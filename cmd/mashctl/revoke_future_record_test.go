@@ -15,7 +15,7 @@ import (
 )
 
 // recordIssuedAt rewrites the issue record of pub so its issued_at is at.
-func (h *addEnv) recordIssuedAt(pub string, at time.Time) {
+func (h *fleetEnv) recordIssuedAt(pub string, at time.Time) {
 	h.t.Helper()
 	adm, err := admin.New(h.e.Conn(h.t, h.e.AdminCreds), h.e.Owner)
 	if err != nil {
@@ -37,16 +37,14 @@ func withRevokeNow(t *testing.T, f func() time.Time) {
 }
 
 func TestDeprovisionRefusesAKeyTheRecordDatesInTheFuture(t *testing.T) {
-	h := newAddEnv(t)
-	if _, errb, code := h.run("add", "n", "--label", "env=green"); code != 0 {
-		t.Fatal(errb)
-	}
-	_, pub := h.credsClaims("n")
+	h := newFleetEnv(t)
+	h.seedMeta(ad("n"), admin.Meta{Labels: map[string]string{"env": "green"}}, nil)
+	_, pub := h.credsClaims(ad("n"))
 	h.recordIssuedAt(pub, time.Now().Add(clockBehind))
 	calls := fakeRevoke(t, nil)
 	recs := h.records()
 
-	out, errb, code := h.run("deprovision", "n")
+	out, errb, code := h.run("deprovision", "o.g.n")
 	if code != 1 || out != "" || !strings.Contains(errb, "n's current creds JWT claims it was issued in the future (") || !strings.Contains(errb, "fix this machine's clock") || !strings.Contains(errb, "nothing was changed") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
@@ -57,17 +55,17 @@ func TestDeprovisionRefusesAKeyTheRecordDatesInTheFuture(t *testing.T) {
 
 	// Re-recording the key with a time in the past does not clear the future-dated revision: still refused.
 	h.recordIssuedAt(pub, time.Now().Add(-clockBehind))
-	out, errb, code = h.run("deprovision", "n")
+	out, errb, code = h.run("deprovision", "o.g.n")
 	if code != 1 || len(*calls) != 0 || !strings.Contains(errb, "an earlier credential of this key was dated in the future") {
 		t.Fatalf("%d %q %q calls %+v", code, out, errb, *calls)
 	}
 }
 
 func TestDeprovisionWarnsAndRevokesWithoutARecord(t *testing.T) {
-	h := newAddEnv(t)
+	h := newFleetEnv(t)
 	u := h.provisionDeclared("a") // not minted by mashctl add: no issue record
 	calls := fakeRevoke(t, nil)
-	out, errb, code := h.run("deprovision", "a")
+	out, errb, code := h.run("deprovision", "o.g.a")
 	if code != 0 || len(*calls) != 1 || (*calls)[0].users[0] != u {
 		t.Fatalf("%d %q %q calls %+v", code, out, errb, *calls)
 	}
@@ -81,10 +79,8 @@ func TestDeprovisionWarnsAndRevokesWithoutARecord(t *testing.T) {
 
 // The check and the revocation share one reading of the clock.
 func TestDeprovisionRevokesAtTheCheckedTime(t *testing.T) {
-	h := newAddEnv(t)
-	if _, errb, code := h.run("add", "n", "--label", "env=green"); code != 0 {
-		t.Fatal(errb)
-	}
+	h := newFleetEnv(t)
+	h.seedMeta(ad("n"), admin.Meta{Labels: map[string]string{"env": "green"}}, nil)
 	calls := fakeRevoke(t, nil)
 	base := time.Now().Add(time.Hour)
 	reads := 0
@@ -92,7 +88,7 @@ func TestDeprovisionRevokesAtTheCheckedTime(t *testing.T) {
 		reads++
 		return base.Add(time.Duration(reads-1) * time.Hour)
 	})
-	if out, errb, code := h.run("deprovision", "n"); code != 0 || len(*calls) != 1 {
+	if out, errb, code := h.run("deprovision", "o.g.n"); code != 0 || len(*calls) != 1 {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
 	if reads != 1 {
@@ -104,13 +100,11 @@ func TestDeprovisionRevokesAtTheCheckedTime(t *testing.T) {
 }
 
 func TestCheckNotFutureIssued(t *testing.T) {
-	h := newAddEnv(t)
+	h := newFleetEnv(t)
 	var pubs []string
 	for _, n := range []string{"p", "q", "r"} {
-		if _, errb, code := h.run("add", n, "--label", "env=green"); code != 0 {
-			t.Fatal(errb)
-		}
-		_, pub := h.credsClaims(n)
+		h.seedMeta(ad(n), admin.Meta{Labels: map[string]string{"env": "green"}}, nil)
+		_, pub := h.credsClaims(ad(n))
 		pubs = append(pubs, pub)
 	}
 	adm, err := admin.New(h.e.Conn(h.t, h.e.AdminCreds), h.e.Owner)
@@ -169,7 +163,7 @@ func TestCheckNotFutureIssuedLookupErrorRefuses(t *testing.T) {
 	cancel()
 	var errb strings.Builder
 	err = ctl.CheckNotFutureIssued(ctx, adm, []ctl.RevokeTarget{{Key: key}}, time.Now(), &errb)
-	if err == nil || !strings.Contains(err.Error(), "user key "+ctl.ShortKey(key)+"...: its issue record could not be read") || !strings.Contains(err.Error(), "mashctl reissue NAME") || !strings.Contains(err.Error(), "nothing was changed") || errb.String() != "" {
+	if err == nil || !strings.Contains(err.Error(), "user key "+ctl.ShortKey(key)+"...: its issue record could not be read") || !strings.Contains(err.Error(), "mashctl endpoint reissue ADDRESS") || !strings.Contains(err.Error(), "nothing was changed") || errb.String() != "" {
 		t.Fatalf("failed lookup: %v %q", err, errb.String())
 	}
 }
@@ -177,11 +171,9 @@ func TestCheckNotFutureIssuedLookupErrorRefuses(t *testing.T) {
 // A record whose issued_at is missing or not a time refuses deprovision before anything is revoked or removed.
 func TestDeprovisionRefusesAMalformedIssueTime(t *testing.T) {
 	for _, bad := range []string{"", "yesterday-ish"} {
-		h := newAddEnv(t)
-		if _, errb, code := h.run("add", "n", "--label", "env=green"); code != 0 {
-			t.Fatal(errb)
-		}
-		_, pub := h.credsClaims("n")
+		h := newFleetEnv(t)
+		h.seedMeta(ad("n"), admin.Meta{Labels: map[string]string{"env": "green"}}, nil)
+		_, pub := h.credsClaims(ad("n"))
 		js, err := jetstream.New(h.e.Conn(h.t, h.e.AdminCreds))
 		if err != nil {
 			t.Fatal(err)
@@ -201,8 +193,8 @@ func TestDeprovisionRefusesAMalformedIssueTime(t *testing.T) {
 		}
 		calls := fakeRevoke(t, nil)
 		recs := h.records()
-		out, errb, code := h.run("deprovision", "n")
-		if code != 1 || out != "" || !strings.Contains(errb, "user key "+ctl.ShortKey(pub)+"...") || !strings.Contains(errb, "missing or malformed issued_at") || !strings.Contains(errb, "mashctl reissue NAME") || !strings.Contains(errb, "nothing was changed") {
+		out, errb, code := h.run("deprovision", "o.g.n")
+		if code != 1 || out != "" || !strings.Contains(errb, "user key "+ctl.ShortKey(pub)+"...") || !strings.Contains(errb, "missing or malformed issued_at") || !strings.Contains(errb, "mashctl endpoint reissue ADDRESS") || !strings.Contains(errb, "nothing was changed") {
 			t.Fatalf("%q: %d %q %q", bad, code, out, errb)
 		}
 		if len(*calls) != 0 || len(h.records()) != len(recs) || h.issued()[pub].RevokedAt != "" {
@@ -213,12 +205,12 @@ func TestDeprovisionRefusesAMalformedIssueTime(t *testing.T) {
 
 func testenvKey(t *testing.T, e *testenv.Env) string {
 	t.Helper()
-	_, pub := e.Mint(t, "x")
+	_, pub := e.Mint(t, ad("x"))
 	return pub
 }
 
 // recordRevisions writes one revision of pub's issue record per issued_at, in order, through the admin helper.
-func (h *addEnv) recordRevisions(pub string, ats ...time.Time) {
+func (h *fleetEnv) recordRevisions(pub string, ats ...time.Time) {
 	h.t.Helper()
 	adm, err := admin.New(h.e.Conn(h.t, h.e.AdminCreds), h.e.Owner)
 	if err != nil {
@@ -233,16 +225,14 @@ func (h *addEnv) recordRevisions(pub string, ats ...time.Time) {
 	}
 }
 
-func deprovisionAfterRevisions(t *testing.T, ats func() []time.Time) (h *addEnv, pub string, calls *[]revokeCall, out, errb string, code int) {
+func deprovisionAfterRevisions(t *testing.T, ats func() []time.Time) (h *fleetEnv, pub string, calls *[]revokeCall, out, errb string, code int) {
 	t.Helper()
-	h = newAddEnv(t)
-	if _, e, c := h.run("add", "n", "--label", "env=green"); c != 0 {
-		t.Fatal(e)
-	}
-	_, pub = h.credsClaims("n")
+	h = newFleetEnv(t)
+	h.seedMeta(ad("n"), admin.Meta{Labels: map[string]string{"env": "green"}}, nil)
+	_, pub = h.credsClaims(ad("n"))
 	h.recordRevisions(pub, ats()...)
 	calls = fakeRevoke(t, nil)
-	out, errb, code = h.run("deprovision", "n")
+	out, errb, code = h.run("deprovision", "o.g.n")
 	return
 }
 
@@ -302,11 +292,9 @@ func TestDeprovisionRefusesAtTheHistoryCap(t *testing.T) {
 
 // A malformed older revision refuses even when the latest is fine.
 func TestDeprovisionRefusesAMalformedOlderRevision(t *testing.T) {
-	h := newAddEnv(t)
-	if _, errb, code := h.run("add", "n", "--label", "env=green"); code != 0 {
-		t.Fatal(errb)
-	}
-	_, pub := h.credsClaims("n")
+	h := newFleetEnv(t)
+	h.seedMeta(ad("n"), admin.Meta{Labels: map[string]string{"env": "green"}}, nil)
+	_, pub := h.credsClaims(ad("n"))
 	js, err := jetstream.New(h.e.Conn(h.t, h.e.AdminCreds))
 	if err != nil {
 		t.Fatal(err)
@@ -323,7 +311,7 @@ func TestDeprovisionRefusesAMalformedOlderRevision(t *testing.T) {
 	}
 	h.recordRevisions(pub, time.Now().Add(-time.Hour))
 	calls := fakeRevoke(t, nil)
-	out, errb, code := h.run("deprovision", "n")
+	out, errb, code := h.run("deprovision", "o.g.n")
 	if code != 1 || out != "" || !strings.Contains(errb, "missing or malformed issued_at") || !strings.Contains(errb, "nothing was changed") || len(*calls) != 0 {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}

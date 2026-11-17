@@ -27,8 +27,8 @@ func (f *fixture) leanClient(t *testing.T, name string, opts ClientOptions) *End
 // including a signed message whose header names no sender: the key alone is looked up in the directory.
 func TestLeanClientLabelsLikeTheWholeDirectory(t *testing.T) {
 	f := newFixture(t, "a", "b", "c")
-	subj := sap.For(f.e.Owner, "a").Mail
-	nc := f.e.ConnAs(t, f.creds["b"], "b")
+	subj := taddr("a").Subjects().Mail
+	nc := f.e.ConnAs(t, f.creds["b"], tkey("b"))
 	id := identity(t, f.creds["b"])
 	signed := func(name, body string) {
 		h, err := id.Sign(subj, []byte(body), name, time.Now(), "")
@@ -37,13 +37,13 @@ func TestLeanClientLabelsLikeTheWholeDirectory(t *testing.T) {
 		}
 		publishRaw(t, nc, subj, h.Encode(), body)
 	}
-	signed("b", "named")                      // verified
-	signed("", "unnamed")                     // verified by its key alone
-	signed("c", "wrong name")                 // b's key under c's name: unknown signer
-	signed("nobody", "no such endpoint")      // unknown signer
-	signed("Not A Name!", "not a valid name") // unknown signer, never looked up
-	publishRaw(t, nc, subj, "", "no header")  // absent
-	signed("b", "named again")                // verified
+	signed(tkey("b"), "named")                 // verified
+	signed("", "unnamed")                      // verified by its key alone
+	signed(tkey("c"), "wrong name")            // b's key under c's name: unknown signer
+	signed(tkey("nobody"), "no such endpoint") // unknown signer
+	signed("Not A Name!", "not a valid name")  // unknown signer, never looked up
+	publishRaw(t, nc, subj, "", "no header")   // absent
+	signed(tkey("b"), "named again")           // verified
 
 	ctx := context.Background()
 	full, err := f.client(t, "a").Inbox(ctx, 20)
@@ -72,7 +72,7 @@ func TestLeanClientLabelsLikeTheWholeDirectory(t *testing.T) {
 	}
 	// read follows the same rule.
 	m, err := f.leanClient(t, "a", ClientOptions{Inbox: true}).Read(ctx, 2)
-	if err != nil || m.Trust != sap.TrustVerified || m.From != "b" {
+	if err != nil || m.Trust != sap.TrustVerified || m.From != tkey("b") {
 		t.Fatalf("read of the unnamed message: %s [%s] %v", m.From, m.Trust, err)
 	}
 }
@@ -80,10 +80,10 @@ func TestLeanClientLabelsLikeTheWholeDirectory(t *testing.T) {
 // A lean client reads no directory records beyond its own, the recipient's and its senders'.
 func TestLeanClientDoesNotLoadTheDirectory(t *testing.T) {
 	f := newFixture(t, "a", "b", "c")
-	c := f.leanClient(t, "a", ClientOptions{Records: []string{"b"}})
+	c := f.leanClient(t, "a", ClientOptions{Records: []string{tdot("b")}})
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	if c.fullDir || len(c.dir) != 2 || c.dir["a"].Name != "a" || c.dir["b"].Name != "b" {
+	if c.fullDir || len(c.dir) != 2 || c.dir[tkey("a")].Instance != "a" || c.dir[tkey("b")].Instance != "b" {
 		t.Fatalf("lean directory %v (full %v)", c.dir, c.fullDir)
 	}
 }
@@ -96,7 +96,7 @@ func TestLeanClientRefusals(t *testing.T) {
 	if _, err := OpenClientWith(context.Background(), cfg, ClientOptions{}); err == nil || !strings.Contains(err.Error(), "do not match") {
 		t.Fatalf("another endpoint's credentials: %v", err)
 	}
-	f.creds["ghost"], _ = f.e.Mint(t, "ghost")
+	f.creds["ghost"], _ = f.e.Mint(t, taddr("ghost"))
 	if _, err := OpenClientWith(context.Background(), f.cfg("ghost"), ClientOptions{}); err == nil || !strings.Contains(err.Error(), "not provisioned") {
 		t.Fatalf("an endpoint with no record: %v", err)
 	}
@@ -109,7 +109,7 @@ func TestCollectTopsUpAfterGaps(t *testing.T) {
 	a, b := f.client(t, "a"), f.client(t, "b")
 	ctx := context.Background()
 	for i := 1; i <= 8; i++ {
-		if _, err := b.Send(ctx, "a", fmt.Sprintf("m%d", i), 0); err != nil {
+		if _, err := b.Send(ctx, tdot("a"), fmt.Sprintf("m%d", i), 0); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -178,7 +178,7 @@ func TestRefreshEndsWhenAnswersGoQuiet(t *testing.T) {
 	}
 	online := map[string]bool{}
 	for _, p := range ep.Who() {
-		online[p.Record.Name] = p.Online
+		online[p.Record.Instance] = p.Online
 	}
 	if !online["b"] || !online["c"] || online["a"] {
 		t.Fatalf("presence %v", online)

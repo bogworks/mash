@@ -48,7 +48,7 @@ var alphabets = []struct {
 	{"cjk", "漢字仮名交じり文", 1}, // BMP: 1 unit, 3 bytes
 }
 
-// unitsBody is a one-line body of exactly want UTF-16 units: a leading "x", then runes of alpha (cycled), then "x"
+// unitsBody is a one-line body of exactly want UTF-16 units: an initial "x", then runes of alpha (cycled), then "x"
 // padding for what a whole rune cannot fill.
 func unitsBody(alpha string, units, want int) string {
 	rs := []rune(alpha)
@@ -95,7 +95,7 @@ func entries(t *testing.T, sp spool.Spool, bodies []string, urgentLast bool) {
 }
 
 func hookEnv(t *testing.T, extra map[string]string) map[string]string {
-	env := map[string]string{"HOME": t.TempDir(), "MASH_NAME": "a", "MASH_OWNER": "o", "MASH_URL": "nats://127.0.0.1:1", "MASH_CREDS": "/none"}
+	env := map[string]string{"HOME": t.TempDir(), "MASH_NAME": "a", "MASH_GROUP": testGroup, "MASH_OWNER": "o", "MASH_URL": "nats://127.0.0.1:1", "MASH_CREDS": "/none"}
 	for k, v := range extra {
 		env[k] = v
 	}
@@ -328,7 +328,7 @@ func TestBoundaryBurstDrainShowsUrgentFirstAndEachOnce(t *testing.T) {
 			seen[s]++
 		}
 	}
-	// Present's order: urgent first, then seq order. The urgent message is #601 and leads the first run.
+	// Present's order: urgent first, then seq order. The urgent message is #601 and opens the first run.
 	want := []int{601, 1, 2, 3, 4, 5, 6, 7, 8, 9}
 	if fmt.Sprint(first) != fmt.Sprint(want) {
 		t.Fatalf("first run shows %v, want %v (urgent first, then oldest first)", first, want)

@@ -36,12 +36,12 @@ func (h *hookRec) hook(t *testing.T, js jetstream.JetStream, name string) admin.
 			t.Error(err)
 			return err
 		}
-		_, lerr := lease.Get(ctx, admin.LockKey(name))
+		_, lerr := lease.Get(ctx, admin.LockKey(ep(t, name).Flat()))
 		h.locked = append(h.locked, lerr == nil)
-		_, serr := js.Stream(ctx, "inbox-"+name)
+		_, serr := js.Stream(ctx, ep(t, name).InboxStream())
 		h.hadInbox = append(h.hadInbox, serr == nil)
 		dir, _ := js.KeyValue(ctx, store.DirectoryBucket)
-		_, rerr := dir.Get(ctx, name)
+		_, rerr := dir.Get(ctx, ep(t, name).Flat())
 		h.hadRec = append(h.hadRec, rerr == nil)
 		return h.err
 	}
@@ -57,7 +57,7 @@ func (h *hookRec) calledOnceWith(t *testing.T, user string) {
 func recordUserOf(t *testing.T, js jetstream.JetStream, name string) string {
 	t.Helper()
 	kv, _ := js.KeyValue(context.Background(), store.DirectoryBucket)
-	rec, err := store.GetRecord(context.Background(), kv, name)
+	rec, err := store.GetRecord(context.Background(), kv, ep(t, name).Flat())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,18 +67,18 @@ func recordUserOf(t *testing.T, js jetstream.JetStream, name string) string {
 func noFence(t *testing.T, js jetstream.JetStream, name string) {
 	t.Helper()
 	lease, _ := js.KeyValue(context.Background(), store.LeaseBucket)
-	if _, err := lease.Get(context.Background(), name); !errors.Is(err, jetstream.ErrKeyNotFound) {
+	if _, err := lease.Get(context.Background(), ep(t, name).Flat()); !errors.Is(err, jetstream.ErrKeyNotFound) {
 		t.Fatalf("lease of %s was written: %v", name, err)
 	}
 }
 
 func gone(t *testing.T, js jetstream.JetStream, name string) {
 	t.Helper()
-	if _, err := js.Stream(context.Background(), "inbox-"+name); err == nil {
+	if _, err := js.Stream(context.Background(), ep(t, name).InboxStream()); err == nil {
 		t.Fatal("stream left")
 	}
 	kv, _ := js.KeyValue(context.Background(), store.DirectoryBucket)
-	if _, err := kv.Get(context.Background(), name); err == nil {
+	if _, err := kv.Get(context.Background(), ep(t, name).Flat()); err == nil {
 		t.Fatal("record left")
 	}
 }
@@ -88,7 +88,7 @@ func TestWithRevokerLeavesTheOriginalAlone(t *testing.T) {
 	provisionFor(t, e, a, "w")
 	h := &hookRec{}
 	_ = a.WithRevoker(h.hook(t, js, "w"))
-	if err := a.Deprovision(context.Background(), "w"); err != nil || len(h.users) != 0 {
+	if err := a.Deprovision(context.Background(), ep(t, "w")); err != nil || len(h.users) != 0 {
 		t.Fatalf("%v %v", err, h.users)
 	}
 }
@@ -98,7 +98,7 @@ func TestDeprovisionRevokesRecordUserUnderLock(t *testing.T) {
 	provisionFor(t, e, a, "w")
 	user := recordUserOf(t, js, "w")
 	h := &hookRec{}
-	if err := a.WithRevoker(h.hook(t, js, "w")).Deprovision(context.Background(), "w"); err != nil {
+	if err := a.WithRevoker(h.hook(t, js, "w")).Deprovision(context.Background(), ep(t, "w")); err != nil {
 		t.Fatal(err)
 	}
 	h.calledOnceWith(t, user)
@@ -109,7 +109,7 @@ func TestDeprovisionHookErrorRemovesNothing(t *testing.T) {
 	e, a, js := setup(t)
 	provisionFor(t, e, a, "w")
 	h := &hookRec{err: errors.New("resolver down")}
-	err := a.WithRevoker(h.hook(t, js, "w")).Deprovision(context.Background(), "w")
+	err := a.WithRevoker(h.hook(t, js, "w")).Deprovision(context.Background(), ep(t, "w"))
 	if err == nil || !errors.Is(err, h.err) || !admin.IsRefusal(err) {
 		t.Fatalf("%v", err)
 	}
@@ -121,11 +121,11 @@ func TestDeprovisionWithoutRecordDoesNotCallHook(t *testing.T) {
 	e, a, js := setup(t)
 	provisionFor(t, e, a, "w")
 	kv, _ := js.KeyValue(context.Background(), store.DirectoryBucket)
-	if err := kv.Purge(context.Background(), "w"); err != nil {
+	if err := kv.Purge(context.Background(), "o_dev_w"); err != nil {
 		t.Fatal(err)
 	}
 	h := &hookRec{err: errors.New("must not be called")}
-	if err := a.WithRevoker(h.hook(t, js, "w")).Deprovision(context.Background(), "w"); err != nil {
+	if err := a.WithRevoker(h.hook(t, js, "w")).Deprovision(context.Background(), ep(t, "w")); err != nil {
 		t.Fatal(err)
 	}
 	if len(h.users) != 0 {
@@ -139,7 +139,7 @@ func TestDeprovisionIfUserRevokesOnceAfterGuard(t *testing.T) {
 	provisionFor(t, e, a, "w")
 	user := recordUserOf(t, js, "w")
 	h := &hookRec{}
-	if err := a.WithRevoker(h.hook(t, js, "w")).DeprovisionIfUser(context.Background(), "w", user); err != nil {
+	if err := a.WithRevoker(h.hook(t, js, "w")).DeprovisionIfUser(context.Background(), ep(t, "w"), user); err != nil {
 		t.Fatal(err)
 	}
 	h.calledOnceWith(t, user)
@@ -151,7 +151,7 @@ func TestDeprovisionIfUserHookErrorRemovesNothing(t *testing.T) {
 	provisionFor(t, e, a, "w")
 	user := recordUserOf(t, js, "w")
 	h := &hookRec{err: errors.New("resolver down")}
-	err := a.WithRevoker(h.hook(t, js, "w")).DeprovisionIfUser(context.Background(), "w", user)
+	err := a.WithRevoker(h.hook(t, js, "w")).DeprovisionIfUser(context.Background(), ep(t, "w"), user)
 	if err == nil || !errors.Is(err, h.err) || !admin.IsRefusal(err) {
 		t.Fatalf("%v", err)
 	}
@@ -162,24 +162,24 @@ func TestDeprovisionIfUserHookErrorRemovesNothing(t *testing.T) {
 func TestDeprovisionIfUserRefusalsNeverCallHook(t *testing.T) {
 	e, a, js := setup(t)
 	provisionFor(t, e, a, "w")
-	_, other := e.Mint(t, "other")
+	_, other := e.Mint(t, ep(t, "other"))
 	h := &hookRec{}
 	ra := a.WithRevoker(h.hook(t, js, "w"))
-	if err := ra.DeprovisionIfUser(context.Background(), "w", other); !errors.Is(err, admin.ErrRecordOtherUser) {
+	if err := ra.DeprovisionIfUser(context.Background(), ep(t, "w"), other); !errors.Is(err, admin.ErrRecordOtherUser) {
 		t.Fatalf("other user: %v", err)
 	}
 	kv, _ := js.KeyValue(context.Background(), store.DirectoryBucket)
 	user := recordUserOf(t, js, "w")
-	if err := kv.Purge(context.Background(), "w"); err != nil {
+	if err := kv.Purge(context.Background(), "o_dev_w"); err != nil {
 		t.Fatal(err)
 	}
-	if err := ra.DeprovisionIfUser(context.Background(), "w", user); !errors.Is(err, admin.ErrNoRecord) {
+	if err := ra.DeprovisionIfUser(context.Background(), ep(t, "w"), user); !errors.Is(err, admin.ErrNoRecord) {
 		t.Fatalf("no record: %v", err)
 	}
 	if len(h.users) != 0 {
 		t.Fatalf("hook called %v", h.users)
 	}
-	if _, err := js.Stream(context.Background(), "inbox-w"); err != nil {
+	if _, err := js.Stream(context.Background(), "inbox-o_dev_w"); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -188,7 +188,7 @@ func TestDeprovisionIfUserReplacedRecordNeverRevokesTheOtherKey(t *testing.T) {
 	e, a, js := setup(t)
 	provisionFor(t, e, a, "w")
 	user := recordUserOf(t, js, "w")
-	_, other := e.Mint(t, "other")
+	_, other := e.Mint(t, ep(t, "other"))
 	done := false
 	seam(t, admin.SetAfterDeprovisionGet, func() {
 		if !done {
@@ -197,7 +197,7 @@ func TestDeprovisionIfUserReplacedRecordNeverRevokesTheOtherKey(t *testing.T) {
 		}
 	})
 	h := &hookRec{}
-	err := a.WithRevoker(h.hook(t, js, "w")).DeprovisionIfUser(context.Background(), "w", user)
+	err := a.WithRevoker(h.hook(t, js, "w")).DeprovisionIfUser(context.Background(), ep(t, "w"), user)
 	// The hook revoked the key the caller named (the record's at the read); the purge then found the record replaced,
 	// so the call is a PARTIAL for that key, never a refusal that claims nothing changed.
 	wantPartial(t, err, user)
@@ -216,22 +216,22 @@ func TestDeprovisionDrainedRevokesAfterEveryGuard(t *testing.T) {
 	e, a, js := setup(t)
 	provisionFor(t, e, a, "w")
 	user := recordUserOf(t, js, "w")
-	st, err := a.Suspend(context.Background(), "w")
+	st, err := a.Suspend(context.Background(), ep(t, "w"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	h := &hookRec{}
 	ra := a.WithRevoker(h.hook(t, js, "w"))
 	ctx := context.Background()
-	if err := ra.DeprovisionDrained(ctx, "w", "wrong-id", st.LastSeq); err == nil {
+	if err := ra.DeprovisionDrained(ctx, ep(t, "w"), "wrong-id", st.LastSeq); err == nil {
 		t.Fatal("wrong id accepted")
 	}
-	if err := ra.DeprovisionDrained(ctx, "w", st.ID, st.LastSeq+1); err == nil {
+	if err := ra.DeprovisionDrained(ctx, ep(t, "w"), st.ID, st.LastSeq+1); err == nil {
 		t.Fatal("wrong seq accepted")
 	}
-	_, other := e.Mint(t, "other")
+	_, other := e.Mint(t, ep(t, "other"))
 	putUser(t, js, "w", other)
-	if err := ra.DeprovisionDrained(ctx, "w", st.ID, st.LastSeq); err == nil {
+	if err := ra.DeprovisionDrained(ctx, ep(t, "w"), st.ID, st.LastSeq); err == nil {
 		t.Fatal("replaced record accepted")
 	}
 	if len(h.users) != 0 {
@@ -239,14 +239,14 @@ func TestDeprovisionDrainedRevokesAfterEveryGuard(t *testing.T) {
 	}
 	putUser(t, js, "w", user)
 	h.err = errors.New("resolver down")
-	if err := ra.DeprovisionDrained(ctx, "w", st.ID, st.LastSeq); !errors.Is(err, h.err) {
+	if err := ra.DeprovisionDrained(ctx, ep(t, "w"), st.ID, st.LastSeq); !errors.Is(err, h.err) {
 		t.Fatalf("%v", err)
 	}
 	intact(t, a, js, "w")
 	parked(t, a, "w", st.ID)
 	noFence(t, js, "w")
 	h.err, h.users, h.locked, h.hadInbox, h.hadRec = nil, nil, nil, nil, nil
-	if err := ra.DeprovisionDrained(ctx, "w", st.ID, st.LastSeq); err != nil {
+	if err := ra.DeprovisionDrained(ctx, ep(t, "w"), st.ID, st.LastSeq); err != nil {
 		t.Fatal(err)
 	}
 	h.calledOnceWith(t, user)
@@ -257,10 +257,10 @@ func TestDeprovisionDrainedRevokesAfterEveryGuard(t *testing.T) {
 func corruptRecord(t *testing.T, js jetstream.JetStream, name string) {
 	t.Helper()
 	kv, _ := js.KeyValue(context.Background(), store.DirectoryBucket)
-	if _, err := kv.Put(context.Background(), name, []byte("not json {")); err != nil {
+	if _, err := kv.Put(context.Background(), ep(t, name).Flat(), []byte("not json {")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.GetRecord(context.Background(), kv, name); err == nil {
+	if _, err := store.GetRecord(context.Background(), kv, ep(t, name).Flat()); err == nil {
 		t.Fatal("the corrupted record still parses")
 	}
 }
@@ -270,18 +270,18 @@ func TestDeprovisionUnparseableRecordWithRevokerFailsClosed(t *testing.T) {
 	provisionFor(t, e, a, "w")
 	corruptRecord(t, js, "w")
 	h := &hookRec{}
-	err := a.WithRevoker(h.hook(t, js, "w")).Deprovision(context.Background(), "w")
+	err := a.WithRevoker(h.hook(t, js, "w")).Deprovision(context.Background(), ep(t, "w"))
 	if err == nil || !admin.IsRefusal(err) || !strings.Contains(err.Error(), "its record cannot be read, so its user key is unknown; --no-revoke removes it without revoking") {
 		t.Fatalf("%v", err)
 	}
 	if len(h.users) != 0 {
 		t.Fatalf("hook called %v", h.users)
 	}
-	if _, err := js.Stream(context.Background(), "inbox-w"); err != nil {
+	if _, err := js.Stream(context.Background(), "inbox-o_dev_w"); err != nil {
 		t.Fatalf("inbox removed: %v", err)
 	}
 	kv, _ := js.KeyValue(context.Background(), store.DirectoryBucket)
-	if _, err := kv.Get(context.Background(), "w"); err != nil {
+	if _, err := kv.Get(context.Background(), "o_dev_w"); err != nil {
 		t.Fatalf("record removed: %v", err)
 	}
 	noFence(t, js, "w")
@@ -291,7 +291,7 @@ func TestDeprovisionUnparseableRecordWithoutRevokerRemoves(t *testing.T) {
 	e, a, js := setup(t)
 	provisionFor(t, e, a, "w")
 	corruptRecord(t, js, "w")
-	if err := a.Deprovision(context.Background(), "w"); err != nil {
+	if err := a.Deprovision(context.Background(), ep(t, "w")); err != nil {
 		t.Fatal(err)
 	}
 	gone(t, js, "w")
@@ -302,7 +302,7 @@ func TestHookWrappingErrNotConfirmedIsARefusalThatSaysItMayBeInForce(t *testing.
 	provisionFor(t, e, a, "w")
 	user := recordUserOf(t, js, "w")
 	h := &hookRec{err: fmt.Errorf("servers: %w", apply.ErrNotConfirmed)}
-	err := a.WithRevoker(h.hook(t, js, "w")).DeprovisionIfUser(context.Background(), "w", user)
+	err := a.WithRevoker(h.hook(t, js, "w")).DeprovisionIfUser(context.Background(), ep(t, "w"), user)
 	if err == nil || !admin.IsRefusal(err) || admin.IsPartial(err) || !errors.Is(err, apply.ErrNotConfirmed) {
 		t.Fatalf("%v", err)
 	}
@@ -320,7 +320,7 @@ func wantPartial(t *testing.T, err error, user string) {
 	if err == nil || admin.IsRefusal(err) || !admin.IsPartial(err) {
 		t.Fatalf("want a non-refusal PARTIAL, got %v", err)
 	}
-	for _, w := range []string{"mash: PARTIAL: w's user key " + user[:8] + " was revoked in the account JWT", "the removal did not complete: ", "run the same command again (revoking again is safe)"} {
+	for _, w := range []string{"mash: PARTIAL: o_dev_w's user key " + user[:8] + " was revoked in the account JWT", "the removal did not complete: ", "run the same command again (revoking again is safe)"} {
 		if !strings.Contains(err.Error(), w) {
 			t.Fatalf("missing %q in %v", w, err)
 		}
@@ -334,7 +334,7 @@ func TestRecordChangedAfterTheHookIsPartialNotARefusal(t *testing.T) {
 	e, a, js := setup(t)
 	provisionFor(t, e, a, "w")
 	user := recordUserOf(t, js, "w")
-	_, other := e.Mint(t, "other")
+	_, other := e.Mint(t, ep(t, "other"))
 	h := &hookRec{}
 	inner := h.hook(t, js, "w")
 	hook := func(ctx context.Context, u string) error {
@@ -344,7 +344,7 @@ func TestRecordChangedAfterTheHookIsPartialNotARefusal(t *testing.T) {
 		putUser(t, js, "w", other) // another admin replaces the record while the hook ran
 		return nil
 	}
-	err := a.WithRevoker(hook).DeprovisionIfUser(context.Background(), "w", user)
+	err := a.WithRevoker(hook).DeprovisionIfUser(context.Background(), ep(t, "w"), user)
 	wantPartial(t, err, user)
 	intact(t, a, js, "w")
 	noFence(t, js, "w")
@@ -357,7 +357,7 @@ func TestDrainedRecordChangedAfterTheHookIsPartial(t *testing.T) {
 	e, a, js := setup(t)
 	provisionFor(t, e, a, "w")
 	user := recordUserOf(t, js, "w")
-	st, err := a.Suspend(context.Background(), "w")
+	st, err := a.Suspend(context.Background(), ep(t, "w"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -370,7 +370,7 @@ func TestDrainedRecordChangedAfterTheHookIsPartial(t *testing.T) {
 		putUser(t, js, "w", user) // a new revision of the same record
 		return nil
 	}
-	err = a.WithRevoker(hook).DeprovisionDrained(context.Background(), "w", st.ID, st.LastSeq)
+	err = a.WithRevoker(hook).DeprovisionDrained(context.Background(), ep(t, "w"), st.ID, st.LastSeq)
 	wantPartial(t, err, user)
 	intact(t, a, js, "w")
 	noFence(t, js, "w")
@@ -381,10 +381,10 @@ func TestLockLostAfterTheHookIsPartial(t *testing.T) {
 	provisionFor(t, e, a, "w")
 	user := recordUserOf(t, js, "w")
 	hook := func(ctx context.Context, u string) error {
-		putLock(t, js, "w", time.Now().Add(time.Minute)) // another admin took the lock
+		putLock(t, js, "o_dev_w", time.Now().Add(time.Minute)) // another admin took the lock
 		return nil
 	}
-	err := a.WithRevoker(hook).DeprovisionIfUser(context.Background(), "w", user)
+	err := a.WithRevoker(hook).DeprovisionIfUser(context.Background(), ep(t, "w"), user)
 	wantPartial(t, err, user)
 	intact(t, a, js, "w")
 	noFence(t, js, "w")
@@ -394,7 +394,7 @@ func TestLockExpiringDuringTheHookIsPartial(t *testing.T) {
 	e, a, js := setup(t)
 	provisionFor(t, e, a, "w")
 	user := recordUserOf(t, js, "w")
-	st, err := a.Suspend(context.Background(), "w")
+	st, err := a.Suspend(context.Background(), ep(t, "w"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -404,7 +404,7 @@ func TestLockExpiringDuringTheHookIsPartial(t *testing.T) {
 		time.Sleep(expiryStall)
 		return nil
 	}
-	err = a.WithRevoker(hook).DeprovisionDrained(context.Background(), "w", st.ID, st.LastSeq)
+	err = a.WithRevoker(hook).DeprovisionDrained(context.Background(), ep(t, "w"), st.ID, st.LastSeq)
 	wantPartial(t, err, user)
 	intact(t, a, js, "w")
 	noFence(t, js, "w")

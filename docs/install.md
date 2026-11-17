@@ -52,7 +52,7 @@ Mail needs those hooks to run. They do not run with `disableAllHooks: true` in a
 **This step is optional for one person on one machine.** Without it, mail still arrives at the session's next prompt or tool call. The idle wake, which rouses a session that is waiting for input, needs either a channel allowlist entry or the development flag. For a solo developer the development flag is fine and needs no root:
 
 ```sh
-MASH_NAME=design claude --dangerously-load-development-channels plugin:mash@mash
+MASH_GROUP=dev MASH_NAME=design claude --dangerously-load-development-channels plugin:mash@mash
 ```
 
 Claude Code asks you to confirm the flag at each launch; that is expected. When the allowlist is missing, `mash status` prints this line:
@@ -100,11 +100,12 @@ On one machine with no NATS server yet, `mashctl init --local --owner <name> --s
 | `url` | `MASH_URL` | The NATS server. Use `tls://`: SAP identity is only meaningful over a verified connection. A plain `nats://` url to a non-loopback host makes `status` print `tls: WARN` and serve warn once on stderr. For a private CA or a server that requires client certificates, set `tls_ca`, `tls_cert` and `tls_key` below. |
 | `tls_ca` | `MASH_TLS_CA` | PEM file of the CA that signed the server's certificate, for a private CA. Without it the system trust store is used. |
 | `tls_cert`, `tls_key` | `MASH_TLS_CERT`, `MASH_TLS_KEY` | PEM client certificate and its private key, for a server that requires client certificates (mutual TLS). Set both or neither. |
-| `owner` | `MASH_OWNER` | Your SAP owner token (lower-case letters, digits, single hyphens). |
-| `creds` | `MASH_CREDS` | The endpoint's credentials file. Default `<name>.creds` in the config directory (`~/.config/mash/<name>.creds` by default). |
+| `owner` | `MASH_OWNER` | Your owner token (lower-case letters, digits, single hyphens): the first token of every address, and the fence a credential reaches. |
+| `creds` | `MASH_CREDS` | The endpoint's credentials file. Default `<owner>.<group>.<instance>.creds` in the config directory (`~/.config/mash/` by default). |
 | | `MASH_CONFIG_DIR` | The config directory (`config.json`, `policy.md`, default creds). An absolute path (a relative one is an error); it wins over `XDG_CONFIG_HOME` and the legacy `~/.config/mash`, which is not consulted. |
 | | `MASH_STATE_DIR` | The directory that holds `spool/` and `hook.log`. An absolute path (a relative one is an error). Default `$XDG_STATE_HOME/mash` if `XDG_STATE_HOME` is absolute, else `~/.local/state/mash`. |
-| | `MASH_NAME` | The endpoint name, set per session at launch. Apps started from a GUI or IDE usually do not inherit your shell's variables, so set it where Claude Code is launched (the IDE's own environment setting, or the launch command). `mash status` shows what a session would see, before you launch. |
+| | `MASH_GROUP` | The endpoint's group, the second token of its address. No default and no `config.json` key: a session without it stops with `group_missing` (exit 2). Set per session at launch, like `MASH_NAME`. |
+| | `MASH_NAME` | The endpoint's instance, the third token of its address, set per session at launch. Apps started from a GUI or IDE usually do not inherit your shell's variables, so set it where Claude Code is launched (the IDE's own environment setting, or the launch command). `mash status` shows what a session would see, before you launch. |
 | | `MASH_RELEASE_BASE` | Plugin launcher only: the base URL the pinned binary is downloaded from, default `https://github.com/bogworks/mash/releases/download`; the launcher fetches `<base>/v<version>/mash-<os>-<arch>`. It changes only where the bytes come from: the sha256 pin still applies, and a download that does not match is refused and deleted. Plain `http` is not refused, so use an `https` base. |
 | | `MASH_PLUGIN_ROOT` | Set by the plugin's `.mcp.json` to the plugin's own root (`${CLAUDE_PLUGIN_ROOT}`). `mash serve` and `mash status` read the plugin's version from `<root>/.claude-plugin/plugin.json` to report whether the plugin and the binary versions have drifted (a major or minor difference). You normally never set it. |
 | | `MASH_MANAGED_SETTINGS_DIR` | Absolute path: the directory where `status` looks for Claude Code's managed settings, default the OS location; for non-standard installs and tests. A relative value is ignored. |
@@ -132,31 +133,31 @@ Optional: the session instruction file `~/.config/mash/policy.md` is appended to
 ## 5. Launch a session
 
 ```sh
-MASH_NAME=design claude --channels plugin:mash@mash
+MASH_GROUP=dev MASH_NAME=design claude --channels plugin:mash@mash
 ```
 
 The session registers as a SAP agent, takes the lease on its name, and starts receiving mail. If another live session already holds the name, this one starts without mail tools and says why.
 
 Keep this machine's clock in sync (NTP): more than 30 s of skew from the server makes peers look offline and mail `[stale]`. `status` shows a `clock:` line (see [Troubleshooting](operations.md)).
 
-In the session, Claude has seven tools: `send`, `read`, `inbox`, `who`, `reply`, `version` and `status`. `status` says what works and what is missing, with the next step for each: the name, config, creds, connection and delivery. It answers in every session, even one with no `MASH_NAME` or a start that failed, where it and `version` are the only tools. `version` shows the mash binary's version and commit, the plugin's version and this endpoint's name and owner. `mash status` from a shell prints the same lines for the environment it runs in, without connecting, so a missing name or creds shows before you launch (the connection and delivery lines are live-only and say so). From a shell, the same identity can use the CLI:
+In the session, Claude has seven tools: `send`, `read`, `inbox`, `who`, `reply`, `version` and `status`. `status` says what works and what is missing, with the next step for each: the name, config, creds, connection and delivery. It answers in every session, even one with no `MASH_NAME` or a start that failed, where it and `version` are the only tools. `version` shows the mash binary's version and commit, the plugin's version and this endpoint's address. `mash status` from a shell prints the same lines for the environment it runs in, without connecting, so a missing name or creds shows before you launch (the connection and delivery lines are live-only and say so). From a shell, the same identity can use the CLI:
 
 ```sh
-MASH_NAME=design mash who
-MASH_NAME=design mash send review "Spec is at docs/specs/x.md; please review section 4."
-MASH_NAME=design mash send review --id spec-review-1 "Spec is at docs/specs/x.md."   # safe to re-run: stored once
-MASH_NAME=design mash prompt review "Are you still on the auth bug?"
-MASH_NAME=design mash inbox --after 120 --limit 50   # the 50 messages after #120, oldest first
+MASH_GROUP=dev MASH_NAME=design mash who
+MASH_GROUP=dev MASH_NAME=design mash send <owner>.dev.review "Spec is at docs/specs/x.md; please review section 4."
+MASH_GROUP=dev MASH_NAME=design mash send <owner>.dev.review --id spec-review-1 "Spec is at docs/specs/x.md."   # safe to re-run: stored once
+MASH_GROUP=dev MASH_NAME=design mash prompt <owner>.dev.review "Are you still on the auth bug?"
+MASH_GROUP=dev MASH_NAME=design mash inbox --after 120 --limit 50   # the 50 messages after #120, oldest first
 ```
 
 A live prompt is at most 32768 bytes; a longer one is refused with an error, so send the longer text as mail.
 
 ### Sessions and resume
 
-The endpoint name belongs to the launch, not to the conversation. It comes only from `MASH_NAME` in the environment Claude Code starts with ([ADR 0012](decisions/0012-endpoint-chosen-per-launch-by-mash-name.md)).
+The endpoint's address belongs to the launch, not to the conversation. The group and instance come only from `MASH_GROUP` and `MASH_NAME` in the environment Claude Code starts with ([ADR 0012](decisions/0012-endpoint-chosen-per-launch-by-mash-name.md)).
 
-- `claude --resume` or `--continue` without `MASH_NAME` gives an inert session. With a different name, the conversation gets that name's mailbox, and reusing a name in an unrelated conversation hands it that endpoint's backlog. Resume with the same `MASH_NAME`.
-- One live session holds a name. A session that finds its name held starts without mail tools and retries. Do not resume a conversation while its original process is still running: a second process in the same Claude session can drain the holder's spooled mail without any signal ([receipt](evidence/2026-11-01-dual-resume/RECEIPT.md)).
+- `claude --resume` or `--continue` without `MASH_NAME` gives an inert session, and without `MASH_GROUP` a session that stops. With a different address, the conversation gets that address's mailbox, and reusing an address in an unrelated conversation hands it that endpoint's backlog. Resume with the same `MASH_GROUP` and `MASH_NAME`.
+- One live session holds an address. A session that finds its address held starts without mail tools and retries. Do not resume a conversation while its original process is still running: a second process in the same Claude session can drain the holder's spooled mail without any signal ([receipt](evidence/2026-11-01-dual-resume/RECEIPT.md)).
 - The lease expires 90 seconds after its last refresh (`store.LeaseTTL`), and a running session refreshes it every 30 seconds (`endpoint.LeaseRefresh`). A laptop that sleeps longer than 90 seconds loses it. When the session wakes, if nobody else took the name, `mash serve` takes it back. If another session took it, the loss is final: lease loss after a start is terminal, and the session must be restarted. Run `status` to see whether the name is still held, and restart with the same `MASH_NAME`; the restart takes the name back once the other holder is gone.
 
 ### Lease fields a supervisor can read
@@ -190,8 +191,8 @@ If you use [Synadia Cloud](https://cloud.synadia.com), [`scripts/quickstart-syna
 4. Start two sessions, each as an endpoint (section 5):
 
    ```sh
-   MASH_NAME=design claude --channels plugin:mash@mash
-   MASH_NAME=review claude --channels plugin:mash@mash
+   MASH_GROUP=dev MASH_NAME=design claude --channels plugin:mash@mash
+   MASH_GROUP=dev MASH_NAME=review claude --channels plugin:mash@mash
    ```
 
 Notes:

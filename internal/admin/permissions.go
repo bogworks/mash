@@ -5,7 +5,8 @@
 package admin
 
 import (
-	"slices"
+	"fmt"
+	"strings"
 
 	"github.com/nats-io/jwt/v2"
 
@@ -13,66 +14,52 @@ import (
 	"github.com/bogworks/mash/internal/store"
 )
 
-// Permissions is the complete permission set of endpoint name under owner
-// (spec section 8). Anything not listed is denied.
-func Permissions(owner, name string) jwt.Permissions {
-	return PermissionsTo(owner, name, nil)
-}
-
-// PermissionsTo is Permissions with the three peer-addressing publish lines (mail, prompt and status to any endpoint
-// of the owner) narrowed to recipients: one line per recipient and verb, agents.<verb>.*.<owner>.<recipient>. A nil
-// recipients keeps the wildcard lines, so PermissionsTo(owner, name, nil) is Permissions. The mail line is the five-token subject agents.mail.*.<owner>.* (ADR 0091). An empty non-nil slice
-// grants no mail, prompt or status line at all; the fixed lines (own heartbeat, inbox, directory read, lease) remain,
-// so the block is never empty. Recipients must be valid endpoint names: they are placed in subjects as they are.
-func PermissionsTo(owner, name string, recipients []string) jwt.Permissions {
-	var pub []string
-	if recipients == nil {
-		pub = append(pub,
-			"agents.mail.*."+owner+".*",
-			"agents.prompt.*."+owner+".*",
-			"agents.status.*."+owner+".*")
-	} else {
-		for _, r := range slices.Sorted(slices.Values(recipients)) {
-			for _, verb := range []string{"mail", "prompt", "status"} {
-				pub = append(pub, "agents."+verb+".*."+owner+"."+r)
-			}
-		}
+// Permissions is the complete permission set of the endpoint at a (ADR 0145, spec section 8). Anything not listed is
+// denied, and there is no response permission: it would grant publishing to any reply subject the endpoint receives, so
+// a request it sends itself with a reply subject of $JS.API.STREAM.DELETE.<victim> would let it delete another inbox.
+//
+// Publish: mail, prompt and status to any endpoint of the same owner (agents.<verb>.<owner>.*.*, the owner a literal
+// token), and the fixed lines: its own exact heartbeat, replies, the service API, and the JetStream and KV subjects of
+// its own inbox, the directory and its lease, all keyed by its own flat key. Subscribe: its private reply prefix, its
+// own prompt and status subjects, $SRV.>, and the heartbeats of its own owner (agents.hb.<owner>.*.*).
+//
+// The owner is a literal in every peer line, never a wildcard, so no line reaches another owner's endpoints. a must be
+// valid (sap.NewAddress); for one that is not, Permissions returns nil, because an empty permission set would allow
+// everything.
+func Permissions(a sap.Address) *jwt.Permissions {
+	if a.Validate() != nil {
+		return nil
 	}
-	pub = append(pub, fixedPub(owner, name)...)
-	subj := sap.For(owner, name)
+	s := a.Subjects()
+	peer := a.Owner + ".*.*"
+	var pub []string
+	for _, verb := range []string{"mail", "prompt", "status"} {
+		pub = append(pub, "agents."+verb+"."+peer)
+	}
+	pub = append(pub, fixedPub(a)...)
 	sub := []string{
-		sap.InboxPrefix(name) + ".>",
-		subj.Prompt,
-		subj.Status,
+		a.InboxPrefix() + ".>",
+		s.Prompt,
+		s.Status,
 		"$SRV.>",
-		"agents.hb.*." + owner + ".*",
+		"agents.hb." + peer,
 	}
 	var p jwt.Permissions
 	p.Pub.Allow.Add(pub...)
 	p.Sub.Allow.Add(sub...)
-	// No response permission: it grants publishing to any reply subject the
-	// endpoint receives, so a request it sends itself with a reply subject of
-	// $JS.API.STREAM.DELETE.<victim> would let it delete another inbox.
-	return p
+	return &p
 }
 
-// fixedPub is the part of the publish allow list that is the same for every endpoint and names only the endpoint
-// itself: its heartbeat, replies, the service API, and the JetStream and KV subjects of its own inbox, the directory
-// and its lease. name may be the template {{name()}}.
-func fixedPub(owner, name string) []string {
-	return fixedPubKeyed(sap.For(owner, name).HB, name)
-}
-
-// fixedPubKeyed is fixedPub with the heartbeat subject and the flat key given. A legacy endpoint's flat key is its bare
-// name (fixedPub); a new-form endpoint's is agent_owner_name (NewFormPermissions). The stream is inbox-<flat>, the
-// consumer is the shared consumer name, and the lease key is <flat>.
-func fixedPubKeyed(hb, flat string) []string {
-	inbox := sap.InboxStream(flat)
+// fixedPub is the part of the publish allow list that names only the endpoint itself: its heartbeat, replies, the
+// service API, and the JetStream and KV subjects of its own inbox, the directory and its lease. The stream is
+// inbox-<flat>, the consumer is the shared consumer name, and the lease key is <flat>.
+func fixedPub(a sap.Address) []string {
+	flat := a.Flat()
+	inbox := a.InboxStream()
 	dir := "KV_" + store.DirectoryBucket
 	lease := "KV_" + store.LeaseBucket
-	name := flat
 	return []string{
-		hb,
+		a.Subjects().HB,
 		"_INBOX.>", // replies (SAP prompt chunks, $SRV answers) go to callers' inboxes only
 		"$SRV.>",
 		"$JS.API.INFO",
@@ -85,14 +72,17 @@ func fixedPubKeyed(hb, flat string) []string {
 		"$JS.API.STREAM.INFO." + dir,
 		"$JS.API.DIRECT.GET." + dir + ".>",
 		"$JS.API.STREAM.INFO." + lease,
-		"$KV." + store.LeaseBucket + "." + name,
-		"$JS.API.DIRECT.GET." + lease + ".$KV." + store.LeaseBucket + "." + name,
+		"$KV." + store.LeaseBucket + "." + flat,
+		"$JS.API.DIRECT.GET." + lease + ".$KV." + store.LeaseBucket + "." + flat,
 	}
 }
 
-// NSCFlags renders Permissions as `nsc add user` flags.
-func NSCFlags(owner, name string) []string {
-	p := Permissions(owner, name)
+// NSCFlags renders Permissions as `nsc add user` flags. An invalid address gives none.
+func NSCFlags(a sap.Address) []string {
+	p := Permissions(a)
+	if p == nil {
+		return nil
+	}
 	var f []string
 	for _, s := range p.Pub.Allow {
 		f = append(f, "--allow-pub", s)
@@ -101,4 +91,44 @@ func NSCFlags(owner, name string) []string {
 		f = append(f, "--allow-sub", s)
 	}
 	return f
+}
+
+// ValidateGrant checks one subject grant: a grant that applies to the agents. subject space must not carry '*' or '>'
+// in the owner token position, which is token index 2 of agents.<verb>.<owner>.<group>.<instance>, or at or before it.
+// A grant is accepted only if every token is a literal or a lone '*', '>' appears only as the last token, no token is
+// empty or has whitespace, and no token mixes a wildcard character with other text. A grant that starts with a
+// wildcard applies to the agents. space too, so it is held to the same rule. An agents. grant needs at least four
+// tokens (verb and owner are named, and something follows). Subjects outside the agents. space pass the structural
+// checks only.
+func ValidateGrant(subject string) error {
+	const rule = "a grant must not carry '*' or '>' in the owner token position (token 3) or before it"
+	if subject == "" || strings.ContainsAny(subject, " \t\r\n") {
+		return fmt.Errorf("grant %q refused (%s): empty or contains whitespace", subject, rule)
+	}
+	toks := strings.Split(subject, ".")
+	for i, t := range toks {
+		switch {
+		case t == "":
+			return fmt.Errorf("grant %q refused (%s): empty token", subject, rule)
+		case t == ">" && i != len(toks)-1:
+			return fmt.Errorf("grant %q refused (%s): '>' only as the last token", subject, rule)
+		case t != "*" && t != ">" && strings.ContainsAny(t, "*>"):
+			return fmt.Errorf("grant %q refused (%s): partial wildcard token %q", subject, rule, t)
+		}
+	}
+	if toks[0] != "agents" && toks[0] != "*" && toks[0] != ">" {
+		return nil
+	}
+	for i, t := range toks {
+		if i > 2 {
+			break
+		}
+		if t == "*" || t == ">" {
+			return fmt.Errorf("grant %q refused (%s)", subject, rule)
+		}
+	}
+	if len(toks) < 4 {
+		return fmt.Errorf("grant %q refused (%s): an agents. grant needs at least the verb and owner tokens, and a token after them", subject, rule)
+	}
+	return nil
 }

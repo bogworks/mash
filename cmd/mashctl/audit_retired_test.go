@@ -25,9 +25,10 @@ type retiredOut struct {
 		Alarm       bool    `json:"alarm"`
 		Markers     []struct {
 			Key       string `json:"key"`
-			Agent     string `json:"agent"`
+			Address   string `json:"address"`
 			Owner     string `json:"owner"`
-			Name      string `json:"name"`
+			Group     string `json:"group"`
+			Instance  string `json:"instance"`
 			User      string `json:"user"`
 			State     string `json:"state"`
 			RetiredAt string `json:"retired_at"`
@@ -61,11 +62,11 @@ func (f *auditFixture) retiredAudit(t *testing.T, args ...string) (retiredOut, s
 	return r, errb, code
 }
 
-func (f *auditFixture) putMarker(t *testing.T, kv jetstream.KeyValue, agent, owner, name, user, state string) {
+func (f *auditFixture) putMarker(t *testing.T, kv jetstream.KeyValue, owner, group, instance, user, state string) {
 	t.Helper()
-	m := store.Retired{Agent: agent, Owner: owner, Name: name, User: user, RetiredAt: "2026-11-10T01:02:03Z", State: state}
+	m := store.Retired{Owner: owner, Group: group, Instance: instance, User: user, RetiredAt: "2026-11-10T01:02:03Z", State: state}
 	v, _ := json.Marshal(m)
-	if _, err := kv.Put(context.Background(), agent+"_"+owner+"_"+name, v); err != nil {
+	if _, err := kv.Put(context.Background(), owner+"_"+group+"_"+instance, v); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -143,7 +144,7 @@ func TestAuditRetiredListsFinalAndPending(t *testing.T) {
 	m := r.Retired.Markers // sorted by key
 	if m[0].Key != "acme_team2_half" || m[0].State != "pending" || m[1].Key != "claude_team1_done" || m[1].State != "final" ||
 		m[2].Key != "claude_team1_old" || m[2].State != "final" || m[1].RetiredAt != "2026-11-10T01:02:03Z" ||
-		m[1].Agent != "claude" || m[1].Owner != "team1" || m[1].Name != "done" || m[1].User != "UDONEUSERKEY" {
+		m[1].Address != "claude.team1.done" || m[1].Owner != "claude" || m[1].Group != "team1" || m[1].Instance != "done" || m[1].User != "UDONEUSERKEY" {
 		t.Errorf("markers: %+v", m)
 	}
 	// a pending marker is an unfinished retirement: a finding, so --strict exits 1

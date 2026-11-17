@@ -9,7 +9,7 @@ import (
 
 func whoSet() []Presence {
 	mk := func(name, owner, role, note string, online bool, labels map[string]string) Presence {
-		return Presence{Online: online, Record: store.Record{Name: name, Owner: owner, Role: role, Note: note, Labels: labels}}
+		return Presence{Online: online, Record: store.Record{Owner: owner, Group: "g", Instance: name, Role: role, Note: note, Labels: labels}}
 	}
 	return []Presence{
 		mk("alpha", "o1", "NATS Operator", "", true, map[string]string{"team": "Acme", "tier": "1"}),
@@ -22,7 +22,7 @@ func whoSet() []Presence {
 func presenceNames(ps []Presence) []string {
 	out := []string{}
 	for _, p := range ps {
-		out = append(out, p.Record.Name)
+		out = append(out, p.Record.Instance)
 	}
 	return out
 }
@@ -74,9 +74,9 @@ func TestWhoFilterValidate(t *testing.T) {
 
 func TestWhoFilterCapsAndDescription(t *testing.T) {
 	ps := []Presence{
-		{Online: true, Record: store.Record{Name: "alpha", Description: "Runs the NATS account tooling", Caps: []string{"nats-accounts", "review"}}},
-		{Record: store.Record{Name: "beta", Caps: []string{"review"}}},
-		{Record: store.Record{Name: "gamma"}},
+		{Online: true, Record: store.Record{Owner: "o", Group: "g", Instance: "alpha", Description: "Runs the NATS account tooling", Caps: []string{"nats-accounts", "review"}}},
+		{Record: store.Record{Owner: "o", Group: "g", Instance: "beta", Caps: []string{"review"}}},
+		{Record: store.Record{Owner: "o", Group: "g", Instance: "gamma"}},
 	}
 	for _, c := range []struct {
 		name string
@@ -107,24 +107,24 @@ func TestWhoFilterCapsAndDescription(t *testing.T) {
 
 func TestWhoFilterMatchIdentityIsUnionWithSubstring(t *testing.T) {
 	ps := []Presence{
-		{Online: true, Record: store.Record{Name: "acme_team1_x"}},
-		{Online: true, Record: store.Record{Name: "legacy", Description: "bridge for acme_team1_x traffic"}},
-		{Online: true, Record: store.Record{Name: "other"}},
+		{Online: true, Record: store.Record{Owner: "acme", Group: "team1", Instance: "x"}},
+		{Online: true, Record: store.Record{Owner: "acme", Group: "team1", Instance: "bridge", Description: "bridge for acme_team1_x traffic"}},
+		{Online: true, Record: store.Record{Owner: "acme", Group: "team1", Instance: "other"}},
 	}
 	for _, q := range []string{"acme_team1_x", "acme.team1.x"} {
 		got := presenceNames(WhoFilter{Match: q}.Apply(ps))
 		if q == "acme.team1.x" {
-			// the dotted form does not occur in the legacy description, so only the identity's own entry matches
-			if !reflect.DeepEqual(got, []string{"acme_team1_x"}) {
+			// the dotted form does not occur in the description, so only the address's own entry matches
+			if !reflect.DeepEqual(got, []string{"x"}) {
 				t.Fatalf("%s: got %v", q, got)
 			}
 			continue
 		}
-		if !reflect.DeepEqual(got, []string{"acme_team1_x", "legacy"}) {
+		if !reflect.DeepEqual(got, []string{"x", "bridge"}) {
 			t.Fatalf("%s: got %v", q, got)
 		}
 	}
-	if got := presenceNames(WhoFilter{Name: "acme_team1_x"}.Apply(ps)); !reflect.DeepEqual(got, []string{"acme_team1_x"}) {
+	if got := presenceNames(WhoFilter{Name: "acme_team1_x"}.Apply(ps)); !reflect.DeepEqual(got, []string{"x"}) {
 		t.Fatalf("--name stays exact: got %v", got)
 	}
 }

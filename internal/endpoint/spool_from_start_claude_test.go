@@ -41,7 +41,7 @@ func TestSpoolFromStartClaudeHoldsMailSentBeforeAnyHook(t *testing.T) {
 	t.Cleanup(func() { IdleWake = oi })
 	f := newFixture(t, "a", "b")
 	a, ev, sp := f.runSpooledClaudeFromStart(t, "a") // sp.Touch is never called
-	if _, err := f.client(t, "b").SendWith(context.Background(), "a", "startup body", SendOptions{Kind: kind.Question}); err != nil {
+	if _, err := f.client(t, "b").SendWith(context.Background(), tdot("a"), "startup body", SendOptions{Kind: kind.Question}); err != nil {
 		t.Fatal(err)
 	}
 	until(t, "spooled", func() bool { return len(waiting(t, sp)) == 1 })
@@ -52,7 +52,7 @@ func TestSpoolFromStartClaudeHoldsMailSentBeforeAnyHook(t *testing.T) {
 		}
 	}
 	got := ev.waitFor(t, 1, 5*time.Second) // no hook has run: the wake is at once (v0.2.7), not after the idle wake
-	if got[0] != "1 message from b (question)" || strings.Contains(got[0], "startup body") {
+	if got[0] != "1 message from "+tdot("b")+" (question)" || strings.Contains(got[0], "startup body") {
 		t.Fatalf("the wake %q, want the summary line alone", got[0])
 	}
 	time.Sleep(3 * SpoolCheck)
@@ -84,7 +84,7 @@ func TestSpoolFromStartClaudeUnwritableSpoolHoldsBeforeAnyHook(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.Chmod(sp.Dir, 0o700) })
-	if _, err := f.client(t, "b").Send(context.Background(), "a", "must be held", 0); err != nil {
+	if _, err := f.client(t, "b").Send(context.Background(), tdot("a"), "must be held", 0); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(4 * time.Second) // past the three spool tries
@@ -112,7 +112,7 @@ func TestSpoolFromStartClaudeUnwritableSpoolFallsBackToTheChannelAfterAHook(t *t
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.Chmod(sp.Dir, 0o700) })
-	if _, err := f.client(t, "b").Send(context.Background(), "a", "falls back", 0); err != nil {
+	if _, err := f.client(t, "b").Send(context.Background(), tdot("a"), "falls back", 0); err != nil {
 		t.Fatal(err)
 	}
 	got := ev.waitFor(t, 1, 10*time.Second)

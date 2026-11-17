@@ -2,26 +2,34 @@ package main
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/bogworks/mash/internal/config"
+	"github.com/bogworks/mash/internal/sap"
 )
 
-var errAgentTokenSet = errors.New("mashctl: agent_token is set but mashctl cannot act on a three-token identity yet; unset agent_token (MASH_AGENT_TOKEN)")
-
-// lookup is what config.Load reads: main passes os.LookupEnv so that a MASH_AGENT_TOKEN that is set but empty is seen.
-// loadConfig is the one place mashctl loads its configuration. It fails closed: mashctl shares config.Load with mash,
-// but would act on the legacy identity when agent_token is set, so every verb refuses instead. The refusal wins over
-// any other error, including the tolerated ErrNoURL and ErrNoConfigDir, which callers treat as not fatal.
+// loadConfig is the one place mashctl loads its configuration: the owner, the server and the credentials come from
+// config.Load. There is no stored group; an endpoint's address is given on the command line. lookup is what
+// config.Load reads; main passes os.LookupEnv.
+//
+// A shell inside an endpoint session sets MASH_NAME without a group for mashctl: mashctl acts as no endpoint, so a name
+// with no group is not an error here, and the config is returned as loaded.
 func loadConfig(env func(string) string, lookup config.Lookup) (config.Config, error) {
-	return loadConfigFor(false, env, lookup)
-}
-
-// loadConfigFor is loadConfig; newForm is true for the three-token form of provision and deprovision (naming plan
-// 1.6), which names its target itself and so runs with agent_token set.
-func loadConfigFor(newForm bool, env func(string) string, lookup config.Lookup) (config.Config, error) {
 	cfg, err := config.Load(lookup, env("HOME"))
-	if cfg.AgentToken != "" && !newForm {
-		return cfg, errAgentTokenSet
+	if errors.Is(err, config.ErrGroupMissing) {
+		err = nil
 	}
 	return cfg, err
+}
+
+// parseAddr reads an endpoint address argument: the dotted form owner.group.instance or the flat key
+// owner_group_instance. Anything else is refused.
+func parseAddr(arg string) (sap.Address, error) {
+	if a, err := sap.ParseAddress(arg); err == nil {
+		return a, nil
+	}
+	if a, err := sap.AddressFromFlat(arg); err == nil {
+		return a, nil
+	}
+	return sap.Address{}, fmt.Errorf("not an endpoint address (the value is not shown): give owner.group.instance")
 }

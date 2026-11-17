@@ -18,7 +18,6 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
-	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/store"
 	"github.com/bogworks/mash/internal/testenv"
@@ -26,8 +25,7 @@ import (
 
 var updateAuditGolden = flag.Bool("update-audit", false, "rewrite cmd/mashctl/testdata/audit.golden.json")
 
-// auditFixture is an account with legacy and new-form identities, an alias with undrained legacy mail, and one
-// orphan of each kind.
+// auditFixture is an account with endpoints, queued and unacknowledged mail, and one orphan of each kind.
 type auditFixture struct {
 	e        *testenv.Env
 	js       jetstream.JetStream
@@ -70,35 +68,6 @@ func (f *auditFixture) putCreds(t *testing.T, src, name string) {
 	f.seeds = append(f.seeds, string(seed), tok)
 }
 
-// newForm builds a new-form directory record, its inbox stream and consumer directly through the store package:
-// provisioning a three-token identity is step 1.6 and mashctl and admin still refuse it.
-func (f *auditFixture) newForm(t *testing.T, agent, owner, name, user string, alias *store.Alias) sap.EndpointIdentity {
-	t.Helper()
-	ctx := context.Background()
-	id, err := sap.New(agent, owner, name)
-	if err != nil {
-		t.Fatal(err)
-	}
-	s, err := f.js.CreateStream(ctx, store.InboxConfigIdentity(id, store.DefaultLimits()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.CreateOrUpdateConsumer(ctx, store.ConsumerConfig()); err != nil {
-		t.Fatal(err)
-	}
-	rec := store.Record{Name: name, Owner: owner, Agent: sap.AgentName, AgentToken: agent, Account: f.e.Account, User: user,
-		MailSubject: id.Subjects().Mail, Created: "2026-11-10T00:00:00Z", Alias: alias}
-	val, _ := json.Marshal(rec)
-	kv, err := f.js.KeyValue(ctx, store.DirectoryBucket)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := kv.Create(ctx, id.Flat(), val); err != nil {
-		t.Fatal(err)
-	}
-	return id
-}
-
 func (f *auditFixture) lease(t *testing.T, key, val string) {
 	t.Helper()
 	kv, err := f.js.KeyValue(context.Background(), store.LeaseBucket)
@@ -110,10 +79,10 @@ func (f *auditFixture) lease(t *testing.T, key, val string) {
 	}
 }
 
-// pullUnacked takes one message from name's legacy consumer and leaves it unacknowledged.
-func (f *auditFixture) pullUnacked(t *testing.T, name string) {
+// pullUnacked takes one message from the endpoint's consumer and leaves it unacknowledged.
+func (f *auditFixture) pullUnacked(t *testing.T, a sap.Address) {
 	t.Helper()
-	c, err := f.js.Consumer(context.Background(), sap.InboxStream(name), store.Consumer)
+	c, err := f.js.Consumer(context.Background(), a.InboxStream(), store.Consumer)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,9 +99,9 @@ func (f *auditFixture) pullUnacked(t *testing.T, name string) {
 	}
 }
 
-func (f *auditFixture) ackAll(t *testing.T, name string) {
+func (f *auditFixture) ackAll(t *testing.T, a sap.Address) {
 	t.Helper()
-	c, err := f.js.Consumer(context.Background(), sap.InboxStream(name), store.Consumer)
+	c, err := f.js.Consumer(context.Background(), a.InboxStream(), store.Consumer)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,52 +141,52 @@ func newAuditEnv(t *testing.T) *auditFixture {
 	return f
 }
 
-// legacy provisions a legacy endpoint and keeps its creds file in the creds directory.
-func (f *auditFixture) legacy(t *testing.T, name string) string {
+// endpoint provisions the endpoint at a and keeps its creds file in the creds directory as owner.group.instance.creds.
+func (f *auditFixture) endpoint(t *testing.T, a sap.Address) string {
 	t.Helper()
-	creds, u := f.e.Mint(t, name)
-	if _, errb, code := ctlRun(t, f.e, "provision", name, "--user", u, "--account", f.e.Account); code != 0 {
-		t.Fatalf("provision %s: %d %q", name, code, errb)
+	creds, u := f.e.Mint(t, a)
+	if _, errb, code := ctlRun(t, f.e, "provision", a.String(), "--user", u, "--account", f.e.Account); code != 0 {
+		t.Fatalf("provision %s: %d %q", a, code, errb)
 	}
-	f.users[u] = "USER-" + name
-	f.putCreds(t, creds, name)
+	f.users[u] = "USER-" + a.Instance
+	f.putCreds(t, creds, a.String())
 	return u
 }
 
-// buildAuditAccount is the full fixture: (a) legacy "alpha" with queued mail and a live lease, (b) new-form
-// claude.team2.beta, (c) new-form acme.team1.ops1 with an alias to legacy "ops1" whose inbox still has an unacked
-// message, (d) an orphan inbox stream, an orphan lease key and an orphan creds file.
+// The addresses of the full fixture.
+var (
+	addrAlpha = ad("alpha")
+	addrBeta  = sap.Address{Owner: testenv.Owner, Group: "team2", Instance: "beta"}
+	addrOps   = sap.Address{Owner: testenv.Owner, Group: "team1", Instance: "ops1"}
+	addrGhost = ad("ghost")
+)
+
+// buildAuditAccount is the full fixture: (a) o.g.alpha with queued mail and a live lease, (b) o.team2.beta with queued
+// mail, (c) o.team1.ops1 with an unacknowledged message and a live lease, (d) an orphan inbox stream, an orphan lease
+// key and an orphan creds file.
 func buildAuditAccount(t *testing.T) *auditFixture {
 	f := newAuditEnv(t)
-	owner := f.e.Owner
 
-	f.legacy(t, "alpha")
-	f.publish(t, sap.For(owner, "alpha").Mail, 3)
-	f.lease(t, "alpha", `{"instance_id":"i1","host":"h"}`)
+	f.endpoint(t, addrAlpha)
+	f.publish(t, addrAlpha.Subjects().Mail, 3)
+	f.lease(t, addrAlpha.Flat(), `{"instance_id":"i1","host":"h"}`)
 
-	betaCreds, betaUser := f.e.Mint(t, "beta")
-	f.users[betaUser] = "USER-beta"
-	f.putCreds(t, betaCreds, "claude_team2_beta")
-	beta := f.newForm(t, "claude", "team2", "beta", betaUser, nil)
-	f.publish(t, beta.Subjects().Mail, 2)
+	f.endpoint(t, addrBeta)
+	f.publish(t, addrBeta.Subjects().Mail, 2)
 
-	f.legacy(t, "ops1")
-	f.publish(t, sap.For(owner, "ops1").Mail, 2)
-	f.pullUnacked(t, "ops1")
-	_, opsUser := f.e.Mint(t, "ops1new")
-	f.users[opsUser] = "USER-ops1new"
-	ops := f.newForm(t, "acme", "team1", "ops1", opsUser, &store.Alias{Owner: owner, Name: "ops1"})
-	f.publish(t, ops.Subjects().Mail, 1)
-	f.lease(t, ops.Flat(), `{"instance_id":"i2","host":"h"}`)
+	f.endpoint(t, addrOps)
+	f.publish(t, addrOps.Subjects().Mail, 2)
+	f.pullUnacked(t, addrOps)
+	f.lease(t, addrOps.Flat(), `{"instance_id":"i2","host":"h"}`)
 
 	// (d) orphans: a stream with no record, a lease key with no record, a creds file whose user matches no record.
 	ctx := context.Background()
-	if _, err := f.js.CreateStream(ctx, store.InboxConfigFor(owner, "ghost", store.DefaultLimits())); err != nil {
+	if _, err := f.js.CreateStream(ctx, store.InboxConfigFor(addrGhost, store.DefaultLimits())); err != nil {
 		t.Fatal(err)
 	}
-	f.publish(t, sap.For(owner, "ghost").Mail, 1)
+	f.publish(t, addrGhost.Subjects().Mail, 1)
 	f.lease(t, "phantom", `{"instance_id":"i3"}`)
-	strayCreds, strayUser := f.e.Mint(t, "stray")
+	strayCreds, strayUser := f.e.Mint(t, ad("stray"))
 	f.users[strayUser] = "USER-stray"
 	f.putCreds(t, strayCreds, "stray")
 	// The admin's own creds file in the directory is not an endpoint's and is never an orphan.
@@ -321,10 +290,11 @@ func TestAuditJSONContent(t *testing.T) {
 		Generated string `json:"generated"`
 		Records   []struct {
 			Key      string `json:"key"`
-			Form     string `json:"form"`
+			Address  string `json:"address"`
+			Owner    string `json:"owner"`
+			Group    string `json:"group"`
+			Instance string `json:"instance"`
 			Running  bool   `json:"running"`
-			Identity struct{ Agent, Owner, Name string }
-			Alias    *struct{ Owner, Name string }
 			Inbox    struct {
 				Stream  string   `json:"stream"`
 				Present bool     `json:"present"`
@@ -338,25 +308,6 @@ func TestAuditJSONContent(t *testing.T) {
 				} `json:"deliver"`
 			} `json:"inbox"`
 		} `json:"records"`
-		Renames []struct {
-			Identity    string `json:"identity"`
-			TrustLabel  string `json:"trust_label"`
-			Drained     bool   `json:"drained"`
-			LegacyInbox struct {
-				Stream  string `json:"stream"`
-				Msgs    uint64 `json:"msgs"`
-				Last    uint64 `json:"last_seq"`
-				Deliver struct {
-					Pending    uint64 `json:"pending"`
-					AckPending int    `json:"ack_pending"`
-				} `json:"deliver"`
-			} `json:"legacy_inbox"`
-			NewInbox struct {
-				Stream string `json:"stream"`
-				Msgs   uint64 `json:"msgs"`
-				Last   uint64 `json:"last_seq"`
-			} `json:"new_inbox"`
-		} `json:"renames"`
 		Orphans struct {
 			Streams []struct{ Stream string } `json:"streams"`
 			Leases  []struct{ Key string }    `json:"leases"`
@@ -366,7 +317,12 @@ func TestAuditJSONContent(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &r); err != nil {
 		t.Fatal(err)
 	}
-	if r.Version != 1 || r.Generated != "2026-11-10T12:00:00Z" {
+	for _, gone := range []string{`"identity"`, `"form"`, `"alias"`, `"renames"`, `"agent_token"`, `"name"`} {
+		if strings.Contains(out, gone) {
+			t.Errorf("the report still carries %s", gone)
+		}
+	}
+	if r.Version != auditVersion || r.Generated != "2026-11-10T12:00:00Z" {
 		t.Fatalf("version/generated: %d %q", r.Version, r.Generated)
 	}
 	keys := []string{}
@@ -375,28 +331,24 @@ func TestAuditJSONContent(t *testing.T) {
 		keys = append(keys, rec.Key)
 		byKey[rec.Key] = i
 	}
-	if want := []string{"acme_team1_ops1", "alpha", "claude_team2_beta", "ops1"}; strings.Join(keys, ",") != strings.Join(want, ",") {
+	if want := []string{"o_g_alpha", "o_team1_ops1", "o_team2_beta"}; strings.Join(keys, ",") != strings.Join(want, ",") {
 		t.Fatalf("record keys %v, want sorted %v", keys, want)
 	}
-	alpha := r.Records[byKey["alpha"]]
-	if alpha.Form != "legacy" || !alpha.Running || alpha.Inbox.Stream != "inbox-alpha" || alpha.Inbox.Msgs != 3 || alpha.Inbox.First != 1 || alpha.Inbox.Last != 3 || alpha.Inbox.Deliver.Pending != 3 {
+	alpha := r.Records[byKey["o_g_alpha"]]
+	if alpha.Address != "o.g.alpha" || alpha.Owner != "o" || alpha.Group != "g" || alpha.Instance != "alpha" ||
+		!alpha.Running || alpha.Inbox.Stream != "inbox-o_g_alpha" || alpha.Inbox.Msgs != 3 || alpha.Inbox.First != 1 || alpha.Inbox.Last != 3 || alpha.Inbox.Deliver.Pending != 3 {
 		t.Errorf("alpha: %+v", alpha)
 	}
-	beta := r.Records[byKey["claude_team2_beta"]]
-	if beta.Form != "new" || beta.Running || beta.Identity.Agent != "claude" || beta.Identity.Owner != "team2" || beta.Identity.Name != "beta" || beta.Inbox.Msgs != 2 ||
-		len(beta.Inbox.Subj) != 1 || beta.Inbox.Subj[0] != "agents.mail.claude.team2.beta" {
+	beta := r.Records[byKey["o_team2_beta"]]
+	if beta.Address != "o.team2.beta" || beta.Group != "team2" || beta.Instance != "beta" || beta.Running || beta.Inbox.Msgs != 2 ||
+		len(beta.Inbox.Subj) != 1 || beta.Inbox.Subj[0] != "agents.mail.o.team2.beta" {
 		t.Errorf("beta: %+v", beta)
 	}
-	if len(r.Renames) != 1 {
-		t.Fatalf("renames: %+v", r.Renames)
+	ops := r.Records[byKey["o_team1_ops1"]]
+	if ops.Address != "o.team1.ops1" || !ops.Running || ops.Inbox.Msgs != 2 || ops.Inbox.Deliver.Pending != 1 || ops.Inbox.Deliver.AckPending != 1 {
+		t.Errorf("ops1: %+v", ops)
 	}
-	rn := r.Renames[0]
-	if rn.Identity != "acme.team1.ops1" || rn.TrustLabel != "not-available" || rn.Drained ||
-		rn.LegacyInbox.Stream != "inbox-ops1" || rn.LegacyInbox.Msgs != 2 || rn.LegacyInbox.Last != 2 || rn.LegacyInbox.Deliver.Pending != 1 || rn.LegacyInbox.Deliver.AckPending != 1 ||
-		rn.NewInbox.Stream != "inbox-acme_team1_ops1" || rn.NewInbox.Msgs != 1 || rn.NewInbox.Last != 1 {
-		t.Errorf("rename: %+v", rn)
-	}
-	if len(r.Orphans.Streams) != 1 || r.Orphans.Streams[0].Stream != "inbox-ghost" {
+	if len(r.Orphans.Streams) != 1 || r.Orphans.Streams[0].Stream != "inbox-o_g_ghost" {
 		t.Errorf("orphan streams: %+v", r.Orphans.Streams)
 	}
 	if len(r.Orphans.Leases) != 1 || r.Orphans.Leases[0].Key != "phantom" {
@@ -447,7 +399,7 @@ func TestAuditTextForm(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d", code)
 	}
-	for _, want := range []string{"alpha", "acme.team1.ops1", "legacy", "new", "inbox-ghost", "phantom", "stray.creds", "not-available", "pending 1", "ack_pending 1"} {
+	for _, want := range []string{"o.g.alpha", "o.team1.ops1", "o.team2.beta", "inbox-o_g_ghost", "phantom", "stray.creds", "pending 1", "ack_pending 1"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("text form lacks %q:\n%s", want, out)
 		}
@@ -476,25 +428,19 @@ func TestAuditStrictExitCodes(t *testing.T) {
 		t.Fatalf("exit without --strict: %d, want 0 even with orphans", code)
 	}
 	if _, errb, code := f.run(t, "--strict"); code != 1 || errb == "" {
-		t.Fatalf("--strict with orphans and an undrained alias: %d %q", code, errb)
+		t.Fatalf("--strict with orphans: %d %q", code, errb)
 	}
 
-	// A clean account: one legacy endpoint, one new-form with an alias whose legacy inbox is drained.
+	// A clean account: one endpoint, all its mail read.
 	g := newAuditEnv(t)
-	g.legacy(t, "ops1")
-	g.publish(t, sap.For(g.e.Owner, "ops1").Mail, 2)
-	_, u := g.e.Mint(t, "n")
-	g.users[u] = "USER-n"
-	g.newForm(t, "acme", "team1", "ops1", u, &store.Alias{Owner: g.e.Owner, Name: "ops1"})
-	if _, _, code := g.run(t, "--strict"); code != 1 {
-		t.Fatalf("--strict with two unread legacy messages: %d, want 1", code)
-	}
-	g.ackAll(t, "ops1")
+	g.endpoint(t, addrOps)
+	g.publish(t, addrOps.Subjects().Mail, 2)
+	g.ackAll(t, addrOps)
 	if out, errb, code := g.run(t, "--strict"); code != 0 {
-		t.Fatalf("--strict on a clean, drained account: %d out=%q err=%q", code, out, errb)
+		t.Fatalf("--strict on a clean account: %d out=%q err=%q", code, out, errb)
 	}
 	// an orphan alone fails it
-	if _, err := g.js.CreateStream(context.Background(), store.InboxConfigFor(g.e.Owner, "ghost", store.DefaultLimits())); err != nil {
+	if _, err := g.js.CreateStream(context.Background(), store.InboxConfigFor(addrGhost, store.DefaultLimits())); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, code := g.run(t, "--strict"); code != 1 {
@@ -522,11 +468,11 @@ func TestAuditUsageAndErrors(t *testing.T) {
 	}
 }
 
-// recreateLegacyConsumer replaces name's legacy "deliver" consumer with one made from mutate(store.ConsumerConfig()).
-func (f *auditFixture) recreateLegacyConsumer(t *testing.T, name string, mutate func(*jetstream.ConsumerConfig)) {
+// recreateConsumer replaces the endpoint's "deliver" consumer with one made from mutate(store.ConsumerConfig()).
+func (f *auditFixture) recreateConsumer(t *testing.T, a sap.Address, mutate func(*jetstream.ConsumerConfig)) {
 	t.Helper()
 	ctx := context.Background()
-	s, err := f.js.Stream(ctx, sap.InboxStream(name))
+	s, err := f.js.Stream(ctx, a.InboxStream())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -540,8 +486,9 @@ func (f *auditFixture) recreateLegacyConsumer(t *testing.T, name string, mutate 
 	}
 }
 
-// A legacy consumer recreated so that it skips the stored messages shows pending 0 and ack_pending 0 while the
-// messages are unread: that is not drained, and the report shows the policy that explains it.
+// A consumer recreated so that it skips the stored messages shows pending 0 and ack_pending 0 while the messages are
+// unread: that is not drained, so deprovisioning the record afterwards reads as a vanished inbox (mail may have been
+// lost), not a retirement, and the report shows the policy that explains it.
 func TestAuditDrainedRequiresConsumerToCoverStoredMessages(t *testing.T) {
 	cases := map[string]struct {
 		mutate func(*jetstream.ConsumerConfig)
@@ -556,53 +503,44 @@ func TestAuditDrainedRequiresConsumerToCoverStoredMessages(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			g := newAuditEnv(t)
-			g.legacy(t, "ops1")
-			g.publish(t, sap.For(g.e.Owner, "ops1").Mail, 3)
-			_, u := g.e.Mint(t, "n")
-			g.users[u] = "USER-n"
-			g.newForm(t, "acme", "team1", "ops1", u, &store.Alias{Owner: g.e.Owner, Name: "ops1"})
-			g.recreateLegacyConsumer(t, "ops1", tc.mutate)
+			g.endpoint(t, addrOps)
+			g.publish(t, addrOps.Subjects().Mail, 3)
+			g.recreateConsumer(t, addrOps, tc.mutate)
 
 			out, _, code := g.run(t, "--json")
 			if code != 0 {
 				t.Fatalf("exit %d", code)
 			}
 			var r struct {
-				Renames []struct {
-					Drained     bool `json:"drained"`
-					LegacyInbox struct {
+				Records []struct {
+					Inbox struct {
 						Msgs    uint64 `json:"msgs"`
 						Deliver struct {
-							Pending       uint64   `json:"pending"`
-							AckPending    int      `json:"ack_pending"`
-							DeliverPolicy string   `json:"deliver_policy"`
-							StartSeq      uint64   `json:"start_seq"`
-							FilterSubject []string `json:"filter_subjects"`
+							Pending       uint64 `json:"pending"`
+							AckPending    int    `json:"ack_pending"`
+							DeliverPolicy string `json:"deliver_policy"`
 						} `json:"deliver"`
-					} `json:"legacy_inbox"`
-				} `json:"renames"`
+					} `json:"inbox"`
+				} `json:"records"`
 			}
-			if err := json.Unmarshal([]byte(out), &r); err != nil {
-				t.Fatal(err)
+			if err := json.Unmarshal([]byte(out), &r); err != nil || len(r.Records) != 1 {
+				t.Fatalf("records: %v %s", err, out)
 			}
-			if len(r.Renames) != 1 {
-				t.Fatalf("renames: %s", out)
+			in := r.Records[0].Inbox
+			if in.Msgs != 3 || in.Deliver.Pending != 0 || in.Deliver.AckPending != 0 {
+				t.Fatalf("fixture: want 3 stored messages and zero counts, got msgs %d pending %d ack_pending %d", in.Msgs, in.Deliver.Pending, in.Deliver.AckPending)
 			}
-			d := r.Renames[0].LegacyInbox.Deliver
-			if r.Renames[0].LegacyInbox.Msgs != 3 || d.Pending != 0 || d.AckPending != 0 {
-				t.Fatalf("fixture: want 3 stored messages and zero counts, got msgs %d pending %d ack_pending %d", r.Renames[0].LegacyInbox.Msgs, d.Pending, d.AckPending)
+			if in.Deliver.DeliverPolicy != tc.policy {
+				t.Errorf("deliver_policy %q, want %q", in.Deliver.DeliverPolicy, tc.policy)
 			}
-			if r.Renames[0].Drained {
-				t.Error("drained is true although the consumer skips stored messages")
+			if txt, _, _ := g.run(t); !strings.Contains(txt, "policy "+tc.policy) {
+				t.Errorf("text form lacks the policy:\n%s", txt)
 			}
-			if d.DeliverPolicy != tc.policy {
-				t.Errorf("deliver_policy %q, want %q", d.DeliverPolicy, tc.policy)
-			}
-			if _, errb, code := g.run(t, "--strict"); code != 1 {
-				t.Errorf("--strict exit %d (%q), want 1", code, errb)
-			}
-			if txt, _, _ := g.run(t); !strings.Contains(txt, "NOT drained") || !strings.Contains(txt, "policy "+tc.policy) {
-				t.Errorf("text form lacks NOT drained or the policy:\n%s", txt)
+			first := g.auditTo(t, "first.json")
+			g.deprovisionAndForget(t, addrOps)
+			c, code := g.compareJSON(t, first)
+			if code != 1 || c.Compare.Vanished != 1 || c.Compare.Retired != 0 {
+				t.Errorf("a consumer that skips stored messages is not drained: exit %d %+v", code, c.Compare)
 			}
 		})
 	}
@@ -643,15 +581,14 @@ func TestAuditInboxDrainedRule(t *testing.T) {
 	}
 }
 
-// The text form carries every field of the JSON that decides a finding: suspended and deliver.present for records,
-// renames and orphan streams, and the consumer's policy.
+// The text form carries every field of the JSON that decides a finding: suspended and deliver.present for records and
+// orphan streams, and the consumer's policy.
 func TestAuditTextShowsSuspendedAndDeliver(t *testing.T) {
 	susp := auditInbox{Stream: "inbox-s", Present: true, Msgs: 1, FirstSeq: 1, LastSeq: 1, Subjects: []string{"x"}, Suspended: true}
 	live := auditInbox{Stream: "inbox-l", Present: true, Subjects: []string{"y"},
 		Deliver: auditDeliver{Present: true, DeliverPolicy: "all", FilterSubjects: []string{"y"}}}
 	rep := auditReport{Version: 1, Generated: "g", Owner: "o",
-		Records: []auditRecord{{Key: "s", Form: "legacy", Inbox: susp}, {Key: "l", Form: "legacy", Inbox: live}},
-		Renames: []auditRename{{Identity: "a.b.c", Alias: auditAlias{Owner: "o", Name: "s"}, LegacyInbox: susp, NewInbox: live}},
+		Records: []auditRecord{{Key: "s", Address: "o.g.s", Inbox: susp}, {Key: "l", Address: "o.g.l", Inbox: live}},
 		Orphans: auditOrphans{Streams: []auditOrphanStream{{Stream: "inbox-z", Suspended: true}, {Stream: "inbox-q"}}},
 	}
 	var b strings.Builder
@@ -673,8 +610,7 @@ func TestAuditTextShowsSuspendedAndDeliver(t *testing.T) {
 	}
 	has("record s\t", "suspended true", "deliver false")
 	has("record l\t", "suspended false", "deliver true", "policy all", "filter y")
-	has("before", "suspended true", "deliver false")
-	has("after", "suspended false", "deliver true")
+	has("record s\t", "address o.g.s")
 	has("orphan stream inbox-z", "suspended true")
 	has("orphan stream inbox-q", "suspended false")
 }
@@ -684,24 +620,23 @@ func TestAuditTextShowsSuspendedAndDeliver(t *testing.T) {
 func TestAuditBadRecordClaimsItsResources(t *testing.T) {
 	f := newAuditEnv(t)
 	ctx := context.Background()
-	owner := f.e.Owner
-	u := f.legacy(t, "good") // a valid legacy record, for contrast
-	_ = u
-	creds, user := f.e.Mint(t, "broken")
+	f.endpoint(t, ad("good")) // a valid record, for contrast
+	broken := ad("broken")
+	creds, user := f.e.Mint(t, broken)
 	f.users[user] = "USER-broken"
 	f.putCreds(t, creds, "broken")
-	if _, err := f.js.CreateStream(ctx, store.InboxConfigFor(owner, "broken", store.DefaultLimits())); err != nil {
+	if _, err := f.js.CreateStream(ctx, store.InboxConfigFor(broken, store.DefaultLimits())); err != nil {
 		t.Fatal(err)
 	}
-	f.lease(t, "broken", `{"instance_id":"i9"}`)
+	f.lease(t, broken.Flat(), `{"instance_id":"i9"}`)
 	// a valid key and user, an invalid mail subject
-	val, _ := json.Marshal(store.Record{Name: "broken", Owner: owner, Agent: sap.AgentName, AgentToken: "cc", Account: f.e.Account,
+	val, _ := json.Marshal(store.Record{Owner: broken.Owner, Group: broken.Group, Instance: broken.Instance, Agent: "claude", Account: f.e.Account,
 		User: user, MailSubject: "not.the.subject", Created: "2026-11-10T00:00:00Z"})
 	kv, err := f.js.KeyValue(ctx, store.DirectoryBucket)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := kv.Create(ctx, "broken", val); err != nil {
+	if _, err := kv.Create(ctx, broken.Flat(), val); err != nil {
 		t.Fatal(err)
 	}
 
@@ -720,36 +655,11 @@ func TestAuditBadRecordClaimsItsResources(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &r); err != nil {
 		t.Fatal(err)
 	}
-	if len(r.Problems) != 1 || r.Problems[0].Item != "broken" {
+	if len(r.Problems) != 1 || r.Problems[0].Item != broken.Flat() {
 		t.Errorf("want the one problem for the entry: %+v", r.Problems)
 	}
 	if len(r.Orphans.Streams) != 0 || len(r.Orphans.Leases) != 0 || len(r.Orphans.Creds) != 0 {
 		t.Errorf("a resource of an existing (unreadable) entry is reported as an orphan: %+v", r.Orphans)
-	}
-}
-
-// A record whose alias cannot be modelled (the store refuses to parse one, so this is a record a future writer or a
-// hand edit could leave) is a problem, so --strict fails, while its resources stay claimed.
-func TestAuditMalformedAliasIsAProblem(t *testing.T) {
-	id, err := sap.New("acme", "team1", "ops1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	rec := store.Record{Name: "ops1", Owner: "team1", Agent: sap.AgentName, AgentToken: "acme", Account: "A", User: "UX",
-		MailSubject: id.Subjects().Mail, Created: "2026-11-10T00:00:00Z", Alias: &store.Alias{Owner: "Bad Owner", Name: "ops1"}}
-	snap := admin.AuditSnapshot{Records: []store.Record{rec}, Streams: []admin.AuditStream{
-		{Name: sap.InboxStream(id.Flat()), Msgs: 0},
-		{Name: sap.InboxStream("ops1"), Msgs: 2, FirstSeq: 1, LastSeq: 2, Subjects: []string{"agents.mail.*.x.ops1"}},
-	}}
-	rep := buildAudit("o", snap, nil, nil, nil)
-	if len(rep.Problems) != 1 || rep.Problems[0].What != "record" || rep.Problems[0].Item != id.Flat() || !strings.Contains(rep.Problems[0].Error, "alias") {
-		t.Fatalf("want one alias problem on %s: %+v", id.Flat(), rep.Problems)
-	}
-	if len(rep.Orphans.Streams) != 0 {
-		t.Errorf("the alias's legacy stream must stay claimed: %+v", rep.Orphans.Streams)
-	}
-	if len(rep.Records) != 1 || rep.findings() == 0 {
-		t.Errorf("record kept and --strict must fail: records=%d findings=%d", len(rep.Records), rep.findings())
 	}
 }
 
@@ -786,16 +696,17 @@ type cmpOut struct {
 	} `json:"compare"`
 }
 
-func cleanLegacyAccount(t *testing.T) *auditFixture {
+// cleanAccount is one endpoint, o.g.alpha, whose mail is all read.
+func cleanAccount(t *testing.T) *auditFixture {
 	f := newAuditEnv(t)
-	f.legacy(t, "alpha")
-	f.publish(t, sap.For(f.e.Owner, "alpha").Mail, 2)
-	f.ackAll(t, "alpha")
+	f.endpoint(t, ad("alpha"))
+	f.publish(t, ad("alpha").Subjects().Mail, 2)
+	f.ackAll(t, ad("alpha"))
 	return f
 }
 
 func TestAuditCompareMovement(t *testing.T) {
-	f := cleanLegacyAccount(t)
+	f := cleanAccount(t)
 	first := f.auditTo(t, "first.json")
 	if _, errb, code := f.run(t, "--strict"); code != 0 {
 		t.Fatalf("baseline not strict clean: %d %q", code, errb)
@@ -810,7 +721,7 @@ func TestAuditCompareMovement(t *testing.T) {
 		t.Fatalf("compare object: %v %+v", err, c.Compare)
 	}
 	// one more message that is not read: last_seq moves, delivered does not
-	f.publish(t, sap.For(f.e.Owner, "alpha").Mail, 1)
+	f.publish(t, ad("alpha").Subjects().Mail, 1)
 	out, errb, code = f.run(t, "--json", "--compare", first)
 	if code != 0 {
 		t.Fatalf("without --strict: %d %q", code, errb)
@@ -820,14 +731,15 @@ func TestAuditCompareMovement(t *testing.T) {
 		t.Fatalf("compare: %v %s", err, out)
 	}
 	s := c.Compare.Streams[0]
-	if s.Stream != "inbox-alpha" || !s.LastSeqMoved || s.LastSeqBefore != 2 || s.LastSeqNow != 3 || s.DeliveredMoved {
+	if s.Stream != "inbox-o_g_alpha" || !s.LastSeqMoved || s.LastSeqBefore != 2 || s.LastSeqNow != 3 || s.DeliveredMoved {
 		t.Errorf("stream compare: %+v", s)
 	}
-	if _, errb, code := f.run(t, "--strict", "--compare", first); code != 1 || errb == "" {
-		t.Fatalf("one more message must fail --strict --compare: %d %q", code, errb)
+	// a live inbox takes mail: movement is shown, and is not a finding
+	if _, errb, code := f.run(t, "--strict", "--compare", first); code != 0 {
+		t.Fatalf("one more message is not a finding for --strict --compare: %d %q", code, errb)
 	}
 	// read and acknowledged: delivered and ack floor move too
-	f.ackAll(t, "alpha")
+	f.ackAll(t, ad("alpha"))
 	out, _, _ = f.run(t, "--json", "--compare", first)
 	c = cmpOut{}
 	_ = json.Unmarshal([]byte(out), &c)
@@ -836,7 +748,7 @@ func TestAuditCompareMovement(t *testing.T) {
 	}
 	// text form
 	txt, _, _ := f.run(t, "--compare", first)
-	if !strings.Contains(txt, "compare") || !strings.Contains(txt, "inbox-alpha") || !strings.Contains(txt, "moved") {
+	if !strings.Contains(txt, "compare") || !strings.Contains(txt, "inbox-o_g_alpha") || !strings.Contains(txt, "moved") {
 		t.Errorf("text compare:\n%s", txt)
 	}
 	// compare is read only
@@ -848,30 +760,30 @@ func TestAuditCompareMovement(t *testing.T) {
 }
 
 func TestAuditCompareIdentities(t *testing.T) {
-	f := cleanLegacyAccount(t)
+	f := cleanAccount(t)
 	first := f.auditTo(t, "first.json")
-	f.legacy(t, "gamma")
+	f.endpoint(t, ad("gamma"))
 	out, _, code := f.run(t, "--json", "--compare", first)
 	var c cmpOut
-	if code != 0 || json.Unmarshal([]byte(out), &c) != nil || c.Compare == nil || len(c.Compare.Added) != 1 || c.Compare.Added[0] != "gamma" || len(c.Compare.Removed) != 0 {
+	if code != 0 || json.Unmarshal([]byte(out), &c) != nil || c.Compare == nil || len(c.Compare.Added) != 1 || c.Compare.Added[0] != "o_g_gamma" || len(c.Compare.Removed) != 0 {
 		t.Fatalf("added: %d %+v", code, c.Compare)
 	}
 	second := f.auditTo(t, "second.json")
-	if _, errb, code := ctlRun(t, f.e, "deprovision", "gamma"); code != 0 {
+	if _, errb, code := ctlRun(t, f.e, "deprovision", "o.g.gamma"); code != 0 {
 		t.Fatalf("deprovision: %d %q", code, errb)
 	}
 	out, _, _ = f.run(t, "--json", "--compare", second)
 	c = cmpOut{}
 	_ = json.Unmarshal([]byte(out), &c)
-	if c.Compare == nil || len(c.Compare.Removed) != 1 || c.Compare.Removed[0] != "gamma" {
+	if c.Compare == nil || len(c.Compare.Removed) != 1 || c.Compare.Removed[0] != "o_g_gamma" {
 		t.Fatalf("removed: %+v", c.Compare)
 	}
 }
 
 func TestAuditCompareStrictFailsOnOrphanOrUndrained(t *testing.T) {
-	f := cleanLegacyAccount(t)
+	f := cleanAccount(t)
 	first := f.auditTo(t, "first.json")
-	if _, err := f.js.CreateStream(context.Background(), store.InboxConfigFor(f.e.Owner, "ghost", store.DefaultLimits())); err != nil {
+	if _, err := f.js.CreateStream(context.Background(), store.InboxConfigFor(addrGhost, store.DefaultLimits())); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, code := f.run(t, "--strict", "--compare", first); code != 1 {
@@ -880,7 +792,7 @@ func TestAuditCompareStrictFailsOnOrphanOrUndrained(t *testing.T) {
 }
 
 func TestAuditCompareBadFile(t *testing.T) {
-	f := cleanLegacyAccount(t)
+	f := cleanAccount(t)
 	dir := t.TempDir()
 	write := func(name, s string) string {
 		p := filepath.Join(dir, name)
@@ -891,7 +803,7 @@ func TestAuditCompareBadFile(t *testing.T) {
 	}
 	for name, p := range map[string]string{
 		"malformed": write("a.json", "{not json"),
-		"version":   write("b.json", `{"version": 2, "records": []}`),
+		"version":   write("b.json", `{"version": 1, "records": []}`),
 		"noversion": write("c.json", `{"records": []}`),
 		"missing":   filepath.Join(dir, "nope.json"),
 	} {
@@ -905,8 +817,8 @@ func TestAuditCompareBadFile(t *testing.T) {
 	}
 }
 
-func TestAuditLegacyStreamEvidenceFields(t *testing.T) {
-	f := cleanLegacyAccount(t)
+func TestAuditStreamEvidenceFields(t *testing.T) {
+	f := cleanAccount(t)
 	out, _, _ := f.run(t, "--json")
 	var r struct {
 		Records []struct {
@@ -950,8 +862,8 @@ type notesOut struct {
 }
 
 func TestAuditNotesSymlinkAndMissingDir(t *testing.T) {
-	f := cleanLegacyAccount(t)
-	if err := os.Symlink(filepath.Join(f.credsDir, "alpha.creds"), filepath.Join(f.credsDir, "link.creds")); err != nil {
+	f := cleanAccount(t)
+	if err := os.Symlink(filepath.Join(f.credsDir, "o.g.alpha.creds"), filepath.Join(f.credsDir, "link.creds")); err != nil {
 		t.Fatal(err)
 	}
 	out, errb, code := f.run(t, "--json", "--strict")
@@ -989,16 +901,16 @@ func (f *auditFixture) putStaged(t *testing.T, src, name string) {
 }
 
 func TestAuditStagedCreds(t *testing.T) {
-	f := cleanLegacyAccount(t)
+	f := cleanAccount(t)
 	// a staged file whose user matches a record is not an orphan; one that matches none is, with staged true
-	alphaCreds := filepath.Join(f.credsDir, "alpha.creds")
-	f.putStaged(t, alphaCreds, "alpha")
+	alphaCreds := filepath.Join(f.credsDir, "o.g.alpha.creds")
+	f.putStaged(t, alphaCreds, "o.g.alpha")
 	out, _, code := f.run(t, "--json", "--strict")
 	var n notesOut
 	if code != 0 || json.Unmarshal([]byte(out), &n) != nil || len(n.Orphans.Creds) != 0 {
 		t.Fatalf("matching staged file: %d %+v", code, n.Orphans)
 	}
-	strayCreds, _ := f.e.Mint(t, "stray")
+	strayCreds, _ := f.e.Mint(t, ad("stray"))
 	f.putStaged(t, strayCreds, "stray")
 	out, errb, code := f.run(t, "--json", "--strict")
 	n = notesOut{}
@@ -1023,37 +935,37 @@ func TestAuditStagedCreds(t *testing.T) {
 }
 
 func TestAuditExitCodeThreeCouldNotComplete(t *testing.T) {
-	f := cleanLegacyAccount(t)
+	f := cleanAccount(t)
 	if _, errb, code := ctlRun(t, f.e, "audit", "--creds-dir", filepath.Join(f.credsDir, "nope")); code != 3 {
 		t.Errorf("unreadable required creds directory: %d %q, want 3", code, errb)
 	}
 }
 
-// vanishFixture is a legacy account with one inbox ("alpha", with mail either queued or all acknowledged), its
+// vanishFixture is an account with one inbox ("alpha", with mail either queued or all acknowledged), its
 // first audit saved, and the helpers the vanish tests share.
 func vanishFixture(t *testing.T, drained bool) (*auditFixture, string) {
 	f := newAuditEnv(t)
-	f.legacy(t, "alpha")
-	f.publish(t, sap.For(f.e.Owner, "alpha").Mail, 2)
+	f.endpoint(t, ad("alpha"))
+	f.publish(t, ad("alpha").Subjects().Mail, 2)
 	if drained {
-		f.ackAll(t, "alpha")
+		f.ackAll(t, ad("alpha"))
 	}
 	return f, f.auditTo(t, "first.json")
 }
 
-func (f *auditFixture) dropStream(t *testing.T, name string) {
+func (f *auditFixture) dropStream(t *testing.T, a sap.Address) {
 	t.Helper()
-	if err := f.js.DeleteStream(context.Background(), sap.InboxStream(name)); err != nil {
+	if err := f.js.DeleteStream(context.Background(), a.InboxStream()); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func (f *auditFixture) deprovisionAndForget(t *testing.T, name string) {
+func (f *auditFixture) deprovisionAndForget(t *testing.T, a sap.Address) {
 	t.Helper()
-	if _, errb, code := ctlRun(t, f.e, "deprovision", name); code != 0 {
+	if _, errb, code := ctlRun(t, f.e, "deprovision", a.String()); code != 0 {
 		t.Fatalf("deprovision: %d %q", code, errb)
 	}
-	if err := os.Remove(filepath.Join(f.credsDir, name+".creds")); err != nil {
+	if err := os.Remove(filepath.Join(f.credsDir, a.String()+".creds")); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -1070,7 +982,7 @@ func (f *auditFixture) compareJSON(t *testing.T, earlier string) (cmpOut, int) {
 
 func TestAuditCompareVanishedWithMailAndRecordGone(t *testing.T) {
 	f, first := vanishFixture(t, false)
-	f.deprovisionAndForget(t, "alpha")
+	f.deprovisionAndForget(t, ad("alpha"))
 	c, code := f.compareJSON(t, first)
 	if code != 1 || c.Compare.Vanished != 1 || c.Compare.Retired != 0 || len(c.Compare.Streams) != 1 || !c.Compare.Streams[0].Vanished || c.Compare.Streams[0].LastSeqBefore != 2 {
 		t.Fatalf("queued mail gone with its record: exit %d %+v", code, c.Compare)
@@ -1083,7 +995,7 @@ func TestAuditCompareVanishedWithMailAndRecordGone(t *testing.T) {
 
 func TestAuditCompareVanishedStreamDeletedRecordKept(t *testing.T) {
 	f, first := vanishFixture(t, false)
-	f.dropStream(t, "alpha")
+	f.dropStream(t, ad("alpha"))
 	c, code := f.compareJSON(t, first)
 	if code != 1 || c.Compare.Vanished != 1 || !c.Compare.Streams[0].Vanished {
 		t.Fatalf("stream deleted, record kept: exit %d %+v", code, c.Compare)
@@ -1092,7 +1004,7 @@ func TestAuditCompareVanishedStreamDeletedRecordKept(t *testing.T) {
 
 func TestAuditCompareRetiredWhenDrainedAndRecordGone(t *testing.T) {
 	f, first := vanishFixture(t, true)
-	f.deprovisionAndForget(t, "alpha")
+	f.deprovisionAndForget(t, ad("alpha"))
 	c, code := f.compareJSON(t, first)
 	if code != 0 || c.Compare.Retired != 1 || c.Compare.Vanished != 0 || c.Compare.Moved != 0 || !c.Compare.Streams[0].Retired || c.Compare.Streams[0].Vanished {
 		t.Fatalf("drained inbox deprovisioned: exit %d %+v", code, c.Compare)
@@ -1105,19 +1017,19 @@ func TestAuditCompareRetiredWhenDrainedAndRecordGone(t *testing.T) {
 
 func TestAuditCompareVanishedWhenDrainedButRecordKept(t *testing.T) {
 	f, first := vanishFixture(t, true)
-	f.dropStream(t, "alpha")
+	f.dropStream(t, ad("alpha"))
 	c, code := f.compareJSON(t, first)
 	if code != 1 || c.Compare.Vanished != 1 || c.Compare.Retired != 0 || !c.Compare.Streams[0].Vanished {
 		t.Fatalf("drained, only the stream gone: exit %d %+v", code, c.Compare)
 	}
 }
 
-// recreateLegacyStream deletes name's inbox stream and makes it again from the same configuration, with its
+// recreateStream deletes the endpoint's inbox stream and makes it again from the same configuration, with its
 // `deliver` consumer, refilled with n messages that are all read and acknowledged: the sequences come out as before.
-func (f *auditFixture) recreateLegacyStream(t *testing.T, name string, n int) {
+func (f *auditFixture) recreateStream(t *testing.T, a sap.Address, n int) {
 	t.Helper()
 	ctx := context.Background()
-	s, err := f.js.Stream(ctx, sap.InboxStream(name))
+	s, err := f.js.Stream(ctx, a.InboxStream())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1125,7 +1037,7 @@ func (f *auditFixture) recreateLegacyStream(t *testing.T, name string, n int) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := f.js.DeleteStream(ctx, sap.InboxStream(name)); err != nil {
+	if err := f.js.DeleteStream(ctx, a.InboxStream()); err != nil {
 		t.Fatal(err)
 	}
 	ns, err := f.js.CreateStream(ctx, info.Config)
@@ -1135,8 +1047,8 @@ func (f *auditFixture) recreateLegacyStream(t *testing.T, name string, n int) {
 	if _, err := ns.CreateOrUpdateConsumer(ctx, store.ConsumerConfig()); err != nil {
 		t.Fatal(err)
 	}
-	f.publish(t, sap.For(f.e.Owner, name).Mail, n)
-	f.ackAll(t, name)
+	f.publish(t, a.Subjects().Mail, n)
+	f.ackAll(t, a)
 }
 
 type recreatedOut struct {
@@ -1167,7 +1079,7 @@ func (f *auditFixture) recreatedJSON(t *testing.T, earlier string) (recreatedOut
 
 func TestAuditCompareStreamRecreatedSameSequences(t *testing.T) {
 	f, first := vanishFixture(t, true)
-	f.recreateLegacyStream(t, "alpha", 2)
+	f.recreateStream(t, ad("alpha"), 2)
 	c, errb, code := f.recreatedJSON(t, first)
 	s := c.Compare.Streams[0]
 	if code != 1 || c.Compare.Recreated != 1 || !s.Recreated || s.CreatedBefore == "" || s.CreatedNow == "" || s.CreatedBefore == s.CreatedNow {
@@ -1183,8 +1095,8 @@ func TestAuditCompareStreamRecreatedSameSequences(t *testing.T) {
 
 func TestAuditCompareDeliverConsumerRecreated(t *testing.T) {
 	f, first := vanishFixture(t, true)
-	f.recreateLegacyConsumer(t, "alpha", func(c *jetstream.ConsumerConfig) {})
-	f.ackAll(t, "alpha")
+	f.recreateConsumer(t, ad("alpha"), func(c *jetstream.ConsumerConfig) {})
+	f.ackAll(t, ad("alpha"))
 	c, errb, code := f.recreatedJSON(t, first)
 	s := c.Compare.Streams[0]
 	if code != 1 || c.Compare.Recreated != 1 || !s.Recreated || s.DeliverBefore == "" || s.DeliverNow == "" || s.DeliverBefore == s.DeliverNow || s.CreatedBefore != s.CreatedNow {
@@ -1210,29 +1122,19 @@ func deleteJSONPath(m map[string]any, path string) {
 	deleteJSONPath(m[head].(map[string]any), rest)
 }
 
-// Every field in earlierInboxFields is required of an earlier report: with just that field removed, for a plain
-// legacy record or for a renamed identity's legacy inbox, the report is refused (exit 3, nothing on stdout) and the
-// message names the JSON path. The test iterates the table, so a later field cannot be missed.
+// Every field in earlierInboxFields is required of an earlier report: with just that field removed from a record's
+// inbox, the report is refused (exit 3, nothing on stdout) and the message names the JSON path. The test iterates the
+// table, so a later field cannot be missed.
 func TestAuditCompareEarlierMissingAnyTableFieldIsRefused(t *testing.T) {
 	f, first := vanishFixture(t, true)
 	for _, fld := range earlierInboxFields {
-		for _, where := range []string{"records[0].inbox", "renames[0].legacy_inbox"} {
-			p := writeEdited(t, first, func(m map[string]any) {
-				inbox := m["records"].([]any)[0].(map[string]any)["inbox"].(map[string]any)
-				if strings.HasPrefix(where, "renames") {
-					raw, _ := json.Marshal(inbox)
-					var cp map[string]any
-					_ = json.Unmarshal(raw, &cp)
-					m["renames"] = []any{map[string]any{"flat": "alpha", "legacy_inbox": cp}}
-					inbox = cp
-				}
-				deleteJSONPath(inbox, fld.Path)
-			})
-			out, errb, code := f.run(t, "--strict", "--compare", p)
-			want := where + "." + fld.Path
-			if code != 3 || out != "" || !strings.Contains(errb, "--compare") || !strings.Contains(errb, "lacks "+want) {
-				t.Errorf("%s without %s: exit %d out=%q err=%q, want 3, nothing on stdout and %q named", where, fld.Path, code, out, errb, want)
-			}
+		p := writeEdited(t, first, func(m map[string]any) {
+			deleteJSONPath(m["records"].([]any)[0].(map[string]any)["inbox"].(map[string]any), fld.Path)
+		})
+		out, errb, code := f.run(t, "--strict", "--compare", p)
+		want := "records[0].inbox." + fld.Path
+		if code != 3 || out != "" || !strings.Contains(errb, "--compare") || !strings.Contains(errb, "lacks "+want) {
+			t.Errorf("without %s: exit %d out=%q err=%q, want 3, nothing on stdout and %q named", fld.Path, code, out, errb, want)
 		}
 	}
 }
@@ -1290,7 +1192,7 @@ func TestAuditCompareVanishedWithMsgsAbsentIsRefused(t *testing.T) {
 	p := writeEdited(t, first, func(m map[string]any) {
 		delete(m["records"].([]any)[0].(map[string]any)["inbox"].(map[string]any), "msgs")
 	})
-	f.deprovisionAndForget(t, "alpha")
+	f.deprovisionAndForget(t, ad("alpha"))
 	out, errb, code := f.run(t, "--strict", "--json", "--compare", p)
 	if code != 3 || out != "" || !strings.Contains(errb, "records[0].inbox.msgs") || strings.Contains(out, "retired") {
 		t.Fatalf("msgs absent, inbox and record gone: exit %d out=%q err=%q", code, out, errb)
@@ -1300,7 +1202,7 @@ func TestAuditCompareVanishedWithMsgsAbsentIsRefused(t *testing.T) {
 // msgs 0 is present, so an empty inbox that vanishes with its record is still a retirement.
 func TestAuditCompareMsgsZeroPresentIsRetired(t *testing.T) {
 	f := newAuditEnv(t)
-	f.legacy(t, "alpha")
+	f.endpoint(t, ad("alpha"))
 	first := f.auditTo(t, "first.json")
 	var rep struct {
 		Records []struct {
@@ -1313,7 +1215,7 @@ func TestAuditCompareMsgsZeroPresentIsRetired(t *testing.T) {
 	if err := json.Unmarshal(raw, &rep); err != nil || rep.Records[0].Inbox.Msgs == nil || *rep.Records[0].Inbox.Msgs != 0 {
 		t.Fatalf("fixture must write msgs 0 explicitly: %v %s", err, raw)
 	}
-	f.deprovisionAndForget(t, "alpha")
+	f.deprovisionAndForget(t, ad("alpha"))
 	c, code := f.compareJSON(t, first)
 	if code != 0 || c.Compare.Retired != 1 || c.Compare.Vanished != 0 {
 		t.Fatalf("empty inbox with msgs 0 present: exit %d %+v", code, c.Compare)
@@ -1341,31 +1243,24 @@ func TestAuditCompareEarlierWithoutCreationTimesIsRefused(t *testing.T) {
 // earlier, so zero pending and an ack floor at last_seq prove nothing: only an unfiltered consumer proves the drain.
 func TestAuditDrainedFilteredConsumerIsNotDrained(t *testing.T) {
 	g := newAuditEnv(t)
-	g.legacy(t, "ops1")
-	subj := sap.For(g.e.Owner, "ops1").Mail
-	g.publish(t, subj, 3)
-	_, u := g.e.Mint(t, "n")
-	g.users[u] = "USER-n"
-	g.newForm(t, "acme", "team1", "ops1", u, &store.Alias{Owner: g.e.Owner, Name: "ops1"})
+	g.endpoint(t, addrOps)
+	g.publish(t, addrOps.Subjects().Mail, 3)
 	// the filter is exactly the stream's current subjects
-	st, err := g.js.Stream(context.Background(), sap.InboxStream("ops1"))
+	st, err := g.js.Stream(context.Background(), addrOps.InboxStream())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(st.CachedInfo().Config.Subjects) != 1 {
 		t.Fatalf("stream subjects: %v", st.CachedInfo().Config.Subjects)
 	}
-	g.recreateLegacyConsumer(t, "ops1", func(c *jetstream.ConsumerConfig) { c.FilterSubject = st.CachedInfo().Config.Subjects[0] })
-	g.ackAll(t, "ops1")
+	g.recreateConsumer(t, addrOps, func(c *jetstream.ConsumerConfig) { c.FilterSubject = st.CachedInfo().Config.Subjects[0] })
+	g.ackAll(t, addrOps)
 
-	out, _, code := g.run(t, "--json")
-	if code != 0 {
-		t.Fatalf("exit %d", code)
-	}
+	first := g.auditTo(t, "first.json")
+	raw, _ := os.ReadFile(first)
 	var r struct {
-		Renames []struct {
-			Drained     bool `json:"drained"`
-			LegacyInbox struct {
+		Records []struct {
+			Inbox struct {
 				Msgs    uint64 `json:"msgs"`
 				LastSeq uint64 `json:"last_seq"`
 				Deliver struct {
@@ -1374,21 +1269,20 @@ func TestAuditDrainedFilteredConsumerIsNotDrained(t *testing.T) {
 					AckFloor   uint64   `json:"ack_floor"`
 					Filters    []string `json:"filter_subjects"`
 				} `json:"deliver"`
-			} `json:"legacy_inbox"`
-		} `json:"renames"`
+			} `json:"inbox"`
+		} `json:"records"`
 	}
-	if err := json.Unmarshal([]byte(out), &r); err != nil || len(r.Renames) != 1 {
-		t.Fatalf("report: %v %s", err, out)
+	if err := json.Unmarshal(raw, &r); err != nil || len(r.Records) != 1 {
+		t.Fatalf("report: %v %s", err, raw)
 	}
-	in := r.Renames[0].LegacyInbox
+	in := r.Records[0].Inbox
 	if in.Msgs != 3 || in.Deliver.Pending != 0 || in.Deliver.AckPending != 0 || in.Deliver.AckFloor != in.LastSeq || len(in.Deliver.Filters) != 1 {
 		t.Fatalf("fixture: want 3 messages, nothing pending, ack floor at last_seq and one filter, got %+v", in)
 	}
-	if r.Renames[0].Drained {
-		t.Error("drained is true for a filtered consumer")
-	}
-	if _, errb, code := g.run(t, "--strict"); code != 1 {
-		t.Errorf("--strict exit %d (%q), want 1", code, errb)
+	g.deprovisionAndForget(t, addrOps)
+	c, code := g.compareJSON(t, first)
+	if code != 1 || c.Compare.Vanished != 1 || c.Compare.Retired != 0 {
+		t.Errorf("a filtered consumer is not drained: exit %d %+v", code, c.Compare)
 	}
 }
 
@@ -1419,23 +1313,22 @@ func writeEdited(t *testing.T, path string, edit func(m map[string]any)) string 
 // could not show that anything is unchanged.
 func TestAuditCompareRefusesReportThatIsNotThisDeployments(t *testing.T) {
 	f, first := vanishFixture(t, true)
-	legacyInbox := func(m map[string]any) map[string]any {
+	recInbox := func(m map[string]any) map[string]any {
 		return m["records"].([]any)[0].(map[string]any)["inbox"].(map[string]any)
 	}
 	cases := map[string]struct {
 		path string
 		want string
 	}{
-		"stub":            {writeEdited(t, first, func(m map[string]any) { clear(m); m["version"] = 1 }), "generated"},
+		"stub":            {writeEdited(t, first, func(m map[string]any) { clear(m); m["version"] = auditVersion }), "generated"},
 		"no generated":    {writeEdited(t, first, func(m map[string]any) { delete(m, "generated") }), "generated"},
 		"empty generated": {writeEdited(t, first, func(m map[string]any) { m["generated"] = "" }), "generated"},
 		"no owner":        {writeEdited(t, first, func(m map[string]any) { delete(m, "owner") }), "owner"},
 		"no records":      {writeEdited(t, first, func(m map[string]any) { delete(m, "records") }), "records"},
-		"null renames":    {writeEdited(t, first, func(m map[string]any) { m["renames"] = nil }), "renames"},
-		"no stream name":  {writeEdited(t, first, func(m map[string]any) { delete(legacyInbox(m), "stream") }), "stream"},
-		"no last_seq":     {writeEdited(t, first, func(m map[string]any) { delete(legacyInbox(m), "last_seq") }), "last_seq"},
-		"no delivered":    {writeEdited(t, first, func(m map[string]any) { delete(legacyInbox(m)["deliver"].(map[string]any), "delivered") }), "delivered"},
-		"no ack_floor":    {writeEdited(t, first, func(m map[string]any) { delete(legacyInbox(m)["deliver"].(map[string]any), "ack_floor") }), "ack_floor"},
+		"no stream name":  {writeEdited(t, first, func(m map[string]any) { delete(recInbox(m), "stream") }), "stream"},
+		"no last_seq":     {writeEdited(t, first, func(m map[string]any) { delete(recInbox(m), "last_seq") }), "last_seq"},
+		"no delivered":    {writeEdited(t, first, func(m map[string]any) { delete(recInbox(m)["deliver"].(map[string]any), "delivered") }), "delivered"},
+		"no ack_floor":    {writeEdited(t, first, func(m map[string]any) { delete(recInbox(m)["deliver"].(map[string]any), "ack_floor") }), "ack_floor"},
 		"another owner":   {writeEdited(t, first, func(m map[string]any) { m["owner"] = "otherowner" }), "owner"},
 		"another account": {writeEdited(t, first, func(m map[string]any) { m["account"] = "AOTHERACCOUNTKEY" }), "account"},
 	}
@@ -1457,7 +1350,7 @@ func TestAuditCompareRefusesReportThatIsNotThisDeployments(t *testing.T) {
 		t.Errorf("valid earlier report: exit %d out=%q err=%q", code, out, errb)
 	}
 	// empty arrays are fine when the keys are present
-	empty := writeEdited(t, first, func(m map[string]any) { m["records"], m["renames"] = []any{}, []any{} })
+	empty := writeEdited(t, first, func(m map[string]any) { m["records"] = []any{} })
 	if _, errb, code := f.run(t, "--compare", empty); code != 0 {
 		t.Errorf("empty arrays, keys present: exit %d %q", code, errb)
 	}
@@ -1489,14 +1382,14 @@ func TestAuditCompareEarlierWithoutAccount(t *testing.T) {
 	}
 }
 
-// A redelivery leaves the delivered stream sequence alone and advances the consumer sequence: --strict --compare
-// must still see the mail was read again. No movement at all passes.
+// A redelivery leaves the delivered stream sequence alone and advances the consumer sequence: --compare must still
+// show the mail was read again.
 func TestAuditCompareRedeliveryMovesConsumerSeq(t *testing.T) {
-	f := cleanLegacyAccount(t)
-	f.publish(t, sap.For(f.e.Owner, "alpha").Mail, 1)
+	f := cleanAccount(t)
+	f.publish(t, ad("alpha").Subjects().Mail, 1)
 	fetchOne := func(nak bool) {
 		t.Helper()
-		c, err := f.js.Consumer(context.Background(), sap.InboxStream("alpha"), store.Consumer)
+		c, err := f.js.Consumer(context.Background(), ad("alpha").InboxStream(), store.Consumer)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1522,8 +1415,8 @@ func TestAuditCompareRedeliveryMovesConsumerSeq(t *testing.T) {
 	}
 	fetchOne(false) // redelivered: stream sequence unchanged, consumer sequence advances
 	out, errb, code := f.run(t, "--strict", "--json", "--compare", first)
-	if code != 1 || errb == "" {
-		t.Fatalf("a redelivery must fail --strict --compare: %d %q", code, errb)
+	if code != 0 {
+		t.Fatalf("a redelivery is shown, and is not a finding: %d %q", code, errb)
 	}
 	var c struct {
 		Compare struct {
@@ -1556,36 +1449,5 @@ func TestAuditCompareEarlierNullConsumerSeqIsRefused(t *testing.T) {
 	})
 	if out, errb, code := f.run(t, "--strict", "--compare", p); code != 3 || out != "" || !strings.Contains(errb, "deliver.delivered_consumer_seq") {
 		t.Errorf("null delivered_consumer_seq: %d %q %q", code, out, errb)
-	}
-}
-
-// A directory record that carries a zone is a problem (ADR 0091): the audit reports it and --strict fails.
-func TestAuditReportsZonedRecord(t *testing.T) {
-	fixAuditClock(t)
-	g := newAuditEnv(t)
-	g.legacy(t, "plain")
-	if _, _, code := g.run(t, "--strict"); code != 0 {
-		t.Fatalf("--strict without a zoned record: %d", code)
-	}
-	adm, err := admin.New(g.nc, g.e.Owner)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, u := g.e.Mint(t, "zoned")
-	g.users[u] = "USER-zoned"
-	if _, err := adm.Provision(context.Background(), "zoned", u, g.e.Account, "", admin.Meta{}); err != nil {
-		t.Fatal(err)
-	}
-	js, err := jetstream.New(g.nc)
-	if err != nil {
-		t.Fatal(err)
-	}
-	makeZoned(t, js, g.e.Owner, "zoned", "red")
-	out, errb, code := g.run(t, "--strict")
-	if code != 1 || !strings.Contains(errb, "1 item(s) not readable") {
-		t.Fatalf("--strict with a zoned record: %d out=%q err=%q", code, out, errb)
-	}
-	if !strings.Contains(out, `record zoned carries zone "red": zones are removed (ADR 0091)`) {
-		t.Errorf("the report does not name the zoned record:\n%s", out)
 	}
 }

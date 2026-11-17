@@ -8,23 +8,23 @@ import (
 
 func TestWhoFiltersCLIAndMCP(t *testing.T) {
 	w := newWorld(t, "a", "b")
-	if out, code := w.admin(t, "set-meta", "a", "--role", "NATS operator", "--label", "team=acme", "--describe", "keeps accounts", "--cap", "nats-accounts"); code != 0 {
+	if out, code := w.admin(t, "set-meta", tTo("a"), "--role", "NATS operator", "--label", "team=acme", "--describe", "keeps accounts", "--cap", "nats-accounts"); code != 0 {
 		t.Fatalf("set-meta: %d %s", code, out)
 	}
 	base, _ := w.cli(t, "b", "who")
-	if !strings.Contains(base, "a\t") || !strings.Contains(base, "b\t") {
+	if !strings.Contains(base, tTo("a")+"\t") || !strings.Contains(base, tTo("b")+"\t") {
 		t.Fatalf("who: %q", base)
 	}
-	if out, code := w.cli(t, "b", "who", "--match", "nats"); code != 0 || !strings.HasPrefix(out, "a\t") || strings.Contains(out, "b\t") {
+	if out, code := w.cli(t, "b", "who", "--match", "nats"); code != 0 || !strings.HasPrefix(out, tTo("a")+"\t") || strings.Contains(out, tTo("b")+"\t") {
 		t.Fatalf("--match: %d %q", code, out)
 	}
-	if out, _ := w.cli(t, "b", "who", "--label=team=acme", "--names"); out != "a\n" {
+	if out, _ := w.cli(t, "b", "who", "--label=team=acme", "--names"); out != "o_dev_a\n" {
 		t.Fatalf("--names: %q", out)
 	}
-	if out, _ := w.cli(t, "b", "who", "--name", "B", "--offline", "--names"); out != "b\n" {
+	if out, _ := w.cli(t, "b", "who", "--name", "B", "--offline", "--names"); out != "o_dev_b\n" {
 		t.Fatalf("--name --offline: %q", out)
 	}
-	if out, _ := w.cli(t, "b", "who", "--cap", "nats-accounts", "--names"); out != "a\n" {
+	if out, _ := w.cli(t, "b", "who", "--cap", "nats-accounts", "--names"); out != "o_dev_a\n" {
 		t.Fatalf("--cap: %q", out)
 	}
 	if out, _ := w.cli(t, "b", "who", "--match", "accounts", "--long"); !strings.Contains(out, "desc keeps accounts\tcaps nats-accounts") {
@@ -32,7 +32,7 @@ func TestWhoFiltersCLIAndMCP(t *testing.T) {
 	}
 	out, code := w.cli(t, "b", "who", "--json", "--role", "operator")
 	var arr []map[string]any
-	if code != 0 || json.Unmarshal([]byte(out), &arr) != nil || len(arr) != 1 || arr[0]["name"] != "a" || arr[0]["labels"].(map[string]any)["team"] != "acme" {
+	if code != 0 || json.Unmarshal([]byte(out), &arr) != nil || len(arr) != 1 || arr[0]["name"] != "o_dev_a" || arr[0]["labels"].(map[string]any)["team"] != "acme" {
 		t.Fatalf("--json: %d %q", code, out)
 	}
 	if out, code := w.cli(t, "b", "who", "--match", "zzz"); code != 0 || out != "" {
@@ -48,23 +48,23 @@ func TestWhoFiltersCLIAndMCP(t *testing.T) {
 	s := startServe(t, w.env["b"])
 	s.initialize(t)
 	s.tools(t)
-	if got := resultText(s.call(t, 30, "who", `{}`)); !strings.Contains(got, "a\t") || !strings.Contains(got, "b\t") {
+	if got := resultText(s.call(t, 30, "who", `{}`)); !strings.Contains(got, tTo("a")+"\t") || !strings.Contains(got, tTo("b")+"\t") {
 		t.Fatalf("no-arg who: %q", got)
 	}
-	if got := resultText(s.call(t, 31, "who", `{"match":"nats","label":["team=acme"],"online":false}`)); !strings.HasPrefix(got, "a\t") || strings.Contains(got, "b\t") {
+	if got := resultText(s.call(t, 31, "who", `{"match":"nats","label":["team=acme"],"online":false}`)); !strings.HasPrefix(got, tTo("a")+"\t") || strings.Contains(got, tTo("b")+"\t") {
 		t.Fatalf("filtered who: %q", got)
 	}
 	if got := resultText(s.call(t, 32, "who", `{"name":"zzz"}`)); got != "" {
 		t.Fatalf("no match: %q", got)
 	}
 	var mj []map[string]any
-	if got := resultText(s.call(t, 33, "who", `{"role":"nats","format":"json"}`)); json.Unmarshal([]byte(got), &mj) != nil || len(mj) != 1 || mj[0]["name"] != "a" {
+	if got := resultText(s.call(t, 33, "who", `{"role":"nats","format":"json"}`)); json.Unmarshal([]byte(got), &mj) != nil || len(mj) != 1 || mj[0]["name"] != "o_dev_a" {
 		t.Fatalf("json who: %q", got)
 	}
 	if r := s.call(t, 34, "who", `{"format":"xml"}`); r["isError"] != true {
 		t.Fatalf("bad format: %v", r)
 	}
-	if got := resultText(s.call(t, 36, "who", `{"cap":["nats-accounts"]}`)); !strings.HasPrefix(got, "a\t") || strings.Contains(got, "b\t") {
+	if got := resultText(s.call(t, 36, "who", `{"cap":["nats-accounts"]}`)); !strings.HasPrefix(got, tTo("a")+"\t") || strings.Contains(got, tTo("b")+"\t") {
 		t.Fatalf("cap who: %q", got)
 	}
 	if r := s.call(t, 37, "who", `{"cap":["Bad"]}`); r["isError"] != true {

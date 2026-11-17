@@ -48,7 +48,7 @@ func wakingFixtureWith(t *testing.T, coalesce time.Duration) (*fixture, spool.Sp
 func leaseUntil(t *testing.T, kv jetstream.KeyValue, what string, cond func(leaseValue) bool) leaseValue {
 	t.Helper()
 	var lv leaseValue
-	until(t, what, func() bool { lv = readLease(t, kv, "a"); return cond(lv) })
+	until(t, what, func() bool { lv = readLease(t, kv, tkey("a")); return cond(lv) })
 	return lv
 }
 
@@ -71,19 +71,19 @@ func TestWakingPendingCountsByKind(t *testing.T) {
 		t.Fatalf("an empty inbox counts %d", lv.WakingPending)
 	}
 	for _, k := range kind.All { // blocker, question, task, result, fyi
-		if _, err := b.SendWith(ctx, "a", "body "+string(k), SendOptions{Kind: k}); err != nil {
+		if _, err := b.SendWith(ctx, tdot("a"), "body "+string(k), SendOptions{Kind: k}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	// Old sender: no kind header, and an unknown one. Both are task.
-	nc := f.e.ConnAs(t, f.creds["b"], "b")
+	nc := f.e.ConnAs(t, f.creds["b"], tkey("b"))
 	id := identity(t, f.creds["b"])
 	for _, v := range []string{"", "urgent-ish"} {
-		h, err := id.Sign(sap.For(f.e.Owner, "a").Mail, []byte("raw"+v), "b", time.Now(), "")
+		h, err := id.Sign(taddr("a").Subjects().Mail, []byte("raw"+v), tkey("b"), time.Now(), "")
 		if err != nil {
 			t.Fatal(err)
 		}
-		m := nats.NewMsg(sap.For(f.e.Owner, "a").Mail)
+		m := nats.NewMsg(taddr("a").Subjects().Mail)
 		m.Data = []byte("raw" + v)
 		m.Header.Set(sap.HeaderName, h.Encode())
 		if v != "" {
@@ -99,14 +99,14 @@ func TestWakingPendingCountsByKind(t *testing.T) {
 		t.Fatalf("waking_pending_at %q is not RFC3339 UTC", lv.WakingPendingAt)
 	}
 	// Urgent counts whatever its kind.
-	if _, err := b.SendWith(ctx, "a", "now", SendOptions{Kind: kind.FYI, Urgent: true}); err != nil {
+	if _, err := b.SendWith(ctx, tdot("a"), "now", SendOptions{Kind: kind.FYI, Urgent: true}); err != nil {
 		t.Fatal(err)
 	}
 	leaseUntil(t, kv, "6 with an urgent fyi", func(lv leaseValue) bool { return lv.WakingPending == 6 })
 	// A fyi alone changes nothing; the count after reading goes to zero, with the stamp kept.
 	drainAll(t, sp)
 	lv = leaseUntil(t, kv, "0 after the mail is shown", func(lv leaseValue) bool { return lv.WakingPending == 0 && lv.WakingPendingAt != "" })
-	raw, _ := kv.Get(ctx, "a")
+	raw, _ := kv.Get(ctx, tkey("a"))
 	if strings.Contains(string(raw.Value()), "waking_pending\"") {
 		t.Fatalf("a zero count is written, not omitted: %s", raw.Value())
 	}
@@ -120,7 +120,7 @@ func TestWakingPendingFallsAsMailIsRead(t *testing.T) {
 	_, sp, b, kv := wakingFixture(t)
 	ctx := context.Background()
 	for i := 0; i < 3; i++ {
-		if _, err := b.SendWith(ctx, "a", "task", SendOptions{}); err != nil {
+		if _, err := b.SendWith(ctx, tdot("a"), "task", SendOptions{}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -142,7 +142,7 @@ func TestWakingPendingChannelMailIsNotPending(t *testing.T) {
 	t.Cleanup(func() { LeaseRefresh = oldR })
 	f := newFixture(t, "a", "b")
 	a, ev := f.run(t, "a")
-	if _, err := f.client(t, "b").Send(context.Background(), "a", "hi", 0); err != nil {
+	if _, err := f.client(t, "b").Send(context.Background(), tdot("a"), "hi", 0); err != nil {
 		t.Fatal(err)
 	}
 	ev.waitFor(t, 1, 5*time.Second)
@@ -156,25 +156,25 @@ func TestWakingPendingWritesAreThrottled(t *testing.T) {
 	ctx := context.Background()
 	leaseUntil(t, kv, "the first stamp", func(lv leaseValue) bool { return lv.WakingPendingAt != "" })
 	time.Sleep(2 * WakingWriteMin) // quiet: the next write is the burst's
-	en, _ := kv.Get(ctx, "a")
+	en, _ := kv.Get(ctx, tkey("a"))
 	base := en.Revision()
 	for i := 0; i < 6; i++ {
-		if _, err := b.SendWith(ctx, "a", "task", SendOptions{}); err != nil {
+		if _, err := b.SendWith(ctx, tdot("a"), "task", SendOptions{}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	leaseUntil(t, kv, "6", func(lv leaseValue) bool { return lv.WakingPending == 6 })
 	time.Sleep(WakingWriteMin / 2)
-	en, _ = kv.Get(ctx, "a")
+	en, _ = kv.Get(ctx, tkey("a"))
 	if got := en.Revision() - base; got != 1 {
 		t.Fatalf("%d lease writes for one burst, want 1", got)
 	}
 	// A change right after is held back until WakingWriteMin has passed since that write, then lands.
-	if _, err := b.SendWith(ctx, "a", "task", SendOptions{}); err != nil {
+	if _, err := b.SendWith(ctx, tdot("a"), "task", SendOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	leaseUntil(t, kv, "7", func(lv leaseValue) bool { return lv.WakingPending == 7 })
-	en, _ = kv.Get(ctx, "a")
+	en, _ = kv.Get(ctx, tkey("a"))
 	if got := en.Revision() - base; got != 2 {
 		t.Fatalf("%d lease writes, want 2", got)
 	}
@@ -196,21 +196,21 @@ func TestWakingPendingRefreshStamps(t *testing.T) {
 	defer ep.Close()
 	js, _ := jetstream.New(f.e.Conn(t, f.e.AdminCreds))
 	kv, _ := js.KeyValue(context.Background(), store.LeaseBucket)
-	if lv := readLease(t, kv, "a"); lv.WakingPendingAt != "" || lv.WakingPending != 0 {
+	if lv := readLease(t, kv, tkey("a")); lv.WakingPendingAt != "" || lv.WakingPending != 0 {
 		t.Fatalf("a count is claimed before the inbox has been received: %+v", lv)
 	}
 	ep.waking.start(0, 0, true, nil)
 	if err := ep.refreshLease(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if lv := readLease(t, kv, "a"); lv.WakingPendingAt != "2026-10-31T12:00:00Z" || lv.WakingPending != 0 {
+	if lv := readLease(t, kv, tkey("a")); lv.WakingPendingAt != "2026-10-31T12:00:00Z" || lv.WakingPending != 0 {
 		t.Fatalf("lease %+v", lv)
 	}
 	clock.Add(int64(30 * time.Second))
 	if err := ep.refreshLease(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if lv := readLease(t, kv, "a"); lv.WakingPendingAt != "2026-10-31T12:00:30Z" {
+	if lv := readLease(t, kv, tkey("a")); lv.WakingPendingAt != "2026-10-31T12:00:30Z" {
 		t.Fatalf("a refresh did not restamp: %+v", lv)
 	}
 }
@@ -311,12 +311,12 @@ func TestWakingPendingBacklogNotRedeliveredStaysUnknown(t *testing.T) {
 	ctx := context.Background()
 	b := f.client(t, "b")
 	for i := 0; i < 2; i++ {
-		if _, err := b.SendWith(ctx, "a", "task", SendOptions{}); err != nil {
+		if _, err := b.SendWith(ctx, tdot("a"), "task", SendOptions{}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	js, _ := jetstream.New(f.e.Conn(t, f.e.AdminCreds))
-	cons, err := js.Consumer(ctx, sap.InboxStream("a"), store.Consumer)
+	cons, err := js.Consumer(ctx, taddr("a").InboxStream(), store.Consumer)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -342,7 +342,7 @@ func TestWakingPendingBacklogNotRedeliveredStaysUnknown(t *testing.T) {
 		if err := ep.refreshLease(ctx); err != nil {
 			t.Fatal(err)
 		}
-		if lv := readLease(t, kv, "a"); lv.WakingPendingAt != "" || lv.WakingPending != 0 {
+		if lv := readLease(t, kv, tkey("a")); lv.WakingPendingAt != "" || lv.WakingPending != 0 {
 			t.Fatalf("a count is claimed with an unredelivered backlog: %+v", lv)
 		}
 	}
@@ -354,7 +354,7 @@ func TestWakingPendingBacklogNotRedeliveredStaysUnknown(t *testing.T) {
 	if err := ep.refreshLease(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if lv := readLease(t, kv, "a"); lv.WakingPendingAt == "" || lv.WakingPending != 0 {
+	if lv := readLease(t, kv, tkey("a")); lv.WakingPendingAt == "" || lv.WakingPending != 0 {
 		t.Fatalf("not known once the server shows nothing outstanding: %+v", lv)
 	}
 }
@@ -381,13 +381,13 @@ func TestWakingPendingEvictionOnRealStream(t *testing.T) {
 	}
 	b := f.client(t, "b")
 	for i := 0; i < 3; i++ {
-		if _, err := b.SendWith(ctx, "a", "task", SendOptions{}); err != nil {
+		if _, err := b.SendWith(ctx, tdot("a"), "task", SendOptions{}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	until(t, "3 counted", func() bool { n, ok := ep.waking.snapshot(); return ok && n == 3 })
 	js, _ := jetstream.New(f.e.Conn(t, f.e.AdminCreds))
-	st, err := js.Stream(ctx, sap.InboxStream("a"))
+	st, err := js.Stream(ctx, taddr("a").InboxStream())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -397,7 +397,7 @@ func TestWakingPendingEvictionOnRealStream(t *testing.T) {
 	if _, err := js.UpdateStream(ctx, cfg); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := b.SendWith(ctx, "a", "task", SendOptions{}); err != nil {
+	if _, err := b.SendWith(ctx, tdot("a"), "task", SendOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	// The count is not waited on at 4: the lease write the arrival triggers reconciles at once, so 4 can pass unseen.
@@ -472,11 +472,11 @@ func TestWakingPendingNewArrivalDoesNotStandInForOldBacklog(t *testing.T) {
 	f := newFixture(t, "a", "b")
 	ctx := context.Background()
 	b := f.client(t, "b")
-	if _, err := b.SendWith(ctx, "a", "old task", SendOptions{Kind: kind.Task}); err != nil {
+	if _, err := b.SendWith(ctx, tdot("a"), "old task", SendOptions{Kind: kind.Task}); err != nil {
 		t.Fatal(err)
 	}
 	js, _ := jetstream.New(f.e.Conn(t, f.e.AdminCreds))
-	cons, err := js.Consumer(ctx, sap.InboxStream("a"), store.Consumer)
+	cons, err := js.Consumer(ctx, taddr("a").InboxStream(), store.Consumer)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -496,7 +496,7 @@ func TestWakingPendingNewArrivalDoesNotStandInForOldBacklog(t *testing.T) {
 		t.Fatal(err)
 	}
 	until(t, "the consumer started", func() bool { ep.waking.mu.Lock(); defer ep.waking.mu.Unlock(); return ep.waking.started })
-	if _, err := b.SendWith(ctx, "a", "new task", SendOptions{Kind: kind.Task}); err != nil {
+	if _, err := b.SendWith(ctx, tdot("a"), "new task", SendOptions{Kind: kind.Task}); err != nil {
 		t.Fatal(err)
 	}
 	until(t, "the new message is tracked", func() bool { ep.waking.mu.Lock(); defer ep.waking.mu.Unlock(); return len(ep.waking.unread) == 1 })
@@ -511,7 +511,7 @@ func TestWakingPendingNewArrivalDoesNotStandInForOldBacklog(t *testing.T) {
 	if err := ep.refreshLease(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if lv := readLease(t, kv, "a"); lv.WakingPendingAt != "" {
+	if lv := readLease(t, kv, tkey("a")); lv.WakingPendingAt != "" {
 		t.Fatalf("a count is claimed with the old message outstanding: %+v", lv)
 	}
 	if err := held[0].DoubleAck(ctx); err != nil {
@@ -520,7 +520,7 @@ func TestWakingPendingNewArrivalDoesNotStandInForOldBacklog(t *testing.T) {
 	if err := ep.refreshLease(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if lv := readLease(t, kv, "a"); lv.WakingPendingAt == "" || lv.WakingPending != 1 {
+	if lv := readLease(t, kv, tkey("a")); lv.WakingPendingAt == "" || lv.WakingPending != 1 {
 		t.Fatalf("not known (1) once the old message is accounted for: %+v", lv)
 	}
 }

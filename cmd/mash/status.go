@@ -83,7 +83,7 @@ func infoTools(src *statusSource) []mcp.Tool {
 }
 
 func versionTool(src *statusSource) mcp.Tool {
-	return mcp.Tool{Name: "version", Description: "Show which mash this is: the mash binary's version and commit, the plugin's version, and this endpoint's name and owner.",
+	return mcp.Tool{Name: "version", Description: "Show which mash this is: the mash binary's version and commit, the plugin's version, and this endpoint's address (owner.group.instance).",
 		Schema: schema(map[string]any{}),
 		Call: func(_ context.Context, _ json.RawMessage) (string, error) {
 			out := versionText(src.cfg.DisplayName(), src.cfg.Owner, src.pluginRoot) + "\n" + clientLine(src.clientInfo())
@@ -95,7 +95,7 @@ func versionTool(src *statusSource) mcp.Tool {
 }
 
 func statusTool(src *statusSource) mcp.Tool {
-	return mcp.Tool{Name: "status", Description: "Say what works and what is missing for mash in this session: the endpoint name, config, creds, connection and delivery, each with its state and the next step. Works in every mode, even with no endpoint.",
+	return mcp.Tool{Name: "status", Description: "Say what works and what is missing for mash in this session: the endpoint address, config, creds, connection and delivery, each with its state and the next step. Works in every mode, even with no endpoint.",
 		Schema: schema(map[string]any{}),
 		Call: func(_ context.Context, _ json.RawMessage) (string, error) {
 			return statusText(src), nil
@@ -107,9 +107,6 @@ func statusTool(src *statusSource) mcp.Tool {
 func statusText(src *statusSource) string {
 	cfg := src.cfg
 	lines := []string{nameLine(cfg)}
-	if l := identityLine(cfg); l != "" {
-		lines = append(lines, l)
-	}
 	lines = append(lines, configLine(cfg, src.cfgErr))
 	// A load error that came before the rule was read leaves it unset: that is the config line's error, not "none set".
 	if src.cfgErr == nil || cfg.NameRule != nil || errors.Is(src.cfgErr, config.ErrNoURL) || errors.Is(src.cfgErr, config.ErrNoOwner) {
@@ -128,13 +125,7 @@ func statusText(src *statusSource) string {
 	if l := spoolFaultLine(src); l != "" {
 		lines = append(lines, l)
 	}
-	if l := legacyInboxLine(src); l != "" {
-		lines = append(lines, l)
-	}
 	if l := inboxLine(src); l != "" {
-		lines = append(lines, l)
-	}
-	if l := legacyInboxEvictionLine(src); l != "" {
 		lines = append(lines, l)
 	}
 	if l := leaseBucketLine(src); l != "" {
@@ -155,32 +146,22 @@ func nameLine(cfg config.Config) string {
 	switch {
 	case cfg.Name == "":
 		return "name: MISSING - not set. Next: start Claude Code with MASH_NAME=<endpoint>"
-	case cfg.AgentToken != "":
-		if _, err := cfg.Identity(); err != nil {
-			return fmt.Sprintf("name: FAILED - %s. Next: fix MASH_AGENT_TOKEN, owner or MASH_NAME", err)
-		}
-	case !config.ValidName(cfg.Name):
-		return fmt.Sprintf("name: FAILED - %q is not a valid endpoint name. Next: start Claude Code with MASH_NAME=<endpoint>, using 1-48 lower-case letters, digits and single hyphens, starting with a letter", cfg.Name)
+	case cfg.Group == "" && cfg.Owner != "":
+		return "name: FAILED - " + config.CodeGroupMissing + ": no group. Next: start Claude Code with MASH_GROUP=<group> (the group has no default), for example MASH_GROUP=dev"
+	}
+	if _, err := cfg.Identity(); err != nil && cfg.Owner != "" {
+		return fmt.Sprintf("name: FAILED - %s. Next: fix MASH_OWNER, MASH_GROUP or MASH_NAME: each is 1-32 lower-case letters, digits and single hyphens, starting with a letter", err)
 	}
 	return "name: OK - " + cfg.DisplayName()
-}
-
-// identityLine names the identity form when a three-token identity is configured, and is empty otherwise.
-func identityLine(cfg config.Config) string {
-	if cfg.AgentToken == "" {
-		return ""
-	}
-	id, err := cfg.Identity()
-	if err != nil {
-		return ""
-	}
-	return "identity: " + id.String() + " (three tokens)"
 }
 
 func configLine(cfg config.Config, cfgErr error) string {
 	if cfgErr != nil && !errors.Is(cfgErr, config.ErrNoURL) && !errors.Is(cfgErr, config.ErrNoOwner) {
 		// The error stopped loading before the environment applied, so an empty field is unresolved, not missing.
 		line := fmt.Sprintf("config: FAILED - %s. Next: fix it in ~/.config/mash/config.json or the environment", redactText(cfgErr.Error()))
+		if errors.Is(cfgErr, config.ErrGroupMissing) {
+			line = fmt.Sprintf("config: FAILED - %s: %s. Next: set MASH_GROUP in the environment (it is not a config.json key)", config.CodeGroupMissing, redactText(cfgErr.Error()))
+		}
 		var un []string
 		if cfg.URL == "" {
 			un = append(un, "url")
@@ -322,7 +303,7 @@ func connectionLine(src *statusSource) string {
 		return fmt.Sprintf("connection: RETRYING - could not reach the server, last error: %s. mash retries on its own", redactText(st.retrying.Error()))
 	case st.superseded != nil:
 		return fmt.Sprintf("connection: SUPERSEDED - a newer mash serve of this session (host %s, pid %s) holds endpoint %s and handles its mail; this server is inactive and exits when its client closes it. Next: use the mash tools of the newer server",
-			redactText(st.superseded.Host), redactText(st.superseded.PID), cfg.Name)
+			redactText(st.superseded.Host), redactText(st.superseded.PID), cfg.DisplayName())
 	case st.waiting != nil:
 		return fmt.Sprintf("connection: WAITING - the lease for endpoint %s is held by another session (host %s, pid %s, since %s). mash retries on its own. Next: end that session, or start this one with a different MASH_NAME",
 			cfg.DisplayName(), redactText(st.waiting.Host), redactText(st.waiting.PID), redactText(st.waiting.Since))
@@ -473,23 +454,6 @@ func deliveryLines(src *statusSource) []string {
 	return append(out, line)
 }
 
-// legacyInboxLine says whether the running endpoint consumes its legacy inbox stream: it does only while it holds the
-// legacy identity's lease. Empty from a shell (nothing is connected), with no running endpoint, and for an endpoint with
-// no alias.
-func legacyInboxLine(src *statusSource) string {
-	if src.cli || src.state == nil {
-		return ""
-	}
-	st := src.state.Load()
-	if st == nil || st.ep == nil {
-		return ""
-	}
-	if l, ok := st.ep.LegacyInboxLine(); ok {
-		return redactText(l)
-	}
-	return ""
-}
-
 // spoolFaultLine says that mail is held because the spool is failing (MASH_SPOOL_REQUIRED). Empty when the spool works,
 // when the setting is off, from a shell (nothing is connected) and with no running endpoint. While no spool has yet
 // bound there is no endpoint state to read it from, so serve keeps the endpoint in the state and the line comes from it.
@@ -535,21 +499,6 @@ func leaseBucketLine(src *statusSource) string {
 		return ""
 	}
 	if l, ok := st.ep.LeaseRollupLine(context.Background()); ok {
-		return redactText(l)
-	}
-	return ""
-}
-
-// legacyInboxEvictionLine is inboxLine for the legacy inbox of an endpoint whose record carries an alias.
-func legacyInboxEvictionLine(src *statusSource) string {
-	if src.cli || src.state == nil {
-		return ""
-	}
-	st := src.state.Load()
-	if st == nil || st.ep == nil {
-		return ""
-	}
-	if l, ok := st.ep.LegacyInboxEvictionLine(context.Background()); ok {
 		return redactText(l)
 	}
 	return ""
@@ -668,7 +617,7 @@ func clientStatusLine(name, version string) string {
 	return fmt.Sprintf("client: WARN - Claude Code %s is older than %s, the oldest version mash has a passing live receipt on. mash does not refuse it. Next: update Claude Code", version, host.MinClaudeCode)
 }
 
-// parseSemver reads MAJOR.MINOR.PATCH, with an optional leading v and any -prerelease or +build suffix ignored.
+// parseSemver reads MAJOR.MINOR.PATCH, with an optional initial v and any -prerelease or +build suffix ignored.
 func parseSemver(s string) (v [3]int, ok bool) {
 	s = strings.TrimPrefix(strings.TrimSpace(s), "v")
 	if i := strings.IndexAny(s, "-+"); i >= 0 {

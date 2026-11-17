@@ -83,7 +83,7 @@ func oracleSetup(t *testing.T) (Identity, nkeys.KeyPair, string) {
 func TestStockClientIsSigningOracle(t *testing.T) {
 	id, _, creds := oracleSetup(t)
 	body := []byte("pay the invoice")
-	subject := "agents.mail.cc.o.bob"
+	subject := "agents.mail.o.g.bob"
 	nonce, h := forgedMailNonce(id, subject, body, time.Now())
 	url, sigs := fakeServer(t, nonce)
 	_, _ = nats.Connect(url, nats.UserCredentials(creds), nats.Timeout(2*time.Second), nats.NoReconnect())
@@ -100,7 +100,7 @@ func TestStockClientIsSigningOracle(t *testing.T) {
 // natsauth refuses: nothing is signed, nothing is sent.
 func TestNatsauthRefusesMailNonce(t *testing.T) {
 	id, _, creds := oracleSetup(t)
-	nonce, _ := forgedMailNonce(id, "agents.mail.cc.o.bob", []byte("x"), time.Now())
+	nonce, _ := forgedMailNonce(id, "agents.mail.o.g.bob", []byte("x"), time.Now())
 	for _, n := range []string{nonce, "AGENT-SENDER-V1\nA\nU\n", "short", strings.Repeat("a", 33), "abc def ghijklm", ""} {
 		url, sigs := fakeServer(t, n)
 		nc, err := nats.Connect(url, natsauth.UserCredentials(creds), nats.Timeout(2*time.Second), nats.NoReconnect())

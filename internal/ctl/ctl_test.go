@@ -30,7 +30,7 @@ func TestAdminMetaFlags(t *testing.T) {
 			t.Errorf("%v accepted", bad)
 		}
 	}
-	args := []string{"provision", "a", "--describe", "d", "--cap", "q", "--cap", "p", "--role", "r"}
+	args := []string{"provision", "o.g.a", "--describe", "d", "--cap", "q", "--cap", "p", "--role", "r"}
 	opt := func(name string) string {
 		for i := 2; i+1 < len(args); i++ {
 			if args[i] == name {
@@ -56,10 +56,26 @@ func TestShortKey(t *testing.T) {
 func TestListFieldsAreEscaped(t *testing.T) {
 	hostile := "x\x1b[2K\r\nREFUSED"
 	want := `x\x1b[2K\x0d\x0aREFUSED`
-	r := store.Record{Name: "a", Description: hostile, Caps: []string{hostile}}
+	r := store.Record{Owner: "o", Group: "g", Instance: "a", Description: hostile, Caps: []string{hostile}}
 	for _, got := range []string{metaSuffix(r), labelList(map[string]string{hostile: hostile}), NoRevokeWarning("a", hostile)} {
 		if strings.ContainsAny(got, "\x1b\r") || !strings.Contains(got, want) {
 			t.Errorf("not escaped: %q", got)
+		}
+	}
+}
+
+func TestParseAddr(t *testing.T) {
+	for _, in := range []string{"acme.ops.recv", "acme_ops_recv"} {
+		a, err := parseAddr(in)
+		if err != nil || a.String() != "acme.ops.recv" {
+			t.Errorf("%q: %v %v", in, a, err)
+		}
+	}
+	for _, in := range []string{"", "recv", "a.b", "a.b.c.d", "a_b", "A.b.c", "a.b.c_d", "a.b."} {
+		_, err := parseAddr(in)
+		want := "mash: not an endpoint address (the value is not shown): give owner.group.instance"
+		if err == nil || err.Error() != want {
+			t.Errorf("%q: %v", in, err)
 		}
 	}
 }

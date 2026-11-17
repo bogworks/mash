@@ -12,13 +12,14 @@ import (
 	"github.com/nats-io/nats.go"
 
 	"github.com/bogworks/mash/internal/natsauth"
+	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/testenv"
 )
 
 // A real nats-server accepts the connect, and its nonce passes the check.
 func TestConnectsToRealServer(t *testing.T) {
 	e := testenv.Start(t)
-	creds, _ := e.Mint(t, "x")
+	creds, _ := e.Mint(t, sap.Address{Owner: "o", Group: "g", Instance: "x"})
 
 	c, err := net.Dial("tcp", strings.TrimPrefix(e.URL, "nats://"))
 	if err != nil {

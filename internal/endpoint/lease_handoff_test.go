@@ -72,13 +72,13 @@ func needMachine(t *testing.T) string {
 func TestLeaseTakenOverFromDeadHolderOnSameMachine(t *testing.T) {
 	f := newFixture(t, "a")
 	host, _ := os.Hostname()
-	kv := putLease(t, f, "a", leaseValue{Instance: "dead", Host: host, Machine: needMachine(t), PID: deadPID(t), Since: "x"})
+	kv := putLease(t, f, tkey("a"), leaseValue{Instance: "dead", Host: host, Machine: needMachine(t), PID: deadPID(t), Since: "x"})
 	ep, err := Open(context.Background(), f.cfg("a"))
 	if err != nil {
 		t.Fatalf("open over a dead holder: %v", err)
 	}
 	defer ep.Close()
-	if lv := readLease(t, kv, "a"); lv.Instance == "dead" || lv.PID != fmt.Sprint(os.Getpid()) {
+	if lv := readLease(t, kv, tkey("a")); lv.Instance == "dead" || lv.PID != fmt.Sprint(os.Getpid()) {
 		t.Fatalf("lease %+v", lv)
 	}
 }
@@ -86,7 +86,7 @@ func TestLeaseTakenOverFromDeadHolderOnSameMachine(t *testing.T) {
 func TestLeaseNotTakenFromLiveHolderOnSameHost(t *testing.T) {
 	f := newFixture(t, "a")
 	host, _ := os.Hostname()
-	putLease(t, f, "a", leaseValue{Instance: "live", Host: host, Machine: needMachine(t), PID: "4242", Since: "x"})
+	putLease(t, f, tkey("a"), leaseValue{Instance: "live", Host: host, Machine: needMachine(t), PID: "4242", Since: "x"})
 	stubHolderGone(t, func(string, string) bool { return false })
 	_, err := Open(context.Background(), f.cfg("a"))
 	var held *LeaseHeldError
@@ -101,13 +101,13 @@ func TestLeaseSameHostnameOtherMachineNotTakenOver(t *testing.T) {
 	needMachine(t)
 	f := newFixture(t, "a")
 	host, _ := os.Hostname()
-	kv := putLease(t, f, "a", leaseValue{Instance: "remote", Host: host, Machine: "other-boot/other-ns", PID: deadPID(t), Since: "x"})
+	kv := putLease(t, f, tkey("a"), leaseValue{Instance: "remote", Host: host, Machine: "other-boot/other-ns", PID: deadPID(t), Since: "x"})
 	_, err := Open(context.Background(), f.cfg("a"))
 	var held *LeaseHeldError
 	if !errors.As(err, &held) {
 		t.Fatalf("got %v, want held", err)
 	}
-	if lv := readLease(t, kv, "a"); lv.Instance != "remote" {
+	if lv := readLease(t, kv, tkey("a")); lv.Instance != "remote" {
 		t.Fatalf("lease displaced: %+v", lv)
 	}
 }
@@ -116,13 +116,13 @@ func TestLeaseSameHostnameOtherMachineNotTakenOver(t *testing.T) {
 func TestLeaseNoMachineNotTakenOver(t *testing.T) {
 	f := newFixture(t, "a")
 	host, _ := os.Hostname()
-	kv := putLease(t, f, "a", leaseValue{Instance: "old", Host: host, PID: deadPID(t), Since: "x"})
+	kv := putLease(t, f, tkey("a"), leaseValue{Instance: "old", Host: host, PID: deadPID(t), Since: "x"})
 	_, err := Open(context.Background(), f.cfg("a"))
 	var held *LeaseHeldError
 	if !errors.As(err, &held) {
 		t.Fatalf("got %v, want held", err)
 	}
-	if lv := readLease(t, kv, "a"); lv.Instance != "old" {
+	if lv := readLease(t, kv, tkey("a")); lv.Instance != "old" {
 		t.Fatalf("lease displaced: %+v", lv)
 	}
 }
@@ -161,7 +161,7 @@ func TestLeaseOtherHostIsNeverJudged(t *testing.T) {
 	f := newFixture(t, "a")
 	stubHolderGone(t, func(string, string) bool { t.Error("holderGone consulted"); return true })
 	for _, host := range []string{"otherhost", ""} {
-		putLease(t, f, "a", leaseValue{Instance: "far", Host: host, PID: "4242", Since: "x"})
+		putLease(t, f, tkey("a"), leaseValue{Instance: "far", Host: host, PID: "4242", Since: "x"})
 		_, err := Open(context.Background(), f.cfg("a"))
 		var held *LeaseHeldError
 		if !errors.As(err, &held) {
@@ -173,10 +173,10 @@ func TestLeaseOtherHostIsNeverJudged(t *testing.T) {
 func TestLeaseTakeoverLosesToLiveWriter(t *testing.T) {
 	f := newFixture(t, "a")
 	host, _ := os.Hostname()
-	kv := putLease(t, f, "a", leaseValue{Instance: "old", Host: host, Machine: needMachine(t), PID: "4242", Since: "x"})
+	kv := putLease(t, f, tkey("a"), leaseValue{Instance: "old", Host: host, Machine: needMachine(t), PID: "4242", Since: "x"})
 	live, _ := json.Marshal(leaseValue{Instance: "live", Host: host, PID: "4243", Since: "y"})
 	stubHolderGone(t, func(string, string) bool {
-		if _, err := kv.Put(context.Background(), "a", live); err != nil {
+		if _, err := kv.Put(context.Background(), tkey("a"), live); err != nil {
 			t.Error(err)
 		}
 		return true
@@ -186,7 +186,7 @@ func TestLeaseTakeoverLosesToLiveWriter(t *testing.T) {
 	if !errors.As(err, &held) {
 		t.Fatalf("got %v, want held", err)
 	}
-	if lv := readLease(t, kv, "a"); lv.Instance != "live" {
+	if lv := readLease(t, kv, tkey("a")); lv.Instance != "live" {
 		t.Fatalf("lease displaced: %+v", lv)
 	}
 }
@@ -258,7 +258,7 @@ func openOver(t *testing.T, lv leaseValue) (error, jetstream.KeyValue) {
 	host, _ := os.Hostname()
 	lv.Host = host
 	lv.Machine = needMachine(t)
-	kv := putLease(t, f, "a", lv)
+	kv := putLease(t, f, tkey("a"), lv)
 	ep, err := Open(context.Background(), f.cfg("a"))
 	if err == nil {
 		ep.Close()
@@ -273,7 +273,7 @@ func TestLeaseLiveNonMashHolderKept(t *testing.T) {
 	if !errors.As(err, &held) {
 		t.Fatalf("got %v, want held", err)
 	}
-	if lv := readLease(t, kv, "a"); lv.Instance != "live" {
+	if lv := readLease(t, kv, tkey("a")); lv.Instance != "live" {
 		t.Fatalf("lease displaced: %+v", lv)
 	}
 }

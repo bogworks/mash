@@ -186,7 +186,7 @@ type fakeInboxes struct {
 	asked   []string
 }
 
-func (f *fakeInboxes) CheckInbox(_ context.Context, id sap.EndpointIdentity) (admin.InboxCheck, error) {
+func (f *fakeInboxes) CheckInbox(_ context.Context, id sap.Address) (admin.InboxCheck, error) {
 	f.asked = append(f.asked, id.String())
 	return f.answers[id.String()], f.errs[id.String()]
 }
@@ -194,7 +194,7 @@ func (f *fakeInboxes) CheckInbox(_ context.Context, id sap.EndpointIdentity) (ad
 func TestCreateInboxOnlyChecksAndNamesWhatIsMissing(t *testing.T) {
 	ctx := context.Background()
 	inb := &fakeInboxes{answers: map[string]admin.InboxCheck{
-		"foo.c.here":  {Stream: "inbox-here", Consumer: true, Legacy: true},
+		"foo.c.here":  {Stream: "inbox-here", Consumer: true},
 		"foo.c.nocon": {Stream: "inbox-nocon"},
 	}, errs: map[string]error{"foo.c.bad": errors.New("mash: inbox stream of bad has subjects x where mash needs y")}}
 	p := Provisioner{Inboxes: inb}

@@ -131,7 +131,7 @@ func TestApplierRefusesAnAddressWithNoInboxBeforeAnythingIsPushed(t *testing.T) 
 
 // A change whose new address has an inbox is applied.
 func TestApplierAppliesAnAddressWhoseInboxExists(t *testing.T) {
-	a, d, called := newAddressApplier(t, &fakeInboxes{answers: map[string]admin.InboxCheck{"foo.c.core": {Stream: "inbox-core", Consumer: true, Legacy: true}}})
+	a, d, called := newAddressApplier(t, &fakeInboxes{answers: map[string]admin.InboxCheck{"foo.c.core": {Stream: "inbox-core", Consumer: true}}})
 	if _, err := a.Apply(context.Background(), d, okGuard{}); err != nil {
 		t.Fatal(err)
 	}

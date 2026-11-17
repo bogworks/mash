@@ -3,23 +3,19 @@ package endpoint
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/nats-io/nats.go/jetstream"
-
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/namerule"
 	"github.com/bogworks/mash/internal/render"
-	"github.com/bogworks/mash/internal/store"
 )
 
-// ruleOf loads a name-rule file that refuses each of the given tokens, one rule per entry: "name:bad" refuses the
-// name token bad, "agent:claude" the agent token claude, "owner:legacyo" the owner token legacyo.
+// ruleOf loads a name-rule file that refuses each of the given tokens, one rule per entry: "instance:bad" refuses the
+// instance token bad, "group:team" the group token team, "owner:elsewhere" the owner token elsewhere.
 func ruleOf(t *testing.T, refuse ...string) *namerule.Rule {
 	t.Helper()
 	var rules []string
@@ -65,7 +61,7 @@ func (f *fixture) cfgRule(name string, r *namerule.Rule) config.Config {
 // (a) start: the endpoint's own identity, in Open and in OpenClient, before anything is connected or read.
 func TestNameRuleStart(t *testing.T) {
 	f := newFixture(t, "a", "bad")
-	r := ruleOf(t, "name:bad")
+	r := ruleOf(t, "instance:bad")
 	if _, err := Open(context.Background(), f.cfgRule("bad", r)); err == nil {
 		t.Fatal("Open started a refused identity")
 	} else {
@@ -99,7 +95,7 @@ func TestNameRuleStart(t *testing.T) {
 // (b) send: the addressed identity and the sender's own, before the directory is read.
 func TestNameRuleSend(t *testing.T) {
 	f := newFixture(t, "a", "b", "bad")
-	r := ruleOf(t, "name:bad", "name:gone")
+	r := ruleOf(t, "instance:bad", "instance:gone")
 	a, err := OpenClient(context.Background(), f.cfgRule("a", r))
 	if err != nil {
 		t.Fatal(err)
@@ -107,12 +103,12 @@ func TestNameRuleSend(t *testing.T) {
 	defer a.Close()
 	ctx := context.Background()
 
-	_, err = a.Send(ctx, "bad", "hi", 0)
+	_, err = a.Send(ctx, tdot("bad"), "hi", 0)
 	wantRefusal(t, err, "no-bad", "send: the recipient")
 	// The refused identity has no record at all: still the rule, not "no endpoint named".
-	_, err = a.Send(ctx, "gone", "hi", 0)
+	_, err = a.Send(ctx, tdot("gone"), "hi", 0)
 	wantRefusal(t, err, "no-gone", "send: the recipient")
-	if _, err := a.Send(ctx, "b", "hi", 0); err != nil {
+	if _, err := a.Send(ctx, tdot("b"), "hi", 0); err != nil {
 		t.Fatalf("an allowed recipient was refused: %v", err)
 	}
 	// Nothing reached the refused endpoint.
@@ -122,67 +118,67 @@ func TestNameRuleSend(t *testing.T) {
 	}
 
 	// The sender's own identity: a rule that came to refuse the sender stops its send.
-	a.cfg.NameRule = ruleOf(t, "name:a")
-	_, err = a.Send(ctx, "b", "hi", 0)
+	a.cfg.NameRule = ruleOf(t, "instance:a")
+	_, err = a.Send(ctx, tdot("b"), "hi", 0)
 	wantRefusal(t, err, "no-a", "send: the sender")
 }
 
 // (b) a record named in the open's first wave (clientNeeds) is not read when its identity is refused.
 func TestNameRuleSendDoesNotPrefetchARefusedRecord(t *testing.T) {
 	f := newFixture(t, "a", "bad")
-	r := ruleOf(t, "name:bad")
+	r := ruleOf(t, "instance:bad")
 	var read []string
 	hook := func(key string) error { read = append(read, key); return nil }
 	fetchRecordHook.Store(&hook)
 	defer fetchRecordHook.Store(nil)
-	a, err := OpenClientWith(context.Background(), f.cfgRule("a", r), ClientOptions{Records: []string{"bad"}})
+	a, err := OpenClientWith(context.Background(), f.cfgRule("a", r), ClientOptions{Records: []string{tdot("bad")}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer a.Close()
 	for _, k := range read {
-		if k == "bad" {
+		if k == tkey("bad") {
 			t.Fatalf("the record of a refused identity was read: %v", read)
 		}
 	}
-	_, err = a.Send(context.Background(), "bad", "hi", 0)
+	_, err = a.Send(context.Background(), tdot("bad"), "hi", 0)
 	wantRefusal(t, err, "no-bad", "send: the recipient")
 }
 
-// (b) a recipient named by the flat key of a three-token endpoint is formed with sap.FromFlat and checked too.
+// (b) a recipient named by its flat key or dotted address is parsed to an address and checked too.
 func TestNameRuleSendFlatKey(t *testing.T) {
 	f := newFixture(t, "a")
-	peer := f.addNewForm(t, "claude", "acme", "peer", newFormOpts{})
-	other := f.addNewForm(t, "codex", "acme", "peer", newFormOpts{})
-	a, err := OpenClient(context.Background(), f.cfgRule("a", ruleOf(t, "agent:claude")))
+	peer := f.addAt(t, "team", "peer", addOpts{})
+	other := f.addAt(t, "crew", "peer", addOpts{})
+	a, err := OpenClient(context.Background(), f.cfgRule("a", ruleOf(t, "group:team")))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer a.Close()
-	_, err = a.Send(context.Background(), peer.Flat(), "hi", 0)
-	wantRefusal(t, err, "no-claude", "send: the recipient")
-	// Allowed by the rule. A legacy sender may not publish to a new-form subject, so the send ends in the server's
-	// policy refusal: the rule let it through, which is all this test asks.
-	var ref *namerule.Refusal
-	if _, err := a.Send(context.Background(), other.Flat(), "hi", 0); errors.As(err, &ref) {
-		t.Fatalf("an allowed flat key was refused by the rule: %v", err)
+	for _, to := range []string{peer.Flat(), peer.String()} {
+		_, err = a.Send(context.Background(), to, "hi", 0)
+		wantRefusal(t, err, "no-team", "send: the recipient")
+	}
+	// Allowed by the rule: the send goes through.
+	if _, err := a.Send(context.Background(), other.Flat(), "hi", 0); err != nil {
+		t.Fatalf("an allowed recipient was refused: %v", err)
 	}
 }
 
 // (e) lookup: a refused identity fails with the rule, never "not found" and never silently omitted.
 func TestNameRuleLookup(t *testing.T) {
 	f := newFixture(t, "a", "b", "bad")
-	a, err := OpenClient(context.Background(), f.cfgRule("a", ruleOf(t, "name:bad", "name:gone")))
+	a, err := OpenClient(context.Background(), f.cfgRule("a", ruleOf(t, "instance:bad", "instance:gone")))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer a.Close()
 	ctx := context.Background()
-	_, err = a.lookup(ctx, "bad")
+	_, err = a.lookup(ctx, tdot("bad"))
 	wantRefusal(t, err, "no-bad", "lookup")
-	_, err = a.lookup(ctx, "gone") // no record
+	_, err = a.lookup(ctx, tdot("gone")) // no record
 	wantRefusal(t, err, "no-gone", "lookup")
-	if rec, err := a.lookup(ctx, "b"); err != nil || rec.Name != "b" {
+	if rec, err := a.lookup(ctx, tdot("b")); err != nil || rec.Instance != "b" {
 		t.Fatalf("an allowed lookup: %+v %v", rec, err)
 	}
 	// Without a rule a missing name is still "no endpoint named", as before.
@@ -191,7 +187,7 @@ func TestNameRuleLookup(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer plain.Close()
-	if _, err := plain.lookup(ctx, "gone"); err == nil || !strings.Contains(err.Error(), `no endpoint named "gone"`) {
+	if _, err := plain.lookup(ctx, tdot("gone")); err == nil || !strings.Contains(err.Error(), `no endpoint named "`+tdot("gone")+`"`) {
 		t.Fatalf("no rule: %v", err)
 	}
 }
@@ -208,8 +204,8 @@ func TestNameRuleReply(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := ep.StartService(ctx, func(p PromptEvent) {
-		if p.From == "b" {
-			ep.cfg.NameRule = ruleOf(t, "name:b")
+		if p.From == tkey("b") {
+			ep.cfg.NameRule = ruleOf(t, "instance:b")
 		}
 		replyErr <- ep.Reply(p.RequestID, "pong", true)
 	}); err != nil {
@@ -220,12 +216,12 @@ func TestNameRuleReply(t *testing.T) {
 	t.Cleanup(func() { cancel(); <-done; ep.Close() })
 
 	b := f.client(t, "b")
-	subj, err := Discover(ctx, b.Conn(), "o", "a")
+	subj, err := Discover(ctx, b.Conn(), taddr("a"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	err = Prompt(ctx, b.Conn(), b.Identity(), "b", subj, "ping", &out)
+	err = Prompt(ctx, b.Conn(), b.Identity(), b.Key(), subj, "ping", &out)
 	if err == nil || !strings.Contains(err.Error(), `name rule "no-b"`) || !strings.Contains(err.Error(), "b is not allowed here") {
 		t.Fatalf("the asker was not told the rule: %v", err)
 	}
@@ -236,7 +232,7 @@ func TestNameRuleReply(t *testing.T) {
 
 	c := f.client(t, "c")
 	out.Reset()
-	if err := Prompt(ctx, c.Conn(), c.Identity(), "c", subj, "ping", &out); err != nil || out.String() != "pong" {
+	if err := Prompt(ctx, c.Conn(), c.Identity(), c.Key(), subj, "ping", &out); err != nil || out.String() != "pong" {
 		t.Fatalf("an allowed asker: %q %v", out.String(), err)
 	}
 	if err := <-replyErr; err != nil {
@@ -250,7 +246,7 @@ func TestNameRulePromptAskerRefusedByService(t *testing.T) {
 	f := newFixture(t, "a", "b", "c")
 	fired := make(chan string, 4)
 	ctx, cancel := context.WithCancel(context.Background())
-	ep, err := Open(ctx, f.cfgRule("a", ruleOf(t, "name:b")))
+	ep, err := Open(ctx, f.cfgRule("a", ruleOf(t, "instance:b")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,12 +262,12 @@ func TestNameRulePromptAskerRefusedByService(t *testing.T) {
 
 	// b's own client has no rule, as an older client would not.
 	b := f.client(t, "b")
-	subj, err := Discover(ctx, b.Conn(), "o", "a")
+	subj, err := Discover(ctx, b.Conn(), taddr("a"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	err = Prompt(ctx, b.Conn(), b.Identity(), "b", subj, "ping", &out)
+	err = Prompt(ctx, b.Conn(), b.Identity(), b.Key(), subj, "ping", &out)
 	if err == nil || !strings.Contains(err.Error(), "403") || !strings.Contains(err.Error(), `name rule "no-b"`) ||
 		!strings.Contains(err.Error(), "b is not allowed here") || !strings.Contains(err.Error(), "prompt: the asker") {
 		t.Fatalf("the refused asker was not answered 403 with the rule: %v", err)
@@ -282,10 +278,10 @@ func TestNameRulePromptAskerRefusedByService(t *testing.T) {
 
 	c := f.client(t, "c")
 	out.Reset()
-	if err := Prompt(ctx, c.Conn(), c.Identity(), "c", subj, "ping", &out); err != nil || out.String() != "pong" {
+	if err := Prompt(ctx, c.Conn(), c.Identity(), c.Key(), subj, "ping", &out); err != nil || out.String() != "pong" {
 		t.Fatalf("an allowed asker: %q %v", out.String(), err)
 	}
-	if from := <-fired; from != "c" {
+	if from := <-fired; from != tkey("c") {
 		t.Fatalf("the prompt event fired for %q; the refused asker must never surface", from)
 	}
 	select {
@@ -301,23 +297,23 @@ func TestNameRuleRelayOriginNotHonoured(t *testing.T) {
 	f := newFixture(t, "a", "b", "c")
 	b, c := f.client(t, "b"), f.client(t, "c")
 	ctx := context.Background()
-	if _, err := c.SendWith(ctx, "b", "the original", SendOptions{}); err != nil {
+	if _, err := c.SendWith(ctx, tdot("b"), "the original", SendOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := b.SendWith(ctx, "a", "passing it on", SendOptions{Via: 1}); err != nil {
+	if _, err := b.SendWith(ctx, tdot("a"), "passing it on", SendOptions{Via: 1}); err != nil {
 		t.Fatal(err)
 	}
 	plain := f.client(t, "a")
-	if m, err := plain.Read(ctx, 1); err != nil || m.Via != "c #1" {
+	if m, err := plain.Read(ctx, 1); err != nil || m.Via != tkey("c")+" #1" {
 		t.Fatalf("no rule: %+v %v", m, err)
 	}
-	a, err := OpenClient(ctx, f.cfgRule("a", ruleOf(t, "name:c")))
+	a, err := OpenClient(ctx, f.cfgRule("a", ruleOf(t, "instance:c")))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer a.Close()
 	m, err := a.Read(ctx, 1)
-	if err != nil || m.Via != "" || m.From != "b" || string(m.Body) != "passing it on" {
+	if err != nil || m.Via != "" || m.From != tkey("b") || string(m.Body) != "passing it on" {
 		t.Fatalf("a refused origin was honoured or the mail lost: %+v %v", m, err)
 	}
 	if out := render.One(m); strings.Contains(out, "relayed") {
@@ -329,103 +325,33 @@ func TestNameRuleRelayOriginNotHonoured(t *testing.T) {
 func TestNameRulePrompt(t *testing.T) {
 	f := newFixture(t, "a", "b", "bad")
 	f.serve(t, "b", noPrompt)
-	a, err := OpenClient(context.Background(), f.cfgRule("a", ruleOf(t, "name:bad", "name:gone")))
+	a, err := OpenClient(context.Background(), f.cfgRule("a", ruleOf(t, "instance:bad", "instance:gone")))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer a.Close()
 	ctx := context.Background()
-	_, err = a.DiscoverRecipient(ctx, "bad")
+	_, err = a.DiscoverRecipient(ctx, tdot("bad"))
 	wantRefusal(t, err, "no-bad", "prompt: the recipient")
-	_, err = a.DiscoverRecipient(ctx, "gone")
+	_, err = a.DiscoverRecipient(ctx, tdot("gone"))
 	wantRefusal(t, err, "no-gone", "prompt: the recipient")
-	subj, err := a.DiscoverRecipient(ctx, "b")
-	if err != nil || subj != "agents.prompt.cc.o.b" {
+	subj, err := a.DiscoverRecipient(ctx, tdot("b"))
+	if err != nil || subj != taddr("b").Subjects().Prompt {
 		t.Fatalf("an allowed recipient: %q %v", subj, err)
 	}
-	a.cfg.NameRule = ruleOf(t, "name:a")
-	_, err = a.DiscoverRecipient(ctx, "b")
+	a.cfg.NameRule = ruleOf(t, "instance:a")
+	_, err = a.DiscoverRecipient(ctx, tdot("b"))
 	wantRefusal(t, err, "no-a", "prompt: the sender")
-}
-
-// (g) the compatibility alias: the alias identity of the endpoint's own record is checked at start.
-func TestNameRuleAlias(t *testing.T) {
-	f := newFixture(t)
-	id := f.addNewForm(t, "claude", "acme", "peer", newFormOpts{})
-	js, err := jetstream.New(f.e.Conn(t, f.e.AdminCreds))
-	if err != nil {
-		t.Fatal(err)
-	}
-	kv, err := js.KeyValue(context.Background(), store.DirectoryBucket)
-	if err != nil {
-		t.Fatal(err)
-	}
-	e, err := kv.Get(context.Background(), id.Flat())
-	if err != nil {
-		t.Fatal(err)
-	}
-	var rec store.Record
-	if err := json.Unmarshal(e.Value(), &rec); err != nil {
-		t.Fatal(err)
-	}
-	rec.Alias = &store.Alias{Owner: "legacyo", Name: "peer"}
-	val, _ := json.Marshal(rec)
-	if _, err := kv.Put(context.Background(), id.Flat(), val); err != nil {
-		t.Fatal(err)
-	}
-
-	// No rule, and a rule that refuses neither identity: starts.
-	for _, r := range []*namerule.Rule{nil, ruleOf(t, "owner:elsewhere")} {
-		c := f.cfgNF(id)
-		c.NameRule = r
-		cl, err := OpenClient(context.Background(), c)
-		if err != nil {
-			t.Fatalf("start with rule %v: %v", r != nil, err)
-		}
-		cl.Close()
-	}
-	// A rule that refuses only the alias (owner legacyo): start is refused, naming the alias.
-	c := f.cfgNF(id)
-	c.NameRule = ruleOf(t, "owner:legacyo")
-	_, err = OpenClient(context.Background(), c)
-	if err == nil {
-		t.Fatal("started with a refused alias")
-	}
-	wantRefusal(t, err, "no-legacyo", "the compatibility alias")
-	_, err = Open(context.Background(), c)
-	wantRefusal(t, err, "no-legacyo", "the compatibility alias")
-}
-
-// The alias is data of the endpoint's own record: with no record there is no alias to check, so the start reports
-// "not provisioned" and never a rule refusal. (TestNameRuleAlias covers a record whose alias is refused.)
-func TestNameRuleAliasOrder(t *testing.T) {
-	f := newFixture(t, "a")
-	noRec := f.addNewForm(t, "ag", "team", "norec", newFormOpts{noRecord: true})
-	c := f.cfgNF(noRec)
-	c.NameRule = ruleOf(t, "owner:legacyo")
-	for opener, open := range map[string]func() error{
-		"Open":       func() error { _, err := Open(context.Background(), c); return err },
-		"OpenClient": func() error { _, err := OpenClient(context.Background(), c); return err },
-	} {
-		err := open()
-		if err == nil || !strings.Contains(err.Error(), "is not provisioned") {
-			t.Errorf("%s with no record: %v (want not provisioned)", opener, err)
-		}
-		var ref *namerule.Refusal
-		if errors.As(err, &ref) {
-			t.Errorf("%s with no record reported a rule refusal: %v", opener, err)
-		}
-	}
 }
 
 // With no rule configured, nothing changes: a name any rule file might forbid works.
 func TestNoNameRuleChangesNothing(t *testing.T) {
 	f := newFixture(t, "a", "bad")
 	a := f.client(t, "a")
-	if _, err := a.Send(context.Background(), "bad", "hi", 0); err != nil {
+	if _, err := a.Send(context.Background(), tdot("bad"), "hi", 0); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.lookup(context.Background(), "bad"); err != nil {
+	if _, err := a.lookup(context.Background(), tdot("bad")); err != nil {
 		t.Fatal(err)
 	}
 }

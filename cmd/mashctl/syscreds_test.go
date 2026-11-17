@@ -12,13 +12,15 @@ import (
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats-server/v2/server"
 	"github.com/nats-io/nats.go"
-	"github.com/nats-io/nkeys"
 
 	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/bootstrap"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/ctlkeys"
+	"github.com/bogworks/mash/internal/mint"
 	"github.com/bogworks/mash/internal/natsauth"
+	"github.com/bogworks/mash/internal/sap"
+	"github.com/bogworks/mash/internal/store"
 )
 
 // applyEnv is a local operator-mode server (bootstrap's configuration, run in process) and the environment mashctl
@@ -164,46 +166,6 @@ func (e *applyEnv) noSeeds(s string) {
 	}
 }
 
-// applyZonePolicy puts a zone policy of an older release on the server: the account JWT gains one scoped signing key,
-// which is what `policy apply` of an older release published and what the zone-removal guards detect (ADR 0091). It returns the
-// account JWT as it was before.
-func (e *applyEnv) applyZonePolicy() string {
-	e.t.Helper()
-	before := e.accountJWT()
-	op, _, err := e.ks.Operator()
-	if err != nil {
-		e.t.Fatal(err)
-	}
-	cl, err := jwt.DecodeAccountClaims(before)
-	if err != nil {
-		e.t.Fatal(err)
-	}
-	sk, _ := nkeys.CreateAccount()
-	pub, _ := sk.PublicKey()
-	sc := jwt.NewUserScope()
-	sc.Key, sc.Role = pub, "red"
-	cl.SigningKeys.AddScopedSigner(sc)
-	if time.Now().Unix() <= cl.IssuedAt {
-		time.Sleep(1100 * time.Millisecond) // the new copy must be the newer one
-	}
-	tok, err := cl.Encode(op)
-	if err != nil {
-		e.t.Fatal(err)
-	}
-	nc, err := nats.Connect(e.srv.ClientURL(), natsauth.UserCredentials(e.env["MASH_SYS_CREDS"]))
-	if err != nil {
-		e.t.Fatal(err)
-	}
-	defer nc.Close()
-	if _, err := nc.Request("$SYS.REQ.CLAIMS.UPDATE", []byte(tok), 5*time.Second); err != nil {
-		e.t.Fatal(err)
-	}
-	if len(scopedSigners(e.claims())) != 1 {
-		e.t.Fatal("the zone policy did not reach the server")
-	}
-	return before
-}
-
 func TestSysCredsDefaultsFromTheInitServerDir(t *testing.T) {
 	e := newApplyEnv(t).withDirectory()
 	want := filepath.Join(e.pl.Dir, bootstrap.SysCreds)
@@ -225,8 +187,41 @@ func TestSysCredsDefaultsFromTheInitServerDir(t *testing.T) {
 	}
 }
 
-// newXYEnv is a bootstrap server with the directory made and endpoints x (net a, label team=red) and y (net b) added
-// with `mashctl add`: the clean state.
+// xy is the address of the test endpoints x and y of newXYEnv: alice.g.<instance>.
+func xy(instance string) sap.Address {
+	return sap.Address{Owner: "alice", Group: "g", Instance: instance}
+}
+
+// endpoint makes the endpoint at a on the server: it mints the user with the account key store, writes the creds file
+// where credsPath looks, provisions the directory record and records the issue, as a create of an endpoint does.
+func (e *applyEnv) endpoint(a sap.Address, labels map[string]string) {
+	e.t.Helper()
+	m, err := mint.Mint(e.ks, a, nil)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(e.root, "cfg"), 0o700); err != nil {
+		e.t.Fatal(err)
+	}
+	if err := os.WriteFile(e.credsPath(a.String()), m.Creds, 0o600); err != nil {
+		e.t.Fatal(err)
+	}
+	adm, ctx, done := e.admin()
+	defer done()
+	if _, err := adm.Provision(ctx, a, m.UserPub, m.AccountPub, "", admin.Meta{Labels: labels}); err != nil {
+		e.t.Fatal(err)
+	}
+	rec := store.Issued{PublicKey: m.UserPub, Address: a.Flat(), Owner: a.Owner, Kind: store.IssuedEndpoint, Tags: []string{}, Purpose: store.PurposeIssue}
+	if uc, err := jwt.DecodeUserClaims(m.JWT); err == nil && uc.IssuedAt > 0 {
+		rec.IssuedAt = time.Unix(uc.IssuedAt, 0).UTC().Format(time.RFC3339)
+	}
+	if err := adm.RecordIssued(ctx, rec); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
+// newXYEnv is a bootstrap server with the directory made and endpoints alice.g.x (net a, label team=red) and alice.g.y
+// (net b): the clean state.
 func newXYEnv(t *testing.T) *applyEnv {
 	t.Helper()
 	e := newApplyEnv(t)
@@ -235,11 +230,8 @@ func newXYEnv(t *testing.T) *applyEnv {
 	if _, errb, code := e.run("init"); code != 0 {
 		t.Fatalf("init: %s", errb)
 	}
-	for _, args := range [][]string{{"add", "x", "--label", "net=a", "--label", "team=red"}, {"add", "y", "--label", "net=b"}} {
-		if out, errb, code := e.run(args...); code != 0 {
-			t.Fatalf("%v: %d\n%s\n%s", args, code, out, errb)
-		}
-	}
+	e.endpoint(xy("x"), map[string]string{"net": "a", "team": "red"})
+	e.endpoint(xy("y"), map[string]string{"net": "b"})
 	return e
 }
 

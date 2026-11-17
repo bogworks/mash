@@ -16,7 +16,7 @@ import (
 
 // unmarkIssuedStream removes the history marker from the issue record's stream, so the bucket reads as one from before
 // the marker (an older deployment).
-func (h *addEnv) unmarkIssuedStream() {
+func (h *fleetEnv) unmarkIssuedStream() {
 	h.t.Helper()
 	ctx := context.Background()
 	js, err := jetstream.New(h.e.Conn(h.t, h.e.AdminCreds))
@@ -45,7 +45,7 @@ func (h *addEnv) unmarkIssuedStream() {
 }
 
 // recordHistory leaves pub's issue record with exactly total revisions in a bucket that has no marker.
-func (h *addEnv) recordHistory(pub, name string, total int) {
+func (h *fleetEnv) recordHistory(pub, name string, total int) {
 	h.t.Helper()
 	adm, err := admin.New(h.e.Conn(h.t, h.e.AdminCreds), h.e.Owner)
 	if err != nil {
@@ -66,7 +66,7 @@ func (h *addEnv) recordHistory(pub, name string, total int) {
 }
 
 // issuedHistory0 is issuedHistory, but 0 for a key or bucket that does not exist yet.
-func (h *addEnv) issuedHistory0(pub string) int {
+func (h *fleetEnv) issuedHistory0(pub string) int {
 	h.t.Helper()
 	js, err := jetstream.New(h.e.Conn(h.t, h.e.AdminCreds))
 	if err != nil {
@@ -88,68 +88,29 @@ const unprovableText = "its issued history cannot be shown to be complete"
 // retire refuses a key whose issue history cannot be shown complete, with nothing changed; a provable one retires.
 func TestRetireRefusesAnUnprovableIssueHistory(t *testing.T) {
 	h := newFleetEnv(t)
-	if _, errb, code := h.run("add", "c", "--label", "env=red"); code != 0 {
-		t.Fatal(errb)
-	}
-	_, pub := h.credsClaims("c")
-	h.recordHistory(pub, "c", store.IssuedMinHistory) // no marker, 8 revisions
-	before, _ := os.ReadFile(h.creds("c"))
+	h.seedMeta(ad("c"), admin.Meta{Labels: map[string]string{"env": "red"}}, nil)
+	_, pub := h.credsClaims(ad("c"))
+	h.recordHistory(pub, ad("c").Flat(), store.IssuedMinHistory) // no marker, 8 revisions
+	before, _ := os.ReadFile(h.creds(ad("c")))
 	recs := h.records()
 	calls := fakeRevoke(t, nil)
 
-	out, errb, code := h.run("retire", "c")
+	out, errb, code := h.run("retire", "o.g.c")
 	if code != 1 || out != "" || !strings.Contains(errb, unprovableText) || !strings.Contains(errb, "by hand") || !strings.Contains(errb, "nothing was changed") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
 	noSecrets(t, out, errb)
-	if after, _ := os.ReadFile(h.creds("c")); len(*calls) != 0 || !bytes.Equal(before, after) || !slices.Equal(recs, h.records()) || h.issued()[pub].RevokedAt != "" {
+	if after, _ := os.ReadFile(h.creds(ad("c"))); len(*calls) != 0 || !bytes.Equal(before, after) || !slices.Equal(recs, h.records()) || h.issued()[pub].RevokedAt != "" {
 		t.Fatalf("something changed: calls %+v records %v", *calls, h.records())
 	}
 
 	// Control: the same bucket with 7 revisions of the key is provable.
 	h2 := newFleetEnv(t)
-	if _, errb, code := h2.run("add", "c", "--label", "env=red"); code != 0 {
-		t.Fatal(errb)
-	}
-	_, pub2 := h2.credsClaims("c")
-	h2.recordHistory(pub2, "c", store.IssuedMinHistory-1)
+	h2.seedMeta(ad("c"), admin.Meta{Labels: map[string]string{"env": "red"}}, nil)
+	_, pub2 := h2.credsClaims(ad("c"))
+	h2.recordHistory(pub2, ad("c").Flat(), store.IssuedMinHistory-1)
 	calls2 := fakeRevoke(t, nil)
-	if out, errb, code := h2.run("retire", "c"); code != 0 || !strings.Contains(out, "revoked in the account JWT") || len(*calls2) != 1 {
+	if out, errb, code := h2.run("retire", "o.g.c"); code != 0 || !strings.Contains(out, "revoked in the account JWT") || len(*calls2) != 1 {
 		t.Fatalf("%d %q %q calls %+v", code, out, errb, *calls2)
-	}
-}
-
-// A rotating reissue refuses before staging or revoking anything when the old key's history cannot be shown
-// complete; a provable one rotates.
-func TestReissueRotationRefusesAnUnprovableIssueHistory(t *testing.T) {
-	h := newAddEnv(t)
-	h.seedWith("a", extraTag)
-	_, oldPub := h.credsClaims("a")
-	h.recordHistory(oldPub, "a", store.IssuedMinHistory)
-	before, _ := os.ReadFile(h.creds("a"))
-	recs := h.records()
-	issuedBefore := len(h.issued())
-	calls := fakeRevoke(t, nil)
-
-	out, errb, code := h.run("reissue", "a")
-	if code != 1 || out != "" || !strings.Contains(errb, unprovableText) || !strings.Contains(errb, "nothing was changed") {
-		t.Fatalf("%d %q %q", code, out, errb)
-	}
-	noSecrets(t, out, errb)
-	h.noStaged("a")
-	if after, _ := os.ReadFile(h.creds("a")); len(*calls) != 0 || !bytes.Equal(before, after) || !slices.Equal(recs, h.records()) || h.issuedHistory(oldPub) != store.IssuedMinHistory || len(h.issued()) != issuedBefore {
-		t.Fatalf("something changed: calls %+v records %v history %d issued %d", *calls, h.records(), h.issuedHistory(oldPub), len(h.issued()))
-	}
-
-	h2 := newAddEnv(t)
-	h2.seedWith("a", extraTag)
-	_, pub2 := h2.credsClaims("a")
-	h2.recordHistory(pub2, "a", store.IssuedMinHistory-1)
-	calls2 := fakeRevoke(t, nil)
-	if out, errb, code := h2.run("reissue", "a"); code != 0 {
-		t.Fatalf("%d %q %q", code, out, errb)
-	}
-	if _, pub := h2.credsClaims("a"); pub == pub2 || len(*calls2) != 1 {
-		t.Fatalf("key %s, revoke calls %+v", pub, *calls2)
 	}
 }

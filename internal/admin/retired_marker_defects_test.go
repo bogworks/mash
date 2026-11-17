@@ -11,6 +11,7 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/bogworks/mash/internal/admin"
+	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/store"
 )
 
@@ -41,11 +42,11 @@ func TestRetiredBucketWithEvictionIsRefused(t *testing.T) {
 			if err := a.Init(ctx); err == nil || !strings.Contains(err.Error(), store.RetiredBucket) {
 				t.Fatalf("Init must refuse, got %v", err)
 			}
-			if _, err := a.ProvisionIdentity(ctx, newID(t, "acme", "team1", "ops2"), nil, user, e.Account, "", admin.Meta{}); err == nil || !strings.Contains(err.Error(), store.RetiredBucket) {
+			if _, err := a.Provision(ctx, epIn(t, "acme", "team1", "ops2"), user, e.Account, "", admin.Meta{}); err == nil || !strings.Contains(err.Error(), store.RetiredBucket) {
 				t.Fatalf("open must refuse, got %v", err)
 			}
 			rev := a.WithRevoker(func(context.Context, string) error { t.Error("revoked"); return nil })
-			if err := rev.Deprovision(ctx, id.Flat()); err == nil || !strings.Contains(err.Error(), store.RetiredBucket) {
+			if err := rev.Deprovision(ctx, id); err == nil || !strings.Contains(err.Error(), store.RetiredBucket) {
 				t.Fatalf("deprovision must refuse, got %v", err)
 			}
 			recordIntact(t, js, id, user)
@@ -74,10 +75,10 @@ func TestRetiredBucketInMemoryIsRefused(t *testing.T) {
 		}
 	}
 	wantMem("Init", a.Init(ctx))
-	_, err := a.ProvisionIdentity(ctx, newID(t, "acme", "team1", "ops2"), nil, user, e.Account, "", admin.Meta{})
+	_, err := a.Provision(ctx, epIn(t, "acme", "team1", "ops2"), user, e.Account, "", admin.Meta{})
 	wantMem("open", err)
 	rev := a.WithRevoker(func(context.Context, string) error { t.Error("revoked"); return nil })
-	wantMem("deprovision", rev.Deprovision(ctx, id.Flat()))
+	wantMem("deprovision", rev.Deprovision(ctx, id))
 	recordIntact(t, js, id, user)
 }
 
@@ -133,19 +134,19 @@ func TestAmbiguousPurgeLeavesMarkerPendingAndRerunFinalizes(t *testing.T) {
 					x = a.WithRevoker(func(context.Context, string) error { return nil })
 				}
 				prev := admin.SetDirectoryPurgeFault(func() error { return context.DeadlineExceeded })
-				err := runPath(ctx, x, path, id.Flat(), user)
+				err := runPath(ctx, x, path, id, user)
 				admin.SetDirectoryPurgeFault(prev)
 				if err == nil || !strings.Contains(err.Error(), "unfinished") || !strings.Contains(err.Error(), "run") {
 					t.Fatalf("want an unfinished-retirement error, got %v", err)
 				}
 				wantMarker(t, js, id.Flat(), store.RetiredPending, user)
-				_, perr := a.ProvisionIdentity(ctx, id, nil, user, e.Account, "", admin.Meta{})
+				_, perr := a.Provision(ctx, id, user, e.Account, "", admin.Meta{})
 				wantPendingBlock(t, perr, id)
-				if err := runPath(ctx, x, path, id.Flat(), user); err != nil {
+				if err := runPath(ctx, x, path, id, user); err != nil {
 					t.Fatalf("re-run: %v", err)
 				}
 				wantMarker(t, js, id.Flat(), store.RetiredFinal, user)
-				gone(t, js, id.Flat())
+				removed(t, js, id)
 			})
 		}
 	}
@@ -163,7 +164,7 @@ func TestAbortWithLostLockLeavesMarker(t *testing.T) {
 				putLock(t, js, id.Flat(), time.Now().Add(time.Minute)) // the lock now belongs to another call
 				return boom
 			})
-			err := runPath(ctx, first, path, id.Flat(), user)
+			err := runPath(ctx, first, path, id, user)
 			if !errors.Is(err, boom) || !strings.Contains(err.Error(), "lock") {
 				t.Fatalf("want the refusal and a lock-loss note, got %v", err)
 			}
@@ -171,11 +172,11 @@ func TestAbortWithLostLockLeavesMarker(t *testing.T) {
 			lease, _ := js.KeyValue(ctx, store.LeaseBucket)
 			_ = lease.Delete(ctx, admin.LockKey(id.Flat()))
 			second := a.WithRevoker(func(context.Context, string) error { return nil })
-			if err := runPath(ctx, second, path, id.Flat(), user); err != nil {
+			if err := runPath(ctx, second, path, id, user); err != nil {
 				t.Fatal(err)
 			}
 			wantMarker(t, js, id.Flat(), store.RetiredFinal, user)
-			gone(t, js, id.Flat())
+			removed(t, js, id)
 		})
 	}
 }
@@ -193,13 +194,13 @@ func TestFinalizeRecreatesAMissingMarker(t *testing.T) {
 					t.Error(err)
 				}
 			})
-			err := runPath(ctx, a, path, id.Flat(), user)
+			err := runPath(ctx, a, path, id, user)
 			admin.SetAfterDeprovisionPurge(prev)
 			if err != nil {
 				t.Fatal(err)
 			}
 			wantMarker(t, js, id.Flat(), store.RetiredFinal, user)
-			_, perr := a.ProvisionIdentity(ctx, id, nil, user, e.Account, "", admin.Meta{})
+			_, perr := a.Provision(ctx, id, user, e.Account, "", admin.Meta{})
 			wantRetired(t, perr, id)
 		})
 	}
@@ -231,14 +232,14 @@ func TestGuardedPurgeRefusedDeletesMarkerEvenAfterRevoke(t *testing.T) {
 	e, a, js := setup(t)
 	ctx := context.Background()
 	id, user := provNewForm(t, e, a, "acme", "team1", "ops1")
-	_, other := e.Mint(t, "someone-else")
+	_, other := e.Mint(t, ep(t, "someone-else"))
 	var revoked []string
 	rev := a.WithRevoker(func(_ context.Context, u string) error {
 		revoked = append(revoked, u)
 		rekey(t, js, id.Flat(), other)
 		return nil
 	})
-	err := rev.DeprovisionIfUser(ctx, id.Flat(), user)
+	err := rev.DeprovisionIfUser(ctx, id, user)
 	if !errors.Is(err, admin.ErrRecordChanged) {
 		t.Fatalf("want the guarded purge refused, got %v", err)
 	}
@@ -248,7 +249,7 @@ func TestGuardedPurgeRefusedDeletesMarkerEvenAfterRevoke(t *testing.T) {
 	if _, ok := readMarker(t, js, id.Flat()); ok {
 		t.Fatal("the marker of a retirement that did not happen was left")
 	}
-	if got := recordUserOf(t, js, id.Flat()); got != other {
+	if got := recUser(t, js, id); got != other {
 		t.Fatalf("record user %s", got)
 	}
 }
@@ -259,13 +260,13 @@ func TestSupersededPendingMarkerIsResolved(t *testing.T) {
 		t.Run(path, func(t *testing.T) {
 			e, a, js := setup(t)
 			id, user := provNewForm(t, e, a, "acme", "team1", "ops1")
-			_, other := e.Mint(t, "someone-else")
+			_, other := e.Mint(t, ep(t, "someone-else"))
 			putMarker(t, js, id, other, store.RetiredPending)
-			if err := runPath(context.Background(), a, path, id.Flat(), user); err != nil {
+			if err := runPath(context.Background(), a, path, id, user); err != nil {
 				t.Fatal(err)
 			}
 			wantMarker(t, js, id.Flat(), store.RetiredFinal, user)
-			gone(t, js, id.Flat())
+			removed(t, js, id)
 		})
 	}
 }
@@ -277,11 +278,11 @@ func TestFinalMarkerWithLiveRecordOfAnotherUserRefuses(t *testing.T) {
 			e, a, js := setup(t)
 			ctx := context.Background()
 			id, user := provNewForm(t, e, a, "acme", "team1", "ops1")
-			_, other := e.Mint(t, "someone-else")
+			_, other := e.Mint(t, ep(t, "someone-else"))
 			putMarker(t, js, id, other, store.RetiredFinal)
 			var calls int
 			rev := a.WithRevoker(func(context.Context, string) error { calls++; return nil })
-			err := runPath(ctx, rev, path, id.Flat(), user)
+			err := runPath(ctx, rev, path, id, user)
 			if err == nil || !strings.Contains(err.Error(), "INV-002") || !strings.Contains(err.Error(), id.Flat()) {
 				t.Fatalf("want an INV-002 refusal naming the burned name, got %v", err)
 			}
@@ -292,4 +293,14 @@ func TestFinalMarkerWithLiveRecordOfAnotherUserRefuses(t *testing.T) {
 			recordIntact(t, js, id, user)
 		})
 	}
+}
+
+func recUser(t *testing.T, js jetstream.JetStream, id sap.Address) string {
+	t.Helper()
+	kv, _ := js.KeyValue(context.Background(), store.DirectoryBucket)
+	rec, err := store.GetRecord(context.Background(), kv, id.Flat())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rec.User
 }

@@ -61,7 +61,7 @@ func SuspendedInboxDetail(addresses []string) string {
 
 // InboxChecker reads whether an address has the inbox mail depends on and creates nothing. *admin.Admin is one.
 type InboxChecker interface {
-	CheckInbox(ctx context.Context, id sap.EndpointIdentity) (admin.InboxCheck, error)
+	CheckInbox(ctx context.Context, addr sap.Address) (admin.InboxCheck, error)
 }
 
 var _ InboxChecker = (*admin.Admin)(nil)
@@ -95,9 +95,9 @@ const SuspendedReason = ": its inbox is suspended; resume it first"
 // Callers tell that answer apart with SuspendedReason. A
 // stream or consumer that exists but does not have the configuration mail depends on is an error, as is a failed read.
 func (p Provisioner) MissingInbox(ctx context.Context, address string) (string, error) {
-	id, err := sap.ParseCanonical(address)
+	id, err := sap.ParseAddress(address)
 	if err != nil {
-		return "", fmt.Errorf("address %.64q is not range.owner.name: %w", address, err)
+		return "", fmt.Errorf("address %.64q is not owner.group.instance: %w", address, err)
 	}
 	if p.Inboxes == nil {
 		return address + " has no inbox stream", nil

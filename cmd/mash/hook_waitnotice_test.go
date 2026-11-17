@@ -12,7 +12,7 @@ import (
 
 // Tests for the notice `mash hook` prints while its session's serve waits for the endpoint's lease (ADR 0092).
 
-const waitNoticeText = "mash: this session does not hold endpoint a (held by pid 4242 on holderhost); mail is off until it recovers"
+const waitNoticeText = "mash: this session does not hold endpoint o.dev.a (held by pid 4242 on holderhost); mail is off until it recovers"
 
 // waitHookEnv is an environment whose hook has a spool but no server: the hook makes no connection.
 func waitHookEnv(t *testing.T) (map[string]string, spool.Spool) {
@@ -21,7 +21,7 @@ func waitHookEnv(t *testing.T) (map[string]string, spool.Spool) {
 	if err := os.WriteFile(creds, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	env := map[string]string{"HOME": t.TempDir(), "MASH_NAME": "a", "MASH_URL": "nats://127.0.0.1:1",
+	env := map[string]string{"HOME": t.TempDir(), "MASH_NAME": "a", "MASH_GROUP": testGroup, "MASH_URL": "nats://127.0.0.1:1",
 		"MASH_OWNER": "o", "MASH_CREDS": creds}
 	sp := spoolOf(env)
 	if err := sp.Init(); err != nil {

@@ -14,7 +14,7 @@ import (
 	"github.com/bogworks/mash/internal/namerule"
 )
 
-const statusRuleBody = `{"version":1,"rules":[{"id":"no-cc","match":{"agent":{"is":"cc"}},"message":"retired"},{"id":"no-x","match":{"name":{"is":"x"}},"message":"x"}]}`
+const statusRuleBody = `{"version":1,"rules":[{"id":"no-cc","match":{"group":{"is":"cc"}},"message":"retired"},{"id":"no-x","match":{"instance":{"is":"x"}},"message":"x"}]}`
 
 func TestStatusShowsNameRuleNone(t *testing.T) {
 	src := &statusSource{cfg: config.Config{Name: "a"}, cli: true, getenv: func(string) string { return "" }}
@@ -61,7 +61,7 @@ func TestStatusNameRuleOmittedOnConfigError(t *testing.T) {
 func TestAdminProvisionAppliesTheNameRule(t *testing.T) {
 	w := newWorld(t, "a")
 	p := filepath.Join(t.TempDir(), "rule.json")
-	if err := os.WriteFile(p, []byte(`{"version":1,"rules":[{"id":"no-c","match":{"name":{"is":"c"}},"message":"c is retired"}]}`), 0o600); err != nil {
+	if err := os.WriteFile(p, []byte(`{"version":1,"rules":[{"id":"no-c","match":{"instance":{"is":"c"}},"message":"c is retired"}]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	r, err := namerule.Load(p)
@@ -70,9 +70,9 @@ func TestAdminProvisionAppliesTheNameRule(t *testing.T) {
 	}
 	cfg := config.Config{InsecureLoopback: true, URL: w.e.URL, Owner: w.e.Owner, AdminCreds: w.e.AdminCreds, NameRule: r, NameRulePath: p}
 	run := func(name string) (string, int) {
-		_, u := w.e.Mint(t, name)
+		_, u := w.e.Mint(t, tAddr(name))
 		var out, errb bytes.Buffer
-		code := adminCmd(cfg, []string{"provision", name, "--user", u, "--account", w.e.Account}, &out, &errb)
+		code := adminCmd(cfg, []string{"provision", tTo(name), "--user", u, "--account", w.e.Account}, &out, &errb)
 		return out.String() + errb.String(), code
 	}
 	if out, code := run("c"); code == 0 || !strings.Contains(out, `name rule "no-c"`) || !strings.Contains(out, "c is retired") {

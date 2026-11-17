@@ -85,11 +85,12 @@ func TestProvisionWithCustomLimits(t *testing.T) {
 	if err := a.SetLimits(bigLimits()); err != nil {
 		t.Fatal(err)
 	}
-	_, user := e.Mint(t, "alpha")
-	if _, err := a.Provision(ctx, "alpha", user, e.Account, "", admin.Meta{}); err != nil {
+	id := ep(t, "alpha")
+	_, user := e.Mint(t, id)
+	if _, err := a.Provision(ctx, id, user, e.Account, "", admin.Meta{}); err != nil {
 		t.Fatal(err)
 	}
-	s, err := js.Stream(ctx, "inbox-alpha")
+	s, err := js.Stream(ctx, "inbox-o_dev_alpha")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,13 +99,13 @@ func TestProvisionWithCustomLimits(t *testing.T) {
 		t.Fatalf("config %+v", c)
 	}
 	// EnsureInbox is checked against the configured limits: fine with them, an error with the defaults.
-	if _, err := a.EnsureInbox(ctx, "alpha"); err != nil {
+	if _, err := a.EnsureInbox(ctx, ep(t, "alpha")); err != nil {
 		t.Fatal(err)
 	}
 	if err := a.SetLimits(store.DefaultLimits()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.EnsureInbox(ctx, "alpha"); err == nil || !strings.Contains(err.Error(), "max_age") {
+	if _, err := a.EnsureInbox(ctx, ep(t, "alpha")); err == nil || !strings.Contains(err.Error(), "max_age") {
 		t.Fatalf("EnsureInbox with other limits: %v", err)
 	}
 }
@@ -112,15 +113,20 @@ func TestProvisionWithCustomLimits(t *testing.T) {
 func provisionTwo(t *testing.T, e *testenv.Env, a *admin.Admin) {
 	t.Helper()
 	for _, n := range []string{"alpha", "beta"} {
-		_, user := e.Mint(t, n)
-		if _, err := a.Provision(context.Background(), n, user, e.Account, "", admin.Meta{}); err != nil {
+		id := ep(t, n)
+		_, user := e.Mint(t, id)
+		if _, err := a.Provision(context.Background(), id, user, e.Account, "", admin.Meta{}); err != nil {
 			t.Fatal(err)
 		}
 	}
 }
 
+// inboxCfg is the config of an endpoint's inbox stream. name is the instance of ep(t, name), or a flat key.
 func inboxCfg(t *testing.T, js jetstream.JetStream, name string) jetstream.StreamConfig {
 	t.Helper()
+	if !strings.Contains(name, "_") {
+		name = "o_dev_" + name
+	}
 	s, err := js.Stream(context.Background(), "inbox-"+name)
 	if err != nil {
 		t.Fatal(err)
@@ -138,8 +144,8 @@ func TestApplyLimitsRaisesAndIsIdempotent(t *testing.T) {
 	if err := a.SetLimits(bigLimits()); err != nil {
 		t.Fatal(err)
 	}
-	lines, err := a.ApplyLimits(ctx, "alpha")
-	if err != nil || len(lines) != 1 || !strings.HasPrefix(lines[0], "alpha: ") ||
+	lines, err := a.ApplyLimits(ctx, ep(t, "alpha"))
+	if err != nil || len(lines) != 1 || !strings.HasPrefix(lines[0], "o_dev_alpha: ") ||
 		!strings.Contains(lines[0], "max_bytes") || !strings.Contains(lines[0], "max_age") || !strings.Contains(lines[0], "max_consumers") {
 		t.Fatalf("named: %v %v", lines, err)
 	}
@@ -150,10 +156,10 @@ func TestApplyLimitsRaisesAndIsIdempotent(t *testing.T) {
 		t.Fatalf("beta touched: %+v", c)
 	}
 	lines, err = a.ApplyLimits(ctx) // all; alpha is already there
-	if err != nil || len(lines) != 2 || lines[0] != "alpha: unchanged" || !strings.HasPrefix(lines[1], "beta: max_bytes") {
+	if err != nil || len(lines) != 2 || lines[0] != "o_dev_alpha: unchanged" || !strings.HasPrefix(lines[1], "o_dev_beta: max_bytes") {
 		t.Fatalf("all: %v %v", lines, err)
 	}
-	if lines, err = a.ApplyLimits(ctx); err != nil || lines[0] != "alpha: unchanged" || lines[1] != "beta: unchanged" {
+	if lines, err = a.ApplyLimits(ctx); err != nil || lines[0] != "o_dev_alpha: unchanged" || lines[1] != "o_dev_beta: unchanged" {
 		t.Fatalf("idempotent: %v %v", lines, err)
 	}
 }
@@ -177,15 +183,15 @@ func TestApplyLimitsRefusesToLower(t *testing.T) {
 				t.Fatal(err)
 			}
 			before := inboxCfg(t, js, "alpha")
-			lines, err := a.ApplyLimits(ctx, "alpha")
-			if err == nil || !strings.Contains(err.Error(), "alpha") || !strings.Contains(err.Error(), c.field) || len(lines) != 0 {
+			lines, err := a.ApplyLimits(ctx, ep(t, "alpha"))
+			if err == nil || !strings.Contains(err.Error(), "o_dev_alpha") || !strings.Contains(err.Error(), c.field) || len(lines) != 0 {
 				t.Fatalf("lines %v err %v", lines, err)
 			}
 			if after := inboxCfg(t, js, "alpha"); after.MaxBytes != before.MaxBytes || after.MaxAge != before.MaxAge || after.MaxConsumers != before.MaxConsumers {
 				t.Fatalf("changed despite refusal: %+v -> %+v", before, after)
 			}
 			// With several endpoints the refusal is reported for each.
-			if _, err := a.ApplyLimits(ctx); err == nil || !strings.Contains(err.Error(), "beta") {
+			if _, err := a.ApplyLimits(ctx); err == nil || !strings.Contains(err.Error(), "o_dev_beta") {
 				t.Fatalf("all: %v", err)
 			}
 		})
@@ -219,7 +225,7 @@ func TestApplyLimitsRefusesToLowerUnlimited(t *testing.T) {
 			if err := a.SetLimits(l); err != nil {
 				t.Fatal(err)
 			}
-			lines, err := a.ApplyLimits(ctx, "alpha")
+			lines, err := a.ApplyLimits(ctx, ep(t, "alpha"))
 			if err == nil || !strings.Contains(err.Error(), c.field) || !strings.Contains(err.Error(), "unlimited") || len(lines) != 0 {
 				t.Fatalf("lines %v err %v", lines, err)
 			}
@@ -248,14 +254,15 @@ func TestProvisionNeverLowersExistingInbox(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			e, a, js := setup(t)
 			ctx := context.Background()
-			_, user := e.Mint(t, "alpha")
-			cfg := store.InboxConfigFor(e.Owner, "alpha", def)
+			id := ep(t, "alpha")
+			_, user := e.Mint(t, id)
+			cfg := store.InboxConfigFor(id, def)
 			c.mod(&cfg)
 			if _, err := js.CreateStream(ctx, cfg); err != nil {
 				t.Skipf("server refuses this config: %v", err)
 			}
 			before := inboxCfg(t, js, "alpha")
-			_, err := a.Provision(ctx, "alpha", user, e.Account, "", admin.Meta{})
+			_, err := a.Provision(ctx, id, user, e.Account, "", admin.Meta{})
 			if err == nil || !strings.Contains(err.Error(), c.field) || !strings.Contains(err.Error(), "never lowers") {
 				t.Fatalf("err %v", err)
 			}
@@ -273,15 +280,16 @@ func TestProvisionNeverLowersExistingInbox(t *testing.T) {
 func TestProvisionRetryRaisesLowerExistingInbox(t *testing.T) {
 	e, a, js := setup(t)
 	ctx := context.Background()
-	_, user := e.Mint(t, "alpha")
+	id := ep(t, "alpha")
+	_, user := e.Mint(t, id)
 	def := store.DefaultLimits()
-	cfg := store.InboxConfigFor(e.Owner, "alpha", def)
+	cfg := store.InboxConfigFor(id, def)
 	cfg.MaxBytes = def.InboxMaxBytes / 2
 	cfg.MaxAge = def.InboxMaxAge // equal
 	if _, err := js.CreateStream(ctx, cfg); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.Provision(ctx, "alpha", user, e.Account, "", admin.Meta{}); err != nil {
+	if _, err := a.Provision(ctx, id, user, e.Account, "", admin.Meta{}); err != nil {
 		t.Fatal(err)
 	}
 	if got := inboxCfg(t, js, "alpha"); got.MaxBytes != def.InboxMaxBytes || got.MaxAge != def.InboxMaxAge {

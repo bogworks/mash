@@ -9,7 +9,6 @@ import (
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats.go/jetstream"
 
-	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/store"
 )
 
@@ -21,7 +20,7 @@ func (f *fixture) fillInbox(t *testing.T, name string, n int) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := js.Stream(ctx, sap.InboxStream(name))
+	s, err := js.Stream(ctx, taddr(name).InboxStream())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +35,7 @@ func (f *fixture) fillInbox(t *testing.T, name string, n int) {
 	}
 	body := []byte(strings.Repeat("x", 500))
 	for i := 0; i < n; i++ {
-		if _, err := js.Publish(ctx, sap.For(f.e.Owner, name).Mail, body); err != nil {
+		if _, err := js.Publish(ctx, taddr(name).Subjects().Mail, body); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -61,7 +60,7 @@ func TestInboxEvictionLineSurvivesTheConsumerCatchingUp(t *testing.T) {
 	deadline := time.Now().Add(10 * time.Second)
 	for {
 		js, _ := jetstream.New(f.e.Conn(t, f.e.AdminCreds))
-		c, err := js.Consumer(context.Background(), sap.InboxStream("a"), store.Consumer)
+		c, err := js.Consumer(context.Background(), taddr("a").InboxStream(), store.Consumer)
 		if err == nil {
 			if ci, err := c.Info(context.Background()); err == nil && ci.NumPending == 0 && ci.Delivered.Stream > 0 {
 				break
@@ -80,7 +79,7 @@ func TestInboxEvictionLineSurvivesTheConsumerCatchingUp(t *testing.T) {
 func TestInboxEvictionLineIsEmptyForACleanInbox(t *testing.T) {
 	f := newFixture(t, "a", "b")
 	b := f.client(t, "b")
-	if _, err := b.Send(context.Background(), "a", "hello", 0); err != nil {
+	if _, err := b.Send(context.Background(), tdot("a"), "hello", 0); err != nil {
 		t.Fatal(err)
 	}
 	ep := f.client(t, "a")
@@ -99,7 +98,7 @@ func TestInboxEvictionLineIsSilentWhenInfoIsNotPermitted(t *testing.T) {
 	}
 	creds, _ := f.e.MintRaw(t, "nopriv", jwt.Permissions{
 		Pub: jwt.Permission{Allow: []string{"_INBOX.>"}}, Sub: jwt.Permission{Allow: []string{"_INBOX.>"}}})
-	js, err := jetstream.New(f.e.ConnAs(t, creds, "nopriv"))
+	js, err := jetstream.New(f.e.ConnAs(t, creds, tkey("nopriv")))
 	if err != nil {
 		t.Fatal(err)
 	}

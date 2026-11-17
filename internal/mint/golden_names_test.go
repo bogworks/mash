@@ -1,4 +1,4 @@
-// Characterisation tests (plan 2b, Phase 0): these pin today's identifiers and validity for legacy identities; a change here is a change to a legacy identifier and needs its own decision.
+// Characterisation tests (plan 2b, Phase 0): these pin today's identifiers; a change here is a change to an identifier and needs its own decision.
 
 package mint
 
@@ -9,9 +9,9 @@ import (
 	"github.com/nats-io/jwt/v2"
 )
 
-// The NATS user's name is the endpoint's bare name.
+// The NATS user's name is the endpoint's dotted address.
 func TestGoldenMintedUserName(t *testing.T) {
-	m, err := Mint(newFakeKeys(t), "o", "a", nil)
+	m, err := Mint(newFakeKeys(t), testAddr, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -19,7 +19,7 @@ func TestGoldenMintedUserName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if uc.Name != "a" || m.Name != "a" {
+	if uc.Name != "o.g.a" || m.Name != "o.g.a" {
 		t.Errorf("name %q minted name %q", uc.Name, m.Name)
 	}
 	if !strings.Contains(string(m.Creds), "BEGIN NATS USER JWT") {

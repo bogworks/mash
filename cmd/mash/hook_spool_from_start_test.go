@@ -19,18 +19,18 @@ func TestServeSpoolFromStartHoldsMailBeforeAnyHook(t *testing.T) {
 	s := startServe(t, w.env["a"])
 	s.initialize(t)
 	s.tools(t)
-	eventually(t, 5*time.Second, "a online", func() bool { out, _ := w.cli(t, "a", "who"); return strings.Contains(out, "a\tonline") })
+	eventually(t, 5*time.Second, "a online", func() bool { out, _ := w.cli(t, "a", "who"); return strings.Contains(out, tTo("a")+"\tonline") })
 	sp := spoolOf(w.env["a"])
 	eventually(t, 5*time.Second, "serve made the spool", func() bool { _, err := os.Stat(sp.Dir); return err == nil })
 	// No hook has run.
-	if _, code := w.cli(t, "b", "send", "a", "--kind", "question", "sent during startup"); code != 0 {
+	if _, code := w.cli(t, "b", "send", tTo("a"), "--kind", "question", "sent during startup"); code != 0 {
 		t.Fatal("send failed")
 	}
 	eventually(t, 5*time.Second, "serve spooled it", func() bool { e, _ := sp.Waiting(); return len(e) == 1 })
 	if n := unreadOf(t, w, "a"); n != 1 {
 		t.Fatalf("unread %d, want 1: nothing is acked before a hook shows it", n)
 	}
-	if ev := content(s.await(t, 15*time.Second, isChannel)); ev != "1 message from b (question)" {
+	if ev := content(s.await(t, 15*time.Second, isChannel)); ev != "1 message from o.dev.b (question)" {
 		t.Fatalf("the only channel event is the wake, the summary line alone; got %q", ev)
 	}
 	if n := unreadOf(t, w, "a"); n != 1 {
@@ -51,13 +51,13 @@ func TestServeSpoolFromStartWakesAtOnceBeforeAnyHook(t *testing.T) {
 	s := startServe(t, w.env["a"])
 	s.initialize(t)
 	s.tools(t)
-	eventually(t, 5*time.Second, "a online", func() bool { out, _ := w.cli(t, "a", "who"); return strings.Contains(out, "a\tonline") })
+	eventually(t, 5*time.Second, "a online", func() bool { out, _ := w.cli(t, "a", "who"); return strings.Contains(out, tTo("a")+"\tonline") })
 	sp := spoolOf(w.env["a"])
 	eventually(t, 5*time.Second, "serve made the spool", func() bool { _, err := os.Stat(sp.Dir); return err == nil })
-	if _, code := w.cli(t, "b", "send", "a", "first mail"); code != 0 {
+	if _, code := w.cli(t, "b", "send", tTo("a"), "first mail"); code != 0 {
 		t.Fatal("send failed")
 	}
-	if ev := content(s.await(t, 2*time.Second, isChannel)); ev != "1 message from b (task)" {
+	if ev := content(s.await(t, 2*time.Second, isChannel)); ev != "1 message from o.dev.b (task)" {
 		t.Fatalf("the wake %q, want the summary line alone", ev)
 	}
 	if n := unreadOf(t, w, "a"); n != 1 {
@@ -80,8 +80,8 @@ func TestServeSpoolFromStartNeedsASpool(t *testing.T) {
 	s := startServe(t, w.env["a"])
 	s.initialize(t)
 	s.tools(t)
-	eventually(t, 5*time.Second, "a online", func() bool { out, _ := w.cli(t, "a", "who"); return strings.Contains(out, "a\tonline") })
-	if _, code := w.cli(t, "b", "send", "a", "must stay unacked"); code != 0 {
+	eventually(t, 5*time.Second, "a online", func() bool { out, _ := w.cli(t, "a", "who"); return strings.Contains(out, tTo("a")+"\tonline") })
+	if _, code := w.cli(t, "b", "send", tTo("a"), "must stay unacked"); code != 0 {
 		t.Fatal("send failed")
 	}
 	notice := content(s.await(t, 15*time.Second, isChannel))

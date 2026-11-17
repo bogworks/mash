@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
-	"strings"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -43,8 +42,9 @@ func LeaseTombstone() []byte {
 
 // SuspendedSubject is the one subject a suspended endpoint's inbox stream takes (ADR 0057). It sits outside agents.>,
 // so no endpoint's publish allow-list reaches it. MetaSuspendedSubjects (a JSON list) and MetaSuspendedAt (RFC 3339,
-// UTC) are the stream metadata keys that hold the subjects it had and when they were parked.
-func SuspendedSubject(name string) string { return "mash.suspended." + name }
+// UTC) are the stream metadata keys that hold the subjects it had and when they were parked. The argument is the
+// endpoint's flat key (Address.Flat).
+func SuspendedSubject(flat string) string { return "mash.suspended." + flat }
 
 const (
 	MetaSuspendedSubjects = "mash_suspended_subjects"
@@ -59,10 +59,10 @@ const (
 // dropped, after it the message is stored again. It bounds what "send --id" can promise.
 const InboxDuplicateWindow = 2 * time.Minute
 
-// InboxConfig is endpoint name's inbox stream. No subject transform: a stored
+// InboxConfig is the inbox stream of the endpoint at a. No subject transform: a stored
 // Agent-Sender header must verify against the stored subject (SAP §13.8).
-func InboxConfig(owner, name string) jetstream.StreamConfig {
-	return InboxConfigFor(owner, name, DefaultLimits())
+func InboxConfig(a sap.Address) jetstream.StreamConfig {
+	return InboxConfigFor(a, DefaultLimits())
 }
 
 // Limits are the configurable caps: the inbox's size, age and consumer count, and the two buckets' sizes.
@@ -98,25 +98,16 @@ func (l Limits) Validate() error {
 	return nil
 }
 
-// InboxConfigFor is InboxConfig under limits l: one stream filtered on the five-token mail subject of name under owner.
-func InboxConfigFor(owner, name string, l Limits) jetstream.StreamConfig {
-	return inboxStreamConfig(name, []string{sap.MailFilter(owner, name)}, l)
-}
-
-// InboxConfigIdentity is the inbox stream of the endpoint id under limits l: inbox-<flat key> filtered on the
-// identity's own mail subject only (id.MailFilter()). For a legacy identity it is InboxConfigFor(owner, name, l).
-func InboxConfigIdentity(id sap.EndpointIdentity, l Limits) jetstream.StreamConfig {
-	if id.IsLegacy() {
-		return InboxConfigFor(id.Owner, id.Name, l)
-	}
-	return inboxStreamConfig(id.Flat(), []string{id.MailFilter()}, l)
+// InboxConfigFor is InboxConfig under limits l: inbox-<flat key>, filtered on a's own mail subject only (a.MailFilter()).
+func InboxConfigFor(a sap.Address, l Limits) jetstream.StreamConfig {
+	return inboxStreamConfig(a.Flat(), []string{a.MailFilter()}, l)
 }
 
 // inboxStreamConfig is the one stream shape every inbox has; key is the directory key the stream is named for.
-func inboxStreamConfig(name string, subjects []string, l Limits) jetstream.StreamConfig {
+func inboxStreamConfig(key string, subjects []string, l Limits) jetstream.StreamConfig {
 	return jetstream.StreamConfig{
-		Name:              sap.InboxStream(name),
-		Description:       "mash inbox for " + name,
+		Name:              sap.InboxStream(key),
+		Description:       "mash inbox for " + key,
 		Subjects:          subjects,
 		Storage:           jetstream.FileStorage,
 		Retention:         jetstream.LimitsPolicy,
@@ -178,9 +169,9 @@ func RetiredConfig() jetstream.KeyValueConfig {
 // Retired is the value of one retired-name marker. It names the identity's three tokens and the user public key that
 // was retired; it never holds a seed or any other secret. User is empty when the record could not be read.
 type Retired struct {
-	Agent     string `json:"agent"`
 	Owner     string `json:"owner"`
-	Name      string `json:"name"`
+	Group     string `json:"group"`
+	Instance  string `json:"instance"`
 	User      string `json:"user,omitempty"`
 	RetiredAt string `json:"retired_at"` // RFC 3339, UTC
 	// State is RetiredPending while a retirement has started and not finished, and RetiredFinal once the record is gone.
@@ -227,12 +218,13 @@ func VerifyRetiredStatus(st jetstream.KeyValueStatus) error {
 	return nil
 }
 
-// Record is one directory entry (spec 6.1).
+// Record is one directory entry (spec 6.1). Owner, Group and Instance are the endpoint's address (Address); Agent is
+// the harness that runs it.
 type Record struct {
-	Name        string `json:"name"`
 	Owner       string `json:"owner"`
+	Group       string `json:"group"`
+	Instance    string `json:"instance"`
 	Agent       string `json:"agent"`
-	AgentToken  string `json:"agent_token"`
 	Account     string `json:"account"`
 	User        string `json:"user"`
 	MailSubject string `json:"mail_subject"`
@@ -240,33 +232,24 @@ type Record struct {
 	Note        string `json:"note,omitempty"`
 	// Role, Host and Labels are optional directory metadata: what the endpoint is for, the machine it is meant to run
 	// on, and free-form key=value labels (for example a team, project or fleet). They are the identity on record; the
-	// lease is the live view. Readers from before these fields ignore them.
+	// lease is the live view.
 	Role   string            `json:"role,omitempty"`
 	Host   string            `json:"host,omitempty"`
 	Labels map[string]string `json:"labels,omitempty"`
 	// Description is free text on what the endpoint does, and Caps are up to MaxCaps capability words (sorted), both
-	// set by the admin. Readers from before these fields ignore them, and set-meta keeps fields it does not know.
+	// set by the admin.
 	Description string   `json:"description,omitempty"`
 	Caps        []string `json:"caps,omitempty"`
-	// Zone is parse-only (ADR 0091): zones are removed and nothing writes it. It is read from a directory record a
-	// zoned release wrote, so the upgrade guards (ZonedRecordError) and "mashctl unzone" can find it. A record
-	// with a zone is refused at upgrade until unzone removes it.
-	Zone string `json:"zone,omitempty"`
-	// Alias is the legacy identity a new-form record answers to during the transition window (ADR 0076). Only a
-	// new-form record may carry it, only provisioning writes it, and the endpoint never does. Readers from before
-	// this field ignore it. It is removed with the legacy form.
-	Alias *Alias `json:"alias,omitempty"`
 }
 
-// Alias names a legacy identity (owner and name under the legacy rule) that a new-form record answers to.
-type Alias struct {
-	Owner string `json:"owner"`
-	Name  string `json:"name"`
+// Address is the endpoint address r names: sap.NewAddress(r.Owner, r.Group, r.Instance).
+func (r Record) Address() (sap.Address, error) {
+	return sap.NewAddress(r.Owner, r.Group, r.Instance)
 }
 
-// MailSubjectFor is the mail subject of an endpoint with this owner and name: always five tokens (ADR 0091).
-func MailSubjectFor(owner, name string) string {
-	return sap.For(owner, name).Mail
+// MailSubjectFor is the mail subject of the endpoint at a.
+func MailSubjectFor(a sap.Address) string {
+	return a.Subjects().Mail
 }
 
 // MaxMetaLen is the longest Role, Host or label value.
@@ -345,154 +328,35 @@ func validText(field, v string, max int) error {
 	return nil
 }
 
-// legacyCheck applies the legacy record checks to r as the record for key.
-func legacyCheck(key string, r Record) error {
-	if r.Name != key || r.User == "" || r.MailSubject == "" {
-		return fmt.Errorf("directory %s: incomplete record", key)
-	}
-	if r.Zone != "" {
-		// Parse-only: a record a zoned release wrote still reads, so the guards can name it (ADR 0091).
-		if z, ok := sap.LegacyZoneOfMailSubject(r.MailSubject, r.Owner, r.Name); !ok || z != r.Zone {
-			return fmt.Errorf("directory %s: invalid zone %q", key, r.Zone)
-		}
-		return nil
-	}
-	if want := MailSubjectFor(r.Owner, r.Name); r.MailSubject != want {
-		return fmt.Errorf("directory %s: mail subject %q is not %q", key, r.MailSubject, want)
-	}
-	return nil
-}
-
-// looksNewForm reports whether r, read under key, was meant as a new-form record: only when key contains an
-// underscore, which a legacy key never has (the legacy name rule forbids it). Every other record keeps its legacy
-// error text.
-func looksNewForm(key string) bool {
-	return strings.Contains(key, "_")
-}
-
-// newFormCheck applies the new-form record rules to r as the record for key and returns its identity.
-func newFormCheck(key string, r Record) (sap.EndpointIdentity, error) {
-	id, err := sap.New(r.AgentToken, r.Owner, r.Name)
-	if err != nil {
-		return sap.EndpointIdentity{}, fmt.Errorf("directory %s: new-form identity (agent_token, owner, name) is invalid: %w", key, err)
-	}
-	if key != id.Flat() {
-		return sap.EndpointIdentity{}, fmt.Errorf("directory %s: new-form record must be keyed by its flat identity %q", key, id.Flat())
-	}
-	if want := id.Subjects().Mail; r.MailSubject != want {
-		return sap.EndpointIdentity{}, fmt.Errorf("directory %s: new-form mail subject %q is not %q", key, r.MailSubject, want)
-	}
-	if r.Zone != "" {
-		return sap.EndpointIdentity{}, fmt.Errorf("directory %s: new-form record must not have a zone (got %q)", key, r.Zone)
-	}
-	if r.User == "" {
-		return sap.EndpointIdentity{}, fmt.Errorf("directory %s: incomplete record", key)
-	}
-	return id, nil
-}
-
-// ParseRecord decodes a directory value and checks it names key. A record that passes the legacy checks is a legacy
-// record; otherwise it may be a new-form record (three-token identity, keyed by the flat form), else the legacy error
-// is returned, unless the record looks new-form, when the broken new-form rule is named.
+// ParseRecord decodes a directory value and checks it is an endpoint of this release stored under key: a valid
+// address (owner, group, instance), key equal to the address's flat key, the mail subject of that address, and a user.
+// Any other value is refused.
 func ParseRecord(key string, value []byte) (Record, error) {
 	var r Record
 	if err := json.Unmarshal(value, &r); err != nil {
 		return Record{}, fmt.Errorf("directory %s: %w", key, err)
 	}
-	lerr := legacyCheck(key, r)
-	if lerr == nil {
-		if r.Alias != nil {
-			return Record{}, fmt.Errorf("directory %s: a legacy record cannot carry an alias", key)
-		}
-		return r, nil
+	a, err := r.Address()
+	if err != nil {
+		return Record{}, fmt.Errorf("directory %s: not an endpoint of this release: %w", key, err)
 	}
-	if _, nerr := newFormCheck(key, r); nerr != nil {
-		if looksNewForm(key) {
-			return Record{}, nerr
-		}
-		return Record{}, lerr
+	if key != a.Flat() {
+		return Record{}, fmt.Errorf("directory %s: not an endpoint of this release: the record must be keyed by its flat key %q", key, a.Flat())
 	}
-	if err := aliasCheck(key, r); err != nil {
-		return Record{}, err
+	if want := a.Subjects().Mail; r.MailSubject != want {
+		return Record{}, fmt.Errorf("directory %s: not an endpoint of this release: mail subject %q is not %q", key, r.MailSubject, want)
+	}
+	if r.User == "" {
+		return Record{}, fmt.Errorf("directory %s: not an endpoint of this release: no user", key)
 	}
 	return r, nil
 }
 
-// aliasCheck applies the alias rules to a new-form record r read under key: the alias, if any, must be a valid legacy
-// identity whose owner differs from r's own owner (mash's admission rule, so the legacy wildcard filter of the alias
-// never reaches r).
-func aliasCheck(key string, r Record) error {
-	if r.Alias == nil {
-		return nil
-	}
-	if _, _, err := r.AliasIdentity(); err != nil {
-		return fmt.Errorf("directory %s: invalid alias: %w", key, err)
-	}
-	if r.Alias.Owner == r.Owner {
-		return fmt.Errorf("directory %s: alias owner %q equals the record's own owner", key, r.Alias.Owner)
-	}
-	return nil
-}
-
-// AliasIdentity is the legacy identity r's alias names. ok is false (and err nil) when r carries no alias, and false
-// with an error when the alias is not a valid legacy identity.
-func (r Record) AliasIdentity() (id sap.EndpointIdentity, ok bool, err error) {
-	if r.Alias == nil {
-		return sap.EndpointIdentity{}, false, nil
-	}
-	id, err = sap.Legacy(r.Alias.Owner, r.Alias.Name)
+// GetRecord reads the directory record under key (an endpoint's flat key).
+func GetRecord(ctx context.Context, kv jetstream.KeyValue, key string) (Record, error) {
+	e, err := kv.Get(ctx, key)
 	if err != nil {
-		return sap.EndpointIdentity{}, false, err
+		return Record{}, fmt.Errorf("directory %s: %w", key, err)
 	}
-	return id, true, nil
-}
-
-// Identity is the endpoint identity r names: the legacy identity when r satisfies the legacy checks (keyed by its
-// name) and its owner and name are valid legacy tokens, else the new-form identity of (agent_token, owner, name).
-// An odd legacy record that ParseRecord accepts can have no identity here.
-func (r Record) Identity() (sap.EndpointIdentity, error) {
-	if legacyCheck(r.Name, r) == nil {
-		if id, err := sap.Legacy(r.Owner, r.Name); err == nil {
-			return id, nil
-		}
-	}
-	id, err := sap.New(r.AgentToken, r.Owner, r.Name)
-	if err != nil {
-		return sap.EndpointIdentity{}, fmt.Errorf("directory %s: record names no identity: %w", r.Name, err)
-	}
-	return newFormCheck(id.Flat(), r)
-}
-
-// Key is the directory key of r: the name for a record that passes the legacy checks (even when its owner or name
-// is not a valid legacy token, so Identity errors), the flat identity for a new-form record. It is empty when r is
-// neither. Key is the writer's key for every record ParseRecord accepts.
-func (r Record) Key() string {
-	if legacyCheck(r.Name, r) == nil {
-		return r.Name
-	}
-	id, err := r.Identity()
-	if err != nil {
-		return ""
-	}
-	return id.Flat()
-}
-
-// KeyOrName is Key(), or Name for a record that names no identity (a bare value that never went through
-// ParseRecord). A reader that indexes the directory, a lease or a live-presence map by a record uses this, so a
-// new-form record (keyed by its flat identity) is never confused with a legacy one of the same name; for every legacy
-// record it is Name.
-func (r Record) KeyOrName() string {
-	if k := r.Key(); k != "" {
-		return k
-	}
-	return r.Name
-}
-
-// GetRecord reads name's directory record.
-func GetRecord(ctx context.Context, kv jetstream.KeyValue, name string) (Record, error) {
-	e, err := kv.Get(ctx, name)
-	if err != nil {
-		return Record{}, fmt.Errorf("directory %s: %w", name, err)
-	}
-	return ParseRecord(name, e.Value())
+	return ParseRecord(key, e.Value())
 }

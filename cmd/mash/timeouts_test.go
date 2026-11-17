@@ -136,7 +136,7 @@ func TestSendAdoptionUsesTheCallTimeout(t *testing.T) {
 		}
 		var out, errb bytes.Buffer
 		in := &slowReader{delay: 2500 * time.Millisecond, body: "late body"} // past the 2 s prefetch freshness
-		code := run([]string{"send", "peer1", "-"}, envFrom(env), in, &out, &errb)
+		code := run([]string{"send", tTo("peer1"), "-"}, envFrom(env), in, &out, &errb)
 		return out.String() + errb.String(), code
 	}
 	const warn = "sending under this command's own instance"

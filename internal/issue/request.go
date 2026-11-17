@@ -13,7 +13,6 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/nats-io/nkeys"
@@ -133,7 +132,7 @@ func (r Request) Validate() *Refusal {
 		return refuse(CodeMalformed, "version must be %d", RequestVersion)
 	}
 	if _, err := r.AddressParts(); err != nil {
-		return refuse(CodeMalformed, "address is not range.owner.name")
+		return refuse(CodeMalformed, "address is not owner.group.instance")
 	}
 	if !nkeys.IsValidPublicUserKey(r.PublicKey) {
 		return refuse(CodeBadKey, "public_key is not a NATS user public key")
@@ -169,13 +168,14 @@ func validHost(h string) bool {
 	return true
 }
 
-// AddressParts is the range, owner and name of the request's address.
-func (r Request) AddressParts() (sap.EndpointIdentity, error) {
-	id, err := sap.ParseCanonical(r.Address)
+// AddressParts is the owner, group and instance of the request's address. The policy path calls the owner token the
+// range and the group token the owner.
+func (r Request) AddressParts() (sap.Address, error) {
+	id, err := sap.ParseAddress(r.Address)
 	if err != nil {
 		return id, err
 	}
-	if strings.Join([]string{id.Agent, id.Owner, id.Name}, ".") != r.Address {
+	if id.String() != r.Address {
 		return id, errors.New("address is not in canonical form")
 	}
 	return id, nil
@@ -187,7 +187,7 @@ func (r Request) Group() string {
 	if err != nil {
 		return ""
 	}
-	return id.Agent + "." + id.Owner
+	return id.Owner + "." + id.Group
 }
 
 // verifyProof reports whether the request's proof is the wrangler's signature over the canonical bytes.

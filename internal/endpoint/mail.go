@@ -10,14 +10,11 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
-	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/kind"
 	"github.com/bogworks/mash/internal/render"
 	"github.com/bogworks/mash/internal/sap"
@@ -55,14 +52,9 @@ const maxPending = 200
 // signed. Older (or future) signatures are labelled stale: a replayed capture.
 var MaxSignedAge = 5 * time.Minute
 
-// shownName is the sender name as displayed: a self-declared name only when it
-// is a valid endpoint name, else a short form of the key (never raw text).
+// shownName is the sender as displayed when it is not proven: a short form of its key, never a self-declared name (an
+// endpoint's address is shown only from the directory, see classify).
 func shownName(h sap.SenderHeader) string {
-	// Only a legacy-valid name is shown for a sender that is not proven: a flat key is shown only from the directory
-	// (classify), never as a self-declared name.
-	if config.ValidName(h.Name) {
-		return h.Name
-	}
 	if len(h.User) > 8 {
 		return h.User[:4] + "…" + h.User[len(h.User)-4:]
 	}
@@ -187,7 +179,7 @@ func (s *seenSet) dup(p pending) bool {
 	return p.ts != "" && copied
 }
 
-// forget undoes mark for p, a message that was recorded but not shown (a held legacy message dropped unacked): its
+// forget undoes mark for p, a message that was recorded but not shown (a held message dropped unacked): its
 // redelivery must be shown, not taken for a repeat.
 func (s *seenSet) forget(p pending) {
 	if s == nil || p.key == "" {
@@ -327,359 +319,97 @@ type pending struct {
 	ts   string // the signed timestamp of signed mail, to tell a copy from a re-send
 }
 
-// inboxSource is one stream an endpoint's consumer reads: the primary inbox stream (ref stream "") and, for an
-// endpoint with an alias, the legacy inbox stream (LegacyStream) through its existing durable consumer.
-type inboxSource struct {
-	ref    string // the MsgRef stream: "" or LegacyStream
-	stream string // the JetStream stream name
-	cons   jetstream.Consumer
-}
-
-// sources are the streams this endpoint reads, primary first.
-func (e *Endpoint) sources() []inboxSource {
-	out := []inboxSource{{ref: "", stream: sap.InboxStream(e.key)}}
-	if e.hasLegacyStream() {
-		out = append(out, inboxSource{ref: LegacyStream, stream: sap.InboxStream(e.legacyKey)})
-	}
-	return out
-}
-
 // consume starts the inbox consumer and its delivery worker. The consumer's
 // callback only classifies and queues; one worker goroutine gathers messages
 // until SettleMS pass with no new one, pushes them as one event, then acks
 // them (a failed write naks them for redelivery). Being the only writer, the
 // worker keeps stream order and makes de-duplication exact. The returned
 // stop waits for the consumer to close and the worker to finish.
-//
-// An endpoint with an alias consumes a second stream, the legacy inbox stream, through the durable consumer it already
-// has there (never a new one: a fresh consumer would deliver mail the old one acknowledged). Both feed the one queue,
-// so the worker is still the only writer. A message's ack goes to its own delivery, whichever stream it came from.
-//
-// The legacy stream is consumed only while this endpoint holds the legacy identity's lease (legacylease.go): without
-// it the stream is left to its holder (the consumer is not even created here), and when the lease is lost mid-session
-// its consume loop is stopped while the own stream's keeps running.
 func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), error) {
 	if !e.graceWait(ctx) { // a takeover from a live serve of this session: let it stop first
 		return func() {}, nil
 	}
-	srcs := e.sources()
-	if !e.legacyReading() {
-		kept := srcs[:0]
-		for _, src := range srcs {
-			if src.ref != LegacyStream {
-				kept = append(kept, src)
-			}
-		}
-		srcs = kept
-	}
-	for i := range srcs {
-		cons, err := e.js.Consumer(ctx, srcs[i].stream, store.Consumer)
-		if err != nil {
-			if srcs[i].ref == LegacyStream {
-				return nil, fmt.Errorf("mash: legacy inbox consumer: %w", err)
-			}
-			return nil, fmt.Errorf("mash: inbox consumer: %w", err)
-		}
-		srcs[i].cons = cons
+	stream := e.ident.InboxStream()
+	cons, err := e.js.Consumer(ctx, stream, store.Consumer)
+	if err != nil {
+		return nil, fmt.Errorf("mash: inbox consumer: %w", err)
 	}
 	queue := make(chan pending, maxPending)
-	// The startup messages are those a consumer held unacked or pending, all at or below Delivered + NumPending, read in
+	// The startup messages are those the consumer held unacked or pending, all at or below Delivered + NumPending, read in
 	// one consumer info (no extra round trip; startup is budgeted). A gap among the pending (a deleted message) only
 	// lowers this bound, which delays readiness to the server's rule and never makes it early; a later arrival is above it.
-	starts := map[string]streamStart{}
-	probes := map[string]wakingProbe{}
-	floors := map[string]func() (uint64, bool){}
-	for _, src := range srcs {
-		ci := src.cons.CachedInfo()
-		starts[src.ref] = streamStart{Backlog: int(ci.NumPending) + ci.NumAckPending, Last: ci.Delivered.Stream + ci.NumPending}
-		probes[src.ref] = e.wakingProbe(src.cons, src.stream)
-		floors[src.ref] = e.consumerAckFloor(src.cons)
-		if src.ref == LegacyStream {
-			fl := floors[src.ref]
-			e.legacy.floor.Store(&fl)
-		}
-	}
-	if e.hasLegacyStream() {
-		// The legacy consumer may start later (legacyManager): its floor reads from what it publishes then.
-		floors[LegacyStream] = func() (uint64, bool) {
-			if f := e.legacy.floor.Load(); f != nil {
-				return (*f)()
-			}
-			return 0, false
-		}
-	}
-	e.waking.startStreams(starts, true, probes)
+	ci := cons.CachedInfo()
+	e.waking.start(int(ci.NumPending)+ci.NumAckPending, ci.Delivered.Stream+ci.NumPending, true, e.wakingProbe(cons, stream))
 	quit := make(chan struct{})
 	workerDone := make(chan struct{})
-	go e.deliverLoop(deliver, queue, quit, workerDone, floors)
+	go e.deliverLoop(deliver, queue, quit, workerDone, map[string]func() (uint64, bool){"": e.consumerAckFloor(cons)})
 
-	// handler is the message callback of one consume loop. A legacy loop is bound to the epoch of the hold it started
-	// under: once the hold has changed it queues nothing (the mail is nak'd to the current hold's loop).
-	handler := func(stream string, epoch uint64, busy *atomic.Int32) func(m jetstream.Msg) {
-		return func(m jetstream.Msg) {
-			if busy != nil { // a legacy loop is not finished while a callback of it runs, whatever its Closed says
-				busy.Add(1)
-				defer busy.Add(-1)
+	handler := func(m jetstream.Msg) {
+		meta, err := m.Metadata()
+		if err != nil {
+			e.log.Printf("message without metadata: %v", err)
+			_ = m.Term()
+			return
+		}
+		ref := MsgRef{Seq: meta.Sequence.Stream}
+		if e.leaseGone.Load() {
+			_ = m.NakWithDelay(time.Second) // the lease is gone: not queued, not acked; redelivered after a second, not in a loop
+			return
+		}
+		defer e.waking.received(ref)
+		// The sender's signature binds the subject the message was stored under, so classify checks it against the
+		// stored subject.
+		from, trust, h, ok := e.classify(m.Subject(), m.Headers(), m.Data(), meta.Timestamp)
+		if !ok {
+			e.dropped.Add(1)
+			e.log.Printf("dropped #%s: %s sender header (claimed user %s)", FormatMsgRef(ref), trust, h.User)
+			if e.verdict() == verdictHeld {
+				_ = m.Ack()
 			}
-			if stream == LegacyStream {
-				if testLegacyHandlerGate != nil {
-					testLegacyHandlerGate()
-				}
-				if !e.legacyReading() {
-					// the lease is gone: not queued, not acked, and not left pending until the ack wait (a retake by this
-					// endpoint would not get it for that long); nak'd with a delay, so a loop that is still pulling does not spin
-					_ = m.NakWithDelay(time.Second)
-					return
-				}
-				if e.legacy.epoch.Load() != epoch {
-					_ = m.Nak() // a loop of an earlier hold: the current hold's loop is redelivered it
-					return
-				}
-			}
-			meta, err := m.Metadata()
-			if err != nil {
-				e.log.Printf("message without metadata: %v", err)
-				_ = m.Term()
-				return
-			}
-			ref := MsgRef{Stream: stream, Seq: meta.Sequence.Stream}
-			if !e.leaseHeldFor(stream) {
-				_ = m.NakWithDelay(time.Second) // the lease is gone: not queued, not acked; redelivered after a second, not in a loop
-				return
-			}
-			defer e.waking.received(ref)
-			// The sender's signature binds the subject the message was stored under, so classify checks it against the
-			// stored subject: a legacy-stream message keeps its legacy subject and verifies as it always did.
-			from, trust, h, ok := e.classify(m.Subject(), m.Headers(), m.Data(), meta.Timestamp)
-			if !ok {
-				e.dropped.Add(1)
-				e.log.Printf("dropped #%s: %s sender header (claimed user %s)", FormatMsgRef(ref), trust, h.User)
-				if e.verdictFor(stream) == verdictHeld {
-					_ = m.Ack()
-				}
-				return
-			}
-			var key string
-			if trust == sap.TrustVerified || trust == sap.TrustUnknownSigner || trust == sap.TrustStale {
-				key = h.User + "\x00" + h.Nonce
-			}
-			replyTo, via := senderMarks(m.Headers(), trust, h)
-			if v, err := e.viaAllowed(via); err != nil {
-				e.log.Printf("#%s: relay declaration not honoured: %v", FormatMsgRef(ref), err)
-				via = v
-			}
-			p := pending{msg: m, key: key, ts: h.TS, mail: render.Mail{ReplyTo: replyTo, Via: via, Seq: ref.Seq, Stream: stream, From: from, Trust: trust,
-				At: meta.Timestamp, Body: m.Data(), Instance: senderInstance(m.Headers(), trust, h), Owner: e.ownerOf(from),
-				Urgent: trust == sap.TrustVerified && sap.VerifyUrgent(m.Headers().Get(UrgentHeader), h),
-				Kind:   kind.Of(m.Headers().Get(KindHeader))}}
-			e.relayInboundRef(ref, from, trust, via)
-			e.waking.add(refOf(p.mail), p.mail.Urgent || p.mail.Kind.Wakes())
-			select {
-			case queue <- p:
-			case <-quit:
-			}
+			return
+		}
+		var key string
+		if trust == sap.TrustVerified || trust == sap.TrustUnknownSigner || trust == sap.TrustStale {
+			key = h.User + "\x00" + h.Nonce
+		}
+		replyTo, via := senderMarks(m.Headers(), trust, h)
+		if v, err := e.viaAllowed(via); err != nil {
+			e.log.Printf("#%s: relay declaration not honoured: %v", FormatMsgRef(ref), err)
+			via = v
+		}
+		p := pending{msg: m, key: key, ts: h.TS, mail: render.Mail{ReplyTo: replyTo, Via: via, Seq: ref.Seq, From: from, Trust: trust,
+			At: meta.Timestamp, Body: m.Data(), Instance: senderInstance(m.Headers(), trust, h), Owner: e.ownerOf(from),
+			Urgent: trust == sap.TrustVerified && sap.VerifyUrgent(m.Headers().Get(UrgentHeader), h),
+			Kind:   kind.Of(m.Headers().Get(KindHeader))}}
+		e.relayInboundRef(ref, from, trust, via)
+		e.waking.add(refOf(p.mail), p.mail.Urgent || p.mail.Kind.Wakes())
+		select {
+		case queue <- p:
+		case <-quit:
 		}
 	}
-	var ccs []jetstream.ConsumeContext
-	var watched sync.WaitGroup
-	stopAll := func() {
+	cc, err := cons.Consume(handler, jetstream.PullMaxMessages(100))
+	if err != nil {
+		close(quit)
+		<-workerDone
+		return nil, fmt.Errorf("mash: consume: %w", err)
+	}
+	return func() {
 		// A serve that has lost its lease drains instead of stopping: Stop discards what the client already pulled into its
 		// buffer, and mail discarded unacked is not redelivered to the new holder until the consumer's AckWait (30 s). Drain
 		// hands each buffered message to the handler, which nak's it (the lease is gone) so the new holder gets it at once.
-		lost := e.anyLeaseGone()
-		for _, cc := range ccs {
-			if lost {
-				cc.Drain()
-			} else {
-				cc.Stop()
-			}
+		if e.leaseGone.Load() {
+			cc.Drain()
+		} else {
+			cc.Stop()
 		}
-		for _, cc := range ccs {
-			select {
-			case <-cc.Closed():
-			case <-time.After(5 * time.Second):
-			}
+		select {
+		case <-cc.Closed():
+		case <-time.After(5 * time.Second):
 		}
-	}
-	var initial jetstream.ConsumeContext // the legacy consume loop already started, if the lease was held at start
-	var initialEpoch uint64
-	initialBusy := new(atomic.Int32)
-	for _, src := range srcs {
-		var ep uint64
-		var busy *atomic.Int32
-		if src.ref == LegacyStream {
-			_, ep = e.legacyHold()
-			busy = initialBusy
-		}
-		cc, err := src.cons.Consume(handler(src.ref, ep, busy), jetstream.PullMaxMessages(100))
-		if err != nil {
-			stopAll()
-			close(quit)
-			<-workerDone
-			return nil, fmt.Errorf("mash: consume: %w", err)
-		}
-		ccs = append(ccs, cc)
-		if src.ref == LegacyStream {
-			initial, initialEpoch = cc, ep
-			e.legacy.loops.Add(1)
-		}
-	}
-	if e.hasLegacyStream() {
-		watched.Add(1)
-		go func() {
-			defer watched.Done()
-			e.legacyManager(ctx, quit, func(epoch uint64, busy *atomic.Int32) func(jetstream.Msg) { return handler(LegacyStream, epoch, busy) }, initial, initialEpoch, initialBusy)
-		}()
-	}
-	return func() {
-		stopAll()
 		close(quit)
 		<-workerDone
-		watched.Wait()
 	}, nil
-}
-
-// legacyManager runs the legacy stream's consume loop for as long as the legacy lease is held: it stops the loop when
-// the lease is lost or given up, and (re)starts it, through the durable consumer the stream already has, whenever a
-// hold begins (the retry loop took the lease after Open, or after a loss). The own stream's loop is never touched.
-// The same message redelivered across holds is de-duplicated by the deliver loop as always (by stream and sequence).
-// initial is the loop consume started while the lease was held (under initialEpoch), or nil. A new loop is never
-// started while the previous one is alive: the manager waits for the stopped loop's callback to return (a callback may be
-// blocked on a full delivery queue), however long that takes, until the endpoint ends.
-func (e *Endpoint) legacyManager(ctx context.Context, quit <-chan struct{}, mkHandler func(epoch uint64, busy *atomic.Int32) func(jetstream.Msg), initial jetstream.ConsumeContext, initialEpoch uint64, initialBusy *atomic.Int32) {
-	var cur jetstream.ConsumeContext
-	var busy *atomic.Int32 // callbacks of the running loop in flight
-	var lost <-chan error
-	var curEpoch uint64
-	// stopCur stops the running loop and waits until it has closed and none of its callbacks is still running (Closed
-	// can fire while a callback is blocked); false means the endpoint ended first.
-	stopCur := func() bool {
-		cc := cur
-		cc.Stop()
-		warn := time.NewTimer(legacyStopWarn)
-		defer warn.Stop()
-		poll := time.NewTicker(10 * time.Millisecond)
-		defer poll.Stop()
-		closed := cc.Closed()
-		for warned := false; ; {
-			if closed == nil && busy.Load() == 0 {
-				cur, lost, busy = nil, nil, nil
-				e.legacy.loops.Add(-1)
-				return true
-			}
-			select {
-			case <-closed:
-				closed = nil
-			case <-poll.C:
-			case <-quit:
-				return false
-			case <-ctx.Done():
-				return false
-			case <-warn.C:
-				if !warned {
-					warned = true
-					e.log.Printf("legacy inbox: still waiting for the previous read of %s to finish before reading again", e.legacyKey)
-				}
-			}
-		}
-	}
-	if initial != nil {
-		cur, curEpoch, busy = initial, initialEpoch, initialBusy
-		lost, _ = e.legacyHold()
-	}
-	defer func() {
-		if cur != nil {
-			stopCur()
-		}
-	}()
-	// The ticker is a safety net for a missed wake (and the retry of a consumer that could not be started).
-	tick := time.NewTicker(max(LegacyRetryMin, 10*time.Millisecond))
-	defer tick.Stop()
-	stream := sap.InboxStream(e.legacyKey)
-	for {
-		select {
-		case <-quit:
-			return
-		default:
-		}
-		if cur != nil && (!e.legacyReading() || e.legacy.epoch.Load() != curEpoch) {
-			if !stopCur() {
-				return
-			}
-			e.log.Printf("legacy inbox: stopped reading %s (the lease was lost); the own inbox is still read", e.legacyKey)
-		}
-		if cur == nil && e.legacyReading() {
-			l, ep := e.legacyHold()
-			// A hold taken from a live serve of this session waits out the takeover grace first (as the own stream
-			// does), so the earlier serve has stopped before this one pulls from the shared consumer.
-			ready, ended := e.legacyGraceWait(ctx, quit, l, ep)
-			if ended {
-				return
-			}
-			if !ready { // the hold ended or changed while waiting: the next pass looks at the new state
-				goto wait
-			}
-			nb := new(atomic.Int32)
-			cons, err := e.js.Consumer(ctx, stream, store.Consumer)
-			if err != nil {
-				e.log.Printf("mash: legacy inbox consumer: %v (will retry)", err)
-			} else {
-				ci := cons.CachedInfo()
-				e.waking.addStream(LegacyStream, streamStart{Backlog: int(ci.NumPending) + ci.NumAckPending, Last: ci.Delivered.Stream + ci.NumPending}, e.wakingProbe(cons, stream))
-				fl := e.consumerAckFloor(cons)
-				e.legacy.floor.Store(&fl)
-				if cc, err := cons.Consume(mkHandler(ep, nb), jetstream.PullMaxMessages(100)); err != nil {
-					e.log.Printf("mash: legacy inbox consume: %v (will retry)", err)
-				} else {
-					cur, lost, curEpoch, busy = cc, l, ep, nb
-					e.legacy.loops.Add(1)
-					e.log.Printf("legacy inbox: reading %s", e.legacyKey)
-				}
-			}
-		}
-	wait:
-		select {
-		case <-quit:
-			return
-		case <-lost: // nil when no loop runs
-		case <-e.legacy.wake:
-		case <-tick.C:
-		}
-	}
-}
-
-// legacyGraceWait waits until the takeover grace has passed for the hold (l, epoch). ready is true when the grace is over
-// and the legacy lease is still held live under that epoch; false when the hold was lost or replaced meanwhile (or the
-// lease could not be confirmed), so nothing starts. ended is true when the endpoint ended while waiting. With no grace
-// owed (a free lease) it does not wait.
-func (e *Endpoint) legacyGraceWait(ctx context.Context, quit <-chan struct{}, l chan error, epoch uint64) (ready, ended bool) {
-	if d := e.graceLeft(); d > 0 {
-		e.log.Printf("legacy inbox: taken over from a live serve of this session; reading in %s, when it has stopped", d.Round(time.Millisecond))
-		t := time.NewTimer(d)
-		defer t.Stop()
-		poll := time.NewTicker(10 * time.Millisecond)
-		defer poll.Stop()
-		for waiting := true; waiting; {
-			select {
-			case <-t.C:
-				waiting = false
-			case <-quit:
-				return false, true
-			case <-ctx.Done():
-				return false, true
-			case <-l: // the hold was lost
-				return false, false
-			case <-poll.C:
-				if !e.legacyReading() || e.legacy.epoch.Load() != epoch {
-					return false, false
-				}
-			}
-		}
-	}
-	if !e.legacyReading() || e.legacy.epoch.Load() != epoch {
-		return false, false
-	}
-	return e.verdictFor(LegacyStream) == verdictHeld, false
 }
 
 // deliverLoop is the single writer of channel events (see consume).
@@ -755,7 +485,7 @@ func (e *Endpoint) deliverLoop(deliver Deliverer, queue <-chan pending, quit <-c
 // the queue, mail held for a hook) is nak'd at once, so the new holder is redelivered it now rather than after the
 // ack wait; none of it is acked. With the lease held it does nothing: that mail waits out the ack wait, as it always did.
 func (e *Endpoint) releaseOnQuit(h *held, batch []pending, queue <-chan pending) {
-	if !e.anyLeaseGone() {
+	if !e.leaseGone.Load() {
 		return
 	}
 	e.dropUnleased(batch)
@@ -786,7 +516,7 @@ func (e *Endpoint) dedupe(batch []pending, seen *seenSet, h *held) []pending {
 			if e.mayAck(p) {
 				_ = p.msg.Ack()
 			} else {
-				_ = p.msg.Nak() // the legacy lease is gone: the holder's consumer is redelivered it, nothing is acked here
+				_ = p.msg.Nak() // the lease is gone: the holder's consumer is redelivered it, nothing is acked here
 			}
 			e.waking.done(refOf(p.mail))
 			continue
@@ -909,7 +639,7 @@ func (e *Endpoint) SendWith(ctx context.Context, to, text string, o SendOptions)
 // or a random one; the message's nonce and Nats-Msg-Id derive from it, so a retry with the key is dropped by the
 // stream. When the acknowledgement times out the error is a *SendTimeoutError naming the key.
 func (e *Endpoint) SendDetailed(ctx context.Context, to, text string, o SendOptions) (SendResult, error) {
-	to = sap.KeyOf(to) // the canonical agent.owner.name names the same recipient as its flat key (ADR 0081)
+	to = sap.KeyOf(to) // the dotted owner.group.instance names the same recipient as its flat key
 	// The name rule comes first: before the inbox or the directory is read, and nothing is dropped silently.
 	if err := e.checkSelf(pointSendSender); err != nil {
 		return SendResult{}, err
@@ -1091,13 +821,13 @@ func (e *Endpoint) ownerOf(name string) string {
 
 // lookup resolves a name through the directory (the live copy, else a read).
 func (e *Endpoint) lookup(ctx context.Context, name string) (store.Record, error) {
-	// A recipient may be written canonical (ADR 0081).
+	// A recipient may be written dotted, owner.group.instance.
 	name = sap.KeyOf(name)
 	if err := e.checkKey(pointLookup, name); err != nil { // before the directory is read: a gone record gets the rule, not "not found"
 		return store.Record{}, err
 	}
-	if !validDirectoryKey(name) {
-		return store.Record{}, fmt.Errorf("mash: %q is not an endpoint key: give a legacy endpoint name or the canonical agent.owner.name as who shows it (the flat agent_owner_name is accepted too)", name)
+	if _, err := parseRecipient(name); err != nil {
+		return store.Record{}, err
 	}
 	e.mu.RLock()
 	rec, ok := e.dir[name]
@@ -1117,7 +847,7 @@ func (e *Endpoint) lookup(ctx context.Context, name string) (store.Record, error
 func (e *Endpoint) inbox(ctx context.Context) (jetstream.Stream, error) {
 	s, err, ok := e.pre.takeInbox()
 	if !ok {
-		s, err = e.js.Stream(ctx, sap.InboxStream(e.key))
+		s, err = e.js.Stream(ctx, e.ident.InboxStream())
 	}
 	if err != nil {
 		return nil, fmt.Errorf("mash: inbox: %w", err)
@@ -1136,50 +866,28 @@ func (e *Endpoint) toMail(raw *jetstream.RawStreamMsg) (render.Mail, bool) {
 		Instance: senderInstance(raw.Header, trust, h), Kind: kind.Of(raw.Header.Get(KindHeader))}, true
 }
 
-// streamOf is the stream of this endpoint's inbox that refs of the given ref-stream live in, with its info as of now: the
-// primary one is what the first wave of a one-shot client read (e.inbox), the legacy one is read now. A legacy ref on
-// an endpoint without that stream is ErrNoLegacyStream.
-func (e *Endpoint) streamOf(ctx context.Context, ref string) (jetstream.Stream, error) {
-	switch ref {
-	case "":
-		return e.inbox(ctx)
-	case LegacyStream:
-		if !e.hasLegacyStream() {
-			return nil, fmt.Errorf("mash: %w", ErrNoLegacyStream)
-		}
-		s, err := e.js.Stream(ctx, sap.InboxStream(e.legacyKey))
-		if err != nil {
-			return nil, fmt.Errorf("mash: legacy inbox: %w", err)
-		}
-		return s, nil
-	}
-	return nil, fmt.Errorf("mash: no stream %q on this endpoint", ref)
-}
-
-// Read returns message seq from this endpoint's own (primary) inbox.
+// Read returns message seq from this endpoint's inbox.
 func (e *Endpoint) Read(ctx context.Context, seq uint64) (render.Mail, error) {
 	return e.ReadRef(ctx, MsgRef{Seq: seq})
 }
 
-// ReadRef returns the message r names: of the endpoint's own inbox, or (r.Stream == LegacyStream) of the legacy inbox
-// stream it reads during the transition. The mail carries its stream, so it is shown with its qualified number.
+// ReadRef returns the message r names, of the endpoint's inbox.
 func (e *Endpoint) ReadRef(ctx context.Context, r MsgRef) (render.Mail, error) {
-	s, err := e.streamOf(ctx, r.Stream)
+	if r.Stream != "" {
+		return render.Mail{}, fmt.Errorf("mash: no stream %q on this endpoint", r.Stream)
+	}
+	s, err := e.inbox(ctx)
 	if err != nil {
 		return render.Mail{}, err
 	}
 	raw, err := s.GetMsg(ctx, r.Seq)
 	if err != nil {
-		if r.Stream == LegacyStream {
-			return render.Mail{}, fmt.Errorf("mash: no message #%s in %s's legacy inbox", FormatMsgRef(r), e.legacyKey)
-		}
 		return render.Mail{}, fmt.Errorf("mash: no message #%d in %s's inbox", r.Seq, e.Display())
 	}
 	if err := e.loadSenders(ctx, []*jetstream.RawStreamMsg{raw}); err != nil {
 		return render.Mail{}, err
 	}
 	m, ok := e.toMail(raw)
-	m.Stream = r.Stream
 	if !ok {
 		return m, fmt.Errorf("mash: message #%s has a %s sender header and is not shown", FormatMsgRef(r), m.Trust)
 	}
@@ -1187,28 +895,19 @@ func (e *Endpoint) ReadRef(ctx context.Context, r MsgRef) (render.Mail, error) {
 }
 
 // Inbox returns up to limit of the most recent messages in this endpoint's
-// inbox, oldest first. Forged mail is skipped. An endpoint that also reads a legacy stream lists both, merged by
-// store time (ties by stream, then sequence), each with its own number.
+// inbox, oldest first. Forged mail is skipped.
 func (e *Endpoint) Inbox(ctx context.Context, limit int) ([]render.Mail, error) {
-	var out []render.Mail
-	for _, src := range e.sources() {
-		s, err := e.streamOf(ctx, src.ref)
-		if err != nil {
-			return nil, err
-		}
-		info := s.CachedInfo()
-		ms, err := e.collectStream(ctx, src.ref, s.GetMsg, seqsDown(info.State.LastSeq, info.State.FirstSeq), limit)
-		out = append(out, ms...)
-		if err != nil {
-			sortMail(out)
-			return out, err
-		}
+	s, err := e.inbox(ctx)
+	if err != nil {
+		return nil, err
 	}
+	info := s.CachedInfo()
+	out, err := e.collect(ctx, s.GetMsg, seqsDown(info.State.LastSeq, info.State.FirstSeq), limit)
 	sortMail(out)
 	if len(out) > limit {
 		out = out[len(out)-limit:]
 	}
-	return out, nil
+	return out, err
 }
 
 // sortMail orders mail by store time, then stream (primary first), then sequence.
@@ -1230,15 +929,17 @@ func (e *Endpoint) InboxAfter(ctx context.Context, after uint64, limit int) ([]r
 	return e.InboxAfterRef(ctx, MsgRef{Seq: after}, limit)
 }
 
-// InboxAfterRef is InboxAfter for a message of either stream: it lists the messages after after in after's own
-// stream (a page forward is per stream, because two streams' numbers are not one sequence).
+// InboxAfterRef is InboxAfter for a message reference.
 func (e *Endpoint) InboxAfterRef(ctx context.Context, after MsgRef, limit int) ([]render.Mail, error) {
-	s, err := e.streamOf(ctx, after.Stream)
+	if after.Stream != "" {
+		return nil, fmt.Errorf("mash: no stream %q on this endpoint", after.Stream)
+	}
+	s, err := e.inbox(ctx)
 	if err != nil {
 		return nil, err
 	}
 	info := s.CachedInfo()
-	return e.collectStream(ctx, after.Stream, s.GetMsg, seqsUp(max(after.Seq+1, info.State.FirstSeq), info.State.LastSeq), limit)
+	return e.collect(ctx, s.GetMsg, seqsUp(max(after.Seq+1, info.State.FirstSeq), info.State.LastSeq), limit)
 }
 
 // getMsg is jetstream.Stream.GetMsg, replaceable in tests.
@@ -1249,11 +950,6 @@ type getMsg func(ctx context.Context, seq uint64, opts ...jetstream.GetMsgOpt) (
 // forged mail; any other read error ends the listing and is returned, so a
 // broken connection is not mistaken for an empty inbox.
 func (e *Endpoint) collect(ctx context.Context, get getMsg, seqs []uint64, limit int) ([]render.Mail, error) {
-	return e.collectStream(ctx, "", get, seqs, limit)
-}
-
-// collectStream is collect for the stream of the given ref-stream: the mail it returns carries that stream.
-func (e *Endpoint) collectStream(ctx context.Context, stream string, get getMsg, seqs []uint64, limit int) ([]render.Mail, error) {
 	var out []render.Mail
 	// Seqs are read a batch at a time, many requests in flight at once. A batch is no larger than what is still
 	// wanted, so the limit is never passed; seqs that turn out to be gone or forged leave the next batch to top up.
@@ -1279,10 +975,9 @@ func (e *Endpoint) collectStream(ctx context.Context, stream string, get getMsg,
 				continue
 			}
 			if errs[i] != nil {
-				return out, fmt.Errorf("mash: inbox: read #%s: %w", FormatMsgRef(MsgRef{Stream: stream, Seq: seq}), errs[i])
+				return out, fmt.Errorf("mash: inbox: read #%s: %w", FormatMsgRef(MsgRef{Seq: seq}), errs[i])
 			}
 			if m, ok := e.toMail(raws[i]); ok {
-				m.Stream = stream
 				out = append(out, m)
 			}
 		}
@@ -1310,7 +1005,7 @@ func seqsUp(from, to uint64) []uint64 {
 
 // deliverBatch is the channel path: show goes out as one event, then is acked (a failed write naks it for redelivery).
 func (e *Endpoint) deliverBatch(deliver Deliverer, show []pending, seen *seenSet) {
-	if show = e.fenceLegacy(show); len(show) == 0 {
+	if show = e.dropUnleased(show); len(show) == 0 {
 		return // the lease is gone: nothing is delivered or acked
 	}
 	mails := make([]render.Mail, len(show))

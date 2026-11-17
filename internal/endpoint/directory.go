@@ -69,7 +69,8 @@ func (e *Endpoint) applyPresence(m *nats.Msg) (counted int) {
 		if ep.Name != "prompt" {
 			continue
 		}
-		name, ok := sap.KeyFromSubject(ep.Subject)
+		a, _, ok := sap.AddressFromSubject(ep.Subject)
+		name := a.Flat()
 		if !ok || !sap.VerifyIDSig(md["user_nkey"], md["account"], md["agent"], md["owner"], ep.Subject, md["id_sig"]) {
 			continue
 		}
@@ -83,7 +84,7 @@ func (e *Endpoint) applyPresence(m *nats.Msg) (counted int) {
 	return counted
 }
 
-// Who returns the directory with presence, sorted by directory key (the name for a legacy record). After a presence probe has completed an endpoint is online
+// Who returns the directory with presence, sorted by directory key. After a presence probe has completed an endpoint is online
 // when it answered that probe or a later one; before any probe, when it was seen within OnlineWindow.
 func (e *Endpoint) Who() []Presence {
 	e.mu.RLock()
@@ -97,7 +98,7 @@ func (e *Endpoint) Who() []Presence {
 		}
 		out = append(out, Presence{Record: r, LastSeen: seen, Online: online})
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Record.KeyOrName() < out[j].Record.KeyOrName() })
+	sort.Slice(out, func(i, j int) bool { return flatOf(out[i].Record) < flatOf(out[j].Record) })
 	return out
 }
 

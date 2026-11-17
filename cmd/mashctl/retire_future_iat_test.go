@@ -18,16 +18,14 @@ const clockBehind = time.Hour
 // creds with the clock right retire normally.
 func TestRetireRefusesFutureIssuedCreds(t *testing.T) {
 	h := newFleetEnv(t)
-	if _, errb, code := h.run("add", "c"); code != 0 {
-		t.Fatal(errb)
-	}
-	before, _ := os.ReadFile(h.creds("c"))
+	h.seed(ad("c"))
+	before, _ := os.ReadFile(h.creds(ad("c")))
 	recs := h.records()
 	calls := fakeRevoke(t, nil)
 
 	prev := retireRevokeNow
 	retireRevokeNow = func() time.Time { return time.Now().Add(-clockBehind) } // the JWT was minted "an hour from now"
-	out, errb, code := h.run("retire", "c")
+	out, errb, code := h.run("retire", "o.g.c")
 	retireRevokeNow = prev
 	if code != 1 || out != "" || !strings.Contains(errb, "c's current creds JWT claims it was issued in the future (") || !strings.Contains(errb, "fix this machine's clock") || !strings.Contains(errb, "nothing was changed") {
 		t.Fatalf("%d %q %q", code, out, errb)
@@ -36,7 +34,7 @@ func TestRetireRefusesFutureIssuedCreds(t *testing.T) {
 	if len(*calls) != 0 {
 		t.Fatalf("revoke calls %+v", *calls)
 	}
-	if after, _ := os.ReadFile(h.creds("c")); !bytes.Equal(before, after) {
+	if after, _ := os.ReadFile(h.creds(ad("c"))); !bytes.Equal(before, after) {
 		t.Fatal("creds file changed")
 	}
 	if len(h.records()) != len(recs) {
@@ -44,7 +42,7 @@ func TestRetireRefusesFutureIssuedCreds(t *testing.T) {
 	}
 
 	// Control: a JWT issued in the past is revoked as before.
-	out, errb, code = h.run("retire", "c")
+	out, errb, code = h.run("retire", "o.g.c")
 	if code != 0 || !strings.Contains(out, "revoked in the account JWT") || len(*calls) != 1 {
 		t.Fatalf("%d %q %q calls %+v", code, out, errb, *calls)
 	}
@@ -54,9 +52,7 @@ func TestRetireRefusesFutureIssuedCreds(t *testing.T) {
 // revoker, even when the clock moves between the two.
 func TestRetireRevokesAtTheCheckedTime(t *testing.T) {
 	h := newFleetEnv(t)
-	if _, errb, code := h.run("add", "c"); code != 0 {
-		t.Fatal(errb)
-	}
+	h.seed(ad("c"))
 	calls := fakeRevoke(t, nil)
 
 	base := time.Now().Add(time.Hour)
@@ -66,7 +62,7 @@ func TestRetireRevokesAtTheCheckedTime(t *testing.T) {
 		reads++
 		return base.Add(time.Duration(reads-1) * time.Hour)
 	}
-	out, errb, code := h.run("retire", "c")
+	out, errb, code := h.run("retire", "o.g.c")
 	retireRevokeNow = prev
 	if code != 0 || len(*calls) != 1 {
 		t.Fatalf("%d %q %q calls %+v", code, out, errb, *calls)
@@ -120,15 +116,13 @@ func TestRetireCredsCheckFailsClosed(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newFleetEnv(t)
-			if _, errb, code := h.run("add", "c"); code != 0 {
-				t.Fatal(errb)
-			}
-			tc.damage(t, h.creds("c"))
-			before, _ := os.ReadFile(h.creds("c"))
-			fiBefore, _ := os.Stat(h.creds("c"))
+			h.seed(ad("c"))
+			tc.damage(t, h.creds(ad("c")))
+			before, _ := os.ReadFile(h.creds(ad("c")))
+			fiBefore, _ := os.Stat(h.creds(ad("c")))
 			recs := h.records()
 			calls := fakeRevoke(t, nil)
-			out, errb, code := h.run("retire", "c")
+			out, errb, code := h.run("retire", "o.g.c")
 			if code != 1 || out != "" || !strings.Contains(errb, tc.want) || !strings.Contains(errb, "nothing was changed") {
 				t.Fatalf("%d %q %q", code, out, errb)
 			}
@@ -139,8 +133,8 @@ func TestRetireCredsCheckFailsClosed(t *testing.T) {
 			if len(*calls) != 0 {
 				t.Fatalf("revoke calls %+v", *calls)
 			}
-			after, _ := os.ReadFile(h.creds("c"))
-			fiAfter, _ := os.Stat(h.creds("c"))
+			after, _ := os.ReadFile(h.creds(ad("c")))
+			fiAfter, _ := os.Stat(h.creds(ad("c")))
 			if !bytes.Equal(before, after) || fiBefore.Mode() != fiAfter.Mode() {
 				t.Fatal("creds file changed")
 			}
@@ -152,14 +146,12 @@ func TestRetireCredsCheckFailsClosed(t *testing.T) {
 
 	t.Run("missing file proceeds", func(t *testing.T) {
 		h := newFleetEnv(t)
-		if _, errb, code := h.run("add", "c"); code != 0 {
-			t.Fatal(errb)
-		}
-		if err := os.Remove(h.creds("c")); err != nil {
+		h.seed(ad("c"))
+		if err := os.Remove(h.creds(ad("c"))); err != nil {
 			t.Fatal(err)
 		}
 		calls := fakeRevoke(t, nil)
-		out, errb, code := h.run("retire", "c")
+		out, errb, code := h.run("retire", "o.g.c")
 		if code != 0 || len(*calls) != 1 {
 			t.Fatalf("%d %q %q calls %+v", code, out, errb, *calls)
 		}
@@ -170,21 +162,19 @@ func TestRetireCredsCheckFailsClosed(t *testing.T) {
 // directory read and before the revoke still refuse the retire, with nothing revoked or removed.
 func TestRetireCredsCheckRunsInsideLock(t *testing.T) {
 	h := newFleetEnv(t)
-	if _, errb, code := h.run("add", "c"); code != 0 {
-		t.Fatal(errb)
-	}
+	h.seed(ad("c"))
 	recs := h.records()
 	calls := fakeRevoke(t, nil)
 
 	swapped := 0
 	beforeRetireRevoke = func() {
 		swapped++
-		if err := os.Chmod(h.creds("c"), 0o644); err != nil {
+		if err := os.Chmod(h.creds(ad("c")), 0o644); err != nil {
 			t.Error(err)
 		}
 	}
 	t.Cleanup(func() { beforeRetireRevoke = nil })
-	out, errb, code := h.run("retire", "c")
+	out, errb, code := h.run("retire", "o.g.c")
 	if swapped != 1 {
 		t.Fatalf("seam ran %d times", swapped)
 	}
@@ -204,21 +194,19 @@ func TestRetireCredsCheckRunsInsideLock(t *testing.T) {
 func TestRetireChecksSymlinkedCredsTarget(t *testing.T) {
 	t.Run("future-dated target refuses", func(t *testing.T) {
 		h := newFleetEnv(t)
-		if _, errb, code := h.run("add", "c"); code != 0 {
-			t.Fatal(errb)
-		}
+		h.seed(ad("c"))
 		target := filepath.Join(t.TempDir(), "mounted.creds")
-		raw, err := os.ReadFile(h.creds("c"))
+		raw, err := os.ReadFile(h.creds(ad("c")))
 		if err != nil {
 			t.Fatal(err)
 		}
 		if err := os.WriteFile(target, raw, 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.Remove(h.creds("c")); err != nil {
+		if err := os.Remove(h.creds(ad("c"))); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.Symlink(target, h.creds("c")); err != nil {
+		if err := os.Symlink(target, h.creds(ad("c"))); err != nil {
 			t.Fatal(err)
 		}
 		recs := h.records()
@@ -226,7 +214,7 @@ func TestRetireChecksSymlinkedCredsTarget(t *testing.T) {
 
 		prev := retireRevokeNow
 		retireRevokeNow = func() time.Time { return time.Now().Add(-clockBehind) }
-		out, errb, code := h.run("retire", "c")
+		out, errb, code := h.run("retire", "o.g.c")
 		retireRevokeNow = prev
 		if code != 1 || out != "" || !strings.Contains(errb, "claims it was issued in the future (") || !strings.Contains(errb, "nothing was changed") {
 			t.Fatalf("%d %q %q", code, out, errb)
@@ -235,7 +223,7 @@ func TestRetireChecksSymlinkedCredsTarget(t *testing.T) {
 		if len(*calls) != 0 {
 			t.Fatalf("revoke calls %+v", *calls)
 		}
-		if fi, err := os.Lstat(h.creds("c")); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		if fi, err := os.Lstat(h.creds(ad("c"))); err != nil || fi.Mode()&os.ModeSymlink == 0 {
 			t.Fatalf("symlink changed: %v", err)
 		}
 		if after, _ := os.ReadFile(target); !bytes.Equal(raw, after) {
@@ -248,22 +236,20 @@ func TestRetireChecksSymlinkedCredsTarget(t *testing.T) {
 
 	t.Run("dangling link proceeds", func(t *testing.T) {
 		h := newFleetEnv(t)
-		if _, errb, code := h.run("add", "c"); code != 0 {
-			t.Fatal(errb)
-		}
-		if err := os.Remove(h.creds("c")); err != nil {
+		h.seed(ad("c"))
+		if err := os.Remove(h.creds(ad("c"))); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.Symlink(filepath.Join(t.TempDir(), "absent"), h.creds("c")); err != nil {
+		if err := os.Symlink(filepath.Join(t.TempDir(), "absent"), h.creds(ad("c"))); err != nil {
 			t.Fatal(err)
 		}
 		calls := fakeRevoke(t, nil)
-		out, errb, code := h.run("retire", "c")
+		out, errb, code := h.run("retire", "o.g.c")
 		// as for any symlinked creds, the retire completes and reports that the link was left in place
-		if code != 1 || !strings.HasPrefix(out, "retired c\n") || !strings.Contains(errb, "not a regular file") || len(*calls) != 1 {
+		if code != 1 || !strings.HasPrefix(out, "retired o.g.c\n") || !strings.Contains(errb, "not a regular file") || len(*calls) != 1 {
 			t.Fatalf("%d %q %q calls %+v", code, out, errb, *calls)
 		}
-		if _, err := os.Lstat(h.creds("c")); err != nil {
+		if _, err := os.Lstat(h.creds(ad("c"))); err != nil {
 			t.Error("the symlink itself was removed")
 		}
 	})

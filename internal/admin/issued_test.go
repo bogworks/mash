@@ -18,7 +18,6 @@ import (
 
 	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/natsauth"
-	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/store"
 	"github.com/bogworks/mash/internal/testenv"
 )
@@ -52,21 +51,10 @@ func issuedSubjects(key string) []string {
 	}
 }
 
-// No permission list mash gives an endpoint grants anything on the issue record: not the legacy or the new-form
-// endpoint list, not a recipient-narrowed one.
+// No permission list mash gives an endpoint grants anything on the issue record.
 func TestEndpointPermissionsGrantNothingOnIssuedRecord(t *testing.T) {
-	id, err := sap.New("claude", "o", "a")
-	if err != nil {
-		t.Fatal(err)
-	}
-	nf, err := admin.NewFormPermissions(id, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
 	lists := map[string]jwt.Permissions{
-		"Permissions":   admin.Permissions("o", "a"),
-		"PermissionsTo": admin.PermissionsTo("o", "a", []string{"b", "c"}),
-		"NewForm":       nf,
+		"Permissions": *admin.Permissions(ep(t, "a")),
 	}
 	for name, p := range lists {
 		allow := append(slices.Clone([]string(p.Pub.Allow)), p.Sub.Allow...)
@@ -92,7 +80,7 @@ func TestLiveEndpointCannotTouchIssuedRecord(t *testing.T) {
 	if err := a.RecordIssued(ctx, store.Issued{PublicKey: key, Address: "x", Kind: store.IssuedEndpoint, Tags: []string{"t"}}); err != nil {
 		t.Fatal(err)
 	}
-	creds, _ := e.Mint(t, "alpha")
+	creds, _ := e.Mint(t, ep(t, "alpha"))
 	violations := make(chan error, 64)
 	nc, err := nats.Connect(e.URL, natsauth.UserCredentials(creds), nats.ErrorHandler(func(_ *nats.Conn, _ *nats.Subscription, err error) {
 		select {

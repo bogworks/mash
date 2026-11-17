@@ -14,8 +14,8 @@ import (
 
 // helpVerbs is every verb run dispatches; each takes -h and --help, prints its usage and changes nothing.
 var helpVerbs = [][]string{
-	{"adopt"}, {"audit"}, {"inbox"}, {"inbox", "inspect"}, {"issued"}, {"issued", "list"}, {"issued", "check"}, {"version"}, {"add"}, {"label"}, {"unlabel"},
-	{"retire"}, {"unzone"}, {"reissue"}, {"init"}, {"limits"}, {"permissions"}, {"provision"},
+	{"adopt"}, {"audit"}, {"inbox"}, {"inbox", "inspect"}, {"issued"}, {"issued", "list"}, {"issued", "check"}, {"version"}, {"label"}, {"unlabel"},
+	{"retire"}, {"init"}, {"limits"}, {"permissions"}, {"provision"},
 	{"set-meta"}, {"suspend"}, {"resume"}, {"suspended"}, {"deprovision"}, {"list"},
 }
 
@@ -96,8 +96,8 @@ func TestHelpRequestedOnlyFirstArgument(t *testing.T) {
 		verb string
 		args []string
 	}{
-		{"add", []string{"-h"}}, {"add", []string{"--help"}}, {"label", []string{"--help"}}, {"set-meta", []string{"-h"}},
-		{"reissue", []string{"--help"}}, {"retire", []string{"-h"}}, {"suspend", []string{"-h"}},
+		{"label", []string{"--help"}}, {"set-meta", []string{"-h"}},
+		{"retire", []string{"-h"}}, {"suspend", []string{"-h"}},
 		{"issued", []string{"check", "--help"}}, {"issued", []string{"list", "-h"}}, {"issued", []string{"-h"}},
 		{"inbox", []string{"inspect", "-h"}}, {"version", []string{"--help"}},
 	}
@@ -110,11 +110,10 @@ func TestHelpRequestedOnlyFirstArgument(t *testing.T) {
 		verb string
 		args []string
 	}{
-		{"add", []string{"n", "--", "--help"}}, {"add", []string{"n", "--note", "--help"}}, {"add", []string{"n", "--describe", "-h"}},
-		{"add", []string{"n", "--note", "see -h"}}, {"label", []string{"n", "--label", "help"}},
+		{"label", []string{"n", "--label", "help"}},
 		{"label", []string{"n", "role=-h"}}, {"label", []string{"n", "k=--help"}}, {"label", []string{"n", "k", "--help"}},
 		{"set-meta", []string{"n", "note", "--help"}}, {"set-meta", []string{"n", "--help"}},
-		{"reissue", []string{"n", "--help"}}, {"retire", []string{"n", "-h"}}, {"suspend", []string{"n", "--help"}},
+		{"retire", []string{"n", "-h"}}, {"suspend", []string{"n", "--help"}},
 		{"unlabel", []string{"n", "-h"}}, {"issued", []string{"check", "n", "--help"}}, {"inbox", []string{"inspect", "n", "-h"}},
 	}
 	for _, c := range no {

@@ -148,7 +148,7 @@ func (is *Issuer) issue(ctx context.Context, r Request, purpose string) (*Issued
 		return nil, refuse(CodeWindow, "the request expires more than %s ahead", MaxWindow)
 	}
 	id, _ := r.AddressParts()
-	group := id.Agent + "." + id.Owner
+	group := id.Owner + "." + id.Group
 
 	if is.Registry == nil || !keyIn(r.Wrangler, is.Registry.Lookup(r.Host, group)) {
 		return nil, refuse(CodeUnregistered, "that wrangler key is not registered for this host and owner group")
@@ -202,7 +202,7 @@ func (is *Issuer) issue(ctx context.Context, r Request, purpose string) (*Issued
 	if err != nil {
 		return nil, refuse(CodeRecordFailed, "the issue record could not be read")
 	}
-	if rf := bindingRefusal(cur, r.Address); rf != nil {
+	if rf := bindingRefusal(cur, id.Flat()); rf != nil {
 		return nil, rf
 	}
 
@@ -245,7 +245,7 @@ func (is *Issuer) issue(ctx context.Context, r Request, purpose string) (*Issued
 		return nil, refuse(CodeInternal, "signing failed")
 	}
 	rec := store.Issued{
-		PublicKey: r.PublicKey, Address: r.Address, Owner: id.Owner, Kind: store.IssuedEndpoint,
+		PublicKey: r.PublicKey, Address: id.Flat(), Owner: id.Owner, Kind: store.IssuedEndpoint,
 		Tags: append([]string{}, user.Tags...), Generation: gen, Purpose: purpose,
 		IssuedAt: time.Unix(uc.IssuedAt, 0).UTC().Format(time.RFC3339),
 	}

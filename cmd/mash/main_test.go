@@ -19,6 +19,7 @@ import (
 
 	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/endpoint"
+	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/store"
 	"github.com/bogworks/mash/internal/testenv"
 )
@@ -143,6 +144,20 @@ func TestServeInertWithoutName(t *testing.T) {
 	}
 }
 
+// testGroup is the group of every endpoint the world makes; the owner is the test environment's. tAddr is the address
+// of the instance name, and tTo the form a recipient is typed in.
+const testGroup = "dev"
+
+func tAddr(name string) sap.Address {
+	a, err := sap.NewAddress(testenv.Owner, testGroup, name)
+	if err != nil {
+		panic(err)
+	}
+	return a
+}
+
+func tTo(name string) string { return tAddr(name).String() }
+
 type world struct {
 	e   *testenv.Env
 	env map[string]map[string]string
@@ -165,11 +180,11 @@ func newWorldWith(t *testing.T, o testenv.Options, names ...string) *world {
 	}
 	w := &world{e: e, env: map[string]map[string]string{}}
 	for _, n := range names {
-		c, u := e.Mint(t, n)
-		if _, err := adm.Provision(context.Background(), n, u, e.Account, "", admin.Meta{}); err != nil {
+		c, u := e.Mint(t, tAddr(n))
+		if _, err := adm.Provision(context.Background(), tAddr(n), u, e.Account, "", admin.Meta{}); err != nil {
 			t.Fatal(err)
 		}
-		w.env[n] = map[string]string{"HOME": t.TempDir(), "MASH_NAME": n, "MASH_URL": e.URL,
+		w.env[n] = map[string]string{"HOME": t.TempDir(), "MASH_NAME": n, "MASH_GROUP": testGroup, "MASH_URL": e.URL,
 			"MASH_OWNER": e.Owner, "MASH_CREDS": c, "MASH_SETTLE_MS": "20"}
 	}
 	return w
@@ -195,22 +210,22 @@ func TestServeEndToEnd(t *testing.T) {
 			t.Fatalf("missing tool %s in %v", n, names)
 		}
 	}
-	out, code := w.cli(t, "b", "send", "a", "hi", "from", "the", "cli")
-	if code != 0 || !strings.Contains(out, "sent #1 from b to a") {
+	out, code := w.cli(t, "b", "send", tTo("a"), "hi", "from", "the", "cli")
+	if code != 0 || !strings.Contains(out, "sent #1 from o.dev.b to o.dev.a") {
 		t.Fatalf("cli send: %d %s", code, out)
 	}
 	ev := s.await(t, 5*time.Second, isChannel)
 	content := ev["params"].(map[string]any)["content"].(string)
-	if !strings.Contains(content, "from b [verified]") || !strings.Contains(content, "hi from the cli") {
+	if !strings.Contains(content, "from o.dev.b [verified]") || !strings.Contains(content, "hi from the cli") {
 		t.Fatalf("channel event: %s", content)
 	}
-	s.send(t, `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"send","arguments":{"to":"b","text":"thanks b"}}}`)
+	s.send(t, `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"send","arguments":{"to":"o.dev.b","text":"thanks b"}}}`)
 	r := s.await(t, 5*time.Second, idIs(3))["result"].(map[string]any)
 	if txt := r["content"].([]any)[0].(map[string]any)["text"].(string); !strings.HasPrefix(txt, "sent #") || r["isError"] == true {
 		t.Fatalf("tool send: %v", r)
 	}
 	out, code = w.cli(t, "b", "inbox")
-	if code != 0 || !strings.Contains(out, "from a [verified]") || !strings.Contains(out, "thanks b") {
+	if code != 0 || !strings.Contains(out, "from o.dev.a [verified]") || !strings.Contains(out, "thanks b") {
 		t.Fatalf("cli inbox: %d %s", code, out)
 	}
 	out, code = w.cli(t, "b", "read", "1")
@@ -218,7 +233,7 @@ func TestServeEndToEnd(t *testing.T) {
 		t.Fatalf("cli read: %d %s", code, out)
 	}
 	out, code = w.cli(t, "b", "who")
-	if code != 0 || !strings.Contains(out, "a\tonline") {
+	if code != 0 || !strings.Contains(out, tTo("a")+"\tonline") {
 		t.Fatalf("cli who: %d %s", code, out)
 	}
 }
@@ -235,7 +250,7 @@ func TestServeLivePromptViaCLI(t *testing.T) {
 	// Prompt once a is registered (its SAP service starts when the channel is ready).
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		if out, _ := w.cli(t, "b", "who"); strings.Contains(out, "a\tonline") {
+		if out, _ := w.cli(t, "b", "who"); strings.Contains(out, tTo("a")+"\tonline") {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -244,11 +259,11 @@ func TestServeLivePromptViaCLI(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	done := make(chan res, 1)
-	go func() { o, c := w.cli(t, "b", "prompt", "a", "what", "time?"); done <- res{o, c} }()
+	go func() { o, c := w.cli(t, "b", "prompt", tTo("a"), "what", "time?"); done <- res{o, c} }()
 	ev := s.await(t, 5*time.Second, isChannel)
 	p := ev["params"].(map[string]any)
 	meta := p["meta"].(map[string]any)
-	if !strings.Contains(p["content"].(string), "what time?") || meta["request_id"] == "" || meta["from"] != "b" {
+	if !strings.Contains(p["content"].(string), "what time?") || meta["request_id"] == "" || meta["from"] != "o_dev_b" {
 		t.Fatalf("prompt event %v", p)
 	}
 	s.send(t, `{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"reply","arguments":{"request_id":"`+meta["request_id"].(string)+`","text":"noon"}}}`)
@@ -284,7 +299,7 @@ func TestServeLeaseConflict(t *testing.T) {
 		t.Fatalf("event %v", ev)
 	}
 	// The holder is undisturbed and still gets its mail.
-	if out, code := w.cli(t, "b", "send", "a", "still yours"); code != 0 {
+	if out, code := w.cli(t, "b", "send", tTo("a"), "still yours"); code != 0 {
 		t.Fatalf("send: %d %s", code, out)
 	}
 	if got := content(first.await(t, 5*time.Second, isChannel)); !strings.Contains(got, "still yours") {
@@ -294,57 +309,55 @@ func TestServeLeaseConflict(t *testing.T) {
 
 func TestAdminCLI(t *testing.T) {
 	e := testenv.Start(t)
-	c, u := e.Mint(t, "z")
+	c, u := e.Mint(t, tAddr("z"))
 	env := map[string]string{"HOME": t.TempDir(), "MASH_URL": e.URL, "MASH_OWNER": e.Owner, "MASH_ADMIN_CREDS": e.AdminCreds, "MASH_INSECURE_LOOPBACK": "1"}
 	runAdmin := func(args ...string) (string, int) {
 		var out bytes.Buffer
 		code := run(append([]string{"admin"}, args...), envFrom(env), strings.NewReader(""), &out, &out)
 		return out.String(), code
 	}
-	if out, code := runAdmin("permissions", "z", "--nsc"); code != 0 || !strings.Contains(out, "--allow-pub\nagents.mail.*.o.*\n") {
+	if out, code := runAdmin("permissions", tTo("z"), "--nsc"); code != 0 || !strings.Contains(out, "--allow-pub\nagents.mail.o.*.*\n") {
 		t.Fatalf("permissions: %d %s", code, out)
 	}
-	if out, code := runAdmin("permissions", "z"); code != 0 || !strings.Contains(out, `"pub"`) {
+	if out, code := runAdmin("permissions", tTo("z")); code != 0 || !strings.Contains(out, `"pub"`) {
 		t.Fatalf("permissions json: %d %s", code, out)
 	}
 	if out, code := runAdmin("init"); code != 0 {
 		t.Fatalf("init: %s", out)
 	}
-	if out, code := runAdmin("provision", "z", "--user", u, "--account", e.Account, "--note", "zed"); code != 0 || !strings.Contains(out, "agents.mail.cc.o.z") {
+	if out, code := runAdmin("provision", tTo("z"), "--user", u, "--account", e.Account, "--note", "zed"); code != 0 || !strings.Contains(out, "agents.mail.o.dev.z") {
 		t.Fatalf("provision: %d %s", code, out)
 	}
-	if out, code := runAdmin("list"); code != 0 || !strings.Contains(out, "z\t") || !strings.Contains(out, "zed") {
+	if out, code := runAdmin("list"); code != 0 || !strings.Contains(out, "o.dev.z\t") || !strings.Contains(out, "zed") {
 		t.Fatalf("list: %d %s", code, out)
 	}
 	_ = c
 	for _, bad := range [][]string{
-		{"deprovision", "z", "--user"},
-		{"deprovision", "z", "--user", "notakey"},
-		{"deprovision", "z", "--user", "u" + u[1:]},
-		{"deprovision", "z", "--user", "A" + u[1:]},
-		{"deprovision", "z", "--user", u + "A"},
-		{"deprovision", "z", "--who", u},
-		{"deprovision", "z", u},
+		{"deprovision", tTo("z"), "--user"},
+		{"deprovision", tTo("z"), "--user", "notakey"},
+		{"deprovision", tTo("z"), "--user", "u" + u[1:]},
+		{"deprovision", tTo("z"), "--user", "A" + u[1:]},
+		{"deprovision", tTo("z"), "--user", u + "A"},
+		{"deprovision", tTo("z"), "--who", u},
+		{"deprovision", tTo("z"), u},
 	} {
-		if out, code := runAdmin(bad...); code == 0 || !strings.Contains(out, "usage: mash admin deprovision <name> [--user <public-key> | --drained-to SEQ --suspension ID]") {
+		if out, code := runAdmin(bad...); code == 0 || !strings.Contains(out, "usage: mash admin deprovision <owner.group.instance> [--user <public-key> | --drained-to SEQ --suspension ID]") {
 			t.Fatalf("%v: %d %s", bad, code, out)
 		}
 	}
-	_, other := e.Mint(t, "y")
-	if out, code := runAdmin("deprovision", "z", "--user", other); code == 0 || !strings.Contains(out, "refusing to deprovision z: its record belongs to another user key (left in place)") || strings.Contains(out, other[:9]) {
+	_, other := e.Mint(t, tAddr("y"))
+	if out, code := runAdmin("deprovision", tTo("z"), "--user", other); code == 0 || !strings.Contains(out, "refusing to deprovision o_dev_z: its record belongs to another user key (left in place)") || strings.Contains(out, other[:9]) {
 		t.Fatalf("other key: %d %s", code, out)
 	}
-	if out, code := runAdmin("list"); code != 0 || !strings.Contains(out, "z\t") {
+	if out, code := runAdmin("list"); code != 0 || !strings.Contains(out, "o.dev.z\t") {
 		t.Fatalf("a refused deprovision removed the record: %d %s", code, out)
 	}
-	if out, code := runAdmin("deprovision", "z", "--user", u); code != 0 || !strings.Contains(out, "deprovisioned z") || strings.Contains(out, u[:9]) {
+	if out, code := runAdmin("deprovision", tTo("z"), "--user", u); code != 0 || !strings.Contains(out, "deprovisioned") || strings.Contains(out, u[:9]) {
 		t.Fatalf("deprovision --user: %d %s", code, out)
 	}
-	if out, code := runAdmin("provision", "z", "--user", u, "--account", e.Account); code != 0 {
-		t.Fatalf("re-provision: %d %s", code, out)
-	}
-	if out, code := runAdmin("deprovision", "z"); code != 0 {
-		t.Fatalf("deprovision: %s", out)
+	// A deprovisioned address is retired and never assigned again.
+	if out, code := runAdmin("provision", tTo("z"), "--user", u, "--account", e.Account); code == 0 || !strings.Contains(out, "retired") {
+		t.Fatalf("re-provision of a retired address: %d %s", code, out)
 	}
 	if out, code := runAdmin("bogus"); code == 0 {
 		t.Fatalf("unknown admin command accepted: %s", out)
@@ -372,7 +385,7 @@ func TestServeExitsWhenLeaseLost(t *testing.T) {
 	s.tools(t)
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		if out, _ := w.cli(t, "a", "who"); strings.Contains(out, "a\tonline") {
+		if out, _ := w.cli(t, "a", "who"); strings.Contains(out, tTo("a")+"\tonline") {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -388,7 +401,7 @@ func TestServeExitsWhenLeaseLost(t *testing.T) {
 	}
 	// A Put overwrites whatever is there; Purge then Create raced with serve's refresh re-creating the key between
 	// the two calls ("wrong last sequence ... key exists").
-	if _, err := kv.Put(context.Background(), "a", []byte(`{"instance_id":"someone-else","host":"h","pid":"1"}`)); err != nil {
+	if _, err := kv.Put(context.Background(), tAddr("a").Flat(), []byte(`{"instance_id":"someone-else","host":"h","pid":"1"}`)); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -428,7 +441,7 @@ func TestServeLeaseLossDoesNotHangOnStdout(t *testing.T) {
 	// From here on nobody reads stdout.
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		if out, _ := w.cli(t, "a", "who"); strings.Contains(out, "a\tonline") {
+		if out, _ := w.cli(t, "a", "who"); strings.Contains(out, tTo("a")+"\tonline") {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -440,7 +453,7 @@ func TestServeLeaseLossDoesNotHangOnStdout(t *testing.T) {
 	kv, _ := js.KeyValue(context.Background(), store.LeaseBucket)
 	// Another session takes the name. A Put overwrites whatever is there; a Purge then Create raced with serve's own
 	// refresh re-creating the key between the two calls ("wrong last sequence ... key exists").
-	if _, err := kv.Put(context.Background(), "a", []byte(`{"instance_id":"someone-else"}`)); err != nil {
+	if _, err := kv.Put(context.Background(), tAddr("a").Flat(), []byte(`{"instance_id":"someone-else"}`)); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -582,7 +595,7 @@ func TestCLISendAdoptsTheLaunchInstance(t *testing.T) {
 	var lease string
 	deadline := time.Now().Add(10 * time.Second)
 	for lease == "" {
-		if en, err := kv.Get(context.Background(), "a"); err == nil {
+		if en, err := kv.Get(context.Background(), tAddr("a").Flat()); err == nil {
 			var lv struct {
 				Instance string `json:"instance_id"`
 			}
@@ -594,11 +607,11 @@ func TestCLISendAdoptsTheLaunchInstance(t *testing.T) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	if out, code := w.cli(t, "a", "send", "b", "from", "the", "shell"); code != 0 {
+	if out, code := w.cli(t, "a", "send", tTo("b"), "from", "the", "shell"); code != 0 {
 		t.Fatalf("cli send: %d %s", code, out)
 	}
 	out, code := w.cli(t, "b", "read", "1")
-	if code != 0 || !strings.Contains(out, "from a [verified]") || !strings.Contains(out, "instance: "+lease+"\n") {
+	if code != 0 || !strings.Contains(out, "from o.dev.a [verified]") || !strings.Contains(out, "instance: "+lease+"\n") {
 		t.Fatalf("want a verified mail naming the lease instance %q: %d %s", lease, code, out)
 	}
 }
@@ -610,7 +623,7 @@ func waitLeaseInstance(t *testing.T, w *world) string {
 	kv, _ := js.KeyValue(context.Background(), store.LeaseBucket)
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		if en, err := kv.Get(context.Background(), "a"); err == nil {
+		if en, err := kv.Get(context.Background(), tAddr("a").Flat()); err == nil {
 			var lv struct {
 				Instance string `json:"instance_id"`
 			}
@@ -646,11 +659,11 @@ func requireSentUnderOwnInstance(t *testing.T, w *world, out string, code int, r
 	if !strings.Contains(out, reason) || !strings.Contains(out, "sending under this command's own instance") {
 		t.Fatalf("want a warning naming %q and the fallback: %s", reason, out)
 	}
-	if !strings.Contains(out, "sent #1 from a to b") {
+	if !strings.Contains(out, "sent #1 from o.dev.a to o.dev.b") {
 		t.Fatalf("want the send reported: %s", out)
 	}
 	rd, rcode := w.cli(t, "b", "read", "1")
-	if rcode != 0 || !strings.Contains(rd, "from a") || !strings.Contains(rd, "instance: ") {
+	if rcode != 0 || !strings.Contains(rd, "from o.dev.a") || !strings.Contains(rd, "instance: ") {
 		t.Fatalf("b must hold the mail from a: %d %s", rcode, rd)
 	}
 	if notLease != "" && strings.Contains(rd, "instance: "+notLease+"\n") {
@@ -669,7 +682,7 @@ func TestCLISendWithAnotherLaunchTokenFallsBackToItsOwnInstance(t *testing.T) {
 	s.tools(t)
 	lease := waitLeaseInstance(t, w)
 	otherLaunchShell(w, "tok-2")
-	out, code := w.cli(t, "a-other", "send", "b", "mismatch", "body")
+	out, code := w.cli(t, "a-other", "send", tTo("b"), "mismatch", "body")
 	requireSentUnderOwnInstance(t, w, out, code, "does not match the launch holding", lease)
 }
 
@@ -677,7 +690,7 @@ func TestCLISendWithAnotherLaunchTokenFallsBackToItsOwnInstance(t *testing.T) {
 func TestCLISendWithATokenAndNoServeFallsBackToItsOwnInstance(t *testing.T) {
 	w := newWorld(t, "a", "b")
 	w.env["a"]["MASH_LAUNCH_TOKEN"] = "tok-1"
-	out, code := w.cli(t, "a", "send", "b", "no", "serve")
+	out, code := w.cli(t, "a", "send", tTo("b"), "no", "serve")
 	requireSentUnderOwnInstance(t, w, out, code, "lease can't be read", "")
 }
 
@@ -685,7 +698,7 @@ func TestCLISendWithATokenAndNoServeFallsBackToItsOwnInstance(t *testing.T) {
 func TestCLISendWithANewTokenBeforeTheNewServeTakesTheLease(t *testing.T) {
 	w := newWorld(t, "a", "b")
 	w.env["a"]["MASH_LAUNCH_TOKEN"] = "tok-2"
-	out, code := w.cli(t, "a", "send", "b", "before", "the", "lease")
+	out, code := w.cli(t, "a", "send", tTo("b"), "before", "the", "lease")
 	requireSentUnderOwnInstance(t, w, out, code, "lease can't be read", "")
 }
 
@@ -699,14 +712,14 @@ func TestCLISendWithANewTokenAgainstTheOldLease(t *testing.T) {
 	s.tools(t)
 	lease := waitLeaseInstance(t, w)
 	otherLaunchShell(w, "tok-2")
-	out, code := w.cli(t, "a-other", "send", "b", "after", "the", "kill")
+	out, code := w.cli(t, "a-other", "send", tTo("b"), "after", "the", "kill")
 	requireSentUnderOwnInstance(t, w, out, code, "does not match the launch holding", lease)
 }
 
 // Without a token and without a serve a send works as it always did.
 func TestCLISendWithoutATokenOrServeStillWorks(t *testing.T) {
 	w := newWorld(t, "a", "b")
-	if out, code := w.cli(t, "a", "send", "b", "plain"); code != 0 || !strings.Contains(out, "sent #1 from a to b") {
+	if out, code := w.cli(t, "a", "send", tTo("b"), "plain"); code != 0 || !strings.Contains(out, "sent #1 from o.dev.a to o.dev.b") {
 		t.Fatalf("plain send: %d %s", code, out)
 	}
 	if out, code := w.cli(t, "b", "read", "1"); code != 0 || !strings.Contains(out, "plain") {
@@ -719,7 +732,7 @@ func TestCLISendWithoutATokenOrServeStillWorks(t *testing.T) {
 func TestCLIInboxAfter(t *testing.T) {
 	w := newWorld(t, "a", "b")
 	for i := 1; i <= 4; i++ {
-		if out, code := w.cli(t, "b", "send", "a", fmt.Sprintf("m%d", i)); code != 0 {
+		if out, code := w.cli(t, "b", "send", tTo("a"), fmt.Sprintf("m%d", i)); code != 0 {
 			t.Fatalf("send: %d %s", code, out)
 		}
 	}
@@ -747,7 +760,7 @@ func TestCLIInboxAfter(t *testing.T) {
 func TestCLIInboxLimitPast100(t *testing.T) {
 	w := newWorld(t, "a", "b")
 	for i := 1; i <= 120; i++ {
-		if out, code := w.cli(t, "b", "send", "a", fmt.Sprintf("m%d", i)); code != 0 {
+		if out, code := w.cli(t, "b", "send", tTo("a"), fmt.Sprintf("m%d", i)); code != 0 {
 			t.Fatalf("send: %d %s", code, out)
 		}
 	}

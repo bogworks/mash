@@ -7,8 +7,6 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go/jetstream"
-
-	"github.com/bogworks/mash/internal/sap"
 )
 
 // floodInbox caps a's inbox at 4096 bytes and fills it past that before a session starts, so mail is evicted unread.
@@ -19,7 +17,7 @@ func floodInbox(t *testing.T, w *world, name string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := js.Stream(ctx, sap.InboxStream(name))
+	s, err := js.Stream(ctx, tAddr(name).InboxStream())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +31,7 @@ func floodInbox(t *testing.T, w *world, name string) {
 		t.Fatal(err)
 	}
 	for i := 0; i < 20; i++ {
-		if _, err := js.Publish(ctx, sap.For(w.e.Owner, name).Mail, []byte(strings.Repeat("x", 500))); err != nil {
+		if _, err := js.Publish(ctx, tAddr(name).Subjects().Mail, []byte(strings.Repeat("x", 500))); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -56,7 +54,7 @@ func TestStatusToolShowsInboxEviction(t *testing.T) {
 
 func TestStatusToolHasNoInboxLineForACleanInbox(t *testing.T) {
 	w := newWorld(t, "a", "b")
-	if out, code := w.cli(t, "b", "send", "a", "hello"); code != 0 {
+	if out, code := w.cli(t, "b", "send", tTo("a"), "hello"); code != 0 {
 		t.Fatalf("send: %s", out)
 	}
 	s := startServe(t, w.env["a"])

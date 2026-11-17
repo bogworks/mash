@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/namerule"
 	"github.com/bogworks/mash/internal/sap"
 )
@@ -22,37 +21,41 @@ const (
 	pointPromptAsker     = "prompt: the asker"
 	pointRelayOrigin     = "mail: the declared origin of a relay"
 	pointLookup          = "lookup"
-	pointAlias           = "the compatibility alias"
 )
 
-// checkRule applies rule to id for the entry point and words the refusal. A nil rule accepts everything.
-func checkRule(rule *namerule.Rule, point string, id sap.EndpointIdentity) error {
-	if err := rule.Check(id); err != nil {
+// checkRule applies rule to a for the entry point and words the refusal. A nil rule accepts everything.
+func checkRule(rule *namerule.Rule, point string, a sap.Address) error {
+	if err := rule.Check(a); err != nil {
 		return fmt.Errorf("mash: %s: %w", point, err)
 	}
 	return nil
 }
 
-// keyIdentity is the identity a directory key (or a recipient argument) names, formed as mash resolves it: a bare
-// legacy name is the legacy identity (cc, owner, name) under the asking endpoint's owner; the flat key of a
-// three-token endpoint (agent_owner_name) is that identity. Callers turn a canonical agent.owner.name into the flat key
-// first (sap.KeyOf). ok is false for anything else, which the code that follows refuses on its own terms.
-func keyIdentity(owner, key string) (sap.EndpointIdentity, bool) {
-	if config.ValidName(key) {
-		id, err := sap.Legacy(owner, key)
-		return id, err == nil
+// parseRecipient is the address a recipient argument names: the dotted owner.group.instance, or the flat key
+// owner_group_instance that who and the directory use. Anything else is refused, naming the form to give. A bare
+// instance is not completed from the sender's own owner or group.
+func parseRecipient(arg string) (sap.Address, error) {
+	var a sap.Address
+	var err error
+	if strings.Contains(arg, ".") {
+		a, err = sap.ParseAddress(arg)
+	} else {
+		a, err = sap.AddressFromFlat(arg)
 	}
-	id, err := sap.FromFlat(key)
-	return id, err == nil
+	if err != nil {
+		return sap.Address{}, fmt.Errorf("mash: %q is not an endpoint address: give the full address owner.group.instance as who shows it (the flat owner_group_instance is accepted too)", arg)
+	}
+	return a, nil
 }
 
-// checkKey applies the rule to the identity the directory key names; a key that names none passes here.
+// checkKey applies the rule to the address the directory key (or recipient argument) names; an argument that names
+// none passes here and is refused by the code that follows, on its own terms.
 func (e *Endpoint) checkKey(point, key string) error {
 	if e.cfg.NameRule == nil {
 		return nil
 	}
-	if id, ok := keyIdentity(e.cfg.Owner, key); ok {
-		return checkRule(e.cfg.NameRule, point, id)
+	if a, err := parseRecipient(key); err == nil {
+		return checkRule(e.cfg.NameRule, point, a)
 	}
 	return nil
 }
@@ -76,7 +79,7 @@ func (e *Endpoint) DiscoverRecipient(ctx context.Context, arg string) (string, e
 	if err := e.checkKey(pointPromptRecipient, arg); err != nil {
 		return "", err
 	}
-	return DiscoverRecipient(ctx, e.nc, e.cfg.Owner, arg)
+	return DiscoverRecipient(ctx, e.nc, arg)
 }
 
 // viaAllowed applies the rule to the origin named by a verified relay declaration ("<origin> #<seq>"). Mail from a

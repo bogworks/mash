@@ -21,11 +21,12 @@ import (
 	"github.com/bogworks/mash/internal/bootstrap"
 	"github.com/bogworks/mash/internal/ctl"
 	"github.com/bogworks/mash/internal/natsauth"
+	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/store"
 )
 
 // issued reads the issue record through the admin connection, by public key.
-func (h *addEnv) issued() map[string]store.Issued {
+func (h *fleetEnv) issued() map[string]store.Issued {
 	h.t.Helper()
 	adm, err := admin.New(h.e.Conn(h.t, h.e.AdminCreds), h.e.Owner)
 	if err != nil {
@@ -42,7 +43,7 @@ func (h *addEnv) issued() map[string]store.Issued {
 	return out
 }
 
-func (h *addEnv) issuedHistory(pub string) int {
+func (h *fleetEnv) issuedHistory(pub string) int {
 	h.t.Helper()
 	js, err := jetstream.New(h.e.Conn(h.t, h.e.AdminCreds))
 	if err != nil {
@@ -94,100 +95,61 @@ func credsSubject(t *testing.T, path string) (*jwt.UserClaims, string) {
 	return uc, pub
 }
 
-// `mashctl add` records the user it issues, with every field, before it hands the creds out; init records the admin.
-func TestAddRecordsTheIssuedUser(t *testing.T) {
-	h := newAddEnv(t)
-	if out, errb, code := h.run("add", "g", "--label", "net=green", "--tool"); code != 0 {
-		t.Fatalf("%d %s %s", code, out, errb)
-	}
-	uc, pub := h.credsClaims("g")
+// The issue record carries each user with the endpoint's address (dotted) and its three tokens, and the admin user marked
+// admin, so a check does not call mash's own user foreign.
+func TestIssuedListCarriesTheAddress(t *testing.T) {
+	h := newFleetEnv(t)
+	h.seedMeta(ad("g"), admin.Meta{Labels: map[string]string{"net": "green"}}, nil)
+	uc, pub := h.credsClaims(ad("g"))
 	rec, ok := h.issued()[pub]
 	if !ok {
 		t.Fatalf("no record for %s: %+v", pub, h.issued())
 	}
-	if rec.Address != "g" || rec.Owner != h.e.Owner || rec.Kind != store.IssuedEndpoint || rec.Generation != 0 {
+	if rec.Address != "o_g_g" || rec.Owner != h.e.Owner || rec.Kind != store.IssuedEndpoint || rec.Generation != 0 {
 		t.Errorf("record %+v", rec)
 	}
-	if len(rec.Tags) != 0 || len(uc.Tags) != 0 { // a user minted without a zone key carries no tags (ADR 0091)
+	if len(rec.Tags) != 0 || len(uc.Tags) != 0 {
 		t.Errorf("tags %v, JWT %v", rec.Tags, uc.Tags)
 	}
 	at, err := time.Parse(time.RFC3339, rec.IssuedAt)
 	if err != nil || !strings.HasSuffix(rec.IssuedAt, "Z") || at.Unix() != uc.IssuedAt {
 		t.Errorf("issued_at %q (%v), JWT iat %d", rec.IssuedAt, err, uc.IssuedAt)
 	}
-	// The admin user is in it too, marked admin, so a check does not call mash's own user foreign.
 	_, adminPub := credsSubject(t, h.e.AdminCreds)
 	if a, ok := h.issued()[adminPub]; !ok || a.Kind != store.IssuedAdmin || a.Address != "admin" {
 		t.Errorf("admin record %+v %v", a, ok)
 	}
+	out, errb, code := h.run("issued", "list", "--json")
+	if code != 0 {
+		t.Fatalf("%d %s %s", code, out, errb)
+	}
+	var l issuedList
+	if err := json.Unmarshal([]byte(out), &l); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range l.Issued {
+		switch r.PublicKey {
+		case pub:
+			if r.Address != "o.g.g" || r.Owner != "o" || r.Group != "g" || r.Instance != "g" {
+				t.Errorf("endpoint entry %+v", r)
+			}
+		case adminPub:
+			if r.Address != "admin" || r.Group != "" || r.Instance != "" {
+				t.Errorf("admin entry %+v", r)
+			}
+		}
+	}
+	for _, gone := range []string{`"name"`, `"agent_token"`} {
+		if strings.Contains(out, gone) {
+			t.Errorf("list --json carries %s", gone)
+		}
+	}
+	if text, _, _ := h.run("issued", "list"); !strings.Contains(text, "endpoint\to.g.g\t") {
+		t.Errorf("text list shows no dotted address:\n%s", text)
+	}
 	// Nothing secret in what the record holds.
 	b, _ := json.Marshal(h.issued())
-	noSecrets(t, string(b))
-}
-
-// A record that cannot be written stops the add: no creds file, no directory record.
-func TestAddIssuesNothingWhenTheRecordCannotBeWritten(t *testing.T) {
-	h := newAddEnv(t)
-	ctx := context.Background()
-	js, err := jetstream.New(h.e.Conn(t, h.e.AdminCreds))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := js.DeleteStream(ctx, store.IssuedStreamName); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := js.CreateKeyValue(ctx, store.IssuedConfig()); err != nil { // allows rollup: not hardened
-		t.Fatal(err)
-	}
-	out, errb, code := h.run("add", "g", "--label", "net=green")
-	if code != 1 || !strings.Contains(errb, "nothing was issued") {
-		t.Fatalf("%d %q %q", code, out, errb)
-	}
-	if _, err := readCreds(h.creds("g")); err == nil {
-		t.Error("a creds file was written")
-	}
-	if recs := h.records(); len(recs) != 0 {
-		t.Errorf("directory records %v", recs)
-	}
-}
-
-// A reissue that keeps the key adds a revision under the same key; a reissue that rotates records the new key and
-// keeps the old key's record.
-func TestReissueRecordsAndNeverRemoves(t *testing.T) {
-	h := newAddEnv(t)
-	fakeRevoke(t, nil)
-	if _, errb, code := h.run("add", "n", "--label", "net=green"); code != 0 {
-		t.Fatal(errb)
-	}
-	_, pub1 := h.credsClaims("n")
-	if h.issuedHistory(pub1) != 1 {
-		t.Fatal("add did not record once")
-	}
-	if out, errb, code := h.run("reissue", "n"); code != 0 {
-		t.Fatalf("%d %s %s", code, out, errb)
-	}
-	if _, p := h.credsClaims("n"); p != pub1 {
-		t.Fatal("a keeping reissue changed the key")
-	}
-	if got := h.issuedHistory(pub1); got != 2 {
-		t.Fatalf("history %d, want 2 revisions of the same key", got)
-	}
-
-	fakeKeyRevoked(t, true, nil) // the account JWT revokes the key: the reissue rotates
-	if out, errb, code := h.run("reissue", "n"); code != 0 {
-		t.Fatalf("%d %s %s", code, out, errb)
-	}
-	_, pub2 := h.credsClaims("n")
-	if pub2 == pub1 {
-		t.Fatal("no rotation")
-	}
-	recs := h.issued()
-	if recs[pub2].Address != "n" || recs[pub2].Kind != store.IssuedEndpoint {
-		t.Errorf("the new key is not recorded: %+v", recs[pub2])
-	}
-	if recs[pub1].Address != "n" {
-		t.Errorf("the old key's record was removed: %+v", recs[pub1])
-	}
+	noSecrets(t, string(b), out)
 }
 
 // --- the check, against a real operator-mode server --------------------------------------------------------------
@@ -242,7 +204,7 @@ func (e *applyEnv) mintRogue(name string) nats.Option {
 	upub, _ := ukp.PublicKey()
 	uc := jwt.NewUserClaims(upub)
 	uc.Name = name
-	uc.Permissions = admin.Permissions("alice", name) // NewUserClaims leaves the limits unlimited
+	uc.Permissions = *admin.Permissions(sap.Address{Owner: "alice", Group: "g", Instance: name}) // NewUserClaims leaves the limits unlimited
 	tok, err := uc.Encode(akp)
 	if err != nil {
 		e.t.Fatal(err)
@@ -254,7 +216,7 @@ func (e *applyEnv) mintRogue(name string) nats.Option {
 // signing key connects, and the check reports exactly its public key and exits 1.
 func TestIssuedCheckReportsAKeyMashDidNotIssue(t *testing.T) {
 	e := newXYEnv(t)
-	x := e.connect(natsauth.UserCredentials(e.credsPath("x")), nats.Name("x-client"))
+	x := e.connect(natsauth.UserCredentials(e.credsPath(xy("x").String())), nats.Name("x-client"))
 	_ = x
 
 	r, errb, code := e.issuedCheck()
@@ -265,7 +227,7 @@ func TestIssuedCheckReportsAKeyMashDidNotIssue(t *testing.T) {
 		t.Errorf("recorded %d", r.Summary.Recorded)
 	}
 	var yKey string
-	_, yKey = credsSubject(t, e.credsPath("y"))
+	_, yKey = credsSubject(t, e.credsPath(xy("y").String()))
 	if !slices.ContainsFunc(r.NotConnected, func(n issuedNotConnected) bool { return n.PublicKey == yKey }) {
 		t.Errorf("y is recorded and not connected, and should be listed: %+v", r.NotConnected)
 	}
@@ -390,7 +352,7 @@ func TestIssuedJSONShape(t *testing.T) {
 		}
 	}
 	text, _, code := e.run("issued", "list")
-	if code != 0 || !strings.Contains(text, "endpoint\tx\t") || !strings.Contains(text, "admin\t") || !strings.Contains(text, "purpose issue") || strings.Contains(text, "revoked") {
+	if code != 0 || !strings.Contains(text, "endpoint\talice.g.x\t") || !strings.Contains(text, "admin\t") || !strings.Contains(text, "purpose issue") || strings.Contains(text, "revoked") {
 		t.Fatalf("%d %s", code, text)
 	}
 	noSecrets(t, out, text)
@@ -426,80 +388,21 @@ func TestConnzReadsEveryPage(t *testing.T) {
 
 // --- purpose and revoked_at ------------------------------------------------------------------------------------
 
-// Each path writes its purpose: add issue, a reissue that keeps the key issue, a reissue that rotates rotation, and
-// the admin user at init issue with kind admin.
+// An issued endpoint user is recorded with the issue purpose, and so is the admin user at init, with kind admin.
 func TestIssuedPurposePerPath(t *testing.T) {
-	h := newAddEnv(t)
-	fakeRevoke(t, nil)
-	if _, errb, code := h.run("add", "n", "--label", "net=green"); code != 0 {
-		t.Fatal(errb)
-	}
-	_, pub1 := h.credsClaims("n")
+	h := newFleetEnv(t)
+	h.seedMeta(ad("n"), admin.Meta{Labels: map[string]string{"net": "green"}}, nil)
+	_, pub1 := h.credsClaims(ad("n"))
 	if r := h.issued()[pub1]; r.Purpose != store.PurposeIssue {
-		t.Errorf("add: purpose %q", r.Purpose)
+		t.Errorf("endpoint: purpose %q", r.Purpose)
 	}
 	_, adminPub := credsSubject(t, h.e.AdminCreds)
 	if r := h.issued()[adminPub]; r.Purpose != store.PurposeIssue || r.Kind != store.IssuedAdmin {
 		t.Errorf("init admin: %+v", r)
 	}
-	if out, errb, code := h.run("reissue", "n"); code != 0 {
-		t.Fatalf("%d %s %s", code, out, errb)
-	}
-	if r := h.issued()[pub1]; r.Purpose != store.PurposeIssue {
-		t.Errorf("reissue that keeps the key: purpose %q", r.Purpose)
-	}
-	fakeKeyRevoked(t, true, nil) // the reissue rotates
-	if out, errb, code := h.run("reissue", "n"); code != 0 {
-		t.Fatalf("%d %s %s", code, out, errb)
-	}
-	_, pub2 := h.credsClaims("n")
-	recs := h.issued()
-	if recs[pub2].Purpose != store.PurposeRotation {
-		t.Errorf("reissue that rotates: new key purpose %q", recs[pub2].Purpose)
-	}
-	if recs[pub1].Purpose != store.PurposeIssue {
-		t.Errorf("the old key's purpose changed: %q", recs[pub1].Purpose)
-	}
 	text, _, code := h.run("issued", "list")
-	if code != 0 || !strings.Contains(text, "purpose rotation") {
+	if code != 0 || !strings.Contains(text, "purpose issue") {
 		t.Errorf("list: %d %s", code, text)
-	}
-}
-
-// A rotating reissue marks the old key revoked after the revocation, and not the new one; a failed revocation marks nothing.
-func TestReissueRotationMarksTheOldKeyRevoked(t *testing.T) {
-	h := newAddEnv(t)
-	if _, errb, code := h.run("add", "n", "--label", "net=green"); code != 0 {
-		t.Fatal(errb)
-	}
-	_, pub1 := h.credsClaims("n")
-	fakeKeyRevoked(t, false, nil)
-
-	calls := fakeRevoke(t, errors.New("no ack"))
-	fakeKeyRevoked(t, true, nil)
-	if _, _, code := h.run("reissue", "n"); code == 0 {
-		t.Fatal("the reissue passed with the revocation failing")
-	}
-	if len(*calls) != 1 || h.issued()[pub1].RevokedAt != "" {
-		t.Fatalf("calls %v, record %+v", *calls, h.issued()[pub1])
-	}
-
-	fakeRevoke(t, nil)
-	fakeKeyRevoked(t, true, nil)
-	if out, errb, code := h.run("reissue", "n"); code != 0 {
-		t.Fatalf("%d %s %s", code, out, errb)
-	}
-	_, pub2 := h.credsClaims("n")
-	recs := h.issued()
-	if _, err := time.Parse(time.RFC3339, recs[pub1].RevokedAt); err != nil || !strings.HasSuffix(recs[pub1].RevokedAt, "Z") {
-		t.Errorf("old key revoked_at %q", recs[pub1].RevokedAt)
-	}
-	if recs[pub2].RevokedAt != "" {
-		t.Errorf("the new key is marked revoked: %+v", recs[pub2])
-	}
-	text, _, _ := h.run("issued", "list")
-	if !strings.Contains(text, "revoked "+recs[pub1].RevokedAt) {
-		t.Errorf("list does not show revoked_at:\n%s", text)
 	}
 }
 
@@ -507,21 +410,19 @@ func TestReissueRotationMarksTheOldKeyRevoked(t *testing.T) {
 // failed mark is a warning and the revocation still stands; a key mash never recorded is no warning.
 func TestRetireAndDeprovisionMarkTheKeyRevoked(t *testing.T) {
 	t.Run("retire", func(t *testing.T) {
-		h := newAddEnv(t)
-		if _, errb, code := h.run("add", "n", "--label", "net=green"); code != 0 {
-			t.Fatal(errb)
-		}
-		_, pub := h.credsClaims("n")
+		h := newFleetEnv(t)
+		h.seedMeta(ad("n"), admin.Meta{Labels: map[string]string{"net": "green"}}, nil)
+		_, pub := h.credsClaims(ad("n"))
 		s := stubRevoke(t)
 		s.err = errors.New("no ack")
-		if _, _, code := h.run("retire", "n"); code == 0 {
+		if _, _, code := h.run("retire", "o.g.n"); code == 0 {
 			t.Fatal("retire passed with the revocation failing")
 		}
 		if h.issued()[pub].RevokedAt != "" {
 			t.Fatal("marked although the revocation failed")
 		}
 		s.err = nil
-		if out, errb, code := h.run("retire", "n"); code != 0 {
+		if out, errb, code := h.run("retire", "o.g.n"); code != 0 {
 			t.Fatalf("%d %s %s", code, out, errb)
 		}
 		if len(s.calls) < 2 || s.calls[len(s.calls)-1] != pub {
@@ -532,13 +433,11 @@ func TestRetireAndDeprovisionMarkTheKeyRevoked(t *testing.T) {
 		}
 	})
 	t.Run("deprovision", func(t *testing.T) {
-		h := newAddEnv(t)
-		if _, errb, code := h.run("add", "n", "--label", "net=green"); code != 0 {
-			t.Fatal(errb)
-		}
-		_, pub := h.credsClaims("n")
+		h := newFleetEnv(t)
+		h.seedMeta(ad("n"), admin.Meta{Labels: map[string]string{"net": "green"}}, nil)
+		_, pub := h.credsClaims(ad("n"))
 		s := stubRevoke(t)
-		if out, errb, code := h.run("deprovision", "n"); code != 0 {
+		if out, errb, code := h.run("deprovision", "o.g.n"); code != 0 {
 			t.Fatalf("%d %s %s", code, out, errb)
 		}
 		if len(s.calls) != 1 || s.calls[0] != pub {
@@ -549,16 +448,14 @@ func TestRetireAndDeprovisionMarkTheKeyRevoked(t *testing.T) {
 		}
 	})
 	t.Run("mark failure is a warning", func(t *testing.T) {
-		h := newAddEnv(t)
-		if _, errb, code := h.run("add", "n", "--label", "net=green"); code != 0 {
-			t.Fatal(errb)
-		}
-		_, pub := h.credsClaims("n")
+		h := newFleetEnv(t)
+		h.seedMeta(ad("n"), admin.Meta{Labels: map[string]string{"net": "green"}}, nil)
+		_, pub := h.credsClaims(ad("n"))
 		stubRevoke(t)
 		prev := ctl.IssuedMarkRevoked
 		ctl.IssuedMarkRevoked = func(context.Context, *admin.Admin, string, time.Time) error { return errors.New("record down") }
 		t.Cleanup(func() { ctl.IssuedMarkRevoked = prev })
-		out, errb, code := h.run("retire", "n")
+		out, errb, code := h.run("retire", "o.g.n")
 		if code != 0 {
 			t.Fatalf("a failed mark failed the retire: %d %s %s", code, out, errb)
 		}
@@ -573,10 +470,10 @@ func TestRetireAndDeprovisionMarkTheKeyRevoked(t *testing.T) {
 		}
 	})
 	t.Run("not recorded is silent", func(t *testing.T) {
-		h := newAddEnv(t)
+		h := newFleetEnv(t)
 		u := h.provisionDeclared("a") // provisioned without mashctl add: not in the issue record
 		stubRevoke(t)
-		out, errb, code := h.run("retire", "a")
+		out, errb, code := h.run("retire", "o.g.a")
 		// The pre-revocation check warns once that the key has no record; marking the revocation says nothing more.
 		if code != 0 || strings.Count(errb, "issue record") != 1 || !strings.Contains(errb, "has no issue record") || strings.Contains(errb, "was not updated") {
 			t.Fatalf("%d %s %s", code, out, errb)
@@ -590,13 +487,13 @@ func TestRetireAndDeprovisionMarkTheKeyRevoked(t *testing.T) {
 // A connected key the record holds as revoked is its own finding: exit 1, listed apart from the unrecorded.
 func TestIssuedCheckReportsARevokedKeyStillConnected(t *testing.T) {
 	e := newXYEnv(t)
-	e.connect(natsauth.UserCredentials(e.credsPath("x")), nats.Name("x-client"))
+	e.connect(natsauth.UserCredentials(e.credsPath(xy("x").String())), nats.Name("x-client"))
 	r, errb, code := e.issuedCheck()
 	if code != 0 || !r.Clean || len(r.RevokedConn) != 0 {
 		t.Fatalf("before: %d %+v %s", code, r, errb)
 	}
-	_, xKey := credsSubject(t, e.credsPath("x"))
-	_, yKey := credsSubject(t, e.credsPath("y"))
+	_, xKey := credsSubject(t, e.credsPath(xy("x").String()))
+	_, yKey := credsSubject(t, e.credsPath(xy("y").String()))
 	adm, ctx, closeAdm := e.admin()
 	defer closeAdm()
 	// y is revoked and not connected: no finding. x is revoked and connected: a finding.
@@ -614,7 +511,7 @@ func TestIssuedCheckReportsARevokedKeyStillConnected(t *testing.T) {
 		t.Fatalf("after: %d %+v %s", code, r, errb)
 	}
 	f := r.RevokedConn[0]
-	if f.PublicKey != xKey || f.Address != "x" || f.RevokedAt != "2026-11-01T00:00:00Z" || f.Purpose != store.PurposeIssue || f.Server == "" {
+	if f.PublicKey != xKey || f.Address != "alice.g.x" || f.RevokedAt != "2026-11-01T00:00:00Z" || f.Purpose != store.PurposeIssue || f.Server == "" {
 		t.Errorf("finding %+v", f)
 	}
 	out, _, code := e.run("issued", "check")

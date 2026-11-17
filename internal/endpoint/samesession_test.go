@@ -45,13 +45,13 @@ func TestSameSessionTakeoverBySessionID(t *testing.T) {
 	setSession(t, id)
 	stubHolderGone(t, func(string, string) bool { return false })
 	f := newFixture(t, "a")
-	kv := heldBy(t, f, "a", leaseValue{Machine: needMachine(t), Session: id.Session})
+	kv := heldBy(t, f, tkey("a"), leaseValue{Machine: needMachine(t), Session: id.Session})
 	ep, err := Open(context.Background(), f.cfg("a"))
 	if err != nil {
 		t.Fatalf("a later serve of the same session must take the lease: %v", err)
 	}
 	defer ep.Close()
-	lv := readLease(t, kv, "a")
+	lv := readLease(t, kv, tkey("a"))
 	if lv.Instance == "earlier" || lv.Session != id.Session || lv.PPID != id.PPID || lv.PStart != id.PStart {
 		t.Fatalf("lease %+v", lv)
 	}
@@ -63,13 +63,13 @@ func TestSameSessionTakeoverByParent(t *testing.T) {
 	setSession(t, id)
 	stubHolderGone(t, func(string, string) bool { return false })
 	f := newFixture(t, "a")
-	kv := heldBy(t, f, "a", leaseValue{Machine: needMachine(t), PPID: id.PPID, PStart: id.PStart})
+	kv := heldBy(t, f, tkey("a"), leaseValue{Machine: needMachine(t), PPID: id.PPID, PStart: id.PStart})
 	ep, err := Open(context.Background(), f.cfg("a"))
 	if err != nil {
 		t.Fatalf("same parent and start time: %v", err)
 	}
 	defer ep.Close()
-	if lv := readLease(t, kv, "a"); lv.Instance == "earlier" {
+	if lv := readLease(t, kv, tkey("a")); lv.Instance == "earlier" {
 		t.Fatalf("lease not taken: %+v", lv)
 	}
 }
@@ -104,7 +104,7 @@ func TestSameSessionNeverAcrossSessionsOrMachines(t *testing.T) {
 			setSession(t, c.mine)
 			stubHolderGone(t, func(string, string) bool { return false })
 			f := newFixture(t, "a")
-			kv := heldBy(t, f, "a", c.holder)
+			kv := heldBy(t, f, tkey("a"), c.holder)
 			cfg := f.cfg("a")
 			cfg.LaunchToken = c.launch[0]
 			_, err := Open(context.Background(), cfg)
@@ -112,7 +112,7 @@ func TestSameSessionNeverAcrossSessionsOrMachines(t *testing.T) {
 			if !errors.As(err, &held) {
 				t.Fatalf("got %v, want held", err)
 			}
-			if lv := readLease(t, kv, "a"); lv.Instance != "earlier" {
+			if lv := readLease(t, kv, tkey("a")); lv.Instance != "earlier" {
 				t.Fatalf("lease displaced: %+v", lv)
 			}
 		})
@@ -125,10 +125,10 @@ func TestSameSessionTakeoverLosesToLiveWriter(t *testing.T) {
 	id := ours(t)
 	setSession(t, id)
 	f := newFixture(t, "a")
-	kv := heldBy(t, f, "a", leaseValue{Machine: needMachine(t), Session: id.Session})
+	kv := heldBy(t, f, tkey("a"), leaseValue{Machine: needMachine(t), Session: id.Session})
 	live := leaseValue{Instance: "live", Host: "h", PID: "4243", Since: "y", Machine: ourMachine(), Session: id.Session}
 	stubHolderGone(t, func(string, string) bool {
-		putLease(t, f, "a", live) // a write between the read and the compare-and-set
+		putLease(t, f, tkey("a"), live) // a write between the read and the compare-and-set
 		return false
 	})
 	_, err := Open(context.Background(), f.cfg("a"))
@@ -136,7 +136,7 @@ func TestSameSessionTakeoverLosesToLiveWriter(t *testing.T) {
 	if !errors.As(err, &held) || !held.SameSession {
 		t.Fatalf("got %v, want held with SameSession", err)
 	}
-	if lv := readLease(t, kv, "a"); lv.Instance != "live" {
+	if lv := readLease(t, kv, tkey("a")); lv.Instance != "live" {
 		t.Fatalf("lease displaced: %+v", lv)
 	}
 }
@@ -147,7 +147,7 @@ func TestHeldErrorSameSessionFlagOnlyForSameSession(t *testing.T) {
 	setSession(t, id)
 	stubHolderGone(t, func(string, string) bool { return false })
 	f := newFixture(t, "a")
-	heldBy(t, f, "a", leaseValue{Machine: needMachine(t), Session: "another"})
+	heldBy(t, f, tkey("a"), leaseValue{Machine: needMachine(t), Session: "another"})
 	_, err := Open(context.Background(), f.cfg("a"))
 	var held *LeaseHeldError
 	if !errors.As(err, &held) || held.SameSession || held.PID != "4242" {
@@ -199,7 +199,7 @@ func TestSameSessionEarlierServeStepsDown(t *testing.T) {
 		t.Fatal("the earlier serve did not step down within a refresh interval")
 	}
 	first.Close()
-	if lv := readLease(t, putLeaseKV(t, f), "a"); lv.Instance != second.instance {
+	if lv := readLease(t, putLeaseKV(t, f), tkey("a")); lv.Instance != second.instance {
 		t.Fatalf("the earlier serve's close touched the new holder's lease: %+v", lv)
 	}
 }
@@ -214,48 +214,13 @@ func TestLeaseLostToOtherSessionIsNotSameSession(t *testing.T) {
 	}
 	defer ep.Close()
 	kv := putLeaseKV(t, f)
-	if _, err := kv.Put(context.Background(), "a", []byte(`{"instance_id":"someone-else","host":"h","pid":"77","machine":"`+ourMachine()+`","session":"another"}`)); err != nil {
+	if _, err := kv.Put(context.Background(), tkey("a"), []byte(`{"instance_id":"someone-else","host":"h","pid":"77","machine":"`+ourMachine()+`","session":"another"}`)); err != nil {
 		t.Fatal(err)
 	}
 	err = ep.refreshLease(context.Background())
 	var lost *LeaseLostError
 	if !errors.As(err, &lost) || lost.SameSession || lost.PID != "77" || !strings.Contains(err.Error(), "lost the lease") {
 		t.Fatalf("got %v (%+v)", err, lost)
-	}
-}
-
-// The legacy identity's lease is taken over by the same rule (ADR 0092), so a new serve of the session reads the legacy
-// stream at once; a legacy lease of another session is still not taken.
-func TestSameSessionTakesLegacyLease(t *testing.T) {
-	id := ours(t)
-	setSession(t, id)
-	stubHolderGone(t, func(string, string) bool { return false })
-	f := newFixture(t, "old")
-	nf := f.addNewFormAlias(t, "ag", "team", "new", f.e.Owner, "old", aliasOpts{})
-	kv := heldBy(t, f, "old", leaseValue{Machine: needMachine(t), Session: id.Session})
-	ep, _, _ := f.runNF(t, nf)
-	if !ep.legacyReading() {
-		line, _ := ep.LegacyInboxLine()
-		t.Fatalf("the legacy lease of the same session was not taken: %s", line)
-	}
-	if lv := readLease(t, kv, "old"); lv.Instance != ep.instance {
-		t.Fatalf("legacy lease %+v", lv)
-	}
-}
-
-func TestOtherSessionKeepsLegacyLease(t *testing.T) {
-	id := ours(t)
-	setSession(t, id)
-	stubHolderGone(t, func(string, string) bool { return false })
-	f := newFixture(t, "old")
-	nf := f.addNewFormAlias(t, "ag", "team", "new", f.e.Owner, "old", aliasOpts{})
-	kv := heldBy(t, f, "old", leaseValue{Machine: needMachine(t), Session: "another"})
-	ep, _, _ := f.runNF(t, nf)
-	if ep.legacyReading() {
-		t.Fatal("took the legacy lease of another session")
-	}
-	if lv := readLease(t, kv, "old"); lv.Instance != "earlier" {
-		t.Fatalf("legacy lease displaced: %+v", lv)
 	}
 }
 
@@ -272,7 +237,7 @@ func TestSameSessionParentFallbackWhenOneSideHasNoSessionID(t *testing.T) {
 			setSession(t, id)
 			stubHolderGone(t, func(string, string) bool { return false })
 			f := newFixture(t, "a")
-			heldBy(t, f, "a", leaseValue{Machine: needMachine(t), Session: c.holder, PPID: id.PPID, PStart: id.PStart})
+			heldBy(t, f, tkey("a"), leaseValue{Machine: needMachine(t), Session: c.holder, PPID: id.PPID, PStart: id.PStart})
 			ep, err := Open(context.Background(), f.cfg("a"))
 			if err != nil {
 				t.Fatalf("same parent, a side without a session id: %v", err)

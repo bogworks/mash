@@ -68,12 +68,9 @@ func (e *Endpoint) takeoverReason(lv leaseValue) string {
 	return ""
 }
 
-// tookOverLine is the log line of a takeover; key is the lease's key, shown only for the legacy identity's.
-func (e *Endpoint) tookOverLine(key, reason string, lv leaseValue) string {
+// tookOverLine is the log line of a takeover.
+func (e *Endpoint) tookOverLine(reason string, lv leaseValue) string {
 	what := "lease: took over"
-	if key != e.key {
-		what += " " + key
-	}
 	if reason == "same" {
 		return fmt.Sprintf("%s from the same session's earlier serve %s (pid %s)", what, lv.Instance, lv.PID)
 	}

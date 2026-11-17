@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/bogworks/mash/internal/render"
-	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/spool"
 	"github.com/bogworks/mash/internal/store"
 	"github.com/bogworks/mash/internal/testenv"
@@ -23,7 +22,7 @@ func (f *fixture) shortenWindow(t *testing.T, name string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := store.InboxConfig(f.e.Owner, name)
+	cfg := store.InboxConfig(taddr(name))
 	cfg.Duplicates = f.dup
 	if _, err := js.UpdateStream(context.Background(), cfg); err != nil {
 		t.Fatal(err)
@@ -40,18 +39,18 @@ func TestSendIDRepeatedAfterTheWindowIsShownAgain(t *testing.T) {
 	_, ev := f.run(t, "a")
 	ctx := context.Background()
 
-	first, err := b.SendDetailed(ctx, "a", "deploy now", SendOptions{ID: "K"})
+	first, err := b.SendDetailed(ctx, tdot("a"), "deploy now", SendOptions{ID: "K"})
 	if err != nil || first.Duplicate {
 		t.Fatalf("first send: %+v %v", first, err)
 	}
-	again, err := b.SendDetailed(ctx, "a", "deploy now", SendOptions{ID: "K"})
+	again, err := b.SendDetailed(ctx, tdot("a"), "deploy now", SendOptions{ID: "K"})
 	if err != nil || !again.Duplicate || again.Seq != first.Seq {
 		t.Fatalf("re-run inside the window: %+v %v, want a duplicate of #%d", again, err, first.Seq)
 	}
 	ev.waitFor(t, 1, 10*time.Second)
 
 	time.Sleep(2500 * time.Millisecond) // past the 1 s window
-	later, err := b.SendDetailed(ctx, "a", "deploy now", SendOptions{ID: "K"})
+	later, err := b.SendDetailed(ctx, tdot("a"), "deploy now", SendOptions{ID: "K"})
 	if err != nil || later.Duplicate || later.Seq == first.Seq {
 		t.Fatalf("send after the window: %+v %v, want a new message", later, err)
 	}
@@ -83,11 +82,11 @@ func TestSendIDTwiceLandsOnce(t *testing.T) {
 	f := newFixture(t, "a", "b")
 	a, b := f.client(t, "a"), f.client(t, "b")
 	ctx := context.Background()
-	first, err := b.SendDetailed(ctx, "a", "once", SendOptions{ID: "deploy-42"})
+	first, err := b.SendDetailed(ctx, tdot("a"), "once", SendOptions{ID: "deploy-42"})
 	if err != nil || first.Duplicate {
 		t.Fatalf("first send: %+v %v", first, err)
 	}
-	second, err := b.SendDetailed(ctx, "a", "once", SendOptions{ID: "deploy-42"})
+	second, err := b.SendDetailed(ctx, tdot("a"), "once", SendOptions{ID: "deploy-42"})
 	if err != nil {
 		t.Fatalf("second send: %v", err)
 	}
@@ -108,7 +107,7 @@ func TestSendIDDoesNotCollideAcrossSendersOrRecipients(t *testing.T) {
 		from *Endpoint
 		to   string
 	}{{b, "a"}, {c, "a"}, {b, "d"}, {c, "d"}} {
-		r, err := s.from.SendDetailed(ctx, s.to, "same key", SendOptions{ID: "k1"})
+		r, err := s.from.SendDetailed(ctx, tdot(s.to), "same key", SendOptions{ID: "k1"})
 		if err != nil || r.Duplicate {
 			t.Fatalf("send to %s: %+v %v", s.to, r, err)
 		}
@@ -136,7 +135,7 @@ func TestSendIDDoesNotCollideAcrossSendersOrRecipients(t *testing.T) {
 func TestLostAckThenRetryWithTheKeyLandsOnce(t *testing.T) {
 	f := newFixture(t, "a", "b")
 	a := f.client(t, "a")
-	px := testenv.NewAckDropProxy(t, f.e.URL, sap.For(f.e.Owner, "a").Mail)
+	px := testenv.NewAckDropProxy(t, f.e.URL, taddr("a").Subjects().Mail)
 	cfg := f.cfg("b")
 	cfg.URL = px.URL()
 	lossy, err := OpenClient(context.Background(), cfg)
@@ -146,7 +145,7 @@ func TestLostAckThenRetryWithTheKeyLandsOnce(t *testing.T) {
 	defer lossy.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
 	defer cancel()
-	_, err = lossy.Send(ctx, "a", "did it land?", 0)
+	_, err = lossy.Send(ctx, tdot("a"), "did it land?", 0)
 	if err == nil {
 		t.Fatal("send with a lost ack succeeded")
 	}
@@ -165,7 +164,7 @@ func TestLostAckThenRetryWithTheKeyLandsOnce(t *testing.T) {
 	if got := inboxBodies(t, a); len(got) != 1 {
 		t.Fatalf("after the lost ack the inbox has %q, want the one message", got)
 	}
-	retry, err := f.client(t, "b").SendDetailed(context.Background(), "a", "did it land?", SendOptions{ID: te.Key})
+	retry, err := f.client(t, "b").SendDetailed(context.Background(), tdot("a"), "did it land?", SendOptions{ID: te.Key})
 	if err != nil || !retry.Duplicate {
 		t.Fatalf("retry with the key: %+v %v, want success as a duplicate", retry, err)
 	}
@@ -179,7 +178,7 @@ func TestSendIDValidation(t *testing.T) {
 	f := newFixture(t, "a", "b")
 	a, b := f.client(t, "a"), f.client(t, "b")
 	for _, bad := range []string{strings.Repeat("k", 129), "has space", "tab\tkey", "new\nline", "nul\x00", "café", "\x7f"} {
-		if _, err := b.SendDetailed(context.Background(), "a", "x", SendOptions{ID: bad}); err == nil || !strings.Contains(err.Error(), "id") {
+		if _, err := b.SendDetailed(context.Background(), tdot("a"), "x", SendOptions{ID: bad}); err == nil || !strings.Contains(err.Error(), "id") {
 			t.Errorf("id %q: want a clear error, got %v", bad, err)
 		}
 		if ValidateSendID(bad) == nil {

@@ -111,7 +111,7 @@ func TestScopeVerdictIsCachedForTheTTLOnly(t *testing.T) {
 func TestRevocationBetweenLookupAndWriteRefuses(t *testing.T) {
 	f := newFixture(t)
 	r := f.req(t, "foo.c.core", hardenTTL)
-	f.rec.recs[r.PublicKey] = store.Issued{PublicKey: r.PublicKey, Address: r.Address}
+	f.rec.recs[r.PublicKey] = store.Issued{PublicKey: r.PublicKey, Address: "foo_c_core"}
 	f.rec.afterLookup = func() {
 		f.rec.mu.Lock()
 		defer f.rec.mu.Unlock()
@@ -132,7 +132,7 @@ func TestBindingElsewhereBetweenLookupAndWriteRefuses(t *testing.T) {
 	f.rec.afterLookup = func() {
 		f.rec.mu.Lock()
 		defer f.rec.mu.Unlock()
-		f.rec.recs[r.PublicKey] = store.Issued{PublicKey: r.PublicKey, Address: "foo.c.lead"}
+		f.rec.recs[r.PublicKey] = store.Issued{PublicKey: r.PublicKey, Address: "foo_c_docs"}
 	}
 	out, err := f.is.Issue(bg, r, store.PurposeIssue)
 	if out != nil || code(err) != CodeBound {
@@ -206,9 +206,9 @@ func TestRefusalsNeverHoldNonces(t *testing.T) {
 	f := newFixture(t)
 	ctx := bg
 	key := userPub(t)
-	f.rec.recs[key] = store.Issued{PublicKey: key, Address: "foo.c.lead"}
+	f.rec.recs[key] = store.Issued{PublicKey: key, Address: "foo_c_docs"}
 	revoked := userPub(t)
-	f.rec.recs[revoked] = store.Issued{PublicKey: revoked, Address: "foo.c.core", RevokedAt: "2026-01-01T00:00:00Z"}
+	f.rec.recs[revoked] = store.Issued{PublicKey: revoked, Address: "foo_c_core", RevokedAt: "2026-01-01T00:00:00Z"}
 	steps := []func(i int) (Request, string){
 		func(i int) (Request, string) {
 			return f.reqFor(t, "foo.c.nobody", userPub(t), nonceN(2, i)), CodeUnlisted

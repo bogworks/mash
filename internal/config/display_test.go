@@ -8,9 +8,9 @@ func TestDisplayName(t *testing.T) {
 		cfg  Config
 		want string
 	}{
-		{"three tokens", Config{Name: "sap-go-sdk", Owner: "x", AgentToken: "bogworks"}, "bogworks.x.sap-go-sdk"},
-		{"legacy", Config{Name: "team-a", Owner: "acme"}, "team-a"},
-		{"invalid three tokens fall back to the name", Config{Name: "Bad", Owner: "x", AgentToken: "bogworks"}, "Bad"},
+		{"three tokens", Config{Name: "sap-go-sdk", Owner: "x", Group: "bogworks"}, "x.bogworks.sap-go-sdk"},
+		{"no group falls back to the name", Config{Name: "team-a", Owner: "acme"}, "team-a"},
+		{"invalid tokens fall back to the name", Config{Name: "Bad", Owner: "x", Group: "bogworks"}, "Bad"},
 		{"unset", Config{}, ""},
 	} {
 		if got := c.cfg.DisplayName(); got != c.want {

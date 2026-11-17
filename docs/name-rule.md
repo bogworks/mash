@@ -4,9 +4,8 @@ The format of mash's name-acceptance rule file, version 1. mash owns this schema
 deployment owns the content of the file. mash ships no default rule: with no file named, no rule applies. The decision
 is [ADR 0077](decisions/0077-the-name-rule-file-is-versioned-and-mash-reads-two-versions-for-one-window.md).
 
-A rule restricts which identities mash will accept. An identity is the three SAP tokens `agent`, `owner` and `name`
-([ADR 0074](decisions/0074-an-endpoint-is-three-sap-tokens-and-keys-its-storage-on-their-flat-form.md)); a legacy
-identity is `(cc, <owner>, <name>)`. mash applies the rules as given and gives no token a meaning of its own. A rule can
+A rule restricts which addresses mash will accept. An address is the three tokens `owner`, `group` and `instance`
+(`owner.group.instance`). mash applies the rules as given and gives no token a meaning of its own. A rule can
 only refuse: it cannot grant what mash's own syntax forbids, and it is not a grant of any permission.
 
 ## Where the file comes from
@@ -28,9 +27,9 @@ only refuse: it cannot grant what mash's own syntax forbids, and it is not a gra
   "version": 1,
   "rules": [
     {
-      "id": "no-cc",
-      "match": { "agent": { "is": "cc" } },
-      "message": "the agent token cc is retired"
+      "id": "no-scratch",
+      "match": { "group": { "is": "scratch" } },
+      "message": "the group scratch is not for real work"
     }
   ]
 }
@@ -40,10 +39,11 @@ only refuse: it cannot grant what mash's own syntax forbids, and it is not a gra
 - `rules`: an array. It may be empty. Required.
 - A rule has exactly the keys `id`, `match` and `message`. `id` is a short non-empty name, unique in the file.
   `message` is the non-empty refusal text.
-- `match` is an object over any of `agent`, `owner` and `name`. Each key present takes one object: `{"is": RE}` or
+- `match` is an object over any of `owner`, `group` and `instance`. The keys `agent` and `name` of the earlier format
+  are refused, and a file that uses them does not load. Each key present takes one object: `{"is": RE}` or
   `{"is_not": RE}`, where `RE` is a Go RE2 regular expression. `is` holds when the token matches; `is_not` holds when it
   does not.
-- A rule matches an identity when every key in its `match` holds. An identity that matches any rule is refused. There
+- A rule matches an address when every key in its `match` holds. An address that matches any rule is refused. There
   are no accept rules and no ordering.
 - mash wraps every pattern as a whole-token match, `^(?:RE)$`, so an alternation cannot match part of a token: `a|b`
   matches the token `a` or the token `b`, never `ab`.
@@ -51,12 +51,10 @@ only refuse: it cannot grant what mash's own syntax forbids, and it is not a gra
 
 ## Where it applies
 
-The rule applies at every entry point, with no per-rule list: provision (legacy `Provision` and the new-form `ProvisionIdentity`, which applies it first, to the
-three tokens of the new identity), start, send, reply, prompt, lookup and the
-compatibility alias. For `send` and `prompt` both the addressed identity and the sender's own identity are checked;
-`reply` checks the identity being answered; `lookup` of a refused identity fails with the named-rule error and never
-omits it silently. The requested identity is checked before the directory is read, so a refused identity whose record is
-gone still gets the named-rule error, not "not found".
+The rule applies at every entry point, with no per-rule list: provision, start, send, reply, prompt and lookup. For `send` and `prompt` both the addressed address and the
+sender's own address are checked; `reply` checks the address being answered; `lookup` of a refused address fails with
+the named-rule error and never omits it silently. The requested address is checked before the directory is read, so a
+refused address whose record is gone still gets the named-rule error, not "not found".
 
 A refusal names the rule (`id`) and carries its `message`. The sender of a `send`, `reply` or `prompt` is told; nothing
 is dropped silently.
@@ -67,7 +65,8 @@ mash refuses to start, naming the file and the problem, when any of these holds:
 
 - the path is set but empty, or the file is unreadable;
 - the file is not valid JSON, or has trailing content after the JSON value;
-- a key is unknown at the top level, in a rule, in `match`, or in a token object;
+- a key is unknown at the top level, in a rule, in `match` (this includes the old `agent` and `name`), or in a token
+  object;
 - `version` is missing, is not an integer, or is not a version mash reads (see Compatibility);
 - `rules` is missing or is not an array;
 - a rule has a missing or empty `id` or `message`, or two rules have the same `id`;
@@ -97,29 +96,25 @@ token object is such a change, because unknown keys are errors.
 
 These show the format. They are content, not part of it; the deployment decides what its file holds.
 
-Refuse the retired agent token `cc`, and a reserved token:
+Refuse a group that is reserved, and any instance name that starts with `tmp-`:
 
 ```json
 {
   "version": 1,
   "rules": [
-    { "id": "no-cc", "match": { "agent": { "is": "cc" } }, "message": "the agent token cc is retired" },
-    { "id": "no-mash", "match": { "agent": { "is": "mash" } }, "message": "the agent token mash is reserved" }
+    { "id": "no-mash-group", "match": { "group": { "is": "mash" } }, "message": "the group mash is reserved" },
+    { "id": "no-tmp", "match": { "instance": { "is": "tmp-.*" } }, "message": "tmp- instances are not allowed" }
   ]
 }
 ```
 
-During a transition from a legacy owner, refuse a new-form identity whose owner is the legacy owner (here `acme`):
+Allow only one owner's addresses, by refusing every other owner (here `acme`):
 
 ```json
 {
   "version": 1,
   "rules": [
-    {
-      "id": "owner-is-legacy",
-      "match": { "agent": { "is_not": "cc" }, "owner": { "is": "acme" } },
-      "message": "a three-token identity may not use the legacy owner"
-    }
+    { "id": "owner-acme-only", "match": { "owner": { "is_not": "acme" } }, "message": "only the owner acme is allowed" }
   ]
 }
 ```

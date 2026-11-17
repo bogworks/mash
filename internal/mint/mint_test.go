@@ -15,6 +15,7 @@ import (
 
 	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/ctlkeys"
+	"github.com/bogworks/mash/internal/sap"
 )
 
 // fakeKeys is an in-memory Keys.
@@ -44,9 +45,12 @@ func (f *fakeKeys) Account() (nkeys.KeyPair, string, error) {
 // The Keys the mint takes is the account key alone: *ctlkeys.Authority satisfies it, and has no zone key to give.
 var _ Keys = (*ctlkeys.Authority)(nil)
 
+// testAddr is the endpoint the tests mint.
+var testAddr = sap.Address{Owner: "o", Group: "g", Instance: "a"}
+
 func TestMintVerify(t *testing.T) {
 	keys := newFakeKeys(t)
-	m, err := Mint(keys, "o", "a", nil)
+	m, err := Mint(keys, testAddr, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,17 +59,17 @@ func TestMintVerify(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, apub, _ := keys.Account()
-	if uc.Issuer != apub || m.AccountPub != apub || uc.Name != "a" || uc.Subject != m.UserPub {
+	if uc.Issuer != apub || m.AccountPub != apub || uc.Name != testAddr.String() || uc.Subject != m.UserPub {
 		t.Errorf("claims: issuer %s (want the account key %s) name %s", uc.Issuer, apub, uc.Name)
 	}
 	if len(uc.Tags) != 0 {
 		t.Errorf("tags %v: ADR 0091 removed them", uc.Tags)
 	}
-	if !reflect.DeepEqual(uc.Permissions, admin.Permissions("o", "a")) {
+	if !reflect.DeepEqual(uc.Permissions, *admin.Permissions(testAddr)) {
 		t.Errorf("permissions %+v", uc.Permissions)
 	}
-	if !slices.Contains(uc.Pub.Allow, "agents.mail.*.o.*") {
-		t.Errorf("the five-token mail line is missing: %v", uc.Pub.Allow)
+	if !slices.Contains(uc.Pub.Allow, "agents.mail.o.*.*") {
+		t.Errorf("the owner mail line is missing: %v", uc.Pub.Allow)
 	}
 	for _, l := range append(append([]string{}, uc.Pub.Allow...), uc.Sub.Allow...) {
 		if strings.Contains(l, "{{") {
@@ -89,13 +93,13 @@ func TestMintVerify(t *testing.T) {
 
 func TestMintReissue(t *testing.T) {
 	keys := newFakeKeys(t)
-	m1, err := Mint(keys, "o", "a", nil)
+	m1, err := Mint(keys, testAddr, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	kp, _ := jwt.ParseDecoratedNKey(m1.Creds)
 	seed, _ := kp.Seed()
-	m2, err := Mint(keys, "o", "a", seed)
+	m2, err := Mint(keys, testAddr, seed)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,16 +108,16 @@ func TestMintReissue(t *testing.T) {
 	}
 	// not a user seed, not a seed
 	acctSeed, _ := keys.acct.Seed()
-	if _, err := Mint(keys, "o", "a", acctSeed); err == nil || !strings.Contains(err.Error(), "not a user seed") {
+	if _, err := Mint(keys, testAddr, acctSeed); err == nil || !strings.Contains(err.Error(), "not a user seed") {
 		t.Errorf("account seed: %v", err)
 	}
-	if _, err := Mint(keys, "o", "a", []byte("junk")); err == nil {
+	if _, err := Mint(keys, testAddr, []byte("junk")); err == nil {
 		t.Error("junk seed accepted")
 	}
 }
 
 func TestMintErrorsHideSeeds(t *testing.T) {
-	_, err := Mint(newFakeKeys(t), "o", "a", []byte("SUAJUNKJUNKJUNK"))
+	_, err := Mint(newFakeKeys(t), testAddr, []byte("SUAJUNKJUNKJUNK"))
 	if err == nil || strings.Contains(err.Error(), "SUAJ") {
 		t.Fatalf("%v", err)
 	}
@@ -126,7 +130,7 @@ func TestMintLive(t *testing.T) {
 		t.Skip("starts a nats-server")
 	}
 	keys := newFakeKeys(t)
-	ma, err := Mint(keys, "o", "a", nil)
+	ma, err := Mint(keys, testAddr, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +149,7 @@ func TestMintLive(t *testing.T) {
 		t.Fatalf("connect with minted creds: %v", err)
 	}
 	defer nc.Close()
-	for _, s := range []string{"agents.mail.cc.o.b", "agents.mail.cc.other.b"} {
+	for _, s := range []string{"agents.mail.o.g.b", "agents.mail.other.g.b"} {
 		if err := nc.Publish(s, []byte("x")); err != nil {
 			t.Fatal(err)
 		}
@@ -155,17 +159,17 @@ func TestMintLive(t *testing.T) {
 	mu.Lock()
 	got := strings.Join(errs, "\n")
 	mu.Unlock()
-	if strings.Contains(got, `"agents.mail.cc.o.b"`) {
+	if strings.Contains(got, `"agents.mail.o.g.b"`) {
 		t.Errorf("mail to a peer of the owner refused:\n%s", got)
 	}
-	if !strings.Contains(got, `Publish to "agents.mail.cc.other.b"`) {
+	if !strings.Contains(got, `Publish to "agents.mail.other.g.b"`) {
 		t.Errorf("mail to another owner not refused:\n%s", got)
 	}
 
 	// A re-issue keeps the user key and still connects.
 	kp, _ := jwt.ParseDecoratedNKey(ma.Creds)
 	seed, _ := kp.Seed()
-	re, err := Mint(keys, "o", "a", seed)
+	re, err := Mint(keys, testAddr, seed)
 	if err != nil {
 		t.Fatal(err)
 	}

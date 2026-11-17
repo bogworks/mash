@@ -7,7 +7,6 @@ import (
 
 	"github.com/nats-io/nats.go/jetstream"
 
-	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/store"
 )
 
@@ -20,22 +19,12 @@ const evictionInfoTimeout = 2 * time.Second
 // does not allow or cannot answer the stream and consumer info reads: the line is advice and never an error. The
 // count is a lower bound (see store.InboxEviction), so no line does not prove that nothing was lost.
 func (e *Endpoint) InboxEvictionLine(ctx context.Context) (line string, ok bool) {
-	return e.evictionLine(ctx, "inbox", e.key)
+	return e.evictionLine(ctx, "inbox", e.ident.InboxStream())
 }
 
-// LegacyInboxEvictionLine is the same for the legacy inbox of an endpoint whose record carries an alias, the stream
-// this endpoint also reads while it holds the legacy identity's lease. ok is false for an endpoint with no alias.
-func (e *Endpoint) LegacyInboxEvictionLine(ctx context.Context) (line string, ok bool) {
-	if !e.hasLegacyStream() {
-		return "", false
-	}
-	return e.evictionLine(ctx, "legacy inbox", e.legacyKey)
-}
-
-func (e *Endpoint) evictionLine(ctx context.Context, label, key string) (line string, ok bool) {
+func (e *Endpoint) evictionLine(ctx context.Context, label, stream string) (line string, ok bool) {
 	ctx, cancel := context.WithTimeout(ctx, evictionInfoTimeout)
 	defer cancel()
-	stream := sap.InboxStream(key)
 	s, err := e.js.Stream(ctx, stream)
 	if err != nil {
 		return "", false

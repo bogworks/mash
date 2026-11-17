@@ -114,7 +114,7 @@ func runAdopt(args []string, env func(string) string, lookup config.Lookup, stdo
 	need(o.server, "--server", "the NATS URL of the server you run")
 	need(o.operatorKey, "--operator-key", "the operator signing seed: mashctl cannot create authority on a server it did not set up, so adopt needs yours")
 	need(o.accountKey, "--account-key", "the identity seed of the account mash uses: mashctl cannot create an account on a server it did not set up")
-	need(o.sysCreds, "--sys-creds", "system account user creds: they prove access to the resolver and are how `mashctl retire` and `reissue` revoke a user key")
+	need(o.sysCreds, "--sys-creds", "system account user creds: they prove access to the resolver and are how `mashctl retire` revokes a user key")
 	if len(missing) > 0 {
 		fmt.Fprintf(stderr, "%smissing: %s\nadopt takes over a server you already run in operator mode; it cannot stand one up or reconfigure one from a URL (use `mashctl init --local` for a new local server)\n%s", pfx, strings.Join(missing, "; "), adoptUsage())
 		return 2
@@ -277,9 +277,9 @@ func runAdopt(args []string, env func(string) string, lookup config.Lookup, stdo
 	if set.Cluster != "" {
 		shape = fmt.Sprintf("cluster %q", set.Cluster)
 	}
-	fmt.Fprintf(stdout, "  4. system user    ok: the ping was answered (%s, %d server(s) replied) and the claims lookup worked. The claims update (push) permission is not exercised here: `mashctl retire` (or a rotating `reissue`) is the first to use it\n", shape, len(set.Names))
+	fmt.Fprintf(stdout, "  4. system user    ok: the ping was answered (%s, %d server(s) replied) and the claims lookup worked. The claims update (push) permission is not exercised here: `mashctl retire` is the first to use it\n", shape, len(set.Names))
 	if set.Cluster != "" || set.Gateways {
-		warns = append(warns, "the server is part of a cluster: pass --servers N (or set MASH_SERVERS) to `mashctl add`, `retire`, `reissue`, `unzone` and `deprovision` so they can confirm every server took the update")
+		warns = append(warns, "the server is part of a cluster: pass --servers N (or set MASH_SERVERS) to `mashctl retire` and `deprovision` so they can confirm every server took the update")
 	}
 
 	// (5) can the operator key sign for this account?
@@ -426,9 +426,9 @@ func runAdopt(args []string, env func(string) string, lookup config.Lookup, stdo
 		step("%s exists and is left as it is; make sure it has: %s", st.cfgPath, settingsText(settings))
 	}
 
-	fmt.Fprintf(stdout, "\nNext:\n  1. mashctl init                                  the directory and lease buckets (needs the admin creds)\n  2. mashctl add NAME ...                          declare an endpoint and mint its creds\n")
+	fmt.Fprintf(stdout, "\nNext:\n  1. mashctl init                                  the directory and lease buckets (needs the admin creds)\n  2. mashctl provision owner.group.instance ...    declare an endpoint (see mashctl help)\n")
 	if adminPath == "" {
-		fmt.Fprintf(stdout, "  no admin creds were given: `mashctl init` and `add` need them. Pass --admin-creds FILE or --mint-admin, or set \"admin_creds\" in config.json\n")
+		fmt.Fprintf(stdout, "  no admin creds were given: `mashctl init` and `provision` need them. Pass --admin-creds FILE or --mint-admin, or set \"admin_creds\" in config.json\n")
 	}
 	fmt.Fprintf(stdout, "\nWhat adopt does not do: it changes nothing on the server, except that --mint-admin records the minted mashadmin user in the issue record (creating its bucket if there is none). It pushes no account update and creates no users on the server (the optional mashadmin exists only as a local creds file). The cutover of a live account, and revoking old credentials, is a separate step you run yourself.\n")
 	return 0

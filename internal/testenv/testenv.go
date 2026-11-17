@@ -20,6 +20,7 @@ import (
 	"github.com/nats-io/nkeys"
 
 	"github.com/bogworks/mash/internal/admin"
+	"github.com/bogworks/mash/internal/sap"
 )
 
 // Owner is the SAP owner used in tests.
@@ -209,9 +210,9 @@ func (e *Env) Shutdown() {
 
 // Mint issues an endpoint user with mash's permission template and writes
 // its creds file. It returns the creds path and the user public key.
-func (e *Env) Mint(t *testing.T, name string) (string, string) {
+func (e *Env) Mint(t *testing.T, a sap.Address) (string, string) {
 	t.Helper()
-	return e.minted(t, name, admin.Permissions(e.Owner, name))
+	return e.minted(t, a.Flat(), *admin.Permissions(a))
 }
 
 // MintRaw issues a user with arbitrary permissions (for negative tests).
@@ -247,8 +248,8 @@ func (e *Env) mint(name string, p jwt.Permissions) (string, string, error) {
 }
 
 // MintEndpoint is Mint without a test.
-func (e *Env) MintEndpoint(name string) (creds, userPub string, err error) {
-	return e.mint(name, admin.Permissions(e.Owner, name))
+func (e *Env) MintEndpoint(a sap.Address) (creds, userPub string, err error) {
+	return e.mint(a.Flat(), *admin.Permissions(a))
 }
 
 // Conn connects with a creds file; it is closed when the test ends.

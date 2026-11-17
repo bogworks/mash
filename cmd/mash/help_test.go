@@ -92,9 +92,9 @@ func TestHelpUsageOnlyFirstArgument(t *testing.T) {
 		}
 	}
 	no := [][]string{
-		{"send", "y", "see", "the", "--help", "flag"}, {"send", "y", "-h"}, {"send", "y", "--help"},
-		{"send", "y", "--", "--help"}, {"send", "y", "--urgent", "-h"}, {"send", "y", "--kind", "--help", "x"},
-		{"prompt", "y", "what", "does", "-h", "do"}, {"prompt", "y", "--help"}, {"prompt", "y", "-h"},
+		{"send", tTo("y"), "see", "the", "--help", "flag"}, {"send", tTo("y"), "-h"}, {"send", tTo("y"), "--help"},
+		{"send", tTo("y"), "--", "--help"}, {"send", tTo("y"), "--urgent", "-h"}, {"send", tTo("y"), "--kind", "--help", "x"},
+		{"prompt", tTo("y"), "what", "does", "-h", "do"}, {"prompt", tTo("y"), "--help"}, {"prompt", tTo("y"), "-h"},
 		{"read", "3", "--help"}, {"read", "--json", "-h"}, {"inbox", "5", "-h"}, {"inbox", "--limit", "--help"},
 		{"who", "--owner", "-h"}, {"who", "x", "--help"},
 		{"admin", "set-meta", "y", "--help"}, {"admin", "set-meta", "y", "note", "-h"},
@@ -114,7 +114,7 @@ func TestHelpUsageOnlyFirstArgument(t *testing.T) {
 func TestSendTextWithHelpWordsIsSent(t *testing.T) {
 	w := newWorld(t, "x", "y")
 	for i, text := range [][]string{{"see", "the", "--help", "flag"}, {"-h"}, {"--help"}, {"what", "does", "-h", "do"}} {
-		out, code := w.cli(t, "x", append([]string{"send", "y"}, text...)...)
+		out, code := w.cli(t, "x", append([]string{"send", tTo("y")}, text...)...)
 		if code != 0 || strings.HasPrefix(out, "usage:") || !strings.Contains(out, "sent #") {
 			t.Fatalf("send %v: %d %q", text, code, out)
 		}

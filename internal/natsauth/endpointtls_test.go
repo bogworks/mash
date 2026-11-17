@@ -12,6 +12,7 @@ import (
 	"github.com/nats-io/nats.go"
 
 	"github.com/bogworks/mash/internal/natsauth"
+	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/testenv"
 )
 
@@ -191,7 +192,7 @@ func TestRequireEndpointTLSPinsPlainLoopbackAtDial(t *testing.T) {
 // A plain 127.0.0.1 URL connects through the dialer, and the dialer is applied again on every reconnect.
 func TestRequireEndpointTLSLoopbackDialerAppliesOnReconnect(t *testing.T) {
 	e := testenv.Start(t)
-	creds, _ := e.Mint(t, "x")
+	creds, _ := e.Mint(t, sap.Address{Owner: "o", Group: "g", Instance: "x"})
 	var dials int32
 	restore := natsauth.SetBaseDial(func(network, address string) (net.Conn, error) {
 		atomic.AddInt32(&dials, 1)

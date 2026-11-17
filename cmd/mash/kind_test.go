@@ -9,10 +9,10 @@ import (
 // error (exit 2) and sends nothing.
 func TestSendKindFromTheCLI(t *testing.T) {
 	w := newWorld(t, "a", "b")
-	if out, code := w.cli(t, "b", "send", "a", "--kind", "Question", "which one"); code != 0 || !strings.Contains(out, "sent #1 from b to a") {
+	if out, code := w.cli(t, "b", "send", tTo("a"), "--kind", "Question", "which one"); code != 0 || !strings.Contains(out, "sent #1 from o.dev.b to o.dev.a") {
 		t.Fatalf("send: %d %s", code, out)
 	}
-	if out, code := w.cli(t, "b", "send", "a", "--urgent", "--kind=blocker", "stuck"); code != 0 {
+	if out, code := w.cli(t, "b", "send", tTo("a"), "--urgent", "--kind=blocker", "stuck"); code != 0 {
 		t.Fatalf("send: %d %s", code, out)
 	}
 	if out, _ := w.cli(t, "a", "read", "1"); !strings.Contains(out, "\nkind: question\n> which one") {
@@ -21,11 +21,11 @@ func TestSendKindFromTheCLI(t *testing.T) {
 	if out, _ := w.cli(t, "a", "read", "2"); !strings.Contains(out, "\nkind: blocker\n> stuck") {
 		t.Fatalf("read #2: %s", out)
 	}
-	out, code := w.cli(t, "b", "send", "a", "--kind", "urgent", "x")
+	out, code := w.cli(t, "b", "send", tTo("a"), "--kind", "urgent", "x")
 	if code != 2 || !strings.Contains(out, "blocker|question|task|result|fyi") {
 		t.Fatalf("unknown kind: %d %s", code, out)
 	}
-	if out, code := w.cli(t, "b", "send", "a", "--kind"); code != 2 {
+	if out, code := w.cli(t, "b", "send", tTo("a"), "--kind"); code != 2 {
 		t.Fatalf("--kind without a value: %d %s", code, out)
 	}
 	if out, _ := w.cli(t, "a", "inbox"); strings.Count(out, "\n") > 2 || strings.Contains(out, "\tx\t") {
@@ -56,19 +56,19 @@ func TestSendKindFromTheMCPTool(t *testing.T) {
 		r := s.call(t, id, "send", args)
 		return resultText(r), r["isError"] == true
 	}
-	if txt, bad := send(10, `{"to":"a","text":"do it","kind":"task"}`); bad || txt != "sent #1 to a" {
+	if txt, bad := send(10, `{"to":"o.dev.a","text":"do it","kind":"task"}`); bad || txt != "sent #1 to o.dev.a" {
 		t.Fatalf("task: %v %s", bad, txt)
 	}
-	if txt, bad := send(11, `{"to":"a","text":"ok, done","in_reply_to":1,"kind":"question"}`); bad || txt != "sent #2 to a (tagged fyi: short reply with no question)" {
+	if txt, bad := send(11, `{"to":"o.dev.a","text":"ok, done","in_reply_to":1,"kind":"question"}`); bad || txt != "sent #2 to o.dev.a (tagged fyi: short reply with no question)" {
 		t.Fatalf("tagged: %v %s", bad, txt)
 	}
-	if txt, bad := send(12, `{"to":"a","text":"ok?","in_reply_to":1,"kind":"question"}`); bad || txt != "sent #3 to a" {
+	if txt, bad := send(12, `{"to":"o.dev.a","text":"ok?","in_reply_to":1,"kind":"question"}`); bad || txt != "sent #3 to o.dev.a" {
 		t.Fatalf("question mark: %v %s", bad, txt)
 	}
-	if txt, bad := send(13, `{"to":"a","text":"stuck","in_reply_to":1,"kind":"blocker"}`); bad || txt != "sent #4 to a" {
+	if txt, bad := send(13, `{"to":"o.dev.a","text":"stuck","in_reply_to":1,"kind":"blocker"}`); bad || txt != "sent #4 to o.dev.a" {
 		t.Fatalf("blocker: %v %s", bad, txt)
 	}
-	if txt, bad := send(14, `{"to":"a","text":"hi","kind":"loud"}`); !bad || !strings.Contains(txt, "blocker|question|task|result|fyi") {
+	if txt, bad := send(14, `{"to":"o.dev.a","text":"hi","kind":"loud"}`); !bad || !strings.Contains(txt, "blocker|question|task|result|fyi") {
 		t.Fatalf("unknown kind: %v %s", bad, txt)
 	}
 	for seq, want := range map[string]string{"1": "task", "2": "fyi", "3": "question", "4": "blocker"} {
@@ -84,7 +84,7 @@ func TestSendKindFromTheMCPTool(t *testing.T) {
 // A CLI send with no --kind is task; an explicit --kind fyi stays fyi.
 func TestUnkindedCLISendIsTask(t *testing.T) {
 	w := newWorld(t, "a", "b")
-	for _, args := range [][]string{{"send", "a", "plain"}, {"send", "a", "--kind", "fyi", "quiet"}} {
+	for _, args := range [][]string{{"send", tTo("a"), "plain"}, {"send", tTo("a"), "--kind", "fyi", "quiet"}} {
 		if out, code := w.cli(t, "b", args...); code != 0 {
 			t.Fatalf("%v: %d %s", args, code, out)
 		}
@@ -101,7 +101,7 @@ func TestUnkindedMCPSendIsTask(t *testing.T) {
 	w := newWorld(t, "a", "b")
 	s := startServe(t, w.env["b"])
 	s.initialize(t)
-	for id, args := range []string{`{"to":"a","text":"plain"}`, `{"to":"a","text":"ok, done","in_reply_to":1}`} {
+	for id, args := range []string{`{"to":"o.dev.a","text":"plain"}`, `{"to":"o.dev.a","text":"ok, done","in_reply_to":1}`} {
 		if r := s.call(t, 20+id, "send", args); r["isError"] == true || strings.Contains(resultText(r), "tagged") {
 			t.Fatalf("%s: %v", args, resultText(r))
 		}
@@ -125,7 +125,7 @@ func TestUnkindedMCPSendIsTask(t *testing.T) {
 // sender's inbox, or a value that is not a positive integer, is a tool error and sends nothing.
 func TestSendViaFromTheMCPTool(t *testing.T) {
 	w := newWorld(t, "a", "b", "c")
-	if out, code := w.cli(t, "c", "send", "b", "the original"); code != 0 {
+	if out, code := w.cli(t, "c", "send", tTo("b"), "the original"); code != 0 {
 		t.Fatalf("send: %d %s", code, out)
 	}
 	s := startServe(t, w.env["b"])
@@ -139,14 +139,14 @@ func TestSendViaFromTheMCPTool(t *testing.T) {
 	if via == nil || via["type"] != "integer" || !strings.Contains(via["description"].(string), "relayed from <sender> #N") {
 		t.Fatalf("send schema via: %v", via)
 	}
-	if r := s.call(t, 30, "send", `{"to":"a","text":"fwd","via":1,"in_reply_to":9}`); r["isError"] == true || resultText(r) != "sent #1 to a" {
+	if r := s.call(t, 30, "send", `{"to":"o.dev.a","text":"fwd","via":1,"in_reply_to":9}`); r["isError"] == true || resultText(r) != "sent #1 to o.dev.a" {
 		t.Fatalf("send: %v", resultText(r))
 	}
 	out, _ := w.cli(t, "a", "read", "1")
-	if !strings.Contains(out, "[verified] at") || !strings.Contains(out, "\nanswers #9\nrelayed from c #1\n") || !strings.Contains(out, "> fwd") {
+	if !strings.Contains(out, "[verified] at") || !strings.Contains(out, "\nanswers #9\nrelayed from o.dev.c #1\n") || !strings.Contains(out, "> fwd") {
 		t.Fatalf("read #1:\n%s", out)
 	}
-	for i, args := range []string{`{"to":"a","text":"x","via":7}`, `{"to":"a","text":"x","via":-1}`, `{"to":"a","text":"x","via":"L1"}`, `{"to":"a","text":"x","via":1.5}`} {
+	for i, args := range []string{`{"to":"o.dev.a","text":"x","via":7}`, `{"to":"o.dev.a","text":"x","via":-1}`, `{"to":"o.dev.a","text":"x","via":"L1"}`, `{"to":"o.dev.a","text":"x","via":1.5}`} {
 		if r := s.call(t, 31+i, "send", args); r["isError"] != true {
 			t.Fatalf("%s: not an error: %v", args, resultText(r))
 		}

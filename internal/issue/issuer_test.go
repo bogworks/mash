@@ -201,7 +201,7 @@ func TestIssueSignsWithTheTableAndRecordsFirst(t *testing.T) {
 		t.Fatalf("%v %v", uc, err)
 	}
 	rec := f.rec.recs[r.PublicKey]
-	if rec.Purpose != store.PurposeRotation || rec.Generation != 7 || rec.Address != "foo.c.core" {
+	if rec.Purpose != store.PurposeRotation || rec.Generation != 7 || rec.Address != "foo_c_core" {
 		t.Errorf("%+v", rec)
 	}
 	if _, err := f.is.Issue(context.Background(), f.req(t, "foo.c.lead", time.Minute), "bogus"); code(err) != CodeBadPurpose {

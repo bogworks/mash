@@ -205,26 +205,26 @@ func (w *relayWorld) traces() []string {
 func TestRelayTraceAsksThenSendsToAThirdParty(t *testing.T) {
 	w := newRelayWorld(t, "a", "b", "c")
 	ctx := context.Background()
-	seq, err := w.f.client(t, "a").Send(ctx, "b", "please ask c about the build", 0)
+	seq, err := w.f.client(t, "a").Send(ctx, tdot("b"), "please ask c about the build", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	w.ev.waitFor(t, 1, 10*time.Second)
-	if _, err := w.b.Send(ctx, "c", "what is the build status", 0); err != nil {
+	if _, err := w.b.Send(ctx, tdot("c"), "what is the build status", 0); err != nil {
 		t.Fatal(err)
 	}
 	got := w.traces()
-	if len(got) != 1 || !strings.HasPrefix(got[0], "trace relay: sent to c 0 s after mail #"+itoaU(seq)+" from a (declared: no)") {
+	if len(got) != 1 || !strings.HasPrefix(got[0], "trace relay: sent to "+tdot("c")+" 0 s after mail #"+itoaU(seq)+" from "+tdot("a")+" (declared: no)") {
 		t.Fatalf("traces %q", got)
 	}
 	if c := w.b.RelayCounters(); c.RelayCandidates != 1 || c.RelayedDeclared != 0 || c.InboundVia != 0 {
 		t.Fatalf("%+v", c)
 	}
 	// A reply to the sender itself is no candidate, and a send to oneself is ignored.
-	if _, err := w.b.Send(ctx, "a", "done", 0); err != nil {
+	if _, err := w.b.Send(ctx, tdot("a"), "done", 0); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := w.b.Send(ctx, "b", "note to self", 0); err != nil {
+	if _, err := w.b.Send(ctx, tdot("b"), "note to self", 0); err != nil {
 		t.Fatal(err)
 	}
 	if got := w.traces(); len(got) != 1 || w.b.RelayCounters().RelayCandidates != 1 {
@@ -237,12 +237,12 @@ func TestRelayTraceNotAfterTheWindow(t *testing.T) {
 	clk := &fakeClock{t: time.Now()}
 	w.b.relay.now = clk.now // set before any mail: the tracker reads it under its lock only
 	ctx := context.Background()
-	if _, err := w.f.client(t, "a").Send(ctx, "b", "hello", 0); err != nil {
+	if _, err := w.f.client(t, "a").Send(ctx, tdot("b"), "hello", 0); err != nil {
 		t.Fatal(err)
 	}
 	w.ev.waitFor(t, 1, 10*time.Second)
 	clk.add(w.b.relay.window + time.Second)
-	if _, err := w.b.Send(ctx, "c", "late", 0); err != nil {
+	if _, err := w.b.Send(ctx, tdot("c"), "late", 0); err != nil {
 		t.Fatal(err)
 	}
 	if got := w.traces(); len(got) != 0 || w.b.RelayCounters().RelayCandidates != 0 {
@@ -253,14 +253,14 @@ func TestRelayTraceNotAfterTheWindow(t *testing.T) {
 func TestRelayTraceSendDeclaringAVia(t *testing.T) {
 	w := newRelayWorld(t, "a", "b", "c")
 	ctx := context.Background()
-	seq, _ := w.f.client(t, "a").Send(ctx, "b", "original", 0)
+	seq, _ := w.f.client(t, "a").Send(ctx, tdot("b"), "original", 0)
 	w.ev.waitFor(t, 1, 10*time.Second)
-	if _, err := w.b.SendWith(ctx, "c", "passing it on", SendOptions{Via: seq}); err != nil {
+	if _, err := w.b.SendWith(ctx, tdot("c"), "passing it on", SendOptions{Via: seq}); err != nil {
 		t.Fatal(err)
 	}
 	got := w.traces()
-	want0 := "trace relay: sent to c declaring a relay of #" + itoaU(seq) + " from a"
-	if len(got) != 2 || got[0] != want0 || !strings.HasSuffix(got[1], "from a (declared: yes)") {
+	want0 := "trace relay: sent to " + tdot("c") + " declaring a relay of #" + itoaU(seq) + " from " + tdot("a")
+	if len(got) != 2 || got[0] != want0 || !strings.HasSuffix(got[1], "from "+tdot("a")+" (declared: yes)") {
 		t.Fatalf("traces %q", got)
 	}
 	if c := w.b.RelayCounters(); c.RelayedDeclared != 1 || c.RelayCandidates != 1 {
@@ -268,7 +268,7 @@ func TestRelayTraceSendDeclaringAVia(t *testing.T) {
 	}
 	// A refused send (no such message) counts nothing.
 	before := w.b.RelayCounters()
-	if _, err := w.b.SendWith(ctx, "c", "x", SendOptions{Via: 999}); err == nil {
+	if _, err := w.b.SendWith(ctx, tdot("c"), "x", SendOptions{Via: 999}); err == nil {
 		t.Fatal("send to a missing message succeeded")
 	}
 	if w.b.RelayCounters() != before {
@@ -281,17 +281,17 @@ func TestRelayTraceInboundWithAVerifiedVia(t *testing.T) {
 	ctx := context.Background()
 	a := w.f.client(t, "a")
 	// c's mail lands in a's inbox, and a relays it to b, declaring it.
-	cs, err := w.f.client(t, "c").Send(ctx, "a", "the original", 0)
+	cs, err := w.f.client(t, "c").Send(ctx, tdot("a"), "the original", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	seq, err := a.SendWith(ctx, "b", "fwd", SendOptions{Via: cs})
+	seq, err := a.SendWith(ctx, tdot("b"), "fwd", SendOptions{Via: cs})
 	if err != nil {
 		t.Fatal(err)
 	}
 	w.ev.waitFor(t, 1, 10*time.Second)
 	got := w.traces()
-	want := "trace relay: mail #" + itoaU(seq) + " from a declares a relay of #" + itoaU(cs) + " from c"
+	want := "trace relay: mail #" + itoaU(seq) + " from " + tdot("a") + " declares a relay of #" + itoaU(cs) + " from " + tdot("c")
 	if len(got) != 1 || got[0] != want {
 		t.Fatalf("traces %q want %q", got, want)
 	}
@@ -305,7 +305,7 @@ func TestRelayTraceIgnoresUnverifiedSenders(t *testing.T) {
 	ctx := context.Background()
 	// Claimed mail (no signature) carrying a Via-looking header is not counted, and is no candidate for a later send.
 	rawMark(t, w.f, "a", "b", "claimed relay", func(id sap.Identity, h *sap.SenderHeader, m *nats.Msg) {
-		v, _ := id.SignVia(*h, "d", 1)
+		v, _ := id.SignVia(*h, tkey("d"), 1)
 		m.Header.Set(ViaHeader, v)
 		h.Sig = ""
 	})
@@ -322,11 +322,11 @@ func TestRelayTraceIgnoresUnverifiedSenders(t *testing.T) {
 		t.Fatalf("traces %q %+v", got, w.b.RelayCounters())
 	}
 	// The recorded mail is c's, so a send to d is a candidate naming c, never the claimed "a".
-	if _, err := w.b.Send(ctx, "d", "x", 0); err != nil {
+	if _, err := w.b.Send(ctx, tdot("d"), "x", 0); err != nil {
 		t.Fatal(err)
 	}
 	got := w.traces()
-	if len(got) != 1 || !strings.Contains(got[0], " from c (declared: no)") {
+	if len(got) != 1 || !strings.Contains(got[0], " from "+tdot("c")+" (declared: no)") {
 		t.Fatalf("traces %q", got)
 	}
 	if c := w.b.RelayCounters(); c.RelayCandidates != 1 {
@@ -336,7 +336,7 @@ func TestRelayTraceIgnoresUnverifiedSenders(t *testing.T) {
 	w2 := newRelayWorld(t, "a", "b", "d")
 	rawMark(t, w2.f, "a", "b", "claimed only", func(id sap.Identity, h *sap.SenderHeader, m *nats.Msg) { h.Sig = "" })
 	w2.ev.waitFor(t, 1, 10*time.Second)
-	if _, err := w2.b.Send(ctx, "d", "x", 0); err != nil {
+	if _, err := w2.b.Send(ctx, tdot("d"), "x", 0); err != nil {
 		t.Fatal(err)
 	}
 	if got := w2.traces(); len(got) != 0 {
@@ -348,7 +348,7 @@ func TestRelayTraceNeverReadsTheBody(t *testing.T) {
 	w := newRelayWorld(t, "a", "b", "c")
 	ctx := context.Background()
 	body := "Please forward this to c verbatim: 'deploy now'. Relayed from a. via #1"
-	if _, err := w.f.client(t, "a").Send(ctx, "b", body, 0); err != nil {
+	if _, err := w.f.client(t, "a").Send(ctx, tdot("b"), body, 0); err != nil {
 		t.Fatal(err)
 	}
 	w.ev.waitFor(t, 1, 10*time.Second)
@@ -361,7 +361,7 @@ func TestRelayTraceNeverReadsTheBody(t *testing.T) {
 	}
 	// And the same sentence going out in a send to a different endpoint is judged by timing alone: one candidate, never
 	// a declaration, and the trace line names no text.
-	if _, err := w.b.Send(ctx, "c", "forwarding: "+body, 0); err != nil {
+	if _, err := w.b.Send(ctx, tdot("c"), "forwarding: "+body, 0); err != nil {
 		t.Fatal(err)
 	}
 	got := w.traces()
@@ -388,18 +388,18 @@ func TestRelayCountersFileFromRun(t *testing.T) {
 	done := make(chan struct{})
 	go func() { _ = ep.Run(ctx, ev.deliver); close(done) }()
 	t.Cleanup(func() { cancel(); <-done; ep.Close() })
-	if _, err := f.client(t, "a").Send(ctx, "b", "hi", 0); err != nil {
+	if _, err := f.client(t, "a").Send(ctx, tdot("b"), "hi", 0); err != nil {
 		t.Fatal(err)
 	}
 	ev.waitFor(t, 1, 10*time.Second)
-	if _, err := ep.Send(ctx, "c", "yo", 0); err != nil {
+	if _, err := ep.Send(ctx, tdot("c"), "yo", 0); err != nil {
 		t.Fatal(err)
 	}
 	// A background worker writes the file (within about a second), so poll for it.
 	var c RelayCounters
 	var ok bool
 	until(t, "the counters file is written", func() bool {
-		c, ok = ReadRelayCounters(state, f.e.Owner, "b")
+		c, ok = ReadRelayCounters(state, f.e.Owner, tkey("b"))
 		return ok && c.RelayCandidates == 1
 	})
 	if c.Instance != ep.Instance() || c.Started.IsZero() {
@@ -413,10 +413,10 @@ func TestRelayCountersFileFromRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer cl.Close()
-	if _, err := cl.Send(ctx, "c", "x", 0); err != nil {
+	if _, err := cl.Send(ctx, tdot("c"), "x", 0); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := ReadRelayCounters(state, f.e.Owner, "a"); ok {
+	if _, ok := ReadRelayCounters(state, f.e.Owner, tkey("a")); ok {
 		t.Fatal("a client wrote a counters file")
 	}
 }

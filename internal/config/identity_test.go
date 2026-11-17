@@ -1,6 +1,8 @@
 package config
 
 import (
+	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -18,8 +20,8 @@ func loadIdentity(t *testing.T, fileBody string, env map[string]string) (Config,
 
 const idFile = `{"url":"tls://x:4222","owner":"o"`
 
-func TestIdentityUnsetIsLegacy(t *testing.T) {
-	c, err := loadIdentity(t, idFile+`}`, map[string]string{"MASH_NAME": "a"})
+func TestAddressIsBuiltFromOwnerGroupInstance(t *testing.T) {
+	c, err := loadIdentity(t, idFile+`}`, map[string]string{"MASH_NAME": "design", "MASH_GROUP": "dev", "MASH_OWNER": "alice"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -27,109 +29,55 @@ func TestIdentityUnsetIsLegacy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want, _ := sap.Legacy("o", "a")
-	if !id.IsLegacy() || id.Subjects() != want.Subjects() || id.Flat() != "a" || id.Flat() != c.Name {
+	want, _ := sap.NewAddress("alice", "dev", "design")
+	if id != want || id.String() != "alice.dev.design" || id.Flat() != "alice_dev_design" {
 		t.Fatalf("got %+v", id)
 	}
-	if c.Source["agent_token"] != "unset" {
-		t.Fatalf("source %q", c.Source["agent_token"])
+	if c.Group != "dev" || c.Source["group"] != "MASH_GROUP" || c.Source["owner"] != "MASH_OWNER" {
+		t.Fatalf("group %q source %v", c.Group, c.Source)
 	}
 }
 
-func TestIdentityFromFileAndEnv(t *testing.T) {
-	c, err := loadIdentity(t, idFile+`,"agent_token":"fileagent"}`, map[string]string{"MASH_NAME": "a"})
-	if err != nil {
-		t.Fatal(err)
+func TestMissingGroupIsRefused(t *testing.T) {
+	_, err := loadIdentity(t, idFile+`}`, map[string]string{"MASH_NAME": "a"})
+	if !errors.Is(err, ErrGroupMissing) {
+		t.Fatalf("Load: got %v, want ErrGroupMissing", err)
 	}
-	id, err := c.Identity()
-	if err != nil || id.IsLegacy() || id.Agent != "fileagent" || id.Owner != "o" || id.Name != "a" {
-		t.Fatalf("file: %+v %v", id, err)
-	}
-	if c.Source["agent_token"] != "config.json" || c.FileValues["agent_token"] != "fileagent" {
-		t.Fatalf("file source %v %v", c.Source, c.FileValues)
-	}
-
-	c, err = loadIdentity(t, idFile+`}`, map[string]string{"MASH_NAME": "a", "MASH_AGENT_TOKEN": "envagent"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if id, err = c.Identity(); err != nil || id.Agent != "envagent" || c.Source["agent_token"] != "MASH_AGENT_TOKEN" {
-		t.Fatalf("env: %+v %v %v", id, err, c.Source)
-	}
-
-	c, err = loadIdentity(t, idFile+`,"agent_token":"fileagent"}`, map[string]string{"MASH_NAME": "a", "MASH_AGENT_TOKEN": "envagent"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if id, err = c.Identity(); err != nil || id.Agent != "envagent" || c.Source["agent_token"] != "MASH_AGENT_TOKEN" || c.FileValues["agent_token"] != "fileagent" {
-		t.Fatalf("env wins: %+v %v %v", id, err, c.Source)
-	}
-}
-
-func TestAgentTokenSetButEmptyInFileIsInvalid(t *testing.T) {
-	_, err := loadIdentity(t, idFile+`,"agent_token":""}`, map[string]string{"MASH_NAME": "a"})
-	if err == nil || !strings.Contains(err.Error(), "agent_token") {
-		t.Fatalf("got %v", err)
-	}
-	// An env value overrides the empty file key, as for every setting.
-	if _, err := loadIdentity(t, idFile+`,"agent_token":""}`, map[string]string{"MASH_NAME": "a", "MASH_AGENT_TOKEN": "ok"}); err != nil {
-		t.Fatal(err)
-	}
-	// Inert: nothing is validated.
-	if _, err := loadIdentity(t, idFile+`,"agent_token":""}`, nil); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// Through the plain-func adapter (load), an empty value is absent. A real set-but-empty variable is an error: see
-// TestEmptyAgentTokenEnvIsInvalidWhenNamed.
-func TestAgentTokenEmptyEnvReadsAsUnset(t *testing.T) {
-	c, err := loadIdentity(t, idFile+`}`, map[string]string{"MASH_NAME": "a", "MASH_AGENT_TOKEN": ""})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if id, err := c.Identity(); err != nil || !id.IsLegacy() {
-		t.Fatalf("%+v %v", id, err)
-	}
-}
-
-func TestInvalidIdentityTokens(t *testing.T) {
-	long := func(n int) string { return "a" + strings.Repeat("b", n-1) }
-	for _, tc := range []struct{ agent, owner, name, want string }{
-		{"Upper", "o", "a", "MASH_AGENT_TOKEN"},
-		{"under_score", "o", "a", "MASH_AGENT_TOKEN"},
-		{long(33), "o", "a", "MASH_AGENT_TOKEN"},
-		{"cc", "o", "a", "MASH_AGENT_TOKEN"},
-		{"ag", long(33), "a", "owner"},
-		{"ag", "o", long(33), "MASH_NAME"},
-		{"ag", "o", "n_x", "MASH_NAME"},
-		{long(32), long(32), long(2), "MASH_AGENT_TOKEN, owner and MASH_NAME"},
-	} {
-		home := t.TempDir()
-		writeFile(t, home, `{"url":"tls://x:4222","owner":"`+tc.owner+`"}`)
-		_, err := load(envOf(map[string]string{"MASH_NAME": tc.name, "MASH_AGENT_TOKEN": tc.agent}), home)
-		if err == nil || !strings.HasPrefix(err.Error(), "mash: ") || !strings.Contains(err.Error(), tc.want) {
-			t.Errorf("%+v: got %v", tc, err)
+	for _, want := range []string{"mash: no group", "MASH_GROUP", "no default", "alice.dev.design"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q lacks %q", err, want)
 		}
 	}
-}
-
-func TestLongNameLegacyOnly(t *testing.T) {
-	name := "a" + strings.Repeat("b", 39) // 40 characters
-	c, err := loadIdentity(t, idFile+`}`, map[string]string{"MASH_NAME": name})
-	if err != nil {
-		t.Fatal(err)
+	if CodeGroupMissing != "group_missing" {
+		t.Errorf("CodeGroupMissing = %q", CodeGroupMissing)
 	}
-	if id, err := c.Identity(); err != nil || id.Flat() != name {
-		t.Fatalf("%+v %v", id, err)
+	// An empty MASH_GROUP reads as unset.
+	if _, err := loadIdentity(t, idFile+`}`, map[string]string{"MASH_NAME": "a", "MASH_GROUP": ""}); !errors.Is(err, ErrGroupMissing) {
+		t.Fatalf("empty MASH_GROUP: got %v", err)
 	}
-	if _, err := loadIdentity(t, idFile+`}`, map[string]string{"MASH_NAME": name, "MASH_AGENT_TOKEN": "ag"}); err == nil {
-		t.Fatal("33..48 character name accepted with an agent token")
+	// Identity refuses it too, for a Config built by hand.
+	if _, err := (Config{Owner: "o", Name: "a"}).Identity(); !errors.Is(err, ErrGroupMissing) {
+		t.Fatalf("Identity: got %v", err)
 	}
 }
 
-func TestInertConfigHasNoIdentity(t *testing.T) {
-	c, err := loadIdentity(t, idFile+`,"agent_token":"ag"}`, nil)
+func TestGroupIsNotAConfigFileKey(t *testing.T) {
+	// "group" in config.json is an unknown key, like any other: ignored, never read as the group.
+	if err := ValidateFile([]byte(idFile + `,"group":"dev"}`)); err != nil {
+		t.Fatalf("ValidateFile: %v", err)
+	}
+	_, err := loadIdentity(t, idFile+`,"group":"dev"}`, map[string]string{"MASH_NAME": "a"})
+	if !errors.Is(err, ErrGroupMissing) {
+		t.Fatalf("a config.json group was read: %v", err)
+	}
+	c, err := loadIdentity(t, idFile+`,"group":"dev"}`, nil)
+	if err != nil || c.Group != "" || c.FileValues["group"] != "" {
+		t.Fatalf("%+v %v", c, err)
+	}
+}
+
+func TestInertConfigNeedsNoGroup(t *testing.T) {
+	c, err := loadIdentity(t, idFile+`}`, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,20 +86,36 @@ func TestInertConfigHasNoIdentity(t *testing.T) {
 	}
 }
 
-func TestAgentTokenFileValueMustBeANonEmptyString(t *testing.T) {
-	env := map[string]string{"MASH_NAME": "a"}
-	for _, bad := range []string{`null`, `""`, `7`, `true`, `["x"]`} {
-		_, err := loadIdentity(t, idFile+`,"agent_token":`+bad+`}`, env)
-		if err == nil || !strings.Contains(err.Error(), "agent_token") {
-			t.Errorf("agent_token %s: got %v", bad, err)
-		}
-	}
-	c, err := loadIdentity(t, idFile+`,"agent_token":"good"}`, env)
-	if err != nil || c.AgentToken != "good" {
-		t.Fatalf("got %q, %v", c.AgentToken, err)
-	}
-	// Inert: nothing is validated.
-	if _, err := loadIdentity(t, idFile+`,"agent_token":null}`, nil); err != nil {
+func TestCredsNameIsOwnerGroupInstance(t *testing.T) {
+	c, err := loadIdentity(t, idFile+`}`, map[string]string{"MASH_NAME": "a", "MASH_GROUP": "g"})
+	if err != nil {
 		t.Fatal(err)
+	}
+	if c.CredsName() != "o.g.a" {
+		t.Fatalf("CredsName = %q", c.CredsName())
+	}
+	if want := filepath.Join(c.Dir, "o.g.a.creds"); c.Creds != want {
+		t.Fatalf("Creds = %q, want %q", c.Creds, want)
+	}
+}
+
+func TestInvalidAddressTokens(t *testing.T) {
+	long := func(n int) string { return "a" + strings.Repeat("b", n-1) }
+	for _, tc := range []struct{ owner, group, name, want string }{
+		{"Upper", "g", "a", "owner"},
+		{long(33), "g", "a", "owner"},
+		{"o", "Upper", "a", "MASH_GROUP"},
+		{"o", "under_score", "a", "MASH_GROUP"},
+		{"o", long(33), "a", "MASH_GROUP"},
+		{"o", "g", long(33), "MASH_NAME"},
+		{"o", "g", "n_x", "MASH_NAME"},
+		{long(32), long(32), long(2), "MASH_OWNER, MASH_GROUP and MASH_NAME"},
+	} {
+		home := t.TempDir()
+		writeFile(t, home, `{"url":"tls://x:4222","owner":"`+tc.owner+`"}`)
+		_, err := load(envOf(map[string]string{"MASH_NAME": tc.name, "MASH_GROUP": tc.group}), home)
+		if err == nil || !strings.HasPrefix(err.Error(), "mash: ") || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%+v: got %v", tc, err)
+		}
 	}
 }

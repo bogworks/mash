@@ -21,7 +21,7 @@ func hooklessKnobs(t *testing.T) {
 
 func sendTask(t *testing.T, f *fixture, body string) {
 	t.Helper()
-	if _, err := f.client(t, "b").SendWith(context.Background(), "a", body, SendOptions{Kind: kind.Task}); err != nil {
+	if _, err := f.client(t, "b").SendWith(context.Background(), tdot("a"), body, SendOptions{Kind: kind.Task}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -68,7 +68,7 @@ func TestNewMailRingsOnceWhileSuspected(t *testing.T) {
 	ev.waitFor(t, 4, 5*time.Second)
 	time.Sleep(8 * IdleWake)
 	got := ev.all()
-	if len(got) != 4 || got[3] != "2 messages from b (task)" {
+	if len(got) != 4 || got[3] != "2 messages from "+tdot("b")+" (task)" {
 		t.Fatalf("wakes %q, want 4 and the last for both messages", got)
 	}
 }
@@ -89,7 +89,7 @@ func TestToolCallsWithoutHooksProveHookless(t *testing.T) {
 	time.Sleep(HookGrace + 50*time.Millisecond)
 	a.ToolCalled(time.Now())
 	got := ev.waitFor(t, 2, 5*time.Second)
-	if !strings.HasSuffix(got[1], HooklessReadHint) || !strings.HasPrefix(got[1], "1 message from b (task)") {
+	if !strings.HasSuffix(got[1], HooklessReadHint) || !strings.HasPrefix(got[1], "1 message from "+tdot("b")+" (task)") {
 		t.Fatalf("the notice %q, want the summary line and the read hint", got[1])
 	}
 	if strings.Contains(got[0], "hooks are not running") {
@@ -249,7 +249,7 @@ func TestProvenHooklessNoticeCoversResultAndFyiMail(t *testing.T) {
 	f := newFixture(t, "a", "b")
 	a, ev, _ := f.runSpooledClaudeFromStart(t, "a")
 	for _, k := range []kind.Kind{kind.Result, kind.FYI} {
-		if _, err := f.client(t, "b").SendWith(context.Background(), "a", "held "+string(k), SendOptions{Kind: k}); err != nil {
+		if _, err := f.client(t, "b").SendWith(context.Background(), tdot("a"), "held "+string(k), SendOptions{Kind: k}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -264,7 +264,7 @@ func TestProvenHooklessNoticeCoversResultAndFyiMail(t *testing.T) {
 	time.Sleep(HookGrace + 50*time.Millisecond)
 	a.ToolCalled(time.Now())
 	got := ev.waitFor(t, 1, 5*time.Second)
-	if !strings.HasSuffix(got[0], HooklessReadHint) || !strings.HasPrefix(got[0], "2 messages from b") {
+	if !strings.HasSuffix(got[0], HooklessReadHint) || !strings.HasPrefix(got[0], "2 messages from "+tdot("b")+"") {
 		t.Fatalf("the notice %q, want the summary line and the read hint", got[0])
 	}
 	time.Sleep(10 * IdleWake)

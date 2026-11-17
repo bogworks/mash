@@ -50,7 +50,6 @@ type InboxTarget struct {
 	Address string // as the caller gave it
 	Flat    string // the flat key of the inbox stream that is read
 	Stream  string // inbox-<flat>
-	Legacy  bool   // the stream is the alias's legacy one
 }
 
 // InspectOptions bound an inspection. From and To are an inclusive stream-sequence range (0 is unset) and Limit caps
@@ -150,49 +149,23 @@ func inspectSeqs(lo, hi uint64, limit int, upward bool) []uint64 {
 	return out
 }
 
-// parseInboxAddress is the directory key an address names: the endpoint name (legacy), the flat key agent_owner_name,
-// or the dotted agent.owner.name. A dotted address with the legacy agent token names the legacy endpoint owner.name.
-// owner is the owner a dotted address names ("" for the other forms), which the record must carry.
-func parseInboxAddress(address string) (key, owner string, err error) {
-	switch {
-	case strings.Contains(address, "."):
-		p := strings.Split(address, ".")
-		if len(p) != 3 {
-			return "", "", fmt.Errorf("address is not agent.owner.name, agent_owner_name or an endpoint name")
-		}
-		if p[0] == sap.AgentToken {
-			id, err := sap.Legacy(p[1], p[2])
-			if err != nil {
-				return "", "", err
-			}
-			return id.Flat(), id.Owner, nil
-		}
-		id, err := sap.New(p[0], p[1], p[2])
-		if err != nil {
-			return "", "", err
-		}
-		return id.Flat(), id.Owner, nil
-	case strings.Contains(address, "_"):
-		id, err := sap.FromFlat(address)
-		if err != nil {
-			return "", "", err
-		}
-		return id.Flat(), "", nil
+// parseInboxAddress is the address a string names: the dotted owner.group.instance or the flat key
+// owner_group_instance.
+func parseInboxAddress(address string) (sap.Address, error) {
+	if strings.Contains(address, ".") {
+		return sap.ParseAddress(address)
 	}
-	if !config.ValidName(address) {
-		return "", "", fmt.Errorf("address is not agent.owner.name, agent_owner_name or an endpoint name")
-	}
-	return address, "", nil
+	return sap.AddressFromFlat(address)
 }
 
 // ResolveInbox finds the directory record address names and the inbox stream to read. It reads the one directory key
-// and nothing else: it lists no keys and creates no consumer. With legacy it names the alias's legacy stream; a record
-// without an alias is refused.
-func (a *Admin) ResolveInbox(ctx context.Context, address string, legacy bool) (InboxTarget, error) {
-	key, owner, err := parseInboxAddress(address)
+// and nothing else: it lists no keys and creates no consumer.
+func (a *Admin) ResolveInbox(ctx context.Context, address string) (InboxTarget, error) {
+	addr, err := parseInboxAddress(address)
 	if err != nil {
 		return InboxTarget{}, &RefusedError{Msg: fmt.Sprintf("mash: inbox %s: %v", config.Clean(address), err)}
 	}
+	key := addr.Flat()
 	kv, err := a.dir(ctx)
 	if err != nil {
 		return InboxTarget{}, err
@@ -204,36 +177,16 @@ func (a *Admin) ResolveInbox(ctx context.Context, address string, legacy bool) (
 	if err != nil {
 		return InboxTarget{}, fmt.Errorf("mash: directory %s: %w", config.Clean(key), err)
 	}
-	rec, err := store.ParseRecord(key, e.Value())
-	if err != nil {
+	if _, err := store.ParseRecord(key, e.Value()); err != nil {
 		return InboxTarget{}, &RefusedError{Msg: fmt.Sprintf("mash: directory record %s is not readable: %v", config.Clean(key), err)}
 	}
-	id, err := rec.Identity()
-	if err != nil {
-		return InboxTarget{}, &RefusedError{Msg: err.Error()}
-	}
-	if id.Flat() != key || (owner != "" && owner != id.Owner) {
-		return InboxTarget{}, &RefusedError{Msg: fmt.Sprintf("mash: no endpoint %s in the directory", config.Clean(address))}
-	}
-	t := InboxTarget{Address: address, Flat: key}
-	if legacy {
-		aid, ok, err := rec.AliasIdentity()
-		switch {
-		case err != nil:
-			return InboxTarget{}, &RefusedError{Msg: fmt.Sprintf("mash: %s has an alias that names no legacy identity: %v", config.Clean(address), err)}
-		case !ok:
-			return InboxTarget{}, &RefusedError{Msg: fmt.Sprintf("mash: %s has no alias, so it has no legacy inbox", config.Clean(address))}
-		}
-		t.Flat, t.Legacy = aid.Flat(), true
-	}
-	t.Stream = sap.InboxStream(t.Flat)
-	return t, nil
+	return InboxTarget{Address: address, Flat: key, Stream: addr.InboxStream()}, nil
 }
 
-// InspectInbox reads the stored messages of inbox-<flat> and the delivery state of its `deliver` consumer. It uses
+// InspectInbox reads the stored messages of inbox-<flat> of addr and the delivery state of its `deliver` consumer. It uses
 // only STREAM.INFO, a direct get by sequence and CONSUMER.INFO of the existing consumer (and directory key reads to
 // name senders), so it changes nothing: it never creates, binds or fetches from a consumer and never acknowledges.
-func (a *Admin) InspectInbox(ctx context.Context, flat string, opts InspectOptions) (*InboxInspection, error) {
+func (a *Admin) InspectInbox(ctx context.Context, addr sap.Address, opts InspectOptions) (*InboxInspection, error) {
 	if opts.Limit < 0 {
 		return nil, fmt.Errorf("mash: inspect limit %d: must be 1 or more", opts.Limit)
 	}
@@ -243,7 +196,7 @@ func (a *Admin) InspectInbox(ctx context.Context, flat string, opts InspectOptio
 	if opts.From != 0 && opts.To != 0 && opts.From > opts.To {
 		return nil, &RefusedError{Msg: fmt.Sprintf("mash: inspect: --from %d is after --to %d", opts.From, opts.To)}
 	}
-	name := sap.InboxStream(flat)
+	name := addr.InboxStream()
 	s, err := a.js.Stream(ctx, name)
 	if errors.Is(err, jetstream.ErrStreamNotFound) {
 		return nil, &RefusedError{Msg: fmt.Sprintf("mash: no inbox stream %s", config.Clean(name))}

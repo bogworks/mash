@@ -4,45 +4,62 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/bogworks/mash/internal/sap"
 )
 
-func TestPermissionsExact(t *testing.T) {
-	p := Permissions("o", "a")
-	wantPub := []string{
-		"$JS.ACK.inbox-a.deliver.>",
-		"$JS.API.CONSUMER.INFO.inbox-a.deliver",
-		"$JS.API.CONSUMER.MSG.NEXT.inbox-a.deliver",
-		"$JS.API.DIRECT.GET.KV_mash-directory.>",
-		"$JS.API.DIRECT.GET.KV_mash-leases.$KV.mash-leases.a",
-		"$JS.API.DIRECT.GET.inbox-a",
-		"$JS.API.DIRECT.GET.inbox-a.>",
-		"$JS.API.INFO",
-		"$JS.API.STREAM.INFO.KV_mash-directory",
-		"$JS.API.STREAM.INFO.KV_mash-leases",
-		"$JS.API.STREAM.INFO.inbox-a",
-		"$KV.mash-leases.a",
-		"$SRV.>",
+func addrOf(t *testing.T, owner, group, instance string) sap.Address {
+	t.Helper()
+	a, err := sap.NewAddress(owner, group, instance)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return a
+}
+
+// fixedLines is the per-endpoint publish lines of the endpoint with flat key flat and heartbeat hb.
+func fixedLines(flat, hb string) []string {
+	return []string{
+		hb,
 		"_INBOX.>",
-		"agents.hb.cc.o.a",
-		"agents.mail.*.o.*",
-		"agents.prompt.*.o.*",
-		"agents.status.*.o.*",
-	}
-	wantSub := []string{
 		"$SRV.>",
-		"_INBOX.a.>",
-		"agents.hb.*.o.*",
-		"agents.prompt.cc.o.a",
-		"agents.status.cc.o.a",
+		"$JS.API.INFO",
+		"$JS.API.STREAM.INFO.inbox-" + flat,
+		"$JS.API.CONSUMER.INFO.inbox-" + flat + ".deliver",
+		"$JS.API.CONSUMER.MSG.NEXT.inbox-" + flat + ".deliver",
+		"$JS.ACK.inbox-" + flat + ".deliver.>",
+		"$JS.API.DIRECT.GET.inbox-" + flat,
+		"$JS.API.DIRECT.GET.inbox-" + flat + ".>",
+		"$JS.API.STREAM.INFO.KV_mash-directory",
+		"$JS.API.DIRECT.GET.KV_mash-directory.>",
+		"$JS.API.STREAM.INFO.KV_mash-leases",
+		"$KV.mash-leases." + flat,
+		"$JS.API.DIRECT.GET.KV_mash-leases.$KV.mash-leases." + flat,
 	}
-	gotPub := slices.Sorted(slices.Values([]string(p.Pub.Allow)))
-	gotSub := slices.Sorted(slices.Values([]string(p.Sub.Allow)))
-	if !slices.Equal(gotPub, wantPub) {
-		t.Errorf("pub\n got %q\nwant %q", gotPub, wantPub)
+}
+
+func sameLines(t *testing.T, what string, got, want []string) {
+	t.Helper()
+	if !slices.Equal(got, want) {
+		t.Errorf("%s:\n got  %q\n want %q", what, got, want)
 	}
-	if !slices.Equal(gotSub, wantSub) {
-		t.Errorf("sub\n got %q\nwant %q", gotSub, wantSub)
-	}
+}
+
+func TestPermissionsExact(t *testing.T) {
+	a := addrOf(t, "alice", "dev", "design")
+	p := Permissions(a)
+	sameLines(t, "pub allow", p.Pub.Allow, append([]string{
+		"agents.mail.alice.*.*",
+		"agents.prompt.alice.*.*",
+		"agents.status.alice.*.*",
+	}, fixedLines("alice_dev_design", "agents.hb.alice.dev.design")...))
+	sameLines(t, "sub allow", p.Sub.Allow, []string{
+		"_INBOX.alice_dev_design.>",
+		"agents.prompt.alice.dev.design",
+		"agents.status.alice.dev.design",
+		"$SRV.>",
+		"agents.hb.alice.*.*",
+	})
 	if len(p.Pub.Deny) != 0 || len(p.Sub.Deny) != 0 {
 		t.Errorf("unexpected deny lists")
 	}
@@ -51,99 +68,123 @@ func TestPermissionsExact(t *testing.T) {
 	}
 }
 
-func TestPermissionsNeverGrantOthers(t *testing.T) {
-	p := Permissions("o", "a")
-	for _, s := range append([]string(p.Pub.Allow), p.Sub.Allow...) {
-		if s == ">" || s == "$JS.API.>" || strings.HasPrefix(s, "$JS.API.STREAM.DELETE") ||
-			strings.HasPrefix(s, "$JS.API.STREAM.PURGE") || strings.HasPrefix(s, "$JS.API.STREAM.MSG.DELETE") {
-			t.Errorf("over-broad grant %q", s)
+func TestPermissionsLongestAddress(t *testing.T) {
+	const t32 = "abcdefghijklmnopqrstuvwxyzabcdef"
+	a, err := sap.NewAddress(t32[:20], t32[:20], t32[:22])
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := Permissions(a)
+	sameLines(t, "sub allow", p.Sub.Allow, []string{
+		"_INBOX." + a.Flat() + ".>",
+		a.Subjects().Prompt,
+		a.Subjects().Status,
+		"$SRV.>",
+		"agents.hb." + a.Owner + ".*.*",
+	})
+}
+
+// No peer line reaches another owner: every publish and subscribe line is under the endpoint's own flat key, a fixed
+// line, or has the owner as a literal in the owner slot (token 3 of an agents. subject).
+func TestPermissionsNeverReachAnotherOwner(t *testing.T) {
+	for _, a := range []sap.Address{
+		addrOf(t, "alice", "dev", "design"),
+		addrOf(t, "bob", "ops", "pager"),
+		addrOf(t, "o", "g", "i"),
+	} {
+		p := Permissions(a)
+		flat := a.Flat()
+		for _, s := range append(slices.Clone([]string(p.Pub.Allow)), p.Sub.Allow...) {
+			if strings.HasPrefix(s, "agents.") {
+				toks := strings.Split(s, ".")
+				if len(toks) != 5 {
+					t.Errorf("%s: %q is not a five-token subject", a, s)
+					continue
+				}
+				if toks[2] != a.Owner {
+					t.Errorf("%s: %q does not carry the owner as a literal in slot 1", a, s)
+				}
+				if toks[1] == "hb" && slices.Contains(p.Pub.Allow, s) && s != a.Subjects().HB {
+					t.Errorf("%s: heartbeat publication beyond its own subject: %q", a, s)
+				}
+				continue
+			}
+			if strings.Contains(s, "inbox-") && !strings.Contains(s, "inbox-"+flat) {
+				t.Errorf("%s: grant on another inbox: %q", a, s)
+			}
+			if strings.Contains(s, "mash-leases.") && !strings.HasSuffix(s, "mash-leases."+flat) {
+				t.Errorf("%s: grant on another lease key: %q", a, s)
+			}
+			if s == ">" || s == "$JS.API.>" || strings.Contains(s, "STREAM.DELETE") || strings.Contains(s, "STREAM.PURGE") ||
+				strings.Contains(s, "CONSUMER.CREATE") || strings.Contains(s, "CONSUMER.DELETE") {
+				t.Errorf("%s: over-broad grant %q", a, s)
+			}
+			if strings.HasPrefix(s, "_INBOX") && s != "_INBOX."+flat+".>" && s != "_INBOX.>" {
+				t.Errorf("%s: unexpected inbox grant: %q", a, s)
+			}
+			if strings.Contains(s, "$KV.mash-directory") {
+				t.Errorf("%s: directory must be read-only: %q", a, s)
+			}
 		}
-		if strings.Contains(s, "inbox-") && !strings.Contains(s, "inbox-a") {
-			t.Errorf("grant on another inbox: %q", s)
+	}
+}
+
+func TestPermissionsInvalidAddressIsNil(t *testing.T) {
+	for _, a := range []sap.Address{{}, {Owner: "*", Group: "g", Instance: "i"}, {Owner: "a", Group: "*", Instance: "i"}, {Owner: "a.b", Group: "g", Instance: "i"}} {
+		if p := Permissions(a); p != nil {
+			t.Errorf("%+v: got %v, want nil (an empty set would allow everything)", a, p)
 		}
-		if strings.HasPrefix(s, "_INBOX") && s != "_INBOX.a.>" && s != "_INBOX.>" {
-			t.Errorf("unexpected inbox grant: %q", s)
-		}
-		if strings.Contains(s, "CONSUMER.CREATE") || strings.Contains(s, "CONSUMER.DELETE") {
-			t.Errorf("consumer management grant: %q", s)
-		}
-		if strings.Contains(s, "$KV.mash-directory") {
-			t.Errorf("directory must be read-only: %q", s)
+		if f := NSCFlags(a); f != nil {
+			t.Errorf("%+v: flags %v", a, f)
 		}
 	}
 }
 
 func TestNSCFlags(t *testing.T) {
-	f := strings.Join(NSCFlags("o", "a"), " ")
-	for _, want := range []string{
-		"--allow-pub agents.mail.*.o.*",
-		"--allow-sub agents.prompt.cc.o.a",
-	} {
-		if !strings.Contains(f, want) {
-			t.Errorf("flags missing %q:\n%s", want, f)
+	a := addrOf(t, "alice", "dev", "design")
+	f := NSCFlags(a)
+	if f[0] != "--allow-pub" || f[1] != "agents.mail.alice.*.*" || len(f) != 2*(3+15+5) {
+		t.Errorf("flag shape: %q", f)
+	}
+	s := strings.Join(f, " ")
+	for _, want := range []string{"--allow-pub agents.mail.alice.*.*", "--allow-sub agents.prompt.alice.dev.design"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("flags missing %q:\n%s", want, s)
 		}
 	}
 }
 
-// The mail subject has five tokens (ADR 0091): the wildcard set carries that one form and no six-token line.
-func TestPermissionsMailLine(t *testing.T) {
-	p := Permissions("o", "a")
-	if !slices.Contains(p.Pub.Allow, "agents.mail.*.o.*") {
-		t.Error("missing agents.mail.*.o.*")
-	}
-	for _, s := range p.Pub.Allow {
-		if strings.HasPrefix(s, "agents.mail") && strings.Count(s, ".") != 4 {
-			t.Errorf("mail line %s is not five tokens", s)
+// A wildcard in the owner slot (or before it) is refused, however the grant is spelled; a literal owner with
+// wildcards after it is accepted.
+func TestValidateGrantRefusesWildcardOwner(t *testing.T) {
+	for _, bad := range []string{
+		"agents.mail.*.dev.design", "agents.mail.>", "agents.*.alice.dev.design", "agents.>", "*.mail.alice.dev.design", ">",
+		"agents.mail.al*.dev.design", "agents.mail..dev.design", "agents.mail.alice", "agents.mail.>.dev",
+	} {
+		if err := ValidateGrant(bad); err == nil {
+			t.Errorf("%q accepted", bad)
 		}
 	}
-	for _, s := range p.Pub.Allow {
-		if strings.HasPrefix(s, "agents.prompt") || strings.HasPrefix(s, "agents.status") {
-			if strings.Count(s, ".") != 4 {
-				t.Errorf("prompt/status line %s changed shape", s)
+	for _, ok := range []string{"agents.mail.alice.*.*", "agents.prompt.alice.dev.*", "agents.status.alice.>", "other.subject.*"} {
+		if err := ValidateGrant(ok); err != nil {
+			t.Errorf("%q refused: %v", ok, err)
+		}
+	}
+}
+
+// Every peer line Permissions gives passes ValidateGrant.
+func TestPermissionsPeerLinesPassValidateGrant(t *testing.T) {
+	for _, s := range Permissions(addrOf(t, "alice", "dev", "design")).Pub.Allow {
+		if strings.HasPrefix(s, "agents.") && !strings.HasPrefix(s, "agents.hb.") {
+			if err := ValidateGrant(s); err != nil {
+				t.Errorf("%q: %v", s, err)
 			}
 		}
 	}
-	// A recipient form keeps the single legacy line per recipient.
-	for _, s := range PermissionsTo("o", "a", []string{"b"}).Pub.Allow {
-		if strings.HasPrefix(s, "agents.mail") && s != "agents.mail.*.o.b" {
-			t.Errorf("recipient form grants %s", s)
-		}
-	}
 }
 
-func TestPermissionsToNilIsPermissions(t *testing.T) {
-	a, b := Permissions("o", "a"), PermissionsTo("o", "a", nil)
-	if !slices.Equal(a.Pub.Allow, b.Pub.Allow) || !slices.Equal(a.Sub.Allow, b.Sub.Allow) {
-		t.Fatalf("nil recipients differ from Permissions:\n%v\n%v", a, b)
-	}
-}
-
-func TestPermissionsToRecipients(t *testing.T) {
-	p := PermissionsTo("o", "a", []string{"c", "b"})
-	for _, w := range []string{"agents.mail.*.o.b", "agents.prompt.*.o.b", "agents.status.*.o.b", "agents.mail.*.o.c", "agents.prompt.*.o.c", "agents.status.*.o.c"} {
-		if !slices.Contains(p.Pub.Allow, w) {
-			t.Errorf("missing %s", w)
-		}
-	}
-	for _, s := range p.Pub.Allow {
-		if strings.HasSuffix(s, ".o.*") {
-			t.Errorf("wildcard line %s", s)
-		}
-	}
-	// Same size apart from the peer lines: fixed lines minus 3 wildcards (mail, prompt, status), plus 6.
-	if len(p.Pub.Allow) != len(Permissions("o", "a").Pub.Allow)-3+6 {
-		t.Errorf("%d lines", len(p.Pub.Allow))
-	}
-	none := PermissionsTo("o", "a", []string{})
-	if len(none.Pub.Allow) != len(Permissions("o", "a").Pub.Allow)-3 {
-		t.Errorf("empty recipients: %d lines", len(none.Pub.Allow))
-	}
-	for _, s := range none.Pub.Allow {
-		if strings.HasPrefix(s, "agents.mail") || strings.HasPrefix(s, "agents.prompt") || strings.HasPrefix(s, "agents.status") {
-			t.Errorf("empty recipients still grants %s", s)
-		}
-	}
-	if len(none.Pub.Allow) == 0 {
-		t.Error("empty block")
+func TestGoldenLockKey(t *testing.T) {
+	if got := lockKey("alice_dev_design"); got != "limits-lock.alice_dev_design" {
+		t.Errorf("lockKey = %q", got)
 	}
 }

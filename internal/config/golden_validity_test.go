@@ -1,4 +1,4 @@
-// Characterisation tests (plan 2b, Phase 0): these pin today's identifiers and validity for legacy identities; a change here is a change to a legacy identifier and needs its own decision.
+// Characterisation of ValidName, and of the token rule Load applies through the address.
 
 package config
 
@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// ValidName is the one rule for both an endpoint name and an owner (Load applies it to each).
+// ValidName is the legacy name rule, kept for callers outside Load.
 func TestGoldenValidNameBoundaries(t *testing.T) {
 	for _, s := range []string{
 		"a", "z", "a0", "a-b", "a-b-c", "a1-2b", "ab-1", "build-1", "acme-corp",
@@ -30,32 +30,40 @@ func TestGoldenValidNameBoundaries(t *testing.T) {
 	}
 }
 
-func TestGoldenLoadAppliesValidNameToOwnerAndName(t *testing.T) {
-	n48 := strings.Repeat("a", 48)
+func TestLoadAppliesTokenRuleToOwnerGroupAndInstance(t *testing.T) {
+	o32, i28 := strings.Repeat("a", 32), strings.Repeat("c", 28)
 	home := t.TempDir()
-	writeFile(t, home, `{"url":"tls://x:4222","owner":"`+n48+`"}`)
-	c, err := load(envOf(map[string]string{"MASH_NAME": n48}), home)
+	writeFile(t, home, `{"url":"tls://x:4222","owner":"`+o32+`"}`)
+	c, err := load(envOf(map[string]string{"MASH_NAME": i28, "MASH_GROUP": "g"}), home)
 	if err != nil {
-		t.Fatalf("48-character owner and name refused: %v", err)
+		t.Fatalf("32-character owner and 28-character instance refused: %v", err)
 	}
-	if c.Owner != n48 || c.Name != n48 {
+	if c.Owner != o32 || c.Name != i28 {
 		t.Errorf("owner %q name %q", c.Owner, c.Name)
 	}
-	// the credentials file mash derives from the name
-	if want := filepath.Join(home, ".config", "mash", n48+".creds"); c.Creds != want {
+	if want := filepath.Join(home, ".config", "mash", o32+".g."+i28+".creds"); c.Creds != want {
 		t.Errorf("creds %q, want %q", c.Creds, want)
 	}
-	n49 := n48 + "a"
-	if _, err := load(envOf(map[string]string{"MASH_NAME": n49}), home); err == nil {
-		t.Error("49-character name accepted")
+	// The whole address is at most 64 characters: 32 + 1 + 29 + 2 = 64 is the bound, 65 is refused.
+	if _, err := load(envOf(map[string]string{"MASH_NAME": i28 + "c", "MASH_GROUP": "g"}), home); err != nil {
+		t.Errorf("64-character address refused: %v", err)
 	}
-	writeFile(t, home, `{"url":"tls://x:4222","owner":"`+n49+`"}`)
-	if _, err := load(envOf(map[string]string{"MASH_NAME": "a"}), home); err == nil {
-		t.Error("49-character owner accepted")
+	if _, err := load(envOf(map[string]string{"MASH_NAME": i28 + "cc", "MASH_GROUP": "g"}), home); err == nil {
+		t.Error("65-character address accepted")
+	}
+	if _, err := load(envOf(map[string]string{"MASH_NAME": strings.Repeat("a", 33), "MASH_GROUP": "g"}), home); err == nil {
+		t.Error("33-character instance accepted")
+	}
+	if _, err := load(envOf(map[string]string{"MASH_NAME": "a", "MASH_GROUP": strings.Repeat("g", 33)}), home); err == nil {
+		t.Error("33-character group accepted")
+	}
+	writeFile(t, home, `{"url":"tls://x:4222","owner":"`+o32+`a"}`)
+	if _, err := load(envOf(map[string]string{"MASH_NAME": "a", "MASH_GROUP": "g"}), home); err == nil {
+		t.Error("33-character owner accepted")
 	}
 	for _, bad := range []string{"Up", "a_b", "a.b", "1a", "a--b", "a-"} {
 		writeFile(t, home, `{"url":"tls://x:4222","owner":"`+bad+`"}`)
-		if _, err := load(envOf(map[string]string{"MASH_NAME": "a"}), home); err == nil {
+		if _, err := load(envOf(map[string]string{"MASH_NAME": "a", "MASH_GROUP": "g"}), home); err == nil {
 			t.Errorf("owner %q accepted", bad)
 		}
 	}

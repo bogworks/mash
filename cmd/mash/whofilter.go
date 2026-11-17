@@ -8,7 +8,7 @@ import (
 
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/endpoint"
-	"github.com/bogworks/mash/internal/sap"
+	"github.com/bogworks/mash/internal/store"
 )
 
 const whoUsage = "usage: mash who [--long] [--json] [--names] [--match TEXT] [--name SUB] [--owner O] [--role SUB] [--label K[=V]]... [--cap C]... [--online|--offline]"
@@ -81,7 +81,7 @@ func ParseWhoFlags(args []string) (endpoint.WhoFilter, whoOutput, error) {
 func whoNames(ps []endpoint.Presence) string {
 	names := make([]string, len(ps))
 	for i, p := range ps {
-		names[i] = config.Clean(p.Record.KeyOrName())
+		names[i] = config.Clean(recordKey(p.Record))
 	}
 	return strings.Join(names, "\n")
 }
@@ -94,8 +94,11 @@ type whoLease struct {
 
 type whoEntry struct {
 	Name        string            `json:"name"`
-	Identity    string            `json:"identity,omitempty"` // additive (ADR 0081): the canonical agent.owner.name, for a three-token endpoint only
+	Identity    string            `json:"identity"` // the dotted address, owner.group.instance
 	Owner       string            `json:"owner"`
+	Group       string            `json:"group"`
+	Instance    string            `json:"instance"`
+	Agent       string            `json:"agent,omitempty"` // the harness that runs the endpoint
 	Online      bool              `json:"online"`
 	LastSeen    string            `json:"last_seen,omitempty"`
 	Role        string            `json:"role,omitempty"`
@@ -105,14 +108,11 @@ type whoEntry struct {
 	Caps        []string          `json:"caps,omitempty"`
 	Labels      map[string]string `json:"labels,omitempty"`
 	Lease       *whoLease         `json:"lease,omitempty"`
-	Alias       *whoAlias         `json:"alias,omitempty"` // additive (ADR 0076): present only for a record that carries an alias
 }
 
-// whoAlias is the legacy identity a new-form record answers to.
-type whoAlias struct {
-	Owner string `json:"owner"`
-	Name  string `json:"name"`
-}
+// recordKey is the flat directory key of r, owner_group_instance; recordAddress is its dotted form.
+func recordKey(r store.Record) string     { return r.Owner + "_" + r.Group + "_" + r.Instance }
+func recordAddress(r store.Record) string { return r.Owner + "." + r.Group + "." + r.Instance }
 
 // whoJSON renders the presences as a JSON array (`[]` when none). Map keys encode sorted. lease is added only when
 // long is set and a live lease is known.
@@ -120,10 +120,7 @@ func whoJSON(ps []endpoint.Presence, long bool, live map[string]endpoint.LeaseIn
 	out := make([]whoEntry, 0, len(ps))
 	for _, p := range ps {
 		r := p.Record
-		e := whoEntry{Name: r.KeyOrName(), Owner: r.Owner, Online: p.Online, Role: r.Role, Host: r.Host, Note: r.Note, Description: r.Description}
-		if d := sap.Display(r.KeyOrName()); d != e.Name {
-			e.Identity = d // a legacy entry has none: its name is already what people read
-		}
+		e := whoEntry{Name: recordKey(r), Identity: recordAddress(r), Owner: r.Owner, Group: r.Group, Instance: r.Instance, Agent: r.Agent, Online: p.Online, Role: r.Role, Host: r.Host, Note: r.Note, Description: r.Description}
 		if len(r.Caps) > 0 {
 			e.Caps = r.Caps
 		}
@@ -133,10 +130,7 @@ func whoJSON(ps []endpoint.Presence, long bool, live map[string]endpoint.LeaseIn
 		if !p.LastSeen.IsZero() {
 			e.LastSeen = p.LastSeen.UTC().Format(time.RFC3339)
 		}
-		if r.Alias != nil {
-			e.Alias = &whoAlias{Owner: r.Alias.Owner, Name: r.Alias.Name}
-		}
-		if li, ok := live[r.KeyOrName()]; ok && long {
+		if li, ok := live[recordKey(r)]; ok && long {
 			e.Lease = &whoLease{Host: li.Host, Version: li.Version}
 		}
 		out = append(out, e)

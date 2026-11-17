@@ -396,7 +396,7 @@ func VerifyInstance(value string, h SenderHeader) (string, bool) {
 	return instance, true
 }
 
-// markSeq is a stream sequence in its one wire form: plain decimal, no sign, no leading zero, at least 1.
+// markSeq is a stream sequence in its one wire form: plain decimal, no sign, no zero prefix, at least 1.
 func markSeq(s string) (uint64, bool) {
 	n, err := strconv.ParseUint(s, 10, 64)
 	if err != nil || n == 0 || strconv.FormatUint(n, 10) != s {
@@ -440,23 +440,15 @@ func VerifyInReplyTo(h SenderHeader, value string) (uint64, bool) {
 	return seq, true
 }
 
-// validOrigin is the endpoint-name syntax (config.ValidName; sap cannot import config).
-var validOrigin = regexp.MustCompile(`^[a-z][a-z0-9]*(-[a-z0-9]+)*$`)
-
-func validOriginName(s string) bool { return len(s) >= 1 && len(s) <= 48 && validOrigin.MatchString(s) }
-
-// validViaOrigin is the one rule for a via origin, used by SignVia and VerifyVia: a legacy endpoint name (validOriginName,
-// exactly as before), or the flat key of a new-form endpoint, agent_owner_name, in its canonical form (FromFlat accepts
-// it and EndpointIdentity.Flat gives back the same string, so no token is empty, upper-case, over length or the legacy
-// agent token, and no other spelling is accepted). The origin is signed as the string given. For a sender that is a
-// new-form endpoint that string is exactly what its sender name (Name in the SenderHeader, set from the endpoint's
-// directory key) is: its Flat form. The signed Sub of that sender is its mail subject, agents.mail.<agent>.<owner>.<name>.
+// validViaOrigin is the one rule for a via origin, used by SignVia and VerifyVia: the flat key of an endpoint,
+// owner_group_instance, in its canonical form (AddressFromFlat accepts it and Address.Flat gives back the same string, so
+// no token is empty, upper-case or over length, and no other spelling is accepted). The origin is signed as the string
+// given. For a sender that is an endpoint that string is exactly what its sender name (Name in the SenderHeader, set from
+// the endpoint's directory key) is: its flat key. The signed Sub of that sender is its mail subject,
+// agents.mail.<owner>.<group>.<instance>.
 func validViaOrigin(s string) bool {
-	if validOriginName(s) {
-		return true
-	}
-	id, err := FromFlat(s)
-	return err == nil && id.Flat() == s
+	a, err := AddressFromFlat(s)
+	return err == nil && a.Flat() == s
 }
 
 func viaInput(h SenderHeader, origin string, seq uint64) []byte {
@@ -465,14 +457,14 @@ func viaInput(h SenderHeader, origin string, seq uint64) []byte {
 }
 
 // SignVia declares, under the key of the message h signs, that this message relays or quotes message seq of the
-// signer's own inbox, whose sender was origin (a legacy endpoint name or the flat key of a new-form endpoint, see validViaOrigin). The value is "<origin>#<seq>.<sig>", for the
+// signer's own inbox, whose sender was origin (the flat key of an endpoint, see validViaOrigin). The value is "<origin>#<seq>.<sig>", for the
 // Mash-Via header.
 func (id Identity) SignVia(h SenderHeader, origin string, seq uint64) (string, error) {
 	if id.kp == nil {
 		return "", errors.New("sap: identity has no seed")
 	}
 	if !validViaOrigin(origin) {
-		return "", errors.New("sap: via origin is not an endpoint name or flat key")
+		return "", errors.New("sap: via origin is not an endpoint flat key (owner_group_instance)")
 	}
 	if seq == 0 {
 		return "", errors.New("sap: via sequence is 0")

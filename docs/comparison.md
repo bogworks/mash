@@ -184,9 +184,8 @@ is the other question: who may send it.
 In v0.5.0 the NATS server enforces one fixed rule, not a per-sender policy:
 
 - **Enforcement.** NATS permissions on each endpoint's user. Every endpoint's permissions are the owner-line set that
-  `mashctl add` issues, so the server, not the receiving session, decides what a credential may publish and subscribe to.
-- **No zones.** Zones are gone (ADR 0091): mail keeps the five-token subject and the address is the fence. `mashctl
-  unzone` is the upgrade helper for an older record.
+  `mashctl permissions` prints for its address, and every credential is open to the whole owner and reaches no other, so the server, not the receiving session, decides what a credential may publish and subscribe to.
+- **The owner is the fence.** Mail has one five-token subject, `agents.mail.<owner>.<group>.<instance>`, and a credential publishes only under its own owner.
 - **Record of issue.** Every credential `mashctl` issues is recorded in a bucket only the admin connection writes, and
   `mashctl issued check` reports a connected key mash did not issue.
 

@@ -16,11 +16,11 @@ import (
 	"github.com/bogworks/mash/internal/sap"
 )
 
-// cli runs the one-shot commands as MASH_NAME, without taking its lease.
+// cli runs the one-shot commands as MASH_OWNER.MASH_GROUP.MASH_NAME, without taking its lease.
 func cli(cfg config.Config, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	fail := func(err error) int { fmt.Fprintln(stderr, err); return 1 }
 	if cfg.Inert() {
-		return fail(fmt.Errorf("mash: set MASH_NAME to the endpoint you are acting as"))
+		return fail(fmt.Errorf("mash: set MASH_NAME to the instance you are acting as (with MASH_OWNER and MASH_GROUP: the endpoint is owner.group.instance)"))
 	}
 	var whoF endpoint.WhoFilter
 	var whoO whoOutput

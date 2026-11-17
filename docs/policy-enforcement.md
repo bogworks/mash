@@ -412,7 +412,7 @@ records every user JWT `mashctl` issues in the KV bucket `mash-issued`, keyed by
 key, address, owner, kind, tags, generation, issue time, purpose (`issue`, `rotation` or `probe`) and a revocation time
 once mash has revoked the key. It never holds a seed or a JWT.
 
-- **Written before the creds exist.** `mashctl add` and `mashctl reissue` write the entry after minting in memory and
+- **Written before the creds exist.** `mashctl` writes the entry after minting in memory and
   before the directory record or any file, so a failed write issues nothing.
 - **Only the admin connection writes it.** No permission list mash makes grants anything on `$KV.mash-issued.>` or the
   stream's `$JS.API` subjects. A test asserts it for each list and against a live endpoint connection, which is refused

@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "generated": "2026-11-10T12:00:00Z",
   "owner": "o",
   "account": "ACCOUNT",
@@ -8,66 +8,15 @@
   ],
   "records": [
     {
-      "key": "acme_team1_ops1",
-      "identity": {
-        "agent": "acme",
-        "owner": "team1",
-        "name": "ops1"
-      },
-      "flat": "acme_team1_ops1",
-      "form": "new",
-      "user": "USER-ops1new",
-      "alias": {
-        "owner": "o",
-        "name": "ops1"
-      },
-      "running": true,
-      "inbox": {
-        "stream": "inbox-acme_team1_ops1",
-        "present": true,
-        "msgs": 1,
-        "first_seq": 1,
-        "last_seq": 1,
-        "last_time": "<TIME>",
-        "created": "<TIME>",
-        "subjects": [
-          "agents.mail.acme.team1.ops1"
-        ],
-        "suspended": false,
-        "deliver": {
-          "present": true,
-          "pending": 1,
-          "ack_pending": 0,
-          "deliver_policy": "all",
-          "start_seq": 0,
-          "filter_subjects": [],
-          "ack_floor": 0,
-          "delivered": 0,
-          "delivered_consumer_seq": 0,
-          "ack_floor_consumer_seq": 0,
-          "num_redelivered": 0,
-          "created": "<TIME>"
-        },
-        "bytes": 59,
-        "max_bytes": 16777216,
-        "fill_percent": 0,
-        "evicted": 0,
-        "evicted_unread": 0
-      }
-    },
-    {
-      "key": "alpha",
-      "identity": {
-        "agent": "cc",
-        "owner": "o",
-        "name": "alpha"
-      },
-      "flat": "alpha",
-      "form": "legacy",
+      "key": "o_g_alpha",
+      "address": "o.g.alpha",
+      "owner": "o",
+      "group": "g",
+      "instance": "alpha",
       "user": "USER-alpha",
       "running": true,
       "inbox": {
-        "stream": "inbox-alpha",
+        "stream": "inbox-o_g_alpha",
         "present": true,
         "msgs": 3,
         "first_seq": 1,
@@ -75,7 +24,7 @@
         "last_time": "<TIME>",
         "created": "<TIME>",
         "subjects": [
-          "agents.mail.*.o.alpha"
+          "agents.mail.o.g.alpha"
         ],
         "suspended": false,
         "deliver": {
@@ -92,7 +41,7 @@
           "num_redelivered": 0,
           "created": "<TIME>"
         },
-        "bytes": 162,
+        "bytes": 159,
         "max_bytes": 16777216,
         "fill_percent": 0,
         "evicted": 0,
@@ -100,18 +49,15 @@
       }
     },
     {
-      "key": "claude_team2_beta",
-      "identity": {
-        "agent": "claude",
-        "owner": "team2",
-        "name": "beta"
-      },
-      "flat": "claude_team2_beta",
-      "form": "new",
-      "user": "USER-beta",
-      "running": false,
+      "key": "o_team1_ops1",
+      "address": "o.team1.ops1",
+      "owner": "o",
+      "group": "team1",
+      "instance": "ops1",
+      "user": "USER-ops1",
+      "running": true,
       "inbox": {
-        "stream": "inbox-claude_team2_beta",
+        "stream": "inbox-o_team1_ops1",
         "present": true,
         "msgs": 2,
         "first_seq": 1,
@@ -119,7 +65,49 @@
         "last_time": "<TIME>",
         "created": "<TIME>",
         "subjects": [
-          "agents.mail.claude.team2.beta"
+          "agents.mail.o.team1.ops1"
+        ],
+        "suspended": false,
+        "deliver": {
+          "present": true,
+          "pending": 1,
+          "ack_pending": 1,
+          "deliver_policy": "all",
+          "start_seq": 0,
+          "filter_subjects": [],
+          "ack_floor": 0,
+          "delivered": 1,
+          "delivered_consumer_seq": 1,
+          "ack_floor_consumer_seq": 0,
+          "delivered_last": "<TIME>",
+          "num_redelivered": 0,
+          "created": "<TIME>"
+        },
+        "bytes": 112,
+        "max_bytes": 16777216,
+        "fill_percent": 0,
+        "evicted": 0,
+        "evicted_unread": 0
+      }
+    },
+    {
+      "key": "o_team2_beta",
+      "address": "o.team2.beta",
+      "owner": "o",
+      "group": "team2",
+      "instance": "beta",
+      "user": "USER-beta",
+      "running": false,
+      "inbox": {
+        "stream": "inbox-o_team2_beta",
+        "present": true,
+        "msgs": 2,
+        "first_seq": 1,
+        "last_seq": 2,
+        "last_time": "<TIME>",
+        "created": "<TIME>",
+        "subjects": [
+          "agents.mail.o.team2.beta"
         ],
         "suspended": false,
         "deliver": {
@@ -136,146 +124,23 @@
           "num_redelivered": 0,
           "created": "<TIME>"
         },
-        "bytes": 122,
+        "bytes": 112,
         "max_bytes": 16777216,
         "fill_percent": 0,
         "evicted": 0,
         "evicted_unread": 0
       }
-    },
-    {
-      "key": "ops1",
-      "identity": {
-        "agent": "cc",
-        "owner": "o",
-        "name": "ops1"
-      },
-      "flat": "ops1",
-      "form": "legacy",
-      "user": "USER-ops1",
-      "running": false,
-      "inbox": {
-        "stream": "inbox-ops1",
-        "present": true,
-        "msgs": 2,
-        "first_seq": 1,
-        "last_seq": 2,
-        "last_time": "<TIME>",
-        "created": "<TIME>",
-        "subjects": [
-          "agents.mail.*.o.ops1"
-        ],
-        "suspended": false,
-        "deliver": {
-          "present": true,
-          "pending": 1,
-          "ack_pending": 1,
-          "deliver_policy": "all",
-          "start_seq": 0,
-          "filter_subjects": [],
-          "ack_floor": 0,
-          "delivered": 1,
-          "delivered_consumer_seq": 1,
-          "ack_floor_consumer_seq": 0,
-          "delivered_last": "<TIME>",
-          "num_redelivered": 0,
-          "created": "<TIME>"
-        },
-        "bytes": 106,
-        "max_bytes": 16777216,
-        "fill_percent": 0,
-        "evicted": 0,
-        "evicted_unread": 0
-      }
-    }
-  ],
-  "renames": [
-    {
-      "identity": "acme.team1.ops1",
-      "flat": "acme_team1_ops1",
-      "alias": {
-        "owner": "o",
-        "name": "ops1"
-      },
-      "legacy_inbox": {
-        "stream": "inbox-ops1",
-        "present": true,
-        "msgs": 2,
-        "first_seq": 1,
-        "last_seq": 2,
-        "last_time": "<TIME>",
-        "created": "<TIME>",
-        "subjects": [
-          "agents.mail.*.o.ops1"
-        ],
-        "suspended": false,
-        "deliver": {
-          "present": true,
-          "pending": 1,
-          "ack_pending": 1,
-          "deliver_policy": "all",
-          "start_seq": 0,
-          "filter_subjects": [],
-          "ack_floor": 0,
-          "delivered": 1,
-          "delivered_consumer_seq": 1,
-          "ack_floor_consumer_seq": 0,
-          "delivered_last": "<TIME>",
-          "num_redelivered": 0,
-          "created": "<TIME>"
-        },
-        "bytes": 106,
-        "max_bytes": 16777216,
-        "fill_percent": 0,
-        "evicted": 0,
-        "evicted_unread": 0
-      },
-      "new_inbox": {
-        "stream": "inbox-acme_team1_ops1",
-        "present": true,
-        "msgs": 1,
-        "first_seq": 1,
-        "last_seq": 1,
-        "last_time": "<TIME>",
-        "created": "<TIME>",
-        "subjects": [
-          "agents.mail.acme.team1.ops1"
-        ],
-        "suspended": false,
-        "deliver": {
-          "present": true,
-          "pending": 1,
-          "ack_pending": 0,
-          "deliver_policy": "all",
-          "start_seq": 0,
-          "filter_subjects": [],
-          "ack_floor": 0,
-          "delivered": 0,
-          "delivered_consumer_seq": 0,
-          "ack_floor_consumer_seq": 0,
-          "num_redelivered": 0,
-          "created": "<TIME>"
-        },
-        "bytes": 59,
-        "max_bytes": 16777216,
-        "fill_percent": 0,
-        "evicted": 0,
-        "evicted_unread": 0
-      },
-      "drained": false,
-      "trust_label": "not-available",
-      "trust_label_note": "the server holds no trust label: the receiving endpoint evaluates it when it reads a message, so compare the message counts and last sequences here and check labels at the endpoint"
     }
   ],
   "orphans": {
     "streams": [
       {
-        "stream": "inbox-ghost",
+        "stream": "inbox-o_g_ghost",
         "msgs": 1,
         "first_seq": 1,
         "last_seq": 1,
         "subjects": [
-          "agents.mail.*.o.ghost"
+          "agents.mail.o.g.ghost"
         ],
         "suspended": false
       }
@@ -307,12 +172,8 @@
   "problems": [],
   "notes": [],
   "summary": {
-    "records": 4,
-    "legacy": 2,
-    "new": 2,
+    "records": 3,
     "running": 2,
-    "renamed": 1,
-    "undrained": 1,
     "orphan_streams": 1,
     "orphan_leases": 1,
     "orphan_creds": 1,

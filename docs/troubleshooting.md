@@ -21,9 +21,9 @@ Message: "mash is installed but this session has no mash identity (MASH_NAME is 
 
 Cause: `MASH_NAME` was not in the environment Claude Code started with. The plugin is inert by design without it, with only `status` and `version`. The name comes only from the environment, never from config.json or the conversation. `claude --resume` and `--continue` need it again: see [Sessions and resume](install.md#sessions-and-resume).
 
-Fix: start Claude Code as `MASH_NAME=design claude --channels plugin:mash@mash`, then check `status` (or run `MASH_NAME=design mash status` first).
+Fix: start Claude Code as `MASH_GROUP=dev MASH_NAME=design claude --channels plugin:mash@mash`, then check `status` (or run `MASH_GROUP=dev MASH_NAME=design mash status` first).
 
-If the message is `mash: MASH_NAME "X": use 1-48 lower-case letters, digits and single hyphens, starting with a letter`, change the name. `status` shows `name: FAILED`.
+If `status` shows `name: FAILED - group_missing: no group`, `MASH_GROUP` was not set: the group has no default and is not a `config.json` key, so set it in the environment (exit 2 for the CLI). If it says to fix `MASH_OWNER`, `MASH_GROUP` or `MASH_NAME`, change the one it names: each is 1-32 lower-case letters, digits and single hyphens, starting with a letter.
 
 ## `mash: no binary found`
 
@@ -41,13 +41,13 @@ Fix: `go install github.com/bogworks/mash/cmd/mash@latest`, and make sure its di
 
 Messages: `mash: no NATS url (config.json "url" or MASH_URL)` and `mash: no owner (config.json "owner" or MASH_OWNER)`. A bad value names its source, for example `mash: MASH_IDLE_WAKE ...` or `mash: MASH_SPOOL_FROM_START="x" is not 1, true, 0 or false`.
 
-Fix: set `url` and `owner` in `~/.config/mash/config.json`, or `MASH_URL` and `MASH_OWNER`. The environment wins over the file. The owner is 1 to 48 lower-case letters, digits and single hyphens ([install.md](install.md) section 4).
+Fix: set `url` and `owner` in `~/.config/mash/config.json`, or `MASH_URL` and `MASH_OWNER`. The environment wins over the file. The owner is 1 to 32 lower-case letters, digits and single hyphens ([install.md](install.md) section 4).
 
 mash reads `$MASH_CONFIG_DIR/config.json` when that variable is set (an absolute path; no other directory is consulted), else `$XDG_CONFIG_HOME/mash/config.json` when `XDG_CONFIG_HOME` is an absolute path and that file exists, and otherwise `~/.config/mash/config.json` under `$HOME`. A leading `~/` (or a bare `~`) in `creds` and `admin_creds` is expanded to your home; `policy.md` and default creds files are also found in `~/.config/mash` when the XDG directory has no copy; `~user/` is not. A `policy.md` that exists but cannot be read is a configuration error that names the file (`mash: reading <path>: ...`), not an empty policy; fix its permissions or remove it. With neither `HOME` nor an absolute `XDG_CONFIG_HOME` set (some systemd units and minimal containers), mash stops with `mash: cannot find a config directory: set HOME or XDG_CONFIG_HOME, or use the MASH_* variables`; set one of them, or give everything through the `MASH_*` variables, including `MASH_CREDS`.
 
 ## `creds: MISSING`, or the creds file is refused
 
-- `creds: MISSING - <path> does not exist`: the file for this endpoint is not at `<name>.creds` in the config directory (`~/.config/mash` unless `XDG_CONFIG_HOME` points at a mash config). Put it there or set `MASH_CREDS` (or `creds` in config.json).
+- `creds: MISSING - <path> does not exist`: the file for this endpoint is not at `<owner>.<group>.<instance>.creds` in the config directory (`~/.config/mash` unless `XDG_CONFIG_HOME` points at a mash config). Put it there or set `MASH_CREDS` (or `creds` in config.json).
 - `mash: credentials file <path> has mode 0644: it is readable by other users. Run: chmod 600 <path>`: run exactly that. Creds files hold the endpoint's private key and must not be readable by others.
 - `creds: FAILED - ... is a directory` or `is not readable`: fix the path or ownership.
 - `mash: <path> is not operator-mode JWT credentials ...`: the file has no user JWT or no seed (a bare token, a `user:password` line, a plain nkey seed, an empty file, or a JWT without its seed). mash supports only operator-mode servers with JWT user credentials; token, user/password and plain-nkey servers are not supported. Next: create a user with `nsc` or Synadia Cloud and set `creds` (or `admin_creds`) to its `.creds` file.
@@ -55,19 +55,19 @@ mash reads `$MASH_CONFIG_DIR/config.json` when that variable is set (an absolute
 
 ## `mash: endpoint X is not provisioned`
 
-The directory has no record for the name. Check `MASH_NAME` for a typo, then as the admin run `mash admin list` to see which endpoints exist. If it is missing, run `mash admin provision <name> --user <key> --account <key>` ([operations.md](operations.md) "Adding an endpoint").
+The directory has no record for the address. Check `MASH_OWNER`, `MASH_GROUP` and `MASH_NAME` for a typo, then as the admin run `mashctl list` to see which endpoints exist. If it is missing, run `mashctl provision <owner.group.instance> --user <key> --account <key>` ([operations.md](operations.md) "Adding an endpoint").
 
 ## `do not match endpoint`
 
-Two forms: `mash: the credentials in <path> do not match endpoint X (they are for another endpoint)` and `mash: the credentials in <path> (user U) do not match endpoint X (user V)`. The creds file belongs to another endpoint, or the directory record was provisioned with a different NATS user key. Use the right creds file for the `MASH_NAME`, or compare the user in `mash admin list` with the user in your creds. If you re-created the NATS user, first try to restore the original creds. Deprovisioning deletes the endpoint's inbox stream, so every unread message in it is lost; only run `mash admin deprovision <name>` and provision the name again if you accept that loss.
+Two forms: `mash: the credentials in <path> do not match endpoint X (they are for another endpoint)` and `mash: the credentials in <path> (user U) do not match endpoint X (user V)`. The creds file belongs to another endpoint, or the directory record was provisioned with a different NATS user key. Use the right creds file for the address, or compare the user in `mashctl list` with the user in your creds. If you re-created the NATS user, first try to restore the original creds. Deprovisioning deletes the endpoint's inbox stream, so every unread message in it is lost; only run `mashctl deprovision <owner.group.instance>` and provision the address again if you accept that loss.
 
-## The session says the name is in use or waiting
+## The session says the address is in use or waiting
 
 `status` shows `connection: WAITING - the lease for endpoint X is held by another session (host H, pid P, since T). mash retries on its own.` The tool error says `mash is waiting for endpoint X (held by ...); mail is off until it is free`.
 
-Cause: another live session holds the name, or one that died within the last 90 seconds does. The session retries every 10 seconds, tells Claude when mail is on, and needs no restart.
+Cause: another live session holds the address, or one that died within the last 90 seconds does. The session retries every 10 seconds, tells Claude when mail is on, and needs no restart.
 
-Fix: end the other session, or start this one with a different `MASH_NAME`. Names are unique per NATS account, not per owner, so a teammate in the same account counts. `mash who` lists the endpoints.
+Fix: end the other session, or start this one with a different `MASH_NAME` or `MASH_GROUP`. Addresses are unique per NATS account, so a teammate who uses the same owner, group and instance counts. `mash who` lists the endpoints.
 
 ## `mash: lost the lease on X to another session`
 
@@ -86,7 +86,7 @@ Shown as `mash: endpoint X stopped: ... Mail is off for this session.` The lease
 
 ## `send` refused by policy
 
-`refused by policy: you may not mail X`. The server refused the publish because the sender's NATS permissions do not include X's mail subject. It fails at once (not after a timeout) when only one send to X is in flight; with several overlapping sends to X a violation cannot be attributed, so they time out instead and the timeout says so, nothing was stored, and retrying with the same credentials will not help. The message ends with the send's key (`If you retry, use --id KEY`): in the rare case the refusal was a violation delayed from an earlier timed-out send and the message was in fact delivered, a retry with that key stores it at most once. The default permission set lets an endpoint mail every endpoint of its owner, so this means the sender was issued a narrower set (a hand-edited allow list). If X is an endpoint of the sender's owner, the credentials may be older than the permissions mash issues now, or the permissions were narrowed: ask the admin to check them. The admin runs `mashctl reissue --changed`. Otherwise ask the admin to issue a set that includes X, or mail a recipient you are allowed to. See "Refused sends" in [operations.md](operations.md).
+`refused by policy: you may not mail X`. The server refused the publish because the sender's NATS permissions do not include X's mail subject. It fails at once (not after a timeout) when only one send to X is in flight; with several overlapping sends to X a violation cannot be attributed, so they time out instead and the timeout says so, nothing was stored, and retrying with the same credentials will not help. The message ends with the send's key (`If you retry, use --id KEY`): in the rare case the refusal was a violation delayed from an earlier timed-out send and the message was in fact delivered, a retry with that key stores it at most once. The default permission set lets an endpoint mail every endpoint of its owner, so this means the sender was issued a narrower set (a hand-edited allow list). If X is an endpoint of the sender's owner, the credentials may be older than the permissions mash issues now, or the permissions were narrowed: ask the admin to check them. Otherwise ask the admin to issue a set that includes X, or mail a recipient you are allowed to. See "Refused sends" in [operations.md](operations.md).
 
 ## `name rule` refused, or mash will not start with a name-rule file
 
@@ -162,7 +162,7 @@ A batch of more than 10 messages or 16 KiB is shown as a digest: one line per me
 
 ## Account full or `maximum number of streams`
 
-Each endpoint takes one stream, and the two shared buckets take two. On Synadia's free tier (5 streams) that is 3 endpoints. Remove an endpoint with `mash admin deprovision <name>` and an admin credential. [synadia.md](synadia.md) has the full list of quickstart script failures (401, a user that already exists, a stale lock, a leftover inbox).
+Each endpoint takes one stream, and the two shared buckets take two. On Synadia's free tier (5 streams) that is 3 endpoints. Remove an endpoint with `mash admin deprovision <owner.group.instance>` and an admin credential. [synadia.md](synadia.md) has the full list of quickstart script failures (401, a user that already exists, a stale lock, a leftover inbox).
 
 ## `jetstream not enabled` (code 503, err_code 10076) or `the server could not enable JetStream for the account`
 

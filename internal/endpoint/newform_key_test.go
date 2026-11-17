@@ -15,9 +15,10 @@ import (
 )
 
 func TestValidDirectoryKey(t *testing.T) {
-	ok := []string{"ops1", "mash-a", "acme_team1_ops1", "codex_o_n", "a-b_c-d_e-f"}
-	bad := []string{"", "a_b", "cc_o_n", "Acme_team1_ops1", "acme_Team1_ops1", "a_b_c_d", "acme_team1_",
-		"_a_b", "acme_team1_" + strings.Repeat("n", 33), strings.Repeat("a", 33) + "_o_n", "acme_1team_ops", "OPS1"}
+	ok := []string{"acme_team1_ops1", "codex_o_n", "a-b_c-d_e-f"}
+	bad := []string{"", "ops1", "mash-a", "a_b", "a_b_c_d", "Acme_team1_ops1", "acme_Team1_ops1", "acme_team1_",
+		"_a_b", "acme_team1_" + strings.Repeat("n", 33), strings.Repeat("a", 33) + "_o_n", "acme_1team_ops", "OPS1",
+		"acme.team1.ops1"}
 	for _, k := range ok {
 		if !validDirectoryKey(k) {
 			t.Errorf("%q rejected", k)
@@ -57,7 +58,7 @@ func keyEndpoint(recs map[string]store.Record) *Endpoint {
 
 func signedHeader(t *testing.T, id sap.Identity, name string) (nats.Header, string, []byte) {
 	t.Helper()
-	subj, data := "agents.mail.cc.acme.me", []byte("hi")
+	subj, data := "agents.mail.acme.team1.me", []byte("hi")
 	h, err := id.Sign(subj, data, name, time.Now(), "")
 	if err != nil {
 		t.Fatal(err)
@@ -65,12 +66,12 @@ func signedHeader(t *testing.T, id sap.Identity, name string) (nats.Header, stri
 	return nats.Header{sap.HeaderName: []string{h.Encode()}}, subj, data
 }
 
-func TestClassifyNewFormKeys(t *testing.T) {
-	const key = "acme_team1_ops1"
-	nf, lg := newFormIdentity(t), newFormIdentity(t)
+func TestClassifyKeys(t *testing.T) {
+	const key, other = "acme_team1_ops1", "acme_team1_ops2"
+	a, b := newFormIdentity(t), newFormIdentity(t)
 	e := keyEndpoint(map[string]store.Record{
-		key:    {Name: "ops1", User: nf.User},
-		"ops1": {Name: "ops1", User: lg.User},
+		key:   {Owner: "acme", Group: "team1", Instance: "ops1", User: a.User},
+		other: {Owner: "acme", Group: "team1", Instance: "ops2", User: b.User},
 	})
 	cases := []struct {
 		desc  string
@@ -79,23 +80,17 @@ func TestClassifyNewFormKeys(t *testing.T) {
 		trust sap.Trust
 		from  string
 	}{
-		{"new-form signs its key", nf, key, sap.TrustVerified, key},
-		{"new-form signs the bare name token", nf, "ops1", sap.TrustUnknownSigner, "ops1"},
-		{"legacy signs its own name", lg, "ops1", sap.TrustVerified, "ops1"},
-		{"legacy signs the new-form key", lg, key, sap.TrustUnknownSigner, ""},
+		{"signs its own key", a, key, sap.TrustVerified, key},
+		{"signs the bare instance token", a, "ops1", sap.TrustUnknownSigner, ""},
+		{"signs another endpoint's key", a, other, sap.TrustUnknownSigner, ""},
+		{"the other endpoint signs its key", b, other, sap.TrustVerified, other},
 	}
 	for _, c := range cases {
 		hdr, subj, data := signedHeader(t, c.id, c.name)
 		from, trust, _, ok := e.classify(subj, hdr, data, time.Now())
-		if !ok || trust != c.trust || (c.from != "" && from != c.from) || (c.trust == sap.TrustUnknownSigner && from == key) {
+		if !ok || trust != c.trust || (c.from != "" && from != c.from) || (c.trust == sap.TrustUnknownSigner && (from == key || from == other)) {
 			t.Errorf("%s: got (%q,%s,%v) want (%q,%s)", c.desc, from, trust, ok, c.from, c.trust)
 		}
-	}
-	// Only the new-form record: the bare name token alone is nobody.
-	e = keyEndpoint(map[string]store.Record{key: {Name: "ops1", User: nf.User}})
-	hdr, subj, data := signedHeader(t, nf, "ops1")
-	if _, trust, _, _ := e.classify(subj, hdr, data, time.Now()); trust != sap.TrustUnknownSigner {
-		t.Errorf("name token alone: %s", trust)
 	}
 }
 
@@ -112,33 +107,27 @@ func presenceMsg(t *testing.T, id sap.Identity, agent, subject string) *nats.Msg
 	return &nats.Msg{Data: b}
 }
 
-func TestApplyPresenceNewFormKey(t *testing.T) {
-	const key = "acme_team1_ops1"
-	nf, lg := newFormIdentity(t), newFormIdentity(t)
+func TestApplyPresenceKey(t *testing.T) {
+	const key, other = "acme_team1_ops1", "acme_team1_ops2"
+	a, b := newFormIdentity(t), newFormIdentity(t)
 	e := keyEndpoint(map[string]store.Record{
-		key:    {Name: "ops1", User: nf.User},
-		"ops1": {Name: "ops1", User: lg.User},
+		key:   {Owner: "acme", Group: "team1", Instance: "ops1", User: a.User},
+		other: {Owner: "acme", Group: "team1", Instance: "ops2", User: b.User},
 	})
-	// An answer for the new-form subject marks only the new-form record.
-	if n := e.applyPresence(presenceMsg(t, nf, "acme", "agents.prompt.acme.team1.ops1")); n != 1 {
-		t.Fatalf("new-form answer counted %d", n)
+	// An answer for a subject marks only that endpoint's record.
+	if n := e.applyPresence(presenceMsg(t, a, sap.AgentName, "agents.prompt.acme.team1.ops1")); n != 1 {
+		t.Fatalf("answer counted %d", n)
 	}
-	if e.lastSeen[key].IsZero() {
-		t.Fatal("new-form record not seen")
+	if e.lastSeen[key].IsZero() || !e.lastSeen[other].IsZero() {
+		t.Fatalf("presence: %v", e.lastSeen)
 	}
-	if !e.lastSeen["ops1"].IsZero() {
-		t.Fatal("legacy record with the same name token marked online")
-	}
-	// A new-form key's user answering for the legacy subject is not the legacy record's user.
+	// One endpoint's user answering for another's subject is not that record's user.
 	e.lastSeen = map[string]time.Time{}
-	if n := e.applyPresence(presenceMsg(t, nf, "cc", "agents.prompt.cc.acme.ops1")); n != 0 {
-		t.Fatalf("new-form user on the legacy subject counted %d", n)
+	if n := e.applyPresence(presenceMsg(t, a, sap.AgentName, "agents.prompt.acme.team1.ops2")); n != 0 {
+		t.Fatalf("a user on another endpoint's subject counted %d", n)
 	}
-	// The legacy answer is unchanged and does not mark the new-form record.
-	if n := e.applyPresence(presenceMsg(t, lg, "cc", "agents.prompt.cc.acme.ops1")); n != 1 {
-		t.Fatalf("legacy answer counted %d", n)
-	}
-	if e.lastSeen["ops1"].IsZero() || !e.lastSeen[key].IsZero() {
-		t.Fatalf("legacy presence: %v", e.lastSeen)
+	// A subject that is not of the address shape counts for nothing.
+	if n := e.applyPresence(presenceMsg(t, a, sap.AgentName, "agents.prompt.cc.acme.ops1")); n != 0 {
+		t.Fatalf("a subject of the removed form counted %d", n)
 	}
 }

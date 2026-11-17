@@ -25,12 +25,12 @@ func standaloneWorld(t *testing.T, bin string, names ...string) map[string][]str
 	mustRun(t, bin, adminEnv, "admin", "init")
 	envs := map[string][]string{}
 	for _, n := range names {
-		creds, user, err := e.MintEndpoint(n)
+		creds, user, err := e.MintEndpoint(tAddr(n))
 		if err != nil {
 			t.Fatal(err)
 		}
-		mustRun(t, bin, adminEnv, "admin", "provision", n, "--user", user, "--account", e.Account)
-		envs[n] = scrubbedEnv(t, map[string]string{"MASH_URL": e.URL, "MASH_OWNER": e.Owner, "MASH_NAME": n,
+		mustRun(t, bin, adminEnv, "admin", "provision", tTo(n), "--user", user, "--account", e.Account)
+		envs[n] = scrubbedEnv(t, map[string]string{"MASH_URL": e.URL, "MASH_OWNER": e.Owner, "MASH_GROUP": testGroup, "MASH_NAME": n,
 			"MASH_CREDS": creds, "MASH_SETTLE_MS": "20"})
 		assertToolsAbsent(t, envs[n])
 	}
@@ -163,7 +163,7 @@ func TestStandaloneServeWithoutAHost(t *testing.T) {
 	envs := standaloneWorld(t, bin, "alpha", "beta")
 	s := startProcServe(t, bin, envs["beta"])
 	ins, tools := s.start(t)
-	if !strings.Contains(ins, `"beta"`) {
+	if !strings.Contains(ins, `"o.dev.beta"`) {
 		t.Fatalf("instructions do not name the endpoint: %q", ins)
 	}
 	for _, n := range []string{"send", "read", "inbox", "who", "reply"} {
@@ -173,12 +173,12 @@ func TestStandaloneServeWithoutAHost(t *testing.T) {
 	}
 	waitOnline(t, bin, envs["alpha"], "beta")
 
-	mustRun(t, bin, envs["alpha"], "send", "beta", "hello", "serving", "beta")
+	mustRun(t, bin, envs["alpha"], "send", tTo("beta"), "hello", "serving", "beta")
 	content, _ := channelOf(s.await(t, isChannel))
-	if !strings.Contains(content, "from alpha [verified]") || !strings.Contains(content, "hello serving beta") {
+	if !strings.Contains(content, "from o.dev.alpha [verified]") || !strings.Contains(content, "hello serving beta") {
 		t.Fatalf("channel event: %q", content)
 	}
-	if out := s.call(t, 3, "send", `{"to":"alpha","text":"hello back"}`); !strings.HasPrefix(out, "sent #") {
+	if out := s.call(t, 3, "send", `{"to":"o.dev.alpha","text":"hello back"}`); !strings.HasPrefix(out, "sent #") {
 		t.Fatalf("send tool: %q", out)
 	}
 	if out := mustRun(t, bin, envs["alpha"], "read", "1"); !strings.Contains(out, "hello back") || !strings.Contains(out, "[verified]") {
@@ -200,12 +200,12 @@ func TestStandaloneLivePrompt(t *testing.T) {
 	}
 	done := make(chan res, 1)
 	go func() {
-		o, c := mashRun(t, bin, envs["alpha"], "", "prompt", "beta", "what", "time?")
+		o, c := mashRun(t, bin, envs["alpha"], "", "prompt", tTo("beta"), "what", "time?")
 		done <- res{o, c}
 	}()
 	content, meta := channelOf(s.await(t, isChannel))
 	id, _ := meta["request_id"].(string)
-	if !strings.Contains(content, "what time?") || id == "" || meta["from"] != "alpha" {
+	if !strings.Contains(content, "what time?") || id == "" || meta["from"] != "o_dev_alpha" {
 		t.Fatalf("prompt event: %q %v", content, meta)
 	}
 	if out := s.call(t, 4, "reply", `{"request_id":"`+id+`","text":"noon"}`); strings.Contains(out, "no open prompt") {
@@ -241,7 +241,7 @@ func TestStandaloneHookDelivery(t *testing.T) {
 	if got := hook(); strings.TrimSpace(got) != "" {
 		t.Fatalf("an empty spool printed %q", got)
 	}
-	mustRun(t, bin, envs["alpha"], "send", "beta", "--kind", "question", "hello", "through", "the", "hook")
+	mustRun(t, bin, envs["alpha"], "send", tTo("beta"), "--kind", "question", "hello", "through", "the", "hook")
 	var got string
 	eventually(t, 15*time.Second, "the hook shows the mail", func() bool {
 		got = hook()
@@ -256,7 +256,7 @@ func TestStandaloneHookDelivery(t *testing.T) {
 	if err := json.Unmarshal([]byte(got), &o); err != nil {
 		t.Fatalf("hook output %q: %v", got, err)
 	}
-	for _, want := range []string{"mash mail for beta", "1 message from alpha", "[verified]", "> hello through the hook"} {
+	for _, want := range []string{"mash mail for o.dev.beta", "1 message from o.dev.alpha", "[verified]", "> hello through the hook"} {
 		if !strings.Contains(o.Specific.Context, want) {
 			t.Fatalf("hook context lacks %q:\n%s", want, o.Specific.Context)
 		}

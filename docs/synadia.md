@@ -43,7 +43,7 @@ credential. To remove an endpoint, make one yourself:
 2. Run it with your usual settings (`MASH_URL`, `MASH_OWNER` as in `config.json`):
 
    ```sh
-   MASH_ADMIN_CREDS=/path/to/admin.creds mash admin deprovision <name> [--user <public-key>]
+   MASH_ADMIN_CREDS=/path/to/admin.creds mash admin deprovision <owner.group.instance> [--user <public-key>]
    ```
 
    With `--user`, the record and inbox are removed only if the record's NATS user is still that public key (see "Removing an endpoint" in operations.md); otherwise nothing is touched.

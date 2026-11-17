@@ -7,10 +7,12 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats.go"
 
 	"github.com/bogworks/mash/internal/bootstrap"
 	"github.com/bogworks/mash/internal/config"
+	"github.com/bogworks/mash/internal/ctlkeys"
 	"github.com/bogworks/mash/internal/natsauth"
 )
 
@@ -70,3 +72,63 @@ func connectSys(cfg config.Config, flagVal string, env func(string) string) (*na
 	}
 	return nc, nil
 }
+
+// loadCtlConfig is config.Load for the verbs that need the owner; offline verbs also pass ErrNoURL.
+func loadCtlConfig(env func(string) string, lookup config.Lookup, needURL bool) (config.Config, error) {
+	cfg, err := loadConfig(env, lookup)
+	if err != nil && (needURL || !errors.Is(err, config.ErrNoURL)) {
+		return cfg, err
+	}
+	return cfg, nil
+}
+
+// openKeys opens the key store the config names.
+func openKeys(cfg config.Config, env func(string) string) (*ctlkeys.Authority, error) {
+	dir, err := ctlkeys.DirFor(cfg, env)
+	if err != nil {
+		return nil, err
+	}
+	return ctlkeys.Open(dir)
+}
+
+// credsUserKey is the user public key (the JWT's subject) of the creds file at p; no seed is kept.
+func credsUserKey(p string) (string, error) {
+	uc, err := credsUserClaims(p)
+	if err != nil {
+		return "", err
+	}
+	return uc.Subject, nil
+}
+
+// credsAccountKey is the public key of the account a creds file's user belongs to: the account the user JWT names as
+// its issuing account (a signing key issues on behalf of it), else its issuer.
+func credsAccountKey(p string) (string, error) {
+	uc, err := credsUserClaims(p)
+	if err != nil {
+		return "", err
+	}
+	if uc.IssuerAccount != "" {
+		return uc.IssuerAccount, nil
+	}
+	return uc.Issuer, nil
+}
+
+func credsUserClaims(p string) (*jwt.UserClaims, error) {
+	raw, err := config.ReadCredsFile(p)
+	if err != nil {
+		return nil, err
+	}
+	defer clear(raw)
+	token, err := jwt.ParseDecoratedJWT(raw)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", p, err)
+	}
+	uc, err := jwt.DecodeUserClaims(token)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", p, err)
+	}
+	return uc, nil
+}
+
+// readCreds reads the creds file at path, refusing one other users can read.
+func readCreds(path string) ([]byte, error) { return config.ReadCredsFile(path) }

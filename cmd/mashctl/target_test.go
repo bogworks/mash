@@ -39,7 +39,7 @@ func loadCfg(t *testing.T, fileBody string, env map[string]string) (config.Confi
 		all[k] = v
 	}
 	get := func(k string) string { return all[k] }
-	cfg, err := config.Load(config.LookupFromFunc(get), all["HOME"])
+	cfg, err := loadConfig(get, config.LookupFromFunc(get))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +169,7 @@ func TestTargetLineComesBeforeAWriteAndOfflineVerbsPrintNone(t *testing.T) {
 	if code != 0 || strings.Contains(errb, "target server") || !strings.Contains(out, "inbox_max_bytes") {
 		t.Errorf("limits --show: %d %q", code, errb)
 	}
-	if _, errb, _ := h.run("permissions", "a", "--nsc"); strings.Contains(errb, "target server") {
+	if _, errb, _ := h.run("permissions", "o.g.a", "--nsc"); strings.Contains(errb, "target server") {
 		t.Errorf("permissions: %q", errb)
 	}
 	if _, errb, _ := h.run("policy"); strings.Contains(errb, "target server") {
@@ -179,7 +179,7 @@ func TestTargetLineComesBeforeAWriteAndOfflineVerbsPrintNone(t *testing.T) {
 		t.Errorf("init --local: %q", errb)
 	}
 
-	for _, args := range [][]string{{"list"}, {"init"}, {"limits"}, {"add", "zz"}} {
+	for _, args := range [][]string{{"list"}, {"init"}, {"limits"}, {"retire", "o.g.zz"}} {
 		_, errb, _ := h.run(args...)
 		want := "mashctl: target server " + h.e.URL + " (from MASH_URL), owner " + h.e.Owner + " (from MASH_OWNER), admin creds " + h.e.AdminCreds + " (from MASH_ADMIN_CREDS)\n"
 		if !strings.HasPrefix(errb, want) {

@@ -14,7 +14,6 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/bogworks/mash/internal/kind"
-	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/spool"
 	"github.com/bogworks/mash/internal/store"
 )
@@ -45,7 +44,7 @@ var sizeInError = regexp.MustCompile(`message is (\d+) bytes with headers`)
 // caller's own sends (the headers do not change length from one send to the next).
 func maxBody(t *testing.T, b *Endpoint) int {
 	t.Helper()
-	_, err := b.Send(context.Background(), "a", strings.Repeat("x", store.MaxMsgSize), 0)
+	_, err := b.Send(context.Background(), tdot("a"), strings.Repeat("x", store.MaxMsgSize), 0)
 	if err == nil {
 		t.Fatal("a message of 1 MiB plus headers was accepted")
 	}
@@ -81,7 +80,7 @@ func TestBoundaryMessageAtTheOneMiBLimit(t *testing.T) {
 	for i, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			body := payload(int64(i), c.body)
-			seq, err := b.Send(ctx, "a", body, 0)
+			seq, err := b.Send(ctx, tdot("a"), body, 0)
 			if c.wantErr != "" {
 				if err == nil || !strings.HasPrefix(err.Error(), "mash: message is ") || !strings.Contains(err.Error(), c.wantErr) || strings.Contains(err.Error(), "nats:") {
 					t.Fatalf("error %v, want one containing %q", err, c.wantErr)
@@ -121,7 +120,7 @@ func TestBoundaryInboxCapWithMaxSizeMessages(t *testing.T) {
 	send := func(i int) uint64 {
 		t.Helper()
 		p := payload(int64(i), body)
-		seq, err := b.Send(ctx, "a", p, 0)
+		seq, err := b.Send(ctx, tdot("a"), p, 0)
 		if err != nil {
 			t.Fatalf("send %d refused: a full inbox must evict, not refuse: %v", i, err)
 		}
@@ -134,7 +133,7 @@ func TestBoundaryInboxCapWithMaxSizeMessages(t *testing.T) {
 	state := func() jetstream.StreamState {
 		t.Helper()
 		js := adminJS(t, f)
-		s, err := js.Stream(ctx, sap.InboxStream("a"))
+		s, err := js.Stream(ctx, taddr("a").InboxStream())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -226,7 +225,7 @@ func waitSpooledProgress(t *testing.T, sp spool.Spool, want int) {
 // Held fyi mail wakes the session at the backlog thresholds only. A burst of 600 fyi, past SpoolWakeCount (500), gives
 // exactly ONE wake (the crowded rule wakes at once, at the 500th held message; the 100 after it add none, and the
 // re-wake is backed off to 2x the idle wake). An urgent task sent last, behind the backlog, rings once more at once
-// (each urgent message rings once, whatever is held): two wakes in all, the second leading with "urgent". After the
+// (each urgent message rings once, whatever is held): two wakes in all, the second starting with "urgent". After the
 // drain every one of the 601 messages is acked exactly once and nothing wakes again.
 //
 // The idle wake is set far past the test so that the re-wake backoff (a different rule, covered by
@@ -252,7 +251,7 @@ func TestBoundaryBurstWakesOnce(t *testing.T) {
 	b := f.client(t, "b")
 	ctx := context.Background()
 	for i := 1; i <= fyi; i++ {
-		if _, err := b.SendWith(ctx, "a", "fyi "+strconv.Itoa(i), SendOptions{Kind: kind.FYI}); err != nil {
+		if _, err := b.SendWith(ctx, tdot("a"), "fyi "+strconv.Itoa(i), SendOptions{Kind: kind.FYI}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -262,7 +261,7 @@ func TestBoundaryBurstWakesOnce(t *testing.T) {
 	if got = ev.all(); len(got) != 1 || strings.HasPrefix(got[0], "urgent") {
 		t.Fatalf("%d wakes for the backlog, want exactly 1 and not urgent: %q", len(got), got)
 	}
-	if seq, err := b.SendWith(ctx, "a", "the build is red", SendOptions{Kind: kind.Task, Urgent: true}); err != nil || seq != total {
+	if seq, err := b.SendWith(ctx, tdot("a"), "the build is red", SendOptions{Kind: kind.Task, Urgent: true}); err != nil || seq != total {
 		t.Fatalf("urgent send: #%d %v", seq, err)
 	}
 	until(t, "601 spooled", func() bool { return len(waiting(t, sp)) == total })
@@ -318,7 +317,7 @@ func TestBoundaryBurstWakesOnce(t *testing.T) {
 // storedBytes is what the serve side counts for a held message (storedSize): body, subject and headers.
 func storedBytes(t *testing.T, f *fixture, name string, seq uint64) int {
 	t.Helper()
-	s, err := adminJS(t, f).Stream(context.Background(), sap.InboxStream(name))
+	s, err := adminJS(t, f).Stream(context.Background(), taddr(name).InboxStream())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -357,7 +356,7 @@ func TestBoundaryFyiBytesAtTheWakeThreshold(t *testing.T) {
 			b := f.client(t, "b")
 			ctx := context.Background()
 			for i := 0; i < 2; i++ {
-				if _, err := b.SendWith(ctx, "a", payload(int64(i), 64<<10), SendOptions{Kind: kind.FYI}); err != nil {
+				if _, err := b.SendWith(ctx, tdot("a"), payload(int64(i), 64<<10), SendOptions{Kind: kind.FYI}); err != nil {
 					t.Fatal(err)
 				}
 			}

@@ -137,7 +137,7 @@ func TestAdoptDryRunThenRealRunThenAdd(t *testing.T) {
 	if code != 0 || errb != "" {
 		t.Fatalf("dry run: %d\n%s\n%s", code, out, errb)
 	}
-	for _, want := range []string{"All checks passed", "nothing is written", "would import the operator key", "would import the account key", "would copy the system creds", "would write the minted mashadmin", "would write", "changes nothing on the server", "standalone", "jetstream", "admin creds    ok: connected (minted)", "`mashctl retire` (or a rotating `reissue`) is the first to use it"} {
+	for _, want := range []string{"All checks passed", "nothing is written", "would import the operator key", "would import the account key", "would copy the system creds", "would write the minted mashadmin", "would write", "changes nothing on the server", "standalone", "jetstream", "admin creds    ok: connected (minted)", "`mashctl retire` is the first to use it"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("dry run output lacks %q:\n%s", want, out)
 		}
@@ -197,12 +197,12 @@ func TestAdoptDryRunThenRealRunThenAdd(t *testing.T) {
 	}
 	sameTree(t, snap, tree(t, a.root))
 
-	// add works from the adopted key dir against the same server, with no file.
-	if out, errb, code = a.run("add", "x"); code != 0 {
-		t.Fatalf("add after adopt: %d\n%s\n%s", code, out, errb)
+	// the adopted key dir works against the same server: the directory is there to read.
+	if out, errb, code = a.run("list"); code != 0 {
+		t.Fatalf("list after adopt: %d\n%s\n%s", code, out, errb)
 	}
 	if n := len(scopedSigners(e.claims())); n != 0 {
-		t.Fatalf("want no scoped signer after add, got %d", n)
+		t.Fatalf("want no scoped signer after adopt, got %d", n)
 	}
 }
 

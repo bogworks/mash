@@ -108,7 +108,7 @@ measure each one.
 | Constraint | What it imposes |
 |---|---|
 | NATS with JetStream (NATS) | A NATS server in operator mode with JetStream (NATS's persistence layer) and file storage. mash needs no memory store ([ADR-0010][0010]). Hosted accounts must set a size cap on every stream. |
-| SAP 0.3.0 subjects and signing (SAP) | Subjects have the five-token form `agents.<verb>.<agent>.<owner>.<name>` ([ADR-0005][0005]), and sender proof uses the SAP §13 `Agent-Sender` header ([ADR-0017][0017]). mash targets SAP 0.3.0 at a fixed commit. |
+| SAP 0.3.0 subjects and signing (SAP) | Subjects have the five-token form `agents.<verb>.<owner>.<group>.<instance>`: SAP says the first slot SHOULD carry the harness, and mash puts the owner there ([ADR-0005][0005]). Sender proof uses the SAP §13 `Agent-Sender` header ([ADR-0017][0017]). mash targets SAP 0.3.0 at a fixed commit. |
 | The agent host's behaviour (agent host) | Claude Code reaches outside processes through MCP servers, channels and hooks. A channel works only if the machine's managed settings allow it, and its events can be dropped or framed as untrusted. Hook output over 10,000 characters is cut. These facts shaped delivery ([ADR-0024][0024], [Appendix B](#appendix-b-claude-code-channels-how-they-work-and-what-we-found)). |
 | One Go binary | Goal 6 of the design spec: "Minimal new code. One Go binary, plus conventions." |
 
@@ -149,11 +149,11 @@ issues NATS users ([ADR-0008][0008]), the agent host, and any file store that ma
 | NATS | JetStream streams, durable pull consumers, acknowledgement and redelivery | Durable storage, retry and an unread count without new code ([ADR-0009][0009]) |
 | NATS | KV buckets (key-value stores built on streams), with TTL and compare-and-set | The directory and the leases ([ADR-0011][0011], [ADR-0013][0013]) |
 | NATS | Stream duplicate window (`Nats-Msg-Id`) | Makes a retried send store at most once ([ADR-0031][0031]) |
-| SAP | The subject hierarchy `agents.<verb>.<agent>.<owner>.<name>` | SAP tools find mash sessions where SAP says agents live ([ADR-0005][0005]) |
+| SAP | The subject hierarchy `agents.<verb>.<owner>.<group>.<instance>` | SAP tools find mash sessions by the service name `agents`. A wildcard on the harness slot does not find them, because that slot carries the owner ([ADR-0005][0005]) |
 | SAP | Registration as a NATS micro service named `agents`, with `prompt` and `status` endpoints and a signed heartbeat | Discovery, presence and live prompts with no mash invention ([ADR-0030][0030]) |
 | SAP | §13 sender identity: the signed `Agent-Sender` header and the trust classes `verified`, `claimed`, `absent` | Proof of sender with no extra key ([ADR-0017][0017]) |
 | mash | The `mail` verb, declared in metadata and the heartbeat and not registered | A registered endpoint would answer JetStream's storage acknowledgement ([ADR-0004][0004]) |
-| mash | The directory: name to NATS user and mail subject, written by the admin | Mail must reach an endpoint that is offline, which SAP discovery cannot. This bends a SAP "MUST" ([ADR-0011][0011]) |
+| mash | The directory: address to NATS user and mail subject, written by the admin | Mail must reach an endpoint that is offline, which SAP discovery cannot. This bends a SAP "MUST" ([ADR-0011][0011]) |
 | mash | Trust labels `unknown-signer` and `stale`, and quoted bodies | A valid key may not be a known endpoint, and a stored message can be replayed ([ADR-0019][0019], [ADR-0021][0021]) |
 | mash | Signed marks `Mash-Urgent`, `Mash-Sender-Instance`, `Mash-In-Reply-To` and `Mash-Via`. Unsigned `Mash-Kind` | Trust-bearing marks are bound to one message. Scheduling hints need no proof ([ADR-0018][0018]). In-reply-to is signed and `Mash-Via` declares a relay, each shown only when it verifies ([ADR 0063](decisions/0063-in-reply-to-is-signed-and-a-sender-can-declare-a-relay-with-a-signed-mash-via-both-are-shown-only-when-they-verify.md)) |
 | mash | Lease, takeover and tombstone | Nothing in NATS stops two processes using one user ([ADR-0013][0013]) |
@@ -245,8 +245,8 @@ have happened ([ADR-0025][0025]).
 |---|---|---|
 | Server | `nats-server` in operator mode with JetStream, file storage | Synadia's service. The free tier allows 5 streams, 5 connections, 512 KiB payload and no replicas |
 | Account | One account for mash, sized for 1 stream and 1 consumer per endpoint plus 2 buckets | One existing account |
-| Users | Issued with your own tooling from `mash admin permissions <name>` (JSON or `nsc` flags). mash never holds a seed | `scripts/quickstart-synadia.sh` asks Synadia's API to create them, with a temporary admin user that it deletes afterwards ([ADR-0038][0038]). mash itself never calls that API |
-| Endpoints | `mash admin init` once, then `mash admin provision <name>` per endpoint | Created by `scripts/quickstart-synadia.sh`, which runs `mash admin provision`. With 2 shared buckets and 1 stream per endpoint, the free tier fits 3 endpoints |
+| Users | Issued with your own tooling from `mashctl permissions <owner.group.instance>` (JSON or `nsc` flags). mash never holds a seed | `scripts/quickstart-synadia.sh` asks Synadia's API to create them, with a temporary admin user that it deletes afterwards ([ADR-0038][0038]). mash itself never calls that API |
+| Endpoints | `mashctl init` once, then `mashctl provision <owner.group.instance>` per endpoint | Created by `scripts/quickstart-synadia.sh`, which runs `mashctl provision`. With 2 shared buckets and 1 stream per endpoint, the free tier fits 3 endpoints |
 | Removing | `mashctl retire` / `mashctl deprovision` (revokes the user), or `mash admin deprovision` and revoke the user yourself | Same, with an admin user made in the console |
 
 Each endpoint machine needs the `mash` binary on `PATH`, the Claude Code plugin, a credentials file at mode 0600 and
@@ -296,12 +296,12 @@ keeps its old setting, because mash refuses to change an inbox in place, which c
 
 ### 8.1 The message envelope
 
-![A stored mail message in order: subject agents.mail.cc.OWNER.NAME, headers covered by a signature, headers not signed, then the UTF-8 body of at most 1 MiB.](images/016-message-envelope.svg)
+![A stored mail message in order: subject agents.mail.OWNER.GROUP.INSTANCE, headers covered by a signature, headers not signed, then the UTF-8 body of at most 1 MiB.](images/016-message-envelope.svg)
 
 *Structure only: arrows show the order of parts in one message. No data moves between them.*
 
 Two details matter. The `name` field of `Agent-Sender` sits inside the signed header, but SAP does not sign it. The
-recipient therefore takes the sender's name from the directory, and a mismatch reads `unknown-signer`
+recipient therefore takes the sender's address from the directory, and a mismatch reads `unknown-signer`
 ([ADR-0017][0017]). Each of mash's signed marks uses its own domain string (`MASH-URGENT-V1`,
 `MASH-SENDER-INSTANCE-V1`), so a mark cannot be moved to another message or passed off as another kind of mark
 ([ADR-0018][0018]). The stream applies no subject transform, because SAP §13.8 requires the stored subject to equal
@@ -315,8 +315,8 @@ the signed one.
 
 | Store | Holds | Written by | Retention |
 |---|---|---|---|
-| `inbox-<name>` stream (NATS, layout mash) | That endpoint's mail, from any sender of its owner | Senders publish. Only the endpoint reads, through its durable pull consumer `deliver` | 30 days or 16 MiB, oldest dropped. No delete or purge ([ADR-0009][0009], [ADR-0010][0010]) |
-| `mash-directory` KV (mash) | Per name: owner, agent, account, user key, mail subject, created, note, and optional role, host and labels | The admin only | Until deprovision. History 1 |
+| `inbox-<flat key>` stream (NATS, layout mash) | That endpoint's mail, from any sender of its owner | Senders publish. Only the endpoint reads, through its durable pull consumer `deliver` | 30 days or 16 MiB, oldest dropped. No delete or purge ([ADR-0009][0009], [ADR-0010][0010]) |
+| `mash-directory` KV (mash) | Per address (flat key): owner, group, instance, agent, account, user key, mail subject, created, note, and optional role, host and labels | The admin only | Until deprovision. History 1 |
 | `mash-leases` KV (mash) | Per name: the live holder's instance, host, pid, start time, machine id, launch token, version, commit and `mcp_seen` time, and the waking-mail count `waking_pending` and its time `waking_pending_at`. Or a deprovision tombstone | Each endpoint, for its own key only | 90 s unless refreshed ([ADR-0013][0013], [ADR-0016][0016]) |
 | SAP registration and heartbeats (SAP) | The `agents` micro service of each running session, and its heartbeat every 30 s | Each running serve | Not stored |
 | Spool (mash, on disk) | Messages held for the hook, with their trust labels | serve writes, the hook marks | Until acknowledged |
@@ -382,7 +382,7 @@ service's API token, which only the quickstart script ever sees.
 |---|---|---|
 | Impersonating another endpoint | SAP §13 signature with the sender's own seed, plus the directory lookup. Forged and malformed mail is dropped, logged and counted ([ADR-0017][0017], [ADR-0019][0019]) | A stolen seed signs as its endpoint |
 | Claiming another name with one's own valid key | The name is taken from the directory. A mismatch reads `unknown-signer` | None known |
-| Reading another endpoint's mail | One stream per endpoint. Fetch and ack only on one's own stream. A private reply prefix `_INBOX.<name>` ([ADR-0009][0009], [ADR-0007][0007]) | The admin reads everything |
+| Reading another endpoint's mail | One stream per endpoint. Fetch and ack only on one's own stream. A private reply prefix `_INBOX.<flat key>` ([ADR-0009][0009], [ADR-0007][0007]) | The admin reads everything |
 | Deleting another inbox by answering a forged reply subject | No response permission. Replies may go only to `_INBOX.>` ([ADR-0007][0007]) | None known |
 | Rewriting history | Delete and purge are denied on every inbox ([ADR-0010][0010]) | The admin can delete a whole stream |
 | Taking over a name, or splitting its mail | A lease with create and compare-and-set. Each user may write only its own lease key ([ADR-0013][0013]) | A stolen credential can hold the lease |
@@ -403,17 +403,16 @@ by design, so one compromised endpoint can direct its peers. Any endpoint can ev
 
 ### 8.4 Naming and addressing
 
-An endpoint is addressed by name. mash maps the name to a mail subject through the directory, not through SAP's live
-discovery, so mail reaches endpoints that are offline ([ADR-0011][0011]). A name is valid in every subject, stream
-name, KV key, user name and file path mash builds ([ADR-0036][0036]). A sender is shown by its endpoint name, or as
-`owner/name` when it belongs to another owner. Full rules are in [Appendix C](#appendix-c-naming-rules-and-conventions).
+An endpoint is addressed `owner.group.instance`. mash maps the address to a mail subject through the directory, not through SAP's live
+discovery, so mail reaches endpoints that are offline ([ADR-0011][0011]). An address is valid in every subject, stream
+name, KV key, user name and file path mash builds ([ADR-0036][0036]). A sender is shown by its address. Full rules are in [Appendix C](#appendix-c-naming-rules-and-conventions).
 
 ### 8.5 Configuration
 
 Settings come from three places, in rising precedence: built-in defaults, then `~/.config/mash/config.json`, then the
-environment (`MASH_*`). A malformed value is an error that names its source. `MASH_NAME` comes only from the
-environment, so each launch chooses its identity ([ADR-0012][0012]). The credentials default to
-`~/.config/mash/<name>.creds`, and `~/.config/mash/policy.md`, if present, is appended to the session's instructions
+environment (`MASH_*`). A malformed value is an error that names its source. `MASH_GROUP` (no default, no config key) and `MASH_NAME`, the instance, come only from the
+environment, so each launch chooses its address ([ADR-0012][0012]). The credentials default to
+`~/.config/mash/<owner>.<group>.<instance>.creds`, and `~/.config/mash/policy.md`, if present, is appended to the session's instructions
 ([ADR-0020][0020]). The spool and hook log live under `$XDG_STATE_HOME/mash` (default `~/.local/state/mash`). The plugin
 sets `MASH_SPOOL_FROM_START=1`, which turns on hook delivery from the first message ([ADR-0025][0025]). `MASH_HOST`
 selects the agent host adapter, and an unknown name is an error, never a fallback ([ADR-0032][0032]).
@@ -536,8 +535,8 @@ that takes channel events.
 | SAP service | SAP | A NATS micro service (NATS's request/reply service framework) named `agents`, which every SAP agent registers. Tools find agents with `$SRV.INFO` requests |
 | status probe | SAP | A request to an agent's `status` endpoint. It returns the heartbeat payload and is never refused for who asked |
 | owner | SAP | The fourth subject token: the operator who owns the agents. One per mash deployment. It is a label, not a NATS account |
-| endpoint | mash | One named mailbox and identity: a name, a NATS user, an inbox stream and a directory record. A session becomes an endpoint by launching with `MASH_NAME` |
-| directory | mash | The `mash-directory` KV bucket: name to owner, user key and mail subject. Written only by the admin. The root of identity |
+| endpoint | mash | One addressed mailbox and identity: an address `owner.group.instance`, a NATS user, an inbox stream and a directory record. A session becomes an endpoint by launching with `MASH_OWNER`, `MASH_GROUP` and `MASH_NAME` |
+| directory | mash | The `mash-directory` KV bucket: address to user key and mail subject. Written only by the admin. The root of identity |
 | lease | mash | An entry in the `mash-leases` bucket that lets one live session hold a name. It expires after 90 s unless refreshed |
 | spool | mash | The per-endpoint directory on disk where serve leaves mail for the hook |
 | envelope | mash | A stored mail message: subject, headers and body (section 8.1) |
@@ -576,8 +575,8 @@ the 0.3.0 tree.
 | Duplicates dropped on user and nonce in session memory | Plus sends made at-most-once with a key, and remembered stream sequences | [0031][0031] |
 | No sender instance | A signed `Mash-Sender-Instance` header | [0018][0018] |
 | `Mash-In-Reply-To` unsigned and never shown | Signed under its own domain, with a signed `Mash-Via`; each shown only when it verifies | [ADR 0063](decisions/0063-in-reply-to-is-signed-and-a-sender-can-declare-a-relay-with-a-signed-mash-via-both-are-shown-only-when-they-verify.md) |
-| A name is unique within an owner | Unique within the account, since keys carry the name only | [0006][0006] |
-| Other agents later, with their own agent token | A host adapter seam, Claude Code the only host, every endpoint still `cc` | [0032][0032] |
+| An address is unique within the account | The flat key `owner_group_instance` is the directory and lease key | [0006][0006] |
+| Other agents later | A host adapter seam, Claude Code the only host, every endpoint's `agent` metadata `claude-code` | [0032][0032] |
 | (Not in the design) | Rendered text and plugin commands became a contract | [0034][0034] |
 | (Not in the design) | Hosted quickstart, `mash init synadia` at first, then `scripts/quickstart-synadia.sh` | [0035][0035] superseded by [0038][0038] |
 | Config: `url`, `owner`, `creds`, `MASH_NAME`, batching | Adds `idle_wake`, `open_timeout`, `call_timeout`, `host`, `spool_from_start`, `admin_creds`, `MASH_LAUNCH_TOKEN` | various |
@@ -693,22 +692,22 @@ idle wake.
 
 | Item | Rule or form |
 |---|---|
-| Endpoint name, owner | `^[a-z][a-z0-9]*(-[a-z0-9]+)*$`, 1-48 characters: lower-case words joined by single hyphens. A hyphen has no meaning to mash and is never split |
-| Subjects | `agents.mail.cc.<owner>.<name>`, `agents.prompt.cc.<owner>.<name>`, `agents.status.cc.<owner>.<name>`, `agents.hb.cc.<owner>.<name>` |
-| Inbox stream filter | `agents.mail.*.<owner>.<name>`: any agent token. Mail has one five-token subject; zones were removed ([ADR 0091](decisions/0091-there-are-no-zones-mail-keeps-the-five-token-subject-and-the-address-is-the-fence.md)) |
-| Inbox stream, consumer | `inbox-<name>`, `deliver` |
-| Buckets, keys | `mash-directory` and `mash-leases`, keyed by `<name>` |
-| Reply prefix | `_INBOX.<name>.` |
-| SAP service | name `agents`, metadata `agent: claude-code`, `owner`, `session: <name>`, `protocol_version: "0.3"`, `user_nkey`, `account`, `id_sig`, `mail_subject` |
+| Owner, group, instance | `^[a-z][a-z0-9]*(-[a-z0-9]+)*$`, 1-32 characters each and at most 64 for the address with its two dots: lower-case words joined by single hyphens. A hyphen has no meaning to mash and is never split |
+| Subjects | `agents.mail.<owner>.<group>.<instance>`, `agents.prompt.<owner>.<group>.<instance>`, `agents.status.<owner>.<group>.<instance>`, `agents.hb.<owner>.<group>.<instance>` |
+| Inbox stream filter | `agents.mail.<owner>.<group>.<instance>`: the endpoint's own mail subject. Mail has one five-token subject |
+| Inbox stream, consumer | `inbox-<flat key>`, `deliver` |
+| Buckets, keys | `mash-directory` and `mash-leases`, keyed by the flat key `<owner>_<group>_<instance>` |
+| Reply prefix | `_INBOX.<flat key>.` |
+| SAP service | name `agents`, metadata `agent: claude-code`, `owner`, `group`, `instance`, `session: <flat key>`, `protocol_version: "0.3"`, `user_nkey`, `account`, `id_sig`, `mail_subject` |
 | Directory labels | At most 64. Key `^[a-z][a-z0-9_.-]{0,31}$`. Values, role and host: at most 64 printable characters, no tab or newline. A grouping field from older records is read as a label. Labels are unsigned metadata: the record carries no signature, so anyone who can write the directory can set them, and nothing may make a security decision on a label. Authority comes from the signed user JWT. `mashctl label` and `unlabel` set and clear them on the directory record |
 | Idempotency key | 1-128 printable ASCII characters, no spaces |
 | Launch token | At most 128 of `A-Z a-z 0-9 . _ -` |
 | Headers | `Agent-Sender` (SAP), `Nats-Msg-Id` (NATS), `Mash-Sender-Instance`, `Mash-Urgent`, `Mash-Kind`, `Mash-In-Reply-To`, `Mash-Via` |
 | Signature domains | `AGENT-SENDER-V1` (SAP), `MASH-SENDER-INSTANCE-V1`, `MASH-URGENT-V1`, `MASH-IN-REPLY-TO-V1`, `MASH-VIA-V1`. Send nonces hash `mash-send-id-v1` with sender, recipient and key |
-| Shown sender | The endpoint name. `owner/name` for another owner. A name that is not valid is shown as a short key fragment (`UABC…WXYZ`). `?` when there is no header |
+| Shown sender | The sender's address. An address that is not valid is shown as a short key fragment (`UABC…WXYZ`). `?` when there is no header |
 | Message header line | `--- #<seq> from <sender> [<trust>] at <time>`, then optional `urgent: yes` and `instance:` lines, then `kind: <kind>`, then the body with each line prefixed `> ` |
-| Files | `~/.config/mash/config.json`, `~/.config/mash/<name>.creds`, `~/.config/mash/policy.md`. `$XDG_STATE_HOME/mash/spool/<owner>/<name>/` and `$XDG_STATE_HOME/mash/hook.log` |
-| Environment | `MASH_URL`, `MASH_OWNER`, `MASH_NAME`, `MASH_CREDS`, `MASH_ADMIN_CREDS`, `MASH_HOST`, `MASH_LAUNCH_TOKEN`, `MASH_SPOOL_FROM_START`, `MASH_IDLE_WAKE`, `MASH_SETTLE_MS`, `MASH_BATCH_MSGS`, `MASH_BATCH_BYTES`, `MASH_OPEN_TIMEOUT`, `MASH_CALL_TIMEOUT` |
+| Files | `~/.config/mash/config.json`, `~/.config/mash/<owner>.<group>.<instance>.creds`, `~/.config/mash/policy.md`. `$XDG_STATE_HOME/mash/spool/<owner>/<flat key>/` and `$XDG_STATE_HOME/mash/hook.log` |
+| Environment | `MASH_URL`, `MASH_OWNER`, `MASH_GROUP`, `MASH_NAME`, `MASH_CREDS`, `MASH_ADMIN_CREDS`, `MASH_HOST`, `MASH_LAUNCH_TOKEN`, `MASH_SPOOL_FROM_START`, `MASH_IDLE_WAKE`, `MASH_SETTLE_MS`, `MASH_BATCH_MSGS`, `MASH_BATCH_BYTES`, `MASH_OPEN_TIMEOUT`, `MASH_CALL_TIMEOUT` |
 
 ## Appendix D. Source map
 

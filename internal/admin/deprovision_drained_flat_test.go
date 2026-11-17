@@ -15,20 +15,32 @@ import (
 	"github.com/bogworks/mash/internal/store"
 )
 
-// drainedFlat takes the supported steps for a new-form identity: it stores one message, Suspend parks the inbox, the
-// stored mail is consumed and acked as the legacy drained tests do, and the suspension id and last sequence that
+// goneAt fails unless addr's inbox stream and directory record are both gone.
+func goneAt(t *testing.T, js jetstream.JetStream, addr sap.Address) {
+	t.Helper()
+	if _, err := js.Stream(context.Background(), sap.InboxStream(addr.Flat())); err == nil {
+		t.Fatal("stream left")
+	}
+	kv, _ := js.KeyValue(context.Background(), store.DirectoryBucket)
+	if _, err := kv.Get(context.Background(), addr.Flat()); err == nil {
+		t.Fatal("record left")
+	}
+}
+
+// drainedFlat takes the supported steps for a endpoint: it stores one message, Suspend parks the inbox, the
+// stored mail is consumed and acked as the drained tests do, and the suspension id and last sequence that
 // DeprovisionDrained needs come back.
-func drainedFlat(t *testing.T, a *admin.Admin, js jetstream.JetStream, id sap.EndpointIdentity) (string, uint64) {
+func drainedFlat(t *testing.T, a *admin.Admin, js jetstream.JetStream, id sap.Address) (string, uint64) {
 	t.Helper()
 	ctx := context.Background()
 	if _, err := js.Publish(ctx, id.Subjects().Mail, []byte("stored")); err != nil {
 		t.Fatal(err)
 	}
-	st, err := a.Suspend(ctx, id.Flat())
+	st, err := a.Suspend(ctx, id)
 	if err != nil {
 		t.Fatalf("Suspend of a flat key: %v", err)
 	}
-	if got, err := a.Suspended(ctx, id.Flat()); err != nil || !got.Suspended || got.ID != st.ID || got.LastSeq != st.LastSeq {
+	if got, err := a.Suspended(ctx, id); err != nil || !got.Suspended || got.ID != st.ID || got.LastSeq != st.LastSeq {
 		t.Fatalf("Suspended: %+v %v, Suspend gave %+v", got, err, st)
 	}
 	s, err := js.Stream(ctx, sap.InboxStream(id.Flat()))
@@ -58,27 +70,28 @@ func drainedFlat(t *testing.T, a *admin.Admin, js jetstream.JetStream, id sap.En
 	return st.ID, st.LastSeq
 }
 
-// A drained new-form identity is deprovisioned: marker pending before the revoke, final after the purge, never reusable.
+// A drained endpoint is deprovisioned: marker pending before the revoke, final after the purge, never reusable.
 func TestDeprovisionDrainedNewFormWritesPendingThenFinal(t *testing.T) {
 	e, a, js := setup(t)
 	ctx := context.Background()
-	id, user := provNewForm(t, e, a, "acme", "team1", "ops1")
+	id := epIn(t, "acme", "team1", "ops1")
+	user := provisionAt(t, e, a, id)
 	sid, seq := drainedFlat(t, a, js, id)
 	var seen store.Retired
 	rev := a.WithRevoker(func(context.Context, string) error { seen, _ = readMarker(t, js, id.Flat()); return nil })
-	if err := rev.DeprovisionDrained(ctx, id.Flat(), sid, seq); err != nil {
+	if err := rev.DeprovisionDrained(ctx, id, sid, seq); err != nil {
 		t.Fatal(err)
 	}
 	if seen.State != store.RetiredPending || seen.User != user {
 		t.Fatalf("at revocation the marker was %+v, want pending for %s", seen, user)
 	}
 	wantMarker(t, js, id.Flat(), store.RetiredFinal, user)
-	gone(t, js, id.Flat())
+	goneAt(t, js, id)
 	lease, _ := js.KeyValue(ctx, store.LeaseBucket)
 	if _, err := lease.Get(ctx, id.Flat()); err != nil {
 		t.Fatalf("lease not fenced: %v", err)
 	}
-	_, err := a.ProvisionIdentity(ctx, id, nil, user, e.Account, "", admin.Meta{})
+	_, err := a.Provision(ctx, id, user, e.Account, "", admin.Meta{})
 	wantRetired(t, err, id)
 }
 
@@ -86,13 +99,14 @@ func TestDeprovisionDrainedNewFormWritesPendingThenFinal(t *testing.T) {
 func TestDeprovisionDrainedNewFormRefusalsTouchNothing(t *testing.T) {
 	e, a, js := setup(t)
 	ctx := context.Background()
-	id, user := provNewForm(t, e, a, "acme", "team1", "ops1")
+	id := epIn(t, "acme", "team1", "ops1")
+	user := provisionAt(t, e, a, id)
 	sid, seq := drainedFlat(t, a, js, id)
 	for name, c := range map[string]struct {
 		id  string
 		seq uint64
 	}{"wrong-seq": {sid, seq + 1}, "wrong-id": {"other", seq}, "empty-id": {"", seq}} {
-		if err := a.DeprovisionDrained(ctx, id.Flat(), c.id, c.seq); err == nil {
+		if err := a.DeprovisionDrained(ctx, id, c.id, c.seq); err == nil {
 			t.Fatalf("%s: refusal expected", name)
 		}
 		if _, ok := readMarker(t, js, id.Flat()); ok {
@@ -102,7 +116,7 @@ func TestDeprovisionDrainedNewFormRefusalsTouchNothing(t *testing.T) {
 	}
 	// A revoke that fails is a definitive refusal before the purge: the pending marker this call wrote is deleted.
 	boom := errors.New("resolver down")
-	err := a.WithRevoker(func(context.Context, string) error { return boom }).DeprovisionDrained(ctx, id.Flat(), sid, seq)
+	err := a.WithRevoker(func(context.Context, string) error { return boom }).DeprovisionDrained(ctx, id, sid, seq)
 	if !errors.Is(err, boom) {
 		t.Fatalf("%v", err)
 	}
@@ -116,10 +130,11 @@ func TestDeprovisionDrainedNewFormRefusalsTouchNothing(t *testing.T) {
 func TestDeprovisionDrainedNewFormCrashResume(t *testing.T) {
 	e, a, js := setup(t)
 	ctx := context.Background()
-	id, user := provNewForm(t, e, a, "acme", "team1", "ops1")
+	id := epIn(t, "acme", "team1", "ops1")
+	user := provisionAt(t, e, a, id)
 	sid, seq := drainedFlat(t, a, js, id)
 	prev := admin.SetAfterDeprovisionPurge(func() { a.Conn().Close() })
-	if err := a.DeprovisionDrained(ctx, id.Flat(), sid, seq); err == nil {
+	if err := a.DeprovisionDrained(ctx, id, sid, seq); err == nil {
 		t.Fatal("the removal cannot have finished on a closed connection")
 	}
 	admin.SetAfterDeprovisionPurge(prev)
@@ -127,39 +142,40 @@ func TestDeprovisionDrainedNewFormCrashResume(t *testing.T) {
 	lease, _ := js.KeyValue(ctx, store.LeaseBucket)
 	_ = lease.Delete(ctx, admin.LockKey(id.Flat()))
 	wantMarker(t, js, id.Flat(), store.RetiredPending, user)
-	_, err := b.ProvisionIdentity(ctx, id, nil, user, e.Account, "", admin.Meta{})
+	_, err := b.Provision(ctx, id, user, e.Account, "", admin.Meta{})
 	wantPendingBlock(t, err, id)
-	if err := b.DeprovisionDrained(ctx, id.Flat(), sid, seq); err != nil {
+	if err := b.DeprovisionDrained(ctx, id, sid, seq); err != nil {
 		t.Fatalf("re-running must finish: %v", err)
 	}
 	wantMarker(t, js, id.Flat(), store.RetiredFinal, user)
-	gone(t, js, id.Flat())
+	goneAt(t, js, id)
 	if _, err := lease.Get(ctx, id.Flat()); err != nil {
 		t.Fatalf("the re-run did not fence the lease: %v", err)
 	}
-	_, err = b.ProvisionIdentity(ctx, id, nil, user, e.Account, "", admin.Meta{})
+	_, err = b.Provision(ctx, id, user, e.Account, "", admin.Meta{})
 	wantRetired(t, err, id)
 }
 
-// Suspend, Resume and Suspended take a flat key; a name that is neither a legacy name nor a flat key is still refused.
-func TestSuspendResumeSuspendedAcceptFlatKeys(t *testing.T) {
+// Suspend, Resume and Suspended work on a three-part address; an invalid address is refused.
+func TestSuspendResumeSuspendedOnAddress(t *testing.T) {
 	e, a, _ := setup(t)
 	ctx := context.Background()
-	id, _ := provNewForm(t, e, a, "acme", "team1", "ops1")
-	st, err := a.Suspend(ctx, id.Flat())
+	id := epIn(t, "acme", "team1", "ops1")
+	provisionAt(t, e, a, id)
+	st, err := a.Suspend(ctx, id)
 	if err != nil || !st.Suspended || st.ID == "" {
 		t.Fatalf("Suspend: %+v %v", st, err)
 	}
-	if got, err := a.Suspended(ctx, id.Flat()); err != nil || !got.Suspended {
+	if got, err := a.Suspended(ctx, id); err != nil || !got.Suspended {
 		t.Fatalf("Suspended: %+v %v", got, err)
 	}
-	if err := a.Resume(ctx, id.Flat()); err != nil {
+	if err := a.Resume(ctx, id); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := a.Suspended(ctx, id.Flat()); err != nil || got.Suspended {
+	if got, err := a.Suspended(ctx, id); err != nil || got.Suspended {
 		t.Fatalf("after Resume: %+v %v", got, err)
 	}
-	for _, bad := range []string{"", "Acme_team1_ops1", "acme_team1", "a b", "_x_y"} {
+	for _, bad := range []sap.Address{{}, {Owner: "Acme", Group: "team1", Instance: "ops1"}, {Owner: "acme", Instance: "ops1"}, {Owner: "acme", Group: "team1", Instance: "a b"}, {Owner: "acme", Group: "_x", Instance: "y"}} {
 		if _, err := a.Suspend(ctx, bad); err == nil {
 			t.Errorf("Suspend(%q) accepted", bad)
 		}
@@ -178,10 +194,11 @@ func TestDeprovisionDrainedRecoveryHoldsNameLock(t *testing.T) {
 	quickLocks(t, longWait)
 	e, a, js := setup(t)
 	ctx := context.Background()
-	id, user := provNewForm(t, e, a, "acme", "team1", "ops1")
+	id := epIn(t, "acme", "team1", "ops1")
+	user := provisionAt(t, e, a, id)
 	sid, seq := drainedFlat(t, a, js, id)
 	prev := admin.SetAfterDeprovisionPurge(func() { a.Conn().Close() })
-	if err := a.DeprovisionDrained(ctx, id.Flat(), sid, seq); err == nil {
+	if err := a.DeprovisionDrained(ctx, id, sid, seq); err == nil {
 		t.Fatal("the removal cannot have finished on a closed connection")
 	}
 	admin.SetAfterDeprovisionPurge(prev)
@@ -197,7 +214,7 @@ func TestDeprovisionDrainedRecoveryHoldsNameLock(t *testing.T) {
 		once.Do(func() { // the recovery holds the lock now
 			go func() {
 				c, _ := initOn(t, e)
-				_, err := c.ProvisionIdentity(ctx, id, nil, user, e.Account, "", admin.Meta{})
+				_, err := c.Provision(ctx, id, user, e.Account, "", admin.Meta{})
 				provReturned.Store(true)
 				provDone <- err
 			}()
@@ -212,7 +229,7 @@ func TestDeprovisionDrainedRecoveryHoldsNameLock(t *testing.T) {
 		})
 	})
 	t.Cleanup(func() { admin.SetAfterLockAcquired(prevHook) })
-	if err := b.DeprovisionDrained(ctx, id.Flat(), sid, seq); err != nil {
+	if err := b.DeprovisionDrained(ctx, id, sid, seq); err != nil {
 		t.Fatalf("recovery: %v", err)
 	}
 	select {
@@ -227,18 +244,18 @@ func TestDeprovisionDrainedRecoveryHoldsNameLock(t *testing.T) {
 // A recovery verifies the stream before it finishes anything: mail stored after the drain, or a suspension that was
 // resumed and made again, refuses it and leaves the pending marker, the lease and the inbox as they were.
 func TestDeprovisionDrainedRecoveryRefusesChangedStream(t *testing.T) {
-	for name, change := range map[string]func(t *testing.T, a *admin.Admin, js jetstream.JetStream, id sap.EndpointIdentity){
-		"extra-mail": func(t *testing.T, _ *admin.Admin, js jetstream.JetStream, id sap.EndpointIdentity) {
+	for name, change := range map[string]func(t *testing.T, a *admin.Admin, js jetstream.JetStream, id sap.Address){
+		"extra-mail": func(t *testing.T, _ *admin.Admin, js jetstream.JetStream, id sap.Address) {
 			// The parked subject is the suspended stream's one subject: this stores one more message.
 			if _, err := js.Publish(context.Background(), store.SuspendedSubject(id.Flat()), []byte("late")); err != nil {
 				t.Fatal(err)
 			}
 		},
-		"new-suspension": func(t *testing.T, a *admin.Admin, _ jetstream.JetStream, id sap.EndpointIdentity) {
-			if err := a.Resume(context.Background(), id.Flat()); err != nil {
+		"new-suspension": func(t *testing.T, a *admin.Admin, _ jetstream.JetStream, id sap.Address) {
+			if err := a.Resume(context.Background(), id); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := a.Suspend(context.Background(), id.Flat()); err != nil {
+			if _, err := a.Suspend(context.Background(), id); err != nil {
 				t.Fatal(err)
 			}
 		},
@@ -246,10 +263,11 @@ func TestDeprovisionDrainedRecoveryRefusesChangedStream(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			e, a, js := setup(t)
 			ctx := context.Background()
-			id, user := provNewForm(t, e, a, "acme", "team1", "ops1")
+			id := epIn(t, "acme", "team1", "ops1")
+			user := provisionAt(t, e, a, id)
 			sid, seq := drainedFlat(t, a, js, id)
 			prev := admin.SetAfterDeprovisionPurge(func() { a.Conn().Close() })
-			if err := a.DeprovisionDrained(ctx, id.Flat(), sid, seq); err == nil {
+			if err := a.DeprovisionDrained(ctx, id, sid, seq); err == nil {
 				t.Fatal("the removal cannot have finished on a closed connection")
 			}
 			admin.SetAfterDeprovisionPurge(prev)
@@ -257,7 +275,7 @@ func TestDeprovisionDrainedRecoveryRefusesChangedStream(t *testing.T) {
 			lease, _ := js.KeyValue(ctx, store.LeaseBucket)
 			_ = lease.Delete(ctx, admin.LockKey(id.Flat()))
 			change(t, b, js, id)
-			if err := b.DeprovisionDrained(ctx, id.Flat(), sid, seq); err == nil {
+			if err := b.DeprovisionDrained(ctx, id, sid, seq); err == nil {
 				t.Fatal("a recovery against a changed stream must refuse")
 			}
 			wantMarker(t, js, id.Flat(), store.RetiredPending, user)

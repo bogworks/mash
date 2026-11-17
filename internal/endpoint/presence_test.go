@@ -128,14 +128,14 @@ func TestPresenceCacheSingleFlight(t *testing.T) {
 }
 
 // A caller that gives up does not fail the callers waiting on its probe: one of them probes again.
-func TestPresenceCacheLeaderGivesUp(t *testing.T) {
+func TestPresenceCacheFirstCallerGivesUp(t *testing.T) {
 	c := &PresenceCache{}
 	lctx, cancel := context.WithCancel(context.Background())
 	started := make(chan struct{})
-	leader := make(chan error, 1)
+	first := make(chan error, 1)
 	go func() {
 		_, err := c.Ensure(lctx, func(ctx context.Context) error { close(started); <-ctx.Done(); return ctx.Err() })
-		leader <- err
+		first <- err
 	}()
 	<-started
 	var n atomic.Int64
@@ -143,8 +143,8 @@ func TestPresenceCacheLeaderGivesUp(t *testing.T) {
 	go func() { _, err := c.Ensure(context.Background(), countingProbe(&n, nil)); waiter <- err }()
 	time.Sleep(50 * time.Millisecond)
 	cancel()
-	if err := <-leader; !errors.Is(err, context.Canceled) {
-		t.Fatalf("leader: %v", err)
+	if err := <-first; !errors.Is(err, context.Canceled) {
+		t.Fatalf("first: %v", err)
 	}
 	if err := <-waiter; err != nil || n.Load() != 1 {
 		t.Fatalf("waiter: err=%v probes=%d", err, n.Load())
@@ -184,7 +184,7 @@ func (f *fixture) infoCounter(t *testing.T) *atomic.Int64 {
 func onlineSet(ps []Presence) map[string]bool {
 	m := map[string]bool{}
 	for _, p := range ps {
-		m[p.Record.Name] = p.Online
+		m[p.Record.Instance] = p.Online
 	}
 	return m
 }
@@ -210,10 +210,10 @@ func TestServeHoldsNoHeartbeatSubscription(t *testing.T) {
 	a := f.serve(t, "a", noPrompt)
 	f.serve(t, "b", noPrompt)
 
-	witness := f.e.ConnAs(t, f.creds["w"], "w")
+	witness := f.e.ConnAs(t, f.creds["w"], tkey("w"))
 	var beats atomic.Int64
 	var heard sync.Map // the endpoints whose heartbeat the witness has received
-	if _, err := witness.Subscribe("agents.hb.*."+f.e.Owner+".*", func(m *nats.Msg) {
+	if _, err := witness.Subscribe("agents.hb."+f.e.Owner+".*.*", func(m *nats.Msg) {
 		beats.Add(1)
 		heard.Store(m.Subject[strings.LastIndex(m.Subject, ".")+1:], true)
 	}); err != nil {
@@ -321,7 +321,7 @@ func TestWhoFreshOfflineAtTheNextProbe(t *testing.T) {
 	}
 	var cSeen time.Time
 	for _, p := range ps {
-		if p.Record.Name == "c" {
+		if p.Record.Instance == "c" {
 			cSeen = p.LastSeen
 		}
 	}
@@ -336,7 +336,7 @@ func TestWhoFreshOfflineAtTheNextProbe(t *testing.T) {
 		t.Fatalf("presence %v: b answered and c did not", on)
 	}
 	for _, p := range ps {
-		if p.Record.Name == "c" && !p.LastSeen.Equal(cSeen) {
+		if p.Record.Instance == "c" && !p.LastSeen.Equal(cSeen) {
 			t.Fatalf("c's last answer moved: %v then %v", cSeen, p.LastSeen)
 		}
 	}
@@ -355,9 +355,9 @@ func TestWhoFreshProbeFailureIsReported(t *testing.T) {
 func TestWhoFreshIgnoresForgedRegistrations(t *testing.T) {
 	f := newFixture(t, "a", "b", "c")
 	a := f.serve(t, "a", noPrompt) // b is in the directory but not running
-	forger := f.e.ConnAs(t, f.creds["c"], "c")
+	forger := f.e.ConnAs(t, f.creds["c"], tkey("c"))
 	cid := identity(t, f.creds["c"])
-	bPrompt := sap.For(f.e.Owner, "b").Prompt
+	bPrompt := taddr("b").Subjects().Prompt
 	reg := func(user, sig string) []byte {
 		md := map[string]string{"owner": f.e.Owner, "agent": "claude-code", "user_nkey": user, "account": f.e.Account, "id_sig": sig}
 		b, _ := json.Marshal(map[string]any{"metadata": md, "endpoints": []map[string]string{{"name": "prompt", "subject": bPrompt}}})

@@ -112,12 +112,12 @@ func TestDirectoryPollSeesChangeAddAndDelete(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 
 	role := "reviewer"
-	if _, err := f.adm.SetMeta(context.Background(), "b", admin.MetaUpdate{Role: &role}); err != nil {
+	if _, err := f.adm.SetMeta(context.Background(), taddr("b"), admin.MetaUpdate{Role: &role}); err != nil {
 		t.Fatal(err)
 	}
 	roleOf := func(n string) string {
 		for _, p := range a.Who() {
-			if p.Record.Name == n {
+			if p.Record.Instance == n {
 				return p.Record.Role
 			}
 		}
@@ -131,7 +131,7 @@ func TestDirectoryPollSeesChangeAddAndDelete(t *testing.T) {
 	if d.gets.Load() == g0 {
 		t.Fatal("the add was seen without a reload")
 	}
-	if err := f.adm.Deprovision(context.Background(), "c"); err != nil {
+	if err := f.adm.Deprovision(context.Background(), taddr("c")); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, "a deleted record gone", 3*time.Second, func() bool { return !hasName(a.Who(), "c") })
@@ -227,18 +227,18 @@ func TestDirectoryPollTransientFailureKeepsRecordAndRetries(t *testing.T) {
 	var failing atomic.Bool
 	failing.Store(true)
 	setFetchHook(t, func(key string) error {
-		if key == "b" && failing.Load() {
+		if key == tkey("b") && failing.Load() {
 			return errors.New("timeout")
 		}
 		return nil
 	})
 	role := "reviewer"
-	if _, err := f.adm.SetMeta(context.Background(), "b", admin.MetaUpdate{Role: &role}); err != nil {
+	if _, err := f.adm.SetMeta(context.Background(), taddr("b"), admin.MetaUpdate{Role: &role}); err != nil {
 		t.Fatal(err)
 	}
 	roleOf := func() string {
 		for _, p := range a.Who() {
-			if p.Record.Name == "b" {
+			if p.Record.Instance == "b" {
 				return p.Record.Role
 			}
 		}
@@ -274,7 +274,7 @@ func TestDirectoryPollDeletedKeyIsNotRetried(t *testing.T) {
 	d := f.watchDirTraffic(t)
 	a, _ := f.run(t, "a")
 	time.Sleep(500 * time.Millisecond)
-	if err := f.adm.Deprovision(context.Background(), "c"); err != nil {
+	if err := f.adm.Deprovision(context.Background(), taddr("c")); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, "c dropped", 3*time.Second, func() bool { return !hasName(a.Who(), "c") })
@@ -288,7 +288,7 @@ func TestDirectoryPollDeletedKeyIsNotRetried(t *testing.T) {
 
 // installDirectory: a failed key keeps its old record, a gone key is dropped.
 func TestInstallDirectoryFailedKeepsGoneDrops(t *testing.T) {
-	e := &Endpoint{dir: map[string]store.Record{"x": {Name: "x", User: "ux"}, "y": {Name: "y", User: "uy"}}}
+	e := &Endpoint{dir: map[string]store.Record{"x": {Instance: "x", User: "ux"}, "y": {Instance: "y", User: "uy"}}}
 	failed := e.installDirectory(map[string]recordResult{
 		"x": {err: errors.New("timeout")},
 		"y": {err: jetstream.ErrKeyNotFound, gone: true},
@@ -305,5 +305,47 @@ func TestInstallDirectoryFailedKeepsGoneDrops(t *testing.T) {
 	}
 	if e.byUser["ux"] != "x" {
 		t.Fatal("byUser")
+	}
+}
+
+// A directory value that is not a record of this release (a record of the removed form keyed by a bare name, one under a
+// flat key whose mail subject is another's, junk) is absent from the listing, like a deleted key: no error, no special
+// text, and the usable records around it are still listed. Nothing here reads or converts it.
+func TestUnparseableDirectoryRecordIsSkipped(t *testing.T) {
+	f := newFixture(t, "a", "b")
+	js, err := jetstream.New(f.e.Conn(t, f.e.AdminCreds))
+	if err != nil {
+		t.Fatal(err)
+	}
+	kv, err := js.KeyValue(context.Background(), store.DirectoryBucket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for key, val := range map[string]string{
+		"old":             `{"name":"old","owner":"o","agent":"claude-code","agent_token":"cc","user":"U1","mail_subject":"agents.mail.cc.o.old"}`,
+		tkey("wrongmail"): `{"owner":"o","group":"dev","instance":"wrongmail","user":"U2","mail_subject":"agents.mail.o.dev.other"}`,
+		tkey("nouser"):    `{"owner":"o","group":"dev","instance":"nouser","mail_subject":"` + taddr("nouser").Subjects().Mail + `"}`,
+		"o_dev_junk":      `not json`,
+	} {
+		if _, err := kv.Put(context.Background(), key, []byte(val)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for opener, open := range map[string]func() (*Endpoint, error){
+		"OpenClient": func() (*Endpoint, error) { return OpenClient(context.Background(), f.cfg("a")) },
+		"Open":       func() (*Endpoint, error) { return Open(context.Background(), f.cfg("a")) },
+	} {
+		ep, err := open()
+		if err != nil {
+			t.Fatalf("%s with unparseable records in the directory: %v", opener, err)
+		}
+		var got []string
+		for _, p := range ep.Who() {
+			got = append(got, flatOf(p.Record))
+		}
+		if want := tkey("a") + "," + tkey("b"); strings.Join(got, ",") != want {
+			t.Errorf("%s: listing %v, want %s", opener, got, want)
+		}
+		ep.Close()
 	}
 }

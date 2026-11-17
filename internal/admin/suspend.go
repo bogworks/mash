@@ -13,7 +13,6 @@ import (
 
 	"github.com/nats-io/nats.go/jetstream"
 
-	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/store"
 )
@@ -67,23 +66,15 @@ func suspendState(ctx context.Context, name string, s jetstream.Stream) (Suspend
 	return st, nil
 }
 
-// ValidKey reports whether key names an endpoint the suspend, resume and drained-removal verbs accept: a legacy name
-// (config.ValidName) or a new-form flat key (agent_owner_name).
-func ValidKey(key string) bool {
-	if _, ok := newFormKey(key); ok {
-		return true
-	}
-	return config.ValidName(key)
-}
-
-// Suspend parks name's inbox stream: it saves the stream's subjects in its metadata and replaces them with the one
-// subject mash.suspended.<name>, so a sender's publish finds no stream. Only the subjects and metadata change and
+// Suspend parks addr's inbox stream: it saves the stream's subjects in its metadata and replaces them with the one
+// subject mash.suspended.<flat>, so a sender's publish finds no stream. Only the subjects and metadata change and
 // nothing is purged. It also stores a fresh random suspension id. It is idempotent: a suspended inbox is reported as it is, with its existing id. The state's LastSeq is read after the
 // update and settled, so it is the final one.
-func (a *Admin) Suspend(ctx context.Context, name string) (_ SuspendState, err error) {
-	if !ValidKey(name) {
-		return SuspendState{}, fmt.Errorf("mash: endpoint name %q: 1-48 lower-case letters, digits and single hyphens, or a new-form agent_owner_name", name)
+func (a *Admin) Suspend(ctx context.Context, addr sap.Address) (_ SuspendState, err error) {
+	if err := addr.Validate(); err != nil {
+		return SuspendState{}, fmt.Errorf("mash: suspend: %w", err)
 	}
+	name := addr.Flat()
 	lk, err := a.lockStream(ctx, name)
 	if err != nil {
 		return SuspendState{}, err
@@ -167,10 +158,11 @@ func settledState(ctx context.Context, name string, s jetstream.Stream) (Suspend
 // Resume restores the subjects Suspend saved and clears its metadata. It is idempotent: an inbox that is not
 // suspended is left as it is. Stale metadata on live subjects is cleared and the subjects kept; parked subjects with
 // no usable saved list are an error, never a guess.
-func (a *Admin) Resume(ctx context.Context, name string) (err error) {
-	if !ValidKey(name) {
-		return fmt.Errorf("mash: endpoint name %q: 1-48 lower-case letters, digits and single hyphens, or a new-form agent_owner_name", name)
+func (a *Admin) Resume(ctx context.Context, addr sap.Address) (err error) {
+	if err := addr.Validate(); err != nil {
+		return fmt.Errorf("mash: resume: %w", err)
 	}
+	name := addr.Flat()
 	lk, err := a.lockStream(ctx, name)
 	if err != nil {
 		return err
@@ -222,11 +214,12 @@ func (a *Admin) Resume(ctx context.Context, name string) (err error) {
 	return nil
 }
 
-// Suspended reads whether name's inbox is suspended, since when, and the stream's message count and last sequence.
-func (a *Admin) Suspended(ctx context.Context, name string) (SuspendState, error) {
-	if !ValidKey(name) {
-		return SuspendState{}, fmt.Errorf("mash: endpoint name %q: 1-48 lower-case letters, digits and single hyphens, or a new-form agent_owner_name", name)
+// Suspended reads whether addr's inbox is suspended, since when, and the stream's message count and last sequence.
+func (a *Admin) Suspended(ctx context.Context, addr sap.Address) (SuspendState, error) {
+	if err := addr.Validate(); err != nil {
+		return SuspendState{}, fmt.Errorf("mash: suspend: %w", err)
 	}
+	name := addr.Flat()
 	s, err := a.inboxForSuspend(ctx, name)
 	if err != nil {
 		return SuspendState{}, err

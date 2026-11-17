@@ -9,7 +9,7 @@ import (
 	"github.com/bogworks/mash/internal/sap"
 )
 
-const goodRuleFile = `{"version":1,"rules":[{"id":"no-cc","match":{"agent":{"is":"cc"}},"message":"the agent token cc is retired"}]}`
+const goodRuleFile = `{"version":1,"rules":[{"id":"no-cc","match":{"owner":{"is":"cc"}},"message":"the owner cc is retired"}]}`
 
 func ruleFileIn(t *testing.T, body string) string {
 	t.Helper()
@@ -30,7 +30,7 @@ func loadWith(t *testing.T, fileBody string, env map[string]string) (Config, err
 }
 
 func TestNameRuleUnsetIsNoRule(t *testing.T) {
-	c, err := loadWith(t, idFile+`}`, map[string]string{"MASH_NAME": "a"})
+	c, err := loadWith(t, idFile+`}`, map[string]string{"MASH_NAME": "a", "MASH_GROUP": "g"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,14 +44,14 @@ func TestNameRuleUnsetIsNoRule(t *testing.T) {
 
 func TestNameRuleFromEnvAndFile(t *testing.T) {
 	p := ruleFileIn(t, goodRuleFile)
-	c, err := loadWith(t, idFile+`}`, map[string]string{"MASH_NAME": "a", "MASH_NAME_RULE_FILE": p})
+	c, err := loadWith(t, idFile+`}`, map[string]string{"MASH_NAME": "a", "MASH_GROUP": "g", "MASH_NAME_RULE_FILE": p})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if c.NameRule == nil || c.NameRulePath != p || c.NameRule.Count() != 1 {
 		t.Fatalf("env: %v %q", c.NameRule, c.NameRulePath)
 	}
-	legacy, _ := sap.Legacy("o", "a")
+	legacy, _ := sap.NewAddress("cc", "g", "a")
 	if c.NameRule.Check(legacy) == nil {
 		t.Fatal("the loaded rule does not refuse cc")
 	}
@@ -93,7 +93,7 @@ func TestNameRuleFileKeyRelativeToConfigDir(t *testing.T) {
 
 func TestNameRuleSetButEmptyIsInvalid(t *testing.T) {
 	// A variable that is set but empty is invalid, not absent: Load sees it through a real Lookup.
-	_, err := loadWith(t, idFile+`}`, map[string]string{"MASH_NAME": "a", "MASH_NAME_RULE_FILE": ""})
+	_, err := loadWith(t, idFile+`}`, map[string]string{"MASH_NAME": "a", "MASH_GROUP": "g", "MASH_NAME_RULE_FILE": ""})
 	if err == nil || !strings.Contains(err.Error(), "MASH_NAME_RULE_FILE") || !strings.Contains(err.Error(), "empty") {
 		t.Fatalf("env empty: %v", err)
 	}
@@ -120,6 +120,7 @@ func TestNameRuleBadFileRefusesLoadNamingTheFile(t *testing.T) {
 		env := map[string]string{"MASH_NAME_RULE_FILE": p}
 		if name != "" {
 			env["MASH_NAME"] = name
+			env["MASH_GROUP"] = "g"
 		}
 		_, err := loadWith(t, idFile+`}`, env)
 		if err == nil || !strings.Contains(err.Error(), p) {
@@ -189,7 +190,7 @@ func TestNameRulePathIsAbsolute(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := loadWith(t, idFile+`}`, map[string]string{"MASH_NAME": "a", "MASH_NAME_RULE_FILE": "rule.json"})
+	c, err := loadWith(t, idFile+`}`, map[string]string{"MASH_NAME": "a", "MASH_GROUP": "g", "MASH_NAME_RULE_FILE": "rule.json"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +200,7 @@ func TestNameRulePathIsAbsolute(t *testing.T) {
 	if got := c.NameRule.StatusLine(c.NameRulePath); !strings.Contains(got, want) {
 		t.Fatalf("status %q does not show %q", got, want)
 	}
-	_, err = loadWith(t, idFile+`}`, map[string]string{"MASH_NAME": "a", "MASH_NAME_RULE_FILE": "missing.json"})
+	_, err = loadWith(t, idFile+`}`, map[string]string{"MASH_NAME": "a", "MASH_GROUP": "g", "MASH_NAME_RULE_FILE": "missing.json"})
 	if err == nil || !strings.Contains(err.Error(), filepath.Join(cwd, "missing.json")) {
 		t.Fatalf("error does not name the absolute path: %v", err)
 	}

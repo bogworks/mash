@@ -44,7 +44,7 @@ func SupportedVersions() []int {
 }
 
 type matcher struct {
-	key    string // agent, owner or name
+	key    string // owner, group or instance
 	re     *regexp.Regexp
 	negate bool // is_not
 }
@@ -64,12 +64,12 @@ type Rule struct {
 type Refusal struct {
 	RuleID  string
 	Message string
-	// Agent, Owner and Name are the tokens of the identity that was refused.
-	Agent, Owner, Name string
+	// Owner, Group and Instance are the tokens of the address that was refused.
+	Owner, Group, Instance string
 }
 
 func (r *Refusal) Error() string {
-	return fmt.Sprintf("name rule %q refuses %s.%s.%s: %s", r.RuleID, r.Agent, r.Owner, r.Name, r.Message)
+	return fmt.Sprintf("name rule %q refuses %s.%s.%s: %s", r.RuleID, r.Owner, r.Group, r.Instance, r.Message)
 }
 
 // Load reads the rule file at path. Any condition under "What refuses start" in docs/name-rule.md is an error that
@@ -283,7 +283,15 @@ func readMatch(id string, raw json.RawMessage) ([]matcher, error) {
 	if !isObject(raw) {
 		return nil, fmt.Errorf("rule %q: match is not an object", id)
 	}
-	m, err := strictObject(raw, "agent", "owner", "name")
+	var probe map[string]json.RawMessage
+	if json.Unmarshal(raw, &probe) == nil {
+		for _, old := range []string{"agent", "name"} {
+			if _, ok := probe[old]; ok {
+				return nil, fmt.Errorf("rule %q: match: key %q is no longer read: the keys are \"owner\", \"group\" and \"instance\" (the old \"agent\" and \"name\" are refused)", id, old)
+			}
+		}
+	}
+	m, err := strictObject(raw, "owner", "group", "instance")
 	if err != nil {
 		return nil, fmt.Errorf("rule %q: match: %v", id, err)
 	}
@@ -291,7 +299,7 @@ func readMatch(id string, raw json.RawMessage) ([]matcher, error) {
 	for _, k := range []struct {
 		key string
 		raw json.RawMessage
-	}{{"agent", m["agent"]}, {"owner", m["owner"]}, {"name", m["name"]}} {
+	}{{"owner", m["owner"]}, {"group", m["group"]}, {"instance", m["instance"]}} {
 		if k.raw == nil {
 			continue
 		}
@@ -340,26 +348,26 @@ func readMatch(id string, raw json.RawMessage) ([]matcher, error) {
 }
 
 // Check returns a *Refusal naming the first rule that matches id, or nil when none does. A nil Rule accepts everything.
-func (r *Rule) Check(id sap.EndpointIdentity) error {
+func (r *Rule) Check(a sap.Address) error {
 	if r == nil {
 		return nil
 	}
 	for _, ru := range r.rules {
-		if ru.matches(id) {
-			return &Refusal{RuleID: ru.id, Message: ru.message, Agent: id.Agent, Owner: id.Owner, Name: id.Name}
+		if ru.matches(a) {
+			return &Refusal{RuleID: ru.id, Message: ru.message, Owner: a.Owner, Group: a.Group, Instance: a.Instance}
 		}
 	}
 	return nil
 }
 
-func (ru rule) matches(id sap.EndpointIdentity) bool {
+func (ru rule) matches(a sap.Address) bool {
 	for _, m := range ru.match {
-		tok := id.Name
+		tok := a.Instance
 		switch m.key {
-		case "agent":
-			tok = id.Agent
 		case "owner":
-			tok = id.Owner
+			tok = a.Owner
+		case "group":
+			tok = a.Group
 		}
 		if m.re.MatchString(tok) == m.negate {
 			return false

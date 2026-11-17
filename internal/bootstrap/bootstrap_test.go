@@ -24,6 +24,7 @@ import (
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/ctlkeys"
 	"github.com/bogworks/mash/internal/natsauth"
+	"github.com/bogworks/mash/internal/sap"
 )
 
 type setup struct {
@@ -146,7 +147,7 @@ func TestGeneratedServerWorks(t *testing.T) {
 		t.Fatal(err)
 	}
 	upub, _ := ukp.PublicKey()
-	if _, err := a.Provision(ctx, "coder", upub, s.pl.Account, "", admin.Meta{}); err != nil {
+	if _, err := a.Provision(ctx, sap.Address{Owner: "alice", Group: "g", Instance: "coder"}, upub, s.pl.Account, "", admin.Meta{}); err != nil {
 		t.Fatal(err)
 	}
 

@@ -10,15 +10,16 @@ import (
 	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/ctl"
+	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/store"
 )
 
-const labelUsage = `usage: mashctl label NAME k=v [k=v]... [--dry-run]
-       mashctl unlabel NAME k [k]... [--dry-run]
+const labelUsage = `usage: mashctl label <owner.group.instance> k=v [k=v]... [--dry-run]
+       mashctl unlabel <owner.group.instance> k [k]... [--dry-run]
 `
 
 type labelOpts struct {
-	name  string
+	addr  sap.Address
 	dry   bool
 	set   map[string]string // label: k=v
 	unset []string          // unlabel: keys
@@ -38,9 +39,13 @@ func parseLabelArgs(unlabel bool, args []string) (labelOpts, error) {
 		}
 	}
 	if len(rest) < 2 {
-		return o, errors.New("want NAME and at least one label")
+		return o, errors.New("want an address (owner.group.instance) and at least one label")
 	}
-	o.name = rest[0]
+	addr, err := parseAddr(rest[0])
+	if err != nil {
+		return o, err
+	}
+	o.addr = addr
 	seen := map[string]bool{}
 	for i, a := range rest[1:] {
 		k, v, hasV := strings.Cut(a, "=")
@@ -81,12 +86,8 @@ func runLabel(unlabel bool, args []string, env func(string) string, lookup confi
 		return 2
 	}
 	fail := func(format string, a ...any) int {
-		fmt.Fprintf(stderr, "mashctl: %s %s: %s\n", verb, o.name, fmt.Sprintf(format, a...))
+		fmt.Fprintf(stderr, "mashctl: %s %s: %s\n", verb, o.addr, fmt.Sprintf(format, a...))
 		return 1
-	}
-	if !config.ValidName(o.name) {
-		fmt.Fprintf(stderr, "mashctl: %s: NAME is not a valid endpoint name: 1-48 lower-case letters, digits and single hyphens (the value is not shown)\n", verb)
-		return 2
 	}
 	cfg, err := loadCtlConfig(env, lookup, true)
 	if err != nil {
@@ -103,9 +104,9 @@ func runLabel(unlabel bool, args []string, env func(string) string, lookup confi
 	if err != nil {
 		return fail("%v", err)
 	}
-	rec, ok := findRecord(recs, o.name)
+	rec, ok := findRecord(recs, o.addr)
 	if !ok {
-		return fail("no directory record for %q: add it first with mashctl add", o.name)
+		return fail("no directory record for %s", o.addr)
 	}
 
 	// The labels the endpoint would end with, checked as the directory checks them.
@@ -116,7 +117,7 @@ func runLabel(unlabel bool, args []string, env func(string) string, lookup confi
 	var unset []string
 	for _, k := range o.unset {
 		if _, has := next[k]; !has {
-			fmt.Fprintf(stderr, "mashctl: unlabel %s: label %s is not set\n", o.name, k)
+			fmt.Fprintf(stderr, "mashctl: unlabel %s: label %s is not set\n", o.addr, k)
 			continue
 		}
 		delete(next, k)
@@ -136,18 +137,18 @@ func runLabel(unlabel bool, args []string, env func(string) string, lookup confi
 		return fail("%v", err)
 	}
 	if len(changes) == 0 {
-		fmt.Fprintf(stdout, "%s: nothing to change\n", o.name)
+		fmt.Fprintf(stdout, "%s: nothing to change\n", o.addr)
 		return 0
 	}
 	done := map[bool]string{false: "labeled", true: "unlabeled"}[unlabel]
 	if o.dry {
-		fmt.Fprintf(stdout, "dry run: would have %s %s (nothing written)\n", done, o.name)
+		fmt.Fprintf(stdout, "dry run: would have %s %s (nothing written)\n", done, o.addr)
 		return 0
 	}
-	if _, err := adm.SetMeta(ctx, o.name, admin.MetaUpdate{Labels: changes}); err != nil {
+	if _, err := adm.SetMeta(ctx, o.addr, admin.MetaUpdate{Labels: changes}); err != nil {
 		return fail("%v", err)
 	}
-	fmt.Fprintf(stdout, "%s %s: %s\n", done, o.name, labelSummary(o.set, unset))
+	fmt.Fprintf(stdout, "%s %s: %s\n", done, o.addr, labelSummary(o.set, unset))
 	return 0
 }
 
@@ -164,11 +165,10 @@ func labelSummary(set map[string]string, unset []string) string {
 	return strings.Join(out, " ")
 }
 
-// findRecord is the directory record whose key is name. The key is the name for a legacy record and the flat
-// identity for a new-form one, so a new-form record whose name token is name is not the record for name.
-func findRecord(recs []store.Record, name string) (store.Record, bool) {
+// findRecord is the directory record of the endpoint at addr.
+func findRecord(recs []store.Record, addr sap.Address) (store.Record, bool) {
 	for _, r := range recs {
-		if r.KeyOrName() == name {
+		if ra, err := r.Address(); err == nil && ra == addr {
 			return r, true
 		}
 	}

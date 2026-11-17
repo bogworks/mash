@@ -33,21 +33,24 @@ func TestParseWhoFlags(t *testing.T) {
 
 func whoFixture() []endpoint.Presence {
 	return []endpoint.Presence{
-		{Online: true, LastSeen: time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC), Record: store.Record{Name: "a", Owner: "o", Role: "chief", Host: "h", Note: "n",
+		{Online: true, LastSeen: time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC), Record: store.Record{Owner: "o", Group: "g", Instance: "a", Role: "chief", Host: "h", Note: "n",
 			Labels: map[string]string{"z": "1", "a": "2"}}},
-		{Record: store.Record{Name: "b", Owner: "o"}},
+		{Record: store.Record{Owner: "o", Group: "g", Instance: "b"}},
 	}
 }
 
 func TestWhoRenderers(t *testing.T) {
 	ps := whoFixture()
-	if got := whoNames(ps); got != "a\nb" {
+	if got := whoNames(ps); got != "o_g_a\no_g_b" {
 		t.Fatalf("names %q", got)
 	}
 	const golden = `[
   {
-    "name": "a",
+    "name": "o_g_a",
+    "identity": "o.g.a",
     "owner": "o",
+    "group": "g",
+    "instance": "a",
     "online": true,
     "last_seen": "2026-11-01T12:00:00Z",
     "role": "chief",
@@ -59,15 +62,18 @@ func TestWhoRenderers(t *testing.T) {
     }
   },
   {
-    "name": "b",
+    "name": "o_g_b",
+    "identity": "o.g.b",
     "owner": "o",
+    "group": "g",
+    "instance": "b",
     "online": false
   }
 ]`
 	if got := whoJSON(ps, false, nil); got != golden {
 		t.Fatalf("json:\n%s", got)
 	}
-	live := map[string]endpoint.LeaseInfo{"a": {Host: "lh", Version: "1.0"}}
+	live := map[string]endpoint.LeaseInfo{"o_g_a": {Host: "lh", Version: "1.0"}}
 	var arr []map[string]any
 	if err := json.Unmarshal([]byte(whoJSON(ps, true, live)), &arr); err != nil || arr[0]["lease"].(map[string]any)["host"] != "lh" || arr[1]["lease"] != nil {
 		t.Fatalf("long json: %v %v", arr, err)
@@ -100,8 +106,8 @@ func TestWhoCapsFlagsAndRenderers(t *testing.T) {
 		}
 	}
 	ps := []endpoint.Presence{
-		{Record: store.Record{Name: "a", Owner: "o", Description: "does things", Caps: []string{"x", "y"}}},
-		{Record: store.Record{Name: "b", Owner: "o"}},
+		{Record: store.Record{Owner: "o", Group: "g", Instance: "a", Description: "does things", Caps: []string{"x", "y"}}},
+		{Record: store.Record{Owner: "o", Group: "g", Instance: "b"}},
 	}
 	long := whoText(ps, true, nil)
 	if !strings.Contains(long, "\tdesc does things\tcaps x,y") {
@@ -120,31 +126,29 @@ func TestWhoCapsFlagsAndRenderers(t *testing.T) {
 	}
 }
 
-func TestWhoShowsAlias(t *testing.T) {
-	al := store.Record{Name: "ops1", Owner: "team1", AgentToken: "acme", Alias: &store.Alias{Owner: "legowner", Name: "ops1"}}
-	plain := store.Record{Name: "ops2", Owner: "o"}
-	ps := []endpoint.Presence{{Record: al}, {Record: plain}}
+func TestWhoShowsAddressAndHarness(t *testing.T) {
+	r := store.Record{Owner: "acme", Group: "team1", Instance: "ops1", Agent: "claude-code"}
+	ps := []endpoint.Presence{{Record: r}}
 	long := whoText(ps, true, nil)
-	if !strings.Contains(long, "\talias legowner/ops1") {
-		t.Fatalf("--long text lacks the alias: %q", long)
+	if !strings.HasPrefix(long, "acme.team1.ops1\toffline") || !strings.Contains(long, "\tagent claude-code") {
+		t.Fatalf("--long text: %q", long)
 	}
-	if short := whoText(ps, false, nil); strings.Contains(short, "alias") {
-		t.Fatalf("short text shows the alias: %q", short)
+	if short := whoText(ps, false, nil); strings.Contains(short, "agent") || short != "acme.team1.ops1\toffline" {
+		t.Fatalf("short text: %q", short)
 	}
-	for _, l := range strings.Split(long, "\n") {
-		if strings.HasPrefix(l, "ops2") && strings.Contains(l, "alias") {
-			t.Fatalf("record without alias shows one: %q", l)
-		}
+	if got := whoNames(ps); got != "acme_team1_ops1" {
+		t.Fatalf("--names stays the flat key: %q", got)
 	}
 	var out []map[string]any
-	if err := json.Unmarshal([]byte(whoJSON(ps, true, nil)), &out); err != nil {
+	if err := json.Unmarshal([]byte(whoJSON(ps, false, nil)), &out); err != nil {
 		t.Fatal(err)
 	}
-	a, ok := out[0]["alias"].(map[string]any)
-	if !ok || a["owner"] != "legowner" || a["name"] != "ops1" || len(a) != 2 {
-		t.Fatalf("json alias = %v", out[0]["alias"])
+	e := out[0]
+	if e["name"] != "acme_team1_ops1" || e["identity"] != "acme.team1.ops1" || e["owner"] != "acme" || e["group"] != "team1" ||
+		e["instance"] != "ops1" || e["agent"] != "claude-code" {
+		t.Fatalf("json: %v", e)
 	}
-	if _, has := out[1]["alias"]; has {
-		t.Fatalf("record without alias has an alias key: %v", out[1])
+	if _, has := e["alias"]; has {
+		t.Fatalf("an alias key: %v", e)
 	}
 }

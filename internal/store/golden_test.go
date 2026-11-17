@@ -1,11 +1,11 @@
-// Characterisation tests (plan 2b, Phase 0): these pin today's identifiers and validity for legacy identities; a change here is a change to a legacy identifier and needs its own decision.
+// Characterisation tests: these pin the bucket, consumer and endpoint identifiers; a change here is a change to an identifier and needs its own decision.
 
 package store
 
-import "testing"
+import (
+	"testing"
 
-const (
-	goldenN48 = "abcdefghijklmnopqrstuvwxyz0123456789abcdefghijkl"
+	"github.com/bogworks/mash/internal/sap"
 )
 
 func TestGoldenBucketAndConsumerNames(t *testing.T) {
@@ -20,57 +20,28 @@ func TestGoldenBucketAndConsumerNames(t *testing.T) {
 	}
 }
 
-func TestGoldenMailSubjectFor(t *testing.T) {
-	for _, c := range []struct{ owner, name, want string }{
-		{"o", "a", "agents.mail.cc.o.a"},
-		{"acme-corp", "build-1", "agents.mail.cc.acme-corp.build-1"},
-		{goldenN48, goldenN48, "agents.mail.cc." + goldenN48 + "." + goldenN48},
+func TestGoldenAddressIdentifiers(t *testing.T) {
+	for _, c := range []struct{ owner, group, instance, mail, flat string }{
+		{"o", "g", "a", "agents.mail.o.g.a", "o_g_a"},
+		{"acme-corp", "build", "build-1", "agents.mail.acme-corp.build.build-1", "acme-corp_build_build-1"},
 	} {
-		if got := MailSubjectFor(c.owner, c.name); got != c.want {
-			t.Errorf("MailSubjectFor(%q,%q) = %q, want %q", c.owner, c.name, got, c.want)
+		a, err := sap.NewAddress(c.owner, c.group, c.instance)
+		if err != nil {
+			t.Fatal(err)
 		}
-	}
-}
-
-func TestGoldenSuspendedSubject(t *testing.T) {
-	for _, c := range []struct{ name, want string }{
-		{"a", "mash.suspended.a"},
-		{"build-1", "mash.suspended.build-1"},
-		{goldenN48, "mash.suspended." + goldenN48},
-	} {
-		if got := SuspendedSubject(c.name); got != c.want {
-			t.Errorf("SuspendedSubject(%q) = %q", c.name, got)
+		if got := MailSubjectFor(a); got != c.mail {
+			t.Errorf("MailSubjectFor(%v) = %q, want %q", a, got, c.mail)
+		}
+		if got := SuspendedSubject(a.Flat()); got != "mash.suspended."+c.flat {
+			t.Errorf("SuspendedSubject = %q", got)
+		}
+		cfg := InboxConfig(a)
+		if cfg.Name != "inbox-"+c.flat || len(cfg.Subjects) != 1 || cfg.Subjects[0] != c.mail || cfg.Description != "mash inbox for "+c.flat {
+			t.Errorf("inbox config: %q %q %q", cfg.Name, cfg.Subjects, cfg.Description)
 		}
 	}
 	if MetaSuspendedSubjects != "mash_suspended_subjects" || MetaSuspendedAt != "mash_suspended_at" ||
 		MetaSuspendedID != "mash_suspended_id" || MetaSuspendedUser != "mash_suspended_user" {
 		t.Error("a suspension metadata key changed")
-	}
-}
-
-func TestGoldenInboxStreamConfig(t *testing.T) {
-	c := InboxConfig("o", "a")
-	if c.Name != "inbox-a" || len(c.Subjects) != 1 || c.Subjects[0] != "agents.mail.*.o.a" || c.Description != "mash inbox for a" {
-		t.Errorf("legacy inbox config: %q %q %q", c.Name, c.Subjects, c.Description)
-	}
-}
-
-// The directory and lease buckets are keyed by the bare endpoint name: ParseRecord requires the key to equal the
-// record's name, and its mail subject to be the one MailSubjectFor derives.
-func TestGoldenDirectoryKeyIsName(t *testing.T) {
-	const rec = `{"name":"a","owner":"o","agent":"claude-code","agent_token":"cc","account":"A","user":"U","mail_subject":"agents.mail.cc.o.a","created":"2026-01-01T00:00:00Z"}`
-	if r, err := ParseRecord("a", []byte(rec)); err != nil || r.Name != "a" {
-		t.Fatalf("legacy record under key a: %v", err)
-	}
-	if _, err := ParseRecord("o.a", []byte(rec)); err == nil {
-		t.Error("record accepted under a key that is not its name")
-	}
-	const zrec = `{"name":"a","owner":"o","agent":"claude-code","agent_token":"cc","account":"A","user":"U","mail_subject":"agents.mail.cc.o.z.a","created":"2026-01-01T00:00:00Z","zone":"z"}`
-	if r, err := ParseRecord("a", []byte(zrec)); err != nil || r.Zone != "z" {
-		t.Fatalf("zoned record under key a: %v", err)
-	}
-	const bad = `{"name":"a","owner":"o","user":"U","mail_subject":"agents.mail.cc.o.z.a","zone":"z "}`
-	if _, err := ParseRecord("a", []byte(bad)); err == nil {
-		t.Error("record with an invalid zone accepted")
 	}
 }

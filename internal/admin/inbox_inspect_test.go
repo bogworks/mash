@@ -66,21 +66,19 @@ func TestClampRangeAndSeqs(t *testing.T) {
 }
 
 func TestParseInboxAddress(t *testing.T) {
-	for _, tc := range []struct{ in, key, owner string }{
-		{"alpha", "alpha", ""},
-		{"my-box", "my-box", ""},
-		{"claude_team1_ops1", "claude_team1_ops1", ""},
-		{"claude.team1.ops1", "claude_team1_ops1", "team1"},
-		{"cc.acme.ops1", "ops1", "acme"},
+	for _, tc := range []struct{ in, flat string }{
+		{"alice_dev_design", "alice_dev_design"},
+		{"alice.dev.design", "alice_dev_design"},
+		{"o.g-1.i2", "o_g-1_i2"},
 	} {
-		key, owner, err := parseInboxAddress(tc.in)
-		if err != nil || key != tc.key || owner != tc.owner {
-			t.Errorf("%q: %q %q %v, want %q %q", tc.in, key, owner, err, tc.key, tc.owner)
+		a, err := parseInboxAddress(tc.in)
+		if err != nil || a.Flat() != tc.flat {
+			t.Errorf("%q: %q %v, want %q", tc.in, a.Flat(), err, tc.flat)
 		}
 	}
-	for _, bad := range []string{"", "a.b", "a.b.c.d", "Claude.x.y", "a_b", "a_b_c_d", "Bad", "bad name", "-x", "claude..x"} {
-		if k, _, err := parseInboxAddress(bad); err == nil {
-			t.Errorf("%q accepted as %q", bad, k)
+	for _, bad := range []string{"", "alpha", "a.b", "a.b.c.d", "Alice.x.y", "a_b", "a_b_c_d", "Bad", "bad name", "-x", "alice..x", "cc.acme"} {
+		if a, err := parseInboxAddress(bad); err == nil {
+			t.Errorf("%q accepted as %q", bad, a.Flat())
 		}
 	}
 }

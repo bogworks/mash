@@ -12,41 +12,32 @@ import (
 	"github.com/bogworks/mash/internal/testenv"
 )
 
-// naming21Provision provisions agent.owner.name through Admin.ProvisionIdentity on the permissions the admin layer
+// naming21Provision provisions owner.group.instance through Admin.Provision on the permissions the admin layer
 // computes, and returns the environment its mash commands run with (its own credentials, never the admin's).
-func naming21Provision(t *testing.T, e *testenv.Env, adm *admin.Admin, agent, owner, name string) (sap.EndpointIdentity, map[string]string) {
+func naming21Provision(t *testing.T, e *testenv.Env, adm *admin.Admin, owner, group, instance string) (sap.Address, map[string]string) {
 	t.Helper()
-	id, err := sap.New(agent, owner, name)
+	id, err := sap.NewAddress(owner, group, instance)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx := context.Background()
-	existing, err := adm.List(ctx)
-	if err != nil {
+	creds, user := e.MintRaw(t, id.Flat(), *admin.Permissions(id))
+	if _, err := adm.Provision(context.Background(), id, user, e.Account, "", admin.Meta{}); err != nil {
 		t.Fatal(err)
 	}
-	perms, err := admin.NewFormUserPermissions(id, nil, existing, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	creds, user := e.MintRaw(t, id.Flat(), perms)
-	if _, err := adm.ProvisionIdentity(ctx, id, nil, user, e.Account, "", admin.Meta{}); err != nil {
-		t.Fatal(err)
-	}
-	return id, map[string]string{"HOME": t.TempDir(), "MASH_NAME": id.Name, "MASH_OWNER": id.Owner, "MASH_AGENT_TOKEN": id.Agent,
+	return id, map[string]string{"HOME": t.TempDir(), "MASH_NAME": id.Instance, "MASH_OWNER": id.Owner, "MASH_GROUP": id.Group,
 		"MASH_URL": e.URL, "MASH_CREDS": creds, "MASH_SETTLE_MS": "20", "MASH_IDLE_WAKE": "5s"}
 }
 
-// shownIdentities returns every identity printed in out in the canonical dotted form agent.owner.name. Ruling
-// (coordinator, 2026-11-10): the flat key (agent_owner_name) is a storage encoding (ADR 0074), not a display form; people
+// shownIdentities returns every identity printed in out in the canonical dotted form owner.group.instance. Ruling
+// (coordinator, 2026-11-10): the flat key (owner_group_instance) is a storage encoding (ADR 0074), not a display form; people
 // see the canonical form, tokens visibly separate, so the flat key is deliberately NOT recognised here.
-func shownIdentities(out string) []sap.EndpointIdentity {
-	var ids []sap.EndpointIdentity
+func shownIdentities(out string) []sap.Address {
+	var ids []sap.Address
 	for _, field := range strings.FieldsFunc(out, func(r rune) bool {
 		return r == ' ' || r == '\t' || r == '\n' || r == ',' || r == ':' || r == '"' || r == '(' || r == ')' || r == '[' || r == ']'
 	}) {
 		if p := strings.Split(field, "."); len(p) == 3 {
-			if id, err := sap.New(p[0], p[1], p[2]); err == nil {
+			if id, err := sap.NewAddress(p[0], p[1], p[2]); err == nil {
 				ids = append(ids, id)
 			}
 		}
@@ -55,14 +46,14 @@ func shownIdentities(out string) []sap.EndpointIdentity {
 }
 
 // assertShows fails unless out shows want with each of its three tokens byte-identical.
-func assertShows(t *testing.T, what, out string, want sap.EndpointIdentity) {
+func assertShows(t *testing.T, what, out string, want sap.Address) {
 	t.Helper()
 	for _, got := range shownIdentities(out) {
-		if got.Agent == want.Agent && got.Owner == want.Owner && got.Name == want.Name {
+		if got == want {
 			return
 		}
 	}
-	t.Fatalf("%s does not show %s/%s/%s byte-identical (shown %v):\n%s", what, want.Agent, want.Owner, want.Name, shownIdentities(out), out)
+	t.Fatalf("%s does not show %s/%s/%s byte-identical (shown %v):\n%s", what, want.Owner, want.Group, want.Instance, shownIdentities(out), out)
 }
 
 // (b) who, inbox, the message header and the trust line show the identity with its three tokens intact and [verified],
