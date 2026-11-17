@@ -283,6 +283,10 @@ func connectionLine(src *statusSource) string {
 	cfg := src.cfg
 	switch {
 	case src.cli:
+		if c, ok := endpoint.ReadConnection(cfg); ok && c.State == "failed" {
+			return fmt.Sprintf("connection: FAILED - %s (recorded by the session at %s). Next: if the endpoint was deleted or its key reissued, the old credentials no longer work: ask whoever runs mashctl for a new credentials file (mashctl endpoint show <address>); otherwise fix the cause and restart",
+				redactText(c.Error), redactText(c.At))
+		}
 		return "connection: " + cliLiveNote
 	case src.cfgErr != nil:
 		return "connection: FAILED - not started, because of the config problem above"
