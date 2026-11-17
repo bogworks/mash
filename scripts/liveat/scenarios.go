@@ -149,7 +149,6 @@ func (a *AT) mailVerified(name string, h Home, from, to []string, toAddr, text s
 // permissions asserts that `mash admin permissions O.G.I` prints REQ-005's set.
 func (a *AT) permissions(h Home, owner, group, name string) {
 	addr := owner + "." + group + "." + name
-	flat := owner + "_" + group + "_" + name
 	r := a.Mash("permissions-"+name, h, a.Conn(), "admin", "permissions", addr)
 	a.C.Check("mash admin permissions "+addr+" succeeds", r.Code == 0, exitDetail(r))
 	v, err := parseJSON(r.Stdout)
@@ -157,51 +156,111 @@ func (a *AT) permissions(h Home, owner, group, name string) {
 		a.C.Check("mash admin permissions prints the permission set as JSON", false, err.Error())
 		return
 	}
-	var pub, sub []string
-	for _, side := range []struct {
-		key string
-		dst *[]string
-	}{{"pub", &pub}, {"sub", &sub}} {
-		if m, ok := v.(map[string]any); ok {
-			if sm, ok := m[side.key].(map[string]any); ok {
-				if al, ok := sm["allow"].([]any); ok {
-					for _, x := range al {
-						if s, ok := x.(string); ok {
-							*side.dst = append(*side.dst, s)
-						}
-					}
+	pub, sub, deny := permissionLists(v)
+	fails, owners := checkPermissions(owner, group, name, pub, sub, deny)
+	a.C.Check("REQ-005: the credential's publish and subscribe set is exactly the contract's", len(fails) == 0, strings.Join(fails, "; "))
+	a.C.Check("INV-002: no line names another owner or a wildcard in the owner slot", len(owners) == 0, strings.Join(owners, "; "))
+}
+
+// permissionLists reads the allow lists and any deny entries from the printed permission JSON.
+func permissionLists(v any) (pub, sub, deny []string) {
+	strs := func(x any) []string {
+		var out []string
+		if al, ok := x.([]any); ok {
+			for _, e := range al {
+				if s, ok := e.(string); ok {
+					out = append(out, s)
 				}
 			}
 		}
+		return out
 	}
-	var missing []string
-	for _, w := range []string{"agents.mail." + owner + ".*.*", "agents.prompt." + owner + ".*.*", "agents.status." + owner + ".*.*", "agents.hb." + owner + "." + group + "." + name} {
-		if !slices.Contains(pub, w) {
-			missing = append(missing, "publish "+w)
+	m, _ := v.(map[string]any)
+	for _, side := range []struct {
+		key string
+		dst *[]string
+		tag string
+	}{{"pub", &pub, "publish "}, {"sub", &sub, "subscribe "}} {
+		sm, _ := m[side.key].(map[string]any)
+		*side.dst = strs(sm["allow"])
+		for _, d := range strs(sm["deny"]) {
+			deny = append(deny, side.tag+d)
 		}
 	}
-	for _, w := range []string{"agents.prompt." + addr, "agents.status." + addr, "$SRV.>", "agents.hb." + owner + ".*.*"} {
-		if !slices.Contains(sub, w) {
-			missing = append(missing, "subscribe "+w)
+	return pub, sub, deny
+}
+
+// expectedPermissions is REQ-005's complete set for O.G.I, written out from the contract.
+func expectedPermissions(owner, group, name string) (pub, sub []string) {
+	f := owner + "_" + group + "_" + name
+	pub = []string{
+		"agents.mail." + owner + ".*.*", "agents.prompt." + owner + ".*.*", "agents.status." + owner + ".*.*",
+		"agents.hb." + owner + "." + group + "." + name,
+		"_INBOX.>", "$SRV.>", "$JS.API.INFO",
+		"$JS.API.STREAM.INFO.inbox-" + f,
+		"$JS.API.CONSUMER.INFO.inbox-" + f + ".deliver",
+		"$JS.API.CONSUMER.MSG.NEXT.inbox-" + f + ".deliver",
+		"$JS.ACK.inbox-" + f + ".deliver.>",
+		"$JS.API.DIRECT.GET.inbox-" + f,
+		"$JS.API.DIRECT.GET.inbox-" + f + ".>",
+		"$JS.API.STREAM.INFO.KV_mash-directory",
+		"$JS.API.DIRECT.GET.KV_mash-directory.>",
+		"$JS.API.STREAM.INFO.KV_mash-leases",
+		"$KV.mash-leases." + f,
+		"$JS.API.DIRECT.GET.KV_mash-leases.$KV.mash-leases." + f,
+	}
+	sub = []string{"_INBOX." + f + ".>", "agents.prompt." + owner + "." + group + "." + name,
+		"agents.status." + owner + "." + group + "." + name, "$SRV.>", "agents.hb." + owner + ".*.*"}
+	return pub, sub
+}
+
+// diffSet reports the lines of want absent from got and the lines of got not in want.
+func diffSet(side string, got, want []string) (missing, unexpected []string) {
+	for _, w := range want {
+		if !slices.Contains(got, w) {
+			missing = append(missing, side+" "+w)
 		}
 	}
-	hasInbox := false
-	for _, s := range sub {
-		if strings.HasPrefix(s, "_INBOX.") && strings.Contains(s, flat) && strings.HasSuffix(s, ".>") {
-			hasInbox = true
+	for _, g := range got {
+		if !slices.Contains(want, g) {
+			unexpected = append(unexpected, side+" "+g)
 		}
 	}
-	if !hasInbox {
-		missing = append(missing, "subscribe _INBOX."+flat+".>")
+	return missing, unexpected
+}
+
+// checkPermissions compares the complete printed sets to the contract's. fails covers set differences and
+// deny entries; owners covers every agents. line that does not carry the owner literally in the owner slot.
+func checkPermissions(owner, group, name string, pub, sub, deny []string) (fails, owners []string) {
+	wp, ws := expectedPermissions(owner, group, name)
+	var missing, unexpected []string
+	for _, side := range []struct {
+		n         string
+		got, want []string
+	}{{"publish", pub, wp}, {"subscribe", sub, ws}} {
+		m, u := diffSet(side.n, side.got, side.want)
+		missing = append(missing, m...)
+		unexpected = append(unexpected, u...)
 	}
-	a.C.Check("REQ-005: the credential's publish and subscribe set is the contract's", len(missing) == 0, strings.Join(missing, "; "))
-	var foreign []string
+	if len(missing) > 0 {
+		fails = append(fails, "missing: "+strings.Join(missing, ", "))
+	}
+	if len(unexpected) > 0 {
+		fails = append(fails, "unexpected: "+strings.Join(unexpected, ", "))
+	}
+	if len(deny) > 0 {
+		fails = append(fails, "deny entries: "+strings.Join(deny, ", "))
+	}
 	for _, s := range append(slices.Clone(pub), sub...) {
-		if t := strings.Split(s, "."); len(t) >= 4 && t[0] == "agents" && t[2] != owner {
-			foreign = append(foreign, s)
+		if !strings.HasPrefix(s, "agents.") {
+			continue
+		}
+		t := strings.Split(s, ".")
+		if s == "agents.>" || strings.HasSuffix(s, ".>") || len(t) < 4 || t[2] != owner {
+			owners = append(owners, s)
 		}
 	}
-	a.C.Check("INV-002: no line names another owner or a wildcard in the owner slot", len(foreign) == 0, strings.Join(foreign, "; "))
+	return fails, owners
 }
 
 var authRE = regexp.MustCompile(`(?i)authori[sz]ation|not authori[sz]ed|revoked`)

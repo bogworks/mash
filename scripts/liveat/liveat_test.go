@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -24,8 +25,10 @@ func TestScanBytes(t *testing.T) {
 		{"a jwt " + fakeJWT, []string{"jwt"}},
 		{fakeSeed + "\n" + fakeJWT, []string{"seed", "jwt"}},
 		{"SU" + strings.Repeat("B", 20), nil}, // too short to be a seed
-		{"SA" + strings.Repeat("B", 54), nil}, // an account seed is not a user seed
-		{"eyJabc.def.ghi", nil},               // too short to be a JWT
+		{"SAMPLE SECTION SUCCESS SOCIAL", nil},
+		{"U" + strings.Repeat("B", 55), nil}, // public keys are not seeds
+		{"A" + strings.Repeat("B", 55), nil},
+		{"eyJabc.def.ghi", nil}, // too short to be a JWT
 	} {
 		got := scanBytes([]byte(c.in))
 		if strings.Join(got, ",") != strings.Join(c.want, ",") {
@@ -263,5 +266,43 @@ func TestBuildEnvDefaultPathWhenTheCallerHasNone(t *testing.T) {
 	}
 	if got["PATH"] != "/usr/bin:/bin" {
 		t.Errorf("PATH %q", got["PATH"])
+	}
+}
+
+func TestEverySeedPrefixIsFlagged(t *testing.T) {
+	for _, p := range []string{"O", "A", "N", "C", "U", "P", "X"} {
+		tok := "S" + p + strings.Repeat("A", 54)
+		if got := scanBytes([]byte("x " + tok + " y")); len(got) != 1 || got[0] != "seed" {
+			t.Errorf("prefix %s: got %v", p, got)
+		}
+		if strings.Contains(redact(tok), tok) {
+			t.Errorf("prefix %s: not redacted", p)
+		}
+	}
+	if got := scanBytes([]byte("S" + "Z" + strings.Repeat("A", 54))); got != nil {
+		t.Errorf("unknown prefix flagged: %v", got)
+	}
+}
+
+func TestCheckPermissions(t *testing.T) {
+	pub, sub := expectedPermissions("alice", "dev", "design")
+	if f, o := checkPermissions("alice", "dev", "design", pub, sub, nil); len(f)+len(o) != 0 {
+		t.Fatalf("exact set failed: %v %v", f, o)
+	}
+	f, o := checkPermissions("alice", "dev", "design", append(slices.Clone(pub), "agents.>"), sub, nil)
+	if len(f) != 1 || !strings.HasPrefix(f[0], "unexpected:") || len(o) != 1 {
+		t.Errorf("extra agents.>: %v %v", f, o)
+	}
+	f, _ = checkPermissions("alice", "dev", "design", pub[1:], sub, nil)
+	if len(f) != 1 || !strings.HasPrefix(f[0], "missing:") {
+		t.Errorf("missing line: %v", f)
+	}
+	f, o = checkPermissions("alice", "dev", "design", append(slices.Clone(pub), "agents.mail.bob.*.*"), sub, nil)
+	if len(f) != 1 || len(o) != 1 {
+		t.Errorf("foreign owner: %v %v", f, o)
+	}
+	f, _ = checkPermissions("alice", "dev", "design", pub, sub, []string{"publish x"})
+	if len(f) != 1 || !strings.HasPrefix(f[0], "deny entries:") {
+		t.Errorf("deny: %v", f)
 	}
 }
