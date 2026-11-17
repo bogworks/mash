@@ -10,9 +10,8 @@ zone command-line items, frozen on 2026-11-10, are unfrozen.
 
 ## Ruling (D188, 2026-11-11)
 
-The maintainer: "There's no zones. I see no reason for them. The natural boundaries in homerange are the range, herd,
-and lane." This is the direction section 6 recommends: remove zones, keep the mail subject at SAP's five tokens, and
-let the existing address (the herd part of it) be the fence (alternative A).
+The maintainer ruled that there are no zones. This is the direction section 6 recommends: remove zones, keep the mail subject at SAP's five tokens, and
+let the existing address be the fence (alternative A).
 
 What the ruling settles: the zone token, `set-zone`, `provision --zone`, the six-token lines and `subject_label` go.
 What it does not settle, and this document does not decide: the label policy model (F1, F2 and the policy file's

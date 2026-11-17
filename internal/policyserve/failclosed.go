@@ -74,7 +74,7 @@ var _ InboxChecker = (*admin.Admin)(nil)
 // configuration mail depends on. The Applier runs the same check for every added address before anything is pushed,
 // so a step reached here finds the inbox it found then.
 //
-// IssueCredential issues nothing: credentials come from the issue service on a wrangler's request (ADR 0104). It only
+// IssueCredential issues nothing: credentials come from the issue service on a requester's request (ADR 0104). It only
 // checks that the address is issuable, so a step reached for an address that no list set in the run names, or whose
 // owner group has no scoped key, fails. It is idempotent.
 type Provisioner struct {

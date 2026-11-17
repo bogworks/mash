@@ -1,13 +1,13 @@
-// Package wranglerreg is the static wrangler registry: a file that says which wrangler public key may countersign an
+// Package requesterreg is the static requester registry: a file that says which requester public key may countersign an
 // issue request for which host and owner group (REQ-013, ADR 0104).
 //
-// It is for test accounts only. How a real wrangler's key comes to be registered for a host and an owner group is not
+// It is for test accounts only. How a real requester's key comes to be registered for a host and an owner group is not
 // decided (DEC-002 leaves it open), so this registry refuses to serve any account that is not flagged as a test
 // account in the file, and any account the file does not name. The flag in the file is a declaration and nothing
 // more: the operator makes a second one, `mashctl issue serve --test-account`, and the service starts only when both
 // agree. It holds public keys only; nothing in it is secret,
 // but it decides who may have a credential signed, so it is written 0600 and read only if no one else can write it.
-package wranglerreg
+package requesterreg
 
 import (
 	"crypto/rand"
@@ -29,19 +29,19 @@ import (
 )
 
 // FileName is the registry's name inside the key store directory.
-const FileName = "wranglers.json"
+const FileName = "requesters.json"
 
 // maxFile bounds how much of the file is read.
 const maxFile = 1 << 20
 
 // ErrNoRegistry is wrapped by every refusal to serve from the static registry.
-var ErrNoRegistry = errors.New("no wrangler registry for this account: the static registry is for test accounts only; real wrangler registration is not decided yet")
+var ErrNoRegistry = errors.New("no requester registry for this account: the static registry is for test accounts only; real requester registration is not decided yet")
 
-// Entry registers one wrangler public key for one host and owner group.
+// Entry registers one requester public key for one host and owner group.
 type Entry struct {
-	Host        string `json:"host"`
-	Group       string `json:"group"`
-	WranglerKey string `json:"wrangler_key"`
+	Host         string `json:"host"`
+	Group        string `json:"group"`
+	RequesterKey string `json:"requester_key"`
 }
 
 // File is the registry file.
@@ -64,48 +64,48 @@ func Load(path string) (*File, error) {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, err
 		}
-		return nil, fmt.Errorf("wrangler registry %s: %w", path, err)
+		return nil, fmt.Errorf("requester registry %s: %w", path, err)
 	}
 	f, err := config.OpenNoFollow(path, os.O_RDONLY, 0)
 	if err != nil {
 		if config.IsSymlinkRefusal(err) {
-			return nil, fmt.Errorf("wrangler registry %s is a symlink: refusing it", path)
+			return nil, fmt.Errorf("requester registry %s is a symlink: refusing it", path)
 		}
 		return nil, err
 	}
 	defer f.Close()
 	fi, err := f.Stat()
 	if err != nil {
-		return nil, fmt.Errorf("wrangler registry %s: %w", path, err)
+		return nil, fmt.Errorf("requester registry %s: %w", path, err)
 	}
 	if !fi.Mode().IsRegular() {
-		return nil, fmt.Errorf("wrangler registry %s is not a regular file", path)
+		return nil, fmt.Errorf("requester registry %s is not a regular file", path)
 	}
 	if fi.Mode().Perm()&0o022 != 0 {
-		return nil, fmt.Errorf("wrangler registry %s has mode %04o: others can write it. Run: chmod 600 %s", path, fi.Mode().Perm(), path)
+		return nil, fmt.Errorf("requester registry %s has mode %04o: others can write it. Run: chmod 600 %s", path, fi.Mode().Perm(), path)
 	}
-	if err := ctlkeys.CheckOwned(fi, path, "wrangler registry"); err != nil {
+	if err := ctlkeys.CheckOwned(fi, path, "requester registry"); err != nil {
 		return nil, err
 	}
 	if fi.Size() > maxFile {
-		return nil, fmt.Errorf("wrangler registry %s is too large", path)
+		return nil, fmt.Errorf("requester registry %s is too large", path)
 	}
 	b, err := io.ReadAll(io.LimitReader(f, maxFile))
 	if err != nil {
-		return nil, fmt.Errorf("wrangler registry %s: %w", path, err)
+		return nil, fmt.Errorf("requester registry %s: %w", path, err)
 	}
 	var r File
 	dec := json.NewDecoder(strings.NewReader(string(b)))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&r); err != nil {
-		return nil, fmt.Errorf("wrangler registry %s: %w", path, err)
+		return nil, fmt.Errorf("requester registry %s: %w", path, err)
 	}
 	if !nkeys.IsValidPublicAccountKey(r.Account) {
-		return nil, fmt.Errorf("wrangler registry %s: \"account\" is not an account public key", path)
+		return nil, fmt.Errorf("requester registry %s: \"account\" is not an account public key", path)
 	}
 	for i, e := range r.Entries {
 		if err := e.validate(); err != nil {
-			return nil, fmt.Errorf("wrangler registry %s: entry %d: %w", path, i+1, err)
+			return nil, fmt.Errorf("requester registry %s: entry %d: %w", path, i+1, err)
 		}
 	}
 	return &r, nil
@@ -118,8 +118,8 @@ func (e Entry) validate() error {
 	if r, o, ok := strings.Cut(e.Group, "."); !ok || r == "" || o == "" || strings.Contains(o, ".") {
 		return fmt.Errorf("group %q is not range.owner", e.Group)
 	}
-	if !nkeys.IsValidPublicUserKey(e.WranglerKey) {
-		return fmt.Errorf("wrangler_key %q is not a NATS user public key", e.WranglerKey)
+	if !nkeys.IsValidPublicUserKey(e.RequesterKey) {
+		return fmt.Errorf("requester_key %q is not a NATS user public key", e.RequesterKey)
 	}
 	return nil
 }
@@ -172,12 +172,12 @@ func withLock(path string, fn func() error) error {
 		if errors.Is(err, os.ErrNotExist) {
 			return err
 		}
-		return fmt.Errorf("wrangler registry %s: %w", path, err)
+		return fmt.Errorf("requester registry %s: %w", path, err)
 	}
 	unlock, err := ctlkeys.LockFile(LockPath(path), lockWait)
 	if err != nil {
 		if errors.Is(err, ctlkeys.ErrLockBusy) {
-			return fmt.Errorf("%w: another mashctl wrangler command is editing the registry: run the command again", err)
+			return fmt.Errorf("%w: another mashctl requester command is editing the registry: run the command again", err)
 		}
 		return err
 	}
@@ -228,9 +228,9 @@ func Init(path, account string) (created bool, err error) {
 var ErrForeign = errors.New("the registry exists and is for another account or not a test registry: not overwriting it")
 
 // Add registers key for host and group. A second registration of the same triple is a no-op; the same host and group
-// with another key adds a second key (a wrangler key may be rotated without a gap).
+// with another key adds a second key (a requester key may be rotated without a gap).
 func (f *File) Add(host, group, key string) error {
-	e := Entry{Host: host, Group: group, WranglerKey: key}
+	e := Entry{Host: host, Group: group, RequesterKey: key}
 	if err := e.validate(); err != nil {
 		return err
 	}
@@ -247,8 +247,8 @@ func (f *File) Remove(host, group string) int {
 	return n - len(f.Entries)
 }
 
-// Static is the WranglerRegistry the issue service uses on a test account. It reads the file again at every lookup, so
-// `mashctl wrangler remove` takes effect at once and a file that has become unreadable, or no longer a test registry
+// Static is the RequesterRegistry the issue service uses on a test account. It reads the file again at every lookup, so
+// `mashctl requester remove` takes effect at once and a file that has become unreadable, or no longer a test registry
 // for the account, registers no one (fail closed).
 type Static struct{ path, account string }
 
@@ -276,7 +276,7 @@ func OpenStatic(path, account string) (*Static, error) {
 	return &Static{path: path, account: account}, nil
 }
 
-// Lookup returns the wrangler public keys registered for exactly host and group; none when the file no longer passes
+// Lookup returns the requester public keys registered for exactly host and group; none when the file no longer passes
 // the checks of OpenStatic.
 func (s *Static) Lookup(host, group string) []string {
 	f, err := openFile(s.path, s.account)
@@ -286,7 +286,7 @@ func (s *Static) Lookup(host, group string) []string {
 	var out []string
 	for _, e := range f.Entries {
 		if e.Host == host && e.Group == group {
-			out = append(out, e.WranglerKey)
+			out = append(out, e.RequesterKey)
 		}
 	}
 	return out
