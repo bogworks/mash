@@ -88,6 +88,11 @@ func (e *Endpoint) SetConnectionHook(f func(error)) {
 }
 
 func isAuthFailure(err error) bool {
-	return errors.Is(err, nats.ErrAuthorization) || errors.Is(err, nats.ErrAuthExpired) ||
-		strings.Contains(strings.ToLower(err.Error()), "authorization violation")
+	if errors.Is(err, nats.ErrAuthorization) || errors.Is(err, nats.ErrAuthExpired) || errors.Is(err, nats.ErrAuthRevoked) ||
+		errors.Is(err, nats.ErrAccountAuthExpired) {
+		return true
+	}
+	t := strings.ToLower(err.Error())
+	return strings.Contains(t, "authorization violation") || strings.Contains(t, "authentication revoked") ||
+		strings.Contains(t, "authentication expired")
 }
