@@ -358,6 +358,7 @@ func TestEndpointCreateGolden(t *testing.T) {
 func TestEndpointReissue(t *testing.T) {
 	h := newFleetEnv(t)
 	calls := fakeRevoke(t, nil)
+	setFakeAcked(t, 3)
 	out := t.TempDir()
 	oldPub, oldFile, _ := epKey(t, out, "old")
 	a := ad("rot")
@@ -381,6 +382,12 @@ func TestEndpointReissue(t *testing.T) {
 	if err := json.Unmarshal([]byte(so), &doc); err != nil || doc.Outcome != "reissued" || doc.UserPublicKey != newPub || doc.JWTWritten == nil || !*doc.JWTWritten {
 		t.Fatalf("doc %q %v", so, err)
 	}
+	if doc.ServersAcknowledged == nil || *doc.ServersAcknowledged != 3 {
+		t.Errorf("servers_acknowledged in %q", so)
+	}
+	if so, _, _ := h.run("endpoint", "reissue", ad("host2").String(), "--make-key", "--dry-run", "--json"); strings.Contains(so, "servers_acknowledged") {
+		t.Errorf("a planned or refused document carries the count: %q", so)
+	}
 	if rec, _ := h.record(a); rec.User != newPub {
 		t.Errorf("record user %s", rec.User)
 	}
@@ -393,7 +400,7 @@ func TestEndpointReissue(t *testing.T) {
 	if _, _, code := h.run("endpoint", "reissue", ad("none").String(), "--public-key", newFile, "--jwt-out", filepath.Join(out, "n2.jwt")); code != 1 {
 		t.Errorf("missing: %d", code)
 	}
-	if _, _, code := h.run("endpoint", "reissue", "--all", "--make-key", "--yes"); code != 2 {
+	if _, _, code := h.run("endpoint", "reissue", "--all", "--public-key", newFile, "--yes"); code != 2 {
 		t.Errorf("bulk: %d", code)
 	}
 	// same host: the creds file is replaced, mode 0600
@@ -402,8 +409,8 @@ func TestEndpointReissue(t *testing.T) {
 	}
 	p := h.creds(ad("host"))
 	first, _ := os.ReadFile(p)
-	if _, se, code := h.run("endpoint", "reissue", ad("host").String(), "--make-key"); code != 0 {
-		t.Fatalf("reissue host: %d %q", code, se)
+	if so, se, code := h.run("endpoint", "reissue", ad("host").String(), "--make-key"); code != 0 || !strings.Contains(so, "servers acknowledged the account update: 3\n") {
+		t.Fatalf("reissue host: %d %q %q", code, so, se)
 	}
 	second, _ := os.ReadFile(p)
 	if string(first) == string(second) || fileMode(t, p) != 0o600 {

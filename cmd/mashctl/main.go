@@ -80,7 +80,8 @@ func run(args []string, env func(string) string, lookup config.Lookup, stdout, s
 		if err != nil {
 			return err
 		}
-		return revokeUsers(ctx, cfg, env, n, users, stdout, now)
+		_, err = revokeUsers(ctx, cfg, env, n, users, stdout, now)
+		return err
 	}
 	ctl.CheckRevokeServers = func(ctx context.Context, cfg config.Config) error {
 		n, err := parseServers(env)

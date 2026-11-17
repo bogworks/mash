@@ -43,13 +43,17 @@ func TestEndpointDeleteRemovesRecordRenamesCredsRevokesKey(t *testing.T) {
 	h := newFleetEnv(t)
 	h.seed(ad("c"))
 	_, user := h.credsClaims(ad("c"))
+	h.seed(ad("d"))
+	if so, _, code := h.run("endpoint", "delete", "o/g/d", "--json"); code != 0 || !strings.Contains(so, `"servers_acknowledged": 1`) {
+		t.Errorf("delete json %d %q", code, so)
+	}
 	retireNow = func() time.Time { return time.Date(2026, 11, 2, 3, 4, 5, 0, time.UTC) }
 	t.Cleanup(func() { retireNow = time.Now })
 	out, errb, code := h.run("endpoint", "delete", "o/g/c")
 	if code != 0 || !strings.HasPrefix(out, "deleted o/g/c (o.g.c)\n") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
-	if !strings.Contains(out, "revoked in the account JWT") || !strings.Contains(out, ".retired-20261102T030405Z") {
+	if !strings.Contains(out, "revoked in the account JWT") || !strings.Contains(out, "1 server(s) acknowledged") || !strings.Contains(out, ".retired-20261102T030405Z") {
 		t.Errorf("report: %q", out)
 	}
 	noSecrets(t, out, errb)

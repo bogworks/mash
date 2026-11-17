@@ -74,6 +74,7 @@ type retireResult struct {
 	credsAction  string // renamed, removed or none
 	renamedTo    string
 	nextSteps    []string
+	acked        int // servers that took the revocation of the user key; set when this run revoked it
 	pendingUsage bool
 }
 
@@ -181,17 +182,35 @@ func retireAddress(addr sap.Address, opts retireOpts, env func(string) string, l
 		user = r.User
 	}
 	if user == "" && !force {
+		// A run killed after the record was removed and before the creds step: the address is burned and a creds file
+		// is still there. The same command finishes it, with no --force.
+		finishing := false
+		if credsPath != "" {
+			if _, lerr := os.Lstat(credsPath); lerr == nil {
+				burned, berr := adm.IsBurned(ctx, addr)
+				if berr != nil {
+					return stop("error", "", nil, "%v", berr)
+				}
+				finishing = burned
+			}
+		}
+		if finishing {
+			fmt.Fprintf(stderr, "mashctl: %s %s: the address is already retired; finishing the creds file\n", opts.verb, label)
+		}
 		hint := ""
 		if opts.listHint != "" {
 			hint = opts.listHint + "; "
 		}
-		return stop("refused", "not_found", []string{"mashctl endpoint list shows the endpoints that exist"}, "no directory record on the server (%s--force handles the creds file anyway); if the endpoint was partly removed, finish with mashctl deprovision %s", hint, name)
+		if !finishing {
+			return stop("refused", "not_found", []string{"mashctl endpoint list shows the endpoints that exist"}, "no directory record on the server (%s--force handles the creds file anyway); if the endpoint was partly removed, finish with mashctl deprovision %s", hint, name)
+		}
 	}
 	if opts.dryRun {
 		return planRetire(opts, user, credsPath, stdout)
 	}
 	var revokeOut bytes.Buffer
 	revokedOK := false // the revocation completed on every server
+	revokeAcked := 0   // the servers that took it
 	if user != "" {
 		// The user key is revoked inside the guarded removal, under the name's lock and only for the record it accepts:
 		// a failed revocation removes nothing, a refused removal revokes nothing.
@@ -226,11 +245,13 @@ func retireAddress(addr sap.Address, opts retireOpts, env func(string) string, l
 						return fmt.Errorf("creds check: %w", err)
 					}
 				}
-				if err := revokeUsers(ctx, cfg, env, servers, []string{u}, &revokeOut, func() time.Time { return revokeAt }); err != nil {
+				n, err := revokeUsers(ctx, cfg, env, servers, []string{u}, &revokeOut, func() time.Time { return revokeAt })
+				if err != nil {
 					revokeErr = err
 					return fmt.Errorf("user key %s...: %w", ctl.ShortKey(u), err)
 				}
 				revokedOK = true
+				revokeAcked = n
 				ctl.MarkRevoked(ctx, recorder, u, revokeAt, stderr)
 				return nil
 			})
@@ -332,6 +353,7 @@ func retireAddress(addr sap.Address, opts retireOpts, env func(string) string, l
 		fmt.Fprintf(stdout, "%s: %s\n", label, noRevokeNote)
 		fmt.Fprint(stderr, ctl.NoRevokeWarning(name, user))
 	default:
+		res.acked = revokeAcked
 		io.WriteString(stdout, revokeOut.String())
 		fmt.Fprintf(stdout, "user key %s... revoked in the account JWT: its creds stop working when the server takes the update; the creds file is separate\n", ctl.ShortKey(user))
 	}

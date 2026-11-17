@@ -259,11 +259,11 @@ func TestEndpointReissueConcurrentSameHost(t *testing.T) {
 	h := newFleetEnv(t)
 	var mu sync.Mutex
 	prev := revokeUsers
-	revokeUsers = func(_ context.Context, _ config.Config, _ func(string) string, _ int, _ []string, _ io.Writer, _ func() time.Time) error {
+	revokeUsers = func(_ context.Context, _ config.Config, _ func(string) string, _ int, _ []string, _ io.Writer, _ func() time.Time) (int, error) {
 		mu.Lock()
 		defer mu.Unlock()
 		time.Sleep(20 * time.Millisecond)
-		return nil
+		return fakeAcked, nil
 	}
 	t.Cleanup(func() { revokeUsers = prev })
 	a := ad("race")
@@ -367,12 +367,12 @@ func TestEndpointReissueConcurrentPublicKey(t *testing.T) {
 	var mu sync.Mutex
 	rotations := 0
 	prev := revokeUsers
-	revokeUsers = func(_ context.Context, _ config.Config, _ func(string) string, _ int, _ []string, _ io.Writer, _ func() time.Time) error {
+	revokeUsers = func(_ context.Context, _ config.Config, _ func(string) string, _ int, _ []string, _ io.Writer, _ func() time.Time) (int, error) {
 		mu.Lock()
 		defer mu.Unlock()
 		rotations++
 		time.Sleep(20 * time.Millisecond)
-		return nil
+		return 1, nil
 	}
 	t.Cleanup(func() { revokeUsers = prev })
 	out := t.TempDir()

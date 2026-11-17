@@ -28,7 +28,9 @@ const endpointCreateUsage = `usage: mashctl endpoint create [ADDRESS] [--owner O
                                [--servers N] [--sys-creds FILE] [--dry-run] [--json]
   ADDRESS is alice/dev/design, or one token (the instance) with --group. There is no default group.
   --public-key FILE  sign the public key the endpoint made (mash key create); the JWT is written to --jwt-out
-  --make-key         make the key on this host and write <config dir>/<address>.creds (mode 0600)
+  --make-key         make the key on this host and write <config dir>/<address>.creds (mode 0600); the key is kept in
+                     <creds file>.pending until the creds file is written, so the same command run again after a kill
+                     finishes with the same key
   A group cannot be changed later: make a new endpoint and delete the old one. The environment does not give a group.
   exit codes: 0 done or planned, 1 refused, 2 usage, 6 error
 Example:
@@ -55,24 +57,26 @@ type epRefusal struct {
 // epDoc is the JSON document of create and reissue. The fields of the contract (REQ-003) are at the top level. No field
 // holds a seed or a JWT.
 type epDoc struct {
-	Schema        string            `json:"schema"`
-	Outcome       string            `json:"outcome"`
-	Owner         string            `json:"owner"`
-	Group         string            `json:"group"`
-	Instance      string            `json:"instance"`
-	Address       string            `json:"address"`
-	Key           string            `json:"key"`
-	JWTPath       string            `json:"jwt_path,omitempty"`
-	JWTWritten    *bool             `json:"jwt_written,omitempty"`
-	CredsPath     string            `json:"creds_path,omitempty"`
-	CredsWritten  *bool             `json:"creds_written,omitempty"`
-	UserPublicKey string            `json:"user_public_key,omitempty"`
-	Labels        map[string]string `json:"labels"`
-	Caps          []string          `json:"caps"`
-	Description   string            `json:"description"`
-	Note          string            `json:"note"`
-	NextSteps     []epStep          `json:"next_steps"`
-	Refusal       *epRefusal        `json:"refusal"`
+	Schema        string `json:"schema"`
+	Outcome       string `json:"outcome"`
+	Owner         string `json:"owner"`
+	Group         string `json:"group"`
+	Instance      string `json:"instance"`
+	Address       string `json:"address"`
+	Key           string `json:"key"`
+	JWTPath       string `json:"jwt_path,omitempty"`
+	JWTWritten    *bool  `json:"jwt_written,omitempty"`
+	CredsPath     string `json:"creds_path,omitempty"`
+	CredsWritten  *bool  `json:"creds_written,omitempty"`
+	UserPublicKey string `json:"user_public_key,omitempty"`
+	// ServersAcknowledged is set by reissue only: create does not change the account JWT, so it has no such field.
+	ServersAcknowledged *int              `json:"servers_acknowledged,omitempty"`
+	Labels              map[string]string `json:"labels"`
+	Caps                []string          `json:"caps"`
+	Description         string            `json:"description"`
+	Note                string            `json:"note"`
+	NextSteps           []epStep          `json:"next_steps"`
+	Refusal             *epRefusal        `json:"refusal"`
 }
 
 // epDocFor is the document of an endpoint at addr (a zero addr leaves the names empty).
@@ -569,8 +573,41 @@ func runEndpointCreate(args []string, env func(string) string, lookup config.Loo
 		}
 		out.set(display)
 	}
-	if ref := epPathFree(outPath); ref != nil {
+	// A same-host run killed after it staged its key finds the pending file: it is the key to finish with.
+	pending := outPath + ".pending"
+	var pendingKey string
+	if c.makeKey {
+		if _, lerr := os.Lstat(pending); lerr == nil {
+			k, _, _, kerr := epStageKey(pending)
+			if kerr != nil {
+				return epErr(doc, "create", "write", fmt.Sprintf("cannot use the staged key %s: %v; nothing was changed", pending, kerr), c.jsonOut, stdout, stderr)
+			}
+			pendingKey = k
+		}
+	}
+	if pendingKey != "" {
+		if _, lerr := os.Lstat(outPath); lerr == nil {
+			have, cerr := epCredsUser(outPath)
+			if cerr != nil || have != pendingKey {
+				return refuse(1, &epRefusal{"creds_exists", fmt.Sprintf("%s already exists for another key and is never overwritten; move it aside and run the same command again", outPath)})
+			}
+			// The creds file is already the staged key's: the run was killed after it wrote them.
+			if !c.dryRun {
+				os.Remove(pending)
+				doc.UserPublicKey = have
+				out.written()
+				doc.Outcome = "created"
+				doc.NextSteps = []epStep{epNextSession(addr)}
+				return epReport("create", doc, func(w io.Writer) {
+					fmt.Fprintf(w, "created endpoint %s\n  address  %s\n  creds    %s\nnext: start a session as this endpoint: %s\n", epShortcut(addr), addr, outPath, doc.NextSteps[0].Detail)
+				}, 0, stdout, stderr, c.jsonOut)
+			}
+		}
+	} else if ref := epPathFree(outPath); ref != nil {
 		return refuse(1, ref)
+	}
+	if c.makeKey {
+		pub = pendingKey
 	}
 	keys, acct, err := epAccountOf(cfg, env)
 	if err != nil {
@@ -618,10 +655,10 @@ func runEndpointCreate(args []string, env func(string) string, lookup config.Loo
 		case errors.Is(err, admin.ErrNoRecord):
 		case err != nil:
 			return epErr(doc, "create", "server", admin.RewordUnavailable(err.Error()), c.jsonOut, stdout, stderr)
-		case c.makeKey || user != pub:
+		case user != pub:
 			return refuse(1, &epRefusal{enroll.CodeAddressTaken, fmt.Sprintf("endpoint %s already exists; mashctl endpoint show %s shows it, mashctl endpoint reissue %s gives it a new key", addr, epShortcut(addr), epShortcut(addr))})
 		}
-		if !c.makeKey {
+		if pub != "" {
 			if ref, err := epIssuedRefusal(ctx, adm, addr, pub); err != nil {
 				return epErr(doc, "create", "server", admin.RewordUnavailable(err.Error()), c.jsonOut, stdout, stderr)
 			} else if ref != nil {
@@ -636,26 +673,38 @@ func runEndpointCreate(args []string, env func(string) string, lookup config.Loo
 	}
 
 	deps := enroll.Deps{Keys: keys, Admin: adm, Account: acct}
+	var seed []byte
+	madePending := false
+	if c.makeKey {
+		// The key is made here and kept in the pending file before the directory is written, so a run killed at any
+		// later point finds the same key when it runs again.
+		if err := epPrepDir(filepath.Dir(outPath)); err != nil {
+			return epErr(doc, "create", "write", fmt.Sprintf("the creds directory is not usable: %v; nothing was changed", err), c.jsonOut, stdout, stderr)
+		}
+		if pub, seed, madePending, err = epStageKey(pending); err != nil {
+			return epErr(doc, "create", "write", fmt.Sprintf("cannot stage the new key in %s: %v; nothing was changed", pending, err), c.jsonOut, stdout, stderr)
+		}
+		defer clear(seed)
+		if epAfterStage != nil {
+			epAfterStage()
+		}
+	}
 	res, err := enroll.Create(ctx, deps, enroll.Request{Addr: addr, PublicKey: pub, Note: note,
 		Meta: admin.Meta{Labels: labels, Description: describe, Caps: caps}})
 	if err != nil {
 		if r, ok := epRefusalOf(err); ok {
+			if madePending {
+				os.Remove(pending) // this call staged the key and the refusal changed nothing
+			}
 			return refuse(1, r)
 		}
 		return epErr(doc, "create", "enroll", admin.RewordUnavailable(err.Error())+"; run the same command again to finish it", c.jsonOut, stdout, stderr)
 	}
-	defer clear(res.Seed)
 	doc.UserPublicKey = res.PublicKey
 
 	var werr error
 	if c.makeKey {
-		creds, ferr := jwt.FormatUserConfig(res.JWT, res.Seed)
-		if ferr != nil {
-			werr = errors.New("the creds could not be formatted")
-		} else {
-			werr = epWriteCredsNew(outPath, creds)
-			clear(creds)
-		}
+		werr = epPublishStaged(res.JWT, seed, outPath, pending, false)
 	} else {
 		werr = epWriteNew(outPath, []byte(res.JWT+"\n"))
 	}
@@ -665,7 +714,7 @@ func runEndpointCreate(args []string, env func(string) string, lookup config.Loo
 	if werr != nil {
 		finish := "run the same command again to finish it (it signs again and writes the JWT)"
 		if c.makeKey {
-			finish = fmt.Sprintf("the key made for it is lost; run: mashctl endpoint reissue %s --make-key", epShortcut(addr))
+			finish = fmt.Sprintf("the key made for it is kept in %s; run the same command again to finish it", pending)
 		}
 		return epErr(doc, "create", "write", fmt.Sprintf("endpoint %s is recorded but the file %s was not written (%v); %s", addr, outPath, werr, finish), c.jsonOut, stdout, stderr)
 	}
@@ -682,4 +731,22 @@ func epErr(doc epDoc, verb, code, detail string, jsonOut bool, stdout, stderr io
 	doc.Outcome = "error"
 	doc.Refusal = &epRefusal{code, detail}
 	return epReport(verb, doc, nil, 6, stdout, stderr, jsonOut)
+}
+
+// epCredsUser is the user public key a creds file names.
+func epCredsUser(path string) (string, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	defer clear(raw)
+	tok, err := jwt.ParseDecoratedJWT(raw)
+	if err != nil {
+		return "", err
+	}
+	uc, err := jwt.DecodeUserClaims(tok)
+	if err != nil {
+		return "", err
+	}
+	return uc.Subject, nil
 }

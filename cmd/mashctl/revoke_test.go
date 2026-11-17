@@ -31,7 +31,7 @@ type revokeStub struct {
 	seen  [][]string
 }
 
-func (s *revokeStub) fn(_ context.Context, _ config.Config, env func(string) string, servers int, users []string, out io.Writer, _ func() time.Time) error {
+func (s *revokeStub) fn(_ context.Context, _ config.Config, env func(string) string, servers int, users []string, out io.Writer, _ func() time.Time) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.calls = append(s.calls, users...)
@@ -41,12 +41,12 @@ func (s *revokeStub) fn(_ context.Context, _ config.Config, env func(string) str
 		s.seen = append(s.seen, s.probe())
 	}
 	if s.err != nil {
-		return s.err
+		return 0, s.err
 	}
 	for _, u := range users {
 		fmt.Fprintf(out, "revoked user key %s...: 1 server(s) acknowledged\n", ctl.ShortKey(u))
 	}
-	return nil
+	return fakeAcked, nil
 }
 
 // stubRevoke replaces revokeUsers for the test and restores it.
@@ -146,7 +146,7 @@ func TestDeprovisionAcceptsServersAndSysCredsFlags(t *testing.T) {
 }
 
 func TestRevokeUserKeysNoSysCredsSaysMashSysCreds(t *testing.T) {
-	err := revokeUserKeys(context.Background(), config.Config{Dir: t.TempDir()}, func(string) string { return "" }, 0, nil, io.Discard, nil)
+	_, err := revokeUserKeys(context.Background(), config.Config{Dir: t.TempDir()}, func(string) string { return "" }, 0, nil, io.Discard, nil)
 	if err == nil {
 		t.Fatal("no error")
 	}

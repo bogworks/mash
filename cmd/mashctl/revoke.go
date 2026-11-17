@@ -22,34 +22,34 @@ import (
 // noSysCredsMsg is the refusal when no system account credentials are configured.
 const noSysCredsMsg = "no system account credentials: pass --sys-creds FILE or set MASH_SYS_CREDS to a file of system account user creds (a server `mashctl init --local` stood up has them in <server dir>/sys.creds)"
 
-// revokeUsers revokes user keys in the account JWT; a test replaces it.
+// revokeUsers revokes user keys in the account JWT and returns how many servers took the update; a test replaces it.
 var revokeUsers = revokeUserKeys
 
 // revokeUserKeys opens the key store (the operator and account keys), connects with the system account credentials and
 // revokes each user key with apply.RevokeUsers, printing one line per key. It never prints a seed. A non-nil now is the
 // revocation time; nil means the current time.
-func revokeUserKeys(ctx context.Context, cfg config.Config, env func(string) string, servers int, users []string, stdout io.Writer, now func() time.Time) error {
+func revokeUserKeys(ctx context.Context, cfg config.Config, env func(string) string, servers int, users []string, stdout io.Writer, now func() time.Time) (int, error) {
 	keyDir, err := ctlkeys.DirFor(cfg, env)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	ks, err := ctlkeys.Open(keyDir)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if _, err := sysCredsPath("", env, cfg); err != nil {
-		return errors.New(noSysCredsMsg)
+		return 0, errors.New(noSysCredsMsg)
 	}
 	nc, err := connectSys(cfg, "", env)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer nc.Close()
 	ctx, cancel := context.WithTimeout(ctx, applyDeadline)
 	defer cancel()
 	res, err := apply.RevokeUsers(ctx, apply.RevokeParams{Keys: ks, Resolver: apply.NATS{Conn: nc, Inventory: servers}, Servers: servers, Now: now}, users)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if res.Warning != "" {
 		fmt.Fprintf(stdout, "warning: %s\n", res.Warning)
@@ -60,7 +60,7 @@ func revokeUserKeys(ctx context.Context, cfg config.Config, env func(string) str
 	for _, u := range res.Already {
 		fmt.Fprintf(stdout, "user key %s...: already revoked\n", ctl.ShortKey(u))
 	}
-	return nil
+	return res.Acked, nil
 }
 
 // keyRevoked reports whether the account JWT revokes the user key pub (at any time); a test replaces it.
