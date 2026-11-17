@@ -112,7 +112,7 @@ MASH_OWNER=alice MASH_GROUP=dev MASH_NAME=design mash send alice.dev.review "hel
 MASH_OWNER=alice MASH_GROUP=dev MASH_NAME=review mash inbox
 ```
 
-When you are done, stop the local server: `kill $(cat ~/.config/mash/server/server.pid)` (the path is `$MASH_CONFIG_DIR/server/server.pid` if you set it).
+When you are done, stop the local server: `D=<the server directory that mashctl init --local printed>; kill "$(cat "$D/server.pid")"`. The directory is `server` inside the config directory, which depends on `MASH_CONFIG_DIR` and `XDG_CONFIG_HOME`, so use the one `init --local` printed.
 
 `MASH_OWNER` (or `owner` in `config.json`), `MASH_GROUP` (no default and no config key; a session without it stops with `group_missing`, exit 2) and `MASH_NAME`, the instance, name the endpoint a session runs as. Each endpoint has a directory record and a credentials ("creds") file named `<owner>.<group>.<instance>.creds` that proves who it is; `mashctl endpoint create` makes both. Recipients in `mash send` are written `owner.group.instance` or the flat key `owner_group_instance`; a bare name is refused.
 
