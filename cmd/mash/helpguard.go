@@ -19,6 +19,12 @@ func helpUsage(args []string) (string, bool) {
 		u, known = linesOf(usage, "  mash "+args[0]), true
 	case "plugin":
 		u, known = pluginUsage, true
+	case "key", "credential":
+		first := keycredHelpFirst(args)
+		if first < len(args) && (args[first] == "-h" || args[first] == "--help") {
+			return keycredUsage(args), true
+		}
+		return "", false
 	case "admin":
 		u, known = adminUsage(args[1]), true
 	}

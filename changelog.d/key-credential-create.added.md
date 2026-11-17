@@ -1,0 +1,1 @@
+**Make a key and a credentials file with `mash`.** `mash key create --out FILE` writes a new user seed and its public key, and `mash credential create --seed FILE --jwt FILE` joins a seed and the user JWT issued for it into a credentials file. Neither needs a server, a config file or an account key.

@@ -15,6 +15,7 @@ import (
 var helpVerbs = [][]string{
 	{"serve"}, {"hook"}, {"send"}, {"read"}, {"inbox"}, {"who"}, {"prompt"}, {"status"}, {"version"},
 	{"plugin"}, {"plugin", "export"},
+	{"key"}, {"key", "create"}, {"credential"}, {"credential", "create"},
 	{"admin"}, {"admin", "init"}, {"admin", "limits"}, {"admin", "permissions"}, {"admin", "provision"},
 	{"admin", "set-meta"}, {"admin", "suspend"}, {"admin", "resume"}, {"admin", "suspended"},
 	{"admin", "deprovision"}, {"admin", "list"},
