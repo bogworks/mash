@@ -68,10 +68,13 @@ func TestAskTablePersistsCapsAndExpires(t *testing.T) {
 	if a.Recipient != "b" || a.RecipientKey != "UB" || a.ReceiptSeq != 3 || a.ID == "" || !a.Deadline.Equal(a.SentAt.Add(time.Minute)) {
 		t.Fatalf("%+v", a)
 	}
-	if re.AnswerClosed("UX", 3) || re.AnswerClosed("UB", 99) {
+	if re.AnswerMatches("UX", 3) || re.AnswerMatches("UB", 99) || re.CloseAnswered("UX", 3) || re.CloseAnswered("UB", 99) {
 		t.Fatal("matched the wrong sender or sequence")
 	}
-	if !re.AnswerClosed("UB", 3) || re.AnswerClosed("UB", 3) {
+	if !re.AnswerMatches("UB", 3) || !re.AnswerMatches("UB", 3) || re.Len() != MaxOpenAsks {
+		t.Fatal("a match must not close the ask")
+	}
+	if !re.CloseAnswered("UB", 3) || re.CloseAnswered("UB", 3) || re.AnswerMatches("UB", 3) {
 		t.Fatal("an ask closes on its first match only")
 	}
 	if OpenAskTable(path).Len() != MaxOpenAsks-1 {
@@ -210,4 +213,34 @@ func TestAskTableReserveIsAtomicAndReleases(t *testing.T) {
 	if _, err := tb.Reserve(); err == nil {
 		t.Fatal("double release freed two slots")
 	}
+}
+
+// A reply whose channel delivery fails leaves its ask open (it is redelivered and matches again); the ask closes only
+// once the reply is delivered.
+func TestAnswerNowAskStaysOpenUntilDelivered(t *testing.T) {
+	f := newFixture(t, "a", "b")
+	a, ev := f.run(t, "a")
+	b := f.client(t, "b")
+	ctx := context.Background()
+	rec, err := a.lookup(ctx, "b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tb := OpenAskTable("")
+	a.SetReplyWaker(tb)
+	if _, err := tb.Add("b", rec.User, 7, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	ev.fail.Store(1000)
+	if _, err := b.SendWith(ctx, "a", "the answer", SendOptions{Kind: kind.FYI, InReplyTo: 7}); err != nil {
+		t.Fatal(err)
+	}
+	until(t, "a failed delivery", func() bool { return ev.fail.Load() < 1000 })
+	time.Sleep(300 * time.Millisecond)
+	if tb.Len() != 1 || !tb.AnswerMatches(rec.User, 7) {
+		t.Fatal("the ask closed before the reply was delivered")
+	}
+	ev.fail.Store(0)
+	ev.waitFor(t, 1, 5*time.Second)
+	until(t, "the ask closed", func() bool { return tb.Len() == 0 })
 }

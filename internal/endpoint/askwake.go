@@ -15,7 +15,7 @@ import (
 // own mash and nothing on the wire: the table remembers the ask by the recipient's user key and the sequence the send
 // acknowledged in the recipient's inbox, which is exactly what a verified reply names in its signed Mash-In-Reply-To
 // (ADR 0063). The mail loop asks the table about each verified mail (ReplyWaker); the first match rings the session like
-// an urgent mail whatever the reply's kind (ADR 0027) and closes the ask.
+// an urgent mail whatever the reply's kind (ADR 0027); the ask closes once that reply is spooled or delivered.
 
 const (
 	// MaxOpenAsks is how many answer=now asks may be open at once; one more is refused before it is sent.
@@ -27,10 +27,13 @@ const (
 	AskTTL = 24 * time.Hour
 )
 
-// ReplyWaker is what the mail loop asks about a verified message whose signed in-reply-to verified. AnswerClosed reports
-// whether the message from the verified user key answers an open ask, and closes the ask when it does.
+// ReplyWaker is what the mail loop asks about a verified message whose signed in-reply-to verified. AnswerMatches
+// reports, without changing anything, whether the message from the verified user key answers an open ask; CloseAnswered
+// closes that ask, and the mail loop calls it only once the reply is durably spooled or delivered, so a reply that is
+// nak'd and redelivered still matches (and keeps its wake) and the ask is never closed by a message nobody saw.
 type ReplyWaker interface {
-	AnswerClosed(userKey string, replyTo uint64) bool
+	AnswerMatches(userKey string, replyTo uint64) bool
+	CloseAnswered(userKey string, replyTo uint64) bool
 }
 
 // SetReplyWaker installs the table of a serve (nil removes it).
@@ -201,9 +204,26 @@ func (t *AskTable) Add(recipient, recipientKey string, receiptSeq uint64, within
 	return a, t.save()
 }
 
-// AnswerClosed implements ReplyWaker: the first message from the ask's recipient whose verified in-reply-to is the ask's
-// receipt sequence closes it. Later ones find no ask and follow their own kind.
-func (t *AskTable) AnswerClosed(userKey string, replyTo uint64) bool {
+// AnswerMatches implements ReplyWaker: whether an open ask is the one a message from userKey answers (its verified
+// in-reply-to is the ask's receipt sequence). It changes nothing.
+func (t *AskTable) AnswerMatches(userKey string, replyTo uint64) bool {
+	if userKey == "" || replyTo == 0 {
+		return false
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.prune()
+	for _, a := range t.asks {
+		if a.RecipientKey == userKey && a.ReceiptSeq == replyTo {
+			return true
+		}
+	}
+	return false
+}
+
+// CloseAnswered implements ReplyWaker: it closes the ask a message from userKey answers and reports whether there was
+// one. Later replies find no ask and follow their own kind.
+func (t *AskTable) CloseAnswered(userKey string, replyTo uint64) bool {
 	if userKey == "" || replyTo == 0 {
 		return false
 	}
@@ -218,6 +238,17 @@ func (t *AskTable) AnswerClosed(userKey string, replyTo uint64) bool {
 		}
 	}
 	return false
+}
+
+// closeAnswered closes the ask p answered, if it answered one: called when p is settled (durably spooled, or delivered
+// by the channel), never before.
+func (e *Endpoint) closeAnswered(p pending) {
+	if p.askSeq == 0 {
+		return
+	}
+	if w := e.replyWaker.Load(); w != nil {
+		(*w).CloseAnswered(p.askUser, p.askSeq)
+	}
 }
 
 // save writes the table: the fixed temp file, then a rename over the table file, both under its directory.

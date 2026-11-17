@@ -219,6 +219,7 @@ func (e *Endpoint) spoolBatch(deliver Deliverer, show []pending, h *held, seen *
 			}
 			delete(h.fails, seq)
 			h.msgs[seq] = p
+			e.closeAnswered(p) // durably spooled: the ask it answered is closed
 			if ep != 0 {
 				if h.epochs == nil {
 					h.epochs = map[spool.Ref]uint64{}

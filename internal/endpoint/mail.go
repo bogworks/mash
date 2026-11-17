@@ -325,6 +325,10 @@ type pending struct {
 	msg  jetstream.Msg
 	key  string // (user, nonce) of signed mail, for de-duplication
 	ts   string // the signed timestamp of signed mail, to tell a copy from a re-send
+	// askUser and askSeq name the open ask this message answers (zero askSeq: none); the ask is closed once the message is
+	// durably spooled or delivered (closeAnswered), not at intake.
+	askUser string
+	askSeq  uint64
 }
 
 // inboxSource is one stream an endpoint's consumer reads: the primary inbox stream (ref stream "") and, for an
@@ -478,8 +482,9 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 			// senderMarks gives 0 otherwise) and equals the ask's receipt sequence, from the ask's recipient: it rings like
 			// an urgent mail whatever its Mash-Kind. Urgent itself, the trust label and the text are not touched.
 			if trust == sap.TrustVerified && replyTo != 0 {
-				if w := e.replyWaker.Load(); w != nil && (*w).AnswerClosed(h.User, replyTo) {
+				if w := e.replyWaker.Load(); w != nil && (*w).AnswerMatches(h.User, replyTo) {
 					p.mail.AnswerWake = true
+					p.askUser, p.askSeq = h.User, replyTo
 				}
 			}
 			e.waking.add(refOf(p.mail), p.mail.Rings() || p.mail.Kind.Wakes())
@@ -1348,6 +1353,7 @@ func (e *Endpoint) deliverBatch(deliver Deliverer, show []pending, seen *seenSet
 	}
 	for _, p := range show {
 		seen.mark(p)
+		e.closeAnswered(p) // delivered: the ask it answered is closed
 		if e.mayAck(p) {
 			if err := p.msg.Ack(); err != nil {
 				e.log.Printf("ack #%s: %v", p.mail.Num(), err)
