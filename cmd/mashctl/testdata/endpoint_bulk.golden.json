@@ -115,6 +115,61 @@
   "next_steps": [],
   "refusal": null
 }
+# all_planned exit 0
+{
+  "schema": "mashctl-endpoint-bulk@1",
+  "outcome": "planned",
+  "counts": {
+    "reissued": 0,
+    "planned": 2,
+    "skipped": 1,
+    "refused": 0,
+    "error": 0
+  },
+  "endpoints": [
+    {
+      "owner": "o",
+      "group": "g",
+      "instance": "a",
+      "address": "o.g.a",
+      "key": "o_g_a",
+      "outcome": "planned",
+      "reason": null,
+      "creds_path": "<DIR>/o.g.a.creds"
+    },
+    {
+      "owner": "o",
+      "group": "g",
+      "instance": "b",
+      "address": "o.g.b",
+      "key": "o_g_b",
+      "outcome": "planned",
+      "reason": null,
+      "creds_path": "<DIR>/o.g.b.creds"
+    },
+    {
+      "owner": "o",
+      "group": "g",
+      "instance": "c",
+      "address": "o.g.c",
+      "key": "o_g_c",
+      "outcome": "skipped",
+      "reason": "no_local_creds",
+      "creds_path": "<DIR>/o.g.c.creds"
+    }
+  ],
+  "next_steps": [
+    {
+      "sender": "operator",
+      "step": "confirm",
+      "action": "reissue these endpoints",
+      "address": "",
+      "purpose": "use",
+      "detail": "mashctl endpoint reissue --all --make-key --yes"
+    }
+  ],
+  "refusal": null
+}
 # bulk_needs_make_key exit 2
 {
   "schema": "mashctl-endpoint-bulk@1",

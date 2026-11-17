@@ -92,7 +92,8 @@ func epCredsStale(path string, addr sap.Address) (bool, error) {
 }
 
 // runEndpointBulk is `mashctl endpoint reissue --all` and `--changed`: the single-address reissue of each endpoint in
-// address order. A refusal or error on one endpoint does not stop the others.
+// address order. Both skip an endpoint with no creds file on this host (no_local_creds); --changed also skips one
+// whose creds are current. A refusal or error on one endpoint does not stop the others.
 func runEndpointBulk(a bulkArgs, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
 	c := a.c
 	doc := epBulkDoc{Schema: endpointBulkSchema, Outcome: "refused", Endpoints: []epBulkEntry{}, NextSteps: []epStep{}}
@@ -201,11 +202,13 @@ func runEndpointBulk(a bulkArgs, env func(string) string, lookup config.Lookup, 
 			firstFail = firstOr(firstFail, &epRefusal{"no_config_dir", "no config directory to write the creds file in; set MASH_CONFIG_DIR"})
 			continue
 		}
+		// An endpoint whose creds are not on this host is never rotated here: that would revoke the key it works with
+		// and write the replacement creds where the endpoint cannot read them.
+		if config.Absent(path) {
+			add(ad, path, "skipped", "no_local_creds", nil)
+			continue
+		}
 		if a.changed {
-			if config.Absent(path) {
-				add(ad, path, "skipped", "no_local_creds", nil)
-				continue
-			}
 			stale, serr := epCredsStale(path, ad)
 			if serr != nil {
 				add(ad, path, "error", "creds_unreadable", nil)
@@ -279,6 +282,12 @@ func runEndpointBulk(a bulkArgs, env func(string) string, lookup config.Lookup, 
 				}
 			case "planned":
 				fmt.Fprintf(w, "would reissue %s\n", s)
+			case "skipped":
+				fmt.Fprintf(w, "skipped %s%s", s, reason)
+				if e.Reason != nil && *e.Reason == "no_local_creds" {
+					fmt.Fprintf(w, ": its creds are not on this host; reissue it on its own machine with: mash key create, then mashctl endpoint reissue %s --public-key FILE", s)
+				}
+				fmt.Fprintln(w)
 			default:
 				fmt.Fprintf(w, "%s %s%s\n", e.Outcome, s, reason)
 			}

@@ -29,7 +29,8 @@ const endpointReissueUsage = `usage: mashctl endpoint reissue ADDRESS (--public-
   ADDRESS is alice/dev/design. The old key is revoked on every server, then the directory record names the new key.
   --public-key FILE  sign the new public key the endpoint made; the JWT is written to --jwt-out
   --make-key         make the key on this host and replace <config dir>/<address>.creds
-  --all              every endpoint in the directory (same-host only: --make-key, never --public-key)
+  --all              every endpoint that has a creds file on this host (same-host only: --make-key, never --public-key);
+                     an endpoint with no creds file here is skipped (no_local_creds), not rotated
   --changed          every endpoint whose creds file on this host has a permission set that differs from the current one;
                      an endpoint with no creds file here is skipped (no_local_creds)
   --yes              do the bulk reissue; without it (or with --dry-run) the command lists what it would reissue
@@ -37,6 +38,7 @@ const endpointReissueUsage = `usage: mashctl endpoint reissue ADDRESS (--public-
   The bulk JSON has schema mashctl-endpoint-bulk@1.
   A key made by --make-key is kept in <creds file>.pending (mode 0600) until the creds file is written, so the same
   command run again after a kill finishes with the same key.
+  Refusals include key_unchanged: --public-key names the key the endpoint already has, so nothing would be rotated.
   exit codes: 0 done, planned or unchanged, 1 refused, 2 usage, 5 partial (bulk), 6 error
 Example:
   mashctl endpoint reissue alice/dev/design --public-key design.pub
@@ -191,6 +193,14 @@ func runEndpointReissue(args []string, env func(string) string, lookup config.Lo
 		return failed(f)
 	}
 
+	if !c.makeKey {
+		if ref, err := epKeyUnchanged(ctx, adm, addr, pub); err != nil {
+			return epErr(doc, "reissue", "server", admin.RewordUnavailable(err.Error()), c.jsonOut, stdout, stderr)
+		} else if ref != nil {
+			return refuse(1, ref)
+		}
+	}
+
 	var step epStep
 	if c.makeKey {
 		step = epStep{Sender: "endpoint", Step: "session", Action: "restart the sessions of this endpoint so they read the new creds",
@@ -240,6 +250,29 @@ func runEndpointReissue(args []string, env func(string) string, lookup config.Lo
 		lines(w)
 		fmt.Fprintf(w, "servers acknowledged the account update: %d\n", acked)
 	}, 0, stdout, stderr, c.jsonOut)
+}
+
+// epKeyUnchanged is the refusal key_unchanged when pub is the key the directory already names for addr: enroll.Reissue
+// revokes nothing then, so old credentials would stay usable. The one exception is the restore case: when the key's
+// issue record is missing or has a malformed issued_at, giving the current key records it again, so it goes on.
+func epKeyUnchanged(ctx context.Context, adm *admin.Admin, addr sap.Address, pub string) (*epRefusal, error) {
+	cur, _, err := adm.UserOf(ctx, addr)
+	if err != nil || cur != pub {
+		return nil, err
+	}
+	if _, found, err := adm.IssuedByKey(ctx, pub); err != nil || !found {
+		return nil, err // no record: the restore case
+	}
+	_, _, err = adm.IssuedHistoryByKey(ctx, pub)
+	var bad *admin.MalformedIssuedAtError
+	if errors.As(err, &bad) {
+		return nil, nil
+	}
+	var incomplete *admin.IncompleteHistoryError
+	if err != nil && !errors.As(err, &incomplete) {
+		return nil, err
+	}
+	return &epRefusal{"key_unchanged", "the public key is already this endpoint's key, so nothing would be rotated; make a new key with: mash key create --out NAME.seed"}, nil
 }
 
 // epRun is what one reissue needs: the open admin connection, the keys and the server settings.

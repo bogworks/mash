@@ -173,6 +173,10 @@ func epReport(verb string, doc epDoc, text func(io.Writer), code int, stdout, st
 			doc.NextSteps = []epStep{{Sender: "endpoint", Step: "key", Action: "make a new key for this endpoint on its machine",
 				Address: doc.Address, Purpose: "use", Detail: "mash key create --out " + doc.Instance + ".seed"}}
 		}
+		if doc.Refusal.Code == "key_unchanged" {
+			doc.NextSteps = []epStep{{Sender: "endpoint", Step: "key", Action: "make a new key for this endpoint on its machine",
+				Address: doc.Address, Purpose: "use", Detail: "mash key create --out NAME.seed"}}
+		}
 	}
 	if doc.NextSteps == nil {
 		doc.NextSteps = []epStep{}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"os"
@@ -10,8 +11,10 @@ import (
 	"time"
 
 	"github.com/nats-io/jwt/v2"
+	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/bogworks/mash/internal/sap"
+	"github.com/bogworks/mash/internal/store"
 )
 
 var updateEndpointBulkGolden = flag.Bool("update-endpoint-bulk", false, "rewrite cmd/mashctl/testdata/endpoint_bulk.golden.json")
@@ -101,6 +104,106 @@ func TestEndpointBulkAll(t *testing.T) {
 	}
 	if tx, _, c := h.run("endpoint", "reissue", "--all", "--make-key", "--yes"); c != 0 || strings.Count(tx, "servers acknowledged the account update: 2\n") != 2 {
 		t.Errorf("text %d %q", c, tx)
+	}
+}
+
+func TestEndpointBulkAllSkipsNoLocalCreds(t *testing.T) {
+	h := newFleetEnv(t)
+	calls := fakeRevoke(t, nil)
+	a, b := ad("a"), ad("b")
+	h.seed(a)
+	h.seed(b)
+	if err := os.Remove(h.creds(b)); err != nil {
+		t.Fatal(err)
+	}
+	oldA := credsPub(t, h, a)
+	recB, _ := h.record(b)
+	so, se, code := h.run("endpoint", "reissue", "--all", "--make-key", "--yes", "--json")
+	if code != 0 {
+		t.Fatalf("%d %q %q", code, so, se)
+	}
+	d := bulkDoc(t, so)
+	if d.Counts.Reissued != 1 || d.Counts.Skipped != 1 || len(d.Endpoints) != 2 {
+		t.Fatalf("doc %q", so)
+	}
+	if e := d.Endpoints[1]; e.Address != b.String() || e.Outcome != "skipped" || e.Reason == nil || *e.Reason != "no_local_creds" {
+		t.Errorf("skipped entry %+v", e)
+	}
+	if credsPub(t, h, a) == oldA {
+		t.Error("the endpoint with creds was not reissued")
+	}
+	if len(*calls) != 1 {
+		t.Errorf("revoke calls %+v", *calls)
+	}
+	for _, c := range *calls {
+		if c.users[0] == recB.User {
+			t.Error("the endpoint with no creds had its key revoked")
+		}
+	}
+	if rec, _ := h.record(b); rec.User != recB.User {
+		t.Errorf("record key changed: %s to %s", recB.User, rec.User)
+	}
+	if _, err := os.Lstat(h.creds(b)); !os.IsNotExist(err) {
+		t.Error("a creds file was made for the endpoint with none")
+	}
+	tx, _, code := h.run("endpoint", "reissue", "--all", "--make-key")
+	if want := "skipped o/g/b (no_local_creds): its creds are not on this host; reissue it on its own machine with: mash key create, then mashctl endpoint reissue o/g/b --public-key FILE\n"; code != 0 || !strings.Contains(tx, want) {
+		t.Errorf("text %d %q", code, tx)
+	}
+}
+
+// deleteIssued removes the issue record of pub, as the admin API of the bucket allows.
+func (h *fleetEnv) deleteIssued(pub string) {
+	h.t.Helper()
+	js, err := jetstream.New(h.e.Conn(h.t, h.e.AdminCreds))
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	kv, err := js.KeyValue(context.Background(), store.IssuedBucket)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	if err := kv.Delete(context.Background(), pub); err != nil {
+		h.t.Fatal(err)
+	}
+}
+
+func TestEndpointReissueSameKey(t *testing.T) {
+	h := newFleetEnv(t)
+	calls := fakeRevoke(t, nil)
+	out := t.TempDir()
+	pub, file, _ := epKey(t, out, "k")
+	a := ad("same")
+	if _, se, code := h.run("endpoint", "create", a.String(), "--public-key", file, "--jwt-out", filepath.Join(out, "k.jwt")); code != 0 {
+		t.Fatalf("create: %q", se)
+	}
+	for _, extra := range [][]string{{"--dry-run"}, nil} {
+		args := append([]string{"endpoint", "reissue", a.String(), "--public-key", file, "--jwt-out", filepath.Join(out, "n.jwt"), "--json"}, extra...)
+		so, se, code := h.run(args...)
+		var d epDoc
+		if err := json.Unmarshal([]byte(so), &d); err != nil || code != 1 || d.Refusal == nil || d.Refusal.Code != "key_unchanged" || len(d.NextSteps) != 1 || !strings.Contains(d.NextSteps[0].Detail, "mash key create") {
+			t.Fatalf("%v: %d %q %q", extra, code, so, se)
+		}
+	}
+	if len(*calls) != 0 {
+		t.Errorf("revoke calls %+v", *calls)
+	}
+	if _, err := os.Lstat(filepath.Join(out, "n.jwt")); !os.IsNotExist(err) {
+		t.Error("a JWT was written")
+	}
+	// the restore case: the issue record is gone, the same key is recorded again
+	h.deleteIssued(pub)
+	if _, se, code := h.run("endpoint", "reissue", a.String(), "--public-key", file, "--jwt-out", filepath.Join(out, "n.jwt"), "--dry-run"); code != 0 {
+		t.Fatalf("dry-run restore: %d %q", code, se)
+	}
+	if _, ok := h.issued()[pub]; ok {
+		t.Fatal("the dry-run recorded the key")
+	}
+	if so, se, code := h.run("endpoint", "reissue", a.String(), "--public-key", file, "--jwt-out", filepath.Join(out, "n.jwt")); code != 0 {
+		t.Fatalf("restore: %d %q %q", code, so, se)
+	}
+	if rec, ok := h.issued()[pub]; !ok || rec.Address != a.Flat() {
+		t.Errorf("the issue record is not back: %+v", h.issued())
 	}
 }
 
@@ -226,6 +329,7 @@ func TestEndpointBulkGolden(t *testing.T) {
 	step("planned", "endpoint", "reissue", "--changed", "--make-key", "--json")
 	step("reissued", "endpoint", "reissue", "--changed", "--make-key", "--yes", "--json")
 	step("unchanged", "endpoint", "reissue", "--changed", "--make-key", "--yes", "--json")
+	step("all_planned", "endpoint", "reissue", "--all", "--make-key", "--json")
 	step("bulk_needs_make_key", "endpoint", "reissue", "--all", "--public-key", "k.pub", "--yes", "--json")
 	golden := filepath.Join("testdata", "endpoint_bulk.golden.json")
 	if *updateEndpointBulkGolden {
