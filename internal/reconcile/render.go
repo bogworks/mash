@@ -8,7 +8,7 @@ import (
 	"github.com/bogworks/mash/internal/config"
 )
 
-// connText names one connection so a live lane stands out: the user's name, the client's name, the host and the server.
+// connText names one connection so a live connection stands out: the user's name, the client's name, the host and the server.
 // Every word comes from the network or a record, so it is cleaned.
 func connText(c Conn) string {
 	parts := []string{}

@@ -307,7 +307,7 @@ func newRig(t *testing.T, adopt bool) *rig {
 		t.Fatal(err)
 	}
 	js, _ := jetstream.New(nc)
-	kv, err := js.CreateKeyValue(ctx, jetstream.KeyValueConfig{Bucket: "homerange_" + testRange + "_policy", History: 8})
+	kv, err := js.CreateKeyValue(ctx, jetstream.KeyValueConfig{Bucket: "team_" + testRange + "_policy", History: 8})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -164,7 +164,7 @@ func TestRecordedSenderNotInTheListSetIsRevoked(t *testing.T) {
 		t.Fatalf("revocation = %+v %v", r, ok)
 	}
 	if len(r.Connections) != 1 || r.Connections[0].Host != "10.0.0.7" || r.Connections[0].Server != "s1" || r.Connections[0].Name != "gone" {
-		t.Errorf("the live lane is not named: %+v", r.Connections)
+		t.Errorf("the live connection is not named: %+v", r.Connections)
 	}
 	if _, ok := revocation(p, kept); ok {
 		t.Error("a recorded user whose sender is in the list set was revoked")
