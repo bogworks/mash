@@ -660,7 +660,8 @@ usage: mashctl endpoint reissue ADDRESS (--public-key FILE | --make-key) [--jwt-
   ADDRESS is alice/dev/design. The old key is revoked on every server, then the directory record names the new key.
   --public-key FILE  sign the new public key the endpoint made; the JWT is written to --jwt-out
   --make-key         make the key on this host and replace <config dir>/<address>.creds
-  --all              every endpoint in the directory (same-host only: --make-key, never --public-key)
+  --all              every endpoint that has a creds file on this host (same-host only: --make-key, never --public-key);
+                     an endpoint with no creds file here is skipped (no_local_creds), not rotated
   --changed          every endpoint whose creds file on this host has a permission set that differs from the current one;
                      an endpoint with no creds file here is skipped (no_local_creds)
   --yes              do the bulk reissue; without it (or with --dry-run) the command lists what it would reissue
@@ -668,6 +669,7 @@ usage: mashctl endpoint reissue ADDRESS (--public-key FILE | --make-key) [--jwt-
   The bulk JSON has schema mashctl-endpoint-bulk@1.
   A key made by --make-key is kept in <creds file>.pending (mode 0600) until the creds file is written, so the same
   command run again after a kill finishes with the same key.
+  Refusals include key_unchanged: --public-key names the key the endpoint already has, so nothing would be rotated.
   exit codes: 0 done, planned or unchanged, 1 refused, 2 usage, 5 partial (bulk), 6 error
 Example:
   mashctl endpoint reissue alice/dev/design --public-key design.pub
@@ -701,7 +703,8 @@ usage: mashctl endpoint reissue ADDRESS (--public-key FILE | --make-key) [--jwt-
   ADDRESS is alice/dev/design. The old key is revoked on every server, then the directory record names the new key.
   --public-key FILE  sign the new public key the endpoint made; the JWT is written to --jwt-out
   --make-key         make the key on this host and replace <config dir>/<address>.creds
-  --all              every endpoint in the directory (same-host only: --make-key, never --public-key)
+  --all              every endpoint that has a creds file on this host (same-host only: --make-key, never --public-key);
+                     an endpoint with no creds file here is skipped (no_local_creds), not rotated
   --changed          every endpoint whose creds file on this host has a permission set that differs from the current one;
                      an endpoint with no creds file here is skipped (no_local_creds)
   --yes              do the bulk reissue; without it (or with --dry-run) the command lists what it would reissue
@@ -709,6 +712,7 @@ usage: mashctl endpoint reissue ADDRESS (--public-key FILE | --make-key) [--jwt-
   The bulk JSON has schema mashctl-endpoint-bulk@1.
   A key made by --make-key is kept in <creds file>.pending (mode 0600) until the creds file is written, so the same
   command run again after a kill finishes with the same key.
+  Refusals include key_unchanged: --public-key names the key the endpoint already has, so nothing would be rotated.
   exit codes: 0 done, planned or unchanged, 1 refused, 2 usage, 5 partial (bulk), 6 error
 Example:
   mashctl endpoint reissue alice/dev/design --public-key design.pub
@@ -1067,7 +1071,7 @@ stdout:
 == reissue_write
 exit 6
 stderr:
-mashctl: endpoint reissue: error (write): the creds directory is not usable: directory <TMP> has mode 0707: it is writable by every user. Run: chmod o-w <TMP>; nothing was changed
+mashctl: endpoint reissue: error (write): the directory for the lock is not usable: directory <TMP> has mode 0707: it is writable by every user. Run: chmod o-w <TMP>; nothing was changed
 stdout:
 {
   "schema": "mashctl-endpoint@1",
@@ -1086,7 +1090,7 @@ stdout:
   "next_steps": [],
   "refusal": {
     "code": "write",
-    "detail": "the creds directory is not usable: directory <TMP> has mode 0707: it is writable by every user. Run: chmod o-w <TMP>; nothing was changed"
+    "detail": "the directory for the lock is not usable: directory <TMP> has mode 0707: it is writable by every user. Run: chmod o-w <TMP>; nothing was changed"
   }
 }
 == reissue_public_key_issued
@@ -1123,6 +1127,40 @@ stdout:
     "detail": "the public key <KEY> was already issued to another address; each key is used at one address: make a new key for this endpoint with: mash key create --out b.seed"
   }
 }
+== reissue_key_unchanged
+exit 1
+stderr:
+mashctl: endpoint reissue: refused (key_unchanged): the public key is already this endpoint's key, so nothing would be rotated; make a new key with: mash key create --out NAME.seed
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "refused",
+  "owner": "o",
+  "group": "g",
+  "instance": "a",
+  "address": "o.g.a",
+  "key": "o_g_a",
+  "jwt_path": "<TMP>/out.jwt",
+  "jwt_written": false,
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [
+    {
+      "sender": "endpoint",
+      "step": "key",
+      "action": "make a new key for this endpoint on its machine",
+      "address": "o.g.a",
+      "purpose": "use",
+      "detail": "mash key create --out NAME.seed"
+    }
+  ],
+  "refusal": {
+    "code": "key_unchanged",
+    "detail": "the public key is already this endpoint's key, so nothing would be rotated; make a new key with: mash key create --out NAME.seed"
+  }
+}
 == bulk_usage
 exit 2
 stderr:
@@ -1133,7 +1171,8 @@ usage: mashctl endpoint reissue ADDRESS (--public-key FILE | --make-key) [--jwt-
   ADDRESS is alice/dev/design. The old key is revoked on every server, then the directory record names the new key.
   --public-key FILE  sign the new public key the endpoint made; the JWT is written to --jwt-out
   --make-key         make the key on this host and replace <config dir>/<address>.creds
-  --all              every endpoint in the directory (same-host only: --make-key, never --public-key)
+  --all              every endpoint that has a creds file on this host (same-host only: --make-key, never --public-key);
+                     an endpoint with no creds file here is skipped (no_local_creds), not rotated
   --changed          every endpoint whose creds file on this host has a permission set that differs from the current one;
                      an endpoint with no creds file here is skipped (no_local_creds)
   --yes              do the bulk reissue; without it (or with --dry-run) the command lists what it would reissue
@@ -1141,6 +1180,7 @@ usage: mashctl endpoint reissue ADDRESS (--public-key FILE | --make-key) [--jwt-
   The bulk JSON has schema mashctl-endpoint-bulk@1.
   A key made by --make-key is kept in <creds file>.pending (mode 0600) until the creds file is written, so the same
   command run again after a kill finishes with the same key.
+  Refusals include key_unchanged: --public-key names the key the endpoint already has, so nothing would be rotated.
   exit codes: 0 done, planned or unchanged, 1 refused, 2 usage, 5 partial (bulk), 6 error
 Example:
   mashctl endpoint reissue alice/dev/design --public-key design.pub
@@ -1173,7 +1213,8 @@ usage: mashctl endpoint reissue ADDRESS (--public-key FILE | --make-key) [--jwt-
   ADDRESS is alice/dev/design. The old key is revoked on every server, then the directory record names the new key.
   --public-key FILE  sign the new public key the endpoint made; the JWT is written to --jwt-out
   --make-key         make the key on this host and replace <config dir>/<address>.creds
-  --all              every endpoint in the directory (same-host only: --make-key, never --public-key)
+  --all              every endpoint that has a creds file on this host (same-host only: --make-key, never --public-key);
+                     an endpoint with no creds file here is skipped (no_local_creds), not rotated
   --changed          every endpoint whose creds file on this host has a permission set that differs from the current one;
                      an endpoint with no creds file here is skipped (no_local_creds)
   --yes              do the bulk reissue; without it (or with --dry-run) the command lists what it would reissue
@@ -1181,6 +1222,7 @@ usage: mashctl endpoint reissue ADDRESS (--public-key FILE | --make-key) [--jwt-
   The bulk JSON has schema mashctl-endpoint-bulk@1.
   A key made by --make-key is kept in <creds file>.pending (mode 0600) until the creds file is written, so the same
   command run again after a kill finishes with the same key.
+  Refusals include key_unchanged: --public-key names the key the endpoint already has, so nothing would be rotated.
   exit codes: 0 done, planned or unchanged, 1 refused, 2 usage, 5 partial (bulk), 6 error
 Example:
   mashctl endpoint reissue alice/dev/design --public-key design.pub
@@ -1213,7 +1255,8 @@ usage: mashctl endpoint reissue ADDRESS (--public-key FILE | --make-key) [--jwt-
   ADDRESS is alice/dev/design. The old key is revoked on every server, then the directory record names the new key.
   --public-key FILE  sign the new public key the endpoint made; the JWT is written to --jwt-out
   --make-key         make the key on this host and replace <config dir>/<address>.creds
-  --all              every endpoint in the directory (same-host only: --make-key, never --public-key)
+  --all              every endpoint that has a creds file on this host (same-host only: --make-key, never --public-key);
+                     an endpoint with no creds file here is skipped (no_local_creds), not rotated
   --changed          every endpoint whose creds file on this host has a permission set that differs from the current one;
                      an endpoint with no creds file here is skipped (no_local_creds)
   --yes              do the bulk reissue; without it (or with --dry-run) the command lists what it would reissue
@@ -1221,6 +1264,7 @@ usage: mashctl endpoint reissue ADDRESS (--public-key FILE | --make-key) [--jwt-
   The bulk JSON has schema mashctl-endpoint-bulk@1.
   A key made by --make-key is kept in <creds file>.pending (mode 0600) until the creds file is written, so the same
   command run again after a kill finishes with the same key.
+  Refusals include key_unchanged: --public-key names the key the endpoint already has, so nothing would be rotated.
   exit codes: 0 done, planned or unchanged, 1 refused, 2 usage, 5 partial (bulk), 6 error
 Example:
   mashctl endpoint reissue alice/dev/design --public-key design.pub

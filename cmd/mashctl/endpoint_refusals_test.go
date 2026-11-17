@@ -214,6 +214,9 @@ var refusalCases = []refCase{
 		r.must(t, "endpoint", "create", "o/g/a", "--public-key", r.pub, "--jwt-out", filepath.Join(r.aux, "first.jwt"))
 		r.h.seed(ad("b"))
 	}, "public_key_issued"},
+	{"reissue_key_unchanged", []string{"endpoint", "reissue", "o/g/a", "--public-key", "{PUB}", "--jwt-out", "{AUX}/out.jwt"}, func(t *testing.T, r *refEnv) {
+		r.must(t, "endpoint", "create", "o/g/a", "--public-key", r.pub, "--jwt-out", filepath.Join(r.aux, "first.jwt"))
+	}, "key_unchanged"},
 
 	// reissue --all and --changed
 	{"bulk_usage", []string{"endpoint", "reissue", "--all", "--changed", "--make-key"}, nil, "usage"},
