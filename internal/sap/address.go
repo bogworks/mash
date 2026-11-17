@@ -1,0 +1,106 @@
+package sap
+
+import (
+	"fmt"
+	"strings"
+)
+
+// Address is an endpoint's address: SAP's owner, group and instance tokens.
+// Subjects are agents.<verb>.<owner>.<group>.<instance> and the flat key is
+// <owner>_<group>_<instance>.
+//
+// The fields are exported for reading. Construct a value with NewAddress,
+// AddressFromFlat, AddressFromSubject or ParseAddress; a struct literal, a
+// mutated field or the zero value bypasses their checks, so Validate is the
+// check for any value that did not come from them. The zero Address is not
+// valid. There is no default group.
+type Address struct {
+	Owner, Group, Instance string
+}
+
+// addressVerbs are the verbs of an address's subjects.
+var addressVerbs = map[string]bool{"prompt": true, "status": true, "hb": true, "mail": true}
+
+func checkAddressTotal(owner, group, instance string) error {
+	if n := len(owner) + len(group) + len(instance) + 2; n > MaxIdentityLen {
+		return fmt.Errorf("sap: address %s.%s.%s is %d characters with separators: at most %d", owner, group, instance, n, MaxIdentityLen)
+	}
+	return nil
+}
+
+// NewAddress returns the address of owner, group and instance. Each token must
+// satisfy the token rule (lower-case letters, digits and single dashes,
+// starting with a letter, not ending with a dash, 1 to 32 characters), and the
+// three tokens with their two separators must total at most 64 characters.
+func NewAddress(owner, group, instance string) (Address, error) {
+	for _, p := range []struct{ pos, tok string }{{"owner", owner}, {"group", group}, {"instance", instance}} {
+		if err := checkToken(p.pos, p.tok); err != nil {
+			return Address{}, err
+		}
+	}
+	if err := checkAddressTotal(owner, group, instance); err != nil {
+		return Address{}, err
+	}
+	return Address{Owner: owner, Group: group, Instance: instance}, nil
+}
+
+// Validate re-applies the construction rules to a. The zero value is invalid.
+func (a Address) Validate() error {
+	_, err := NewAddress(a.Owner, a.Group, a.Instance)
+	return err
+}
+
+// Subjects returns the four SAP subjects of a.
+func (a Address) Subjects() Subjects {
+	s := func(verb string) string {
+		return "agents." + verb + "." + a.Owner + "." + a.Group + "." + a.Instance
+	}
+	return Subjects{Prompt: s("prompt"), Status: s("status"), HB: s("hb"), Mail: s("mail")}
+}
+
+// MailFilter is the subject filter of a's inbox stream: exactly a's mail
+// subject, with no wildcard.
+func (a Address) MailFilter() string { return a.Subjects().Mail }
+
+// Flat is the flat key of a: owner_group_instance. It is injective because
+// tokens contain no underscore.
+func (a Address) Flat() string { return a.Owner + "_" + a.Group + "_" + a.Instance }
+
+// String is the dotted form of a: owner.group.instance.
+func (a Address) String() string { return a.Owner + "." + a.Group + "." + a.Instance }
+
+// AddressFromFlat is the inverse of Flat: exactly three underscore-separated
+// tokens, each valid, within the total bound.
+func AddressFromFlat(flat string) (Address, error) {
+	p := strings.Split(flat, "_")
+	if len(p) != 3 {
+		return Address{}, fmt.Errorf("sap: flat %q has %d underscore-separated parts: want exactly three (owner_group_instance)", flat, len(p))
+	}
+	return NewAddress(p[0], p[1], p[2])
+}
+
+// ParseAddress parses the dotted form owner.group.instance: exactly three
+// tokens, each valid, within the total bound.
+func ParseAddress(s string) (Address, error) {
+	p := strings.Split(s, ".")
+	if len(p) != 3 {
+		return Address{}, fmt.Errorf("sap: address %q has %d dot-separated parts: want exactly three (owner.group.instance)", s, len(p))
+	}
+	return NewAddress(p[0], p[1], p[2])
+}
+
+// AddressFromSubject returns the address and verb of a five-token
+// agents.<verb>.<owner>.<group>.<instance> subject. It reports false if the
+// shape is wrong, the verb is not prompt, status, hb or mail, or a token fails
+// the token rule (so a wildcard token is never accepted).
+func AddressFromSubject(subj string) (Address, string, bool) {
+	t := strings.Split(subj, ".")
+	if len(t) != 5 || t[0] != "agents" || !addressVerbs[t[1]] {
+		return Address{}, "", false
+	}
+	a, err := NewAddress(t[2], t[3], t[4])
+	if err != nil {
+		return Address{}, "", false
+	}
+	return a, t[1], true
+}
