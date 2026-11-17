@@ -237,6 +237,7 @@ var testSettleSeam func()
 func (e *Endpoint) settleHeld(deliver Deliverer, h *held) {
 	defer func() { h.added = 0 }()
 	e.dropHeld(h)
+	e.heldN.Store(int32(len(h.msgs)))
 	if e.spool == nil {
 		return
 	}
@@ -270,6 +271,7 @@ func (e *Endpoint) settleHeld(deliver Deliverer, h *held) {
 			h.hookAt = time.Now()
 		}
 	}
+	e.heldN.Store(int32(len(h.msgs)))
 	if testSettleSeam != nil {
 		testSettleSeam()
 	}
