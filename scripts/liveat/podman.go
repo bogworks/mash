@@ -509,3 +509,10 @@ func (h *podHost) Snapshot() (string, func(), error) {
 	}
 	return filepath.Join(dir, filepath.Base(nodeHome)), done, nil
 }
+
+// Cleanup removes every podman resource labelled with the label key, whatever run made it (see at005Cleanup).
+func (p *Podman) Cleanup(label string, stdout, stderr io.Writer) int {
+	return at005Cleanup([]string{"--label", label}, stdout, stderr, p.Runner, p.LookPath)
+}
+
+var _ Cleaner = (*Podman)(nil)
