@@ -84,10 +84,11 @@ machinery is removed), 0077 (the rule file's keys) and 0102 (the group is slot 2
 ### Confirmation
 
 * A live proof on one local server (plan, section 2): create endpoints with an endpoint-made key, exchange mail across
-  groups of one owner, revoke a key and see the live connection close and the reconnect refused, and retire an endpoint.
+  groups of one owner, revoke a key and see the live connection close and the reconnect refused, and delete an endpoint; then the same across three real hosts, over TLS, on a cluster, from
+  two mashctl machines.
 * Unit tests: the token rule and the 64-character bound, the flat key's unambiguity, `ValidateGrant` refusing a wildcard
   owner, the permission set for an `O.G.I` (no peer line reaches another owner), the refusals (missing group, taken
-  address, retired flat key).
+  address, burned flat key).
 * A test fails the build if a subject, record field or error text still carries the removed legacy form or `agent_token`.
 
 ## Pros and Cons of the Options

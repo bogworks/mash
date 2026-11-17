@@ -83,8 +83,8 @@ and prints this set.
 ### 1.5 What is removed
 
 * `mashctl add`, `reissue` of a legacy name, and the `cc` / two-part legacy form: `add` is replaced by
-  `mashctl endpoint create`, `reissue` and `retire` by `endpoint reissue` and `endpoint retire` (one governed path;
-  ctl designs the command face).
+  `mashctl endpoint create`, legacy `reissue` and `retire` by `endpoint reissue` and `endpoint delete` (one governed path;
+  ctl designs the command face). A deleted endpoint's flat key is burned and `create` refuses it (`key_retired`).
 * `agent_token` / `MASH_AGENT_TOKEN`: there is one form, so there is nothing to choose.
 * The legacy parsers (`sap.Legacy`, the `cc` branch of `KeyFromSubject`, `SplitMail`'s legacy acceptance), the legacy
   record, stream-filter and permission code, and with them the alias read, the legacy lease and the bridge grants of
@@ -92,8 +92,11 @@ and prints this set.
 
 ### 1.6 Open points inside the model
 
-1. There is no default group (the maintainer's ruling): a missing group is refused with `group_missing`.
-2. Records in the form ADR 0074 built (three tokens, slot 1 an `agent_token`, off by default): the plan maps `(agent,
+1. There is no default group (the maintainer's ruling): a missing group is refused with `group_missing`. A group cannot be
+   changed later: create a new endpoint and delete the old; its flat key is burned.
+2. The endpoint-made key is the default. An explicit same-host flag (proposed `--make-key`, DEC-002 closed yes) makes
+   the key on the mashctl host; `public_key_invalid` and `public_key_issued` refuse a bad or reused public key.
+3. Records in the form ADR 0074 built (three tokens, slot 1 an `agent_token`, off by default): the plan maps `(agent,
    owner, name)` to owner = the old owner, group = the old agent token, instance = the old name, because the old slot 1
    was a kind of endpoint and the old owner is the trust unit. I did not find any deployment using them. If one exists the
    mapping is the only judgment call in this plan; flagged for review.
@@ -106,10 +109,14 @@ check and no bridge, and it does not read, convert or tolerate an old record, ad
 maintainer's own endpoints is a one-time script outside mash, owned by operations. The release note says first that every
 identity changes and every credentials file is replaced.
 
-How it is proven live, on `mashctl init --local`, one NATS server: create endpoints of one owner in two groups, each
-with an endpoint-made key; mail crosses between them; revoke a key and assert the live connection closes and the
-reconnect is refused; retire an endpoint; a missing group is `group_missing`. Not tried: more than one server, TLS, two
-central hosts.
+How it is proven live (contract AT-001 to AT-005): first on `mashctl init --local`, one NATS server: create endpoints of
+one owner in two groups, each with an endpoint-made key; mail crosses between them; revoke a key and assert the live
+connection closes and the reconnect is refused; delete an endpoint; a missing group is `group_missing`. Then across three
+real hosts (C4): endpoints on a machine other than mashctl's and the server's, over TLS, on a cluster of three NATS
+servers, and from two mashctl machines. A second mashctl machine (DEC-004) is set up with `adopt` and the same operator
+and account seeds and system credentials as the first; a machine with its own signing key in the account JWT is not
+supported (ADR 0059). That is the hardest of the three: it has never been run, the key material is copied by hand, and
+the shared locks judge expiry by each machine's clock.
 
 ## 3. Triage of the held stack
 
@@ -146,6 +153,10 @@ if two run at once.
 | **Core total** | **10.5** |
 | ctl: the `endpoint` CLI face (create, reissue, delete) with JSON | ctl's estimate |
 
+Across machines (contract NFR-003): C1 the model 7.5, C2 signing from a public key and the same-host flag 1.5, C3 live proof
+on one machine and release notes 1.5, C4 three real hosts with TLS, the cluster and the two-mashctl proof 4.5 plus a
+reserve of 2.
+
 The risk is the third row: the legacy code runs through `admin`, `endpoint`, `store`, `ctl` and the commands, and many tests
 carry legacy names. I count 10.5 with the golden-name tests rewritten, not deleted. The earlier 14 included 2.5 for
 `migrate`, 1 for classifying legacy records in readers and 0.5 for a longer proof, all of which go with the hard cut.
@@ -163,17 +174,3 @@ carry legacy names. I count 10.5 with the golden-name tests rewritten, not delet
   The JWT always goes to a file (`--jwt-out`) and is never printed. There is no stored group: no config key holds it, it
   is given on each create and by `MASH_GROUP` in a session. `credential revoke` is out: replacing a key goes through
   `reissue --public-key`.
-
-## 6. Aligned to contract revision 4 (ratified, decision 250)
-
-Where this note and `contracts/0.5.5-endpoint-model.md` differ, the contract wins. The differences:
-
-* The commands are `endpoint create|reissue|delete|list|show`; `retire` is `delete`. A deleted endpoint's flat key is
-  burned and `create` refuses it (`key_retired`). A group cannot be changed later: create a new endpoint, delete the old.
-* The same-host flag (proposed `--make-key`, DEC-002 closed yes) makes the key on the mashctl host; the endpoint-made key
-  stays the default. The refusals `public_key_invalid` and `public_key_issued` come with it.
-* A second mashctl machine (DEC-004) is set up with `adopt` and the same operator and account seeds and system credentials
-  as the first. A machine with its own signing key in the account JWT is not supported (ADR 0059).
-* Size, from the build plan: C1 (this model) 7.5 days, C2 (signing from a public key, same-host flag) 1.5, C3 (live proof
-  on one machine, release notes) 1.5, C4 (three real hosts, TLS and cluster configuration, the two-mashctl proof) 4.5
-  plus a reserve of 2. The 10.5 of section 4 is the single-machine scope; the contract adds C4.
