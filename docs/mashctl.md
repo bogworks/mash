@@ -128,7 +128,16 @@ A key is used at one address, once. A key that was issued before, or revoked, is
 
 **Other flags.** `--label k=v` (repeatable) sets directory labels, `--tool` adds the label `kind=tool`, `--note N` and `--describe T` set the note and the description, and `--cap C` (repeatable) adds capabilities. These are checked as `set-meta` checks them. `--servers N` and `--sys-creds FILE` name the server count and the system account creds for a cluster, as the other verbs do. `--dry-run` connects, checks everything, says what it would do and changes nothing. `--json` prints one JSON document (schema `mashctl-endpoint@1`).
 
-**What it prints.** On success: `created endpoint alice/dev/design`, then the address and the path of the JWT (with `--public-key`) or of the creds file (with `--make-key`), then the command to run next. Progress, warnings and errors go to standard error.
+**What it prints.** On success, with `--public-key`:
+
+```text
+created endpoint alice/dev/design
+  address  alice.dev.design
+  jwt      ./alice.dev.design.jwt
+next: on the endpoint's machine, run: mash credential create --seed design.seed --jwt alice.dev.design.jwt
+```
+
+With `--make-key` the third line is `  creds    <config dir>/alice.dev.design.creds` and the last line is `next: start a session as this endpoint: MASH_OWNER=alice MASH_GROUP=dev MASH_NAME=design`. Progress, warnings and errors go to standard error.
 
 **Exit codes.** 0 done or planned, 1 refused, 2 usage error, 6 error (a server or a file failed). A refusal and an error name a code in the message, for example `refused (address_taken)`, and the [table below](#refusal-codes) lists them.
 
@@ -205,6 +214,9 @@ A refusal exits 1, a usage error exits 2 and an error exits 6. The message names
 | `name_missing` | 2 | create | No instance name. |
 | `address_missing`, `address_invalid` | 2 | reissue, delete, show | No address, or one that is not an address. |
 | `key_both`, `key_missing` | 2 | create, reissue | Give exactly one of `--public-key` and `--make-key`. |
+| `unknown_flag`, `usage` | 2 | every verb | An unknown flag, or arguments the verb does not take. With `--json` the document has outcome `error` and the code. |
+| `bulk_needs_make_key` | 2 | reissue | `--all` and `--changed` take `--make-key` only. |
+| `staged_key_revoked` | 1 | create, reissue | The key staged in `<creds file>.pending` was revoked: remove the file and run again. |
 | `labels_invalid` | 2 | create | A label key or value is not allowed. |
 | `servers_invalid` | 2 | create, reissue, delete | `--servers` or `MASH_SERVERS` is not a whole number of 1 or more. |
 | `no_config_dir` | 1 | create, reissue | No config directory for the creds file: set `MASH_CONFIG_DIR`. |

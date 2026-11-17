@@ -389,7 +389,7 @@ issue record's `generation` field is 0 because mash has no generation yet (ADR 0
 ### 5.2 Narrowing rotates, removal revokes
 
 > Describes #498. Not yet documented: the handover deadline's length, the retry behaviour and
-> test names. The text below is REQ-014 and AT-013, plus ADR 0067 for what `mashctl reissue` does today.
+> test names. The text below is REQ-014 and AT-013, plus ADR 0067 for what `mashctl endpoint reissue` does today.
 
 - When a sender's tags narrow, mash issues the new credential to a **new public key**, waits until the servers show a
   connection with that key, then revokes every key the issue record holds for that address except the new one, and
@@ -400,7 +400,7 @@ issue record's `generation` field is 0 because mash has no generation yet (ADR 0
 - Each push disconnects every sender under that owner group's key (section 4). The dry run names those senders.
 
 What exists on `main` is the earlier rule of [ADR 0067](decisions/0067-a-reissue-that-narrows-an-endpoint-rotates-its-user-key-and-revokes-the-old-one.md):
-`mashctl reissue` mints a new user key and revokes the old one when the new credential carries fewer permissions, adds
+`mashctl endpoint reissue` mints a new user key and revokes the old one when the new credential carries fewer permissions, adds
 a deny tag, or is signed by a different key, and it never re-signs a key the account JWT already revokes.
 
 ### 5.3 Issuing a credential: the issue service and the issue record
