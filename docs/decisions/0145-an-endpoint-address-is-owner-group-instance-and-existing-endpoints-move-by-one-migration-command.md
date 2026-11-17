@@ -23,7 +23,7 @@ ships wide open; this release has no policy. This record fixes the model and the
 ## Decision Drivers
 
 * Trust follows the path, and NATS wildcards match whole tokens only: each level that needs a rule must be its own token.
-* One model, with no default group: every endpoint names its group ("no name, no herd").
+* One model, with no default group: every endpoint names its group.
 * No change to the SAP protocol and no divergence in the SAP Go SDK: the subject keeps its shape and its token count.
 * The harness stays truthful in the service metadata.
 * Existing endpoints have credentials in running sessions: the transition must not cut them off before they are moved.

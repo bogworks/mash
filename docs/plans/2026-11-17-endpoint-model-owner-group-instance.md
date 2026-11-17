@@ -23,7 +23,7 @@ Examples: `agents.mail.randy.web.build-1`, `agents.prompt.randy.web.build-1`. Tr
 may reach is a prefix of this path, and every level that needs a rule is its own token, so a NATS wildcard (which matches
 whole tokens only) can say it. No level is joined into another with a dash.
 
-There is no default group (the maintainer's ruling: "no name, no herd"). `mashctl endpoint create` takes `--owner` (from
+There is no default group (the maintainer's ruling). `mashctl endpoint create` takes `--owner` (from
 config) and needs `--group`; a session names its group in `MASH_GROUP`. A missing group is a readable refusal with the
 code `group_missing`. A solo developer names one group once and everything under the owner is open by default
 (section 1.5).
