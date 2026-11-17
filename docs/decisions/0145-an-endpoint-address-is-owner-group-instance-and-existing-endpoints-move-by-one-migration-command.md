@@ -23,7 +23,7 @@ ships wide open; this release has no policy. This record fixes the model and the
 ## Decision Drivers
 
 * Trust follows the path, and NATS wildcards match whole tokens only: each level that needs a rule must be its own token.
-* One model. A solo developer should never need to know groups exist.
+* One model, with no default group: every endpoint names its group ("no name, no herd").
 * No change to the SAP protocol and no divergence in the SAP Go SDK: the subject keeps its shape and its token count.
 * The harness stays truthful in the service metadata.
 * Existing endpoints have credentials in running sessions: the transition must not cut them off before they are moved.
@@ -54,12 +54,14 @@ Chosen: one form, with one migration command.
   default: ships wide open), its own heartbeat, and the fixed lines it has today; it subscribes to its own prompt and
   status and to `agents.hb.<owner>.*.*`. The owner is a literal in every peer line, so no credential reaches another
   owner. Narrowing to a group is a user's later choice, not in this release.
+* **There is no default group.** `endpoint create` needs a group, `migrate` needs `--group`, a session needs `MASH_GROUP`;
+  a missing group is a readable refusal, code `group_missing`.
 * **There is one form and no legacy.** `mashctl add`, legacy `reissue`, `agent_token`, the `cc` form and its parsers and
   record code are removed (the CLI face is `mashctl endpoint create|reissue|retire`, designed separately).
 * **One migration command moves existing endpoints.** `mashctl endpoint migrate` plans (changes nothing), `--apply` makes
   the new identity of one endpoint (record, inbox stream, new key and creds) and leaves the legacy record, inbox and
   credentials untouched, and `--finish` revokes the old credentials, drains and deletes the legacy inbox and removes the
-  legacy record. A legacy name becomes owner = its owner, group = `--group` or `main`, instance = its name; a name over
+  legacy record. A legacy name becomes owner = its owner, group = `--group` (required), instance = its name; a name over
   32 characters is refused until `--name` gives one.
 * **The window is bridged in both directions with the alias machinery of
   [ADR 0076](0076-a-three-token-record-may-carry-the-legacy-identity-it-answers-to-as-an-alias.md).** Old to new:
@@ -72,8 +74,7 @@ window becomes the migration window), 0077 (the rule file's keys) and 0102 (the 
 
 ### Consequences
 
-* Good: one model; trust in the subject; no tag or template needed to say who belongs with whom; a solo developer sees
-  only an owner and a default group.
+* Good: one model; trust in the subject; no tag or template needed to say who belongs with whom; a solo developer names one group once.
 * Good: running sessions are never cut off; mail is carried over by not moving it; the move is reversible until
   `--finish`.
 * Bad: a breaking change for every deployment: every identity changes, every creds file is replaced, every peer that
@@ -109,7 +110,7 @@ window becomes the migration window), 0077 (the rule file's keys) and 0102 (the 
 
 ### One form, owner, group, instance, and one migration command
 
-* Good: trust follows the path; one model; a solo developer sees only an owner and a default group.
+* Good: trust follows the path; one model; a solo developer names one group once.
 * Bad: a breaking change for every deployment, and a documented departure from SAP's SHOULD.
 
 ## More Information

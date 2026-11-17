@@ -23,8 +23,10 @@ Examples: `agents.mail.randy.web.build-1`, `agents.prompt.randy.web.build-1`. Tr
 may reach is a prefix of this path, and every level that needs a rule is its own token, so a NATS wildcard (which matches
 whole tokens only) can say it. No level is joined into another with a dash.
 
-A solo developer never needs to know that groups exist: `mashctl endpoint create` takes `--owner` (from config) and
-defaults `--group` to `main`, and everything under the owner is open by default (section 1.5).
+There is no default group (the maintainer's ruling: "no name, no herd"). `mashctl endpoint create` takes `--owner` (from
+config) and needs `--group`; a session names its group in `MASH_GROUP`. A missing group is a readable refusal with the
+code `group_missing`. A solo developer names one group once and everything under the owner is open by default
+(section 1.5).
 
 Each token keeps today's rule: `[a-z][a-z0-9-]*`, 1 to 32 characters, no `--`, no trailing dash. The whole address,
 dots included, is at most 64 characters. The name rule file (ADR 0077) is read per slot; its keys become `owner`, `group`
@@ -93,7 +95,8 @@ and prints this set.
 
 ### 1.6 Open points inside the model
 
-1. The default group is `main`. A legacy name has no group, so `migrate` needs one; section 2.2 says how it is chosen.
+1. There is no default group. A legacy name has no group, so `migrate` needs an explicit `--group`; a run without one is
+   refused with `group_missing`.
 2. Records in the form ADR 0074 built (three tokens, slot 1 an `agent_token`, off by default): the plan maps `(agent,
    owner, name)` to owner = the old owner, group = the old agent token, instance = the old name, because the old slot 1
    was a kind of endpoint and the old owner is the trust unit. I did not find any deployment using them. If one exists the
@@ -109,7 +112,7 @@ The migration is the cut-over of every identity in a deployment, one endpoint at
    they keep their credentials and their 0.5.0 binary.
 2. **Plan.** `mashctl endpoint migrate --all --dry-run` plans every legacy endpoint and changes nothing (bare `migrate` exits 2). It prints, per
    endpoint, the new address, whether it is `planned` or `refused` (and why), and what step it would take. `--json` is the
-   machine form. `--group G` sets the group for every endpoint in the run; `--name NAME` (one endpoint only) sets the
+   machine form. `--group G` is required and sets the group for every endpoint in the run; `--name NAME` (one endpoint only) sets the
    instance when the name does not fit.
 3. **Migrate one endpoint.** `mashctl endpoint migrate NAME --apply` does the account-side work (2.2). It prints the
    `next_steps`: where the new creds file is, and that the endpoint's session must be restarted with it under the 0.5.5
@@ -127,8 +130,8 @@ The migration is the cut-over of every identity in a deployment, one endpoint at
 For the legacy endpoint `N` of owner `O` (outcome words: `planned`, `migrated`, `unchanged` when already moved,
 `refused`):
 
-1. Resolve the new address `O.<group>.<instance>`: the group is `--group` if given, else the deployment's default group
-   `main`; the instance is the legacy name. A legacy name can be up to 48 characters, a token is at most 32: a longer name
+1. Resolve the new address `O.<group>.<instance>`: the group is `--group`, which is required (without it the endpoint is `refused` with
+   `group_missing`); the instance is the legacy name. A legacy name can be up to 48 characters, a token is at most 32: a longer name
    is `refused` with the reason, and the operator gives `--name`. A name or group the name rule refuses is `refused`
    as well, as is a record that still carries a zone, an address already taken, and a flat key in the retired ledger.
 2. Take the name's lock and the admission lock, and check admission (the existing overlap and burn checks).
