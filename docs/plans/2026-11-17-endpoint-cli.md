@@ -48,19 +48,21 @@ Two forms, one meaning. Mixing them is a usage error (exit 2) unless they agree.
 | `mashctl endpoint create --owner alice --group dev --name design` (canonical) | alice | dev | design |
 | `mashctl endpoint create alice/dev/design` (shortcut) | alice | dev | design |
 | `mashctl endpoint create --group dev --name design` | the configured owner | dev | design |
-| `mashctl endpoint create design` | the configured owner | `main` | design |
-| `mashctl endpoint create --name design` | the configured owner | `main` | design |
+| `mashctl endpoint create design --group dev` | the configured owner | dev | design |
+| `mashctl endpoint create design` | refused, exit 2: no group | | |
+| `mashctl endpoint create --name design` | refused, exit 2: no group | | |
 
-- The shortcut has one token or three, separated by `/`. Two tokens are refused: `alice/design` could be owner and
-  instance or group and instance, and the command does not guess (`refused: two tokens are ambiguous; write
-  alice/main/design or --owner alice --name design`, exit 2).
-- Defaults: the owner is the configured one (`MASH_OWNER` or `config.json`); the group is `main`. A solo developer writes
-  `mashctl endpoint create design` and never meets a group.
+- The shortcut is three tokens separated by `/`, or one token with `--group`. Two tokens are refused: `alice/design`
+  could be owner and instance or group and instance, and the command does not guess (`refused: two tokens are
+  ambiguous; write alice/dev/design or --group dev design`, exit 2).
+- There is no default group (the maintainer's ruling of 2026-11-17). A command with no group exits 2 with `refused: an
+  endpoint needs a group; write --group dev or alice/dev/design`. The owner is the configured one (`MASH_OWNER` or
+  `config.json`) when not given.
 - Each token follows the token rule of the model (`[a-z][a-z0-9-]*`, 1 to 32 characters, no `--`, no trailing dash;
   the whole address at most 64) and the name rule file. The flag is `--name` because that is the ruling; the JSON field
   is `instance` (section 8).
-- What the command prints for the address is the model's form: `alice.main.design` (dots, as it appears in a subject).
-  What a person types is `alice/main/design`. Both are shown in the output so that neither has to be converted by hand.
+- What the command prints for the address is the model's form: `alice.dev.design` (dots, as it appears in a subject).
+  What a person types is `alice/dev/design`. Both are shown in the output so that neither has to be converted by hand.
 
 ### 2.2 What it does
 
@@ -78,14 +80,14 @@ that starts with `-` must be written `--flag=VALUE`.
 Text (a convenience; standard error carries progress, standard output carries this):
 
 ```text
-$ mashctl endpoint create design
-created endpoint alice/main/design
-  address  alice.main.design
-  creds    /home/alice/.config/mash/alice.main.design.creds
+$ mashctl endpoint create design --group dev
+created endpoint alice/dev/design
+  address  alice.dev.design
+  creds    /home/alice/.config/mash/alice.dev.design.creds
 next: start a session as this endpoint (see the quick start)
 ```
 
-`--dry-run` prints `would create endpoint alice/main/design` and the same lines, and writes nothing:
+`--dry-run` prints `would create endpoint alice/dev/design` and the same lines, and writes nothing:
 
 ```text
 $ mashctl endpoint create alice/dev/design --dry-run --json
@@ -116,7 +118,7 @@ $ mashctl endpoint create alice/dev/design --dry-run --json
 ```
 
 A created endpoint has `"outcome": "created"`, `"creds": { ..., "written": true }` and `"user_public_key"`. A refusal has
-`"outcome": "refused"` and `"refusal": { "code": "...", "detail": "..." }` with exit 1. Codes: `name_invalid`,
+`"outcome": "refused"` and `"refusal": { "code": "...", "detail": "..." }` with exit 1. Codes: `group_missing` (a usage error: exit 2, as the ruling says; the code is core's), `name_invalid`,
 `name_rule`, `address_taken`, `key_retired` (the flat key is in the retired ledger), `creds_exists`, `zone_record`,
 `no_account_key`. An error (a server failure) has `"outcome": "error"` and exit 6; the text says what to run next.
 `next_steps` has the shape of `policydirect.Result.next_steps` (`sender`, `step`, `action`, `address`, `purpose`,
@@ -134,7 +136,7 @@ mashctl: refused: alice.dev.design already exists in the directory.
 The model plan (section 2) gives the account-side steps. This is how an operator drives them.
 
 ```text
-mashctl endpoint migrate [NAME | --all] [--group G] [--name N]
+mashctl endpoint migrate [NAME | --all] --group G [--name N]
                          [--finish] [--force] [--yes] [--dry-run] [--json]
                          [--servers N] [--sys-creds FILE]
 ```
@@ -143,16 +145,16 @@ mashctl endpoint migrate [NAME | --all] [--group G] [--name N]
 
 | Command | What it does |
 |---|---|
-| `mashctl endpoint migrate --all --dry-run` | Plans every legacy endpoint. Changes nothing. |
-| `mashctl endpoint migrate design` | Step 1 for one endpoint: makes the new identity beside the old one (record, inbox, user, creds file). Revokes nothing. |
-| `mashctl endpoint migrate design --finish` | Step 2 for one endpoint: revokes the old credentials, ends the bridge, deletes the drained legacy inbox and record. |
-| `mashctl endpoint migrate --all --yes` | Step 1 for every legacy endpoint (it lists first, and acts only with `--yes`, as `reissue --all` does). |
-| `mashctl endpoint migrate --all --finish --yes` | Step 2 for every endpoint that has moved. Lists any that has not, and leaves its record. |
+| `mashctl endpoint migrate --all --group dev --dry-run` | Plans every legacy endpoint. Changes nothing. |
+| `mashctl endpoint migrate design --group dev` | Step 1 for one endpoint: makes the new identity beside the old one (record, inbox, user, creds file). Revokes nothing. |
+| `mashctl endpoint migrate design --group dev --finish` | Step 2 for one endpoint: revokes the old credentials, ends the bridge, deletes the drained legacy inbox and record. |
+| `mashctl endpoint migrate --all --group dev --yes` | Step 1 for every legacy endpoint (it lists first, and acts only with `--yes`, as `reissue --all` does). |
+| `mashctl endpoint migrate --all --group dev --finish --yes` | Step 2 for every endpoint that has moved. Lists any that has not, and leaves its record. |
 
 - With no `NAME` and no `--all` the command exits 2 and says to name an endpoint or give `--all`. (The model plan has
   "no names plans all" as the default. The standard says a changing command changes nothing only under `--dry-run`
   (rule 11), and a bare `migrate` that does nothing is a trap for an agent that expects it to migrate. See section 8.)
-- `--group G` sets the group for the endpoints in the run (default `main`). `--name N` sets the instance for one
+- `--group G` sets the group for the endpoints in the run (required; there is no default, and without it the command exits 2 with the same message as `create`). `--name N` sets the instance for one
   endpoint, for the case where the legacy name is longer than 32 characters. Without it such an endpoint is `refused`.
 - `--finish` on an endpoint whose legacy inbox is not drained refuses with the count of unread messages, unless
   `--force` says to drop them.
@@ -163,9 +165,9 @@ mashctl endpoint migrate [NAME | --all] [--group G] [--name N]
 Per endpoint, one line; the last line is the count.
 
 ```text
-$ mashctl endpoint migrate --all --dry-run
-planned  design     -> alice/main/design   make the new identity; the old one keeps working
-planned  review     -> alice/main/review   make the new identity; the old one keeps working
+$ mashctl endpoint migrate --all --group dev --dry-run
+planned  design     -> alice/dev/design   make the new identity; the old one keeps working
+planned  review     -> alice/dev/review   make the new identity; the old one keeps working
 refused  a-very-long-legacy-endpoint-name-of-forty-one -> (instance over 32 characters; pass --name)
 2 planned, 1 refused, 0 unchanged. Nothing was changed.
 next: mashctl endpoint migrate design
@@ -178,17 +180,17 @@ next: mashctl endpoint migrate design
   "step": "plan",
   "counts": { "planned": 2, "migrated": 0, "unchanged": 0, "refused": 1 },
   "endpoints": [
-    { "legacy": "design", "owner": "alice", "group": "main", "instance": "design",
-      "address": "alice.main.design", "outcome": "planned", "refusal": null },
-    { "legacy": "review", "owner": "alice", "group": "main", "instance": "review",
-      "address": "alice.main.review", "outcome": "planned", "refusal": null },
-    { "legacy": "a-very-long-legacy-endpoint-name-of-forty-one", "owner": "alice", "group": "main",
+    { "legacy": "design", "owner": "alice", "group": "dev", "instance": "design",
+      "address": "alice.dev.design", "outcome": "planned", "refusal": null },
+    { "legacy": "review", "owner": "alice", "group": "dev", "instance": "review",
+      "address": "alice.dev.review", "outcome": "planned", "refusal": null },
+    { "legacy": "a-very-long-legacy-endpoint-name-of-forty-one", "owner": "alice", "group": "dev",
       "instance": null, "address": null, "outcome": "refused",
       "refusal": { "code": "instance_too_long", "detail": "pass --name" } }
   ],
   "next_steps": [
     { "sender": "operator", "step": "migrate", "action": "make the new identity for design",
-      "address": "alice.main.design", "purpose": "migrate", "detail": "mashctl endpoint migrate design" }
+      "address": "alice.dev.design", "purpose": "migrate", "detail": "mashctl endpoint migrate design --group dev" }
   ]
 }
 ```
@@ -209,14 +211,14 @@ over days, because the model plan keeps old and new reaching each other for the 
 of that plan). In order:
 
 1. **Put the 0.5.5 `mashctl` on the host that runs it.** Nothing changes for running endpoints.
-2. **`mashctl endpoint migrate --all --dry-run`.** Read the plan. Fix each `refused` (a longer name needs `--name`; a
+2. **`mashctl endpoint migrate --all --group dev --dry-run`.** Read the plan. Fix each `refused` (a longer name needs `--name`; a
    zoned record needs `mashctl unzone` first).
 3. **For one endpoint: `mashctl endpoint migrate NAME`.** The old session is untouched and keeps working.
 4. **Restart that endpoint's session with the new creds file and the 0.5.5 binary, together.** Both are needed: a 0.5.0
    binary cannot serve the new form, and the new creds do not work for a 0.5.0 binary's subjects. Do not run the old
    session and the new one on the same endpoint at once; the lease allows one reader of the old name.
 5. **Repeat 3 and 4** for every endpoint, in any order.
-6. **`mashctl endpoint migrate --all --finish --yes`.** It revokes the old credentials of every endpoint that moved, and
+6. **`mashctl endpoint migrate --all --group dev --finish --yes`.** It revokes the old credentials of every endpoint that moved, and
    lists, without touching, any that did not. Run `mashctl audit` afterwards; it is clean when nothing is legacy.
 
 What breaks, from the model plan and the order above:
@@ -255,7 +257,7 @@ $ echo $?
 The same for `mashctl reissue` and `mashctl retire`, each naming its replacement (`endpoint reissue`, `endpoint delete`). They
 are not aliases: they run nothing and exit 2.
 
-`endpoint delete` and `endpoint reissue` take the shortcut form as the positional address (`alice/main/design`) and the
+`endpoint delete` and `endpoint reissue` take the shortcut form as the positional address (`alice/dev/design`) and the
 same `--servers` and `--sys-creds` flags `retire` and `reissue` have. Their outcomes keep today's words in the model's
 vocabulary: `deleted`, `unchanged`, `refused`, `partial`, `error`; `reissued`, `unchanged`, `refused`, `partial`, `error`.
 
@@ -271,29 +273,29 @@ it`". Their JSON uses the endpoint object of section 2.3 plus `state` (`current`
 `mashctl init --local` keeps its spelling and its flags in 0.5.5. The standard puts `init` under a noun; that rename is the
 major revision's (section 6). What changes:
 
-- Its last line becomes `Ready: ... Add an endpoint with: mashctl endpoint create NAME`.
-- A fresh `init --local` writes no group. The first `endpoint create design` makes `<owner>.main.design`.
+- Its last line becomes `Ready: ... Add an endpoint with: mashctl endpoint create NAME --group GROUP`.
+- A fresh `init --local` writes no group, and none is assumed. The first `endpoint create design` makes `<owner>.dev.design`.
 - It still never touches `config.json` beyond what it wrote, and still prints the config directory.
 
-The full five-minute path, as the README will carry it (no account, one machine, no group named):
+The full five-minute path, as the README will carry it (no account, one machine, group `dev`):
 
 ```sh
 # 1. Install mash (a release download, verified) and mashctl (go install), as the README's Install section says.
 # 2. A local NATS server, keys and credentials:
 mashctl init --local --owner alice --start
 # 3. Two endpoints:
-mashctl endpoint create design
-mashctl endpoint create review
+mashctl endpoint create design --group dev
+mashctl endpoint create review --group dev
 # 4. The plugin:
 mash plugin export ~/.mash-plugin
 claude plugin marketplace add ~/.mash-plugin
 claude plugin install mash@mash
-# 5. Two Claude Code sessions, one per endpoint (`MASH_OWNER` and `MASH_GROUP` complete the address; the group defaults to `main`):
-#      terminal 1:  MASH_NAME=design claude --dangerously-load-development-channels plugin:mash@mash
-#      terminal 2:  MASH_NAME=review claude --dangerously-load-development-channels plugin:mash@mash
+# 5. Two Claude Code sessions, one per endpoint (`MASH_OWNER` and `MASH_GROUP` complete the address; `MASH_GROUP` is required):
+#      terminal 1:  MASH_GROUP=dev MASH_NAME=design claude --dangerously-load-development-channels plugin:mash@mash
+#      terminal 2:  MASH_GROUP=dev MASH_NAME=review claude --dangerously-load-development-channels plugin:mash@mash
 # 6. A third shell:
-MASH_NAME=design mash send review "hello"
-MASH_NAME=review mash inbox
+MASH_GROUP=dev MASH_NAME=design mash send review "hello"
+MASH_GROUP=dev MASH_NAME=review mash inbox
 # 7. Stop the local server:
 kill "$(cat "$D/server.pid")"      # D is the server directory init --local printed
 ```
@@ -303,7 +305,7 @@ The README's other changes for 0.5.5:
 - The words "agent" and "endpoint" are used as the glossary will fix them; `mashctl` is described as the tool that
   creates endpoints.
 - An "Upgrading from 0.5.0" paragraph: put 0.5.5 `mashctl` on the central host, run `mashctl endpoint migrate --all
-  --dry-run`, and follow section 3.2. It links the operations page for the full order.
+  --group dev --dry-run`, and follow section 3.2. It links the operations page for the full order.
 - The SAP departure (the first slot is the owner) in the README's SAP section, as the model plan says.
 - `docs/mashctl.md` replaces "Adding an endpoint", "Re-issuing" and "Retiring an endpoint" with the sections of this note
   that apply; `docs/operations.md` gets the migration order.
@@ -336,7 +338,7 @@ on each changing command and no state change under it, a bad flag exits 2, and `
 
 ## 7. Tests
 
-- A table test of the naming forms in section 2.1 (the five rows, the two-token refusal, a mixed form that disagrees).
+- A table test of the naming forms in section 2.1 (the rows, the no-group refusal, the two-token refusal, a mixed form that disagrees).
 - Golden files for the text and the JSON of `create` (planned, created, each refusal code), `migrate` (plan, step 1,
   step 2, partial) and the removed-verb messages. The goldens are the contract that `--json` consumers read.
 - The live proof of the model plan (its section 2.4) driven through these commands, not the library: two legacy
@@ -350,11 +352,11 @@ Settled with the model's owner on 2026-11-17:
 
 1. **`--name`** is the flag everywhere, `migrate` included (it names the new instance when a legacy name is longer than
    32 characters). The JSON field and the prose say `instance`.
-2. **Slash for typing, dots stored.** A person types `alice/main/design`; the subject and the stored address are
-   `alice.main.design`. Both are shown in output.
-3. **A bare `migrate` exits 2.** The plan is `--all --dry-run`.
+2. **Slash for typing, dots stored.** A person types `alice/dev/design`; the subject and the stored address are
+   `alice.dev.design`. Both are shown in output.
+3. **A bare `migrate` exits 2.** The plan is `--all --group dev --dry-run`.
 4. **A session names its endpoint with three variables:** `MASH_NAME=design`, `MASH_OWNER` (as today) and `MASH_GROUP`
-   (default `main`). One form, no `owner/group/instance` in `MASH_NAME`. The quick start in section 5 uses it.
+   (required, no default; its absence is a readable error at session start). One form, no `owner/group/instance` in `MASH_NAME`. The quick start in section 5 uses it.
 5. **`provision`, `deprovision`, `set-meta` and `permissions`** survive as repairs only where they key by the new
    address (the flat key `owner_group_instance`). Any that takes a legacy name goes. The list is for the maintainer's
    lead to confirm.
