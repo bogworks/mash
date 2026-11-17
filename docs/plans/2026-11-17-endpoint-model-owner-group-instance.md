@@ -107,9 +107,9 @@ The migration is the cut-over of every identity in a deployment, one endpoint at
 
 1. **Upgrade the central tools.** Put `mashctl` 0.5.5 on the host that runs it. Nothing about running endpoints changes;
    they keep their credentials and their 0.5.0 binary.
-2. **Plan.** `mashctl endpoint migrate` with no names plans every legacy endpoint and changes nothing. It prints, per
+2. **Plan.** `mashctl endpoint migrate --all --dry-run` plans every legacy endpoint and changes nothing (bare `migrate` exits 2). It prints, per
    endpoint, the new address, whether it is `planned` or `refused` (and why), and what step it would take. `--json` is the
-   machine form. `--group G` sets the group for every endpoint in the run; `--instance NAME` (one endpoint only) sets the
+   machine form. `--group G` sets the group for every endpoint in the run; `--name NAME` (one endpoint only) sets the
    instance when the name does not fit.
 3. **Migrate one endpoint.** `mashctl endpoint migrate NAME --apply` does the account-side work (2.2). It prints the
    `next_steps`: where the new creds file is, and that the endpoint's session must be restarted with it under the 0.5.5
@@ -129,7 +129,7 @@ For the legacy endpoint `N` of owner `O` (outcome words: `planned`, `migrated`, 
 
 1. Resolve the new address `O.<group>.<instance>`: the group is `--group` if given, else the deployment's default group
    `main`; the instance is the legacy name. A legacy name can be up to 48 characters, a token is at most 32: a longer name
-   is `refused` with the reason, and the operator gives `--instance`. A name or group the name rule refuses is `refused`
+   is `refused` with the reason, and the operator gives `--name`. A name or group the name rule refuses is `refused`
    as well, as is a record that still carries a zone, an address already taken, and a flat key in the retired ledger.
 2. Take the name's lock and the admission lock, and check admission (the existing overlap and burn checks).
 3. Create the **new identity**: a directory record `O.G.I` whose `alias` names the legacy identity, a new inbox stream and
@@ -190,7 +190,7 @@ no second server and no outside system:
 5. `migrate --finish --all`: assert the old creds are revoked (a connect with them is refused, the revocation visible in the
    account JWT), the legacy records and drained streams are gone, the bridge grants are gone from the new users' JWTs,
    `audit` is clean, and the new endpoints still work.
-6. Refusals: a 40-character name is `refused` until `--instance`; a re-run of `--apply` on a moved name says `unchanged`;
+6. Refusals: a 40-character name is `refused` until `--name`; a re-run of `--apply` on a moved name says `unchanged`;
    `--finish NAME` with an undrained legacy inbox refuses with the count.
 7. Kill the run between steps 3 and 4 of `--apply` and run it again: it finishes and leaves one new identity.
 

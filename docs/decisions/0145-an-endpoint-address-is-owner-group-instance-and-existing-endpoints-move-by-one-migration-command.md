@@ -60,7 +60,7 @@ Chosen: one form, with one migration command.
   the new identity of one endpoint (record, inbox stream, new key and creds) and leaves the legacy record, inbox and
   credentials untouched, and `--finish` revokes the old credentials, drains and deletes the legacy inbox and removes the
   legacy record. A legacy name becomes owner = its owner, group = `--group` or `main`, instance = its name; a name over
-  32 characters is refused until `--instance` gives one.
+  32 characters is refused until `--name` gives one.
 * **The window is bridged in both directions with the alias machinery of
   [ADR 0076](0076-a-three-token-record-may-carry-the-legacy-identity-it-answers-to-as-an-alias.md).** Old to new:
   old senders still publish to the retained legacy inbox, which the moved endpoint reads. New to old: the moved
