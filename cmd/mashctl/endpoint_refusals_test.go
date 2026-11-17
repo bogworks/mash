@@ -280,6 +280,17 @@ var refusalCases = []refCase{
 	{"reissue_key_retired", []string{"endpoint", "reissue", "o/g/a", "--make-key"}, burned("a"), "key_retired", 1},
 	{"reissue_reissue_busy", []string{"endpoint", "reissue", "o/g/a", "--make-key"}, seq(seeded("a"), lockHeld("a")), "reissue_busy", 1},
 	{"reissue_write", []string{"endpoint", "reissue", "o/g/a", "--make-key"}, seq(seeded("a"), groupWritableDir), "write", 6},
+	{"reissue_superseded", []string{"endpoint", "reissue", "o/g/a", "--make-key"}, seq(seeded("a"), func(t *testing.T, r *refEnv) {
+		// another run replaces the directory key between this run's write and its check
+		epBeforeVerify = func() {
+			rec, _ := r.h.record(ad("a"))
+			_, other := r.h.e.Mint(t, ad("other"))
+			if _, err := r.h.adminOf().SetUser(context.Background(), ad("a"), r.h.e.Account, rec.User, other); err != nil {
+				t.Error(err)
+			}
+		}
+		t.Cleanup(func() { epBeforeVerify = nil })
+	}), "superseded", 6},
 	{"reissue_public_key_issued", []string{"endpoint", "reissue", "o/g/b", "--public-key", "{PUB}", "--jwt-out", "{AUX}/out.jwt"}, func(t *testing.T, r *refEnv) {
 		r.must(t, "endpoint", "create", "o/g/a", "--public-key", r.pub, "--jwt-out", filepath.Join(r.aux, "first.jwt"))
 		r.h.seed(ad("b"))
