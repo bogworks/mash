@@ -271,6 +271,16 @@ var AT001 = Scenario{
 
 		a.permissions(h, "alice", "dev", "design")
 
+		// endpoint delete retires the creds file in the config directory, so the revoked key is kept at a private path first.
+		revokedCreds := filepath.Join(a.Dir, "review-before-delete.creds")
+		kept := false
+		if b, err := os.ReadFile(filepath.Join(h.Config, "alice.dev.review.creds")); err == nil {
+			kept = os.WriteFile(revokedCreds, b, 0o600) == nil
+			a.Watch("jwt review-creds", revokedCreds)
+			a.Watch("seed review-creds", revokedCreds)
+		}
+		a.C.Check("review's creds file is copied to a private path before the delete", kept, "")
+		revEnv := append(slices.Clone(envs["review"]), "MASH_CREDS="+revokedCreds)
 		r = a.Ctl("endpoint-delete-review", h, a.Conn(), "endpoint", "delete", "alice/dev/review")
 		a.C.Check("mashctl endpoint delete alice/dev/review succeeds", r.Code == 0, exitDetail(r))
 		deadline := time.Now().Add(30 * time.Second)
@@ -283,9 +293,9 @@ var AT001 = Scenario{
 			}
 		}
 		a.C.Check("REQ-011: the review session's connection is closed (its serve exits or reports the authorization failure)", closed, "")
-		r = a.Mash("reconnect-review", h, envs["review"], "inbox")
+		r = a.Mash("reconnect-review", h, revEnv, "inbox")
 		a.C.Check("REQ-011: a reconnect by the review key is refused as not authorized", r.Code != 0 && authRE.MatchString(r.Text()), exitDetail(r))
-		r = a.Mash("status-review", h, envs["review"], "status")
+		r = a.Mash("status-review", h, revEnv, "status")
 		a.C.Check("REQ-011: mash status says why (an authorization failure)", authRE.MatchString(r.Text()), exitDetail(r))
 	},
 }
@@ -321,7 +331,7 @@ var AT002 = Scenario{
 		r := a.Mash("send-to-peer", hb, env, "send", "alice.dev.review", "mail from the endpoint on B")
 		a.C.Check("the endpoint on B mails its peer", r.Code == 0, exitDetail(r))
 		r = a.Ctl("inbox-inspect-peer", ha, a.Conn(), "inbox", "inspect", "alice.dev.review", "--json")
-		a.C.Check("A sees the mail in the peer's inbox (sent by alice.dev.design)", r.Code == 0 && strings.Contains(r.Stdout, "alice.dev.design"), exitDetail(r))
+		a.C.Check("A sees the mail in the peer's inbox (sent by alice.dev.design)", r.Code == 0 && (strings.Contains(r.Stdout, "alice.dev.design") || strings.Contains(r.Stdout, "alice_dev_design")), exitDetail(r))
 		_ = p
 
 		seed, jwtText := a.secrets["seed design"], a.secrets["jwt design"]

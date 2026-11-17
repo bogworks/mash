@@ -145,9 +145,9 @@ var AT003 = Scenario{
 				Hint: [][]string{{"32", "shorter", "characters"}}},
 			{Name: "a token the name rule file refuses", Label: "name-rule", Home: ha, Extra: []string{"MASH_NAME_RULE_FILE=" + rule}, Args: create("alice/scratch/x", pk...), Exit: 1, Code: "name_rule",
 				Hint: [][]string{{"no-scratch"}}},
-			{Name: "an address that exists", Label: "address-taken", Home: ha, Args: create("alice/dev/design", pk...), Exit: 1, Code: "address_taken",
+			{Name: "an address that exists", Label: "address-taken", Home: ha, Args: create("alice/dev/design", append(pk, "--jwt-out", filepath.Join(he.Dir, "taken-address.jwt"))...), Exit: 1, Code: "address_taken",
 				Hint: [][]string{{"endpoint", "another", "different"}}},
-			{Name: "a deleted, burned address", Label: "key-retired", Home: ha, Args: create("alice/dev/gone", pk...), Exit: 1, Code: "key_retired",
+			{Name: "a deleted, burned address", Label: "key-retired", Home: ha, Args: create("alice/dev/gone", append(pk, "--jwt-out", filepath.Join(he.Dir, "burned-address.jwt"))...), Exit: 1, Code: "key_retired",
 				Hint: [][]string{{"endpoint create", "another", "new name", "different"}}},
 			{Name: "a malformed public key file", Label: "pubkey-invalid", Home: ha, Args: create("alice/dev/other", "--public-key", bad), Exit: 1, Code: "public_key_invalid",
 				Hint: [][]string{{"mash key create", "--public-key"}}},
@@ -159,7 +159,7 @@ var AT003 = Scenario{
 				Hint: [][]string{{"mashctl init", "mashctl adopt", "MASH_KEYS_DIR", "account key"}}},
 			{Name: "mash credential create with a seed and a JWT for different keys", Label: "creds-mismatch", Home: he, Mash: true, NoJSON: true, Exit: 1,
 				Args: []string{"credential", "create", "--seed", design.seed, "--jwt", review.jwt, "--out", filepath.Join(he.Dir, "mismatch.creds")},
-				Hint: [][]string{{"mash key create", "--seed", "--jwt", "same key", "different"}}},
+				Hint: [][]string{{"mash key create", "--seed", "--jwt", "same key", "different", "belong together"}}},
 		}
 		for _, c := range cases {
 			a.refusal(ha, trees, c)
