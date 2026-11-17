@@ -669,7 +669,15 @@ usage: mashctl endpoint reissue ADDRESS (--public-key FILE | --make-key) [--jwt-
   The bulk JSON has schema mashctl-endpoint-bulk@1.
   A key made by --make-key is kept in <creds file>.pending (mode 0600) until the creds file is written, so the same
   command run again after a kill finishes with the same key.
+  A rerun of --public-key FILE --jwt-out FILE after a run that switched the directory to the key but did not write the
+  JWT is a resume: <jwt-out>.pending (mode 0600) records the rotation, and the rerun writes the JWT and removes it.
+  --changed also reissues an endpoint with a staged <creds file>.pending (rotation_pending) or whose current key is
+  revoked (key_revoked); one whose revocation cannot be checked is an error, revocation_unknown, never "unchanged".
   Refusals include key_unchanged: --public-key names the key the endpoint already has, so nothing would be rotated.
+  Other refusals: future_issued (the old key's issue record is dated after the revocation time; fix the clock),
+  creds_mismatch (--make-key found a creds file that is not this endpoint's current creds: its name, key or account
+  differs; move it aside with mv FILE FILE.old and run again, or use --public-key), creds_unreadable (the file exists
+  and cannot be read or parsed).
   exit codes: 0 done, planned or unchanged, 1 refused, 2 usage, 5 partial (bulk), 6 error
 Example:
   mashctl endpoint reissue alice/dev/design --public-key design.pub
@@ -712,7 +720,15 @@ usage: mashctl endpoint reissue ADDRESS (--public-key FILE | --make-key) [--jwt-
   The bulk JSON has schema mashctl-endpoint-bulk@1.
   A key made by --make-key is kept in <creds file>.pending (mode 0600) until the creds file is written, so the same
   command run again after a kill finishes with the same key.
+  A rerun of --public-key FILE --jwt-out FILE after a run that switched the directory to the key but did not write the
+  JWT is a resume: <jwt-out>.pending (mode 0600) records the rotation, and the rerun writes the JWT and removes it.
+  --changed also reissues an endpoint with a staged <creds file>.pending (rotation_pending) or whose current key is
+  revoked (key_revoked); one whose revocation cannot be checked is an error, revocation_unknown, never "unchanged".
   Refusals include key_unchanged: --public-key names the key the endpoint already has, so nothing would be rotated.
+  Other refusals: future_issued (the old key's issue record is dated after the revocation time; fix the clock),
+  creds_mismatch (--make-key found a creds file that is not this endpoint's current creds: its name, key or account
+  differs; move it aside with mv FILE FILE.old and run again, or use --public-key), creds_unreadable (the file exists
+  and cannot be read or parsed).
   exit codes: 0 done, planned or unchanged, 1 refused, 2 usage, 5 partial (bulk), 6 error
 Example:
   mashctl endpoint reissue alice/dev/design --public-key design.pub
@@ -1161,6 +1177,81 @@ stdout:
     "detail": "the public key is already this endpoint's key, so nothing would be rotated; make a new key with: mash key create --out NAME.seed"
   }
 }
+== reissue_future_issued
+exit 1
+stderr:
+mashctl: endpoint reissue: refused (future_issued): o.g.a's current creds JWT claims it was issued in the future (<TIME>): the revocation would not cover it; fix this machine's clock (or the machine that minted it) and run again; nothing was changed
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "refused",
+  "owner": "o",
+  "group": "g",
+  "instance": "a",
+  "address": "o.g.a",
+  "key": "o_g_a",
+  "creds_path": "<TMP>/o.g.a.creds",
+  "creds_written": false,
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "future_issued",
+    "detail": "o.g.a's current creds JWT claims it was issued in the future (<TIME>): the revocation would not cover it; fix this machine's clock (or the machine that minted it) and run again; nothing was changed"
+  }
+}
+== reissue_creds_mismatch
+exit 1
+stderr:
+mashctl: endpoint reissue: refused (creds_mismatch): the creds file <TMP>/o.g.a.creds is not this endpoint's current creds: its JWT is named "o.g.b", not o.g.a; nothing was changed: move the file aside (mv <TMP>/o.g.a.creds <TMP>/o.g.a.creds.old) and run again, or use --public-key
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "refused",
+  "owner": "o",
+  "group": "g",
+  "instance": "a",
+  "address": "o.g.a",
+  "key": "o_g_a",
+  "creds_path": "<TMP>/o.g.a.creds",
+  "creds_written": false,
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "creds_mismatch",
+    "detail": "the creds file <TMP>/o.g.a.creds is not this endpoint's current creds: its JWT is named \"o.g.b\", not o.g.a; nothing was changed: move the file aside (mv <TMP>/o.g.a.creds <TMP>/o.g.a.creds.old) and run again, or use --public-key"
+  }
+}
+== reissue_creds_unreadable
+exit 1
+stderr:
+mashctl: endpoint reissue: refused (creds_unreadable): the creds file <TMP>/o.g.a.creds exists but holds a JWT that is not a user JWT; nothing was changed: move the file aside (mv <TMP>/o.g.a.creds <TMP>/o.g.a.creds.old) and run again, or use --public-key
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "refused",
+  "owner": "o",
+  "group": "g",
+  "instance": "a",
+  "address": "o.g.a",
+  "key": "o_g_a",
+  "creds_path": "<TMP>/o.g.a.creds",
+  "creds_written": false,
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "creds_unreadable",
+    "detail": "the creds file <TMP>/o.g.a.creds exists but holds a JWT that is not a user JWT; nothing was changed: move the file aside (mv <TMP>/o.g.a.creds <TMP>/o.g.a.creds.old) and run again, or use --public-key"
+  }
+}
 == bulk_usage
 exit 2
 stderr:
@@ -1180,7 +1271,15 @@ usage: mashctl endpoint reissue ADDRESS (--public-key FILE | --make-key) [--jwt-
   The bulk JSON has schema mashctl-endpoint-bulk@1.
   A key made by --make-key is kept in <creds file>.pending (mode 0600) until the creds file is written, so the same
   command run again after a kill finishes with the same key.
+  A rerun of --public-key FILE --jwt-out FILE after a run that switched the directory to the key but did not write the
+  JWT is a resume: <jwt-out>.pending (mode 0600) records the rotation, and the rerun writes the JWT and removes it.
+  --changed also reissues an endpoint with a staged <creds file>.pending (rotation_pending) or whose current key is
+  revoked (key_revoked); one whose revocation cannot be checked is an error, revocation_unknown, never "unchanged".
   Refusals include key_unchanged: --public-key names the key the endpoint already has, so nothing would be rotated.
+  Other refusals: future_issued (the old key's issue record is dated after the revocation time; fix the clock),
+  creds_mismatch (--make-key found a creds file that is not this endpoint's current creds: its name, key or account
+  differs; move it aside with mv FILE FILE.old and run again, or use --public-key), creds_unreadable (the file exists
+  and cannot be read or parsed).
   exit codes: 0 done, planned or unchanged, 1 refused, 2 usage, 5 partial (bulk), 6 error
 Example:
   mashctl endpoint reissue alice/dev/design --public-key design.pub
@@ -1222,7 +1321,15 @@ usage: mashctl endpoint reissue ADDRESS (--public-key FILE | --make-key) [--jwt-
   The bulk JSON has schema mashctl-endpoint-bulk@1.
   A key made by --make-key is kept in <creds file>.pending (mode 0600) until the creds file is written, so the same
   command run again after a kill finishes with the same key.
+  A rerun of --public-key FILE --jwt-out FILE after a run that switched the directory to the key but did not write the
+  JWT is a resume: <jwt-out>.pending (mode 0600) records the rotation, and the rerun writes the JWT and removes it.
+  --changed also reissues an endpoint with a staged <creds file>.pending (rotation_pending) or whose current key is
+  revoked (key_revoked); one whose revocation cannot be checked is an error, revocation_unknown, never "unchanged".
   Refusals include key_unchanged: --public-key names the key the endpoint already has, so nothing would be rotated.
+  Other refusals: future_issued (the old key's issue record is dated after the revocation time; fix the clock),
+  creds_mismatch (--make-key found a creds file that is not this endpoint's current creds: its name, key or account
+  differs; move it aside with mv FILE FILE.old and run again, or use --public-key), creds_unreadable (the file exists
+  and cannot be read or parsed).
   exit codes: 0 done, planned or unchanged, 1 refused, 2 usage, 5 partial (bulk), 6 error
 Example:
   mashctl endpoint reissue alice/dev/design --public-key design.pub
@@ -1264,7 +1371,15 @@ usage: mashctl endpoint reissue ADDRESS (--public-key FILE | --make-key) [--jwt-
   The bulk JSON has schema mashctl-endpoint-bulk@1.
   A key made by --make-key is kept in <creds file>.pending (mode 0600) until the creds file is written, so the same
   command run again after a kill finishes with the same key.
+  A rerun of --public-key FILE --jwt-out FILE after a run that switched the directory to the key but did not write the
+  JWT is a resume: <jwt-out>.pending (mode 0600) records the rotation, and the rerun writes the JWT and removes it.
+  --changed also reissues an endpoint with a staged <creds file>.pending (rotation_pending) or whose current key is
+  revoked (key_revoked); one whose revocation cannot be checked is an error, revocation_unknown, never "unchanged".
   Refusals include key_unchanged: --public-key names the key the endpoint already has, so nothing would be rotated.
+  Other refusals: future_issued (the old key's issue record is dated after the revocation time; fix the clock),
+  creds_mismatch (--make-key found a creds file that is not this endpoint's current creds: its name, key or account
+  differs; move it aside with mv FILE FILE.old and run again, or use --public-key), creds_unreadable (the file exists
+  and cannot be read or parsed).
   exit codes: 0 done, planned or unchanged, 1 refused, 2 usage, 5 partial (bulk), 6 error
 Example:
   mashctl endpoint reissue alice/dev/design --public-key design.pub
@@ -1504,6 +1619,125 @@ stdout:
   "refusal": {
     "code": "reissue_busy",
     "detail": "another reissue of o.g.a is running; if none is (a run was killed), remove the directory <TMP>/o.g.a.creds.lock and run this again"
+  }
+}
+== bulk_future_issued
+exit 1
+stderr:
+mashctl: endpoint reissue o/g/a: future_issued: o.g.a's current creds JWT claims it was issued in the future (<TIME>): the revocation would not cover it; fix this machine's clock (or the machine that minted it) and run again; nothing was changed
+mashctl: endpoint reissue: refused (future_issued): o.g.a's current creds JWT claims it was issued in the future (<TIME>): the revocation would not cover it; fix this machine's clock (or the machine that minted it) and run again; nothing was changed
+stdout:
+{
+  "schema": "mashctl-endpoint-bulk@1",
+  "outcome": "refused",
+  "counts": {
+    "reissued": 0,
+    "planned": 0,
+    "skipped": 0,
+    "refused": 1,
+    "error": 0
+  },
+  "endpoints": [
+    {
+      "owner": "o",
+      "group": "g",
+      "instance": "a",
+      "address": "o.g.a",
+      "key": "o_g_a",
+      "outcome": "refused",
+      "reason": "future_issued",
+      "creds_path": "<TMP>/o.g.a.creds"
+    }
+  ],
+  "next_steps": [],
+  "refusal": {
+    "code": "future_issued",
+    "detail": "o.g.a's current creds JWT claims it was issued in the future (<TIME>): the revocation would not cover it; fix this machine's clock (or the machine that minted it) and run again; nothing was changed"
+  }
+}
+== bulk_creds_mismatch
+exit 5
+stderr:
+mashctl: endpoint reissue o/g/a: creds_mismatch: the creds file <TMP>/o.g.a.creds is not this endpoint's current creds: its JWT is named "o.g.b", not o.g.a; nothing was changed: move the file aside (mv <TMP>/o.g.a.creds <TMP>/o.g.a.creds.old) and run again, or use --public-key
+revoked user key <KEY>: 1 server(s) acknowledged
+stdout:
+{
+  "schema": "mashctl-endpoint-bulk@1",
+  "outcome": "partial",
+  "counts": {
+    "reissued": 1,
+    "planned": 0,
+    "skipped": 0,
+    "refused": 1,
+    "error": 0
+  },
+  "endpoints": [
+    {
+      "owner": "o",
+      "group": "g",
+      "instance": "a",
+      "address": "o.g.a",
+      "key": "o_g_a",
+      "outcome": "refused",
+      "reason": "creds_mismatch",
+      "creds_path": "<TMP>/o.g.a.creds"
+    },
+    {
+      "owner": "o",
+      "group": "g",
+      "instance": "b",
+      "address": "o.g.b",
+      "key": "o_g_b",
+      "outcome": "reissued",
+      "reason": null,
+      "creds_path": "<TMP>/o.g.b.creds",
+      "servers_acknowledged": 1
+    }
+  ],
+  "next_steps": [
+    {
+      "sender": "endpoint",
+      "step": "session",
+      "action": "restart the sessions of the reissued endpoints so they read the new creds",
+      "address": "",
+      "purpose": "use",
+      "detail": ""
+    }
+  ],
+  "refusal": null
+}
+== bulk_revocation_unknown
+exit 6
+stderr:
+mashctl: endpoint reissue o/g/a: revocation_unknown: cannot tell whether the current key of o.g.a is revoked: no system account answered
+mashctl: endpoint reissue: error (revocation_unknown): cannot tell whether the current key of o.g.a is revoked: no system account answered
+stdout:
+{
+  "schema": "mashctl-endpoint-bulk@1",
+  "outcome": "error",
+  "counts": {
+    "reissued": 0,
+    "planned": 0,
+    "skipped": 0,
+    "refused": 0,
+    "error": 1
+  },
+  "endpoints": [
+    {
+      "owner": "o",
+      "group": "g",
+      "instance": "a",
+      "address": "o.g.a",
+      "key": "o_g_a",
+      "outcome": "error",
+      "reason": "revocation_unknown",
+      "creds_path": "<TMP>/o.g.a.creds"
+    }
+  ],
+  "next_steps": [],
+  "refusal": {
+    "code": "revocation_unknown",
+    "detail": "cannot tell whether the current key of o.g.a is revoked: no system account answered"
   }
 }
 == delete_usage

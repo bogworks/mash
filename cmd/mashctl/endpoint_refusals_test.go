@@ -131,6 +131,42 @@ func burned(instance string) func(t *testing.T, r *refEnv) {
 	}
 }
 
+// futureIssued dates the issue record of the seeded endpoint's key an hour ahead.
+func futureIssued(instance string) func(t *testing.T, r *refEnv) {
+	return func(t *testing.T, r *refEnv) {
+		r.h.seed(ad(instance))
+		rec, _ := r.h.record(ad(instance))
+		r.h.recordIssuedAt(rec.User, time.Now().Add(time.Hour))
+	}
+}
+
+// otherCreds seeds the endpoints a and b and puts b's creds file at a's path.
+func otherCreds(t *testing.T, r *refEnv) {
+	r.h.seed(ad("a"))
+	r.h.seed(ad("b"))
+	other, err := os.ReadFile(r.h.creds(ad("b")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(r.h.creds(ad("a")), other, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// junkCreds seeds the endpoint a and puts a file that is not creds at its path.
+func junkCreds(t *testing.T, r *refEnv) {
+	r.h.seed(ad("a"))
+	if err := os.WriteFile(r.h.creds(ad("a")), []byte("junk"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// revocationUnknown makes the check of whether a key is revoked fail.
+func revocationUnknown(t *testing.T, r *refEnv) {
+	r.h.seed(ad("a"))
+	fakeKeyRevoked(t, func(string) (bool, error) { return false, errors.New("no system account answered") })
+}
+
 var refusalCases = []refCase{
 	// create
 	{"create_usage", []string{"endpoint", "create", "o/g/a", "o/g/b"}, nil, "usage"},
@@ -218,6 +254,10 @@ var refusalCases = []refCase{
 		r.must(t, "endpoint", "create", "o/g/a", "--public-key", r.pub, "--jwt-out", filepath.Join(r.aux, "first.jwt"))
 	}, "key_unchanged"},
 
+	{"reissue_future_issued", []string{"endpoint", "reissue", "o/g/a", "--make-key"}, futureIssued("a"), "future_issued"},
+	{"reissue_creds_mismatch", []string{"endpoint", "reissue", "o/g/a", "--make-key"}, otherCreds, "creds_mismatch"},
+	{"reissue_creds_unreadable", []string{"endpoint", "reissue", "o/g/a", "--make-key"}, junkCreds, "creds_unreadable"},
+
 	// reissue --all and --changed
 	{"bulk_usage", []string{"endpoint", "reissue", "--all", "--changed", "--make-key"}, nil, "usage"},
 	{"bulk_needs_make_key", []string{"endpoint", "reissue", "--all"}, nil, "bulk_needs_make_key"},
@@ -243,6 +283,10 @@ var refusalCases = []refCase{
 		}
 	}, "creds_unreadable"},
 	{"bulk_reissue_busy", []string{"endpoint", "reissue", "--all", "--make-key", "--yes"}, seq(seeded("a"), lockHeld("a")), "reissue_busy"},
+
+	{"bulk_future_issued", []string{"endpoint", "reissue", "--all", "--make-key", "--yes"}, futureIssued("a"), "future_issued"},
+	{"bulk_creds_mismatch", []string{"endpoint", "reissue", "--all", "--make-key", "--yes"}, otherCreds, "creds_mismatch"},
+	{"bulk_revocation_unknown", []string{"endpoint", "reissue", "--changed", "--make-key", "--yes"}, revocationUnknown, "revocation_unknown"},
 
 	// delete
 	{"delete_usage", []string{"endpoint", "delete", "o/g/a", "o/g/b"}, nil, "usage"},
