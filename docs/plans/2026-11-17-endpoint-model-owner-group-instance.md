@@ -62,8 +62,8 @@ puts in them differs, and the one place SAP says SHOULD is documented as a depar
 | Creds file | `<name>.creds` | `<owner>.<group>.<instance>.creds` |
 | Micro service metadata | `agent, owner, session, ...` | `agent` (harness), `owner, group, instance, session, ...` |
 
-The `alias` field of the record (ADR 0076) stays, with one job: it names the legacy identity an endpoint is moving from,
-and it exists only during the migration window (section 2).
+The `alias` field of the record (ADR 0076) goes with the rest of the legacy code: the migration is one sitting with no
+mixed window (section 2), so nothing reads two identities.
 
 ### 1.4 The credential's permissions
 
@@ -88,8 +88,9 @@ and prints this set.
   ctl designs the command face).
 * `agent_token` / `MASH_AGENT_TOKEN`: there is one form, so there is nothing to choose.
 * The legacy parsers (`sap.Legacy`, the `cc` branch of `KeyFromSubject`, `SplitMail`'s legacy acceptance) and the legacy
-  record, stream-filter and permission code. The one exception is the migration window's read-only machinery in
-  section 2.3, which is deleted in 0.6.0.
+  record, stream-filter and permission code, and with them the alias read, the legacy lease and the bridge grants of
+  ADR 0074 and 0076: 0.5.5 has no legacy-aware reader. The `migrate` command alone knows the legacy record shape, to
+  read it once.
 * `unzone` (zones are already gone, ADR 0091) stays only while a record still carries one; `migrate` refuses such a
   record and says to run `unzone` first.
 
@@ -104,98 +105,88 @@ and prints this set.
 
 ## 2. Migration
 
+The migration is **one sitting** (the maintainer's ruling): every endpoint of a deployment moves in one pass, by an
+operator, with a clean rollback until the last step. There is no mixed window: no bridge grants, no alias read and no
+legacy lease are built.
+
 ### 2.1 What the operator does, in order
 
-The migration is the cut-over of every identity in a deployment, one endpoint at a time. The operator:
+1. **Upgrade the central tools.** Put `mashctl` 0.5.5 on the host that runs it and keep the 0.5.0 `mashctl`, `mash` and
+   the plugin where they are: they are the rollback. Running endpoints change nothing.
+2. **Plan.** `mashctl endpoint migrate --all --dry-run` plans every legacy endpoint and changes nothing (bare `migrate`
+   exits 2). It prints, per endpoint, the new address, `planned` or `refused` (and why), and the step it would take.
+   `--group G` is required (no default; `group_missing` otherwise) and applies to every endpoint in the run; `--name N`
+   (one endpoint only) sets the instance when the legacy name exceeds 32 characters. `--json` is the machine form.
+3. **Apply.** `mashctl endpoint migrate --all --apply --group G` makes the new identities (2.2) and leaves everything
+   legacy untouched. To keep the endpoint's private key off the central host, each endpoint makes its own key first
+   and the operator gives the folder of public halves, `<name>.pub`, to `--apply` (ctl names the flag; the endpoint-made
+   key is the credential primitive of #698, section 3). Without a public half for a name, `--apply` mints the key and
+   writes `<owner>.<group>.<instance>.creds` (mode 0600) as `add` does today.
+4. **Sit.** Stop every session, then restart each with its new credentials under the 0.5.5 binary. Until a session is
+   restarted it is old: old and new endpoints cannot reach each other (2.3), so the restart pass is the whole window.
+5. **Check.** `mashctl audit` and the connected-check (2.2, `--finish`) show which new identities have connected.
+6. **Finish, or roll back.** `mashctl endpoint migrate --finish --all` is the last step (2.2). Before it, `migrate
+   --rollback --all` (ctl names the verb; it is `endpoint delete` on each new identity) undoes steps 3 and 4.
 
-1. **Upgrade the central tools.** Put `mashctl` 0.5.5 on the host that runs it. Nothing about running endpoints changes;
-   they keep their credentials and their 0.5.0 binary.
-2. **Plan.** `mashctl endpoint migrate --all --dry-run` plans every legacy endpoint and changes nothing (bare `migrate` exits 2). It prints, per
-   endpoint, the new address, whether it is `planned` or `refused` (and why), and what step it would take. `--json` is the
-   machine form. `--group G` is required and sets the group for every endpoint in the run; `--name NAME` (one endpoint only) sets the
-   instance when the name does not fit.
-3. **Migrate one endpoint.** `mashctl endpoint migrate NAME --apply` does the account-side work (2.2). It prints the
-   `next_steps`: where the new creds file is, and that the endpoint's session must be restarted with it under the 0.5.5
-   binary.
-4. **Move the endpoint.** The operator restarts that endpoint's session with the new creds and the 0.5.5 binary. The new
-   endpoint takes the lease for the flat key and the legacy lease for the old name, reads the retained legacy inbox
-   (2.3), and carries on. Repeat 3 and 4 for each endpoint, in any order, over any number of days.
-5. **Finish.** When every endpoint has moved, `mashctl endpoint migrate --finish` (per name or `--all`) revokes the old
-   credentials, ends the bridge (2.3), deletes the legacy streams once they are drained and the legacy records, and
-   reports what it removed. `audit` reports the same state while the window is open (which endpoints are legacy, which
-   moved, which legacy inboxes are not yet drained) and is clean afterwards.
+**Rollback is a requirement.** Before `--finish`: the old binaries and old credentials work unchanged (they are never
+touched), every legacy inbox is intact with all its mail, and the new identities can be removed: record, stream and user
+(revoked), each issue record marked, and **no flat key burned** (a rolled-back address can be migrated again). Rollback
+refuses while a new inbox holds unread mail, with the count, unless `--force`: that mail is addressed to the new identity
+and does not go back. **After `--finish` nothing is reversible**: the old keys are revoked, the legacy inboxes and records
+are deleted.
 
-### 2.2 What `--apply` does to one legacy endpoint
+### 2.2 What each step does
 
-For the legacy endpoint `N` of owner `O` (outcome words: `planned`, `migrated`, `unchanged` when already moved,
+`--apply`, per legacy endpoint `N` of owner `O` (outcomes: `planned`, `migrated`, `unchanged` when already moved,
 `refused`):
 
-1. Resolve the new address `O.<group>.<instance>`: the group is `--group`, which is required (without it the endpoint is `refused` with
-   `group_missing`); the instance is the legacy name. A legacy name can be up to 48 characters, a token is at most 32: a longer name
-   is `refused` with the reason, and the operator gives `--name`. A name or group the name rule refuses is `refused`
-   as well, as is a record that still carries a zone, an address already taken, and a flat key in the retired ledger.
-2. Take the name's lock and the admission lock, and check admission (the existing overlap and burn checks).
-3. Create the **new identity**: a directory record `O.G.I` whose `alias` names the legacy identity, a new inbox stream and
-   its consumer, a new NATS user (a new key pair, and a new creds file next to the old one, mode 0600), recorded in the
-   issue record. The record is written last, so a failed run leaves nothing half made; a run again finishes it.
-4. Add the **bridge grants** to the new user (2.3).
-5. Leave the **legacy record, legacy inbox stream and old credentials untouched**. Nothing is revoked here: the old
-   session keeps working until the operator moves it.
+1. Resolve `O.<group>.<instance>`: the group is the required `--group`; the instance is the legacy name. A name over 32
+   characters is `refused` until `--name`. A name or group the name rule refuses, a record that still carries a zone, an
+   address already taken, and a flat key in the retired ledger are `refused` as well.
+2. Take the name's lock and the admission lock; check admission (the overlap and burn checks).
+3. Create the **new identity**: directory record `O.G.I`, inbox stream and consumer, the user (the public half signed by the
+   account signing key, or a minted key), an issue record keyed by the user's public key with the flat key as address.
+   **Copy the unread mail** of the legacy inbox into the new inbox. The record is written last, so a failed run leaves
+   nothing half made and a run again finishes it.
+4. Leave the **legacy record, legacy inbox and old credentials untouched.**
 
-Mail is carried over by not moving it. Mail that is in the legacy stream when the endpoint moves, and mail that old
-senders send afterwards, is read by the new endpoint through the legacy stream (2.3); nothing is copied, nothing is
-lost, and nothing is read twice because the lease on the old name allows one reader. Whether the mail already read stays
-read is the consumer's state, unchanged.
+`--finish --all`: for each endpoint, repeat the mail copy (mail old senders sent after `--apply`), then revoke the old key,
+delete the legacy inbox and the legacy record. It refuses an endpoint whose new identity has not connected, or whose
+legacy inbox it cannot read, unless `--force`. It prints what it removed.
 
-The old credentials are revoked at `--finish`, not at `--apply`: revoking at apply would cut a running session off before
-it could be moved. `--finish NAME` for one endpoint revokes that endpoint's old key only; it refuses while its legacy
-inbox is not drained, with the count, unless `--force` says to drop it.
+### 2.3 Old and new during the sitting: what breaks
 
-### 2.3 Mixed old and new: what reaches what while endpoints move
+Old and new use different subjects (`agents.mail.cc.O.N` against `agents.mail.O.G.I`) and nothing bridges them:
 
-Old and new endpoints address each other by different subjects (`agents.mail.cc.O.N` against `agents.mail.O.G.I`). Left
-alone, neither can reach the other: the legacy peer lines name `*` in slot 1 and the owner in slot 2, the new ones name
-the owner in slot 1. The window is bridged in both directions, with machinery that already exists (ADR 0076's alias
-window), so no new moving part is invented:
-
-* **Old to new.** An old sender still publishes to `agents.mail.cc.O.N`. That is the retained legacy inbox stream, and
-  the new endpoint drains it (the alias read of ADR 0076: two streams, one session, the legacy lease so exactly one reader
-  holds the old name). So an old endpoint reaches a moved one, with the same delivery and signing as before.
-* **New to old.** A moved endpoint addresses an endpoint that is still legacy by its directory record, which still says
-  `cc.O.N`. Its credential carries, while the window is open, the bridge grants: publish on `agents.{mail,prompt,status}.cc.O.*`
-  and subscribe to `agents.hb.cc.O.*`. These are the alias bridge grants that exist today, widened from one name to the
-  owner's legacy names, and they are the whole of what widens.
-* **Two moved endpoints** use the new subjects only.
-* **What breaks.** (a) An old endpoint under the 0.5.0 binary cannot serve a new-form record: it cannot be migrated in
-  place, only moved (step 4), which is why the old and new session never overlap on one name. (b) While the window is open
-  the new endpoints hold the wider bridge grants; `--finish` removes them. (c) `who` and the directory show a legacy and
-  a moved endpoint under different addresses until the window closes. (d) `mash admin permissions` for a legacy name is gone
-  from 0.5.5; the old creds keep their old permissions until revoked. (e) A name the operator forgot is not broken, just
-  legacy: it keeps working until `--finish --all`, which lists any endpoint that never moved and refuses to remove its
-  record unless told to.
-
-This machinery (the alias read, the legacy lease, the bridge grants, the legacy `audit` drain check) is the only
-legacy-aware code left in 0.5.5 and is deleted in 0.6.0.
+* Between `--apply` and a session's restart that session is still old; a restarted session cannot send to it and it cannot
+  send to the new ones. Old senders' mail to `cc.O.N` lands in the legacy inbox and is copied at `--finish`.
+* A session that is **not restarted** keeps working on its old credentials until `--finish`, then its connection is
+  refused (2.4, step 6) and mail sent to its old address has no inbox and is lost to the sender. `--finish` refuses while
+  a new identity has not connected, to catch this.
+* `mash admin permissions` for a legacy name is gone in 0.5.5.
 
 ### 2.4 How it is proven live on one local server
 
-On `mashctl init --local`, one NATS server, in the test environment (the `testenv` that the cluster tests use), with
-no second server and no outside system:
+On `mashctl init --local`, one NATS server, in the test environment the cluster tests use, with the 0.5.0 binaries
+available for the old side:
 
-1. Make two legacy endpoints `a` and `b` of owner `O` with the legacy minting kept as test-only code (the CLI `add` is
-   gone), connect real endpoints with their old credentials, and send `a` to `b` and back (proves the starting state).
-2. Leave 3 messages unread in `a`'s inbox. `endpoint migrate a --apply`: assert the new record, stream and creds exist, the
-   legacy record, stream and creds are untouched, and `a` (old creds) still connects and receives.
-3. Move `a`: start an endpoint with the new creds. Assert: it reads the 3 messages through the legacy stream, once each;
-   `b` (legacy) sends to `a` and it arrives; `a` (moved) sends to `b` and it arrives; a second reader of the old name is
-   refused by the lease.
-4. Migrate and move `b`; assert two moved endpoints exchange mail on the new subjects only.
-5. `migrate --finish --all`: assert the old creds are revoked (a connect with them is refused, the revocation visible in the
-   account JWT), the legacy records and drained streams are gone, the bridge grants are gone from the new users' JWTs,
-   `audit` is clean, and the new endpoints still work.
-6. Refusals: a 40-character name is `refused` until `--name`; a re-run of `--apply` on a moved name says `unchanged`;
-   `--finish NAME` with an undrained legacy inbox refuses with the count.
-7. Kill the run between steps 3 and 4 of `--apply` and run it again: it finishes and leaves one new identity.
+1. Make two legacy endpoints `a` and `b` of owner `O` (legacy minting kept as test-only code), connect real endpoints
+   with their old credentials, send `a` to `b` and back, and leave 3 messages unread in `a`'s inbox.
+2. **The sitting.** `endpoint migrate --all --apply --group G`, giving `a` a public half (the endpoint made its key) and
+   letting `b` be minted. Assert the new records, streams, users and issue records exist, `a`'s 3 messages are in its new
+   inbox, and the legacy record, inbox and credentials are untouched. Restart both under the new credentials: each reads
+   its mail once and they exchange mail on the new subjects.
+3. **Rollback.** `--rollback --all` (with the new inboxes drained, and again with unread mail to see the refusal). Assert
+   the old binaries and old credentials connect, `a` and `b` have all their mail, 0.5.0 `list`, `retire` and `audit` work
+   with the new records gone, the new users are revoked, and no flat key is burned.
+4. **The sitting again.** Repeat step 2; assert it succeeds on the same addresses.
+5. **Finish.** `--finish --all`: assert the old credentials are revoked (a connect is refused), the legacy records and
+   inboxes are gone, `audit` is clean, the new endpoints work, and the rollback is now refused.
+6. **Revocation drops the connection.** Connect an endpoint, revoke its key, assert the connection closes and a reconnect
+   is refused with an authorization error.
+7. **Refusals.** A 40-character name is `refused` until `--name`; a missing `--group` is `group_missing`; `--apply` on a
+   moved name is `unchanged`; `--finish` with a new identity that never connected refuses.
+8. Kill `--apply` between its steps and run it again: it finishes and leaves one new identity.
 
 Not tried and said so in the release notes: more than one server, TLS, two central hosts.
 
@@ -211,7 +202,7 @@ none of them belongs in it as built. For each: where it belongs, and what surviv
 | #685 requester rename (ADR 0133) | rename of the countersigner inside the issue service | policy release | Names a thing only the policy path has. |
 | #686 reconcile fix | a finding in `policy reconcile`'s logic | policy release | Engine-internal; no shipped surface. |
 | #688 policydirect | the direct driver of the policy engine, two-server live proof, no verb | policy release | The engine's driver for the later `policy` verb. Carries the `scripts/gate` exception. |
-| #698 credential primitive (ADR 0136) | a credential for a public key the endpoint made, so no private key crosses to the central host | policy release as built; **0.5.5 can take a carve-out** | As built it signs only under a list set and refuses `no_list_set`. `endpoint create` in 0.5.5 can offer the same property (the endpoint makes its key, `mashctl` signs the public key) without any list set: that is about 1.5 days of work, lifting `NewKey`, `Assemble` and `Show` out and putting a plain signing path under them. Not done unless the maintainer wants the property in 0.5.5. |
+| #698 credential primitive (ADR 0136) | a credential for a public key the endpoint made, so no private key crosses to the central host | **0.5.5 carve-out (maintainer's ruling)**, the rest to the policy release | As built it signs only under a list set and refuses `no_list_set`. 0.5.5 lifts `NewKey`, `Assemble` and `Show` out and puts a plain signing path under them, so `endpoint create` and `migrate --apply` take the endpoint's public key without any list set: about 1.5 days. The list-set path stays held. |
 | #702 (closed) | a legacy endpoint governed in place | nowhere | Closed; there is no legacy in 0.5.5. |
 
 Nothing in the stack is needed by 0.5.5 (the model needs `sap`, `store`, `admin`, `endpoint`, `config`, `namerule`,
@@ -228,12 +219,12 @@ if two run at once.
 |---|---|
 | Slots and tokens: `sap` identity and subjects, store record and key, admission, name rule version | 2 |
 | Permissions, mint, creds naming, lease, inbox stream, spool and state paths, metadata, discovery | 2.5 |
-| Remove `add` and legacy `reissue`, `agent_token`, the legacy parsers and record code; rewrite the golden-name and legacy tests | 3 |
-| Migration: `migrate` (plan, apply, finish), the bridge grants, `audit` window state | 3 |
-| Live proof (2.4), docs (README SAP departure, `docs/sap.md`, `mashctl.md`, `operations.md`, name rule), ADR amendments, release note | 2 |
-| **Core total** | **12.5** |
+| Remove `add` and legacy `reissue`, `agent_token`, the legacy parsers, record code and alias machinery; legacy records in readers are reported, not errors; rewrite the golden-name and legacy tests | 4 |
+| Migration: `migrate` (plan, apply with public halves and mail copy, rollback, finish and the connected-check) | 2.5 |
+| Live proof (2.4: sitting, rollback, sitting again, revocation drop), docs (README SAP departure, `docs/sap.md`, `mashctl.md`, `operations.md`, name rule), ADR amendments, release note | 2 |
+| Credential primitive carve-out (section 3, in 0.5.5) | 1.5 |
+| **Core total** | **14** |
 | ctl: the `endpoint` CLI face (create, reissue, retire, migrate) with JSON | ctl's estimate |
-| Optional carve-out of the credential primitive (section 3) | +1.5 |
 
 The risk is the third row: the legacy code runs through `admin`, `endpoint`, `store`, `ctl` and the commands, and many tests
 carry legacy names. I count 12.5 with the golden-name tests rewritten, not deleted.
@@ -242,55 +233,24 @@ carry legacy names. I count 12.5 with the golden-name tests rewritten, not delet
 
 * ADR 0145 records the address model, the SAP departure, the permission shape, the removal of the legacy form and the
   migration contract. It amends ADR 0005 (subjects), 0006 (one owner per deployment becomes: one account, owners are
-  slot 1), 0011 (the record), 0074 and 0076 (the alias window becomes the migration window), 0077 (rule file keys) and
+  slot 1), 0011 (the record), 0074 and 0076 (their alias machinery is removed), 0077 (rule file keys) and
   0102 (the group is slot 2, not the owner).
 * The command names and flags belong to the CLI design that ctl writes (`mashctl endpoint create|reissue|retire|migrate`);
   the field names in this note (`owner`, `group`, `instance`, `address`, outcome words) are what ctl quotes in `--json`.
 
-## 6. Addendum: the flag-day alternative, costed
+## 6. Addendum: the flag day, the alternatives costed, and the ruling
 
-The plan above moves endpoints one at a time and bridges the window. With one user and a few endpoints the bridge may not
-earn its code. The alternative, **flag day**: no bridge grants, no alias read, no legacy lease are built or kept.
+The first draft of this plan moved endpoints one at a time and bridged the window. The maintainer ruled for **one
+sitting with a clean rollback** (this plan, section 2) and the endpoint-made key in 0.5.5. The costing behind it:
 
-**What the operator does.**
+* **Bridge** (one at a time, over days): 12.5 core days without the credential carve-out, 14 with it.
+* **Flag day** (`migrate --all --apply`, restart everyone, `--finish`; no bridge, alias read or legacy lease): 11.5 without
+  the carve-out. The ruling adds the rollback (+0.5 in the migration row) and a longer live proof (+0.5), and the
+  carve-out (+1.5): **14 days** in section 4. The 0.6.0 deletion of the alias code (about 1 day) is not needed.
+* **No `migrate` verb at all** (the operator lists with the 0.5.0 `list --json`, creates each endpoint with
+  `endpoint create`, restarts, reads leftovers with 0.5.0, retires with 0.5.0): about 11 to 11.5 days, so it saves
+  nothing: readers must report legacy records instead of failing (about 1 day, at about 15 `ParseRecord` call sites), and
+  `create` must carry over labels, description and caps. It removes the one command that shows the operator what will
+  happen. Open (maintainer, option C); this plan keeps `migrate`.
 
-1. `mashctl endpoint migrate` (no names) plans every endpoint and changes nothing, as in 2.1.
-2. `mashctl endpoint migrate --all --apply` makes every new identity at once (record, inbox stream, key, creds file) and
-   leaves the legacy records, inboxes and old credentials untouched. For each endpoint it copies the unread mail of the
-   legacy inbox into the new inbox, so mail is carried over by copy, not by a second read path.
-3. The operator stops every session and restarts each with its new creds file under the 0.5.5 binary.
-4. `mashctl endpoint migrate --finish --all` runs right after: it revokes every old credential, deletes the legacy inboxes
-   and removes the legacy records. It refuses while an endpoint has not connected under its new identity, unless `--force`.
-
-**What it saves.** The bridge grants, the alias read (two streams, one session), the legacy lease, the `audit` window
-state and the mixed-window tests are never built for 0.5.5, and the ADR 0076 alias code is deleted now instead of in
-0.6.0. The cost moved in is the copy of unread mail at `--apply` and a connected-check at `--finish`.
-
-**What breaks.**
-
-* Between steps 2 and 3, old and new sessions cannot reach each other: old senders publish to `cc.O.N`, which the new
-  inboxes do not carry; new credentials do not reach the legacy subjects. A restarted session cannot send to one not yet
-  restarted. The operator's restart pass is the whole window, so it should be short: stop all, restart all.
-* A session that is **not restarted** keeps working on its old credentials until step 4 and then is cut off: its
-  connection is refused and mail sent to its old address after `--finish` has no inbox and is lost to the sender
-  (publishing to a subject with no stream). Mail that reached the legacy inbox between `--apply` and `--finish` is not
-  lost: `--finish` repeats the copy per endpoint first, and refuses on a legacy inbox it cannot read.
-* There is no way to move one endpoint and wait: a single endpoint can be migrated (`NAME --apply`), but it cannot talk to
-  the others until they have all moved.
-* The move is not reversible after step 4, as before.
-
-**Size, in person-days (core).** Flag day replaces the migration row (3) with 2: plan, `--all --apply`, the mail copy,
-the connected-check and `--finish`; the live proof drops from 2 to 1.5 (no mixed-window steps); and the removal row rises
-from 3 to 3.5 because the alias machinery goes now. Net: **11.5 days against 12.5** in 0.5.5, and the 0.6.0 deletion of
-the alias code (about 1 day) is not needed. The bridge buys the ability to move one session at a time over days; it costs
-about 1 day now and 1 day later.
-
-**Size with and without the credential-primitive carve-out (section 3, #698).**
-
-* Without the carve-out: 12.5 days (bridge) or 11.5 days (flag day).
-* With the carve-out: 14 days (bridge) or 13 days (flag day).
-
-**Recommendation.** For one user with a few endpoints the flag day is enough: the cost of the bridge is real code that is
-deleted again in 0.6.0, and the only thing it buys is moving sessions on different days. If any endpoint cannot be
-restarted in one pass, the bridge earns its place; that is the maintainer's call, and the ADR (0145) records whichever is
-chosen. The ADR text above describes the bridge and changes if the flag day is chosen.
+What is not reversible: after `--finish` nothing is (section 2.1).

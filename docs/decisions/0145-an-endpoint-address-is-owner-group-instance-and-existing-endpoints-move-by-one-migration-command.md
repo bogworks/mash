@@ -26,7 +26,7 @@ ships wide open; this release has no policy. This record fixes the model and the
 * One model, with no default group: every endpoint names its group.
 * No change to the SAP protocol and no divergence in the SAP Go SDK: the subject keeps its shape and its token count.
 * The harness stays truthful in the service metadata.
-* Existing endpoints have credentials in running sessions: the transition must not cut them off before they are moved.
+* Existing endpoints have credentials in running sessions: the transition must not cut them off until the operator has moved them and chosen to finish; until then it can be rolled back.
 * Mash stands alone: everything here works for a solo developer with `mashctl init --local`.
 
 ## Considered Options
@@ -58,19 +58,21 @@ Chosen: one form, with one migration command.
   a missing group is a readable refusal, code `group_missing`.
 * **There is one form and no legacy.** `mashctl add`, legacy `reissue`, `agent_token`, the `cc` form and its parsers and
   record code are removed (the CLI face is `mashctl endpoint create|reissue|retire`, designed separately).
-* **One migration command moves existing endpoints.** `mashctl endpoint migrate` plans (changes nothing), `--apply` makes
-  the new identity of one endpoint (record, inbox stream, new key and creds) and leaves the legacy record, inbox and
-  credentials untouched, and `--finish` revokes the old credentials, drains and deletes the legacy inbox and removes the
-  legacy record. A legacy name becomes owner = its owner, group = `--group` (required), instance = its name; a name over
-  32 characters is refused until `--name` gives one.
-* **The window is bridged in both directions with the alias machinery of
-  [ADR 0076](0076-a-three-token-record-may-carry-the-legacy-identity-it-answers-to-as-an-alias.md).** Old to new:
-  old senders still publish to the retained legacy inbox, which the moved endpoint reads. New to old: the moved
-  endpoint's credential carries bridge grants for the owner's legacy subjects until `--finish`. This is the only
-  legacy-aware code left in 0.5.5 and it is deleted in 0.6.0.
+* **One migration command moves existing endpoints.** `mashctl endpoint migrate --all --dry-run` plans (changes nothing),
+  `--apply` makes the new identities (record, inbox stream, user, copy of unread mail) and leaves the legacy record, inbox
+  and credentials untouched, `--rollback` removes the new identities, and `--finish` revokes the old credentials and
+  removes the legacy inbox and record. A legacy name becomes owner = its owner, group = `--group` (required), instance =
+  its name; a name over 32 characters is refused until `--name` gives one.
+* **The move is one sitting with a clean rollback.** No bridge, alias read or legacy lease is built. `--apply` makes every
+  new identity and copies unread mail; the operator restarts every session; `--finish` revokes the old credentials and
+  removes the legacy inboxes and records. Before `--finish` the old binaries and credentials work unchanged and
+  `--rollback` removes the new identities (no flat key burned); after it nothing is reversible. While sessions move, old
+  and new endpoints cannot reach each other: the restart pass is the whole window.
+* **The endpoint makes its own key in 0.5.5.** `endpoint create` and `migrate --apply` accept the endpoint's public key (a
+  folder of `<name>.pub`), signed by the account signing key; no private key crosses to the central host. This is the
+  credential primitive of ADR 0136 lifted out of the list-set path.
 
-This amends ADR 0005 (subjects), 0006 (one account; owners are slot 1), 0011 (the record), 0074 and 0076 (the alias
-window becomes the migration window), 0077 (the rule file's keys) and 0102 (the group is slot 2, not the owner).
+This amends ADR 0005 (subjects), 0006 (one account; owners are slot 1), 0011 (the record), 0074 and 0076 (their alias machinery is removed), 0077 (the rule file's keys) and 0102 (the group is slot 2, not the owner).
 
 ### Consequences
 
@@ -78,16 +80,16 @@ window becomes the migration window), 0077 (the rule file's keys) and 0102 (the 
 * Good: running sessions are never cut off; mail is carried over by not moving it; the move is reversible until
   `--finish`.
 * Bad: a breaking change for every deployment: every identity changes, every creds file is replaced, every peer that
-  addresses by the old form must move. The window and the bridge make it gradual, not free.
+  addresses by the old form must move, in one sitting.
 * Bad: SAP clients that find agents by a wildcard on the harness slot find nothing in mash. This is documented.
 * Bad: the first slot's meaning differs from SAP's SHOULD. The mitigation is documentation and truthful metadata.
 * Neutral: the policy release must re-key the held policy stack by the new address.
 
 ### Confirmation
 
-* The live proof in the plan (section 2.4) on one local server: two legacy endpoints migrate and move one at a time, mail
-  crosses in both directions during the window and is carried over, the old credentials are refused after `--finish`,
-  `audit` is clean, and an interrupted `--apply` is finished by running it again.
+* The live proof in the plan (section 2.4) on one local server: the sitting, a rollback (old binaries and credentials work,
+  all mail is there, no flat key burned), the sitting again, `--finish` (old credentials refused, `audit` clean), the
+  revocation dropping a live connection, and an interrupted `--apply` finished by running it again.
 * Unit tests: the token rule and the 64-character bound, the flat key's unambiguity, `ValidateGrant` refusing a wildcard
   owner, the permission set for an `O.G.I` (no peer line reaches another owner), the refusals (long name, taken address,
   retired flat key, zoned record).
