@@ -241,7 +241,7 @@ eq "12 unwritable log: pass still exits 0" 0 "$rc"
 # 13. the default receipt store is mash's own: HOME-relative with XDG_DATA_HOME unset, under it when set.
 wdir=mash
 newrun; pid=$(pidof b1);
-dgate() { rc=0; out=$(env -u GATE_REVIEW_STORE "$@" bash "$here/gate" b1 --review --model stub:clean 2>&1) || rc=$?; }
+dgate() { rc=0; out=$(env -u GATE_REVIEW_STORE -u GATE_REVIEW_ROOT "$@" bash "$here/gate" b1 --review --model stub:clean 2>&1) || rc=$?; }
 dgate -u XDG_DATA_HOME
 eq "13 default store, XDG_DATA_HOME unset: exit 0" 0 "$rc"
 if [ -n "$(find "$HOME/.local/share/$wdir/reviews/inloop-v1" -type f -name "$pid" 2>/dev/null)" ]; then ok "13 default store: \$HOME/.local/share/mash/reviews/inloop-v1"; else bad "13 default store (HOME) holds no record for $pid"; fi
@@ -250,5 +250,9 @@ dgate XDG_DATA_HOME="$T/xdg-data"
 eq "13 default store, XDG_DATA_HOME set: exit 0" 0 "$rc"
 if [ -n "$(find "$T/xdg-data/$wdir/reviews/inloop-v1" -type f -name "$pid" 2>/dev/null)" ]; then ok "13 default store: \$XDG_DATA_HOME/mash/reviews/inloop-v1"; else bad "13 default store (XDG) holds no record for $pid"; fi
 if [ ! -e "$HOME/.local/share/$wdir" ]; then ok "13 XDG_DATA_HOME set: HOME path unused"; else bad "13 HOME path used despite XDG_DATA_HOME"; fi
+newrun; pid=$(pidof b1)
+dgate GATE_REVIEW_ROOT="$T/root"
+eq "13 GATE_REVIEW_ROOT set: exit 0" 0 "$rc"
+if [ -n "$(find "$T/root/inloop-v1" -type f -name "$pid" 2>/dev/null)" ]; then ok "13 GATE_REVIEW_ROOT: <root>/inloop-v1"; else bad "13 GATE_REVIEW_ROOT holds no record for $pid"; fi
 
 if [ "$fail" = 0 ]; then echo "all passed"; else echo "FAILURES"; exit 1; fi

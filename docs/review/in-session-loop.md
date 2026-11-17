@@ -89,7 +89,7 @@ which reviews each pull request head with Codex.
   its records to the path the watcher reads (`${XDG_DATA_HOME:-$HOME/.local/share}/<the watcher's directory>/reviews/inloop-v1`,
   with a suffix when the base policy has standing questions; the gate and the watcher derive it the same way). The
   path is per-user, under the user's XDG data directory, so the gate and the watcher must run as the same user on the
-  same host. Otherwise set `GATE_REVIEW_STORE` for the gate and `REVIEW_INLOOP_STORE` for the watcher to one shared
+  same host. Otherwise set `GATE_REVIEW_ROOT` for the gate and `REVIEW_INLOOP_STORE` for the watcher to one shared
   path. Records are keyed by the repository slug (`bogworks_mash`), so sharing a store between repositories is safe.
 - **Base branch, not the pull request.** The watcher reads `docs/review/policy.json` and builds `scripts/reviewgate`
   from the fetched `origin/<base branch>` (`git show`, `git archive`), never from the pull request's own tree, so a
