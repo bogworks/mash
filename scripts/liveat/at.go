@@ -169,6 +169,8 @@ func (a *AT) Finish(sc Scenario) Record {
 	a.C.Check("INV-001: no command output holds a seed or a JWT", err == nil && len(a.ownLeaks(found)) == 0, "")
 	specific, err2 := scanFor(a.R.Out, a.secrets)
 	a.C.Check("INV-001: no command output holds a key or JWT this scenario made", err2 == nil && len(a.ownLeaks(specific)) == 0, "")
+	ce := a.R.Runner.CaptureErrors()
+	a.C.Check("INV-001: every command's output was captured completely (no capture or read error)", len(ce) == 0, strings.Join(ce, "; "))
 	leaks := a.ownLeaks(append(found, specific...))
 	rec := Record{RunID: a.R.ID, Revision: a.R.Revision, AT: sc.ID, Scenario: sc.Scenario, Env: a.R.EnvLines(a.Scratch), Observed: a.C.All(), Leaks: leaks}
 	return rec

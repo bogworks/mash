@@ -306,3 +306,66 @@ func TestCheckPermissions(t *testing.T) {
 		t.Errorf("deny: %v", f)
 	}
 }
+
+func finishFor(t *testing.T, out string) (*Runner, []Assertion) {
+	t.Helper()
+	dir := t.TempDir()
+	r := &Runner{Out: out, Cwd: dir}
+	a := &AT{R: &Run{Dir: dir, Out: out, Runner: r, pids: map[int]string{}}, ID: "x", Dir: dir, C: &Checks{}, secrets: map[string][]byte{}}
+	h, _ := NewHome(filepath.Join(dir, "h"))
+	a.R.Runner.Run("echo", []string{"/bin/echo", "hi"}, BuildEnv(h, nil), "")
+	a.Finish(Scenario{ID: "x"})
+	return r, a.C.All()
+}
+
+func captureCheck(as []Assertion) *Assertion {
+	for i := range as {
+		if strings.Contains(as[i].Name, "captured completely") {
+			return &as[i]
+		}
+	}
+	return nil
+}
+
+func TestCleanRunRecordsNoCaptureError(t *testing.T) {
+	r, as := finishFor(t, t.TempDir())
+	c := captureCheck(as)
+	if len(r.CaptureErrors()) != 0 || c == nil || !c.Pass {
+		t.Fatalf("errors %v check %+v", r.CaptureErrors(), c)
+	}
+}
+
+func TestCaptureErrorFailsTheScenario(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "no-such-dir")
+	r, as := finishFor(t, missing)
+	errs := r.CaptureErrors()
+	if len(errs) == 0 || !strings.Contains(errs[0], "01-echo.out") {
+		t.Fatalf("errors %v", errs)
+	}
+	c := captureCheck(as)
+	if c == nil || c.Pass || !strings.Contains(c.Detail, "01-echo.out") {
+		t.Fatalf("check %+v", c)
+	}
+	res := r.Run("again", []string{"/bin/echo", "hi"}, os.Environ(), "")
+	if res.CaptureErr == "" || res.Code != 0 {
+		t.Fatalf("result %+v", res)
+	}
+}
+
+func TestProcReadBackErrorIsRecorded(t *testing.T) {
+	out := t.TempDir()
+	r := &Runner{Out: out, Cwd: out}
+	h, _ := NewHome(filepath.Join(t.TempDir(), "h"))
+	p, err := r.Start("cat", []string{"/bin/cat"}, BuildEnv(h, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(out, p.base+".out")); err != nil {
+		t.Fatal(err)
+	}
+	p.Stop()
+	errs := r.CaptureErrors()
+	if len(errs) != 1 || !strings.Contains(errs[0], "reading back") {
+		t.Fatalf("errors %v", errs)
+	}
+}

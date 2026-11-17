@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -30,7 +31,16 @@ var SelfCheck = Scenario{
 		// The environment: nothing from the caller reaches a child.
 		os.Setenv("MASH_URL", "nats://caller.invalid:1")
 		os.Setenv("NATS_URL", "nats://caller.invalid:2")
-		env := a.R.Runner.Run("env", []string{"/usr/bin/env"}, a.Env(h), "")
+		tools := map[string]string{}
+		for _, n := range []string{"env", "echo", "cat"} {
+			p, err := exec.LookPath(n)
+			a.C.Check("the self-check tool "+n+" is on PATH", err == nil, "")
+			if err != nil {
+				return
+			}
+			tools[n] = p
+		}
+		env := a.R.Runner.Run("env", []string{tools["env"]}, a.Env(h), "")
 		os.Unsetenv("MASH_URL")
 		os.Unsetenv("NATS_URL")
 		a.C.Check("a child sees HOME and MASH_CONFIG_DIR from the scratch home", strings.Contains(env.Stdout, "HOME="+h.Dir+"\n") && strings.Contains(env.Stdout, "MASH_CONFIG_DIR="+h.Config+"\n"), exitDetail(env))
@@ -58,9 +68,9 @@ var SelfCheck = Scenario{
 		lr := &Runner{Out: ldir, Cwd: ldir}
 		fakeSeed := "SU" + strings.Repeat("A", 54) // not a key: the right shape only
 		fakeJWT := "eyJ" + strings.Repeat("a", 12) + ".payload12345.sig"
-		lr.Run("fake-seed", []string{"/bin/echo", fakeSeed}, a.Env(h), "")
-		lr.Run("fake-jwt", []string{"/bin/echo", fakeJWT}, a.Env(h), "")
-		lr.Run("clean", []string{"/bin/echo", "nothing secret here"}, a.Env(h), "")
+		lr.Run("fake-seed", []string{tools["echo"], fakeSeed}, a.Env(h), "")
+		lr.Run("fake-jwt", []string{tools["echo"], fakeJWT}, a.Env(h), "")
+		lr.Run("clean", []string{tools["echo"], "nothing secret here"}, a.Env(h), "")
 		leaks, err := scanDir(ldir)
 		kinds := map[string]string{}
 		for _, l := range leaks {
@@ -77,7 +87,7 @@ var SelfCheck = Scenario{
 		}
 
 		// Process control: start a process, record its PID, stop it by that PID.
-		p, err := a.R.StartProc("cat", []string{"/bin/cat"}, a.Env(h))
+		p, err := a.R.StartProc("cat", []string{tools["cat"]}, a.Env(h))
 		okStart := err == nil && p.PID > 0 && alive(p.PID)
 		a.C.Check("a session process is started with a recorded PID", okStart, "")
 		if okStart {

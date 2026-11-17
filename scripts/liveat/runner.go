@@ -79,6 +79,8 @@ type Result struct {
 	Stdout string
 	Stderr string
 	Seq    int
+	// CaptureErr is why this command's output was not saved completely ("" when it was). It names the file, never the content.
+	CaptureErr string
 }
 
 // Text is stdout and stderr together.
@@ -92,9 +94,51 @@ type Runner struct {
 	Timeout time.Duration
 	Log     io.Writer
 
-	mu    sync.Mutex
-	seq   int
-	leaks []Leak
+	mu      sync.Mutex
+	seq     int
+	leaks   []Leak
+	capErrs []string
+}
+
+// capErr records a failure to save or read back a command's output. A scenario with one fails (INV-001): the secret scan
+// would otherwise run over incomplete output.
+func (r *Runner) capErr(format string, a ...any) string {
+	msg := fmt.Sprintf(format, a...)
+	r.mu.Lock()
+	r.capErrs = append(r.capErrs, msg)
+	r.mu.Unlock()
+	r.logf("CAPTURE ERROR: %s", msg)
+	return msg
+}
+
+// CaptureErrors is every failure so far to save or read back a command's output (file named, never content).
+func (r *Runner) CaptureErrors() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.capErrs...)
+}
+
+// recWriter writes a process's output to its file and records a failed or short write instead of failing the process.
+type recWriter struct {
+	f    *os.File
+	r    *Runner
+	name string
+	bad  bool
+}
+
+func (w *recWriter) Write(p []byte) (int, error) {
+	if w.bad {
+		return len(p), nil
+	}
+	n, err := w.f.Write(p)
+	if err == nil && n < len(p) {
+		err = io.ErrShortWrite
+	}
+	if err != nil {
+		w.bad = true
+		w.r.capErr("%s: writing: %v", w.name, err)
+	}
+	return len(p), nil
 }
 
 var labelRE = regexp.MustCompile(`[^a-z0-9-]+`)
@@ -121,12 +165,20 @@ func (r *Runner) Leaks() []Leak {
 	return append([]Leak(nil), r.leaks...)
 }
 
-// save writes the output files of one command and scans them.
+// save writes the output files of one command and scans them. A failed write is recorded as a capture error and
+// returned; the other file is still written and scanned.
 func (r *Runner) save(base string, stdout, stderr []byte) error {
-	for ext, b := range map[string][]byte{".out": stdout, ".err": stderr} {
-		p := filepath.Join(r.Out, base+ext)
-		if err := os.WriteFile(p, b, 0o600); err != nil {
-			return err
+	var first error
+	for _, ext := range []string{".out", ".err"} {
+		b := stdout
+		if ext == ".err" {
+			b = stderr
+		}
+		if err := r.writeFile(filepath.Join(r.Out, base+ext), b); err != nil {
+			r.capErr("%s: saving output: %v", base+ext, err)
+			if first == nil {
+				first = err
+			}
 		}
 		for _, k := range scanBytes(b) {
 			r.mu.Lock()
@@ -135,7 +187,22 @@ func (r *Runner) save(base string, stdout, stderr []byte) error {
 			r.logf("LEAK: a %s in %s", k, base+ext)
 		}
 	}
-	return nil
+	return first
+}
+
+func (r *Runner) writeFile(p string, b []byte) error {
+	f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	n, err := f.Write(b)
+	if err == nil && n < len(b) {
+		err = io.ErrShortWrite
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	return err
 }
 
 // Run runs args[0] with args[1:] in the runner's working directory. name labels its output files.
@@ -149,7 +216,9 @@ func (r *Runner) RunIn(dir, name string, args []string, env []string, stdin stri
 	res := Result{Code: -1, Seq: seq}
 	if len(args) == 0 {
 		res.Stderr = "liveat: no command"
-		_ = r.save(base, nil, []byte(res.Stderr))
+		if err := r.save(base, nil, []byte(res.Stderr)); err != nil {
+			res.CaptureErr = err.Error()
+		}
 		return res
 	}
 	timeout := r.Timeout
@@ -182,7 +251,7 @@ func (r *Runner) RunIn(dir, name string, args []string, env []string, stdin stri
 	}
 	res.Stdout, res.Stderr = so.String(), se.String()
 	if err := r.save(base, so.Bytes(), se.Bytes()); err != nil {
-		r.logf("%s: saving output: %v", base, err)
+		res.CaptureErr = err.Error()
 	}
 	r.logf("%s: %s exit=%d (%s)", base, cmdline(args), res.Code, time.Since(start).Round(time.Millisecond))
 	return res
@@ -244,9 +313,9 @@ func (r *Runner) Start(name string, args []string, env []string) (*Proc, error) 
 		}
 		p.files = append(p.files, f)
 		if ext == ".out" {
-			cmd.Stdout = io.MultiWriter(f, w)
+			cmd.Stdout = io.MultiWriter(&recWriter{f: f, r: r, name: base + ext}, w)
 		} else {
-			cmd.Stderr = io.MultiWriter(f, w)
+			cmd.Stderr = io.MultiWriter(&recWriter{f: f, r: r, name: base + ext}, w)
 		}
 	}
 	in, err := cmd.StdinPipe()
@@ -273,8 +342,11 @@ func (r *Runner) Start(name string, args []string, env []string) (*Proc, error) 
 
 func (p *Proc) closeFiles() {
 	for _, f := range p.files {
-		f.Close()
+		if err := f.Close(); err != nil {
+			p.r.capErr("%s: closing: %v", filepath.Base(f.Name()), err)
+		}
 	}
+	p.files = nil
 }
 
 // Exited reports whether the process has ended.
@@ -355,6 +427,7 @@ func (p *Proc) Stop() {
 	for _, ext := range []string{".out", ".err"} {
 		b, err := os.ReadFile(filepath.Join(p.r.Out, p.base+ext))
 		if err != nil {
+			p.r.capErr("%s: reading back: %v", p.base+ext, err)
 			continue
 		}
 		for _, k := range scanBytes(b) {
