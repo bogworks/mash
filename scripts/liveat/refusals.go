@@ -1,0 +1,240 @@
+package main
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/nats-io/nats.go"
+)
+
+// refusalCase is one line of AT-003's list that has a CLI form.
+type refusalCase struct {
+	Name   string
+	Label  string
+	Home   Home     // where the command runs
+	Extra  []string // environment added to the connection settings
+	Args   []string // the command (after the binary)
+	Mash   bool     // run mash rather than mashctl
+	Exit   int
+	Code   string     // the refusal code in --json; "" means any non-empty code; unused when NoJSON
+	Hint   [][]string // the message must hold, for each group, at least one of its strings: what to type
+	NoJSON bool
+}
+
+// refusal runs the case between two snapshots and asserts the exit code, the refusal code, the hint and that nothing
+// was written.
+func (a *AT) refusal(ctlHome Home, trees []Home, c refusalCase) {
+	before := a.Snapshot(c.Label+"-before", ctlHome, trees...)
+	var res Result
+	extra := append(a.Conn(), c.Extra...)
+	if c.Mash {
+		res = a.Mash(c.Label, c.Home, extra, c.Args...)
+	} else {
+		res = a.Ctl(c.Label, c.Home, extra, c.Args...)
+	}
+	after := a.Snapshot(c.Label+"-after", ctlHome, trees...)
+	a.C.Check(c.Name+": exit code "+fmt.Sprint(c.Exit), res.Code == c.Exit, exitDetail(res))
+	if !c.NoJSON {
+		got := refusalCode(res.Stdout)
+		ok := got == c.Code || (c.Code == "" && got != "")
+		want := c.Code
+		if want == "" {
+			want = "(any)"
+		}
+		a.C.Check(c.Name+": --json refusal code "+want, ok, "refusal "+orNone(got)+", "+exitDetail(res))
+	}
+	text := res.Text()
+	var missing []string
+	for _, grp := range c.Hint {
+		found := false
+		for _, s := range grp {
+			if strings.Contains(text, s) {
+				found = true
+			}
+		}
+		if !found {
+			missing = append(missing, "one of "+strings.Join(grp, " | "))
+		}
+	}
+	a.C.Check(c.Name+": the message names what to type", len(missing) == 0 && strings.TrimSpace(text) != "", "missing: "+strings.Join(missing, "; "))
+	diff := before.Diff(after)
+	bad := append(before.Bad, after.Bad...)
+	a.C.Check(c.Name+": nothing was written (directory, issue record, streams, leases, files)", len(diff) == 0 && len(bad) == 0, "changed: "+orNone(strings.Join(diff, ", "))+"; failed reads: "+orNone(strings.Join(bad, ", ")))
+}
+
+func orNone(s string) string {
+	if s == "" {
+		return "none"
+	}
+	return s
+}
+
+func writeFile(path, text string) error { return os.WriteFile(path, []byte(text), 0o600) }
+
+// AT003 is every refusal can fail.
+var AT003 = Scenario{
+	ID: "at003",
+	Scenario: "AT-003, every refusal can fail: one local server; endpoints alice/dev/design, alice/dev/review, a deleted alice/dev/gone and bob/dev/build. " +
+		"Each refusal of the contract's list that has a CLI form is run between two snapshots (mashctl list, audit --json, issued list --json, " +
+		"and a digest of each home's files): exit code, refusal code in --json, a message that names what to type, nothing written. " +
+		"Then bob's credentials publish to alice's mail subject and request her prompt subject.",
+	Body: func(a *AT) {
+		ha, e1 := a.Home("home-a") // mashctl host
+		he, e2 := a.Home("home-e") // endpoint machine
+		hn, e3 := a.Home("home-n") // a host with no account key
+		if !a.C.Check("three scratch homes are made", e1 == nil && e2 == nil && e3 == nil, "") || !a.StartServer(ha) {
+			return
+		}
+		trees := []Home{ha, he, hn}
+		adminCreds := filepath.Join(a.srvDir, "mashadmin.creds")
+
+		// Setup: four endpoints made the contract's way, one of them deleted so that its address is burned.
+		design, ok := a.provision(ha, he, "alice", "dev", "design", filepath.Join(he.Dir, "design.creds"), false)
+		if !ok {
+			return
+		}
+		review, ok := a.provision(ha, he, "alice", "dev", "review", filepath.Join(he.Dir, "review.creds"), false)
+		if !ok {
+			return
+		}
+		if _, ok = a.provision(ha, he, "alice", "dev", "gone", "", true); !ok {
+			return
+		}
+		r := a.Ctl("endpoint-delete-gone", ha, a.Conn(), "endpoint", "delete", "alice/dev/gone")
+		if !a.C.Check("setup: mashctl endpoint delete alice/dev/gone burns the address", r.Code == 0, exitDetail(r)) {
+			return
+		}
+		bob, ok := a.provision(ha, he, "bob", "dev", "build", filepath.Join(he.Dir, "bob.creds"), false)
+		if !ok {
+			return
+		}
+		r = a.Mash("key-create-fresh", he, a.Conn(), "key", "create", "--out", filepath.Join(he.Dir, "fresh.seed"))
+		if !a.C.Check("setup: a key that has never been issued", r.Code == 0, exitDetail(r)) {
+			return
+		}
+		fresh := filepath.Join(he.Dir, "fresh.pub")
+		bad := filepath.Join(he.Dir, "bad.pub")
+		rule := filepath.Join(he.Dir, "rule.json")
+		taken := filepath.Join(he.Dir, "taken.jwt")
+		if err := writeFile(bad, "this is not a public key\n"); err != nil {
+			a.C.Check("setup: the scratch files are written", false, err.Error())
+			return
+		}
+		_ = writeFile(taken, "an existing file\n")
+		_ = writeFile(rule, `{"version":1,"rules":[{"id":"no-scratch","match":{"group":{"is":"scratch"}},"message":"the group scratch is not for real work"}]}`+"\n")
+
+		create := func(addr string, more ...string) []string {
+			return append([]string{"endpoint", "create", addr, "--json"}, more...)
+		}
+		pk := []string{"--public-key", fresh}
+		cases := []refusalCase{
+			{Name: "no group", Label: "no-group", Home: ha, Args: create("design", pk...), Exit: 2, Code: "group_missing",
+				Hint: [][]string{{"--group"}, {"alice/dev/", "owner/group/", "OWNER/GROUP"}}},
+			{Name: "two-token form", Label: "two-token", Home: ha, Args: create("alice/design", pk...), Exit: 2,
+				Hint: [][]string{{"alice/dev/", "owner/group/", "--group"}}},
+			{Name: "neither --public-key nor the same-host flag", Label: "key-missing", Home: ha, Args: create("alice/dev/solo"), Exit: 2, Code: "key_missing",
+				Hint: [][]string{{"--public-key"}, {"--make-key"}}},
+			{Name: "a token with a capital", Label: "name-capital", Home: ha, Args: create("alice/dev/Design", pk...), Exit: 1, Code: "name_invalid",
+				Hint: [][]string{{"lower-case", "lowercase", "[a-z]"}}},
+			{Name: "a token with a double dash", Label: "name-dashes", Home: ha, Args: create("alice/dev/a--b", pk...), Exit: 1, Code: "name_invalid",
+				Hint: [][]string{{"lower-case", "lowercase", "[a-z]", "--"}}},
+			{Name: "a token of 33 characters", Label: "name-long", Home: ha, Args: create("alice/dev/"+strings.Repeat("a", 33), pk...), Exit: 1, Code: "name_invalid",
+				Hint: [][]string{{"32", "shorter", "characters"}}},
+			{Name: "a token the name rule file refuses", Label: "name-rule", Home: ha, Extra: []string{"MASH_NAME_RULE_FILE=" + rule}, Args: create("alice/scratch/x", pk...), Exit: 1, Code: "name_rule",
+				Hint: [][]string{{"no-scratch"}}},
+			{Name: "an address that exists", Label: "address-taken", Home: ha, Args: create("alice/dev/design", pk...), Exit: 1, Code: "address_taken",
+				Hint: [][]string{{"endpoint", "another", "different"}}},
+			{Name: "a deleted, burned address", Label: "key-retired", Home: ha, Args: create("alice/dev/gone", pk...), Exit: 1, Code: "key_retired",
+				Hint: [][]string{{"endpoint create", "another", "new name", "different"}}},
+			{Name: "a malformed public key file", Label: "pubkey-invalid", Home: ha, Args: create("alice/dev/other", "--public-key", bad), Exit: 1, Code: "public_key_invalid",
+				Hint: [][]string{{"mash key create", "--public-key"}}},
+			{Name: "a public key already issued at another address", Label: "pubkey-issued", Home: ha, Args: create("alice/dev/other", "--public-key", design.pub), Exit: 1, Code: "public_key_issued",
+				Hint: [][]string{{"mash key create", "endpoint reissue", "new key", "another key"}}},
+			{Name: "a JWT output file that exists", Label: "file-exists", Home: ha, Args: create("alice/dev/other", append(pk, "--jwt-out", taken)...), Exit: 1, Code: "file_exists",
+				Hint: [][]string{{"--jwt-out"}}},
+			{Name: "no account key on the mashctl host", Label: "no-account-key", Home: hn, Extra: []string{"MASH_ADMIN_CREDS=" + adminCreds}, Args: create("alice/dev/other", pk...), Exit: 1, Code: "no_account_key",
+				Hint: [][]string{{"mashctl init", "mashctl adopt", "MASH_KEYS_DIR", "account key"}}},
+			{Name: "mash credential create with a seed and a JWT for different keys", Label: "creds-mismatch", Home: he, Mash: true, NoJSON: true, Exit: 1,
+				Args: []string{"credential", "create", "--seed", design.seed, "--jwt", review.jwt, "--out", filepath.Join(he.Dir, "mismatch.creds")},
+				Hint: [][]string{{"mash key create", "--seed", "--jwt", "same key", "different"}}},
+		}
+		for _, c := range cases {
+			a.refusal(ha, trees, c)
+		}
+
+		// A session with no MASH_GROUP.
+		before := a.Snapshot("no-group-session-before", ha, trees...)
+		gextra := append(a.Conn(), "MASH_NAME=ghost", "MASH_STATE_DIR="+filepath.Join(he.State, "ghost"))
+		r = a.Mash("session-no-group", he, gextra, "serve")
+		after := a.Snapshot("no-group-session-after", ha, trees...)
+		a.C.Check("a session with no MASH_GROUP: exit code 2", r.Code == 2, exitDetail(r))
+		a.C.Check("a session with no MASH_GROUP: standard error names MASH_GROUP", strings.Contains(r.Stderr, "MASH_GROUP"), "")
+		a.C.Check("a session with no MASH_GROUP: no directory record, stream, consumer, lease or service was made for it",
+			len(before.Diff(after)) == 0 && !strings.Contains(after.Raw["audit"], "ghost") && !strings.Contains(after.Raw["list"], "ghost"), "changed: "+orNone(strings.Join(before.Diff(after), ", ")))
+
+		// The three removed commands.
+		for _, c := range []refusalCase{
+			{Name: "mashctl add", Label: "removed-add", Home: ha, Args: []string{"add", "alice/dev/old"}, Exit: 2, NoJSON: true, Hint: [][]string{{"endpoint create"}}},
+			{Name: "mashctl reissue", Label: "removed-reissue", Home: ha, Args: []string{"reissue", "alice/dev/design"}, Exit: 2, NoJSON: true, Hint: [][]string{{"endpoint reissue"}}},
+			{Name: "mashctl retire", Label: "removed-retire", Home: ha, Args: []string{"retire", "alice/dev/design"}, Exit: 2, NoJSON: true, Hint: [][]string{{"endpoint delete"}}},
+		} {
+			a.refusal(ha, trees, c)
+		}
+
+		a.crossOwner(ha, he, bob, design, trees)
+	},
+}
+
+// crossOwner is the planted cross-owner attempt: bob's credentials publish to alice's mail subject and request her
+// prompt subject; the server must refuse both, and nothing may reach alice's inbox.
+func (a *AT) crossOwner(ha, he Home, bob, alice ep, trees []Home) {
+	const probe = "cross-owner probe text"
+	errs := make(chan error, 16)
+	flat := "bob_dev_build"
+	nc, err := nats.Connect(a.url(), nats.UserCredentials(bob.creds), nats.CustomInboxPrefix("_INBOX."+flat),
+		nats.MaxReconnects(0), nats.Timeout(5*time.Second),
+		nats.ErrorHandler(func(_ *nats.Conn, _ *nats.Subscription, e error) {
+			select {
+			case errs <- e:
+			default:
+			}
+		}))
+	if !a.C.Check("bob connects with his own credentials", err == nil, errDetail(err)) {
+		return
+	}
+	defer nc.Close()
+	_ = nc.Publish("agents.mail.alice.dev.design", []byte(probe))
+	_ = nc.Flush()
+	_, _ = nc.Request("agents.prompt.alice.dev.design", []byte(probe), 2*time.Second)
+	var mail, prompt bool
+	deadline := time.After(3 * time.Second)
+collect:
+	for {
+		select {
+		case e := <-errs:
+			m := strings.ToLower(e.Error())
+			if strings.Contains(m, "permissions violation") {
+				mail = mail || strings.Contains(m, "agents.mail.alice.dev.design")
+				prompt = prompt || strings.Contains(m, "agents.prompt.alice.dev.design")
+			}
+		case <-deadline:
+			break collect
+		}
+	}
+	a.C.Check("INV-002: the server refuses bob's publish to agents.mail.alice.dev.design with a permissions violation", mail, "")
+	a.C.Check("INV-002: the server refuses bob's request to agents.prompt.alice.dev.design with a permissions violation", prompt, "")
+	aliceEnv := append(a.Conn(), "MASH_GROUP=dev", "MASH_NAME=design", "MASH_CREDS="+alice.creds, "MASH_STATE_DIR="+filepath.Join(he.State, "design"))
+	r := a.Mash("inbox-alice", he, aliceEnv, "inbox")
+	a.C.Check("alice's inbox is read with her own credentials", r.Code == 0, exitDetail(r))
+	a.C.Check("nothing arrived in alice's inbox from bob", r.Code == 0 && !strings.Contains(r.Text(), probe), "")
+}
+
+func errDetail(err error) string {
+	if err == nil {
+		return ""
+	}
+	return redact(err.Error())
+}

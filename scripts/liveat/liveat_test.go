@@ -1,0 +1,254 @@
+package main
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
+
+// fakeSeed and fakeJWT have the shape of a secret and are not one.
+var (
+	fakeSeed = "SU" + strings.Repeat("B", 54)
+	fakeJWT  = "eyJ" + strings.Repeat("c", 12) + ".payload12345.sig_-"
+)
+
+func TestScanBytes(t *testing.T) {
+	for _, c := range []struct {
+		in   string
+		want []string
+	}{
+		{"nothing here", nil},
+		{"a seed " + fakeSeed + " in text", []string{"seed"}},
+		{"a jwt " + fakeJWT, []string{"jwt"}},
+		{fakeSeed + "\n" + fakeJWT, []string{"seed", "jwt"}},
+		{"SU" + strings.Repeat("B", 20), nil}, // too short to be a seed
+		{"SA" + strings.Repeat("B", 54), nil}, // an account seed is not a user seed
+		{"eyJabc.def.ghi", nil},               // too short to be a JWT
+	} {
+		got := scanBytes([]byte(c.in))
+		if strings.Join(got, ",") != strings.Join(c.want, ",") {
+			t.Errorf("scanBytes(%q) = %v, want %v", c.in, got, c.want)
+		}
+	}
+}
+
+func TestScanDirNamesFileNotMatch(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "01-a.out"), []byte("clean"), 0o600)
+	os.WriteFile(filepath.Join(dir, "02-b.err"), []byte("x "+fakeSeed), 0o600)
+	os.WriteFile(filepath.Join(dir, "03-c.out"), []byte(fakeJWT), 0o600)
+	leaks, err := scanDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(leaks) != 2 || leaks[0].File != "02-b.err" || leaks[0].Kind != "seed" || leaks[1].File != "03-c.out" || leaks[1].Kind != "jwt" {
+		t.Fatalf("leaks = %+v", leaks)
+	}
+	for _, l := range leaks {
+		if strings.Contains(l.File+l.Kind, fakeSeed) || strings.Contains(l.File+l.Kind, fakeJWT) {
+			t.Fatal("a leak holds the match")
+		}
+	}
+}
+
+func TestScanFor(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "a"), []byte("one SECRETTEXT two"), 0o600)
+	os.WriteFile(filepath.Join(dir, "b"), []byte("none"), 0o600)
+	got, _ := scanFor(dir, map[string][]byte{"s": []byte("SECRETTEXT"), "empty": nil})
+	if len(got) != 1 || got[0].File != "a" || got[0].Kind != "s" {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestRunnerSavesEveryCommandAndFlagsALeak(t *testing.T) {
+	out := t.TempDir()
+	var log strings.Builder
+	r := &Runner{Out: out, Cwd: out, Log: &log}
+	h, _ := NewHome(filepath.Join(t.TempDir(), "h"))
+	env := BuildEnv(h, nil)
+	a := r.Run("Say Hi", []string{"/bin/echo", "hello"}, env, "")
+	b := r.Run("fail", []string{"/bin/sh", "-c", "echo oops >&2; exit 3"}, env, "")
+	c := r.Run("leaky", []string{"/bin/echo", fakeSeed}, env, "")
+	d := r.Run("stdin", []string{"/bin/cat"}, env, "from stdin")
+	if a.Code != 0 || a.Stdout != "hello\n" || b.Code != 3 || b.Stderr != "oops\n" || c.Code != 0 || d.Stdout != "from stdin" {
+		t.Fatalf("results: %+v %+v %+v %+v", a, b, c, d)
+	}
+	for _, f := range []string{"01-say-hi.out", "01-say-hi.err", "02-fail.err", "03-leaky.out", "04-stdin.out"} {
+		st, err := os.Stat(filepath.Join(out, f))
+		if err != nil || st.Mode().Perm() != 0o600 {
+			t.Errorf("%s: %v %v", f, st, err)
+		}
+	}
+	leaks := r.Leaks()
+	if len(leaks) != 1 || leaks[0].File != "03-leaky.out" || leaks[0].Kind != "seed" {
+		t.Fatalf("leaks %+v", leaks)
+	}
+	if !strings.Contains(log.String(), "02-fail: sh -c") || !strings.Contains(log.String(), "exit=3") {
+		t.Errorf("log lacks the command line and exit code:\n%s", log.String())
+	}
+	if strings.Contains(log.String(), fakeSeed) {
+		t.Error("the log holds the leaked text")
+	}
+}
+
+func TestRunnerTimeout(t *testing.T) {
+	out := t.TempDir()
+	r := &Runner{Out: out, Cwd: out, Timeout: 300 * time.Millisecond}
+	h, _ := NewHome(filepath.Join(t.TempDir(), "h"))
+	res := r.Run("sleepy", []string{"/bin/sleep", "5"}, BuildEnv(h, nil), "")
+	if res.Code != -1 || !strings.Contains(res.Stderr, "killed after") {
+		t.Fatalf("%+v", res)
+	}
+}
+
+func TestBuildEnvInheritsNothing(t *testing.T) {
+	t.Setenv("MASH_URL", "nats://caller.invalid:1")
+	t.Setenv("MASH_OWNER", "caller")
+	t.Setenv("NATS_URL", "nats://caller.invalid:2")
+	t.Setenv("HOME", "/caller/home")
+	t.Setenv("XDG_CONFIG_HOME", "/caller/xdg")
+	h, err := NewHome(filepath.Join(t.TempDir(), "h"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := BuildEnv(h, []string{"/opt/nats"}, "MASH_URL=nats://127.0.0.1:1", "MASH_OWNER=alice", "MASH_OWNER=bob")
+	got := map[string]string{}
+	for _, kv := range env {
+		k, v, _ := strings.Cut(kv, "=")
+		if _, dup := got[k]; dup {
+			t.Errorf("%s set twice", k)
+		}
+		got[k] = v
+	}
+	if got["HOME"] != h.Dir || got["MASH_CONFIG_DIR"] != h.Config || got["MASH_KEYS_DIR"] != h.Keys {
+		t.Errorf("scratch values missing: %v", got)
+	}
+	if got["MASH_URL"] != "nats://127.0.0.1:1" || got["MASH_OWNER"] != "bob" {
+		t.Errorf("extra does not win, last extra wins: %v", got)
+	}
+	for k := range got {
+		if strings.HasPrefix(k, "NATS_") || k == "XDG_CONFIG_HOME" {
+			t.Errorf("inherited or unexpected variable %s", k)
+		}
+	}
+	if got["PATH"] != "/usr/bin:/bin:/opt/nats" {
+		t.Errorf("PATH %q", got["PATH"])
+	}
+	for _, v := range got {
+		if strings.Contains(v, "caller") {
+			t.Errorf("a caller value leaked: %q", v)
+		}
+	}
+}
+
+func TestChecks(t *testing.T) {
+	var c Checks
+	if !c.Check("holds", true, "exit 0") || c.Check("breaks", false, "exit 2, refusal group_missing") {
+		t.Fatal("Check must return its condition")
+	}
+	if c.Failed() != 1 || len(c.All()) != 2 {
+		t.Fatalf("failed %d of %d", c.Failed(), len(c.All()))
+	}
+	tab := c.Table()
+	if !strings.Contains(tab, "PASS  holds  [exit 0]") || !strings.Contains(tab, "FAIL  breaks  [exit 2, refusal group_missing]") {
+		t.Fatalf("table:\n%s", tab)
+	}
+}
+
+func TestRecordHasNoSecretsAndShowsEverything(t *testing.T) {
+	rec := Record{
+		RunID: "20261117T000000Z-abcd1234", Revision: "deadbeef (clean)", AT: "at001", Scenario: "the scenario",
+		Env: []string{"linux/amd64", "go: go1.27.4", "nats-server: nats-server: v2.15.1"},
+		Observed: []Assertion{
+			{Name: "a holds", Pass: true, Detail: "exit 0"},
+			{Name: "b refuses", Pass: false, Detail: "exit 2, refusal group_missing, saw " + fakeSeed + " and " + fakeJWT},
+		},
+		Leaks: []Leak{{File: "03-x.out", Kind: "seed"}},
+	}
+	md := rec.Markdown()
+	if strings.Contains(md, fakeSeed) || strings.Contains(md, fakeJWT) || len(scanBytes([]byte(md))) != 0 {
+		t.Fatalf("the record holds a secret:\n%s", md)
+	}
+	for _, want := range []string{"20261117T000000Z-abcd1234", "deadbeef (clean)", "linux/amd64", "the scenario", "- a holds", "- pass: a holds (exit 0)", "- FAIL: b refuses", "refusal group_missing", "03-x.out", "## Result\n\nFAIL"} {
+		if !strings.Contains(md, want) {
+			t.Errorf("record lacks %q:\n%s", want, md)
+		}
+	}
+	rec.Leaks, rec.Observed = nil, rec.Observed[:1]
+	if !rec.Passed() || !strings.Contains(rec.Markdown(), "## Result\n\nPASS") {
+		t.Error("a clean record of passing assertions must pass")
+	}
+	if (Record{}).Passed() {
+		t.Error("a record with no assertions must not pass")
+	}
+	path := filepath.Join(t.TempDir(), "record-at001.md")
+	if err := WriteRecord(path, rec); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := os.Stat(path); st.Mode().Perm() != 0o600 {
+		t.Errorf("mode %v", st.Mode())
+	}
+	if WriteRecord(path, rec) == nil {
+		t.Error("an existing record must not be overwritten")
+	}
+}
+
+func TestRunID(t *testing.T) {
+	a, b := newRunID(time.Date(2026, 11, 17, 1, 2, 3, 0, time.UTC)), newRunID(time.Date(2026, 11, 17, 1, 2, 3, 0, time.UTC))
+	if !strings.HasPrefix(a, "20261117T010203Z-") || len(a) != len("20261117T010203Z-")+8 || a == b {
+		t.Errorf("%q %q", a, b)
+	}
+}
+
+func TestRefusalCode(t *testing.T) {
+	for in, want := range map[string]string{
+		`{"refusal":"group_missing"}`:          "group_missing",
+		`{"refusal":{"code":"key_missing"}}`:   "key_missing",
+		`{"outcome":"created","refusal":null}`: "",
+		`not json`:                             "",
+	} {
+		if got := refusalCode(in); got != want {
+			t.Errorf("refusalCode(%s) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestTreeHash(t *testing.T) {
+	d := t.TempDir()
+	os.WriteFile(filepath.Join(d, "a"), []byte("1"), 0o600)
+	os.Mkdir(filepath.Join(d, "state"), 0o700)
+	h1, _ := treeHash(d, "state")
+	os.WriteFile(filepath.Join(d, "state", "x"), []byte("noise"), 0o600)
+	if h2, _ := treeHash(d, "state"); h1 != h2 {
+		t.Error("a skipped directory changed the digest")
+	}
+	os.WriteFile(filepath.Join(d, "a"), []byte("2"), 0o600)
+	if h3, _ := treeHash(d, "state"); h1 == h3 {
+		t.Error("a changed byte did not change the digest")
+	}
+}
+
+func TestStopPIDRefusesAForeignCommandLine(t *testing.T) {
+	r := &Run{Out: t.TempDir()}
+	_ = r
+	out := t.TempDir()
+	run := &Runner{Out: out, Cwd: out}
+	h, _ := NewHome(filepath.Join(t.TempDir(), "h"))
+	p, err := run.Start("cat", []string{"/bin/cat"}, BuildEnv(h, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Stop()
+	stopPID(p.PID, "no-such-marker", func(string, ...any) {})
+	if !alive(p.PID) {
+		t.Fatal("stopPID signalled a process whose command line does not hold the marker")
+	}
+	pid := p.PID
+	p.Stop()
+	if alive(pid) {
+		t.Fatal("Stop left the process")
+	}
+}
