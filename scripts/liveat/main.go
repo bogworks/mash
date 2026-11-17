@@ -30,10 +30,13 @@ import (
 func main() { os.Exit(realMain(os.Args[1:], os.Stdout, os.Stderr)) }
 
 func realMain(args []string, stdout, stderr io.Writer) int {
-	usage := "usage: liveat at001|at002|at003|all|selfcheck --port P [--keep]"
+	usage := "usage: liveat at001|at002|at003|all|selfcheck --port P [--keep] | liveat at005 [--dry-setup] [--skew N] [--past-skew N] [--faketime-lib PATH] [--keep]"
 	if len(args) == 0 {
 		fmt.Fprintln(stderr, usage)
 		return 2
+	}
+	if args[0] == "at005" { // the reserved ports are fixed: no --port
+		return at005Main(args[1:], stdout, stderr)
 	}
 	cmd := args[0]
 	fs := flag.NewFlagSet("liveat", flag.ContinueOnError)
