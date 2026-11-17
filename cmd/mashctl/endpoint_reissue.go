@@ -580,6 +580,9 @@ func epStageKey(path string) (pub string, seed []byte, made bool, err error) {
 			if !fi.Mode().IsRegular() {
 				return "", nil, false, fmt.Errorf("%s is not a regular file; remove it", path)
 			}
+			if !epOwnedByCaller(fi) {
+				return "", nil, false, fmt.Errorf("%s is owned by another user; remove it and run the command again", path)
+			}
 			if fi.Mode().Perm()&0o077 != 0 {
 				// A staged seed that others can read is not a secret: never revoke a working key for it.
 				return "", nil, false, fmt.Errorf("%s has mode %04o and exposes the seed; remove it and run the command again", path, fi.Mode().Perm())

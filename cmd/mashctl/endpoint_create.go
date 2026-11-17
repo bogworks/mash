@@ -282,7 +282,12 @@ func epWriteNew(path string, data []byte) error {
 		return err
 	}
 	defer os.Remove(tmp) // the temp this call made; path keeps its own link
-	return os.Link(tmp, path)
+	if err := os.Link(tmp, path); err != nil {
+		return err
+	}
+	// The file was synced before the link; syncing the directory makes the link itself durable, so a staged seed
+	// survives a crash before anything is revoked for it.
+	return syncDir(filepath.Dir(path))
 }
 
 // epPrepDir makes the creds directory 0700 when it is missing and checks it is one only the user can swap files in.

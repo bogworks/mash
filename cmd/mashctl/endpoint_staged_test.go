@@ -291,3 +291,17 @@ func TestEndpointStagedSeedMustBePrivate(t *testing.T) {
 		t.Error("state changed")
 	}
 }
+
+func TestEpOwnedByCaller(t *testing.T) {
+	p := t.TempDir() + "/f"
+	if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Lstat(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !epOwnedByCaller(fi) {
+		t.Error("a file this process made is not owned by the caller")
+	}
+}
