@@ -153,7 +153,7 @@ func CheckParentDir(d string) error {
 }
 
 // CheckStrictParentDir is the rule for a directory that holds a file deciding who may be issued a credential (the
-// wrangler registry, its lock file, the issue service's list set): a real directory (a symlink is refused) that the
+// requester registry, its lock file, the issue service's list set): a real directory (a symlink is refused) that the
 // effective uid owns and that no group or other user can write (mode & 0022 == 0). Unlike CheckParentDir it refuses a
 // group-writable directory too, because another member of the group could replace the file by rename. A missing
 // directory is an error wrapping fs.ErrNotExist.

@@ -2,7 +2,7 @@
 
 [ADR 0080](../decisions/0080-review-is-a-gate-in-the-implementers-loop-adopted-from-a-sibling-project.md): an author
 reviews their own diff before pushing, so findings come back into the same session in minutes instead of through a pull
-request comment hours later. The process is adopted from ADR 0047 of the sibling project at `randybias/rangehand`
+request comment hours later. The process is adopted from ADR 0047 of a sibling project
 (`docs/decisions/0047-review-is-a-gate-in-the-implementers-loop.md`), whose gate this one is a port of; this page says what
 differs for mash.
 
@@ -85,12 +85,14 @@ which reviews each pull request head with Codex.
   `receipts_waive_review` (with an attestation verifier), which the repository's policy does not: the output tells
   "receipt invalid" from "receipt checks out, but receipts do not waive review". Either way the watcher reviews the
   diff in full, as it does for any head with no receipt, so a mash pull request is never less reviewed than before.
-- **The watcher must look where the gate writes.** The defaults now agree: with no environment set, the gate writes
-  its records to the path the watcher reads (`${XDG_DATA_HOME:-$HOME/.local/share}/<the watcher's directory>/reviews/inloop-v1`,
-  with a suffix when the base policy has standing questions; the gate and the watcher derive it the same way). The
-  path is per-user, under the user's XDG data directory, so the gate and the watcher must run as the same user on the
-  same host. Otherwise set `GATE_REVIEW_STORE` for the gate and `REVIEW_INLOOP_STORE` for the watcher to one shared
-  path. Records are keyed by the repository slug (`bogworks_mash`), so sharing a store between repositories is safe.
+- **The watcher must look where the gate writes.** The gate writes its records to `$GATE_REVIEW_ROOT/inloop-v1`, with a
+  suffix when the base policy has standing questions (the gate and the watcher derive the suffix the same way); with no
+  environment set the root is `${XDG_DATA_HOME:-$HOME/.local/share}/mash/reviews`. Mash does not know where a particular
+  watcher reads, so whoever runs the watcher sets `GATE_REVIEW_ROOT` for the gate to the directory that holds the
+  watcher's `inloop-v1` directory (the watcher's `REVIEW_INLOOP_STORE` is that directory plus `/inloop-v1`, and the
+  suffix when there is one). `GATE_REVIEW_STORE` overrides the whole path, suffix included, for a caller that wants to
+  name it exactly. The path is per-user in the default case, so the gate and the watcher must run as the same user on the
+  same host. Records are keyed by the repository slug (`bogworks_mash`), so sharing a store between repositories is safe.
 - **Base branch, not the pull request.** The watcher reads `docs/review/policy.json` and builds `scripts/reviewgate`
   from the fetched `origin/<base branch>` (`git show`, `git archive`), never from the pull request's own tree, so a
   pull request cannot verify its receipt with its own policy or verifier. A base without either skips verification, so

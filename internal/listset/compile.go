@@ -8,7 +8,7 @@ import (
 	"github.com/bogworks/mash/internal/store"
 )
 
-// Tag names, the deny sentinel and the template layout (chosen by the herd under contract section 7; ADR 0102).
+// Tag names, the deny sentinel and the template layout (fixed by the contract, section 7; ADR 0102).
 //
 // A tag value is the address without its range part, "owner.name", lower case: the range is the account's and sits as
 // a literal in every template line, so no tag can name an address outside the range (INV-005) and a tag is as short as
