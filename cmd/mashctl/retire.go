@@ -16,11 +16,21 @@ import (
 	"github.com/bogworks/mash/internal/apply"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/ctl"
+	"github.com/bogworks/mash/internal/sap"
 )
 
-const retireUsage = `usage: mashctl retire NAME [--delete-creds] [--force] [--no-revoke] [--servers N] [--sys-creds FILE]
+const retireUsage = `usage: mashctl retire <owner.group.instance> [--delete-creds] [--force] [--no-revoke] [--servers N] [--sys-creds FILE]
   --servers N and --sys-creds FILE override MASH_SERVERS and MASH_SYS_CREDS
 `
+
+// credsFileFor is where the endpoint's creds live: an existing owner.group.instance.creds in the config directories.
+func credsFileFor(cfg config.Config, addr sap.Address) (string, error) {
+	p := cfg.Find(addr.String() + ".creds")
+	if p == "" {
+		return "", config.ErrNoConfigDir
+	}
+	return p, nil
+}
 
 // afterRetireRead is a test seam called between the directory read and the guarded delete.
 var afterRetireRead func()
@@ -44,7 +54,7 @@ const noRevokeNote = "its user key is not revoked (--no-revoke): its creds still
 // runRetire is `mashctl retire`: the server removal (the revocation of the user key, then the directory record and
 // inbox) comes first and the creds file last, so a failure leaves the earlier, safer state.
 func runRetire(args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
-	var name string
+	var arg string
 	var deleteCreds, force, noRevoke bool
 	for i := 0; i < len(args); i++ {
 		a := args[i]
@@ -58,17 +68,23 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 		case strings.HasPrefix(a, "-"):
 			fmt.Fprintf(stderr, "mashctl: retire: unknown %s\n%s", config.RejectedArg(a), retireUsage)
 			return 2
-		case name != "":
-			fmt.Fprintf(stderr, "mashctl: retire: one endpoint name only\n%s", retireUsage)
+		case arg != "":
+			fmt.Fprintf(stderr, "mashctl: retire: one endpoint address only\n%s", retireUsage)
 			return 2
 		default:
-			name = a
+			arg = a
 		}
 	}
-	if name == "" {
-		fmt.Fprintf(stderr, "mashctl: retire: no endpoint name\n%s", retireUsage)
+	if arg == "" {
+		fmt.Fprintf(stderr, "mashctl: retire: no endpoint address: give owner.group.instance\n%s", retireUsage)
 		return 2
 	}
+	addr, err := parseAddr(arg)
+	if err != nil {
+		fmt.Fprintf(stderr, "mashctl: retire: %v\n%s", err, retireUsage)
+		return 2
+	}
+	name := addr.String()
 	servers, err := parseServers(env)
 	if err != nil {
 		fmt.Fprintf(stderr, "mashctl: retire: %v\n%s", err, retireUsage)
@@ -78,16 +94,12 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 		fmt.Fprintf(stderr, "mashctl: retire %s: %s\n", name, admin.RewordUnavailable(fmt.Sprintf(format, a...)))
 		return 1
 	}
-	if !config.ValidName(name) {
-		fmt.Fprintf(stderr, "mashctl: %s: NAME is not a valid endpoint name: 1-48 lower-case letters, digits and single hyphens (the value is not shown)\n", "retire")
-		return 2
-	}
 	cfg, err := loadCtlConfig(env, lookup, true)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	credsPath, credsErr := credsFileFor(cfg, name)
+	credsPath, credsErr := credsFileFor(cfg, addr)
 	if credsErr != nil && deleteCreds {
 		return fail("%v", credsErr)
 	}
@@ -108,7 +120,7 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 		return fail("%v", err)
 	}
 	user := ""
-	if r, ok := findRecord(recs, name); ok {
+	if r, ok := findRecord(recs, addr); ok {
 		user = r.User
 	}
 	var revokeOut bytes.Buffer
@@ -176,11 +188,8 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 			io.WriteString(stdout, revokeOut.String())
 			fmt.Fprintf(stderr, "mashctl: retire %s: PARTIAL: revoked: user key %s... (the acknowledgement line above gives the server count); still pending: the removal of the directory record, the lease fence and the inbox; running it again finishes it\n", name, ctl.ShortKey(user))
 		}
-		if err := deprovisionIfUser(adm, ctx, name, user); err != nil {
+		if err := deprovisionIfUser(adm, ctx, addr, user); err != nil {
 			if admin.IsRefusal(err) {
-				if msg, ok := ctl.AliasedRefusal(err, name); ok {
-					return fail("%s", msg)
-				}
 				if checkErr != nil && errors.Is(err, checkErr) {
 					return fail("%v", checkErr)
 				}
@@ -210,7 +219,7 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 	}
 
 	// (2) the creds file, last; a symlink or anything but a regular file is left alone. By default it is renamed
-	// aside so the name can be added again at once; --delete-creds removes it.
+	// aside; --delete-creds removes it.
 	code := 0
 	renamed := ""
 	if credsErr == nil {
@@ -243,7 +252,7 @@ func runRetire(args []string, env func(string) string, lookup config.Lookup, std
 	// (3) report.
 	fmt.Fprintf(stdout, "retired %s\n", name)
 	if renamed != "" {
-		fmt.Fprintf(stdout, "creds file renamed to %s (mashctl add %s works again; --delete-creds removes it instead)\n", renamed, name)
+		fmt.Fprintf(stdout, "creds file renamed to %s (--delete-creds removes it instead)\n", renamed)
 	}
 	switch {
 	case user == "":

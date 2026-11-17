@@ -25,6 +25,7 @@ import (
 
 	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/release"
+	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/testenv"
 )
 
@@ -362,16 +363,23 @@ type lab struct {
 	senderE []string
 }
 
+// labGroup is the group token of every endpoint of the lab.
+const labGroup = "lab"
+
 // endpointEnv provisions endpoint name and returns the environment its mash commands run with: a fresh HOME and state
 // directory, the plugin's env block (for serve), and the connection settings.
 func (l *lab) endpointEnv(ctx context.Context, name string, plugin bool) ([]string, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	creds, user, err := l.ne.MintEndpoint(name)
+	addr, err := sap.NewAddress(l.ne.Owner, labGroup, name)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := l.adm.Provision(ctx, name, user, l.ne.Account, "", admin.Meta{}); err != nil {
+	creds, user, err := l.ne.MintEndpoint(addr)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := l.adm.Provision(ctx, addr, user, l.ne.Account, "", admin.Meta{}); err != nil {
 		return nil, fmt.Errorf("provisioning %s: %w", name, err)
 	}
 	home := filepath.Join(l.dir, "home-"+name)
@@ -382,7 +390,7 @@ func (l *lab) endpointEnv(ctx context.Context, name string, plugin bool) ([]stri
 	if plugin {
 		env = append(env, l.spec.envPairs()...)
 	}
-	return append(env, "MASH_NAME="+name, "MASH_URL="+l.ne.URL, "MASH_OWNER="+l.ne.Owner, "MASH_CREDS="+creds), nil
+	return append(env, "MASH_NAME="+name, "MASH_URL="+l.ne.URL, "MASH_OWNER="+l.ne.Owner, "MASH_GROUP="+labGroup, "MASH_CREDS="+creds), nil
 }
 
 // sendMail sends the standard probe text from the sender to to, with the binary under test.
@@ -390,11 +398,11 @@ func (l *lab) sendMail(ctx context.Context, to string, flags ...string) (out str
 	return l.sendText(ctx, to, "release-check latency probe", flags...)
 }
 
-// sendText sends text from the sender to to, with the binary under test.
+// sendText sends text from the sender to the lab endpoint named to (its instance token), with the binary under test.
 func (l *lab) sendText(ctx context.Context, to, text string, flags ...string) (out string, code int, err error) {
 	rctx, cancel := context.WithTimeout(ctx, versionTimeout)
 	defer cancel()
-	c := exec.CommandContext(rctx, l.bin, append(append([]string{"send", to}, flags...), text)...)
+	c := exec.CommandContext(rctx, l.bin, append(append([]string{"send", l.ne.Owner + "." + labGroup + "." + to}, flags...), text)...)
 	c.Env = l.senderE
 	c.WaitDelay = 2 * time.Second
 	b, err := c.CombinedOutput()

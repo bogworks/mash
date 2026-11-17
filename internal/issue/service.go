@@ -68,7 +68,7 @@ func handle(is *Issuer, rng string, req micro.Request) {
 	if rf == nil {
 		// The subject names the group the wrangler believes it asks for; the address must be in it, in this range.
 		id, _ := r.AddressParts()
-		if id.Agent != rng || req.Subject() != Subject(id.Agent, id.Owner) {
+		if id.Owner != rng || req.Subject() != Subject(id.Owner, id.Group) {
 			rf = refuse(CodeSubject, "the address is not in the owner group of the subject")
 		}
 	}

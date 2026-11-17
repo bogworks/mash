@@ -18,9 +18,12 @@ import (
 	"github.com/bogworks/mash/internal/testenv"
 )
 
+// qa is the endpoint address of instance n: the quickstart runs as owner alice in group eng.
+func qa(n string) string { return "alice.eng." + n }
+
 const fakeToken = "fake-token-for-tests-123456"
 
-// fakeSynadia serves just the control-plane endpoints quickstart-synadia.sh uses, with NATS users whose creds are
+// fakeSynadia serves just the management API endpoints quickstart-synadia.sh uses, with NATS users whose creds are
 // minted by the in-process test server with exactly the permissions the user was created with.
 type fakeSynadia struct {
 	e            *testenv.Env
@@ -255,7 +258,7 @@ func TestQuickstartCreatesEndpointsAndDeletesAdmin(t *testing.T) {
 	e := testenv.Start(t)
 	f := newFake(t, e, 5)
 	home := t.TempDir()
-	r := runScript(t, f, home, nil, "--owner", "alice", "--endpoint", "alice-a", "--endpoint", "alice-b")
+	r := runScript(t, f, home, nil, "--group", "eng", "--owner", "alice", "--endpoint", "alice-a", "--endpoint", "alice-b")
 	if r.code != 0 {
 		t.Fatalf("exit %d:\n%s", r.code, r.out)
 	}
@@ -266,7 +269,7 @@ func TestQuickstartCreatesEndpointsAndDeletesAdmin(t *testing.T) {
 	if cfg["url"] != e.URL || cfg["owner"] != "alice" {
 		t.Errorf("config = %v, want url %s owner alice", cfg, e.URL)
 	}
-	for _, n := range []string{"alice-a", "alice-b"} {
+	for _, n := range []string{qa("alice-a"), qa("alice-b")} {
 		fi, err := os.Stat(filepath.Join(home, ".config", "mash", n+".creds"))
 		if err != nil {
 			t.Fatal(err)
@@ -295,11 +298,11 @@ func TestQuickstartCustomConfigDir(t *testing.T) {
 	f := newFake(t, e, 5)
 	home := t.TempDir()
 	custom := filepath.Join(t.TempDir(), "elsewhere")
-	r := runScript(t, f, home, nil, "--config-dir", custom, "--owner", "alice", "--endpoint", "alice-a", "--endpoint", "alice-b")
+	r := runScript(t, f, home, nil, "--config-dir", custom, "--group", "eng", "--owner", "alice", "--endpoint", "alice-a", "--endpoint", "alice-b")
 	if r.code != 0 {
 		t.Fatalf("exit %d:\n%s", r.code, r.out)
 	}
-	for _, n := range []string{"config.json", "alice-a.creds", "alice-b.creds"} {
+	for _, n := range []string{"config.json", qa("alice-a") + ".creds", qa("alice-b") + ".creds"} {
 		if _, err := os.Stat(filepath.Join(custom, n)); err != nil {
 			t.Errorf("%s not in the custom config dir: %v", n, err)
 		}
@@ -318,7 +321,7 @@ func TestQuickstartXDGConfigHomeDefault(t *testing.T) {
 	f := newFake(t, e, 5)
 	home := t.TempDir()
 	xdg := t.TempDir()
-	r := runScript(t, f, home, []string{"XDG_CONFIG_HOME=" + xdg}, "--no-test", "--owner", "alice", "--endpoint", "alice-a")
+	r := runScript(t, f, home, []string{"XDG_CONFIG_HOME=" + xdg}, "--no-test", "--group", "eng", "--owner", "alice", "--endpoint", "alice-a")
 	if r.code != 0 {
 		t.Fatalf("exit %d:\n%s", r.code, r.out)
 	}
@@ -330,7 +333,7 @@ func TestQuickstartXDGConfigHomeDefault(t *testing.T) {
 func TestQuickstartRelativeConfigDirRefused(t *testing.T) {
 	e := testenv.Start(t)
 	f := newFake(t, e, 5)
-	r := runScript(t, f, t.TempDir(), nil, "--dry-run", "--config-dir", "rel/dir")
+	r := runScript(t, f, t.TempDir(), nil, "--dry-run", "--group", "eng", "--config-dir", "rel/dir")
 	if r.code == 0 || !strings.Contains(r.out, "absolute") {
 		t.Fatalf("exit %d:\n%s", r.code, r.out)
 	}
@@ -340,7 +343,7 @@ func TestQuickstartDryRunCreatesNothing(t *testing.T) {
 	e := testenv.Start(t)
 	f := newFake(t, e, 5)
 	home := t.TempDir()
-	r := runScript(t, f, home, nil, "--dry-run", "--owner", "alice", "--endpoint", "alice-a")
+	r := runScript(t, f, home, nil, "--dry-run", "--group", "eng", "--owner", "alice", "--endpoint", "alice-a")
 	if r.code != 0 || !strings.Contains(r.out, "Dry run") {
 		t.Fatalf("exit %d:\n%s", r.code, r.out)
 	}
@@ -358,7 +361,7 @@ func TestQuickstartDeletesAdminOnFailure(t *testing.T) {
 	f.mu.Lock()
 	f.failCreds = true
 	f.mu.Unlock()
-	r := runScript(t, f, t.TempDir(), nil, "--owner", "alice", "--endpoint", "alice-a")
+	r := runScript(t, f, t.TempDir(), nil, "--group", "eng", "--owner", "alice", "--endpoint", "alice-a")
 	if r.code == 0 {
 		t.Fatalf("want a failure:\n%s", r.out)
 	}
@@ -376,7 +379,7 @@ func TestQuickstartRefusals(t *testing.T) {
 	e := testenv.Start(t)
 	t.Run("capacity", func(t *testing.T) {
 		f := newFake(t, e, 3)
-		r := runScript(t, f, t.TempDir(), nil, "--owner", "alice", "--endpoint", "a", "--endpoint", "b")
+		r := runScript(t, f, t.TempDir(), nil, "--group", "eng", "--owner", "alice", "--endpoint", "a", "--endpoint", "b")
 		if r.code == 0 || !strings.Contains(r.out, "allows 3 streams") || f.postCount() != 0 {
 			t.Errorf("exit %d, posts %d:\n%s", r.code, f.postCount(), r.out)
 		}
@@ -385,14 +388,14 @@ func TestQuickstartRefusals(t *testing.T) {
 		// Two endpoints are provisioned first; the account then allows 5 streams, so 2 shared + 2 held + 2 planned
 		// does not fit and the script must stop before it creates any endpoint user.
 		home := t.TempDir()
-		first := runScript(t, newFake(t, e, 5), home, nil, "--owner", "alice", "--endpoint", "old-a", "--endpoint", "old-b", "--no-test")
+		first := runScript(t, newFake(t, e, 5), home, nil, "--group", "eng", "--owner", "alice", "--endpoint", "old-a", "--endpoint", "old-b", "--no-test")
 		if first.code != 0 {
 			t.Fatalf("setup run: exit %d:\n%s", first.code, first.out)
 		}
 		f := newFake(t, e, 5)
-		r := runScript(t, f, home, nil, "--owner", "alice", "--endpoint", "new-a", "--endpoint", "new-b")
-		if r.code == 0 || !strings.Contains(r.out, "allows 5 streams") || !strings.Contains(r.out, "old-a") ||
-			!strings.Contains(r.out, "old-b") || !strings.Contains(r.out, "Removing an endpoint") {
+		r := runScript(t, f, home, nil, "--group", "eng", "--owner", "alice", "--endpoint", "new-a", "--endpoint", "new-b")
+		if r.code == 0 || !strings.Contains(r.out, "allows 5 streams") || !strings.Contains(r.out, qa("old-a")) ||
+			!strings.Contains(r.out, qa("old-b")) || !strings.Contains(r.out, "Removing an endpoint") {
 			t.Fatalf("want the stream hint naming old-a and old-b, exit %d:\n%s", r.code, r.out)
 		}
 		if f.postCount() != 1 {
@@ -405,7 +408,7 @@ func TestQuickstartRefusals(t *testing.T) {
 	// A refusal after config.json was written (mash admin init has run) must not leave the new url and owner behind.
 	t.Run("failed run restores or removes the config", func(t *testing.T) {
 		e2 := testenv.Start(t) // its own directory, so this subtest does not depend on the others
-		first := runScript(t, newFake(t, e2, 5), t.TempDir(), nil, "--owner", "alice", "--endpoint", "old-a", "--endpoint", "old-b", "--no-test")
+		first := runScript(t, newFake(t, e2, 5), t.TempDir(), nil, "--group", "eng", "--owner", "alice", "--endpoint", "old-a", "--endpoint", "old-b", "--no-test")
 		if first.code != 0 {
 			t.Fatalf("setup run: exit %d:\n%s", first.code, first.out)
 		}
@@ -421,7 +424,7 @@ func TestQuickstartRefusals(t *testing.T) {
 			if err := os.WriteFile(cfgPath(home), old, 0o600); err != nil {
 				t.Fatal(err)
 			}
-			r := runScript(t, f, home, nil, "--force", "--owner", "alice", "--endpoint", "new-a", "--endpoint", "new-b")
+			r := runScript(t, f, home, nil, "--force", "--group", "eng", "--owner", "alice", "--endpoint", "new-a", "--endpoint", "new-b")
 			if r.code == 0 || !strings.Contains(r.out, "allows 5 streams") || !strings.Contains(r.out, "restored the previous") {
 				t.Fatalf("want a refusal that restores the config, exit %d:\n%s", r.code, r.out)
 			}
@@ -432,7 +435,7 @@ func TestQuickstartRefusals(t *testing.T) {
 		t.Run("fresh run", func(t *testing.T) {
 			f := newFake(t, e2, 5)
 			home := t.TempDir()
-			r := runScript(t, f, home, nil, "--owner", "alice", "--endpoint", "new-a", "--endpoint", "new-b")
+			r := runScript(t, f, home, nil, "--group", "eng", "--owner", "alice", "--endpoint", "new-a", "--endpoint", "new-b")
 			if r.code == 0 || !strings.Contains(r.out, "allows 5 streams") {
 				t.Fatalf("want the stream refusal, exit %d:\n%s", r.code, r.out)
 			}
@@ -451,7 +454,7 @@ func TestQuickstartRefusals(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"url":"nats://other:4222","owner":"alice"}`), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		r := runScript(t, f, home, nil, "--owner", "alice", "--endpoint", "a")
+		r := runScript(t, f, home, nil, "--group", "eng", "--owner", "alice", "--endpoint", "a")
 		if r.code == 0 || !strings.Contains(r.out, "--force") || f.postCount() != 0 {
 			t.Errorf("exit %d, posts %d:\n%s", r.code, f.postCount(), r.out)
 		}
@@ -463,13 +466,13 @@ func TestQuickstartRefusals(t *testing.T) {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		creds := filepath.Join(dir, "a.creds")
+		creds := filepath.Join(dir, qa("a")+".creds")
 		keep := []byte("precious creds of another account\n")
 		if err := os.WriteFile(creds, keep, 0o600); err != nil {
 			t.Fatal(err)
 		}
 		for _, extra := range [][]string{nil, {"--dry-run"}} {
-			r := runScript(t, f, home, nil, append([]string{"--owner", "alice", "--endpoint", "a"}, extra...)...)
+			r := runScript(t, f, home, nil, append([]string{"--group", "eng", "--owner", "alice", "--endpoint", "a"}, extra...)...)
 			if r.code == 0 || !strings.Contains(r.out, creds) || !strings.Contains(r.out, "already exists") || f.postCount() != 0 {
 				t.Errorf("%v: exit %d, posts %d:\n%s", extra, r.code, f.postCount(), r.out)
 			}
@@ -481,24 +484,24 @@ func TestQuickstartRefusals(t *testing.T) {
 	t.Run("API URL", func(t *testing.T) {
 		f := newFake(t, e, 5)
 		for _, u := range []string{"http://example.com/api", "ftp://x", "http://127.0.0.1@evil.example/", "http://localhost.evil.example/", "cloud.synadia.com"} {
-			r := runScript(t, f, t.TempDir(), []string{"SYNADIA_API_URL=" + u}, "--dry-run", "--endpoint", "a")
+			r := runScript(t, f, t.TempDir(), []string{"SYNADIA_API_URL=" + u}, "--dry-run", "--group", "eng", "--endpoint", "a")
 			if r.code == 0 || !strings.Contains(r.out, "SYNADIA_API_URL") || strings.Contains(r.out, fakeToken) || f.reqCount() != 0 {
 				t.Errorf("%s: exit %d, requests %d:\n%s", u, r.code, f.reqCount(), r.out)
 			}
 		}
 		// https and loopback http pass the URL check (an https host that does not exist fails later, in curl).
-		r := runScript(t, f, t.TempDir(), []string{"SYNADIA_API_URL=https://127.0.0.1:1/x"}, "--dry-run", "--endpoint", "a")
+		r := runScript(t, f, t.TempDir(), []string{"SYNADIA_API_URL=https://127.0.0.1:1/x"}, "--dry-run", "--group", "eng", "--endpoint", "a")
 		if strings.Contains(r.out, "SYNADIA_API_URL") {
 			t.Errorf("https refused:\n%s", r.out)
 		}
-		r = runScript(t, f, t.TempDir(), nil, "--dry-run", "--owner", "alice", "--endpoint", "a") // the suite's own http://127.0.0.1:port
+		r = runScript(t, f, t.TempDir(), nil, "--dry-run", "--group", "eng", "--owner", "alice", "--endpoint", "a") // the suite's own http://127.0.0.1:port
 		if r.code != 0 || f.reqCount() == 0 {
 			t.Errorf("loopback http refused: exit %d:\n%s", r.code, r.out)
 		}
 	})
 	t.Run("no token", func(t *testing.T) {
 		f := newFake(t, e, 5)
-		r := runScript(t, f, t.TempDir(), []string{"SYNADIA_API_TOKEN="}, "--endpoint", "a")
+		r := runScript(t, f, t.TempDir(), []string{"SYNADIA_API_TOKEN="}, "--group", "eng", "--endpoint", "a")
 		if r.code == 0 || !strings.Contains(r.out, "no Synadia API token") {
 			t.Errorf("exit %d:\n%s", r.code, r.out)
 		}
@@ -510,8 +513,8 @@ func TestQuickstartRefusals(t *testing.T) {
 func TestQuickstartDefaultMashFromPath(t *testing.T) {
 	e := testenv.Start(t)
 	f := newFake(t, e, 5)
-	r := runScript(t, f, t.TempDir(), []string{"QS_DEFAULT_MASH=1"}, "--owner", "alice", "--endpoint", "alice-a", "--endpoint", "alice-b")
-	if r.code != 0 || !strings.Contains(r.out, "provisioned alice-a") {
+	r := runScript(t, f, t.TempDir(), []string{"QS_DEFAULT_MASH=1"}, "--group", "eng", "--owner", "alice", "--endpoint", "alice-a", "--endpoint", "alice-b")
+	if r.code != 0 || !strings.Contains(r.out, "provisioned "+qa("alice-a")) {
 		t.Fatalf("exit %d:\n%s", r.code, r.out)
 	}
 }
@@ -523,25 +526,25 @@ func credsPath(home, n string) string { return filepath.Join(home, ".config", "m
 func TestQuickstartPartialFailureKeepsWhatSucceeded(t *testing.T) {
 	e := testenv.Start(t)
 	f := newFake(t, e, 6)
-	f.set(func(f *fakeSynadia) { f.failCredsFor = "alice-b" })
+	f.set(func(f *fakeSynadia) { f.failCredsFor = qa("alice-b") })
 	home := t.TempDir()
-	r := runScript(t, f, home, nil, "--owner", "alice", "--endpoint", "alice-a", "--endpoint", "alice-b")
+	r := runScript(t, f, home, nil, "--group", "eng", "--owner", "alice", "--endpoint", "alice-a", "--endpoint", "alice-b")
 	if r.code == 0 {
 		t.Fatalf("want a failure:\n%s", r.out)
 	}
-	if names := f.names(); len(names) != 1 || names[0] != "alice-a" {
+	if names := f.names(); len(names) != 1 || names[0] != qa("alice-a") {
 		t.Errorf("users left = %v, want only alice-a", names)
 	}
-	if _, err := os.Stat(credsPath(home, "alice-a")); err != nil {
+	if _, err := os.Stat(credsPath(home, qa("alice-a"))); err != nil {
 		t.Errorf("alice-a creds gone: %v", err)
 	}
-	if _, err := os.Stat(credsPath(home, "alice-b")); err == nil {
+	if _, err := os.Stat(credsPath(home, qa("alice-b"))); err == nil {
 		t.Errorf("alice-b creds exist")
 	}
 	if cfg := readConfig(t, home); cfg["owner"] != "alice" {
 		t.Errorf("config = %v", cfg)
 	}
-	if !strings.Contains(r.out, "removed the unprovisioned NATS user(s): alice-b") || !strings.Contains(r.out, "Remaining, provisioned and working: alice-a") {
+	if !strings.Contains(r.out, "removed the unprovisioned NATS user(s): "+qa("alice-b")) || !strings.Contains(r.out, "Remaining, provisioned and working: "+qa("alice-a")) {
 		t.Errorf("output does not say which users were removed and kept:\n%s", r.out)
 	}
 }
@@ -549,14 +552,14 @@ func TestQuickstartPartialFailureKeepsWhatSucceeded(t *testing.T) {
 func TestQuickstartRefusesStaleDirectoryRecord(t *testing.T) {
 	e := testenv.Start(t)
 	home := t.TempDir()
-	if first := runScript(t, newFake(t, e, 6), home, nil, "--owner", "alice", "--endpoint", "old-a", "--no-test"); first.code != 0 {
+	if first := runScript(t, newFake(t, e, 6), home, nil, "--group", "eng", "--owner", "alice", "--endpoint", "old-a", "--no-test"); first.code != 0 {
 		t.Fatalf("setup run: exit %d:\n%s", first.code, first.out)
 	}
-	_ = os.Remove(credsPath(home, "old-a")) // the user and its creds are gone; only the directory record is left
+	_ = os.Remove(credsPath(home, qa("old-a"))) // the user and its creds are gone; only the directory record is left
 	// A new fake has no NATS users: old-a's directory record is stale.
 	f := newFake(t, e, 6)
-	r := runScript(t, f, home, nil, "--owner", "alice", "--endpoint", "old-a2", "--endpoint", "old-a")
-	if r.code == 0 || !strings.Contains(r.out, "mash admin deprovision old-a") || !strings.Contains(r.out, "stale or taken") {
+	r := runScript(t, f, home, nil, "--group", "eng", "--owner", "alice", "--endpoint", "old-a2", "--endpoint", "old-a")
+	if r.code == 0 || !strings.Contains(r.out, "mash admin deprovision "+qa("old-a")) || !strings.Contains(r.out, "stale or taken") {
 		t.Fatalf("want a stale-record refusal, exit %d:\n%s", r.code, r.out)
 	}
 	if f.postCount() != 1 || len(f.names()) != 0 {
@@ -569,14 +572,14 @@ func TestQuickstartRefusesMismatchedCreds(t *testing.T) {
 	f := newFake(t, e, 5)
 	f.set(func(f *fakeSynadia) { f.wrongCreds = true })
 	home := t.TempDir()
-	r := runScript(t, f, home, nil, "--owner", "alice", "--endpoint", "alice-a")
+	r := runScript(t, f, home, nil, "--group", "eng", "--owner", "alice", "--endpoint", "alice-a")
 	if r.code == 0 || !strings.Contains(r.out, "different user public key") {
 		t.Fatalf("want a refusal, exit %d:\n%s", r.code, r.out)
 	}
 	if n := f.names(); len(n) != 0 {
 		t.Errorf("users left = %v, want none", n)
 	}
-	if _, err := os.Stat(credsPath(home, "alice-a")); err == nil {
+	if _, err := os.Stat(credsPath(home, qa("alice-a"))); err == nil {
 		t.Errorf("mismatched creds were written")
 	}
 	if _, err := os.Stat(filepath.Join(home, ".config", "mash", "config.json")); !os.IsNotExist(err) {
@@ -607,7 +610,7 @@ func TestQuickstartConfigDirLock(t *testing.T) {
 		if err := os.MkdirAll(lockPath(home), 0o700); err != nil {
 			t.Fatal(err)
 		}
-		r := runScript(t, f, home, nil, "--owner", "alice", "--endpoint", "a")
+		r := runScript(t, f, home, nil, "--group", "eng", "--owner", "alice", "--endpoint", "a")
 		if r.code == 0 || !strings.Contains(r.out, lockPath(home)) || !strings.Contains(r.out, "another quickstart run") || !strings.Contains(r.out, "rm "+lockPath(home)+"/pid && rmdir "+lockPath(home)) || f.postCount() != 0 {
 			t.Fatalf("exit %d, posts %d:\n%s", r.code, f.postCount(), r.out)
 		}
@@ -620,7 +623,7 @@ func TestQuickstartConfigDirLock(t *testing.T) {
 	})
 	t.Run("lock removed after success", func(t *testing.T) {
 		home := t.TempDir()
-		r := runScript(t, newFake(t, e, 5), home, nil, "--owner", "alice", "--endpoint", "a", "--no-test")
+		r := runScript(t, newFake(t, e, 5), home, nil, "--group", "eng", "--owner", "alice", "--endpoint", "a", "--no-test")
 		if r.code != 0 {
 			t.Fatalf("exit %d:\n%s", r.code, r.out)
 		}
@@ -632,7 +635,7 @@ func TestQuickstartConfigDirLock(t *testing.T) {
 		f := newFake(t, e, 5)
 		f.set(func(f *fakeSynadia) { f.failCreds = true })
 		home := t.TempDir()
-		r := runScript(t, f, home, nil, "--owner", "alice", "--endpoint", "a")
+		r := runScript(t, f, home, nil, "--group", "eng", "--owner", "alice", "--endpoint", "a")
 		if r.code == 0 {
 			t.Fatalf("want a failure:\n%s", r.out)
 		}
@@ -642,7 +645,7 @@ func TestQuickstartConfigDirLock(t *testing.T) {
 	})
 	t.Run("dry run takes no lock and creates nothing", func(t *testing.T) {
 		home := t.TempDir()
-		if r := runScript(t, newFake(t, e, 5), home, nil, "--dry-run", "--owner", "alice", "--endpoint", "a"); r.code != 0 {
+		if r := runScript(t, newFake(t, e, 5), home, nil, "--dry-run", "--group", "eng", "--owner", "alice", "--endpoint", "a"); r.code != 0 {
 			t.Fatalf("exit %d:\n%s", r.code, r.out)
 		}
 		if _, err := os.Stat(filepath.Join(home, ".config")); err == nil {
@@ -651,22 +654,22 @@ func TestQuickstartConfigDirLock(t *testing.T) {
 	})
 }
 
-// failProvisionBody makes `admin provision alice-b` fail after remembering its --user key. A guarded `admin deprovision
+// failProvisionBody makes `admin provision alice.eng.alice-b` fail after remembering its --user key. A guarded `admin deprovision
 // alice-b --user KEY` then behaves as mode says: "own" succeeds (the record is this run's), "foreign" refuses as the real
 // guard does for another admin's record, "changed" refuses because the record kept changing or now names another user, and "norecord"
 // runs the real mash against the live test server, where no record exists.
 func failProvisionBody(mode string) string {
-	body := `if [ "$1" = admin ] && [ "$2" = provision ] && [ "$3" = alice-b ]; then echo "$5" >"$0.key"; echo "provision: boom" >&2; exit 1; fi
-if [ "$1" = admin ] && [ "$2" = deprovision ] && [ "$3" = alice-b ]; then
+	body := `if [ "$1" = admin ] && [ "$2" = provision ] && [ "$3" = alice.eng.alice-b ]; then echo "$5" >"$0.key"; echo "provision: boom" >&2; exit 1; fi
+if [ "$1" = admin ] && [ "$2" = deprovision ] && [ "$3" = alice.eng.alice-b ]; then
   [ "$4" = --user ] && [ "$5" = "$(cat "$0.key")" ] || { echo "deprovision: wrong or missing --user" >&2; exit 1; }
 `
 	switch mode {
 	case "own":
 		body += "  exit 0\n"
 	case "foreign":
-		body += "  echo 'mash: refusing to deprovision alice-b: its record belongs to another user key (left in place)' >&2; exit 1\n"
+		body += "  echo 'mash: refusing to deprovision alice.eng.alice-b: its record belongs to another user key (left in place)' >&2; exit 1\n"
 	case "changed":
-		body += "  echo 'mash: refusing to deprovision alice-b: the record for alice-b changed; left in place' >&2; exit 1\n"
+		body += "  echo 'mash: refusing to deprovision alice.eng.alice-b: the record for alice.eng.alice-b changed; left in place' >&2; exit 1\n"
 	}
 	return body + "fi"
 }
@@ -676,19 +679,19 @@ func TestQuickstartDeprovisionsHalfProvisionedEndpoint(t *testing.T) {
 	f := newFake(t, e, 6)
 	wrapper, calls := wrapperMash(t, failProvisionBody("own"))
 	home := t.TempDir()
-	r := runScript(t, f, home, nil, "--mash", wrapper, "--owner", "alice", "--endpoint", "alice-a", "--endpoint", "alice-b")
+	r := runScript(t, f, home, nil, "--mash", wrapper, "--group", "eng", "--owner", "alice", "--endpoint", "alice-a", "--endpoint", "alice-b")
 	if r.code == 0 {
 		t.Fatalf("want a failure:\n%s", r.out)
 	}
 	b, _ := os.ReadFile(calls)
-	if !strings.Contains(string(b), "admin deprovision alice-b --user U") || strings.Contains(string(b), "admin deprovision alice-a") || strings.Count(string(b), "admin deprovision") != 1 {
+	if !strings.Contains(string(b), "admin deprovision alice.eng.alice-b --user U") || strings.Contains(string(b), "admin deprovision alice.eng.alice-a") || strings.Count(string(b), "admin deprovision") != 1 {
 		t.Errorf("want exactly one guarded deprovision of alice-b, calls:\n%s", b)
 	}
-	if !strings.Contains(r.out, "deprovision alice-b") {
+	if !strings.Contains(r.out, "deprovision alice.eng.alice-b") {
 		t.Errorf("output does not mention the deprovision:\n%s", r.out)
 	}
 	for _, n := range f.names() {
-		if strings.HasPrefix(n, "mash-quickstart-admin-") || n == "alice-b" {
+		if strings.HasPrefix(n, "mash-quickstart-admin-") || n == qa("alice-b") {
 			t.Errorf("user %s survived", n)
 		}
 	}
@@ -701,21 +704,21 @@ func TestQuickstartLeavesForeignRecordAfterFailedProvision(t *testing.T) {
 			f := newFake(t, e, 6)
 			wrapper, calls := wrapperMash(t, failProvisionBody(mode))
 			home := t.TempDir()
-			r := runScript(t, f, home, nil, "--mash", wrapper, "--owner", "alice", "--endpoint", "alice-a", "--endpoint", "alice-b")
+			r := runScript(t, f, home, nil, "--mash", wrapper, "--group", "eng", "--owner", "alice", "--endpoint", "alice-a", "--endpoint", "alice-b")
 			if r.code == 0 {
 				t.Fatalf("want a failure:\n%s", r.out)
 			}
 			b, _ := os.ReadFile(calls)
-			if !strings.Contains(string(b), "admin deprovision alice-b --user U") {
+			if !strings.Contains(string(b), "admin deprovision alice.eng.alice-b --user U") {
 				t.Errorf("no guarded deprovision, calls:\n%s", b)
 			}
-			if !strings.Contains(r.out, "a record for alice-b exists that is not this run's; left in place") {
+			if !strings.Contains(r.out, "a record for alice.eng.alice-b exists that is not this run's; left in place") {
 				t.Errorf("output does not say the record was left:\n%s", r.out)
 			}
-			_, credsErr := os.Stat(filepath.Join(home, ".config", "mash", "alice-b.creds"))
+			_, credsErr := os.Stat(filepath.Join(home, ".config", "mash", qa("alice-b")+".creds"))
 			kept := false
 			for _, n := range f.names() {
-				if n == "alice-b" {
+				if n == qa("alice-b") {
 					kept = true
 				}
 			}
@@ -746,11 +749,11 @@ func TestQuickstartNoRecordAfterFailedProvision(t *testing.T) {
 	e := testenv.Start(t)
 	f := newFake(t, e, 6)
 	wrapper, _ := wrapperMash(t, failProvisionBody("norecord"))
-	r := runScript(t, f, t.TempDir(), nil, "--mash", wrapper, "--owner", "alice", "--endpoint", "alice-a", "--endpoint", "alice-b")
+	r := runScript(t, f, t.TempDir(), nil, "--mash", wrapper, "--group", "eng", "--owner", "alice", "--endpoint", "alice-a", "--endpoint", "alice-b")
 	if r.code == 0 {
 		t.Fatalf("want a failure:\n%s", r.out)
 	}
-	if !strings.Contains(r.out, "no directory record for alice-b to remove") {
+	if !strings.Contains(r.out, "no directory record for alice.eng.alice-b to remove") {
 		t.Errorf("output does not say there was no record:\n%s", r.out)
 	}
 }
@@ -760,8 +763,23 @@ func TestQuickstartMailTestNeedsItsOwnToken(t *testing.T) {
 	f := newFake(t, e, 6)
 	// The inbox shows an old [verified] message without this run's token.
 	wrapper, _ := wrapperMash(t, `if [ "$1" = inbox ]; then echo '#1 [verified] alice-a: an older message'; exit 0; fi`)
-	r := runScript(t, f, t.TempDir(), nil, "--mash", wrapper, "--owner", "alice", "--endpoint", "alice-a", "--endpoint", "alice-b")
+	r := runScript(t, f, t.TempDir(), nil, "--mash", wrapper, "--group", "eng", "--owner", "alice", "--endpoint", "alice-a", "--endpoint", "alice-b")
 	if r.code == 0 || !strings.Contains(r.out, "did not arrive as [verified]") {
 		t.Fatalf("a stale verified message passed the mail test, exit %d:\n%s", r.code, r.out)
+	}
+}
+
+// --group has no default: without it the script refuses before it reads the token or creates anything.
+func TestQuickstartGroupRequired(t *testing.T) {
+	e := testenv.Start(t)
+	f := newFake(t, e, 5)
+	home := t.TempDir()
+	r := runScript(t, f, home, nil, "--owner", "alice", "--endpoint", "a")
+	if r.code == 0 || !strings.Contains(r.out, "quickstart-synadia: --group is required (an endpoint's group has no default)") || f.reqCount() != 0 {
+		t.Fatalf("exit %d, requests %d:\n%s", r.code, f.reqCount(), r.out)
+	}
+	r = runScript(t, f, home, nil, "--group", "Bad_Group", "--owner", "alice", "--endpoint", "a")
+	if r.code == 0 || !strings.Contains(r.out, "group 'Bad_Group' is not valid (1-32") || f.reqCount() != 0 {
+		t.Fatalf("exit %d, requests %d:\n%s", r.code, f.reqCount(), r.out)
 	}
 }

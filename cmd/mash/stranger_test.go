@@ -32,19 +32,19 @@ func strangerEnv(w *world, extra map[string]string) map[string]string {
 	}, extra))
 }
 
-// strangerDelivery sends two task messages from b to a before any hook, and checks the first hook shows both, once,
+// strangerDelivery sends two task messages from o.dev.b to a before any hook, and checks the first hook shows both, once,
 // and that serve acks them (unread 0).
 func strangerDelivery(t *testing.T, w *world, c *fakeClaude, sp spool.Spool, session string) {
 	t.Helper()
 	eventually(t, 20*time.Second, "serve owns the spool", func() bool { return sp.Owner() != "" })
 	for _, body := range []string{"first task", "second task"} {
-		if out, code := w.cli(t, "b", "send", "a", "--kind", "task", body); code != 0 {
+		if out, code := w.cli(t, "b", "send", tTo("a"), "--kind", "task", body); code != 0 {
 			t.Fatalf("send: %s", out)
 		}
 	}
 	eventually(t, 10*time.Second, "serve spooled both", func() bool { e, _ := sp.Waiting(); return len(e) == 2 })
 	got := c.hook(t, session)
-	for _, want := range []string{"2 messages from b", "> first task", "> second task"} {
+	for _, want := range []string{"2 messages from o.dev.b", "> first task", "> second task"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("the first hook lacks %q:\n%s", want, got)
 		}
@@ -182,7 +182,7 @@ func TestStrangerHooksDisabled(t *testing.T) {
 	c := startFakeClaude(t, env, true)
 	sp := spoolOf(env)
 	eventually(t, 20*time.Second, "serve owns the spool", func() bool { return sp.Owner() != "" })
-	if out, code := w.cli(t, "b", "send", "a", "--kind", "task", "hooks are off"); code != 0 {
+	if out, code := w.cli(t, "b", "send", tTo("a"), "--kind", "task", "hooks are off"); code != 0 {
 		t.Fatalf("send: %s", out)
 	}
 	// Four idle wakes' worth of time: the wakes back off and stop, they do not loop.
@@ -213,7 +213,7 @@ func TestServeWhoToolAsksNow(t *testing.T) {
 	c := startFakeClaude(t, strangerEnv(w, nil), true)
 	eventually(t, 20*time.Second, "who shows a online", func() bool {
 		out := c.call(t, "who", `{}`)
-		return strings.Contains(out, "a\tonline") && strings.Contains(out, "b\toffline")
+		return strings.Contains(out, tTo("a")+"\tonline") && strings.Contains(out, tTo("b")+"\toffline")
 	})
 	if out := c.call(t, "who", `{"online":true,"format":"json"}`); !strings.Contains(out, `"a"`) || strings.Contains(out, `"b"`) {
 		t.Fatalf("who online json:\n%s", out)

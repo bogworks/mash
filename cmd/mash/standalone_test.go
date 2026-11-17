@@ -19,7 +19,7 @@ import (
 // Mash must be fully usable with only NATS, its SAP and its runtime dependencies: no Claude or other agent-orchestration
 // config. These tests prove it through the built binary, run with a scrubbed environment.
 
-var foreignTools = []string{"range", "herdr", "claude"}
+var foreignTools = []string{"range", "claude"}
 
 // forbiddenWords splits a comma-separated word list: trimmed, lowercased, empty entries dropped.
 func forbiddenWords(list string) []string {
@@ -60,7 +60,7 @@ func assertToolsAbsent(t *testing.T, env []string) {
 		if v, ok := strings.CutPrefix(kv, "PATH="); ok {
 			path = v
 		}
-		for _, bad := range []string{"RANGE_", "HERDR_", "CLAUDE"} {
+		for _, bad := range []string{"RANGE_", "CLAUDE"} {
 			if strings.HasPrefix(kv, bad) {
 				t.Fatalf("environment leaks %s", kv)
 			}
@@ -104,19 +104,19 @@ func TestStandaloneOnlyNATS(t *testing.T) {
 	bin := mashBinary(t)
 	e := testenv.Start(t)
 
-	base := map[string]string{"MASH_URL": e.URL, "MASH_OWNER": e.Owner}
+	base := map[string]string{"MASH_URL": e.URL, "MASH_OWNER": e.Owner, "MASH_GROUP": testGroup}
 	adminEnv := scrubbedEnv(t, map[string]string{"MASH_URL": e.URL, "MASH_OWNER": e.Owner, "MASH_ADMIN_CREDS": e.AdminCreds, "MASH_INSECURE_LOOPBACK": "1"})
 	assertToolsAbsent(t, adminEnv)
 	mustRun(t, bin, adminEnv, "admin", "init")
 	envs := map[string][]string{}
 	for _, n := range []string{"alpha", "beta"} {
-		creds, user, err := e.MintEndpoint(n)
+		creds, user, err := e.MintEndpoint(tAddr(n))
 		if err != nil {
 			t.Fatal(err)
 		}
-		out := mustRun(t, bin, adminEnv, "admin", "provision", n, "--user", user, "--account", e.Account,
+		out := mustRun(t, bin, adminEnv, "admin", "provision", tTo(n), "--user", user, "--account", e.Account,
 			"--role", "tester-"+n, "--host", "standalone")
-		if !strings.Contains(out, "provisioned "+n) {
+		if !strings.Contains(out, "provisioned "+tTo(n)) {
 			t.Fatalf("provision %s: %s", n, out)
 		}
 		m := map[string]string{"MASH_NAME": n, "MASH_CREDS": creds}
@@ -127,8 +127,8 @@ func TestStandaloneOnlyNATS(t *testing.T) {
 		assertToolsAbsent(t, envs[n])
 	}
 
-	out := mustRun(t, bin, envs["alpha"], "send", "beta", "hello", "from", "alpha")
-	if !strings.Contains(out, "sent #1 from alpha to beta") {
+	out := mustRun(t, bin, envs["alpha"], "send", tTo("beta"), "hello", "from", "alpha")
+	if !strings.Contains(out, "sent #1 from o.dev.alpha to o.dev.beta") {
 		t.Fatalf("send: %s", out)
 	}
 	inbox := mustRun(t, bin, envs["beta"], "inbox")
@@ -148,8 +148,8 @@ func TestStandaloneOnlyNATS(t *testing.T) {
 	}
 
 	// The reply round trip: beta answers, alpha reads it, verified.
-	out = mustRun(t, bin, envs["beta"], "send", "alpha", "reply", "from", "beta")
-	if !strings.Contains(out, "sent #1 from beta to alpha") {
+	out = mustRun(t, bin, envs["beta"], "send", tTo("alpha"), "reply", "from", "beta")
+	if !strings.Contains(out, "sent #1 from o.dev.beta to o.dev.alpha") {
 		t.Fatalf("reply send: %s", out)
 	}
 	read = mustRun(t, bin, envs["alpha"], "read", "1")
@@ -164,13 +164,13 @@ func TestStandaloneEnvOnlyConfig(t *testing.T) {
 	e := testenv.Start(t)
 	adminEnv := scrubbedEnv(t, map[string]string{"MASH_URL": e.URL, "MASH_OWNER": e.Owner, "MASH_ADMIN_CREDS": e.AdminCreds, "MASH_INSECURE_LOOPBACK": "1"})
 	mustRun(t, bin, adminEnv, "admin", "init")
-	creds, user, err := e.MintEndpoint("solo")
+	creds, user, err := e.MintEndpoint(tAddr("solo"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	mustRun(t, bin, adminEnv, "admin", "provision", "solo", "--user", user, "--account", e.Account)
+	mustRun(t, bin, adminEnv, "admin", "provision", tTo("solo"), "--user", user, "--account", e.Account)
 
-	env := scrubbedEnv(t, map[string]string{"MASH_URL": e.URL, "MASH_OWNER": e.Owner, "MASH_NAME": "solo", "MASH_CREDS": creds})
+	env := scrubbedEnv(t, map[string]string{"MASH_URL": e.URL, "MASH_OWNER": e.Owner, "MASH_GROUP": testGroup, "MASH_NAME": "solo", "MASH_CREDS": creds})
 	assertToolsAbsent(t, env)
 	for _, kv := range env {
 		if v, ok := strings.CutPrefix(kv, "HOME="); ok {
@@ -179,7 +179,7 @@ func TestStandaloneEnvOnlyConfig(t *testing.T) {
 			}
 		}
 	}
-	if out := mustRun(t, bin, env, "send", "solo", "note", "to", "self"); !strings.Contains(out, "sent #1 from solo to solo") {
+	if out := mustRun(t, bin, env, "send", tTo("solo"), "note", "to", "self"); !strings.Contains(out, "sent #1 from o.dev.solo to o.dev.solo") {
 		t.Fatalf("send: %s", out)
 	}
 	if out := mustRun(t, bin, env, "who"); !strings.Contains(out, "solo") {
@@ -266,7 +266,7 @@ func hasForeignIn(s string, extra []string) bool {
 			}
 		}
 	}
-	return strings.Contains(s, "herdr")
+	return false
 }
 
 func TestForbiddenWordsHelpers(t *testing.T) {

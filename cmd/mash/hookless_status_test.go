@@ -30,7 +30,7 @@ func hooklessWorld(t *testing.T, grace time.Duration) (*world, *session) {
 func sendAndWaitSpooled(t *testing.T, w *world, body string) spool.Entry {
 	t.Helper()
 	sp := spoolFor(w, "a")
-	if out, code := w.cli(t, "b", "send", "a", body); code != 0 {
+	if out, code := w.cli(t, "b", "send", tTo("a"), body); code != 0 {
 		t.Fatalf("send: %s", out)
 	}
 	var e []spool.Entry

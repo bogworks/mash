@@ -48,7 +48,7 @@ func TestSettleDoesNotRingAnUrgentMessageTheHookJustDrained(t *testing.T) {
 	ctx := context.Background()
 	const fyi = 5
 	for i := 1; i <= fyi; i++ {
-		if _, err := b.SendWith(ctx, "a", "fyi "+strconv.Itoa(i), SendOptions{Kind: kind.FYI}); err != nil {
+		if _, err := b.SendWith(ctx, tdot("a"), "fyi "+strconv.Itoa(i), SendOptions{Kind: kind.FYI}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -57,7 +57,7 @@ func TestSettleDoesNotRingAnUrgentMessageTheHookJustDrained(t *testing.T) {
 	if got := ev.all(); len(got) != 0 {
 		t.Fatalf("%d wakes for fyi mail alone, want none: %q", len(got), got)
 	}
-	seq, err := b.SendWith(ctx, "a", "the build is red", SendOptions{Kind: kind.Task, Urgent: true})
+	seq, err := b.SendWith(ctx, tdot("a"), "the build is red", SendOptions{Kind: kind.Task, Urgent: true})
 	if err != nil {
 		t.Fatal(err)
 	}

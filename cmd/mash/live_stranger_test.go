@@ -549,7 +549,7 @@ func (sc *lsScenario) identity(w *world, name string, extra map[string]string) m
 	src := w.env[name]
 	ls.addFileSecrets(src["MASH_CREDS"])
 	ls.addSecret(src["MASH_CREDS"], src["MASH_URL"], src["MASH_OWNER"], filepath.Dir(src["MASH_CREDS"]))
-	out := map[string]string{"MASH_NAME": name, "MASH_URL": src["MASH_URL"], "MASH_OWNER": src["MASH_OWNER"],
+	out := map[string]string{"MASH_NAME": name, "MASH_GROUP": testGroup, "MASH_URL": src["MASH_URL"], "MASH_OWNER": src["MASH_OWNER"],
 		"MASH_CREDS": src["MASH_CREDS"], "MASH_SPOOL_FROM_START": "1", "XDG_STATE_HOME": sc.state}
 	for k, v := range extra {
 		out[k] = v
@@ -797,7 +797,7 @@ func (sc *lsScenario) run(env map[string]string, extraArgs []string, prompt stri
 
 func lsSend(t *testing.T, w *world, id, marker string) {
 	t.Helper()
-	out, code := w.cli(t, "b", "send", "a", "--kind", "task", marker)
+	out, code := w.cli(t, "b", "send", tTo("a"), "--kind", "task", marker)
 	if code != 0 {
 		t.Fatalf("send %s: %s", marker, out)
 	}
@@ -911,7 +911,7 @@ func TestLiveStrangerL3MinimalEnvironment(t *testing.T) {
 	m := lsMarker("L3")
 	lsSend(t, w, id, m)
 	env2 := sc.env(sc.mashPath(), true, sc.identity(w, "a", map[string]string{"MASH_HOOK_TRACE": "1"}))
-	sp := spool.Spool{Dir: spool.Dir(filepath.Join(sc.state, "mash"), w.env["a"]["MASH_OWNER"], "a")}
+	sp := spool.Spool{Dir: spool.Dir(filepath.Join(sc.state, "mash"), w.env["a"]["MASH_OWNER"], tAddr("a").Flat())}
 	var owner string
 	prompt2 := "Run the shell command `sleep 8`, then reply with one line listing every token in this session starting with MARK-L3 (look in any mash mail context too), and nothing else."
 	seen := false

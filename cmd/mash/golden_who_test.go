@@ -1,4 +1,4 @@
-// Characterisation tests (plan 2b, Phase 0): these pin today's identifiers and validity for legacy identities; a change here is a change to a legacy identifier and needs its own decision.
+// Characterisation tests: these pin the who --json schema; a change here is a change to a published contract and needs its own decision.
 
 package main
 
@@ -11,23 +11,26 @@ import (
 )
 
 // The who --json contract (ADR 0049): every field, in order, for a fully populated record with a live lease,
-// and the smallest legacy record.
+// and the smallest record.
 func TestGoldenWhoJSONShape(t *testing.T) {
-	const n48 = "abcdefghijklmnopqrstuvwxyz0123456789abcdefghijkl"
 	full := endpoint.Presence{
 		Record: store.Record{
-			Name: n48, Owner: n48, Role: "r", Host: "h", Note: "n",
+			Owner: "own", Group: "grp", Instance: "ins", Agent: "claude-code", Role: "r", Host: "h", Note: "n",
 			Description: "d", Caps: []string{"c1", "c2"}, Labels: map[string]string{"b": "2", "a": "1"},
 		},
 		Online:   true,
 		LastSeen: time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC),
 	}
-	legacy := endpoint.Presence{Record: store.Record{Name: "a", Owner: "o"}}
-	live := map[string]endpoint.LeaseInfo{n48: {Host: "lh", Version: "1.0"}}
+	small := endpoint.Presence{Record: store.Record{Owner: "o", Group: "g", Instance: "a"}}
+	live := map[string]endpoint.LeaseInfo{"own_grp_ins": {Host: "lh", Version: "1.0"}}
 	const want = `[
   {
-    "name": "abcdefghijklmnopqrstuvwxyz0123456789abcdefghijkl",
-    "owner": "abcdefghijklmnopqrstuvwxyz0123456789abcdefghijkl",
+    "name": "own_grp_ins",
+    "identity": "own.grp.ins",
+    "owner": "own",
+    "group": "grp",
+    "instance": "ins",
+    "agent": "claude-code",
     "online": true,
     "last_seen": "2026-11-01T12:00:00Z",
     "role": "r",
@@ -48,12 +51,15 @@ func TestGoldenWhoJSONShape(t *testing.T) {
     }
   },
   {
-    "name": "a",
+    "name": "o_g_a",
+    "identity": "o.g.a",
     "owner": "o",
+    "group": "g",
+    "instance": "a",
     "online": false
   }
 ]`
-	if got := whoJSON([]endpoint.Presence{full, legacy}, true, live); got != want {
+	if got := whoJSON([]endpoint.Presence{full, small}, true, live); got != want {
 		t.Errorf("who --json --long:\n%s", got)
 	}
 	if got := whoJSON(nil, false, nil); got != "[]" {

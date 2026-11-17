@@ -92,22 +92,6 @@ func (h *LockHandle) Check(ctx context.Context) error { return h.l.check(ctx) }
 // Release releases the lock.
 func (h *LockHandle) Release() { h.l.release(context.Background()) }
 
-// AdmissionLockName is the pseudo-name of the directory-wide admission lock.
-const AdmissionLockName = admissionLockName
-
-// SetAfterAdmissionLock installs a hook that runs once Provision holds the admission lock; it returns the previous one.
-func SetAfterAdmissionLock(f func()) (prev func()) {
-	prev, afterAdmissionLock = afterAdmissionLock, f
-	return
-}
-
-// SetAfterDirectoryGet installs a hook that runs before each per-record directory read of admission; it returns the
-// previous one.
-func SetAfterDirectoryGet(f func(key string)) (prev func(key string)) {
-	prev, afterDirectoryGet = afterDirectoryGet, f
-	return
-}
-
 // SetIssuedStatusFault installs a hook whose error replaces the issue bucket's status read in IssuedHistoryByKey; it
 // returns the previous one.
 func SetIssuedStatusFault(f func() error) (prev func() error) {

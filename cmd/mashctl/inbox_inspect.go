@@ -13,10 +13,11 @@ import (
 	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/ctl"
+	"github.com/bogworks/mash/internal/sap"
 )
 
-const inboxUsage = "usage: mashctl inbox inspect <address> [--json] [--legacy] [--from SEQ] [--to SEQ] [--limit N]\n" +
-	"  address: an endpoint name, a flat key agent_owner_name, or agent.owner.name\n"
+const inboxUsage = "usage: mashctl inbox inspect <owner.group.instance> [--json] [--from SEQ] [--to SEQ] [--limit N]\n" +
+	"  address: owner.group.instance, or its flat key owner_group_instance\n"
 
 // exitInspectIncomplete is the exit code of an inspection that could not complete (no server, no config); 1 is a
 // refusal (an unknown endpoint, no inbox stream) and 2 is usage, as for audit.
@@ -28,7 +29,6 @@ var inspectStateText = map[string]string{admin.StateAckUnsure: "delivered, ack n
 type inboxInspectOpts struct {
 	address  string
 	json     bool
-	legacy   bool
 	from, to uint64
 	limit    int
 }
@@ -47,15 +47,11 @@ func parseInboxInspectArgs(args []string) (inboxInspectOpts, error) {
 		a := args[i]
 		name, inline, hasInline := strings.Cut(a, "=")
 		switch name {
-		case "--json", "--legacy":
+		case "--json":
 			if hasInline {
 				return o, fmt.Errorf("unexpected %s", config.RejectedArg(a))
 			}
-			if name == "--json" {
-				o.json = true
-			} else {
-				o.legacy = true
-			}
+			o.json = true
 		case "--from", "--to", "--limit":
 			v, err := flagValue(args, &i, name, inline, hasInline)
 			if err != nil {
@@ -141,15 +137,18 @@ type inspectMessageJSON struct {
 // inspectReport is what `mashctl inbox inspect --json` prints.
 type inspectReport struct {
 	Schema   string               `json:"schema"`
-	Address  string               `json:"address"`
+	Address  string               `json:"address"` // owner.group.instance
+	Owner    string               `json:"owner"`
+	Group    string               `json:"group"`
+	Instance string               `json:"instance"`
 	Stream   inspectStreamJSON    `json:"stream"`
 	Consumer *inspectConsumerJSON `json:"consumer"`
 	Messages []inspectMessageJSON `json:"messages"`
 	Limits   []string             `json:"limits"`
 }
 
-func buildInspectReport(address string, in *admin.InboxInspection) inspectReport {
-	r := inspectReport{Schema: admin.InspectSchema, Address: address,
+func buildInspectReport(addr sap.Address, in *admin.InboxInspection) inspectReport {
+	r := inspectReport{Schema: admin.InspectSchema, Address: addr.String(), Owner: addr.Owner, Group: addr.Group, Instance: addr.Instance,
 		Stream:   inspectStreamJSON{Name: in.Stream.Name, FirstSeq: in.Stream.FirstSeq, LastSeq: in.Stream.LastSeq, Messages: in.Stream.Messages, Bytes: in.Stream.Bytes},
 		Messages: []inspectMessageJSON{}, Limits: append([]string{}, admin.InspectLimits...)}
 	if c := in.Consumer; c != nil {
@@ -207,9 +206,13 @@ func runInboxInspect(args []string, env func(string) string, lookup config.Looku
 		fmt.Fprintf(stderr, "mashctl: inbox inspect: %v\n%s", err, inboxUsage)
 		return 2
 	}
-	// like audit: it changes nothing and acts as no endpoint, so a set agent_token is no reason to refuse it
+	addr, err := parseAddr(o.address)
+	if err != nil {
+		fmt.Fprintf(stderr, "mashctl: inbox inspect: %v\n%s", err, inboxUsage)
+		return 2
+	}
 	cfg, err := loadConfig(env, lookup)
-	if err != nil && !errors.Is(err, errAgentTokenSet) {
+	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return exitInspectIncomplete
 	}
@@ -227,15 +230,14 @@ func runInboxInspect(args []string, env func(string) string, lookup config.Looku
 		}
 		return exitInspectIncomplete
 	}
-	t, err := adm.ResolveInbox(ctx, o.address, o.legacy)
+	if _, err := adm.ResolveInbox(ctx, addr.String()); err != nil {
+		return fail(err)
+	}
+	in, err := adm.InspectInbox(ctx, addr, admin.InspectOptions{From: o.from, To: o.to, Limit: o.limit})
 	if err != nil {
 		return fail(err)
 	}
-	in, err := adm.InspectInbox(ctx, t.Flat, admin.InspectOptions{From: o.from, To: o.to, Limit: o.limit})
-	if err != nil {
-		return fail(err)
-	}
-	rep := buildInspectReport(o.address, in)
+	rep := buildInspectReport(addr, in)
 	if o.json {
 		b, err := json.MarshalIndent(rep, "", "  ")
 		if err != nil {

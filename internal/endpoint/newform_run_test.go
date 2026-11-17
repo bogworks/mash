@@ -17,43 +17,35 @@ import (
 	"github.com/bogworks/mash/internal/store"
 )
 
-// newFormOpts says what addNewForm leaves out or breaks, for the fail-closed tests.
-type newFormOpts struct {
-	noRecord   bool   // no directory record
-	badRecord  bool   // a record under the key that is not a valid new-form record
-	credsOf    string // mint the user with the permissions of this other identity's flat key (a wrong-endpoint credential)
-	legacyName string // mint the user as the legacy endpoint of this name (the bare-name credential)
+// addOpts says what addAt leaves out or breaks, for the fail-closed tests.
+type addOpts struct {
+	noRecord  bool   // no directory record
+	badRecord bool   // a record under the key that is not a valid record of this release
+	credsOf   string // mint the user with the permissions of this other address's flat key (a wrong-endpoint credential)
 }
 
-// addNewForm provisions a three-token endpoint directly (there is no mashctl for it yet): the inbox stream
-// inbox-<flat> filtered on the identity's own mail subject with production limits, the durable consumer, a user named
-// by the flat key with the default new-form permissions, and the directory record under the flat key.
-func (f *fixture) addNewForm(t *testing.T, agent, owner, name string, o newFormOpts) sap.EndpointIdentity {
+// addAt provisions the endpoint at (the fixture's owner, group, name) directly, so a test can leave out or break one
+// part: the inbox stream inbox-<flat> filtered on its own mail subject with production limits, the durable consumer, a
+// user named by the flat key with the default permissions, and the directory record under the flat key.
+func (f *fixture) addAt(t *testing.T, group, name string, o addOpts) sap.Address {
 	t.Helper()
-	id, err := sap.New(agent, owner, name)
+	a, err := sap.NewAddress(f.e.Owner, group, name)
 	if err != nil {
 		t.Fatal(err)
 	}
-	permsFor := id
+	permsFor := a
 	if o.credsOf != "" {
-		if permsFor, err = sap.FromFlat(o.credsOf); err != nil {
+		if permsFor, err = sap.AddressFromFlat(o.credsOf); err != nil {
 			t.Fatal(err)
 		}
 	}
-	perms, err := admin.NewFormPermissions(permsFor, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if o.legacyName != "" {
-		perms = admin.Permissions(f.e.Owner, o.legacyName)
-	}
-	creds, user := f.e.MintRaw(t, id.Flat(), perms)
+	creds, user := f.e.MintRaw(t, a.Flat(), *admin.Permissions(permsFor))
 	ctx := context.Background()
 	js, err := jetstream.New(f.e.Conn(t, f.e.AdminCreds))
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := js.CreateStream(ctx, store.InboxConfigIdentity(id, store.DefaultLimits()))
+	s, err := js.CreateStream(ctx, store.InboxConfigFor(a, store.DefaultLimits()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,30 +57,30 @@ func (f *fixture) addNewForm(t *testing.T, agent, owner, name string, o newFormO
 		if err != nil {
 			t.Fatal(err)
 		}
-		rec := store.Record{Name: id.Name, Owner: id.Owner, Agent: sap.AgentName, AgentToken: id.Agent,
-			Account: f.e.Account, User: user, MailSubject: id.Subjects().Mail, Created: time.Now().UTC().Format(time.RFC3339)}
+		rec := store.Record{Owner: a.Owner, Group: a.Group, Instance: a.Instance, Agent: sap.AgentName,
+			Account: f.e.Account, User: user, MailSubject: a.Subjects().Mail, Created: time.Now().UTC().Format(time.RFC3339)}
 		if o.badRecord {
-			rec.MailSubject = "agents.mail.cc.somewhere.else"
+			rec.MailSubject = "agents.mail.somewhere.else.entirely"
 		}
 		val, _ := json.Marshal(rec)
-		if _, err := kv.Create(ctx, id.Flat(), val); err != nil {
+		if _, err := kv.Create(ctx, a.Flat(), val); err != nil {
 			t.Fatal(err)
 		}
 	}
-	f.creds[id.Flat()], f.users[id.Flat()] = creds, user
-	return id
+	f.creds[a.Flat()], f.users[a.Flat()] = creds, user
+	return a
 }
 
-func (f *fixture) cfgNF(id sap.EndpointIdentity) config.Config {
-	return config.Config{URL: f.e.URL, Owner: id.Owner, Name: id.Name, AgentToken: id.Agent, Creds: f.creds[id.Flat()],
+func (f *fixture) cfgAt(a sap.Address) config.Config {
+	return config.Config{URL: f.e.URL, Owner: a.Owner, Group: a.Group, Name: a.Instance, Creds: f.creds[a.Flat()],
 		SettleMS: 50, BatchMsgs: 10, BatchBytes: 16384}
 }
 
-// serveNF runs the new-form endpoint id with its lease, its SAP service and its mail loop until the test ends.
-func (f *fixture) serveNF(t *testing.T, id sap.EndpointIdentity, onPrompt func(*Endpoint, PromptEvent)) (*Endpoint, *events) {
+// serveAt runs the endpoint a with its lease, its SAP service and its mail loop until the test ends.
+func (f *fixture) serveAt(t *testing.T, a sap.Address, onPrompt func(*Endpoint, PromptEvent)) (*Endpoint, *events) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	ep, err := Open(ctx, f.cfgNF(id))
+	ep, err := Open(ctx, f.cfgAt(a))
 	if err != nil {
 		cancel()
 		t.Fatal(err)
@@ -104,9 +96,9 @@ func (f *fixture) serveNF(t *testing.T, id sap.EndpointIdentity, onPrompt func(*
 	return ep, ev
 }
 
-func (f *fixture) clientNF(t *testing.T, id sap.EndpointIdentity) *Endpoint {
+func (f *fixture) clientAt(t *testing.T, a sap.Address) *Endpoint {
 	t.Helper()
-	ep, err := OpenClient(context.Background(), f.cfgNF(id))
+	ep, err := OpenClient(context.Background(), f.cfgAt(a))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,16 +129,16 @@ func ackFloor(t *testing.T, f *fixture, stream string, seq uint64) {
 	}
 }
 
-// (1) Two three-token endpoints of one agent and owner exchange mail both ways: delivered, [verified], from the sender's
-// key, read and inbox work, acknowledged, and both show online in who.
-func TestNewFormMailBothWays(t *testing.T) {
+// (1) Two endpoints of one owner and group exchange mail both ways: delivered, [verified], from the sender's key, read
+// and inbox work, acknowledged, and both show online in who.
+func TestAddressMailBothWays(t *testing.T) {
 	f := newFixture(t)
-	ida := f.addNewForm(t, "ag", "team", "a", newFormOpts{})
-	idb := f.addNewForm(t, "ag", "team", "b", newFormOpts{})
-	a, aev := f.serveNF(t, ida, noPrompt)
-	b, bev := f.serveNF(t, idb, noPrompt)
-	if a.Key() != "ag_team_a" || b.Key() != "ag_team_b" || a.Name() != "a" {
-		t.Fatalf("keys %q %q name %q", a.Key(), b.Key(), a.Name())
+	ida := f.addAt(t, "team", "a", addOpts{})
+	idb := f.addAt(t, "team", "b", addOpts{})
+	a, aev := f.serveAt(t, ida, noPrompt)
+	b, bev := f.serveAt(t, idb, noPrompt)
+	if a.Key() != ida.Flat() || b.Key() != idb.Flat() || a.Name() != "a" || a.Display() != ida.String() {
+		t.Fatalf("keys %q %q name %q display %q", a.Key(), b.Key(), a.Name(), a.Display())
 	}
 	ctx := context.Background()
 	seq, err := b.Send(ctx, a.Key(), "hello a", 0)
@@ -154,59 +146,59 @@ func TestNewFormMailBothWays(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := aev.waitFor(t, 1, 5*time.Second)
-	if !strings.Contains(got[0], "from ag.team.b [verified]") || !strings.Contains(got[0], "hello a") {
+	if !strings.Contains(got[0], "from "+idb.String()+" [verified]") || !strings.Contains(got[0], "hello a") {
 		t.Fatalf("event: %s", got[0])
 	}
 	m, err := a.Read(ctx, seq)
-	if err != nil || m.From != "ag_team_b" || m.Trust != sap.TrustVerified || string(m.Body) != "hello a" {
+	if err != nil || m.From != idb.Flat() || m.Trust != sap.TrustVerified || string(m.Body) != "hello a" {
 		t.Fatalf("read: %+v %v", m, err)
 	}
-	if ms, err := a.Inbox(ctx, 20); err != nil || len(ms) != 1 || ms[0].Seq != seq || ms[0].From != "ag_team_b" {
+	if ms, err := a.Inbox(ctx, 20); err != nil || len(ms) != 1 || ms[0].Seq != seq || ms[0].From != idb.Flat() {
 		t.Fatalf("inbox: %+v %v", ms, err)
 	}
-	ackFloor(t, f, "inbox-ag_team_a", seq)
+	ackFloor(t, f, ida.InboxStream(), seq)
 
 	rseq, err := a.Send(ctx, b.Key(), "hello b", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	got = bev.waitFor(t, 1, 5*time.Second)
-	if !strings.Contains(got[0], "from ag.team.a [verified]") || !strings.Contains(got[0], "hello b") {
+	if !strings.Contains(got[0], "from "+ida.String()+" [verified]") || !strings.Contains(got[0], "hello b") {
 		t.Fatalf("event: %s", got[0])
 	}
-	if m, err := b.Read(ctx, rseq); err != nil || m.From != "ag_team_a" || m.Trust != sap.TrustVerified {
+	if m, err := b.Read(ctx, rseq); err != nil || m.From != ida.Flat() || m.Trust != sap.TrustVerified {
 		t.Fatalf("read: %+v %v", m, err)
 	}
-	ackFloor(t, f, "inbox-ag_team_b", rseq)
+	ackFloor(t, f, idb.InboxStream(), rseq)
 
 	// A one-shot client (the CLI's shape) reads the same inbox and sends under the same key.
-	c := f.clientNF(t, ida)
-	if ms, err := c.Inbox(ctx, 20); err != nil || len(ms) != 1 || ms[0].From != "ag_team_b" || ms[0].Trust != sap.TrustVerified {
+	c := f.clientAt(t, ida)
+	if ms, err := c.Inbox(ctx, 20); err != nil || len(ms) != 1 || ms[0].From != idb.Flat() || ms[0].Trust != sap.TrustVerified {
 		t.Fatalf("client inbox: %+v %v", ms, err)
 	}
 	if _, err := c.Send(ctx, b.Key(), "from the shell", 0); err != nil {
 		t.Fatal(err)
 	}
 	bev.waitFor(t, 2, 5*time.Second)
-	if ms, _ := b.Inbox(ctx, 20); len(ms) != 2 || ms[1].From != "ag_team_a" || ms[1].Trust != sap.TrustVerified {
+	if ms, _ := b.Inbox(ctx, 20); len(ms) != 2 || ms[1].From != ida.Flat() || ms[1].Trust != sap.TrustVerified {
 		t.Fatalf("shell send: %+v", ms)
 	}
 
-	// who: both are online, keyed by their flat identity.
+	// who: both are online, keyed by their flat key.
 	ps, err := a.WhoFresh(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	online := map[string]bool{}
 	for _, p := range ps {
-		online[p.Record.KeyOrName()] = p.Online
+		online[flatOf(p.Record)] = p.Online
 	}
-	if len(ps) != 2 || !online["ag_team_a"] || !online["ag_team_b"] {
+	if len(ps) != 2 || !online[ida.Flat()] || !online[idb.Flat()] {
 		t.Fatalf("who: %+v", online)
 	}
 
-	// The heartbeat goes out on the identity's own subject, signed as its key.
-	sub, err := b.Conn().SubscribeSync("agents.hb.ag.team.a")
+	// The heartbeat goes out on the address's own subject, signed as its key.
+	sub, err := b.Conn().SubscribeSync("agents.hb." + ida.String())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,74 +211,72 @@ func TestNewFormMailBothWays(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if h, tr := sap.VerifyStored(hm.Header.Get(sap.HeaderName), hm.Subject, hm.Data); h.Name != "ag_team_a" || tr == sap.TrustForged || tr == sap.TrustMalformed {
+	if h, tr := sap.VerifyStored(hm.Header.Get(sap.HeaderName), hm.Subject, hm.Data); h.Name != ida.Flat() || tr == sap.TrustForged || tr == sap.TrustMalformed {
 		t.Fatalf("heartbeat header %+v %v", h, tr)
 	}
 }
 
-// A recipient may be written as a legacy name, the flat key or the canonical agent.owner.name (ADR 0081); anything
-// else is refused with an error that names the canonical form, not looked up.
-func TestNewFormRecipientMayBeCanonicalOrFlat(t *testing.T) {
+// A recipient may be written dotted or as the flat key; anything else, a bare instance included, is refused with an
+// error that names owner.group.instance, not looked up.
+func TestRecipientMayBeDottedOrFlat(t *testing.T) {
 	f := newFixture(t)
-	ida := f.addNewForm(t, "ag", "team", "a", newFormOpts{})
-	idb := f.addNewForm(t, "ag", "team", "b", newFormOpts{})
-	a := f.clientNF(t, ida)
-	if idb.Flat() != "ag_team_b" || idb.String() != "ag.team.b" {
+	ida := f.addAt(t, "team", "a", addOpts{})
+	idb := f.addAt(t, "team", "b", addOpts{})
+	a := f.clientAt(t, ida)
+	if idb.Flat() != f.e.Owner+"_team_b" || idb.String() != f.e.Owner+".team.b" {
 		t.Fatalf("setup %q %q", idb.Flat(), idb.String())
 	}
-	for _, to := range []string{"ag.team.b", "ag_team_b"} {
+	for _, to := range []string{idb.String(), idb.Flat()} {
 		if _, err := a.Send(context.Background(), to, "hi", 0); err != nil {
 			t.Fatalf("send to %q: %v", to, err)
 		}
 	}
-	for _, bad := range []string{"ag.team", "ag.team.b.c", "ag.team_b", "cc.team.b", "Ag.team.b"} {
+	for _, bad := range []string{"b", f.e.Owner + ".team", f.e.Owner + ".team.b.c", f.e.Owner + ".team_b", "O.team.b", "team.b"} {
 		_, err := a.Send(context.Background(), bad, "hi", 0)
-		if err == nil || !strings.Contains(err.Error(), "not an endpoint key") || !strings.Contains(err.Error(), "agent.owner.name") ||
-			strings.Contains(err.Error(), "as who shows it (agent_owner_name)") {
+		if err == nil || !strings.Contains(err.Error(), "is not an endpoint address") || !strings.Contains(err.Error(), "owner.group.instance") {
 			t.Fatalf("send to %q: %v", bad, err)
 		}
 	}
-	if _, err := a.Send(context.Background(), "ag_team_nobody", "hi", 0); err == nil || !strings.Contains(err.Error(), "no endpoint named") {
+	if _, err := a.Send(context.Background(), f.e.Owner+"_team_nobody", "hi", 0); err == nil || !strings.Contains(err.Error(), "no endpoint named") {
 		t.Fatalf("send to an unknown key: %v", err)
 	}
-	if _, err := a.Send(context.Background(), "ag.team.nobody", "hi", 0); err == nil || !strings.Contains(err.Error(), "no endpoint named") {
-		t.Fatalf("send to an unknown canonical form: %v", err)
+	if _, err := a.Send(context.Background(), f.e.Owner+".team.nobody", "hi", 0); err == nil || !strings.Contains(err.Error(), "no endpoint named") {
+		t.Fatalf("send to an unknown dotted address: %v", err)
 	}
 }
 
-// (2) A three-token endpoint and a legacy one with the same name token (and a different owner) share one directory and
-// never see each other's mail.
-func TestNewFormAndLegacyCoexistWithoutCrosstalk(t *testing.T) {
-	f := newFixture(t, "a", "b") // legacy, owner f.e.Owner
-	nfa := f.addNewForm(t, "ag", "team", "a", newFormOpts{})
-	nfb := f.addNewForm(t, "ag", "team", "b", newFormOpts{})
-	_, lev := f.run(t, "a")
-	_, nev := f.serveNF(t, nfa, noPrompt)
-	lb := f.client(t, "b")
-	nb := f.clientNF(t, nfb)
+// (2) Two endpoints with the same instance token in two groups share one directory and never see each other's mail.
+func TestSameInstanceInTwoGroupsWithoutCrosstalk(t *testing.T) {
+	f := newFixture(t, "a", "b") // group dev
+	ta := f.addAt(t, "team", "a", addOpts{})
+	tb := f.addAt(t, "team", "b", addOpts{})
+	_, dev := f.run(t, "a")
+	_, tev := f.serveAt(t, ta, noPrompt)
+	db := f.client(t, "b")
+	tbc := f.clientAt(t, tb)
 	ctx := context.Background()
-	if _, err := lb.Send(ctx, "a", "to legacy a", 0); err != nil {
+	if _, err := db.Send(ctx, tdot("a"), "to dev a", 0); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := nb.Send(ctx, "ag_team_a", "to new-form a", 0); err != nil {
+	if _, err := tbc.Send(ctx, ta.Flat(), "to team a", 0); err != nil {
 		t.Fatal(err)
 	}
-	lg := lev.waitFor(t, 1, 5*time.Second)
-	ng := nev.waitFor(t, 1, 5*time.Second)
+	dg := dev.waitFor(t, 1, 5*time.Second)
+	tg := tev.waitFor(t, 1, 5*time.Second)
 	time.Sleep(300 * time.Millisecond)
-	lg, ng = lev.all(), nev.all()
-	if len(lg) != 1 || !strings.Contains(lg[0], "to legacy a") || !strings.Contains(lg[0], "from b [verified]") || strings.Contains(lg[0], "new-form") {
-		t.Fatalf("legacy a got %q", lg)
+	dg, tg = dev.all(), tev.all()
+	if len(dg) != 1 || !strings.Contains(dg[0], "to dev a") || !strings.Contains(dg[0], "from "+tdot("b")+" [verified]") || strings.Contains(dg[0], "to team") {
+		t.Fatalf("dev a got %q", dg)
 	}
-	if len(ng) != 1 || !strings.Contains(ng[0], "to new-form a") || !strings.Contains(ng[0], "from ag.team.b [verified]") || strings.Contains(ng[0], "legacy") {
-		t.Fatalf("new-form a got %q", ng)
+	if len(tg) != 1 || !strings.Contains(tg[0], "to team a") || !strings.Contains(tg[0], "from "+tb.String()+" [verified]") || strings.Contains(tg[0], "to dev") {
+		t.Fatalf("team a got %q", tg)
 	}
 	// Each stream holds exactly its own message.
 	js, err := jetstream.New(f.e.Conn(t, f.e.AdminCreds))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for stream, want := range map[string]uint64{"inbox-a": 1, "inbox-ag_team_a": 1, "inbox-b": 0, "inbox-ag_team_b": 0} {
+	for stream, want := range map[string]uint64{taddr("a").InboxStream(): 1, ta.InboxStream(): 1, taddr("b").InboxStream(): 0, tb.InboxStream(): 0} {
 		s, err := js.Stream(ctx, stream)
 		if err != nil {
 			t.Fatal(err)
@@ -295,39 +285,40 @@ func TestNewFormAndLegacyCoexistWithoutCrosstalk(t *testing.T) {
 			t.Fatalf("%s: %+v %v", stream, info, err)
 		}
 	}
-	// Both are in the directory, the new-form one under its flat key.
-	ps := nb.Who()
+	// All four are in the directory, under their flat keys.
 	var keys []string
-	for _, p := range ps {
-		keys = append(keys, p.Record.KeyOrName())
+	for _, p := range tbc.Who() {
+		keys = append(keys, flatOf(p.Record))
 	}
-	if strings.Join(keys, ",") != "a,ag_team_a,ag_team_b,b" {
-		t.Fatalf("directory keys %v", keys)
+	if want := strings.Join([]string{tkey("a"), tkey("b"), ta.Flat(), tb.Flat()}, ","); strings.Join(keys, ",") != want {
+		t.Fatalf("directory keys %v, want %s", keys, want)
 	}
 }
 
-// (3) A prompt round trip between two three-token endpoints.
-func TestNewFormPromptRoundTrip(t *testing.T) {
+// (3) A prompt round trip between two endpoints.
+func TestPromptRoundTrip(t *testing.T) {
 	f := newFixture(t)
-	ida := f.addNewForm(t, "ag", "team", "a", newFormOpts{})
-	idb := f.addNewForm(t, "ag", "team", "b", newFormOpts{})
+	ida := f.addAt(t, "team", "a", addOpts{})
+	idb := f.addAt(t, "team", "b", addOpts{})
 	got := make(chan PromptEvent, 1)
-	f.serveNF(t, ida, func(ep *Endpoint, p PromptEvent) {
+	f.serveAt(t, ida, func(ep *Endpoint, p PromptEvent) {
 		got <- p
 		_ = ep.Reply(p.RequestID, "pong ", false)
 		_ = ep.Reply(p.RequestID, "from a", true)
 	})
-	b := f.clientNF(t, idb)
+	b := f.clientAt(t, idb)
 	ctx := context.Background()
-	subj, err := DiscoverRecipient(ctx, b.Conn(), "team", "ag_team_a")
-	if err != nil || subj != "agents.prompt.ag.team.a" {
+	subj, err := DiscoverRecipient(ctx, b.Conn(), ida.Flat())
+	if err != nil || subj != ida.Subjects().Prompt {
 		t.Fatalf("discover: %q %v", subj, err)
 	}
-	if s2, err := DiscoverRecipient(ctx, b.Conn(), "team", "ag.team.a"); err != nil || s2 != subj {
-		t.Fatalf("the canonical form names the same endpoint: %q %v", s2, err)
+	if s2, err := DiscoverRecipient(ctx, b.Conn(), ida.String()); err != nil || s2 != subj {
+		t.Fatalf("the dotted form names the same endpoint: %q %v", s2, err)
 	}
-	if _, err := DiscoverRecipient(ctx, b.Conn(), "team", "ag.team"); err == nil || !strings.Contains(err.Error(), "not an endpoint key") {
-		t.Fatalf("not three tokens: %v", err)
+	for _, bad := range []string{"a", f.e.Owner + ".team"} {
+		if _, err := DiscoverRecipient(ctx, b.Conn(), bad); err == nil || !strings.Contains(err.Error(), "owner.group.instance") {
+			t.Fatalf("%q: %v", bad, err)
+		}
 	}
 	var out bytes.Buffer
 	if err := Prompt(ctx, b.Conn(), b.Identity(), b.Key(), subj, "ping", &out); err != nil {
@@ -336,33 +327,31 @@ func TestNewFormPromptRoundTrip(t *testing.T) {
 	if out.String() != "pong from a" {
 		t.Fatalf("reply %q", out.String())
 	}
-	if p := <-got; p.From != "ag_team_b" || p.Trust != sap.TrustVerified || p.Text != "ping" {
+	if p := <-got; p.From != idb.Flat() || p.Trust != sap.TrustVerified || p.Text != "ping" {
 		t.Fatalf("event %+v", p)
 	}
 }
 
 // (4) The open fails closed, with a clear error, when the endpoint's own directory record is absent or not a usable
-// record, and when the credentials are for another endpoint (not for the flat key).
-func TestNewFormOpenFailsClosed(t *testing.T) {
+// record, and when the credentials are for another endpoint.
+func TestOpenFailsClosed(t *testing.T) {
 	f := newFixture(t, "a")
-	noRec := f.addNewForm(t, "ag", "team", "norec", newFormOpts{noRecord: true})
-	bad := f.addNewForm(t, "ag", "team", "bad", newFormOpts{badRecord: true})
-	other := f.addNewForm(t, "ag", "team", "other", newFormOpts{})
-	wrong := f.addNewForm(t, "ag", "team", "wrong", newFormOpts{credsOf: other.Flat()})
-	bare := f.addNewForm(t, "ag", "team", "bare", newFormOpts{legacyName: "a"})
+	noRec := f.addAt(t, "team", "norec", addOpts{noRecord: true})
+	bad := f.addAt(t, "team", "bad", addOpts{badRecord: true})
+	other := f.addAt(t, "team", "other", addOpts{})
+	wrong := f.addAt(t, "team", "wrong", addOpts{credsOf: other.Flat()})
 	for _, tc := range []struct {
 		name string
-		id   sap.EndpointIdentity
+		id   sap.Address
 		want string
 	}{
 		{"no record", noRec, "is not provisioned"},
 		{"unusable record", bad, "is not provisioned"},
-		{"credentials of another new-form endpoint", wrong, "do not match endpoint ag.team.wrong"},
-		{"credentials of the bare name", bare, "do not match endpoint ag.team.bare"},
+		{"credentials of another endpoint", wrong, "do not match endpoint " + wrong.String()},
 	} {
 		for opener, open := range map[string]func() error{
-			"Open":       func() error { _, err := Open(context.Background(), f.cfgNF(tc.id)); return err },
-			"OpenClient": func() error { _, err := OpenClient(context.Background(), f.cfgNF(tc.id)); return err },
+			"Open":       func() error { _, err := Open(context.Background(), f.cfgAt(tc.id)); return err },
+			"OpenClient": func() error { _, err := OpenClient(context.Background(), f.cfgAt(tc.id)); return err },
 		} {
 			if err := open(); err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("%s via %s: %v (want %q)", tc.name, opener, err, tc.want)
@@ -371,41 +360,41 @@ func TestNewFormOpenFailsClosed(t *testing.T) {
 	}
 }
 
-// (5) The lease is keyed by the flat identity: a second open of the same three-token identity conflicts, and a legacy
-// endpoint with the same name token is not affected.
-func TestNewFormLeaseConflictAndLegacyIndependence(t *testing.T) {
+// (5) The lease is keyed by the flat key: a second open of the same address conflicts, and an endpoint with the same
+// instance token in another group is not affected.
+func TestLeaseConflictAndGroupIndependence(t *testing.T) {
 	f := newFixture(t, "a")
-	ida := f.addNewForm(t, "ag", "team", "a", newFormOpts{})
+	ida := f.addAt(t, "team", "a", addOpts{})
 	ctx := context.Background()
-	first, err := Open(ctx, f.cfgNF(ida))
+	first, err := Open(ctx, f.cfgAt(ida))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(first.Close)
-	_, err = Open(ctx, f.cfgNF(ida))
+	_, err = Open(ctx, f.cfgAt(ida))
 	var held *LeaseHeldError
-	if !errors.As(err, &held) || held.Name != "ag_team_a" {
+	if !errors.As(err, &held) || held.Name != ida.Flat() {
 		t.Fatalf("second open: %v", err)
 	}
-	legacy, err := Open(ctx, f.cfg("a"))
+	other, err := Open(ctx, f.cfg("a"))
 	if err != nil {
-		t.Fatalf("legacy open with the same name token: %v", err)
+		t.Fatalf("open with the same instance token in another group: %v", err)
 	}
-	t.Cleanup(legacy.Close)
+	t.Cleanup(other.Close)
 	// The two leases are two keys.
 	js, _ := jetstream.New(f.e.Conn(t, f.e.AdminCreds))
 	kv, err := js.KeyValue(ctx, store.LeaseBucket)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, k := range []string{"a", "ag_team_a"} {
+	for _, k := range []string{tkey("a"), ida.Flat()} {
 		if _, err := kv.Get(ctx, k); err != nil {
 			t.Fatalf("lease %s: %v", k, err)
 		}
 	}
-	// Closing the new-form holder frees only its own key: the same identity can open again.
+	// Closing the holder frees only its own key: the same address can open again.
 	first.Close()
-	again, err := Open(ctx, f.cfgNF(ida))
+	again, err := Open(ctx, f.cfgAt(ida))
 	if err != nil {
 		t.Fatalf("reopen after close: %v", err)
 	}

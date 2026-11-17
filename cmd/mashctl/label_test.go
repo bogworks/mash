@@ -10,7 +10,7 @@ import (
 )
 
 // recordLabels reads a directory record's labels from the server.
-func (h *addEnv) recordLabels(name string) (map[string]string, bool) {
+func (h *fleetEnv) recordLabels(name string) (map[string]string, bool) {
 	h.t.Helper()
 	adm, err := admin.New(h.e.Conn(h.t, h.e.AdminCreds), h.e.Owner)
 	if err != nil {
@@ -20,10 +20,8 @@ func (h *addEnv) recordLabels(name string) (map[string]string, bool) {
 	if err != nil {
 		h.t.Fatal(err)
 	}
-	for _, r := range recs {
-		if r.Name == name {
-			return r.Labels, true
-		}
+	if r, ok := findRecord(recs, ad(name)); ok {
+		return r.Labels, true
 	}
 	return nil, false
 }
@@ -33,25 +31,25 @@ func TestLabelSetsAndClearsRecordLabels(t *testing.T) {
 	h := newFleetEnv(t)
 	h.provisionDeclared("b")
 	filesBefore := dirNames(t, h.dir)
-	out, errb, code := h.run("label", "b", "team=x", "kind=tool")
-	if code != 0 || out != "labeled b: kind=tool team=x\n" {
+	out, errb, code := h.run("label", "o.g.b", "team=x", "kind=tool")
+	if code != 0 || out != "labeled o.g.b: kind=tool team=x\n" {
 		t.Fatalf("label: %d %q %q", code, out, errb)
 	}
 	if l, _ := h.recordLabels("b"); l["team"] != "x" || l["kind"] != "tool" || len(l) != 2 {
 		t.Errorf("record labels %v", l)
 	}
 	// changing a value, setting another and the same value again (no change)
-	if out, _, code = h.run("label", "b", "team=y", "kind=tool"); code != 0 || out != "labeled b: kind=tool team=y\n" {
+	if out, _, code = h.run("label", "o.g.b", "team=y", "kind=tool"); code != 0 || out != "labeled o.g.b: kind=tool team=y\n" {
 		t.Fatalf("relabel: %d %q", code, out)
 	}
 	if l, _ := h.recordLabels("b"); l["team"] != "y" || l["kind"] != "tool" {
 		t.Errorf("record labels %v", l)
 	}
-	if out, _, code = h.run("label", "b", "team=y"); code != 0 || out != "b: nothing to change\n" {
+	if out, _, code = h.run("label", "o.g.b", "team=y"); code != 0 || out != "o.g.b: nothing to change\n" {
 		t.Fatalf("same value: %d %q", code, out)
 	}
-	out, errb, code = h.run("unlabel", "b", "team", "kind")
-	if code != 0 || out != "unlabeled b: -kind -team\n" || errb != "" {
+	out, errb, code = h.run("unlabel", "o.g.b", "team", "kind")
+	if code != 0 || out != "unlabeled o.g.b: -kind -team\n" || errb != "" {
 		t.Fatalf("unlabel: %d %q %q", code, out, errb)
 	}
 	if l, _ := h.recordLabels("b"); len(l) != 0 {
@@ -66,8 +64,8 @@ func TestLabelSetsAndClearsRecordLabels(t *testing.T) {
 func TestLabelDryRunWritesNothing(t *testing.T) {
 	h := newFleetEnv(t)
 	h.provisionDeclared("b")
-	out, errb, code := h.run("label", "b", "net=green", "--dry-run")
-	if code != 0 || !strings.Contains(out, "dry run: would have labeled b") {
+	out, errb, code := h.run("label", "o.g.b", "net=green", "--dry-run")
+	if code != 0 || !strings.Contains(out, "dry run: would have labeled o.g.b") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
 	if l, _ := h.recordLabels("b"); len(l) != 0 {
@@ -79,7 +77,7 @@ func TestLabelDryRunWritesNothing(t *testing.T) {
 func TestUnlabelUnsetWarns(t *testing.T) {
 	h := newFleetEnv(t)
 	h.provisionDeclared("b")
-	out, errb, code := h.run("unlabel", "b", "team")
+	out, errb, code := h.run("unlabel", "o.g.b", "team")
 	if code != 0 || !strings.Contains(errb, "label team is not set") || !strings.Contains(out, "nothing to change") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
@@ -93,17 +91,18 @@ func TestLabelRefusals(t *testing.T) {
 		code int
 		want string
 	}{
-		{[]string{"label", "nobody", "k=v"}, 1, "no directory record"},
-		{[]string{"unlabel", "nobody", "k"}, 1, "no directory record"},
-		{[]string{"label", "a", "Bad=v"}, 2, "label key"},
-		{[]string{"label", "a", "k"}, 2, "k=v"},
-		{[]string{"label", "a", "k="}, 2, "k=v"},
-		{[]string{"label", "a", "k=1", "k=2"}, 2, "twice"},
-		{[]string{"unlabel", "a", "team=x"}, 2, "keys"},
-		{[]string{"label", "a"}, 2, "NAME and at least one"},
-		{[]string{"label", "a", "k=v", "--bogus"}, 2, "unknown option"},
-		{[]string{"label", "a", "k=v", "--sync"}, 2, "unknown option"},
-		{[]string{"label", "a", "k=" + strings.Repeat("v", 300)}, 1, "label k"},
+		{[]string{"label", "o.g.nobody", "k=v"}, 1, "no directory record"},
+		{[]string{"unlabel", "o.g.nobody", "k"}, 1, "no directory record"},
+		{[]string{"label", "o.g.a", "Bad=v"}, 2, "label key"},
+		{[]string{"label", "o.g.a", "k"}, 2, "k=v"},
+		{[]string{"label", "o.g.a", "k="}, 2, "k=v"},
+		{[]string{"label", "o.g.a", "k=1", "k=2"}, 2, "twice"},
+		{[]string{"unlabel", "o.g.a", "team=x"}, 2, "keys"},
+		{[]string{"label", "o.g.a"}, 2, "an address (owner.group.instance) and at least one"},
+		{[]string{"label", "o.g.a", "k=v", "--bogus"}, 2, "unknown option"},
+		{[]string{"label", "o.g.a", "k=v", "--sync"}, 2, "unknown option"},
+		{[]string{"label", "a", "k=v"}, 2, "give owner.group.instance"},
+		{[]string{"label", "o.g.a", "k=" + strings.Repeat("v", 300)}, 1, "label k"},
 	} {
 		_, errb, code := h.run(c.args...)
 		if code != c.code || !strings.Contains(errb, c.want) {
@@ -121,7 +120,7 @@ func TestLabelConsequences(t *testing.T) {
 	h := newFleetEnv(t)
 	h.provisionDeclared("a")
 	h.provisionDeclared("b")
-	for _, args := range [][]string{{"label", "b", "kind=tool"}, {"label", "a", "net=blue"}, {"unlabel", "b", "kind"}} {
+	for _, args := range [][]string{{"label", "o.g.b", "kind=tool"}, {"label", "o.g.a", "net=blue"}, {"unlabel", "o.g.b", "kind"}} {
 		out, errb, code := h.run(args...)
 		if code != 0 || strings.Contains(out, "needed") || strings.Contains(out, "set-zone") || strings.Contains(out, "reissue") {
 			t.Fatalf("%v: %d %q %q", args, code, out, errb)
@@ -133,7 +132,7 @@ func TestLabelConsequences(t *testing.T) {
 func TestLabelWithoutAServer(t *testing.T) {
 	h := newFleetEnv(t)
 	h.env["MASH_URL"] = "nats://127.0.0.1:1" // nothing listens
-	out, errb, code := h.run("label", "b", "note=hello")
+	out, errb, code := h.run("label", "o.g.b", "note=hello")
 	if code != 1 || !strings.Contains(errb, "no servers available") || !strings.Contains(errb, "check MASH_URL and that at least one listed server is up") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}

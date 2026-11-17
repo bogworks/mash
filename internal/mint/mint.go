@@ -12,6 +12,7 @@ import (
 	"github.com/nats-io/nkeys"
 
 	"github.com/bogworks/mash/internal/admin"
+	"github.com/bogworks/mash/internal/sap"
 )
 
 // Keys is the key store Mint signs with; *ctlkeys.Authority satisfies it.
@@ -28,10 +29,10 @@ type Minted struct {
 	Creds      []byte // the creds file contents (JWT and seed): a secret
 }
 
-// Mint issues the user JWT of endpoint name of owner, signed by the account signing key with the permission set of
-// admin.Permissions(owner, name). With userSeed nil it makes a fresh user key; with a user seed (a re-issue) it keeps
+// Mint issues the user JWT of the endpoint at addr, named by its flat key, signed by the account signing key with the
+// permission set of admin.Permissions(addr). With userSeed nil it makes a fresh user key; with a user seed (a re-issue) it keeps
 // that user key.
-func Mint(keys Keys, owner, name string, userSeed []byte) (*Minted, error) {
+func Mint(keys Keys, addr sap.Address, userSeed []byte) (*Minted, error) {
 	reissue := userSeed != nil
 	acctKP, acctPub, err := keys.Account()
 	if err != nil {
@@ -68,9 +69,10 @@ func Mint(keys Keys, owner, name string, userSeed []byte) (*Minted, error) {
 	defer clear(seed)
 
 	uc := jwt.NewUserClaims(userPub)
+	name := addr.String()
 	uc.Name = name
 	// The account's own key signs, so the user carries its permissions in the JWT itself.
-	uc.Permissions = admin.Permissions(owner, name)
+	uc.Permissions = *admin.Permissions(addr)
 	token, err := uc.Encode(acctKP)
 	if err != nil {
 		return nil, fmt.Errorf("mint: sign: %w", err)

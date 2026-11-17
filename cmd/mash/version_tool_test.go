@@ -66,7 +66,7 @@ func checkVersionLines(t *testing.T, w *world, out, plugin string) {
 	if !strings.HasPrefix(lines[1], plugin) {
 		t.Errorf("plugin line %q, want prefix %q", lines[1], plugin)
 	}
-	if want := "endpoint a (owner " + w.e.Owner + ")"; lines[2] != want {
+	if want := "endpoint " + tTo("a") + " (owner " + w.e.Owner + ")"; lines[2] != want {
 		t.Errorf("endpoint line %q, want %q", lines[2], want)
 	}
 }

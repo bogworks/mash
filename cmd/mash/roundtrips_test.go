@@ -47,14 +47,14 @@ func newRTTWorld(t *testing.T, n int) *rttWorld {
 	}
 	for i := len(names) + 1; i <= n; i++ {
 		name := fmt.Sprintf("dir-%d", i)
-		_, user, err := w.e.MintEndpoint(name)
+		_, user, err := w.e.MintEndpoint(tAddr(name))
 		if err != nil {
 			t.Fatal(err)
 		}
-		rec := store.Record{Name: name, Owner: w.e.Owner, Agent: sap.AgentName, AgentToken: sap.AgentToken, Account: w.e.Account,
-			User: user, MailSubject: sap.For(w.e.Owner, name).Mail, Created: time.Now().UTC().Format(time.RFC3339)}
+		rec := store.Record{Owner: w.e.Owner, Group: testGroup, Instance: name, Agent: sap.AgentName, Account: w.e.Account,
+			User: user, MailSubject: tAddr(name).Subjects().Mail, Created: time.Now().UTC().Format(time.RFC3339)}
 		v, _ := json.Marshal(rec)
-		if _, err := dir.Create(ctx, name, v); err != nil {
+		if _, err := dir.Create(ctx, tAddr(name).Flat(), v); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -77,7 +77,7 @@ func newRTTWorld(t *testing.T, n int) *rttWorld {
 		t.Fatal(err)
 	}
 	for i := 1; i <= 25; i++ {
-		if _, err := sender.Send(ctx, "me", fmt.Sprintf("message %d from sender", i), 0); err != nil {
+		if _, err := sender.Send(ctx, tTo("me"), fmt.Sprintf("message %d from sender", i), 0); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -146,12 +146,12 @@ func TestCLIRoundTrips(t *testing.T) {
 				t.Fatalf("read: %q", out)
 			}
 		}},
-		{"send", "", []string{"send", "peer1", "hello", "there"}, func(t *testing.T, out string) {
-			if !strings.HasPrefix(out, "sent #") || !strings.Contains(out, "from me to peer1") {
+		{"send", "", []string{"send", tTo("peer1"), "hello", "there"}, func(t *testing.T, out string) {
+			if !strings.HasPrefix(out, "sent #") || !strings.Contains(out, "from o.dev.me to o.dev.peer1") {
 				t.Fatalf("send: %q", out)
 			}
 		}},
-		{"send-launch-token", rttToken, []string{"send", "peer1", "hello", "there"}, func(t *testing.T, out string) {
+		{"send-launch-token", rttToken, []string{"send", tTo("peer1"), "hello", "there"}, func(t *testing.T, out string) {
 			if !strings.HasPrefix(out, "sent #") || strings.Contains(out, "MASH_LAUNCH_TOKEN") {
 				t.Fatalf("send with the launch token: %q", out)
 			}

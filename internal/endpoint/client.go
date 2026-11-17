@@ -14,7 +14,6 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
-	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/store"
 )
@@ -269,7 +268,7 @@ func (e *Endpoint) init(ctx context.Context, opts ClientOptions) error {
 
 	want := []string{e.key}
 	for _, n := range opts.Records {
-		n = sap.KeyOf(n) // a recipient may be written canonical (ADR 0081)
+		n = sap.KeyOf(n) // a recipient may be written dotted, owner.group.instance
 		// A key the name rule refuses is not read: lookup of it reports the rule, not the record.
 		if n != e.key && validDirectoryKey(n) && e.checkKey(pointLookup, n) == nil {
 			want = append(want, n)
@@ -289,7 +288,7 @@ func (e *Endpoint) init(ctx context.Context, opts ClientOptions) error {
 	}
 	if opts.Inbox {
 		tasks = append(tasks, func() {
-			e.pre.inbox, e.pre.inboxErr = js.Stream(ctx, sap.InboxStream(e.key))
+			e.pre.inbox, e.pre.inboxErr = js.Stream(ctx, e.ident.InboxStream())
 			e.pre.inboxSet = true
 		})
 	}
@@ -323,18 +322,6 @@ func (e *Endpoint) init(ctx context.Context, opts ClientOptions) error {
 			e.cfg.Creds, e.id.User, e.Display(), self.User)
 	}
 	e.self = self
-	// The compatibility alias is an identity the record answers to: the rule applies to it too. The alias is data of
-	// the endpoint's own record, not an identity the caller requested (that one is checked before the directory is
-	// read), so it can be checked only once the record is read: an absent record has no alias and reports "not
-	// provisioned" above. Nothing else is read for the caller past this point (the rest of the directory, the
-	// consumers), so a refused alias stops the start before any of it.
-	if alias, ok, err := self.AliasIdentity(); err == nil && ok {
-		if err := checkRule(e.cfg.NameRule, pointAlias, alias); err != nil {
-			return err
-		}
-	}
-	// The endpoint's own mail subject is the one its record says (five tokens).
-	e.subj.Mail = self.MailSubject
 	if opts.FullDirectory {
 		if keysErr != nil {
 			return fmt.Errorf("mash: reading the directory: %w", keysErr)
@@ -354,11 +341,8 @@ func (e *Endpoint) init(ctx context.Context, opts ClientOptions) error {
 				delete(got, k) // read in the first wave, but no longer (or never) in the directory
 			}
 		}
-		// A record that could not be read is missing from Who(). A start that takes a lease must not go on: that record
-		// may be a zoned one, which refuseZoned (ADR 0091) could then not see. One-shot readers tolerate a partial load.
-		if failed := e.installDirectory(got); opts.holding && failed > 0 {
-			return fmt.Errorf("mash: directory: %d of %d records could not be read; refusing to start because a zoned record may be among them (ADR 0091); try again", failed, len(got))
-		}
+		// A record that could not be read is missing from Who() until the poll reads it again.
+		e.installDirectory(got)
 		return nil
 	}
 	e.learn(got)
@@ -537,13 +521,9 @@ func (e *Endpoint) awaitPresence(ctx context.Context, p *presenceProbe) error {
 	return nil
 }
 
-// validDirectoryKey reports whether name can be a directory key: a legacy endpoint
-// name, or the flat form (agent_owner_name) of a new-form identity. The canonical agent.owner.name is an input form
-// only: callers turn it into the flat key first (sap.KeyOf).
+// validDirectoryKey reports whether name can be a directory key: the flat form (owner_group_instance) of an address. The
+// dotted owner.group.instance is an input form only: callers turn it into the flat key first (sap.KeyOf).
 func validDirectoryKey(name string) bool {
-	if config.ValidName(name) {
-		return true
-	}
-	_, err := sap.FromFlat(name)
+	_, err := sap.AddressFromFlat(name)
 	return err == nil
 }

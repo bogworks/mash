@@ -40,7 +40,7 @@ func (f *fixture) runSpooled(t *testing.T, name string) (*Endpoint, *events, spo
 // unread is the inbox consumer's not-yet-acked count, what a launcher's delivery health reads.
 func unread(t *testing.T, ep *Endpoint) uint64 {
 	t.Helper()
-	c, err := ep.js.Consumer(context.Background(), sap.InboxStream(ep.cfg.Name), store.Consumer)
+	c, err := ep.js.Consumer(context.Background(), ep.ident.InboxStream(), store.Consumer)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,14 +79,14 @@ func waiting(t *testing.T, sp spool.Spool) []spool.Entry {
 	return w
 }
 
-// The switch-over (lead's condition 1): before any hook has run, mail is the channel's, in full, and nothing is
+// The switch-over (condition 1): before any hook has run, mail is the channel's, in full, and nothing is
 // spooled; once a hook runs, mail is spooled and held unacked, with no channel event while the session's hooks are
 // running, and only what was spooled is shown by the hook. The ack waits for the hook (condition 3).
 func TestHookSwitchOverShowsEachMessageOnce(t *testing.T) {
 	f := newFixture(t, "a", "b")
 	a, ev, sp := f.runSpooled(t, "a")
 	b := f.client(t, "b")
-	if _, err := b.Send(context.Background(), "a", "before the hook", 0); err != nil {
+	if _, err := b.Send(context.Background(), tdot("a"), "before the hook", 0); err != nil {
 		t.Fatal(err)
 	}
 	if got := ev.waitFor(t, 1, 5*time.Second); !strings.Contains(got[0], "> before the hook") {
@@ -100,12 +100,12 @@ func TestHookSwitchOverShowsEachMessageOnce(t *testing.T) {
 	if err := sp.Touch(); err != nil { // a hook runs
 		t.Fatal(err)
 	}
-	if _, err := b.Send(context.Background(), "a", "after the hook", 0); err != nil {
+	if _, err := b.Send(context.Background(), tdot("a"), "after the hook", 0); err != nil {
 		t.Fatal(err)
 	}
 	until(t, "spooled", func() bool { return len(waiting(t, sp)) == 1 })
 	w := waiting(t, sp)
-	if len(w) != 1 || string(w[0].Body) != "after the hook" || w[0].From != "b" || w[0].Trust != string(sap.TrustVerified) {
+	if len(w) != 1 || string(w[0].Body) != "after the hook" || w[0].From != tkey("b") || w[0].Trust != string(sap.TrustVerified) {
 		t.Fatalf("spool %+v", w)
 	}
 	time.Sleep(3 * SpoolCheck)
@@ -139,7 +139,7 @@ func TestHookIdleWake(t *testing.T) {
 	b := f.client(t, "b")
 	send := func(text string) {
 		t.Helper()
-		if _, err := b.SendWith(context.Background(), "a", text, SendOptions{Kind: kind.Question}); err != nil {
+		if _, err := b.SendWith(context.Background(), tdot("a"), text, SendOptions{Kind: kind.Question}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -162,7 +162,7 @@ func TestHookIdleWake(t *testing.T) {
 
 	send("one")
 	send("two")
-	if got := ev.waitFor(t, 1, 5*time.Second); got[0] != "2 messages from b (question)" {
+	if got := ev.waitFor(t, 1, 5*time.Second); got[0] != "2 messages from "+tdot("b")+" (question)" {
 		t.Fatalf("the wake %q", got)
 	}
 	send("three") // the same idle spell: no second wake within the first backoff (2x IdleWake)
@@ -173,7 +173,7 @@ func TestHookIdleWake(t *testing.T) {
 	drain() // the woken session's hook shows the mail
 	until(t, "drained and acked", func() bool { return len(waiting(t, sp)) == 0 })
 	send("four") // the next idle spell
-	if got := ev.waitFor(t, 2, 5*time.Second); got[1] != "1 message from b (question)" {
+	if got := ev.waitFor(t, 2, 5*time.Second); got[1] != "1 message from "+tdot("b")+" (question)" {
 		t.Fatalf("the next wake %q", got)
 	}
 }
@@ -185,7 +185,7 @@ func TestHookRedeliveryOfADrainedMessageIsAcked(t *testing.T) {
 	if err := sp.Touch(); err != nil {
 		t.Fatal(err)
 	}
-	seq, err := f.client(t, "b").Send(context.Background(), "a", "once", 0)
+	seq, err := f.client(t, "b").Send(context.Background(), tdot("a"), "once", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,7 +210,7 @@ func TestHookFullSpoolLeavesMailInTheInbox(t *testing.T) {
 	if err := sp.Touch(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.client(t, "b").Send(context.Background(), "a", "too big for the spool", 0); err != nil {
+	if _, err := f.client(t, "b").Send(context.Background(), tdot("a"), "too big for the spool", 0); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(time.Second)
@@ -425,7 +425,7 @@ func TestHookReprovisionDoesNotAckNewMailByAnOldTombstone(t *testing.T) {
 	if err := sp.Touch(); err != nil {
 		t.Fatal(err)
 	}
-	if seq, err := f.client(t, "b").Send(context.Background(), "a", "new mail", 0); err != nil || seq != 1 {
+	if seq, err := f.client(t, "b").Send(context.Background(), tdot("a"), "new mail", 0); err != nil || seq != 1 {
 		t.Fatalf("send: seq %d, %v", seq, err)
 	}
 	until(t, "the message is spooled", func() bool { return len(waiting(t, sp)) == 1 })
@@ -443,7 +443,7 @@ func TestHookTombstoneSuppressesChannelDeliveryBeforeAHookRuns(t *testing.T) {
 	if err := os.WriteFile(sp.Dir+"/drained/1", nil, 0o600); err != nil { // the first message of a new inbox is #1
 		t.Fatal(err)
 	}
-	if seq, err := f.client(t, "b").Send(context.Background(), "a", "already shown", 0); err != nil || seq != 1 {
+	if seq, err := f.client(t, "b").Send(context.Background(), tdot("a"), "already shown", 0); err != nil || seq != 1 {
 		t.Fatalf("send: seq %d, %v", seq, err)
 	}
 	until(t, "the shown message is acked", func() bool { return unread(t, a) == 0 })
@@ -461,7 +461,7 @@ func TestHookUrgentWakesAtOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := f.client(t, "b")
-	if _, err := b.SendWith(context.Background(), "a", "can wait", SendOptions{Kind: kind.FYI}); err != nil {
+	if _, err := b.SendWith(context.Background(), tdot("a"), "can wait", SendOptions{Kind: kind.FYI}); err != nil {
 		t.Fatal(err)
 	}
 	until(t, "spooled", func() bool { return len(waiting(t, sp)) == 1 })
@@ -469,10 +469,10 @@ func TestHookUrgentWakesAtOnce(t *testing.T) {
 	if got := ev.all(); len(got) != 0 {
 		t.Fatalf("normal mail woke the session before IdleWake: %q", got)
 	}
-	if _, err := b.SendWith(context.Background(), "a", "cannot wait", SendOptions{Urgent: true}); err != nil {
+	if _, err := b.SendWith(context.Background(), tdot("a"), "cannot wait", SendOptions{Urgent: true}); err != nil {
 		t.Fatal(err)
 	}
-	if got := ev.waitFor(t, 1, 5*time.Second); got[0] != "urgent, 2 messages from b (fyi, task)" {
+	if got := ev.waitFor(t, 1, 5*time.Second); got[0] != "urgent, 2 messages from "+tdot("b")+" (fyi, task)" {
 		t.Fatalf("the urgent wake %q", got)
 	}
 	if w := waiting(t, sp); len(w) != 2 || !w[1].Urgent || w[0].Urgent {
@@ -484,11 +484,11 @@ func TestHookUrgentWakesAtOnce(t *testing.T) {
 	}
 
 	// A claimed sender (an unverified header) with an urgent mark: spooled as normal mail, no wake.
-	subj := sap.For(f.e.Owner, "a").Mail
-	nc := f.e.ConnAs(t, f.creds["b"], "b")
+	subj := taddr("a").Subjects().Mail
+	nc := f.e.ConnAs(t, f.creds["b"], tkey("b"))
 	id := identity(t, f.creds["b"])
 	// A claimed header (no signature over the message), with an urgent mark that b's key did sign for it.
-	claimed := sap.SenderHeader{V: 1, Account: id.Account, User: id.User, Name: "b"}
+	claimed := sap.SenderHeader{V: 1, Account: id.Account, User: id.User, Name: tkey("b")}
 	u, err := id.SignUrgent(claimed)
 	if err != nil || !sap.VerifyUrgent(u, claimed) {
 		t.Fatalf("mark: %v", err)
@@ -520,7 +520,7 @@ func TestHookUrgentLeftHeldRingsAgain(t *testing.T) {
 	}
 	b := f.client(t, "b")
 	for _, body := range []string{"one", "two"} {
-		if _, err := b.SendWith(context.Background(), "a", body, SendOptions{Urgent: true}); err != nil {
+		if _, err := b.SendWith(context.Background(), tdot("a"), body, SendOptions{Urgent: true}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -564,7 +564,7 @@ func TestFailpointBeforeAckHoldsTheAck(t *testing.T) {
 	if err := sp.Touch(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := b.Send(ctx, "a", "held", 0); err != nil {
+	if _, err := b.Send(ctx, tdot("a"), "held", 0); err != nil {
 		t.Fatal(err)
 	}
 	until(t, "the message is spooled", func() bool { return len(waiting(t, sp)) == 1 })
@@ -606,7 +606,7 @@ func TestSetSpoolBindsToTheRecreatedStream(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	old, err := ajs.Stream(ctx, sap.InboxStream("a"))
+	old, err := ajs.Stream(ctx, taddr("a").InboxStream())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -614,17 +614,17 @@ func TestSetSpoolBindsToTheRecreatedStream(t *testing.T) {
 	// What e.inbox would hand back: the stream as an earlier read saw it.
 	ep.pre.inbox, ep.pre.inboxSet = old, true
 	time.Sleep(10 * time.Millisecond)
-	if err := ajs.DeleteStream(ctx, sap.InboxStream("a")); err != nil {
+	if err := ajs.DeleteStream(ctx, taddr("a").InboxStream()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ajs.CreateStream(ctx, store.InboxConfig(f.e.Owner, "a")); err != nil {
+	if _, err := ajs.CreateStream(ctx, store.InboxConfig(taddr("a"))); err != nil {
 		t.Fatal(err)
 	}
-	fresh, err := ajs.Stream(ctx, sap.InboxStream("a"))
+	fresh, err := ajs.Stream(ctx, taddr("a").InboxStream())
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := sap.InboxStream("a") + "@" + fresh.CachedInfo().Created.UTC().Format(time.RFC3339Nano)
+	want := taddr("a").InboxStream() + "@" + fresh.CachedInfo().Created.UTC().Format(time.RFC3339Nano)
 	if !fresh.CachedInfo().Created.After(oldCreated) {
 		t.Fatal("the stream was not recreated")
 	}

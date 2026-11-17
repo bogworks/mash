@@ -8,23 +8,23 @@ import (
 	"testing"
 
 	"github.com/bogworks/mash/internal/admin"
+	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/testenv"
 )
 
-// Configuration A of the naming plan's negative tests (steps 1.10 and 3.1), at the `mash` entry points of REQ-016:
-// a rule file that refuses the agent tokens cc and mash. These tests are permanent; none may be skipped or weakened.
-// The full table, for every entry point, is in internal/endpoint/namerule_configa_test.go: this file proves that the
-// mash commands (start through serve and the CLI, send, prompt, provision through `mash admin`) reach it through the
-// same configuration, and that a deployment which requires a rule and supplies none does not start.
+// Configuration A of the naming plan's negative tests, at the `mash` entry points of REQ-016: a rule file that refuses
+// the group "retired" and the instance "mash". These tests are permanent; none may be skipped or weakened.
+// The full table, for every entry point, is in internal/endpoint: this file proves that the mash commands (start
+// through serve and the CLI, send, prompt, provision through `mash admin`) reach it through the same configuration,
+// and that a deployment which requires a rule and supplies none does not start.
 //
-// Layers, as in the endpoint table: a bare legacy name is the identity (cc, owner, name) and is refused by the rule
-// no-cc; a three-token identity with agent mash by no-mash (it stands for the plain name inside a deployment); a
-// three-token identity with agent cc (flat or dotted spelling) by sap, which never builds it while the legacy form
-// exists, so the command says the key is not an endpoint key; an ordinary agent token is the allowed control.
+// Layers, as in the endpoint table: an address in the group retired is refused by the rule no-retired, one whose
+// instance is mash by no-mash, a bare name is not an address at all (the endpoint says which forms it takes), and an
+// ordinary address is the allowed control.
 const (
 	configAMashRule = `{"version":1,"rules":[` +
-		`{"id":"no-cc","match":{"agent":{"is":"cc"}},"message":"the agent token cc is retired"},` +
-		`{"id":"no-mash","match":{"agent":{"is":"mash"}},"message":"the agent token mash is reserved"}]}`
+		`{"id":"no-retired","match":{"group":{"is":"retired"}},"message":"the group retired is closed"},` +
+		`{"id":"no-mash","match":{"instance":{"is":"mash"}},"message":"the instance mash is reserved"}]}`
 	configAMashEmpty = `{"version":1,"rules":[]}`
 )
 
@@ -38,19 +38,20 @@ func configARuleFile(t *testing.T, dir, name, body string) string {
 }
 
 type configAMashWorld struct {
-	e                                  *testenv.Env
-	rule                               string
-	legacy, mashSender, control, peerE map[string]string // environments
+	e                                   *testenv.Env
+	rule                                string
+	retired, mashSender, control, peerE map[string]string // environments
 }
 
 func newConfigAMashWorld(t *testing.T) *configAMashWorld {
 	t.Helper()
-	w := newWorld(t, "a", "legacy")
+	w := newWorld(t, "a")
 	e := w.e
-	_, control := provisionNewForm(t, e, "claude", "acme", "me")
-	_, peer := provisionNewForm(t, e, "claude", "acme", "peer")
-	_, mashEnv := provisionNewForm(t, e, "mash", "acme", "me")
-	_, _ = provisionNewForm(t, e, "mash", "acme", "peer")
+	_, control := provisionNewForm(t, e, "acme", "team1", "me")
+	_, peer := provisionNewForm(t, e, "acme", "team1", "peer")
+	_, retired := provisionNewForm(t, e, "acme", "retired", "me")
+	_, mashEnv := provisionNewForm(t, e, "acme", "team1", "mash")
+	_, _ = provisionNewForm(t, e, "acme", "retired", "peer")
 	rule := configARuleFile(t, t.TempDir(), "name-rule.json", configAMashRule)
 	with := func(m map[string]string) map[string]string {
 		c := map[string]string{}
@@ -60,7 +61,7 @@ func newConfigAMashWorld(t *testing.T) *configAMashWorld {
 		c["MASH_NAME_RULE_FILE"] = rule
 		return c
 	}
-	return &configAMashWorld{e: e, rule: rule, legacy: with(w.env["a"]), mashSender: with(mashEnv), control: with(control), peerE: with(peer)}
+	return &configAMashWorld{e: e, rule: rule, retired: with(retired), mashSender: with(mashEnv), control: with(control), peerE: with(peer)}
 }
 
 func configARun(env map[string]string, args ...string) (string, int) {
@@ -78,11 +79,11 @@ func TestConfigAMashStart(t *testing.T) {
 		env  map[string]string
 		want string
 	}{
-		{"bare legacy name", w.legacy, "no-cc"},
-		{"three-token identity with agent mash", w.mashSender, "no-mash"},
-		{"control: ordinary agent token", w.control, ""},
+		{"group retired", w.retired, "no-retired"},
+		{"instance mash", w.mashSender, "no-mash"},
+		{"control: ordinary address", w.control, ""},
 	} {
-		for _, args := range [][]string{{"inbox"}, {"who"}, {"read", "1"}, {"send", "claude_acme_peer", "hi"}, {"prompt", "claude_acme_peer", "hi"}} {
+		for _, args := range [][]string{{"inbox"}, {"who"}, {"read", "1"}, {"send", "acme_team1_peer", "hi"}, {"prompt", "acme_team1_peer", "hi"}} {
 			t.Run(c.name+"/"+args[0], func(t *testing.T) {
 				out, code := configARun(c.env, args...)
 				if c.want == "" {
@@ -114,8 +115,8 @@ func TestConfigAMashServeStart(t *testing.T) {
 		env  map[string]string
 		want string
 	}{
-		{"bare legacy name", w.legacy, "no-cc"},
-		{"three-token identity with agent mash", w.mashSender, "no-mash"},
+		{"group retired", w.retired, "no-retired"},
+		{"instance mash", w.mashSender, "no-mash"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			s := startServe(t, c.env)
@@ -131,7 +132,7 @@ func TestConfigAMashServeStart(t *testing.T) {
 			}
 		})
 	}
-	t.Run("control: ordinary agent token", func(t *testing.T) {
+	t.Run("control: ordinary address", func(t *testing.T) {
 		s := startServe(t, w.control)
 		instr := s.initialize(t)["result"].(map[string]any)["instructions"].(string)
 		if strings.Contains(instr, "name rule") {
@@ -148,15 +149,15 @@ func TestConfigAMashServeStart(t *testing.T) {
 func TestConfigAMashSendAndPrompt(t *testing.T) {
 	w := newConfigAMashWorld(t)
 	forms := []struct {
-		name, key, want string // want: "no-cc", "no-mash", "sap" (not an endpoint key) or ""
+		name, key, want string // want: "no-retired", "no-mash", "addr" (not an endpoint address) or ""
 	}{
-		{"bare legacy name, no record", "gone", "no-cc"},
-		{"bare legacy name, record exists", "legacy", "no-cc"},
-		{"three-token flat key with agent cc", "cc_acme_gone", "sap"},
-		{"dotted display form with agent cc", "cc.acme.gone", "sap"},
-		{"three-token identity with agent mash, no record", "mash_acme_gone", "no-mash"},
-		{"three-token identity with agent mash, record exists", "mash_acme_peer", "no-mash"},
-		{"control: ordinary agent token", "claude_acme_peer", ""},
+		{"group retired, no record", "acme.retired.gone", "no-retired"},
+		{"group retired, flat key", "acme_retired_gone", "no-retired"},
+		{"group retired, record exists", "acme_retired_peer", "no-retired"},
+		{"instance mash, record exists", "acme_team1_mash", "no-mash"},
+		{"bare name, no record", "gone", "addr"},
+		{"bare name, record exists", "a", "addr"},
+		{"control: ordinary address", "acme_team1_peer", ""},
 	}
 	for _, verb := range []string{"send", "prompt"} {
 		for _, f := range forms {
@@ -166,8 +167,8 @@ func TestConfigAMashSendAndPrompt(t *testing.T) {
 			t.Run(verb+"/"+f.name, func(t *testing.T) {
 				out, code := configARun(w.control, verb, f.key, "hi")
 				switch f.want {
-				case "sap":
-					if code == 0 || strings.Contains(out, "name rule") || !strings.Contains(out, "is not an endpoint key") {
+				case "addr":
+					if code == 0 || strings.Contains(out, "name rule") || !strings.Contains(out, "is not an endpoint address") {
 						t.Fatalf("%d %s", code, out)
 					}
 				case "":
@@ -182,22 +183,18 @@ func TestConfigAMashSendAndPrompt(t *testing.T) {
 			})
 		}
 	}
-	// Nothing reached a refused recipient: the stream of mash_acme_peer holds no message.
-	if n := pendingOf(t, w.e, "inbox-mash_acme_peer"); n != 0 {
-		t.Errorf("a refused recipient has %d messages", n)
+	// Nothing reached a refused recipient: the streams of the refused addresses hold no message.
+	for _, k := range []string{"acme_team1_mash", "acme_retired_peer"} {
+		if n := pendingOf(t, w.e, "inbox-"+k); n != 0 {
+			t.Errorf("a refused recipient %s has %d messages", k, n)
+		}
 	}
-	if n := pendingOf(t, w.e, "inbox-legacy"); n != 0 {
-		t.Errorf("a refused legacy recipient has %d messages", n)
-	}
-	if n := pendingOf(t, w.e, "inbox-claude_acme_peer"); n != 1 {
+	if n := pendingOf(t, w.e, "inbox-acme_team1_peer"); n != 1 {
 		t.Errorf("the control recipient has %d messages, want 1", n)
 	}
 }
 
-// provision through `mash admin`: the same configuration, the rule first, nothing created. A three-token identity is
-// refused by mash admin itself (errAdminAgentToken, its fail-closed refusal) before the rule is reached, except the
-// three-token form of provision and deprovision (naming plan 1.6), which is refused for the unset setting or its
-// token, before the rule too.
+// provision through `mash admin`: the same configuration, the rule first, nothing created.
 func TestConfigAMashAdminProvision(t *testing.T) {
 	w := newConfigAMashWorld(t)
 	admEnv := func(extra map[string]string) map[string]string {
@@ -208,29 +205,28 @@ func TestConfigAMashAdminProvision(t *testing.T) {
 		}
 		return m
 	}
-	for _, name := range []string{"fresh", "legacy", "mash", "gone"} { // "legacy" exists
-		_, user := w.e.Mint(t, name)
-		out, code := configARun(admEnv(nil), "admin", "provision", name, "--user", user, "--account", w.e.Account)
-		if code == 0 || !strings.Contains(out, `name rule "no-cc"`) || !strings.Contains(out, "the agent token cc is retired") {
-			t.Errorf("admin provision %q: %d %s", name, code, out)
+	for _, c := range []struct{ addr, rule string }{
+		{w.e.Owner + ".retired.fresh", "no-retired"},
+		{w.e.Owner + ".dev.mash", "no-mash"},
+	} {
+		a, err := sap.ParseAddress(c.addr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, user := w.e.Mint(t, a)
+		out, code := configARun(admEnv(nil), "admin", "provision", c.addr, "--user", user, "--account", w.e.Account)
+		if code == 0 || !strings.Contains(out, `name rule "`+c.rule+`"`) {
+			t.Errorf("admin provision %q: %d %s", c.addr, code, out)
 		}
 		if strings.Contains(out, "already") {
 			t.Errorf("the directory was read before the rule: %s", out)
 		}
 	}
-	for _, name := range []string{"cc_acme_gone", "mash_acme_gone", "cc.acme.gone"} {
-		_, user := w.e.Mint(t, "x"+strings.NewReplacer("_", "", ".", "").Replace(name))
-		out, code := configARun(admEnv(nil), "admin", "provision", name, "--user", user, "--account", w.e.Account)
-		if code == 0 || strings.Contains(out, "name rule") || !(strings.Contains(out, "endpoint name") || strings.Contains(out, "agent_token setting") || strings.Contains(out, "legacy form's agent token")) {
-			t.Errorf("admin provision %q: %d %s", name, code, out)
-		}
-	}
-	for _, tok := range []string{"cc", "mash", "claude"} {
-		_, user := w.e.Mint(t, "fresh")
-		out, code := configARun(admEnv(map[string]string{"MASH_NAME": "fresh", "MASH_AGENT_TOKEN": tok}), "admin", "provision", "fresh", "--user", user, "--account", w.e.Account)
-		if code == 0 || !strings.Contains(out, errAdminAgentToken.Error()) {
-			t.Errorf("agent_token %q: %d %s", tok, code, out)
-		}
+	// A bare name is not an address: refused, and not by the rule.
+	_, user := w.e.Mint(t, tAddr("fresh"))
+	out, code := configARun(admEnv(nil), "admin", "provision", "fresh", "--user", user, "--account", w.e.Account)
+	if code == 0 || strings.Contains(out, "name rule") {
+		t.Errorf("admin provision of a bare name: %d %s", code, out)
 	}
 	adm, err := admin.New(w.e.Conn(t, w.e.AdminCreds), w.e.Owner)
 	if err != nil {
@@ -241,8 +237,8 @@ func TestConfigAMashAdminProvision(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, r := range recs {
-		if r.Name == "fresh" || r.Name == "mash" || r.Name == "gone" {
-			t.Errorf("a refused provision wrote the record %q", r.Name)
+		if r.Instance == "fresh" || r.Instance == "mash" && r.Owner == w.e.Owner {
+			t.Errorf("a refused provision wrote the record %s.%s.%s", r.Owner, r.Group, r.Instance)
 		}
 	}
 }
@@ -268,13 +264,12 @@ func TestConfigAMashRequiredWithoutFileRefusesToStart(t *testing.T) {
 			return m
 		}
 		const want = "a name rule is required"
-		for _, args := range [][]string{{"inbox"}, {"who"}, {"read", "1"}, {"send", "claude_acme_peer", "hi"}, {"prompt", "claude_acme_peer", "hi"},
-			{"admin", "provision", "x", "--user", "U", "--account", "A"}} {
+		for _, args := range [][]string{{"inbox"}, {"who"}, {"read", "1"}, {"send", "acme_team1_peer", "hi"}, {"prompt", "acme_team1_peer", "hi"},
+			{"admin", "provision", "o.dev.x", "--user", "U", "--account", "A"}} {
 			t.Run(how+"/"+strings.Join(args[:min(2, len(args))], " "), func(t *testing.T) {
 				e := env()
 				if args[0] == "admin" {
 					e["MASH_ADMIN_CREDS"] = w.e.AdminCreds
-					delete(e, "MASH_AGENT_TOKEN")
 				}
 				out, code := configARun(e, args...)
 				if code == 0 || !strings.Contains(out, want) {
@@ -339,7 +334,7 @@ func TestConfigAMashRuleFileEnvironmentWinsOverConfigJSON(t *testing.T) {
 	a := w.rule
 	base := func(ruleEnv string) map[string]string {
 		m := map[string]string{}
-		for k, v := range w.legacy { // the legacy endpoint a: only a permissive rule lets it start
+		for k, v := range w.retired { // an endpoint in the closed group: only a permissive rule lets it start
 			m[k] = v
 		}
 		delete(m, "MASH_NAME_RULE_FILE")
@@ -351,7 +346,7 @@ func TestConfigAMashRuleFileEnvironmentWinsOverConfigJSON(t *testing.T) {
 	}
 	// config.json names the permissive file; the environment names configuration A: refused, and status shows A.
 	configARuleFile(t, dir, "config.json", `{"name_rule_file":"`+permissive+`"}`)
-	if out, code := configARun(base(a), "inbox"); code == 0 || !strings.Contains(out, `name rule "no-cc"`) {
+	if out, code := configARun(base(a), "inbox"); code == 0 || !strings.Contains(out, `name rule "no-retired"`) {
 		t.Fatalf("environment configuration A over a permissive config.json: %d %s", code, out)
 	}
 	if out, _ := configARun(base(a), "status"); !strings.Contains(out, "name rule: "+a+" ") {
@@ -359,7 +354,7 @@ func TestConfigAMashRuleFileEnvironmentWinsOverConfigJSON(t *testing.T) {
 	}
 	// config.json alone names configuration A: refused.
 	configARuleFile(t, dir, "config.json", `{"name_rule_file":"`+a+`"}`)
-	if out, code := configARun(base(""), "inbox"); code == 0 || !strings.Contains(out, `name rule "no-cc"`) {
+	if out, code := configARun(base(""), "inbox"); code == 0 || !strings.Contains(out, `name rule "no-retired"`) {
 		t.Fatalf("configuration A from config.json alone: %d %s", code, out)
 	}
 	// config.json names configuration A; the environment names the permissive file: the environment wins.

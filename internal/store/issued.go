@@ -72,7 +72,7 @@ const IssuedMaxBytes = 8 << 20
 
 // The kinds of an issued user.
 const (
-	// IssuedEndpoint is a policy endpoint's user, issued by `mashctl add` or `mashctl reissue`.
+	// IssuedEndpoint is a policy endpoint's user, issued by `mashctl endpoint create` or `mashctl endpoint reissue`.
 	IssuedEndpoint = "endpoint"
 	// IssuedAdmin is the admin user mash or the operator uses to administer the account.
 	IssuedAdmin = "admin"
@@ -81,7 +81,7 @@ const (
 // The purposes of an issued user: why mash issued the credential. The set is closed; an unknown purpose is refused on
 // write.
 const (
-	// PurposeIssue is an ordinary issue: `mashctl add`, a reissue that keeps the key, the admin user at init.
+	// PurposeIssue is an ordinary issue: the endpoint command, a reissue that keeps the key, the admin user at init.
 	PurposeIssue = "issue"
 	// PurposeRotation is the new key of a reissue that rotates the user key.
 	PurposeRotation = "rotation"
@@ -102,9 +102,8 @@ func ValidPurpose(p string) bool {
 // a JWT. The bucket key is the user's public key.
 type Issued struct {
 	PublicKey string `json:"public_key"`
-	// Address is the endpoint's directory name (for an admin user, the name in its JWT). Owner is the
-	// owner the name lives under ("" when the user has none). An entry an older release wrote may carry a "zone" key;
-	// it is ignored on read.
+	// Address is the endpoint's flat key (Address.Flat; for an admin user, the name in its JWT). Owner is the
+	// endpoint's owner token ("" when the user has none).
 	Address string   `json:"address"`
 	Owner   string   `json:"owner,omitempty"`
 	Kind    string   `json:"kind"`

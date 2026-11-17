@@ -39,8 +39,8 @@ type Config struct {
 	URL             string        // NATS URL
 	Owner           string        // SAP owner token
 	StateDir        string        // $MASH_STATE_DIR, else $XDG_STATE_HOME/mash, else ~/.local/state/mash: holds spool/ and hook.log
-	Name            string        // endpoint name (MASH_NAME); empty = inert
-	AgentToken      string        // MASH_AGENT_TOKEN / "agent_token": the agent token of a three-token identity; empty = the legacy identity
+	Name            string        // the endpoint's instance token (MASH_NAME); empty = inert
+	Group           string        // the endpoint's group token (MASH_GROUP only, not a config.json key); no default
 	Creds           string        // endpoint credentials file
 	SettleMS        int           // quiet time before a batch is pushed
 	BatchMsgs       int           // a batch up to this many messages is shown in full
@@ -87,20 +87,19 @@ type Config struct {
 
 // SourceKeys are the keys of Config.Source and Config.FileValues, and the environment variable each one is read from.
 var SourceKeys = map[string]string{
-	"url": "MASH_URL", "owner": "MASH_OWNER", "agent_token": "MASH_AGENT_TOKEN", "admin_creds": "MASH_ADMIN_CREDS",
+	"url": "MASH_URL", "owner": "MASH_OWNER", "group": "MASH_GROUP", "admin_creds": "MASH_ADMIN_CREDS",
 	"tls_ca": "MASH_TLS_CA", "tls_cert": "MASH_TLS_CERT", "tls_key": "MASH_TLS_KEY", "insecure_loopback": "MASH_INSECURE_LOOPBACK",
 	"require_tls": "MASH_REQUIRE_TLS",
 }
 
 type file struct {
-	URL        string          `json:"url"`
-	Owner      string          `json:"owner"`
-	AgentToken json.RawMessage `json:"agent_token"` // kept raw: null, "" and non-strings are present but invalid
-	Creds      string          `json:"creds"`
-	SettleMS   *int            `json:"settle_ms"`
-	BatchMsgs  *int            `json:"batch_msgs"`
-	BatchBytes *int            `json:"batch_bytes"`
-	IdleWake   string          `json:"idle_wake"`
+	URL        string `json:"url"`
+	Owner      string `json:"owner"`
+	Creds      string `json:"creds"`
+	SettleMS   *int   `json:"settle_ms"`
+	BatchMsgs  *int   `json:"batch_msgs"`
+	BatchBytes *int   `json:"batch_bytes"`
+	IdleWake   string `json:"idle_wake"`
 
 	RelayWindow string `json:"relay_window"`
 
@@ -144,16 +143,19 @@ func ValidName(s string) bool {
 // Inert reports whether no endpoint name is configured.
 func (c Config) Inert() bool { return c.Name == "" }
 
+// CodeGroupMissing is the code of the refusal for an endpoint with no group.
+const CodeGroupMissing = "group_missing"
+
 // ErrNoURL and ErrNoOwner are what Load returns once the whole configuration is resolved and a required field is
 // still empty; any other error stopped loading before the environment was fully applied.
 var (
-	// ErrAgentTokenEmpty is Load's error for MASH_AGENT_TOKEN present but empty. Callers that must not treat a config
-	// error as a no-op (hook) test for it with errors.Is.
-	ErrAgentTokenEmpty = errors.New("mash: MASH_AGENT_TOKEN is set but empty: give an agent token, or unset it for the legacy identity")
 	// ErrNameRuleRequired is Load's error for a required name rule with no file loaded.
 	ErrNameRuleRequired = errors.New("mash: a name rule is required (name_rule_required or MASH_NAME_RULE_REQUIRED is true) but no rule file is set: set name_rule_file (MASH_NAME_RULE_FILE) to a name-rule file")
 	ErrNoURL            = errors.New("mash: no NATS url (config.json \"url\" or MASH_URL)")
 	ErrNoOwner          = errors.New("mash: no owner (config.json \"owner\" or MASH_OWNER)")
+	// ErrGroupMissing is Load's error, and Identity's, for an endpoint name with no group. A *GroupMissingError wrapping
+	// none: compare with errors.Is. Its text names MASH_GROUP; the CLI reports CodeGroupMissing.
+	ErrGroupMissing = errors.New("mash: no group: set MASH_GROUP (the endpoint's group has no default), for example MASH_OWNER=alice MASH_GROUP=dev MASH_NAME=design for alice.dev.design")
 )
 
 // ValidateFile reports whether raw is a config.json that Load would accept as far as the file itself goes: it must
@@ -298,7 +300,7 @@ func inDir(dir, p string) string {
 	return filepath.Join(dir, p)
 }
 
-// ExpandHome expands a leading "~" or "~/" in p to home. "~user/" is left alone, and so is p when home is unknown.
+// ExpandHome expands an initial "~" or "~/" in p to home. "~user/" is left alone, and so is p when home is unknown.
 func ExpandHome(p, home string) string {
 	if home == "" {
 		return p
@@ -322,11 +324,9 @@ func LookupFromFunc(env func(string) string) Lookup {
 }
 
 // Load resolves the configuration. lookup is os.LookupEnv in production; home is $HOME, or the OS's idea of the user's
-// home when that is unset ("" when unknown). Only MASH_AGENT_TOKEN distinguishes set-but-empty from unset (the former
-// is an error once a name is set); an empty value of any other variable reads as unset.
+// home when that is unset ("" when unknown). An empty value of any variable reads as unset.
 func Load(lookup Lookup, home string) (Config, error) {
 	env := func(k string) string { v, _ := lookup(k); return v }
-	_, agentEnvSet := lookup("MASH_AGENT_TOKEN")
 	if _, err := explicitDir(env, "MASH_CONFIG_DIR"); err != nil {
 		return Config{}, err
 	}
@@ -413,7 +413,6 @@ func Load(lookup Lookup, home string) (Config, error) {
 		return c, err
 	}
 
-	fileAgentSet := false
 	str := func(dst *string, key string) {
 		if v := env(key); v != "" {
 			*dst = v
@@ -422,15 +421,9 @@ func Load(lookup Lookup, home string) (Config, error) {
 	str(&c.URL, "MASH_URL")
 	str(&c.Owner, "MASH_OWNER")
 	str(&c.Name, "MASH_NAME")
+	str(&c.Group, "MASH_GROUP")
 	str(&c.Creds, "MASH_CREDS")
 	str(&c.AdminCreds, "MASH_ADMIN_CREDS")
-	str(&c.AgentToken, "MASH_AGENT_TOKEN")
-	if f.AgentToken != nil {
-		if env("MASH_AGENT_TOKEN") == "" {
-			c.AgentToken = agentTokenOf(f.AgentToken)
-		}
-		fileAgentSet = true
-	}
 	c.Creds, c.AdminCreds = ExpandHome(c.Creds, home), ExpandHome(c.AdminCreds, home)
 	c.recordSources(f, env, home)
 	str(&c.LaunchToken, "MASH_LAUNCH_TOKEN")
@@ -546,17 +539,6 @@ func Load(lookup Lookup, home string) (Config, error) {
 	if c.Name == "" {
 		return c, nil
 	}
-	// A key that is present but empty is invalid, not absent: in config.json (unless the environment overrides it) and
-	// as MASH_AGENT_TOKEN itself, which must not fall back to the file or to the legacy identity.
-	if agentEnvSet && env("MASH_AGENT_TOKEN") == "" {
-		return c, ErrAgentTokenEmpty
-	}
-	if fileAgentSet && c.AgentToken == "" {
-		return c, errors.New("mash: config.json \"agent_token\" must be a non-empty string: give an agent token, or remove the key for the legacy identity")
-	}
-	if c.AgentToken == "" && !ValidName(c.Name) {
-		return c, fmt.Errorf("mash: MASH_NAME %q: use 1-48 lower-case letters, digits and single hyphens, starting with a letter", c.Name)
-	}
 	if c.URL == "" {
 		if dir == "" {
 			return c, ErrNoConfigDir
@@ -569,13 +551,11 @@ func Load(lookup Lookup, home string) (Config, error) {
 		}
 		return c, ErrNoOwner
 	}
-	if c.AgentToken == "" && !ValidName(c.Owner) {
-		return c, fmt.Errorf("mash: owner %q: use 1-48 lower-case letters, digits and single hyphens", c.Owner)
+	if c.Group == "" {
+		return c, ErrGroupMissing
 	}
-	if c.AgentToken != "" {
-		if _, err := c.Identity(); err != nil {
-			return c, fmt.Errorf("mash: %s: %w", identitySetting(err), err)
-		}
+	if _, err := c.Identity(); err != nil {
+		return c, fmt.Errorf("mash: %s: %w", identitySetting(err), err)
 	}
 	if c.Creds == "" {
 		if dir == "" {
@@ -586,48 +566,46 @@ func Load(lookup Lookup, home string) (Config, error) {
 	return c, nil
 }
 
-// Identity is the endpoint's identity: the legacy one of Owner and Name when AgentToken is empty, else the three-token
-// identity of AgentToken, Owner and Name. The error of sap is returned as is; it names the rule that failed.
-func (c Config) Identity() (sap.EndpointIdentity, error) {
+// Identity is the endpoint's address: Owner, Group and Name (the instance). It returns ErrGroupMissing when Name is
+// set and Group is not (there is no default group). The error of sap is returned as is; it names the rule that failed.
+func (c Config) Identity() (sap.Address, error) {
 	if c.Name == "" {
-		return sap.EndpointIdentity{}, errors.New("mash: no identity: no endpoint name is configured (MASH_NAME)")
+		return sap.Address{}, errors.New("mash: no identity: no endpoint name is configured (MASH_NAME)")
 	}
-	if c.AgentToken == "" {
-		return sap.Legacy(c.Owner, c.Name)
+	if c.Group == "" {
+		return sap.Address{}, ErrGroupMissing
 	}
-	return sap.New(c.AgentToken, c.Owner, c.Name)
+	return sap.NewAddress(c.Owner, c.Group, c.Name)
 }
 
-// CredsName is the base name of the endpoint's default creds file: the name for a legacy endpoint (as always), the
-// flat identity (agent_owner_name) for a three-token one, so two identities that share a name token do not share a file.
+// CredsName is the base name of the endpoint's default creds file: owner.group.instance, so two endpoints that share an
+// instance token do not share a file.
 func (c Config) CredsName() string {
-	if c.AgentToken != "" {
-		if id, err := c.Identity(); err == nil {
-			return id.Flat()
-		}
+	if id, err := c.Identity(); err == nil {
+		return id.String()
 	}
 	return c.Name
 }
 
-// identitySetting names the setting a sap identity error is about.
+// identitySetting names the setting a sap address error is about.
 func identitySetting(err error) string {
 	m := err.Error()
 	switch {
-	case strings.HasPrefix(m, "sap: agent token"), strings.HasPrefix(m, "sap: agent "):
-		return "MASH_AGENT_TOKEN (config.json \"agent_token\")"
 	case strings.HasPrefix(m, "sap: owner"):
 		return "owner (config.json \"owner\" or MASH_OWNER)"
-	case strings.HasPrefix(m, "sap: name"):
+	case strings.HasPrefix(m, "sap: group"):
+		return "MASH_GROUP"
+	case strings.HasPrefix(m, "sap: instance"):
 		return "MASH_NAME"
 	}
-	return "MASH_AGENT_TOKEN, owner and MASH_NAME"
+	return "MASH_OWNER, MASH_GROUP and MASH_NAME"
 }
 
 // recordSources fills Source and FileValues from the file f and the environment, as Load applied them: an environment
 // variable that is set and not empty wins, else a value the file set, else the default.
 func (c *Config) recordSources(f file, env func(string) string, home string) {
 	c.Source, c.FileValues = map[string]string{}, map[string]string{}
-	fileVals := map[string]string{"url": f.URL, "owner": f.Owner, "agent_token": agentTokenOf(f.AgentToken), "admin_creds": ExpandHome(f.AdminCreds, home),
+	fileVals := map[string]string{"url": f.URL, "owner": f.Owner, "admin_creds": ExpandHome(f.AdminCreds, home),
 		"tls_ca": f.TLSCA, "tls_cert": f.TLSCert, "tls_key": f.TLSKey}
 	if f.InsecureLoopback != nil {
 		fileVals["insecure_loopback"] = strconv.FormatBool(*f.InsecureLoopback)
@@ -719,16 +697,6 @@ func RejectedArg(a string) string {
 		name = name[:32]
 	}
 	return "option " + strconv.Quote(name)
-}
-
-// agentTokenOf is the value of a present agent_token key: the string, or "" for null, an empty string or any other
-// JSON type, which Load then refuses.
-func agentTokenOf(raw json.RawMessage) string {
-	var v string
-	if json.Unmarshal(raw, &v) != nil {
-		return ""
-	}
-	return v
 }
 
 // nameRuleFileKey is the value of a present name_rule_file key: set is false when the key is absent. A key that is

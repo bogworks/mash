@@ -38,7 +38,7 @@ func TestServeExitsWhenStdinReachesEOF(t *testing.T) {
 	s := startServe(t, w.env["a"])
 	s.initialize(t)
 	s.tools(t)
-	eventually(t, 5*time.Second, "a online", func() bool { out, _ := w.cli(t, "a", "who"); return strings.Contains(out, "a\tonline") })
+	eventually(t, 5*time.Second, "a online", func() bool { out, _ := w.cli(t, "a", "who"); return strings.Contains(out, tTo("a")+"\tonline") })
 	s.in.Close() // EOF on serve's stdin
 	s.exited(t, 5*time.Second)
 	code := <-s.done
@@ -46,7 +46,7 @@ func TestServeExitsWhenStdinReachesEOF(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit code %d, want 0", code)
 	}
-	if _, err := leaseKV(t, w).Get(context.Background(), "a"); err == nil {
+	if _, err := leaseKV(t, w).Get(context.Background(), tAddr("a").Flat()); err == nil {
 		t.Fatal("the lease was not released at exit")
 	}
 }
@@ -62,7 +62,7 @@ func TestServeSameSessionTakesOverAndSupersedesOld(t *testing.T) {
 	old := startServe(t, w.env["a"])
 	old.initialize(t)
 	old.tools(t)
-	eventually(t, 5*time.Second, "old online", func() bool { out, _ := w.cli(t, "a", "who"); return strings.Contains(out, "a\tonline") })
+	eventually(t, 5*time.Second, "old online", func() bool { out, _ := w.cli(t, "a", "who"); return strings.Contains(out, tTo("a")+"\tonline") })
 
 	attempts := acquireAttempts.Load()
 	fresh := startServe(t, w.env["a"])
@@ -93,7 +93,7 @@ func TestServeSameSessionTakesOverAndSupersedesOld(t *testing.T) {
 	if txt := resultText(old.call(t, 21, "status", `{}`)); !strings.Contains(txt, "pid "+pid) || !strings.Contains(txt, "inactive") {
 		t.Fatalf("the old serve's status: %s", txt)
 	}
-	r := old.call(t, 22, "send", `{"to":"b","text":"x"}`)
+	r := old.call(t, 22, "send", `{"to":"o.dev.b","text":"x"}`)
 	if txt := resultText(r); r["isError"] != true || !strings.Contains(txt, "superseded by a newer mash serve of the same session") ||
 		!strings.Contains(txt, "pid "+pid) || !strings.Contains(txt, "handled there") {
 		t.Fatalf("the old serve's tool answer: %v", r)
@@ -103,7 +103,7 @@ func TestServeSameSessionTakesOverAndSupersedesOld(t *testing.T) {
 	}
 
 	// Mail goes to the new serve alone.
-	if out, code := w.cli(t, "b", "send", "a", "after the takeover"); code != 0 {
+	if out, code := w.cli(t, "b", "send", tTo("a"), "after the takeover"); code != 0 {
 		t.Fatalf("send: %d %s", code, out)
 	}
 	// After a retried takeover the first channel event may be the earlier "held" notice: wait for the mail itself.
@@ -121,7 +121,7 @@ func TestServeSameSessionTakesOverAndSupersedesOld(t *testing.T) {
 		t.Fatalf("superseded serve exit code %d", code)
 	}
 	old.done <- 0
-	if _, err := leaseKV(t, w).Get(context.Background(), "a"); err != nil {
+	if _, err := leaseKV(t, w).Get(context.Background(), tAddr("a").Flat()); err != nil {
 		t.Fatalf("the new holder's lease is gone after the old serve exited: %v", err)
 	}
 }
@@ -140,7 +140,7 @@ func TestServeSupersededExitsWhenParentChanges(t *testing.T) {
 	old := startServe(t, w.env["a"])
 	old.initialize(t)
 	old.tools(t)
-	eventually(t, 5*time.Second, "old online", func() bool { out, _ := w.cli(t, "a", "who"); return strings.Contains(out, "a\tonline") })
+	eventually(t, 5*time.Second, "old online", func() bool { out, _ := w.cli(t, "a", "who"); return strings.Contains(out, tTo("a")+"\tonline") })
 	fresh := startServe(t, w.env["a"])
 	fresh.initialize(t)
 	fresh.tools(t)
@@ -249,14 +249,14 @@ func TestServeWaitStateRecordedAndCleared(t *testing.T) {
 	setTiming(t, 50*time.Millisecond, 20*time.Second)
 	w := newWorld(t, "a")
 	kv := leaseKV(t, w)
-	holdLease(t, kv, "a")
+	holdLease(t, kv, tAddr("a").Flat())
 	s := startServe(t, w.env["a"])
 	sp := spoolOf(w.env["a"])
 	eventually(t, 5*time.Second, "the wait state is recorded", func() bool {
 		ws, ok := sp.LiveWaitState()
 		return ok && ws.HolderPID == "4242" && ws.HolderHost == "deadhost"
 	})
-	freeLease(t, kv, "a")
+	freeLease(t, kv, tAddr("a").Flat())
 	eventually(t, 5*time.Second, "the wait state is removed once the lease is taken", func() bool {
 		_, ok := sp.LiveWaitState()
 		return !ok
@@ -267,7 +267,7 @@ func TestServeWaitStateRecordedAndCleared(t *testing.T) {
 	s.in.Close()
 	s.exited(t, 5*time.Second)
 
-	holdLease(t, kv, "a")
+	holdLease(t, kv, tAddr("a").Flat())
 	s2 := startServe(t, w.env["a"])
 	eventually(t, 5*time.Second, "the wait state is recorded again", func() bool { _, ok := sp.LiveWaitState(); return ok })
 	s2.in.Close()
@@ -282,7 +282,7 @@ func TestServeWaitStateOfTwoWaitingServes(t *testing.T) {
 	setTiming(t, time.Minute, 20*time.Second) // no retry rewrites the state during the test
 	w := newWorld(t, "a")
 	kv := leaseKV(t, w)
-	holdLease(t, kv, "a")
+	holdLease(t, kv, tAddr("a").Flat())
 	sp := spoolOf(w.env["a"])
 	s1 := startServe(t, w.env["a"])
 	var first spool.WaitState

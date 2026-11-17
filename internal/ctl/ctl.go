@@ -69,22 +69,36 @@ func splitRevokeFlags(args []string) ([]string, bool, error) {
 }
 
 func limitsUsage(prog string) string {
-	return "usage: " + prog + " limits [name...] | " + prog + " limits --show"
+	return "usage: " + prog + " limits [address...] | " + prog + " limits --show"
 }
 
 func provisionUsage(prog string) string {
-	return "usage: " + prog + " provision <name> --user U --account A [--note N] [--role R] [--host H] [--label k=v]... [--describe TEXT] [--cap C]..." + newFormUsage
+	return "usage: " + prog + " provision <owner.group.instance> --user U --account A [--note N] [--role R] [--host H] [--label k=v]... [--describe TEXT] [--cap C]..."
 }
 
-// newFormUsage is the three-token tail of the provision usage line.
-const newFormUsage = "\n  three tokens (needs the agent_token setting): <name> --agent A [--owner O] [--alias OWNER/NAME], or agent.owner.name; --owner defaults to the configured owner"
+// notAddress is the refusal of an argument that is not an endpoint address.
+func notAddress(arg string) error {
+	return fmt.Errorf("mash: not an endpoint address (the value is not shown): give owner.group.instance")
+}
+
+// parseAddr reads an endpoint address argument: the dotted form owner.group.instance or the flat key
+// owner_group_instance. Anything else is refused.
+func parseAddr(arg string) (sap.Address, error) {
+	if a, err := sap.ParseAddress(arg); err == nil {
+		return a, nil
+	}
+	if a, err := sap.AddressFromFlat(arg); err == nil {
+		return a, nil
+	}
+	return sap.Address{}, notAddress(arg)
+}
 
 func suspendUsage(prog, verb string) string {
-	return "usage: " + prog + " " + verb + " <name>"
+	return "usage: " + prog + " " + verb + " <owner.group.instance>"
 }
 
 func setMetaUsage(prog string) string {
-	return "usage: " + prog + " set-meta <name> [--role R] [--host H] [--label k=v]... [--describe TEXT] [--cap C]... [--uncap C]...   (at least one; a value of - clears the field; --label k=- clears that label; --cap C adds a capability, --uncap C removes one, --cap - clears them all)"
+	return "usage: " + prog + " set-meta <owner.group.instance> [--role R] [--host H] [--label k=v]... [--describe TEXT] [--cap C]... [--uncap C]...   (at least one; a value of - clears the field; --label k=- clears that label; --cap C adds a capability, --uncap C removes one, --cap - clears them all)"
 }
 
 // Usage is the full verb listing for prog ("mashctl" or "mash admin").
@@ -100,28 +114,26 @@ func Usage(prog string) string {
 	}
 	line("init", "create the directory and lease buckets (or raise their caps to the configured limits)")
 	line("init --local [--dir D] [--owner O] [--port P] [--start]", "write the configuration of a local operator-mode NATS server with JetStream (loopback, no TLS), keys and credentials, for one developer; --start also starts it and creates the buckets")
-	line("limits [name...]", "raise existing inboxes to the configured limits (config.json \"limits\"; never lowers)")
+	line("limits [address...]", "raise existing inboxes to the configured limits (config.json \"limits\"; never lowers)")
 	line("limits --show", "print the effective limits")
-	line("permissions <name> [--nsc]", "the NATS permissions an endpoint user needs")
-	line("provision <name> --user U --account A [--note N] [--role R] [--host H] [--label k=v]... [--describe TEXT] [--cap C]...", "")
-	line("set-meta <name> [--role R] [--host H] [--label k=v]... [--describe TEXT] [--cap C]... [--uncap C]...", "(a value of - clears the field; --label k=- clears that label; --cap C adds a capability, --uncap C removes one, --cap - clears them all)")
-	line("suspend <name>", "refuse all inbound mail to an endpoint (its stored mail stays readable); prints the last sequence; the endpoint's credentials stay valid")
-	line("resume <name>", "undo suspend")
-	line("suspended <name>", "print whether an endpoint is suspended and its last sequence; exit 0 if suspended, 3 if not, 1 on error")
+	line("permissions <owner.group.instance> [--nsc]", "the NATS permissions an endpoint user needs")
+	line("provision <owner.group.instance> --user U --account A [--note N] [--role R] [--host H] [--label k=v]... [--describe TEXT] [--cap C]...", "")
+	line("set-meta <owner.group.instance> [--role R] [--host H] [--label k=v]... [--describe TEXT] [--cap C]... [--uncap C]...", "(a value of - clears the field; --label k=- clears that label; --cap C adds a capability, --uncap C removes one, --cap - clears them all)")
+	line("suspend <owner.group.instance>", "refuse all inbound mail to an endpoint (its stored mail stays readable); prints the last sequence; the endpoint's credentials stay valid")
+	line("resume <owner.group.instance>", "undo suspend")
+	line("suspended <owner.group.instance>", "print whether an endpoint is suspended and its last sequence; exit 0 if suspended, 3 if not, 1 on error")
 	removal := "remove the record and inbox;"
 	if prog == "mashctl" {
 		removal = "revoke the endpoint's user in the account JWT (--no-revoke skips it; --servers N, else MASH_SERVERS, is how many servers must acknowledge; --sys-creds FILE, else MASH_SYS_CREDS, the system account creds), then remove the record and inbox;"
 	}
-	line("deprovision <name> [--user U | --drained-to SEQ --suspension ID]"+map[bool]string{true: " [--servers N] [--sys-creds FILE]"}[prog == "mashctl"], removal+" with --user, only if the record's user is still U; with --drained-to and --suspension, only if still that suspension (ID) and at last_seq SEQ")
+	line("deprovision <owner.group.instance> [--user U | --drained-to SEQ --suspension ID]"+map[bool]string{true: " [--servers N] [--sys-creds FILE]"}[prog == "mashctl"], removal+" with --user, only if the record's user is still U; with --drained-to and --suspension, only if still that suspension (ID) and at last_seq SEQ")
 	line("list", "")
 	if prog == "mashctl" { // verbs `mash admin` does not carry
-		line("audit [--json] [--strict] [--creds-dir DIR]", "read only: list every directory record, inbox stream, lease and creds file with their state, the orphans and the legacy inboxes' drain state; --strict exits 1 on an orphan, an undrained inbox, or unread mail lost to eviction (a lower bound from consumer sequences: mail fetched but never shown, or redelivered, can make it undercount, so a clean audit does not prove nothing was lost)")
-		line("inbox inspect <address> [--json] [--legacy] [--from SEQ] [--to SEQ] [--limit N]", "read only: one inbox's stored messages (default the last 20) with sender, trust, store time, size, kind and delivery state derived from the deliver consumer's cursors, and the consumer's totals; never creates, fetches from or acknowledges a consumer")
+		line("audit [--json] [--strict] [--creds-dir DIR]", "read only: list every directory record, inbox stream, lease and creds file with their state, the orphans; --strict exits 1 on an orphan, an unreadable item, or unread mail lost to eviction (a lower bound from consumer sequences: mail fetched but never shown, or redelivered, can make it undercount, so a clean audit does not prove nothing was lost)")
+		line("inbox inspect <owner.group.instance> [--json] [--from SEQ] [--to SEQ] [--limit N]", "read only: one inbox's stored messages (default the last 20) with sender, trust, store time, size, kind and delivery state derived from the deliver consumer's cursors, and the consumer's totals; never creates, fetches from or acknowledges a consumer")
 		adoptLines(line)
-		mintLines(line)
 		issuedLines(line)
 		retireLines(line)
-		line("unzone NAME [--sys-creds FILE] [--servers N]", "rewrite a six-token record to five-token (ADR 0091): its record, its inbox subjects and the permissions to reissue, keeping stored mail; refused while a policy from an older release is applied (the check needs the system credentials and cannot be skipped); safe to re-run. It gives the endpoint no new credential: afterwards run `mashctl reissue NAME` where its creds file is, or run the nsc flags `mashctl permissions NAME --nsc` prints and regenerate the creds file")
 	}
 	return b.String()
 }
@@ -130,20 +142,15 @@ func adoptLines(line func(left, right string)) {
 	line("adopt --server URL --operator-key F --account-key F --sys-creds F [--account N] [--admin-creds F | --mint-admin] [--owner O] [--dry-run]", "take over an operator-mode server you already run: check your authority over it, then keep the keys and write the config; changes nothing on the server")
 }
 
-func mintLines(line func(left, right string)) {
-	line("add NAME [--label k=v]... [--tool] [--note N] [--describe T] [--cap C]... [--servers N] [--sys-creds FILE]", "mint NAME's user (signed by the account key, with the owner-line permissions), record it in the issue record, provision its directory record and inbox and write its creds file")
-	line("reissue NAME... [--widen] | --all --yes | --changed --yes [--servers N] [--sys-creds FILE]", "mint a user JWT again, signed by the account key (checks the directory record; a reissue of a user signed by anything else, or with other permissions, rotates the user key and revokes the old one); --all names every endpoint in the directory, --changed those whose creds file differs from what a mint now issues")
-}
-
 func issuedLines(line func(left, right string)) {
 	line("issued list [--json]", "the issue record: every user JWT mashctl issued (public key, address, kind, tags, time, purpose, revoked time)")
 	line("issued check [--json] [--sys-creds FILE] [--servers N]", "compare the user keys connected to every server with the record and report any key mash did not issue and any revoked key still connected; exit 1 on one, 2 when the check could not complete")
 }
 
 func retireLines(line func(left, right string)) {
-	line("retire NAME [--delete-creds] [--force] [--no-revoke] [--servers N] [--sys-creds FILE]", "revoke NAME's user in the account JWT (--no-revoke skips it), then remove its record and inbox; --servers N (else MASH_SERVERS) is how many servers must acknowledge, --sys-creds FILE (else MASH_SYS_CREDS) the system account creds")
-	line("label NAME k=v... [--dry-run]", "set labels on NAME's directory record")
-	line("unlabel NAME k... [--dry-run]", "remove labels from NAME's directory record")
+	line("retire <owner.group.instance> [--delete-creds] [--force] [--no-revoke] [--servers N] [--sys-creds FILE]", "revoke the endpoint's user in the account JWT (--no-revoke skips it), then remove its record and inbox; --servers N (else MASH_SERVERS) is how many servers must acknowledge, --sys-creds FILE (else MASH_SYS_CREDS) the system account creds")
+	line("label <owner.group.instance> k=v... [--dry-run]", "set labels on the endpoint's directory record")
+	line("unlabel <owner.group.instance> k... [--dry-run]", "remove labels from the endpoint's directory record")
 }
 
 // OpenAdmin connects to the server with the admin credentials and returns the admin handle, a context carrying the
@@ -216,17 +223,21 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		return fail(errors.New(pfx + ": no owner (config.json \"owner\" or MASH_OWNER)"))
 	}
 	if args[0] == "permissions" {
-		if len(args) < 2 || len(args) > 3 || !config.ValidName(args[1]) || (len(args) == 3 && args[2] != "--nsc") {
-			return usage(errors.New("usage: " + prog + " permissions <name> [--nsc]"))
+		if len(args) < 2 || len(args) > 3 || (len(args) == 3 && args[2] != "--nsc") {
+			return usage(errors.New("usage: " + prog + " permissions <owner.group.instance> [--nsc]"))
+		}
+		addr, err := parseAddr(args[1])
+		if err != nil {
+			return usage(err)
 		}
 		// On stderr: the output is consumed whole (jq, mapfile), so a note on stdout would break it.
 		fmt.Fprintln(stderr, permissionsNote(prog))
 		if len(args) == 3 {
 			// One argument per line: mapfile -t flags < <(mashctl permissions n --nsc)
-			fmt.Fprintln(stdout, strings.Join(madmin.NSCFlags(cfg.Owner, args[1]), "\n"))
+			fmt.Fprintln(stdout, strings.Join(madmin.NSCFlags(addr), "\n"))
 			return 0
 		}
-		b, _ := json.MarshalIndent(madmin.Permissions(cfg.Owner, args[1]), "", "  ")
+		b, _ := json.MarshalIndent(madmin.Permissions(addr), "", "  ")
 		fmt.Fprintln(stdout, string(b))
 		return 0
 	}
@@ -255,48 +266,33 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		if len(args) < 2 {
 			return usage(errors.New(provisionUsage(prog)))
 		}
-		args, nf, err := parseNewForm(cfg, args)
+		addr, err := parseAddr(args[1])
 		if err != nil {
-			if isUsage(err) {
-				return usage(fmt.Errorf("%s\n%s: provision: %w", provisionUsage(prog), pfx, err))
-			}
-			return fail(err)
+			return usage(fmt.Errorf("%s\n%w", provisionUsage(prog), err))
 		}
 		opt := optOf(args)
 		meta, err := provisionMeta(prog, args, opt)
 		if err != nil {
 			return usage(err)
 		}
-		if nf != nil {
-			if err := provisionKeyArgs(prog, opt("--user"), opt("--account")); err != nil {
-				return usage(err)
-			}
-			rec, err := a.ProvisionIdentity(ctx, nf.id, nf.alias, opt("--user"), opt("--account"), opt("--note"), meta)
-			if err != nil {
-				return fail(err)
-			}
-			alias := ""
-			if rec.Alias != nil {
-				alias = ", alias " + config.Clean(rec.Alias.Owner) + "/" + config.Clean(rec.Alias.Name)
-			}
-			fmt.Fprintf(stdout, "provisioned %s: inbox inbox-%s, mail %s%s%s\n", config.Clean(nf.id.String()), config.Clean(rec.KeyOrName()), config.Clean(rec.MailSubject), alias, metaSuffix(rec))
-			return 0
-		}
-		if err := provisionArgs(prog, args[1], opt("--user"), opt("--account")); err != nil {
+		if err := provisionKeyArgs(prog, opt("--user"), opt("--account")); err != nil {
 			return usage(err)
 		}
-		rec, err := a.Provision(ctx, args[1], opt("--user"), opt("--account"), opt("--note"), meta)
+		rec, err := a.Provision(ctx, addr, opt("--user"), opt("--account"), opt("--note"), meta)
 		if err != nil {
 			return fail(err)
 		}
-		fmt.Fprintf(stdout, "provisioned %s: inbox inbox-%s, mail %s%s\n", config.Clean(sap.Display(rec.KeyOrName())), config.Clean(rec.KeyOrName()), config.Clean(rec.MailSubject), metaSuffix(rec))
+		fmt.Fprintf(stdout, "provisioned %s: inbox inbox-%s, mail %s%s\n", config.Clean(addr.String()), config.Clean(addr.Flat()), config.Clean(rec.MailSubject), metaSuffix(rec))
 	case "limits":
+		var addrs []sap.Address
 		for _, n := range args[1:] {
-			if !config.ValidName(n) {
-				return usage(errors.New(limitsUsage(prog)))
+			addr, err := parseAddr(n)
+			if err != nil {
+				return usage(fmt.Errorf("%s\n%w", limitsUsage(prog), err))
 			}
+			addrs = append(addrs, addr)
 		}
-		lines, err := a.ApplyLimits(ctx, args[1:]...)
+		lines, err := a.ApplyLimits(ctx, addrs...)
 		for _, l := range lines {
 			fmt.Fprintln(stdout, l)
 		}
@@ -304,47 +300,55 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 			return fail(err)
 		}
 	case "set-meta":
-		if len(args) < 3 || !config.ValidName(args[1]) {
+		if len(args) < 3 {
 			return usage(errors.New(setMetaUsage(prog)))
+		}
+		addr, err := parseAddr(args[1])
+		if err != nil {
+			return usage(fmt.Errorf("%s\n%w", setMetaUsage(prog), err))
 		}
 		u, err := setMetaUpdate(prog, args)
 		if err != nil {
 			return usage(err)
 		}
-		rec, err := a.SetMeta(ctx, args[1], u)
+		rec, err := a.SetMeta(ctx, addr, u)
 		if err != nil {
 			return fail(err)
 		}
-		fmt.Fprintf(stdout, "updated %s: role %q, host %q, labels %s%s\n", config.Clean(sap.Display(rec.KeyOrName())), config.Clean(rec.Role), config.Clean(rec.Host), labelList(rec.Labels), metaSuffix(rec))
+		fmt.Fprintf(stdout, "updated %s: role %q, host %q, labels %s%s\n", config.Clean(addr.String()), config.Clean(rec.Role), config.Clean(rec.Host), labelList(rec.Labels), metaSuffix(rec))
 	case "suspend", "resume", "suspended":
-		if len(args) != 2 || !madmin.ValidKey(args[1]) {
+		if len(args) != 2 {
 			return usage(errors.New(suspendUsage(prog, args[0])))
+		}
+		addr, err := parseAddr(args[1])
+		if err != nil {
+			return usage(fmt.Errorf("%s\n%w", suspendUsage(prog, args[0]), err))
 		}
 		switch args[0] {
 		case "suspend":
-			st, err := a.Suspend(ctx, args[1])
+			st, err := a.Suspend(ctx, addr)
 			if err != nil {
 				return fail(err)
 			}
-			fmt.Fprintf(stdout, "suspended %s: id %s, last_seq %d, msgs %d (new mail parked; the endpoint's credentials are still valid)\n", args[1], config.Clean(st.ID), st.LastSeq, st.Msgs)
+			fmt.Fprintf(stdout, "suspended %s: id %s, last_seq %d, msgs %d (new mail parked; the endpoint's credentials are still valid)\n", addr, config.Clean(st.ID), st.LastSeq, st.Msgs)
 		case "resume":
-			if err := a.Resume(ctx, args[1]); err != nil {
+			if err := a.Resume(ctx, addr); err != nil {
 				return fail(err)
 			}
-			fmt.Fprintf(stdout, "resumed %s\n", args[1])
+			fmt.Fprintf(stdout, "resumed %s\n", addr)
 		default:
-			st, err := a.Suspended(ctx, args[1])
+			st, err := a.Suspended(ctx, addr)
 			if err != nil {
 				return fail(err)
 			}
 			if !st.Suspended {
-				fmt.Fprintf(stdout, "%s is not suspended\n", args[1])
+				fmt.Fprintf(stdout, "%s is not suspended\n", addr)
 				return 3
 			}
-			fmt.Fprintf(stdout, "suspended %s since %s: id %s, last_seq %d, msgs %d\n", args[1], config.Clean(st.Since), config.Clean(st.ID), st.LastSeq, st.Msgs)
+			fmt.Fprintf(stdout, "suspended %s since %s: id %s, last_seq %d, msgs %d\n", addr, config.Clean(st.Since), config.Clean(st.ID), st.LastSeq, st.Msgs)
 		}
 	case "deprovision":
-		deprovisionUsage := "usage: " + prog + " deprovision <name> [--user <public-key> | --drained-to SEQ --suspension ID]"
+		deprovisionUsage := "usage: " + prog + " deprovision <owner.group.instance> [--user <public-key> | --drained-to SEQ --suspension ID]"
 		var noRevoke bool
 		if prog == "mashctl" {
 			deprovisionUsage += " [--no-revoke] [--servers N] [--sys-creds FILE]"
@@ -356,22 +360,11 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		if len(args) < 2 {
 			return usage(errors.New(deprovisionUsage))
 		}
-		// shown is the name in messages: the canonical agent.owner.name for a three-token target, whose directory key
-		// (args[1] from here on) is the flat key.
-		shown := args[1]
-		args, nf, err := parseNewForm(cfg, args)
+		addr, err := parseAddr(args[1])
 		if err != nil {
-			if isUsage(err) {
-				return usage(fmt.Errorf("%s\n%s: deprovision: %w", deprovisionUsage, pfx, err))
-			}
-			return fail(err)
+			return usage(fmt.Errorf("%s\n%w", deprovisionUsage, err))
 		}
-		if nf != nil {
-			shown = nf.id.String()
-			args = append([]string{args[0], nf.id.Flat()}, args[2:]...)
-		} else if !madmin.ValidKey(args[1]) {
-			return usage(errors.New(deprovisionUsage + "\n" + pfx + ": <name> is not a valid endpoint name: 1-48 lower-case letters, digits and single hyphens (the value is not shown)"))
-		}
+		shown := addr.String()
 		var rest []string
 		if len(args) > 2 {
 			rest = args[2:]
@@ -414,10 +407,6 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		}
 		// failRemoval reports a failed removal; a failed revocation also names the way around it.
 		failRemoval := func(err error) int {
-			if msg, ok := AliasedRefusal(err, args[1]); ok {
-				fmt.Fprintln(stderr, msg)
-				return 1
-			}
 			if checkErr != nil && errors.Is(err, checkErr) {
 				return fail(checkErr)
 			}
@@ -455,7 +444,7 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 				return ""
 			}
 			for _, r := range recs {
-				if r.KeyOrName() == args[1] {
+				if ra, err := r.Address(); err == nil && ra == addr {
 					return r.User
 				}
 			}
@@ -489,7 +478,7 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 			if !precheck() {
 				return 1
 			}
-			if err := adm.DeprovisionDrained(ctx, args[1], id, seq); err != nil {
+			if err := adm.DeprovisionDrained(ctx, addr, id, seq); err != nil {
 				return failRemoval(err)
 			}
 			fmt.Fprintf(stdout, "deprovisioned %s (suspension %s drained to %d; %s)\n", shown, id, seq, note())
@@ -509,7 +498,7 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 				return 1
 			}
 			noRevokeWarn(args[3])
-			if err := adm.DeprovisionIfUser(ctx, args[1], args[3]); err != nil {
+			if err := adm.DeprovisionIfUser(ctx, addr, args[3]); err != nil {
 				return failRemoval(err)
 			}
 			fmt.Fprintf(stdout, "deprovisioned %s (its record belonged to user key %s...; %s)\n", shown, ShortKey(args[3]), strings.Replace(note(), "user key "+ShortKey(args[3])+"... ", "", 1))
@@ -517,7 +506,7 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 			return 0
 		}
 		// Deprovision is idempotent, so rollbacks can call it freely; this verb refuses a name that was never there.
-		if ok, err := a.Exists(ctx, args[1]); err != nil {
+		if ok, err := a.Exists(ctx, addr); err != nil {
 			if RevokeUsers != nil && !noRevoke {
 				return fail(fmt.Errorf("%w\n%s", err, NotRevoked))
 			}
@@ -534,7 +523,7 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 			warnUser = recordUser()
 			noRevokeWarn(warnUser)
 		}
-		if err := adm.Deprovision(ctx, args[1]); err != nil {
+		if err := adm.Deprovision(ctx, addr); err != nil {
 			return failRemoval(err)
 		}
 		fmt.Fprintf(stdout, "deprovisioned %s (%s)\n", shown, note())
@@ -545,7 +534,7 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 			return fail(err)
 		}
 		for _, r := range recs {
-			fmt.Fprintf(stdout, "%s\t%s\t%s\t%s\n", config.Clean(r.KeyOrName()), config.Clean(r.User), config.Clean(r.Created), config.Clean(r.Note))
+			fmt.Fprintf(stdout, "%s\t%s\t%s\t%s\n", config.Clean(r.Owner+"."+r.Group+"."+r.Instance), config.Clean(r.User), config.Clean(r.Created), config.Clean(r.Note))
 		}
 	default:
 		if prog == "mash admin" {
@@ -614,16 +603,8 @@ func provisionMeta(prog string, args []string, opt func(string) string) (madmin.
 	return madmin.Meta{Role: opt("--role"), Host: opt("--host"), Labels: labels, Description: opt("--describe"), Caps: caps}, nil
 }
 
-// provisionArgs checks the arguments provision needs before anything touches the server. An invalid one is named,
+// provisionKeyArgs checks the keys provision needs before anything touches the server. An invalid one is named,
 // never printed: a seed pasted into --user must not come back on the screen.
-func provisionArgs(prog, name, user, account string) error {
-	if !config.ValidName(name) {
-		return errors.New(provisionUsage(prog) + "\n<name> is not a valid endpoint name: 1-48 lower-case letters, digits and single hyphens (the value is not shown)")
-	}
-	return provisionKeyArgs(prog, user, account)
-}
-
-// provisionKeyArgs is provisionArgs without the legacy name: the keys, for the three-token form too.
 func provisionKeyArgs(prog, user, account string) error {
 	use := provisionUsage(prog)
 	switch {
@@ -643,11 +624,9 @@ func initUsage(prog string) string {
 	return "usage: " + prog + " init   |   " + prog + " init --local [--dir D] [--owner O] [--port P] [--start]"
 }
 
-// permissionsNote says who `permissions` output is for: the legacy wide mail lines are what a hand-made user needs.
-// An endpoint added by `mashctl add` gets narrower permissions, the owner-line set, instead.
+// permissionsNote says what `permissions` prints.
 func permissionsNote(prog string) string {
-	pfx, _, _ := strings.Cut(prog, " ")
-	return "note: these lines are for hand-made legacy users. Endpoints provisioned by `" + pfx + " add` get narrower permissions, the owner-line set."
+	return "note: these are the permissions of the endpoint's NATS user: the owner-line set for its address."
 }
 
 // setMetaUpdate reads set-meta's flags (args[0] is "set-meta", args[1] the name) into a MetaUpdate.
@@ -736,24 +715,8 @@ func validUserKeyShape(k string) bool {
 	return true
 }
 
-// AliasedRefusal words admin.ErrAliased, the refusal to remove a legacy endpoint that a new-form endpoint names as its
-// alias (ADR 0076, ADR 0088), as one line that names both endpoints, says nothing was changed and says what to do. ok is
-// false for any other error.
-func AliasedRefusal(err error, name string) (msg string, ok bool) {
-	if !errors.Is(err, madmin.ErrAliased) {
-		return "", false
-	}
-	by := "a new-form endpoint"
-	fix := "retire or re-point that endpoint first"
-	if h := madmin.AliasHolder(err); h != "" {
-		by = "the new-form endpoint " + h
-		fix = "retire or re-point " + h + " first"
-	}
-	return "mash: refusing to deprovision " + name + ": " + by + " names it as its alias; nothing was changed. To proceed, " + fix + ", then run this again", true
-}
-
 // recordAdminUser puts the admin user of cfg's admin credentials in the issue record, kind "admin": mash's own admin
-// user (the one `init --local` writes, or `adopt --mint-admin` mints) is issued outside `add`, so it is recorded the
+// user (the one `init --local` writes, or `adopt --mint-admin` mints) is issued outside `mint`, so it is recorded the
 // first time init runs with it. Only the public key and the JWT's name and tags are read; the seed is never used.
 func recordAdminUser(ctx context.Context, a *madmin.Admin, cfg config.Config) error {
 	raw, err := config.ReadCredsFile(cfg.AdminCreds)
@@ -824,14 +787,14 @@ func CheckNotFutureIssued(ctx context.Context, a *madmin.Admin, targets []Revoke
 		times, found, err := a.IssuedHistoryByKey(ctx, t.Key)
 		var bad *madmin.MalformedIssuedAtError
 		if errors.As(err, &bad) {
-			return fmt.Errorf("user key %s...: its issue record has a missing or malformed issued_at (%q) in revision %d, so a future-dated credential cannot be ruled out; restore the record with `mashctl reissue NAME` (the same key is recorded again) and run again; nothing was changed", ShortKey(t.Key), bad.Value, bad.Revision)
+			return fmt.Errorf("user key %s...: its issue record has a missing or malformed issued_at (%q) in revision %d, so a future-dated credential cannot be ruled out; restore the record with `mashctl endpoint reissue ADDRESS` (the same key is recorded again) and run again; nothing was changed", ShortKey(t.Key), bad.Value, bad.Revision)
 		}
 		var incomplete *madmin.IncompleteHistoryError
 		if errors.As(err, &incomplete) {
 			return fmt.Errorf("user key %s...: a future-dated credential cannot be ruled out: its issued history cannot be shown to be complete (%d revisions are kept and the record may have dropped older ones before its history limit was raised); revoke the key by hand in the account JWT, only after checking where it was issued; nothing was changed", ShortKey(t.Key), incomplete.Retained)
 		}
 		if err != nil {
-			return fmt.Errorf("user key %s...: its issue record could not be read (%v), so a future-dated credential cannot be ruled out; retry, and if the record is damaged restore it with `mashctl reissue NAME` (the same key is recorded again); nothing was changed", ShortKey(t.Key), err)
+			return fmt.Errorf("user key %s...: its issue record could not be read (%v), so a future-dated credential cannot be ruled out; retry, and if the record is damaged restore it with `mashctl endpoint reissue ADDRESS` (the same key is recorded again); nothing was changed", ShortKey(t.Key), err)
 		}
 		if !found {
 			fmt.Fprintf(stderr, "warning: user key %s... has no issue record, so a future-dated credential cannot be ruled out; revoking anyway\n", ShortKey(t.Key))

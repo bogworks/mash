@@ -79,7 +79,7 @@ func TestPeerCannotSpoofPromptAnswer(t *testing.T) {
 		}
 	}()
 
-	subj, err := Discover(context.Background(), b.Conn(), "o", "a")
+	subj, err := Discover(context.Background(), b.Conn(), taddr("a"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestPeerCannotSpoofPromptAnswer(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
 	go func() { time.Sleep(3500 * time.Millisecond); close(release) }()
-	_ = Prompt(ctx, b.Conn(), b.Identity(), "b", subj, "ping", &out)
+	_ = Prompt(ctx, b.Conn(), b.Identity(), tkey("b"), subj, "ping", &out)
 	if strings.Contains(out.String(), "EVIL") {
 		t.Fatalf("a peer spoofed the prompt answer: %q", out.String())
 	}

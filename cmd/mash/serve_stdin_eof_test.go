@@ -46,7 +46,7 @@ func TestServeStdinEOFWhileHoldingReleasesLeaseAndExits(t *testing.T) {
 	s.tools(t)
 	var held string
 	eventually(t, 5*time.Second, "serve holds the lease", func() bool {
-		id, ok := leaseInstance(t, w, "a")
+		id, ok := leaseInstance(t, w, tAddr("a").Flat())
 		held = id
 		return ok
 	})
@@ -61,7 +61,7 @@ func TestServeStdinEOFWhileHoldingReleasesLeaseAndExits(t *testing.T) {
 		t.Fatalf("exit code %d, want 0", code)
 	}
 	s.done <- 0
-	if id, ok := leaseInstance(t, w, "a"); ok {
+	if id, ok := leaseInstance(t, w, tAddr("a").Flat()); ok {
 		t.Fatalf("the lease is still held (by %s) after serve exited", id)
 	}
 
@@ -72,7 +72,7 @@ func TestServeStdinEOFWhileHoldingReleasesLeaseAndExits(t *testing.T) {
 	b.initialize(t)
 	b.tools(t)
 	eventually(t, 5*time.Second, "the next serve takes the freed lease", func() bool {
-		id, ok := leaseInstance(t, w, "a")
+		id, ok := leaseInstance(t, w, tAddr("a").Flat())
 		return ok && id != held
 	})
 	if txt := resultText(b.call(t, 5, "status", `{}`)); !strings.Contains(txt, "connection: OK") {
@@ -104,7 +104,7 @@ func TestServeStdinEOFDuringFirstOpen(t *testing.T) {
 		if took := time.Since(start); took > bound+2*time.Second {
 			t.Fatalf("serve took %s to exit, want within the open bound %s plus slack", took, bound)
 		}
-		if id, ok := leaseInstance(t, w, "a"); ok {
+		if id, ok := leaseInstance(t, w, tAddr("a").Flat()); ok {
 			t.Fatalf("lease held by %s after exit", id)
 		}
 	})
@@ -132,12 +132,12 @@ func TestServeStdinEOFDuringFirstOpen(t *testing.T) {
 		if took := time.Since(start); took > stdinEOFExitBound {
 			t.Fatalf("serve took %s to exit after its open returned", took)
 		}
-		if id, ok := leaseInstance(t, w, "a"); ok {
+		if id, ok := leaseInstance(t, w, tAddr("a").Flat()); ok {
 			t.Fatalf("serve left the lease it bound after EOF (held by %s)", id)
 		}
 		// It does not come back: several refresh intervals later the key is still absent.
 		time.Sleep(5 * endpoint.LeaseRefresh)
-		if id, ok := leaseInstance(t, w, "a"); ok {
+		if id, ok := leaseInstance(t, w, tAddr("a").Flat()); ok {
 			t.Fatalf("the lease reappeared (held by %s)", id)
 		}
 	})
@@ -154,7 +154,7 @@ func TestServeSupersededNeverRefreshesThenEOFLeavesHolder(t *testing.T) {
 	old.tools(t)
 	var oldID string
 	eventually(t, 5*time.Second, "the old serve holds the lease", func() bool {
-		id, ok := leaseInstance(t, w, "a")
+		id, ok := leaseInstance(t, w, tAddr("a").Flat())
 		oldID = id
 		return ok
 	})
@@ -164,7 +164,7 @@ func TestServeSupersededNeverRefreshesThenEOFLeavesHolder(t *testing.T) {
 	fresh.tools(t)
 	var newID string
 	eventually(t, 10*time.Second, "the new serve takes the lease", func() bool {
-		id, ok := leaseInstance(t, w, "a")
+		id, ok := leaseInstance(t, w, tAddr("a").Flat())
 		newID = id
 		return ok && id != oldID
 	})
@@ -176,7 +176,7 @@ func TestServeSupersededNeverRefreshesThenEOFLeavesHolder(t *testing.T) {
 	// ever the new holder's: the old serve has stopped refreshing, and has not taken the key back.
 	deadline := time.Now().Add(15 * endpoint.LeaseRefresh)
 	for time.Now().Before(deadline) {
-		if id, ok := leaseInstance(t, w, "a"); !ok || id != newID {
+		if id, ok := leaseInstance(t, w, tAddr("a").Flat()); !ok || id != newID {
 			t.Fatalf("lease key is held by %q (present %v), want only the new serve %s", id, ok, newID)
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -190,7 +190,7 @@ func TestServeSupersededNeverRefreshesThenEOFLeavesHolder(t *testing.T) {
 	old.done <- 0
 	deadline = time.Now().Add(15 * endpoint.LeaseRefresh)
 	for time.Now().Before(deadline) {
-		if id, ok := leaseInstance(t, w, "a"); !ok || id != newID {
+		if id, ok := leaseInstance(t, w, tAddr("a").Flat()); !ok || id != newID {
 			t.Fatalf("after the old serve exited the lease key is held by %q (present %v), want %s", id, ok, newID)
 		}
 		time.Sleep(10 * time.Millisecond)

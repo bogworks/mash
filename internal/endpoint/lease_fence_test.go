@@ -27,7 +27,7 @@ func setLiveGet(ep *Endpoint, fn func(ctx context.Context, key string) (jetstrea
 
 func (l *liveLease) liveGetSet(fn func(ctx context.Context, key string) (jetstream.KeyValueEntry, error)) {
 	l.get = fn
-	l.res = [2]leaseVerdict{} // forget what was confirmed
+	l.res = 0 // forget what was confirmed
 }
 
 func setVar[T any](t *testing.T, p *T, v T) {
@@ -58,7 +58,7 @@ func TestFenceEarlierServeDeliversAndAcksNothingBeforeItsWatchNotices(t *testing
 	snd := f.client(t, "snd")
 	const n = 3
 	for i := 0; i < n; i++ {
-		if _, err := snd.Send(context.Background(), "a", fmt.Sprintf("m-%d", i), 0); err != nil {
+		if _, err := snd.Send(context.Background(), tdot("a"), fmt.Sprintf("m-%d", i), 0); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -102,7 +102,7 @@ func TestFenceEarlierServeAckOfDrainedMailRefusedBeforeItsWatchNotices(t *testin
 	snd := f.client(t, "snd")
 	const n = 2
 	for i := 0; i < n; i++ {
-		if _, err := snd.Send(context.Background(), "a", fmt.Sprintf("h-%d", i), 0); err != nil {
+		if _, err := snd.Send(context.Background(), tdot("a"), fmt.Sprintf("h-%d", i), 0); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -160,7 +160,7 @@ func TestFenceUnconfirmedLeaseAcksNothing(t *testing.T) {
 	}
 
 	snd := f.client(t, "snd")
-	if _, err := snd.Send(context.Background(), "a", "while unconfirmed", 0); err != nil {
+	if _, err := snd.Send(context.Background(), tdot("a"), "while unconfirmed", 0); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(700 * time.Millisecond)
@@ -219,7 +219,7 @@ func TestTakeoverGraceBeforeNewServeConsumes(t *testing.T) {
 	}
 	defer second.Close()
 	snd := f.client(t, "snd")
-	if _, err := snd.Send(context.Background(), "a", "after takeover", 0); err != nil {
+	if _, err := snd.Send(context.Background(), tdot("a"), "after takeover", 0); err != nil {
 		t.Fatal(err)
 	}
 	ev := &events{}
@@ -251,7 +251,7 @@ func TestNoTakeoverGraceOnFreeOrDeadHolder(t *testing.T) {
 		t.Fatalf("grace on a free lease: %v", free.graceUntil)
 	}
 	snd := f.client(t, "snd")
-	if _, err := snd.Send(context.Background(), "a", "at once", 0); err != nil {
+	if _, err := snd.Send(context.Background(), tdot("a"), "at once", 0); err != nil {
 		t.Fatal(err)
 	}
 	ev := &events{}
@@ -262,7 +262,7 @@ func TestNoTakeoverGraceOnFreeOrDeadHolder(t *testing.T) {
 	waitText(t, ev, "at once")
 
 	host, _ := os.Hostname()
-	putLease(t, f, "b", leaseValue{Instance: "dead", Host: host, Machine: needMachine(t), PID: deadPID(t), Since: "x"})
+	putLease(t, f, tkey("b"), leaseValue{Instance: "dead", Host: host, Machine: needMachine(t), PID: deadPID(t), Since: "x"})
 	dead, err := Open(context.Background(), f.cfg("b"))
 	if err != nil {
 		t.Fatal(err)
@@ -355,7 +355,7 @@ func TestAwaitTakeoverNoGrace(t *testing.T) {
 func TestAwaitTakeoverLeaseLost(t *testing.T) {
 	f := newFixture(t, "a")
 	_, second, _ := takeoverPair(t, f, "a", 400*time.Millisecond)
-	putLease(t, f, "a", leaseValue{Instance: "third", Host: "elsewhere", PID: "1", Since: "x"})
+	putLease(t, f, tkey("a"), leaseValue{Instance: "third", Host: "elsewhere", PID: "1", Since: "x"})
 	err := second.AwaitTakeover(context.Background())
 	var lost *LeaseLostError
 	if !errors.As(err, &lost) {
@@ -385,7 +385,7 @@ func TestPromptDuringTakeoverGraceNotDelivered(t *testing.T) {
 	var out bytes.Buffer
 	short, c2 := context.WithTimeout(ctx, 2*time.Second)
 	defer c2()
-	if err := Prompt(short, snd.Conn(), snd.Identity(), "snd", "agents.prompt.cc.o.a", "early", &out); err == nil {
+	if err := Prompt(short, snd.Conn(), snd.Identity(), tkey("snd"), taddr("a").Subjects().Prompt, "early", &out); err == nil {
 		t.Fatal("a prompt inside the grace was answered")
 	}
 	select {
@@ -395,7 +395,7 @@ func TestPromptDuringTakeoverGraceNotDelivered(t *testing.T) {
 	}
 	<-started
 	out.Reset()
-	if err := Prompt(ctx, snd.Conn(), snd.Identity(), "snd", "agents.prompt.cc.o.a", "late", &out); err != nil {
+	if err := Prompt(ctx, snd.Conn(), snd.Identity(), tkey("snd"), taddr("a").Subjects().Prompt, "late", &out); err != nil {
 		t.Fatal(err)
 	}
 	if p := <-got; p.Text != "late" {

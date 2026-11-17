@@ -67,7 +67,7 @@ func TestSpoolRequiredHoldsWithoutASpoolAndBindsLater(t *testing.T) {
 	done := make(chan struct{})
 	go func() { _ = ep.Run(ctx, ev.deliver); close(done) }()
 	t.Cleanup(func() { cancel(); <-done; ep.Close() })
-	if _, err := f.client(t, "b").Send(context.Background(), "a", "held body", 0); err != nil {
+	if _, err := f.client(t, "b").Send(context.Background(), tdot("a"), "held body", 0); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(4 * time.Second) // past several redeliveries
@@ -145,7 +145,7 @@ func TestSpoolRequiredHoldsMidSessionWriteFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.Chmod(sp.Dir, 0o700) })
-	if _, err := f.client(t, "b").Send(context.Background(), "a", "mid body", 0); err != nil {
+	if _, err := f.client(t, "b").Send(context.Background(), tdot("a"), "mid body", 0); err != nil {
 		t.Fatal(err)
 	}
 	until(t, "the report", func() bool { return len(rep.all()) == 1 })

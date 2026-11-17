@@ -17,7 +17,6 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 	"github.com/nats-io/nkeys"
 
-	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/namerule"
 	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/store"
@@ -43,7 +42,7 @@ func (a *Admin) WithAccountLockWait(d time.Duration) *Admin {
 	return &c
 }
 
-// WithNameRule returns a copy of a whose Provision applies rule to the identity it provisions, before the directory is
+// WithNameRule returns a copy of a whose Provision applies rule to the address it provisions, before the directory is
 // read (docs/name-rule.md). A nil rule accepts everything. a itself is unchanged.
 func (a *Admin) WithNameRule(rule *namerule.Rule) *Admin {
 	c := *a
@@ -51,18 +50,13 @@ func (a *Admin) WithNameRule(rule *namerule.Rule) *Admin {
 	return &c
 }
 
-// CheckProvision applies rule to the legacy identity of name under owner, as provisioning does. A refusal is an error
-// that names the rule and carries its message. A name or owner that is not a legacy identity passes here: the code
-// that follows refuses it on its own terms.
-func CheckProvision(rule *namerule.Rule, owner, name string) error {
-	if rule == nil {
+// CheckProvision applies rule to the address addr, as provisioning does. A refusal is an error that names the rule and
+// carries its message. An address that is not valid passes here: the code that follows refuses it on its own terms.
+func CheckProvision(rule *namerule.Rule, addr sap.Address) error {
+	if rule == nil || addr.Validate() != nil {
 		return nil
 	}
-	id, err := sap.Legacy(owner, name)
-	if err != nil {
-		return nil
-	}
-	if err := rule.Check(id); err != nil {
+	if err := rule.Check(addr); err != nil {
 		return fmt.Errorf("mash: provision: %w", err)
 	}
 	return nil
@@ -132,10 +126,10 @@ func (a *Admin) SetLimits(l store.Limits) error {
 	return nil
 }
 
-// New returns an Admin for owner.
+// New returns an Admin for owner, the owner token its issue records carry when they name none.
 func New(nc *nats.Conn, owner string) (*Admin, error) {
-	if !config.ValidName(owner) {
-		return nil, fmt.Errorf("mash: owner %q is not a valid name", owner)
+	if _, err := sap.NewAddress(owner, "g", "i"); err != nil {
+		return nil, fmt.Errorf("mash: owner %q is not a valid owner token (lower-case letters, digits and single dashes, 1-32 characters; the value is not shown)", owner)
 	}
 	js, err := jetstream.New(nc)
 	if err != nil {
@@ -282,155 +276,11 @@ func (m Meta) validate() error {
 	return store.ValidLabels(m.Labels)
 }
 
-// Provision creates name's inbox stream, its consumer and, last, its
-// directory record, so a half-done provision can simply be re-run.
-func (a *Admin) Provision(ctx context.Context, name, user, account, note string, meta Meta) (rec store.Record, err error) {
-	if !config.ValidName(name) {
-		return store.Record{}, fmt.Errorf("mash: endpoint name: 1-48 lower-case letters, digits and single hyphens (the value is not shown)")
-	}
-	// The name rule is applied to the identity being provisioned before the directory is read or anything is created.
-	if err := CheckProvision(a.rule, a.owner, name); err != nil {
-		return store.Record{}, err
-	}
-	if !nkeys.IsValidPublicUserKey(user) {
-		return store.Record{}, errors.New("mash: the user is not a user public key (U, then 55 base32 characters; the value is not shown)")
-	}
-	if !nkeys.IsValidPublicAccountKey(account) {
-		return store.Record{}, fmt.Errorf("mash: the account is not an account public key (A, then 55 base32 characters; the value is not shown)")
-	}
-	if err := meta.validate(); err != nil {
-		return store.Record{}, err
-	}
-	kv, err := a.dir(ctx)
-	if err != nil {
-		return store.Record{}, err
-	}
-	// The name's lock is held for the whole provision, record and stream alike, so a deprovision of the same name
-	// cannot interleave with it (ADR-0048, ADR-0047). The stream helpers below are the Locked variants.
-	lk, err := a.lockStream(ctx, name)
-	if err != nil {
-		return store.Record{}, err
-	}
-	defer lk.release(ctx)
-	ctx, end := lk.guard(ctx, "provision", &err)
-	defer end()
-	// Lock order: the name's lock first, then the directory-wide admission lock, always. The admission lock is a leaf
-	// (never held while waiting for another lock), so no cycle is possible. It makes list-admit-create atomic across
-	// names. ANY writer of a directory record (including new-form provisioning) MUST take the same lock, via
-	// lockStream(ctx, admissionLockName), around its own list-and-create. ProvisionIdentity takes three locks in this
-	// order: its flat key's, then its alias's legacy name lock (this same per-name lock), then the admission lock. No
-	// cycle: a flat key (it holds "_") is never a legacy name, Provision, Deprovision and the other legacy writers hold
-	// only their own name's lock and then the leaf, and a lock wait is bounded by lockWait.
-	adm, err := a.lockStream(ctx, admissionLockName)
-	if err != nil {
-		return store.Record{}, err
-	}
-	defer adm.release(ctx)
-	if afterAdmissionLock != nil {
-		afterAdmissionLock()
-	}
-	if _, err := kv.Get(ctx, name); err == nil {
-		return store.Record{}, fmt.Errorf("mash: endpoint %s is already provisioned", name)
-	} else if !errors.Is(err, jetstream.ErrKeyNotFound) {
-		return store.Record{}, err
-	}
-	// Mash's own admission rule: refuse an identity whose subjects overlap an existing endpoint's. Nothing is
-	// created before this passes.
-	if err := a.admit(ctx, kv, name); err != nil {
-		return store.Record{}, err
-	}
-	// A deprovisioned name's lease key holds a tombstone until it expires: clear it, so the name works at once.
-	if lease, err := a.js.KeyValue(ctx, store.LeaseBucket); err == nil {
-		if err := clearLease(ctx, lease, name); err != nil {
-			return store.Record{}, fmt.Errorf("mash: lease: %w", err)
-		}
-	}
-	// A retried provision finds its inbox stream already there: never let the update lower its caps. The read, the
-	// check and the write run under the stream's limits lock, so a concurrent limits change cannot slip between them.
-	s, err := a.createInboxLocked(ctx, lk, name)
-	if err != nil {
-		return store.Record{}, err
-	}
-	if _, err := s.CreateOrUpdateConsumer(ctx, store.ConsumerConfig()); err != nil {
-		return store.Record{}, fmt.Errorf("mash: inbox consumer: %w", err)
-	}
-	rec = store.Record{
-		Name: name, Owner: a.owner, Agent: sap.AgentName, AgentToken: sap.AgentToken,
-		Account: account, User: user, MailSubject: store.MailSubjectFor(a.owner, name),
-		Created: time.Now().UTC().Format(time.RFC3339), Note: note,
-		Role: meta.Role, Host: meta.Host, Labels: meta.Labels, Description: meta.Description, Caps: sortedCaps(meta.Caps),
-	}
-	val, _ := json.Marshal(rec)
-	if err := lk.check(ctx); err != nil {
-		return store.Record{}, err
-	}
-	if err := adm.check(ctx); err != nil {
-		return store.Record{}, err
-	}
-	if _, err := kv.Create(ctx, name, val); err != nil {
-		if errors.Is(err, jetstream.ErrKeyExists) {
-			return store.Record{}, fmt.Errorf("mash: endpoint %s is already provisioned", name)
-		}
-		return store.Record{}, fmt.Errorf("mash: directory record: %w", err)
-	}
-	return rec, nil
-}
-
-// admissionLockName is the pseudo-name of the directory-wide admission lock. It is not a valid endpoint name
-// (config.ValidName refuses the underscore), so its lock key limits-lock._admission is no name's lock.
-const admissionLockName = "_admission"
-
-// afterAdmissionLock is a test seam that runs once Provision holds the admission lock; nil in production.
-var afterAdmissionLock func()
-
-// afterDirectoryGet is a test seam that runs before each per-record read of admit; nil in production.
-var afterDirectoryGet func(key string)
-
-// admit lists the directory and applies store.Admit to the legacy identity of name under a.owner. A value that does
-// not parse is skipped when its key is a legacy-shaped key, as before admission existed, but only while no listed key
-// looks new-form (has an underscore). Once one does, any read or parse error on any key refuses the provision (fail
-// closed), because an unmodellable record could hide an overlap. The caller holds the admission lock.
-func (a *Admin) admit(ctx context.Context, kv jetstream.KeyValue, name string) error {
-	id, err := sap.Legacy(a.owner, name)
-	if err != nil {
-		return fmt.Errorf("mash: admit: %w", err)
-	}
-	keys, err := kv.Keys(ctx)
-	if errors.Is(err, jetstream.ErrNoKeysFound) {
-		return store.Admit(id, nil)
-	}
-	if err != nil {
-		return fmt.Errorf("mash: admit: list directory: %w", err)
-	}
-	slices.Sort(keys)
-	newForm := slices.ContainsFunc(keys, func(k string) bool { return strings.Contains(k, "_") })
-	if !newForm {
-		// Legacy-only directory and a legacy identity: legacy identities are never compared, so there is
-		// nothing to refuse and no record needs reading.
-		return store.Admit(id, nil)
-	}
-	var recs []store.Record
-	for _, k := range keys {
-		if afterDirectoryGet != nil {
-			afterDirectoryGet(k)
-		}
-		r, err := store.GetRecord(ctx, kv, k)
-		if err != nil {
-			if newForm || strings.Contains(k, "_") {
-				return fmt.Errorf("mash: admit %s refused: unmodellable record %s in the directory: %w", id, k, err)
-			}
-			continue
-		}
-		recs = append(recs, r)
-	}
-	return store.Admit(id, recs)
-}
-
-// createInboxLocked creates name's inbox stream, or updates an existing one to the configured limits unless that
-// would lower a cap. The caller holds name's lock.
-func (a *Admin) createInboxLocked(ctx context.Context, lk *streamLock, name string) (jetstream.Stream, error) {
-	return a.createStreamLocked(ctx, lk, name, func(existing jetstream.Stream) jetstream.StreamConfig {
-		return store.InboxConfigFor(a.owner, name, a.limits)
+// createInboxLocked creates addr's inbox stream, or updates an existing one to the configured limits unless that
+// would lower a cap. The caller holds addr's lock.
+func (a *Admin) createInboxLocked(ctx context.Context, lk *streamLock, addr sap.Address) (jetstream.Stream, error) {
+	return a.createStreamLocked(ctx, lk, addr.Flat(), func(existing jetstream.Stream) jetstream.StreamConfig {
+		return store.InboxConfigFor(addr, a.limits)
 	})
 }
 
@@ -481,12 +331,13 @@ var afterStreamRead func(inboxMaxBytes int64)
 // only checked, never updated: one that differs from that configuration in any field mail depends on is an error
 // naming the field, because fixing it in place could discard stored mail (a lower MaxBytes or MaxAge would). The
 // user decides to deprovision it, which removes whatever the inbox holds, and provisions again.
-func (a *Admin) EnsureInbox(ctx context.Context, name string) ([]string, error) {
-	if !config.ValidName(name) {
-		return nil, fmt.Errorf("mash: endpoint name: 1-48 lower-case letters, digits and single hyphens (the value is not shown)")
+func (a *Admin) EnsureInbox(ctx context.Context, addr sap.Address) ([]string, error) {
+	if err := addr.Validate(); err != nil {
+		return nil, fmt.Errorf("mash: ensure inbox: %w", err)
 	}
+	name := addr.Flat()
 	var made []string
-	s, created, err := a.ensureInboxStream(ctx, name)
+	s, created, err := a.ensureInboxStream(ctx, addr)
 	if err != nil {
 		return nil, err
 	}
@@ -511,33 +362,34 @@ func (a *Admin) EnsureInbox(ctx context.Context, name string) ([]string, error) 
 }
 
 // ensureInboxStream is ensureInboxStreamLocked under name's lock.
-func (a *Admin) ensureInboxStream(ctx context.Context, name string) (s jetstream.Stream, created bool, err error) {
-	lk, err := a.lockStream(ctx, name)
+func (a *Admin) ensureInboxStream(ctx context.Context, addr sap.Address) (s jetstream.Stream, created bool, err error) {
+	lk, err := a.lockStream(ctx, addr.Flat())
 	if err != nil {
 		return nil, false, err
 	}
 	defer lk.release(ctx)
 	ctx, end := lk.guard(ctx, "ensure-inbox", &err)
 	defer end()
-	return a.ensureInboxStreamLocked(ctx, lk, name)
+	return a.ensureInboxStreamLocked(ctx, lk, addr)
 }
 
 // ensureInboxStreamLocked finds name's inbox stream, creating it if missing, or checks an existing one against the
 // configuration. The caller holds name's lock.
-func (a *Admin) ensureInboxStreamLocked(ctx context.Context, lk *streamLock, name string) (s jetstream.Stream, created bool, err error) {
+func (a *Admin) ensureInboxStreamLocked(ctx context.Context, lk *streamLock, addr sap.Address) (s jetstream.Stream, created bool, err error) {
+	name := addr.Flat()
 	s, err = a.js.Stream(ctx, sap.InboxStream(name))
 	if errors.Is(err, jetstream.ErrStreamNotFound) {
 		if err := lk.check(ctx); err != nil {
 			return nil, false, err
 		}
-		if s, err = a.js.CreateStream(ctx, store.InboxConfigFor(a.owner, name, a.limits)); err != nil {
+		if s, err = a.js.CreateStream(ctx, store.InboxConfigFor(addr, a.limits)); err != nil {
 			return nil, false, fmt.Errorf("mash: inbox stream: %w", err)
 		}
 		return s, true, nil
 	} else if err != nil {
 		return nil, false, fmt.Errorf("mash: inbox stream: %w", err)
 	}
-	want := store.InboxConfigFor(a.owner, name, a.limits)
+	want := store.InboxConfigFor(addr, a.limits)
 	got := s.CachedInfo().Config
 	// A suspended stream is the endpoint's own: its saved subjects stand in for the parked one (ADR 0057).
 	if saved, ok := suspendedSubjects(name, got); ok {
@@ -634,24 +486,28 @@ func checkInboxConsumer(name string, got, want jetstream.ConsumerConfig) error {
 }
 
 // ApplyLimits raises the configured limits on existing inboxes in place with a stream update: max_bytes and max_age
-// where they are below the configured value, and max_consumers where it differs. With no names it covers every
+// where they are below the configured value, and max_consumers where it differs. With no addresses it covers every
 // directory endpoint. Lowering max_bytes or max_age is refused with an error naming the endpoint and field (nothing
 // changes for that endpoint), because it could discard stored mail; the other endpoints are still processed and the
 // errors are joined. It returns one line per endpoint saying what changed.
-func (a *Admin) ApplyLimits(ctx context.Context, names ...string) ([]string, error) {
-	if len(names) == 0 {
+func (a *Admin) ApplyLimits(ctx context.Context, addrs ...sap.Address) ([]string, error) {
+	if len(addrs) == 0 {
 		recs, err := a.List(ctx)
 		if err != nil {
 			return nil, err
 		}
 		for _, r := range recs {
-			names = append(names, r.KeyOrName())
+			addr, err := r.Address()
+			if err != nil {
+				return nil, err
+			}
+			addrs = append(addrs, addr)
 		}
 	}
 	var lines []string
 	var errs []error
-	for _, name := range names {
-		line, err := a.applyInboxLimits(ctx, name)
+	for _, addr := range addrs {
+		line, err := a.applyInboxLimits(ctx, addr)
 		if err != nil {
 			errs = append(errs, err)
 			continue
@@ -698,19 +554,19 @@ func refuseLowering(name string, cfg jetstream.StreamConfig, l store.Limits) err
 	return nil
 }
 
-func (a *Admin) applyInboxLimits(ctx context.Context, name string) (msg string, err error) {
-	if !config.ValidName(name) {
-		return "", fmt.Errorf("mash: endpoint name: 1-48 lower-case letters, digits and single hyphens (the value is not shown)")
+func (a *Admin) applyInboxLimits(ctx context.Context, addr sap.Address) (msg string, err error) {
+	if err := addr.Validate(); err != nil {
+		return "", fmt.Errorf("mash: limits: %w", err)
 	}
 	// The read, the check and the write run under the stream's limits lock.
-	lk, err := a.lockStream(ctx, name)
+	lk, err := a.lockStream(ctx, addr.Flat())
 	if err != nil {
 		return "", err
 	}
 	defer lk.release(ctx)
 	ctx, end := lk.guard(ctx, "limits change", &err)
 	defer end()
-	return a.applyInboxLimitsLocked(ctx, lk, name)
+	return a.applyInboxLimitsLocked(ctx, lk, addr.Flat())
 }
 
 // applyInboxLimitsLocked is applyInboxLimits for a caller that holds name's lock.
@@ -780,10 +636,14 @@ const setMetaTries = 5
 // afterMetaGet is a test seam between SetMeta's read and its write; nil in production.
 var afterMetaGet func()
 
-// SetMeta changes name's role, host and labels, only those given. It merges into the stored JSON object, so every
+// SetMeta changes addr's role, host and labels, only those given. It merges into the stored JSON object, so every
 // other field, including ones a newer mash wrote, survives, and writes with a compare-and-set against the revision
 // it read, re-reading and retrying if another write got in between.
-func (a *Admin) SetMeta(ctx context.Context, name string, u MetaUpdate) (store.Record, error) {
+func (a *Admin) SetMeta(ctx context.Context, addr sap.Address, u MetaUpdate) (store.Record, error) {
+	if err := addr.Validate(); err != nil {
+		return store.Record{}, fmt.Errorf("mash: set meta: %w", err)
+	}
+	name := addr.Flat()
 	fields := map[string]*string{"role": u.Role, "host": u.Host}
 	for f, v := range fields {
 		if v != nil {
@@ -931,11 +791,11 @@ func (n NameLock) Check(ctx context.Context) error { return n.l.check(ctx) }
 // does its reads and writes through UserOfLocked and SetUserLocked (the lock is not reentrant: SetUser or UserOf inside
 // fn would wait for it) and re-checks the lock with Check before any write of its own. An error from fn that is the
 // context ending because the lock was about to expire is worded to say so.
-func (a *Admin) WithNameLock(ctx context.Context, name string, fn func(ctx context.Context, l NameLock) error) (err error) {
-	if !config.ValidName(name) {
-		return fmt.Errorf("mash: endpoint name %q: 1-48 lower-case letters, digits and single hyphens", name)
+func (a *Admin) WithNameLock(ctx context.Context, addr sap.Address, fn func(ctx context.Context, l NameLock) error) (err error) {
+	if err := addr.Validate(); err != nil {
+		return fmt.Errorf("mash: name lock: %w", err)
 	}
-	lk, err := a.lockStream(ctx, name)
+	lk, err := a.lockStream(ctx, addr.Flat())
 	if err != nil {
 		return err
 	}
@@ -947,10 +807,11 @@ func (a *Admin) WithNameLock(ctx context.Context, name string, fn func(ctx conte
 
 // UserOf reads name's directory record and returns its user key and account. It returns ErrNoRecord when there is none.
 // It does not take the name's lock; inside WithNameLock use UserOfLocked (the read is the same).
-func (a *Admin) UserOf(ctx context.Context, name string) (user, account string, err error) {
-	if !config.ValidName(name) {
-		return "", "", fmt.Errorf("mash: endpoint name %q: 1-48 lower-case letters, digits and single hyphens", name)
+func (a *Admin) UserOf(ctx context.Context, addr sap.Address) (user, account string, err error) {
+	if err := addr.Validate(); err != nil {
+		return "", "", fmt.Errorf("mash: user of: %w", err)
 	}
+	name := addr.Flat()
 	kv, err := a.dir(ctx)
 	if err != nil {
 		return "", "", err
@@ -971,14 +832,14 @@ func (a *Admin) UserOf(ctx context.Context, name string) (user, account string, 
 
 // UserOfLocked is UserOf for a caller that holds name's lock l (from WithNameLock); it refuses a lock that is not
 // held or not name's.
-func (a *Admin) UserOfLocked(ctx context.Context, l NameLock, name string) (user, account string, err error) {
-	if l.l == nil || l.l.name != name {
-		return "", "", fmt.Errorf("mash: the lock held is not %s's", name)
+func (a *Admin) UserOfLocked(ctx context.Context, l NameLock, addr sap.Address) (user, account string, err error) {
+	if l.l == nil || l.l.name != addr.Flat() {
+		return "", "", fmt.Errorf("mash: the lock held is not %s's", addr.Flat())
 	}
 	if err := l.l.check(ctx); err != nil {
 		return "", "", err
 	}
-	return a.UserOf(ctx, name)
+	return a.UserOf(ctx, addr)
 }
 
 // SetUser is a compare-and-set of name's directory record's user key from oldUser to newUser (public user keys), for a
@@ -986,36 +847,36 @@ func (a *Admin) UserOfLocked(ctx context.Context, l NameLock, name string) (user
 // read, re-reading and retrying if another write got in between, and keeps every other field. It refuses a name with
 // no record, a record whose account is not account, and a record whose user is neither oldUser nor newUser. It is
 // idempotent: a record that already carries newUser is returned as it is.
-func (a *Admin) SetUser(ctx context.Context, name, account, oldUser, newUser string) (store.Record, error) {
-	if err := validSetUser(name, oldUser, newUser); err != nil {
+func (a *Admin) SetUser(ctx context.Context, addr sap.Address, account, oldUser, newUser string) (store.Record, error) {
+	if err := validSetUser(addr, oldUser, newUser); err != nil {
 		return store.Record{}, err
 	}
-	lk, err := a.lockStream(ctx, name)
+	lk, err := a.lockStream(ctx, addr.Flat())
 	if err != nil {
 		return store.Record{}, err
 	}
 	defer lk.release(ctx)
-	return a.setUser(ctx, lk, name, account, oldUser, newUser)
+	return a.setUser(ctx, lk, addr.Flat(), account, oldUser, newUser)
 }
 
 // SetUserLocked is SetUser for a caller that already holds name's lock l (from WithNameLock): it does not take the lock
 // again, and re-checks it before the write.
-func (a *Admin) SetUserLocked(ctx context.Context, l NameLock, name, account, oldUser, newUser string) (store.Record, error) {
-	if err := validSetUser(name, oldUser, newUser); err != nil {
+func (a *Admin) SetUserLocked(ctx context.Context, l NameLock, addr sap.Address, account, oldUser, newUser string) (store.Record, error) {
+	if err := validSetUser(addr, oldUser, newUser); err != nil {
 		return store.Record{}, err
 	}
-	if l.l == nil || l.l.name != name {
-		return store.Record{}, fmt.Errorf("mash: the lock held is not %s's", name)
+	if l.l == nil || l.l.name != addr.Flat() {
+		return store.Record{}, fmt.Errorf("mash: the lock held is not %s's", addr.Flat())
 	}
-	return a.setUser(ctx, l.l, name, account, oldUser, newUser)
+	return a.setUser(ctx, l.l, addr.Flat(), account, oldUser, newUser)
 }
 
-func validSetUser(name, oldUser, user string) error {
+func validSetUser(addr sap.Address, oldUser, user string) error {
 	if !nkeys.IsValidPublicUserKey(oldUser) {
 		return fmt.Errorf("mash: %q is not a user public key (U...)", oldUser)
 	}
-	if !config.ValidName(name) {
-		return fmt.Errorf("mash: endpoint name %q: 1-48 lower-case letters, digits and single hyphens", name)
+	if err := addr.Validate(); err != nil {
+		return fmt.Errorf("mash: set user: %w", err)
 	}
 	if !nkeys.IsValidPublicUserKey(user) {
 		return fmt.Errorf("mash: %q is not a user public key (U...)", user)
@@ -1081,32 +942,31 @@ func isRevisionConflict(err error) bool {
 		(errors.As(err, &apiErr) && apiErr.ErrorCode == jetstream.JSErrCodeStreamWrongLastSequence)
 }
 
-// Deprovision removes name's directory record and inbox stream and fences its lease with a tombstone. The fence
-// comes first: a session that is live or starting cannot take the lease back once its endpoint is gone (#10). A
-// new-form identity's retired marker goes pending -> purge -> final (see beginRetire): the marker is written pending
+// Deprovision removes addr's directory record and inbox stream and fences its lease with a tombstone. The fence
+// comes first: a session that is live or starting cannot take the lease back once its endpoint is gone (#10). The
+// address's retired marker goes pending -> purge -> final (see beginRetire): the marker is written pending
 // before the user is revoked or anything is removed, and made final once the record is purged.
-func (a *Admin) Deprovision(ctx context.Context, name string) (err error) {
-	lk, err := a.lockStream(ctx, name)
+func (a *Admin) Deprovision(ctx context.Context, addr sap.Address) (err error) {
+	if err := addr.Validate(); err != nil {
+		return fmt.Errorf("mash: deprovision: %w", err)
+	}
+	lk, err := a.lockStream(ctx, addr.Flat())
 	if err != nil {
 		return err
 	}
 	defer lk.release(ctx)
 	ctx, end := lk.guard(ctx, "deprovision", &err)
 	defer end()
-	return a.deprovisionLocked(ctx, lk, name)
+	return a.deprovisionLocked(ctx, lk, addr)
 }
 
-// deprovisionLocked is Deprovision's body; the caller holds name's lock.
-func (a *Admin) deprovisionLocked(ctx context.Context, lk *streamLock, name string) error {
+// deprovisionLocked is Deprovision's body; the caller holds addr's lock.
+func (a *Admin) deprovisionLocked(ctx context.Context, lk *streamLock, addr sap.Address) error {
+	name := addr.Flat()
 	kv, err := a.dir(ctx)
 	if err != nil {
 		return err
 	}
-	adm, err := a.guardLegacyAlias(ctx, kv, name)
-	if err != nil {
-		return err
-	}
-	defer adm.release(ctx)
 	lease, err := a.js.KeyValue(ctx, store.LeaseBucket)
 	if err != nil {
 		if down := bucketDown(store.LeaseBucket, err); down != nil {
@@ -1135,14 +995,14 @@ func (a *Admin) deprovisionLocked(ctx context.Context, lk *streamLock, name stri
 	case !errors.Is(err, jetstream.ErrKeyNotFound) && !errors.Is(err, jetstream.ErrKeyDeleted):
 		return fmt.Errorf("mash: directory %s: %w; nothing was removed", name, err)
 	}
-	// First phase, before anything is revoked or purged: a new-form identity's marker is written pending (a full or
-	// failing bucket stops the call here). A name with no record is never burned, but a pending marker left by an
+	// First phase, before anything is revoked or purged: the address's marker is written pending (a full or
+	// failing bucket stops the call here). An address with no record is never burned, but a pending marker left by an
 	// earlier run is picked up and finished.
 	var pm *retireMark
 	if have {
-		pm, err = a.beginRetire(ctx, lk, name, ruser)
+		pm, err = a.beginRetire(ctx, lk, addr, ruser)
 	} else {
-		pm, err = a.loadRetire(ctx, name)
+		pm, err = a.loadRetire(ctx, addr)
 	}
 	if err != nil {
 		return err
@@ -1162,9 +1022,6 @@ func (a *Admin) deprovisionLocked(ctx context.Context, lk *streamLock, name stri
 		if err := lk.check(ctx); err != nil {
 			return err
 		}
-		if err := adm.check(ctx); err != nil {
-			return err
-		}
 		purgeTried = true
 		if err := purgeDirectory(ctx, kv, name); err != nil && !errors.Is(err, jetstream.ErrKeyNotFound) {
 			return unfinishedPurge(name, pm, err)
@@ -1176,7 +1033,7 @@ func (a *Admin) deprovisionLocked(ctx context.Context, lk *streamLock, name stri
 		// Only a definitive refusal made before the purge was tried deletes the marker; once the user is revoked the
 		// retirement is under way, and a purge that failed unknown may have succeeded: both stay pending.
 		if !revoked && !purgeTried {
-			err = a.abortRetire(ctx, lk, adm, pm, err, false)
+			err = a.abortRetire(ctx, lk, pm, err, false)
 		}
 		return err
 	}
@@ -1236,13 +1093,13 @@ func (a *Admin) fenceAndDeleteInbox(ctx context.Context, lk *streamLock, lease j
 // matches, so a re-provisioned endpoint of the same name is safe from an old command) and its last sequence is exactly seq: another admin's Resume, and any mail stored after it, make the
 // check fail instead of losing mail. A name with no inbox stream is refused: nothing proves it is the one drained.
 //
-// name is a legacy name or a new-form flat key (agent_owner_name). A new-form identity's retired marker goes pending ->
-// revoke and purge -> final exactly as in Deprovision (see beginRetire), and a re-run after a stop that followed the
-// purge finishes it. A legacy name is refused while a new-form record names it as its alias (guardLegacyAlias).
-func (a *Admin) DeprovisionDrained(ctx context.Context, name, id string, seq uint64) (err error) {
-	if !ValidKey(name) {
-		return fmt.Errorf("mash: endpoint name: 1-48 lower-case letters, digits and single hyphens, or a new-form agent_owner_name (the value is not shown)")
+// The address's retired marker goes pending -> revoke and purge -> final exactly as in Deprovision (see beginRetire),
+// and a re-run after a stop that followed the purge finishes it.
+func (a *Admin) DeprovisionDrained(ctx context.Context, addr sap.Address, id string, seq uint64) (err error) {
+	if err := addr.Validate(); err != nil {
+		return fmt.Errorf("mash: deprovision: %w", err)
 	}
+	name := addr.Flat()
 	lk, err := a.lockStream(ctx, name)
 	if err != nil {
 		return err
@@ -1281,10 +1138,10 @@ func (a *Admin) DeprovisionDrained(ctx context.Context, name, id string, seq uin
 	savedUser := info.Config.Metadata[store.MetaSuspendedUser]
 	e, err := kv.Get(ctx, name)
 	if errors.Is(err, jetstream.ErrKeyNotFound) || errors.Is(err, jetstream.ErrKeyDeleted) {
-		if _, flat := newFormKey(name); flat && savedUser != "" {
-			// A new-form removal that stopped after the purge: its retired marker, if any, is finished (see
+		if savedUser != "" {
+			// A removal that stopped after the purge: its retired marker, if any, is finished (see
 			// finishAfterPurge); with none this refuses and changes nothing.
-			if err := a.finishAfterPurge(ctx, lk, lease, name, savedUser); err != nil {
+			if err := a.finishAfterPurge(ctx, lk, lease, addr, savedUser); err != nil {
 				return fmt.Errorf("mash: endpoint %s has no directory record, so nothing proves it is the endpoint that was drained: %w", name, err)
 			}
 			return nil
@@ -1303,35 +1160,27 @@ func (a *Admin) DeprovisionDrained(ctx context.Context, name, id string, seq uin
 	case rec.User != savedUser:
 		return fmt.Errorf("mash: endpoint %s: its record belongs to a different user key than when it was suspended (left in place)", name)
 	}
-	adm, err := a.guardLegacyAlias(ctx, kv, name)
-	if err != nil {
-		return err
-	}
-	defer adm.release(ctx)
 	if afterDeprovisionGet != nil {
 		afterDeprovisionGet()
 	}
 	if err := lk.check(ctx); err != nil {
 		return err
 	}
-	// First phase: a new-form identity's marker is written pending before the user is revoked or the record purged.
-	pm, err := a.beginRetire(ctx, lk, name, rec.User)
+	// First phase: the address's marker is written pending before the user is revoked or the record purged.
+	pm, err := a.beginRetire(ctx, lk, addr, rec.User)
 	if err != nil {
 		return err
 	}
 	revoked, err := a.revokeLocked(ctx, lk, name, rec.User)
-	if err == nil {
-		err = adm.check(ctx)
-	}
 	if err != nil {
 		// Nothing was purged: the marker this call wrote goes.
-		return a.abortRetire(ctx, lk, adm, pm, partialIf(revoked, name, rec.User, err), false)
+		return a.abortRetire(ctx, lk, pm, partialIf(revoked, name, rec.User, err), false)
 	}
 	if err := purgeDirectory(ctx, kv, name, jetstream.LastRevision(e.Revision())); err != nil {
 		if isRevisionConflict(err) {
 			// The server refused the guarded purge: the retirement did not happen, so the pending marker goes.
 			err = partialIf(revoked, name, rec.User, fmt.Errorf("mash: refusing to deprovision %s: the record changed; left in place", name))
-			return a.abortRetire(ctx, lk, adm, pm, err, true)
+			return a.abortRetire(ctx, lk, pm, err, true)
 		}
 		// The answer does not say whether the server purged it: the marker stays pending.
 		return partialIf(revoked, name, rec.User, unfinishedPurge(name, pm, err))
@@ -1352,8 +1201,6 @@ var (
 	ErrRecordOtherUser = errors.New("its record belongs to another user key (left in place)")
 	// ErrRecordChanged: the record was replaced or changed between the read and the delete.
 	ErrRecordChanged = errors.New("the record changed; left in place")
-	// ErrAliased: a new-form record's alias names this legacy endpoint.
-	ErrAliased = errors.New("a new-form endpoint aliases it (left in place)")
 	// ErrNoRecord: there is no directory record, so nothing proves who owns the name (or its inbox stream).
 	ErrNoRecord = errors.New("it has no directory record, so nothing proves the key owns it (left in place)")
 )
@@ -1382,9 +1229,13 @@ var afterDeprovisionPurge func()
 // --user) finishes it.
 //
 // With no record nothing proves ownership, so it refuses even when the inbox stream exists (a provision that failed
-// before writing its record): remove that stream with a plain deprovision. The one exception is a new-form key with a
+// before writing its record): remove that stream with a plain deprovision. The one exception is a key with a
 // retired marker, the remains of an interrupted removal, which it finishes; with no marker it changes nothing.
-func (a *Admin) DeprovisionIfUser(ctx context.Context, name, user string) (err error) {
+func (a *Admin) DeprovisionIfUser(ctx context.Context, addr sap.Address, user string) (err error) {
+	if err := addr.Validate(); err != nil {
+		return fmt.Errorf("mash: deprovision: %w", err)
+	}
+	name := addr.Flat()
 	kv, err := a.dir(ctx)
 	if err != nil {
 		return err
@@ -1402,11 +1253,6 @@ func (a *Admin) DeprovisionIfUser(ctx context.Context, name, user string) (err e
 	defer lk.release(ctx)
 	ctx, end := lk.guard(ctx, "deprovision", &err)
 	defer end()
-	adm, err := a.guardLegacyAlias(ctx, kv, name)
-	if err != nil {
-		return err
-	}
-	defer adm.release(ctx)
 	changed := &refusedError{name: name, why: ErrRecordChanged, text: "the record for " + name + " changed; left in place"}
 	purged, revoked := false, false
 	var pm *retireMark
@@ -1422,12 +1268,9 @@ func (a *Admin) DeprovisionIfUser(ctx context.Context, name, user string) (err e
 					keep = true
 					return partialIf(revoked, name, user, changed) // it vanished after we read it: nothing proves ownership now
 				}
-				if _, ferr := sap.FromFlat(name); strings.Contains(name, "_") && ferr == nil {
-					// A new-form name whose record is already gone: finished only if a retired marker shows a
-					// removal began (else ErrNoRecord, nothing changed).
-					return a.finishAfterPurge(ctx, lk, lease, name, user)
-				}
-				return refusal(name, ErrNoRecord)
+				// A record already gone: finished only if a retired marker shows a removal began (else
+				// ErrNoRecord, nothing changed).
+				return a.finishAfterPurge(ctx, lk, lease, addr, user)
 			}
 			if err != nil {
 				return partialIf(revoked, name, user, fmt.Errorf("mash: directory %s: %w", name, err))
@@ -1451,7 +1294,7 @@ func (a *Admin) DeprovisionIfUser(ctx context.Context, name, user string) (err e
 			}
 			if pm == nil {
 				// First phase: the marker is pending before the user is revoked or the record purged.
-				if pm, err = a.beginRetire(ctx, lk, name, user); err != nil { // new-form only
+				if pm, err = a.beginRetire(ctx, lk, addr, user); err != nil {
 					return err
 				}
 			}
@@ -1462,9 +1305,6 @@ func (a *Admin) DeprovisionIfUser(ctx context.Context, name, user string) (err e
 				if err != nil {
 					return err
 				}
-			}
-			if err := adm.check(ctx); err != nil {
-				return partialIf(revoked, name, user, err)
 			}
 			err = purgeDirectory(ctx, kv, name, jetstream.LastRevision(e.Revision()))
 			switch {
@@ -1488,7 +1328,7 @@ func (a *Admin) DeprovisionIfUser(ctx context.Context, name, user string) (err e
 		// A definitive refusal deletes the pending marker even after the revoke (the old user stays revoked); a
 		// refusal before the purge deletes the one this call wrote; an unknown outcome leaves it pending.
 		if !purged && !keep && (refused || !revoked) {
-			err = a.abortRetire(ctx, lk, adm, pm, err, refused)
+			err = a.abortRetire(ctx, lk, pm, err, refused)
 		}
 		return err
 	}
@@ -1505,14 +1345,15 @@ func (a *Admin) DeprovisionIfUser(ctx context.Context, name, user string) (err e
 	return partialIf(revoked, name, user, a.fenceAndDeleteInbox(ctx, lk, lease, name))
 }
 
-// finishAfterPurge completes a DeprovisionIfUser whose record is already gone for a new-form key: the remains of a
+// finishAfterPurge completes a DeprovisionIfUser whose record is already gone: the remains of a
 // removal that stopped after the purge. Only an existing retired marker proves such a removal began (the marker is
 // written pending before anything is revoked or purged), so with no marker it refuses with ErrNoRecord and changes
 // nothing: a never-provisioned name, or a partial provision's inbox stream, is neither burned nor deleted. A pending
 // marker becomes final (it keeps its first time); a final one is left as it is; a marker for another user than the
 // caller's refuses. Then the lease is fenced and the inbox deleted. The caller holds name's lock.
-func (a *Admin) finishAfterPurge(ctx context.Context, lk *streamLock, lease jetstream.KeyValue, name string, user string) error {
-	pm, err := a.loadRetire(ctx, name)
+func (a *Admin) finishAfterPurge(ctx context.Context, lk *streamLock, lease jetstream.KeyValue, addr sap.Address, user string) error {
+	name := addr.Flat()
+	pm, err := a.loadRetire(ctx, addr)
 	if err != nil {
 		return err
 	}
@@ -1526,74 +1367,6 @@ func (a *Admin) finishAfterPurge(ctx context.Context, lk *streamLock, lease jets
 		return err
 	}
 	return a.fenceAndDeleteInbox(ctx, lk, lease, name)
-}
-
-// aliasGuard is the admission lock a legacy removal holds while it checks that no new-form record aliases the name.
-// A nil guard (a new-form key) holds nothing.
-type aliasGuard struct{ l *streamLock }
-
-func (g *aliasGuard) release(ctx context.Context) {
-	if g != nil {
-		g.l.release(ctx)
-	}
-}
-
-func (g *aliasGuard) check(ctx context.Context) error {
-	if g == nil {
-		return nil
-	}
-	return g.l.check(ctx)
-}
-
-// guardLegacyAlias is the alias check of every path that removes a legacy record (a key without "_"). Under the
-// directory-wide admission lock (taken after the caller's name lock, never before it) it refuses when a new-form
-// record's alias names this record's owner and name: removing the record would leave that alias dangling, and a legacy
-// Provision of the name could then hand its bridge permissions to a different endpoint. It returns the held lock,
-// which the caller releases once the record is removed, or nil for a new-form key. A directory with no new-form key
-// is not read. Otherwise every record is read and one that cannot be read refuses (fail closed), as admission does.
-// The caller holds name's lock.
-func (a *Admin) guardLegacyAlias(ctx context.Context, kv jetstream.KeyValue, name string) (*aliasGuard, error) {
-	if strings.Contains(name, "_") {
-		return nil, nil
-	}
-	adm, err := a.lockStream(ctx, admissionLockName)
-	if err != nil {
-		return nil, err
-	}
-	g := &aliasGuard{l: adm}
-	keys, err := kv.Keys(ctx)
-	if errors.Is(err, jetstream.ErrNoKeysFound) {
-		return g, nil
-	}
-	if err != nil {
-		g.release(ctx)
-		return nil, fmt.Errorf("mash: refusing to deprovision %s: list directory: %w", name, err)
-	}
-	if !slices.ContainsFunc(keys, func(k string) bool { return strings.Contains(k, "_") }) {
-		return g, nil
-	}
-	recs, err := a.directoryRecords(ctx, kv)
-	if err != nil {
-		g.release(ctx)
-		return nil, fmt.Errorf("mash: refusing to deprovision %s: %w (left in place)", name, err)
-	}
-	// The alias names the legacy record's own owner and name, whatever owner this admin is configured with. When
-	// the record's owner cannot be established, any alias naming the name blocks (fail closed).
-	owner, ownerKnown := "", false
-	if e, gerr := kv.Get(ctx, name); gerr == nil {
-		if rec, perr := store.ParseRecord(name, e.Value()); perr == nil && rec.Owner != "" {
-			owner, ownerKnown = rec.Owner, true
-		}
-	}
-	for _, r := range recs {
-		if r.Alias != nil && r.Alias.Name == name && (!ownerKnown || r.Alias.Owner == owner) {
-			g.release(ctx)
-			holder := r.KeyOrName()
-			return nil, &refusedError{name: name, why: ErrAliased, holder: holder,
-				text: fmt.Sprintf("the new-form endpoint %s still names it as its alias; retire or re-point %s first (nothing was removed)", holder, holder)}
-		}
-	}
-	return g, nil
 }
 
 // IsRefusal reports whether err is a refusal of DeprovisionIfUser: the call touched nothing. Any other error from it
@@ -1626,18 +1399,6 @@ type refusedError struct {
 	name string
 	why  error
 	text string // overrides why's text when set
-	// holder is the new-form endpoint that names name as its alias (ErrAliased only).
-	holder string
-}
-
-// AliasHolder returns the new-form endpoint (its flat name) that blocks a deprovision with ErrAliased, or "" when err
-// is not that refusal.
-func AliasHolder(err error) string {
-	var r *refusedError
-	if errors.As(err, &r) && errors.Is(r.why, ErrAliased) {
-		return r.holder
-	}
-	return ""
 }
 
 func (r *refusedError) Error() string {
@@ -1691,11 +1452,15 @@ func (a *Admin) List(ctx context.Context) ([]store.Record, error) {
 	return out, nil
 }
 
-// Exists reports whether name has a directory record, an inbox stream or a live lease (not just the tombstone a
+// Exists reports whether addr has a directory record, an inbox stream or a live lease (not just the tombstone a
 // deprovision leaves): any of them is something a deprovision removes or fences.
 // Deprovision itself stays idempotent (rollbacks rely on it); a CLI verb asks this first to refuse a name that was
 // never there.
-func (a *Admin) Exists(ctx context.Context, name string) (bool, error) {
+func (a *Admin) Exists(ctx context.Context, addr sap.Address) (bool, error) {
+	if err := addr.Validate(); err != nil {
+		return false, fmt.Errorf("mash: exists: %w", err)
+	}
+	name := addr.Flat()
 	kv, err := a.js.KeyValue(ctx, store.DirectoryBucket)
 	switch {
 	case errors.Is(err, jetstream.ErrBucketNotFound):
@@ -1724,7 +1489,7 @@ func (a *Admin) Exists(ctx context.Context, name string) (bool, error) {
 	return false, nil
 }
 
-// jsErrUnavailable is the JetStream API error code for "JetStream system temporarily unavailable" (no meta leader,
+// jsErrUnavailable is the JetStream API error code for "JetStream system temporarily unavailable" (no meta quorum,
 // typically too few servers up to keep quorum).
 const jsErrUnavailable = 10008
 

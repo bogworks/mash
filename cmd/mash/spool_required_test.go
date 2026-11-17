@@ -57,8 +57,8 @@ func TestServeSpoolRequiredHoldsMailAndBindsWhenTheSpoolRecovers(t *testing.T) {
 	s := startServe(t, w.env["a"])
 	s.initialize(t)
 	s.tools(t)
-	eventually(t, 5*time.Second, "a online", func() bool { out, _ := w.cli(t, "a", "who"); return strings.Contains(out, "a\tonline") })
-	if _, code := w.cli(t, "b", "send", "a", "must stay unacked"); code != 0 {
+	eventually(t, 5*time.Second, "a online", func() bool { out, _ := w.cli(t, "a", "who"); return strings.Contains(out, tTo("a")+"\tonline") })
+	if _, code := w.cli(t, "b", "send", tTo("a"), "must stay unacked"); code != 0 {
 		t.Fatal("send failed")
 	}
 	notice := content(s.await(t, 15*time.Second, isChannel))
@@ -83,7 +83,7 @@ func TestServeSpoolRequiredHoldsMailAndBindsWhenTheSpoolRecovers(t *testing.T) {
 	if err := os.MkdirAll(state, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	sp := spool.Spool{Dir: spool.Dir(state, w.env["a"]["MASH_OWNER"], w.env["a"]["MASH_NAME"])}
+	sp := spool.Spool{Dir: spool.Dir(state, w.env["a"]["MASH_OWNER"], tAddr(w.env["a"]["MASH_NAME"]).Flat())}
 	eventually(t, 3*spoolRetryEvery+30*time.Second, "the held mail is spooled", func() bool { e, _ := sp.Waiting(); return len(e) == 1 })
 	if n := unreadOf(t, w, "a"); n != 1 {
 		t.Fatalf("unread %d, want 1: spooled, not yet drained", n)

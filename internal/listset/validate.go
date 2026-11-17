@@ -9,7 +9,8 @@ import (
 	"github.com/bogworks/mash/internal/sap"
 )
 
-// address is a parsed three-part address, "range.owner.name".
+// address is a parsed three-part address, "range.owner.name": the endpoint address owner.group.instance, with the
+// account's range as the owner token.
 type address struct{ rng, owner, name string }
 
 func (a address) String() string { return a.rng + "." + a.owner + "." + a.name }
@@ -20,17 +21,17 @@ func (a address) group() string { return a.rng + "." + a.owner }
 // tail is "owner.name", the tag value form of an address inside the account's range.
 func (a address) tail() string { return a.owner + "." + a.name }
 
-// parseAddress parses a three-part address with mash's naming grammar (sap.ParseCanonical, ADR 0074). The grammar
+// parseAddress parses a three-part address with mash's naming grammar (sap.ParseAddress). The grammar
 // refuses every character a wildcard needs, but the reason names the wildcard so the caller sees REQ-003 at work.
 func parseAddress(s string) (address, string) {
 	if strings.ContainsAny(s, "*>") {
 		return address{}, "wildcards are refused: an entry names one exact address"
 	}
-	id, err := sap.ParseCanonical(s)
+	id, err := sap.ParseAddress(s)
 	if err != nil {
 		return address{}, strings.TrimPrefix(err.Error(), "sap: ")
 	}
-	return address{id.Agent, id.Owner, id.Name}, ""
+	return address{id.Owner, id.Group, id.Instance}, ""
 }
 
 // parseGroup parses "range.owner". A three-part value is a switch for a single sender.
@@ -40,8 +41,8 @@ func parseGroup(s string) (rng, owner, reason string) {
 	}
 	switch parts := strings.Split(s, "."); len(parts) {
 	case 2:
-		// sap.New is the grammar; "a" is a name that always passes it.
-		if _, err := sap.New(parts[0], parts[1], "a"); err != nil {
+		// sap.NewAddress is the grammar; "a" is a name that always passes it.
+		if _, err := sap.NewAddress(parts[0], parts[1], "a"); err != nil {
 			return "", "", strings.TrimPrefix(err.Error(), "sap: ")
 		}
 		return parts[0], parts[1], ""
@@ -87,7 +88,7 @@ func validate(ls ListSet) (*model, error) {
 	var ps []Problem
 	bad := func(entry, format string, a ...any) { ps = append(ps, Problem{entry, fmt.Sprintf(format, a...)}) }
 
-	if _, err := sap.New(ls.Range, "a", "a"); err != nil {
+	if _, err := sap.NewAddress(ls.Range, "a", "a"); err != nil {
 		bad("range "+quote(ls.Range), "%s", strings.TrimPrefix(err.Error(), "sap: "))
 	}
 	m := &model{rng: ls.Range, switches: map[string]map[Verb]Switch{}}

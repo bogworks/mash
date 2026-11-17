@@ -19,7 +19,6 @@ import (
 
 	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/natsauth"
-	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/store"
 	"github.com/bogworks/mash/internal/testenv"
 )
@@ -55,18 +54,8 @@ func adoptionSubjects() []string {
 
 // No permission list mash gives an endpoint grants anything on the adoption marker.
 func TestEndpointPermissionsGrantNothingOnAdoptionMarker(t *testing.T) {
-	id, err := sap.New("claude", "o", "a")
-	if err != nil {
-		t.Fatal(err)
-	}
-	nf, err := admin.NewFormPermissions(id, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
 	lists := map[string]jwt.Permissions{
-		"Permissions":   admin.Permissions("o", "a"),
-		"PermissionsTo": admin.PermissionsTo("o", "a", []string{"b", "c"}),
-		"NewForm":       nf,
+		"Permissions": *admin.Permissions(ep(t, "a")),
 	}
 	for name, p := range lists {
 		allow := append(slices.Clone([]string(p.Pub.Allow)), p.Sub.Allow...)
@@ -92,7 +81,7 @@ func TestLiveEndpointCannotTouchAdoptionMarker(t *testing.T) {
 	if _, _, err := a.Adopt(ctx, acct, sub, by, nil); err != nil {
 		t.Fatal(err)
 	}
-	creds, _ := e.Mint(t, "alpha")
+	creds, _ := e.Mint(t, ep(t, "alpha"))
 	violations := make(chan error, 64)
 	nc, err := nats.Connect(e.URL, natsauth.UserCredentials(creds), nats.ErrorHandler(func(_ *nats.Conn, _ *nats.Subscription, err error) {
 		select {

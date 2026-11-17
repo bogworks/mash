@@ -29,7 +29,7 @@ func TestInboxOverflowEvictsTheOldest(t *testing.T) {
 	f := newFixture(t, "a", "b")
 	ctx := context.Background()
 	js := adminJS(t, f)
-	st, err := js.Stream(ctx, sap.InboxStream("a"))
+	st, err := js.Stream(ctx, taddr("a").InboxStream())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +41,7 @@ func TestInboxOverflowEvictsTheOldest(t *testing.T) {
 	body := strings.Repeat("x", 400<<10) // 400 KiB: 16 MiB holds about 40
 	const total = 60
 	for i := 1; i <= total; i++ {
-		seq, err := b.Send(ctx, "a", body, 0)
+		seq, err := b.Send(ctx, tdot("a"), body, 0)
 		if err != nil {
 			t.Fatalf("send %d refused (discard-old must accept it): %v", i, err)
 		}
@@ -73,7 +73,7 @@ func TestInboxOverflowEvictsTheOldest(t *testing.T) {
 // live server reports it.
 func TestInboxConsumerConfigOnTheServer(t *testing.T) {
 	f := newFixture(t, "a")
-	c, err := adminJS(t, f).Consumer(context.Background(), sap.InboxStream("a"), store.Consumer)
+	c, err := adminJS(t, f).Consumer(context.Background(), taddr("a").InboxStream(), store.Consumer)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,11 +91,11 @@ func TestInboxConsumerRedeliversWithoutLimit(t *testing.T) {
 	js := adminJS(t, f)
 	cc := store.ConsumerConfig()
 	cc.AckWait = 250 * time.Millisecond
-	c, err := js.UpdateConsumer(ctx, sap.InboxStream("a"), cc)
+	c, err := js.UpdateConsumer(ctx, taddr("a").InboxStream(), cc)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.client(t, "b").Send(ctx, "a", "never acked", 0); err != nil {
+	if _, err := f.client(t, "b").Send(ctx, tdot("a"), "never acked", 0); err != nil {
 		t.Fatal(err)
 	}
 	const want = 10
@@ -127,7 +127,7 @@ func TestInboxConsumerCapsOutstandingAt1000(t *testing.T) {
 	f := newFixture(t, "a")
 	ctx := context.Background()
 	js := adminJS(t, f)
-	subj := sap.For(f.e.Owner, "a").Mail
+	subj := taddr("a").Subjects().Mail
 	const total = 1005
 	for i := 0; i < total; i++ {
 		if _, err := js.PublishAsync(subj, []byte("m")); err != nil {
@@ -139,7 +139,7 @@ func TestInboxConsumerCapsOutstandingAt1000(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("publishes did not complete")
 	}
-	c, err := js.Consumer(ctx, sap.InboxStream("a"), store.Consumer)
+	c, err := js.Consumer(ctx, taddr("a").InboxStream(), store.Consumer)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,10 +186,10 @@ func TestInboxConsumerCapsOutstandingAt1000(t *testing.T) {
 func TestPromptFromAVerifiedSenderOutsideTheDirectory403(t *testing.T) {
 	f := newFixture(t, "a", "b")
 	f.serve(t, "a", func(*Endpoint, PromptEvent) { t.Error("a prompt from outside the directory reached the session") })
-	creds, _ := f.e.Mint(t, "x") // a valid user with its own key, never provisioned
-	nc := f.e.ConnAs(t, creds, "x")
+	creds, _ := f.e.Mint(t, taddr("x")) // a valid user with its own key, never provisioned
+	nc := f.e.ConnAs(t, creds, tkey("x"))
 	id := identity(t, creds)
-	const subj = "agents.prompt.cc.o.a"
+	subj := taddr("a").Subjects().Prompt
 
 	raw := func(name string) string {
 		t.Helper()
@@ -234,11 +234,11 @@ func TestPromptFromAVerifiedSenderOutsideTheDirectory403(t *testing.T) {
 	}
 	// The Prompt client path shows the same refusal.
 	var out bytes.Buffer
-	err := Prompt(context.Background(), nc, id, "x", subj, "again", &out)
+	err := Prompt(context.Background(), nc, id, tkey("x"), subj, "again", &out)
 	if err == nil || !strings.Contains(err.Error(), "403") || out.Len() != 0 {
 		t.Fatalf("Prompt: err %v, out %q", err, out.String())
 	}
-	st, err := adminJS(t, f).Stream(context.Background(), sap.InboxStream("a"))
+	st, err := adminJS(t, f).Stream(context.Background(), taddr("a").InboxStream())
 	if err != nil {
 		t.Fatal(err)
 	}

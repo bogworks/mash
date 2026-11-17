@@ -3,6 +3,7 @@ package admin_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -35,19 +36,20 @@ func TestLeaseBucketRefusesEndpointRollup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	keys := []string{"alice", "bob", admin.LockKey("bob")}
+	alice, bob := ep(t, "alice"), ep(t, "bob")
+	keys := []string{alice.Flat(), bob.Flat(), admin.LockKey(bob.Flat())}
 	for _, k := range keys {
 		if _, err := kv.Put(ctx, k, []byte("live")); err != nil {
 			t.Fatal(err)
 		}
 	}
-	creds, _ := e.Mint(t, "alice")
-	ajs, err := jetstream.New(e.ConnAs(t, creds, "alice"))
+	creds, _ := e.Mint(t, alice)
+	ajs, err := jetstream.New(e.ConnAs(t, creds, alice.Flat()))
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, mode := range []string{"all", "sub"} {
-		m := nats.NewMsg("$KV." + store.LeaseBucket + ".alice")
+		m := nats.NewMsg("$KV." + store.LeaseBucket + "." + alice.Flat())
 		m.Header.Set("Nats-Rollup", mode)
 		m.Data = []byte("replacement")
 		pctx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -233,31 +235,26 @@ func TestClearLeaseRevisionConflict(t *testing.T) {
 	}
 }
 
-// Provision clears a deprovisioned name's lease marker at once, with rollup disabled, and the key is free for an
-// endpoint's Create and for a lock.
-func TestProvisionClearsLeaseMarkerWithoutRollup(t *testing.T) {
+// Deprovision fences the lease with a tombstone, with rollup disabled. The address is never provisioned again (the
+// retired marker refuses it), so nothing clears the tombstone.
+func TestDeprovisionFencesLeaseWithoutRollup(t *testing.T) {
 	e, a, js := setup(t)
 	ctx := context.Background()
-	_, user := e.Mint(t, "alpha")
-	if _, err := a.Provision(ctx, "alpha", user, e.Account, "", admin.Meta{}); err != nil {
+	id := ep(t, "alpha")
+	_, user := e.Mint(t, id)
+	if _, err := a.Provision(ctx, id, user, e.Account, "", admin.Meta{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.Deprovision(ctx, "alpha"); err != nil {
+	if err := a.Deprovision(ctx, id); err != nil {
 		t.Fatal(err)
 	}
 	lease, _ := js.KeyValue(ctx, store.LeaseBucket)
-	if _, err := lease.Get(ctx, "alpha"); err != nil {
-		t.Fatalf("no tombstone to clear: %v", err)
+	if _, err := lease.Get(ctx, id.Flat()); err != nil {
+		t.Fatalf("no tombstone: %v", err)
 	}
-	_, user2 := e.Mint(t, "alpha")
-	if _, err := a.Provision(ctx, "alpha", user2, e.Account, "", admin.Meta{}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := lease.Get(ctx, "alpha"); !errors.Is(err, jetstream.ErrKeyNotFound) && !errors.Is(err, jetstream.ErrKeyDeleted) {
-		t.Fatalf("the lease key was not cleared: %v", err)
-	}
-	if _, err := lease.Create(ctx, "alpha", []byte("held")); err != nil {
-		t.Fatalf("the name is not free at once: %v", err)
+	_, user2 := e.Mint(t, id)
+	if _, err := a.Provision(ctx, id, user2, e.Account, "", admin.Meta{}); err == nil || !strings.Contains(err.Error(), "retired") {
+		t.Fatalf("re-provisioning a retired address: %v", err)
 	}
 	if leaseRollupAllowed(t, js) {
 		t.Fatal("the lease bucket allows rollup")

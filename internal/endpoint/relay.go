@@ -45,7 +45,7 @@ type RelayCounters struct {
 
 type relayRecv struct {
 	seq  uint64
-	num  string // seq as shown: "5", or "L5" for a legacy-stream message
+	num  string // seq as shown: "5"
 	from string
 	at   time.Time
 }

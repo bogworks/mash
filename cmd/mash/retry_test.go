@@ -162,7 +162,7 @@ func TestServeRetriesHeldLease(t *testing.T) {
 	setTiming(t, 50*time.Millisecond, 20*time.Second)
 	w := newWorld(t, "a", "b")
 	kv := leaseKV(t, w)
-	holdLease(t, kv, "a")
+	holdLease(t, kv, tAddr("a").Flat())
 	s := startServe(t, w.env["a"])
 	s.initialize(t)
 	if n := len(s.tools(t)); n != 7 {
@@ -175,22 +175,22 @@ func TestServeRetriesHeldLease(t *testing.T) {
 		}
 	}
 	// Mail sent while the name is held waits in the inbox and arrives after the online notice.
-	if out, code := w.cli(t, "b", "send", "a", "sent while held"); code != 0 {
+	if out, code := w.cli(t, "b", "send", tTo("a"), "sent while held"); code != 0 {
 		t.Fatalf("send: %d %s", code, out)
 	}
-	freeLease(t, kv, "a")
+	freeLease(t, kv, tAddr("a").Flat())
 	s.awaitOnline(t)
 	if ev := content(s.await(t, 5*time.Second, isChannel)); !strings.Contains(ev, "sent while held") {
 		t.Fatalf("expected the queued mail after the online notice, got %s", ev)
 	}
-	if out, code := w.cli(t, "b", "send", "a", "hello after recovery"); code != 0 {
+	if out, code := w.cli(t, "b", "send", tTo("a"), "hello after recovery"); code != 0 {
 		t.Fatalf("send: %d %s", code, out)
 	}
 	if ev := content(s.await(t, 5*time.Second, isChannel)); !strings.Contains(ev, "hello after recovery") {
 		t.Fatalf("expected the mail, got %s", ev)
 	}
 	// The registered tools now work on the recovered endpoint, as endpoint a.
-	r := s.call(t, 10, "send", `{"to":"b","text":"thanks"}`)
+	r := s.call(t, 10, "send", `{"to":"o.dev.b","text":"thanks"}`)
 	if txt := resultText(r); !strings.HasPrefix(txt, "sent #") || r["isError"] == true {
 		t.Fatalf("send tool after recovery: %v", r)
 	}
@@ -200,13 +200,13 @@ func TestServeRetriesHeldLease(t *testing.T) {
 	if txt := resultText(s.call(t, 12, "read", `{"seq":1}`)); !strings.Contains(txt, "sent while held") {
 		t.Fatalf("read after recovery: %s", txt)
 	}
-	if txt := resultText(s.call(t, 13, "who", `{}`)); !strings.Contains(txt, "a\tonline") {
+	if txt := resultText(s.call(t, 13, "who", `{}`)); !strings.Contains(txt, tTo("a")+"\tonline") {
 		t.Fatalf("who after recovery: %s", txt)
 	}
-	if out, _ := w.cli(t, "b", "inbox"); !strings.Contains(out, "from a [verified]") || !strings.Contains(out, "thanks") {
+	if out, _ := w.cli(t, "b", "inbox"); !strings.Contains(out, "from o.dev.a [verified]") || !strings.Contains(out, "thanks") {
 		t.Fatalf("b's inbox: %s", out)
 	}
-	if out, _ := w.cli(t, "b", "who"); !strings.Contains(out, "a\tonline") {
+	if out, _ := w.cli(t, "b", "who"); !strings.Contains(out, tTo("a")+"\tonline") {
 		t.Fatalf("who: %s", out)
 	}
 }
@@ -215,12 +215,12 @@ func TestServeAcquireBeforeInitialized(t *testing.T) {
 	setTiming(t, 50*time.Millisecond, 20*time.Second)
 	w := newWorld(t, "a", "b")
 	kv := leaseKV(t, w)
-	holdLease(t, kv, "a")
+	holdLease(t, kv, tAddr("a").Flat())
 	s := startServe(t, w.env["a"])
 	attempts := acquireAttempts.Load()
 	eventually(t, 5*time.Second, "first Open found the lease held and a retry started", func() bool { return acquireAttempts.Load() > attempts })
 	before := acquiredCount.Load()
-	freeLease(t, kv, "a")
+	freeLease(t, kv, tAddr("a").Flat())
 	eventually(t, 5*time.Second, "waiter takes the lease before initialize", func() bool { return acquiredCount.Load() > before })
 	// Claude has not initialized: nothing may be pushed yet.
 	s.none(t, 400*time.Millisecond, isChannel)
@@ -230,7 +230,7 @@ func TestServeAcquireBeforeInitialized(t *testing.T) {
 	if !strings.Contains(online, "online") || strings.Contains(online, "retrying") {
 		t.Fatalf("expected exactly the online notice, got %s", online)
 	}
-	if out, code := w.cli(t, "b", "send", "a", "queued mail"); code != 0 {
+	if out, code := w.cli(t, "b", "send", tTo("a"), "queued mail"); code != 0 {
 		t.Fatalf("send: %d %s", code, out)
 	}
 	if ev := content(s.await(t, 5*time.Second, isChannel)); !strings.Contains(ev, "queued mail") {
@@ -246,8 +246,8 @@ func TestServeDoesNotDisplaceRenewingHolder(t *testing.T) {
 	holder := startServe(t, w.env["a"])
 	holder.initialize(t)
 	holder.tools(t)
-	eventually(t, 5*time.Second, "holder online", func() bool { out, _ := w.cli(t, "a", "who"); return strings.Contains(out, "a\tonline") })
-	first, err := kv.Get(context.Background(), "a")
+	eventually(t, 5*time.Second, "holder online", func() bool { out, _ := w.cli(t, "a", "who"); return strings.Contains(out, tTo("a")+"\tonline") })
+	first, err := kv.Get(context.Background(), tAddr("a").Flat())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,11 +257,11 @@ func TestServeDoesNotDisplaceRenewingHolder(t *testing.T) {
 	waiter.tools(t)
 	eventually(t, 10*time.Second, "10 retries while the holder renews", func() bool { return acquireAttempts.Load()-attempts0 >= 10 })
 	eventually(t, 10*time.Second, "5 holder refreshes", func() bool {
-		cur, err := kv.Get(context.Background(), "a")
+		cur, err := kv.Get(context.Background(), tAddr("a").Flat())
 		return err == nil && cur.Revision() >= first.Revision()+5
 	})
 	// The holder still gets its mail while a waiter is retrying against it.
-	if out, code := w.cli(t, "a", "send", "a", "to the holder"); code != 0 {
+	if out, code := w.cli(t, "a", "send", tTo("a"), "to the holder"); code != 0 {
 		t.Fatalf("send: %d %s", code, out)
 	}
 	if ev := content(holder.await(t, 5*time.Second, isChannel)); !strings.Contains(ev, "to the holder") {
@@ -278,18 +278,18 @@ func TestServeDoesNotDisplaceRenewingHolder(t *testing.T) {
 func TestServeWaitingToolsAreSafe(t *testing.T) {
 	setTiming(t, time.Hour, 20*time.Second)
 	w := newWorld(t, "a")
-	holdLease(t, leaseKV(t, w), "a")
+	holdLease(t, leaseKV(t, w), tAddr("a").Flat())
 	s := startServe(t, w.env["a"])
 	s.initialize(t)
 	calls := map[string]string{
-		"send": `{"to":"x","text":"y"}`, "read": `{"seq":1}`, "inbox": `{}`, "who": `{}`,
+		"send": `{"to":"o.dev.x","text":"y"}`, "read": `{"seq":1}`, "inbox": `{}`, "who": `{}`,
 		"reply": `{"request_id":"r","text":"t"}`,
 	}
 	id := 20
 	for tool, args := range calls {
 		id++
 		r := s.call(t, id, tool, args)
-		if r["isError"] != true || !strings.Contains(resultText(r), "waiting for endpoint a") {
+		if r["isError"] != true || !strings.Contains(resultText(r), "waiting for endpoint o.dev.a") {
 			t.Fatalf("%s while waiting: %v", tool, r)
 		}
 	}
@@ -298,7 +298,7 @@ func TestServeWaitingToolsAreSafe(t *testing.T) {
 func TestServeWaitingInstructionsKeepPolicy(t *testing.T) {
 	setTiming(t, time.Hour, 20*time.Second)
 	w := newWorld(t, "a")
-	holdLease(t, leaseKV(t, w), "a")
+	holdLease(t, leaseKV(t, w), tAddr("a").Flat())
 	dir := filepath.Join(w.env["a"]["HOME"], ".config", "mash")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
@@ -318,7 +318,7 @@ func TestServeWaitingInstructionsKeepPolicy(t *testing.T) {
 func TestServeLegacyPolicyWithXDGConfig(t *testing.T) {
 	setTiming(t, time.Hour, 20*time.Second)
 	w := newWorld(t, "a")
-	holdLease(t, leaseKV(t, w), "a")
+	holdLease(t, leaseKV(t, w), tAddr("a").Flat())
 	env := w.env["a"]
 	xdg := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(xdg, "mash"), 0o755); err != nil {
@@ -405,7 +405,7 @@ func TestServeUnreadablePolicyIsConfigError(t *testing.T) {
 	if err := os.Remove(filepath.Join(dir, "policy.md")); err != nil {
 		t.Fatal(err)
 	}
-	holdLease(t, leaseKV(t, w), "a")
+	holdLease(t, leaseKV(t, w), tAddr("a").Flat())
 	s2 := startServe(t, env)
 	instr = s2.initialize(t)["result"].(map[string]any)["instructions"].(string)
 	if strings.Contains(instr, "reading ") {
@@ -430,7 +430,7 @@ func TestServeCancelDuringWait(t *testing.T) {
 	w := newWorld(t, "a")
 	kv := leaseKV(t, w)
 	base := w.e.Connections()
-	holdLease(t, kv, "a")
+	holdLease(t, kv, tAddr("a").Flat())
 	s := startServe(t, w.env["a"])
 	s.initialize(t)
 	s.tools(t)
@@ -438,7 +438,7 @@ func TestServeCancelDuringWait(t *testing.T) {
 	eventually(t, 5*time.Second, "waiting", func() bool { return acquireAttempts.Load() > attempts+2 })
 	s.in.Close()
 	s.exited(t, 5*time.Second)
-	waitGone(t, w, base, "a", kv, false)
+	waitGone(t, w, base, tAddr("a").Flat(), kv, false)
 }
 
 // Cancellation (here the parent context, which is observable) is already in effect when a retry's Open
@@ -448,7 +448,7 @@ func TestServeCancelRightAfterOpen(t *testing.T) {
 	w := newWorld(t, "a")
 	kv := leaseKV(t, w)
 	base := w.e.Connections()
-	holdLease(t, kv, "a")
+	holdLease(t, kv, tAddr("a").Flat())
 	reached, release := make(chan struct{}), make(chan struct{})
 	var once sync.Once
 	letGo := func() { once.Do(func() { close(release) }) }
@@ -458,7 +458,7 @@ func TestServeCancelRightAfterOpen(t *testing.T) {
 	t.Cleanup(cancel)
 	done, closeIO := startServeCtx(t, ctx, w.env["a"])
 	t.Cleanup(closeIO)
-	freeLease(t, kv, "a")
+	freeLease(t, kv, tAddr("a").Flat())
 	select {
 	case <-reached:
 	case <-time.After(5 * time.Second):
@@ -471,8 +471,8 @@ func TestServeCancelRightAfterOpen(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("serve did not exit")
 	}
-	waitGone(t, w, base, "a", kv, false)
-	if _, err := kv.Get(context.Background(), "a"); err == nil {
+	waitGone(t, w, base, tAddr("a").Flat(), kv, false)
+	if _, err := kv.Get(context.Background(), tAddr("a").Flat()); err == nil {
 		t.Fatal("a successful Open raced with shutdown and left its lease held")
 	}
 }
@@ -482,7 +482,7 @@ func TestServeCancelBeforeAttemptAndParentCancel(t *testing.T) {
 	w := newWorld(t, "a")
 	kv := leaseKV(t, w)
 	base := w.e.Connections()
-	holdLease(t, kv, "a")
+	holdLease(t, kv, tAddr("a").Flat())
 	reached, release := make(chan struct{}, 100), make(chan struct{})
 	var once sync.Once
 	letGo := func() { once.Do(func() { close(release) }) }
@@ -504,7 +504,7 @@ func TestServeCancelBeforeAttemptAndParentCancel(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("serve did not exit on parent cancel")
 	}
-	waitGone(t, w, base, "a", kv, false)
+	waitGone(t, w, base, tAddr("a").Flat(), kv, false)
 }
 
 // startServeCtx runs serve under a caller-controlled context, for cancellation that stdin EOF cannot order.
@@ -523,7 +523,7 @@ func TestServeHeldThenNonHeldErrorIsTerminal(t *testing.T) {
 	setTiming(t, 30*time.Millisecond, 20*time.Second)
 	w := newWorld(t, "a")
 	kv := leaseKV(t, w)
-	holdLease(t, kv, "a")
+	holdLease(t, kv, tAddr("a").Flat())
 	// No Open may run during the deprovision: one that read the directory record before the purge and created the
 	// lease after it would come online (the flake this gate removes).
 	var gate sync.RWMutex
@@ -541,7 +541,7 @@ func TestServeHeldThenNonHeldErrorIsTerminal(t *testing.T) {
 		t.Fatal(err)
 	}
 	gate.Lock()
-	err = adm.Deprovision(context.Background(), "a")
+	err = adm.Deprovision(context.Background(), tAddr("a"))
 	gate.Unlock()
 	if err != nil {
 		t.Fatal(err)
@@ -567,7 +567,7 @@ func TestServeOrdinaryStartupHasNoNotice(t *testing.T) {
 	s.initialize(t)
 	s.tools(t)
 	s.none(t, 1200*time.Millisecond, isChannel)
-	if out, code := w.cli(t, "b", "send", "a", "plain mail"); code != 0 {
+	if out, code := w.cli(t, "b", "send", tTo("a"), "plain mail"); code != 0 {
 		t.Fatalf("send: %d %s", code, out)
 	}
 	if ev := content(s.await(t, 5*time.Second, isChannel)); !strings.Contains(ev, "plain mail") {
@@ -636,7 +636,7 @@ func TestServeWaitSurvivesTransientErrors(t *testing.T) {
 			transientMax = 50 * time.Millisecond
 			w := newWorld(t, "a")
 			kv := leaseKV(t, w)
-			holdLease(t, kv, "a")
+			holdLease(t, kv, tAddr("a").Flat())
 			openEndpoint = failingOpen(func(n int64) bool { return n >= 2 && n <= 5 }, fmt.Errorf("mash: lease: %w", e))
 			s := startServe(t, w.env["a"])
 			s.initialize(t)
@@ -645,7 +645,7 @@ func TestServeWaitSurvivesTransientErrors(t *testing.T) {
 			attempts := acquireAttempts.Load()
 			eventually(t, 5*time.Second, "the transient failures are retried", func() bool { return acquireAttempts.Load() >= attempts+5 })
 			before := acquiredCount.Load()
-			freeLease(t, kv, "a")
+			freeLease(t, kv, tAddr("a").Flat())
 			eventually(t, 5*time.Second, "the waiter takes the freed name", func() bool { return acquiredCount.Load() > before })
 			s.awaitOnline(t)
 		})
@@ -659,7 +659,7 @@ func TestServeTransientErrorsEndAfterTheBudget(t *testing.T) {
 	transientMax, transientBudget = 30*time.Millisecond, 300*time.Millisecond
 	w := newWorld(t, "a")
 	kv := leaseKV(t, w)
-	holdLease(t, kv, "a")
+	holdLease(t, kv, tAddr("a").Flat())
 	openEndpoint = failingOpen(func(n int64) bool { return n >= 2 }, fmt.Errorf("mash: lease: %w", nats.ErrNoResponders))
 	s := startServe(t, w.env["a"])
 	s.initialize(t)
@@ -735,7 +735,7 @@ func TestServeFirstOpenTransientIsRetried(t *testing.T) {
 	if ev := content(s.await(t, 5*time.Second, isChannel)); !strings.Contains(ev, "online") {
 		t.Fatalf("want the online notice, got %s", ev)
 	}
-	if out, code := w.cli(t, "b", "send", "a", "after the blip"); code != 0 {
+	if out, code := w.cli(t, "b", "send", tTo("a"), "after the blip"); code != 0 {
 		t.Fatalf("send: %d %s", code, out)
 	}
 	if ev := content(s.await(t, 5*time.Second, isChannel)); !strings.Contains(ev, "after the blip") {
@@ -776,7 +776,7 @@ func TestServeRecordsMCPSeenAndChannelsInTheLease(t *testing.T) {
 	s.initialize(t)
 	s.tools(t)
 	lease := func() map[string]any {
-		en, err := kv.Get(context.Background(), "a")
+		en, err := kv.Get(context.Background(), tAddr("a").Flat())
 		if err != nil {
 			return nil
 		}
@@ -807,7 +807,7 @@ func TestServeRecordsItselfWhileWaiting(t *testing.T) {
 	setTiming(t, 50*time.Millisecond, 20*time.Second)
 	w := newWorld(t, "a", "b")
 	kv := leaseKV(t, w)
-	holdLease(t, kv, "a")
+	holdLease(t, kv, tAddr("a").Flat())
 	sp := spoolOf(w.env["a"])
 	rec := filepath.Join(sp.Dir, ".waiting."+strconv.Itoa(os.Getppid()))
 	s := startServe(t, w.env["a"])
@@ -816,7 +816,7 @@ func TestServeRecordsItselfWhileWaiting(t *testing.T) {
 	if got := sp.Waiters(); len(got) != 1 || got[0].PID != os.Getppid() {
 		t.Fatalf("Waiters = %+v", got)
 	}
-	freeLease(t, kv, "a")
+	freeLease(t, kv, tAddr("a").Flat())
 	s.awaitOnline(t)
 	eventually(t, 10*time.Second, "waiting record removed once bound", func() bool { _, err := os.Stat(rec); return err != nil })
 }
@@ -827,7 +827,7 @@ func TestServeLeaseRetryFromConfig(t *testing.T) {
 	setTiming(t, 10*time.Second, 20*time.Second)
 	w := newWorld(t, "a")
 	kv := leaseKV(t, w)
-	holdLease(t, kv, "a")
+	holdLease(t, kv, tAddr("a").Flat())
 	env := w.env["a"]
 	env["MASH_LEASE_RETRY"] = "50ms"
 	s := startServe(t, env)
@@ -836,7 +836,7 @@ func TestServeLeaseRetryFromConfig(t *testing.T) {
 	if held := content(s.await(t, 5*time.Second, isChannel)); !strings.Contains(held, "retrying every 50ms") {
 		t.Fatalf("held notice: %s", held)
 	}
-	freeLease(t, kv, "a")
+	freeLease(t, kv, tAddr("a").Flat())
 	s.awaitOnline(t)
 }
 

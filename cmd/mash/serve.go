@@ -393,7 +393,7 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 				fmt.Fprintf(stderr, "%v; superseded by a newer mash serve of this session (pid %s); this server is inactive\n", err, lostTo.PID)
 				told := make(chan struct{})
 				go func() {
-					_ = srv.Notify(supersededText(cfg.Name, lostTo), map[string]string{"error": "true"})
+					_ = srv.Notify(supersededText(cfg.DisplayName(), lostTo), map[string]string{"error": "true"})
 					close(told)
 				}()
 				select {
@@ -629,10 +629,10 @@ func tools(state *atomic.Pointer[sessionState], src *statusSource) []mcp.Tool {
 		}
 	}
 	return append([]mcp.Tool{
-		{Name: "send", Description: "Mail another mash endpoint by name. Returns the delivery receipt (#seq in their inbox). `in_reply_to` and `via` are signed declarations recipients see only when they verify.",
-			Schema: schema(map[string]any{"to": str("endpoint name"), "text": str("message body (markdown)"),
-				"in_reply_to": sendRefProp(src.cfg, "optional #seq of the message this answers; sent signed, so recipients see 'answers #N' when it verifies"),
-				"via": sendRefProp(src.cfg, "optional #seq of a message in your own inbox: declare that this message relays or quotes message #N of your inbox; "+
+		{Name: "send", Description: "Mail another mash endpoint by address (owner.group.instance, or the flat key owner_group_instance; a bare name is refused). Returns the delivery receipt (#seq in their inbox). `in_reply_to` and `via` are signed declarations recipients see only when they verify.",
+			Schema: schema(map[string]any{"to": str("recipient endpoint address: owner.group.instance or owner_group_instance"), "text": str("message body (markdown)"),
+				"in_reply_to": num("optional #seq of the message this answers; sent signed, so recipients see 'answers #N' when it verifies"),
+				"via": num("optional #seq of a message in your own inbox: declare that this message relays or quotes message #N of your inbox; " +
 					"recipients see 'relayed from <sender> #N' when the declaration verifies; omit it for ordinary mail"),
 				"urgent": flag("optional: wake the recipient at once instead of after its idle wait; for what cannot wait"),
 				"kind":   kindProp(),
@@ -681,7 +681,7 @@ func tools(state *atomic.Pointer[sessionState], src *statusSource) []mcp.Tool {
 				}
 				return fmt.Sprintf("sent #%d to %s", seq, sap.Display(sap.KeyOf(a.To))), nil
 			})},
-		{Name: "read", Description: readDescription(src.cfg),
+		{Name: "read", Description: "Read one message from your inbox by #seq.",
 			// Only after the result is written to the client has the model the body. That counts as seen, so serve
 			// acks the message, for one a hook listed in a digest (any mode, ADR 0046) and for one waiting in a
 			// session proven hookless (no hook will show it). Everywhere else the message stays held for a hook.
@@ -697,7 +697,7 @@ func tools(state *atomic.Pointer[sessionState], src *statusSource) []mcp.Tool {
 					}
 				}
 			},
-			Schema: readSchema(src.cfg),
+			Schema: schema(map[string]any{"seq": num("message #seq")}, "seq"),
 			Call: call(func(ctx context.Context, ep *endpoint.Endpoint, raw json.RawMessage) (string, error) {
 				var a struct {
 					Seq msgNumber `json:"seq"`
@@ -728,12 +728,12 @@ func tools(state *atomic.Pointer[sessionState], src *statusSource) []mcp.Tool {
 				}
 				return inboxText(ms), nil
 			})},
-		{Name: "who", Description: "List mash endpoints and whether each is online (asked of every endpoint now; the answer is reused for 30 seconds), with their role, host, description, capabilities and labels when recorded. " +
-			"Optional filters (all must match): match (text in name, role, note, description, capabilities or labels), cap (capability words, all must be present), name, role (case-insensitive substrings), " +
+		{Name: "who", Description: "List mash endpoints and whether each is online (asked of every endpoint now; the answer is reused for 30 seconds), with their address (owner.group.instance), harness, role, host, description, capabilities and labels when recorded. " +
+			"Optional filters (all must match): match (text in the address, role, note, description, capabilities or labels), cap (capability words, all must be present), name (an address or a substring of one), role (case-insensitive substrings), " +
 			"label (\"k\" or \"k=v\" strings), online (true: online only, false: offline only). format: text (default) or json.",
 			Schema: schema(map[string]any{
-				"match":  str("case-insensitive text found in the name, role, note, description, a capability, or a label key or value"),
-				"name":   str("case-insensitive substring of the endpoint name"),
+				"match":  str("case-insensitive text found in the address (owner.group.instance), role, note, description, a capability, or a label key or value"),
+				"name":   str("an owner.group.instance address or flat key (exact), or a case-insensitive substring of the address"),
 				"role":   str("case-insensitive substring of the role"),
 				"cap":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "each an exact capability word the endpoint must have"},
 				"label":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "each \"k\" (label present) or \"k=v\" (exact value)"},
@@ -836,9 +836,8 @@ func pluginLine(root string) string {
 	return fmt.Sprintf("plugin %s (%s)", m.Version, root)
 }
 
-// msgNumber is a message number as the read tool takes it: a JSON integer (5) or a string ("5", "#5", "L5", "#L5"),
-// kept as text for Endpoint.ResolveRef. The qualified L form names a message of the legacy inbox stream an endpoint
-// with an alias reads during the transition.
+// msgNumber is a message number as the read tool takes it: a JSON integer (5) or a string ("5", "#5"),
+// kept as text for Endpoint.ResolveRef.
 type msgNumber string
 
 func (n *msgNumber) UnmarshalJSON(b []byte) error {
@@ -849,44 +848,13 @@ func (n *msgNumber) UnmarshalJSON(b []byte) error {
 	}
 	var u uint64
 	if err := json.Unmarshal(b, &u); err != nil {
-		return fmt.Errorf("seq must be a message number such as 5 or \"L5\"")
+		return fmt.Errorf("seq must be a message number such as 5")
 	}
 	*n = msgNumber(strconv.FormatUint(u, 10))
 	return nil
 }
 
-// readDescription is the read tool's description. A legacy-only endpoint (no agent_token) gets the text it always had;
-// a three-token one also learns the qualified number form.
-func readDescription(cfg config.Config) string {
-	if cfg.AgentToken == "" {
-		return "Read one message from your inbox by #seq."
-	}
-	return "Read one message from your inbox by #seq. A message of your legacy inbox (shown as #L5) is read with seq \"L5\"."
-}
-
-// readSchema is the read tool's schema: the seq is an integer for a legacy-only endpoint, an integer or a string
-// (for #L5) for a three-token one.
-func readSchema(cfg config.Config) map[string]any {
-	if cfg.AgentToken == "" {
-		return schema(map[string]any{"seq": num("message #seq")}, "seq")
-	}
-	return schema(map[string]any{"seq": map[string]any{"type": []string{"integer", "string"},
-		"description": "message #seq: 5, or \"L5\" for a message of your legacy inbox"}}, "seq")
-}
-
-// sendRefProp is a send argument that names a message of your own inbox (in_reply_to, via). A legacy-only endpoint
-// (no agent_token) keeps the integer schema it always had; a three-token one takes an integer or a string too, so a
-// user can type the number as displayed (#5, #L5).
-func sendRefProp(cfg config.Config, desc string) map[string]any {
-	if cfg.AgentToken == "" {
-		return num(desc)
-	}
-	return map[string]any{"type": []string{"integer", "string"},
-		"description": desc + ". Give the number as shown (5 or #5); a legacy-stream message (#L5) cannot be named yet"}
-}
-
-// declaredSeq resolves a send argument to the bare number a signed declaration carries. A declaration cannot say which
-// stream a number is of, so a legacy-stream reference is refused rather than read as the primary message of that number.
+// declaredSeq resolves a send argument to the bare number a signed declaration carries.
 func declaredSeq(ep *endpoint.Endpoint, field string, n msgNumber) (uint64, error) {
 	if n == "" {
 		return 0, nil
@@ -894,9 +862,6 @@ func declaredSeq(ep *endpoint.Endpoint, field string, n msgNumber) (uint64, erro
 	ref, err := ep.ResolveRef(string(n))
 	if err != nil {
 		return 0, err
-	}
-	if ref.Stream != "" {
-		return 0, fmt.Errorf("%s cannot name a legacy-stream message (#L%d) yet", "in_reply_to/via", ref.Seq)
 	}
 	return ref.Seq, nil
 }
@@ -964,7 +929,7 @@ func whoText(ps []endpoint.Presence, long bool, live map[string]endpoint.LeaseIn
 		if p.Online {
 			state = "online"
 		}
-		fmt.Fprintf(&b, "%s\t%s", config.Clean(sap.Display(p.Record.KeyOrName())), state)
+		fmt.Fprintf(&b, "%s\t%s", config.Clean(recordAddress(p.Record)), state)
 		if !p.LastSeen.IsZero() {
 			fmt.Fprintf(&b, "\tseen %s ago", time.Since(p.LastSeen).Round(time.Second))
 		}
@@ -973,13 +938,10 @@ func whoText(ps []endpoint.Presence, long bool, live map[string]endpoint.LeaseIn
 		}
 		if long {
 			r := p.Record
-			for _, f := range []struct{ k, v string }{{"role", r.Role}, {"host", r.Host}, {"desc", r.Description}, {"caps", strings.Join(r.Caps, ",")}} {
+			for _, f := range []struct{ k, v string }{{"agent", r.Agent}, {"role", r.Role}, {"host", r.Host}, {"desc", r.Description}, {"caps", strings.Join(r.Caps, ",")}} {
 				if f.v != "" {
 					fmt.Fprintf(&b, "\t%s %s", f.k, config.Clean(f.v))
 				}
-			}
-			if r.Alias != nil {
-				fmt.Fprintf(&b, "\talias %s/%s", config.Clean(r.Alias.Owner), config.Clean(r.Alias.Name))
 			}
 			lk := make([]string, 0, len(r.Labels))
 			for k := range r.Labels {
@@ -989,7 +951,7 @@ func whoText(ps []endpoint.Presence, long bool, live map[string]endpoint.LeaseIn
 			for _, k := range lk {
 				fmt.Fprintf(&b, "\tlabel.%s=%s", config.Clean(k), config.Clean(r.Labels[k]))
 			}
-			if li, ok := live[r.KeyOrName()]; ok {
+			if li, ok := live[recordKey(r)]; ok {
 				if li.Host != "" {
 					fmt.Fprintf(&b, "\tlease host %s", config.Clean(li.Host))
 				}

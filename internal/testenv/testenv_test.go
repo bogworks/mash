@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/bogworks/mash/internal/natsauth"
+	"github.com/bogworks/mash/internal/sap"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 )
@@ -24,18 +25,22 @@ func TestStartAndMint(t *testing.T) {
 		t.Fatalf("admin JetStream: %v", err)
 	}
 
-	creds, user := e.Mint(t, "x")
+	addr, err := sap.NewAddress(e.Owner, "dev", "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	creds, user := e.Mint(t, addr)
 	if !strings.HasPrefix(user, "U") {
 		t.Fatalf("user %q", user)
 	}
 	errs := make(chan error, 4)
-	nc, err := nats.Connect(e.URL, natsauth.UserCredentials(creds), nats.CustomInboxPrefix("_INBOX.x"),
+	nc, err := nats.Connect(e.URL, natsauth.UserCredentials(creds), nats.CustomInboxPrefix("_INBOX."+addr.Flat()),
 		nats.ErrorHandler(func(_ *nats.Conn, _ *nats.Subscription, err error) { errs <- err }))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer nc.Close()
-	if err := nc.Publish("agents.mail.cc."+e.Owner+".x", []byte("ok")); err != nil {
+	if err := nc.Publish("agents.mail."+e.Owner+".dev.x", []byte("ok")); err != nil {
 		t.Fatal(err)
 	}
 	if err := nc.Publish("not.allowed", []byte("no")); err != nil {

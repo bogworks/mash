@@ -421,7 +421,7 @@ func TestMountRefusesIncompleteOptions(t *testing.T) {
 	}
 }
 
-// DirectoryResolver reads the directory: a new-form record resolves by its user key to agent.owner.name; an unknown
+// DirectoryResolver reads the directory: a record resolves by its user key to owner.group.instance; an unknown
 // key resolves to none.
 func TestDirectoryResolver(t *testing.T) {
 	e := testenv.Start(t)
@@ -433,12 +433,12 @@ func TestDirectoryResolver(t *testing.T) {
 	if err := adm.Init(ctx); err != nil {
 		t.Fatal(err)
 	}
-	id, err := sap.New("r", "o", "a")
+	id, err := sap.NewAddress("r", "o", "a")
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, user := e.Mint(t, id.Flat())
-	if _, err := adm.ProvisionIdentity(ctx, id, nil, user, e.Account, "", admin.Meta{}); err != nil {
+	_, user := e.Mint(t, id)
+	if _, err := adm.Provision(ctx, id, user, e.Account, "", admin.Meta{}); err != nil {
 		t.Fatal(err)
 	}
 	js, err := jetstream.New(e.Conn(t, e.AdminCreds))

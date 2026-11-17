@@ -119,7 +119,7 @@ func TestHookCrashMatrix(t *testing.T) {
 		{"after-first-drained", []int{1, 2, 3}, []int{2, 3}},
 	} {
 		t.Run(c.failpoint, func(t *testing.T) {
-			env := map[string]string{"HOME": t.TempDir(), "MASH_NAME": "a", "MASH_OWNER": "o", "MASH_URL": "nats://127.0.0.1:1", "MASH_CREDS": "/none"}
+			env := map[string]string{"HOME": t.TempDir(), "MASH_NAME": "a", "MASH_GROUP": testGroup, "MASH_OWNER": "o", "MASH_URL": "nats://127.0.0.1:1", "MASH_CREDS": "/none"}
 			sp := spoolOf(env)
 			if err := sp.Init(); err != nil {
 				t.Fatal(err)
@@ -200,7 +200,7 @@ func containsInt(a []int, n int) bool {
 // A shown mark that cannot be written does not stop the print (at-least-once wins): the mail is shown and drained,
 // and stderr says what failed.
 func TestHookShowsWhenTheShownMarkFails(t *testing.T) {
-	env := map[string]string{"HOME": t.TempDir(), "MASH_NAME": "a", "MASH_OWNER": "o", "MASH_URL": "nats://127.0.0.1:1", "MASH_CREDS": "/none"}
+	env := map[string]string{"HOME": t.TempDir(), "MASH_NAME": "a", "MASH_GROUP": testGroup, "MASH_OWNER": "o", "MASH_URL": "nats://127.0.0.1:1", "MASH_CREDS": "/none"}
 	sp := spoolOf(env)
 	if err := sp.Init(); err != nil {
 		t.Fatal(err)

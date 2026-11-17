@@ -79,7 +79,7 @@ func TestIdleSpellRunsFromTheLastDrain(t *testing.T) {
 	ev, sp, b := boundFixture(t, boundIdle)
 	ctx := context.Background()
 	for _, s := range []string{"held", "drained"} {
-		if _, err := b.SendWith(ctx, "a", s, SendOptions{Kind: kind.Task}); err != nil {
+		if _, err := b.SendWith(ctx, tdot("a"), s, SendOptions{Kind: kind.Task}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -106,7 +106,7 @@ func TestCrowdedBacklogWithoutDrainWakesAtOnce(t *testing.T) {
 	ctx := context.Background()
 	start := time.Now()
 	for i := 0; i < 5; i++ {
-		if _, err := b.SendWith(ctx, "a", "fyi", SendOptions{Kind: kind.FYI}); err != nil {
+		if _, err := b.SendWith(ctx, tdot("a"), "fyi", SendOptions{Kind: kind.FYI}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -143,7 +143,7 @@ func TestCrowdedBacklogAfterADrainWaitsForTheIdleSpell(t *testing.T) {
 
 func sendFYI(t *testing.T, b *Endpoint, body string) {
 	t.Helper()
-	if _, err := b.SendWith(context.Background(), "a", body, SendOptions{Kind: kind.FYI}); err != nil {
+	if _, err := b.SendWith(context.Background(), tdot("a"), body, SendOptions{Kind: kind.FYI}); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -59,22 +59,16 @@ func run(args []string, env func(string) string, lookup config.Lookup, stdout, s
 		return runInbox(args[1:], env, lookup, stdout, stderr)
 	case "issued": // read-only: the issue record and the check of it against the connected keys
 		return runIssued(args[1:], env, lookup, stdout, stderr)
-	case "add":
-		return runAdd(args[1:], env, lookup, stdout, stderr)
 	case "label", "unlabel": // the labels on the directory record
 		return runLabel(args[0] == "unlabel", args[1:], env, lookup, stdout, stderr)
 	case "retire":
 		return runRetire(args[1:], env, lookup, stdout, stderr)
-	case "unzone": // zones are removed (ADR 0091): makes a zoned record five-token, keeping its mail
-		return runUnzone(args[1:], env, lookup, stdout, stderr)
-	case "reissue": // needs the key directory and creds files, no server
-		return runReissue(args[1:], env, lookup, stdout, stderr)
 	case "init", "limits", "permissions", "provision", "set-meta", "suspend", "resume", "suspended", "deprovision", "list":
 	default:
 		fmt.Fprintf(stderr, "mashctl: unknown command %q\n\n%s", args[0], ctl.Usage("mashctl"))
 		return 2
 	}
-	cfg, err := loadConfigFor(ctl.NewFormRequested(args), env, lookup)
+	cfg, err := loadConfig(env, lookup)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -139,7 +133,7 @@ func verbUsage(args []string) string {
 // isVerb reports whether name is a verb run dispatches.
 func isVerb(name string) bool {
 	switch name {
-	case "adopt", "audit", "inbox", "issued", "add", "label", "unlabel", "retire", "unzone", "reissue",
+	case "adopt", "audit", "inbox", "issued", "label", "unlabel", "retire",
 		"init", "limits", "permissions", "provision", "set-meta", "suspend", "resume", "suspended", "deprovision", "list":
 		return true
 	}

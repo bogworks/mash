@@ -14,7 +14,6 @@ import (
 
 	"github.com/bogworks/mash/internal/kind"
 	"github.com/bogworks/mash/internal/render"
-	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/spool"
 	"github.com/bogworks/mash/internal/store"
 	"github.com/nats-io/nats.go/jetstream"
@@ -109,13 +108,13 @@ func TestHookAckLostToANatsRestartIsRedeliveredAndAcked(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ajs.UpdateConsumer(context.Background(), sap.InboxStream("a"), cc); err != nil {
+	if _, err := ajs.UpdateConsumer(context.Background(), taddr("a").InboxStream(), cc); err != nil {
 		t.Fatal(err)
 	}
 	if err := sp.Touch(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.client(t, "b").SendWith(context.Background(), "a", "once", SendOptions{Kind: kind.Question}); err != nil {
+	if _, err := f.client(t, "b").SendWith(context.Background(), tdot("a"), "once", SendOptions{Kind: kind.Question}); err != nil {
 		t.Fatal(err)
 	}
 	until(t, "spooled", func() bool { return len(waiting(t, sp)) == 1 })
@@ -128,7 +127,7 @@ func TestHookAckLostToANatsRestartIsRedeliveredAndAcked(t *testing.T) {
 	time.Sleep(4 * SpoolCheck) // serve tries to ack
 	f.e.Restart(t)
 	for deadline := time.Now().Add(20 * time.Second); ; time.Sleep(50 * time.Millisecond) {
-		c, err := ajs.Consumer(context.Background(), sap.InboxStream("a"), store.Consumer)
+		c, err := ajs.Consumer(context.Background(), taddr("a").InboxStream(), store.Consumer)
 		if err == nil {
 			if i, err := c.Info(context.Background()); err == nil && i.NumPending+uint64(i.NumAckPending) == 0 {
 				break
@@ -169,7 +168,7 @@ func TestHookReWakesWithBackoff(t *testing.T) {
 	if err := sp.Touch(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.client(t, "b").SendWith(context.Background(), "a", "held", SendOptions{Kind: kind.Question}); err != nil {
+	if _, err := f.client(t, "b").SendWith(context.Background(), tdot("a"), "held", SendOptions{Kind: kind.Question}); err != nil {
 		t.Fatal(err)
 	}
 	until(t, "spooled", func() bool { return len(waiting(t, sp)) == 1 })
@@ -197,7 +196,7 @@ func TestHookReWakesWithBackoff(t *testing.T) {
 	if count() != n {
 		t.Fatalf("woke after a drain with nothing held")
 	}
-	if _, err := f.client(t, "b").SendWith(context.Background(), "a", "next spell", SendOptions{Kind: kind.Question}); err != nil {
+	if _, err := f.client(t, "b").SendWith(context.Background(), tdot("a"), "next spell", SendOptions{Kind: kind.Question}); err != nil {
 		t.Fatal(err)
 	}
 	until(t, "the next idle spell wakes again", func() bool { return count() == n+1 })
@@ -257,7 +256,7 @@ func TestBusySessionGetsNoWake(t *testing.T) {
 	}
 	const n = 16 // 16 x 250 ms = 4 idle-wake periods
 	for i := 0; i < n; i++ {
-		if _, err := b.Send(context.Background(), "a", "tick "+strconv.Itoa(i), 0); err != nil {
+		if _, err := b.Send(context.Background(), tdot("a"), "tick "+strconv.Itoa(i), 0); err != nil {
 			t.Fatal(err)
 		}
 		until(t, "the tick is spooled", func() bool { return len(waiting(t, sp)) > 0 })
@@ -293,7 +292,7 @@ func TestIdleSessionWakesOnceAfterTheConfiguredWake(t *testing.T) {
 		t.Fatal(err)
 	}
 	sent := time.Now()
-	if _, err := f.client(t, "b").SendWith(context.Background(), "a", "held", SendOptions{Kind: kind.Question}); err != nil {
+	if _, err := f.client(t, "b").SendWith(context.Background(), tdot("a"), "held", SendOptions{Kind: kind.Question}); err != nil {
 		t.Fatal(err)
 	}
 	until(t, "spooled", func() bool { return len(waiting(t, sp)) == 1 })
@@ -337,7 +336,7 @@ func TestHookUnwritableSpoolFallsBackToTheChannel(t *testing.T) {
 	t.Cleanup(func() { os.Chmod(sp.Dir, 0o700) })
 	b := f.client(t, "b")
 	for _, text := range []string{"first", "second"} {
-		if _, err := b.Send(context.Background(), "a", text, 0); err != nil {
+		if _, err := b.Send(context.Background(), tdot("a"), text, 0); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -365,7 +364,7 @@ func TestHookSpoolFileSelfHeals(t *testing.T) {
 			if err := sp.Touch(); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := f.client(t, "b").Send(context.Background(), "a", "keep me", 0); err != nil {
+			if _, err := f.client(t, "b").Send(context.Background(), tdot("a"), "keep me", 0); err != nil {
 				t.Fatal(err)
 			}
 			until(t, "spooled", func() bool { return len(waiting(t, sp)) == 1 })

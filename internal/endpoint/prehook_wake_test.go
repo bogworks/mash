@@ -17,21 +17,21 @@ func TestSpoolFromStartWakesAtOnceBeforeTheFirstHook(t *testing.T) {
 	f := newFixture(t, "a", "b")
 	a, ev, sp := f.runSpooledClaudeFromStart(t, "a") // sp.Touch is never called
 	b := f.client(t, "b")
-	if _, err := b.Send(context.Background(), "a", "first, no kind", 0); err != nil {
+	if _, err := b.Send(context.Background(), tdot("a"), "first, no kind", 0); err != nil {
 		t.Fatal(err)
 	}
 	got := ev.waitFor(t, 1, 3*time.Second)
-	if got[0] != "1 message from b (task)" {
+	if got[0] != "1 message from "+tdot("b")+" (task)" {
 		t.Fatalf("the wake %q, want the summary line alone", got[0])
 	}
 	if n := unread(t, a); n != 1 {
 		t.Fatalf("unread %d, want 1 (a wake is not a receipt)", n)
 	}
-	if _, err := b.SendWith(context.Background(), "a", "second", SendOptions{Kind: kind.Task}); err != nil {
+	if _, err := b.SendWith(context.Background(), tdot("a"), "second", SendOptions{Kind: kind.Task}); err != nil {
 		t.Fatal(err)
 	}
 	got = ev.waitFor(t, 2, 3*time.Second) // still no hook: the second message rings too
-	if got[1] != "2 messages from b (task)" {
+	if got[1] != "2 messages from "+tdot("b")+" (task)" {
 		t.Fatalf("the second wake %q", got[1])
 	}
 	time.Sleep(4 * SpoolCheck)
@@ -51,7 +51,7 @@ func TestSpoolFromStartFyiAndResultDoNotWakeBeforeTheFirstHook(t *testing.T) {
 	_, ev, sp := f.runSpooledClaudeFromStart(t, "a")
 	b := f.client(t, "b")
 	for _, k := range []kind.Kind{kind.FYI, kind.Result} {
-		if _, err := b.SendWith(context.Background(), "a", "quiet "+string(k), SendOptions{Kind: k}); err != nil {
+		if _, err := b.SendWith(context.Background(), tdot("a"), "quiet "+string(k), SendOptions{Kind: k}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -70,7 +70,7 @@ func TestSpoolFromStartWaitsForTheIdleWakeAfterAHook(t *testing.T) {
 		t.Fatal(err)
 	}
 	start := time.Now()
-	if _, err := f.client(t, "b").Send(context.Background(), "a", "after a hook", 0); err != nil {
+	if _, err := f.client(t, "b").Send(context.Background(), tdot("a"), "after a hook", 0); err != nil {
 		t.Fatal(err)
 	}
 	until(t, "spooled", func() bool { return len(waiting(t, sp)) == 1 })
@@ -91,7 +91,7 @@ func TestSpoolFromStartPreHookRingDoesNotStartTheBackoff(t *testing.T) {
 	f.idle = 1500 * time.Millisecond
 	_, ev, _ := f.runSpooledClaudeFromStart(t, "a") // no hook ever runs
 	start := time.Now()
-	if _, err := f.client(t, "b").SendWith(context.Background(), "a", "ring once", SendOptions{Kind: kind.Task}); err != nil {
+	if _, err := f.client(t, "b").SendWith(context.Background(), tdot("a"), "ring once", SendOptions{Kind: kind.Task}); err != nil {
 		t.Fatal(err)
 	}
 	ev.waitFor(t, 1, 3*time.Second) // the pre-hook ring

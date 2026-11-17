@@ -13,7 +13,6 @@ import (
 
 	"github.com/nats-io/nats.go/jetstream"
 
-	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/spool"
 	"github.com/bogworks/mash/internal/store"
 )
@@ -63,7 +62,7 @@ func TestHookOwnershipThroughARealProcessChain(t *testing.T) {
 
 	send := func(body string) {
 		t.Helper()
-		if out, code := w.cli(t, "b", "send", "a", body); code != 0 {
+		if out, code := w.cli(t, "b", "send", tTo("a"), body); code != 0 {
 			t.Fatalf("send: %s", out)
 		}
 		eventually(t, 10*time.Second, "serve spooled "+body, func() bool { e, _ := sp.Waiting(); return len(e) == 1 })
@@ -106,14 +105,14 @@ func TestHookMailSurvivesAClaudeRestart(t *testing.T) {
 	}
 	cc := store.ConsumerConfig()
 	cc.AckWait = 8 * time.Second
-	if _, err := js.UpdateConsumer(context.Background(), sap.InboxStream("a"), cc); err != nil {
+	if _, err := js.UpdateConsumer(context.Background(), tAddr("a").InboxStream(), cc); err != nil {
 		t.Fatal(err)
 	}
 	sp := spoolOf(w.env["a"])
 	old := startFakeClaude(t, w.env["a"], true)
 	eventually(t, 20*time.Second, "serve owns the spool", func() bool { return ownedByPID(sp, old.pid) })
 	old.hook(t, "S1") // the session is on the spool from now on
-	if out, code := w.cli(t, "b", "send", "a", "survives the restart"); code != 0 {
+	if out, code := w.cli(t, "b", "send", tTo("a"), "survives the restart"); code != 0 {
 		t.Fatalf("send: %s", out)
 	}
 	eventually(t, 10*time.Second, "serve spooled it", func() bool { e, _ := sp.Waiting(); return len(e) == 1 })
@@ -150,7 +149,7 @@ func TestHookShownOnceAcrossAServeKilledBeforeAck(t *testing.T) {
 	}
 	cc := store.ConsumerConfig()
 	cc.AckWait = 8 * time.Second // the dead serve's unacked mail comes back in seconds
-	if _, err := js.UpdateConsumer(context.Background(), sap.InboxStream("a"), cc); err != nil {
+	if _, err := js.UpdateConsumer(context.Background(), tAddr("a").InboxStream(), cc); err != nil {
 		t.Fatal(err)
 	}
 	sp := spoolOf(w.env["a"])
@@ -162,7 +161,7 @@ func TestHookShownOnceAcrossAServeKilledBeforeAck(t *testing.T) {
 	old := startFakeClaude(t, env, true)
 	eventually(t, 20*time.Second, "serve owns the spool", func() bool { return ownedByPID(sp, old.pid) })
 	old.hook(t, "S1") // the session is on the spool from now on
-	if out, code := w.cli(t, "b", "send", "a", "shown once"); code != 0 {
+	if out, code := w.cli(t, "b", "send", tTo("a"), "shown once"); code != 0 {
 		t.Fatalf("send: %s", out)
 	}
 	eventually(t, 10*time.Second, "serve spooled it", func() bool { e, _ := sp.Waiting(); return len(e) == 1 })
@@ -230,7 +229,7 @@ func withEnv(env map[string]string, extra map[string]string) map[string]string {
 // sendAndSpool sends body from b to a and waits until serve has spooled it.
 func sendAndSpool(t *testing.T, w *world, sp spool.Spool, body string) {
 	t.Helper()
-	if out, code := w.cli(t, "b", "send", "a", body); code != 0 {
+	if out, code := w.cli(t, "b", "send", tTo("a"), body); code != 0 {
 		t.Fatalf("send: %s", out)
 	}
 	eventually(t, 10*time.Second, "serve spooled "+body, func() bool { e, _ := sp.Waiting(); return len(e) == 1 })

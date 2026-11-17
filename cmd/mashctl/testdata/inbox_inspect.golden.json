@@ -1,8 +1,11 @@
 {
   "schema": "mash-inbox-inspect@1",
-  "address": "alpha",
+  "address": "acme.team1.alpha",
+  "owner": "acme",
+  "group": "team1",
+  "instance": "alpha",
   "stream": {
-    "name": "inbox-alpha",
+    "name": "inbox-acme_team1_alpha",
     "first_seq": 1,
     "last_seq": 4,
     "messages": 4,

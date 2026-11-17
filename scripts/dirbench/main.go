@@ -1,8 +1,8 @@
 // Command dirbench is a MEASUREMENT TOOL, not product code (bogworks/mash#43, "directory polling grows with the
 // square of the endpoint count"). It simulates N endpoints against a NATS cluster that is already running: each one
 // has its own connection, polls the directory the way internal/endpoint does (a filtered stream info for the keys,
-// then one direct get per key, 64 at a time, five second timeout), publishes a heartbeat on agents.hb.cc.<owner>.<name>
-// and counts what its agents.hb.*.<owner>.* subscription delivers. It does not sign or verify anything and does not
+// then one direct get per key, 64 at a time, five second timeout), publishes a heartbeat on agents.hb.<owner>.<group>.<instance>
+// and counts what its agents.hb.<owner>.*.* subscription delivers. It does not sign or verify anything and does not
 // import the Endpoint. It creates a bucket of its OWN, named dirbench-<8 random hex>, with the product's directory
 // config (store.DirectoryConfig: history, storage; replicas settable by flag), writes N valid records, runs a warm-up
 // and then a measured window, and prints key=value lines: client counters, and server side numbers from /varz deltas
@@ -19,7 +19,7 @@
 // stream info per poll, a full load only when the state moved or the forced reload is due, jittered waits).
 //
 // -hb-mode (docs/evidence/2026-11-02-heartbeat-fanout) varies the heartbeat side: all (default, today) = every endpoint
-// publishes a heartbeat and holds the standing agents.hb.*.<owner>.* subscription; none = it publishes but holds no
+// publishes a heartbeat and holds the standing agents.hb.<owner>.*.* subscription; none = it publishes but holds no
 // heartbeat subscription; probe = none plus each endpoint answers $SRV.INFO.agents with a -who-payload byte registration-like
 // reply and runs a who probe every -who-every (random first offset; 0 = none) or all at once once (-who-burst): subscribe a
 // fresh inbox, publish the request, wait endpoint.PresenceQuiet after the last reply or endpoint.PresenceCap. Each
@@ -58,6 +58,7 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/bogworks/mash/internal/endpoint"
+	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/store"
 )
 
@@ -70,6 +71,7 @@ const (
 	fetchConc  = 64 // internal/endpoint fetchConcurrency
 	reqTimeout = 5 * time.Second
 	owner      = "o"
+	group      = "g"
 	clkTck     = 100 // getconf CLK_TCK on Linux
 )
 
@@ -217,7 +219,7 @@ func run() int {
 				return
 			}
 			if *hbMode == "all" {
-				_, _ = nc.Subscribe("agents.hb.*."+owner+".*", func(*nats.Msg) { cHBDel.Add(1) })
+				_, _ = nc.Subscribe("agents.hb."+owner+".*.*", func(*nats.Msg) { cHBDel.Add(1) })
 			}
 			if *hbMode == "probe" {
 				reply := make([]byte, *whoPayload)
@@ -242,7 +244,7 @@ func run() int {
 		} else {
 			go loop(stop, offP, *poll, func() { _ = loadDirectory(e.nc) })
 		}
-		go loop(stop, offH, *hb, func() { _ = e.nc.Publish("agents.hb.cc."+owner+"."+e.name, make([]byte, 300)); cHBPub.Add(1) })
+		go loop(stop, offH, *hb, func() { _ = e.nc.Publish("agents.hb."+owner+"."+group+"."+e.name, make([]byte, 300)); cHBPub.Add(1) })
 	}
 	burst := make(chan struct{})
 	if *hbMode == "probe" {
@@ -421,11 +423,12 @@ func setup(ctx context.Context, url, name string, n, replicas int, created *atom
 	created.Store(true)
 	for i := range n {
 		name := fmt.Sprintf("e%04d", i)
-		rec := store.Record{Name: name, Owner: owner, Agent: "A" + name, AgentToken: "tok-" + name + "-0123456789abcdef0123456789abcdef",
-			Account: "ACCT0123456789", User: "U" + name + "0123456789", MailSubject: store.MailSubjectFor(owner, name),
+		addr := sap.Address{Owner: owner, Group: group, Instance: name}
+		rec := store.Record{Owner: owner, Group: group, Instance: name, Agent: "A" + name,
+			Account: "ACCT0123456789", User: "U" + name + "0123456789", MailSubject: store.MailSubjectFor(addr),
 			Created: "2026-11-02T00:00:00Z", Role: "bench", Host: "bench-host"}
 		b, _ := json.Marshal(rec)
-		if _, err := kv.Put(ctx, name, b); err != nil {
+		if _, err := kv.Put(ctx, addr.Flat(), b); err != nil {
 			return err
 		}
 	}

@@ -19,6 +19,7 @@ import (
 	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/store"
+	"github.com/bogworks/mash/internal/testenv"
 )
 
 var updateInspectGolden = flag.Bool("update-inspect", false, "rewrite cmd/mashctl/testdata/inbox_inspect.golden.json")
@@ -29,7 +30,7 @@ func TestInboxInspectArgs(t *testing.T) {
 		want inboxInspectOpts
 	}{
 		{[]string{"a"}, inboxInspectOpts{address: "a"}},
-		{[]string{"a", "--json", "--from", "3", "--to=9", "--limit", "5", "--legacy"}, inboxInspectOpts{address: "a", json: true, legacy: true, from: 3, to: 9, limit: 5}},
+		{[]string{"a", "--json", "--from", "3", "--to=9", "--limit", "5"}, inboxInspectOpts{address: "a", json: true, from: 3, to: 9, limit: 5}},
 		{[]string{"--limit=2", "x.y.z"}, inboxInspectOpts{address: "x.y.z", limit: 2}},
 	}
 	for _, c := range ok {
@@ -39,7 +40,7 @@ func TestInboxInspectArgs(t *testing.T) {
 		}
 	}
 	for _, bad := range [][]string{nil, {"--json"}, {"a", "b"}, {"a", "--from"}, {"a", "--from", "0"}, {"a", "--from", "x"}, {"a", "--limit", "0"},
-		{"a", "--limit", "-1"}, {"a", "--from", "5", "--to", "4"}, {"a", "--frob"}, {"a", "--json=1"}} {
+		{"a", "--limit", "-1"}, {"a", "--from", "5", "--to", "4"}, {"a", "--frob"}, {"a", "--json=1"}, {"a", "--legacy"}} {
 		if _, err := parseInboxInspectArgs(bad); err == nil {
 			t.Errorf("%v accepted", bad)
 		}
@@ -48,8 +49,8 @@ func TestInboxInspectArgs(t *testing.T) {
 
 func TestInboxUsageAndSubverb(t *testing.T) {
 	f := newAuditEnv(t)
-	for _, args := range [][]string{{"inbox"}, {"inbox", "frob"}, {"inbox", "inspect"}, {"inbox", "inspect", "a", "--limit", "0"}} {
-		if out, errb, code := ctlRun(t, f.e, args...); code != 2 || out != "" || !strings.Contains(errb, "usage: mashctl inbox inspect <address> [--json] [--legacy] [--from SEQ] [--to SEQ] [--limit N]") {
+	for _, args := range [][]string{{"inbox"}, {"inbox", "frob"}, {"inbox", "inspect"}, {"inbox", "inspect", "o.g.a", "--limit", "0"}} {
+		if out, errb, code := ctlRun(t, f.e, args...); code != 2 || out != "" || !strings.Contains(errb, "usage: mashctl inbox inspect <owner.group.instance> [--json] [--from SEQ] [--to SEQ] [--limit N]") {
 			t.Errorf("%v: %d %q %q", args, code, out, errb)
 		}
 	}
@@ -58,7 +59,7 @@ func TestInboxUsageAndSubverb(t *testing.T) {
 // TestInboxInspectJSONGolden pins the bytes of the JSON contract with a fixed inspection.
 func TestInboxInspectJSONGolden(t *testing.T) {
 	in := &admin.InboxInspection{
-		Stream:   admin.InspectedStream{Name: "inbox-alpha", FirstSeq: 1, LastSeq: 4, Messages: 4, Bytes: 812},
+		Stream:   admin.InspectedStream{Name: "inbox-acme_team1_alpha", FirstSeq: 1, LastSeq: 4, Messages: 4, Bytes: 812},
 		Consumer: &admin.InspectedConsumer{Name: "deliver", AckFloor: admin.Cursor{Stream: 1, Consumer: 1}, Delivered: admin.Cursor{Stream: 3, Consumer: 3}, NumPending: 1, NumRedelivered: 0, NumAckPending: 2},
 	}
 	ts := time.Date(2026, 11, 12, 10, 0, 0, 0, time.UTC)
@@ -67,7 +68,7 @@ func TestInboxInspectJSONGolden(t *testing.T) {
 		in.Messages = append(in.Messages, admin.InspectedMessage{Seq: seq, MsgID: fmt.Sprintf("id%d", seq), Sender: "bob", Trust: tr,
 			StoredAt: ts.Add(time.Duration(i) * time.Minute), Size: 10 * (i + 1), Kind: "message", State: admin.DeliveryState(seq, in.Consumer)})
 	}
-	b, err := json.MarshalIndent(buildInspectReport("alpha", in), "", "  ")
+	b, err := json.MarshalIndent(buildInspectReport(sap.Address{Owner: "acme", Group: "team1", Instance: "alpha"}, in), "", "  ")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,9 +87,9 @@ func TestInboxInspectJSONGolden(t *testing.T) {
 		t.Fatalf("inbox inspect --json differs from %s (run with -update-inspect after checking the diff)\n got: %s\nwant: %s", golden, got, want)
 	}
 	// no consumer: null, not absent; the messages array is never null
-	empty := buildInspectReport("a", &admin.InboxInspection{Stream: admin.InspectedStream{Name: "inbox-a"}})
+	empty := buildInspectReport(sap.Address{Owner: "o", Group: "g", Instance: "a"}, &admin.InboxInspection{Stream: admin.InspectedStream{Name: "inbox-o_g_a"}})
 	eb, _ := json.Marshal(empty)
-	for _, w := range []string{`"consumer":null`, `"messages":[]`, `"schema":"mash-inbox-inspect@1"`} {
+	for _, w := range []string{`"consumer":null`, `"messages":[]`, `"schema":"mash-inbox-inspect@1"`, `"address":"o.g.a"`, `"owner":"o"`, `"group":"g"`, `"instance":"a"`} {
 		if !strings.Contains(string(eb), w) {
 			t.Errorf("%s lacks %s", eb, w)
 		}
@@ -232,34 +233,37 @@ func signedHdr(t *testing.T, id sap.Identity, subject string, payload []byte, na
 	return hdr
 }
 
-// inspectFixture: legacy endpoint "box" holding six messages of every trust class; the deliver consumer has fetched
+// inspectFixture: endpoint o.g.box holding six messages of every trust class; the deliver consumer has fetched
 // four and acknowledged 1, 2 and 4 (so the ack floor is 2, and 3 and 4 are delivered above it).
+// sndKey is the directory key the sender o.g.snd signs its messages with.
+var sndKey = ad("snd").Flat()
+
 func inspectFixture(t *testing.T) (*auditFixture, string) {
 	f := newAuditEnv(t)
-	f.legacy(t, "box")
-	subject := sap.For(f.e.Owner, "box").Mail
-	sndCreds, sndUser := f.e.Mint(t, "snd")
-	if _, errb, code := ctlRun(t, f.e, "provision", "snd", "--user", sndUser, "--account", f.e.Account); code != 0 {
+	f.endpoint(t, ad("box"))
+	subject := ad("box").Subjects().Mail
+	sndCreds, sndUser := f.e.Mint(t, ad("snd"))
+	if _, errb, code := ctlRun(t, f.e, "provision", "o.g.snd", "--user", sndUser, "--account", f.e.Account); code != 0 {
 		t.Fatalf("provision snd: %d %q", code, errb)
 	}
 	snd := identityOf(t, sndCreds)
-	ghostCreds, _ := f.e.Mint(t, "ghostsender") // signs, but is not in the directory
+	ghostCreds, _ := f.e.Mint(t, ad("ghostsender")) // signs, but is not in the directory
 	ghost := identityOf(t, ghostCreds)
 	now := time.Now()
 
 	p := func(s string) []byte { return []byte(s) }
-	sendSigned(t, f.js, subject, p("one"), signedHdr(t, snd, subject, p("one"), "snd", now, "msg-1", "message"))        // 1 verified
-	sendSigned(t, f.js, subject, p("two!"), signedHdr(t, ghost, subject, p("two!"), "snd", now, "msg-2", "reply"))      // 2 unknown-signer (name snd, other key)
-	sendSigned(t, f.js, subject, p("three"), signedHdr(t, snd, subject, p("tampered"), "snd", now, "msg-3", "message")) // 3 forged
+	sendSigned(t, f.js, subject, p("one"), signedHdr(t, snd, subject, p("one"), sndKey, now, "msg-1", "message"))        // 1 verified
+	sendSigned(t, f.js, subject, p("two!"), signedHdr(t, ghost, subject, p("two!"), sndKey, now, "msg-2", "reply"))      // 2 unknown-signer (name snd, other key)
+	sendSigned(t, f.js, subject, p("three"), signedHdr(t, snd, subject, p("tampered"), sndKey, now, "msg-3", "message")) // 3 forged
 	claimed := nats.Header{}
 	claimed.Set(sap.HeaderName, `{"v":1,"account":"`+snd.Account+`","user":"`+snd.User+`","name":"someone"}`)
 	claimed.Set(jetstream.MsgIDHeader, "msg-4")
 	claimed.Set("Mash-Kind", "message")
-	sendSigned(t, f.js, subject, p("four"), claimed)                                                                               // 4 claimed
-	sendSigned(t, f.js, subject, p("five"), signedHdr(t, snd, subject, p("five"), "snd", now.Add(-time.Hour), "msg-5", "message")) // 5 stale
-	sendSigned(t, f.js, subject, p("six"), nats.Header{"Nats-Msg-Id": {"msg-6"}})                                                  // 6 no sender header
+	sendSigned(t, f.js, subject, p("four"), claimed)                                                                                // 4 claimed
+	sendSigned(t, f.js, subject, p("five"), signedHdr(t, snd, subject, p("five"), sndKey, now.Add(-time.Hour), "msg-5", "message")) // 5 stale
+	sendSigned(t, f.js, subject, p("six"), nats.Header{"Nats-Msg-Id": {"msg-6"}})                                                   // 6 no sender header
 
-	c, err := f.js.Consumer(context.Background(), sap.InboxStream("box"), store.Consumer)
+	c, err := f.js.Consumer(context.Background(), ad("box").InboxStream(), store.Consumer)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,7 +280,7 @@ func inspectFixture(t *testing.T) (*auditFixture, string) {
 			t.Fatal(err)
 		}
 	}
-	return f, sap.InboxStream("box")
+	return f, ad("box").InboxStream()
 }
 
 type inspectMsgOut struct {
@@ -305,7 +309,7 @@ func TestInboxInspectLive(t *testing.T) {
 	f, stream := inspectFixture(t)
 	before := snapInbox(t, f.js, stream)
 	rec := record(t, f.nc)
-	out, errb, code := ctlRun(t, f.e, "inbox", "inspect", "box", "--json")
+	out, errb, code := ctlRun(t, f.e, "inbox", "inspect", "o.g.box", "--json")
 	subjects := rec.stop(t)
 	if code != 0 {
 		t.Fatalf("exit %d: %q", code, errb)
@@ -316,7 +320,7 @@ func TestInboxInspectLive(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &r); err != nil {
 		t.Fatalf("%v: %s", err, out)
 	}
-	if r.Schema != "mash-inbox-inspect@1" || r.Address != "box" || len(r.Limits) == 0 || !strings.Contains(r.Limits[0], "num_redelivered") {
+	if r.Schema != "mash-inbox-inspect@1" || r.Address != "o.g.box" || len(r.Limits) == 0 || !strings.Contains(r.Limits[0], "num_redelivered") {
 		t.Fatalf("header: %+v", r)
 	}
 	wantTrust := []string{"verified", "unknown-signer", "forged", "claimed", "stale", "absent"}
@@ -336,7 +340,7 @@ func TestInboxInspectLive(t *testing.T) {
 			t.Errorf("stored_at %q", m.StoredAt)
 		}
 	}
-	if r.Messages[0].Sender != "snd" || r.Messages[0].Kind != "message" || r.Messages[1].Kind != "reply" || r.Messages[3].Sender != "someone" || r.Messages[5].Sender != "?" {
+	if r.Messages[0].Sender != sndKey || r.Messages[0].Kind != "message" || r.Messages[1].Kind != "reply" || r.Messages[3].Sender != "someone" || r.Messages[5].Sender != "?" {
 		t.Errorf("senders or kinds: %+v", r.Messages)
 	}
 	c := r.Consumer
@@ -355,13 +359,13 @@ func TestInboxInspectLive(t *testing.T) {
 	}
 
 	// text form, range and limit
-	txt, _, code := ctlRun(t, f.e, "inbox", "inspect", "box", "--from", "2", "--to", "9", "--limit", "3")
+	txt, _, code := ctlRun(t, f.e, "inbox", "inspect", "o.g.box", "--from", "2", "--to", "9", "--limit", "3")
 	if code != 0 || !strings.Contains(txt, "delivered, ack not confirmed") || !strings.Contains(txt, "msg-2") || !strings.Contains(txt, "msg-4") ||
 		strings.Contains(txt, "msg-1 ") || strings.Contains(txt, "msg-5") || !strings.Contains(txt, "note: per-message delivery count and ack time are not kept by JetStream or mash") ||
 		!strings.Contains(txt, "ack_floor stream 2 consumer 2") {
 		t.Errorf("text: %d\n%s", code, txt)
 	}
-	out, _, _ = ctlRun(t, f.e, "inbox", "inspect", "box", "--json", "--limit", "2")
+	out, _, _ = ctlRun(t, f.e, "inbox", "inspect", "o.g.box", "--json", "--limit", "2")
 	var r2 inspectOut
 	_ = json.Unmarshal([]byte(out), &r2)
 	if len(r2.Messages) != 2 || r2.Messages[0].Seq != 5 || r2.Messages[1].Seq != 6 {
@@ -374,12 +378,12 @@ func TestInboxInspectLive(t *testing.T) {
 
 func TestInboxInspectNoConsumerAndRefusals(t *testing.T) {
 	f := newAuditEnv(t)
-	f.legacy(t, "plain")
-	f.publish(t, sap.For(f.e.Owner, "plain").Mail, 2)
-	if err := f.js.DeleteConsumer(context.Background(), sap.InboxStream("plain"), store.Consumer); err != nil {
+	f.endpoint(t, ad("plain"))
+	f.publish(t, ad("plain").Subjects().Mail, 2)
+	if err := f.js.DeleteConsumer(context.Background(), ad("plain").InboxStream(), store.Consumer); err != nil {
 		t.Fatal(err)
 	}
-	out, errb, code := ctlRun(t, f.e, "inbox", "inspect", "plain", "--json")
+	out, errb, code := ctlRun(t, f.e, "inbox", "inspect", "o.g.plain", "--json")
 	var r inspectOut
 	if code != 0 || json.Unmarshal([]byte(out), &r) != nil || r.Consumer != nil || len(r.Messages) != 2 || r.Messages[0].State != "undelivered" || r.Messages[1].State != "undelivered" {
 		t.Fatalf("no consumer: %d %q %q", code, out, errb)
@@ -387,35 +391,36 @@ func TestInboxInspectNoConsumerAndRefusals(t *testing.T) {
 	if !strings.Contains(out, `"consumer": null`) {
 		t.Errorf("consumer is not null: %s", out)
 	}
-	if txt, _, code := ctlRun(t, f.e, "inbox", "inspect", "plain"); code != 0 || !strings.Contains(txt, "consumer: none") {
+	if txt, _, code := ctlRun(t, f.e, "inbox", "inspect", "o.g.plain"); code != 0 || !strings.Contains(txt, "consumer: none") {
 		t.Errorf("text without consumer: %d %q", code, txt)
 	}
-	for _, addr := range []string{"nobody", "no.such.endpoint", "claude_o_nobody", "has.two", "Bad Name"} {
+	for _, addr := range []string{"o.g.nobody", "no.such.endpoint", "claude_o_nobody"} {
 		if out, errb, code := ctlRun(t, f.e, "inbox", "inspect", addr); code != 1 || out != "" || errb == "" {
 			t.Errorf("%q: %d %q %q, want exit 1 and a message", addr, code, out, errb)
 		}
 	}
+	// not an address at all: usage, with the form to give
+	for _, addr := range []string{"nobody", "has.two", "Bad Name", "o.g"} {
+		if out, errb, code := ctlRun(t, f.e, "inbox", "inspect", addr); code != 2 || out != "" || !strings.Contains(errb, "give owner.group.instance") {
+			t.Errorf("%q: %d %q %q, want exit 2 and the form to give", addr, code, out, errb)
+		}
+	}
 	// a record without a stream is refused, not a connection failure
-	if err := f.js.DeleteStream(context.Background(), sap.InboxStream("plain")); err != nil {
+	if err := f.js.DeleteStream(context.Background(), ad("plain").InboxStream()); err != nil {
 		t.Fatal(err)
 	}
-	if _, errb, code := ctlRun(t, f.e, "inbox", "inspect", "plain"); code != 1 || !strings.Contains(errb, "no inbox stream") {
+	if _, errb, code := ctlRun(t, f.e, "inbox", "inspect", "o.g.plain"); code != 1 || !strings.Contains(errb, "no inbox stream") {
 		t.Errorf("no stream: %d %q", code, errb)
-	}
-	// --legacy on a record with no alias
-	f.legacy(t, "other")
-	if _, errb, code := ctlRun(t, f.e, "inbox", "inspect", "other", "--legacy"); code != 1 || !strings.Contains(errb, "no alias") {
-		t.Errorf("--legacy without alias: %d %q", code, errb)
 	}
 }
 
 func TestInboxInspectAddressForms(t *testing.T) {
 	f := newAuditEnv(t)
-	f.legacy(t, "ops1")
-	f.publish(t, sap.For(f.e.Owner, "ops1").Mail, 2)
-	_, u := f.e.Mint(t, "ops1new")
-	ops := f.newForm(t, "acme", "team1", "ops1", u, &store.Alias{Owner: f.e.Owner, Name: "ops1"})
-	f.publish(t, ops.Subjects().Mail, 1)
+	ops := sap.Address{Owner: testenv.Owner, Group: "team1", Instance: "ops1"}
+	f.endpoint(t, ops)
+	f.publish(t, ops.Subjects().Mail, 2)
+	f.endpoint(t, ad("ops1")) // the same instance token in another group is another endpoint
+	f.publish(t, ad("ops1").Subjects().Mail, 1)
 
 	stream := func(args ...string) (string, int) {
 		out, errb, code := ctlRun(t, f.e, append([]string{"inbox", "inspect", "--json"}, args...)...)
@@ -426,29 +431,26 @@ func TestInboxInspectAddressForms(t *testing.T) {
 		if err := json.Unmarshal([]byte(out), &r); err != nil {
 			t.Fatal(err)
 		}
-		return fmt.Sprintf("%v/%d", r.Stream["name"], len(r.Messages)), code
+		return fmt.Sprintf("%v/%s/%d", r.Stream["name"], r.Address, len(r.Messages)), code
 	}
 	for _, c := range []struct {
 		args []string
 		want string
 	}{
-		{[]string{"acme_team1_ops1"}, "inbox-acme_team1_ops1/1"},
-		{[]string{"acme.team1.ops1"}, "inbox-acme_team1_ops1/1"},
-		{[]string{"ops1"}, "inbox-ops1/2"},
-		{[]string{"cc." + f.e.Owner + ".ops1"}, "inbox-ops1/2"},
-		{[]string{"acme.team1.ops1", "--legacy"}, "inbox-ops1/2"}, // the alias's legacy stream
-		{[]string{"acme_team1_ops1", "--legacy"}, "inbox-ops1/2"},
+		{[]string{"o_team1_ops1"}, "inbox-o_team1_ops1/o.team1.ops1/2"},
+		{[]string{"o.team1.ops1"}, "inbox-o_team1_ops1/o.team1.ops1/2"},
+		{[]string{"o.g.ops1"}, "inbox-o_g_ops1/o.g.ops1/1"},
 	} {
 		if got, code := stream(c.args...); code != 0 || got != c.want {
 			t.Errorf("%v: %q (%d), want %s", c.args, got, code, c.want)
 		}
 	}
-	// a dotted address with another owner does not name the endpoint
-	if _, code := stream("acme.team9.ops1"); code != 1 {
-		t.Errorf("wrong owner: exit %d", code)
+	// an address in another group or owner does not name the endpoint
+	if _, code := stream("o.team9.ops1"); code != 1 {
+		t.Errorf("wrong group: exit %d", code)
 	}
-	if _, code := stream("cc.other.ops1"); code != 1 {
-		t.Errorf("wrong legacy owner: exit %d", code)
+	if _, code := stream("other.team1.ops1"); code != 1 {
+		t.Errorf("wrong owner: exit %d", code)
 	}
 }
 
@@ -456,7 +458,7 @@ func TestInboxInspectCannotComplete(t *testing.T) {
 	f := newAuditEnv(t)
 	env := map[string]string{"HOME": t.TempDir(), "MASH_URL": "nats://127.0.0.1:1", "MASH_OWNER": f.e.Owner, "MASH_ADMIN_CREDS": f.e.AdminCreds, "MASH_INSECURE_LOOPBACK": "1"}
 	var out, errb strings.Builder
-	if code := runEnv([]string{"inbox", "inspect", "x"}, func(k string) string { return env[k] }, &out, &errb); code != exitInspectIncomplete {
+	if code := runEnv([]string{"inbox", "inspect", "o.g.x"}, func(k string) string { return env[k] }, &out, &errb); code != exitInspectIncomplete {
 		t.Fatalf("exit %d, want 3: %q", code, errb.String())
 	}
 }

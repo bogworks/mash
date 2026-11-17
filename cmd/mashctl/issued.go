@@ -8,16 +8,14 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 
-	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats.go"
 
 	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/apply"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/ctl"
-	"github.com/bogworks/mash/internal/mint"
+	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/store"
 )
 
@@ -35,15 +33,43 @@ const (
 	issuedNoAnswer = 2
 )
 
-// issuedOf is the issue record's entry for a user mint just made: public information only. The issue time is the
-// JWT's own iat.
-func issuedOf(m *mint.Minted, owner, purpose string) store.Issued {
-	r := store.Issued{PublicKey: m.UserPub, Address: m.Name, Owner: owner, Kind: store.IssuedEndpoint,
-		Tags: []string{}, Purpose: purpose} // a user minted without a zone key carries no tags (ADR 0091)
-	if uc, err := jwt.DecodeUserClaims(m.JWT); err == nil && uc.IssuedAt > 0 {
-		r.IssuedAt = time.Unix(uc.IssuedAt, 0).UTC().Format(time.RFC3339)
+// addrFields splits the address a record holds (an endpoint's flat key) into the dotted address and its three tokens.
+// A record that names no endpoint (an admin user's name) keeps its text as the address and has no tokens.
+func addrFields(held string) (address, owner, group, instance string) {
+	if a, err := sap.AddressFromFlat(held); err == nil {
+		return a.String(), a.Owner, a.Group, a.Instance
 	}
-	return r
+	return held, "", "", ""
+}
+
+// textAddr is the dotted form of the address a record holds, for the text output.
+func textAddr(held string) string {
+	a, _, _, _ := addrFields(held)
+	return a
+}
+
+// issuedOut is one issue record as the JSON shows it: the endpoint's address (owner.group.instance) and its tokens.
+type issuedOut struct {
+	PublicKey  string   `json:"public_key"`
+	Address    string   `json:"address"`
+	Owner      string   `json:"owner,omitempty"`
+	Group      string   `json:"group,omitempty"`
+	Instance   string   `json:"instance,omitempty"`
+	Kind       string   `json:"kind"`
+	Tags       []string `json:"tags"`
+	Generation int      `json:"generation"`
+	IssuedAt   string   `json:"issued_at"`
+	Purpose    string   `json:"purpose,omitempty"`
+	RevokedAt  string   `json:"revoked_at,omitempty"`
+}
+
+func toIssuedOut(r store.Issued) issuedOut {
+	o := issuedOut{PublicKey: r.PublicKey, Kind: r.Kind, Tags: r.Tags, Generation: r.Generation, IssuedAt: r.IssuedAt, Purpose: r.Purpose, RevokedAt: r.RevokedAt}
+	o.Address, o.Owner, o.Group, o.Instance = addrFields(r.Address)
+	if o.Owner == "" {
+		o.Owner = r.Owner
+	}
+	return o
 }
 
 type issuedOpts struct {
@@ -82,9 +108,9 @@ func parseIssuedArgs(verb string, args []string) (issuedOpts, error) {
 
 // issuedList is what `mashctl issued list --json` prints.
 type issuedList struct {
-	Present bool           `json:"present"`
-	Count   int            `json:"count"`
-	Issued  []store.Issued `json:"issued"`
+	Present bool        `json:"present"`
+	Count   int         `json:"count"`
+	Issued  []issuedOut `json:"issued"`
 }
 
 // runIssued is `mashctl issued`: list reads the issue record, check compares it with what is connected.
@@ -155,9 +181,13 @@ func printIssuedList(recs []store.Issued, present, asJSON bool, stdout io.Writer
 		recs[i].Purpose = recs[i].EffectivePurpose() // an old record with no purpose is an ordinary issue
 	}
 	if asJSON {
+		out := make([]issuedOut, 0, len(recs))
+		for _, r := range recs {
+			out = append(out, toIssuedOut(r))
+		}
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
-		_ = enc.Encode(issuedList{Present: present, Count: len(recs), Issued: recs})
+		_ = enc.Encode(issuedList{Present: present, Count: len(recs), Issued: out})
 		return 0
 	}
 	if !present {
@@ -165,7 +195,7 @@ func printIssuedList(recs []store.Issued, present, asJSON bool, stdout io.Writer
 		return 0
 	}
 	for _, r := range recs {
-		line := fmt.Sprintf("%s\t%s\t%s\t%s\tgeneration %d\ttags %s\tpurpose %s", r.PublicKey, config.Clean(r.Kind), config.Clean(r.Address), config.Clean(r.IssuedAt), r.Generation, config.Clean(strings.Join(r.Tags, ",")), config.Clean(r.EffectivePurpose()))
+		line := fmt.Sprintf("%s\t%s\t%s\t%s\tgeneration %d\ttags %s\tpurpose %s", r.PublicKey, config.Clean(r.Kind), config.Clean(textAddr(r.Address)), config.Clean(r.IssuedAt), r.Generation, config.Clean(strings.Join(r.Tags, ",")), config.Clean(r.EffectivePurpose()))
 		if r.RevokedAt != "" {
 			line += "\trevoked " + config.Clean(r.RevokedAt)
 		}
@@ -191,6 +221,9 @@ type issuedRevokedConn struct {
 	Account   string `json:"account"`
 	PublicKey string `json:"public_key"`
 	Address   string `json:"address"`
+	Owner     string `json:"owner,omitempty"`
+	Group     string `json:"group,omitempty"`
+	Instance  string `json:"instance,omitempty"`
 	Kind      string `json:"kind"`
 	Purpose   string `json:"purpose"`
 	RevokedAt string `json:"revoked_at"`
@@ -199,6 +232,9 @@ type issuedRevokedConn struct {
 type issuedNotConnected struct {
 	PublicKey string `json:"public_key"`
 	Address   string `json:"address"`
+	Owner     string `json:"owner,omitempty"`
+	Group     string `json:"group,omitempty"`
+	Instance  string `json:"instance,omitempty"`
 	Kind      string `json:"kind"`
 }
 
@@ -336,8 +372,9 @@ func runIssuedCheck(ctx context.Context, cfg config.Config, env func(string) str
 			rep.Summary.Connected++
 			if r, ok := recorded[c.Key]; ok {
 				if r.RevokedAt != "" {
+					a, o, g, i := addrFields(r.Address)
 					rep.RevokedConn = append(rep.RevokedConn, issuedRevokedConn{Server: s.Name, Account: c.Account, PublicKey: c.Key,
-						Address: r.Address, Kind: r.Kind, Purpose: r.EffectivePurpose(), RevokedAt: r.RevokedAt})
+						Address: a, Owner: o, Group: g, Instance: i, Kind: r.Kind, Purpose: r.EffectivePurpose(), RevokedAt: r.RevokedAt})
 				}
 				continue
 			}
@@ -347,7 +384,8 @@ func runIssuedCheck(ctx context.Context, cfg config.Config, env func(string) str
 	}
 	for _, r := range recs {
 		if !connected[r.PublicKey] {
-			rep.NotConnected = append(rep.NotConnected, issuedNotConnected{PublicKey: r.PublicKey, Address: r.Address, Kind: r.Kind})
+			a, o, g, i := addrFields(r.Address)
+			rep.NotConnected = append(rep.NotConnected, issuedNotConnected{PublicKey: r.PublicKey, Address: a, Owner: o, Group: g, Instance: i, Kind: r.Kind})
 		}
 	}
 	slices.SortFunc(rep.Unrecorded, func(a, b issuedFindingOut) int {

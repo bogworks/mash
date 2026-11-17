@@ -74,8 +74,8 @@ func TestPromptNoticeWorstCaseArithmetic(t *testing.T) {
 
 func hostileRecord() store.Record {
 	bad := func(s string) string { return s + "\x1b[31m\x07\u009b" }
-	return store.Record{Name: "ops1", Owner: "acme", Agent: "cc", AgentToken: "cc", Account: "A", User: "U",
-		MailSubject: store.MailSubjectFor("acme", "ops1"), Created: "2026-01-01T00:00:00Z",
+	return store.Record{Owner: "acme", Group: "team1", Instance: "ops1", Agent: "claude-code", Account: "A", User: "U",
+		MailSubject: tAddr("ops1").Subjects().Mail, Created: "2026-01-01T00:00:00Z",
 		Note: bad("note"), Role: bad("role"), Host: bad("host"), Description: bad("desc"),
 		Caps: []string{bad("cap")}, Labels: map[string]string{bad("lk"): bad("lv")}}
 }

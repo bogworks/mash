@@ -3,9 +3,7 @@ package policyapply
 import (
 	"context"
 	"errors"
-	"fmt"
 	"slices"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -69,7 +67,7 @@ func (p *liveProv) inbox(ctx context.Context, name, address string) (stream, con
 	if err != nil {
 		return false, false, err
 	}
-	st, err := js.Stream(ctx, sap.InboxStream(id.Flat()))
+	st, err := js.Stream(ctx, id.InboxStream())
 	if errors.Is(err, jetstream.ErrStreamNotFound) {
 		return false, false, nil
 	}
@@ -85,13 +83,9 @@ func (p *liveProv) inbox(ctx context.Context, name, address string) (stream, con
 	return true, true, nil
 }
 
-// identity is the endpoint identity of an address range.owner.name: the range is the agent token position.
-func (p *liveProv) identity(address string) (sap.EndpointIdentity, error) {
-	parts := strings.Split(address, ".")
-	if len(parts) != 3 {
-		return sap.EndpointIdentity{}, fmt.Errorf("address %q is not range.owner.name", address)
-	}
-	return sap.New(parts[0], parts[1], parts[2])
+// identity is the endpoint address of an address owner.group.instance.
+func (p *liveProv) identity(address string) (sap.Address, error) {
+	return sap.ParseAddress(address)
 }
 
 // waitJS waits until the cluster's JetStream answers for the account.
@@ -153,7 +147,7 @@ func (p *liveProv) CreateInbox(ctx context.Context, address string) error {
 	var last error
 	for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); time.Sleep(250 * time.Millisecond) {
 		var s jetstream.Stream
-		if s, last = js.CreateOrUpdateStream(ctx, store.InboxConfigIdentity(id, store.DefaultLimits())); last != nil {
+		if s, last = js.CreateOrUpdateStream(ctx, store.InboxConfigFor(id, store.DefaultLimits())); last != nil {
 			continue
 		}
 		if _, last = s.CreateOrUpdateConsumer(ctx, store.ConsumerConfig()); last == nil {

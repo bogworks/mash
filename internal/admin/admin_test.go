@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/bogworks/mash/internal/natsauth"
+	"github.com/bogworks/mash/internal/sap"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
@@ -34,21 +35,21 @@ func setup(t *testing.T) (*testenv.Env, *admin.Admin, jetstream.JetStream) {
 func TestProvisionCreatesInboxConsumerRecord(t *testing.T) {
 	e, a, js := setup(t)
 	ctx := context.Background()
-	_, user := e.Mint(t, "alpha")
-	rec, err := a.Provision(ctx, "alpha", user, e.Account, "test endpoint", admin.Meta{})
+	_, user := e.Mint(t, ep(t, "alpha"))
+	rec, err := a.Provision(ctx, ep(t, "alpha"), user, e.Account, "test endpoint", admin.Meta{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rec.MailSubject != "agents.mail.cc.o.alpha" || rec.User != user || rec.Account != e.Account ||
-		rec.Agent != "claude-code" || rec.AgentToken != "cc" || rec.Owner != "o" || rec.Note != "test endpoint" || rec.Created == "" {
+	if rec.MailSubject != "agents.mail.o.dev.alpha" || rec.User != user || rec.Account != e.Account ||
+		rec.Agent != "claude-code" || rec.Owner != "o" || rec.Group != "dev" || rec.Instance != "alpha" || rec.Note != "test endpoint" || rec.Created == "" {
 		t.Fatalf("record %+v", rec)
 	}
-	s, err := js.Stream(ctx, "inbox-alpha")
+	s, err := js.Stream(ctx, "inbox-o_dev_alpha")
 	if err != nil {
 		t.Fatal(err)
 	}
 	c := s.CachedInfo().Config
-	if len(c.Subjects) != 1 || c.Subjects[0] != "agents.mail.*.o.alpha" || c.Storage != jetstream.FileStorage ||
+	if len(c.Subjects) != 1 || c.Subjects[0] != "agents.mail.o.dev.alpha" || c.Storage != jetstream.FileStorage ||
 		c.Retention != jetstream.LimitsPolicy || c.MaxAge != 30*24*time.Hour || c.MaxBytes != 16<<20 ||
 		c.MaxMsgSize != 1<<20 || c.Discard != jetstream.DiscardOld || c.Duplicates != 2*time.Minute ||
 		!c.DenyDelete || !c.DenyPurge || !c.AllowDirect || c.SubjectTransform != nil {
@@ -64,12 +65,12 @@ func TestProvisionCreatesInboxConsumerRecord(t *testing.T) {
 		t.Fatalf("consumer config %+v", cc)
 	}
 	kv, _ := js.KeyValue(ctx, store.DirectoryBucket)
-	got, err := store.GetRecord(ctx, kv, "alpha")
+	got, err := store.GetRecord(ctx, kv, "o_dev_alpha")
 	if err != nil || !reflect.DeepEqual(got, rec) {
 		t.Fatalf("directory: %+v %v", got, err)
 	}
 	lst, err := a.List(ctx)
-	if err != nil || len(lst) != 1 || lst[0].Name != "alpha" {
+	if err != nil || len(lst) != 1 || lst[0].Instance != "alpha" {
 		t.Fatalf("list %+v %v", lst, err)
 	}
 }
@@ -77,19 +78,20 @@ func TestProvisionCreatesInboxConsumerRecord(t *testing.T) {
 func TestProvisionRejectsBadNameAndDuplicate(t *testing.T) {
 	e, a, _ := setup(t)
 	ctx := context.Background()
-	_, user := e.Mint(t, "alpha")
+	_, user := e.Mint(t, ep(t, "alpha"))
 	for _, bad := range []string{"Alpha", "a--b", ""} {
-		if _, err := a.Provision(ctx, bad, user, e.Account, "", admin.Meta{}); err == nil {
-			t.Errorf("name %q accepted", bad)
+		addr := sap.Address{Owner: "o", Group: "dev", Instance: bad}
+		if _, err := a.Provision(ctx, addr, user, e.Account, "", admin.Meta{}); err == nil {
+			t.Errorf("instance %q accepted", bad)
 		}
 	}
-	if _, err := a.Provision(ctx, "alpha", "Unotakey", e.Account, "", admin.Meta{}); err == nil {
+	if _, err := a.Provision(ctx, ep(t, "alpha"), "Unotakey", e.Account, "", admin.Meta{}); err == nil {
 		t.Error("bad user key accepted")
 	}
-	if _, err := a.Provision(ctx, "alpha", user, e.Account, "", admin.Meta{}); err != nil {
+	if _, err := a.Provision(ctx, ep(t, "alpha"), user, e.Account, "", admin.Meta{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.Provision(ctx, "alpha", user, e.Account, "", admin.Meta{}); err == nil || !strings.Contains(err.Error(), "already") {
+	if _, err := a.Provision(ctx, ep(t, "alpha"), user, e.Account, "", admin.Meta{}); err == nil || !strings.Contains(err.Error(), "already") {
 		t.Fatalf("duplicate: %v", err)
 	}
 }
@@ -97,22 +99,26 @@ func TestProvisionRejectsBadNameAndDuplicate(t *testing.T) {
 func TestDeprovisionRemovesAll(t *testing.T) {
 	e, a, js := setup(t)
 	ctx := context.Background()
-	_, user := e.Mint(t, "alpha")
-	if _, err := a.Provision(ctx, "alpha", user, e.Account, "", admin.Meta{}); err != nil {
+	_, user := e.Mint(t, ep(t, "alpha"))
+	if _, err := a.Provision(ctx, ep(t, "alpha"), user, e.Account, "", admin.Meta{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.Deprovision(ctx, "alpha"); err != nil {
+	if err := a.Deprovision(ctx, ep(t, "alpha")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := js.Stream(ctx, "inbox-alpha"); err == nil {
+	if _, err := js.Stream(ctx, "inbox-o_dev_alpha"); err == nil {
 		t.Fatal("inbox still exists")
 	}
 	kv, _ := js.KeyValue(ctx, store.DirectoryBucket)
-	if _, err := store.GetRecord(ctx, kv, "alpha"); err == nil {
+	if _, err := store.GetRecord(ctx, kv, "o_dev_alpha"); err == nil {
 		t.Fatal("record still exists")
 	}
-	if _, err := a.Provision(ctx, "alpha", user, e.Account, "", admin.Meta{}); err != nil {
+	// A deprovisioned address is retired and never reassigned.
+	if _, err := a.Provision(ctx, ep(t, "alpha"), user, e.Account, "", admin.Meta{}); err == nil || !strings.Contains(err.Error(), "retired") {
 		t.Fatalf("re-provision after deprovision: %v", err)
+	}
+	if ok, err := a.Exists(ctx, ep(t, "alpha")); err != nil || ok {
+		t.Fatalf("exists after deprovision: %v %v", ok, err)
 	}
 }
 
@@ -149,33 +155,33 @@ func denied(t *testing.T, nc *nats.Conn, subj, body, what string) {
 func TestEndpointPermissionDenials(t *testing.T) {
 	e, a, js := setup(t)
 	ctx := context.Background()
-	credsA, userA := e.Mint(t, "a")
-	_, userB := e.Mint(t, "b")
+	credsA, userA := e.Mint(t, ep(t, "a"))
+	_, userB := e.Mint(t, ep(t, "b"))
 	for n, u := range map[string]string{"a": userA, "b": userB} {
-		if _, err := a.Provision(ctx, n, u, e.Account, "", admin.Meta{}); err != nil {
+		if _, err := a.Provision(ctx, ep(t, n), u, e.Account, "", admin.Meta{}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	for _, to := range []string{"a", "b"} {
-		if _, err := js.Publish(ctx, "agents.mail.cc.o."+to, []byte("seed")); err != nil {
+		if _, err := js.Publish(ctx, "agents.mail.o.dev."+to, []byte("seed")); err != nil {
 			t.Fatal(err)
 		}
 	}
-	nc, err := nats.Connect(e.URL, natsauth.UserCredentials(credsA), nats.CustomInboxPrefix("_INBOX.a"))
+	nc, err := nats.Connect(e.URL, natsauth.UserCredentials(credsA), nats.CustomInboxPrefix("_INBOX.o_dev_a"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer nc.Close()
 
-	denied(t, nc, "$JS.API.DIRECT.GET.inbox-b", `{"seq":1}`, "direct get of another inbox")
-	denied(t, nc, "$JS.API.STREAM.MSG.GET.inbox-b", `{"seq":1}`, "msg get of another inbox")
-	denied(t, nc, "$JS.API.STREAM.MSG.GET.inbox-a", `{"seq":1}`, "msg get (non-direct) of own inbox")
-	denied(t, nc, "$JS.API.CONSUMER.MSG.NEXT.inbox-b.deliver", `{"batch":1,"expires":500000000}`, "fetch from another inbox")
-	denied(t, nc, "$KV.mash-leases.b", `{}`, "another endpoint's lease")
-	denied(t, nc, "$KV.mash-directory.a", `{}`, "writing the directory")
-	denied(t, nc, "$JS.API.STREAM.MSG.DELETE.inbox-a", `{"seq":1}`, "deleting a message")
-	denied(t, nc, "$JS.API.STREAM.PURGE.inbox-a", `{}`, "purging own inbox")
-	denied(t, nc, "$JS.API.STREAM.DELETE.inbox-a", ``, "deleting own inbox")
+	denied(t, nc, "$JS.API.DIRECT.GET.inbox-o_dev_b", `{"seq":1}`, "direct get of another inbox")
+	denied(t, nc, "$JS.API.STREAM.MSG.GET.inbox-o_dev_b", `{"seq":1}`, "msg get of another inbox")
+	denied(t, nc, "$JS.API.STREAM.MSG.GET.inbox-o_dev_a", `{"seq":1}`, "msg get (non-direct) of own inbox")
+	denied(t, nc, "$JS.API.CONSUMER.MSG.NEXT.inbox-o_dev_b.deliver", `{"batch":1,"expires":500000000}`, "fetch from another inbox")
+	denied(t, nc, "$KV.mash-leases.o_dev_b", `{}`, "another endpoint's lease")
+	denied(t, nc, "$KV.mash-directory.o_dev_a", `{}`, "writing the directory")
+	denied(t, nc, "$JS.API.STREAM.MSG.DELETE.inbox-o_dev_a", `{"seq":1}`, "deleting a message")
+	denied(t, nc, "$JS.API.STREAM.PURGE.inbox-o_dev_a", `{}`, "purging own inbox")
+	denied(t, nc, "$JS.API.STREAM.DELETE.inbox-o_dev_a", ``, "deleting own inbox")
 	denied(t, nc, "$JS.API.CONSUMER.CREATE.KV_mash-directory.evil", `{"stream_name":"KV_mash-directory","config":{"durable_name":"evil","deliver_subject":"x"}}`, "a durable consumer on the directory")
 	denied(t, nc, "$JS.API.CONSUMER.DELETE.KV_mash-directory.anything", ``, "deleting a directory consumer")
 	denied(t, nc, "$JS.API.STREAM.CREATE.x", `{"name":"x","subjects":["x"]}`, "creating a stream")
@@ -184,7 +190,7 @@ func TestEndpointPermissionDenials(t *testing.T) {
 	// travel on inbox subjects, so a may subscribe only to its own prefix.
 	for _, subj := range []string{"_INBOX.>", "_INBOX.b.>", "_INBOX.b.x", "_INBOX.*.x"} {
 		errs := make(chan error, 1)
-		sc, err := nats.Connect(e.URL, natsauth.UserCredentials(credsA), nats.CustomInboxPrefix("_INBOX.a"),
+		sc, err := nats.Connect(e.URL, natsauth.UserCredentials(credsA), nats.CustomInboxPrefix("_INBOX.o_dev_a"),
 			nats.ErrorHandler(func(_ *nats.Conn, _ *nats.Subscription, err error) {
 				select {
 				case errs <- err:
@@ -210,12 +216,12 @@ func TestEndpointPermissionDenials(t *testing.T) {
 	// Reply-permission laundering: a sends itself a request whose reply subject
 	// is a JetStream admin call, then answers it. A response grant derived from
 	// received reply subjects would let that through.
-	sub, err := nc.SubscribeSync("agents.status.cc.o.a")
+	sub, err := nc.SubscribeSync("agents.status.o.dev.a")
 	if err != nil {
 		t.Fatal(err)
 	}
-	lm := nats.NewMsg("agents.status.cc.o.a")
-	lm.Reply = "$JS.API.STREAM.DELETE.inbox-b"
+	lm := nats.NewMsg("agents.status.o.dev.a")
+	lm.Reply = "$JS.API.STREAM.DELETE.inbox-o_dev_b"
 	if err := nc.PublishMsg(lm); err != nil {
 		t.Fatal(err)
 	}
@@ -224,12 +230,12 @@ func TestEndpointPermissionDenials(t *testing.T) {
 	}
 	nc.Flush()
 	time.Sleep(300 * time.Millisecond)
-	if _, err := js.Stream(ctx, "inbox-b"); err != nil {
+	if _, err := js.Stream(ctx, "inbox-o_dev_b"); err != nil {
 		t.Fatalf("an endpoint deleted another endpoint's inbox by answering its own request: %v", err)
 	}
 
 	// And the allowed path: a reads its own inbox by direct get.
-	m, err := nc.Request("$JS.API.DIRECT.GET.inbox-a", []byte(`{"seq":1}`), 2*time.Second)
+	m, err := nc.Request("$JS.API.DIRECT.GET.inbox-o_dev_a", []byte(`{"seq":1}`), 2*time.Second)
 	if err != nil {
 		t.Fatalf("own direct get: %v", err)
 	}
@@ -241,26 +247,26 @@ func TestEndpointPermissionDenials(t *testing.T) {
 func TestEnsureInboxRecreatesWhatIsMissing(t *testing.T) {
 	e, a, js := setup(t)
 	ctx := context.Background()
-	_, user := e.Mint(t, "alpha")
-	if _, err := a.Provision(ctx, "alpha", user, e.Account, "", admin.Meta{}); err != nil {
+	_, user := e.Mint(t, ep(t, "alpha"))
+	if _, err := a.Provision(ctx, ep(t, "alpha"), user, e.Account, "", admin.Meta{}); err != nil {
 		t.Fatal(err)
 	}
-	if made, err := a.EnsureInbox(ctx, "alpha"); err != nil || len(made) != 0 {
+	if made, err := a.EnsureInbox(ctx, ep(t, "alpha")); err != nil || len(made) != 0 {
 		t.Fatalf("intact inbox: made %v, err %v", made, err)
 	}
-	if err := js.DeleteConsumer(ctx, "inbox-alpha", store.Consumer); err != nil {
+	if err := js.DeleteConsumer(ctx, "inbox-o_dev_alpha", store.Consumer); err != nil {
 		t.Fatal(err)
 	}
-	if made, err := a.EnsureInbox(ctx, "alpha"); err != nil || strings.Join(made, ",") != "consumer" {
+	if made, err := a.EnsureInbox(ctx, ep(t, "alpha")); err != nil || strings.Join(made, ",") != "consumer" {
 		t.Fatalf("missing consumer: made %v, err %v", made, err)
 	}
-	if err := js.DeleteStream(ctx, "inbox-alpha"); err != nil {
+	if err := js.DeleteStream(ctx, "inbox-o_dev_alpha"); err != nil {
 		t.Fatal(err)
 	}
-	if made, err := a.EnsureInbox(ctx, "alpha"); err != nil || strings.Join(made, ",") != "stream,consumer" {
+	if made, err := a.EnsureInbox(ctx, ep(t, "alpha")); err != nil || strings.Join(made, ",") != "stream,consumer" {
 		t.Fatalf("missing stream: made %v, err %v", made, err)
 	}
-	s, err := js.Stream(ctx, "inbox-alpha")
+	s, err := js.Stream(ctx, "inbox-o_dev_alpha")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -299,19 +305,19 @@ func TestEnsureInboxRejectsAWrongInbox(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			e, a, js := setup(t)
 			ctx := context.Background()
-			_, user := e.Mint(t, "alpha")
-			if _, err := a.Provision(ctx, "alpha", user, e.Account, "", admin.Meta{}); err != nil {
+			_, user := e.Mint(t, ep(t, "alpha"))
+			if _, err := a.Provision(ctx, ep(t, "alpha"), user, e.Account, "", admin.Meta{}); err != nil {
 				t.Fatal(err)
 			}
-			s, err := js.Stream(ctx, "inbox-alpha")
+			s, err := js.Stream(ctx, "inbox-o_dev_alpha")
 			if err != nil {
 				t.Fatal(err)
 			}
 			if tc.stream != nil {
-				cfg := store.InboxConfig(e.Owner, "alpha")
+				cfg := store.InboxConfig(ep(t, "alpha"))
 				tc.stream(&cfg)
 				if tc.field == "retention" {
-					if err := js.DeleteStream(ctx, "inbox-alpha"); err != nil {
+					if err := js.DeleteStream(ctx, "inbox-o_dev_alpha"); err != nil {
 						t.Fatal(err)
 					}
 					s, err = js.CreateStream(ctx, cfg)
@@ -326,7 +332,7 @@ func TestEnsureInboxRejectsAWrongInbox(t *testing.T) {
 				cc := store.ConsumerConfig()
 				tc.consumer(&cc)
 				if cc.DeliverSubject != "" { // a push consumer cannot be changed into place; recreate it
-					if err := js.DeleteConsumer(ctx, "inbox-alpha", store.Consumer); err != nil {
+					if err := js.DeleteConsumer(ctx, "inbox-o_dev_alpha", store.Consumer); err != nil {
 						t.Fatal(err)
 					}
 					_, err = s.CreateConsumer(ctx, cc)
@@ -338,11 +344,11 @@ func TestEnsureInboxRejectsAWrongInbox(t *testing.T) {
 				}
 			}
 			before := s.CachedInfo().Config
-			_, err = a.EnsureInbox(ctx, "alpha")
-			if err == nil || !strings.Contains(err.Error(), tc.field) || !strings.Contains(err.Error(), "mash admin deprovision alpha") {
+			_, err = a.EnsureInbox(ctx, ep(t, "alpha"))
+			if err == nil || !strings.Contains(err.Error(), tc.field) || !strings.Contains(err.Error(), "mash admin deprovision o_dev_alpha") {
 				t.Fatalf("err %v, want one naming %s and the deprovision command", err, tc.field)
 			}
-			s2, err := js.Stream(ctx, "inbox-alpha")
+			s2, err := js.Stream(ctx, "inbox-o_dev_alpha")
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -39,7 +39,7 @@ func TestSpoolFromStartHoldsUntilDrained(t *testing.T) {
 	t.Cleanup(func() { IdleWake = oi })
 	f := newFixture(t, "a", "b")
 	a, ev, sp := f.runSpooledFromStart(t, "a") // sp.Touch is never called
-	if _, err := f.client(t, "b").SendWith(context.Background(), "a", "the body", SendOptions{Kind: kind.Question}); err != nil {
+	if _, err := f.client(t, "b").SendWith(context.Background(), tdot("a"), "the body", SendOptions{Kind: kind.Question}); err != nil {
 		t.Fatal(err)
 	}
 	until(t, "spooled", func() bool { return len(waiting(t, sp)) == 1 })
@@ -50,7 +50,7 @@ func TestSpoolFromStartHoldsUntilDrained(t *testing.T) {
 		}
 	}
 	got := ev.waitFor(t, 1, 5*time.Second) // no hook has run: the wake is at once (v0.2.7), not after the idle wake
-	if got[0] != "1 message from b (question)" {
+	if got[0] != "1 message from "+tdot("b")+" (question)" {
 		t.Fatalf("the wake %q, want the summary line alone", got[0])
 	}
 	time.Sleep(3 * SpoolCheck)
@@ -79,7 +79,7 @@ func TestSpoolFromStartReWakesWithoutDrain(t *testing.T) {
 	f := newFixture(t, "a", "b")
 	ep, ev, sp := f.runSpooledFromStart(t, "a")
 	sent := time.Now()
-	if _, err := f.client(t, "b").SendWith(context.Background(), "a", "held", SendOptions{Kind: kind.Question}); err != nil {
+	if _, err := f.client(t, "b").SendWith(context.Background(), tdot("a"), "held", SendOptions{Kind: kind.Question}); err != nil {
 		t.Fatal(err)
 	}
 	ev.waitFor(t, 1, 5*time.Second) // the pre-hook wake, at once; it starts no backoff
@@ -120,7 +120,7 @@ func TestSpoolFromStartWithoutSpoolHoldsMail(t *testing.T) {
 	done := make(chan struct{})
 	go func() { _ = a.Run(ctx, ev.deliver); close(done) }()
 	t.Cleanup(func() { cancel(); <-done; a.Close() })
-	if _, err := f.client(t, "b").SendWith(context.Background(), "a", "stays", SendOptions{Kind: kind.Question, Urgent: true}); err != nil {
+	if _, err := f.client(t, "b").SendWith(context.Background(), tdot("a"), "stays", SendOptions{Kind: kind.Question, Urgent: true}); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(2 * time.Second)

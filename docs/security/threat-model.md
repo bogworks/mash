@@ -333,14 +333,14 @@ Custody rule: the account signing key, and every key above it, stay with the min
   admin user, and check the directory, the inbox streams and the issue record (`mashctl audit`, `mashctl issued list`).
 
 **Endpoint creds and seeds** (`<name>.creds`)
-- Lives: `<config dir>/<name>.creds`, 0600; `mashctl add` refuses a parent directory that others can write, and a
+- Lives: `<config dir>/<owner>.<group>.<instance>.creds`, 0600; the command that writes it refuses a parent directory that others can write, and a
   creds file readable by others is refused when read. It holds the endpoint's user JWT and seed.
 - Held by: the host that runs that one endpoint.
 - A holder can: be that endpoint: connect as it, send mail within the permissions of its user, read its inbox, and sign
   `Agent-Sender` headers with its seed. It cannot mint, read or write the directory's records beyond reading them, and
   has no access to the issue record: its permissions grant nothing on `mash-issued` (a test asserts it).
-- If it leaks: `mashctl retire NAME` revokes the user key (it also removes the record and inbox), or `mashctl reissue
-  NAME` when the key is already revoked or its permissions changed; the old key stays revoked.
+- If it leaks: `mashctl retire ADDRESS` revokes the user key (it also removes the record and inbox); the old key stays
+  revoked, and a new credential for the address needs a new user key.
 
 **The key store** (`<config dir>/keys`, or `$MASH_KEYS_DIR`)
 - Lives: the directory (0700) holding `operator.nk`, `system.nk`, `account.nk` (0600), `operator.jwt` (a

@@ -81,24 +81,13 @@ func (e *Endpoint) SetSpool(s spool.Spool, owner string) error {
 	// a stream recreated since, while this session waited for the lease, would bind the spool to the old identity,
 	// keep its tombstones, and ack new mail unshown (codex H1 on #121). It is the one stream-info request serve's
 	// startup makes, so it adds no wave.
-	st, err := e.js.Stream(ctx, sap.InboxStream(e.key))
+	st, err := e.js.Stream(ctx, e.ident.InboxStream())
 	if err != nil {
 		return fmt.Errorf("mash: inbox: %w", err)
 	}
 	info := st.CachedInfo() // the response to the request just made
 	if err := s.BindStream("", info.Config.Name+"@"+info.Created.UTC().Format(time.RFC3339Nano)); err != nil {
 		return err
-	}
-	if e.alias != nil {
-		// The legacy stream is bound on its own: its sequences are not the primary stream's, and it too can be recreated.
-		lst, err := e.js.Stream(ctx, sap.InboxStream(e.legacyKey))
-		if err != nil {
-			return fmt.Errorf("mash: legacy inbox: %w", err)
-		}
-		linfo := lst.CachedInfo()
-		if err := s.BindStream(LegacyStream, linfo.Config.Name+"@"+linfo.Created.UTC().Format(time.RFC3339Nano)); err != nil {
-			return err
-		}
 	}
 	// The previous session's waiting files are stale: the hook timestamp resets with this serve, so a later hook
 	// would print them again while NATS redelivers the unacked mail. Clear them; the redelivery is spooled again or
@@ -116,10 +105,6 @@ func (e *Endpoint) SetSpool(s spool.Spool, owner string) error {
 		return err
 	}
 	e.spool, e.since = &s, time.Now()
-	e.epochSpool.Store(&s)
-	if err := e.noteLegacyEpochLocked(); err != nil && e.legacyReading() { // under the lock SetSpool holds: the file names the hold in force, or none
-		e.failLegacyHold(err, true) // the hold's entries would be hidden and never drained: give it up
-	}
 	e.hl.bind(s, e.since)
 	return nil
 }
@@ -152,21 +137,20 @@ type held struct {
 	msgs       map[spool.Ref]pending
 	at         map[spool.Ref]time.Time // when each was spooled
 	bytes      int
-	stored     int                  // the held messages' stored size, headers included, as the inbox stream counts it
-	alive      time.Time            // the last keep-alive
-	wakeAt     time.Time            // when the session was last woken; zero once a hook has drained since
-	wakes      int                  // wakes since a hook last drained: the backoff exponent
-	hookAt     time.Time            // when a hook last drained: the idle spell is measured from here, and a crowded backlog stops waking at once
-	hookHeld   int                  // the held count right after the last drain: a backlog above it has grown since
-	hookStored int                  // the held stored size right after the last drain
-	added      int                  // messages spooled since the last settle: arrivals of the current pass, not yet seen by a drain check
-	listed     map[spool.Ref]bool   // messages a hook listed in a digest and the model has not read: announced, so they never wake (ADR 0046)
-	rung       map[spool.Ref]bool   // urgent messages a wake has already announced
-	fails      map[spool.Ref]int    // consecutive spool failures per message
-	failed     bool                 // a spool failure is logged for the current spell
-	full       bool                 // the byte cap turned a message away since a hook last drained
-	epochs     map[spool.Ref]uint64 // the legacy epoch each held legacy message was spooled under
-	seen       *seenSet             // the deliver loop's seen set: a dropped legacy message is forgotten there, so its redelivery is shown
+	stored     int                // the held messages' stored size, headers included, as the inbox stream counts it
+	alive      time.Time          // the last keep-alive
+	wakeAt     time.Time          // when the session was last woken; zero once a hook has drained since
+	wakes      int                // wakes since a hook last drained: the backoff exponent
+	hookAt     time.Time          // when a hook last drained: the idle spell is measured from here, and a crowded backlog stops waking at once
+	hookHeld   int                // the held count right after the last drain: a backlog above it has grown since
+	hookStored int                // the held stored size right after the last drain
+	added      int                // messages spooled since the last settle: arrivals of the current pass, not yet seen by a drain check
+	listed     map[spool.Ref]bool // messages a hook listed in a digest and the model has not read: announced, so they never wake (ADR 0046)
+	rung       map[spool.Ref]bool // urgent messages a wake has already announced
+	fails      map[spool.Ref]int  // consecutive spool failures per message
+	failed     bool               // a spool failure is logged for the current spell
+	full       bool               // the byte cap turned a message away since a hook last drained
+	seen       *seenSet           // the deliver loop's seen set: a dropped message is forgotten there, so its redelivery is shown
 }
 
 // spoolTries is how many times a message is spooled before the channel delivers it instead.
@@ -191,7 +175,7 @@ func (e *Endpoint) spoolBatch(deliver Deliverer, show []pending, h *held, seen *
 			_ = p.msg.NakWithDelay(spoolFullDelay)
 			continue
 		default:
-			wrote, ep, err := e.putEntry(p)
+			wrote, err := e.putEntry(p)
 			if !wrote {
 				// The lease is not held now: nothing is written, nothing is seen or acked. Nak'd as dropUnleased does,
 				// so the new holder is redelivered it at once.
@@ -219,12 +203,6 @@ func (e *Endpoint) spoolBatch(deliver Deliverer, show []pending, h *held, seen *
 			}
 			delete(h.fails, seq)
 			h.msgs[seq] = p
-			if ep != 0 {
-				if h.epochs == nil {
-					h.epochs = map[spool.Ref]uint64{}
-				}
-				h.epochs[seq] = ep
-			}
 			h.added++
 			h.at[seq] = time.Now()
 			h.bytes += len(p.mail.Body)
@@ -242,55 +220,13 @@ func (e *Endpoint) spoolBatch(deliver Deliverer, show []pending, h *held, seen *
 	}
 }
 
-// putEntry writes p's entry to the spool. An own-stream entry is written as it always was. A legacy-stream entry is
-// written in one critical section of the spool lock, after a check of the legacy lease made inside it, and stamped with
-// the epoch of the hold (legacyEpochNow). A lease lost after the check but known by the end of the write has its epoch
-// "none" recorded in the same critical section as the entry, so no hook read shows the entry. A lease lost later still
-// has its "none" written under the lock right after, but a hook read that takes the lock first in between can show the
-// entry once: a duplicate at worst, since the old holder cannot ack it and the next holder is redelivered it. Delivery
-// is at least once: a duplicate is accepted, a lost message never. held is false when nothing was written because the
-// legacy lease is not held.
-func (e *Endpoint) putEntry(p pending) (held bool, epoch uint64, err error) {
-	ent := EntryOf(p.mail)
-	if p.mail.Stream != LegacyStream || !e.hasLegacyStream() {
-		if !e.leaseHeldFor(p.mail.Stream) { // the own lease is gone (flag only): nothing is written
-			return false, 0, nil
-		}
-		return true, 0, e.spool.Put(ent)
+// putEntry writes p's entry to the spool. held is false when nothing was written because the lease is not held. Delivery
+// is at least once: a duplicate is accepted, a lost message never.
+func (e *Endpoint) putEntry(p pending) (held bool, err error) {
+	if e.leaseGone.Load() { // the own lease is gone (flag only): nothing is written
+		return false, nil
 	}
-	unlock, err := e.spool.Lock()
-	if err != nil {
-		return true, 0, err
-	}
-	defer unlock()
-	return e.putLegacyLocked(ent)
-}
-
-// putLegacyLocked is the legacy-stream half of putEntry, the caller holding the spool lock: the lease check, then the
-// stamped write, then a recheck of the hold: a loss known by then is recorded before the lock is released. held is false
-// when nothing was written because the legacy lease is not held; it stays true when the entry was written and the lease
-// was lost during the write (the entry is dropped and the message nak'd later, so the next holder is redelivered it).
-func (e *Endpoint) putLegacyLocked(ent spool.Entry) (held bool, epoch uint64, err error) {
-	if testLegacyCheckSeam != nil {
-		testLegacyCheckSeam()
-	}
-	// The live lease read (lease_fence.go), not just the watch's state: a takeover the watch has not yet noticed is noticed
-	// here, before anything is written. Not held, lost or unconfirmed alike, writes nothing.
-	if e.verdictFor(LegacyStream) != verdictHeld {
-		e.noteLegacyEpochLocked() // the loss is recorded here too, should its own writer not have yet
-		return false, 0, nil
-	}
-	ent.Epoch = e.legacy.epoch.Load()
-	if testLegacyPutSeam != nil {
-		testLegacyPutSeam()
-	}
-	if err := e.spool.Put(ent); err != nil {
-		return true, ent.Epoch, err
-	}
-	if !e.legacyReading() {
-		e.noteLegacyEpochLocked() // lost during the write: record "none" in this critical section, not after it
-	}
-	return true, ent.Epoch, nil
+	return true, e.spool.Put(EntryOf(p.mail))
 }
 
 // testSettleSeam is a test seam: called in settleHeld after the per-entry loop, before the drain is acted on. Nil in
@@ -329,7 +265,6 @@ func (e *Endpoint) settleHeld(deliver Deliverer, h *held) {
 			delete(h.at, seq)
 			delete(h.rung, seq)
 			delete(h.listed, seq)
-			delete(h.epochs, seq)
 			h.full = false
 			h.wakeAt, h.wakes = time.Time{}, 0 // a hook ran: the session is not idle, and the next idle spell may wake it again
 			h.hookAt = time.Now()
@@ -484,7 +419,7 @@ var streamBytes = func(ctx context.Context, e *Endpoint) (bytes, max uint64, err
 	if e.js == nil {
 		return 0, 0, errors.New("no stream handle")
 	}
-	st, err := e.js.Stream(ctx, sap.InboxStream(e.key))
+	st, err := e.js.Stream(ctx, e.ident.InboxStream())
 	if err != nil {
 		return 0, 0, err
 	}
@@ -582,14 +517,7 @@ func (e *Endpoint) healHeld(h *held) {
 			continue
 		}
 		ent := EntryOf(h.msgs[seq].mail)
-		var err error
-		if ent.Stream == LegacyStream && e.hasLegacyStream() {
-			// Through the lease-checked, epoch-stamped path of putEntry: a lost lease writes nothing.
-			_, _, err = e.putLegacyLocked(ent)
-		} else {
-			err = e.spool.Put(ent)
-		}
-		if err != nil {
+		if err := e.spool.Put(ent); err != nil {
 			e.log.Printf("spool #%s: rewrite: %v", FormatMsgRef(seq), err)
 		}
 	}

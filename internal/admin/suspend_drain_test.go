@@ -19,7 +19,7 @@ func TestSuspendDrainLosesNothing(t *testing.T) {
 	e, a, js := setup(t)
 	ctx := context.Background()
 	provisionFor(t, e, a, "alpha")
-	const subj = "agents.mail.cc.o.alpha"
+	const subj = "agents.mail.o.dev.alpha"
 
 	var (
 		acked, refused atomic.Int64
@@ -51,12 +51,12 @@ func TestSuspendDrainLosesNothing(t *testing.T) {
 	for acked.Load() < 50 {
 		time.Sleep(time.Millisecond)
 	}
-	s, err := a.Suspend(ctx, "alpha")
+	s, err := a.Suspend(ctx, ep(t, "alpha"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	refusedAtSuspend := refused.Load()
-	got, err := a.Suspended(ctx, "alpha")
+	got, err := a.Suspended(ctx, ep(t, "alpha"))
 	if err != nil || !got.Suspended || got.LastSeq != s.LastSeq {
 		t.Fatalf("Suspended: %+v %v, Suspend gave %+v", got, err, s)
 	}
@@ -77,7 +77,7 @@ func TestSuspendDrainLosesNothing(t *testing.T) {
 	}
 
 	// Drain through the durable consumer.
-	stream, err := js.Stream(ctx, sap.InboxStream("alpha"))
+	stream, err := js.Stream(ctx, sap.InboxStream(ep(t, "alpha").Flat()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,10 +118,10 @@ func TestSuspendDrainLosesNothing(t *testing.T) {
 		md, _ := m.Metadata()
 		t.Fatalf("message beyond LastSeq: stream seq %d", md.Sequence.Stream)
 	}
-	if end, err := a.Suspended(ctx, "alpha"); err != nil || end.LastSeq != s.LastSeq {
+	if end, err := a.Suspended(ctx, ep(t, "alpha")); err != nil || end.LastSeq != s.LastSeq {
 		t.Fatalf("final state %+v %v", end, err)
 	}
-	if err := a.Deprovision(ctx, "alpha"); err != nil {
+	if err := a.Deprovision(ctx, ep(t, "alpha")); err != nil {
 		t.Fatal(err)
 	}
 }

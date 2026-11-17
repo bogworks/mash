@@ -18,25 +18,21 @@ import (
 	"github.com/bogworks/mash/internal/testenv"
 )
 
-// provisionNewForm provisions a three-token endpoint directly (there is no mashctl for it yet), as the endpoint
-// package's tests do, and returns the environment its mash commands run with.
-func provisionNewForm(t *testing.T, e *testenv.Env, agent, owner, name string) (sap.EndpointIdentity, map[string]string) {
+// provisionNewForm provisions an endpoint at owner.group.instance directly, as the endpoint package's tests do, and
+// returns its address and the environment its mash commands run with.
+func provisionNewForm(t *testing.T, e *testenv.Env, owner, group, instance string) (sap.Address, map[string]string) {
 	t.Helper()
-	id, err := sap.New(agent, owner, name)
+	id, err := sap.NewAddress(owner, group, instance)
 	if err != nil {
 		t.Fatal(err)
 	}
-	perms, err := admin.NewFormPermissions(id, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	creds, user := e.MintRaw(t, id.Flat(), perms)
+	creds, user := e.MintRaw(t, id.Flat(), *admin.Permissions(id))
 	ctx := context.Background()
 	js, err := jetstream.New(e.Conn(t, e.AdminCreds))
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := js.CreateStream(ctx, store.InboxConfigIdentity(id, store.DefaultLimits()))
+	s, err := js.CreateStream(ctx, store.InboxConfigFor(id, store.DefaultLimits()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,13 +43,13 @@ func provisionNewForm(t *testing.T, e *testenv.Env, agent, owner, name string) (
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec := store.Record{Name: id.Name, Owner: id.Owner, Agent: sap.AgentName, AgentToken: id.Agent, Account: e.Account,
+	rec := store.Record{Owner: id.Owner, Group: id.Group, Instance: id.Instance, Agent: sap.AgentName, Account: e.Account,
 		User: user, MailSubject: id.Subjects().Mail, Created: time.Now().UTC().Format(time.RFC3339)}
 	val, _ := json.Marshal(rec)
 	if _, err := kv.Create(ctx, id.Flat(), val); err != nil {
 		t.Fatal(err)
 	}
-	return id, map[string]string{"HOME": t.TempDir(), "MASH_NAME": id.Name, "MASH_OWNER": id.Owner, "MASH_AGENT_TOKEN": id.Agent,
+	return id, map[string]string{"HOME": t.TempDir(), "MASH_NAME": id.Instance, "MASH_OWNER": id.Owner, "MASH_GROUP": id.Group,
 		"MASH_URL": e.URL, "MASH_CREDS": creds, "MASH_SETTLE_MS": "20"}
 }
 
@@ -89,11 +85,10 @@ func cliAsQuiet(env map[string]string, args ...string) string {
 	return out.String()
 }
 
-// A live new-form serve and a live legacy serve with the same name token share one state directory: each spools to
-// its own directory, each hook drains and shows only its own endpoint's mail, and each serve acks only its own.
-func TestNewFormHookNextToLegacyEndpointOfTheSameName(t *testing.T) {
+// Two live endpoints with the same instance in different groups share one state directory: each spools to its own
+// directory, each hook drains and shows only its own endpoint's mail, and each serve acks only its own.
+func TestHookNextToEndpointOfTheSameInstanceInAnotherGroup(t *testing.T) {
 	e := testenv.Start(t)
-	e.Owner = "legowner" // the legacy endpoints' owner, before anything is provisioned
 	adm, err := admin.New(e.Conn(t, e.AdminCreds), e.Owner)
 	if err != nil {
 		t.Fatal(err)
@@ -102,95 +97,83 @@ func TestNewFormHookNextToLegacyEndpointOfTheSameName(t *testing.T) {
 		t.Fatal(err)
 	}
 	state := filepath.Join(t.TempDir(), "shared-state")
-	legacy := func(name string) map[string]string {
-		c, u := e.Mint(t, name)
-		if _, err := adm.Provision(context.Background(), name, u, e.Account, "", admin.Meta{}); err != nil {
-			t.Fatal(err)
-		}
-		return map[string]string{"HOME": t.TempDir(), "MASH_NAME": name, "MASH_URL": e.URL, "MASH_OWNER": e.Owner,
-			"MASH_CREDS": c, "MASH_SETTLE_MS": "20"}
-	}
-	legEnv, legSender := legacy("ops1"), legacy("lsender")
-	nfID, nfEnv := provisionNewForm(t, e, "acme", "team1", "ops1")
-	_, nfSender := provisionNewForm(t, e, "acme", "team1", "nsender")
-	for _, env := range []map[string]string{legEnv, nfEnv} {
+	aID, aEnv := provisionNewForm(t, e, "acme", "team1", "ops1")
+	bID, bEnv := provisionNewForm(t, e, "acme", "team2", "ops1")
+	_, aSender := provisionNewForm(t, e, "acme", "team1", "asender")
+	_, bSender := provisionNewForm(t, e, "acme", "team2", "bsender")
+	for _, env := range []map[string]string{aEnv, bEnv} {
 		env["MASH_STATE_DIR"] = state // one shared state directory: a collision would show
 		env["MASH_IDLE_WAKE"] = "5s"
 	}
-	if nfID.Flat() != "acme_team1_ops1" || nfEnv["MASH_NAME"] != legEnv["MASH_NAME"] {
-		t.Fatalf("setup: flat %q names %q %q", nfID.Flat(), nfEnv["MASH_NAME"], legEnv["MASH_NAME"])
+	if aID.Flat() != "acme_team1_ops1" || bID.Flat() != "acme_team2_ops1" || aEnv["MASH_NAME"] != bEnv["MASH_NAME"] {
+		t.Fatalf("setup: flat %q %q names %q %q", aID.Flat(), bID.Flat(), aEnv["MASH_NAME"], bEnv["MASH_NAME"])
 	}
 
-	legSpool := filepath.Join(state, "spool", "legowner", "ops1")
-	nfSpool := filepath.Join(state, "spool", "team1", "acme_team1_ops1")
+	aSpool := filepath.Join(state, "spool", "acme", "acme_team1_ops1")
+	bSpool := filepath.Join(state, "spool", "acme", "acme_team2_ops1")
 
-	ls, ns := startServe(t, legEnv), startServe(t, nfEnv)
-	ls.initialize(t)
-	ns.initialize(t)
-	ls.tools(t)
-	ns.tools(t)
-	for _, d := range []string{legSpool, nfSpool} {
+	as, bs := startServe(t, aEnv), startServe(t, bEnv)
+	as.initialize(t)
+	bs.initialize(t)
+	as.tools(t)
+	bs.tools(t)
+	for _, d := range []string{aSpool, bSpool} {
 		d := d
 		eventually(t, 5*time.Second, "serve made the spool "+d, func() bool { _, err := os.Stat(d); return err == nil })
 	}
 	eventually(t, 5*time.Second, "both online", func() bool {
-		return strings.Contains(cliAsQuiet(legSender, "who"), "ops1\tonline") && strings.Contains(cliAsQuiet(nfSender, "who"), "acme.team1.ops1\tonline")
+		return strings.Contains(cliAsQuiet(aSender, "who"), "acme.team1.ops1\tonline") && strings.Contains(cliAsQuiet(bSender, "who"), "acme.team2.ops1\tonline")
 	})
 	// Nothing else lives under the spool root: exactly the two distinct directories.
-	for _, root := range []string{filepath.Join(state, "spool", "legowner"), filepath.Join(state, "spool", "team1")} {
-		ents, err := os.ReadDir(root)
-		if err != nil || len(ents) != 1 {
-			t.Fatalf("%s: %v %v", root, ents, err)
-		}
+	ents, err := os.ReadDir(filepath.Join(state, "spool", "acme"))
+	if err != nil || len(ents) != 2 {
+		t.Fatalf("spool root: %v %v", ents, err)
 	}
-	if legSpool == nfSpool {
-		t.Fatal("spool directories collide")
+	if got := runHook(t, aEnv, "UserPromptSubmit"); got != "" {
+		t.Fatalf("empty spool printed %q", got)
 	}
-	if got := runHook(t, legEnv, "UserPromptSubmit"); got != "" {
-		t.Fatalf("legacy empty spool printed %q", got)
-	}
-	if got := runHook(t, nfEnv, "UserPromptSubmit"); got != "" {
-		t.Fatalf("new-form empty spool printed %q", got)
+	if got := runHook(t, bEnv, "UserPromptSubmit"); got != "" {
+		t.Fatalf("empty spool printed %q", got)
 	}
 
-	const legMsg, nfMsg = "LEGACY-ONLY payload alpha", "NEWFORM-ONLY payload beta"
-	cliAs(t, legSender, "send", "ops1", legMsg)
-	cliAs(t, nfSender, "send", "acme_team1_ops1", nfMsg)
+	const aMsg, bMsg = "TEAM-ONE-ONLY payload alpha", "TEAM-TWO-ONLY payload beta"
+	cliAs(t, aSender, "send", "acme.team1.ops1", aMsg)
+	cliAs(t, bSender, "send", "acme_team2_ops1", bMsg)
 
-	if ev := content(ls.await(t, 15*time.Second, isChannel)); ev != "1 message from lsender (task)" {
-		t.Fatalf("legacy wake %q", ev)
+	if ev := content(as.await(t, 15*time.Second, isChannel)); ev != "1 message from acme.team1.asender (task)" {
+		t.Fatalf("team1 wake %q", ev)
 	}
-	if ev := content(ns.await(t, 15*time.Second, isChannel)); ev != "1 message from acme.team1.nsender (task)" {
-		t.Fatalf("new-form wake %q", ev)
+	if ev := content(bs.await(t, 15*time.Second, isChannel)); ev != "1 message from acme.team2.bsender (task)" {
+		t.Fatalf("team2 wake %q", ev)
 	}
 
-	legOut := runHook(t, legEnv, "PostToolUse")
-	nfOut := runHook(t, nfEnv, "PostToolUse")
-	for _, want := range []string{"mash mail for ops1", "1 message from lsender (task)", "[verified]", "> " + legMsg} {
-		if !strings.Contains(legOut, want) {
-			t.Fatalf("legacy hook lacks %q:\n%s", want, legOut)
+	aOut := runHook(t, aEnv, "PostToolUse")
+	bOut := runHook(t, bEnv, "PostToolUse")
+	for _, want := range []string{"mash mail for acme.team1.ops1", "1 message from acme.team1.asender", "[verified]", "> " + aMsg} {
+		if !strings.Contains(aOut, want) {
+			t.Fatalf("team1 hook lacks %q:\n%s", want, aOut)
 		}
 	}
-	for _, want := range []string{"1 message from acme.team1.nsender", "mash mail for acme.team1.ops1", "[verified]", "> " + nfMsg} {
-		if !strings.Contains(nfOut, want) {
-			t.Fatalf("new-form hook lacks %q:\n%s", want, nfOut)
+	for _, want := range []string{"mash mail for acme.team2.ops1", "1 message from acme.team2.bsender", "[verified]", "> " + bMsg} {
+		if !strings.Contains(bOut, want) {
+			t.Fatalf("team2 hook lacks %q:\n%s", want, bOut)
 		}
 	}
-	if strings.Contains(legOut, "NEWFORM") || strings.Contains(legOut, "nsender") || strings.Contains(legOut, "acme") {
-		t.Fatalf("legacy hook shows new-form mail:\n%s", legOut)
+	if strings.Contains(aOut, "TEAM-TWO") || strings.Contains(aOut, "bsender") || strings.Contains(aOut, "team2") {
+		t.Fatalf("team1 hook shows team2 mail:\n%s", aOut)
 	}
-	if strings.Contains(nfOut, "LEGACY") || strings.Contains(nfOut, "lsender") || strings.Contains(nfOut, "legowner") {
-		t.Fatalf("new-form hook shows legacy mail:\n%s", nfOut)
+	if strings.Contains(bOut, "TEAM-ONE") || strings.Contains(bOut, "asender") || strings.Contains(bOut, "team1") {
+		t.Fatalf("team2 hook shows team1 mail:\n%s", bOut)
 	}
 
 	// Each serve acks only what its own hook showed, and each stream held only its own message.
-	eventually(t, 5*time.Second, "legacy serve acks", func() bool { return pendingOf(t, e, sap.InboxStream("ops1")) == 0 })
-	eventually(t, 5*time.Second, "new-form serve acks", func() bool { return pendingOf(t, e, "inbox-acme_team1_ops1") == 0 })
+	eventually(t, 5*time.Second, "team1 serve acks", func() bool { return pendingOf(t, e, aID.InboxStream()) == 0 })
+	eventually(t, 5*time.Second, "team2 serve acks", func() bool { return pendingOf(t, e, bID.InboxStream()) == 0 })
 	js, err := jetstream.New(e.Conn(t, e.AdminCreds))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for stream, subj := range map[string]string{"inbox-ops1": legMsg, "inbox-acme_team1_ops1": nfMsg} {
+	for stream, subj := range map[string]string{aID.InboxStream(): aMsg, bID.InboxStream(): bMsg} {
 		s, err := js.Stream(context.Background(), stream)
 		if err != nil {
 			t.Fatal(err)
@@ -201,21 +184,15 @@ func TestNewFormHookNextToLegacyEndpointOfTheSameName(t *testing.T) {
 	}
 
 	// Re-running each hook shows nothing new, and the spool directories stay distinct on disk.
-	if again := runHook(t, legEnv, "PostToolUse"); again != "" {
-		t.Fatalf("legacy hook shows again: %q", again)
+	if again := runHook(t, aEnv, "PostToolUse"); again != "" {
+		t.Fatalf("team1 hook shows again: %q", again)
 	}
-	if again := runHook(t, nfEnv, "PostToolUse"); again != "" {
-		t.Fatalf("new-form hook shows again: %q", again)
+	if again := runHook(t, bEnv, "PostToolUse"); again != "" {
+		t.Fatalf("team2 hook shows again: %q", again)
 	}
-	for _, d := range []string{legSpool, nfSpool} {
-		if _, err := os.Stat(d); err != nil {
-			t.Fatalf("spool %s: %v", d, err)
+	for _, d := range []string{aSpool, bSpool} {
+		if un := len(unlisted(spool.Spool{Dir: d})); un != 0 {
+			t.Fatalf("spool %s has %d undrained entries", d, un)
 		}
-	}
-	if un := len(unlisted(spool.Spool{Dir: legSpool})); un != 0 {
-		t.Fatalf("legacy spool has %d undrained entries", un)
-	}
-	if un := len(unlisted(spool.Spool{Dir: nfSpool})); un != 0 {
-		t.Fatalf("new-form spool has %d undrained entries", un)
 	}
 }

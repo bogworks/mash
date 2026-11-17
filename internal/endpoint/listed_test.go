@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/bogworks/mash/internal/kind"
-	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/spool"
 	"github.com/bogworks/mash/internal/store"
 	"github.com/nats-io/nats.go/jetstream"
@@ -24,7 +23,7 @@ func listedKnobs(t *testing.T) {
 func sendQuestions(t *testing.T, f *fixture, n int) {
 	t.Helper()
 	for i := 0; i < n; i++ {
-		if _, err := f.client(t, "b").SendWith(context.Background(), "a", "q"+strconv.Itoa(i), SendOptions{Kind: kind.Question}); err != nil {
+		if _, err := f.client(t, "b").SendWith(context.Background(), tdot("a"), "q"+strconv.Itoa(i), SendOptions{Kind: kind.Question}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -139,7 +138,7 @@ func TestListedMailDoesNotHideOrRepeatInANewWake(t *testing.T) {
 		t.Fatalf("woke for listed mail: %q", got)
 	}
 	sendQuestions(t, f, 1)
-	if got := ev.waitFor(t, 1, 5*time.Second); got[0] != "1 message from b (question)" {
+	if got := ev.waitFor(t, 1, 5*time.Second); got[0] != "1 message from "+tdot("b")+" (question)" {
 		t.Fatalf("the wake %q, want the new message alone", got[0])
 	}
 }
@@ -196,7 +195,7 @@ func TestListedMailIsListedOnceAgainAfterARebind(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ajs.UpdateConsumer(context.Background(), sap.InboxStream("a"), cc); err != nil {
+	if _, err := ajs.UpdateConsumer(context.Background(), taddr("a").InboxStream(), cc); err != nil {
 		t.Fatal(err)
 	}
 	if err := sp.Touch(); err != nil {

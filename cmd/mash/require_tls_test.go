@@ -15,7 +15,7 @@ import (
 // requireTLSEnv is an endpoint configuration whose server is a plain remote URL and which sets MASH_REQUIRE_TLS.
 func requireTLSEnv(t *testing.T) map[string]string {
 	t.Helper()
-	return map[string]string{"HOME": t.TempDir(), "MASH_NAME": "a", "MASH_OWNER": "o", "MASH_CREDS": "/none",
+	return map[string]string{"HOME": t.TempDir(), "MASH_NAME": "a", "MASH_GROUP": testGroup, "MASH_OWNER": "o", "MASH_CREDS": "/none",
 		"MASH_URL": "nats://u:s3cret@10.255.255.1:4222", "MASH_REQUIRE_TLS": "1"}
 }
 
@@ -83,7 +83,7 @@ func TestServeRefusesPlainRemoteUnderRequireTLS(t *testing.T) {
 
 // The CLI commands refuse before connecting, exit non-zero, and `mash status` shows the refusal.
 func TestCLIRefusesPlainRemoteUnderRequireTLS(t *testing.T) {
-	for _, cmd := range [][]string{{"inbox"}, {"who"}, {"send", "b", "hi"}} {
+	for _, cmd := range [][]string{{"inbox"}, {"who"}, {"send", tTo("b"), "hi"}} {
 		var out, errb bytes.Buffer
 		code := run(cmd, envFrom(requireTLSEnv(t)), strings.NewReader(""), &out, &errb)
 		got := out.String() + errb.String()

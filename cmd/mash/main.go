@@ -15,7 +15,6 @@ import (
 	"syscall"
 
 	"github.com/bogworks/mash/internal/config"
-	"github.com/bogworks/mash/internal/ctl"
 	"github.com/bogworks/mash/internal/endpoint"
 	"github.com/bogworks/mash/internal/host"
 )
@@ -24,7 +23,8 @@ const usage = `mash: a messaging mesh for agents (SAP 0.3 + mail, on NATS JetStr
 
   mash serve                                   the Claude Code channel server (started by the plugin)
   mash hook                                    the plugin's hook: shows the session its spooled mail
-  mash send <to> [--urgent] [--kind K] [--id KEY] [text... | --file F | -]   mail an endpoint (as MASH_NAME); --urgent
+  mash send <to> [--urgent] [--kind K] [--id KEY] [text... | --file F | -]   mail an endpoint (<to> is owner.group.instance or its flat key
+                                               owner_group_instance; as MASH_OWNER.MASH_GROUP.MASH_NAME); --urgent
                                                wakes it at once; K is blocker|question|task (wake an idle recipient)
                                                or result|fyi (opt-in; wait for its next turn); default task;
                                                --id KEY makes the send at-most-once: re-running it with the same KEY
@@ -41,8 +41,10 @@ const usage = `mash: a messaging mesh for agents (SAP 0.3 + mail, on NATS JetStr
   mash plugin export <dir>                     write this build's Claude Code plugin and a marketplace for it into <dir>
   mash version
 
+An endpoint is addressed owner.group.instance: MASH_OWNER (or config.json "owner"), MASH_GROUP (no default, no config key; a
+session without it stops, exit 2, group_missing) and MASH_NAME, the instance.
 Configuration: config.json {"url","owner"} in $MASH_CONFIG_DIR (default ~/.config/mash, or $XDG_CONFIG_HOME/mash), overridden by
-MASH_URL, MASH_OWNER, MASH_NAME, MASH_CREDS, MASH_ADMIN_CREDS, MASH_HOST (see docs/install.md).
+MASH_URL, MASH_OWNER, MASH_GROUP, MASH_NAME, MASH_CREDS, MASH_ADMIN_CREDS, MASH_HOST (see docs/install.md).
 State (spool, hook.log): $MASH_STATE_DIR (default $XDG_STATE_HOME/mash, else ~/.local/state/mash).
 Slow link: "open_timeout" (default 20s) and "call_timeout" (default 15s), or MASH_OPEN_TIMEOUT and MASH_CALL_TIMEOUT.
 Also tunable: lease_retry, transient_budget, transient_max, cli_timeout, admin_timeout (MASH_LEASE_RETRY, MASH_TRANSIENT_BUDGET, MASH_TRANSIENT_MAX, MASH_CLI_TIMEOUT, MASH_ADMIN_TIMEOUT).
@@ -137,8 +139,7 @@ var verbUsage = map[string]string{
 	"prompt":  "usage: mash prompt <to> <text...>",
 }
 
-// runLookup is main with its environment injected. lookup must agree with env; it is what config.Load reads, so that a
-// MASH_AGENT_TOKEN that is set but empty is seen.
+// runLookup is main with its environment injected. lookup must agree with env; it is what config.Load reads.
 func runLookup(ctx context.Context, args []string, env func(string) string, lookup config.Lookup, stdin io.Reader, stdout, stderr io.Writer) int {
 	// Resolved before anything dispatches, so `version`, the MCP server and the SAP service all report one string.
 	// Written only when it changes, which a process does once: later commands (and the tests, which run many in
@@ -185,17 +186,16 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 		home, _ = os.UserHomeDir()
 	}
 	cfg, err := config.Load(lookup, home)
-	// admin acts on the legacy identity, so with agent_token set it refuses rather than operate the wrong endpoint;
-	// the exception is the three-token form of provision and deprovision (naming plan 1.6), which names its target
-	// itself. An empty MASH_AGENT_TOKEN is a config error that hook would swallow as a no-op: refuse it for hook and
-	// admin both.
-	if args[0] == "admin" && cfg.AgentToken != "" && !ctl.NewFormRequested(args[1:]) {
-		fmt.Fprintln(stderr, errAdminAgentToken)
-		return 1
-	}
-	if (args[0] == "hook" || args[0] == "admin") && errors.Is(err, config.ErrAgentTokenEmpty) {
-		fmt.Fprintln(stderr, err)
-		return 1
+	// A session named without a group has no address and no default: it stops at once, exit 2, naming MASH_GROUP.
+	// A hook never fails the session (REQ-002 applies to the session itself, which serve stops), so it says so on
+	// stderr and exits 0; status reports it as a line.
+	if errors.Is(err, config.ErrGroupMissing) && args[0] != "status" {
+		if args[0] == "hook" {
+			fmt.Fprintf(stderr, "mash hook: %s: %v\n", config.CodeGroupMissing, err)
+			return 0
+		}
+		fmt.Fprintf(stderr, "%s: %v\n", config.CodeGroupMissing, err)
+		return 2
 	}
 	var adapter host.Adapter
 	if args[0] == "hook" || args[0] == "serve" {
@@ -228,6 +228,3 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 	fmt.Fprintf(stderr, "mash: unknown command %q\n\n%s", args[0], usage)
 	return 2
 }
-
-// errAdminAgentToken is mash admin's refusal of a configured agent_token.
-var errAdminAgentToken = errors.New("mash: agent_token is set but mash admin cannot act on a three-token identity yet; unset agent_token (MASH_AGENT_TOKEN)")

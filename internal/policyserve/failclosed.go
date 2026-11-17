@@ -61,14 +61,14 @@ func SuspendedInboxDetail(addresses []string) string {
 
 // InboxChecker reads whether an address has the inbox mail depends on and creates nothing. *admin.Admin is one.
 type InboxChecker interface {
-	CheckInbox(ctx context.Context, id sap.EndpointIdentity) (admin.InboxCheck, error)
+	CheckInbox(ctx context.Context, addr sap.Address) (admin.InboxCheck, error)
 }
 
 var _ InboxChecker = (*admin.Admin)(nil)
 
 // Provisioner is the policyapply.Provisioner of the service. It creates no inbox and issues no credential: a list set
 // does not carry the endpoint's public key, and mash never holds an endpoint's private key (ADR 0104), so an
-// address's endpoint is made first, by `mashctl add` or by the issue service, and applying a list set only checks it.
+// address's endpoint is made first, by the endpoint command or by the issue service, and applying a list set only checks it.
 //
 // CreateInbox verifies, through Inboxes, that the address has its inbox stream and durable consumer, with the
 // configuration mail depends on. The Applier runs the same check for every added address before anything is pushed,
@@ -95,9 +95,9 @@ const SuspendedReason = ": its inbox is suspended; resume it first"
 // Callers tell that answer apart with SuspendedReason. A
 // stream or consumer that exists but does not have the configuration mail depends on is an error, as is a failed read.
 func (p Provisioner) MissingInbox(ctx context.Context, address string) (string, error) {
-	id, err := sap.ParseCanonical(address)
+	id, err := sap.ParseAddress(address)
 	if err != nil {
-		return "", fmt.Errorf("address %.64q is not range.owner.name: %w", address, err)
+		return "", fmt.Errorf("address %.64q is not owner.group.instance: %w", address, err)
 	}
 	if p.Inboxes == nil {
 		return address + " has no inbox stream", nil

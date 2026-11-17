@@ -104,3 +104,43 @@ func AddressFromSubject(subj string) (Address, string, bool) {
 	}
 	return a, t[1], true
 }
+
+// Limits of the token rule.
+const (
+	// MaxTokenLen is the longest owner, group or instance token.
+	MaxTokenLen = 32
+	// MaxIdentityLen is the longest dotted form: three tokens and two separators.
+	MaxIdentityLen = 64
+)
+
+// checkToken applies the new token rule to one token at position pos
+// ("owner", "group" or "instance"): lower-case ASCII letters, digits and single
+// dashes, starting with a letter, not ending with a dash, 1 to 32 characters.
+func checkToken(pos, t string) error {
+	if t == "" {
+		return fmt.Errorf("sap: %s token is empty: use 1-%d characters", pos, MaxTokenLen)
+	}
+	if len(t) > MaxTokenLen {
+		return fmt.Errorf("sap: %s token %q is too long: at most %d characters", pos, t, MaxTokenLen)
+	}
+	for i := 0; i < len(t); i++ {
+		c := t[i]
+		switch {
+		case c >= 'A' && c <= 'Z':
+			return fmt.Errorf("sap: %s token %q must be lower-case", pos, t)
+		case c >= 'a' && c <= 'z', c >= '0' && c <= '9', c == '-':
+		default:
+			return fmt.Errorf("sap: %s token %q has a character that is not a lower-case letter, digit or dash", pos, t)
+		}
+	}
+	if t[0] < 'a' || t[0] > 'z' {
+		return fmt.Errorf("sap: %s token %q must start with a letter", pos, t)
+	}
+	if t[len(t)-1] == '-' {
+		return fmt.Errorf("sap: %s token %q must not end with a dash", pos, t)
+	}
+	if strings.Contains(t, "--") {
+		return fmt.Errorf("sap: %s token %q must not have consecutive dashes", pos, t)
+	}
+	return nil
+}

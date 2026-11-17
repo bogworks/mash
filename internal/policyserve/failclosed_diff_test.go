@@ -74,7 +74,7 @@ func diffWith(t *testing.T, inForce, next []byte, inboxes InboxChecker) policydo
 func hasInbox(addrs ...string) *fakeInboxes {
 	f := &fakeInboxes{answers: map[string]admin.InboxCheck{}}
 	for _, a := range addrs {
-		f.answers[a] = admin.InboxCheck{Stream: "inbox-" + a, Consumer: true, Legacy: true}
+		f.answers[a] = admin.InboxCheck{Stream: "inbox-" + a, Consumer: true}
 	}
 	return f
 }

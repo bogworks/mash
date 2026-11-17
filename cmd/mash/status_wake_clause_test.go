@@ -17,7 +17,7 @@ import (
 // sent the given number of channel notifications.
 func hooksRanSource(t *testing.T, notifications int) *statusSource {
 	t.Helper()
-	cfg := config.Config{Name: "a", Owner: "o", StateDir: t.TempDir()}
+	cfg := config.Config{Name: "a", Owner: "o", Group: testGroup, StateDir: t.TempDir()}
 	sdir, err := endpoint.SpoolDir(cfg)
 	if err != nil {
 		t.Fatal(err)

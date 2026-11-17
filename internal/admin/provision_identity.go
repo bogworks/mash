@@ -5,11 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"slices"
-	"strings"
 	"time"
 
-	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats.go/jetstream"
 	"github.com/nats-io/nkeys"
 
@@ -17,102 +14,28 @@ import (
 	"github.com/bogworks/mash/internal/store"
 )
 
-// VerifyAlias is the one check of a new-form record's legacy alias (ADR 0076, "Validation at provisioning"). The
-// permission set WindowBridge builds trusts its alias, so nothing else guards the grants that name another endpoint's
-// exact prompt, status and heartbeat subjects: provisioning and any permission assembly must call this first.
+// Provision provisions the endpoint at addr (ADR 0145). The configured name rule is applied first, to all three tokens
+// of addr, before the keys are validated and before anything is read or written. It creates the directory record
+// keyed by addr's flat key, the inbox stream inbox-<flat> filtered on addr's exact mail subject, and the durable
+// consumer. The record's agent is the harness, sap.AgentName.
 //
-// existing is the directory's records. It returns the alias as a legacy identity, or an error when
-//   - id is not a valid new-form identity;
-//   - the alias owner or name fails the legacy name rule (sap.Legacy);
-//   - the alias owner equals id's owner (the legacy wildcard filter would reach id), or the alias overlaps id;
-//   - no legacy record has exactly that owner and name;
-//   - another new-form record, one not keyed by id's own flat key, already claims the alias.
-//
-// The record under id's own flat key is id itself, so verifying an already provisioned record passes.
-func VerifyAlias(id sap.EndpointIdentity, alias store.Alias, existing []store.Record) (sap.EndpointIdentity, error) {
-	if err := id.Validate(); err != nil {
-		return sap.EndpointIdentity{}, fmt.Errorf("mash: alias: identity: %w", err)
-	}
-	if id.IsLegacy() {
-		return sap.EndpointIdentity{}, fmt.Errorf("mash: alias: %s must be a new-form identity: a legacy identity cannot carry an alias", id)
-	}
-	leg, err := sap.Legacy(alias.Owner, alias.Name)
-	if err != nil {
-		return sap.EndpointIdentity{}, fmt.Errorf("mash: alias refused: %w", err)
-	}
-	if alias.Owner == id.Owner {
-		return sap.EndpointIdentity{}, fmt.Errorf("mash: alias refused: alias owner %q equals the owner of %s: the legacy wildcard filter would reach it", alias.Owner, id)
-	}
-	if sap.Overlaps(id, leg) {
-		return sap.EndpointIdentity{}, fmt.Errorf("mash: alias refused: %s overlaps the alias %s/%s", id, alias.Owner, alias.Name)
-	}
-	named := false
-	for _, r := range existing {
-		if r.Owner == alias.Owner && r.Name == alias.Name && r.Key() == r.Name { // a legacy-keyed record
-			named = true
-		}
-		if r.Alias != nil && *r.Alias == alias && r.KeyOrName() != id.Flat() {
-			return sap.EndpointIdentity{}, fmt.Errorf("mash: alias refused: %s/%s is already claimed by %s", alias.Owner, alias.Name, r.KeyOrName())
-		}
-	}
-	if named {
-		return leg, nil
-	}
-	return sap.EndpointIdentity{}, fmt.Errorf("mash: alias refused: no legacy endpoint %s/%s in the directory", alias.Owner, alias.Name)
-}
-
-// directoryRecords reads every directory record. Fail closed: any key that cannot be read or modelled is an error,
-// because an unmodellable record could hide an overlap. The caller holds the admission lock.
-func (a *Admin) directoryRecords(ctx context.Context, kv jetstream.KeyValue) ([]store.Record, error) {
-	keys, err := kv.Keys(ctx)
-	if errors.Is(err, jetstream.ErrNoKeysFound) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("list directory: %w", err)
-	}
-	slices.Sort(keys)
-	var recs []store.Record
-	for _, k := range keys {
-		if afterDirectoryGet != nil {
-			afterDirectoryGet(k)
-		}
-		r, err := store.GetRecord(ctx, kv, k)
-		if err != nil {
-			return nil, fmt.Errorf("unmodellable record %s in the directory: %w", k, err)
-		}
-		recs = append(recs, r)
-	}
-	return recs, nil
-}
-
-// ProvisionIdentity provisions the new-form endpoint id (ADR 0074). The configured name rule is applied first, to all
-// three tokens of id (not to alias), before the keys are validated and before anything is read or written. It creates the directory record keyed by id's flat identity,
-// the inbox stream inbox-<flat> filtered on id's exact mail subject, and the durable consumer. alias, when set, is
-// the legacy identity the endpoint answers to during the transition window (ADR 0076); it is verified by VerifyAlias
-// before anything is written.
-//
-// Discipline is Provision's: the flat key's lock, then the directory-wide admission lock (a leaf), held while the
-// directory is listed, admitted against and written, with both re-checked before the record. The record is written
-// last, so a provision that stopped part-way is finished by running the same call again; a finished one is refused as
-// already provisioned. A retired new-form identity is refused (INV-002): the new-form deprovision writes a durable
-// marker into the no-TTL bucket store.RetiredBucket (key = flat identity; value: store.Retired, its tokens, the retired
-// user public key, the time and a state, never a seed) as pending before it revokes or removes anything, and makes it
-// final once the record is purged. This call checks it under the admission lock; a pending marker blocks exactly like a
-// final one. A deprovision deletes only the pending marker its own call wrote, when it refuses before the purge; there
-// is no release path for a marker that outlives a call: releasing one would need a contract ruling and an audit record.
-// A legacy name is not marked (Provision clears its tombstone on purpose), so it stays reusable. The bucket must hold
-// room for one more marker and must have no TTL, or provisioning is refused.
-func (a *Admin) ProvisionIdentity(ctx context.Context, id sap.EndpointIdentity, alias *store.Alias, user, account, note string, meta Meta) (rec store.Record, err error) {
-	if err := id.Validate(); err != nil {
-		return store.Record{}, fmt.Errorf("mash: provision identity: %w", err)
-	}
-	if id.IsLegacy() {
-		return store.Record{}, fmt.Errorf("mash: provision identity: %s is a legacy identity: use Provision", id)
+// The flat key's lock is held for the whole call, record and stream alike, so a deprovision of the same address
+// cannot interleave with it. The record is written last, so a provision that stopped part-way is finished by running
+// the same call again; a finished one is refused as already provisioned. A retired address is refused (INV-002): the
+// deprovision writes a durable marker into the no-TTL bucket store.RetiredBucket (key = flat key; value: store.Retired,
+// its tokens, the retired user public key, the time and a state, never a seed) as pending before it revokes or
+// removes anything, and makes it final once the record is purged. This call checks it under the flat key's lock; a
+// pending marker blocks exactly like a final one. A deprovision deletes only the pending marker its own call wrote,
+// when it refuses before the purge; there is no release path for a marker that outlives a call: releasing one would
+// need a contract ruling and an audit record. The bucket must hold room for one more marker and must have no TTL, or
+// provisioning is refused.
+func (a *Admin) Provision(ctx context.Context, addr sap.Address, user, account, note string, meta Meta) (rec store.Record, err error) {
+	if err := addr.Validate(); err != nil {
+		return store.Record{}, fmt.Errorf("mash: provision: %w", err)
 	}
 	if a.rule != nil {
-		if err := a.rule.Check(id); err != nil {
-			return store.Record{}, fmt.Errorf("mash: provision identity: %w", err)
+		if err := a.rule.Check(addr); err != nil {
+			return store.Record{}, fmt.Errorf("mash: provision: %w", err)
 		}
 	}
 	if !nkeys.IsValidPublicUserKey(user) {
@@ -128,7 +51,7 @@ func (a *Admin) ProvisionIdentity(ctx context.Context, id sap.EndpointIdentity, 
 	if err != nil {
 		return store.Record{}, err
 	}
-	flat := id.Flat()
+	flat := addr.Flat()
 	lk, err := a.lockStream(ctx, flat)
 	if err != nil {
 		return store.Record{}, err
@@ -136,35 +59,8 @@ func (a *Admin) ProvisionIdentity(ctx context.Context, id sap.EndpointIdentity, 
 	defer lk.release(ctx)
 	ctx, end := lk.guard(ctx, "provision", &err)
 	defer end()
-	var aliasLock *streamLock
-	// Lock order: the new identity's flat-key lock, then the alias legacy name's lock, then the admission lock (a
-	// leaf). The alias name's lock is the one legacy Deprovision and Provision take for that name, so while it is held
-	// the alias's legacy record cannot be removed or replaced between verification and the record's creation.
-	if alias != nil {
-		if _, err := sap.Legacy(alias.Owner, alias.Name); err != nil {
-			return store.Record{}, fmt.Errorf("mash: alias refused: %w", err)
-		}
-		alk, err := a.lockStream(ctx, alias.Name)
-		if err != nil {
-			return store.Record{}, err
-		}
-		defer alk.release(ctx)
-		var cancel context.CancelFunc
-		ctx, cancel = alk.bound(ctx)
-		defer cancel()
-		aliasLock = alk
-	}
-	adm, err := a.lockStream(ctx, admissionLockName)
-	if err != nil {
-		return store.Record{}, err
-	}
-	defer adm.release(ctx)
-	if afterAdmissionLock != nil {
-		afterAdmissionLock()
-	}
-	// INV-002: a retired new-form identity is never reassigned. The marker is durable (no TTL) and mash never deletes
-	// it. Checked with the flat-key and admission locks held, before anything is written; an unreadable marker
-	// refuses (fail closed).
+	// INV-002: a retired address is never reassigned. The marker is durable (no TTL) and mash never deletes it.
+	// Checked with the flat key's lock held, before anything is written; an unreadable marker refuses (fail closed).
 	retired, rbs, err := a.openRetired(ctx)
 	if err != nil {
 		return store.Record{}, err
@@ -173,18 +69,17 @@ func (a *Admin) ProvisionIdentity(ctx context.Context, id sap.EndpointIdentity, 
 	case err == nil:
 		m, _ := parseMarker(flat, e.Value()) // an unreadable marker still blocks
 		if m.IsPending() {
-			return store.Record{}, fmt.Errorf("mash: endpoint %s has a retirement that is pending and unfinished (since %s) and its name is never reassigned (INV-002); run deprovision for it again to finish", id, m.RetiredAt)
+			return store.Record{}, fmt.Errorf("mash: endpoint %s has a retirement that is pending and unfinished (since %s) and its address is never reassigned (INV-002); run deprovision for it again to finish", addr, m.RetiredAt)
 		}
-		return store.Record{}, fmt.Errorf("mash: endpoint %s is retired (since %s) and its name is never reassigned (INV-002)", id, m.RetiredAt)
+		return store.Record{}, fmt.Errorf("mash: endpoint %s is retired (since %s) and its address is never reassigned (INV-002)", addr, m.RetiredAt)
 	case !errors.Is(err, jetstream.ErrKeyNotFound):
 		return store.Record{}, fmt.Errorf("mash: retired marker %s: %w", flat, err)
 	}
 	if err := retiredRoom(rbs); err != nil {
 		return store.Record{}, err
 	}
-	// The alias is verified below against a directory read made now, with all three locks held.
 	if _, err := kv.Get(ctx, flat); err == nil {
-		return store.Record{}, fmt.Errorf("mash: endpoint %s is already provisioned", id)
+		return store.Record{}, fmt.Errorf("mash: endpoint %s is already provisioned", addr)
 	} else if !errors.Is(err, jetstream.ErrKeyNotFound) {
 		return store.Record{}, err
 	}
@@ -197,96 +92,35 @@ func (a *Admin) ProvisionIdentity(ctx context.Context, id sap.EndpointIdentity, 
 		// Belt and braces: the durable fence is the retired marker above. A tombstone written before markers existed
 		// still refuses here while it lives.
 		if isTombstone(e.Value()) {
-			return store.Record{}, fmt.Errorf("mash: endpoint %s was deprovisioned and its name is retired: a retired name is not reassigned", id)
+			return store.Record{}, fmt.Errorf("mash: endpoint %s was deprovisioned and its address is retired: a retired address is not reassigned", addr)
 		}
 	case !errors.Is(err, jetstream.ErrKeyNotFound):
 		return store.Record{}, fmt.Errorf("mash: lease %s: %w", flat, err)
 	}
-	recs, err := a.directoryRecords(ctx, kv)
+	s, err := a.createInboxLocked(ctx, lk, addr)
 	if err != nil {
-		return store.Record{}, fmt.Errorf("mash: admit %s refused: %w", id, err)
-	}
-	var aliasID *sap.EndpointIdentity
-	if alias != nil {
-		leg, err := VerifyAlias(id, *alias, recs)
-		if err != nil {
-			return store.Record{}, err
-		}
-		aliasID = &leg
-	}
-	if err := store.AdmitWithAlias(id, aliasID, recs); err != nil {
-		return store.Record{}, err
-	}
-	held := []*streamLock{adm}
-	if aliasLock != nil {
-		held = append(held, aliasLock)
-	}
-	checkHeld := func() error {
-		for _, l := range held {
-			if err := l.check(ctx); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-	s, err := a.createStreamLocked(ctx, lk, flat, func(jetstream.Stream) jetstream.StreamConfig {
-		return store.InboxConfigIdentity(id, a.limits)
-	}, checkHeld)
-	if err != nil {
-		return store.Record{}, err
-	}
-	if err := checkHeld(); err != nil {
 		return store.Record{}, err
 	}
 	if _, err := s.CreateOrUpdateConsumer(ctx, store.ConsumerConfig()); err != nil {
 		return store.Record{}, fmt.Errorf("mash: inbox consumer: %w", err)
 	}
 	rec = store.Record{
-		Name: id.Name, Owner: id.Owner, Agent: sap.AgentName, AgentToken: id.Agent,
-		Account: account, User: user, MailSubject: id.Subjects().Mail,
+		Owner: addr.Owner, Group: addr.Group, Instance: addr.Instance, Agent: sap.AgentName,
+		Account: account, User: user, MailSubject: store.MailSubjectFor(addr),
 		Created: time.Now().UTC().Format(time.RFC3339), Note: note,
 		Role: meta.Role, Host: meta.Host, Labels: meta.Labels, Description: meta.Description, Caps: sortedCaps(meta.Caps),
-		Alias: alias,
 	}
 	val, _ := json.Marshal(rec)
 	if err := lk.check(ctx); err != nil {
 		return store.Record{}, err
 	}
-	if err := checkHeld(); err != nil {
-		return store.Record{}, err
-	}
 	if _, err := kv.Create(ctx, flat, val); err != nil {
 		if errors.Is(err, jetstream.ErrKeyExists) {
-			return store.Record{}, fmt.Errorf("mash: endpoint %s is already provisioned", id)
+			return store.Record{}, fmt.Errorf("mash: endpoint %s is already provisioned", addr)
 		}
 		return store.Record{}, fmt.Errorf("mash: directory record: %w", err)
 	}
 	return rec, nil
-}
-
-// NewFormUserPermissions is the permission set of a new-form endpoint's user: NewFormPermissions(id, extra), plus
-// WindowBridge for the alias when there is one, allow lists merged and deduplicated. It takes no policy input.
-//
-// existing is the directory's records. A non-nil alias is verified here with VerifyAlias against existing, and refused
-// on error before WindowBridge is called, so verification cannot be skipped. The caller passes a directory read made
-// while it holds the locks that keep the alias's legacy record in place.
-func NewFormUserPermissions(id sap.EndpointIdentity, alias *store.Alias, existing []store.Record, extra []string) (jwt.Permissions, error) {
-	base, err := NewFormPermissions(id, extra)
-	if err != nil || alias == nil {
-		return base, err
-	}
-	leg, err := VerifyAlias(id, *alias, existing)
-	if err != nil {
-		return jwt.Permissions{}, fmt.Errorf("mash: new-form permissions: %w", err)
-	}
-	bridge, err := WindowBridge(id, leg)
-	if err != nil {
-		return jwt.Permissions{}, err
-	}
-	var p jwt.Permissions
-	p.Pub.Allow.Add(dedupe(slices.Concat(base.Pub.Allow, bridge.Pub.Allow))...)
-	p.Sub.Allow.Add(dedupe(slices.Concat(base.Sub.Allow, bridge.Sub.Allow))...)
-	return p, nil
 }
 
 // retiredMarkerReserve is the room, in bytes, that provisioning wants free in the retired-name bucket: a marker is
@@ -363,15 +197,6 @@ func (p *pendingMarkerError) Unwrap() error { return p.err }
 // another user key. Nothing is removed and the name stays refused.
 var ErrMarkerFinalOtherUser = errors.New("its name is already retired (INV-002) by a final retired marker for another user key (left as it is)")
 
-// newFormKey reports whether key is a new-form flat identity and returns it.
-func newFormKey(key string) (sap.EndpointIdentity, bool) {
-	if !strings.Contains(key, "_") {
-		return sap.EndpointIdentity{}, false
-	}
-	id, err := sap.FromFlat(key)
-	return id, err == nil
-}
-
 func parseMarker(key string, v []byte) (store.Retired, error) {
 	var m store.Retired
 	if err := json.Unmarshal(v, &m); err != nil {
@@ -380,19 +205,15 @@ func parseMarker(key string, v []byte) (store.Retired, error) {
 	return m, nil
 }
 
-// beginRetire is the first phase of retiring a new-form key: it Creates key's marker as pending, before anything is
+// beginRetire is the first phase of retiring an address: it Creates the flat key's marker as pending, before anything is
 // revoked or purged, so a full or failing bucket fails the call before it changes anything. A marker already there
 // is resumed: pending for the same user (or no user on either side), or final for the same user (older markers have
 // no state). A live record exists whenever this is called, so a pending marker for another user key than user is
 // stale: the retirement of that old user was superseded (the record was re-keyed). It is deleted, revision-guarded,
-// and the call goes on as if there were no marker. A final marker for another user key is a burned name with a live
-// record: refused with ErrMarkerFinalOtherUser, nothing changed. A key that is not a new-form identity has no marker
-// (nil). The caller holds key's lock.
-func (a *Admin) beginRetire(ctx context.Context, lk *streamLock, key, user string) (*retireMark, error) {
-	id, ok := newFormKey(key)
-	if !ok {
-		return nil, nil
-	}
+// and the call goes on as if there were no marker. A final marker for another user key is a burned address with a live
+// record: refused with ErrMarkerFinalOtherUser, nothing changed. The caller holds the flat key's lock.
+func (a *Admin) beginRetire(ctx context.Context, lk *streamLock, id sap.Address, user string) (*retireMark, error) {
+	key := id.Flat()
 	kv, err := a.retiredKV(ctx)
 	if err != nil {
 		return nil, err
@@ -400,7 +221,7 @@ func (a *Admin) beginRetire(ctx context.Context, lk *streamLock, key, user strin
 	if err := lk.check(ctx); err != nil {
 		return nil, err
 	}
-	m := store.Retired{Agent: id.Agent, Owner: id.Owner, Name: id.Name, User: user,
+	m := store.Retired{Owner: id.Owner, Group: id.Group, Instance: id.Instance, User: user,
 		RetiredAt: time.Now().UTC().Format(time.RFC3339), State: store.RetiredPending}
 	val, _ := json.Marshal(m)
 	for try := 0; try < 3; try++ {
@@ -441,12 +262,9 @@ func (a *Admin) beginRetire(ctx context.Context, lk *streamLock, key, user strin
 	return nil, fmt.Errorf("mash: retired marker %s changed while it was being read; try again", key)
 }
 
-// loadRetire reads key's existing marker without creating one: nil when the key is not a new-form identity or has
-// none.
-func (a *Admin) loadRetire(ctx context.Context, key string) (*retireMark, error) {
-	if _, ok := newFormKey(key); !ok {
-		return nil, nil
-	}
+// loadRetire reads the flat key's existing marker without creating one: nil when it has none.
+func (a *Admin) loadRetire(ctx context.Context, id sap.Address) (*retireMark, error) {
+	key := id.Flat()
 	kv, err := a.retiredKV(ctx)
 	if err != nil {
 		return nil, err
@@ -510,22 +328,18 @@ func (a *Admin) finalizeRetire(ctx context.Context, lk *streamLock, pm *retireMa
 // abortRetire runs when a removal was definitively refused before the record was purged (or the guarded purge was
 // refused by the server): it deletes the pending marker, revision-guarded, and returns err. It deletes a marker this
 // call wrote, or, when superseded is set, a pending marker it resumed too (the retirement did not happen). It first
-// re-checks that this call still holds its name lock (and the admission lock, adm, when held): a call that lost its
+// re-checks that this call still holds its name lock: a call that lost its
 // lock must not delete a marker another call may now be resuming, so it leaves it pending and says so. A failure
 // to delete is joined to err, never silent. A final marker is never deleted. Deleting after the old user was revoked is
 // deliberate: a definitive refusal means the record changed, so no retirement of this name happened and the live record
 // keeps its name; the revoked user stays revoked.
-func (a *Admin) abortRetire(ctx context.Context, lk *streamLock, adm *aliasGuard, pm *retireMark, err error, superseded bool) error {
+func (a *Admin) abortRetire(ctx context.Context, lk *streamLock, pm *retireMark, err error, superseded bool) error {
 	if pm == nil || err == nil || !pm.m.IsPending() || !(pm.wrote || superseded) {
 		return err
 	}
 	dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), lockReleaseTimeout)
 	defer cancel()
-	lerr := lk.check(dctx)
-	if lerr == nil {
-		lerr = adm.check(dctx)
-	}
-	if lerr != nil {
+	if lerr := lk.check(dctx); lerr != nil {
 		return errors.Join(err, &pendingMarkerError{key: pm.key, err: fmt.Errorf("this call no longer holds its lock, so it did not delete it: %w", lerr)})
 	}
 	if derr := pm.kv.Purge(dctx, pm.key, jetstream.LastRevision(pm.rev)); derr != nil && !isRevisionConflict(derr) {

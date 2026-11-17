@@ -56,10 +56,9 @@ type Endpoint struct {
 	headOK bool
 
 	cfg config.Config
-	// ident is the endpoint's identity (cfg.Identity()) and key its directory/stream/lease key, ident.Flat(): the bare
-	// name for a legacy endpoint (today's value), agent_owner_name for a three-token one. Every key and subject of
-	// the endpoint derives from these; cfg.Name is display text only.
-	ident sap.EndpointIdentity
+	// ident is the endpoint's address (cfg.Identity()) and key its directory, stream and lease key, ident.Flat():
+	// owner_group_instance. Every key and subject of the endpoint derives from these.
+	ident sap.Address
 	key   string
 	nc    *nats.Conn
 	js    jetstream.JetStream
@@ -67,12 +66,6 @@ type Endpoint struct {
 	subj  sap.Subjects
 	self  store.Record
 	log   *log.Logger
-
-	// alias is the legacy identity this endpoint's own directory record says it answers to, read once by Open (a
-	// three-token endpoint only) and never again for the life of the process; legacyKey is its flat key, the name of its
-	// legacy inbox stream (sap.InboxStream). Nil when there is none: the endpoint reads its own stream only.
-	alias     *sap.EndpointIdentity
-	legacyKey string
 
 	instance    string // this process's id (lease holder, SAP instance)
 	dirKV       jetstream.KeyValue
@@ -95,10 +88,6 @@ type Endpoint struct {
 	graceMu    sync.Mutex
 	graceUntil time.Time
 
-	// legacy is the state of the legacy identity's lease, which the endpoint holds while it consumes the legacy inbox
-	// stream (legacylease.go).
-	legacy legacyLease
-
 	mu       sync.RWMutex
 	dir      map[string]store.Record // by name
 	byUser   map[string]string       // user key -> name
@@ -117,9 +106,7 @@ type Endpoint struct {
 	// The hook hand-over (hook.go): nil until SetSpool; since is when this session began, so only a hook run in this
 	// session switches delivery to the spool.
 	spool *spool.Spool
-	// epochSpool is spool as the legacy-lease loss path reads it (that runs on another goroutine, from Open on); set by SetSpool.
-	epochSpool atomic.Pointer[spool.Spool]
-	since      time.Time
+	since time.Time
 	// fromStart: the session counts as hooked from the start (SpoolFromStart).
 	fromStart bool
 	// noChannel: the host takes no channel delivery, so mail is held, never channel-delivered (NoChannel).
@@ -297,28 +284,19 @@ func connect(ctx context.Context, url string, opts ...nats.Option) (*nats.Conn, 
 	}
 }
 
-// identityOf is the identity, key and subjects an endpoint with cfg works under. A legacy configuration (no
-// agent_token) gets exactly today's values and never an error here: its key is cfg.Name and its subjects
-// sap.For(owner, name). A three-token one must have a valid identity.
-func identityOf(cfg config.Config) (sap.EndpointIdentity, string, sap.Subjects, error) {
-	if cfg.AgentToken == "" {
-		id, _ := cfg.Identity() // zero when the legacy rule fails: the legacy paths never needed it
-		return id, cfg.Name, sap.For(cfg.Owner, cfg.Name), nil
-	}
+// identityOf is the address, key and subjects an endpoint with cfg works under: cfg.Identity(), its flat key and its
+// subjects. It is an error when the configuration names no valid address.
+func identityOf(cfg config.Config) (sap.Address, string, sap.Subjects, error) {
 	id, err := cfg.Identity()
 	if err != nil {
-		return sap.EndpointIdentity{}, "", sap.Subjects{}, err
+		return sap.Address{}, "", sap.Subjects{}, err
 	}
 	return id, id.Flat(), id.Subjects(), nil
 }
 
-// StateLocation is where an endpoint's state (spool, relay counters) lives under the state directory: the owner and
-// the directory name. A legacy endpoint is (owner, name), as always; a three-token one is (its owner token, its flat
-// key), so two identities that share a name token never share a directory. An invalid identity is an error.
+// StateLocation is where an endpoint's state (spool, relay counters) lives under the state directory: its owner and its
+// flat key, so two endpoints that share an instance token never share a directory. An invalid address is an error.
 func StateLocation(cfg config.Config) (owner, name string, err error) {
-	if cfg.AgentToken == "" {
-		return cfg.Owner, cfg.Name, nil
-	}
 	id, err := cfg.Identity()
 	if err != nil {
 		return "", "", err
@@ -367,7 +345,7 @@ func OpenClientWith(ctx context.Context, cfg config.Config, opts ClientOptions) 
 		return nil, err
 	}
 	// The name rule is applied to the endpoint's own identity before anything is connected or read.
-	if cfg.NameRule != nil && ident.Validate() == nil {
+	if cfg.NameRule != nil {
 		if err := checkRule(cfg.NameRule, pointStart, ident); err != nil {
 			return nil, err
 		}
@@ -386,7 +364,7 @@ func OpenClientWith(ctx context.Context, cfg config.Config, opts ClientOptions) 
 	nc, err := connect(ctx, cfg.URL, append(append(natsauth.TLSOptions(cfg.TLSCA, cfg.TLSCert, cfg.TLSKey), tlsReq...),
 		natsauth.UserCredentials(cfg.Creds),
 		nats.Name("mash "+cfg.Name),
-		nats.CustomInboxPrefix(sap.InboxPrefix(key)),
+		nats.CustomInboxPrefix(ident.InboxPrefix()),
 		nats.MaxReconnects(-1),
 		nats.ReconnectWait(2*time.Second),
 		nats.ReconnectJitter(5*time.Second, 5*time.Second),
@@ -450,12 +428,6 @@ func Open(ctx context.Context, cfg config.Config) (*Endpoint, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Zones are removed (ADR 0091): a zoned record, this endpoint's or any other the directory read found, stops the
-	// start before a lease is taken.
-	if err := e.refuseZoned(); err != nil {
-		e.nc.Close()
-		return nil, err
-	}
 	if err := e.takeLease(ctx); err != nil {
 		e.nc.Close()
 		return nil, err
@@ -465,28 +437,12 @@ func Open(ctx context.Context, cfg config.Config) (*Endpoint, error) {
 	}
 	// The directory record was read before the lease was taken: a deprovision in between would leave this session
 	// online for an endpoint that no longer exists. Read it again now that the name is held.
-	own, err := store.GetRecord(ctx, e.dirKV, e.key)
-	if err != nil {
+	if _, err := store.GetRecord(ctx, e.dirKV, e.key); err != nil {
 		e.Close() // gives the lease back
 		if errors.Is(err, jetstream.ErrKeyNotFound) || errors.Is(err, jetstream.ErrKeyDeleted) {
 			return nil, fmt.Errorf("%w: %s's directory record is gone", ErrDeprovisioned, e.Display())
 		}
 		return nil, fmt.Errorf("mash: directory: %w", err)
-	}
-	// A three-token endpoint whose record carries an alias also reads the legacy inbox stream of that identity (naming
-	// plan 1.4b). The alias is taken from this read, under the endpoint's own credentials, and is fixed for the life of
-	// the process: a later change in the directory is not adopted until restart. An alias that is not a valid legacy
-	// identity fails the open (a closed failure: mail would otherwise sit unread in a stream nobody reads).
-	if !e.ident.IsLegacy() {
-		alias, ok, err := own.AliasIdentity()
-		if err != nil {
-			e.Close()
-			return nil, fmt.Errorf("mash: %s's directory record has an invalid alias: %w", e.key, err)
-		}
-		if ok {
-			e.alias, e.legacyKey = &alias, alias.Flat()
-			e.startLegacy(ctx)
-		}
 	}
 	return e, nil
 }
@@ -545,7 +501,7 @@ func (e *Endpoint) takeLease(ctx context.Context) error {
 				// read.
 				if reason := e.takeoverReason(lv); reason != "" {
 					if rev, uerr := kv.Update(ctx, e.key, val, cur.Revision()); uerr == nil {
-						e.log.Print(e.tookOverLine(e.key, reason, lv))
+						e.log.Print(e.tookOverLine(reason, lv))
 						if reason == "same" {
 							e.startGrace()
 						}
@@ -579,7 +535,6 @@ func (e *Endpoint) keepLease() {
 	// lose marks the lease lost once, whoever saw it first: no more delivery or acks from this instant, the refresh and
 	// the watch stop, and Run is told.
 	lose := func(err error) {
-		e.legacy.ownLost.Store(true) // the legacy retry loop ends with the endpoint
 		e.leaseGone.Store(true)
 		select {
 		case e.leaseLost <- err:
@@ -692,8 +647,7 @@ func (e *Endpoint) refreshLease(ctx context.Context) error {
 	return e.refreshKey(ctx, e.key, &e.leaseRev)
 }
 
-// refreshKey is refreshLease for the lease named key, whose last known revision is *revp: the endpoint's own lease, or
-// the legacy identity's while the endpoint reads the legacy stream (legacylease.go).
+// refreshKey is refreshLease for the lease named key, whose last known revision is *revp.
 func (e *Endpoint) refreshKey(ctx context.Context, key string, revp *atomic.Uint64) error {
 	val := e.lease()
 	rev, err := e.leaseKV.Update(ctx, key, val, revp.Load())
@@ -779,7 +733,6 @@ func (e *Endpoint) Run(ctx context.Context, deliver Deliverer) error {
 
 // Close releases the lease and closes the connection.
 func (e *Endpoint) Close() {
-	e.stopLegacyRetry()
 	if svc := e.svc(); svc != nil {
 		svc.stop()
 	}
@@ -787,7 +740,6 @@ func (e *Endpoint) Close() {
 		e.leaseCancel()
 		<-e.leaseDone
 	}
-	e.releaseLegacyLease()
 	if e.leaseKV != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), releaseTimeout)
 		if err := e.releaseLease(ctx); err != nil {
@@ -842,20 +794,18 @@ func (e *Endpoint) releaseKey(ctx context.Context, key string, revp *atomic.Uint
 	}
 }
 
-// Name is this endpoint's name.
-func (e *Endpoint) Name() string { return e.cfg.Name }
+// Name is this endpoint's instance token.
+func (e *Endpoint) Name() string { return e.ident.Instance }
 
-// Key is this endpoint's directory key (the flat identity): the bare name for a legacy endpoint, agent_owner_name for
-// a three-token one. It is what the endpoint signs as, what its stream, lease and directory record are keyed by, and
-// what who and the mail labels show.
+// Key is this endpoint's directory key (the flat key, owner_group_instance). It is what the endpoint signs as, what its
+// stream, lease and directory record are keyed by, and what who and the mail labels carry.
 func (e *Endpoint) Key() string { return e.key }
 
-// Display is this endpoint as people read it: agent.owner.name for a three-token endpoint, the bare name for a legacy
-// one (ADR 0081). Key stays the storage and signing form.
+// Display is this endpoint as people read it: owner.group.instance. Key stays the storage and signing form.
 func (e *Endpoint) Display() string { return e.ident.String() }
 
-// EndpointIdentity is this endpoint's identity (agent, owner and name tokens).
-func (e *Endpoint) EndpointIdentity() sap.EndpointIdentity { return e.ident }
+// Address is this endpoint's address.
+func (e *Endpoint) Address() sap.Address { return e.ident }
 
 // Dropped counts forged or malformed mail that was discarded.
 func (e *Endpoint) Dropped() int64 { return e.dropped.Load() }
@@ -888,17 +838,4 @@ func (e *Endpoint) noteServerTime(server, t0, t1 time.Time) {
 // reading. A skew beyond sap.LiveSkew makes peers look offline (live signatures are refused) and mail [stale].
 func (e *Endpoint) ClockSkew() (time.Duration, bool) {
 	return time.Duration(e.skew.Load()), e.skewSet.Load()
-}
-
-// refuseZoned is the first zoned record among this endpoint's own and the directory it has read (ADR 0091).
-func (e *Endpoint) refuseZoned() error {
-	if err := store.ZonedRecordError(e.self); err != nil {
-		return err
-	}
-	for _, p := range e.Who() {
-		if err := store.ZonedRecordError(p.Record); err != nil {
-			return err
-		}
-	}
-	return nil
 }

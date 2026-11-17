@@ -8,15 +8,14 @@ import (
 
 	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/endpoint"
-	"github.com/bogworks/mash/internal/sap"
 )
 
 // addRestricted adds endpoint "s" to w, allowed to mail only the named recipients (admin.Permissions with the
 // owner-wide mail line replaced by their subjects).
 func addRestricted(t *testing.T, w *world, allowed ...string) {
 	t.Helper()
-	p := admin.Permissions(w.e.Owner, "s")
-	wide := "agents.mail.*." + w.e.Owner + ".*"
+	p := admin.Permissions(tAddr("s"))
+	wide := "agents.mail." + w.e.Owner + ".*.*"
 	var pub []string
 	for _, s := range p.Pub.Allow {
 		if s != wide {
@@ -24,23 +23,23 @@ func addRestricted(t *testing.T, w *world, allowed ...string) {
 			continue
 		}
 		for _, n := range allowed {
-			pub = append(pub, sap.For(w.e.Owner, n).Mail)
+			pub = append(pub, tAddr(n).Subjects().Mail)
 		}
 	}
 	p.Pub.Allow = pub
-	c, u := w.e.MintRaw(t, "s", p)
+	c, u := w.e.MintRaw(t, tAddr("s").Flat(), *p)
 	adm, err := admin.New(w.e.Conn(t, w.e.AdminCreds), w.e.Owner)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := adm.Provision(context.Background(), "s", u, w.e.Account, "", admin.Meta{}); err != nil {
+	if _, err := adm.Provision(context.Background(), tAddr("s"), u, w.e.Account, "", admin.Meta{}); err != nil {
 		t.Fatal(err)
 	}
-	w.env["s"] = map[string]string{"HOME": t.TempDir(), "MASH_NAME": "s", "MASH_URL": w.e.URL,
+	w.env["s"] = map[string]string{"HOME": t.TempDir(), "MASH_NAME": "s", "MASH_GROUP": testGroup, "MASH_URL": w.e.URL,
 		"MASH_OWNER": w.e.Owner, "MASH_CREDS": c, "MASH_SETTLE_MS": "20"}
 }
 
-const refusalBase = "refused by policy: you may not mail denied." +
+const refusalBase = "refused by policy: you may not mail o.dev.denied." +
 	" If the recipient is an endpoint of this owner, your credentials may be older than the permissions mash issues now, or your permissions were narrowed:" +
 	" ask the admin to check them."
 
@@ -52,7 +51,7 @@ func TestCLISendRefusedByPolicy(t *testing.T) {
 	w := newWorld(t, "ok", "denied")
 	addRestricted(t, w, "ok")
 	start := time.Now()
-	out, code := w.cli(t, "s", "send", "denied", "--id", "k1", "hello")
+	out, code := w.cli(t, "s", "send", tTo("denied"), "--id", "k1", "hello")
 	if took := time.Since(start); took > 3*time.Second {
 		t.Fatalf("refusal took %v", took)
 	}
@@ -64,7 +63,7 @@ func TestCLISendRefusedByPolicy(t *testing.T) {
 			t.Fatalf("output mentions %q: %q", bad, out)
 		}
 	}
-	if out, code := w.cli(t, "s", "send", "ok", "hello"); code != 0 || !strings.Contains(out, "sent #1 from s to ok") {
+	if out, code := w.cli(t, "s", "send", tTo("ok"), "hello"); code != 0 || !strings.Contains(out, "sent #1 from o.dev.s to o.dev.ok") {
 		t.Fatalf("allowed send: %d %q", code, out)
 	}
 }
@@ -75,12 +74,35 @@ func TestServeSendToolRefusedByPolicy(t *testing.T) {
 	addRestricted(t, w, "ok")
 	s := startServe(t, w.env["s"])
 	s.initialize(t)
-	r := s.call(t, 7, "send", `{"to":"denied","text":"hello","id":"k1"}`)
+	r := s.call(t, 7, "send", `{"to":"o.dev.denied","text":"hello","id":"k1"}`)
 	if r["isError"] != true || strings.TrimSpace(resultText(r)) != refusal {
 		t.Fatalf("result %v, want an error with the single line %q", r, refusal)
 	}
-	r = s.call(t, 8, "send", `{"to":"ok","text":"hello"}`)
-	if r["isError"] == true || !strings.Contains(resultText(r), "sent #1 to ok") {
+	r = s.call(t, 8, "send", `{"to":"o.dev.ok","text":"hello"}`)
+	if r["isError"] == true || !strings.Contains(resultText(r), "sent #1 to o.dev.ok") {
 		t.Fatalf("allowed send: %v", r)
+	}
+}
+
+// A session started without MASH_GROUP stops at once, exit 2, naming MASH_GROUP and the code group_missing, at every
+// entry that runs an endpoint; a hook never fails the session, so it says so on stderr and exits 0; status reports it.
+func TestMissingGroupStopsTheSession(t *testing.T) {
+	env := map[string]string{"HOME": t.TempDir(), "MASH_URL": "nats://127.0.0.1:1", "MASH_OWNER": "o", "MASH_NAME": "a", "MASH_CREDS": "/nonexistent"}
+	for _, args := range [][]string{{"serve"}, {"send", "o.dev.b", "x"}, {"inbox"}, {"who"}, {"read", "1"}, {"prompt", "o.dev.b", "x"}} {
+		var out, errb strings.Builder
+		if code := run(args, envFrom(env), strings.NewReader(""), &out, &errb); code != 2 ||
+			!strings.Contains(errb.String(), "MASH_GROUP") || !strings.Contains(errb.String(), "group_missing") {
+			t.Errorf("%v: exit %d, stdout %q, stderr %q", args, code, out.String(), errb.String())
+		}
+	}
+	var out, errb strings.Builder
+	if code := run([]string{"hook"}, envFrom(env), strings.NewReader("{}"), &out, &errb); code != 0 || out.String() != "" ||
+		!strings.Contains(errb.String(), "MASH_GROUP") {
+		t.Errorf("hook: exit %d, stdout %q, stderr %q", code, out.String(), errb.String())
+	}
+	out.Reset()
+	if code := run([]string{"status"}, envFrom(env), strings.NewReader(""), &out, &errb); code != 0 ||
+		!strings.Contains(out.String(), "group_missing") || !strings.Contains(out.String(), "MASH_GROUP") {
+		t.Errorf("status: exit %d, %q", code, out.String())
 	}
 }

@@ -41,9 +41,8 @@ var (
 
 // wakingTracker is the in-memory unread set (a nil one ignores everything), safe for the consumer's callback and the delivery worker.
 //
-// An endpoint reads one stream (the primary, ref stream "") or two (the primary and the legacy stream, naming plan 1.4b).
-// The startup backlog, its bound and the server probe are kept per stream, and the count is known only when every
-// stream's backlog is accounted for.
+// An endpoint reads one stream (ref stream ""). The startup backlog, its bound and the server probe are kept per stream
+// name, and the count is known only when every stream's backlog is accounted for.
 type wakingTracker struct {
 	mu       sync.Mutex
 	unread   map[spool.Ref]bool     // (stream, sequence) -> wakes
@@ -100,31 +99,6 @@ func (w *wakingTracker) startStreams(streams map[string]streamStart, haveLast bo
 	}
 	w.haveLast, w.started, w.probes = haveLast, true, probes
 	w.seen, w.seenN = map[spool.Ref]bool{}, map[string]int{}
-	w.ready = w.allReady()
-	w.mu.Unlock()
-	w.poke()
-}
-
-// addStream registers a stream whose consumer starts after the others did (the legacy stream, once its lease is taken
-// by a retry). A stream already registered is left as it is. Until its backlog is accounted for the count is unknown.
-func (w *wakingTracker) addStream(name string, st streamStart, probe wakingProbe) {
-	if w == nil {
-		return
-	}
-	w.mu.Lock()
-	if !w.started {
-		w.mu.Unlock()
-		return
-	}
-	if _, ok := w.expect[name]; ok {
-		w.mu.Unlock()
-		return
-	}
-	w.expect[name], w.last[name], w.sReady[name] = st.Backlog, st.Last, st.Backlog <= 0
-	if w.probes == nil {
-		w.probes = map[string]wakingProbe{}
-	}
-	w.probes[name] = probe
 	w.ready = w.allReady()
 	w.mu.Unlock()
 	w.poke()

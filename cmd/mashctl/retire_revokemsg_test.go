@@ -16,7 +16,7 @@ func TestRetireRevokeAfterPushSaysMayBeInForce(t *testing.T) {
 	h.provisionDeclared("a")
 	s := stubRevoke(t)
 	s.err = fmt.Errorf("revoke: %w: the update was not acknowledged: one server; running the revoke again is safe", apply.ErrNotConfirmed)
-	_, errb, code := h.run("retire", "a")
+	_, errb, code := h.run("retire", "o.g.a")
 	if code != 1 {
 		t.Fatalf("%d %q", code, errb)
 	}
@@ -37,7 +37,7 @@ func TestRetireRevokeBeforePushSaysNothingRevoked(t *testing.T) {
 	h.provisionDeclared("a")
 	s := stubRevoke(t)
 	s.err = errors.New("refusing: only 2 of 3 servers answered the account lookup")
-	_, errb, code := h.run("retire", "a")
+	_, errb, code := h.run("retire", "o.g.a")
 	if code != 1 {
 		t.Fatalf("%d %q", code, errb)
 	}

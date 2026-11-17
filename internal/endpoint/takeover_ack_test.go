@@ -8,14 +8,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/spool"
 	"github.com/bogworks/mash/internal/store"
 )
 
 func consumerState(t *testing.T, ep *Endpoint, name string) (ackFloor uint64, pending, ackPending int) {
 	t.Helper()
-	c, err := ep.js.Consumer(context.Background(), sap.InboxStream(name), store.Consumer)
+	c, err := ep.js.Consumer(context.Background(), taddr(name).InboxStream(), store.Consumer)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +81,7 @@ func TestEarlierServeAcksNothingAfterTakeover(t *testing.T) {
 	snd := f.client(t, "snd")
 	const n = 3
 	for i := 0; i < n; i++ {
-		if _, err := snd.Send(context.Background(), "a", fmt.Sprintf("held-%d", i), 0); err != nil {
+		if _, err := snd.Send(context.Background(), tdot("a"), fmt.Sprintf("held-%d", i), 0); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -118,7 +117,7 @@ func TestEarlierServeAcksNothingAfterTakeover(t *testing.T) {
 	}
 }
 
-// The ack gate is the primary lease too: once it is lost nothing of any stream is acked.
+// The ack gate is the lease: once it is lost nothing is acked.
 func TestMayAckFalseOnceOwnLeaseLost(t *testing.T) {
 	f := newFixture(t, "a")
 	ep, _ := f.run(t, "a")
@@ -133,29 +132,15 @@ func TestMayAckFalseOnceOwnLeaseLost(t *testing.T) {
 	}
 }
 
-// The legacy lease is watched too: a takeover of it by another session stops the legacy reading within about a second.
-func TestLegacyLeaseLossLearnedAtOnce(t *testing.T) {
-	bigRefresh(t)
-	stubHolderGone(t, func(string, string) bool { return false })
-	f := newFixture(t, "old")
-	nf := f.addNewFormAlias(t, "ag", "team", "new", f.e.Owner, "old", aliasOpts{})
-	ep, _, _ := f.runNF(t, nf)
-	if !ep.legacyReading() {
-		t.Fatal("not reading the legacy inbox")
-	}
-	putLease(t, f, "old", leaseValue{Instance: "someone-else", Host: "h", PID: "77", Since: "x", Machine: "elsewhere"})
-	until(t, "the legacy loss", func() bool { return !ep.legacyReading() })
-}
-
 var _ = spool.Spool{}
 
-// A spool write of an own-stream entry is refused once the own lease is gone (flag check only).
+// A spool write is refused once the own lease is gone (flag check only).
 func TestPutEntryOwnStreamRefusedOnceLeaseGone(t *testing.T) {
 	f := newFixture(t, "a")
 	ep, _ := f.run(t, "a")
 	p := pending{}
 	ep.leaseGone.Store(true)
-	if wrote, _, err := ep.putEntry(p); wrote || err != nil {
+	if wrote, err := ep.putEntry(p); wrote || err != nil {
 		t.Fatalf("wrote %v, err %v after the own lease was lost", wrote, err)
 	}
 }

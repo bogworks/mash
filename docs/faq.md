@@ -50,15 +50,15 @@ By default it treats verified mail as a delegated request from you and acts on i
 
 ## How are endpoints named, and can two people share an account?
 
-A name is 1 to 48 lower-case letters, digits and single hyphens, starting with a letter. You choose it at launch with `MASH_NAME`. Today the name is the key in the account's directory and lease buckets and in the stream name, so it is unique per NATS account, not per owner, and every endpoint can read the whole directory. Two owners in one account cannot both have `review`. [operations.md](operations.md) says the same. The deployment model is one owner per account ([ADR 0006](decisions/0006-one-shared-nats-account-one-owner-per-deployment.md)).
+An endpoint is addressed `owner.group.instance`. Each token is 1 to 32 lower-case letters, digits and single hyphens, starting with a letter. You choose the group and instance at launch with `MASH_GROUP` and `MASH_NAME`; the group has no default. The flat key `owner_group_instance` is the key in the account's directory and lease buckets and in the stream name, so an address is unique per NATS account, and every endpoint can read the whole directory. Two owners in one account can both have `dev.review`, because their addresses differ in the owner. [operations.md](operations.md) says the same. The deployment model is one owner per account ([ADR 0006](decisions/0006-one-shared-nats-account-one-owner-per-deployment.md)).
 
-## Can two sessions use the same name?
+## Can two sessions use the same address?
 
-No. A lease allows one live session per name. A second session starts without mail tools, waits, and retries every 10 seconds; its `status` tool shows `connection: WAITING`. A holder that dies frees the name when its lease expires, 90 seconds later ([operations.md](operations.md) Troubleshooting).
+No. A lease allows one live session per address. A second session starts without mail tools, waits, and retries every 10 seconds; its `status` tool shows `connection: WAITING`. A holder that dies frees the address when its lease expires, 90 seconds later ([operations.md](operations.md) Troubleshooting).
 
 ## What happens with `claude --resume`?
 
-The name comes only from the launch environment, never from the conversation. A resumed session started without `MASH_NAME` is inert. Started with a different name, it gets that name's mailbox. Set the same `MASH_NAME` when you resume. A laptop that sleeps longer than the 90 second lease can lose the name; if another session took it, the loss is final and the session must be restarted, because lease loss after start is terminal in `mash serve` Resuming a session that is still running starts a second copy that does not get the mail: its hooks are refused and say so once in that session, with or without a `MASH_LAUNCH_TOKEN` ([ADR-0043](decisions/0043-second-launch-of-a-running-session-is-refused-and-told-once.md)). See [Sessions and resume](install.md#sessions-and-resume).
+The name comes only from the launch environment, never from the conversation. A resumed session started without `MASH_NAME` is inert, and without `MASH_GROUP` it stops. Started with a different address, it gets that address's mailbox. Set the same `MASH_GROUP` and `MASH_NAME` when you resume. A laptop that sleeps longer than the 90 second lease can lose the address; if another session took it, the loss is final and the session must be restarted, because lease loss after start is terminal in `mash serve` Resuming a session that is still running starts a second copy that does not get the mail: its hooks are refused and say so once in that session, with or without a `MASH_LAUNCH_TOKEN` ([ADR-0043](decisions/0043-second-launch-of-a-running-session-is-refused-and-told-once.md)). See [Sessions and resume](install.md#sessions-and-resume).
 
 ## Do subagents get mail?
 

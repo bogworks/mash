@@ -17,7 +17,6 @@ import (
 	"github.com/nats-io/nats.go/micro"
 	"github.com/nats-io/nuid"
 
-	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/sap"
 )
 
@@ -222,7 +221,7 @@ func (e *Endpoint) publishHeartbeat() {
 // StartService registers this endpoint as a SAP 0.3 agent (spec 7.4) and
 // starts the signed heartbeat. Prompts that pass verification go to onPrompt.
 func (e *Endpoint) StartService(ctx context.Context, onPrompt func(PromptEvent)) error {
-	idSig, err := e.id.IDSig(sap.AgentName, e.cfg.Owner, e.subj.Prompt)
+	idSig, err := e.id.IDSig(sap.AgentName, e.ident.Owner, e.subj.Prompt)
 	if err != nil {
 		return err
 	}
@@ -230,9 +229,9 @@ func (e *Endpoint) StartService(ctx context.Context, onPrompt func(PromptEvent))
 	svc, err := micro.AddService(e.nc, micro.Config{
 		Name:        sap.ServiceName,
 		Version:     CurrentVersion(),
-		Description: "Claude Code (mash): " + e.cfg.Name,
+		Description: "Claude Code (mash): " + e.ident.String(),
 		Metadata: map[string]string{
-			"agent": sap.AgentName, "owner": e.cfg.Owner, "session": e.key,
+			"agent": sap.AgentName, "owner": e.ident.Owner, "group": e.ident.Group, "instance": e.ident.Instance, "session": e.key,
 			"protocol_version": sap.ProtocolVersion, "user_nkey": e.id.User, "account": e.id.Account,
 			"id_sig": idSig, "mail_subject": e.subj.Mail,
 		},
@@ -421,30 +420,19 @@ func (e *Endpoint) Reply(requestID, text string, done bool) error {
 	return nil
 }
 
-// Discover finds name's prompt subject from $SRV.INFO.agents (SAP §4.3).
-func Discover(ctx context.Context, nc *nats.Conn, owner, name string) (string, error) {
-	return discoverSubject(ctx, nc, owner, sap.For(owner, name).Prompt, name)
-}
-
-// DiscoverRecipient is Discover for a recipient argument: a legacy endpoint name (looked up under owner, as Discover
-// does), or a three-token endpoint written canonically (agent.owner.name) or as its flat key (agent_owner_name); both
-// carry their own owner. Any other argument is an error that says so.
-func DiscoverRecipient(ctx context.Context, nc *nats.Conn, owner, arg string) (string, error) {
-	arg = sap.KeyOf(arg) // the canonical agent.owner.name is accepted as well (ADR 0081)
-	if config.ValidName(arg) {
-		return Discover(ctx, nc, owner, arg)
-	}
-	id, err := sap.FromFlat(arg)
+// DiscoverRecipient is Discover for a recipient argument: the dotted address owner.group.instance as who shows it, or
+// its flat key owner_group_instance. Any other argument is an error that names the form to give.
+func DiscoverRecipient(ctx context.Context, nc *nats.Conn, arg string) (string, error) {
+	a, err := parseRecipient(sap.KeyOf(arg))
 	if err != nil {
-		return "", fmt.Errorf("mash: %q is not an endpoint key: give a legacy endpoint name or the canonical agent.owner.name as who shows it (the flat agent_owner_name is accepted too)", arg)
+		return "", err
 	}
-	return DiscoverIdentity(ctx, nc, id)
+	return Discover(ctx, nc, a)
 }
 
-// DiscoverIdentity is Discover for an endpoint known by its identity (a three-token one has its own owner and agent
-// tokens in its prompt subject); a legacy identity gives exactly Discover's answer.
-func DiscoverIdentity(ctx context.Context, nc *nats.Conn, id sap.EndpointIdentity) (string, error) {
-	return discoverSubject(ctx, nc, id.Owner, id.Subjects().Prompt, id.Flat())
+// Discover finds the prompt subject of the endpoint at a from $SRV.INFO.agents (SAP §4.3).
+func Discover(ctx context.Context, nc *nats.Conn, a sap.Address) (string, error) {
+	return discoverSubject(ctx, nc, a.Owner, a.Subjects().Prompt, a.Flat())
 }
 
 func discoverSubject(ctx context.Context, nc *nats.Conn, owner, want, name string) (string, error) {

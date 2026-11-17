@@ -8,7 +8,6 @@ import (
 
 	"github.com/nats-io/nats.go"
 
-	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/kind"
 	"github.com/bogworks/mash/internal/render"
 	"github.com/bogworks/mash/internal/sap"
@@ -18,10 +17,10 @@ import (
 // signed header before it is encoded and the headers after.
 func rawMark(t *testing.T, f *fixture, from, to, body string, mutate func(id sap.Identity, h *sap.SenderHeader, m *nats.Msg)) {
 	t.Helper()
-	nc := f.e.ConnAs(t, f.creds[from], from)
+	nc := f.e.ConnAs(t, f.creds[from], tkey(from))
 	id := identity(t, f.creds[from])
-	subj := sap.For(f.e.Owner, to).Mail
-	h, err := id.Sign(subj, []byte(body), from, time.Now(), "")
+	subj := taddr(to).Subjects().Mail
+	h, err := id.Sign(subj, []byte(body), tkey(from), time.Now(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,10 +37,10 @@ func TestReplyToIsSignedAndShown(t *testing.T) {
 	f := newFixture(t, "a", "b")
 	a, b := f.client(t, "a"), f.client(t, "b")
 	ctx := context.Background()
-	if _, err := b.SendWith(ctx, "a", "plain", SendOptions{}); err != nil {
+	if _, err := b.SendWith(ctx, tdot("a"), "plain", SendOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := b.SendWith(ctx, "a", "answer", SendOptions{InReplyTo: 7}); err != nil {
+	if _, err := b.SendWith(ctx, tdot("a"), "answer", SendOptions{InReplyTo: 7}); err != nil {
 		t.Fatal(err)
 	}
 	m1, _ := a.Read(ctx, 1)
@@ -115,32 +114,32 @@ func TestViaIsDeclaredAndShown(t *testing.T) {
 	f := newFixture(t, "a", "b", "c")
 	a, b, c := f.client(t, "a"), f.client(t, "b"), f.client(t, "c")
 	ctx := context.Background()
-	if _, err := c.SendWith(ctx, "b", "the original", SendOptions{}); err != nil {
+	if _, err := c.SendWith(ctx, tdot("b"), "the original", SendOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := b.SendWith(ctx, "a", "passing it on", SendOptions{Via: 1}); err != nil {
+	if _, err := b.SendWith(ctx, tdot("a"), "passing it on", SendOptions{Via: 1}); err != nil {
 		t.Fatal(err)
 	}
 	m, err := a.Read(ctx, 1)
-	if err != nil || m.Via != "c #1" || m.ReplyTo != 0 || m.Trust != sap.TrustVerified || m.From != "b" {
+	if err != nil || m.Via != tkey("c")+" #1" || m.ReplyTo != 0 || m.Trust != sap.TrustVerified || m.From != tkey("b") {
 		t.Fatalf("%+v %v", m, err)
 	}
-	if out := render.One(m); !strings.Contains(out, "\nrelayed from c #1\n") {
+	if out := render.One(m); !strings.Contains(out, "\nrelayed from "+tdot("c")+" #1\n") {
 		t.Fatalf("render %q", out)
 	}
 	// via and in_reply_to together
-	if _, err := b.SendWith(ctx, "a", "both", SendOptions{Via: 1, InReplyTo: 9}); err != nil {
+	if _, err := b.SendWith(ctx, tdot("a"), "both", SendOptions{Via: 1, InReplyTo: 9}); err != nil {
 		t.Fatal(err)
 	}
 	m, _ = a.Read(ctx, 2)
-	if m.Via != "c #1" || m.ReplyTo != 9 {
+	if m.Via != tkey("c")+" #1" || m.ReplyTo != 9 {
 		t.Fatalf("both: %+v", m)
 	}
-	if out := render.One(m); !strings.Contains(out, "answers #9\nrelayed from c #1\n") {
+	if out := render.One(m); !strings.Contains(out, "answers #9\nrelayed from "+tdot("c")+" #1\n") {
 		t.Fatalf("render %q", out)
 	}
 	// the wire form is origin#seq.sig
-	if raw := rawHeader(t, f, "a", 1, ViaHeader); !strings.HasPrefix(raw, "c#1.") {
+	if raw := rawHeader(t, f, "a", 1, ViaHeader); !strings.HasPrefix(raw, tkey("c")+"#1.") {
 		t.Fatalf("wire value %q", raw)
 	}
 }
@@ -148,7 +147,7 @@ func TestViaIsDeclaredAndShown(t *testing.T) {
 func TestViaToAMissingMessageErrorsWithoutSending(t *testing.T) {
 	f := newFixture(t, "a", "b")
 	a, b := f.client(t, "a"), f.client(t, "b")
-	_, err := b.SendWith(context.Background(), "a", "x", SendOptions{Via: 5})
+	_, err := b.SendWith(context.Background(), tdot("a"), "x", SendOptions{Via: 5})
 	if err == nil || err.Error() != "mash: no message #5 in your inbox to relay" {
 		t.Fatalf("err %v", err)
 	}
@@ -168,14 +167,14 @@ func TestViaOfUnverifiedMail(t *testing.T) {
 		h.Name = "Not A Name"
 		h.Sig = ""
 	})
-	if _, err := b.SendWith(ctx, "a", "relay", SendOptions{Via: 1}); err != nil {
+	if _, err := b.SendWith(ctx, tdot("a"), "relay", SendOptions{Via: 1}); err != nil {
 		t.Fatal(err)
 	}
-	if m, _ := a.Read(ctx, 1); m.Via != "c #1" {
+	if m, _ := a.Read(ctx, 1); m.Via != tkey("c")+" #1" {
 		t.Fatalf("%+v", m)
 	}
 	// b's #2 is the message with the unusable sender name
-	if _, err := b.SendWith(ctx, "a", "relay 2", SendOptions{Via: 2}); err == nil {
+	if _, err := b.SendWith(ctx, tdot("a"), "relay 2", SendOptions{Via: 2}); err == nil {
 		t.Fatal("relayed a message with an unusable sender name")
 	}
 }
@@ -186,7 +185,7 @@ func TestMarksOfAClaimedSenderAreNotShown(t *testing.T) {
 	a := f.client(t, "a")
 	rawMark(t, f, "b", "a", "claimed", func(id sap.Identity, h *sap.SenderHeader, m *nats.Msg) {
 		r, _ := id.SignInReplyTo(*h, 3)
-		v, _ := id.SignVia(*h, "c", 2)
+		v, _ := id.SignVia(*h, tkey("c"), 2)
 		m.Header.Set(InReplyToHeader, r)
 		m.Header.Set(ViaHeader, v)
 		h.Sig = ""
@@ -202,16 +201,16 @@ func TestMarksChangeNeitherTrustKindNorWake(t *testing.T) {
 	f, ev, sp, b := kindFixtureSpool(t)
 	f.add(t, "c")
 	ctx := context.Background()
-	if _, err := f.client(t, "c").SendWith(ctx, "b", "orig", SendOptions{Kind: kind.FYI}); err != nil {
+	if _, err := f.client(t, "c").SendWith(ctx, tdot("b"), "orig", SendOptions{Kind: kind.FYI}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := b.SendWith(ctx, "a", "fyi with marks", SendOptions{Kind: kind.FYI, InReplyTo: 4, Via: 1}); err != nil {
+	if _, err := b.SendWith(ctx, tdot("a"), "fyi with marks", SendOptions{Kind: kind.FYI, InReplyTo: 4, Via: 1}); err != nil {
 		t.Fatal(err)
 	}
 	until(t, "spooled", func() bool { return len(waiting(t, sp)) == 1 })
 	e := waiting(t, sp)[0]
 	got := MailOf(e)
-	if got.ReplyTo != 4 || got.Via != "c #1" || got.Trust != sap.TrustVerified || got.Urgent || got.Kind != kind.FYI {
+	if got.ReplyTo != 4 || got.Via != tkey("c")+" #1" || got.Trust != sap.TrustVerified || got.Urgent || got.Kind != kind.FYI {
 		t.Fatalf("%+v", got)
 	}
 	time.Sleep(4 * f.idle)
@@ -219,25 +218,26 @@ func TestMarksChangeNeitherTrustKindNorWake(t *testing.T) {
 		t.Fatalf("marks woke the session: %q", all)
 	}
 	// and on a task, with urgent, the handling is the ordinary one
-	if _, err := b.SendWith(ctx, "a", "urgent with marks", SendOptions{Urgent: true, InReplyTo: 4, Via: 1}); err != nil {
+	if _, err := b.SendWith(ctx, tdot("a"), "urgent with marks", SendOptions{Urgent: true, InReplyTo: 4, Via: 1}); err != nil {
 		t.Fatal(err)
 	}
-	if w := ev.waitFor(t, 1, 3*time.Second); !strings.HasPrefix(w[0], "urgent, 2 messages from b") { // the held fyi is covered by the same wake
+	if w := ev.waitFor(t, 1, 3*time.Second); !strings.HasPrefix(w[0], "urgent, 2 messages from "+tdot("b")+"") { // the held fyi is covered by the same wake
 		t.Fatalf("wake %q", w[0])
 	}
 }
 
-// The origin syntax in sap matches config.ValidName (sap cannot import config in a test).
-func TestViaOriginSyntaxMatchesConfig(t *testing.T) {
+// The origin syntax in sap is the endpoint's flat key, the same rule as a directory key.
+func TestViaOriginSyntaxMatchesDirectoryKey(t *testing.T) {
 	id := identity(t, newFixture(t, "a").creds["a"])
-	h, err := id.Sign("agents.mail.cc.o.a", []byte("x"), "a", time.Now(), "")
+	h, err := id.Sign(taddr("a").Subjects().Mail, []byte("x"), tkey("a"), time.Now(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, s := range []string{"a", "a-b", "a--b", "-a", "a-", "A", "1a", "a1", strings.Repeat("a", 48), strings.Repeat("a", 49), "", "a_b", "a b"} {
+	for _, s := range []string{"o_dev_a", "o_dev_a-b", "o_dev_a--b", "o_dev_-a", "o_dev_a-", "O_dev_a", "o_dev_1a", "o_dev_a1",
+		"o_dev_" + strings.Repeat("a", 32), "o_dev_" + strings.Repeat("a", 33), "", "a", "a-b", "o_dev", "o_dev_a_b", "o.dev.a", "o_dev_a b"} {
 		_, err := id.SignVia(h, s, 1)
-		if (err == nil) != config.ValidName(s) {
-			t.Fatalf("%q: sap accepts %v, config %v", s, err == nil, config.ValidName(s))
+		if (err == nil) != validDirectoryKey(s) {
+			t.Fatalf("%q: sap accepts %v, the directory key rule %v", s, err == nil, validDirectoryKey(s))
 		}
 	}
 }

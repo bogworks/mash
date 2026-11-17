@@ -53,7 +53,7 @@ The checksum shows the file arrived whole. The attestation, a record signed by G
 
 **`go install` (builds from source).** `go install github.com/bogworks/mash/cmd/mash@latest` needs Go 1.27.4 or newer. It compiles the source on your machine, so the result is not the attested build, and `mash version` prints `commit unknown`.
 
-**`mashctl`** (the tool that sets up servers and creates agents) is not among the release assets: v0.5.0 carries only the four `mash-<os>-<arch>` binaries. For now install it with `go install github.com/bogworks/mash/cmd/mashctl@latest`; `mashctl version` prints `0.0.0-dev` from a go install.
+**`mashctl`** (the tool that sets up servers and administers endpoints) is not among the release assets: v0.5.0 carries only the four `mash-<os>-<arch>` binaries. For now install it with `go install github.com/bogworks/mash/cmd/mashctl@latest`; `mashctl version` prints `0.0.0-dev` from a go install.
 
 ## Quick start: one machine, no account
 
@@ -66,16 +66,16 @@ This path needs no Synadia account and no server you run by hand. You need:
 ```sh
 go install github.com/bogworks/mash/cmd/mashctl@latest   # mashctl is not in the release assets
 mashctl init --local --owner alice --start                # a NATS server that only this machine can reach, plus keys and credentials
-mashctl add design                                        # one agent; its credentials ("creds") are a file that proves who it is
-mashctl add review
 mash plugin export ~/.mash-plugin
 claude plugin marketplace add ~/.mash-plugin
 claude plugin install mash@mash
-MASH_NAME=design claude --dangerously-load-development-channels plugin:mash@mash   # terminal 1
-MASH_NAME=review claude --dangerously-load-development-channels plugin:mash@mash   # terminal 2
-MASH_NAME=design mash send review "hello"                 # from a shell
-MASH_NAME=review mash inbox
+MASH_OWNER=alice MASH_GROUP=dev MASH_NAME=design claude --dangerously-load-development-channels plugin:mash@mash   # terminal 1
+MASH_OWNER=alice MASH_GROUP=dev MASH_NAME=review claude --dangerously-load-development-channels plugin:mash@mash   # terminal 2
+MASH_OWNER=alice MASH_GROUP=dev MASH_NAME=design mash send alice.dev.review "hello"   # from a shell
+MASH_OWNER=alice MASH_GROUP=dev MASH_NAME=review mash inbox
 ```
+
+An agent is an endpoint with an address of three tokens, `owner.group.instance` (here `alice.dev.design` and `alice.dev.review`): `MASH_OWNER` (or `owner` in `config.json`), `MASH_GROUP` (no default and no config key; a session without it stops with `group_missing`, exit 2) and `MASH_NAME`, the instance. Each endpoint needs a directory record (`mashctl provision`) and a credentials ("creds") file named `<owner>.<group>.<instance>.creds` that proves who it is. Minting that file with one command (`mashctl endpoint create`) is coming; until it lands, the setup script mints it. Recipients in `mash send` are written `owner.group.instance` or the flat key `owner_group_instance`; a bare name is refused.
 
 `mashctl init --local` makes a server on port 4222 by default; if something else uses 4222, pass `--port N` to pick another.
 
@@ -112,16 +112,24 @@ See it working first: [two Claude Code sessions exchanging mail, one woken by it
 
    The script comes from the release, not from `main`, and nothing runs unless its checksum matches (the `&&` chain stops at the first failure). Contributors can run the script from their checkout instead.
 
-   `--endpoint` repeats; with none, the script makes one named `<user>-<host>`. It checks the account's stream limit first and, if the plan does not fit, creates nothing and says so. It uses a temporary admin user, which it deletes at the end, and writes `~/.config/mash/config.json` and one `~/.config/mash/<name>.creds` per endpoint (mode 0600). With two or more endpoints it sends a test mail from the first to the second (`--no-test` skips it).
+   `--endpoint` repeats; with none, the script makes one named `<user>-<host>`. It checks the account's stream limit first and, if the plan does not fit, creates nothing and says so. It uses a temporary admin user, which it deletes at the end, and writes `~/.config/mash/config.json` and one `~/.config/mash/<owner>.<group>.<instance>.creds` per endpoint (mode 0600). With two or more endpoints it sends a test mail from the first to the second (`--no-test` skips it).
 4. Start a session as an endpoint, and mail the other one:
 
    ```sh
-   MASH_NAME=alice claude --channels plugin:mash@mash
+   MASH_GROUP=<group> MASH_NAME=alice claude --channels plugin:mash@mash
    ```
 
-   Ask Claude to send "hello" to `bob`. In a second terminal, `MASH_NAME=bob claude --channels plugin:mash@mash` receives it; Claude can answer with the `reply` or `send` tool, and `MASH_NAME=alice mash inbox` shows the mailbox from a shell.
+   Ask Claude to send "hello" to `<owner>.<group>.bob`. In a second terminal, `MASH_GROUP=<group> MASH_NAME=bob claude --channels plugin:mash@mash` receives it; Claude can answer with the `reply` or `send` tool, and `MASH_GROUP=<group> MASH_NAME=alice mash inbox` shows the mailbox from a shell.
 
 The free tier allows 5 streams (mash uses 2 shared, plus 1 per endpoint, so 3 endpoints), 5 connections (one per live session), a 512 KiB message payload (mash caps sends to the server's `max_payload`), and R1 only (no replication, so no HA). Limits, and what to do when the script fails, are in [docs/synadia.md](docs/synadia.md).
+
+## Addresses and the Synadia Agent Protocol
+
+mash is a SAP agent per session, with one departure. An endpoint is addressed `owner.group.instance`, and its subjects are `agents.<verb>.<owner>.<group>.<instance>` (verbs `mail`, `prompt`, `status`, `hb`). SAP says the first subject slot SHOULD carry the harness; mash puts the owner there, because that is what lets a credential be fenced to its owner. So finding agents by a wildcard on the harness slot does not work with mash; discovery by the service name does. The metadata still says `agent: claude-code` and adds `owner`, `group` and `instance`. The three slots:
+
+- **owner**: whose fleet this is; the permission fence. A credential publishes `agents.{mail,prompt,status}.<owner>.*.*`, so it is open to the whole owner by default, and it reaches no other owner.
+- **group**: a set of endpoints of one owner working together (a project or a swarm). It is part of the address, not a permission boundary.
+- **instance**: the session's own name.
 
 ## What you get
 
@@ -130,7 +138,7 @@ The free tier allows 5 streams (mash uses 2 shared, plus 1 per endpoint, so 3 en
 - **No polling turns.** Mail that lands mid-turn rides along with the next tool result (a hook). An idle session is woken by the mail itself: after 45 seconds unshown (`MASH_IDLE_WAKE`) if the mail is a blocker, question or task, at once for urgent mail from a verified sender, and again with backoff if a wake starts no turn. A burst arrives as one turn. A small batch arrives in full; a large one arrives as a digest, and Claude reads the messages it cares about.
 - **Fast replies.** The session answers through tools on the same process that holds the NATS connection open: no subprocess, no CLI, one network round trip.
 - **Verified senders.** Every message is signed with the sender's own NATS key (SAP §13), and the receiver checks it against a directory. A forged message is dropped; an unproven one is labelled as such.
-- **Unique endpoints.** One NATS user per session name, and a lease (a claim on the name, held while the session runs) that refuses a second live session under the same name.
+- **Unique endpoints.** One NATS user per address, and a lease (a claim on the address, held while the session runs) that refuses a second live session under the same address. A credential reaches only its own owner: it may mail any endpoint of that owner and no other owner's.
 - **Live prompts too.** Because each session is a SAP agent, you can `mash prompt` it (or use any SAP client) and get a streamed answer.
 
 Policy commands (`mashctl policy`, allow lists) are not in this release; the engine arrives in 0.5.5.
@@ -155,7 +163,7 @@ claude plugin marketplace add bogworks/mash
 claude plugin install mash@mash
 # allowlist the channel once per machine (managed settings are the admin-controlled settings file of Claude Code): write /etc/claude-code/managed-settings.json (Linux)
 # or /Library/Application Support/ClaudeCode/managed-settings.json (macOS), see docs/install.md section 3, then:
-MASH_NAME=my-session claude --channels plugin:mash@mash
+MASH_GROUP=dev MASH_NAME=my-session claude --channels plugin:mash@mash
 ```
 
 To install the plugin of exactly the mash you have (a pinned release, no GitHub fetch), export it and add the directory as the marketplace:
@@ -166,7 +174,7 @@ claude plugin marketplace add ~/.mash-plugin
 claude plugin install mash@mash
 ```
 
-Operators set up the server with `mashctl init` (or `mashctl adopt` for a server you already run) and create agents with `mashctl add`; `mash admin` is deprecated. See [docs/mashctl.md](docs/mashctl.md) and [docs/operations.md](docs/operations.md).
+Operators set up the server with `mashctl init` (or `mashctl adopt` for a server you already run) and declare endpoints with `mashctl provision` (a one-command `mashctl endpoint create` is coming); `mash admin` is deprecated. See [docs/mashctl.md](docs/mashctl.md) and [docs/operations.md](docs/operations.md).
 
 ## Status
 

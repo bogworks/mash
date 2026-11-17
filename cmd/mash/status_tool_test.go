@@ -112,7 +112,7 @@ func TestStatusToolConfigError(t *testing.T) {
 	if err := os.WriteFile(creds, []byte("-----BEGIN NATS USER JWT-----\n"+credsSecret+"\n------END NATS USER JWT------\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	s := startServe(t, map[string]string{"HOME": home, "MASH_NAME": "a", "MASH_OWNER": "o", "MASH_CREDS": creds})
+	s := startServe(t, map[string]string{"HOME": home, "MASH_NAME": "a", "MASH_GROUP": testGroup, "MASH_OWNER": "o", "MASH_CREDS": creds})
 	s.initialize(t)
 	wantInfoTools(t, s)
 	out := statusOf(t, s, 10)
@@ -135,7 +135,7 @@ func TestStatusToolConfigError(t *testing.T) {
 }
 
 func TestStatusToolMissingOwner(t *testing.T) {
-	s := startServe(t, map[string]string{"HOME": t.TempDir(), "MASH_NAME": "a", "MASH_URL": "nats://u:pw@127.0.0.1:1"})
+	s := startServe(t, map[string]string{"HOME": t.TempDir(), "MASH_NAME": "a", "MASH_GROUP": testGroup, "MASH_URL": "nats://u:pw@127.0.0.1:1"})
 	s.initialize(t)
 	out := statusOf(t, s, 10)
 	wantAll(t, "missing owner", out, "config: MISSING", "owner", "MASH_OWNER")
@@ -146,8 +146,8 @@ func TestStatusToolMissingOwner(t *testing.T) {
 
 func TestStatusToolCredsMissingThenPresent(t *testing.T) {
 	home := t.TempDir()
-	env := map[string]string{"HOME": home, "MASH_NAME": "a", "MASH_OWNER": "o"} // no url: a cheap config-error serve
-	def := filepath.Join(home, ".config", "mash", "a.creds")
+	env := map[string]string{"HOME": home, "MASH_NAME": "a", "MASH_GROUP": testGroup, "MASH_OWNER": "o"} // no url: a cheap config-error serve
+	def := filepath.Join(home, ".config", "mash", "o.dev.a.creds")
 
 	s := startServe(t, env)
 	s.initialize(t)
@@ -199,7 +199,7 @@ func TestStatusToolRetrying(t *testing.T) {
 func TestStatusToolWaitingForLease(t *testing.T) {
 	setTiming(t, time.Hour, 20*time.Second)
 	w := newWorld(t, "a")
-	holdLease(t, leaseKV(t, w), "a")
+	holdLease(t, leaseKV(t, w), tAddr("a").Flat())
 	s := startServe(t, w.env["a"])
 	s.initialize(t)
 	wantInfoTools(t, s)
@@ -255,7 +255,7 @@ func TestStatusToolRunning(t *testing.T) {
 	}
 
 	// A notification sent to the session is counted.
-	if o, code := w.cli(t, "b", "send", "a", "count me"); code != 0 {
+	if o, code := w.cli(t, "b", "send", tTo("a"), "count me"); code != 0 {
 		t.Fatalf("send: %d %s", code, o)
 	}
 	s.await(t, 5*time.Second, isChannel)
@@ -270,7 +270,7 @@ func TestStatusToolRunning(t *testing.T) {
 		id++
 		return strings.Contains(statusOf(t, s, id), "hooks have not run")
 	})
-	sp := spool.Spool{Dir: spool.Dir(filepath.Join(w.env["a"]["HOME"], ".local", "state", "mash"), w.e.Owner, "a")}
+	sp := spool.Spool{Dir: spool.Dir(filepath.Join(w.env["a"]["HOME"], ".local", "state", "mash"), w.e.Owner, tAddr("a").Flat())}
 	if err := sp.Init(); err != nil {
 		t.Fatal(err)
 	}
@@ -356,7 +356,7 @@ func TestStatusToolRedactsRealConnectError(t *testing.T) {
 
 func TestStatusToolMalformedURLRedacted(t *testing.T) {
 	const bad = "nats://alice:" + pwSecret + "@127.0.0.1:1/%zz"
-	s := startServe(t, map[string]string{"HOME": t.TempDir(), "MASH_NAME": "a", "MASH_OWNER": "o", "MASH_URL": bad})
+	s := startServe(t, map[string]string{"HOME": t.TempDir(), "MASH_NAME": "a", "MASH_GROUP": testGroup, "MASH_OWNER": "o", "MASH_URL": bad})
 	s.initialize(t)
 	out := statusOf(t, s, 10)
 	if strings.Contains(out, pwSecret) {
@@ -377,7 +377,7 @@ func TestStatusToolConfigParseErrorFirst(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte("{ not json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	s := startServe(t, map[string]string{"HOME": home, "MASH_NAME": "a", "MASH_URL": "nats://alice:" + pwSecret + "@127.0.0.1:1"})
+	s := startServe(t, map[string]string{"HOME": home, "MASH_NAME": "a", "MASH_GROUP": testGroup, "MASH_URL": "nats://alice:" + pwSecret + "@127.0.0.1:1"})
 	s.initialize(t)
 	out := statusOf(t, s, 10)
 	l := statusLine(t, out, "config:")
@@ -391,14 +391,14 @@ func TestStatusToolConfigParseErrorFirst(t *testing.T) {
 }
 
 func spoolFor(w *world, name string) spool.Spool {
-	return spool.Spool{Dir: spool.Dir(filepath.Join(w.env[name]["HOME"], ".local", "state", "mash"), w.e.Owner, name)}
+	return spool.Spool{Dir: spool.Dir(filepath.Join(w.env[name]["HOME"], ".local", "state", "mash"), w.e.Owner, tAddr(name).Flat())}
 }
 
 // While the lease is held by another session, that holder's hooks are not this session's.
 func TestStatusToolHooksNaWhileWaiting(t *testing.T) {
 	setTiming(t, time.Hour, 20*time.Second)
 	w := newWorld(t, "a")
-	holdLease(t, leaseKV(t, w), "a")
+	holdLease(t, leaseKV(t, w), tAddr("a").Flat())
 	s := startServe(t, w.env["a"])
 	s.initialize(t)
 	sp := spoolFor(w, "a")
@@ -558,12 +558,12 @@ func TestStatusCLINoSecrets(t *testing.T) {
 	if err := os.WriteFile(creds, []byte("-----BEGIN NATS USER JWT-----\n"+credsSecret+"\n------END NATS USER JWT------\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	out, code := runStatusCLI(t, map[string]string{"HOME": home, "MASH_NAME": "a", "MASH_OWNER": "o", "MASH_CREDS": creds,
+	out, code := runStatusCLI(t, map[string]string{"HOME": home, "MASH_NAME": "a", "MASH_GROUP": testGroup, "MASH_OWNER": "o", "MASH_CREDS": creds,
 		"MASH_URL": "nats://user:hunter2pw@127.0.0.1:1"})
 	if code != 0 {
 		t.Fatalf("exit %d:\n%s", code, out)
 	}
-	wantAll(t, "cli valid", out, "name: OK - a", "config: OK", "REDACTED@", "creds: OK")
+	wantAll(t, "cli valid", out, "name: OK - o.dev.a", "config: OK", "REDACTED@", "creds: OK")
 	for _, bad := range []string{credsSecret, "BEGIN NATS", "hunter2pw"} {
 		if strings.Contains(out, bad) {
 			t.Fatalf("status printed %q:\n%s", bad, out)
@@ -578,7 +578,7 @@ func TestStatusCLIMatchesTool(t *testing.T) {
 	if err := os.WriteFile(creds, []byte("x\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	env := map[string]string{"HOME": home, "MASH_NAME": "a", "MASH_OWNER": "o", "MASH_CREDS": creds, "MASH_URL": "nats://127.0.0.1:1"}
+	env := map[string]string{"HOME": home, "MASH_NAME": "a", "MASH_GROUP": testGroup, "MASH_OWNER": "o", "MASH_CREDS": creds, "MASH_URL": "nats://127.0.0.1:1"}
 	cliOut, _ := runStatusCLI(t, env)
 	cfg, err := config.Load(config.LookupFromFunc(envFrom(env)), home)
 	if err != nil {
@@ -728,25 +728,23 @@ func TestStatusAuthLine(t *testing.T) {
 	}
 }
 
-func TestNameLineWithAgentToken(t *testing.T) {
+func TestNameLineValidatesTheThreeTokens(t *testing.T) {
 	long := strings.Repeat("a", 32)
-	cfg := config.Config{Name: long, Owner: "o", AgentToken: "ag"}
-	if l := nameLine(cfg); !strings.HasPrefix(l, "name: OK") {
-		t.Fatalf("a 32-character name is valid in the new form: %q", l)
-	}
-	if l := identityLine(cfg); l != "identity: ag.o."+long+" (three tokens)" {
-		t.Fatalf("got %q", l)
+	cfg := config.Config{Name: long, Owner: "o", Group: "g"}
+	if l := nameLine(cfg); l != "name: OK - o.g."+long {
+		t.Fatalf("a 32-character instance is valid: %q", l)
 	}
 	cfg.Name = long + "a"
 	if l := nameLine(cfg); !strings.HasPrefix(l, "name: FAILED") {
-		t.Fatalf("a 33-character name is too long: %q", l)
+		t.Fatalf("a 33-character instance is too long: %q", l)
 	}
 	cfg.Name = "a"
-	cfg.AgentToken = "Bad Token"
+	cfg.Group = "Bad Group"
 	if l := nameLine(cfg); !strings.HasPrefix(l, "name: FAILED") {
 		t.Fatalf("got %q", l)
 	}
-	if l := identityLine(config.Config{Name: "a", Owner: "o"}); l != "" {
-		t.Fatalf("legacy prints nothing: %q", l)
+	cfg.Group = ""
+	if l := nameLine(cfg); !strings.HasPrefix(l, "name: FAILED") || !strings.Contains(l, "group_missing") || !strings.Contains(l, "MASH_GROUP") {
+		t.Fatalf("a missing group: %q", l)
 	}
 }

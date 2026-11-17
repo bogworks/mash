@@ -47,10 +47,10 @@ func wantMarker(t *testing.T, js jetstream.JetStream, key, state, user string) s
 	return m
 }
 
-func putMarker(t *testing.T, js jetstream.JetStream, id sap.EndpointIdentity, user, state string) {
+func putMarker(t *testing.T, js jetstream.JetStream, id sap.Address, user, state string) {
 	t.Helper()
 	rk, _ := js.KeyValue(context.Background(), store.RetiredBucket)
-	val, _ := json.Marshal(store.Retired{Agent: id.Agent, Owner: id.Owner, Name: id.Name, User: user,
+	val, _ := json.Marshal(store.Retired{Owner: id.Owner, Group: id.Group, Instance: id.Instance, User: user,
 		RetiredAt: "2026-11-10T00:00:00Z", State: state})
 	if _, err := rk.Put(context.Background(), id.Flat(), val); err != nil {
 		t.Fatal(err)
@@ -85,18 +85,37 @@ func fillBucket(t *testing.T, kv jetstream.KeyValue) {
 	t.Fatal("the bucket never filled")
 }
 
-func recordIntact(t *testing.T, js jetstream.JetStream, id sap.EndpointIdentity, user string) {
+func recordIntact(t *testing.T, js jetstream.JetStream, id sap.Address, user string) {
 	t.Helper()
-	if got := recordUserOf(t, js, id.Flat()); got != user {
-		t.Fatalf("record user %s, want %s", got, user)
+	ctx := context.Background()
+	dir, _ := js.KeyValue(ctx, store.DirectoryBucket)
+	rec, err := store.GetRecord(ctx, dir, id.Flat())
+	if err != nil || rec.User != user {
+		t.Fatalf("record %+v (%v), want user %s", rec, err, user)
 	}
-	if _, err := js.Stream(context.Background(), "inbox-"+id.Flat()); err != nil {
+	if _, err := js.Stream(ctx, "inbox-"+id.Flat()); err != nil {
 		t.Fatalf("stream gone: %v", err)
 	}
-	noFence(t, js, id.Flat())
+	lease, _ := js.KeyValue(ctx, store.LeaseBucket)
+	if _, err := lease.Get(ctx, id.Flat()); !errors.Is(err, jetstream.ErrKeyNotFound) {
+		t.Fatalf("lease of %s was written: %v", id, err)
+	}
 }
 
-func wantPendingBlock(t *testing.T, err error, id sap.EndpointIdentity) {
+// removed checks the address's record and inbox stream are both gone.
+func removed(t *testing.T, js jetstream.JetStream, id sap.Address) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := js.Stream(ctx, "inbox-"+id.Flat()); err == nil {
+		t.Fatal("stream left")
+	}
+	dir, _ := js.KeyValue(ctx, store.DirectoryBucket)
+	if _, err := dir.Get(ctx, id.Flat()); err == nil {
+		t.Fatal("record left")
+	}
+}
+
+func wantPendingBlock(t *testing.T, err error, id sap.Address) {
 	t.Helper()
 	wantRetired(t, err, id)
 	if !strings.Contains(err.Error(), "pending") {
@@ -105,11 +124,11 @@ func wantPendingBlock(t *testing.T, err error, id sap.EndpointIdentity) {
 }
 
 // runPath runs the unconditional deprovision or the user-guarded one.
-func runPath(ctx context.Context, x *admin.Admin, path, key, user string) error {
+func runPath(ctx context.Context, x *admin.Admin, path string, id sap.Address, user string) error {
 	if path == "deprovision" {
-		return x.Deprovision(ctx, key)
+		return x.Deprovision(ctx, id)
 	}
-	return x.DeprovisionIfUser(ctx, key, user)
+	return x.DeprovisionIfUser(ctx, id, user)
 }
 
 var bothPaths = []string{"deprovision", "if-user"}
@@ -120,10 +139,10 @@ func TestRetiredMarkerFinalAfterBothDeprovisions(t *testing.T) {
 	ctx := context.Background()
 	id1, u1 := provNewForm(t, e, a, "acme", "team1", "ops1")
 	id2, u2 := provNewForm(t, e, a, "acme", "team1", "ops2")
-	if err := a.Deprovision(ctx, id1.Flat()); err != nil {
+	if err := a.Deprovision(ctx, id1); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.DeprovisionIfUser(ctx, id2.Flat(), u2); err != nil {
+	if err := a.DeprovisionIfUser(ctx, id2, u2); err != nil {
 		t.Fatal(err)
 	}
 	wantMarker(t, js, id1.Flat(), store.RetiredFinal, u1)
@@ -136,10 +155,10 @@ func TestRetiredMarkerFinalAfterBothDeprovisions(t *testing.T) {
 // A pending marker blocks ProvisionIdentity exactly like a final one and says the retirement is unfinished.
 func TestPendingMarkerBlocksProvisionIdentity(t *testing.T) {
 	e, a, js := setup(t)
-	id := newID(t, "acme", "team1", "ops1")
-	_, user := e.Mint(t, "ops1")
+	id := epIn(t, "acme", "team1", "ops1")
+	_, user := e.Mint(t, id)
 	putMarker(t, js, id, user, store.RetiredPending)
-	_, err := a.ProvisionIdentity(context.Background(), id, nil, user, e.Account, "", admin.Meta{})
+	_, err := a.Provision(context.Background(), id, user, e.Account, "", admin.Meta{})
 	wantPendingBlock(t, err, id)
 	untouched(t, js, nil, nil)
 }
@@ -157,7 +176,7 @@ func TestPendingMarkerIsWrittenBeforeRevocation(t *testing.T) {
 				seen, _ = readMarker(t, js, id.Flat())
 				return nil
 			})
-			if err := runPath(context.Background(), rev, path, id.Flat(), user); err != nil {
+			if err := runPath(context.Background(), rev, path, id, user); err != nil {
 				t.Fatal(err)
 			}
 			if calls != 1 || seen.State != store.RetiredPending || seen.User != user {
@@ -177,7 +196,7 @@ func TestCrashAfterPurgeLeavesPendingAndRerunFinalizes(t *testing.T) {
 			ctx := context.Background()
 			id, user := provNewForm(t, e, a, "acme", "team1", "ops1")
 			prev := admin.SetAfterDeprovisionPurge(func() { a.Conn().Close() })
-			if err := runPath(ctx, a, path, id.Flat(), user); err == nil {
+			if err := runPath(ctx, a, path, id, user); err == nil {
 				t.Fatal("the removal cannot have finished on a closed connection")
 			}
 			admin.SetAfterDeprovisionPurge(prev)
@@ -189,9 +208,9 @@ func TestCrashAfterPurgeLeavesPendingAndRerunFinalizes(t *testing.T) {
 				t.Fatalf("the record should be purged: %v", err)
 			}
 			wantMarker(t, js, id.Flat(), store.RetiredPending, user)
-			_, err := b.ProvisionIdentity(ctx, id, nil, user, e.Account, "", admin.Meta{})
+			_, err := b.Provision(ctx, id, user, e.Account, "", admin.Meta{})
 			wantPendingBlock(t, err, id)
-			if err := runPath(ctx, b, path, id.Flat(), user); err != nil {
+			if err := runPath(ctx, b, path, id, user); err != nil {
 				t.Fatalf("re-running must finish: %v", err)
 			}
 			wantMarker(t, js, id.Flat(), store.RetiredFinal, user)
@@ -201,7 +220,7 @@ func TestCrashAfterPurgeLeavesPendingAndRerunFinalizes(t *testing.T) {
 			if _, err := lease.Get(ctx, id.Flat()); err != nil {
 				t.Fatalf("the re-run did not fence the lease: %v", err)
 			}
-			_, err = b.ProvisionIdentity(ctx, id, nil, user, e.Account, "", admin.Meta{})
+			_, err = b.Provision(ctx, id, user, e.Account, "", admin.Meta{})
 			wantRetired(t, err, id)
 		})
 	}
@@ -216,7 +235,7 @@ func TestPendingMarkerForTheSameUserIsResumed(t *testing.T) {
 			putMarker(t, js, id, user, store.RetiredPending)
 			var revoked []string
 			rev := a.WithRevoker(func(_ context.Context, u string) error { revoked = append(revoked, u); return nil })
-			if err := runPath(context.Background(), rev, path, id.Flat(), user); err != nil {
+			if err := runPath(context.Background(), rev, path, id, user); err != nil {
 				t.Fatal(err)
 			}
 			if len(revoked) != 1 || revoked[0] != user {
@@ -226,7 +245,7 @@ func TestPendingMarkerForTheSameUserIsResumed(t *testing.T) {
 			if m.RetiredAt != "2026-11-10T00:00:00Z" {
 				t.Fatalf("the first retired-at must be kept: %s", m.RetiredAt)
 			}
-			gone(t, js, id.Flat())
+			removed(t, js, id)
 		})
 	}
 }
@@ -240,7 +259,7 @@ func TestRefusalDeletesThePendingMarkerThisCallWrote(t *testing.T) {
 			id, user := provNewForm(t, e, a, "acme", "team1", "ops1")
 			boom := errors.New("resolver down")
 			rev := a.WithRevoker(func(context.Context, string) error { return boom })
-			err := runPath(ctx, rev, path, id.Flat(), user)
+			err := runPath(ctx, rev, path, id, user)
 			if !errors.Is(err, boom) || !admin.IsRefusal(err) {
 				t.Fatalf("%v", err)
 			}
@@ -248,7 +267,7 @@ func TestRefusalDeletesThePendingMarkerThisCallWrote(t *testing.T) {
 				t.Fatal("a refused removal left a marker")
 			}
 			recordIntact(t, js, id, user)
-			if _, err := a.SetMeta(ctx, id.Flat(), admin.MetaUpdate{Role: sp("still-operable")}); err != nil {
+			if _, err := a.SetMeta(ctx, id, admin.MetaUpdate{Role: sp("still-operable")}); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -258,11 +277,11 @@ func TestRefusalDeletesThePendingMarkerThisCallWrote(t *testing.T) {
 		ctx := context.Background()
 		id, user := provNewForm(t, e, a, "acme", "team1", "ops1")
 		prev := admin.SetAfterDeprovisionGet(func() {
-			if _, err := a.SetMeta(ctx, id.Flat(), admin.MetaUpdate{Role: sp(time.Now().String())}); err != nil {
+			if _, err := a.SetMeta(ctx, id, admin.MetaUpdate{Role: sp(time.Now().String())}); err != nil {
 				t.Error(err)
 			}
 		})
-		err := a.DeprovisionIfUser(ctx, id.Flat(), user)
+		err := a.DeprovisionIfUser(ctx, id, user)
 		admin.SetAfterDeprovisionGet(prev)
 		if !errors.Is(err, admin.ErrRecordChanged) || !admin.IsRefusal(err) {
 			t.Fatalf("%v", err)
@@ -274,8 +293,8 @@ func TestRefusalDeletesThePendingMarkerThisCallWrote(t *testing.T) {
 	t.Run("other-user", func(t *testing.T) {
 		e, a, js := setup(t)
 		id, user := provNewForm(t, e, a, "acme", "team1", "ops1")
-		_, other := e.Mint(t, "someone-else")
-		if err := a.DeprovisionIfUser(context.Background(), id.Flat(), other); !errors.Is(err, admin.ErrRecordOtherUser) {
+		_, other := e.Mint(t, ep(t, "someone-else"))
+		if err := a.DeprovisionIfUser(context.Background(), id, other); !errors.Is(err, admin.ErrRecordOtherUser) {
 			t.Fatalf("%v", err)
 		}
 		if _, ok := readMarker(t, js, id.Flat()); ok {
@@ -293,7 +312,7 @@ func TestFailedMarkerDeleteSurfaces(t *testing.T) {
 			id, user := provNewForm(t, e, a, "acme", "team1", "ops1")
 			boom := errors.New("resolver down")
 			rev := a.WithRevoker(func(context.Context, string) error { a.Conn().Close(); return boom })
-			err := runPath(context.Background(), rev, path, id.Flat(), user)
+			err := runPath(context.Background(), rev, path, id, user)
 			if !errors.Is(err, boom) || admin.IsRefusal(err) || !strings.Contains(err.Error(), "pending") || !strings.Contains(err.Error(), id.Flat()) {
 				t.Fatalf("want the refusal joined with the failed marker delete, got %v", err)
 			}
@@ -314,7 +333,7 @@ func TestFullRetiredBucketFailsBeforeAnyRevocation(t *testing.T) {
 			fillBucket(t, kv)
 			var calls int
 			rev := a.WithRevoker(func(context.Context, string) error { calls++; return nil })
-			err := runPath(context.Background(), rev, path, id.Flat(), user)
+			err := runPath(context.Background(), rev, path, id, user)
 			if err == nil {
 				t.Fatal("a full bucket must fail the deprovision")
 			}
@@ -331,10 +350,10 @@ func TestFullRetiredBucketFailsBeforeAnyRevocation(t *testing.T) {
 		e, a, js := setup(t)
 		kv := recreateRetired(t, js, func(c *jetstream.KeyValueConfig) { c.MaxBytes = 2048 })
 		fillBucket(t, kv)
-		id := newID(t, "acme", "team1", "ops1")
-		_, user := e.Mint(t, "ops1")
+		id := epIn(t, "acme", "team1", "ops1")
+		_, user := e.Mint(t, id)
 		keys, streams := dirKeys(t, js), streamNames(t, js)
-		_, err := a.ProvisionIdentity(context.Background(), id, nil, user, e.Account, "", admin.Meta{})
+		_, err := a.Provision(context.Background(), id, user, e.Account, "", admin.Meta{})
 		if err == nil || !strings.Contains(err.Error(), "full") {
 			t.Fatalf("a full retired bucket must refuse provisioning, got %v", err)
 		}
@@ -363,14 +382,14 @@ func TestRetiredBucketConfigFailsClosed(t *testing.T) {
 			if (name == "ttl" && st.TTL() != time.Hour) || (name == "history" && st.History() != 5) {
 				t.Fatal("mash modified the bucket")
 			}
-			_, err := a.ProvisionIdentity(ctx, newID(t, "acme", "team1", "ops2"), nil, user, e.Account, "", admin.Meta{})
+			_, err := a.Provision(ctx, epIn(t, "acme", "team1", "ops2"), user, e.Account, "", admin.Meta{})
 			if err == nil || !strings.Contains(err.Error(), store.RetiredBucket) {
 				t.Fatalf("ProvisionIdentity must refuse, got %v", err)
 			}
 			var calls int
 			rev := a.WithRevoker(func(context.Context, string) error { calls++; return nil })
 			for _, path := range bothPaths {
-				if err := runPath(ctx, rev, path, id.Flat(), user); err == nil || !strings.Contains(err.Error(), store.RetiredBucket) {
+				if err := runPath(ctx, rev, path, id, user); err == nil || !strings.Contains(err.Error(), store.RetiredBucket) {
 					t.Fatalf("%s must refuse, got %v", path, err)
 				}
 			}
@@ -386,8 +405,8 @@ func TestRetiredBucketConfigFailsClosed(t *testing.T) {
 func TestConcurrentProvisionIdentitySameName(t *testing.T) {
 	quickLocks(t, longWait)
 	e, a, js := setup(t)
-	id := newID(t, "acme", "team1", "ops1")
-	_, user := e.Mint(t, "ops1")
+	id := epIn(t, "acme", "team1", "ops1")
+	_, user := e.Mint(t, id)
 	admins := []*admin.Admin{a, secondAdmin(t, e, store.DefaultLimits()), secondAdmin(t, e, store.DefaultLimits()), a}
 	errs := make([]error, len(admins))
 	var wg sync.WaitGroup
@@ -395,7 +414,7 @@ func TestConcurrentProvisionIdentitySameName(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, errs[i] = x.ProvisionIdentity(context.Background(), id, nil, user, e.Account, "", admin.Meta{})
+			_, errs[i] = x.Provision(context.Background(), id, user, e.Account, "", admin.Meta{})
 		}()
 	}
 	wg.Wait()
@@ -425,12 +444,12 @@ func TestProvisionRacingDeprovisionIsConsistent(t *testing.T) {
 	e, a, js := setup(t)
 	ctx := context.Background()
 	for i, nm := range []string{"r1", "r2", "r3", "r4"} {
-		id := newID(t, "acme", "team1", nm)
-		_, user := e.Mint(t, nm)
+		id := epIn(t, "acme", "team1", nm)
+		_, user := e.Mint(t, id)
 		b := secondAdmin(t, e, store.DefaultLimits())
 		path := bothPaths[i%2]
 		if i >= 2 { // the second half races a repeat provision against a removal of a live record
-			if _, err := a.ProvisionIdentity(ctx, id, nil, user, e.Account, "", admin.Meta{}); err != nil {
+			if _, err := a.Provision(ctx, id, user, e.Account, "", admin.Meta{}); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -439,9 +458,9 @@ func TestProvisionRacingDeprovisionIsConsistent(t *testing.T) {
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
-			_, perr = a.ProvisionIdentity(ctx, id, nil, user, e.Account, "", admin.Meta{})
+			_, perr = a.Provision(ctx, id, user, e.Account, "", admin.Meta{})
 		}()
-		go func() { defer wg.Done(); derr = runPath(ctx, b, path, id.Flat(), user) }()
+		go func() { defer wg.Done(); derr = runPath(ctx, b, path, id, user) }()
 		wg.Wait()
 		_, marked := readMarker(t, js, id.Flat())
 		dir, _ := js.KeyValue(ctx, store.DirectoryBucket)
@@ -453,7 +472,7 @@ func TestProvisionRacingDeprovisionIsConsistent(t *testing.T) {
 			// the removal ran first on a name with no record: it burns nothing, and only the 90 s lease fence refuses
 		case !present && marked:
 			wantMarker(t, js, id.Flat(), store.RetiredFinal, user)
-			_, err := a.ProvisionIdentity(ctx, id, nil, user, e.Account, "", admin.Meta{})
+			_, err := a.Provision(ctx, id, user, e.Account, "", admin.Meta{})
 			wantRetired(t, err, id)
 		default:
 			t.Fatalf("%s: record present %v, marked %v, provision %v, deprovision %v", nm, present, marked, perr, derr)
@@ -461,32 +480,27 @@ func TestProvisionRacingDeprovisionIsConsistent(t *testing.T) {
 	}
 }
 
-// Losing the flat-key lock, the alias name lock or the admission lock while ProvisionIdentity runs stops it with
-// nothing written after the loss.
+// Losing the flat-key lock while Provision runs stops it with nothing written after the loss.
 func TestProvisionIdentityLockLossWritesNothing(t *testing.T) {
-	for _, lost := range []string{"flat", "alias", "admission"} {
-		for _, at := range []string{"after-admission-lock", "before-stream-write"} {
-			t.Run(lost+"/"+at, func(t *testing.T) {
-				quickLocks(t, longWait)
-				e, a, js := setup(t)
-				provLegacy(t, e, a, "ghost", admin.Meta{})
-				id := newID(t, "acme", "team1", "ops1")
-				_, user := e.Mint(t, "ops1")
-				name := map[string]string{"flat": id.Flat(), "alias": "ghost", "admission": admin.AdmissionLockName}[lost]
-				keys, streams := dirKeys(t, js), streamNames(t, js)
-				steal := func() { putLock(t, js, name, time.Now().Add(time.Minute)) }
-				if at == "after-admission-lock" {
-					seam(t, admin.SetAfterAdmissionLock, steal)
-				} else {
-					prev := admin.SetAfterStreamRead(func(int64) { steal() })
-					t.Cleanup(func() { admin.SetAfterStreamRead(prev) })
-				}
-				_, err := a.ProvisionIdentity(context.Background(), id, &store.Alias{Owner: "o", Name: "ghost"}, user, e.Account, "", admin.Meta{})
-				if err == nil || !strings.Contains(err.Error(), "was lost or is about to expire") {
-					t.Fatalf("want a lock-loss error, got %v", err)
-				}
-				untouched(t, js, keys, streams)
-			})
-		}
+	for _, at := range []string{"after-lock-acquired", "before-stream-write"} {
+		t.Run(at, func(t *testing.T) {
+			quickLocks(t, longWait)
+			e, a, js := setup(t)
+			id := epIn(t, "acme", "team1", "ops1")
+			_, user := e.Mint(t, id)
+			keys, streams := dirKeys(t, js), streamNames(t, js)
+			steal := func() { putLock(t, js, id.Flat(), time.Now().Add(time.Minute)) }
+			if at == "after-lock-acquired" {
+				seam(t, admin.SetAfterLockAcquired, steal)
+			} else {
+				prev := admin.SetAfterStreamRead(func(int64) { steal() })
+				t.Cleanup(func() { admin.SetAfterStreamRead(prev) })
+			}
+			_, err := a.Provision(context.Background(), id, user, e.Account, "", admin.Meta{})
+			if err == nil || !strings.Contains(err.Error(), "was lost or is about to expire") {
+				t.Fatalf("want a lock-loss error, got %v", err)
+			}
+			untouched(t, js, keys, streams)
+		})
 	}
 }

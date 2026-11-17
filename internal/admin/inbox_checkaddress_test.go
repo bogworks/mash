@@ -15,7 +15,7 @@ import (
 func TestCheckInboxFindsAnInboxAndCreatesNothing(t *testing.T) {
 	e, a, js := setup(t)
 	ctx := context.Background()
-	id := newID(t, "acme", e.Owner, "ops1")
+	id := ep(t, "ops1")
 
 	// Nothing provisioned: no stream, no consumer, no error, and nothing created.
 	keys, streams := dirKeys(t, js), streamNames(t, js)
@@ -25,61 +25,55 @@ func TestCheckInboxFindsAnInboxAndCreatesNothing(t *testing.T) {
 	}
 	untouched(t, js, keys, streams)
 
-	// An endpoint made the way `mashctl add` makes one is a legacy one: its inbox is inbox-<name>, filtered on the
-	// five-token subject of its owner and name, which receives mail for every agent token.
-	provLegacy(t, e, a, "ops1", admin.Meta{})
+	// A provisioned endpoint's inbox is inbox-<flat>.
+	_, user := e.Mint(t, id)
+	if _, err := a.Provision(ctx, id, user, e.Account, "", admin.Meta{}); err != nil {
+		t.Fatal(err)
+	}
 	keys, streams = dirKeys(t, js), streamNames(t, js)
 	got, err = a.CheckInbox(ctx, id)
-	if err != nil || got.Stream != "inbox-ops1" || !got.Consumer || !got.Legacy {
-		t.Fatalf("legacy endpoint: %+v %v", got, err)
+	if err != nil || got.Stream != "inbox-o_dev_ops1" || !got.Consumer {
+		t.Fatalf("endpoint: %+v %v", got, err)
 	}
 	untouched(t, js, keys, streams)
 
 	// Another owner's address is not served by it.
-	got, err = a.CheckInbox(ctx, newID(t, "acme", "other", "ops1"))
+	got, err = a.CheckInbox(ctx, epIn(t, "other", "dev", "ops1"))
 	if err != nil || got.Stream != "" {
 		t.Fatalf("another owner: %+v %v", got, err)
-	}
-
-	// A new-form endpoint's own inbox is inbox-<flat>.
-	_, user := e.Mint(t, "ops2")
-	id2 := newID(t, "acme", "team1", "ops2")
-	if _, err := a.ProvisionIdentity(ctx, id2, nil, user, e.Account, "", admin.Meta{}); err != nil {
-		t.Fatal(err)
-	}
-	got, err = a.CheckInbox(ctx, id2)
-	if err != nil || got.Stream != "inbox-acme_team1_ops2" || !got.Consumer || got.Legacy {
-		t.Fatalf("new-form endpoint: %+v %v", got, err)
 	}
 }
 
 func TestCheckInboxReportsAMissingConsumerAndAChangedStream(t *testing.T) {
 	e, a, js := setup(t)
 	ctx := context.Background()
-	provLegacy(t, e, a, "ops1", admin.Meta{})
-	id := newID(t, "acme", e.Owner, "ops1")
-	if err := js.DeleteConsumer(ctx, "inbox-ops1", store.Consumer); err != nil {
+	id := ep(t, "ops1")
+	_, user := e.Mint(t, id)
+	if _, err := a.Provision(ctx, id, user, e.Account, "", admin.Meta{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := js.DeleteConsumer(ctx, "inbox-o_dev_ops1", store.Consumer); err != nil {
 		t.Fatal(err)
 	}
 	got, err := a.CheckInbox(ctx, id)
-	if err != nil || got.Stream != "inbox-ops1" || got.Consumer {
+	if err != nil || got.Stream != "inbox-o_dev_ops1" || got.Consumer {
 		t.Fatalf("missing consumer: %+v %v", got, err)
 	}
 
 	// A stream that differs in a field mail depends on is an error naming the field; nothing is changed.
-	s, err := js.Stream(ctx, "inbox-ops1")
+	s, err := js.Stream(ctx, "inbox-o_dev_ops1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	cfg := s.CachedInfo().Config
-	cfg.Subjects = []string{"agents.mail.*." + e.Owner + ".elsewhere"}
+	cfg.Subjects = []string{"agents.mail." + e.Owner + ".dev.elsewhere"}
 	if _, err := js.UpdateStream(ctx, cfg); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := a.CheckInbox(ctx, id); err == nil || !strings.Contains(err.Error(), "subjects") {
 		t.Fatalf("changed stream: %v", err)
 	}
-	if _, err := js.Consumer(ctx, "inbox-ops1", store.Consumer); err != jetstream.ErrConsumerNotFound {
+	if _, err := js.Consumer(ctx, "inbox-o_dev_ops1", store.Consumer); err != jetstream.ErrConsumerNotFound {
 		t.Fatalf("the check created a consumer: %v", err)
 	}
 }
@@ -88,20 +82,20 @@ func TestCheckInboxReportsAMissingConsumerAndAChangedStream(t *testing.T) {
 func TestCheckInboxReportsASuspendedInbox(t *testing.T) {
 	e, a, _ := setup(t)
 	ctx := context.Background()
-	_, user := e.Mint(t, "ops3")
-	id := newID(t, "acme", "team1", "ops3")
-	if _, err := a.ProvisionIdentity(ctx, id, nil, user, e.Account, "", admin.Meta{}); err != nil {
+	id := ep(t, "ops3")
+	_, user := e.Mint(t, id)
+	if _, err := a.Provision(ctx, id, user, e.Account, "", admin.Meta{}); err != nil {
 		t.Fatal(err)
 	}
 	got, err := a.CheckInbox(ctx, id)
 	if err != nil || got.Suspended || !got.Exists() {
 		t.Fatalf("before: %+v %v", got, err)
 	}
-	if _, err := a.Suspend(ctx, id.Flat()); err != nil {
+	if _, err := a.Suspend(ctx, id); err != nil {
 		t.Fatal(err)
 	}
 	got, err = a.CheckInbox(ctx, id)
-	if err != nil || !got.Suspended || got.Stream != "inbox-acme_team1_ops3" {
+	if err != nil || !got.Suspended || got.Stream != "inbox-o_dev_ops3" {
 		t.Fatalf("suspended: %+v %v", got, err)
 	}
 }

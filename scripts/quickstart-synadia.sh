@@ -2,7 +2,7 @@
 # quickstart-synadia.sh: set mash up on Synadia Cloud (free tier) from one API token.
 #
 # A demo/quickstart, not part of the mash binary (ADR 0038). mash itself never creates
-# NATS users (ADR 0008); this script does that through Synadia's control-plane REST API
+# NATS users (ADR 0008); this script does that through Synadia's management REST API
 # (https://cloud.synadia.com/api/core/beta, undocumented and unstable: if a response is not
 # shaped as expected, the script stops). Needs bash, curl, jq and a mash binary.
 #
@@ -12,9 +12,10 @@
 #      endpoints the mash directory already holds and stops if the account cannot take the plan;
 #   2. creates ONE temporary admin NATS user, writes <config dir>/config.json (url, owner) and
 #      runs `mash admin init` with the admin creds, then (if the plan fits) creates, for each
-#      endpoint, a NATS user with the permissions `mash admin permissions <name>` prints (creds go
-#      to <config dir>/<name>.creds, 0600) and runs `mash admin provision`;
-#   4. sends a test message between the first two endpoints (if there are two);
+#      endpoint, a NATS user named by the endpoint's address, OWNER.GROUP.INSTANCE (--endpoint gives
+#      the instance), with the permissions `mash admin permissions <address>` prints (creds go
+#      to <config dir>/<address>.creds, 0600) and runs `mash admin provision <address>`;
+#   4. sends a test message between the first two endpoints (if there are two), in the group G;
 #   5. deletes the temporary admin user when it ends, however it ends (EXIT trap).
 #
 # The API token comes from SYNADIA_API_TOKEN, one line on stdin (--token-stdin), or a prompt
@@ -32,8 +33,11 @@
 # orphaned admin users from crashed runs (they are named mash-quickstart-admin-*; delete them
 # in the Synadia console, see docs/synadia.md).
 #
-# Usage: quickstart-synadia.sh [--team T] [--account A] [--owner O] [--endpoint N]...
+# Usage: quickstart-synadia.sh --group G [--team T] [--account A] [--owner O] [--endpoint N]...
 #          [--dry-run] [--mash PATH] [--config-dir DIR] [--force] [--token-stdin] [--no-test]
+#   --group is required: an endpoint's group has no default. Owner, group and each instance (--endpoint) are
+#   1-32 lower-case letters, digits and single hyphens, starting with a letter. A session as an endpoint needs
+#   MASH_OWNER (or the owner in config.json), MASH_GROUP and MASH_NAME (the instance).
 #   --config-dir must be an absolute path; mash is run with MASH_CONFIG_DIR set to it, so any directory works. The default is
 #   $MASH_CONFIG_DIR, else $XDG_CONFIG_HOME/mash (when XDG_CONFIG_HOME is absolute and that holds a config.json, or
 #   ~/.config/mash holds none), else ~/.config/mash.
@@ -52,7 +56,7 @@ case "$API" in
     || die "SYNADIA_API_URL '$API' refused: plain http is only allowed to 127.0.0.1 or localhost" ;;
   *) die "SYNADIA_API_URL '$API' refused: it must be an https URL (or http://127.0.0.1 / http://localhost)" ;;
 esac
-TEAM="" ACCOUNT="" OWNER="" MASH="mash" CONFIG_DIR="" DRY=0 FORCE=0 TOKEN_STDIN=0 NO_TEST=0
+TEAM="" ACCOUNT="" OWNER="" GROUP="" MASH="mash" CONFIG_DIR="" DRY=0 FORCE=0 TOKEN_STDIN=0 NO_TEST=0
 ENDPOINTS=()
 ADMIN_ID="" TMP="" LOCK_DIR="" LOCK_HELD=0 PROVISIONING="" PROVISIONING_KEY="" # PROVISIONING: the endpoint whose `mash admin provision` is running or failed
 CREATED_IDS=() CREATED_NAMES=() CREATED_CREDS=() PROVISIONED=() # endpoint users this run created (id, name, whether it wrote their creds file), endpoints provisioned
@@ -67,6 +71,7 @@ while [ $# -gt 0 ]; do
     --team) TEAM="${2:?--team needs a value}"; shift 2 ;;
     --account) ACCOUNT="${2:?--account needs a value}"; shift 2 ;;
     --owner) OWNER="${2:?--owner needs a value}"; shift 2 ;;
+    --group) GROUP="${2:?--group needs a value}"; shift 2 ;;
     --endpoint) ENDPOINTS+=("${2:?--endpoint needs a value}"); shift 2 ;;
     --mash) MASH="${2:?--mash needs a value}"; shift 2 ;;
     --config-dir) CONFIG_DIR="${2:?--config-dir needs a value}"; shift 2 ;;
@@ -79,28 +84,31 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+[ -n "$GROUP" ] || die "--group is required (an endpoint's group has no default)"
 for tool in curl jq; do command -v "$tool" >/dev/null || die "$tool is required"; done
 command -v "$MASH" >/dev/null || die "mash binary not found ($MASH); install it or pass --mash PATH"
 MASH=$(command -v "$MASH") # an absolute path: the mash() function below must never resolve to itself
 
 # ---- names and directories ------------------------------------------------------------------
-sanitize() { # lower-case, [a-z0-9-], single hyphens, starts with a letter, at most 48 chars
+sanitize() { # lower-case, [a-z0-9-], single hyphens, starts with a letter, at most 32 chars
   local s
   s=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9' '-' | tr -s '-' | sed 's/^-*//; s/-*$//')
   case "$s" in [a-z]*) ;; *) s="x$s" ;; esac
-  printf '%s' "${s:0:48}" | sed 's/-*$//'
+  printf '%s' "${s:0:32}" | sed 's/-*$//'
 }
-valid_name() { [ "${#1}" -le 48 ] && [[ "$1" =~ ^[a-z][a-z0-9]*(-[a-z0-9]+)*$ ]]; }
+valid_name() { [ "${#1}" -le 32 ] && [[ "$1" =~ ^[a-z][a-z0-9]*(-[a-z0-9]+)*$ ]]; }
 
 USER_NAME="${USER:-$(id -un)}"
 [ -n "$OWNER" ] || OWNER=$(sanitize "$USER_NAME")
 if [ "${#ENDPOINTS[@]}" -eq 0 ]; then ENDPOINTS=("$(sanitize "$USER_NAME-$(hostname -s 2>/dev/null || echo host)")"); fi
-valid_name "$OWNER" || die "owner '$OWNER' is not valid (1-48 lower-case letters, digits and single hyphens, starting with a letter); use --owner"
+valid_name "$OWNER" || die "owner '$OWNER' is not valid (1-32 lower-case letters, digits and single hyphens, starting with a letter); use --owner"
+valid_name "$GROUP" || die "group '$GROUP' is not valid (1-32 lower-case letters, digits and single hyphens, starting with a letter)"
 for n in "${ENDPOINTS[@]}"; do
-  valid_name "$n" || die "endpoint name '$n' is not valid (1-48 lower-case letters, digits and single hyphens, starting with a letter)"
+  valid_name "$n" || die "endpoint name '$n' is not valid (1-32 lower-case letters, digits and single hyphens, starting with a letter)"
   case "$n" in mash-quickstart-admin*) die "endpoint name '$n' is reserved" ;; esac
 done
 [ "$(printf '%s\n' "${ENDPOINTS[@]}" | sort -u | wc -l)" -eq "${#ENDPOINTS[@]}" ] || die "an --endpoint is given twice"
+addr() { printf '%s.%s.%s' "$OWNER" "$GROUP" "$1"; } # the endpoint address of instance $1
 
 if [ -z "$CONFIG_DIR" ]; then
   LEGACY_DIR="${HOME:?HOME is not set}/.config/mash"
@@ -114,11 +122,11 @@ case "$CONFIG_DIR" in /*) ;; *) die "the config directory '$CONFIG_DIR' must be 
 CONFIG="$CONFIG_DIR/config.json"
 
 # mash reads these in every later session and they beat config.json: do not let them skew this run.
-for v in MASH_URL MASH_OWNER MASH_CREDS MASH_NAME MASH_ADMIN_CREDS MASH_LAUNCH_TOKEN; do
+for v in MASH_URL MASH_OWNER MASH_GROUP MASH_CREDS MASH_NAME MASH_ADMIN_CREDS MASH_LAUNCH_TOKEN; do
   if [ -n "${!v:-}" ]; then say "note: ignoring $v from the environment for this run (set, it also overrides config.json in later sessions)"; fi
   unset "$v"
 done
-mash() { MASH_CONFIG_DIR="$CONFIG_DIR" "$MASH" "$@"; }
+mash() { MASH_CONFIG_DIR="$CONFIG_DIR" MASH_GROUP="$GROUP" "$MASH" "$@"; }
 
 # ---- token (never argv, never stored, never echoed) -------------------------------------------
 TOKEN="${SYNADIA_API_TOKEN:-}"
@@ -166,7 +174,7 @@ cleanup() {
           PROVISIONED+=("$PROVISIONING")
           echo "quickstart-synadia: a record for $PROVISIONING exists that is not this run's; left in place; its NATS user and creds file kept." >&2 ;;
         *"has no directory record"*)
-          say "Setup failed: no directory record for $PROVISIONING to remove. If its inbox stream (inbox-$PROVISIONING) was left behind, remove it with 'mash admin deprovision $PROVISIONING' (docs/synadia.md)." ;;
+          say "Setup failed: no directory record for $PROVISIONING to remove. If its inbox stream (inbox-${PROVISIONING//./_}) was left behind, remove it with 'mash admin deprovision $PROVISIONING' (docs/synadia.md)." ;;
         *)
           PROVISIONED+=("$PROVISIONING") # a record may exist and use this run's user: keep the user and creds
           echo "quickstart-synadia: could not run 'mash admin deprovision $PROVISIONING --user ...'; remove it by hand if it is this run's (docs/synadia.md). Its NATS user and creds file kept." >&2 ;;
@@ -256,7 +264,7 @@ say "NATS URL: $NATS_URL"
 # Capacity: 2 shared streams (directory and lease KV buckets) + 1 inbox per endpoint. Streams the account
 # already holds are not counted (the old init asked the server; this script has no NATS client).
 need=$((2 + ${#ENDPOINTS[@]}))
-say "Plan: owner '$OWNER', ${#ENDPOINTS[@]} endpoint(s) (${ENDPOINTS[*]})"
+say "Plan: owner '$OWNER', group '$GROUP', ${#ENDPOINTS[@]} endpoint(s) (${ENDPOINTS[*]})"
 say "Streams: 2 shared + ${#ENDPOINTS[@]} x 1 per endpoint = $need (the account allows $stream_limit)"
 if [ "$stream_limit" -ge 0 ] && [ "$need" -gt "$stream_limit" ]; then
   die "this account allows $stream_limit streams and the plan needs $need; room for $((stream_limit > 2 ? stream_limit - 2 : 0)) endpoint(s). Nothing was created"
@@ -274,7 +282,7 @@ fi
 # Config conflict, before anything is created.
 if [ -e "$CONFIG" ]; then
   jq -e 'type == "object"' "$CONFIG" >/dev/null 2>&1 || die "$CONFIG is not a JSON object; fix it first"
-  [ "$(jq -r '.creds // "" | tostring' "$CONFIG")" = "" ] || die "$CONFIG has a \"creds\" key, which would beat the new <name>.creds files; remove it"
+  [ "$(jq -r '.creds // "" | tostring' "$CONFIG")" = "" ] || die "$CONFIG has a \"creds\" key, which would beat the new <address>.creds files; remove it"
   if [ "$FORCE" -ne 1 ]; then
     for kv in "url:$NATS_URL" "owner:$OWNER"; do
       cur=$(jq -r --arg k "${kv%%:*}" '.[$k] // "" | tostring' "$CONFIG")
@@ -283,10 +291,11 @@ if [ -e "$CONFIG" ]; then
   fi
 fi
 
-# An existing <name>.creds may be the only local copy of another account's (or a removed user's) creds.
+# An existing <address>.creds may be the only local copy of another account's (or a removed user's) creds.
 for n in "${ENDPOINTS[@]}"; do
-  if [ -e "$CONFIG_DIR/$n.creds" ] || [ -L "$CONFIG_DIR/$n.creds" ]; then
-    die "$CONFIG_DIR/$n.creds already exists and would be overwritten; move it away or pick another --endpoint. Nothing was created"
+  a=$(addr "$n")
+  if [ -e "$CONFIG_DIR/$a.creds" ] || [ -L "$CONFIG_DIR/$a.creds" ]; then
+    die "$CONFIG_DIR/$a.creds already exists and would be overwritten; move it away or pick another --endpoint. Nothing was created"
   fi
 done
 
@@ -294,16 +303,16 @@ if [ "$DRY" -eq 1 ]; then
   say ""
   say "Dry run: nothing is created. A real run would:"
   say "  - create a temporary admin user, and delete it at the end"
-  for n in "${ENDPOINTS[@]}"; do say "  - create NATS user '$n' (creds in $CONFIG_DIR/$n.creds), then provision it"; done
+  for n in "${ENDPOINTS[@]}"; do say "  - create NATS user '$(addr "$n")' (creds in $CONFIG_DIR/$(addr "$n").creds), then provision it"; done
   say "  - write $CONFIG (url $NATS_URL, owner $OWNER) and run 'mash admin init'"
-  [ "${#ENDPOINTS[@]}" -lt 2 ] || [ "$NO_TEST" -eq 1 ] || say "  - send a test message from ${ENDPOINTS[0]} to ${ENDPOINTS[1]}"
+  [ "${#ENDPOINTS[@]}" -lt 2 ] || [ "$NO_TEST" -eq 1 ] || say "  - send a test message from $(addr "${ENDPOINTS[0]}") to $(addr "${ENDPOINTS[1]}")"
   exit 0
 fi
 
 # Refuse same-name users instead of reusing them (a dropped guard).
 existing=$(api GET "/accounts/$acct_id/nats-users" | jq -r '.items[].name')
 for n in "${ENDPOINTS[@]}"; do
-  if grep -qxF "$n" <<<"$existing"; then die "a NATS user named '$n' already exists in account '$acct_name'; delete it in the Synadia console or pick another --endpoint"; fi
+  if grep -qxF "$(addr "$n")" <<<"$existing"; then die "a NATS user named '$(addr "$n")' already exists in account '$acct_name'; delete it in the Synadia console or pick another --endpoint"; fi
 done
 
 # create_user NAME PUB_JSON SUB_JSON -> prints the user's JSON (id, user_public_key).
@@ -387,20 +396,23 @@ mash_admin init
 listing=$(mash admin list)
 # A requested name that already has a directory record is stale or taken: stop before any endpoint user exists.
 for n in "${ENDPOINTS[@]}"; do
+  a=$(addr "$n")
   while IFS=$'\t' read -r en _; do
-    [ "$en" != "$n" ] || die "the mash directory already holds a record for '$n' (stale or taken): run 'mash admin deprovision $n' (docs/synadia.md, \"Removing an endpoint\") or pick another --endpoint. No endpoint user was created"
+    [ "$en" != "$a" ] || die "the mash directory already holds a record for '$a' (stale or taken): run 'mash admin deprovision $a' (docs/synadia.md, \"Removing an endpoint\") or pick another --endpoint. No endpoint user was created"
   done <<<"$listing"
 done
 # Endpoints already in the directory (not in this run's list) each hold an inbox stream.
+ADDRS=(); for n in "${ENDPOINTS[@]}"; do ADDRS+=("$(addr "$n")"); done
 while IFS=$'\t' read -r en _; do
   [ -n "$en" ] || continue
-  printf '%s\n' "${ENDPOINTS[@]}" | grep -qxF "$en" || EXISTING+=("$en")
+  printf '%s\n' "${ADDRS[@]}" | grep -qxF "$en" || EXISTING+=("$en")
 done <<<"$listing"
 if [ "$stream_limit" -ge 0 ] && [ $(( ${#EXISTING[@]} + ${#ENDPOINTS[@]} + 2 )) -gt "$stream_limit" ]; then
   streams_hint
 fi
 # ---- endpoint users (after the capacity check, so a refused plan leaves none behind) ------------
-for n in "${ENDPOINTS[@]}"; do
+for inst in "${ENDPOINTS[@]}"; do
+  n=$(addr "$inst") # the address: the NATS user's name, the creds file's name and the directory key
   perms=$(MASH_OWNER="$OWNER" mash admin permissions "$n" | jq -c '{pub: .pub.allow, sub: .sub.allow}') \
     || die "could not read the permissions from 'mash admin permissions $n'"
   u=$(create_user "$n" "$(jq -c .pub <<<"$perms")" "$(jq -c .sub <<<"$perms")")
@@ -424,14 +436,14 @@ if api DELETE "/nats-users/$ADMIN_ID" >/dev/null; then ADMIN_ID=""; say "Deleted
 if [ "$NO_TEST" -eq 1 ]; then say "Test mail: skipped (--no-test)."
 elif [ "${#ENDPOINTS[@]}" -lt 2 ]; then say "Test mail: skipped, it needs two endpoints; add a second --endpoint."
 else
-  a="${ENDPOINTS[0]}" b="${ENDPOINTS[1]}"
+  a="${ENDPOINTS[0]}" b="${ENDPOINTS[1]}" # instances; the group is MASH_GROUP (set by mash())
   token="qs-$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')" # unique: an older [verified] message in the inbox must not pass
-  MASH_NAME="$a" mash send "$b" "quickstart-synadia.sh test $token" >/dev/null || die "everything was created, but sending the test message failed"
-  inbox=$(MASH_NAME="$b" mash inbox) || die "everything was created, but reading $b's inbox failed"
-  grep -F "$token" <<<"$inbox" | grep -qF "[verified]" || die "the test message did not arrive as [verified] in $b's inbox"
-  say "Test mail: $a sent a message to $b, which read it as [verified]."
+  MASH_NAME="$a" mash send "$(addr "$b")" "quickstart-synadia.sh test $token" >/dev/null || die "everything was created, but sending the test message failed"
+  inbox=$(MASH_NAME="$b" mash inbox) || die "everything was created, but reading $(addr "$b")'s inbox failed"
+  grep -F "$token" <<<"$inbox" | grep -qF "[verified]" || die "the test message did not arrive as [verified] in $(addr "$b")'s inbox"
+  say "Test mail: $(addr "$a") sent a message to $(addr "$b"), which read it as [verified]."
 fi
 
 say ""
 say "Done. Start a session as an endpoint, for example:"
-say "  MASH_NAME=${ENDPOINTS[0]} claude --channels plugin:mash@mash"
+say "  MASH_GROUP=$GROUP MASH_NAME=${ENDPOINTS[0]} claude --channels plugin:mash@mash"

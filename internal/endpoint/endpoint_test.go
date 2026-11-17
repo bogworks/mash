@@ -23,6 +23,21 @@ import (
 	"github.com/bogworks/mash/internal/testenv"
 )
 
+// testGroup is the group of every endpoint the fixture makes; the owner is the test environment's. An endpoint is
+// named in a test by its instance token ("a"); taddr, tkey and tdot give its address, flat key and dotted form.
+const testGroup = "dev"
+
+func taddr(instance string) sap.Address {
+	a, err := sap.NewAddress(testenv.Owner, testGroup, instance)
+	if err != nil {
+		panic(err)
+	}
+	return a
+}
+
+func tkey(instance string) string { return taddr(instance).Flat() }
+func tdot(instance string) string { return taddr(instance).String() }
+
 type fixture struct {
 	e     *testenv.Env
 	adm   *admin.Admin
@@ -57,8 +72,8 @@ func newFixture(t *testing.T, names ...string) *fixture {
 
 func (f *fixture) add(t *testing.T, name string) {
 	t.Helper()
-	c, u := f.e.Mint(t, name)
-	if _, err := f.adm.Provision(context.Background(), name, u, f.e.Account, "", admin.Meta{}); err != nil {
+	c, u := f.e.Mint(t, taddr(name))
+	if _, err := f.adm.Provision(context.Background(), taddr(name), u, f.e.Account, "", admin.Meta{}); err != nil {
 		t.Fatal(err)
 	}
 	f.creds[name], f.users[name] = c, u
@@ -69,7 +84,7 @@ func (f *fixture) cfg(name string) config.Config {
 	if f.settle > 0 {
 		settleMS = int(f.settle / time.Millisecond)
 	}
-	return config.Config{URL: f.e.URL, Owner: f.e.Owner, Name: name, Creds: f.creds[name],
+	return config.Config{URL: f.e.URL, Owner: f.e.Owner, Group: testGroup, Name: name, Creds: f.creds[name],
 		SettleMS: settleMS, BatchMsgs: 10, BatchBytes: 16384, IdleWake: f.idle}
 }
 
@@ -140,16 +155,16 @@ func TestSendReceiveVerified(t *testing.T) {
 	f := newFixture(t, "a", "b")
 	a, ev := f.run(t, "a")
 	b := f.client(t, "b")
-	seq, err := b.Send(context.Background(), "a", "hello a", 0)
+	seq, err := b.Send(context.Background(), tdot("a"), "hello a", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := ev.waitFor(t, 1, 5*time.Second)
-	if !strings.Contains(got[0], fmt.Sprintf("--- #%d from b [verified]", seq)) || !strings.Contains(got[0], "hello a") {
+	if !strings.Contains(got[0], fmt.Sprintf("--- #%d from "+tdot("b")+" [verified]", seq)) || !strings.Contains(got[0], "hello a") {
 		t.Fatalf("event: %s", got[0])
 	}
 	m, err := a.Read(context.Background(), seq)
-	if err != nil || m.From != "b" || m.Trust != sap.TrustVerified || string(m.Body) != "hello a" {
+	if err != nil || m.From != tkey("b") || m.Trust != sap.TrustVerified || string(m.Body) != "hello a" {
 		t.Fatalf("read: %+v %v", m, err)
 	}
 	ms, err := a.Inbox(context.Background(), 20)
@@ -161,7 +176,7 @@ func TestSendReceiveVerified(t *testing.T) {
 func TestStoreAndForward(t *testing.T) {
 	f := newFixture(t, "a", "b")
 	b := f.client(t, "b")
-	if _, err := b.Send(context.Background(), "a", "while you were out", 0); err != nil {
+	if _, err := b.Send(context.Background(), tdot("a"), "while you were out", 0); err != nil {
 		t.Fatal(err)
 	}
 	_, ev := f.run(t, "a")
@@ -176,13 +191,13 @@ func TestBatchOneEvent(t *testing.T) {
 	_, ev := f.run(t, "a")
 	b := f.client(t, "b")
 	for i := 0; i < 5; i++ {
-		if _, err := b.Send(context.Background(), "a", fmt.Sprintf("m%d", i), 0); err != nil {
+		if _, err := b.Send(context.Background(), tdot("a"), fmt.Sprintf("m%d", i), 0); err != nil {
 			t.Fatal(err)
 		}
 	}
 	got := ev.waitFor(t, 1, 5*time.Second)
 	time.Sleep(300 * time.Millisecond)
-	if got = ev.all(); len(got) != 1 || !strings.Contains(got[0], "5 messages from b (task)\n") {
+	if got = ev.all(); len(got) != 1 || !strings.Contains(got[0], "5 messages from "+tdot("b")+" (task)\n") {
 		t.Fatalf("want one event of 5, got %d: %q", len(got), got)
 	}
 }
@@ -192,7 +207,7 @@ func TestDigestOver10(t *testing.T) {
 	f.settle = time.Second // the burst must not split across batches on a slow runner
 	b := f.client(t, "b")
 	for i := 0; i < 11; i++ {
-		if _, err := b.Send(context.Background(), "a", fmt.Sprintf("item %d", i), 0); err != nil {
+		if _, err := b.Send(context.Background(), tdot("a"), fmt.Sprintf("item %d", i), 0); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -225,14 +240,14 @@ func identity(t *testing.T, creds string) sap.Identity {
 
 func TestForgedDroppedClaimedLabelled(t *testing.T) {
 	f := newFixture(t, "a", "b")
-	subj := sap.For(f.e.Owner, "a").Mail
-	nc := f.e.ConnAs(t, f.creds["b"], "b")
+	subj := taddr("a").Subjects().Mail
+	nc := f.e.ConnAs(t, f.creds["b"], tkey("b"))
 	id := identity(t, f.creds["b"])
 
-	h, _ := id.Sign(subj, []byte("forged body"), "b", time.Now(), "")
+	h, _ := id.Sign(subj, []byte("forged body"), tkey("b"), time.Now(), "")
 	h.Sig = strings.Repeat("A", len(h.Sig))
 	publishRaw(t, nc, subj, h.Encode(), "forged body")
-	claimed := sap.SenderHeader{V: 1, Account: id.Account, User: id.User, Name: "b"}
+	claimed := sap.SenderHeader{V: 1, Account: id.Account, User: id.User, Name: tkey("b")}
 	publishRaw(t, nc, subj, claimed.Encode(), "claimed body")
 	publishRaw(t, nc, subj, "", "absent body")
 
@@ -241,7 +256,8 @@ func TestForgedDroppedClaimedLabelled(t *testing.T) {
 	if strings.Contains(got, "forged body") {
 		t.Fatalf("forged mail was shown:\n%s", got)
 	}
-	if !strings.Contains(got, "from b [claimed]") || !strings.Contains(got, "[absent]") {
+	// A claimed sender is shown by a short form of its key, never by the name it declares.
+	if !strings.Contains(got, " [claimed]") || strings.Contains(got, "from "+tdot("b")+" [claimed]") || !strings.Contains(got, "[absent]") {
 		t.Fatalf("labels:\n%s", got)
 	}
 	if a.Dropped() != 1 {
@@ -251,11 +267,11 @@ func TestForgedDroppedClaimedLabelled(t *testing.T) {
 
 func TestUnknownSigner(t *testing.T) {
 	f := newFixture(t, "a")
-	creds, _ := f.e.Mint(t, "x") // a valid user, never provisioned
-	subj := sap.For(f.e.Owner, "a").Mail
+	creds, _ := f.e.Mint(t, taddr("x")) // a valid user, never provisioned
+	subj := taddr("a").Subjects().Mail
 	id := identity(t, creds)
-	h, _ := id.Sign(subj, []byte("who am i"), "x", time.Now(), "")
-	publishRaw(t, f.e.ConnAs(t, creds, "x"), subj, h.Encode(), "who am i")
+	h, _ := id.Sign(subj, []byte("who am i"), tkey("x"), time.Now(), "")
+	publishRaw(t, f.e.ConnAs(t, creds, tkey("x")), subj, h.Encode(), "who am i")
 	_, ev := f.run(t, "a")
 	if got := ev.waitFor(t, 1, 5*time.Second); !strings.Contains(got[0], "[unknown-signer]") {
 		t.Fatal(got[0])
@@ -264,10 +280,10 @@ func TestUnknownSigner(t *testing.T) {
 
 func TestNameClaimMismatchIsUnknownSigner(t *testing.T) {
 	f := newFixture(t, "a", "b")
-	subj := sap.For(f.e.Owner, "a").Mail
+	subj := taddr("a").Subjects().Mail
 	id := identity(t, f.creds["b"])
-	h, _ := id.Sign(subj, []byte("i am root"), "root", time.Now(), "")
-	publishRaw(t, f.e.ConnAs(t, f.creds["b"], "b"), subj, h.Encode(), "i am root")
+	h, _ := id.Sign(subj, []byte("i am root"), tkey("root"), time.Now(), "")
+	publishRaw(t, f.e.ConnAs(t, f.creds["b"], tkey("b")), subj, h.Encode(), "i am root")
 	_, ev := f.run(t, "a")
 	if got := ev.waitFor(t, 1, 5*time.Second); !strings.Contains(got[0], "[unknown-signer]") {
 		t.Fatalf("b claiming another name must not verify:\n%s", got[0])
@@ -295,7 +311,7 @@ func TestLeaseRefusesSecond(t *testing.T) {
 
 func TestDeliverAcksOnlyAfterWrite(t *testing.T) {
 	f := newFixture(t, "a", "b")
-	if _, err := f.client(t, "b").Send(context.Background(), "a", "must not be lost", 0); err != nil {
+	if _, err := f.client(t, "b").Send(context.Background(), tdot("a"), "must not be lost", 0); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -327,10 +343,10 @@ func TestDirectoryLiveUpdate(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if _, err := a.Send(context.Background(), "c", "hi c", 0); err != nil {
+	if _, err := a.Send(context.Background(), tdot("c"), "hi c", 0); err != nil {
 		t.Fatalf("send to new endpoint: %v", err)
 	}
-	if err := f.adm.Deprovision(context.Background(), "c"); err != nil {
+	if err := f.adm.Deprovision(context.Background(), taddr("c")); err != nil {
 		t.Fatal(err)
 	}
 	deadline = time.Now().Add(3 * time.Second)
@@ -340,13 +356,13 @@ func TestDirectoryLiveUpdate(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if _, err := a.Send(context.Background(), "c", "gone?", 0); err == nil {
+	if _, err := a.Send(context.Background(), tdot("c"), "gone?", 0); err == nil {
 		t.Fatal("send to a deprovisioned endpoint must fail")
 	}
-	subj := sap.For(f.e.Owner, "a").Mail
+	subj := taddr("a").Subjects().Mail
 	id := identity(t, f.creds["c"])
-	h, _ := id.Sign(subj, []byte("from a ghost"), "c", time.Now(), "")
-	publishRaw(t, f.e.ConnAs(t, f.creds["c"], "c"), subj, h.Encode(), "from a ghost")
+	h, _ := id.Sign(subj, []byte("from a ghost"), tkey("c"), time.Now(), "")
+	publishRaw(t, f.e.ConnAs(t, f.creds["c"], tkey("c")), subj, h.Encode(), "from a ghost")
 	if got := ev.waitFor(t, 1, 5*time.Second); !strings.Contains(got[0], "[unknown-signer]") {
 		t.Fatalf("mail from a deprovisioned user: %s", got[0])
 	}
@@ -354,7 +370,7 @@ func TestDirectoryLiveUpdate(t *testing.T) {
 
 func hasName(ps []Presence, n string) bool {
 	for _, p := range ps {
-		if p.Record.Name == n {
+		if p.Record.Instance == n {
 			return true
 		}
 	}
@@ -377,14 +393,14 @@ func TestIdentityMismatchRefuses(t *testing.T) {
 
 func TestSendUnknownName(t *testing.T) {
 	f := newFixture(t, "a")
-	if _, err := f.client(t, "a").Send(context.Background(), "nobody", "x", 0); err == nil || !strings.Contains(err.Error(), "nobody") {
+	if _, err := f.client(t, "a").Send(context.Background(), tdot("nobody"), "x", 0); err == nil || !strings.Contains(err.Error(), "nobody") {
 		t.Fatalf("unknown recipient: %v", err)
 	}
 }
 
 func TestSendTooLarge(t *testing.T) {
 	f := newFixture(t, "a", "b")
-	if _, err := f.client(t, "b").Send(context.Background(), "a", strings.Repeat("x", 1<<20), 0); err == nil {
+	if _, err := f.client(t, "b").Send(context.Background(), tdot("a"), strings.Repeat("x", 1<<20), 0); err == nil {
 		t.Fatal("a 1 MiB body plus headers must be refused locally")
 	}
 }
@@ -393,7 +409,7 @@ func TestReconnectResumes(t *testing.T) {
 	f := newFixture(t, "a", "b")
 	_, ev := f.run(t, "a")
 	b := f.client(t, "b")
-	if _, err := b.Send(context.Background(), "a", "before restart", 0); err != nil {
+	if _, err := b.Send(context.Background(), tdot("a"), "before restart", 0); err != nil {
 		t.Fatal(err)
 	}
 	ev.waitFor(t, 1, 5*time.Second)
@@ -409,7 +425,7 @@ func TestReconnectResumes(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	if _, err := b.Send(ctx, "a", "after restart", 0); err != nil {
+	if _, err := b.Send(ctx, tdot("a"), "after restart", 0); err != nil {
 		t.Fatalf("send after restart: %v", err)
 	}
 	got := ev.waitFor(t, 2, 20*time.Second)
@@ -433,7 +449,7 @@ func TestLeaseRefreshAfterLostReply(t *testing.T) {
 	js, _ := jetstream.New(f.e.Conn(t, f.e.AdminCreds))
 	kv, _ := js.KeyValue(context.Background(), store.LeaseBucket)
 	mine := fmt.Sprintf(`{"instance_id":%q,"host":"h","pid":"1","since":"x"}`, ep.instance)
-	if _, err := kv.Put(context.Background(), "a", []byte(mine)); err != nil { // the "lost" update
+	if _, err := kv.Put(context.Background(), tkey("a"), []byte(mine)); err != nil { // the "lost" update
 		t.Fatal(err)
 	}
 	if err := ep.refreshLease(context.Background()); err != nil {
@@ -442,7 +458,7 @@ func TestLeaseRefreshAfterLostReply(t *testing.T) {
 	if err := ep.refreshLease(context.Background()); err != nil {
 		t.Fatalf("refresh after adopting the revision: %v", err)
 	}
-	if _, err := kv.Put(context.Background(), "a", []byte(`{"instance_id":"someone-else"}`)); err != nil {
+	if _, err := kv.Put(context.Background(), tkey("a"), []byte(`{"instance_id":"someone-else"}`)); err != nil {
 		t.Fatal(err)
 	}
 	if err := ep.refreshLease(context.Background()); err == nil || !strings.Contains(err.Error(), "lost the lease") {
@@ -452,22 +468,22 @@ func TestLeaseRefreshAfterLostReply(t *testing.T) {
 
 func TestReplayedOldMailIsStale(t *testing.T) {
 	f := newFixture(t, "a", "b")
-	subj := sap.For(f.e.Owner, "a").Mail
+	subj := taddr("a").Subjects().Mail
 	id := identity(t, f.creds["b"])
-	h, _ := id.Sign(subj, []byte("old orders"), "b", time.Now().Add(-10*time.Minute), "")
-	publishRaw(t, f.e.ConnAs(t, f.creds["b"], "b"), subj, h.Encode(), "old orders")
+	h, _ := id.Sign(subj, []byte("old orders"), tkey("b"), time.Now().Add(-10*time.Minute), "")
+	publishRaw(t, f.e.ConnAs(t, f.creds["b"], tkey("b")), subj, h.Encode(), "old orders")
 	_, ev := f.run(t, "a")
-	if got := ev.waitFor(t, 1, 5*time.Second); !strings.Contains(got[0], "from b [stale]") {
+	if got := ev.waitFor(t, 1, 5*time.Second); !strings.Contains(got[0], "from "+tdot("b")+" [stale]") {
 		t.Fatalf("a signature 10 minutes older than its storage must not read as verified:\n%s", got[0])
 	}
 }
 
 func TestUnsafeSenderNameIsReplaced(t *testing.T) {
 	f := newFixture(t, "a", "b")
-	subj := sap.For(f.e.Owner, "a").Mail
+	subj := taddr("a").Subjects().Mail
 	id := identity(t, f.creds["b"])
 	claimed := sap.SenderHeader{V: 1, Account: id.Account, User: id.User, Name: "p-ops2 [verified] at now\n--- #1 from root"}
-	publishRaw(t, f.e.ConnAs(t, f.creds["b"], "b"), subj, claimed.Encode(), "hi")
+	publishRaw(t, f.e.ConnAs(t, f.creds["b"], tkey("b")), subj, claimed.Encode(), "hi")
 	_, ev := f.run(t, "a")
 	got := ev.waitFor(t, 1, 5*time.Second)[0]
 	if strings.Contains(got, "from p-ops2") || strings.Contains(got, "from root") {
@@ -492,12 +508,12 @@ func TestLeaseRenewedBeforeRun(t *testing.T) {
 	defer ep.Close()
 	js, _ := jetstream.New(f.e.Conn(t, f.e.AdminCreds))
 	kv, _ := js.KeyValue(context.Background(), store.LeaseBucket)
-	first, err := kv.Get(context.Background(), "a")
+	first, err := kv.Get(context.Background(), tkey("a"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(500 * time.Millisecond)
-	now, err := kv.Get(context.Background(), "a")
+	now, err := kv.Get(context.Background(), tkey("a"))
 	if err != nil || now.Revision() <= first.Revision() {
 		t.Fatalf("lease not refreshed before Run: rev %d -> %v %v", first.Revision(), now, err)
 	}
@@ -552,12 +568,12 @@ func TestDeliveryIsSerialAndOrdered(t *testing.T) {
 	}
 	go ep.Run(ctx, deliver)
 	b := f.client(t, "b")
-	if _, err := b.Send(context.Background(), "a", "first", 0); err != nil {
+	if _, err := b.Send(context.Background(), tdot("a"), "first", 0); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(150 * time.Millisecond) // first is now being written
 	for _, m := range []string{"second", "third"} {
-		if _, err := b.Send(context.Background(), "a", m, 0); err != nil {
+		if _, err := b.Send(context.Background(), tdot("a"), m, 0); err != nil {
 			t.Fatal(err)
 		}
 		time.Sleep(80 * time.Millisecond) // beyond the 50 ms settle: separate batches if not serialised
@@ -605,7 +621,7 @@ func TestRunWaitsForDeliveryBeforeReturning(t *testing.T) {
 	}
 	done := make(chan struct{})
 	go func() { _ = ep.Run(ctx, deliver); close(done) }()
-	if _, err := f.client(t, "b").Send(context.Background(), "a", "slow", 0); err != nil {
+	if _, err := f.client(t, "b").Send(context.Background(), tdot("a"), "slow", 0); err != nil {
 		t.Fatal(err)
 	}
 	<-started
@@ -696,7 +712,7 @@ func TestLeaseCarriesTheLaunchToken(t *testing.T) {
 	kv, _ := js.KeyValue(context.Background(), store.LeaseBucket)
 	read := func(name string) leaseValue {
 		t.Helper()
-		en, err := kv.Get(context.Background(), name)
+		en, err := kv.Get(context.Background(), tkey(name))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -721,7 +737,7 @@ func TestLeaseCarriesTheLaunchToken(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer ep2.Close()
-	en, _ := kv.Get(context.Background(), "b")
+	en, _ := kv.Get(context.Background(), tkey("b"))
 	if strings.Contains(string(en.Value()), "launch_token") {
 		t.Fatalf("a lease without a token carries the field: %s", en.Value())
 	}
@@ -737,7 +753,7 @@ func TestSenderInstanceVerified(t *testing.T) {
 	f := newFixture(t, "a", "b")
 	a, ev := f.run(t, "a")
 	b := f.client(t, "b")
-	seq, err := b.Send(context.Background(), "a", "hello a", 0)
+	seq, err := b.Send(context.Background(), tdot("a"), "hello a", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -760,11 +776,11 @@ func TestSenderInstanceVerified(t *testing.T) {
 
 func TestForgedSenderInstanceNotShown(t *testing.T) {
 	f := newFixture(t, "a", "b")
-	subj := sap.For(f.e.Owner, "a").Mail
+	subj := taddr("a").Subjects().Mail
 	id := identity(t, f.creds["b"])
-	nc := f.e.ConnAs(t, f.creds["b"], "b")
+	nc := f.e.ConnAs(t, f.creds["b"], tkey("b"))
 	for i, hv := range []string{"VICTIM.AAAA", "VICTIM"} { // an unsigned claim; one without a dot
-		h, _ := id.Sign(subj, []byte("hi"), "b", time.Now(), "")
+		h, _ := id.Sign(subj, []byte("hi"), tkey("b"), time.Now(), "")
 		msg := nats.NewMsg(subj)
 		msg.Data = []byte("hi")
 		msg.Header.Set(sap.HeaderName, h.Encode())
@@ -776,7 +792,7 @@ func TestForgedSenderInstanceNotShown(t *testing.T) {
 	}
 	_, ev := f.run(t, "a")
 	got := strings.Join(ev.waitFor(t, 1, 5*time.Second), "\n")
-	if !strings.Contains(got, "from b [verified]") {
+	if !strings.Contains(got, "from "+tdot("b")+" [verified]") {
 		t.Fatalf("message not delivered:\n%s", got)
 	}
 	if strings.Contains(got, "VICTIM") || strings.Contains(got, "instance") {
@@ -790,12 +806,12 @@ func TestSenderInstanceIsTheLeaseInstance(t *testing.T) {
 	f := newFixture(t, "a", "b")
 	_, ev := f.run(t, "a")
 	b := f.serve(t, "b", noPrompt)
-	if _, err := b.Send(context.Background(), "a", "hi", 0); err != nil {
+	if _, err := b.Send(context.Background(), tdot("a"), "hi", 0); err != nil {
 		t.Fatal(err)
 	}
 	js, _ := jetstream.New(f.e.Conn(t, f.e.AdminCreds))
 	kv, _ := js.KeyValue(context.Background(), store.LeaseBucket)
-	en, err := kv.Get(context.Background(), "b")
+	en, err := kv.Get(context.Background(), tkey("b"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -817,7 +833,7 @@ func leaseInstance(t *testing.T, f *fixture, name string) string {
 	t.Helper()
 	js, _ := jetstream.New(f.e.Conn(t, f.e.AdminCreds))
 	kv, _ := js.KeyValue(context.Background(), store.LeaseBucket)
-	en, err := kv.Get(context.Background(), name)
+	en, err := kv.Get(context.Background(), tkey(name))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -845,7 +861,7 @@ func sendFromClient(t *testing.T, f *fixture, tok string, adopt bool) (*Endpoint
 	if adopt {
 		aerr = c.AdoptLaunchInstance(context.Background())
 	}
-	seq, err := c.Send(context.Background(), "b", "from the shell", 0)
+	seq, err := c.Send(context.Background(), tdot("b"), "from the shell", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -941,7 +957,7 @@ func TestDeprovisionedLiveSessionDoesNotRetakeTheLease(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer ep.Close()
-	if err := f.adm.Deprovision(context.Background(), "a"); err != nil {
+	if err := f.adm.Deprovision(context.Background(), taddr("a")); err != nil {
 		t.Fatal(err)
 	}
 	err = ep.refreshLease(context.Background())
@@ -950,7 +966,7 @@ func TestDeprovisionedLiveSessionDoesNotRetakeTheLease(t *testing.T) {
 	}
 	js, _ := jetstream.New(f.e.Conn(t, f.e.AdminCreds))
 	kv, _ := js.KeyValue(context.Background(), store.LeaseBucket)
-	en, err := kv.Get(context.Background(), "a")
+	en, err := kv.Get(context.Background(), tkey("a"))
 	if err != nil || !strings.Contains(string(en.Value()), `"deprovisioned":true`) || strings.Contains(string(en.Value()), ep.instance) {
 		t.Fatalf("the lease was re-taken or the tombstone lost: %v %v", en, err)
 	}
@@ -961,7 +977,7 @@ func TestOpenRefusesADeprovisionedName(t *testing.T) {
 	f := newFixture(t, "a")
 	js, _ := jetstream.New(f.e.Conn(t, f.e.AdminCreds))
 	kv, _ := js.KeyValue(context.Background(), store.LeaseBucket)
-	if _, err := kv.Put(context.Background(), "a", store.LeaseTombstone()); err != nil {
+	if _, err := kv.Put(context.Background(), tkey("a"), store.LeaseTombstone()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := Open(context.Background(), f.cfg("a")); !errors.Is(err, ErrDeprovisioned) {
@@ -969,20 +985,19 @@ func TestOpenRefusesADeprovisionedName(t *testing.T) {
 	}
 }
 
-// Re-provisioning a deprovisioned name clears its tombstone, so the name works again at once.
-func TestReprovisionClearsTheTombstone(t *testing.T) {
+// A deprovisioned address is retired for good (INV-002): provisioning it again is refused, and Open of it stays
+// refused as deprovisioned.
+func TestDeprovisionedAddressIsNeverReassigned(t *testing.T) {
 	f := newFixture(t, "a")
-	if err := f.adm.Deprovision(context.Background(), "a"); err != nil {
+	if err := f.adm.Deprovision(context.Background(), taddr("a")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.adm.Provision(context.Background(), "a", f.users["a"], f.e.Account, "", admin.Meta{}); err != nil {
-		t.Fatal(err)
+	if _, err := f.adm.Provision(context.Background(), taddr("a"), f.users["a"], f.e.Account, "", admin.Meta{}); err == nil || !strings.Contains(err.Error(), "retired") {
+		t.Fatalf("provisioning a retired address: %v", err)
 	}
-	ep, err := Open(context.Background(), f.cfg("a"))
-	if err != nil {
-		t.Fatalf("Open after re-provision: %v", err)
+	if _, err := Open(context.Background(), f.cfg("a")); err == nil {
+		t.Fatal("Open of a deprovisioned address succeeded")
 	}
-	ep.Close()
 }
 
 // An Open whose lease lands after its directory record was removed (a deprovision racing the Open) gives the lease
@@ -991,13 +1006,13 @@ func TestOpenRechecksTheDirectoryAfterTakingTheLease(t *testing.T) {
 	f := newFixture(t, "a")
 	js, _ := jetstream.New(f.e.Conn(t, f.e.AdminCreds))
 	dir, _ := js.KeyValue(context.Background(), store.DirectoryBucket)
-	afterLeaseHook = func() { _ = dir.Purge(context.Background(), "a") }
+	afterLeaseHook = func() { _ = dir.Purge(context.Background(), tkey("a")) }
 	t.Cleanup(func() { afterLeaseHook = nil })
 	if _, err := Open(context.Background(), f.cfg("a")); !errors.Is(err, ErrDeprovisioned) {
 		t.Fatalf("Open racing the directory purge: %v, want ErrDeprovisioned", err)
 	}
 	kv, _ := js.KeyValue(context.Background(), store.LeaseBucket)
-	if en, err := kv.Get(context.Background(), "a"); err == nil {
+	if en, err := kv.Get(context.Background(), tkey("a")); err == nil {
 		t.Fatalf("the lease was kept: %s", en.Value())
 	}
 }
@@ -1009,7 +1024,7 @@ func TestInboxAfterPagesForward(t *testing.T) {
 	a := f.client(t, "a")
 	b := f.client(t, "b")
 	for i := 1; i <= 7; i++ {
-		if _, err := b.Send(context.Background(), "a", fmt.Sprintf("m%d", i), 0); err != nil {
+		if _, err := b.Send(context.Background(), tdot("a"), fmt.Sprintf("m%d", i), 0); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1045,7 +1060,7 @@ func TestInboxListingSkipsOnlyMissingSeqs(t *testing.T) {
 	a := f.client(t, "a")
 	b := f.client(t, "b")
 	for i := 1; i <= 4; i++ {
-		if _, err := b.Send(context.Background(), "a", fmt.Sprintf("m%d", i), 0); err != nil {
+		if _, err := b.Send(context.Background(), tdot("a"), fmt.Sprintf("m%d", i), 0); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1098,11 +1113,11 @@ func TestCloseReleasesALeaseWithAStaleRevision(t *testing.T) {
 		t.Fatal(err)
 	}
 	mine := fmt.Sprintf(`{"instance_id":%q,"host":"h","pid":"1","since":"x"}`, ep.instance)
-	if _, err := kv.Put(context.Background(), "a", []byte(mine)); err != nil { // the refresh whose reply was lost
+	if _, err := kv.Put(context.Background(), tkey("a"), []byte(mine)); err != nil { // the refresh whose reply was lost
 		t.Fatal(err)
 	}
 	ep.Close()
-	if en, err := kv.Get(context.Background(), "a"); !errors.Is(err, jetstream.ErrKeyNotFound) {
+	if en, err := kv.Get(context.Background(), tkey("a")); !errors.Is(err, jetstream.ErrKeyNotFound) {
 		t.Fatalf("Close left the lease behind (it would block the next session until the TTL): %v %v", en, err)
 	}
 
@@ -1110,11 +1125,11 @@ func TestCloseReleasesALeaseWithAStaleRevision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := kv.Put(context.Background(), "b", []byte(`{"instance_id":"someone-else","host":"h","pid":"2","since":"x"}`)); err != nil {
+	if _, err := kv.Put(context.Background(), tkey("b"), []byte(`{"instance_id":"someone-else","host":"h","pid":"2","since":"x"}`)); err != nil {
 		t.Fatal(err)
 	}
 	other.Close()
-	en, err := kv.Get(context.Background(), "b")
+	en, err := kv.Get(context.Background(), tkey("b"))
 	if err != nil || !strings.Contains(string(en.Value()), "someone-else") {
 		t.Fatalf("Close released a lease another instance holds: %v %v", en, err)
 	}
@@ -1137,7 +1152,7 @@ func TestLeaseCarriesVersionAndCommit(t *testing.T) {
 	kv, _ := js.KeyValue(context.Background(), store.LeaseBucket)
 	read := func() leaseValue {
 		t.Helper()
-		en, err := kv.Get(context.Background(), "a")
+		en, err := kv.Get(context.Background(), tkey("a"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1164,13 +1179,31 @@ func TestOwnerOfComesFromTheDirectory(t *testing.T) {
 	f := newFixture(t, "a", "b")
 	a, _ := f.run(t, "a")
 	deadline := time.Now().Add(5 * time.Second)
-	for a.ownerOf("b") != f.e.Owner {
+	for a.ownerOf(tkey("b")) != f.e.Owner {
 		if time.Now().After(deadline) {
-			t.Fatalf("ownerOf(b) = %q, want %q", a.ownerOf("b"), f.e.Owner)
+			t.Fatalf("ownerOf(b) = %q, want %q", a.ownerOf(tkey("b")), f.e.Owner)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if got := a.ownerOf("nobody"); got != "" {
+	if got := a.ownerOf(tkey("nobody")); got != "" {
 		t.Fatalf("ownerOf(nobody) = %q", got)
 	}
+}
+
+func joined(ev *events) string { return strings.Join(ev.all(), "\n") }
+
+// waitText waits until the events' text contains every want.
+func waitText(t *testing.T, ev *events, wants ...string) string {
+	t.Helper()
+	var got string
+	until(t, fmt.Sprintf("events containing %q", wants), func() bool {
+		got = joined(ev)
+		for _, w := range wants {
+			if !strings.Contains(got, w) {
+				return false
+			}
+		}
+		return true
+	})
+	return got
 }

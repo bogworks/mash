@@ -27,28 +27,10 @@ const exitAuditIncomplete = 3
 const auditUsage = "usage: mashctl audit [--json] [--strict] [--creds-dir DIR] [--compare EARLIER.json]\n"
 
 // auditVersion is the version field of the JSON report. It changes only when a field is removed or changes meaning.
-const auditVersion = 1
-
-// trustLabelNA is the trust_label of every renamed identity: the server holds no trust label (the receiving endpoint
-// evaluates one from the signed sender header when it reads a message).
-const (
-	trustLabelNA   = "not-available"
-	trustLabelNote = "the server holds no trust label: the receiving endpoint evaluates it when it reads a message, so compare the message counts and last sequences here and check labels at the endpoint"
-)
+const auditVersion = 2
 
 // auditNow is the clock for the report's generated field; a test replaces it.
 var auditNow = time.Now
-
-type auditIdentity struct {
-	Agent string `json:"agent"`
-	Owner string `json:"owner"`
-	Name  string `json:"name"`
-}
-
-type auditAlias struct {
-	Owner string `json:"owner"`
-	Name  string `json:"name"`
-}
 
 type auditDeliver struct {
 	Present    bool   `json:"present"`
@@ -93,25 +75,14 @@ type auditInbox struct {
 }
 
 type auditRecord struct {
-	Key      string        `json:"key"`
-	Identity auditIdentity `json:"identity"`
-	Flat     string        `json:"flat"`
-	Form     string        `json:"form"` // legacy or new
-	User     string        `json:"user"`
-	Alias    *auditAlias   `json:"alias,omitempty"`
-	Running  bool          `json:"running"`
-	Inbox    auditInbox    `json:"inbox"`
-}
-
-type auditRename struct {
-	Identity       string     `json:"identity"` // agent.owner.name
-	Flat           string     `json:"flat"`
-	Alias          auditAlias `json:"alias"`
-	LegacyInbox    auditInbox `json:"legacy_inbox"`
-	NewInbox       auditInbox `json:"new_inbox"`
-	Drained        bool       `json:"drained"`
-	TrustLabel     string     `json:"trust_label"`
-	TrustLabelNote string     `json:"trust_label_note"`
+	Key      string     `json:"key"`     // the directory key: the address's flat key
+	Address  string     `json:"address"` // owner.group.instance
+	Owner    string     `json:"owner"`
+	Group    string     `json:"group"`
+	Instance string     `json:"instance"`
+	User     string     `json:"user"`
+	Running  bool       `json:"running"`
+	Inbox    auditInbox `json:"inbox"`
 }
 
 type auditOrphanStream struct {
@@ -142,10 +113,11 @@ type auditOrphans struct {
 // auditRetiredMarker is one retired-identity marker. It carries the retired user public key (the audit shows the other
 // users' public keys too) and never a seed.
 type auditRetiredMarker struct {
-	Key       string `json:"key"` // the flat identity
-	Agent     string `json:"agent"`
+	Key       string `json:"key"` // the flat key
+	Address   string `json:"address"`
 	Owner     string `json:"owner"`
-	Name      string `json:"name"`
+	Group     string `json:"group"`
+	Instance  string `json:"instance"`
 	User      string `json:"user,omitempty"`
 	State     string `json:"state"`      // pending or final (a marker with no state counts as final)
 	RetiredAt string `json:"retired_at"` // as the marker holds it, RFC 3339 UTC
@@ -215,8 +187,8 @@ func buildRetired(snap admin.AuditRetired) (auditRetired, []auditProblem) {
 					Error: fmt.Sprintf("retired marker has an unrecognized state %q (treated as final: the name stays refused); investigate", capState(m.Marker.State))})
 			}
 		}
-		ar.Markers = append(ar.Markers, auditRetiredMarker{Key: m.Key, Agent: m.Marker.Agent, Owner: m.Marker.Owner, Name: m.Marker.Name,
-			User: m.Marker.User, State: state, RetiredAt: m.Marker.RetiredAt})
+		ar.Markers = append(ar.Markers, auditRetiredMarker{Key: m.Key, Address: m.Marker.Owner + "." + m.Marker.Group + "." + m.Marker.Instance,
+			Owner: m.Marker.Owner, Group: m.Marker.Group, Instance: m.Marker.Instance, User: m.Marker.User, State: state, RetiredAt: m.Marker.RetiredAt})
 	}
 	return ar, probs
 }
@@ -238,11 +210,7 @@ type auditProblem struct {
 
 type auditSummary struct {
 	Records       int `json:"records"`
-	Legacy        int `json:"legacy"`
-	New           int `json:"new"`
 	Running       int `json:"running"`
-	Renamed       int `json:"renamed"`
-	Undrained     int `json:"undrained"`
 	OrphanStreams int `json:"orphan_streams"`
 	OrphanLeases  int `json:"orphan_leases"`
 	OrphanCreds   int `json:"orphan_creds"`
@@ -261,7 +229,6 @@ type auditReport struct {
 	Account     string         `json:"account"` // the account's public key (never a seed or a token); binds --compare to one deployment
 	CredsDirs   []string       `json:"creds_dirs"`
 	Records     []auditRecord  `json:"records"`
-	Renames     []auditRename  `json:"renames"`
 	Orphans     auditOrphans   `json:"orphans"`
 	FencedLease []string       `json:"fenced_leases"` // lease keys holding a deprovision tombstone and no record: expected, they expire
 	Retired     *auditRetired  `json:"retired"`       // always set in a report this mashctl writes; nil in an earlier report from before it
@@ -271,13 +238,13 @@ type auditReport struct {
 	Compare     *auditCompare  `json:"compare,omitempty"` // only with --compare
 }
 
-// findings is how many things --strict counts: every orphan, every undrained alias, every item the audit could not
-// read (it cannot call what it did not read clean) and, with --compare, every legacy stream that moved.
+// findings is how many things --strict counts: every orphan, every item the audit could not read (it cannot call
+// what it did not read clean) and, with --compare, every inbox that vanished or was recreated.
 func (r auditReport) findings() int {
 	s := r.Summary
-	n := s.OrphanStreams + s.OrphanLeases + s.OrphanCreds + s.Undrained + s.Problems
+	n := s.OrphanStreams + s.OrphanLeases + s.OrphanCreds + s.Problems
 	if r.Compare != nil {
-		n += r.Compare.Moved + r.Compare.Vanished + r.Compare.Recreated + r.Compare.CreationUnknown + len(r.Compare.RetiredFinalLost)
+		n += r.Compare.Vanished + r.Compare.Recreated + r.Compare.CreationUnknown + len(r.Compare.RetiredFinalLost)
 		if r.Compare.AccountUnverified {
 			n++
 		}
@@ -319,8 +286,8 @@ func auditTime(t *time.Time) string {
 	return t.UTC().Format(time.RFC3339Nano)
 }
 
-// drained reports whether a legacy inbox can be cut off. An inbox that is gone, or one that holds no message, is
-// drained. Otherwise its `deliver` consumer must have nothing pending and nothing unacknowledged, and must be
+// drained reports whether an inbox can be cut off: it is gone, or it holds no message, or every message it holds has been
+// delivered and acknowledged. Otherwise its `deliver` consumer must have nothing pending and nothing unacknowledged, and must be
 // configured to have delivered every stored message: deliver policy all (or a start sequence at or below the first
 // stored sequence), no filter at all, and an ack floor that reaches the last stored sequence. The counts alone are
 // not enough: a consumer recreated to skip stored messages shows zero for both. Any filter disqualifies it, even one
@@ -380,7 +347,7 @@ func inboxNote(key string, in auditInbox) string {
 // user public key (or to an error); skipUsers are keys that are not endpoints' (the admin's).
 func buildAudit(owner string, snap admin.AuditSnapshot, dirs []string, creds []credsFile, skipUsers map[string]bool) auditReport {
 	rep := auditReport{Version: auditVersion, Owner: owner, CredsDirs: dirs,
-		Records: []auditRecord{}, Renames: []auditRename{}, FencedLease: []string{}, Problems: []auditProblem{}, Notes: []string{},
+		Records: []auditRecord{}, FencedLease: []string{}, Problems: []auditProblem{}, Notes: []string{},
 		Orphans: auditOrphans{Streams: []auditOrphanStream{}, Leases: []auditOrphanLease{}, Creds: []auditOrphanCreds{}}}
 	streams := map[string]*admin.AuditStream{}
 	for i := range snap.Streams {
@@ -402,76 +369,24 @@ func buildAudit(owner string, snap admin.AuditSnapshot, dirs []string, creds []c
 			users[b.User] = true
 		}
 	}
-	// an inbox is evaluated once: a legacy inbox that is also a record's own inbox is reported under that record
-	evaluated := map[string]bool{}
 	for _, r := range snap.Records {
-		if id, err := r.Identity(); err == nil {
-			evaluated[id.Flat()] = true
-		}
-	}
-	for _, r := range snap.Records {
-		if zerr := store.ZonedRecordError(r); zerr != nil { // zones are removed (ADR 0091): a finding, so --strict fails
-			rep.Problems = append(rep.Problems, auditProblem{What: "record", Item: r.KeyOrName(), Error: zerr.Error()})
-		}
-		id, err := r.Identity()
+		addr, err := r.Address()
 		if err != nil {
-			rep.Problems = append(rep.Problems, auditProblem{What: "record", Item: r.KeyOrName(), Error: err.Error()})
-			k := r.KeyOrName()
-			claimedStream[sap.InboxStream(k)], claimedLease[k] = true, true
-			if r.User != "" {
-				users[r.User] = true
-			}
+			// a record that fails ParseRecord is in snap.BadRecords; this is a record whose tokens are not an address
+			rep.Problems = append(rep.Problems, auditProblem{What: "record", Item: r.Owner + "_" + r.Group + "_" + r.Instance, Error: err.Error()})
 			continue
 		}
-		key := id.Flat()
+		key := addr.Flat()
 		claimedStream[sap.InboxStream(key)], claimedLease[key], users[r.User] = true, true, true
-		form := "new"
-		if id.IsLegacy() {
-			form = "legacy"
-		}
-		var legacyInbox *auditInbox
-		ar := auditRecord{Key: key, Identity: auditIdentity{Agent: id.Agent, Owner: id.Owner, Name: id.Name}, Flat: key,
-			Form: form, User: r.User, Running: live[key], Inbox: toAuditInbox(key, streams[sap.InboxStream(key)])}
-		if r.Alias != nil {
-			ar.Alias = &auditAlias{Owner: r.Alias.Owner, Name: r.Alias.Name}
-			aid, ok, aerr := r.AliasIdentity()
-			if aerr != nil {
-				// an alias that names no legacy identity: the audit cannot say which inbox is the old one, so it reports the
-				// record as a problem (which fails --strict) and claims the inbox the alias's name would give, so mail
-				// stored there is not reported as an orphan instead.
-				rep.Problems = append(rep.Problems, auditProblem{What: "record", Item: key, Error: "invalid alias: " + aerr.Error()})
-				if r.Alias.Name != "" {
-					claimedStream[sap.InboxStream(r.Alias.Name)] = true
-				}
-			}
-			if aerr == nil && ok {
-				legacy := aid.Flat()
-				claimedStream[sap.InboxStream(legacy)] = true
-				rn := auditRename{Identity: id.String(), Flat: key, Alias: *ar.Alias,
-					LegacyInbox: toAuditInbox(legacy, streams[sap.InboxStream(legacy)]), NewInbox: ar.Inbox,
-					TrustLabel: trustLabelNA, TrustLabelNote: trustLabelNote}
-				rn.Drained = rn.LegacyInbox.drained()
-				if !evaluated[legacy] {
-					evaluated[legacy], legacyInbox = true, &rn.LegacyInbox
-				}
-				rep.Renames = append(rep.Renames, rn)
-			}
-		}
+		ar := auditRecord{Key: key, Address: addr.String(), Owner: addr.Owner, Group: addr.Group, Instance: addr.Instance,
+			User: r.User, Running: live[key], Inbox: toAuditInbox(key, streams[sap.InboxStream(key)])}
 		rep.Records = append(rep.Records, ar)
 		rep.Problems = append(rep.Problems, inboxProblems(key, ar.Inbox)...)
 		if n := inboxNote(key, ar.Inbox); n != "" {
 			rep.Notes = append(rep.Notes, n)
 		}
-		if legacyInbox != nil { // the legacy inbox of a renamed identity is evaluated the same way, and labelled as such
-			label := fmt.Sprintf("%s (legacy inbox %s)", key, legacyInbox.Stream)
-			rep.Problems = append(rep.Problems, inboxProblems(label, *legacyInbox)...)
-			if n := inboxNote(label, *legacyInbox); n != "" {
-				rep.Notes = append(rep.Notes, n)
-			}
-		}
 	}
 	slices.SortFunc(rep.Records, func(a, b auditRecord) int { return strings.Compare(a.Key, b.Key) })
-	slices.SortFunc(rep.Renames, func(a, b auditRename) int { return strings.Compare(a.Flat, b.Flat) })
 
 	for _, st := range snap.Streams {
 		if !claimedStream[st.Name] {
@@ -514,20 +429,10 @@ func buildAudit(owner string, snap admin.AuditSnapshot, dirs []string, creds []c
 	})
 
 	s := &rep.Summary
-	s.Records, s.Renamed = len(rep.Records), len(rep.Renames)
+	s.Records = len(rep.Records)
 	for _, r := range rep.Records {
-		if r.Form == "legacy" {
-			s.Legacy++
-		} else {
-			s.New++
-		}
 		if r.Running {
 			s.Running++
-		}
-	}
-	for _, r := range rep.Renames {
-		if !r.Drained {
-			s.Undrained++
 		}
 	}
 	s.RetiredFinal, s.RetiredPending = retired.Final, retired.Pending
@@ -646,10 +551,8 @@ func runAudit(args []string, env func(string) string, lookup config.Lookup, stdo
 			return auditFailed(stderr, err)
 		}
 	}
-	// audit changes nothing and acts as no endpoint, so a set agent_token (which makes the writing verbs refuse) is no
-	// reason to refuse it.
 	cfg, err := loadConfig(env, lookup)
-	if err != nil && !errors.Is(err, errAgentTokenSet) {
+	if err != nil {
 		return auditFailed(stderr, err)
 	}
 	adm, ctx, closeAdmin, err := ctl.OpenAdmin("mashctl", cfg)
@@ -718,14 +621,14 @@ func runAudit(args []string, env func(string) string, lookup config.Lookup, stdo
 	}
 	if o.strict && rep.findings() > 0 {
 		s := rep.Summary
-		moved, vanished, recreated, unknown, lost := 0, 0, 0, 0, 0
+		vanished, recreated, unknown, lost := 0, 0, 0, 0
 		if rep.Compare != nil {
-			moved, vanished, recreated, unknown, lost = rep.Compare.Moved, rep.Compare.Vanished, rep.Compare.Recreated, rep.Compare.CreationUnknown, len(rep.Compare.RetiredFinalLost)
+			vanished, recreated, unknown, lost = rep.Compare.Vanished, rep.Compare.Recreated, rep.Compare.CreationUnknown, len(rep.Compare.RetiredFinalLost)
 		}
-		fmt.Fprintf(stderr, "mashctl: audit --strict: %d finding(s): %d orphan stream(s), %d orphan lease(s), %d orphan creds file(s), %d alias inbox(es) not drained, %d item(s) not readable or retired-marker finding(s), %d legacy stream(s) moved, %d vanished and %d recreated since the earlier audit, %d final retired marker(s) lost since the earlier audit\n",
-			rep.findings(), s.OrphanStreams, s.OrphanLeases, s.OrphanCreds, s.Undrained, s.Problems, moved, vanished, recreated, lost)
+		fmt.Fprintf(stderr, "mashctl: audit --strict: %d finding(s): %d orphan stream(s), %d orphan lease(s), %d orphan creds file(s), %d item(s) not readable or retired-marker finding(s), %d inbox(es) vanished and %d recreated since the earlier audit, %d final retired marker(s) lost since the earlier audit\n",
+			rep.findings(), s.OrphanStreams, s.OrphanLeases, s.OrphanCreds, s.Problems, vanished, recreated, lost)
 		if unknown > 0 {
-			fmt.Fprintf(stderr, "mashctl: audit --strict: the earlier audit lacks creation times for %d legacy stream(s), so it cannot show they were not deleted and recreated: regenerate it with this mashctl and compare again\n", unknown)
+			fmt.Fprintf(stderr, "mashctl: audit --strict: the earlier audit lacks creation times for %d inbox stream(s), so it cannot show they were not deleted and recreated: regenerate it with this mashctl and compare again\n", unknown)
 		}
 		if rep.Compare != nil && rep.Compare.AccountUnverified {
 			fmt.Fprintln(stderr, "mashctl: audit --strict: the earlier audit lacks the account field, so it cannot be tied to this deployment: regenerate it with this mashctl and compare again")
@@ -761,30 +664,13 @@ func writeAuditText(w io.Writer, r auditReport) {
 	c := config.Clean
 	fmt.Fprintf(w, "mashctl audit version %d generated %s owner %s\n", r.Version, r.Generated, c(r.Owner))
 	fmt.Fprintf(w, "creds directories: %s\n", c(strings.Join(r.CredsDirs, ", ")))
-	fmt.Fprintf(w, "records %d (legacy %d, new %d), running %d\n", r.Summary.Records, r.Summary.Legacy, r.Summary.New, r.Summary.Running)
+	fmt.Fprintf(w, "records %d, running %d\n", r.Summary.Records, r.Summary.Running)
 	for _, x := range r.Records {
 		state := "stopped"
 		if x.Running {
 			state = "running"
 		}
-		alias := ""
-		if x.Alias != nil {
-			alias = "\talias " + c(x.Alias.Owner) + "/" + c(x.Alias.Name)
-		}
-		fmt.Fprintf(w, "record %s\t%s\t%s\tidentity %s.%s.%s\tuser %s%s\t%s\n", c(x.Key), x.Form, state, c(x.Identity.Agent), c(x.Identity.Owner), c(x.Identity.Name), c(x.User), alias, inboxText(x.Inbox))
-	}
-	fmt.Fprintf(w, "renamed identities %d, not drained %d\n", r.Summary.Renamed, r.Summary.Undrained)
-	for _, x := range r.Renames {
-		drained := "drained"
-		if !x.Drained {
-			drained = "NOT drained"
-		}
-		fmt.Fprintf(w, "rename %s\t%s\ttrust_label %s\n", c(x.Identity), drained, x.TrustLabel)
-		fmt.Fprintf(w, "  before (legacy %s/%s)\t%s\n", c(x.Alias.Owner), c(x.Alias.Name), inboxText(x.LegacyInbox))
-		fmt.Fprintf(w, "  after\t%s\n", inboxText(x.NewInbox))
-	}
-	if r.Summary.Renamed > 0 {
-		fmt.Fprintf(w, "trust_label: %s\n", trustLabelNote)
+		fmt.Fprintf(w, "record %s\t%s\taddress %s\tuser %s\t%s\n", c(x.Key), state, c(x.Address), c(x.User), inboxText(x.Inbox))
 	}
 	fmt.Fprintf(w, "orphans: %d stream(s), %d lease(s), %d creds file(s)\n", r.Summary.OrphanStreams, r.Summary.OrphanLeases, r.Summary.OrphanCreds)
 	for _, x := range r.Orphans.Streams {

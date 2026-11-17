@@ -21,25 +21,16 @@ func write(t *testing.T, content string) string {
 	return p
 }
 
-func newID(t *testing.T, a, o, n string) sap.EndpointIdentity {
+func newID(t *testing.T, o, g, i string) sap.Address {
 	t.Helper()
-	id, err := sap.New(a, o, n)
+	a, err := sap.NewAddress(o, g, i)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return id
+	return a
 }
 
-func legacyID(t *testing.T, o, n string) sap.EndpointIdentity {
-	t.Helper()
-	id, err := sap.Legacy(o, n)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return id
-}
-
-const okRule = `{"id":"r","match":{"agent":{"is":"x"}},"message":"m"}`
+const okRule = `{"id":"r","match":{"owner":{"is":"x"}},"message":"m"}`
 
 func TestLoadRefusals(t *testing.T) {
 	cases := []struct {
@@ -51,9 +42,12 @@ func TestLoadRefusals(t *testing.T) {
 		{"trailing content", `{"version":1,"rules":[]} {}`, "trailing content"},
 		{"trailing garbage", `{"version":1,"rules":[]} x`, "trailing content"},
 		{"unknown top-level key", `{"version":1,"rules":[],"extra":1}`, `unknown key "extra"`},
-		{"unknown rule key", `{"version":1,"rules":[{"id":"r","match":{"agent":{"is":"x"}},"message":"m","why":1}]}`, `unknown key "why"`},
+		{"unknown rule key", `{"version":1,"rules":[{"id":"r","match":{"owner":{"is":"x"}},"message":"m","why":1}]}`, `unknown key "why"`},
 		{"unknown match key", `{"version":1,"rules":[{"id":"r","match":{"zone":{"is":"x"}},"message":"m"}]}`, `unknown key "zone"`},
-		{"unknown token key", `{"version":1,"rules":[{"id":"r","match":{"agent":{"is":"x","like":"y"}},"message":"m"}]}`, `unknown key "like"`},
+		{"unknown token key", `{"version":1,"rules":[{"id":"r","match":{"owner":{"is":"x","like":"y"}},"message":"m"}]}`, `unknown key "like"`},
+		{"old agent key refused", `{"version":1,"rules":[{"id":"r","match":{"agent":{"is":"x"}},"message":"m"}]}`, `the keys are "owner", "group" and "instance"`},
+		{"old name key refused", `{"version":1,"rules":[{"id":"r","match":{"name":{"is":"x"}},"message":"m"}]}`, `the keys are "owner", "group" and "instance"`},
+		{"old keys with new ones refused", `{"version":1,"rules":[{"id":"r","match":{"owner":{"is":"x"},"name":{"is":"y"}},"message":"m"}]}`, `key "name" is no longer read`},
 		{"version missing", `{"rules":[]}`, "version is missing"},
 		{"version string", `{"version":"1","rules":[]}`, "version is not an integer"},
 		{"version fraction", `{"version":1.5,"rules":[]}`, "version is not an integer"},
@@ -65,34 +59,34 @@ func TestLoadRefusals(t *testing.T) {
 		{"rules null", `{"version":1,"rules":null}`, "rules is not an array"},
 		{"rules object", `{"version":1,"rules":{}}`, "rules is not an array"},
 		{"rule not an object", `{"version":1,"rules":[1]}`, "rule 1"},
-		{"id missing", `{"version":1,"rules":[{"match":{"agent":{"is":"x"}},"message":"m"}]}`, "id is missing or empty"},
-		{"id empty", `{"version":1,"rules":[{"id":"","match":{"agent":{"is":"x"}},"message":"m"}]}`, "id is missing or empty"},
-		{"message missing", `{"version":1,"rules":[{"id":"r","match":{"agent":{"is":"x"}}}]}`, "message is missing or empty"},
-		{"message empty", `{"version":1,"rules":[{"id":"r","match":{"agent":{"is":"x"}},"message":""}]}`, "message is missing or empty"},
+		{"id missing", `{"version":1,"rules":[{"match":{"owner":{"is":"x"}},"message":"m"}]}`, "id is missing or empty"},
+		{"id empty", `{"version":1,"rules":[{"id":"","match":{"owner":{"is":"x"}},"message":"m"}]}`, "id is missing or empty"},
+		{"message missing", `{"version":1,"rules":[{"id":"r","match":{"owner":{"is":"x"}}}]}`, "message is missing or empty"},
+		{"message empty", `{"version":1,"rules":[{"id":"r","match":{"owner":{"is":"x"}},"message":""}]}`, "message is missing or empty"},
 		{"duplicate id", `{"version":1,"rules":[` + okRule + `,` + okRule + `]}`, `duplicate id "r"`},
 		{"match missing", `{"version":1,"rules":[{"id":"r","message":"m"}]}`, "match is missing"},
 		{"match empty", `{"version":1,"rules":[{"id":"r","match":{},"message":"m"}]}`, "match is empty"},
 		{"match null", `{"version":1,"rules":[{"id":"r","match":null,"message":"m"}]}`, "match is missing"},
-		{"empty token object", `{"version":1,"rules":[{"id":"r","match":{"agent":{}},"message":"m"}]}`, "agent has neither is nor is_not"},
-		{"null token object", `{"version":1,"rules":[{"id":"r","match":{"owner":null},"message":"m"}]}`, "owner has neither is nor is_not"},
-		{"is and is_not", `{"version":1,"rules":[{"id":"r","match":{"name":{"is":"a","is_not":"b"}},"message":"m"}]}`, "name has both is and is_not"},
-		{"bad RE2", `{"version":1,"rules":[{"id":"r","match":{"agent":{"is":"("}},"message":"m"}]}`, "not valid RE2"},
-		{"bad RE2 is_not", `{"version":1,"rules":[{"id":"r","match":{"agent":{"is_not":"a**"}},"message":"m"}]}`, "not valid RE2"},
-		{"lookahead is not RE2", `{"version":1,"rules":[{"id":"r","match":{"agent":{"is":"(?=a)"}},"message":"m"}]}`, "not valid RE2"},
-		{"unbalanced that wrapping would repair", `{"version":1,"rules":[{"id":"r","match":{"agent":{"is":"a)(b"}},"message":"m"}]}`, "not valid RE2"},
-		{"duplicate top key", `{"version":1,"rules":[{"id":"r","match":{"agent":{"is":"x"}},"message":"m"}],"rules":[]}`, `duplicate key "rules"`},
+		{"empty token object", `{"version":1,"rules":[{"id":"r","match":{"owner":{}},"message":"m"}]}`, "owner has neither is nor is_not"},
+		{"null token object", `{"version":1,"rules":[{"id":"r","match":{"group":null},"message":"m"}]}`, "group has neither is nor is_not"},
+		{"is and is_not", `{"version":1,"rules":[{"id":"r","match":{"instance":{"is":"a","is_not":"b"}},"message":"m"}]}`, "instance has both is and is_not"},
+		{"bad RE2", `{"version":1,"rules":[{"id":"r","match":{"owner":{"is":"("}},"message":"m"}]}`, "not valid RE2"},
+		{"bad RE2 is_not", `{"version":1,"rules":[{"id":"r","match":{"owner":{"is_not":"a**"}},"message":"m"}]}`, "not valid RE2"},
+		{"lookahead is not RE2", `{"version":1,"rules":[{"id":"r","match":{"owner":{"is":"(?=a)"}},"message":"m"}]}`, "not valid RE2"},
+		{"unbalanced that wrapping would repair", `{"version":1,"rules":[{"id":"r","match":{"owner":{"is":"a)(b"}},"message":"m"}]}`, "not valid RE2"},
+		{"duplicate top key", `{"version":1,"rules":[{"id":"r","match":{"owner":{"is":"x"}},"message":"m"}],"rules":[]}`, `duplicate key "rules"`},
 		{"duplicate version", `{"version":1,"version":1,"rules":[]}`, `duplicate key "version"`},
-		{"duplicate rule key", `{"version":1,"rules":[{"id":"r","id":"s","match":{"agent":{"is":"x"}},"message":"m"}]}`, `duplicate key "id"`},
-		{"duplicate match key", `{"version":1,"rules":[{"id":"r","match":{"agent":{"is":"x"},"agent":{"is":"y"}},"message":"m"}]}`, `duplicate key "agent"`},
-		{"duplicate token key", `{"version":1,"rules":[{"id":"r","match":{"agent":{"is":"x","is":"y"}},"message":"m"}]}`, `duplicate key "is"`},
+		{"duplicate rule key", `{"version":1,"rules":[{"id":"r","id":"s","match":{"owner":{"is":"x"}},"message":"m"}]}`, `duplicate key "id"`},
+		{"duplicate match key", `{"version":1,"rules":[{"id":"r","match":{"owner":{"is":"x"},"owner":{"is":"y"}},"message":"m"}]}`, `duplicate key "owner"`},
+		{"duplicate token key", `{"version":1,"rules":[{"id":"r","match":{"owner":{"is":"x","is":"y"}},"message":"m"}]}`, `duplicate key "is"`},
 		{"case variant top key", `{"version":1,"Rules":[]}`, `unknown key "Rules"`},
 		{"case variant version key", `{"Version":1,"rules":[]}`, `unknown key "Version"`},
-		{"case variant rule key", `{"version":1,"rules":[{"ID":"r","match":{"agent":{"is":"x"}},"message":"m"}]}`, `unknown key "ID"`},
-		{"case variant match key", `{"version":1,"rules":[{"id":"r","Match":{"agent":{"is":"x"}},"message":"m"}]}`, `unknown key "Match"`},
-		{"case variant match member", `{"version":1,"rules":[{"id":"r","match":{"Agent":{"is":"x"}},"message":"m"}]}`, `unknown key "Agent"`},
-		{"case variant token key", `{"version":1,"rules":[{"id":"r","match":{"agent":{"IS":"x"}},"message":"m"}]}`, `unknown key "IS"`},
-		{"case variant is_not", `{"version":1,"rules":[{"id":"r","match":{"agent":{"Is_Not":"x"}},"message":"m"}]}`, `unknown key "Is_Not"`},
-		{"pattern not a string", `{"version":1,"rules":[{"id":"r","match":{"agent":{"is":1}},"message":"m"}]}`, "agent"},
+		{"case variant rule key", `{"version":1,"rules":[{"ID":"r","match":{"owner":{"is":"x"}},"message":"m"}]}`, `unknown key "ID"`},
+		{"case variant match key", `{"version":1,"rules":[{"id":"r","Match":{"owner":{"is":"x"}},"message":"m"}]}`, `unknown key "Match"`},
+		{"case variant match member", `{"version":1,"rules":[{"id":"r","match":{"Owner":{"is":"x"}},"message":"m"}]}`, `unknown key "Owner"`},
+		{"case variant token key", `{"version":1,"rules":[{"id":"r","match":{"owner":{"IS":"x"}},"message":"m"}]}`, `unknown key "IS"`},
+		{"case variant is_not", `{"version":1,"rules":[{"id":"r","match":{"owner":{"Is_Not":"x"}},"message":"m"}]}`, `unknown key "Is_Not"`},
+		{"pattern not a string", `{"version":1,"rules":[{"id":"r","match":{"owner":{"is":1}},"message":"m"}]}`, "owner"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -155,7 +149,7 @@ func TestLoadAcceptsEmptyRules(t *testing.T) {
 	if r.Count() != 0 {
 		t.Errorf("count %d", r.Count())
 	}
-	if err := r.Check(legacyID(t, "acme", "peer")); err != nil {
+	if err := r.Check(newID(t, "acme", "dev", "peer")); err != nil {
 		t.Errorf("an empty rule set refused: %v", err)
 	}
 }
@@ -170,38 +164,41 @@ func loadRule(t *testing.T, body string) *Rule {
 }
 
 func TestCheck(t *testing.T) {
-	noCC := `{"id":"no-cc","match":{"agent":{"is":"cc"}},"message":"the agent token cc is retired"}`
-	noMash := `{"id":"no-mash","match":{"agent":{"is":"mash"}},"message":"the agent token mash is reserved"}`
-	window := `{"id":"owner-is-legacy","match":{"agent":{"is_not":"cc"},"owner":{"is":"acme"}},"message":"a three-token identity may not use the legacy owner"}`
+	noMash := `{"id":"no-mash","match":{"owner":{"is":"mash"}},"message":"the owner mash is reserved"}`
+	window := `{"id":"group-ci","match":{"owner":{"is_not":"cc"},"group":{"is":"ci"}},"message":"the group ci is reserved"}`
 	body := func(rs ...string) string {
 		return `{"version":1,"rules":[` + strings.Join(rs, ",") + `]}`
+	}
+	addr := func(o, g, i string) func(*testing.T) sap.Address {
+		return func(t *testing.T) sap.Address { return newID(t, o, g, i) }
 	}
 	cases := []struct {
 		name    string
 		rules   []string
-		id      func(*testing.T) sap.EndpointIdentity
+		id      func(*testing.T) sap.Address
 		refused string // rule id, "" = accepted
 		message string
 	}{
-		{"legacy identity matches agent is cc", []string{noCC}, func(t *testing.T) sap.EndpointIdentity { return legacyID(t, "acme", "peer") }, "no-cc", "the agent token cc is retired"},
-		{"new form passes the no-cc rule", []string{noCC}, func(t *testing.T) sap.EndpointIdentity { return newID(t, "claude", "acme", "peer") }, "", ""},
-		{"mash token refused", []string{noCC, noMash}, func(t *testing.T) sap.EndpointIdentity { return newID(t, "mash", "acme", "peer") }, "no-mash", "the agent token mash is reserved"},
-		{"mash token accepted when other", []string{noCC, noMash}, func(t *testing.T) sap.EndpointIdentity { return newID(t, "mashx", "acme", "peer") }, "", ""},
-		{"window rule refuses new form with legacy owner", []string{window}, func(t *testing.T) sap.EndpointIdentity { return newID(t, "claude", "acme", "peer") }, "owner-is-legacy", "a three-token identity may not use the legacy owner"},
-		{"window rule accepts new form with another owner", []string{window}, func(t *testing.T) sap.EndpointIdentity { return newID(t, "claude", "bogs", "peer") }, "", ""},
-		{"window rule accepts the legacy identity itself", []string{window}, func(t *testing.T) sap.EndpointIdentity { return legacyID(t, "acme", "peer") }, "", ""},
-		{"all keys must hold: one fails", []string{`{"id":"both","match":{"agent":{"is":"claude"},"owner":{"is":"acme"}},"message":"m"}`}, func(t *testing.T) sap.EndpointIdentity { return newID(t, "claude", "bogs", "peer") }, "", ""},
-		{"all keys must hold: all hold", []string{`{"id":"both","match":{"agent":{"is":"claude"},"owner":{"is":"acme"},"name":{"is":"pe.*"}},"message":"m"}`}, func(t *testing.T) sap.EndpointIdentity { return newID(t, "claude", "acme", "peer") }, "both", "m"},
-		{"whole token: a|b does not match ab", []string{`{"id":"ab","match":{"name":{"is":"a|b"}},"message":"m"}`}, func(t *testing.T) sap.EndpointIdentity { return newID(t, "claude", "acme", "ab") }, "", ""},
-		{"whole token: a|b matches a", []string{`{"id":"ab","match":{"name":{"is":"a|b"}},"message":"m"}`}, func(t *testing.T) sap.EndpointIdentity { return newID(t, "claude", "acme", "a") }, "ab", "m"},
-		{"whole token: a|b matches b", []string{`{"id":"ab","match":{"name":{"is":"a|b"}},"message":"m"}`}, func(t *testing.T) sap.EndpointIdentity { return newID(t, "claude", "acme", "b") }, "ab", "m"},
-		{"whole token: prefix does not match", []string{`{"id":"p","match":{"name":{"is":"peer"}},"message":"m"}`}, func(t *testing.T) sap.EndpointIdentity { return newID(t, "claude", "acme", "peer2") }, "", ""},
-		{"whole token: suffix does not match", []string{`{"id":"p","match":{"name":{"is":"eer"}},"message":"m"}`}, func(t *testing.T) sap.EndpointIdentity { return newID(t, "claude", "acme", "peer") }, "", ""},
-		{"is_not with alternation: member holds nothing", []string{`{"id":"only-ab","match":{"name":{"is_not":"a|b"}},"message":"m"}`}, func(t *testing.T) sap.EndpointIdentity { return newID(t, "claude", "acme", "a") }, "", ""},
-		{"is_not with alternation: non-member is refused", []string{`{"id":"only-ab","match":{"name":{"is_not":"a|b"}},"message":"m"}`}, func(t *testing.T) sap.EndpointIdentity { return newID(t, "claude", "acme", "ab") }, "only-ab", "m"},
-		{"is_not with alternation: other is refused", []string{`{"id":"only-ab","match":{"name":{"is_not":"a|b"}},"message":"m"}`}, func(t *testing.T) sap.EndpointIdentity { return newID(t, "claude", "acme", "c") }, "only-ab", "m"},
-		{"first matching rule is reported", []string{noMash, `{"id":"second","match":{"owner":{"is":"acme"}},"message":"two"}`}, func(t *testing.T) sap.EndpointIdentity { return newID(t, "mash", "acme", "peer") }, "no-mash", "the agent token mash is reserved"},
-		{"owner key", []string{`{"id":"o","match":{"owner":{"is":"acme"}},"message":"m"}`}, func(t *testing.T) sap.EndpointIdentity { return legacyID(t, "acme", "peer") }, "o", "m"},
+		{"owner token refused", []string{noMash}, addr("mash", "acme", "peer"), "no-mash", "the owner mash is reserved"},
+		{"owner token accepted when other", []string{noMash}, addr("mashx", "acme", "peer"), "", ""},
+		{"owner rule does not read the group", []string{noMash}, addr("acme", "mash", "peer"), "", ""},
+		{"owner rule does not read the instance", []string{noMash}, addr("acme", "peer", "mash"), "", ""},
+		{"group key", []string{window}, addr("acme", "ci", "peer"), "group-ci", "the group ci is reserved"},
+		{"group key accepts another group", []string{window}, addr("acme", "dev", "peer"), "", ""},
+		{"is_not on the owner slot", []string{window}, addr("cc", "ci", "peer"), "", ""},
+		{"instance key", []string{`{"id":"i","match":{"instance":{"is":"peer"}},"message":"m"}`}, addr("acme", "dev", "peer"), "i", "m"},
+		{"instance key does not read the group", []string{`{"id":"i","match":{"instance":{"is":"dev"}},"message":"m"}`}, addr("acme", "dev", "peer"), "", ""},
+		{"all keys must hold: one fails", []string{`{"id":"both","match":{"owner":{"is":"claude"},"group":{"is":"acme"}},"message":"m"}`}, addr("claude", "bogs", "peer"), "", ""},
+		{"all keys must hold: all hold", []string{`{"id":"both","match":{"owner":{"is":"claude"},"group":{"is":"acme"},"instance":{"is":"pe.*"}},"message":"m"}`}, addr("claude", "acme", "peer"), "both", "m"},
+		{"whole token: a|b does not match ab", []string{`{"id":"ab","match":{"instance":{"is":"a|b"}},"message":"m"}`}, addr("claude", "acme", "ab"), "", ""},
+		{"whole token: a|b matches a", []string{`{"id":"ab","match":{"instance":{"is":"a|b"}},"message":"m"}`}, addr("claude", "acme", "a"), "ab", "m"},
+		{"whole token: a|b matches b", []string{`{"id":"ab","match":{"instance":{"is":"a|b"}},"message":"m"}`}, addr("claude", "acme", "b"), "ab", "m"},
+		{"whole token: prefix does not match", []string{`{"id":"p","match":{"instance":{"is":"peer"}},"message":"m"}`}, addr("claude", "acme", "peer2"), "", ""},
+		{"whole token: suffix does not match", []string{`{"id":"p","match":{"instance":{"is":"eer"}},"message":"m"}`}, addr("claude", "acme", "peer"), "", ""},
+		{"is_not with alternation: member holds nothing", []string{`{"id":"only-ab","match":{"instance":{"is_not":"a|b"}},"message":"m"}`}, addr("claude", "acme", "a"), "", ""},
+		{"is_not with alternation: non-member is refused", []string{`{"id":"only-ab","match":{"instance":{"is_not":"a|b"}},"message":"m"}`}, addr("claude", "acme", "ab"), "only-ab", "m"},
+		{"is_not with alternation: other is refused", []string{`{"id":"only-ab","match":{"instance":{"is_not":"a|b"}},"message":"m"}`}, addr("claude", "acme", "c"), "only-ab", "m"},
+		{"first matching rule is reported", []string{noMash, `{"id":"second","match":{"group":{"is":"acme"}},"message":"two"}`}, addr("mash", "acme", "peer"), "no-mash", "the owner mash is reserved"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -229,7 +226,7 @@ func TestCheck(t *testing.T) {
 
 func TestNilRuleAcceptsEverything(t *testing.T) {
 	var r *Rule
-	if err := r.Check(legacyID(t, "acme", "peer")); err != nil {
+	if err := r.Check(newID(t, "acme", "dev", "peer")); err != nil {
 		t.Errorf("nil rule refused: %v", err)
 	}
 	if r.Count() != 0 || r.Digest() != "" {

@@ -14,7 +14,7 @@ import (
 	"github.com/bogworks/mash/internal/store"
 )
 
-// auditCompareStream is one legacy inbox stream across two audits. A stream "moved" when it is present now and its
+// auditCompareStream is one inbox stream across two audits. A stream "moved" when it is present now and its
 // last sequence differs from the earlier one (a new message was stored) or its `deliver` consumer's delivered stream
 // sequence or its delivered consumer sequence differs (a message was read, or read again). The ack floor is reported but does not by itself fail --strict.
 type auditCompareStream struct {
@@ -60,11 +60,11 @@ type auditCompare struct {
 	Streams          []auditCompareStream `json:"streams"`
 	Removed          []string             `json:"identities_removed"` // record keys present before and absent now
 	Added            []string             `json:"identities_added"`   // record keys absent before and present now
-	Moved            int                  `json:"moved"`              // legacy streams whose last_seq, delivered or consumer sequence moved
-	Vanished         int                  `json:"vanished"`           // legacy inboxes present before, absent now, not retired: fails --strict
-	Recreated        int                  `json:"recreated"`          // legacy streams or deliver consumers present in both audits with a different creation time: fails --strict
+	Moved            int                  `json:"moved"`              // inbox streams whose last_seq, delivered or consumer sequence moved: shown only (live inboxes take mail)
+	Vanished         int                  `json:"vanished"`           // inboxes present before, absent now, not retired: fails --strict
+	Recreated        int                  `json:"recreated"`          // inbox streams or deliver consumers present in both audits with a different creation time: fails --strict
 	CreationUnknown  int                  `json:"creation_unknown"`   // present in both and a creation time is missing (an earlier audit without `created`): fails --strict
-	Retired          int                  `json:"retired"`            // legacy inboxes drained before whose record and stream are both gone: shown only
+	Retired          int                  `json:"retired"`            // drained inboxes whose record and stream are both gone: shown only
 	// The retired-identity markers (ADR 0088: a final one is never deleted). RetiredCompared is false when the earlier
 	// report has no `retired` section (made before it existed): see RetiredUnverified; nothing is checked and the
 	// three lists are empty. RetiredAdded: markers present now and not before (fine). RetiredFinalLost: a marker that
@@ -96,12 +96,12 @@ const (
 	whenDeliverPresent                    // the inbox is present and its `deliver` consumer is present
 )
 
-// earlierInboxFields is the ONE table of what an earlier report must carry for each legacy inbox it lists (a record
-// of form legacy: `inbox`; a rename: `legacy_inbox`). Each is a field the comparison or the drain rule reads, so a
-// report without it could make a vanished inbox read as drained (a missing `msgs` is 0) or hide a recreation. A field
-// counts as present when its key is there and is not null, so `msgs: 0` is present and a missing `msgs` is not. The
-// validator, docs/audit.md and the tests all iterate this table. Fields the writer omits when empty or unknown and
-// that nothing reads (`last_time`, `subjects`, `start_time`, `delivered_last`, ...) are not listed.
+// earlierInboxFields is the ONE table of what an earlier report must carry for each record's `inbox`. Each is a field
+// the comparison or the drain rule reads, so a report without it could make a vanished inbox read as drained (a missing
+// `msgs` is 0) or hide a recreation. A field counts as present when its key is there and is not null, so `msgs: 0` is
+// present and a missing `msgs` is not. The validator, docs/audit.md and the tests all iterate this table. Fields the
+// writer omits when empty or unknown and that nothing reads (`last_time`, `subjects`, `start_time`, `delivered_last`,
+// ...) are not listed.
 var earlierInboxFields = []struct {
 	Path string // relative to the inbox, with dots for the nested `deliver` object
 	When earlierWhen
@@ -185,11 +185,10 @@ type earlierReport struct {
 	Generated *string          `json:"generated"`
 	Owner     *string          `json:"owner"`
 	Records   *json.RawMessage `json:"records"`
-	Renames   *json.RawMessage `json:"renames"`
 }
 
 // validateEarlier refuses a file that is not a complete audit report: the fields the comparison reads must be there,
-// or a stub such as {"version":1} would pass for a baseline with no legacy streams.
+// or a stub such as {"version":1} would pass for a baseline with no inboxes.
 func validateEarlier(raw []byte) error {
 	var e earlierReport
 	if err := json.Unmarshal(raw, &e); err != nil {
@@ -211,33 +210,18 @@ func validateEarlier(raw []byte) error {
 	if e.Owner == nil || *e.Owner == "" {
 		return miss("owner")
 	}
-	if e.Records == nil || e.Renames == nil {
-		return miss("records and renames")
+	if e.Records == nil {
+		return miss("records")
 	}
 	var recs []struct {
 		Key   string                     `json:"key"`
-		Form  string                     `json:"form"`
 		Inbox map[string]json.RawMessage `json:"inbox"`
-	}
-	var rens []struct {
-		Flat        string                     `json:"flat"`
-		LegacyInbox map[string]json.RawMessage `json:"legacy_inbox"`
 	}
 	if err := json.Unmarshal(*e.Records, &recs); err != nil || recs == nil {
 		return miss("records (an array)")
 	}
-	if err := json.Unmarshal(*e.Renames, &rens); err != nil || rens == nil {
-		return miss("renames (an array)")
-	}
 	for i, r := range recs {
-		if r.Form == "legacy" {
-			if err := checkEarlierInbox(fmt.Sprintf("records[%d].inbox", i), r.Inbox); err != nil {
-				return err
-			}
-		}
-	}
-	for i, r := range rens {
-		if err := checkEarlierInbox(fmt.Sprintf("renames[%d].legacy_inbox", i), r.LegacyInbox); err != nil {
+		if err := checkEarlierInbox(fmt.Sprintf("records[%d].inbox", i), r.Inbox); err != nil {
 			return err
 		}
 	}
@@ -324,31 +308,20 @@ func bindEarlierAudit(before *auditReport, now auditReport) error {
 	return nil
 }
 
-// legacyStreams is every legacy inbox the report shows: the inbox of each old-form record and the legacy inbox of
-// each renamed identity, by stream name.
-func (r auditReport) legacyStreams() map[string]auditInbox {
-	m, _ := r.legacyStreamsWithKeys()
-	return m
-}
-
-// legacyStreamsWithKeys also returns, for each stream, the directory key of the record it belongs to.
-func (r auditReport) legacyStreamsWithKeys() (map[string]auditInbox, map[string]string) {
+// inboxStreams is every record's inbox the report shows, by stream name, and the directory key of the record each
+// belongs to.
+func (r auditReport) inboxStreams() (map[string]auditInbox, map[string]string) {
 	m, keys := map[string]auditInbox{}, map[string]string{}
 	for _, x := range r.Records {
-		if x.Form == "legacy" {
-			m[x.Inbox.Stream], keys[x.Inbox.Stream] = x.Inbox, x.Key
-		}
-	}
-	for _, x := range r.Renames {
-		m[x.LegacyInbox.Stream], keys[x.LegacyInbox.Stream] = x.LegacyInbox, x.Flat
+		m[x.Inbox.Stream], keys[x.Inbox.Stream] = x.Inbox, x.Key
 	}
 	return m, keys
 }
 
 func compareAudits(before, now auditReport) *auditCompare {
 	c := &auditCompare{AgainstGenerated: before.Generated, Streams: []auditCompareStream{}, Removed: []string{}, Added: []string{}}
-	b, bkeys := before.legacyStreamsWithKeys()
-	n := now.legacyStreams()
+	b, bkeys := before.inboxStreams()
+	n, _ := now.inboxStreams()
 	recordNow := map[string]bool{}
 	for _, r := range now.Records {
 		recordNow[r.Key] = true
@@ -470,7 +443,7 @@ func writeCompareText(w io.Writer, c *auditCompare) {
 	if c.AccountUnverified {
 		fmt.Fprintln(w, "compare account not verified: the earlier audit has no account field, so it cannot be tied to this deployment")
 	}
-	fmt.Fprintf(w, "compare against the audit generated %s: %d legacy stream(s), %d moved, %d vanished, %d retired, %d recreated, %d creation unknown\n", cl(c.AgainstGenerated), len(c.Streams), c.Moved, c.Vanished, c.Retired, c.Recreated, c.CreationUnknown)
+	fmt.Fprintf(w, "compare against the audit generated %s: %d inbox stream(s), %d moved, %d vanished, %d retired, %d recreated, %d creation unknown\n", cl(c.AgainstGenerated), len(c.Streams), c.Moved, c.Vanished, c.Retired, c.Recreated, c.CreationUnknown)
 	for _, s := range c.Streams {
 		state := "unchanged"
 		if s.LastSeqMoved || s.DeliveredMoved || s.ConsumerSeqMoved {

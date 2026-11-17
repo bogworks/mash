@@ -9,6 +9,7 @@ import (
 
 	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/config"
+	"github.com/bogworks/mash/internal/sap"
 )
 
 // Every test runs without a real server-set check: the real one needs system account credentials.
@@ -64,7 +65,7 @@ func TestVerbsAcceptServersAndSysCredsFlags(t *testing.T) {
 	h.provisionDeclared("a")
 	s := stubRevoke(t)
 	h.env["MASH_SERVERS"], h.env["MASH_SYS_CREDS"] = "2", "/env/sys.creds"
-	out, errb, code := h.run("retire", "a", "--servers", "3", "--sys-creds=/flag/sys.creds")
+	out, errb, code := h.run("retire", "o.g.a", "--servers", "3", "--sys-creds=/flag/sys.creds")
 	if code != 0 {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
@@ -76,11 +77,8 @@ func TestVerbsAcceptServersAndSysCredsFlags(t *testing.T) {
 func TestBadServersFlagIsRefusedOnEveryVerb(t *testing.T) {
 	h := newFleetEnv(t)
 	for _, args := range [][]string{
-		{"add", "a", "--servers", "x"},
-		{"reissue", "a", "--servers=0"},
-		{"retire", "a", "--servers", "x"},
-		{"unzone", "a", "--servers", "0"},
-		{"deprovision", "a", "--servers", "x"},
+		{"retire", "o.g.a", "--servers", "x"},
+		{"deprovision", "o.g.a", "--servers", "x"},
 	} {
 		_, errb, code := h.run(args...)
 		if code != 2 || !strings.Contains(errb, "must be a whole number of servers, 1 or more") {
@@ -90,7 +88,7 @@ func TestBadServersFlagIsRefusedOnEveryVerb(t *testing.T) {
 }
 
 func TestUsageListsTheFlags(t *testing.T) {
-	for _, u := range []string{addUsage, reissueUsage, retireUsage, unzoneUsage} {
+	for _, u := range []string{retireUsage} {
 		if !strings.Contains(u, "--servers N") || !strings.Contains(u, "--sys-creds FILE") {
 			t.Errorf("usage lacks the flags: %q", u)
 		}
@@ -112,7 +110,7 @@ func TestRetireShortServerSetChangesNothing(t *testing.T) {
 		return errors.New("only 2 of 3 servers answered the account lookup")
 	}
 	t.Cleanup(func() { checkServerSet = old })
-	out, errb, code := h.run("retire", "a")
+	out, errb, code := h.run("retire", "o.g.a")
 	if code != 1 || strings.Contains(out, "retired") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
@@ -123,7 +121,7 @@ func TestRetireShortServerSetChangesNothing(t *testing.T) {
 		t.Errorf("changed something: %q calls %v records %v", errb, s.calls, h.records())
 	}
 	// --no-revoke needs no server set
-	if _, errb, code := h.run("retire", "a", "--no-revoke"); code != 0 {
+	if _, errb, code := h.run("retire", "o.g.a", "--no-revoke"); code != 0 {
 		t.Errorf("--no-revoke: %d %q", code, errb)
 	}
 }
@@ -137,7 +135,7 @@ func TestDeprovisionShortServerSetChangesNothing(t *testing.T) {
 		return errors.New("only 2 of 3 servers answered the account lookup")
 	}
 	t.Cleanup(func() { checkServerSet = old })
-	_, errb, code := h.run("deprovision", "a")
+	_, errb, code := h.run("deprovision", "o.g.a")
 	if code != 1 || !strings.Contains(errb, "nothing was revoked; the key is still valid") {
 		t.Fatalf("%d %q", code, errb)
 	}
@@ -151,7 +149,7 @@ func TestRetirePartialListsWhatWasRevokedAndWhatIsPending(t *testing.T) {
 	h.provisionDeclared("b")
 	stubRevoke(t)
 	failAfterPurge(t)
-	out, errb, code := h.run("retire", "b")
+	out, errb, code := h.run("retire", "o.g.b")
 	if code != 1 {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
@@ -166,11 +164,11 @@ func TestRetirePartialListsWhatWasRevokedAndWhatIsPending(t *testing.T) {
 func TestRetireFailureBeforeAnyRevokeSaysKeyStillValid(t *testing.T) {
 	h := newFleetEnv(t)
 	h.provisionDeclared("b")
-	deprovisionIfUser = func(*admin.Admin, context.Context, string, string) error {
+	deprovisionIfUser = func(*admin.Admin, context.Context, sap.Address, string) error {
 		return errors.New("the server holding bucket KV_lease is down")
 	}
 	t.Cleanup(func() { deprovisionIfUser = (*admin.Admin).DeprovisionIfUser })
-	_, errb, code := h.run("retire", "b")
+	_, errb, code := h.run("retire", "o.g.b")
 	if code != 1 || strings.Contains(errb, "PARTIAL") || !strings.Contains(errb, "nothing was revoked; the key is still valid") {
 		t.Fatalf("%d %q", code, errb)
 	}
@@ -185,7 +183,7 @@ func TestDeprovisionDrainedShortServerSetChangesNothing(t *testing.T) {
 		return errors.New("only 2 of 3 servers answered the account lookup")
 	}
 	t.Cleanup(func() { checkServerSet = old })
-	_, errb, code := h.run("deprovision", "a", "--drained-to", "0", "--suspension", "s1")
+	_, errb, code := h.run("deprovision", "o.g.a", "--drained-to", "0", "--suspension", "s1")
 	if code != 1 || !strings.Contains(errb, "nothing was revoked; the key is still valid") {
 		t.Fatalf("%d %q", code, errb)
 	}

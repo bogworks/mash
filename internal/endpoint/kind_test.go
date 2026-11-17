@@ -44,7 +44,7 @@ func TestKindDecidesTheIdleWake(t *testing.T) {
 	for _, k := range kind.All {
 		t.Run(string(k), func(t *testing.T) {
 			f, ev, spooled, b := kindFixture(t)
-			if _, err := b.SendWith(context.Background(), "a", "body", SendOptions{Kind: k}); err != nil {
+			if _, err := b.SendWith(context.Background(), tdot("a"), "body", SendOptions{Kind: k}); err != nil {
 				t.Fatal(err)
 			}
 			until(t, "spooled", func() bool { return len(spooled()) == 1 })
@@ -72,19 +72,19 @@ func TestWakingKindArrivingAfterAFyiWakesWithBoth(t *testing.T) {
 	f, ev, sp, b := kindFixtureSpool(t)
 	spooled := func() []spool.Entry { return waiting(t, sp) }
 	ctx := context.Background()
-	if _, err := b.SendWith(ctx, "a", "fyi first", SendOptions{Kind: kind.FYI}); err != nil {
+	if _, err := b.SendWith(ctx, tdot("a"), "fyi first", SendOptions{Kind: kind.FYI}); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(2 * f.idle)
 	if got := ev.all(); len(got) != 0 {
 		t.Fatalf("a fyi woke the session: %q", got)
 	}
-	if _, err := b.SendWith(ctx, "a", "then a question", SendOptions{Kind: kind.Question}); err != nil {
+	if _, err := b.SendWith(ctx, tdot("a"), "then a question", SendOptions{Kind: kind.Question}); err != nil {
 		t.Fatal(err)
 	}
 	until(t, "both spooled", func() bool { return len(spooled()) == 2 })
 	got := ev.waitFor(t, 1, 5*time.Second)
-	if got[0] != "2 messages from b (question, fyi)" && got[0] != "2 messages from b (fyi, question)" {
+	if got[0] != "2 messages from "+tdot("b")+" (question, fyi)" && got[0] != "2 messages from "+tdot("b")+" (fyi, question)" {
 		t.Fatalf("the wake %q", got[0])
 	}
 	var ms []render.Mail
@@ -106,7 +106,7 @@ func TestOldSenderWithoutAKindWakes(t *testing.T) {
 	if err := sp.Touch(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.client(t, "b").SendWith(context.Background(), "a", "from an old sender", SendOptions{Kind: kind.FYI}); err != nil {
+	if _, err := f.client(t, "b").SendWith(context.Background(), tdot("a"), "from an old sender", SendOptions{Kind: kind.FYI}); err != nil {
 		t.Fatal(err)
 	}
 	until(t, "spooled", func() bool { return len(waiting(t, sp)) == 1 })
@@ -115,14 +115,14 @@ func TestOldSenderWithoutAKindWakes(t *testing.T) {
 		t.Fatalf("an explicit fyi woke the session: %q", got)
 	}
 	// Strip the header as an old sender would: send raw, with an unknown kind too.
-	nc := f.e.ConnAs(t, f.creds["b"], "b")
+	nc := f.e.ConnAs(t, f.creds["b"], tkey("b"))
 	id := identity(t, f.creds["b"])
 	for _, v := range []string{"", "urgent-ish"} {
-		h, err := id.Sign(sap.For(f.e.Owner, "a").Mail, []byte("raw"+v), "b", time.Now(), "")
+		h, err := id.Sign(taddr("a").Subjects().Mail, []byte("raw"+v), tkey("b"), time.Now(), "")
 		if err != nil {
 			t.Fatal(err)
 		}
-		m := nats.NewMsg(sap.For(f.e.Owner, "a").Mail)
+		m := nats.NewMsg(taddr("a").Subjects().Mail)
 		m.Data = []byte("raw" + v)
 		m.Header.Set(sap.HeaderName, h.Encode())
 		if v != "" {
@@ -153,11 +153,11 @@ func TestOldSenderWithoutAKindWakes(t *testing.T) {
 // Urgent still wakes at once, whatever the kind.
 func TestUrgentFyiStillWakesAtOnce(t *testing.T) {
 	_, ev, spooled, b := kindFixture(t)
-	if _, err := b.SendWith(context.Background(), "a", "now", SendOptions{Kind: kind.FYI, Urgent: true}); err != nil {
+	if _, err := b.SendWith(context.Background(), tdot("a"), "now", SendOptions{Kind: kind.FYI, Urgent: true}); err != nil {
 		t.Fatal(err)
 	}
 	until(t, "spooled", func() bool { return len(spooled()) == 1 })
-	if got := ev.waitFor(t, 1, 2*time.Second); !strings.HasPrefix(got[0], "urgent, 1 message from b") {
+	if got := ev.waitFor(t, 1, 2*time.Second); !strings.HasPrefix(got[0], "urgent, 1 message from "+tdot("b")+"") {
 		t.Fatalf("the wake %q", got[0])
 	}
 }
@@ -168,13 +168,13 @@ func TestSendWithSetsTheKindHeader(t *testing.T) {
 	a := f.client(t, "a")
 	b := f.client(t, "b")
 	ctx := context.Background()
-	if _, err := b.SendWith(ctx, "a", "q", SendOptions{Kind: kind.Question}); err != nil {
+	if _, err := b.SendWith(ctx, tdot("a"), "q", SendOptions{Kind: kind.Question}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := b.SendWith(ctx, "a", "default", SendOptions{}); err != nil { // no kind is task
+	if _, err := b.SendWith(ctx, tdot("a"), "default", SendOptions{}); err != nil { // no kind is task
 		t.Fatal(err)
 	}
-	if _, err := b.SendWith(ctx, "a", "bad", SendOptions{Kind: "nope"}); err == nil {
+	if _, err := b.SendWith(ctx, tdot("a"), "bad", SendOptions{Kind: "nope"}); err == nil {
 		t.Fatal("an unknown kind was sent")
 	}
 	m1, err := a.Read(ctx, 1)
@@ -196,7 +196,7 @@ func TestFyiBacklogAtTheCountWakes(t *testing.T) {
 	f, ev, sp, b := kindFixtureSpool(t)
 	ctx := context.Background()
 	for i := 0; i < 4; i++ {
-		if _, err := b.SendWith(ctx, "a", "fyi", SendOptions{Kind: kind.FYI}); err != nil {
+		if _, err := b.SendWith(ctx, tdot("a"), "fyi", SendOptions{Kind: kind.FYI}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -205,7 +205,7 @@ func TestFyiBacklogAtTheCountWakes(t *testing.T) {
 	if got := ev.all(); len(got) != 0 {
 		t.Fatalf("4 fyi woke the session: %q", got)
 	}
-	if _, err := b.SendWith(ctx, "a", "fyi", SendOptions{Kind: kind.FYI}); err != nil {
+	if _, err := b.SendWith(ctx, tdot("a"), "fyi", SendOptions{Kind: kind.FYI}); err != nil {
 		t.Fatal(err)
 	}
 	until(t, "5 spooled", func() bool { return len(waiting(t, sp)) == 5 })
@@ -223,7 +223,7 @@ func TestFyiBacklogAtTheWakeBytesWakes(t *testing.T) {
 	t.Cleanup(func() { SpoolWakeBytes = old })
 	f, ev, sp, b := kindFixtureSpool(t)
 	ctx := context.Background()
-	if _, err := b.SendWith(ctx, "a", strings.Repeat("x", 20000), SendOptions{Kind: kind.FYI}); err != nil {
+	if _, err := b.SendWith(ctx, tdot("a"), strings.Repeat("x", 20000), SendOptions{Kind: kind.FYI}); err != nil {
 		t.Fatal(err)
 	}
 	until(t, "1 spooled", func() bool { return len(waiting(t, sp)) == 1 })
@@ -231,7 +231,7 @@ func TestFyiBacklogAtTheWakeBytesWakes(t *testing.T) {
 	if got := ev.all(); len(got) != 0 {
 		t.Fatalf("20000 bytes of fyi woke the session: %q", got)
 	}
-	if _, err := b.SendWith(ctx, "a", strings.Repeat("x", 20000), SendOptions{Kind: kind.FYI}); err != nil {
+	if _, err := b.SendWith(ctx, tdot("a"), strings.Repeat("x", 20000), SendOptions{Kind: kind.FYI}); err != nil {
 		t.Fatal(err)
 	}
 	ev.waitFor(t, 1, 5*time.Second)
@@ -244,11 +244,11 @@ func TestSpoolFullWakes(t *testing.T) {
 	t.Cleanup(func() { SpoolMaxBytes = old })
 	f, ev, sp, b := kindFixtureSpool(t)
 	ctx := context.Background()
-	if _, err := b.SendWith(ctx, "a", "123456", SendOptions{Kind: kind.FYI}); err != nil {
+	if _, err := b.SendWith(ctx, tdot("a"), "123456", SendOptions{Kind: kind.FYI}); err != nil {
 		t.Fatal(err)
 	}
 	until(t, "1 spooled", func() bool { return len(waiting(t, sp)) == 1 })
-	if _, err := b.SendWith(ctx, "a", strings.Repeat("x", 30), SendOptions{Kind: kind.Task}); err != nil {
+	if _, err := b.SendWith(ctx, tdot("a"), strings.Repeat("x", 30), SendOptions{Kind: kind.Task}); err != nil {
 		t.Fatal(err)
 	}
 	ev.waitFor(t, 1, 5*time.Second)
@@ -268,13 +268,13 @@ func TestFyiBacklogCountsHeaders(t *testing.T) {
 	SpoolWakeBytes = 2000
 	t.Cleanup(func() { SpoolWakeBytes = old })
 	f, ev, sp, _ := kindFixtureSpool(t)
-	nc := f.e.ConnAs(t, f.creds["b"], "b")
+	nc := f.e.ConnAs(t, f.creds["b"], tkey("b"))
 	id := identity(t, f.creds["b"])
-	h, err := id.Sign(sap.For(f.e.Owner, "a").Mail, []byte("hi"), "b", time.Now(), "")
+	h, err := id.Sign(taddr("a").Subjects().Mail, []byte("hi"), tkey("b"), time.Now(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := nats.NewMsg(sap.For(f.e.Owner, "a").Mail)
+	m := nats.NewMsg(taddr("a").Subjects().Mail)
 	m.Data = []byte("hi")
 	m.Header.Set(sap.HeaderName, h.Encode())
 	m.Header.Set(KindHeader, "fyi")
@@ -295,7 +295,7 @@ func TestUnkindedSendWakesButFyiDoesNot(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := f.client(t, "b")
-	if _, err := b.SendWith(context.Background(), "a", "quiet", SendOptions{Kind: kind.FYI}); err != nil {
+	if _, err := b.SendWith(context.Background(), tdot("a"), "quiet", SendOptions{Kind: kind.FYI}); err != nil {
 		t.Fatal(err)
 	}
 	until(t, "spooled", func() bool { return len(waiting(t, sp)) == 1 })
@@ -303,7 +303,7 @@ func TestUnkindedSendWakesButFyiDoesNot(t *testing.T) {
 	if got := ev.all(); len(got) != 0 {
 		t.Fatalf("an explicit fyi woke the session: %q", got)
 	}
-	if _, err := b.Send(context.Background(), "a", "plain", 0); err != nil {
+	if _, err := b.Send(context.Background(), tdot("a"), "plain", 0); err != nil {
 		t.Fatal(err)
 	}
 	if got := ev.waitFor(t, 1, 3*time.Second); !strings.Contains(got[0], "task") {

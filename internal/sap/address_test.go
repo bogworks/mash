@@ -7,6 +7,8 @@ import (
 	"github.com/bogworks/mash/internal/sap"
 )
 
+func rep(c byte, n int) string { return strings.Repeat(string(c), n) }
+
 func TestNewAddressValid(t *testing.T) {
 	cases := []struct{ o, g, i string }{
 		{"a", "b", "c"},

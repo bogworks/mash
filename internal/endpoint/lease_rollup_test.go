@@ -66,7 +66,7 @@ func TestLeaseRollupIsSilentWhenInfoIsNotPermitted(t *testing.T) {
 	}
 	creds, _ := f.e.MintRaw(t, "nopriv", jwt.Permissions{
 		Pub: jwt.Permission{Allow: []string{"_INBOX.>"}}, Sub: jwt.Permission{Allow: []string{"_INBOX.>"}}})
-	js, err := jetstream.New(f.e.ConnAs(t, creds, "nopriv"))
+	js, err := jetstream.New(f.e.ConnAs(t, creds, tkey("nopriv")))
 	if err != nil {
 		t.Fatal(err)
 	}

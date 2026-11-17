@@ -48,7 +48,7 @@ func TestServeReleasesLeaseOnSignal(t *testing.T) {
 				t.Fatal(err)
 			}
 			held := func() bool {
-				_, err := kv.Get(context.Background(), "a")
+				_, err := kv.Get(context.Background(), tAddr("a").Flat())
 				return err == nil
 			}
 			deadline := time.Now().Add(10 * time.Second)
@@ -87,7 +87,7 @@ func TestServeReleasesLeaseOnSignal(t *testing.T) {
 			if held() {
 				t.Fatal("lease still held after a clean signal exit")
 			}
-			_, err = kv.Get(context.Background(), "a")
+			_, err = kv.Get(context.Background(), tAddr("a").Flat())
 			if !errors.Is(err, jetstream.ErrKeyNotFound) && !errors.Is(err, jetstream.ErrKeyDeleted) {
 				t.Fatalf("lease lookup: %v", err)
 			}

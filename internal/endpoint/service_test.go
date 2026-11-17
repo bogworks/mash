@@ -39,7 +39,7 @@ func noPrompt(*Endpoint, PromptEvent) {}
 func TestRegistrationMetadata(t *testing.T) {
 	f := newFixture(t, "a", "b")
 	a := f.serve(t, "a", noPrompt)
-	nc := f.e.ConnAs(t, f.creds["b"], "b")
+	nc := f.e.ConnAs(t, f.creds["b"], tkey("b"))
 	m, err := nc.Request("$SRV.INFO.agents", nil, 2*time.Second)
 	if err != nil {
 		t.Fatal(err)
@@ -49,10 +49,15 @@ func TestRegistrationMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	md := info.Metadata
-	if info.Name != "agents" || md["agent"] != "claude-code" || md["owner"] != "o" || md["session"] != "a" ||
+	// agent stays the harness; the address is carried in owner, group and instance, and session is the flat key.
+	if info.Name != "agents" || md["agent"] != "claude-code" || md["owner"] != f.e.Owner ||
+		md["group"] != testGroup || md["instance"] != "a" || md["session"] != tkey("a") ||
 		md["protocol_version"] != "0.3" || md["user_nkey"] != f.users["a"] || md["account"] != f.e.Account ||
-		md["mail_subject"] != "agents.mail.cc.o.a" {
+		md["mail_subject"] != taddr("a").Subjects().Mail {
 		t.Fatalf("service info %+v", info)
+	}
+	if _, ok := md["agent_token"]; ok {
+		t.Fatalf("service info carries an agent_token: %+v", md)
 	}
 	if info.ID != a.Instance() {
 		t.Fatalf("instance id %q vs %q", info.ID, a.Instance())
@@ -62,17 +67,17 @@ func TestRegistrationMetadata(t *testing.T) {
 		eps[e.Name] = e
 	}
 	p, s := eps["prompt"], eps["status"]
-	if p.Subject != "agents.prompt.cc.o.a" || p.QueueGroup != "agents" || p.Metadata["min_sender_trust"] != "signed" ||
+	if p.Subject != taddr("a").Subjects().Prompt || p.QueueGroup != "agents" || p.Metadata["min_sender_trust"] != "signed" ||
 		p.Metadata["max_payload"] != "1MB" || p.Metadata["attachments_ok"] != "false" {
 		t.Fatalf("prompt endpoint %+v", p)
 	}
-	if s.Subject != "agents.status.cc.o.a" || s.QueueGroup != "agents" {
+	if s.Subject != taddr("a").Subjects().Status || s.QueueGroup != "agents" {
 		t.Fatalf("status endpoint %+v", s)
 	}
 	if _, ok := eps["mail"]; ok {
 		t.Fatal("mail must be declared, not registered (it would answer the JetStream ack)")
 	}
-	if !sap.VerifyIDSig(md["user_nkey"], md["account"], "claude-code", "o", p.Subject, md["id_sig"]) {
+	if !sap.VerifyIDSig(md["user_nkey"], md["account"], "claude-code", f.e.Owner, p.Subject, md["id_sig"]) {
 		t.Fatal("id_sig does not verify")
 	}
 }
@@ -93,8 +98,8 @@ type hbPayload struct {
 
 func TestHeartbeatSigned(t *testing.T) {
 	f := newFixture(t, "a", "b")
-	nc := f.e.ConnAs(t, f.creds["b"], "b")
-	sub, err := nc.SubscribeSync("agents.hb.cc.o.a")
+	nc := f.e.ConnAs(t, f.creds["b"], tkey("b"))
+	sub, err := nc.SubscribeSync(taddr("a").Subjects().HB)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,9 +112,9 @@ func TestHeartbeatSigned(t *testing.T) {
 	if err := json.Unmarshal(m.Data, &hb); err != nil {
 		t.Fatal(err)
 	}
-	if hb.Agent != "claude-code" || hb.Owner != "o" || hb.Session != "a" || hb.InstanceID != a.Instance() ||
+	if hb.Agent != "claude-code" || hb.Owner != "o" || hb.Session != tkey("a") || hb.InstanceID != a.Instance() ||
 		hb.IntervalS != 30 || hb.ProtocolVersion != "0.3" ||
-		hb.Endpoints["mail"].Subject != "agents.mail.cc.o.a" || hb.Endpoints["prompt"].Subject != "agents.prompt.cc.o.a" ||
+		hb.Endpoints["mail"].Subject != taddr("a").Subjects().Mail || hb.Endpoints["prompt"].Subject != taddr("a").Subjects().Prompt ||
 		hb.Endpoints["prompt"].Metadata["min_sender_trust"] != "signed" {
 		t.Fatalf("heartbeat %s", m.Data)
 	}
@@ -135,12 +140,12 @@ func TestWhoShowsOnline(t *testing.T) {
 func TestStatusReply(t *testing.T) {
 	f := newFixture(t, "a", "b")
 	a := f.serve(t, "a", noPrompt)
-	m, err := f.e.ConnAs(t, f.creds["b"], "b").Request("agents.status.cc.o.a", nil, 2*time.Second)
+	m, err := f.e.ConnAs(t, f.creds["b"], tkey("b")).Request(taddr("a").Subjects().Status, nil, 2*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var hb hbPayload
-	if err := json.Unmarshal(m.Data, &hb); err != nil || hb.InstanceID != a.Instance() || hb.Session != "a" {
+	if err := json.Unmarshal(m.Data, &hb); err != nil || hb.InstanceID != a.Instance() || hb.Session != tkey("a") {
 		t.Fatalf("status %s %v", m.Data, err)
 	}
 	if m.Header.Get(sap.HeaderName) != "" {
@@ -157,19 +162,19 @@ func TestDiscoverAndPromptReply(t *testing.T) {
 		_ = ep.Reply(p.RequestID, "from a", true)
 	})
 	b := f.client(t, "b")
-	subj, err := Discover(context.Background(), b.Conn(), "o", "a")
-	if err != nil || subj != "agents.prompt.cc.o.a" {
+	subj, err := Discover(context.Background(), b.Conn(), taddr("a"))
+	if err != nil || subj != taddr("a").Subjects().Prompt {
 		t.Fatalf("discover: %q %v", subj, err)
 	}
 	var out bytes.Buffer
-	if err := Prompt(context.Background(), b.Conn(), b.Identity(), "b", subj, "ping", &out); err != nil {
+	if err := Prompt(context.Background(), b.Conn(), b.Identity(), tkey("b"), subj, "ping", &out); err != nil {
 		t.Fatal(err)
 	}
 	if out.String() != "pong from a" {
 		t.Fatalf("reply %q", out.String())
 	}
 	p := <-got
-	if p.From != "b" || p.Trust != sap.TrustVerified || p.Text != "ping" || p.RequestID == "" {
+	if p.From != tkey("b") || p.Trust != sap.TrustVerified || p.Text != "ping" || p.RequestID == "" {
 		t.Fatalf("event %+v", p)
 	}
 }
@@ -179,7 +184,7 @@ func TestPromptEnvelopeJSON(t *testing.T) {
 	got := make(chan PromptEvent, 1)
 	f.serve(t, "a", func(ep *Endpoint, p PromptEvent) { got <- p; _ = ep.Reply(p.RequestID, "ok", true) })
 	b := f.client(t, "b")
-	chunks := promptRaw(t, b, "agents.prompt.cc.o.a", []byte("  {\"prompt\":\"json hi\",\"extra\":1}"), true)
+	chunks := promptRaw(t, b, taddr("a").Subjects().Prompt, []byte("  {\"prompt\":\"json hi\",\"extra\":1}"), true)
 	if !strings.Contains(strings.Join(chunks, "|"), `"response"`) {
 		t.Fatalf("chunks %q", chunks)
 	}
@@ -203,7 +208,7 @@ func promptRaw(t *testing.T, ep *Endpoint, subj string, payload []byte, sign boo
 	m.Reply = inbox
 	m.Data = payload
 	if sign {
-		h, _ := ep.Identity().Sign(subj, payload, ep.Name(), time.Now(), "")
+		h, _ := ep.Identity().Sign(subj, payload, ep.Key(), time.Now(), "")
 		m.Header.Set(sap.HeaderName, h.Encode())
 	}
 	if err := nc.PublishMsg(m); err != nil {
@@ -229,7 +234,7 @@ func promptRaw(t *testing.T, ep *Endpoint, subj string, payload []byte, sign boo
 func TestPromptUnsigned401(t *testing.T) {
 	f := newFixture(t, "a", "b")
 	f.serve(t, "a", func(*Endpoint, PromptEvent) { t.Error("unsigned prompt reached the session") })
-	got := promptRaw(t, f.client(t, "b"), "agents.prompt.cc.o.a", []byte("hi"), false)
+	got := promptRaw(t, f.client(t, "b"), taddr("a").Subjects().Prompt, []byte("hi"), false)
 	if strings.Join(got, "|") != "ERR 401|END" {
 		t.Fatalf("got %q", got)
 	}
@@ -240,7 +245,7 @@ func TestPromptBadEnvelope400(t *testing.T) {
 	f.serve(t, "a", func(*Endpoint, PromptEvent) { t.Error("bad envelope reached the session") })
 	b := f.client(t, "b")
 	for _, body := range []string{`{"nope":1}`, `{bad json`, `{"prompt":"x","attachments":[{"filename":"f","content":"AA=="}]}`} {
-		if got := promptRaw(t, b, "agents.prompt.cc.o.a", []byte(body), true); strings.Join(got, "|") != "ERR 400|END" {
+		if got := promptRaw(t, b, taddr("a").Subjects().Prompt, []byte(body), true); strings.Join(got, "|") != "ERR 400|END" {
 			t.Errorf("%s: got %q", body, got)
 		}
 	}
@@ -252,7 +257,7 @@ func TestPromptWorkingKeepaliveAndTimeout(t *testing.T) {
 	t.Cleanup(func() { PromptKeepalive, PromptTimeout = oldK, oldT })
 	f := newFixture(t, "a", "b")
 	f.serve(t, "a", noPrompt) // never replies
-	got := promptRaw(t, f.client(t, "b"), "agents.prompt.cc.o.a", []byte("hello?"), true)
+	got := promptRaw(t, f.client(t, "b"), taddr("a").Subjects().Prompt, []byte("hello?"), true)
 	joined := strings.Join(got, "|")
 	if !strings.HasPrefix(joined, `{"type":"status","data":"ack"}`) || !strings.Contains(joined, `{"type":"status","data":"working"}`) ||
 		!strings.HasSuffix(joined, "ERR 500|END") {
@@ -283,9 +288,9 @@ func TestPromptNothingAfterTerminator(t *testing.T) {
 	nc := b.Conn()
 	inbox := nc.NewInbox()
 	sub, _ := nc.SubscribeSync(inbox)
-	m := nats.NewMsg("agents.prompt.cc.o.a")
+	m := nats.NewMsg(taddr("a").Subjects().Prompt)
 	m.Reply, m.Data = inbox, []byte("race")
-	h, _ := b.Identity().Sign(m.Subject, m.Data, "b", time.Now(), "")
+	h, _ := b.Identity().Sign(m.Subject, m.Data, tkey("b"), time.Now(), "")
 	m.Header.Set(sap.HeaderName, h.Encode())
 	if err := nc.PublishMsg(m); err != nil {
 		t.Fatal(err)
@@ -349,7 +354,7 @@ func TestStartServiceFailureLeavesNoService(t *testing.T) {
 			t.Fatal("the failed service was not stopped")
 		}
 	}
-	nc := f.e.ConnAs(t, f.creds["b"], "b")
+	nc := f.e.ConnAs(t, f.creds["b"], tkey("b"))
 	if _, err := nc.Request("$SRV.INFO.agents", nil, 500*time.Millisecond); err == nil {
 		t.Fatal("the failed service still answers $SRV.INFO")
 	}
@@ -363,7 +368,7 @@ func TestPromptLimit(t *testing.T) {
 
 	at := strings.Repeat("x", MaxPromptBytes)
 	var out bytes.Buffer
-	if err := Prompt(context.Background(), b.Conn(), b.Identity(), "b", "agents.prompt.cc.o.a", at, &out); err != nil || out.String() != "ok" {
+	if err := Prompt(context.Background(), b.Conn(), b.Identity(), tkey("b"), taddr("a").Subjects().Prompt, at, &out); err != nil || out.String() != "ok" {
 		t.Fatalf("at the limit: %q %v", out.String(), err)
 	}
 	if p := <-got; p.Text != at {
@@ -372,22 +377,22 @@ func TestPromptLimit(t *testing.T) {
 
 	over := at + "x"
 	// Raw, past the client's own check: the service answers the error and nothing else, with no ack.
-	if r := promptRaw(t, b, "agents.prompt.cc.o.a", []byte(over), true); strings.Join(r, "|") != "ERR "+PromptTooLargeCode+"|END" {
+	if r := promptRaw(t, b, taddr("a").Subjects().Prompt, []byte(over), true); strings.Join(r, "|") != "ERR "+PromptTooLargeCode+"|END" {
 		t.Fatalf("over the limit: %q", r)
 	}
 	// The same in an envelope.
 	env, _ := json.Marshal(map[string]string{"prompt": over})
-	if r := promptRaw(t, b, "agents.prompt.cc.o.a", env, true); strings.Join(r, "|") != "ERR "+PromptTooLargeCode+"|END" {
+	if r := promptRaw(t, b, taddr("a").Subjects().Prompt, env, true); strings.Join(r, "|") != "ERR "+PromptTooLargeCode+"|END" {
 		t.Fatalf("envelope over the limit: %q", r)
 	}
 	// What the caller's Prompt returns for the service's refusal.
-	err := promptSend(context.Background(), b.Conn(), b.Identity(), "b", "agents.prompt.cc.o.a", over, &out)
+	err := promptSend(context.Background(), b.Conn(), b.Identity(), tkey("b"), taddr("a").Subjects().Prompt, over, &out)
 	want := "prompt_too_large: a live prompt is at most 32768 bytes; send the longer text as mail"
 	if err == nil || !strings.Contains(err.Error(), PromptTooLargeCode) || !strings.Contains(err.Error(), want) {
 		t.Fatalf("service refusal: %v", err)
 	}
 	// And the client's pre-check says the same before sending.
-	if err := Prompt(context.Background(), b.Conn(), b.Identity(), "b", "agents.prompt.cc.o.a", over, &out); err == nil || !strings.Contains(err.Error(), want) {
+	if err := Prompt(context.Background(), b.Conn(), b.Identity(), tkey("b"), taddr("a").Subjects().Prompt, over, &out); err == nil || !strings.Contains(err.Error(), want) {
 		t.Fatalf("client pre-check: %v", err)
 	}
 	select {

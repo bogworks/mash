@@ -205,7 +205,7 @@ func waitNotice(sp spool.Spool, cfg config.Config, event string, id host.HookIde
 		return
 	}
 	text := fmt.Sprintf("mash: this session does not hold endpoint %s (held by pid %s on %s); mail is off until it recovers",
-		cfg.Name, ws.HolderPID, ws.HolderHost)
+		cfg.DisplayName(), ws.HolderPID, ws.HolderHost)
 	if _, err := stdout.Write(host.Notice(event, text)); err != nil {
 		return
 	}
