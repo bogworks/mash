@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 
 	"github.com/bogworks/mash/internal/config"
@@ -242,13 +241,10 @@ func credentialCreateCmd(args []string, env func(string) string, stdout, stderr 
 		fmt.Fprintln(stderr, err)
 		return 2
 	}
-	home := env("HOME")
-	if home == "" {
-		home, _ = os.UserHomeDir()
-	}
+	// With no HOME the config directory may be empty, and a run with no --out is then refused: it names --out.
 	res, err := keycred.CreateCredentials(keycred.CredOptions{
 		Seed: f.vals["--seed"], JWT: f.vals["--jwt"], Out: f.vals["--out"],
-		ConfigDir: config.ConfigDir(env, home), Force: f.frc, DryRun: f.dry,
+		ConfigDir: config.ConfigDir(env, env("HOME")), Force: f.frc, DryRun: f.dry,
 	})
 	if errors.Is(err, keycred.ErrNeedOut) {
 		fmt.Fprintf(stderr, "mash credential create: %v (try: mash credential create --help)\n", err)
