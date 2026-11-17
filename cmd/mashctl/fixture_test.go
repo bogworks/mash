@@ -285,5 +285,16 @@ func fakeRevoke(t *testing.T, err error) *[]revokeCall {
 		return fakeAcked, nil
 	}
 	t.Cleanup(func() { revokeUsers = prev })
+	fakeKeyRevoked(t, func(string) (bool, error) { return false, nil })
 	return &calls
+}
+
+// fakeKeyRevoked replaces the account revocation read for the test: f answers for a user public key.
+func fakeKeyRevoked(t *testing.T, f func(pub string) (bool, error)) {
+	t.Helper()
+	prev := keyRevoked
+	keyRevoked = func(_ context.Context, _ config.Config, _ func(string) string, _ int, pub string) (bool, error) {
+		return f(pub)
+	}
+	t.Cleanup(func() { keyRevoked = prev })
 }

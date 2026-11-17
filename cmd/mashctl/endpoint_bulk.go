@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -93,7 +94,8 @@ func epCredsStale(path string, addr sap.Address) (bool, error) {
 
 // runEndpointBulk is `mashctl endpoint reissue --all` and `--changed`: the single-address reissue of each endpoint in
 // address order. Both skip an endpoint with no creds file on this host (no_local_creds); --changed also skips one
-// whose creds are current. A refusal or error on one endpoint does not stop the others.
+// whose creds are current and whose key is not revoked, and takes one with a staged rotation (rotation_pending) or a
+// revoked key (key_revoked); a revocation that cannot be checked is the error revocation_unknown. A refusal or error on one endpoint does not stop the others.
 func runEndpointBulk(a bulkArgs, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
 	c := a.c
 	doc := epBulkDoc{Schema: endpointBulkSchema, Outcome: "refused", Endpoints: []epBulkEntry{}, NextSteps: []epStep{}}
@@ -208,20 +210,37 @@ func runEndpointBulk(a bulkArgs, env func(string) string, lookup config.Lookup, 
 			add(ad, path, "skipped", "no_local_creds", nil)
 			continue
 		}
+		reason := ""
 		if a.changed {
-			stale, serr := epCredsStale(path, ad)
-			if serr != nil {
-				add(ad, path, "error", "creds_unreadable", nil)
-				firstFail = firstOr(firstFail, &epRefusal{"creds_unreadable", serr.Error()})
-				fmt.Fprintf(stderr, "mashctl: endpoint reissue %s: creds_unreadable: %v\n", epShortcut(ad), serr)
-				continue
-			}
-			if !stale {
-				continue
+			// Selected: a staged rotation is waiting, the permission set differs, or the directory's key is revoked.
+			if _, serr := os.Lstat(path + ".pending"); serr == nil {
+				reason = "rotation_pending"
+			} else {
+				stale, serr := epCredsStale(path, ad)
+				if serr != nil {
+					add(ad, path, "error", "creds_unreadable", nil)
+					firstFail = firstOr(firstFail, &epRefusal{"creds_unreadable", serr.Error()})
+					fmt.Fprintf(stderr, "mashctl: endpoint reissue %s: creds_unreadable: %v\n", epShortcut(ad), serr)
+					continue
+				}
+				if !stale {
+					revoked, rerr := epKeyIsRevoked(ctx, adm, cfg, env, servers, ad)
+					if rerr != nil {
+						detail := fmt.Sprintf("cannot tell whether the current key of %s is revoked: %v", ad, rerr)
+						add(ad, path, "error", "revocation_unknown", nil)
+						firstFail = firstOr(firstFail, &epRefusal{"revocation_unknown", detail})
+						fmt.Fprintf(stderr, "mashctl: endpoint reissue %s: revocation_unknown: %s\n", epShortcut(ad), detail)
+						continue
+					}
+					if !revoked {
+						continue
+					}
+					reason = "key_revoked"
+				}
 			}
 		}
 		if !doit {
-			add(ad, path, "planned", "", nil)
+			add(ad, path, "planned", reason, nil)
 			continue
 		}
 		if f := run.preflight(ad); f != nil {
@@ -230,14 +249,14 @@ func runEndpointBulk(a bulkArgs, env func(string) string, lookup config.Lookup, 
 			fmt.Fprintf(stderr, "mashctl: endpoint reissue %s: %s: %s\n", epShortcut(ad), f.code, f.detail)
 			continue
 		}
-		_, acked, f := run.reissue(ad, true, "", path)
+		_, acked, f := run.reissue(ad, true, "", path, false)
 		if f != nil {
 			add(ad, path, failOutcome(f), f.code, nil)
 			firstFail = firstOr(firstFail, &epRefusal{f.code, f.detail})
 			fmt.Fprintf(stderr, "mashctl: endpoint reissue %s: %s: %s\n", epShortcut(ad), f.code, f.detail)
 			continue
 		}
-		add(ad, path, "reissued", "", &acked)
+		add(ad, path, "reissued", reason, &acked)
 	}
 
 	n := doc.Counts
@@ -302,6 +321,15 @@ func runEndpointBulk(a bulkArgs, env func(string) string, lookup config.Lookup, 
 			fmt.Fprintln(w, "next: restart the sessions of the reissued endpoints so they read the new creds")
 		}
 	})
+}
+
+// epKeyIsRevoked reports whether the key the directory names for ad is revoked in the account JWT.
+func epKeyIsRevoked(ctx context.Context, adm *admin.Admin, cfg config.Config, env func(string) string, servers int, ad sap.Address) (bool, error) {
+	cur, _, err := adm.UserOf(ctx, ad)
+	if err != nil {
+		return false, err
+	}
+	return keyRevoked(ctx, cfg, env, servers, cur)
 }
 
 func failOutcome(f *epFail) string {
