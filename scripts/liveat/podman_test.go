@@ -132,7 +132,7 @@ func TestPodmanOpenCommandLines(t *testing.T) {
 		"podman run -d --name mash-at005-" + id + "-m1 --network mash-at005-" + id + " --ip 10.89.10.11 --label " + lbl + " --read-only=false mash-at005:" + id + " /bin/nodeinit serve",
 		"podman run -d --name mash-at005-" + id + "-m2 --network mash-at005-" + id + " --ip 10.89.10.12 --label " + lbl,
 		"podman run -d --name mash-at005-" + id + "-m3 --network mash-at005-" + id + " --ip 10.89.10.13 --label " + lbl,
-		"podman exec mash-at005-" + id + "-m3 /bin/nodeinit mkdir /home/node/tls",
+		"podman exec mash-at005-" + id + "-m3 /bin/nodeinit mkdir /node/tls",
 	} {
 		if !f.has(want) {
 			t.Errorf("missing command %q in:\n%s", want, strings.Join(f.lines(), "\n"))
@@ -172,8 +172,8 @@ func TestPodmanOpenCommandLines(t *testing.T) {
 	seen := map[string]bool{}
 	for i, h := range hs {
 		n := string(rune('1' + i))
-		if h.Role() != "M"+n || h.Addr() != "10.89.10.1"+n || h.Home().Dir != "/home/node" || h.Bin("mash") != "/bin/mash" ||
-			h.ServerDir() != "/home/node/server" || h.TLSDir() != "/home/node/tls" || h.Ports() != DefaultPorts[i] {
+		if h.Role() != "M"+n || h.Addr() != "10.89.10.1"+n || h.Home().Dir != "/node" || h.Bin("mash") != "/bin/mash" ||
+			h.ServerDir() != "/node/server" || h.TLSDir() != "/node/tls" || h.Ports() != DefaultPorts[i] {
 			t.Errorf("node %d: %s %s %+v", i, h.Role(), h.Addr(), h.Ports())
 		}
 		seen[h.Addr()] = true
@@ -354,8 +354,8 @@ func TestPodmanFreeOctetAvoidsExistingNetworks(t *testing.T) {
 }
 
 func TestPodmanExecAndSpawnArgs(t *testing.T) {
-	a := execArgs("c1", []string{"/bin/mash", "status"}, []string{"MASH_URL=tls://10.89.1.11:14222", "HOME=/home/node"}, false)
-	want := "podman exec --workdir /home/node -e MASH_URL=tls://10.89.1.11:14222 -e HOME=/home/node c1 /bin/mash status"
+	a := execArgs("c1", []string{"/bin/mash", "status"}, []string{"MASH_URL=tls://10.89.1.11:14222", "HOME=/node"}, false)
+	want := "podman exec --workdir /node -e MASH_URL=tls://10.89.1.11:14222 -e HOME=/node c1 /bin/mash status"
 	if strings.Join(a, " ") != want {
 		t.Fatalf("%v", a)
 	}
@@ -398,18 +398,18 @@ func TestPodmanCopyInAndOut(t *testing.T) {
 	hs := openPodman(t, f, r)
 	f.calls = nil
 	m2 := hs[1]
-	if err := m2.Put("/home/node/keys/s.seed", []byte(secret), 0o600); err != nil {
+	if err := m2.Put("/node/keys/s.seed", []byte(secret), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if string(atCp) != secret || cpMode != 0o600 {
 		t.Errorf("the temporary file held %q mode %v", atCp, cpMode)
 	}
-	b, err := m2.Get("/home/node/x")
+	b, err := m2.Get("/node/x")
 	if err != nil || string(b) != "from the node" {
 		t.Fatalf("%q %v", b, err)
 	}
 	c2 := "mash-at005-" + testRunID + "-m2"
-	for _, want := range []string{"podman exec " + c2 + " /bin/nodeinit mkdir /home/node/keys", "podman cp ", c2 + ":/home/node/keys/s.seed", "/bin/nodeinit chmod 600 /home/node/keys/s.seed", "podman cp " + c2 + ":/home/node/x "} {
+	for _, want := range []string{"podman exec " + c2 + " /bin/nodeinit mkdir /node/keys", "podman cp ", c2 + ":/node/keys/s.seed", "/bin/nodeinit chmod 600 /node/keys/s.seed", "podman cp " + c2 + ":/node/x "} {
 		if !f.has(want) {
 			t.Errorf("missing %q in\n%s", want, strings.Join(f.lines(), "\n"))
 		}
@@ -430,7 +430,7 @@ func TestPodmanCopyInAndOut(t *testing.T) {
 		t.Error("Remove took a relative path")
 	}
 	f.calls = nil
-	if err := m2.Remove("/home/node/adopt-in/sys.creds"); err != nil || !f.has("/bin/nodeinit rm /home/node/adopt-in/sys.creds") {
+	if err := m2.Remove("/node/adopt-in/sys.creds"); err != nil || !f.has("/bin/nodeinit rm /node/adopt-in/sys.creds") {
 		t.Errorf("remove: %v %v", err, f.lines())
 	}
 	if !m2.Exists("/x") || !f.has("/bin/nodeinit stat /x") {

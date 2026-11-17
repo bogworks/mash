@@ -32,7 +32,7 @@ What `--hosts podman` makes (all of it labelled `mash-at005=<run id>`, all of it
 
 - a network `mash-at005-<run id>` on `10.89.<r>.0/24`, `r` random and not used by any existing podman network;
 - three containers `mash-at005-<run id>-m1` to `-m3` at `10.89.<r>.11` to `.13`. Each has its own filesystem
-  (HOME is `/home/node`), no mounted host directory and no published port. The NATS ports 14222-14224 (clients),
+  (HOME is `/node`), no mounted host directory and no published port. The NATS ports 14222-14224 (clients),
   16222-16224 (routes) and 18222 (the monitor of M1) are inside each node's own network namespace, and the certificates
   carry the node address as an IP SAN.
 

@@ -28,7 +28,7 @@ import (
 //   - One private network with a /24 inside 10.89.0.0/16 (a third octet that no existing podman network uses); the
 //     nodes have fixed addresses .11, .12 and .13, so certificates carry the node address before the node starts.
 //     No port is published: the ports in Ports are private to each node's network namespace.
-//   - Each node has its own filesystem (the container's own layer, under /home/node). Nothing is shared and no host
+//   - Each node has its own filesystem (the container's own layer, under /node). Nothing is shared and no host
 //     directory is mounted. Files go in and out by `podman cp` through a temporary file in the run directory that is
 //     removed by its exact path right after; a seed or a JWT is never on a command line.
 //   - Exec is `podman exec`. Spawn starts `podman exec -i` as a local child process of the harness; the harness records
@@ -40,7 +40,7 @@ var containerfile string
 
 const (
 	labelKey = "mash-at005" // the label key on every container, the network and the image
-	nodeHome = "/home/node"
+	nodeHome = "/node"
 )
 
 // ErrNoPodman is the failure of a run on a machine without podman. It is a failure: the run tested nothing.
