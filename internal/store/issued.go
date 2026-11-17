@@ -81,7 +81,7 @@ const (
 // The purposes of an issued user: why mash issued the credential. The set is closed; an unknown purpose is refused on
 // write.
 const (
-	// PurposeIssue is an ordinary issue: `mashctl add`, a reissue that keeps the key, the admin user at init.
+	// PurposeIssue is an ordinary issue: the endpoint command, a reissue that keeps the key, the admin user at init.
 	PurposeIssue = "issue"
 	// PurposeRotation is the new key of a reissue that rotates the user key.
 	PurposeRotation = "rotation"

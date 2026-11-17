@@ -414,10 +414,6 @@ func runIssuedCheck(ctx context.Context, cfg config.Config, env func(string) str
 		code = issuedNoAnswer
 	}
 	if o.json {
-		out := make([]issuedOut, 0, len(recs))
-		for _, r := range recs {
-			out = append(out, toIssuedOut(r))
-		}
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
 		_ = enc.Encode(rep)

@@ -471,7 +471,7 @@ func TestRetireAndDeprovisionMarkTheKeyRevoked(t *testing.T) {
 	})
 	t.Run("not recorded is silent", func(t *testing.T) {
 		h := newFleetEnv(t)
-		u := h.provisionDeclared("a") // provisioned without mashctl add: not in the issue record
+		u := h.provisionDeclared("a") // provisioned without a minted credential: not in the issue record
 		stubRevoke(t)
 		out, errb, code := h.run("retire", "o.g.a")
 		// The pre-revocation check warns once that the key has no record; marking the revocation says nothing more.

@@ -63,7 +63,7 @@ func TestDeprovisionRefusesAKeyTheRecordDatesInTheFuture(t *testing.T) {
 
 func TestDeprovisionWarnsAndRevokesWithoutARecord(t *testing.T) {
 	h := newFleetEnv(t)
-	u := h.provisionDeclared("a") // not minted by mashctl add: no issue record
+	u := h.provisionDeclared("a") // not minted through the issue path: no issue record
 	calls := fakeRevoke(t, nil)
 	out, errb, code := h.run("deprovision", "o.g.a")
 	if code != 0 || len(*calls) != 1 || (*calls)[0].users[0] != u {

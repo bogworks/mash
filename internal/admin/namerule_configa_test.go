@@ -91,7 +91,7 @@ func TestConfigAProvision(t *testing.T) {
 	}
 }
 
-// CheckProvision is the check mashctl add runs before it touches a key, a policy file or a record.
+// CheckProvision is the check provisioning runs before it touches a key, a policy file or a record.
 func TestConfigACheckProvision(t *testing.T) {
 	r := configARule(t)
 	for _, g := range []string{"cc", "mash"} {
