@@ -178,7 +178,7 @@ func TestEndpointCreateRefusalRemovesPending(t *testing.T) {
 
 	taken := ad("t1")
 	otherPub, _, _ := epKey(t, t.TempDir(), "o")
-	if _, err := enrollCreate(h, taken, otherPub); err != nil {
+	if _, err := enrollCreateFor(h, taken, otherPub); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(h.creds(taken)+".pending", seed, 0o600); err != nil {

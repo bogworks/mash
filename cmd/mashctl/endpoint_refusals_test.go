@@ -15,6 +15,8 @@ import (
 
 	"github.com/bogworks/mash/internal/apply"
 	"github.com/bogworks/mash/internal/config"
+	"github.com/bogworks/mash/internal/enroll"
+	"github.com/bogworks/mash/internal/sap"
 )
 
 var updateEndpointRefusals = flag.Bool("update-endpoint-refusals", false, "rewrite cmd/mashctl/testdata/endpoint_refusals.golden.txt")
@@ -29,6 +31,17 @@ type refEnv struct {
 	k1   string // the public key in pub
 }
 
+// Exit codes by code, from the contract. Usage-class codes (the command line is wrong, nothing ran) exit 2; a refusal
+// exits 1; a server or write failure is outcome error and exits 6. Where a code's exit differs between verbs the case
+// says so:
+//   - no_config_dir exits 1 for create and reissue of one endpoint (a refusal before anything changes) and 6 in a bulk
+//     run, where it is the error of one endpoint among others.
+//   - creds_unreadable exits 1 for reissue of one endpoint and 6 in a bulk run, for the same reason.
+//   - creds_mismatch exits 1 for one endpoint and 5 in a bulk run, where the other endpoint was reissued and this one
+//     was refused (some endpoints failed).
+//   - no_local_creds exits 0: the endpoint is skipped, which is not a failure.
+// refCase.wantExit holds the value for each case.
+
 // refCase is one refusal or error: the arguments, what it sets up first, and the code its JSON document carries.
 // {AUX}, {PUB} and {PUB2} in an argument are replaced by the case's directory and its two public key files; --json is
 // added to every run.
@@ -37,14 +50,13 @@ type refCase struct {
 	args     []string
 	setup    func(t *testing.T, r *refEnv)
 	wantCode string
+	wantExit int // the exit code of the contract for this code: 2 usage, 1 refusal, 5 some endpoints of a bulk run failed, 6 error
 }
 
 // untriggerable is every code the endpoint commands can print that no case triggers, with the reason. The test fails
 // when a code is in the source and in neither the cases nor this map, and when an entry here is no longer in the source
 // or is covered by a case.
-var untriggerable = map[string]string{
-	"enroll": "a failure of enroll.Create or enroll.Reissue that is not a refusal needs a server fault in the middle of the enrollment; the commands pass the library no seam to inject one",
-}
+var untriggerable = map[string]string{}
 
 func noEnv(keys ...string) func(t *testing.T, r *refEnv) {
 	return func(t *testing.T, r *refEnv) {
@@ -112,6 +124,19 @@ func shortServerSet(t *testing.T, r *refEnv) {
 	t.Cleanup(func() { checkServerSet = old })
 }
 
+// enrollFails replaces the library calls of create and reissue by ones that fail with an error that is not a refusal,
+// as a server fault in the middle of the enrollment does.
+func enrollFails(t *testing.T, r *refEnv) {
+	prevCreate, prevReissue := enrollCreate, enrollReissue
+	enrollCreate = func(context.Context, enroll.Deps, enroll.Request) (enroll.Result, error) {
+		return enroll.Result{}, errors.New("the server stopped answering")
+	}
+	enrollReissue = func(context.Context, enroll.Deps, sap.Address, string) (enroll.Result, error) {
+		return enroll.Result{}, errors.New("the server stopped answering")
+	}
+	t.Cleanup(func() { enrollCreate, enrollReissue = prevCreate, prevReissue })
+}
+
 func lockHeld(instance string) func(t *testing.T, r *refEnv) {
 	return func(t *testing.T, r *refEnv) {
 		if err := os.Mkdir(r.h.creds(ad(instance))+".lock", 0o700); err != nil {
@@ -169,14 +194,14 @@ func revocationUnknown(t *testing.T, r *refEnv) {
 
 var refusalCases = []refCase{
 	// create
-	{"create_usage", []string{"endpoint", "create", "o/g/a", "o/g/b"}, nil, "usage"},
-	{"create_unknown_flag", []string{"endpoint", "create", "--bogus"}, nil, "unknown_flag"},
-	{"create_name_invalid", []string{"endpoint", "create", "o//a", "--public-key", "{PUB}"}, nil, "name_invalid"},
-	{"create_address_ambiguous", []string{"endpoint", "create", "g/a", "--public-key", "{PUB}"}, nil, "address_ambiguous"},
-	{"create_naming_disagrees", []string{"endpoint", "create", "o/g/a", "--group", "h", "--public-key", "{PUB}"}, nil, "naming_disagrees"},
-	{"create_group_missing", []string{"endpoint", "create", "a", "--public-key", "{PUB}"}, nil, "group_missing"},
-	{"create_owner_missing", []string{"endpoint", "create", "--group", "g", "--name", "a", "--public-key", "{PUB}"}, noEnv("MASH_OWNER"), "owner_missing"},
-	{"create_name_missing", []string{"endpoint", "create", "--group", "g", "--public-key", "{PUB}"}, nil, "name_missing"},
+	{"create_usage", []string{"endpoint", "create", "o/g/a", "o/g/b"}, nil, "usage", 2},
+	{"create_unknown_flag", []string{"endpoint", "create", "--bogus"}, nil, "unknown_flag", 2},
+	{"create_name_invalid", []string{"endpoint", "create", "o//a", "--public-key", "{PUB}"}, nil, "name_invalid", 1},
+	{"create_address_ambiguous", []string{"endpoint", "create", "g/a", "--public-key", "{PUB}"}, nil, "address_ambiguous", 2},
+	{"create_naming_disagrees", []string{"endpoint", "create", "o/g/a", "--group", "h", "--public-key", "{PUB}"}, nil, "naming_disagrees", 2},
+	{"create_group_missing", []string{"endpoint", "create", "a", "--public-key", "{PUB}"}, nil, "group_missing", 2},
+	{"create_owner_missing", []string{"endpoint", "create", "--group", "g", "--name", "a", "--public-key", "{PUB}"}, noEnv("MASH_OWNER"), "owner_missing", 2},
+	{"create_name_missing", []string{"endpoint", "create", "--group", "g", "--public-key", "{PUB}"}, nil, "name_missing", 2},
 	{"create_name_rule", []string{"endpoint", "create", "o/g/blocked", "--public-key", "{PUB}"}, func(t *testing.T, r *refEnv) {
 		p := filepath.Join(r.aux, "rule.json")
 		rule := `{"version":1,"rules":[{"id":"no-blocked","match":{"instance":{"is":"blocked"}},"message":"the name blocked is not allowed"}]}`
@@ -184,27 +209,27 @@ var refusalCases = []refCase{
 			t.Fatal(err)
 		}
 		r.h.env["MASH_NAME_RULE_FILE"] = p
-	}, "name_rule"},
-	{"create_key_both", []string{"endpoint", "create", "o/g/a", "--make-key", "--public-key", "{PUB}"}, nil, "key_both"},
-	{"create_key_missing", []string{"endpoint", "create", "o/g/a"}, nil, "key_missing"},
-	{"create_labels_invalid", []string{"endpoint", "create", "o/g/a", "--make-key", "--label", "9bad=v"}, nil, "labels_invalid"},
-	{"create_config", []string{"endpoint", "create", "o/g/a", "--make-key"}, badConfig, "config"},
-	{"create_no_config_dir", []string{"endpoint", "create", "o/g/a", "--make-key"}, noConfigDir, "no_config_dir"},
-	{"create_public_key_unreadable", []string{"endpoint", "create", "o/g/a", "--public-key", "{AUX}/missing.pub", "--jwt-out", "{AUX}/out.jwt"}, nil, "public_key_unreadable"},
+	}, "name_rule", 1},
+	{"create_key_both", []string{"endpoint", "create", "o/g/a", "--make-key", "--public-key", "{PUB}"}, nil, "key_both", 2},
+	{"create_key_missing", []string{"endpoint", "create", "o/g/a"}, nil, "key_missing", 2},
+	{"create_labels_invalid", []string{"endpoint", "create", "o/g/a", "--make-key", "--label", "9bad=v"}, nil, "labels_invalid", 2},
+	{"create_config", []string{"endpoint", "create", "o/g/a", "--make-key"}, badConfig, "config", 6},
+	{"create_no_config_dir", []string{"endpoint", "create", "o/g/a", "--make-key"}, noConfigDir, "no_config_dir", 1},
+	{"create_public_key_unreadable", []string{"endpoint", "create", "o/g/a", "--public-key", "{AUX}/missing.pub", "--jwt-out", "{AUX}/out.jwt"}, nil, "public_key_unreadable", 1},
 	{"create_public_key_invalid", []string{"endpoint", "create", "o/g/a", "--public-key", "{AUX}/bad.pub", "--jwt-out", "{AUX}/out.jwt"}, func(t *testing.T, r *refEnv) {
 		if err := os.WriteFile(filepath.Join(r.aux, "bad.pub"), []byte("not a key\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-	}, "public_key_invalid"},
+	}, "public_key_invalid", 1},
 	{"create_file_exists", []string{"endpoint", "create", "o/g/a", "--public-key", "{PUB}", "--jwt-out", "{AUX}/exists.jwt"}, func(t *testing.T, r *refEnv) {
 		if err := os.WriteFile(filepath.Join(r.aux, "exists.jwt"), []byte("x\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-	}, "file_exists"},
+	}, "file_exists", 1},
 	{"create_file_exists_late", []string{"endpoint", "create", "o/g/a", "--make-key"}, func(t *testing.T, r *refEnv) {
 		epAfterEnroll = func() { os.WriteFile(r.h.creds(ad("a")), []byte("x\n"), 0o600) }
 		t.Cleanup(func() { epAfterEnroll = nil })
-	}, "file_exists"},
+	}, "file_exists", 1},
 	{"create_creds_exists", []string{"endpoint", "create", "o/g/a", "--make-key"}, func(t *testing.T, r *refEnv) {
 		// a run killed after it staged its key, then another creds file put at the path
 		if code := killAt(r.h, &epAfterStage, "endpoint", "create", "o/g/a", "--make-key"); code != -1 {
@@ -213,103 +238,112 @@ var refusalCases = []refCase{
 		if err := os.WriteFile(r.h.creds(ad("a")), []byte("another key\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-	}, "creds_exists"},
-	{"create_no_account_key", []string{"endpoint", "create", "o/g/a", "--public-key", "{PUB}", "--jwt-out", "{AUX}/out.jwt"}, noKeys, "no_account_key"},
-	{"create_server", []string{"endpoint", "create", "o/g/a", "--public-key", "{PUB}", "--jwt-out", "{AUX}/out.jwt"}, unreachable, "server"},
-	{"create_write", []string{"endpoint", "create", "o/g/a", "--make-key"}, groupWritableDir, "write"},
-	{"create_address_taken", []string{"endpoint", "create", "o/g/a", "--public-key", "{PUB}", "--jwt-out", "{AUX}/out.jwt"}, seeded("a"), "address_taken"},
-	{"create_key_retired", []string{"endpoint", "create", "o/g/a", "--public-key", "{PUB2}", "--jwt-out", "{AUX}/out.jwt"}, burned("a"), "key_retired"},
+	}, "creds_exists", 1},
+	{"create_staged_key_revoked", []string{"endpoint", "create", "o/g/a", "--make-key"}, func(t *testing.T, r *refEnv) {
+		// a run killed after it staged its key, then the account revokes that key
+		if code := killAt(r.h, &epAfterStage, "endpoint", "create", "o/g/a", "--make-key"); code != -1 {
+			t.Fatalf("not stopped: %d", code)
+		}
+		fakeKeyRevoked(t, func(string) (bool, error) { return true, nil })
+	}, "staged_key_revoked", 1},
+	{"create_no_account_key", []string{"endpoint", "create", "o/g/a", "--public-key", "{PUB}", "--jwt-out", "{AUX}/out.jwt"}, noKeys, "no_account_key", 1},
+	{"create_server", []string{"endpoint", "create", "o/g/a", "--public-key", "{PUB}", "--jwt-out", "{AUX}/out.jwt"}, unreachable, "server", 6},
+	{"create_enroll_server", []string{"endpoint", "create", "o/g/a", "--public-key", "{PUB}", "--jwt-out", "{AUX}/out.jwt"}, enrollFails, "server", 6},
+	{"create_write", []string{"endpoint", "create", "o/g/a", "--make-key"}, groupWritableDir, "write", 6},
+	{"create_address_taken", []string{"endpoint", "create", "o/g/a", "--public-key", "{PUB}", "--jwt-out", "{AUX}/out.jwt"}, seeded("a"), "address_taken", 1},
+	{"create_key_retired", []string{"endpoint", "create", "o/g/a", "--public-key", "{PUB2}", "--jwt-out", "{AUX}/out.jwt"}, burned("a"), "key_retired", 1},
 	{"create_public_key_issued", []string{"endpoint", "create", "o/g/c", "--public-key", "{PUB}", "--jwt-out", "{AUX}/out.jwt"}, func(t *testing.T, r *refEnv) {
 		r.must(t, "endpoint", "create", "o/g/a", "--public-key", r.pub, "--jwt-out", filepath.Join(r.aux, "first.jwt"))
-	}, "public_key_issued"},
-	{"create_key_revoked", []string{"endpoint", "create", "o/g/d", "--public-key", "{PUB}", "--jwt-out", "{AUX}/out.jwt"}, burned("b"), "key_revoked"},
+	}, "public_key_issued", 1},
+	{"create_key_revoked", []string{"endpoint", "create", "o/g/d", "--public-key", "{PUB}", "--jwt-out", "{AUX}/out.jwt"}, burned("b"), "key_revoked", 1},
 
 	// reissue
-	{"reissue_usage", []string{"endpoint", "reissue", "o/g/a", "o/g/b"}, nil, "usage"},
-	{"reissue_unknown_flag", []string{"endpoint", "reissue", "--bogus"}, nil, "unknown_flag"},
-	{"reissue_address_missing", []string{"endpoint", "reissue", "--make-key"}, nil, "address_missing"},
-	{"reissue_address_invalid", []string{"endpoint", "reissue", "bad address", "--make-key"}, nil, "address_invalid"},
-	{"reissue_key_both", []string{"endpoint", "reissue", "o/g/a", "--make-key", "--public-key", "{PUB}"}, nil, "key_both"},
-	{"reissue_key_missing", []string{"endpoint", "reissue", "o/g/a"}, nil, "key_missing"},
-	{"reissue_servers_invalid", []string{"endpoint", "reissue", "o/g/a", "--make-key"}, setEnv("MASH_SERVERS", "0"), "servers_invalid"},
-	{"reissue_config", []string{"endpoint", "reissue", "o/g/a", "--make-key"}, badConfig, "config"},
-	{"reissue_no_config_dir", []string{"endpoint", "reissue", "o/g/a", "--make-key"}, noConfigDir, "no_config_dir"},
-	{"reissue_public_key_unreadable", []string{"endpoint", "reissue", "o/g/a", "--public-key", "{AUX}/missing.pub", "--jwt-out", "{AUX}/out.jwt"}, nil, "public_key_unreadable"},
+	{"reissue_usage", []string{"endpoint", "reissue", "o/g/a", "o/g/b"}, nil, "usage", 2},
+	{"reissue_unknown_flag", []string{"endpoint", "reissue", "--bogus"}, nil, "unknown_flag", 2},
+	{"reissue_address_missing", []string{"endpoint", "reissue", "--make-key"}, nil, "address_missing", 2},
+	{"reissue_address_invalid", []string{"endpoint", "reissue", "bad address", "--make-key"}, nil, "address_invalid", 2},
+	{"reissue_key_both", []string{"endpoint", "reissue", "o/g/a", "--make-key", "--public-key", "{PUB}"}, nil, "key_both", 2},
+	{"reissue_key_missing", []string{"endpoint", "reissue", "o/g/a"}, nil, "key_missing", 2},
+	{"reissue_servers_invalid", []string{"endpoint", "reissue", "o/g/a", "--make-key"}, setEnv("MASH_SERVERS", "0"), "servers_invalid", 2},
+	{"reissue_config", []string{"endpoint", "reissue", "o/g/a", "--make-key"}, badConfig, "config", 6},
+	{"reissue_no_config_dir", []string{"endpoint", "reissue", "o/g/a", "--make-key"}, noConfigDir, "no_config_dir", 1},
+	{"reissue_public_key_unreadable", []string{"endpoint", "reissue", "o/g/a", "--public-key", "{AUX}/missing.pub", "--jwt-out", "{AUX}/out.jwt"}, nil, "public_key_unreadable", 1},
 	{"reissue_file_exists", []string{"endpoint", "reissue", "o/g/a", "--public-key", "{PUB}", "--jwt-out", "{AUX}/exists.jwt"}, func(t *testing.T, r *refEnv) {
 		if err := os.WriteFile(filepath.Join(r.aux, "exists.jwt"), []byte("x\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-	}, "file_exists"},
-	{"reissue_no_account_key", []string{"endpoint", "reissue", "o/g/a", "--make-key"}, noKeys, "no_account_key"},
-	{"reissue_server", []string{"endpoint", "reissue", "o/g/a", "--make-key"}, unreachable, "server"},
-	{"reissue_endpoint_missing", []string{"endpoint", "reissue", "o/g/a", "--make-key"}, nil, "endpoint_missing"},
-	{"reissue_key_retired", []string{"endpoint", "reissue", "o/g/a", "--make-key"}, burned("a"), "key_retired"},
-	{"reissue_reissue_busy", []string{"endpoint", "reissue", "o/g/a", "--make-key"}, seq(seeded("a"), lockHeld("a")), "reissue_busy"},
-	{"reissue_write", []string{"endpoint", "reissue", "o/g/a", "--make-key"}, seq(seeded("a"), groupWritableDir), "write"},
+	}, "file_exists", 1},
+	{"reissue_no_account_key", []string{"endpoint", "reissue", "o/g/a", "--make-key"}, noKeys, "no_account_key", 1},
+	{"reissue_server", []string{"endpoint", "reissue", "o/g/a", "--make-key"}, unreachable, "server", 6},
+	{"reissue_enroll_server", []string{"endpoint", "reissue", "o/g/a", "--make-key"}, seq(seeded("a"), enrollFails), "server", 6},
+	{"reissue_endpoint_missing", []string{"endpoint", "reissue", "o/g/a", "--make-key"}, nil, "endpoint_missing", 1},
+	{"reissue_key_retired", []string{"endpoint", "reissue", "o/g/a", "--make-key"}, burned("a"), "key_retired", 1},
+	{"reissue_reissue_busy", []string{"endpoint", "reissue", "o/g/a", "--make-key"}, seq(seeded("a"), lockHeld("a")), "reissue_busy", 1},
+	{"reissue_write", []string{"endpoint", "reissue", "o/g/a", "--make-key"}, seq(seeded("a"), groupWritableDir), "write", 6},
 	{"reissue_public_key_issued", []string{"endpoint", "reissue", "o/g/b", "--public-key", "{PUB}", "--jwt-out", "{AUX}/out.jwt"}, func(t *testing.T, r *refEnv) {
 		r.must(t, "endpoint", "create", "o/g/a", "--public-key", r.pub, "--jwt-out", filepath.Join(r.aux, "first.jwt"))
 		r.h.seed(ad("b"))
-	}, "public_key_issued"},
+	}, "public_key_issued", 1},
 	{"reissue_key_unchanged", []string{"endpoint", "reissue", "o/g/a", "--public-key", "{PUB}", "--jwt-out", "{AUX}/out.jwt"}, func(t *testing.T, r *refEnv) {
 		r.must(t, "endpoint", "create", "o/g/a", "--public-key", r.pub, "--jwt-out", filepath.Join(r.aux, "first.jwt"))
-	}, "key_unchanged"},
+	}, "key_unchanged", 1},
 
-	{"reissue_future_issued", []string{"endpoint", "reissue", "o/g/a", "--make-key"}, futureIssued("a"), "future_issued"},
-	{"reissue_creds_mismatch", []string{"endpoint", "reissue", "o/g/a", "--make-key"}, otherCreds, "creds_mismatch"},
-	{"reissue_creds_unreadable", []string{"endpoint", "reissue", "o/g/a", "--make-key"}, junkCreds, "creds_unreadable"},
+	{"reissue_future_issued", []string{"endpoint", "reissue", "o/g/a", "--make-key"}, futureIssued("a"), "future_issued", 1},
+	{"reissue_creds_mismatch", []string{"endpoint", "reissue", "o/g/a", "--make-key"}, otherCreds, "creds_mismatch", 1},
+	{"reissue_creds_unreadable", []string{"endpoint", "reissue", "o/g/a", "--make-key"}, junkCreds, "creds_unreadable", 1},
 
 	// reissue --all and --changed
-	{"bulk_usage", []string{"endpoint", "reissue", "--all", "--changed", "--make-key"}, nil, "usage"},
-	{"bulk_needs_make_key", []string{"endpoint", "reissue", "--all"}, nil, "bulk_needs_make_key"},
-	{"bulk_servers_invalid", []string{"endpoint", "reissue", "--all", "--make-key"}, setEnv("MASH_SERVERS", "0"), "servers_invalid"},
-	{"bulk_config", []string{"endpoint", "reissue", "--all", "--make-key"}, badConfig, "config"},
-	{"bulk_no_account_key", []string{"endpoint", "reissue", "--all", "--make-key", "--yes"}, noKeys, "no_account_key"},
-	{"bulk_server", []string{"endpoint", "reissue", "--all", "--make-key", "--yes"}, unreachable, "server"},
-	{"bulk_servers", []string{"endpoint", "reissue", "--all", "--make-key", "--yes"}, seq(seeded("a"), shortServerSet), "servers"},
+	{"bulk_usage", []string{"endpoint", "reissue", "--all", "--changed", "--make-key"}, nil, "usage", 2},
+	{"bulk_needs_make_key", []string{"endpoint", "reissue", "--all"}, nil, "bulk_needs_make_key", 2},
+	{"bulk_servers_invalid", []string{"endpoint", "reissue", "--all", "--make-key"}, setEnv("MASH_SERVERS", "0"), "servers_invalid", 2},
+	{"bulk_config", []string{"endpoint", "reissue", "--all", "--make-key"}, badConfig, "config", 6},
+	{"bulk_no_account_key", []string{"endpoint", "reissue", "--all", "--make-key", "--yes"}, noKeys, "no_account_key", 1},
+	{"bulk_server", []string{"endpoint", "reissue", "--all", "--make-key", "--yes"}, unreachable, "server", 6},
+	{"bulk_servers", []string{"endpoint", "reissue", "--all", "--make-key", "--yes"}, seq(seeded("a"), shortServerSet), "servers", 6},
 	{"bulk_no_config_dir", []string{"endpoint", "reissue", "--all", "--make-key", "--yes"}, func(t *testing.T, r *refEnv) {
 		r.h.seed(ad("a"))
 		noConfigDir(t, r)
-	}, "no_config_dir"},
+	}, "no_config_dir", 6},
 	{"bulk_no_local_creds", []string{"endpoint", "reissue", "--changed", "--make-key", "--yes"}, func(t *testing.T, r *refEnv) {
 		r.h.seed(ad("a"))
 		if err := os.Remove(r.h.creds(ad("a"))); err != nil {
 			t.Fatal(err)
 		}
-	}, "no_local_creds"},
+	}, "no_local_creds", 0},
 	{"bulk_creds_unreadable", []string{"endpoint", "reissue", "--changed", "--make-key", "--yes"}, func(t *testing.T, r *refEnv) {
 		r.h.seed(ad("a"))
 		if err := os.WriteFile(r.h.creds(ad("a")), []byte("junk\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-	}, "creds_unreadable"},
-	{"bulk_reissue_busy", []string{"endpoint", "reissue", "--all", "--make-key", "--yes"}, seq(seeded("a"), lockHeld("a")), "reissue_busy"},
+	}, "creds_unreadable", 6},
+	{"bulk_reissue_busy", []string{"endpoint", "reissue", "--all", "--make-key", "--yes"}, seq(seeded("a"), lockHeld("a")), "reissue_busy", 1},
 
-	{"bulk_future_issued", []string{"endpoint", "reissue", "--all", "--make-key", "--yes"}, futureIssued("a"), "future_issued"},
-	{"bulk_creds_mismatch", []string{"endpoint", "reissue", "--all", "--make-key", "--yes"}, otherCreds, "creds_mismatch"},
-	{"bulk_revocation_unknown", []string{"endpoint", "reissue", "--changed", "--make-key", "--yes"}, revocationUnknown, "revocation_unknown"},
+	{"bulk_future_issued", []string{"endpoint", "reissue", "--all", "--make-key", "--yes"}, futureIssued("a"), "future_issued", 1},
+	{"bulk_creds_mismatch", []string{"endpoint", "reissue", "--all", "--make-key", "--yes"}, otherCreds, "creds_mismatch", 5},
+	{"bulk_revocation_unknown", []string{"endpoint", "reissue", "--changed", "--make-key", "--yes"}, revocationUnknown, "revocation_unknown", 6},
 
 	// delete
-	{"delete_usage", []string{"endpoint", "delete", "o/g/a", "o/g/b"}, nil, "usage"},
-	{"delete_unknown_flag", []string{"endpoint", "delete", "--bogus"}, nil, "unknown_flag"},
-	{"delete_address_missing", []string{"endpoint", "delete"}, nil, "address_missing"},
-	{"delete_address_invalid", []string{"endpoint", "delete", "bad address"}, nil, "address_invalid"},
-	{"delete_servers_invalid", []string{"endpoint", "delete", "o/g/a"}, setEnv("MASH_SERVERS", "0"), "servers_invalid"},
-	{"delete_not_found", []string{"endpoint", "delete", "o/g/none"}, nil, "not_found"},
-	{"delete_no_creds_file", []string{"endpoint", "delete", "o/g/a", "--delete-creds"}, seq(seeded("a"), noConfigDir), "no_creds_file"},
-	{"delete_server_set", []string{"endpoint", "delete", "o/g/a"}, seq(seeded("a"), shortServerSet), "server_set"},
+	{"delete_usage", []string{"endpoint", "delete", "o/g/a", "o/g/b"}, nil, "usage", 2},
+	{"delete_unknown_flag", []string{"endpoint", "delete", "--bogus"}, nil, "unknown_flag", 2},
+	{"delete_address_missing", []string{"endpoint", "delete"}, nil, "address_missing", 2},
+	{"delete_address_invalid", []string{"endpoint", "delete", "bad address"}, nil, "address_invalid", 2},
+	{"delete_servers_invalid", []string{"endpoint", "delete", "o/g/a"}, setEnv("MASH_SERVERS", "0"), "servers_invalid", 2},
+	{"delete_not_found", []string{"endpoint", "delete", "o/g/none"}, nil, "not_found", 1},
+	{"delete_no_creds_file", []string{"endpoint", "delete", "o/g/a", "--delete-creds"}, seq(seeded("a"), noConfigDir), "no_creds_file", 1},
+	{"delete_server_set", []string{"endpoint", "delete", "o/g/a"}, seq(seeded("a"), shortServerSet), "server_set", 1},
 	{"delete_future_issued", []string{"endpoint", "delete", "o/g/a"}, func(t *testing.T, r *refEnv) {
 		r.h.seed(ad("a"))
 		_, pub := r.h.credsClaims(ad("a"))
 		r.h.recordIssuedAt(pub, time.Now().Add(48*time.Hour))
-	}, "future_issued"},
+	}, "future_issued", 1},
 	{"delete_revoke_failed", []string{"endpoint", "delete", "o/g/a"}, func(t *testing.T, r *refEnv) {
 		r.h.seed(ad("a"))
 		fakeRevoke(t, errors.New("no system account answered"))
-	}, "revoke_failed"},
+	}, "revoke_failed", 1},
 	{"delete_revoke_not_confirmed", []string{"endpoint", "delete", "o/g/a"}, func(t *testing.T, r *refEnv) {
 		r.h.seed(ad("a"))
 		fakeRevoke(t, fmt.Errorf("the revocation was not confirmed: %w", apply.ErrNotConfirmed))
-	}, "revoke_not_confirmed"},
+	}, "revoke_not_confirmed", 1},
 	{"delete_refused", []string{"endpoint", "delete", "o/g/a"}, func(t *testing.T, r *refEnv) {
 		r.h.seed(ad("a"))
 		first, _ := r.h.record(ad("a"))
@@ -322,16 +356,16 @@ var refusalCases = []refCase{
 			}
 		}
 		t.Cleanup(func() { afterRetireRead = nil })
-	}, "refused"},
+	}, "refused", 1},
 
 	// list and show
-	{"list_usage", []string{"endpoint", "list", "o/g/a"}, nil, "usage"},
-	{"list_unknown_flag", []string{"endpoint", "list", "--bogus"}, nil, "unknown_flag"},
-	{"show_usage", []string{"endpoint", "show", "o/g/a", "o/g/b"}, nil, "usage"},
-	{"show_unknown_flag", []string{"endpoint", "show", "--bogus"}, nil, "unknown_flag"},
-	{"show_address_missing", []string{"endpoint", "show"}, nil, "address_missing"},
-	{"show_address_invalid", []string{"endpoint", "show", "bad address"}, nil, "address_invalid"},
-	{"show_not_found", []string{"endpoint", "show", "o/g/none"}, nil, "not_found"},
+	{"list_usage", []string{"endpoint", "list", "o/g/a"}, nil, "usage", 2},
+	{"list_unknown_flag", []string{"endpoint", "list", "--bogus"}, nil, "unknown_flag", 2},
+	{"show_usage", []string{"endpoint", "show", "o/g/a", "o/g/b"}, nil, "usage", 2},
+	{"show_unknown_flag", []string{"endpoint", "show", "--bogus"}, nil, "unknown_flag", 2},
+	{"show_address_missing", []string{"endpoint", "show"}, nil, "address_missing", 2},
+	{"show_address_invalid", []string{"endpoint", "show", "bad address"}, nil, "address_invalid", 2},
+	{"show_not_found", []string{"endpoint", "show", "o/g/none"}, nil, "not_found", 1},
 }
 
 var (
@@ -385,6 +419,9 @@ func TestEndpointRefusals(t *testing.T) {
 			}
 			args = append(args, "--json")
 			so, se, code := h.run(args...)
+			if code != c.wantExit {
+				t.Errorf("exit %d, want %d for code %s: %q %q", code, c.wantExit, c.wantCode, so, se)
+			}
 			if code == 0 && c.wantCode != "no_local_creds" { // a skipped endpoint is not a failure
 				t.Errorf("exit 0, want a refusal or error: %q %q", so, se)
 			}

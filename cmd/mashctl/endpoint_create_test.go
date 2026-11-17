@@ -44,8 +44,8 @@ func fileMode(t *testing.T, p string) os.FileMode {
 	return fi.Mode().Perm()
 }
 
-// enrollCreate runs the library part of a create, as a run that stopped before it wrote the file would have.
-func enrollCreate(h *fleetEnv, a sap.Address, pub string) (enroll.Result, error) {
+// enrollCreateFor runs the library part of a create, as a run that stopped before it wrote the file would have.
+func enrollCreateFor(h *fleetEnv, a sap.Address, pub string) (enroll.Result, error) {
 	_, acct, err := h.keys().Account()
 	if err != nil {
 		return enroll.Result{}, err
@@ -201,7 +201,7 @@ func TestEndpointCreateRerunCompletes(t *testing.T) {
 	out := t.TempDir()
 	pub, pubFile, _ := epKey(t, out, "k")
 	a := ad("again")
-	if _, err := enrollCreate(h, a, pub); err != nil {
+	if _, err := enrollCreateFor(h, a, pub); err != nil {
 		t.Fatal(err)
 	}
 	jf := filepath.Join(out, "again.jwt")

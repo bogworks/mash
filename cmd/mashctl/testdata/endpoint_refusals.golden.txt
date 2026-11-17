@@ -9,7 +9,8 @@ usage: mashctl endpoint create [ADDRESS] [--owner O] [--group G] [--name N] (--p
   --public-key FILE  sign the public key the endpoint made (mash key create); the JWT is written to --jwt-out
   --make-key         make the key on this host and write <config dir>/<address>.creds (mode 0600); the key is kept in
                      <creds file>.pending until the creds file is written, so the same command run again after a kill
-                     finishes with the same key
+                     finishes with the same key. A staged key the account revokes is refused (staged_key_revoked); when
+                     the address is taken or retired the file is removed, since that key can never be used for it
   A group cannot be changed later: make a new endpoint and delete the old one. The environment does not give a group.
   exit codes: 0 done or planned, 1 refused, 2 usage, 6 error
 Example:
@@ -44,7 +45,8 @@ usage: mashctl endpoint create [ADDRESS] [--owner O] [--group G] [--name N] (--p
   --public-key FILE  sign the public key the endpoint made (mash key create); the JWT is written to --jwt-out
   --make-key         make the key on this host and write <config dir>/<address>.creds (mode 0600); the key is kept in
                      <creds file>.pending until the creds file is written, so the same command run again after a kill
-                     finishes with the same key
+                     finishes with the same key. A staged key the account revokes is refused (staged_key_revoked); when
+                     the address is taken or retired the file is removed, since that key can never be used for it
   A group cannot be changed later: make a new endpoint and delete the old one. The environment does not give a group.
   exit codes: 0 done or planned, 1 refused, 2 usage, 6 error
 Example:
@@ -466,6 +468,31 @@ stdout:
     "detail": "<TMP>/o.g.a.creds already exists for another key and is never overwritten; move it aside and run the same command again"
   }
 }
+== create_staged_key_revoked
+exit 1
+stderr:
+mashctl: endpoint create: refused (staged_key_revoked): the staged key <TMP>/o.g.a.creds.pending was revoked; remove <TMP>/o.g.a.creds.pending and run the command again
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "refused",
+  "owner": "o",
+  "group": "g",
+  "instance": "a",
+  "address": "o.g.a",
+  "key": "o_g_a",
+  "creds_path": "<TMP>/o.g.a.creds",
+  "creds_written": false,
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "staged_key_revoked",
+    "detail": "the staged key <TMP>/o.g.a.creds.pending was revoked; remove <TMP>/o.g.a.creds.pending and run the command again"
+  }
+}
 == create_no_account_key
 exit 1
 stderr:
@@ -514,6 +541,31 @@ stdout:
   "refusal": {
     "code": "server",
     "detail": "mashctl: connect nats://127.0.0.1:1: nats: no servers available for connection (check MASH_URL and that at least one listed server is up); nothing was changed, run the same command again once the server is reachable"
+  }
+}
+== create_enroll_server
+exit 6
+stderr:
+mashctl: endpoint create: error (server): the server stopped answering; run the same command again to finish it
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "error",
+  "owner": "o",
+  "group": "g",
+  "instance": "a",
+  "address": "o.g.a",
+  "key": "o_g_a",
+  "jwt_path": "<TMP>/out.jwt",
+  "jwt_written": false,
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "server",
+    "detail": "the server stopped answering; run the same command again to finish it"
   }
 }
 == create_write
@@ -671,6 +723,8 @@ usage: mashctl endpoint reissue ADDRESS (--public-key FILE | --make-key) [--jwt-
   command run again after a kill finishes with the same key.
   A rerun of --public-key FILE --jwt-out FILE after a run that switched the directory to the key but did not write the
   JWT is a resume: <jwt-out>.pending (mode 0600) records the rotation, and the rerun writes the JWT and removes it.
+  A staged key that the account revokes is refused (staged_key_revoked): remove the .pending file and run again;
+  a check that cannot be made is an error (revocation_unknown).
   --changed also reissues an endpoint with a staged <creds file>.pending (rotation_pending) or whose current key is
   revoked (key_revoked); one whose revocation cannot be checked is an error, revocation_unknown, never "unchanged".
   Refusals include key_unchanged: --public-key names the key the endpoint already has, so nothing would be rotated.
@@ -722,6 +776,8 @@ usage: mashctl endpoint reissue ADDRESS (--public-key FILE | --make-key) [--jwt-
   command run again after a kill finishes with the same key.
   A rerun of --public-key FILE --jwt-out FILE after a run that switched the directory to the key but did not write the
   JWT is a resume: <jwt-out>.pending (mode 0600) records the rotation, and the rerun writes the JWT and removes it.
+  A staged key that the account revokes is refused (staged_key_revoked): remove the .pending file and run again;
+  a check that cannot be made is an error (revocation_unknown).
   --changed also reissues an endpoint with a staged <creds file>.pending (rotation_pending) or whose current key is
   revoked (key_revoked); one whose revocation cannot be checked is an error, revocation_unknown, never "unchanged".
   Refusals include key_unchanged: --public-key names the key the endpoint already has, so nothing would be rotated.
@@ -1009,6 +1065,31 @@ stdout:
     "detail": "mashctl: connect nats://127.0.0.1:1: nats: no servers available for connection (check MASH_URL and that at least one listed server is up); nothing was changed"
   }
 }
+== reissue_enroll_server
+exit 6
+stderr:
+mashctl: endpoint reissue: error (server): the server stopped answering; run the same command again to finish it
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "error",
+  "owner": "o",
+  "group": "g",
+  "instance": "a",
+  "address": "o.g.a",
+  "key": "o_g_a",
+  "creds_path": "<TMP>/o.g.a.creds",
+  "creds_written": false,
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "server",
+    "detail": "the server stopped answering; run the same command again to finish it"
+  }
+}
 == reissue_endpoint_missing
 exit 1
 stderr:
@@ -1273,6 +1354,8 @@ usage: mashctl endpoint reissue ADDRESS (--public-key FILE | --make-key) [--jwt-
   command run again after a kill finishes with the same key.
   A rerun of --public-key FILE --jwt-out FILE after a run that switched the directory to the key but did not write the
   JWT is a resume: <jwt-out>.pending (mode 0600) records the rotation, and the rerun writes the JWT and removes it.
+  A staged key that the account revokes is refused (staged_key_revoked): remove the .pending file and run again;
+  a check that cannot be made is an error (revocation_unknown).
   --changed also reissues an endpoint with a staged <creds file>.pending (rotation_pending) or whose current key is
   revoked (key_revoked); one whose revocation cannot be checked is an error, revocation_unknown, never "unchanged".
   Refusals include key_unchanged: --public-key names the key the endpoint already has, so nothing would be rotated.
@@ -1323,6 +1406,8 @@ usage: mashctl endpoint reissue ADDRESS (--public-key FILE | --make-key) [--jwt-
   command run again after a kill finishes with the same key.
   A rerun of --public-key FILE --jwt-out FILE after a run that switched the directory to the key but did not write the
   JWT is a resume: <jwt-out>.pending (mode 0600) records the rotation, and the rerun writes the JWT and removes it.
+  A staged key that the account revokes is refused (staged_key_revoked): remove the .pending file and run again;
+  a check that cannot be made is an error (revocation_unknown).
   --changed also reissues an endpoint with a staged <creds file>.pending (rotation_pending) or whose current key is
   revoked (key_revoked); one whose revocation cannot be checked is an error, revocation_unknown, never "unchanged".
   Refusals include key_unchanged: --public-key names the key the endpoint already has, so nothing would be rotated.
@@ -1373,6 +1458,8 @@ usage: mashctl endpoint reissue ADDRESS (--public-key FILE | --make-key) [--jwt-
   command run again after a kill finishes with the same key.
   A rerun of --public-key FILE --jwt-out FILE after a run that switched the directory to the key but did not write the
   JWT is a resume: <jwt-out>.pending (mode 0600) records the rotation, and the rerun writes the JWT and removes it.
+  A staged key that the account revokes is refused (staged_key_revoked): remove the .pending file and run again;
+  a check that cannot be made is an error (revocation_unknown).
   --changed also reissues an endpoint with a staged <creds file>.pending (rotation_pending) or whose current key is
   revoked (key_revoked); one whose revocation cannot be checked is an error, revocation_unknown, never "unchanged".
   Refusals include key_unchanged: --public-key names the key the endpoint already has, so nothing would be rotated.
@@ -1702,6 +1789,14 @@ stdout:
       "address": "",
       "purpose": "use",
       "detail": ""
+    },
+    {
+      "sender": "operator",
+      "step": "rerun",
+      "action": "reissue the endpoints that did not finish; --changed leaves the ones that succeeded alone",
+      "address": "",
+      "purpose": "use",
+      "detail": "mashctl endpoint reissue --changed --make-key --yes"
     }
   ],
   "refusal": null

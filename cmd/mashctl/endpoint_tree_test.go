@@ -15,28 +15,30 @@ import (
 // every command of the noun passes every check.
 var treeExceptions = map[string]string{}
 
-// treeCommand is one command of the endpoint noun and what the command-tree test expects of it.
-type treeCommand struct {
-	verb       string
-	positional int  // most positional arguments it takes
-	changes    bool // it changes state, so it has --dry-run
-	reads      bool // it only reads, so it has --json
+// treeSample is what the tree test passes one verb of endpointVerbTable. A verb in the table with no sample fails the
+// test: add one to treeSamples.
+type treeSample struct {
+	usage      string
+	positional int // most positional arguments it takes
+	// readArgs are the arguments after the verb of a read command that succeed on the seeded endpoint
+	readArgs func(a sap.Address) []string
+	// dryArgs are the arguments after the verb of a changing command, with --dry-run added by the test, that succeed
+	dryArgs func(seeded sap.Address, pubFile string) []string
+	// needsKey is set when the verb requires --public-key or --make-key, so the positional-count check supplies one
+	needsKey bool
 }
 
-var treeCommands = []treeCommand{
-	{verb: "create", positional: 1, changes: true},
-	{verb: "reissue", positional: 1, changes: true},
-	{verb: "delete", positional: 1, changes: true},
-	{verb: "list", positional: 0, reads: true},
-	{verb: "show", positional: 1, reads: true},
-}
-
-// treeReadArgs is the arguments of a read command that has one: the seeded endpoint.
-func treeReadArgs(c treeCommand, a sap.Address) []string {
-	if c.positional == 0 {
-		return nil
-	}
-	return []string{slashForm(a)}
+var treeSamples = map[string]treeSample{
+	"create": {usage: endpointCreateUsage, positional: 1, needsKey: true,
+		dryArgs: func(_ sap.Address, pub string) []string { return []string{ad("treenew").String(), "--public-key", pub} }},
+	"reissue": {usage: endpointReissueUsage, positional: 1, needsKey: true,
+		dryArgs: func(a sap.Address, pub string) []string { return []string{a.String(), "--public-key", pub} }},
+	"delete": {usage: endpointDeleteUsage, positional: 1,
+		dryArgs: func(a sap.Address, _ string) []string { return []string{a.String()} }},
+	"list": {usage: endpointListUsage, positional: 0,
+		readArgs: func(sap.Address) []string { return nil }},
+	"show": {usage: endpointShowUsage, positional: 1,
+		readArgs: func(a sap.Address) []string { return []string{slashForm(a)} }},
 }
 
 func treeExcused(verb, check string) bool {
@@ -48,86 +50,97 @@ func treeExcused(verb, check string) bool {
 func usageLine(u string) string { l, _, _ := strings.Cut(u, "\n"); return l }
 
 func TestEndpointCommandTree(t *testing.T) {
-	usages := map[string]string{"create": endpointCreateUsage, "reissue": endpointReissueUsage, "delete": endpointDeleteUsage,
-		"list": endpointListUsage, "show": endpointShowUsage}
+	if len(endpointVerbTable) == 0 {
+		t.Fatal("endpointVerbTable is empty")
+	}
 	h := newFleetEnv(t)
 	pubDir := t.TempDir()
 	_, pubFile, _ := epKey(t, pubDir, "tree")
 	addr := ad("tree")
 	h.seed(addr)
 
-	// the verb list in the noun's own help names exactly these commands
-	for _, c := range treeCommands {
-		if !strings.Contains(endpointVerbs, c.verb) {
-			t.Errorf("endpointVerbs %q lacks %s", endpointVerbs, c.verb)
+	// the verb list in the noun's own help names exactly the table's verbs
+	listed := strings.Split(endpointVerbs, ", ")
+	if len(listed) != len(endpointVerbTable) {
+		t.Errorf("endpointVerbs names %d verbs, the table has %d", len(listed), len(endpointVerbTable))
+	}
+	inTable := map[string]bool{}
+	for i, v := range endpointVerbTable {
+		inTable[v.name] = true
+		if i < len(listed) && listed[i] != v.name {
+			t.Errorf("endpointVerbs names %q at position %d, the table has %q", listed[i], i+1, v.name)
+		}
+		if v.read == v.changes {
+			t.Errorf("verb %s: read and changes must differ (read %v, changes %v)", v.name, v.read, v.changes)
 		}
 	}
-	if got := len(strings.Split(endpointVerbs, ", ")); got != len(treeCommands) {
-		t.Errorf("endpointVerbs names %d verbs, the table has %d", got, len(treeCommands))
-	}
 
-	// no aliases: a verb that is not listed exits 2
-	for _, v := range []string{"add", "remove", "rm", "new", "ls", "get", "retire", "rotate", "update"} {
-		if _, _, code := h.run("endpoint", v); code != 2 {
-			t.Errorf("endpoint %s: exit %d, want 2", v, code)
+	// no aliases: a verb that is not in the table exits 2
+	for _, alias := range []string{"add", "remove", "rm", "new", "ls", "get", "retire", "rotate", "update"} {
+		if inTable[alias] {
+			continue
+		}
+		if _, _, code := h.run("endpoint", alias); code != 2 {
+			t.Errorf("endpoint %s: exit %d, want 2", alias, code)
 		}
 	}
 
-	for _, c := range treeCommands {
-		u := usages[c.verb]
-		t.Run(c.verb, func(t *testing.T) {
+	for _, c := range endpointVerbTable {
+		t.Run(c.name, func(t *testing.T) {
+			smp, ok := treeSamples[c.name]
+			if !ok {
+				t.Fatalf("endpointVerbTable has %q and treeSamples has no sample for it: add one to endpoint_tree_test.go", c.name)
+			}
 			// at most one positional argument, and the usage line names it
-			if !treeExcused(c.verb, "positional") {
-				first := usageLine(u)
-				if c.positional == 1 && !strings.Contains(first, "ADDRESS") {
+			if !treeExcused(c.name, "positional") {
+				first := usageLine(smp.usage)
+				if smp.positional == 1 && !strings.Contains(first, "ADDRESS") {
 					t.Errorf("usage line %q does not name ADDRESS", first)
 				}
-				if c.positional == 0 && strings.Contains(first, "ADDRESS") {
+				if smp.positional == 0 && strings.Contains(first, "ADDRESS") {
 					t.Errorf("usage line %q names a positional the command does not take", first)
 				}
-				args := []string{"endpoint", c.verb}
-				for i := 0; i <= c.positional; i++ {
+				args := []string{"endpoint", c.name}
+				for i := 0; i <= smp.positional; i++ {
 					args = append(args, "x"+string(rune('a'+i))+"/dev/y")
 				}
-				if c.verb == "create" || c.verb == "reissue" {
+				if smp.needsKey {
 					args = append(args, "--public-key", pubFile)
 				}
 				if _, _, code := h.run(args...); code != 2 {
-					t.Errorf("%d positional arguments: exit %d, want 2", c.positional+1, code)
+					t.Errorf("%d positional arguments: exit %d, want 2", smp.positional+1, code)
 				}
 			}
 			// --help first: exit 0, with an example
-			if !treeExcused(c.verb, "help") {
-				out, errb, code := h.run("endpoint", c.verb, "--help")
+			if !treeExcused(c.name, "help") {
+				out, errb, code := h.run("endpoint", c.name, "--help")
 				if code != 0 || !strings.Contains(out, "Example") || errb != "" {
 					t.Errorf("--help: exit %d stdout %q stderr %q", code, out, errb)
 				}
 			}
 			// an unknown flag exits 2
-			if !treeExcused(c.verb, "unknown_flag") {
-				if _, _, code := h.run("endpoint", c.verb, "--no-such-flag"); code != 2 {
+			if !treeExcused(c.name, "unknown_flag") {
+				if _, _, code := h.run("endpoint", c.name, "--no-such-flag"); code != 2 {
 					t.Errorf("unknown flag: exit %d, want 2", code)
 				}
 			}
 			// a read command prints JSON that parses
-			if c.reads && !treeExcused(c.verb, "json") {
-				out, errb, code := h.run(append(append([]string{"endpoint", c.verb}, treeReadArgs(c, addr)...), "--json")...)
+			if c.read && !treeExcused(c.name, "json") {
+				if smp.readArgs == nil {
+					t.Fatalf("verb %s is a read command and its sample has no readArgs", c.name)
+				}
+				out, errb, code := h.run(append(append([]string{"endpoint", c.name}, smp.readArgs(addr)...), "--json")...)
 				var v map[string]any
 				if code != 0 || json.Unmarshal([]byte(out), &v) != nil {
 					t.Errorf("--json: exit %d stdout %q stderr %q", code, out, errb)
 				}
 			}
 			// a changing command with --dry-run changes nothing
-			if c.changes && !treeExcused(c.verb, "dry_run") {
-				var args []string
-				switch c.verb {
-				case "create":
-					args = []string{"endpoint", "create", ad("treenew").String(), "--public-key", pubFile, "--dry-run"}
-				case "reissue":
-					args = []string{"endpoint", "reissue", addr.String(), "--public-key", pubFile, "--dry-run"}
-				case "delete":
-					args = []string{"endpoint", "delete", addr.String(), "--dry-run"}
+			if c.changes && !treeExcused(c.name, "dry_run") {
+				if smp.dryArgs == nil {
+					t.Fatalf("verb %s is a changing command and its sample has no dryArgs", c.name)
 				}
+				args := append(append([]string{"endpoint", c.name}, smp.dryArgs(addr, pubFile)...), "--dry-run")
 				before := epSnapshot(t, h, h.dir)
 				out, errb, code := h.run(args...)
 				if code != 0 {

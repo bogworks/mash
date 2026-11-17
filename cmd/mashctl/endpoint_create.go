@@ -775,7 +775,7 @@ func runEndpointCreate(args []string, env func(string) string, lookup config.Loo
 			epAfterStage()
 		}
 	}
-	res, err := enroll.Create(ctx, deps, enroll.Request{Addr: addr, PublicKey: pub, Note: note,
+	res, err := enrollCreate(ctx, deps, enroll.Request{Addr: addr, PublicKey: pub, Note: note,
 		Meta: admin.Meta{Labels: labels, Description: describe, Caps: caps}})
 	if err != nil {
 		if r, ok := epRefusalOf(err); ok {
@@ -784,7 +784,7 @@ func runEndpointCreate(args []string, env func(string) string, lookup config.Loo
 			}
 			return refuse(1, dropPending(r))
 		}
-		return epErr(doc, "create", "enroll", admin.RewordUnavailable(err.Error())+"; run the same command again to finish it", c.jsonOut, stdout, stderr)
+		return epErr(doc, "create", "server", admin.RewordUnavailable(err.Error())+"; run the same command again to finish it", c.jsonOut, stdout, stderr)
 	}
 	doc.UserPublicKey = res.PublicKey
 
@@ -853,3 +853,8 @@ func epCredsUser(path string, addr sap.Address) (string, error) {
 	}
 	return uc.Subject, nil
 }
+
+// enrollCreate and enrollReissue are the library calls the commands make. Tests replace them to inject a failure
+// that is not a refusal; nothing else does.
+var enrollCreate = enroll.Create
+var enrollReissue = enroll.Reissue

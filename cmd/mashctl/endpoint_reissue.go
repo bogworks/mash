@@ -552,7 +552,7 @@ func (r epRun) reissue(addr sap.Address, makeKey bool, pub, outPath string, resu
 			acked = n
 			return err
 		}}
-	res, err := enroll.Reissue(r.ctx, deps, addr, pub)
+	res, err := enrollReissue(r.ctx, deps, addr, pub)
 	if err != nil {
 		var fi *epFutureIssuedError
 		if errors.As(err, &fi) {
@@ -571,7 +571,7 @@ func (r epRun) reissue(addr sap.Address, makeKey bool, pub, outPath string, resu
 			}
 			return "", 0, &epFail{refused: true, code: ref.Code, detail: ref.Detail}
 		}
-		return "", 0, &epFail{code: "enroll", detail: admin.RewordUnavailable(err.Error()) + "; run the same command again to finish it"}
+		return "", 0, &epFail{code: "server", detail: admin.RewordUnavailable(err.Error()) + "; run the same command again to finish it"}
 	}
 	var werr error
 	if makeKey {

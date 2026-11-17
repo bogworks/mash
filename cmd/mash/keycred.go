@@ -113,15 +113,43 @@ func keycredCmd(args []string, env func(string) string, stdout, stderr io.Writer
 		fmt.Fprintf(stderr, "mash %s: needs a subcommand: create\n%s", verb, usage)
 		return 2
 	}
-	if args[1] != "create" {
-		fmt.Fprintf(stderr, "mash %s: unknown subcommand %q; the only one is create (try: mash %s --help)\n", verb, args[1], verb)
+	var found *keycredVerb
+	var names []string
+	for i, v := range keycredVerbTable {
+		if v.noun != verb {
+			continue
+		}
+		names = append(names, v.name)
+		if v.name == args[1] {
+			found = &keycredVerbTable[i]
+		}
+	}
+	if found == nil {
+		fmt.Fprintf(stderr, "mash %s: unknown subcommand %q; the only one is %s (try: mash %s --help)\n", verb, args[1], strings.Join(names, ", "), verb)
 		return 2
 	}
-	rest := args[2:]
-	if verb == "key" {
-		return keyCreateCmd(rest, stdout, stderr)
-	}
-	return credentialCreateCmd(rest, env, stdout, stderr)
+	return found.run(args[2:], env, stdout, stderr)
+}
+
+// keycredVerb is one command of the key and credential nouns. The dispatch and the command-tree test both read
+// keycredVerbTable, so a new verb is dispatched and tested from one entry.
+type keycredVerb struct {
+	noun    string
+	name    string
+	usage   string // the help text of `mash NOUN NAME`
+	run     func(rest []string, env func(string) string, stdout, stderr io.Writer) int
+	changes bool // it writes files, so it has --dry-run
+}
+
+var keycredVerbTable = []keycredVerb{
+	{noun: "key", name: "create", usage: keyCreateUsage, changes: true,
+		run: func(rest []string, _ func(string) string, stdout, stderr io.Writer) int {
+			return keyCreateCmd(rest, stdout, stderr)
+		}},
+	{noun: "credential", name: "create", usage: credentialCreateUsage, changes: true,
+		run: func(rest []string, env func(string) string, stdout, stderr io.Writer) int {
+			return credentialCreateCmd(rest, env, stdout, stderr)
+		}},
 }
 
 type keycredFlags struct {
