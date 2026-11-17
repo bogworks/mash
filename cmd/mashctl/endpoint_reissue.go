@@ -212,20 +212,31 @@ func runEndpointReissue(args []string, env func(string) string, lookup config.Lo
 	if err := checkServerSet(ctx, cfg, env, servers); err != nil {
 		return epErr(doc, "reissue", "servers", fmt.Sprintf("%v; %s", err, ctl.NotRevoked), c.jsonOut, stdout, stderr)
 	}
-	if c.makeKey {
-		// One reissue at a time per creds file: enroll.Reissue and the replace of the file are one step, so two runs
-		// cannot leave the directory on one key and the file on the other.
-		if err := epPrepDir(filepath.Dir(outPath)); err != nil {
-			return epErr(doc, "reissue", "write", fmt.Sprintf("the creds directory is not usable: %v; nothing was changed", err), c.jsonOut, stdout, stderr)
+	// One reissue at a time per endpoint, in every key mode: enroll.Reissue and the write of the output file are one
+	// step, so two runs cannot rotate the server key twice or leave the output on a key that is already revoked. The
+	// lock is a directory beside the endpoint's creds path (keyed by the address); with no config directory it sits
+	// beside the output file.
+	lockPath := outPath + ".lock"
+	if cp, cerr := credsFileFor(cfg, addr); cerr == nil {
+		lockPath = cp + ".lock"
+	}
+	if err := epPrepDir(filepath.Dir(lockPath)); err != nil {
+		return epErr(doc, "reissue", "write", fmt.Sprintf("the directory for the lock is not usable: %v; nothing was changed", err), c.jsonOut, stdout, stderr)
+	}
+	unlock, lerr := epLock(lockPath)
+	if errors.Is(lerr, errEpBusy) {
+		return refuse(1, &epRefusal{"reissue_busy", fmt.Sprintf("another reissue of %s is running; if none is (a run was killed), remove the directory %s and run this again", addr, lockPath)})
+	}
+	if lerr != nil {
+		return epErr(doc, "reissue", "write", fmt.Sprintf("cannot take the lock %s: %v; nothing was changed", lockPath, lerr), c.jsonOut, stdout, stderr)
+	}
+	defer unlock()
+	if !c.makeKey {
+		// A run that held the lock before this one may have written the file: check again under the lock, before the
+		// server key is rotated, so a refusal here changes nothing.
+		if _, serr := os.Lstat(outPath); serr == nil {
+			return refuse(1, &epRefusal{"file_exists", fmt.Sprintf("%s already exists and is never overwritten; nothing was changed: name another file with --jwt-out", outPath)})
 		}
-		unlock, lerr := epLock(outPath + ".lock")
-		if errors.Is(lerr, errEpBusy) {
-			return refuse(1, &epRefusal{"reissue_busy", fmt.Sprintf("another reissue of %s is running; if none is (a run was killed), remove the directory %s and run this again", addr, outPath+".lock")})
-		}
-		if lerr != nil {
-			return epErr(doc, "reissue", "write", fmt.Sprintf("cannot take the lock %s: %v; nothing was changed", outPath+".lock", lerr), c.jsonOut, stdout, stderr)
-		}
-		defer unlock()
 	}
 	deps := enroll.Deps{Keys: keys, Admin: adm, Account: acct,
 		Revoke: func(ctx context.Context, u string) error {

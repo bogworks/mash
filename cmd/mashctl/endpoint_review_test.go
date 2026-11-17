@@ -361,3 +361,65 @@ func TestEndpointPublicKeyIssuedNamesRemedy(t *testing.T) {
 		t.Errorf("%+v", doc)
 	}
 }
+
+func TestEndpointReissueConcurrentPublicKey(t *testing.T) {
+	h := newFleetEnv(t)
+	var mu sync.Mutex
+	rotations := 0
+	prev := revokeUsers
+	revokeUsers = func(_ context.Context, _ config.Config, _ func(string) string, _ int, _ []string, _ io.Writer, _ func() time.Time) error {
+		mu.Lock()
+		defer mu.Unlock()
+		rotations++
+		time.Sleep(20 * time.Millisecond)
+		return nil
+	}
+	t.Cleanup(func() { revokeUsers = prev })
+	out := t.TempDir()
+	a := ad("pk")
+	_, pub0, _ := epKey(t, out, "k0")
+	if _, se, code := h.run("endpoint", "create", a.String(), "--public-key", pub0, "--jwt-out", filepath.Join(out, "k0.jwt")); code != 0 {
+		t.Fatalf("create: %q", se)
+	}
+	_, pub1, _ := epKey(t, out, "k1")
+	_, pub2, _ := epKey(t, out, "k2")
+	jwtOut := filepath.Join(out, "new.jwt")
+	var wg sync.WaitGroup
+	codes := make([]int, 2)
+	errs := make([]string, 2)
+	for i, pub := range []string{pub1, pub2} {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, errs[i], codes[i] = h.run("endpoint", "reissue", a.String(), "--public-key", pub, "--jwt-out", jwtOut)
+		}()
+	}
+	wg.Wait()
+	ok := 0
+	for i, c := range codes {
+		switch c {
+		case 0:
+			ok++
+		case 1:
+			if !strings.Contains(errs[i], "file_exists") && !strings.Contains(errs[i], "key_revoked") {
+				t.Errorf("run %d: exit 1 without file_exists: %s", i, errs[i])
+			}
+		default:
+			t.Errorf("run %d: exit %d: %s", i, c, errs[i])
+		}
+	}
+	if ok != 1 || rotations != 1 {
+		t.Fatalf("%d runs succeeded, the server key rotated %d times; want 1 and 1 (%v)", ok, rotations, errs)
+	}
+	tok, err := os.ReadFile(jwtOut)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uc, err := jwt.DecodeUserClaims(strings.TrimSpace(string(tok)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec, found := h.record(a); !found || rec.User != uc.Subject {
+		t.Errorf("directory key %q, output JWT key %q", rec.User, uc.Subject)
+	}
+}
