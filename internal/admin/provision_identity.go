@@ -370,3 +370,19 @@ func (a *Admin) IsBurned(ctx context.Context, addr sap.Address) (bool, error) {
 	}
 	return pm != nil, nil
 }
+
+// RetireState reports the state of addr's retired marker: "" when it has none, else "pending" or "final". It reads the
+// marker without taking the name's lock.
+func (a *Admin) RetireState(ctx context.Context, addr sap.Address) (string, error) {
+	if err := addr.Validate(); err != nil {
+		return "", fmt.Errorf("mash: retire state: %w", err)
+	}
+	pm, err := a.loadRetire(ctx, addr)
+	if err != nil || pm == nil {
+		return "", err
+	}
+	if pm.m.IsPending() {
+		return store.RetiredPending, nil
+	}
+	return store.RetiredFinal, nil
+}

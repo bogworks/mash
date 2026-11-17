@@ -124,7 +124,7 @@ func TestLabelAndPolicyDoNotEchoInvalidArguments(t *testing.T) {
 		{"label", "o.g.a", seedShaped},
 		{"label", "o.g.a", seedShaped + "=x"},
 		{"unlabel", "o.g.a", seedShaped + "=x"},
-		{"retire", seedShaped},
+		{"endpoint", "delete", seedShaped},
 		{"policy", seedShaped},
 		{"policy", "--" + seedShaped + "=1"},
 	} {

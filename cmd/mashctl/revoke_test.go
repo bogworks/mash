@@ -31,7 +31,7 @@ type revokeStub struct {
 	seen  [][]string
 }
 
-func (s *revokeStub) fn(_ context.Context, _ config.Config, env func(string) string, servers int, users []string, out io.Writer, _ func() time.Time) error {
+func (s *revokeStub) fn(_ context.Context, _ config.Config, env func(string) string, servers int, users []string, out io.Writer, _ func() time.Time) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.calls = append(s.calls, users...)
@@ -41,12 +41,12 @@ func (s *revokeStub) fn(_ context.Context, _ config.Config, env func(string) str
 		s.seen = append(s.seen, s.probe())
 	}
 	if s.err != nil {
-		return s.err
+		return 0, s.err
 	}
 	for _, u := range users {
 		fmt.Fprintf(out, "revoked user key %s...: 1 server(s) acknowledged\n", ctl.ShortKey(u))
 	}
-	return nil
+	return fakeAcked, nil
 }
 
 // stubRevoke replaces revokeUsers for the test and restores it.
@@ -68,7 +68,7 @@ func TestRetireRevokesBeforeDeleting(t *testing.T) {
 	s := stubRevoke(t)
 	s.probe = h.records
 	h.env["MASH_SYS_CREDS"], h.env["MASH_SERVERS"] = "/x/sys.creds", "3"
-	out, errb, code := h.run("retire", "o.g.a")
+	out, errb, code := h.run("endpoint", "delete", "o.g.a")
 	if code != 0 {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
@@ -81,7 +81,7 @@ func TestRetireRevokesBeforeDeleting(t *testing.T) {
 	if len(h.records()) != 0 {
 		t.Error("record left")
 	}
-	if !strings.HasPrefix(out, "retired o.g.a\n") || !strings.Contains(out, "revoked in the account JWT") || strings.Contains(out, "not implemented") {
+	if !strings.HasPrefix(out, "deleted o/g/a (o.g.a)\n") || !strings.Contains(out, "revoked in the account JWT") || strings.Contains(out, "not implemented") {
 		t.Errorf("out %q", out)
 	}
 }
@@ -91,8 +91,8 @@ func TestRetireRefusedWhenRevokeFails(t *testing.T) {
 	h.provisionDeclared("a")
 	s := stubRevoke(t)
 	s.err = errors.New("no system account credentials")
-	out, errb, code := h.run("retire", "o.g.a")
-	if code != 1 || strings.Contains(out, "retired") || !strings.Contains(errb, "no system account credentials") || !strings.Contains(errb, "--no-revoke") || !strings.Contains(errb, "nothing was removed") {
+	out, errb, code := h.run("endpoint", "delete", "o.g.a")
+	if code != 1 || strings.Contains(out, "deleted") || !strings.Contains(errb, "no system account credentials") || !strings.Contains(errb, "--no-revoke") || !strings.Contains(errb, "nothing was removed") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
 	if len(h.records()) != 1 {
@@ -105,7 +105,7 @@ func TestRetireNoRevokeSkips(t *testing.T) {
 	h.provisionDeclared("a")
 	s := stubRevoke(t)
 	s.err = errors.New("must not be called")
-	out, errb, code := h.run("retire", "o.g.a", "--no-revoke")
+	out, errb, code := h.run("endpoint", "delete", "o.g.a", "--no-revoke")
 	if code != 0 || len(s.calls) != 0 || !strings.Contains(out, "not revoked") {
 		t.Fatalf("%d %v %q %q", code, s.calls, out, errb)
 	}
@@ -118,7 +118,7 @@ func TestRetireNoRevokeSkips(t *testing.T) {
 func TestRetireForceWithoutRecordRevokesNothing(t *testing.T) {
 	h := newFleetEnv(t)
 	s := stubRevoke(t)
-	out, errb, code := h.run("retire", "o.g.a", "--force")
+	out, errb, code := h.run("endpoint", "delete", "o.g.a", "--force")
 	if code != 0 || len(s.calls) != 0 || !strings.Contains(errb, "nothing was revoked") {
 		t.Fatalf("%d %v %q %q", code, s.calls, out, errb)
 	}
@@ -127,11 +127,11 @@ func TestRetireForceWithoutRecordRevokesNothing(t *testing.T) {
 func TestRetireBadServersAndUsage(t *testing.T) {
 	h := newFleetEnv(t)
 	h.env["MASH_SERVERS"] = "zero"
-	if _, errb, code := h.run("retire", "o.g.a"); code != 2 || !strings.Contains(errb, "MASH_SERVERS must be") {
+	if _, errb, code := h.run("endpoint", "delete", "o.g.a"); code != 2 || !strings.Contains(errb, "MASH_SERVERS must be") {
 		t.Fatalf("%d %q", code, errb)
 	}
 	delete(h.env, "MASH_SERVERS")
-	if _, errb, code := h.run("retire", "o.g.a", "--bogus"); code != 2 || !strings.Contains(errb, "unknown option") || !strings.Contains(errb, "[--no-revoke]") {
+	if _, errb, code := h.run("endpoint", "delete", "o.g.a", "--bogus"); code != 2 || !strings.Contains(errb, "unknown option") || !strings.Contains(errb, "endpoint delete --help") {
 		t.Fatalf("%d %q", code, errb)
 	}
 }
@@ -146,7 +146,7 @@ func TestDeprovisionAcceptsServersAndSysCredsFlags(t *testing.T) {
 }
 
 func TestRevokeUserKeysNoSysCredsSaysMashSysCreds(t *testing.T) {
-	err := revokeUserKeys(context.Background(), config.Config{Dir: t.TempDir()}, func(string) string { return "" }, 0, nil, io.Discard, nil)
+	_, err := revokeUserKeys(context.Background(), config.Config{Dir: t.TempDir()}, func(string) string { return "" }, 0, nil, io.Discard, nil)
 	if err == nil {
 		t.Fatal("no error")
 	}
@@ -264,8 +264,8 @@ func TestDeprovisionDrainedRevokes(t *testing.T) {
 }
 
 func TestUsageTexts(t *testing.T) {
-	if !strings.Contains(retireUsage, "[--force] [--no-revoke]") || !strings.Contains(retireUsage, "--sys-creds FILE") || !strings.Contains(retireUsage, "--servers N") {
-		t.Errorf("retireUsage %q", retireUsage)
+	if !strings.Contains(endpointDeleteUsage, "[--force] [--no-revoke]") || !strings.Contains(endpointDeleteUsage, "--sys-creds FILE") || !strings.Contains(endpointDeleteUsage, "--servers N") {
+		t.Errorf("endpointDeleteUsage %q", endpointDeleteUsage)
 	}
 }
 
@@ -316,11 +316,11 @@ func TestRetireWithAShortUserValueDoesNotPanic(t *testing.T) {
 	h.shortUser("b", "abc")
 	s := stubRevoke(t)
 	s.err = errors.New("resolver down")
-	if _, errb, code := h.run("retire", "o.g.b"); code != 1 || !strings.Contains(errb, "user key abc...") {
+	if _, errb, code := h.run("endpoint", "delete", "o.g.b"); code != 1 || !strings.Contains(errb, "user key abc...") {
 		t.Fatalf("%d %q", code, errb)
 	}
 	s.err = nil
-	out, errb, code := h.run("retire", "o.g.b")
+	out, errb, code := h.run("endpoint", "delete", "o.g.b")
 	if code != 0 || !strings.Contains(out, "user key abc... revoked") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}

@@ -102,20 +102,23 @@ func TestMashctlAddressOnly(t *testing.T) {
 		{"provision", "leg2", "--user", u, "--account", e.Account},
 		{"set-meta", "leg", "--role", "r"},
 		{"suspend", "leg"}, {"resume", "leg"}, {"suspended", "leg"}, {"deprovision", "leg"}, {"permissions", "leg"},
-		{"retire", "leg"}, {"label", "leg", "k=v"}, {"unlabel", "leg", "k"}, {"inbox", "inspect", "leg"},
+		{"label", "leg", "k=v"}, {"unlabel", "leg", "k"}, {"inbox", "inspect", "leg"},
 	} {
 		if _, errb, code := ctlRun(t, e, args...); code == 0 || !strings.Contains(errb, "give owner.group.instance") {
 			t.Errorf("%v: %d %q", args, code, errb)
 		}
 	}
-	for _, verb := range []string{"add", "reissue", "unzone", "set-zone"} {
+	if _, errb, code := ctlRun(t, e, "endpoint", "delete", "leg"); code != 2 || !strings.Contains(errb, "write owner/group/instance") {
+		t.Errorf("endpoint delete leg: %d %q", code, errb)
+	}
+	for _, verb := range []string{"unzone", "set-zone"} {
 		if out, errb, code := ctlRun(t, e, verb, "o.g.leg"); code != 2 || out != "" || !strings.Contains(errb, `unknown command "`+verb+`"`) {
 			t.Errorf("%s: %d %q %q", verb, code, out, errb)
 		}
 	}
 	var h bytes.Buffer
 	runEnv([]string{"help"}, func(string) string { return "" }, &h, &h)
-	for _, gone := range []string{"zone", "agent_token", "reissue", "mashctl add"} {
+	for _, gone := range []string{"zone", "agent_token", "mashctl reissue", "mashctl retire", "mashctl add"} {
 		if strings.Contains(strings.ToLower(h.String()), gone) {
 			t.Errorf("help mentions %q:\n%s", gone, h.String())
 		}

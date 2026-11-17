@@ -1,0 +1,2398 @@
+== create_usage
+exit 2
+stderr:
+mashctl: endpoint create: one endpoint address only
+usage: mashctl endpoint create [ADDRESS] [--owner O] [--group G] [--name N] (--public-key FILE | --make-key)
+                               [--jwt-out FILE] [--label k=v]... [--tool] [--note N] [--describe T] [--cap C]...
+                               [--servers N] [--sys-creds FILE] [--dry-run] [--json]
+  ADDRESS is alice/dev/design, or one token (the instance) with --group. There is no default group.
+  --public-key FILE  sign the public key the endpoint made (mash key create); the JWT is written to --jwt-out.
+                     A key the account JWT revokes is refused (key_revoked); a check that cannot be made is an error
+                     (revocation_unknown), and nothing is changed
+  --make-key         make the key on this host and write <config dir>/<address>.creds (mode 0600); the key is kept in
+                     <creds file>.pending until the creds file is written, so the same command run again after a kill
+                     finishes with the same key. A staged key the account revokes is refused (staged_key_revoked); when
+                     the address is taken or retired the file is removed, since that key can never be used for it
+  A group cannot be changed later: make a new endpoint and delete the old one. The environment does not give a group.
+  exit codes: 0 done or planned, 1 refused, 2 usage, 6 error
+Example:
+  mashctl endpoint create alice/dev/design --public-key design.pub
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "error",
+  "owner": "",
+  "group": "",
+  "instance": "",
+  "address": "",
+  "key": "",
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "usage",
+    "detail": "one endpoint address only"
+  }
+}
+== create_unknown_flag
+exit 2
+stderr:
+mashctl: endpoint create: unknown option "--bogus"
+usage: mashctl endpoint create [ADDRESS] [--owner O] [--group G] [--name N] (--public-key FILE | --make-key)
+                               [--jwt-out FILE] [--label k=v]... [--tool] [--note N] [--describe T] [--cap C]...
+                               [--servers N] [--sys-creds FILE] [--dry-run] [--json]
+  ADDRESS is alice/dev/design, or one token (the instance) with --group. There is no default group.
+  --public-key FILE  sign the public key the endpoint made (mash key create); the JWT is written to --jwt-out.
+                     A key the account JWT revokes is refused (key_revoked); a check that cannot be made is an error
+                     (revocation_unknown), and nothing is changed
+  --make-key         make the key on this host and write <config dir>/<address>.creds (mode 0600); the key is kept in
+                     <creds file>.pending until the creds file is written, so the same command run again after a kill
+                     finishes with the same key. A staged key the account revokes is refused (staged_key_revoked); when
+                     the address is taken or retired the file is removed, since that key can never be used for it
+  A group cannot be changed later: make a new endpoint and delete the old one. The environment does not give a group.
+  exit codes: 0 done or planned, 1 refused, 2 usage, 6 error
+Example:
+  mashctl endpoint create alice/dev/design --public-key design.pub
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "error",
+  "owner": "",
+  "group": "",
+  "instance": "",
+  "address": "",
+  "key": "",
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "unknown_flag",
+    "detail": "unknown option \"--bogus\""
+  }
+}
+== create_name_invalid
+exit 1
+stderr:
+mashctl: endpoint create: refused (name_invalid): an address has three tokens, none empty: owner/group/instance
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "refused",
+  "owner": "",
+  "group": "",
+  "instance": "",
+  "address": "",
+  "key": "",
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "name_invalid",
+    "detail": "an address has three tokens, none empty: owner/group/instance"
+  }
+}
+== create_address_ambiguous
+exit 2
+stderr:
+mashctl: endpoint create: error (address_ambiguous): two tokens are ambiguous; write alice/dev/design or --group dev design
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "error",
+  "owner": "",
+  "group": "",
+  "instance": "",
+  "address": "",
+  "key": "",
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "address_ambiguous",
+    "detail": "two tokens are ambiguous; write alice/dev/design or --group dev design"
+  }
+}
+== create_naming_disagrees
+exit 2
+stderr:
+mashctl: endpoint create: error (naming_disagrees): the address and --group name different group values; give one
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "error",
+  "owner": "",
+  "group": "",
+  "instance": "",
+  "address": "",
+  "key": "",
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "naming_disagrees",
+    "detail": "the address and --group name different group values; give one"
+  }
+}
+== create_group_missing
+exit 2
+stderr:
+mashctl: endpoint create: error (group_missing): an endpoint needs a group; write --group dev or alice/dev/design
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "error",
+  "owner": "",
+  "group": "",
+  "instance": "",
+  "address": "",
+  "key": "",
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "group_missing",
+    "detail": "an endpoint needs a group; write --group dev or alice/dev/design"
+  }
+}
+== create_owner_missing
+exit 2
+stderr:
+mashctl: endpoint create: error (owner_missing): no owner: write --owner, alice/dev/design, or set MASH_OWNER (config.json "owner")
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "error",
+  "owner": "",
+  "group": "",
+  "instance": "",
+  "address": "",
+  "key": "",
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "owner_missing",
+    "detail": "no owner: write --owner, alice/dev/design, or set MASH_OWNER (config.json \"owner\")"
+  }
+}
+== create_name_missing
+exit 2
+stderr:
+mashctl: endpoint create: error (name_missing): no endpoint name: write alice/dev/design or --name design
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "error",
+  "owner": "",
+  "group": "",
+  "instance": "",
+  "address": "",
+  "key": "",
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "name_missing",
+    "detail": "no endpoint name: write alice/dev/design or --name design"
+  }
+}
+== create_name_rule
+exit 1
+stderr:
+mashctl: endpoint create: refused (name_rule): mash: provision: name rule "no-blocked" refuses o.g.blocked: the name blocked is not allowed
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "refused",
+  "owner": "o",
+  "group": "g",
+  "instance": "blocked",
+  "address": "o.g.blocked",
+  "key": "o_g_blocked",
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "name_rule",
+    "detail": "mash: provision: name rule \"no-blocked\" refuses o.g.blocked: the name blocked is not allowed"
+  }
+}
+== create_key_both
+exit 2
+stderr:
+mashctl: endpoint create: error (key_both): give one of --public-key FILE and --make-key, not both
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "error",
+  "owner": "o",
+  "group": "g",
+  "instance": "a",
+  "address": "o.g.a",
+  "key": "o_g_a",
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "key_both",
+    "detail": "give one of --public-key FILE and --make-key, not both"
+  }
+}
+== create_key_missing
+exit 2
+stderr:
+mashctl: endpoint create: error (key_missing): an endpoint needs a key: write --public-key FILE (the endpoint's public key, from mash key create) or --make-key (make the key on this host)
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "error",
+  "owner": "o",
+  "group": "g",
+  "instance": "a",
+  "address": "o.g.a",
+  "key": "o_g_a",
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "key_missing",
+    "detail": "an endpoint needs a key: write --public-key FILE (the endpoint's public key, from mash key create) or --make-key (make the key on this host)"
+  }
+}
+== create_labels_invalid
+exit 2
+stderr:
+mashctl: endpoint create: error (labels_invalid): mash: label key: a letter, then up to 31 of a-z 0-9 _ . - (the value is not shown)
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "error",
+  "owner": "o",
+  "group": "g",
+  "instance": "a",
+  "address": "o.g.a",
+  "key": "o_g_a",
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "labels_invalid",
+    "detail": "mash: label key: a letter, then up to 31 of a-z 0-9 _ . - (the value is not shown)"
+  }
+}
+== create_config
+exit 6
+stderr:
+mash: name rule file <TMP>/no-such-rule.json: cannot be read: open <TMP>/no-such-rule.json: no such file or directory
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "error",
+  "owner": "o",
+  "group": "g",
+  "instance": "a",
+  "address": "o.g.a",
+  "key": "o_g_a",
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "config",
+    "detail": "the configuration did not load; fix it and run the same command again"
+  }
+}
+== create_no_config_dir
+exit 1
+stderr:
+mashctl: endpoint create: refused (no_config_dir): no config directory to write the creds file in; set MASH_CONFIG_DIR
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "refused",
+  "owner": "o",
+  "group": "g",
+  "instance": "a",
+  "address": "o.g.a",
+  "key": "o_g_a",
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "no_config_dir",
+    "detail": "no config directory to write the creds file in; set MASH_CONFIG_DIR"
+  }
+}
+== create_public_key_unreadable
+exit 1
+stderr:
+mashctl: endpoint create: refused (public_key_unreadable): cannot read the public key file <TMP>/missing.pub: no such file or directory
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "refused",
+  "owner": "o",
+  "group": "g",
+  "instance": "a",
+  "address": "o.g.a",
+  "key": "o_g_a",
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "public_key_unreadable",
+    "detail": "cannot read the public key file <TMP>/missing.pub: no such file or directory"
+  }
+}
+== create_public_key_invalid
+exit 1
+stderr:
+mashctl: endpoint create: refused (public_key_invalid): <TMP>/bad.pub does not hold a NATS user public key (U, then 55 base32 characters); make one with: mash key create --out NAME.seed
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "refused",
+  "owner": "o",
+  "group": "g",
+  "instance": "a",
+  "address": "o.g.a",
+  "key": "o_g_a",
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "public_key_invalid",
+    "detail": "<TMP>/bad.pub does not hold a NATS user public key (U, then 55 base32 characters); make one with: mash key create --out NAME.seed"
+  }
+}
+== create_file_exists
+exit 1
+stderr:
+mashctl: endpoint create: refused (file_exists): <TMP>/exists.jwt already exists and is never overwritten; name another file with --jwt-out or remove it
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "refused",
+  "owner": "o",
+  "group": "g",
+  "instance": "a",
+  "address": "o.g.a",
+  "key": "o_g_a",
+  "jwt_path": "<TMP>/exists.jwt",
+  "jwt_written": false,
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "file_exists",
+    "detail": "<TMP>/exists.jwt already exists and is never overwritten; name another file with --jwt-out or remove it"
+  }
+}
+== create_file_exists_late
+exit 1
+stderr:
+mashctl: endpoint create: refused (file_exists): <TMP>/o.g.a.creds appeared while the command ran and is never overwritten; endpoint o.g.a is recorded: run the same command again with another --jwt-out
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "refused",
+  "owner": "o",
+  "group": "g",
+  "instance": "a",
+  "address": "o.g.a",
+  "key": "o_g_a",
+  "creds_path": "<TMP>/o.g.a.creds",
+  "creds_written": false,
+  "user_public_key": "<KEY>",
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "file_exists",
+    "detail": "<TMP>/o.g.a.creds appeared while the command ran and is never overwritten; endpoint o.g.a is recorded: run the same command again with another --jwt-out"
+  }
+}
+== create_creds_exists
+exit 1
+stderr:
+mashctl: endpoint create: refused (creds_exists): <TMP>/o.g.a.creds already exists for another key and is never overwritten; move it aside and run the same command again
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "refused",
+  "owner": "o",
+  "group": "g",
+  "instance": "a",
+  "address": "o.g.a",
+  "key": "o_g_a",
+  "creds_path": "<TMP>/o.g.a.creds",
+  "creds_written": false,
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "creds_exists",
+    "detail": "<TMP>/o.g.a.creds already exists for another key and is never overwritten; move it aside and run the same command again"
+  }
+}
+== create_staged_key_revoked
+exit 1
+stderr:
+mashctl: endpoint create: refused (staged_key_revoked): the staged key <TMP>/o.g.a.creds.pending was revoked; remove <TMP>/o.g.a.creds.pending and run the command again
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "refused",
+  "owner": "o",
+  "group": "g",
+  "instance": "a",
+  "address": "o.g.a",
+  "key": "o_g_a",
+  "creds_path": "<TMP>/o.g.a.creds",
+  "creds_written": false,
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "staged_key_revoked",
+    "detail": "the staged key <TMP>/o.g.a.creds.pending was revoked; remove <TMP>/o.g.a.creds.pending and run the command again"
+  }
+}
+== create_no_account_key
+exit 1
+stderr:
+mashctl: endpoint create: refused (no_account_key): mashctl: no account signing key: run `mashctl init` (run mashctl init first)
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "refused",
+  "owner": "o",
+  "group": "g",
+  "instance": "a",
+  "address": "o.g.a",
+  "key": "o_g_a",
+  "jwt_path": "<TMP>/out.jwt",
+  "jwt_written": false,
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "no_account_key",
+    "detail": "mashctl: no account signing key: run `mashctl init` (run mashctl init first)"
+  }
+}
+== create_server
+exit 6
+stderr:
+mashctl: endpoint create: error (server): mashctl: connect nats://127.0.0.1:1: nats: no servers available for connection (check MASH_URL and that at least one listed server is up); nothing was changed, run the same command again once the server is reachable
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "error",
+  "owner": "o",
+  "group": "g",
+  "instance": "a",
+  "address": "o.g.a",
+  "key": "o_g_a",
+  "jwt_path": "<TMP>/out.jwt",
+  "jwt_written": false,
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "server",
+    "detail": "mashctl: connect nats://127.0.0.1:1: nats: no servers available for connection (check MASH_URL and that at least one listed server is up); nothing was changed, run the same command again once the server is reachable"
+  }
+}
+== create_enroll_server
+exit 6
+stderr:
+mashctl: endpoint create: error (server): the server stopped answering; run the same command again to finish it
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "error",
+  "owner": "o",
+  "group": "g",
+  "instance": "a",
+  "address": "o.g.a",
+  "key": "o_g_a",
+  "jwt_path": "<TMP>/out.jwt",
+  "jwt_written": false,
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "server",
+    "detail": "the server stopped answering; run the same command again to finish it"
+  }
+}
+== create_write
+exit 6
+stderr:
+mashctl: endpoint create: error (write): the creds directory is not usable: directory <TMP> has mode 0707: it is writable by every user. Run: chmod o-w <TMP>; nothing was changed
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "error",
+  "owner": "o",
+  "group": "g",
+  "instance": "a",
+  "address": "o.g.a",
+  "key": "o_g_a",
+  "creds_path": "<TMP>/o.g.a.creds",
+  "creds_written": false,
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "write",
+    "detail": "the creds directory is not usable: directory <TMP> has mode 0707: it is writable by every user. Run: chmod o-w <TMP>; nothing was changed"
+  }
+}
+== create_address_taken
+exit 1
+stderr:
+mashctl: endpoint create: refused (address_taken): endpoint o.g.a already exists; use reissue to give it a new key
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "refused",
+  "owner": "o",
+  "group": "g",
+  "instance": "a",
+  "address": "o.g.a",
+  "key": "o_g_a",
+  "jwt_path": "<TMP>/out.jwt",
+  "jwt_written": false,
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "address_taken",
+    "detail": "endpoint o.g.a already exists; use reissue to give it a new key"
+  }
+}
+== create_key_retired
+exit 1
+stderr:
+mashctl: endpoint create: refused (key_retired): endpoint o.g.a was retired and its address is never reassigned
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "refused",
+  "owner": "o",
+  "group": "g",
+  "instance": "a",
+  "address": "o.g.a",
+  "key": "o_g_a",
+  "jwt_path": "<TMP>/out.jwt",
+  "jwt_written": false,
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "key_retired",
+    "detail": "endpoint o.g.a was retired and its address is never reassigned"
+  }
+}
+== create_public_key_issued
+exit 1
+stderr:
+mashctl: endpoint create: refused (public_key_issued): the public key <KEY> was already issued to another address; each key is used at one address: make a new key for this endpoint with: mash key create --out c.seed
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "refused",
+  "owner": "o",
+  "group": "g",
+  "instance": "c",
+  "address": "o.g.c",
+  "key": "o_g_c",
+  "jwt_path": "<TMP>/out.jwt",
+  "jwt_written": false,
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [
+    {
+      "sender": "endpoint",
+      "step": "key",
+      "action": "make a new key for this endpoint on its machine",
+      "address": "o.g.c",
+      "purpose": "use",
+      "detail": "mash key create --out c.seed"
+    }
+  ],
+  "refusal": {
+    "code": "public_key_issued",
+    "detail": "the public key <KEY> was already issued to another address; each key is used at one address: make a new key for this endpoint with: mash key create --out c.seed"
+  }
+}
+== create_key_revoked
+exit 1
+stderr:
+mashctl: endpoint create: refused (key_revoked): the public key <KEY> has been revoked; make a new key
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "refused",
+  "owner": "o",
+  "group": "g",
+  "instance": "d",
+  "address": "o.g.d",
+  "key": "o_g_d",
+  "jwt_path": "<TMP>/out.jwt",
+  "jwt_written": false,
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [
+    {
+      "sender": "endpoint",
+      "step": "key",
+      "action": "make a new key for this endpoint on its machine",
+      "address": "o.g.d",
+      "purpose": "use",
+      "detail": "mash key create --out d.seed"
+    }
+  ],
+  "refusal": {
+    "code": "key_revoked",
+    "detail": "the public key <KEY> has been revoked; make a new key"
+  }
+}
+== reissue_usage
+exit 2
+stderr:
+mashctl: endpoint reissue: one endpoint address only
+usage: mashctl endpoint reissue ADDRESS (--public-key FILE | --make-key) [--jwt-out FILE]
+                                [--servers N] [--sys-creds FILE] [--dry-run] [--json]
+       mashctl endpoint reissue (--all | --changed) --make-key [--yes] [--servers N] [--sys-creds FILE] [--dry-run] [--json]
+  ADDRESS is alice/dev/design. The old key is revoked on every server, then the directory record names the new key.
+  --public-key FILE  sign the new public key the endpoint made; the JWT is written to --jwt-out
+  --make-key         make the key on this host and replace <config dir>/<address>.creds
+  --all              every endpoint that has a creds file on this host (same-host only: --make-key, never --public-key);
+                     an endpoint with no creds file here is skipped (no_local_creds), not rotated
+  --changed          every endpoint whose creds file on this host has a permission set that differs from the current one;
+                     an endpoint with no creds file here is skipped (no_local_creds)
+  --yes              do the bulk reissue; without it (or with --dry-run) the command lists what it would reissue
+  A bulk run reissues one endpoint at a time in address order; a refusal or error on one does not stop the others.
+  The bulk JSON has schema mashctl-endpoint-bulk@1.
+  A key made by --make-key is kept in <creds file>.pending (mode 0600) until the creds file is written, so the same
+  command run again after a kill finishes with the same key.
+  A rerun of --public-key FILE --jwt-out FILE after a run that switched the directory to the key but did not write the
+  JWT is a resume: <jwt-out>.pending (mode 0600) records the rotation, and the rerun writes the JWT and removes it.
+  --public-key FILE is checked first: a key the account JWT revokes is refused (key_revoked), also when it is the
+  endpoint's current key (a resume or a restore never signs a revoked key; make a new key with mash key create);
+  a check that cannot be made is an error (revocation_unknown), and nothing is changed.
+  A staged key that the account revokes is refused (staged_key_revoked): remove the .pending file and run again;
+  a check that cannot be made is an error (revocation_unknown).
+  --changed also reissues an endpoint with a staged <creds file>.pending (rotation_pending) or whose current key is
+  revoked (key_revoked); one whose revocation cannot be checked is an error, revocation_unknown, never "unchanged".
+  Refusals include key_unchanged: --public-key names the key the endpoint already has, so nothing would be rotated.
+  Other refusals: future_issued (the old key's issue record is dated after the revocation time; fix the clock),
+  creds_mismatch (--make-key found a creds file that is not this endpoint's current creds: its name, key or account
+  differs; move it aside with mv FILE FILE.old and run again, or use --public-key), creds_unreadable (the file exists
+  and cannot be read or parsed).
+  Errors include superseded: another reissue changed the endpoint's key while this one ran, so the file this run wrote
+  was removed; run the command again.
+  exit codes: 0 done, planned or unchanged, 1 refused, 2 usage, 5 partial (bulk), 6 error
+Example:
+  mashctl endpoint reissue alice/dev/design --public-key design.pub
+  mashctl endpoint reissue --changed --make-key --yes
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "error",
+  "owner": "",
+  "group": "",
+  "instance": "",
+  "address": "",
+  "key": "",
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "usage",
+    "detail": "one endpoint address only"
+  }
+}
+== reissue_unknown_flag
+exit 2
+stderr:
+mashctl: endpoint reissue: unknown option "--bogus"
+usage: mashctl endpoint reissue ADDRESS (--public-key FILE | --make-key) [--jwt-out FILE]
+                                [--servers N] [--sys-creds FILE] [--dry-run] [--json]
+       mashctl endpoint reissue (--all | --changed) --make-key [--yes] [--servers N] [--sys-creds FILE] [--dry-run] [--json]
+  ADDRESS is alice/dev/design. The old key is revoked on every server, then the directory record names the new key.
+  --public-key FILE  sign the new public key the endpoint made; the JWT is written to --jwt-out
+  --make-key         make the key on this host and replace <config dir>/<address>.creds
+  --all              every endpoint that has a creds file on this host (same-host only: --make-key, never --public-key);
+                     an endpoint with no creds file here is skipped (no_local_creds), not rotated
+  --changed          every endpoint whose creds file on this host has a permission set that differs from the current one;
+                     an endpoint with no creds file here is skipped (no_local_creds)
+  --yes              do the bulk reissue; without it (or with --dry-run) the command lists what it would reissue
+  A bulk run reissues one endpoint at a time in address order; a refusal or error on one does not stop the others.
+  The bulk JSON has schema mashctl-endpoint-bulk@1.
+  A key made by --make-key is kept in <creds file>.pending (mode 0600) until the creds file is written, so the same
+  command run again after a kill finishes with the same key.
+  A rerun of --public-key FILE --jwt-out FILE after a run that switched the directory to the key but did not write the
+  JWT is a resume: <jwt-out>.pending (mode 0600) records the rotation, and the rerun writes the JWT and removes it.
+  --public-key FILE is checked first: a key the account JWT revokes is refused (key_revoked), also when it is the
+  endpoint's current key (a resume or a restore never signs a revoked key; make a new key with mash key create);
+  a check that cannot be made is an error (revocation_unknown), and nothing is changed.
+  A staged key that the account revokes is refused (staged_key_revoked): remove the .pending file and run again;
+  a check that cannot be made is an error (revocation_unknown).
+  --changed also reissues an endpoint with a staged <creds file>.pending (rotation_pending) or whose current key is
+  revoked (key_revoked); one whose revocation cannot be checked is an error, revocation_unknown, never "unchanged".
+  Refusals include key_unchanged: --public-key names the key the endpoint already has, so nothing would be rotated.
+  Other refusals: future_issued (the old key's issue record is dated after the revocation time; fix the clock),
+  creds_mismatch (--make-key found a creds file that is not this endpoint's current creds: its name, key or account
+  differs; move it aside with mv FILE FILE.old and run again, or use --public-key), creds_unreadable (the file exists
+  and cannot be read or parsed).
+  Errors include superseded: another reissue changed the endpoint's key while this one ran, so the file this run wrote
+  was removed; run the command again.
+  exit codes: 0 done, planned or unchanged, 1 refused, 2 usage, 5 partial (bulk), 6 error
+Example:
+  mashctl endpoint reissue alice/dev/design --public-key design.pub
+  mashctl endpoint reissue --changed --make-key --yes
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "error",
+  "owner": "",
+  "group": "",
+  "instance": "",
+  "address": "",
+  "key": "",
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "unknown_flag",
+    "detail": "unknown option \"--bogus\""
+  }
+}
+== reissue_address_missing
+exit 2
+stderr:
+mashctl: endpoint reissue: error (address_missing): no endpoint address: write alice/dev/design
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "error",
+  "owner": "",
+  "group": "",
+  "instance": "",
+  "address": "",
+  "key": "",
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "address_missing",
+    "detail": "no endpoint address: write alice/dev/design"
+  }
+}
+== reissue_address_invalid
+exit 2
+stderr:
+mashctl: endpoint reissue: error (address_invalid): not an endpoint address (the value is not shown): write owner/group/instance, for example alice/dev/design
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "error",
+  "owner": "",
+  "group": "",
+  "instance": "",
+  "address": "",
+  "key": "",
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "address_invalid",
+    "detail": "not an endpoint address (the value is not shown): write owner/group/instance, for example alice/dev/design"
+  }
+}
+== reissue_key_both
+exit 2
+stderr:
+mashctl: endpoint reissue: error (key_both): give one of --public-key FILE and --make-key, not both
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "error",
+  "owner": "o",
+  "group": "g",
+  "instance": "a",
+  "address": "o.g.a",
+  "key": "o_g_a",
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "key_both",
+    "detail": "give one of --public-key FILE and --make-key, not both"
+  }
+}
+== reissue_key_missing
+exit 2
+stderr:
+mashctl: endpoint reissue: error (key_missing): a reissue needs a new key: write --public-key FILE (the endpoint's new public key, from mash key create) or --make-key (make the key on this host)
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "error",
+  "owner": "o",
+  "group": "g",
+  "instance": "a",
+  "address": "o.g.a",
+  "key": "o_g_a",
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "key_missing",
+    "detail": "a reissue needs a new key: write --public-key FILE (the endpoint's new public key, from mash key create) or --make-key (make the key on this host)"
+  }
+}
+== reissue_servers_invalid
+exit 2
+stderr:
+mashctl: endpoint reissue: error (servers_invalid): MASH_SERVERS must be a whole number of servers, 1 or more, got "0"
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "error",
+  "owner": "o",
+  "group": "g",
+  "instance": "a",
+  "address": "o.g.a",
+  "key": "o_g_a",
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "servers_invalid",
+    "detail": "MASH_SERVERS must be a whole number of servers, 1 or more, got \"0\""
+  }
+}
+== reissue_config
+exit 6
+stderr:
+mashctl: endpoint reissue: error (config): mash: name rule file <TMP>/no-such-rule.json: cannot be read: open <TMP>/no-such-rule.json: no such file or directory
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "error",
+  "owner": "o",
+  "group": "g",
+  "instance": "a",
+  "address": "o.g.a",
+  "key": "o_g_a",
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "config",
+    "detail": "mash: name rule file <TMP>/no-such-rule.json: cannot be read: open <TMP>/no-such-rule.json: no such file or directory"
+  }
+}
+== reissue_no_config_dir
+exit 1
+stderr:
+mashctl: endpoint reissue: refused (no_config_dir): no config directory to write the creds file in; set MASH_CONFIG_DIR
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "refused",
+  "owner": "o",
+  "group": "g",
+  "instance": "a",
+  "address": "o.g.a",
+  "key": "o_g_a",
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "no_config_dir",
+    "detail": "no config directory to write the creds file in; set MASH_CONFIG_DIR"
+  }
+}
+== reissue_public_key_unreadable
+exit 1
+stderr:
+mashctl: endpoint reissue: refused (public_key_unreadable): cannot read the public key file <TMP>/missing.pub: no such file or directory
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "refused",
+  "owner": "o",
+  "group": "g",
+  "instance": "a",
+  "address": "o.g.a",
+  "key": "o_g_a",
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "public_key_unreadable",
+    "detail": "cannot read the public key file <TMP>/missing.pub: no such file or directory"
+  }
+}
+== reissue_file_exists
+exit 1
+stderr:
+mashctl: endpoint reissue: refused (file_exists): <TMP>/exists.jwt already exists and is never overwritten; name another file with --jwt-out or remove it
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "refused",
+  "owner": "o",
+  "group": "g",
+  "instance": "a",
+  "address": "o.g.a",
+  "key": "o_g_a",
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "file_exists",
+    "detail": "<TMP>/exists.jwt already exists and is never overwritten; name another file with --jwt-out or remove it"
+  }
+}
+== reissue_no_account_key
+exit 1
+stderr:
+mashctl: endpoint reissue: refused (no_account_key): mashctl: no account signing key: run `mashctl init` (run mashctl init first)
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "refused",
+  "owner": "o",
+  "group": "g",
+  "instance": "a",
+  "address": "o.g.a",
+  "key": "o_g_a",
+  "creds_path": "<TMP>/o.g.a.creds",
+  "creds_written": false,
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "no_account_key",
+    "detail": "mashctl: no account signing key: run `mashctl init` (run mashctl init first)"
+  }
+}
+== reissue_server
+exit 6
+stderr:
+mashctl: endpoint reissue: error (server): mashctl: connect nats://127.0.0.1:1: nats: no servers available for connection (check MASH_URL and that at least one listed server is up); nothing was changed
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "error",
+  "owner": "o",
+  "group": "g",
+  "instance": "a",
+  "address": "o.g.a",
+  "key": "o_g_a",
+  "creds_path": "<TMP>/o.g.a.creds",
+  "creds_written": false,
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "server",
+    "detail": "mashctl: connect nats://127.0.0.1:1: nats: no servers available for connection (check MASH_URL and that at least one listed server is up); nothing was changed"
+  }
+}
+== reissue_enroll_server
+exit 6
+stderr:
+mashctl: endpoint reissue: error (server): the server stopped answering; run the same command again to finish it
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "error",
+  "owner": "o",
+  "group": "g",
+  "instance": "a",
+  "address": "o.g.a",
+  "key": "o_g_a",
+  "creds_path": "<TMP>/o.g.a.creds",
+  "creds_written": false,
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "server",
+    "detail": "the server stopped answering; run the same command again to finish it"
+  }
+}
+== reissue_endpoint_missing
+exit 1
+stderr:
+mashctl: endpoint reissue: refused (endpoint_missing): endpoint o.g.a does not exist; create it with: mashctl endpoint create o/g/a
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "refused",
+  "owner": "o",
+  "group": "g",
+  "instance": "a",
+  "address": "o.g.a",
+  "key": "o_g_a",
+  "creds_path": "<TMP>/o.g.a.creds",
+  "creds_written": false,
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "endpoint_missing",
+    "detail": "endpoint o.g.a does not exist; create it with: mashctl endpoint create o/g/a"
+  }
+}
+== reissue_key_retired
+exit 1
+stderr:
+mashctl: endpoint reissue: refused (key_retired): endpoint o.g.a was retired and its address is never reassigned
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "refused",
+  "owner": "o",
+  "group": "g",
+  "instance": "a",
+  "address": "o.g.a",
+  "key": "o_g_a",
+  "creds_path": "<TMP>/o.g.a.creds",
+  "creds_written": false,
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "key_retired",
+    "detail": "endpoint o.g.a was retired and its address is never reassigned"
+  }
+}
+== reissue_reissue_busy
+exit 1
+stderr:
+mashctl: endpoint reissue: refused (reissue_busy): another reissue of o.g.a is running; if none is (a run was killed), remove the directory <TMP>/o.g.a.creds.lock and run this again
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "refused",
+  "owner": "o",
+  "group": "g",
+  "instance": "a",
+  "address": "o.g.a",
+  "key": "o_g_a",
+  "creds_path": "<TMP>/o.g.a.creds",
+  "creds_written": false,
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "reissue_busy",
+    "detail": "another reissue of o.g.a is running; if none is (a run was killed), remove the directory <TMP>/o.g.a.creds.lock and run this again"
+  }
+}
+== reissue_write
+exit 6
+stderr:
+mashctl: endpoint reissue: error (write): the directory for the lock is not usable: directory <TMP> has mode 0707: it is writable by every user. Run: chmod o-w <TMP>; nothing was changed
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "error",
+  "owner": "o",
+  "group": "g",
+  "instance": "a",
+  "address": "o.g.a",
+  "key": "o_g_a",
+  "creds_path": "<TMP>/o.g.a.creds",
+  "creds_written": false,
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "write",
+    "detail": "the directory for the lock is not usable: directory <TMP> has mode 0707: it is writable by every user. Run: chmod o-w <TMP>; nothing was changed"
+  }
+}
+== reissue_superseded
+exit 6
+stderr:
+revoked user key <KEY>: 1 server(s) acknowledged
+mashctl: endpoint reissue: error (superseded): another reissue changed o.g.a's key while this one ran, so the credentials this run wrote are for a key that is no longer the endpoint's; they were removed; run the command again
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "error",
+  "owner": "o",
+  "group": "g",
+  "instance": "a",
+  "address": "o.g.a",
+  "key": "o_g_a",
+  "creds_path": "<TMP>/o.g.a.creds",
+  "creds_written": false,
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "superseded",
+    "detail": "another reissue changed o.g.a's key while this one ran, so the credentials this run wrote are for a key that is no longer the endpoint's; they were removed; run the command again"
+  }
+}
+== reissue_public_key_issued
+exit 1
+stderr:
+mashctl: endpoint reissue: refused (public_key_issued): the public key <KEY> was already issued to another address; each key is used at one address: make a new key for this endpoint with: mash key create --out b.seed
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "refused",
+  "owner": "o",
+  "group": "g",
+  "instance": "b",
+  "address": "o.g.b",
+  "key": "o_g_b",
+  "jwt_path": "<TMP>/out.jwt",
+  "jwt_written": false,
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [
+    {
+      "sender": "endpoint",
+      "step": "key",
+      "action": "make a new key for this endpoint on its machine",
+      "address": "o.g.b",
+      "purpose": "use",
+      "detail": "mash key create --out b.seed"
+    }
+  ],
+  "refusal": {
+    "code": "public_key_issued",
+    "detail": "the public key <KEY> was already issued to another address; each key is used at one address: make a new key for this endpoint with: mash key create --out b.seed"
+  }
+}
+== reissue_key_unchanged
+exit 1
+stderr:
+mashctl: endpoint reissue: refused (key_unchanged): the public key is already this endpoint's key, so nothing would be rotated; make a new key with: mash key create --out NAME.seed
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "refused",
+  "owner": "o",
+  "group": "g",
+  "instance": "a",
+  "address": "o.g.a",
+  "key": "o_g_a",
+  "jwt_path": "<TMP>/out.jwt",
+  "jwt_written": false,
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [
+    {
+      "sender": "endpoint",
+      "step": "key",
+      "action": "make a new key for this endpoint on its machine",
+      "address": "o.g.a",
+      "purpose": "use",
+      "detail": "mash key create --out NAME.seed"
+    }
+  ],
+  "refusal": {
+    "code": "key_unchanged",
+    "detail": "the public key is already this endpoint's key, so nothing would be rotated; make a new key with: mash key create --out NAME.seed"
+  }
+}
+== reissue_future_issued
+exit 1
+stderr:
+mashctl: endpoint reissue: refused (future_issued): o.g.a's current creds JWT claims it was issued in the future (<TIME>): the revocation would not cover it; fix this machine's clock (or the machine that minted it) and run again; nothing was changed
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "refused",
+  "owner": "o",
+  "group": "g",
+  "instance": "a",
+  "address": "o.g.a",
+  "key": "o_g_a",
+  "creds_path": "<TMP>/o.g.a.creds",
+  "creds_written": false,
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "future_issued",
+    "detail": "o.g.a's current creds JWT claims it was issued in the future (<TIME>): the revocation would not cover it; fix this machine's clock (or the machine that minted it) and run again; nothing was changed"
+  }
+}
+== reissue_creds_mismatch
+exit 1
+stderr:
+mashctl: endpoint reissue: refused (creds_mismatch): the creds file <TMP>/o.g.a.creds is not this endpoint's current creds: its JWT is named "o.g.b", not o.g.a; nothing was changed: move the file aside (mv <TMP>/o.g.a.creds <TMP>/o.g.a.creds.old) and run again, or use --public-key
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "refused",
+  "owner": "o",
+  "group": "g",
+  "instance": "a",
+  "address": "o.g.a",
+  "key": "o_g_a",
+  "creds_path": "<TMP>/o.g.a.creds",
+  "creds_written": false,
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "creds_mismatch",
+    "detail": "the creds file <TMP>/o.g.a.creds is not this endpoint's current creds: its JWT is named \"o.g.b\", not o.g.a; nothing was changed: move the file aside (mv <TMP>/o.g.a.creds <TMP>/o.g.a.creds.old) and run again, or use --public-key"
+  }
+}
+== reissue_creds_unreadable
+exit 1
+stderr:
+mashctl: endpoint reissue: refused (creds_unreadable): the creds file <TMP>/o.g.a.creds exists but holds a JWT that is not a user JWT; nothing was changed: move the file aside (mv <TMP>/o.g.a.creds <TMP>/o.g.a.creds.old) and run again, or use --public-key
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "refused",
+  "owner": "o",
+  "group": "g",
+  "instance": "a",
+  "address": "o.g.a",
+  "key": "o_g_a",
+  "creds_path": "<TMP>/o.g.a.creds",
+  "creds_written": false,
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "note": "",
+  "next_steps": [],
+  "refusal": {
+    "code": "creds_unreadable",
+    "detail": "the creds file <TMP>/o.g.a.creds exists but holds a JWT that is not a user JWT; nothing was changed: move the file aside (mv <TMP>/o.g.a.creds <TMP>/o.g.a.creds.old) and run again, or use --public-key"
+  }
+}
+== bulk_usage
+exit 2
+stderr:
+mashctl: endpoint reissue: give one of --all and --changed, not both
+usage: mashctl endpoint reissue ADDRESS (--public-key FILE | --make-key) [--jwt-out FILE]
+                                [--servers N] [--sys-creds FILE] [--dry-run] [--json]
+       mashctl endpoint reissue (--all | --changed) --make-key [--yes] [--servers N] [--sys-creds FILE] [--dry-run] [--json]
+  ADDRESS is alice/dev/design. The old key is revoked on every server, then the directory record names the new key.
+  --public-key FILE  sign the new public key the endpoint made; the JWT is written to --jwt-out
+  --make-key         make the key on this host and replace <config dir>/<address>.creds
+  --all              every endpoint that has a creds file on this host (same-host only: --make-key, never --public-key);
+                     an endpoint with no creds file here is skipped (no_local_creds), not rotated
+  --changed          every endpoint whose creds file on this host has a permission set that differs from the current one;
+                     an endpoint with no creds file here is skipped (no_local_creds)
+  --yes              do the bulk reissue; without it (or with --dry-run) the command lists what it would reissue
+  A bulk run reissues one endpoint at a time in address order; a refusal or error on one does not stop the others.
+  The bulk JSON has schema mashctl-endpoint-bulk@1.
+  A key made by --make-key is kept in <creds file>.pending (mode 0600) until the creds file is written, so the same
+  command run again after a kill finishes with the same key.
+  A rerun of --public-key FILE --jwt-out FILE after a run that switched the directory to the key but did not write the
+  JWT is a resume: <jwt-out>.pending (mode 0600) records the rotation, and the rerun writes the JWT and removes it.
+  --public-key FILE is checked first: a key the account JWT revokes is refused (key_revoked), also when it is the
+  endpoint's current key (a resume or a restore never signs a revoked key; make a new key with mash key create);
+  a check that cannot be made is an error (revocation_unknown), and nothing is changed.
+  A staged key that the account revokes is refused (staged_key_revoked): remove the .pending file and run again;
+  a check that cannot be made is an error (revocation_unknown).
+  --changed also reissues an endpoint with a staged <creds file>.pending (rotation_pending) or whose current key is
+  revoked (key_revoked); one whose revocation cannot be checked is an error, revocation_unknown, never "unchanged".
+  Refusals include key_unchanged: --public-key names the key the endpoint already has, so nothing would be rotated.
+  Other refusals: future_issued (the old key's issue record is dated after the revocation time; fix the clock),
+  creds_mismatch (--make-key found a creds file that is not this endpoint's current creds: its name, key or account
+  differs; move it aside with mv FILE FILE.old and run again, or use --public-key), creds_unreadable (the file exists
+  and cannot be read or parsed).
+  Errors include superseded: another reissue changed the endpoint's key while this one ran, so the file this run wrote
+  was removed; run the command again.
+  exit codes: 0 done, planned or unchanged, 1 refused, 2 usage, 5 partial (bulk), 6 error
+Example:
+  mashctl endpoint reissue alice/dev/design --public-key design.pub
+  mashctl endpoint reissue --changed --make-key --yes
+stdout:
+{
+  "schema": "mashctl-endpoint-bulk@1",
+  "outcome": "error",
+  "counts": {
+    "reissued": 0,
+    "planned": 0,
+    "skipped": 0,
+    "refused": 0,
+    "error": 0
+  },
+  "endpoints": [],
+  "next_steps": [],
+  "refusal": {
+    "code": "usage",
+    "detail": "give one of --all and --changed, not both"
+  }
+}
+== bulk_needs_make_key
+exit 2
+stderr:
+mashctl: endpoint reissue: the bulk forms take --make-key only: many public keys cannot arrive in one command; run endpoint reissue ADDRESS --public-key FILE once per endpoint
+usage: mashctl endpoint reissue ADDRESS (--public-key FILE | --make-key) [--jwt-out FILE]
+                                [--servers N] [--sys-creds FILE] [--dry-run] [--json]
+       mashctl endpoint reissue (--all | --changed) --make-key [--yes] [--servers N] [--sys-creds FILE] [--dry-run] [--json]
+  ADDRESS is alice/dev/design. The old key is revoked on every server, then the directory record names the new key.
+  --public-key FILE  sign the new public key the endpoint made; the JWT is written to --jwt-out
+  --make-key         make the key on this host and replace <config dir>/<address>.creds
+  --all              every endpoint that has a creds file on this host (same-host only: --make-key, never --public-key);
+                     an endpoint with no creds file here is skipped (no_local_creds), not rotated
+  --changed          every endpoint whose creds file on this host has a permission set that differs from the current one;
+                     an endpoint with no creds file here is skipped (no_local_creds)
+  --yes              do the bulk reissue; without it (or with --dry-run) the command lists what it would reissue
+  A bulk run reissues one endpoint at a time in address order; a refusal or error on one does not stop the others.
+  The bulk JSON has schema mashctl-endpoint-bulk@1.
+  A key made by --make-key is kept in <creds file>.pending (mode 0600) until the creds file is written, so the same
+  command run again after a kill finishes with the same key.
+  A rerun of --public-key FILE --jwt-out FILE after a run that switched the directory to the key but did not write the
+  JWT is a resume: <jwt-out>.pending (mode 0600) records the rotation, and the rerun writes the JWT and removes it.
+  --public-key FILE is checked first: a key the account JWT revokes is refused (key_revoked), also when it is the
+  endpoint's current key (a resume or a restore never signs a revoked key; make a new key with mash key create);
+  a check that cannot be made is an error (revocation_unknown), and nothing is changed.
+  A staged key that the account revokes is refused (staged_key_revoked): remove the .pending file and run again;
+  a check that cannot be made is an error (revocation_unknown).
+  --changed also reissues an endpoint with a staged <creds file>.pending (rotation_pending) or whose current key is
+  revoked (key_revoked); one whose revocation cannot be checked is an error, revocation_unknown, never "unchanged".
+  Refusals include key_unchanged: --public-key names the key the endpoint already has, so nothing would be rotated.
+  Other refusals: future_issued (the old key's issue record is dated after the revocation time; fix the clock),
+  creds_mismatch (--make-key found a creds file that is not this endpoint's current creds: its name, key or account
+  differs; move it aside with mv FILE FILE.old and run again, or use --public-key), creds_unreadable (the file exists
+  and cannot be read or parsed).
+  Errors include superseded: another reissue changed the endpoint's key while this one ran, so the file this run wrote
+  was removed; run the command again.
+  exit codes: 0 done, planned or unchanged, 1 refused, 2 usage, 5 partial (bulk), 6 error
+Example:
+  mashctl endpoint reissue alice/dev/design --public-key design.pub
+  mashctl endpoint reissue --changed --make-key --yes
+stdout:
+{
+  "schema": "mashctl-endpoint-bulk@1",
+  "outcome": "error",
+  "counts": {
+    "reissued": 0,
+    "planned": 0,
+    "skipped": 0,
+    "refused": 0,
+    "error": 0
+  },
+  "endpoints": [],
+  "next_steps": [],
+  "refusal": {
+    "code": "bulk_needs_make_key",
+    "detail": "the bulk forms take --make-key only: many public keys cannot arrive in one command; run endpoint reissue ADDRESS --public-key FILE once per endpoint"
+  }
+}
+== bulk_servers_invalid
+exit 2
+stderr:
+mashctl: endpoint reissue: MASH_SERVERS must be a whole number of servers, 1 or more, got "0"
+usage: mashctl endpoint reissue ADDRESS (--public-key FILE | --make-key) [--jwt-out FILE]
+                                [--servers N] [--sys-creds FILE] [--dry-run] [--json]
+       mashctl endpoint reissue (--all | --changed) --make-key [--yes] [--servers N] [--sys-creds FILE] [--dry-run] [--json]
+  ADDRESS is alice/dev/design. The old key is revoked on every server, then the directory record names the new key.
+  --public-key FILE  sign the new public key the endpoint made; the JWT is written to --jwt-out
+  --make-key         make the key on this host and replace <config dir>/<address>.creds
+  --all              every endpoint that has a creds file on this host (same-host only: --make-key, never --public-key);
+                     an endpoint with no creds file here is skipped (no_local_creds), not rotated
+  --changed          every endpoint whose creds file on this host has a permission set that differs from the current one;
+                     an endpoint with no creds file here is skipped (no_local_creds)
+  --yes              do the bulk reissue; without it (or with --dry-run) the command lists what it would reissue
+  A bulk run reissues one endpoint at a time in address order; a refusal or error on one does not stop the others.
+  The bulk JSON has schema mashctl-endpoint-bulk@1.
+  A key made by --make-key is kept in <creds file>.pending (mode 0600) until the creds file is written, so the same
+  command run again after a kill finishes with the same key.
+  A rerun of --public-key FILE --jwt-out FILE after a run that switched the directory to the key but did not write the
+  JWT is a resume: <jwt-out>.pending (mode 0600) records the rotation, and the rerun writes the JWT and removes it.
+  --public-key FILE is checked first: a key the account JWT revokes is refused (key_revoked), also when it is the
+  endpoint's current key (a resume or a restore never signs a revoked key; make a new key with mash key create);
+  a check that cannot be made is an error (revocation_unknown), and nothing is changed.
+  A staged key that the account revokes is refused (staged_key_revoked): remove the .pending file and run again;
+  a check that cannot be made is an error (revocation_unknown).
+  --changed also reissues an endpoint with a staged <creds file>.pending (rotation_pending) or whose current key is
+  revoked (key_revoked); one whose revocation cannot be checked is an error, revocation_unknown, never "unchanged".
+  Refusals include key_unchanged: --public-key names the key the endpoint already has, so nothing would be rotated.
+  Other refusals: future_issued (the old key's issue record is dated after the revocation time; fix the clock),
+  creds_mismatch (--make-key found a creds file that is not this endpoint's current creds: its name, key or account
+  differs; move it aside with mv FILE FILE.old and run again, or use --public-key), creds_unreadable (the file exists
+  and cannot be read or parsed).
+  Errors include superseded: another reissue changed the endpoint's key while this one ran, so the file this run wrote
+  was removed; run the command again.
+  exit codes: 0 done, planned or unchanged, 1 refused, 2 usage, 5 partial (bulk), 6 error
+Example:
+  mashctl endpoint reissue alice/dev/design --public-key design.pub
+  mashctl endpoint reissue --changed --make-key --yes
+stdout:
+{
+  "schema": "mashctl-endpoint-bulk@1",
+  "outcome": "error",
+  "counts": {
+    "reissued": 0,
+    "planned": 0,
+    "skipped": 0,
+    "refused": 0,
+    "error": 0
+  },
+  "endpoints": [],
+  "next_steps": [],
+  "refusal": {
+    "code": "servers_invalid",
+    "detail": "MASH_SERVERS must be a whole number of servers, 1 or more, got \"0\""
+  }
+}
+== bulk_config
+exit 6
+stderr:
+mash: name rule file <TMP>/no-such-rule.json: cannot be read: open <TMP>/no-such-rule.json: no such file or directory
+mashctl: endpoint reissue: error (config): the configuration did not load; fix it and run the same command again
+stdout:
+{
+  "schema": "mashctl-endpoint-bulk@1",
+  "outcome": "error",
+  "counts": {
+    "reissued": 0,
+    "planned": 0,
+    "skipped": 0,
+    "refused": 0,
+    "error": 0
+  },
+  "endpoints": [],
+  "next_steps": [],
+  "refusal": {
+    "code": "config",
+    "detail": "the configuration did not load; fix it and run the same command again"
+  }
+}
+== bulk_no_account_key
+exit 1
+stderr:
+mashctl: endpoint reissue: refused (no_account_key): mashctl: no account signing key: run `mashctl init` (run mashctl init first)
+stdout:
+{
+  "schema": "mashctl-endpoint-bulk@1",
+  "outcome": "refused",
+  "counts": {
+    "reissued": 0,
+    "planned": 0,
+    "skipped": 0,
+    "refused": 0,
+    "error": 0
+  },
+  "endpoints": [],
+  "next_steps": [],
+  "refusal": {
+    "code": "no_account_key",
+    "detail": "mashctl: no account signing key: run `mashctl init` (run mashctl init first)"
+  }
+}
+== bulk_server
+exit 6
+stderr:
+mashctl: endpoint reissue: error (server): mashctl: connect nats://127.0.0.1:1: nats: no servers available for connection (check MASH_URL and that at least one listed server is up); nothing was changed
+stdout:
+{
+  "schema": "mashctl-endpoint-bulk@1",
+  "outcome": "error",
+  "counts": {
+    "reissued": 0,
+    "planned": 0,
+    "skipped": 0,
+    "refused": 0,
+    "error": 0
+  },
+  "endpoints": [],
+  "next_steps": [],
+  "refusal": {
+    "code": "server",
+    "detail": "mashctl: connect nats://127.0.0.1:1: nats: no servers available for connection (check MASH_URL and that at least one listed server is up); nothing was changed"
+  }
+}
+== bulk_servers
+exit 6
+stderr:
+mashctl: endpoint reissue: error (servers): only 2 of 3 servers answered the account lookup; nothing was revoked; the key is still valid
+stdout:
+{
+  "schema": "mashctl-endpoint-bulk@1",
+  "outcome": "error",
+  "counts": {
+    "reissued": 0,
+    "planned": 0,
+    "skipped": 0,
+    "refused": 0,
+    "error": 0
+  },
+  "endpoints": [],
+  "next_steps": [],
+  "refusal": {
+    "code": "servers",
+    "detail": "only 2 of 3 servers answered the account lookup; nothing was revoked; the key is still valid"
+  }
+}
+== bulk_no_config_dir
+exit 6
+stderr:
+mashctl: endpoint reissue: error (no_config_dir): no config directory to write the creds file in; set MASH_CONFIG_DIR
+stdout:
+{
+  "schema": "mashctl-endpoint-bulk@1",
+  "outcome": "error",
+  "counts": {
+    "reissued": 0,
+    "planned": 0,
+    "skipped": 0,
+    "refused": 0,
+    "error": 1
+  },
+  "endpoints": [
+    {
+      "owner": "o",
+      "group": "g",
+      "instance": "a",
+      "address": "o.g.a",
+      "key": "o_g_a",
+      "outcome": "error",
+      "reason": "no_config_dir",
+      "creds_path": ""
+    }
+  ],
+  "next_steps": [],
+  "refusal": {
+    "code": "no_config_dir",
+    "detail": "no config directory to write the creds file in; set MASH_CONFIG_DIR"
+  }
+}
+== bulk_no_local_creds
+exit 0
+stderr:
+stdout:
+{
+  "schema": "mashctl-endpoint-bulk@1",
+  "outcome": "unchanged",
+  "counts": {
+    "reissued": 0,
+    "planned": 0,
+    "skipped": 1,
+    "refused": 0,
+    "error": 0
+  },
+  "endpoints": [
+    {
+      "owner": "o",
+      "group": "g",
+      "instance": "a",
+      "address": "o.g.a",
+      "key": "o_g_a",
+      "outcome": "skipped",
+      "reason": "no_local_creds",
+      "creds_path": "<TMP>/o.g.a.creds"
+    }
+  ],
+  "next_steps": [],
+  "refusal": null
+}
+== bulk_creds_unreadable
+exit 6
+stderr:
+mashctl: endpoint reissue o/g/a: creds_unreadable: <TMP>/o.g.a.creds: expected 3 chunks
+mashctl: endpoint reissue: error (creds_unreadable): <TMP>/o.g.a.creds: expected 3 chunks
+stdout:
+{
+  "schema": "mashctl-endpoint-bulk@1",
+  "outcome": "error",
+  "counts": {
+    "reissued": 0,
+    "planned": 0,
+    "skipped": 0,
+    "refused": 0,
+    "error": 1
+  },
+  "endpoints": [
+    {
+      "owner": "o",
+      "group": "g",
+      "instance": "a",
+      "address": "o.g.a",
+      "key": "o_g_a",
+      "outcome": "error",
+      "reason": "creds_unreadable",
+      "creds_path": "<TMP>/o.g.a.creds"
+    }
+  ],
+  "next_steps": [],
+  "refusal": {
+    "code": "creds_unreadable",
+    "detail": "<TMP>/o.g.a.creds: expected 3 chunks"
+  }
+}
+== bulk_reissue_busy
+exit 1
+stderr:
+mashctl: endpoint reissue o/g/a: reissue_busy: another reissue of o.g.a is running; if none is (a run was killed), remove the directory <TMP>/o.g.a.creds.lock and run this again
+mashctl: endpoint reissue: refused (reissue_busy): another reissue of o.g.a is running; if none is (a run was killed), remove the directory <TMP>/o.g.a.creds.lock and run this again
+stdout:
+{
+  "schema": "mashctl-endpoint-bulk@1",
+  "outcome": "refused",
+  "counts": {
+    "reissued": 0,
+    "planned": 0,
+    "skipped": 0,
+    "refused": 1,
+    "error": 0
+  },
+  "endpoints": [
+    {
+      "owner": "o",
+      "group": "g",
+      "instance": "a",
+      "address": "o.g.a",
+      "key": "o_g_a",
+      "outcome": "refused",
+      "reason": "reissue_busy",
+      "creds_path": "<TMP>/o.g.a.creds"
+    }
+  ],
+  "next_steps": [],
+  "refusal": {
+    "code": "reissue_busy",
+    "detail": "another reissue of o.g.a is running; if none is (a run was killed), remove the directory <TMP>/o.g.a.creds.lock and run this again"
+  }
+}
+== bulk_future_issued
+exit 1
+stderr:
+mashctl: endpoint reissue o/g/a: future_issued: o.g.a's current creds JWT claims it was issued in the future (<TIME>): the revocation would not cover it; fix this machine's clock (or the machine that minted it) and run again; nothing was changed
+mashctl: endpoint reissue: refused (future_issued): o.g.a's current creds JWT claims it was issued in the future (<TIME>): the revocation would not cover it; fix this machine's clock (or the machine that minted it) and run again; nothing was changed
+stdout:
+{
+  "schema": "mashctl-endpoint-bulk@1",
+  "outcome": "refused",
+  "counts": {
+    "reissued": 0,
+    "planned": 0,
+    "skipped": 0,
+    "refused": 1,
+    "error": 0
+  },
+  "endpoints": [
+    {
+      "owner": "o",
+      "group": "g",
+      "instance": "a",
+      "address": "o.g.a",
+      "key": "o_g_a",
+      "outcome": "refused",
+      "reason": "future_issued",
+      "creds_path": "<TMP>/o.g.a.creds"
+    }
+  ],
+  "next_steps": [],
+  "refusal": {
+    "code": "future_issued",
+    "detail": "o.g.a's current creds JWT claims it was issued in the future (<TIME>): the revocation would not cover it; fix this machine's clock (or the machine that minted it) and run again; nothing was changed"
+  }
+}
+== bulk_creds_mismatch
+exit 5
+stderr:
+mashctl: endpoint reissue o/g/a: creds_mismatch: the creds file <TMP>/o.g.a.creds is not this endpoint's current creds: its JWT is named "o.g.b", not o.g.a; nothing was changed: move the file aside (mv <TMP>/o.g.a.creds <TMP>/o.g.a.creds.old) and run again, or use --public-key
+revoked user key <KEY>: 1 server(s) acknowledged
+stdout:
+{
+  "schema": "mashctl-endpoint-bulk@1",
+  "outcome": "partial",
+  "counts": {
+    "reissued": 1,
+    "planned": 0,
+    "skipped": 0,
+    "refused": 1,
+    "error": 0
+  },
+  "endpoints": [
+    {
+      "owner": "o",
+      "group": "g",
+      "instance": "a",
+      "address": "o.g.a",
+      "key": "o_g_a",
+      "outcome": "refused",
+      "reason": "creds_mismatch",
+      "creds_path": "<TMP>/o.g.a.creds"
+    },
+    {
+      "owner": "o",
+      "group": "g",
+      "instance": "b",
+      "address": "o.g.b",
+      "key": "o_g_b",
+      "outcome": "reissued",
+      "reason": null,
+      "creds_path": "<TMP>/o.g.b.creds",
+      "servers_acknowledged": 1
+    }
+  ],
+  "next_steps": [
+    {
+      "sender": "endpoint",
+      "step": "session",
+      "action": "restart the sessions of the reissued endpoints so they read the new creds",
+      "address": "",
+      "purpose": "use",
+      "detail": ""
+    },
+    {
+      "sender": "operator",
+      "step": "rerun",
+      "action": "reissue the endpoints that did not finish; --changed leaves the ones that succeeded alone",
+      "address": "",
+      "purpose": "use",
+      "detail": "mashctl endpoint reissue --changed --make-key --yes"
+    }
+  ],
+  "refusal": null
+}
+== bulk_revocation_unknown
+exit 6
+stderr:
+mashctl: endpoint reissue o/g/a: revocation_unknown: cannot tell whether the current key of o.g.a is revoked: no system account answered
+mashctl: endpoint reissue: error (revocation_unknown): cannot tell whether the current key of o.g.a is revoked: no system account answered
+stdout:
+{
+  "schema": "mashctl-endpoint-bulk@1",
+  "outcome": "error",
+  "counts": {
+    "reissued": 0,
+    "planned": 0,
+    "skipped": 0,
+    "refused": 0,
+    "error": 1
+  },
+  "endpoints": [
+    {
+      "owner": "o",
+      "group": "g",
+      "instance": "a",
+      "address": "o.g.a",
+      "key": "o_g_a",
+      "outcome": "error",
+      "reason": "revocation_unknown",
+      "creds_path": "<TMP>/o.g.a.creds"
+    }
+  ],
+  "next_steps": [],
+  "refusal": {
+    "code": "revocation_unknown",
+    "detail": "cannot tell whether the current key of o.g.a is revoked: no system account answered"
+  }
+}
+== delete_usage
+exit 2
+stderr:
+mashctl: endpoint delete: one endpoint address only; try: mashctl endpoint delete --help
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "error",
+  "owner": "",
+  "group": "",
+  "instance": "",
+  "address": "",
+  "key": "",
+  "creds": {
+    "path": "",
+    "action": "none"
+  },
+  "next_steps": [],
+  "refusal": {
+    "code": "usage",
+    "detail": "one endpoint address only; try: mashctl endpoint delete --help"
+  }
+}
+== delete_unknown_flag
+exit 2
+stderr:
+mashctl: endpoint delete: unknown option "--bogus"; try: mashctl endpoint delete --help
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "error",
+  "owner": "",
+  "group": "",
+  "instance": "",
+  "address": "",
+  "key": "",
+  "creds": {
+    "path": "",
+    "action": "none"
+  },
+  "next_steps": [],
+  "refusal": {
+    "code": "unknown_flag",
+    "detail": "unknown option \"--bogus\"; try: mashctl endpoint delete --help"
+  }
+}
+== delete_address_missing
+exit 2
+stderr:
+mashctl: endpoint delete: no endpoint address: give owner/group/instance, for example alice/dev/design; try: mashctl endpoint delete --help
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "error",
+  "owner": "",
+  "group": "",
+  "instance": "",
+  "address": "",
+  "key": "",
+  "creds": {
+    "path": "",
+    "action": "none"
+  },
+  "next_steps": [],
+  "refusal": {
+    "code": "address_missing",
+    "detail": "no endpoint address: give owner/group/instance, for example alice/dev/design; try: mashctl endpoint delete --help"
+  }
+}
+== delete_address_invalid
+exit 2
+stderr:
+mashctl: endpoint delete: not an endpoint address (the value is not shown): write owner/group/instance, for example alice/dev/design
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "error",
+  "owner": "",
+  "group": "",
+  "instance": "",
+  "address": "",
+  "key": "",
+  "creds": {
+    "path": "",
+    "action": "none"
+  },
+  "next_steps": [],
+  "refusal": {
+    "code": "address_invalid",
+    "detail": "not an endpoint address (the value is not shown): write owner/group/instance, for example alice/dev/design"
+  }
+}
+== delete_servers_invalid
+exit 2
+stderr:
+mashctl: endpoint delete: MASH_SERVERS must be a whole number of servers, 1 or more, got "0"
+usage: mashctl endpoint delete ADDRESS [--delete-creds] [--force] [--no-revoke] [--dry-run] [--json]
+  ADDRESS is owner/group/instance (for example alice/dev/design) or owner.group.instance.
+  Revokes the endpoint's user key, removes its directory record and inbox, burns the address, and renames its creds
+  file (if one is in the config directories) to NAME.creds.retired-<time>.
+  --delete-creds   remove the creds file instead of renaming it
+  --force          also handle the creds file when the server has no record
+  --no-revoke      do not revoke the user key
+  --dry-run        say what would happen and change nothing
+  --json           print the result as JSON (schema mashctl-endpoint@1)
+  --servers N and --sys-creds FILE override MASH_SERVERS and MASH_SYS_CREDS
+  exit: 0 deleted or unchanged, 1 refused, 2 usage, 5 partial, 6 error
+Example:
+  mashctl endpoint delete alice/dev/design --dry-run
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "error",
+  "owner": "o",
+  "group": "g",
+  "instance": "a",
+  "address": "o.g.a",
+  "key": "o_g_a",
+  "creds": {
+    "path": "",
+    "action": "none"
+  },
+  "next_steps": [],
+  "refusal": {
+    "code": "servers_invalid",
+    "detail": "MASH_SERVERS must be a whole number of servers, 1 or more, got \"0\""
+  }
+}
+== delete_not_found
+exit 1
+stderr:
+mashctl: endpoint delete o/g/none: no directory record on the server (mashctl endpoint list shows the endpoints that exist; --force handles the creds file anyway); if the endpoint was partly removed, finish with mashctl deprovision o.g.none
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "refused",
+  "owner": "o",
+  "group": "g",
+  "instance": "none",
+  "address": "o.g.none",
+  "key": "o_g_none",
+  "creds": {
+    "path": "",
+    "action": "none"
+  },
+  "next_steps": [
+    "mashctl endpoint list shows the endpoints that exist"
+  ],
+  "refusal": {
+    "code": "not_found",
+    "detail": "no directory record on the server (mashctl endpoint list shows the endpoints that exist; --force handles the creds file anyway); if the endpoint was partly removed, finish with mashctl deprovision o.g.none"
+  }
+}
+== delete_no_creds_file
+exit 1
+stderr:
+mashctl: endpoint delete o/g/a: mash: cannot find a config directory: set HOME or XDG_CONFIG_HOME, or use the MASH_* variables
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "refused",
+  "owner": "o",
+  "group": "g",
+  "instance": "a",
+  "address": "o.g.a",
+  "key": "o_g_a",
+  "creds": {
+    "path": "",
+    "action": "none"
+  },
+  "next_steps": [
+    "run again without --delete-creds"
+  ],
+  "refusal": {
+    "code": "no_creds_file",
+    "detail": "mash: cannot find a config directory: set HOME or XDG_CONFIG_HOME, or use the MASH_* variables"
+  }
+}
+== delete_server_set
+exit 1
+stderr:
+mashctl: endpoint delete o/g/a: only 2 of 3 servers answered the account lookup
+nothing was revoked; the key is still valid
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "refused",
+  "owner": "o",
+  "group": "g",
+  "instance": "a",
+  "address": "o.g.a",
+  "key": "o_g_a",
+  "creds": {
+    "path": "",
+    "action": "none"
+  },
+  "next_steps": [
+    "start the missing servers or name them with --servers, then run mashctl endpoint delete o/g/a"
+  ],
+  "refusal": {
+    "code": "server_set",
+    "detail": "only 2 of 3 servers answered the account lookup"
+  }
+}
+== delete_future_issued
+exit 1
+stderr:
+mashctl: endpoint delete o/g/a: o.g.a's current creds JWT claims it was issued in the future (<TIME>): the revocation would not cover it; fix this machine's clock (or the machine that minted it) and run again; nothing was changed
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "refused",
+  "owner": "o",
+  "group": "g",
+  "instance": "a",
+  "address": "o.g.a",
+  "key": "o_g_a",
+  "creds": {
+    "path": "",
+    "action": "none"
+  },
+  "next_steps": [],
+  "refusal": {
+    "code": "future_issued",
+    "detail": "o.g.a's current creds JWT claims it was issued in the future (<TIME>): the revocation would not cover it; fix this machine's clock (or the machine that minted it) and run again; nothing was changed"
+  }
+}
+== delete_revoke_failed
+exit 1
+stderr:
+mashctl: endpoint delete o/g/a: mash: refusing to deprovision o_g_a: could not confirm the revocation of <KEY>: user key <KEY>: no system account answered; it may already be in force on some servers; nothing was removed; run the same command again (revoking again is safe): nothing was revoked; the key is still valid; the directory record was not changed (--no-revoke retires without revoking)
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "refused",
+  "owner": "o",
+  "group": "g",
+  "instance": "a",
+  "address": "o.g.a",
+  "key": "o_g_a",
+  "creds": {
+    "path": "",
+    "action": "none"
+  },
+  "next_steps": [
+    "run mashctl endpoint delete o/g/a --no-revoke to remove without revoking"
+  ],
+  "refusal": {
+    "code": "revoke_failed",
+    "detail": "mash: refusing to deprovision o_g_a: could not confirm the revocation of <KEY>: user key <KEY>: no system account answered; it may already be in force on some servers; nothing was removed; run the same command again (revoking again is safe): nothing was revoked; the key is still valid; the directory record was not changed (--no-revoke retires without revoking)"
+  }
+}
+== delete_revoke_not_confirmed
+exit 1
+stderr:
+mashctl: endpoint delete o/g/a: mash: refusing to deprovision o_g_a: could not confirm the revocation of <KEY>: user key <KEY>: the revocation was not confirmed: the revocation was pushed but not confirmed; it may already be in force on some servers; nothing was removed; run the same command again (revoking again is safe): the revocation may already be in force on some servers; the directory record was not changed (--no-revoke retires without revoking)
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "refused",
+  "owner": "o",
+  "group": "g",
+  "instance": "a",
+  "address": "o.g.a",
+  "key": "o_g_a",
+  "creds": {
+    "path": "",
+    "action": "none"
+  },
+  "next_steps": [
+    "run mashctl endpoint delete o/g/a --no-revoke to remove without revoking"
+  ],
+  "refusal": {
+    "code": "revoke_not_confirmed",
+    "detail": "mash: refusing to deprovision o_g_a: could not confirm the revocation of <KEY>: user key <KEY>: the revocation was not confirmed: the revocation was pushed but not confirmed; it may already be in force on some servers; nothing was removed; run the same command again (revoking again is safe): the revocation may already be in force on some servers; the directory record was not changed (--no-revoke retires without revoking)"
+  }
+}
+== delete_refused
+exit 1
+stderr:
+mashctl: endpoint delete o/g/a: mash: refusing to deprovision o_g_a: its record belongs to another user key (left in place): nothing was changed
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "refused",
+  "owner": "o",
+  "group": "g",
+  "instance": "a",
+  "address": "o.g.a",
+  "key": "o_g_a",
+  "creds": {
+    "path": "",
+    "action": "none"
+  },
+  "next_steps": [],
+  "refusal": {
+    "code": "refused",
+    "detail": "mash: refusing to deprovision o_g_a: its record belongs to another user key (left in place): nothing was changed"
+  }
+}
+== list_usage
+exit 2
+stderr:
+mashctl: endpoint list: takes no argument; try: mashctl endpoint show ADDRESS for one endpoint, or mashctl endpoint list --help
+stdout:
+{
+  "schema": "mashctl-endpoint-list@1",
+  "outcome": "error",
+  "endpoints": [],
+  "refusal": {
+    "code": "usage",
+    "detail": "takes no argument; try: mashctl endpoint show ADDRESS for one endpoint, or mashctl endpoint list --help"
+  }
+}
+== list_unknown_flag
+exit 2
+stderr:
+mashctl: endpoint list: unknown option "--bogus"; try: mashctl endpoint list --help
+stdout:
+{
+  "schema": "mashctl-endpoint-list@1",
+  "outcome": "error",
+  "endpoints": [],
+  "refusal": {
+    "code": "unknown_flag",
+    "detail": "unknown option \"--bogus\"; try: mashctl endpoint list --help"
+  }
+}
+== show_usage
+exit 2
+stderr:
+mashctl: endpoint show: one endpoint address only; try: mashctl endpoint show --help
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "error",
+  "owner": "",
+  "group": "",
+  "instance": "",
+  "address": "",
+  "key": "",
+  "user_public_key": "",
+  "created": "",
+  "note": "",
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "role": "",
+  "host": "",
+  "agent": "",
+  "account": "",
+  "mail_subject": "",
+  "creds": {
+    "path": "",
+    "exists": false
+  },
+  "issued": null,
+  "refusal": {
+    "code": "usage",
+    "detail": "one endpoint address only; try: mashctl endpoint show --help"
+  }
+}
+== show_unknown_flag
+exit 2
+stderr:
+mashctl: endpoint show: unknown option "--bogus"; try: mashctl endpoint show --help
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "error",
+  "owner": "",
+  "group": "",
+  "instance": "",
+  "address": "",
+  "key": "",
+  "user_public_key": "",
+  "created": "",
+  "note": "",
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "role": "",
+  "host": "",
+  "agent": "",
+  "account": "",
+  "mail_subject": "",
+  "creds": {
+    "path": "",
+    "exists": false
+  },
+  "issued": null,
+  "refusal": {
+    "code": "unknown_flag",
+    "detail": "unknown option \"--bogus\"; try: mashctl endpoint show --help"
+  }
+}
+== show_address_missing
+exit 2
+stderr:
+mashctl: endpoint show: no endpoint address: give owner/group/instance, for example alice/dev/design; try: mashctl endpoint show --help
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "error",
+  "owner": "",
+  "group": "",
+  "instance": "",
+  "address": "",
+  "key": "",
+  "user_public_key": "",
+  "created": "",
+  "note": "",
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "role": "",
+  "host": "",
+  "agent": "",
+  "account": "",
+  "mail_subject": "",
+  "creds": {
+    "path": "",
+    "exists": false
+  },
+  "issued": null,
+  "refusal": {
+    "code": "address_missing",
+    "detail": "no endpoint address: give owner/group/instance, for example alice/dev/design; try: mashctl endpoint show --help"
+  }
+}
+== show_address_invalid
+exit 2
+stderr:
+mashctl: endpoint show: not an endpoint address (the value is not shown): write owner/group/instance, for example alice/dev/design
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "error",
+  "owner": "",
+  "group": "",
+  "instance": "",
+  "address": "",
+  "key": "",
+  "user_public_key": "",
+  "created": "",
+  "note": "",
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "role": "",
+  "host": "",
+  "agent": "",
+  "account": "",
+  "mail_subject": "",
+  "creds": {
+    "path": "",
+    "exists": false
+  },
+  "issued": null,
+  "refusal": {
+    "code": "address_invalid",
+    "detail": "not an endpoint address (the value is not shown): write owner/group/instance, for example alice/dev/design"
+  }
+}
+== show_not_found
+exit 1
+stderr:
+stdout:
+{
+  "schema": "mashctl-endpoint@1",
+  "outcome": "refused",
+  "owner": "o",
+  "group": "g",
+  "instance": "none",
+  "address": "o.g.none",
+  "key": "o_g_none",
+  "user_public_key": "",
+  "created": "",
+  "note": "",
+  "labels": {},
+  "caps": [],
+  "description": "",
+  "role": "",
+  "host": "",
+  "agent": "",
+  "account": "",
+  "mail_subject": "",
+  "creds": {
+    "path": "<TMP>/o.g.none.creds",
+    "exists": true
+  },
+  "issued": null,
+  "refusal": {
+    "code": "not_found",
+    "detail": "no directory record for o/g/none; mashctl endpoint list shows the endpoints that exist"
+  }
+}

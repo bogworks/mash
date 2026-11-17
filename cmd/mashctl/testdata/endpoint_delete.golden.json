@@ -10,6 +10,7 @@
     "path": "<DIR>/o.g.a.creds",
     "action": "renamed"
   },
+  "servers_acknowledged": 1,
   "next_steps": [],
   "refusal": null
 }

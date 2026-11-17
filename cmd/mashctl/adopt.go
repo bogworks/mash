@@ -114,7 +114,7 @@ func runAdopt(args []string, env func(string) string, lookup config.Lookup, stdo
 	need(o.server, "--server", "the NATS URL of the server you run")
 	need(o.operatorKey, "--operator-key", "the operator signing seed: mashctl cannot create authority on a server it did not set up, so adopt needs yours")
 	need(o.accountKey, "--account-key", "the identity seed of the account mash uses: mashctl cannot create an account on a server it did not set up")
-	need(o.sysCreds, "--sys-creds", "system account user creds: they prove access to the resolver and are how `mashctl retire` revokes a user key")
+	need(o.sysCreds, "--sys-creds", "system account user creds: they prove access to the resolver and are how `mashctl endpoint delete` revokes a user key")
 	if len(missing) > 0 {
 		fmt.Fprintf(stderr, "%smissing: %s\nadopt takes over a server you already run in operator mode; it cannot stand one up or reconfigure one from a URL (use `mashctl init --local` for a new local server)\n%s", pfx, strings.Join(missing, "; "), adoptUsage())
 		return 2
@@ -277,9 +277,9 @@ func runAdopt(args []string, env func(string) string, lookup config.Lookup, stdo
 	if set.Cluster != "" {
 		shape = fmt.Sprintf("cluster %q", set.Cluster)
 	}
-	fmt.Fprintf(stdout, "  4. system user    ok: the ping was answered (%s, %d server(s) replied) and the claims lookup worked. The claims update (push) permission is not exercised here: `mashctl retire` is the first to use it\n", shape, len(set.Names))
+	fmt.Fprintf(stdout, "  4. system user    ok: the ping was answered (%s, %d server(s) replied) and the claims lookup worked. The claims update (push) permission is not exercised here: `mashctl endpoint delete` is the first to use it\n", shape, len(set.Names))
 	if set.Cluster != "" || set.Gateways {
-		warns = append(warns, "the server is part of a cluster: pass --servers N (or set MASH_SERVERS) to `mashctl retire` and `deprovision` so they can confirm every server took the update")
+		warns = append(warns, "the server is part of a cluster: pass --servers N (or set MASH_SERVERS) to `mashctl endpoint delete` and `deprovision` so they can confirm every server took the update")
 	}
 
 	// (5) can the operator key sign for this account?

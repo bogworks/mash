@@ -415,14 +415,14 @@ func TestRetireAndDeprovisionMarkTheKeyRevoked(t *testing.T) {
 		_, pub := h.credsClaims(ad("n"))
 		s := stubRevoke(t)
 		s.err = errors.New("no ack")
-		if _, _, code := h.run("retire", "o.g.n"); code == 0 {
+		if _, _, code := h.run("endpoint", "delete", "o.g.n"); code == 0 {
 			t.Fatal("retire passed with the revocation failing")
 		}
 		if h.issued()[pub].RevokedAt != "" {
 			t.Fatal("marked although the revocation failed")
 		}
 		s.err = nil
-		if out, errb, code := h.run("retire", "o.g.n"); code != 0 {
+		if out, errb, code := h.run("endpoint", "delete", "o.g.n"); code != 0 {
 			t.Fatalf("%d %s %s", code, out, errb)
 		}
 		if len(s.calls) < 2 || s.calls[len(s.calls)-1] != pub {
@@ -455,7 +455,7 @@ func TestRetireAndDeprovisionMarkTheKeyRevoked(t *testing.T) {
 		prev := ctl.IssuedMarkRevoked
 		ctl.IssuedMarkRevoked = func(context.Context, *admin.Admin, string, time.Time) error { return errors.New("record down") }
 		t.Cleanup(func() { ctl.IssuedMarkRevoked = prev })
-		out, errb, code := h.run("retire", "o.g.n")
+		out, errb, code := h.run("endpoint", "delete", "o.g.n")
 		if code != 0 {
 			t.Fatalf("a failed mark failed the retire: %d %s %s", code, out, errb)
 		}
@@ -473,7 +473,7 @@ func TestRetireAndDeprovisionMarkTheKeyRevoked(t *testing.T) {
 		h := newFleetEnv(t)
 		u := h.provisionDeclared("a") // provisioned without a minted credential: not in the issue record
 		stubRevoke(t)
-		out, errb, code := h.run("retire", "o.g.a")
+		out, errb, code := h.run("endpoint", "delete", "o.g.a")
 		// The pre-revocation check warns once that the key has no record; marking the revocation says nothing more.
 		if code != 0 || strings.Count(errb, "issue record") != 1 || !strings.Contains(errb, "has no issue record") || strings.Contains(errb, "was not updated") {
 			t.Fatalf("%d %s %s", code, out, errb)

@@ -15,7 +15,7 @@ import (
 // helpVerbs is every verb run dispatches; each takes -h and --help, prints its usage and changes nothing.
 var helpVerbs = [][]string{
 	{"adopt"}, {"audit"}, {"inbox"}, {"inbox", "inspect"}, {"issued"}, {"issued", "list"}, {"issued", "check"}, {"version"}, {"label"}, {"unlabel"},
-	{"retire"}, {"init"}, {"limits"}, {"permissions"}, {"provision"},
+	{"endpoint"}, {"init"}, {"limits"}, {"permissions"}, {"provision"},
 	{"set-meta"}, {"suspend"}, {"resume"}, {"suspended"}, {"deprovision"}, {"list"},
 }
 
@@ -97,7 +97,7 @@ func TestHelpRequestedOnlyFirstArgument(t *testing.T) {
 		args []string
 	}{
 		{"label", []string{"--help"}}, {"set-meta", []string{"-h"}},
-		{"retire", []string{"-h"}}, {"suspend", []string{"-h"}},
+		{"endpoint", []string{"-h"}}, {"suspend", []string{"-h"}},
 		{"issued", []string{"check", "--help"}}, {"issued", []string{"list", "-h"}}, {"issued", []string{"-h"}},
 		{"inbox", []string{"inspect", "-h"}}, {"version", []string{"--help"}},
 	}
@@ -113,7 +113,7 @@ func TestHelpRequestedOnlyFirstArgument(t *testing.T) {
 		{"label", []string{"n", "--label", "help"}},
 		{"label", []string{"n", "role=-h"}}, {"label", []string{"n", "k=--help"}}, {"label", []string{"n", "k", "--help"}},
 		{"set-meta", []string{"n", "note", "--help"}}, {"set-meta", []string{"n", "--help"}},
-		{"retire", []string{"n", "-h"}}, {"suspend", []string{"n", "--help"}},
+		{"endpoint", []string{"n", "-h"}}, {"suspend", []string{"n", "--help"}},
 		{"unlabel", []string{"n", "-h"}}, {"issued", []string{"check", "n", "--help"}}, {"inbox", []string{"inspect", "n", "-h"}},
 	}
 	for _, c := range no {

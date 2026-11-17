@@ -90,7 +90,7 @@ func TestConfigAMashctlProvision(t *testing.T) {
 func TestConfigAMashctlRequiredWithoutFileRefusesToStart(t *testing.T) {
 	verbs := [][]string{
 		{"list"}, {"init"}, {"limits"}, {"provision", "o.g.x", "--user", "U", "--account", "A"},
-		{"label", "o.g.x", "k=v"}, {"retire", "o.g.x"},
+		{"label", "o.g.x", "k=v"}, {"endpoint", "delete", "o.g.x"},
 		{"adopt", "--server", "nats://127.0.0.1:1", "--operator-key", "/x", "--account-key", "/x", "--sys-creds", "/x", "--admin-creds", "/x"},
 	}
 	for _, how := range []string{"environment", "config.json"} {

@@ -112,6 +112,7 @@ func TestEpReplaceCredsLeavesNoTemp(t *testing.T) {
 
 func TestEndpointCreateFlatJSON(t *testing.T) {
 	h := newFleetEnv(t)
+	fakeKeyRevoked(t, func(string) (bool, error) { return false, nil })
 	out := t.TempDir()
 	_, pubFile, _ := epKey(t, out, "k")
 	a := ad("flat")
@@ -259,11 +260,11 @@ func TestEndpointReissueConcurrentSameHost(t *testing.T) {
 	h := newFleetEnv(t)
 	var mu sync.Mutex
 	prev := revokeUsers
-	revokeUsers = func(_ context.Context, _ config.Config, _ func(string) string, _ int, _ []string, _ io.Writer, _ func() time.Time) error {
+	revokeUsers = func(_ context.Context, _ config.Config, _ func(string) string, _ int, _ []string, _ io.Writer, _ func() time.Time) (int, error) {
 		mu.Lock()
 		defer mu.Unlock()
 		time.Sleep(20 * time.Millisecond)
-		return nil
+		return fakeAcked, nil
 	}
 	t.Cleanup(func() { revokeUsers = prev })
 	a := ad("race")
@@ -340,6 +341,7 @@ func TestEndpointReissueBusy(t *testing.T) {
 
 func TestEndpointPublicKeyIssuedNamesRemedy(t *testing.T) {
 	h := newFleetEnv(t)
+	fakeKeyRevoked(t, func(string) (bool, error) { return false, nil })
 	out := t.TempDir()
 	_, pubA, _ := epKey(t, out, "a")
 	if _, se, code := h.run("endpoint", "create", ad("a").String(), "--public-key", pubA, "--jwt-out", filepath.Join(out, "a.jwt")); code != 0 {
@@ -364,15 +366,16 @@ func TestEndpointPublicKeyIssuedNamesRemedy(t *testing.T) {
 
 func TestEndpointReissueConcurrentPublicKey(t *testing.T) {
 	h := newFleetEnv(t)
+	fakeKeyRevoked(t, func(string) (bool, error) { return false, nil })
 	var mu sync.Mutex
 	rotations := 0
 	prev := revokeUsers
-	revokeUsers = func(_ context.Context, _ config.Config, _ func(string) string, _ int, _ []string, _ io.Writer, _ func() time.Time) error {
+	revokeUsers = func(_ context.Context, _ config.Config, _ func(string) string, _ int, _ []string, _ io.Writer, _ func() time.Time) (int, error) {
 		mu.Lock()
 		defer mu.Unlock()
 		rotations++
 		time.Sleep(20 * time.Millisecond)
-		return nil
+		return 1, nil
 	}
 	t.Cleanup(func() { revokeUsers = prev })
 	out := t.TempDir()

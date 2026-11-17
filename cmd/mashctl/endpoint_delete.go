@@ -48,9 +48,11 @@ type deleteJSON struct {
 	Schema  string `json:"schema"`
 	Outcome string `json:"outcome"`
 	endpointObject
-	Creds     deleteCredsJSON `json:"creds"`
-	NextSteps []string        `json:"next_steps"`
-	Refusal   *refusalJSON    `json:"refusal"`
+	Creds deleteCredsJSON `json:"creds"`
+	// ServersAcknowledged is how many servers took the revocation of the user key; always present when the outcome is deleted, 0 when this run revoked none.
+	ServersAcknowledged *int         `json:"servers_acknowledged,omitempty"`
+	NextSteps           []string     `json:"next_steps"`
+	Refusal             *refusalJSON `json:"refusal"`
 }
 
 // slashForm is owner/group/instance.
@@ -131,6 +133,9 @@ func runEndpointDelete(args []string, env func(string) string, lookup config.Loo
 		}
 		return 2
 	}
+	if res.kind == "deleted" {
+		fmt.Fprintf(out, "servers acknowledged the revocation: %d\n", res.acked)
+	}
 	if asJSON {
 		j := deleteJSON{
 			Schema: endpointSchema, Outcome: res.kind, endpointObject: names,
@@ -143,7 +148,10 @@ func runEndpointDelete(args []string, env func(string) string, lookup config.Loo
 		if j.NextSteps == nil {
 			j.NextSteps = []string{}
 		}
-		if res.kind == "refused" {
+		if res.kind == "deleted" {
+			j.ServersAcknowledged = &res.acked
+		}
+		if res.kind == "refused" || (res.kind == "error" && res.refusalCode != "") {
 			j.Refusal = &refusalJSON{Code: res.refusalCode, Detail: res.detail}
 		}
 		writeJSON(stdout, j)

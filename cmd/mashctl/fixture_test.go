@@ -257,19 +257,44 @@ type revokeCall struct {
 	at    time.Time // the revocation time the caller passed; zero when it passed none
 }
 
+// fakeAcked is the server count every test fake of revokeUsers reports as having taken the update.
+// A test that checks the count sets it with setFakeAcked.
+var fakeAcked = 1
+
+func setFakeAcked(t *testing.T, n int) {
+	t.Helper()
+	prev := fakeAcked
+	fakeAcked = n
+	t.Cleanup(func() { fakeAcked = prev })
+}
+
 // fakeRevoke replaces the revocation seam for the test; err, when set, is what every call returns.
 func fakeRevoke(t *testing.T, err error) *[]revokeCall {
 	t.Helper()
 	var calls []revokeCall
 	prev := revokeUsers
-	revokeUsers = func(_ context.Context, _ config.Config, _ func(string) string, _ int, users []string, _ io.Writer, now func() time.Time) error {
+	revokeUsers = func(_ context.Context, _ config.Config, _ func(string) string, _ int, users []string, _ io.Writer, now func() time.Time) (int, error) {
 		c := revokeCall{users: slices.Clone(users)}
 		if now != nil {
 			c.at = now()
 		}
 		calls = append(calls, c)
-		return err
+		if err != nil {
+			return 0, err
+		}
+		return fakeAcked, nil
 	}
 	t.Cleanup(func() { revokeUsers = prev })
+	fakeKeyRevoked(t, func(string) (bool, error) { return false, nil })
 	return &calls
+}
+
+// fakeKeyRevoked replaces the account revocation read for the test: f answers for a user public key.
+func fakeKeyRevoked(t *testing.T, f func(pub string) (bool, error)) {
+	t.Helper()
+	prev := keyRevoked
+	keyRevoked = func(_ context.Context, _ config.Config, _ func(string) string, _ int, pub string) (bool, error) {
+		return f(pub)
+	}
+	t.Cleanup(func() { keyRevoked = prev })
 }
