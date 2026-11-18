@@ -44,6 +44,10 @@ func scrubbedEnv(t *testing.T, mash map[string]string) []string {
 	t.Helper()
 	pathDir := t.TempDir() // empty: nothing resolves on it
 	env := []string{"PATH=" + pathDir, "HOME=" + t.TempDir()}
+	if _, ok := mash["MASH_INSECURE_PLAINTEXT"]; !ok {
+		// REQ-014: these tests are not about TLS; the override is explicit.
+		env = append(env, "MASH_INSECURE_PLAINTEXT=1")
+	}
 	for k, v := range mash {
 		if !strings.HasPrefix(k, "MASH_") {
 			t.Fatalf("scrubbedEnv: %s is not a MASH_ variable", k)
@@ -90,6 +94,23 @@ func mashRun(t *testing.T, bin string, env []string, stdin string, args ...strin
 	return out.String(), code
 }
 
+// mashRunSplit is mashRun with standard output and standard error kept apart.
+func mashRunSplit(t *testing.T, bin string, env []string, stdin string, args ...string) (stdout, stderr string, code int) {
+	t.Helper()
+	cmd := exec.Command(bin, args...)
+	cmd.Env = env
+	cmd.Stdin = strings.NewReader(stdin)
+	var out, errb bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errb
+	err := cmd.Run()
+	if ee, ok := err.(*exec.ExitError); ok {
+		code = ee.ExitCode()
+	} else if err != nil {
+		t.Fatalf("mash %v: %v", args, err)
+	}
+	return out.String(), errb.String(), code
+}
+
 func mustRun(t *testing.T, bin string, env []string, args ...string) string {
 	t.Helper()
 	out, code := mashRun(t, bin, env, "", args...)
@@ -105,7 +126,7 @@ func TestStandaloneOnlyNATS(t *testing.T) {
 	e := testenv.Start(t)
 
 	base := map[string]string{"MASH_URL": e.URL, "MASH_OWNER": e.Owner, "MASH_GROUP": testGroup}
-	adminEnv := scrubbedEnv(t, map[string]string{"MASH_URL": e.URL, "MASH_OWNER": e.Owner, "MASH_ADMIN_CREDS": e.AdminCreds, "MASH_INSECURE_LOOPBACK": "1"})
+	adminEnv := scrubbedEnv(t, map[string]string{"MASH_URL": e.URL, "MASH_OWNER": e.Owner, "MASH_ADMIN_CREDS": e.AdminCreds, "MASH_INSECURE_PLAINTEXT": "1"})
 	assertToolsAbsent(t, adminEnv)
 	mustRun(t, bin, adminEnv, "admin", "init")
 	envs := map[string][]string{}
@@ -162,7 +183,7 @@ func TestStandaloneOnlyNATS(t *testing.T) {
 func TestStandaloneEnvOnlyConfig(t *testing.T) {
 	bin := mashBinary(t)
 	e := testenv.Start(t)
-	adminEnv := scrubbedEnv(t, map[string]string{"MASH_URL": e.URL, "MASH_OWNER": e.Owner, "MASH_ADMIN_CREDS": e.AdminCreds, "MASH_INSECURE_LOOPBACK": "1"})
+	adminEnv := scrubbedEnv(t, map[string]string{"MASH_URL": e.URL, "MASH_OWNER": e.Owner, "MASH_ADMIN_CREDS": e.AdminCreds, "MASH_INSECURE_PLAINTEXT": "1"})
 	mustRun(t, bin, adminEnv, "admin", "init")
 	creds, user, err := e.MintEndpoint(tAddr("solo"))
 	if err != nil {

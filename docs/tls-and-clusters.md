@@ -82,8 +82,7 @@ If `init --local` made the file, it already has a `tls://` URL and `tls_ca` nami
 | `url` | `MASH_URL` | `tls://host:port`. |
 | `tls_ca` | `MASH_TLS_CA` | The CA that signed the server's certificate. Without it the system trust store is used. |
 | `tls_cert`, `tls_key` | `MASH_TLS_CERT`, `MASH_TLS_KEY` | A client certificate and its key, for a server with `verify: true`. Set both or neither. |
-| `require_tls` | `MASH_REQUIRE_TLS` | `1` makes mash refuse plain text (below). |
-| `insecure_loopback` | `MASH_INSECURE_LOOPBACK` | Plain text to a loopback server only. |
+| `insecure_plaintext` | `MASH_INSECURE_PLAINTEXT` | `1` allows plain text (below). Off by default. |
 
 A variable overrides the same key in `config.json`. A relative path in `config.json` is resolved against the config directory. The files are read at connect time.
 
@@ -98,15 +97,29 @@ The same settings serve `mashctl`, `mash serve`, `mash hook` and the other `mash
 | Set `tls_cert` without `tls_key` | `tls_cert and tls_key (MASH_TLS_CERT and MASH_TLS_KEY) must be set together` |
 | Named a host the certificate does not list | an `x509` host name error. Add the name to the SAN and sign again. |
 
-### `MASH_REQUIRE_TLS`
+### Plain text and `MASH_INSECURE_PLAINTEXT`
 
-By default mash accepts a plain `nats://` URL for an endpoint and warns. With `MASH_REQUIRE_TLS=1` (or `"require_tls": true`), `mash serve`, `mash hook` and the commands `send`, `read`, `inbox`, `who`, `prompt` and `status` refuse a plain `nats://` or `ws://` URL to any host that is not `localhost` or a loopback address, before they connect. They allow plain text to loopback. `mash status` shows the result:
+Every mash connection requires TLS, to any host, loopback included: `mashctl`, `mash serve`, `mash hook` and the commands `send`, `read`, `inbox`, `who`, `prompt` and `status`. A plain `nats://` or `ws://` URL is refused before any connection is made, and so is any other scheme that is not `tls://` or `wss://`. `mashctl init --local` makes a certificate authority and a server certificate, so the quick start runs over TLS with no extra setting. The one override is `insecure_plaintext` (`MASH_INSECURE_PLAINTEXT`): `1`/`true` or `0`/`false`, anything else is an error, and the variable beats `config.json`. 
+
+A plain URL without the override fails with exit code 2 and this text:
+
+```
+mash: refusing a plain nats:// connection to "HOST": every mash connection requires TLS, to any host (loopback included); set insecure_plaintext (MASH_INSECURE_PLAINTEXT=1) to allow plain text; the fix is to use a tls:// URL with the server's certificate (tls_ca for a private CA)
+```
+
+With the override set, each command connects and prints this line on stderr:
+
+```
+mash: WARNING: plain-text connection to HOST (insecure_plaintext is set); anyone on the network can read mail and obtain signatures
+```
+
+Use it only for a throwaway server in a test. Never use it on a network you do not control: plain text lets anyone on the network read mail and obtain signatures. It does not turn a `tls://` connection off.
+
+`mash status` shows the result:
 
 - `tls: OK - tls:// connection`
-- `tls: WARN - nats://HOST:PORT is plain nats:// to a non-loopback host ...` when the setting is off and the URL is plain.
-- `tls: FAILED - mash: MASH_REQUIRE_TLS (require_tls) is set: refusing a plain nats:// connection to "HOST" ...` when the setting is on and the URL is plain.
-
-`mashctl` is stricter without any setting: with the admin or system credentials it refuses a plain `nats://` URL to a non-loopback host, and the connection must use TLS. Only `insecure_loopback` allows plain text, and only to loopback.
+- `tls: WARN - URL is plain text and insecure_plaintext (MASH_INSECURE_PLAINTEXT) is set: ...` when the override is set and the URL is plain.
+- `tls: FAILED - mash: refusing a plain nats:// connection to "HOST" ...` when the override is not set and the URL is plain.
 
 ### `mashctl adopt` with a `tls://` URL
 
@@ -268,7 +281,7 @@ While this page was written, these steps were also run on one host, on loopback,
 - The same server with `verify: true`: a connection without a client certificate failed with the message above, and one with `tls_cert` and `tls_key` worked.
 - `mashctl adopt` with a `tls://` URL and `--mint-admin` into a second, empty config directory, then `endpoint create --public-key` from it, `mash key create` and `mash credential create` in a third, and `endpoint delete --servers 1 --sys-creds FILE`.
 - Three servers in one cluster with the `cluster` TLS block and `verify: true`, one shared certificate for all three, listing `localhost` and `127.0.0.1`: `adopt` reported `3 server(s) replied`, `mashctl init`, `issued check` (`3 of 3 servers answered`), `endpoint create --servers 3` and `endpoint delete --servers 3` (`3 server(s) acknowledged`) worked with a three-entry `url`.
-- `mash status` with `MASH_REQUIRE_TLS` on and off, against a plain URL to a non-loopback address that was not contacted.
+- `mash status` with `MASH_INSECURE_PLAINTEXT` on and off, against a plain URL to a non-loopback address that was not contacted.
 
 What was not run, by AT-005 or by these steps:
 

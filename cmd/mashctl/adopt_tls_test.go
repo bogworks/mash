@@ -68,7 +68,7 @@ func writeTestPKI(t *testing.T, dir string) (caPath, certPath, keyPath string) {
 }
 
 // newTLSAdopter is an adopter whose source server (operator mode, full resolver) listens with TLS. The adopter's
-// environment has no MASH_INSECURE_LOOPBACK. url is the tls:// URL of the server.
+// environment has no MASH_INSECURE_PLAINTEXT. url is the tls:// URL of the server.
 func newTLSAdopter(t *testing.T) (a *adopter, url, caPath string) {
 	t.Helper()
 	caPath, certPath, keyPath := writeTestPKI(t, t.TempDir())
@@ -80,7 +80,7 @@ func newTLSAdopter(t *testing.T) (a *adopter, url, caPath string) {
 		o.TLSConfig, o.TLS, o.TLSTimeout = cfg, true, 5
 	})
 	a = newAdopter(t, e)
-	delete(a.env, "MASH_INSECURE_LOOPBACK")
+	delete(a.env, "MASH_INSECURE_PLAINTEXT")
 	return a, fmt.Sprintf("tls://127.0.0.1:%d", e.srv.Addr().(*net.TCPAddr).Port), caPath
 }
 
@@ -106,10 +106,10 @@ func TestAdoptTLSUntrustedCARefused(t *testing.T) {
 	a.refuses(1, []string{"not trusted", "tls_ca"}, "--server", url, "--dry-run")
 }
 
-func TestAdoptPlainWithoutInsecureLoopbackRefused(t *testing.T) {
+func TestAdoptPlainWithoutInsecurePlaintextRefused(t *testing.T) {
 	// A plain nats:// URL to a non-loopback host is refused by RequireTLS before any connection is made. (A plain URL
 	// to the loopback address of a TLS server is not refused: nats.Secure upgrades it to TLS.)
 	a, _, ca := newTLSAdopter(t)
 	a.env["MASH_TLS_CA"] = ca
-	a.refuses(1, []string{"refusing a plain nats://", "tls_ca", "nothing was changed"}, "--server", "nats://example.invalid:4222", "--dry-run")
+	a.refuses(2, []string{"refusing a plain nats://", "tls_ca", "nothing was changed"}, "--server", "nats://example.invalid:4222", "--dry-run")
 }

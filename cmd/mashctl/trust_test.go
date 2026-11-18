@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -102,38 +103,67 @@ func TestAdoptRefusesForeignIssuerAndInstallsNoOperatorJWT(t *testing.T) {
 }
 
 func TestAdminAndSystemConnectionsRequireTLS(t *testing.T) {
-	// a plain loopback server without the opt-in: every admin verb and the system connection are refused
+	refused := func(t *testing.T, label string, code int, out, errb string) {
+		t.Helper()
+		all := out + errb
+		if code != 2 || !strings.Contains(all, "refusing a plain nats://") || !strings.Contains(all, "insecure_plaintext") || !strings.Contains(all, "MASH_INSECURE_PLAINTEXT=1") || !strings.Contains(all, "tls://") {
+			t.Fatalf("%s: exit %d, want 2 naming the override and tls://\n%s\n%s", label, code, out, errb)
+		}
+	}
+	// a plain loopback server without the override: every admin verb and the system connection are refused
 	e := newApplyEnv(t).withDirectory()
-	e.env["MASH_INSECURE_LOOPBACK"] = ""
+	e.env["MASH_INSECURE_PLAINTEXT"] = ""
 	e.env["MASH_ADMIN_CREDS"] = e.pl.Creds
 	for _, args := range [][]string{{"issued", "check"}, {"list"}, {"init"}} {
 		out, errb, code := e.run(args...)
-		if code == 0 || !strings.Contains(out+errb, "secure connection not available") {
-			t.Fatalf("%v: %d\n%s\n%s", args, code, out, errb)
-		}
+		refused(t, fmt.Sprint(args), code, out, errb)
 	}
-	// with the opt-in the same server works
-	e.env["MASH_INSECURE_LOOPBACK"] = "1"
-	if out, errb, code := e.run("list"); code != 0 {
-		t.Fatalf("with the opt-in: %d\n%s\n%s", code, out, errb)
+	// with the override the same server works, and stderr carries the warning
+	e.env["MASH_INSECURE_PLAINTEXT"] = "1"
+	if out, errb, code := runWithProcessStderr(e.t, e.run, "list"); code != 0 || !strings.Contains(errb, "mash: WARNING: plain-text connection to") {
+		t.Fatalf("with the override: %d\n%s\n%s", code, out, errb)
 	}
-	// a non-loopback plain URL is refused before any connection, with or without the opt-in
-	for _, optIn := range []string{"", "1"} {
-		e.env["MASH_INSECURE_LOOPBACK"] = optIn
-		e.env["MASH_URL"] = "nats://192.0.2.1:4222"
-		for _, args := range [][]string{{"issued", "check"}, {"list"}} {
-			out, errb, code := e.run(args...)
-			if code == 0 || !(strings.Contains(out+errb, "refusing a plain nats://") || strings.Contains(out+errb, "allows a plain connection only to localhost")) {
-				t.Fatalf("%v opt-in %q: %d\n%s\n%s", args, optIn, code, out, errb)
-			}
+	// a non-loopback plain URL is refused without the override, before any connection; with it, it is allowed (and
+	// warned about), so the failure is a connection failure, not a refusal
+	e.env["MASH_URL"] = "nats://192.0.2.1:4222"
+	for _, args := range [][]string{{"issued", "check"}, {"list"}} {
+		e.env["MASH_INSECURE_PLAINTEXT"] = ""
+		out, errb, code := e.run(args...)
+		refused(t, fmt.Sprint(args)+" non-loopback", code, out, errb)
+		e.env["MASH_INSECURE_PLAINTEXT"] = "1"
+		out, errb, code = runWithProcessStderr(e.t, e.run, args...)
+		if code == 0 || strings.Contains(out+errb, "refusing a plain") || !strings.Contains(errb, "mash: WARNING: plain-text connection to 192.0.2.1") {
+			t.Fatalf("%v non-loopback with the override: %d\n%s\n%s", args, code, out, errb)
 		}
 	}
 	// the same for adopt, which names its server on the command line
 	a := newAdopter(t, newApplyEnv(t))
-	a.env["MASH_INSECURE_LOOPBACK"] = ""
-	a.refuses(1, []string{"secure connection not available"})
-	a.env["MASH_INSECURE_LOOPBACK"] = "1"
-	a.refuses(1, []string{"allows a plain connection only to localhost"}, "--server", "nats://192.0.2.1:4222")
+	a.env["MASH_INSECURE_PLAINTEXT"] = ""
+	a.refuses(2, []string{"refusing a plain nats://", "insecure_plaintext", "MASH_INSECURE_PLAINTEXT=1", "tls://"})
+	a.refuses(2, []string{"refusing a plain nats://", "MASH_INSECURE_PLAINTEXT=1"}, "--server", "nats://192.0.2.1:4222")
+	a.env["MASH_INSECURE_PLAINTEXT"] = "1"
+	if out, errb, code := runWithProcessStderr(a.t, a.adopt, "--server", "nats://192.0.2.1:4222", "--dry-run"); code == 0 || !strings.Contains(errb, "mash: WARNING: plain-text connection to 192.0.2.1") {
+		t.Fatalf("adopt non-loopback with the override: %d\n%s\n%s", code, out, errb)
+	}
+}
+
+// runWithProcessStderr runs a verb and returns its stderr together with what it wrote to the process's own stderr,
+// where the plain-text warning goes.
+func runWithProcessStderr(t *testing.T, run func(args ...string) (string, string, int), args ...string) (string, string, int) {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := os.Stderr
+	os.Stderr = w
+	out, errb, code := run(args...)
+	os.Stderr = old
+	w.Close()
+	var warn bytes.Buffer
+	warn.ReadFrom(r)
+	r.Close()
+	return out, errb + warn.String(), code
 }
 
 func TestAdminVerbsAcceptATLSServer(t *testing.T) {
@@ -141,13 +171,49 @@ func TestAdminVerbsAcceptATLSServer(t *testing.T) {
 	env := map[string]string{"HOME": t.TempDir(), "MASH_URL": e.URL, "MASH_OWNER": e.Owner, "MASH_ADMIN_CREDS": e.AdminCreds, "MASH_TLS_CA": e.CAFile}
 	var out, errb bytes.Buffer
 	if code := runEnv([]string{"init"}, func(k string) string { return env[k] }, &out, &errb); code != 0 {
-		t.Fatalf("init over TLS without insecure_loopback: %d\n%s\n%s", code, out.String(), errb.String())
+		t.Fatalf("init over TLS without insecure_plaintext: %d\n%s\n%s", code, out.String(), errb.String())
 	}
-	// the loopback opt-in does not turn a TLS connection off
-	env["MASH_INSECURE_LOOPBACK"] = "1"
+	// the override does not turn a TLS connection off
+	env["MASH_INSECURE_PLAINTEXT"] = "1"
 	out.Reset()
 	errb.Reset()
 	if code := runEnv([]string{"list"}, func(k string) string { return env[k] }, &out, &errb); code != 0 {
 		t.Fatalf("list over TLS with the opt-in: %d\n%s\n%s", code, out.String(), errb.String())
 	}
+}
+
+// TestPlainURLRefusalExitsTwoEverywhere: every verb that connects exits 2, naming the override and tls://, when it
+// is given a plain nats:// URL without the override, whatever exit code its own error path would have used. An
+// ordinary connection failure with the override keeps its own exit code.
+func TestPlainURLRefusalExitsTwoEverywhere(t *testing.T) {
+	e := newApplyEnv(t).withDirectory()
+	e.env["MASH_INSECURE_PLAINTEXT"] = ""
+	for _, args := range [][]string{
+		{"endpoint", "list"},
+		{"endpoint", "list", "--json"},
+		{"endpoint", "show", "o/g/a"},
+		{"endpoint", "show", "o/g/a", "--json"},
+		{"endpoint", "create", "o/g/a", "--make-key"},
+		{"endpoint", "reissue", "o/g/a", "--make-key"},
+		{"endpoint", "reissue", "--all", "--make-key", "--yes"},
+		{"endpoint", "delete", "o/g/a"},
+		{"issued", "check"},
+		{"audit"},
+		{"list"},
+		{"init"},
+	} {
+		out, errb, code := e.run(args...)
+		all := out + errb
+		if code != 2 || !strings.Contains(all, "insecure_plaintext") || !strings.Contains(all, "tls://") {
+			t.Errorf("%v: exit %d, want 2 naming insecure_plaintext and tls://\n%s\n%s", args, code, out, errb)
+		}
+	}
+	// with the override and an address nothing listens on, the failure is an ordinary one, not a refusal
+	e.env["MASH_INSECURE_PLAINTEXT"] = "1"
+	e.env["MASH_URL"] = "nats://127.0.0.1:1"
+	out, errb, code := e.run("endpoint", "list")
+	if code != 6 || strings.Contains(out+errb, "refusing a plain") {
+		t.Fatalf("unreachable server with the override: exit %d, want its ordinary 6\n%s\n%s", code, out, errb)
+	}
+	t.Logf("endpoint list against a down server with the override exits %d", code)
 }

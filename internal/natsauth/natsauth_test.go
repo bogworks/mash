@@ -79,83 +79,6 @@ func TestTLSHintClosedAfterHandshake(t *testing.T) {
 	}
 }
 
-func TestRequireTLS(t *testing.T) {
-	for _, tc := range []struct {
-		url      string
-		insecure bool
-		wantErr  string // "" = accepted
-		secure   bool   // the options force TLS
-	}{
-		{"tls://example.com:4222", false, "", true},
-		{"nats://127.0.0.1:4222", false, "", true}, // loopback plain URL: TLS is still required of the server
-		{"nats://localhost:4222", false, "", true},
-		{"nats://[::1]:4222", false, "", true},
-		{"nats://10.0.0.5:4222", false, "refusing a plain nats://", false},
-		{"nats://example.com:4222", false, "refusing a plain nats://", false},
-		{"example.com:4222", false, "refusing a plain nats://", false},
-		{"ws://example.com:80", false, "refusing a plain ws://", false},
-		{"nats://127.0.0.1:4222", true, "", false},
-		{"nats://127.1.2.3:4222", true, "", false},
-		{"nats://localhost:4222", true, "", false},
-		{"nats://[::1]:4222", true, "", false},
-		{"nats://10.0.0.5:4222", true, "allows a plain connection only to localhost", false},
-		{"tls://example.com:4222", true, "allows a plain connection only to localhost", false},
-		{"nats://127.0.0.1:4222,nats://10.0.0.5:4222", true, "allows a plain connection only to localhost", false},
-		{"nats://127.0.0.1.example.com:4222", true, "allows a plain connection only to localhost", false},
-	} {
-		opts, err := natsauth.RequireTLS(tc.url, tc.insecure)
-		if tc.wantErr != "" {
-			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
-				t.Errorf("%s insecure=%v: err %v, want %q", tc.url, tc.insecure, err, tc.wantErr)
-			}
-			continue
-		}
-		if err != nil {
-			t.Errorf("%s insecure=%v: %v", tc.url, tc.insecure, err)
-			continue
-		}
-		var o nats.Options
-		for _, f := range opts {
-			if err := f(&o); err != nil {
-				t.Fatal(err)
-			}
-		}
-		if o.Secure != tc.secure {
-			t.Errorf("%s insecure=%v: Secure = %v, want %v", tc.url, tc.insecure, o.Secure, tc.secure)
-		}
-	}
-}
-
-func TestLoopbackDialer(t *testing.T) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer ln.Close()
-	go func() {
-		for {
-			c, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			c.Close()
-		}
-	}()
-	d := natsauth.LoopbackDialer{}
-	c, err := d.Dial("tcp", ln.Addr().String())
-	if err != nil {
-		t.Fatalf("loopback dial: %v", err)
-	}
-	c.Close()
-	for _, addr := range []string{"10.0.0.5:4222", "192.0.2.1:4222", "example.com:4222", "127.0.0.1.example.com:4222", "[2001:db8::1]:4222", "nohost"} {
-		c, err := d.Dial("tcp", addr)
-		if err == nil {
-			c.Close()
-			t.Errorf("dial %s succeeded, want a refusal", addr)
-		}
-	}
-}
-
 // fakeServer answers the NATS handshake and advertises connect_urls with a non-loopback address.
 func fakeServer(t *testing.T) string {
 	t.Helper()
@@ -201,42 +124,134 @@ func TestAdvertisedServersAreNotUsed(t *testing.T) {
 	}
 	nc.Close()
 
-	for _, insecure := range []bool{true, false} {
-		opts, err := natsauth.RequireTLS(url, insecure)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !insecure {
-			continue // the fake server offers no TLS; the option set is checked below
-		}
-		nc, err := nats.Connect(url, opts...)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if d := nc.DiscoveredServers(); len(d) != 0 {
-			t.Errorf("discovered servers %v, want none", d)
-		}
-		for _, s := range nc.Servers() {
-			if strings.Contains(s, "192.0.2.7") {
-				t.Errorf("the pool holds the advertised address: %v", nc.Servers())
-			}
-		}
-		nc.Close()
+	opts, warning, err := natsauth.RequireTLS(url, true)
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, insecure := range []bool{true, false} {
-		opts, _ := natsauth.RequireTLS(url, insecure)
-		var o nats.Options
-		for _, f := range opts {
-			if err := f(&o); err != nil {
-				t.Fatal(err)
+	if warning == "" {
+		t.Error("no warning for a plain connection under insecure_plaintext")
+	}
+	nc, err = nats.Connect(url, opts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer nc.Close()
+	if d := nc.DiscoveredServers(); len(d) != 0 {
+		t.Errorf("discovered servers %v, want none", d)
+	}
+	for _, s := range nc.Servers() {
+		if strings.Contains(s, "192.0.2.7") {
+			t.Errorf("the pool holds the advertised address: %v", nc.Servers())
+		}
+	}
+	for _, u := range []string{url, "tls://example.com:4222"} {
+		opts, _, err := natsauth.RequireTLS(u, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if o := optionsOf(t, opts); !o.IgnoreDiscoveredServers {
+			t.Errorf("%s: discovered servers are not ignored", u)
+		}
+	}
+}
+
+func optionsOf(t *testing.T, opts []nats.Option) nats.Options {
+	t.Helper()
+	var o nats.Options
+	for _, f := range opts {
+		if err := f(&o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return o
+}
+
+func TestRequireTLS(t *testing.T) {
+	for _, tc := range []struct {
+		url      string
+		override bool
+		wantErr  string // "" = accepted
+		secure   bool   // the options force TLS
+		warnHost string // the host the warning names ("" = no warning)
+	}{
+		{"tls://example.com:4222", false, "", true, ""},
+		{"tls://127.0.0.1:4222", false, "", true, ""},
+		{"tls://localhost:4222", false, "", true, ""},
+		{"wss://[::1]:443", false, "", true, ""},
+		{"tls://a.example.com:4222,tls://b.example.com:4222", false, "", true, ""},
+		{"tls://example.com:4222", true, "", true, ""},
+		{"nats://127.0.0.1:4222", false, "refusing a plain nats:// connection to \"127.0.0.1\"", false, ""},
+		{"nats://localhost:4222", false, "refusing a plain nats:// connection to \"localhost\"", false, ""},
+		{"nats://[::1]:4222", false, "refusing a plain nats:// connection to \"::1\"", false, ""},
+		{"nats://example.com:4222", false, "refusing a plain nats:// connection to \"example.com\"", false, ""},
+		{"ws://example.com:80", false, "refusing a plain ws://", false, ""},
+		{"example.com:4222", false, "refusing a plain nats://", false, ""},
+		{"127.0.0.1:4222", false, "refusing a plain nats://", false, ""},
+		{"foo://example.com:4222", false, "unsupported scheme \"foo\"", false, ""},
+		{"foo://127.0.0.1:4222", true, "unsupported scheme \"foo\"", false, ""},
+		{"tls://a.example.com:4222,nats://b.example.com:4222", false, "refusing a plain nats:// connection to \"b.example.com\"", false, ""},
+		{"nats://127.0.0.1:4222,tls://example.com:4222", false, "refusing a plain nats://", false, ""},
+		{"nats://127.0.0.1:4222", true, "", false, "127.0.0.1"},
+		{"nats://localhost:4222", true, "", false, "localhost"},
+		{"nats://[::1]:4222", true, "", false, "::1"},
+		{"nats://example.com:4222", true, "", false, "example.com"},
+		{"ws://example.com:80", true, "", false, "example.com"},
+		{"example.com:4222", true, "", false, "example.com"},
+		{"tls://a.example.com:4222,nats://b.example.com:4222", true, "", false, "b.example.com"},
+		{"nats://x.example.com:4222,nats://y.example.com:4222", true, "", false, "x.example.com"},
+	} {
+		opts, warning, err := natsauth.RequireTLS(tc.url, tc.override)
+		if tc.wantErr != "" {
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("%s override=%v: err %v, want %q", tc.url, tc.override, err, tc.wantErr)
+			}
+			if err != nil && (opts != nil || warning != "") {
+				t.Errorf("%s: a refusal returned options or a warning", tc.url)
+			}
+			if err != nil && !strings.Contains(tc.wantErr, "unsupported") && !strings.Contains(err.Error(), "insecure_plaintext") {
+				t.Errorf("%s: refusal does not name insecure_plaintext: %v", tc.url, err)
+			}
+			if err != nil && !strings.Contains(err.Error(), "tls_ca") {
+				t.Errorf("%s: refusal does not name the fix: %v", tc.url, err)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("%s override=%v: %v", tc.url, tc.override, err)
+			continue
+		}
+		o := optionsOf(t, opts)
+		if o.Secure != tc.secure {
+			t.Errorf("%s override=%v: Secure = %v, want %v", tc.url, tc.override, o.Secure, tc.secure)
+		}
+		if !o.IgnoreDiscoveredServers || o.CustomDialer != nil {
+			t.Errorf("%s: IgnoreDiscoveredServers = %v, CustomDialer set = %v", tc.url, o.IgnoreDiscoveredServers, o.CustomDialer != nil)
+		}
+		want := ""
+		if tc.warnHost != "" {
+			want = "mash: WARNING: plain-text connection to " + tc.warnHost + " (insecure_plaintext is set); anyone on the network can read mail and obtain signatures"
+		}
+		if warning != want {
+			t.Errorf("%s override=%v: warning %q, want %q", tc.url, tc.override, warning, want)
+		}
+	}
+}
+
+func TestRequireTLSNeverPrintsUserinfo(t *testing.T) {
+	for _, url := range []string{"nats://user:s3cret@example.com:4222", "ws://tok3n@127.0.0.1:80", "foo://user:s3cret@example.com:4222"} {
+		_, _, err := natsauth.RequireTLS(url, false)
+		if err == nil {
+			t.Fatalf("%s accepted", url)
+		}
+		for _, secret := range []string{"s3cret", "tok3n", "user:"} {
+			if strings.Contains(err.Error(), secret) {
+				t.Errorf("%s: error carries userinfo: %v", url, err)
 			}
 		}
-		if !o.IgnoreDiscoveredServers {
-			t.Errorf("insecure=%v: discovered servers are not ignored", insecure)
-		}
-		if (o.CustomDialer != nil) != insecure {
-			t.Errorf("insecure=%v: custom dialer set = %v", insecure, o.CustomDialer != nil)
-		}
+	}
+	_, w, err := natsauth.RequireTLS("nats://user:s3cret@example.com:4222", true)
+	if err != nil || strings.Contains(w, "s3cret") || !strings.Contains(w, "example.com") {
+		t.Errorf("override: warning %q, err %v", w, err)
 	}
 }
 

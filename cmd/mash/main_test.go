@@ -9,6 +9,7 @@ import (
 	"io"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime/debug"
 	"strings"
 	"sync"
@@ -24,7 +25,23 @@ import (
 	"github.com/bogworks/mash/internal/testenv"
 )
 
-func envFrom(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
+// envFrom is the environment of a test whose subject is not TLS. REQ-014: these tests are not about TLS; the override
+// is explicit. MASH_INSECURE_PLAINTEXT is 1 unless the test names it, and a test about TLS names it ("" or "0" for
+// none), or uses envStrict.
+func envFrom(m map[string]string) func(string) string {
+	return func(k string) string {
+		if v, ok := m[k]; ok {
+			return v
+		}
+		if k == "MASH_INSECURE_PLAINTEXT" {
+			return "1"
+		}
+		return ""
+	}
+}
+
+// envStrict is envFrom with no default: a test about the TLS requirement sees exactly the variables it names.
+func envStrict(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
 
 // session runs `mash serve` over pipes and speaks MCP to it.
 type session struct {
@@ -186,6 +203,10 @@ func newWorldWith(t *testing.T, o testenv.Options, names ...string) *world {
 		}
 		w.env[n] = map[string]string{"HOME": t.TempDir(), "MASH_NAME": n, "MASH_GROUP": testGroup, "MASH_URL": e.URL,
 			"MASH_OWNER": e.Owner, "MASH_CREDS": c, "MASH_SETTLE_MS": "20"}
+		if !o.TLS {
+			// REQ-014: these tests are not about TLS; the override is explicit.
+			w.env[n]["MASH_INSECURE_PLAINTEXT"] = "1"
+		}
 	}
 	return w
 }
@@ -194,8 +215,15 @@ func (w *world) cli(t *testing.T, as string, args ...string) (string, int) {
 	t.Helper()
 	var out, errb bytes.Buffer
 	code := run(args, envFrom(w.env[as]), strings.NewReader(""), &out, &errb)
-	return out.String() + errb.String(), code
+	return out.String() + withoutPlainWarning(errb.String()), code
 }
+
+// plainWarningLine is the line a command prints on standard error when insecure_plaintext lets a plain URL through.
+// REQ-014: these tests are not about TLS; the override is explicit, and the helpers that merge the two streams leave
+// that one line out. The line itself is asserted in plaintext_refusal_test.go.
+var plainWarningLine = regexp.MustCompile(`(?m)^mash: WARNING: plain-text connection to [^\n]*\n`)
+
+func withoutPlainWarning(s string) string { return plainWarningLine.ReplaceAllString(s, "") }
 
 func TestServeEndToEnd(t *testing.T) {
 	w := newWorld(t, "a", "b")
@@ -310,7 +338,7 @@ func TestServeLeaseConflict(t *testing.T) {
 func TestAdminCLI(t *testing.T) {
 	e := testenv.Start(t)
 	c, u := e.Mint(t, tAddr("z"))
-	env := map[string]string{"HOME": t.TempDir(), "MASH_URL": e.URL, "MASH_OWNER": e.Owner, "MASH_ADMIN_CREDS": e.AdminCreds, "MASH_INSECURE_LOOPBACK": "1"}
+	env := map[string]string{"HOME": t.TempDir(), "MASH_URL": e.URL, "MASH_OWNER": e.Owner, "MASH_ADMIN_CREDS": e.AdminCreds, "MASH_INSECURE_PLAINTEXT": "1"}
 	runAdmin := func(args ...string) (string, int) {
 		var out bytes.Buffer
 		code := run(append([]string{"admin"}, args...), envFrom(env), strings.NewReader(""), &out, &out)

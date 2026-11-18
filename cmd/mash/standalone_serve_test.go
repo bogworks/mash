@@ -21,7 +21,7 @@ import (
 func standaloneWorld(t *testing.T, bin string, names ...string) map[string][]string {
 	t.Helper()
 	e := testenv.Start(t)
-	adminEnv := scrubbedEnv(t, map[string]string{"MASH_URL": e.URL, "MASH_OWNER": e.Owner, "MASH_ADMIN_CREDS": e.AdminCreds, "MASH_INSECURE_LOOPBACK": "1"})
+	adminEnv := scrubbedEnv(t, map[string]string{"MASH_URL": e.URL, "MASH_OWNER": e.Owner, "MASH_ADMIN_CREDS": e.AdminCreds, "MASH_INSECURE_PLAINTEXT": "1"})
 	mustRun(t, bin, adminEnv, "admin", "init")
 	envs := map[string][]string{}
 	for _, n := range names {
@@ -195,12 +195,12 @@ func TestStandaloneLivePrompt(t *testing.T) {
 	waitOnline(t, bin, envs["alpha"], "beta")
 
 	type res struct {
-		out  string
+		out  string // standard output only: the plain-text warning is on standard error
 		code int
 	}
 	done := make(chan res, 1)
 	go func() {
-		o, c := mashRun(t, bin, envs["alpha"], "", "prompt", tTo("beta"), "what", "time?")
+		o, _, c := mashRunSplit(t, bin, envs["alpha"], "", "prompt", tTo("beta"), "what", "time?")
 		done <- res{o, c}
 	}()
 	content, meta := channelOf(s.await(t, isChannel))

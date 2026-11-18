@@ -224,6 +224,18 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
+	// A plain URL with no insecure_plaintext is refused before anything is connected (REQ-014): serve stops at session
+	// start and the commands that connect stop, exit 2, with the refusal on stderr.
+	if err == nil && !cfg.Inert() && args[0] != "admin" {
+		if _, perr := endpoint.EndpointTLS(cfg); perr != nil {
+			fmt.Fprintln(stderr, perr)
+			return 2
+		}
+		// serve says it once at start (reportSettings); a command says it here, once, before it connects.
+		if w := endpoint.PlainWarning(cfg); w != "" && args[0] != "serve" {
+			fmt.Fprintln(stderr, w)
+		}
+	}
 	switch args[0] {
 	case "serve":
 		return serve(ctx, cfg, err, adapter, env("MASH_PLUGIN_ROOT"), stdin, stdout, stderr)

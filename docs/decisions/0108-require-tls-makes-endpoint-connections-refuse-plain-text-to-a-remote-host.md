@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded by ADR-0146; only its require_tls default and its loopback allowance
 date: 2026-11-12
 decision-makers: Randy Bias (mash maintainer)
 ---

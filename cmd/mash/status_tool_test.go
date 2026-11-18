@@ -599,73 +599,77 @@ func TestStatusCLIMatchesTool(t *testing.T) {
 	}
 }
 
+// REQ-014: a plain URL (loopback or remote, with or without a scheme) with no override is FAILED with the refusal; with
+// insecure_plaintext it is WARN naming the override; tls:// and wss:// are OK. The userinfo is never printed.
 func TestStatusTLSLine(t *testing.T) {
+	refused := func(scheme, host string) string {
+		return "tls: FAILED - mash: refusing a plain " + scheme + "://" + " connection to \"" + host + "\""
+	}
 	for url, want := range map[string]string{
-		"nats://10.0.0.5:4222":        "tls: WARN - nats://10.0.0.5:4222 is plain nats:// to a non-loopback host",
-		"nats://u:pw@10.0.0.5:4222":   "tls: WARN - nats://REDACTED@10.0.0.5:4222 is plain nats://",
+		"nats://10.0.0.5:4222":        refused("nats", "10.0.0.5"),
+		"nats://u:s3cret@10.0.0.5":    refused("nats", "10.0.0.5"),
+		"nats://127.0.0.1:4222":       refused("nats", "127.0.0.1"),
+		"127.0.0.1:4222":              refused("nats", "127.0.0.1"),
+		"nats://localhost:4222":       refused("nats", "localhost"),
+		"nats://[::1]:4222":           refused("nats", "::1"),
+		"ws://ws.example.com":         refused("ws", "ws.example.com"),
+		"nats.example.com":            refused("nats", "nats.example.com"),
+		"tls://a:4222,example.com:42": refused("nats", "example.com"),
+		"foo://example.com":           "tls: FAILED - mash: unsupported scheme \"foo\"",
 		"tls://nats.example.com:4222": "tls: OK - tls:// connection",
-		"nats://127.0.0.1:4222":       "tls: n/a - loopback",
+		"wss://nats.example.com":      "tls: OK - tls:// connection",
+		"tls://127.0.0.1:4222":        "tls: OK - tls:// connection",
 	} {
-		src := settingsSource(t, "a", nil)
-		src.cfg.URL = url
-		l := statusLine(t, statusText(src), "tls: ")
-		if !strings.HasPrefix(l, want) {
-			t.Errorf("url %s: line %q, want prefix %q", url, l, want)
-		}
-		var buf bytes.Buffer
-		reportSettings(src, &buf)
-		if got := strings.Contains(buf.String(), "tls: WARN"); got != strings.HasPrefix(want, "tls: WARN") {
-			t.Errorf("url %s: serve stderr warns = %v: %q", url, got, buf.String())
-		}
-	}
-}
-
-// The warning was silent for an entry with no scheme (nats:// is the default) and for a list whose plain entry has
-// none; it names the host and both fixes, in the tool and in `mash status`.
-func TestStatusTLSLineWarnsNamingTheHost(t *testing.T) {
-	for url, host := range map[string]string{
-		"10.0.0.5:4222":                    "10.0.0.5",
-		"nats.example.com":                 "nats.example.com",
-		"tls://a:4222,nats.example.com:42": "nats.example.com",
-		"nats://u:s3cret@10.0.0.5:4222":    "10.0.0.5",
-		"ws://ws.example.com":              "ws.example.com",
-	} {
-		src := settingsSource(t, "a", nil)
-		src.cfg.URL = url
-		l := statusLine(t, statusText(src), "tls: ")
-		if !strings.HasPrefix(l, "tls: WARN") || !strings.Contains(l, "("+host+")") || !strings.Contains(l, "use tls://") ||
-			!strings.Contains(l, "MASH_REQUIRE_TLS=1") || strings.Contains(l, "s3cret") {
-			t.Errorf("tool, url %s: line %q", url, l)
-		}
-		cli := settingsSource(t, "a", nil)
-		cli.cfg.URL, cli.cli = url, true
-		if l := statusLine(t, statusText(cli), "tls: "); !strings.HasPrefix(l, "tls: WARN") || !strings.Contains(l, "("+host+")") {
-			t.Errorf("cli, url %s: line %q", url, l)
-		}
-		var buf bytes.Buffer
-		reportSettings(src, &buf)
-		if !strings.Contains(buf.String(), "tls: WARN") {
-			t.Errorf("url %s: serve stderr is silent: %q", url, buf.String())
-		}
-	}
-}
-
-func TestStatusTLSLineRequireTLS(t *testing.T) {
-	for url, want := range map[string]string{
-		"nats://127.0.0.1:4222":        "tls: OK (required)",
-		"tls://nats.example.com:4222":  "tls: OK (required)",
-		"nats://10.0.0.5:4222":         "tls: FAILED - mash: MASH_REQUIRE_TLS (require_tls) is set: refusing a plain nats:// connection to \"10.0.0.5\"",
-		"nats://u:s3cret@10.0.0.5":     "tls: FAILED - mash: MASH_REQUIRE_TLS (require_tls) is set: refusing a plain nats:// connection to \"10.0.0.5\"",
-		"tls://a:4222,example.com:422": "tls: FAILED",
-	} {
-		src := settingsSource(t, "a", nil)
-		src.cfg.URL, src.cfg.RequireTLS = url, true
 		for _, cli := range []bool{false, true} {
-			src.cli = cli
+			src := settingsSource(t, "a", nil)
+			src.cfg.URL, src.cli = url, cli
 			l := statusLine(t, statusText(src), "tls: ")
 			if !strings.HasPrefix(l, want) || strings.Contains(l, "s3cret") {
 				t.Errorf("url %s cli=%v: line %q, want prefix %q", url, cli, l, want)
 			}
+			if strings.HasPrefix(l, "tls: FAILED - mash: refusing") {
+				wantAll(t, url, l, "insecure_plaintext", "MASH_INSECURE_PLAINTEXT=1", "tls://", "tls_ca")
+			}
+		}
+	}
+}
+
+// With the override a plain entry is a WARN that names the host and the override, in the tool, in `mash status` and on
+// serve's stderr (once, at start); a tls:// entry is OK with or without it, and an unsupported scheme still fails.
+func TestStatusTLSLineWarnsNamingTheOverride(t *testing.T) {
+	for url, host := range map[string]string{
+		"10.0.0.5:4222":                    "10.0.0.5",
+		"nats.example.com":                 "nats.example.com",
+		"nats://127.0.0.1:4222":            "127.0.0.1",
+		"tls://a:4222,nats.example.com:42": "nats.example.com",
+		"nats://u:s3cret@10.0.0.5:4222":    "10.0.0.5",
+		"ws://ws.example.com":              "ws.example.com",
+	} {
+		for _, cli := range []bool{false, true} {
+			src := settingsSource(t, "a", nil)
+			src.cfg.URL, src.cfg.InsecurePlaintext, src.cli = url, true, cli
+			l := statusLine(t, statusText(src), "tls: ")
+			if !strings.HasPrefix(l, "tls: WARN") || !strings.Contains(l, "insecure_plaintext") || !strings.Contains(l, "plain-text connection to "+host) ||
+				strings.Contains(l, "s3cret") {
+				t.Errorf("url %s cli=%v: line %q", url, cli, l)
+			}
+		}
+		src := settingsSource(t, "a", nil)
+		src.cfg.URL, src.cfg.InsecurePlaintext = url, true
+		var buf bytes.Buffer
+		reportSettings(src, &buf)
+		if n := strings.Count(buf.String(), "tls: WARN"); n != 1 || strings.Contains(buf.String(), "s3cret") {
+			t.Errorf("url %s: serve stderr has %d tls warnings: %q", url, n, buf.String())
+		}
+	}
+	for url, want := range map[string]string{
+		"tls://nats.example.com:4222": "tls: OK",
+		"foo://example.com":           "tls: FAILED - mash: unsupported scheme",
+	} {
+		src := settingsSource(t, "a", nil)
+		src.cfg.URL, src.cfg.InsecurePlaintext = url, true
+		if l := statusLine(t, statusText(src), "tls: "); !strings.HasPrefix(l, want) {
+			t.Errorf("url %s with the override: line %q, want prefix %q", url, l, want)
 		}
 	}
 }

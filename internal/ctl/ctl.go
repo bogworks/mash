@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"os"
 	"slices"
 	"sort"
 	"strconv"
@@ -113,7 +114,7 @@ func Usage(prog string) string {
 		fmt.Fprintf(&b, "  %-44s %s\n", prog+" "+left, right)
 	}
 	line("init", "create the directory and lease buckets (or raise their caps to the configured limits)")
-	line("init --local [--dir D] [--owner O] [--port P] [--start]", "write the configuration of a local operator-mode NATS server with JetStream (loopback, no TLS), keys and credentials, for one developer; --start also starts it and creates the buckets")
+	line("init --local [--dir D] [--owner O] [--port P] [--start]", "write the configuration of a local operator-mode NATS server with JetStream (loopback, TLS only), keys and credentials, for one developer; --start also starts it and creates the buckets")
 	line("limits [address...]", "raise existing inboxes to the configured limits (config.json \"limits\"; never lowers)")
 	line("limits --show", "print the effective limits")
 	line("permissions <owner.group.instance> [--nsc]", "the NATS permissions an endpoint user needs")
@@ -184,9 +185,12 @@ func OpenAdmin(prog string, cfg config.Config) (*madmin.Admin, context.Context, 
 	} else if err := natsauth.CheckCreds(cfg.AdminCreds, raw); err != nil {
 		return nil, nil, nil, err
 	}
-	tlsReq, err := natsauth.RequireTLS(cfg.URL, cfg.InsecureLoopback)
+	tlsReq, warning, err := natsauth.RequireTLS(cfg.URL, cfg.InsecurePlaintext)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("%s: %w", pfx, err)
+	}
+	if warning != "" {
+		fmt.Fprintln(os.Stderr, warning)
 	}
 	nc, err := nats.Connect(cfg.URL, append(append(natsauth.TLSOptions(cfg.TLSCA, cfg.TLSCert, cfg.TLSKey), tlsReq...), natsauth.UserCredentials(cfg.AdminCreds), nats.Name(prog))...)
 	if err != nil {
