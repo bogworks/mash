@@ -18,10 +18,10 @@ func addrOf(t *testing.T, owner, group, instance string) sap.Address {
 }
 
 // fixedLines is the per-endpoint publish lines of the endpoint with flat key flat and heartbeat hb.
-func fixedLines(flat, hb string) []string {
+func fixedLines(owner, flat, hb string) []string {
 	return []string{
 		hb,
-		"_INBOX.>",
+		"_INBOX." + owner + ".>",
 		"$SRV.>",
 		"$JS.API.INFO",
 		"$JS.API.STREAM.INFO.inbox-" + flat,
@@ -52,9 +52,9 @@ func TestPermissionsExact(t *testing.T) {
 		"agents.mail.alice.*.*",
 		"agents.prompt.alice.*.*",
 		"agents.status.alice.*.*",
-	}, fixedLines("alice_dev_design", "agents.hb.alice.dev.design")...))
+	}, fixedLines("alice", "alice_dev_design", "agents.hb.alice.dev.design")...))
 	sameLines(t, "sub allow", p.Sub.Allow, []string{
-		"_INBOX.alice_dev_design.>",
+		"_INBOX.alice.alice_dev_design.>",
 		"agents.prompt.alice.dev.design",
 		"agents.status.alice.dev.design",
 		"$SRV.>",
@@ -76,7 +76,7 @@ func TestPermissionsLongestAddress(t *testing.T) {
 	}
 	p := Permissions(a)
 	sameLines(t, "sub allow", p.Sub.Allow, []string{
-		"_INBOX." + a.Flat() + ".>",
+		"_INBOX." + a.Owner + "." + a.Flat() + ".>",
 		a.Subjects().Prompt,
 		a.Subjects().Status,
 		"$SRV.>",
@@ -119,7 +119,7 @@ func TestPermissionsNeverReachAnotherOwner(t *testing.T) {
 				strings.Contains(s, "CONSUMER.CREATE") || strings.Contains(s, "CONSUMER.DELETE") {
 				t.Errorf("%s: over-broad grant %q", a, s)
 			}
-			if strings.HasPrefix(s, "_INBOX") && s != "_INBOX."+flat+".>" && s != "_INBOX.>" {
+			if strings.HasPrefix(s, "_INBOX") && s != "_INBOX."+a.Owner+"."+flat+".>" && s != "_INBOX."+a.Owner+".>" {
 				t.Errorf("%s: unexpected inbox grant: %q", a, s)
 			}
 			if strings.Contains(s, "$KV.mash-directory") {
@@ -160,12 +160,13 @@ func TestValidateGrantRefusesWildcardOwner(t *testing.T) {
 	for _, bad := range []string{
 		"agents.mail.*.dev.design", "agents.mail.>", "agents.*.alice.dev.design", "agents.>", "*.mail.alice.dev.design", ">",
 		"agents.mail.al*.dev.design", "agents.mail..dev.design", "agents.mail.alice", "agents.mail.>.dev",
+		"_INBOX.>", "_INBOX.*.x", "_INBOX.*.>", "_INBOX.>.x",
 	} {
 		if err := ValidateGrant(bad); err == nil {
 			t.Errorf("%q accepted", bad)
 		}
 	}
-	for _, ok := range []string{"agents.mail.alice.*.*", "agents.prompt.alice.dev.*", "agents.status.alice.>", "other.subject.*"} {
+	for _, ok := range []string{"agents.mail.alice.*.*", "agents.prompt.alice.dev.*", "agents.status.alice.>", "other.subject.*", "_INBOX.alice.>", "_INBOX.alice.alice_dev_design.>"} {
 		if err := ValidateGrant(ok); err != nil {
 			t.Errorf("%q refused: %v", ok, err)
 		}

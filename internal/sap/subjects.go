@@ -16,19 +16,15 @@ type Subjects struct {
 	Prompt, Status, HB, Mail string
 }
 
-// InboxPrefix is the reply-subject prefix of an endpoint's connections:
-// _INBOX.<flat>. The argument is the endpoint's flat key (Address.Flat). Each
-// endpoint may subscribe only under its own prefix, so replies meant for one
-// endpoint (JetStream deliveries, KV reads, prompt answers) are private; it may
-// publish replies only under _INBOX.>.
-func InboxPrefix(flat string) string { return "_INBOX." + flat }
-
 // InboxStream is the JetStream stream that holds an endpoint's mail. The
 // argument is the endpoint's flat key (Address.Flat).
 func InboxStream(flat string) string { return "inbox-" + flat }
 
-// InboxPrefix is the reply-subject prefix of a's connections.
-func (a Address) InboxPrefix() string { return InboxPrefix(a.Flat()) }
+// InboxPrefix is the reply-subject prefix of a's connections: _INBOX.<owner>.<flat>, where the flat key is
+// Address.Flat. The endpoint may subscribe only under its own prefix, so replies meant for it (JetStream deliveries,
+// KV reads, prompt answers, discovery answers) are private; it may publish replies only under _INBOX.<owner>.>, the
+// inboxes of its own owner, so an endpoint of another owner can neither answer nor forge into them.
+func (a Address) InboxPrefix() string { return "_INBOX." + a.Owner + "." + a.Flat() }
 
 // InboxStream is the JetStream stream that holds a's mail.
 func (a Address) InboxStream() string { return InboxStream(a.Flat()) }

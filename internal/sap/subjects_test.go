@@ -16,7 +16,7 @@ func TestAddressSubjectsAndInbox(t *testing.T) {
 	if a.Subjects() != want || a.MailFilter() != want.Mail {
 		t.Fatalf("got %+v filter %q", a.Subjects(), a.MailFilter())
 	}
-	if a.InboxPrefix() != "_INBOX.acme_ops_p1" || InboxPrefix(a.Flat()) != a.InboxPrefix() {
+	if a.InboxPrefix() != "_INBOX.acme.acme_ops_p1" {
 		t.Fatal(a.InboxPrefix())
 	}
 	if a.InboxStream() != "inbox-acme_ops_p1" || InboxStream(a.Flat()) != a.InboxStream() {

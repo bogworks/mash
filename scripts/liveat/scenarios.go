@@ -260,7 +260,7 @@ func expectedPermissions(owner, group, name string) (pub, sub []string) {
 	pub = []string{
 		"agents.mail." + owner + ".*.*", "agents.prompt." + owner + ".*.*", "agents.status." + owner + ".*.*",
 		"agents.hb." + owner + "." + group + "." + name,
-		"_INBOX.>", "$SRV.>", "$JS.API.INFO",
+		"_INBOX." + owner + ".>", "$SRV.>", "$JS.API.INFO",
 		"$JS.API.STREAM.INFO.inbox-" + f,
 		"$JS.API.CONSUMER.INFO.inbox-" + f + ".deliver",
 		"$JS.API.CONSUMER.MSG.NEXT.inbox-" + f + ".deliver",
@@ -273,7 +273,7 @@ func expectedPermissions(owner, group, name string) (pub, sub []string) {
 		"$KV.mash-leases." + f,
 		"$JS.API.DIRECT.GET.KV_mash-leases.$KV.mash-leases." + f,
 	}
-	sub = []string{"_INBOX." + f + ".>", "agents.prompt." + owner + "." + group + "." + name,
+	sub = []string{"_INBOX." + owner + "." + f + ".>", "agents.prompt." + owner + "." + group + "." + name,
 		"agents.status." + owner + "." + group + "." + name, "$SRV.>", "agents.hb." + owner + ".*.*"}
 	return pub, sub
 }

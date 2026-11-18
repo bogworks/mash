@@ -382,8 +382,8 @@ service's API token, which only the quickstart script ever sees.
 |---|---|---|
 | Impersonating another endpoint | SAP §13 signature with the sender's own seed, plus the directory lookup. Forged and malformed mail is dropped, logged and counted ([ADR-0017][0017], [ADR-0019][0019]) | A stolen seed signs as its endpoint |
 | Claiming another name with one's own valid key | The name is taken from the directory. A mismatch reads `unknown-signer` | None known |
-| Reading another endpoint's mail | One stream per endpoint. Fetch and ack only on one's own stream. A private reply prefix `_INBOX.<flat key>` ([ADR-0009][0009], [ADR-0007][0007]) | The admin reads everything |
-| Deleting another inbox by answering a forged reply subject | No response permission. Replies may go only to `_INBOX.>` ([ADR-0007][0007]) | None known |
+| Reading another endpoint's mail | One stream per endpoint. Fetch and ack only on one's own stream. A private reply prefix `_INBOX.<owner>.<flat key>`, subscribe only under it ([ADR-0009][0009], [ADR-0007][0007]) | The admin reads everything |
+| Deleting another inbox by answering a forged reply subject | No response permission. Replies may go only to `_INBOX.<owner>.>`, the reply inboxes of the endpoint's own owner ([ADR-0007][0007]), so another owner's endpoint can neither answer nor forge into a discovery or presence probe | None known |
 | Rewriting history | Delete and purge are denied on every inbox ([ADR-0010][0010]) | The admin can delete a whole stream |
 | Taking over a name, or splitting its mail | A lease with create and compare-and-set. Each user may write only its own lease key ([ADR-0013][0013]) | A stolen credential can hold the lease |
 | Changing who is who | Only the admin writes the directory. Endpoints have no write or consumer rights on it ([ADR-0011][0011]) | Directory changes reach running endpoints within about 15 s (a poll sees the stream move and reloads) |
@@ -563,7 +563,7 @@ the 0.3.0 tree.
 | A second session under a held name refuses to start | It waits and retries. A dead holder on the same machine is taken over at once | [0014][0014] |
 | Without `MASH_NAME`, serve registers no tools | It offers `status` and `version`, so the session can say what is wrong | [0012][0012] |
 | Endpoints read the directory by a KV watch | They poll every 15 s, because a watch needs consumer rights that endpoints lack (changed the same night) | [0011][0011] |
-| Replies through NATS's `allow_responses` permission | Replies only to `_INBOX.>`, with a private prefix per endpoint (changed the same night) | [0007][0007] |
+| Replies through NATS's `allow_responses` permission | Replies only to `_INBOX.<owner>.>`, with a private prefix per endpoint (changed the same night) | [0007][0007] |
 | Trust classes `verified`, `unknown-signer`, `claimed`, `absent`, with forged mail dropped | Adds `stale`. Bodies quoted (both added the same night) | [0019][0019], [0021][0021] |
 | Lease value: instance, host, pid, since | Adds start time, machine id, launch token, version, commit, `mcp_seen`, `waking_pending`, `waking_pending_at`. A tombstone value on deprovision | [0014][0014], [0015][0015], [0016][0016] |
 | Deprovision deletes the record, the lease and the inbox | It fences the lease key with a tombstone first | [0015][0015] |
@@ -697,7 +697,7 @@ idle wake.
 | Inbox stream filter | `agents.mail.<owner>.<group>.<instance>`: the endpoint's own mail subject. Mail has one five-token subject |
 | Inbox stream, consumer | `inbox-<flat key>`, `deliver` |
 | Buckets, keys | `mash-directory` and `mash-leases`, keyed by the flat key `<owner>_<group>_<instance>` |
-| Reply prefix | `_INBOX.<flat key>.` |
+| Reply prefix | `_INBOX.<owner>.<flat key>.` |
 | SAP service | name `agents`, metadata `agent: claude-code`, `owner`, `group`, `instance`, `session: <flat key>`, `protocol_version: "0.3"`, `user_nkey`, `account`, `id_sig`, `mail_subject` |
 | Directory labels | At most 64. Key `^[a-z][a-z0-9_.-]{0,31}$`. Values, role and host: at most 64 printable characters, no tab or newline. A grouping field from older records is read as a label. Labels are unsigned metadata: the record carries no signature, so anyone who can write the directory can set them, and nothing may make a security decision on a label. Authority comes from the signed user JWT. `mashctl label` and `unlabel` set and clear them on the directory record |
 | Idempotency key | 1-128 printable ASCII characters, no spaces |

@@ -534,7 +534,7 @@ func promptSend(ctx context.Context, nc *nats.Conn, id sap.Identity, name, subje
 }
 
 // secretInbox is a reply subject under the connection's inbox prefix with 128 random bits. nc.NewInbox ends in a NUID,
-// whose next value a peer that saw one (every endpoint reads the $SRV discovery requests and may publish to _INBOX.>)
+// whose next value a peer that saw one (every endpoint reads the $SRV discovery requests and may publish to the inboxes of its own owner, _INBOX.<owner>.>)
 // can predict, and so answer a prompt in the target's place.
 func secretInbox(nc *nats.Conn) string {
 	in := nc.NewInbox()

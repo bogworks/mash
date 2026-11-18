@@ -151,7 +151,7 @@ Before a command changes anything, `--dry-run` says what it would do: `mashctl e
 - read (never write) the directory;
 - hold its own lease and nothing else.
 
-It cannot read another endpoint's inbox, history or replies (each endpoint receives only under its own `_INBOX.<flat key>` prefix), take another endpoint's address, write the directory, create or delete consumers, or delete or purge any stream. It holds no response permission, because NATS grants that for any reply subject an endpoint receives; replies may only go to `_INBOX.>` subjects. The integration tests assert each of these denials against a real server.
+It cannot read another endpoint's inbox, history or replies (each endpoint receives only under its own `_INBOX.<owner>.<flat key>` prefix, for example `_INBOX.alice.alice_dev_design`), take another endpoint's address, write the directory, create or delete consumers, or delete or purge any stream. It holds no response permission, because NATS grants that for any reply subject an endpoint receives; replies may only go to `_INBOX.<owner>.>` subjects, the reply inboxes of its own owner, so an endpoint of another owner can neither answer your discovery or presence probes nor forge into them. The integration tests assert each of these denials against a real server.
 
 ### An endpoint on another machine
 
