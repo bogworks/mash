@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -201,6 +202,7 @@ const at005Scenario = "AT-005, across machines, over TLS, on a cluster, from two
 	"with the same operator signing seed, account identity seed and sys.creds (DEC-004); both with --servers 3. " +
 	"endpoint create alice/dev/design from M1 (key made by mash key create on M3, session on M3 connecting to the server of M2) and " +
 	"alice/dev/review from M2 (key made on M1, session on M1 connecting to the server on M3); mail each way; endpoint list --json on M1 and M2; " +
+	"a second owner's endpoint bob/dev/x (key and creds on M3) forging and replaying answers into alice's discovery while her mash who runs on M1, with alice/dev/ghost offline; " +
 	"endpoint reissue of design from M2 with a new key made on M3 (old session dropped, old key refused on each of the three servers); " +
 	"endpoint delete of review from M1 (session dropped, a reconnect refused on each server, mash status says why); " +
 	"a plain nats:// URL to a non-loopback address refused by an endpoint (ADR 0108) and by mashctl (ADR 0059); " +
@@ -329,6 +331,7 @@ func (s *At5) epEnv(h, srv Host, name, creds string, extra ...string) []string {
 
 // ep is one endpoint: where its key was made and the paths there.
 type ep5 struct {
+	owner string // "" is alice
 	name  string
 	host  Host // the endpoint's machine
 	seed  string
@@ -360,14 +363,18 @@ func (s *At5) carryPub(from Host, path string, to Host) (string, error) {
 // carried to ctl, the JWT goes to the courier directory and from there to the endpoint's machine, where `mash credential
 // create` assembles the creds. verb is "create" or "reissue".
 func (s *At5) provision(ctl Host, verb string, e *ep5, credsPath string) bool {
+	owner := e.owner
+	if owner == "" {
+		owner = "alice"
+	}
 	pubOnCtl, err := s.carryPub(e.host, e.pub, ctl)
 	if !s.check("the public key of "+e.name+" is carried to "+ctl.Role(), err == nil, errText(err)) {
 		return false
 	}
 	jwtCarry := filepath.Join(ctl.Home().Dir, "alice.dev."+e.name+"."+verb+".out.jwt") // written on ctl; the courier moves it
-	args := []string{"endpoint", verb, "alice/dev/" + e.name, "--public-key", pubOnCtl, "--jwt-out", jwtCarry}
+	args := []string{"endpoint", verb, owner + "/dev/" + e.name, "--public-key", pubOnCtl, "--jwt-out", jwtCarry}
 	r := s.ctl(ctl, "endpoint-"+verb+"-"+e.name, nil, args...)
-	ok := s.check(ctl.Role()+": mashctl endpoint "+verb+" alice/dev/"+e.name+" --public-key succeeds", r.Code == 0, exitSnip(r))
+	ok := s.check(ctl.Role()+": mashctl endpoint "+verb+" "+owner+"/dev/"+e.name+" --public-key succeeds", r.Code == 0, exitSnip(r))
 	if !ok {
 		return false
 	}
@@ -592,6 +599,9 @@ func (s *At5) Scenario() {
 		s.check(h.Role()+": endpoint list --json shows design and review, each with group dev", r.Code == 0 && groups["design"] == "dev" && groups["review"] == "dev", fmt.Sprintf("exit %d, groups seen: %v", r.Code, groups))
 	}
 
+	// 3b. a second owner's endpoint forges and replays answers into alice's discovery.
+	s.secondOwner(m1, m2, m3, renv)
+
 	// 4. reissue design from M2 with a new key made on M3.
 	oldDesign := filepath.Join(m3.Home().Dir, "design-old.creds")
 	s.check("M3: the old design creds are copied to a private path before the reissue", s.copyPrivate(m3, designCreds, oldDesign, "design-old"), "")
@@ -628,6 +638,80 @@ func (s *At5) Scenario() {
 
 	// 8. concurrent creates.
 	s.race("race0")
+}
+
+// forgeSeconds is how long `nodeinit forge` waits for discovery requests; it ends sooner once both answers were refused.
+const forgeSeconds = 40
+
+// secondOwner is REQ-005's negative case across machines. bob/dev/x (a second owner, in the same account) is created
+// from M1 with a key made on M3, where bob's creds are assembled, so his seed never leaves M3; alice/dev/ghost is
+// created with no session (offline). `nodeinit forge` on M3 connects as bob to the server on M2, answers each of
+// alice's discovery requests with a forged and a replay-shaped payload into her reply subject, and counts the
+// permissions violations; meanwhile alice's `mash who` runs on M1 (renv: her review endpoint, server on M3). mashctl
+// takes the owner from the address, so no MASH_OWNER override is needed.
+func (s *At5) secondOwner(m1, m2, m3 Host, aliceEnv []string) {
+	if _, ok := m3.(*localHost); ok {
+		s.skip("REQ-005: second-owner forged and replayed answers (the forging runs inside a node: podman hosts only)")
+		return
+	}
+	bob, ok := s.makeKey(m3, "bobx", "")
+	if !ok {
+		return
+	}
+	bob.owner, bob.name = "bob", "x"
+	bobCreds := filepath.Join(m3.Home().Config, "bob.creds")
+	if !s.provision(m1, "create", &bob, bobCreds) {
+		return
+	}
+	ghost, ok := s.makeKey(m3, "ghost", "")
+	if !ok {
+		return
+	}
+	if !s.provision(m1, "create", &ghost, filepath.Join(m3.Home().Config, "ghost.creds")) {
+		return
+	}
+	p, err := m3.Spawn("forge", []string{m3.Bin("nodeinit"), "forge", "--url", s.urlOf(m2), "--ca", s.tlsOf(m3).CA, "--creds", bobCreds, "--seconds", strconv.Itoa(forgeSeconds)}, s.env(m3))
+	if err != nil {
+		s.check("REQ-005: bob's forging endpoint starts on M3", false, errText(err))
+		return
+	}
+	defer p.Stop()
+	s.notes = append(s.notes, fmt.Sprintf("forge on M3 pid %d (server of M2)", p.PID))
+	ready := p.WaitFor(30*time.Second, func(_, e string) bool { return strings.Contains(e, "forge: subscribed") })
+	if !s.check("REQ-005: bob (a second owner) connects to the server on M2 and subscribes to $SRV.>", ready, snip(p.Stderr())) {
+		return
+	}
+	r := s.mash(m1, "who-forged", aliceEnv, "who", "--json")
+	online, listed := "", false
+	if v, err := parseJSON(r.Stdout); err == nil {
+		for _, o := range findObjects(v, "identity") {
+			id, _ := o["identity"].(string)
+			if id == "alice.dev.ghost" {
+				listed = true
+				if on, _ := o["online"].(bool); on {
+					online += id + " "
+				}
+			}
+		}
+	}
+	s.check("REQ-005: alice's mash who ran on M1 while bob answered", r.Code == 0, exitSnip(r))
+	deadline := time.Now().Add((forgeSeconds + 20) * time.Second)
+	for !p.Exited() && time.Now().Before(deadline) {
+		time.Sleep(300 * time.Millisecond)
+	}
+	var res struct {
+		Seen       int `json:"seen_requests"`
+		Violations int `json:"violations"`
+	}
+	line := ""
+	for _, l := range strings.Split(p.Stdout(), "\n") {
+		if strings.HasPrefix(strings.TrimSpace(l), "{") && json.Unmarshal([]byte(l), &res) == nil {
+			line = strings.TrimSpace(l)
+		}
+	}
+	s.check("REQ-005: bob on M3 sees alice's discovery request (a $SRV.INFO request with a reply in _INBOX.alice.)", line != "" && res.Seen >= 1, "forge result: "+orNone(line))
+	s.check("REQ-005: the servers refuse bob's forged discovery answer and his replayed presence answer with permissions violations", line != "" && res.Violations >= 2, "forge result: "+orNone(line))
+	s.check("REQ-005: alice's who does not list her offline endpoint alice/dev/ghost as online", r.Code == 0 && online == "", fmt.Sprintf("alice/dev/ghost listed: %v, online: %s", listed, orNone(online)))
 }
 
 // revocationSeen: the delete of review was made from M1; M2 shows it with endpoint show and issued check.

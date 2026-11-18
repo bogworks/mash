@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -123,5 +125,39 @@ func TestStopEscalatesToKillAndMissingPidfileIsStopped(t *testing.T) {
 	}
 	if cmdRun([]string{"x"}) != 2 {
 		t.Fatal("cmdRun usage")
+	}
+}
+
+func TestForgePayloadsAreValidAndNameTheOwner(t *testing.T) {
+	forged, replay := forgePayloads("alice", "dev", "ghost")
+	for name, b := range map[string][]byte{"forged": forged, "replay": replay} {
+		var v struct {
+			Metadata  map[string]string   `json:"metadata"`
+			Endpoints []map[string]string `json:"endpoints"`
+		}
+		if err := json.Unmarshal(b, &v); err != nil {
+			t.Fatalf("%s is not JSON: %v", name, err)
+		}
+		if v.Metadata["owner"] != "alice" || v.Metadata["instance"] != "ghost" || len(v.Endpoints) != 1 || v.Endpoints[0]["subject"] != "agents.prompt.alice.dev.ghost" {
+			t.Fatalf("%s does not name alice/dev/ghost: %s", name, b)
+		}
+	}
+	if !strings.Contains(string(replay), "UREPLAYED") || strings.Contains(string(forged), "UREPLAYED") {
+		t.Fatal("only the replay-shaped payload carries replayed identity fields")
+	}
+}
+
+func TestForgeViolationMatch(t *testing.T) {
+	yes := errors.New(`nats: Permissions Violation for Publish to "_INBOX.alice.dev_x.abc"`)
+	no := errors.New(`nats: Permissions Violation for Publish to "agents.mail.alice.dev.x"`)
+	if !isForgeViolation(yes) || isForgeViolation(no) || isForgeViolation(nil) {
+		t.Fatal("violation match is wrong")
+	}
+}
+
+func TestForgeUsage(t *testing.T) {
+	var out, errb bytes.Buffer
+	if got := cmdForge([]string{"--url", "tls://x:1"}, &out, &errb); got != 2 || out.Len() != 0 {
+		t.Fatalf("exit %d, out %q", got, out.String())
 	}
 }

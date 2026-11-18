@@ -138,3 +138,12 @@ func TestAT5FinishFailsOnCaptureError(t *testing.T) {
 		}
 	}
 }
+
+func TestAT005SecondOwnerIsSkippedOnLocalHosts(t *testing.T) {
+	s := &At5{C: &Checks{}}
+	h := &localHost{}
+	s.secondOwner(h, h, h, nil)
+	if len(s.skipped) != 1 || !strings.Contains(s.skipped[0], "second-owner") || len(s.C.All()) != 0 {
+		t.Fatalf("skipped %v, checks %v", s.skipped, s.C.All())
+	}
+}
