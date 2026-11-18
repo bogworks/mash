@@ -18,6 +18,8 @@ type Record struct {
 	Env      []string // lines: os/arch, versions, scratch names relative to the run dir
 	Observed []Assertion
 	Leaks    []Leak
+	// LocalSubstrate: the run used --hosts local, so its result must not read as the contract's AT-005.
+	LocalSubstrate bool
 }
 
 // newRunID is a UTC timestamp and a random suffix.
@@ -71,6 +73,9 @@ func (r Record) Markdown() string {
 	res := "PASS"
 	if !r.Passed() {
 		res = "FAIL"
+	}
+	if r.LocalSubstrate {
+		res = "local substrate: not AT-005 evidence (checks: " + res + ")"
 	}
 	fmt.Fprintf(&b, "\n## Result\n\n%s\n", res)
 	return redact(b.String())

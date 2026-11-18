@@ -296,6 +296,9 @@ type Proc struct {
 	exited bool
 	mu     sync.Mutex
 	base   string
+	// Before, when set, runs once at the start of Stop: a host whose process lives behind the local child (podman exec)
+	// ends the real process by its recorded PID there.
+	Before func()
 }
 
 // Start starts args[0] with args[1:] and stdin held open. Its output is kept in memory and in files under Out.
@@ -406,6 +409,10 @@ func (p *Proc) Handshake(d time.Duration) error {
 func (p *Proc) Stop() {
 	if p.PID == 0 {
 		return
+	}
+	if p.Before != nil {
+		p.Before()
+		p.Before = nil
 	}
 	_ = p.stdin.Close()
 	wait := func(d time.Duration) bool {
