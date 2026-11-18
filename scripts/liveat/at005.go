@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"net"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"regexp"
@@ -221,7 +222,7 @@ func (s *At5) EnvLines() []string {
 		}
 		out = append(out, fmt.Sprintf("%s: %s, address %s, own HOME, config dir, keys dir and server dir; NATS client port %d, route port %d%s", h.Role(), h.Facts(), h.Addr(), p.Client, p.Route, mon))
 	}
-	out = append(out, "go: "+goVersion(), "nats-server: "+r.NatsVer+" (the same binary on all three machines)")
+	out = append(out, "host: "+hostLine(), "go: "+goVersion(), "nats-server: "+r.NatsVer+" (the same binary on all three machines)")
 	out = append(out, "cluster: name mashc, server_name mash-n1..mash-n3, routes between all three, JetStream with a store directory per node, operator mode with the full resolver (interval 5s) and the same resolver_preload on every node; node 1 made by mashctl init --local (without --start) and its config edited and copied")
 	out = append(out, "TLS on client connections (tls block) and on routes (cluster tls block, verify on), ca_file, cert_file and key_file per node")
 	if s.CA != nil {
@@ -246,6 +247,16 @@ func (s *At5) hostsName() string {
 }
 
 func goVersion() string { return runtimeVersion() }
+
+// hostLine is the host of the run as the contract's section 8 asks: operating system, kernel and architecture. The kernel
+// release is `uname -r`; if that cannot be read the line says so rather than leaving it out.
+func hostLine() string {
+	k := "kernel unknown"
+	if b, err := exec.Command("uname", "-r").Output(); err == nil && strings.TrimSpace(string(b)) != "" {
+		k = "kernel " + strings.TrimSpace(string(b))
+	}
+	return runtime.GOOS + ", " + k + ", " + runtime.GOARCH
+}
 
 func (s *At5) observed() []Assertion {
 	return s.C.All()

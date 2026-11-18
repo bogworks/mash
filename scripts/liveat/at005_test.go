@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -267,3 +268,10 @@ func TestAT5Helpers(t *testing.T) {
 type discard struct{}
 
 func (discard) Write(p []byte) (int, error) { return len(p), nil }
+
+func TestHostLineNamesOSKernelAndArch(t *testing.T) {
+	l := hostLine()
+	if !strings.HasPrefix(l, runtime.GOOS+", kernel ") || !strings.HasSuffix(l, ", "+runtime.GOARCH) {
+		t.Fatalf("host line %q", l)
+	}
+}

@@ -129,6 +129,8 @@ A hit that is not an asserted refusal, a REQ-009 message, an unrelated word or a
 | internal/apply/escape_test.go:38 | unrelated word | the string `legacy` is test data (a hostile role name; a role label), not an old form |
 | internal/apply/trust_test.go:175 | unrelated word | the string `legacy` is test data (a hostile role name; a role label), not an old form |
 | internal/apply/trust_test.go:184 | unrelated word | the string `legacy` is test data (a hostile role name; a role label), not an old form |
+| internal/portable/portable_test.go:36 | enforcement (the forbidden-name list) | `personalRE` lists the names of people, machines and private projects (among them `homerange` and `rangehand`, the layer above) that the portability scan refuses anywhere in source, docs and tests; it is how the contract's reject rule "any layer above mash is named in code, flags, subjects, keys, fields, errors or tests" is enforced. It is not the old form; it names words in order to refuse them |
+| internal/portable/portable_test.go:482 | enforcement (its own sample strings) | the test strings that prove `personalRE` matches each listed name and does not match `bogworks` or ordinary words |
 | internal/reconcile/plan_test.go:179 | unrelated word | `legacy` is a label for a user connection or record name in a reconcile plan; not an old form |
 | internal/reconcile/plan_test.go:180 | unrelated word | `legacy` is a label for a user connection or record name in a reconcile plan; not an old form |
 | internal/reconcile/plan_test.go:182 | unrelated word | `legacy` is a label for a user connection or record name in a reconcile plan; not an old form |
