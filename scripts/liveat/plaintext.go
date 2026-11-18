@@ -64,6 +64,19 @@ func plainWarnedOK(r Result, connects int64) (bool, string) {
 	return ok, fmt.Sprintf("%d connections reached the server; warning on stderr %v, on stdout %v; %s", connects, warned, onStdout, exitDetail(r))
 }
 
+// statusWarnedOnStderr is the check that `mash status` under the override says the plain-text warning on standard
+// error. The report itself (with its tls: WARN line) is on stdout; the standalone warning line must not be.
+func statusWarnedOnStderr(r Result) (bool, string) {
+	warned := strings.Contains(strings.ToLower(r.Stderr), "warning: plain-text")
+	onStdout := false // the report's own tls: line quotes the warning; a line that is the warning itself is the standalone one
+	for _, l := range strings.Split(r.Stdout, "\n") {
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(l)), "mash: warning: plain") {
+			onStdout = true
+		}
+	}
+	return warned && !onStdout && r.Code == 0, fmt.Sprintf("warning on stderr %v, standalone on stdout %v; %s", warned, onStdout, exitDetail(r))
+}
+
 // plainText is AT-003's plain-URL case (REQ-014). A plain nats:// URL to a loopback address, with no override, is refused
 // by mash (session start and a command) and by mashctl, exit 2, naming the override, and no connection reaches the
 // address (a counting listener stands in for the server: the refusal comes before any connection). With the override
@@ -104,6 +117,8 @@ func (a *AT) plainText(ha, he Home, design ep) {
 	}
 	st := a.Mash("plain-status", he, append(base("1"), session...), "status")
 	a.C.Check("REQ-014: mash status with the override says tls: WARN", strings.Contains(st.Text(), "tls: WARN"), snip(grepLine(st.Text(), "tls:")))
+	ok, detail := statusWarnedOnStderr(st)
+	a.C.Check("REQ-014: mash status with the override prints the plain-text warning on standard error, not standard output", ok, detail)
 	st = a.Mash("plain-status-refused", he, append(base("0"), session...), "status")
 	a.C.Check("REQ-014: mash status without it says tls: FAILED", strings.Contains(st.Text(), "tls: FAILED"), snip(grepLine(st.Text(), "tls:")))
 }

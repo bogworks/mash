@@ -280,7 +280,7 @@ func parseJSON(s string) (any, error) {
 
 // Snapshot is the state of the server and the files, as far as the harness can see without a NATS client of its own:
 // the directory (mashctl list), the audit (directory, streams, consumers, leases, creds files), the issue record, and a
-// digest of each home's file tree (without its state and tmp directories).
+// digest of each home's file tree (all of it, except snapshotExclusions).
 type Snapshot struct {
 	Hash map[string]string
 	Raw  map[string]string
@@ -309,14 +309,42 @@ func (a *AT) Snapshot(label string, ctlHome Home, trees ...Home) Snapshot {
 		}
 		s.Hash[c.name] = digest(hashed)
 	}
-	for _, h := range trees {
-		t, err := treeHash(h.Dir, "state", "tmp")
-		if err != nil {
-			t = "error: " + err.Error()
-		}
-		s.Hash["files:"+filepath.Base(h.Dir)] = t
+	hashes, bad := treeHashes(trees, snapshotExclusions)
+	for k, v := range hashes {
+		s.Hash[k] = v
 	}
+	s.Bad = append(s.Bad, bad...)
 	return s
+}
+
+// snapshotExclusions are the exact relative paths (under each home) a refusal may legitimately change, so the
+// snapshot leaves them out. Each entry needs a reason; an empty list means every file of every home is compared.
+// AT-003 says "files byte-identical", so nothing is excluded unless a live run shows a refusal must write it.
+var snapshotExclusions = []string{}
+
+// exclusionNote is the text a "files byte-identical" assertion carries about snapshotExclusions: nothing, or each
+// exclusion with its reason.
+func exclusionNote() string {
+	if len(snapshotExclusions) == 0 {
+		return ""
+	}
+	return " except " + strings.Join(snapshotExclusions, ", ")
+}
+
+// treeHashes digests each home's file tree, leaving out only the exact relative paths in exclude. A read error is
+// never turned into a value: it comes back as a failed read naming the path, and the home has no hash.
+func treeHashes(trees []Home, exclude []string) (map[string]string, []string) {
+	out := map[string]string{}
+	var bad []string
+	for _, h := range trees {
+		t, err := treeHash(h.Dir, exclude...)
+		if err != nil {
+			bad = append(bad, "files "+h.Dir+": "+err.Error())
+			continue
+		}
+		out["files:"+filepath.Base(h.Dir)] = t
+	}
+	return out, bad
 }
 
 // Diff names what differs between two snapshots.

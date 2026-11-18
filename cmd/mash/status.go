@@ -578,9 +578,17 @@ func hooklessFix(sp spool.Spool, own time.Time) string {
 // statusCmd is `mash status`: the status tool's lines for this environment, read from the shell, before Claude Code
 // is launched. It connects to nothing and takes no lease. It is a report, so a missing name or config is output, not
 // a failure.
-func statusCmd(cfg config.Config, cfgErr error, env func(string) string, stdout io.Writer) int {
+//
+// The whole report, including a `tls: WARN` line, goes to stdout. When that line is WARN (a plain URL let through by
+// insecure_plaintext) the plain-text warning the connecting commands print is also written to stderr once (REQ-014).
+func statusCmd(cfg config.Config, cfgErr error, env func(string) string, stdout, stderr io.Writer) int {
 	src := &statusSource{cfg: cfg, cfgErr: cfgErr, cli: true, home: env("HOME"), getenv: env}
 	fmt.Fprintln(stdout, statusText(src))
+	if cfgErr == nil && strings.HasPrefix(tlsLine(cfg), "tls: WARN") {
+		if w := endpoint.PlainWarning(cfg); w != "" {
+			fmt.Fprintln(stderr, w)
+		}
+	}
 	return 0
 }
 

@@ -208,3 +208,38 @@ func TestServeWithTheOverrideWarnsOnStderrNotStdout(t *testing.T) {
 		t.Errorf("%d warnings on stderr, want 1: %q", n, s.stderr())
 	}
 }
+
+// `mash status` keeps the whole report, `tls: WARN` included, on stdout, and also says the plain-text warning on
+// standard error once (REQ-014). A tls:// URL, and a plain URL with no override, print no warning on stderr.
+func TestStatusCommandPlainWarningOnStderr(t *testing.T) {
+	const warning = "WARNING: plain-text connection to 127.0.0.1"
+	statusRun := func(url string, override bool) (string, string) {
+		env := plainEnv(t, url)
+		if override {
+			env["MASH_INSECURE_PLAINTEXT"] = "1"
+		}
+		var out, errb bytes.Buffer
+		if code := run([]string{"status"}, envStrict(env), strings.NewReader(""), &out, &errb); code != 0 {
+			t.Fatalf("mash status exit %d: %s", code, errb.String())
+		}
+		return out.String(), errb.String()
+	}
+	out, errs := statusRun("nats://127.0.0.1:4222", true)
+	if !strings.Contains(out, "tls: WARN") {
+		t.Errorf("stdout lacks tls: WARN:\n%s", out)
+	}
+	if strings.Contains(out, "\nmash: WARNING") {
+		t.Errorf("the standalone warning is on stdout:\n%s", out)
+	}
+	if n := strings.Count(errs, warning); n != 1 {
+		t.Errorf("%d warnings on stderr, want 1: %q", n, errs)
+	}
+	out, errs = statusRun("tls://127.0.0.1:4222", false)
+	if !strings.Contains(out, "tls: OK") || strings.Contains(errs, "WARNING") {
+		t.Errorf("tls:// status: stdout tls line missing or stderr warned: %q / %q", out, errs)
+	}
+	out, errs = statusRun("nats://127.0.0.1:4222", false)
+	if !strings.Contains(out, "tls: FAILED") || strings.Contains(errs, "WARNING") {
+		t.Errorf("plain, no override: stdout %q, stderr %q", out, errs)
+	}
+}

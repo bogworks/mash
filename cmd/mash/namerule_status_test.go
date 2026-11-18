@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,7 +41,7 @@ func TestStatusShowsNameRuleLoaded(t *testing.T) {
 	}
 	// `mash status` from a shell shows the same line.
 	var out bytes.Buffer
-	statusCmd(src.cfg, nil, func(string) string { return "" }, &out)
+	statusCmd(src.cfg, nil, func(string) string { return "" }, &out, io.Discard)
 	if !strings.Contains(out.String(), want+"\n") {
 		t.Fatalf("mash status output lacks %q:\n%s", want, out.String())
 	}

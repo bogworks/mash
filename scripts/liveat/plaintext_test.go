@@ -66,3 +66,21 @@ func TestPlainWarnedOK(t *testing.T) {
 		}
 	}
 }
+
+func TestStatusWarnedOnStderr(t *testing.T) {
+	warn := "mash: WARNING: plain-text connection to 127.0.0.1 (insecure_plaintext is set)"
+	report := "tls: WARN - nats://127.0.0.1:1 is plain text and insecure_plaintext (MASH_INSECURE_PLAINTEXT) is set: " + warn + "\n"
+	for name, c := range map[string]struct {
+		r    Result
+		want bool
+	}{
+		"report on stdout, warning on stderr": {Result{Stdout: report, Stderr: warn}, true},
+		"no warning on stderr":                {Result{Stdout: report}, false},
+		"warning only on stdout":              {Result{Stdout: report + warn + "\n"}, false},
+		"nonzero exit":                        {Result{Code: 1, Stdout: report, Stderr: warn}, false},
+	} {
+		if got, detail := statusWarnedOnStderr(c.r); got != c.want {
+			t.Errorf("%s: got %v, want %v (%s)", name, got, c.want, detail)
+		}
+	}
+}
