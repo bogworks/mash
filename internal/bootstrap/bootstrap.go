@@ -72,6 +72,7 @@ type Plan struct {
 	Dirs     []string
 	Config   *File // nil when a config.json exists or no path was given
 	URL      string
+	CA       string // the path of ca.pem: the CA that signed the server certificate
 	Creds    string // the admin creds path
 	Account  string // public keys, safe to print
 	Operator string
@@ -117,7 +118,7 @@ func Preflight(dir string) error {
 		return fmt.Errorf("mashctl: %s has mode %04o: it holds credentials. Run: chmod 700 %s", dir, fi.Mode().Perm(), dir)
 	}
 	var have []string
-	for _, n := range []string{ServerConf, OperatorJWT, AdminCreds, SysCreds, ServerLog, ServerPID, resolverDir, jetstreamDir} {
+	for _, n := range []string{ServerConf, OperatorJWT, AdminCreds, SysCreds, CACert, CAKey, ServerCert, ServerKey, ServerLog, ServerPID, resolverDir, jetstreamDir} {
 		if _, err := os.Lstat(filepath.Join(dir, n)); !errors.Is(err, fs.ErrNotExist) {
 			have = append(have, n)
 		}
@@ -201,17 +202,25 @@ func Build(p Params, ks *ctlkeys.Authority) (*Plan, error) {
 		return nil, err
 	}
 
-	pl := &Plan{Params: p, URL: "nats://127.0.0.1:" + strconv.Itoa(p.Port), Creds: p.AdminCredsPath(), Account: acctPub, Operator: opPub, System: sysPub, OperatorJWT: opJWT}
+	pki, err := newLocalPKI()
+	if err != nil {
+		return nil, err
+	}
+	pl := &Plan{Params: p, URL: "tls://127.0.0.1:" + strconv.Itoa(p.Port), CA: p.path(CACert), Creds: p.AdminCredsPath(), Account: acctPub, Operator: opPub, System: sysPub, OperatorJWT: opJWT}
 	pl.Dirs = []string{p.Dir, p.path(resolverDir), p.path(jetstreamDir)}
 	pl.Files = []File{
 		{p.path(OperatorJWT), []byte(opJWT + "\n")},
 		{p.path(AdminCreds), adminCreds},
 		{p.path(SysCreds), sysCreds},
+		{p.path(CACert), pki.caCert},
+		{p.path(CAKey), pki.caKey},
+		{p.path(ServerCert), pki.serverCert},
+		{p.path(ServerKey), pki.serverKey},
 		{p.ConfPath(), []byte(serverConfFor(p, sysPub, sysJWT, acctPub, acctJWT))},
 	}
 	if p.ConfigPath != "" && config.Absent(p.ConfigPath) {
-		pl.Config = &File{p.ConfigPath, []byte(fmt.Sprintf("{\n  \"url\": %s,\n  \"owner\": %s,\n  \"admin_creds\": %s,\n  \"insecure_plaintext\": true\n}\n",
-			strconv.Quote(pl.URL), strconv.Quote(p.Owner), strconv.Quote(pl.Creds)))}
+		pl.Config = &File{p.ConfigPath, []byte(fmt.Sprintf("{\n  \"url\": %s,\n  \"owner\": %s,\n  \"admin_creds\": %s,\n  \"tls_ca\": %s\n}\n",
+			strconv.Quote(pl.URL), strconv.Quote(p.Owner), strconv.Quote(pl.Creds), strconv.Quote(pl.CA)))}
 	}
 	return pl, nil
 }
@@ -253,13 +262,14 @@ func confQuote(s string) string {
 	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s) + `"`
 }
 
-// serverConfFor is server.conf: loopback only, no TLS, operator mode with a full resolver preloaded with the two
+// serverConfFor is server.conf: loopback only, TLS only, operator mode with a full resolver preloaded with the two
 // accounts, JetStream on file storage.
 func serverConfFor(p Params, sysPub, sysJWT, acctPub, acctJWT string) string {
 	var b strings.Builder
-	b.WriteString("# Written by `mashctl init --local`. A local development server: it listens on loopback only and has no TLS.\n")
+	b.WriteString("# Written by `mashctl init --local`. A local development server: it listens on loopback only and accepts TLS connections only.\n")
 	fmt.Fprintf(&b, "server_name: %s\n", ServerName)
 	fmt.Fprintf(&b, "listen: 127.0.0.1:%d\n", p.Port)
+	fmt.Fprintf(&b, "tls: {\n  cert_file: %s\n  key_file: %s\n}\n", confQuote(p.path(ServerCert)), confQuote(p.path(ServerKey)))
 	fmt.Fprintf(&b, "operator: %s\n", confQuote(p.path(OperatorJWT)))
 	fmt.Fprintf(&b, "system_account: %s\n", sysPub)
 	fmt.Fprintf(&b, "resolver: {\n  type: full\n  dir: %s\n  allow_delete: false\n}\n", confQuote(p.path(resolverDir)))

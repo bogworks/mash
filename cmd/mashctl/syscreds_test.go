@@ -78,6 +78,9 @@ func newApplyEnvOpts(t *testing.T, tweak func(e *applyEnv), optsHook func(o *ser
 	}
 	opts.Port = -1
 	opts.NoLog, opts.NoSigs = true, true
+	// init --local's server.conf is TLS only; these tests drive the verbs against a plain loopback server, so they
+	// drop its tls block here. The TLS behaviour of the generated server is tested in internal/bootstrap.
+	opts.TLS, opts.TLSConfig, opts.TLSCert, opts.TLSKey, opts.TLSCaCert = false, nil, "", "", ""
 	if optsHook != nil {
 		optsHook(opts)
 	}

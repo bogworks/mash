@@ -1,0 +1,1 @@
+`mashctl init --local` now makes a server that speaks TLS only. It creates a local certificate authority and a server certificate for `localhost`, `127.0.0.1` and `::1` (ten years, keys mode 0600, in the server directory), and writes the `tls://` URL and `tls_ca` into `config.json`. The quick start runs over TLS with no setting.

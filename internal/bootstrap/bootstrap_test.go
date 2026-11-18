@@ -3,7 +3,10 @@ package bootstrap
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/hex"
+	"encoding/pem"
 	"errors"
 	"io/fs"
 	"net"
@@ -120,7 +123,7 @@ func TestGeneratedServerWorks(t *testing.T) {
 	s.generate(t)
 	srv := startInProcess(t, s.pl.ConfPath())
 
-	nc, err := nats.Connect(srv.ClientURL(), natsauth.UserCredentials(s.pl.Creds))
+	nc, err := nats.Connect(srv.ClientURL(), natsauth.UserCredentials(s.pl.Creds), nats.RootCAs(s.pl.CA))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +165,7 @@ func TestGeneratedServerWorks(t *testing.T) {
 		t.Fatalf("pub/sub: %v", err)
 	}
 
-	sys, err := nats.Connect(srv.ClientURL(), natsauth.UserCredentials(filepath.Join(s.serverDir, SysCreds)))
+	sys, err := nats.Connect(srv.ClientURL(), natsauth.UserCredentials(filepath.Join(s.serverDir, SysCreds)), nats.RootCAs(s.pl.CA))
 	if err != nil {
 		t.Fatalf("the sys user cannot connect: %v", err)
 	}
@@ -235,7 +238,7 @@ func TestConfigIsWritten(t *testing.T) {
 		t.Fatal("a policy file was written: the policy file is gone")
 	}
 	cfg, err := os.ReadFile(s.cfgPath)
-	if err != nil || !strings.Contains(string(cfg), `"nats://127.0.0.1:4222"`) || !strings.Contains(string(cfg), `"owner": "alice"`) || !strings.Contains(string(cfg), s.pl.Creds) {
+	if err != nil || !strings.Contains(string(cfg), `"tls://127.0.0.1:4222"`) || !strings.Contains(string(cfg), `"owner": "alice"`) || !strings.Contains(string(cfg), s.pl.Creds) || !strings.Contains(string(cfg), `"tls_ca": "`+filepath.Join(s.serverDir, "ca.pem")+`"`) || strings.Contains(string(cfg), "insecure_loopback") {
 		t.Fatalf("config.json: %s %v", cfg, err)
 	}
 	// The written config.json is one mash loads.
@@ -246,7 +249,7 @@ func TestConfigIsWritten(t *testing.T) {
 		return ""
 	}
 	c, err := config.Load(config.LookupFromFunc(env), "")
-	if err != nil || c.AdminCreds != s.pl.Creds || c.Owner != "alice" {
+	if err != nil || c.AdminCreds != s.pl.Creds || c.Owner != "alice" || c.TLSCA != s.pl.CA {
 		t.Fatalf("config.Load: %+v %v", c, err)
 	}
 }
@@ -334,7 +337,7 @@ func TestStartRefusesOccupiedPort(t *testing.T) {
 	fakeNatsServer(t, "touch "+filepath.Join(s.root, "launched")+"; sleep 5")
 	p := s.pl.Params
 	p.Port = ln.Addr().(*net.TCPAddr).Port
-	pid, err := Start(p, "nats://127.0.0.1:"+strconv.Itoa(p.Port), true)
+	pid, err := Start(p, "tls://127.0.0.1:"+strconv.Itoa(p.Port), true)
 	if err == nil || pid != 0 || !strings.Contains(err.Error(), "already") || !strings.Contains(err.Error(), strconv.Itoa(p.Port)) {
 		t.Fatalf("Start: %d %v", pid, err)
 	}
@@ -354,7 +357,7 @@ func TestStartChildExitedReportsLog(t *testing.T) {
 	fakeNatsServer(t, "echo 'bind: address already in use' >&2; exit 1")
 	p := s.pl.Params
 	p.Port = freePort(t)
-	pid, err := Start(p, "nats://127.0.0.1:"+strconv.Itoa(p.Port), true)
+	pid, err := Start(p, "tls://127.0.0.1:"+strconv.Itoa(p.Port), true)
 	if err == nil || pid != 0 || !strings.Contains(err.Error(), "server.log") || !strings.Contains(err.Error(), "address already in use") {
 		t.Fatalf("Start: %d %v", pid, err)
 	}
@@ -436,7 +439,7 @@ func TestInitReportsJetStreamThatCouldNotBeEnabled(t *testing.T) {
 		t.Fatal("server did not start")
 	}
 	t.Cleanup(func() { srv.Shutdown(); srv.WaitForShutdown() })
-	nc, err := nats.Connect(srv.ClientURL(), natsauth.UserCredentials(s.pl.Creds))
+	nc, err := nats.Connect(srv.ClientURL(), natsauth.UserCredentials(s.pl.Creds), nats.RootCAs(s.pl.CA))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -500,5 +503,111 @@ func TestJetStreamDiskLimit(t *testing.T) {
 	}
 	if got := accountDisk(t, pl); got != 2<<30 {
 		t.Fatalf("default account disk limit %d, want 2 GiB", got)
+	}
+}
+
+func loadCert(t *testing.T, path string) *x509.Certificate {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blk, _ := pem.Decode(b)
+	if blk == nil || blk.Type != "CERTIFICATE" {
+		t.Fatalf("%s is not a certificate", path)
+	}
+	c, err := x509.ParseCertificate(blk.Bytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+func TestServerCertificateVerifiesAgainstTheCA(t *testing.T) {
+	s := newSetup(t)
+	s.generate(t)
+	ca, srv := loadCert(t, s.pl.CA), loadCert(t, filepath.Join(s.serverDir, ServerCert))
+	if !ca.IsCA || ca.Subject.CommonName != "mash local CA" || ca.KeyUsage != x509.KeyUsageCertSign|x509.KeyUsageCRLSign {
+		t.Errorf("CA: %+v", ca)
+	}
+	if d := ca.NotAfter.Sub(ca.NotBefore); d < 9*365*24*time.Hour {
+		t.Errorf("CA validity %v", d)
+	}
+	if d := srv.NotAfter.Sub(srv.NotBefore); d < 9*365*24*time.Hour {
+		t.Errorf("server certificate validity %v", d)
+	}
+	if ca.SerialNumber.Cmp(srv.SerialNumber) == 0 || ca.SerialNumber.BitLen() < 64 {
+		t.Errorf("serials: %v %v", ca.SerialNumber, srv.SerialNumber)
+	}
+	pool := x509.NewCertPool()
+	pool.AddCert(ca)
+	for _, name := range []string{"localhost", "127.0.0.1", "::1"} {
+		if _, err := srv.Verify(x509.VerifyOptions{Roots: pool, DNSName: name}); err != nil {
+			t.Errorf("verify for %s: %v", name, err)
+		}
+	}
+	if _, err := srv.Verify(x509.VerifyOptions{Roots: pool, DNSName: "example.com"}); err == nil {
+		t.Error("certificate verifies for example.com")
+	}
+	for _, n := range []string{CACert, CAKey, ServerCert, ServerKey} {
+		fi, err := os.Stat(filepath.Join(s.serverDir, n))
+		if err != nil || fi.Mode().Perm() != 0o600 {
+			t.Errorf("%s: %v %v", n, fi, err)
+		}
+	}
+	for _, n := range []string{CAKey, ServerKey} {
+		b, _ := os.ReadFile(filepath.Join(s.serverDir, n))
+		if blk, _ := pem.Decode(b); blk == nil || blk.Type != "PRIVATE KEY" {
+			t.Errorf("%s is not a PKCS8 PRIVATE KEY", n)
+		}
+	}
+}
+
+func TestPreflightRefusesCertificateFiles(t *testing.T) {
+	for _, n := range []string{CACert, CAKey, ServerCert, ServerKey} {
+		dir := filepath.Join(t.TempDir(), "server")
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, n), []byte("mine"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := Preflight(dir); err == nil || !strings.Contains(err.Error(), n) {
+			t.Errorf("%s: %v", n, err)
+		}
+	}
+}
+
+func TestServerCertificateHandshake(t *testing.T) {
+	s := newSetup(t)
+	s.generate(t)
+	cert, err := tls.LoadX509KeyPair(filepath.Join(s.serverDir, ServerCert), filepath.Join(s.serverDir, ServerKey))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ln, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{Certificates: []tls.Certificate{cert}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func() { _ = c.(*tls.Conn).Handshake(); c.Close() }()
+		}
+	}()
+	pool := x509.NewCertPool()
+	pool.AddCert(loadCert(t, s.pl.CA))
+	c, err := tls.Dial("tcp", ln.Addr().String(), &tls.Config{RootCAs: pool, ServerName: "127.0.0.1"})
+	if err != nil {
+		t.Fatalf("handshake with the CA trusted: %v", err)
+	}
+	c.Close()
+	if c, err := tls.Dial("tcp", ln.Addr().String(), &tls.Config{RootCAs: x509.NewCertPool(), ServerName: "127.0.0.1"}); err == nil {
+		c.Close()
+		t.Error("handshake succeeded without trusting the CA")
 	}
 }

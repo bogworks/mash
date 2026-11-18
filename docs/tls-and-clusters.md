@@ -21,7 +21,7 @@ tls: {
 }
 ```
 
-`mashctl init --local` writes a server with no TLS block and `listen: 127.0.0.1:...`. To use TLS, add the block to the file it wrote, set `listen` to an address the clients can reach, and start the server yourself with `nats-server -c server.conf`. An existing operator-mode server needs only the block.
+`mashctl init --local` writes a TLS-only server on `listen: 127.0.0.1:...`. It makes a local certificate authority (`ca.pem`, `ca.key`) and a server certificate (`server.pem`, `server.key`) in the server directory, and the `tls` block in `server.conf` names the certificate and key. The certificate is valid for `localhost`, `127.0.0.1` and `::1` only. For clients on other hosts, replace the certificate and key with ones that name the address the clients use, and set `listen` to an address they can reach. An existing operator-mode server needs only the block.
 
 For mutual TLS (the server also checks a certificate from each client) add the CA and `verify`:
 
@@ -75,7 +75,7 @@ Copy `ca.pem` (not `ca.key`) to every machine that connects. In `config.json`:
 }
 ```
 
-If `init --local` made the file, it has `"insecure_loopback": true`. Remove it. It allows plain text to a loopback host only.
+If `init --local` made the file, it already has a `tls://` URL and `tls_ca` naming its `ca.pem`.
 
 | Setting | Variable | Use |
 |---|---|---|
