@@ -275,3 +275,77 @@ func TestHostLineNamesOSKernelAndArch(t *testing.T) {
 		t.Fatalf("host line %q", l)
 	}
 }
+
+func TestShowRefusalAssertsTheCode(t *testing.T) {
+	good := `{"schema":"x","outcome":"refused","refusal":{"code":"not_found","detail":"no directory record"}}`
+	for _, c := range []struct {
+		name   string
+		code   int
+		out    string
+		wantOK bool
+	}{
+		{"not_found", 1, good, true},
+		{"other code", 1, `{"outcome":"refused","refusal":{"code":"unavailable","detail":"x"}}`, false},
+		{"exit 1, no JSON", 1, "", false},
+		{"exit 1, text only", 1, "mashctl: endpoint show: revoked", false},
+		{"exit 0 with the document", 0, good, false},
+		{"exit 2", 2, good, false},
+		{"found endpoint", 1, `{"outcome":"ok"}`, false},
+		{"refusal is a bare string", 1, `{"outcome":"refused","refusal":"not_found"}`, false},
+		{"refused without refusal", 1, `{"outcome":"refused"}`, false},
+	} {
+		if ok, d := showRefusal(c.code, c.out); ok != c.wantOK {
+			t.Errorf("%s: got %v (%s), want %v", c.name, ok, d, c.wantOK)
+		}
+	}
+}
+
+func TestIssuedCheckCleanAssertsTheFields(t *testing.T) {
+	doc := func(clean, complete, rec, revoked string) string {
+		return `{"clean":` + clean + `,"complete":` + complete + `,"record_present":` + rec + `,"revoked_connected":` + revoked + `}`
+	}
+	for _, c := range []struct {
+		name   string
+		code   int
+		out    string
+		wantOK bool
+	}{
+		{"clean", 0, doc("true", "true", "true", "[]"), true},
+		{"exit 1 finding", 1, doc("false", "true", "true", `[{"address":"alice.dev.review"}]`), false},
+		{"exit 2 incomplete", 2, doc("false", "false", "true", "[]"), false},
+		{"exit 0 but revoked connected", 0, doc("true", "true", "true", `[{"address":"a"}]`), false},
+		{"not clean", 0, doc("false", "true", "true", "[]"), false},
+		{"not complete", 0, doc("true", "false", "true", "[]"), false},
+		{"no record", 0, doc("true", "true", "false", "[]"), false},
+		{"field missing", 0, `{"clean":true,"complete":true,"revoked_connected":[]}`, false},
+		{"no JSON", 0, "all clean", false},
+	} {
+		if ok, d := issuedCheckClean(c.code, c.out); ok != c.wantOK {
+			t.Errorf("%s: got %v (%s), want %v", c.name, ok, d, c.wantOK)
+		}
+	}
+}
+
+func TestIssuedListRevokedNeedsTheEntry(t *testing.T) {
+	list := func(addr, at string) string {
+		return `[{"address":"` + addr + `","revoked_at":"` + at + `"}]`
+	}
+	for _, c := range []struct {
+		name   string
+		code   int
+		out    string
+		wantOK bool
+	}{
+		{"revoked", 0, list("alice.dev.review", "2026-11-18T10:00:00Z"), true},
+		{"entry absent", 0, list("alice.dev.design", "2026-11-18T10:00:00Z"), false},
+		{"empty list", 0, "[]", false},
+		{"not revoked", 0, list("alice.dev.review", ""), false},
+		{"only another entry revoked", 0, `[{"address":"alice.dev.review","revoked_at":""},{"address":"alice.dev.x","revoked_at":"t"}]`, false},
+		{"exit 1", 1, list("alice.dev.review", "t"), false},
+		{"not JSON", 0, "nothing", false},
+	} {
+		if ok, d := issuedListRevoked(c.code, c.out, "alice.dev.review"); ok != c.wantOK {
+			t.Errorf("%s: got %v (%s), want %v", c.name, ok, d, c.wantOK)
+		}
+	}
+}

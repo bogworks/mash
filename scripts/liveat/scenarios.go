@@ -136,29 +136,6 @@ func (a *AT) waitOnline(h Home, extra []string, ids ...string) bool {
 
 var sentRE = regexp.MustCompile(`sent #(\d+)`)
 
-// mailVerified sends text from one endpoint to another with the CLI and reads it back from the recipient's inbox with
-// the recipient's own credentials: it must arrive, carry the text and be labelled [verified].
-func (a *AT) mailVerified(name string, h Home, from, to []string, toAddr, text string) {
-	r := a.Mash("send-"+name, h, from, "send", toAddr, text)
-	a.C.Check("mail "+name+": mash send succeeds", r.Code == 0, exitDetail(r))
-	m := sentRE.FindStringSubmatch(r.Stdout)
-	if m == nil {
-		a.C.Check("mail "+name+": send names the message number", false, "no '#N' in the output")
-		return
-	}
-	deadline := time.Now().Add(20 * time.Second)
-	var rd Result
-	for {
-		rd = a.Mash("read-"+name, h, to, "read", m[1])
-		if rd.Code == 0 && strings.Contains(rd.Stdout, text) || time.Now().After(deadline) {
-			break
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-	a.C.Check("mail "+name+": the recipient reads the text", rd.Code == 0 && strings.Contains(rd.Stdout, text), exitDetail(rd))
-	a.C.Check("mail "+name+": the recipient sees it labelled verified", strings.Contains(rd.Stdout, "verified"), "")
-}
-
 // permissions asserts that `mash admin permissions O.G.I` prints REQ-005's set.
 func (a *AT) permissions(h Home, owner, group, name string) {
 	addr := owner + "." + group + "." + name
@@ -333,9 +310,11 @@ var authRE = regexp.MustCompile(`(?i)authori[sz]ation|not authori[sz]ed|revoked`
 var AT001 = Scenario{
 	ID: "at001",
 	Scenario: "AT-001, the solo developer, standalone: a fresh scratch home; mashctl init --local --owner alice --start; for design and review, " +
-		"mash key create, mashctl endpoint create alice/dev/<name> --public-key, mash credential create; two sessions (mash serve) with " +
-		"MASH_OWNER=alice MASH_GROUP=dev MASH_NAME=design|review; mail each way; endpoint list --json; service metadata (mash who --json); " +
-		"mash admin permissions alice.dev.design; mashctl endpoint delete alice/dev/review, then the review session's connection, a reconnect and mash status.",
+		"mash key create, mashctl endpoint create alice/dev/<name> --public-key, mash credential create; two sessions started through the plugin launcher " +
+		"and hooks, as Claude Code starts the plugin (sh plugin/scripts/mash serve with the env of plugin/.mcp.json, MASH_BIN set to the built binary, no download; " +
+		"MASH_OWNER=alice MASH_GROUP=dev MASH_NAME=design|review); mail each way through the sessions' MCP send tool, delivered by the hook commands of plugin/hooks/hooks.json " +
+		"(UserPromptSubmit and PostToolUse, run under sh -c with the hook JSON on stdin) with the sender's verified trust label, cross-checked with the MCP inbox and read tools; endpoint list --json; service metadata (mash who --json); " +
+		"mash admin permissions alice.dev.design; mashctl endpoint delete alice/dev/review, then the review session's connection, a reconnect and mash status, both through the plugin launcher. Not driven: a real Claude Code session (the harness plays Claude Code's two roles, starting the MCP server and running the hooks with their JSON, and no model is involved).",
 	Body: func(a *AT) {
 		h, err := a.Home("home")
 		if !a.C.Check("a fresh scratch home is made", err == nil, "") || !a.StartServer(h) {
@@ -346,23 +325,37 @@ var AT001 = Scenario{
 				return
 			}
 		}
+		pl, err := loadPluginLaunch(filepath.Join(a.R.Repo, "plugin"))
+		detail := ""
+		if err != nil {
+			detail = err.Error()
+		} else if bad := pl.checkDeclared(); len(bad) > 0 {
+			err, detail = fmt.Errorf("declared"), strings.Join(bad, "; ")
+		}
+		if !a.C.Check("plugin/.mcp.json and plugin/hooks/hooks.json declare the launcher serve with MASH_SPOOL_FROM_START=1 and MASH_PLUGIN_ROOT, and the UserPromptSubmit and PostToolUse hook commands", err == nil, detail) {
+			return
+		}
 		var procs = map[string]*Proc{}
+		sess := map[string]*plugSession{}
 		envs := map[string][]string{}
 		for _, n := range []string{"design", "review"} {
-			p, env, err := a.StartSession(h, "dev", n)
+			s, err := a.StartPluginSession(pl, h, "dev", n)
 			detail := ""
 			if err != nil {
 				detail = redact(err.Error())
 			}
-			if !a.C.Check("the "+n+" session starts with MASH_GROUP=dev and completes the MCP handshake", err == nil, detail) {
+			if !a.C.Check("the "+n+" session starts through the plugin launcher (sh plugin/scripts/mash serve) with MASH_GROUP=dev and completes the MCP handshake", err == nil, detail) {
 				return
 			}
-			procs[n], envs[n] = p, env
+			sess[n], procs[n], envs[n] = s, s.P, s.Env
+			a.launcherExecsBuild(n, s)
 		}
 		a.C.Check("both sessions are online", a.waitOnline(h, envs["design"], "alice.dev.design", "alice.dev.review"), "")
 
-		a.mailVerified("design-to-review", h, envs["design"], envs["review"], "alice.dev.review", "hello review from design")
-		a.mailVerified("review-to-design", h, envs["review"], envs["design"], "alice.dev.design", "hello design from review")
+		a.pluginMail(pl, "design-to-review (UserPromptSubmit)", h, sess["design"], sess["review"], "UserPromptSubmit", "hello review from design")
+		a.pluginMail(pl, "review-to-design (PostToolUse)", h, sess["review"], sess["design"], "PostToolUse", "hello design from review")
+		a.pluginMail(pl, "design-to-review (PostToolUse)", h, sess["design"], sess["review"], "PostToolUse", "second hello review from design")
+		a.pluginMail(pl, "review-to-design (UserPromptSubmit)", h, sess["review"], sess["design"], "UserPromptSubmit", "second hello design from review")
 
 		r := a.Ctl("endpoint-list", h, a.Conn(), "endpoint", "list", "--json")
 		a.C.Check("mashctl endpoint list --json succeeds", r.Code == 0, exitDetail(r))
@@ -417,10 +410,11 @@ var AT001 = Scenario{
 			}
 		}
 		a.C.Check("REQ-011: the review session's connection is closed (its serve exits or reports the authorization failure)", closed, "")
-		r = a.Mash("reconnect-review", h, revEnv, "inbox")
-		a.C.Check("REQ-011: a reconnect by the review key is refused as not authorized", r.Code != 0 && authRE.MatchString(r.Text()), exitDetail(r))
-		r = a.Mash("status-review", h, revEnv, "status")
-		a.C.Check("REQ-011: mash status says why (an authorization failure)", authRE.MatchString(r.Text()), exitDetail(r))
+		r = a.Launcher(pl, "reconnect-review", h, revEnv, "inbox")
+		a.C.Check("REQ-011: a reconnect by the review key through the plugin launcher is refused as not authorized", r.Code != 0 && authRE.MatchString(r.Text()), exitDetail(r))
+		r = a.Launcher(pl, "status-review", h, revEnv, "status")
+		a.C.Check("REQ-011: mash status through the plugin launcher says why (an authorization failure)", authRE.MatchString(r.Text()), exitDetail(r))
+		a.noDownload(sess["design"], sess["review"])
 	},
 }
 
