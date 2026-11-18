@@ -57,6 +57,8 @@ The checksum shows the file arrived whole. The attestation, a record signed by G
 
 ## Quick start: one machine, no account
 
+Step-by-step guides: your own NATS server on one machine, [docs/guides/nats-local.md](docs/guides/nats-local.md); Synadia Cloud free tier, [docs/guides/nats-synadia.md](docs/guides/nats-synadia.md).
+
 This path needs no Synadia account and no server you run by hand. You need:
 
 - `mash` installed as above, and a Go 1.27.4 or newer toolchain for `mashctl`, with the directory `go install` writes to on your `PATH` (`go env GOBIN`, or `$(go env GOPATH)/bin` when `GOBIN` is empty; `~/go/bin` by default).
@@ -124,7 +126,7 @@ The config and the credentials land in the config directory, `~/.config/mash` by
 
 ## Quickstart on Synadia Cloud (free tier)
 
-This is the second path, for a server you do not run yourself. Use a free [Synadia Cloud](https://cloud.synadia.com) account: [`scripts/quickstart-synadia.sh`](scripts/quickstart-synadia.sh) sets up the server side from one API token (it needs curl and jq; it is a script, not part of the mash binary). You need Go 1.27.4 or newer (or the release binary above) and Claude Code with channels: a claude.ai or Console sign-in, not Bedrock, Agent Platform or Foundry; organisations need an Owner to allow mash ([docs/install.md](docs/install.md)).
+This is the second path, for a server you do not run yourself. The step-by-step guide is [docs/guides/nats-synadia.md](docs/guides/nats-synadia.md). Use a free [Synadia Cloud](https://cloud.synadia.com) account: [`scripts/quickstart-synadia.sh`](scripts/quickstart-synadia.sh) sets up the server side from one API token (it needs curl and jq; it is a script, not part of the mash binary). You need Go 1.27.4 or newer (or the release binary above) and Claude Code with channels: a claude.ai or Console sign-in, not Bedrock, Agent Platform or Foundry; organisations need an Owner to allow mash ([docs/install.md](docs/install.md)).
 
 See it working first: [two Claude Code sessions exchanging mail, one woken by it](docs/demo/) (a recording to play with `asciinema play`).
 

@@ -89,6 +89,8 @@ Without this, `--channels plugin:mash@mash` is refused ("not on the approved cha
 
 On one machine with no NATS server yet, `mashctl init --local --owner <name> --start` sets up a local operator-mode server with JetStream and writes this configuration for you (see [Local setup](operations.md#local-setup-with-mashctl-init---local)); then make each endpoint with `mashctl endpoint create` ([Adding an endpoint](operations.md#adding-an-endpoint)); the rest of this section is for an existing server.
 
+Your own NATS server on one machine: [guides/nats-local.md](guides/nats-local.md). Synadia Cloud free tier: [guides/nats-synadia.md](guides/nats-synadia.md).
+
 `~/.config/mash/config.json`, or `$XDG_CONFIG_HOME/mash/config.json` when `XDG_CONFIG_HOME` is an absolute path and that file exists (an existing `~/.config/mash` install keeps working). With no `HOME` and no absolute `XDG_CONFIG_HOME`, mash stops with an error unless everything comes from the `MASH_*` variables. A leading `~/` in `creds` and `admin_creds` (and in `MASH_CREDS` and `MASH_ADMIN_CREDS`) is expanded to your home; `~user/` is not. `policy.md` and the default creds files live in the same directory; when the XDG directory has no copy of one, mash also finds it in `~/.config/mash` (the XDG copy wins when both exist). A relative `admin_creds`, `tls_ca`, `tls_cert` or `tls_key` in `config.json` is resolved against the config directory, not the working directory. `config.json` that is writable by every user is refused; run `chmod go-w` on it.
 
 ```json
@@ -176,17 +178,19 @@ The CLI never takes the lease, so it works alongside the running session.
 
 If you use [Synadia Cloud](https://cloud.synadia.com), [`scripts/quickstart-synadia.sh`](../scripts/quickstart-synadia.sh) does the server side (operations.md) for you from one API token. It is a script outside the binary (it needs curl and jq; [ADR 0038](decisions/0038-synadia-setup-is-a-script-outside-the-binary.md)). Install the binary and the plugin (sections 1 to 3) first.
 
+The step-by-step guide is [guides/nats-synadia.md](guides/nats-synadia.md).
+
 1. In the Synadia Cloud console, create an API token for your team.
 2. Give it to the script through the environment (or `--token-stdin`, or the prompt in a terminal; never on the command line), and look at the plan first:
 
    ```sh
    export SYNADIA_API_TOKEN=...
-   scripts/quickstart-synadia.sh --dry-run --endpoint design --endpoint review
-   scripts/quickstart-synadia.sh --endpoint design --endpoint review
+   scripts/quickstart-synadia.sh --dry-run --group dev --endpoint design --endpoint review
+   scripts/quickstart-synadia.sh --group dev --endpoint design --endpoint review
    ```
 
-   With no `--endpoint`, it makes one named `<user>-<host>`. If the token sees several teams or accounts, name one with `--team` or `--account`. `--owner` defaults to your user name.
-3. It creates a temporary admin user (named `mash-quickstart-admin-` and 8 random hex characters), a NATS user and a creds file in `~/.config/mash/<name>.creds` (mode 0600) for each endpoint, and writes `~/.config/mash/config.json` (it refuses to change a different `url` or `owner` without `--force`). Then it runs `mash admin init` and `mash admin provision` for each endpoint, sends a test message from the first endpoint to the second, and deletes the admin user, also when it fails. It refuses to reuse a NATS user that already exists; delete it in the console first. The API token is not stored, and no admin credential is left behind. [docs/synadia.md](synadia.md) lists what it does and does not check.
+   `--group` is required: an endpoint's group has no default. With no `--endpoint`, it makes one named `<user>-<host>`. If the token sees several teams or accounts, name one with `--team` or `--account`. `--owner` defaults to your user name.
+3. It creates a temporary admin user (named `mash-quickstart-admin-` and 8 random hex characters), a NATS user and a creds file in `~/.config/mash/<owner.group.instance>.creds` (mode 0600) for each endpoint, and writes `~/.config/mash/config.json` (it refuses to change a different `url` or `owner` without `--force`). Then it runs the directory setup (`init`) and `provision` for each endpoint, sends a test message from the first endpoint to the second, and deletes the admin user, also when it fails. It refuses to reuse a NATS user that already exists; delete it in the console first. The API token is not stored, and no admin credential is left behind. [docs/synadia.md](synadia.md) lists what it does and does not check.
 4. Start two sessions, each as an endpoint (section 5):
 
    ```sh
