@@ -1,7 +1,7 @@
-# Run record at003: 20261117T234850Z-ef476a8f
+# Run record at003: 20261118T001157Z-e47b17e5
 
-- Run id: 20261117T234850Z-ef476a8f
-- Revision: 2a204edf197f1754b8f3a4561e73fb8307814733 (clean)
+- Run id: 20261118T001157Z-e47b17e5
+- Revision: 0c9ac8744a910908c553d51299218137a1845452 (clean)
 
 ## Environment
 
@@ -206,14 +206,14 @@ AT-003, every refusal can fail: one local server; endpoints alice/dev/design, al
 - pass: a session with no MASH_GROUP: exit code 2 (exit 2)
 - pass: a session with no MASH_GROUP: standard error names MASH_GROUP
 - pass: a session with no MASH_GROUP: no directory record, stream, consumer, lease or service was made for it (changed: none)
-- pass: mashctl add: exit code 2 (exit 2: the CLI form does not exist in this build)
-- FAIL: mashctl add: the message names what to type (missing: one of endpoint create)
+- pass: mashctl add: exit code 2 (exit 2)
+- pass: mashctl add: the message names what to type (missing: )
 - pass: mashctl add: nothing was written (directory, issue record, streams, leases, files) (changed: none; failed reads: none)
-- pass: mashctl reissue: exit code 2 (exit 2: the CLI form does not exist in this build)
-- FAIL: mashctl reissue: the message names what to type (missing: one of endpoint reissue)
+- pass: mashctl reissue: exit code 2 (exit 2)
+- pass: mashctl reissue: the message names what to type (missing: )
 - pass: mashctl reissue: nothing was written (directory, issue record, streams, leases, files) (changed: none; failed reads: none)
 - pass: mashctl retire: exit code 2 (exit 2)
-- FAIL: mashctl retire: the message names what to type (missing: one of endpoint delete)
+- pass: mashctl retire: the message names what to type (missing: )
 - pass: mashctl retire: nothing was written (directory, issue record, streams, leases, files) (changed: none; failed reads: none)
 - pass: bob connects with his own credentials
 - pass: INV-002: the server refuses bob's publish to agents.mail.alice.dev.design with a permissions violation
@@ -226,4 +226,4 @@ AT-003, every refusal can fail: one local server; endpoints alice/dev/design, al
 
 ## Result
 
-FAIL
+PASS

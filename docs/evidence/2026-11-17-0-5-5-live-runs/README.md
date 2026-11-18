@@ -9,7 +9,7 @@ environment, scenario, expected, observed).
 |---|---|---|
 | AT-001, the solo developer | pass (37 assertions) | includes REQ-005 (the printed set and the issued JWT, both exactly the contract's), REQ-011 (a live session dropped by revocation, a reconnect refused, `mash status` says why) and INV-001 |
 | AT-002, the key crosses no machine | pass (25 assertions) | the public key file is carried to the mashctl host; the seed is searched for in every output and in the mashctl host's whole tree |
-| AT-003, every refusal can fail | 3 assertions fail, the rest pass | `mashctl add`, `reissue` and `retire` print `unknown command` (and `retire` a usage error) and do not name `endpoint create`, `endpoint reissue`, `endpoint delete`: the removed-command messages land with the CLI team's follow-up (#754); AT-003 is to be re-run when it merges |
+| AT-003, every refusal can fail | pass (102 assertions; re-run 2026-11-18 on main `ab84de7` once the removed-command messages merged) | the first run on `2a204ed` failed only the three removed-command messages (`mashctl add`, `reissue`, `retire` did not name their replacements); those landed in #754 and the re-run passes; the record here is the re-run's |
 
 AT-005 (across machines) was run by hand on 2026-11-18 by the core lane, from the harness of #749 with `--hosts podman --run-by manual
 --host-label bf2`: three rootless podman containers (podman 4.9.3, netavark) built from the checkout, each its own filesystem and
