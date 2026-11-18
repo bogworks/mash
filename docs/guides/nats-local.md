@@ -334,10 +334,12 @@ The log is `<config dir>/server/server.log`; `tail` it for connection and TLS er
 
 ## Stopping and removing it
 
-Stop the server by the process id in `server.pid`, and only that one:
+Stop the server by the process id in `server.pid`, and only that one. First check that the process is still this server: a stale `server.pid` can name a process that started later with the same id.
 
 ```sh
-kill $(cat $MASH_CONFIG_DIR/server/server.pid)
+PID=$(cat $MASH_CONFIG_DIR/server/server.pid)
+ps -p $PID -o args=          # must show nats-server -c <config dir>/server/server.conf
+kill $PID                    # only if the line above names this server's config file
 ```
 
 The log ends with `JetStream Shutdown` and `Server Exiting..`. While the server is down, `mash` commands fail with `mash: connect tls://127.0.0.1:20000: nats: no servers available for connection` (exit 1). Mail stays in the store: after a restart with the command below, `mash inbox` showed the same message.
@@ -355,7 +357,7 @@ To remove it, after the server is stopped, delete what was made, by path:
 - the key store, `<config dir>/keys` (or `$MASH_KEYS_DIR`);
 - `<config dir>/config.json`;
 - each endpoint's `<config dir>/<owner>.<group>.<instance>.creds` (and any `.retired-<time>` copies);
-- `$MASH_STATE_DIR` (else `~/.local/state/mash`), if sessions ran as these endpoints: their spool is there;
+- the state directory, if sessions ran as these endpoints (their spool is there): `$MASH_STATE_DIR`, else `$XDG_STATE_HOME/mash` when `XDG_STATE_HOME` is an absolute path, else `~/.local/state/mash`;
 - any seed files you copied for `adopt`, and `design.seed`-style files if you used the three-command endpoint form.
 
 If the config directory was made for this trial and holds nothing else, removing it as a whole is the same thing. Delete the key store only when you will not use this server again: without `operator.nk` and `account.nk` nobody can revoke or mint credentials for the account.
