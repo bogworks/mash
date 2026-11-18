@@ -580,11 +580,13 @@ func hooklessFix(sp spool.Spool, own time.Time) string {
 // a failure.
 //
 // The whole report, including a `tls: WARN` line, goes to stdout. When that line is WARN (a plain URL let through by
-// insecure_plaintext) the plain-text warning the connecting commands print is also written to stderr once (REQ-014).
+// insecure_plaintext) the plain-text warning the connecting commands print is also written to stderr once (REQ-014). That
+// holds whatever else is wrong with the config: the report prints the tls line from the URL and override that did
+// load, so the warning does not wait on cfgErr. A config that did not load at all has no URL, so no warning.
 func statusCmd(cfg config.Config, cfgErr error, env func(string) string, stdout, stderr io.Writer) int {
 	src := &statusSource{cfg: cfg, cfgErr: cfgErr, cli: true, home: env("HOME"), getenv: env}
 	fmt.Fprintln(stdout, statusText(src))
-	if cfgErr == nil && strings.HasPrefix(tlsLine(cfg), "tls: WARN") {
+	if strings.HasPrefix(tlsLine(cfg), "tls: WARN") {
 		if w := endpoint.PlainWarning(cfg); w != "" {
 			fmt.Fprintln(stderr, w)
 		}

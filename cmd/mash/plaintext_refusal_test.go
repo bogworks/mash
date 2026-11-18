@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/testenv"
 )
 
@@ -241,5 +242,34 @@ func TestStatusCommandPlainWarningOnStderr(t *testing.T) {
 	out, errs = statusRun("nats://127.0.0.1:4222", false)
 	if !strings.Contains(out, "tls: FAILED") || strings.Contains(errs, "WARNING") {
 		t.Errorf("plain, no override: stdout %q, stderr %q", out, errs)
+	}
+}
+
+// The stderr warning follows the report's own tls line, not the config error: a plain URL with the override and an
+// unrelated config error (no group) still says `tls: WARN` on stdout and so must warn on stderr, once. A config that
+// did not load at all has no URL: no warning, no panic.
+func TestStatusCommandPlainWarningDespiteConfigError(t *testing.T) {
+	const warning = "WARNING: plain-text connection to 127.0.0.1"
+	env := plainEnv(t, "nats://127.0.0.1:4222")
+	env["MASH_INSECURE_PLAINTEXT"] = "1"
+	delete(env, "MASH_GROUP")
+	var out, errb bytes.Buffer
+	if code := run([]string{"status"}, envStrict(env), strings.NewReader(""), &out, &errb); code != 0 {
+		t.Fatalf("mash status exit %d: %s", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "tls: WARN") {
+		t.Errorf("stdout lacks tls: WARN:\n%s", out.String())
+	}
+	if n := strings.Count(errb.String(), warning); n != 1 {
+		t.Errorf("%d warnings on stderr, want 1: %q", n, errb.String())
+	}
+
+	out.Reset()
+	errb.Reset()
+	if code := statusCmd(config.Config{}, config.ErrGroupMissing, func(k string) string { return "" }, &out, &errb); code != 0 {
+		t.Fatalf("statusCmd exit %d", code)
+	}
+	if strings.Contains(out.String(), "tls: WARN") || strings.Contains(errb.String(), "WARNING") {
+		t.Errorf("zero config warned: %q / %q", out.String(), errb.String())
 	}
 }
