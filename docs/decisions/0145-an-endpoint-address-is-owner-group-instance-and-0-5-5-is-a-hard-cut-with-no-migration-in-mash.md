@@ -56,6 +56,13 @@ Chosen: one form, and a hard cut.
   default: ships wide open), its own heartbeat, and the fixed lines it has today; it subscribes to its own prompt and
   status and to `agents.hb.<owner>.*.*`. The owner is a literal in every peer line, so no credential reaches another
   owner. Narrowing to a group is a user's later choice, not in this release.
+* **Reply inboxes are inside the owner's wall too (contract revision 9, REQ-005 and INV-002).** An endpoint's reply-inbox
+  prefix is `_INBOX.<owner>.<flat key>`; it publishes replies only to `_INBOX.<owner>.>` and subscribes only to
+  `_INBOX.<owner>.<flat key>.>`. Before this, every endpoint could publish to `_INBOX.>`, so an endpoint of another owner
+  could forge a discovery answer or replay a presence answer into an in-flight reply subject (found by the final gate's
+  security finding G1 and shown live by the second-owner case of AT-005). Inside one owner, endpoints can still answer each
+  other's reply subjects: that is the same "open under the owner" as the peer lines, until the policy release. No SAP wire
+  shape and no stored record changes. A credential made before this change is refused by this release's mash (reissue it).
 * **The endpoint makes its own key in 0.5.5.** `endpoint create` takes the endpoint's public key, signed by the account
   signing key; no private key crosses to the central host. The group is never stored in configuration: it is given on
   each create and by `MASH_GROUP`. A group cannot be changed later (create a
