@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
+	"strings"
 )
 
 // seedRE matches an NKey seed of any kind (S then O, A, N, C, U, P or X, then base32); jwtRE a JWT.
@@ -96,4 +98,24 @@ func scanFor(dir string, secrets map[string][]byte) ([]Leak, error) {
 func redact(s string) string {
 	s = seedRE.ReplaceAllString(s, "[seed removed]")
 	return jwtRE.ReplaceAllString(s, "[jwt removed]")
+}
+
+// registerKeyLines adds every body line of a PEM private key to secrets, named label+" line N" (N counts the body
+// lines from 1). Armour (-----) lines and blank lines are skipped. A line is registered when it is at least 16 bytes
+// (shorter ones are not unique enough to search for); the last body line is also registered from 8 bytes, since a
+// PEM's last line is usually short. Names only ever reach a message, never the text.
+func registerKeyLines(secrets map[string][]byte, label string, pemText []byte) {
+	var body []string
+	for _, l := range strings.Split(string(pemText), "\n") {
+		l = strings.TrimSpace(l)
+		if l == "" || strings.HasPrefix(l, "-----") {
+			continue
+		}
+		body = append(body, l)
+	}
+	for i, l := range body {
+		if len(l) >= 16 || (i == len(body)-1 && len(l) >= 8) {
+			secrets[label+" line "+strconv.Itoa(i+1)] = []byte(l)
+		}
+	}
 }

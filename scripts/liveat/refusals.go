@@ -196,7 +196,7 @@ func (a *AT) crossOwner(ha, he Home, bob, alice ep, trees []Home) {
 	const probe = "cross-owner probe text"
 	errs := make(chan error, 16)
 	flat := "bob_dev_build"
-	nc, err := nats.Connect(a.url(), nats.UserCredentials(bob.creds), nats.CustomInboxPrefix("_INBOX.bob."+flat),
+	nc, err := nats.Connect(a.tlsURL(), nats.RootCAs(a.caPath()), nats.UserCredentials(bob.creds), nats.CustomInboxPrefix("_INBOX.bob."+flat),
 		nats.MaxReconnects(0), nats.Timeout(5*time.Second),
 		nats.ErrorHandler(func(_ *nats.Conn, _ *nats.Subscription, e error) {
 			select {

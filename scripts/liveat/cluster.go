@@ -1,7 +1,9 @@
 package main
 
 import (
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"path/filepath"
 	"regexp"
@@ -198,6 +200,12 @@ func (s *At5) BuildCerts(now time.Time) error {
 			return err
 		}
 		s.Leaves = append(s.Leaves, l)
+		s.mu.Lock()
+		registerKeyLines(s.secrets, "leaf "+l.Name+" key", l.KeyPEM) // every line of the key.pem written above
+		if kb, err := x509.MarshalPKCS8PrivateKey(ca.key); err == nil {
+			registerKeyLines(s.secrets, "ca key", pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: kb})) // memory-only, never written
+		}
+		s.mu.Unlock()
 		s.TLS = append(s.TLS, f)
 		if err := ca.Verify(l, now, sans...); err != nil {
 			return fmt.Errorf("leaf %s does not verify: %w", l.Name, err)
