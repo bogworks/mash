@@ -1,0 +1,1 @@
+**Reissuing an endpoint from two `mashctl` machines at once no longer leaves a stale credential file.** `mashctl endpoint reissue` now writes the credential file while it still holds the endpoint's lock on the server, so a second machine's reissue waits instead of replacing the key in between.
