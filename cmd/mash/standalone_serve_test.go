@@ -195,12 +195,12 @@ func TestStandaloneLivePrompt(t *testing.T) {
 	waitOnline(t, bin, envs["alpha"], "beta")
 
 	type res struct {
-		out  string
+		out  string // standard output only: the plain-text warning is on standard error
 		code int
 	}
 	done := make(chan res, 1)
 	go func() {
-		o, c := mashRun(t, bin, envs["alpha"], "", "prompt", tTo("beta"), "what", "time?")
+		o, _, c := mashRunSplit(t, bin, envs["alpha"], "", "prompt", tTo("beta"), "what", "time?")
 		done <- res{o, c}
 	}()
 	content, meta := channelOf(s.await(t, isChannel))

@@ -50,7 +50,8 @@ func provisionNewForm(t *testing.T, e *testenv.Env, owner, group, instance strin
 		t.Fatal(err)
 	}
 	return id, map[string]string{"HOME": t.TempDir(), "MASH_NAME": id.Instance, "MASH_OWNER": id.Owner, "MASH_GROUP": id.Group,
-		"MASH_URL": e.URL, "MASH_CREDS": creds, "MASH_SETTLE_MS": "20"}
+		"MASH_URL": e.URL, "MASH_CREDS": creds, "MASH_SETTLE_MS": "20",
+		"MASH_INSECURE_PLAINTEXT": "1"} // REQ-014: these tests are not about TLS; the override is explicit
 }
 
 func pendingOf(t *testing.T, e *testenv.Env, stream string) uint64 {

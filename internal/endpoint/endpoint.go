@@ -322,18 +322,21 @@ func SpoolDir(cfg config.Config) (string, error) {
 	return spool.Dir(cfg.StateDir, o, n), nil
 }
 
-// endpointTLS is the connection options an endpoint connection under cfg needs, the plain-text warning to print when
-// insecure_plaintext lets a plain URL through ("" otherwise), or the refusal (natsauth.RequireTLS, REQ-014).
-func endpointTLS(cfg config.Config) ([]nats.Option, string, error) {
-	return natsauth.RequireTLS(cfg.URL, cfg.InsecurePlaintext)
+// EndpointTLS is the extra connection options an endpoint connection under cfg needs, or the refusal: a plain URL is
+// refused here, before anything is connected, unless insecure_plaintext is set (natsauth.RequireTLS, REQ-014). It prints
+// nothing. PlainWarning is the line to print to standard error when a plain URL was let through.
+func EndpointTLS(cfg config.Config) ([]nats.Option, error) {
+	opts, _, err := natsauth.RequireTLS(cfg.URL, cfg.InsecurePlaintext)
+	return opts, err
 }
 
-// EndpointTLS is the extra connection options an endpoint connection under cfg needs, or the refusal: a plain URL is
-// refused here, before anything is connected, unless insecure_plaintext is set. It prints nothing; the connection
-// itself (OpenClientWith, which calls it first) prints the plain-text warning to standard error.
-func EndpointTLS(cfg config.Config) ([]nats.Option, error) {
-	opts, _, err := endpointTLS(cfg)
-	return opts, err
+// PlainWarning is the plain-text warning for cfg ("" when its URL is all TLS or is refused).
+func PlainWarning(cfg config.Config) string {
+	_, w, err := natsauth.RequireTLS(cfg.URL, cfg.InsecurePlaintext)
+	if err != nil {
+		return ""
+	}
+	return w
 }
 
 // OpenClient connects as cfg.Name and checks the identity, without a lease. It loads the whole directory: serve and
@@ -348,12 +351,11 @@ func OpenClientWith(ctx context.Context, cfg config.Config, opts ClientOptions) 
 	if cfg.Inert() {
 		return nil, errors.New("mash: no endpoint name (set MASH_NAME)")
 	}
-	tlsReq, warning, err := endpointTLS(cfg)
+	// The plain-text warning is not printed here: the command prints it once on its own standard error before it
+	// connects (cmd/mash run), and serve at start (reportSettings), not at every retry of its open.
+	tlsReq, err := EndpointTLS(cfg)
 	if err != nil {
 		return nil, err
-	}
-	if warning != "" {
-		fmt.Fprintln(os.Stderr, warning)
 	}
 	ident, key, subj, err := identityOf(cfg)
 	if err != nil {

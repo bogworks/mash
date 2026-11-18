@@ -84,7 +84,8 @@ func (f *fixture) cfg(name string) config.Config {
 	if f.settle > 0 {
 		settleMS = int(f.settle / time.Millisecond)
 	}
-	return config.Config{URL: f.e.URL, Owner: f.e.Owner, Group: testGroup, Name: name, Creds: f.creds[name],
+	// REQ-014: these tests are not about TLS; the override is explicit.
+	return config.Config{URL: f.e.URL, InsecurePlaintext: true, Owner: f.e.Owner, Group: testGroup, Name: name, Creds: f.creds[name],
 		SettleMS: settleMS, BatchMsgs: 10, BatchBytes: 16384, IdleWake: f.idle}
 }
 
