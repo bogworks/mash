@@ -281,5 +281,5 @@ If you also edit the account with `nsc`, these steps keep it from undoing mashct
 - Run `nsc pull -A` before any `nsc push`, so a push from a stale local copy does not overwrite a revocation mashctl made. `mashctl issued check` shows keys connected to a server that mash did not issue.
 - `nsc push` rejects an account server URL that starts with `tls://`; give nsc a `nats://` URL. For a server with a private CA, nsc needs `SSL_CERT_FILE` set to the CA's PEM file (mashctl takes `tls_ca` instead).
 - `nsc revocations add-user` followed by an `nsc push` revokes a user; `mashctl endpoint delete` and `mashctl deprovision` revoke the user of an endpoint themselves.
-- To cut off old creds and keep the endpoint, run `mashctl endpoint reissue ADDRESS`: it revokes the old key and names a new one. `mashctl endpoint delete ADDRESS` revokes the user and removes the endpoint for good.
+- To cut off old creds and keep the endpoint, run `mashctl endpoint reissue ADDRESS --make-key` (or `--public-key FILE`): it revokes the old key and names a new one. `mashctl endpoint delete ADDRESS` revokes the user and removes the endpoint for good.
 - A suspended endpoint's stored mail stays readable. `mash send` to a suspended endpoint fails with "no response from stream" and does not say the endpoint is suspended; this is a known limitation.
