@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/bogworks/mash/internal/namerule"
-	"github.com/bogworks/mash/internal/natsauth"
 	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/store"
 )
@@ -58,19 +57,16 @@ type Config struct {
 	TLSCA           string        // MASH_TLS_CA / "tls_ca": PEM file of the CA that signed the server's certificate (empty = system roots)
 	TLSCert         string        // MASH_TLS_CERT / "tls_cert": PEM client certificate, for a server that requires one; set with TLSKey
 	TLSKey          string        // MASH_TLS_KEY / "tls_key": PEM private key of TLSCert
-	// InsecureLoopback is the one minimal escape from the TLS requirement of admin and system connections: it allows
-	// plain text, and only to a loopback URL. It is a setting, not a command-line flag, and may be renamed when the
-	// command-line settings are redesigned (its name now: "insecure_loopback").
-	InsecureLoopback bool // MASH_INSECURE_LOOPBACK / "insecure_loopback": allow plain nats:// for admin and system connections to a loopback server (a local server `init --local` made); refused for any other host
-	// RequireTLS makes every endpoint connection (serve, hook, the CLI commands) refuse a plain nats:// or ws:// URL to a
-	// host that is not localhost or a loopback IP literal. Plain text to a loopback host is always allowed. Default off.
-	RequireTLS     bool         // MASH_REQUIRE_TLS / "require_tls": refuse plain text from endpoint connections to a remote host (use tls://)
-	LaunchToken    string       // MASH_LAUNCH_TOKEN: names the launch of the agent this process serves; recorded in the lease, optional
-	Host           string       // MASH_HOST / "host": the agent host adapter ("" = claude)
-	SpoolFromStart bool         // MASH_SPOOL_FROM_START / "spool_from_start": spool mail from the first message, before any hook has run
-	SpoolRequired  bool         // MASH_SPOOL_REQUIRED / "spool_required": fail closed: mail the spool cannot take is held unacked and reported, never delivered by the channel (default off)
-	Dir            string       // the config directory (ConfigDir); "" when none can be found
-	Limits         store.Limits // config.json "limits": inbox and bucket caps (defaults: store.DefaultLimits)
+	// InsecurePlaintext is the one override of the TLS requirement (REQ-014): every connection mash and mashctl make
+	// uses tls:// or wss://, to any host (loopback included), unless it is set. Then a plain nats:// or ws:// URL is
+	// connected and a warning goes to standard error. It is a setting, not a command-line flag.
+	InsecurePlaintext bool         // MASH_INSECURE_PLAINTEXT / "insecure_plaintext": allow plain-text connections to any host (default false)
+	LaunchToken       string       // MASH_LAUNCH_TOKEN: names the launch of the agent this process serves; recorded in the lease, optional
+	Host              string       // MASH_HOST / "host": the agent host adapter ("" = claude)
+	SpoolFromStart    bool         // MASH_SPOOL_FROM_START / "spool_from_start": spool mail from the first message, before any hook has run
+	SpoolRequired     bool         // MASH_SPOOL_REQUIRED / "spool_required": fail closed: mail the spool cannot take is held unacked and reported, never delivered by the channel (default off)
+	Dir               string       // the config directory (ConfigDir); "" when none can be found
+	Limits            store.Limits // config.json "limits": inbox and bucket caps (defaults: store.DefaultLimits)
 
 	// The name-acceptance rule (docs/name-rule.md). Load reads the file once; a file that cannot be read or is invalid
 	// fails Load. NameRule is nil, and accepts everything, when no file is named.
@@ -87,8 +83,7 @@ type Config struct {
 // SourceKeys are the keys of Config.Source and Config.FileValues, and the environment variable each one is read from.
 var SourceKeys = map[string]string{
 	"url": "MASH_URL", "owner": "MASH_OWNER", "group": "MASH_GROUP", "admin_creds": "MASH_ADMIN_CREDS",
-	"tls_ca": "MASH_TLS_CA", "tls_cert": "MASH_TLS_CERT", "tls_key": "MASH_TLS_KEY", "insecure_loopback": "MASH_INSECURE_LOOPBACK",
-	"require_tls": "MASH_REQUIRE_TLS",
+	"tls_ca": "MASH_TLS_CA", "tls_cert": "MASH_TLS_CERT", "tls_key": "MASH_TLS_KEY", "insecure_plaintext": "MASH_INSECURE_PLAINTEXT",
 }
 
 type file struct {
@@ -121,8 +116,7 @@ type file struct {
 	SpoolFromStart *bool `json:"spool_from_start"`
 	SpoolRequired  *bool `json:"spool_required"`
 
-	InsecureLoopback *bool `json:"insecure_loopback"`
-	RequireTLS       *bool `json:"require_tls"`
+	InsecurePlaintext *bool `json:"insecure_plaintext"`
 
 	Limits json.RawMessage `json:"limits"`
 
@@ -322,11 +316,8 @@ func Load(lookup Lookup, home string) (Config, error) {
 	if f.SpoolRequired != nil {
 		c.SpoolRequired = *f.SpoolRequired
 	}
-	if f.InsecureLoopback != nil {
-		c.InsecureLoopback = *f.InsecureLoopback
-	}
-	if f.RequireTLS != nil {
-		c.RequireTLS = *f.RequireTLS
+	if f.InsecurePlaintext != nil {
+		c.InsecurePlaintext = *f.InsecurePlaintext
 	}
 	for _, p := range []struct {
 		dst *int
@@ -410,24 +401,14 @@ func Load(lookup Lookup, home string) (Config, error) {
 		return c, fmt.Errorf("mash: MASH_SPOOL_REQUIRED=%q is not 1, true, 0 or false", v)
 	}
 
-	switch v := env("MASH_INSECURE_LOOPBACK"); v {
+	switch v := env("MASH_INSECURE_PLAINTEXT"); v {
 	case "":
 	case "1", "true":
-		c.InsecureLoopback = true
+		c.InsecurePlaintext = true
 	case "0", "false":
-		c.InsecureLoopback = false
+		c.InsecurePlaintext = false
 	default:
-		return c, fmt.Errorf("mash: MASH_INSECURE_LOOPBACK=%q is not 1, true, 0 or false", v)
-	}
-
-	switch v := env("MASH_REQUIRE_TLS"); v {
-	case "":
-	case "1", "true":
-		c.RequireTLS = true
-	case "0", "false":
-		c.RequireTLS = false
-	default:
-		return c, fmt.Errorf("mash: MASH_REQUIRE_TLS=%q is not 1, true, 0 or false", v)
+		return c, fmt.Errorf("mash: MASH_INSECURE_PLAINTEXT=%q is not 1, true, 0 or false", v)
 	}
 
 	if v := env("MASH_IDLE_WAKE"); v != "" {
@@ -551,11 +532,8 @@ func (c *Config) recordSources(f file, env func(string) string, home string) {
 	c.Source, c.FileValues = map[string]string{}, map[string]string{}
 	fileVals := map[string]string{"url": f.URL, "owner": f.Owner, "admin_creds": ExpandHome(f.AdminCreds, home),
 		"tls_ca": f.TLSCA, "tls_cert": f.TLSCert, "tls_key": f.TLSKey}
-	if f.InsecureLoopback != nil {
-		fileVals["insecure_loopback"] = strconv.FormatBool(*f.InsecureLoopback)
-	}
-	if f.RequireTLS != nil {
-		fileVals["require_tls"] = strconv.FormatBool(*f.RequireTLS)
+	if f.InsecurePlaintext != nil {
+		fileVals["insecure_plaintext"] = strconv.FormatBool(*f.InsecurePlaintext)
 	}
 	for key, ev := range SourceKeys {
 		fv := fileVals[key]
@@ -567,7 +545,7 @@ func (c *Config) recordSources(f file, env func(string) string, home string) {
 			c.Source[key] = ev
 		case fv != "":
 			c.Source[key] = "config.json"
-		case key == "insecure_loopback" || key == "require_tls":
+		case key == "insecure_plaintext":
 			c.Source[key] = "default"
 		default:
 			c.Source[key] = "unset"
@@ -616,17 +594,6 @@ func positiveDuration(v string) (time.Duration, error) {
 		return 0, fmt.Errorf("%q is not a duration above zero (for example \"20s\" or \"1m\")", v)
 	}
 	return d, nil
-}
-
-// PlainTextWarning returns a warning when url (or any entry of a comma-separated server list) uses a plain scheme (every one but tls:// and wss://)
-// (an entry with no scheme is nats://) to a host that is not loopback, and "" otherwise. SAP identity assumes a
-// verified connection, which plain text is not. The warning names the host, never the URL's userinfo.
-func PlainTextWarning(url string) string {
-	scheme, host, ok := natsauth.PlainRemote(url)
-	if !ok {
-		return ""
-	}
-	return fmt.Sprintf("is plain %s:// to a non-loopback host (%s): SAP identity assumes a verified connection. Next: use tls:// with the server's certificate (tls_ca for a private CA); set MASH_REQUIRE_TLS=1 to make mash refuse it", scheme, host)
 }
 
 // RejectedArg is what an error may print of a command-line argument it rejects without having validated it: the

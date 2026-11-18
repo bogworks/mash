@@ -63,7 +63,7 @@ func (a *AT) url() string { return "nats://127.0.0.1:" + strconv.Itoa(a.R.Port) 
 
 // Conn is the connection settings of every endpoint and mashctl command of the scenario: the one local server.
 func (a *AT) Conn() []string {
-	return []string{"MASH_URL=" + a.url(), "MASH_OWNER=alice", "MASH_INSECURE_LOOPBACK=true"}
+	return []string{"MASH_URL=" + a.url(), "MASH_OWNER=alice", "MASH_INSECURE_PLAINTEXT=true"}
 }
 
 // Env is the environment for a command in home h: scratch values only, plus extra.

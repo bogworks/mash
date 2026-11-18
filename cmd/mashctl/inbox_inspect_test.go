@@ -456,7 +456,7 @@ func TestInboxInspectAddressForms(t *testing.T) {
 
 func TestInboxInspectCannotComplete(t *testing.T) {
 	f := newAuditEnv(t)
-	env := map[string]string{"HOME": t.TempDir(), "MASH_URL": "nats://127.0.0.1:1", "MASH_OWNER": f.e.Owner, "MASH_ADMIN_CREDS": f.e.AdminCreds, "MASH_INSECURE_LOOPBACK": "1"}
+	env := map[string]string{"HOME": t.TempDir(), "MASH_URL": "nats://127.0.0.1:1", "MASH_OWNER": f.e.Owner, "MASH_ADMIN_CREDS": f.e.AdminCreds, "MASH_INSECURE_PLAINTEXT": "1"}
 	var out, errb strings.Builder
 	if code := runEnv([]string{"inbox", "inspect", "o.g.x"}, func(k string) string { return env[k] }, &out, &errb); code != exitInspectIncomplete {
 		t.Fatalf("exit %d, want 3: %q", code, errb.String())

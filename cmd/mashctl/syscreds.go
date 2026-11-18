@@ -60,9 +60,12 @@ func connectSys(cfg config.Config, flagVal string, env func(string) string) (*na
 	if err := natsauth.CheckCreds(credsPath, raw); err != nil {
 		return nil, fmt.Errorf("system account credentials: %v", err)
 	}
-	tlsReq, err := natsauth.RequireTLS(cfg.URL, cfg.InsecureLoopback)
+	tlsReq, warning, err := natsauth.RequireTLS(cfg.URL, cfg.InsecurePlaintext)
 	if err != nil {
 		return nil, fmt.Errorf("connect %s with the system account credentials: %v", config.RedactURL(cfg.URL), config.RedactErr(err, cfg.URL))
+	}
+	if warning != "" {
+		fmt.Fprintln(os.Stderr, warning)
 	}
 	opts := append(append(natsauth.TLSOptions(cfg.TLSCA, cfg.TLSCert, cfg.TLSKey), tlsReq...),
 		natsauth.UserCredentialBytes(raw), nats.Name("mashctl-sys"), nats.Timeout(connectTimeout), nats.MaxReconnects(0))
