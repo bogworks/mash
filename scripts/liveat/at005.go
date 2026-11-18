@@ -374,13 +374,15 @@ func (s *At5) provision(ctl Host, verb string, e *ep5, credsPath string) bool {
 	s.mu.Lock()
 	s.lastCreate = r.Stdout
 	s.mu.Unlock()
-	if strings.Contains(r.Stdout, "acknowledged") {
-		s.check(ctl.Role()+": endpoint "+verb+" reports that all three servers took the account update", (strings.Contains(r.Stdout, "3 server(s) acknowledged") || strings.Contains(r.Stdout, "servers acknowledged the account update: 3")), snip(grepLine(r.Stdout, "acknowledged")))
+	if verb == "create" {
+		// create makes no account update (nothing is revoked), so there is nothing for three servers to acknowledge: the
+		// check does not apply and is recorded as n/a, never as a pass (known issue #766; the contract wording is corrected).
+		s.C.NotApplicable(ctl.Role()+": endpoint create: all three servers took the account update",
+			"not applicable: create makes no account update, so there is nothing to acknowledge; known issue #766")
 	} else {
-		// Contract AT-005 says create reports it. Observed: create and reissue print no acknowledgement (create pushes no
-		// account update; only the revocation of a reissue or a delete does, and delete prints it). Recorded as a finding;
-		// the old key being refused on all three servers is asserted below.
-		s.check("FINDING (contract vs observed): "+ctl.Role()+" endpoint "+verb+" prints no line saying the three servers took an account update", true, "output: "+snip(r.Stdout))
+		s.check(ctl.Role()+": endpoint "+verb+" reports that all three servers took the account update",
+			strings.Contains(r.Stdout, "3 server(s) acknowledged") || strings.Contains(r.Stdout, "servers acknowledged the account update: 3"),
+			snip(grepLine(r.Stdout, "acknowledged")))
 	}
 	s.watch(ctl, "jwt", e.name+verb, jwtCarry)
 	jb, err := ctl.Get(jwtCarry)
@@ -593,7 +595,7 @@ func (s *At5) Scenario() {
 	// 4. reissue design from M2 with a new key made on M3.
 	oldDesign := filepath.Join(m3.Home().Dir, "design-old.creds")
 	s.check("M3: the old design creds are copied to a private path before the reissue", s.copyPrivate(m3, designCreds, oldDesign, "design-old"), "")
-	s.acceptedOn("old design key before the reissue (control)", m3, "design", oldDesign)
+	s.acceptedOn("the credential `endpoint create` issued for design (accepted by each of the three servers, before the reissue)", m3, "design", oldDesign)
 	design2, ok := s.makeKey(m3, "design", "-2")
 	if !ok {
 		return
