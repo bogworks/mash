@@ -165,7 +165,7 @@ The endpoint's seed is its private key. In this form it is made on the endpoint'
 
 If the command in step 3 is killed, run the same command again with the same arguments. If step 3 refuses because the JWT file exists, name another file with `--jwt-out` or remove the old one.
 
-Multi-server and TLS use, and a second `mashctl` machine, are described in [TLS, clusters and a second mashctl machine](tls-and-clusters.md); that use is not tested in 0.5.5.
+Multi-server and TLS use, and a second `mashctl` machine, are described in [TLS, clusters and a second mashctl machine](tls-and-clusters.md). The 0.5.5 acceptance run (AT-005) tested all three by hand, in rootless containers on one host: three NATS servers of one cluster with TLS on the client and route connections, endpoints on separate nodes, and two `mashctl` machines. It did not test real separate hosts or a physical network, clock drift between hosts, or certificate expiry and renewal; the [Not tested in 0.5.5](tls-and-clusters.md#not-tested-in-055) box lists everything that was not run.
 
 ### Directory metadata
 

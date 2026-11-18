@@ -260,9 +260,9 @@ Only `design.pub` and the JWT file travel. M3 also needs `ca.pem` and the settin
 
 ## Not tested in 0.5.5
 
-> Multi-server and TLS use is described here from the settings that exist. The 0.5.5 acceptance run across machines (AT-005) verifies it later. It has not been done.
+> The 0.5.5 acceptance run (AT-005) tested TLS, a three-server cluster and two `mashctl` machines by hand, in rootless containers on one host: three NATS servers of one cluster with TLS on the client and route connections, endpoints on separate nodes (a session on one node connecting to another node's server, mail each way), and two `mashctl` machines on one account (the same address created from both at the same moment: one succeeded, the other was refused `address_taken`). It did not test real separate hosts or a physical network, clock drift between hosts, or certificate expiry and renewal.
 
-What was run, on one host, on loopback, with `nats-server` 2.15.1 and OpenSSL 4.1.0:
+While this page was written, these steps were also run on one host, on loopback, with `nats-server` 2.15.1 and OpenSSL 4.1.0:
 
 - One operator-mode server made by `mashctl init --local`, with the `tls` block above added: `mashctl init` over `tls://localhost` failed without `tls_ca` and worked with it.
 - The same server with `verify: true`: a connection without a client certificate failed with the message above, and one with `tls_cert` and `tls_key` worked.
@@ -270,13 +270,11 @@ What was run, on one host, on loopback, with `nats-server` 2.15.1 and OpenSSL 4.
 - Three servers in one cluster with the `cluster` TLS block and `verify: true`, one shared certificate for all three, listing `localhost` and `127.0.0.1`: `adopt` reported `3 server(s) replied`, `mashctl init`, `issued check` (`3 of 3 servers answered`), `endpoint create --servers 3` and `endpoint delete --servers 3` (`3 server(s) acknowledged`) worked with a three-entry `url`.
 - `mash status` with `MASH_REQUIRE_TLS` on and off, against a plain URL to a non-loopback address that was not contacted.
 
-What was not run:
+What was not run, by AT-005 or by these steps:
 
-- Any machine other than the one host, and any network between machines. Everything ran on loopback.
-- A certificate per server with real host names, and a SAN with a public DNS name.
-- `listen` on a non-loopback address.
+- Real separate hosts, and any physical network between hosts: the AT-005 containers share one host, and the steps above ran on loopback.
+- Clock drift between hosts.
+- Certificates with public DNS names in the SAN (AT-005 used IP addresses), and a certificate per server issued by a real CA.
 - A client list where one server is down, and a revocation with one server down.
-- Two `mashctl` machines used for signing in turn, or at once, against one account.
-- An endpoint session (`mash serve`) running on a third machine over TLS and sending mail.
 - Certificate expiry and renewal, and a server that needs a restart to take a new certificate.
 - The OpenSSL commands with versions other than 4.1.0.
