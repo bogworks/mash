@@ -69,7 +69,7 @@ If `MASH_URL`, `MASH_OWNER` or other `MASH_*` variables are set from another set
 
 ```sh
 go install github.com/bogworks/mash/cmd/mashctl@latest   # mashctl is not in the release assets
-mashctl init --local --owner alice --start                # a NATS server that only this machine can reach, plus keys and credentials
+mashctl init --local --owner alice --start                # a TLS-only NATS server that only this machine can reach, plus a local CA, keys and credentials
 ```
 
 An agent is an endpoint with an address of three tokens, `owner.group.instance`. Here the owner is `alice`, the group is `dev` and the instances are `design` and `review`, so the addresses are `alice.dev.design` and `alice.dev.review`. A group has no default: you always name it.
@@ -116,7 +116,7 @@ When you are done, stop the local server: `D=<the server directory that mashctl 
 
 `MASH_OWNER` (or `owner` in `config.json`), `MASH_GROUP` (no default and no config key; a session without it stops with `group_missing`, exit 2) and `MASH_NAME`, the instance, name the endpoint a session runs as. Each endpoint has a directory record and a credentials ("creds") file named `<owner>.<group>.<instance>.creds` that proves who it is; `mashctl endpoint create` makes both. Recipients in `mash send` are written `owner.group.instance` or the flat key `owner_group_instance`; a bare name is refused.
 
-`mashctl init --local` makes a server on port 4222 by default; if something else uses 4222, pass `--port N` to pick another.
+`mashctl init --local` makes a server on port 4222 by default; if something else uses 4222, pass `--port N` to pick another. The server uses TLS with a certificate from a local certificate authority that `init --local` makes (`ca.pem` in the server directory); the `url` in `config.json` is `tls://127.0.0.1:4222` and `tls_ca` names `ca.pem`, so `mashctl` and endpoints on this host need no extra setting.
 
 `--channels` and `--dangerously-load-development-channels` are Claude Code research-preview flags. They are not shown in `claude --help`, but they work.
 
