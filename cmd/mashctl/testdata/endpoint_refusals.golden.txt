@@ -751,8 +751,8 @@ usage: mashctl endpoint reissue ADDRESS (--public-key FILE | --make-key) [--jwt-
   Errors include superseded: another reissue changed the endpoint's key while this one ran, so the file this run wrote
   was removed; run the command again.
   Refusals include reissue_busy: another reissue of ADDRESS holds the lock (its pid and host are named when readable). A lock
-  left by a killed run on this host is reclaimed automatically; a lock whose owner is on another host, or that names no
-  owner, is not: if that run is gone, remove the directory named in the refusal.
+  left by a killed run on this host (same machine and process namespace) is reclaimed automatically; other locks are
+  not: if that run is gone, remove the directory named in the refusal.
   exit codes: 0 done, planned or unchanged, 1 refused, 2 usage, 5 partial (bulk), 6 error
 Example:
   mashctl endpoint reissue alice/dev/design --public-key design.pub
@@ -812,8 +812,8 @@ usage: mashctl endpoint reissue ADDRESS (--public-key FILE | --make-key) [--jwt-
   Errors include superseded: another reissue changed the endpoint's key while this one ran, so the file this run wrote
   was removed; run the command again.
   Refusals include reissue_busy: another reissue of ADDRESS holds the lock (its pid and host are named when readable). A lock
-  left by a killed run on this host is reclaimed automatically; a lock whose owner is on another host, or that names no
-  owner, is not: if that run is gone, remove the directory named in the refusal.
+  left by a killed run on this host (same machine and process namespace) is reclaimed automatically; other locks are
+  not: if that run is gone, remove the directory named in the refusal.
   exit codes: 0 done, planned or unchanged, 1 refused, 2 usage, 5 partial (bulk), 6 error
 Example:
   mashctl endpoint reissue alice/dev/design --public-key design.pub
@@ -1172,7 +1172,7 @@ stdout:
 == reissue_reissue_busy
 exit 1
 stderr:
-mashctl: endpoint reissue: refused (reissue_busy): another reissue of o.g.a is running (pid <PID> on <HOST>); a lock left by a killed run on this host is reclaimed automatically; a lock whose owner is on another host, or that names no owner, is not; if that run is gone, remove the directory <LOCKPATH>
+mashctl: endpoint reissue: refused (reissue_busy): another reissue of o.g.a is running (pid <PID> on <HOST>); a lock left by a killed run on this host (same machine and process namespace) is reclaimed automatically; other locks are not; if that run is gone, remove the directory <LOCKPATH>
 stdout:
 {
   "schema": "mashctl-endpoint@1",
@@ -1191,7 +1191,7 @@ stdout:
   "next_steps": [],
   "refusal": {
     "code": "reissue_busy",
-    "detail": "another reissue of o.g.a is running (pid <PID> on <HOST>); a lock left by a killed run on this host is reclaimed automatically; a lock whose owner is on another host, or that names no owner, is not; if that run is gone, remove the directory <LOCKPATH>"
+    "detail": "another reissue of o.g.a is running (pid <PID> on <HOST>); a lock left by a killed run on this host (same machine and process namespace) is reclaimed automatically; other locks are not; if that run is gone, remove the directory <LOCKPATH>"
   }
 }
 == reissue_write
@@ -1424,8 +1424,8 @@ usage: mashctl endpoint reissue ADDRESS (--public-key FILE | --make-key) [--jwt-
   Errors include superseded: another reissue changed the endpoint's key while this one ran, so the file this run wrote
   was removed; run the command again.
   Refusals include reissue_busy: another reissue of ADDRESS holds the lock (its pid and host are named when readable). A lock
-  left by a killed run on this host is reclaimed automatically; a lock whose owner is on another host, or that names no
-  owner, is not: if that run is gone, remove the directory named in the refusal.
+  left by a killed run on this host (same machine and process namespace) is reclaimed automatically; other locks are
+  not: if that run is gone, remove the directory named in the refusal.
   exit codes: 0 done, planned or unchanged, 1 refused, 2 usage, 5 partial (bulk), 6 error
 Example:
   mashctl endpoint reissue alice/dev/design --public-key design.pub
@@ -1484,8 +1484,8 @@ usage: mashctl endpoint reissue ADDRESS (--public-key FILE | --make-key) [--jwt-
   Errors include superseded: another reissue changed the endpoint's key while this one ran, so the file this run wrote
   was removed; run the command again.
   Refusals include reissue_busy: another reissue of ADDRESS holds the lock (its pid and host are named when readable). A lock
-  left by a killed run on this host is reclaimed automatically; a lock whose owner is on another host, or that names no
-  owner, is not: if that run is gone, remove the directory named in the refusal.
+  left by a killed run on this host (same machine and process namespace) is reclaimed automatically; other locks are
+  not: if that run is gone, remove the directory named in the refusal.
   exit codes: 0 done, planned or unchanged, 1 refused, 2 usage, 5 partial (bulk), 6 error
 Example:
   mashctl endpoint reissue alice/dev/design --public-key design.pub
@@ -1544,8 +1544,8 @@ usage: mashctl endpoint reissue ADDRESS (--public-key FILE | --make-key) [--jwt-
   Errors include superseded: another reissue changed the endpoint's key while this one ran, so the file this run wrote
   was removed; run the command again.
   Refusals include reissue_busy: another reissue of ADDRESS holds the lock (its pid and host are named when readable). A lock
-  left by a killed run on this host is reclaimed automatically; a lock whose owner is on another host, or that names no
-  owner, is not: if that run is gone, remove the directory named in the refusal.
+  left by a killed run on this host (same machine and process namespace) is reclaimed automatically; other locks are
+  not: if that run is gone, remove the directory named in the refusal.
   exit codes: 0 done, planned or unchanged, 1 refused, 2 usage, 5 partial (bulk), 6 error
 Example:
   mashctl endpoint reissue alice/dev/design --public-key design.pub
@@ -1756,8 +1756,8 @@ stdout:
 == bulk_reissue_busy
 exit 1
 stderr:
-mashctl: endpoint reissue o/g/a: reissue_busy: another reissue of o.g.a is running (pid <PID> on <HOST>); a lock left by a killed run on this host is reclaimed automatically; a lock whose owner is on another host, or that names no owner, is not; if that run is gone, remove the directory <LOCKPATH>
-mashctl: endpoint reissue: refused (reissue_busy): another reissue of o.g.a is running (pid <PID> on <HOST>); a lock left by a killed run on this host is reclaimed automatically; a lock whose owner is on another host, or that names no owner, is not; if that run is gone, remove the directory <LOCKPATH>
+mashctl: endpoint reissue o/g/a: reissue_busy: another reissue of o.g.a is running (pid <PID> on <HOST>); a lock left by a killed run on this host (same machine and process namespace) is reclaimed automatically; other locks are not; if that run is gone, remove the directory <LOCKPATH>
+mashctl: endpoint reissue: refused (reissue_busy): another reissue of o.g.a is running (pid <PID> on <HOST>); a lock left by a killed run on this host (same machine and process namespace) is reclaimed automatically; other locks are not; if that run is gone, remove the directory <LOCKPATH>
 stdout:
 {
   "schema": "mashctl-endpoint-bulk@1",
@@ -1784,7 +1784,7 @@ stdout:
   "next_steps": [],
   "refusal": {
     "code": "reissue_busy",
-    "detail": "another reissue of o.g.a is running (pid <PID> on <HOST>); a lock left by a killed run on this host is reclaimed automatically; a lock whose owner is on another host, or that names no owner, is not; if that run is gone, remove the directory <LOCKPATH>"
+    "detail": "another reissue of o.g.a is running (pid <PID> on <HOST>); a lock left by a killed run on this host (same machine and process namespace) is reclaimed automatically; other locks are not; if that run is gone, remove the directory <LOCKPATH>"
   }
 }
 == bulk_future_issued

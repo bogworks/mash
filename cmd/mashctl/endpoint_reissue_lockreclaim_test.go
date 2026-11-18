@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -34,7 +35,7 @@ func writeLockOwner(t *testing.T, path string, o epOwner) {
 // holdLock makes a lock at path held by this process, as epLock would.
 func holdLock(t *testing.T, path string) {
 	t.Helper()
-	writeLockOwner(t, path, epOwner{os.Getpid(), hostName(t), time.Now().Unix()})
+	writeLockOwner(t, path, epOwner{os.Getpid(), hostName(t), epHostID(), time.Now().Unix()})
 }
 
 // deadPid is the pid of a process that has run and been waited for.
@@ -58,17 +59,31 @@ func TestEpLockReclaimRules(t *testing.T) {
 	now := time.Now()
 	old := now.Add(-time.Hour).Unix()
 	dead := deadPid(t)
+	id := epHostID()
+	if id == "" {
+		t.Skip("no machine and namespace id on this platform")
+	}
 	cases := []struct {
 		name      string
 		setup     func(t *testing.T, lock string)
 		reclaimed bool
 	}{
-		{"dead pid on this host", func(t *testing.T, l string) { writeLockOwner(t, l, epOwner{dead, host, now.Unix()}) }, true},
-		{"live pid on this host", func(t *testing.T, l string) { writeLockOwner(t, l, epOwner{os.Getpid(), host, now.Unix()}) }, false},
-		{"other host, recent", func(t *testing.T, l string) { writeLockOwner(t, l, epOwner{dead, host + "-other", now.Unix()}) }, false},
-		{"other host, old start", func(t *testing.T, l string) { writeLockOwner(t, l, epOwner{dead, host + "-other", old}) }, false},
-		{"live pid with an old start time on this host", func(t *testing.T, l string) { writeLockOwner(t, l, epOwner{os.Getpid(), host, old}) }, false},
-		{"dead pid with an old start time on this host", func(t *testing.T, l string) { writeLockOwner(t, l, epOwner{dead, host, old}) }, true},
+		{"dead pid on this host", func(t *testing.T, l string) { writeLockOwner(t, l, epOwner{dead, host, id, now.Unix()}) }, true},
+		{"live pid on this host", func(t *testing.T, l string) { writeLockOwner(t, l, epOwner{os.Getpid(), host, id, now.Unix()}) }, false},
+		{"other host, recent", func(t *testing.T, l string) { writeLockOwner(t, l, epOwner{dead, host + "-other", id, now.Unix()}) }, false},
+		{"other host, old start", func(t *testing.T, l string) { writeLockOwner(t, l, epOwner{dead, host + "-other", id, old}) }, false},
+		{"live pid with an old start time on this host", func(t *testing.T, l string) { writeLockOwner(t, l, epOwner{os.Getpid(), host, id, old}) }, false},
+		{"dead pid with an old start time on this host", func(t *testing.T, l string) { writeLockOwner(t, l, epOwner{dead, host, id, old}) }, true},
+		{"same host, dead pid, same id", func(t *testing.T, l string) { writeLockOwner(t, l, epOwner{dead, host, id, now.Unix()}) }, true},
+		{"same host, dead pid, different id", func(t *testing.T, l string) { writeLockOwner(t, l, epOwner{dead, host, id + "x", now.Unix()}) }, false},
+		{"same host, dead pid, empty id", func(t *testing.T, l string) { writeLockOwner(t, l, epOwner{dead, host, "", now.Unix()}) }, false},
+		{"same host, dead pid, no id field", func(t *testing.T, l string) {
+			if err := os.Mkdir(l, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			txt := fmt.Sprintf("pid=%d host=%s start=%d\n", dead, host, now.Unix())
+			os.WriteFile(filepath.Join(l, "owner"), []byte(txt), 0o600)
+		}, false},
 		{"existing empty directory (older mash lock), fresh", func(t *testing.T, l string) {
 			if err := os.Mkdir(l, 0o700); err != nil {
 				t.Fatal(err)
@@ -151,7 +166,7 @@ func TestEpLockReclaimConcurrent(t *testing.T) {
 	epLockWait = 20 * time.Second
 	t.Cleanup(func() { epLockWait = prev })
 	lock := filepath.Join(t.TempDir(), "x.creds.lock")
-	writeLockOwner(t, lock, epOwner{deadPid(t), hostName(t), time.Now().Unix()})
+	writeLockOwner(t, lock, epOwner{deadPid(t), hostName(t), epHostID(), time.Now().Unix()})
 	var inside, maxInside, entered atomic.Int32
 	var wg sync.WaitGroup
 	errs := make(chan error, 8)
@@ -193,7 +208,7 @@ func TestEpUnlockLeavesReplacedLock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	other := epOwner{os.Getpid() + 1, hostName(t), time.Now().Unix() + 7}
+	other := epOwner{os.Getpid() + 1, hostName(t), epHostID(), time.Now().Unix() + 7}
 	if err := os.WriteFile(filepath.Join(lock, "owner"), []byte(other.String()), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -212,32 +227,61 @@ func TestEpUnlockLeavesReplacedLock(t *testing.T) {
 	}
 }
 
-func TestEpReclaimPutsBackReplacedLock(t *testing.T) {
-	if epPidState(os.Getpid()) < 0 {
-		t.Skip("no process check on this platform")
+func TestEpReclaimLeavesReplacedLockAside(t *testing.T) {
+	if epPidState(os.Getpid()) < 0 || epHostID() == "" {
+		t.Skip("no process check or host id on this platform")
 	}
-	prev := epLockWait
-	epLockWait = 200 * time.Millisecond
-	t.Cleanup(func() { epLockWait = prev })
 	lock := filepath.Join(t.TempDir(), "x.creds.lock")
-	writeLockOwner(t, lock, epOwner{deadPid(t), hostName(t), time.Now().Unix()})
+	writeLockOwner(t, lock, epOwner{deadPid(t), hostName(t), epHostID(), time.Now().Unix()})
 	var fresh epOwner
 	epReclaimAfterJudge = func() {
 		// The holder finished and a new run took the path between the judgement and the rename.
 		epReclaimAfterJudge = nil
 		os.RemoveAll(lock)
-		fresh = epOwner{os.Getpid(), hostName(t), time.Now().Unix()}
+		fresh = epOwner{os.Getpid(), hostName(t), epHostID(), time.Now().Unix()}
 		writeLockOwner(t, lock, fresh)
 	}
 	t.Cleanup(func() { epReclaimAfterJudge = nil })
 	epReclaim(lock)
-	if _, raw, ok := epReadOwner(lock); !ok || raw != fresh.String() {
-		t.Fatalf("the new lock did not survive: %q %v", raw, ok)
+	// The path is not touched after the rename: the moved directory is not put back and not removed.
+	if _, err := os.Lstat(lock); err == nil {
+		t.Fatal("reclaim put something at the lock path")
 	}
-	if left, _ := filepath.Glob(lock + ".stale.*"); len(left) != 0 {
-		t.Errorf("stale copies left: %v", left)
+	left, _ := filepath.Glob(lock + ".stale.*")
+	if len(left) != 1 {
+		t.Fatalf("want the moved-aside copy left, got %v", left)
 	}
-	if _, err := epLock(lock); !errors.Is(err, errEpBusy) {
-		t.Errorf("the second owner's lock is not held: %v", err)
+	if _, raw, _ := epReadOwner(left[0]); raw != fresh.String() {
+		t.Errorf("moved-aside copy holds %q", raw)
+	}
+}
+
+func TestEpReclaimKeepsThirdHolderDirectory(t *testing.T) {
+	if epPidState(os.Getpid()) < 0 || epHostID() == "" {
+		t.Skip("no process check or host id on this platform")
+	}
+	lock := filepath.Join(t.TempDir(), "x.creds.lock")
+	writeLockOwner(t, lock, epOwner{deadPid(t), hostName(t), epHostID(), time.Now().Unix()})
+	epReclaimAfterJudge = func() {
+		// A new run replaced the judged lock.
+		epReclaimAfterJudge = nil
+		os.RemoveAll(lock)
+		writeLockOwner(t, lock, epOwner{os.Getpid(), hostName(t), epHostID(), time.Now().Unix()})
+	}
+	epReclaimAfterMove = func() {
+		// A third run makes its lock directory at the freed path before the owner text is read again.
+		epReclaimAfterMove = nil
+		if err := os.Mkdir(lock, 0o700); err != nil {
+			t.Error(err)
+		}
+	}
+	t.Cleanup(func() { epReclaimAfterJudge, epReclaimAfterMove = nil, nil })
+	epReclaim(lock)
+	ents, err := os.ReadDir(lock)
+	if err != nil || len(ents) != 0 {
+		t.Errorf("third holder's directory was replaced or changed: %v %v", ents, err)
+	}
+	if left, _ := filepath.Glob(lock + ".stale.*"); len(left) != 1 {
+		t.Errorf("want the moved-aside copy left, got %v", left)
 	}
 }

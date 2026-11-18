@@ -505,7 +505,7 @@ func TestEndpointReissueMakeKeyKilledAfterEnroll(t *testing.T) {
 		t.Fatal("creds changed before the kill point")
 	}
 	// the lock a killed run leaves: its owner is a process that no longer runs; the rerun reclaims it
-	writeLockOwner(t, h.creds(a)+".lock", epOwner{deadPid(t), hostName(t), time.Now().Unix()})
+	writeLockOwner(t, h.creds(a)+".lock", epOwner{deadPid(t), hostName(t), epHostID(), time.Now().Unix()})
 	if _, se, code := h.run(args...); code != 0 {
 		t.Fatalf("rerun %d %q", code, se)
 	}
