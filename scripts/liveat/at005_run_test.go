@@ -106,3 +106,35 @@ func TestAT005RecordLocalAndNoHostname(t *testing.T) {
 		}
 	}
 }
+
+// A run whose output directory cannot be written must not pass AT-005: Finish records the capture error.
+func TestAT5FinishFailsOnCaptureError(t *testing.T) {
+	for _, tc := range []struct {
+		out  string
+		pass bool
+	}{{t.TempDir(), true}, {filepath.Join(t.TempDir(), "no-such-dir"), false}} {
+		dir := t.TempDir()
+		r := &Run{Dir: dir, Out: tc.out, Runner: &Runner{Out: tc.out, Cwd: dir}, pids: map[int]string{}}
+		hs, err := Local{}.Open(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := &At5{R: r, Hosts: hs, C: &Checks{}, secrets: map[string][]byte{}}
+		h, _ := NewHome(filepath.Join(dir, "h"))
+		r.Runner.Run("echo", []string{tool(t, "echo"), "hi"}, BuildEnv(h, nil), "")
+		s.Finish()
+		var c *Assertion
+		for _, a := range s.C.All() {
+			if strings.Contains(a.Name, "captured completely") {
+				a := a
+				c = &a
+			}
+		}
+		if c == nil || c.Pass != tc.pass {
+			t.Fatalf("out %s: check %+v", tc.out, c)
+		}
+		if !tc.pass && !strings.Contains(c.Detail, "01-echo.out") {
+			t.Errorf("detail %q", c.Detail)
+		}
+	}
+}

@@ -39,7 +39,7 @@ func at005Main(args []string, stdout, stderr io.Writer) int {
 	case "local":
 		hs = Local{}
 	case "podman":
-		hs = &Podman{}
+		hs = &Podman{SubnetBase: o.subnetBase}
 	}
 	if o.recordOut != "" { // refuse early, before anything is built
 		if _, err := os.Lstat(o.recordOut); err == nil {
@@ -130,8 +130,8 @@ func at005Main(args []string, stdout, stderr io.Writer) int {
 const at005Usage = "usage: liveat at005 [--dry-setup] [--hosts podman --run-by manual|ci --host-label LABEL] [--hosts local] [--keep] [--record-out FILE] | liveat at005-cleanup [--label mash-at005]"
 
 type at005Opts struct {
-	dry, keep                          bool
-	hosts, runBy, hostLabel, recordOut string
+	dry, keep                                      bool
+	hosts, runBy, hostLabel, recordOut, subnetBase string
 }
 
 // hostLabelOK: letters, digits, dashes and dots, 1 to 40 characters. The label is never looked up.
@@ -157,6 +157,7 @@ func parseAt005(args []string) (at005Opts, error) {
 	fs.StringVar(&o.runBy, "run-by", "", "")
 	fs.StringVar(&o.hostLabel, "host-label", "", "")
 	fs.StringVar(&o.recordOut, "record-out", "", "")
+	fs.StringVar(&o.subnetBase, "subnet-base", "", "")
 	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
 		return o, errors.New("bad arguments")
 	}
@@ -165,10 +166,16 @@ func parseAt005(args []string) (at005Opts, error) {
 		if o.runBy != "manual" && o.runBy != "ci" {
 			return o, errors.New("--run-by is required with --hosts podman and must be manual or ci")
 		}
+		if o.subnetBase != "" && !validSubnetBase(o.subnetBase) {
+			return o, errors.New("--subnet-base must be a private IPv4 /16 prefix as A.B: 10.x, 172.16 to 172.31.x or 192.168")
+		}
 		if !hostLabelOK(o.hostLabel) {
 			return o, errors.New("--host-label is required with --hosts podman: letters, digits, dashes and dots only, at most 40 characters")
 		}
 	case "local":
+		if o.subnetBase != "" {
+			return o, errors.New("--subnet-base is for --hosts podman only")
+		}
 		if o.runBy != "" || o.hostLabel != "" {
 			return o, errors.New("--run-by and --host-label are for --hosts podman only")
 		}
@@ -748,6 +755,8 @@ func (s *At5) Finish() {
 	}
 	s.check("every process the harness started is stopped by its recorded PID and ports 14222-14224, 16222-16224 and 18222 are free", free, strings.Join(s.notes, "; "))
 	s.search()
+	ce := s.R.Runner.CaptureErrors()
+	s.check("INV-001: every command's output was captured completely (no capture or read error)", len(ce) == 0, strings.Join(ce, "; "))
 }
 
 func (s *At5) sessions() []*Proc {

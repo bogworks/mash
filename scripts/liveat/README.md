@@ -51,7 +51,7 @@ What `--hosts podman` makes (all of it labelled `mash-at005=<run id>`, all of it
   ENTRYPOINT []
   ```
 
-- a network `mash-at005-<run id>` on `10.89.<r>.0/24`, `r` random and not used by any existing podman network;
+- a network `mash-at005-<run id>` on `10.89.<r>.0/24` (or `<A.B>.<r>.0/24` with `--subnet-base A.B`, a private /16 such as `10.x`, `172.16-31.x` or `192.168`), `r` random and overlapping no podman network, no host route (`ip -4 route show`) and no host interface address;
 - three containers `mash-at005-<run id>-m1` to `-m3` at `10.89.<r>.11` to `.13`. Each has its own filesystem
   (HOME is `/node`), no mounted host directory and no published port. The NATS ports 14222-14224 (clients),
   16222-16224 (routes) and 18222 (the monitor of M1) are inside each node's own network namespace, and the certificates
@@ -75,7 +75,7 @@ go run ./scripts/liveat at005-cleanup --label mash-at005
 
 It removes the containers, networks and images carrying the label key `mash-at005` (any run id), found with
 `podman ps -a`, `podman network ls` and `podman images` filtered by that label, and prints each thing it removed. It
-touches nothing without the label.
+touches nothing without the label. `--label` is optional and accepts only that exact key; any other key or a value (`a=b`) is a usage error (exit 2).
 
 ### Not checked without podman
 

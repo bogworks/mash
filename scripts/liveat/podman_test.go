@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -333,7 +334,7 @@ func TestPodmanDynamicNatsServerFails(t *testing.T) {
 
 func TestPodmanFreeOctetAvoidsExistingNetworks(t *testing.T) {
 	f := podmanFake(nil)
-	c := &podCtx{rt: f}
+	c := &podCtx{rt: f, addrs: noAddrs}
 	// 10.88.0.0/16 and 10.89.5.0/24 exist: picks 4 (octet 5) is refused, 0 (octet 1) is free.
 	picks := []int{4, 0}
 	r, err := freeOctet(c, func(int) int { v := picks[0]; picks = picks[1:]; return v })
@@ -349,7 +350,7 @@ func TestPodmanFreeOctetAvoidsExistingNetworks(t *testing.T) {
 		}
 		return "10.0.0.0/8 \n", "", 0, true
 	}
-	if _, err := freeOctet(&podCtx{rt: f}, func(int) int { return 0 }); err == nil {
+	if _, err := freeOctet(&podCtx{rt: f, addrs: noAddrs}, func(int) int { return 0 }); err == nil {
 		t.Fatal("a /8 network was not seen as a clash")
 	}
 }
@@ -499,4 +500,103 @@ func TestPodmanIsAHostsValue(t *testing.T) {
 	var _ Preflighter = &Podman{}
 	var _ Host = &podHost{}
 	var _ Host = &localHost{}
+}
+
+func noAddrs() ([]net.Addr, error) { return nil, nil }
+
+func routeFake(routes string) *fakeRT {
+	return podmanFake(func(c Cmd) (string, string, int, bool) {
+		if strings.HasPrefix(strings.Join(c.Argv, " "), "ip -4 route show") {
+			return routes, "", 0, true
+		}
+		return "", "", 0, false
+	})
+}
+
+func TestPodmanFreeOctetAvoidsHostRoutes(t *testing.T) {
+	// a route for the whole default /16 leaves nothing under it, with a message that names the flag
+	f := routeFake("default via 192.0.2.1 dev eth0\n10.89.0.0/16 dev tun0 scope link\n")
+	_, err := freeOctet(&podCtx{rt: f, addrs: noAddrs}, func(int) int { return 0 })
+	if err == nil || !strings.Contains(err.Error(), "--subnet-base") || !strings.Contains(err.Error(), "10.89.x.0/24") {
+		t.Fatalf("%v", err)
+	}
+	// the same table leaves another base free
+	r, err := freeOctet(&podCtx{rt: f, addrs: noAddrs, base: "172.20"}, func(int) int { return 6 })
+	if err != nil || r != 7 {
+		t.Fatal(r, err)
+	}
+	// a single /24 route and a host route are skipped (a fallback scan finds the first free octet)
+	f = routeFake("10.89.1.0/24 dev x\n10.89.2.9 dev y\nblackhole 10.89.3.0/24\n")
+	r, err = freeOctet(&podCtx{rt: f, addrs: noAddrs}, func(int) int { return 0 })
+	if err != nil || r != 4 {
+		t.Fatal(r, err)
+	}
+	// no ip command: ignored
+	f = podmanFake(func(c Cmd) (string, string, int, bool) {
+		if c.Argv[0] == "ip" {
+			return "", "", -1, true
+		}
+		return "", "", 0, false
+	})
+	if _, err := freeOctet(&podCtx{rt: f, addrs: noAddrs}, func(int) int { return 0 }); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPodmanFreeOctetAvoidsHostAddresses(t *testing.T) {
+	f := podmanFake(nil)
+	addrs := func() ([]net.Addr, error) {
+		return []net.Addr{&net.IPNet{IP: net.ParseIP("10.89.1.77"), Mask: net.CIDRMask(24, 32)}, &net.IPNet{IP: net.ParseIP("fe80::1"), Mask: net.CIDRMask(64, 128)}}, nil
+	}
+	picks := []int{0, 1}
+	r, err := freeOctet(&podCtx{rt: f, addrs: addrs}, func(int) int { v := picks[0]; picks = picks[1:]; return v })
+	if err != nil || r != 2 {
+		t.Fatal(r, err)
+	}
+}
+
+func TestSubnetBaseValidation(t *testing.T) {
+	for _, ok := range []string{"10.89", "10.0", "172.16", "172.31", "192.168"} {
+		if !validSubnetBase(ok) {
+			t.Errorf("%s refused", ok)
+		}
+	}
+	for _, bad := range []string{"", "10", "10.89.1", "11.1", "172.15", "172.32", "192.169", "10.256", "10.x", "10.08", "8.8"} {
+		if validSubnetBase(bad) {
+			t.Errorf("%s accepted", bad)
+		}
+	}
+	if _, err := parseAt005([]string{"--hosts", "podman", "--run-by", "manual", "--host-label", "x", "--subnet-base", "8.8"}); err == nil {
+		t.Error("a public base is accepted")
+	}
+	if o, err := parseAt005([]string{"--hosts", "podman", "--run-by", "manual", "--host-label", "x", "--subnet-base", "172.20"}); err != nil || o.subnetBase != "172.20" {
+		t.Error(o, err)
+	}
+	if _, err := parseAt005([]string{"--hosts", "local", "--subnet-base", "10.1"}); err == nil {
+		t.Error("--subnet-base with local")
+	}
+	var so, se strings.Builder
+	if code := at005Main([]string{"--hosts", "podman", "--run-by", "manual", "--host-label", "x", "--subnet-base", "1.2"}, &so, &se); code != 2 {
+		t.Errorf("exit %d", code)
+	}
+	if _, err := (&Podman{Runner: podmanFake(nil), LookPath: func(string) (string, error) { return "/usr/bin/podman", nil }, SubnetBase: "8.8"}).Open(newPodRun(t)); err == nil || !strings.Contains(err.Error(), "private") {
+		t.Errorf("%v", err)
+	}
+}
+
+func TestAT005CleanupOnlyOwnLabel(t *testing.T) {
+	look := func(string) (string, error) { return "/usr/bin/podman", nil }
+	f := &fakeRT{}
+	var so, se strings.Builder
+	for _, bad := range [][]string{{"--label", "other-project"}, {"--label", "mash-at005=x"}, {"--label", "mash-at0050"}, {"--label", ""}} {
+		if at005Cleanup(bad, &so, &se, f, look) != 2 {
+			t.Errorf("%v accepted", bad)
+		}
+	}
+	if len(f.calls) != 0 {
+		t.Errorf("it ran %v", f.lines())
+	}
+	if !strings.Contains(se.String(), "accepts only") {
+		t.Errorf("message %q", se.String())
+	}
 }

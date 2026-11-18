@@ -26,7 +26,8 @@ import (
 //
 //   - The image is FROM scratch (Containerfile.at005): mash, mashctl, nats-server and nodeinit as static binaries in
 //     /bin. Nothing is pulled at run time.
-//   - One private network with a /24 inside 10.89.0.0/16 (a third octet that no existing podman network uses); the
+//   - One private network with a /24 inside 10.89.0.0/16 by default, or the /16 of --subnet-base (a third octet that no
+//     podman network, host route or host address overlaps); the
 //     nodes have fixed addresses .11, .12 and .13, so certificates carry the node address before the node starts.
 //     No port is published: the ports in Ports are private to each node's network namespace.
 //   - Each node has its own filesystem (the container's own layer, under /node). Nothing is shared and no host
@@ -99,6 +100,30 @@ type Podman struct {
 	Runner   CmdRunner
 	LookPath func(string) (string, error)
 	Pick     func(n int) int // a random number in [0, n): the third octet of the network
+	// SubnetBase is the private /16 the test network is taken from, "A.B" (default 10.89).
+	SubnetBase string
+	// HostAddrs lists the host's own interface addresses (default net.InterfaceAddrs).
+	HostAddrs func() ([]net.Addr, error)
+}
+
+// defaultSubnetBase is the /16 of the test network when --subnet-base is not given.
+const defaultSubnetBase = "10.89"
+
+// validSubnetBase accepts "A.B" naming a private IPv4 /16: 10.x, 172.16 to 172.31 or 192.168.
+func validSubnetBase(b string) bool {
+	parts := strings.Split(b, ".")
+	if len(parts) != 2 {
+		return false
+	}
+	n := [2]int{}
+	for i, s := range parts {
+		v, err := strconv.Atoi(s)
+		if err != nil || v < 0 || v > 255 || strconv.Itoa(v) != s {
+			return false
+		}
+		n[i] = v
+	}
+	return n[0] == 10 || (n[0] == 172 && n[1] >= 16 && n[1] <= 31) || (n[0] == 192 && n[1] == 168)
 }
 
 func (*Podman) Name() string { return "podman" }
@@ -138,6 +163,8 @@ type podCtx struct {
 	tmp     string // run directory for the temporary files of Put and Get
 	n       atomic.Int64
 	execFn  func(name string, argv []string) Result
+	base    string // the /16 of the test network, "A.B"
+	addrs   func() ([]net.Addr, error)
 }
 
 func containerName(id string, node int) string { return "mash-at005-" + id + "-m" + strconv.Itoa(node) }
@@ -160,7 +187,13 @@ func (p *Podman) Open(r *Run) ([]Host, error) {
 	if rt == nil {
 		rt = execRunner{}
 	}
-	c := &podCtx{r: r, rt: rt, id: r.ID, network: "mash-at005-" + r.ID, image: labelKey + ":" + r.ID}
+	c := &podCtx{r: r, rt: rt, id: r.ID, network: "mash-at005-" + r.ID, image: labelKey + ":" + r.ID, base: p.SubnetBase, addrs: p.HostAddrs}
+	if c.base == "" {
+		c.base = defaultSubnetBase
+	}
+	if !validSubnetBase(c.base) {
+		return nil, fmt.Errorf("subnet base %q is not a private IPv4 /16 (10.x, 172.16-31.x or 192.168)", c.base)
+	}
 	c.execFn = func(name string, argv []string) Result { return r.Runner.RunIn(r.Dir, name, argv, podmanEnv(), "") }
 	out, err := c.do("info", "--format", "{{.Host.Security.Rootless}}")
 	if err != nil {
@@ -193,13 +226,13 @@ func (p *Podman) Open(r *Run) ([]Host, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := c.do("network", "create", "--subnet", fmt.Sprintf("10.89.%d.0/24", octet), "--label", labelKey+"="+r.ID, c.network); err != nil {
+	if _, err := c.do("network", "create", "--subnet", fmt.Sprintf("%s.%d.0/24", c.base, octet), "--label", labelKey+"="+r.ID, c.network); err != nil {
 		return nil, err
 	}
 	var hs []Host
 	for i, ports := range DefaultPorts {
 		n := i + 1
-		h := &podHost{c: c, role: "M" + strconv.Itoa(n), name: containerName(r.ID, n), addr: fmt.Sprintf("10.89.%d.%d", octet, 10+n), ports: ports,
+		h := &podHost{c: c, role: "M" + strconv.Itoa(n), name: containerName(r.ID, n), addr: fmt.Sprintf("%s.%d.%d", c.base, octet, 10+n), ports: ports,
 			home: Home{Dir: nodeHome, Config: nodeHome + "/config", Keys: nodeHome + "/keys", State: nodeHome + "/state", Tmp: nodeHome + "/tmp"}}
 		if _, err := c.do("run", "-d", "--name", h.name, "--network", c.network, "--ip", h.addr, "--label", labelKey+"="+r.ID, "--read-only=false", c.image, "/bin/nodeinit", "serve"); err != nil {
 			return nil, err
@@ -263,8 +296,50 @@ func checkStatic(path string) error {
 	return nil
 }
 
-// freeOctet picks a third octet r in 1..254 such that 10.89.r.0/24 overlaps no existing podman network.
+// hostPrefixes is every IPv4 prefix the host itself knows: its interface addresses and, when `ip` exists, its routes.
+// A missing or failing `ip` is ignored. The default route is not a prefix to avoid.
+func hostPrefixes(c *podCtx) []*net.IPNet {
+	var out []*net.IPNet
+	addrs := c.addrs
+	if addrs == nil {
+		addrs = net.InterfaceAddrs
+	}
+	if as, err := addrs(); err == nil {
+		for _, a := range as {
+			if n, ok := a.(*net.IPNet); ok && n.IP.To4() != nil {
+				out = append(out, &net.IPNet{IP: n.IP.To4().Mask(n.Mask), Mask: n.Mask})
+			}
+		}
+	}
+	so, _, code := c.rt.Run(Cmd{Argv: []string{"ip", "-4", "route", "show"}})
+	if code != 0 {
+		return out
+	}
+	for _, line := range strings.Split(so, "\n") {
+		for _, f := range strings.Fields(line) {
+			if f == "default" {
+				break
+			}
+			if _, n, err := net.ParseCIDR(f); err == nil {
+				out = append(out, n)
+				break
+			}
+			if ip := net.ParseIP(f); ip != nil && ip.To4() != nil {
+				out = append(out, &net.IPNet{IP: ip.To4(), Mask: net.CIDRMask(32, 32)})
+				break
+			}
+		}
+	}
+	return out
+}
+
+// freeOctet picks a third octet r in 1..254 such that <base>.r.0/24 overlaps no podman network, no host route and no
+// host interface address.
 func freeOctet(c *podCtx, pick func(int) int) (int, error) {
+	base := c.base
+	if base == "" {
+		base = defaultSubnetBase
+	}
 	out, err := c.do("network", "ls", "--format", "{{.Name}}")
 	if err != nil {
 		return 0, err
@@ -281,20 +356,27 @@ func freeOctet(c *podCtx, pick func(int) int) (int, error) {
 			}
 		}
 	}
-	for try := 0; try < 200; try++ {
-		r := 1 + pick(254)
-		_, cand, _ := net.ParseCIDR(fmt.Sprintf("10.89.%d.0/24", r))
-		clash := false
+	used = append(used, hostPrefixes(c)...)
+	free := func(r int) bool {
+		_, cand, _ := net.ParseCIDR(fmt.Sprintf("%s.%d.0/24", base, r))
 		for _, u := range used {
 			if u.Contains(cand.IP) || cand.Contains(u.IP) {
-				clash = true
+				return false
 			}
 		}
-		if !clash {
+		return true
+	}
+	for try := 0; try < 200; try++ {
+		if r := 1 + pick(254); free(r) {
 			return r, nil
 		}
 	}
-	return 0, errors.New("no free 10.89.x.0/24 network is left to use")
+	for r := 1; r <= 254; r++ {
+		if free(r) {
+			return r, nil
+		}
+	}
+	return 0, fmt.Errorf("no free %s.x.0/24 network is left to use: every one overlaps a podman network, a host route or a host address; pass --subnet-base A.B with another private /16", base)
 }
 
 // removeLabelled removes every container, network and image that carries the label (filter is "key" for any value or
@@ -366,6 +448,10 @@ func at005Cleanup(args []string, stdout, stderr io.Writer, rt CmdRunner, look fu
 	case len(args) == 0:
 	case len(args) == 2 && args[0] == "--label":
 		label = args[1]
+		if label != labelKey {
+			fmt.Fprintf(stderr, "liveat at005-cleanup: --label accepts only %q (the harness's own label key), not %q\n", labelKey, label)
+			return 2
+		}
 	default:
 		fmt.Fprintln(stderr, "usage: liveat at005-cleanup [--label mash-at005]")
 		return 2
