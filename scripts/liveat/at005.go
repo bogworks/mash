@@ -206,7 +206,7 @@ const at005Scenario = "AT-005, across machines, over TLS, on a cluster, from two
 	"a second owner's endpoint bob/dev/x (key and creds on M3) forging and replaying answers into alice's discovery while her mash who runs on M1, with alice/dev/ghost offline; " +
 	"endpoint reissue of design from M2 with a new key made on M3 (old session dropped, old key refused on each of the three servers); " +
 	"endpoint delete of review from M1 (session dropped, a reconnect refused on each server, mash status says why); " +
-	"a plain nats:// URL to a non-loopback address refused by an endpoint (ADR 0108) and by mashctl (ADR 0059); " +
+	"a plain nats:// URL to a non-loopback address refused by an endpoint and by mashctl with no override (REQ-014, ADR 0146); " +
 	"the same address created from M1 and M2 at the same moment (one succeeds, the other is refused address_taken); a revocation made on M1 shown by endpoint show and issued check on M2; a search of all captured output for any endpoint seed and any JWT, and of the homes on M1 and M2 for any endpoint seed."
 
 // EnvLines is the environment section of the record: each machine by role, the NATS server version, and the TLS and
@@ -838,8 +838,7 @@ func (s *At5) revocationSeen() {
 	s.ClusterCheck(m2, "M2 after the revocation")
 }
 
-// plainRefusals asserts ADR 0108 (an endpoint refuses a plain nats:// URL to a non-loopback address) and ADR 0059
-// (mashctl refuses an admin connection without TLS). No plain server is started: both refusals come before any
+// plainRefusals asserts REQ-014 and ADR 0146 (an endpoint and mashctl refuse a plain nats:// URL, with no override set). No plain server is started: both refusals come before any
 // connection, so the harness points at a non-loopback address (on the local hosts this machine's own address, where
 // nothing listens; on the podman hosts the address of M1) and the refusal text, not a connection error, is what is
 // asserted.
@@ -853,14 +852,14 @@ func (s *At5) plainRefusals(m1, m3 Host) {
 		return
 	}
 	url := "nats://" + ip + ":" + strconv.Itoa(DefaultPorts[0].Client)
-	env := s.epEnv(m3, m1, "design", filepath.Join(m3.Home().Config, "design.creds"), "MASH_URL="+url, "MASH_REQUIRE_TLS=1")
+	env := s.epEnv(m3, m1, "design", filepath.Join(m3.Home().Config, "design.creds"), "MASH_URL="+url, "MASH_INSECURE_PLAINTEXT=0")
 	r := s.mash(m3, "plain-endpoint", env, "inbox")
 	txt := r.Text()
-	s.check("ADR 0108: with MASH_REQUIRE_TLS=1 an endpoint refuses to connect to a plain nats:// URL on a non-loopback address (refused before any connection; no plain server started)", r.Code != 0 && strings.Contains(strings.ToLower(txt), "tls"), exitSnip(r))
+	s.check("REQ-014: with no override an endpoint refuses to connect to a plain nats:// URL on a non-loopback address (refused before any connection; no plain server started)", r.Code != 0 && strings.Contains(strings.ToLower(txt), "tls"), exitSnip(r))
 	st := s.mash(m3, "plain-status", env, "status")
-	s.check("ADR 0108: mash status says tls: FAILED for it", strings.Contains(st.Text(), "tls: FAILED"), snip(grepLine(st.Text(), "tls:")))
-	r = s.ctl(m1, "plain-admin", []string{"MASH_URL=" + url}, "list")
-	s.check("ADR 0059: mashctl refuses an admin connection to a plain nats:// URL on a non-loopback address", r.Code != 0 && strings.Contains(strings.ToLower(r.Text()), "tls"), exitSnip(r))
+	s.check("REQ-014: mash status says tls: FAILED for it", strings.Contains(st.Text(), "tls: FAILED"), snip(grepLine(st.Text(), "tls:")))
+	r = s.ctl(m1, "plain-admin", []string{"MASH_URL=" + url, "MASH_INSECURE_PLAINTEXT=0"}, "list")
+	s.check("REQ-014: mashctl refuses an admin connection to a plain nats:// URL on a non-loopback address", r.Code != 0 && strings.Contains(strings.ToLower(r.Text()), "tls"), exitSnip(r))
 }
 
 // race: M1 and M2 each make a key on their own machine and create alice/dev/race0 at the same moment. The product

@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded by ADR-0146; only its loopback allowance
 date: 2026-11-02
 decision-makers: Randy Bias (mash maintainer)
 ---
