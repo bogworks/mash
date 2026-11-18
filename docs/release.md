@@ -8,13 +8,13 @@ directories with a pinned toolchain; the build is byte-reproducible and `mash ve
 
 The cutover version is recorded in `docs/release-cutover` (v0.4.0). Below it, the command runs on the maintainer's machine, which signs the tag with the release SSH key; at or above it, the tag is made by the minting service (see "Keyless releases"). In both cases `gh` must be authenticated for the release repository:
 
-    scripts/release-check publish [--wait 45m] <version> <X>
+    scripts/release-check publish [--wait 45m] [--not-latest] <version> <X>
 
 It runs the pre-tag gate, the signed tag and push, waits for `release.yml`'s draft, runs the `--assets` gate, publishes
 the draft, and verifies the published release. It finds its state from the world and resumes there, so after a
 failure or an interruption you rerun the same command: no tag means the gate and the tag; a tag at X and no release
 means waiting for the draft (`--wait`, default 45 minutes; it stops early if the tag's `release.yml` run failed); a
-draft means the pre-tag gate (again, for a tag pushed by hand; not twice in one run), the `--assets` gate and publishing; a published release is only verified, and nothing is created. A tag at
+draft means the pre-tag gate (again, for a tag pushed by hand; not twice in one run), the `--assets` gate and publishing; a published release is only verified, and nothing is created. `--not-latest` publishes with `gh release edit --latest=false` and then reads the release back: one still marked latest is an error (use it for a release that must not become the repository's latest, such as a backport). A tag at
 a commit other than X is refused and nothing is changed. The pre-tag gate also refuses a version that is not strictly
 above the latest published release, and the same ordering checks run again immediately before publishing (another version may have been published during the asset gate; a violation is refused, exit 3). The tag is signed with `git -c gpg.format=ssh -c user.signingkey=$RELEASE_SIGNING_KEY` (an SSH public key path, default
 `~/.ssh/id_ed25519.pub`; a missing file fails before any tag is made), independent of the machine's git signing

@@ -4,7 +4,7 @@
 //	release-check --assets <version> <X>   after CI drafted the release: is the tag right and are the assets ours?
 //	release-check --consumer <checkout> <X> <version>   as the first form, plus the consumer's check run against X (maintainers only)
 //	release-check --policy-tests           run the policy tests of REQ-020 alone (scripts/releasecheck/policytests.txt)
-//	release-check publish [--wait <d>] <version> <X>     the whole path, resumable: gate, signed tag, draft, --assets gate, publish, verify
+//	release-check publish [--wait <d>] [--not-latest] <version> <X>     the whole path, resumable: gate, signed tag, draft, --assets gate, publish, verify
 //
 // It verifies the candidate is on main of the release repository; CI's check runs on X succeeded; X builds, from
 // fresh clones in different directories, to identical bytes whose `version` line is exactly "mash <version> (commit X)".
@@ -62,6 +62,8 @@ type Options struct {
 	// Publish selects `release-check publish`; Wait is how long it waits for release.yml's draft (default 45m).
 	Publish bool
 	Wait    time.Duration
+	// NotLatest (publish --not-latest): the published release is not marked latest, and publish verifies it is not.
+	NotLatest bool
 
 	prevFetched *string // the tag already fetched into prevTagRef, so the plugin and render-contract steps fetch it once; nil: always fetch
 
@@ -111,6 +113,8 @@ func parseArgs(args []string) (o Options, assets bool, err error) {
 					return o, false, fmt.Errorf("--wait %q is not a positive duration", v)
 				}
 				o.Wait = d
+			case a == "--not-latest":
+				o.NotLatest = true
 			case strings.HasPrefix(a, "-"):
 				return o, false, fmt.Errorf("unknown flag %s", a)
 			default:
@@ -118,7 +122,7 @@ func parseArgs(args []string) (o Options, assets bool, err error) {
 			}
 		}
 		if len(pos) != 2 {
-			return o, false, errors.New("usage: release-check publish [--wait <duration>] <version> <X>")
+			return o, false, errors.New("usage: release-check publish [--wait <duration>] [--not-latest] <version> <X>")
 		}
 		return withArgs(o, pos[1], pos[0]), false, nil
 	}

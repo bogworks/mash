@@ -422,8 +422,36 @@ func (r realWorld) Publish(tag string) error {
 	if err := verifySupplyChain(r.o, tag, x); err != nil {
 		return fmt.Errorf("refused: not publishing %s: %w", tag, err)
 	}
-	_, err = gh(r.o, "release", "edit", tag, "--repo", r.o.GHRepo, "--draft=false")
-	return op(err)
+	return publishRelease(r.o, tag)
+}
+
+// publishRelease is the irreversible edit: the draft becomes the published release. With o.NotLatest the edit passes
+// --latest=false and the release is read back: one that GitHub still marks latest is an error.
+func publishRelease(o Options, tag string) error {
+	args := []string{"release", "edit", tag, "--repo", o.GHRepo, "--draft=false"}
+	if o.NotLatest {
+		args = append(args, "--latest=false")
+	}
+	if _, err := gh(o, args...); err != nil {
+		return op(err)
+	}
+	if !o.NotLatest {
+		return nil
+	}
+	b, err := gh(o, "release", "view", tag, "--repo", o.GHRepo, "--json", "isLatest")
+	if err != nil {
+		return op(err)
+	}
+	var v struct {
+		IsLatest bool `json:"isLatest"`
+	}
+	if err := json.Unmarshal(b, &v); err != nil {
+		return op(fmt.Errorf("reading the release of %s: %w", tag, err))
+	}
+	if v.IsLatest {
+		return fmt.Errorf("%s was published with --not-latest but is marked latest", tag)
+	}
+	return nil
 }
 
 func (r realWorld) Now() time.Time        { return time.Now() }

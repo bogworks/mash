@@ -376,7 +376,7 @@ func TestParseArgs_publish(t *testing.T) {
 		{"publish"}, {"publish", "1.2.3"}, {"publish", "1.2.3", "abc", "d"},
 		{"publish", "--assets", "1.2.3", "abc"}, {"publish", "--consumer", "co", "1.2.3", "abc"},
 		{"publish", "--wait"}, {"publish", "--wait", "soon", "1.2.3", "abc"}, {"publish", "--wait", "-1m", "1.2.3", "abc"},
-		{"publish", "--bogus", "1.2.3", "abc"},
+		{"publish", "--bogus", "1.2.3", "abc"}, {"publish", "--not-latest=false", "1.2.3", "abc"},
 		{"1.2.3", "abc", "publish"}, // publish is only the first argument
 	} {
 		if _, _, err := parseArgs(args); err == nil {
@@ -540,5 +540,62 @@ func TestOrderAbove_ownDraftDoesNotCount(t *testing.T) {
 	rel := []releaseRow{{TagName: "v1.2.2"}, {TagName: "v1.2.3", IsDraft: true}}
 	if err := orderAbove("1.2.3", rel); err != nil {
 		t.Errorf("own draft counted against itself: %v", err)
+	}
+}
+
+func TestParseArgs_notLatest(t *testing.T) {
+	o, _, err := parseArgs([]string{"publish", "--not-latest", "1.2.3", "abc"})
+	if err != nil || !o.NotLatest {
+		t.Fatalf("%+v %v", o, err)
+	}
+	if o, _, err = parseArgs([]string{"publish", "1.2.3", "abc"}); err != nil || o.NotLatest {
+		t.Fatalf("%+v %v", o, err)
+	}
+}
+
+// ghLog writes a gh that logs its arguments and answers `release view --json isLatest` with latest.
+func ghLog(t *testing.T, latest string) (Options, string) {
+	t.Helper()
+	dir := t.TempDir()
+	log := filepath.Join(dir, "log")
+	script := "#!/bin/sh\necho \"$*\" >> " + log + "\n" +
+		"case \"$2\" in view) echo '{\"isLatest\":" + latest + "}' ;; esac\n"
+	gh := filepath.Join(dir, "gh")
+	if err := os.WriteFile(gh, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return Options{GH: gh, GHRepo: "bogworks/mash"}, log
+}
+
+func TestPublishRelease_notLatest(t *testing.T) {
+	o, log := ghLog(t, "false")
+	o.NotLatest = true
+	if err := publishRelease(o, "v1.2.3"); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(log)
+	want := "release edit v1.2.3 --repo bogworks/mash --draft=false --latest=false\nrelease view v1.2.3 --repo bogworks/mash --json isLatest\n"
+	if string(b) != want {
+		t.Errorf("gh calls:\n%s", b)
+	}
+}
+
+func TestPublishRelease_notLatestButLatest(t *testing.T) {
+	o, _ := ghLog(t, "true")
+	o.NotLatest = true
+	err := publishRelease(o, "v1.2.3")
+	if err == nil || !strings.Contains(err.Error(), "marked latest") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestPublishRelease_default(t *testing.T) {
+	o, log := ghLog(t, "true")
+	if err := publishRelease(o, "v1.2.3"); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(log)
+	if want := "release edit v1.2.3 --repo bogworks/mash --draft=false\n"; string(b) != want {
+		t.Errorf("gh calls:\n%s", b)
 	}
 }
