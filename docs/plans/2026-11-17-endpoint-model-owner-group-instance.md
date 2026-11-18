@@ -130,7 +130,7 @@ none of them belongs in it as built. For each: where it belongs, and what surviv
 | #685 requester rename (ADR 0133) | rename of the countersigner inside the issue service | policy release | Names a thing only the policy path has. |
 | #686 reconcile fix | a finding in `policy reconcile`'s logic | policy release | Engine-internal; no shipped surface. |
 | #688 policydirect | the direct driver of the policy engine, two-server live proof, no verb | policy release | The engine's driver for the later `policy` verb. Carries the `scripts/gate` exception. |
-| #698 credential primitive (ADR 0136) | a credential for a public key the endpoint made, so no private key crosses to the central host | **0.5.5 carve-out (maintainer's ruling)**, the rest to the policy release | As built it signs only under a list set and refuses `no_list_set`. 0.5.5 lifts `NewKey`, `Assemble` and `Show` out and puts a plain signing path under them, so `endpoint create` takes the endpoint's public key without any list set: about 1.5 days. The list-set path stays held. |
+| #698 credential primitive | a credential for a public key the endpoint made, so no private key crosses to the central host | **0.5.5 carve-out (maintainer's ruling)**, the rest to the policy release | As built it signs only under a list set and refuses `no_list_set`. 0.5.5 lifts `NewKey`, `Assemble` and `Show` out and puts a plain signing path under them, so `endpoint create` takes the endpoint's public key without any list set: about 1.5 days. The list-set path stays held. |
 | #702 (closed) | a legacy endpoint governed in place | nowhere | Closed; there is no legacy in 0.5.5. |
 
 Nothing in the stack is needed by 0.5.5 (the model needs `sap`, `store`, `admin`, `endpoint`, `config`, `namerule`,

@@ -77,7 +77,7 @@ func TestRefMethodsRefuseUnsafeStreams(t *testing.T) {
 
 func TestRefMethodsStillWorkForValidStreams(t *testing.T) {
 	s := newSpool(t)
-	for _, st := range []string{"", "legacy", "a.b", "x-y_z"} {
+	for _, st := range []string{"", "second", "a.b", "x-y_z"} {
 		r := Ref{Stream: st, Seq: 3}
 		if err := s.Put(Entry{Stream: st, Seq: 3}); err != nil {
 			t.Fatal(err)

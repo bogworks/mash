@@ -32,7 +32,7 @@ var zoneAllow = []struct{ path, line, why string }{
 	{"cmd/mashctl/unzone_test.go", "", "the unzone test publishes to a zoned subject"},
 	{"internal/admin/unzone_test.go", "", "the unzone admin test uses zoned records and subjects"},
 	{"cmd/mashctl/main_test.go", "", "TestMashctlNoZone asserts set-zone and --zone are refused"},
-	{"internal/sap/", "", "legacy zoned-subject parsing (LegacyZoneOf*) and its golden and subject tests"},
+	{"internal/sap/address_test.go", `"agents.mail.a.b.c.d"`, "asserts a six-token subject is refused as an address"},
 	{"internal/store/", "", "zoned.go reads a zoned directory record for the unzone path; its tests and the golden and store tests use zoned data"},
 	{"internal/admin/inbox_subjects_test.go", "", "tests that six-token subjects stay publishable until unzone runs"},
 	{"internal/listset/listset_test.go", "", "generic subject-pattern matching cases; the six-token strings are just test data"},

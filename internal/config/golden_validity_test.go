@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// ValidName is the legacy name rule, kept for callers outside Load.
+// ValidName is the name rule for a name outside an address (an owner given to init and adopt): 1 to 48 characters.
 func TestGoldenValidNameBoundaries(t *testing.T) {
 	for _, s := range []string{
 		"a", "z", "a0", "a-b", "a-b-c", "a1-2b", "ab-1", "build-1", "acme-corp",

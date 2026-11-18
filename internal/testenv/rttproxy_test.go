@@ -42,7 +42,7 @@ func TestWavesFollowResponses(t *testing.T) {
 	resp()
 	resp()
 	req("d")
-	p.note(frame{verb: "MSG", subject: "agents.hb.cc.o.x"}, false) // heartbeats are not answers
+	p.note(frame{verb: "MSG", subject: "agents.hb.o.dev.x"}, false) // heartbeats are not answers
 	req("e")
 	resp()
 	req("f")

@@ -61,8 +61,8 @@ Chosen: one form, and a hard cut.
   each create and by `MASH_GROUP`. A group cannot be changed later (create a
   new endpoint, delete the old; its flat key is burned). An explicit same-host flag makes the key on the mashctl host; the
   endpoint-made key stays the default. A second mashctl machine is set up by `adopt` with the same key material; an own
-  signing key in the account JWT is not supported (ADR 0059). This is the credential primitive of ADR 0136 lifted out of the
-  list-set path.
+  signing key in the account JWT is not supported (ADR 0059). The enroll package signs a user credential from a public key the endpoint
+  made; no list set or policy is involved.
 * **There is one form, no legacy and no migration in mash.** `mashctl add`, legacy `reissue`, `agent_token`, the `cc` form,
   its parsers and record code, and the alias machinery are removed. 0.5.5 does not read, convert or tolerate an old
   record, address or credential. Moving the maintainer's own endpoints is a one-time script outside mash, owned by

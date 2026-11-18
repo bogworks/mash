@@ -8,7 +8,7 @@ import (
 )
 
 // A three-token sender is shown in the canonical agent.owner.name form on every human surface (ADR 0081); the
-// legacy forms are pinned by contract.txt and render_test.go and do not change.
+// other senders are pinned by contract.txt and render_test.go and do not change.
 const tokKey, tokDisplay = "bogworks_x_sap-go-sdk", "bogworks.x.sap-go-sdk"
 
 func tokMail(seq uint64) Mail {
@@ -37,7 +37,7 @@ func TestOneShowsCanonicalRelayOrigin(t *testing.T) {
 	}
 	m.Via = "team-a #9"
 	if out := One(m); !strings.Contains(out, "\nrelayed from team-a #9\n") {
-		t.Fatalf("legacy via: %s", out)
+		t.Fatalf("relayed from a plain name: %s", out)
 	}
 	if got := Line(func() Mail { m.Via = tokKey + " #9"; return m }()); !strings.Contains(got, "\trelayed from "+tokDisplay+" #9") {
 		t.Fatalf("line via: %s", got)
@@ -83,11 +83,11 @@ func TestSenderCanonicalHasNoOwnerPrefix(t *testing.T) {
 	if got := Sender("acme", m); got != tokDisplay {
 		t.Fatalf("unknown owner: %q", got)
 	}
-	// legacy: unchanged
+	// a sender with an owner and a plain name: unchanged
 	l := mail(1, "nats-ops", "x")
 	l.Owner = "devops"
 	if got := Sender("acme", l); got != "devops/nats-ops" {
-		t.Fatalf("legacy: %q", got)
+		t.Fatalf("plain name: %q", got)
 	}
 }
 
