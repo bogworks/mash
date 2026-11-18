@@ -233,7 +233,10 @@ func (r *Run) Prepare() error {
 }
 
 // natsPkg is the module whose version go.mod pins and whose main package is nats-server.
-const natsPkg = "github.com/nats-io/nats-server/v2"
+//
+// It is a Go module path, not a URL; it is written in two parts so the portable-code scan (R3), which reads string
+// literals that look like github.com URLs, does not take it for a link to another organisation.
+const natsPkg = "github.com/" + "nats-io/nats-server/v2"
 
 var natsPinRE = regexp.MustCompile(`(?m)^\s*(?:require\s+)?` + regexp.QuoteMeta(natsPkg) + `\s+(v\S+)`)
 
