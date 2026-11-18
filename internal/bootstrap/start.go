@@ -67,7 +67,7 @@ func Start(p Params, url string, generatedHere bool) (int, error) {
 	if !generatedHere {
 		return 0, ErrNotGeneratedHere
 	}
-	tlsOpts, err := natsauth.RequireTLS(url, false) // false: no plain text
+	tlsOpts, _, err := natsauth.RequireTLS(url, false) // false: no plain text, so there is no warning
 	if err != nil {
 		return 0, fmt.Errorf("%w (nothing was started)", err)
 	}
