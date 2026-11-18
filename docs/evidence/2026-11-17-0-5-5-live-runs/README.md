@@ -14,7 +14,7 @@ environment, scenario, expected, observed).
 AT-005 (across machines) was run by hand on 2026-11-18 by the core lane, from the harness of #749 with `--hosts podman --run-by manual
 --host-label bf2`: three rootless podman containers (podman 4.9.3, netavark) built from the checkout, each its own filesystem and
 address on a private network, with a certificate authority and certificates made by the test, a three-server TLS cluster, and two
-mashctl machines set up by `adopt` with the same key material. `record-at005.md` is its record: pass (79 assertions), and nothing
+mashctl machines set up by `adopt` with the same key material. `record-at005.md` is its record: pass (81 assertions), and nothing
 labelled was left behind. The clock-skew case is not part of it (a unit test in `internal/enroll` covers skews inside and past the
 lock bound). It is evidence of a developer-machine run, not of the CI runners.
 
