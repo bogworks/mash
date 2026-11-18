@@ -320,6 +320,14 @@ var AT001 = Scenario{
 		if !a.C.Check("a fresh scratch home is made", err == nil, "") || !a.StartServer(h) {
 			return
 		}
+		envHasOverride := false
+		for _, kv := range a.Env(h, a.SessionEnv(h, "dev", "design")...) {
+			if strings.HasPrefix(kv, "MASH_INSECURE_PLAINTEXT") {
+				envHasOverride = true
+			}
+		}
+		a.C.Check("REQ-014: the quick start runs with no override: the environment of init, serve and the ctl commands holds no MASH_INSECURE_PLAINTEXT, and the URL is tls://",
+			!envHasOverride && strings.Contains(strings.Join(a.Conn(), " "), "MASH_URL=tls://"), "")
 		for _, n := range []string{"design", "review"} {
 			if _, ok := a.provision(h, h, "alice", "dev", n, "", false); !ok {
 				return
@@ -351,6 +359,9 @@ var AT001 = Scenario{
 			a.launcherExecsBuild(n, s)
 		}
 		a.C.Check("both sessions are online", a.waitOnline(h, envs["design"], "alice.dev.design", "alice.dev.review"), "")
+
+		st := a.Mash("status-design", h, envs["design"], "status")
+		a.C.Check("REQ-014: mash status for a session says tls: OK (no override set)", strings.Contains(st.Text(), "tls: OK"), snip(grepLine(st.Text(), "tls:")))
 
 		a.pluginMail(pl, "design-to-review (UserPromptSubmit)", h, sess["design"], sess["review"], "UserPromptSubmit", "hello review from design")
 		a.pluginMail(pl, "review-to-design (PostToolUse)", h, sess["review"], sess["design"], "PostToolUse", "hello design from review")

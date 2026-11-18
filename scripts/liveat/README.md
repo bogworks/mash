@@ -3,6 +3,12 @@
 `go run ./scripts/liveat at001|at002|at003|all|selfcheck --port P` runs AT-001 to AT-003 of the 0.5.5 endpoint-model
 contract against a build of this checkout, on one local NATS server, in scratch homes.
 
+The local server is the one `mashctl init --local` makes: TLS only, with its own CA (`ca.pem`, `server.pem`, `server.key`
+in the server directory). Every command of AT-001 to AT-003 connects to `tls://127.0.0.1:P` with `MASH_TLS_CA` set to
+that `ca.pem` and no `MASH_INSECURE_PLAINTEXT` (REQ-014); AT-001 asserts that and that `mash status` says `tls: OK`.
+Only AT-003's plain-URL case sets the override, per command, against a counting listener. The server key's text is
+searched for in all captured output like a seed.
+
 ## AT-005: three machines, TLS, a cluster, two mashctl machines
 
 ```

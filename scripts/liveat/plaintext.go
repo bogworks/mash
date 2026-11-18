@@ -77,7 +77,8 @@ func (a *AT) plainText(ha, he Home, design ep) {
 	defer cc.Close()
 	url := "nats://" + cc.Addr()
 	base := func(over string, more ...string) []string {
-		return append(append(a.Conn(), "MASH_URL="+url, "MASH_INSECURE_PLAINTEXT="+over, "MASH_OPEN_TIMEOUT=2s"), more...)
+		return append(append(a.Conn(), "MASH_URL="+url, "MASH_INSECURE_PLAINTEXT="+over, // Conn() carries no override: it is set here, per command, and only here
+			"MASH_OPEN_TIMEOUT=2s"), more...)
 	}
 	session := []string{"MASH_GROUP=dev", "MASH_NAME=design", "MASH_CREDS=" + design.creds, "MASH_STATE_DIR=" + filepath.Join(he.State, "plain")}
 	type run struct {

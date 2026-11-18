@@ -59,11 +59,16 @@ func (a *AT) Home(name string) (Home, error) {
 	return h, err
 }
 
-func (a *AT) url() string { return "nats://127.0.0.1:" + strconv.Itoa(a.R.Port) }
+// tlsURL is the URL of the one local server: TLS, as mashctl init --local writes it to config.json (REQ-014).
+func (a *AT) tlsURL() string { return "tls://127.0.0.1:" + strconv.Itoa(a.R.Port) }
 
-// Conn is the connection settings of every endpoint and mashctl command of the scenario: the one local server.
+// caPath is the CA certificate (public) that mashctl init --local writes into the server directory.
+func (a *AT) caPath() string { return filepath.Join(a.srvDir, bootstrap.CACert) }
+
+// Conn is the connection settings of every endpoint and mashctl command of the scenario: the one local server over
+// TLS, trusting the CA init --local made, with no insecure_plaintext override (REQ-014, AT-001).
 func (a *AT) Conn() []string {
-	return []string{"MASH_URL=" + a.url(), "MASH_OWNER=alice", "MASH_INSECURE_PLAINTEXT=true"}
+	return []string{"MASH_URL=" + a.tlsURL(), "MASH_TLS_CA=" + a.caPath(), "MASH_OWNER=alice"}
 }
 
 // Env is the environment for a command in home h: scratch values only, plus extra.
@@ -113,6 +118,15 @@ func (a *AT) StartServer(h Home) bool {
 	}
 	res := a.Ctl("init-local", h, nil, "init", "--local", "--owner", "alice", "--dir", a.srvDir, "--port", strconv.Itoa(a.R.Port), "--start")
 	ok := a.C.Check("mashctl init --local --owner alice --start brings up one local server", res.Code == 0, exitDetail(res))
+	// The server key is private: its text is searched for in all captured output like a seed.
+	if kb, err := os.ReadFile(filepath.Join(a.srvDir, bootstrap.ServerKey)); err == nil {
+		for _, l := range strings.Split(string(kb), "\n") {
+			if l = strings.TrimSpace(l); len(l) >= 40 && !strings.HasPrefix(l, "-----") {
+				a.secrets["server key"] = []byte(l)
+				break
+			}
+		}
+	}
 	b, err := os.ReadFile(filepath.Join(a.srvDir, bootstrap.ServerPID))
 	if err == nil {
 		if pid, perr := strconv.Atoi(strings.TrimSpace(string(b))); perr == nil {
