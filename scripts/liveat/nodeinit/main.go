@@ -12,6 +12,10 @@
 //	nodeinit run --pidfile PATH -- CMD ARGS...
 //	                             run CMD as a child (same env and stdio), write the child's pid to PATH (0600),
 //	                             forward SIGTERM and SIGINT to it, exit with its status, remove PATH
+//	nodeinit forge --url tls://ADDR:PORT --ca FILE --creds FILE --seconds N
+//	                             as a second owner (the given creds): answer each discovery request of owner alice
+//	                             with a forged and a replay-shaped payload, count the servers' refusals, print
+//	                             {"seen_requests":N,"violations":M} (counts only)
 //	nodeinit stop --pidfile PATH [--grace 5s]
 //	                             SIGTERM the pid in PATH, wait up to the grace, then SIGKILL that pid only; exit 0
 //	                             once it is gone (also when PATH is absent)
@@ -48,6 +52,8 @@ func run(a []string) int {
 		return cmdRun(a[1:])
 	case len(a) > 0 && a[0] == "stop":
 		return cmdStop(a[1:])
+	case len(a) > 0 && a[0] == "forge":
+		return cmdForge(a[1:], os.Stdout, os.Stderr)
 	case len(a) == 0:
 		need(1)
 		return 2

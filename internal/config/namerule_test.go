@@ -51,8 +51,8 @@ func TestNameRuleFromEnvAndFile(t *testing.T) {
 	if c.NameRule == nil || c.NameRulePath != p || c.NameRule.Count() != 1 {
 		t.Fatalf("env: %v %q", c.NameRule, c.NameRulePath)
 	}
-	legacy, _ := sap.NewAddress("cc", "g", "a")
-	if c.NameRule.Check(legacy) == nil {
+	cc, _ := sap.NewAddress("cc", "g", "a")
+	if c.NameRule.Check(cc) == nil {
 		t.Fatal("the loaded rule does not refuse cc")
 	}
 

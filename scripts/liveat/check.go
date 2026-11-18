@@ -11,6 +11,8 @@ type Assertion struct {
 	Name   string
 	Pass   bool
 	Detail string
+	// NA marks a check that does not apply (and so is neither a pass nor a failure): the record says "n/a", not "pass".
+	NA bool
 }
 
 // Checks collects the assertions of one scenario.
@@ -26,6 +28,14 @@ func (c *Checks) Check(name string, cond bool, detail string) bool {
 	defer c.mu.Unlock()
 	c.list = append(c.list, Assertion{Name: name, Pass: cond, Detail: detail})
 	return cond
+}
+
+// NotApplicable records that a check does not apply, with the reason. It is not counted as a pass (the record says n/a) and
+// never fails the run.
+func (c *Checks) NotApplicable(name, reason string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.list = append(c.list, Assertion{Name: name, Pass: true, NA: true, Detail: reason})
 }
 
 // All returns a copy of the assertions in the order they were made.
@@ -51,7 +61,9 @@ func (c *Checks) Table() string {
 	var b strings.Builder
 	for _, a := range c.All() {
 		res := "PASS"
-		if !a.Pass {
+		if a.NA {
+			res = "N/A "
+		} else if !a.Pass {
 			res = "FAIL"
 		}
 		fmt.Fprintf(&b, "%s  %s", res, a.Name)

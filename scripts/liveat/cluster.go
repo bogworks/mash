@@ -325,7 +325,7 @@ func retry(d time.Duration, every time.Duration, fn func() (Result, bool)) Resul
 
 // InitBuckets points M1 at the cluster (config.json: every server's URL and tls_ca; no insecure_loopback) and runs
 // `mashctl init` there, which creates the directory and lease buckets over the cluster. JetStream may need a few
-// seconds to elect its coordinator, so the command is retried.
+// seconds to elect its meta group, so the command is retried.
 func (s *At5) InitBuckets() bool {
 	m1 := s.M(1)
 	err := s.patchConfig(m1, map[string]any{"url": s.urlList(), "tls_ca": s.TLS[0].CA}, "insecure_loopback")

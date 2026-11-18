@@ -1,0 +1,8 @@
+--- PASS: TestStandaloneServeWithoutAHost (1.44s)
+--- PASS: TestStandaloneLivePrompt (1.06s)
+--- PASS: TestStandaloneHookDelivery (1.12s)
+--- PASS: TestStandaloneOnlyNATS (0.39s)
+--- PASS: TestStandaloneEnvOnlyConfig (0.36s)
+--- PASS: TestForbiddenWordsHelpers (0.00s)
+PASS
+ok  	github.com/bogworks/mash/cmd/mash	4.375s

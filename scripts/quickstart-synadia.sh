@@ -111,11 +111,9 @@ done
 addr() { printf '%s.%s.%s' "$OWNER" "$GROUP" "$1"; } # the endpoint address of instance $1
 
 if [ -z "$CONFIG_DIR" ]; then
-  LEGACY_DIR="${HOME:?HOME is not set}/.config/mash"
   if [ -n "${MASH_CONFIG_DIR:-}" ]; then CONFIG_DIR="$MASH_CONFIG_DIR"
-  elif [ -n "${XDG_CONFIG_HOME:-}" ] && [ "${XDG_CONFIG_HOME#/}" != "$XDG_CONFIG_HOME" ] &&
-    { [ -e "$XDG_CONFIG_HOME/mash/config.json" ] || [ ! -e "$LEGACY_DIR/config.json" ]; }; then CONFIG_DIR="$XDG_CONFIG_HOME/mash"
-  else CONFIG_DIR="$LEGACY_DIR"
+  elif [ -n "${XDG_CONFIG_HOME:-}" ] && [ "${XDG_CONFIG_HOME#/}" != "$XDG_CONFIG_HOME" ]; then CONFIG_DIR="$XDG_CONFIG_HOME/mash"
+  else CONFIG_DIR="${HOME:?HOME is not set}/.config/mash"
   fi
 fi
 case "$CONFIG_DIR" in /*) ;; *) die "the config directory '$CONFIG_DIR' must be an absolute path" ;; esac

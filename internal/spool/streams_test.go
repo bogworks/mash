@@ -12,13 +12,13 @@ import (
 
 func TestTwoStreamsWithTheSameSequenceAreDistinct(t *testing.T) {
 	s := newSpool(t)
-	own, old := Ref{Seq: 5}, Ref{Stream: "legacy", Seq: 5}
-	for _, e := range []Entry{{Seq: 5, Body: []byte("own")}, {Stream: "legacy", Seq: 5, Body: []byte("old")}} {
+	own, old := Ref{Seq: 5}, Ref{Stream: "second", Seq: 5}
+	for _, e := range []Entry{{Seq: 5, Body: []byte("own")}, {Stream: "second", Seq: 5, Body: []byte("old")}} {
 		if err := s.Put(e); err != nil {
 			t.Fatal(err)
 		}
 	}
-	want := []string{"5.json", "drained/", "legacy@5.json", "listed/", "shown/"}
+	want := []string{"5.json", "drained/", "listed/", "second@5.json", "shown/"}
 	if got := layout(t, s); !reflect.DeepEqual(got, want) {
 		t.Fatalf("layout %v, want %v", got, want)
 	}
@@ -38,8 +38,8 @@ func TestTwoStreamsWithTheSameSequenceAreDistinct(t *testing.T) {
 	if w[0].Stream != "" || string(w[0].Body) != "own" || !w[0].Listed || w[0].Redelivered {
 		t.Fatalf("own %+v", w[0])
 	}
-	if w[1].Stream != "legacy" || string(w[1].Body) != "old" || w[1].Listed || !w[1].Redelivered {
-		t.Fatalf("legacy %+v", w[1])
+	if w[1].Stream != "second" || string(w[1].Body) != "old" || w[1].Listed || !w[1].Redelivered {
+		t.Fatalf("second %+v", w[1])
 	}
 	if err := s.Drained(old); err != nil {
 		t.Fatal(err)
@@ -60,10 +60,10 @@ func TestBindPerStreamKeepsTheOtherStreamsMarks(t *testing.T) {
 	if err := s.Bind("own@1"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.BindStream("legacy", "old@1"); err != nil {
+	if err := s.BindStream("second", "old@1"); err != nil {
 		t.Fatal(err)
 	}
-	own, old := Ref{Seq: 3}, Ref{Stream: "legacy", Seq: 3}
+	own, old := Ref{Seq: 3}, Ref{Stream: "second", Seq: 3}
 	for _, r := range []Ref{own, old} {
 		if err := s.Put(Entry{Stream: r.Stream, Seq: r.Seq, Body: []byte("x")}); err != nil {
 			t.Fatal(err)
@@ -82,31 +82,31 @@ func TestBindPerStreamKeepsTheOtherStreamsMarks(t *testing.T) {
 	if err := s.Bind("own@1"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.BindStream("legacy", "old@1"); err != nil {
+	if err := s.BindStream("second", "old@1"); err != nil {
 		t.Fatal(err)
 	}
-	// The legacy stream is recreated: only its files go.
-	if err := s.BindStream("legacy", "old@2"); err != nil {
+	// The second stream is recreated: only its files go.
+	if err := s.BindStream("second", "old@2"); err != nil {
 		t.Fatal(err)
 	}
 	got := layout(t, s)
 
-	// listed/4, shown/3, drained/5 and 3.json of the own stream remain; the legacy@ ones are gone.
-	want := []string{".stream", ".stream.legacy", "3.json", "drained/", "drained/5", "listed/", "listed/4", "shown/", "shown/3"}
+	// listed/4, shown/3, drained/5 and 3.json of the own stream remain; the second@ ones are gone.
+	want := []string{".stream", ".stream.second", "3.json", "drained/", "drained/5", "listed/", "listed/4", "shown/", "shown/3"}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("after rebinding legacy: %v, want %v", got, want)
+		t.Fatalf("after rebinding second: %v, want %v", got, want)
 	}
-	if b, _ := os.ReadFile(filepath.Join(s.Dir, ".stream.legacy")); string(b) != "old@2" {
-		t.Fatalf(".stream.legacy = %q", b)
+	if b, _ := os.ReadFile(filepath.Join(s.Dir, ".stream.second")); string(b) != "old@2" {
+		t.Fatalf(".stream.second = %q", b)
 	}
-	// And the own stream recreated drops its files but leaves legacy's (here, new).
-	if err := s.Put(Entry{Stream: "legacy", Seq: 9, Body: []byte("y")}); err != nil {
+	// And the own stream recreated drops its files but leaves second's (here, new).
+	if err := s.Put(Entry{Stream: "second", Seq: 9, Body: []byte("y")}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Bind("own@2"); err != nil {
 		t.Fatal(err)
 	}
-	want = []string{".stream", ".stream.legacy", "drained/", "legacy@9.json", "listed/", "shown/"}
+	want = []string{".stream", ".stream.second", "drained/", "listed/", "second@9.json", "shown/"}
 	if got := layout(t, s); !reflect.DeepEqual(got, want) {
 		t.Fatalf("after rebinding own: %v, want %v", got, want)
 	}

@@ -1,4 +1,4 @@
-// Characterisation tests (plan 2b, Phase 0): these pin today's identifiers and validity for legacy identities; a change here is a change to a legacy identifier and needs its own decision.
+// Characterisation tests (plan 2b, Phase 0): these pin the identifiers derived from an endpoint address (owner, group, instance); a change here is a change to an identifier and needs its own decision.
 
 package endpoint
 

@@ -33,6 +33,8 @@ evidence. A `--hosts local` record says `run: local loopback (dry setup or devel
 contract)` and its result line says `local substrate: not AT-005 evidence`; `--run-by` and `--host-label` are refused with
 `--hosts local`.
 
+The second-owner case: an endpoint of a second owner (`bob/dev/x`, key and credentials made on M3) runs `nodeinit forge` inside M3, which publishes a forged discovery answer and a replayed presence answer into the reply subject of alice's `mash who` on M1; the record must show that the servers refused both and that her offline endpoint `alice/dev/ghost` is not listed as online.
+
 AT-005 needs **rootless podman** and a `nats-server` on PATH that is a static binary (a release build or
 `CGO_ENABLED=0 go build`). With no podman the run **fails** (exit 4) with "podman is not installed: AT-005 needs rootless
 podman (the CI job provides it); this run did not test anything". It never skips and never passes without podman, and it
