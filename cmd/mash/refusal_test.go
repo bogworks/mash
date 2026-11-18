@@ -36,7 +36,8 @@ func addRestricted(t *testing.T, w *world, allowed ...string) {
 		t.Fatal(err)
 	}
 	w.env["s"] = map[string]string{"HOME": t.TempDir(), "MASH_NAME": "s", "MASH_GROUP": testGroup, "MASH_URL": w.e.URL,
-		"MASH_OWNER": w.e.Owner, "MASH_CREDS": c, "MASH_SETTLE_MS": "20"}
+		"MASH_OWNER": w.e.Owner, "MASH_CREDS": c, "MASH_SETTLE_MS": "20",
+		"MASH_INSECURE_PLAINTEXT": "1"} // REQ-014: these tests are not about TLS; the override is explicit
 }
 
 const refusalBase = "refused by policy: you may not mail o.dev.denied." +

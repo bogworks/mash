@@ -119,7 +119,7 @@ func (r *rttWorld) measure(t *testing.T, token string, args ...string) (string, 
 		t.Fatalf("mash %v: exit %d: %s%s", args, code, out.String(), errb.String())
 	}
 	time.Sleep(60 * time.Millisecond) // let the last frames cross the proxy
-	return out.String() + errb.String(), r.px.RTT()
+	return out.String() + withoutPlainWarning(errb.String()), r.px.RTT()
 }
 
 // The CLI's cost in round trips is bounded and does not grow with the directory: the same command against 10 and 40

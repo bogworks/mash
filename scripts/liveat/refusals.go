@@ -80,6 +80,7 @@ var AT003 = Scenario{
 	Scenario: "AT-003, every refusal can fail: one local server; endpoints alice/dev/design, alice/dev/review, a deleted alice/dev/gone and bob/dev/build. " +
 		"Each refusal of the contract's list that has a CLI form is run between two snapshots (mashctl list, audit --json, issued list --json, " +
 		"and a digest of each home's files): exit code, refusal code in --json, a message that names what to type, nothing written. " +
+		"A plain nats:// URL to loopback is refused by mash (session start and a command) and by mashctl, exit 2, and no connection is made; with the override the connection is made and the warning is printed (REQ-014). " +
 		"Then bob's credentials publish to alice's mail subject and request her prompt subject.",
 	Body: func(a *AT) {
 		ha, e1 := a.Home("home-a") // mashctl host
@@ -184,6 +185,7 @@ var AT003 = Scenario{
 			a.refusal(ha, trees, c)
 		}
 
+		a.plainText(ha, he, design)
 		a.crossOwner(ha, he, bob, design, trees)
 	},
 }

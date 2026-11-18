@@ -25,7 +25,8 @@ func naming21Provision(t *testing.T, e *testenv.Env, adm *admin.Admin, owner, gr
 		t.Fatal(err)
 	}
 	return id, map[string]string{"HOME": t.TempDir(), "MASH_NAME": id.Instance, "MASH_OWNER": id.Owner, "MASH_GROUP": id.Group,
-		"MASH_URL": e.URL, "MASH_CREDS": creds, "MASH_SETTLE_MS": "20", "MASH_IDLE_WAKE": "5s"}
+		"MASH_URL": e.URL, "MASH_CREDS": creds, "MASH_SETTLE_MS": "20", "MASH_IDLE_WAKE": "5s",
+		"MASH_INSECURE_PLAINTEXT": "1"} // REQ-014: these tests are not about TLS; the override is explicit
 }
 
 // shownIdentities returns every identity printed in out in the canonical dotted form owner.group.instance. Ruling

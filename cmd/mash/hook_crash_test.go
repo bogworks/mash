@@ -50,6 +50,9 @@ func runMashHook(t *testing.T, env map[string]string, failpoint string) string {
 	t.Helper()
 	cmd := exec.Command(mashBinary(t), "hook")
 	cmd.Env = []string{"PATH=" + os.Getenv("PATH")}
+	if _, ok := env["MASH_INSECURE_PLAINTEXT"]; !ok {
+		cmd.Env = append(cmd.Env, "MASH_INSECURE_PLAINTEXT=1") // REQ-014: these tests are not about TLS; the override is explicit
+	}
 	for k, v := range env {
 		cmd.Env = append(cmd.Env, k+"="+v)
 	}

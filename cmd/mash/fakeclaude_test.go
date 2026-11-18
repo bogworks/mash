@@ -181,6 +181,9 @@ func startFakeClaudeMode(t *testing.T, env map[string]string, serveMode string) 
 	if serveMode != "" {
 		cmd.Env = append(cmd.Env, "MASH_TEST_FAKE_SERVE="+serveMode)
 	}
+	if _, ok := env["MASH_INSECURE_PLAINTEXT"]; !ok {
+		cmd.Env = append(cmd.Env, "MASH_INSECURE_PLAINTEXT=1") // REQ-014: these tests are not about TLS; the override is explicit
+	}
 	for k, v := range env {
 		cmd.Env = append(cmd.Env, k+"="+v)
 	}
