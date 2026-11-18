@@ -13,21 +13,23 @@
 
 ## Free-tier limits
 
+The free tier cannot run mash: its 5 streams are fewer than the 6 that one endpoint needs. The script refuses such an account before it creates anything. An account with a higher stream limit is needed (5 shared streams plus 1 per endpoint).
+
 | Limit | Free tier | Effect on mash |
 |---|---|---|
-| Streams | 5 | 2 shared buckets plus 1 inbox per endpoint: at most 3 endpoints |
+| Streams | 5 | 5 shared buckets plus 1 inbox per endpoint: no endpoint fits (at most 0); an account with a limit of 5 + N holds N endpoints |
 | Connections | 5 | One per live session |
 | Message payload | 512 KiB | mash caps a send to the server's `max_payload` |
 | Replication | R1 only | No replicas, so no high availability |
 
-The script reads the account's stream limit and checks the plan (2 shared plus 1 per endpoint) against it before it creates anything. If the plan does not fit it stops and says how many streams the account allows and what the plan needs. After `init` it also counts the endpoints the mash directory already holds (each has an inbox stream) and stops, naming them, if the plan no longer fits; a `maximum number of streams` error from mash gets the same hint. Streams made by other tools are not counted, so on an account that runs other streams, pass fewer `--endpoint`s than the limit suggests.
+The script reads the account's stream limit and checks the plan (5 shared plus 1 per endpoint; `mash admin init` makes the `mash-directory`, `mash-leases`, `mash-retired`, `mash-issued` and `mash-adoption` buckets, one stream each) against it before it creates anything. If the plan does not fit it stops and says how many streams the account allows and what the plan needs. After `init` it also counts the endpoints the mash directory already holds (each has an inbox stream) and stops, naming them, if the plan no longer fits; a `maximum number of streams` error from mash gets the same hint. Streams made by other tools are not counted, so on an account that runs other streams, pass fewer `--endpoint`s than the limit suggests.
 
 ## Troubleshooting
 
 - **401 / unauthorized.** The token is wrong, expired or revoked. Create a new API token for your team and re-run.
 - **Account full.** The capacity message above. Remove an endpoint you no longer use (see "Removing an endpoint" below), or ask for fewer `--endpoint`s.
 - **A NATS user with that name already exists.** The script refuses to reuse one. Delete the user in the Synadia console, or pick another `--endpoint` name. If the endpoint's directory record is still there, remove it with `mashctl endpoint delete ADDRESS --no-revoke` and an admin creds file (see below) first.
-- **A run failed in the middle of provisioning an endpoint and the account is nearly full.** If provisioning fails after it created the inbox stream but before it wrote the directory record, the script finds no record to remove and leaves the inbox stream (`inbox-<owner>_<group>_<instance>`) behind; it holds one of the free tier's streams. Remove it with an admin credential as in "Removing an endpoint" below (`mashctl deprovision ADDRESS --no-revoke`, without `--user`, with an admin creds file), then re-run.
+- **A run failed in the middle of provisioning an endpoint and the account is nearly full.** If provisioning fails after it created the inbox stream but before it wrote the directory record, the script finds no record to remove and leaves the inbox stream (`inbox-<owner>_<group>_<instance>`) behind; it holds one of the account's streams. Remove it with an admin credential as in "Removing an endpoint" below (`mashctl deprovision ADDRESS --no-revoke`, without `--user`, with an admin creds file), then re-run.
 - **`config.json` already has a different `url` or `owner`.** Re-run with the old `--owner`, or pass `--force` to overwrite it.
 - **`MASH_URL`, `MASH_OWNER` or `MASH_CREDS` is set.** The environment beats `config.json` in every later session. The script ignores them for its own run and says so; unset them afterwards.
 - **Leftover `mash-quickstart-admin-*` users.** The script deletes its admin user on exit, but a `kill -9` or a lost network can leave one behind, and the script warns if it cannot delete it. It never cleans up other runs' users: delete leftovers in the Synadia console when no other run is in progress.

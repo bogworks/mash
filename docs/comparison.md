@@ -139,7 +139,7 @@ numbered footnotes. IBM/BeeAI ACP merged into A2A (2025-08-29), so A2A's column 
 [^mat-ccx]: v2.1.224 and later; on by default.
 [^mat-sub]: Agent teams are experimental.
 [^mat-brk]: Kafka 4.3.1, RabbitMQ 4.4.0, Redis 8.10.3.
-[^run-mash]: One NATS server with JetStream in operator mode, or a hosted account (free tier: 3 endpoints). Identity: one NATS user, creds file and inbox stream per endpoint; `mash init synadia` automates the hosted case. Trust boundary: one NATS account; its key holder can impersonate any endpoint and read mail. Host integration: a Claude Code plugin, and a channels allowlist in managed settings for the idle wake. Measured: `mash send` 511-540 ms; urgent wake 1.2-2.3 s.
+[^run-mash]: One NATS server with JetStream in operator mode, or a hosted account (an account with 5 + N streams holds N endpoints; the free tier's 5 hold none). Identity: one NATS user, creds file and inbox stream per endpoint; `mash init synadia` automates the hosted case. Trust boundary: one NATS account; its key holder can impersonate any endpoint and read mail. Host integration: a Claude Code plugin, and a channels allowlist in managed settings for the idle wake. Measured: `mash send` 511-540 ms; urgent wake 1.2-2.3 s.
 [^run-sap]: One NATS server. Identity: NATS users per agent. Trust boundary: whatever the NATS setup gives. Host integration: Synadia plugins, 12 hosts. Measured: not found.
 [^run-js]: One NATS server. Identity: NATS users. Trust boundary: accounts, with explicit export/import. Host integration: you build it. Measured: not applicable.
 [^run-a2a]: An HTTP(S) server per agent, or a gateway in front of several. Identity per agent: API keys, OAuth, OIDC or mTLS. Trust boundary: per agent. Host integration: SDKs; you write the executor. Measured: not found for setup.
@@ -229,7 +229,7 @@ mash puts each kind of traffic on the NATS layer that suits it. Both share the o
 | Used for | Signed heartbeat every 30 s (published, not listened to by `mash serve`; online = answered the latest `$SRV.INFO` presence probe); `$SRV.INFO` discovery; `status` probes; live prompts, answered as a stream of chunks | Signed mail into a per-endpoint inbox stream; the directory (name to user key and mail subject); leases (one live session per name) |
 | Guarantee | At most once. SAP 0.3: chunks "MAY be lost silently" | At least once while retained: 30 days or 16 MiB per inbox, single replica[^dur-mash] |
 | Recipient not running | The message is gone; an unanswered prompt ends in error `500` after 10 minutes | The message waits in the inbox |
-| Cost | Nothing stored; one hop through the server | A disk write and an acknowledgement per send, and one stream per endpoint (a 5-stream hosted free tier fits 3 endpoints) |
+| Cost | Nothing stored; one hop through the server | A disk write and an acknowledgement per send, and one stream per endpoint (mash's five shared buckets take five streams, so a 5-stream hosted free tier fits no endpoint) |
 
 **Why both.** Presence and live prompts are about now; a heartbeat from an hour ago is wrong data, so `who` asks. Mail is about later,
 so it has to be kept, acknowledged and redelivered, which core NATS does not do. SAP 0.3 defines only the live path and
@@ -373,7 +373,7 @@ work. Shared state is pulled, though, and nothing in it wakes a stopped session.
 queue, not as the work queue.
 
 **Is it faster than A2A? Isn't NATS one more thing to run?** Speed is unmeasured; a model turn takes seconds either way
-(section 6). NATS is one more thing to run (see "What you run" in section 2); a hosted free account fits 3 endpoints.
+(section 6). NATS is one more thing to run (see "What you run" in section 2); a hosted free account has too few streams for even one endpoint.
 
 **When should I not use mash?**
 

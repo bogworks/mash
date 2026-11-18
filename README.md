@@ -57,7 +57,7 @@ The checksum shows the file arrived whole. The attestation, a record signed by G
 
 ## Quick start: one machine, no account
 
-Step-by-step guides: your own NATS server on one machine, [docs/guides/nats-local.md](docs/guides/nats-local.md); Synadia Cloud free tier, [docs/guides/nats-synadia.md](docs/guides/nats-synadia.md).
+Step-by-step guides: your own NATS server on one machine, [docs/guides/nats-local.md](docs/guides/nats-local.md); Synadia Cloud (an account above the free tier), [docs/guides/nats-synadia.md](docs/guides/nats-synadia.md).
 
 This path needs no Synadia account and no server you run by hand. You need:
 
@@ -126,11 +126,11 @@ The config and the credentials land in the config directory, `~/.config/mash` by
 
 ## Quickstart on Synadia Cloud (free tier)
 
-This is the second path, for a server you do not run yourself. The step-by-step guide is [docs/guides/nats-synadia.md](docs/guides/nats-synadia.md). Use a free [Synadia Cloud](https://cloud.synadia.com) account: [`scripts/quickstart-synadia.sh`](scripts/quickstart-synadia.sh) sets up the server side from one API token (it needs curl and jq; it is a script, not part of the mash binary). You need Go 1.27.4 or newer (or the release binary above) and Claude Code with channels: a claude.ai or Console sign-in, not Bedrock, Agent Platform or Foundry; organisations need an Owner to allow mash ([docs/install.md](docs/install.md)).
+This is the second path, for a server you do not run yourself. The step-by-step guide is [docs/guides/nats-synadia.md](docs/guides/nats-synadia.md). The free tier of [Synadia Cloud](https://cloud.synadia.com) cannot run mash (see the limits below), so use an account with a higher stream limit: [`scripts/quickstart-synadia.sh`](scripts/quickstart-synadia.sh) sets up the server side from one API token (it needs curl and jq; it is a script, not part of the mash binary). You need Go 1.27.4 or newer (or the release binary above) and Claude Code with channels: a claude.ai or Console sign-in, not Bedrock, Agent Platform or Foundry; organisations need an Owner to allow mash ([docs/install.md](docs/install.md)).
 
 See it working first: [two Claude Code sessions exchanging mail, one woken by it](docs/demo/) (a recording to play with `asciinema play`).
 
-1. Sign up for Synadia Cloud (the free tier is enough) and create an API token for your team in the Synadia console.
+1. Sign up for Synadia Cloud (an account that allows at least 5 streams plus 1 per endpoint; the free tier's 5 do not) and create an API token for your team in the Synadia console.
 2. Install mash, the plugin, and the channel allowlist (once per machine; the allowlist step is a managed settings file, shown in [docs/install.md](docs/install.md#managed-settings-teams-and-managed-machines)), as in [docs/install.md](docs/install.md) sections 1 to 3:
 
    ```sh
@@ -164,7 +164,7 @@ See it working first: [two Claude Code sessions exchanging mail, one woken by it
 
    Ask Claude to send "hello" to `<owner>.<group>.bob`. In a second terminal, `MASH_GROUP=<group> MASH_NAME=bob claude --channels plugin:mash@mash` receives it; Claude can answer with the `reply` or `send` tool, and `MASH_GROUP=<group> MASH_NAME=alice mash inbox` shows the mailbox from a shell.
 
-The free tier allows 5 streams (mash uses 2 shared, plus 1 per endpoint, so 3 endpoints), 5 connections (one per live session), a 512 KiB message payload (mash caps sends to the server's `max_payload`), and R1 only (no replication, so no HA). Limits, and what to do when the script fails, are in [docs/synadia.md](docs/synadia.md).
+The free tier allows 5 streams, but mash uses 5 shared streams plus 1 per endpoint, so the free tier cannot hold even one endpoint and the script refuses it before it creates anything; an account with a limit of 5 + N holds N endpoints. The free tier also allows 5 connections (one per live session), a 512 KiB message payload (mash caps sends to the server's `max_payload`), and R1 only (no replication, so no HA). Limits, and what to do when the script fails, are in [docs/synadia.md](docs/synadia.md).
 
 ## Addresses and the Synadia Agent Protocol
 

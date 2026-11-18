@@ -65,6 +65,8 @@ type Options struct {
 	// RequireMaxBytes makes the MASH account refuse a stream or bucket config with no MaxBytes, as Synadia's
 	// accounts do (err_code 10113).
 	RequireMaxBytes bool
+	// JetStreamStreams is the MASH account's stream limit; 0 keeps the default of 50.
+	JetStreamStreams int
 	// TLS serves tls://127.0.0.1 with a certificate from a throwaway CA, whose PEM is Env.CAFile.
 	TLS bool
 	// RequireClientCert (with TLS) makes the server verify client certificates; Env.ClientCert and Env.ClientKey
@@ -114,7 +116,11 @@ func launch(dir string, o Options) (*Env, error) {
 		ac.Name = name
 		ac.SigningKeys.Add(skPub)
 		if js {
-			ac.Limits.JetStreamLimits = jwt.JetStreamLimits{DiskStorage: 256 << 20, MemoryStorage: 64 << 20, Streams: 50, Consumer: 100,
+			streams := int64(50)
+			if o.JetStreamStreams > 0 {
+				streams = int64(o.JetStreamStreams)
+			}
+			ac.Limits.JetStreamLimits = jwt.JetStreamLimits{DiskStorage: 256 << 20, MemoryStorage: 64 << 20, Streams: streams, Consumer: 100,
 				MaxBytesRequired: o.RequireMaxBytes}
 		}
 		tok := must(ac.Encode(opKP))

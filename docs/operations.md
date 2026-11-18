@@ -46,7 +46,7 @@ Prerequisites, all of which you supply:
 
 Seeds are read from files only, never from arguments or environment values, the files must be mode 0600, and a seed is never printed. Without `--operator-key`, `--account-key` or `--sys-creds`, adopt exits 2 and says which is missing and why.
 
-Adopt first runs read-only checks, in this order, and writes nothing until all pass: (1) the files parse and have the right seed prefixes; (2) the server refuses a connection without credentials (a server that accepts one, or whose system account answers nothing, is refused as not looking like an operator-mode server with a full resolver), the system creds connect, and the resolver has a JWT for the account key's public key whose subject is that key, whose name is `NAME` and which is not expired; (3) the account has JetStream file storage (disk limit other than 0), and its disk, stream and consumer limits are shown, with a warning when they are below what one endpoint needs (3 streams, 1 consumer, about 36 MiB; see [Account limits](#account-limits)); (4) the system account answers the `$SYS.REQ.SERVER.PING` and the claims lookup, which is reported as standalone or as a cluster; (5) the account JWT carries a valid signature by its issuer, and the issuer is the operator key you gave; any other issuer is refused (exit 1, nothing written), naming the issuer and the accepted keys. The system and admin connections require TLS, or the `insecure_plaintext` setting for a throwaway server (see [Local setup](#local-setup-with-mashctl-init---local)). The permission to push claims updates is not tested, because that would change the server: `mashctl endpoint delete` is the first to use it. The check also refuses a key store that already holds a different operator or account key, and a `sys.creds` that already holds other creds.
+Adopt first runs read-only checks, in this order, and writes nothing until all pass: (1) the files parse and have the right seed prefixes; (2) the server refuses a connection without credentials (a server that accepts one, or whose system account answers nothing, is refused as not looking like an operator-mode server with a full resolver), the system creds connect, and the resolver has a JWT for the account key's public key whose subject is that key, whose name is `NAME` and which is not expired; (3) the account has JetStream file storage (disk limit other than 0), and its disk, stream and consumer limits are shown, with a warning when they are below what one endpoint needs (6 streams, 1 consumer, about 109 MiB; see [Account limits](#account-limits)); (4) the system account answers the `$SYS.REQ.SERVER.PING` and the claims lookup, which is reported as standalone or as a cluster; (5) the account JWT carries a valid signature by its issuer, and the issuer is the operator key you gave; any other issuer is refused (exit 1, nothing written), naming the issuer and the accepted keys. The system and admin connections require TLS, or the `insecure_plaintext` setting for a throwaway server (see [Local setup](#local-setup-with-mashctl-init---local)). The permission to push claims updates is not tested, because that would change the server: `mashctl endpoint delete` is the first to use it. The check also refuses a key store that already holds a different operator or account key, and a `sys.creds` that already holds other creds.
 
 Then it writes, or with `--dry-run` prints exactly what it would write: the two keys into the key store (`operator.nk`, `account.nk`; 0600, created without replacing anything, fsynced; the same key already stored is fine, a different one is refused); the system creds as `<config dir>/server/sys.creds` (0600, where a revocation looks for them); with `--admin-creds FILE`, that path as `admin_creds` in `config.json` (the file is checked to connect and not copied), or with `--mint-admin` a `mashadmin` user of the account, signed by the account identity key with full access as `init --local` makes it, as `<config dir>/server/mashadmin.creds` (0600; one already there that is valid for this account and connects is kept, not replaced); `config.json` (`url`, `owner`, `admin_creds`, and `tls_ca`, `tls_cert`, `tls_key` when the loaded configuration sets them) only if there is none (otherwise the settings are printed); and the open `policy.yaml` only if there is none. Running adopt again with the same inputs changes nothing.
 
@@ -83,7 +83,7 @@ What `mashctl` prints and reads follows from not trusting the server:
 
 ## The account
 
-Create an account with JetStream limits sized for your endpoints: one stream per endpoint plus two KV buckets, and one consumer per endpoint. The account name is yours to choose; `MASH` is only the default in these examples (set `ACCOUNT` to use another). The limits default to 2G of disk, 64 streams and 128 consumers; see [Limits](#limits) for the sizing rule.
+Create an account with JetStream limits sized for your endpoints: one stream per endpoint plus five KV buckets, and one consumer per endpoint. The account name is yours to choose; `MASH` is only the default in these examples (set `ACCOUNT` to use another). The limits default to 2G of disk, 64 streams and 128 consumers; see [Limits](#limits) for the sizing rule.
 
 ```sh
 ACCOUNT=${ACCOUNT:-MASH}
@@ -433,13 +433,13 @@ New endpoints (`mash admin provision`) get the configured limits at once. `mash 
 
 ### Account limits
 
-The NATS account has limits of its own: streams, consumers and disk. Size them from the endpoint count: one stream per endpoint plus two for the buckets, and one consumer per endpoint. The disk must hold the sum of the stream caps (`inbox_max_bytes` per endpoint plus the two bucket caps), so raising the inbox cap raises the disk you need.
+The NATS account has limits of its own: streams, consumers and disk. Size them from the endpoint count: one stream per endpoint plus five for the buckets (`mash-directory`, `mash-leases`, `mash-retired`, `mash-issued` and `mash-adoption`, all made by `mash admin init`), and one consumer per endpoint. The disk must hold the sum of the stream caps (`inbox_max_bytes` per endpoint plus the five bucket caps: 16, 4, 64, 8 and 1 MiB, 93 MiB), so raising the inbox cap raises the disk you need.
 
 ```sh
 ENDPOINTS=20
-JS_STREAMS=$((ENDPOINTS + 2))
+JS_STREAMS=$((ENDPOINTS + 5))
 JS_CONSUMERS=$ENDPOINTS
-JS_DISK_MIB=$((ENDPOINTS * 16 + 16 + 4))   # inbox_max_bytes in MiB per endpoint, plus the two buckets
+JS_DISK_MIB=$((ENDPOINTS * 16 + 93))   # inbox_max_bytes in MiB per endpoint, plus the five buckets
 ```
 
 The examples above default to `JS_DISK=2G`, `JS_STREAMS=64` and `JS_CONSUMERS=128`, which leave room to grow; change the values and re-run `nsc edit account "$ACCOUNT" ... --js-disk-storage "$JS_DISK" --js-streams "$JS_STREAMS" --js-consumer "$JS_CONSUMERS"` and `nsc push`. Leave `--js-mem-storage` unset.

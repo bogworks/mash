@@ -7,9 +7,10 @@
 # shaped as expected, the script stops). Needs bash, curl, jq and a mash binary.
 #
 # What it does:
-#   1. finds your team, system and account, and checks the free-tier stream limit
-#      (2 shared streams + 1 per endpoint must fit); after `mash admin init` it also counts the
-#      endpoints the mash directory already holds and stops if the account cannot take the plan;
+#   1. finds your team, system and account, and checks the account's stream limit (5 shared streams
+#      + 1 per endpoint must fit; the free tier's 5 streams do not hold even one endpoint); after
+#      `mash admin init` it also counts the endpoints the mash directory already holds and stops
+#      if the account cannot take the plan;
 #   2. creates ONE temporary admin NATS user, writes <config dir>/config.json (url, owner) and
 #      runs `mash admin init` with the admin creds, then (if the plan fits) creates, for each
 #      endpoint, a NATS user named by the endpoint's address, OWNER.GROUP.INSTANCE (--endpoint gives
@@ -259,13 +260,15 @@ skg_id=$(api GET "/accounts/$acct_id/account-sk-groups" | jq -r '[.items[] | sel
 say "Synadia: team '$team_name', system '$(jq -r .system <<<"$acct")', account '$acct_name'"
 say "NATS URL: $NATS_URL"
 
-# Capacity: 2 shared streams (directory and lease KV buckets) + 1 inbox per endpoint. Streams the account
+# Capacity: `mash admin init` creates 5 shared streams (the mash-directory, mash-leases, mash-retired, mash-issued
+# and mash-adoption KV buckets) and `mash admin provision` adds 1 inbox per endpoint. Streams the account
 # already holds are not counted (the old init asked the server; this script has no NATS client).
-need=$((2 + ${#ENDPOINTS[@]}))
+SHARED=5
+need=$((SHARED + ${#ENDPOINTS[@]}))
 say "Plan: owner '$OWNER', group '$GROUP', ${#ENDPOINTS[@]} endpoint(s) (${ENDPOINTS[*]})"
-say "Streams: 2 shared + ${#ENDPOINTS[@]} x 1 per endpoint = $need (the account allows $stream_limit)"
+say "Streams: $SHARED shared + ${#ENDPOINTS[@]} x 1 per endpoint = $need (the account allows $stream_limit)"
 if [ "$stream_limit" -ge 0 ] && [ "$need" -gt "$stream_limit" ]; then
-  die "this account allows $stream_limit streams and the plan needs $need; room for $((stream_limit > 2 ? stream_limit - 2 : 0)) endpoint(s). Nothing was created"
+  die "this account allows $stream_limit streams and the plan needs $need; room for $((stream_limit > SHARED ? stream_limit - SHARED : 0)) endpoint(s). Nothing was created"
 fi
 
 # Exclusive lock on the config directory (a real run only: a dry run creates nothing), held until the exit trap.
@@ -376,7 +379,7 @@ EXISTING=()
 streams_hint() {
   local held=${#EXISTING[@]}
   {
-    echo "quickstart-synadia: this account allows $stream_limit streams; it already holds the 2 shared buckets plus $held endpoint inbox(es)${EXISTING[*]:+ (${EXISTING[*]})}, and the plan needs ${#ENDPOINTS[@]} more."
+    echo "quickstart-synadia: this account allows $stream_limit streams; it already holds the $SHARED shared buckets plus $held endpoint inbox(es)${EXISTING[*]:+ (${EXISTING[*]})}, and the plan needs ${#ENDPOINTS[@]} more."
     echo "Remove an endpoint you no longer use (docs/synadia.md, \"Removing an endpoint\"), or pass fewer --endpoint."
   } >&2
   exit 1
@@ -405,7 +408,7 @@ while IFS=$'\t' read -r en _; do
   [ -n "$en" ] || continue
   printf '%s\n' "${ADDRS[@]}" | grep -qxF "$en" || EXISTING+=("$en")
 done <<<"$listing"
-if [ "$stream_limit" -ge 0 ] && [ $(( ${#EXISTING[@]} + ${#ENDPOINTS[@]} + 2 )) -gt "$stream_limit" ]; then
+if [ "$stream_limit" -ge 0 ] && [ $(( ${#EXISTING[@]} + ${#ENDPOINTS[@]} + SHARED )) -gt "$stream_limit" ]; then
   streams_hint
 fi
 # ---- endpoint users (after the capacity check, so a refused plan leaves none behind) ------------

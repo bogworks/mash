@@ -163,7 +163,7 @@ A batch of more than 10 messages or 16 KiB is shown as a digest: one line per me
 
 ## Account full or `maximum number of streams`
 
-Each endpoint takes one stream, and the two shared buckets take two. On Synadia's free tier (5 streams) that is 3 endpoints. Remove an endpoint with `mash admin deprovision <owner.group.instance>` and an admin credential. [synadia.md](synadia.md) has the full list of quickstart script failures (401, a user that already exists, a stale lock, a leftover inbox).
+Each endpoint takes one stream, and the five shared buckets take five. On Synadia's free tier (5 streams) no endpoint fits; an account with a limit of 5 + N streams holds N. Remove an endpoint with `mash admin deprovision <owner.group.instance>` and an admin credential. [synadia.md](synadia.md) has the full list of quickstart script failures (401, a user that already exists, a stale lock, a leftover inbox).
 
 ## `jetstream not enabled` (code 503, err_code 10076) or `the server could not enable JetStream for the account`
 

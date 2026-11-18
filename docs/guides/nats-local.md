@@ -18,7 +18,7 @@ Where the detail lives, this guide links to it: [operations.md](../operations.md
 - JetStream on file storage, with the limits the `MASH` account needs.
 - A local certificate authority and a server certificate it signs.
 - The credentials and signing keys `mashctl` needs, in a config directory.
-- The directory and lease buckets that mash keeps in the account.
+- The five buckets that mash keeps in the account (listed [below](#the-buckets-mash-keeps-in-the-account)), made by `mashctl init`.
 - Two endpoints, and mail between them.
 
 It does not set up a server that other machines can reach, a cluster, or a second `mashctl` machine. See [Limits](#limits).
@@ -31,7 +31,7 @@ Use this as a checklist for a server you did not set up with `mashctl init --loc
 |---|---|
 | JetStream on, with a file store directory (`jetstream { store_dir: ... }`) | Every inbox is a JetStream stream and every directory, lease and record bucket is a key-value bucket. mash keeps all of it on file storage and uses no memory store. |
 | Operator mode with a full account resolver (`operator`, `resolver { type: full ... }`, `resolver_preload`) | An endpoint signs with the key of its NATS user, so mash accepts only JWT user credentials. `mashctl` writes revocations into the account JWT through the resolver, which must be a full one. Token, user/password and plain nkey login are not supported. |
-| A `MASH` account whose JWT gives JetStream disk, streams and consumers (default 2G, 64, 128) | One stream per endpoint plus buckets, one consumer per endpoint. An account with disk 0 has no JetStream: `adopt` refuses it. See [Account limits](../operations.md#account-limits) for the sizing rule. |
+| A `MASH` account whose JWT gives JetStream disk, streams and consumers (default 2G, 64, 128) | Five shared streams (the buckets) plus one inbox stream per endpoint, one consumer per endpoint. An account with disk 0 has no JetStream: `adopt` refuses it. See [Account limits](../operations.md#account-limits) for the sizing rule. |
 | TLS on the client port (`tls { cert_file, key_file }`), a certificate that lists every host name and address clients use, and a CA the clients trust (`tls_ca`) | Every mash connection requires TLS, to any host, loopback included. A plain `nats://` URL is refused before any connection is made. Clients must use `tls://` URLs. |
 | A system account (`system_account`) and its credentials (`sys.creds`) | Revocations ask every server for the account JWT and push the update through the system account. `mashctl issued check` also uses it. |
 | Admin credentials for the `MASH` account (`mashadmin.creds`) | `mashctl` creates buckets, endpoints and inboxes with them. They have no permission limits inside the account. |
@@ -49,7 +49,7 @@ Ask these before running anything. Each answer changes a step.
 4. **One machine or several.** One machine: continue with this guide. Several machines that all run endpoints against one server, or a second machine that runs `mashctl`: this guide covers only the first server; the rest is in [tls-and-clusters.md](../tls-and-clusters.md) and was not run here (see [Not run](#not-run)).
 5. **Must the server be reachable from other machines?** If no, path A is enough: it listens on `127.0.0.1` and its certificate lists `localhost`, `127.0.0.1` and `::1` only. If yes, the server needs a certificate that lists every host name and address the clients use, `listen` on an address they can reach, and `tls_ca` on every client. `init --local` does not do this; see [TLS on one server](../tls-and-clusters.md#1-tls-on-one-server) and use path B.
 6. **Is a nats-server already running that mash must use?** If yes, use path B and check it against the [checklist](#what-mash-needs-from-a-nats-server). If no, use path A.
-7. **Storage path and size.** The JetStream store is `<server dir>/jetstream`, on the disk that holds the config directory. The `MASH` account is limited to 2G of disk; each inbox keeps at most 16 MiB or 30 days, and the buckets take a few MiB more. nats-server also gives JetStream only a share of the free disk by default, so the disk under the store directory needs more free space than the account limit. To use another disk, pass `--dir` on a path on that disk.
+7. **Storage path and size.** The JetStream store is `<server dir>/jetstream`, on the disk that holds the config directory. The `MASH` account is limited to 2G of disk; each inbox keeps at most 16 MiB or 30 days, and the five buckets take up to 93 MiB more in caps (they hold little). nats-server also gives JetStream only a share of the free disk by default, so the disk under the store directory needs more free space than the account limit. To use another disk, pass `--dir` on a path on that disk.
 
 You also need `nats-server` on your `PATH` (a current 2.x release with JetStream; mash is built and tested against 2.15), and `mash` and `mashctl` ([install.md](../install.md#1-the-binary); `mashctl` comes from `go install`, it is not in the release assets).
 
@@ -96,7 +96,7 @@ Without `--start`, the command writes the files and stops. Start the server your
 
 ```sh
 nats-server -c $MASH_CONFIG_DIR/server/server.conf     # in its own terminal, or detached
-mashctl init                                            # the directory and lease buckets
+mashctl init                                            # the five buckets (its output says "directory and lease buckets ready")
 ```
 
 With `--start`, `mashctl` starts `nats-server` detached from `PATH`, writes its output to `server.log` and its pid to `server.pid`, waits up to 15 seconds for a connection with `mashadmin.creds`, and makes the buckets.
@@ -116,6 +116,20 @@ In the server directory (mode 0700):
 | `server.pem`, `server.key` | The server certificate and its key, valid for `localhost`, `127.0.0.1` and `::1`. | `server.key` is secret (0600) |
 | `resolver/`, `jetstream/` | The resolver's account JWTs, and the JetStream store (all mail). | The store holds every message |
 | `server.log`, `server.pid` | The server's log, and its process id (written with `--start`). | No |
+
+### The buckets mash keeps in the account
+
+Each bucket is a JetStream key-value bucket, and each is one stream (`KV_` plus the name). Observed on a fresh local server (mash 0.5.5, commit e389eaf), `mashctl init` made all five and `nats stream ls` listed exactly these, with no endpoint yet:
+
+| Bucket (stream) | What it holds | Cap | Created by |
+|---|---|---|---|
+| `mash-directory` (`KV_mash-directory`) | One record per endpoint | 16 MiB | `mashctl init` |
+| `mash-leases` (`KV_mash-leases`) | The lease and lock of each running session | 4 MiB | `mashctl init` |
+| `mash-retired` (`KV_mash-retired`) | A marker for each address that was deleted, so it is never assigned again | 64 MiB | `mashctl init` |
+| `mash-issued` (`KV_mash-issued`) | The record of each NATS user mash signed | 8 MiB | `mashctl init` |
+| `mash-adoption` (`KV_mash-adoption`) | The marker `mashctl adopt` leaves | 1 MiB | `mashctl init` |
+
+Each endpoint adds one more stream, its inbox (`inbox-<owner>_<group>_<instance>`), when it is created (`mashctl endpoint create`) or provisioned. After `mashctl init --local ... --start` and one `mashctl endpoint create ... --make-key` the server held 6 streams: the five buckets and one inbox. The code also creates `mash-retired`, `mash-issued` and `mash-adoption` if they are missing when an admin command first needs them (an account that was set up by an older mash), but `init` already makes them, so a fresh account has all five before the first endpoint. The stream count of the account is therefore 5 plus the number of endpoints, and the account's stream limit must be at least that (64 in the guide's setup).
 
 In the config directory:
 
@@ -396,7 +410,7 @@ More: [Troubleshooting in operations.md](../operations.md#troubleshooting).
 - One server and one replica. Every inbox is a single-replica stream, and nats-server's default `sync_interval` (2 minutes) means a host crash or power cut can lose recent mail that was reported as sent; see [Durability](../operations.md#durability-and-sync_interval).
 - One account (`MASH`), one owner. Every endpoint can read the whole directory.
 - The seeds in `<config dir>/keys` and `mashadmin.creds` are unrestricted authority over the account, and other processes of your own user can read them. See [Where the key store lives](../operations.md#where-the-key-store-lives).
-- The disk limit of 2G, 64 streams and 128 consumers caps the account at about 60 endpoints; see [Account limits](../operations.md#account-limits) to raise it.
+- The disk limit of 2G, 64 streams and 128 consumers caps the account at 59 endpoints (64 streams, less the 5 for the buckets, one inbox stream each; the disk would allow about 120); see [Account limits](../operations.md#account-limits) to raise it.
 
 ## Not run
 

@@ -1,9 +1,11 @@
 ---
 name: mash-nats-synadia
-description: Use when you want mash to run on Synadia Cloud (the free tier) instead of a NATS server you run yourself. Covers the API token, the dry run, the real run of scripts/quickstart-synadia.sh, the checks afterwards, adding and removing an endpoint, and the failures the script reports. Do not use it for a server you run in operator mode (see docs/operations.md) or for a one-machine setup (`mashctl init --local`).
+description: Use when you want mash to run on a Synadia Cloud account instead of a NATS server you run yourself. The free tier's 5 streams are too few for mash (it needs 5 shared streams plus 1 per endpoint), so this needs an account with a higher stream limit. Covers the API token, the dry run, the real run of scripts/quickstart-synadia.sh, the checks afterwards, adding and removing an endpoint, and the failures the script reports. Do not use it for a server you run in operator mode (see docs/operations.md) or for a one-machine setup (`mashctl init --local`).
 ---
 
-# mash on Synadia Cloud (free tier)
+# mash on Synadia Cloud
+
+**The free tier cannot run mash.** mash needs 5 streams for its shared buckets and 1 more for each endpoint, so one endpoint needs 6 streams. Synadia's free tier allows 5 (figure from [synadia.md](../synadia.md), not re-checked). The script refuses such an account before it creates anything. To use this guide you need a Synadia account whose R1 stream limit is at least 5 plus the number of endpoints, and its other limits (connections, payload) are Synadia's to set. For one machine or a LAN, use [nats-local.md](nats-local.md) instead.
 
 This guide is for a person to follow, or to point an agent at. It is built on [`scripts/quickstart-synadia.sh`](../../scripts/quickstart-synadia.sh) and was written against mash 0.5.5. An agent following it must ask the questions in "Questions to ask first" before it runs anything, must never see the API token, and must stop at each step marked "person" until the person has done it.
 
@@ -11,7 +13,7 @@ The sections: [What this sets up](#what-this-sets-up), [What mash needs from the
 
 ## What this sets up
 
-- One NATS account on Synadia Cloud holds mash's two shared buckets (the directory and the leases) and one inbox stream for each endpoint.
+- One NATS account on Synadia Cloud holds mash's five shared buckets (`mash-directory`, `mash-leases`, `mash-retired`, `mash-issued` and `mash-adoption`, all made by `mash admin init`) and one inbox stream for each endpoint. Each bucket is one JetStream stream.
 - Each endpoint has its own NATS user and creds file. An endpoint is addressed `owner.group.instance`: the owner is whose endpoints these are and is the permission fence, the group is the set of endpoints of one owner that work together, the instance is the name of one session.
 - `~/.config/mash/config.json` (or the config directory you choose) holds the server `url` and the `owner`.
 - The script is a quickstart outside the mash binary ([ADR 0038](../decisions/0038-synadia-setup-is-a-script-outside-the-binary.md)). It talks to Synadia's management API, creates the NATS users, and runs mash's own commands for the directory, the inboxes and the test message. It needs bash, curl, jq and a `mash` binary. Install mash and `mashctl` first ([install.md](../install.md), sections 1 and 2; `mashctl` comes from `go install`).
@@ -20,7 +22,7 @@ The sections: [What this sets up](#what-this-sets-up), [What mash needs from the
 
 | mash needs | Synadia Cloud |
 |---|---|
-| JetStream, with file storage and R1 streams | The account has JetStream limits. The free tier allows 5 streams (figure from [synadia.md](../synadia.md), not re-checked). mash uses 2 for its shared buckets and 1 per endpoint, so the free tier fits 3 endpoints. The script reads the account's R1 stream limit and stops, creating nothing, if the plan does not fit. |
+| JetStream, with file storage and R1 streams | The account has JetStream limits. The free tier allows 5 streams (figure from [synadia.md](../synadia.md), not re-checked). mash uses 5 for its shared buckets and 1 per endpoint, so the free tier cannot hold even one endpoint; an account with a limit of 5 + N holds N. The script reads the account's R1 stream limit and stops, creating nothing, if the plan does not fit. |
 | An account and users in it | Synadia runs the operator and the account. You do not run `nsc`, an operator key or a resolver. The script creates users in the account through the management API. |
 | TLS on every connection | mash requires TLS on every connection, loopback included. Synadia's servers use a certificate from a public CA, so the URL is `tls://...` and `config.json` needs no `tls_ca`. The script writes the server URL the API reports. |
 | A user per endpoint, with mash's permissions | The script runs `mashctl permissions <address>` for each endpoint and creates the NATS user with exactly that permission set (publish and subscribe subjects, which fence the user to its owner). Creds go to `<config dir>/<address>.creds`, mode 0600. |
@@ -45,7 +47,7 @@ Ask all of these and wait for the answers.
 2. **Which team and account?** If the token sees one team and one account with JetStream, the script finds them. If it sees several, it stops and lists them; pass `--team NAME` and `--account NAME` (name or id).
 3. **Which owner?** It defaults to your user name, lower-cased. Use `--owner` to choose. The owner, the group and each instance are 1 to 32 lower-case letters, digits and single hyphens, and start with a letter.
 4. **Which group?** Required. There is no default and `config.json` has no key for it. One group for a first try (`eng`, `dev`) is enough. A group cannot be changed later: you delete the endpoint and create a new one.
-5. **How many endpoints, and what are their instance names?** Each `--endpoint NAME` is one instance; the address is `owner.group.NAME`. With none, the script makes one named `<user>-<host>`. The plan must fit the stream limit: 2 shared streams plus 1 per endpoint. With the free tier's 5 streams that is at most 3 endpoints, and fewer if anything else on the account uses streams (the script does not count streams other tools made). Two endpoints are the least that gives you the test message.
+5. **How many endpoints, and what are their instance names?** Each `--endpoint NAME` is one instance; the address is `owner.group.NAME`. With none, the script makes one named `<user>-<host>`. The plan must fit the stream limit: 5 shared streams plus 1 per endpoint. An account that allows 9 streams holds at most 4 endpoints, and fewer if anything else on the account uses streams (the script does not count streams other tools made). The free tier's 5 streams hold none. Two endpoints are the least that gives you the test message.
 6. **Which config directory?** The default is `$MASH_CONFIG_DIR`, else `$XDG_CONFIG_HOME/mash`, else `~/.config/mash`. `--config-dir DIR` takes an absolute path. If the directory already holds a `config.json` with another `url` or `owner`, the script stops unless you pass `--force`; if it already holds `<address>.creds` for a requested endpoint, the script stops and touches nothing.
 7. **Dry run first?** Yes. `--dry-run` does the discovery and the capacity check, calls only read endpoints of the API, prints the plan and creates nothing.
 
@@ -63,13 +65,13 @@ Give the token to the script by one of the routes in question 1.
 bash scripts/quickstart-synadia.sh --dry-run --group eng --owner alice --endpoint design --endpoint review
 ```
 
-Observed against the fake API (see [Not run here](#not-run-here)), exit 0:
+Observed against the fake API (see [Not run here](#not-run-here)), with an account limited to 9 streams, exit 0:
 
 ```text
 Synadia: team 'Test Team', system 'Test System', account 'Default'
 NATS URL: nats://127.0.0.1:<port>
 Plan: owner 'alice', group 'eng', 2 endpoint(s) (design review)
-Streams: 2 shared + 2 x 1 per endpoint = 4 (the account allows 5)
+Streams: 5 shared + 2 x 1 per endpoint = 7 (the account allows 9)
 
 Dry run: nothing is created. A real run would:
   - create a temporary admin user, and delete it at the end
@@ -90,7 +92,7 @@ The script also refuses, before it creates anything:
 | the token on the command line | `quickstart-synadia: unknown argument: --token (try --help)` | 1 |
 | no token anywhere | `quickstart-synadia: no Synadia API token: set SYNADIA_API_TOKEN, use --token-stdin, or run on a terminal` | 1 |
 | `SYNADIA_API_URL=http://example.com/api` | `quickstart-synadia: SYNADIA_API_URL 'http://example.com/api' refused: plain http is only allowed to 127.0.0.1 or localhost` | 1 |
-| plan too large | `quickstart-synadia: this account allows 3 streams and the plan needs 4; room for 1 endpoint(s). Nothing was created` | 1 |
+| plan too large (the free tier's 5 streams, one endpoint) | `quickstart-synadia: this account allows 5 streams and the plan needs 6; room for 0 endpoint(s). Nothing was created` | 1 |
 
 `SYNADIA_API_URL` is for tests; leave it unset against Synadia.
 
@@ -100,14 +102,14 @@ The script also refuses, before it creates anything:
 bash scripts/quickstart-synadia.sh --group eng --owner alice --endpoint design --endpoint review
 ```
 
-What it does, in order: reads the account and its signing-key group; takes a lock on the config directory (`.quickstart.lock`); checks `config.json` and existing creds files; creates the temporary admin user and downloads its creds to a temporary directory; writes `config.json`; runs `mash admin init` (the directory and lease buckets) and lists the directory; creates each endpoint's NATS user with the permissions `mashctl permissions` prints, downloads its creds (and refuses creds that belong to another key), runs `mash admin provision` (the directory record and the inbox); deletes the admin user; sends the test message.
+What it does, in order: reads the account and its signing-key group; takes a lock on the config directory (`.quickstart.lock`); checks `config.json` and existing creds files; creates the temporary admin user and downloads its creds to a temporary directory; writes `config.json`; runs `mash admin init` (the five shared buckets) and lists the directory; creates each endpoint's NATS user with the permissions `mashctl permissions` prints, downloads its creds (and refuses creds that belong to another key), runs `mash admin provision` (the directory record and the inbox); deletes the admin user; sends the test message.
 
-Observed against the fake API, exit 0 (paths shortened to `~`; the `NATS URL` line and a plain-text warning that the fake's plain connection prints on stderr before each mash command are left out, and the deprecation line is shown once, see the note after the block):
+Observed against the fake API, an account limited to 9 streams, exit 0 (paths shortened to `~`; the `NATS URL` line and a plain-text warning that the fake's plain connection prints on stderr before each mash command are left out, and the deprecation line is shown once, see the note after the block). The `mash: directory and lease buckets ready` line is mash's own text; `init` also makes the retired-name, issue-record and adoption buckets, which that line does not name:
 
 ```text
 Synadia: team 'Test Team', system 'Test System', account 'Default'
 Plan: owner 'alice', group 'eng', 2 endpoint(s) (design review)
-Streams: 2 shared + 2 x 1 per endpoint = 4 (the account allows 5)
+Streams: 5 shared + 2 x 1 per endpoint = 7 (the account allows 9)
 Created the temporary admin user mash-quickstart-admin-35d34074 (deleted before this script ends).
 Wrote ~/.config/mash/config.json.
 mash admin is deprecated and will be removed; use mashctl (same verbs, e.g. mashctl list)
@@ -188,12 +190,12 @@ bash scripts/quickstart-synadia.sh --dry-run --group eng --owner alice --endpoin
 bash scripts/quickstart-synadia.sh --group eng --owner alice --endpoint third
 ```
 
-Observed with two endpoints already provisioned: the plan reads `2 shared + 1 x 1 per endpoint = 3 (the account allows 5)`, it makes a temporary admin user, re-runs `init` (safe to repeat), provisions `alice.eng.third`, deletes the admin user, and prints `Test mail: skipped, it needs two endpoints; add a second --endpoint.` (a test needs two `--endpoint`s in the same run). `config.json` is rewritten with the same `url` and `owner`; no `--force` is needed unless they differ.
+Observed with two endpoints already provisioned on an account limited to 9 streams: the plan reads `5 shared + 1 x 1 per endpoint = 6 (the account allows 9)`, it makes a temporary admin user, re-runs `init` (safe to repeat), provisions `alice.eng.third`, deletes the admin user, and prints `Test mail: skipped, it needs two endpoints; add a second --endpoint.` (a test needs two `--endpoint`s in the same run). `config.json` is rewritten with the same `url` and `owner`; no `--force` is needed unless they differ.
 
-The script counts the endpoints already in the directory. If they and the new ones do not fit, it stops after `init`, names them, deletes the admin user, and restores `config.json` (observed with a limit of 4, three endpoints held and two requested):
+The script counts the endpoints already in the directory. If they and the new ones do not fit, it stops after `init`, names them, deletes the admin user, and restores `config.json` (observed with a limit of 9, three endpoints held and two requested):
 
 ```text
-quickstart-synadia: this account allows 4 streams; it already holds the 2 shared buckets plus 3 endpoint inbox(es) (alice.eng.design alice.eng.review alice.eng.third), and the plan needs 2 more.
+quickstart-synadia: this account allows 9 streams; it already holds the 5 shared buckets plus 3 endpoint inbox(es) (alice.eng.design alice.eng.review alice.eng.third), and the plan needs 2 more.
 Remove an endpoint you no longer use (docs/synadia.md, "Removing an endpoint"), or pass fewer --endpoint.
 Deleted the temporary admin user.
 Setup failed: restored the previous ~/.config/mash/config.json.
@@ -242,7 +244,7 @@ The first four were run against the fake API; the others come from [synadia.md](
 
 | Limit | Free tier (as [synadia.md](../synadia.md) states it, not re-checked) | Effect on mash |
 |---|---|---|
-| Streams | 5 | 2 shared + 1 per endpoint: at most 3 endpoints |
+| Streams | 5 | 5 shared + 1 per endpoint: none fit (one endpoint needs 6) |
 | Connections | 5 | one per live session |
 | Message payload | 512 KiB | mash caps a send to the server's `max_payload` |
 | Replication | R1 only | no replicas, no high availability |

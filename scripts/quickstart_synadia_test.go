@@ -256,7 +256,7 @@ func readConfig(t *testing.T, home string) map[string]any {
 
 func TestQuickstartCreatesEndpointsAndDeletesAdmin(t *testing.T) {
 	e := testenv.Start(t)
-	f := newFake(t, e, 5)
+	f := newFake(t, e, 9)
 	home := t.TempDir()
 	r := runScript(t, f, home, nil, "--group", "eng", "--owner", "alice", "--endpoint", "alice-a", "--endpoint", "alice-b")
 	if r.code != 0 {
@@ -295,7 +295,7 @@ func TestQuickstartCreatesEndpointsAndDeletesAdmin(t *testing.T) {
 // A --config-dir that does not end in .config/mash works: mash is run with MASH_CONFIG_DIR set to it, and HOME is untouched.
 func TestQuickstartCustomConfigDir(t *testing.T) {
 	e := testenv.Start(t)
-	f := newFake(t, e, 5)
+	f := newFake(t, e, 9)
 	home := t.TempDir()
 	custom := filepath.Join(t.TempDir(), "elsewhere")
 	r := runScript(t, f, home, nil, "--config-dir", custom, "--group", "eng", "--owner", "alice", "--endpoint", "alice-a", "--endpoint", "alice-b")
@@ -318,7 +318,7 @@ func TestQuickstartCustomConfigDir(t *testing.T) {
 // With no --config-dir, XDG_CONFIG_HOME/mash is the default.
 func TestQuickstartXDGConfigHomeDefault(t *testing.T) {
 	e := testenv.Start(t)
-	f := newFake(t, e, 5)
+	f := newFake(t, e, 9)
 	home := t.TempDir()
 	xdg := t.TempDir()
 	r := runScript(t, f, home, []string{"XDG_CONFIG_HOME=" + xdg}, "--no-test", "--group", "eng", "--owner", "alice", "--endpoint", "alice-a")
@@ -332,7 +332,7 @@ func TestQuickstartXDGConfigHomeDefault(t *testing.T) {
 
 func TestQuickstartRelativeConfigDirRefused(t *testing.T) {
 	e := testenv.Start(t)
-	f := newFake(t, e, 5)
+	f := newFake(t, e, 9)
 	r := runScript(t, f, t.TempDir(), nil, "--dry-run", "--group", "eng", "--config-dir", "rel/dir")
 	if r.code == 0 || !strings.Contains(r.out, "absolute") {
 		t.Fatalf("exit %d:\n%s", r.code, r.out)
@@ -341,7 +341,7 @@ func TestQuickstartRelativeConfigDirRefused(t *testing.T) {
 
 func TestQuickstartDryRunCreatesNothing(t *testing.T) {
 	e := testenv.Start(t)
-	f := newFake(t, e, 5)
+	f := newFake(t, e, 9)
 	home := t.TempDir()
 	r := runScript(t, f, home, nil, "--dry-run", "--group", "eng", "--owner", "alice", "--endpoint", "alice-a")
 	if r.code != 0 || !strings.Contains(r.out, "Dry run") {
@@ -357,7 +357,7 @@ func TestQuickstartDryRunCreatesNothing(t *testing.T) {
 
 func TestQuickstartDeletesAdminOnFailure(t *testing.T) {
 	e := testenv.Start(t)
-	f := newFake(t, e, 5)
+	f := newFake(t, e, 9)
 	f.mu.Lock()
 	f.failCreds = true
 	f.mu.Unlock()
@@ -385,16 +385,16 @@ func TestQuickstartRefusals(t *testing.T) {
 		}
 	})
 	t.Run("directory already holds endpoints", func(t *testing.T) {
-		// Two endpoints are provisioned first; the account then allows 5 streams, so 2 shared + 2 held + 2 planned
+		// Two endpoints are provisioned first; the account then allows 8 streams, so 5 shared + 2 held + 2 planned
 		// does not fit and the script must stop before it creates any endpoint user.
 		home := t.TempDir()
-		first := runScript(t, newFake(t, e, 5), home, nil, "--group", "eng", "--owner", "alice", "--endpoint", "old-a", "--endpoint", "old-b", "--no-test")
+		first := runScript(t, newFake(t, e, 8), home, nil, "--group", "eng", "--owner", "alice", "--endpoint", "old-a", "--endpoint", "old-b", "--no-test")
 		if first.code != 0 {
 			t.Fatalf("setup run: exit %d:\n%s", first.code, first.out)
 		}
-		f := newFake(t, e, 5)
+		f := newFake(t, e, 8)
 		r := runScript(t, f, home, nil, "--group", "eng", "--owner", "alice", "--endpoint", "new-a", "--endpoint", "new-b")
-		if r.code == 0 || !strings.Contains(r.out, "allows 5 streams") || !strings.Contains(r.out, qa("old-a")) ||
+		if r.code == 0 || !strings.Contains(r.out, "allows 8 streams") || !strings.Contains(r.out, qa("old-a")) ||
 			!strings.Contains(r.out, qa("old-b")) || !strings.Contains(r.out, "Removing an endpoint") {
 			t.Fatalf("want the stream hint naming old-a and old-b, exit %d:\n%s", r.code, r.out)
 		}
@@ -408,14 +408,14 @@ func TestQuickstartRefusals(t *testing.T) {
 	// A refusal after config.json was written (mash admin init has run) must not leave the new url and owner behind.
 	t.Run("failed run restores or removes the config", func(t *testing.T) {
 		e2 := testenv.Start(t) // its own directory, so this subtest does not depend on the others
-		first := runScript(t, newFake(t, e2, 5), t.TempDir(), nil, "--group", "eng", "--owner", "alice", "--endpoint", "old-a", "--endpoint", "old-b", "--no-test")
+		first := runScript(t, newFake(t, e2, 8), t.TempDir(), nil, "--group", "eng", "--owner", "alice", "--endpoint", "old-a", "--endpoint", "old-b", "--no-test")
 		if first.code != 0 {
 			t.Fatalf("setup run: exit %d:\n%s", first.code, first.out)
 		}
 		cfgPath := func(home string) string { return filepath.Join(home, ".config", "mash", "config.json") }
-		// Same directory, so the plan does not fit (2 shared + 2 held + 2 planned > 5), after init.
+		// Same directory, so the plan does not fit (5 shared + 2 held + 2 planned > 8), after init.
 		t.Run("existing config with force", func(t *testing.T) {
-			f := newFake(t, e2, 5)
+			f := newFake(t, e2, 8)
 			home := t.TempDir()
 			if err := os.MkdirAll(filepath.Dir(cfgPath(home)), 0o700); err != nil {
 				t.Fatal(err)
@@ -425,7 +425,7 @@ func TestQuickstartRefusals(t *testing.T) {
 				t.Fatal(err)
 			}
 			r := runScript(t, f, home, nil, "--force", "--group", "eng", "--owner", "alice", "--endpoint", "new-a", "--endpoint", "new-b")
-			if r.code == 0 || !strings.Contains(r.out, "allows 5 streams") || !strings.Contains(r.out, "restored the previous") {
+			if r.code == 0 || !strings.Contains(r.out, "allows 8 streams") || !strings.Contains(r.out, "restored the previous") {
 				t.Fatalf("want a refusal that restores the config, exit %d:\n%s", r.code, r.out)
 			}
 			if got, err := os.ReadFile(cfgPath(home)); err != nil || !bytes.Equal(got, old) {
@@ -433,10 +433,10 @@ func TestQuickstartRefusals(t *testing.T) {
 			}
 		})
 		t.Run("fresh run", func(t *testing.T) {
-			f := newFake(t, e2, 5)
+			f := newFake(t, e2, 8)
 			home := t.TempDir()
 			r := runScript(t, f, home, nil, "--group", "eng", "--owner", "alice", "--endpoint", "new-a", "--endpoint", "new-b")
-			if r.code == 0 || !strings.Contains(r.out, "allows 5 streams") {
+			if r.code == 0 || !strings.Contains(r.out, "allows 8 streams") {
 				t.Fatalf("want the stream refusal, exit %d:\n%s", r.code, r.out)
 			}
 			if _, err := os.Stat(cfgPath(home)); !os.IsNotExist(err) {
@@ -445,7 +445,7 @@ func TestQuickstartRefusals(t *testing.T) {
 		})
 	})
 	t.Run("different config without force", func(t *testing.T) {
-		f := newFake(t, e, 5)
+		f := newFake(t, e, 9)
 		home := t.TempDir()
 		dir := filepath.Join(home, ".config", "mash")
 		if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -460,7 +460,7 @@ func TestQuickstartRefusals(t *testing.T) {
 		}
 	})
 	t.Run("existing creds file", func(t *testing.T) {
-		f := newFake(t, e, 5)
+		f := newFake(t, e, 9)
 		home := t.TempDir()
 		dir := filepath.Join(home, ".config", "mash")
 		if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -482,7 +482,7 @@ func TestQuickstartRefusals(t *testing.T) {
 		}
 	})
 	t.Run("API URL", func(t *testing.T) {
-		f := newFake(t, e, 5)
+		f := newFake(t, e, 9)
 		for _, u := range []string{"http://example.com/api", "ftp://x", "http://127.0.0.1@evil.example/", "http://localhost.evil.example/", "cloud.synadia.com"} {
 			r := runScript(t, f, t.TempDir(), []string{"SYNADIA_API_URL=" + u}, "--dry-run", "--group", "eng", "--endpoint", "a")
 			if r.code == 0 || !strings.Contains(r.out, "SYNADIA_API_URL") || strings.Contains(r.out, fakeToken) || f.reqCount() != 0 {
@@ -500,7 +500,7 @@ func TestQuickstartRefusals(t *testing.T) {
 		}
 	})
 	t.Run("no token", func(t *testing.T) {
-		f := newFake(t, e, 5)
+		f := newFake(t, e, 9)
 		r := runScript(t, f, t.TempDir(), []string{"SYNADIA_API_TOKEN="}, "--group", "eng", "--endpoint", "a")
 		if r.code == 0 || !strings.Contains(r.out, "no Synadia API token") {
 			t.Errorf("exit %d:\n%s", r.code, r.out)
@@ -512,7 +512,7 @@ func TestQuickstartRefusals(t *testing.T) {
 // resolved by name it would call itself forever.
 func TestQuickstartDefaultMashFromPath(t *testing.T) {
 	e := testenv.Start(t)
-	f := newFake(t, e, 5)
+	f := newFake(t, e, 9)
 	r := runScript(t, f, t.TempDir(), []string{"QS_DEFAULT_MASH=1"}, "--group", "eng", "--owner", "alice", "--endpoint", "alice-a", "--endpoint", "alice-b")
 	if r.code != 0 || !strings.Contains(r.out, "provisioned "+qa("alice-a")) {
 		t.Fatalf("exit %d:\n%s", r.code, r.out)
@@ -525,7 +525,7 @@ func credsPath(home, n string) string { return filepath.Join(home, ".config", "m
 // the config stay, the second's user is deleted, and so is the admin user.
 func TestQuickstartPartialFailureKeepsWhatSucceeded(t *testing.T) {
 	e := testenv.Start(t)
-	f := newFake(t, e, 6)
+	f := newFake(t, e, 9)
 	f.set(func(f *fakeSynadia) { f.failCredsFor = qa("alice-b") })
 	home := t.TempDir()
 	r := runScript(t, f, home, nil, "--group", "eng", "--owner", "alice", "--endpoint", "alice-a", "--endpoint", "alice-b")
@@ -552,12 +552,12 @@ func TestQuickstartPartialFailureKeepsWhatSucceeded(t *testing.T) {
 func TestQuickstartRefusesStaleDirectoryRecord(t *testing.T) {
 	e := testenv.Start(t)
 	home := t.TempDir()
-	if first := runScript(t, newFake(t, e, 6), home, nil, "--group", "eng", "--owner", "alice", "--endpoint", "old-a", "--no-test"); first.code != 0 {
+	if first := runScript(t, newFake(t, e, 9), home, nil, "--group", "eng", "--owner", "alice", "--endpoint", "old-a", "--no-test"); first.code != 0 {
 		t.Fatalf("setup run: exit %d:\n%s", first.code, first.out)
 	}
 	_ = os.Remove(credsPath(home, qa("old-a"))) // the user and its creds are gone; only the directory record is left
 	// A new fake has no NATS users: old-a's directory record is stale.
-	f := newFake(t, e, 6)
+	f := newFake(t, e, 9)
 	r := runScript(t, f, home, nil, "--group", "eng", "--owner", "alice", "--endpoint", "old-a2", "--endpoint", "old-a")
 	if r.code == 0 || !strings.Contains(r.out, "mash admin deprovision "+qa("old-a")) || !strings.Contains(r.out, "stale or taken") {
 		t.Fatalf("want a stale-record refusal, exit %d:\n%s", r.code, r.out)
@@ -569,7 +569,7 @@ func TestQuickstartRefusesStaleDirectoryRecord(t *testing.T) {
 
 func TestQuickstartRefusesMismatchedCreds(t *testing.T) {
 	e := testenv.Start(t)
-	f := newFake(t, e, 5)
+	f := newFake(t, e, 9)
 	f.set(func(f *fakeSynadia) { f.wrongCreds = true })
 	home := t.TempDir()
 	r := runScript(t, f, home, nil, "--group", "eng", "--owner", "alice", "--endpoint", "alice-a")
@@ -605,7 +605,7 @@ func lockPath(home string) string { return filepath.Join(home, ".config", "mash"
 func TestQuickstartConfigDirLock(t *testing.T) {
 	e := testenv.Start(t)
 	t.Run("held lock refuses a second run", func(t *testing.T) {
-		f := newFake(t, e, 5)
+		f := newFake(t, e, 9)
 		home := t.TempDir()
 		if err := os.MkdirAll(lockPath(home), 0o700); err != nil {
 			t.Fatal(err)
@@ -623,7 +623,7 @@ func TestQuickstartConfigDirLock(t *testing.T) {
 	})
 	t.Run("lock removed after success", func(t *testing.T) {
 		home := t.TempDir()
-		r := runScript(t, newFake(t, e, 5), home, nil, "--group", "eng", "--owner", "alice", "--endpoint", "a", "--no-test")
+		r := runScript(t, newFake(t, e, 9), home, nil, "--group", "eng", "--owner", "alice", "--endpoint", "a", "--no-test")
 		if r.code != 0 {
 			t.Fatalf("exit %d:\n%s", r.code, r.out)
 		}
@@ -632,7 +632,7 @@ func TestQuickstartConfigDirLock(t *testing.T) {
 		}
 	})
 	t.Run("lock removed after failure", func(t *testing.T) {
-		f := newFake(t, e, 5)
+		f := newFake(t, e, 9)
 		f.set(func(f *fakeSynadia) { f.failCreds = true })
 		home := t.TempDir()
 		r := runScript(t, f, home, nil, "--group", "eng", "--owner", "alice", "--endpoint", "a")
@@ -645,7 +645,7 @@ func TestQuickstartConfigDirLock(t *testing.T) {
 	})
 	t.Run("dry run takes no lock and creates nothing", func(t *testing.T) {
 		home := t.TempDir()
-		if r := runScript(t, newFake(t, e, 5), home, nil, "--dry-run", "--group", "eng", "--owner", "alice", "--endpoint", "a"); r.code != 0 {
+		if r := runScript(t, newFake(t, e, 9), home, nil, "--dry-run", "--group", "eng", "--owner", "alice", "--endpoint", "a"); r.code != 0 {
 			t.Fatalf("exit %d:\n%s", r.code, r.out)
 		}
 		if _, err := os.Stat(filepath.Join(home, ".config")); err == nil {
@@ -676,7 +676,7 @@ if [ "$1" = admin ] && [ "$2" = deprovision ] && [ "$3" = alice.eng.alice-b ]; t
 
 func TestQuickstartDeprovisionsHalfProvisionedEndpoint(t *testing.T) {
 	e := testenv.Start(t)
-	f := newFake(t, e, 6)
+	f := newFake(t, e, 9)
 	wrapper, calls := wrapperMash(t, failProvisionBody("own"))
 	home := t.TempDir()
 	r := runScript(t, f, home, nil, "--mash", wrapper, "--group", "eng", "--owner", "alice", "--endpoint", "alice-a", "--endpoint", "alice-b")
@@ -701,7 +701,7 @@ func TestQuickstartLeavesForeignRecordAfterFailedProvision(t *testing.T) {
 	for _, mode := range []string{"foreign", "changed"} {
 		t.Run(mode, func(t *testing.T) {
 			e := testenv.Start(t)
-			f := newFake(t, e, 6)
+			f := newFake(t, e, 9)
 			wrapper, calls := wrapperMash(t, failProvisionBody(mode))
 			home := t.TempDir()
 			r := runScript(t, f, home, nil, "--mash", wrapper, "--group", "eng", "--owner", "alice", "--endpoint", "alice-a", "--endpoint", "alice-b")
@@ -747,7 +747,7 @@ func TestQuickstartLeavesForeignRecordAfterFailedProvision(t *testing.T) {
 
 func TestQuickstartNoRecordAfterFailedProvision(t *testing.T) {
 	e := testenv.Start(t)
-	f := newFake(t, e, 6)
+	f := newFake(t, e, 9)
 	wrapper, _ := wrapperMash(t, failProvisionBody("norecord"))
 	r := runScript(t, f, t.TempDir(), nil, "--mash", wrapper, "--group", "eng", "--owner", "alice", "--endpoint", "alice-a", "--endpoint", "alice-b")
 	if r.code == 0 {
@@ -760,7 +760,7 @@ func TestQuickstartNoRecordAfterFailedProvision(t *testing.T) {
 
 func TestQuickstartMailTestNeedsItsOwnToken(t *testing.T) {
 	e := testenv.Start(t)
-	f := newFake(t, e, 6)
+	f := newFake(t, e, 9)
 	// The inbox shows an old [verified] message without this run's token.
 	wrapper, _ := wrapperMash(t, `if [ "$1" = inbox ]; then echo '#1 [verified] alice-a: an older message'; exit 0; fi`)
 	r := runScript(t, f, t.TempDir(), nil, "--mash", wrapper, "--group", "eng", "--owner", "alice", "--endpoint", "alice-a", "--endpoint", "alice-b")
@@ -772,7 +772,7 @@ func TestQuickstartMailTestNeedsItsOwnToken(t *testing.T) {
 // --group has no default: without it the script refuses before it reads the token or creates anything.
 func TestQuickstartGroupRequired(t *testing.T) {
 	e := testenv.Start(t)
-	f := newFake(t, e, 5)
+	f := newFake(t, e, 9)
 	home := t.TempDir()
 	r := runScript(t, f, home, nil, "--owner", "alice", "--endpoint", "a")
 	if r.code == 0 || !strings.Contains(r.out, "quickstart-synadia: --group is required (an endpoint's group has no default)") || f.reqCount() != 0 {
@@ -781,5 +781,40 @@ func TestQuickstartGroupRequired(t *testing.T) {
 	r = runScript(t, f, home, nil, "--group", "Bad_Group", "--owner", "alice", "--endpoint", "a")
 	if r.code == 0 || !strings.Contains(r.out, "group 'Bad_Group' is not valid (1-32") || f.reqCount() != 0 {
 		t.Fatalf("exit %d, requests %d:\n%s", r.code, f.reqCount(), r.out)
+	}
+}
+
+// The NATS account really holds a stream limit (the JWT's JetStream limits), and the fake API reports the same
+// number, so the script's provisioning runs against an enforced limit. A fresh mash directory takes 5 shared
+// streams (the directory, lease, retired-name, issue-record and adoption buckets) and each endpoint adds an inbox.
+func TestQuickstartEnforcedStreamLimit(t *testing.T) {
+	const shared = 5
+	ep := func(n int) []string {
+		a := []string{"--group", "eng", "--owner", "alice", "--no-test"}
+		for i := 0; i < n; i++ {
+			a = append(a, "--endpoint", fmt.Sprintf("e%d", i))
+		}
+		return a
+	}
+	for _, c := range []struct{ limit, endpoints int }{{shared, 1}, {shared, 2}, {shared, 3}, {shared + 2, 3}} {
+		t.Run(fmt.Sprintf("limit %d, %d endpoint(s): refused at plan time", c.limit, c.endpoints), func(t *testing.T) {
+			e := testenv.StartWith(t, testenv.Options{JetStreamStreams: c.limit})
+			f := newFake(t, e, c.limit)
+			r := runScript(t, f, t.TempDir(), nil, ep(c.endpoints)...)
+			if r.code == 0 || !strings.Contains(r.out, fmt.Sprintf("allows %d streams and the plan needs %d", c.limit, shared+c.endpoints)) ||
+				!strings.Contains(r.out, "Nothing was created") || f.postCount() != 0 {
+				t.Fatalf("want a plan-time refusal, exit %d, posts %d:\n%s", r.code, f.postCount(), r.out)
+			}
+		})
+	}
+	for _, c := range []struct{ limit, endpoints int }{{shared + 1, 1}, {shared + 2, 2}} {
+		t.Run(fmt.Sprintf("limit %d, %d endpoint(s): succeeds", c.limit, c.endpoints), func(t *testing.T) {
+			e := testenv.StartWith(t, testenv.Options{JetStreamStreams: c.limit})
+			f := newFake(t, e, c.limit)
+			r := runScript(t, f, t.TempDir(), nil, ep(c.endpoints)...)
+			if r.code != 0 || !strings.Contains(r.out, fmt.Sprintf("Streams: %d shared + %d x 1 per endpoint = %d", shared, c.endpoints, shared+c.endpoints)) {
+				t.Fatalf("want success, exit %d:\n%s", r.code, r.out)
+			}
+		})
 	}
 }

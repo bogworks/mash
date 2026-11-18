@@ -176,7 +176,7 @@ never connects to NATS.*
 | Spool (mash) | One directory per endpoint, files `<seq>.json` plus `shown/`, `listed/` and `drained/` marks (`listed/` is a message a digest named and the model has not read: still waiting and unacked, drained by `read` or a full showing, [ADR-0046][0046]); directories 0700, files 0600 | Hands mail from serve to the hook, so an acknowledgement means the mail was shown ([ADR-0025][0025]). Its `.owner` file records the owner (serve's parent pid, session id and launch token as JSON); a hook drains only if its session id or launch token matches, or the pid is among its ancestors, and a hook that matches none is refused and recorded in `.refused` ([ADR-0040][0040]) |
 | `mash` CLI (mash) | One-shot commands for people and scripts, using the same identity. It never takes the lease. `mash admin` provisions endpoints. Setting up a hosted account is a script outside the binary, `scripts/quickstart-synadia.sh` | Shells and scripts need a way in without a session ([ADR-0022][0022]) |
 | Agent host (agent host) | Claude Code, through the mash plugin: an MCP server entry and two hooks | The plugin is the unit of distribution ([ADR-0033][0033]) |
-| NATS server (NATS) | Inbox streams, two KV buckets, and the SAP subjects | See section 8.2 |
+| NATS server (NATS) | Inbox streams, five KV buckets, and the SAP subjects | See section 8.2 |
 
 ### 5.2 Components of `mash serve`
 
@@ -246,7 +246,7 @@ have happened ([ADR-0025][0025]).
 | Server | `nats-server` in operator mode with JetStream, file storage | Synadia's service. The free tier allows 5 streams, 5 connections, 512 KiB payload and no replicas |
 | Account | One account for mash, sized for 1 stream and 1 consumer per endpoint plus 2 buckets | One existing account |
 | Users | Signed by `mashctl endpoint create` with the account signing key, from the endpoint's own public key; `mashctl permissions <owner.group.instance>` prints the set (JSON or `nsc` flags). An endpoint's seed stays on its machine (with `--make-key`, `mashctl` makes it on its own host) | `scripts/quickstart-synadia.sh` asks Synadia's API to create them, with a temporary admin user that it deletes afterwards ([ADR-0038][0038]). mash itself never calls that API |
-| Endpoints | `mashctl init` once, then `mashctl endpoint create <owner/group/instance>` per endpoint | Created by `scripts/quickstart-synadia.sh`. With 2 shared buckets and 1 stream per endpoint, the free tier fits 3 endpoints |
+| Endpoints | `mashctl init` once, then `mashctl endpoint create <owner/group/instance>` per endpoint | Created by `scripts/quickstart-synadia.sh`. With 5 shared buckets and 1 stream per endpoint, the free tier (5 streams) fits no endpoint |
 | Removing | `mashctl endpoint delete` / `mashctl deprovision` (revokes the user), or `mash admin deprovision` and revoke the user yourself | Same, with an admin user made in the console |
 
 Each endpoint machine needs the `mash` binary on `PATH`, the Claude Code plugin, a credentials file at mode 0600 and
@@ -511,7 +511,7 @@ that takes channel events.
 | A host crash of the NATS server loses up to 2 minutes of acknowledged mail, because inbox streams are R1 and `sync_interval` defaults to 2 minutes. Synadia Cloud's policy is unknown | Operators set `sync_interval: always` ([operations](operations.md#durability-and-sync_interval)). mash cannot read the server setting, so nothing warns yet |
 | A flood evicts unread mail, since the inbox drops its oldest messages and cannot be purged | Backlog wake drains earlier. None yet against a deliberate flood |
 | Every endpoint shares one account: names are account-wide and account limits are shared | None yet ([ADR-0006][0006]) |
-| A stream per endpoint caps endpoints on accounts with a stream limit (3 on the free tier) | None yet |
+| A stream per endpoint caps endpoints on accounts with a stream limit (none on the free tier's 5 streams) | None yet |
 | Live prompts are not durable and have no hook path | None yet. Mail is the durable path |
 | `scripts/quickstart-synadia.sh` relies on an undocumented beta API | It fails loudly on any unexpected shape, and breaks a script a user can edit, not a released binary |
 | The host adapter was shaped by one host | None yet. A second adapter is not built |

@@ -31,12 +31,12 @@ import (
 // lookupWait bounds the account lookup of adopt (a variable so tests need not wait for the full time).
 var lookupWait = 5 * time.Second
 
-// What one endpoint needs of the account (docs/operations.md, "Account limits"): its inbox stream plus the two KV
-// buckets, one consumer, and the default inbox cap (16 MiB) plus the two buckets' caps (16 MiB and 4 MiB).
+// What one endpoint needs of the account (docs/operations.md, "Account limits"): its inbox stream plus the five KV
+// buckets, one consumer, and the default inbox cap (16 MiB) plus the five buckets' caps (16, 4, 64, 8 and 1 MiB).
 const (
-	needStreams   = 3
+	needStreams   = 6
 	needConsumers = 1
-	needDisk      = (16 + 16 + 4) << 20
+	needDisk      = (16 + 16 + 4 + 64 + 8 + 1) << 20
 )
 
 func adoptUsage() string {
@@ -266,13 +266,13 @@ func runAdopt(args []string, env func(string) string, lookup config.Lookup, stdo
 	fmt.Fprintf(stdout, "  3. jetstream      ok: the account JWT gives it%s: disk %s, streams %s, consumers %s\n", tier, limitText(lim.DiskStorage, true), limitText(lim.Streams, false), limitText(lim.Consumer, false))
 	fmt.Fprintf(stdout, "  3. jetstream      (the JWT is what the account asks for; step 6 asks the server whether it enabled JetStream)\n")
 	if lim.Streams > 0 && lim.Streams < needStreams {
-		warns = append(warns, fmt.Sprintf("the account allows %d streams; one endpoint needs %d (its inbox plus the two KV buckets), one more per endpoint", lim.Streams, needStreams))
+		warns = append(warns, fmt.Sprintf("the account allows %d streams; one endpoint needs %d (its inbox plus the five KV buckets), one more per endpoint", lim.Streams, needStreams))
 	}
 	if lim.Consumer > 0 && lim.Consumer < needConsumers {
 		warns = append(warns, fmt.Sprintf("the account allows %d consumers; mash needs one per endpoint", lim.Consumer))
 	}
 	if lim.DiskStorage > 0 && lim.DiskStorage < needDisk {
-		warns = append(warns, fmt.Sprintf("the account has %s of disk; one endpoint needs about %s (inbox cap plus the two buckets); see docs/operations.md, Account limits", config.FormatSize(lim.DiskStorage), config.FormatSize(needDisk)))
+		warns = append(warns, fmt.Sprintf("the account has %s of disk; one endpoint needs about %s (inbox cap plus the five buckets); see docs/operations.md, Account limits", config.FormatSize(lim.DiskStorage), config.FormatSize(needDisk)))
 	}
 
 	// (4) the transport.

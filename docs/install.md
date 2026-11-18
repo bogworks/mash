@@ -89,7 +89,7 @@ Without this, `--channels plugin:mash@mash` is refused ("not on the approved cha
 
 On one machine with no NATS server yet, `mashctl init --local --owner <name> --start` sets up a local operator-mode server with JetStream and writes this configuration for you (see [Local setup](operations.md#local-setup-with-mashctl-init---local)); then make each endpoint with `mashctl endpoint create` ([Adding an endpoint](operations.md#adding-an-endpoint)); the rest of this section is for an existing server.
 
-Your own NATS server on one machine: [guides/nats-local.md](guides/nats-local.md). Synadia Cloud free tier: [guides/nats-synadia.md](guides/nats-synadia.md).
+Your own NATS server on one machine: [guides/nats-local.md](guides/nats-local.md). Synadia Cloud (an account above the free tier; see the guide): [guides/nats-synadia.md](guides/nats-synadia.md).
 
 `~/.config/mash/config.json`, or `$XDG_CONFIG_HOME/mash/config.json` when `XDG_CONFIG_HOME` is an absolute path and that file exists (an existing `~/.config/mash` install keeps working). With no `HOME` and no absolute `XDG_CONFIG_HOME`, mash stops with an error unless everything comes from the `MASH_*` variables. A leading `~/` in `creds` and `admin_creds` (and in `MASH_CREDS` and `MASH_ADMIN_CREDS`) is expanded to your home; `~user/` is not. `policy.md` and the default creds files live in the same directory; when the XDG directory has no copy of one, mash also finds it in `~/.config/mash` (the XDG copy wins when both exist). A relative `admin_creds`, `tls_ca`, `tls_cert` or `tls_key` in `config.json` is resolved against the config directory, not the working directory. `config.json` that is writable by every user is refused; run `chmod go-w` on it.
 
@@ -200,6 +200,6 @@ The step-by-step guide is [guides/nats-synadia.md](guides/nats-synadia.md).
 
 Notes:
 
-- The free tier allows 5 streams. mash takes 2 for its shared buckets and 1 per endpoint, so it fits **3 endpoints**; the script checks this first and, if the plan does not fit, creates nothing and says how many would.
+- The free tier allows 5 streams. mash takes 5 for its shared buckets and 1 per endpoint, so the free tier fits **no endpoint**; the script checks this first and, if the plan does not fit, creates nothing and says how many endpoints would fit. An account with a limit of 5 + N streams holds N endpoints.
 - Synadia's control-plane API (`/api/core/beta/`) is not documented or stable. If its shape changes, the script stops with an error rather than guessing.
 - The account's message limit is 512 KiB, half of mash's own 1 MiB cap.
