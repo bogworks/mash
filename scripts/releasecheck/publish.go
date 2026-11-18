@@ -49,6 +49,8 @@ type world interface {
 	Keyless(tag, x string) (cutover string, keyless bool, err error)
 	// Publish turns the draft into a published release.
 	Publish(tag string) error
+	// VerifyNotLatest reads the release list back: the published tag must be listed and not marked latest.
+	VerifyNotLatest(tag string) error
 	Now() time.Time
 	Sleep(d time.Duration)
 }
@@ -210,6 +212,11 @@ func runPublish(o Options, w world, x string) error {
 		return failed(fmt.Errorf("%s is %s after publishing, not published", tag, st))
 	}
 	say("verifying the published release (read-only)")
+	if o.NotLatest {
+		if err := w.VerifyNotLatest(tag); err != nil {
+			return stepErr(err)
+		}
+	}
 	if err := w.Assets(); err != nil {
 		return stepErr(err)
 	}
@@ -438,8 +445,13 @@ func publishRelease(o Options, tag string) error {
 	if !o.NotLatest {
 		return nil
 	}
-	// gh release view has no isLatest field: read it from the release list.
-	b, err := gh(o, "release", "list", "--repo", o.GHRepo, "--json", "tagName,isLatest", "--limit", "100", "--exclude-drafts")
+	return verifyNotLatest(o, tag)
+}
+
+// verifyNotLatest reads the release list back (gh release view has no isLatest field): the tag must be listed and not
+// marked latest. The publish step and the read-only verification of a published release both use it.
+func verifyNotLatest(o Options, tag string) error {
+	b, err := gh(o, "release", "list", "--repo", o.GHRepo, "--json", "tagName,isLatest", "--limit", "1000", "--exclude-drafts")
 	if err != nil {
 		return op(err)
 	}
@@ -461,6 +473,8 @@ func publishRelease(o Options, tag string) error {
 	}
 	return op(fmt.Errorf("%s not found in the release list after publishing", tag))
 }
+
+func (r realWorld) VerifyNotLatest(tag string) error { return verifyNotLatest(r.o, tag) }
 
 func (r realWorld) Now() time.Time        { return time.Now() }
 func (r realWorld) Sleep(d time.Duration) { time.Sleep(d) }

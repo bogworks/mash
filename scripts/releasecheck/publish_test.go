@@ -26,6 +26,7 @@ type fakeWorld struct {
 	calls      []string
 	polls      int
 	cutover    string // the cutover version Keyless reports ("": none)
+	latestErr  error  // what VerifyNotLatest says
 	keyless    bool   // the tag is at or above the cutover: its tag is pushed by the minting service
 }
 
@@ -78,6 +79,10 @@ func (f *fakeWorld) Publish(tag string) error {
 	}
 	return f.publishErr
 }
+func (f *fakeWorld) VerifyNotLatest(tag string) error {
+	f.calls = append(f.calls, "notlatest")
+	return f.latestErr
+}
 func (f *fakeWorld) Now() time.Time        { return f.now }
 func (f *fakeWorld) Sleep(d time.Duration) { f.calls = append(f.calls, "sleep"); f.now = f.now.Add(d) }
 
@@ -129,6 +134,41 @@ func TestPublish_orderRecheckedRightBeforePublishing(t *testing.T) {
 		}
 		if order < 0 || pub < 0 || order > pub {
 			t.Errorf("calls %v: want order before publish", f.calls)
+		}
+	})
+}
+
+func TestPublish_rerunVerifiesNotLatest(t *testing.T) {
+	has := func(f *fakeWorld) bool {
+		for _, c := range f.calls {
+			if c == "notlatest" {
+				return true
+			}
+		}
+		return false
+	}
+	o := Options{Version: "1.2.3", Wait: time.Minute, NotLatest: true}
+	t.Run("published and marked latest: refused", func(t *testing.T) {
+		f := newFake()
+		f.tagAt, f.release = "abc", relPublished
+		f.latestErr = errors.New("v1.2.3 was published with --not-latest but is marked latest")
+		err := runPublish(o, f, "abc")
+		if err == nil || !strings.Contains(err.Error(), "marked latest") {
+			t.Fatalf("err = %v, want the refusal", err)
+		}
+	})
+	t.Run("published and not latest: ok", func(t *testing.T) {
+		f := newFake()
+		f.tagAt, f.release = "abc", relPublished
+		if err := runPublish(o, f, "abc"); err != nil || !has(f) {
+			t.Fatalf("err = %v, calls %v", err, f.calls)
+		}
+	})
+	t.Run("without the flag: no list call", func(t *testing.T) {
+		f := newFake()
+		f.tagAt, f.release = "abc", relPublished
+		if err := run(f); err != nil || has(f) {
+			t.Fatalf("err = %v, calls %v", err, f.calls)
 		}
 	})
 }
@@ -579,7 +619,7 @@ func TestPublishRelease_notLatest(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, _ := os.ReadFile(log)
-	want := "release edit v0.4.0 --repo bogworks/mash --draft=false --latest=false\nrelease list --repo bogworks/mash --json tagName,isLatest --limit 100 --exclude-drafts\n"
+	want := "release edit v0.4.0 --repo bogworks/mash --draft=false --latest=false\nrelease list --repo bogworks/mash --json tagName,isLatest --limit 1000 --exclude-drafts\n"
 	if string(b) != want {
 		t.Errorf("gh calls:\n%s", b)
 	}
