@@ -258,6 +258,8 @@ mash credential create --seed design.seed --jwt acme.dev.design.jwt
 
 Only `design.pub` and the JWT file travel. M3 also needs `ca.pem` and the settings in section 1: `url`, `tls_ca`, and a client certificate when the servers require one. M3 can name any one of the three servers in `url`, or all three.
 
+Set `MASH_REQUIRE_TLS=1` (or `"require_tls": true`) on M3 and on every other endpoint machine. It is off by default, so an endpoint whose `url` is plain `nats://` connects in plain text without a refusal; plain text lets anyone on the network read its mail and obtain its signatures ([`MASH_REQUIRE_TLS`](#mash_require_tls)).
+
 ## Not tested in 0.5.5
 
 > The 0.5.5 acceptance run (AT-005) tested TLS, a three-server cluster and two `mashctl` machines by hand, in rootless containers on one host: three NATS servers of one cluster with TLS on the client and route connections, endpoints on separate nodes (a session on one node connecting to another node's server, mail each way), and two `mashctl` machines on one account (the same address created from both at the same moment: one succeeded, the other was refused `address_taken`). It did not test real separate hosts or a physical network, clock drift between hosts, or certificate expiry and renewal.
