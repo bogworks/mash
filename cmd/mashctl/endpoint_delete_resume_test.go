@@ -187,7 +187,7 @@ func TestEndpointPublishStagedSyncsBeforeRemovingPending(t *testing.T) {
 		return nil
 	}
 	t.Cleanup(func() { epSyncDir = syncDir })
-	if err := epPublishStaged(tok, useed, creds, pending, true); err != nil {
+	if err := epPublishStaged(tok, useed, creds, pending, true, true); err != nil {
 		t.Fatal(err)
 	}
 	if !pendingAtSync {
@@ -201,7 +201,7 @@ func TestEndpointPublishStagedSyncsBeforeRemovingPending(t *testing.T) {
 		t.Fatal(err)
 	}
 	epSyncDir = func(string) error { return os.ErrInvalid }
-	if err := epPublishStaged(tok, useed, creds, pending, true); err == nil {
+	if err := epPublishStaged(tok, useed, creds, pending, true, true); err == nil {
 		t.Fatal("sync error ignored")
 	}
 	if _, err := os.Lstat(pending); err != nil {

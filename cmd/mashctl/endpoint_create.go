@@ -793,7 +793,7 @@ func runEndpointCreate(args []string, env func(string) string, lookup config.Loo
 		// The creds file already holds this key (a run killed before the directory was written): nothing to write.
 		os.Remove(pending)
 	} else if c.makeKey {
-		werr = epPublishStaged(res.JWT, seed, outPath, pending, false)
+		werr = epPublishStaged(res.JWT, seed, outPath, pending, false, true)
 	} else {
 		werr = epWriteNew(outPath, []byte(res.JWT+"\n"))
 	}
