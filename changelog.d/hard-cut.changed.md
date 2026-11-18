@@ -1,1 +1,0 @@
-**`mashctl add`, `mashctl reissue` and `mashctl retire` are removed.** Use `mashctl endpoint create`, `mashctl endpoint reissue` and `mashctl endpoint delete`. Endpoints made by 0.5.0 do not work with 0.5.5: make new ones and delete the old ones.

@@ -1,17 +1,17 @@
-Code commit: 88e2a86b74c4ad22986a69e6479faa013bfa3300 (main). Run 2026-11-18, on a tree whose code equals that commit.
+Code commit: e26332cdd55342538791c3088c85cc5ca2b09c59 (main). Run 2026-11-18, on a tree whose code equals that commit.
 $ MASH_FORBIDDEN_WORDS="rangehand,herdr,herd,lane,lead" go test ./cmd/mash -run 'Standalone|ForbiddenWordsHelpers' -count=1 -v
 === RUN   TestStandaloneServeWithoutAHost
---- PASS: TestStandaloneServeWithoutAHost (1.47s)
+--- PASS: TestStandaloneServeWithoutAHost (1.40s)
 === RUN   TestStandaloneLivePrompt
---- PASS: TestStandaloneLivePrompt (1.07s)
+--- PASS: TestStandaloneLivePrompt (1.09s)
 === RUN   TestStandaloneHookDelivery
---- PASS: TestStandaloneHookDelivery (1.11s)
+--- PASS: TestStandaloneHookDelivery (1.18s)
 === RUN   TestStandaloneOnlyNATS
 --- PASS: TestStandaloneOnlyNATS (0.39s)
 === RUN   TestStandaloneEnvOnlyConfig
---- PASS: TestStandaloneEnvOnlyConfig (0.36s)
+--- PASS: TestStandaloneEnvOnlyConfig (0.37s)
 === RUN   TestForbiddenWordsHelpers
 --- PASS: TestForbiddenWordsHelpers (0.00s)
 PASS
-ok  	github.com/bogworks/mash/cmd/mash	4.398s
+ok  	github.com/bogworks/mash/cmd/mash	4.439s
 exit 0

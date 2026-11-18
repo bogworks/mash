@@ -1,1 +1,0 @@
-This release closes replies across owners: an endpoint of another owner can no longer answer, forge or replay a reply into your endpoints (reply inboxes are `_INBOX.<owner>.<flat key>` and an endpoint publishes replies only to its own owner's inboxes). Inside one owner, endpoints can still answer each other's reply subjects until the policy release.
