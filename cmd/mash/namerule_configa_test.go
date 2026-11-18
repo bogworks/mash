@@ -199,7 +199,7 @@ func TestConfigAMashAdminProvision(t *testing.T) {
 	w := newConfigAMashWorld(t)
 	admEnv := func(extra map[string]string) map[string]string {
 		m := map[string]string{"HOME": t.TempDir(), "MASH_URL": w.e.URL, "MASH_OWNER": w.e.Owner, "MASH_ADMIN_CREDS": w.e.AdminCreds,
-			"MASH_INSECURE_LOOPBACK": "1", "MASH_NAME_RULE_FILE": w.rule}
+			"MASH_INSECURE_PLAINTEXT": "1", "MASH_NAME_RULE_FILE": w.rule}
 		for k, v := range extra {
 			m[k] = v
 		}

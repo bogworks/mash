@@ -67,9 +67,12 @@ func Start(p Params, url string, generatedHere bool) (int, error) {
 	if !generatedHere {
 		return 0, ErrNotGeneratedHere
 	}
-	tlsOpts, err := natsauth.RequireTLS(url, true) // true: plain text is allowed, and only for a loopback URL
+	tlsOpts, warning, err := natsauth.RequireTLS(url, true) // true: this part still starts a plain local server
 	if err != nil {
 		return 0, fmt.Errorf("%w (nothing was started)", err)
+	}
+	if warning != "" {
+		fmt.Fprintln(os.Stderr, warning)
 	}
 	bin, err := exec.LookPath("nats-server")
 	if err != nil {

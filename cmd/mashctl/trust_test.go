@@ -104,7 +104,7 @@ func TestAdoptRefusesForeignIssuerAndInstallsNoOperatorJWT(t *testing.T) {
 func TestAdminAndSystemConnectionsRequireTLS(t *testing.T) {
 	// a plain loopback server without the opt-in: every admin verb and the system connection are refused
 	e := newApplyEnv(t).withDirectory()
-	e.env["MASH_INSECURE_LOOPBACK"] = ""
+	e.env["MASH_INSECURE_PLAINTEXT"] = ""
 	e.env["MASH_ADMIN_CREDS"] = e.pl.Creds
 	for _, args := range [][]string{{"issued", "check"}, {"list"}, {"init"}} {
 		out, errb, code := e.run(args...)
@@ -113,13 +113,13 @@ func TestAdminAndSystemConnectionsRequireTLS(t *testing.T) {
 		}
 	}
 	// with the opt-in the same server works
-	e.env["MASH_INSECURE_LOOPBACK"] = "1"
+	e.env["MASH_INSECURE_PLAINTEXT"] = "1"
 	if out, errb, code := e.run("list"); code != 0 {
 		t.Fatalf("with the opt-in: %d\n%s\n%s", code, out, errb)
 	}
 	// a non-loopback plain URL is refused before any connection, with or without the opt-in
 	for _, optIn := range []string{"", "1"} {
-		e.env["MASH_INSECURE_LOOPBACK"] = optIn
+		e.env["MASH_INSECURE_PLAINTEXT"] = optIn
 		e.env["MASH_URL"] = "nats://192.0.2.1:4222"
 		for _, args := range [][]string{{"issued", "check"}, {"list"}} {
 			out, errb, code := e.run(args...)
@@ -130,9 +130,9 @@ func TestAdminAndSystemConnectionsRequireTLS(t *testing.T) {
 	}
 	// the same for adopt, which names its server on the command line
 	a := newAdopter(t, newApplyEnv(t))
-	a.env["MASH_INSECURE_LOOPBACK"] = ""
+	a.env["MASH_INSECURE_PLAINTEXT"] = ""
 	a.refuses(1, []string{"secure connection not available"})
-	a.env["MASH_INSECURE_LOOPBACK"] = "1"
+	a.env["MASH_INSECURE_PLAINTEXT"] = "1"
 	a.refuses(1, []string{"allows a plain connection only to localhost"}, "--server", "nats://192.0.2.1:4222")
 }
 
@@ -141,10 +141,10 @@ func TestAdminVerbsAcceptATLSServer(t *testing.T) {
 	env := map[string]string{"HOME": t.TempDir(), "MASH_URL": e.URL, "MASH_OWNER": e.Owner, "MASH_ADMIN_CREDS": e.AdminCreds, "MASH_TLS_CA": e.CAFile}
 	var out, errb bytes.Buffer
 	if code := runEnv([]string{"init"}, func(k string) string { return env[k] }, &out, &errb); code != 0 {
-		t.Fatalf("init over TLS without insecure_loopback: %d\n%s\n%s", code, out.String(), errb.String())
+		t.Fatalf("init over TLS without insecure_plaintext: %d\n%s\n%s", code, out.String(), errb.String())
 	}
 	// the loopback opt-in does not turn a TLS connection off
-	env["MASH_INSECURE_LOOPBACK"] = "1"
+	env["MASH_INSECURE_PLAINTEXT"] = "1"
 	out.Reset()
 	errb.Reset()
 	if code := runEnv([]string{"list"}, func(k string) string { return env[k] }, &out, &errb); code != 0 {

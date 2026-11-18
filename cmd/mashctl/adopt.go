@@ -209,9 +209,12 @@ func runAdopt(args []string, env func(string) string, lookup config.Lookup, stdo
 
 	// (2) the server: operator mode, system creds, the resolver. Admin and system connections require TLS, so a URL
 	// that is refused for that is refused before any connection is made.
-	tlsReq, err := natsauth.RequireTLS(o.server, cfg.InsecureLoopback)
+	tlsReq, warning, err := natsauth.RequireTLS(o.server, cfg.InsecurePlaintext)
 	if err != nil {
 		return fail("%v (nothing was changed)", err)
+	}
+	if warning != "" {
+		fmt.Fprintln(os.Stderr, warning)
 	}
 	if c, aerr := nats.Connect(o.server, append(natsauth.TLSOptions(cfg.TLSCA, cfg.TLSCert, cfg.TLSKey), nats.Name("mashctl-adopt-probe"), nats.Timeout(connectTimeout), nats.MaxReconnects(0))...); aerr == nil {
 		c.Close()
@@ -403,8 +406,8 @@ func runAdopt(args []string, env func(string) string, lookup config.Lookup, stdo
 	if adminPath != "" {
 		settings["admin_creds"] = adminPath
 	}
-	if cfg.InsecureLoopback {
-		settings["insecure_loopback"] = "true"
+	if cfg.InsecurePlaintext {
+		settings["insecure_plaintext"] = "true"
 	}
 	if cfg.TLSCA != "" {
 		settings["tls_ca"] = cfg.TLSCA
@@ -464,7 +467,7 @@ func already(have bool) string {
 
 func settingsText(m map[string]string) string {
 	var parts []string
-	for _, k := range []string{"url", "owner", "admin_creds", "insecure_loopback", "tls_ca", "tls_cert", "tls_key"} {
+	for _, k := range []string{"url", "owner", "admin_creds", "insecure_plaintext", "tls_ca", "tls_cert", "tls_key"} {
 		if v, ok := m[k]; ok {
 			parts = append(parts, fmt.Sprintf("%q: %s", k, jsonValue(k, v)))
 		}
@@ -476,7 +479,7 @@ func configJSON(m map[string]string) []byte {
 	var b bytes.Buffer
 	b.WriteString("{\n")
 	var parts []string
-	for _, k := range []string{"url", "owner", "admin_creds", "insecure_loopback", "tls_ca", "tls_cert", "tls_key"} {
+	for _, k := range []string{"url", "owner", "admin_creds", "insecure_plaintext", "tls_ca", "tls_cert", "tls_key"} {
 		if v, ok := m[k]; ok {
 			parts = append(parts, fmt.Sprintf("  %q: %s", k, jsonValue(k, v)))
 		}
@@ -624,9 +627,12 @@ func askJetStream(cfg config.Config, url string, raw []byte, limit int64) (strin
 }
 
 func dialAdmin(cfg config.Config, url string, raw []byte) (*nats.Conn, error) {
-	tlsReq, err := natsauth.RequireTLS(url, cfg.InsecureLoopback)
+	tlsReq, warning, err := natsauth.RequireTLS(url, cfg.InsecurePlaintext)
 	if err != nil {
 		return nil, err
+	}
+	if warning != "" {
+		fmt.Fprintln(os.Stderr, warning)
 	}
 	c, err := nats.Connect(url, append(append(natsauth.TLSOptions(cfg.TLSCA, cfg.TLSCert, cfg.TLSKey), tlsReq...),
 		natsauth.UserCredentialBytes(raw), nats.Name("mashctl-adopt-admin"), nats.Timeout(connectTimeout), nats.MaxReconnects(0))...)
@@ -696,9 +702,9 @@ func ensureDir(d string) error {
 	return nil
 }
 
-// jsonValue is v as a config.json value: insecure_loopback is a boolean, everything else a string.
+// jsonValue is v as a config.json value: insecure_plaintext is a boolean, everything else a string.
 func jsonValue(key, v string) string {
-	if key == "insecure_loopback" {
+	if key == "insecure_plaintext" {
 		return v
 	}
 	return strconv.Quote(v)

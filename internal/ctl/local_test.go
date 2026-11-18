@@ -280,8 +280,8 @@ func TestInitLocalStartTakesNoInsecureFlagAndStartsOnlyTheLoopbackServerItGenera
 	if code != 0 || !strings.Contains(out, "Ready") {
 		t.Fatalf("exit %d: %s\n%s", code, out, errs)
 	}
-	if !strings.HasPrefix(gotURL, "nats://127.0.0.1:") || !gotGenerated || !bucketCfg.InsecureLoopback {
-		t.Fatalf("Start got %q generated %v, buckets insecure_loopback %v", gotURL, gotGenerated, bucketCfg.InsecureLoopback)
+	if !strings.HasPrefix(gotURL, "nats://127.0.0.1:") || !gotGenerated || !bucketCfg.InsecurePlaintext {
+		t.Fatalf("Start got %q generated %v, buckets insecure_plaintext %v", gotURL, gotGenerated, bucketCfg.InsecurePlaintext)
 	}
 	if code, _, _ := e.run("init", "--local", "--owner", "alice", "--start", "--insecure"); code != 2 {
 		t.Fatalf("--insecure is not a flag any more: exit %d", code)
@@ -299,7 +299,7 @@ func TestInitLocalRecordsOperatorJWTAndTheLoopbackOptIn(t *testing.T) {
 		t.Fatalf("operator.jwt in the key directory: %v %v", st, err)
 	}
 	cfg, err := os.ReadFile(filepath.Join(e.root, "cfg", "config.json"))
-	if err != nil || !strings.Contains(string(cfg), `"insecure_loopback": true`) {
+	if err != nil || !strings.Contains(string(cfg), `"insecure_plaintext": true`) {
 		t.Fatalf("config.json: %s %v", cfg, err)
 	}
 	// a second init on another directory keeps the first operator JWT

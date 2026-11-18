@@ -210,7 +210,7 @@ func Build(p Params, ks *ctlkeys.Authority) (*Plan, error) {
 		{p.ConfPath(), []byte(serverConfFor(p, sysPub, sysJWT, acctPub, acctJWT))},
 	}
 	if p.ConfigPath != "" && config.Absent(p.ConfigPath) {
-		pl.Config = &File{p.ConfigPath, []byte(fmt.Sprintf("{\n  \"url\": %s,\n  \"owner\": %s,\n  \"admin_creds\": %s,\n  \"insecure_loopback\": true\n}\n",
+		pl.Config = &File{p.ConfigPath, []byte(fmt.Sprintf("{\n  \"url\": %s,\n  \"owner\": %s,\n  \"admin_creds\": %s,\n  \"insecure_plaintext\": true\n}\n",
 			strconv.Quote(pl.URL), strconv.Quote(p.Owner), strconv.Quote(pl.Creds)))}
 	}
 	return pl, nil

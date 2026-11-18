@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"os"
 	"slices"
 	"sort"
 	"strconv"
@@ -184,9 +185,12 @@ func OpenAdmin(prog string, cfg config.Config) (*madmin.Admin, context.Context, 
 	} else if err := natsauth.CheckCreds(cfg.AdminCreds, raw); err != nil {
 		return nil, nil, nil, err
 	}
-	tlsReq, err := natsauth.RequireTLS(cfg.URL, cfg.InsecureLoopback)
+	tlsReq, warning, err := natsauth.RequireTLS(cfg.URL, cfg.InsecurePlaintext)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("%s: %w", pfx, err)
+	}
+	if warning != "" {
+		fmt.Fprintln(os.Stderr, warning)
 	}
 	nc, err := nats.Connect(cfg.URL, append(append(natsauth.TLSOptions(cfg.TLSCA, cfg.TLSCert, cfg.TLSKey), tlsReq...), natsauth.UserCredentials(cfg.AdminCreds), nats.Name(prog))...)
 	if err != nil {

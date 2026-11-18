@@ -105,7 +105,7 @@ func TestStandaloneOnlyNATS(t *testing.T) {
 	e := testenv.Start(t)
 
 	base := map[string]string{"MASH_URL": e.URL, "MASH_OWNER": e.Owner, "MASH_GROUP": testGroup}
-	adminEnv := scrubbedEnv(t, map[string]string{"MASH_URL": e.URL, "MASH_OWNER": e.Owner, "MASH_ADMIN_CREDS": e.AdminCreds, "MASH_INSECURE_LOOPBACK": "1"})
+	adminEnv := scrubbedEnv(t, map[string]string{"MASH_URL": e.URL, "MASH_OWNER": e.Owner, "MASH_ADMIN_CREDS": e.AdminCreds, "MASH_INSECURE_PLAINTEXT": "1"})
 	assertToolsAbsent(t, adminEnv)
 	mustRun(t, bin, adminEnv, "admin", "init")
 	envs := map[string][]string{}
@@ -162,7 +162,7 @@ func TestStandaloneOnlyNATS(t *testing.T) {
 func TestStandaloneEnvOnlyConfig(t *testing.T) {
 	bin := mashBinary(t)
 	e := testenv.Start(t)
-	adminEnv := scrubbedEnv(t, map[string]string{"MASH_URL": e.URL, "MASH_OWNER": e.Owner, "MASH_ADMIN_CREDS": e.AdminCreds, "MASH_INSECURE_LOOPBACK": "1"})
+	adminEnv := scrubbedEnv(t, map[string]string{"MASH_URL": e.URL, "MASH_OWNER": e.Owner, "MASH_ADMIN_CREDS": e.AdminCreds, "MASH_INSECURE_PLAINTEXT": "1"})
 	mustRun(t, bin, adminEnv, "admin", "init")
 	creds, user, err := e.MintEndpoint(tAddr("solo"))
 	if err != nil {

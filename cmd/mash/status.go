@@ -22,6 +22,7 @@ import (
 	"github.com/bogworks/mash/internal/endpoint"
 	"github.com/bogworks/mash/internal/host"
 	"github.com/bogworks/mash/internal/mcp"
+	"github.com/bogworks/mash/internal/natsauth"
 	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/spool"
 )
@@ -248,26 +249,21 @@ func credsLine(cfg config.Config) string {
 
 const cliLiveNote = "not checked from the CLI (a running session reports it)"
 
-// tlsLine says how the url is protected. A plain nats:// or ws:// entry (a scheme-less entry is nats://) to a host that
-// is not loopback is a WARN that names the host, or, with require_tls on, the refusal an endpoint connection gives.
+// tlsLine says how the url is protected (REQ-014). A plain entry (nats://, ws://, or none; a scheme-less entry is
+// nats://) without insecure_plaintext is FAILED with the refusal an endpoint connection gives; with it, WARN naming the
+// override; a tls:// or wss:// url is OK.
 func tlsLine(cfg config.Config) string {
 	if cfg.URL == "" {
 		return "tls: n/a - no url"
 	}
-	if cfg.RequireTLS {
-		if _, err := endpoint.EndpointTLS(cfg); err != nil {
-			return "tls: FAILED - " + redactText(err.Error())
-		}
+	_, warning, err := natsauth.RequireTLS(cfg.URL, cfg.InsecurePlaintext)
+	switch {
+	case err != nil:
+		return "tls: FAILED - " + redactText(err.Error())
+	case warning != "":
+		return fmt.Sprintf("tls: WARN - %s is plain text and insecure_plaintext (MASH_INSECURE_PLAINTEXT) is set: %s", redactURL(cfg.URL), redactText(warning))
 	}
-	switch w := config.PlainTextWarning(cfg.URL); {
-	case w != "":
-		return fmt.Sprintf("tls: WARN - %s %s", redactURL(cfg.URL), w)
-	case cfg.RequireTLS:
-		return "tls: OK (required) - no plain text to a remote host"
-	case strings.Contains(cfg.URL, "tls://") || strings.Contains(cfg.URL, "wss://"):
-		return "tls: OK - tls:// connection"
-	}
-	return "tls: n/a - loopback"
+	return "tls: OK - tls:// connection"
 }
 
 // authLine warns when a url in the (comma-separated) server list carries userinfo, a password or a token, which mash

@@ -56,7 +56,7 @@ func newFleetEnv(t *testing.T) *fleetEnv {
 		t.Fatal(err)
 	}
 	h := &fleetEnv{t: t, e: e, dir: dir, env: map[string]string{
-		"HOME": t.TempDir(), "MASH_URL": e.URL, "MASH_OWNER": e.Owner, "MASH_ADMIN_CREDS": e.AdminCreds, "MASH_INSECURE_LOOPBACK": "1",
+		"HOME": t.TempDir(), "MASH_URL": e.URL, "MASH_OWNER": e.Owner, "MASH_ADMIN_CREDS": e.AdminCreds, "MASH_INSECURE_PLAINTEXT": "1",
 		"MASH_CONFIG_DIR": dir, "MASH_KEYS_DIR": filepath.Join(dir, "keys"),
 	}}
 	if _, _, code := h.run("init"); code != 0 {
