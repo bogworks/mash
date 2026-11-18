@@ -26,6 +26,7 @@ type fakeWorld struct {
 	calls      []string
 	polls      int
 	cutover    string // the cutover version Keyless reports ("": none)
+	latestErr  error  // what VerifyNotLatest says
 	keyless    bool   // the tag is at or above the cutover: its tag is pushed by the minting service
 }
 
@@ -78,6 +79,10 @@ func (f *fakeWorld) Publish(tag string) error {
 	}
 	return f.publishErr
 }
+func (f *fakeWorld) VerifyNotLatest(tag string) error {
+	f.calls = append(f.calls, "notlatest")
+	return f.latestErr
+}
 func (f *fakeWorld) Now() time.Time        { return f.now }
 func (f *fakeWorld) Sleep(d time.Duration) { f.calls = append(f.calls, "sleep"); f.now = f.now.Add(d) }
 
@@ -129,6 +134,41 @@ func TestPublish_orderRecheckedRightBeforePublishing(t *testing.T) {
 		}
 		if order < 0 || pub < 0 || order > pub {
 			t.Errorf("calls %v: want order before publish", f.calls)
+		}
+	})
+}
+
+func TestPublish_rerunVerifiesNotLatest(t *testing.T) {
+	has := func(f *fakeWorld) bool {
+		for _, c := range f.calls {
+			if c == "notlatest" {
+				return true
+			}
+		}
+		return false
+	}
+	o := Options{Version: "1.2.3", Wait: time.Minute, NotLatest: true}
+	t.Run("published and marked latest: refused", func(t *testing.T) {
+		f := newFake()
+		f.tagAt, f.release = "abc", relPublished
+		f.latestErr = errors.New("v1.2.3 was published with --not-latest but is marked latest")
+		err := runPublish(o, f, "abc")
+		if err == nil || !strings.Contains(err.Error(), "marked latest") {
+			t.Fatalf("err = %v, want the refusal", err)
+		}
+	})
+	t.Run("published and not latest: ok", func(t *testing.T) {
+		f := newFake()
+		f.tagAt, f.release = "abc", relPublished
+		if err := runPublish(o, f, "abc"); err != nil || !has(f) {
+			t.Fatalf("err = %v, calls %v", err, f.calls)
+		}
+	})
+	t.Run("without the flag: no list call", func(t *testing.T) {
+		f := newFake()
+		f.tagAt, f.release = "abc", relPublished
+		if err := run(f); err != nil || has(f) {
+			t.Fatalf("err = %v, calls %v", err, f.calls)
 		}
 	})
 }
@@ -376,7 +416,7 @@ func TestParseArgs_publish(t *testing.T) {
 		{"publish"}, {"publish", "1.2.3"}, {"publish", "1.2.3", "abc", "d"},
 		{"publish", "--assets", "1.2.3", "abc"}, {"publish", "--consumer", "co", "1.2.3", "abc"},
 		{"publish", "--wait"}, {"publish", "--wait", "soon", "1.2.3", "abc"}, {"publish", "--wait", "-1m", "1.2.3", "abc"},
-		{"publish", "--bogus", "1.2.3", "abc"},
+		{"publish", "--bogus", "1.2.3", "abc"}, {"publish", "--not-latest=false", "1.2.3", "abc"},
 		{"1.2.3", "abc", "publish"}, // publish is only the first argument
 	} {
 		if _, _, err := parseArgs(args); err == nil {
@@ -540,5 +580,86 @@ func TestOrderAbove_ownDraftDoesNotCount(t *testing.T) {
 	rel := []releaseRow{{TagName: "v1.2.2"}, {TagName: "v1.2.3", IsDraft: true}}
 	if err := orderAbove("1.2.3", rel); err != nil {
 		t.Errorf("own draft counted against itself: %v", err)
+	}
+}
+
+func TestParseArgs_notLatest(t *testing.T) {
+	o, _, err := parseArgs([]string{"publish", "--not-latest", "1.2.3", "abc"})
+	if err != nil || !o.NotLatest {
+		t.Fatalf("%+v %v", o, err)
+	}
+	if o, _, err = parseArgs([]string{"publish", "1.2.3", "abc"}); err != nil || o.NotLatest {
+		t.Fatalf("%+v %v", o, err)
+	}
+}
+
+// ghLog writes a gh that logs its arguments and answers `release list` with list (the recorded output shape).
+func ghLog(t *testing.T, list string) (Options, string) {
+	t.Helper()
+	dir := t.TempDir()
+	log := filepath.Join(dir, "log")
+	script := "#!/bin/sh\necho \"$*\" >> " + log + "\n" +
+		"case \"$2\" in list) echo '" + list + "' ;; esac\n"
+	gh := filepath.Join(dir, "gh")
+	if err := os.WriteFile(gh, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return Options{GH: gh, GHRepo: "bogworks/mash"}, log
+}
+
+const (
+	listNotLatest = `[{"isLatest":true,"tagName":"v0.5.0"},{"isLatest":false,"tagName":"v0.4.0"}]`
+	listLatest    = `[{"isLatest":true,"tagName":"v0.4.0"},{"isLatest":false,"tagName":"v0.3.0"}]`
+)
+
+func TestPublishRelease_notLatest(t *testing.T) {
+	o, log := ghLog(t, listNotLatest)
+	o.NotLatest = true
+	if err := publishRelease(o, "v0.4.0"); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(log)
+	want := "release edit v0.4.0 --repo bogworks/mash --draft=false --latest=false\nrelease list --repo bogworks/mash --json tagName,isLatest --limit 1000 --exclude-drafts\n"
+	if string(b) != want {
+		t.Errorf("gh calls:\n%s", b)
+	}
+}
+
+func TestPublishRelease_notLatestButLatest(t *testing.T) {
+	o, _ := ghLog(t, listLatest)
+	o.NotLatest = true
+	err := publishRelease(o, "v0.4.0")
+	if err == nil || !strings.Contains(err.Error(), "marked latest") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestPublishRelease_notLatestTagAbsent(t *testing.T) {
+	o, _ := ghLog(t, listNotLatest)
+	o.NotLatest = true
+	err := publishRelease(o, "v9.9.9")
+	if err == nil || !strings.Contains(err.Error(), "not found in the release list") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestPublishRelease_notLatestMalformedList(t *testing.T) {
+	o, _ := ghLog(t, `not json`)
+	o.NotLatest = true
+	err := publishRelease(o, "v0.4.0")
+	var oe opError
+	if err == nil || !errors.As(err, &oe) {
+		t.Fatalf("got %v (%T), want an opError", err, err)
+	}
+}
+
+func TestPublishRelease_default(t *testing.T) {
+	o, log := ghLog(t, listLatest)
+	if err := publishRelease(o, "v0.4.0"); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(log)
+	if want := "release edit v0.4.0 --repo bogworks/mash --draft=false\n"; string(b) != want {
+		t.Errorf("gh calls:\n%s", b)
 	}
 }

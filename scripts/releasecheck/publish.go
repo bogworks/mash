@@ -49,6 +49,8 @@ type world interface {
 	Keyless(tag, x string) (cutover string, keyless bool, err error)
 	// Publish turns the draft into a published release.
 	Publish(tag string) error
+	// VerifyNotLatest reads the release list back: the published tag must be listed and not marked latest.
+	VerifyNotLatest(tag string) error
 	Now() time.Time
 	Sleep(d time.Duration)
 }
@@ -210,6 +212,11 @@ func runPublish(o Options, w world, x string) error {
 		return failed(fmt.Errorf("%s is %s after publishing, not published", tag, st))
 	}
 	say("verifying the published release (read-only)")
+	if o.NotLatest {
+		if err := w.VerifyNotLatest(tag); err != nil {
+			return stepErr(err)
+		}
+	}
 	if err := w.Assets(); err != nil {
 		return stepErr(err)
 	}
@@ -422,9 +429,52 @@ func (r realWorld) Publish(tag string) error {
 	if err := verifySupplyChain(r.o, tag, x); err != nil {
 		return fmt.Errorf("refused: not publishing %s: %w", tag, err)
 	}
-	_, err = gh(r.o, "release", "edit", tag, "--repo", r.o.GHRepo, "--draft=false")
-	return op(err)
+	return publishRelease(r.o, tag)
 }
+
+// publishRelease is the irreversible edit: the draft becomes the published release. With o.NotLatest the edit passes
+// --latest=false and the release is read back: one that GitHub still marks latest is an error.
+func publishRelease(o Options, tag string) error {
+	args := []string{"release", "edit", tag, "--repo", o.GHRepo, "--draft=false"}
+	if o.NotLatest {
+		args = append(args, "--latest=false")
+	}
+	if _, err := gh(o, args...); err != nil {
+		return op(err)
+	}
+	if !o.NotLatest {
+		return nil
+	}
+	return verifyNotLatest(o, tag)
+}
+
+// verifyNotLatest reads the release list back (gh release view has no isLatest field): the tag must be listed and not
+// marked latest. The publish step and the read-only verification of a published release both use it.
+func verifyNotLatest(o Options, tag string) error {
+	b, err := gh(o, "release", "list", "--repo", o.GHRepo, "--json", "tagName,isLatest", "--limit", "1000", "--exclude-drafts")
+	if err != nil {
+		return op(err)
+	}
+	var rows []struct {
+		TagName  string `json:"tagName"`
+		IsLatest bool   `json:"isLatest"`
+	}
+	if err := json.Unmarshal(b, &rows); err != nil {
+		return op(fmt.Errorf("reading the release list: %w", err))
+	}
+	for _, r := range rows {
+		if r.TagName != tag {
+			continue
+		}
+		if r.IsLatest {
+			return fmt.Errorf("%s was published with --not-latest but is marked latest", tag)
+		}
+		return nil
+	}
+	return op(fmt.Errorf("%s not found in the release list after publishing", tag))
+}
+
+func (r realWorld) VerifyNotLatest(tag string) error { return verifyNotLatest(r.o, tag) }
 
 func (r realWorld) Now() time.Time        { return time.Now() }
 func (r realWorld) Sleep(d time.Duration) { time.Sleep(d) }
