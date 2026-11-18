@@ -735,22 +735,106 @@ func (s *At5) secondOwner(m1, m2, m3 Host, aliceEnv []string) {
 	s.check("REQ-005: alice's who does not list her offline endpoint alice/dev/ghost as online", r.Code == 0 && online == "", fmt.Sprintf("alice/dev/ghost listed: %v, online: %s", listed, orNone(online)))
 }
 
-// revocationSeen: the delete of review was made from M1; M2 shows it with endpoint show and issued check.
+// showRefusal asserts the output of `endpoint show --json` for an endpoint that no longer exists: exit 1 and a refused
+// outcome whose refusal code is exactly not_found (cmd/mashctl/endpoint_show.go). Any other exit, any other code and
+// output that is not that JSON document fail.
+func showRefusal(code int, stdout string) (bool, string) {
+	if code != 1 {
+		return false, fmt.Sprintf("exit %d, want 1", code)
+	}
+	var doc struct {
+		Outcome string `json:"outcome"`
+		Refusal *struct {
+			Code string `json:"code"`
+		} `json:"refusal"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(stdout)), &doc); err != nil {
+		return false, "exit 1 but stdout is not the --json document"
+	}
+	if doc.Outcome != "refused" || doc.Refusal == nil {
+		return false, fmt.Sprintf("outcome %q with no refusal, want refused", doc.Outcome)
+	}
+	if doc.Refusal.Code != "not_found" {
+		return false, fmt.Sprintf("refusal code %q, want not_found", doc.Refusal.Code)
+	}
+	return true, "exit 1, refusal not_found"
+}
+
+// issuedCheckClean asserts `mashctl issued check --json` after the revocation: exit 0 (clean and complete, per
+// cmd/mashctl/issued.go), clean, complete, the issue record present and no revoked key connected anywhere.
+func issuedCheckClean(code int, stdout string) (bool, string) {
+	if code != 0 {
+		return false, fmt.Sprintf("exit %d, want 0 (clean and complete)", code)
+	}
+	var doc struct {
+		Clean         *bool             `json:"clean"`
+		Complete      *bool             `json:"complete"`
+		RecordPresent *bool             `json:"record_present"`
+		RevokedConn   []json.RawMessage `json:"revoked_connected"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(stdout)), &doc); err != nil {
+		return false, "stdout is not the --json document"
+	}
+	var bad []string
+	for _, f := range []struct {
+		n string
+		v *bool
+	}{{"clean", doc.Clean}, {"complete", doc.Complete}, {"record_present", doc.RecordPresent}} {
+		if f.v == nil || !*f.v {
+			bad = append(bad, f.n+" is not true")
+		}
+	}
+	if len(doc.RevokedConn) != 0 {
+		bad = append(bad, fmt.Sprintf("%d revoked key(s) connected", len(doc.RevokedConn)))
+	}
+	if len(bad) > 0 {
+		return false, strings.Join(bad, "; ")
+	}
+	return true, "exit 0, clean, complete, record present, no revoked key connected"
+}
+
+// issuedListRevoked asserts that `issued list --json` has an entry for address with a non-empty revoked_at. An absent
+// entry fails.
+func issuedListRevoked(code int, stdout, address string) (bool, string) {
+	if code != 0 {
+		return false, fmt.Sprintf("exit %d, want 0", code)
+	}
+	v, err := parseJSON(stdout)
+	if err != nil {
+		return false, "stdout is not JSON"
+	}
+	found := false
+	for _, o := range findObjects(v, "address", "revoked_at") {
+		if a, _ := o["address"].(string); a != address {
+			continue
+		}
+		found = true
+		if at, _ := o["revoked_at"].(string); at != "" {
+			return true, address + " revoked_at is set"
+		}
+	}
+	if !found {
+		return false, "no entry for " + address
+	}
+	return false, address + " has an empty revoked_at"
+}
+
+// revocationSeen: the delete of review was made from M1; M2 shows it with endpoint show, issued list and issued check.
 func (s *At5) revocationSeen() {
 	m2 := s.M(2)
 	r := s.ctl(m2, "show-review", nil, "endpoint", "show", "alice/dev/review", "--json")
-	t := r.Text()
-	s.check("M2: endpoint show alice/dev/review shows the revocation made from M1 (the endpoint is gone, or its record says revoked)", r.Code == 1 || strings.Contains(strings.ToLower(t), "revoked") || strings.Contains(strings.ToLower(t), "burned"), exitSnip(r))
+	ok, d := showRefusal(r.Code, r.Stdout)
+	s.check("M2: endpoint show alice/dev/review --json refuses with code not_found for the endpoint M1 deleted", ok, d)
 	il := s.ctl(m2, "issued-list", nil, "issued", "list", "--json")
-	revoked := false
-	if v, err := parseJSON(il.Stdout); err == nil {
-		for _, o := range findObjects(v, "address", "revoked_at") {
-			if a, _ := o["address"].(string); a == "alice.dev.review" && fmt.Sprint(o["revoked_at"]) != "" {
-				revoked = true
-			}
-		}
-	}
-	s.check("M2: mashctl issued list shows review's key revoked", il.Code == 0 && revoked, exitSnip(il))
+	ok, d = issuedListRevoked(il.Code, il.Stdout, "alice.dev.review")
+	s.check("M2: mashctl issued list shows alice.dev.review's key revoked (its entry has revoked_at)", ok, d)
+	ic := retry(30*time.Second, 2*time.Second, func() (Result, bool) {
+		r := s.ctl(m2, "issued-check-json", nil, "issued", "check", "--json", "--servers", "3")
+		ok, _ := issuedCheckClean(r.Code, r.Stdout)
+		return r, ok
+	})
+	ok, d = issuedCheckClean(ic.Code, ic.Stdout)
+	s.check("M2: mashctl issued check --json after the revocation: clean, complete, record present, no revoked key connected", ok, d)
 	s.ClusterCheck(m2, "M2 after the revocation")
 }
 
