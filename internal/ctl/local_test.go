@@ -88,7 +88,7 @@ func TestInitLocalWithNoConfig(t *testing.T) {
 		}
 	}
 	c, err := os.ReadFile(filepath.Join(e.root, "cfg", "config.json"))
-	if err != nil || !strings.Contains(string(c), "tls://127.0.0.1:4333") || !strings.Contains(string(c), `"tls_ca"`) || strings.Contains(string(c), "insecure_loopback") {
+	if err != nil || !strings.Contains(string(c), "tls://127.0.0.1:4333") || !strings.Contains(string(c), `"tls_ca"`) || strings.Contains(string(c), "insecure_plaintext") {
 		t.Fatalf("config.json: %s %v", c, err)
 	}
 	if _, err := os.Stat(filepath.Join(e.root, "cfg", "policy.yaml")); err == nil {
@@ -281,8 +281,8 @@ func TestInitLocalStartTakesNoInsecureFlagAndStartsOnlyTheLoopbackServerItGenera
 	if code != 0 || !strings.Contains(out, "Ready") {
 		t.Fatalf("exit %d: %s\n%s", code, out, errs)
 	}
-	if !strings.HasPrefix(gotURL, "tls://127.0.0.1:") || !gotGenerated || bucketCfg.InsecureLoopback || bucketCfg.TLSCA != filepath.Join(e.root, "cfg", "server", "ca.pem") {
-		t.Fatalf("Start got %q generated %v, buckets insecure_loopback %v tls_ca %q", gotURL, gotGenerated, bucketCfg.InsecureLoopback, bucketCfg.TLSCA)
+	if !strings.HasPrefix(gotURL, "tls://127.0.0.1:") || !gotGenerated || bucketCfg.InsecurePlaintext || bucketCfg.TLSCA != filepath.Join(e.root, "cfg", "server", "ca.pem") {
+		t.Fatalf("Start got %q generated %v, buckets insecure_plaintext %v tls_ca %q", gotURL, gotGenerated, bucketCfg.InsecurePlaintext, bucketCfg.TLSCA)
 	}
 	if code, _, _ := e.run("init", "--local", "--owner", "alice", "--start", "--insecure"); code != 2 {
 		t.Fatalf("--insecure is not a flag any more: exit %d", code)
@@ -300,7 +300,7 @@ func TestInitLocalRecordsOperatorJWTAndATLSOnlyConfig(t *testing.T) {
 		t.Fatalf("operator.jwt in the key directory: %v %v", st, err)
 	}
 	cfg, err := os.ReadFile(filepath.Join(e.root, "cfg", "config.json"))
-	if err != nil || !strings.Contains(string(cfg), `"tls_ca"`) || strings.Contains(string(cfg), "insecure_loopback") {
+	if err != nil || !strings.Contains(string(cfg), `"tls_ca"`) || strings.Contains(string(cfg), "insecure_plaintext") {
 		t.Fatalf("config.json: %s %v", cfg, err)
 	}
 	// a second init on another directory keeps the first operator JWT
