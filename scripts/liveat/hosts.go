@@ -53,14 +53,14 @@ type Host interface {
 type Preflighter interface{ Preflight() error }
 
 // Cleaner is a Hosts value whose substrate can leave things behind (containers, networks, images, machines) and can
-// remove them by a label key, whatever run made them. It backs `liveat at005-cleanup`.
+// remove one run's by its label (mash-at005=<run id>). It backs `liveat at005-cleanup`.
 type Cleaner interface {
-	Cleanup(label string, stdout, stderr io.Writer) int
+	Cleanup(runID string, stdout, stderr io.Writer) int
 }
 
 // Hosts is the one seam between the AT-005 scenario and the substrate that makes its nodes: Open creates three nodes
 // (each a Host: its address, exec, copy in and out, a way to read its file tree) and registers their destruction on
-// the Run (Run.OnClose); a Cleaner removes leftovers by label. The scenario knows nothing else, so the substrate can
+// the Run (Run.OnClose); a Cleaner removes one run's leftovers by label. The scenario knows nothing else, so the substrate can
 // change (Local loopback, rootless podman, a future VM or container service) by adding one more Hosts value.
 type Hosts interface {
 	Name() string
