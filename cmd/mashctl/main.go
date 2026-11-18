@@ -40,8 +40,9 @@ func (p *plainWatch) Write(b []byte) (int, error) {
 // verb, whichever path reported it.
 func run(args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
 	pw := &plainWatch{w: stderr}
-	code := runVerbs(args, env, lookup, stdout, pw)
-	if code == 1 && pw.seen {
+	pwOut := &plainWatch{w: stdout} // a --json run reports its error on stdout
+	code := runVerbs(args, env, lookup, pwOut, pw)
+	if code != 0 && code != 2 && (pw.seen || pwOut.seen) {
 		return 2
 	}
 	return code
