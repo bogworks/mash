@@ -1,0 +1,1 @@
+`mashctl endpoint reissue --make-key` keeps the staged key in `<creds file>.pending` until it has read the directory record back and found the new key there. A run that stopped after the new creds file was written, or could not read the record back, is finished by running the same command again, which no longer stages another key and revokes the one the first run installed.

@@ -161,7 +161,7 @@ Before it revokes, `reissue` refuses when the old key's issue record shows a JWT
 
 Two `mashctl` machines must not reissue the same endpoint at the same moment. The command checks the directory key after it writes and reports `superseded` if another run replaced it; it cannot stop the race, and the older key stays revoked either way.
 
-**Exit codes.** 0 done, planned or unchanged, 1 refused, 2 usage error, 5 partial (a bulk run in which some endpoints were not reissued), 6 error. A killed run is finished by running the same command again; with `--make-key` the new key waits in `<creds file>.pending`.
+**Exit codes.** 0 done, planned or unchanged, 1 refused, 2 usage error, 5 partial (a bulk run in which some endpoints were not reissued), 6 error. A killed run is finished by running the same command again; with `--make-key` the new key waits in `<creds file>.pending`. With `--make-key`, a reissue that stopped after the new credentials were written, or could not read the directory record back to confirm them, is finished by running the same command again: it keeps the new key, confirms it and removes `<creds file>.pending`, and does not revoke the new key.
 
 ## mashctl endpoint delete
 

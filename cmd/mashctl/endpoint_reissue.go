@@ -584,7 +584,7 @@ func (r epRun) reissue(addr sap.Address, makeKey bool, pub, outPath string, resu
 	}
 	var werr error
 	if makeKey {
-		werr = epPublishStaged(res.JWT, seed, outPath, pending, true)
+		werr = epPublishStaged(res.JWT, seed, outPath, pending, true, false)
 	} else {
 		if epAfterEnroll != nil {
 			epAfterEnroll()
@@ -609,9 +609,20 @@ func (r epRun) reissue(addr sap.Address, makeKey bool, pub, outPath string, resu
 	if epBeforeVerify != nil {
 		epBeforeVerify()
 	}
-	cur, _, verr := r.adm.UserOf(r.ctx, addr)
+	var cur string
+	var verr error
+	if epVerifyFail != nil {
+		verr = epVerifyFail()
+	}
+	if verr == nil {
+		cur, _, verr = r.adm.UserOf(r.ctx, addr)
+	}
 	if verr != nil {
-		return "", 0, &epFail{code: "server", detail: fmt.Sprintf("endpoint %s was reissued and %s was written, but the result could not be confirmed (%s) and the file was kept: run mashctl endpoint show %s and compare its key with the one in the file", addr, outPath, admin.RewordUnavailable(verr.Error()), epShortcut(addr))}
+		kept := ""
+		if makeKey {
+			kept = fmt.Sprintf(" The staged key %s was kept: run the same command again to finish it; the new key is not revoked.", pending)
+		}
+		return "", 0, &epFail{code: "server", detail: fmt.Sprintf("endpoint %s was reissued and %s was written, but the result could not be confirmed (%s) and the file was kept: run mashctl endpoint show %s and compare its key with the one in the file.%s", addr, outPath, admin.RewordUnavailable(verr.Error()), epShortcut(addr), kept)}
 	}
 	if cur != res.PublicKey {
 		os.Remove(outPath)
@@ -620,6 +631,11 @@ func (r epRun) reissue(addr sap.Address, makeKey bool, pub, outPath string, resu
 			os.Remove(pending)
 		}
 		return "", 0, &epFail{code: "superseded", detail: fmt.Sprintf("another reissue changed %s's key while this one ran, so the credentials this run wrote are for a key that is no longer the endpoint's; they were removed; run the command again", addr)}
+	}
+	if makeKey {
+		// The readback confirmed the key: the staged seed is not needed any more. Removed only now, so a run stopped
+		// before this point finds the staged key and finishes without revoking the key it installed.
+		os.Remove(pending)
 	}
 	return res.PublicKey, acked, nil
 }
@@ -631,6 +647,8 @@ var (
 	epAfterStage   func()
 	epAfterEnroll  func()
 	epBeforeVerify func()
+	// epVerifyFail, when set, returns the error the readback of the directory record fails with.
+	epVerifyFail func() error
 )
 
 // epStageKey returns the key a --make-key run uses, kept in the pending file at path so a run killed at any later
@@ -686,9 +704,9 @@ func epStageKey(path string) (pub string, seed []byte, made bool, err error) {
 	return "", nil, false, fmt.Errorf("%s keeps appearing; remove it and run again", path)
 }
 
-// epPublishStaged writes the creds file for jwtText and seed and then removes the pending file. With replace the file
-// at path is replaced, else it is never overwritten.
-func epPublishStaged(jwtText string, seed []byte, path, pending string, replace bool) error {
+// epPublishStaged writes the creds file for jwtText and seed and then, with removePending, removes the pending file.
+// With replace the file at path is replaced, else it is never overwritten.
+func epPublishStaged(jwtText string, seed []byte, path, pending string, replace, removePending bool) error {
 	if epAfterEnroll != nil {
 		epAfterEnroll()
 	}
@@ -710,7 +728,9 @@ func epPublishStaged(jwtText string, seed []byte, path, pending string, replace 
 	if err := epSyncDir(filepath.Dir(path)); err != nil {
 		return fmt.Errorf("the creds file %s was written but the directory could not be synced (%w); the staged key %s was kept", path, err, pending)
 	}
-	os.Remove(pending)
+	if removePending {
+		os.Remove(pending)
+	}
 	return nil
 }
 
