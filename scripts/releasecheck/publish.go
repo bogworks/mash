@@ -438,20 +438,28 @@ func publishRelease(o Options, tag string) error {
 	if !o.NotLatest {
 		return nil
 	}
-	b, err := gh(o, "release", "view", tag, "--repo", o.GHRepo, "--json", "isLatest")
+	// gh release view has no isLatest field: read it from the release list.
+	b, err := gh(o, "release", "list", "--repo", o.GHRepo, "--json", "tagName,isLatest", "--limit", "100", "--exclude-drafts")
 	if err != nil {
 		return op(err)
 	}
-	var v struct {
-		IsLatest bool `json:"isLatest"`
+	var rows []struct {
+		TagName  string `json:"tagName"`
+		IsLatest bool   `json:"isLatest"`
 	}
-	if err := json.Unmarshal(b, &v); err != nil {
-		return op(fmt.Errorf("reading the release of %s: %w", tag, err))
+	if err := json.Unmarshal(b, &rows); err != nil {
+		return op(fmt.Errorf("reading the release list: %w", err))
 	}
-	if v.IsLatest {
-		return fmt.Errorf("%s was published with --not-latest but is marked latest", tag)
+	for _, r := range rows {
+		if r.TagName != tag {
+			continue
+		}
+		if r.IsLatest {
+			return fmt.Errorf("%s was published with --not-latest but is marked latest", tag)
+		}
+		return nil
 	}
-	return nil
+	return op(fmt.Errorf("%s not found in the release list after publishing", tag))
 }
 
 func (r realWorld) Now() time.Time        { return time.Now() }
