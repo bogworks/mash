@@ -240,11 +240,13 @@ func Reissue(ctx context.Context, d Deps, addr sap.Address, publicKey string) (R
 // ReissueThen is Reissue with a callback that runs UNDER the address's name lock, after the old key is revoked and the
 // directory record names the new key, with the Result (the JWT, and the Seed of a same-host key). A caller that writes the
 // credential to a file does it here, so two machines reissuing one endpoint cannot interleave between the record
-// moving and the file being written. Keep it short: the lock lasts 30 s and a check refuses past it. If then returns an
+// moving and the file being written. It receives the lock's bounded context and the held lock: call l.Check(ctx) immediately before
+// each write the lock protects (the lock lasts 30 s, and Check refuses once it is lost or about to expire) and pass ctx on, so a
+// stalled callback cannot write after another machine took the lock. Keep it short. If then returns an
 // error, ReissueThen returns that error together with the Result: the record has already moved and the old key is
 // revoked, so running the same command again with the same public key completes (a same-host key is made again: the seed
 // of the failed run is lost).
-func ReissueThen(ctx context.Context, d Deps, addr sap.Address, publicKey string, then func(Result) error) (Result, error) {
+func ReissueThen(ctx context.Context, d Deps, addr sap.Address, publicKey string, then func(ctx context.Context, l admin.NameLock, r Result) error) (Result, error) {
 	if d.Revoke == nil {
 		return Result{}, errors.New("enroll: Deps.Revoke is required to reissue")
 	}
@@ -296,7 +298,7 @@ func ReissueThen(ctx context.Context, d Deps, addr sap.Address, publicKey string
 		}
 		moved = true
 		if then != nil {
-			thenErr = then(Result{Addr: addr, PublicKey: pub, JWT: tok, Seed: seed, Reissued: true})
+			thenErr = then(ctx, l, Result{Addr: addr, PublicKey: pub, JWT: tok, Seed: seed, Reissued: true})
 		}
 		return nil
 	})

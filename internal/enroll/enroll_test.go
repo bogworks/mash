@@ -691,7 +691,7 @@ func TestReissueThenRunsUnderTheNameLock(t *testing.T) {
 			t.Error("the second reissue finished before the callback returned")
 		}
 	}()
-	res, err := enroll.ReissueThen(ctx, h.d, a, k1, func(r enroll.Result) error {
+	res, err := enroll.ReissueThen(ctx, h.d, a, k1, func(_ context.Context, _ admin.NameLock, r enroll.Result) error {
 		if r.PublicKey != k1 || !r.Reissued {
 			t.Errorf("callback result %+v", r)
 		}
@@ -726,7 +726,7 @@ func TestReissueThenCallbackErrorKeepsTheMove(t *testing.T) {
 	}
 	_, k1 := newKey(t)
 	boom := errors.New("disk full")
-	res, err := enroll.ReissueThen(ctx, h.d, a, k1, func(enroll.Result) error { return boom })
+	res, err := enroll.ReissueThen(ctx, h.d, a, k1, func(context.Context, admin.NameLock, enroll.Result) error { return boom })
 	if !errors.Is(err, boom) || res.PublicKey != k1 || res.JWT == "" {
 		t.Fatalf("got %+v %v", res, err)
 	}
@@ -736,5 +736,36 @@ func TestReissueThenCallbackErrorKeepsTheMove(t *testing.T) {
 	again, err := enroll.Reissue(ctx, h.d, a, k1)
 	if err != nil || again.PublicKey != k1 {
 		t.Fatalf("rerun: %+v %v", again, err)
+	}
+}
+
+// The callback receives the held lock and the lock's bounded context: Check passes while the lock is held, and refuses once
+// the Admin's clock has run past the lock's life (a stalled callback must not write after another machine took the lock).
+func TestReissueThenCallbackCanCheckTheLock(t *testing.T) {
+	h := newEnv(t)
+	ctx := context.Background()
+	a := addr("thenchk")
+	_, k0 := newKey(t)
+	if _, err := enroll.Create(ctx, h.d, enroll.Request{Addr: a, PublicKey: k0}); err != nil {
+		t.Fatal(err)
+	}
+	var offset atomic.Int64 // nanoseconds the Admin's clock is ahead
+	h.adm.UseClock(func() time.Time { return time.Now().Add(time.Duration(offset.Load())) })
+	_, k1 := newKey(t)
+	var before, after error
+	_, err := enroll.ReissueThen(ctx, h.d, a, k1, func(cctx context.Context, l admin.NameLock, _ enroll.Result) error {
+		if cctx == nil || cctx.Err() != nil {
+			t.Errorf("the callback's context is not usable: %v", cctx)
+		}
+		before = l.Check(cctx)
+		offset.Store(int64(45 * time.Second)) // the callback stalls past the lock's life
+		after = l.Check(cctx)
+		return after
+	})
+	if before != nil {
+		t.Errorf("Check refused while the lock was held: %v", before)
+	}
+	if after == nil || !errors.Is(err, admin.ErrLockLost) && !errors.Is(err, after) {
+		t.Errorf("Check passed past the lock's life, or the error was lost: after=%v err=%v", after, err)
 	}
 }
