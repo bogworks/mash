@@ -114,7 +114,7 @@ func Usage(prog string) string {
 		fmt.Fprintf(&b, "  %-44s %s\n", prog+" "+left, right)
 	}
 	line("init", "create the directory and lease buckets (or raise their caps to the configured limits)")
-	line("init --local [--dir D] [--owner O] [--port P] [--start]", "write the configuration of a local operator-mode NATS server with JetStream (loopback, no TLS), keys and credentials, for one developer; --start also starts it and creates the buckets")
+	line("init --local [--dir D] [--owner O] [--port P] [--start]", "write the configuration of a local operator-mode NATS server with JetStream (loopback, TLS only), keys and credentials, for one developer; --start also starts it and creates the buckets")
 	line("limits [address...]", "raise existing inboxes to the configured limits (config.json \"limits\"; never lowers)")
 	line("limits --show", "print the effective limits")
 	line("permissions <owner.group.instance> [--nsc]", "the NATS permissions an endpoint user needs")
