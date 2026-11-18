@@ -340,6 +340,16 @@ type ep5 struct {
 	creds string
 }
 
+// jwtBase is the owner.group.instance part of the names of an endpoint's JWT files, so endpoints of different owners with the same
+// instance never share a file in the harness workspace (an empty owner is alice).
+func (e ep5) jwtBase() string {
+	o := e.owner
+	if o == "" {
+		o = "alice"
+	}
+	return o + ".dev." + e.name
+}
+
 // makeKey runs `mash key create` on h.
 func (s *At5) makeKey(h Host, name, tag string) (ep5, bool) {
 	e := ep5{name: name, host: h, seed: filepath.Join(h.Home().Dir, name+tag+".seed"), pub: filepath.Join(h.Home().Dir, name+tag+".pub")}
@@ -371,7 +381,7 @@ func (s *At5) provision(ctl Host, verb string, e *ep5, credsPath string) bool {
 	if !s.check("the public key of "+e.name+" is carried to "+ctl.Role(), err == nil, errText(err)) {
 		return false
 	}
-	jwtCarry := filepath.Join(ctl.Home().Dir, "alice.dev."+e.name+"."+verb+".out.jwt") // written on ctl; the courier moves it
+	jwtCarry := filepath.Join(ctl.Home().Dir, e.jwtBase()+"."+verb+".out.jwt") // written on ctl; the courier moves it
 	args := []string{"endpoint", verb, owner + "/dev/" + e.name, "--public-key", pubOnCtl, "--jwt-out", jwtCarry}
 	r := s.ctl(ctl, "endpoint-"+verb+"-"+e.name, nil, args...)
 	ok := s.check(ctl.Role()+": mashctl endpoint "+verb+" "+owner+"/dev/"+e.name+" --public-key succeeds", r.Code == 0, exitSnip(r))
@@ -398,7 +408,7 @@ func (s *At5) provision(ctl Host, verb string, e *ep5, credsPath string) bool {
 		return false
 	}
 	// the courier carries the JWT file to the endpoint's machine
-	e.jwt = filepath.Join(e.host.Home().Dir, "alice.dev."+e.name+"."+verb+".jwt")
+	e.jwt = filepath.Join(e.host.Home().Dir, e.jwtBase()+"."+verb+".jwt")
 	if err := e.host.Put(e.jwt, jb, 0o600); err != nil {
 		s.check("the JWT file is carried to "+e.host.Role(), false, err.Error())
 		return false
