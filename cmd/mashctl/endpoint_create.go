@@ -854,7 +854,7 @@ func epCredsUser(path string, addr sap.Address) (string, error) {
 	return uc.Subject, nil
 }
 
-// enrollCreate and enrollReissue are the library calls the commands make. Tests replace them to inject a failure
+// enrollCreate and enrollReissueThen are the library calls the commands make. Tests replace them to inject a failure
 // that is not a refusal; nothing else does.
 var enrollCreate = enroll.Create
-var enrollReissue = enroll.Reissue
+var enrollReissueThen = enroll.ReissueThen

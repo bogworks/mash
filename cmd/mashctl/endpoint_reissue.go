@@ -52,8 +52,6 @@ const endpointReissueUsage = `usage: mashctl endpoint reissue ADDRESS (--public-
   creds_mismatch (--make-key found a creds file that is not this endpoint's current creds: its name, key or account
   differs; move it aside with mv FILE FILE.old and run again, or use --public-key), creds_unreadable (the file exists
   and cannot be read or parsed).
-  Errors include superseded: another reissue changed the endpoint's key while this one ran, so the file this run wrote
-  was removed; run the command again.
   exit codes: 0 done, planned or unchanged, 1 refused, 2 usage, 5 partial (bulk), 6 error
 Example:
   mashctl endpoint reissue alice/dev/design --public-key design.pub
@@ -447,10 +445,11 @@ func (r epRun) preflight(addr sap.Address) *epFail {
 func (r epRun) reissue(addr sap.Address, makeKey bool, pub, outPath string, resume bool) (string, int, *epFail) {
 	var seed []byte
 	pending := outPath + ".pending"
-	// One reissue at a time per endpoint, in every key mode: enroll.Reissue and the write of the output file are one
-	// step, so two runs cannot rotate the server key twice or leave the output on a key that is already revoked. The
-	// lock is a directory beside the endpoint's creds path (keyed by the address); with no config directory it sits
-	// beside the output file.
+	// One reissue at a time per endpoint on this host, in every key mode. This lock is a directory beside the
+	// endpoint's creds path (keyed by the address); with no config directory it sits beside the output file. It is
+	// local: across machines the server's name lock serialises, because the output file is written inside
+	// enroll.ReissueThen's callback, under that lock, so another machine's reissue of the endpoint waits (up to the
+	// lock's wait) until this run's file is written.
 	lockPath := outPath + ".lock"
 	if cp, cerr := credsFileFor(r.cfg, addr); cerr == nil {
 		lockPath = cp + ".lock"
@@ -552,8 +551,28 @@ func (r epRun) reissue(addr sap.Address, makeKey bool, pub, outPath string, resu
 			acked = n
 			return err
 		}}
-	res, err := enrollReissue(r.ctx, deps, addr, pub)
-	if err != nil {
+	// The output file is written inside the callback, so it is written under the server's name lock for addr: a run on
+	// another host cannot move the record between this run's record move and this run's file write.
+	var werr error
+	then := func(res enroll.Result) error {
+		if epInsideLock != nil {
+			epInsideLock()
+		}
+		if makeKey {
+			werr = epPublishStaged(res.JWT, seed, outPath, pending, true)
+		} else {
+			if epAfterEnroll != nil {
+				epAfterEnroll()
+			}
+			werr = epWriteNew(outPath, []byte(res.JWT+"\n"))
+			if werr == nil {
+				os.Remove(marker)
+			}
+		}
+		return werr
+	}
+	res, err := enrollReissueThen(r.ctx, deps, addr, pub, then)
+	if err != nil && werr == nil {
 		var fi *epFutureIssuedError
 		if errors.As(err, &fi) {
 			if makeKey {
@@ -573,18 +592,6 @@ func (r epRun) reissue(addr sap.Address, makeKey bool, pub, outPath string, resu
 		}
 		return "", 0, &epFail{code: "server", detail: admin.RewordUnavailable(err.Error()) + "; run the same command again to finish it"}
 	}
-	var werr error
-	if makeKey {
-		werr = epPublishStaged(res.JWT, seed, outPath, pending, true)
-	} else {
-		if epAfterEnroll != nil {
-			epAfterEnroll()
-		}
-		werr = epWriteNew(outPath, []byte(res.JWT+"\n"))
-		if werr == nil {
-			os.Remove(marker)
-		}
-	}
 	if errors.Is(werr, fs.ErrExist) {
 		return "", 0, &epFail{refused: true, code: "file_exists", detail: fmt.Sprintf("%s appeared while the command ran and is never overwritten; endpoint %s was reissued: run the same command again with another --jwt-out", outPath, addr)}
 	}
@@ -595,33 +602,16 @@ func (r epRun) reissue(addr sap.Address, makeKey bool, pub, outPath string, resu
 		}
 		return "", 0, &epFail{code: "write", detail: fmt.Sprintf("endpoint %s was reissued but %s was not written (%v); %s", addr, outPath, werr, finish)}
 	}
-	// enroll.Reissue released the server's name lock before the file was written, and the lock above is local to this
-	// host: a run on another host may have changed the key since. Read the record again and compare.
-	if epBeforeVerify != nil {
-		epBeforeVerify()
-	}
-	cur, _, verr := r.adm.UserOf(r.ctx, addr)
-	if verr != nil {
-		return "", 0, &epFail{code: "server", detail: fmt.Sprintf("endpoint %s was reissued and %s was written, but the result could not be confirmed (%s) and the file was kept: run mashctl endpoint show %s and compare its key with the one in the file", addr, outPath, admin.RewordUnavailable(verr.Error()), epShortcut(addr))}
-	}
-	if cur != res.PublicKey {
-		os.Remove(outPath)
-		os.Remove(marker)
-		if makeKey {
-			os.Remove(pending)
-		}
-		return "", 0, &epFail{code: "superseded", detail: fmt.Sprintf("another reissue changed %s's key while this one ran, so the credentials this run wrote are for a key that is no longer the endpoint's; they were removed; run the command again", addr)}
-	}
 	return res.PublicKey, acked, nil
 }
 
 // epAfterStage and epAfterEnroll are test seams: after the key is staged, and after the directory is written and
-// before the creds file is. A hook that panics stops the run at that point, as a kill would. epBeforeVerify runs
-// right before the directory record is read again to confirm the key.
+// before the creds file is. A hook that panics stops the run at that point, as a kill would.
 var (
-	epAfterStage   func()
-	epAfterEnroll  func()
-	epBeforeVerify func()
+	epAfterStage  func()
+	epAfterEnroll func()
+	// epInsideLock runs at the start of the callback that writes the output file, under the server's name lock.
+	epInsideLock func()
 )
 
 // epStageKey returns the key a --make-key run uses, kept in the pending file at path so a run killed at any later

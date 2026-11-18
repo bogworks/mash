@@ -159,7 +159,7 @@ Before it revokes, `reissue` refuses when the old key's issue record shows a JWT
 
 **Bulk.** `--all` reissues every endpoint that has a creds file on this host. `--changed` reissues the ones whose creds file carries a permission set that differs from the current one, and also those with a rotation left half done (`<creds file>.pending` exists) or whose current key is revoked. If it cannot check whether a key is revoked, it reports that endpoint as an error (`revocation_unknown`) and does not call it unchanged. Both take `--make-key` only, because many public keys cannot arrive in one command. An endpoint with no creds file on this host is skipped (`no_local_creds`), never rotated. Without `--yes`, or with `--dry-run`, the command lists what it would reissue and changes nothing. With `--yes` it reissues one endpoint at a time in address order. A refusal or error on one endpoint does not stop the rest. The JSON schema is `mashctl-endpoint-bulk@1`.
 
-Two `mashctl` machines must not reissue the same endpoint at the same moment. The command checks the directory key after it writes and reports `superseded` if another run replaced it; it cannot stop the race, and the older key stays revoked either way.
+Two `mashctl` machines can reissue the same endpoint at the same moment. The reissue holds the endpoint's name lock on the server until the credential file is written, so a second machine's reissue of the same endpoint waits for it (the lock wait is 20 s) and then runs. If it cannot get the lock it is refused with `mash: another admin is changing the limits of NAME (lock held until TIME); try again`, shown as error `server` with exit 6; run the command again. The older key stays revoked either way.
 
 **Exit codes.** 0 done, planned or unchanged, 1 refused, 2 usage error, 5 partial (a bulk run in which some endpoints were not reissued), 6 error. A killed run is finished by running the same command again; with `--make-key` the new key waits in `<creds file>.pending`.
 
@@ -237,7 +237,6 @@ A refusal exits 1, a usage error exits 2 and an error exits 6. The message names
 | `creds_mismatch` | 1 | reissue, bulk | The creds file at the creds path is not this endpoint's current creds. Move it aside. |
 | `reissue_busy` | 1 | reissue, bulk | Another reissue of the endpoint holds its lock. If none runs, remove the `<creds file>.lock` directory it names. |
 | `server` | 6 | create, reissue, bulk | The server could not be reached or answered with an error. Nothing was changed. |
-| `superseded` | 6 | reissue, bulk | Another reissue changed the endpoint's key while this one ran, so the file this run wrote was removed. Run the command again. |
 | `servers` | 6 | reissue, bulk | Fewer servers answered than the count says. Nothing was revoked. |
 | `write` | 6 | create, reissue | A directory is writable by every user or cannot be used. Nothing was changed. |
 | `creds_unreadable` | 1 (6 in bulk) | reissue, bulk | A creds file on this host cannot be read or parsed. |

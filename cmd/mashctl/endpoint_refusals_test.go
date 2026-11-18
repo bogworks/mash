@@ -127,14 +127,14 @@ func shortServerSet(t *testing.T, r *refEnv) {
 // enrollFails replaces the library calls of create and reissue by ones that fail with an error that is not a refusal,
 // as a server fault in the middle of the enrollment does.
 func enrollFails(t *testing.T, r *refEnv) {
-	prevCreate, prevReissue := enrollCreate, enrollReissue
+	prevCreate, prevReissue := enrollCreate, enrollReissueThen
 	enrollCreate = func(context.Context, enroll.Deps, enroll.Request) (enroll.Result, error) {
 		return enroll.Result{}, errors.New("the server stopped answering")
 	}
-	enrollReissue = func(context.Context, enroll.Deps, sap.Address, string) (enroll.Result, error) {
+	enrollReissueThen = func(context.Context, enroll.Deps, sap.Address, string, func(enroll.Result) error) (enroll.Result, error) {
 		return enroll.Result{}, errors.New("the server stopped answering")
 	}
-	t.Cleanup(func() { enrollCreate, enrollReissue = prevCreate, prevReissue })
+	t.Cleanup(func() { enrollCreate, enrollReissueThen = prevCreate, prevReissue })
 }
 
 func lockHeld(instance string) func(t *testing.T, r *refEnv) {
@@ -280,17 +280,6 @@ var refusalCases = []refCase{
 	{"reissue_key_retired", []string{"endpoint", "reissue", "o/g/a", "--make-key"}, burned("a"), "key_retired", 1},
 	{"reissue_reissue_busy", []string{"endpoint", "reissue", "o/g/a", "--make-key"}, seq(seeded("a"), lockHeld("a")), "reissue_busy", 1},
 	{"reissue_write", []string{"endpoint", "reissue", "o/g/a", "--make-key"}, seq(seeded("a"), groupWritableDir), "write", 6},
-	{"reissue_superseded", []string{"endpoint", "reissue", "o/g/a", "--make-key"}, seq(seeded("a"), func(t *testing.T, r *refEnv) {
-		// another run replaces the directory key between this run's write and its check
-		epBeforeVerify = func() {
-			rec, _ := r.h.record(ad("a"))
-			_, other := r.h.e.Mint(t, ad("other"))
-			if _, err := r.h.adminOf().SetUser(context.Background(), ad("a"), r.h.e.Account, rec.User, other); err != nil {
-				t.Error(err)
-			}
-		}
-		t.Cleanup(func() { epBeforeVerify = nil })
-	}), "superseded", 6},
 	{"reissue_public_key_issued", []string{"endpoint", "reissue", "o/g/b", "--public-key", "{PUB}", "--jwt-out", "{AUX}/out.jwt"}, func(t *testing.T, r *refEnv) {
 		r.must(t, "endpoint", "create", "o/g/a", "--public-key", r.pub, "--jwt-out", filepath.Join(r.aux, "first.jwt"))
 		r.h.seed(ad("b"))

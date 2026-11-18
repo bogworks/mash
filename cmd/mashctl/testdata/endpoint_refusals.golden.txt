@@ -748,8 +748,6 @@ usage: mashctl endpoint reissue ADDRESS (--public-key FILE | --make-key) [--jwt-
   creds_mismatch (--make-key found a creds file that is not this endpoint's current creds: its name, key or account
   differs; move it aside with mv FILE FILE.old and run again, or use --public-key), creds_unreadable (the file exists
   and cannot be read or parsed).
-  Errors include superseded: another reissue changed the endpoint's key while this one ran, so the file this run wrote
-  was removed; run the command again.
   exit codes: 0 done, planned or unchanged, 1 refused, 2 usage, 5 partial (bulk), 6 error
 Example:
   mashctl endpoint reissue alice/dev/design --public-key design.pub
@@ -806,8 +804,6 @@ usage: mashctl endpoint reissue ADDRESS (--public-key FILE | --make-key) [--jwt-
   creds_mismatch (--make-key found a creds file that is not this endpoint's current creds: its name, key or account
   differs; move it aside with mv FILE FILE.old and run again, or use --public-key), creds_unreadable (the file exists
   and cannot be read or parsed).
-  Errors include superseded: another reissue changed the endpoint's key while this one ran, so the file this run wrote
-  was removed; run the command again.
   exit codes: 0 done, planned or unchanged, 1 refused, 2 usage, 5 partial (bulk), 6 error
 Example:
   mashctl endpoint reissue alice/dev/design --public-key design.pub
@@ -1213,32 +1209,6 @@ stdout:
     "detail": "the directory for the lock is not usable: directory <TMP> has mode 0707: it is writable by every user. Run: chmod o-w <TMP>; nothing was changed"
   }
 }
-== reissue_superseded
-exit 6
-stderr:
-revoked user key <KEY>: 1 server(s) acknowledged
-mashctl: endpoint reissue: error (superseded): another reissue changed o.g.a's key while this one ran, so the credentials this run wrote are for a key that is no longer the endpoint's; they were removed; run the command again
-stdout:
-{
-  "schema": "mashctl-endpoint@1",
-  "outcome": "error",
-  "owner": "o",
-  "group": "g",
-  "instance": "a",
-  "address": "o.g.a",
-  "key": "o_g_a",
-  "creds_path": "<TMP>/o.g.a.creds",
-  "creds_written": false,
-  "labels": {},
-  "caps": [],
-  "description": "",
-  "note": "",
-  "next_steps": [],
-  "refusal": {
-    "code": "superseded",
-    "detail": "another reissue changed o.g.a's key while this one ran, so the credentials this run wrote are for a key that is no longer the endpoint's; they were removed; run the command again"
-  }
-}
 == reissue_public_key_issued
 exit 1
 stderr:
@@ -1415,8 +1385,6 @@ usage: mashctl endpoint reissue ADDRESS (--public-key FILE | --make-key) [--jwt-
   creds_mismatch (--make-key found a creds file that is not this endpoint's current creds: its name, key or account
   differs; move it aside with mv FILE FILE.old and run again, or use --public-key), creds_unreadable (the file exists
   and cannot be read or parsed).
-  Errors include superseded: another reissue changed the endpoint's key while this one ran, so the file this run wrote
-  was removed; run the command again.
   exit codes: 0 done, planned or unchanged, 1 refused, 2 usage, 5 partial (bulk), 6 error
 Example:
   mashctl endpoint reissue alice/dev/design --public-key design.pub
@@ -1472,8 +1440,6 @@ usage: mashctl endpoint reissue ADDRESS (--public-key FILE | --make-key) [--jwt-
   creds_mismatch (--make-key found a creds file that is not this endpoint's current creds: its name, key or account
   differs; move it aside with mv FILE FILE.old and run again, or use --public-key), creds_unreadable (the file exists
   and cannot be read or parsed).
-  Errors include superseded: another reissue changed the endpoint's key while this one ran, so the file this run wrote
-  was removed; run the command again.
   exit codes: 0 done, planned or unchanged, 1 refused, 2 usage, 5 partial (bulk), 6 error
 Example:
   mashctl endpoint reissue alice/dev/design --public-key design.pub
@@ -1529,8 +1495,6 @@ usage: mashctl endpoint reissue ADDRESS (--public-key FILE | --make-key) [--jwt-
   creds_mismatch (--make-key found a creds file that is not this endpoint's current creds: its name, key or account
   differs; move it aside with mv FILE FILE.old and run again, or use --public-key), creds_unreadable (the file exists
   and cannot be read or parsed).
-  Errors include superseded: another reissue changed the endpoint's key while this one ran, so the file this run wrote
-  was removed; run the command again.
   exit codes: 0 done, planned or unchanged, 1 refused, 2 usage, 5 partial (bulk), 6 error
 Example:
   mashctl endpoint reissue alice/dev/design --public-key design.pub
