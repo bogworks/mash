@@ -487,9 +487,6 @@ func TestEndpointCreateMakeKeyDryRunStagesNothing(t *testing.T) {
 }
 
 func TestEndpointReissueMakeKeyKilledAfterEnroll(t *testing.T) {
-	if epPidState(os.Getpid()) < 0 {
-		t.Skip("no process check on this platform")
-	}
 	h := newFleetEnv(t)
 	fakeRevoke(t, nil)
 	a := ad("k5")
@@ -504,8 +501,6 @@ func TestEndpointReissueMakeKeyKilledAfterEnroll(t *testing.T) {
 	if credsPub(t, h, a) != old {
 		t.Fatal("creds changed before the kill point")
 	}
-	// the lock a killed run leaves: its owner is a process that no longer runs; the rerun reclaims it
-	writeLockOwner(t, h.creds(a)+".lock", epOwner{deadPid(t), hostName(t), epHostID(), time.Now().Unix()})
 	if _, se, code := h.run(args...); code != 0 {
 		t.Fatalf("rerun %d %q", code, se)
 	}

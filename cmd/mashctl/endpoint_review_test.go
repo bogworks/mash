@@ -305,8 +305,10 @@ func TestEndpointReissueConcurrentSameHost(t *testing.T) {
 	if rec, ok := h.record(a); !ok || rec.User != pub {
 		t.Errorf("directory key %q, creds file key %q", rec.User, pub)
 	}
-	if _, err := os.Lstat(h.creds(a) + ".lock"); err == nil {
-		t.Error("lock directory left behind")
+	if u, err := epLock(h.creds(a) + ".lock"); err != nil {
+		t.Errorf("lock still held: %v", err)
+	} else {
+		u()
 	}
 	if left, _ := filepath.Glob(filepath.Join(h.dir, ".*.tmp-*")); len(left) != 0 {
 		t.Errorf("temp files left: %v", left)

@@ -274,7 +274,8 @@ func epSnapshot(t *testing.T, h *fleetEnv, dirs ...string) string {
 	}
 	for _, d := range dirs {
 		filepath.Walk(d, func(p string, fi os.FileInfo, err error) error {
-			if err == nil && !fi.IsDir() {
+			// the .lock file of a reissue stays after the run; it holds no state
+			if err == nil && !fi.IsDir() && !strings.HasSuffix(p, ".lock") {
 				c, _ := os.ReadFile(p)
 				b.WriteString(p + "=" + string(c) + "\n")
 			}
