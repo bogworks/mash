@@ -181,3 +181,39 @@ func TestAdminVerbsAcceptATLSServer(t *testing.T) {
 		t.Fatalf("list over TLS with the opt-in: %d\n%s\n%s", code, out.String(), errb.String())
 	}
 }
+
+// TestPlainURLRefusalExitsTwoEverywhere: every verb that connects exits 2, naming the override and tls://, when it
+// is given a plain nats:// URL without the override, whatever exit code its own error path would have used. An
+// ordinary connection failure with the override keeps its own exit code.
+func TestPlainURLRefusalExitsTwoEverywhere(t *testing.T) {
+	e := newApplyEnv(t).withDirectory()
+	e.env["MASH_INSECURE_PLAINTEXT"] = ""
+	for _, args := range [][]string{
+		{"endpoint", "list"},
+		{"endpoint", "list", "--json"},
+		{"endpoint", "show", "o/g/a"},
+		{"endpoint", "show", "o/g/a", "--json"},
+		{"endpoint", "create", "o/g/a", "--make-key"},
+		{"endpoint", "reissue", "o/g/a", "--make-key"},
+		{"endpoint", "reissue", "--all", "--make-key", "--yes"},
+		{"endpoint", "delete", "o/g/a"},
+		{"issued", "check"},
+		{"audit"},
+		{"list"},
+		{"init"},
+	} {
+		out, errb, code := e.run(args...)
+		all := out + errb
+		if code != 2 || !strings.Contains(all, "insecure_plaintext") || !strings.Contains(all, "tls://") {
+			t.Errorf("%v: exit %d, want 2 naming insecure_plaintext and tls://\n%s\n%s", args, code, out, errb)
+		}
+	}
+	// with the override and an address nothing listens on, the failure is an ordinary one, not a refusal
+	e.env["MASH_INSECURE_PLAINTEXT"] = "1"
+	e.env["MASH_URL"] = "nats://127.0.0.1:1"
+	out, errb, code := e.run("endpoint", "list")
+	if code != 6 || strings.Contains(out+errb, "refusing a plain") {
+		t.Fatalf("unreachable server with the override: exit %d, want its ordinary 6\n%s\n%s", code, out, errb)
+	}
+	t.Logf("endpoint list against a down server with the override exits %d", code)
+}
