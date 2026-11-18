@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -22,7 +23,7 @@ import (
 
 // The Podman hosts: M1 to M3 are three rootless podman containers that the test builds from this checkout and
 // destroys. Nothing is installed or left on the host: every container, the network and the image carry the label
-// mash-at005=<run id>, and removal is by that label.
+// mash-at005=<run id>, and removal is by that label, with this run's id as the value: a run never touches another run's resources.
 //
 //   - The image is FROM scratch (Containerfile.at005): mash, mashctl, nats-server and nodeinit as static binaries in
 //     /bin. Nothing is pulled at run time.
@@ -376,7 +377,7 @@ func freeOctet(c *podCtx, pick func(int) int) (int, error) {
 }
 
 // removeLabelled removes every container, network and image that carries the label (filter is "key" for any value or
-// "key=value" for one run), in that order, and prints what it removed. It removes by the ids and names that podman
+// "key=value" for one run; a run's own destroy and `at005-cleanup --run` always pass one run), in that order, and prints what it removed. It removes by the ids and names that podman
 // lists for the label: no shell, no glob, no pattern.
 func removeLabelled(rt CmdRunner, filter string, w io.Writer) error {
 	if w == nil {
@@ -436,22 +437,24 @@ func removeLabelled(rt CmdRunner, filter string, w io.Writer) error {
 }
 
 // destroy removes this run's containers, network and image and returns every failure joined, then checks that nothing
-// labelled with the harness's label key remains (any run's, as `at005-cleanup` would find it). It is idempotent.
+// labelled with this run's label (mash-at005=<run id>) remains. It never selects by the bare key, so another live
+// run's resources are neither removed nor counted. It is idempotent.
 func (p *Podman) destroy(rt CmdRunner, r *Run) error {
 	var errs []error
-	if err := removeLabelled(rt, labelKey+"="+r.ID, r.Runner.Log); err != nil {
+	own := labelKey + "=" + r.ID
+	if err := removeLabelled(rt, own, r.Runner.Log); err != nil {
 		errs = append(errs, fmt.Errorf("removing what run %s made: %w", r.ID, err))
 	}
-	if err := verifyNoneLabelled(rt, labelKey); err != nil {
+	if err := verifyNoneLabelled(rt, own); err != nil {
 		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
 }
 
-// verifyNoneLabelled lists containers, networks and images that carry the label key and fails if any is left (or a
-// listing fails). The text names ids and names podman lists, never file contents or credentials.
-func verifyNoneLabelled(rt CmdRunner, key string) error {
-	lbl := "label=" + key
+// verifyNoneLabelled lists containers, networks and images that carry the label (filter is "key=value", one run's) and
+// fails if any is left (or a listing fails). The text names ids and names podman lists, never file contents or credentials.
+func verifyNoneLabelled(rt CmdRunner, filter string) error {
+	lbl := "label=" + filter
 	var errs []error
 	for _, l := range []struct {
 		what string
@@ -467,31 +470,79 @@ func verifyNoneLabelled(rt CmdRunner, key string) error {
 			continue
 		}
 		if f := strings.Fields(o); len(f) > 0 {
-			errs = append(errs, fmt.Errorf("%d %s(s) labelled %s remain: %s", len(f), l.what, key, strings.Join(f, " ")))
+			errs = append(errs, fmt.Errorf("%d %s(s) labelled %s remain: %s", len(f), l.what, filter, strings.Join(f, " ")))
 		}
 	}
 	return errors.Join(errs...)
 }
 
-// at005Cleanup is `liveat at005-cleanup [--label mash-at005]`: it removes the leftovers of any AT-005 run, whatever its
-// run id, by the label key. It is for the always-run step of the CI job. Exit 0: nothing is left; 1: something could
-// not be removed; 2: usage.
+// runIDRE is the shape of Run.ID (newRunID): a UTC timestamp, a dash and eight hex digits.
+var runIDRE = regexp.MustCompile(`^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}$`)
+
+const at005CleanupUsage = "usage: liveat at005-cleanup [--run RUNID]"
+
+// listLabelled prints what carries the label key, grouped by run id (the label's value). It removes nothing.
+func listLabelled(rt CmdRunner, w io.Writer) error {
+	lbl := "label=" + labelKey
+	idx := `{{index .Labels "` + labelKey + `"}}`
+	groups := map[string][]string{}
+	var errs []error
+	for _, l := range []struct {
+		what string
+		args []string
+	}{
+		{"container", []string{"ps", "-a", "--filter", lbl, "--format", idx + " {{.ID}}"}},
+		{"network", []string{"network", "ls", "--filter", lbl, "--format", idx + " {{.Name}}"}},
+		{"image", []string{"images", "--filter", lbl, "--format", idx + " {{.ID}}"}},
+	} {
+		o, e, code := rt.Run(Cmd{Argv: append([]string{"podman"}, l.args...)})
+		if code != 0 {
+			errs = append(errs, fmt.Errorf("podman %s: exit %d: %s", l.args[0], code, strings.TrimSpace(e)))
+			continue
+		}
+		for _, ln := range strings.Split(o, "\n") {
+			f := strings.Fields(ln)
+			switch len(f) {
+			case 0:
+			case 1: // an empty label value
+				groups["(none)"] = append(groups["(none)"], l.what+" "+f[0])
+			default:
+				groups[f[0]] = append(groups[f[0]], l.what+" "+f[1])
+			}
+		}
+	}
+	ids := make([]string, 0, len(groups))
+	for id := range groups {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		fmt.Fprintf(w, "run %s: %s\n", id, strings.Join(groups[id], ", "))
+	}
+	if len(ids) == 0 {
+		fmt.Fprintf(w, "nothing labelled %s exists\n", labelKey)
+	} else {
+		fmt.Fprintln(w, "nothing was removed: pass --run RUNID to remove one run's resources (only if that run is dead)")
+	}
+	return errors.Join(errs...)
+}
+
+// at005Cleanup is `liveat at005-cleanup [--run RUNID]`. With --run it removes the resources labelled
+// mash-at005=RUNID (that run's only) and verifies none of that run remain; it is for the always-run step of the CI job,
+// which knows its own run id. With no argument it lists what carries the label key, any run, grouped by run id, and
+// removes nothing. Exit 0: done (or listed); 1: something could not be removed or listed; 2: usage.
 func at005Cleanup(args []string, stdout, stderr io.Writer, rt CmdRunner, look func(string) (string, error)) int {
-	label := labelKey
+	runID := ""
 	switch {
 	case len(args) == 0:
-	case len(args) == 2 && args[0] == "--label":
-		label = args[1]
-		if label != labelKey {
-			fmt.Fprintf(stderr, "liveat at005-cleanup: --label accepts only %q (the harness's own label key), not %q\n", labelKey, label)
+	case len(args) == 2 && args[0] == "--run":
+		runID = args[1]
+		if !runIDRE.MatchString(runID) {
+			fmt.Fprintf(stderr, "liveat at005-cleanup: %q is not a run id (like 20261117T010203Z-0a1b2c3d: no '=', spaces or patterns)\n", runID)
 			return 2
 		}
 	default:
-		fmt.Fprintln(stderr, "usage: liveat at005-cleanup [--label mash-at005]")
-		return 2
-	}
-	if label == "" || strings.ContainsAny(label, "= \t\n*?[") {
-		fmt.Fprintln(stderr, "liveat at005-cleanup: --label is a label key (no value, no pattern)")
+		fmt.Fprintln(stderr, at005CleanupUsage)
 		return 2
 	}
 	if look == nil {
@@ -504,11 +555,23 @@ func at005Cleanup(args []string, stdout, stderr io.Writer, rt CmdRunner, look fu
 		fmt.Fprintln(stdout, "podman is not installed: nothing of AT-005 can exist here, nothing removed")
 		return 0
 	}
-	if err := removeLabelled(rt, label, stdout); err != nil {
+	if runID == "" {
+		if err := listLabelled(rt, stdout); err != nil {
+			fmt.Fprintln(stderr, "liveat at005-cleanup:", err)
+			return 1
+		}
+		return 0
+	}
+	own := labelKey + "=" + runID
+	if err := removeLabelled(rt, own, stdout); err != nil {
 		fmt.Fprintln(stderr, "liveat at005-cleanup:", err)
 		return 1
 	}
-	fmt.Fprintf(stdout, "nothing labelled %s is left\n", label)
+	if err := verifyNoneLabelled(rt, own); err != nil {
+		fmt.Fprintln(stderr, "liveat at005-cleanup:", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "nothing labelled %s is left\n", own)
 	return 0
 }
 
@@ -677,9 +740,9 @@ func (h *podHost) Snapshot() (string, func(), error) {
 	return filepath.Join(dir, filepath.Base(nodeHome)), done, nil
 }
 
-// Cleanup removes every podman resource labelled with the label key, whatever run made it (see at005Cleanup).
-func (p *Podman) Cleanup(label string, stdout, stderr io.Writer) int {
-	return at005Cleanup([]string{"--label", label}, stdout, stderr, p.Runner, p.LookPath)
+// Cleanup removes the podman resources of one run, labelled mash-at005=<runID> (see at005Cleanup).
+func (p *Podman) Cleanup(runID string, stdout, stderr io.Writer) int {
+	return at005Cleanup([]string{"--run", runID}, stdout, stderr, p.Runner, p.LookPath)
 }
 
 var _ Cleaner = (*Podman)(nil)

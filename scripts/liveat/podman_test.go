@@ -1,10 +1,12 @@
 package main
 
 import (
+	"errors"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -214,9 +216,9 @@ func TestPodmanCleanupByLabel(t *testing.T) {
 		"podman network rm -f mash-at005-" + testRunID,
 		"podman images --filter " + lbl + " --format {{.ID}} {{.Repository}}:{{.Tag}}",
 		"podman rmi localhost/mash-at005:" + testRunID,
-		"podman ps -a --filter label=mash-at005 --format {{.ID}}",
-		"podman network ls --filter label=mash-at005 --format {{.Name}}",
-		"podman images --filter label=mash-at005 --format {{.ID}}",
+		"podman ps -a --filter " + lbl + " --format {{.ID}}",
+		"podman network ls --filter " + lbl + " --format {{.Name}}",
+		"podman images --filter " + lbl + " --format {{.ID}}",
 	}
 	got := f.lines()
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
@@ -233,37 +235,37 @@ func TestPodmanCleanupByLabel(t *testing.T) {
 }
 
 func TestAT005CleanupSubcommand(t *testing.T) {
+	removed := false
 	f := &fakeRT{reply: func(c Cmd) (string, string, int, bool) {
-		if strings.HasPrefix(strings.Join(c.Argv, " "), "podman ps") {
+		l := strings.Join(c.Argv, " ")
+		if l == "podman rm -f x1" {
+			removed = true
+		}
+		if strings.HasPrefix(l, "podman ps -a --filter label=mash-at005="+testRunID+" ") && !removed {
 			return "x1\n", "", 0, true
 		}
 		return "", "", 0, false
 	}}
 	look := func(string) (string, error) { return "/usr/bin/podman", nil }
 	var so, se strings.Builder
-	if code := at005Cleanup([]string{"--label", "mash-at005"}, &so, &se, f, look); code != 0 {
+	if code := at005Cleanup([]string{"--run", testRunID}, &so, &se, f, look); code != 0 {
 		t.Fatal(code, se.String())
 	}
 	if !strings.Contains(so.String(), "removed container x1") {
 		t.Errorf("it does not say what it removed: %q", so.String())
 	}
-	if !f.has("podman ps -a --filter label=mash-at005 --format {{.ID}}") || !f.has("podman rm -f x1") {
+	if !f.has("podman ps -a --filter label=mash-at005="+testRunID+" --format {{.ID}}") || !f.has("podman rm -f x1") {
 		t.Errorf("commands %v", f.lines())
-	}
-	for _, bad := range [][]string{{"--label", "a=b"}, {"--label", "x*"}, {"--label"}, {"stray"}} {
-		if at005Cleanup(bad, &so, &se, f, look) != 2 {
-			t.Errorf("%v accepted", bad)
-		}
 	}
 	so.Reset()
 	none := func(string) (string, error) { return "", exec.ErrNotFound }
 	g := &fakeRT{}
-	if at005Cleanup(nil, &so, &se, g, none) != 0 || len(g.calls) != 0 {
+	if at005Cleanup(nil, &so, &se, g, none) != 0 || len(g.calls) != 0 || !strings.Contains(so.String(), "podman is not installed") {
 		t.Error("with no podman it must run nothing and succeed")
 	}
 	// a failure to remove is exit 1
 	bad := &fakeRT{reply: func(Cmd) (string, string, int, bool) { return "", "boom", 125, true }}
-	if at005Cleanup(nil, &so, &se, bad, look) != 1 {
+	if at005Cleanup([]string{"--run", testRunID}, &so, &se, bad, look) != 1 {
 		t.Error("a failed removal is not exit 1")
 	}
 }
@@ -587,20 +589,98 @@ func TestSubnetBaseValidation(t *testing.T) {
 	}
 }
 
-func TestAT005CleanupOnlyOwnLabel(t *testing.T) {
+func TestAT005CleanupBadRunID(t *testing.T) {
 	look := func(string) (string, error) { return "/usr/bin/podman", nil }
 	f := &fakeRT{}
 	var so, se strings.Builder
-	for _, bad := range [][]string{{"--label", "other-project"}, {"--label", "mash-at005=x"}, {"--label", "mash-at0050"}, {"--label", ""}} {
+	for _, bad := range [][]string{{"--run", "mash-at005"}, {"--run", "mash-at005=" + testRunID}, {"--run", testRunID + " x"}, {"--run", "2026*"},
+		{"--run", ""}, {"--run", "a=b"}, {"--run", testRunID + "\n"}, {"--run", "[a-z]"}, {"--run"}, {"--label", "mash-at005"}, {"stray"}, {"--run", testRunID, "x"}} {
 		if at005Cleanup(bad, &so, &se, f, look) != 2 {
-			t.Errorf("%v accepted", bad)
+			t.Errorf("%q accepted", bad)
 		}
 	}
 	if len(f.calls) != 0 {
 		t.Errorf("it ran %v", f.lines())
 	}
-	if !strings.Contains(se.String(), "accepts only") {
-		t.Errorf("message %q", se.String())
+}
+
+const otherRunID = "20261117T999999Z-ffffffff"
+
+func TestAT005CleanupRunNeverTouchesOtherRun(t *testing.T) {
+	look := func(string) (string, error) { return "/usr/bin/podman", nil }
+	f := &fakeRT{}
+	var so, se strings.Builder
+	if code := at005Cleanup([]string{"--run", testRunID}, &so, &se, f, look); code != 0 {
+		t.Fatal(code, se.String())
+	}
+	if len(f.calls) == 0 {
+		t.Fatal("it ran nothing")
+	}
+	for _, l := range f.lines() {
+		if strings.Contains(l, otherRunID) {
+			t.Errorf("touches another run: %s", l)
+		}
+		if strings.Contains(l, "--filter") && !strings.Contains(l, "--filter label=mash-at005="+testRunID+" ") {
+			t.Errorf("a filter that is not this run's: %s", l)
+		}
+	}
+}
+
+func TestAT005CleanupNoArgListsOnly(t *testing.T) {
+	look := func(string) (string, error) { return "/usr/bin/podman", nil }
+	f := &fakeRT{reply: func(c Cmd) (string, string, int, bool) {
+		l := strings.Join(c.Argv, " ")
+		switch {
+		case strings.HasPrefix(l, "podman ps"):
+			return testRunID + " c1\n" + otherRunID + " c2\n", "", 0, true
+		case strings.HasPrefix(l, "podman network ls"):
+			return otherRunID + " mash-at005-" + otherRunID + "\n", "", 0, true
+		}
+		return "", "", 0, false
+	}}
+	var so, se strings.Builder
+	if code := at005Cleanup(nil, &so, &se, f, look); code != 0 {
+		t.Fatal(code, se.String())
+	}
+	for _, l := range f.lines() {
+		if strings.HasPrefix(l, "podman rm") || strings.HasPrefix(l, "podman rmi") || strings.HasPrefix(l, "podman network rm") ||
+			!(strings.HasPrefix(l, "podman ps") || strings.HasPrefix(l, "podman network ls") || strings.HasPrefix(l, "podman images")) {
+			t.Errorf("no-arg run issued %q", l)
+		}
+		if !strings.Contains(l, "--filter label=mash-at005 ") {
+			t.Errorf("listing is not by the key: %q", l)
+		}
+	}
+	out := so.String()
+	for _, want := range []string{"run " + testRunID + ": container c1", "run " + otherRunID + ": container c2, network mash-at005-" + otherRunID, "--run"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "removed") && !strings.Contains(out, "nothing was removed") {
+		t.Errorf("output claims a removal: %s", out)
+	}
+}
+
+func TestPodmanDestroyOnlyOwnRunFilters(t *testing.T) {
+	r := newPodRun(t)
+	f := podmanFake(nil)
+	openPodman(t, f, r)
+	f.calls = nil
+	if err := r.Destroy(); err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, l := range f.lines() {
+		if i := strings.Index(l, "--filter "); i >= 0 {
+			n++
+			if !strings.Contains(l[i:], "--filter label=mash-at005="+testRunID+" ") {
+				t.Errorf("filter without this run's id: %s", l)
+			}
+		}
+	}
+	if n != 6 {
+		t.Errorf("%d filtered listings, want 6 (3 to remove, 3 to verify): %v", n, f.lines())
 	}
 }
 
@@ -617,9 +697,7 @@ func destroyFake(rmFails bool, leftover string) *fakeRT {
 			}
 			removed = true
 			return "", "", 0, true
-		case strings.HasPrefix(l, "podman ps -a --filter label=mash-at005="):
-			return "aaa111\n", "", 0, true
-		case strings.HasPrefix(l, "podman ps -a --filter label=mash-at005 "):
+		case strings.HasPrefix(l, "podman ps -a --filter label=mash-at005="+testRunID+" --format {{.ID}}"):
 			if !removed {
 				return "aaa111\n", "", 0, true
 			}
@@ -641,7 +719,7 @@ func TestAT5DestroyCheck(t *testing.T) {
 	}{
 		{"success", false, "", true, ""},
 		{"rm fails", true, "", false, "cannot remove container"},
-		{"leftover container", false, "zzz999\n", false, "1 container(s) labelled mash-at005 remain: zzz999"},
+		{"leftover container", false, "zzz999\n", false, "1 container(s) labelled mash-at005=" + testRunID + " remain: zzz999"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := newPodRun(t)
@@ -650,7 +728,7 @@ func TestAT5DestroyCheck(t *testing.T) {
 			s.destroyCheck()
 			var got *Assertion
 			for _, a := range s.C.All() {
-				if strings.Contains(a.Name, "nothing labelled mash-at005 remains") {
+				if strings.Contains(a.Name, "nothing labelled mash-at005="+testRunID+" remains") {
 					a := a
 					got = &a
 				}
@@ -660,7 +738,7 @@ func TestAT5DestroyCheck(t *testing.T) {
 			}
 			rec := Record{RunID: "r", Revision: "v", AT: "at005", Scenario: "s", Observed: s.observed()}
 			md := rec.Markdown()
-			if !strings.Contains(md, "every container, network and image of this run is destroyed and nothing labelled mash-at005 remains") {
+			if !strings.Contains(md, "every container, network and image of this run is destroyed and nothing labelled mash-at005="+testRunID+" remains") {
 				t.Errorf("record lacks the check line:\n%s", md)
 			}
 			if rec.Passed() != tc.pass {
@@ -680,5 +758,71 @@ func TestAT5DestroyLocalIsTrivial(t *testing.T) {
 	r.OnClose(func() error { panic("boom") })
 	if err := r.Destroy(); err == nil || !strings.Contains(err.Error(), "boom") {
 		t.Errorf("panic not turned into an error: %v", err)
+	}
+}
+
+func natsRepo(t *testing.T, ver string) *Run {
+	t.Helper()
+	d := t.TempDir()
+	gm := "module x\n\ngo 1.27.4\n\nrequire (\n\tgithub.com/other/thing v1.0.0\n\tgithub.com/nats-io/nats-server/v2 " + ver + "\n)\n"
+	if err := os.WriteFile(filepath.Join(d, "go.mod"), []byte(gm), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return &Run{Dir: d, Repo: d, Runner: &Runner{Out: d, Cwd: d}, pids: map[int]string{}}
+}
+
+func TestBuildNatsFromPin(t *testing.T) {
+	var calls [][]string
+	var envs [][]string
+	fake := func(reported string) buildFn {
+		return func(dir string, env []string, argv ...string) (string, error) {
+			calls = append(calls, argv)
+			envs = append(envs, env)
+			if len(argv) > 1 && argv[1] == "build" {
+				return "", nil
+			}
+			return reported + "\n", nil
+		}
+	}
+	r := natsRepo(t, "v2.15.1")
+	bin := filepath.Join(r.Dir, "bin")
+	if err := r.buildNats(bin, fake("nats-server: v2.15.1")); err != nil {
+		t.Fatal(err)
+	}
+	if r.NatsBin != filepath.Join(bin, "nats-server") {
+		t.Errorf("NatsBin %q", r.NatsBin)
+	}
+	if got := strings.Join(calls[0], " "); got != "go build -o "+r.NatsBin+" github.com/nats-io/nats-server/v2" {
+		t.Errorf("build command %q", got)
+	}
+	if !slices.Contains(envs[0], "CGO_ENABLED=0") {
+		t.Error("the build is not static")
+	}
+	if got := "nats-server: " + r.NatsVer; got != "nats-server: v2.15.1 (built from the go.mod pin v2.15.1)" {
+		t.Errorf("record line %q", got)
+	}
+	// a mismatch is refused and records nothing
+	r2 := natsRepo(t, "v2.15.1")
+	err := r2.buildNats(filepath.Join(r2.Dir, "bin"), fake("nats-server: v2.14.0"))
+	if err == nil || !strings.Contains(err.Error(), "refusing") || r2.NatsBin != "" || r2.NatsVer != "" {
+		t.Errorf("mismatch not refused: %v (%q %q)", err, r2.NatsBin, r2.NatsVer)
+	}
+	// a failed build is an error
+	r3 := natsRepo(t, "v2.15.1")
+	if err := r3.buildNats("b", func(string, []string, ...string) (string, error) { return "", errors.New("boom") }); err == nil {
+		t.Error("a failed build is not an error")
+	}
+	// no pin in go.mod
+	r4 := natsRepo(t, "v2.15.1")
+	_ = os.WriteFile(filepath.Join(r4.Dir, "go.mod"), []byte("module x\n"), 0o600)
+	if err := r4.buildNats("b", fake("")); err == nil {
+		t.Error("no pin is not an error")
+	}
+}
+
+func TestNatsPinMatchesRepoGoMod(t *testing.T) {
+	v, err := natsPin("../..")
+	if err != nil || !strings.HasPrefix(v, "v2.") {
+		t.Fatalf("%q %v", v, err)
 	}
 }

@@ -9,7 +9,7 @@ contract against a build of this checkout, on one local NATS server, in scratch 
 go run ./scripts/liveat at005 --hosts podman --run-by manual --host-label dev-box --record-out at005-record.md
 go run ./scripts/liveat at005 --hosts local      # the harness's own selfcheck on a developer machine (the default)
 go run ./scripts/liveat at005 --hosts local --dry-setup
-go run ./scripts/liveat at005-cleanup --label mash-at005
+go run ./scripts/liveat at005-cleanup --run RUNID
 ```
 
 ### Running AT-005 by hand
@@ -35,16 +35,16 @@ contract)` and its result line says `local substrate: not AT-005 evidence`; `--r
 
 The second-owner case: an endpoint of a second owner (`bob/dev/x`, key and credentials made on M3) runs `nodeinit forge` inside M3, which publishes a forged discovery answer and a replayed presence answer into the reply subject of alice's `mash who` on M1; the record must show that the servers refused both and that her offline endpoint `alice/dev/ghost` is not listed as online.
 
-AT-005 needs **rootless podman** and a `nats-server` on PATH that is a static binary (a release build or
-`CGO_ENABLED=0 go build`). With no podman the run **fails** (exit 4) with "podman is not installed: AT-005 needs rootless
+AT-005 needs **rootless podman** and a Go toolchain: the harness builds `nats-server` itself from the version `go.mod`
+pins (`CGO_ENABLED=0 go build`, static) and refuses to run if the built binary reports another version; the caller's PATH is not consulted. With no podman the run **fails** (exit 4) with "podman is not installed: AT-005 needs rootless
 podman (the CI job provides it); this run did not test anything". It never skips and never passes without podman, and it
-fails if `podman info` does not report a rootless install or if `nats-server` is dynamically linked. No test runs on a
+fails if `podman info` does not report a rootless install. No test runs on a
 production host: nothing is installed, no account or key is made, no directory is made outside the run directory.
 
 What `--hosts podman` makes (all of it labelled `mash-at005=<run id>`, all of it removed when the run ends, pass or fail):
 
 - an image `mash-at005:<run id>`, built from the checkout: `mash`, `mashctl`, `nodeinit` (`scripts/liveat/nodeinit`) and
-  the `nats-server` from PATH, as static binaries in `/bin`, on `FROM scratch`. Nothing is pulled. The Containerfile is
+  the `nats-server` built from the `go.mod` pin, as static binaries in `/bin`, on `FROM scratch`. Nothing is pulled. The Containerfile is
   `scripts/liveat/Containerfile.at005`:
 
   ```
@@ -68,16 +68,19 @@ The clock-skew case is not part of AT-005 (containers share the host's clock); a
 
 ### Cleanup
 
-The harness removes what it made at the end of every run and on an interrupt. It then checks that nothing labelled `mash-at005` remains, and a cleanup failure fails the run (the record shows the check and the exit status is 1); `liveat at005-cleanup` removes any leftovers. For a job that was killed outright, run
-the always-run step
+The harness removes what it made at the end of every run and on an interrupt. It then checks that nothing labelled `mash-at005=<its run id>` remains (another run's resources are neither removed nor checked), and a cleanup failure fails the run (the record shows the check and the exit status is 1). `liveat at005-cleanup --run RUNID` removes the leftovers of one run. For a job that was killed outright, run
+the always-run step with the job's own run id (printed on the first line of the run, and the value of the label)
 
 ```
-go run ./scripts/liveat at005-cleanup --label mash-at005
+go run ./scripts/liveat at005-cleanup --run RUNID
 ```
 
-It removes the containers, networks and images carrying the label key `mash-at005` (any run id), found with
-`podman ps -a`, `podman network ls` and `podman images` filtered by that label, and prints each thing it removed. It
-touches nothing without the label. `--label` is optional and accepts only that exact key; any other key or a value (`a=b`) is a usage error (exit 2).
+It removes only the containers, networks and images labelled `mash-at005=RUNID`, found with
+`podman ps -a`, `podman network ls` and `podman images` filtered by that exact label, prints each thing it removed, then
+verifies none of that run's remain (exit 1 if one does). It never selects by the bare key, so a live run of another
+job is untouched. `RUNID` must have the harness's run-id shape (`20261117T010203Z-0a1b2c3d`); anything else (`a=b`, spaces,
+patterns) is a usage error (exit 2). With no `--run` it only lists what carries the label key, any run, grouped by run id,
+removes nothing and exits 0; read the ids from that list, check the run is dead, and pass one with `--run`.
 
 ### Not checked without podman
 

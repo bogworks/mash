@@ -30,7 +30,7 @@ import (
 func main() { os.Exit(realMain(os.Args[1:], os.Stdout, os.Stderr)) }
 
 func realMain(args []string, stdout, stderr io.Writer) int {
-	usage := "usage: liveat at001|at002|at003|all|selfcheck --port P [--keep] | liveat at005 [--dry-setup] [--hosts podman --run-by manual|ci --host-label LABEL [--subnet-base A.B] | --hosts local] [--keep] [--record-out FILE] | liveat at005-cleanup [--label mash-at005]"
+	usage := "usage: liveat at001|at002|at003|all|selfcheck --port P [--keep] | liveat at005 [--dry-setup] [--hosts podman --run-by manual|ci --host-label LABEL [--subnet-base A.B] | --hosts local] [--keep] [--record-out FILE] | liveat at005-cleanup [--run RUNID]"
 	if len(args) == 0 {
 		fmt.Fprintln(stderr, usage)
 		return 2

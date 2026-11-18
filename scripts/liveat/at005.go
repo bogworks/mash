@@ -128,7 +128,7 @@ func at005Main(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-const at005Usage = "usage: liveat at005 [--dry-setup] [--hosts podman --run-by manual|ci --host-label LABEL] [--hosts local] [--keep] [--record-out FILE] | liveat at005-cleanup [--label mash-at005]"
+const at005Usage = "usage: liveat at005 [--dry-setup] [--hosts podman --run-by manual|ci --host-label LABEL] [--hosts local] [--keep] [--record-out FILE] | liveat at005-cleanup [--run RUNID]"
 
 type at005Opts struct {
 	dry, keep                                      bool
@@ -864,7 +864,7 @@ func (s *At5) destroyCheck() {
 	if derr != nil {
 		detail = snip(strings.ReplaceAll(derr.Error(), "\n", "; "))
 	}
-	s.check("every container, network and image of this run is destroyed and nothing labelled "+labelKey+" remains", derr == nil, detail)
+	s.check("every container, network and image of this run is destroyed and nothing labelled "+labelKey+"="+s.R.ID+" remains", derr == nil, detail)
 }
 
 func (s *At5) sessions() []*Proc {
