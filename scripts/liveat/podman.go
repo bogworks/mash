@@ -203,11 +203,7 @@ func (p *Podman) Open(r *Run) ([]Host, error) {
 		return nil, fmt.Errorf("podman is not rootless (podman info says Host.Security.Rootless is %q): AT-005 runs only rootless", strings.TrimSpace(out))
 	}
 	// From here on something may exist: Close removes it by label, whatever happens next.
-	r.OnClose(func() {
-		if err := removeLabelled(rt, labelKey+"="+r.ID, r.Runner.Log); err != nil {
-			r.Runner.logf("cleanup by label %s=%s: %v", labelKey, r.ID, err)
-		}
-	})
+	r.OnClose(func() error { return p.destroy(rt, r) })
 	ctx := filepath.Join(r.Dir, "podman-ctx")
 	c.tmp = filepath.Join(r.Dir, "podman-tmp")
 	for _, d := range []string{ctx, c.tmp} {
@@ -434,6 +430,44 @@ func removeLabelled(rt CmdRunner, filter string, w io.Writer) error {
 			} else {
 				fmt.Fprintf(w, "removed image %s\n", ref)
 			}
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// destroy removes this run's containers, network and image and returns every failure joined, then checks that nothing
+// labelled with the harness's label key remains (any run's, as `at005-cleanup` would find it). It is idempotent.
+func (p *Podman) destroy(rt CmdRunner, r *Run) error {
+	var errs []error
+	if err := removeLabelled(rt, labelKey+"="+r.ID, r.Runner.Log); err != nil {
+		errs = append(errs, fmt.Errorf("removing what run %s made: %w", r.ID, err))
+	}
+	if err := verifyNoneLabelled(rt, labelKey); err != nil {
+		errs = append(errs, err)
+	}
+	return errors.Join(errs...)
+}
+
+// verifyNoneLabelled lists containers, networks and images that carry the label key and fails if any is left (or a
+// listing fails). The text names ids and names podman lists, never file contents or credentials.
+func verifyNoneLabelled(rt CmdRunner, key string) error {
+	lbl := "label=" + key
+	var errs []error
+	for _, l := range []struct {
+		what string
+		args []string
+	}{
+		{"container", []string{"ps", "-a", "--filter", lbl, "--format", "{{.ID}}"}},
+		{"network", []string{"network", "ls", "--filter", lbl, "--format", "{{.Name}}"}},
+		{"image", []string{"images", "--filter", lbl, "--format", "{{.ID}}"}},
+	} {
+		o, e, code := rt.Run(Cmd{Argv: append([]string{"podman"}, l.args...)})
+		if code != 0 {
+			errs = append(errs, fmt.Errorf("verifying: podman %s: exit %d: %s", l.args[0], code, strings.TrimSpace(e)))
+			continue
+		}
+		if f := strings.Fields(o); len(f) > 0 {
+			errs = append(errs, fmt.Errorf("%d %s(s) labelled %s remain: %s", len(f), l.what, key, strings.Join(f, " ")))
 		}
 	}
 	return errors.Join(errs...)

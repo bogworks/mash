@@ -66,7 +66,7 @@ The clock-skew case is not part of AT-005 (containers share the host's clock); a
 
 ### Cleanup
 
-The harness removes what it made at the end of every run and on an interrupt. For a job that was killed outright, run
+The harness removes what it made at the end of every run and on an interrupt. It then checks that nothing labelled `mash-at005` remains, and a cleanup failure fails the run (the record shows the check and the exit status is 1); `liveat at005-cleanup` removes any leftovers. For a job that was killed outright, run
 the always-run step
 
 ```

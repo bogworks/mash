@@ -375,7 +375,7 @@ func (s *At5) provision(ctl Host, verb string, e *ep5, credsPath string) bool {
 	s.lastCreate = r.Stdout
 	s.mu.Unlock()
 	if strings.Contains(r.Stdout, "acknowledged") {
-		s.check(ctl.Role()+": endpoint "+verb+" reports that all three servers took the account update", strings.Contains(r.Stdout, "3 server(s) acknowledged"), snip(grepLine(r.Stdout, "acknowledged")))
+		s.check(ctl.Role()+": endpoint "+verb+" reports that all three servers took the account update", (strings.Contains(r.Stdout, "3 server(s) acknowledged") || strings.Contains(r.Stdout, "servers acknowledged the account update: 3")), snip(grepLine(r.Stdout, "acknowledged")))
 	} else {
 		// Contract AT-005 says create reports it. Observed: create and reissue print no acknowledgement (create pushes no
 		// account update; only the revocation of a reissue or a delete does, and delete prints it). Recorded as a finding;
@@ -757,6 +757,18 @@ func (s *At5) Finish() {
 	s.search()
 	ce := s.R.Runner.CaptureErrors()
 	s.check("INV-001: every command's output was captured completely (no capture or read error)", len(ce) == 0, strings.Join(ce, "; "))
+	s.destroyCheck()
+}
+
+// destroyCheck is last: the nodes are destroyed here, so the result of the destruction is in the record and a failure
+// fails the run. Close retries it as a safety net.
+func (s *At5) destroyCheck() {
+	derr := s.R.Destroy()
+	detail := ""
+	if derr != nil {
+		detail = snip(strings.ReplaceAll(derr.Error(), "\n", "; "))
+	}
+	s.check("every container, network and image of this run is destroyed and nothing labelled "+labelKey+" remains", derr == nil, detail)
 }
 
 func (s *At5) sessions() []*Proc {

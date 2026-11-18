@@ -214,6 +214,9 @@ func TestPodmanCleanupByLabel(t *testing.T) {
 		"podman network rm -f mash-at005-" + testRunID,
 		"podman images --filter " + lbl + " --format {{.ID}} {{.Repository}}:{{.Tag}}",
 		"podman rmi localhost/mash-at005:" + testRunID,
+		"podman ps -a --filter label=mash-at005 --format {{.ID}}",
+		"podman network ls --filter label=mash-at005 --format {{.Name}}",
+		"podman images --filter label=mash-at005 --format {{.ID}}",
 	}
 	got := f.lines()
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
@@ -598,5 +601,84 @@ func TestAT005CleanupOnlyOwnLabel(t *testing.T) {
 	}
 	if !strings.Contains(se.String(), "accepts only") {
 		t.Errorf("message %q", se.String())
+	}
+}
+
+// destroyFake answers like podman after a removal: the listings are empty once "rm" succeeded, unless rmFails or
+// leftover says otherwise.
+func destroyFake(rmFails bool, leftover string) *fakeRT {
+	removed := false
+	return podmanFake(func(c Cmd) (string, string, int, bool) {
+		l := strings.Join(c.Argv, " ")
+		switch {
+		case strings.HasPrefix(l, "podman rm -f"):
+			if rmFails {
+				return "", "cannot remove container", 125, true
+			}
+			removed = true
+			return "", "", 0, true
+		case strings.HasPrefix(l, "podman ps -a --filter label=mash-at005="):
+			return "aaa111\n", "", 0, true
+		case strings.HasPrefix(l, "podman ps -a --filter label=mash-at005 "):
+			if !removed {
+				return "aaa111\n", "", 0, true
+			}
+			return leftover, "", 0, true
+		case strings.HasPrefix(l, "podman network ls --filter"), strings.HasPrefix(l, "podman images"):
+			return "", "", 0, true
+		}
+		return "", "", 0, false
+	})
+}
+
+func TestAT5DestroyCheck(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		rmFails  bool
+		leftover string
+		pass     bool
+		want     string
+	}{
+		{"success", false, "", true, ""},
+		{"rm fails", true, "", false, "cannot remove container"},
+		{"leftover container", false, "zzz999\n", false, "1 container(s) labelled mash-at005 remain: zzz999"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newPodRun(t)
+			hs := openPodman(t, destroyFake(tc.rmFails, tc.leftover), r)
+			s := &At5{R: r, Hosts: hs, C: &Checks{}, secrets: map[string][]byte{}}
+			s.destroyCheck()
+			var got *Assertion
+			for _, a := range s.C.All() {
+				if strings.Contains(a.Name, "nothing labelled mash-at005 remains") {
+					a := a
+					got = &a
+				}
+			}
+			if got == nil || got.Pass != tc.pass || !strings.Contains(got.Detail, tc.want) {
+				t.Fatalf("check %+v", got)
+			}
+			rec := Record{RunID: "r", Revision: "v", AT: "at005", Scenario: "s", Observed: s.observed()}
+			md := rec.Markdown()
+			if !strings.Contains(md, "every container, network and image of this run is destroyed and nothing labelled mash-at005 remains") {
+				t.Errorf("record lacks the check line:\n%s", md)
+			}
+			if rec.Passed() != tc.pass {
+				t.Errorf("record passed = %v", rec.Passed())
+			}
+			// a failed destruction is retried by Close and never panics
+			r.Close()
+		})
+	}
+}
+
+func TestAT5DestroyLocalIsTrivial(t *testing.T) {
+	r := &Run{Dir: t.TempDir(), pids: map[int]string{}}
+	if err := r.Destroy(); err != nil {
+		t.Error(err)
+	}
+	r.OnClose(func() error { panic("boom") })
+	if err := r.Destroy(); err == nil || !strings.Contains(err.Error(), "boom") {
+		t.Errorf("panic not turned into an error: %v", err)
 	}
 }

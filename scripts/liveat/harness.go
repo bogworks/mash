@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -39,15 +40,49 @@ type Run struct {
 	mu    sync.Mutex
 	procs []*Proc
 	pids  map[int]string // recorded PIDs of processes this run started and has not yet stopped
-	undo  []func()       // what a host made outside Dir (containers, a network, an image), run by Close, last first
+	undo  []func() error // what a host made outside Dir (containers, a network, an image), run by Destroy or Close, last first
 }
 
-// OnClose registers a function that removes something a host made outside the run directory. Close runs them after
-// every recorded process is stopped, last registered first, whether or not the run passed.
-func (r *Run) OnClose(fn func()) {
+// OnClose registers a function that removes something a host made outside the run directory and returns why it could
+// not. Destroy (and Close, as a safety net) runs them, last registered first, whether or not the run passed.
+func (r *Run) OnClose(fn func() error) {
 	r.mu.Lock()
 	r.undo = append(r.undo, fn)
 	r.mu.Unlock()
+}
+
+// Destroy runs what the hosts registered, last first, and returns every failure joined (nil when there was nothing to
+// destroy, as for loopback hosts). A function that failed stays registered, so a later Destroy or Close retries it;
+// one that succeeded is dropped, so calling Destroy again is harmless. A panic in one is turned into an error.
+func (r *Run) Destroy() error {
+	r.mu.Lock()
+	undo := r.undo
+	r.undo = nil
+	r.mu.Unlock()
+	var errs []error
+	var failed []func() error
+	for i := len(undo) - 1; i >= 0; i-- {
+		if err := safeUndo(undo[i]); err != nil {
+			errs = append(errs, err)
+			failed = append(failed, undo[i])
+		}
+	}
+	if len(failed) > 0 {
+		slices.Reverse(failed) // back in registration order, ahead of anything registered meanwhile
+		r.mu.Lock()
+		r.undo = append(failed, r.undo...)
+		r.mu.Unlock()
+	}
+	return errors.Join(errs...)
+}
+
+func safeUndo(fn func() error) (err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			err = fmt.Errorf("destroy panicked: %v", p)
+		}
+	}()
+	return fn()
 }
 
 // NewRun makes the run directory and its output directory, and opens the run log.
@@ -97,12 +132,8 @@ func (r *Run) Close() {
 	for pid, name := range pids {
 		stopPID(pid, name, r.Runner.logf)
 	}
-	r.mu.Lock()
-	undo := r.undo
-	r.undo = nil
-	r.mu.Unlock()
-	for i := len(undo) - 1; i >= 0; i-- {
-		undo[i]()
+	if err := r.Destroy(); err != nil && r.Runner != nil {
+		r.Runner.logf("destroy: %v", err)
 	}
 	if r.LogFile != nil {
 		r.LogFile.Close()
