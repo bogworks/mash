@@ -18,15 +18,18 @@ unit test in `internal/enroll` covers skews inside and past the lock bound). Not
 
 ## Reruns after the owner-scoped reply inboxes (#780)
 
-The final gate found that every endpoint could publish to `_INBOX.>` (INV-002); the fix is #780 (contract revision 9). AT-001, AT-002,
-AT-003 and AT-005 were run again on `8fa36b846716043e0a8a49032de092e82e330617`, which is #780's head plus the harness patch of this
-pull request (so the AT-005 create check is n/a), and the records are NEW files beside the `a191f08` ones, not replacements:
+The final gate found that every endpoint could publish to `_INBOX.>` (INV-002); the fix is #780 (contract revision 9, which this pull
+request also carries). The acceptance tests were run again, and the records are NEW files beside the `a191f08` ones, not replacements:
 
-| Record | Result |
-|---|---|
-| `record-at001-8fa36b8.md` | pass (37 assertions) |
-| `record-at002-8fa36b8.md` | pass (25 assertions) |
-| `record-at003-8fa36b8.md` | pass (106 assertions; includes the new cross-owner case: bob's forged discovery answer and replayed presence answer are refused by the server) |
-| `record-at005-8fa36b8.md` | pass (79 assertions, 2 not applicable, 0 failed; podman, manual, host label bf2; nothing labelled left) |
+| Record | Revision | Result |
+|---|---|---|
+| `record-at001-8fa36b8.md` | `8fa36b8` (#780's head plus the harness patch of this pull request) | pass (37 assertions) |
+| `record-at002-8fa36b8.md` | `8fa36b8` | pass (25 assertions) |
+| `record-at003-8fa36b8.md` | `8fa36b8` | pass (106 assertions; includes the cross-owner case: bob's forged discovery answer and replayed presence answer are refused by the server) |
+| `record-at005-ed12e34.md` | `ed12e34` (#780's head plus the harness patches of this pull request, now including the second-owner case) | pass (92 assertions, 4 not applicable, 0 failed; podman, manual, host label bf2; nothing labelled left) |
 
-AT-005 has no second-owner case: its harness fixes one owner. The cross-owner check is in AT-003 and in the endpoint tests of #780.
+AT-005 now has the second-owner case of contract revision 9: an endpoint of a second owner, on one node of the cluster, forges a discovery
+answer and replays a presence answer into alice's in-flight reply subject while alice probes from another node; the servers refuse both
+(`{"seen_requests":1,"violations":2}`), and alice's discovery does not list her offline endpoint `alice/dev/ghost` as online. The harness
+changes after `8fa36b8` touch only AT-005 (`at005.go`, the in-image helper), so AT-001 to AT-003 were not run again on `ed12e34`. The
+earlier AT-005 record (`record-at005.md`, on `a191f08`) is kept for the history of the gate.
