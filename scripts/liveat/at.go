@@ -118,13 +118,10 @@ func (a *AT) StartServer(h Home) bool {
 	}
 	res := a.Ctl("init-local", h, nil, "init", "--local", "--owner", "alice", "--dir", a.srvDir, "--port", strconv.Itoa(a.R.Port), "--start")
 	ok := a.C.Check("mashctl init --local --owner alice --start brings up one local server", res.Code == 0, exitDetail(res))
-	// The server key is private: its text is searched for in all captured output like a seed.
-	if kb, err := os.ReadFile(filepath.Join(a.srvDir, bootstrap.ServerKey)); err == nil {
-		for _, l := range strings.Split(string(kb), "\n") {
-			if l = strings.TrimSpace(l); len(l) >= 40 && !strings.HasPrefix(l, "-----") {
-				a.secrets["server key"] = []byte(l)
-				break
-			}
+	// The CA key and the server key are private: every line of each is searched for in all captured output.
+	for _, k := range []struct{ label, file string }{{"ca key", bootstrap.CAKey}, {"server key", bootstrap.ServerKey}} {
+		if kb, err := os.ReadFile(filepath.Join(a.srvDir, k.file)); err == nil {
+			registerKeyLines(a.secrets, k.label, kb)
 		}
 	}
 	b, err := os.ReadFile(filepath.Join(a.srvDir, bootstrap.ServerPID))
