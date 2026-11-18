@@ -141,13 +141,15 @@ See it working first: [two Claude Code sessions exchanging mail, one woken by it
 
    ```sh
    export SYNADIA_API_TOKEN=...
-   curl -fsSLO https://github.com/bogworks/mash/releases/download/v0.5.0/quickstart-synadia.sh
-   curl -fsSLO https://github.com/bogworks/mash/releases/download/v0.5.0/SHA256SUMS
+   curl -fsSLO https://github.com/bogworks/mash/releases/download/v0.5.5/quickstart-synadia.sh
+   curl -fsSLO https://github.com/bogworks/mash/releases/download/v0.5.5/SHA256SUMS
    test "$(grep -c ' quickstart-synadia.sh$' SHA256SUMS)" = 1 &&
      grep ' quickstart-synadia.sh$' SHA256SUMS | sha256sum -c - &&   # macOS: shasum -a 256 -c -
      bash quickstart-synadia.sh --dry-run --endpoint alice --endpoint bob &&
      bash quickstart-synadia.sh --endpoint alice --endpoint bob
    ```
+
+   The Synadia script is part of the v0.5.5 release, and it was not part of 0.5.5's acceptance tests.
 
    The script comes from the release, not from `main`, and nothing runs unless its checksum matches (the `&&` chain stops at the first failure). Contributors can run the script from their checkout instead.
 
