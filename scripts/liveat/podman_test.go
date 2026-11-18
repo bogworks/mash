@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -122,6 +123,7 @@ func openPodman(t *testing.T, f *fakeRT, r *Run) []Host {
 }
 
 func TestPodmanOpenCommandLines(t *testing.T) {
+	linuxOnly(t)
 	r := newPodRun(t)
 	f := podmanFake(nil)
 	hs := openPodman(t, f, r)
@@ -192,6 +194,7 @@ func TestPodmanOpenCommandLines(t *testing.T) {
 }
 
 func TestPodmanCleanupByLabel(t *testing.T) {
+	linuxOnly(t)
 	r := newPodRun(t)
 	f := podmanFake(func(c Cmd) (string, string, int, bool) {
 		l := strings.Join(c.Argv, " ")
@@ -235,6 +238,7 @@ func TestPodmanCleanupByLabel(t *testing.T) {
 }
 
 func TestAT005CleanupSubcommand(t *testing.T) {
+	linuxOnly(t)
 	removed := false
 	f := &fakeRT{reply: func(c Cmd) (string, string, int, bool) {
 		l := strings.Join(c.Argv, " ")
@@ -271,6 +275,7 @@ func TestAT005CleanupSubcommand(t *testing.T) {
 }
 
 func TestPodmanNoRuntimeFails(t *testing.T) {
+	linuxOnly(t)
 	none := func(string) (string, error) { return "", exec.ErrNotFound }
 	f := &fakeRT{}
 	_, err := (&Podman{Runner: f, LookPath: none}).Open(newPodRun(t))
@@ -291,6 +296,7 @@ func TestPodmanNoRuntimeFails(t *testing.T) {
 }
 
 func TestPodmanNotRootlessFails(t *testing.T) {
+	linuxOnly(t)
 	look := func(string) (string, error) { return "/usr/bin/podman", nil }
 	f := &fakeRT{reply: func(Cmd) (string, string, int, bool) { return "false\n", "", 0, true }}
 	if _, err := (&Podman{Runner: f, LookPath: look}).Open(newPodRun(t)); err == nil || !strings.Contains(err.Error(), "not rootless") {
@@ -308,6 +314,7 @@ func TestPodmanNotRootlessFails(t *testing.T) {
 }
 
 func TestPodmanDynamicNatsServerFails(t *testing.T) {
+	linuxOnly(t)
 	ls, err := exec.LookPath("ls")
 	if err != nil {
 		t.Skip("no ls")
@@ -338,6 +345,7 @@ func TestPodmanDynamicNatsServerFails(t *testing.T) {
 }
 
 func TestPodmanFreeOctetAvoidsExistingNetworks(t *testing.T) {
+	linuxOnly(t)
 	f := podmanFake(nil)
 	c := &podCtx{rt: f, addrs: noAddrs}
 	// 10.88.0.0/16 and 10.89.5.0/24 exist: picks 4 (octet 5) is refused, 0 (octet 1) is free.
@@ -361,6 +369,7 @@ func TestPodmanFreeOctetAvoidsExistingNetworks(t *testing.T) {
 }
 
 func TestPodmanExecAndSpawnArgs(t *testing.T) {
+	linuxOnly(t)
 	a := execArgs("c1", []string{"/bin/mash", "status"}, []string{"MASH_URL=tls://10.89.1.11:14222", "HOME=/node"}, false)
 	want := "podman exec --workdir /node -e MASH_URL=tls://10.89.1.11:14222 -e HOME=/node c1 /bin/mash status"
 	if strings.Join(a, " ") != want {
@@ -381,6 +390,7 @@ func TestPodmanExecAndSpawnArgs(t *testing.T) {
 }
 
 func TestPodmanSpawnRunsUnderNodeinitAndStopsByPidfile(t *testing.T) {
+	linuxOnly(t)
 	r := newPodRun(t)
 	f := podmanFake(nil)
 	hs := openPodman(t, f, r)
@@ -404,6 +414,7 @@ func TestPodmanSpawnRunsUnderNodeinitAndStopsByPidfile(t *testing.T) {
 }
 
 func TestPodmanCopyInAndOut(t *testing.T) {
+	linuxOnly(t)
 	r := newPodRun(t)
 	secret := "SU" + strings.Repeat("A", 54)
 	var atCp []byte
@@ -472,6 +483,7 @@ func TestPodmanCopyInAndOut(t *testing.T) {
 }
 
 func TestPodmanSnapshotAndPortFree(t *testing.T) {
+	linuxOnly(t)
 	r := newPodRun(t)
 	f := podmanFake(func(c Cmd) (string, string, int, bool) {
 		if len(c.Argv) > 3 && c.Argv[1] == "cp" {
@@ -501,6 +513,7 @@ func TestPodmanSnapshotAndPortFree(t *testing.T) {
 }
 
 func TestPodmanIsAHostsValue(t *testing.T) {
+	linuxOnly(t)
 	var _ Hosts = &Podman{}
 	var _ Preflighter = &Podman{}
 	var _ Host = &podHost{}
@@ -519,6 +532,7 @@ func routeFake(routes string) *fakeRT {
 }
 
 func TestPodmanFreeOctetAvoidsHostRoutes(t *testing.T) {
+	linuxOnly(t)
 	// a route for the whole default /16 leaves nothing under it, with a message that names the flag
 	f := routeFake("default via 192.0.2.1 dev eth0\n10.89.0.0/16 dev tun0 scope link\n")
 	_, err := freeOctet(&podCtx{rt: f, addrs: noAddrs}, func(int) int { return 0 })
@@ -549,6 +563,7 @@ func TestPodmanFreeOctetAvoidsHostRoutes(t *testing.T) {
 }
 
 func TestPodmanFreeOctetAvoidsHostAddresses(t *testing.T) {
+	linuxOnly(t)
 	f := podmanFake(nil)
 	addrs := func() ([]net.Addr, error) {
 		return []net.Addr{&net.IPNet{IP: net.ParseIP("10.89.1.77"), Mask: net.CIDRMask(24, 32)}, &net.IPNet{IP: net.ParseIP("fe80::1"), Mask: net.CIDRMask(64, 128)}}, nil
@@ -561,6 +576,7 @@ func TestPodmanFreeOctetAvoidsHostAddresses(t *testing.T) {
 }
 
 func TestSubnetBaseValidation(t *testing.T) {
+	linuxOnly(t)
 	for _, ok := range []string{"10.89", "10.0", "172.16", "172.31", "192.168"} {
 		if !validSubnetBase(ok) {
 			t.Errorf("%s refused", ok)
@@ -590,6 +606,7 @@ func TestSubnetBaseValidation(t *testing.T) {
 }
 
 func TestAT005CleanupBadRunID(t *testing.T) {
+	linuxOnly(t)
 	look := func(string) (string, error) { return "/usr/bin/podman", nil }
 	f := &fakeRT{}
 	var so, se strings.Builder
@@ -607,6 +624,7 @@ func TestAT005CleanupBadRunID(t *testing.T) {
 const otherRunID = "20261117T999999Z-ffffffff"
 
 func TestAT005CleanupRunNeverTouchesOtherRun(t *testing.T) {
+	linuxOnly(t)
 	look := func(string) (string, error) { return "/usr/bin/podman", nil }
 	f := &fakeRT{}
 	var so, se strings.Builder
@@ -627,6 +645,7 @@ func TestAT005CleanupRunNeverTouchesOtherRun(t *testing.T) {
 }
 
 func TestAT005CleanupNoArgListsOnly(t *testing.T) {
+	linuxOnly(t)
 	look := func(string) (string, error) { return "/usr/bin/podman", nil }
 	f := &fakeRT{reply: func(c Cmd) (string, string, int, bool) {
 		l := strings.Join(c.Argv, " ")
@@ -663,6 +682,7 @@ func TestAT005CleanupNoArgListsOnly(t *testing.T) {
 }
 
 func TestPodmanDestroyOnlyOwnRunFilters(t *testing.T) {
+	linuxOnly(t)
 	r := newPodRun(t)
 	f := podmanFake(nil)
 	openPodman(t, f, r)
@@ -710,6 +730,7 @@ func destroyFake(rmFails bool, leftover string) *fakeRT {
 }
 
 func TestAT5DestroyCheck(t *testing.T) {
+	linuxOnly(t)
 	for _, tc := range []struct {
 		name     string
 		rmFails  bool
@@ -751,6 +772,7 @@ func TestAT5DestroyCheck(t *testing.T) {
 }
 
 func TestAT5DestroyLocalIsTrivial(t *testing.T) {
+	linuxOnly(t)
 	r := &Run{Dir: t.TempDir(), pids: map[int]string{}}
 	if err := r.Destroy(); err != nil {
 		t.Error(err)
@@ -824,5 +846,14 @@ func TestNatsPinMatchesRepoGoMod(t *testing.T) {
 	v, err := natsPin("../..")
 	if err != nil || !strings.HasPrefix(v, "v2.") {
 		t.Fatalf("%q %v", v, err)
+	}
+}
+
+// linuxOnly skips a test of the podman host on a platform that is not Linux: AT-005's rootless podman nodes exist only there
+// (the tests model its command lines and read ELF binaries), so they say so and skip instead of failing on a macOS runner.
+func linuxOnly(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS != "linux" {
+		t.Skip("the podman host of AT-005 is Linux-only (rootless podman, ELF binaries)")
 	}
 }
