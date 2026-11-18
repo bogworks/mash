@@ -133,6 +133,7 @@ func TestPodmanOpenCommandLines(t *testing.T) {
 		"podman run -d --name mash-at005-" + id + "-m2 --network mash-at005-" + id + " --ip 10.89.10.12 --label " + lbl,
 		"podman run -d --name mash-at005-" + id + "-m3 --network mash-at005-" + id + " --ip 10.89.10.13 --label " + lbl,
 		"podman exec mash-at005-" + id + "-m3 /bin/nodeinit mkdir /node/tls",
+		"podman exec mash-at005-" + id + "-m3 /bin/nodeinit mkdir /node/run",
 	} {
 		if !f.has(want) {
 			t.Errorf("missing command %q in:\n%s", want, strings.Join(f.lines(), "\n"))
@@ -370,6 +371,29 @@ func TestPodmanExecAndSpawnArgs(t *testing.T) {
 	res := hs[0].Exec("x", []string{"/bin/mashctl", "list"}, []string{"K=V"})
 	if res.Code != 7 || got[0] != "M1-x" || !strings.Contains(strings.Join(got, " "), "-e K=V mash-at005-"+testRunID+"-m1 /bin/mashctl list") {
 		t.Fatalf("%v %+v", got, res)
+	}
+}
+
+func TestPodmanSpawnRunsUnderNodeinitAndStopsByPidfile(t *testing.T) {
+	r := newPodRun(t)
+	f := podmanFake(nil)
+	hs := openPodman(t, f, r)
+	h := hs[0].(*podHost)
+	pf1, pf2 := h.pidfile("serve a/b"), h.pidfile("serve a/b")
+	if pf1 == pf2 || !strings.HasPrefix(pf1, "/node/run/serve_a_b-") || !strings.HasSuffix(pf1, ".pid") {
+		t.Fatalf("%q %q", pf1, pf2)
+	}
+	got := strings.Join(spawnArgs("c1", pf1, []string{"/bin/mash", "serve"}, []string{"K=V"}), " ")
+	want := "podman exec -i --workdir /node -e K=V c1 /bin/nodeinit run --pidfile " + pf1 + " -- /bin/mash serve"
+	if got != want {
+		t.Fatalf("%s", got)
+	}
+	f.calls = nil
+	if err := h.stopInNode(pf1); err != nil {
+		t.Fatal(err)
+	}
+	if !f.has("podman exec mash-at005-" + testRunID + "-m1 /bin/nodeinit stop --pidfile " + pf1 + " --grace 5s") {
+		t.Fatalf("%s", strings.Join(f.lines(), "\n"))
 	}
 }
 

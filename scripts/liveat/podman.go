@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -31,9 +32,11 @@ import (
 //   - Each node has its own filesystem (the container's own layer, under /node). Nothing is shared and no host
 //     directory is mounted. Files go in and out by `podman cp` through a temporary file in the run directory that is
 //     removed by its exact path right after; a seed or a JWT is never on a command line.
-//   - Exec is `podman exec`. Spawn starts `podman exec -i` as a local child process of the harness; the harness records
-//     that client's PID and stops it with SIGTERM to that PID only. Stopping the whole node (podman rm -f, at Close)
-//     ends everything inside it, so no process inside is ever found or killed by pattern.
+//   - Exec is `podman exec`. Spawn starts `podman exec -i ... nodeinit run --pidfile /node/run/NAME.pid -- CMD` as a local
+//     child of the harness: nodeinit starts CMD inside the node and writes CMD's PID to that file. Stop first runs
+//     `nodeinit stop --pidfile ...` in the node (SIGTERM, then SIGKILL, to exactly the PID in the file), then ends the
+//     local client by its recorded PID. Nothing inside is found or killed by pattern; removing the whole node (podman
+//     rm -f, at Close) is the last resort.
 
 //go:embed Containerfile.at005
 var containerfile string
@@ -201,7 +204,7 @@ func (p *Podman) Open(r *Run) ([]Host, error) {
 		if _, err := c.do("run", "-d", "--name", h.name, "--network", c.network, "--ip", h.addr, "--label", labelKey+"="+r.ID, "--read-only=false", c.image, "/bin/nodeinit", "serve"); err != nil {
 			return nil, err
 		}
-		for _, d := range []string{h.home.Dir, h.home.State, h.home.Tmp, h.ServerDir(), h.TLSDir(), "/tmp"} {
+		for _, d := range []string{h.home.Dir, h.home.State, h.home.Tmp, h.ServerDir(), h.TLSDir(), h.runDir(), "/tmp"} {
 			if _, err := c.do("exec", h.name, "/bin/nodeinit", "mkdir", d); err != nil {
 				return nil, err
 			}
@@ -429,9 +432,40 @@ func (h *podHost) Exec(label string, args, env []string) Result {
 	return h.c.execFn(h.role+"-"+label, execArgs(h.name, args, env, false))
 }
 
-// Spawn starts `podman exec -i` as a child of the harness and records its PID: that client is what Stop signals.
+func (h *podHost) runDir() string { return nodeHome + "/run" }
+
+var pidLabelRE = regexp.MustCompile(`[^A-Za-z0-9._-]`)
+
+// pidfile is a unique file name for one spawned process in the node's run directory.
+func (h *podHost) pidfile(label string) string {
+	return h.runDir() + "/" + pidLabelRE.ReplaceAllString(label, "_") + "-" + strconv.FormatInt(h.c.n.Add(1), 10) + ".pid"
+}
+
+// spawnArgs is the command line of a spawned process: nodeinit runs it in the node and records its PID in pidfile.
+func spawnArgs(container, pidfile string, args, env []string) []string {
+	return execArgs(container, append([]string{"/bin/nodeinit", "run", "--pidfile", pidfile, "--"}, args...), env, true)
+}
+
+// Spawn starts the process in the node under `nodeinit run` and records the PID of the local `podman exec -i` client.
+// Stop first stops the process inside the node by the PID in its pidfile, then ends the client by its recorded PID.
 func (h *podHost) Spawn(label string, args, env []string) (*Proc, error) {
-	return h.c.r.StartProc(h.role+"-"+label, execArgs(h.name, args, env, true), podmanEnv())
+	pf := h.pidfile(label)
+	p, err := h.c.r.StartProc(h.role+"-"+label, spawnArgs(h.name, pf, args, env), podmanEnv())
+	if err != nil {
+		return nil, err
+	}
+	p.Before = func() {
+		if err := h.stopInNode(pf); err != nil {
+			h.c.r.Runner.logf("%s: stop in the node: %v", h.role+"-"+label, err)
+		}
+	}
+	return p, nil
+}
+
+// stopInNode ends the process whose PID is in pidfile, inside the node (nodeinit stop: SIGTERM, then SIGKILL, to that PID).
+func (h *podHost) stopInNode(pidfile string) error {
+	_, err := h.c.do("exec", h.name, "/bin/nodeinit", "stop", "--pidfile", pidfile, "--grace", "5s")
+	return err
 }
 
 func (h *podHost) tool(args ...string) (string, error) {

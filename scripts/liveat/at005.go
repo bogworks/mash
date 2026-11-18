@@ -197,7 +197,7 @@ const at005Scenario = "AT-005, across machines, over TLS, on a cluster, from two
 	"endpoint reissue of design from M2 with a new key made on M3 (old session dropped, old key refused on each of the three servers); " +
 	"endpoint delete of review from M1 (session dropped, a reconnect refused on each server, mash status says why); " +
 	"a plain nats:// URL to a non-loopback address refused by an endpoint (ADR 0108) and by mashctl (ADR 0059); " +
-	"the same address created from M1 and M2 at the same moment (one succeeds, the other is refused address_taken); a revocation made on M1 shown by endpoint show and issued check on M2; a search of all captured output and of the homes on M1 and M2 for any endpoint seed and any JWT."
+	"the same address created from M1 and M2 at the same moment (one succeeds, the other is refused address_taken); a revocation made on M1 shown by endpoint show and issued check on M2; a search of all captured output for any endpoint seed and any JWT, and of the homes on M1 and M2 for any endpoint seed."
 
 // EnvLines is the environment section of the record: each machine by role, the NATS server version, and the TLS and
 // cluster setup, without any key or certificate private part.
@@ -763,8 +763,9 @@ func (s *At5) sessions() []*Proc {
 }
 
 // search looks for secrets: every captured output for any seed or JWT and for the exact endpoint secrets; the homes on
-// M1 and M2 for the exact seeds and JWTs of endpoints, except those of an endpoint whose own machine that home is
-// (review's key was made on M1 and its creds hold its seed and JWT there, by design).
+// M1 and M2 for the exact endpoint SEEDS only, except those of an endpoint whose own machine that home is (review's
+// key was made on M1 and its creds hold its seed there, by design). A JWT is not a secret key: the JWT files that
+// `endpoint create --jwt-out` writes are on the mashctl machine by design, so the home search ignores JWTs.
 func (s *At5) search() {
 	found, err := scanDir5(s.R.Out)
 	s.check("INV-001: no captured output holds a seed or a JWT", err == nil && len(found) == 0, leakNames(found))
@@ -787,11 +788,13 @@ func (s *At5) search() {
 			if i == 2 && strings.Contains(k, "race0-m2") {
 				continue
 			}
-			secrets[k] = v
+			if strings.HasPrefix(k, "seed ") {
+				secrets[k] = v
+			}
 		}
 		hits, err := scanFor5(home, secrets)
 		done()
-		s.check(fmt.Sprintf("a search of M%d's whole machine directory (home, config, keys, server) for the %d endpoint seeds and JWTs that do not belong on it finds nothing", i, len(secrets)), err == nil && len(hits) == 0, leakNames(hits))
+		s.check(fmt.Sprintf("a search of M%d's whole machine directory (home, config, keys, server) for the %d endpoint seeds that do not belong on it finds nothing", i, len(secrets)), err == nil && len(hits) == 0, leakNames(hits))
 		s.leaks = append(s.leaks, hits...)
 	}
 	if s.dry {
