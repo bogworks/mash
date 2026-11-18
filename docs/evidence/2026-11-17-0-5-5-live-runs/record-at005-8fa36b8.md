@@ -1,0 +1,198 @@
+# Run record at005: 20261118T072730Z-4c854b76
+
+- Run id: 20261118T072730Z-4c854b76
+- Revision: 8fa36b846716043e0a8a49032de092e82e330617 (clean)
+
+## Environment
+
+- run: manual, host bf2, substrate podman 4.9.3
+- hosts: podman (three rootless containers built from this checkout, each its own filesystem and address on a private network, created and destroyed by the test): three machines M1, M2, M3 (roles, not host names)
+- M1: linux/amd64 (rootless podman container), address 10.89.161.11, own HOME, config dir, keys dir and server dir; NATS client port 14222, route port 16222, monitor 18222
+- M2: linux/amd64 (rootless podman container), address 10.89.161.12, own HOME, config dir, keys dir and server dir; NATS client port 14223, route port 16223
+- M3: linux/amd64 (rootless podman container), address 10.89.161.13, own HOME, config dir, keys dir and server dir; NATS client port 14224, route port 16224
+- go: go1.27.4
+- nats-server: nats-server: v2.15.1 (the same binary on all three machines)
+- cluster: name mashc, server_name mash-n1..mash-n3, routes between all three, JetStream with a store directory per node, operator mode with the full resolver (interval 5s) and the same resolver_preload on every node; node 1 made by mashctl init --local (without --start) and its config edited and copied
+- TLS on client connections (tls block) and on routes (cluster tls block, verify on), ca_file, cert_file and key_file per node
+- TLS: a certificate authority made by the harness for this run (ECDSA P-256, valid 24h0m0s, CA key held in memory and never written), fingerprint 819ea3e070398955
+- TLS leaf mash-n1: signed by that CA, server and client use, SANs 10.89.161.11, key of its own (0600, not shown), fingerprint 6e215080309507f1
+- TLS leaf mash-n2: signed by that CA, server and client use, SANs 10.89.161.12, key of its own (0600, not shown), fingerprint c1c0ef024a528dc1
+- TLS leaf mash-n3: signed by that CA, server and client use, SANs 10.89.161.13, key of its own (0600, not shown), fingerprint 5fa5fdd8634f5f84
+- mashctl on M1 (init) and M2 (adopt, DEC-004), config.json with all three tls:// URLs and tls_ca, MASH_SERVERS=3
+- clock: no clock offset is made (the nodes share the host's clock; the skewed case is an in-process test elsewhere)
+
+## Scenario
+
+AT-005, across machines, over TLS, on a cluster, from two mashctl machines: three NATS servers on three machines (M1, M2, M3) of one cluster, TLS on client and route connections under a CA the harness made, one account, scratch homes. M1 is set up by mashctl init --local (then the config is edited for TLS and cluster and copied to M2 and M3); M2 by mashctl adopt with the same operator signing seed, account identity seed and sys.creds (DEC-004); both with --servers 3. endpoint create alice/dev/design from M1 (key made by mash key create on M3, session on M3 connecting to the server of M2) and alice/dev/review from M2 (key made on M1, session on M1 connecting to the server on M3); mail each way; endpoint list --json on M1 and M2; endpoint reissue of design from M2 with a new key made on M3 (old session dropped, old key refused on each of the three servers); endpoint delete of review from M1 (session dropped, a reconnect refused on each server, mash status says why); a plain nats:// URL to a non-loopback address refused by an endpoint (ADR 0108) and by mashctl (ADR 0059); the same address created from M1 and M2 at the same moment (one succeeds, the other is refused address_taken); a revocation made on M1 shown by endpoint show and issued check on M2; a search of all captured output for any endpoint seed and any JWT, and of the homes on M1 and M2 for any endpoint seed.
+
+## Expected
+
+- the harness makes its certificate authority and one certificate per node, each chain verified with the SANs of the node's address
+- M1: mashctl init --local --owner alice (without --start) writes the server template and the keys
+- the template is edited for TLS, cluster and server_name and copied to M2 and M3 with their own ports and directories
+- the three NATS servers started and formed one cluster over TLS routes (node 1's monitor shows at least 2 routes; the server pools several connections per peer)
+- M1: config.json names all three servers and tls_ca
+- M1: mashctl init creates the buckets over the cluster
+- M2: mashctl adopt --server tls://M2 --owner alice --account MASH --operator-key --account-key --sys-creds --mint-admin with the same seeds as M1
+- the copies of the seeds and sys.creds that the harness made on M2 are deleted by exact path
+- M2: config.json names all three servers and tls_ca
+- M1: mashctl issued check --servers 3 reports all three servers answered
+- M2: mashctl issued check --servers 3 reports all three servers answered
+- M1: mashctl list works
+- M2: mashctl list works
+- M3: mash key create makes the key of design
+- the public key of design is carried to M1
+- M1: mashctl endpoint create alice/dev/design --public-key succeeds
+- M1: endpoint create: all three servers took the account update
+- M3: mash credential create assembles the creds of design from its own seed and the carried JWT
+- M1: mash key create makes the key of review
+- the public key of review is carried to M2
+- M2: mashctl endpoint create alice/dev/review --public-key succeeds
+- M2: endpoint create: all three servers took the account update
+- M1: mash credential create assembles the creds of review from its own seed and the carried JWT
+- the design session on M3 connects to the server on M2 (TLS) and completes the MCP handshake
+- the review session on M1 connects to the server on M3 (TLS) and completes the MCP handshake
+- both sessions are online
+- mail design-to-review: mash send succeeds
+- mail design-to-review: the recipient reads the text
+- mail design-to-review: the recipient sees it labelled verified
+- mail review-to-design: mash send succeeds
+- mail review-to-design: the recipient reads the text
+- mail review-to-design: the recipient sees it labelled verified
+- M1: endpoint list --json shows design and review, each with group dev
+- M2: endpoint list --json shows design and review, each with group dev
+- M3: the old design creds are copied to a private path before the reissue
+- the credential `endpoint create` issued for design (accepted by each of the three servers, before the reissue): a connection to the server on M1 is accepted
+- the credential `endpoint create` issued for design (accepted by each of the three servers, before the reissue): a connection to the server on M2 is accepted
+- the credential `endpoint create` issued for design (accepted by each of the three servers, before the reissue): a connection to the server on M3 is accepted
+- M3: mash key create makes the key of design-2
+- the public key of design is carried to M2
+- M2: mashctl endpoint reissue alice/dev/design --public-key succeeds
+- M2: endpoint reissue reports that all three servers took the account update
+- M3: mash credential create assembles the creds of design from its own seed and the carried JWT
+- REQ-011: the old design session is dropped (its serve exits or reports the authorization failure)
+- the old design key: a connection to the server on M1 is refused as not authorized
+- the old design key: a connection to the server on M2 is refused as not authorized
+- the old design key: a connection to the server on M3 is refused as not authorized
+- the new design key: a connection to the server on M1 is accepted
+- the new design key: a connection to the server on M2 is accepted
+- the new design key: a connection to the server on M3 is accepted
+- M1: the review creds are copied to a private path before the delete
+- review key before the delete (control): a connection to the server on M1 is accepted
+- review key before the delete (control): a connection to the server on M2 is accepted
+- review key before the delete (control): a connection to the server on M3 is accepted
+- M1: mashctl endpoint delete alice/dev/review succeeds
+- M1: endpoint delete reports that all three servers acknowledged the revocation
+- REQ-011: the review session is dropped (its serve exits or reports the authorization failure)
+- the deleted review key: a connection to the server on M1 is refused as not authorized
+- the deleted review key: a connection to the server on M2 is refused as not authorized
+- the deleted review key: a connection to the server on M3 is refused as not authorized
+- mash status (the command) with the deleted key: observed, it does not connect
+- REQ-011: the status tool of a session with the deleted key says why (an authorization failure)
+- M2: endpoint show alice/dev/review shows the revocation made from M1 (the endpoint is gone, or its record says revoked)
+- M2: mashctl issued list shows review's key revoked
+- M2 after the revocation: mashctl issued check --servers 3 reports all three servers answered
+- ADR 0108: with MASH_REQUIRE_TLS=1 an endpoint refuses to connect to a plain nats:// URL on a non-loopback address (refused before any connection; no plain server started)
+- ADR 0108: mash status says tls: FAILED for it
+- ADR 0059: mashctl refuses an admin connection to a plain nats:// URL on a non-loopback address
+- M1: mash key create makes the key of race0-m1
+- M2: mash key create makes the key of race0-m2
+- concurrent endpoint create of alice/dev/race0 from M1 and M2: exactly one succeeds and the other is refused address_taken with exit 1
+- the loser's create, run again on its own, is refused address_taken
+- one identity exists for alice/dev/race0 afterwards
+- every process the harness started is stopped by its recorded PID and ports 14222-14224, 16222-16224 and 18222 are free
+- INV-001: no captured output holds a seed or a JWT
+- INV-001: no captured output holds an endpoint seed or JWT this run made
+- a search of M1's whole machine directory (home, config, keys, server) for the 4 endpoint seeds that do not belong on it finds nothing
+- a search of M2's whole machine directory (home, config, keys, server) for the 6 endpoint seeds that do not belong on it finds nothing
+- the seeds and JWTs of this run were read for the search
+- INV-001: every command's output was captured completely (no capture or read error)
+- every container, network and image of this run is destroyed and nothing labelled mash-at005 remains
+
+## Observed
+
+- pass: the harness makes its certificate authority and one certificate per node, each chain verified with the SANs of the node's address
+- pass: M1: mashctl init --local --owner alice (without --start) writes the server template and the keys (exit 0)
+- pass: the template is edited for TLS, cluster and server_name and copied to M2 and M3 with their own ports and directories
+- pass: the three NATS servers started and formed one cluster over TLS routes (node 1's monitor shows at least 2 routes; the server pools several connections per peer) (8 routes)
+- pass: M1: config.json names all three servers and tls_ca
+- pass: M1: mashctl init creates the buckets over the cluster (exit 0)
+- pass: M2: mashctl adopt --server tls://M2 --owner alice --account MASH --operator-key --account-key --sys-creds --mint-admin with the same seeds as M1 (exit 0)
+- pass: the copies of the seeds and sys.creds that the harness made on M2 are deleted by exact path
+- pass: M2: config.json names all three servers and tls_ca
+- pass: M1: mashctl issued check --servers 3 reports all three servers answered (exit 0; summary: 1 connected, 0 unrecorded, 0 revoked but connected, 2 recorded (1 not connected), 3 of 3 servers answered)
+- pass: M2: mashctl issued check --servers 3 reports all three servers answered (exit 0; summary: 1 connected, 0 unrecorded, 0 revoked but connected, 2 recorded (1 not connected), 3 of 3 servers answered)
+- pass: M1: mashctl list works (exit 0)
+- pass: M2: mashctl list works (exit 0)
+- pass: M3: mash key create makes the key of design (exit 0: created key)
+- pass: the public key of design is carried to M1
+- pass: M1: mashctl endpoint create alice/dev/design --public-key succeeds (exit 0: created endpoint alice/dev/design)
+- n/a: M1: endpoint create: all three servers took the account update (not applicable: create makes no account update, so there is nothing to acknowledge; known issue #766)
+- pass: M3: mash credential create assembles the creds of design from its own seed and the carried JWT (exit 0: created credentials)
+- pass: M1: mash key create makes the key of review (exit 0: created key)
+- pass: the public key of review is carried to M2
+- pass: M2: mashctl endpoint create alice/dev/review --public-key succeeds (exit 0: created endpoint alice/dev/review)
+- n/a: M2: endpoint create: all three servers took the account update (not applicable: create makes no account update, so there is nothing to acknowledge; known issue #766)
+- pass: M1: mash credential create assembles the creds of review from its own seed and the carried JWT (exit 0: created credentials)
+- pass: the design session on M3 connects to the server on M2 (TLS) and completes the MCP handshake
+- pass: the review session on M1 connects to the server on M3 (TLS) and completes the MCP handshake
+- pass: both sessions are online
+- pass: mail design-to-review: mash send succeeds (exit 0: sent #1 from alice.dev.design to alice.dev.review)
+- pass: mail design-to-review: the recipient reads the text (exit 0: --- #1 from alice.dev.design [verified] at 2026-11-18T07:27:52Z)
+- pass: mail design-to-review: the recipient sees it labelled verified
+- pass: mail review-to-design: mash send succeeds (exit 0: sent #1 from alice.dev.review to alice.dev.design)
+- pass: mail review-to-design: the recipient reads the text (exit 0: --- #1 from alice.dev.review [verified] at 2026-11-18T07:27:52Z)
+- pass: mail review-to-design: the recipient sees it labelled verified
+- pass: M1: endpoint list --json shows design and review, each with group dev (exit 0, groups seen: map[design:dev review:dev])
+- pass: M2: endpoint list --json shows design and review, each with group dev (exit 0, groups seen: map[design:dev review:dev])
+- pass: M3: the old design creds are copied to a private path before the reissue
+- pass: the credential `endpoint create` issued for design (accepted by each of the three servers, before the reissue): a connection to the server on M1 is accepted (exit 0: #1	from alice.dev.review [verified]	2026-11-18T07:27:52Z	40 B	hello design from review across machines	kind task	instance ohiZd0mQB77wgVR6E3QMFJ)
+- pass: the credential `endpoint create` issued for design (accepted by each of the three servers, before the reissue): a connection to the server on M2 is accepted (exit 0: #1	from alice.dev.review [verified]	2026-11-18T07:27:52Z	40 B	hello design from review across machines	kind task	instance ohiZd0mQB77wgVR6E3QMFJ)
+- pass: the credential `endpoint create` issued for design (accepted by each of the three servers, before the reissue): a connection to the server on M3 is accepted (exit 0: #1	from alice.dev.review [verified]	2026-11-18T07:27:52Z	40 B	hello design from review across machines	kind task	instance ohiZd0mQB77wgVR6E3QMFJ)
+- pass: M3: mash key create makes the key of design-2 (exit 0: created key)
+- pass: the public key of design is carried to M2
+- pass: M2: mashctl endpoint reissue alice/dev/design --public-key succeeds (exit 0: reissued endpoint alice/dev/design)
+- pass: M2: endpoint reissue reports that all three servers took the account update (servers acknowledged the account update: 3)
+- pass: M3: mash credential create assembles the creds of design from its own seed and the carried JWT (exit 0: created credentials)
+- pass: REQ-011: the old design session is dropped (its serve exits or reports the authorization failure)
+- pass: the old design key: a connection to the server on M1 is refused as not authorized (exit 1: mash: connect tls://10.89.161.11:14222: nats: Authorization Violation)
+- pass: the old design key: a connection to the server on M2 is refused as not authorized (exit 1: mash: connect tls://10.89.161.12:14223: nats: Authorization Violation)
+- pass: the old design key: a connection to the server on M3 is refused as not authorized (exit 1: mash: connect tls://10.89.161.13:14224: nats: Authorization Violation)
+- pass: the new design key: a connection to the server on M1 is accepted (exit 0: #1	from alice.dev.review [verified]	2026-11-18T07:27:52Z	40 B	hello design from review across machines	kind task	instance ohiZd0mQB77wgVR6E3QMFJ)
+- pass: the new design key: a connection to the server on M2 is accepted (exit 0: #1	from alice.dev.review [verified]	2026-11-18T07:27:52Z	40 B	hello design from review across machines	kind task	instance ohiZd0mQB77wgVR6E3QMFJ)
+- pass: the new design key: a connection to the server on M3 is accepted (exit 0: #1	from alice.dev.review [verified]	2026-11-18T07:27:52Z	40 B	hello design from review across machines	kind task	instance ohiZd0mQB77wgVR6E3QMFJ)
+- pass: M1: the review creds are copied to a private path before the delete
+- pass: review key before the delete (control): a connection to the server on M1 is accepted (exit 0: #1	from UAA5…FVNB [unknown-signer]	2026-11-18T07:27:52Z	40 B	hello review from design across machines	kind task)
+- pass: review key before the delete (control): a connection to the server on M2 is accepted (exit 0: #1	from UAA5…FVNB [unknown-signer]	2026-11-18T07:27:52Z	40 B	hello review from design across machines	kind task)
+- pass: review key before the delete (control): a connection to the server on M3 is accepted (exit 0: #1	from UAA5…FVNB [unknown-signer]	2026-11-18T07:27:52Z	40 B	hello review from design across machines	kind task)
+- pass: M1: mashctl endpoint delete alice/dev/review succeeds (exit 0: deleted alice/dev/review (alice.dev.review))
+- pass: M1: endpoint delete reports that all three servers acknowledged the revocation (revoked user key UCYNESNX...: 3 server(s) acknowledged)
+- pass: REQ-011: the review session is dropped (its serve exits or reports the authorization failure)
+- pass: the deleted review key: a connection to the server on M1 is refused as not authorized (exit 1: mash: connect tls://10.89.161.11:14222: nats: Authorization Violation)
+- pass: the deleted review key: a connection to the server on M2 is refused as not authorized (exit 1: mash: connect tls://10.89.161.12:14223: nats: Authorization Violation)
+- pass: the deleted review key: a connection to the server on M3 is refused as not authorized (exit 1: mash: connect tls://10.89.161.13:14224: nats: Authorization Violation)
+- pass: mash status (the command) with the deleted key: observed, it does not connect (connection line: connection: FAILED - nats: authorization violation (recorded by the session at 2026-11-18T07:27:57Z). Next: if the endpoint was deleted or its key reissued, the old crede...)
+- pass: REQ-011: the status tool of a session with the deleted key says why (an authorization failure) (connection: FAILED - mash: connect tls://10.89.161.13:14224: nats: Authorization Violation. Next: fix the cause (see the creds and config lines) and restart Claude Code)
+- pass: M2: endpoint show alice/dev/review shows the revocation made from M1 (the endpoint is gone, or its record says revoked) (exit 1: {)
+- pass: M2: mashctl issued list shows review's key revoked (exit 0: {)
+- pass: M2 after the revocation: mashctl issued check --servers 3 reports all three servers answered (exit 0; summary: 2 connected, 0 unrecorded, 0 revoked but connected, 5 recorded (3 not connected), 3 of 3 servers answered)
+- pass: ADR 0108: with MASH_REQUIRE_TLS=1 an endpoint refuses to connect to a plain nats:// URL on a non-loopback address (refused before any connection; no plain server started) (exit 1: mash: MASH_REQUIRE_TLS (require_tls) is set: refusing a plain nats:// connection to "10.89.161.11": use tls:// with the server's certificate (tls_ca for a private CA))
+- pass: ADR 0108: mash status says tls: FAILED for it (tls: FAILED - mash: MASH_REQUIRE_TLS (require_tls) is set: refusing a plain nats:// connection to "10.89.161.11": use tls:// with the server's certificate (tls_ca for a p...)
+- pass: ADR 0059: mashctl refuses an admin connection to a plain nats:// URL on a non-loopback address (exit 1: mashctl: target server nats://10.89.161.11:14222 (from MASH_URL), owner alice (from /node/config/config.json), admin creds /node/server/mashadmin.creds (from /node/config...)
+- pass: M1: mash key create makes the key of race0-m1 (exit 0: created key)
+- pass: M2: mash key create makes the key of race0-m2 (exit 0: created key)
+- pass: concurrent endpoint create of alice/dev/race0 from M1 and M2: exactly one succeeds and the other is refused address_taken with exit 1 (M1 exit 0, M2 exit 1; refused address_taken: 1; outcome created | refusal address_taken: endpoint alice.dev.race0 already exists; use reissue to give it a new key)
+- pass: the loser's create, run again on its own, is refused address_taken (exit 1: {)
+- pass: one identity exists for alice/dev/race0 afterwards (1 record(s))
+- pass: every process the harness started is stopped by its recorded PID and ports 14222-14224, 16222-16224 and 18222 are free (M1 nats-server pid 840640; M2 nats-server pid 840641; M3 nats-server pid 840642; session design on M3 pid 847760 (server of M2); session review on M1 pid 847991 (server of M3))
+- pass: INV-001: no captured output holds a seed or a JWT
+- pass: INV-001: no captured output holds an endpoint seed or JWT this run made
+- pass: a search of M1's whole machine directory (home, config, keys, server) for the 4 endpoint seeds that do not belong on it finds nothing
+- pass: a search of M2's whole machine directory (home, config, keys, server) for the 6 endpoint seeds that do not belong on it finds nothing
+- pass: the seeds and JWTs of this run were read for the search (12 kept in memory only)
+- pass: INV-001: every command's output was captured completely (no capture or read error)
+- pass: every container, network and image of this run is destroyed and nothing labelled mash-at005 remains
+
+## Result
+
+PASS

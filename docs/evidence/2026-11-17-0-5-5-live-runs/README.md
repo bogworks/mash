@@ -15,3 +15,18 @@ section 8: run id, revision, environment, scenario, expected, observed).
 AT-005's record is of harness `67aa3a5` (the same patch is in this pull request as its own commit, so the checked-in harness is the one that ran; it is also #776) (main `a191f08` plus a change in `scripts/liveat` only: the n/a relabelling; the product code under test is identical to `a191f08`, the record names `67aa3a5` as its revision). AT-001 to AT-003 first ran on `2a204ed` (before the removed-command messages merged) and AT-005 on earlier harness revisions; those records are
 replaced by these. The AT-005 run is evidence from a developer machine, not from the CI runners, and it does not include a clock-skew case (a
 unit test in `internal/enroll` covers skews inside and past the lock bound). Nothing in a record holds a key, a seed or a JWT.
+
+## Reruns after the owner-scoped reply inboxes (#780)
+
+The final gate found that every endpoint could publish to `_INBOX.>` (INV-002); the fix is #780 (contract revision 9). AT-001, AT-002,
+AT-003 and AT-005 were run again on `8fa36b846716043e0a8a49032de092e82e330617`, which is #780's head plus the harness patch of this
+pull request (so the AT-005 create check is n/a), and the records are NEW files beside the `a191f08` ones, not replacements:
+
+| Record | Result |
+|---|---|
+| `record-at001-8fa36b8.md` | pass (37 assertions) |
+| `record-at002-8fa36b8.md` | pass (25 assertions) |
+| `record-at003-8fa36b8.md` | pass (106 assertions; includes the new cross-owner case: bob's forged discovery answer and replayed presence answer are refused by the server) |
+| `record-at005-8fa36b8.md` | pass (79 assertions, 2 not applicable, 0 failed; podman, manual, host label bf2; nothing labelled left) |
+
+AT-005 has no second-owner case: its harness fixes one owner. The cross-owner check is in AT-003 and in the endpoint tests of #780.
