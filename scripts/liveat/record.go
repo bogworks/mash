@@ -58,7 +58,9 @@ func (r Record) Markdown() string {
 	b.WriteString("\n## Observed\n\n")
 	for _, a := range r.Observed {
 		res := "pass"
-		if !a.Pass {
+		if a.NA {
+			res = "n/a"
+		} else if !a.Pass {
 			res = "FAIL"
 		}
 		fmt.Fprintf(&b, "- %s: %s", res, a.Name)

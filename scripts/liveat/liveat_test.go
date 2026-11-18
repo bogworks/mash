@@ -445,3 +445,23 @@ func TestWithoutGeneratedIgnoresTheTimestamp(t *testing.T) {
 		t.Errorf("non-JSON changed: %q", got)
 	}
 }
+
+// A check that does not apply is recorded as n/a: not a pass, not a failure.
+func TestNotApplicableIsNeitherPassNorFailure(t *testing.T) {
+	var c Checks
+	c.Check("a real check", true, "")
+	c.NotApplicable("a check that does not apply", "no account update")
+	if c.Failed() != 0 {
+		t.Errorf("Failed() = %d", c.Failed())
+	}
+	rec := Record{RunID: "x", Revision: "y", AT: "at005", Scenario: "s", Observed: c.All()}.Markdown()
+	if !strings.Contains(rec, "- pass: a real check") || !strings.Contains(rec, "- n/a: a check that does not apply (no account update)") {
+		t.Errorf("record lines wrong:\n%s", rec)
+	}
+	if strings.Contains(rec, "- pass: a check that does not apply") {
+		t.Error("a not-applicable check was recorded as a pass")
+	}
+	if !strings.Contains(c.Table(), "N/A") {
+		t.Errorf("table: %q", c.Table())
+	}
+}
