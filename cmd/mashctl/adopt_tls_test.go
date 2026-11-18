@@ -111,5 +111,5 @@ func TestAdoptPlainWithoutInsecurePlaintextRefused(t *testing.T) {
 	// to the loopback address of a TLS server is not refused: nats.Secure upgrades it to TLS.)
 	a, _, ca := newTLSAdopter(t)
 	a.env["MASH_TLS_CA"] = ca
-	a.refuses(1, []string{"refusing a plain nats://", "tls_ca", "nothing was changed"}, "--server", "nats://example.invalid:4222", "--dry-run")
+	a.refuses(2, []string{"refusing a plain nats://", "tls_ca", "nothing was changed"}, "--server", "nats://example.invalid:4222", "--dry-run")
 }

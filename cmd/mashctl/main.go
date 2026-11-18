@@ -20,8 +20,34 @@ func main() {
 	os.Exit(run(os.Args[1:], os.Getenv, os.LookupEnv, os.Stdout, os.Stderr))
 }
 
-// run is main with its environment injected, for tests.
+// plainRefusalMarker is the text of natsauth's refusal of a plain URL, which every connecting verb prints verbatim.
+const plainRefusalMarker = "every mash connection requires TLS, to any host"
+
+// plainWatch passes writes through and records whether the plain-URL refusal went by.
+type plainWatch struct {
+	w    io.Writer
+	seen bool
+}
+
+func (p *plainWatch) Write(b []byte) (int, error) {
+	if strings.Contains(string(b), plainRefusalMarker) {
+		p.seen = true
+	}
+	return p.w.Write(b)
+}
+
+// run is main with its environment injected, for tests. A plain URL refused for TLS is a usage error (exit 2) in every
+// verb, whichever path reported it.
 func run(args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
+	pw := &plainWatch{w: stderr}
+	code := runVerbs(args, env, lookup, stdout, pw)
+	if code == 1 && pw.seen {
+		return 2
+	}
+	return code
+}
+
+func runVerbs(args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		fmt.Fprint(stderr, ctl.Usage("mashctl"))
 		return 2
