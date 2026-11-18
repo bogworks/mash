@@ -833,14 +833,24 @@ func issuedRevocationAccounted(listCode int, listOut string, checkCode int, chec
 		return false, "issued check: " + d
 	}
 	lv, _ := parseJSON(listOut)
-	key := ""
+	// every revoked record for the address must be accounted for: a newer, unrevoked record (a reissue) must not
+	// stand in for the revoked key.
+	var keys []string
 	for _, o := range findObjects(lv, "address", "revoked_at") {
-		if a, _ := o["address"].(string); a == address {
-			key, _ = o["public_key"].(string)
+		if a, _ := o["address"].(string); a != address {
+			continue
 		}
+		if at, _ := o["revoked_at"].(string); at == "" {
+			continue
+		}
+		key, _ := o["public_key"].(string)
+		if key == "" {
+			return false, "issued list has a revoked record without a public_key for " + address
+		}
+		keys = append(keys, key)
 	}
-	if key == "" {
-		return false, "issued list has no public_key for " + address
+	if len(keys) == 0 {
+		return false, "issued list has no revoked record for " + address
 	}
 	var doc struct {
 		NotConnected []struct {
@@ -851,12 +861,19 @@ func issuedRevocationAccounted(listCode int, listOut string, checkCode int, chec
 	if err := json.Unmarshal([]byte(strings.TrimSpace(checkOut)), &doc); err != nil {
 		return false, "issued check stdout is not the --json document"
 	}
-	for _, n := range doc.NotConnected {
-		if n.PublicKey == key && n.Address == address {
-			return true, address + " revoked_at is set in issued list; issued check is clean and complete and accounts for its key (recorded, not connected)"
+	for _, key := range keys {
+		found := false
+		for _, n := range doc.NotConnected {
+			if n.PublicKey == key && n.Address == address {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false, "issued check does not account for " + address + "'s revoked key " + key + " (not in recorded_not_connected)"
 		}
 	}
-	return false, "issued check does not account for " + address + "'s key (not in recorded_not_connected)"
+	return true, address + " revoked_at is set in issued list; issued check is clean and complete and accounts for every revoked key (recorded, not connected)"
 }
 
 // revocationSeen: the delete of review was made from M1; M2 shows it with endpoint show, issued list and issued check.
