@@ -257,9 +257,7 @@ func TestEndpointBulkRefusalDoesNotStopOthers(t *testing.T) {
 	oldB := credsPub(t, h, b)
 	// a lock left on b: its reissue is refused
 	lock := h.creds(b) + ".lock"
-	if err := os.Mkdir(lock, 0o700); err != nil {
-		t.Fatal(err)
-	}
+	holdLock(t, lock)
 	prev := epLockWait
 	epLockWait = 20 * time.Millisecond
 	t.Cleanup(func() { epLockWait = prev })
@@ -279,9 +277,7 @@ func TestEndpointBulkRefusalDoesNotStopOthers(t *testing.T) {
 	}
 	// every endpoint refused: exit 1
 	for _, x := range []sap.Address{a, c} {
-		if err := os.Mkdir(h.creds(x)+".lock", 0o700); err != nil {
-			t.Fatal(err)
-		}
+		holdLock(t, h.creds(x)+".lock")
 	}
 	so, _, code = h.run("endpoint", "reissue", "--all", "--make-key", "--yes", "--json")
 	if d := bulkDoc(t, so); code != 1 || d.Outcome != "refused" || d.Counts.Refused != 3 || d.Refusal == nil {
@@ -505,7 +501,6 @@ func TestEndpointReissueMakeKeyKilledAfterEnroll(t *testing.T) {
 	if credsPub(t, h, a) != old {
 		t.Fatal("creds changed before the kill point")
 	}
-	os.RemoveAll(h.creds(a) + ".lock") // the lock a killed run leaves
 	if _, se, code := h.run(args...); code != 0 {
 		t.Fatalf("rerun %d %q", code, se)
 	}

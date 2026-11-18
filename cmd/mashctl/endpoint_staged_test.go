@@ -209,9 +209,7 @@ func TestEndpointBulkPartialNamesChanged(t *testing.T) {
 	a, b := ad("a"), ad("b")
 	h.seed(a)
 	h.seed(b)
-	if err := os.Mkdir(h.creds(b)+".lock", 0o700); err != nil {
-		t.Fatal(err)
-	}
+	holdLock(t, h.creds(b)+".lock")
 	prev := epLockWait
 	epLockWait = 20 * time.Millisecond
 	t.Cleanup(func() { epLockWait = prev })

@@ -54,6 +54,11 @@ const endpointReissueUsage = `usage: mashctl endpoint reissue ADDRESS (--public-
   and cannot be read or parsed).
   Errors include superseded: another reissue changed the endpoint's key while this one ran, so the file this run wrote
   was removed; run the command again.
+  Refusals include reissue_busy: another reissue of ADDRESS holds the lock (its pid and host are named when readable).
+  A reissue of an endpoint holds a lock on its creds file's .lock file; the operating system releases it when the run
+  ends or is killed, so a killed run needs nothing removed. The lock works on one host (a local filesystem), not across
+  hosts or on a network filesystem that does not honour flock. A .lock directory made by an earlier mash is reported
+  and removed once by hand.
   exit codes: 0 done, planned or unchanged, 1 refused, 2 usage, 5 partial (bulk), 6 error
 Example:
   mashctl endpoint reissue alice/dev/design --public-key design.pub
@@ -66,23 +71,27 @@ var errEpBusy = errors.New("lock busy")
 // epLockWait is how long epLock waits for a lock held by another run.
 var epLockWait = 10 * time.Second
 
-// epLock takes the lock directory at path: os.Mkdir is exclusive, the attempt repeats every 50 ms for epLockWait. The
-// returned function removes the directory this call made.
-func epLock(path string) (unlock func(), err error) {
-	deadline := time.Now().Add(epLockWait)
-	for {
-		err := os.Mkdir(path, 0o700)
-		if err == nil {
-			return func() { os.Remove(path) }, nil
-		}
-		if !errors.Is(err, fs.ErrExist) {
-			return nil, err
-		}
-		if time.Now().After(deadline) {
-			return nil, errEpBusy
-		}
-		time.Sleep(50 * time.Millisecond)
+// errEpOldLock is returned by epLock when a directory is at the lock path: a lock left or held by an older mash.
+var errEpOldLock = errors.New("lock is a directory")
+
+// epBusyDetail is the reissue_busy refusal text. The info line in the lock file is read for the message only.
+func epBusyDetail(addr sap.Address, lockPath string, oldDir bool) string {
+	if oldDir {
+		return fmt.Sprintf("another reissue of %s holds the lock, or an older mash left the directory %s; if no reissue is running, remove it once", addr, lockPath)
 	}
+	head := fmt.Sprintf("another reissue of %s holds the lock", addr)
+	if b, err := os.ReadFile(lockPath); err == nil {
+		f := map[string]string{}
+		for _, kv := range strings.Fields(string(b)) {
+			if k, v, ok := strings.Cut(kv, "="); ok {
+				f[k] = v
+			}
+		}
+		if f["pid"] != "" && f["host"] != "" {
+			head += fmt.Sprintf(" (pid %s on %s)", f["pid"], f["host"])
+		}
+	}
+	return head + "; the lock is released when that run ends or is killed; run this again later"
 }
 
 // runEndpointReissue is `mashctl endpoint reissue`.
@@ -449,8 +458,8 @@ func (r epRun) reissue(addr sap.Address, makeKey bool, pub, outPath string, resu
 	pending := outPath + ".pending"
 	// One reissue at a time per endpoint, in every key mode: enroll.Reissue and the write of the output file are one
 	// step, so two runs cannot rotate the server key twice or leave the output on a key that is already revoked. The
-	// lock is a directory beside the endpoint's creds path (keyed by the address); with no config directory it sits
-	// beside the output file.
+	// lock is a file beside the endpoint's creds path (keyed by the address), held with flock; with no config
+	// directory it sits beside the output file.
 	lockPath := outPath + ".lock"
 	if cp, cerr := credsFileFor(r.cfg, addr); cerr == nil {
 		lockPath = cp + ".lock"
@@ -459,8 +468,8 @@ func (r epRun) reissue(addr sap.Address, makeKey bool, pub, outPath string, resu
 		return "", 0, &epFail{code: "write", detail: fmt.Sprintf("the directory for the lock is not usable: %v; nothing was changed", err)}
 	}
 	unlock, lerr := epLock(lockPath)
-	if errors.Is(lerr, errEpBusy) {
-		return "", 0, &epFail{refused: true, code: "reissue_busy", detail: fmt.Sprintf("another reissue of %s is running; if none is (a run was killed), remove the directory %s and run this again", addr, lockPath)}
+	if errors.Is(lerr, errEpBusy) || errors.Is(lerr, errEpOldLock) {
+		return "", 0, &epFail{refused: true, code: "reissue_busy", detail: epBusyDetail(addr, lockPath, errors.Is(lerr, errEpOldLock))}
 	}
 	if lerr != nil {
 		return "", 0, &epFail{code: "write", detail: fmt.Sprintf("cannot take the lock %s: %v; nothing was changed", lockPath, lerr)}

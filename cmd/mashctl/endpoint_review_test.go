@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
@@ -304,8 +305,10 @@ func TestEndpointReissueConcurrentSameHost(t *testing.T) {
 	if rec, ok := h.record(a); !ok || rec.User != pub {
 		t.Errorf("directory key %q, creds file key %q", rec.User, pub)
 	}
-	if _, err := os.Lstat(h.creds(a) + ".lock"); err == nil {
-		t.Error("lock directory left behind")
+	if u, err := epLock(h.creds(a) + ".lock"); err != nil {
+		t.Errorf("lock still held: %v", err)
+	} else {
+		u()
 	}
 	if left, _ := filepath.Glob(filepath.Join(h.dir, ".*.tmp-*")); len(left) != 0 {
 		t.Errorf("temp files left: %v", left)
@@ -321,14 +324,12 @@ func TestEndpointReissueBusy(t *testing.T) {
 	}
 	before, _ := os.ReadFile(h.creds(a))
 	lock := h.creds(a) + ".lock"
-	if err := os.Mkdir(lock, 0o700); err != nil {
-		t.Fatal(err)
-	}
+	holdLock(t, lock)
 	prev := epLockWait
 	epLockWait = 150 * time.Millisecond
 	t.Cleanup(func() { epLockWait = prev })
 	so, se, code := h.run("endpoint", "reissue", a.String(), "--make-key", "--json")
-	if code != 1 || !strings.Contains(se, "reissue_busy") || !strings.Contains(se, lock) {
+	if code != 1 || !strings.Contains(se, "reissue_busy") || !strings.Contains(se, fmt.Sprintf("pid %d", os.Getpid())) {
 		t.Fatalf("%d %q %q", code, so, se)
 	}
 	if after, _ := os.ReadFile(h.creds(a)); string(after) != string(before) {
