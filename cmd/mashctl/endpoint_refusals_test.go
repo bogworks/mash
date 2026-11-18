@@ -381,6 +381,7 @@ var (
 	reUserKey   = regexp.MustCompile(`U[A-Z2-7]{55}`)
 	reAcctKey   = regexp.MustCompile(`A[A-Z2-7]{55}`)
 	reShortKey  = regexp.MustCompile(`\bU[A-Z2-7]{7}\b(\.\.\.)?`)
+	reLockPath  = regexp.MustCompile(`directory <TMP>\S*\.lock`)
 	reTimestamp = regexp.MustCompile(`\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d+)?(Z|[+-]\d\d:\d\d)`)
 )
 
@@ -390,6 +391,7 @@ func (r *refEnv) normalise(s string) string {
 	s = strings.ReplaceAll(s, r.h.dir, "<TMP>")
 	s = strings.ReplaceAll(s, fmt.Sprintf("(pid %d on %s)", os.Getpid(), hostName(r.h.t)), "(pid <PID> on <HOST>)")
 	s = strings.ReplaceAll(s, r.h.e.URL, "<URL>")
+	s = reLockPath.ReplaceAllString(s, "directory <LOCKPATH>")
 	s = reUserKey.ReplaceAllString(s, "<KEY>")
 	s = reAcctKey.ReplaceAllString(s, "<KEY>")
 	s = reShortKey.ReplaceAllString(s, "<KEY>")
