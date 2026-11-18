@@ -69,36 +69,30 @@ func TestEpLockReclaimRules(t *testing.T) {
 		{"other host, old start", func(t *testing.T, l string) { writeLockOwner(t, l, epOwner{dead, host + "-other", old}) }, false},
 		{"live pid with an old start time on this host", func(t *testing.T, l string) { writeLockOwner(t, l, epOwner{os.Getpid(), host, old}) }, false},
 		{"dead pid with an old start time on this host", func(t *testing.T, l string) { writeLockOwner(t, l, epOwner{dead, host, old}) }, true},
-		{"no owner file, fresh", func(t *testing.T, l string) {
+		{"existing empty directory (older mash lock), fresh", func(t *testing.T, l string) {
 			if err := os.Mkdir(l, 0o700); err != nil {
 				t.Fatal(err)
 			}
 		}, false},
-		{"no owner file, older than 15 s", func(t *testing.T, l string) {
+		{"no owner file, 1 hour old", func(t *testing.T, l string) {
 			if err := os.Mkdir(l, 0o700); err != nil {
 				t.Fatal(err)
 			}
-			past := now.Add(-time.Minute)
+			past := now.Add(-time.Hour)
 			if err := os.Chtimes(l, past, past); err != nil {
 				t.Fatal(err)
 			}
-		}, true},
-		{"garbage owner file, fresh", func(t *testing.T, l string) {
-			if err := os.Mkdir(l, 0o700); err != nil {
-				t.Fatal(err)
-			}
-			os.WriteFile(filepath.Join(l, "owner"), []byte("not an owner\x00"), 0o600)
 		}, false},
-		{"garbage owner file, older than 15 s", func(t *testing.T, l string) {
+		{"garbage owner file, 1 hour old", func(t *testing.T, l string) {
 			if err := os.Mkdir(l, 0o700); err != nil {
 				t.Fatal(err)
 			}
 			os.WriteFile(filepath.Join(l, "owner"), []byte("not an owner\x00"), 0o600)
-			past := now.Add(-time.Minute)
+			past := now.Add(-time.Hour)
 			if err := os.Chtimes(l, past, past); err != nil {
 				t.Fatal(err)
 			}
-		}, true},
+		}, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -245,68 +239,5 @@ func TestEpReclaimPutsBackReplacedLock(t *testing.T) {
 	}
 	if _, err := epLock(lock); !errors.Is(err, errEpBusy) {
 		t.Errorf("the second owner's lock is not held: %v", err)
-	}
-}
-
-// TestEpLockNeverOwnerless takes and releases the lock from 8 goroutines while a watcher polls: whenever the lock
-// directory exists its owner file exists too.
-func TestEpLockNeverOwnerless(t *testing.T) {
-	prev := epLockWait
-	epLockWait = 30 * time.Second
-	t.Cleanup(func() { epLockWait = prev })
-	lock := filepath.Join(t.TempDir(), "x.creds.lock")
-	stop := make(chan struct{})
-	watched := make(chan string, 1)
-	go func() {
-		defer close(watched)
-		misses := 0
-		for {
-			select {
-			case <-stop:
-				return
-			default:
-			}
-			if _, err := os.Stat(lock); err != nil {
-				misses = 0
-				continue
-			}
-			if _, err := os.Stat(filepath.Join(lock, "owner")); err == nil {
-				misses = 0
-				continue
-			}
-			if _, err := os.Stat(lock); err != nil {
-				misses = 0 // the directory vanished meanwhile
-				continue
-			}
-			if misses++; misses >= 2 {
-				watched <- "lock directory present with no owner file"
-				return
-			}
-		}
-	}()
-	var wg sync.WaitGroup
-	errs := make(chan error, 8)
-	for i := 0; i < 8; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for j := 0; j < 20; j++ {
-				unlock, err := epLock(lock)
-				if err != nil {
-					errs <- err
-					return
-				}
-				unlock()
-			}
-		}()
-	}
-	wg.Wait()
-	close(stop)
-	close(errs)
-	for err := range errs {
-		t.Errorf("epLock: %v", err)
-	}
-	if msg := <-watched; msg != "" {
-		t.Error(msg)
 	}
 }

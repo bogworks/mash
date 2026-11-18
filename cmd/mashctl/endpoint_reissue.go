@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/nats-io/jwt/v2"
@@ -55,9 +54,9 @@ const endpointReissueUsage = `usage: mashctl endpoint reissue ADDRESS (--public-
   and cannot be read or parsed).
   Errors include superseded: another reissue changed the endpoint's key while this one ran, so the file this run wrote
   was removed; run the command again.
-  Refusals include reissue_busy: another reissue of ADDRESS is running (its pid and host are named when readable). A lock
-  left by a killed run on this host is reclaimed automatically; a lock whose owner is on another host is not: if that
-  run is gone, remove the directory named in the refusal.
+  Refusals include reissue_busy: another reissue of ADDRESS holds the lock (its pid and host are named when readable). A lock
+  left by a killed run on this host is reclaimed automatically; a lock whose owner is on another host, or that names no
+  owner, is not: if that run is gone, remove the directory named in the refusal.
   exit codes: 0 done, planned or unchanged, 1 refused, 2 usage, 5 partial (bulk), 6 error
 Example:
   mashctl endpoint reissue alice/dev/design --public-key design.pub
@@ -70,9 +69,9 @@ var errEpBusy = errors.New("lock busy")
 // epLockWait is how long epLock waits for a lock held by another run.
 var epLockWait = 10 * time.Second
 
-// epLockNoOwnerAfter is the age of a lock directory with no readable owner file after which it is reclaimed. epLock
-// never makes such a directory, so it is foreign or damaged.
-const epLockNoOwnerAfter = 15 * time.Second
+// epGateStaleAfter is the age after which the <lock>.reclaim gate directory of a run killed inside epReclaim is
+// removed. It applies to the gate only, never to the lock.
+const epGateStaleAfter = 15 * time.Second
 
 // epOwner is the content of the owner file in a lock directory: one line, "pid=N host=NAME start=UNIXSECONDS".
 type epOwner struct {
@@ -112,22 +111,17 @@ func epWriteOwner(dir string) (text string, err error) {
 }
 
 // epLockStale judges the lock directory at path: stale is true when it may be reclaimed, and raw is the owner file
-// text the judgement rests on ("" when there is none). A lock is stale only when its owner is on this host with a pid
-// that is not running, or when it has no readable owner and is older than epLockNoOwnerAfter. A lock whose owner is on
-// another host, or whose pid cannot be checked, is never stale.
+// text the judgement rests on ("" when there is none). A lock is stale only when its owner file parses, the owner is
+// on this host, and its pid is not running. A lock whose owner is on another host, whose pid cannot be checked, or
+// that has no readable owner is never stale: a lock with no owner may be a live run of an older mash, which made the
+// directory without an owner file, or a run between the Mkdir and the owner write in epLock.
 func epLockStale(path string) (stale bool, raw string) {
 	o, raw, ok := epReadOwner(path)
-	if ok {
-		if host, _ := os.Hostname(); o.host == host && epPidState(o.pid) == 0 {
-			return true, raw
-		}
+	if !ok {
 		return false, raw
 	}
-	fi, err := os.Lstat(path)
-	if err != nil {
-		return false, raw
-	}
-	return time.Since(fi.ModTime()) > epLockNoOwnerAfter, raw
+	host, _ := os.Hostname()
+	return o.host == host && epPidState(o.pid) == 0, raw
 }
 
 // epReclaim removes the lock at path when it is stale. Runs that reclaim at once are serialized by a second directory,
@@ -136,13 +130,12 @@ func epLockStale(path string) (stale bool, raw string) {
 // free or taken, never half removed) and its owner text is read again: when it is not the text that was judged, a new
 // holder replaced the lock between the judgement and the rename, and the directory is renamed back (this fails
 // harmlessly when the path was taken again) and not removed. Otherwise the moved directory is removed. The reclaim
-// directory of a run killed inside this function is removed when it is older than epLockNoOwnerAfter. Reclaim is
-// only for a dead pid on this host or a damaged lock (no readable owner, older than epLockNoOwnerAfter); a live
-// owner never loses its lock.
+// directory of a run killed inside this function is removed when it is older than epGateStaleAfter. Reclaim is
+// only for a dead pid on this host (see epLockStale); a live owner, and a lock with no owner, are never reclaimed.
 func epReclaim(path string) {
 	gate := path + ".reclaim"
 	if err := os.Mkdir(gate, 0o700); err != nil {
-		if fi, serr := os.Lstat(gate); serr == nil && time.Since(fi.ModTime()) > epLockNoOwnerAfter {
+		if fi, serr := os.Lstat(gate); serr == nil && time.Since(fi.ModTime()) > epGateStaleAfter {
 			os.Remove(gate)
 		}
 		return
@@ -194,30 +187,26 @@ func epRelease(path, text string) {
 	os.RemoveAll(moved)
 }
 
-// epLock takes the lock directory at path. The lock is built in a private directory <path>.new.<pid>.<nanos> holding
-// the owner file (pid, host, start time), written whole, and renamed to path. Renaming a directory onto a missing path
-// is atomic and onto an existing non-empty directory fails, so the lock directory never exists without its owner. The
-// attempt repeats every 50 ms for epLockWait, and a stale lock (see epLockStale) is reclaimed. The returned function
-// removes the directory this call made. A killed run can leave a <path>.new.* directory: it holds no lock and is
-// harmless; a run removes only its own.
+// epLock takes the lock directory at path with os.Mkdir, which fails when anything exists at path, an empty
+// directory included (the locks of an older mash are empty directories and are live), and then writes the owner file
+// (pid, host, start time) inside, whole (see epWriteOwner). When the owner write fails the directory this call made is
+// removed and the error returned. An existing lock is busy: the attempt repeats every 50 ms for epLockWait, and a
+// lock whose owner is a dead pid on this host (see epLockStale) is reclaimed. The returned function removes the
+// directory this call made. One window remains: a run killed between the Mkdir and the owner write leaves a lock with
+// no owner, which is never reclaimed; the operator removes the directory, which the refusal names.
 func epLock(path string) (unlock func(), err error) {
 	deadline := time.Now().Add(epLockWait)
 	for {
-		tmp := fmt.Sprintf("%s.new.%d.%d", path, os.Getpid(), time.Now().UnixNano())
-		if err := os.Mkdir(tmp, 0o700); err != nil {
-			return nil, err
-		}
-		text, werr := epWriteOwner(tmp)
-		if werr != nil {
-			os.RemoveAll(tmp)
-			return nil, werr
-		}
-		err := os.Rename(tmp, path)
+		err := os.Mkdir(path, 0o700)
 		if err == nil {
+			text, werr := epWriteOwner(path)
+			if werr != nil {
+				os.RemoveAll(path)
+				return nil, werr
+			}
 			return func() { epRelease(path, text) }, nil
 		}
-		os.RemoveAll(tmp)
-		if !errors.Is(err, syscall.ENOTEMPTY) && !errors.Is(err, fs.ErrExist) {
+		if !errors.Is(err, fs.ErrExist) {
 			return nil, err
 		}
 		if stale, _ := epLockStale(path); stale {
@@ -233,11 +222,11 @@ func epLock(path string) (unlock func(), err error) {
 
 // epBusyDetail is the reissue_busy refusal text: who holds the lock when its owner file can be read.
 func epBusyDetail(addr sap.Address, lockPath string) string {
-	who := ""
+	head := fmt.Sprintf("another reissue of %s holds the lock", addr)
 	if o, _, ok := epReadOwner(lockPath); ok {
-		who = fmt.Sprintf(" (pid %d on %s)", o.pid, o.host)
+		head = fmt.Sprintf("another reissue of %s is running (pid %d on %s)", addr, o.pid, o.host)
 	}
-	return fmt.Sprintf("another reissue of %s is running%s; a lock left by a killed run on this host is reclaimed automatically; a lock whose owner is on another host is not; if that run is gone, remove the directory %s", addr, who, lockPath)
+	return head + fmt.Sprintf("; a lock left by a killed run on this host is reclaimed automatically; a lock whose owner is on another host, or that names no owner, is not; if that run is gone, remove the directory %s", lockPath)
 }
 
 // runEndpointReissue is `mashctl endpoint reissue`.
