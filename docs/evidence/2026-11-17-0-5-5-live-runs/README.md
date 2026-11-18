@@ -26,10 +26,10 @@ request also carries). The acceptance tests were run again, and the records are 
 | `record-at001-8fa36b8.md` | `8fa36b8` (#780's head plus the harness patch of this pull request) | pass (37 assertions) |
 | `record-at002-8fa36b8.md` | `8fa36b8` | pass (25 assertions) |
 | `record-at003-8fa36b8.md` | `8fa36b8` | pass (106 assertions; includes the cross-owner case: bob's forged discovery answer and replayed presence answer are refused by the server) |
-| `record-at005-ed12e34.md` | `ed12e34` (#780's head plus the harness patches of this pull request, now including the second-owner case) | pass (92 assertions, 4 not applicable, 0 failed; podman, manual, host label bf2; nothing labelled left) |
+| `record-at005-bc96b27.md` | `bc96b27` (#780's head plus the harness patches of this pull request, including the second-owner case and the owner-derived JWT file names) | pass (92 assertions, 4 not applicable, 0 failed; podman, manual, host label bf2; nothing labelled left) |
 
 AT-005 now has the second-owner case of contract revision 9: an endpoint of a second owner, on one node of the cluster, forges a discovery
 answer and replays a presence answer into alice's in-flight reply subject while alice probes from another node; the servers refuse both
 (`{"seen_requests":1,"violations":2}`), and alice's discovery does not list her offline endpoint `alice/dev/ghost` as online. The harness
-changes after `8fa36b8` touch only AT-005 (`at005.go`, the in-image helper), so AT-001 to AT-003 were not run again on `ed12e34`. The
+changes after `8fa36b8` touch only AT-005 (`at005.go`, the in-image helper), so AT-001 to AT-003 were not run again on `bc96b27`; this pull request now contains #780's change itself, so its tree is that of the record. The
 earlier AT-005 record (`record-at005.md`, on `a191f08`) is kept for the history of the gate.
