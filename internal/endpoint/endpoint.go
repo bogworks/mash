@@ -322,15 +322,18 @@ func SpoolDir(cfg config.Config) (string, error) {
 	return spool.Dir(cfg.StateDir, o, n), nil
 }
 
-// EndpointTLS is the extra connection options an endpoint connection under cfg needs, or the refusal. With require_tls
-// off (the default) it is none and nil. With it on, a plain nats:// or ws:// URL to a host that is not loopback is
-// refused here, before anything is connected, and a tls:// or wss:// URL is made to require TLS (natsauth.RequireEndpointTLS).
-// Every endpoint connection, serve and the CLI commands, goes through OpenClientWith, which calls it first.
+// endpointTLS is the connection options an endpoint connection under cfg needs, the plain-text warning to print when
+// insecure_plaintext lets a plain URL through ("" otherwise), or the refusal (natsauth.RequireTLS, REQ-014).
+func endpointTLS(cfg config.Config) ([]nats.Option, string, error) {
+	return natsauth.RequireTLS(cfg.URL, cfg.InsecurePlaintext)
+}
+
+// EndpointTLS is the extra connection options an endpoint connection under cfg needs, or the refusal: a plain URL is
+// refused here, before anything is connected, unless insecure_plaintext is set. It prints nothing; the connection
+// itself (OpenClientWith, which calls it first) prints the plain-text warning to standard error.
 func EndpointTLS(cfg config.Config) ([]nats.Option, error) {
-	if !cfg.RequireTLS {
-		return nil, nil
-	}
-	return natsauth.RequireEndpointTLS(cfg.URL)
+	opts, _, err := endpointTLS(cfg)
+	return opts, err
 }
 
 // OpenClient connects as cfg.Name and checks the identity, without a lease. It loads the whole directory: serve and
@@ -345,9 +348,12 @@ func OpenClientWith(ctx context.Context, cfg config.Config, opts ClientOptions) 
 	if cfg.Inert() {
 		return nil, errors.New("mash: no endpoint name (set MASH_NAME)")
 	}
-	tlsReq, err := EndpointTLS(cfg)
+	tlsReq, warning, err := endpointTLS(cfg)
 	if err != nil {
 		return nil, err
+	}
+	if warning != "" {
+		fmt.Fprintln(os.Stderr, warning)
 	}
 	ident, key, subj, err := identityOf(cfg)
 	if err != nil {

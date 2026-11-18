@@ -14,7 +14,7 @@ import (
 
 func ctlRun(t *testing.T, e *testenv.Env, args ...string) (string, string, int) {
 	t.Helper()
-	env := map[string]string{"HOME": t.TempDir(), "MASH_URL": e.URL, "MASH_OWNER": e.Owner, "MASH_ADMIN_CREDS": e.AdminCreds, "MASH_INSECURE_LOOPBACK": "1"}
+	env := map[string]string{"HOME": t.TempDir(), "MASH_URL": e.URL, "MASH_OWNER": e.Owner, "MASH_ADMIN_CREDS": e.AdminCreds, "MASH_INSECURE_PLAINTEXT": "1"}
 	var out, errb bytes.Buffer
 	code := runEnv(args, func(k string) string { return env[k] }, &out, &errb)
 	return out.String(), errb.String(), code

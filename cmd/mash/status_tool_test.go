@@ -659,7 +659,7 @@ func TestStatusTLSLineRequireTLS(t *testing.T) {
 		"tls://a:4222,example.com:422": "tls: FAILED",
 	} {
 		src := settingsSource(t, "a", nil)
-		src.cfg.URL, src.cfg.RequireTLS = url, true
+		src.cfg.URL = url
 		for _, cli := range []bool{false, true} {
 			src.cli = cli
 			l := statusLine(t, statusText(src), "tls: ")

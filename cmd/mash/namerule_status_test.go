@@ -68,7 +68,7 @@ func TestAdminProvisionAppliesTheNameRule(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := config.Config{InsecureLoopback: true, URL: w.e.URL, Owner: w.e.Owner, AdminCreds: w.e.AdminCreds, NameRule: r, NameRulePath: p}
+	cfg := config.Config{InsecurePlaintext: true, URL: w.e.URL, Owner: w.e.Owner, AdminCreds: w.e.AdminCreds, NameRule: r, NameRulePath: p}
 	run := func(name string) (string, int) {
 		_, u := w.e.Mint(t, tAddr(name))
 		var out, errb bytes.Buffer

@@ -310,7 +310,7 @@ func TestServeLeaseConflict(t *testing.T) {
 func TestAdminCLI(t *testing.T) {
 	e := testenv.Start(t)
 	c, u := e.Mint(t, tAddr("z"))
-	env := map[string]string{"HOME": t.TempDir(), "MASH_URL": e.URL, "MASH_OWNER": e.Owner, "MASH_ADMIN_CREDS": e.AdminCreds, "MASH_INSECURE_LOOPBACK": "1"}
+	env := map[string]string{"HOME": t.TempDir(), "MASH_URL": e.URL, "MASH_OWNER": e.Owner, "MASH_ADMIN_CREDS": e.AdminCreds, "MASH_INSECURE_PLAINTEXT": "1"}
 	runAdmin := func(args ...string) (string, int) {
 		var out bytes.Buffer
 		code := run(append([]string{"admin"}, args...), envFrom(env), strings.NewReader(""), &out, &out)

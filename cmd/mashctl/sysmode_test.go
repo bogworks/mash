@@ -34,7 +34,7 @@ func TestSysCredsModeIsChecked(t *testing.T) {
 	// connectSys is what every verb that revokes or checks keys uses: it reports the credentials error, with nothing
 	// of their content, before it connects.
 	drift := func(flagVal string) (string, int) {
-		cfg := config.Config{URL: e.srv.ClientURL(), InsecureLoopback: true}
+		cfg := config.Config{URL: e.srv.ClientURL(), InsecurePlaintext: true}
 		nc, err := connectSys(cfg, flagVal, func(k string) string { return e.env[k] })
 		if err != nil {
 			return err.Error(), 1

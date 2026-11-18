@@ -323,12 +323,12 @@ func retry(d time.Duration, every time.Duration, fn func() (Result, bool)) Resul
 	}
 }
 
-// InitBuckets points M1 at the cluster (config.json: every server's URL and tls_ca; no insecure_loopback) and runs
+// InitBuckets points M1 at the cluster (config.json: every server's URL and tls_ca) and runs
 // `mashctl init` there, which creates the directory and lease buckets over the cluster. JetStream may need a few
 // seconds to elect its meta group, so the command is retried.
 func (s *At5) InitBuckets() bool {
 	m1 := s.M(1)
-	err := s.patchConfig(m1, map[string]any{"url": s.urlList(), "tls_ca": s.TLS[0].CA}, "insecure_loopback")
+	err := s.patchConfig(m1, map[string]any{"url": s.urlList(), "tls_ca": s.TLS[0].CA})
 	if !s.check("M1: config.json names all three servers and tls_ca", err == nil, errText(err)) {
 		return false
 	}
@@ -390,7 +390,7 @@ func (s *At5) AdoptM2() bool {
 	if !ok {
 		return false
 	}
-	m2cfg := s.patchConfig(m2, map[string]any{"url": s.urlList(), "tls_ca": s.TLS[1].CA}, "insecure_loopback")
+	m2cfg := s.patchConfig(m2, map[string]any{"url": s.urlList(), "tls_ca": s.TLS[1].CA})
 	return s.check("M2: config.json names all three servers and tls_ca", m2cfg == nil, errText(m2cfg))
 }
 

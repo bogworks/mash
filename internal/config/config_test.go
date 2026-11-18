@@ -480,43 +480,6 @@ func TestTLSCertAndKeyMustBeSetTogether(t *testing.T) {
 	}
 }
 
-func TestPlainTextWarning(t *testing.T) {
-	for url, warn := range map[string]bool{
-		"nats://10.0.0.5":                       true,
-		"nats://example.com:4222":               true,
-		"ws://example.com":                      true,
-		"nats://user:pw@10.0.0.5:4222":          true,
-		"nats://localhost":                      false,
-		"nats://127.0.0.1:4222":                 false,
-		"nats://127.1.2.3":                      false,
-		"nats://[::1]:4222":                     false,
-		"nats://LOCALHOST:4222":                 false,
-		"tls://example.com:4222":                false,
-		"wss://example.com":                     false,
-		"":                                      false,
-		"tls://a:4222,nats://10.0.0.5:4222":     true,
-		"nats://127.0.0.1:4222, nats://b:4222":  true,
-		"nats://127.0.0.1:4222,nats://[::1]:42": false,
-		// An entry with no scheme is nats://: it was silently skipped.
-		"10.0.0.5:4222":                 true,
-		"example.com":                   true,
-		"tls://a:4222,example.com:4222": true,
-		"127.0.0.1:4222":                false,
-		"localhost":                     false,
-		"u:pw@example.com:4222":         true,
-		// Only tls and wss are TLS: the client dials every other scheme as plain TCP.
-		"foo://remote:4222":  true,
-		"FOO://remote:4222":  true,
-		"foo://127.0.0.1":    false,
-		"TLS://remote:4222":  false,
-		"tls://a,foo://b:42": true,
-	} {
-		if got := PlainTextWarning(url) != ""; got != warn {
-			t.Errorf("PlainTextWarning(%q) warns = %v, want %v", url, got, warn)
-		}
-	}
-}
-
 func writeIn(t *testing.T, dir, body string) {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -705,7 +668,7 @@ func TestMashConfigDirHasNoFallback(t *testing.T) {
 	}
 }
 
-func TestLoadInsecureLoopback(t *testing.T) {
+func TestLoadInsecurePlaintext(t *testing.T) {
 	load := func(file string, env map[string]string) (Config, error) {
 		home := t.TempDir()
 		writeFile(t, home, file)
@@ -713,35 +676,7 @@ func TestLoadInsecureLoopback(t *testing.T) {
 		env["MASH_GROUP"] = "g"
 		return load(envOf(env), home)
 	}
-	base := `"url":"nats://127.0.0.1:4222","owner":"o"`
-	for _, tc := range []struct {
-		name, file string
-		env        map[string]string
-		want       bool
-	}{
-		{"default off", `{` + base + `}`, map[string]string{}, false},
-		{"file key", `{` + base + `,"insecure_loopback":true}`, map[string]string{}, true},
-		{"env 1", `{` + base + `}`, map[string]string{"MASH_INSECURE_LOOPBACK": "1"}, true},
-		{"env 0 beats the file", `{` + base + `,"insecure_loopback":true}`, map[string]string{"MASH_INSECURE_LOOPBACK": "0"}, false},
-	} {
-		if c, err := load(tc.file, tc.env); err != nil || c.InsecureLoopback != tc.want {
-			t.Fatalf("%s: %v, %v; want %v", tc.name, c.InsecureLoopback, err, tc.want)
-		}
-	}
-	if _, err := load(`{`+base+`}`, map[string]string{"MASH_INSECURE_LOOPBACK": "yes"}); err == nil || !strings.Contains(err.Error(), "MASH_INSECURE_LOOPBACK") {
-		t.Fatalf("a bad value: %v", err)
-	}
-}
-
-func TestLoadRequireTLS(t *testing.T) {
-	load := func(file string, env map[string]string) (Config, error) {
-		home := t.TempDir()
-		writeFile(t, home, file)
-		env["MASH_NAME"] = "a"
-		env["MASH_GROUP"] = "g"
-		return load(envOf(env), home)
-	}
-	base := `"url":"nats://127.0.0.1:4222","owner":"o"`
+	base := `"url":"tls://127.0.0.1:4222","owner":"o"`
 	for _, tc := range []struct {
 		name, file string
 		env        map[string]string
@@ -749,23 +684,35 @@ func TestLoadRequireTLS(t *testing.T) {
 		source     string
 	}{
 		{"default off", `{` + base + `}`, map[string]string{}, false, "default"},
-		{"file key", `{` + base + `,"require_tls":true}`, map[string]string{}, true, "config.json"},
-		{"file false", `{` + base + `,"require_tls":false}`, map[string]string{}, false, "config.json"},
-		{"env 1", `{` + base + `}`, map[string]string{"MASH_REQUIRE_TLS": "1"}, true, "MASH_REQUIRE_TLS"},
-		{"env true", `{` + base + `}`, map[string]string{"MASH_REQUIRE_TLS": "true"}, true, "MASH_REQUIRE_TLS"},
-		{"env 0 beats the file", `{` + base + `,"require_tls":true}`, map[string]string{"MASH_REQUIRE_TLS": "0"}, false, "MASH_REQUIRE_TLS"},
-		{"env false beats the file", `{` + base + `,"require_tls":true}`, map[string]string{"MASH_REQUIRE_TLS": "false"}, false, "MASH_REQUIRE_TLS"},
-		{"env 1 beats the file", `{` + base + `,"require_tls":false}`, map[string]string{"MASH_REQUIRE_TLS": "1"}, true, "MASH_REQUIRE_TLS"},
+		{"file key", `{` + base + `,"insecure_plaintext":true}`, map[string]string{}, true, "config.json"},
+		{"file false", `{` + base + `,"insecure_plaintext":false}`, map[string]string{}, false, "config.json"},
+		{"env 1", `{` + base + `}`, map[string]string{"MASH_INSECURE_PLAINTEXT": "1"}, true, "MASH_INSECURE_PLAINTEXT"},
+		{"env true", `{` + base + `}`, map[string]string{"MASH_INSECURE_PLAINTEXT": "true"}, true, "MASH_INSECURE_PLAINTEXT"},
+		{"env 0 beats the file", `{` + base + `,"insecure_plaintext":true}`, map[string]string{"MASH_INSECURE_PLAINTEXT": "0"}, false, "MASH_INSECURE_PLAINTEXT"},
+		{"env false beats the file", `{` + base + `,"insecure_plaintext":true}`, map[string]string{"MASH_INSECURE_PLAINTEXT": "false"}, false, "MASH_INSECURE_PLAINTEXT"},
+		{"env 1 beats the file", `{` + base + `,"insecure_plaintext":false}`, map[string]string{"MASH_INSECURE_PLAINTEXT": "1"}, true, "MASH_INSECURE_PLAINTEXT"},
 	} {
 		c, err := load(tc.file, tc.env)
-		if err != nil || c.RequireTLS != tc.want || c.Source["require_tls"] != tc.source {
-			t.Fatalf("%s: %v, %v, source %q; want %v, %q", tc.name, c.RequireTLS, err, c.Source["require_tls"], tc.want, tc.source)
+		if err != nil || c.InsecurePlaintext != tc.want || c.Source["insecure_plaintext"] != tc.source {
+			t.Fatalf("%s: %v, %v, source %q; want %v, %q", tc.name, c.InsecurePlaintext, err, c.Source["insecure_plaintext"], tc.want, tc.source)
 		}
 	}
 	for _, v := range []string{"yes", "on", "TRUE", "2"} {
-		if _, err := load(`{`+base+`}`, map[string]string{"MASH_REQUIRE_TLS": v}); err == nil || !strings.Contains(err.Error(), "MASH_REQUIRE_TLS") {
+		if _, err := load(`{`+base+`}`, map[string]string{"MASH_INSECURE_PLAINTEXT": v}); err == nil || !strings.Contains(err.Error(), "MASH_INSECURE_PLAINTEXT") {
 			t.Fatalf("a bad value %q: %v", v, err)
 		}
+	}
+}
+
+func TestOldTLSKeysAreUnknownKeys(t *testing.T) {
+	home := t.TempDir()
+	writeFile(t, home, `{"url":"tls://127.0.0.1:4222","owner":"o","insecure_loopback":true,"require_tls":true}`)
+	c, err := load(envOf(map[string]string{"MASH_NAME": "a", "MASH_GROUP": "g", "MASH_INSECURE_LOOPBACK": "1", "MASH_REQUIRE_TLS": "1"}), home)
+	if err != nil || c.InsecurePlaintext {
+		t.Fatalf("old names must be ignored: %v, %v", c.InsecurePlaintext, err)
+	}
+	if _, ok := c.Source["insecure_loopback"]; ok {
+		t.Fatal("old key has a source")
 	}
 }
 
@@ -777,7 +724,7 @@ func TestSourcesRecordWhereEachSettingCameFrom(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]string{"url": "MASH_URL", "owner": "config.json", "admin_creds": "config.json", "tls_ca": "config.json",
-		"tls_cert": "MASH_TLS_CERT", "tls_key": "MASH_TLS_KEY", "insecure_loopback": "default"}
+		"tls_cert": "MASH_TLS_CERT", "tls_key": "MASH_TLS_KEY", "insecure_plaintext": "default"}
 	for k, v := range want {
 		if c.Source[k] != v {
 			t.Errorf("Source[%s] = %q, want %q", k, c.Source[k], v)
@@ -800,14 +747,14 @@ func TestSourcesRecordWhereEachSettingCameFrom(t *testing.T) {
 
 func TestSourcesWithoutFileAreEnvOrUnset(t *testing.T) {
 	home := t.TempDir()
-	c, err := load(envOf(map[string]string{"MASH_URL": "tls://e:1", "MASH_OWNER": "o", "MASH_INSECURE_LOOPBACK": "1"}), home)
+	c, err := load(envOf(map[string]string{"MASH_URL": "tls://e:1", "MASH_OWNER": "o", "MASH_INSECURE_PLAINTEXT": "1"}), home)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if c.File != "" || len(c.FileValues) != 0 {
 		t.Errorf("File %q FileValues %v", c.File, c.FileValues)
 	}
-	for k, v := range map[string]string{"url": "MASH_URL", "owner": "MASH_OWNER", "admin_creds": "unset", "insecure_loopback": "MASH_INSECURE_LOOPBACK"} {
+	for k, v := range map[string]string{"url": "MASH_URL", "owner": "MASH_OWNER", "admin_creds": "unset", "insecure_plaintext": "MASH_INSECURE_PLAINTEXT"} {
 		if c.Source[k] != v {
 			t.Errorf("Source[%s] = %q, want %q", k, c.Source[k], v)
 		}
@@ -816,7 +763,7 @@ func TestSourcesWithoutFileAreEnvOrUnset(t *testing.T) {
 
 func TestSourcesAgreeingEnvStillNamesEnv(t *testing.T) {
 	home := t.TempDir()
-	writeFile(t, home, `{"url":"tls://same:4222","insecure_loopback":false}`)
+	writeFile(t, home, `{"url":"tls://same:4222","insecure_plaintext":false}`)
 	c, err := load(envOf(map[string]string{"MASH_URL": "tls://same:4222"}), home)
 	if err != nil {
 		t.Fatal(err)
@@ -824,7 +771,7 @@ func TestSourcesAgreeingEnvStillNamesEnv(t *testing.T) {
 	if c.Source["url"] != "MASH_URL" || c.FileValues["url"] != c.URL {
 		t.Errorf("%v %v", c.Source, c.FileValues)
 	}
-	if c.FileValues["insecure_loopback"] != "false" || c.Source["insecure_loopback"] != "config.json" {
+	if c.FileValues["insecure_plaintext"] != "false" || c.Source["insecure_plaintext"] != "config.json" {
 		t.Errorf("%v %v", c.Source, c.FileValues)
 	}
 }
