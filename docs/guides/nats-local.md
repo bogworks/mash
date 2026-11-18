@@ -57,14 +57,16 @@ You also need `nats-server` on your `PATH` (a current 2.x release with JetStream
 
 ### 1. Use a clean environment
 
-If `MASH_*` variables are set in your shell, they point at some other server and override the files written below. Run every command in this guide with a clean environment, and a config directory of your own:
+If `MASH_*` variables are set in your shell, they point at some other server, credentials or key store and override the files written below. Run every command in this guide in a shell where the only `MASH_*` variables are the two you set here: a config directory and a state directory of your own. The state directory holds the sessions' mail spool; a dedicated one means removing this trial later touches nothing else.
 
 ```sh
+for v in $(env | grep -o '^MASH_[A-Z_]*'); do unset "$v"; done     # clears every MASH_* override in this shell
 export MASH_CONFIG_DIR=$HOME/mash-local-config     # a directory that does not exist yet, or is empty; mashctl makes it
-env | grep '^MASH_'                                  # nothing should print except MASH_CONFIG_DIR
+export MASH_STATE_DIR=$HOME/mash-local-state       # the spool of any session run as these endpoints
+env | grep '^MASH_'                                  # only those two should print
 ```
 
-If anything else prints, run the commands as `env -u MASH_URL -u MASH_OWNER -u MASH_ADMIN_CREDS -u MASH_TLS_CA mashctl ...` or from a shell outside the session. See [Which server does mashctl change?](../operations.md#which-server-does-mashctl-change).
+Or run the commands from a new shell that has no `MASH_*` variables. See [Which server does mashctl change?](../operations.md#which-server-does-mashctl-change).
 
 ### 2. Make and start the server
 
@@ -357,7 +359,7 @@ To remove it, after the server is stopped, delete what was made, by path:
 - the key store, `<config dir>/keys` (or `$MASH_KEYS_DIR`);
 - `<config dir>/config.json`;
 - each endpoint's `<config dir>/<owner>.<group>.<instance>.creds` (and any `.retired-<time>` copies);
-- the state directory, if sessions ran as these endpoints (their spool is there): `$MASH_STATE_DIR`, else `$XDG_STATE_HOME/mash` when `XDG_STATE_HOME` is an absolute path, else `~/.local/state/mash`;
+- the dedicated state directory you set in step 1, `$MASH_STATE_DIR`, if sessions ran as these endpoints (their spool is there). Do not delete a state directory that you did not set for this trial: with no `MASH_STATE_DIR` it is `$XDG_STATE_HOME/mash` (an absolute path) or `~/.local/state/mash`, and it holds the mail of every other mash endpoint on this machine;
 - any seed files you copied for `adopt`, and `design.seed`-style files if you used the three-command endpoint form.
 
 If the config directory was made for this trial and holds nothing else, removing it as a whole is the same thing. Delete the key store only when you will not use this server again: without `operator.nk` and `account.nk` nobody can revoke or mint credentials for the account.
