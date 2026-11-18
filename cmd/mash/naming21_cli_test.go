@@ -29,7 +29,7 @@ func naming21Provision(t *testing.T, e *testenv.Env, adm *admin.Admin, owner, gr
 }
 
 // shownIdentities returns every identity printed in out in the canonical dotted form owner.group.instance. Ruling
-// (coordinator, 2026-11-10): the flat key (owner_group_instance) is a storage encoding (ADR 0074), not a display form; people
+// (a ruling of 2026-11-10): the flat key (owner_group_instance) is a storage encoding (ADR 0074), not a display form; people
 // see the canonical form, tokens visibly separate, so the flat key is deliberately NOT recognised here.
 func shownIdentities(out string) []sap.Address {
 	var ids []sap.Address
