@@ -1,5 +1,30 @@
 # 0.5.5 acceptance runs: AT-001 to AT-005
 
+## The runs on the code commit (final)
+
+The code commit is main at `88e2a86b74c4ad22986a69e6479faa013bfa3300` (ruling 16: after it only documents change). AT-001 to AT-003 and
+AT-005 were run on exactly that commit (every record names it as its revision, clean checkout), on 2026-11-18, by the core worker, with
+the real `mash` and `mashctl` built from it. AT-001 to AT-003 ran on one local server over TLS (`mashctl init --local`'s own CA, no
+override: REQ-014); AT-005 ran by hand (`--hosts podman --run-by manual --host-label bf2`) on rootless podman 4.9.3, host Linux
+6.17.0-42-generic amd64, nats-server v2.15.1 built from the go.mod pin. The `nats-server` and the binaries are built from this checkout,
+not taken from PATH.
+
+| Record | Run id | Result |
+|---|---|---|
+| `record-at001-88e2a86.md` | 20261118T155357Z-f58f1a20 | pass (61 assertions; the sessions run through the plugin launcher and hooks; REQ-014: no override, `tls: OK`) |
+| `record-at002-88e2a86.md` | 20261118T155406Z-af46ea63 | pass (25) |
+| `record-at003-88e2a86.md` | 20261118T155409Z-ad1d1697 | pass (114; includes REQ-014's plain-URL refusal and override cases) |
+| `record-at004-88e2a86.md` | (CLI team, run 2) | pass (written by the CLI team on `88e2a86`: 19 selected top-level tests and 96 subtests in `cmd/mashctl`, 11 in `cmd/mash`, 14 in `internal/keycred`, 2 in `internal/enroll`; 0 failed, 0 skipped; `go vet ./...` and the whole suite, 46 packages, pass; adds the flock reissue real-kill test and `TestPlainURLRefusalExitsTwoEverywhere`) |
+| `record-at005-88e2a86.md` | 20261118T155239Z-075fc831 | pass (93 assertions, 4 not applicable, 0 failed); cleanup verified |
+| `sdk-gate-output-88e2a86.txt` | | the SDK compatibility gate on a scratch merge of `88e2a86` and #667's head `3d877bc`, with output |
+| `completion-checks.md`, `old-form-search.md`, `forbidden-word-test-output.txt`, `scrubcheck-output.txt` | | the forbidden-word test, command-tree test, scrub check and the old-form search, on `88e2a86` |
+| `requirements-to-assertions.md` | | every REQ, INV, NFR and BND mapped to these records and assertion names |
+
+The earlier records below (`a191f08`, `8fa36b8`, `bc96b27`) are kept as the history of the gate; they are not the evidence for the
+release.
+
+## History: the runs before the final gate
+
 All five were run on the release candidate, main at `a191f08b7cdb7bbdcaf9c29144c81b8682c37e05` (every record names it as its revision, clean
 checkout), on 2026-11-18. The real `mash` and `mashctl` binaries were built from that commit. One run record per scenario (the contract's
 section 8: run id, revision, environment, scenario, expected, observed).

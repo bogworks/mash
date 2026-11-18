@@ -1,0 +1,253 @@
+# Run record at003: 20261118T155409Z-ad1d1697
+
+- Run id: 20261118T155409Z-ad1d1697
+- Revision: 88e2a86b74c4ad22986a69e6479faa013bfa3300 (clean)
+
+## Environment
+
+- linux/amd64
+- go: go1.27.4
+- nats-server: v2.15.1 (built from the go.mod pin v2.15.1)
+- scratch (relative to the run directory): at003/home-a, at003/home-e, at003/home-n
+
+## Scenario
+
+AT-003, every refusal can fail: one local server; endpoints alice/dev/design, alice/dev/review, a deleted alice/dev/gone and bob/dev/build. Each refusal of the contract's list that has a CLI form is run between two snapshots (mashctl list, audit --json, issued list --json, and a digest of each home's files): exit code, refusal code in --json, a message that names what to type, nothing written. A plain nats:// URL to loopback is refused by mash (session start and a command) and by mashctl, exit 2, and no connection is made; with the override the connection is made and the warning is printed (REQ-014). Then bob's credentials publish to alice's mail subject and request her prompt subject.
+
+## Expected
+
+- three scratch homes are made
+- mashctl init --local --owner alice --start brings up one local server
+- mash key create makes design's key on its own machine
+- design seed file is mode 0600
+- the public key file is carried to the mashctl host
+- mashctl endpoint create alice/dev/design --public-key signs for the endpoint's own key
+- design JWT file is mode 0600
+- mash credential create assembles design's creds file on its machine
+- mash key create makes review's key on its own machine
+- review seed file is mode 0600
+- the public key file is carried to the mashctl host
+- mashctl endpoint create alice/dev/review --public-key signs for the endpoint's own key
+- review JWT file is mode 0600
+- mash credential create assembles review's creds file on its machine
+- mash key create makes gone's key on its own machine
+- gone seed file is mode 0600
+- the public key file is carried to the mashctl host
+- mashctl endpoint create alice/dev/gone --public-key signs for the endpoint's own key
+- gone JWT file is mode 0600
+- setup: mashctl endpoint delete alice/dev/gone burns the address
+- mash key create makes build's key on its own machine
+- build seed file is mode 0600
+- the public key file is carried to the mashctl host
+- mashctl endpoint create bob/dev/build --public-key signs for the endpoint's own key
+- build JWT file is mode 0600
+- mash credential create assembles build's creds file on its machine
+- setup: a key that has never been issued
+- no group: exit code 2
+- no group: --json refusal code group_missing
+- no group: the message names what to type
+- no group: nothing was written (directory, issue record, streams, leases, files)
+- two-token form: exit code 2
+- two-token form: --json refusal code (any)
+- two-token form: the message names what to type
+- two-token form: nothing was written (directory, issue record, streams, leases, files)
+- neither --public-key nor the same-host flag: exit code 2
+- neither --public-key nor the same-host flag: --json refusal code key_missing
+- neither --public-key nor the same-host flag: the message names what to type
+- neither --public-key nor the same-host flag: nothing was written (directory, issue record, streams, leases, files)
+- a token with a capital: exit code 1
+- a token with a capital: --json refusal code name_invalid
+- a token with a capital: the message names what to type
+- a token with a capital: nothing was written (directory, issue record, streams, leases, files)
+- a token with a double dash: exit code 1
+- a token with a double dash: --json refusal code name_invalid
+- a token with a double dash: the message names what to type
+- a token with a double dash: nothing was written (directory, issue record, streams, leases, files)
+- a token of 33 characters: exit code 1
+- a token of 33 characters: --json refusal code name_invalid
+- a token of 33 characters: the message names what to type
+- a token of 33 characters: nothing was written (directory, issue record, streams, leases, files)
+- a token the name rule file refuses: exit code 1
+- a token the name rule file refuses: --json refusal code name_rule
+- a token the name rule file refuses: the message names what to type
+- a token the name rule file refuses: nothing was written (directory, issue record, streams, leases, files)
+- an address that exists: exit code 1
+- an address that exists: --json refusal code address_taken
+- an address that exists: the message names what to type
+- an address that exists: nothing was written (directory, issue record, streams, leases, files)
+- a deleted, burned address: exit code 1
+- a deleted, burned address: --json refusal code key_retired
+- a deleted, burned address: the message names what to type
+- a deleted, burned address: nothing was written (directory, issue record, streams, leases, files)
+- a malformed public key file: exit code 1
+- a malformed public key file: --json refusal code public_key_invalid
+- a malformed public key file: the message names what to type
+- a malformed public key file: nothing was written (directory, issue record, streams, leases, files)
+- a public key already issued at another address: exit code 1
+- a public key already issued at another address: --json refusal code public_key_issued
+- a public key already issued at another address: the message names what to type
+- a public key already issued at another address: nothing was written (directory, issue record, streams, leases, files)
+- a JWT output file that exists: exit code 1
+- a JWT output file that exists: --json refusal code file_exists
+- a JWT output file that exists: the message names what to type
+- a JWT output file that exists: nothing was written (directory, issue record, streams, leases, files)
+- no account key on the mashctl host: exit code 1
+- no account key on the mashctl host: --json refusal code no_account_key
+- no account key on the mashctl host: the message names what to type
+- no account key on the mashctl host: nothing was written (directory, issue record, streams, leases, files)
+- mash credential create with a seed and a JWT for different keys: exit code 1
+- mash credential create with a seed and a JWT for different keys: the message names what to type
+- mash credential create with a seed and a JWT for different keys: nothing was written (directory, issue record, streams, leases, files)
+- a session with no MASH_GROUP: exit code 2
+- a session with no MASH_GROUP: standard error names MASH_GROUP
+- a session with no MASH_GROUP: no directory record, stream, consumer, lease or service was made for it
+- mashctl add: exit code 2
+- mashctl add: the message names what to type
+- mashctl add: nothing was written (directory, issue record, streams, leases, files)
+- mashctl reissue: exit code 2
+- mashctl reissue: the message names what to type
+- mashctl reissue: nothing was written (directory, issue record, streams, leases, files)
+- mashctl retire: exit code 2
+- mashctl retire: the message names what to type
+- mashctl retire: nothing was written (directory, issue record, streams, leases, files)
+- a counting listener is made on a loopback port
+- REQ-014: mash serve (session start) refuses a plain nats:// URL to loopback with no override, exit 2, naming the override, and no connection is made
+- REQ-014: mash inbox (a command) refuses a plain nats:// URL to loopback with no override, exit 2, naming the override, and no connection is made
+- REQ-014: mashctl endpoint list refuses a plain nats:// URL to loopback with no override, exit 2, naming the override, and no connection is made
+- REQ-014: mash inbox (a command) with insecure_plaintext set connects and prints the plain-text warning on standard error
+- REQ-014: mashctl endpoint list with insecure_plaintext set connects and prints the plain-text warning on standard error
+- REQ-014: mash status with the override says tls: WARN
+- REQ-014: mash status without it says tls: FAILED
+- bob connects with his own credentials
+- INV-002: the server refuses bob's publish to agents.mail.alice.dev.design with a permissions violation
+- INV-002: the server refuses bob's request to agents.prompt.alice.dev.design with a permissions violation
+- REQ-005: bob subscribes to $SRV.> and sees discovery requests
+- REQ-005: alice's mash who ran while bob answered
+- REQ-005: the server refuses bob's forged discovery answer and his replayed presence answer with permissions violations
+- REQ-005: alice's who does not list her offline endpoints as online
+- alice's inbox is read with her own credentials
+- nothing arrived in alice's inbox from bob
+- INV-001: no command output holds a seed or a JWT
+- INV-001: no command output holds a key or JWT this scenario made
+- INV-001: every command's output was captured completely (no capture or read error)
+
+## Observed
+
+- pass: three scratch homes are made
+- pass: mashctl init --local --owner alice --start brings up one local server (exit 0)
+- pass: mash key create makes design's key on its own machine (exit 0)
+- pass: design seed file is mode 0600 (mode 0600)
+- pass: the public key file is carried to the mashctl host
+- pass: mashctl endpoint create alice/dev/design --public-key signs for the endpoint's own key (exit 0)
+- pass: design JWT file is mode 0600 (mode 0600)
+- pass: mash credential create assembles design's creds file on its machine (exit 0)
+- pass: mash key create makes review's key on its own machine (exit 0)
+- pass: review seed file is mode 0600 (mode 0600)
+- pass: the public key file is carried to the mashctl host
+- pass: mashctl endpoint create alice/dev/review --public-key signs for the endpoint's own key (exit 0)
+- pass: review JWT file is mode 0600 (mode 0600)
+- pass: mash credential create assembles review's creds file on its machine (exit 0)
+- pass: mash key create makes gone's key on its own machine (exit 0)
+- pass: gone seed file is mode 0600 (mode 0600)
+- pass: the public key file is carried to the mashctl host
+- pass: mashctl endpoint create alice/dev/gone --public-key signs for the endpoint's own key (exit 0)
+- pass: gone JWT file is mode 0600 (mode 0600)
+- pass: setup: mashctl endpoint delete alice/dev/gone burns the address (exit 0)
+- pass: mash key create makes build's key on its own machine (exit 0)
+- pass: build seed file is mode 0600 (mode 0600)
+- pass: the public key file is carried to the mashctl host
+- pass: mashctl endpoint create bob/dev/build --public-key signs for the endpoint's own key (exit 0)
+- pass: build JWT file is mode 0600 (mode 0600)
+- pass: mash credential create assembles build's creds file on its machine (exit 0)
+- pass: setup: a key that has never been issued (exit 0)
+- pass: no group: exit code 2 (exit 2)
+- pass: no group: --json refusal code group_missing (refusal group_missing, exit 2)
+- pass: no group: the message names what to type (missing: )
+- pass: no group: nothing was written (directory, issue record, streams, leases, files) (changed: none; failed reads: none)
+- pass: two-token form: exit code 2 (exit 2)
+- pass: two-token form: --json refusal code (any) (refusal address_ambiguous, exit 2)
+- pass: two-token form: the message names what to type (missing: )
+- pass: two-token form: nothing was written (directory, issue record, streams, leases, files) (changed: none; failed reads: none)
+- pass: neither --public-key nor the same-host flag: exit code 2 (exit 2)
+- pass: neither --public-key nor the same-host flag: --json refusal code key_missing (refusal key_missing, exit 2)
+- pass: neither --public-key nor the same-host flag: the message names what to type (missing: )
+- pass: neither --public-key nor the same-host flag: nothing was written (directory, issue record, streams, leases, files) (changed: none; failed reads: none)
+- pass: a token with a capital: exit code 1 (exit 1)
+- pass: a token with a capital: --json refusal code name_invalid (refusal name_invalid, exit 1)
+- pass: a token with a capital: the message names what to type (missing: )
+- pass: a token with a capital: nothing was written (directory, issue record, streams, leases, files) (changed: none; failed reads: none)
+- pass: a token with a double dash: exit code 1 (exit 1)
+- pass: a token with a double dash: --json refusal code name_invalid (refusal name_invalid, exit 1)
+- pass: a token with a double dash: the message names what to type (missing: )
+- pass: a token with a double dash: nothing was written (directory, issue record, streams, leases, files) (changed: none; failed reads: none)
+- pass: a token of 33 characters: exit code 1 (exit 1)
+- pass: a token of 33 characters: --json refusal code name_invalid (refusal name_invalid, exit 1)
+- pass: a token of 33 characters: the message names what to type (missing: )
+- pass: a token of 33 characters: nothing was written (directory, issue record, streams, leases, files) (changed: none; failed reads: none)
+- pass: a token the name rule file refuses: exit code 1 (exit 1)
+- pass: a token the name rule file refuses: --json refusal code name_rule (refusal name_rule, exit 1)
+- pass: a token the name rule file refuses: the message names what to type (missing: )
+- pass: a token the name rule file refuses: nothing was written (directory, issue record, streams, leases, files) (changed: none; failed reads: none)
+- pass: an address that exists: exit code 1 (exit 1)
+- pass: an address that exists: --json refusal code address_taken (refusal address_taken, exit 1)
+- pass: an address that exists: the message names what to type (missing: )
+- pass: an address that exists: nothing was written (directory, issue record, streams, leases, files) (changed: none; failed reads: none)
+- pass: a deleted, burned address: exit code 1 (exit 1)
+- pass: a deleted, burned address: --json refusal code key_retired (refusal key_retired, exit 1)
+- pass: a deleted, burned address: the message names what to type (missing: )
+- pass: a deleted, burned address: nothing was written (directory, issue record, streams, leases, files) (changed: none; failed reads: none)
+- pass: a malformed public key file: exit code 1 (exit 1)
+- pass: a malformed public key file: --json refusal code public_key_invalid (refusal public_key_invalid, exit 1)
+- pass: a malformed public key file: the message names what to type (missing: )
+- pass: a malformed public key file: nothing was written (directory, issue record, streams, leases, files) (changed: none; failed reads: none)
+- pass: a public key already issued at another address: exit code 1 (exit 1)
+- pass: a public key already issued at another address: --json refusal code public_key_issued (refusal public_key_issued, exit 1)
+- pass: a public key already issued at another address: the message names what to type (missing: )
+- pass: a public key already issued at another address: nothing was written (directory, issue record, streams, leases, files) (changed: none; failed reads: none)
+- pass: a JWT output file that exists: exit code 1 (exit 1)
+- pass: a JWT output file that exists: --json refusal code file_exists (refusal file_exists, exit 1)
+- pass: a JWT output file that exists: the message names what to type (missing: )
+- pass: a JWT output file that exists: nothing was written (directory, issue record, streams, leases, files) (changed: none; failed reads: none)
+- pass: no account key on the mashctl host: exit code 1 (exit 1)
+- pass: no account key on the mashctl host: --json refusal code no_account_key (refusal no_account_key, exit 1)
+- pass: no account key on the mashctl host: the message names what to type (missing: )
+- pass: no account key on the mashctl host: nothing was written (directory, issue record, streams, leases, files) (changed: none; failed reads: none)
+- pass: mash credential create with a seed and a JWT for different keys: exit code 1 (exit 1)
+- pass: mash credential create with a seed and a JWT for different keys: the message names what to type (missing: )
+- pass: mash credential create with a seed and a JWT for different keys: nothing was written (directory, issue record, streams, leases, files) (changed: none; failed reads: none)
+- pass: a session with no MASH_GROUP: exit code 2 (exit 2)
+- pass: a session with no MASH_GROUP: standard error names MASH_GROUP
+- pass: a session with no MASH_GROUP: no directory record, stream, consumer, lease or service was made for it (changed: none)
+- pass: mashctl add: exit code 2 (exit 2)
+- pass: mashctl add: the message names what to type (missing: )
+- pass: mashctl add: nothing was written (directory, issue record, streams, leases, files) (changed: none; failed reads: none)
+- pass: mashctl reissue: exit code 2 (exit 2)
+- pass: mashctl reissue: the message names what to type (missing: )
+- pass: mashctl reissue: nothing was written (directory, issue record, streams, leases, files) (changed: none; failed reads: none)
+- pass: mashctl retire: exit code 2 (exit 2)
+- pass: mashctl retire: the message names what to type (missing: )
+- pass: mashctl retire: nothing was written (directory, issue record, streams, leases, files) (changed: none; failed reads: none)
+- pass: a counting listener is made on a loopback port (<nil>)
+- pass: REQ-014: mash serve (session start) refuses a plain nats:// URL to loopback with no override, exit 2, naming the override, and no connection is made (exit 2 (want 2); message lacks: none; 0 connections reached the server; exit 2)
+- pass: REQ-014: mash inbox (a command) refuses a plain nats:// URL to loopback with no override, exit 2, naming the override, and no connection is made (exit 2 (want 2); message lacks: none; 0 connections reached the server; exit 2)
+- pass: REQ-014: mashctl endpoint list refuses a plain nats:// URL to loopback with no override, exit 2, naming the override, and no connection is made (exit 2 (want 2); message lacks: none; 0 connections reached the server; exit 2)
+- pass: REQ-014: mash inbox (a command) with insecure_plaintext set connects and prints the plain-text warning on standard error (1 connections reached the server; warning on stderr true, on stdout false; exit 1)
+- pass: REQ-014: mashctl endpoint list with insecure_plaintext set connects and prints the plain-text warning on standard error (1 connections reached the server; warning on stderr true, on stdout false; exit 6)
+- pass: REQ-014: mash status with the override says tls: WARN (tls: WARN - nats://127.0.0.1:36649 is plain text and insecure_plaintext (MASH_INSECURE_PLAINTEXT) is set: mash: WARNING: plain-text connection to 127.0.0.1 (insecure_plai...)
+- pass: REQ-014: mash status without it says tls: FAILED (tls: FAILED - mash: refusing a plain nats:// connection to "127.0.0.1": every mash connection requires TLS, to any host (loopback included); set insecure_plaintext (MASH_...)
+- pass: bob connects with his own credentials
+- pass: INV-002: the server refuses bob's publish to agents.mail.alice.dev.design with a permissions violation
+- pass: INV-002: the server refuses bob's request to agents.prompt.alice.dev.design with a permissions violation
+- pass: REQ-005: bob subscribes to $SRV.> and sees discovery requests
+- pass: REQ-005: alice's mash who ran while bob answered (exit 0)
+- pass: REQ-005: the server refuses bob's forged discovery answer and his replayed presence answer with permissions violations (2 violation(s) seen)
+- pass: REQ-005: alice's who does not list her offline endpoints as online (online: none)
+- pass: alice's inbox is read with her own credentials (exit 0)
+- pass: nothing arrived in alice's inbox from bob
+- pass: INV-001: no command output holds a seed or a JWT
+- pass: INV-001: no command output holds a key or JWT this scenario made
+- pass: INV-001: every command's output was captured completely (no capture or read error)
+
+## Result
+
+PASS
