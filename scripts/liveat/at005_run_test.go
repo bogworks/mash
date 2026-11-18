@@ -62,6 +62,7 @@ func TestAT005RecordOutRefusesExisting(t *testing.T) {
 }
 
 func TestAT005RunLinePodman(t *testing.T) {
+	linuxOnly(t)
 	f := podmanFake(func(c Cmd) (string, string, int, bool) {
 		if strings.HasPrefix(strings.Join(c.Argv, " "), "podman version --format {{.Client.Version}}") {
 			return "5.3.1\n", "", 0, true
