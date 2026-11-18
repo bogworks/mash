@@ -234,17 +234,6 @@ func Create(ctx context.Context, d Deps, r Request) (Result, error) {
 // the old key is no longer known to a rerun that names the new key, so rerun without a key (a further key is made and
 // the then-current one is revoked) or retire the endpoint.
 func Reissue(ctx context.Context, d Deps, addr sap.Address, publicKey string) (Result, error) {
-	return ReissueThen(ctx, d, addr, publicKey, nil)
-}
-
-// ReissueThen is Reissue with a callback that runs UNDER the address's name lock, after the old key is revoked and the
-// directory record names the new key, with the Result (the JWT, and the Seed of a same-host key). A caller that writes the
-// credential to a file does it here, so two machines reissuing one endpoint cannot interleave between the record
-// moving and the file being written. Keep it short: the lock lasts 30 s and a check refuses past it. If then returns an
-// error, ReissueThen returns that error together with the Result: the record has already moved and the old key is
-// revoked, so running the same command again with the same public key completes (a same-host key is made again: the seed
-// of the failed run is lost).
-func ReissueThen(ctx context.Context, d Deps, addr sap.Address, publicKey string, then func(Result) error) (Result, error) {
 	if d.Revoke == nil {
 		return Result{}, errors.New("enroll: Deps.Revoke is required to reissue")
 	}
@@ -264,8 +253,6 @@ func ReissueThen(ctx context.Context, d Deps, addr sap.Address, publicKey string
 		return fail(&Refusal{Code: CodeKeyRetired, Msg: fmt.Sprintf("endpoint %s was retired and its address is never reassigned", addr)})
 	}
 	var tok string
-	var moved bool
-	var thenErr error
 	err = d.Admin.WithNameLock(ctx, addr, func(ctx context.Context, l admin.NameLock) error {
 		old, _, err := d.Admin.UserOfLocked(ctx, l, addr)
 		if errors.Is(err, admin.ErrNoRecord) {
@@ -291,21 +278,11 @@ func ReissueThen(ctx context.Context, d Deps, addr sap.Address, publicKey string
 				return err
 			}
 		}
-		if _, err = d.Admin.SetUserLocked(ctx, l, addr, d.Account, old, pub); err != nil {
-			return err
-		}
-		moved = true
-		if then != nil {
-			thenErr = then(Result{Addr: addr, PublicKey: pub, JWT: tok, Seed: seed, Reissued: true})
-		}
-		return nil
+		_, err = d.Admin.SetUserLocked(ctx, l, addr, d.Account, old, pub)
+		return err
 	})
 	if err != nil {
 		return fail(err)
 	}
-	res := Result{Addr: addr, PublicKey: pub, JWT: tok, Seed: seed, Reissued: moved}
-	if thenErr != nil {
-		return res, thenErr
-	}
-	return res, nil
+	return Result{Addr: addr, PublicKey: pub, JWT: tok, Seed: seed, Reissued: true}, nil
 }

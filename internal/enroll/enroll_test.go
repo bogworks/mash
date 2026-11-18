@@ -9,7 +9,6 @@ import (
 	"reflect"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -654,87 +653,5 @@ func TestCreateKilledAfterTheIssueRecordCompletesOnRerun(t *testing.T) {
 	recs, _, err := h.adm.List(ctx)
 	if err != nil || len(recs) != 1 {
 		t.Fatalf("%d directory records (err %v), want 1", len(recs), err)
-	}
-}
-
-// ReissueThen runs its callback under the address's name lock: a second reissue of the same endpoint (another machine)
-// cannot start until the callback has returned, so the callback's work (writing the credential file) is never
-// interleaved with the other machine's switch.
-func TestReissueThenRunsUnderTheNameLock(t *testing.T) {
-	h := newEnv(t)
-	ctx := context.Background()
-	a := addr("then")
-	_, k0 := newKey(t)
-	if _, err := enroll.Create(ctx, h.d, enroll.Request{Addr: a, PublicKey: k0}); err != nil {
-		t.Fatal(err)
-	}
-	_, k1 := newKey(t)
-	_, k2 := newKey(t)
-	inThen := make(chan struct{})
-	release := make(chan struct{})
-	thenReturned := make(chan struct{})
-	var secondDone atomic.Bool
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		<-inThen
-		// the callback is running under the lock: this reissue must wait for it
-		_, err := enroll.Reissue(ctx, h.secondDeps(0), a, k2)
-		secondDone.Store(true)
-		if err != nil {
-			t.Errorf("second reissue: %v", err)
-		}
-		select {
-		case <-thenReturned:
-		default:
-			t.Error("the second reissue finished before the callback returned")
-		}
-	}()
-	res, err := enroll.ReissueThen(ctx, h.d, a, k1, func(r enroll.Result) error {
-		if r.PublicKey != k1 || !r.Reissued {
-			t.Errorf("callback result %+v", r)
-		}
-		close(inThen)
-		time.Sleep(500 * time.Millisecond) // the other machine tries meanwhile
-		if secondDone.Load() {
-			t.Error("the second reissue got through while the callback held the lock")
-		}
-		close(thenReturned)
-		close(release)
-		return nil
-	})
-	if err != nil || res.PublicKey != k1 {
-		t.Fatalf("ReissueThen: %+v %v", res, err)
-	}
-	<-release
-	wg.Wait()
-	if u, _, _ := h.adm.UserOf(ctx, a); u != k2 {
-		t.Fatalf("directory names %q, want the second machine's key %q (it ran after)", u, k2)
-	}
-}
-
-// A failing callback surfaces its error with the Result; the record has moved and the old key is revoked, so running the
-// command again with the same key completes.
-func TestReissueThenCallbackErrorKeepsTheMove(t *testing.T) {
-	h := newEnv(t)
-	ctx := context.Background()
-	a := addr("thenerr")
-	_, k0 := newKey(t)
-	if _, err := enroll.Create(ctx, h.d, enroll.Request{Addr: a, PublicKey: k0}); err != nil {
-		t.Fatal(err)
-	}
-	_, k1 := newKey(t)
-	boom := errors.New("disk full")
-	res, err := enroll.ReissueThen(ctx, h.d, a, k1, func(enroll.Result) error { return boom })
-	if !errors.Is(err, boom) || res.PublicKey != k1 || res.JWT == "" {
-		t.Fatalf("got %+v %v", res, err)
-	}
-	if u, _, _ := h.adm.UserOf(ctx, a); u != k1 {
-		t.Fatalf("directory names %q, want %q", u, k1)
-	}
-	again, err := enroll.Reissue(ctx, h.d, a, k1)
-	if err != nil || again.PublicKey != k1 {
-		t.Fatalf("rerun: %+v %v", again, err)
 	}
 }
