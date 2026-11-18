@@ -20,14 +20,14 @@ A2A at the edge, mash inside. See [how mash compares](docs/comparison.md), inclu
 Two paths, one bus: live traffic (presence, status, live prompts) rides plain NATS and is not stored; mail rides
 JetStream (the NATS feature that stores messages on the server) and is kept up to 30 days. ([details](docs/comparison.md#4-two-paths-live-and-durable))
 
-Status: v0.5.0, one host adapter (Claude Code). Known limits are listed in
+Status: v0.5.5, one host adapter (Claude Code). Known limits are listed in
 [the comparison](docs/comparison.md#9-known-limits).
 
 Supported platforms: Linux and macOS (amd64, arm64). Native Windows is not supported. WSL 2 with the Linux binary is expected to work but has not been tested.
 
 ## Install mash
 
-**Download a release (recommended).** A release binary is the build that the project's release workflow made from a tag, and you can check that. Download the binary for your platform and `SHA256SUMS` from the [v0.5.0 release](https://github.com/bogworks/mash/releases/tag/v0.5.0). The four binaries are:
+**Download a release (recommended).** A release binary is the build that the project's release workflow made from a tag, and you can check that. Download the binary for your platform and `SHA256SUMS` from the [v0.5.5 release](https://github.com/bogworks/mash/releases/tag/v0.5.5). The four binaries are:
 
 - `mash-linux-amd64`
 - `mash-linux-arm64`
@@ -35,13 +35,13 @@ Supported platforms: Linux and macOS (amd64, arm64). Native Windows is not suppo
 - `mash-darwin-arm64`
 
 ```sh
-BASE=https://github.com/bogworks/mash/releases/download/v0.5.0
+BASE=https://github.com/bogworks/mash/releases/download/v0.5.5
 curl -fsSLO $BASE/mash-linux-amd64
 curl -fsSLO $BASE/SHA256SUMS
 grep ' mash-linux-amd64$' SHA256SUMS | sha256sum -c - &&   # macOS: shasum -a 256 -c -
 gh attestation verify mash-linux-amd64 -R bogworks/mash \
   --signer-workflow bogworks/mash/.github/workflows/release.yml \
-  --source-ref refs/tags/v0.5.0 &&
+  --source-ref refs/tags/v0.5.5 &&
 chmod +x mash-linux-amd64 &&
 BIN=~/.local/bin &&                                         # any directory; it must be on your PATH
 mkdir -p "$BIN" && mv mash-linux-amd64 "$BIN/mash"
@@ -49,11 +49,11 @@ case ":$PATH:" in *":$BIN:"*) ;; *) echo "add $BIN to your PATH" ;; esac
 mash version
 ```
 
-The checksum shows the file arrived whole. The attestation, a record signed by GitHub, shows that this binary was built from the `v0.5.0` tag by the release workflow ([more](docs/release.md)). `gh` is the [GitHub CLI](https://cli.github.com/).
+The checksum shows the file arrived whole. The attestation, a record signed by GitHub, shows that this binary was built from the `v0.5.5` tag by the release workflow ([more](docs/release.md)). `gh` is the [GitHub CLI](https://cli.github.com/).
 
-**`go install` (builds from source).** `go install github.com/bogworks/mash/cmd/mash@latest` needs Go 1.27.4 or newer. It compiles the source on your machine, so the result is not the attested build, and `mash version` prints `commit unknown`.
+**`go install` (builds from source).** `go install github.com/bogworks/mash/cmd/mash@v0.5.5` needs Go 1.27.4 or newer. It compiles the source on your machine, so the result is not the attested build, and `mash version` prints `commit unknown`.
 
-**`mashctl`** (the tool that sets up servers and administers endpoints) is not among the release assets: v0.5.0 carries only the four `mash-<os>-<arch>` binaries. For now install it with `go install github.com/bogworks/mash/cmd/mashctl@latest`; `mashctl version` prints `0.0.0-dev` from a go install.
+**`mashctl`** (the tool that sets up servers and administers endpoints) is not among the release assets: v0.5.5 carries only the four `mash-<os>-<arch>` binaries. For now install it with `go install github.com/bogworks/mash/cmd/mashctl@v0.5.5`; `mashctl version` prints `0.0.0-dev` from a go install.
 
 ## Quick start: one machine, no account
 
@@ -68,7 +68,7 @@ Start the server. `mashctl` is the tool that runs the server and makes endpoints
 If `MASH_URL`, `MASH_OWNER` or other `MASH_*` variables are set from another setup, clear them first (`unset $(env | sed -n 's/^\(MASH_[A-Z_]*\)=.*/\1/p')`). They override the config files, and the commands below would go to that other server.
 
 ```sh
-go install github.com/bogworks/mash/cmd/mashctl@latest   # mashctl is not in the release assets
+go install github.com/bogworks/mash/cmd/mashctl@v0.5.5   # mashctl is not in the release assets
 mashctl init --local --owner alice --start                # a TLS-only NATS server that only this machine can reach, plus a local CA, keys and credentials
 ```
 
@@ -132,7 +132,7 @@ See it working first: [two Claude Code sessions exchanging mail, one woken by it
 2. Install mash, the plugin, and the channel allowlist (once per machine; the allowlist step is a managed settings file, shown in [docs/install.md](docs/install.md#managed-settings-teams-and-managed-machines)), as in [docs/install.md](docs/install.md) sections 1 to 3:
 
    ```sh
-   go install github.com/bogworks/mash/cmd/mash@latest   # or the release binary above
+   go install github.com/bogworks/mash/cmd/mash@v0.5.5   # or the release binary above
    claude plugin marketplace add bogworks/mash
    claude plugin install mash@mash
    ```
@@ -197,7 +197,7 @@ Requirements: Claude Code 2.1.312 or newer (the oldest version a live receipt pa
 You need a NATS server in operator mode with JetStream (TLS recommended: use a `tls://` url, and for a private CA or mutual TLS set `tls_ca`, `tls_cert` and `tls_key`; see [docs/install.md](docs/install.md#4-configuration)), an account for mash, and Claude Code with channels (a claude.ai or Console sign-in, not Bedrock, Agent Platform or Foundry; organisations need an Owner to allow mash; the channel wakes an idle session, and hooks deliver the mail). [docs/install.md](docs/install.md) covers it end to end. The short version:
 
 ```sh
-go install github.com/bogworks/mash/cmd/mash@v0.5.0      # Go 1.27.4 or newer; or use the release binary above. `mash version` prints the tag and `commit unknown`
+go install github.com/bogworks/mash/cmd/mash@v0.5.5      # Go 1.27.4 or newer; or use the release binary above. `mash version` prints the tag and `commit unknown`
 claude plugin marketplace add bogworks/mash
 claude plugin install mash@mash
 # allowlist the channel once per machine (managed settings are the admin-controlled settings file of Claude Code): write /etc/claude-code/managed-settings.json (Linux)
@@ -217,7 +217,7 @@ Operators set up the server with `mashctl init` (or `mashctl adopt` for a server
 
 ## Status
 
-mash is v0.5.0 (released 2026-11-16). It supports Claude Code sessions as endpoints: durable, signed mail with trust labels, delivered by the plugin's hooks with a channel wake for idle sessions, on a NATS server you run or on Synadia Cloud's free tier ([`scripts/quickstart-synadia.sh`](scripts/quickstart-synadia.sh); see [docs/install.md](docs/install.md)). The spec is in docs/specs, and an integration suite runs against an in-process NATS server carrying the production permissions. Mail survives process restarts. To survive a host crash on a self-hosted server set `sync_interval: always` ([docs/operations.md](docs/operations.md#durability-and-sync_interval)). "Durable" means stored on the NATS server until read, for up to 30 days and 16 MiB per inbox, on one replica. Past those limits the oldest messages go first, read or not, and an inbox on a clustered server is unavailable while its node is down; see [inbox limits](docs/operations.md#inbox-limits) and [durability](docs/operations.md#durability-and-sync_interval). Upgrading to 0.5.5 is a clean break from 0.5.0: make new endpoints with `mashctl endpoint create` and remove the old ones with `mashctl endpoint delete`. Mail unread in an old endpoint is not carried over. Interfaces may still change before the next major revision. Later phases (an archive leaf node, monitoring, approvals) are listed in the spec.
+mash is v0.5.5. Use the same version of `mash` and `mashctl` (the quick start needs 0.5.5's `mash key create` and `mash credential create`, which 0.5.0 does not have); 0.5.0 (released 2026-11-16) stays the version for running deployments until they are moved (see the release notes). It supports Claude Code sessions as endpoints: durable, signed mail with trust labels, delivered by the plugin's hooks with a channel wake for idle sessions, on a NATS server you run or on Synadia Cloud's free tier ([`scripts/quickstart-synadia.sh`](scripts/quickstart-synadia.sh); see [docs/install.md](docs/install.md)). The spec is in docs/specs, and an integration suite runs against an in-process NATS server carrying the production permissions. Mail survives process restarts. To survive a host crash on a self-hosted server set `sync_interval: always` ([docs/operations.md](docs/operations.md#durability-and-sync_interval)). "Durable" means stored on the NATS server until read, for up to 30 days and 16 MiB per inbox, on one replica. Past those limits the oldest messages go first, read or not, and an inbox on a clustered server is unavailable while its node is down; see [inbox limits](docs/operations.md#inbox-limits) and [durability](docs/operations.md#durability-and-sync_interval). Upgrading to 0.5.5 is a clean break from 0.5.0: make new endpoints with `mashctl endpoint create` and remove the old ones with `mashctl endpoint delete`. Mail unread in an old endpoint is not carried over. Interfaces may still change before the next major revision. Later phases (an archive leaf node, monitoring, approvals) are listed in the spec.
 
 ## Releases
 

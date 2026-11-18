@@ -93,4 +93,4 @@ See `sdk-gate-output-88e2a86.txt`, which holds both commits and the output of th
 
 ## Run records
 
-`record-at001-88e2a86.md`, `record-at002-88e2a86.md`, `record-at003-88e2a86.md` and `record-at005-88e2a86.md` (on the code commit); AT-004 is `record-at004.md`. The earlier-revision records stay beside them, named by their commit.
+`record-at001-88e2a86.md`, `record-at002-88e2a86.md`, `record-at003-88e2a86.md` and `record-at005-88e2a86.md` (on the code commit); AT-004 is `record-at004-88e2a86.md` (the CLI team's run on the code commit). The earlier-revision records stay beside them, named by their commit.
