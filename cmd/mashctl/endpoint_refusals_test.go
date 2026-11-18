@@ -139,9 +139,7 @@ func enrollFails(t *testing.T, r *refEnv) {
 
 func lockHeld(instance string) func(t *testing.T, r *refEnv) {
 	return func(t *testing.T, r *refEnv) {
-		if err := os.Mkdir(r.h.creds(ad(instance))+".lock", 0o700); err != nil {
-			t.Fatal(err)
-		}
+		holdLock(t, r.h.creds(ad(instance))+".lock")
 		prev := epLockWait
 		epLockWait = 20 * time.Millisecond
 		t.Cleanup(func() { epLockWait = prev })
@@ -390,6 +388,7 @@ var (
 func (r *refEnv) normalise(s string) string {
 	s = strings.ReplaceAll(s, r.aux, "<TMP>")
 	s = strings.ReplaceAll(s, r.h.dir, "<TMP>")
+	s = strings.ReplaceAll(s, fmt.Sprintf("(pid %d on %s)", os.Getpid(), hostName(r.h.t)), "(pid <PID> on <HOST>)")
 	s = strings.ReplaceAll(s, r.h.e.URL, "<URL>")
 	s = reUserKey.ReplaceAllString(s, "<KEY>")
 	s = reAcctKey.ReplaceAllString(s, "<KEY>")

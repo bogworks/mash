@@ -750,6 +750,8 @@ usage: mashctl endpoint reissue ADDRESS (--public-key FILE | --make-key) [--jwt-
   and cannot be read or parsed).
   Errors include superseded: another reissue changed the endpoint's key while this one ran, so the file this run wrote
   was removed; run the command again.
+  Refusals include reissue_busy: another reissue of ADDRESS is running (its pid and host are named when readable). A lock
+  left by a killed run on this host is reclaimed automatically; a lock from another host after 5 minutes.
   exit codes: 0 done, planned or unchanged, 1 refused, 2 usage, 5 partial (bulk), 6 error
 Example:
   mashctl endpoint reissue alice/dev/design --public-key design.pub
@@ -808,6 +810,8 @@ usage: mashctl endpoint reissue ADDRESS (--public-key FILE | --make-key) [--jwt-
   and cannot be read or parsed).
   Errors include superseded: another reissue changed the endpoint's key while this one ran, so the file this run wrote
   was removed; run the command again.
+  Refusals include reissue_busy: another reissue of ADDRESS is running (its pid and host are named when readable). A lock
+  left by a killed run on this host is reclaimed automatically; a lock from another host after 5 minutes.
   exit codes: 0 done, planned or unchanged, 1 refused, 2 usage, 5 partial (bulk), 6 error
 Example:
   mashctl endpoint reissue alice/dev/design --public-key design.pub
@@ -1166,7 +1170,7 @@ stdout:
 == reissue_reissue_busy
 exit 1
 stderr:
-mashctl: endpoint reissue: refused (reissue_busy): another reissue of o.g.a is running; if none is (a run was killed), remove the directory <TMP>/o.g.a.creds.lock and run this again
+mashctl: endpoint reissue: refused (reissue_busy): another reissue of o.g.a is running (pid <PID> on <HOST>); a lock left by a killed run on this host is reclaimed automatically, one from another host after 5 minutes; run this again later
 stdout:
 {
   "schema": "mashctl-endpoint@1",
@@ -1185,7 +1189,7 @@ stdout:
   "next_steps": [],
   "refusal": {
     "code": "reissue_busy",
-    "detail": "another reissue of o.g.a is running; if none is (a run was killed), remove the directory <TMP>/o.g.a.creds.lock and run this again"
+    "detail": "another reissue of o.g.a is running (pid <PID> on <HOST>); a lock left by a killed run on this host is reclaimed automatically, one from another host after 5 minutes; run this again later"
   }
 }
 == reissue_write
@@ -1417,6 +1421,8 @@ usage: mashctl endpoint reissue ADDRESS (--public-key FILE | --make-key) [--jwt-
   and cannot be read or parsed).
   Errors include superseded: another reissue changed the endpoint's key while this one ran, so the file this run wrote
   was removed; run the command again.
+  Refusals include reissue_busy: another reissue of ADDRESS is running (its pid and host are named when readable). A lock
+  left by a killed run on this host is reclaimed automatically; a lock from another host after 5 minutes.
   exit codes: 0 done, planned or unchanged, 1 refused, 2 usage, 5 partial (bulk), 6 error
 Example:
   mashctl endpoint reissue alice/dev/design --public-key design.pub
@@ -1474,6 +1480,8 @@ usage: mashctl endpoint reissue ADDRESS (--public-key FILE | --make-key) [--jwt-
   and cannot be read or parsed).
   Errors include superseded: another reissue changed the endpoint's key while this one ran, so the file this run wrote
   was removed; run the command again.
+  Refusals include reissue_busy: another reissue of ADDRESS is running (its pid and host are named when readable). A lock
+  left by a killed run on this host is reclaimed automatically; a lock from another host after 5 minutes.
   exit codes: 0 done, planned or unchanged, 1 refused, 2 usage, 5 partial (bulk), 6 error
 Example:
   mashctl endpoint reissue alice/dev/design --public-key design.pub
@@ -1531,6 +1539,8 @@ usage: mashctl endpoint reissue ADDRESS (--public-key FILE | --make-key) [--jwt-
   and cannot be read or parsed).
   Errors include superseded: another reissue changed the endpoint's key while this one ran, so the file this run wrote
   was removed; run the command again.
+  Refusals include reissue_busy: another reissue of ADDRESS is running (its pid and host are named when readable). A lock
+  left by a killed run on this host is reclaimed automatically; a lock from another host after 5 minutes.
   exit codes: 0 done, planned or unchanged, 1 refused, 2 usage, 5 partial (bulk), 6 error
 Example:
   mashctl endpoint reissue alice/dev/design --public-key design.pub
@@ -1741,8 +1751,8 @@ stdout:
 == bulk_reissue_busy
 exit 1
 stderr:
-mashctl: endpoint reissue o/g/a: reissue_busy: another reissue of o.g.a is running; if none is (a run was killed), remove the directory <TMP>/o.g.a.creds.lock and run this again
-mashctl: endpoint reissue: refused (reissue_busy): another reissue of o.g.a is running; if none is (a run was killed), remove the directory <TMP>/o.g.a.creds.lock and run this again
+mashctl: endpoint reissue o/g/a: reissue_busy: another reissue of o.g.a is running (pid <PID> on <HOST>); a lock left by a killed run on this host is reclaimed automatically, one from another host after 5 minutes; run this again later
+mashctl: endpoint reissue: refused (reissue_busy): another reissue of o.g.a is running (pid <PID> on <HOST>); a lock left by a killed run on this host is reclaimed automatically, one from another host after 5 minutes; run this again later
 stdout:
 {
   "schema": "mashctl-endpoint-bulk@1",
@@ -1769,7 +1779,7 @@ stdout:
   "next_steps": [],
   "refusal": {
     "code": "reissue_busy",
-    "detail": "another reissue of o.g.a is running; if none is (a run was killed), remove the directory <TMP>/o.g.a.creds.lock and run this again"
+    "detail": "another reissue of o.g.a is running (pid <PID> on <HOST>); a lock left by a killed run on this host is reclaimed automatically, one from another host after 5 minutes; run this again later"
   }
 }
 == bulk_future_issued

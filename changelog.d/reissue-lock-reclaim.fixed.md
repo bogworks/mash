@@ -1,0 +1,1 @@
+`mashctl endpoint reissue` no longer needs the operator to remove its lock directory after a killed run. The lock records the pid, host and start time of the run that took it. A later run reclaims it when that pid is gone on the same host, or when it is older than 5 minutes, and the identical command then succeeds.

@@ -235,7 +235,7 @@ A refusal exits 1, a usage error exits 2 and an error exits 6. The message names
 | `endpoint_missing` | 1 | reissue | No such endpoint. |
 | `future_issued` | 1 | reissue, bulk | The old key's JWT was issued after now: fix the clock. Nothing was changed. |
 | `creds_mismatch` | 1 | reissue, bulk | The creds file at the creds path is not this endpoint's current creds. Move it aside. |
-| `reissue_busy` | 1 | reissue, bulk | Another reissue of the endpoint holds its lock. If none runs, remove the `<creds file>.lock` directory it names. |
+| `reissue_busy` | 1 | reissue, bulk | Another reissue of the endpoint is running; the detail names its pid and host when readable. A lock left by a killed run on this host is reclaimed automatically; a lock from another host is reclaimed after 5 minutes. |
 | `server` | 6 | create, reissue, bulk | The server could not be reached or answered with an error. Nothing was changed. |
 | `superseded` | 6 | reissue, bulk | Another reissue changed the endpoint's key while this one ran, so the file this run wrote was removed. Run the command again. |
 | `servers` | 6 | reissue, bulk | Fewer servers answered than the count says. Nothing was revoked. |
