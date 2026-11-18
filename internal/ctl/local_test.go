@@ -73,7 +73,7 @@ func TestInitLocalWithNoConfig(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d: %s %s", code, out, errs)
 	}
-	for _, want := range []string{"nats-server -c " + filepath.Join(e.root, "cfg", "server", "server.conf"), "mashctl init", "mashctl endpoint create alice/dev/design", "alice.dev.design.jwt", "no TLS", "127.0.0.1:4333"} {
+	for _, want := range []string{"nats-server -c " + filepath.Join(e.root, "cfg", "server", "server.conf"), "mashctl init", "mashctl endpoint create alice/dev/design", "alice.dev.design.jwt", "loopback only, TLS", "server cert", "ca.pem", "127.0.0.1:4333"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}
@@ -88,7 +88,7 @@ func TestInitLocalWithNoConfig(t *testing.T) {
 		}
 	}
 	c, err := os.ReadFile(filepath.Join(e.root, "cfg", "config.json"))
-	if err != nil || !strings.Contains(string(c), "nats://127.0.0.1:4333") {
+	if err != nil || !strings.Contains(string(c), "tls://127.0.0.1:4333") || !strings.Contains(string(c), `"tls_ca"`) || strings.Contains(string(c), "insecure_loopback") {
 		t.Fatalf("config.json: %s %v", c, err)
 	}
 	if _, err := os.Stat(filepath.Join(e.root, "cfg", "policy.yaml")); err == nil {
@@ -121,7 +121,7 @@ func TestInitLocalLeavesExistingConfig(t *testing.T) {
 	if b, _ := os.ReadFile(cfgPath); string(b) != "{}\n" {
 		t.Fatal("config.json was touched")
 	}
-	for _, want := range []string{"not touched", `"url": "nats://127.0.0.1:4222"`, `"owner": "carol"`, "admin_creds"} {
+	for _, want := range []string{"not touched", `"url": "tls://127.0.0.1:4222"`, `"owner": "carol"`, "admin_creds", `"tls_ca"`} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}
@@ -232,7 +232,7 @@ func TestInitLocalStartConfigElsewhere(t *testing.T) {
 			if code != 0 {
 				t.Fatalf("exit %d: %s", code, errs)
 			}
-			for _, want := range []string{"points elsewhere", `"url": "nats://127.0.0.1:4222"`, `"owner": "alice"`, "admin_creds", "MASH_URL"} {
+			for _, want := range []string{"points elsewhere", `"url": "tls://127.0.0.1:4222"`, `"owner": "alice"`, "admin_creds", `"tls_ca"`, "MASH_URL"} {
 				if !strings.Contains(out, want) {
 					t.Errorf("output lacks %q:\n%s", want, out)
 				}
@@ -247,8 +247,9 @@ func TestInitLocalStartConfigElsewhere(t *testing.T) {
 func TestInitLocalStartConfigMatches(t *testing.T) {
 	stubStart(t)
 	e := newLocalEnv(t)
-	e.cfg.URL, e.cfg.Owner = "nats://127.0.0.1:4222", "alice"
+	e.cfg.URL, e.cfg.Owner = "tls://127.0.0.1:4222", "alice"
 	e.cfg.AdminCreds = filepath.Join(e.root, "cfg", "server", "mashadmin.creds")
+	e.cfg.TLSCA = filepath.Join(e.root, "cfg", "server", "ca.pem")
 	code, out, errs := e.run("init", "--local", "--owner", "alice", "--start")
 	if code != 0 || !strings.Contains(out, "Ready") || strings.Contains(out, "points elsewhere") {
 		t.Fatalf("exit %d: %s\n%s", code, out, errs)
@@ -280,15 +281,15 @@ func TestInitLocalStartTakesNoInsecureFlagAndStartsOnlyTheLoopbackServerItGenera
 	if code != 0 || !strings.Contains(out, "Ready") {
 		t.Fatalf("exit %d: %s\n%s", code, out, errs)
 	}
-	if !strings.HasPrefix(gotURL, "nats://127.0.0.1:") || !gotGenerated || !bucketCfg.InsecurePlaintext {
-		t.Fatalf("Start got %q generated %v, buckets insecure_plaintext %v", gotURL, gotGenerated, bucketCfg.InsecurePlaintext)
+	if !strings.HasPrefix(gotURL, "tls://127.0.0.1:") || !gotGenerated || bucketCfg.InsecureLoopback || bucketCfg.TLSCA != filepath.Join(e.root, "cfg", "server", "ca.pem") {
+		t.Fatalf("Start got %q generated %v, buckets insecure_loopback %v tls_ca %q", gotURL, gotGenerated, bucketCfg.InsecureLoopback, bucketCfg.TLSCA)
 	}
 	if code, _, _ := e.run("init", "--local", "--owner", "alice", "--start", "--insecure"); code != 2 {
 		t.Fatalf("--insecure is not a flag any more: exit %d", code)
 	}
 }
 
-func TestInitLocalRecordsOperatorJWTAndTheLoopbackOptIn(t *testing.T) {
+func TestInitLocalRecordsOperatorJWTAndATLSOnlyConfig(t *testing.T) {
 	e := newLocalEnv(t)
 	code, out, errs := e.run("init", "--local", "--owner", "alice")
 	if code != 0 {
@@ -299,7 +300,7 @@ func TestInitLocalRecordsOperatorJWTAndTheLoopbackOptIn(t *testing.T) {
 		t.Fatalf("operator.jwt in the key directory: %v %v", st, err)
 	}
 	cfg, err := os.ReadFile(filepath.Join(e.root, "cfg", "config.json"))
-	if err != nil || !strings.Contains(string(cfg), `"insecure_plaintext": true`) {
+	if err != nil || !strings.Contains(string(cfg), `"tls_ca"`) || strings.Contains(string(cfg), "insecure_loopback") {
 		t.Fatalf("config.json: %s %v", cfg, err)
 	}
 	// a second init on another directory keeps the first operator JWT

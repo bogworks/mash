@@ -27,7 +27,7 @@ func init() {
 }
 
 func initLocalUsage(prog string) string {
-	return "usage: " + prog + " init --local [--dir D] [--owner O] [--port P] [--start]\n  --start starts the new loopback-only server (127.0.0.1) and creates the buckets over a plain connection to it; init --local without --start connects to nothing"
+	return "usage: " + prog + " init --local [--dir D] [--owner O] [--port P] [--start]\n  --start starts the new loopback-only, TLS-only server (127.0.0.1) and creates the buckets over TLS, trusting the CA init --local made; init --local without --start connects to nothing"
 }
 
 // runInitLocal is `init --local`: it writes a local operator-mode NATS server's configuration (args are the
@@ -104,7 +104,8 @@ func runInitLocal(prog string, cfg config.Config, args []string, stdout, stderr 
 		fmt.Fprintf(stdout, "%s: recorded the operator JWT in %s (mashctl accepts account JWTs issued by the keys it declares)\n", pfx, filepath.Join(keyDir, ctlkeys.OperatorJWTFile))
 	}
 	fmt.Fprintf(stdout, "%s: local NATS server configured in %s\n", pfx, abs)
-	fmt.Fprintf(stdout, "  server config   %s (listens on 127.0.0.1:%d, loopback only, no TLS)\n", pl.ConfPath(), port)
+	fmt.Fprintf(stdout, "  server config   %s (listens on 127.0.0.1:%d, loopback only, TLS)\n", pl.ConfPath(), port)
+	fmt.Fprintf(stdout, "  server cert     %s, signed by %s (valid 10 years)\n", filepath.Join(abs, bootstrap.ServerCert), pl.CA)
 	fmt.Fprintf(stdout, "  admin creds     %s\n", pl.Creds)
 	fmt.Fprintf(stdout, "  system creds    %s\n", filepath.Join(abs, bootstrap.SysCreds))
 	fmt.Fprintf(stdout, "  signing keys    %s (operator.nk, system.nk, account.nk; never copy them off this machine)\n", keyDir)
@@ -112,17 +113,17 @@ func runInitLocal(prog string, cfg config.Config, args []string, stdout, stderr 
 		fmt.Fprintf(stdout, "  config          %s\n", pl.Config.Path)
 	} else {
 		fmt.Fprintf(stdout, "  config          %s exists and was not touched; add to it:\n", orNone(p.ConfigPath))
-		fmt.Fprintf(stdout, "    \"url\": %q, \"owner\": %q, \"admin_creds\": %q, \"insecure_plaintext\": true\n", pl.URL, owner, pl.Creds)
+		fmt.Fprintf(stdout, "    \"url\": %q, \"owner\": %q, \"admin_creds\": %q, \"tls_ca\": %q\n", pl.URL, owner, pl.Creds, pl.CA)
 	}
 
 	// Later commands use the loaded configuration (or, when this run wrote config.json, what that file now says,
 	// unless a MASH_* variable overrides it): does that name the server just configured?
 	same := func(have, want string) bool { return have == want || (have == "" && pl.Config != nil) }
-	elsewhere := !same(cfg.URL, pl.URL) || !same(cfg.AdminCreds, pl.Creds) || !same(cfg.Owner, owner)
+	elsewhere := !same(cfg.URL, pl.URL) || !same(cfg.AdminCreds, pl.Creds) || !same(cfg.Owner, owner) || !same(cfg.TLSCA, pl.CA)
 
 	if !start {
 		if elsewhere {
-			fmt.Fprintf(stdout, "\nNote: your configuration points elsewhere: %s commands will not use this server until config.json (or MASH_URL, MASH_OWNER, MASH_ADMIN_CREDS) has the three settings above.\n", prog)
+			fmt.Fprintf(stdout, "\nNote: your configuration points elsewhere: %s commands will not use this server until config.json (or MASH_URL, MASH_OWNER, MASH_ADMIN_CREDS, MASH_TLS_CA) has the settings above.\n", prog)
 		}
 		fmt.Fprintf(stdout, "\nNext:\n  1. start the server:      nats-server -c %s\n  2. create the buckets:    %s init\n  3. create an endpoint:    mash key create --out design.seed; mashctl endpoint create %s/dev/design --public-key design.pub; mash credential create --seed design.seed --jwt %s.dev.design.jwt   (or, on this host: mashctl endpoint create %s/dev/design --make-key)\n", pl.ConfPath(), prog, owner, owner, owner)
 		return 0
@@ -134,17 +135,16 @@ func runInitLocal(prog string, cfg config.Config, args []string, stdout, stderr 
 	fmt.Fprintf(stdout, "  server          started, pid %d (log %s)\n", pid, pl.LogPath())
 	c := cfg
 	c.URL, c.Owner, c.AdminCreds = pl.URL, owner, pl.Creds
-	c.TLSCA, c.TLSCert, c.TLSKey = "", "", "" // the local server has no TLS
-	c.InsecurePlaintext = true                // the server was generated and started by this run on 127.0.0.1: plain by construction
+	c.TLSCA, c.TLSCert, c.TLSKey = pl.CA, "", "" // the server's certificate is signed by the CA this run made
 	if code := initLocalBuckets(prog, c, stdout, stderr); code != 0 {
 		fmt.Fprintf(stderr, "%s: the server is running (pid %d) but its buckets were not created; run: %s init\n", pfx, pid, prog)
 		return code
 	}
 	if elsewhere {
 		fmt.Fprintf(stdout, "\nthe local server is running, but your configuration points elsewhere\n")
-		fmt.Fprintf(stdout, "  %s commands use url %q, admin_creds %q, owner %q (from config.json or MASH_* variables),\n  not this server, and will keep using that other server until you set these three:\n", prog, config.RedactURL(cfg.URL), cfg.AdminCreds, cfg.Owner)
-		fmt.Fprintf(stdout, "    \"url\": %q, \"owner\": %q, \"admin_creds\": %q, \"insecure_plaintext\": true\n", pl.URL, owner, pl.Creds)
-		fmt.Fprintf(stdout, "  (or MASH_URL, MASH_OWNER, MASH_ADMIN_CREDS)\n")
+		fmt.Fprintf(stdout, "  %s commands use url %q, admin_creds %q, owner %q (from config.json or MASH_* variables),\n  not this server, and will keep using that other server until you set these:\n", prog, config.RedactURL(cfg.URL), cfg.AdminCreds, cfg.Owner)
+		fmt.Fprintf(stdout, "    \"url\": %q, \"owner\": %q, \"admin_creds\": %q, \"tls_ca\": %q\n", pl.URL, owner, pl.Creds, pl.CA)
+		fmt.Fprintf(stdout, "  (or MASH_URL, MASH_OWNER, MASH_ADMIN_CREDS, MASH_TLS_CA)\n")
 		return 0
 	}
 	fmt.Fprintf(stdout, "\nReady: the local server is up at %s. Create an endpoint with: mashctl endpoint create %s/dev/design --make-key   (it writes the creds file; to make the key on the endpoint's machine instead, see: mashctl endpoint create --help)\n", pl.URL, owner)
