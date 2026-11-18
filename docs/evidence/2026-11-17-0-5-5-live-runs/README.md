@@ -2,6 +2,27 @@
 
 ## The runs on the code commit (final)
 
+The code commit is main at `e26332cdd55342538791c3088c85cc5ca2b09c59` (ruling 16: after it only documents change; it follows gate run 3's
+fixes). AT-001 to AT-003 and AT-005 were run on exactly that commit (every record names it as its revision, clean checkout), on
+2026-11-18, by the core worker, with the real `mash` and `mashctl` built from it. AT-001 to AT-003 ran on one local server over TLS
+(`mashctl init --local`'s own CA, no override: REQ-014); AT-005 ran by hand (`--hosts podman --run-by manual --host-label bf2`) on
+rootless podman 4.9.3, host Linux 6.17.0-42-generic amd64, nats-server v2.15.1 built from the go.mod pin. What AT-001 ran is limited:
+binaries built from the commit, sessions started through the plugin launcher and mail delivered through the plugin's hook commands, with
+the test acting as Claude Code's MCP client and hook caller; no Claude Code session ran and the README's install steps were not part of it.
+
+| Record | Run id | Result |
+|---|---|---|
+| `record-at001-e26332c.md` | 20261118T190226Z-478df28f | pass (61 assertions) |
+| `record-at002-e26332c.md` | 20261118T190236Z-82391da9 | pass (25) |
+| `record-at003-e26332c.md` | 20261118T190239Z-4749e177 | pass (115; the nothing-written check digests every file of the homes with no exclusion and fails on a read error; `mash status` warns on stderr) |
+| `record-at004-e26332c.md` | (CLI team, run 3) | pass (written by the CLI team on `e26332c`: 21 selected top-level tests and 96 subtests in `cmd/mashctl`, 11 in `cmd/mash`, 14 in `internal/keycred`, 2 in `internal/enroll`; 0 failed, 0 skipped; `go vet ./...` and the whole suite, 46 packages, pass; adds the two reissue retry tests: kill after publish, readback fails) |
+| `record-at005-e26332c.md` | 20261118T190228Z-4dd5d0d1 | pass (94 assertions, 4 not applicable, 0 failed); cleanup verified |
+| `sdk-gate-output-e26332c.txt` | | the SDK compatibility gate on a scratch merge of `e26332c` and #667's head `3d877bc`, with output |
+| `completion-checks.md`, `old-form-search.md`, `forbidden-word-test-output.txt`, `scrubcheck-output.txt` | | the forbidden-word test, command-tree test, scrub check and the old-form search, on `e26332c` |
+| `requirements-to-assertions.md` | | every REQ, INV, NFR and BND mapped to these records and assertion names |
+
+## History: the runs on the code commit of gate run 3 (88e2a86)
+
 The code commit is main at `88e2a86b74c4ad22986a69e6479faa013bfa3300` (ruling 16: after it only documents change). AT-001 to AT-003 and
 AT-005 were run on exactly that commit (every record names it as its revision, clean checkout), on 2026-11-18, by the core worker, with
 the real `mash` and `mashctl` built from it. AT-001 to AT-003 ran on one local server over TLS (`mashctl init --local`'s own CA, no
@@ -20,7 +41,7 @@ not taken from PATH.
 | `completion-checks.md`, `old-form-search.md`, `forbidden-word-test-output.txt`, `scrubcheck-output.txt` | | the forbidden-word test, command-tree test, scrub check and the old-form search, on `88e2a86` |
 | `requirements-to-assertions.md` | | every REQ, INV, NFR and BND mapped to these records and assertion names |
 
-The earlier records below (`a191f08`, `8fa36b8`, `bc96b27`) are kept as the history of the gate; they are not the evidence for the
+The earlier records (`a191f08`, `8fa36b8`, `bc96b27`, `88e2a86`) are kept as the history of the gate; they are not the evidence for the
 release.
 
 ## History: the runs before the final gate

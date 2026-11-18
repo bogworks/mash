@@ -1,0 +1,55 @@
+code commit: e26332cdd55342538791c3088c85cc5ca2b09c59
+merged: pr/ctl/sdk-compat-gate 3d877bcd34d00ab590b6c4996e8f14242ec6c3f0 (scratch merge, not committed; #667)
+
+$ go test ./internal/sap ./internal/host ./internal/spool ./internal/endpoint -run "Compat|TestProtocolConstants" -count=1 -v   (internal/endpoint after the port below)
+--- PASS: TestCompatTrustConstantsMatchSpoolGolden (0.00s)
+--- PASS: TestCompatCorpusStored (0.00s)
+--- PASS: TestCompatCorpusLive (0.00s)
+--- PASS: TestProtocolConstants (0.00s)
+PASS
+ok  	github.com/bogworks/mash/internal/sap	0.007s
+--- PASS: TestCompatRenderGolden (0.00s)
+PASS
+ok  	github.com/bogworks/mash/internal/host	0.002s
+--- PASS: TestCompatTrustLabelStrings (0.00s)
+--- PASS: TestCompatSpoolEntryBytes (0.03s)
+--- PASS: TestCompatSpoolReadsGoldens (0.00s)
+PASS
+ok  	github.com/bogworks/mash/internal/spool	0.035s
+--- PASS: TestCompatStoredNewFormInbox (0.06s)
+PASS
+ok  	github.com/bogworks/mash/internal/endpoint	0.064s
+
+port applied to internal/endpoint/compat_stored_test.go in the scratch merge:
+-func TestCompatStoredLegacyInbox(t *testing.T) {
+-	f := newFixture(t, "a", "b", "c")
+-	b, c := f.client(t, "b"), f.client(t, "c")
+-	ctx := context.Background()
+-	if _, err := c.SendWith(ctx, "b", "the original", SendOptions{}); err != nil {
+-		t.Fatal(err)
+-	}
+-	for _, o := range []struct {
+-		body string
+-		opts SendOptions
+-	}{
+-		{"plain", SendOptions{}},
+-		{"a question", SendOptions{Kind: kind.Question}},
+-		{"urgent", SendOptions{Urgent: true}},
+-		{"answers", SendOptions{InReplyTo: 7}},
+-		{"relay", SendOptions{Via: 1}},
+-		{"all marks", SendOptions{Kind: kind.Task, Urgent: true, InReplyTo: 4, Via: 1}},
+-		{"héllo \"quoted\" <tag> & 日本", SendOptions{}},
+-	} {
+-		if _, err := b.SendWith(ctx, "a", o.body, o.opts); err != nil {
+-			t.Fatal(err)
+-		}
+-	}
+-	mash, sdk := compatStoredLabels(t, f, sap.InboxStream("a"), 7)
+-	requireCompatVerified(t, mash, sdk)
+-}
+-	rcv := f.addNewForm(t, "ag", "team", "rcv", newFormOpts{})
+-	snd := f.addNewForm(t, "ag", "team", "snd", newFormOpts{})
+-	s := f.clientNF(t, snd)
++	rcv := f.addAt(t, "team", "rcv", addOpts{})
++	snd := f.addAt(t, "team", "snd", addOpts{})
++	s := f.clientAt(t, snd)
