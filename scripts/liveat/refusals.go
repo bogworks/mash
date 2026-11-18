@@ -62,7 +62,7 @@ func (a *AT) refusal(ctlHome Home, trees []Home, c refusalCase) {
 	a.C.Check(c.Name+": the message names what to type", len(missing) == 0 && strings.TrimSpace(text) != "", "missing: "+strings.Join(missing, "; "))
 	diff := before.Diff(after)
 	bad := append(before.Bad, after.Bad...)
-	a.C.Check(c.Name+": nothing was written (directory, issue record, streams, leases, files)", len(diff) == 0 && len(bad) == 0, "changed: "+orNone(strings.Join(diff, ", "))+"; failed reads: "+orNone(strings.Join(bad, ", ")))
+	a.C.Check(c.Name+": nothing was written (directory, issue record, streams, leases, files byte-identical"+exclusionNote()+")", len(diff) == 0 && len(bad) == 0, "changed: "+orNone(strings.Join(diff, ", "))+"; failed reads: "+orNone(strings.Join(bad, ", ")))
 }
 
 func orNone(s string) string {

@@ -400,7 +400,13 @@ func treeHash(root string, skip ...string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		fmt.Fprintf(h, "%s\x00%o\x00%d\x00", rel, st.Mode(), st.Size())
+		// A directory's size is not content (on tmpfs and overlay filesystems it changes with the entries inside it, which
+		// are listed on their own), so only a regular file's size is part of the digest.
+		size := int64(0)
+		if st.Mode().IsRegular() {
+			size = st.Size()
+		}
+		fmt.Fprintf(h, "%s\x00%o\x00%d\x00", rel, st.Mode(), size)
 		if st.Mode().IsRegular() {
 			b, err := os.ReadFile(p)
 			if err != nil {

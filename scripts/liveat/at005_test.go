@@ -349,3 +349,50 @@ func TestIssuedListRevokedNeedsTheEntry(t *testing.T) {
 		}
 	}
 }
+
+func TestIssuedRevocationAccountedNeedsTheTarget(t *testing.T) {
+	const addr = "alice.dev.review"
+	list := func(a, key, at string) string {
+		return `[{"address":"` + a + `","public_key":"` + key + `","revoked_at":"` + at + `"}]`
+	}
+	check := func(entries string) string {
+		return `{"clean":true,"complete":true,"record_present":true,"revoked_connected":[],"recorded_not_connected":` + entries + `}`
+	}
+	entry := func(a, key string) string { return `[{"address":"` + a + `","public_key":"` + key + `"}]` }
+	rec := func(key, at string) string {
+		return `{"address":"` + addr + `","public_key":"` + key + `","revoked_at":"` + at + `"}`
+	}
+	entries := func(keys ...string) string {
+		var parts []string
+		for _, k := range keys {
+			parts = append(parts, `{"address":"`+addr+`","public_key":"`+k+`"}`)
+		}
+		return "[" + strings.Join(parts, ",") + "]"
+	}
+	for _, c := range []struct {
+		name      string
+		list, chk string
+		wantOK    bool
+	}{
+		{"reissue: old revoked, new unrevoked, only the new key listed", "[" + rec("OLD", "t") + "," + rec("NEW", "") + "]", check(entries("NEW")), false},
+		{"reissue: the revoked key listed", "[" + rec("OLD", "t") + "," + rec("NEW", "") + "]", check(entries("OLD")), true},
+		{"reissue: new unrevoked first in the list, only new key listed", "[" + rec("NEW", "") + "," + rec("OLD", "t") + "]", check(entries("NEW")), false},
+		{"two revoked, only one listed", "[" + rec("A", "t") + "," + rec("B", "t") + "]", check(entries("A")), false},
+		{"two revoked, both listed", "[" + rec("A", "t") + "," + rec("B", "t") + "]", check(entries("A", "B")), true},
+		{"no revoked record", "[" + rec("A", "") + "]", check(entries("A")), false},
+		{"present and revoked", list(addr, "AK1", "2026-11-18T10:00:00Z"), check(entry(addr, "AK1")), true},
+		{"target missing from the check report", list(addr, "AK1", "t"), check("[]"), false},
+		{"check lists another key for the address", list(addr, "AK1", "t"), check(entry(addr, "AK2")), false},
+		{"check lists only another address", list(addr, "AK1", "t"), check(entry("alice.dev.design", "AK1")), false},
+		{"present but not revoked", list(addr, "AK1", ""), check(entry(addr, "AK1")), false},
+		{"target missing from the list", list("alice.dev.design", "AK9", "t"), check(entry(addr, "AK1")), false},
+		{"list without a key", `[{"address":"` + addr + `","revoked_at":"t"}]`, check(entry(addr, "AK1")), false},
+	} {
+		if ok, d := issuedRevocationAccounted(0, c.list, 0, c.chk, addr); ok != c.wantOK {
+			t.Errorf("%s: got %v (%s), want %v", c.name, ok, d, c.wantOK)
+		}
+	}
+	if ok, _ := issuedRevocationAccounted(0, list(addr, "AK1", "t"), 1, check(entry(addr, "AK1")), addr); ok {
+		t.Error("a failing issued check passed")
+	}
+}

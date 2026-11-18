@@ -819,6 +819,63 @@ func issuedListRevoked(code int, stdout, address string) (bool, string) {
 	return false, address + " has an empty revoked_at"
 }
 
+// issuedRevocationAccounted is the AT-005 assertion that M2's issued commands account for address's revoked key.
+// `issued check --json` has no per-key revoked flag for a key that is not connected (a revoked key that is connected is
+// revoked_connected, and fails the check): it lists such a key under recorded_not_connected with no revoked_at. So the
+// revoked state comes from `issued list --json` (an entry for address with revoked_at set), the check must be clean and
+// complete (issuedCheckClean), and the check's recorded_not_connected must carry that same public key, so that the
+// clean report is shown to have accounted for the target's key and not merely to be empty.
+func issuedRevocationAccounted(listCode int, listOut string, checkCode int, checkOut, address string) (bool, string) {
+	if ok, d := issuedListRevoked(listCode, listOut, address); !ok {
+		return false, "issued list: " + d
+	}
+	if ok, d := issuedCheckClean(checkCode, checkOut); !ok {
+		return false, "issued check: " + d
+	}
+	lv, _ := parseJSON(listOut)
+	// every revoked record for the address must be accounted for: a newer, unrevoked record (a reissue) must not
+	// stand in for the revoked key.
+	var keys []string
+	for _, o := range findObjects(lv, "address", "revoked_at") {
+		if a, _ := o["address"].(string); a != address {
+			continue
+		}
+		if at, _ := o["revoked_at"].(string); at == "" {
+			continue
+		}
+		key, _ := o["public_key"].(string)
+		if key == "" {
+			return false, "issued list has a revoked record without a public_key for " + address
+		}
+		keys = append(keys, key)
+	}
+	if len(keys) == 0 {
+		return false, "issued list has no revoked record for " + address
+	}
+	var doc struct {
+		NotConnected []struct {
+			PublicKey string `json:"public_key"`
+			Address   string `json:"address"`
+		} `json:"recorded_not_connected"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(checkOut)), &doc); err != nil {
+		return false, "issued check stdout is not the --json document"
+	}
+	for _, key := range keys {
+		found := false
+		for _, n := range doc.NotConnected {
+			if n.PublicKey == key && n.Address == address {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false, "issued check does not account for " + address + "'s revoked key " + key + " (not in recorded_not_connected)"
+		}
+	}
+	return true, address + " revoked_at is set in issued list; issued check is clean and complete and accounts for every revoked key (recorded, not connected)"
+}
+
 // revocationSeen: the delete of review was made from M1; M2 shows it with endpoint show, issued list and issued check.
 func (s *At5) revocationSeen() {
 	m2 := s.M(2)
@@ -835,6 +892,8 @@ func (s *At5) revocationSeen() {
 	})
 	ok, d = issuedCheckClean(ic.Code, ic.Stdout)
 	s.check("M2: mashctl issued check --json after the revocation: clean, complete, record present, no revoked key connected", ok, d)
+	ok, d = issuedRevocationAccounted(il.Code, il.Stdout, ic.Code, ic.Stdout, "alice.dev.review")
+	s.check("M2: issued list shows alice.dev.review revoked; issued check is clean and complete and lists its key", ok, d)
 	s.ClusterCheck(m2, "M2 after the revocation")
 }
 

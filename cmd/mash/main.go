@@ -218,7 +218,7 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 		return hook(cfg, err, adapter, env, stdin, stdout, stderr)
 	}
 	if args[0] == "status" { // a report: a config error is a line of it
-		return statusCmd(cfg, err, env, stdout)
+		return statusCmd(cfg, err, env, stdout, stderr)
 	}
 	if err != nil && args[0] != "serve" {
 		fmt.Fprintln(stderr, err)
