@@ -34,7 +34,7 @@ func TestStartAndMint(t *testing.T) {
 		t.Fatalf("user %q", user)
 	}
 	errs := make(chan error, 4)
-	nc, err := nats.Connect(e.URL, natsauth.UserCredentials(creds), nats.CustomInboxPrefix("_INBOX."+addr.Flat()),
+	nc, err := nats.Connect(e.URL, natsauth.UserCredentials(creds), nats.CustomInboxPrefix(addr.InboxPrefix()),
 		nats.ErrorHandler(func(_ *nats.Conn, _ *nats.Subscription, err error) { errs <- err }))
 	if err != nil {
 		t.Fatal(err)

@@ -167,7 +167,7 @@ func TestEndpointPermissionDenials(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	nc, err := nats.Connect(e.URL, natsauth.UserCredentials(credsA), nats.CustomInboxPrefix("_INBOX.o_dev_a"))
+	nc, err := nats.Connect(e.URL, natsauth.UserCredentials(credsA), nats.CustomInboxPrefix("_INBOX.o.o_dev_a"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,9 +188,9 @@ func TestEndpointPermissionDenials(t *testing.T) {
 
 	// Inbox privacy: replies (JetStream deliveries, KV reads, prompt answers)
 	// travel on inbox subjects, so a may subscribe only to its own prefix.
-	for _, subj := range []string{"_INBOX.>", "_INBOX.b.>", "_INBOX.b.x", "_INBOX.*.x"} {
+	for _, subj := range []string{"_INBOX.>", "_INBOX.o.>", "_INBOX.o.b.>", "_INBOX.b.>", "_INBOX.b.x", "_INBOX.*.x"} {
 		errs := make(chan error, 1)
-		sc, err := nats.Connect(e.URL, natsauth.UserCredentials(credsA), nats.CustomInboxPrefix("_INBOX.o_dev_a"),
+		sc, err := nats.Connect(e.URL, natsauth.UserCredentials(credsA), nats.CustomInboxPrefix("_INBOX.o.o_dev_a"),
 			nats.ErrorHandler(func(_ *nats.Conn, _ *nats.Subscription, err error) {
 				select {
 				case errs <- err:

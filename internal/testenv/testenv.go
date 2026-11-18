@@ -266,7 +266,11 @@ func (e *Env) Conn(t *testing.T, creds string) *nats.Conn {
 // ConnAs connects as endpoint name, using its private inbox prefix.
 func (e *Env) ConnAs(t *testing.T, creds, name string) *nats.Conn {
 	t.Helper()
-	nc, err := nats.Connect(e.URL, append(natsauth.TLSOptions(e.CAFile, e.ClientCert, e.ClientKey), natsauth.UserCredentials(creds), nats.CustomInboxPrefix("_INBOX."+name))...)
+	prefix := "_INBOX." + name
+	if a, err := sap.AddressFromFlat(name); err == nil {
+		prefix = a.InboxPrefix()
+	}
+	nc, err := nats.Connect(e.URL, append(natsauth.TLSOptions(e.CAFile, e.ClientCert, e.ClientKey), natsauth.UserCredentials(creds), nats.CustomInboxPrefix(prefix))...)
 	if err != nil {
 		t.Fatal(err)
 	}

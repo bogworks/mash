@@ -31,7 +31,7 @@ func nextNUIDs(tok string, from, to int) []string {
 }
 
 // TestPeerCannotSpoofPromptAnswer: endpoint c, same owner, sees b's discovery request and its reply subject on $SRV.>,
-// and may publish to _INBOX.>; with NUID inboxes it guesses b's prompt reply inbox and answers in a's place.
+// and may publish to _INBOX.<owner>.>; with NUID inboxes it guesses b's prompt reply inbox and answers in a's place.
 func TestPeerCannotSpoofPromptAnswer(t *testing.T) {
 	f := newFixture(t, "a", "b", "c")
 	release := make(chan struct{})

@@ -19,8 +19,8 @@ import (
 // a request it sends itself with a reply subject of $JS.API.STREAM.DELETE.<victim> would let it delete another inbox.
 //
 // Publish: mail, prompt and status to any endpoint of the same owner (agents.<verb>.<owner>.*.*, the owner a literal
-// token), and the fixed lines: its own exact heartbeat, replies, the service API, and the JetStream and KV subjects of
-// its own inbox, the directory and its lease, all keyed by its own flat key. Subscribe: its private reply prefix, its
+// token), and the fixed lines: its own exact heartbeat, replies to the inboxes of its own owner (_INBOX.<owner>.>), the service API, and the JetStream and KV subjects of
+// its own inbox, the directory and its lease, all keyed by its own flat key. Subscribe: its private reply prefix (_INBOX.<owner>.<flat>.>), its
 // own prompt and status subjects, $SRV.>, and the heartbeats of its own owner (agents.hb.<owner>.*.*).
 //
 // The owner is a literal in every peer line, never a wildcard, so no line reaches another owner's endpoints. a must be
@@ -60,7 +60,7 @@ func fixedPub(a sap.Address) []string {
 	lease := "KV_" + store.LeaseBucket
 	return []string{
 		a.Subjects().HB,
-		"_INBOX.>", // replies (SAP prompt chunks, $SRV answers) go to callers' inboxes only
+		"_INBOX." + a.Owner + ".>", // replies (SAP prompt chunks, $SRV answers) go to inboxes of its own owner only
 		"$SRV.>",
 		"$JS.API.INFO",
 		"$JS.API.STREAM.INFO." + inbox,
@@ -115,6 +115,9 @@ func ValidateGrant(subject string) error {
 		case t != "*" && t != ">" && strings.ContainsAny(t, "*>"):
 			return fmt.Errorf("grant %q refused (%s): partial wildcard token %q", subject, rule, t)
 		}
+	}
+	if toks[0] == "_INBOX" && len(toks) >= 2 && (toks[1] == "*" || toks[1] == ">") {
+		return fmt.Errorf("grant %q refused (a reply-inbox grant must name the owner token, not a wildcard)", subject)
 	}
 	if toks[0] != "agents" && toks[0] != "*" && toks[0] != ">" {
 		return nil

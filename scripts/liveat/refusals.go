@@ -194,7 +194,7 @@ func (a *AT) crossOwner(ha, he Home, bob, alice ep, trees []Home) {
 	const probe = "cross-owner probe text"
 	errs := make(chan error, 16)
 	flat := "bob_dev_build"
-	nc, err := nats.Connect(a.url(), nats.UserCredentials(bob.creds), nats.CustomInboxPrefix("_INBOX."+flat),
+	nc, err := nats.Connect(a.url(), nats.UserCredentials(bob.creds), nats.CustomInboxPrefix("_INBOX.bob."+flat),
 		nats.MaxReconnects(0), nats.Timeout(5*time.Second),
 		nats.ErrorHandler(func(_ *nats.Conn, _ *nats.Subscription, e error) {
 			select {
@@ -227,9 +227,72 @@ collect:
 	a.C.Check("INV-002: the server refuses bob's publish to agents.mail.alice.dev.design with a permissions violation", mail, "")
 	a.C.Check("INV-002: the server refuses bob's request to agents.prompt.alice.dev.design with a permissions violation", prompt, "")
 	aliceEnv := append(a.Conn(), "MASH_GROUP=dev", "MASH_NAME=design", "MASH_CREDS="+alice.creds, "MASH_STATE_DIR="+filepath.Join(he.State, "design"))
+	a.forgedReplies(he, nc, errs, aliceEnv)
 	r := a.Mash("inbox-alice", he, aliceEnv, "inbox")
 	a.C.Check("alice's inbox is read with her own credentials", r.Code == 0, exitDetail(r))
 	a.C.Check("nothing arrived in alice's inbox from bob", r.Code == 0 && !strings.Contains(r.Text(), probe), "")
+}
+
+// forgedReplies is REQ-005's negative case: bob subscribes to $SRV.>, sees the reply subject of alice's discovery
+// request (the presence probe of `mash who`), and publishes into it a forged discovery answer that claims her offline
+// endpoint is up, and a second answer shaped like a replayed registration. The server must refuse both with a
+// permissions violation (bob's publish rights stop at _INBOX.bob.>), and who must not show her endpoints online.
+func (a *AT) forgedReplies(he Home, nc *nats.Conn, errs chan error, aliceEnv []string) {
+	spy, err := nc.SubscribeSync("$SRV.>")
+	if err == nil {
+		err = nc.Flush()
+	}
+	if !a.C.Check("REQ-005: bob subscribes to $SRV.> and sees discovery requests", err == nil, errDetail(err)) {
+		return
+	}
+	forged := []byte(`{"name":"agents","type":"io.nats.micro.v1.info_response","metadata":{"owner":"alice","group":"dev","instance":"design","agent":"claude-code"},` +
+		`"endpoints":[{"name":"prompt","subject":"agents.prompt.alice.dev.design"}]}`)
+	replay := []byte(`{"name":"agents","type":"io.nats.micro.v1.info_response","metadata":{"owner":"alice","group":"dev","instance":"review","agent":"claude-code",` +
+		`"user_nkey":"UREPLAYED","account":"AREPLAYED","id_sig":"replayed"},"endpoints":[{"name":"prompt","subject":"agents.prompt.alice.dev.review"}]}`)
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			m, err := spy.NextMsg(50 * time.Millisecond)
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			if err == nil && strings.HasPrefix(m.Subject, "$SRV.INFO") && strings.HasPrefix(m.Reply, "_INBOX.alice.") {
+				_ = nc.Publish(m.Reply, forged)
+				_ = nc.Publish(m.Reply, replay)
+				_ = nc.Flush()
+			}
+		}
+	}()
+	es, r := a.who(he, aliceEnv)
+	close(stop)
+	<-done
+	_ = nc.Flush()
+	refused := 0
+	deadline := time.After(3 * time.Second)
+collect:
+	for refused < 2 {
+		select {
+		case e := <-errs:
+			if m := strings.ToLower(e.Error()); strings.Contains(m, "permissions violation for publish") && strings.Contains(m, "_inbox.alice.") {
+				refused++
+			}
+		case <-deadline:
+			break collect
+		}
+	}
+	a.C.Check("REQ-005: alice's mash who ran while bob answered", r.Code == 0 && len(es) > 0, exitDetail(r))
+	a.C.Check("REQ-005: the server refuses bob's forged discovery answer and his replayed presence answer with permissions violations", refused >= 2, fmt.Sprintf("%d violation(s) seen", refused))
+	online := ""
+	for _, e := range es {
+		if e.Online {
+			online += e.Identity + " "
+		}
+	}
+	a.C.Check("REQ-005: alice's who does not list her offline endpoints as online", online == "", "online: "+orNone(online))
 }
 
 func errDetail(err error) string {

@@ -414,7 +414,7 @@ func TestEndpointCannotUpdateItsStream(t *testing.T) {
 	if _, err := a.Provision(ctx, ep(t, "alpha"), u, e.Account, "", admin.Meta{}); err != nil {
 		t.Fatal(err)
 	}
-	nc, err := nats.Connect(e.URL, natsauth.UserCredentials(creds), nats.CustomInboxPrefix("_INBOX.o_dev_alpha"))
+	nc, err := nats.Connect(e.URL, natsauth.UserCredentials(creds), nats.CustomInboxPrefix("_INBOX.o.o_dev_alpha"))
 	if err != nil {
 		t.Fatal(err)
 	}
