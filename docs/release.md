@@ -35,10 +35,18 @@ refuses, and the maintainer asks for the tag. There is no `SHA256SUMS.sig` and n
 attested subject instead. Every attestation check pins four facts: `-R <repo>`, `--signer-workflow
 <repo>/.github/workflows/release.yml`, `--source-ref refs/tags/v<version>` and `--source-digest <X>` (X is the release
 commit). `release-check --assets` verifies the four binaries and `SHA256SUMS` that way and rebuilds the binaries. After
-`--assets` passes, publication is `scripts/release-check publish <version> <X>`: once the service's tag exists at X it
+`--assets` passes, publication is `scripts/release-check publish <version> <X>` (for 0.5.5: `scripts/release-check publish --not-latest 0.5.5 <X>`, see below): once the service's tag exists at X it
 runs the pre-tag gate, `--assets` and the final checks (the sums and every attestation again) immediately before
 `gh release edit v<version> --draft=false`, so the publish step is bound to what was just verified. It makes no tag and
 signs nothing. Do not publish a keyless draft with a bare `gh release edit`.
+
+**0.5.5 is published with `--not-latest`**, and so is every resume of that publish: `scripts/release-check publish --not-latest 0.5.5 <X>`
+(0.5.0 stays the release that running deployments keep using; 0.5.5 reads none of its state). With the flag the publish edit
+carries `--latest=false`, and the command then reads `gh release list --json tagName,isLatest` back and fails if v0.5.5 is
+marked latest or is missing from the list; a rerun on an already published release re-checks it too. Required step of
+the procedure: after the command reports success, check by eye that `gh release list` still shows v0.5.0 as Latest and
+v0.5.5 as not Latest. A publish made without the flag is a mistake: if the release is then marked latest, set it back with
+`gh release edit v0.5.5 --latest=false` and say so in the release record.
 
 ### What a keyless release does not prove
 
