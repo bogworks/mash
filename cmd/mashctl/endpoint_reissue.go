@@ -55,7 +55,8 @@ const endpointReissueUsage = `usage: mashctl endpoint reissue ADDRESS (--public-
   Errors include superseded: another reissue changed the endpoint's key while this one ran, so the file this run wrote
   was removed; run the command again.
   Refusals include reissue_busy: another reissue of ADDRESS is running (its pid and host are named when readable). A lock
-  left by a killed run on this host is reclaimed automatically; a lock from another host after 5 minutes.
+  left by a killed run on this host is reclaimed automatically; a lock taken on another host, or where the process
+  cannot be checked, after 5 minutes.
   exit codes: 0 done, planned or unchanged, 1 refused, 2 usage, 5 partial (bulk), 6 error
 Example:
   mashctl endpoint reissue alice/dev/design --public-key design.pub
@@ -68,8 +69,8 @@ var errEpBusy = errors.New("lock busy")
 // epLockWait is how long epLock waits for a lock held by another run.
 var epLockWait = 10 * time.Second
 
-// epLockStaleAfter is the age after which a lock is reclaimed whatever its owner: a reissue takes seconds (the name
-// lock is held 30 s at most).
+// epLockStaleAfter is the age after which a lock is reclaimed when its owner's liveness cannot be checked (another
+// host, or no process check): a reissue takes seconds (the name lock is held 30 s at most).
 const epLockStaleAfter = 5 * time.Minute
 
 // epLockNoOwnerAfter is the age of a lock directory with no readable owner file after which it is reclaimed: a kill
@@ -103,22 +104,30 @@ func epReadOwner(path string) (o epOwner, raw string, ok bool) {
 
 // epWriteOwner writes the owner file whole under a temporary name in the lock directory and renames it into place, so
 // a reader never sees a half-written file.
-func epWriteOwner(dir string) error {
+func epWriteOwner(dir string) (text string, err error) {
 	host, _ := os.Hostname()
+	text = epOwner{os.Getpid(), host, time.Now().Unix()}.String()
 	tmp := filepath.Join(dir, ".owner.tmp")
-	if err := os.WriteFile(tmp, []byte(epOwner{os.Getpid(), host, time.Now().Unix()}.String()), 0o600); err != nil {
-		return err
+	if err := os.WriteFile(tmp, []byte(text), 0o600); err != nil {
+		return "", err
 	}
-	return os.Rename(tmp, filepath.Join(dir, "owner"))
+	return text, os.Rename(tmp, filepath.Join(dir, "owner"))
 }
 
 // epLockStale judges the lock directory at path: stale is true when it may be reclaimed, and raw is the owner file
-// text the judgement rests on ("" when there is none).
+// text the judgement rests on ("" when there is none). A lock whose owner is on this host, with a pid state that can
+// be checked, is judged by the pid alone: a running owner is never stale, whatever the age. The age rule
+// (epLockStaleAfter) applies only when liveness cannot be checked: another host, or an unknown pid state.
 func epLockStale(path string) (stale bool, raw string) {
 	o, raw, ok := epReadOwner(path)
 	if ok {
-		if host, _ := os.Hostname(); o.host == host && epPidState(o.pid) == 0 {
-			return true, raw
+		if host, _ := os.Hostname(); o.host == host {
+			switch epPidState(o.pid) {
+			case 0:
+				return true, raw
+			case 1:
+				return false, raw
+			}
 		}
 		return time.Since(time.Unix(o.start, 0)) > epLockStaleAfter, raw
 	}
@@ -131,10 +140,14 @@ func epLockStale(path string) (stale bool, raw string) {
 
 // epReclaim removes the lock at path when it is stale. Runs that reclaim at once are serialized by a second directory,
 // <path>.reclaim, taken with os.Mkdir; under it the lock is judged again, so a lock another run has just taken is not
-// mistaken for the stale one. The stale directory is renamed to a unique sibling (rename is atomic: the lock path is
-// free or taken, never half removed) and removed. The reclaim directory of a run killed inside this function is
-// removed when it is older than epLockNoOwnerAfter. A narrow window remains: a run killed between the judgement and
-// the rename, or a reclaim directory removed as stale while its run is still working, lets two runs reclaim at once.
+// mistaken for the stale one. The judged directory is renamed to a unique sibling (rename is atomic: the lock path is
+// free or taken, never half removed) and its owner text is read again: when it is not the text that was judged, a new
+// holder replaced the lock between the judgement and the rename, and the directory is renamed back (this fails
+// harmlessly when the path was taken again) and not removed. Otherwise the moved directory is removed. The reclaim
+// directory of a run killed inside this function is removed when it is older than epLockNoOwnerAfter. A window
+// remains only for a lock whose owner's liveness cannot be checked (another host, or a platform with no process
+// check): a holder that is alive past epLockStaleAfter can lose its lock. For a lock on this host the pid decides and
+// no such window exists.
 func epReclaim(path string) {
 	gate := path + ".reclaim"
 	if err := os.Mkdir(gate, 0o700); err != nil {
@@ -144,13 +157,50 @@ func epReclaim(path string) {
 		return
 	}
 	defer os.Remove(gate)
-	if stale, _ := epLockStale(path); !stale {
+	stale, raw := epLockStale(path)
+	if !stale {
 		return
 	}
-	moved := fmt.Sprintf("%s.stale.%d.%d", path, os.Getpid(), time.Now().UnixNano())
-	if os.Rename(path, moved) == nil {
-		os.RemoveAll(moved)
+	if epReclaimAfterJudge != nil {
+		epReclaimAfterJudge()
 	}
+	moved, err := epMoveAside(path)
+	if err != nil {
+		return
+	}
+	if _, now, _ := epReadOwner(moved); now != raw {
+		os.Rename(moved, path)
+		return
+	}
+	os.RemoveAll(moved)
+}
+
+// epReclaimAfterJudge is a test seam called inside epReclaim after the stale judgement and before the rename.
+var epReclaimAfterJudge func()
+
+// epMoveAside renames the directory at path to a unique sibling <path>.stale.<pid>.<nanos> and returns that name.
+func epMoveAside(path string) (string, error) {
+	moved := fmt.Sprintf("%s.stale.%d.%d", path, os.Getpid(), time.Now().UnixNano())
+	return moved, os.Rename(path, moved)
+}
+
+// epRelease removes the lock directory at path only when its owner file still holds text, the text this run wrote:
+// the owner file is read again, and the directory is renamed to a unique sibling and removed there, so a run that
+// takes the path at the same moment never loses its lock half-way. A lock whose owner text differs, or is missing, is
+// left alone.
+func epRelease(path, text string) {
+	if _, raw, _ := epReadOwner(path); raw != text {
+		return
+	}
+	moved, err := epMoveAside(path)
+	if err != nil {
+		return
+	}
+	if _, raw, _ := epReadOwner(moved); raw != text {
+		os.Rename(moved, path)
+		return
+	}
+	os.RemoveAll(moved)
 }
 
 // epLock takes the lock directory at path: os.Mkdir is exclusive, the attempt repeats every 50 ms for epLockWait, and a
@@ -161,11 +211,12 @@ func epLock(path string) (unlock func(), err error) {
 	for {
 		err := os.Mkdir(path, 0o700)
 		if err == nil {
-			if werr := epWriteOwner(path); werr != nil {
+			text, werr := epWriteOwner(path)
+			if werr != nil {
 				os.RemoveAll(path)
 				return nil, werr
 			}
-			return func() { os.RemoveAll(path) }, nil
+			return func() { epRelease(path, text) }, nil
 		}
 		if !errors.Is(err, fs.ErrExist) {
 			return nil, err
@@ -187,7 +238,7 @@ func epBusyDetail(addr sap.Address, lockPath string) string {
 	if o, _, ok := epReadOwner(lockPath); ok {
 		who = fmt.Sprintf(" (pid %d on %s)", o.pid, o.host)
 	}
-	return fmt.Sprintf("another reissue of %s is running%s; a lock left by a killed run on this host is reclaimed automatically, one from another host after %d minutes; run this again later", addr, who, int(epLockStaleAfter/time.Minute))
+	return fmt.Sprintf("another reissue of %s is running%s; a lock left by a killed run on this host is reclaimed automatically; a lock taken on another host, or where the process cannot be checked, after %d minutes; run this again later", addr, who, int(epLockStaleAfter/time.Minute))
 }
 
 // runEndpointReissue is `mashctl endpoint reissue`.
