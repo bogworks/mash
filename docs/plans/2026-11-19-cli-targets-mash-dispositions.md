@@ -765,3 +765,41 @@ one list: REQ-003's synopsis names no `--server` (Y1); REQ-003's unqualified
 `trust-reset-refuse`. Added (6): `install-check`, `serve-backlog`,
 `status-mailbox-over`, `status-mailbox-off`, `status-detail-mailbox-over`,
 `mailbox-limit-refuse`.
+
+## DRAFT8: contract rev 16 rulings
+
+Sources: the lead's brief for DRAFT8 (five numbered items, each split into rows
+below) and contract revision 16 (`mash-0.5.6-cli-ux`, rev 16 draft, the newest
+in `masterplanner/for-herds/mash-0.5.6/` at the start and at the end of this
+work; its REQ-001, REQ-003, REQ-004, REQ-011, REQ-015, INV-003, AT-007 and
+AT-008 were read for every line about mash command output). Ids are `D8-1.n`
+to `D8-5.n`. Z1 to Z8 are the decisions in section 7 of the targets file;
+blocks named are packet keys.
+
+| # | item | disposition | where in the targets (DRAFT8), or why not |
+|---|---|---|---|
+| D8-1.1 | `--ca` and `--server` BOTH required on a first install; each missing one exits 2, checked before anything is read | FIXED | R15, step C text; `install-refuse` (two blocks); Y2 conformed |
+| D8-1.2 | Two refusal blocks `error: a first install needs --ca <file>` and `... --server <address>`, each with a labelled fix and the full command line to run | FIXED | The two `install-refuse` blocks now end in the whole command (with `<ca file>` or `<address>`); both are over 80 columns and exempt (R9, 111 and 98) |
+| D8-1.3 | A later install for another endpoint uses the configured server and CA; a flag given must match, else it refuses untouched naming the file to move aside | FIXED | R15, R17, section 3, the second-endpoint text, `help`; the two existing refusals (`newhost`, `newca`) show it |
+| D8-1.4 | Update help and every example, block, fix and hand-over text | FIXED | `help` (two usages, text), the status and send fixes keep their later-install form (config exists), the no-configuration and removed-verb fixes carry both flags, the trust fixes |
+| D8-2.1 | NEW CHECK (F15-2): the token's signature verifies against the key of the account of the AUTHENTICATED server, before any write; refusal block with the lead's text and a labelled fix | FIXED | `install-refuse` (`this token was not signed by the account of the server at myserver:4222`), R15, step C, `trust` text; Y4 reversed. The word `account` is the lead's: R2 names it as one exception (Z1) |
+| D8-2.2 | Success output: no new line; extend the existing `checked` line | FIXED | `checked  the server at myserver:4222: its certificate is from this CA for its name, and it made this token` in every install block (Z1); `--json` gets `token_checked` (Z8) |
+| D8-2.3 | WRITE ORDER (F15-6): preflight, then the CA, then the credentials, then `config.json` last as the commit point; success lines in that order | FIXED | File safety (section 2), R20, step C; every install block, and the two `--make-key` blocks quoted from mashctl (Z3) |
+| D8-2.4 | A rerun COMPLETES an interrupted install; new block `install-rerun` | FIXED | `install-rerun`: CA copy `kept (unchanged)`, credentials and `config.json` `wrote`, `config.json` last; UNVERIFIED that the screen is the full first-install one (Z2) |
+| D8-2.5 | The rule text in the file-safety and output-contract section | FIXED | Section 2, "Write order of `credential install`" |
+| D8-3.1 | `--creds FILE` DROPPED from `credential install` everywhere (help, blocks, MCP, mashctl hand-over wording) | FIXED | `install-creds` block and its packet key removed; help, R16, section 4 bullets, the changes paragraph, the hand-overs, sections 7 to 9; Y3 superseded; no MCP field named it. mashctl's `--make-key` and `--creds-out` stay as its own targets |
+| D8-3.2 | The trust screens' fix named `--creds` | CHANGED OTHERWISE | Two `mv` lines (`ca.pem`, `config.json`) then a first install with placeholders; UNVERIFIED which files must be moved (Z4) |
+| D8-4.1 | REQ-015 count = pending plus ack-pending; O1 digest-listed count; O2 reading does not lower it | FIXED | R22, section 5b ("The definition (DECIDED, the lead, contract rev 16)", differences 2 and 3, O1 and O2 marked DECIDED), MCP `mailbox.waiting`, the serve-backlog text |
+| D8-4.2 | Cooldown per endpoint, from the last wake, not surviving a restart; say so in 5b and the serve-backlog text | FIXED | R22, section 5b (wake, difference 4), "The backlog wake (REQ-015)", Z5; packet section 12 |
+| D8-4.3 | `mash endpoint status` shows the count only for the caller's own owner, else `unknown` (a `MAILBOX` column) | FIXED, one point UNVERIFIED | Section 5b's table row (the only place the targets name that view), R22, Z6; the permission is UNVERIFIED |
+| D8-5.1 | The deliberate refusal leaves the quick start | NOT TAKEN HERE | README only, not edited by this lane |
+| D8-5.2 | Fix the `localhost` vs `myserver` mismatch in the blocks where the helper's real address is shown; decide the simplest consistent choice | FIXED (Z7) | One-machine blocks use `tls://localhost:4222` (status, serve, send, the second-endpoint install, the MCP examples, the plain-text override block); `tls://myserver:4222` stays on the other-machine path (steps B and C, their refusals and trust screens, the help example). The cast paragraph says it once; no extra printed rule |
+| D8-5.3 | Re-measure widths, update counts, packet keys and checks run | FIXED | Section 9: 144 fenced blocks, 123 chosen by markers, 66 keys (`install-creds` removed, `install-rerun` added); no printed line over 80 except the exemptions |
+
+Counts: 17 rows; FIXED 14 (D8-4.3 with one UNVERIFIED point); CHANGED OTHERWISE
+1 (D8-3.2); NOT TAKEN HERE 1 (D8-5.1); FIXED with a decision 1 (D8-5.2).
+Contract rev 16 lines not conformed to: none that a target output can show; three
+points are UNVERIFIED (REQ-015's owner-wide read with the caller's own
+credentials; that a rerun prints the full first-install screen; the file set
+named by the trust screens). Packet keys removed (1): `install-creds`. Added
+(1): `install-rerun`.

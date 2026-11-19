@@ -1,6 +1,6 @@
-# mash status views, DRAFT1
+# mash status views, DRAFT2
 
-Date: 2026-11-19. Status: DRAFT1, paper design only (nothing is built, no
+Date: 2026-11-19. Status: DRAFT2, paper design only (nothing is built, no
 product code, the targets document is not edited). It answers the maintainer's
 comment on the noon page: "I see no reason to put the mash server details in
 the mash status. There's only one server in your mash and if you don't know
@@ -9,6 +9,21 @@ endpoint), `mash server status` (my mash server) and `mash endpoint status`
 (all endpoints by my owner, taking an endpoint path and simple patterns), and
 asks: "Other?", "can you see heartbeat status?" and "What does mash report via
 SAP status, and should it be in mash status?".
+
+Proposed to Randy, hard cut of `mash who`: the view set `mash status` (this
+endpoint), `mash server status` (the server) and `mash endpoint status
+[<address or pattern>]`, which REPLACES `mash who` with no alias. The lead
+accepted this set as the proposal; the maintainer has not ruled on it yet.
+
+decision 249: where it sits is being decided now.
+
+(That decision is about mail that waits in an idle mailbox; meanwhile status
+shows the mailbox count, and the backlog wake of REQ-015 covers the rest.)
+
+DRAFT2 changes DRAFT1 as the lead ruled: the view set is the proposal above;
+`LAST SEEN` is a local record, labelled `LAST SEEN HERE` (section 4.4); the
+`inbox` row is the `mailbox` row of REQ-015 on every screen; `mashctl status`
+keeps its name (section 6, item 9). Section 7 marks what is settled.
 
 No clock: quality first. The fixed-rows idea of the status screen stays (R11 of
 `docs/plans/2026-11-19-cli-targets-mash.md`, DRAFT6c); the rows change.
@@ -36,7 +51,7 @@ measures every fenced block.
 2. What an endpoint may read (the facts every view stands on)
 3. (b) What mash reports through SAP status today, field by field
 4. (a) The three views: `mash status`, `mash server status`,
-   `mash endpoint status`
+   `mash endpoint status`; 4.4 the last-seen-here record
 5. (c) "Other?": the questions none of the three answer, and the names
 6. (d) Fit with the CLI standard; Agree with ctl
 7. Open questions for the maintainer
@@ -48,17 +63,23 @@ measures every fenced block.
 The recommended view set (one name per thing):
 
 - `mash status`: this endpoint only. Verdict, then six fixed rows: version,
-  server (reachable or not, no address), config, credentials, inbox (how much
-  mail is new), session (is a Claude Code session serving it).
+  server (reachable or not, no address), config, credentials, mailbox (how
+  many messages are waiting, REQ-015), session (is a Claude Code session
+  serving it).
 - `mash server status`: the server. Address, reachable, encrypted and its
   certificate, clock, storage, message limit, endpoints registered. Only what
   an ordinary endpoint's credentials may read; the rest is `mashctl`.
 - `mash endpoint status [<address or pattern>]`: the endpoints of your owner,
-  live: online or offline and last seen. It REPLACES `mash who` (hard cut, no
-  alias). A pattern is three dotted parts, owner literal, `*` inside a part.
+  live: online or offline, `LAST SEEN HERE` (the last time this machine saw it
+  online, from a local record) and `MAILBOX` (a count for your own endpoint,
+  `unknown` for the others). It REPLACES `mash who` (hard cut, no alias). A
+  pattern is three dotted parts, owner literal, `*` inside a part.
 - `mashctl endpoint list` stays the administrator's registry (created, type,
-  note, never-seen endpoints included); `mashctl status` becomes `mashctl
-  server status`, the same noun as the person's `mash server status`.
+  note, never-seen endpoints included). ONE name for the administrator's
+  status: `mashctl status` stays (about the operator's tool: admin sign-in,
+  shared storage, key directory, config paths), next to `mash server status`
+  (the server as an endpoint's credentials see it); `mashctl server status`
+  is withdrawn. Confirmation from ctl pending (section 6, item 9).
 - Heartbeat and SAP status stay internal. A person sees conclusions
   (online, session serving), never the payload.
 
@@ -82,7 +103,8 @@ asks it. It should NOT be in `mash status`: it says only "I answered", which
 What the targets get wrong today, found while reading (details in sections 3
 and 7): the `LAST SEEN 3h ago` of `mash who` cannot be produced by 0.5.5 (the
 time is kept in the memory of one process and is set only for an endpoint that
-answered a probe, `directory.go:25,79,94`); the claim that `mash who` shows only
+answered a probe, `directory.go:25,79,94`; DRAFT2 gives it a local record,
+section 4.4); the claim that `mash who` shows only
 your owner's endpoints (N13) is wrong (`directory.go:89-103` filters nothing,
 presence is the part that is owner-only, `directory.go:64`); and `runs on` in
 `who --detail` is the directory's `host` field, where an administrator says the
@@ -113,7 +135,7 @@ the three views, each one a question the screen must pass:
    protocol under the mail: absent. The address appears in an error or a fix
    only when it is what the person must check.
 7. One thing, one name, one form: the dotted address, `online`, `offline`,
-   `new`. No second word for the same thing (`unread`, `alive`, `lease`).
+   `waiting`. No second word for the same thing (`unread`, `alive`, `lease`).
 8. A fix is a true next step and a command stands alone (R4, R9, R10). A
    screen that worked ends without a hint: the answer was the point.
 
@@ -210,7 +232,7 @@ families, each with what a person should see and where:
 | `$SRV.INFO` metadata `agent`, `owner`, `group`, `instance` | `service.go:233-238` | the address | the address column |
 | `$SRV.INFO` metadata `user_nkey`, `account`, `id_sig`, `mail_subject` | `service.go:233-238` | nothing (the key is checked against the directory, then dropped) | nowhere (internal; `directory.go:54-85`) |
 | online (the probe) | `client.go:474-500`, `directory.go:54-103` | online or offline | endpoint status `STATE`; `session` row of `mash status` (own) |
-| last seen | `directory.go:25,79,94` (memory of one process) | when it last answered | endpoint status `LAST SEEN`, needs a new record (section 4, question 4) |
+| last seen | `directory.go:25,79,94` (memory of one process) | when it last answered | endpoint status `LAST SEEN HERE`, from a local record (section 4.4) |
 | directory record: owner, group, instance | `store/store.go:223-228` | the address | address column |
 | directory record: `agent` | `store.go:227` | the program | `--detail` |
 | directory record: account, user, mail_subject | `store.go:228-230` | nothing | nowhere (internal) |
@@ -218,8 +240,8 @@ families, each with what a person should see and where:
 | directory record: note, role, host, description, caps, labels | `store.go:232-242` | what it is for; where it is meant to run (`host`) | `--wide` / `--detail`; `--role`, `--label`, `--cap` filters |
 | own lease: `host`, `since`, `version`, `commit`, `pid`, `machine` | `endpoint.go:147-168` | whether a session serves this endpoint, since when, on which machine | `mash status` row `session`; `--detail` for host |
 | own lease: `mcp_seen`, `launch_token`, `ppid`, `session` | `endpoint.go:155-171` | nothing | nowhere (internal, takeover logic) |
-| own lease: `waking_pending` + `_at` | `endpoint.go:172-178`, `waking.go` | nothing: it counts mail that should WAKE, not new mail | nowhere (the inbox row uses the inbox's own count) |
-| own inbox: counts, fill, evictions | `eviction.go:22-40` | new mail; a warning when mail was lost or the inbox is nearly full | `mash status` row `inbox` and a `warning:` |
+| own lease: `waking_pending` + `_at` | `endpoint.go:172-178`, `waking.go` | nothing: it counts mail that should WAKE, not the backlog | nowhere (the mailbox row uses the inbox's own unacknowledged count) |
+| own inbox: counts, fill, evictions | `eviction.go:22-40` | mail waiting (pending plus delivered-unacknowledged); a warning when mail was lost, the inbox is nearly full, or the count passes the limit | `mash status` row `mailbox` and a `warning:`; `MAILBOX` of your own endpoint |
 | clock offset | `endpoint.go:855-868`, `status.go:325-345` | only when it is wrong (beyond 10s) | `mash server status` row `clock` |
 | server `max_payload` | `mail.go:715,798` | the largest message | `mash server status` row `message limit` |
 
@@ -260,7 +282,7 @@ process's memory (`endpoint.go:100`, set at `directory.go:79`), so a one-shot
 `mash who` knows a last-seen time only for the endpoints that answered it, and
 that time is "now". An endpoint that was online yesterday shows no last-seen at
 all today. The target `LAST SEEN 3h ago` (targets, `who`, lines 2663-2684) has
-no source in 0.5.5. Section 4, question 4 says what it needs.
+no source in 0.5.5. Section 4.4 says what the local record is.
 
 Should the SAP status payload be in `mash status`? No. Every field is either
 internal (instance id, timestamp, interval, subjects, protocol) or a limit of
@@ -272,7 +294,9 @@ is it reachable", is a conclusion, and the screens show it as one.
 ### 4.1 `mash status`: this endpoint only
 
 The question: "can this endpoint send and receive mail, and is anything
-waiting?" It names no other endpoint and no server address.
+waiting?" It names no other endpoint and no server address. The rows are the
+fixed rows of REQ-004: verdict, version, server (no address), config,
+credentials and the mailbox (REQ-015); `session` is the one row added here.
 
 The six fixed rows, in this order, in every state, each with its reason:
 
@@ -282,8 +306,8 @@ The six fixed rows, in this order, in every state, each with its reason:
 | `server` | can this machine reach the server, encrypted and trusted; the one outside fact mail needs; NO address |
 | `config` | is there a configuration whose trust files agree (R21) |
 | `credentials` | is this endpoint's own file there, private, and accepted by the server |
-| `inbox` | is mail waiting, and how much: the first thing a person wants to know once it works |
-| `session` | does a Claude Code session serve this endpoint: why mail did, or did not, arrive on its own |
+| `mailbox` | how many messages wait, against the limit of REQ-015: the first thing a person wants to know once it works |
+| `session` | does a Claude Code session serve this endpoint: kept because it says why mail, or the backlog wake of REQ-015, did or did not reach a session on its own; it costs one lease read and is `not checked` without sign-in |
 
 Not rows: the endpoint (it is in the verdict and in `--detail`), how it was
 chosen (`--detail`), the server's address (`mash server status`; in an error
@@ -303,11 +327,20 @@ Row values, the complete lists (anything else is a defect):
   occur, and the `last reached` of N10 is no longer needed here.
 - `config`, `credentials`: as the targets (`ok`, `MISSING`, `REFUSED`,
   `UNSAFE`, `not checked`).
-- `inbox`: `no new mail`; `2 new (1 urgent)`; `not checked`. The count is the
-  one `mash inbox` says in its header ("57 messages ..., 3 new, 1 urgent";
-  targets, `inbox`); it comes from the endpoint's own inbox and consumer,
-  which the credentials may read (section 2). When mail was lost or the inbox
-  is nearly full, a `warning:` follows (`eviction.go:22-60`).
+- `mailbox` (REQ-015): `0 waiting`; `2 waiting`; `17 waiting, OVER THE LIMIT
+  OF 15` (a warning: the verdict says `mail works (1 warning)`, exit 0);
+  `off` (the config key `mailbox_limit` is 0); `not checked`. The count is
+  the BACKLOG: messages delivered to the endpoint's inbox that the inbox
+  consumer has not acknowledged, pending plus delivered-unacknowledged. A
+  message listed in a digest still counts, and reading it with `mash read`
+  does not lower the count. The count comes from the endpoint's own inbox and
+  consumer, which its credentials may read (section 2). The limit is the
+  config key `mailbox_limit` (default 15). When the count passes the limit,
+  `mash serve` wakes the session at once, whatever the kind of the messages;
+  the cooldown is per endpoint, from the last backlog wake, at most one wake
+  per 10 minutes, and it does not survive a restart of `mash serve`. When
+  mail was lost or the inbox is nearly full, a second `warning:` follows
+  (`eviction.go:22-60`).
 - `session`: `serving since 09:12`; `not running`; `not checked`. From the
   endpoint's own lease (section 2), and fresh within 90 seconds
   (`store.LeaseTTL`, `store.go:22`; the lease is renewed every 30s,
@@ -331,14 +364,15 @@ acme.demo.bob: mail works.
   server       reachable
   config       ok
   credentials  ok
-  inbox        2 new (1 urgent)
+  mailbox      2 waiting
   session      serving since 09:12
 ```
 
 Healthy, `--detail`. The seven rows of REQ-012 are unchanged and come after
 the six. The group counts leave (they are the verdict of `mash endpoint
 status`), the clock and the answer time leave (they are `mash server status`);
-the configured server address is one fact row (question 3):
+the configured server address is one fact row (question 3) and the mailbox
+limit is one fact row (an eighth fact row, which REQ-012 needs a note for):
 
 <!-- packet: status-detail -->
 ```
@@ -349,7 +383,7 @@ acme.demo.bob: mail works.
   server       reachable
   config       ok
   credentials  ok
-  inbox        2 new (1 urgent)
+  mailbox      2 waiting
   session      serving since 09:12
 
   config file       /home/bob/.config/mash/config.json
@@ -359,6 +393,7 @@ acme.demo.bob: mail works.
   trust             matches config (generation 1; the account acme)
   endpoint          acme.demo.bob
   chosen by         the only one installed here
+  mailbox limit     15 (mailbox_limit in config.json)
 
   server        tls://myserver:4222
   commit        e389eaf
@@ -383,13 +418,35 @@ acme.demo.bob: mail works (1 warning).
   server       reachable
   config       ok
   credentials  ok
-  inbox        1 new
+  mailbox      1 waiting
   session      serving since 09:12
 
 warning: an idle Claude Code session is not woken by new mail; the mail
          waits for its next prompt.
 fix: start Claude Code with the mash channel, from the terminal you want it in:
   claude --dangerously-load-development-channels plugin:mash@mash
+```
+
+The mailbox is over its limit (warning, exit 0; AT-008). The count is the
+backlog, and reading a message does not lower it, so the warning says so and
+does not promise a way out that the contract does not give (section 9):
+
+<!-- packet: status-mailbox-over -->
+```
+$ mash status
+acme.demo.bob: mail works (1 warning).
+
+  version      0.5.6
+  server       reachable
+  config       ok
+  credentials  ok
+  mailbox      17 waiting, OVER THE LIMIT OF 15
+  session      serving since 09:12
+
+warning: 17 messages are waiting here, over the limit of 15. Reading a
+         message does not lower the count.
+fix: see what is waiting:
+  mash inbox
 ```
 
 Server not reachable (exit 6). The address appears in the fix only: it is the
@@ -405,7 +462,7 @@ acme.demo.bob: mail does NOT work: the server did not answer within 2s.
   server       NOT REACHABLE
   config       ok
   credentials  not checked (the server was not reached)
-  inbox        not checked
+  mailbox      not checked
   session      not checked
 
 fix: check that the server at tls://myserver:4222 is running, and that
@@ -423,7 +480,7 @@ acme.demo.bob: mail does NOT work: the server refused its credentials.
   server       reachable
   config       ok
   credentials  REFUSED (deleted, or its key was reissued)
-  inbox        not checked
+  mailbox      not checked
   session      not checked
 
 fix: ask whoever runs your mash server which of the two it was. If the key
@@ -444,7 +501,7 @@ acme.demo.bob: mail does NOT work: this endpoint was DELETED on the server.
   server       reachable
   config       ok
   credentials  REFUSED (endpoint DELETED)
-  inbox        not checked
+  mailbox      not checked
   session      not checked
 
 fix: its address cannot be used again. For a new endpoint, make a new key,
@@ -464,7 +521,7 @@ mail does NOT work: mash has no configuration on this machine.
   server       not checked (no server is set)
   config       MISSING (~/.config/mash/config.json)
   credentials  not checked
-  inbox        not checked
+  mailbox      not checked
   session      not checked
 
 fix: install the credentials your server made. mash asks for the server
@@ -486,7 +543,7 @@ mail does NOT work: 2 endpoints are installed here and none is chosen.
   server       reachable
   config       ok
   credentials  not checked (no endpoint is chosen)
-  inbox        not checked
+  mailbox      not checked
   session      not checked
 
 fix: mash never guesses between acme.demo.alice and acme.demo.bob. To use
@@ -510,7 +567,7 @@ acme.demo.bob: mail works (1 warning).
   server       reachable, NOT ENCRYPTED
   config       ok
   credentials  ok
-  inbox        2 new (1 urgent)
+  mailbox      2 waiting
   session      serving since 09:12
 
 warning: anyone on the network can read your credentials and your mail.
@@ -534,7 +591,7 @@ acme.demo.bob: mail does NOT work: MASH_SERVER overrides config.json.
   server       not checked (MASH_SERVER overrides config.json)
   config       ok
   credentials  not checked (the server was not asked)
-  inbox        not checked
+  mailbox      not checked
   session      not checked
 
 fix: MASH_SERVER is overriding the server in config.json for this run
@@ -550,7 +607,7 @@ not connected)`, exit 1), the override set with a tls address (a warning;
 UNSAFE ...`, exit 1) or missing, and the trust files that disagree (`config
 REFUSED (disagrees with the trust record)`, `server  not checked (the trust
 files disagree)`). In a running session the MCP `status` tool returns the
-same six facts (section 8).
+same six facts (section 8). With `mailbox_limit` 0 the row says `off`.
 
 ### 4.2 `mash server status`: the server
 
@@ -736,8 +793,25 @@ The filters of `who` that are not a name stay as flags: `--online`,
 `--offline`, `--role SUB`, `--label K[=V]`, `--cap C`, `--match TEXT`. `--owner`
 and `--name` are removed: the pattern says both.
 
-Columns: `ENDPOINT`, `STATE` (`online` or `offline`), `LAST SEEN`. `*` marks the
-caller. The verdict line names the set and the counts, which says which
+Columns: `ENDPOINT`, `STATE` (`online` or `offline`), `LAST SEEN HERE` and
+`MAILBOX`. `*` marks the caller.
+
+`LAST SEEN HERE` is the time this machine last saw the endpoint online, from
+the local record of section 4.4, and nothing else: an online endpoint says
+`now`, an offline one the time since the record (`3h ago`), or `never seen
+here`. It is the same fact whoever runs the command, and a different one on
+another machine. The label and the footer line say "from this machine", so
+nobody reads it as a clock kept by the server.
+
+`MAILBOX` is the backlog of REQ-015 (section 4.1), a plain number, followed
+by `OVER` (as in `17 OVER`) when it is past the limit of the caller's own
+endpoint. It is real only
+for the caller's own endpoint: the credentials may read their own inbox and
+no other (section 2), so every other row says `unknown`. REQ-015 words it as
+"only for the caller's own owner's endpoints"; the permissions allow less than
+that, so I read it as "only your own endpoint" (question 14).
+
+The verdict line names the set and the counts, which says which
 endpoints the default acted on (standard rule 8). Sorted by address, because
 a person pastes the address and `grep` finds it. No `NEXT:` under a listing.
 Exit 0 whenever the question was asked and answered, even if every endpoint is
@@ -751,14 +825,16 @@ All endpoints of your owner:
 $ mash endpoint status
 3 endpoints of acme: 1 online, 2 offline.
 
-  ENDPOINT         STATE    LAST SEEN
-  acme.demo.alice  online   now
-* acme.demo.bob    offline  3h ago
-  acme.lab.carol   offline  never
+  ENDPOINT         STATE    LAST SEEN HERE   MAILBOX
+  acme.demo.alice  online   now              unknown
+* acme.demo.bob    offline  3h ago           2
+  acme.lab.carol   offline  never seen here  unknown
 
 * you
 online: a Claude Code session is serving that endpoint now
-last seen: the last time this computer saw it answer; never: not seen yet
+last seen here: from this machine: the last time it saw the endpoint online
+mailbox: messages waiting; only your own can be read, else unknown
+n OVER: the count is past your limit
 ```
 
 A pattern with matches:
@@ -768,13 +844,15 @@ A pattern with matches:
 $ mash endpoint status 'acme.demo.*'
 2 endpoints match acme.demo.*: 1 online, 1 offline.
 
-  ENDPOINT         STATE    LAST SEEN
-  acme.demo.alice  online   now
-* acme.demo.bob    offline  3h ago
+  ENDPOINT         STATE    LAST SEEN HERE   MAILBOX
+  acme.demo.alice  online   now              unknown
+* acme.demo.bob    offline  3h ago           2
 
 * you
 online: a Claude Code session is serving that endpoint now
-last seen: the last time this computer saw it answer; never: not seen yet
+last seen here: from this machine: the last time it saw the endpoint online
+mailbox: messages waiting; only your own can be read, else unknown
+n OVER: the count is past your limit
 ```
 
 A pattern with no match (exit 1; stderr). The fix is true: it is the command
@@ -830,29 +908,35 @@ the endpoint is meant to run on, not a live fact (question 5):
 $ mash endpoint status acme.demo.alice
 acme.demo.alice: online.
 
-  endpoint   acme.demo.alice
-  state      online
-  last seen  now
-  version    0.5.6
-  program    claude-code
-  host       myserver
+  endpoint        acme.demo.alice
+  state           online
+  last seen here  now
+  mailbox         unknown (only your own can be read)
+  version         0.5.6
+  program         claude-code
+  host            myserver
 ```
 
-An endpoint that never reported (registered, no answer ever seen from this
-computer). Nothing is made up: unknown is `-`, and the verdict says what is
+The caller's own endpoint reads its mailbox with the caller's credentials, so
+`mash endpoint status acme.demo.bob` says `mailbox  2 waiting` (or `17
+waiting, OVER THE LIMIT OF 15`) in the same place.
+
+An endpoint that never reported (registered, never seen online from this
+machine). Nothing is made up: unknown is `-`, and the verdict says what is
 true:
 
 <!-- packet: endpoint-status-never -->
 ```
 $ mash endpoint status acme.lab.carol
-acme.lab.carol: offline, never seen.
+acme.lab.carol: offline, never seen here.
 
-  endpoint   acme.lab.carol
-  state      offline
-  last seen  never
-  version    -
-  program    claude-code
-  host       -
+  endpoint        acme.lab.carol
+  state           offline
+  last seen here  never seen here
+  mailbox         unknown (only your own can be read)
+  version         -
+  program         claude-code
+  host            -
 ```
 
 One address, `--detail` (more rows, never a different screen; the storage name
@@ -863,12 +947,13 @@ is shown only here, R3):
 $ mash endpoint status acme.demo.alice --detail
 acme.demo.alice: online.
 
-  endpoint   acme.demo.alice
-  state      online
-  last seen  now
-  version    0.5.6
-  program    claude-code
-  host       myserver
+  endpoint        acme.demo.alice
+  state           online
+  last seen here  now
+  mailbox         unknown (only your own can be read)
+  version         0.5.6
+  program         claude-code
+  host            myserver
 
   registered     2026-11-19 00:21 UTC
   role           reviewer
@@ -886,14 +971,16 @@ A list with `--wide`: more columns on the same row, which may pass 80 columns
 $ mash endpoint status --wide
 3 endpoints of acme: 1 online, 2 offline.
 
-  ENDPOINT         STATE    LAST SEEN  VERSION  PROGRAM      HOST      ROLE
-  acme.demo.alice  online   now        0.5.6    claude-code  myserver  reviewer
-* acme.demo.bob    offline  3h ago     -        claude-code  myserver  -
-  acme.lab.carol   offline  never      -        claude-code  -         -
+  ENDPOINT         STATE    LAST SEEN HERE   MAILBOX  VERSION  PROGRAM      HOST      ROLE
+  acme.demo.alice  online   now              unknown  0.5.6    claude-code  myserver  reviewer
+* acme.demo.bob    offline  3h ago           2        -        claude-code  myserver  -
+  acme.lab.carol   offline  never seen here  unknown  -        claude-code  -         -
 
 * you
 online: a Claude Code session is serving that endpoint now
-last seen: the last time this computer saw it answer; never: not seen yet
+last seen here: from this machine: the last time it saw the endpoint online
+mailbox: messages waiting; only your own can be read, else unknown
+n OVER: the count is past your limit
 ```
 
 Many endpoints. Past 40 rows the table stops and says so; the verdict counts
@@ -906,15 +993,17 @@ the real output prints):
 $ mash endpoint status
 112 endpoints of acme: 7 online, 105 offline. Showing the first 40.
 
-  ENDPOINT                   STATE    LAST SEEN
-  acme.build.runner-001      online   now
-  acme.build.runner-002      offline  2d ago
-  acme.build.runner-003      offline  never
-  acme.build.runner-004      online   now
+  ENDPOINT               STATE    LAST SEEN HERE   MAILBOX
+  acme.build.runner-001  online   now              unknown
+  acme.build.runner-002  offline  2d ago           unknown
+  acme.build.runner-003  offline  never seen here  unknown
+  acme.build.runner-004  online   now              unknown
   ...
 
 online: a Claude Code session is serving that endpoint now
-last seen: the last time this computer saw it answer; never: not seen yet
+last seen here: from this machine: the last time it saw the endpoint online
+mailbox: messages waiting; only your own can be read, else unknown
+n OVER: the count is past your limit
 To see more, narrow it with a pattern or --online, or use --all.
 ```
 
@@ -925,13 +1014,15 @@ The real-name case (address kept whole, widest 54 columns):
 $ mash endpoint status
 2 endpoints of acme: 1 online, 1 offline.
 
-  ENDPOINT                                  STATE    LAST SEEN
-  acme.release-pipeline.build-watcher-prod  online   now
-* acme.release-pipeline.deploy-coordinator  offline  3h ago
+  ENDPOINT                                  STATE    LAST SEEN HERE  MAILBOX
+  acme.release-pipeline.build-watcher-prod  online   now             unknown
+* acme.release-pipeline.deploy-coordinator  offline  3h ago          2
 
 * you
 online: a Claude Code session is serving that endpoint now
-last seen: the last time this computer saw it answer; never: not seen yet
+last seen here: from this machine: the last time it saw the endpoint online
+mailbox: messages waiting; only your own can be read, else unknown
+n OVER: the count is past your limit
 ```
 
 The server cannot be reached (exit 6, stderr: the whole answer depends on it).
@@ -947,16 +1038,20 @@ fix: check that the server is running and that "server" in
 ```
 
 `--json` (one document, standard rule 10; the fields keep the names of the MCP
-`who` result of the targets, section 6, plus the pattern):
+`who` result of the targets, section 6, plus the pattern and `mailbox`;
+`last_seen` is documented as "last seen from this machine", and `mailbox` is
+`null` for every endpoint but the caller's own):
 
 ```
 { "owner": "acme", "pattern": "acme.demo.*",
   "endpoints": [
     { "endpoint": "acme.demo.alice", "state": "online",
-      "last_seen": "2026-11-19T09:42:11Z", "version": "0.5.6",
-      "program": "claude-code", "host": "myserver", "role": "reviewer" },
+      "last_seen": "2026-11-19T09:42:11Z", "mailbox": null,
+      "version": "0.5.6", "program": "claude-code", "host": "myserver",
+      "role": "reviewer" },
     { "endpoint": "acme.demo.bob", "state": "offline",
-      "last_seen": "2026-11-19T06:41:02Z", "version": null,
+      "last_seen": "2026-11-19T06:41:02Z",
+      "mailbox": { "waiting": 2, "limit": 15 }, "version": null,
       "program": "claude-code", "host": "myserver", "role": null } ] }
 ```
 
@@ -964,6 +1059,48 @@ Exit codes: 0 asked and answered; 1 an address or pattern with no endpoint
 (its own words), a refused connection, trust files that disagree; 2 a
 pattern that is not three parts, an owner that is not yours, an unknown flag;
 4 the credentials were refused; 6 the server did not answer.
+
+### 4.4 The last-seen-here record (new mechanism, for the scope table)
+
+The column `LAST SEEN HERE` needs one thing 0.5.5 does not have: a time that
+outlives the process (section 3). Decided as the lead ruled: a LOCAL record,
+no server change, no new permission, no protocol change (D229).
+
+What it is, exactly:
+
+- One small file in this machine's mash state directory (`$MASH_STATE_DIR`,
+  default `$XDG_STATE_HOME/mash`, else `~/.local/state/mash`; `cmd/mash/
+  main.go:52`), next to the spool and `hook.log`. Proposed name: `seen-here`.
+- One line per endpoint: the dotted address, a space, the UTC time of the last
+  probe that saw that endpoint online (RFC 3339). Nothing else.
+- Written when a probe sees an endpoint answer: `mash endpoint status`
+  certainly, and `mash send` and `mash serve` where they already probe today
+  (section 9 says I did not check which do). An endpoint that did not answer
+  is not written, so an offline endpoint keeps its old time; an endpoint that
+  is no longer in the directory is dropped at the next write, so the file
+  holds at most the endpoints of the caller's own owner.
+- Per OS user and per state directory, like the spool; it is read by nothing
+  but mash on this machine. The server never sees it and it is never sent.
+- Deleted with the state directory: afterwards every offline endpoint says
+  `never seen here` until it is seen again. It is a convenience, not a log.
+
+Why it must be labelled: it says what THIS machine saw, not what the endpoint
+did. Another machine, another user or a fresh state directory has another
+answer, and a machine that was off all week says `3d ago` for an endpoint that
+ran all week elsewhere. The header says `HERE`, the footer says "from this
+machine", the one-address view says `last seen here`, and `--json` documents
+`last_seen` the same way. An online endpoint is always `now`.
+
+Flags for the scope table and the security read: it is a NEW FILE (a new
+mechanism, not a changed one). What it stores: addresses and times only, no
+keys, tokens, message text or host names. Points the security read should look
+at: the write must be atomic (a temp file, then a rename) so a reader never
+sees half a line; the file and the directory must be private to the user (mode
+0600 in a directory that is already 0700, like the spool); mash must refuse to
+follow a link or to read a file another user owns, by the same rules the state
+directory already has (I did not read those rules, section 9); and the file
+is bounded, because entries are dropped when the endpoint leaves the
+directory. A person who must not leave a trace deletes the state directory.
 
 ## 5. (c) "Other?": the questions none of the three answer, and the names
 
@@ -975,14 +1112,14 @@ Every question a person plausibly has, the view that answers it, and whether
 |---|---|---|---|
 | Does mail work from this machine? | `mash status` | no | no |
 | Which endpoint am I? | `mash status` verdict; `*` row of `endpoint status` | `*` row | no |
-| Is mail waiting, how much? | `mash status` row `inbox`; the table of `mash inbox` | no | `show` has `unread mail` for ONE endpoint (admin) |
+| Is mail waiting, how much? | `mash status` row `mailbox`; the table of `mash inbox` | no | `show` has `unread mail` for ONE endpoint (admin) |
 | Is a Claude Code session serving me? | `mash status` row `session` | `online` of the `*` row only | `show` has `online` (admin) |
 | Is my plugin installed, are its hooks set? | `mash status` warning, `--detail` row `claude code` | no | no |
 | Is this machine's trust record fine? | `mash status` row `config`, `--detail` rows `trust` | no | no |
 | Is the server up and encrypted? | `mash server status`; the `server` row of `mash status` (reachable only) | no | `mashctl status` shows it (admin) |
 | Is the server full, how long is my mail kept? | `mash server status --detail` | no | `mashctl limits` (admin) |
 | Who is online in my group? | `mash endpoint status 'acme.demo.*'` | YES: collides | no |
-| Is Carol online, when last? | `mash endpoint status acme.lab.carol` | YES: collides | no |
+| Is Carol online, when last (from here)? | `mash endpoint status acme.lab.carol` | YES: collides | no |
 | Which endpoints exist in my owner? | `mash endpoint status` | YES: collides | YES: overlaps (admin sees more) |
 | Who can do a thing (role, label, capability)? | `mash endpoint status --role ... --cap ...` | YES (the same flags) | `show` only |
 | Which version do my peers run? | `mash endpoint status --wide` | no | no |
@@ -1024,7 +1161,7 @@ The set, as a table of things and names (the whole interface in six lines):
 | the thing | the person's command | the administrator's |
 |---|---|---|
 | this endpoint, can it mail | `mash status` | (none: an endpoint is not the administrator's concern) |
-| the server | `mash server status` | `mashctl server status` |
+| the server | `mash server status` | `mashctl status` (the operator's tool: admin sign-in, shared storage, key directory, config paths; no endpoint, no second `server status`) |
 | the endpoints of my owner, live | `mash endpoint status [pattern]` | `mashctl endpoint show`, `list` (registry) |
 | one endpoint, in full | `mash endpoint status <address>` | `mashctl endpoint show <address>` |
 | mail | `mash send`, `inbox`, `read` | `mashctl inbox inspect` |
@@ -1074,8 +1211,9 @@ Not agreed with the mashctl lane; these are the questions I would put to them,
 each with a proposal. (ctl D15 as cited: `status` 1458-1580, `endpoint list`
 and `show` 2452-2656, `issued list` 4918-4975.)
 
-1. Name. `mashctl status` is the administrator's view of the SERVER (what
-   `config.json` and the admin credentials say about it; its own text says it
+1. (SUPERSEDED in DRAFT2: see item 9; the lead's ruling keeps `mashctl
+   status`.) Name. `mashctl status` is the administrator's view of the SERVER
+   (what `config.json` and the admin credentials say about it; its own text says it
    "knows no endpoint"). Under rule 1 a top-level `status` needs "a tool named
    for a thing"; `mashctl` is not. Proposal: `mashctl server status`, the same
    noun as `mash server status`. Is that agreed?
@@ -1116,10 +1254,26 @@ and `show` 2452-2656, `issued list` 4918-4975.)
 8. Exit codes for `server status`: ctl says 0 OK, 1 PROBLEM, 6 NOT REACHABLE.
    Mine are the same, plus 4 when the credentials are refused (the storage
    rows then say why). Agreed?
+9. ONE name, `mashctl status` (appended in DRAFT2; the lead's ruling, to be
+   settled with ctl). Core's position, sent to ctl: withdraw `mashctl server
+   status` (item 1 of DRAFT1 proposed it) and KEEP `mashctl status`, which ctl
+   already answered is about the operator's tool (admin sign-in, shared
+   storage, key directory, config paths), next to `mash server status`, the
+   server as an endpoint's credentials see it. They do not overlap: neither
+   tool repeats the other's rows, and `mashctl status` shows a server fact
+   only to explain a failure, as ctl said. Confirmation from ctl pending (its
+   answer is not in my inputs).
+10. Counts on `mash server status`. ctl's answer says "no counts"; this page
+   shows `mail storage`, `endpoints` (a count) and, with `--detail`,
+   `streams`, because the maintainer asked for storage and limits "if a
+   person can read them without admin credentials" and section 2 shows they
+   can. Is that agreed, or does ctl want them only in `mashctl`?
 
 ## 7. Open questions for the maintainer
 
-1. The set of names. Recommendation: A of section 5: `mash status`, `mash
+1. SETTLED as the proposal (the lead accepted it; it goes to Randy as "hard
+   cut of `mash who`", his ruling is not yet in). The set of names.
+   Recommendation: A of section 5: `mash status`, `mash
    server status`, `mash endpoint status [pattern]`, `mash who` removed with no
    alias, `mashctl endpoint list` kept as the registry. The "Other?" of the
    comment is answered by the table in section 5: the nearest thing not covered
@@ -1128,13 +1282,16 @@ and `show` 2452-2656, `issued list` 4918-4975.)
    (one name per thing, the JSON already changes; the plugin's instructions
    are regenerated). The alternative is to keep `who` for agents only, which
    leaves two names for one view for the life of the tool.
-3. The server's address in `mash status --detail`. Recommendation: yes, one
+3. OPEN. The server's address in `mash status --detail`. Recommendation: yes,
+one
    fact row (`server  tls://myserver:4222`), because `--detail` already says
    where everything is (the config file, the CA, the credentials file). The
    default screen has none, as you said. If you want it nowhere in `mash
    status`, `mash server status` is the only place and the `--detail` row goes.
-4. `LAST SEEN`. It has no source in 0.5.5 (section 3): the time is in one
-   process's memory. Options: (a) a record in this machine's state directory,
+4. SETTLED: the lead chose option (a); section 4.4 describes it; the label is
+   `LAST SEEN HERE`. The question was: `LAST SEEN` has no source in 0.5.5
+   (section 3), the time is in one process's memory. Options: (a) a record in
+   this machine's state directory,
    written by every `mash endpoint status`, `serve` and `send` that sees an
    answer: no server change, no new permission, honest label "the last time
    THIS computer saw it answer" (as N10's `last reached`); (b) a record the
@@ -1166,13 +1323,12 @@ and `show` 2452-2656, `issued list` 4918-4975.)
    screen with a warning is 0. A script that wants a gate uses `--json`.
    Recommendation: keep 0. The alternative (1 when the one asked-for endpoint
    is offline) turns an answer into a failure.
-10. The `inbox` and `session` rows add two lookups to `mash status` (own
-    inbox consumer, own lease) on the connection that already signs in. They
-    are `not checked` whenever the sign-in did not happen. The `new` count is
-    only as good as `mash inbox`'s own definition of `new` (reading a message
-    does not ack it, `waking.go:16-30`): the same count must be used, so the
-    inbox contract decides it. Recommendation: add both; the maintainer asked
-    "is mail waiting" and "can you see heartbeat" in one breath.
+10. SETTLED for the mailbox row: REQ-015 puts it on every screen, and the
+    count is the unacknowledged backlog (section 4.1); the open wording part
+    is point 15. The `mailbox` and `session` rows add two lookups to `mash
+    status` (own inbox consumer, own lease) on the connection that already
+    signs in; they are `not checked` whenever the sign-in did not happen.
+    Recommendation for `session`: keep it (section 4.1 says why).
 11. The certificate's end date. Recommendation: show it in `mash server
     status` and warn within 30 days; mash reads no certificate field today
     (section 2), so it is new code but no new permission.
@@ -1182,21 +1338,43 @@ and `show` 2452-2656, `issued list` 4918-4975.)
     `mash endpoint status <own address>`.
 13. The server address in errors. Recommendation: a fix may name the address
     (`check that the server at tls://myserver:4222 is running`), because it is
-    the thing to check; no other line of `mash status` does.
+    the thing to check; no other line of `mash status` does. OPEN.
+14. OPEN. The `MAILBOX` of other endpoints. REQ-015 says `mash endpoint
+    status` shows the count for "the caller's own owner's endpoints", with the
+    caller's own credentials, never admin. The permission set lets those
+    credentials read their OWN inbox only (section 2; ctl said the same), so
+    a count for Carol would need an admin or a new permission, which the
+    contract forbids. This page shows the number for the caller's own
+    endpoint and `unknown` for every other row. If the contract meant the
+    other endpoints of the owner too, it is not possible as written.
+15. OPEN. Two small wording points of the `mailbox` row. (a) `mash inbox` says
+    `new` in its header today (targets) and the row says `waiting`: two words
+    for two counts, or one word for one count? What counts as new may differ
+    from unacknowledged, so I used `waiting`, REQ-015's word, and the inbox
+    contract decides whether its header says it too. (b) With `mailbox_limit`
+    0 the contract says status says `off`; I used the single word `off` and
+    show no count then. The alternative is `3 waiting, wake off`.
+16. OPEN. The record of section 4.4: which commands write it (only `endpoint
+    status`, or also `send` and `serve`), and its name. Recommendation: every
+    command that already probes who is online, so a person is not shown
+    `never seen here` for an endpoint they mailed an hour ago.
 
 ## 8. What this changes in the targets doc
 
 Not edited. The sections and blocks that would change:
 
 - Rule R11 (lines 158-210): the default screen is the verdict and SIX rows
-  (`version`, `server`, `config`, `credentials`, `inbox`, `session`); the
+  (`version`, `server`, `config`, `credentials`, `mailbox`, `session`); the
   server row is one word (`reachable`, `reachable, NOT ENCRYPTED`, ...), no
   address, no time; the two and three line forms, the `checked 09:42` and
   `last reached` texts and the env override lines in the row go; the override
   moves into the `warning:`/`fix:` text. `--detail`: the seven rows of REQ-012
-  stay, the `group` fact leaves, a `server` (address) and a `session` fact
-  are added.
-- R14 (lines 234-244) and R3 (94-105): add `endpoint status` columns and the
+  stay, the `group` fact leaves, a `server` (address), a `session` and a
+  `mailbox limit` fact are added. The `mailbox` row is the one of REQ-015
+  (`<n> waiting`, `OVER THE LIMIT OF 15`, `off`, `not checked`) in every
+  block, with the over-the-limit block added (`status-mailbox-over`).
+- R14 (lines 234-244) and R3 (94-105): add `endpoint status` columns
+  (`LAST SEEN HERE`, `MAILBOX`) and the
   pattern; "the address is the dotted path" gains the pattern form (the one
   wildcard).
 - R20 (317-329): "one place keeps naming the server ... the rows of `mash
@@ -1222,17 +1400,24 @@ Not edited. The sections and blocks that would change:
   `mash status` they quote ("this is how a healthy `mash status` looks") takes
   the six rows.
 - Section 6 MCP: `who` becomes `endpoint_status` (question 2) with the pattern
-  argument, `last_seen` documented as local; `status` takes the six rows
-  (`server.address`, `server.checked_at`, `server.last_reached` leave the
-  default JSON; `inbox: {new, urgent}` and `session: {serving, since}` are
-  new); new tool `server_status`; the initialize `instructions` text (4316-)
+  argument, `last_seen` documented as local, `mailbox` added (null for others);
+  `status` takes the six rows (`server.address`, `server.checked_at`,
+  `server.last_reached` leave the default JSON; `mailbox: {waiting, limit}`
+  and `session: {serving, since}` are new); new tool `server_status`; the
+  initialize `instructions` text (4316-)
   names the new tools.
 - Section 7: N10 (`last reached`) closes for `mash status` and moves to the
-  LAST SEEN record (question 4); N13 closes; new N for the pattern and the
+  last-seen-here record (section 4.4; question 4 is settled); N13 closes; new N
+  for the pattern and the
   limit. Section 8 (behaviour changes): `who` removed, `status` reads the
-  inbox and the lease, two new commands, a local last-seen record. The
+  mailbox count and the lease, two new commands, a local last-seen record (a
+  new file in the state directory: scope table row and security read, section
+  4.4). The
   contract's REQ-012 (the seven detail rows) needs a note that two fact rows
   are added.
+- The name of the administrator's status: `mashctl status` stays (section 6,
+  item 9, confirmation from ctl pending); the targets and ctl D15 need no
+  rename.
 - Section 2 (exit codes): the table gains the exit-code row of `server status`
   and `endpoint status` (section 4.3 of this document).
 - Section 9 (checks) and the dispositions file: rows for D1 (the server row
@@ -1253,12 +1438,27 @@ What I could not verify:
 - The certificate fields (end date, issuer, the cause of a refusal): my run
   used the plain test server (`tlsreq: false`), so no certificate was read. Go's
   API gives them; mash reads none today.
-- The `new` count and the `session` row. The inbox consumer and the own lease
-  are readable (the consumer info answered live; the lease read is
-  `OwnLease`, `directory.go:138-148`). I did not run `mash inbox`'s own
-  `new` definition (it is a target, not in 0.5.5), and I did not check that
-  a one-shot CLI can read the lease fresh enough: `ClientOptions.Lease`
-  (`client.go:49-50`) exists for the launch path.
+- The `mailbox` count and the `session` row. The inbox consumer (its ack and
+  pending counts) and the own lease are readable (the consumer info answered
+  live; the lease read is `OwnLease`, `directory.go:138-148`). I did not run
+  the count as REQ-015 defines it (pending plus delivered-unacknowledged), the
+  backlog wake or its cooldown, and I did not check that a one-shot CLI can
+  read the lease fresh enough: `ClientOptions.Lease` (`client.go:49-50`)
+  exists for the launch path.
+- What lowers the mailbox count. REQ-015 says reading does not, and a digest
+  does not acknowledge. What does acknowledge (so what a person does about
+  `OVER THE LIMIT`) I could not determine, so the warning's fix only says
+  `mash inbox`, to see what waits.
+- The MAILBOX of other endpoints (question 14): the permissions deny another
+  inbox, so the contract's "the caller's own owner's endpoints" cannot be
+  met; I show `unknown` for them. A run with an admin-less second endpoint
+  would confirm it; I did not run it.
+- The local record (section 4.4): which commands probe today and so could
+  write it, and the state directory's own permission and link rules, which I
+  did not read. The file name `seen-here` is mine.
+- `off` for `mailbox_limit` 0: the contract says status says `off`; whether a
+  count is shown with it is not stated (question 15).
+- ctl's answer on `mashctl status` (item 9 of section 6): not in my inputs.
 - A multi-server cluster: ADR 0066 measured three servers, the maintainer says
   one. `mash server status` talks to the server it connects to; a cluster would
   need a sentence about replicas (stream info has `cluster.leader`).
@@ -1279,11 +1479,16 @@ the granted ones as replies. The fenced blocks were measured with a script
 (Python 3, `-I`, characters per line of every fenced block, `$`-blocks and the
 JSON block included):
 
-29 fenced blocks (the `$` blocks and the one JSON block), none over 80
-columns; the widest is 79 (the `--wide` table of section 4.3 and the Claude
-Code fix line of `status-claude`). Prose lines outside tables: none over
-80. Tables in this file are not measured (a markdown table row cannot wrap).
-Not measured, by the same rule as the targets: nothing exempt is used here.
+Re-measured for DRAFT2: 30 fenced blocks (the `$` blocks and the one JSON
+block). None is over 80 columns except the `--wide` table of section 4.3
+(`endpoint-status-wide`, 94 columns at its widest), which the standard exempts
+(rule 28) and which does not wrap. Of the rest the widest is 79 (the Claude
+Code fix line of `status-claude`); the widest of the `mash status` blocks is
+the new `status-mailbox-over` (its warning lines are under 70). The default
+`mash endpoint status` tables are 52 columns (the `MAILBOX` column included),
+the long-name table is 76 and the footer lines are under 80. Prose lines outside tables: none
+over 80. Tables in this file are not measured (a markdown table row cannot
+wrap). Not measured, by the same rule as the targets: only the `--wide` block.
 
 ## Appendix: the CLI team's answers, quoted unchanged
 
