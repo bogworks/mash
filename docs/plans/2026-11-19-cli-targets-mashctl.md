@@ -415,6 +415,12 @@ repeat them.
   `INCOMPLETE`, `NOT REACHABLE`, `NOT READY`) is a result, not an error line:
   a health command that finds a fault prints its `error:` and `fix:` lines
   after the rows, and exits with the code of its row in the table.
+- Patterns. One grammar, here and in `mash`. `*` matches inside one dotted
+  part (`'acme.demo.*'`, `'*.*.bob'`, `'acme.*.rev*'`); `acme.demo` is the
+  short form for every endpoint in the group demo; any other pattern has
+  three dotted parts. Only `endpoint list` takes a pattern, for any owner of
+  the account; every other command takes one address. Patterns are quoted in
+  help and examples: the shell expands an unquoted `*` first.
 - The server is not in the output. The server and the path of the config file
   appear in no success output. A normal run prints nothing about them. They
   appear on failure, under `--detail` (`adopt --detail` may show the address),
@@ -3148,6 +3154,31 @@ acme   demo   alice     acme.demo.alice  2026-11-19 00:21
 3 endpoints
 ```
 
+A pattern picks some of them. `*` matches inside one dotted part, and
+`acme.demo` alone means everything in the group demo, so these two print the
+same table. The pattern is quoted, because the shell expands an unquoted `*`
+before mashctl sees it:
+
+**AFTER, with a pattern**
+
+```text
+$ mashctl endpoint list 'acme.demo.*'
+
+OWNER  GROUP  ENDPOINT  ADDRESS          CREATED (UTC)
+acme   demo   alice     acme.demo.alice  2026-11-19 00:21
+              bob       acme.demo.bob    2026-11-19 00:22
+
+2 endpoints
+
+$ mashctl endpoint list acme.demo
+
+OWNER  GROUP  ENDPOINT  ADDRESS          CREATED (UTC)
+acme   demo   alice     acme.demo.alice  2026-11-19 00:21
+              bob       acme.demo.bob    2026-11-19 00:22
+
+2 endpoints
+```
+
 With no endpoints:
 
 ```text
@@ -3167,6 +3198,10 @@ Removed command, see 1a: `mashctl list` prints the refusal that names
 
 **What changed and why**
 
+- DRAFT22, K1: `endpoint list` takes a pattern (the grammar is in H5 and the
+  conventions). It lists any owner of the operator's account, because mashctl
+  is the operator's tool; `mash endpoint status` is the one that never crosses
+  owners. `endpoint show` takes one address and no pattern.
 - P1 (point 14): no preamble. The count (`2 endpoints`) is on stdout, after
   the table, so a pipe sees it too.
 - P2 and P8 (points 13, 16): one address form per row, `acme.demo.alice`,
@@ -4033,9 +4068,32 @@ exits 1 with `mash: no endpoint named "..."`.
     link, belongs to someone else or is broader than 0600, before it
     connects (core's rule): one block, a key file with mode 644, whose fix is
     `chmod 600 bob.key` and the install again.
+82. The pattern grammar (DRAFT22, K1; ruled, one grammar for both tools; core
+    owns its wording, quoted unchanged on its status-views page, section 4.3).
+    `*` matches inside one dotted part (`acme.demo.*`, `*.*.bob`, `bo*`,
+    `acme.*.rev*`); the short form `acme.demo` means everything in the group
+    demo; otherwise a pattern has three dotted parts. Anything else is
+    `error: an address has three parts: owner.group.name, or two for a group:
+    owner.group` (exit 2); this replaces the earlier proposals that fewer or
+    more than three parts is always an error. `mashctl endpoint list` takes a
+    pattern and lists any owner of the operator's account (mashctl is the
+    operator's tool); `mashctl endpoint show` takes one address and no
+    pattern (`error: show takes one address, not a pattern.`); `audit`,
+    `inbox inspect`, `issued list` and the rest take one address or none.
+    `mash endpoint status` never crosses owners: the owner is literal and
+    must be the caller's (`error: you can only see endpoints of owner acme`).
+    Patterns are quoted in help and examples, and the help says why once:
+    `Quote a pattern: your shell expands an unquoted * before mashctl sees
+    it.` [confirm: a pattern that matches nothing; this document prints
+    `No endpoints yet.` only for an account with none.]
 
 ## Facts to confirm
 
+- [confirm, DRAFT22, K1: the pattern grammar is core's wording and
+  its matching is core's code in `mash`; mashctl uses the same grammar for
+  `endpoint list` only, for any owner of the account. A `*` never matches a
+  dot. `acme.demo` is the group form. An unquoted `*` is the shell's, not
+  mashctl's; the help says so once.]
 - [confirm, DRAFT22: the install's confirmation (contract revisions 18 and
   22). The three values, the question `Do these three match what the
   operator sent you? (yes/no)`, the refusal on a no (exit 1, `Nothing was
@@ -4468,7 +4526,7 @@ mashctl endpoint - make, change and remove endpoints
 Usage: mashctl endpoint <command> [options]
 
   create      make an endpoint and its credentials
-  list        list endpoints (--wide for more columns)
+  list        list endpoints; a quoted pattern picks some (--wide: columns)
   show        show one endpoint, and whether it is suspended
   set         change an endpoint's role, host, description or tags
   reissue     give an endpoint a new key; the old key stops working
@@ -5711,6 +5769,7 @@ was full. It exits 1 when it prints `PROBLEM` (a finding); `--compare FILE`
 adds what moved since an earlier `--json` report; exit 6 when the server could
 not be reached. The sentence "changes nothing; shows what the server holds, not who
 used it" is in `mashctl audit --help`, not printed on every run (critic A.D1).
+`audit` takes no address and no pattern.
 
 BEFORE (catalog, audit case 2 and case 5), marks P2 P3 P5 P6 P7 P8 P9:
 
@@ -5852,7 +5911,7 @@ What changed and why:
 
 What it does: lists every key mash has issued (docs/mashctl.md, "The issue
 record"). Today it prints one tab separated row per key, with `generation 0`,
-`tags` and `purpose issue`.
+`tags` and `purpose issue`. `issued list` takes no address and no pattern.
 
 BEFORE (catalog, il), marks P2 P3 P5 P6 P7 P9:
 
@@ -6008,7 +6067,8 @@ What changed and why:
 ### D4. inbox inspect
 
 What it does: shows one endpoint's stored mail and where its delivery stands.
-It reads only. Exit 0, 1 refusal (no such endpoint, no inbox), 2 usage, 6 the
+It reads only. It takes one address, not a pattern (its usage line says
+`<address>`). Exit 0, 1 refusal (no such endpoint, no inbox), 2 usage, 6 the
 server could not be reached.
 
 BEFORE (catalog, ii), marks P2 P5 P6 P7 P8 P9:
@@ -7799,14 +7859,20 @@ $ mashctl endpoint list --help
 mashctl endpoint list - list the endpoints on the server
 
 Usage:
-  mashctl endpoint list [--wide] [--detail]
+  mashctl endpoint list [<pattern>] [--wide] [--detail]
+
+A pattern has three dotted parts, owner.group.name. A * matches inside one
+part: 'acme.demo.*', '*.*.bob', 'acme.*.rev*'. Two parts,
+acme.demo, mean every endpoint in the group demo. With no pattern it lists
+every endpoint. Quote a pattern: your shell expands an unquoted * before
+mashctl sees it.
 
 Flags:
   --wide      add the type, host and note columns
   --detail    print everything known about each endpoint
 
 Example:
-  mashctl endpoint list
+  mashctl endpoint list 'acme.demo.*'
 
 $ mashctl endpoint show --help
 [exit 0]
@@ -7814,6 +7880,9 @@ mashctl endpoint show - show one endpoint
 
 Usage:
   mashctl endpoint show <address> [--detail]
+
+It takes one address, not a pattern; to see several endpoints, use
+mashctl endpoint list.
 
 Flags:
   --detail    add the keys and the server's record
@@ -7944,6 +8013,14 @@ fix: give the whole address, owner, group and name:
 
 usage: mashctl endpoint show <address> [--detail]
 
+$ mashctl endpoint show 'acme.demo.*'
+[exit 2]
+error: show takes one address, not a pattern.
+fix: to see several endpoints, list them:
+  mashctl endpoint list 'acme.demo.*'
+
+usage: mashctl endpoint show <address> [--detail]
+
 $ mashctl endpoint show acme.demo.bob
 [exit 0]
 
@@ -8000,11 +8077,12 @@ fix: remove the file yourself, if you do not need it:
 
 $ mashctl endpoint list now
 [exit 2]
-error: endpoint list takes no arguments.
-fix: run it by itself:
-  mashctl endpoint list
+error: an address has three parts: owner.group.name, or two for a group:
+       owner.group
+fix: give a pattern, in quotes:
+  mashctl endpoint list 'acme.demo.*'
 
-usage: mashctl endpoint list [--wide] [--detail]
+usage: mashctl endpoint list [<pattern>] [--wide] [--detail]
 
 $ mashctl endpoint reissue acme.demo.bob --make-key
 [exit 1]
@@ -8425,6 +8503,10 @@ Decisions the rules left open. Each is one line.
     (B3, E1, H5; Part 1, choice 76). The `--creds-out` help says the default
     is `<address>.creds` in the config folder and that mash does not find a
     file written elsewhere (A4a; Part 1, choice 73).
+
+66. The pattern grammar (DRAFT22, K1; Part 1, choice 82): `endpoint list`
+    takes a quoted pattern for any owner of the account (H5, H7); `show`
+    takes one address; the bad-pattern usage error is in H7.
 
 ## Facts to confirm
 
@@ -9027,7 +9109,18 @@ DRAFT2 to DRAFT21 lists describe those drafts and are history.
       a 56-character account on one line, an install command with
       `--account`, the new confirmation line, and none of the old
       confirmation wording.
-10. Lints (`make_packet.py`): the hand-off holds the four things and none of
+10. K1. Pattern grammar (ruled; one grammar for both tools; section 13 of
+    `mashctl-dispositions.md`). `mashctl endpoint list [<pattern>]`: `*`
+    matches inside one dotted part, `acme.demo` means the group demo, any
+    other pattern has three parts, and a bad one is `error: an address has
+    three parts: owner.group.name, or two for a group: owner.group`. The help
+    quotes every pattern and says once: `Quote a pattern: your shell expands
+    an unquoted * before mashctl sees it.` Where: the conventions bullet, the
+    list section (`'acme.demo.*'` and `acme.demo`), H5 (list help; show says
+    it takes one address), H7 (the bad-pattern block and `show` with a
+    pattern), D1, D2 and D4 (one address or none), Choices 82 (Part 1) and 66
+    (Part 2), and the Facts. Lint: every pattern example is quoted.
+11. Lints (`make_packet.py`): the hand-off holds the four things and none of
    the removed text; the install blocks ask the question; G1 expects the
    adopt fix; no name other than alice, bob, acme, demo and prod in an address
    in an AFTER block; no `No lock file`; no "as above"; no "your operator"; no
