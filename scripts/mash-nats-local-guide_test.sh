@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Test for docs/skills/mash-nats-local/SKILL.md (the guide, DRAFT 5).  Run with:
+# Test for docs/skills/mash-nats-local/SKILL.md (the guide, DRAFT 6).  Run with:
 #
 #     bash scripts/mash-nats-local-guide_test.sh [--update-closing]
 #
@@ -68,12 +68,12 @@ mkdir -p "$T/out" "$T/blk" "$T/bin" "$T/gocache" "$T/ctx" "$T/assets"
 
 # ------------------------------------------------- the guide itself
 say "reading the guide"
-awk -v d="$T/blk" '
+AWKPROG='
 /^```/ {
     if (!infence) {
         infence = 1
         info = substr($0, 4)
-        cap = (info == "sh" || info == "sh person")
+        cap = (all == 1 || info == "sh" || info == "sh person")
         if (cap) {
             n++
             f = sprintf("%s/%02d.sh", d, n)
@@ -92,10 +92,17 @@ infence { if (cap) print > f; next }
 /^\|/ { next }
 /^ *[^ ]+$/ { next }
 length > 80 { printf "%d: %s\n", NR, $0 > (d "/wide.txt") }
-' "$SKILL"
+'
+mkdir -p "$T/sall" "$T/wblk"
+awk -v d="$T/blk" -v all=0 "$AWKPROG" "$SKILL"
+awk -v d="$T/sall" -v all=1 "$AWKPROG" "$SKILL"
+WHAT=$REPO/docs/skills/mash-nats-local/WHAT-MASH-NEEDS.md
+[ -f "$WHAT" ] && awk -v d="$T/wblk" -v all=1 "$AWKPROG" "$WHAT"
 NBLK=$(find "$T/blk" -name '*.sh' | grep -c .)
 WIDE=0
 [ -f "$T/blk/wide.txt" ] && WIDE=$(grep -c . "$T/blk/wide.txt")
+WWIDE=0
+[ -f "$T/wblk/wide.txt" ] && WWIDE=$(grep -c . "$T/wblk/wide.txt")
 LONGEST=$(cat "$T"/blk/*.sh | awk '{ if (length > m) m = length } END { print m + 0 }')
 LONGEST_ASCII=$(grep -c '[^ -~]' "$SKILL" || true)
 
@@ -351,6 +358,11 @@ save() { # NAME: keep the current output, secrets scrubbed
 }
 runblk() { # N: as written, its own bash -c
     local f
+    # the agent path never runs a person block (runpty is the person's side)
+    if [ "$(cat "$T/blk/$(printf %02d "$1").info")" = "sh person" ]; then
+        echo "BUG: runblk $1 is a person block" >&2
+        exit 2
+    fi
     f=$T/blk/$(printf %02d "$1").sh
     cin "$(cat "$f")"
     save "blk$(printf %02d "$1")"
@@ -383,11 +395,14 @@ extra() { # NAME: an extra row (not a guide block)
 say "checking the guide itself"
 BWHY=""
 RC=0
-ck "block count is 34 (got $NBLK)" test "$NBLK" -eq 34
-ck "$WIDE prose lines over 80 columns (tables and URL-only lines exempt)" \
+ck "block count is 33 (got $NBLK)" test "$NBLK" -eq 33
+ck "$WIDE SKILL.md prose lines over 80 columns (fences, tables, URL-only lines exempt)" \
     test "$WIDE" -eq 0
+ck "$WWIDE WHAT-MASH-NEEDS.md prose lines over 80 columns" test "$WWIDE" -eq 0
 ck "non-ASCII characters in SKILL.md" test "$LONGEST_ASCII" -eq 0
-extra "guide: 34 sh blocks, prose <= 80 columns, ASCII"
+ck "non-ASCII characters in WHAT-MASH-NEEDS.md" \
+    test "$(grep -c '[^ -~]' "$WHAT" || true)" -eq 0
+extra "guide: 33 sh blocks, prose <= 80 columns in both documents, ASCII"
 
 # expected signature per block (so a reordered guide fails loudly)
 declare -A SIG=(
@@ -402,12 +417,12 @@ declare -A SIG=(
     [19]='--retire-keys' [20]='mv -i' [21]='--check' [22]='--stop'
     [23]='--start' [24]='--backup' [25]='not restored:' [26]='--upgrade'
     [27]='--enable-boot' [28]='--disable-boot' [29]='--remove'
-    [30]='rm -r "$HOME/.config/mash"' [31]='rm -r "$HOME/mash-setup"'
-    [32]='rm "$HOME/.local/bin/mash"' [33]='rm -f'
-    [34]='create acme.demo.design'
+    [30]='rm -r "$HOME/.config/mash" "$HOME/mash-setup"'
+    [31]='rm "$HOME/.local/bin/mash"' [32]='rm -f'
+    [33]='create acme.demo.design'
 )
-declare -A KIND=([11]=person [19]=person [27]=person [28]=person [29]=person)
-for n in $(seq 1 34); do
+declare -A KIND=([19]=person [27]=person [28]=person [29]=person)
+for n in $(seq 1 33); do
     want="sh"
     [ -n "${KIND[$n]:-}" ] && want="sh person"
     got=$(cat "$T/blk/$(printf %02d "$n").info" 2>/dev/null)
@@ -424,12 +439,18 @@ BWHY=""
 blkcount() { # N PATTERN COUNT
     [ "$(grep -o -- "$2" "$T/blk/$(printf %02d "$1").sh" | grep -c .)" -eq "$3" ]
 }
-ck "no block has a line that is just 'exit'" \
-    bash -c "! grep -qE '^[[:space:]]*exit[[:space:]]*$' \"$T\"/blk/[0-9][0-9].sh"
-ck "no block contains ' exit '" \
-    bash -c "! grep -qF ' exit ' \"$T\"/blk/[0-9][0-9].sh"
+ck "no fenced block in SKILL.md or WHAT-MASH-NEEDS.md contains the word exit" \
+    bash -c "! grep -qw exit \"$T\"/sall/*.sh \"$T\"/wblk/*.sh"
 ck "part-4 block (8) has exactly two 'attestation verify' calls" \
     blkcount 8 'attestation verify' 2
+ck "part-4 block (8) tail is '); [ \$? -eq 0 ] || {' (set -e in force)" \
+    sig 8 '); [ $? -eq 0 ] || { echo "NOT installed'
+ck "part-4 block (8) is a multi-line subshell with set -eu" bash -c \
+    "[ \"\$(head -n1 \"$T/blk/08.sh\")\" = '(' ] && sed -n 2p \"$T/blk/08.sh\" | grep -qx 'set -eu'"
+ck "the guide says the person runs the sh person blocks (and the agent never)" \
+    grep -q 'never run' "$SKILL"
+ck "every block that retires, removes, or sets boot is marked sh person" bash -c \
+    "for f in \"$T\"/blk/[0-9][0-9].sh; do b=\${f%.sh}; if grep -qE -- '--retire-keys|--remove|--enable-boot|--disable-boot' \$f && [ \"\$(cat \$b.info)\" != 'sh person' ]; then echo \"unmarked: \$f\"; exit 1; fi; done"
 ck "block 16 and 17 use MASH_ENDPOINT" bash -c \
     "grep -qF MASH_ENDPOINT \"$T/blk/16.sh\" && grep -qF MASH_ENDPOINT \"$T/blk/17.sh\""
 ck "no block has MASH_TLS_CA, MASH_OWNER, MASH_GROUP or MASH_NAME" \
@@ -457,7 +478,25 @@ ck "the script at that commit has the guide's sha256" test "$COMMITSHA" = "$GSHA
 ck "the script in this tree has the guide's sha256" test "$HELPERSHA" = "$GSHA"
 ck "that commit is on a pushed (remote) branch" bash -c \
     "[ -n \"\$(git -C '$REPO' branch -r --contains '$GCOMMIT' 2>/dev/null)\" ]"
-extra "guide script URL: commit and sha256 equal git's and the file's"
+PIN_COMMIT=8ac4d0b0ee09240fe72c1ac5637444b44d25570f
+PIN_SHA=900f4fcb5b327cc0204954e27536d51b5aecd674817e306b895d11ef989692b0
+ck "the guide's script commit equals the pinned $PIN_COMMIT" \
+    test "$GCOMMIT" = "$PIN_COMMIT"
+ck "the guide's script sha256 equals the pinned $PIN_SHA" \
+    test "$GSHA" = "$PIN_SHA"
+ck "the helper in this tree has the pinned sha256" \
+    test "$HELPERSHA" = "$PIN_SHA"
+RAWURL=https://raw.githubusercontent.com/bogworks/mash/$GCOMMIT/scripts/nats-local-setup.sh
+if /usr/bin/curl -fsSL --max-time 60 -o "$T/raw.sh" "$RAWURL" 2>/dev/null; then
+    ck "the raw URL content (curl, outside the container) hashes to the guide's sha256" \
+        test "$(sha256sum "$T/raw.sh" | cut -d' ' -f1)" = "$GSHA"
+    RAWMSG="fetched and hashed"
+else
+    RAWMSG="SKIPPED: could not fetch $RAWURL (offline?)"
+    echo "SKIP  raw URL hash: $RAWMSG"
+fi
+RC=0
+extra "guide script URL: commit and sha256 equal git's, the pin and the file's; raw URL $RAWMSG"
 BWHY=""
 
 # ------------------------------------------------- run the blocks
@@ -596,12 +635,13 @@ ck "dry-run says nothing is written" has "nothing is written"
 ck "no FAIL or error line" nothas "FAIL"
 row 10 "bash -c (adopt --from via shim)" "$RC"
 
-# 11: adopt (a person block: the in-tree adopt has no fingerprint prompt)
+# 11: adopt (an ordinary block now: this machine types no fingerprint)
 runblk 11
 ck "rc 0" rc0
 ck "All checks passed" has "All checks passed"
 ck "mashadmin.creds copied, not recorded" nothas "not copied"
-row 11 "bash -c, no pty (adopt --from via shim; fingerprint NOT exercised)" "$RC"
+ck "no fingerprint prompt" nothas "ingerprint"
+row 11 "bash -c, no pty (adopt --from via shim)" "$RC"
 cin 'ls "$HOME/.config/mash" "$HOME/.config/mash/server" "$HOME/.config/mash/keys"'
 save blk11-ls
 ck "config.json written (init ran)" has config.json
@@ -615,7 +655,28 @@ ck "folder 700" has "700 /home/alice/.config/mash"
 ck "keys 700" has "700 /home/alice/.config/mash/keys"
 ck "server 700" has "700 /home/alice/.config/mash/server"
 ck "config.json 600" has "600 /home/alice/.config/mash/config.json"
+# FINDING: the in-tree mashctl does not copy ca.pem into its folder (it keeps
+# "tls_ca" pointing at the server directory), so the real output has four
+# entries, not five.  The guide (0.5.6) says five, ca.pem 0644 second.  The
+# observed four must be in the guide's order; the five-entry order is checked
+# on a model folder with the same names and modes (below).
+ORDER=$(printf '%s\n' "$OUT" | awk '{ printf "%s ", $1 }')
+ck "OBSERVED stat order is 700 600 700 700 (got: $ORDER)" test "$ORDER" = "700 600 700 700 "
+ORDERN=$(printf '%s\n' "$OUT" | sed 's|.*/||' | tr '\n' ' ')
+ck "OBSERVED names in order: mash config.json keys server (got: $ORDERN)" \
+    test "$ORDERN" = "mash config.json keys server "
 row 12 "bash -c" "$RC"
+# model folder: the five entries the guide expects, run through the block text
+# with HOME pointed at it (the test makes and keeps it inside the container)
+cin 'M=$HOME/stat-model; mkdir -p -m 700 "$M/.config/mash/keys" "$M/.config/mash/server" && chmod 700 "$M/.config/mash" && : >"$M/.config/mash/ca.pem" && chmod 644 "$M/.config/mash/ca.pem" && : >"$M/.config/mash/config.json" && chmod 600 "$M/.config/mash/config.json"'
+ck "model folder made" rc0
+OUTM=$(cexec env HOME=$CIP/stat-model bash -c "$(cat "$T/blk/12.sh")" 2>&1 </dev/null)
+ORDERM=$(printf '%s\n' "$OUTM" | awk '{ printf "%s ", $1 }')
+ORDERMN=$(printf '%s\n' "$OUTM" | sed 's|.*/||' | tr '\n' ' ')
+ck "MODEL folder order is 700 644 600 700 700 (got: $ORDERM)" test "$ORDERM" = "700 644 600 700 700 "
+ck "MODEL names: mash ca.pem config.json keys server (got: $ORDERMN)" \
+    test "$ORDERMN" = "mash ca.pem config.json keys server "
+extra "block 12 on a model folder: the guide's five-entry order holds"
 
 # 13-15: endpoints (--creds-out through the shim)
 runblk 13
@@ -661,6 +722,18 @@ ck "rc 0" rc0
 ck "same four times" nlines "same " 4
 ck "no differ" nothas differ
 row 18 "bash -c" "$RC"
+
+# 29 (negative): --remove must refuse before --retire-keys has archived the keys
+runpty 29 "$D"
+save remove-before-retire
+ck "remove before retire: rc non-zero" rcn0
+cin '[ -d "$HOME/mash-nats" ] && echo dir-kept; [ -e "$HOME/mash-nats/ca.key" ] && echo cakey-kept; [ -d "$HOME/mash-nats/nsc" ] && echo nsc-kept; ss -ltn | grep -c ":4222 "'
+ck "remove before retire: server dir, ca.key and nsc/ all still there" bash -c \
+    "printf '%s\n' \"$OUT\" | grep -qx dir-kept && printf '%s\n' \"$OUT\" | grep -qx cakey-kept && printf '%s\n' \"$OUT\" | grep -qx nsc-kept"
+ck "remove before retire: server still listens on 4222" \
+    test "$(printf '%s\n' "$OUT" | tail -n1)" = 1
+RC=0
+extra "negative: --remove before --retire-keys refuses and deletes nothing"
 
 # 19: retire-keys on a pty
 runpty 19 "$D"
@@ -741,17 +814,16 @@ ck "bin/ not in the backup" has "no bin"
 extra "after restore: files back, mode 700, no bin/"
 runblk 26
 save blk26
-ck "rc non-zero: KNOWN LIMIT stated in the guide (restored dir has no bin/, --upgrade refuses it; fixed in the next script)" test "$RC" -ne 0
+ck "rc 0 (--upgrade makes bin/ in a restored directory)" rc0
 row 26 "bash -c" "$RC"
-if [ "$RC" -ne 0 ]; then
-    # workaround so the rest can run: an empty bin/ is refused too (see the
-    # report), so put the original bin/ back from the directory moved aside
-    cin 'cp -a "$HOME/mash-nats.moved/bin" "$HOME/mash-nats/bin"'
-    runblk 26
-    save blk26-after-copy-bin
-    ck "rc 0" rc0
-    extra "WORKAROUND: copy the old bin/ in, then block 26 again (upgrade is a no-op)"
-fi
+cin 'ls "$HOME/mash-nats/bin"; stat -c "%a %n" "$HOME/mash-nats/bin"'
+ck "bin/ has nats-server and nsc" has nats-server
+ck "bin/ mode 700" has "700 /home/alice/mash-nats/bin"
+extra "after --upgrade: bin/ made, mode 700"
+runblk 26
+save blk26-again
+ck "second --upgrade rc 0 (nothing to do)" rc0
+extra "--upgrade again is a no-op"
 runblk 23
 save blk23-after-restore
 ck "start after restore rc 0" rc0
@@ -764,14 +836,14 @@ extra "check after restore"
 answers
 extra "after restore, upgrade and start: the server answers"
 
-# 34: What next, the design endpoint (run here, while the server is up)
-runblk 34
+# 33: What next, the design endpoint (run here, while the server is up)
+runblk 33
 ck "rc 0" rc0
 ck "address shown" has acme.demo.design
-row 34 "bash -c (run before remove; --creds-out dropped by shim)" "$RC"
+row 33 "bash -c (run before remove; --creds-out dropped by shim)" "$RC"
 cin '$HOME/.local/bin/mashctl endpoint list'
 ck "design listed" has acme.demo.design
-extra "after block 34: acme.demo.design is listed"
+extra "after block 33: acme.demo.design is listed"
 
 # 27, 28: boot service needs systemd; not run here
 BWHY=""
@@ -791,8 +863,9 @@ extra "after remove: server dir gone, mashctl folder kept"
 cin 'ss -ltn | grep ":4222 "; true'
 ck "port 4222 free after remove" test -z "$OUT"
 extra "after remove: nothing listens on 4222"
-# 30-33: the rest of "Remove it completely"
-for n in 30 31 32 33; do
+# 30-32: the rest of "Remove it completely" (blocks 19, 29, 30, 31, 32 ran in
+# the guide's order: retire, remove, config+downloads, programs, archives)
+for n in 30 31 32; do
     runblk $n
     ck "rc 0" rc0
     row $n "bash -c" "$RC"
@@ -802,7 +875,7 @@ ck "mashctl folder, mash-setup, archives gone, .local/bin empty"     test "$OUT"
 b
 c
 d')"
-extra "after blocks 30-33: everything the guide made is gone"
+extra "after blocks 30-32: everything the guide made is gone"
 
 # ------------------------------------------------- S5: tamper tests of block 8
 # each in its own fresh container (image with the prerequisites in), running a
@@ -827,18 +900,6 @@ tb_end() {
     C=$C_MAIN
 }
 
-# GUIDE DEFECT guard: `( set -eu; ... ) || { ...; false; }` as the block is
-# written: bash ignores set -e inside a subshell that is the left side of
-# `||`, so a failed step does not stop the block.  The "fixed" variant runs
-# a copy whose tail is `); [ $? -eq 0 ] || {` (set -e is then in force).
-sed 's/ ) || { echo "NOT installed/ ); [ $? -eq 0 ] || { echo "NOT installed/' \
-    "$T/blk/08.sub.sh" >"$T/blk/08.sub.fix.sh"
-sed 's/ ) || { echo "NOT installed/ ); [ $? -eq 0 ] || { echo "NOT installed/' \
-    "$T/blk/08.sh" >"$T/blk/08.fix.sh"
-ck "the guide block already has the fixed tail (copy identical)" \
-    cmp -s "$T/blk/08.sub.sh" "$T/blk/08.sub.fix.sh"
-RC=0
-extra "proposed-fix copy of the part-4 block made (tail: '); [ \$? -eq 0 ] ||')"
 putmode() { printf '%s\n' "$1" >"$T/mode"; podman cp "$T/mode" "$TB:/opt/guide-assets/mode"; podman exec --user root "$TB" chmod a+r /opt/guide-assets/mode; }
 
 tamper_all() { # LABEL BLOCKFILE(substituted) BLOCKFILE(original) SUFFIX
@@ -909,8 +970,64 @@ tamper_all() { # LABEL BLOCKFILE(substituted) BLOCKFILE(original) SUFFIX
 }
 say "S5 tamper tests, the block AS WRITTEN (each in a fresh container)"
 tamper_all "as written" "$T/blk/08.sub.sh" "$T/blk/08.sh" w
-say "S5 tamper tests, the PROPOSED-FIX copy (each in a fresh container)"
-tamper_all "proposed fix" "$T/blk/08.sub.fix.sh" "$T/blk/08.fix.sh" f
+
+# ------------------------------------------------- WHAT-MASH-NEEDS.md
+say "WHAT-MASH-NEEDS.md: every fenced block run, or listed as not run"
+NW=$(find "$T/wblk" -name '*.sh' | grep -c .)
+BWHY=""
+RC=0
+ck "WHAT-MASH-NEEDS.md has 7 fenced blocks (got $NW)" test "$NW" -eq 7
+extra "WHAT-MASH-NEEDS.md has 7 fenced blocks"
+# index: info string | disposition | pattern the block must contain | reason
+wb() { # N INFO DISPOSITION PATTERN REASON
+    local nn
+    nn=$(printf %02d "$1")
+    BWHY=""
+    ck "WHAT block $1 info string is '$2'" \
+        test "$(cat "$T/wblk/$nn.info" 2>/dev/null)" = "$2"
+    ck "WHAT block $1 contains '$4'" grep -qF -- "$4" "$T/wblk/$nn.sh"
+    printf '| W%s | `%s` | %s | %s |\n' "$1" "$4" "$3" "$5" >>"$T/wrows.md"
+    extra "WHAT block $1 ($3): $4"
+}
+: >"$T/wrows.md"
+wb 1 "" "documented, not run" 'listen: "127.0.0.1:4222"' \
+    "sample server.conf text, not a command"
+wb 2 sh "RUN (fresh container)" '--port 4333 --start' "create on another port"
+wb 3 sh "documented, not run" '--dir "$HOME/srv/mash-nats"' \
+    "needs $HOME/srv made first; --dir is the same code path the default run used"
+wb 4 sh "documented, not run" '--mash-config "$HOME/mash-conf"' \
+    "only changes the closing text; the folder itself is mashctl's (shimmed here)"
+wb 5 sh "documented, not run" 'MASH_CONFIG_DIR="$HOME/mash-conf"' \
+    "a real adopt writes mashctl state; shimmed mashctl in this harness"
+wb 6 "sh person" "person block, never run by the agent path" '--listen 0.0.0.0' \
+    "typed confirmation; opens every interface: not run"
+wb 7 sh "documented, not run (read-only --dry-run)" 'adopt --dry-run --server' \
+    "uses long flags (--system-credentials) the in-tree mashctl does not have yet"
+ck "WHAT block 7 is a --dry-run" grep -qF -- '--dry-run' "$T/wblk/07.sh"
+RC=0
+extra "WHAT-MASH-NEEDS.md: all 7 blocks classified"
+
+# W2 run: the --port 4333 create, in a fresh container (helper copied in from
+# this tree; its sha256 is checked against the guide's pin first)
+BWHY=""
+ck "helper in tree equals the guide's pinned sha256" test "$HELPERSHA" = "$GSHA"
+if tb_new whatport normal; then
+    podman exec --user root "$TB" mkdir -p /home/alice/mash-setup
+    podman cp "$REPO/scripts/nats-local-setup.sh" "$TB:/home/alice/mash-setup/nats-local-setup.sh"
+    podman exec --user root "$TB" chown -R alice:alice /home/alice/mash-setup
+    cin "$(cat "$T/wblk/02.sh")"
+    save what-port4333
+    ck "W2 create on 4333 rc 0" rc0
+    ck "W2 prints Done." has "Done."
+    cin 'bash "$HOME/mash-setup/nats-local-setup.sh" --dir "$HOME/mash-nats" --check; echo "rc=$?"; ss -ltn | grep -c ":4333 "; ss -ltn | grep -c ":4222 "'
+    save what-port4333-check
+    ck "W2 check passed" has "check passed"
+    ck "W2 check mentions 4333" has "4333"
+    ck "W2 4333 listens, 4222 does not" bash -c \
+        "[ \"\$(printf '%s\n' \"$OUT\" | tail -n2 | tr '\n' ' ')\" = '1 0 ' ]"
+    extra "WHAT W2: --port 4333 create, then --check, in a fresh container"
+    tb_end
+fi
 
 # ------------------------------------------------- the closing output
 say "closing output"
@@ -1002,18 +1119,19 @@ say "writing the report"
     DIR/mash-setup.json; MASH_TLS_CA=DIR/ca.pem; --sys-creds, --admin-creds),
     runs `mashctl init` after a real adopt, and drops `--creds-out` after
     checking it names the default path. Blocks 10 and 11 are therefore NOT
-    tested against ctl's real `adopt --from`, and the typed CA fingerprint
-    is NOT exercised: block 11 (a person block) ran without a pty and fed
-    nothing. In the build copy, adopt.go is patched so `--admin-creds`
+    tested against ctl's real `adopt --from`; neither prompts for a
+    fingerprint (the guide says this machine is not asked), so none is fed. In the build copy, adopt.go is patched so `--admin-creds`
     copies the file (0.5.6 behaviour); not committed.
 (e) mash: the in-tree mash does not read MASH_ENDPOINT. Blocks 16 and 17 ran
     as COPIES with MASH_ENDPOINT=o.g.n rewritten to MASH_OWNER=o
     MASH_GROUP=g MASH_NAME=n. The guide text itself was checked to contain
     MASH_ENDPOINT and none of MASH_TLS_CA, MASH_OWNER, MASH_GROUP, MASH_NAME.
-(f) Block 34 (What next, `endpoint create acme.demo.design`) ran before the
+(f) Block 33 (What next, `endpoint create acme.demo.design`) ran before the
     remove blocks (it needs the server). Block 25 (restore) ran first as
     written (refuses, the directory exists), then after the test stopped
-    the server and renamed the directory to mash-nats.moved. Blocks 27 and
+    the server and renamed the directory to mash-nats.moved; block 26
+    (--upgrade) then made bin/ itself. The person blocks (19, 29) ran on a
+    pty; 29 also ran once BEFORE 19 to check it refuses. Blocks 27 and
     28 (boot) were not run (no systemd).
 (g) The image is debian:bookworm-slim plus sudo; user alice (uid 1000,
     NOPASSWD sudo); each block ran as `podman exec --user alice ... env -i
@@ -1024,6 +1142,8 @@ say "writing the report"
 (h) The CA fingerprint in the embedded closing text is masked in the
     comparison with the fresh output (it differs every run).
 __SUBS__
+    printf '\n## WHAT-MASH-NEEDS.md blocks\n\n| block | contains | status | reason |\n|---|---|---|---|\n'
+    cat "$T/wrows.md"
     printf '\n## NOT VERIFIED\n\n'
     cat <<'__NV__'
 - Real attestation verify on v0.5.6 (assets do not exist; the release
@@ -1031,6 +1151,8 @@ __SUBS__
 - ctl's real `mashctl adopt --from`, the typed fingerprint, adopt running
   init itself, `endpoint create --creds-out`, and mash reading MASH_ENDPOINT:
   all only through the shims above.
+- adopt copying ca.pem (0644) into mashctl's folder: the in-tree mashctl
+  does not; block 12's five-entry order was checked on a model folder.
 - --enable-boot and --disable-boot, a real reboot.
 - Any distribution other than Debian 12 (bookworm), and Ubuntu.
 __NV__

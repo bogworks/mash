@@ -271,3 +271,25 @@ exists yet and v0.5.6 attestation is untested; adopt's copy behaviour is
 ctl's DRAFT10 target; the same-user race is a residual; the systemd
 journal copy of `server.log` is unfiltered; reboot, Ubuntu and
 `enable-linger` as an ordinary user are untested.
+
+## DRAFT6 update (2026-11-19)
+
+Planner's split (lead #24), within the 0.5.6 freeze (#25: no new command,
+file format or protocol):
+
+- Doc 1, `SKILL.md`: the default one-machine path only, ending in
+  "what you hold" and the next command. It is the agent skill.
+- Doc 2, `WHAT-MASH-NEEDS.md`: the settings, limits and users mash needs,
+  non-default answers with worked examples (`--port`, `--dir`,
+  `--mash-config`/`MASH_CONFIG_DIR`, `--host`/`--listen`), the long-form
+  adopt, other machines, your own server, backup and loss.
+- Rev 14: on one machine as one user nobody types a fingerprint; the typed
+  check belongs to the other-machine section. Helper closing reworded
+  (commit 8ac4d0b).
+- One table of where each secret is after each step and what is lost.
+  "There is no restore" for mashctl's folder is said plainly.
+- Install block is multi-line (no 1,300-character line); interim route.
+- Remove completely: retire keys, then `--remove`, then mashctl's folder;
+  no step deletes live keys (INV-004).
+- Held under the freeze: the rev 12 release-file install route (helper and
+  skill as attested release files), boot-unit work, new flags.
