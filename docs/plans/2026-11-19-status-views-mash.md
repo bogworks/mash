@@ -1,6 +1,6 @@
-# mash status views, DRAFT5c
+# mash status views, DRAFT5d
 
-Date: 2026-11-19. Status: DRAFT5c, paper design only (nothing is built, no
+Date: 2026-11-19. Status: DRAFT5d, paper design only (nothing is built, no
 product code; the targets document and the READMEs are edited by others). It
 answers Randy's comment on the noon page: "I see no reason to put the mash
 server details in the mash status. There's only one server in your mash and if
@@ -46,6 +46,21 @@ hard cut and no alias.
 Decision 249 is the lead's open decision about the SENDER's side of mail: did
 my message arrive, did the session wake. This page does not answer it; section
 5 says what a sender can see today, and what only decision 249 can add.
+
+DRAFT5d (the planner's last check of DRAFT5c, and the lead's rulings). (1) THE
+TWO LIMITS ARE INDEPENDENT: with `mailbox_limit` 0 and the age on, the mailbox
+row says `no count limit set; age limit 1h` (new block
+`status-mailbox-count-off`) and mash still wakes for age; `no limit set` is the
+row only when BOTH are off. (2) The age-over screen has one fix (`the session
+is not taking its mail: look at its terminal`), then the two shell commands,
+labelled; the config hint is gone from the screen; the wake sits at the end of
+the first line on the count row and the age row alike. (3) `waiting` is `not
+yet acknowledged by your session`, with the no-session case, in `--detail`.
+(4) The one-address view of your own endpoint shows the mailbox row, and the
+page no longer says the contract lacks it. (5) `mash status` with plain text on
+prints no server address; it points to `mash server status`. (6) Small prose:
+the `last alive` row name, the `meant to run on` note on every block that shows
+the label, section 8's age forms.
 
 DRAFT5c (the age trigger; Randy said yes at 11:30Z, "configurable but defaults
 to like 1 hour", and the contract, rev 26, REQ-015 now has it). The mailbox
@@ -227,8 +242,9 @@ three views, each one a question the screen must pass:
 6. Nothing a person is expected to know is printed. The server address, the
    endpoint's own address (named once, in the verdict). `mash status` prints no
    server address: `mash server status` is the one place that shows it, and
-   every failure points there. The two override screens name the value that
-   overrides, because that is the thing to check.
+   every failure points there. The one screen that names a value is the
+   environment override (`status-env-override`: the `MASH_SERVER` that is
+   being ignored, the thing to check); the plain-text screens print no address.
 7. One thing, one name, one form, one source: the dotted address; `online` and
    `offline` (a session answered the probe just now, or not); `waiting` (mail
    not yet acknowledged). No second word for the same thing (`serving`,
@@ -451,16 +467,28 @@ Row values, the complete lists (anything else is a defect):
   `UNSAFE`, `not checked`).
 - `mailbox` (REQ-015, section 4.4): `0 waiting`; `2 waiting`; `17 waiting,
   OVER THE LIMIT OF 15 (woke the session at 09:40)` (a warning: the verdict
-  says `mail works (1 warning)`, exit 0); `3 waiting, no limit set` (the config
-  key `mailbox_limit` is 0; mash never wakes the session for a backlog; the
-  count is still shown); `not checked`. In order: how many are waiting; whether
-  that is OVER THE LIMIT; when it is, whether and when mash woke the session
-  (`woke the session at 09:40`, `no wake yet`, or `no session to wake`). When
-  the OLDEST message is past `mailbox_age` the row is `3 waiting, oldest 1h
-  12m, OVER THE AGE LIMIT OF 1h`, with the wake on its second line; when both
-  limits are passed, `22 waiting, OVER THE LIMIT OF 15 AND THE AGE LIMIT OF
-  1h`, and the second line is `oldest 1h 12m (woke the session at 09:40)`. The
-  `warning:` and the `fix:` under the rows say what to do.
+  says `mail works (1 warning)`, exit 0); `not checked`. In order: how many are
+  waiting; whether that is OVER A LIMIT; when it is, whether and when mash woke
+  the session (`woke the session at 09:40`, `no wake yet`, or `no session to
+  wake`). The wake is always the LAST words of the row's FIRST line, in
+  brackets, whichever limit was passed. When the OLDEST message is past
+  `mailbox_age` the row is `3 waiting, OVER THE AGE LIMIT OF 1h (woke the
+  session at 09:40)` and its second line is `oldest 1h 12m`; when both limits
+  are passed, `22 waiting, OVER BOTH LIMITS (woke the session at 09:40)` and
+  the same second line (the `warning:` names the two limits). The two limits
+  are independent, so the row says which is not set:
+  both off (`mailbox_limit` 0 and `mailbox_age` 0), `3 waiting, no limit set`
+  (mash never wakes the session for a backlog; `status-mailbox-off`); only the
+  count limit off (`mailbox_limit` 0, `mailbox_age` 1h), `3 waiting, no count
+  limit set; age limit 1h` (mash STILL WAKES the session when the oldest
+  message is older than the age limit; `status-mailbox-count-off`); only the
+  age off (`mailbox_age` 0), the row is the count row as above and `--detail`
+  says `no age limit set` (a count-over screen adds a `note:` saying so). A
+  count limit of 0 never shows OVER THE LIMIT; an age that is over still does.
+  The count is still shown in every state. In `--detail` the `mailbox limit`
+  line reads `no limit set` when both are off and `no count limit set` when only
+  the count limit is, and its second line is `age 1h ...` or `no age limit
+  set`. The `warning:` and the `fix:` under the rows say what to do.
 - "Limit" means one thing, and every screen that shows it says so: the limit
   is the number that triggers a wake, and the age limit is the age that
   triggers a wake. It is not a capacity: the inbox's
@@ -551,7 +579,9 @@ acme.demo.bob: mail works.
   credentials file  /home/bob/.config/mash/acme.demo.bob.creds
   endpoint          acme.demo.bob
   chosen by         the only one installed here
-  waiting means     not yet shown to the session in full, and not read
+  waiting means     not yet acknowledged by your session; with no session
+                    running nothing acknowledges mail, so every message
+                    waits until a session starts and shows or reads it
   mailbox limit     15 (the number that triggers a wake; key mailbox_limit)
                     age 1h (the age that triggers a wake; key mailbox_age)
   summary only      0 (shown as a one-line summary, not read; still waiting)
@@ -643,8 +673,9 @@ acknowledges it within 250 ms, and with no session the count drops when the
 next one starts (4.4).
 
 The oldest waiting message is older than the age limit (warning, exit 0;
-AT-008), however few wait. The row says how many, how old the oldest is, that
-the AGE limit is passed, and when mash woke the session (its second line):
+AT-008), however few wait. The row says how many, that the AGE limit is passed,
+and when mash woke the session, in the same place as on the count screen (the
+end of the first line); its second line says how old the oldest message is:
 
 <!-- packet: status-mailbox-age-over -->
 ```
@@ -655,25 +686,26 @@ acme.demo.bob: mail works (1 warning).
   server       reachable, encrypted
   config       ok
   credentials  ok
-  mailbox      3 waiting, oldest 1h 12m, OVER THE AGE LIMIT OF 1h
-               (woke the session at 09:40)
+  mailbox      3 waiting, OVER THE AGE LIMIT OF 1h (woke the session at 09:40)
+               oldest 1h 12m
   session      online
 
 warning: 3 messages are waiting, and the oldest has waited 1h 12m. The age
          limit, 1h, is the age that triggers a wake: a note mash sends an
          idle session to say mail is waiting. It sends one at most every 10
          minutes while the oldest message is older than that.
-fix: have the session read its mail: the session is running, so a message
-     you read leaves the count within a second:
+fix: the session is not taking its mail: look at its terminal.
+next: if you are at a shell, list the mail, then read a message by its number
+      (a running session's serve acknowledges a message you read within a
+      second):
   mash inbox
   mash read <number>
-To change the age limit, add this line to ~/.config/mash/config.json (0
-turns the age check off):
-    "mailbox_age": "2h"
 ```
 
-With `mailbox_age` 0, the `--detail` line under `mailbox limit` reads `no age
-limit set` and the age never wakes the session.
+There is no line to paste for changing the age limit on this screen: someone
+who got here wants the mail read, not the setting changed, and `mash status
+--detail` names the key (`mailbox_age`) on its `age` line. With `mailbox_age` 0,
+that line reads `no age limit set` and the age never wakes the session.
 
 The mailbox is over its limit and no session is there (warning, exit 0). There
 is no one to wake, so the action is to start one or to read the mail:
@@ -700,8 +732,9 @@ fix: start Claude Code in the terminal you want it in: it is shown the
   mash read <number>
 ```
 
-The limit is turned off (`mailbox_limit` 0; exit 0, no warning). The `note:`
-explains the word, because this person never sees the over-the-limit screen:
+Both limits are turned off (`mailbox_limit` 0 and `mailbox_age` 0; exit 0, no
+warning). The `note:` explains the word, because this person never sees the
+over-the-limit screen:
 
 <!-- packet: status-mailbox-off -->
 ```
@@ -715,10 +748,33 @@ acme.demo.bob: mail works.
   mailbox      3 waiting, no limit set
   session      online
 
-note: the limit is the number of waiting messages that triggers a wake. None
-      is set, so mash never wakes the session for a backlog. To set one, put
-      "mailbox_limit" (a whole number; the default is 15) in
+note: a limit is what triggers a wake. Neither the number of waiting messages
+      nor the age of the oldest has one set, so mash never wakes the session
+      for a backlog. To set one, put "mailbox_limit" (a whole number; the
+      default is 15) or "mailbox_age" (for example "1h") in
       ~/.config/mash/config.json.
+```
+
+Only the count limit is turned off (`mailbox_limit` 0, `mailbox_age` 1h; exit 0,
+no warning). The row says which limit is not set and which is. mash STILL WAKES
+the session, for age:
+
+<!-- packet: status-mailbox-count-off -->
+```
+$ mash status
+acme.demo.bob: mail works.
+
+  version      0.5.6
+  server       reachable, encrypted
+  config       ok
+  credentials  ok
+  mailbox      3 waiting, no count limit set; age limit 1h
+  session      online
+
+note: no count limit is set, so a large backlog does not wake the session by
+      itself. The age limit, 1h, still does: mash wakes the session, a note it
+      sends an idle session to say mail is waiting, when the oldest message
+      has waited longer than that.
 ```
 
 Server not reachable (exit 6). No address on this screen: the server's address
@@ -836,9 +892,10 @@ fix: mash never guesses between acme.demo.alice and acme.demo.bob. To use
   export MASH_ENDPOINT=acme.demo.bob
 ```
 
-Plain text with the test-server override (warning, exit 0). Both addresses of
-the override are in the warning, because the person must see what is
-overriding what, and `nats://` is explained where it first appears:
+Plain text with the test-server override (warning, exit 0). DRAFT5d (the lead's
+ruling): this screen prints NO server address, like the rest of `mash status`.
+It says that plain text is on and why that matters; `mash server status` shows
+the address:
 
 <!-- packet: status-plain-warning -->
 ```
@@ -854,13 +911,13 @@ acme.demo.bob: mail works (1 warning).
   mailbox      2 waiting
   session      online
 
-warning: anyone on the network can read your credentials and your mail.
-         MASH_SERVER is set to nats://localhost:4222, a plain-text address
-         (tls:// ones are encrypted), instead of tls://localhost:4222 from
-         config.json. It is allowed only because
-         MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set (test servers only).
+warning: plain text is on (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION): mail is not
+         encrypted. Anyone on the network can read your credentials and your
+         mail. This is for test servers only.
 fix: stop overriding it in this shell:
   unset MASH_SERVER MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION
+next: to see the server address mash used:
+  mash server status
 ```
 
 The environment names a server that `config.json` does not have (not checked,
@@ -887,7 +944,10 @@ fix: MASH_SERVER is set to tls://other:4222, which is not the server in
   unset MASH_SERVER
 ```
 
-The other states keep the targets' text with the rows changed the same way: a
+The other states keep the targets' text with the rows changed the same way, and
+with no address printed (DRAFT5d: the refusal of a plain address says
+`MASH_SERVER is a plain-text address` and points to `mash server status`, as
+the unreachable screen does): a
 plain address without the override (`server  NOT ENCRYPTED (refused; not
 connected)`, exit 1), the override set with a tls address (a warning;
 `server  reachable, encrypted`, and the warning says the variable is set and
@@ -1113,15 +1173,16 @@ has no source (section 3), and no `MAILBOX` column. REQ-015 (contract, rev 26)
 says it, and this is the one place the page states it: `mash endpoint status`
 shows no mailbox column, because an endpoint's credentials can read only its
 own inbox (section 2), so the count is shown by that endpoint's own `mash
-status`, and a column would be `unknown` on every row but yours. This page adds
-one thing the contract does not say: the one-address view of your own endpoint
-shows the same row (section 8). The list is thinner than "more detailed"
+status`, and a column would be `unknown` on every row but yours. The one-address
+view of your own endpoint shows the same row, and the contract says so (the
+block `endpoint-status-own`, below). The list is thinner than "more detailed"
 sounds; what is true about another endpoint is its address, whether it answers,
 its version, where it is meant to run, and the directory's description.
 
 `meant to run on` is the directory's `host` field, where an administrator says
 the endpoint is meant to run; it is not a live fact for any endpoint but your
-own, and every block that shows it says so in one line.
+own, and wherever the label appears a `note:` says so in one line (every block
+below that shows it has one, the `--wide` table included).
 
 The verdict line names the set and the counts, which says which endpoints the
 default acted on (standard rule 8). Sorted by address. No legend under a list:
@@ -1283,6 +1344,7 @@ acme.lab.carol: offline.
   version          -
   meant to run on  -
 
+note: meant to run on is what an administrator recorded, not where it runs.
 note: mail to acme.lab.carol waits for its next session. mash cannot tell
       whether it has been read; only a reply shows that.
 ```
@@ -1326,6 +1388,8 @@ $ mash endpoint status --wide
   acme.demo.alice  online   0.5.6    localhost        reviewer
   acme.demo.bob    online   0.5.6    localhost        -         (you)
   acme.lab.carol   offline  -        -                -
+
+note: MEANT TO RUN ON is what an administrator recorded, not where it runs.
 ```
 
 Many endpoints. Past 40 rows the table stops and says so; the verdict counts
@@ -1486,7 +1550,9 @@ WHICH CODE CHANGES THAT, and anything else the ack change touches:
    limit, so a session that has been shown or has read its mail is not woken. A
    backlog already over the limit when serve starts wakes once, at 10 minutes
    after the start, if still over (REQ-015). Everything else of REQ-015
-   stands: the line text, the cooldown, `mailbox_limit` 0 turns it off.
+   stands: the line text, the cooldown, `mailbox_limit` 0 turns off the COUNT
+   trigger only (the age trigger, item 5, is a separate setting and still
+   wakes).
 5. THE AGE TRIGGER (the contract, rev 26, REQ-015; Randy: "configurable but
    defaults to like 1 hour"). WHAT IT COUNTS: the age of the OLDEST waiting
    message, by the time the SERVER stored it (not the time serve first saw it),
@@ -1494,8 +1560,11 @@ WHICH CODE CHANGES THAT, and anything else the ack change touches:
    same wake fires, under the same cooldown (per endpoint, 10 minutes from the
    last wake, not kept over a restart) and the same start hold (a backlog
    already over at the start wakes once, at 10 minutes), however few messages
-   wait. The wake line and the row say which limit was passed (`oldest 1h 12m,
-   over the age limit of 1h`; `status-mailbox-age-over`). BUILD PLAN. In
+   wait. The two settings are independent: `mailbox_limit` 0 turns off the count
+   trigger and the age still wakes; `mailbox_age` 0 turns off the age trigger
+   and the count still wakes. The wake line says which limit was passed
+   (`oldest 1h 12m, over the age limit of 1h`) and so does the row
+   (`OVER THE AGE LIMIT OF 1h`; `status-mailbox-age-over`). BUILD PLAN. In
    `mash serve`: a third predicate in `wakeIfIdle`
    (`internal/endpoint/hook.go:305-317`) beside the count, and the waking
    tracker (`internal/endpoint/waking.go:48`, `:144`) keeps the stream's
@@ -1788,12 +1857,19 @@ decide. OPEN: Randy or ctl has not ruled; the recommendation is given.
 12. CLOSED: rule 3 of the standard and `mash status`; the exception covers it
     (section 6).
 13. CLOSED: the server address. `mash status` prints no server address except
-    in the two override screens, where the value that overrides is the thing
-    to check; for every failure it points to `mash server status`, the one
+    in the environment-override screen, where the value that is ignored is the
+    thing to check (the plain-text screens print none, DRAFT5d); for every
+    failure it points to `mash server status`, the one
     place that shows the address.
 14. CLOSED: the `MAILBOX` of other endpoints. No column (stated once, in 4.3).
-15. CLOSED by the same ruling: with `mailbox_limit` 0 the row says `3 waiting,
-    no limit set`, and a `note:` says what the limit is.
+15. CLOSED, and corrected in DRAFT5d (the planner's last check; the lead's
+    wording): the row depends on both settings. With `mailbox_limit` 0 and
+    `mailbox_age` 0 the row says `3 waiting, no limit set`, and a `note:` says
+    what a limit is (mash never wakes for a backlog). With `mailbox_limit` 0
+    and `mailbox_age` on the row says `3 waiting, no count limit set; age limit
+    1h`, and mash STILL WAKES for age (`status-mailbox-count-off`). With only
+    `mailbox_age` 0 the row is unchanged and `--detail` says `no age limit
+    set`.
 16. OPEN, small. Time format (section 1): local time on default screens, with
     the offset behind `--detail`. Recommendation: as written.
 17. OPEN, small. `mash status` now probes presence for the `session` row: about
@@ -1813,9 +1889,18 @@ Not edited by this page. The sections and blocks that would change:
   `warning:`/`fix:` text. `--detail`: REQ-012's rows stay without the trust
   rows and the `group` fact; added: `waiting means`, `mailbox limit`, `summary
   only`, `session started`, `server details`. The `mailbox` row is `<n>
-  waiting`, `..., OVER THE LIMIT OF <limit> (<wake>)`, `..., no limit set`,
+  waiting`, `..., OVER THE LIMIT OF <limit> (<wake>)`, `..., OVER THE AGE
+  LIMIT OF <age> (<wake>)` with `oldest <age>` on a second
+  line, `..., OVER BOTH LIMITS (<wake>)`, `..., no limit set` (both off),
+  `..., no count limit set; age limit <age>` (only the count limit off),
   `not checked`, in every block, with the over-the-limit blocks, their `fix:`
-  and the `no limit set` note added.
+  and the notes added. The wake is the last words of the first line in every
+  over-limit form. The age forms are R12's, `45s`, `12m`, `1h 12m`, `2d`, for
+  `oldest`; the age limit is written in the `mailbox_age` grammar, a whole
+  number and a unit: `30m`, `1h`, `2d`. `--detail`: the `mailbox limit` line
+  and, under it, the `age` line (`age 1h (the age that triggers a wake; key
+  mailbox_age)` or `no age limit set`); `waiting means` is `not yet
+  acknowledged by your session`, with the no-session case.
 - The environment rule (section 4.1): the targets' DRAFT11 says `mail does NOT
   work: MASH_SERVER overrides config.json` for a differing value; this page says
   `not checked`, because mash did not check (critic, defect 7), and the fix says
@@ -1848,7 +1933,11 @@ Not edited by this page. The sections and blocks that would change:
   `no limit set`. This page adds to it: (1) the row wording, `<n> waiting,
   OVER THE LIMIT OF <limit> (woke the session at 09:40)`, the contract's
   capitals with the wake time added; (2) the recorded wake time,
-  `backlog_woke_at`. The contract already has the one-address view of your own
+  `backlog_woke_at`; (3) `no limit set` only when BOTH limits are off, and
+  `no count limit set; age limit 1h` when only the count limit is (the lead's
+  wording; the contract says `no limit set` for a limit of 0 and does not say
+  what the row reads when the age is on); (4) the wake in the same place, the
+  last words of the first line, on the count row and the age row. The contract already has the one-address view of your own
   endpoint showing the mailbox row, and `mash read` marking the message read
   locally (the count drops when the next session starts). REQ-004's `mash
   server status: address, alive, encrypted, last seen` and `mash endpoint
@@ -1859,7 +1948,9 @@ Not edited by this page. The sections and blocks that would change:
 - Section 6 MCP: `who` becomes `endpoint_status` (7.2) with the pattern
   argument and `mailbox` for the caller's own entry; `status` takes the six rows
   (`mailbox: {waiting, limit, oldest_age, age_limit, over_limit,
-  over_age_limit, woke_at}`, `session: online|offline`); new tool
+  over_age_limit, woke_at}`; `limit` 0 means NO COUNT LIMIT SET, not "no wake":
+  with `age_limit` on, the session is still woken for age;
+  `session: online|offline`); new tool
   `server_status`; the initialize `instructions` text names the new tools.
 - Section 7 and 8 of the targets: N10 (`last reached`) closes for `mash status`
   and is dropped for the list (no last seen); N13 closes; the behaviour changes
@@ -1946,7 +2037,9 @@ and ADR 0041, 0046, 0066 and 0069.
 
 DRAFT5c adds one block, `status-mailbox-age-over`, and a line to `status-detail`
 (37 fenced blocks in all, 36 before; the widest printed line is
-still 78: re-measured, none is over 80).
+still 78: re-measured, none is over 80). DRAFT5d adds one block,
+`status-mailbox-count-off` (38 in all), and re-measures: see the end of this
+section.
 
 DRAFT5b, measured (a Python 3 script, `-I`, characters per line of every fenced
 block, the `$` blocks and the JSON block included; a second pass checks that
@@ -1956,13 +2049,21 @@ over 80 columns. The widest is 78 (`status-detail`, `status-refused` and
 `server-untrusted`). `status-noconfig`, whose command was 121 columns in
 DRAFT4, is now 76: the command is continued over two lines with a backslash and
 no line of it is over 80. The new `mash status` blocks: `status-mailbox-over`
-76, `status-mailbox-over-offline` 76, `status-mailbox-off` 76. `mash endpoint
-status`: the default tables are 41 columns or fewer, the `--wide` table 69, the
-real-name table 56 (DRAFT4 said both 54 and 56), the help block 75, the
-one-address blocks 73 to 77, the JSON block 72. Every key/value block has one
-value column, status-detail's at column 20. Prose lines outside tables and
-quoted text: none over 80. Tables in this file are not measured (a markdown
-table row cannot wrap; each is one line of the file).
+76, `status-mailbox-over-offline` 76, `status-mailbox-off` 76 (77 in DRAFT5d).
+`mash endpoint status`: the default tables are 41 columns or fewer, the
+`--wide` table 69, the real-name table 56 (DRAFT4 said both 54 and 56), the
+help block 75, the one-address blocks 73 to 77, the JSON block 72. Every
+key/value block has one value column, status-detail's at column 20. Prose lines
+outside tables and quoted text: none over 80. Tables in this file are not
+measured (a markdown table row cannot wrap; each is one line of the file).
+
+DRAFT5d, measured with the same script: 38 fenced blocks. NO printed line is
+over 80; the widest is 78 (`status-detail`, `status-refused`,
+`status-plain-warning`, `status-mailbox-age-over`, `status-mailbox-count-off`,
+`server-untrusted`). `status-mailbox-off` is 77, `endpoint-status-offline` 75
+and `endpoint-status-wide` 75. One value column in each key/value block
+(`status-detail` at column 20). No prose line outside tables and quoted text is
+over 80.
 
 ## 10. Disposition of the findings
 
@@ -1976,7 +2077,7 @@ sections; "junior" is its part 3 unless named.
 | finding | status | where, and what |
 |---|---|---|
 | critic D1: one fact, two names, two sources | FIXED | `online`/`offline`, from the presence probe, in `mash status` (section 4.1) and `mash endpoint status` (4.3); rule 7. The lease is not the state source: it can be 90 s old, and cannot be read for another endpoint |
-| critic D2: the count cannot be lowered | FIXED | 4.4: delivery acknowledges (shown in full, the `read` tool, `mash read`), so reading lowers the count, with or without a session; the screens carry a `fix:` with `mash inbox` and `mash read` |
+| critic D2: the count cannot be lowered | FIXED | 4.4: delivery acknowledges (shown in full, the `read` tool, `mash read`), so reading lowers the count when a session is running, and when none is it drops when the next one starts (`mash read` marks it read here); the screens carry a `fix:` with `mash inbox` and `mash read` |
 | critic D3: the wake is not shown | FIXED | the `mailbox` row itself says `woke the session at 09:40` (lead ruling 4); the time is read from the lease (4.4) |
 | critic D4: `off` and `LIMIT` mislead | FIXED | `no limit set`, with a `note:` on that screen; "limit" is explained on every screen that shows it as the number that triggers a wake, and is not a capacity |
 | critic D5: no-match is both legitimate and an error | FIXED | `endpoint-status-nomatch`: exit 0, stdout; an unregistered full address stays exit 1 |
@@ -1985,10 +2086,10 @@ sections; "junior" is its part 3 unless named.
 | critic D8: `mashctl status` contradicted | FIXED | the superseded item and the appendix's closing paragraph are gone; settled in section 6, item 3 |
 | critic D9: two pattern dialects | FIXED | one grammar for both tools, ruled by the planner (ruling 7): stated once in 4.3, ctl mirrors it; the one difference is scope (mashctl may name another owner) |
 | critic D10: `--json` drops "here" | FIXED | by removal: no `last_seen` anywhere |
-| critic D11: "last seen here" claims more than it knows | FIXED | by removal (planner's ruling): no last-seen by default and no local record; the question to Randy is at the top; `--detail` says `heartbeats  not recorded` |
+| critic D11: "last seen here" claims more than it knows | FIXED | by removal (planner's ruling): no last-seen by default and no local record; the question to Randy is at the top; `--detail` says `last alive  not recorded` |
 | critic D12: the same fact twice on one screen | FIXED | `status-detail` has no server or session fact rows (one pointer line); the certificate date appears once |
 | critic D13: a legend under every list | FIXED | no legend; `endpoint-status-help` holds the definitions; the caller is marked `(you)` |
-| critic D14: the `MAILBOX` column is `unknown` | FIXED | the column is gone; REQ-015 (rev 26) says so and 4.3 states it once; the contract differs from this page only in the one-address view of your own endpoint (section 8) |
+| critic D14: the `MAILBOX` column is `unknown` | FIXED | the column is gone; REQ-015 (rev 26) says so and 4.3 states it once; the contract has the one-address view of your own endpoint showing the mailbox row too, so there is no difference (4.3, section 8) |
 | critic D15: `server status` fails on a credentials problem | FIXED | `server-no-credentials`: the server's verdict, exit 0, storage row `not checked (...)` |
 | critic D16: the `status-choose` fix is not pasteable | FIXED | prose for the file edit, the command for the shell; indents 5 and 2 |
 | critic D17: two alignments on one screen | FIXED | one value column per screen (rule 9) in every block, including `status-detail` (the `listed, not read` row is now `summary only`, at the common column) |
@@ -2081,6 +2182,16 @@ sections; "junior" is its part 3 unless named.
 | DRAFT5b, lead 3: own-endpoint one-address view | FIXED | the flag is removed from section 8 (the contract says it now) |
 | DRAFT5b, lead 4: open items | FIXED | "Verify at build", a table in the targets decisions file; one pointer in section 9 |
 | DRAFT5c, the age trigger (Randy, 11:30Z; contract rev 26 REQ-015) | FIXED | `status-mailbox-age-over`, the second line of `mailbox limit` in `--detail`, 4.4 item 5 (the predicate and the build plan), the MCP object; the shell's one direct get is "Verify at build" (j) |
+| planner, DRAFT5c check, item 1: `mailbox_limit` 0 with `mailbox_age` on says `no limit set` and "never wakes" | FIXED | 4.1 (the row forms by state), the `note:` of `status-mailbox-off` (both off only), new block `status-mailbox-count-off` (`no count limit set; age limit 1h`; mash still wakes), 4.4 items 4 and 5 (independent settings), 7.15, section 8, the MCP `limit` 0 (targets section 6), `--detail` `no count limit set`; targets: `status-mailbox-off` and its text, row forms |
+| planner, item 5: the age-over fix is muddled; the config hint is not pasteable | FIXED | `status-mailbox-age-over`: `fix: the session is not taking its mail: look at its terminal.`, then a labelled `next:` with `mash inbox` and `mash read <number>` each on its own line; the config hint is REMOVED (noise; `--detail` names the key); the wake is the last words of the first line on the count row and the age row alike (`oldest 1h 12m` on the age row's second line) |
+| planner, item 2: `waiting means ... and not read` is false; item 3: the D2 row | FIXED | `status-detail`: `waiting means  not yet acknowledged by your session`, and the no-session case (nothing acknowledges mail until a session starts and shows or reads it); the D2 row says the same |
+| planner, item 4: the contract has the own-endpoint mailbox row or not (and defect 14) | FIXED | 4.3 and the D14 row now say it does (the lead's ruling); no sentence says otherwise |
+| planner, item 9: `status-plain-warning` prints the config's address | CHANGED | the lead ruled no address on status screens: `plain text is on (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION): mail is not encrypted`, and `next:` `mash server status`; the targets' three plain-text status blocks say the same; rule 6 and 7.13 name `status-env-override` as the one screen that names a value; the connecting commands' stderr warnings (`send`, `serve`) keep their text and name no address |
+| planner, item 7: the D11 row says `heartbeats` | FIXED | the row says `last alive  not recorded` |
+| planner, item 8: "every block says so" for `meant to run on` | FIXED | 4.3 says "wherever the label appears, a `note:`" and every block with the label has it (the offline block and the `--wide` table gained one; verified by grep) |
+| planner, item 6: section 8 lacks the age forms | FIXED | section 8: `OVER THE AGE LIMIT OF <age>`, `oldest` in R12's `45s`, `12m`, `1h 12m`, `2d`, the `mailbox_age` grammar `30m`, `1h`, `2d`, the `--detail` age line |
+| planner, item 10: lower-case quote in 4.4 item 5 | FIXED | the row is quoted in capitals; the wake line (lower case, the contract's) is named as the wake line |
+| planner, NOT CLEAN list: l.892 "the override set with a tls address" reads as MASH_SERVER | NOT TAKEN | the sentence means the DANGEROUSLY variable and says so by name two lines above it; the extra words are not worth another sentence |
 | junior: sections 2, 3, 4.4 need the code to read | CHANGED | they are for a reviewer; the words a person needs are in the screens |
 
 ## Appendix: the CLI team's answers, quoted unchanged

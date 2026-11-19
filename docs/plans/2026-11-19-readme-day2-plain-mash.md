@@ -277,10 +277,8 @@ $ mash status
 acme.demo.bob: mail does NOT work: the server address is not encrypted.
 
   version       0.5.6
-  server        nats://localhost:4222
-                NOT ENCRYPTED (refused; not connected)
-                MASH_SERVER overrides config.json: nats://localhost:4222
-                instead of tls://localhost:4222
+  server        NOT ENCRYPTED (refused; not connected)
+                MASH_SERVER is set to a plain-text address (nats://)
   config        ok
   credentials   not checked (the connection was refused)
   mailbox       not checked
@@ -290,6 +288,8 @@ fix: use a tls:// address. MASH_SERVER is overriding the server in
      credentials and mail would cross the network unencrypted: test servers
      only.) Stop overriding it in this shell:
   unset MASH_SERVER
+next: to see the address of the server in config.json:
+  mash server status
 ```
 
 When that variable is set anyway, status reports it (exit 0). With a plain
@@ -303,20 +303,19 @@ $ mash status
 acme.demo.bob: mail works (1 warning).
 
   version       0.5.6
-  server        nats://localhost:4222
-                alive, NOT ENCRYPTED (checked 09:42)
-                MASH_SERVER overrides config.json: nats://localhost:4222
-                instead of tls://localhost:4222
+  server        alive, NOT ENCRYPTED (checked 09:42)
                 allowed by MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION
   config        ok
   credentials   ok
   mailbox       2 waiting
 
-warning: anyone on the network can read your credentials and your mail.
-         MASH_SERVER is overriding the server in config.json for this run.
-         Use this only for a test server.
+warning: plain text is on (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION): mail is not
+         encrypted. Anyone on the network can read your credentials and your
+         mail. This is for test servers only.
 fix: stop overriding it in this shell:
   unset MASH_SERVER MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION
+next: to see the server address mash used:
+  mash server status
 ```
 
 and with a tls address it says the variable is set and not used:
@@ -327,8 +326,7 @@ $ mash status
 acme.demo.bob: mail works (1 warning).
 
   version       0.5.6
-  server        tls://localhost:4222
-                alive, encrypted (checked 09:42)
+  server        alive, encrypted (checked 09:42)
                 MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set (not used)
   config        ok
   credentials   ok

@@ -964,3 +964,22 @@ Targets: `docs/plans/2026-11-19-cli-targets-mash.md`; status views DRAFT5c.
 | D5c-7 | Does the endpoint's own credentials allow a direct get on its own inbox stream by sequence | READ, NOT RUN | `internal/admin/permissions.go:70-71` grants `DIRECT.GET.<inbox>` and `.>`; "Verify at build" (j) |
 
 Packet keys added: `serve-backlog-age`, `status-mailbox-age-over`. Removed: none.
+
+## DRAFT5d: the planner's last check
+
+Source: the planner's check of status views DRAFT5c (`check-status-views-DRAFT5b.md`) and the lead's rulings; contract rev 26 (final, still the newest). Page: `docs/plans/2026-11-19-status-views-mash.md` (DRAFT5d). Targets: `docs/plans/2026-11-19-cli-targets-mash.md` (Z25 in the decisions file).
+
+| # | item | disposition | where |
+|---|---|---|---|
+| D5d-1 | Check item 1 / fix 1: `mailbox_limit` 0 with `mailbox_age` on said `no limit set` and "never wakes" | FIXED | page 4.1, `status-mailbox-off` (both off only), new block `status-mailbox-count-off` (`no count limit set; age limit 1h`, mash still wakes), 4.4 items 4 and 5, 7.15, section 8, MCP `limit` 0; targets: row forms, `--detail` forms, `status-mailbox-off` text, MCP field table, settings table; Z25 (a) |
+| D5d-2 | Check item 5 / fix 2: age-over fix muddled; config hint not pasteable; wake in a different place | FIXED | `status-mailbox-age-over` (page and targets): `fix: the session is not taking its mail: look at its terminal.`, labelled `next:` with `mash inbox` and `mash read <number>`; config hint REMOVED (noise); the wake is the last words of the first line on the count row and the age row (`OVER BOTH LIMITS` the same); Z25 (b), (c). The targets' count-over block has no wake time in its row (a gap older than this draft; the page's has it) |
+| D5d-3 | Check items 2 and 3 / fix 3: `waiting means ... and not read`; D2 row | FIXED | page `status-detail`: `waiting means  not yet acknowledged by your session`, with the no-session case; the D2 row says the count drops when the next session starts when none runs |
+| D5d-4 | Check item 4 / fix 4 (ruling): own-endpoint one-address view shows the mailbox row | FIXED | page 4.3 and the D14 row say the contract has it; section 8 consistent |
+| D5d-5 | Check item 9 / fix 5 (ruling): `status-plain-warning` prints no server address | CHANGED | page `status-plain-warning`: `plain text is on (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION): mail is not encrypted`, `next:` `mash server status`; rule 6 and 7.13 name `status-env-override` as the one screen that names a value. Targets: `status-plain-warning`, `status-plain-inherited` and `status-plain-refused` lost their address lines (refused gained a `next:` `mash server status`). `send-warning`, serve and `send-refuse`: unchanged, they name no host. The README Day 2 page regenerates from the three blocks |
+| D5d-6 | Check item 7: D11 row says `heartbeats` | FIXED | the row says `last alive  not recorded` |
+| D5d-7 | Check item 8: "every block says so" for `meant to run on` | FIXED | page 4.3 softened to "wherever the label appears, a `note:`" and made true: `endpoint-status-offline` and the `--wide` table gained the note (grep: every block with the label has one) |
+| D5d-8 | Check item 6: section 8 lacks the age forms | FIXED | page section 8: the age row forms, `oldest` in R12's `45s`, `12m`, `1h 12m`, `2d`, the `mailbox_age` grammar `30m`, `1h`, `2d`; targets R12 mentions at the wake-line and `read` text now list the same forms (were `45s, 12m, 3h`) |
+| D5d-9 | Check item 10: lower-case quote in 4.4 item 5 | FIXED | the row is quoted in capitals; the lower-case text is named as the wake line |
+| D5d-10 | Check NOT CLEAN: l.892 "the override set with a tls address" | NOT TAKEN | the sentence names the DANGEROUSLY variable two lines above; one more sentence is not worth it |
+
+Packet keys added: none (`status-mailbox-count-off` is a page block, not a targets block). Removed: none.

@@ -18,7 +18,7 @@ counted is `readme-step-count.md` (scratchpad), regenerated with the pages by
 | | lines | prose and headings | inside fenced blocks and markers | widest printed block | widest typed block |
 |---|---|---|---|---|---|
 | quick start | 631 | 333 | 298 | 87 columns | 88 columns |
-| Day 2 | 394 | 199 | 195 | 87 columns | 76 columns |
+| Day 2 | 392 | 199 | 193 | 87 columns | 76 columns |
 
 The quick start is 26 pastes, 77 lines and 10 other actions for the whole
 page; the first mail is sent after 11 pastes (52 lines) with the

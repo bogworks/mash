@@ -512,6 +512,23 @@ Z24. DECIDED, the lead and Randy (contract rev 26, REQ-015, 11:29Z; Randy at
     oldest unacked; the permission is already granted, `internal/admin/
     permissions.go:70-71`); no new SAP field; no new mechanism for a security
     read (own inbox only). Not run: "Verify at build" (j).
+Z25. DECIDED, the lead (the planner's last check of the status views, DRAFT5d).
+    (a) The two limits are independent. `mailbox_limit` 0 with `mailbox_age`
+    on: the row is `3 waiting, no count limit set; age limit 1h` and mash STILL
+    WAKES for age; `no limit set` is the row only when both are 0 (Z12 and Z19
+    read that way); only the age off: the count row and `no age limit set` in
+    `--detail`. The MCP `limit` 0 means no count limit set. (b) The row's wake
+    is the last words of the first line on every over-limit row (Z24 (d)'s
+    second-line wake is replaced: `3 waiting, OVER THE AGE LIMIT OF 1h (woke the
+    session at 09:40)`, second line `oldest 1h 12m`; both passed: `OVER BOTH
+    LIMITS`). (c) The age screen has one fix: `the session is not taking its
+    mail: look at its terminal.` and a labelled `next:` with `mash inbox` and
+    `mash read <number>`; the config line for the age limit is removed from the
+    screen. (d) No status screen prints a server address for plain text:
+    `plain text is on (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION): mail is not
+    encrypted`, and `mash server status` shows the address; the stderr
+    warnings of the connecting commands name no host and are unchanged. (e)
+    Ages are R12's `45s`, `12m`, `1h 12m`, `2d` everywhere.
 
 ## 8. Behaviour changes the contract must decide
 

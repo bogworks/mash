@@ -310,10 +310,13 @@ owner `acme`, the group `release-pipeline` (16 characters) and the names
   default screen (no group row, no claude row); a state that cannot be
   checked says `not checked` in its row. The MAILBOX row (REQ-015, R22) is
   `<n> waiting`, `<n> waiting, OVER THE LIMIT OF <limit>` (a warning),
-  `<n> waiting, no limit set` when `mailbox_limit` is 0 (the count is still
-  shown, contract rev 21), `<n> waiting, oldest 1h 12m, OVER THE AGE LIMIT OF
-  1h` when the oldest message is past `mailbox_age` (a warning too; the wake time
-  is on the row's second line), or `not checked` wherever the count cannot be
+  `<n> waiting, no limit set` when `mailbox_limit` and `mailbox_age` are both 0
+  (the count is still shown, contract rev 21), `<n> waiting, no count limit set;
+  age limit 1h` when only `mailbox_limit` is 0 (mash still wakes for age),
+  `<n> waiting, OVER THE AGE LIMIT OF 1h (woke the session at 09:40)` with
+  `oldest 1h 12m` on a second line when the oldest message is past
+  `mailbox_age` (a warning too; the wake is the last words of the first line),
+  or `not checked` wherever the count cannot be
   known (no credentials, the server not reached or not asked, the credentials
   refused); it is last because it needs the credentials above it. The verdict is
   `<endpoint>: mail works.`, `<endpoint>: mail works (1 warning).` or
@@ -329,7 +332,8 @@ owner `acme`, the group `release-pipeline` (16 characters) and the names
   with `none`, `missing` or `not set` where a value is absent: `config file`,
   `ca`, `credentials file`, `endpoint`, `chosen by` and `mailbox limit` (`15
   (the default)`, `40 ("mailbox_limit" in config.json)`, `40
-  (MASH_MAILBOX_LIMIT)` or `no limit set`), whose second line is the age limit
+  (MASH_MAILBOX_LIMIT)`, `no limit set` when both limits are off or `no count
+  limit set` when only this one is), whose second line is the age limit
   (`age 1h (the default)`, `age 2h ("mailbox_age" in config.json)`, `age 2h
   (MASH_MAILBOX_AGE)` or `no age limit set`); the old facts (commit, counts,
   settings) follow them, and a line `oldest waiting 12m ago` sits under the mailbox row
@@ -682,7 +686,7 @@ variables read there).
 | `endpoint` | `MASH_ENDPOINT` | the endpoint to act as, `acme.demo.bob` | NEW: replaces `owner` / `MASH_OWNER`, `MASH_GROUP` and `MASH_NAME`, which are removed |
 | `server` | `MASH_SERVER` | the server address, `tls://myserver:4222` | RENAMED from `url` / `MASH_URL` (this draft's decision, N8) |
 | `ca` | `MASH_CA` | the file of the CA that signed the server's certificate | RENAMED from `tls_ca` / `MASH_TLS_CA` (N8) |
-| `mailbox_limit` | `MASH_MAILBOX_LIMIT` | how many unacknowledged messages may wait before `mash serve` wakes the session (REQ-015): a whole number from 0 to 1000, default 15, 0 = off | NEW |
+| `mailbox_limit` | `MASH_MAILBOX_LIMIT` | how many unacknowledged messages may wait before `mash serve` wakes the session (REQ-015): a whole number from 0 to 1000, default 15, 0 = no count limit (the age limit still wakes) | NEW |
 | `mailbox_age` | `MASH_MAILBOX_AGE` | how old the oldest waiting message may be before `mash serve` wakes the session, the same wake and cooldown as the count (REQ-015): `30m`, `1h` or `2d` (whole number and unit m, h or d), 1m to 30d, default `1h`, `0` = off | NEW |
 | (none) | `MASH_CONFIG_DIR` | the directory of config.json and credentials | unchanged |
 | (none) | `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION` | allow a plain `nats://` connection, for that run only (R18) | REPLACES `MASH_INSECURE_PLAINTEXT` (Randy: "Just put it in their face."; the old name is gone, no alias); the `insecure_plaintext` key stays REMOVED |
@@ -2116,7 +2120,7 @@ when no endpoint is known and `not set` when none is chosen); `endpoint` (the
 address, `not set`) and `chosen by`, in one of four fixed phrases:
 `MASH_ENDPOINT`, `"endpoint" in config.json`, `the only one installed here`
 (REQ-009) or `not set`; and `mailbox limit` (`15 (the default)`, `40
-("mailbox_limit" in config.json)`, `40 (MASH_MAILBOX_LIMIT)` or `no limit set`, R22), with a second line for the
+("mailbox_limit" in config.json)`, `40 (MASH_MAILBOX_LIMIT)`, `no limit set` (both limits off) or `no count limit set` (only this one), R22), with a second line for the
 age limit (`age 1h (the default)`, `age 2h ("mailbox_age" in config.json)`, `age 2h (MASH_MAILBOX_AGE)` or `no age limit set`; the row count stays six).
 The CA is named by its file in the `ca` row; its fingerprint is not on the
 status screens (it is shown by the first install and by mashctl, R15). The
@@ -2219,13 +2223,13 @@ fix: have the session read its mail. To change the limit, add this line to
 
 The age limit is the second way a mailbox backs up (REQ-015, rev 26): the
 oldest waiting message is older than `mailbox_age` (`1h` unless set), however
-few wait. The row says how many, how old the oldest is and that the AGE limit
-is passed, and when mash woke the session (second line of the row, from the
-lease's `backlog_woke_at`; `no wake yet` before the first, `no session to wake`
-with no session); the warning says what the age limit is, in the words of the
-count's: the age that triggers a wake. If the count is over too, the row is `22
-waiting, OVER THE LIMIT OF 15 AND THE AGE LIMIT OF 1h` and its second line
-`oldest 1h 12m (woke the session at 09:40)`:
+few wait. The row says how many, that the AGE limit is passed and when mash woke
+the session (the last words of the row's first line, from the lease's
+`backlog_woke_at`; `no wake yet` before the first, `no session to wake` with no
+session); its second line says how old the oldest is. The warning says what the
+age limit is, in the words of the count's: the age that triggers a wake. If the
+count is over too, the row is `22 waiting, OVER BOTH LIMITS (woke the session at
+09:40)` with the same second line:
 
 <!-- packet: status-mailbox-age-over -->
 ```
@@ -2237,18 +2241,21 @@ acme.demo.bob: mail works (1 warning).
                 alive, encrypted (checked 09:42)
   config        ok
   credentials   ok
-  mailbox       3 waiting, oldest 1h 12m, OVER THE AGE LIMIT OF 1h
-                (woke the session at 09:40)
+  mailbox       3 waiting, OVER THE AGE LIMIT OF 1h (woke the session at 09:40)
+                oldest 1h 12m
 
 warning: 3 messages are waiting for acme.demo.bob, and the oldest has
          waited 1h 12m. The age limit, 1h, is the age that triggers a wake:
          a note mash sends an idle session to say mail is waiting. It sends
          one at most every 10 minutes while the oldest message is older
          than that.
-fix: have the session read its mail. To change the age limit, add this
-     line to ~/.config/mash/config.json (0 turns the age check off):
-    "mailbox_age": "2h"
+fix: the session is not taking its mail: look at its terminal.
+next: if you are at a shell, list the mail, then read a message by its number:
+  mash inbox
+  mash read <number>
 ```
+
+The screen has no line for changing the age limit: `--detail` names the key.
 
 With `mailbox_age` 0 (`--detail`, the rows under the mailbox limit; no age is
 compared and the age never wakes the session; the default screen has nothing to
@@ -2259,10 +2266,14 @@ say, as for the other limit):
                     no age limit set
 ```
 
-When `mailbox_limit` is 0 the check is off: the row shows the count and then
-`no limit set` (contract rev 21: the count is still shown; the planner's word
-`no limit set` replaces `off`), nothing is compared with a limit, and mash
-serve never wakes the session for a backlog:
+When `mailbox_limit` and `mailbox_age` are both 0 the check is off: the row
+shows the count and then `no limit set` (contract rev 21: the count is still
+shown; the planner's word `no limit set` replaces `off`), nothing is compared
+with a limit, and mash serve never wakes the session for a backlog. When only
+`mailbox_limit` is 0 and the age is on, the row is `3 waiting, no count limit
+set; age limit 1h` and mash serve STILL WAKES the session for age; when only
+`mailbox_age` is 0 the row is the count row as above and `--detail` says `no age
+limit set`:
 
 <!-- packet: status-mailbox-off -->
 ```
@@ -2644,20 +2655,19 @@ $ mash status
 acme.demo.bob: mail works (1 warning).
 
   version       0.5.6
-  server        nats://localhost:4222
-                alive, NOT ENCRYPTED (checked 09:42)
-                MASH_SERVER overrides config.json: nats://localhost:4222
-                instead of tls://localhost:4222
+  server        alive, NOT ENCRYPTED (checked 09:42)
                 allowed by MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION
   config        ok
   credentials   ok
   mailbox       2 waiting
 
-warning: anyone on the network can read your credentials and your mail.
-         MASH_SERVER is overriding the server in config.json for this run.
-         Use this only for a test server.
+warning: plain text is on (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION): mail is not
+         encrypted. Anyone on the network can read your credentials and your
+         mail. This is for test servers only.
 fix: stop overriding it in this shell:
   unset MASH_SERVER MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION
+next: to see the server address mash used:
+  mash server status
 ```
 
 A report, not an error screen (L5). `config.json` already holds
@@ -2667,7 +2677,8 @@ unset it: nobody edits `config.json` to a `nats://` address. Today the
 warning is printed twice, once on stdout as the `tls:` line and once on
 stderr, on every status run (catalog DUP); the target prints it once, as part
 of the report, and the warning does not repeat the server row (it says what is
-at stake, the row says why it is allowed). The override exists only through
+at stake, the row says why it is allowed). The screen prints NO server address
+(the lead's ruling: a status screen names none; `mash server status` does). The override exists only through
 `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1` in the environment of that run (R18;
 Randy's name, `MASH_INSECURE_PLAINTEXT` is gone with no alias): the
 `insecure_plaintext` key of `config.json` is removed. Every other command that
@@ -2688,8 +2699,7 @@ $ mash status
 acme.demo.bob: mail works (1 warning).
 
   version       0.5.6
-  server        tls://localhost:4222
-                alive, encrypted (checked 09:42)
+  server        alive, encrypted (checked 09:42)
                 MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set (not used)
   config        ok
   credentials   ok
@@ -2712,10 +2722,8 @@ $ mash status
 acme.demo.bob: mail does NOT work: the server address is not encrypted.
 
   version       0.5.6
-  server        nats://localhost:4222
-                NOT ENCRYPTED (refused; not connected)
-                MASH_SERVER overrides config.json: nats://localhost:4222
-                instead of tls://localhost:4222
+  server        NOT ENCRYPTED (refused; not connected)
+                MASH_SERVER is set to a plain-text address (nats://)
   config        ok
   credentials   not checked (the connection was refused)
   mailbox       not checked
@@ -2725,6 +2733,8 @@ fix: use a tls:// address. MASH_SERVER is overriding the server in
      credentials and mail would cross the network unencrypted: test servers
      only.) Stop overriding it in this shell:
   unset MASH_SERVER
+next: to see the address of the server in config.json:
+  mash server status
 ```
 
 Exit 1 in both tools (L2; today: stdout line `tls: FAILED - ...299 columns`,
@@ -3620,7 +3630,7 @@ columns, starts with `mash:` like the start-up line (it is not an error, R4),
 and holds no message text, no sender and no address: the session reads its mail
 with the `inbox` and `read` tools, or the hook delivers it (the next
 section). `mash status` says the same thing in the mailbox row (section 5,
-status). The age is R12's duration (`45s`, `12m`, `3h`).
+status). The age is R12's duration (`45s`, `12m`, `1h 12m`, `2d`).
 
 ### The Claude Code hook message (what the model sees)
 
@@ -4205,7 +4215,7 @@ stored time of the oldest waiting message: in serve the minimum `At` of the
 held entries (`spool.Entry.At`, `spool.go:31`); from a shell the stored time of
 the message at the consumer's ack floor plus one (`ack_floor.stream + 1`, read
 with `DIRECT.GET`; a gap left by an evicted message makes it the next stored
-one). The age is printed with the unit and no space (R12: `45s`, `12m`, `3h`).
+one). The age is printed with the unit and no space (R12: `45s`, `12m`, `1h 12m`, `2d`).
 
 ### Where it differs from "not yet shown"
 
@@ -4595,7 +4605,7 @@ facts as the CLI's five rows.
 | `config.state` | enum | configuration | `"ok"` | was `config:` line |
 | `credentials.state` | enum | credentials | `"ok"` | was `creds:` line |
 | `mailbox.waiting` | int or null | unacked messages of this inbox: pending plus ack-pending (section 5b); null when not checked | `0` | new (REQ-015) |
-| `mailbox.limit` | int | the limit, `mailbox_limit`; 0 means off | `15` | new |
+| `mailbox.limit` | int | the limit, `mailbox_limit`; 0 means no count limit set (the age limit can still wake) | `15` | new |
 | `mailbox.oldest_age` | string or null | age of the oldest waiting message in R12's form; null when none waits or not checked | `"12m"` | new |
 | `mailbox.age_limit` | string | the age limit, `mailbox_age`, in R12's form; `"0"` means off | `"1h"` | new |
 | `mailbox.over_limit` | bool or null | `waiting` is past `limit`; false when the limit is 0; null when not checked | `false` | new |
