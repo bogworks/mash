@@ -1,9 +1,12 @@
-# mashctl target outputs (0.5.6) - DRAFT3
+# mashctl target outputs (0.5.6) - DRAFT4
 
 Status: design mockups, not code. Nothing here was run. Written to the maintainer's
 feedback on the v0.5.5 video and the CLI standard's rules; BEFORE blocks are
 excerpts of docs/plans/2026-11-19-cli-output-catalog-mashctl.md (v0.5.5 tag).
-DRAFT3 applies five review findings (see "Changes in DRAFT3" at the end): config
+DRAFT4 applies three review findings (see "Changes in DRAFT4" at the end): adopt
+saves the certificate file as a full path, the walkthrough starts Claude Code
+with the documented solo command, and the drained delete says only what its
+check proves. DRAFT3 applied five review findings: config
 paths follow the resolved folder, a repeat delete claims no revoke, the session
 name comes from MASH_NAME, removing init --local is a proposal that needs an
 ADR, and the plain-URL refusal names its override. DRAFT2 applied the rules
@@ -19,7 +22,7 @@ to confirm".
 
 ---
 
-# Part 1: the first-run journey (target output for mashctl 0.5.6), DRAFT3
+# Part 1: the first-run journey (target output for mashctl 0.5.6), DRAFT4
 
 Design document. Nothing here was run. BEFORE blocks are excerpts of
 `docs/plans/2026-11-19-cli-output-catalog-mashctl.md` (v0.5.5), trimmed to the
@@ -209,7 +212,7 @@ What adopt does not do: it changes nothing on the server, except that --mint-adm
 **AFTER**
 
 ```text
-$ MASH_TLS_CA=ca.pem mashctl adopt --server tls://myserver:4222 \
+$ MASH_TLS_CA=<path to ca.pem> mashctl adopt --server tls://myserver:4222 \
     --owner acme --account MASH --make-admin \
     --operator-key operator.nk --account-key account.nk \
     --system-credentials system.creds
@@ -235,6 +238,8 @@ checks pass.
 Adopted tls://myserver:4222 as owner acme.
 
   Saved the keys, the admin credentials and the settings in ~/.config/mash.
+  The settings hold the certificate file as a full path, the one you typed
+  after MASH_TLS_CA=, so later commands find it from any folder.
   On the server, the only change is a record of the new admin credentials.
 
 NEXT: on myserver, prepare the server for mash:
@@ -282,6 +287,17 @@ its answers before it prints.
 - P8 and P9: the three 56-character key ids, the file modes and the resource
   counts (streams, consumers) are gone from the default output; they are in
   `--detail`.
+- Certificate path (review finding 1): the typed command shows
+  `<path to ca.pem>`, a full path, and adopt saves the CA's absolute path in
+  config.json. Today adopt saves the value of MASH_TLS_CA as typed
+  (cmd/mashctl/adopt.go, `settings["tls_ca"] = cfg.TLSCA`), and later runs
+  resolve a relative `tls_ca` under the config folder
+  (internal/config/config.go, `inDir`), so `ca.pem` would point to
+  `~/.config/mash/ca.pem` and the next `mashctl init` could fail TLS
+  verification. The target requires adopt to make the path absolute before it
+  saves it. The other files adopt takes are not at risk: the operator key,
+  account key and system credentials are copied into the config folder, and
+  the admin credentials path is already saved as an absolute path.
 - P7: the closing paragraph "What adopt does not do" is replaced by the one
   true sentence for this run: the server change is the admin record.
 - P4 (point 11): the `Next:` list of two items, with the `provision`
@@ -978,12 +994,15 @@ The group and the name are given each time a session starts, so alice and
 bob can run on one machine. In that terminal, set:
   export MASH_GROUP=demo MASH_NAME=bob
 
-Step 3. Start Claude Code in that same terminal, with the mash plugin
-installed:
-  claude --channels plugin:mash@mash
-[confirm: the plugin install step, and that this flag is the start command].
+Step 3. Install the mash plugin in Claude Code, once on this machine:
+  claude plugin marketplace add bogworks/mash
+  claude plugin install mash@mash
 
-Step 4. mash signs in with bob's credentials, the file
+Step 4. Start Claude Code in that same terminal:
+  claude --dangerously-load-development-channels plugin:mash@mash
+Claude Code asks you to confirm this each time it starts. Answer yes.
+
+Step 5. mash signs in with bob's credentials, the file
 ~/.config/mash/acme.demo.bob.creds.
 
 For alice, open a second terminal and set MASH_NAME=alice instead.
@@ -999,7 +1018,16 @@ For alice, open a second terminal and set MASH_NAME=alice instead.
   no group key, docs/install.md); neither can be saved in the file. The
   `export` line is true because Claude Code starts from the same terminal.
 - The owner, `MASH_GROUP` and `MASH_NAME` together match the address
-  (acme.demo.bob). The start command is the one in docs/install.md section 3.
+  (acme.demo.bob).
+- Start command (review finding 2): the DRAFT3 command, `claude --channels
+  plugin:mash@mash`, is refused ("not on the approved channels allowlist")
+  without a managed channel allowlist (docs/install.md section 3). For one
+  person section 3 gives the development form, `claude
+  --dangerously-load-development-channels plugin:mash@mash`, which needs no
+  administrator and asks for a confirmation at each launch. The walkthrough
+  uses it, and adds the plugin install commands from section 2 as Step 3.
+  Section 3 is optional for one person: without a channel, mail still arrives
+  at the next prompt or tool call; the channel is what wakes an idle session.
 - Point 18 and rule 15: the session uses the mash tools (MCP). The CLI
   commands in the next part are for the person.
 
@@ -1128,6 +1156,15 @@ exits 1 with `mash: no endpoint named "..."`.
 23. The plain-URL refusal shows the override, because ADR 0146 requires it:
     `insecure_plaintext` (`MASH_INSECURE_PLAINTEXT=1`), with a warning that it
     is for a throwaway test server only.
+24. adopt saves the CA's absolute path. Reasoning: adopt saves `MASH_TLS_CA`
+    as typed today, and a relative value is later read under the config
+    folder, so the next `mashctl init` can fail TLS verification. The target
+    makes adopt resolve the path before saving it; this is a behaviour change
+    in adopt, to confirm with the contract.
+25. The walkthrough starts Claude Code with the development channel form, the
+    solo-user command in docs/install.md section 3. Reasoning: `--channels
+    plugin:mash@mash` is refused without a managed channel allowlist; the
+    development form needs none and asks for a confirmation at each launch.
 
 ## Facts to confirm
 
@@ -1155,10 +1192,13 @@ exits 1 with `mash: no endpoint named "..."`.
   the words `capabilities` and `tags`]
 - [confirm: `endpoint show` can tell a suspended endpoint, and prints it as a
   `status:` line when it is]
-- [confirm: the exact command that starts a Claude Code session as an
-  endpoint, and the plugin install step]
+- [confirm: the plugin install commands (docs/install.md section 2) and the
+  development channel command (section 3) are the start for one person; the
+  section also says Claude Code asks for confirmation at each launch]
 - [confirm: `mashctl adopt` accepts the server certificate file as
-  `MASH_TLS_CA` on the command line, as the catalog's capture does]
+  `MASH_TLS_CA` on the command line, as the catalog's capture does, and
+  saves its absolute path in config.json (a behaviour the target requires;
+  today it saves the value as typed)]
 - [confirm: adopt's only server change with `--make-admin` is recording the
   admin credentials in the record of signed tokens (catalog, "What adopt does
   not do")]
@@ -2715,8 +2755,9 @@ What changed and why:
 
 What it does: removes an endpoint's directory record and inbox and revokes its
 NATS user, after checks. With `--suspension ID --drained-to N` (both, from
-`endpoint suspend`) it removes only if the inbox is still suspended at message N,
-so no unread mail is lost. `--no-revoke` skips the revocation.
+`endpoint suspend`) it removes only if the inbox is still suspended with that
+id and no message arrived after message N. It does not check that the messages
+were read. `--no-revoke` skips the revocation.
 
 BEFORE (catalog, depro_plain, depro_susp, depro_norevoke), marks P1 P5 P6 P8:
 
@@ -2777,7 +2818,9 @@ AFTER, after a drain
 $ mashctl deprovision acme.demo.alice --suspension 63afd156... --drained-to 41
 [exit 0]
 Removed endpoint acme.demo.alice on tls://127.0.0.1:24222.
-  Mail was read up to message 41 before it was removed; none was lost.
+  Checked before removing: the inbox was suspended with id 63afd156..., and
+  no message had arrived after message 41.
+  mash does not check that messages 1 to 41 were read. They are deleted.
   Its NATS user no longer works: all 1 servers confirmed it.
 
 NEXT: delete any copy of alice's credentials file on its machine.
@@ -2805,6 +2848,14 @@ What changed and why:
   and "revoked in the account JWT" removed; the warning is printed once.
 - P4: NEXT is true: deprovision of an endpoint made by `endpoint create` leaves
   its credentials file in the config folder (catalog, depro_hal).
+- Drained delete (review finding 3): the line "none was lost" is removed. The
+  guard (`--suspension ID --drained-to N`) proves two things: the inbox was
+  still suspended with that id, and its last stored message number is N (no
+  message arrived after N). It does not prove that any message was read or
+  acknowledged. The output states those two checks and says plainly that
+  reading is not checked. Before removing unread mail a person reads the
+  stored messages (`mash inbox`, `mash read`) or copies them, then runs the
+  command with the id and number that `endpoint suspend` printed.
 - `deprovision` has no `--dry-run` today (see Facts to confirm).
 
 ---
@@ -3072,7 +3123,7 @@ error: refusing to connect to 127.0.0.1 without encryption (the address
        starts with nats://).
 fix: use a tls:// address: change "url" in ~/.config/mash/config.json (or
      MASH_URL, which overrides it). For a server with its own certificate
-     authority, also set "tls_ca" there to its file.
+     authority, also set "tls_ca" there to the full path of its file.
      For a throwaway test server only, set insecure_plaintext to true in
      that file, or allow plain text in this shell:
   export MASH_INSECURE_PLAINTEXT=1
@@ -3462,7 +3513,8 @@ fix: see which endpoints exist:
 
 $ mashctl deprovision acme.demo.bob --suspension deadbeef --drained-to 0
 [exit 1]
-error: that is not the suspension you drained. Nothing was revoked.
+error: the inbox is not suspended with that id, or a message arrived after
+       message 0. Nothing was revoked.
 fix: read the current suspension:
   mashctl endpoint suspended acme/demo/bob
 
@@ -3745,3 +3797,30 @@ By rule (counts are blocks or lines changed in AFTER text):
    person with a throwaway test server what to do, with the command on its own
    line. "What changed and why" is updated; choices 23 (Part 1) and 24
    (Part 2) record that ADR 0146 requires the refusal to show it.
+
+## Changes in DRAFT4
+
+1. Certificate path in `mashctl adopt` (Part 1, 1b). The typed command uses
+   `MASH_TLS_CA=<path to ca.pem>`, a full path, in place of `ca.pem`. adopt
+   saves the value as typed today, and a relative `tls_ca` is read under the
+   config folder, so the next `mashctl init` could fail TLS verification. The
+   target requires adopt to save the CA's absolute path; the output says so,
+   "What changed and why" says why, and choice 24 and a fact record it. The
+   other files adopt takes (operator key, account key, system credentials) are
+   copied into the config folder, and the admin credentials path is saved as
+   an absolute path, so no other relative path is saved. The refusal in E2 now
+   says to set `tls_ca` to the full path of the file.
+2. Start command (Part 1, section 4). `claude --channels plugin:mash@mash` is
+   replaced by `claude --dangerously-load-development-channels
+   plugin:mash@mash`, the solo form in docs/install.md section 3, with a
+   plugin install step (section 2) before it and a note that Claude Code asks
+   for a confirmation at each launch. "What changed and why", choice 25 and
+   the fact list are updated.
+3. Drained deprovision (Part 2, D8). "none was lost" is removed. The output
+   states what the guard proves (suspended with that id, no message after
+   message N) and that reading is not checked. The description and "What
+   changed and why" say what a person checks before removing unread mail. The
+   mismatch refusal in E no longer says "the suspension you drained".
+
+The fourth finding (an ADR for removing `init --local`) is answered in the pull
+request; nothing changed for it.
