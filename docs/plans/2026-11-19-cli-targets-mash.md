@@ -1,14 +1,34 @@
-# mash CLI target outputs (0.5.6 contract input), DRAFT10
+# mash CLI target outputs (0.5.6 contract input), DRAFT11
 
-Date: 2026-11-19. Status: DRAFT10 of the mockups for the maintainer's review.
+Date: 2026-11-19. Status: DRAFT11 of the mockups for the maintainer's review.
 Every finding of the earlier rounds has one row in
-`docs/plans/2026-11-19-cli-targets-mash-dispositions.md` (DRAFT1 to DRAFT9);
-the rows of this draft are in its last section, "DRAFT10: contract revs 18 to
-21".
+`docs/plans/2026-11-19-cli-targets-mash-dispositions.md` (DRAFT1 to DRAFT10);
+the rows of this draft are in its last section, "DRAFT11: lead rulings of
+11:08Z".
 
-DRAFT10 applies contract revisions 18 to 26 (`mash-0.5.6-cli-ux`, rev 26 draft,
-the newest in `masterplanner/for-herds/mash-0.5.6/` at the end of this work;
-the work began at rev 21, and revs 22 to 26 appeared while it ran and were
+DRAFT11 applies the lead's four rulings of 11:08Z (contract rev 26, final:
+the critic's read of rev 26 was clean) and changes no other rule. (1) THE
+PASTED INSTALL REFUSES AN UNSAFE DESTINATION (rev 24): before it copies, the
+paste (section 5a, and the README quick start, which regenerates from it)
+refuses a destination folder, or any parent of it, that is a symbolic link or
+writable by another user, with its own `error:` and `fix:` lines
+(`install-check-writable`, `install-check-symlink`); the targets'
+install paste is one chain of 21 lines (the check is 16 of them) and the
+README's whole prerequisite paste grows from 14 lines to 31. (2) `mash endpoint status` HAS NO
+MAILBOX COLUMN (rev 26, aligned with the status-views page): the column is gone
+from the targets, section 5b and the packet; a caller's own
+count is in its own `mash status`. (3) The answer `no` keeps the `error:`
+label like every refusal: `error: you did not confirm the three values.`, then
+`Nothing was written. Ask the operator who made this endpoint.`, exit 1. (4)
+Two refusals the contract gave tests but no words for are written:
+`credential install` when the server REFUSES the key and token (exit 4,
+`install-refuse-refused`) and when it is UNREACHABLE (exit 6, after the 20
+second open timeout, `install-unreachable`); both write nothing. Everything
+else of DRAFT10 stands.
+
+DRAFT10 applies contract revisions 18 to 26 (`mash-0.5.6-cli-ux`, rev 26, final
+in DRAFT11, the newest in `masterplanner/for-herds/mash-0.5.6/` at the end of
+this work; the work began at rev 21, and revs 22 to 26 appeared while it ran and were
 applied) and the lead's rulings for them. (1) The FIRST INSTALL
 CONFIRMS BEFORE IT WRITES: `mash credential install` shows three values in
 mashctl's agreed form (`server address`, `CA fingerprint` in two lines of four
@@ -73,8 +93,8 @@ the commit point, so that a rerun COMPLETES an interrupted install (block
 everywhere: the other-machine path is key plus token. (4) REQ-015's count is
 decided (unacked = pending plus ack-pending; digest-listed messages count;
 reading does not lower it); the 10-minute cooldown is per endpoint, from the
-last wake, and does not survive a restart; `mash endpoint status` shows the
-count only for the caller's own owner, else `unknown`. (5) The example server:
+last wake, and does not survive a restart; `mash endpoint status` has no
+mailbox column (DRAFT11, rev 26). (5) The example server:
 ONE-MACHINE blocks use `tls://localhost:4222`, what the NATS helper prints; the
 other-machine blocks (steps B and C) keep `tls://myserver:4222`. No product
 code.
@@ -374,8 +394,9 @@ owner `acme`, the group `release-pipeline` (16 characters) and the names
   56-character public key, on one line, copyable, never shortened and never
   grouped (rev 21: not its first 32 characters). The question is `Do these
   three match what the operator sent you? (yes/no)`.
-  Only `yes` goes on. `no`, or anything but `yes`, prints `Nothing was written.
-  Ask the operator who made this endpoint.` and exits 1 (`install-confirm-no`).
+  Only `yes` goes on. `no`, or anything but `yes`, prints `error: you did not
+  confirm the three values.` and then `Nothing was written. Ask the operator
+  who made this endpoint.` and exits 1 (`install-confirm-no`).
   With no terminal the command refuses with exit 4, before it reads the token
   or the CA and with nothing written (`install-no-terminal`: `error: this needs
   a person at a terminal`; an agent or a script cannot answer). The answer is
@@ -397,9 +418,10 @@ owner `acme`, the group `release-pipeline` (16 characters) and the names
   the server REQUIRES authentication (`error: the server at myserver:4222 does
   not require authentication.`); and the server ACCEPTS a connection made with
   the new key and token over that verified connection (an accepted connection
-  is the server vouching for the token's account; a refusal is exit 4, an
-  unreachable server exit 6). It reads nothing else from the server: there is
-  no directory lookup (rev 19). Every refusal writes nothing. A later install,
+  is the server vouching for the token's account; a refusal is exit 4,
+  `install-refuse-refused`; an unreachable server exit 6,
+  `install-unreachable`). It reads nothing else from the server: there is no
+  directory lookup (rev 19). Every refusal writes nothing. A later install,
   for another endpoint, uses the configured server and CA, and a flag that is
   given must match them (R17). The status screens and `--json` of `status`
   print the CA's path, never its fingerprint.
@@ -485,10 +507,10 @@ owner `acme`, the group `release-pipeline` (16 characters) and the names
   restart, or a crash loop, never wakes sooner than 10 minutes after the
   start (F15-5, R16-5). A backlog already over the limit when `mash serve`
   starts wakes ONCE, at 10 minutes after the start, if it is still over then
-  (rev 19; the same line, the same cooldown). `mash endpoint status` shows the
-  count in a `MAILBOX` column only for the endpoints of the caller's own owner,
-  read with the caller's own credentials and never admin; for any other
-  endpoint it says `unknown` (F15-8). `mash status` shows a mailbox row on
+  (rev 19; the same line, the same cooldown). `mash endpoint status` shows no
+  mailbox column: an endpoint's credentials can read only its own inbox, so the
+  count is shown only by that endpoint's own `mash status` (F15-8, rev 26).
+  `mash status` shows a mailbox row on
   EVERY screen (R11): `<n> waiting`, `<n> waiting, OVER THE LIMIT OF <limit>`
   as a warning (verdict `mail works (1 warning)`, exit 0), `<n> waiting, no
   limit set`, or `not checked`; `--detail` adds the limit and where it came
@@ -520,8 +542,8 @@ here. The same condition gets the same code in every command.
 | 0 | done; also "mail works with a warning" | same | `status` is 0 only when mail works |
 | 1 | refused or a problem was found: a refused request, no credentials, an install the person answered `no`, a token of another account than the confirmed one, a server that requires no authentication, a certificate of another CA than the confirmed one, a key or token file that is not private, no endpoint chosen, a certificate mash does not trust, a plain URL (both tools), `status` when mail does not work; AND a local file error, said with its cause (a file that cannot be read or written) | send, read, inbox, who: 1 for most refusals; a file error is 6 | plain-URL refusal: 1 in every command (was 2); `status` problem: 1 (was 0); `serve` with no endpoint chosen: 1 (was 2); a file error: 1 (was 6) |
 | 2 | usage error: unknown command, unknown option, missing argument, bare `mash` | status, key, credential, plugin: 2; inbox, read, send usage: 1 | 2 for every command |
-| 4 | not authorized, in BOTH tools, for one of two causes and the message says which: (a) the server refused the credentials: it answered, and the key or the token it was given is deleted or reissued, or, in `credential install`, does not accept the key and token before anything is written (`status` prints the exit code on those screens; `send`, `inbox`, `read`, `who` and `mashctl` exit 4 the same way); (b) a person must run this at a terminal: mashctl's confirmations of a deletion or an exposure (INV-004), and the first `mash credential install`'s confirmation of the three values (R15, `install-no-terminal`); said as `a person must run it at a terminal` | unused | NEW (the contract's exit table: 4 = not authorized). (b) is on purpose: INV-004 and contract security rev 2 B1 set it, overriding the CLI standard's usage code (the lead's ruling). The two causes print two different texts |
-| 6 | the server is unreachable or failed, in BOTH tools: it did not answer within the time limit, the connection broke, the server returned an error (`status`, `send`, `inbox`, `read`, `who`, `prompt`, `mashctl`) | a file error is 6 | NEW meaning; a file error moves to 1; unreachable was 1 |
+| 4 | not authorized, in BOTH tools, for one of two causes and the message says which: (a) the server refused the credentials: it answered, and the key or the token it was given is deleted or reissued, or, in `credential install`, refuses the key and token before anything is written (`install-refuse-refused`; `status` prints the exit code on those screens; `send`, `inbox`, `read`, `who` and `mashctl` exit 4 the same way); (b) a person must run this at a terminal: mashctl's confirmations of a deletion or an exposure (INV-004), and the first `mash credential install`'s confirmation of the three values (R15, `install-no-terminal`); said as `a person must run it at a terminal` | unused | NEW (the contract's exit table: 4 = not authorized). (b) is on purpose: INV-004 and contract security rev 2 B1 set it, overriding the CLI standard's usage code (the lead's ruling). The two causes print two different texts |
+| 6 | the server is unreachable or failed, in BOTH tools: it did not answer within the time limit, the connection broke, the server returned an error (`status`, `send`, `inbox`, `read`, `who`, `prompt`, `mashctl`; `credential install` before anything is written, `install-unreachable`) | a file error is 6 | NEW meaning; a file error moves to 1; unreachable was 1 |
 
 Timeouts, said once (they are limits mash applies; an error names the one
 that ran out). `mash status` waits 2 seconds for the server: it is only a
@@ -1031,8 +1053,8 @@ with `--ca`, in the display form of R15; what the person confirms it against is
 what the operator sent, which mash never sees.
 
 The person says `no` (anything but `yes` is a no; nothing was written, nothing
-was sent to the server, so it never sees an authentication attempt; exit 1; no
-`error:` label, because the person chose it):
+was sent to the server, so it never sees an authentication attempt; exit 1; it
+keeps the `error:` label like every refusal, DRAFT11):
 
 <!-- packet: install-confirm-no -->
 ```
@@ -1040,6 +1062,7 @@ $ mash credential install --key bob.key --token acme.demo.bob.token \
     --server tls://myserver:4222 --ca ca.pem \
     --account ADQ6KRG4JFLSMDNOLVYUFUXM3JOVHOS5OJZPTIFCCRPM3DTQKTE4VLXF
 Do these three match what the operator sent you? (yes/no) no
+error: you did not confirm the three values.
 Nothing was written. Ask the operator who made this endpoint.
 ```
 
@@ -1370,9 +1393,9 @@ The certificate, the host name and the confirmed account are right, but the
 server does not accept this key and token (exit 4, not authorized; the lead's
 text of rev 16, kept: a token made
 for a server this one does not serve, or a deleted or reissued endpoint;
-nothing is written, because this check too comes before every write; a server
-that cannot be reached is exit 6 and has no block of its own, the contract
-names the test and gives no wording):
+nothing is written, because this check too comes before every write; the two
+blocks after it are the words DRAFT11 adds for a connection the server refuses
+and for a server that cannot be reached):
 
 <!-- packet: install-refuse -->
 ```
@@ -1385,6 +1408,42 @@ error: this token was not signed by the account of the server at
 fix: ask whoever runs your mash server for a token made on this server, save
      it to a file, and run the command again with that file:
   mash credential install --key bob.key --token <token file> --server tls://myserver:4222 --ca ca.pem --account <account key>
+```
+
+The server answered and REFUSED the key and token (exit 4, not authorized: the
+endpoint does not exist on that server, was deleted or reissued, or one of the
+three values is wrong; DRAFT11's words, contract rev 17 and later give the test
+and no text; nothing is written, and mash cannot tell the causes apart, so it
+names none):
+
+<!-- packet: install-refuse-refused -->
+```
+$ mash credential install --key bob.key --token acme.demo.bob.token \
+    --server tls://myserver:4222 --ca ca.pem \
+    --account ADQ6KRG4JFLSMDNOLVYUFUXM3JOVHOS5OJZPTIFCCRPM3DTQKTE4VLXF
+Do these three match what the operator sent you? (yes/no) yes
+error: the server at myserver:4222 refused this key and token.
+       Nothing was written.
+fix: ask whoever runs your mash server whether this endpoint exists and
+     whether the three values are right, then run the whole command again:
+  mash credential install --key bob.key --token acme.demo.bob.token --server tls://myserver:4222 --ca ca.pem --account ADQ6KRG4JFLSMDNOLVYUFUXM3JOVHOS5OJZPTIFCCRPM3DTQKTE4VLXF
+```
+
+The server did not answer (exit 6, the server is unreachable or failed; the
+limit is the 20 second open timeout, section 2 Timeouts, the one a command
+that must reach the server uses; nothing is written):
+
+<!-- packet: install-unreachable -->
+```
+$ mash credential install --key bob.key --token acme.demo.bob.token \
+    --server tls://myserver:4222 --ca ca.pem \
+    --account ADQ6KRG4JFLSMDNOLVYUFUXM3JOVHOS5OJZPTIFCCRPM3DTQKTE4VLXF
+Do these three match what the operator sent you? (yes/no) yes
+error: the server at myserver:4222 did not answer within 20s.
+       Nothing was written.
+fix: check the address and that the server is running, then run the whole
+     command again:
+  mash credential install --key bob.key --token acme.demo.bob.token --server tls://myserver:4222 --ca ca.pem --account ADQ6KRG4JFLSMDNOLVYUFUXM3JOVHOS5OJZPTIFCCRPM3DTQKTE4VLXF
 ```
 
 A key file that others can read (the check comes before anything is shown or
@@ -3778,8 +3837,9 @@ needs no GitHub login (tested on the v0.5.5 release bundle with no login: it
 verified, and a tampered `SHA256SUMS` failed with exit 1); the online form
 without `--bundle` needs `gh auth login`. A checksum file alone is not enough,
 which is why the sums file is itself verified; a failed check installs nothing
-(the person does not paste the last block). Binaries go into the user's own
-directory, `~/.local/bin`, never with `sudo`.
+(the person does not paste the last block, and the destination check can
+refuse too). Binaries go into the user's own directory, `~/.local/bin`, never
+with `sudo`.
 
 Download (four pastes in one block, or four lines; Linux amd64 shown, and the
 page says to change the platform part of the names for macOS or arm64):
@@ -3852,16 +3912,79 @@ mashctl-linux-amd64: OK
 
 Install: plain commands, no `sudo`, the directory must be on the PATH (the
 page says how to check, and that `go install` is the unverified developer
-route, never the quick start):
+route, never the quick start). DRAFT11 (contract rev 24, REQ-011 (i)): BEFORE
+it copies anything, the paste REFUSES a destination folder, or any parent of
+it, that is a symbolic link or writable by another user (the group or the
+world), and says which folder and what to do. The folder is made first by the
+person's own user with `umask 022` (so a new one is 0755), then every
+component from the destination up to `/` is checked: `[ -L ]` for a link and
+`find ... -maxdepth 0 -perm` for the group and world write bits, both of which
+behave the same on Linux and macOS (`stat` does not, so it is not used). The
+check sits after the verify and right before the copy, in the same `&&` chain,
+so a refusal stops the chain and copies nothing; it is a subshell, so its
+`exit` ends the check and not the person's terminal. It is plain POSIX shell
+with no comment inside the chain. One paste (shown without prompts because it
+is a chain; the page puts it after the verify, in one block with it):
 
 <!-- packet: install-check -->
 ```
-$ chmod +x mash-linux-amd64 mashctl-linux-amd64
-$ mkdir -p ~/.local/bin
-$ mv mash-linux-amd64 ~/.local/bin/mash
-$ mv mashctl-linux-amd64 ~/.local/bin/mashctl
+B=$HOME/.local/bin
+(umask 022; mkdir -p "$B") &&
+(d=$B
+while [ "$d" != / ]; do
+  if [ -L "$d" ]; then
+    echo "error: $d is a symbolic link; nothing was copied." >&2
+    echo "fix: replace it with a real folder you own, then paste again." >&2
+    exit 1
+  fi
+  if [ -n "$(find "$d" -maxdepth 0 \( -perm -0020 -o -perm -0002 \))" ]; then
+    echo "error: $d is writable by other users; nothing was copied." >&2
+    echo "fix: take that away, then paste this again:" >&2
+    echo "  chmod go-w $d" >&2
+    exit 1
+  fi
+  d=${d%/*}
+  [ -n "$d" ] || d=/
+done) &&
+chmod +x mash-linux-amd64 mashctl-linux-amd64 &&
+mv mash-linux-amd64 "$B/mash" &&
+mv mashctl-linux-amd64 "$B/mashctl"
+```
+
+Then the check that it works:
+
+<!-- packet: install-check -->
+```
 $ mash version
 mash 0.5.6
+```
+
+On macOS the same paste works with `P=darwin-arm64` (`darwin-amd64` on an Intel
+Mac) in the names and `shasum -a 256 -c -` for `sha256sum -c -`; nothing in the
+destination check is Linux-only. The README quick start is a Debian or Ubuntu
+page (its server helper runs there only), so it shows the Linux paste alone.
+
+The refusals, printed by the paste's own `echo` lines to the error stream
+(the folder named is the real one, here `/home/ada/.local/bin`; nothing was
+copied, the downloaded files stay in the work folder, and the person runs the
+`chmod` line alone and pastes the block again). A folder, or a parent of it,
+that others can write (the group counts: many Linux accounts make folders
+`0775`):
+
+<!-- packet: install-check-writable -->
+```
+error: /home/ada/.local/bin is writable by other users; nothing was copied.
+fix: take that away, then paste this again:
+  chmod go-w /home/ada/.local/bin
+```
+
+A folder, or a parent of it, that is a symbolic link (nothing is changed for
+the person: only they know which real folder they mean):
+
+<!-- packet: install-check-symlink -->
+```
+error: /home/ada/.local/bin is a symbolic link; nothing was copied.
+fix: replace it with a real folder you own, then paste again.
 ```
 
 If the shell says `mash: command not found`, `~/.local/bin` is not on the
@@ -4073,7 +4196,7 @@ What else the ack change touches:
 | `mash serve` (the wake) | the waking tracker's unread set, all kinds (new counter beside `count`); it also writes `backlog` and `backlog_woke_at` into the lease | nothing new | no wake while the count is unknown (restart, up to 30 s) |
 | `mash status` from a shell | the lease's `backlog` when a session is there, else `CONSUMER.INFO` (`NumPending + NumAckPending`), then `DIRECT.GET` of the oldest | the endpoint's own credentials; the connection status already makes (2 s budget) | the mailbox row says `not checked` and the verdict is unchanged |
 | MCP `status` in a session | the same tracker as serve, no new connection | nothing | `mailbox.waiting` is `null` |
-| `mash endpoint status` | a `MAILBOX` column, only for the endpoints of the CALLER'S OWN owner, read with the caller's own credentials and never admin (contract rev 16, F15-8); the owner's lease records (`backlog`, beside `waking_pending`, `endpoint.go:180`) are one way | UNVERIFIED: that an owner may read another endpoint's lease, as `mash who` reads it; today an endpoint's credentials read its own inbox only (the other endpoint's consumer is NOT readable), so the owner-wide read needs a permission or the lease number | `unknown` in the column for any endpoint of another owner, or one that cannot be read (never a guess); the rest of the view is the status-views page's |
+| `mash endpoint status` | NO mailbox column (contract rev 26, F15-8): an endpoint's credentials read only its own inbox, so there is nothing for it to show; the count is the caller's own, in its own `mash status` | nothing | not applicable; the view itself is the status-views page's |
 
 ### The wake, in the shipped code's terms
 

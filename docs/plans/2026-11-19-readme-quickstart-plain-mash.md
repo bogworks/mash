@@ -10,9 +10,9 @@ signed in with a claude.ai or Console account and with channels (the way mash
 wakes an idle session), the GitHub CLI `gh`, and Go 1.27.4 or newer. Prerequisite 3
 may also need `sudo`, once, to install a missing tool. The honest total,
 counted by script from this page: the first mail is sent after 11 pastes
-(35 lines) with the prerequisites, or 4 pastes (6 lines)
+(52 lines) with the prerequisites, or 4 pastes (6 lines)
 if a server and mashctl are already working; Alice reads it after
-13 pastes (6). The whole page is 26 pastes and 60 lines, and
+13 pastes (6). The whole page is 26 pastes and 77 lines, and
 10 other actions: two confirmations of a Claude Code flag, two more terminals, one
 sentence typed to Bob's agent, three addresses typed to confirm the deletions,
 two sessions closed. Installing Claude Code, `gh` and Go, and answering any
@@ -68,7 +68,9 @@ You now hold: `claude`, `gh` and `go` on your PATH.
 paste: the release's signed record (`mash.intoto.jsonl`, made by the
 release workflow) vouches for its list of checksums, then the checksum vouches
 for the file. A failed check stops the paste and installs nothing. No `sudo`:
-it goes in your own `~/.local/bin`. The paste works in `~/mash-setup/dl`,
+it goes in your own `~/.local/bin`, and the paste refuses to copy there if that
+folder, or a folder above it, is a link or can be written by other users (the
+last lines of the paste). The paste works in `~/mash-setup/dl`,
 which it makes, and leaves you in your home folder.
 
 **Command 1 of 3.**
@@ -77,7 +79,8 @@ which it makes, and leaves you in your home folder.
 P=linux-amd64
 BASE=https://github.com/bogworks/mash/releases/download/v0.5.6
 D=$HOME/mash-setup/dl
-mkdir -p $D $HOME/.local/bin && cd $D &&
+B=$HOME/.local/bin
+(umask 022; mkdir -p "$D" "$B") && cd "$D" &&
 curl -fsSLO $BASE/mash-$P &&
 curl -fsSLO $BASE/SHA256SUMS &&
 curl -fsSLO $BASE/mash.intoto.jsonl &&
@@ -85,8 +88,24 @@ gh attestation verify SHA256SUMS -R bogworks/mash --bundle mash.intoto.jsonl \
   --signer-workflow bogworks/mash/.github/workflows/release.yml \
   --source-ref refs/tags/v0.5.6 &&
 grep " mash-$P\$" SHA256SUMS | sha256sum -c - &&
+(d=$B
+while [ "$d" != / ]; do
+  if [ -L "$d" ]; then
+    echo "error: $d is a symbolic link; nothing was copied." >&2
+    echo "fix: replace it with a real folder you own, then paste again." >&2
+    exit 1
+  fi
+  if [ -n "$(find "$d" -maxdepth 0 \( -perm -0020 -o -perm -0002 \))" ]; then
+    echo "error: $d is writable by other users; nothing was copied." >&2
+    echo "fix: take that away, then paste this again:" >&2
+    echo "  chmod go-w $d" >&2
+    exit 1
+  fi
+  d=${d%/*}
+  [ -n "$d" ] || d=/
+done) &&
 chmod +x mash-$P &&
-mv mash-$P $HOME/.local/bin/mash &&
+mv mash-$P "$B/mash" &&
 cd "$HOME"
 ```
 
@@ -95,6 +114,27 @@ and `sha256sum` then prints `mash-linux-amd64: OK`. Anything else
 (`Verification failed`, a line that says `FAILED`, `gh: command not found` or no
 `gh attestation` command) means stop: nothing was installed. The failing screen
 is on the second page.
+
+The last check before the copy looks at the folder the program goes into, and at
+every folder above it. If one can be written by other users (many Linux accounts
+make new folders writable by their group), the paste stops and prints this; run the
+`chmod` line it shows, then paste the whole block again:
+
+<!-- from: targets#install-check-writable -->
+```
+error: /home/ada/.local/bin is writable by other users; nothing was copied.
+fix: take that away, then paste this again:
+  chmod go-w /home/ada/.local/bin
+```
+
+If one is a symbolic link, it stops with this instead, and you decide which real
+folder you want:
+
+<!-- from: targets#install-check-symlink -->
+```
+error: /home/ada/.local/bin is a symbolic link; nothing was copied.
+fix: replace it with a real folder you own, then paste again.
+```
 
 **Command 2 of 3.** `mashctl` is built from source with Go for now (see "Not
 available until the 0.5.6 release" at the end): it is built on your machine,

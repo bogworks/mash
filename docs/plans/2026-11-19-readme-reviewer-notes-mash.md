@@ -5,8 +5,8 @@ Not README text. These notes go with
 `docs/plans/2026-11-19-readme-day2-plain-mash.md` (Day 2). The two pages carry no
 notes section and no internal marks: everything a reviewer needs is here.
 
-Built on the targets DRAFT10 (`docs/plans/2026-11-19-cli-targets-mash.md`, contract
-revision 26) for the ruled scope (Randy's decision 264). Regenerated after DRAFT10 (contract revisions
+Built on the targets DRAFT11 (`docs/plans/2026-11-19-cli-targets-mash.md`, contract
+revision 26) for the ruled scope (Randy's decision 264). Regenerated after DRAFT11 (contract revision 26 final; the lead's rulings of 11:08Z: the pasted install refuses a destination folder, or a folder above it, that is a link or that other users can write, and prints the refusal; `mash endpoint status` has no mailbox column; the answer `no` keeps the `error:` label; the refusals for a server that refuses and for one that does not answer are written). Earlier, after DRAFT10 (contract revisions
 18 to 26: revisions 22 to 26 appeared while the regeneration ran and were applied): every install takes `--account <key>` (the operator's account key, copied whole) and the first install confirms three values before it writes anything; the
 fingerprint is in groups of eight separated by spaces; the count of the mailbox row is unacknowledged mail and
 reading acknowledges. The lead's count of what is
@@ -17,11 +17,11 @@ counted is `readme-step-count.md` (scratchpad), regenerated with the pages by
 
 | | lines | prose and headings | inside fenced blocks and markers | widest printed block | widest typed block |
 |---|---|---|---|---|---|
-| quick start | 588 | 316 | 272 | 87 columns | 88 columns |
-| Day 2 | 392 | 197 | 195 | 87 columns | 76 columns |
+| quick start | 628 | 330 | 298 | 87 columns | 88 columns |
+| Day 2 | 394 | 199 | 195 | 87 columns | 76 columns |
 
-The quick start is 26 pastes, 60 lines and 10 other actions for the whole
-page; the first mail is sent after 11 pastes (35 lines) with the
+The quick start is 26 pastes, 77 lines and 10 other actions for the whole
+page; the first mail is sent after 11 pastes (52 lines) with the
 prerequisites and 4 without (6 lines); Alice reads it after
 13 pastes (6 without). Without the prerequisites the whole page is
 19 pastes and 31 lines. Lines are now physical lines of a paste (v2 counted a
@@ -117,10 +117,13 @@ in plain sentences, or is off the page.
 - The first install asks for a person at a terminal, on Day 2 only; the quick start never runs it
   (same machine: `--make-key`). The contract says an agent never runs it, and the page gives the
   command to the person.
-- Contract rev 24 to 26, REQ-011 (i), NOT conformed: the pasted install (Prerequisite 2) should refuse a destination, or any parent of it, that is a symlink or writable by another user, before copying. The page's paste does not; the shape of that paste is a decision for the lead (targets section 9 lists it).
-- A second difference between two documents: the status-views page (DRAFT4) drops the `MAILBOX`
-  column of `mash endpoint status`; the contract and the targets keep it for the caller's own
-  owner. Not on these pages.
+- Contract rev 24 to 26, REQ-011 (i), now CONFORMED (DRAFT11): the pasted install (Prerequisite 2) refuses a
+  destination folder, or any folder above it, that is a symbolic link or that another user can write, before it
+  copies, and prints the two refusals. The paste grew from 14 lines to 31 (the check is 16); it uses `[ -L ]` and
+  `find -maxdepth 0 -perm`, which behave the same on macOS, but the page stays Linux only. A folder made
+  `0775` (common on Linux accounts) is refused, and the fix is a `chmod go-w` on that folder. UNVERIFIED: that
+  the real 0.5.6 release and a real run behave as the mockup; nothing was run against a release.
+- The status-views page (DRAFT4) and the targets now agree: `mash endpoint status` has no mailbox column (contract rev 26).
 - The targets' `status-deleted` shows `DELETED`; the server must say so for status to
   (targets N11). Until then the screen on the page may read REFUSED. Both pages show the
   targets' DELETED.

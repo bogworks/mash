@@ -870,7 +870,7 @@ reviewer notes are regenerated.
 | D10-6.1 | Rev 22 to 24: `--account <key>` on EVERY install, required, a complete valid key, never ignored; a missing one exits 2 before anything is read and nothing is connected; the local issuer comparison comes first and refuses before any write whatever the person answers | FIXED | R15, step C, section 2, the help, every `$` command and every printed `fix:` command carries it; new blocks `install-refuse-noaccount`, `install-refuse-badaccount`; Z21 |
 | D10-6.2 | Rev 22 to 24: order = local preflight and issuer comparison, then (first install) the confirmation, then any connection that carries the key or token; a "no" means the server never sees an authentication attempt; a later install does not prompt and still compares first | FIXED | R15, step C text, `install-confirm-no` text, section 2 |
 | D10-6.3 | Rev 22 to 24: a later install writes its credentials under `.<address>.creds.tmp` and renames it last; stale temporary files removed; mash ignores `.*.tmp`; the address checked against the grammar | FIXED in the rule, no block | section 2 write-order rule; no printed block shows a temporary file (Z21 (c)) |
-| D10-6.4 | Rev 24, REQ-011 (i): the pasted install refuses a destination, or any parent of it, that is a symlink or writable by another user, before copying | NOT TAKEN | the shape of the paste (section 5a, the README prerequisite) is a decision for the lead; listed as not conformed |
+| D10-6.4 | Rev 24, REQ-011 (i): the pasted install refuses a destination, or any parent of it, that is a symlink or writable by another user, before copying | NOT TAKEN in DRAFT10; FIXED in DRAFT11 (D11-1) | the shape of the paste was a decision for the lead; listed as not conformed until the lead ruled |
 | D10-6.6 | Rev 26: a later install refuses (exit 1, `error: another mash credential install is running`) while another's temporary is younger than 10 minutes; only older or future-dated temporaries are stale; address grammar (1 to 63 a part, at most 191, lowercase); a later install's `--server` and `--ca` byte-identical to the configured ones; a terminal only when it prompts | FIXED | section 2, R15, new block `install-refuse-running` (the lead's words), Z21 (e) |
 | D10-6.5 | Newest revision binds over earlier rulings | APPLIED | the brief's "mash computes the account from the token's issuer" yields to rev 24's `--account` (compared with the issuer); the lead's error line `... than the one you confirmed.` is kept word for word (Z21 (a)) |
 
@@ -896,3 +896,34 @@ Packet keys added (12): `install-confirm`, `install-confirm-no`,
 `install-refuse-ca`, `install-refuse-keyfile-mode`, `install-refuse-keyfile-symlink`,
 `install-refuse-keyfile-owner`. Removed: none (the combined certificate refusal
 stays under `install-refuse`, reworded to the host name).
+
+## DRAFT11: lead rulings of 11:08Z
+
+Contract rev 26 FINAL (`contract-0.5.6-cli-ux-rev26.md`, the critic's read of
+rev 26 clean) was downloaded at the start and the end of this work; it differs
+from `rev26-draft.md` only in the critic row, the removal of the `mash endpoint
+status` mailbox column and the publication list. Target document:
+`docs/plans/2026-11-19-cli-targets-mash.md` (DRAFT11).
+
+| # | item | disposition | where in the targets (DRAFT11), or why not |
+|---|---|---|---|
+| D11-1 | The pasted install refuses a destination folder, or any parent of it, that is a symlink or writable by another user, before copying; refusal blocks; Mac block before Linux; verify before copy; short enough to paste | FIXED, with one part not taken | section 5a: the paste is one `&&` chain (21 lines in the targets, 31 in the README's whole prerequisite paste, up from 14), the check a subshell loop of `[ -L ]` and `find -maxdepth 0 -perm` (portable, no `stat`), after the verify and right before the copy; blocks `install-check-writable` and `install-check-symlink`; Z22 (a). NOT TAKEN: the Mac block before the Linux one: the README is a Debian or Ubuntu page (README v3 removed the Mac downloads because the helper runs only there); the targets say the same paste works on a Mac with `P` and `shasum -a 256 -c -` |
+| D11-2 | `mash endpoint status` has NO mailbox column; remove the column and the `unknown` wording from the targets, packet, section 5b | FIXED | R22, section 5b's table, the DRAFT10 summary, the companion's Z6 (superseded) and section 8; the packet never had the column; Z22 (b) |
+| D11-3 | The `no` outcome keeps the `error:` label | FIXED | `install-confirm-no` reads `error: you did not confirm the three values.`, then `Nothing was written. Ask the operator who made this endpoint.`, exit 1; R15 and the block's text; Z14, Z22 (c) |
+| D11-4 | Write the refusals for a server that REFUSES and one UNREACHABLE | FIXED | `install-refuse-refused` (exit 4) and `install-unreachable` (exit 6, 20s, the open timeout: section 2 Timeouts); the exit-code table's rows 4 and 6 and R15 name them; Z22 (d). The older `install-refuse` block for a token not signed by the server's account is kept beside the new one (two words for one exit-4 condition; for the lead) |
+| D11-5 | Yes/no read from the terminal, a later install shows no confirmation, `--dry-run` asks nothing | ACCEPTED, nothing to change | unchanged |
+| D11-6 | Re-measure widths, update counts, packet keys, checks run | FIXED | section 9 (companion): 162 fenced blocks, 141 chosen by markers, 83 keys |
+| D11-7 | Regenerate the README pages, step count and reviewer notes; lint on both | FIXED | see the report of this draft; the status-views page is not edited |
+
+Packet keys added (4): `install-check-writable`, `install-check-symlink`,
+`install-refuse-refused`, `install-unreachable`. Removed: none. (`install-check`
+has one more block, the `mash version` check on its own, and its install block
+is the new chain.)
+
+Contract rev 26 lines not conformed to: REQ-003's one line in `--make-key`
+output on why no fingerprint is shown (mashctl's text, not in `install-make`);
+AT-007's kill, symlink and foreign-owner tests and AT-008's tests of the
+destination check (behaviour, not output: only the refusal texts are shown);
+the contract's "a destination that does not exist yet (created by the person's
+own user, 0755, then checked)" is applied by `umask 022` and `mkdir -p`, which is
+UNVERIFIED against a release (nothing was run against one).

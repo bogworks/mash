@@ -1,7 +1,7 @@
 # mash CLI targets: decisions, behaviour changes and checks (sections 7 to 9)
 
 This file is the decisions, behaviour-changes and checks part of
-[the mash CLI target outputs](2026-11-19-cli-targets-mash.md) (DRAFT10). It was
+[the mash CLI target outputs](2026-11-19-cli-targets-mash.md) (DRAFT11). It was
 split out only to keep the main file under the repository's size limit for
 committed files. Sections 7, 8 and 9 below are unchanged and keep their
 numbers; every output block (the ones the reviewer packet and the README pages
@@ -284,13 +284,9 @@ Z5. DECIDED, the lead (rev 16; the digest and reading parts and the restart
     wake, and does not survive a restart of `mash serve` (R22, the
     `serve-backlog` text, section 5b): after a restart the first wake can come
     immediately.
-Z6. DECIDED, the lead (rev 16, F15-8). `mash endpoint status` shows the count
-    in a `MAILBOX` column only for the caller's own owner's endpoints, read
-    with the caller's own credentials and never admin, else `unknown`. The
-    targets mention that view only in section 5b's table (the view itself is the
-    status-views page's); the sentence is there. UNVERIFIED: that an endpoint's
-    own credentials may read another endpoint of the same owner's consumer
-    (today's permissions are own-inbox only).
+Z6. SUPERSEDED by Z22 (DRAFT11). Rev 16 had `mash endpoint status` show the
+    count in a `MAILBOX` column for the caller's own owner's endpoints; rev 26
+    removes the column (an endpoint's credentials read only its own inbox).
 Z7. DECIDED here. The example server is `tls://localhost:4222` in every
     ONE-MACHINE block (status, serve, send, the second-endpoint install, the
     MCP examples), because that is what the NATS helper prints (its DRAFT7
@@ -346,8 +342,9 @@ Z14. DECIDED, the lead (rev 18, 20, 21; order and `--account` from rev 22 to 24)
     carries the key or token (R15, `install-confirm`). Chosen here: the question
     and its answer are read from the terminal itself, never from standard input,
     so `--token -` and a piped token still work on a first install; the `no`
-    outcome has no `error:` label (the person chose it; the lead's text is
-    `Nothing was written. Ask the operator who made this endpoint.`); `--json`
+    outcome keeps the `error:` label (DRAFT11, Z22: `error: you did not confirm the
+    three values.`, then the lead's text `Nothing was written. Ask the operator
+    who made this endpoint.`); `--json`
     asks the same question; `--dry-run` writes nothing and asks nothing; a LATER
     install (config and CA already there) shows and asks nothing, since the
     contract says "first install" and no record of the confirmed account exists
@@ -421,6 +418,47 @@ Z21. DECIDED, the lead and the newest contract (rev 22 to 24), applied while
     later install's `--server` and `--ca` must be byte-identical to the
     configured ones, and that only a first install needs a terminal; all in
     section 2 and R15's later-install sentence, one new block.
+
+DRAFT11's decisions (the lead's rulings of 11:08Z, contract rev 26 final). Each
+is easy to reverse.
+
+Z22. DECIDED, the lead. (a) The pasted install checks its destination (rev 24,
+    REQ-011 (i)): before it copies, it refuses a destination folder, or any
+    parent of it, that is a symbolic link or writable by the group or the
+    world, with `error:` and `fix:` lines the paste itself prints (blocks
+    `install-check-writable` and `install-check-symlink`, shown for
+    `/home/ada/.local/bin`). Chosen here: the check is a subshell loop from the
+    destination up to `/` using `[ -L ]` and `find ... -maxdepth 0 -perm`
+    (portable to macOS, where `stat` differs); it comes right before the copy
+    in the same `&&` chain, after the verify; the folder is made first with
+    `umask 022` (rev 24: "created by the person's own user, 0755, then
+    checked"); the symlink refusal gives no command, because only the person
+    knows the real folder; a folder owned by ANOTHER user but not writable by
+    others is not refused (rev 24 asks for "symlink or writable by another
+    user" only); a parent that is a symbolic link is refused even when it is
+    the system's (`/home` on some distributions), because the rev 24 test
+    names a symlinked parent. Measured on the author's own Linux account: the
+    ordinary `~/.local/bin` there is `0775`, so the refusal will fire on many
+    Linux accounts; the `chmod go-w` fix is the answer. The macOS block of the
+    earlier README (Mac before Linux) is NOT restored: the quick start is a
+    Debian or Ubuntu page (decided at the README v3 rewrite, its server helper
+    runs there only), so the targets (section 5a) say the same paste works on
+    a Mac with `P` and `shasum -a 256 -c -`, and the README shows Linux alone.
+    (b) `mash endpoint status` has no mailbox column (rev 26): removed from R22,
+    section 5b's table, the DRAFT10 summary and Z6; a caller's own count is in
+    its own `mash status`. (c) The answer `no` keeps the `error:` label:
+    `error: you did not confirm the three values.` then `Nothing was written.
+    Ask the operator who made this endpoint.`, exit 1 (`install-confirm-no`,
+    Z14). (d) The two refusals without contract wording are written, both after
+    a `yes`, both writing nothing: `install-refuse-refused` (exit 4) and
+    `install-unreachable` (exit 6, `did not answer within 20s`, the open
+    timeout a connecting command uses, section 2 Timeouts, not status's 2
+    seconds). The older block for a token "not signed by the account of the
+    server" (rev 16's text) is KEPT beside the new `install-refuse-refused`:
+    two words for one exit-4 condition; the lead may pick one (mash cannot tell
+    the causes apart). (e) Accepted as is: yes and no are read from the
+    terminal, a later install shows no confirmation, and `--dry-run` asks
+    nothing.
 
 ## 8. Behaviour changes the contract must decide
 
@@ -506,7 +544,7 @@ missing one is exit 2, before anything is read),
   `backlog_woke_at` into the lease; an ADR amends ADR 0041); a digest line does
   not acknowledge and still counts. `mash status` and the MCP `status` show the
   count (`<n> waiting, no limit set` for a limit of 0), and `mash endpoint
-  status` shows it for the caller's own owner only, else `unknown`.
+  status` has no mailbox column (rev 26).
 - Listings (`inbox`, `who`) print no `NEXT:`.
 - `mash status --debug` stays unsupported (exit 2); one flag, `--detail`.
 - `--detail` is added to `version`, `status`, `send`, `inbox`, `read`,
@@ -564,23 +602,28 @@ and lowers the mailbox count (CHANGED, rev 21: today `mash read` never acks).
 
 ## 9. Checks run
 
-Width (re-measured for DRAFT10, contract revision 26). A script (`width.py`, run
+Width (re-measured for DRAFT11, contract revision 26 final). A script (`width.py`, run
 over the file, kept outside the repo) walks the file, tracks the fenced blocks
-and keeps every line over 80 columns. Result for this file: 157 fenced blocks
+and keeps every line over 80 columns. Result for this file: 162 fenced blocks
 (every mockup, Before block and JSON example and the `adopt-from` placeholder),
-136 of them chosen by a `packet:` marker (79 distinct keys; DRAFT9 had 145, 124
-and 67: twelve keys are new, `install-confirm`, `install-confirm-no`,
+141 of them chosen by a `packet:` marker (83 distinct keys; DRAFT10 had 157,
+136 and 79: four keys are new, `install-check-writable`, `install-check-symlink`,
+`install-refuse-refused` and `install-unreachable`, and none is out; the
+`install-check` key has one more block, the `mash version` check on its own,
+and its install block is now the destination-checked chain; DRAFT10's twelve
+new keys were `install-confirm`, `install-confirm-no`,
 `install-no-terminal`, `install-refuse-account`, `install-refuse-noaccount`,
 `install-refuse-badaccount`, `install-refuse-running`, `install-refuse-noauth`,
 `install-refuse-ca`, `install-refuse-keyfile-mode`, `-symlink` and `-owner`,
-and none is out). The widest line of text
+and none was out). The widest line of text
 that a tool prints is 80 columns (the real-name inbox rows and the trust-column
 inbox row, whose message is cut with `...` at column 80 by design, and the
 `--detail` install screen's `config.json` line); NO printed text is over 80,
 with these exemptions (R1, R9): a command a person is told to run or can run
 again, on a line of its own (`--account` is on every `credential install`
 command, so they are longer: the widest are 175 columns, the NEXT of the
-server-side step and the fixes that repeat the whole command with the real
+server-side step and the fixes (DRAFT11 adds two, `install-refuse-refused` and
+`install-unreachable`) that repeat the whole command with the real
 56-character account key; then 168, 135, 134, 132 and 125 for the other such
 fixes with real values, 122 for the one that has a token placeholder; 121 for
 the no-configuration, trust, `ctl-make-key-refuse`, removed-verb and status
@@ -589,7 +632,8 @@ the shortest placeholder form; every other printed command is 81 or less, the
 reply command with an 18-character sender name); a URL (the one link to the
 guide, 84 columns); a
 pasted `$` line (the send warning's, 84 columns, with the variable in front);
-and `gh`'s own report on the install page (88, 107 and 138 columns, `gh`'s
+the install paste's own `echo` lines (76 columns at most, in a pasted block,
+which is a command a person pastes); and `gh`'s own report on the install page (88, 107 and 138 columns, `gh`'s
 words, not mash's). The JSON of `credential install --json` wraps its
 fingerprint and the account onto lines of their own (78 columns). The account
 line of the confirmation is 17 + 56 = 73 columns, so the whole key fits (never
@@ -597,7 +641,8 @@ shortened); the fingerprint lines are 17 + 35 = 52. `localhost` is one column
 longer
 than `myserver`: the status screens that follow the helper stay at 79. Widest
 per category: status screens 79, `credential install` 80 (the `--detail`
-screen; the refusals 78; the first-install screen 73; the rerun 73), `key
+screen; the refusals 78, the new `install-refuse-refused` and
+`install-unreachable` 74; the destination refusals of the pasted install 75; the first-install screen 73; the rerun 73), `key
 create` 75, the server-side step 75 (its command is the exemption), the trust
 screens 75, send 79, hook 76, help 78, serve and the backlog wake 79 (the wake
 line itself is 48), mashctl hand-overs 72, plugin export 74, prompt 73, who 62,
@@ -666,8 +711,11 @@ Checked against the shipped source (the v0.5.5 tag, cloned at
   of 0.5.5's `docs/install.md` (lines 40 and 41) are what section 5a shows. No
   command was run against Claude Code, so nothing claude prints is shown or
   claimed. The plugin export writes 5 files.
-- Contract revisions 18 to 26 (`contract-0.5.6-cli-ux-rev26-draft.md`, the
-  newest in `masterplanner/for-herds/mash-0.5.6/` at the end of this work; the
+- Contract revisions 18 to 26 (`contract-0.5.6-cli-ux-rev26.md`, rev 26 FINAL,
+  which differs from `rev26-draft.md` only in the critic row (the read of rev 26
+  was clean), the sentence that removes the `mash endpoint status` mailbox
+  column and the publication list; the newest in
+  `masterplanner/for-herds/mash-0.5.6/` at the end of DRAFT11; the
   work began at rev 21 and revs 22 to 26 appeared during it, so the contract was
   downloaded to the scratchpad at the start and again at the end, and the
   differences were applied). Read (the diff of rev 24 to rev 26 too) for
@@ -695,18 +743,11 @@ Checked against the shipped source (the v0.5.5 tag, cloned at
   `--account`, compared with the issuer); rev 21 over the planner's "not yet
   delivered" count (DRAFT9) and over rev 16's "reading does not lower it"; rev
   21's `3 waiting, no limit set` over DRAFT9's row without a count. Lines NOT
-  conformed to: (1) REQ-011 (i), rev 24: the pasted install must refuse a
-  destination, or any parent of it, that is a symlink or writable by another
-  user, before copying, with a test list (group-writable, world-writable,
-  sticky shared parent, symlinked parent and destination, a destination that
-  does not exist yet): the `install-check` blocks and the README paste are NOT
-  changed here (the paste's shape is a decision for the lead; section 5a is as
-  in DRAFT9); (2) `mash endpoint status` showing the count for the caller's own
-  owner's endpoints (REQ-015): the targets follow it, the status-views page
-  (DRAFT4) still has no MAILBOX column; (3) no refusal block has wording for a
-  connection the server refuses beyond the lead's rev 16 line (kept, exit 4)
-  nor for an unreachable server (exit 6): the contract names the tests and
-  gives no words; (4) REQ-003's one line in `--make-key` output saying no
+  conformed to in DRAFT10, now closed by DRAFT11 (Z22): (1) REQ-011 (i), rev
+  24, the destination check of the pasted install; (2) `mash endpoint status`
+  and its count, which rev 26 settles as no column; (3) the refusals for a
+  connection the server refuses and for an unreachable server. Still not
+  conformed to: (4) REQ-003's one line in `--make-key` output saying no
   fingerprint is shown because the CA came from the person's own setup is
   mashctl's text and is not in `install-make`; (5) the tests of AT-007 (a kill
   after each file, the temporary-name cases, the symlink and foreign-owner
@@ -732,7 +773,7 @@ Checked against the shipped source (the v0.5.5 tag, cloned at
   authenticated server serves (F15-2), the write order and the rerun that
   completes an interrupted install (F15-6), REQ-015's unacked count, the
   cooldown per endpoint from the last wake not surviving a restart (F15-5), and
-  the `unknown` of `mash endpoint status` for another owner (F15-8). Lines of
+  (F15-8, which rev 26 later reduced to no mailbox column). Lines of
   rev 17 this file did not conform to are closed by rev 21 (`no limit set`, the
   unacked count), except the refusal blocks for a connection the server refuses
   and for an unreachable server during `credential install` (the contract names

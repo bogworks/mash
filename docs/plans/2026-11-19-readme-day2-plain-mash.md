@@ -183,7 +183,9 @@ Error: verifying with issuer "sigstore.dev"
 ```
 
 Delete the downloads (`rm -r "$HOME/mash-setup/dl"`) and do not go on. A line
-that says `FAILED` after `sha256sum` means the same.
+that says `FAILED` after `sha256sum` means the same. The two other ways the paste
+stops, a folder that other users can write and a link, are on the first page, in
+Prerequisite 2.
 
 ## When `mash status` says something else
 
