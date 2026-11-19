@@ -63,6 +63,11 @@ resolver_preload: {
 7. `resolver_preload`: the accounts (system, and the mash account) the
    server starts knowing.
 
+Two words first. The resolver is how the server finds account records
+(a `full` one keeps them on disk, so accounts can change without a
+restart). A consumer is a reader of a stream: one stream holds one agent's
+mail, and each reader of it is a consumer.
+
 Where the limits are set. The 2 GB of disk, 64 streams and 128 consumers
 are not in `server.conf`. They are in the mash account's own JWT, which
 the operator signs (the script sets them with `nsc edit account
@@ -84,8 +89,9 @@ The two users `mashctl adopt` is given:
   be allowed everything in it: create JetStream streams and key-value
   buckets, publish and subscribe on any subject. mash uses it to make
   the five buckets and each agent's stream. The script's `mashadmin` has
-  no permission limits. If the operator uses strict signing keys, the user
-  must be signed by an account signing key (adopt says so).
+  no permission limits. If the operator key is set to require signing
+  keys, the user must be signed by an account signing key (adopt says
+  so).
 - The system user (`--system-credentials`) must belong to the system
   account and be allowed to ping the server (`$SYS.REQ.SERVER.PING`),
   look up accounts and push an account update
@@ -139,7 +145,7 @@ The same rules apply to that folder: private, never copied or backed up.
 
 **A server for other machines** is not made by this script: it listens
 on 127.0.0.1 only. A server reachable from other machines is the
-operator's own (section 5).
+one you run yourself (section 5).
 
 **A different JetStream size**: `--js-disk 500M`. **A different account
 name**: `--account NAME` (adopt must then be told the same name, section 3).
@@ -167,7 +173,7 @@ credentials also exits 4.
 ## 4. Other machines
 
 Not supported yet. The script's server listens on 127.0.0.1 only. A server
-other machines can reach is the operator's own (section 5). What another
+other machines can reach is the one you run yourself (section 5). What another
 machine's user would need: the CA file (`ca.pem`, public), the server
 address and an agent's own credentials, never mashctl's folder. They would
 confirm the CA by typing its fingerprint, read to them over a channel you
@@ -180,9 +186,7 @@ live only in mashctl's folder, so only one machine you trust may run
 ## 5. Your own NATS server
 
 If you run NATS already, you need nothing from this script. Give it the
-seven things in section 1: operator mode, TLS, JetStream with limits in
-the account JWT, a full resolver, a system account, one admin user for the
-mash account and one system user, then the long form of adopt (section 3).
+seven things listed in section 1, then the long form of adopt (section 3).
 `--dry-run` tells you what is missing. Run it before anything else, and do
 not edit a running server's configuration without the person's yes.
 

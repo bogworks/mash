@@ -309,3 +309,21 @@ file format or protocol):
   (not supported), own server, loss, simplified secrets table.
 - Dropped: the rev 12 release-file install route, SR11-5 baseline list and
   the exit-4 credentials text (held for Randy).
+
+## DRAFT8 update (2026-11-19, planner direction via lead #31)
+
+- Guide frozen at part 3 (server made and checked) plus stop/start/remove,
+  a truthful ending ("you now hold ...; next: README quick start, step 1")
+  and `claude --version` as a prerequisite check. Parts 4 and 5 (mashctl
+  download, adopt, endpoints) are parked in
+  `2026-11-19-nats-skill-parts-4-5-parked.md`, to be rewritten from the
+  built commands with real output; the test for them is behind
+  `GUIDETEST_PENDING=1`.
+- Helper: owner asked once (terminal prompt, default the login name; no
+  terminal uses the default), later modes refuse an `--owner` that differs
+  from `mash-setup.json`, closing Next is the README quick start only.
+- One loss paragraph: where the keys are (the server directory), what a
+  leak of each exposes, "if this machine is lost: run the helper again and
+  reissue every endpoint".
+- Wording: operator (key, not a person), resolver and consumer defined in
+  the reference doc, one "seven things" list, pointers checked by the test.
