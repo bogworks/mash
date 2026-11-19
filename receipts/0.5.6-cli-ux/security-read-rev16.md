@@ -68,7 +68,7 @@ Under §5 “Network exposure,” the helper defaults to one TLS client listener
 - `REQ-003` should state what a failed or unavailable account-key lookup returns and verify that **no** CA, credential, or config file is written in each case.
 - `REQ-015` should test the caller’s own credentials and owner boundary for `mash endpoint status`, including an unauthorized endpoint returning `unknown`. Its current `AT-008` exercises wakes and `mash status`, not that boundary.
 - §5 “Network exposure” says other NATS ports may be opened “unless the person asks,” while `REQ-002` says the 0.5.6 helper offers no other interface. State that any wider server setup belongs to the operator’s separate server path.
-- `REQ-002` says the helper writes nothing outside its directory while also directing verification of mash downloads under `REQ-011(i)`. State that binary installation into `~/.local/bin` is a separate install step, so an agent cannot read the helper rule as authority to write there.
+- `REQ-002` says the helper writes nothing outside its directory while also directing verification of mash downloads under `REQ-011(i)`. State that binary installation into an install directory (the contract names `~/.local/bin` only as an example) is a separate install step, so an agent cannot read the helper rule as authority to write there.
 
 ## Summary
 
