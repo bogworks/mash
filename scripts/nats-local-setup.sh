@@ -20,7 +20,7 @@
 #    again and compares every device:inode with the recorded one; if any
 #    differs it stops and writes nothing. Writes go through relative paths
 #    from the directory it is in. Residual: a process running as you can
-#    still swap a path between that recheck and the write; this script does
+#    still change files under the script while it runs; this script does
 #    not defend against that.
 #  - Tools: nats-server and nsc are downloaded from pinned URLs, compared
 #    with a literal sha256 in this file BEFORE extraction or execution, and
@@ -91,7 +91,7 @@ root-owned keys). The server listens on 127.0.0.1 only.
 
 Before each write or remove the script re-resolves every parent directory and
 compares its device:inode with the one recorded at the first check. A process
-running as you can still swap a path between the recheck and the write; this
+running as you can still change files under the script while it runs; this
 script does not defend against that.
 EOF
 }
@@ -258,8 +258,8 @@ srvlog_filter() {
 
 die() { wrap 'nats-local-setup: ' '    ' "$*" >&2; exit 1; }
 say() { wrap '' '    ' "$*"; }
-RESIDUAL="A process running as you can still swap a path between the recheck"
-RESIDUAL="$RESIDUAL and the write; this script does not defend against that."
+RESIDUAL="A process running as you can still change files under the script"
+RESIDUAL="$RESIDUAL while it runs; this script does not defend against that."
 residual() { wrap '' '' "$RESIDUAL"; }
 
 # Root is refused for every subcommand, before anything is read or made.

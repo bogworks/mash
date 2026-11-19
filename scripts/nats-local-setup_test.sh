@@ -328,8 +328,8 @@ hasany() { # succeeds if $OUT holds any of the arguments
 t() { # NAME CONDITION(eval)
     if eval "$2"; then pass "$1"; else fail "$1" "$2"; fi
 }
-RES="A process running as you can still swap a path between the recheck"
-RES="$RES and the write; this script does not defend against that."
+RES="A process running as you can still change files under the script"
+RES="$RES while it runs; this script does not defend against that."
 # the README URL line is one unbroken line and may exceed 80
 wide() {
     printf '%s\n' "$OUT" | grep -v 'README.md#quick-start' |
@@ -550,7 +550,7 @@ t "closing output: other-commands line, Done and race sentences" \
         $W/happy.out &&
      has_n "Done. The setup is in" &&
      has_n "does not limit it to you" &&
-     has_n "A process running as you can still swap a path"'
+     has_n "$RES"'
 t "closing output: the box says ca.key and the nsc store stay in DIR" \
     'has_n() { tr -s " \n" " " <$W/happy.out | grep -qF -- "$1"; }
      has_n "(mode 0700. ca.key and the nsc store stay in it: a process" &&
