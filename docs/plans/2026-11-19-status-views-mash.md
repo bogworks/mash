@@ -475,7 +475,8 @@ Row values, the complete lists (anything else is a defect):
   `mailbox_age` the row is `3 waiting, OVER THE AGE LIMIT OF 1h (woke the
   session at 09:40)` and its second line is `oldest 1h 12m`; when both limits
   are passed, `22 waiting, OVER BOTH LIMITS (woke the session at 09:40)` and
-  the same second line (the `warning:` names the two limits). The two limits
+  a second line that names both, `limit 15, age limit 1h; oldest 1h 12m` (the
+  `warning:` names the two limits). The two limits
   are independent, so the row says which is not set:
   both off (`mailbox_limit` 0 and `mailbox_age` 0), `3 waiting, no limit set`
   (mash never wakes the session for a backlog; `status-mailbox-off`); only the
@@ -1891,7 +1892,8 @@ Not edited by this page. The sections and blocks that would change:
   only`, `session started`, `server details`. The `mailbox` row is `<n>
   waiting`, `..., OVER THE LIMIT OF <limit> (<wake>)`, `..., OVER THE AGE
   LIMIT OF <age> (<wake>)` with `oldest <age>` on a second
-  line, `..., OVER BOTH LIMITS (<wake>)`, `..., no limit set` (both off),
+  line, `..., OVER BOTH LIMITS (<wake>)` with `limit <n>, age limit <age>; oldest <age>` on
+  its second line, `..., no limit set` (both off),
   `..., no count limit set; age limit <age>` (only the count limit off),
   `not checked`, in every block, with the over-the-limit blocks, their `fix:`
   and the notes added. The wake is the last words of the first line in every

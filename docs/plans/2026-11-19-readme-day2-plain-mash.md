@@ -21,12 +21,12 @@ a fault:
 $ mash status
 mail does NOT work: 2 endpoints are installed here and none is chosen.
 
-  version       0.5.6
-  server        tls://localhost:4222
-                alive, encrypted (checked 09:42)
-  config        ok
-  credentials   not checked (acme.demo.alice, acme.demo.bob)
-  mailbox       not checked
+  version      0.5.6
+  server       reachable, encrypted
+  config       ok
+  credentials  not checked (acme.demo.alice, acme.demo.bob)
+  mailbox      not checked
+  session      not checked
 
 fix: mash never guesses between them. To use acme.demo.alice (or
      acme.demo.bob), add this line to ~/.config/mash/config.json:
@@ -123,15 +123,15 @@ server until it is read:
 $ mash status
 acme.demo.bob: mail does NOT work: the server did not answer within 2s.
 
-  version       0.5.6
-  server        tls://localhost:4222
-                NOT REACHABLE (last reached 3h ago)
-  config        ok
-  credentials   not checked (the server was not reached)
-  mailbox       not checked
+  version      0.5.6
+  server       NOT REACHABLE
+  config       ok
+  credentials  not checked (the server was not reached)
+  mailbox      not checked
+  session      not checked
 
-fix: check that the server is running and that "server" in
-     ~/.config/mash/config.json is right.
+fix: the server did not answer; details, with the address mash tried:
+  mash server status
 ```
 
 ```sh
@@ -189,7 +189,7 @@ Prerequisite 2.
 
 ## When `mash status` says something else
 
-Every screen has the same shape: a verdict, five rows, and a `fix:` unless
+Every screen has the same shape: a verdict, six rows (the `server` row says only whether the server is reachable; `mash server status` shows its address), and a `fix:` unless
 mail works. When mail works the exit code is 0, with or without a warning;
 when it does not it is 1, except 6 when the server did not answer and 4 when
 the server refused the credentials. If the server did not answer, check that
@@ -205,12 +205,12 @@ what to do.
 $ mash status
 acme.demo.bob: mail does NOT work: the server refused its credentials.
 
-  version       0.5.6
-  server        tls://localhost:4222
-                alive, encrypted (checked 09:42)
-  config        ok
-  credentials   REFUSED (deleted, or its key was reissued)
-  mailbox       not checked
+  version      0.5.6
+  server       reachable, encrypted
+  config       ok
+  credentials  REFUSED (deleted, or its key was reissued)
+  mailbox      not checked
+  session      not checked
 
 fix: ask whoever runs your mash server which of the two it was. If the key
      was reissued, move the old credentials aside, then install the new key
@@ -226,12 +226,12 @@ No credentials on this machine:
 $ mash status
 acme.demo.bob: mail does NOT work: no credentials on this machine.
 
-  version       0.5.6
-  server        tls://localhost:4222
-                alive, encrypted (checked 09:42)
-  config        ok
-  credentials   MISSING
-  mailbox       not checked
+  version      0.5.6
+  server       reachable, encrypted
+  config       ok
+  credentials  MISSING
+  mailbox      not checked
+  session      not checked
 
 fix: install the credentials made for this endpoint:
   mash credential install --key <key file> --token <token file> --account <account key>
@@ -249,19 +249,18 @@ ask that server:
 ```
 $ export MASH_SERVER=tls://other:4222
 $ mash status
-acme.demo.bob: mail does NOT work: MASH_SERVER overrides config.json.
+acme.demo.bob: not checked: MASH_SERVER is not the server in config.json.
 
-  version       0.5.6
-  server        tls://other:4222
-                not checked
-                MASH_SERVER overrides config.json: tls://other:4222
-                instead of tls://localhost:4222
-  config        ok
-  credentials   not checked (the server was not asked)
-  mailbox       not checked
+  version      0.5.6
+  server       not checked (MASH_SERVER is not the server in config.json)
+  config       ok
+  credentials  not checked (the server was not asked)
+  mailbox      not checked
+  session      not checked
 
-fix: MASH_SERVER is overriding the server in config.json for this run. Stop
-     overriding it in this shell:
+fix: MASH_SERVER is set to tls://other:4222, which is not the server in
+     config.json, so mash IGNORES it and asked no server. Remove it from
+     this shell, then run mash status again:
   unset MASH_SERVER
 ```
 
@@ -276,17 +275,18 @@ $ export MASH_SERVER=nats://localhost:4222
 $ mash status
 acme.demo.bob: mail does NOT work: the server address is not encrypted.
 
-  version       0.5.6
-  server        NOT ENCRYPTED (refused; not connected)
-                MASH_SERVER is set to a plain-text address (nats://)
-  config        ok
-  credentials   not checked (the connection was refused)
-  mailbox       not checked
+  version      0.5.6
+  server       NOT ENCRYPTED (refused; not connected)
+  config       ok
+  credentials  not checked (the connection was refused)
+  mailbox      not checked
+  session      not checked
 
-fix: use a tls:// address. MASH_SERVER is overriding the server in
-     config.json for this run. (With MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1
-     credentials and mail would cross the network unencrypted: test servers
-     only.) Stop overriding it in this shell:
+fix: MASH_SERVER is a plain-text address, and it overrides the server in
+     config.json for this run. Use a tls:// address. (With
+     MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1 credentials and mail would cross
+     the network unencrypted: test servers only.) Stop overriding it in this
+     shell:
   unset MASH_SERVER
 next: to see the address of the server in config.json:
   mash server status
@@ -302,12 +302,12 @@ $ export MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1
 $ mash status
 acme.demo.bob: mail works (1 warning).
 
-  version       0.5.6
-  server        alive, NOT ENCRYPTED (checked 09:42)
-                allowed by MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION
-  config        ok
-  credentials   ok
-  mailbox       2 waiting
+  version      0.5.6
+  server       reachable, NOT ENCRYPTED
+  config       ok
+  credentials  ok
+  mailbox      2 waiting
+  session      online
 
 warning: plain text is on (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION): mail is not
          encrypted. Anyone on the network can read your credentials and your
@@ -325,14 +325,15 @@ and with a tls address it says the variable is set and not used:
 $ mash status
 acme.demo.bob: mail works (1 warning).
 
-  version       0.5.6
-  server        alive, encrypted (checked 09:42)
-                MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set (not used)
-  config        ok
-  credentials   ok
-  mailbox       0 waiting
+  version      0.5.6
+  server       reachable, encrypted
+  config       ok
+  credentials  ok
+  mailbox      0 waiting
+  session      online
 
 warning: MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set; mail may be unencrypted.
+         It is not used for this check: the server in config.json is tls.
 fix: unset it unless this is a test server:
   unset MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION
 ```
@@ -345,12 +346,12 @@ but an idle session is not woken.
 $ mash status
 acme.demo.bob: mail works (1 warning).
 
-  version       0.5.6
-  server        tls://localhost:4222
-                alive, encrypted (checked 09:42)
-  config        ok
-  credentials   ok
-  mailbox       3 waiting
+  version      0.5.6
+  server       reachable, encrypted
+  config       ok
+  credentials  ok
+  mailbox      3 waiting
+  session      online
 
 warning: an idle Claude Code session is not woken by new mail; the mail
          waits for its next prompt.
@@ -368,19 +369,24 @@ waiting.
 $ mash status
 acme.demo.bob: mail works (1 warning).
 
-  version       0.5.6
-  server        tls://localhost:4222
-                alive, encrypted (checked 09:42)
-  config        ok
-  credentials   ok
-  mailbox       22 waiting, OVER THE LIMIT OF 15
+  version      0.5.6
+  server       reachable, encrypted
+  config       ok
+  credentials  ok
+  mailbox      17 waiting, OVER THE LIMIT OF 15 (woke the session at 09:40)
+  session      online
 
-warning: 22 messages are waiting for acme.demo.bob, and the oldest has
-         waited 12m. mash serve wakes the session at most every 10 minutes
-         while the mailbox is over the limit.
-fix: have the session read its mail. To change the limit, add this line to
-     ~/.config/mash/config.json (0 turns the check off):
-    "mailbox_limit": 40
+warning: 17 messages are waiting. The limit, 15, is the number that triggers
+         a wake: a note mash sends an idle session to say mail is waiting.
+         It sends one at most every 10 minutes while more than 15 wait. A
+         message stops waiting when the session is shown it in full or reads
+         it. A one-line summary of a message does not count as shown.
+fix: if the count stays over the limit, the session is not taking mail. Look
+     at the terminal it runs in: it may be stuck or waiting for you. Or read
+     the mail yourself; the session is running, so a message you read leaves
+     the count within a second:
+  mash inbox
+  mash read <number>
 ```
 
 ## Not available until the 0.5.6 release

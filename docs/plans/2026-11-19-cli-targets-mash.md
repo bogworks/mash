@@ -1,10 +1,17 @@
-# mash CLI target outputs (0.5.6 contract input), DRAFT12
+# mash CLI target outputs (0.5.6 contract input), DRAFT12d
 
-Date: 2026-11-19. Status: DRAFT12 of the mockups for the maintainer's review.
+Date: 2026-11-19. Status: DRAFT12d of the mockups for the maintainer's review.
 Every finding of the earlier rounds has one row in
 `docs/plans/2026-11-19-cli-targets-mash-dispositions.md` (DRAFT1 to DRAFT11);
 the rows of this draft are in its last section, "DRAFT12: lead rulings of
-11:17Z".
+11:17Z" and "DRAFT12d: conformance pass".
+
+DRAFT12d is a conformance pass with no new behaviour: every `mash status`
+screen here follows the status-views page (`2026-11-19-status-views-mash.md`):
+six rows, the server row a state and nothing else (no address, no time, no
+detail line), the address only on `mash server status`, which that page
+specifies; the count-over row names the wake time; a mailbox over both limits
+names both on its second line.
 
 DRAFT12 applies the lead's four rulings of 11:17Z (the contract is still rev
 26, final, the newest in `masterplanner/for-herds/mash-0.5.6/`). (1) The README
@@ -138,7 +145,7 @@ conformed to. No product code.
 
 Earlier drafts: DRAFT4 applied the security read of contract revisions 2 and
 3 (INV-001, INV-003, INV-004, REQ-003, REQ-009, REQ-010; rules R15 to R18);
-DRAFT5 made the server row of `status` say when mash checked, labelled
+DRAFT5 made the server row of `status` say when mash checked (DRAFT12d: it says no time and no address now), labelled
 configuration fixes and removed the NEXT after removing access; round 4 added
 section 5a and rule R20; DRAFT6 applied revision 11 (the trust record, now
 removed).
@@ -270,79 +277,80 @@ owner `acme`, the group `release-pipeline` (16 characters) and the names
   `change the <key> line to:`, not `add`; the line is still indented four
   spaces (the plain-text fix of `status`).
 - R11 `mash status` (DECIDED, planner, L5; DRAFT7 adds the mailbox row,
-  REQ-015). SUBJECT TO THE STATUS-VIEWS PAGE: this is the target for the
-  current design, and that page may drop the `server` row (section 5, status).
-  The default screen is FIXED and IDENTICAL in every state: a verdict line, a
-  blank line, then exactly these five rows in this order with these labels:
-  `version`, `server`, `config`, `credentials`, `mailbox`. The server row is
-  two lines: the address as configured (`tls://myserver:4222`), then the state.
-  The state line has exactly these forms and no other (DECIDED, the lead, D1;
-  completed in round 4): `alive, encrypted (checked 09:42)` when the server
-  answered (the time is when mash asked, on a 24-hour clock, local time);
-  `alive, certificate NOT TRUSTED (checked 09:42)` when it answered with a
-  certificate the trusted CA did not sign; `alive, NOT ENCRYPTED (checked
-  09:42)` when it answered on a plain address the override allows; `NOT
-  ENCRYPTED (refused; not connected)` when a plain address is refused; `NOT
-  REACHABLE (last reached 3h ago)` when it did not answer (`never reached from
-  here` when no answer was ever recorded); `not checked` when mash did not ask.
-  A THIRD line exists in two cases, both about
-  `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION`: `allowed by
-  MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION` under `alive, NOT ENCRYPTED`, and
-  `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set (not used)` under a tls address
-  (R18). A SECOND kind of extra lines reports the environment (T7): when
-  `MASH_SERVER` or `MASH_CA` differs from `config.json`, the row says so in two
-  lines, `MASH_SERVER overrides config.json: <the environment's value>` and
-  `instead of <config.json's value>` (`MASH_CA overrides the CA in
-  config.json:` for the CA), and the verdict is `mail does NOT work: MASH_SERVER
-  overrides config.json.` (exit 1), because nothing vouches for what mash would
-  connect to. The one exception is the test-server plain-text override: with
+  REQ-015; DRAFT12d conforms it to the status-views page). The default screen
+  is FIXED and IDENTICAL in every state: a verdict line, a blank line, then
+  exactly these six rows in this order with these labels: `version`, `server`,
+  `config`, `credentials`, `mailbox`, `session`. `mash status` shows NO server
+  address, no time and no server detail (the lead's ruling, the status-views
+  page, section 4.1): the `server` row is a state and nothing else, in exactly
+  these forms (DECIDED, the lead, D1): `reachable, encrypted` when the server
+  answered just now; `reachable, certificate NOT TRUSTED` when it answered with
+  a certificate the trusted CA did not sign; `reachable, NOT ENCRYPTED` when it
+  answered on a plain address the test-server override allows; `NOT ENCRYPTED
+  (refused; not connected)` when a plain address is refused; `NOT REACHABLE`
+  when it did not answer; `not checked` with a reason in brackets when mash did
+  not ask (`not checked (no server is set)`, `not checked (MASH_SERVER is not
+  the server in config.json)`). A row that says `reachable` was checked just
+  now, so it needs no time. The address, the time of the last answer and the
+  rest are on `mash server status` (specified on the status-views page, not
+  here), which is the one place that shows them; a screen that needs the person
+  to see the address says so in its `fix:` or `next:` and points there. The
+  environment rule (T7, one rule for `MASH_SERVER` and `MASH_CA`): a value that
+  differs from `config.json` is IGNORED, so mash asks nothing, the server row is
+  `not checked (MASH_SERVER is not the server in config.json)` and the verdict is
+  `<endpoint>: not checked: MASH_SERVER is not the server in config.json.`
+  (exit 1, not ready; the fix says mash IGNORES it and how to remove it). The one
+  exception is the test-server plain-text override: with
   `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION` set an overriding `nats://`
-  `MASH_SERVER` is allowed, still reported on the row, and the verdict stays
-  `mail works (1 warning)`. A variable equal to what `config.json` holds is not
-  an override and is not reported. `--detail` adds one more line, `certificate
-  checked against <path>`, under a tls address.
-  The row NEVER says `alive` and a past time together: `alive` always goes
-  with the check that just happened. The server is checked in every state
-  that has a server address and a tls:// scheme, whether or not credentials
-  are there, because reaching it needs none. "last seen" is not used on this
-  screen: it means the last mail activity of an ENDPOINT, in `mash who`
-  (LAST SEEN) and only there. Nothing else is a row on the
-  default screen (no group row, no claude row); a state that cannot be
+  `MASH_SERVER` is used, with a `warning:` that says so, and the verdict stays
+  `mail works (1 warning)`; the same variable set while the address is tls is
+  not used, and the `warning:` says it is set and not used (R18). A variable
+  equal to what `config.json` holds is not an override and is not reported.
+  The server is checked in every state that has a server address and a tls://
+  scheme, whether or not credentials are there, because reaching it needs none.
+  "last seen" is not used on this screen: it means the last mail activity of an
+  ENDPOINT, in `mash who` (LAST SEEN) and only there. Nothing else is a row on
+  the default screen (no group row, no claude row); a state that cannot be
   checked says `not checked` in its row. The MAILBOX row (REQ-015, R22) is
-  `<n> waiting`, `<n> waiting, OVER THE LIMIT OF <limit>` (a warning),
-  `<n> waiting, no limit set` when `mailbox_limit` and `mailbox_age` are both 0
-  (the count is still shown, contract rev 21), `<n> waiting, no count limit set;
-  age limit 1h` when only `mailbox_limit` is 0 (mash still wakes for age),
-  `<n> waiting, OVER THE AGE LIMIT OF 1h (woke the session at 09:40)` with
-  `oldest 1h 12m` on a second line when the oldest message is past
-  `mailbox_age` (a warning too; the wake is the last words of the first line),
-  or `not checked` wherever the count cannot be
+  `<n> waiting`, `<n> waiting, OVER THE LIMIT OF <limit> (woke the session at
+  09:40)` (a warning), `<n> waiting, OVER THE AGE LIMIT OF 1h (woke the session
+  at 09:40)` with `oldest 1h 12m` on a second line when the oldest message is
+  past `mailbox_age` (a warning too), `<n> waiting, OVER BOTH LIMITS (woke the
+  session at 09:40)` with `limit 15, age limit 1h; oldest 1h 12m` on a second
+  line when both are past, `<n> waiting, no limit set` when `mailbox_limit` and
+  `mailbox_age` are both 0 (the count is still shown, contract rev 21),
+  `<n> waiting, no count limit set; age limit 1h` when only `mailbox_limit` is 0
+  (mash still wakes for age), or `not checked` wherever the count cannot be
   known (no credentials, the server not reached or not asked, the credentials
-  refused); it is last because it needs the credentials above it. The verdict is
-  `<endpoint>: mail works.`, `<endpoint>: mail works (1 warning).` or
+  refused); it needs the credentials above it. The wake is always the last words
+  of the row's first line, in brackets: `woke the session at 09:40`, `no wake
+  yet` or `no session to wake`. "Limit" means one thing, and every screen that
+  shows it says so: the limit is the number that triggers a wake, and the age
+  limit is the age that triggers a wake. The `session` row is `online`,
+  `offline (mail waits for the next session)` or `not checked`. The verdict is
+  `<endpoint>: mail works.`, `<endpoint>: mail works (1 warning).`,
   `<endpoint>: mail does NOT work: <why>.` (`mail does NOT work: <why>.` when no
-  endpoint is known); an over-the-limit mailbox is a warning, never a failure
-  (AT-008). A problem value is in CAPITALS (`MISSING`, `REFUSED`, `NOT
-  REACHABLE`, `NOT ENCRYPTED`, `NOT TRUSTED`, `NOT SET`, `DELETED`, `UNSAFE`,
-  `OVER THE LIMIT`). When `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION` is set the
-  server row gets a third line saying so (R18). How the endpoint was chosen
-  (R13) is not a default row: it is in `--detail` and on the screens where mash
-  could not choose. `--detail` adds rows after these five and changes none
-  (REQ-012). The extra rows are the SAME six, in this order, in EVERY state,
-  with `none`, `missing` or `not set` where a value is absent: `config file`,
-  `ca`, `credentials file`, `endpoint`, `chosen by` and `mailbox limit` (`15
-  (the default)`, `40 ("mailbox_limit" in config.json)`, `40
-  (MASH_MAILBOX_LIMIT)`, `no limit set` when both limits are off or `no count
-  limit set` when only this one is), whose second line is the age limit
-  (`age 1h (the default)`, `age 2h ("mailbox_age" in config.json)`, `age 2h
-  (MASH_MAILBOX_AGE)` or `no age limit set`); the old facts (commit, counts,
-  settings) follow them, and a line `oldest waiting 12m ago` sits under the mailbox row
-  when something waits. The CA is its OWN row: `ca  <path>`, or `ca  not set`
-  when there is no configuration.
+  endpoint is known) or `<endpoint>: not checked: <why>.`; an over-the-limit
+  mailbox is a warning, never a failure (AT-008). A problem value is in CAPITALS
+  (`MISSING`, `REFUSED`, `NOT REACHABLE`, `NOT ENCRYPTED`, `NOT TRUSTED`,
+  `DELETED`, `UNSAFE`, `OVER THE LIMIT`). How the endpoint was chosen (R13) is
+  not a default row: it is in `--detail` and on the screens where mash could not
+  choose. `--detail` adds facts after the six rows and changes none (REQ-012),
+  in one value column, and none of them is a server detail: the `server` row
+  stays the state, and a line `server details  run: mash server status` is the
+  pointer. The facts are `config file`, `ca file`, `credentials file`,
+  `endpoint`, `chosen by`, `mailbox limit` (`15 (the default)`, `40
+  ("mailbox_limit" in config.json)`, `40 (MASH_MAILBOX_LIMIT)`, `no limit set`
+  when both limits are off or `no count limit set` when only this one is),
+  whose second line is the age limit (`age 1h (the default)`, `age 2h
+  ("mailbox_age" in config.json)`, `age 2h (MASH_MAILBOX_AGE)` or `no age limit
+  set`), then the waiting, session and build facts; a line `oldest waiting 12m
+  ago` sits under the mailbox row when something waits. The CA is its OWN fact:
+  `ca file  <path>`, or `ca file  not set` when there is no configuration.
 
 - R12 Units and words. Times are `12m ago`, `3h ago`, `now`, `never`; exact
   times use a 24-hour clock and a date in `--detail` (`2026-11-19 00:21 UTC`);
-  the time of a check in `status` is the local clock alone (`checked 09:42`).
+  a time in `status` is a wake time on the local clock alone (`woke the session at 09:40`).
   Durations and sizes are a number with its unit and no space (`2s`, `41ms`,
   `14B`); an age under an hour is `45s` or `12m`, from an hour it is `3h` or
   `1h 12m` (the contract's own form), from a day `2d`. Created things are "Created", written files are "wrote", files
@@ -479,7 +487,7 @@ owner `acme`, the group `release-pipeline` (16 characters) and the names
   removed (a file that still has it is refused), and no mash command writes the
   override anywhere. Whenever the variable is set, inherited or not, EVERY
   command that connects prints one line on stderr (`warning:`, no `fix:`), and
-  `mash status` shows it on its server row. The refusal names the new variable
+  `mash status` says so in its `warning:`. The refusal names the new variable
   and says that credentials and mail would cross the network unencrypted and
   that the override is for test servers only; help and the agent's instructions
   say an agent never sets it.
@@ -504,8 +512,8 @@ owner `acme`, the group `release-pipeline` (16 characters) and the names
   credentials, then `config.json` LAST, the commit point): `wrote <path>`,
   `copied <path>` (a file first placed from another file) or `kept   <path>  (unchanged)` (the file is already there with
   the same content; `copied` and `wrote` are never used for an unchanged file).
-  One place keeps naming the server by earlier decision (N19): the rows of
-  `mash status` (a report whose job is exactly that). The start-up line of
+  One place keeps naming the server (N19, DRAFT12d): `mash server status` (a
+  report whose job is exactly that; `mash status` prints no address). The start-up line of
   `mash serve` names the endpoint only.
 
 - R21 (the trust record, DRAFT6) is REMOVED by decision 264: no `trust.json`,
@@ -608,7 +616,7 @@ reads the same with colour off. Colour is used only when the stream is a
 terminal and `NO_COLOR` is unset or empty. `FORCE_COLOR` is not supported (no
 ANSI sequence exists in either binary today; this is new). What is coloured:
 `NEXT:` (green), `error:` and the capital problem words (`NOT REACHABLE`,
-`NOT ENCRYPTED`, `NOT TRUSTED`, `MISSING`, `REFUSED`, `DELETED`, `NOT SET`,
+`NOT ENCRYPTED`, `NOT TRUSTED`, `MISSING`, `REFUSED`, `DELETED`,
 `UNSAFE`; red),
 `warning:` (yellow), and `new` and `urgent` in the mail tables (yellow).
 Nothing else is coloured, and the mockups show none.
@@ -715,7 +723,7 @@ The other `config.json` keys and `MASH_*` variables (timeouts, spool, name
 rule, client certificate, host) are not people-facing and are unchanged. The
 environment wins over `config.json` for one run, and mash says so on every
 `status`: a `MASH_SERVER` or `MASH_CA` that differs from `config.json` is
-reported on the server row and makes the verdict `mail does NOT work` (the one
+ignored: the server row says `not checked` and the verdict is `not checked` (the one
 exception is `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION`, below). An absolute path
 is expected in `MASH_CONFIG_DIR`; a relative `ca` in `config.json` is resolved
 against the config directory, as today.
@@ -1701,12 +1709,12 @@ refusing the server, and says so, in `mash status` (exit 1) and in `mash send`
 $ mash status
 acme.demo.bob: mail does NOT work: mash does not trust the server.
 
-  version       0.5.6
-  server        tls://myserver:4222
-                alive, certificate NOT TRUSTED (checked 09:42)
-  config        ok
-  credentials   not checked (mash did not trust the server)
-  mailbox       not checked
+  version      0.5.6
+  server       reachable, certificate NOT TRUSTED
+  config       ok
+  credentials  not checked (mash did not trust the server)
+  mailbox      not checked
+  session      not checked
 
 fix: if the server's CA changed on purpose, get the new CA file and a new
      token from whoever runs your mash server, move the old settings aside,
@@ -2003,34 +2011,34 @@ sign-in, closed again), and takes up to 2 seconds when the server does not
 answer. It still works with no configuration (it then says what is missing and
 does not connect).
 
-SUBJECT TO THE STATUS-VIEWS PAGE. Contract rev 15 (REQ-004) splits status
-into three views (`mash status` for this endpoint, `mash server status`,
-`mash endpoint status`) and the status-views page (written separately) may
-drop the server address row from `mash status` and settles the exact rows.
-The screens below are the target for the CURRENT design, plus the mailbox row
-of REQ-015 on every screen; when that page lands the `server` rows here follow
-it, and the mailbox row stays (it is `mash status`'s, the endpoint's own).
+CONFORMS TO THE STATUS-VIEWS PAGE (DRAFT12d). Contract rev 15 (REQ-004) splits
+status into three views: `mash status` (this endpoint), `mash server status`
+and `mash endpoint status`. The status-views page settles the rows and
+specifies the other two views; this section carries the `mash status` screens
+in the rows that page fixes. `mash server status` is specified on the
+status-views page; it is not repeated here (the one place that shows the server
+address and why it is or is not reachable).
 
-The screen is fixed (R11): the same verdict line and the same five rows in
-the same order in every state, in the scenarios below: healthy, Claude Code
-not set up, mail backing up (over the limit), no configuration, no endpoint
-chosen when several are installed, credentials missing, none installed,
-credentials readable by others, server unreachable, certificate not trusted
-(section 4), credentials refused, endpoint DELETED, plain URL with the
+The screen is fixed (R11): the same verdict line and the same six rows
+(`version`, `server`, `config`, `credentials`, `mailbox`, `session`) in the
+same order in every state, in the scenarios below: healthy, Claude Code not set
+up, mail backing up (over the limit, or the age limit), no configuration, no
+endpoint chosen when several are installed, credentials missing, none
+installed, credentials readable by others, server unreachable, certificate not
+trusted (section 4), credentials refused, endpoint DELETED, plain URL with the
 override, the override set with a tls address, plain URL refused, the
-environment overriding the server. The server row is its address, then one of
-the forms listed in R11 (`alive, encrypted (checked 09:42)`, `alive,
-certificate NOT TRUSTED (checked 09:42)`, `alive, NOT ENCRYPTED (checked
-09:42)`, `NOT ENCRYPTED (refused; not connected)`, `NOT REACHABLE (last
-reached 3h ago)`, `not checked`), with a third line only for the plain-text
-variable. It never says `alive` together with a past time: that was the defect
-of DRAFT4 (a server that answers now was seen now). "Last reached" is the
-last time this machine's mash heard the server answer, as recorded by `mash
-serve` in the state directory, or `never reached from here` (NEW behaviour:
-`mash serve` writes that time; N10). The mailbox row is `<n> waiting`, `<n>
-waiting, OVER THE LIMIT OF 15`, `<n> waiting, no limit set` or `not checked`
-(R22). The group and
-endpoint counts are in `--detail` only.
+environment overriding the server. The `server` row is a state and nothing
+else, one of the forms listed in R11 (`reachable, encrypted`, `reachable,
+certificate NOT TRUSTED`, `reachable, NOT ENCRYPTED`, `NOT ENCRYPTED (refused;
+not connected)`, `NOT REACHABLE`, `not checked` with its reason): no address,
+no time, no second line. A row that says `reachable` was checked just now.
+What `mash serve` records of the last answer (N10) is for `mash server status`,
+not for this screen. The mailbox row is `<n> waiting`, `<n> waiting, OVER THE
+LIMIT OF 15 (woke the session at 09:40)`, the age and both-limits forms,
+`<n> waiting, no limit set` or `not checked` (R22). The `session` row is `online`,
+`offline (mail waits for the next session)` or `not checked`: it says whether a
+Claude Code session is there to be woken. The group and endpoint counts are not
+on `mash status`: they belong to `mash endpoint status`.
 
 Exit codes: 0 when mail works (warnings included, an over-the-limit mailbox
 included: AT-008), 1 when it does not, 4 when the server refused the
@@ -2061,79 +2069,84 @@ version: mash 0.5.5 (commit e389eaf807279b58e63b05578a779ef672d93a36)
 $ mash status
 acme.demo.bob: mail works.
 
-  version       0.5.6
-  server        tls://localhost:4222
-                alive, encrypted (checked 09:42)
-  config        ok
-  credentials   ok
-  mailbox       0 waiting
+  version      0.5.6
+  server       reachable, encrypted
+  config       ok
+  credentials  ok
+  mailbox      2 waiting
+  session      online
 ```
 
-Exit 0. No `NEXT:` (nothing follows). The server address is shown as
-configured, with its scheme, so the encryption words and any fix agree with
-what the person reads.
+Exit 0. No `NEXT:` (nothing follows). The screen names no server address: the
+server row says whether the server is reachable and encrypted, and `mash server
+status` shows the address.
 
 #### Healthy, `--detail`
 
-`--detail` keeps the five rows and adds rows after them (REQ-012): WHERE
-everything is, in six rows that are the SAME in every state (the absent ones
-say `none`, `missing` or `not set`, so a person can compare screens), then the
-facts of before: the counts of the group (the maintainer's "if cheap": one
-extra read of the endpoint directory on the connection that is already open,
-counting records, never who is online) and the settings in use.
+`--detail` keeps the six rows and adds facts after them (REQ-012): WHERE
+everything is (the config file, the CA file, the credentials file, the selected
+endpoint and how it was chosen), then what `waiting` means, the mailbox limit
+and the age limit, the one-line summaries, when and where the session started,
+and the commit and settings, in one value column. It carries NO server detail:
+the answer time, the clock offset and the address are `mash server status`, and
+the `server details` line says so. The group counts are `mash endpoint status`'s.
 
 <!-- packet: status-detail -->
 ```
 $ mash status --detail
 acme.demo.bob: mail works.
 
-  version       0.5.6
-  server        tls://localhost:4222
-                alive, encrypted (checked 09:42)
-                answered in 41ms; the server's clock is 1s ahead of ours
-  config        ok
-  credentials   ok
-  mailbox       0 waiting
+  version           0.5.6
+  server            reachable, encrypted
+  config            ok
+  credentials       ok
+  mailbox           2 waiting
+  session           online (what that means: mash help endpoint status)
 
   config file       /home/bob/.config/mash/config.json
-  ca                /home/bob/.config/mash/ca.pem
+  ca file           /home/bob/.config/mash/ca.pem (how mash trusts the server)
   credentials file  /home/bob/.config/mash/acme.demo.bob.creds
   endpoint          acme.demo.bob
   chosen by         the only one installed here
-  mailbox limit     15 (the default)
-                    age 1h (the default)
-
-  commit        e389eaf
-  token expires never
-  group         demo has 1 other endpoint; acme has 3 in all
-  storage name  acme_demo_bob
-  name rule     none set (no list limits which names are accepted)
-  claude code   plugin hooks installed; mash may wake an idle session
-  relays seen   0 messages relayed through another endpoint
-  settings      MASH_* none set; the server and CA come from config.json
+  waiting means     not yet acknowledged by your session; with no session
+                    running nothing acknowledges mail, so every message
+                    waits until a session starts and shows or reads it
+  mailbox limit     15 (the number that triggers a wake; key mailbox_limit)
+                    age 1h (the age that triggers a wake; key mailbox_age)
+  summary only      0 (shown as a one-line summary, not read; still waiting)
+  session started   2026-11-19 09:12 +00:00 on localhost
+  claude code       set up to tell an idle session about new mail
+  token expires     never (the token: what the server issued with your key)
+  commit            e389eaf (the source this mash was built from)
+  settings          no MASH_* variable is set
+  server details    run: mash server status
 ```
 
-The six rows, in this order: `config file` (the path, `(missing)` after it
-when there is no file); `ca` (the CA file's path, `not set` when there is no
-configuration); `credentials file` (the path, `(missing)` after it, `none`
-when no endpoint is known and `not set` when none is chosen); `endpoint` (the
-address, `not set`) and `chosen by`, in one of four fixed phrases:
-`MASH_ENDPOINT`, `"endpoint" in config.json`, `the only one installed here`
-(REQ-009) or `not set`; and `mailbox limit` (`15 (the default)`, `40
-("mailbox_limit" in config.json)`, `40 (MASH_MAILBOX_LIMIT)`, `no limit set` (both limits off) or `no count limit set` (only this one), R22), with a second line for the
-age limit (`age 1h (the default)`, `age 2h ("mailbox_age" in config.json)`, `age 2h (MASH_MAILBOX_AGE)` or `no age limit set`; the row count stays six).
-The CA is named by its file in the `ca` row; its fingerprint is not on the
-status screens (it is shown by the first install and by mashctl, R15). The
-`settings` row names every `MASH_*` variable that is set, never its value, so
-a person who meets an override sees it (for example `MASH_SERVER,
-MASH_ENDPOINT`). The `claude code` row replaces two jargon lines (channel
-allowlist, delivery); a CLI run reports only what it can read (whether the
-plugin's hooks and the channel list are installed); live counts are in the MCP
-`status` JSON (section 6). When something waits, `--detail` adds one line under
-the `mailbox` row, `oldest waiting 12m ago` (the next block but one). The next
-blocks are the other states of `--detail`, cut to the verdict, the rows and the
-fix: the facts under `commit` follow in every one exactly as above and are not
-repeated.
+The facts that are the SAME in every state (the absent ones say `none`,
+`missing` or `not set`, so a person can compare screens): `config file` (the
+path, `(missing)` after it when there is no file); `ca file` (the CA file's
+path, `not set` when there is no configuration); `credentials file` (the
+path, `(missing)` after it, `none` when no endpoint is known and `not set`
+when none is chosen); `endpoint` (the address, `not set`) and `chosen by`, in
+one of four fixed phrases: `MASH_ENDPOINT`, `"endpoint" in config.json`, `the
+only one installed here` (REQ-009) or `not set`; and `mailbox limit` (`15
+(the default)`, `40 ("mailbox_limit" in config.json)`, `40
+(MASH_MAILBOX_LIMIT)`, `no limit set` (both limits off) or `no count limit set`
+(only this one), R22), with a second line for the age limit (`age 1h (the
+default)`, `age 2h ("mailbox_age" in config.json)`, `age 2h (MASH_MAILBOX_AGE)`
+or `no age limit set`). The CA is named by its file in the `ca file` fact; its
+fingerprint is not on the status screens (it is shown by the first install and
+by mashctl, R15). The `settings` fact names every `MASH_*` variable that is
+set, never its value, so a person who meets an override sees it (for example
+`MASH_SERVER, MASH_ENDPOINT`). The `claude code` fact replaces two jargon
+lines (channel allowlist, delivery); a CLI run reports only what it can read
+(whether the plugin's hooks and the channel list are installed); live counts
+are in the MCP `status` JSON (section 6). When something waits, `--detail` adds
+one line under the `mailbox` row, `oldest waiting 12m ago` (a block below). The
+next blocks are the other states of `--detail`, cut to the verdict, the rows,
+the first facts and the fix: the facts under `mailbox limit` follow in every one
+as in the block above and are not repeated, except the `server details`
+pointer, which every `--detail` screen ends its facts with.
 
 #### Claude Code is not set up for mail (warning, exit 0)
 
@@ -2142,12 +2155,12 @@ repeated.
 $ mash status
 acme.demo.bob: mail works (1 warning).
 
-  version       0.5.6
-  server        tls://localhost:4222
-                alive, encrypted (checked 09:42)
-  config        ok
-  credentials   ok
-  mailbox       3 waiting
+  version      0.5.6
+  server       reachable, encrypted
+  config       ok
+  credentials  ok
+  mailbox      3 waiting
+  session      online
 
 warning: an idle Claude Code session is not woken by new mail; the mail
          waits for its next prompt.
@@ -2167,26 +2180,35 @@ the quick start, prerequisite 3.)
 More messages are waiting than the limit allows (REQ-015, R22; the limit is 15
 unless `mailbox_limit` says otherwise). Mail still works, so the verdict is the
 one-warning form and the exit is 0 (AT-008). The mailbox row is the one place
-that says how many and that the limit is passed:
+that says how many, that the limit is passed and when mash woke the session
+(the last words of the first line; `no wake yet` before the first wake, `no
+session to wake` with no session). "Limit" means one thing: the number that
+triggers a wake, which is a note mash sends an idle session to say mail is
+waiting; it is not a capacity. The warning says so, once:
 
 <!-- packet: status-mailbox-over -->
 ```
 $ mash status
 acme.demo.bob: mail works (1 warning).
 
-  version       0.5.6
-  server        tls://localhost:4222
-                alive, encrypted (checked 09:42)
-  config        ok
-  credentials   ok
-  mailbox       22 waiting, OVER THE LIMIT OF 15
+  version      0.5.6
+  server       reachable, encrypted
+  config       ok
+  credentials  ok
+  mailbox      17 waiting, OVER THE LIMIT OF 15 (woke the session at 09:40)
+  session      online
 
-warning: 22 messages are waiting for acme.demo.bob, and the oldest has
-         waited 12m. mash serve wakes the session at most every 10 minutes
-         while the mailbox is over the limit.
-fix: have the session read its mail. To change the limit, add this line to
-     ~/.config/mash/config.json (0 turns the check off):
-    "mailbox_limit": 40
+warning: 17 messages are waiting. The limit, 15, is the number that triggers
+         a wake: a note mash sends an idle session to say mail is waiting.
+         It sends one at most every 10 minutes while more than 15 wait. A
+         message stops waiting when the session is shown it in full or reads
+         it. A one-line summary of a message does not count as shown.
+fix: if the count stays over the limit, the session is not taking mail. Look
+     at the terminal it runs in: it may be stuck or waiting for you. Or read
+     the mail yourself; the session is running, so a message you read leaves
+     the count within a second:
+  mash inbox
+  mash read <number>
 ```
 
 With `--detail` (the same rows as in every state; the line under the mailbox
@@ -2197,28 +2219,34 @@ row is the oldest waiting message and where the limit comes from):
 $ mash status --detail
 acme.demo.bob: mail works (1 warning).
 
-  version       0.5.6
-  server        tls://localhost:4222
-                alive, encrypted (checked 09:42)
-  config        ok
-  credentials   ok
-  mailbox       22 waiting, OVER THE LIMIT OF 15
-                oldest waiting 12m ago
+  version           0.5.6
+  server            reachable, encrypted
+  config            ok
+  credentials       ok
+  mailbox           17 waiting, OVER THE LIMIT OF 15 (woke the session at 09:40)
+                    oldest waiting 12m ago
+  session           online
 
   config file       /home/bob/.config/mash/config.json
-  ca                /home/bob/.config/mash/ca.pem
+  ca file           /home/bob/.config/mash/ca.pem
   credentials file  /home/bob/.config/mash/acme.demo.bob.creds
   endpoint          acme.demo.bob
   chosen by         the only one installed here
   mailbox limit     15 (the default)
                     age 1h (the default)
+  server details    run: mash server status
 
-warning: 22 messages are waiting for acme.demo.bob, and the oldest has
-         waited 12m. mash serve wakes the session at most every 10 minutes
-         while the mailbox is over the limit.
-fix: have the session read its mail. To change the limit, add this line to
-     ~/.config/mash/config.json (0 turns the check off):
-    "mailbox_limit": 40
+warning: 17 messages are waiting. The limit, 15, is the number that triggers
+         a wake: a note mash sends an idle session to say mail is waiting.
+         It sends one at most every 10 minutes while more than 15 wait. A
+         message stops waiting when the session is shown it in full or reads
+         it. A one-line summary of a message does not count as shown.
+fix: if the count stays over the limit, the session is not taking mail. Look
+     at the terminal it runs in: it may be stuck or waiting for you. Or read
+     the mail yourself; the session is running, so a message you read leaves
+     the count within a second:
+  mash inbox
+  mash read <number>
 ```
 
 The age limit is the second way a mailbox backs up (REQ-015, rev 26): the
@@ -2229,20 +2257,21 @@ the session (the last words of the row's first line, from the lease's
 session); its second line says how old the oldest is. The warning says what the
 age limit is, in the words of the count's: the age that triggers a wake. If the
 count is over too, the row is `22 waiting, OVER BOTH LIMITS (woke the session at
-09:40)` with the same second line:
+09:40)` and its second line names both limits and the age,
+`limit 15, age limit 1h; oldest 1h 12m`:
 
 <!-- packet: status-mailbox-age-over -->
 ```
 $ mash status
 acme.demo.bob: mail works (1 warning).
 
-  version       0.5.6
-  server        tls://localhost:4222
-                alive, encrypted (checked 09:42)
-  config        ok
-  credentials   ok
-  mailbox       3 waiting, OVER THE AGE LIMIT OF 1h (woke the session at 09:40)
-                oldest 1h 12m
+  version      0.5.6
+  server       reachable, encrypted
+  config       ok
+  credentials  ok
+  mailbox      3 waiting, OVER THE AGE LIMIT OF 1h (woke the session at 09:40)
+               oldest 1h 12m
+  session      online
 
 warning: 3 messages are waiting for acme.demo.bob, and the oldest has
          waited 1h 12m. The age limit, 1h, is the age that triggers a wake:
@@ -2280,16 +2309,15 @@ limit set`:
 $ mash status
 acme.demo.bob: mail works.
 
-  version       0.5.6
-  server        tls://localhost:4222
-                alive, encrypted (checked 09:42)
-  config        ok
-  credentials   ok
-  mailbox       3 waiting, no limit set
+  version      0.5.6
+  server       reachable, encrypted
+  config       ok
+  credentials  ok
+  mailbox      3 waiting, no limit set
+  session      online
 ```
 
-If the config file already has the key, the fix label is `change the
-mailbox_limit line to:` (R10). The count is `not checked` wherever it cannot
+The count is `not checked` wherever it cannot
 be known: no connection was made, the credentials were refused, or the server
 would not answer the inbox question (every other screen below).
 
@@ -2300,12 +2328,12 @@ would not answer the inbox question (every other screen below).
 $ mash status
 mail does NOT work: mash has no configuration on this machine.
 
-  version       0.5.6
-  server        NOT SET
-                not checked
-  config        MISSING (~/.config/mash/config.json)
-  credentials   not checked
-  mailbox       not checked
+  version      0.5.6
+  server       not checked (no server is set)
+  config       MISSING (~/.config/mash/config.json)
+  credentials  not checked
+  mailbox      not checked
+  session      not checked
 
 fix: install your key and the token you were sent. Give the server address
      and the CA file whoever runs your mash server sent you:
@@ -2327,20 +2355,21 @@ refusals and the server setup guide carry the rest. The command is wider than
 $ mash status --detail
 mail does NOT work: mash has no configuration on this machine.
 
-  version       0.5.6
-  server        NOT SET
-                not checked
-  config        MISSING (~/.config/mash/config.json)
-  credentials   not checked
-  mailbox       not checked
+  version           0.5.6
+  server            not checked (no server is set)
+  config            MISSING (~/.config/mash/config.json)
+  credentials       not checked
+  mailbox           not checked
+  session           not checked
 
   config file       /home/bob/.config/mash/config.json  (missing)
-  ca                not set
+  ca file           not set
   credentials file  none
   endpoint          not set
   chosen by         not set
   mailbox limit     15 (the default)
                     age 1h (the default)
+  server details    run: mash server status
 
 fix: install your key and the token you were sent. Give the server address
      and the CA file whoever runs your mash server sent you:
@@ -2354,12 +2383,12 @@ fix: install your key and the token you were sent. Give the server address
 $ mash status
 mail does NOT work: 2 endpoints are installed here and none is chosen.
 
-  version       0.5.6
-  server        tls://localhost:4222
-                alive, encrypted (checked 09:42)
-  config        ok
-  credentials   not checked (acme.demo.alice, acme.demo.bob)
-  mailbox       not checked
+  version      0.5.6
+  server       reachable, encrypted
+  config       ok
+  credentials  not checked (acme.demo.alice, acme.demo.bob)
+  mailbox      not checked
+  session      not checked
 
 fix: mash never guesses between them. To use acme.demo.alice (or
      acme.demo.bob), add this line to ~/.config/mash/config.json:
@@ -2381,20 +2410,21 @@ second a command.
 $ mash status --detail
 mail does NOT work: 2 endpoints are installed here and none is chosen.
 
-  version       0.5.6
-  server        tls://localhost:4222
-                alive, encrypted (checked 09:42)
-  config        ok
-  credentials   not checked (acme.demo.alice, acme.demo.bob)
-  mailbox       not checked
+  version           0.5.6
+  server            reachable, encrypted
+  config            ok
+  credentials       not checked (acme.demo.alice, acme.demo.bob)
+  mailbox           not checked
+  session           not checked
 
   config file       /home/bob/.config/mash/config.json
-  ca                /home/bob/.config/mash/ca.pem
+  ca file           /home/bob/.config/mash/ca.pem
   credentials file  not set (no endpoint is chosen)
   endpoint          not set
   chosen by         not set
   mailbox limit     15 (the default)
                     age 1h (the default)
+  server details    run: mash server status
 
 fix: mash never guesses between them. To use acme.demo.alice (or
      acme.demo.bob), add this line to ~/.config/mash/config.json:
@@ -2410,12 +2440,12 @@ fix: mash never guesses between them. To use acme.demo.alice (or
 $ mash status
 mail does NOT work: no endpoint is installed here.
 
-  version       0.5.6
-  server        tls://localhost:4222
-                alive, encrypted (checked 09:42)
-  config        ok
-  credentials   MISSING (none in ~/.config/mash)
-  mailbox       not checked
+  version      0.5.6
+  server       reachable, encrypted
+  config       ok
+  credentials  MISSING (none in ~/.config/mash)
+  mailbox      not checked
+  session      not checked
 
 fix: install your key and the token you were sent for this endpoint. mash
      then uses it by itself; with several installed, name one with MASH_ENDPOINT
@@ -2435,12 +2465,12 @@ the screen is the one above ("No configuration at all").
 $ mash status
 acme.demo.bob: mail does NOT work: no credentials on this machine.
 
-  version       0.5.6
-  server        tls://localhost:4222
-                alive, encrypted (checked 09:42)
-  config        ok
-  credentials   MISSING
-  mailbox       not checked
+  version      0.5.6
+  server       reachable, encrypted
+  config       ok
+  credentials  MISSING
+  mailbox      not checked
+  session      not checked
 
 fix: install the credentials made for this endpoint:
   mash credential install --key <key file> --token <token file> --account <account key>
@@ -2460,12 +2490,12 @@ mode 600 (INV-001, REQ-009). Otherwise mash does not use it and says why:
 $ mash status
 acme.demo.bob: mail does NOT work: its credentials file is readable by others.
 
-  version       0.5.6
-  server        tls://localhost:4222
-                alive, encrypted (checked 09:42)
-  config        ok
-  credentials   UNSAFE (readable by others; not used)
-  mailbox       not checked
+  version      0.5.6
+  server       reachable, encrypted
+  config       ok
+  credentials  UNSAFE (readable by others; not used)
+  mailbox      not checked
+  session      not checked
 
 fix: make the file private, then check again:
   chmod 600 ~/.config/mash/acme.demo.bob.creds
@@ -2484,47 +2514,48 @@ says when the only file there fails the test.
 $ mash status
 acme.demo.bob: mail does NOT work: the server did not answer within 2s.
 
-  version       0.5.6
-  server        tls://localhost:4222
-                NOT REACHABLE (last reached 3h ago)
-  config        ok
-  credentials   not checked (the server was not reached)
-  mailbox       not checked
+  version      0.5.6
+  server       NOT REACHABLE
+  config       ok
+  credentials  not checked (the server was not reached)
+  mailbox      not checked
+  session      not checked
 
-fix: check that the server is running and that "server" in
-     ~/.config/mash/config.json is right.
+fix: the server did not answer; details, with the address mash tried:
+  mash server status
 ```
 
 Exit 6 (the server is unreachable or failed: contract rev 7, section 2; it
-was 1 in DRAFT5). If the address came from `MASH_SERVER` instead of the file,
-the fix names `MASH_SERVER`. If the server is reachable but the sign-in times
-out, the same words. The fix is prose: mash does not start or stop a server
-(cli rule 32); the quick start gives the commands for the helper it uses.
-With `--detail` the same screen shows the six rows:
+was 1 in DRAFT5). The screen names no address: `mash server status` shows the
+address mash tried and the cause (an address that came from `MASH_SERVER`
+instead of the file shows there too). If the server is reachable but the sign-in
+times out, the same words. The fix points to `mash server status`: mash does
+not start or stop a server (cli rule 32); the quick start gives the commands for
+the helper it uses. With `--detail` the same screen shows the six rows:
 
 <!-- packet: status-detail-unreachable -->
 ```
 $ mash status --detail
 acme.demo.bob: mail does NOT work: the server did not answer within 2s.
 
-  version       0.5.6
-  server        tls://localhost:4222
-                NOT REACHABLE (last reached 3h ago)
-                waited 2s; no answer
-  config        ok
-  credentials   not checked (the server was not reached)
-  mailbox       not checked
+  version           0.5.6
+  server            NOT REACHABLE
+  config            ok
+  credentials       not checked (the server was not reached)
+  mailbox           not checked
+  session           not checked
 
   config file       /home/bob/.config/mash/config.json
-  ca                /home/bob/.config/mash/ca.pem
+  ca file           /home/bob/.config/mash/ca.pem
   credentials file  /home/bob/.config/mash/acme.demo.bob.creds
   endpoint          acme.demo.bob
   chosen by         the only one installed here
   mailbox limit     15 (the default)
                     age 1h (the default)
+  server details    run: mash server status
 
-fix: check that the server is running and that "server" in
-     ~/.config/mash/config.json is right.
+fix: the server did not answer; details, with the address mash tried:
+  mash server status
 ```
 
 #### Credentials refused
@@ -2536,12 +2567,12 @@ Exit 4 (the server refused the credentials; the same code in both tools):
 $ mash status
 acme.demo.bob: mail does NOT work: the server refused its credentials.
 
-  version       0.5.6
-  server        tls://localhost:4222
-                alive, encrypted (checked 09:42)
-  config        ok
-  credentials   REFUSED (deleted, or its key was reissued)
-  mailbox       not checked
+  version      0.5.6
+  server       reachable, encrypted
+  config       ok
+  credentials  REFUSED (deleted, or its key was reissued)
+  mailbox      not checked
+  session      not checked
 
 fix: ask whoever runs your mash server which of the two it was. If the key
      was reissued, move the old credentials aside, then install the new key
@@ -2565,20 +2596,21 @@ exit 4:
 $ mash status --detail
 acme.demo.bob: mail does NOT work: the server refused its credentials.
 
-  version       0.5.6
-  server        tls://localhost:4222
-                alive, encrypted (checked 09:42)
-  config        ok
-  credentials   REFUSED (deleted, or its key was reissued)
-  mailbox       not checked
+  version           0.5.6
+  server            reachable, encrypted
+  config            ok
+  credentials       REFUSED (deleted, or its key was reissued)
+  mailbox           not checked
+  session           not checked
 
   config file       /home/bob/.config/mash/config.json
-  ca                /home/bob/.config/mash/ca.pem
+  ca file           /home/bob/.config/mash/ca.pem
   credentials file  /home/bob/.config/mash/acme.demo.bob.creds
   endpoint          acme.demo.bob
   chosen by         MASH_ENDPOINT
   mailbox limit     15 (the default)
                     age 1h (the default)
+  server details    run: mash server status
 
 fix: ask whoever runs your mash server which of the two it was. If the key
      was reissued, move the old credentials aside, then install the new key
@@ -2600,12 +2632,12 @@ lane's decision), which is why the server's refusal is what says DELETED. Exit
 $ mash status
 acme.demo.bob: mail does NOT work: this endpoint was DELETED on the server.
 
-  version       0.5.6
-  server        tls://localhost:4222
-                alive, encrypted (checked 09:42)
-  config        ok
-  credentials   REFUSED (endpoint DELETED)
-  mailbox       not checked
+  version      0.5.6
+  server       reachable, encrypted
+  config       ok
+  credentials  REFUSED (endpoint DELETED)
+  mailbox      not checked
+  session      not checked
 
 fix: its address cannot be used again. For a new endpoint, make a new key,
      then give its .pub file to whoever runs your mash server:
@@ -2625,20 +2657,21 @@ With `--detail` (the rows are the same as in every state; exit 4):
 $ mash status --detail
 acme.demo.bob: mail does NOT work: this endpoint was DELETED on the server.
 
-  version       0.5.6
-  server        tls://localhost:4222
-                alive, encrypted (checked 09:42)
-  config        ok
-  credentials   REFUSED (endpoint DELETED)
-  mailbox       not checked
+  version           0.5.6
+  server            reachable, encrypted
+  config            ok
+  credentials       REFUSED (endpoint DELETED)
+  mailbox           not checked
+  session           not checked
 
   config file       /home/bob/.config/mash/config.json
-  ca                /home/bob/.config/mash/ca.pem
+  ca file           /home/bob/.config/mash/ca.pem
   credentials file  /home/bob/.config/mash/acme.demo.bob.creds
   endpoint          acme.demo.bob
   chosen by         "endpoint" in config.json
   mailbox limit     15 (the default)
                     age 1h (the default)
+  server details    run: mash server status
 
 fix: its address cannot be used again. For a new endpoint, make a new key,
      then give its .pub file to whoever runs your mash server:
@@ -2654,12 +2687,12 @@ $ export MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1
 $ mash status
 acme.demo.bob: mail works (1 warning).
 
-  version       0.5.6
-  server        alive, NOT ENCRYPTED (checked 09:42)
-                allowed by MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION
-  config        ok
-  credentials   ok
-  mailbox       2 waiting
+  version      0.5.6
+  server       reachable, NOT ENCRYPTED
+  config       ok
+  credentials  ok
+  mailbox      2 waiting
+  session      online
 
 warning: plain text is on (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION): mail is not
          encrypted. Anyone on the network can read your credentials and your
@@ -2676,15 +2709,15 @@ address can come only from `MASH_SERVER`, for this run, and the only fix is to
 unset it: nobody edits `config.json` to a `nats://` address. Today the
 warning is printed twice, once on stdout as the `tls:` line and once on
 stderr, on every status run (catalog DUP); the target prints it once, as part
-of the report, and the warning does not repeat the server row (it says what is
-at stake, the row says why it is allowed). The screen prints NO server address
-(the lead's ruling: a status screen names none; `mash server status` does). The override exists only through
+of the report; the server row says `reachable, NOT ENCRYPTED`, and the warning
+says what is at stake. The screen prints NO server address
+(the lead's ruling: `mash status` names none; `mash server status` does). The override exists only through
 `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1` in the environment of that run (R18;
 Randy's name, `MASH_INSECURE_PLAINTEXT` is gone with no alias): the
 `insecure_plaintext` key of `config.json` is removed. Every other command that
 connects prints the one-line `warning:` of R18 on stderr whenever the variable
 is set (`mash send`, below), with or without a plain address, and `status`
-shows it on the server row, as here and in the next screen. Both variables are
+says so in its `warning:`, as here and in the next screen. Both variables are
 set with `export` here because the fix is to `unset` them: a variable set
 inline on one command cannot be unset.
 
@@ -2698,20 +2731,21 @@ launcher). It is not used by this connection, and it is shown anyway:
 $ mash status
 acme.demo.bob: mail works (1 warning).
 
-  version       0.5.6
-  server        alive, encrypted (checked 09:42)
-                MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set (not used)
-  config        ok
-  credentials   ok
-  mailbox       0 waiting
+  version      0.5.6
+  server       reachable, encrypted
+  config       ok
+  credentials  ok
+  mailbox      0 waiting
+  session      online
 
 warning: MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set; mail may be unencrypted.
+         It is not used for this check: the server in config.json is tls.
 fix: unset it unless this is a test server:
   unset MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION
 ```
 
 The warning sentence is the one `send` prints (one sentence for the
-variable everywhere); the row says it is set and not used here.
+variable everywhere); the line under it says it is not used here.
 
 #### Plain URL without the override (refused, exit 1)
 
@@ -2721,17 +2755,18 @@ $ export MASH_SERVER=nats://localhost:4222
 $ mash status
 acme.demo.bob: mail does NOT work: the server address is not encrypted.
 
-  version       0.5.6
-  server        NOT ENCRYPTED (refused; not connected)
-                MASH_SERVER is set to a plain-text address (nats://)
-  config        ok
-  credentials   not checked (the connection was refused)
-  mailbox       not checked
+  version      0.5.6
+  server       NOT ENCRYPTED (refused; not connected)
+  config       ok
+  credentials  not checked (the connection was refused)
+  mailbox      not checked
+  session      not checked
 
-fix: use a tls:// address. MASH_SERVER is overriding the server in
-     config.json for this run. (With MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1
-     credentials and mail would cross the network unencrypted: test servers
-     only.) Stop overriding it in this shell:
+fix: MASH_SERVER is a plain-text address, and it overrides the server in
+     config.json for this run. Use a tls:// address. (With
+     MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1 credentials and mail would cross
+     the network unencrypted: test servers only.) Stop overriding it in this
+     shell:
   unset MASH_SERVER
 next: to see the address of the server in config.json:
   mash server status
@@ -2757,28 +2792,28 @@ gone, the rule stays). Mash does not ask that server:
 ```
 $ export MASH_SERVER=tls://other:4222
 $ mash status
-acme.demo.bob: mail does NOT work: MASH_SERVER overrides config.json.
+acme.demo.bob: not checked: MASH_SERVER is not the server in config.json.
 
-  version       0.5.6
-  server        tls://other:4222
-                not checked
-                MASH_SERVER overrides config.json: tls://other:4222
-                instead of tls://localhost:4222
-  config        ok
-  credentials   not checked (the server was not asked)
-  mailbox       not checked
+  version      0.5.6
+  server       not checked (MASH_SERVER is not the server in config.json)
+  config       ok
+  credentials  not checked (the server was not asked)
+  mailbox      not checked
+  session      not checked
 
-fix: MASH_SERVER is overriding the server in config.json for this run. Stop
-     overriding it in this shell:
+fix: MASH_SERVER is set to tls://other:4222, which is not the server in
+     config.json, so mash IGNORES it and asked no server. Remove it from
+     this shell, then run mash status again:
   unset MASH_SERVER
 ```
 
-A `MASH_CA` that differs reads the same, with `MASH_CA overrides the CA in
-config.json: <path>` and `instead of <path>`, and `unset MASH_CA`. The one
-exception is the test-server override: with
+A `MASH_CA` that differs reads the same, with `MASH_CA is not the CA in
+config.json` in the verdict and the row, and `unset MASH_CA`. The verdict says
+`not checked` (mash asked nothing: the page's word, section 4.1 there; DRAFT12
+said `mail does NOT work`). The one exception is the test-server override: with
 `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION` set an overriding `nats://`
-`MASH_SERVER` is allowed, still reported on the row (the plain-URL screen
-above), and the verdict stays `mail works (1 warning)`.
+`MASH_SERVER` is used, reported in the `warning:` (the plain-URL screen above),
+and the verdict stays `mail works (1 warning)`.
 
 #### Unknown flag (exit 2 as today)
 
@@ -2793,24 +2828,30 @@ fix: see the options with:
 `--debug` is not added (one flag, `--detail`, on every command; R7).
 
 Changes (status): connects once, 2s budget; exit 1 when mail does not work (4
-when the server refused the credentials); one fixed screen, verdict and five
-rows, in every state; the server row says when mash checked
-(`alive, encrypted (checked 09:42)`) or when it last reached the server
-(`NOT REACHABLE (last reached 3h ago)`), never "last seen" (D1), and the server
-is checked in every state that has an address, whether or not credentials
+when the server refused the credentials); one fixed screen, verdict and six
+rows (`session` is added), in every state; the server row is a state and no
+address (`reachable, encrypted`, `NOT REACHABLE`, `not checked`), never "last
+seen" (D1) and no time, and the server is checked in every state that has an address, whether or not credentials
 exist; an untrusted certificate says mash did not trust the server (D2); the
 `mailbox` row is new (REQ-015, R22): `<n> waiting`, `<n> waiting, OVER THE
-LIMIT OF 15` (a warning, exit 0), `<n> waiting, no limit set` or `not checked`;
-`--detail` is new and
-carries six rows that are the same in every state (the config file, the CA as
-its own row, the credentials file, the endpoint, how it was chosen and the
-mailbox limit), the group counts, the commit and the settings; the unreachable
-server exits 6; the two plaintext messages merge into one, and the server row
-shows `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION` whenever it is set; a credentials
+LIMIT OF 15 (woke the session at 09:40)` (a warning, exit 0), the age and
+both-limits forms, `<n> waiting, no limit set` or `not checked`; `--detail` is
+new and carries facts that are the same in every state (the config file, the CA
+file, the credentials file, the endpoint, how it was chosen and the mailbox
+limit), the commit and the settings, and one pointer, `server details  run:
+mash server status`, never a server detail; the unreachable
+server exits 6; the two plaintext messages merge into one, and `status`
+says so in its `warning:` whenever `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION` is set; a credentials
 file that is not private or not yours is `UNSAFE`; `--detail` names how the
 endpoint was chosen and the CA file; `name rule`, `clock`, `relay trace`,
 `channel allowlist` and `delivery` leave the default screen. The same content
 is in the MCP tool (JSON, section 6).
+
+`mash server status` is specified on the status-views page (section 4.2 there:
+the address, the encryption, the certificate and when mash last reached the
+server); this document does not repeat its blocks. It is the one place that
+shows the address, and the `fix:` lines of the `mash status` screens point to
+it.
 
 ### mash send
 
@@ -3308,7 +3349,7 @@ the caller, at a shell, is offline unless a Claude Code session also runs as
 the same endpoint). `LAST SEEN` here is the last mail activity of the
 endpoint (`now` while online, `never` for an endpoint nobody has seen; `-` is
 not used); it is the only place the words "last seen" are used (the status
-server row says when mash checked, R11). No `NEXT:` under a listing. The rule "who lists the whole owner" is how
+server row is a state, R11). No `NEXT:` under a listing. The rule "who lists the whole owner" is how
 the directory is read today and was not re-verified for this draft (N13).
 
 Real names (the address stays whole, because a person pastes it):
@@ -4388,7 +4429,7 @@ The mapping, human word to JSON field:
 | closing a live prompt | done | `done` (argument and result; was `final` in the result) |
 | online / offline | STATE | `state` |
 | last seen (an ENDPOINT's last mail activity; `who` only) | LAST SEEN | `last_seen` (RFC 3339 or `null` for never) |
-| when mash checked the server; when it last reached it (`status` only) | `checked 09:42`; `last reached 3h ago` | `server.checked_at`; `server.last_reached` |
+| whether the server answered (`status` only; no address, no time) | `reachable`, `NOT REACHABLE` | `server.state` |
 
 Rule: agents get structured JSON; the human text is not returned by MCP any
 more. No field of any tool holds a token, a private key or the contents of a
@@ -4586,9 +4627,11 @@ with a state and what to do about it. Works with no endpoint set."
 
 No arguments (new optional boolean `detail`). Returns JSON and no human
 text. The `state` of `config` and `credentials` is one of `ok`, `warning`,
-`problem`, `not_checked`; the `state` of `server` is `alive`, `not_reachable`
-or `not_checked` (the same words as the CLI's server row, D1): the same five
-facts as the CLI's five rows.
+`problem`, `not_checked`; the `state` of `server` is `reachable`, `not_reachable`
+or `not_checked` (the CLI's server row in JSON words, D1): the same six
+facts as the CLI's six rows. `server` carries NO address, time or other server
+detail, as the CLI's `server` row does; `mash server status` has its own view
+and its own tool (specified on the status-views page).
 
 | field | type | meaning | example | vs today |
 |---|---|---|---|---|
@@ -4596,12 +4639,9 @@ facts as the CLI's five rows.
 | `chosen_by` | enum or null | how it was chosen: `env`, `config`, `only_one`; null if none | `"only_one"` | new (REQ-009) |
 | `ok` | bool | no part is `problem` (mail works) | `true` | new |
 | `version` | string | mash version | `"0.5.6"` | was `version:` line |
-| `server.address` | string or null | as configured | `"tls://localhost:4222"` | new |
-| `server.state` | enum | `alive`, `not_reachable` or `not_checked`: the answer of the check just made | `"alive"` | was `connection:`/`tls:` |
+| `server.state` | enum | `reachable`, `not_reachable` or `not_checked`: the answer of the check just made | `"reachable"` | was `connection:`/`tls:` |
 | `server.encrypted` | bool or null | tls connection; null when not checked or not reachable | `true` | was `tls:` line |
 | `server.plaintext_override` | bool | `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION` is set (inherited or not) | `false` | new (REQ-010) |
-| `server.checked_at` | string or null | when mash asked the server; null when it did not ask | `"2026-11-19T09:42:11Z"` | new (the CLI's `checked 09:42`) |
-| `server.last_reached` | string or null | when this machine's mash last heard the server answer (equal to `checked_at` when `alive`); null for never | `"2026-11-19T09:42:11Z"` | new (the CLI's `last reached 3h ago`) |
 | `config.state` | enum | configuration | `"ok"` | was `config:` line |
 | `credentials.state` | enum | credentials | `"ok"` | was `creds:` line |
 | `mailbox.waiting` | int or null | unacked messages of this inbox: pending plus ack-pending (section 5b); null when not checked | `0` | new (REQ-015) |
@@ -4611,6 +4651,7 @@ facts as the CLI's five rows.
 | `mailbox.over_limit` | bool or null | `waiting` is past `limit`; false when the limit is 0; null when not checked | `false` | new |
 | `mailbox.over_age_limit` | bool or null | `oldest_age` is past `age_limit`; false when it is `"0"`; null when not checked | `false` | new |
 | `mailbox.woke_at` | string or null | when mash last woke the session for a backlog, from the lease's `backlog_woke_at`; null for none yet or no session | `null` | new |
+| `session` | enum or null | `online` or `offline`: whether a Claude Code session answered the presence probe just now; null when not checked | `"online"` | new (the CLI's `session` row) |
 | `problems` | array | `{code, message, fix}` per problem | | new; replaces `Next:` text |
 | `detail` | object | only with `detail: true` | | below |
 
@@ -4619,17 +4660,16 @@ the CLI says `not checked` in the row. Codes in `problems[].code` come from
 the shared list above, plus `config_missing`, `credentials_missing`.
 
 `detail` fields (secrets never; names of settings, never their values; no
-fingerprint). They are the SAME rows as `mash status --detail` (REQ-012,
+fingerprint; no server detail: no address, no answer time, no clock offset). They are the SAME rows as `mash status --detail` (REQ-012,
 section 5), in every state, with `null` where the CLI says `none`, `missing`
 or `not set`: `config_path`, `ca_path` (`null` when there is no
 configuration), `credentials_path`, `endpoint` and `chosen_by` (`env`,
 `config`, `only_one`, or `null`; both repeat the top-level values, so `detail`
-stands alone), `server.address` (the same as the top-level `server.address`),
-and `mailbox_limit_from` and `mailbox_age_from` (`default`, `config` or `env`; the
+stands alone), and `mailbox_limit_from` and `mailbox_age_from` (`default`, `config` or `env`; the
 limits themselves are `mailbox.limit` and `mailbox.age_limit`). Then the facts: `group` (`{members, endpoints}`: the other
 endpoints in the group and the endpoints of the owner), `settings` (the
-`MASH_*` variables that are set), `answered_ms`, `key` (storage name),
-`name_rule`, `clock_offset_seconds`, `relay_trace` (`{inbound_via, quick_sends,
+`MASH_*` variables that are set), `key` (storage name),
+`name_rule`, `relay_trace` (`{inbound_via, quick_sends,
 declared_relays}`, today's three counts), `commit`, `claude_code`
 (`{hooks_installed, channel_listed, hooks_ran, last_hook_at,
 channel_notifications, last_channel_at}`; the live session counts of today's
@@ -4640,16 +4680,14 @@ says it.
 ```
 { "endpoint": "acme.demo.bob", "ok": true, "version": "0.5.6",
   "chosen_by": "only_one",
-  "server": { "address": "tls://localhost:4222", "state": "alive",
-              "encrypted": true, "plaintext_override": false,
-              "checked_at": "2026-11-19T09:42:11Z",
-              "last_reached": "2026-11-19T09:42:11Z" },
+  "server": { "state": "reachable", "encrypted": true,
+              "plaintext_override": false },
   "config": { "state": "ok" },
   "credentials": { "state": "ok" },
   "mailbox": { "waiting": 0, "limit": 15, "oldest_age": null,
                "age_limit": "1h", "over_limit": false,
                "over_age_limit": false, "woke_at": null },
-  "problems": [] }
+  "session": "online", "problems": [] }
 ```
 
 Failure example (credentials refused):
@@ -4657,60 +4695,53 @@ Failure example (credentials refused):
 ```
 { "endpoint": "acme.demo.bob", "ok": false, "version": "0.5.6",
   "chosen_by": "only_one",
-  "server": { "address": "tls://localhost:4222", "state": "alive",
-              "encrypted": true, "plaintext_override": false,
-              "checked_at": "2026-11-19T09:42:11Z",
-              "last_reached": "2026-11-19T09:42:11Z" },
+  "server": { "state": "reachable", "encrypted": true,
+              "plaintext_override": false },
   "config": { "state": "ok" },
   "credentials": { "state": "problem" },
   "mailbox": { "waiting": null, "limit": 15, "oldest_age": null,
                "age_limit": "1h", "over_limit": null,
                "over_age_limit": null, "woke_at": null },
-  "problems": [ { "code": "credentials_refused",
+  "session": null, "problems": [ { "code": "credentials_refused",
     "message": "deleted, or its key was reissued",
     "fix": "ask whoever runs your mash server which it was" } ] }
 ```
 
-With `detail: true` (the same server and rows as the CLI's `--detail`):
+With `detail: true` (the same facts as the CLI's `--detail`, and no server detail):
 
 ```
 { "endpoint": "acme.demo.bob", "ok": true, "version": "0.5.6",
   "chosen_by": "only_one",
-  "server": { "address": "tls://localhost:4222", "state": "alive",
-              "encrypted": true, "plaintext_override": false,
-              "checked_at": "2026-11-19T09:42:11Z",
-              "last_reached": "2026-11-19T09:42:11Z" },
+  "server": { "state": "reachable", "encrypted": true,
+              "plaintext_override": false },
   "config": { "state": "ok" },
   "credentials": { "state": "ok" },
   "mailbox": { "waiting": 0, "limit": 15, "oldest_age": null,
                "age_limit": "1h", "over_limit": false,
                "over_age_limit": false, "woke_at": null },
-  "problems": [],
+  "session": "online", "problems": [],
   "detail": {
     "config_path": "/home/bob/.config/mash/config.json",
     "ca_path": "/home/bob/.config/mash/ca.pem",
     "credentials_path": "/home/bob/.config/mash/acme.demo.bob.creds",
     "endpoint": "acme.demo.bob", "chosen_by": "only_one",
-    "server": { "address": "tls://localhost:4222" },
     "mailbox_limit_from": "default", "mailbox_age_from": "default",
-    "commit": "e389eaf", "answered_ms": 41 } }
+    "commit": "e389eaf" } }
 ```
 
-Mail backing up (22 waiting over a limit of 15; `ok` stays true):
+Mail backing up (17 waiting over a limit of 15; `ok` stays true):
 
 ```
 { "endpoint": "acme.demo.bob", "ok": true, "version": "0.5.6",
   "chosen_by": "only_one",
-  "server": { "address": "tls://localhost:4222", "state": "alive",
-              "encrypted": true, "plaintext_override": false,
-              "checked_at": "2026-11-19T09:42:11Z",
-              "last_reached": "2026-11-19T09:42:11Z" },
+  "server": { "state": "reachable", "encrypted": true,
+              "plaintext_override": false },
   "config": { "state": "ok" },
   "credentials": { "state": "ok" },
-  "mailbox": { "waiting": 22, "limit": 15, "oldest_age": "12m",
+  "mailbox": { "waiting": 17, "limit": 15, "oldest_age": "12m",
                "age_limit": "1h", "over_limit": true,
                "over_age_limit": false, "woke_at": "2026-11-19T09:40:11Z" },
-  "problems": [] }
+  "session": "online", "problems": [] }
 ```
 
 Oldest message past the age limit (3 waiting, `ok` stays true):
@@ -4718,16 +4749,14 @@ Oldest message past the age limit (3 waiting, `ok` stays true):
 ```
 { "endpoint": "acme.demo.bob", "ok": true, "version": "0.5.6",
   "chosen_by": "only_one",
-  "server": { "address": "tls://localhost:4222", "state": "alive",
-              "encrypted": true, "plaintext_override": false,
-              "checked_at": "2026-11-19T09:42:11Z",
-              "last_reached": "2026-11-19T09:42:11Z" },
+  "server": { "state": "reachable", "encrypted": true,
+              "plaintext_override": false },
   "config": { "state": "ok" },
   "credentials": { "state": "ok" },
   "mailbox": { "waiting": 3, "limit": 15, "oldest_age": "1h 12m",
                "age_limit": "1h", "over_limit": false,
                "over_age_limit": true, "woke_at": "2026-11-19T09:40:11Z" },
-  "problems": [] }
+  "session": "online", "problems": [] }
 ```
 
 Notes: in a running session the tool already knows the live state; it fills

@@ -271,12 +271,12 @@ mash status
 $ mash status
 acme.demo.bob: mail works.
 
-  version       0.5.6
-  server        tls://localhost:4222
-                alive, encrypted (checked 09:42)
-  config        ok
-  credentials   ok
-  mailbox       0 waiting
+  version      0.5.6
+  server       reachable, encrypted
+  config       ok
+  credentials  ok
+  mailbox      2 waiting
+  session      online
 ```
 
 **Command 3 of 3.** Alice. Two endpoints are installed after this, so you
@@ -547,12 +547,12 @@ mash status
 $ mash status
 acme.demo.bob: mail does NOT work: this endpoint was DELETED on the server.
 
-  version       0.5.6
-  server        tls://localhost:4222
-                alive, encrypted (checked 09:42)
-  config        ok
-  credentials   REFUSED (endpoint DELETED)
-  mailbox       not checked
+  version      0.5.6
+  server       reachable, encrypted
+  config       ok
+  credentials  REFUSED (endpoint DELETED)
+  mailbox      not checked
+  session      not checked
 
 fix: its address cannot be used again. For a new endpoint, make a new key,
      then give its .pub file to whoever runs your mash server:
@@ -598,12 +598,12 @@ mash status
 $ mash status
 mail does NOT work: no endpoint is installed here.
 
-  version       0.5.6
-  server        tls://localhost:4222
-                alive, encrypted (checked 09:42)
-  config        ok
-  credentials   MISSING (none in ~/.config/mash)
-  mailbox       not checked
+  version      0.5.6
+  server       reachable, encrypted
+  config       ok
+  credentials  MISSING (none in ~/.config/mash)
+  mailbox      not checked
+  session      not checked
 
 fix: install your key and the token you were sent for this endpoint. mash
      then uses it by itself; with several installed, name one with MASH_ENDPOINT

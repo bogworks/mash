@@ -80,7 +80,8 @@ N9. STILL OPEN, small: the `recipient` row of `send --detail`, the plugin
     version in `mash version --detail`, a message size limit, and how
     partial answers of `prompt` show in the CLI were not checked in the
     source.
-N10. STILL OPEN. `last reached` in `mash status` is the time `mash serve` last
+N10. STILL OPEN (DRAFT12d: for `mash server status`, not `mash status`, which
+    prints no time and no address). `last reached` is the time `mash serve` last
     recorded an answer from the server (state directory); that record is new.
     Without it the row can only say `checked <now>` or `never reached from
     here`. (DRAFT4 called it "last seen"; the word now belongs to `mash who`
@@ -116,10 +117,12 @@ S7. DECIDED here. The older-messages hint under a long inbox is a sentence and
     a whole command (`Older messages are before #56. To see them:` then `mash
     inbox --limit 2 --before 56`), not a `NEXT:` (listings print none). There is
     no empty `who`: the caller is always listed.
-S8. DECIDED, the lead, D1. The server row of `status` never says "last seen":
-    `alive, encrypted (checked 09:42)`, `NOT REACHABLE (last reached 3h ago)` or
-    `not checked`; MCP `server.state` is `alive`, `not_reachable` or
-    `not_checked`, with `server.checked_at` and `server.last_reached`; `LAST
+S8. DECIDED, the lead, D1; REPLACED in DRAFT12d by Z26. The server row of
+    `status` never says "last seen"; it is `reachable, encrypted`, `NOT
+    REACHABLE` or `not checked` with no address and no time (was `alive,
+    encrypted (checked 09:42)`, `NOT REACHABLE (last reached 3h ago)`); MCP
+    `server.state` is `reachable`, `not_reachable` or `not_checked`, with no
+    `server.checked_at` or `server.last_reached`; `LAST
     SEEN` means an endpoint's last mail activity in `mash who` only. The
     server is checked in every state that has an address.
 S9. DECIDED, the lead, D2. A certificate the trusted CA did not sign is mash
@@ -521,7 +524,7 @@ Z25. DECIDED, the lead (the planner's last check of the status views, DRAFT5d).
     is the last words of the first line on every over-limit row (Z24 (d)'s
     second-line wake is replaced: `3 waiting, OVER THE AGE LIMIT OF 1h (woke the
     session at 09:40)`, second line `oldest 1h 12m`; both passed: `OVER BOTH
-    LIMITS`). (c) The age screen has one fix: `the session is not taking its
+    LIMITS`, with `limit 15, age limit 1h; oldest 1h 12m` on the second line). (c) The age screen has one fix: `the session is not taking its
     mail: look at its terminal.` and a labelled `next:` with `mash inbox` and
     `mash read <number>`; the config line for the age limit is removed from the
     screen. (d) No status screen prints a server address for plain text:
@@ -529,6 +532,28 @@ Z25. DECIDED, the lead (the planner's last check of the status views, DRAFT5d).
     encrypted`, and `mash server status` shows the address; the stderr
     warnings of the connecting commands name no host and are unchanged. (e)
     Ages are R12's `45s`, `12m`, `1h 12m`, `2d` everywhere.
+Z26. DECIDED, the lead (DRAFT12d, a conformance pass with no new behaviour).
+    (a) Every `mash status` screen follows the status-views page: six rows
+    (`version`, `server`, `config`, `credentials`, `mailbox`, `session`), the
+    `server` row a state and nothing else, with no address, no time and no
+    second line; in `--detail` there are no server details either, only a
+    pointer line (`server details  run: mash server status`, the page's
+    wording). The address is on `mash server status` only, which the
+    status-views page specifies and this file does not repeat; messages that
+    connect and fail (install refusals, send errors) still name the server.
+    The MCP `status` tool follows: `server` is `{state, encrypted,
+    plaintext_override}` with `state` `reachable`, `not_reachable` or
+    `not_checked`, a `session` field, no `address`, `checked_at`,
+    `last_reached` or `answered_ms`. (b) The count row names the wake time, as
+    the page has it: `17 waiting, OVER THE LIMIT OF 15 (woke the session at
+    09:40)`; the explanation of "limit" is given once, in the warning: the
+    number that triggers a wake. (c) Over both limits: `22 waiting, OVER BOTH
+    LIMITS (woke the session at 09:40)` and the second line names both,
+    `limit 15, age limit 1h; oldest 1h 12m`. (d) A differing `MASH_SERVER` or
+    `MASH_CA` is `not checked` (the page's word; DRAFT12 said `mail does NOT
+    work`), and the unreachable fix points to `mash server status` instead of
+    telling the person to check an address. S8 is replaced; the 12-minute
+    `oldest` line stays in `--detail` only.
 
 ## 8. Behaviour changes the contract must decide
 
@@ -569,7 +594,7 @@ Z25. DECIDED, the lead (the planner's last check of the status views, DRAFT5d).
   `NEXT:`; the label `next:` is gone.
 - Plain-text warning: `warning: MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set;
   ...` once, on stderr, in every command that connects whenever the variable is
-  set; in the server row of `status`.
+  set; in the `warning:` of `status` (no address).
 - Secrets (INV-003, R16): `--key` and `--token` take file names or `-`;
   a pasted token or key is refused unprinted; every secret file is created
   exclusively, mode 600, without following links, by atomic rename; an
@@ -597,8 +622,9 @@ missing one is exit 2, before anything is read),
   file and names the file to move aside. mashctl prints the three values for
   the operator. There is no trust record, no generation, no `mash trust reset`,
   no `--replace`.
-- `mash status`: the server row says when mash checked or last reached the
-  server (no "last seen"); the mailbox row is new on every screen; `--detail`
+- `mash status`: the server row is a state (`reachable, encrypted`, `NOT
+  REACHABLE`, `not checked`) with no address and no time (no "last seen");
+  a sixth row, `session`; the mailbox row is new on every screen; `--detail`
   shows six rows that are the same in every state (config file, the CA as its
   own row, credentials file, endpoint, how it was chosen, mailbox limit); new
   screens for no endpoint installed, a credentials file that is not private
@@ -675,11 +701,23 @@ acknowledgement).
 
 ## 9. Checks run
 
-Width (re-measured for DRAFT12, contract revision 26 final). A script (`width.py`, run
+DRAFT12d: every `mash status` block was re-read against the status-views page's
+section 4.1 (rows, forms and reasons); no block carries `tls://`, a host and
+port or `checked 09:42` any longer, and a search of the targets for `alive`,
+`last reached`, `checked_at`, `answered_ms` and `server.address` finds nothing
+in a status screen or in the `status` tool. The measurements below are those of
+DRAFT12d.
+
+Width (re-measured for DRAFT12d, contract revision 26 final). A script (`width.py`, run
 over the file, kept outside the repo) walks the file, tracks the fenced blocks
-and keeps every line over 80 columns. Result for this file: 161 fenced blocks
+and keeps every line over 80 columns. Result for this file: 167 fenced blocks
 (every mockup, Before block and JSON example and the `adopt-from` placeholder),
-140 of them chosen by a `packet:` marker (83 distinct keys; DRAFT12 removes one
+144 of them chosen by a `packet:` marker (85 distinct keys; DRAFT12d adds and removes
+no block and no key, and changes the text of 25 keys (the `status-*` blocks,
+but `status-unknown-option`, and `trust`) and of the `status` tool's five JSON
+examples (the six rows, no address); the 31 lines over 80 columns are the same
+exempt command lines as before, and no status screen's printed text is over 80;
+DRAFT12 removed one
 block, the older token refusal, one of the `install-refuse` blocks, and no key
 (the key keeps its other blocks); DRAFT11 had 162, 141 and 83; DRAFT10 had 157,
 136 and 79: four keys are new, `install-check-writable`, `install-check-symlink`,

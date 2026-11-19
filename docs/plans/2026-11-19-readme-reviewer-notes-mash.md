@@ -5,11 +5,15 @@ Not README text. These notes go with
 `docs/plans/2026-11-19-readme-day2-plain-mash.md` (Day 2). The two pages carry no
 notes section and no internal marks: everything a reviewer needs is here.
 
-Built on the targets DRAFT12 (`docs/plans/2026-11-19-cli-targets-mash.md`, contract
+Built on the targets DRAFT12d (`docs/plans/2026-11-19-cli-targets-mash.md`, contract
 revision 26) for the ruled scope (Randy's decision 264). Regenerated after DRAFT12 (contract revision 26, still final; the lead's rulings of 11:17Z: the quick start is the Debian or Ubuntu path the helper supports, with no other platform described; one wording for a server that refuses the key and token, which this page does not print; the page says why the pasted install refuses a folder that others can write to or a link). After DRAFT11 (contract revision 26 final; the lead's rulings of 11:08Z: the pasted install refuses a destination folder, or a folder above it, that is a link or that other users can write, and prints the refusal; `mash endpoint status` has no mailbox column; the answer `no` keeps the `error:` label; the refusals for a server that refuses and for one that does not answer are written). Earlier, after DRAFT10 (contract revisions
 18 to 26: revisions 22 to 26 appeared while the regeneration ran and were applied): every install takes `--account <key>` (the operator's account key, copied whole) and the first install confirms three values before it writes anything; the
 fingerprint is in groups of eight separated by spaces; the count of the mailbox row is unacknowledged mail and
-reading acknowledges. The lead's count of what is
+reading acknowledges. DRAFT12d is a conformance pass: every `mash status` screen on the two pages
+now has six rows (a `session` row is added), a server row that says only whether
+the server is reachable and no address (`mash server status` shows it), and the
+mailbox-over screen names the time mash woke the session. No steps or commands
+changed. The lead's count of what is
 counted is `readme-step-count.md` (scratchpad), regenerated with the pages by
 `p2/plain-gen.py`, `p2/count-report.py` and this file's `p2/notes-gen.py`.
 
@@ -18,7 +22,7 @@ counted is `readme-step-count.md` (scratchpad), regenerated with the pages by
 | | lines | prose and headings | inside fenced blocks and markers | widest printed block | widest typed block |
 |---|---|---|---|---|---|
 | quick start | 631 | 333 | 298 | 87 columns | 88 columns |
-| Day 2 | 392 | 199 | 193 | 87 columns | 76 columns |
+| Day 2 | 398 | 199 | 199 | 87 columns | 76 columns |
 
 The quick start is 26 pastes, 77 lines and 10 other actions for the whole
 page; the first mail is sent after 11 pastes (52 lines) with the
