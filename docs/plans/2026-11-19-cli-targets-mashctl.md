@@ -1,9 +1,42 @@
-# mashctl target outputs (0.5.6) - DRAFT18
+# mashctl target outputs (0.5.6) - DRAFT19
 
 Status: design mockups, not code. Nothing here was run. Written to the maintainer's
 feedback on the v0.5.5 video and the CLI standard's rules (version 1.2.5);
 BEFORE blocks are excerpts of
 docs/plans/2026-11-19-cli-output-catalog-mashctl.md (v0.5.5 tag).
+DRAFT19 applies the maintainer's scope ruling for 0.5.6 (decision 264; contract
+revision 15). The freeze lifts for that scope only (decided; see "Changes in
+DRAFT19", the table "Cut by decision 264" at the end of this file, and
+`mashctl-dispositions.md`, section 8):
+
+E1. Cut from the targets: the retire-keys handling and the refusal screens
+    after it; the `--creds-out` generation note (the flag itself stays);
+    the trust record (`trust.json`, `mash trust reset`, `replace`, `repair`)
+    and every check that used it, so install refuses on any difference and
+    says which file to move aside (0.5.5's rule); and every typed
+    confirmation except on `endpoint delete`, `deprovision`, `--delete-creds`
+    and a single `endpoint reissue`. A bulk reissue (`--all`, `--changed`)
+    asks for `--yes` again [confirm].
+E2. `mashctl adopt --from <dir>` in its simplest true form: it checks the
+    folder, the signatures and the server's certificate, copies what mashctl
+    needs, makes the shared storage, and says `No fingerprint asked: the
+    folder is yours.` The refusal block that needed a trust record is gone.
+    The long-flag form for a hand-managed server stays, with no typed
+    fingerprint [confirm].
+E3. `endpoint create --public-key` prints the server address and the CA
+    fingerprint for the operator to send apart from the token; `credential
+    install` shows both and nothing is typed. `endpoint create --make-key
+    --creds-out` shows no fingerprint and says why in one line.
+E4. The plain-text override is `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1`
+    (environment only). The old name is gone from every AFTER block; BEFORE
+    blocks and history keep it.
+E5. The scope list and the dispositions file record the ruling (section 8 of
+    `mashctl-dispositions.md`).
+
+Text below this block that describes DRAFT18 and earlier drafts is history.
+Where it names a cut item, the live text (the conventions, the AFTER blocks,
+the Choices and the Facts) has the DRAFT19 form.
+
 DRAFT18 applies four text fixes decided by the maintainer during the 0.5.6
 freeze (no new command, file format or protocol; see "Changes in DRAFT18"; the
 items are in `mashctl-dispositions.md`, section 7):
@@ -12,16 +45,16 @@ D1. `mashctl endpoint delete` never renames or removes the credentials file on
     this machine. When the file is here the output says `Its credentials file
     here was left as it was; mash status will report it as DELETED.`; when it
     is elsewhere there is nothing to say about it. `--delete-creds` stays,
-    with its typed confirmation. [confirm with core: the status wording and
-    exit code, DELETED and exit 4.]
+    with its typed confirmation (kept in DRAFT19). [confirm with core: the
+    status wording and exit code, DELETED and exit 4.]
 D2. No `NEXT:` after any removal (delete in every form, `deprovision`,
     `--delete-creds`). The proof may stay as a plain sentence that names what
     `mash status` prints. [confirm with core.]
 D3. Exit 4 stays for "no terminal" and also covers "the server refuses the
     credentials"; the error line says which.
 D4. `adopt`'s closing text no longer mentions `mash trust replace`. The `kept
-    trust.json` lines are marked `[HELD until the scope ruling: trust
-    record]` above their blocks and kept.
+    trust.json` lines were marked held (DRAFT19, E1c: removed with the trust
+    record).
 
 DRAFT17 applies twelve decisions of the maintainer on contract revision 11
 and answers the check of reviewer packet DRAFT5 (decided; see "Changes in
@@ -211,7 +244,7 @@ DRAFT10's six directions stay in force:
    person's own files).
 6. Names: `ADDRESS` replaces `PATH`; `Adopted`; one server form.
 
-Earlier drafts are described under "Changes in DRAFT2" to "Changes in DRAFT16".
+Earlier drafts are described under "Changes in DRAFT2" to "Changes in DRAFT19".
 
 Part 1 is the first-run journey, in the order a new user meets it. Part 2 is every
 other mashctl output. Each part ends with its own "Choices to confirm" and "Facts
@@ -219,7 +252,7 @@ to confirm".
 
 ---
 
-# Part 1: the first-run journey (target output for mashctl 0.5.6), DRAFT18
+# Part 1: the first-run journey (target output for mashctl 0.5.6), DRAFT19
 
 Design document. Nothing here was run. BEFORE blocks are excerpts of
 `docs/plans/2026-11-19-cli-output-catalog-mashctl.md` (v0.5.5), trimmed to the
@@ -248,8 +281,8 @@ repeat them.
   | 0 | success | done, planned (`--dry-run`), nothing to change, nothing wrong |
   | 1 | failure | a refusal; a health command that reports `PROBLEM`; a plain URL refused for TLS |
   | 2 | wrong usage | unknown command or flag, missing or bad argument, a removed command |
-  | 3 | cancelled | the person typed a wrong confirmation (the command stops, nothing changes) |
-  | 4 | not authorized | no person at a terminal for a confirmation (`error: a person must run this at a terminal.`); no administrator credentials; credentials the server refuses (`error: the server refuses these credentials.`, `NOT READY`) |
+  | 3 | cancelled | the person typed a wrong confirmation on a delete, a deprovision, `--delete-creds` or a single reissue (the command stops, nothing changes) |
+  | 4 | not authorized | no person at a terminal for a delete, a deprovision, `--delete-creds` or a single reissue (`error: a person must run this at a terminal.`); no administrator credentials; credentials the server refuses (`error: the server refuses these credentials.`, `NOT READY`) |
   | 5 | partial | part of a bulk command was done |
   | 6 | server unreachable | the server could not be reached or did not answer (`NOT REACHABLE`, `INCOMPLETE`, "only 1 of 2 servers answered"); the same in mash and mashctl |
 
@@ -291,8 +324,7 @@ repeat them.
   names the config folder or the server in a success output. A command that
   writes
   one file says so in one line. A file line shows the path only when the
-  person will need it: the credentials, the token, the CA file, `config.json`,
-  the trust record.
+  person will need it: the credentials, the token, the CA file, `config.json`.
   `mashctl adopt` says in one line how many files it copied and lists them
   only under `--detail` (DRAFT17, C3; CLI rule 24).
   A `copied` line names the file, the copy and the copy's mode. A `copied` and
@@ -304,26 +336,21 @@ repeat them.
   only read is not named in its success output, with one exception (DRAFT14,
   Z9): the hand-off, and the `NEXT:` that tells the person to copy files to
   another machine, name the files to copy (the token, `ca.pem`).
-- Typed confirmation (contract INV-004; CLI standard rule 15). Rule 15 says a
-  command prompts only when standard input is a terminal and, without one, it
-  fails. INV-004 applies it to every change a person must own, without the
-  `--yes` flag that rule 15 allows: no flag and no environment variable stands
-  in for the person. The change of trust is a new server or a new certificate
-  authority. The destruction is `endpoint delete`, any single `endpoint
-  reissue`, a bulk reissue, the replacement of installed credentials and
-  `mash trust reset`. No flag skips a destructive confirmation, including
-  `--delete-creds` (DRAFT17, C1). Before it acts the command says what will be
-  lost. A line that ends in a colon and
-  asks for typing is a prompt; the mockups show what the person types after the
-  colon. The person types the address (or, for a bulk reissue, the count; for a
-  trust change, the fingerprint). One narrow exception (DRAFT14, Z5; DRAFT15,
-  A1; Choices 62 and 65): `adopt --from <dir>` for a folder the person owns
-  on this machine asks for no fingerprint, because the trust comes from a
-  folder the same person owns, and it says so; it never authenticates the
-  server. A wrong answer exits
-  3 (cancelled). With no
-  terminal the command exits 4 with `error:` and `fix:`. `--dry-run` prints the
-  same text of what will be lost and asks nothing.
+- Typed confirmation (contract INV-004; CLI standard rule 15; decision 264).
+  Rule 15 says a command prompts only when standard input is a terminal and,
+  without one, it fails. INV-004 keeps typed confirmation for destruction
+  only: `endpoint delete`, `deprovision`, `--delete-creds` and a single
+  `endpoint reissue`. The person types the address. For these four no flag
+  and no environment variable stands in for the person: there is no `--yes`.
+  Before it acts the command says what will be lost. A line that ends in a
+  colon and asks for typing is a prompt; the mockups show what the person
+  types after the colon. A wrong answer exits 3 (cancelled). With no
+  terminal the command exits 4 with `error:` and `fix:`. `--dry-run` prints
+  the same text of what will be lost and asks nothing. Nothing else is
+  typed: a bulk reissue (`--all`, `--changed`) takes `--yes`, as the earlier
+  release did [confirm]; a new server or a new certificate authority is shown to the
+  person, not typed (the fingerprint rule below); `adopt` of the person's own
+  folder asks nothing and says so.
 - Fingerprint form. A fingerprint a mockup shows is the 64 hex digits of the
   SHA-256 of the CA certificate (the value that `openssl x509 -in ca.pem
   -noout -fingerprint -sha256` prints, and the setup helper prints; not the
@@ -331,55 +358,54 @@ repeat them.
   single spaces between the groups (for example `3f9a41c2 7b0d9e55 a1c4e08b
   2d77f3a9 5e1b6c40 98aa0d12 c3f5e7b6 4a21d90c`). It is never separated by
   colons and never cut short with an ellipsis, so a person can copy it whole.
-  A person may type it with or without `sha256:`, with colons or with spaces,
-  in any case; the prompt says so in one line. The setup helper prints this
-  form behind a `sha256:` prefix, wrapped over two lines at 80 columns; the
-  prefix is accepted when typed.
-- A value the person must type is never printed first. `mash credential
-  install` (and the long form of `adopt`) asks the
-  person to type the CA fingerprint; neither prints it before or after, and
-  they say only `matches` or `does not match` (contract revision 5, REQ-003:
-  "mash never prints the value it then asks the person to type, and says only
-  whether it matched"). The fingerprint is printed only where it is handed
-  over: by the setup helper, and by `endpoint create --public-key` and
-  `--creds-out`, whose output is for the operator, who passes it on by a route
-  other than the token and the files. A fingerprint proves nothing when the CA
-  file came from the same screen or the same folder (the person would be
-  comparing the file with itself), so `adopt` of the person's own folder asks
-  none. It proves something when it arrives out of band, by a route other than
-  the files, so every command that receives a CA file from another machine
-  asks for it and cannot skip the question.
+  The setup helper prints this form behind a `sha256:` prefix, wrapped over
+  two lines at 80 columns.
+- A fingerprint is shown and compared, never typed (contract REQ-003,
+  decision 264). Nothing in mashctl and nothing in `mash credential install`
+  asks the person to type one. `endpoint create --public-key` prints, for
+  the operator, the server address and the CA fingerprint, each labelled, to
+  send by a route other than the token and the files. `mash credential
+  install` shows the person the address and the fingerprint and says in one
+  line to compare them with what the operator sent; before it writes, it also
+  checks that the server presents a certificate from that CA with the
+  matching host name. A fingerprint proves something only when it arrives by
+  a route other than the files, so the hand-off says to send them apart. It
+  proves nothing when the CA file came from the same screen or the same
+  folder (the person would be comparing the file with itself), so `adopt` of
+  the person's own folder shows none and says so in one line, and `endpoint
+  create --make-key --creds-out` shows none and says so in one line.
 - A token carries no server address. A person who hands a token (or a
   credentials file) to another machine also hands over the server's address,
   the CA file and the CA fingerprint; the address and the fingerprint go by a
   route other than the files. The address must be reachable from that
   machine: `localhost` and `127.0.0.1` reach only the machine that runs
-  mashctl, so no tool prints mashctl's own address as the address for another
-  machine. The hand-off prints `<server address>` and says what to put there.
-  The install on that machine asks for the address (or takes `--server
-  <address>`), and for the typed fingerprint: a machine with no settings always
-  does. A machine that already has a trust record checks the token's account, the
-  server and the CA against it, and refuses a token that does not match
-  (DRAFT15, A2; DRAFT14, Z4). To use another server the person runs `mash
-  trust reset` on that machine, which removes its endpoint configuration,
-  trust record and credentials, and installs again (DRAFT17, C2). The install
-  reads `ca.pem` from the current folder, or the file `--ca` names (C10).
+  mashctl, so a hand-off whose own address is one of those prints `<server
+  address>` and says what to put there. The install takes the address with
+  `--server <address>` and the CA file with `--ca <file>` (the contract
+  requires `--ca`; [confirm with core: the flag for the address]), shows the
+  address and the fingerprint, and never changes a server, CA or credentials
+  file that is already there: on any difference it refuses, touches nothing
+  and says which file to move aside (the earlier release's rule, kept). To use another
+  server a person moves those files aside and installs again. There is no
+  trust record.
 - A folder with live keys is never called removable (DRAFT17, C1). The setup
-  folder holds the CA key and the signing keys until the setup script's
-  `--retire-keys` step takes them off. No output tells a person to take away
-  that folder, or its `export` subfolder; adopt says `mashctl keeps its own
-  copies.` and points to that step.
+  folder holds the CA key and the signing keys. No mashctl output tells a
+  person to take away that folder, or its `export` subfolder, or names the
+  helper's step that retires its keys; adopt says `mashctl keeps its own
+  copies.` The helper prints its own closing text.
 - Check rows (DRAFT17, C12). A check row is the check's name, the status word
   and the text. When `ok` and `FAILED` rows share a block, the status word is
   padded to six columns so the text lines up. A default failure prints only the
   failing row; `--detail` prints every row.
-- Plain-text warning (contract REQ-010). While `MASH_INSECURE_PLAINTEXT` is
-  set, every command that connects prints this first line on stderr, before
-  any result (shown in full once, in E2, on `endpoint list`):
+- Plain-text warning (contract REQ-010; decision 264). While
+  `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION` is set, every command that connects
+  prints this first line on stderr, before any result (shown in full once, in
+  E2, on `endpoint list`):
 
   ```text
-  warning: plain-text connection to myserver (MASH_INSECURE_PLAINTEXT is set):
-           anyone on the network can read mail and obtain signatures
+  warning: encryption to myserver is switched off
+           (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set): anyone on the network
+           can read mail and obtain signatures
   ```
 - Colour. On a terminal the words `NEXT:`, `error:` and `warning:` and the
   verdict words (`OK`, `PROBLEM`, `NOT REACHABLE`) are coloured, in colours
@@ -399,22 +425,24 @@ repeat them.
   both) and each ignores the keys it does not own. The keys both read:
   `server`, the address, written `tls://host:port` (environment variable
   MASH_SERVER); `ca`, the path of the CA file (MASH_CA); and `endpoint`
-  (MASH_ENDPOINT). Also MASH_CONFIG_DIR, and MASH_INSECURE_PLAINTEXT, which is
-  environment only and is never written to a file. mash reads and writes no
+  (MASH_ENDPOINT). Also MASH_CONFIG_DIR, and
+  MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION, which is environment only and is
+  never written to a file (the maintainer renamed it so the name says what it
+  does; Choice 70). mash reads and writes no
   `owner` and no `account`. mashctl's own keys, which mash ignores, are
   `owner`, `account`, `admin_credentials`, `system_credentials` and `keys`,
   with the variables MASH_ADMIN_CREDENTIALS, MASH_SYSTEM_CREDENTIALS and
   MASH_KEYS_DIR. mashctl has no variable for the owner: the address a command
   takes carries it, and `owner` in the config names it for the commands that
-  take no address. The trust record, `trust.json` in the same
-  folder (mode 600), is mash's (REQ-013; Choice 61): it binds the account's
-  public key, the server address and the CA fingerprint the person confirmed.
+  take no address. There is no trust record (REQ-013 is removed).
   One name for the CA in both tools, in every help text and refusal: the flag
   `--ca <file>`, the variable `MASH_CA`, the key `ca`. The earlier names of the
   server and CA settings appear only in BEFORE blocks and in history.
 - Width. No line a person reads is longer than 80 columns, help included (CLI
   standard rule 28). A command a person is told to run stays whole on one line
-  and is kept short. The one exception is `--wide`, which exists to show whole
+  and is kept short; the install with `--ca` and `--server` passes 78
+  columns and is kept whole all the same [confirm]. The one exception to the
+  80 columns is `--wide`, which exists to show whole
   values: a row stays on one line and may pass 80 columns (contract revision
   4). `--detail` stays within 80.
 - Versions. A mockup never prints a version number; it prints `<version>`.
@@ -566,8 +594,9 @@ The helper's block is quoted from the closing output of the skill's helper
 (the `Files` list, the part headed "What you hold", and the sentence and
 command that adopt the server); it is not mashctl output, and it is the only
 block here that uses the helper's own words (operator seed, credentials). The
-`CA fingerprint` line is the helper's own: the install on another machine asks
-for it (and so does the long form of `adopt`). mashctl's blocks follow, and
+`CA fingerprint` line is the helper's own: the operator sends it to the person
+who installs on another machine, who compares it with what the install shows.
+mashctl's blocks follow, and
 each explains in one line
 the terms it first uses: the operator key (the root key of the server), the
 system credentials (they let mashctl look up accounts) and the CA (it signs
@@ -662,14 +691,13 @@ key `account.nk`, the system credentials `sys.creds` and the admin credentials
 `mashadmin.creds`. It copies what mashctl needs into mashctl's own folder
 (`~/.config/mash`, mode 700) and says in one line how many files it copied
 (`--detail` lists each, with its mode). mashctl keeps its own copies. The
-setup folder stays: it holds the CA key and the signing keys until
-the setup script's `--retire-keys` step. It then prepares the server for mash
-(what `mashctl init` did), so no second command stands between `adopt` and
-the first endpoint. The folder is the person's own, so `adopt` asks for no
-fingerprint and says plainly, in one line, that it copies files from a folder
-the same person owns and does not authenticate the server. A fingerprint is
-typed where a CA file arrives from another machine (the install on
-bobs-laptop, below, and the long form of `adopt`). Before it copies anything
+setup folder stays. It then prepares the server for mash (what `mashctl init`
+did), so no second command stands between `adopt` and the first endpoint. The
+folder is the person's own, so `adopt` asks for no fingerprint and says so in
+one line: `No fingerprint asked: the folder is yours.` On another machine the
+install shows the server address and the CA fingerprint, and the person
+compares them with what the operator sent (bobs-laptop, below); nothing is
+typed. Before it copies anything
 `adopt` makes four named checks, shown under `--detail` and named in the
 failure: `folder` (the folder is yours, every folder above it is yours or
 root's and not writable by others, no file in it is a link, and each file is
@@ -681,12 +709,7 @@ It copies only files it has checked, and refuses, at the check by name, a
 file that is replaced or changed while it is copied (section 1b, "adopt
 --from: refusals"). Under `--detail` it says that the folder is the only
 source of the server's address. It writes mashctl's own settings in
-`config.json` and no trust record: `trust.json` belongs to mash, which makes
-it (the first install of an endpoint, or `endpoint create --make-key` on this
-machine). Retiring the setup's keys is the helper's own step,
-`--retire-keys`; it comes last (the skill runs it after alice and bob have
-mailed each other) and a person runs it, not an agent, so adopt only points
-to it.
+`config.json`; there is no trust record in 0.5.6.
 
 **AFTER, on myserver: adopt**
 
@@ -694,7 +717,7 @@ to it.
 $ mashctl adopt --from /home/alice/mash-nats
 
 Connected mashctl to the server. Copied 5 files to ~/.config/mash.
-This copies files from a folder you own; it does not authenticate the server.
+No fingerprint asked: the folder is yours.
 
 NEXT: on this machine, create an endpoint:
   mashctl endpoint create acme.<group>.<name> --make-key
@@ -702,8 +725,7 @@ NEXT: on this machine, create an endpoint:
 Or, for an endpoint on another machine, start there:
   mash key create --out <name>.key
 
-mashctl keeps its own copies. The signing keys stay in the setup folder until
-the setup script's --retire-keys step takes them off. See its closing output.
+mashctl keeps its own copies.
 ```
 
 The checks, the settings and the files are behind `--detail` (section 1b shows
@@ -766,48 +788,46 @@ The token does not carry the server's address. Give bob's machine these:
 
   files        ./acme.demo.bob.token
                ~/.config/mash/ca.pem
-  address      <server address>
 
-  fingerprint of ca.pem (eight groups of eight digits):
+Send these two another way than the files:
+
+  server address  tls://myserver:4222
+
+  CA fingerprint (eight groups of eight digits):
   3f9a41c2 7b0d9e55 a1c4e08b 2d77f3a9 5e1b6c40 98aa0d12 c3f5e7b6 4a21d90c
+
+The person installing compares both with what the install shows.
 
 The token holds no secret key, but it is a credential: keep it private and
 send it only to bob's machine.
 
-Send the files one way and the address and fingerprint another, so that the
-other machine can check ca.pem against something the files did not bring.
-Replace <server address> with the address that machine uses to reach this
-server. Do not use localhost or 127.0.0.1: only this machine can reach those.
+Send the address that bob's machine uses to reach this server.
+Do not use localhost or 127.0.0.1: only this machine can reach those.
 
-Put both files in the folder where bob runs the install. It reads ca.pem from
-the current folder.
+Put both files in the folder where bob runs the install.
 
 NEXT: copy both files to the folder bob runs this in, on his machine, and run:
-  mash credential install --key bob.key --token acme.demo.bob.token
+  mash credential install --key bob.key --token acme.demo.bob.token --ca ca.pem --server tls://myserver:4222
 ```
 
 **AFTER, on bobs-laptop: the install**
 
 ```text
-$ mash credential install --key bob.key --token acme.demo.bob.token
+$ mash credential install --key bob.key --token acme.demo.bob.token --ca ca.pem --server tls://myserver:4222
 
-The token does not say where the server is. Type the server address you
-were given: tls://myserver:4222
+Compare these with what the operator sent you, apart from the token:
 
-A certificate authority (CA) signs the server's certificate. mash will trust
-the CA in ca.pem for that server. Whoever holds the CA's key can pose as that
-server.
+  server address  tls://myserver:4222
 
-Type the fingerprint of ca.pem you were given (a sha256: prefix,
-colons, spaces and capitals are all accepted):
-3f9a41c2 7b0d9e55 a1c4e08b 2d77f3a9 5e1b6c40 98aa0d12 c3f5e7b6 4a21d90c
-Checked: ca.pem matches the fingerprint you typed.
+  CA fingerprint (eight groups of eight digits):
+  3f9a41c2 7b0d9e55 a1c4e08b 2d77f3a9 5e1b6c40 98aa0d12 c3f5e7b6 4a21d90c
+
+Checked: the server presents a certificate from ca.pem, and it names myserver.
 
 Installed credentials for acme.demo.bob.
 
   wrote   ~/.config/mash/acme.demo.bob.creds  (mode 600)
   wrote   ~/.config/mash/config.json          (server, CA)
-  wrote   ~/.config/mash/trust.json           (mode 600)
   copied  ca.pem to ~/.config/mash/ca.pem     (mode 644)
 
 NEXT: on this machine, check that bob can sign in. No settings are needed:
@@ -998,7 +1018,7 @@ What adopt does not do: it changes nothing on the server, except that --mint-adm
 $ mashctl adopt --from /home/alice/mash-nats
 
 Connected mashctl to the server. Copied 5 files to ~/.config/mash.
-This copies files from a folder you own; it does not authenticate the server.
+No fingerprint asked: the folder is yours.
 
 NEXT: on this machine, create an endpoint:
   mashctl endpoint create acme.<group>.<name> --make-key
@@ -1006,8 +1026,7 @@ NEXT: on this machine, create an endpoint:
 Or, for an endpoint on another machine, start there:
   mash key create --out <name>.key
 
-mashctl keeps its own copies. The signing keys stay in the setup folder until
-the setup script's --retire-keys step takes them off. See its closing output.
+mashctl keeps its own copies.
 ```
 
 **AFTER, `--detail`: the settings, the checks and the files**
@@ -1025,8 +1044,8 @@ A certificate authority (CA) signs the server's certificate. mashctl will
 trust the CA in ca.pem for that server. Whoever holds the CA's key can pose
 as that server.
 
-This copies files from a folder you own; it does not authenticate the server.
-The address above comes only from that folder.
+No fingerprint asked: the folder is yours. The address above comes only from
+that folder.
 
 Checking the folder first.
 
@@ -1081,8 +1100,7 @@ Prepared the server for mash.
     - the record of every token mash signs
     - the sessions that are running
 
-mashctl keeps its own copies. The signing keys stay in the setup folder until
-the setup script's --retire-keys step takes them off. See its closing output.
+mashctl keeps its own copies.
 
 NEXT: on this machine, create an endpoint:
   mashctl endpoint create acme.<group>.<name> --make-key
@@ -1092,10 +1110,9 @@ Or, for an endpoint on another machine, start there:
 ```
 
 The default screen is at most twelve lines. It keeps the one line that says
-this is a copy and not an authentication, and it names no server (CLI rule 24;
-contract REQ-001). The `retire` step is the setup script's own and a person
-runs it, so the screen points to the script's closing output and prints no
-command for it. In the `--detail` screen the `certificate` row is a
+no fingerprint was asked because the folder is the person's own, and it names
+no server (CLI rule 24; contract REQ-001). mashctl never mentions the
+helper's own closing steps. In the `--detail` screen the `certificate` row is a
 check made when mashctl connects, so it follows the files row; the `folder`
 and `credentials` rows are made before it connects.
 
@@ -1125,25 +1142,17 @@ connect to the server's account, so it finds a stopped server or a changed
 file, not a missing account.
 
 A folder that is not the person's own is not a second case that asks; it is
-refused (below, "adopt --from: refusals", case 6), because a folder another
-user owns or wrote could hold files that user chose. The typed fingerprint
-belongs to the long form of `adopt`, whose CA file came from whoever set the
-server up and so did travel. It prints no fingerprint, and says only whether
-what was typed matched:
+refused (below, "adopt --from: refusals", case 5), because a folder another
+user owns or wrote could hold files that user chose. The long form of `adopt`
+is for a hand-managed server, whose CA file came from whoever set the server
+up. It asks for no typed fingerprint, as in 0.5.5 [confirm]: the person who
+gives `--ca` has chosen that CA, and `adopt` checks that the server presents a
+certificate from it:
 
 ```text
 $ mashctl adopt --server tls://myserver:4222 --owner acme --account MASH \
     --ca ca.pem --operator-key operator.nk --account-key account.nk \
     --system-credentials sys.creds --make-admin
-
-A certificate authority (CA) signs the server's certificate. mashctl will
-trust the CA in ca.pem for that server. Whoever holds the CA's key can pose
-as that server.
-
-Type the fingerprint of ca.pem you were given (a sha256: prefix,
-colons, spaces and capitals are all accepted):
-3f9a41c2 7b0d9e55 a1c4e08b 2d77f3a9 5e1b6c40 98aa0d12 c3f5e7b6 4a21d90c
-Checked: ca.pem matches the fingerprint you typed.
 
 Connected mashctl to the server. Copied 4 files to ~/.config/mash, and made
 the admin credentials there.
@@ -1152,35 +1161,7 @@ NEXT: on this machine, create an endpoint:
   mashctl endpoint create acme.<group>.<name> --make-key
 ```
 
-A script, or a person with no terminal, cannot answer that question; a wrong
-answer prints only that it does not match, never the fingerprint it wanted:
-
-```text
-$ mashctl adopt --server tls://myserver:4222 --owner acme --account MASH \
-    --ca ca.pem --operator-key operator.nk --account-key account.nk \
-    --system-credentials sys.creds --make-admin   (no terminal)
-[exit 4]
-error: this makes mash trust a certificate authority, and a person must
-       confirm it at a terminal.
-fix: run the same command in a terminal and type the fingerprint when asked:
-  mashctl adopt --server tls://myserver:4222 --owner acme --account MASH \
-    --ca ca.pem --operator-key operator.nk --account-key account.nk \
-    --system-credentials sys.creds --make-admin
-
-$ mashctl adopt --server tls://myserver:4222 --owner acme --account MASH \
-    --ca ca.pem --operator-key operator.nk --account-key account.nk \
-    --system-credentials sys.creds --make-admin
-...
-Type the fingerprint of ca.pem you were given (a sha256: prefix,
-colons, spaces and capitals are all accepted):
-0a1b2c3d 4e5f6071 8293a4b5 c6d7e8f9 0a1b2c3d 4e5f6071 8293a4b5 c6d7e8f9
-[exit 3]
-error: ca.pem does not match the fingerprint you typed. Nothing was changed.
-fix: get the fingerprint from whoever gave you the CA file, then run it again:
-  mashctl adopt --server tls://myserver:4222 --owner acme --account MASH \
-    --ca ca.pem --operator-key operator.nk --account-key account.nk \
-    --system-credentials sys.creds --make-admin
-```
+A script, or a person with no terminal, can run it: nothing is typed.
 
 A folder the person owns, run from a script with no terminal, asks nothing and
 still makes every check above (Choice 62): the person owns the folder, so there
@@ -1217,10 +1198,8 @@ fix: make the file writable by you only:
   chmod go-w /home/alice/mash-nats/mash-setup.json
 ```
 
-After the setup script's `--retire-keys` step the folder no longer holds
-`export/` (that step removes it, with `ca.key` and `nsc/`), so `adopt --from`
-on it refuses with the second block above. That is expected: mashctl already
-keeps its own copies, and the step runs only after `adopt` has succeeded.
+When a file the folder should hold is missing, `adopt --from` refuses with the
+second block above and changes nothing.
 
 `--from` and the long flags (`--server`, `--ca`, `--owner`, `--account`,
 `--operator-key`, `--account-key`, `--system-credentials`,
@@ -1238,9 +1217,9 @@ fix: leave out --server:
 The long form is kept for a hand-managed server, with every file given.
 `--account <name>` is required: there is no default, because mash cannot know
 the account's name (whoever runs the NATS server has it). Its CA file comes
-from whoever set the server up, so the long form always asks for the
-fingerprint as above, then checks, copies and prepares the server as the first
-form does, from the server checks on (it has no folder rows and says nothing
+from whoever set the server up, so the long form checks that the server
+presents a certificate from it, then copies and prepares the server as the
+first form does, from the server checks on (it has no folder rows and says nothing
 about a folder), and writes mashctl's settings the same way. Its default
 result is the short one; `--detail` lists the checks and the files:
 
@@ -1251,7 +1230,7 @@ $ mashctl adopt --server tls://myserver:4222 --owner acme --account MASH \
     --account-key /home/alice/mash-nats/export/account.nk \
     --system-credentials /home/alice/mash-nats/export/sys.creds \
     --admin-credentials /home/alice/mash-nats/export/mashadmin.creds
-(the CA prompt, then the short result, print as above)
+(the short result prints as above)
 ```
 
 When the address is `nats://` (plain text) and it came from `--server`:
@@ -1265,10 +1244,11 @@ error: nats://myserver:4222 is not encrypted, and mash only connects over TLS.
 fix: give --server a tls:// address. Your operator can give you the
      certificate file, which you pass as --ca <file> (or set MASH_CA).
 
-Or, for a test server only, run the command with MASH_INSECURE_PLAINTEXT=1:
-  MASH_INSECURE_PLAINTEXT=1 mashctl adopt --server nats://myserver:4222 \
-    --owner acme --account MASH --operator-key operator.nk \
-    --account-key account.nk --system-credentials sys.creds --make-admin
+Or, for a test server only, set MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1:
+  MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1 \
+    mashctl adopt --server nats://myserver:4222 --owner acme --account MASH \
+    --operator-key operator.nk --account-key account.nk \
+    --system-credentials sys.creds --make-admin
 
 With it, credentials and mail cross the connection unencrypted.
 ```
@@ -1285,13 +1265,14 @@ adopt reports its checks one line at a time as it runs, so the verdict cannot
 come before them. The result block that follows the checks opens with the
 verdict, `OK` (or `error:` after a `FAILED` line); the verdict-first rule
 (R-verdict) holds for `mashctl status`, which has all its answers before it
-prints. A prompt that asks for typing comes before any verdict.
+prints. A prompt that asks for typing (delete, deprovision, a single reissue) comes
+before any verdict.
 
 #### adopt --from: refusals, and the rerun that changes nothing
 
 `adopt --from` trusts a folder because the same person owns it, so it checks
-four things before it copies anything and refuses, with nothing changed, at
-the check that fails, named in plain words (contract revision 11, REQ-011 ii):
+these things before it copies anything and refuses, with nothing changed, at
+the check that fails, named in plain words (contract REQ-011 ii):
 
 - `folder`: the folder is yours, and every folder above it is yours or root's
   and not writable by others; no file in it is a link; each file is yours and
@@ -1304,16 +1285,13 @@ the check that fails, named in plain words (contract revision 11, REQ-011 ii):
   key signed the account;
 - only files it checked are copied: a file replaced or changed during the
   copy is refused at its own named check, each copy is compared with its
-  source before it is kept, and the copy is kept whole or removed;
-- a folder whose CA or account differ from the settings mashctl already has
-  is refused. The trust record belongs to mash, not to `adopt`.
+  source before it is kept, and the copy is kept whole or removed.
 
 Every refusal is an `error:` with a `fix:` and exits 1 (refused, in the one
 table of exit codes). Each shows only the check that failed (`--detail` shows
-every row, with the status word padded so the rows line up). Seven blocks
-follow, one for each test the contract names: a link, a writable parent, mixed
-files, a swap during the copy, a rerun with changed contents, a folder another
-user prepared, and the rerun that changes nothing. The swap test replaces a
+every row, with the status word padded so the rows line up). Six blocks
+follow: a link, a writable parent, mixed files, a swap during the copy, a
+folder another user prepared, and the rerun that changes nothing. The swap test replaces a
 file after mashctl has opened it and before the copy is kept, and expects one
 of the two refusals shown. A folder that is fully consistent but was prepared
 by another process of the same user is accepted: that is the custody residual,
@@ -1442,27 +1420,6 @@ fix: run it again when nothing else is writing to that folder:
   mashctl adopt --from /home/alice/mash-nats
 ```
 
-**AFTER, a rerun with different contents**
-
-The folder now holds a different CA and account than the ones mashctl is
-already set up with. `adopt` does not touch mash's trust record, and it does not
-quietly replace mashctl's own settings either; it stops
-[confirm with core: how mashctl's own server and CA settings are replaced; the
-fix below points at the folder mashctl already uses]:
-
-```text
-$ mashctl adopt --from /home/alice/mash-nats
-[exit 1]
-Checking the folder first.
-
-  settings  FAILED  This folder's CA and account are not the ones mashctl uses.
-
-error: the CA and the account in this folder differ from the ones mashctl is
-       already set up with. Nothing was changed.
-fix: use the folder of the server mashctl already uses, then run it again:
-  mashctl adopt --from <folder>
-```
-
 **AFTER, a folder another user prepared**
 
 ```text
@@ -1495,7 +1452,7 @@ endpoints made on the old server stop matching it.
 
 **AFTER, the same owner reruns with identical contents**
 
-This block is not a refusal: it exits 0. It is here because it is the seventh
+This block is not a refusal: it exits 0. It is here because it is the last
 test of the contract, a rerun that changes nothing.
 
 ```text
@@ -1504,7 +1461,7 @@ $ mashctl adopt --from /home/alice/mash-nats
 
 Connected mashctl to the server. Nothing was changed: the 5 files in
 ~/.config/mash are the same.
-This copies files from a folder you own; it does not authenticate the server.
+No fingerprint asked: the folder is yours.
 
 NEXT: on this machine, create an endpoint:
   mashctl endpoint create acme.<group>.<name> --make-key
@@ -1532,6 +1489,16 @@ NEXT: on this machine, create an endpoint:
 
 **What changed and why**
 
+- DRAFT19 (E1a, E1c, E1d, E2; decision 264): the default and `--detail`
+  screens say `No fingerprint asked: the folder is yours.` in place of the
+  "does not authenticate" line; they no longer mention the helper's retire
+  step (mashctl says only `mashctl keeps its own copies.`). The long form has
+  no typed fingerprint (so the prompt, the no-terminal block and the mismatch
+  block are gone) [confirm]. The refusal block for a rerun with changed
+  contents (the trust record's case) is gone, and with it the bullet that a
+  folder whose CA or account differ is refused; six blocks remain. The note
+  about `adopt --from` after the retire step is replaced by the plain case of
+  a missing file. The plain-text `Or` uses the renamed variable.
 - DRAFT17 (C1, C3 to C8; contract revision 11, REQ-011 ii; the check of packet
   DRAFT5): the default result is short and names no server; the settings, the
   checks and the files are under `--detail`. The closing line that said the
@@ -1821,7 +1788,6 @@ prepared:            yes
 admin credentials:   ~/.config/mash/server/mashadmin.creds
 system credentials:  ~/.config/mash/server/sys.creds
 keys:                ~/.config/mash/keys
-trust record:        ~/.config/mash/trust.json (mash's, made on this machine)
 
 who signed what (operator key made the account; account key signs tokens):
 operator key:        OAQCFPM5BOL22AGI6O76QGKIQHRLYN7DZZEATDRWD6QTEC5462SVCBJU
@@ -2030,24 +1996,26 @@ The token does not carry the server's address. Give bob's machine these:
 
   files        ./acme.demo.bob.token
                ~/.config/mash/ca.pem
-  address      <server address>
 
-  fingerprint of ca.pem (eight groups of eight digits):
+Send these two another way than the files:
+
+  server address  tls://myserver:4222
+
+  CA fingerprint (eight groups of eight digits):
   3f9a41c2 7b0d9e55 a1c4e08b 2d77f3a9 5e1b6c40 98aa0d12 c3f5e7b6 4a21d90c
+
+The person installing compares both with what the install shows.
 
 The token holds no secret key, but it is a credential: keep it private and
 send it only to bob's machine.
 
-Send the files one way and the address and fingerprint another, so that the
-other machine can check ca.pem against something the files did not bring.
-Replace <server address> with the address that machine uses to reach this
-server. Do not use localhost or 127.0.0.1: only this machine can reach those.
+Send the address that bob's machine uses to reach this server.
+Do not use localhost or 127.0.0.1: only this machine can reach those.
 
-Put both files in the folder where bob runs the install. It reads ca.pem from
-the current folder.
+Put both files in the folder where bob runs the install.
 
 NEXT: copy both files to the folder bob runs this in, on his machine, and run:
-  mash credential install --key bob.key --token acme.demo.bob.token
+  mash credential install --key bob.key --token acme.demo.bob.token --ca ca.pem --server tls://myserver:4222
 ```
 
 **What changed and why**
@@ -2108,38 +2076,34 @@ Step 3 of 3: install the credentials (on the agent's machine)
 This joins bob's private key and the token from Step 2 into credentials: the
 one file mash runs with. It checks that the token was made for this key, and
 writes acme.demo.bob.creds to mash's config directory. The token does not say
-where the server is, so it asks for the address you were given. It reads
-ca.pem from the current folder (or the file --ca names) and checks it against
-the fingerprint you were given. It saves the address and a copy of ca.pem
-there, which mash needs to connect, and a trust record,
-trust.json, that binds the account that signed the token, the server and the
-CA you confirmed, so that a later token from another account, or another
-server or CA, is refused. The private key does not leave this machine.
+where the server is, so you give the address you were sent with --server. It
+shows that address and the fingerprint of ca.pem (the file --ca names), to
+compare with what you were sent apart from the token, and checks that the
+server presents a certificate from that CA. It saves the address and a copy of
+ca.pem there, which mash needs to connect. It never changes a server, CA or
+credentials file that is already there: it refuses and says which file to
+move aside. The private key does not leave this machine.
 When only one endpoint is installed on a machine, mash uses it, and the
 setting MASH_ENDPOINT can be left out.
 
 mash runs with the credentials file alone. bob.key and the token file were
 only inputs: delete them, or keep them as a backup and keep both private.
 
-$ mash credential install --key bob.key --token acme.demo.bob.token
+$ mash credential install --key bob.key --token acme.demo.bob.token --ca ca.pem --server tls://myserver:4222
 
-The token does not say where the server is. Type the server address you
-were given: tls://myserver:4222
+Compare these with what the operator sent you, apart from the token:
 
-A certificate authority (CA) signs the server's certificate. mash will trust
-the CA in ca.pem for that server. Whoever holds the CA's key can pose as that
-server.
+  server address  tls://myserver:4222
 
-Type the fingerprint of ca.pem you were given (a sha256: prefix,
-colons, spaces and capitals are all accepted):
-3f9a41c2 7b0d9e55 a1c4e08b 2d77f3a9 5e1b6c40 98aa0d12 c3f5e7b6 4a21d90c
-Checked: ca.pem matches the fingerprint you typed.
+  CA fingerprint (eight groups of eight digits):
+  3f9a41c2 7b0d9e55 a1c4e08b 2d77f3a9 5e1b6c40 98aa0d12 c3f5e7b6 4a21d90c
+
+Checked: the server presents a certificate from ca.pem, and it names myserver.
 
 Installed credentials for acme.demo.bob.
 
   wrote   ~/.config/mash/acme.demo.bob.creds  (mode 600)
   wrote   ~/.config/mash/config.json          (server, CA)
-  wrote   ~/.config/mash/trust.json           (mode 600)
   copied  ca.pem to ~/.config/mash/ca.pem     (mode 644)
 
 NEXT: on this machine, check that bob can sign in. No settings are needed:
@@ -2228,46 +2192,44 @@ The token does not carry the server's address. Give bob's machine these:
 
   files        ./acme.demo.bob.token
                ~/.config/mash/ca.pem
-  address      <server address>
 
-  fingerprint of ca.pem (eight groups of eight digits):
+Send these two another way than the files:
+
+  server address  tls://myserver:4222
+
+  CA fingerprint (eight groups of eight digits):
   3f9a41c2 7b0d9e55 a1c4e08b 2d77f3a9 5e1b6c40 98aa0d12 c3f5e7b6 4a21d90c
+
+The person installing compares both with what the install shows.
 
 The token holds no secret key, but it is a credential: keep it private and
 send it only to bob's machine.
 
-Send the files one way and the address and fingerprint another, so that the
-other machine can check ca.pem against something the files did not bring.
-Replace <server address> with the address that machine uses to reach this
-server. Do not use localhost or 127.0.0.1: only this machine can reach those.
+Send the address that bob's machine uses to reach this server.
+Do not use localhost or 127.0.0.1: only this machine can reach those.
 
-Put both files in the folder where bob runs the install. It reads ca.pem from
-the current folder.
+Put both files in the folder where bob runs the install.
 
 NEXT: copy both files to the folder bob runs this in, on his machine, and run:
-  mash credential install --key bob.key --token acme.demo.bob.token
+  mash credential install --key bob.key --token acme.demo.bob.token --ca ca.pem --server tls://myserver:4222
 ```
 
 ```text
-$ mash credential install --key bob.key --token acme.demo.bob.token
+$ mash credential install --key bob.key --token acme.demo.bob.token --ca ca.pem --server tls://myserver:4222
 
-The token does not say where the server is. Type the server address you
-were given: tls://myserver:4222
+Compare these with what the operator sent you, apart from the token:
 
-A certificate authority (CA) signs the server's certificate. mash will trust
-the CA in ca.pem for that server. Whoever holds the CA's key can pose as that
-server.
+  server address  tls://myserver:4222
 
-Type the fingerprint of ca.pem you were given (a sha256: prefix,
-colons, spaces and capitals are all accepted):
-3f9a41c2 7b0d9e55 a1c4e08b 2d77f3a9 5e1b6c40 98aa0d12 c3f5e7b6 4a21d90c
-Checked: ca.pem matches the fingerprint you typed.
+  CA fingerprint (eight groups of eight digits):
+  3f9a41c2 7b0d9e55 a1c4e08b 2d77f3a9 5e1b6c40 98aa0d12 c3f5e7b6 4a21d90c
+
+Checked: the server presents a certificate from ca.pem, and it names myserver.
 
 Installed credentials for acme.demo.bob.
 
   wrote   ~/.config/mash/acme.demo.bob.creds  (mode 600)
   wrote   ~/.config/mash/config.json          (server, CA)
-  wrote   ~/.config/mash/trust.json           (mode 600)
   copied  ca.pem to ~/.config/mash/ca.pem     (mode 644)
 
 NEXT: on this machine, check that bob can sign in. No settings are needed:
@@ -2292,171 +2254,74 @@ acme.demo.bob: mail works.
 [mash output: see the mash targets file]
 ```
 
-A machine with no trust record always asks for the server address and the
-typed fingerprint, as above, and creates the record (trust.json, mode 600). A
-machine that already has one (for example the machine that runs mashctl, once
-`endpoint create --make-key` has made alice's endpoint there) checks the token
-against it: the record holds the account's
-public key, the server address and the CA the person confirmed, and the
-token's signature and issuer must match them. When they do, the install asks
-for no address and no fingerprint, says what it checked, writes the
-credentials, and reports the three files already in place as `kept
-(unchanged)` (DRAFT15, A2; DRAFT14, Z4; DRAFT13, Y2):
-
-[HELD until the scope ruling: trust record]
+Install never changes a settings, CA or credentials file that is already there
+(0.5.5's rule, kept; decision 264). Run again over the same key and token, it
+changes nothing and says so for each file, so a person can trust a rerun:
 
 ```text
-$ mash credential install --key bob.key --token acme.demo.bob.token
-
-Checked: this token matches the trust record.
-
-Installed credentials for acme.demo.bob.
-
-  wrote   ~/.config/mash/acme.demo.bob.creds  (mode 600)
-  kept    ~/.config/mash/config.json          (unchanged)
-  kept    ~/.config/mash/trust.json           (unchanged)
-  kept    ~/.config/mash/ca.pem               (unchanged)
-
-NEXT: on this machine, check that bob can sign in:
-  MASH_ENDPOINT=acme.demo.bob mash status
-
-Or add another endpoint, starting on its machine:
-  mash key create --out <name>.key
-```
-
-A token names no server, so the token alone cannot show that the settings on
-this machine belong to the server that signed it. The trust record can: it
-holds the account's public key (taken from a token whose signature was
-verified), the server address and the CA fingerprint the person confirmed. A
-token from another account, or a server or CA that is not the recorded one,
-does not match the record, and the install refuses and touches no file.
-Install never changes the record as a side effect. To use another server, the
-person resets this machine's setup with `mash trust reset`, then installs
-again as on a new machine (DRAFT17, C2; contract revision 11, REQ-013):
-
-Install refuses a token, server or CA that is not the one this machine trusts:
-
-```text
-$ mash credential install --key bob.key --token acme.demo.bob.token
-[exit 1]
-error: this token was issued by a different account than the one this machine
-       trusts. Nothing was changed.
-fix: to use another server, reset this machine's setup first:
-  mash trust reset
-
-Then install again:
-  mash credential install --key bob.key --token acme.demo.bob.token
-
-Reset removes this machine's endpoint configuration, trust and credentials.
-
-$ mash credential install --key bob.key --token acme.demo.bob.token --server tls://myserver2:4222
-[exit 1]
-error: tls://myserver2:4222 is not the server this machine trusts, which is
-       tls://myserver:4222. Nothing was changed.
-fix: to use another server, reset this machine's setup first:
-  mash trust reset
-
-Then install again:
-  mash credential install --key bob.key --token acme.demo.bob.token --server tls://myserver2:4222
-
-Reset removes this machine's endpoint configuration, trust and credentials.
-
-$ mash credential install --key bob.key --token acme.demo.bob.token --ca new-ca.pem
-[exit 1]
-error: new-ca.pem is not the CA this machine trusts. Nothing was changed.
-fix: to use another CA, reset this machine's setup first:
-  mash trust reset
-
-Then install again, with the CA file you got from the operator:
-  mash credential install --key bob.key --token acme.demo.bob.token --ca new-ca.pem
-
-Reset removes this machine's endpoint configuration, trust and credentials.
-```
-
-`mash trust reset` is the one command that clears the record. A person runs
-it at a terminal; no flag skips its confirmation, and with no terminal it
-exits 4 with `a person must run this at a terminal`. It says what it removes
-(this machine's endpoint configuration, its trust record and its
-credentials) and asks the person to type to confirm. The next install is a
-first install: it asks for the server address and the typed fingerprint.
-Its screen is in the mash targets file:
-
-```text
-$ mash trust reset
-[mash output: see the mash targets file]
-```
-
-Run again over the same key and token, the install changes nothing and says so
-for each file, so a person can trust a rerun:
-
-[HELD until the scope ruling: trust record]
-
-```text
-$ mash credential install --key bob.key --token acme.demo.bob.token
-
-Checked: this token matches the trust record.
+$ mash credential install --key bob.key --token acme.demo.bob.token --ca ca.pem --server tls://myserver:4222
 
 The credentials for acme.demo.bob are already installed. Nothing was changed.
 
   kept    ~/.config/mash/acme.demo.bob.creds  (unchanged)
   kept    ~/.config/mash/config.json          (unchanged)
-  kept    ~/.config/mash/trust.json           (unchanged)
   kept    ~/.config/mash/ca.pem               (unchanged)
 
 NEXT: on this machine, check that bob can sign in:
   mash status
 ```
 
-When the install would make mash trust a certificate authority and there is no
-terminal, or the fingerprint does not match, it refuses (it never prints the
-fingerprint it wanted):
+On any difference it refuses, touches no file, and says which file to move
+aside. A token from another account, a server that is not the one in
+`config.json`, and a CA that is not the one in `ca.pem` each stop the install:
 
 ```text
-$ mash credential install --key bob.key --token acme.demo.bob.token
-[exit 4]
-error: this makes mash trust a certificate authority, and a person must
-       confirm it at a terminal.
-fix: run the same command in a terminal and type the fingerprint when asked:
-  mash credential install --key bob.key --token acme.demo.bob.token
+$ mash credential install --key bob.key --token acme.demo.bob.token --ca ca.pem --server tls://myserver:4222
+[exit 1]
+error: ~/.config/mash/acme.demo.bob.creds already holds credentials for
+       another account. Nothing was changed.
+fix: move it aside:
+  mv ~/.config/mash/acme.demo.bob.creds ~/.config/mash/acme.demo.bob.creds.old
 
-$ mash credential install --key bob.key --token acme.demo.bob.token
-...
-Type the fingerprint of ca.pem you were given (a sha256: prefix,
-colons, spaces and capitals are all accepted):
-0a1b2c3d 4e5f6071 8293a4b5 c6d7e8f9 0a1b2c3d 4e5f6071 8293a4b5 c6d7e8f9
-[exit 3]
-error: ca.pem does not match the fingerprint you typed. Nothing was changed.
-fix: ask whoever runs mashctl for the fingerprint, then run it again:
-  mash credential install --key bob.key --token acme.demo.bob.token
+Then run the install again:
+  mash credential install --key bob.key --token acme.demo.bob.token --ca ca.pem --server tls://myserver:4222
+
+$ mash credential install --key bob.key --token acme.demo.bob.token --ca ca.pem --server tls://myserver2:4222
+[exit 1]
+error: ~/.config/mash/config.json already holds settings for another server.
+       Nothing was changed.
+fix: move it aside:
+  mv ~/.config/mash/config.json ~/.config/mash/config.json.old
+
+Then run the install again:
+  mash credential install --key bob.key --token acme.demo.bob.token --ca ca.pem --server tls://myserver2:4222
+
+$ mash credential install --key bob.key --token acme.demo.bob.token --ca new-ca.pem
+[exit 1]
+error: ~/.config/mash/ca.pem already holds another CA. Nothing was changed.
+fix: move it aside:
+  mv ~/.config/mash/ca.pem ~/.config/mash/ca.pem.old
+
+Then run the install again:
+  mash credential install --key bob.key --token acme.demo.bob.token --ca new-ca.pem
 ```
 
-After a reissue the credentials for the same address are already installed. The
-install says what is replaced and asks the person to type the address; there is
-no `--force`. This is install's own behaviour for the same account and the
-same server: the credentials are replaced and the trust record is not touched
-[confirm with core]:
-
-[HELD until the scope ruling: trust record]
+There is no `mash trust reset` and no trust record: the person moves the file
+aside, or removes it, and installs again. After a reissue the credentials for
+the same address are already installed with the old key, so the install of
+the new key refuses in the same way and the person moves the old credentials
+file aside first (Part 2, B2):
 
 ```text
-$ mash credential install --key bob2.key --token acme.demo.bob.2.token
+$ mash credential install --key bob2.key --token acme.demo.bob.2.token --ca ca.pem
+[exit 1]
+error: ~/.config/mash/acme.demo.bob.creds already holds credentials for
+       acme.demo.bob. Nothing was changed.
+fix: move it aside:
+  mv ~/.config/mash/acme.demo.bob.creds ~/.config/mash/acme.demo.bob.creds.old
 
-Checked: this token matches the trust record.
-
-The current credentials for acme.demo.bob use an old key that the server now
-refuses. Installing replaces them.
-
-Type the address to replace them: acme.demo.bob
-
-Installed credentials for acme.demo.bob.
-
-  wrote   ~/.config/mash/acme.demo.bob.creds  (replaced the old credentials)
-  kept    ~/.config/mash/config.json          (unchanged)
-  kept    ~/.config/mash/trust.json           (unchanged)
-  kept    ~/.config/mash/ca.pem               (unchanged)
-
-NEXT: on this machine, check that bob can sign in:
-  mash status
+Then run the install again:
+  mash credential install --key bob2.key --token acme.demo.bob.2.token --ca ca.pem
 ```
 
 After the install, on bobs-laptop, the check shows bob signed in with the new
@@ -2475,24 +2340,6 @@ acme.demo.bob: mail works.
 [mash output: see the mash targets file]
 ```
 
-With no terminal, or with a wrong answer:
-
-```text
-$ mash credential install --key bob2.key --token acme.demo.bob.2.token
-[exit 4]
-error: a person must run this at a terminal.
-fix: run the same command in a terminal and type the address when asked:
-  mash credential install --key bob2.key --token acme.demo.bob.2.token
-
-$ mash credential install --key bob2.key --token acme.demo.bob.2.token
-...
-Type the address to replace them: acme.demo.alice
-[exit 3]
-error: what you typed is not acme.demo.bob. Nothing was changed.
-fix: run the command again and type the address of the credentials to replace:
-  mash credential install --key bob2.key --token acme.demo.bob.2.token
-```
-
 To copy one credentials file to another machine instead, use `mash
 credential install --creds <file>`; it makes the same writes as `--key
 --token`. That moves a private key across machines; the three steps keep
@@ -2500,6 +2347,15 @@ the key on the agent's machine.
 
 **What changed and why**
 
+- DRAFT19 (E1c, E1d, E3; decision 264): no trust record, no `mash trust
+  reset`, no typed fingerprint, address or replacement. The install shows the
+  server address and the CA fingerprint and says to compare them with what
+  the operator sent apart from the token; it checks that the server presents
+  a certificate from that CA; it takes the address with `--server` [confirm
+  with core] and the CA with `--ca` (contract REQ-003). On any difference
+  from an existing file it refuses and names the file to move aside (three
+  refusals and the reissue case, each with `mv <file> <file>.old`). The
+  entries below are history.
 - DRAFT17 (C2, C10; contract revision 11, REQ-013): `mash trust replace` is
   dropped from 0.5.6 and so is every pointer to it. The three install
   refusals say what is wrong in one line and send the person to `mash trust
@@ -2567,7 +2423,6 @@ Created endpoint acme.demo.alice.
   3. Installed credentials for alice.
 
   wrote   ~/.config/mash/acme.demo.alice.creds  (mode 600)
-  wrote   ~/.config/mash/trust.json             (mode 600)
 
 NEXT: on this machine, check that alice can sign in:
   mash status
@@ -2575,13 +2430,6 @@ NEXT: on this machine, check that alice can sign in:
 Or add another endpoint on this machine:
   mashctl endpoint create acme.<group>.<name> --make-key
 ```
-
-The `trust.json` line is mash's code, which `endpoint create --make-key` calls
-on this machine: the first endpoint installed here creates mash's trust
-record, from the server and the CA that mashctl was adopted with, so nothing
-is typed [confirm with core: no typed fingerprint on the same machine, where
-mashctl already trusts the CA]. A later endpoint on this machine finds it in
-place (Part 1, Choice 61).
 
 The check the NEXT names, on this machine, run as alice:
 
@@ -2603,8 +2451,6 @@ When credentials for another endpoint are already installed on this machine,
 `--make-key` names the new endpoint (DRAFT17, C11). The second block here is
 alice's, made after another endpoint's credentials were installed here:
 
-[HELD until the scope ruling: trust record]
-
 ```text
 $ mashctl endpoint create acme.demo.alice --make-key
 
@@ -2615,7 +2461,6 @@ Created endpoint acme.demo.alice.
   3. Installed credentials for alice.
 
   wrote   ~/.config/mash/acme.demo.alice.creds  (mode 600)
-  kept    ~/.config/mash/trust.json             (unchanged)
 
 NEXT: on this machine, check that alice can sign in:
   MASH_ENDPOINT=acme.demo.alice mash status
@@ -2629,26 +2474,26 @@ Run again after an earlier run was cut off once the credentials were written
 server signed), the command finishes, changes nothing, and says so for the file
 it is responsible for [confirm with core]:
 
-[HELD until the scope ruling: trust record]
-
 ```text
 $ mashctl endpoint create acme.demo.alice --make-key
 
 Endpoint acme.demo.alice is complete. Nothing was changed.
 
   kept    ~/.config/mash/acme.demo.alice.creds  (unchanged)
-  kept    ~/.config/mash/trust.json             (unchanged)
 
 NEXT: on this machine, check that alice can sign in:
   mash status
 ```
 
-### Credentials for another machine: `endpoint create --make-key --creds-out`
+### Credentials at a path of your choice: `endpoint create --make-key --creds-out`
 
-**AFTER, short form, credentials for another machine (`--creds-out`)**
+**AFTER, short form, on the same machine (`--creds-out`)**
 
-This is not the same-machine path: carol runs on another machine, so the
-command writes one file to carry there and installs nothing here.
+This is the same-machine, same-user path (contract REQ-003): `--creds-out
+<path>` puts the credentials file where the person says, and everything else
+is in place already, because mashctl was adopted here from the person's own
+setup. It shows no fingerprint and says why in one line. A different OS user
+or another machine uses the three steps above and `credential install`.
 
 ```text
 $ mashctl endpoint create acme.demo.carol --make-key --creds-out carol.creds
@@ -2657,35 +2502,20 @@ Created endpoint acme.demo.carol.
 
   1. Created a private key for carol.
   2. Created her token, signed by your server.
-  3. Wrote the credentials for carol to one file.
+  3. Installed credentials for carol.
 
-  wrote   ./carol.creds  (new file, mode 600)
+  wrote   ./carol.creds                  (new file, mode 600)
+  kept    ~/.config/mash/config.json     (unchanged)
+  kept    ~/.config/mash/ca.pem          (unchanged)
 
-warning: copying carol.creds moves carol's private key to another machine.
-         To keep the key on carol's machine, make it there with mash key
-         create and use mashctl endpoint create with --public-key.
+Same machine: this CA came from your own setup.
 
-The credentials file does not carry the server's address. Give carol's
-machine these:
-
-  files        ./carol.creds
-               ~/.config/mash/ca.pem
-  address      <server address>
-
-  fingerprint of ca.pem (eight groups of eight digits):
-  3f9a41c2 7b0d9e55 a1c4e08b 2d77f3a9 5e1b6c40 98aa0d12 c3f5e7b6 4a21d90c
-
-Send the files one way and the address and fingerprint another, so that the
-other machine can check ca.pem against something the files did not bring.
-Replace <server address> with the address that machine uses to reach this
-server. Do not use localhost or 127.0.0.1: only this machine can reach those.
-
-Put both files in the folder where carol runs the install. It reads ca.pem
-from the current folder.
-
-NEXT: copy both files to the folder carol runs this in, on her machine, and run:
-  mash credential install --creds carol.creds
+NEXT: on this machine, check that carol can sign in:
+  MASH_ENDPOINT=acme.demo.carol mash status
 ```
+
+[confirm with core: how mash finds a credentials file that `--creds-out`
+wrote outside the config folder.]
 
 ### A MASH_SERVER that names another server: `endpoint create`
 
@@ -2739,7 +2569,6 @@ Step 3 of 3: install the credentials (on this machine)
   Done: installed credentials for alice.
 
   wrote   ~/.config/mash/acme.demo.alice.creds  (mode 600)
-  wrote   ~/.config/mash/trust.json             (mode 600)
 
 NEXT: on this machine, check that alice can sign in:
   mash status
@@ -3188,8 +3017,8 @@ exits 1 with `mash: no endpoint named "..."`.
     R2; written once in the conventions block). REQ-014 is being updated.
 19. The NEXT after `mash key create` carries `<address>`, because mash does
     not know the owner or group on a new machine. The NEXT after `endpoint
-    create --public-key` carries the real token file and `bob.key`; it has no
-    placeholder: the fingerprint is typed at the prompt of the install (36).
+    create --public-key` carries the real token file, `bob.key`, `ca.pem` and
+    the server address; the install shows the fingerprint to compare (36).
 20. The word `seed` stays once, in Step 1 ("NATS calls it a seed"). Review 2
     asked to move it to `--detail`; rule 7 decided it stays in the key step.
 21. Table headers (DRAFT10): `ENDPOINT` is the name (`bob`) and `ADDRESS` the
@@ -3202,8 +3031,8 @@ exits 1 with `mash: no endpoint named "..."`.
     carries the ADR (mash order 17: mashctl does not install, configure or
     start NATS). Until then this is a proposal.
 23. The plain-URL refusal shows the override, because ADR 0146 requires it, in
-    one form only (DRAFT8, REQ-010): `MASH_INSECURE_PLAINTEXT=1` before the
-    command, for that run. The config key `insecure_plaintext` is removed and
+    one form only (DRAFT8, REQ-010; renamed in DRAFT19, Choice 70):
+    `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1` before the command, for that run. The config key `insecure_plaintext` is removed and
     no mash command writes the override. The refusal says that credentials and
     mail then cross the connection unencrypted, for a test server only.
 24. adopt saves the CA's absolute path. Reasoning: adopt saves `MASH_TLS_CA`
@@ -3221,9 +3050,13 @@ exits 1 with `mash: no endpoint named "..."`.
     plugin:mash@mash` is refused without a managed channel allowlist; the
     development form needs none and asks for a confirmation at each launch.
 26. `--creds-out FILE` is new on `mashctl endpoint create ... --make-key`.
-    It writes the credentials at FILE in one command (mode 0600); without
-    it they go to the config folder, as today. Reasoning: a person who runs
-    the agent on another machine copies one file, not two.
+    It is the same-machine, same-user path (contract REQ-003; DRAFT19, E1b,
+    E3): it puts the credentials at FILE (mode 0600) in one command, and
+    everything else is in place already, each file named. It shows no
+    fingerprint and says why in one line: `Same machine: this CA came from
+    your own setup.` Without it the credentials go to the config folder, as
+    today. A different OS user or another machine uses the three steps and
+    `credential install`.
 27. No success output names the server or the config file (DRAFT10, V1;
     contract REQ-001). They appear on failure, under `--detail` and in
     `mashctl status`. One line remains, for the trap of a `mashctl` run inside
@@ -3237,8 +3070,8 @@ exits 1 with `mash: no endpoint named "..."`.
     a config path, except the file lines (`wrote`, `copied`, `kept`,
     `renamed`) of the commands that put files in place, `adopt` and `credential
     install` among them,
-    the trust prompts and the typed commands (the exceptions are listed in the
-    script).
+    the address row of the hand-off and of the install, and the typed commands
+    (the exceptions are listed in the script).
 28. Both ways to get credentials print file lines in core's shape: two
     spaces, a lowercase verb (`wrote`, `copied`), the file, a parenthesis
     (`(mode 600)`, `(server, CA)`). `mash credential install` prints
@@ -3251,11 +3084,9 @@ exits 1 with `mash: no endpoint named "..."`.
     `wrote` for the credentials, or `kept (unchanged)` on a rerun that finds
     them in place. [confirm with core: core confirmed the install block with
     `kept` lines in DRAFT6; DRAFT13 restores them in the `(unchanged)` form.]
-29. `mash credential install --creds FILE` (core accepted it) installs the
-    file that `--creds-out` wrote, with the same writes as `--key --token`.
-    The `--creds-out` output says that copying the file moves a private key
-    across machines, and that the three-step path keeps the key on the
-    agent's machine.
+29. `mash credential install --creds FILE` (core accepted it) installs a
+    credentials file on another machine or for another OS user, with the same
+    writes as `--key --token`. `--creds-out` is the same-machine path (26).
 30. The launch of Claude Code is one command (DRAFT10): bob is alone on
     bobs-laptop, so no `export MASH_ENDPOINT=...` is needed (REQ-009). Where
     two endpoints are installed on one machine, the `no endpoint is set`
@@ -3278,37 +3109,30 @@ exits 1 with `mash: no endpoint named "..."`.
     colour rule, `--json`, resolved paths and the label rules are written
     once there. Every error line starts `error:`; hints are `fix:`, `NEXT:`,
     `Or` or `See`. Mockups print `<version>`, never a version number.
-35. Audit of confirmations: every command that changes trust, exposure or
-    destroys something (contract INV-004). The contract's words: "A change of
-    trust (another server or CA for an endpoint) or of exposure (listening on
-    more than loopback, firewall rules, a startup unit) needs the person's own
-    confirmation: an interactive prompt on a terminal that shows the exact
-    address, CA fingerprint, interface or scope and asks the person to type
-    it back. No flag (`--yes` or similar) and no environment variable stands
-    in for it." And: "INV-004 also covers destruction: `mashctl endpoint
-    delete`, and a reissue that replaces a key mash did not make on this
-    machine, state what will be lost before acting ... and need the same typed
-    confirmation; the output afterwards proves the old credential is refused,
-    or gives the one command that proves it." DRAFT10 decides that every
-    single reissue of an endpoint qualifies, because every one revokes a key.
-    No command in this document offers a flag that skips a confirmation.
+35. Audit of confirmations (contract INV-004; narrowed by decision 264).
+    Typed confirmation is for destruction only: `mashctl endpoint delete`,
+    `deprovision`, `--delete-creds` and a single `endpoint reissue`. Each
+    states what will be lost before acting and needs the person to type the
+    address; the output afterwards proves the old credential is refused, or
+    gives the one sentence that proves it. DRAFT10 decided that every single
+    reissue qualifies, because every one revokes a key. These four have no
+    `--yes`. A change of trust is not typed: the install shows the server
+    address and the CA fingerprint, and the person compares them with what the
+    operator sent; `adopt --from` asks nothing and says so. Bulk reissue
+    (`--all`, `--changed`) takes `--yes`, as in 0.5.5 [confirm].
 
     | Command | Kind of change | Confirmation (what the person types) |
     |---|---|---|
-    | `adopt` (the long form, whose CA file came from whoever set the server up) | trust | the fingerprint |
-    | `adopt --from` a folder the person owns on this machine (DRAFT15, A1; Choices 62 and 65) | none: the trust comes from a folder the same person owns | none; the command says it does not authenticate the server |
+    | `adopt --from` a folder the person owns on this machine | none: the files come from a folder the same person owns | none; the command says `No fingerprint asked: the folder is yours.` |
     | `adopt --from` a folder another user owns or wrote | refused | none: the folder is made again by the person (Choice 65) |
-    | `adopt --from` a folder whose CA or account differ from mashctl's settings (DRAFT16, B2) | refused | none [confirm with core: how those settings are replaced] |
-    | `mash trust reset` (core's; DRAFT17, C2; Choice 61) | destroys this machine's endpoint configuration, trust and credentials | person-confirmed at a terminal; no flag skips it; no terminal exits 4 (the mash targets file has the screen) |
-    | `endpoint delete --delete-creds` (DRAFT17, C1) | destroys the credentials file here too | the address, as for every delete: the flag does not skip it |
-    | `credential install`, first install | trust | the CA fingerprint, from the operator (the address is asked for too: it is input, not the confirmation) |
-    | `credential install` with another server, CA or account than the trust record | refused (DRAFT15, A2) | none: the person runs `mash trust reset`, then installs again (DRAFT17, C2) |
-    | `credential install` over credentials for the same address | replaces a key | the address |
-    | `MASH_INSECURE_PLAINTEXT` (any command) | plain text | the variable for one run, a warning on every command; see below |
+    | `adopt` (the long form, for a hand-managed server) | trust | none, as in 0.5.5 [confirm] |
+    | `credential install` | trust | none: it shows the address and the CA fingerprint to compare; on a difference from an existing file it refuses |
     | `endpoint delete` | destroys the inbox, retires the address, revokes the key | the address |
+    | `endpoint delete --delete-creds` | destroys the credentials file here too | the address, as for every delete: the flag does not skip it |
     | `endpoint reissue` (one endpoint) | revokes the old key | the address |
-    | `endpoint reissue --all`, `--changed` | revokes the old keys | the count (`Type 3 to reissue 3 endpoints`) |
+    | `endpoint reissue --all`, `--changed` | revokes the old keys | none typed: `--yes` [confirm] |
     | `deprovision` | destroys the inbox, revokes the key | the address (D8) |
+    | `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION` (any command) | plain text | the variable for one run, a warning on every command; see below |
     | `set`, `suspend`, `resume`, `provision` | none | none |
     | `init` (an adopted server), `limits`, `permissions`, `audit`, `issued`, `inbox inspect` | none | none |
     | `init --local`, `--start` | exposure | removed, so nothing to confirm |
@@ -3316,33 +3140,30 @@ exits 1 with `mash: no endpoint named "..."`.
     CLI standard rule 15 says a command prompts only when standard input is a
     terminal, that every prompt has a flag that answers it (`--yes`), and that
     without a terminal it fails with exit 2 naming that flag. INV-004 departs
-    from rule 15 on the flag (there is none), and this document departs on the
-    code: a command with no terminal exits 4 (not authorized, rule 14), because
-    no flag can fix it (its error says `a person must run this at a terminal.`;
-    the same code covers credentials the server refuses, and that error says
-    `the server refuses these credentials.`: DRAFT18, D3); a wrong answer exits 3 (cancelled, rule 14). The
-    contract text cites "the CLI standard's confirmation rule" with no number;
-    it is rule 15 of standard 1.2.5, which was read for this draft (rules 14,
-    15, 26 and 28 are quoted from it). The contract's list of exit codes omits
-    3; this document follows the standard (ruled: yes, DRAFT12: 3 is
-    cancelled, a wrong typed answer; see 55).
-    Without a terminal, a confirmation refuses with `error:` and `fix:` (adopt,
-    delete and install show both). [confirm: the plain-text override is a
-    variable, as REQ-010 says, while INV-004 says no environment variable
-    stands in for a confirmation; this document follows REQ-010 and warns on
-    every command, and the contract should say which rule wins.]
-36. The hand-off (DRAFT9 U1, DRAFT10 V4, DRAFT11): the files to copy with
-    their paths on this machine (the token, the CA file), then the server
-    address and the CA fingerprint on lines of their own, under a sentence that
-    says the token does not carry the address; one paragraph on sending the
-    address and the fingerprint by another route and on what to put in
-    `<server address>`; and a NEXT that carries the real token file and key
-    file. The install then asks the person for the address and to type the
-    fingerprint, and prints neither. DRAFT9 put `--ca-fingerprint
-    <fingerprint>` in the command (98 columns, with a placeholder for a value
-    mashctl knew). [confirm with core: contract REQ-003 has no fingerprint
-    flag (INV-004), which this document follows; the token carries no address
-    (walk finding 16), which this document now follows too.]
+    from rule 15 on the flag for the four destructive operations (there is
+    none), and this document departs on the code: a command with no terminal
+    exits 4 (not authorized, rule 14), because no flag can fix it (its error
+    says `a person must run this at a terminal.`; the same code covers
+    credentials the server refuses, and that error says `the server refuses
+    these credentials.`: DRAFT18, D3); a wrong answer exits 3 (cancelled, rule
+    14). The bulk reissue takes `--yes` as rule 15 says. The contract text
+    cites "the CLI standard's confirmation rule" with no number; it is rule 15
+    of standard 1.2.5. The contract's list of exit codes omits 3; this
+    document follows the standard (ruled: yes, DRAFT12: 3 is cancelled, a wrong
+    typed answer; see 55). Without a terminal, a confirmation refuses with
+    `error:` and `fix:`. [confirm: the plain-text override is a variable, as
+    REQ-010 says, while INV-004 says no environment variable stands in for a
+    confirmation; this document follows REQ-010 and warns on every command.]
+36. The hand-off (DRAFT9 U1, DRAFT10 V4, DRAFT11, DRAFT19 E3): the files to
+    copy with their paths on this machine (the token, the CA file); then, to
+    be sent another way than the files, the server address and the CA
+    fingerprint, each labelled, on lines of their own; one sentence that the
+    person installing compares both with what the install shows; one paragraph
+    on what address to send; and a NEXT that carries the real token file, key
+    file, CA file and address. `mash credential install` shows the address and
+    the fingerprint and prints no prompt (contract REQ-003). Nothing is typed.
+    [confirm with core: the flag for the address, `--server`; with it the
+    install command is long (108 columns) and stays whole on one line.]
 37. The MASH_ENDPOINT proposal departs from ADR 0012 on the session name, and
     the removal of `init --local` with its exit code departs from ADR 0146.
     Both are proposals in this document; the ratifying contract carries the
@@ -3351,12 +3172,12 @@ exits 1 with `mash: no endpoint named "..."`.
     another change. Until it is merged and the files are published at the
     URLs the message gives, the message points at nothing; the URLs and the
     release page are to confirm.
-39. Replacing installed credentials (DRAFT10, V4): `mash credential install`
-    over credentials for the same address needs no `--force`. It says what is
-    replaced ("The current credentials for acme.demo.bob use an old key that
-    the server now refuses.") and the person types the address. Wrong answer:
-    exit 3. No terminal: exit 4. Reasoning: the walk showed the second install
-    after a reissue failing with `file_exists` until `--force`.
+39. Replacing installed credentials (DRAFT10, V4; reversed in DRAFT19, E1c,
+    E1d): `mash credential install` over credentials for the same address
+    refuses and names the file to move aside (`mv <file> <file>.old`), then
+    the person runs the install again. It never changes a file already there
+    and asks nothing typed (0.5.5's rule, kept; REQ-003). DRAFT10 had it ask
+    the person to type the address.
 40. Reissue writes a numbered token (DRAFT10, V4): the first token for an
     address is `acme.demo.bob.token`, the next `acme.demo.bob.2.token`, then
     `.3`. The output says so and keeps the earlier file. Alternative: refuse
@@ -3373,7 +3194,7 @@ exits 1 with `mash: no endpoint named "..."`.
     `endpoint create --make-key` is removed.
 43. Exit-code changes in Part 1 (DRAFT10, V3), one per command whose code
     changed: `mashctl status` NOT REACHABLE 1 to 6; `adopt` wrong fingerprint
-    1 to 3 and no terminal 1 to 4; `endpoint suspended` is gone (it exited 3
+    1 to 3 and no terminal 1 to 4 (DRAFT19: no typed fingerprint, so neither); `endpoint suspended` is gone (it exited 3
     for "not suspended", the standard's "cancelled").
 44. A delete ends with one sentence that a new endpoint needs a new name
     (DRAFT10, V5; DRAFT13, Y4; DRAFT14, Z1; DRAFT18, D2: superseded: no
@@ -3381,15 +3202,14 @@ exits 1 with `mash: no endpoint named "..."`.
     every delete ends `NEXT: create an endpoint with a new name` is dropped:
     it offered a step that was not the next one for a person who deleted by
     mistake, and nothing can restore the address.
-45. A person never sees the value they are asked to type (DRAFT11, W2). The
-    contract, revision 5, REQ-003: "mash never prints the value it then asks
-    the person to type, and says only whether it matched". `credential
-    install` (and the long form of `adopt`; DRAFT14,
-    Z5) prints `Checked: ca.pem matches the fingerprint you typed.` or
-    `error: ca.pem does not match the fingerprint you typed.` The
-    fingerprint is printed where it is handed over: the helper's output and
-    the `endpoint create` hand-off (`--public-key` and `--creds-out`), which
-    are for the operator. The rule is in the conventions block.
+45. A fingerprint is shown and compared, never typed (DRAFT19, E3; contract
+    REQ-003). DRAFT11 had the person type it and the command say only
+    `matches`; decision 264 cuts the typing. The fingerprint is printed where
+    it is handed over: the helper's output and the `endpoint create
+    --public-key` hand-off, for the operator to send another way; and `mash
+    credential install` shows it to the person, with the address, to compare.
+    `adopt --from` and `--creds-out` show none and say why in one line. The
+    rule is in the conventions block.
 46. `mash key create --for <address>` (DRAFT11, W4). When the key is for an
     endpoint that exists, the person says so and the NEXT names `mashctl
     endpoint reissue <address> --public-key bob2.pub`. Alternative: mash
@@ -3405,20 +3225,18 @@ exits 1 with `mash: no endpoint named "..."`.
     Ruled: yes, DRAFT12: the CA file stays mode 644, because it is public;
     the token file is mode 600 (see 54).
 48. The token carries no address (DRAFT11, W3; walk finding 16; contract
-    REQ-003). The hand-off prints `<server address>` and says what to put
-    there; the example in the install is `tls://myserver:4222`. The install on
-    the other machine asks for the address (the person types it) and takes
-    `--server <address>` for the same answer, as CLI standard rule 15 asks of
-    a prompt; no flag answers the fingerprint (INV-004). Ruled: yes, DRAFT12.
-    mashctl does not
-    offer an `--address-for-others` flag (critic defect 3): the address
-    another machine reaches depends on that machine's network, which mashctl
-    cannot see.
+    REQ-003). The hand-off prints the address mashctl has (`tls://myserver:
+    4222` in the walk) and says what to send; where that address is a
+    loopback one, it prints `<server address>` and says what to put there. The
+    install on the other machine takes `--server <address>` (DRAFT19: it no
+    longer asks for the address) [confirm with core]. mashctl does not offer
+    an `--address-for-others` flag (critic defect 3): the address another
+    machine reaches depends on that machine's network, which mashctl cannot
+    see.
 49. The NEXT after `adopt` is the first endpoint (DRAFT13, Y1): `adopt`
-    prepares the server, so no `init` stands between. The helper's retire step
-    is an `Or` that follows, with the real server directory, because the skill
-    retires keys after alice and bob have mailed each other. (DRAFT11 and
-    DRAFT12 made `mashctl init` the NEXT.)
+    prepares the server, so no `init` stands between. mashctl prints no word
+    about the helper's own closing steps (DRAFT19, E1a). (DRAFT11 and DRAFT12
+    made `mashctl init` the NEXT.)
 50. The setup block's table says `myserver` runs mash too (critic C2): alice
     runs `mash status` there.
 51. The `kept` line, by command (DRAFT13, Y2; it supersedes DRAFT11's "no
@@ -3437,21 +3255,17 @@ exits 1 with `mash: no endpoint named "..."`.
     variable is MASH_SERVER, Choice 66).
 53. Fingerprint form (DRAFT12, X6). Every fingerprint a mockup shows is eight
     groups of eight lowercase hex digits (64 digits, SHA-256) with single
-    spaces, in full: never colons, never an ellipsis. A typed answer is
-    accepted with or without `sha256:`, with colons or spaces, in any case;
-    each prompt says so in one line (two printed lines, because the line
-    would pass 80 columns) and shows the value on a line of its own. The
-    hand-off shows the value on a line of its own so that it is copied whole.
-    The setup helper's quoted block keeps its own form and is marked as
-    aligned by its owner. Ruled: yes. Lints: W2 recognises the new form; F1
-    fails a fingerprint with colons or an ellipsis outside the quoted helper
-    block.
+    spaces, in full: never colons, never an ellipsis, on a line of its own so
+    that it is copied whole. The setup helper's quoted block keeps its own
+    form and is marked as aligned by its owner. Ruled: yes. Lints: F1 fails a
+    fingerprint with colons or an ellipsis outside the quoted helper block.
+    (DRAFT19: nothing is typed, so no prompt takes it in any form.)
 54. The token file is mode 600 (DRAFT12, X3). A token is a credential, not a
     secret key: the hand-off says it holds no secret key, is a credential,
     and is kept private and sent only to the endpoint's machine. `wrote
     ./acme.demo.bob.token  (mode 600)` replaces `(mode 644; not secret)`
     everywhere. The CA file stays 644 (public). `mash credential install`
-    asks for the server address, and `--server` answers it (48). Ruled: yes.
+    takes the server address with `--server` (48). Ruled: yes.
 55. Exit codes 3 and 6 (DRAFT12, X4, X5). The one table has 3 (cancelled,
     rule 14 of the standard: the person typed a wrong confirmation) and 6
     (server unreachable or not answering, the same in mash and mashctl). There
@@ -3501,64 +3315,31 @@ exits 1 with `mash: no endpoint named "..."`.
     only when the endpoint's host is recorded with `endpoint set --host`]
     [confirm with core: the status wording and exit code, DELETED and exit 4].
     (A1, A3, H4).
-61. The trust record (DRAFT15, A2; DRAFT16, B2, B3; contract revision 9,
-    REQ-013). A token names no server, so `mash credential install` cannot
+61. There is no trust record in 0.5.6 (DRAFT19, E1c; decision 264; contract
+    REQ-013 is removed). `trust.json`, `mash trust reset`, `replace` and
+    `repair` are not in this document, and no output states that an account,
+    a server or a CA is recorded. A token names no server, so install cannot
     know that settings already on the machine belong to the server that signed
-    it. Decided: `trust.json` is the endpoint side's, mash's. It is created
-    (exclusively, mode 600) by the first `mash credential install` on a
-    machine, or by the same-machine `mashctl endpoint create --make-key`,
-    which calls the same code. `adopt` does not create it and does not record
-    an account in a trust record: it writes mashctl's own settings in
-    `config.json` (server, owner, account, CA, file paths). The record binds
-    the account's public key (taken from the token after its signature is
-    verified), the server address and the CA fingerprint the person confirmed.
-    Every later install checks the token's signature and issuer, the server
-    and the CA against the record, prints `Checked: this token matches the
-    trust record.` and reports `kept (unchanged)` for the files. A token from
-    another account, a different server or a different CA is an `error:` that
-    says it `does not match the trust record`, with a `fix:` and exit 1, and
-    no file is touched (section 2 shows all three). DRAFT17 (C2; contract
-    revision 11, REQ-013): the record is not changed in place in 0.5.6;
-    `mash trust replace` is dropped. To use another server the person runs
-    `mash trust reset` (person-confirmed at a terminal, no flag skips it,
-    exit 4 with no terminal; it removes this machine's endpoint
-    configuration, trust record and credentials and says so) and installs
-    again as on a new machine. `mash trust repair` is not in revision 11 and
-    is not drawn here [confirm with core]. Every mash command still checks
-    that `trust.json`, the config and the CA agree and refuses with `error:
-    this machine's trust files disagree` [confirm with core: the fix it names
-    is `mash trust reset`]. `--replace` is gone
-    from install. A new machine, with no record, always asks for the server
-    address and the typed fingerprint and writes the record. On the machine
-    that runs mashctl the first `endpoint create --make-key` writes it (shown
-    in alice's block, and `kept (unchanged)` on a rerun) from the server and
-    CA mashctl was adopted with [confirm with core: whether a typed
-    confirmation is asked there]. `mashctl status --detail` shows the path of
-    the record on a `trust record:` line when the file exists, and says it is
-    mash's. Install over existing credentials for the same account and server
-    is install's own behaviour (the typed address, credentials replaced, the
-    record untouched) [confirm with core]. Alternative not chosen: keep the
-    account in `config.json` (DRAFT14), or let `adopt` write the record
-    (DRAFT15). Reason: a file the install rewrites is not a record it can be
-    held to; the record changes only through the person-confirmed path.
-62. Same-machine adopt asks no fingerprint and says it does not authenticate
-    the server (DRAFT14, Z5; DRAFT15, A1; contract revision 6, REQ-011 ii).
-    INV-004 says a change of trust needs a typed confirmation, and DRAFT13
-    made `adopt --from <dir>` ask for the CA fingerprint. The setup helper
-    prints that fingerprint on the same screen, so the person copied it and
-    the check compared a file with its own hash. Ruled: `adopt --from <dir>`,
-    where `<dir>` is a directory the person owns on this machine, asks for no
-    fingerprint and says so in one line of its result: `This copies files from
-    a folder you own; it does not authenticate the server.` (DRAFT17, C3: one
-    line that fits 80 columns; the earlier wording was two sentences). The
-    same statement is in `adopt --help` and in the dry run. This is an
-    explicit, narrow exception to INV-004 and the contract carries it. The
-    typed fingerprint stays for every hand-off across machines: `mash
-    credential install` on another machine, and the long form of `adopt`,
-    whose CA file comes from whoever set the server up. `adopt --from` a
-    folder that is not the person's own is no longer a prompt: it is refused
-    (Choice 65). A fingerprint proves nothing when the CA file came from the
-    same screen; it proves something when it arrives out of band
+    it; it does what 0.5.5 did: it never changes a server, CA or credentials
+    file that is already there, and on any difference it refuses, touches
+    nothing and says which file to move aside (`mv <file> <file>.old`).
+    `config.json` keeps the server, owner and CA (mashctl keeps `owner` and
+    `account` for itself), and `mashctl status --detail` has no trust record
+    line. Alternatives not chosen: the trust record of DRAFT15 to DRAFT18, which
+    the maintainer put out of scope; each is for a later release if a need
+    appears.
+62. Same-machine adopt asks no fingerprint and says so (DRAFT14, Z5; DRAFT15,
+    A1; DRAFT19, E2; contract REQ-011 ii). The setup helper prints the
+    fingerprint on the same screen, so a typed fingerprint would compare a
+    file with its own hash. `adopt --from <dir>`, where `<dir>` is a directory
+    the person owns on this machine, asks for none and says so in one line of
+    its result: `No fingerprint asked: the folder is yours.` The same line is
+    in `adopt --help`, the dry run and `--detail`. The long form of `adopt`,
+    for a hand-managed server, asks no typed fingerprint either (as in
+    0.5.5) [confirm]. `adopt --from` a folder that is not the person's own is
+    refused (Choice 65). A fingerprint proves nothing when the CA file came
+    from the same screen or folder; it proves something when it arrives by
+    another route, so the operator's hand-off sends it apart from the files
     (conventions).
 63. Two-step fixes and the long form (DRAFT14, Z2, Z6). A fix that says to run
     the command again prints it, with the person's own arguments (the nine the
@@ -3572,14 +3353,12 @@ exits 1 with `mash: no endpoint named "..."`.
 64. Files to copy, the archive file, the lock file (DRAFT14, Z9). A hand-off
     `NEXT:` names the files to copy (`acme.demo.bob.token and ca.pem`); the
     Files convention allows that one exception to "a file a command only read
-    is not named". `<archive file>` in the retire step is a path the person
-    chooses, where the setup script puts the archive of the signing keys it
-    removes; the text under the `Or` says so. A reissue removes its lock file
+    is not named". A reissue removes its lock file
     (Part 2, choice 61).
 65. `adopt --from`: what it requires, what it shows and how it refuses
     (DRAFT15, A1; DRAFT16, B2, B4; contract revision 9, REQ-011 ii and R8-3).
     Four checks, all before anything is committed, each shown in the output or
-    in one of the seven blocks under "adopt --from: refusals" (section 1b),
+    in one of the six blocks under "adopt --from: refusals" (section 1b),
     each refusal naming the check that failed: (a) `folder`: the folder is
     yours, and every folder above it is yours or root's and not writable by
     others (DRAFT17, C4: not "belongs to you": `/home` and `/` are root's),
@@ -3599,35 +3378,30 @@ exits 1 with `mash: no endpoint named "..."`.
     the source file during the copy (the file's identity differs, or the bytes
     read differ from what was checked) is refused at its own named check, and
     the test for it states its timing, after the open and before the commit
-    (R8-3); (d) a folder whose CA or account differ from the settings mashctl
-    already has is refused. The trust record is not part of `adopt` (Choice
-    61): a rerun with the same contents changes nothing (`kept (unchanged)`).
+    (R8-3); (d) a rerun with the same contents changes nothing (`kept (unchanged)`).
     The output says the local folder is the only origin of the server's
     address; a fully consistent folder prepared by another process of the same
     user passes, which is the custody residual the contract lists, and the
-    plain statement that `adopt --from` does not authenticate the server is
-    how the output admits it. The output uses no file-identity or handle
+    line `No fingerprint asked: the folder is yours.` is how the output says
+    what it does not do. The output uses no file-identity or handle
     words: it says `the folder is a link`, `a parent folder is writable by
     others`, `the account key and the credentials belong to different
     accounts`, `a file was replaced while it was being copied`, `a file
     changed while it was being copied`, and ends the success with `Copied only
     files it checked first.` Exit codes (one table): every refusal above is 1
-    (refused), because nothing was asked of the person; a wrong typed answer
-    in the long form is 3; no terminal for the long form's question is 4; a
-    server that does not answer is 6; a usage mistake is 2. A folder another
+    (refused), because nothing was asked of the person; a server that does not
+    answer is 6; a usage mistake is 2. A folder another
     user prepared is refused with 1, not asked about: the fix is for the person
     to run the setup script as themselves. [confirm with core: the exact owner
     and mode checks above, how the swap is detected, that the certificate and
-    host name check is made when mashctl connects, before anything is committed,
-    and how mashctl's own server and CA settings are replaced when a folder
-    differs from them.]
+    host name check is made when mashctl connects, before anything is committed.]
 66. Config and env names, agreed with the mash targets (DRAFT16, B1). One
     `config.json` for both tools on a machine that runs both; each ignores
     the keys it does not own. Both read `server` (MASH_SERVER, a `tls://`
     address; it replaces `url` and MASH_URL everywhere), `ca` (MASH_CA, a
     path; it replaced `tls_ca` and MASH_TLS_CA in DRAFT13) and `endpoint`
-    (MASH_ENDPOINT); both read MASH_CONFIG_DIR and MASH_INSECURE_PLAINTEXT
-    (environment only). mash reads and writes no `owner` or `account`.
+    (MASH_ENDPOINT); both read MASH_CONFIG_DIR and
+    MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION (environment only; Choice 70). mash reads and writes no `owner` or `account`.
     mashctl's own keys are `owner`, `account`, `admin_credentials`,
     `system_credentials` and `keys`, with the variables
     MASH_ADMIN_CREDENTIALS, MASH_SYSTEM_CREDENTIALS and MASH_KEYS_DIR, and it
@@ -3635,6 +3409,37 @@ exits 1 with `mash: no endpoint named "..."`.
     owner. The conventions block, the refusals (E2), the one warning, every
     `--help` and `mashctl status --detail` use these names; the BEFORE blocks
     keep the old ones.
+
+67. The 0.5.6 scope ruling (DRAFT19; decision 264; contract revision 15).
+    Cut from these targets: the retire-keys handling and the refusal screens
+    after it (E1a); the held trust lines (E1b); the trust record and every
+    check that used it (E1c); every typed confirmation except on delete,
+    deprovision, `--delete-creds` and a single reissue (E1d). The table
+    "Cut by decision 264" at the end of this file lists each removal and where
+    it was. Each cut item goes to a later release if a need appears.
+68. The install's inputs (DRAFT19, E3). `mash credential install` takes the
+    CA with `--ca <file>` (required by the contract; without it install
+    refuses with exit 2 before reading anything) and the address with
+    `--server <address>` [confirm with core]. It shows both and the
+    fingerprint; it checks that the server presents a certificate from that
+    CA with the matching host name before it writes anything.
+69. `adopt --from` in its simplest true form (DRAFT19, E2). It checks the
+    folder (owner, mode, link), the signatures (the credentials against the
+    account key, and the operator key against the account) and the server's
+    certificate and host name against the CA; copies what mashctl needs;
+    makes the shared storage; and says in one line that it asks no
+    fingerprint because the folder is yours. Six blocks: a link, a writable
+    parent, mixed files, a file changed while copying, a folder another user
+    prepared, and the identical rerun. The block for a rerun with changed
+    contents is gone with the trust record.
+70. The plain-text override is `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1`
+    (DRAFT19, E4; contract REQ-010). The maintainer renamed it so that the name
+    says what it does. Environment only; never a config key; no mash command
+    writes it. Hard cut: `MASH_INSECURE_PLAINTEXT` stays only in BEFORE blocks
+    and history. The warning on every connecting command reads `warning:
+    encryption to <host> is switched off (MASH_DANGEROUSLY_SKIP_NATS_
+    ENCRYPTION is set): anyone on the network can read mail and obtain
+    signatures`, wrapped to 80 columns.
 
 ## Facts to confirm
 
@@ -3671,9 +3476,9 @@ exits 1 with `mash: no endpoint named "..."`.
   development channel command (section 3) are the start for one person; the
   section also says Claude Code asks for confirmation at each launch]
 - [confirm: `mashctl adopt --ca <file>`, or the variable `MASH_CA` (the
-  catalog's capture used `MASH_TLS_CA`), takes the CA file, computes its
-  fingerprint for the typed check, and saves its absolute path in config.json
-  under the key `ca` (today it saves the value as typed under `tls_ca`)]
+  catalog's capture used `MASH_TLS_CA`), takes the CA file and saves
+  its absolute path in config.json under the key `ca` (today it saves the
+  value as typed under `tls_ca`)]
 - [confirm: adopt's only server change with `--make-admin` is recording the
   admin credentials in the record of signed tokens (catalog, "What adopt does
   not do")]
@@ -3685,9 +3490,9 @@ exits 1 with `mash: no endpoint named "..."`.
   create` wrote only the credentials file, so the server address, the CA and
   the group came from nowhere. The target is that `credential install` writes
   `config.json` (server, owner, CA copy). The token carries no server address
-  (contract revision 5; walk finding 16), so the install asks for it and takes
-  the CA from beside the token or `--ca`; DRAFT10's claim that the token held
-  the address is withdrawn.]
+  (contract revision 5; walk finding 16), so the install takes it with
+  `--server` and the CA with `--ca`; DRAFT10's claim that the token held the
+  address is withdrawn.]
 - [walk, finding 4: `endpoint create` and `reissue` printed the token path
   relative (`./acme.demo.bob.jwt`) and did not say the file is mode 0600. The
   target says `wrote ./acme.demo.bob.token (mode 600)` (DRAFT12, ruled: the
@@ -3710,14 +3515,12 @@ exits 1 with `mash: no endpoint named "..."`.
   `<version>`.]
 - [DRAFT14, Z8: every `mash status` success screen is the mash targets' own,
   quoted; the version row is `<version>` (the mash targets print a number).]
-- [DRAFT16, B2: `trust.json` is mash's; the first `mash credential install`,
-  or the same-machine `mashctl endpoint create --make-key`, creates it;
-  `adopt` writes mashctl's own settings (server, owner, account, CA, file
-  paths) and no trust record; "own folder" is decided by ownership and mode
-  (Choices 61, 62 and 65).]
+- [DRAFT19: there is no trust record; `adopt` writes mashctl's own settings
+  (server, owner, account, CA, file paths); "own folder" is decided by
+  ownership and mode (Choices 61, 62 and 65).]
 - [DRAFT16, B1: config keys and variables are one set across both tools
   (Choice 66): `server`/MASH_SERVER, `ca`/MASH_CA, `endpoint`/MASH_ENDPOINT,
-  MASH_CONFIG_DIR, MASH_INSECURE_PLAINTEXT; mashctl's own `owner`,
+  MASH_CONFIG_DIR, MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION; mashctl's own `owner`,
   `account`, `admin_credentials`, `system_credentials`, `keys` with
   MASH_ADMIN_CREDENTIALS, MASH_SYSTEM_CREDENTIALS and MASH_KEYS_DIR [confirm
   with core: the mash targets use the same names].]
@@ -3726,13 +3529,10 @@ exits 1 with `mash: no endpoint named "..."`.
   writable by group or others, no sticky world-writable parent, no link in the
   path or among the five files, each file a regular file owned by the user,
   secret files mode 600; how a swap during the copy is detected; how the match
-  between the CA, the account key and the credentials is checked (Choice 65).]
-- [DRAFT17, C2: `mash trust replace` is dropped from 0.5.6 and `mash trust
-  repair` is not in contract revision 11. The three install refusals send the
-  person to `mash trust reset` (pointer block, `[mash output: see the mash
-  targets file]`), then install again. [confirm with core: that `repair` is
-  gone, what `reset` prints, and the fix of `this machine's trust files
-  disagree`.]]
+  between the account key and the credentials is checked (Choice 65).]
+- [DRAFT19, E1c: no `mash trust` command in 0.5.6. The install refuses on any
+  difference and names the file to move aside; [confirm with core: the three
+  refusals' wording and that no mash command checks a trust record.]]
 - [DRAFT17, C9: the README wording of how to get and check `install-mash.sh`
   (the contract says the attestation, `gh attestation verify`, naming the
   repository, the release workflow and the tag); the page address is the
@@ -3761,19 +3561,17 @@ exits 1 with `mash: no endpoint named "..."`.
   with `mashctl adopt --from <dir>` and `mash-setup.json` (Choice 56). It
   prints no `Account` row. Two of its sentences still say that `adopt` asks
   the person to type the fingerprint; the helper's owner removes them
-  (section 0a). The helper binds `127.0.0.1` by default and prints
+  (section 0a). Its closing text about its own key-retiring step is the
+  helper's, printed as it is; mashctl's output never mentions it. The helper binds `127.0.0.1` by default and prints
   `tls://localhost:4222`; the two-machine flow needs `--host` with a name the
   other machine reaches and a `--listen` address the person confirmed, as the
   skill describes. Section 0a shows `tls://myserver:4222`.]
-- [the setup helper's `--retire-keys` step needs the server directory
-  (`--dir`) and an archive path (`--retire-keys DEST`), and a person types
-  the directory to confirm it; `adopt` prints no command for it.]
 - [core confirmed: `mash credential install --key K --token T [--server
   <url>] [--ca <ca.pem>] [--out <dir>] [--force] [--dry-run] [--detail]
   [--json]` prints the block in section 2 (`wrote`, `wrote`, `copied`), and
-  `--creds FILE` makes the same writes from a credentials file made by
-  `mashctl endpoint create --make-key --creds-out FILE`; DRAFT11 removes the
-  `kept` form and `--force`, and adds the address prompt; confirm with core]
+  `--creds FILE` makes the same writes from a credentials file; DRAFT19
+  removes the address and fingerprint prompts and takes `--server`; confirm
+  with core]
 - [confirm: `--creds-out FILE` is created exclusively as a new regular file in
   a folder the person owns, without following links, mode 600 from creation,
   completed atomically (INV-003); an existing different file, a link and a
@@ -3798,7 +3596,7 @@ exits 1 with `mash: no endpoint named "..."`.
   MASH_OWNER]
 - [confirm with core: the checks `adopt --from` makes and `adopt --dry-run`
   lists (Part 1, Choice 65), read through held handles and refused at a named
-  check; `adopt` no longer writes or keeps `trust.json` (DRAFT16).]
+  check; `adopt` writes no trust record.]
 
 ## Changes in DRAFT2
 
@@ -3842,7 +3640,7 @@ place, not a word).
 
 ---
 
-# mashctl 0.5.6 target output, part 2: every command except the first-run journey, DRAFT18
+# mashctl 0.5.6 target output, part 2: every command except the first-run journey, DRAFT19
 
 Status: design proposal, no code. Written against the catalog
 `docs/plans/2026-11-19-cli-output-catalog-mashctl.md` (v0.5.5) and the rules in
@@ -4029,11 +3827,13 @@ Usage: mashctl endpoint <command> [options]
 Options (each command's --help says which it takes)
   --all       every endpoint whose credentials are on this machine (reissue)
   --changed   only the endpoints that need a new key (reissue)
+  --yes       go ahead with a bulk reissue (--all or --changed)
   --dry-run   print what would be done and change nothing
   --detail    print everything that was done
   --wide      add columns to a list
 
-delete and reissue say what will be lost and ask you to type the address.
+delete and a single reissue say what will be lost and ask you to type the
+address. A bulk reissue (--all, --changed) goes ahead only with --yes.
 
 Example:
   mashctl endpoint create acme.demo.bob --make-key
@@ -4070,15 +3870,15 @@ key was made on another machine with mash key create.
 
 Flags:
   --make-key           make the private key here and write the credentials
-  --creds-out <file>   write the credentials to <file>: a new file, private
-                       to you (mode 0600) from the moment it is made, in a
-                       folder you own. A file that already exists is refused.
-                       Without it they go to
-                       ~/.config/mash/<address>.creds
+  --creds-out <file>   write the credentials to <file>, on this machine, as
+                       the same user: a new file, private to you (mode 0600)
+                       from the moment it is made, in a folder you own. A
+                       file that already exists is refused. Without it they
+                       go to ~/.config/mash/<address>.creds
   --public-key <file>  sign a public key made on another machine; writes the
-                       token and prints what to give that machine: the token
-                       file, the CA file, the server address (you fill it in)
-                       and the CA fingerprint
+                       token and prints what to send that machine: the token
+                       file and the CA file, and, apart from them, the server
+                       address and the CA fingerprint
   --token-out <file>   write the token to <file>. Default: <address>.token in
                        this folder
   --tag K=V            add a tag to the endpoint (repeat for more)
@@ -4099,6 +3899,9 @@ Example:
 
 What changed and why:
 
+- DRAFT19 (E1b, E3): `--creds-out` is the same-machine, same-user path;
+  `--public-key` prints the server address and the CA fingerprint, each
+  labelled, to send apart from the files. The help names both.
 - The help is new (DRAFT5): it did not exist in this document. It shows the
   one-command same-machine path, `--make-key --creds-out FILE`, and the
   other-machine path, `--public-key FILE`, with the file each one writes.
@@ -4445,8 +4248,11 @@ Reissued acme.demo.bob.
 
 No lock file was left behind.
 
-NEXT: copy acme.demo.bob.2.token to bob's machine, and run there:
-  mash credential install --key bob2.key --token acme.demo.bob.2.token
+NEXT: on bob's machine, move the old credentials aside:
+  mv ~/.config/mash/acme.demo.bob.creds ~/.config/mash/acme.demo.bob.creds.old
+
+Then copy acme.demo.bob.2.token there and install the new credentials:
+  mash credential install --key bob2.key --token acme.demo.bob.2.token --ca ca.pem
 ```
 
 AFTER, `--dry-run`
@@ -4478,8 +4284,11 @@ What changed and why:
 - DRAFT10 (V2): the same typed confirmation as B1, and the `Checked:` line.
   The old key is refused at once, so bob is signed out until the install; the
   "will lose" text says so before the person types.
-- The install on bob's machine needs no `--force` and no CA flags: it
-  replaces the credentials after a typed confirmation (Part 1, step 3).
+- DRAFT19 (E1c, E1d): the install on bob's machine never changes a file
+  that is already there, so it would refuse over the old credentials; the NEXT
+  moves them aside first and then installs the new ones (Part 1, step 3). It
+  needs no `--force` and asks nothing typed. The address is already in
+  `config.json`, so the command names only the CA file.
 - The flag `--jwt-out` is now `--token-out`; `--token-out <file>` overrides
   the numbered name.
 - DRAFT11 (critic defect 4, walk finding 1): step 1 is shown. `mash key create
@@ -4534,27 +4343,27 @@ Skipped, no credentials file on this machine (2):
 Nothing was changed.
 
 NEXT: to give alice and zoe new keys, run:
-  mashctl endpoint reissue --all
+  mashctl endpoint reissue --all --yes
 
 Or reissue bob (carol the same way), starting on bob's machine:
   mash key create --for acme.demo.bob --out bob2.key
 ```
 
-AFTER, `--all`, all done
+AFTER, `--all` without `--yes`
+
+Without `--yes` the command prints the plan, as the dry run does, and changes
+nothing [confirm]:
 
 ```text
 $ mashctl endpoint reissue --all
+[exit 0]
+(the screen of the dry run above, and nothing is changed)
+```
 
-Reissuing 2 endpoints makes a new key for each and refuses the old keys from
-now. The sessions that run as alice and zoe are signed out until they are
-restarted. Unread mail is kept. Mail an endpoint sent before now will show as
-[unknown-signer] in its inbox, because the old key signed it.
+AFTER, `--all --yes`, all done
 
-OWNER  GROUP  ENDPOINT  UNREAD
-acme   demo   alice     2
-              zoe       0
-
-Type 2 to reissue 2 endpoints: 2
+```text
+$ mashctl endpoint reissue --all --yes
 
 Gave new keys to 2 endpoints.
 
@@ -4563,37 +4372,16 @@ acme   demo   alice     done
               zoe       done
 
 Checked: the server now refuses the old keys.
+Mail each sent before now shows as [unknown-signer] in its inbox.
 
 Restart the sessions that run as alice and zoe, on this machine, so they use
 the new credentials.
 ```
 
-AFTER, `--all`, a wrong count, and no terminal
-
-```text
-$ mashctl endpoint reissue --all
-(the text of what will change, and the prompt, as above)
-Type 2 to reissue 2 endpoints: 3
-[exit 3]
-error: what you typed is not 2. Nothing was changed.
-fix: run the command again and type the number of endpoints it lists:
-  mashctl endpoint reissue --all
-
-$ mashctl endpoint reissue --all
-[exit 4]
-error: a person must run this at a terminal.
-fix: run the same command in a terminal and type the count when asked:
-  mashctl endpoint reissue --all
-
-Or, to see what it would change without changing anything:
-  mashctl endpoint reissue --all --dry-run
-```
-
 AFTER, `--all`, partial outcome (exit 5)
 
 ```text
-$ mashctl endpoint reissue --all
-(the text of what will change, and the prompt, as above)
+$ mashctl endpoint reissue --all --yes
 [exit 5]
 Gave a new key to 1 of 2 endpoints. 1 was not done.
 
@@ -4626,6 +4414,13 @@ Nothing to reissue: no endpoint on this machine needs a new key.
 
 What changed and why:
 
+- DRAFT19 (E1d; decision 264): a bulk reissue takes `--yes` again, as in
+  0.5.5, and asks no typed count: the typed count, its wrong-answer and
+  no-terminal blocks and the "will lose" paragraph before it are gone [confirm].
+  Without `--yes` the command prints the plan (the dry run's screen) and
+  changes nothing; the NEXT of the plan names `--yes`. Typed confirmation stays
+  for a single reissue (B1, B2), delete, `deprovision` and `--delete-creds`.
+  The entries below are history.
 - P3, P2: a grouped table (owner and group once), the dotted address only.
 - P6: no `reissued 0, skipped 0, refused 0, error 0` counter line. The result is
   a sentence plus a RESULT column; the reason is in plain words.
@@ -6038,15 +5833,15 @@ error: --all and --changed make the new keys on this machine, so they cannot
 fix: leave out --public-key; to see what would change:
   mashctl endpoint reissue --all --dry-run
 
-usage: mashctl endpoint reissue (--all | --changed) [--dry-run]
+usage: mashctl endpoint reissue (--all | --changed) [--yes] [--dry-run]
 
-$ mashctl endpoint reissue --all --yes
+$ mashctl endpoint reissue acme.demo.bob --public-key bob2.pub --yes
 [exit 2]
-error: unknown option --yes. A bulk reissue asks you to type the count.
+error: unknown option --yes. A single reissue asks you to type the address.
 fix: run it without the flag, in a terminal:
-  mashctl endpoint reissue --all
+  mashctl endpoint reissue acme.demo.bob --public-key bob2.pub
 
-usage: mashctl endpoint reissue (--all | --changed) [--dry-run]
+usage: mashctl endpoint reissue <address> (--make-key | --public-key <file>)
 
 $ mashctl endpoint create bob
 [exit 2]
@@ -6199,8 +5994,8 @@ If your profile exports MASH_SERVER, remove it from the file that sets it,
 then start a new shell. To use another address, set MASH_SERVER to a tls://
 address.
 
-Or, for a test server only: put MASH_INSECURE_PLAINTEXT=1 before the command:
-  MASH_INSECURE_PLAINTEXT=1 mashctl endpoint list
+Or, for a test server only, run it with the variable set:
+  MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1 mashctl endpoint list
 
 With it, credentials and mail cross the connection unencrypted.
 
@@ -6212,8 +6007,8 @@ fix: change "server" in ~/.config/mash/config.json to a tls:// address. For a
      server with its own certificate authority, also set "ca" there to the
      full path of its file (MASH_CA names it for one run).
 
-Or, for a test server only: put MASH_INSECURE_PLAINTEXT=1 before the command:
-  MASH_INSECURE_PLAINTEXT=1 mashctl endpoint list
+Or, for a test server only, run it with the variable set:
+  MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1 mashctl endpoint list
 
 With it, credentials and mail cross the connection unencrypted.
 
@@ -6290,10 +6085,11 @@ Warnings (not refusals; the command goes on). They replace the two long
 `warning:` lines of 0.5.5 and are printed only when they matter.
 
 ```text
-$ MASH_INSECURE_PLAINTEXT=1 mashctl endpoint list
+$ MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1 mashctl endpoint list
 [exit 0]
-warning: plain-text connection to myserver (MASH_INSECURE_PLAINTEXT is set):
-         anyone on the network can read mail and obtain signatures
+warning: encryption to myserver is switched off
+         (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set): anyone on the network
+         can read mail and obtain signatures
 
 OWNER  GROUP  ENDPOINT  ADDRESS          CREATED (UTC)
 acme   demo   alice     acme.demo.alice  2026-11-19 00:21
@@ -6313,9 +6109,10 @@ What changed and why:
 - P1: the preamble is gone. A server problem names the server in the error (a failure may name it).
 - P5, P6: the TLS refusal (310 columns, with `insecure_plaintext` and `tls_ca`
   explained nowhere) is a short fix. The test-server override is the
-  environment variable `MASH_INSECURE_PLAINTEXT=1` for one run, named in an
-  `Or` block (DRAFT8, REQ-010); the config key `insecure_plaintext` is not
-  offered. The text says that credentials and mail then cross the connection
+  environment variable for one run, named in an `Or` block (DRAFT8, REQ-010;
+  DRAFT19, E4: it is `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1`, renamed by the
+  maintainer; it was `MASH_INSECURE_PLAINTEXT=1`); the config key
+  `insecure_plaintext` is not offered. The text says that credentials and mail then cross the connection
   unencrypted.
 - DRAFT9 (U6): the plain-URL refusal says where the address came from. From
   MASH_SERVER the fix is `unset MASH_SERVER` alone on its line (a test for the
@@ -6324,8 +6121,9 @@ What changed and why:
   Both end with the same `Or` block for a test server. [confirm: mashctl can
   tell the two sources apart; Part 1 Facts to confirm 20.]
 - DRAFT9 (U3, REQ-010): while the override is set, every connecting command
-  prints one `warning:` line first on stderr, before any result, in core's
-  words wrapped to 80. It is shown once here, on `endpoint list`, and not in
+  prints one `warning:` line first on stderr, before any result, in the
+  words of REQ-010 wrapped to 80 (DRAFT19, E4: `encryption to <host> is
+  switched off (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set): ...`). It is shown once here, on `endpoint list`, and not in
   the other mockups. The conventions block states the rule.
 - The wrapper text `mashctl: endpoint list: mashctl: mash:` (the same program
   named three times) is gone.
@@ -6880,11 +6678,11 @@ form with its folder filled in: use that. The folder holds mash-setup.json
 ca.pem and, in export/, operator.nk, account.nk, sys.creds and
 mashadmin.creds. adopt copies what mashctl needs into ~/.config/mash and
 mashctl keeps its own copies. Leave the folder where it is: it holds the CA
-key and the signing keys until the setup script's --retire-keys step.
+key and the signing keys.
 
 For a folder that is yours, on this machine, adopt asks nothing about ca.pem.
-This copies files from a folder you own; it does not authenticate the server,
-and the server's address comes only from that folder. adopt checks, by name,
+No fingerprint asked: the folder is yours. The server's address comes only
+from that folder. adopt checks, by name,
 that the folder is yours and every folder above it is yours or root's and not
 writable by others, that each file in it is yours, not writable by others and
 not a link, that the credentials in export/mashadmin.creds were made by the
@@ -6892,18 +6690,17 @@ account in export/account.nk, that the CA signed the server's certificate and
 that the operator key signed the account. It copies only files it has
 checked. It refuses a folder that is not yours, a folder above it that others
 can write to, a link, a file that another user owns or can write, files that
-do not belong together, a file that is replaced or changed while it is copied,
-and a folder whose CA or account differ from the ones mashctl already uses.
-It names the check that failed and changes nothing. A settings file that
-others can only read is fine. It writes no trust record: that is mash's.
-A dry run makes the same checks and refuses the same way.
+do not belong together, and a file that is replaced or changed while it is
+copied. It names the check that failed and changes nothing. A settings file
+that others can only read is fine. A dry run makes the same checks and
+refuses the same way.
 
 The second form is for a server you set up by hand or that someone else runs:
 you give each file yourself, from whoever set the server up, and --account
 needs the account's name (no default; whoever runs the NATS server has it). It
-always asks for the CA's fingerprint, and says only whether it matched; no flag
-skips that. The two forms cannot be mixed: --from refuses every flag of the
-second.
+asks for no fingerprint: the CA file is the one you give it, and adopt checks
+that the server presents a certificate from it. The two forms cannot be
+mixed: --from refuses every flag of the second.
 
 Flags:
   --from <dir>                  the folder the setup script printed
@@ -6915,8 +6712,7 @@ Flags:
   --system-credentials <file>   the system credentials file
   --account NAME                the account's name; required, no default
   --ca <file>                   the CA file of a server with its own
-                                certificate authority (or set MASH_CA); it
-                                asks you to type its fingerprint
+                                certificate authority (or set MASH_CA)
   --make-admin                  make the admin credentials mashctl will use
   --admin-credentials <file>    use admin credentials you already have
   --dry-run                     print what would be done; ask and change nothing
@@ -6981,9 +6777,8 @@ fix: leave out --ca:
 ```text
 $ mashctl adopt --from /home/alice/mash-nats --dry-run
 [exit 0]
-Would connect mashctl to the server as owner acme. This copies files from a
-folder you own; it does not authenticate the server, so no fingerprint would
-be asked:
+No fingerprint asked: the folder is yours.
+Would connect mashctl to the server as owner acme:
   - check that the folder is yours, that every folder above it is yours or
     root's and not writable by others, and that each file in it is yours, not
     writable by others and not a link
@@ -7021,17 +6816,6 @@ Or run the setup script again, in a new folder under your own home folder:
 <script> is the setup script you ran. A fresh setup makes a new server
 identity: endpoints made on the old server stop matching it.
 
-$ mashctl adopt --from /home/alice/mash-nats --dry-run
-[exit 1]
-Checking the folder first.
-
-  settings  FAILED  This folder's CA and account are not the ones mashctl uses.
-
-error: the CA and the account in this folder differ from the ones mashctl is
-       already set up with. Nothing was changed.
-fix: use the folder of the server mashctl already uses, then run it again:
-  mashctl adopt --from <folder>
-
 $ mashctl adopt --server tls://myserver:4222 --owner acme ... --dry-run
 [exit 0]
 Would adopt the server as owner acme:
@@ -7058,7 +6842,7 @@ $ mashctl adopt --from /home/alice/mash-nats
 
 Connected mashctl to the server. Nothing was changed: the 5 files in
 ~/.config/mash are the same.
-This copies files from a folder you own; it does not authenticate the server.
+No fingerprint asked: the folder is yours.
 
 NEXT: on this machine, create an endpoint:
   mashctl endpoint create acme.<group>.<name> --make-key
@@ -7186,12 +6970,12 @@ mashctl endpoint reissue - give an endpoint a new key
 Usage:
   mashctl endpoint reissue <address> --public-key <file>
   mashctl endpoint reissue <address> --make-key
-  mashctl endpoint reissue (--all | --changed)
+  mashctl endpoint reissue (--all | --changed) [--yes]
 
 The old key stops working. Use --public-key when the new key was made on the
 machine where the endpoint runs, and --make-key only when it runs on this
-machine. It says what will change and asks you to type the address (for --all
-and --changed, the count). No flag skips it.
+machine. For one endpoint it says what will change and asks you to type the
+address; no flag skips that. --all and --changed go ahead only with --yes.
 
 Flags:
   --public-key <file> sign a new public key; writes a numbered token
@@ -7201,6 +6985,7 @@ Flags:
   --changed           reissue only those that need it: the credentials no
                       longer match the permissions, or a reissue was left
                       half done
+  --yes               go ahead with --all or --changed
   --dry-run           print what would change and change nothing
   --detail            print everything that was done
 
@@ -7256,7 +7041,8 @@ $ mashctl endpoint create acme.demo.bob --public-key bob.pub --dry-run
 Would create endpoint acme.demo.bob:
   - sign bob's public key, which makes the token
   - write the token to ./acme.demo.bob.token
-  - print the CA file and its fingerprint to give bob's machine
+  - print the server address and the CA fingerprint to send bob's machine
+    apart from the files
 Nothing was changed.
 ```
 
@@ -7561,11 +7347,12 @@ Decisions the rules left open. Each is one line.
     of those actions; `Created` is used for new keys and tokens made inside
     them.
 23. The bulk reissue dry run ends with a labelled `NEXT:` and the command on
-    its own line (DRAFT7, `--yes` removed in DRAFT10): `mashctl endpoint
-    reissue --all`, which then asks for the count.
+    its own line (DRAFT7; `--yes` removed in DRAFT10 and back in DRAFT19):
+    `mashctl endpoint reissue --all --yes`.
 24. The plain-URL refusal (E2) shows the override in one form only (DRAFT8,
-    REQ-010): `MASH_INSECURE_PLAINTEXT=1` before the command, for that run.
-    The config key `insecure_plaintext` is removed. The text says that
+    REQ-010; DRAFT19, E4): `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1` before
+    the command, for that run (it was `MASH_INSECURE_PLAINTEXT=1`; Part 1,
+    Choice 70). The config key `insecure_plaintext` is removed. The text says that
     credentials and mail then cross the connection unencrypted.
 25. Removing `mashctl init --local` (A5) reverses the local TLS quick start
     that ADR 0146 and 0.5.5 shipped. The contract that ratifies this document
@@ -7574,7 +7361,7 @@ Decisions the rules left open. Each is one line.
     1 choice 27). The one warning for a MASH_SERVER that overrides the config
     file is in the conventions block. `mashctl status` shows the server and the
     config path.
-27. `--creds-out FILE` (DRAFT8: a new private file, never an existing one) belongs to `endpoint create --make-key` only; with
+27. `--creds-out FILE` (DRAFT8: a new private file, never an existing one; DRAFT19: the same-machine, same-user path, with no fingerprint shown) belongs to `endpoint create --make-key` only; with
     `--public-key` it is a usage error (E1). `endpoint reissue --make-key`
     still writes to the config folder; give it `--creds-out` too if the
     same one-file copy is wanted after a reissue.
@@ -7601,13 +7388,14 @@ Decisions the rules left open. Each is one line.
 33. The exit codes, the stdout and stderr split, the colour rule, `--json`,
     resolved paths and `<version>` are written once, in the conventions block
     at the top of Part 1, and are not repeated in this part (DRAFT7).
-34. No command has a flag that skips a confirmation (DRAFT10, V2). `endpoint
-    delete`, every single `endpoint reissue`, `deprovision` and `credential
-    install` over credentials for the same address ask for the address;
-    `endpoint reissue --all` and `--changed` ask for the count. DRAFT9 kept
-    `--yes` on the bulk commands because a reissue is neither a trust nor an
-    exposure change; the contract's INV-004 now covers destruction, and every
-    reissue revokes a key. The audit table is Part 1, choice 35.
+34. Typed confirmation is for destruction only (DRAFT19, E1d; decision 264;
+    Part 1, choice 35). `endpoint delete`, every single `endpoint reissue`,
+    `deprovision` and `--delete-creds` ask for the address, and have no flag
+    that skips it. `endpoint reissue --all` and `--changed` take `--yes`, as in
+    0.5.5 (DRAFT10 had them ask for the count; DRAFT9 had `--yes`); without it
+    they print the plan and change nothing [confirm]. `credential install`
+    over credentials for the same address no longer asks: it refuses and names
+    the file to move aside (Part 1, choice 39).
 35. The plain-text warning is one `warning:` line printed first on stderr by
     every connecting command (REQ-010). It is shown once in E2; per-command
     mockups do not repeat it.
@@ -7636,19 +7424,21 @@ Decisions the rules left open. Each is one line.
 43. `mashctl endpoint delete`: "only 1 of 2 servers answered" and "the server
     could not confirm the revocation": 1 to 6. A wrong typed address: 3 (new).
     No terminal: 4 (new).
-44. `mashctl endpoint reissue` (every form): a wrong typed address or count 3,
-    no terminal 4 (new). "Another reissue changed bob's key": 6 to 1. An
+44. `mashctl endpoint reissue` (one endpoint): a wrong typed address 3, no
+    terminal 4 (new; DRAFT19: a bulk reissue types nothing). "Another reissue changed bob's key": 6 to 1. An
     unreadable credentials file in a bulk run is a `not done` row, exit 5.
 45. `mashctl endpoint create`: a config folder other users can write to: 6 to
     1. `--make-key` with a MASH_SERVER that names another server: 1 (new).
 46. `mashctl deprovision`: the typed address, 3 and 4, as for delete (new).
-47. `mash credential install` over credentials for the same address: wrong
-    address 3, no terminal 4 (new). `mash status` after a delete or a
+47. `mash credential install` over credentials for the same address:
+    refused, exit 1, with the file to move aside (DRAFT19; it was a typed
+    address, 3 and 4). `mash status` after a delete or a
     reissue: the server refuses the credentials, exit 4, and the error says so
     (`error: the server refuses these credentials.`; no terminal says `error:
     a person must run this at a terminal.`: DRAFT18, D3) [confirm with the
     `mash` targets: the wording, DELETED, and exit 4].
-48. `mashctl adopt` (Part 1): a wrong fingerprint 1 to 3; no terminal 1 to 4.
+48. `mashctl adopt` (Part 1): a wrong fingerprint 1 to 3; no terminal 1 to 4
+    (DRAFT19: no typed fingerprint, so neither).
     `mashctl status` NOT REACHABLE: 1 to 6.
 49. Rule 15 of the CLI standard says a missing terminal fails with exit 2
     naming the flag that answers the prompt. There is no such flag here
@@ -7663,25 +7453,30 @@ Decisions the rules left open. Each is one line.
     alternative: `--token-out` required. Part 1, choice 40.
 52. The packet lints (`make_packet.py`): V1 fails any success block with
     `tls://` or a config path, except typed commands, the `wrote`, `copied`
-    and `renamed` lines of the credential commands, `endpoint create`, `adopt`,
-    reissue and delete, the typed prompt lines, the adopt trust rows and the
-    CA path to copy; V3 fails an `[exit N]` outside the table or a condition
-    with the wrong code, and any `PROBLEM` with an exit other than 1; V2 fails
-    `--yes`; V6 fails a `PATH` column and any server other than
-    `tls://myserver:4222` (and `tls://testserver:4222`, the second server of
-    the MASH_SERVER examples). DRAFT11 adds: W6 fails a `kept` line (DRAFT13, Y2:
-    a `kept` line is allowed only in a block of `adopt`, `credential install`
-    or `endpoint create --make-key`, and only as `kept ... (unchanged)`; the
-    other V1 file verbs now include `kept`; Y3 fails `MASH_TLS_CA` and
-    `tls_ca` in an AFTER block); W2 fails a `sha256:` value before or after the line that asks the
-    person to type the fingerprint; W9 fails `--sys-creds` and `--admin-creds`
-    outside a "was renamed" refusal (DRAFT12: W2 recognises the eight-group
-    fingerprint; F1 fails a fingerprint with colons or an ellipsis outside the
-    quoted helper block; V3 fails an `[exit 3]` that is not a wrong typed
-    answer); K fails a `url` config key and a
-    loopback address; the width check exempts a block that shows `--wide` (CLI
-    standard rule 28, contract revision 4), and the jargon check exempts the
-    one block quoted from the setup helper.
+    and `kept` lines of the credential commands, `endpoint create`, `adopt`,
+    reissue and delete, the typed prompt lines, the `server address` rows of
+    the hand-off and the install, and the CA path to copy; V3 fails an `[exit
+    N]` outside the table or a condition with the wrong code, and any
+    `PROBLEM` with an exit other than 1; V2 fails `--yes` except on a bulk
+    reissue (DRAFT19) and in a "no --yes" line; V6 fails a `PATH` column and
+    any server other than `tls://myserver:4222` (and `tls://testserver:4222`,
+    the second server of the MASH_SERVER examples). W6 allows a `kept` line
+    only in a block of `adopt`, `credential install` or `endpoint create
+    --make-key`, and only as `kept ... (unchanged)`; Y3 fails `MASH_TLS_CA` and
+    `tls_ca` in an AFTER block; W9 fails `--sys-creds` and `--admin-creds`
+    outside a "was renamed" refusal; F1 fails a fingerprint with colons or an
+    ellipsis outside the quoted helper block; V3 fails an `[exit 3]` that is
+    not a wrong typed answer; K fails a `url` config key and a loopback
+    address; the width check exempts a block that shows `--wide` (CLI standard
+    rule 28, contract revision 4), and the jargon check exempts the one block
+    quoted from the setup helper. DRAFT19 adds, in an AFTER block (the helper's
+    quoted block excepted): no `trust.json`, no `--retire-keys`, no
+    `retire-keys`, no `MASH_INSECURE_PLAINTEXT`, no `trust reset`, `replace`
+    or `repair`, and no prompt that asks for a fingerprint or a count; and
+    the lint that a typed prompt is only on delete, deprovision,
+    `--delete-creds` and a single reissue. The lints that required typed
+    fingerprints (W2, Z4, Z5), the trust-record lines (R6 trust lines, N4) and
+    the held markers are removed.
 53. `audit` and `issued check` (DRAFT11, W5): a `PROBLEM` exits 1 whatever the
     flags, `INCOMPLETE` and `NOT REACHABLE` exit 6, as the one table says.
     `--strict` is removed, because it only turned a finding into exit 1; `audit
@@ -7707,8 +7502,8 @@ Decisions the rules left open. Each is one line.
 58. `adopt` (DRAFT13, Y1; Part 1, choices 56 to 58): `--from <dir>` is the
     first form in `--help`; the long flags are the second form, for a server
     set up by hand; the two are mutually exclusive (H2 shows the refusal). The
-    dry run of `--from` asks nothing and says that no fingerprint would be
-    asked for a folder the person owns (DRAFT14, Z5). `init` stays for raising the storage of an adopted server
+    dry run of `--from` asks nothing and says `No fingerprint asked: the
+    folder is yours.` (DRAFT14, Z5; DRAFT19, E2). `init` stays for raising the storage of an adopted server
     (A1, A3, H4).
 59. `kept (unchanged)` (DRAFT13, Y2; Part 1, choice 51): the repeat `adopt`
     (H3), the identical `credential install` and the repeat `endpoint create
@@ -7728,13 +7523,20 @@ Decisions the rules left open. Each is one line.
     (new; the first one is kept)`. It is a `wrote` line, the verb the Files
     convention lists, and says the first token is not touched.
 63. `adopt --help` and the dry run say what `adopt --from` says (DRAFT15, A1;
-    Part 1, Choices 62 and 65): the sentence `This is a local copy of files
-    from a folder you own. It does not authenticate the server.` appears in
-    the help, and the dry run lists the checks it would make (the folder and
+    Part 1, Choices 62 and 65; DRAFT19, E2): the line `No fingerprint asked:
+    the folder is yours.` appears in the help, and the dry run lists the checks it would make (the folder and
     its parents, that the CA, account key and credentials belong together,
     the refusal of a file that changes during the copy) and asks nothing. The
     repeat run reports `kept (unchanged)` for each file it is responsible for.
     DRAFT16: no trust record is written or kept by `adopt`.
+64. The scope ruling in this part (DRAFT19; decision 264): a bulk reissue takes
+    `--yes` and asks no typed count (B3, H5, E1); the install on bob's machine
+    after a reissue refuses over the old credentials, so the NEXT moves them
+    aside first (B2); `--creds-out` is the same-machine path (A4a); the
+    override is `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION` (E2); `adopt --help`
+    and the dry run say `No fingerprint asked: the folder is yours.` and no
+    longer mention a CA or account that differs, a trust record or a retire
+    step (H1, H3). Part 1, Choices 67 to 70, give the whole ruling.
 
 ## Facts to confirm
 
@@ -7781,8 +7583,9 @@ Decisions the rules left open. Each is one line.
 17. [confirm: `mash who --detail` shows tags (C1 help text).]
 18. [confirm: `rm -r` of the lock folder named in E4 is safe when no reissue is
     running.]
-19. [core confirmed: `mash credential install --creds FILE`, which A4a and
-    part 1 name as the way to install the file made by `--creds-out`.]
+19. [core confirmed: `mash credential install --creds FILE`, which installs a
+    credentials file on another machine or for another OS user (DRAFT19:
+    `--creds-out` is the same-machine path).]
 20. [confirm: mashctl can tell a server chosen by MASH_SERVER from one read from
     the config file, for the warning and for the source of a plain-URL
     refusal.]
@@ -8248,6 +8051,82 @@ numbers refer to the file as of DRAFT12's lint run; they are in the report.
    form and is marked `[the helper prints the fingerprint in this form once
    aligned]`. W2 recognises the new form; lint F1 fails a colon-separated or
    shortened fingerprint outside the helper block. Choice 53.
+
+## Changes in DRAFT19
+
+The maintainer's scope ruling for 0.5.6 (decision 264; contract revision 15)
+applied to both parts. Section 8 of `mashctl-dispositions.md` has the items in
+table form; the table "Cut by decision 264" at the end of this file lists each
+removal and where it was. Earlier "What changed and why" entries and the
+DRAFT2 to DRAFT18 lists describe those drafts and are history.
+
+1. E1a. The retire-keys handling is cut. Removed: every pointer to the
+   helper's `--retire-keys` step in mashctl's output (the closing paragraph of
+   the `adopt` default and `--detail` screens, the `Or`-after-NEXT note, the
+   `adopt --help` sentence, the conventions bullet and the Choices); the note
+   that `adopt --from` refuses by design after the retire step (replaced by the
+   plain case of a missing file). mashctl says only `mashctl keeps its own
+   copies.` The helper's own quoted closing text stays as the helper prints it.
+2. E1b. The held lines are gone with the trust record (see 3). `endpoint create
+   --make-key --creds-out <path>` stays as the same-machine, same-user,
+   one-command path (REQ-003): it writes everything in place, names each file,
+   shows no fingerprint and says why in one line. Its old other-machine
+   hand-off (files, address, fingerprint, warning, `credential install
+   --creds` NEXT) is gone.
+3. E1c. The trust record is cut: no `trust.json` anywhere (the three install
+   blocks, the two `--make-key` blocks, the cut-off rerun, the install
+   refusals, `mashctl status --detail`), no `mash trust reset`, `replace` or
+   `repair` pointer, no `Checked: this token matches the trust record.`, no
+   statement that an account is recorded. Install refuses on any difference
+   with `error: <file> already holds ... Nothing was changed.` and `fix: move it
+   aside:` with `mv <file> <file>.old`, then `Then run the install again:`
+   (the two-step form of the conventions, so the lint for a fix of two
+   commands holds): another account (the credentials file), another server
+   (`config.json`), another CA (`ca.pem`), and the reissue case (B2's NEXT now
+   moves the old credentials aside first). The `adopt` refusal for a rerun with
+   changed contents is gone.
+4. E1d. Typed confirmation is only on `endpoint delete`, `deprovision`,
+   `--delete-creds` and a single `endpoint reissue`. Removed: the typed CA
+   fingerprint, server address and replacement confirmation of `credential
+   install`; the long form of `adopt`'s typed fingerprint with its no-terminal
+   and mismatch blocks; the bulk reissue's typed count with its wrong-count and
+   no-terminal blocks. A bulk `--all` or `--changed` takes `--yes` again [confirm]
+   (A4, A4a, B3, H5, E1 usage error); without it the command prints the plan.
+   The conventions bullet, the exit-code rows, Choices 35, 36, 39, 45, 48, 53
+   and 62 (Part 1) and 34, 44, 47, 48 (Part 2) say so.
+5. E2. `adopt --from <dir>` in its simplest true form: one line, `No fingerprint
+   asked: the folder is yours.`, replaces the "does not authenticate" line in
+   every screen (default, `--detail`, identical rerun, `--help`, dry run). The
+   refusals are six blocks (link, writable parent, mixed files, a file changed
+   while copying, a folder another user prepared, the identical rerun). The long
+   form for a hand-managed server asks no typed fingerprint [confirm]. The
+   default output is 11 lines (lint M4: at most 12).
+6. E3. `endpoint create --public-key` prints, to send apart from the token, the
+   server address and the CA fingerprint (eight groups of eight), each
+   labelled, and one sentence that the person installing compares both with
+   what the install shows. `credential install` (core's) shows both and the
+   check that the server presents a certificate from the CA; nothing is typed.
+   The install takes `--ca` (required, REQ-003) and `--server`, so its command
+   passes 78 columns [confirm with core: the flag for the address].
+7. E4. `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1` replaces
+   `MASH_INSECURE_PLAINTEXT` in every AFTER block, help, refusal, warning (now
+   `warning: encryption to <host> is switched off (...): anyone on the network
+   can read mail and obtain signatures`, wrapped to 80), convention, Choice and
+   Fact. Part 1 Choice 70 records the rename. BEFORE blocks and history keep the
+   old name.
+8. E5. `mashctl-dispositions.md` has a section 8 (table: item, cut / kept /
+   changed, where). `scope-list-mashctl.md` is unchanged.
+9. Lints. Removed: W2, Z4, Z5, N4 and the HELD handling's purpose, and R6's
+   seven-block count (now six). Added: P1 (no `trust.json`, `retire-keys`,
+   `MASH_INSECURE_PLAINTEXT`, trust record or command, typed fingerprint or
+   count, or HELD in an AFTER block), P2 (a typed prompt only on delete,
+   deprovision, `--delete-creds` and a single reissue), P3 (`--yes` only on a
+   bulk reissue), E3a to E3c, E2a, E4; M3 covers `trust reset`; the typed
+   command width is 110 (it was 100) for the install with `--server`.
+10. New Choices: Part 1 67 to 70, Part 2 64. New [confirm] items: bulk
+    `--yes` and the plan without it; the long form of `adopt` with no typed
+    fingerprint; the install's `--server`; how mash finds a `--creds-out`
+    file outside the config folder.
 
 ## Changes in DRAFT18
 
@@ -8895,3 +8774,18 @@ the folder check where they differ.
 | check 4 `FAILED` rows push the text right of `ok` rows | fixed: the status word is padded to six columns when both share a block; lint M8 | P1 conventions, s.1b |
 | check 1 item 11 walk 13 note missing | fixed: the reissue shows `No lock file was left behind.` | P2 B2 |
 | check 4 names (carol, zoe, dave, hal, deploy) | no change: pre-existing names in Part 2 | P2 |
+
+## Cut by decision 264
+
+Removed from these targets by the maintainer's scope ruling (DRAFT19). Each
+goes to a later release if a need appears. "Was" names the section of DRAFT18.
+
+| Cut | What was removed | Where it was |
+|---|---|---|
+| E1a retire-keys | every `--retire-keys` pointer in mashctl's output; the `Or` and the closing paragraph of `adopt`; the `adopt --help` sentence; the note that `adopt --from` refuses after the retire step; the `<archive file>` explanation; the Facts bullet about the step | P1 s.0a, s.1b (default, `--detail`), conventions, Choices 24, 49, 64, Facts; P2 H1 |
+| E1b `--creds-out` hand-off | the other-machine hand-off of `--creds-out` (files, address, fingerprint, warning, NEXT `credential install --creds`); the five held markers | P1 s.2 (carol), s.2 (install and alice blocks) |
+| E1c trust record | `trust.json` lines in the install blocks, the two `--make-key` blocks and the cut-off rerun; `Checked: this token matches the trust record.`; the three install refusals that sent the person to `mash trust reset`; the `mash trust reset` pointer block; the alice trust paragraph; `trust record:` in `mashctl status --detail`; the `adopt` refusal for changed contents and its bullet; the dry-run `settings FAILED` block; the help sentences about a differing CA or account and about the trust record; every statement that an account is recorded | P1 conventions, s.1b, s.1d (status), s.2, Choices 35, 61, Facts; P2 H1, H3 |
+| E1d typed confirmations | the typed CA fingerprint of `credential install` and of the long form of `adopt`; the typed server address; the typed replacement address over existing credentials; the no-terminal and mismatch blocks for each; the typed count of a bulk reissue with its wrong-count and no-terminal blocks and the "will lose" paragraph before it; the `--yes` is-unknown usage error for a bulk reissue | P1 s.1b, s.2; P2 B3, E1, H5; Choices 35, 36, 39, 45, 48, 53, 62 |
+| E1d lints | W2 (typed fingerprint order), Z4 (install without the address prompt), Z5 (adopt asks or says why), N4 (held markers), R6's count of seven | `make_packet.py` |
+| E2 adopt refusal | the refusal block for a rerun with different contents | P1 s.1b refusals |
+| E2 the long form | the typed fingerprint of the long form of `adopt` (kept as the fallback, with none typed) | P1 s.1b |
