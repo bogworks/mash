@@ -211,7 +211,7 @@ Fetch the script from one exact commit and check its hash. Do not run a
 script you have not checked:
 
 ```sh
-mkdir -p "$HOME/mash-setup" && curl -fsSL -o "$HOME/mash-setup/nats-local-setup.sh" https://raw.githubusercontent.com/bogworks/mash/3a35750c178442f6495db74e0013b4215434e7d7/scripts/nats-local-setup.sh && echo "988054b24778a0aabf36091fae32861e45ef08ddbf834ec248c75ac80df6d5a1  $HOME/mash-setup/nats-local-setup.sh" | sha256sum -c -
+mkdir -p "$HOME/mash-setup" && curl -fsSL -o "$HOME/mash-setup/nats-local-setup.sh" https://raw.githubusercontent.com/bogworks/mash/9c729a78fccf1b4021c6f281966796d207d81475/scripts/nats-local-setup.sh && echo "e0ab368d0cc56cbebbd464f3630b7ca29f545a0272f087ddb330c9c2f6317c40  $HOME/mash-setup/nats-local-setup.sh" | sha256sum -c -
 ```
 
 Expected: one line ending `nats-local-setup.sh: OK`. If it says

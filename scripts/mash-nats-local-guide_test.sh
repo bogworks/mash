@@ -544,8 +544,8 @@ ck "the script at that commit has the guide's sha256" test "$COMMITSHA" = "$GSHA
 ck "the script in this tree has the guide's sha256" test "$HELPERSHA" = "$GSHA"
 ck "that commit is on a pushed (remote) branch" bash -c \
     "[ -n \"\$(git -C '$REPO' branch -r --contains '$GCOMMIT' 2>/dev/null)\" ]"
-PIN_COMMIT=3a35750c178442f6495db74e0013b4215434e7d7
-PIN_SHA=988054b24778a0aabf36091fae32861e45ef08ddbf834ec248c75ac80df6d5a1
+PIN_COMMIT=9c729a78fccf1b4021c6f281966796d207d81475
+PIN_SHA=e0ab368d0cc56cbebbd464f3630b7ca29f545a0272f087ddb330c9c2f6317c40
 ck "the guide's script commit equals the pinned $PIN_COMMIT" \
     test "$GCOMMIT" = "$PIN_COMMIT"
 ck "the guide's script sha256 equals the pinned $PIN_SHA" \
