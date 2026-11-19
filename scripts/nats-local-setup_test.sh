@@ -328,7 +328,11 @@ t() { # NAME CONDITION(eval)
 }
 RES="A process running as you can still swap a path between the recheck"
 RES="$RES and the write; this script does not defend against that."
-wide() { printf '%s\n' "$OUT" | awk 'length > 80' | grep -c . || true; }
+# the README URL line is one unbroken line and may exceed 80
+wide() {
+    printf '%s\n' "$OUT" | grep -v 'README.md#quick-start' |
+        awk 'length > 80' | grep -c . || true
+}
 PORT=4300
 np() { PORT=$((PORT + 1)); }
 SEED=SUAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB
@@ -429,7 +433,7 @@ t "tools report the pinned versions" \
      has "nsc reports '"'"'nsc version 2.15.0'"'"'"'
 t "create output <= 80 columns" '[ "$(wide)" = 0 ]'
 t "no seed, JWT or PEM in the output" \
-    '! grep -Eq "S[OANUCX][A-Z2-7]{40,}|eyJ[A-Za-z0-9_-]{10,}|BEGIN" \
+    '! grep -Eq "(^|[^A-Z2-7])S[OANUCX][A-Z2-7]{54,}|eyJ[A-Za-z0-9_-]{10,}|BEGIN" \
         <<<"$OUT"'
 t "no temp files left, DIR 700" \
     '[ -z "$(find $D -name ".cmd.*")" ] && [ "$(stat -c %a $D)" = 700 ]'
@@ -480,9 +484,8 @@ t "closing output: no long adopt flags, no CA env" \
         $W/happy.out &&
      ! grep -Eq "MASH_TLS_CA|MASH_CA" $W/happy.out &&
      ! grep -E "mashctl adopt --from" $W/adopt.cmd | grep -q -- "--ca "'
-t "closing output: hand-managed pointer without the long form" \
-    'has_f() { tr -s " \n" " " <$W/happy.out | grep -qF "$1"; }
-     has_f "Hand-managed server instead? see the long form in the guide"'
+t "closing output: hand-managed paragraph is gone" \
+    '! tr -s " \n" " " <$W/happy.out | grep -qF "Hand-managed server"'
 t "closing output: no separate init step" '! grep -q "mashctl init" $W/happy.out'
 t "mash-setup.json: exists, mode 600, one exact line" \
     '[ -f $D/mash-setup.json ] && [ "$(stat -c %a $D/mash-setup.json)" = 600 ] &&
@@ -491,27 +494,46 @@ t "mash-setup.json: exists, mode 600, one exact line" \
         $D/server.conf)\",\"owner\":\"alice\",\"account\":\"MASH\"}" ]'
 t "mash-setup.json: no secrets, no fingerprint" \
     '! grep -Eq "S[OANUCX][A-Z2-7]{40,}|eyJ|BEGIN|sha256|$FPHEX" $D/mash-setup.json'
-t "mash-setup.json: listed in Files" \
-    'grep -q "mash-setup.json  *what adopt --from reads (no secrets)" $W/happy.out'
+t "closing output: per-file list replaced by one line" \
+    'grep -qxF "Everything is in $D; run --check to list it." $W/happy.out &&
+     ! grep -q "^Files (all under" $W/happy.out &&
+     ! grep -q "export/operator.nk" $W/happy.out'
+t "step 1 and the box print the owner back" \
+    'tr -s " \n" " " <$W/happy.out | grep -qF \
+        "owner alice (the first part of every address)" &&
+     grep -Eq "^  Owner +alice$" $W/happy.out'
 t "closing output: no seed or credential content printed" \
-    '! grep -Eq "S[OANUCX][A-Z2-7]{40,}|eyJ[A-Za-z0-9_-]{10,}|BEGIN" \
+    '! grep -Eq "(^|[^A-Z2-7])S[OANUCX][A-Z2-7]{54,}|eyJ[A-Za-z0-9_-]{10,}|BEGIN" \
         $W/happy.out'
-t "closing output: retire-keys pointer and other-machine sentence" \
-    'grep -q "Or, after adopt succeeds, to retire the setup.s keys: --retire-keys (item 2" \
-        $W/happy.out && tr -s " \n" " " <$W/happy.out |
-        grep -q "a credential carries no address"'
+t "closing output: removed paragraphs are gone" \
+    '! grep -q "Or, after adopt succeeds" $W/happy.out &&
+     ! tr -s " \n" " " <$W/happy.out | grep -q "a credential carries no" &&
+     ! grep -q "Looking after the server later" $W/happy.out &&
+     ! grep -Eq -- "--(backup|upgrade|enable-boot|disable-boot|remove|retire-keys .*tar)" \
+        $W/happy.out'
+t "closing output: other-commands line, Done and race sentences" \
+    'has_n() { tr -s " \n" " " <$W/happy.out | grep -qF -- "$1"; }
+     grep -qxF "Other commands: --stop, --start, --check, --help." \
+        $W/happy.out &&
+     has_n "Done. The setup is in" &&
+     has_n "does not limit it to you" &&
+     has_n "A process running as you can still swap a path"'
 t "closing output: new fingerprint and adopt-user wording, no typing prompt" \
     'has_n() { tr -s " \n" " " <$W/happy.out | grep -qF -- "$1"; }
      has_n "The CA fingerprint is what a person on ANOTHER machine types to" &&
      has_n "trust this server; this machine does not ask for it." &&
-     has_n "Adopt the server into mash, as the same user that ran this" &&
-     has_n "script (it does not ask for the fingerprint, and it sets up" &&
-     has_n "so there is no separate init):" &&
-     has_n "--retire-keys archives the keys first; nothing here asks you to" &&
-     has_n "delete the server directory by hand." &&
+     has_n "Install mash and mashctl (part 4 of the guide), then adopt the" &&
+     has_n "server into mash as the same user that ran this script (it does" &&
+     has_n "not ask for the fingerprint and sets up mash" &&
+     has_n "README quick start from its \"launch a session\" step:" &&
+     grep -qxF "  https://github.com/bogworks/mash/blob/v0.5.6/README.md#quick-start-one-machine-no-account" \
+        $W/happy.out &&
+     ! has_n "claude plugin" && ! has_n "docs/install.md" &&
      ! has_n "types the CA fingerprint" && ! has_n "type the CA fingerprint" &&
      ! has_n "compare it with the CA fingerprint" &&
      ! has_n "in their own terminal"'
+t "closing output is short (<= 45 lines from Done. on)" \
+    '[ "$(sed -n "/^Done\./,\$p" $W/happy.out | wc -l)" -le 45 ]'
 t "adopt and init commands found in the output" \
     '[ -s $W/adopt.cmd ] && [ "$(grep -c . $W/init.cmd)" = 1 ]'
 run env -i HOME=/home/alice PATH="$BINP:/usr/bin:/bin" \
@@ -559,17 +581,17 @@ t "--mash-config reaches the closing text and MASH_CONFIG_DIR" \
     'has "MASH_CONFIG_DIR=$W/mcfg mashctl adopt --from $W/nostart" &&
      has "mashctl'"'"'s folder ($W/mcfg; set MASH_CONFIG_DIR"'
 t "mash-config dir is not created by the helper" '[ ! -e $W/mcfg ]'
-t "closing text names the groups and Claude Code lines" \
-    'has "claude plugin marketplace add bogworks/mash" &&
-     has "claude plugin install mash@mash" &&
-     has "https://github.com/bogworks/mash/blob/v0.5.6/docs/install.md" &&
-     has "bob-1.<group>.<agent>.creds"'
-t "lifecycle commands all printed" \
-    'for w in --start --stop --check --backup --retire-keys --upgrade \
-        --enable-boot --disable-boot --remove; do has "$w" || exit 1; done'
+t "closing text names the agents' creds file" \
+    'has "bob-1.<group>.<agent>.creds" &&
+     ! has "claude plugin marketplace add" &&
+     ! has "docs/install.md"'
+t "other commands line printed, long command list gone" \
+    'has "Other commands: --stop, --start, --check, --help." &&
+     for w in --backup --upgrade --enable-boot --disable-boot --remove; do
+         ! has "$w" || exit 1; done'
 # the adopt --from line is one unbroken line: a long DIR may exceed 80
 t "closing output <= 80 columns (but the adopt line)" \
-    '[ "$(printf "%s\n" "$OUT" | grep -v "mashctl adopt --from" |
+    '[ "$(printf "%s\n" "$OUT" | grep -v "mashctl adopt --from\|README.md#" |
         awk "length > 80" | grep -c .)" = 0 ]'
 t "S2: closing output states the residual race" 'has "$RES"'
 note "arguments"
@@ -1178,7 +1200,8 @@ OUTSHA=$(sha256sum "$W/lgout"/* | md5sum)
 run "$HELPER" --dir "$D" --owner alice --port $PORT --start
 t "log: create --start makes server.log (0600), no .1 yet" \
     '[ $RC -eq 0 ] && [ "$(stat -c %a $D/server.log)" = 600 ] &&
-     [ ! -e $D/server.log.1 ] && has "the log is kept at most 7 days"'
+     [ ! -e $D/server.log.1 ] &&
+     ! has "Files (all under"'
 run "$HELPER" --dir "$D" --stop
 echo "first-run marker" >>"$D/server.log"
 LOG1=$(sha256sum <"$D/server.log")

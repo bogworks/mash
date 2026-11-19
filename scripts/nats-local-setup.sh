@@ -1522,7 +1522,8 @@ chain_recheck parent "$PARENT"
 chkdir
 printf 'mash-nats-setup 1 created by uid %s\n' "$ME" >.mash-nats-setup
 mklog
-did "$DIR created by this script (mode 0700, yours); $ph:$PORT is free"
+did "$DIR created by this script (mode 0700, yours); $ph:$PORT is free;" \
+    "owner $OWNER (the first part of every address)"
 [ "$LOOPBACK" -eq 1 ] || did "EXPOSED: $LISTEN:$PORT, typed confirmation" \
     "given"
 
@@ -1684,7 +1685,6 @@ if [ "$START" -eq 1 ]; then
     srv_start
 fi
 
-file() { printf '  %-24s %s\n' "$1" "$2"; }
 QDIR=$(Q "$DIR")
 
 printf '\n'
@@ -1704,25 +1704,11 @@ else
 fi
 printf '\n'
 residual
-printf '\nFiles (all under %s):\n' "$QDIR"
-file bin/nats-server "server, $NS_VER (sha256 checked)"
-file bin/nsc "nsc, $NSC_VER (sha256 checked)"
-file ca.pem 'CA certificate: give this to clients'
-file mash-setup.json 'what adopt --from reads (no secrets)'
-file server.conf 'nats-server configuration (no seeds)'
-file export/mashadmin.creds 'admin credentials (secret)'
-file export/sys.creds 'system account credentials (secret)'
-file export/operator.nk 'operator seed (secret)'
-file export/account.nk 'account seed (secret)'
-file ca.key 'CA private key (secret)'
-file nsc/ 'nsc store with all signing keys (secret)'
-if [ "$START" -eq 1 ]; then
-    file server.log 'server log (the log is kept at most 7 days)'
-    file server.pid 'server process id (--stop reads it)'
-fi
+printf '\nEverything is in %s; run --check to list it.\n' "$QDIR"
 
 printf '\nWhat you hold\n'
 wrap '  Server address     ' '                     ' "$SERVERURL"
+wrap '  Owner              ' '                     ' "$OWNER"
 wrap '  CA file            ' '                     ' "$DIR/ca.pem"
 CAFP=$(openssl x509 -in "$DIR/ca.pem" -noout -fingerprint -sha256 |
     sed 's/^[^=]*=//' | tr -d ':' | tr 'A-F' 'a-f')
@@ -1743,9 +1729,9 @@ if [ "$START" -ne 1 ]; then
 fi
 CFGENV=()
 [ "$MASHCFG_GIVEN" -eq 0 ] || CFGENV=("MASH_CONFIG_DIR=$(Q "$MASHCFG")")
-wrap '  ' '  ' "Adopt the server into mash, as the same user that ran this" \
-    "script (it does not ask for the fingerprint, and it sets up mash's" \
-    "storage too, so there is no separate init):"
+wrap '  ' '  ' "Install mash and mashctl (part 4 of the guide), then adopt" \
+    "the server into mash as the same user that ran this script (it does" \
+    "not ask for the fingerprint and sets up mash's storage too):"
 printf '\n'
 if [ "${#CFGENV[@]}" -gt 0 ]; then
     printf '    %s mashctl adopt --from %s\n' "${CFGENV[0]}" "$(Q "$DIR")"
@@ -1754,38 +1740,10 @@ else
 fi
 printf '\n'
 wrap '  ' '  ' "Adopt copies the CA, the keys and the credentials into" \
-    "mashctl's folder ($MASHCFG; set MASH_CONFIG_DIR to change that) and" \
-    "prints one 'copied' line per file, so export/ is no longer needed." \
+    "mashctl's folder ($MASHCFG; set MASH_CONFIG_DIR to change that)." \
     "Agents' credentials are written there as $OWNER.<group>.<agent>.creds."
 printf '\n'
-wrap '  ' '  ' "Hand-managed server instead? see the long form in the guide" \
-    "(mashctl adopt --server ... --ca ...)."
-printf '\n'
-wrap '  ' '  ' "Or, after adopt succeeds, to retire the setup's keys:" \
-    "--retire-keys (item 2 below). --retire-keys archives the keys first;" \
-    "nothing here asks you to delete the server directory by hand."
-printf '\n'
-wrap '  ' '  ' "Another machine that wants to use this server needs the CA" \
-    "file and an address for the server that machine can reach (the one in" \
-    "the certificate); a credential carries no address."
-printf '\n'
-wrap '  ' '  ' "To use mash in Claude Code, run these two lines in Claude" \
-    "Code, then see the guide:"
-printf '\n    claude plugin marketplace add bogworks/mash\n'
-printf '    claude plugin install mash@mash\n\n'
-wrap '  ' '  ' "https://github.com/bogworks/mash/blob/v0.5.6/docs/install.md"
-printf '\n  2. Looking after the server later (each takes --dir):\n'
-BK=$HOME/mash-nats-backup.tar.gz
-RK=$HOME/mash-nats-keys.tar.gz
-OWNIND='    '
-lc() { printf '\n  %s\n' "$1"; shift; own_cmd "$@"; }
-lc 'start the server' --dir "$DIR" --start
-lc 'stop it' --dir "$DIR" --stop
-lc 'check it' --dir "$DIR" --check
-lc 'back it up (the archive holds secrets)' --dir "$DIR" --backup "$BK"
-lc 'after adopt, move the offline-only secrets off this machine' \
-    --dir "$DIR" --retire-keys "$RK"
-lc 'upgrade nats-server and nsc to the pinned versions' --dir "$DIR" --upgrade
-lc 'start it at boot (systemd user unit)' --dir "$DIR" --enable-boot
-lc 'stop starting it at boot' --dir "$DIR" --disable-boot
-lc 'remove it all (after --retire-keys)' --dir "$DIR" --remove
+wrap '  ' '  ' "Then follow the README quick start from its \"launch a" \
+    "session\" step:"
+printf '  %s\n' "https://github.com/bogworks/mash/blob/v0.5.6/README.md#quick-start-one-machine-no-account"
+printf '\nOther commands: --stop, --start, --check, --help.\n'
