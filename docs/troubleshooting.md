@@ -79,11 +79,11 @@ Shown as `mash: endpoint X stopped: ... Mail is off for this session.` The lease
 - `FAILED - ... Next: fix the cause (see the creds and config lines) and restart Claude Code`: the first failure was permanent. Fix what the earlier lines show.
 - `mash status` from a shell makes no connection, but it shows a failure the session recorded: `connection: FAILED - ... Authorization Violation (recorded by the session at T)` means the endpoint was deleted or its key reissued, so the old credentials no longer work; ask whoever runs mashctl for a new credentials file (`mashctl endpoint show <address>`). The record is kept in the endpoint's state directory (`connection.json`, no secret) and is cleared when a session connects again.
 - After a network blip, clients can take 30 to 60 seconds to reconnect because the server rate-limits new connections per source address ([operations.md](operations.md) Troubleshooting).
-- Synadia Cloud's free tier allows 5 connections, one per live session ([synadia.md](synadia.md)).
+- A hosted account has a connection allowance; mash needs one connection per live session ([synadia.md](synadia.md)).
 
 ## `send` fails: message too large
 
-`mash: message is N bytes with headers; this server accepts at most M (its max_payload). Send a smaller message or put the content in a file and send the path.` Or, when the server allows more than mash does: `mash: message is N bytes with headers; the limit is 1048576`. Nothing was published. Mash's cap is 1 MiB including headers, or the server's `max_payload` if smaller (512 KiB on Synadia's free tier). Send a file path instead of the content.
+`mash: message is N bytes with headers; this server accepts at most M (its max_payload). Send a smaller message or put the content in a file and send the path.` Or, when the server allows more than mash does: `mash: message is N bytes with headers; the limit is 1048576`. Nothing was published. Mash's cap is 1 MiB including headers, or the server's `max_payload` if smaller (a hosted server may set it lower). Send a file path instead of the content.
 
 ## `send` refused by policy
 
@@ -163,7 +163,7 @@ A batch of more than 10 messages or 16 KiB is shown as a digest: one line per me
 
 ## Account full or `maximum number of streams`
 
-Each endpoint takes one stream, and the five shared buckets take five. On Synadia's free tier (5 streams) no endpoint fits; an account with a limit of 5 + N streams holds N. Remove an endpoint with `mash admin deprovision <owner.group.instance>` and an admin credential. [synadia.md](synadia.md) has the full list of quickstart script failures (401, a user that already exists, a stale lock, a leftover inbox).
+Each endpoint takes one stream, and the five shared buckets take five. An account with a limit of 5 + N streams holds N. Remove an endpoint with `mash admin deprovision <owner.group.instance>` and an admin credential. [synadia.md](synadia.md) has the full list of quickstart script failures (401, a user that already exists, a stale lock, a leftover inbox).
 
 ## `jetstream not enabled` (code 503, err_code 10076) or `the server could not enable JetStream for the account`
 

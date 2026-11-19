@@ -14,7 +14,7 @@ Subagents and agent teams are helpers that one session starts and directs, on on
 
 ## What do I need to run it?
 
-- A NATS server in operator mode (JWT credentials) with JetStream, and one account for mash. Self-hosted, or a Synadia Cloud account with enough streams ([synadia.md](synadia.md); the free tier's 5 are too few).
+- A NATS server in operator mode (JWT credentials) with JetStream, and one account for mash. Self-hosted, or a paid Synadia Cloud account with enough streams ([synadia.md](synadia.md)).
 - Claude Code with channels: a claude.ai or Console sign-in, not Bedrock, Agent Platform or Foundry. An organisation Owner must allow mash, and the channel needs an allowlist entry in managed settings ([install.md](install.md) section 3).
 - The `mash` binary and the plugin. A pinned plugin release fetches and verifies its own binary; an unpinned one uses `mash` from your `PATH` ([install.md](install.md) section 1).
 
@@ -24,7 +24,7 @@ No. mash needs a NATS server in operator mode with JWT user credentials. In the 
 
 ## Do I have to run a server?
 
-Either run your own NATS server in operator mode, or use Synadia Cloud. [`scripts/quickstart-synadia.sh`](../scripts/quickstart-synadia.sh) sets up the server side on a Synadia account from one API token ([install.md](install.md) "Quick start on Synadia Cloud", [synadia.md](synadia.md)). The free tier allows 5 streams, which mash's five shared buckets use up, so it holds no endpoint; an account needs 5 + N streams for N endpoints. The free tier's payload limit is 512 KiB.
+Either run your own NATS server in operator mode, or use Synadia Cloud. [`scripts/quickstart-synadia.sh`](../scripts/quickstart-synadia.sh) sets up the server side on a Synadia account from one API token ([install.md](install.md) "Quick start on Synadia Cloud", [synadia.md](synadia.md)). mash on Synadia Cloud needs a paid account: it needs 5 + N streams for N endpoints, because the five shared buckets use five.
 
 ## How durable is the mail?
 
@@ -74,7 +74,7 @@ The plugin's launcher downloads and verifies binaries for Linux and macOS, on am
 
 ## How big can a message be?
 
-1 MiB including headers, or the server's `max_payload` when that is smaller (512 KiB on Synadia's free tier). mash checks the size locally and refuses before publishing. Mail is text; put large content in a file and send the path ([ADR 0037](decisions/0037-mail-carries-text-files-travel-by-reference.md)). There is no broadcast: one recipient per message.
+1 MiB including headers, or the server's `max_payload` when that is smaller (a hosted server may set it lower). mash checks the size locally and refuses before publishing. Mail is text; put large content in a file and send the path ([ADR 0037](decisions/0037-mail-carries-text-files-travel-by-reference.md)). There is no broadcast: one recipient per message.
 
 ## Is a digest the same as the model having read the mail?
 

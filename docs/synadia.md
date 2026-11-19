@@ -1,6 +1,8 @@
 # mash on Synadia Cloud
 
-[`scripts/quickstart-synadia.sh`](../scripts/quickstart-synadia.sh) sets mash up on [Synadia Cloud](https://cloud.synadia.com) from one API token for your team. It is a demo script, not part of the mash binary: mash does not create NATS users ([ADR 0038](decisions/0038-synadia-setup-is-a-script-outside-the-binary.md), ADR 0008). The step-by-step guide is [guides/nats-synadia.md](guides/nats-synadia.md). The short walkthrough is in the [README](../README.md#quickstart-on-synadia-cloud-free-tier); the script needs bash, curl, jq and a `mash` binary, and `--help` lists its flags. `--group` is required: an endpoint's group has no default. Every connection requires TLS, so the URL Synadia reports must be `tls://`; a plain URL is refused, naming `insecure_plaintext`.
+mash on Synadia Cloud needs a paid account. The account must allow JetStream, at least 5 shared streams plus 1 per endpoint, and a connection allowance of one per live session. These are what mash needs, not Synadia's plans or prices: check Synadia's current plan limits in the console before you buy.
+
+[`scripts/quickstart-synadia.sh`](../scripts/quickstart-synadia.sh) sets mash up on [Synadia Cloud](https://cloud.synadia.com) from one API token for your team. It is a demo script, not part of the mash binary: mash does not create NATS users ([ADR 0038](decisions/0038-synadia-setup-is-a-script-outside-the-binary.md), ADR 0008). The step-by-step guide is [guides/nats-synadia.md](guides/nats-synadia.md). The short walkthrough is in the [README](../README.md#quickstart-on-synadia-cloud-paid-account); the script needs bash, curl, jq and a `mash` binary, and `--help` lists its flags. `--group` is required: an endpoint's group has no default. Every connection requires TLS, so the URL Synadia reports must be `tls://`; a plain URL is refused, naming `insecure_plaintext`.
 
 ## What the script does
 
@@ -11,16 +13,17 @@
 
 `--dry-run` does step 1 only and prints the plan. The token is read from `SYNADIA_API_TOKEN`, from one line on stdin (`--token-stdin`) or from a prompt; it is never taken from the command line, never stored and never printed. A real run holds a `mkdir` lock, `~/.config/mash/.quickstart.lock`, until it ends, so a second run on the same config directory is refused; if no run is going, remove a stale lock with `rm ~/.config/mash/.quickstart.lock/pid && rmdir ~/.config/mash/.quickstart.lock` (the lock holds a `pid` file, so a bare `rmdir` fails; only do this when no quickstart run is active). If provisioning fails for an endpoint, the script runs the deprecated `mash admin deprovision <address> --user <key>` for it (the verb for you to run is `mashctl deprovision`), with the NATS user key this run created, before it deletes the admin user, so a half-created inbox is removed. The `--user` guard removes the record and inbox only if the record still carries that key, checked and deleted against the record's revision; a metadata-only change by another admin in between is retried on the new revision, while a record that is another admin's, or that changed to another user or kept changing, is left in place (for a changed record the script also keeps this run's NATS user and creds file, since the endpoint may use them), and so is an inbox with no record (nothing proves it is this run's). The test message carries a random token, which must appear in the `[verified]` inbox entry.
 
-## Free-tier limits
+## What the account must allow
 
-The free tier cannot run mash: its 5 streams are fewer than the 6 that one endpoint needs. The script refuses such an account before it creates anything. An account with a higher stream limit is needed (5 shared streams plus 1 per endpoint).
+The script refuses an account whose stream limit cannot hold the plan before it creates anything.
 
-| Limit | Free tier | Effect on mash |
-|---|---|---|
-| Streams | 5 | 5 shared buckets plus 1 inbox per endpoint: no endpoint fits (at most 0); an account with a limit of 5 + N holds N endpoints |
-| Connections | 5 | One per live session |
-| Message payload | 512 KiB | mash caps a send to the server's `max_payload` |
-| Replication | R1 only | No replicas, so no high availability |
+| What mash needs | Effect on mash |
+|---|---|
+| JetStream with file storage and R1 streams | mash uses R1 streams only: no replicas, so no high availability |
+| At least 5 shared streams plus 1 per endpoint | 5 shared buckets plus 1 inbox per endpoint; an account with a limit of 5 + N holds N endpoints |
+| One connection per live session | A session with no free connection cannot connect |
+| Disk for the stream caps | The sum of the stream caps: `inbox_max_bytes` per endpoint plus 93 MiB for the five buckets (see [operations.md](operations.md#account-limits)) |
+| A message payload limit | mash caps a send to the server's `max_payload` (1 MiB with headers at most) |
 
 The script reads the account's stream limit and checks the plan (5 shared plus 1 per endpoint; `mash admin init` makes the `mash-directory`, `mash-leases`, `mash-retired`, `mash-issued` and `mash-adoption` buckets, one stream each) against it before it creates anything. If the plan does not fit it stops and says how many streams the account allows and what the plan needs. After `init` it also counts the endpoints the mash directory already holds (each has an inbox stream) and stops, naming them, if the plan no longer fits; a `maximum number of streams` error from mash gets the same hint. Streams made by other tools are not counted, so on an account that runs other streams, pass fewer `--endpoint`s than the limit suggests.
 
@@ -46,7 +49,7 @@ The quickstart script deletes its temporary admin user when it ends, and `mashct
    MASH_ADMIN_CREDS=/path/admin.creds mashctl endpoint delete ADDRESS --no-revoke
    ```
 
-   This removes the directory record and the inbox stream, which frees a stream on the free tier.
+   This removes the directory record and the inbox stream, which frees a stream on the account.
 3. Delete the endpoint's own NATS user (named by the address) in the console. `--no-revoke` leaves its key valid, so this deletion is the only revocation on Synadia.
 4. Delete the admin user from step 1 in the console.
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# quickstart-synadia.sh: set mash up on Synadia Cloud (free tier) from one API token.
+# quickstart-synadia.sh: set mash up on Synadia Cloud (a paid account) from one API token.
 #
 # A demo/quickstart, not part of the mash binary (ADR 0038). mash itself never creates
 # NATS users (ADR 0008); this script does that through Synadia's management REST API
@@ -8,7 +8,7 @@
 #
 # What it does:
 #   1. finds your team, system and account, and checks the account's stream limit (5 shared streams
-#      + 1 per endpoint must fit; the free tier's 5 streams do not hold even one endpoint); after
+#      + 1 per endpoint must fit; an account that allows 5 streams holds no endpoint); after
 #      `mash admin init` it also counts the endpoints the mash directory already holds and stops
 #      if the account cannot take the plan;
 #   2. creates ONE temporary admin NATS user, writes <config dir>/config.json (url, owner) and

@@ -792,7 +792,7 @@ func (e *Endpoint) viaOrigin(ctx context.Context, seq uint64) (string, error) {
 }
 
 // sendLimit is the largest message, headers included, a send may be: mash's own cap, or the connected server's
-// max_payload (from its INFO) when that is smaller. Hosted servers cap it below 1 MiB (Synadia's free tier: 512 KiB),
+// max_payload (from its INFO) when that is smaller. Hosted servers may cap it below 1 MiB,
 // and the client would otherwise fail a send between the two with a bare "maximum payload exceeded".
 func sendLimit(nc *nats.Conn) int {
 	if mp := int(nc.MaxPayload()); mp > 0 && mp < store.MaxMsgSize {

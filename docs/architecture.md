@@ -243,10 +243,10 @@ have happened ([ADR-0025][0025]).
 
 | | Self-hosted NATS | Synadia Cloud (hosted NATS) |
 |---|---|---|
-| Server | `nats-server` in operator mode with JetStream, file storage | Synadia's service. The free tier allows 5 streams, 5 connections, 512 KiB payload and no replicas |
+| Server | `nats-server` in operator mode with JetStream, file storage | Synadia's service; needs a paid account with JetStream, 5 + N streams and one connection per live session. mash uses R1 streams only |
 | Account | One account for mash, sized for 1 stream and 1 consumer per endpoint plus 2 buckets | One existing account |
 | Users | Signed by `mashctl endpoint create` with the account signing key, from the endpoint's own public key; `mashctl permissions <owner.group.instance>` prints the set (JSON or `nsc` flags). An endpoint's seed stays on its machine (with `--make-key`, `mashctl` makes it on its own host) | `scripts/quickstart-synadia.sh` asks Synadia's API to create them, with a temporary admin user that it deletes afterwards ([ADR-0038][0038]). mash itself never calls that API |
-| Endpoints | `mashctl init` once, then `mashctl endpoint create <owner/group/instance>` per endpoint | Created by `scripts/quickstart-synadia.sh`. With 5 shared buckets and 1 stream per endpoint, the free tier (5 streams) fits no endpoint |
+| Endpoints | `mashctl init` once, then `mashctl endpoint create <owner/group/instance>` per endpoint | Created by `scripts/quickstart-synadia.sh`. With 5 shared buckets and 1 stream per endpoint, an account with a limit of 5 streams fits no endpoint |
 | Removing | `mashctl endpoint delete` / `mashctl deprovision` (revokes the user), or `mash admin deprovision` and revoke the user yourself | Same, with an admin user made in the console |
 
 Each endpoint machine needs the `mash` binary on `PATH`, the Claude Code plugin, a credentials file at mode 0600 and
@@ -478,7 +478,7 @@ About 400 Go test functions cover the product code, not counting release tooling
 | Contract tests on output | `internal/render/testdata/contract.txt`, plugin command and manifest tests, `who` format | Text that other programs parse does not change unnoticed ([ADR-0034][0034]) |
 | Fake external service | `scripts/quickstart_synadia_test.go` | `scripts/quickstart-synadia.sh` against an `httptest` fake of the Synadia API that mints real credentials, with a real NATS server |
 | Opt-in live test with a real agent host | `TestLiveClaudeAnswersServePings`, run with `MASH_LIVE_CLAUDE=1` | The installed Claude Code answers serve's pings |
-| Recorded live runs | `docs/evidence/` receipts, produced by scripted runs that are not part of `go test` | Real Claude Code (mid-turn, idle and urgent delivery, early mail), the real Synadia free tier, and `kill -9` lease takeover with timings |
+| Recorded live runs | `docs/evidence/` receipts, produced by scripted runs that are not part of `go test` | Real Claude Code (mid-turn, idle and urgent delivery, early mail), a real Synadia Cloud account, and `kill -9` lease takeover with timings |
 
 ### 10.3 Goals, the tests that measure them, and gaps
 
@@ -511,7 +511,7 @@ that takes channel events.
 | A host crash of the NATS server loses up to 2 minutes of acknowledged mail, because inbox streams are R1 and `sync_interval` defaults to 2 minutes. Synadia Cloud's policy is unknown | Operators set `sync_interval: always` ([operations](operations.md#durability-and-sync_interval)). mash cannot read the server setting, so nothing warns yet |
 | A flood evicts unread mail, since the inbox drops its oldest messages and cannot be purged | Backlog wake drains earlier. None yet against a deliberate flood |
 | Every endpoint shares one account: names are account-wide and account limits are shared | None yet ([ADR-0006][0006]) |
-| A stream per endpoint caps endpoints on accounts with a stream limit (none on the free tier's 5 streams) | None yet |
+| A stream per endpoint caps endpoints on accounts with a stream limit (none on an account limited to 5 streams) | None yet |
 | Live prompts are not durable and have no hook path | None yet. Mail is the durable path |
 | `scripts/quickstart-synadia.sh` relies on an undocumented beta API | It fails loudly on any unexpected shape, and breaks a script a user can edit, not a released binary |
 | The host adapter was shaped by one host | None yet. A second adapter is not built |
