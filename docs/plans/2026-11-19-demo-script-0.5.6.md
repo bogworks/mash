@@ -108,8 +108,13 @@ you@myserver$ mkdir ~/mash-demo && cd ~/mash-demo
 
 ### Step 0-B: Install mash and mashctl from the release (command 2 of 4)
 
-Download both programs, the NATS helper and the release's checksum file. Each file must have its own line in the
-checksum file and match it; if any file fails, stop. Then put the programs in a directory on your `PATH`.
+Download both programs, the NATS helper and the release's checksum file, then make two checks before installing
+anything:
+- **Attestation:** GitHub's signed record shows each file was built by mash's release workflow from the `v0.5.6` tag
+  of `bogworks/mash`. This proves where the file came from. `gh` is the GitHub command-line tool.
+- **Checksum:** each file must have its own line in `SHA256SUMS` and match it. This proves the download is whole.
+
+Only then are the programs put in a directory on your `PATH`.
 
 Two settings come first:
 - `P` is your platform: `linux` or `darwin`, then `amd64` or `arm64`.
@@ -122,15 +127,22 @@ On macOS, use `shasum -a 256 -c` in place of `sha256sum -c`.
 ```
 you@myserver$ P=linux-amd64 BIN=~/.local/bin
 you@myserver$ BASE=https://github.com/bogworks/mash/releases/download/v0.5.6
+you@myserver$ W=bogworks/mash/.github/workflows/release.yml
 you@myserver$ curl -fsSL -O $BASE/mash-$P -O $BASE/mashctl-$P \
                 -O $BASE/nats-local-setup.sh -O $BASE/SHA256SUMS
-you@myserver$ grep -E " (mash-$P|mashctl-$P|nats-local-setup\.sh)\$" \
+you@myserver$ ok=yes; for f in mash-$P mashctl-$P nats-local-setup.sh; do
+                gh attestation verify $f -R bogworks/mash --signer-workflow $W \
+                  --source-ref refs/tags/v0.5.6 >/dev/null || ok=no
+              done; echo "attested: $ok"
+attested: yes
+you@myserver$ [ $ok = yes ] &&
+              grep -E " (mash-$P|mashctl-$P|nats-local-setup\.sh)\$" \
                 SHA256SUMS > mine.sums && [ $(wc -l < mine.sums) -eq 3 ] &&
               sha256sum -c mine.sums &&
               mkdir -p $BIN && install -m 755 mash-$P $BIN/mash &&
               install -m 755 mashctl-$P $BIN/mashctl &&
               chmod +x nats-local-setup.sh ||
-              echo "STOP: a file is missing from SHA256SUMS or does not match"
+              echo "STOP: not attested, or a checksum is missing or wrong"
 mash-linux-amd64: OK
 mashctl-linux-amd64: OK
 nats-local-setup.sh: OK
@@ -138,12 +150,12 @@ you@myserver$ case ":$PATH:" in *":$BIN:"*) ;;
                 *) echo "add $BIN to your PATH" ;; esac
 ```
 
-The install runs only after each of the three files has passed:
+The install runs only if all three files are attested and each has passed its checksum:
 - each file needs its own line in `SHA256SUMS`, and there must be exactly three;
 - each file must match its line.
 
-If any check fails, nothing is installed and the last line says to stop. This chain was
-tested in a scratch directory: a missing line and a changed file each stopped it.
+If any check fails, nothing is installed and the last line says to stop. Both checks were tried in a scratch
+directory, with `gh` stubbed. An unattested file, a missing checksum line and a changed file each stopped the install.
 
 `Guide:` The one assumption here is that 0.5.6 ships `mashctl` and the NATS helper in the release, listed in
 `SHA256SUMS`. v0.5.5 shipped `mash` only. Next we check what got installed.
