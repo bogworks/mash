@@ -121,6 +121,10 @@ repeat them.
 - Paths. Every path printed is the resolved path: an absolute
   `MASH_CONFIG_DIR`, else an absolute `XDG_CONFIG_HOME/mash`, else
   `~/.config/mash`. Mockups show the default.
+  A file a command writes in the current directory (the token, or a path given
+  to `--creds-out` or `--token-out`) is shown as `./<name>` (or as the person
+  typed it), because the default is the current directory; the hand-off
+  instructions use the same path as the line that reports the write.
 - Versions. A mockup never prints a version number; it prints `<version>`.
 
 Conventions in the AFTER blocks:
@@ -782,11 +786,11 @@ $ mashctl endpoint create acme.demo.bob --public-key bob.pub
 
 Created endpoint acme.demo.bob.
 
-  token  ~/acme.demo.bob.token  (proves bob.pub is acme.demo.bob; not secret)
+  token  ./acme.demo.bob.token  (proves bob.pub is acme.demo.bob; not secret)
 
 Copy these two files to bob's machine:
 
-  ~/acme.demo.bob.token
+  ./acme.demo.bob.token
   ~/.config/mash/ca.pem
 
 Give bob's machine this fingerprint of ca.pem separately from the files. The
@@ -946,11 +950,11 @@ $ mashctl endpoint create acme.demo.bob --public-key bob.pub
 
 Created endpoint acme.demo.bob.
 
-  token  ~/acme.demo.bob.token  (proves bob.pub is acme.demo.bob; not secret)
+  token  ./acme.demo.bob.token  (proves bob.pub is acme.demo.bob; not secret)
 
 Copy these two files to bob's machine:
 
-  ~/acme.demo.bob.token
+  ./acme.demo.bob.token
   ~/.config/mash/ca.pem
 
 Give bob's machine this fingerprint of ca.pem separately from the files. The
@@ -1113,7 +1117,7 @@ Created endpoint acme.demo.carol.
   2. Created her token, signed by your server.
   3. Wrote the credentials for carol to one file.
 
-  wrote   ~/carol.creds  (new file, mode 600)
+  wrote   ./carol.creds  (new file, mode 600)
 
 warning: copying carol.creds moves carol's private key to another machine.
          To keep the key on carol's machine, make it there with mash key
@@ -1121,7 +1125,7 @@ warning: copying carol.creds moves carol's private key to another machine.
 
 Copy these two files to carol's machine:
 
-  ~/carol.creds
+  ./carol.creds
   ~/.config/mash/ca.pem
 
 Give carol's machine this fingerprint of ca.pem separately from the files. The
@@ -2473,7 +2477,7 @@ Reissued acme.demo.bob.
   the new credentials are installed.
   Unread mail in bob's inbox is kept.
 
-  token  ~/acme.demo.bob.2.token  (a new file; the first token is kept)
+  token  ./acme.demo.bob.2.token  (a new file; the first token is kept)
 
 NEXT: copy acme.demo.bob.2.token to bob's machine, and run there:
   mash credential install --key bob2.key --token acme.demo.bob.2.token
@@ -2486,7 +2490,7 @@ $ mashctl endpoint reissue acme.demo.bob --public-key bob2.pub --dry-run
 [exit 0]
 Would reissue acme.demo.bob:
   - sign a new token for the key in bob2.pub
-  - write it to ~/acme.demo.bob.2.token (acme.demo.bob.token already exists)
+  - write it to ./acme.demo.bob.2.token (acme.demo.bob.token already exists)
   - refuse bob's old key from now, on every machine
   - keep bob's inbox and its 3 unread messages
 Nothing was changed.
@@ -4397,7 +4401,7 @@ fix: make a new key on bob's machine:
   mash key create --out bob.key
 
 # when: the token file already exists
-error: ~/acme.demo.bob.token already exists and is never overwritten.
+error: ./acme.demo.bob.token already exists and is never overwritten.
 fix: name another file with --token-out, or delete this one.
 
 # when: a server did not answer the revocation check (exit 6)
@@ -5080,7 +5084,7 @@ $ mashctl endpoint create acme.demo.bob --public-key bob.pub --dry-run
 [exit 0]
 Would create endpoint acme.demo.bob:
   - sign bob's public key, which makes the token
-  - write the token to ~/acme.demo.bob.token
+  - write the token to ./acme.demo.bob.token
   - print the CA file and its fingerprint to give bob's machine
 Nothing was changed.
 ```
