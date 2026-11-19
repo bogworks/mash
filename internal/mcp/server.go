@@ -20,7 +20,13 @@ type Tool struct {
 	Name        string
 	Description string
 	Schema      map[string]any
-	Call        func(ctx context.Context, args json.RawMessage) (string, error)
+	// Call and CallStructured are alternatives: a tool author sets exactly one. When CallStructured is set it is used
+	// and Call is ignored. CallStructured returns the text block plus a result object; on a successful call with a
+	// non-nil result, and only when the client negotiated revision 2025-06-18, the result object is sent as the
+	// tools/call result's structuredContent next to the unchanged text block. Otherwise (older revisions, a nil
+	// result, any error) the reply is text only. No outputSchema is declared.
+	Call           func(ctx context.Context, args json.RawMessage) (string, error)
+	CallStructured func(ctx context.Context, args json.RawMessage) (text string, result any, err error)
 	// AfterWrite, when set, runs with the call's arguments only after Call succeeded and its result was written to
 	// the client without error: for effects that must not happen unless the client received the result.
 	AfterWrite func(args json.RawMessage)
@@ -53,6 +59,7 @@ type Server struct {
 
 	cmu                   sync.Mutex
 	clientName, clientVer string // clientInfo from the client's initialize request
+	negotiated            string // the revision answered to the client's initialize; empty before one is seen
 
 	notified   atomic.Int64 // channel notifications written
 	notifiedAt atomic.Int64 // unix nanoseconds of the last one
@@ -63,6 +70,14 @@ func (s *Server) ClientInfo() (name, version string) {
 	s.cmu.Lock()
 	defer s.cmu.Unlock()
 	return s.clientName, s.clientVer
+}
+
+// structuredOK is true only when the negotiated revision is exactly 2025-06-18, the one that defines structuredContent
+// among the revisions mash speaks.
+func (s *Server) structuredOK() bool {
+	s.cmu.Lock()
+	defer s.cmu.Unlock()
+	return s.negotiated == "2025-06-18"
 }
 
 // ErrPingBusy is Ping's answer while an earlier ping is still being written: the client is not draining stdout, so
@@ -289,11 +304,13 @@ func (s *Server) handle(ctx context.Context, line []byte) {
 			} `json:"clientInfo"`
 		}
 		_ = json.Unmarshal(req.Params, &p)
+		version := negotiateVersion(p.ProtocolVersion)
 		s.cmu.Lock()
 		s.clientName, s.clientVer = p.ClientInfo.Name, p.ClientInfo.Version
+		s.negotiated = version
 		s.cmu.Unlock()
 		_ = s.result(req.ID, map[string]any{
-			"protocolVersion": negotiateVersion(p.ProtocolVersion),
+			"protocolVersion": version,
 			"serverInfo":      map[string]string{"name": s.name, "version": s.version},
 			"capabilities": map[string]any{
 				"tools":        map[string]any{},
@@ -328,13 +345,17 @@ func (s *Server) handle(ctx context.Context, line []byte) {
 }
 
 func (s *Server) call(ctx context.Context, id json.RawMessage, name string, args json.RawMessage) {
-	text := func(t string, isErr bool) error {
+	reply := func(t string, isErr bool, structured any) error {
 		r := map[string]any{"content": []map[string]string{{"type": "text", "text": t}}}
 		if isErr {
 			r["isError"] = true
 		}
+		if structured != nil && !isErr && s.structuredOK() {
+			r["structuredContent"] = structured
+		}
 		return s.result(id, r)
 	}
+	text := func(t string, isErr bool) error { return reply(t, isErr, nil) }
 	t, ok := s.tools[name]
 	if !ok {
 		_ = text("unknown tool "+name, true)
@@ -343,7 +364,17 @@ func (s *Server) call(ctx context.Context, id json.RawMessage, name string, args
 	if len(args) == 0 {
 		args = json.RawMessage("{}")
 	}
-	out, err := t.Call(ctx, args)
+	var out string
+	var structured any
+	var err error
+	switch {
+	case t.CallStructured != nil:
+		out, structured, err = t.CallStructured(ctx, args)
+	case t.Call != nil:
+		out, err = t.Call(ctx, args)
+	default:
+		err = errors.New("tool " + name + " has no handler")
+	}
 	if s.OnToolCall != nil {
 		s.OnToolCall(name)
 	}
@@ -351,7 +382,7 @@ func (s *Server) call(ctx context.Context, id json.RawMessage, name string, args
 		_ = text(err.Error(), true)
 		return
 	}
-	if text(out, false) == nil && t.AfterWrite != nil {
+	if reply(out, false, structured) == nil && t.AfterWrite != nil {
 		t.AfterWrite(args)
 	}
 }
