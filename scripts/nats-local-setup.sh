@@ -10,17 +10,27 @@
 # long path) can exceed 80.
 #
 # Safety model, in short:
+#  - Root: refused for every subcommand, before anything is read or made
+#    (sudo would make root-owned keys).
 #  - Paths: absolute; every component from / down must be a real directory
 #    owned by root or you and not writable by group or others. The script
-#    enters the verified parent with cd -P, makes DIR with mkdir relative to
-#    that directory, re-checks device:inode, cd's into DIR and writes only
-#    through relative paths from there.
+#    records the device:inode of each component at the first check, enters
+#    the verified parent with cd -P, and makes DIR with mkdir relative to
+#    that directory. Before each write or remove it checks the whole chain
+#    again and compares every device:inode with the recorded one; if any
+#    differs it stops and writes nothing. Writes go through relative paths
+#    from the directory it is in. Residual: a process running as you can
+#    still swap a path between that recheck and the write; this script does
+#    not defend against that.
 #  - Tools: nats-server and nsc are downloaded from pinned URLs, compared
 #    with a literal sha256 in this file BEFORE extraction or execution, and
 #    installed into DIR/bin. Only DIR/bin/nats-server and DIR/bin/nsc are
 #    ever run; a copy on PATH is never executed.
-#  - Output: everything a subprocess prints goes to a private temp file and
-#    through safe(), which withholds secret-looking lines.
+#  - Output: everything a tool prints goes to a private temp file and
+#    through safe(), which withholds secret-looking lines. The server's own
+#    log (server.log and any server line shown on the terminal) is different:
+#    it goes through srvlog_filter, an allowlist of known-safe line shapes;
+#    every other line is replaced by a fixed text.
 #  - Decisions that matter (non-loopback listen, retire-keys, remove, boot)
 #    need a person typing a confirmation at a terminal.
 set -euC
@@ -49,7 +59,9 @@ usage: nats-local-setup.sh [create] --dir DIR --owner NAME [options]
        nats-local-setup.sh --dir DIR --disable-boot | --remove
 
 Linux x86-64 (amd64), Debian or Ubuntu only. Needs: curl tar unzip openssl
-sha256sum ss. Exactly one subcommand per run; create is the default.
+sha256sum ss (--retire-keys also diff, find). Exactly one subcommand per run;
+create is the default. Run it as your own user, not root: it refuses root
+(sudo would make root-owned keys).
 
   --dir DIR        required, absolute. Every component must be a real
                    directory (no symlinks) owned by you or root and not
@@ -75,15 +87,25 @@ sha256sum ss. Exactly one subcommand per run; create is the default.
   --stop           stop the server recorded in DIR/server.pid
   --check          verify files, modes, tools, config, TLS and what listens
   --upgrade        install this script's pinned nats-server and nsc
-  --backup DEST    one tar.gz (0600) of DIR except DIR/bin; it holds secrets
-  --retire-keys DEST  move ca.key, nsc/ and export/ into one tar.gz, then
-                   remove them from DIR (typed confirmation)
-  --enable-boot    systemd user unit that keeps the server up (typed
+  --backup DEST    writes DEST (mode 0600, one tar.gz of DIR except
+                   DIR/bin; it holds secrets) and nothing else
+  --retire-keys DEST  writes DEST (0600) and DIR/.keys-retired and removes
+                   ca.key, nsc/ and export/ from DIR, but only after it
+                   extracts DEST into a private temporary directory and finds
+                   it identical to them (typed confirmation)
+  --enable-boot    writes the systemd user unit file at its real path
+                   $HOME/.config/systemd/user/<name> and enables it (typed
                    confirmation); --linger also runs loginctl enable-linger
-  --disable-boot   remove that unit (typed confirmation)
-  --remove         delete DIR (typed confirmation; only a directory this
-                   script made, found by DIR/.mash-nats-setup)
+  --disable-boot   removes that unit file (typed confirmation)
+  --remove         removes DIR (and the unit file, if this script made one);
+                   typed confirmation; only a directory this script made,
+                   found by DIR/.mash-nats-setup
   --help           this text
+
+Before each write or remove the script re-resolves every parent directory and
+compares its device:inode with the one recorded at the first check. A process
+running as you can still swap a path between the recheck and the write; this
+script does not defend against that.
 EOF
 }
 
@@ -126,8 +148,137 @@ safe() {
 }
 fold80() { fold -w 80; }
 
+# srvlog_ok LINE: succeeds only if LINE is exactly one of the known-safe
+# shapes of a nats-server 2.15 log line, "[pid] date time [LVL] body":
+#   INF  Starting nats-server, Starting JetStream, Server is ready, TLS
+#        required for client connections, Trusted Operators, Initiating
+#        Shutdown..., Initiating JetStream Shutdown..., JetStream Shutdown,
+#        Server Exiting.., Trapped "terminated|interrupt|hangup" signal, a
+#        blank body, and the JetStream banner (fixed art, the docs URL)
+#   INF  "  Version:  X.Y.Z", "  Git:      [hex]", "  Name:     mash-local",
+#        "  Node:     8 letters or digits", "  ID:       N and 55 base32",
+#        "  System  : "SYS"" (or ""), "  Operator: "NAME"", "  Issued  :
+#        DATE", "  Expires : Never|DATE", "  Strict:          true|false",
+#        "  Max Memory:      N.N GB", "  Max Storage:     N.N GB",
+#        "  API Level:       N"; Name is exactly mash-local (the script
+#        writes it) and the operator NAME is 1 to 32 of a-z0-9_- starting
+#        with a letter (a seed, key or token has capitals; any other name
+#        is withheld, which is harmless)
+#   INF  Using configuration file: THIS CONF [(sha256:64 hex)],
+#        Managing all jwt in exclusive directory THIS DIR/resolver,
+#        Store Directory: "THIS DIR/jetstream[/jetstream]",
+#        Took N.Nus to start JetStream (a unit of up to 4 characters),
+#        Listening for client connections on HOST:PORT (HOST: up to 40 of
+#        A-Za-z0-9.- or [IPv6])
+#   ERR  ADDR:PORT - cid:N - TLS handshake error: one of five fixed
+#        messages (EOF, first record not TLS, unsupported versions, bad
+#        certificate, unknown certificate authority or handshake failure)
+#   and nats-server -t's "nats-server: configuration file F is valid
+#   [(sha256:64 hex)]" with F = THIS CONF or server.conf.
+# Anything else is not allowed: a control character, more than 300 bytes,
+# any other body, or text after a fixed shape. The line the filter prints
+# for those, '<line withheld>', is itself allowed (so the filter can be
+# applied twice). THIS CONF and THIS DIR are $CONF and $DIR, compared as
+# literal text.
+srvlog_ok() {
+    local l=$1 lvl body rest re on='[a-z][a-z0-9_-]{0,31}'
+    local dt='[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9:]{8} [-+][0-9]{4} [A-Z]{3,5}'
+    local sz='[0-9]{1,6}(\.[0-9]{1,3})? [KMGTP]?i?B'
+    local ad='([A-Za-z0-9.-]{1,40}|\[[0-9A-Fa-f:.]{2,45}\]):[0-9]{1,5}'
+    local ip='(([0-9]{1,3}\.){3}[0-9]{1,3}|\[[0-9A-Fa-f:.]{2,45}\]):[0-9]{1,5}'
+    local sh='^( \(sha256:[0-9a-f]{64}\))?$'
+    local pre='^\[[0-9]+\] [0-9]{4}/[0-9]{2}/[0-9]{2} [0-9:.]{15} '
+    pre="$pre"'\[([A-Z]{3})\] (.*)$'
+    [ "$l" != '<line withheld>' ] || return 0
+    [ "${#l}" -le 300 ] || return 1
+    [[ $l != *[[:cntrl:]]* ]] || return 1
+    case $l in
+    'nats-server: configuration file '*)
+        rest=${l#'nats-server: configuration file '}
+        for re in "$CONF" server.conf; do
+            case $rest in "$re is valid"*)
+                rest=${rest#"$re is valid"}
+                [[ $rest =~ $sh ]] && return 0 ;;
+            esac
+        done
+        return 1 ;;
+    esac
+    [[ $l =~ $pre ]] || return 1
+    lvl=${BASH_REMATCH[1]}
+    body=${BASH_REMATCH[2]}
+    if [ "$lvl" = ERR ]; then
+        re="^$ip"' - cid:[0-9]+ - TLS handshake error: '
+        re="$re"'(EOF|tls: first record does not look like a TLS handshake'
+        re="$re"'|tls: client offered only unsupported versions'
+        re="$re"'|remote error: tls: (bad certificate'
+        re="$re"'|unknown certificate authority|handshake failure))$'
+        [[ $body =~ $re ]]
+        return
+    fi
+    [ "$lvl" = INF ] || return 1
+    case $body in
+    '' | 'Starting nats-server' | 'Starting JetStream' | 'Server is ready' |\
+    'TLS required for client connections' | 'Trusted Operators' |\
+    'Initiating Shutdown...' | 'Initiating JetStream Shutdown...' |\
+    'JetStream Shutdown' | 'Server Exiting..') return 0 ;;
+    '    _ ___ _____ ___ _____ ___ ___   _   __  __' |\
+    ' _ | | __|_   _/ __|_   _| _ \ __| /_\ |  \/  |' |\
+    '| || | _|  | | \__ \ | | |   / _| / _ \| |\/| |' |\
+    ' \__/|___| |_| |___/ |_| |_|_\___/_/ \_\_|  |_|' |\
+    '         https://docs.nats.io/jetstream' |\
+    '---------------- JETSTREAM ----------------' |\
+    '-------------------------------------------') return 0 ;;
+    'Using configuration file: '*)
+        rest=${body#'Using configuration file: '}
+        case $rest in "$CONF"*) rest=${rest#"$CONF"} ;; *) return 1 ;; esac
+        [[ $rest =~ $sh ]]
+        return ;;
+    'Managing all jwt in exclusive directory '*)
+        [ "${body#'Managing all jwt in exclusive directory '}" = \
+            "$DIR/resolver" ]
+        return ;;
+    '  Store Directory: "'*)
+        rest=${body#'  Store Directory: '}
+        [ "$rest" = "\"$DIR/jetstream\"" ] ||
+            [ "$rest" = "\"$DIR/jetstream/jetstream\"" ]
+        return ;;
+    esac
+    for re in 'Trapped "(terminated|interrupt|hangup)" signal' \
+        '  Version:  [0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]{1,16})?' \
+        '  Git:      \[[0-9a-f]{4,12}\]' "  Name:     mash-local" \
+        '  Node:     [A-Za-z0-9]{8}' '  ID:       N[A-Z2-7]{55}' \
+        '  System  : \"(SYS)?\"' "  Operator: \"$on\"" "  Issued  : $dt" \
+        "  Expires : (Never|$dt)" '  Strict:          (true|false)' \
+        "  Max Memory:      $sz" "  Max Storage:     $sz" \
+        '  API Level:       [0-9]{1,3}' \
+        'Took [0-9.]+[^[:space:][:cntrl:]0-9.]{1,4} to start JetStream' \
+        "Listening for client connections on $ad"; do
+        re="^($re)\$"
+        [[ $body =~ $re ]] && return 0
+    done
+    return 1
+}
+# srvlog_filter: stdin to stdout, one line at a time: a line unchanged if
+# srvlog_ok accepts it, else the fixed text '<line withheld>'. This is the
+# only path the server's own output takes to server.log or the terminal.
+srvlog_filter() {
+    local line
+    while IFS= read -r line || [ -n "$line" ]; do
+        if srvlog_ok "$line"; then printf '%s\n' "$line"
+        else printf '<line withheld>\n'; fi
+    done
+}
+
 die() { wrap 'nats-local-setup: ' '    ' "$*" >&2; exit 1; }
 say() { wrap '' '    ' "$*"; }
+RESIDUAL="A process running as you can still swap a path between the recheck"
+RESIDUAL="$RESIDUAL and the write; this script does not defend against that."
+residual() { wrap '' '' "$RESIDUAL"; }
+
+# Root is refused for every subcommand, before anything is read or made.
+[ "$EUID" -ne 0 ] ||
+    die "run as your own user, not root; sudo would make root-owned keys" \
+        "(nothing was read or changed)"
 step() { N=$((N + 1)); printf '\n'; wrap "[$N] about to: " '    ' "$*"; }
 did() { wrap '    did: ' '         ' "$*"; }
 
@@ -280,7 +431,8 @@ esac
 case $MODE in
 create | upgrade) NEED='curl tar unzip openssl sha256sum ss' ;;
 check) NEED='openssl sha256sum ss' ;;
-backup | retire-keys) NEED='tar sha256sum' ;;
+backup) NEED='tar sha256sum' ;;
+retire-keys) NEED='tar sha256sum diff find' ;;
 start | stop | enable-boot | disable-boot | remove) NEED='sha256sum' ;;
 esac
 miss=''
@@ -288,7 +440,13 @@ pk=''
 for t in $NEED; do
     command -v "$t" >/dev/null 2>&1 && continue
     miss="$miss $t"
-    case $t in sha256sum) p=coreutils ;; ss) p=iproute2 ;; *) p=$t ;; esac
+    case $t in
+    sha256sum) p=coreutils ;;
+    ss) p=iproute2 ;;
+    diff) p=diffutils ;;
+    find) p=findutils ;;
+    *) p=$t ;;
+    esac
     pk="$pk $p"
 done
 [ -z "$miss" ] ||
@@ -401,9 +559,27 @@ confirm() {
 }
 
 # ---------------------------------------------------- path safety (F2)
+# Every path is checked once (chain_rec records the device:inode of every
+# component) and checked again by chain_recheck immediately before each
+# write or remove that names it: every component is resolved again, must
+# still be a real directory owned by root or you and not writable by group
+# or others, and must have the SAME device:inode as at the first check;
+# otherwise the script stops and writes nothing. (Residual: see RESIDUAL.)
+declare -A REC=()
+_cmp=''
+_ids=''
 # chain_one P: a real directory (not a symlink), owned by root or you, not
-# writable by group or others (sticky or not).
+# writable by group or others (sticky or not). Adds "device:inode P" to
+# _ids; when _cmp names a record, the device:inode must be in that record.
 chain_one() {
+    _id=$(inode_of "$1" 2>/dev/null) || _id=none
+    if [ -n "$_cmp" ]; then
+        case $'\n'"${REC[$_cmp]}" in
+        *$'\n'"$_id $1"$'\n'*) ;;
+        *) die "$1 was replaced since this run checked it (its device:inode" \
+            "changed): nothing was written" ;;
+        esac
+    fi
     [ ! -L "$1" ] || die "$1 is a symlink: refusing. Use the real path."
     [ -d "$1" ] || die "$1 does not exist or is not a directory"
     _u=$(uid_of "$1")
@@ -415,9 +591,11 @@ chain_one() {
             "user could swap things inside it. Pick a directory under your" \
             "home (not /tmp)."
     fi
+    _ids="$_ids$_id $1"$'\n'
 }
 # chain_ok PATH: chain_one for / and every component down to PATH.
 chain_ok() {
+    _ids=''
     chain_one /
     _cur=''
     IFS=/ read -ra _parts <<<"${1#/}"
@@ -426,34 +604,85 @@ chain_ok() {
         chain_one "$_cur"
     done
 }
-# enter PATH: verify the chain, cd -P into it, confirm where we landed.
-enter() {
-    chain_ok "$1"
-    cd -P -- "$1" || die "cannot enter $1"
-    [ "$(pwd -P)" = "$1" ] || die "$1 is not a plain path (it resolves to" \
-        "$(pwd -P))"
+# chain_rec NAME PATH: check the chain and record each device:inode.
+chain_rec() {
+    _cmp=''
+    chain_ok "$2"
+    REC[$1]=$_ids
 }
-# chkdir: DIR still names the directory we are in (device:inode).
+# chain_recheck NAME PATH: the same checks, and every component must have
+# the device:inode recorded under NAME (PATH may be a parent of the path
+# recorded: its components are a prefix).
+chain_recheck() {
+    _cmp=$1
+    chain_ok "$2"
+    _cmp=''
+}
+# rec_id NAME PATH: the device:inode recorded for PATH.
+rec_id() {
+    while IFS= read -r _l; do
+        if [ "${_l#* }" = "$2" ]; then printf '%s' "${_l%% *}"; return 0; fi
+    done <<<"${REC[$1]}"
+    return 1
+}
+# goto NAME PATH: recheck by device:inode, cd -P into PATH, and confirm the
+# directory we are in is the recorded one.
+goto() {
+    chain_recheck "$1" "$2"
+    cd -P -- "$2" || die "cannot enter $2"
+    _want=$(rec_id "$1" "$2")
+    { [ "$(pwd -P)" = "$2" ] && [ "$(inode_of .)" = "$_want" ]; } ||
+        die "$2 was replaced while it was entered (its device:inode" \
+            "changed): nothing was written"
+}
+# enter PATH (always DIR): check, record, cd -P into it, confirm.
+enter() {
+    chain_rec dir "$1"
+    cd -P -- "$1" || die "cannot enter $1"
+    _want=$(rec_id dir "$1")
+    { [ "$(pwd -P)" = "$1" ] && [ "$(inode_of .)" = "$_want" ]; } ||
+        die "$1 was replaced while it was entered (its device:inode" \
+            "changed): nothing was done"
+}
+# chkdir: before a write in DIR: every component of DIR still has its
+# recorded device:inode and DIR still names the directory we are in.
 chkdir() {
-    [ "$(pwd -P)" = "$DIR" ] && [ "$(inode_of "$DIR" 2>/dev/null)" = \
-        "$CWDID" ] || die "$DIR no longer leads to the directory this run" \
-        "is working in (something replaced a path component): stopping"
+    chain_recheck dir "$DIR"
+    { [ "$(pwd -P)" = "$DIR" ] && [ "$(inode_of .)" = "$CWDID" ]; } ||
+        die "$DIR no longer leads to the directory this run is working in" \
+            "(its device:inode changed, something replaced a path" \
+            "component): stopping"
 }
 # split_dest: DESTPARENT and DESTNAME from DEST; DEST must not exist and its
-# parent must pass the same checks as --dir's parent.
+# parent must pass the same checks as --dir's parent (and is recorded).
 split_dest() {
     DESTPARENT=${DEST%/*}
     DESTNAME=${DEST##*/}
     [ -n "$DESTPARENT" ] || DESTPARENT=/
-    chain_ok "$DESTPARENT"
+    chain_rec dest "$DESTPARENT"
     [ ! -e "$DEST" ] && [ ! -L "$DEST" ] ||
         die "$DEST already exists: choose a path that does not exist"
 }
+# dest_cd: recheck DEST's parent by device:inode and enter it (run in a
+# subshell, then write or remove DESTNAME there).
+dest_cd() { goto dest "$DESTPARENT"; }
+dest_rm() { ( dest_cd && rm -f -- "$DESTNAME" ) 2>/dev/null || true; }
+# unit_cd: recheck the user-unit directory and enter it (subshell use).
+unit_cd() { goto unit "$UNITDIR"; }
+unit_rm() { ( unit_cd && rm -f -- "$UNITNAME" ); }
 
 # ---------------------------------------------------------- run helpers
 # Tool output goes to the temp file $LOG (mode 0600, removed on every exit),
 # never to a persistent log. On failure only a redacted tail is shown.
-cleanup() { [ -z "$LOG" ] || rm -f -- "$LOG"; }
+VDIR=''
+cleanup() {
+    [ -z "$LOG" ] || rm -f -- "$LOG"
+    # VDIR is the exact relative name made by verify_archive in DIR (the
+    # directory this process is in); it holds secrets.
+    if [ -n "$VDIR" ] && [ -d "$VDIR" ] && [ ! -L "$VDIR" ]; then
+        rm -rf -- "$VDIR"
+    fi
+}
 trap cleanup EXIT
 trap 'exit 1' INT TERM HUP
 mklog() {
@@ -497,6 +726,26 @@ ours() {
 boot_ours() {
     [ -f "$UNITPATH" ] && [ ! -L "$UNITPATH" ] &&
         [ "$(sed -n 1p "$UNITPATH")" = "$UNITMARK" ]
+}
+# unit_prep: record the chain of the unit directory if it exists, else of
+# the deepest existing directory above it (UNITBASE), by device:inode.
+unit_prep() {
+    UNITBASE=$UNITDIR
+    while [ -n "$UNITBASE" ] && [ ! -d "$UNITBASE" ]; do
+        UNITBASE=${UNITBASE%/*}
+    done
+    [ -n "$UNITBASE" ] || die "no existing directory above $UNITDIR"
+    chain_rec ubase "$UNITBASE"
+    if [ "$UNITBASE" = "$UNITDIR" ]; then REC[unit]=${REC[ubase]}; fi
+}
+# unit_make: create the missing directories of UNITDIR relative to the
+# rechecked UNITBASE, then record the chain of UNITDIR.
+unit_make() {
+    [ "$UNITBASE" != "$UNITDIR" ] || return 0
+    ( goto ubase "$UNITBASE" && mkdir -p -- "${UNITDIR#"$UNITBASE"/}" )
+    chain_recheck ubase "$UNITBASE"
+    chain_rec unit "$UNITDIR"
+    UNITBASE=$UNITDIR
 }
 # srv_pid: print the pid of this directory's running server, if any.
 srv_pid() {
@@ -579,8 +828,7 @@ srv_start() {
     else
         chkdir
         nohup "$DIR/bin/nats-server" -c "$CONF" </dev/null \
-            > >(nohup sed -u -E "/-----BEGIN/,/-----END/d;/$SECRE/d" \
-                >>server.log 2>&1) 2>&1 &
+            > >(trap '' HUP; exec >>server.log 2>&1; srvlog_filter) 2>&1 &
         echo $! >|"$PIDF"
     fi
     _i=0
@@ -589,7 +837,8 @@ srv_start() {
         _p=$(srv_pid)
         if [ -z "$_p" ]; then
             sleep 0.5
-            [ ! -f server.log ] || tail -n 10 server.log | safe | fold80 >&2
+            [ ! -f server.log ] || tail -n 10 server.log | srvlog_filter |
+                fold80 >&2
             die "the server exited (log: $DIR/server.log, filtered)"
         fi
         [ "$_i" -lt 75 ] ||
@@ -664,6 +913,7 @@ fetch() {
 install_tools() {
     [ ! -e bin/.dl ] || die "bin/.dl exists (an earlier run was cut short):" \
         "check it, move it away and run again"
+    chkdir
     mkdir -m 0700 bin/.dl
     fetch nats-server "$NS_FILE" "$NS_BASE" "$NS_SHA"
     fetch nsc "$NSC_FILE" "$NSC_BASE" "$NSC_SHA"
@@ -674,6 +924,7 @@ install_tools() {
         -d bin/.dl/y
     [ -f "bin/.dl/x/$NS_MEMBER" ] || die "$NS_FILE had no $NS_MEMBER"
     [ -f bin/.dl/y/nsc ] || die "$NSC_FILE had no nsc"
+    chkdir
     cat "bin/.dl/x/$NS_MEMBER" >bin/.new-nats-server
     cat bin/.dl/y/nsc >bin/.new-nsc
     chmod 0700 bin/.new-nats-server bin/.new-nsc
@@ -690,6 +941,7 @@ install_tools() {
                 "not installing it"
         did "$_t reports '$_o'"
     done
+    chkdir
     for _t in nats-server nsc; do
         if [ -e "bin/$_t" ] || [ -L "bin/$_t" ]; then
             [ "$1" = upgrade ] || die "bin/$_t exists: not overwriting"
@@ -749,6 +1001,28 @@ check_run() {
         else bad "missing $DIR/nsc"; fi
     fi
     mode_is server.key 600 f
+    mode_is mash-setup.json 600 f
+    if [ -f mash-setup.json ] && [ ! -L mash-setup.json ]; then
+        ms=$(cat mash-setup.json)
+        js='"([^"\\]|\\.)*"'
+        js="^\{\"server\":$js,\"owner\":$js,\"account\":$js\}\$"
+        if printf '%s\n' "$ms" | grep -Eq "$js" &&
+            [ "$(printf '%s\n' "$ms" | grep -c .)" = 1 ]; then
+            good "mash-setup.json is one line with server, owner, account"
+            if [ -f server.conf ]; then
+                lp=$(conf_listen)
+                [ -n "$lp" ] || lp="127.0.0.1 4222"
+                case $ms in
+                *'"server":"tls://'*":${lp#* }\",\"owner\""*) ;;
+                *) bad "mash-setup.json server port is not the" \
+                    "server.conf client port ${lp#* }" ;;
+                esac
+            fi
+        else
+            bad "mash-setup.json is not the one-line JSON object with" \
+                "string fields server, owner, account"
+        fi
+    fi
     for f in ca.pem server.pem server.conf operator.jwt; do
         if [ -f "$f" ]; then good "$DIR/$f exists"
         else bad "missing $DIR/$f"; fi
@@ -780,11 +1054,12 @@ check_run() {
     fi
     if [ -f server.conf ] && [ "$binok" -eq 1 ]; then
         : >|"$LOG"
+        chkdir
         if "$DIR/bin/nats-server" -t -c "$CONF" >>"$LOG" 2>&1; then
-            good "nats-server -t -c: $(sed -n 1p "$LOG" |
-                sed 's/ *(sha256:[0-9a-f]*)//' | safe)"
+            good "nats-server -t -c: $(srvlog_filter <"$LOG" | sed -n 1p |
+                sed 's/ *(sha256:[0-9a-f]*)//')"
         else
-            bad "nats-server -t -c $CONF: $(safe <"$LOG" | fold80)"
+            bad "nats-server -t -c $CONF: $(srvlog_filter <"$LOG" | fold80)"
         fi
     fi
     if [ -f server.conf ]; then
@@ -830,6 +1105,48 @@ check_run() {
     fi
     [ "$fails" -eq 0 ] || return 1
     say "check passed"
+}
+
+# verify_archive (--retire-keys): before anything is removed, extract DEST
+# into a private 0700 directory made under DIR (the place the temp logs
+# already live, never /tmp) and compare it with the sources: ca.key, nsc/
+# and export/ all present, nothing else, every file identical (diff names a
+# file that differs; it never shows content) and the same number of
+# entries. Any difference: the bad archive is removed, nothing else is, and
+# the extraction directory (it holds secrets) is removed by its exact name.
+vfail() {
+    [ ! -s "$LOG" ] || tail -n 3 "$LOG" | safe | fold80 >&2
+    dest_rm
+    die "$1: the archive $DEST was removed; nothing in $DIR was removed" \
+        "or changed"
+}
+verify_archive() {
+    VDIR=$(mktemp -d ./.verify.XXXXXX) || die "cannot make a temp directory" \
+        "in $DIR"
+    chkdir
+    : >|"$LOG"
+    ( dest_cd && tar -xzf "$DESTNAME" --no-same-owner \
+        -C "/proc/$MAINPID/cwd/$VDIR" ) >>"$LOG" 2>&1 ||
+        vfail "the archive could not be extracted again"
+    [ -f "$VDIR/ca.key" ] && [ -d "$VDIR/nsc" ] && [ -d "$VDIR/export" ] ||
+        vfail "the archive lacks ca.key, nsc/ or export/"
+    [ "$(ls -A "$VDIR" | tr '\n' ' ')" = "ca.key export nsc " ] ||
+        vfail "the archive holds entries other than ca.key, nsc/ and export/"
+    _na=$(find ca.key nsc export -print0 | tr -cd '\0' | wc -c)
+    _nb=$( (cd "$VDIR" && find ca.key nsc export -print0 | tr -cd '\0' |
+        wc -c) )
+    [ "$_na" = "$_nb" ] || vfail "the archive holds $_nb entries, the" \
+        "sources $_na"
+    for _m in ca.key nsc export; do
+        diff -rq --no-dereference -- "$_m" "$VDIR/$_m" >>"$LOG" 2>&1 ||
+            vfail "the archive's $_m differs from the one in $DIR"
+    done
+    rm -rf -- "$VDIR"
+    [ ! -e "$VDIR" ] || die "could not remove the extraction directory" \
+        "$DIR/$VDIR (it holds secrets): remove it yourself"
+    VDIR=''
+    did "extracted $DEST and found ca.key, nsc/ and export/ identical to" \
+        "the sources ($_na entries); the extraction was removed"
 }
 
 # ------------------------------------------------------------------ modes
@@ -890,45 +1207,53 @@ backup | retire-keys)
         done
         need_terminal "--retire-keys"
         printf '\n'
-        wrap '' '' "--retire-keys writes ca.key, nsc/ and export/ from $DIR" \
-            "into $DEST (one tar.gz, mode 0600), checks it, then REMOVES" \
-            "those three from $DIR. After that the server still runs, but" \
+        wrap '' '' "--retire-keys writes $DEST (mode 0600) and" \
+            "$DIR/.keys-retired and removes ca.key, nsc/ and export/ from" \
+            "$DIR. Before it removes anything it extracts $DEST into a" \
+            "private temporary directory under $DIR and checks that every" \
+            "file is identical to the one it will remove; if not, it stops" \
+            "and removes nothing. After that the server still runs, but" \
             "this machine can no longer sign new certificates, accounts or" \
             "users. Do this only after mashctl adopt succeeded. The" \
             "archive holds secrets: move it off this machine."
+        wrap '' '' "$RESIDUAL"
         confirm "$DIR"
+    else
+        printf '\n'
+        wrap '' '' "--backup writes $DEST (mode 0600) and nothing else. It" \
+            "stops the server while it reads DIR and starts it again."
+        wrap '' '' "$RESIDUAL"
     fi
     was=$(srv_pid)
     if [ "$MODE" = backup ] && [ -n "$was" ]; then srv_stop; fi
     created=0
-    ( cd -P -- "$DESTPARENT" && [ "$(pwd -P)" = "$DESTPARENT" ] &&
-        : >"$DESTNAME" ) 2>/dev/null ||
-        die "could not create $DEST exclusively"
+    ( dest_cd && : >"$DESTNAME" ) ||
+        die "could not create $DEST exclusively (nothing was written)"
     created=1
     case $MODE in
     backup) members=(--exclude=./bin '--exclude=./.cmd.*' .) ;;
     *) members=(ca.key nsc export) ;;
     esac
     : >|"$LOG"
-    if ! ( cd -P -- "$DESTPARENT" && [ "$(pwd -P)" = "$DESTPARENT" ] &&
-        tar -czf "$DESTNAME" -C "/proc/$MAINPID/cwd" "${members[@]}"
-        ) >>"$LOG" 2>&1; then
-        [ "$created" -eq 0 ] || rm -f -- "$DEST"
+    if ! ( dest_cd && tar -czf "$DESTNAME" -C "/proc/$MAINPID/cwd" \
+        "${members[@]}" ) >>"$LOG" 2>&1; then
+        [ "$created" -eq 0 ] || dest_rm
         capfail "tar"
     fi
-    n=$( (cd -P -- "$DESTPARENT" && tar -tzf "$DESTNAME" 2>>"$LOG") |
-        grep -c '') || n=0
+    n=$( (dest_cd && tar -tzf "$DESTNAME" 2>>"$LOG") | grep -c '') || n=0
     if [ "$n" -lt 2 ]; then
-        rm -f -- "$DEST"
+        dest_rm
         die "the archive $DEST did not list back: removed it"
     fi
     if [ "$MODE" = backup ] &&
-        (cd -P -- "$DESTPARENT" && tar -tzf "$DESTNAME") 2>/dev/null |
+        (dest_cd && tar -tzf "$DESTNAME") 2>/dev/null |
         grep -q '^\./bin/'; then
-        rm -f -- "$DEST"
+        dest_rm
         die "the archive contained bin/: removed it"
     fi
-    did "wrote $DEST (mode $(rawmode "$DEST"), $n entries, lists back)"
+    if [ "$MODE" = retire-keys ]; then verify_archive; fi
+    dmode=$( (dest_cd && rawmode "$DESTNAME") ) || dmode=unknown
+    did "wrote $DEST (mode $dmode, $n entries, lists back)"
     if [ "$MODE" = backup ]; then
         if [ -n "$was" ]; then srv_start; fi
         say "this archive holds secrets (CA key, nsc keys, creds): keep it" \
@@ -944,6 +1269,7 @@ backup | retire-keys)
             "keeps running. The archive holds secrets: move it off this" \
             "machine and keep it safe."
     fi
+    residual
     exit 0 ;;
 # ---------------------------------------------------------- boot units
 enable-boot | disable-boot)
@@ -960,12 +1286,15 @@ enable-boot | disable-boot)
             boot_ours || die "$UNITPATH exists and this script did not" \
                 "write it: not touching it"
         fi
+        unit_prep
         printf '\n'
-        wrap '' '' "--enable-boot will: write $UNITPATH (a systemd user" \
-            "unit that runs $DIR/bin/nats-server -c $CONF, restarting it" \
-            "on failure); run systemctl --user daemon-reload and" \
-            "systemctl --user enable --now $UNITNAME; stop the server this" \
-            "script started, if any, because systemd takes over."
+        wrap '' '' "--enable-boot writes the unit file $UNITPATH (a systemd" \
+            "user unit that runs $DIR/bin/nats-server -c $CONF, restarting" \
+            "it on failure) and enables it: it runs systemctl --user" \
+            "daemon-reload and systemctl --user enable --now $UNITNAME, and" \
+            "stops the server this script started, if any, because systemd" \
+            "takes over. It writes nothing else."
+        wrap '' '' "$RESIDUAL"
         if [ "$LINGER" -eq 1 ]; then
             wrap '' '' "--linger will ALSO run loginctl enable-linger $U." \
                 "That changes your account on this machine: your user" \
@@ -980,17 +1309,20 @@ enable-boot | disable-boot)
         was=$(srv_pid)
         if [ -n "$was" ] && ! boot_ours; then srv_stop; fi
         if ! boot_ours; then
-            [ -d "$UNITDIR" ] || { chain_ok "${HOME}"
-                mkdir -p -- "$UNITDIR"; }
-            {
-                printf '%s\n' "$UNITMARK" '[Unit]' \
-                    "Description=mash NATS server for $DIR" \
-                    'After=network-online.target' '' '[Service]' \
-                    "ExecStart=\"$DIR/bin/nats-server\" -c \"$CONF\"" \
-                    'Restart=on-failure' 'RestartSec=2' \
-                    'NoNewPrivileges=yes' '' '[Install]' \
-                    'WantedBy=default.target'
-            } >"$UNITPATH"
+            unit_make
+            chkdir
+            (
+                unit_cd
+                {
+                    printf '%s\n' "$UNITMARK" '[Unit]' \
+                        "Description=mash NATS server for $DIR" \
+                        'After=network-online.target' '' '[Service]' \
+                        "ExecStart=\"$DIR/bin/nats-server\" -c \"$CONF\"" \
+                        'Restart=on-failure' 'RestartSec=2' \
+                        'NoNewPrivileges=yes' '' '[Install]' \
+                        'WantedBy=default.target'
+                } >"$UNITNAME"
+            ) || die "could not write $UNITPATH (nothing was written)"
             did "wrote $UNITPATH"
         fi
         sysd daemon-reload
@@ -1010,6 +1342,7 @@ enable-boot | disable-boot)
             sleep 0.2
         done
         did "the server answers on ${_lp% *}:${_lp#* }"
+        residual
     else
         if [ ! -e "$UNITPATH" ] && [ ! -L "$UNITPATH" ]; then
             say "no boot unit $UNITNAME for this directory: nothing to do"
@@ -1017,52 +1350,61 @@ enable-boot | disable-boot)
         fi
         boot_ours || die "$UNITPATH exists and this script did not write" \
             "it: not touching it"
+        unit_prep
         printf '\n'
-        wrap '' '' "--disable-boot will run systemctl --user disable --now" \
-            "$UNITNAME (this STOPS the server) and remove $UNITPATH. It does" \
-            "not change linger."
+        wrap '' '' "--disable-boot removes the unit file $UNITPATH and runs" \
+            "systemctl --user disable --now $UNITNAME (this STOPS the" \
+            "server). It does not change linger and writes nothing."
+        wrap '' '' "$RESIDUAL"
         confirm "$UNITNAME"
         sysd disable --now "$UNITNAME"
-        rm -f -- "$UNITPATH"
+        unit_rm || die "could not remove $UNITPATH (nothing was removed)"
         sysd daemon-reload
         did "disabled $UNITNAME and removed $UNITPATH"
         say "linger was not touched. If you turned it on and want it off:" \
             "loginctl disable-linger $U"
         say "start the server again by hand with --start"
+        residual
     fi
     exit 0 ;;
 # ------------------------------------------------------------- --remove
 remove)
-    chain_ok "$DIR"
-    cd -P -- "$DIR" || die "cannot enter $DIR"
-    CWDID=$(inode_of .)
+    enter "$DIR"; CWDID=$(inode_of .)
     need_marker
     need_terminal "--remove"
+    if [ -e "$UNITPATH" ] || [ -L "$UNITPATH" ]; then unit_prep; fi
     printf '\n'
-    wrap '' '' "--remove will stop the server, remove the boot unit this" \
-        "script wrote (if any) and DELETE $DIR with everything in it (CA" \
-        "key, nsc keys, creds, mail stored in JetStream). Back up first if" \
-        "you need any of it."
+    wrap '' '' "--remove removes $DIR with everything in it (CA key, nsc" \
+        "keys, creds, mail stored in JetStream) and, if this script made" \
+        "one, the unit file $UNITPATH; it stops the server first. Back up" \
+        "first if you need any of it."
+    wrap '' '' "$RESIDUAL"
     confirm "$DIR"
     mklog
     if [ -n "$(srv_pid)" ]; then srv_stop; fi
     if boot_ours; then
         sysd disable --now "$UNITNAME"
-        rm -f -- "$UNITPATH"
+        unit_rm || die "could not remove $UNITPATH (nothing was removed)"
         sysd daemon-reload
         did "disabled $UNITNAME and removed $UNITPATH"
     fi
     rm -f -- "$LOG"
     LOG=''
     chkdir
+    RPARENT=${DIR%/*}
     cd -P -- .. || die "cannot leave $DIR"
-    [ "$(pwd -P)" = "${DIR%/*}" ] && [ "$(inode_of "${DIR##*/}")" = \
-        "$CWDID" ] || die "$DIR is not where this run found it: not removing"
+    chain_recheck dir "$RPARENT"
+    _want=$(rec_id dir "$RPARENT")
+    { [ "$(pwd -P)" = "$RPARENT" ] && [ "$(inode_of .)" = "$_want" ] &&
+        [ "$(inode_of "${DIR##*/}")" = "$CWDID" ]; } ||
+        die "$DIR is not where this run found it (its device:inode" \
+            "changed): not removing"
     rm -r -- "${DIR##*/}"
     did "removed $DIR"
     say "mashctl's folder was not touched. If you are done with mash," \
         "this removes it (it holds your keys and agents' creds):"
     emit_cmd '  ' rm -r -- "$(Q "$MASHCFG")"
+    residual
     exit 0 ;;
 esac
 
@@ -1092,7 +1434,7 @@ fi
 step "preflight (directory, port)"
 PARENT=${DIR%/*}
 NAME=${DIR##*/}
-chain_ok "$PARENT"
+chain_rec parent "$PARENT"
 [ ! -e "$DIR" ] && [ ! -L "$DIR" ] ||
     die "$DIR already exists: this script creates --dir itself and" \
         "refuses any existing path (even an empty directory)"
@@ -1102,7 +1444,11 @@ if port_open "$ph" "$PORT"; then
         "or changed): use --port"
 fi
 cd -P -- "$PARENT" || die "cannot enter $PARENT"
-[ "$(pwd -P)" = "$PARENT" ] || die "$PARENT is not a plain path"
+_want=$(rec_id parent "$PARENT")
+{ [ "$(pwd -P)" = "$PARENT" ] && [ "$(inode_of .)" = "$_want" ]; } ||
+    die "$PARENT was replaced while it was entered (its device:inode" \
+        "changed): nothing was written"
+chain_recheck parent "$PARENT"
 mkdir -m 0700 -- "$NAME" || die "could not create $DIR (it must not exist)"
 NID=$(inode_of "$NAME")
 fail_new() {
@@ -1119,6 +1465,9 @@ CWDID=$(inode_of .)
 { [ "$(pwd -P)" = "$DIR" ] && [ "$(inode_of "$DIR")" = "$CWDID" ]; } ||
     fail_new "$PARENT was replaced while $DIR was made: it was not used" \
         "and the new directory was removed"
+chain_rec dir "$DIR"
+chain_recheck parent "$PARENT"
+chkdir
 printf 'mash-nats-setup 1 created by uid %s\n' "$ME" >.mash-nats-setup
 mklog
 did "$DIR created by this script (mode 0700, yours); $ph:$PORT is free"
@@ -1126,6 +1475,7 @@ did "$DIR created by this script (mode 0700, yours); $ph:$PORT is free"
     "given"
 
 step "install nats-server and nsc into $DIR/bin (pinned, checked)"
+chkdir
 mkdir -m 0700 bin
 if cmd=$(command -v nsc 2>/dev/null); then
     say "(a copy of nsc on PATH at $cmd is never run)"
@@ -1138,11 +1488,13 @@ NSC=$DIR/bin/nsc
 NATSD=$DIR/bin/nats-server
 
 step "make a private CA and a server certificate (ECDSA P-256, 10 years)"
+chkdir
 runlog "openssl (CA)" openssl req -x509 -newkey ec \
     -pkeyopt ec_paramgen_curve:P-256 -nodes -days 3650 \
     -keyout ca.key -out ca.pem -subj '/CN=mash local CA' \
     -addext 'basicConstraints=critical,CA:TRUE' \
     -addext 'keyUsage=critical,keyCertSign,cRLSign'
+chkdir
 : >|"$LOG"
 openssl req -new -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
     -keyout server.key -subj '/CN=mash local server' 2>>"$LOG" |
@@ -1159,6 +1511,7 @@ did "ca.pem, ca.key, server.pem, server.key written; SANs: $SANS"
 
 step "make the operator, accounts and users with nsc, in an isolated store" \
     "under $DIR/nsc"
+chkdir
 mkdir -m 0700 nsc nsc/data nsc/config nsc/keys nsc/home
 # Relative on purpose: everything nsc writes lands under the directory this
 # script is working in, not wherever an absolute string might lead later.
@@ -1194,6 +1547,7 @@ did "JetStream on $ACCOUNT: disk $JSDISK, 64 streams, 128 consumers (memory" \
 did "users: mashadmin in $ACCOUNT, sys in SYS; all keys are in $DIR/nsc/keys"
 
 step "write the server configuration and test it"
+chkdir
 mkdir -m 0700 resolver jetstream
 : >|"$LOG"
 "$NSC" describe operator --raw >operator.jwt 2>>"$LOG" ||
@@ -1202,6 +1556,7 @@ ACCJWT=$("$NSC" describe account "$ACCOUNT" --raw 2>>"$LOG") ||
     capfail "nsc describe account"
 SYSJWT=$("$NSC" describe account SYS --raw 2>>"$LOG") ||
     capfail "nsc describe account"
+chkdir
 cat >server.conf <<EOF
 # written by nats-local-setup.sh: operator mode, full resolver, TLS required,
 # JetStream on. (The resolver_preload lines hold the account JWTs: long.)
@@ -1234,12 +1589,14 @@ did "$CONF written (self-contained; operator JWT in $DIR/operator.jwt) and" \
     "'nats-server -t -c' passes"
 
 step "export the files mashctl adopt takes into $DIR/export (mode 0600)"
+chkdir
 mkdir -m 0700 export
 seed_of() { # PUBLIC-KEY: print the seed file of a key nsc made
     p=$(find nsc/keys/keys -name "$1.nk" | sed -n 1p)
     [ -n "$p" ] || die "no seed for $1 under $DIR/nsc/keys"
     printf '%s' "$p"
 }
+chkdir
 cat "$(seed_of "$OPPUB")" >export/operator.nk
 cat "$(seed_of "$ACCPUB")" >export/account.nk
 chkdir
@@ -1254,19 +1611,29 @@ esac
 case $(cut -c1-2 export/account.nk) in
 SA) ;; *) die "account.nk is not an SA seed" ;;
 esac
+URLHOST=$FIRSTHOST
+case $URLHOST in *:*) URLHOST="[$URLHOST]" ;; esac
+SERVERURL=tls://$URLHOST:$PORT
+json_esc() { # VALUE: JSON string body (no control characters allowed)
+    [ -z "$(printf '%s' "$1" | tr -d '[:print:]')" ] ||
+        die "a value for mash-setup.json has a control character"
+    printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+}
+chkdir
+printf '{"server":"%s","owner":"%s","account":"%s"}\n' \
+    "$(json_esc "$SERVERURL")" "$(json_esc "$OWNER")" \
+    "$(json_esc "$ACCOUNT")" >mash-setup.json
 did "operator.nk, account.nk, sys.creds, mashadmin.creds written (contents" \
-    "not shown)"
+    "not shown); $DIR/mash-setup.json (server, owner, account: no secrets)" \
+    "written, which mashctl adopt --from reads"
 
 if [ "$START" -eq 1 ]; then
     step "start nats-server detached"
     srv_start
 fi
 
-URLHOST=$FIRSTHOST
-case $URLHOST in *:*) URLHOST="[$URLHOST]" ;; esac
 file() { printf '  %-24s %s\n' "$1" "$2"; }
 QDIR=$(Q "$DIR")
-SERVERURL=tls://$URLHOST:$PORT
 
 printf '\n'
 wrap '' '' "Done. The setup is in $QDIR. Nothing above printed a seed or" \
@@ -1281,10 +1648,13 @@ else
         "(TLS required, credentials needed). No firewall or service was" \
         "touched."
 fi
+printf '\n'
+residual
 printf '\nFiles (all under %s):\n' "$QDIR"
 file bin/nats-server "server, $NS_VER (sha256 checked)"
 file bin/nsc "nsc, $NSC_VER (sha256 checked)"
 file ca.pem 'CA certificate: give this to clients'
+file mash-setup.json 'what adopt --from reads (no secrets)'
 file server.conf 'nats-server configuration (no seeds)'
 file export/mashadmin.creds 'admin credentials (secret)'
 file export/sys.creds 'system account credentials (secret)'
@@ -1293,16 +1663,23 @@ file export/account.nk 'account seed (secret)'
 file ca.key 'CA private key (secret)'
 file nsc/ 'nsc store with all signing keys (secret)'
 if [ "$START" -eq 1 ]; then
-    file server.log 'server log (secret-looking lines withheld)'
+    file server.log 'server log (known-safe line shapes only)'
     file server.pid 'server process id (--stop reads it)'
 fi
 
 printf '\nWhat you hold\n'
 wrap '  Server address     ' '                     ' "$SERVERURL"
 wrap '  CA file            ' '                     ' "$DIR/ca.pem"
+CAFP=$(openssl x509 -in "$DIR/ca.pem" -noout -fingerprint -sha256 |
+    sed 's/^[^=]*=//' | tr -d ':' | tr 'A-F' 'a-f')
+CAFPG=$(printf '%s' "$CAFP" | sed -E 's/(.{8})/\1 /g; s/ $//')
+wrap '  CA fingerprint     ' '                     ' "sha256:$CAFPG"
 wrap '  Server directory   ' '                     ' "$DIR"
 wrap '                     ' '                     ' "(mode 0700; holds the" \
     "CA key and the nsc keys until you run --retire-keys)"
+printf '\n'
+wrap '' '' "The person who runs adopt types the CA fingerprint at adopt's" \
+    "prompt; compare it with the CA fingerprint line above."
 
 printf '\nNext\n'
 if [ "$START" -ne 1 ]; then
@@ -1312,40 +1689,37 @@ if [ "$START" -ne 1 ]; then
 fi
 CFGENV=()
 [ "$MASHCFG_GIVEN" -eq 0 ] || CFGENV=("MASH_CONFIG_DIR=$(Q "$MASHCFG")")
-# lines GROUP...: each group on its own line, joined with " \".
-lines() {
-    _n=$#
-    for _g in "$@"; do
-        _n=$((_n - 1))
-        if [ "$_n" -gt 0 ]; then printf '    %s \\\n' "$_g"
-        else printf '    %s\n' "$_g"; fi
-    done
-}
-printf '  1. Adopt the server into mash. One command; run it as it is:\n\n'
-lines "${CFGENV[@]}" "MASH_TLS_CA=$(Q "$DIR/ca.pem") mashctl adopt" \
-    "--server $(Q "$SERVERURL")" "--owner $(Q "$OWNER")" \
-    "--account $(Q "$ACCOUNT")" \
-    "--operator-key $(Q "$DIR/export/operator.nk")" \
-    "--account-key $(Q "$DIR/export/account.nk")" \
-    "--sys-creds $(Q "$DIR/export/sys.creds")" \
-    "--admin-creds $(Q "$DIR/export/mashadmin.creds")"
-printf '\n  2. Create the directory and lease buckets:\n\n'
+wrap '  ' '  ' "Adopt the server into mash (a person runs this, in their" \
+    "own terminal: it asks them to type the CA fingerprint above, then sets" \
+    "up mash's storage too, so there is no separate init):"
+printf '\n'
 if [ "${#CFGENV[@]}" -gt 0 ]; then
-    printf '    %s mashctl init\n' "${CFGENV[0]}"
+    printf '    %s mashctl adopt --from %s\n' "${CFGENV[0]}" "$(Q "$DIR")"
 else
-    printf '    mashctl init\n'
+    printf '    mashctl adopt --from %s\n' "$(Q "$DIR")"
 fi
 printf '\n'
-wrap '  ' '  ' "mashctl keeps its files in $MASHCFG (set MASH_CONFIG_DIR to" \
-    "change that). Agents' credentials are written there as" \
-    "$OWNER.<group>.<agent>.creds."
+wrap '  ' '  ' "Adopt copies the CA, the keys and the credentials into" \
+    "mashctl's folder ($MASHCFG; set MASH_CONFIG_DIR to change that) and" \
+    "prints one 'copied' line per file, so export/ is no longer needed." \
+    "Agents' credentials are written there as $OWNER.<group>.<agent>.creds."
+printf '\n'
+wrap '  ' '  ' "Hand-managed server instead? see the long form in the guide" \
+    "(mashctl adopt --server ... --ca ...)."
+printf '\n'
+wrap '  ' '  ' "Or, after adopt succeeds, to retire the setup's keys:" \
+    "--retire-keys (item 2 below)."
+printf '\n'
+wrap '  ' '  ' "Another machine that wants to use this server needs the CA" \
+    "file and an address for the server that machine can reach (the one in" \
+    "the certificate); a credential carries no address."
 printf '\n'
 wrap '  ' '  ' "To use mash in Claude Code, run these two lines in Claude" \
     "Code, then see the guide:"
 printf '\n    claude plugin marketplace add bogworks/mash\n'
 printf '    claude plugin install mash@mash\n\n'
 wrap '  ' '  ' "https://github.com/bogworks/mash/blob/v0.5.6/docs/install.md"
-printf '\n  3. Looking after the server later (each takes --dir):\n'
+printf '\n  2. Looking after the server later (each takes --dir):\n'
 BK=$HOME/mash-nats-backup.tar.gz
 RK=$HOME/mash-nats-keys.tar.gz
 OWNIND='    '

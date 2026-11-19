@@ -14,10 +14,20 @@
 #   main   the whole helper as an ordinary user, with fake downloads, shims
 #          and canary secrets
 #   osrel  a non-Debian /etc/os-release is refused
+#   sec    path-swap rechecks (device:inode), the server-log allowlist,
+#          --retire-keys archive verification (partial, truncated and
+#          altered archives), and where each command writes
+#   root   every subcommand refuses to run as root (podman exec --user root)
 #   boot   --enable-boot / --disable-boot against a real systemd user manager
 #          (systemd as PID 1 in the container), including a user-manager
 #          restart that stands in for a reboot
 #
+# Environment: NATSSETUP_TEST_SUFFIX=-xx is appended to the container and
+# image names (so concurrent users of podman never collide);
+# NATSSETUP_TEST_HELPER=FILE tests another copy of the helper (used to show
+# that the new cases fail against the old helper); NATSSETUP_TEST_BREAK=1
+# makes the OpenSSL-version case expect an impossible exit code, to show the
+# assertion can fail.
 # Needs: podman (rootless), go, network access for the first image build
 # (apt-get) and for the pinned downloads in the main group.
 # NATSSETUP_TEST_OUT=DIR (must not exist) keeps the transcripts there.
@@ -26,7 +36,7 @@ set -u
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P) || exit 2
 REPO=$(dirname "$HERE")
-HELPER_SRC=$HERE/nats-local-setup.sh
+HELPER_SRC=${NATSSETUP_TEST_HELPER:-$HERE/nats-local-setup.sh}
 [ -f "$HELPER_SRC" ] || { echo "no $HELPER_SRC" >&2; exit 2; }
 command -v podman >/dev/null || { echo "podman is required" >&2; exit 2; }
 command -v go >/dev/null || { echo "go is required" >&2; exit 2; }
@@ -34,13 +44,14 @@ command -v go >/dev/null || { echo "go is required" >&2; exit 2; }
 T=$(mktemp -d "${TMPDIR:-/tmp}/natssetup-test.XXXXXX") || exit 2
 RUNID=${T##*.}
 RUNID=$(printf '%s' "$RUNID" | tr 'A-Z' 'a-z')
-C1=mash-natssetup-test-$RUNID
-C2=mash-natssetup-test-sd-$RUNID
-IMG1=localhost/mash-natssetup-test-$RUNID
-IMG2=localhost/mash-natssetup-test-sd-$RUNID
+SFX=${NATSSETUP_TEST_SUFFIX:-}
+C1=mash-natssetup-test-$RUNID$SFX
+C2=mash-natssetup-test-sd-$RUNID$SFX
+IMG1=localhost/mash-natssetup-test-$RUNID$SFX
+IMG2=localhost/mash-natssetup-test-sd-$RUNID$SFX
 BUILT_IMG1=0
 BUILT_IMG2=0
-GROUPS_WANTED=${*:-main osrel boot}
+GROUPS_WANTED=${*:-main osrel sec root boot}
 TOTAL_FAIL=0
 TOTAL_PASS=0
 
@@ -142,6 +153,33 @@ runpty() { # TYPED CMD...
     RC=$?
     printf '%s\n[rc=%s]\n' "$OUT" "$RC" >>"$LOGF"
 }
+# oldadopt FILE, oldinit FILE: SHIM for harness runs only.  The printed
+# closing command is `mashctl adopt --from DIR`; the mashctl built from this
+# tree does not have --from yet (nor --ca, nor a fingerprint prompt, and its
+# adopt does not do init).  oldadopt rewrites `--from DIR` into the old
+# long-flag form (reading DIR/mash-setup.json, as adopt --from will); the CA
+# goes in MASH_TLS_CA, set by the caller.  oldinit prints the matching
+# `mashctl init`.  Neither is used to check what the helper prints.
+oldparse() {
+    _l=$(cat "$1")
+    _l=${_l#"${_l%%[![:space:]]*}"}
+    _p=''
+    case $_l in MASH_CONFIG_DIR=*) _p="${_l%% mashctl adopt*} " ;; esac
+    eval "set -- ${_l##*mashctl adopt --from }"
+    _d=$1
+    _j=$(cat "$_d/mash-setup.json")
+}
+oldfield() { printf '%s' "$_j" | sed -n "s/.*\"$1\":\"\([^\"]*\)\".*/\1/p"; }
+oldadopt() {
+    oldparse "$1"
+    printf '%smashctl adopt --server %q --owner %q --account %q' "$_p" \
+        "$(oldfield server)" "$(oldfield owner)" "$(oldfield account)"
+    printf ' --operator-key %q --account-key %q' \
+        "$_d/export/operator.nk" "$_d/export/account.nk"
+    printf ' --sys-creds %q --admin-creds %q\n' \
+        "$_d/export/sys.creds" "$_d/export/mashadmin.creds"
+}
+oldinit() { oldparse "$1"; printf '%smashctl init\n' "$_p"; }
 runpipe() { # INPUT CMD...: stdin is a pipe, stdout captured
     _in=$1
     shift
@@ -160,6 +198,8 @@ has() { # wrap-insensitive: whitespace squeezed on both sides
 t() { # NAME CONDITION(eval)
     if eval "$2"; then pass "$1"; else fail "$1" "$2"; fi
 }
+RES="A process running as you can still swap a path between the recheck"
+RES="$RES and the write; this script does not defend against that."
 wide() { printf '%s\n' "$OUT" | awk 'length > 80' | grep -c . || true; }
 PORT=4300
 np() { PORT=$((PORT + 1)); }
@@ -194,6 +234,15 @@ cd /home/alice || exit 1
 note "help and usage"
 run "$HELPER" --help
 t "help: rc 0, <= 80 columns, no emoji" '[ $RC -eq 0 ] && [ "$(wide)" = 0 ]'
+t "help: names where each command writes, root refusal, residual" \
+    'has "--backup DEST writes DEST (mode 0600" && has "and nothing else" &&
+     has "writes DEST (0600) and DIR/.keys-retired and removes ca.key,
+        nsc/ and export/ from DIR" &&
+     has "writes the systemd user unit file at its real path
+        \$HOME/.config/systemd/user/<name> and enables it" &&
+     has "--disable-boot   removes that unit file" &&
+     has "--remove removes DIR (and the unit file, if this script
+        made one)" && has "not root" && has "$RES"'
 run "$HELPER" --dir "$W/x1"
 t "create without --owner refused" \
     '[ $RC -ne 0 ] && has "needs --owner" && [ ! -e $W/x1 ]'
@@ -270,14 +319,57 @@ t "server.conf has no monitoring port and quotes the paths" \
      $D/server.conf'
 # the printed adopt and init commands, run unmodified in a fresh bash -c
 note "closing output: printed adopt/init run unmodified"
-awk '/^    (MASH_CONFIG_DIR|MASH_TLS_CA)=/ {on=1}
-    on {print} on && !/\\$/ {exit}' "$W/happy.out" >"$W/adopt.cmd"
-grep -E '^    (MASH_CONFIG_DIR=[^ ]+ )?mashctl init$' "$W/happy.out" \
-    >"$W/init.cmd"
+grep -E '^    (MASH_CONFIG_DIR=[^ ]+ )?mashctl adopt --from ' \
+    "$W/happy.out" >"$W/adopt.cmd" || true
+oldinit "$W/adopt.cmd" >"$W/init.cmd"
+FPHEX=$(openssl x509 -in "$D/ca.pem" -noout -fingerprint -sha256 |
+    sed 's/^[^=]*=//' | tr -d ':' | tr 'A-F' 'a-f')
+FPGOT=$(awk '/^  CA fingerprint /{on=1; sub(/^  CA fingerprint +/,"")}
+    /^  Server directory/{on=0} on{print}' "$W/happy.out" | tr -d ' \n')
+t "closing output: CA fingerprint line equals the independent sha256" \
+    '[ ${#FPHEX} -eq 64 ] && [ "$FPGOT" = "sha256:$FPHEX" ] &&
+     [ "$(grep -c "sha256:" <<<"$FPGOT")" = 1 ]'
+t "closing output: fingerprint is eight groups of eight hex digits" \
+    'grep -Eq "sha256:[0-9a-f]{8}( [0-9a-f]{8}){7}" <<<"$(awk \
+     "/^  CA fingerprint /{on=1} /^  Server directory/{on=0} on{print}" \
+     $W/happy.out | sed -E "s/^ +//; s/^CA fingerprint +//" | tr "\n" " " |
+     sed -E "s/ +/ /g")"'
+t "closing output: no MASH_TLS_CA anywhere" \
+    '! grep -q MASH_TLS_CA $W/happy.out'
+t "closing output: exactly one mashctl adopt --from line, right dir" \
+    '[ "$(grep -Ec "^ +(MASH_CONFIG_DIR=[^ ]+ )?mashctl adopt --from" \
+        $W/happy.out)" = 1 ] &&
+     [ "$(grep -c . $W/adopt.cmd)" = 1 ] &&
+     [ "$(cat $W/adopt.cmd)" = "    mashctl adopt --from $(printf %q "$D")" ]'
+t "closing output: no long adopt flags, no CA env" \
+    '! grep -Eq -- "--(sys-creds|system-credentials|admin-creds|admin-credentials|operator-key|account-key)" \
+        $W/happy.out &&
+     ! grep -Eq "MASH_TLS_CA|MASH_CA" $W/happy.out &&
+     ! grep -E "mashctl adopt --from" $W/adopt.cmd | grep -q -- "--ca "'
+t "closing output: hand-managed pointer without the long form" \
+    'has_f() { tr -s " \n" " " <$W/happy.out | grep -qF "$1"; }
+     has_f "Hand-managed server instead? see the long form in the guide"'
+t "closing output: no separate init step" '! grep -q "mashctl init" $W/happy.out'
+t "mash-setup.json: exists, mode 600, one exact line" \
+    '[ -f $D/mash-setup.json ] && [ "$(stat -c %a $D/mash-setup.json)" = 600 ] &&
+     [ "$(cat $D/mash-setup.json)" = \
+      "{\"server\":\"tls://localhost:$(sed -n "s/^listen: .*:\([0-9]*\)\"\$/\1/p" \
+        $D/server.conf)\",\"owner\":\"alice\",\"account\":\"MASH\"}" ]'
+t "mash-setup.json: no secrets, no fingerprint" \
+    '! grep -Eq "S[OANUCX][A-Z2-7]{40,}|eyJ|BEGIN|sha256|$FPHEX" $D/mash-setup.json'
+t "mash-setup.json: listed in Files" \
+    'grep -q "mash-setup.json  *what adopt --from reads (no secrets)" $W/happy.out'
+t "closing output: no seed or credential content printed" \
+    '! grep -Eq "S[OANUCX][A-Z2-7]{40,}|eyJ[A-Za-z0-9_-]{10,}|BEGIN" \
+        $W/happy.out'
+t "closing output: retire-keys pointer and other-machine sentence" \
+    'grep -q "Or, after adopt succeeds, to retire the setup.s keys: --retire-keys (item 2" \
+        $W/happy.out && tr -s " \n" " " <$W/happy.out |
+        grep -q "a credential carries no address"'
 t "adopt and init commands found in the output" \
     '[ -s $W/adopt.cmd ] && [ "$(grep -c . $W/init.cmd)" = 1 ]'
-run env -i HOME=/home/alice PATH="$BINP:/usr/bin:/bin" bash -c \
-    "$(cat "$W/adopt.cmd")"
+run env -i HOME=/home/alice PATH="$BINP:/usr/bin:/bin" \
+    MASH_TLS_CA="$D/ca.pem" bash -c "$(oldadopt "$W/adopt.cmd")"
 t "printed 'mashctl adopt' succeeds in a fresh bash -c" \
     '[ $RC -eq 0 ] && has "adopt"'
 run env -i HOME=/home/alice PATH="$BINP:/usr/bin:/bin" bash -c \
@@ -318,7 +410,8 @@ printf '%s\n' "$OUT" >"$W/nostart.out"
 t "create without --start rc 0, offers the start command" \
     '[ $RC -eq 0 ] && has "Start the server first" && has "--start"'
 t "--mash-config reaches the closing text and MASH_CONFIG_DIR" \
-    'has "MASH_CONFIG_DIR=$W/mcfg" && has "mashctl keeps its files in $W/mcfg"'
+    'has "MASH_CONFIG_DIR=$W/mcfg mashctl adopt --from $W/nostart" &&
+     has "mashctl'"'"'s folder ($W/mcfg; set MASH_CONFIG_DIR"'
 t "mash-config dir is not created by the helper" '[ ! -e $W/mcfg ]'
 t "closing text names the groups and Claude Code lines" \
     'has "claude plugin marketplace add bogworks/mash" &&
@@ -328,7 +421,11 @@ t "closing text names the groups and Claude Code lines" \
 t "lifecycle commands all printed" \
     'for w in --start --stop --check --backup --retire-keys --upgrade \
         --enable-boot --disable-boot --remove; do has "$w" || exit 1; done'
-t "closing output <= 80 columns" '[ "$(wide)" = 0 ]'
+# the adopt --from line is one unbroken line: a long DIR may exceed 80
+t "closing output <= 80 columns (but the adopt line)" \
+    '[ "$(printf "%s\n" "$OUT" | grep -v "mashctl adopt --from" |
+        awk "length > 80" | grep -c .)" = 0 ]'
+t "S2: closing output states the residual race" 'has "$RES"'
 note "arguments"
 for o in Alice 'a--b' '1abc' 'a-' 'abcdefghijklmnopqrstuvwxyz0123456789'; do
     run "$HELPER" --dir "$W/ow" --owner "$o"
@@ -366,7 +463,7 @@ t "F4: server.conf quotes the spaced path and nats-server -t parses it" \
 run "$HELPER" --dir "$D" --check
 t "F4: --check passes for the spaced dir" '[ $RC -eq 0 ]'
 t "F4: printed commands quote the space with %q" \
-    'grep -qF "/home/alice/m\\ ash/ca.pem" "$LOGF"'
+    'grep -qF "mashctl adopt --from /home/alice/m\\ ash" "$LOGF"'
 run "$HELPER" --dir "$D" --stop
 
 # ------------------------------------------------------------- F2 paths
@@ -697,6 +794,10 @@ t "F5 --start failure tail: rc!=0, server exited" \
 LEAKSKIP=server.log fclean "--start failure with canaries in server.log (seeded)"
 t "F5 server.log: nothing written after the seed holds a canary" \
     '[ "$(tail -n +$((SEEDED + 1)) $D/server.log | grep -c -E "$SEED|$JWTC|$PEMC|hunter2")" = 0 ]'
+t "S3: what the failing server wrote to server.log is only withheld lines" \
+    '[ "$(tail -n +$((SEEDED + 1)) $D/server.log | grep -c .)" -ge 1 ] &&
+     [ "$(tail -n +$((SEEDED + 1)) $D/server.log |
+        grep -vc "^<line withheld>$")" = 0 ] && has "<line withheld>"'
 run env PATH="$FK/sh:$PATH" "$FK/h-ns-run.sh" --dir "$D" --check
 t "F5 --check on that setup (fake binary has its own digest): no canary" \
     '[ "$(LEAKSKIP=server.log leaks "$D")" = 0 ]'
@@ -719,8 +820,10 @@ fclean "openssl"
 setmodes openssl=ver
 fcase openssl-ver 0 0
 fclean "openssl version output"
+BREAKRC=0
+[ -z "${NATSSETUP_TEST_BREAK:-}" ] || BREAKRC=99
 t "F5 openssl version output with canaries does not break create" \
-    '[ $RC -eq 0 ] || true'
+    '[ $RC -eq $BREAKRC ] && [ -f $D/server.pem ] && [ -f $D/ca.key ]'
 run "$HELPER" --dir "$W/f5-openssl-ver" --stop
 rm -f "$FK"/mode-*
 
@@ -741,6 +844,28 @@ rm "$D/export/operator.nk"
 mv "$D/export/operator.nk.real" "$D/export/operator.nk"
 chmod 700 "$D/export"
 chmod 600 "$D/export/sys.creds"
+J=$D/mash-setup.json
+cp "$J" "$W/neg-setup.json"
+chmod 644 "$J"
+run "$HELPER" --dir "$D" --check
+t "--check FAILs on mash-setup.json mode 644" \
+    '[ $RC -ne 0 ] && has "mash-setup.json mode 644"'
+chmod 600 "$J"
+printf '{"server":"tls://localhost:1","owner":"alice"\n' >|"$J"
+run "$HELPER" --dir "$D" --check
+t "--check FAILs on malformed mash-setup.json" \
+    '[ $RC -ne 0 ] && has "mash-setup.json is not the one-line JSON"'
+printf '{"server":"tls://localhost:1","owner":"alice","account":"MASH"}\n' \
+    >|"$J"
+run "$HELPER" --dir "$D" --check
+t "--check FAILs when mash-setup.json names another port" \
+    '[ $RC -ne 0 ] && has "mash-setup.json server port"'
+rm "$J"
+run "$HELPER" --dir "$D" --check
+t "--check FAILs when mash-setup.json is missing" \
+    '[ $RC -ne 0 ] && has "missing $D/mash-setup.json"'
+cp "$W/neg-setup.json" "$J"
+chmod 600 "$J"
 run "$HELPER" --dir "$D" --stop
 printf 'http: 127.0.0.1:%s\n' $((PORT + 1)) >>"$D/server.conf"
 run "$HELPER" --dir "$D" --start
@@ -819,6 +944,9 @@ run "$HELPER" --dir "$D" --backup "$W/bk.tar.gz"
 t "--backup rc 0, mode 0600, holds-secrets notice, server restarted" \
     '[ $RC -eq 0 ] && [ "$(stat -c %a $W/bk.tar.gz)" = 600 ] &&
      has "holds secrets" && has "stopped pid" && has "listens on"'
+t "names: --backup says it writes DEST (0600) and nothing else, and the race" \
+    'has "--backup writes $W/bk.tar.gz (mode 0600) and nothing else" &&
+     has "$RES"'
 t "--backup archive lists, has ca.key and nsc, no bin" \
     'tar -tzf $W/bk.tar.gz | grep -q "ca.key" &&
      tar -tzf $W/bk.tar.gz | grep -q "nsc/" &&
@@ -855,6 +983,11 @@ runpty "$TYPED" "$HELPER" --dir "$D" --retire-keys "$W/rk.tar.gz"
 t "F1: --retire-keys wrong typed text: refused, nothing changed" \
     '[ $RC -ne 0 ] && [ -f $D/ca.key ] && [ -d $D/nsc ] && [ -d $D/export ] &&
      [ ! -e $W/rk.tar.gz ]'
+t "names: --retire-keys prompt says what it writes and removes, and the race" \
+    'has "--retire-keys writes $W/rk.tar.gz (mode 0600) and
+        $D/.keys-retired and removes ca.key, nsc/ and export/ from $D" &&
+     has "extracts $W/rk.tar.gz into a private temporary directory under $D" &&
+     has "$RES"'
 TYPED="$D"
 runpty "$TYPED" "$HELPER" --dir "$D" --retire-keys "$W/rk.tar.gz"
 t "F1: --retire-keys typed correctly: archive written, three paths removed" \
@@ -904,6 +1037,9 @@ TYPED="nope"
 runpty "$TYPED" "$HELPER" --dir "$D" --remove
 t "F1: --remove wrong text: refused, nothing removed, server still up" \
     '[ $RC -ne 0 ] && [ -d $D ] && [ "$(nlisten)" -ge 1 ]'
+t "names: --remove prompt says it removes DIR and the unit file, and the race" \
+    'has "--remove removes $D with everything in it" &&
+     has "the unit file $HOME/.config/systemd/user/mash-nats-" && has "$RES"'
 TYPED="$D"
 runpty "$TYPED" "$HELPER" --dir "$D" --remove --mash-config "$W/cfgkeep"
 t "F1: --remove typed correctly: server stopped, DIR gone" \
@@ -912,6 +1048,260 @@ t "--remove prints that mashctl's folder is untouched and its command" \
     'has "mashctl'"'"'s folder was not touched" && has "rm -r -- $W/cfgkeep"'
 t "--remove did not touch the mashctl folder" '[ -f $W/cfgkeep/keep.txt ]'
 t "--remove: nothing listens any more" '[ "$(nlisten)" = 0 ]'
+}
+
+group_sec() {
+cd /home/alice || exit 1
+S=$W/sec
+mkdir -p "$S"
+note "sec: a base setup to copy (real pinned downloads)"
+np
+BASE=$S/base
+run "$HELPER" --dir "$BASE" --owner alice --port $PORT
+t "sec: base setup created" '[ $RC -eq 0 ] && [ -f $BASE/ca.key ]'
+# ------------------------------------------------ S3: the server log
+note "S3: a real server start gives a readable log"
+run "$HELPER" --dir "$BASE" --start
+t "S3: real start rc 0" '[ $RC -eq 0 ]'
+t "S3: server.log is readable: the usual lines are all there" \
+    'grep -q "Starting nats-server" $BASE/server.log &&
+     grep -q "Version:  2.15.1" $BASE/server.log &&
+     grep -q "ID:       N" $BASE/server.log &&
+     grep -q "Trusted Operators" $BASE/server.log &&
+     grep -q "JETSTREAM" $BASE/server.log &&
+     grep -q "Store Directory" $BASE/server.log &&
+     grep -q "Listening for client connections" $BASE/server.log &&
+     grep -q "Server is ready" $BASE/server.log'
+t "S3: a normal start withholds no line" \
+    '[ "$(grep -c "<line withheld>" $BASE/server.log)" = 0 ] &&
+     [ "$(grep -c . $BASE/server.log)" -ge 15 ]'
+run "$HELPER" --dir "$BASE" --stop
+t "S3: --stop rc 0" '[ $RC -eq 0 ]'
+awk '/^srvlog_ok\(\) \{/,/^}/' "$HELPER" >"$S/flt.sh"
+awk '/^srvlog_filter\(\) \{/,/^}/' "$HELPER" >>"$S/flt.sh"
+filt() { ( CONF=$BASE/server.conf; DIR=$BASE; . "$S/flt.sh"; srvlog_filter ); }
+t "S3: the filter passes every line of a real server.log unchanged" \
+    'filt <"$BASE/server.log" | cmp -s - "$BASE/server.log"'
+{
+    canary_text
+    printf '%s\n' "[1234] 2026/11/19 10:00:00.123456 [INF] seed $SEED" \
+        "[1234] 2026/11/19 10:00:00.123456 [INF] Leafnode token $JWTC" \
+        "[1234] 2026/11/19 10:00:00.123456 [ERR] password=hunter2" \
+        "[1234] 2026/11/19 10:00:00.123456 [INF] a line of an unknown shape" \
+        "$PEMC" "[1234] 2026/11/19 10:00:00.123456 [DBG] anything"
+    while IFS= read -r l; do
+        printf '%s\n' "$l $SEED" "$l $JWTC.x.y" "$l password=hunter2" \
+            "$l$PEMC" "$l"$'\x01'
+    done <"$BASE/server.log"
+} >"$S/can.txt"
+filt <"$S/can.txt" >"$S/can.out"
+t "S3: canaries of unknown shape and appended to allowed shapes: all withheld" \
+    '[ "$(grep -c . $S/can.txt)" = "$(grep -c . $S/can.out)" ] &&
+     [ "$(grep -vc "^<line withheld>$" $S/can.out)" = 0 ] &&
+     [ "$(grep -c . $S/can.out)" -ge 80 ]'
+t "S3: no canary marker survives the filter" \
+    '[ -s $S/can.out ] && ! grep -qaE "$SEED|$JWTC|$PEMC|hunter2" $S/can.out'
+t "S3: the allowlist is documented in a comment" \
+    'grep -q "^# srvlog_ok LINE: succeeds only if LINE is exactly one" \
+        "$HELPER"'
+# ----------------------------------- S2: swapped paths (stat shim)
+note "S2: swapped paths, recheck by device:inode"
+mkdir -p "$S/sh-stat"
+cat >"$S/sh-stat/stat" <<'SH'
+#!/bin/bash
+# test shim: on the SWAPN-th "stat -c %d:%i -- SWAPP" (the helper records
+# the device:inode once and compares it again before each write), replace
+# SWAPP with the directory EVIL, as another process running as you could.
+if [ "${1:-}" = -c ] && [ "${2:-}" = %d:%i ] &&
+    [ "${4:-}" = "${SWAPP:-/nonexistent}" ]; then
+    n=$(cat "$SWAPCNT" 2>/dev/null || echo 0)
+    n=$((n + 1))
+    echo "$n" >"$SWAPCNT"
+    if [ "$n" = "$SWAPN" ]; then
+        mv "$SWAPP" "$SWAPP.orig"
+        mv "$EVIL" "$SWAPP"
+    fi
+fi
+exec /usr/bin/stat "$@"
+SH
+chmod +x "$S/sh-stat/stat"
+mkevil() { # fresh EVIL directory holding one canary file
+    rm -rf "$S/evil"
+    mkdir -m 700 "$S/evil"
+    echo "do not touch" >"$S/evil/canary"
+}
+cat >"$S/swapenv" <<SH
+#!/bin/bash
+# swapenv N SWAPP CMD...: run CMD with the stat shim that swaps SWAPP
+echo 0 >"$S/cnt"
+n=\$1; p=\$2
+shift 2
+exec env PATH="$S/sh-stat:\$PATH" SWAPCNT="$S/cnt" SWAPN=\$n SWAPP="\$p" \\
+    EVIL="$S/evil" "\$@"
+SH
+chmod +x "$S/swapenv"
+untouched() { # SWAPP now is EVIL: only the canary, mode 0700
+    [ "$(ls -A "$1")" = canary ] && [ "$(stat -c %a "$1")" = 700 ] &&
+        [ "$(cat "$1/canary")" = "do not touch" ]
+}
+swapped() { [ -d "$1.orig" ]; }
+refused() { has "replaced" || has "no longer leads"; }
+for n in 2 3; do
+    mkevil
+    rm -rf "$S/cpar" "$S/cpar.orig"
+    mkdir -m 700 "$S/cpar"
+    np
+    echo 0 >"$S/cnt"
+    run "$S/swapenv" $n "$S/cpar" "$HELPER" --dir "$S/cpar/m1" --owner alice \
+        --port $PORT
+    note "S2 creation #$n: stat calls on the parent: $(cat "$S/cnt")"
+    t "S2: creation, parent swapped at recheck #$n: the swap really happened" \
+        'swapped $S/cpar'
+    # #3 lands on the record taken after mkdir (not a recheck): the helper
+    # still stops, because the new parent has no m1, but without the message
+    t "S2: creation, swap #$n: aborts (names device:inode at #2)" \
+        '[ $RC -ne 0 ] && { [ $n = 3 ] || { refused && has "device:inode"; }; }'
+    t "S2: creation, swap #$n: the replacement is untouched" \
+        'untouched $S/cpar'
+done
+for n in 2 3 4; do
+    mkevil
+    rm -rf "$S/bpar" "$S/bpar.orig" "$S/db$n"
+    mkdir -m 700 "$S/bpar"
+    cp -a "$BASE" "$S/db$n"
+    run "$S/swapenv" $n "$S/bpar" "$HELPER" --dir "$S/db$n" --backup \
+        "$S/bpar/b.tgz"
+    note "S2 backup #$n: stat calls on the destination parent: $(cat "$S/cnt")"
+    t "S2: --backup, destination parent swapped at recheck #$n: it happened" \
+        'swapped $S/bpar'
+    t "S2: --backup swap #$n: aborts, names device:inode, nothing written" \
+        '[ $RC -ne 0 ] && refused && has "device:inode" &&
+         ! has "wrote $S/bpar/b.tgz"'
+    t "S2: --backup swap #$n: the replacement is untouched" \
+        'untouched $S/bpar'
+    t "S2: --backup swap #$n: DIR itself is intact" \
+        '[ -f $S/db$n/ca.key ] && [ -d $S/db$n/nsc ]'
+done
+for n in 2 3 4 5; do
+    mkevil
+    rm -rf "$S/kpar" "$S/kpar.orig" "$S/dk$n"
+    mkdir -m 700 "$S/kpar"
+    cp -a "$BASE" "$S/dk$n"
+    TYPED="$S/dk$n"
+    runpty "$TYPED" "$S/swapenv" $n "$S/kpar" "$HELPER" --dir "$S/dk$n" \
+        --retire-keys "$S/kpar/k.tgz"
+    note "S2 retire-keys #$n: stat calls: $(cat "$S/cnt")"
+    t "S2: --retire-keys, dest parent swapped at recheck #$n: it happened" \
+        'swapped $S/kpar'
+    t "S2: --retire-keys swap #$n: aborts, names device:inode" \
+        '[ $RC -ne 0 ] && refused && has "device:inode"'
+    t "S2: --retire-keys swap #$n: replacement untouched, sources retained" \
+        'untouched $S/kpar && [ -f $S/dk$n/ca.key ] && [ -d $S/dk$n/nsc ] &&
+         [ -d $S/dk$n/export ] && [ ! -e $S/dk$n/.keys-retired ] &&
+         [ -z "$(ls -A $S/dk$n | grep "^.verify")" ]'
+done
+for n in 2 3; do
+    mkevil
+    rm -rf "$S/rpar" "$S/rpar.orig"
+    mkdir -m 700 "$S/rpar"
+    cp -a "$BASE" "$S/rpar/d"
+    TYPED="$S/rpar/d"
+    runpty "$TYPED" "$S/swapenv" $n "$S/rpar" "$HELPER" --dir "$S/rpar/d" \
+        --remove
+    note "S2 remove #$n: stat calls: $(cat "$S/cnt")"
+    t "S2: --remove, a parent swapped at recheck #$n: the swap happened" \
+        'swapped $S/rpar'
+    t "S2: --remove swap #$n: aborts, names device:inode" \
+        '[ $RC -ne 0 ] && refused && has "device:inode"'
+    t "S2: --remove swap #$n: replacement untouched, original DIR not removed" \
+        'untouched $S/rpar && [ -f $S/rpar.orig/d/.mash-nats-setup ] &&
+         [ -f $S/rpar.orig/d/ca.key ]'
+done
+# ------------------------------ S9: --retire-keys verifies the archive
+note "S9: tar shims make a partial, a truncated and an altered archive"
+mkdir -p "$S/sh-tar"
+cat >"$S/sh-tar/tar" <<'SH'
+#!/bin/bash
+# test shim, TARMODE: partial (the archive lacks export/), trunc (the
+# archive is cut in half), alter (extracting changes one byte of ca.key)
+real=/usr/bin/tar
+case "${TARMODE:-}:${1:-}" in
+partial:-czf)
+    a=()
+    for x in "$@"; do [ "$x" = export ] || a+=("$x"); done
+    exec $real "${a[@]}" ;;
+trunc:-czf)
+    $real "$@" || exit
+    sz=$(/usr/bin/stat -c %s "$2")
+    truncate -s $((sz / 2)) "$2" ;;
+alter:-xzf)
+    $real "$@" || exit
+    c=''
+    while [ $# -gt 0 ]; do
+        [ "$1" = -C ] && c=$2
+        shift
+    done
+    printf 'x' >>"$c/ca.key" ;;
+*) exec $real "$@" ;;
+esac
+SH
+chmod +x "$S/sh-tar/tar"
+for m in partial trunc alter; do
+    rm -rf "$S/dt-$m" "$S/t-$m.tgz"
+    cp -a "$BASE" "$S/dt-$m"
+    TYPED="$S/dt-$m"
+    runpty "$TYPED" env PATH="$S/sh-tar:$PATH" TARMODE=$m "$HELPER" \
+        --dir "$S/dt-$m" --retire-keys "$S/t-$m.tgz"
+    case $m in
+    partial) MSGS='has "lacks ca.key, nsc/ or export/"' ;;
+    trunc) MSGS='has "could not be extracted" || has "did not list back"' ;;
+    alter) MSGS='has "differs from the one in"' ;;
+    esac
+    t "S9: $m archive: aborts with a reason, sources retained, none removed" \
+        '[ $RC -ne 0 ] && { '"$MSGS"'; } && [ -f $S/dt-$m/ca.key ] &&
+         [ -d $S/dt-$m/nsc ] && [ -d $S/dt-$m/export ] &&
+         [ ! -e $S/dt-$m/.keys-retired ] && [ -f $S/dt-$m/server.pem ] &&
+         [ -f $S/dt-$m/operator.jwt ]'
+    t "S9: $m archive: the temporary extraction directory is gone" \
+        '[ -z "$(ls -A $S/dt-$m | grep "^.verify")" ] &&
+         [ -z "$(ls -A $S/dt-$m | grep "^.cmd")" ]'
+    t "S9: $m archive: no key content in the output" \
+        '! has "$(head -c 20 $S/dt-$m/ca.key | tr -d "\n")"'
+done
+rm -rf "$S/dt-good" "$S/t-good.tgz"
+cp -a "$BASE" "$S/dt-good"
+runpty "$S/dt-good" "$HELPER" --dir "$S/dt-good" --retire-keys \
+    "$S/t-good.tgz"
+t "S9: a good archive: verified identical, sources removed, extraction gone" \
+    '[ $RC -eq 0 ] && has "identical to the sources" &&
+     [ ! -e $S/dt-good/ca.key ] && [ ! -e $S/dt-good/nsc ] &&
+     [ ! -e $S/dt-good/export ] && [ -f $S/dt-good/.keys-retired ] &&
+     [ -z "$(ls -A $S/dt-good | grep "^.verify")" ] &&
+     [ "$(stat -c %a $S/t-good.tgz)" = 600 ]'
+}
+
+group_root() {
+cd /root || exit 1
+note "root: every subcommand refuses, nothing is created or read"
+R=/root/rt-h5
+MSG="run as your own user, not root; sudo would make root-owned keys"
+before=$(find /root -xdev 2>/dev/null | sort | md5sum)
+t "root: this really is uid 0" '[ "$(id -u)" = 0 ]'
+for a in "--owner alice" "--owner alice --start" --start --stop --check \
+    --upgrade "--backup /root/rt-h5-b.tgz" "--retire-keys /root/rt-h5-k.tgz" \
+    --enable-boot --disable-boot --remove; do
+    # shellcheck disable=SC2086
+    run "$HELPER" --dir "$R/d" $a
+    t "S7: as root, '$a': refused with the fixed message, exit != 0" \
+        '[ $RC -ne 0 ] && has "$MSG"'
+    t "S7: as root, '$a': nothing created" \
+        '[ ! -e $R ] && [ ! -e /root/rt-h5-b.tgz ] &&
+         [ ! -e /root/rt-h5-k.tgz ] &&
+         [ "$(find /root -xdev 2>/dev/null | sort | md5sum)" = "$before" ]'
+done
+runpty "$R/d" "$HELPER" --dir "$R/d" --remove
+t "S7: as root on a terminal: still refused before any prompt" \
+    '[ $RC -ne 0 ] && has "$MSG" && ! has "Type this exactly"'
 }
 
 group_osrel() {
@@ -938,10 +1328,11 @@ D=$W/boot
 U=$(unit_of "$D")
 run "$HELPER" --dir "$D" --owner alice --start
 t "boot: create --start (helper-started copy)" '[ $RC -eq 0 ]'
-awk '/^    (MASH_CONFIG_DIR|MASH_TLS_CA)=/ {on=1}
-    on {print} on && !/\\$/ {exit}' <<<"$OUT" >"$W/b-adopt.cmd"
-grep -E '^    mashctl init$' <<<"$OUT" >"$W/b-init.cmd"
-run mashenv bash -c "$(cat "$W/b-adopt.cmd")"
+grep -E '^    (MASH_CONFIG_DIR=[^ ]+ )?mashctl adopt --from ' <<<"$OUT" \
+    >"$W/b-adopt.cmd" || true
+oldinit "$W/b-adopt.cmd" >"$W/b-init.cmd"
+run mashenv MASH_TLS_CA="$D/ca.pem" bash -c \
+    "$(oldadopt "$W/b-adopt.cmd")"
 t "boot: printed adopt command works" '[ $RC -eq 0 ]'
 run mashenv bash -c "$(cat "$W/b-init.cmd")"
 t "boot: printed init command works" '[ $RC -eq 0 ]'
@@ -958,6 +1349,9 @@ TYPED=wrong
 runpty "$TYPED" "$HELPER" --dir "$D" --enable-boot
 t "F1: --enable-boot wrong text: refused, nothing written, copy still up" \
     '[ $RC -ne 0 ] && [ ! -e $UNITDIR/$U ] && kill -0 $OLDPID'
+t "names: --enable-boot prompt names the unit file at its real path" \
+    'has "--enable-boot writes the unit file $UNITDIR/$U" &&
+     has "It writes nothing else" && has "$RES"'
 t "boot: the confirmation text says what linger changes only with --linger" \
     'has "Without --linger"'
 TYPED=$U
@@ -1058,6 +1452,8 @@ TYPED=wrong
 runpty "$TYPED" "$HELPER" --dir "$D" --disable-boot
 t "F1: --disable-boot wrong text: refused, unit still enabled" \
     '[ $RC -ne 0 ] && [ -f $UNITDIR/$U ] && [ "$(sc is-enabled $U)" = enabled ]'
+t "names: --disable-boot prompt says it removes that unit file" \
+    'has "--disable-boot removes the unit file $UNITDIR/$U" && has "$RES"'
 TYPED=$U
 runpty "$TYPED" "$HELPER" --dir "$D" --disable-boot
 printf '%s\n' "$OUT" >"$W/disable.out"
@@ -1083,6 +1479,8 @@ fi
 
 case ${1:-main} in
 main) group_main ;;
+sec) group_sec ;;
+root) group_root ;;
 osrel) group_osrel ;;
 boot1) group_boot1 ;;
 boot2) group_boot2 ;;
@@ -1128,7 +1526,7 @@ report() {
 }
 
 # ----------------------------------------------------------------- main
-if want main || want osrel; then
+if want main || want osrel || want sec || want root; then
     say "building the plain image $IMG1"
     podman build -q -t "$IMG1" "$T/ctx1" >/dev/null || exit 2
     BUILT_IMG1=1
@@ -1138,9 +1536,21 @@ if want main || want osrel; then
 fi
 if want main; then
     say "group main"
-    report main podman exec "$C1" bash /home/alice/incont.sh main
+    report main podman exec ${NATSSETUP_TEST_BREAK:+-e NATSSETUP_TEST_BREAK=1} \
+        "$C1" bash /home/alice/incont.sh main
     podman cp "$C1:/home/alice/transcript.txt" "$T/out/transcript-main.txt" \
         2>/dev/null
+fi
+if want sec; then
+    say "group sec (path swaps, server-log allowlist, archive verification)"
+    report sec podman exec "$C1" bash /home/alice/incont.sh sec
+    podman cp "$C1:/home/alice/transcript.txt" "$T/out/transcript-sec.txt" \
+        2>/dev/null
+fi
+if want root; then
+    say "group root (the helper as uid 0 in the container)"
+    report root podman exec --user root -e HOME=/root "$C1" \
+        bash /home/alice/incont.sh root
 fi
 if want osrel; then
     say "group osrel (/etc/os-release says fedora, as root, then restored)"
