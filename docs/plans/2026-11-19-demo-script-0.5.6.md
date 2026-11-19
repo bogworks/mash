@@ -180,7 +180,8 @@ next: bob.seed and bob.jwt are now in the credentials file;
 
 On a machine the admin and the agent share, mashctl can make the key itself. This one command does what Steps 2-A to
 2-C did: it makes Alice's key, creates `acme/demo/alice`, and writes her credentials file straight into her mash
-directory.
+directory. `--creds-dir` names that directory. Here it is `~alice/.config/mash`, the default. If Alice's account sets
+`MASH_CONFIG_DIR` or `XDG_CONFIG_HOME`, pass the directory her mash actually reads, or her mash will not find the file.
 
 No separate seed file appears, because the seed goes straight into the credentials file. These are Alice's
 credentials, not the admin's. The admin's signing key never leaves mashctl.
@@ -419,7 +420,7 @@ this script proposes a CLI change, the target decides.
 - **A6: `mash status`.** One row per check, from Randy's own sketch: version, server, config, credentials. A group row
   is added if it is fast. `--detail` carries the rest (feedback 16 and 17). Proposal: status reports a revoked key
   (the v0.5.5 walk-through's finding was that it does not), exiting 1.
-- **A7: `--creds-dir` on `--make-key`.** mashctl writes the credentials into the agent's mash directory. If the target
+- **A7: `--creds-dir` on `--make-key`.** mashctl writes the credentials into the directory the agent's mash reads, given by `--creds-dir`. mashctl cannot know an agent's `MASH_CONFIG_DIR`, so the admin passes it. If the target
   keeps the admin's config directory instead, Step 3-A gains one step moving the file, and the narration says so.
 - **A8: answering mail.** Proposal: `mash send ... --answers N`. The name `reply` is taken: the plugin's MCP `reply`
   tool answers a live prompt, so a CLI `reply` meaning something else would confuse. If the target has neither, Step
