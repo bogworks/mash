@@ -1,10 +1,24 @@
-# mashctl target outputs (0.5.6) - DRAFT11
+# mashctl target outputs (0.5.6) - DRAFT12
 
 Status: design mockups, not code. Nothing here was run. Written to the maintainer's
 feedback on the v0.5.5 video and the CLI standard's rules (version 1.2.5);
 BEFORE blocks are excerpts of
 docs/plans/2026-11-19-cli-output-catalog-mashctl.md (v0.5.5 tag).
-DRAFT11 applies the directions below, given for this draft on the critic's
+DRAFT12 applies six rulings of the maintainer on contract revision 5 (decided;
+see "Changes in DRAFT12"):
+
+X1. A `wrote` line may name a file the command wrote; only files merely read
+    are barred.
+X2. `adopt`'s NEXT is `mashctl init`, with the retire step as an `Or`.
+X3. `credential install` asks for the server address (`--server` answers it).
+    The CA file is mode 644 (public); the token file is mode 600 (a
+    credential).
+X4. Exit 3 is the CLI standard's "cancelled" (rule 14): a wrong typed answer.
+X5. Exit 6 is a server that is unreachable or does not answer, in mash and in
+    mashctl alike.
+X6. A fingerprint is shown as eight groups of eight hex digits, in full.
+
+DRAFT11's directions stay in force. They were given for that draft on the critic's
 second round (on the reviewer packet of DRAFT2), contract revision 5, the setup
 helper's closing output and a walk of the setup helper (see "Changes in
 DRAFT11" and, at the very end, "Dispositions of the critic's round 2 on packet
@@ -42,7 +56,7 @@ DRAFT10's six directions stay in force:
    person's own files).
 6. Names: `ADDRESS` replaces `PATH`; `Adopted`; one server form.
 
-Earlier drafts are described under "Changes in DRAFT2" to "Changes in DRAFT10".
+Earlier drafts are described under "Changes in DRAFT2" to "Changes in DRAFT11".
 
 Part 1 is the first-run journey, in the order a new user meets it. Part 2 is every
 other mashctl output. Each part ends with its own "Choices to confirm" and "Facts
@@ -50,7 +64,7 @@ to confirm".
 
 ---
 
-# Part 1: the first-run journey (target output for mashctl 0.5.6), DRAFT11
+# Part 1: the first-run journey (target output for mashctl 0.5.6), DRAFT12
 
 Design document. Nothing here was run. BEFORE blocks are excerpts of
 `docs/plans/2026-11-19-cli-output-catalog-mashctl.md` (v0.5.5), trimmed to the
@@ -69,17 +83,20 @@ repeat them.
   "Exit codes mean: 0 success; 1 failure; 2 wrong usage (unknown command, bad
   flag or argument); 3 cancelled; 4 not authorized; any other code is listed on
   the command's reference page." The contract (Exit codes) adds 5 and 6 and says
-  the same condition gets the same code in every command.
+  the same condition gets the same code in every command. Its list leaves out
+  3; the standard defines it (cancelled), so the table has it. There is no code
+  for an internal error: neither the standard nor the contract defines one, and
+  an unexpected failure is 1 (failure).
 
   | Code | Meaning | Where this document uses it |
   |---|---|---|
   | 0 | success | done, planned (`--dry-run`), nothing to change, nothing wrong |
   | 1 | failure | a refusal; a health command that reports `PROBLEM`; a plain URL refused for TLS |
   | 2 | wrong usage | unknown command or flag, missing or bad argument, a removed command |
-  | 3 | cancelled | the person typed the wrong confirmation |
+  | 3 | cancelled | the person typed a wrong confirmation (the command stops, nothing changes) |
   | 4 | not authorized | no person at a terminal for a confirmation; no administrator credentials; credentials the server refuses (`NOT READY`) |
   | 5 | partial | part of a bulk command was done |
-  | 6 | the server | could not be reached (`NOT REACHABLE`), or did not confirm (`INCOMPLETE`) |
+  | 6 | server unreachable | the server could not be reached or did not answer (`NOT REACHABLE`, `INCOMPLETE`, "only 1 of 2 servers answered"); the same in mash and mashctl |
 
   No command has a code of its own. `mashctl endpoint suspended` is gone (its
   answer is a line of `endpoint show`), so no command uses an exit code to
@@ -128,10 +145,17 @@ repeat them.
   it acts the command says what will be lost. A line that ends in a colon and
   asks for typing is a prompt; the mockups show what the person types after the
   colon. The person types the address (or, for a bulk reissue, the count; for a
-  trust change, the fingerprint). A wrong answer exits 3. With no terminal the
-  command exits 4 with `error:` and `fix:`. `--dry-run` prints the same text
-  of what will be lost and asks nothing. A real fingerprint is `sha256:` and 64
-  digits, so the mockups shorten it to `sha256:3f9a...c41e`.
+  trust change, the fingerprint). A wrong answer exits 3 (cancelled). With no
+  terminal the command exits 4 with `error:` and `fix:`. `--dry-run` prints the
+  same text of what will be lost and asks nothing.
+- Fingerprint form. A fingerprint a mockup shows is the 64 hex digits of the
+  SHA-256 of the CA file, as eight groups of eight digits in lowercase, with
+  single spaces between the groups (for example `3f9a41c2 7b0d9e55 a1c4e08b
+  2d77f3a9 5e1b6c40 98aa0d12 c3f5e7b6 4a21d90c`). It is never separated by
+  colons and never cut short with an ellipsis, so a person can copy it whole.
+  A person may type it with or without `sha256:`, with colons or with spaces,
+  in any case; the prompt says so in one line. The setup helper prints its own
+  form today; its owner aligns it to this one.
 - A value the person must type is never printed first. `adopt` and `mash
   credential install` ask the person to type the CA fingerprint; neither
   prints it before or after, and they say only `matches` or `does not match`
@@ -309,6 +333,11 @@ mashctl look up accounts) and the CA (it signs the server's certificate).
 
 **AFTER, printed by the setup helper, not by mashctl**
 
+[the helper prints the fingerprint in this form once aligned] The quoted
+`CA fingerprint` line below is the helper's own form. Its owner aligns it to
+the form every mashctl block uses: eight groups of eight hex digits (see
+"Fingerprint form" in the conventions). The quote stays as printed.
+
 ```text
 Files (all under /home/alice/mash-nats):
   ca.pem                   CA certificate: give this to clients
@@ -349,7 +378,9 @@ A certificate authority (CA) signs the server's certificate. mashctl will
 trust the CA in ca.pem for the server you gave. Whoever holds the CA's key can
 pose as that server.
 
-Type the fingerprint of ca.pem you were given: sha256:3f9a...c41e
+Type the fingerprint of ca.pem you were given (a sha256: prefix,
+colons, spaces and capitals are all accepted):
+3f9a41c2 7b0d9e55 a1c4e08b 2d77f3a9 5e1b6c40 98aa0d12 c3f5e7b6 4a21d90c
 Checked: ca.pem matches the fingerprint you typed.
 
 Checking the server as owner acme. Nothing is written until all the checks
@@ -435,14 +466,19 @@ $ mashctl endpoint create acme.demo.bob --public-key bob.pub
 
 Created endpoint acme.demo.bob.
 
-  wrote   ./acme.demo.bob.token  (mode 644; not secret)
+  wrote   ./acme.demo.bob.token  (mode 600)
 
 The token does not carry the server's address. Give bob's machine these:
 
   files        ./acme.demo.bob.token
                ~/.config/mash/ca.pem
   address      <server address>
-  fingerprint  sha256:3f9a...c41e  (of ca.pem)
+
+  fingerprint of ca.pem (eight groups of eight digits):
+  3f9a41c2 7b0d9e55 a1c4e08b 2d77f3a9 5e1b6c40 98aa0d12 c3f5e7b6 4a21d90c
+
+The token holds no secret key, but it is a credential: keep it private and
+send it only to bob's machine.
 
 Send the files one way and the address and fingerprint another, so that the
 other machine can check ca.pem against something the files did not bring.
@@ -465,7 +501,9 @@ A certificate authority (CA) signs the server's certificate. mash will trust
 the CA in ca.pem for that server. Whoever holds the CA's key can pose as that
 server.
 
-Type the fingerprint of ca.pem you were given: sha256:3f9a...c41e
+Type the fingerprint of ca.pem you were given (a sha256: prefix,
+colons, spaces and capitals are all accepted):
+3f9a41c2 7b0d9e55 a1c4e08b 2d77f3a9 5e1b6c40 98aa0d12 c3f5e7b6 4a21d90c
 Checked: ca.pem matches the fingerprint you typed.
 
 Installed credentials for acme.demo.bob.
@@ -618,7 +656,9 @@ A certificate authority (CA) signs the server's certificate. mashctl will
 trust the CA in ca.pem for the server you gave. Whoever holds the CA's key can
 pose as that server.
 
-Type the fingerprint of ca.pem you were given: sha256:3f9a...c41e
+Type the fingerprint of ca.pem you were given (a sha256: prefix,
+colons, spaces and capitals are all accepted):
+3f9a41c2 7b0d9e55 a1c4e08b 2d77f3a9 5e1b6c40 98aa0d12 c3f5e7b6 4a21d90c
 Checked: ca.pem matches the fingerprint you typed.
 
 Checking the server as owner acme. Nothing is written until all the checks
@@ -685,7 +725,9 @@ fix: run the same command in a terminal and type the fingerprint when asked:
 
 $ mashctl adopt <the same options>
 ...
-Type the fingerprint of ca.pem you were given: sha256:0000...0000
+Type the fingerprint of ca.pem you were given (a sha256: prefix,
+colons, spaces and capitals are all accepted):
+0a1b2c3d 4e5f6071 8293a4b5 c6d7e8f9 0a1b2c3d 4e5f6071 8293a4b5 c6d7e8f9
 [exit 3]
 error: ca.pem does not match the fingerprint you typed. Nothing was changed.
 fix: get the fingerprint from your operator, then run the command again:
@@ -1108,21 +1150,27 @@ is the group bob mails within, and bob is the name.
 mashctl signs bob's public key. The result is bob's token: the statement your
 mash server signs that "this public key is endpoint acme.demo.bob". The
 server accepts bob only with a key and a token that go together. The token
-does not say where the server is, so you give bob's machine the server's
-address, the CA file and the CA fingerprint too.
+holds no secret key, but it is a credential: keep it private. It does not say
+where the server is, so you give bob's machine the server's address, the CA
+file and the CA fingerprint too.
 
 $ mashctl endpoint create acme.demo.bob --public-key bob.pub
 
 Created endpoint acme.demo.bob.
 
-  wrote   ./acme.demo.bob.token  (mode 644; not secret)
+  wrote   ./acme.demo.bob.token  (mode 600)
 
 The token does not carry the server's address. Give bob's machine these:
 
   files        ./acme.demo.bob.token
                ~/.config/mash/ca.pem
   address      <server address>
-  fingerprint  sha256:3f9a...c41e  (of ca.pem)
+
+  fingerprint of ca.pem (eight groups of eight digits):
+  3f9a41c2 7b0d9e55 a1c4e08b 2d77f3a9 5e1b6c40 98aa0d12 c3f5e7b6 4a21d90c
+
+The token holds no secret key, but it is a credential: keep it private and
+send it only to bob's machine.
 
 Send the files one way and the address and fingerprint another, so that the
 other machine can check ca.pem against something the files did not bring.
@@ -1160,8 +1208,10 @@ NEXT: on bob's machine, with bob.key and both files in one folder, run:
   own is the one it uses from this machine, loopback in the walk), so the line
   is `<server address>` with one sentence of instruction, and the text says
   not to use `localhost` or `127.0.0.1`. The token file line is `wrote` with
-  its mode (644: not secret; the walk found 600, which made the copy to
-  another user fail). The fingerprint is printed here because this output is
+  its mode (DRAFT12: 600. The token is a credential, so it is private; DRAFT11
+  said 644, not secret, because the walk found 600 made a copy to another user
+  fail. The hand-off now says the token is kept private and sent only to bob's
+  machine.) The fingerprint is printed here because this output is
   for the operator, who passes it on separately; the install prints it
   nowhere. The NEXT is the short install command: the install asks for the
   address (Choice 48).
@@ -1196,7 +1246,7 @@ leave this machine. When only one endpoint is installed on a machine, mash
 uses it, and the setting MASH_ENDPOINT can be left out.
 
 mash runs with the credentials file alone. bob.key and the token file were
-only inputs: delete them, or keep them as a backup and keep bob.key private.
+only inputs: delete them, or keep them as a backup and keep both private.
 
 $ mash credential install --key bob.key --token acme.demo.bob.token
 
@@ -1207,7 +1257,9 @@ A certificate authority (CA) signs the server's certificate. mash will trust
 the CA in ca.pem for that server. Whoever holds the CA's key can pose as that
 server.
 
-Type the fingerprint of ca.pem you were given: sha256:3f9a...c41e
+Type the fingerprint of ca.pem you were given (a sha256: prefix,
+colons, spaces and capitals are all accepted):
+3f9a41c2 7b0d9e55 a1c4e08b 2d77f3a9 5e1b6c40 98aa0d12 c3f5e7b6 4a21d90c
 Checked: ca.pem matches the fingerprint you typed.
 
 Installed credentials for acme.demo.bob.
@@ -1296,14 +1348,19 @@ $ mashctl endpoint create acme.demo.bob --public-key bob.pub
 
 Created endpoint acme.demo.bob.
 
-  wrote   ./acme.demo.bob.token  (mode 644; not secret)
+  wrote   ./acme.demo.bob.token  (mode 600)
 
 The token does not carry the server's address. Give bob's machine these:
 
   files        ./acme.demo.bob.token
                ~/.config/mash/ca.pem
   address      <server address>
-  fingerprint  sha256:3f9a...c41e  (of ca.pem)
+
+  fingerprint of ca.pem (eight groups of eight digits):
+  3f9a41c2 7b0d9e55 a1c4e08b 2d77f3a9 5e1b6c40 98aa0d12 c3f5e7b6 4a21d90c
+
+The token holds no secret key, but it is a credential: keep it private and
+send it only to bob's machine.
 
 Send the files one way and the address and fingerprint another, so that the
 other machine can check ca.pem against something the files did not bring.
@@ -1324,7 +1381,9 @@ A certificate authority (CA) signs the server's certificate. mash will trust
 the CA in ca.pem for that server. Whoever holds the CA's key can pose as that
 server.
 
-Type the fingerprint of ca.pem you were given: sha256:3f9a...c41e
+Type the fingerprint of ca.pem you were given (a sha256: prefix,
+colons, spaces and capitals are all accepted):
+3f9a41c2 7b0d9e55 a1c4e08b 2d77f3a9 5e1b6c40 98aa0d12 c3f5e7b6 4a21d90c
 Checked: ca.pem matches the fingerprint you typed.
 
 Installed credentials for acme.demo.bob.
@@ -1375,7 +1434,9 @@ fix: run the same command in a terminal and type the fingerprint when asked:
 
 $ mash credential install --key bob.key --token acme.demo.bob.token
 ...
-Type the fingerprint of ca.pem you were given: sha256:0000...0000
+Type the fingerprint of ca.pem you were given (a sha256: prefix,
+colons, spaces and capitals are all accepted):
+0a1b2c3d 4e5f6071 8293a4b5 c6d7e8f9 0a1b2c3d 4e5f6071 8293a4b5 c6d7e8f9
 [exit 3]
 error: ca.pem does not match the fingerprint you typed. Nothing was changed.
 fix: ask whoever runs mashctl for the fingerprint, then run it again:
@@ -1505,7 +1566,9 @@ machine these:
   files        ./carol.creds
                ~/.config/mash/ca.pem
   address      <server address>
-  fingerprint  sha256:3f9a...c41e  (of ca.pem)
+
+  fingerprint of ca.pem (eight groups of eight digits):
+  3f9a41c2 7b0d9e55 a1c4e08b 2d77f3a9 5e1b6c40 98aa0d12 c3f5e7b6 4a21d90c
 
 Send the files one way and the address and fingerprint another, so that the
 other machine can check ca.pem against something the files did not bring.
@@ -2129,7 +2192,8 @@ exits 1 with `mash: no endpoint named "..."`.
     contract text cites "the CLI standard's confirmation rule" with no number;
     it is rule 15 of standard 1.2.5, which was read for this draft (rules 14,
     15, 26 and 28 are quoted from it). The contract's list of exit codes omits
-    3; this document follows the standard.
+    3; this document follows the standard (ruled: yes, DRAFT12: 3 is
+    cancelled, a wrong typed answer; see 55).
     Without a terminal, a confirmation refuses with `error:` and `fix:` (adopt,
     delete and install show both). [confirm: the plain-text override is a
     variable, as REQ-010 says, while INV-004 says no environment variable
@@ -2204,34 +2268,57 @@ exits 1 with `mash: no endpoint named "..."`.
     line each, with the mode (DRAFT11, W1): the CA file (mode 644, a public
     file that is handed to other machines), `operator.nk` and `account.nk` in
     `keys/`, and `sys.creds` and `mashadmin.creds` in `server/` (mode 600).
-    [confirm: the contract says mashctl's files are 0600; a CA file at 600
-    failed to copy across users in the walk, so 644 is proposed.]
+    Ruled: yes, DRAFT12: the CA file stays mode 644, because it is public;
+    the token file is mode 600 (see 54).
 48. The token carries no address (DRAFT11, W3; walk finding 16; contract
     REQ-003). The hand-off prints `<server address>` and says what to put
     there; the example in the install is `tls://myserver:4222`. The install on
     the other machine asks for the address (the person types it) and takes
     `--server <address>` for the same answer, as CLI standard rule 15 asks of
-    a prompt; no flag answers the fingerprint (INV-004). mashctl does not
+    a prompt; no flag answers the fingerprint (INV-004). Ruled: yes, DRAFT12.
+    mashctl does not
     offer an `--address-for-others` flag (critic defect 3): the address
     another machine reaches depends on that machine's network, which mashctl
     cannot see.
-49. The NEXT after `adopt` stays `init` (DRAFT11). The helper's retire step is
-    the `Or` that follows, with the real server directory. It was asked for as
-    the NEXT; a NEXT must be the step the walk takes next (rule 30), and the
-    skill retires keys after alice and bob have mailed each other.
-    [confirm: whether the retire step should be the NEXT anyway.]
+49. The NEXT after `adopt` is `mashctl init` (DRAFT11). The helper's retire
+    step is the `Or` that follows, with the real server directory. A NEXT must
+    be the step the walk takes next (rule 30), and the skill retires keys after
+    alice and bob have mailed each other. Ruled: yes, DRAFT12.
 50. The setup block's table says `myserver` runs mash too (critic C2): alice
     runs `mash status` there.
 51. No `kept` line (DRAFT11, W6; CLI standard rule 26, version 1.2.5): a file a
     command wrote or copied is named; a file it only read, or found in place,
     is not, and `Nothing else was changed.` says so when only part was written.
-    `wrote` lines keep the path of `config.json`: rule 26 forbids opening a
-    result with where the command read its configuration, not saying what it
-    wrote. The critic's defect 6 asks for no path at all; that part is
-    declined (see the dispositions). `make_packet.py` fails a `kept` line in a
-    success block.
+    `wrote` lines may name the files the command wrote, `config.json`
+    included: rule 26 forbids opening a result with where the command read its
+    configuration, not saying what it wrote; only files merely read are
+    barred. Ruled: yes, DRAFT12 (the critic's defect 6 asked for no path at
+    all; that part is declined, see the dispositions). `make_packet.py` fails a
+    `kept` line in a success block.
 52. Config keys (DRAFT11): the server address is `server`, the endpoint is
     `endpoint`; no AFTER block names `url`.
+53. Fingerprint form (DRAFT12, X6). Every fingerprint a mockup shows is eight
+    groups of eight lowercase hex digits (64 digits, SHA-256) with single
+    spaces, in full: never colons, never an ellipsis. A typed answer is
+    accepted with or without `sha256:`, with colons or spaces, in any case;
+    each prompt says so in one line (two printed lines, because the line
+    would pass 80 columns) and shows the value on a line of its own. The
+    hand-off shows the value on a line of its own so that it is copied whole.
+    The setup helper's quoted block keeps its own form and is marked as
+    aligned by its owner. Ruled: yes. Lints: W2 recognises the new form; F1
+    fails a fingerprint with colons or an ellipsis outside the quoted helper
+    block.
+54. The token file is mode 600 (DRAFT12, X3). A token is a credential, not a
+    secret key: the hand-off says it holds no secret key, is a credential,
+    and is kept private and sent only to the endpoint's machine. `wrote
+    ./acme.demo.bob.token  (mode 600)` replaces `(mode 644; not secret)`
+    everywhere. The CA file stays 644 (public). `mash credential install`
+    asks for the server address, and `--server` answers it (48). Ruled: yes.
+55. Exit codes 3 and 6 (DRAFT12, X4, X5). The one table has 3 (cancelled,
+    rule 14 of the standard: the person typed a wrong confirmation) and 6
+    (server unreachable or not answering, the same in mash and mashctl). There
+    is no internal-error code; an unexpected failure is 1. A lint fails an
+    `[exit 3]` shown for anything but a wrong typed answer. Ruled: yes.
 
 ## Facts to confirm
 
@@ -2283,9 +2370,9 @@ exits 1 with `mash: no endpoint named "..."`.
   the address is withdrawn.]
 - [walk, finding 4: `endpoint create` and `reissue` printed the token path
   relative (`./acme.demo.bob.jwt`) and did not say the file is mode 0600. The
-  target says `wrote ./acme.demo.bob.token (mode 644; not secret)`: confirm the
-  token's mode (the contract says a token is not secret; the walk found it
-  0600, so the copy across users failed until `chmod`).]
+  target says `wrote ./acme.demo.bob.token (mode 600)` (DRAFT12, ruled: the
+  token is a credential and is private; a copy to another user needs a
+  deliberate step, as the walk found when the file was 0600).]
 - [walk, finding 11: mail that bob sent before a reissue shows as
   `[unknown-signer]` in his own inbox afterwards, while new mail is
   `[verified]`. Fixed here: every reissue says so before the typed address
@@ -2392,7 +2479,7 @@ place, not a word).
 
 ---
 
-# mashctl 0.5.6 target output, part 2: every command except the first-run journey, DRAFT11
+# mashctl 0.5.6 target output, part 2: every command except the first-run journey, DRAFT12
 
 Status: design proposal, no code. Written against the catalog
 `docs/plans/2026-11-19-cli-output-catalog-mashctl.md` (v0.5.5) and the rules in
@@ -2434,7 +2521,8 @@ How to read the mockups.
   command that asks for typed confirmation prints the same "will lose" text
   and asks nothing.
 - Exit codes in every `[exit N]` below are the one table in the conventions
-  block (rule 14 of the CLI standard, plus 5 and 6 from the contract).
+  block (rule 14 of the CLI standard, which includes 3 cancelled, plus 5 and 6
+  from the contract; 6 is a server that is unreachable or does not answer).
 
 ---
 
@@ -4866,6 +4954,8 @@ What changed and why:
   named three times) is gone.
 - "not initialised" now means "not connected to a server yet": the fix points
   to `mashctl adopt --help`, because `init --local` is removed.
+- DRAFT12 (X5): exit 6 means a server that is unreachable or does not answer,
+  in mash and mashctl alike; every `[exit 6]` below is one of those.
 - DRAFT10 (V3): every unreachable server is exit 6 (`audit` and `inbox inspect`
   were 3, `issued check` was 2, the usage code). No administrator credentials,
   a missing credentials file and a missing signing key are 4 (not authorized;
@@ -5114,8 +5204,7 @@ fix: bring the missing server back, or pass --servers N if the count is
 
 $ mashctl endpoint reissue acme.demo.bob --make-key
 [exit 6]
-error: the server did not answer, or answered with an error. Nothing was
-       changed.
+error: the server did not answer. Nothing was changed.
 fix: see where mashctl stands, then run the command again:
   mashctl status
 ```
@@ -5979,7 +6068,10 @@ Decisions the rules left open. Each is one line.
     the ADRs (Part 1, choice 37).
 38. Exit codes (DRAFT10, V3): one table for every command, the CLI standard's
     rule 14 plus 5 and 6 from the contract (conventions block). Choices 39 to
-    48 are one line per command whose code changed.
+    48 are one line per command whose code changed. DRAFT12 (ruled: yes): 3 is
+    the standard's "cancelled" (a wrong typed answer; no other command uses
+    it) and 6 is a server unreachable or not answering, in mash and mashctl;
+    nothing means "internal error".
 39. `mashctl audit`: server unreachable 3 to 6. `audit --compare` with a file
     that does not exist: 3 to 1 (a refusal).
 40. `mashctl inbox inspect`: server unreachable 3 to 6.
@@ -6027,7 +6119,10 @@ Decisions the rules left open. Each is one line.
     the MASH_URL examples). DRAFT11 adds: W6 fails a `kept` line in a success
     block; W2 fails a `sha256:` value before or after the line that asks the
     person to type the fingerprint; W9 fails `--sys-creds` and `--admin-creds`
-    outside a "was renamed" refusal; K fails a `url` config key and a
+    outside a "was renamed" refusal (DRAFT12: W2 recognises the eight-group
+    fingerprint; F1 fails a fingerprint with colons or an ellipsis outside the
+    quoted helper block; V3 fails an `[exit 3]` that is not a wrong typed
+    answer); K fails a `url` config key and a
     loopback address; the width check exempts a block that shows `--wide` (CLI
     standard rule 28, contract revision 4), and the jargon check exempts the
     one block quoted from the setup helper.
@@ -6523,6 +6618,43 @@ this file; the dispositions are at the end.
    key; the `init --local` screens agree and show `[exit 2]`; the packet's block
    titles come from the nearest sentence.
 
+## Changes in DRAFT12
+
+Six rulings on contract revision 5 (decided), applied to both parts. Line
+numbers refer to the file as of DRAFT12's lint run; they are in the report.
+
+1. X1. `wrote` lines may name the files the command wrote; only files merely
+   read are barred. No block changed. Choice 51 no longer asks, and records
+   "ruled: yes".
+2. X2. `adopt`'s NEXT is `mashctl init`, with the retire step as an `Or` (as
+   in DRAFT11). Choice 49 records "ruled: yes".
+3. X3. `credential install` asks for the server address and `--server`
+   answers it (Choice 48, "ruled: yes"). The token file is mode 600: every
+   `wrote ./acme.demo.bob.token` line says `(mode 600)`; the three hand-offs
+   say the token holds no secret key, is a credential, and is kept private and
+   sent only to bob's machine; the Step 2 and Step 3 long forms say so; the
+   Step 2 bullet, Facts and the walk-findings disposition are updated. The CA
+   file stays 644 (public; Choice 47). Choice 54.
+4. X4. Exit 3 is "cancelled" as the CLI standard's rule 14 defines it; it is
+   in the one table and in the Choices lists. Every shown `[exit 3]` is a
+   wrong typed answer (adopt, install, replace-credentials, bulk reissue, one
+   reissue, delete); none conflicts. `make_packet.py` adds lint V3b: an
+   `[exit 3]` whose `error:` is not a wrong typed answer fails. Choice 55.
+5. X5. Exit 6 is a server that is unreachable or does not answer, in mash and
+   mashctl. The table row says so; the statement that 6 also covers "failed" is
+   removed, and no code means an internal error (an unexpected failure is 1).
+   E2, the conventions, and Part 2 Choice 38 say so. One error text that said
+   "or answered with an error" under exit 6 now says only that the server did
+   not answer.
+6. X6. Every shown fingerprint is eight groups of eight lowercase hex digits
+   with single spaces, in full (prompts, the three hand-offs and the
+   credentials-file hand-off). The typed prompt says in one line that a
+   `sha256:` prefix, colons, spaces and capitals are accepted, and shows the
+   value on its own line (80 columns). The helper's quoted block keeps its own
+   form and is marked `[the helper prints the fingerprint in this form once
+   aligned]`. W2 recognises the new form; lint F1 fails a colon-separated or
+   shortened fingerprint outside the helper block. Choice 53.
+
 ## Dispositions of the critic's round 2 on packet DRAFT2
 
 Source: the critic's review of the reviewer packet of DRAFT2 (A: script checks
@@ -6570,7 +6702,7 @@ Sections are "P1 s.N" for Part 1 section N and "P2 X" for Part 2 section X.
 | polish 2 garbled headings | fixed for the packet: the block title is the nearest sentence or the command | make_packet.py |
 | polish 3 block 0 omits mash on myserver | fixed (C2) | P1 s.0 |
 | polish 4 `bob.key`, not `./bob.key`; does not say it wrote to the current folder | fixed | P1 s.2 Step 1 |
-| polish 5 state the token's mode in Step 2 | fixed: `mode 644`; [confirm] the mode | P1 s.2 Step 2 |
+| polish 5 state the token's mode in Step 2 | fixed: the token line gives its mode (DRAFT12, ruled: `mode 600`; DRAFT11 said 644) | P1 s.2 Step 2 |
 | polish 6 show a successful `mash status` | declined: the `mash` targets own its output (C1.5) | none |
 | polish 7 A4's six NEXTs | fixed (A4) | P2 B1, B3, D8 |
 | polish 8 E1 `usage:` line abuts the command above it | fixed: a blank line before every `usage:` line that follows a command (36 places in E1, H2, H4, H6, H7) | P2 E1, H |
