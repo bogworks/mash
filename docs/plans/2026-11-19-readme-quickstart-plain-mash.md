@@ -2,42 +2,56 @@
 
 You will make three mailboxes on one machine, Bob, Alice and you. Bob mails
 Alice from the shell, then Bob's Claude Code session mails Alice's, and at the
-end you delete all three. **The honest total, counted by script from this page:
-the first mail is sent after 11 pastes
-(18 command lines, 0 other actions) from a fresh machine,
-4 pastes (6 lines) from a working server and mashctl, and
-Alice reads it after 13 pastes (6 from a working server and mashctl). The whole page is
-24 pastes, 38 command lines and 10 other actions** (the other
-actions: two confirmations of the Claude Code flag, two more terminals, one
+end you delete all three.
+
+What you need first: a Debian or Ubuntu machine on 64-bit Intel or AMD (the
+server helper in Prerequisite 3 runs there only), Claude Code 2.1.312 or newer
+signed in with a claude.ai or Console account and with channels (the way mash
+wakes an idle session), the GitHub CLI `gh`, and Go 1.27.4 or newer. Prerequisite 3
+may also need `sudo`, once, to install a missing tool. The honest total,
+counted by script from this page: the first mail is sent after 11 pastes
+(35 lines) with the prerequisites, or 4 pastes (6 lines)
+if a server and mashctl are already working; Alice reads it after
+13 pastes (6). The whole page is 26 pastes and 60 lines, and
+10 other actions: two confirmations of a Claude Code flag, two more terminals, one
 sentence typed to Bob's agent, three addresses typed to confirm the deletions,
-two sessions closed). It assumes a Linux machine, Claude Code signed in, `gh`
-and Go already installed, and no `sudo` unless the server helper finds one of
-its own tools missing. Nothing else is needed.
+two sessions closed. Installing Claude Code, `gh` and Go, and answering any
+question Claude Code itself asks, are not counted.
 
 ```diagram
  your machine
- +--------------------------------------------+
- |  NATS server <----- mashctl (you: makes    |
- |   ^    ^    ^        and deletes mailboxes)|
- |  bob  alice you   each sends and reads     |
- |                   its own mail with mash   |
- +--------------------------------------------+
+ +-------------------------------------------------+
+ |  NATS server  <----- mashctl (you: makes and    |
+ |  (where the mail      deletes mailboxes)        |
+ |   waits)                                        |
+ |   ^    ^    ^                                   |
+ |  bob  alice you   each sends and reads          |
+ |                   its own mail with mash        |
+ +-------------------------------------------------+
 ```
 
 An endpoint is one mailbox, addressed `owner.group.name`, such as
-`acme.demo.bob`. A message is `new` until `mash read` shows it.
+`acme.demo.bob`: `acme` is the owner you will name when you make the server,
+`demo` is a group (a name you choose; it exists once an endpoint uses it) and
+`bob` is the endpoint. A message is `new` until `mash read` shows it.
 
 ## Prerequisites
 
 Four things to hold before the first mailbox. Each ends with what you now
-hold and where.
+hold and where. [The guide](https://github.com/bogworks/mash/blob/main/docs/skills/mash-nats-local/SKILL.md)
+is a separate route through prerequisites 2 to 4, written for a Claude Code
+session to follow with you: it asks three questions first (the owner name,
+the names of its test endpoints and whether it may use `sudo`) and then makes
+its own test endpoints, `acme.demo.alice` and `acme.demo.bob`. A deleted
+address can never be used again, so use the guide or this page, not both.
 
 ### Prerequisite 1: Claude Code, gh and Go
 
-Claude Code 2.1.312 or newer with channels (a claude.ai or Console sign-in),
-the GitHub CLI `gh` (the install check needs its `gh attestation` command and
-no GitHub login; some Debian packages are too old: install a current one from
-cli.github.com), and Go 1.27.4 or newer (for `mashctl`).
+Claude Code 2.1.312 or newer with channels, the GitHub CLI `gh` (the install
+check in the next prerequisite needs its `gh attestation` command and no
+GitHub login; some Debian packages are too old: install a current one from
+cli.github.com) and Go 1.27.4 or newer (for `mashctl`; Debian's own package is
+likely older: install one from go.dev/dl).
 
 **Command 1 of 1.** Each prints a version; "command not found" names the one
 to install first.
@@ -54,31 +68,16 @@ You now hold: `claude`, `gh` and `go` on your PATH.
 paste: the release's signed record (`mash.intoto.jsonl`, made by the
 release workflow) vouches for its list of checksums, then the checksum vouches
 for the file. A failed check stops the paste and installs nothing. No `sudo`:
-it goes in your own `~/.local/bin`. On a Mac, paste this block (use
-`P=darwin-amd64` on an Intel Mac); on Linux skip it.
+it goes in your own `~/.local/bin`. The paste works in `~/mash-setup/dl`,
+which it makes, and leaves you in your home folder.
 
 **Command 1 of 3.**
-
-<!-- alt -->
-```sh
-P=darwin-arm64
-BASE=https://github.com/bogworks/mash/releases/download/v0.5.6
-curl -fsSLO $BASE/mash-$P &&
-curl -fsSLO $BASE/SHA256SUMS &&
-curl -fsSLO $BASE/mash.intoto.jsonl &&
-gh attestation verify SHA256SUMS -R bogworks/mash --bundle mash.intoto.jsonl \
-  --signer-workflow bogworks/mash/.github/workflows/release.yml \
-  --source-ref refs/tags/v0.5.6 &&
-grep " mash-$P\$" SHA256SUMS | shasum -a 256 -c - &&
-chmod +x mash-$P &&
-mkdir -p ~/.local/bin && mv mash-$P ~/.local/bin/mash
-```
-
-On Linux (use `P=linux-arm64` on Arm):
 
 ```sh
 P=linux-amd64
 BASE=https://github.com/bogworks/mash/releases/download/v0.5.6
+D=$HOME/mash-setup/dl
+mkdir -p $D $HOME/.local/bin && cd $D &&
 curl -fsSLO $BASE/mash-$P &&
 curl -fsSLO $BASE/SHA256SUMS &&
 curl -fsSLO $BASE/mash.intoto.jsonl &&
@@ -87,51 +86,22 @@ gh attestation verify SHA256SUMS -R bogworks/mash --bundle mash.intoto.jsonl \
   --source-ref refs/tags/v0.5.6 &&
 grep " mash-$P\$" SHA256SUMS | sha256sum -c - &&
 chmod +x mash-$P &&
-mkdir -p ~/.local/bin && mv mash-$P ~/.local/bin/mash
+mv mash-$P $HOME/.local/bin/mash &&
+cd "$HOME"
 ```
 
-`gh` prints its report on a terminal, and `sha256sum` then prints
-`mash-linux-amd64: OK` (`shasum` the same on a Mac). The report, from this
-repository's release workflow and the `v0.5.6` tag:
+On a terminal `gh` prints a report that ends with `Verification succeeded!`,
+and `sha256sum` then prints `mash-linux-amd64: OK`. Anything else
+(`Verification failed`, a line that says `FAILED`, `gh: command not found` or no
+`gh attestation` command) means stop: nothing was installed. The failing screen
+is on the second page.
 
-<!-- from: targets#install-check.2 -->
-```
-$ gh attestation verify SHA256SUMS -R bogworks/mash --bundle mash.intoto.jsonl \
-    --signer-workflow bogworks/mash/.github/workflows/release.yml \
-    --source-ref refs/tags/v0.5.6
-Loaded digest sha256:048d915f361086f94904d3364a8811747c5b4308c90e449aaecb3d5e6d28cb44 for file://SHA256SUMS
-Loaded 1 attestations from mash.intoto.jsonl
-
-The following policy criteria will be enforced:
-- Predicate type must match:................ https://slsa.dev/provenance/v1
-- Source Repository Owner URI must match:... https://github.com/bogworks
-- Source Repository URI must match:......... https://github.com/bogworks/mash
-- Source repo ref must match:............... refs/tags/v0.5.6
-- Subject Alternative Name must match regex: ^https://github\.com/bogworks/mash/\.github/workflows/release\.yml(@(refs/.*|[0-9a-fA-F]+))?$
-- OIDC Issuer must match:................... https://token.actions.githubusercontent.com
-
-✓ Verification succeeded!
-
-The following 1 attestation matched the policy criteria
-
-- Attestation #1
-  - Build repo:..... bogworks/mash
-  - Build workflow:. .github/workflows/release.yml@refs/tags/v0.5.6
-  - Signer repo:.... bogworks/mash
-  - Signer workflow: .github/workflows/release.yml@refs/tags/v0.5.6
-```
-
-Anything else (`Verification failed`, a line that says `FAILED`) means stop:
-nothing was installed. Delete the downloaded files and do not go on; the
-failing screen is on the second page.
-
-**Command 2 of 3.** `mashctl` is built from source with Go. (PENDING the
-release lane: when `mashctl` is a release asset, the block above downloads and
-checks it too and this block goes. Until then `go install` is the unverified
-developer route: it builds on your machine, not the release's attested build.)
-The second and third lines put both programs on the PATH of every new
-terminal (zsh or bash); the fourth does it for this one. A Claude Code
-session starts `mash` by name from that PATH.
+**Command 2 of 3.** `mashctl` is built from source with Go for now (see "Not
+available until the 0.5.6 release" at the end): it is built on your machine,
+not checked against the release the way `mash` just was. The second and third
+lines put both programs on the PATH of every new terminal (zsh or bash); the
+fourth does it for this one. A Claude Code session starts `mash` by name from
+that PATH.
 
 ```sh
 go install github.com/bogworks/mash/cmd/mashctl@v0.5.6
@@ -157,72 +127,70 @@ You now hold: `mash` at `~/.local/bin/mash`, and `mashctl` in
 
 ### Prerequisite 3: a NATS server and its CA
 
-mash does not run a server. This helper makes one that only this machine can
-reach, in `~/mash-nats` (a Debian or Ubuntu helper, 64-bit Intel or AMD).
-[The guide](https://github.com/bogworks/mash/blob/main/docs/skills/mash-nats-local/SKILL.md)
-fetches and checks this same helper itself, asks three questions first, and
-also installs mash and mashctl and adopts the server: follow it instead of
-prerequisites 2 to 4 if you want its questions, or for another system. The
-helper needs `curl`, `tar`, `unzip`, `openssl`, `sha256sum` and `ss`; it says
-which is missing, and installing one is the only place `sudo` can come in.
+mash does not run a server; the mail waits on a NATS server. This helper makes
+one that only this machine can reach, in `~/mash-nats`. It needs `curl`,
+`tar`, `unzip`, `openssl`, `sha256sum` and `ss`; it says which is missing, and
+installing one is the only place `sudo` can come in.
 
-**Command 1 of 2.** Fetch the helper and check it. It prints `OK`.
+**Command 1 of 2.** Fetch the helper and check it. It prints a line that
+ends in `: OK`.
 
 ```sh
-mkdir -p "$HOME/mash-setup" && curl -fsSL -o "$HOME/mash-setup/nats-local-setup.sh" https://raw.githubusercontent.com/bogworks/mash/6f3dc46aa51078f386f4c6698f23696808068ab6/scripts/nats-local-setup.sh && echo "1371f18abb8de966346d60dfa0a121af75550b78d7b5ea3126db370f244954da  $HOME/mash-setup/nats-local-setup.sh" | sha256sum -c -
+H=$HOME/mash-setup/nats-local-setup.sh
+C=6f3dc46aa51078f386f4c6698f23696808068ab6
+mkdir -p "$HOME/mash-setup" &&
+curl -fsSL -o "$H" \
+  https://raw.githubusercontent.com/bogworks/mash/$C/scripts/nats-local-setup.sh &&
+echo "1371f18abb8de966346d60dfa0a121af75550b78d7b5ea3126db370f244954da  $H" \
+  | sha256sum -c -
 ```
 
-**Command 2 of 2.** Make and start the server (about a minute). It prints
-seven steps and ends with what you hold:
+**Command 2 of 2.** Make and start the server (about a minute). The owner
+name `acme` is the first part of every address. It prints its steps and ends
+with a summary of what you hold, which includes the server address, the CA
+file and the server folder:
 
 ```sh
 bash "$HOME/mash-setup/nats-local-setup.sh" --dir "$HOME/mash-nats" --owner acme --start
 ```
 
-<!-- external: PENDING policy lane: the helper's closing box, from the helper guide revision 7, "What you hold", cut to its five rows -->
-```
-What you hold
-  Server address     tls://localhost:4222
-  Owner              acme
-  CA file            /home/alice/mash-nats/ca.pem
-  CA fingerprint     sha256:72ce00ec 3b2b4a33 b694a541 b4eaa2bd 9f3ae573
-                     903e2e36 a75b51df ee53ebea
-  Server directory   /home/alice/mash-nats
-                     (mode 0700. ca.key and the nsc store stay in it: a process
-                     running as you can read them, and no step here moves them)
-```
-
 You now hold: the server address `tls://localhost:4222`, the CA file
-`ca.pem` at `~/mash-nats/ca.pem` (it holds no secret), and the server
-directory `~/mash-nats`. The screens below show the server as
-`tls://myserver:4222`; on this machine yours reads `tls://localhost:4222`.
+`ca.pem` at `~/mash-nats/ca.pem` (the CA is the authority that signed the
+server's certificate; the file holds no secret), and the server folder
+`~/mash-nats`, which also holds the CA's private key: keep it private and keep
+it, the server runs from it.
+
+**The server does not survive a reboot, and nothing starts it again.** If the
+machine restarts between here and the end of the steps, `mash status` says
+the server did not answer; start it again with `bash
+"$HOME/mash-setup/nats-local-setup.sh" --dir "$HOME/mash-nats" --start` and
+carry on.
 
 ### Prerequisite 4: hand the server to mashctl
 
 **Command 1 of 1.** It checks the folder the helper made, copies what mashctl
-needs into `~/.config/mash`, and prepares the server for mail (PENDING the
-mashctl lane: this is its text, not yet built). It asks for nothing, because
-the folder is yours.
+needs into `~/.config/mash` and prepares the server's storage for mail. It
+asks for nothing, because the folder is yours. Its output is not shown here
+(see "Not available until the 0.5.6 release" at the end).
 
 ```sh
 mashctl adopt --from "$HOME/mash-nats"
 ```
 
-<!-- external: PENDING ctl lane: the default output of mashctl adopt --from, from the mashctl targets revision 19, section 1b, cut before its NEXT hint -->
-```
-Connected mashctl to the server. Copied 5 files to ~/.config/mash.
-No fingerprint asked: the folder is yours.
-```
-
 You now hold: `~/.config/mash/config.json` (the server and the CA),
-`~/.config/mash/ca.pem`, and mashctl's copies of the keys that sign every
-endpoint under `~/.config/mash`: guard that folder like a password file. The
-server directory `~/mash-nats` is no longer needed to make mailboxes.
+`~/.config/mash/ca.pem`, and mashctl's signing key under `~/.config/mash`: the
+key that signs every endpoint's token. Guard that folder like a password file.
+Keep `~/mash-nats` too: the server runs from it.
 
 ## Step 1: Make Bob and Alice
 
-An endpoint needs a key and a token the server signed. On the machine that
-runs `mashctl`, one command makes both and installs them.
+A token is a statement signed by your mashctl's signing key that says: this
+public key is this address. Credentials are the private key plus the token:
+the file mash signs in with.
+
+On the machine that runs `mashctl`, one command makes a key pair (a private
+half that stays in a file only you can read, and a public half), makes the
+token and installs the credentials.
 
 **Command 1 of 3.** Bob.
 
@@ -237,9 +205,9 @@ Created a key pair and endpoint acme.demo.bob.
 Installed credentials for acme.demo.bob.
 The private key is inside the credentials file: guard that file.
 
+  kept    ~/.config/mash/ca.pem               (unchanged)
   wrote   ~/.config/mash/acme.demo.bob.creds  (mode 600)
   kept    ~/.config/mash/config.json          (unchanged)
-  kept    ~/.config/mash/ca.pem               (unchanged)
 
 NEXT: check that acme.demo.bob can sign in:
   mash status
@@ -247,8 +215,7 @@ NEXT: check that acme.demo.bob can sign in:
 
 **Command 2 of 3.** Check mail. With one endpoint installed, mash knows who
 you are. This is a healthy `mash status`. Its `mailbox` row is how many
-messages are waiting for this endpoint's session to see; past 15 (the
-default limit) mash wakes the session and the row says `OVER THE LIMIT`.
+messages are waiting for this endpoint to read.
 
 ```sh
 mash status
@@ -260,7 +227,7 @@ $ mash status
 acme.demo.bob: mail works.
 
   version       0.5.6
-  server        tls://myserver:4222
+  server        tls://localhost:4222
                 alive, encrypted (checked 09:42)
   config        ok
   credentials   ok
@@ -268,7 +235,8 @@ acme.demo.bob: mail works.
 ```
 
 **Command 3 of 3.** Alice. Two endpoints are installed after this, so you
-choose one in each shell, as the next step does.
+choose one in each shell. The hint below names Alice as an example; the next
+step chooses Bob first.
 
 ```sh
 mashctl endpoint create acme.demo.alice --make-key
@@ -281,9 +249,9 @@ Created a key pair and endpoint acme.demo.alice.
 Installed credentials for acme.demo.alice.
 The private key is inside the credentials file: guard that file.
 
+  kept   ~/.config/mash/ca.pem                 (unchanged)
   wrote  ~/.config/mash/acme.demo.alice.creds  (mode 600)
   kept   ~/.config/mash/config.json            (unchanged)
-  kept   ~/.config/mash/ca.pem                 (unchanged)
 
 NEXT: this machine has more than one endpoint now. Choose one for this
       shell, then check it:
@@ -295,7 +263,8 @@ NEXT: this machine has more than one endpoint now. Choose one for this
 
 Mail waits on the server until it is read, whether or not Alice is running.
 
-**Command 1 of 3.** As Bob.
+**Command 1 of 3.** As Bob. `--urgent` marks a message urgent and `--kind
+question` says what sort of message it is; the inbox shows both.
 
 ```sh
 export MASH_ENDPOINT=acme.demo.bob
@@ -336,7 +305,7 @@ Senders are in acme.demo unless shown in full. All verified.
 ```
 
 **Command 3 of 3.** `mash inbox` only lists. `mash read` shows one message in
-full and marks it read.
+full and marks it read; message 1 stays `new` until it is read the same way.
 
 ```sh
 mash read 2
@@ -359,14 +328,24 @@ NEXT: answer it, linked to #2:
 
 ## Step 3: The same, in two Claude Code sessions
 
-The mash plugin gives Claude Code tools to send, read and list mail. In
-terminal 1 (where you have been working), write it out and add it to Claude
-Code. Claude Code's own output for the two `claude` lines is not shown here
-(UNVERIFIED), and the plugin is not verified the way `mash` was.
+The mash plugin gives Claude Code tools to send, read and list mail, and a hook
+that hands waiting mail to the session. Claude Code starts `mash serve` for
+the plugin: you never run it yourself. Mail reaches an agent in two ways. The
+hook delivers waiting mail when the session next acts (after a tool call, or
+with your next prompt). A channel wake pushes a one-line message to an idle
+session so that it acts and the hook delivers. A third thing is separate: when
+more than 15 messages are waiting (the default limit), `mash serve` wakes the
+session, at most every 10 minutes.
 
-**Command 1 of 4.**
+In terminal 1 (where you have been working), export the plugin to a folder and
+add it to Claude Code. Claude Code adds a plugin from a marketplace, even a
+folder on this machine; `mash@mash` is the plugin and the marketplace it came
+from.
+
+**Command 1 of 5.**
 
 ```sh
+cd "$HOME"
 mash plugin export ./mash-plugin
 ```
 
@@ -381,14 +360,15 @@ NEXT: add it to Claude Code, install it, then start Claude Code with mash:
   claude --dangerously-load-development-channels plugin:mash@mash
 ```
 
-**Command 2 of 4.** The first two lines of its hint.
+**Command 2 of 5.** The first two lines of its hint. Claude Code prints its
+own text for these two lines: it is not shown here.
 
 ```sh
 claude plugin marketplace add ./mash-plugin
 claude plugin install mash@mash
 ```
 
-**Command 3 of 4.** Open terminal 2 for Alice. A session starts `mash` from
+**Command 3 of 5.** Open terminal 2 for Alice. A session starts `mash` from
 this terminal's PATH. Claude Code asks you to confirm
 `--dangerously-load-development-channels` (it lets mash wake an idle session
 and nothing more); confirm it, then leave the session idle.
@@ -400,7 +380,7 @@ export MASH_ENDPOINT=acme.demo.alice
 claude --dangerously-load-development-channels plugin:mash@mash
 ```
 
-**Command 4 of 4.** Open terminal 3 for Bob, and confirm the flag again.
+**Command 4 of 5.** Open terminal 3 for Bob, and confirm the flag again.
 
 <!-- action: open terminal 3 -->
 <!-- action: confirm the Claude Code flag in Bob's session -->
@@ -411,8 +391,9 @@ claude --dangerously-load-development-channels plugin:mash@mash
 
 <!-- action: type one sentence to Bob's agent -->
 Type in Bob's session: "Send acme.demo.alice a question: are you free for
-lunch at noon?" Alice's window wakes by itself and her agent is handed this
-(you see what the agent does with it, not the text):
+lunch at noon?" Bob's agent sends it with the plugin's send tool. Alice's
+window wakes by itself and her agent is handed this (what you see is her agent
+acting on it, not this text):
 
 <!-- from: targets#hook.2 -->
 ```
@@ -427,45 +408,31 @@ Reply with the send tool (in_reply_to links it to a message); read a long
 message in full with the read tool.
 ```
 
-## Step 4: Your own address
+To see the proof, go back to terminal 1 (still Alice) and list her inbox: a
+third message, from `bob`, is there.
 
-A person at a shell can have an endpoint too. In terminal 1, with no endpoint
-chosen, mash will not guess between the two it finds. This is the one refusal
-on this page, and its fix is the last line:
-
-**Command 1 of 3.**
+**Command 5 of 5.**
 
 ```sh
-unset MASH_ENDPOINT
-mash status
+mash inbox
 ```
 
-<!-- from: targets#status-choose -->
-```
-$ mash status
-mail does NOT work: 2 endpoints are installed here and none is chosen.
+If nothing happens in Alice's window, run `mash status` as Alice in terminal 1:
+the second page shows the screen for a session started without the mash
+channel.
 
-  version       0.5.6
-  server        tls://myserver:4222
-                alive, encrypted (checked 09:42)
-  config        ok
-  credentials   not checked (acme.demo.alice, acme.demo.bob)
-  mailbox       not checked
+## Step 4: Your own address
 
-fix: mash never guesses between them. To use acme.demo.alice (or
-     acme.demo.bob), add this line to ~/.config/mash/config.json:
-    "endpoint": "acme.demo.alice"
-     For this shell only, and the Claude Code you start from it:
-  export MASH_ENDPOINT=acme.demo.alice
-```
+A person at a shell can have an endpoint too.
 
-**Command 2 of 3.** Make your address (it prints what it printed for Alice).
+**Command 1 of 2.** Make your address (it prints what it printed for Alice).
+`you` is just a name: type it as shown.
 
 ```sh
 mashctl endpoint create acme.demo.you --make-key
 ```
 
-**Command 3 of 3.** Choose it and send. Alice's open session is woken again,
+**Command 2 of 2.** Choose it and send. Alice's open session is woken again,
 now by a message from `acme.demo.you`.
 
 ```sh
@@ -483,11 +450,12 @@ Sent your message to acme.demo.alice.
 
 **This cannot be undone.** A deleted address can never be used again, and the
 mail in its inbox is deleted with it. Delete only the three endpoints this
-page made. Close Bob's session in terminal 3 first. `mashctl` says what will
-be lost and asks you to type the address; typing it is the confirmation. It
-leaves this machine's credentials file for the endpoint as it was.
+page made. Close Bob's session in terminal 3 first (type `/exit`). `mashctl`
+says what will be lost and asks you to type the address; typing it is the
+confirmation. It leaves this machine's credentials file for the endpoint as it
+was.
 
-**Command 1 of 4.** Delete Bob; type `acme.demo.bob` when asked.
+**Command 1 of 6.** Delete Bob; type `acme.demo.bob` when asked.
 
 <!-- action: close Bob's session -->
 <!-- action: type acme.demo.bob to confirm -->
@@ -514,12 +482,13 @@ Deleted acme.demo.bob. Its address cannot be used again.
 Nothing can restore a deleted address.
 ```
 
-Nothing follows: there is no next step for someone who removed access. The
-proof is the next command. On this machine `mashctl` also says that Bob's
-credentials file was left as it was and that `mash status` will report it
-as DELETED.
+A delete prints no next-step hint: there is none for someone who removed
+access. The proof is the next command. The count in `its inbox, with 1
+message` is that endpoint's own: yours is the number of messages Bob received.
 
-**Command 2 of 4.** Ask as Bob. The server no longer knows him.
+**Command 2 of 6.** Ask as Bob. The server no longer knows him. The fix line
+names `mash key create`, the command that makes a key pair on its own (for a
+new endpoint, `--make-key` made yours for you); the second page shows it.
 
 ```sh
 export MASH_ENDPOINT=acme.demo.bob
@@ -532,7 +501,7 @@ $ mash status
 acme.demo.bob: mail does NOT work: this endpoint was DELETED on the server.
 
   version       0.5.6
-  server        tls://myserver:4222
+  server        tls://localhost:4222
                 alive, encrypted (checked 09:42)
   config        ok
   credentials   REFUSED (endpoint DELETED)
@@ -543,7 +512,7 @@ fix: its address cannot be used again. For a new endpoint, make a new key,
   mash key create --out <new-name>.key
 ```
 
-**Command 3 of 4.** Close Alice's session in terminal 2, then delete her. Type
+**Command 3 of 6.** Close Alice's session in terminal 2, then delete her. Type
 `acme.demo.alice` when asked; it prints her lines, with her inbox count.
 
 <!-- action: close Alice's session -->
@@ -552,73 +521,64 @@ fix: its address cannot be used again. For a new endpoint, make a new key,
 mashctl endpoint delete acme.demo.alice
 ```
 
-**Command 4 of 4.** Delete yours. Type `acme.demo.you` when asked.
+**Command 4 of 6.** Delete yours. Type `acme.demo.you` when asked.
 
 <!-- action: type acme.demo.you to confirm -->
 ```sh
 mashctl endpoint delete acme.demo.you
 ```
 
-The server and the programs are still there. Stopping, removing, the other
-machine, a reissued key and what each failing `mash status` means are on the
-second page, [Day 2 with mash](2026-11-19-readme-day2-plain-mash.md).
+**Command 5 of 6.** The three credentials files are still in
+`~/.config/mash`, each holding a private key that opens nothing now. Remove
+them, and stop choosing an endpoint in this shell.
 
-## Notes for reviewers
+```sh
+rm ~/.config/mash/acme.demo.bob.creds
+rm ~/.config/mash/acme.demo.alice.creds
+rm ~/.config/mash/acme.demo.you.creds
+unset MASH_ENDPOINT
+```
 
-Not README text. This is the PLAIN PATH rebuilt for the ruled scope (Randy's
-decision 264, contract revision 15): no trust record, generations, lock,
-`mash trust ...`, `mash plugin install` or install script. The lead's count
-of what is counted is in `readme-step-count.md` (scratchpad, regenerated with
-this page by `p2/plain-gen.py`).
+**Command 6 of 6.** `mash status` now says that no endpoint is installed
+(it still reads as a failing screen, because no mail can be sent from here).
 
-Real size: 624 lines in this file, of which 565 are
-README text above these notes (263 lines of prose and headings,
-302 lines inside fenced blocks and their markers).
-The ruling does not ask for the short quick start of the earlier target.
+```sh
+mash status
+```
 
-Outputs. Every `from` block is copied by `p2/plain-gen.py` from
-`docs/plans/2026-11-19-cli-targets-mash.md` (revision 7) by its `packet:` key; the
-lint `p2/lint-plain.py` (outside the repository) compares each byte for byte
-and rejects trust, generation, plugin-install, install-script and
-`MASH_INSECURE_PLAINTEXT` text and the plain-text override in this page. It has
-negative tests (`p2/neg3.py`).
+<!-- from: targets#status-none -->
+```
+$ mash status
+mail does NOT work: no endpoint is installed here.
 
-Placeholders pending other lanes (marked `external` or PENDING):
+  version       0.5.6
+  server        tls://localhost:4222
+                alive, encrypted (checked 09:42)
+  config        ok
+  credentials   MISSING (none in ~/.config/mash)
+  mailbox       not checked
 
-- policy: the closing box and the helper's pinned fetch are the helper guide
-  revision 7's (not DRAFT5: revision 7 is newer and after the ruling). The helper may
-  move its commit and hash. Its box ends with "The CA fingerprint is what a
-  person on ANOTHER machine types to trust this server": the targets and the
-  contract now say the person compares, and types nothing back. That sentence
-  is cut here and must change in the guide. The helper's "Next" points to
-  `README.md#quick-start-one-machine-no-account`; this page's heading is
-  "Quick start: two agents and you, on one machine". The guide's own
-  mash/mashctl install is its `gh` pinned download and four separate commands,
-  not this page's one paste.
-- ctl: the adopt text is revision 19's default form (nothing was run). The 5
-  copied files and the `config.json` are in its `--detail`.
-  `mashctl endpoint create ... --make-key` and `delete` as the targets print
-  them; revision 19's same-machine `delete` adds a line (`Its credentials file
-  here was left as it was; mash status will report it as DELETED.`) that the
-  targets' `ctl-delete` block does not have; this page says it in prose.
-- release: `mashctl` as a release asset is PENDING; until then `go install`,
-  unverified. The 0.5.6 release must carry `mash-linux-amd64`,
-  `mash.intoto.jsonl` and a `SHA256SUMS` that is a subject of that bundle
-  (UNVERIFIED: only v0.5.5 was run).
-- targets: every printed block shows the server as `tls://myserver:4222`;
-  the helper's server is `tls://localhost:4222`. One sentence says so.
-  `install-check.2` begins with the `$ gh attestation verify` line and wraps
-  it with 4-space continuation, which this page's pasted block does not repeat
-  character for character.
-- Claude Code's output for `plugin marketplace add` and `plugin install` is
-  not shown (UNVERIFIED). Claude Code may also ask whether you want to work
-  in the folder (a trust prompt of its own): not counted, not verified.
+fix: install the credentials your server made for this endpoint. mash then
+     uses it by itself; with several installed, name one with MASH_ENDPOINT
+     or "endpoint" in config.json:
+  mash credential install --key <key file> --token <token file>
+```
 
-Contradictions and choices:
+The server and the programs are still there. Another machine, deleting an
+endpoint and checking it is gone, stopping, removing, and what each failing
+`mash status` means are on the second page,
+[Day 2 with mash](2026-11-19-readme-day2-plain-mash.md).
 
-- The brief says the wake is "at 15"; the contract (REQ-015) says when the
-  backlog passes the limit, so the page says "past 15".
-- Contract REQ-011 (iv) says a quick start has no deliberate refusal; the lead
-  asked for one, in Step 4 (deleting its command 1 moves it to Day 2).
-- The contract says `mashctl endpoint delete` leaves the credentials file and
-  `mash status` reports DELETED: the page and the targets agree.
+## Not available until the 0.5.6 release
+
+Four things on this page wait for the release, and what you need to go on
+without each is here. `mashctl` is not yet a release download: the first paste
+of Prerequisite 2 will fetch and check it with `mash` and the Go step will go,
+and until then it is built with `go install`, unchecked. `mashctl adopt --from`
+(Prerequisite 4) is the 0.5.6 command that also copies the CA; its output is
+not shown here, and this page cannot be followed to the end before the release.
+The helper's closing summary (Prerequisite 3) is not reproduced here: the three
+things it names are listed under "You now hold". Claude Code's own output and
+questions (the two `claude plugin` lines, the confirmation of the flag, and
+anything it asks about the folder or before an agent uses a tool) are
+Claude Code's and are not shown: answer as Claude Code asks.
