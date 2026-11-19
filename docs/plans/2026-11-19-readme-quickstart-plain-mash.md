@@ -217,7 +217,7 @@ NEXT: check that acme.demo.bob can sign in:
 
 **Command 2 of 3.** Check mail. With one endpoint installed, mash knows who
 you are. This is a healthy `mash status`. Its `mailbox` row is how many
-messages are waiting for this endpoint to read.
+messages are waiting: not yet shown to the session or read.
 
 ```sh
 mash status
@@ -338,8 +338,8 @@ the plugin: you never run it yourself. Mail reaches an agent in two ways. The
 hook delivers waiting mail when the session next acts (after a tool call, or
 with your next prompt). A channel wake pushes a one-line message to an idle
 session so that it acts and the hook delivers. A third thing is separate: when
-more than 15 messages are waiting (the default limit), `mash serve` wakes the
-session, at most every 10 minutes.
+more than 15 messages are waiting (the default limit; reading a message stops
+it waiting), `mash serve` wakes the session, at most every 10 minutes.
 
 In terminal 1 (where you have been working), export the plugin to a folder and
 add it to Claude Code. Claude Code adds a plugin from a marketplace, even a
@@ -565,7 +565,7 @@ mail does NOT work: no endpoint is installed here.
 fix: install your key and the token you were sent for this endpoint. mash
      then uses it by itself; with several installed, name one with MASH_ENDPOINT
      or "endpoint" in config.json:
-  mash credential install --key <key file> --token <token file>
+  mash credential install --key <key file> --token <token file> --account <account key>
 ```
 
 The server and the programs are still there. Another machine, deleting an

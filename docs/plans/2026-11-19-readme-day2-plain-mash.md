@@ -60,19 +60,35 @@ use it. Only the public key and the token cross between machines.
    the token, `acme.demo.carol.token`, in the folder you ran it from.
 4. Take `acme.demo.carol.token` and the CA file to the second machine
    (`~/.config/mash/ca.pem` on the machine that runs `mashctl`; it holds no
-   secret). Send the person the server address and the CA's fingerprint by
-   another route than the token.
-5. On the second machine, run `mash credential install --key carol.key --token
-   acme.demo.carol.token --ca ca.pem --server` followed by the address of the
-   server (a `tls://` address). On a first install both `--ca` and `--server`
-   are required; each missing one is a usage error and nothing is read. mash
-   shows the server address and the CA's fingerprint (eight groups of eight
-   lower-case hex digits joined by `-`): compare both with what you were sent,
-   and stop if they differ. Nothing is typed back. It writes the CA copy, the
-   credentials and, last, the configuration, so running the same command
-   again completes an interrupted install. It never changes a file that is
-   already installed: on a difference it says which file to move aside.
-   Delete `acme.demo.carol.token` afterwards: mash kept no copy.
+   secret). Send the person the server address, the CA's fingerprint and the
+   account (`mashctl endpoint create` prints all three) by another route than
+   the token.
+5. On the second machine, in a terminal, run `mash credential install --key
+   carol.key --token acme.demo.carol.token --ca ca.pem --server` followed by
+   the address of the server (a `tls://` address), then `--account` followed
+   by the account key you were sent, copied whole. Every install needs
+   `--account`, and a first install needs `--ca` and `--server` as well; each
+   missing one is a usage error and nothing is read. mash compares the token
+   with the account key on the machine, and refuses before it shows or writes
+   anything if they are not the same account, whatever you would answer. Then,
+   before it writes anything, mash shows three values: the server address,
+   the CA's fingerprint (groups of eight lower-case hex digits, two lines of
+   four) and the account (the whole 56-character key), and asks `Do these
+   three match what the operator sent you? (yes/no)`. Compare all three with
+   what you were sent and answer `yes` only if every one matches. Anything
+   else writes nothing, sends nothing to the server and says to ask the
+   operator who made the endpoint; with no terminal the command refuses, so a
+   script or an agent cannot answer for you. After a yes it checks that the
+   server's certificate is from that CA, that the server requires
+   authentication and that it accepts your key and token, and only then writes
+   the CA copy, the credentials and, last, the configuration. If a run is
+   interrupted, running the same command again starts from the files that are
+   really there (it ignores whatever the killed run left behind), asks again
+   and completes the install. It never changes a file that is already
+   installed: on a difference it says which file to move aside. A key or token
+   file that is a symbolic link, belongs to another user or can be read by
+   others is refused before anything is shown. Delete
+   `acme.demo.carol.token` afterwards: mash kept no copy.
 6. `mash status` there is healthy (the first page shows the screen).
 
 ## Delete an endpoint on another machine, and see the proof
@@ -198,7 +214,7 @@ fix: ask whoever runs your mash server which of the two it was. If the key
      was reissued, move the old credentials aside, then install the new key
      and token:
   mv ~/.config/mash/acme.demo.bob.creds ~/.config/mash/acme.demo.bob.creds.old
-  mash credential install --key <key file> --token <token file>
+  mash credential install --key <key file> --token <token file> --account <account key>
 ```
 
 No credentials on this machine:
@@ -216,7 +232,7 @@ acme.demo.bob: mail does NOT work: no credentials on this machine.
   mailbox       not checked
 
 fix: install the credentials made for this endpoint:
-  mash credential install --key <key file> --token <token file>
+  mash credential install --key <key file> --token <token file> --account <account key>
 ```
 
 No configuration yet (a machine where nothing was installed): the screen says
@@ -343,7 +359,9 @@ fix: start Claude Code with the mash channel, from the terminal you want it in:
 ```
 
 More than 15 messages waiting (exit 0): mail works, and the session is woken
-at most every 10 minutes while it stays over.
+at most every 10 minutes while it stays over. A message stops waiting when the
+session is shown it in full or reads it; one only named in a digest keeps
+waiting.
 
 <!-- from: targets#status-mailbox-over -->
 ```

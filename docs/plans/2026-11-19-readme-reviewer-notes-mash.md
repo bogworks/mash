@@ -5,8 +5,11 @@ Not README text. These notes go with
 `docs/plans/2026-11-19-readme-day2-plain-mash.md` (Day 2). The two pages carry no
 notes section and no internal marks: everything a reviewer needs is here.
 
-Built on the targets DRAFT8 (`docs/plans/2026-11-19-cli-targets-mash.md`, contract
-revision 16) for the ruled scope (Randy's decision 264). The lead's count of what is
+Built on the targets DRAFT10 (`docs/plans/2026-11-19-cli-targets-mash.md`, contract
+revision 26) for the ruled scope (Randy's decision 264). Regenerated after DRAFT10 (contract revisions
+18 to 26: revisions 22 to 26 appeared while the regeneration ran and were applied): every install takes `--account <key>` (the operator's account key, copied whole) and the first install confirms three values before it writes anything; the
+fingerprint is in groups of eight separated by spaces; the count of the mailbox row is unacknowledged mail and
+reading acknowledges. The lead's count of what is
 counted is `readme-step-count.md` (scratchpad), regenerated with the pages by
 `p2/plain-gen.py`, `p2/count-report.py` and this file's `p2/notes-gen.py`.
 
@@ -14,8 +17,8 @@ counted is `readme-step-count.md` (scratchpad), regenerated with the pages by
 
 | | lines | prose and headings | inside fenced blocks and markers | widest printed block | widest typed block |
 |---|---|---|---|---|---|
-| quick start | 584 | 316 | 268 | 75 columns | 88 columns |
-| Day 2 | 374 | 179 | 195 | 79 columns | 76 columns |
+| quick start | 588 | 316 | 272 | 87 columns | 88 columns |
+| Day 2 | 392 | 197 | 195 | 87 columns | 76 columns |
 
 The quick start is 26 pastes, 60 lines and 10 other actions for the whole
 page; the first mail is sent after 11 pastes (35 lines) with the
@@ -32,20 +35,22 @@ Every printed block is copied by `p2/plain-gen.py` from the targets by its
 the repository). The lint also rejects: PENDING, UNVERIFIED, lane, external,
 placeholder, team names, "Notes for reviewers", "the server signed" and "signed by
 the server", `-v2`, a marker comment that is not `from`, `action` or `alt`, a
-fingerprint that is not 8 groups of 8 lower-case hex digits joined by `-`, a printed
-block wider than 80 columns, the cut scope (trust record, generations, plugin
+fingerprint that is not groups of 8 lower-case hex digits separated by single spaces, four to a line (eight groups on one line, the old `-` joined form, a `:` form and upper case are refused), an account shown shortened or not 56 characters, a printed
+block wider than 80 columns (a command on its own line is exempt, as in the targets' rule R9: the hint commands with `--account` are 87 columns, so the lint's check now skips a command-position line), the cut scope (trust record, generations, plugin
 install, install script, `MASH_INSECURE_PLAINTEXT`, the plain-text override before
 the failing-status section of Day 2), and it requires the lead's verbatim sentences
 (the token sentence on the quick start; the two "never travels" lines, the
-requirements-page URL and the deliberate-refusal heading on Day 2). Negative tests:
-`p2/neg3.py`, 31 cases, all rejected, both pages pass as controls.
+requirements-page URL, the deliberate-refusal heading and the lead's question
+`Do these three match what the operator sent you? (yes/no)` on Day 2). Negative tests:
+`p2/neg3.py`, 37 cases (six new for the fingerprint and account forms and the question), all rejected, both pages pass as controls.
 
 Not printed on purpose: the targets' `install-check.2` (the `gh` report; its widest
 line is 138 columns, over the 80 limit, and the junior found it frightening; the page
 describes it in one sentence), `status-noconfig` (97 columns: a line of its fix), and
-the `key`, `server` and `install-main` blocks of the other-machine flow (they name
+the
+`key`, `server`, `install-confirm`, `install-main` and the other install blocks of the other-machine flow (they name
 `bob`, which the quick start has retired; the lead wants `carol` and no invented
-output, so Day 2 gives those commands in prose).
+output, so Day 2 gives those commands, and what the confirmation shows, in prose).
 
 ## What is not built, and where it sits
 
@@ -64,11 +69,21 @@ in plain sentences, or is off the page.
   does not).
 - The helper's closing summary ("What you hold") is not printed: the guide revision 7's
   box is the real output of its test but its CA fingerprint is `sha256:72ce00ec 3b2b4a33
-  ...` (spaces and a prefix), not the one 8x8 format the lead fixed, and it ends "what a
+  ...` (a prefix and five groups), not the one form the lead fixed (groups of eight
+  separated by spaces, eight groups, two lines of four), and it shows no account; it ends "what a
   person on ANOTHER machine types to trust this server", which the contract now
-  contradicts (the person compares and types nothing). Both need a change in the guide
+  contradicts (the person confirms three values, a yes or a no, and types nothing else). Both need a change in the guide
   and the helper before the box can be printed. The page lists the three things the
   summary names (address, CA file, folder), which are the guide's.
+- Reading acknowledges (contract rev 21). The sentences "reading a message stops it
+  waiting" (Step 3) and "a message stops waiting when the session is shown it in full or
+  reads it" (Day 2) are true only after three changes that are not built: the `read` tool
+  draining any waiting message, `mash read` writing the drained tombstone, and `mash serve`
+  writing the count into the lease (targets section 5b). Today `mash read` never acknowledges
+  and the `read` tool only some messages.
+- The `--account` flag and the first install's confirmation (yes or no, in a terminal) are not built; Day 2 describes it
+  in prose and does not print it. An agent or script that runs the install is refused (exit 4):
+  the page says so in one clause.
 - Claude Code's own output and questions (`claude plugin marketplace add`, `claude plugin
   install`, the flag confirmation, a folder question, a permission question before the
   send tool) are not shown and are not counted. Not verified.
@@ -85,18 +100,27 @@ in plain sentences, or is off the page.
 
 ## Differences between the lead's text and the targets (kept the targets)
 
-- Make-key output. The lead (ctl agreed) wants its first line to say what it made:
-  `Made a key pair for acme.demo.bob: the private half is kept in the credentials file
-  on this machine, and your mashctl's signing key signed a token saying this public key
-  is acme.demo.bob.` The targets' `install-make` and `install-make-second` still say
-  `Created a key pair and endpoint acme.demo.bob.` and `The private key is inside the
-  credentials file: guard that file.` The page prints the targets' block, and the
-  verbatim token sentence sits above it in Step 1. When the targets carry ctl's line,
-  regenerate; nothing on the page changes by hand.
-- The targets' `server` block says "The token says, signed by your server, that bob.pub
-  is this endpoint", and `install-main` says "it made this token". Under the lead's
-  ruling the signer is mashctl's signing key; neither block is on a page now, but the
-  targets should say it.
+- The make-key output now agrees: the targets (DRAFT9) carry ctl's first line (`Made a key
+  pair for acme.demo.bob: ...`) and the `server` block says that mashctl's signing key signed the
+  token; the generated blocks changed and nothing on a page was edited by hand. (Earlier notes listed
+  both as differences; they are closed.)
+- Placeholder values in the targets' blocks. The fingerprint (`3f9a41c2 7b0d9e55 ...`) is
+  ctl's sample and the account (`ADQ6KRG4JFLSMDNOLVYUFUXM3JOVHOS5OJZPTIFCCRPM3DTQKTE4VLXF`) is
+  a made-up 56-character key that starts with `A`; neither is derived from any real CA or
+  token. Neither is on a page (Day 2 describes the three values in prose); a reviewer who
+  reads the targets must not look for them in a real run.
+- The three values' form. The page text and the targets agree: `server address`, `CA fingerprint`
+  (two lines of four groups of eight) and `account` (the whole key, 73 columns with its label),
+  as ctl prints them for the operator, and the question is the lead's verbatim. `--make-key`
+  shows no confirmation (the same machine and user); the contract asks its output to say in one
+  line why no fingerprint is shown, and that line is ctl's text, not in the targets' block.
+- The first install asks for a person at a terminal, on Day 2 only; the quick start never runs it
+  (same machine: `--make-key`). The contract says an agent never runs it, and the page gives the
+  command to the person.
+- Contract rev 24 to 26, REQ-011 (i), NOT conformed: the pasted install (Prerequisite 2) should refuse a destination, or any parent of it, that is a symlink or writable by another user, before copying. The page's paste does not; the shape of that paste is a decision for the lead (targets section 9 lists it).
+- A second difference between two documents: the status-views page (DRAFT4) drops the `MAILBOX`
+  column of `mash endpoint status`; the contract and the targets keep it for the caller's own
+  owner. Not on these pages.
 - The targets' `status-deleted` shows `DELETED`; the server must say so for status to
   (targets N11). Until then the screen on the page may read REFUSED. Both pages show the
   targets' DELETED.
@@ -214,7 +238,7 @@ Step 1
 32. Where the public half goes: FIXED (the token says "this public key is this address").
 33. The `mailbox` row's "wake" too early: FIXED (it moved to Step 3).
 34. The hint names Alice, Step 2 uses Bob: FIXED (a sentence says so).
-35. The make-key output does not say what it made: NOT TAKEN on the page. See "Differences".
+35. The make-key output does not say what it made: FIXED. The targets carry ctl's first line (DRAFT9) and the page prints the block.
 
 Step 2
 36. `--urgent --kind` unexplained: FIXED. 37. Message 1 stays `new`: FIXED (a sentence).
@@ -275,7 +299,7 @@ Part 3 (5), between the pages
 66. Links to `-v2` names: FIXED. 67. Retired addresses reused: FIXED (`carol`). 68. A local
     server against a second machine: FIXED. 69. "a deletion with its proof" announced as new:
     CHANGED (Day 2's is for the other machine). 70. Two fingerprint formats: FIXED on the
-    pages (one format); the guide's box must change. 71. PATH lines calling `go` on the second
+    pages (one format, now groups of eight separated by spaces on two lines); the guide's box must change. 71. PATH lines calling `go` on the second
     machine: FIXED. 72. `mash key create` first appears in a fix: FIXED. 73. `mash serve` never
     introduced and two wakes not told apart: FIXED (Step 3).
 

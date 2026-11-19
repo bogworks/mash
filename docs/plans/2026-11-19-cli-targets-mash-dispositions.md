@@ -833,3 +833,66 @@ count (superseded by the planner's delivery definition; text left); the
 refusal blocks for a connection the server refuses and for an unreachable
 server during `credential install` (the contract gives tests, not wording).
 Packet keys added (1): `ctl-make-key-refuse`. Removed: none.
+
+## DRAFT10: contract revs 18 to 21
+
+Sources: the lead's brief for DRAFT10 (five numbered items) and contract
+revisions 18 to 26 (`mash-0.5.6-cli-ux`). The work began at rev 21 (the newest
+in `masterplanner/for-herds/mash-0.5.6/`); the contract was downloaded again
+during and at the end, when revs 22 to 26 had appeared, and the differences were applied
+(rows D10-6.n). REQ-003, REQ-013, REQ-015, INV-003, INV-004, AT-007 and AT-008
+were read for every line about install and the mailbox. Ids are `D10-1.n` to
+`D10-6.n`. Z14 to Z21 are the decisions in section 7 of the targets file; blocks
+named are packet keys. The status-views page is DRAFT4 and the README pages and
+reviewer notes are regenerated.
+
+| # | item | disposition | where in the targets (DRAFT10), or why not |
+|---|---|---|---|
+| D10-1.1 | First install shows three values BEFORE any write, in ctl's form (`server address`, `CA fingerprint` on two lines of four groups, `account`) | FIXED | R15, step C, `install-confirm`, `install-main`, `install-rerun`, `install-detail`; step B's `server` block gains the `account` line (mashctl's hand-over prints all three, rev 21); the account on the screen is the `--account` value (rev 24) |
+| D10-1.2 | The account is the COMPLETE 56-character key on one line, never shortened (rev 21 correction: NOT the first 32 characters) | FIXED | the sample key is 56 characters and the label line is 73 columns; R15; the lint refuses a cut key |
+| D10-1.3 | `Do these three match what the operator sent you? (yes/no)`; no or anything but yes: `Nothing was written. Ask the operator who made this endpoint.`, exit 1; no terminal: `error: this needs a person at a terminal ...`, exit 4 | FIXED, wording chosen here for the fix lines | `install-confirm-no`, `install-no-terminal`; R2 gains the exception for `account` and `operator` (Z14) |
+| D10-1.4 | Fingerprint display form everywhere = ctl's (groups of 8, space separated, two lines of four): replace the `-` joined form in rules, help, hand-over text, JSON examples, README generator rules and lint | FIXED | R15, `server`, `install-*`, `install-json` (one line, wrapped under its key), the adopt paragraph; `p2/lint-plain.py` (and `p2/neg3.py`, six new cases); packet intro |
+| D10-1.5 | Remove typed-answer rules; replace every "compare after the write" wording | FIXED | R15 (nothing typed but yes/no), R17, step B and C text, "How the agent trusts the server", the `credential install` help, S2/S3/S12 and Y7 marked superseded; Day 2 step 5 |
+| D10-2.1 | The token's issuer must equal the confirmed account; refusal `error: this token belongs to another account than the one you confirmed.` + labelled fix; nothing written | FIXED, reordered by rev 22 to 24 | `install-refuse-account` (now before the question: the local comparison with `--account` is the first check after the files; see D10-6.1) |
+| D10-2.2 | The server must REQUIRE authentication and the connection must succeed; refusal `error: the server at myserver:4222 does not require authentication.` + fix | FIXED | `install-refuse-noauth`; the connection refusal keeps the lead's rev 16 line (exit 4, `install-refuse`); an unreachable server (exit 6) has no block: no wording in the contract |
+| D10-2.3 | A certificate signed by a DIFFERENT CA than the confirmed one: `error: the server's certificate is not signed by the CA you confirmed.` + fix | FIXED | `install-refuse-ca`; the old combined "CA and name" refusal is now a host-name refusal under `install-refuse` (Z15) |
+| D10-2.4 | NO directory lookup; drop any "no matching record" refusal and any directory-check text | FIXED (nothing to drop) | DRAFT9 had neither; R15 and step C say install reads nothing else from the server |
+| D10-2.5 | Before connecting refuse a key or token file that is a symlink, foreign-owned or broader than 0600: `error: bob.key is readable by others (mode 644).` + `chmod 600 bob.key` on its own indented line; one block per cause | FIXED, fixes chosen here | `install-refuse-keyfile-mode`, `-symlink`, `-owner` |
+| D10-2.6 | Every interrupted state is ignored before the rerun: a rerun starts from the files actually present and never trusts a leftover marker or half-written file | FIXED, UNVERIFIED in code | section 2 write-order rule, step C, `install-rerun` text (the rerun asks again), Z16 |
+| D10-2.7 | Keep write order, the "accepted this key and token" wording, exit codes 6, 4, 2, 1 | FIXED | unchanged; the `checked` lines now also say it requires authentication and (first install) a separate line for the account |
+| D10-3.1 | REQ-015 count STAYS pending plus ack-pending; delivery acknowledges (full hook context, the `read` tool, `mash read`); a digest line does not acknowledge and still counts; so reading lowers the count | FIXED | section 5b rewritten, R22, the serve-backlog text, O1 and O2, MCP instruction text, hook, `mash read` change text; the DRAFT9 line "superseded by status-views" removed; Z17 |
+| D10-3.2 | Status-views page DRAFT4: replace DRAFT3's recommendation (digest counts as delivered) everywhere; list which code changes and what else it touches | FIXED | `docs/plans/2026-11-19-status-views-mash.md`: section 4.4, every mailbox row and explanation, the open question, section 8, section 10 |
+| D10-3.3 | The brief's line "`mashctl audit` unread can exceed the status number by the digest-listed count" | NOT TAKEN | under the ruling both count the digest-listed messages, so they agree; 5b ("what else", item 2) and Z17 say so |
+| D10-4.1 | A backlog already over the limit at `mash serve` start wakes once, 10 minutes after the start, if still over; same line; cooldown per endpoint from the last wake, not kept across restart | FIXED | R22, 5b "the wake", the serve-backlog text, a note under the serve start block (Z18) |
+| D10-4.2 | `mailbox_limit` 0: the count is still shown (rev 21) | FIXED, beyond the brief | `status-mailbox-off` reads `3 waiting, no limit set`; R11, R22, section 3, packet text (Z19) |
+| D10-5.1 | Re-measure widths, update section 9 counts, packet keys, checks run | FIXED | section 9: 157 fenced blocks, 136 chosen by markers, 79 keys (twelve added); account line 73 columns; no printed line over 80 except the exemptions (R9: a command on its own line; the longest, a fix with `--account <account key>`, is 121 columns) |
+| D10-5.2 | Regenerate the README pages, the step count and the reviewer notes; lint passes | FIXED | quick start and Day 2 regenerated, lint ok on both (37 negative cases pass; the lint's printed-block width check now skips a command-position line, as R9 does, because the hint commands with `--account` are 87 columns); step count unchanged (26 pastes, 60 lines, 10 actions); notes regenerated (stale lines about "signed by your server" and make-key removed; new differences and placeholders added; junior findings and dispositions kept) |
+| D10-6.1 | Rev 22 to 24: `--account <key>` on EVERY install, required, a complete valid key, never ignored; a missing one exits 2 before anything is read and nothing is connected; the local issuer comparison comes first and refuses before any write whatever the person answers | FIXED | R15, step C, section 2, the help, every `$` command and every printed `fix:` command carries it; new blocks `install-refuse-noaccount`, `install-refuse-badaccount`; Z21 |
+| D10-6.2 | Rev 22 to 24: order = local preflight and issuer comparison, then (first install) the confirmation, then any connection that carries the key or token; a "no" means the server never sees an authentication attempt; a later install does not prompt and still compares first | FIXED | R15, step C text, `install-confirm-no` text, section 2 |
+| D10-6.3 | Rev 22 to 24: a later install writes its credentials under `.<address>.creds.tmp` and renames it last; stale temporary files removed; mash ignores `.*.tmp`; the address checked against the grammar | FIXED in the rule, no block | section 2 write-order rule; no printed block shows a temporary file (Z21 (c)) |
+| D10-6.4 | Rev 24, REQ-011 (i): the pasted install refuses a destination, or any parent of it, that is a symlink or writable by another user, before copying | NOT TAKEN | the shape of the paste (section 5a, the README prerequisite) is a decision for the lead; listed as not conformed |
+| D10-6.6 | Rev 26: a later install refuses (exit 1, `error: another mash credential install is running`) while another's temporary is younger than 10 minutes; only older or future-dated temporaries are stale; address grammar (1 to 63 a part, at most 191, lowercase); a later install's `--server` and `--ca` byte-identical to the configured ones; a terminal only when it prompts | FIXED | section 2, R15, new block `install-refuse-running` (the lead's words), Z21 (e) |
+| D10-6.5 | Newest revision binds over earlier rulings | APPLIED | the brief's "mash computes the account from the token's issuer" yields to rev 24's `--account` (compared with the issuer); the lead's error line `... than the one you confirmed.` is kept word for word (Z21 (a)) |
+
+Where revisions conflicted, the newest won: rev 26 (and 24) over the brief's account
+computed from the token (now `--account`); rev 21 over the planner's "not yet
+delivered" count (DRAFT9, Z13) and over rev 16's O2 (reading does not lower);
+rev 21's count shown with `no limit set` over DRAFT9's row; rev 17's "cooldown
+starts at start" over DRAFT8's "after a restart the first wake can come
+immediately"; the lead's brief (the whole account) over rev 20 (first 32
+characters).
+
+Contract rev 26 lines not conformed to: REQ-011 (i)'s destination and parent
+checks for the pasted install (D10-6.4); `mash endpoint status` showing the count
+for the caller's own owner (REQ-015) is followed by the targets but not by the
+status-views page; refusal wording for a connection the server refuses beyond the
+lead's rev 16 line and for an unreachable server (the contract names the tests
+only); REQ-003's one line in `--make-key` output on why no fingerprint is shown
+(mashctl's text, not in `install-make`); AT-007's kill and symlink tests are
+behaviour, not output.
+Packet keys added (12): `install-confirm`, `install-confirm-no`,
+`install-no-terminal`, `install-refuse-account`, `install-refuse-noaccount`,
+`install-refuse-badaccount`, `install-refuse-running`, `install-refuse-noauth`,
+`install-refuse-ca`, `install-refuse-keyfile-mode`, `install-refuse-keyfile-symlink`,
+`install-refuse-keyfile-owner`. Removed: none (the combined certificate refusal
+stays under `install-refuse`, reworded to the host name).
