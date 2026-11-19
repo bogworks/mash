@@ -304,3 +304,117 @@ OTHERWISE, NOT CONFORMED (with the reason).
 | S13 | AT-007 cases that have an output | FIXED | Existing file, different file, symlink (`key-refuse`, `install-refuse`); zero, several, foreign-owned credentials (`status-none`, `status-choose`, `status-unsafe`, `send-refuse`); trust change with no terminal and with a wrong typed fingerprint (`install-trust`); substituted token with the operator's fingerprint (`install-refuse`, mismatch); override inherited (`status-plain-inherited`, `send-warning`). The helper-script cases (swapped parent, substituted download) are not command output of mash |
 
 Counts: 13 rows; FIXED 10; CHANGED OTHERWISE 3 (S2, S5, S7 as numbered in this table).
+
+
+## Review of the quick start (critic round 1 on DRAFT2, junior developer)
+
+Date: 2026-11-19. Source: the junior developer's read of the README quick
+start DRAFT2 (every finding of that review, in the order of its walkthrough,
+then its collected "sloppy or inconsistent" list). DRAFT3 is
+`docs/plans/2026-11-19-readme-quickstart-targets-mash.md`: a rewrite, with its
+output blocks copied from the targets (DRAFT4) and checked by
+`lint-quickstart.py` (a design for the contract, kept outside the repository).
+Section names below are those of DRAFT3.
+
+| # | finding | disposition | where in DRAFT3, or why not |
+|---|---|---|---|
+| 1 | The note at the top is for reviewers, but is read first, and uses words the reader does not know ("skill", "After outputs", "R9 and R10", "the target's cast") | FIXED | The README text has no reviewer note. The one note is the last section, "Notes for reviewers"; lint fails if it is not last |
+| 2 | Two things the reader needs are missing before step 1 (the guide, the unpublished release) | FIXED | "Prerequisites" 3 and 4 name the release (0.5.6, `v0.5.6`) and the guide (`docs/skills/mash-nats-local/SKILL.md`); dependencies are listed in the notes |
+| 3 | "NATS" never explained; is "mash server" the NATS server? | FIXED | "The words this page uses": "mash mail rides on a NATS server; the mash server and the NATS server are the same thing" |
+| 4 | "Endpoint" used in the intro, defined in step 3; has a mailbox or is the mailbox? | FIXED | One definition in the words list: an endpoint is one mailbox, with an address; the intro no longer says it "has" one |
+| 5 | Where `acme` and `demo` are decided is never said | FIXED | Words list: owner is what the server was set up with (chosen in prerequisite 4); group is the name you give when you create the endpoint; both are in the address |
+| 6 | `go version` and `claude --version` checks not given | CHANGED OTHERWISE | No Go any more (finding 14). Prerequisite 1 names `gh auth status` for `gh`; `curl`, `claude` are named, and the install and Step 3 would fail loudly without them. Not a command block, to keep the count down |
+| 7 | Go 1.27.4 and `GOBIN`/`GOPATH` paragraph | FIXED | Removed: `mashctl` is a release download (finding 14) |
+| 8 | "Channels", "Console sign-in", Bedrock and others unexplained | CHANGED OTHERWISE | Prerequisite 1 keeps the sign-in condition in one clause; "channel" is defined once in Step 3, where it matters |
+| 9 | `curl`, `sha256sum`/`shasum`, `gh` not listed; `gh` appears after the block that uses it; `gh` login | FIXED | Prerequisite 1 lists `curl` and `gh` signed in; Prerequisite 3 command 1 sets `SUM` per platform; command 3 says how to skip `gh` (`ok=yes`) |
+| 10 | The server is only in another guide; the page does not say what the guide leaves | FIXED | Prerequisite 4 ends "You now hold": server address, `ca.pem` at `~/mash-demo/nats/ca.pem`, the owner, the CA fingerprint; the answers to give the guide are listed |
+| 11 | The guide "ends with `mashctl` able to reach the server", but `mashctl` is installed after it | FIXED | Order chosen and explained in Prerequisite 3: install first, then the server (the guide needs nothing of ours until its last step, which runs `mashctl`, and the helper is in the release) |
+| 12 | No one-line check that the server is up before step 1 | CHANGED OTHERWISE | The guide has `--check`; the page names it in "If `mash status` says something else". Step 1's first status is the page's own check |
+| 13 | The `unset $(env \| sed ...)` line: empty case, and it clears `MASH_CONFIG_DIR` | FIXED | Replaced by one sentence and `env \| grep '^MASH_'`, which prints nothing (Prerequisite 2 command 2) |
+| 14 | `<version>` has no value, form unknown, release unpublished, and a literal `<` redirects | FIXED | Written `0.5.6` and `v0.5.6` in the install blocks; no angle bracket in any typed block (lint rule 4). The release is still a dependency (notes) |
+| 15 | Comments inside an `&&` chain; macOS hint after the line it changes; six edits to change platform | FIXED | No comment in any typed block (lint); the macOS block comes before the Linux block (Prerequisite 3 command 1); one `P` and one `SUM` carry the platform |
+| 16 | The last `case` line is not joined with `&&` | FIXED | The install is one chain that stops on any failure and prints `STOP`; the `case` line is gone; `export PATH` ends the chain, and a sentence covers new terminals |
+| 17 | The block promises output and shows none; no good or bad `gh` output | FIXED | Each command has its output: `attested: yes`, the three `OK` lines, `mash version`, `mashctl version`. The `gh` output is silenced and summarised by `attested:` |
+| 18 | "command 1 of 2" on ten lines | FIXED | A command is defined as one block pasted; every section counts them (lint rule 6 checks `Command k of m`) |
+| 19 | Not told how to put `$BIN` on `PATH` | FIXED | `export PATH` in the chain, and one sentence for `~/.bashrc` and `~/.zshrc` |
+| 20 | `SHA256SUMS` left behind though cleanup is called exact | FIXED | "What stays on disk, and why" lists every download, including `SHA256SUMS` and `mine.sums` |
+| 21 | `docs/release.md`, `docs/operations.md` not links | FIXED | `docs/operations.md` is a link; `docs/release.md` is no longer mentioned (the attestation is explained in one sentence) |
+| 22 | `mashctl` needs Go, public or private repository unknown | FIXED | No Go; both programs are downloads from the release, checked the same way (finding 14); `gh` sign-in is a prerequisite |
+| 23 | `mashctl version` shows nothing; no check | FIXED | Prerequisite 3 command 6, with output (marked `external`: not in the mash targets) |
+| 24 | How `mashctl` finds the server, and what it needs, is unknown at install | FIXED | Prerequisite 4 says the guide hands the server to `mashctl` (adopt, init) and that `mashctl` writes the address into mash's settings |
+| 25 | Which directory for the files; step 10 says "where you ran steps 2 and 3" | FIXED | One working directory, `~/mash-demo`, from Prerequisite 2; every path later is exact |
+| 26 | Owner and group "stated, not explained" | FIXED | See 5 |
+| 27 | Two `next:` lines (tool and page) look alike and disagree at steps 4, 5, 7 | FIXED | The page writes no `NEXT`/`next:` line at all; the only ones are the tools' own, inside marked blocks (lint rule 3). Links between steps are plain headings |
+| 28 | The three-command flow taught first (steps 2-4), then "one command does all three" | FIXED | The quick start uses only `mashctl endpoint create ... --make-key`; the three-command flow is a link to `docs/operations.md`, where `--server` and `--ca` make sense |
+| 29 | `--ca ca.pem` and `--server tls://myserver:4222` unclear: where the file is, is the machine called `myserver`, what `tls://` and `4222` are | FIXED | Prerequisite 4 names the file and path; `myserver` is explained once ("use its name") and typed only in the helper command; no later command names the server |
+| 30 | "Keep alice.key" contradicts the leftover `rm alice.key` | FIXED | No `alice.key` file exists in this flow; the private key is inside the credentials file, "the backup of the key: guard it" (Step 1), and the credentials files are listed as dead after Step 5 |
+| 31 | The group/name "from the token" versus "from the environment" paragraph; when are the variables needed | FIXED | One setting, `MASH_ENDPOINT=acme.demo.alice`, or the `"endpoint"` line of config.json; the words list says when it is needed (more than one endpoint installed); `MASH_GROUP`, `MASH_NAME`, `MASH_OWNER` appear nowhere (lint rule 5) |
+| 32 | `credentials`, `credential`, `.creds` are one thing in three spellings | CHANGED OTHERWISE | The prose says "credentials" (the file `*.creds`); `credential install` is no longer used on the page |
+| 33 | The three `wrote`/`copied` lines have different shapes | NOT TAKEN | The shape is the target's (`install-make`); the quick start copies it |
+| 34 | Alice's key in the working directory, Bob's in `~/.config/mash` | FIXED | No key file outside `~/.config/mash`; all endpoints use `--make-key` |
+| 35 | Step 5 repeats `wrote config.json` and `copied ca.pem` for the second endpoint: overwritten? | FIXED | Step 1 command 2 says the second endpoint reports both as `kept` and unchanged (the targets' rule); no second output block is invented |
+| 36 | "`mashctl` already knows the server and the CA": how? | FIXED | Prerequisite 4 (the guide's adopt step) and Step 1's introduction |
+| 37 | Bob's sign-in never checked | FIXED | Step 1 command 3 shows the refusal that says to choose; Step 2 shows each endpoint working by sending and reading as it; Step 5 checks Bob last |
+| 38 | "you, as alice" never defined; first thought `su alice` | FIXED | The words list defines it: `MASH_ENDPOINT` names it, or the only installed one; no Unix user or login |
+| 39 | The `tls://myserver:4222` typed versus `myserver:4222` printed | NOT TAKEN | `mash status` prints the address as the target has it (`tls://myserver:4222`); the page no longer types the address, so the two forms never meet |
+| 40 | Only the healthy status is shown; failures, and what to do, unknown | FIXED | Step 1 shows the choose refusal with its fix; "If `mash status` says something else" shows the unreachable screen with its fix and the guide's `--check`; Step 5 shows the DELETED screen |
+| 41 | `--kind question`: what kinds exist; why is the plain mail a `task` | FIXED | The target now prints kind `message` for plain mail (`inbox` block); the page uses `--kind question` once and the blocks show it |
+| 42 | "12m ago" for mail just sent | FIXED | The target prints `10s ago` and `8s ago` |
+| 43 | One thing in different forms (`new, urgent`/`question`/`urgent question`) | FIXED | The target separates STATE and URGENCY columns; the page copies it |
+| 44 | `TRUST verified`: what else can it be, what to do | FIXED | Step 2: `All verified` explained; a message that is not verified says so and is information, not an instruction |
+| 45 | The round trip (Bob answers, Alice reads) never happens | CHANGED OTHERWISE | The page shows one direction in the shell and again in a Claude Code session (the aim of 11 actions); the reply is the `NEXT` line of `mash read`, which the page does not use |
+| 46 | I became Bob by changing one variable; what stops that on a real setup? | CHANGED OTHERWISE | Step 2 says every message is signed with the key of the endpoint that sent it; the person who holds the files is that endpoint, as on any host. No claim beyond that |
+| 47 | The leading space, the indent differences in the tables | NOT TAKEN | Layout is the target's (`inbox`, `read`) and is copied byte for byte |
+| 48 | `mash who` shows the endpoint running the command as offline and never seen | FIXED | `mash who` is no longer on the page |
+| 49 | Step 9 words: plugin, marketplace, `mash@mash`, channels, allowlist, wake | FIXED | Step 3 defines plugin, marketplace, `mash@mash` and channel, each in one line |
+| 50 | The `--dangerously-...` flag: what is the danger | CHANGED OTHERWISE | Step 3 says what it does and does not do (lets mash wake an idle session; without it mail arrives at the next prompt or tool call) and that Claude Code asks to confirm; it does not claim a danger the page cannot state |
+| 51 | No counter and no output for the two `claude plugin` commands | FIXED | Step 3 counts three commands; the two `claude plugin` lines are one paste, with no output block (mash prints nothing; Claude Code does) |
+| 52 | The last step stops before an agent sends or receives; the step the page exists for has no proof | FIXED | Step 3 ends with what the agent in Alice's session sees (`hook` block, `verified`); Step 4 sends again from your shell and Alice's open session shows it |
+| 53 | Second terminal for Bob: the whole `export` line must be retyped | FIXED | Only Alice's session is started; the launch is two pasteable lines, `export MASH_ENDPOINT=acme.demo.alice` then `claude ...`, with `cd ~/mash-demo` for a new terminal |
+| 54 | How does the person get an address of their own? | FIXED | Step 4: `mashctl endpoint create acme.demo.you --make-key`, `export MASH_ENDPOINT=acme.demo.you`, `mash send` |
+| 55 | Step 10 removes only local files; nothing removes the endpoints on the server | FIXED | Step 5: `mashctl endpoint delete` for Bob, Alice and you, then the refused credentials |
+| 56 | `claude plugin marketplace remove mash`: where did the name come from | FIXED | Step 3 defines `mash@mash` (plugin, then marketplace); the removal lines are in "What stays on disk, and why" |
+| 57 | "`mashctl` has no stop verb (checked in its source)" reads as a developer note | FIXED | Dropped; the table says the server is stopped as the guide says (its `--stop`) |
+| 58 | The programs themselves and `SHA256SUMS` not removed or mentioned | FIXED | Both are rows of "What stays on disk, and why" |
+| 59 | "What is different from 0.5.5" means nothing to a new reader | FIXED | Removed from the page; the section is not in the README text at all |
+| 60 | "Nothing is cleared: scroll back at any time" answers a problem the reader never had | FIXED | Removed |
+| 61 | Counters inconsistent (1-A, steps 2-6 per step, step 7 with a missing number, none in 9 and 10) | FIXED | One rule everywhere: "Command k of m" per section, counted per paste, checked by lint rule 6 |
+| 62 | `new, urgent` vs `question` vs `urgent question` and other forms of one fact | FIXED | See 43 |
+| 63 | Column alignment fine, no line over 80 columns | FIXED | Still true: the widest printed line is 76 columns; typed lines are at most 69 |
+
+Counts: 63 rows; FIXED 53; CHANGED OTHERWISE 7 (6, 8, 12, 32, 45, 46, 50);
+NOT TAKEN 3 (33, 39, 47).
+
+## Critic round 2, part C (README)
+
+Source: round 2, section C ("The README quick start") and E.4 ("cannot be
+followed, and is not minimal"), on DRAFT2. The critic's outline is followed:
+install; Bob and Alice with `--make-key`; status; mail; Claude Code; clean-up;
+the remote flow only as a link.
+
+| # | finding | disposition | where in DRAFT3, or why not |
+|---|---|---|---|
+| C1 | The guide "ends with `mashctl` able to reach it" but `mashctl` is installed after | FIXED | Same as 11: the order is chosen and explained (Prerequisite 3) |
+| C2 | The guide does not exist yet and is named differently in the packet | FIXED | One name, `docs/skills/mash-nats-local/SKILL.md`, with the helper `scripts/nats-local-setup.sh`; both are in the notes' dependency list |
+| C3 | `gh` and `gh auth login` and `curl` missing from the prerequisites | FIXED | Prerequisite 1, and `ok=yes` to skip the attestation |
+| C4 | The `unset $(env \| sed ...)` line is clever shell; empty case fails in zsh; `mash status` should name any `MASH_*` override | CHANGED OTHERWISE | Replaced by `env \| grep '^MASH_'` (prints nothing). `mash status` naming an override is the CLI's, not the page's |
+| C5 | Step 1-A: thirteen lines of nine commands, linux-amd64 only, macOS edit mid-chain, unpublished release, `<version>` form | FIXED | One `P`/`SUM`/`BIN` block, a macOS block before it, a chain without comments, `0.5.6` and `v0.5.6` stated |
+| C6 | Step 1-B: Go 1.27.4 only to get `mashctl`; ship it as a release asset | FIXED | `mashctl-<os>-<arch>` is downloaded and checked beside `mash` (dependency: release lane) |
+| C7 | `--ca ca.pem` is a relative path: which directory, which guide step | FIXED | The page no longer passes `--ca`; the guide's `ca.pem` is named at `~/mash-demo/nats/ca.pem` in Prerequisite 4 |
+| C8 | After step 4 the tool says `mash status`; the README goes to step 5 | FIXED | The page's order follows the tool's hints; status is run before mail |
+| C9 | "mash read the group and name from the token", then types them anyway | FIXED | One setting, `MASH_ENDPOINT`; see 31 |
+| C10 | Step 5 output says `wrote` for files step 4 wrote; the packet says `kept` | FIXED | Step 1 command 2 says `kept`, and no invented second block |
+| C11 | `bob.key` in `~/.config/mash`, `alice.key` in the working directory | FIXED | See 34 |
+| C12 | "`mashctl` already knows the server and the CA": how | FIXED | See 36 |
+| C13 | `MASH_GROUP`/`MASH_NAME` exported and nothing unsets them | FIXED | Gone; `MASH_ENDPOINT` is one variable, and the last section says to close the shell or `unset MASH_ENDPOINT` |
+| C14 | Step 9 ends at launching; the quick start never shows an agent sending or receiving | FIXED | Step 3 and Step 4. Shown: the agent receiving (the `hook` block). Not shown: the agent sending (the MCP `send` tool); the page has no block for it |
+| C15 | Step 10 removes local files, not the server's endpoints: "remove what the steps made, and nothing else" is false | FIXED | Step 5 deletes the endpoints; "What stays on disk, and why" does not claim to remove everything |
+| C16 | The README's `next:` lines imitate the tool's | FIXED | See 27 |
+| C17 | Clean up the cast and the count: 31 actions where about 11 would do after install | CHANGED OTHERWISE | 14 pastes in 5 steps after the prerequisites. The core the critic counted (two endpoints, status, send, inbox, plugin, launch) is 11; the three the planner and lead added are Alice's session proof, your own address and removing access |
+| C18 | The remote three-step flow belongs under "An endpoint on another machine" | FIXED | One link, to `docs/operations.md`, in Step 1 |
+| E4.1 | Depends on an unpublished release and an unwritten guide | CHANGED OTHERWISE | Still true, by design: both are named as dependencies in the notes, and the page is written to them |
+| E4.2 | Cleanup leaves the server endpoints and the shell exports | FIXED | See C13, C15 |
+| E4.3 | "Before you start": a mash server from the guide (it prints the path of `ca.pem`), Claude Code with channels, `curl` and `gh` | FIXED | "Prerequisites" 1 to 4, each ending "You now hold" |
+
+Counts: 21 rows (C1 to C18, E4.1 to E4.3); FIXED 18; CHANGED OTHERWISE 3 (C4,
+C17, E4.1); NOT TAKEN 0.
