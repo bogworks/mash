@@ -20,6 +20,21 @@ own NATS server; 6 loss; 7 where every secret is.
 
 ## 1. The settings mash needs
 
+**Checklist (everything in one place).** A server mash can use has:
+
+- [ ] `listen` (this machine only unless you chose otherwise)
+- [ ] `tls` with a certificate, and the CA that signed it
+- [ ] `jetstream` with a `store_dir`
+- [ ] `operator` (operator mode)
+- [ ] `system_account`
+- [ ] `resolver { type: full }`
+- [ ] `resolver_preload` with the system and mash accounts
+- [ ] the mash account's JWT limits: 2 GB disk, 64 streams, 128 consumers
+- [ ] an admin user in the mash account (all permissions) and a system user
+      in the system account (ping, account lookup, claims update)
+- [ ] two seeds as 0600 files: operator signing (`SO...`) and account
+      identity (`SA...`)
+
 Read this if you already run a NATS server and want mash to use it,
 or want to know what the script's `server.conf` gives. mash needs the
 seven things listed under the example from the server, and `mashctl adopt`
@@ -141,7 +156,9 @@ bash "$HOME/mash-setup/nats-local-setup.sh" --dir "$HOME/mash-nats" --owner acme
 MASH_CONFIG_DIR="$HOME/mash-conf" "$HOME/.local/bin/mashctl" adopt --from "$HOME/mash-nats"
 ```
 
-The same rules apply to that folder: private, never copied or backed up.
+The same rules apply to that folder: private.
+Copying it is your call, but a copy holds every key, so keep it as private
+as the original.
 
 **A server for other machines** is not made by this script: it listens
 on 127.0.0.1 only. A server reachable from other machines is the
@@ -200,14 +217,14 @@ no renew command: set up again.
 
 ## 7. Where every secret is, and what you lose
 
-| What | Where | If it is gone |
-|---|---|---|
-| `ca.key` (CA private key) | server dir | no new server certificate; existing ones keep working |
-| `nsc/` (key store) | server dir | no new accounts or users by hand; mashctl and the server keep working |
-| `export/` (copies of four files) | server dir | nothing: mashctl holds its own copies |
-| mashctl's folder: operator seed, account seed, system and admin credentials, agent creds | `$HOME/.config/mash` | mashctl cannot make, revoke or administer agents; set up again and reissue every endpoint |
-| `server.key` | server dir | the server cannot start; set up again |
-| `jetstream/` (all mail) | server dir | every stored message |
+| What | Where | If it is gone | If it leaks |
+|---|---|---|---|
+| `ca.key` (CA private key) | server dir | no new server certificate; existing ones keep working | pass as the server to clients that trust this CA | |
+| `nsc/` (key store) | server dir | no new accounts or users by hand; mashctl and the server keep working | make any account or user, so any identity | |
+| `export/` (copies of four files) | server dir | nothing: mashctl holds its own copies | the same as the four files it copies (operator and account seeds, admin and system credentials) | |
+| mashctl's folder: operator seed, account seed, system and admin credentials, agent creds | `$HOME/.config/mash` | mashctl cannot make, revoke or administer agents; set up again and reissue every endpoint | make any identity, read all mail, administer the server's accounts | |
+| `server.key` | server dir | the server cannot start; set up again | pass as the server (with its certificate) | |
+| `jetstream/` (all mail) | server dir | every stored message | every stored message is read | |
 
 A process running as you can read all of these. mash does not defend
 against that; if it matters to you, run the agent in a sandbox.

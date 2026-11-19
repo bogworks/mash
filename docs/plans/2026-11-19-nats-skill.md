@@ -327,3 +327,16 @@ file format or protocol):
   reissue every endpoint".
 - Wording: operator (key, not a person), resolver and consumer defined in
   the reference doc, one "seven things" list, pointers checked by the test.
+
+## DRAFT9 (final, lead #33)
+
+Five fixes: (1) the `claude --version` check is gone from the guide (the
+README owns it); (2) "Doing it again": `--remove` then `rm -r
+"$HOME/mash-setup"`, both `sh person`; (3) keys sentence true after adopt
+(two places, backing up is the person's call, no restore command); (4) new
+one-line definitions (mashctl, adopt, endpoint, stream/consumer, resolver,
+.nk), "swap a path" wording replaced in the helper (a process running as you
+can still change files under the script while it runs); (5) download sources
+named (nats-io releases, versions and assets) and a 404 row in the fix table.
+Doc 2: gathered checklist and an "If it leaks" column. Parts 4-5 stay parked
+until ctl builds `adopt --from` and the release file exists.

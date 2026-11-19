@@ -95,6 +95,15 @@ more, and read "If something is wrong".
   Whoever holds the file is that user.
 - JetStream: the part of NATS that stores messages on disk.
 - Owner: the first part of every address (`acme` in `acme.demo.alice`).
+- mashctl: mash's admin tool. It makes and revokes agents' mailboxes.
+- Adopt: `mashctl adopt` hands a finished server to mash: it checks the
+  server and copies what mashctl needs into its own folder.
+- Endpoint: one agent's mailbox, with its own `.creds` file.
+- Stream, consumer: a stream is where JetStream keeps one endpoint's mail;
+  a consumer is a reader of a stream.
+- Resolver: how the server finds account records; this one keeps them on
+  disk.
+- `.nk` file: a seed saved as a file (the operator and account seeds).
 
 ## What you end up with
 
@@ -167,17 +176,10 @@ yourself; see `WHAT-MASH-NEEDS.md`, section 5.
 
 ## 2. Prerequisites
 
-You need Claude Code installed (mash is a Claude Code plugin; the README
-quick start uses it). Check, read-only:
-
-```sh
-claude --version
-```
-
-Expected: a version line. `command not found` means Claude Code is not
-installed: stop and ask the person to install it. The script needs curl,
-tar, unzip, openssl, sha256sum and ss. Read-only check of the script's
-programs; it prints `missing:` for each one that is not there:
+The server does not need Claude Code; the README quick start checks for it
+later. The script needs curl, tar, unzip, openssl, sha256sum and ss.
+Read-only check of the script's programs; it prints `missing:` for each
+one that is not there:
 
 ```sh
 for c in curl tar unzip openssl sha256sum ss; do command -v "$c" >/dev/null || echo "missing: $c"; done; echo checked
@@ -211,17 +213,20 @@ Fetch the script from one exact commit and check its hash. Do not run a
 script you have not checked:
 
 ```sh
-mkdir -p "$HOME/mash-setup" && curl -fsSL -o "$HOME/mash-setup/nats-local-setup.sh" https://raw.githubusercontent.com/bogworks/mash/9c729a78fccf1b4021c6f281966796d207d81475/scripts/nats-local-setup.sh && echo "e0ab368d0cc56cbebbd464f3630b7ca29f545a0272f087ddb330c9c2f6317c40  $HOME/mash-setup/nats-local-setup.sh" | sha256sum -c -
+mkdir -p "$HOME/mash-setup" && curl -fsSL -o "$HOME/mash-setup/nats-local-setup.sh" https://raw.githubusercontent.com/bogworks/mash/f713821435cbb23dd8c0a94c3760cd54f3541aab/scripts/nats-local-setup.sh && echo "be7a07c94474d86ccffabe0ed30892ef5fcc25350cb2b4f8edc22e9772b364f5  $HOME/mash-setup/nats-local-setup.sh" | sha256sum -c -
 ```
 
 Expected: one line ending `nats-local-setup.sh: OK`. If it says
 `FAILED` the file is on disk but wrong: do not run it; stop. If curl
-says `404`, nothing was saved: the URL is wrong, copy the block again.
+says `404`, nothing was saved: see "If something is wrong".
 
 The script writes only under the server directory and `$HOME/mash-setup`.
-It installs nats-server v2.15.1 and nsc v2.15.0 into
-`$HOME/mash-nats/bin`, after checking each download against a hash
-written in the script; of the programs on your PATH it runs only the
+It downloads nats-server v2.15.1
+(`nats-server-v2.15.1-linux-amd64.tar.gz`, from
+github.com/nats-io/nats-server/releases) and nsc v2.15.0
+(`nsc-linux-amd64.zip`, from github.com/nats-io/nsc/releases) and installs
+them into `$HOME/mash-nats/bin`, after checking each download against a
+hash written in the script; of the programs on your PATH it runs only the
 prerequisites. Run it:
 
 ```sh
@@ -344,11 +349,16 @@ The signing keys are in one place: the server directory,
 - `server.key`: pass as the server (with its certificate).
 - `jetstream/`: every stored message.
 
-If this machine is lost: run the helper again and reissue every endpoint.
-There is no backup and no restore. Certificates last ten years; after that
-clients fail with `x509: certificate has expired` and there is no renew
-command, so you run the helper again. `WHAT-MASH-NEEDS.md` has a table of
-what losing each file costs.
+They are in `$HOME/mash-nats` now. The README quick start's first step
+(`mashctl adopt --from`) copies what mashctl needs into `$HOME/.config/mash`;
+after that there are two places, and both hold keys. Copying either to a
+backup is your call: a copy holds every key above, so keep it as private as
+the original. mash has no backup or restore command and does not test
+restoring from a copy. If this machine is lost: run the helper again and
+reissue every endpoint. Certificates last ten years; after that clients
+fail with `x509: certificate has expired` and there is no renew command, so
+you run the helper again. `WHAT-MASH-NEEDS.md` has a table of what losing
+each file costs.
 
 ## 4. Stop, start and remove
 
@@ -387,6 +397,22 @@ Expected: it prints what it will remove, then `about to: stop nats-server
 pid N`, `did: stopped pid N` and `did: removed <dir>`. With no terminal it
 refuses and exits 4.
 
+### Doing it again
+
+`--remove` leaves `$HOME/mash-setup` (the script you fetched) in place, and
+part 2's last check wants it absent. To start over, you run these two
+yourself, then go back to part 3. If you already ran `--remove`, the first
+says the directory does not exist and changes nothing: go on to the
+second.
+
+```sh person
+bash "$HOME/mash-setup/nats-local-setup.sh" --dir "$HOME/mash-nats" --remove
+```
+
+```sh person
+rm -r "$HOME/mash-setup"
+```
+
 ## What next
 
 You now hold: the server directory `$HOME/mash-nats` (the running
@@ -408,8 +434,8 @@ Binding 127.0.0.1 keeps the server off the network but does not limit it to you:
 every user on this machine can reach port 4222. They cannot connect without
 credentials, read mail or make agents.
 
-A process running as you can still swap a path between the recheck and the
-write; this script does not defend against that.
+A process running as you can still change files under the script while it runs;
+this script does not defend against that.
 
 Everything is in /home/alice/mash-nats; run --check to list it.
 
@@ -417,8 +443,8 @@ What you hold
   Server address     tls://localhost:4222
   Owner              acme
   CA file            /home/alice/mash-nats/ca.pem
-  CA fingerprint     sha256:af463f4f 04c56e92 bdab66f2 3caea71b ac96d995
-                     04c88870 9bcf856e 424f81b1
+  CA fingerprint     sha256:ba59e4df f73610f0 27757e46 1fe4e76e 89ff25cd
+                     c45facd4 48706b18 388e6a63
   Server directory   /home/alice/mash-nats
                      (mode 0700. ca.key and the nsc store stay in it: a process
                      running as you can read them, and no step here moves them)
@@ -449,6 +475,7 @@ afterwards.
 | `... already exists: this script creates --dir itself` | the path exists, even empty | pick a new path |
 | `needs at least 3 path components` or `is writable by group or others` | `--dir` is `/`, `/tmp` or similar | use a path under `$HOME` |
 | `sudo: a password is required`, `is not in the sudoers file`, `sudo: command not found` | no sudo here | ask the person to run the install line as root, or install the programs |
+| `curl: (22) ... 404` fetching the script | the commit is not at that address (typo, or it was moved) | copy the block again; if still 404, use the same URL with `v0.5.6` in place of the commit (once that tag exists): the hash line still checks it and says `FAILED` for any other file |
 | `x509: certificate has expired` | the ten-year certificate ran out | see "Certificates last ten years" in part 3 |
 
 To see why the server will not start, read the last lines of

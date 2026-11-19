@@ -125,13 +125,6 @@ WWIDE=0
 LONGEST=$(cat "$T"/blk/*.sh | awk '{ if (length > m) m = length } END { print m + 0 }')
 LONGEST_ASCII=$(grep -c '[^ -~]' "$SKILL" || true)
 
-# the stand-in claude (the container has no Claude Code)
-cat >"$T/assets/claude" <<'__CLAUDE__'
-#!/bin/sh
-# TEST STAND-IN for Claude Code: prints a version line, nothing else.
-echo "2.1.0 (Claude Code) [guide-test stand-in]"
-__CLAUDE__
-chmod 755 "$T/assets/claude"
 
 if [ "$PENDING" = 1 ]; then
 # ------------------------------------------------- build
@@ -466,7 +459,7 @@ BN() { printf '%s/pblk/%02d.sh' "$T" "$1"; }
 say "checking the guide itself"
 BWHY=""
 RC=0
-ck "SKILL.md sh block count is 10 (got $NBLK)" test "$NBLK" -eq 10
+ck "SKILL.md sh block count is 11 (got $NBLK)" test "$NBLK" -eq 11
 NWB=$(find "$T/wblk" -name '*.sh' | grep -c .)
 ck "WHAT-MASH-NEEDS.md fenced block count is 6 (got $NWB)" test "$NWB" -eq 6
 ck "$WIDE SKILL.md prose lines over 80 columns (fences, tables, URL-only lines exempt)" \
@@ -475,17 +468,17 @@ ck "$WWIDE WHAT-MASH-NEEDS.md prose lines over 80 columns" test "$WWIDE" -eq 0
 ck "non-ASCII characters in SKILL.md" test "$LONGEST_ASCII" -eq 0
 ck "non-ASCII characters in WHAT-MASH-NEEDS.md" \
     test "$(grep -c '[^ -~]' "$WHAT" || true)" -eq 0
-extra "guide: 10 sh blocks in SKILL.md, 6 fences in WHAT-MASH-NEEDS.md, prose <= 80 columns in both documents, ASCII"
+extra "guide: 11 sh blocks in SKILL.md, 6 fences in WHAT-MASH-NEEDS.md, prose <= 80 columns in both documents, ASCII"
 
 # expected signature per block (so a reordered guide fails loudly)
 declare -A SIG=(
-    [1]='claude --version' [2]='command -v "$c"' [3]='sudo apt-get install'
-    [4]='exists: $p' [5]='sha256sum -c -' [6]='--owner acme --start'
-    [7]='--check' [8]='--stop' [9]='--dir "$HOME/mash-nats" --start'
-    [10]='--remove'
+    [1]='command -v "$c"' [2]='sudo apt-get install'
+    [3]='exists: $p' [4]='sha256sum -c -' [5]='--owner acme --start'
+    [6]='--check' [7]='--stop' [8]='--dir "$HOME/mash-nats" --start'
+    [9]='--remove' [10]='--remove' [11]='rm -r "$HOME/mash-setup"'
 )
-declare -A INFO=([10]="sh person")
-for n in $(seq 1 10); do
+declare -A INFO=([9]="sh person" [10]="sh person" [11]="sh person")
+for n in $(seq 1 11); do
     want=sh
     [ "${INFO[$n]+set}" = set ] && want=${INFO[$n]}
     got=$(cat "$T/blk/$(printf %02d "$n").info" 2>/dev/null)
@@ -523,14 +516,14 @@ ck "the guide says the person runs the sh person blocks (and the agent never)" \
     grep -q 'never run' "$SKILL"
 ck "every sh block (both documents) that uses --remove is marked sh person" bash -c \
     "for f in \"$T\"/blk/[0-9][0-9].sh \"$T\"/wblk/[0-9][0-9].sh; do b=\${f%.sh}; case \$(cat \$b.info) in sh*) ;; *) continue ;; esac; if grep -qE -- '--remove|rm -r.*\.config/mash|^rm .*\.local/bin' \$f && [ \"\$(cat \$b.info)\" != 'sh person' ]; then echo \"unmarked: \$f\"; exit 1; fi; done"
-ck "the create block passes --owner acme explicitly" sig 6 "--owner acme"
+ck "the create block passes --owner acme explicitly" sig 5 "--owner acme"
 extra "guide text: no 'exit', person block marked, create passes --owner"
 
 # the script URL commit and sha in the guide equal git's
 GCOMMIT=$(grep -o 'raw.githubusercontent.com/bogworks/mash/[0-9a-f]\{40\}/scripts/nats-local-setup.sh' \
-    "$T/blk/05.sh" | cut -d/ -f4)
+    "$T/blk/04.sh" | cut -d/ -f4)
 GSHA=$(grep -o '[0-9a-f]\{64\}  \$HOME/mash-setup/nats-local-setup.sh' \
-    "$T/blk/05.sh" | cut -c1-64)
+    "$T/blk/04.sh" | cut -c1-64)
 LASTC=$(git -C "$REPO" log -1 --format=%H -- scripts/nats-local-setup.sh)
 FULLC=$(git -C "$REPO" rev-parse "${GCOMMIT:-none}^{commit}" 2>/dev/null)
 HELPERSHA=$(sha256sum "$REPO/scripts/nats-local-setup.sh" | cut -d' ' -f1)
@@ -544,8 +537,8 @@ ck "the script at that commit has the guide's sha256" test "$COMMITSHA" = "$GSHA
 ck "the script in this tree has the guide's sha256" test "$HELPERSHA" = "$GSHA"
 ck "that commit is on a pushed (remote) branch" bash -c \
     "[ -n \"\$(git -C '$REPO' branch -r --contains '$GCOMMIT' 2>/dev/null)\" ]"
-PIN_COMMIT=9c729a78fccf1b4021c6f281966796d207d81475
-PIN_SHA=e0ab368d0cc56cbebbd464f3630b7ca29f545a0272f087ddb330c9c2f6317c40
+PIN_COMMIT=f713821435cbb23dd8c0a94c3760cd54f3541aab
+PIN_SHA=be7a07c94474d86ccffabe0ed30892ef5fcc25350cb2b4f8edc22e9772b364f5
 ck "the guide's script commit equals the pinned $PIN_COMMIT" \
     test "$GCOMMIT" = "$PIN_COMMIT"
 ck "the guide's script sha256 equals the pinned $PIN_SHA" \
@@ -595,37 +588,20 @@ fi
 D=$CIP/mash-nats
 say "running the blocks"
 
-# 1: claude --version, first WITHOUT claude (the guide's stop case)
-runblk 1
-ck "no claude: rc 127" test "$RC" -eq 127
-ck "no claude: command not found" has "command not found"
-ck "no claude: no version line" nothas "Claude Code"
-BWHY="${BWHY}"
-extra "block 1 without claude: command not found (the guide says stop)"
-# then with the stand-in claude at /usr/local/bin/claude
-podman cp "$T/assets/claude" "$C:/usr/local/bin/claude"
-podman exec --user root "$C" chmod 755 /usr/local/bin/claude
-RC=0
-extra "install the stand-in claude at /usr/local/bin/claude"
-runblk 1
-ck "with claude: rc 0" rc0
-ck "with claude: prints a version line" has "Claude Code"
-row 1 "bash -c (claude stand-in)" "$RC"
-
 # 2: missing check, before apt
-runblk 2
+runblk 1
 ck "rc 0" rc0
 for m in curl unzip openssl ss; do ck "missing: $m is reported" has "missing: $m"; done
 ck "tar is not reported missing" nothas "missing: tar"
 ck "sha256sum is not reported missing" nothas "missing: sha256sum"
 ck "prints checked" has checked
-row 2 "bash -c" "$RC"
+row 1 "bash -c" "$RC"
 
 # 3: apt (the block runs apt-get update itself)
-runblk 3
-ck "rc 0" rc0
-row 3 "bash -c" "$RC"
 runblk 2
+ck "rc 0" rc0
+row 2 "bash -c" "$RC"
+runblk 1
 save blk02-after-apt
 ck "rc 0" rc0
 ck "nothing missing after apt" nothas "missing:"
@@ -633,34 +609,34 @@ ck "prints checked" has checked
 extra "block 2 again, after apt: nothing missing"
 
 # 4: nothing exists
-runblk 4
+runblk 3
 ck "rc 0" rc0
 ck "no 'exists:' line" nothas "exists:"
 ck "no port line" nothas "LISTEN"
 ck "prints only checked" test "$OUT" = checked
-row 4 "bash -c" "$RC"
+row 3 "bash -c" "$RC"
 
 # 5: fetch the script (raw URL at the pinned commit, real network)
-runblk 5
+runblk 4
 ck "rc 0" rc0
 ck "sha256sum says OK" has "nats-local-setup.sh: OK"
-row 5 "bash -c" "$RC"
+row 4 "bash -c" "$RC"
 
 # 6: create --owner acme --start
-runblk 6
+runblk 5
 ck "rc 0" rc0
 ck "prints Done." has "Done."
 ck "owner acme printed" has "Owner              acme"
 for i in 1 2 3 4 5 6 7; do ck "step [$i] about to:" has "[$i] about to:"; done
-row 6 "bash -c" "$RC"
-awk '/^Done\./ { p = 1 } p' "$T/out/blk06.txt" >"$T/out/closing.txt"
+row 5 "bash -c" "$RC"
+awk '/^Done\./ { p = 1 } p' "$T/out/blk05.txt" >"$T/out/closing.txt"
 
 # 7: check
-runblk 7
+runblk 6
 ck "rc 0" rc0
 ck "no FAIL line" nothas "FAIL"
 ck "check passed" has "check passed"
-row 7 "bash -c" "$RC"
+row 6 "bash -c" "$RC"
 
 if [ "$PENDING" = 1 ]; then
 say "PENDING: running the parked parts"
@@ -873,26 +849,26 @@ BK=blk
 fi
 
 # ---- stop, stop again, start, check
-runblk 8
+runblk 7
 save blk08-first
 ck "rc 0" rc0
 ck "stop: about to: stop nats-server pid N" has "about to: stop nats-server pid"
 ck "stop: did: stopped pid N" has "did: stopped pid"
-row 8 "bash -c" "$RC"
+row 7 "bash -c" "$RC"
 cin 'ss -ltn | grep ":4222 "; true'
 ck "port 4222 no longer listening" test -z "$OUT"
 extra "after stop: nothing listens on 4222"
-runblk 8
+runblk 7
 save blk08-again
 ck "stop again: rc 0" rc0
 ck "stop again: says the pid file is stale" has "stale"
 extra "--stop again: stale pid file, exit 0"
-runblk 9
+runblk 8
 ck "rc 0" rc0
 ck "start: exactly one did: line" nlines "did:" 1
 ck "start: listens on 127.0.0.1:4222 and requires TLS" has "listens on 127.0.0.1:4222 and requires TLS"
-row 9 "bash -c" "$RC"
-runblk 7
+row 8 "bash -c" "$RC"
+runblk 6
 save blk07-after-start
 ck "rc 0" rc0
 ck "check passed after start" has "check passed"
@@ -915,7 +891,7 @@ runnotty() { # N: a person block with NO terminal (stdin /dev/null)
     cin "$(cat "$T/$BK/$nn.sh")"
     save "$BK$nn-notty"
 }
-runnotty 10
+runnotty 9
 ck "remove with no terminal: exit 4" test "$RC" -eq 4
 cin '[ -d "$HOME/mash-nats" ] && echo dir-kept; [ -e "$HOME/mash-nats/ca.key" ] && echo cakey-kept; ss -ltn | grep -c ":4222 "'
 save remove-notty-probe
@@ -923,12 +899,12 @@ ck "no terminal: server dir and ca.key still there, server still listens" bash -
     "printf '%s\n' \"$OUT\" | grep -qx dir-kept && printf '%s\n' \"$OUT\" | grep -qx cakey-kept && [ \"\$(printf '%s\n' \"$OUT\" | tail -n1)\" = 1 ]"
 RC=0
 extra "--remove with no terminal: refuses, deletes nothing (rc 4 asserted above)"
-runpty 10 "$D"
+runpty 9 "$D"
 ck "remove on a pty: rc 0" rc0
 ck "remove: about to: stop nats-server pid" has "about to: stop nats-server pid"
 ck "remove: did: stopped pid" has "did: stopped pid"
 ck "remove: did: removed" has "did: removed"
-row 10 "pty (script -qec), directory typed" "$RC"
+row 9 "pty (script -qec), directory typed" "$RC"
 cin '[ ! -e "$HOME/mash-nats" ] && echo gone; [ -f "$HOME/mash-setup/nats-local-setup.sh" ] && echo "script kept"'
 ck "server directory gone" has gone
 ck "mash-setup script kept (the guide says so)" has "script kept"
@@ -936,6 +912,27 @@ extra "after remove: server dir gone, mash-setup kept"
 cin 'ss -ltn | grep ":4222 "; true'
 ck "port 4222 free after remove" test -z "$OUT"
 extra "after remove: nothing listens on 4222"
+
+# ---- "Doing it again": the second --remove (same text as block 9), then rm -r
+runpty 10 "$D"
+save blk10-second-remove
+ck "second remove after a remove: refuses, rc 1" test "$RC" -eq 1
+ck "second remove: says the directory does not exist" has "does not exist or is not a directory"
+row 10 "pty (script -qec), directory typed (second remove)" "$RC"
+cin '[ -e "$HOME/mash-nats" ] && echo dir-back; [ -f "$HOME/mash-setup/nats-local-setup.sh" ] && echo "script kept"; true'
+ck "after the second remove: no server directory, script still kept" bash -c \
+    "! printf '%s\n' \"$OUT\" | grep -qx dir-back && printf '%s\n' \"$OUT\" | grep -qx 'script kept'"
+extra "after the second remove: still no server dir, mash-setup kept"
+runpty 11 ""
+ck "rm -r mash-setup on a pty: rc 0" rc0
+row 11 "pty (script -qec)" "$RC"
+cin '[ ! -e "$HOME/mash-setup" ] && echo setup-gone'
+ck "mash-setup is gone" has setup-gone
+extra "after rm -r: $HOME/mash-setup is gone"
+runblk 3
+ck "part 2 last check after doing it again: rc 0" rc0
+ck "part 2 last check prints only checked" test "$OUT" = checked
+extra "block 3 again after doing it again: prints only checked"
 
 if [ "$PENDING" = 1 ]; then
 BK=pblk
@@ -1167,7 +1164,7 @@ say "writing the report"
 
 ## What was not the real thing (SUBSTITUTIONS)
 
-(a) `claude`: the container has no Claude Code. Block 1 (`claude --version`)
+@@
     ran twice: first with NO claude on the PATH (it prints `command not
     found`, rc 127: the guide's stop case, asserted), then with a stand-in
     script at /usr/local/bin/claude that prints one version line
