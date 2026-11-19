@@ -78,9 +78,9 @@ root-owned keys). The server listens on 127.0.0.1 only.
   --operator NAME  operator name (default mash-operator)
   --js-disk SIZE   JetStream disk, like 500M or 2G (default 2G)
   --start          with create: start the server afterwards. Alone: start
-                   the server of an existing setup. Each start keeps the
-                   last two server.log files (server.log, server.log.1);
-                   the log is kept at most 7 days
+                   an existing server; it never creates one. Each start
+                   keeps the last two server.log files (server.log,
+                   server.log.1); the log is kept at most 7 days
   --stop           stop the server recorded in DIR/server.pid
   --check          verify files, modes, tools, config, TLS and what listens
   --remove         stops the server recorded in DIR/server.pid and removes
@@ -345,11 +345,16 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 
-# --start with create options, or with a DIR that does not exist yet, is
-# create-and-start; with an existing DIR (and --owner, if any, only checked)
-# it starts that setup.
+# --start with a create option (--owner, --port, --account, --operator,
+# --js-disk, --mash-config) is create-and-start; without one it starts the
+# setup in DIR, which must exist (--owner, if any, is only checked).
+NOCREATE=0
 if [ "$START" -eq 1 ]; then
-    if [ -z "$MODE" ] && [ "$CREATE_OPTS" -eq 0 ] && [ -e "$DIR" ]; then
+    if [ -z "$MODE" ] && [ "$CREATE_OPTS" -eq 0 ] &&
+        [ "$OWNER_GIVEN" -eq 0 ] && [ "$MASHCFG_GIVEN" -eq 0 ]; then
+        MODE=start
+        NOCREATE=1
+    elif [ -z "$MODE" ] && [ "$CREATE_OPTS" -eq 0 ] && [ -e "$DIR" ]; then
         MODE=start
     elif [ -z "$MODE" ]; then MODE=create
     elif [ "$MODE" != create ]; then
@@ -473,6 +478,10 @@ pathchars --dir "$DIR"
 ncomp=$(printf '%s' "$DIR" | tr -s '/' '\n' | grep -c .) || true
 [ "$ncomp" -ge 3 ] ||
     die "refusing --dir $DIR: needs at least 3 path components"
+if [ "$NOCREATE" -eq 1 ] && [ ! -e "$DIR" ] && [ ! -L "$DIR" ]; then
+    die "$DIR not found; --start never creates a server. Create it with:" \
+        "$0 --dir $DIR --owner NAME --start"
+fi
 if [ -z "$MASHCFG" ]; then
     [ -n "${HOME:-}" ] || die "HOME is not set: give --mash-config"
     MASHCFG=$HOME/.config/mash

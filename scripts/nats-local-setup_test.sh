@@ -376,6 +376,7 @@ t "help: rc 0, <= 80 columns, no emoji" '[ $RC -eq 0 ] && [ "$(wide)" = 0 ]'
 t "help: the modes, remove's terminal rule and exit 4, root refusal, residual" \
     'has "nats-local-setup.sh --dir DIR --start | --stop | --check |
         --remove" &&
+     has "Alone: start an existing server; it never creates one." &&
      has "--remove         stops the server recorded in DIR/server.pid and
         removes DIR; you type DIR at a terminal to confirm, and with no
         terminal it refuses and exits 4" &&
@@ -606,6 +607,21 @@ run "$HELPER" --dir "$D" --start
 t "--start refuses when this dir already has a server" \
     '[ $RC -ne 0 ] && has "already running"'
 run "$HELPER" --dir "$D" --stop
+note "--start never creates"
+run "$HELPER" --dir "$W/nocreate" --start
+t "bare --start on a missing dir: exit 1, refusal text, nothing created" \
+    '[ $RC -eq 1 ] && has "$W/nocreate not found; --start never creates a
+        server. Create it with:" && has "--dir $W/nocreate --owner NAME
+        --start" && [ ! -e $W/nocreate ] && [ "$(wide)" = 0 ]'
+run "$HELPER" --dir "$W/nocreate" --owner alice --port 4390 --start
+t "--owner (a create option) with --start on a missing dir still creates" \
+    '[ $RC -eq 0 ] && [ -f $W/nocreate/server.conf ] &&
+     [ -f $W/nocreate/.mash-nats-setup ]'
+run "$HELPER" --dir "$W/nocreate" --stop
+run "$HELPER" --dir "$W/nocreate" --start
+t "--start on the now existing dir starts it" \
+    '[ $RC -eq 0 ] && has "requires TLS"'
+run "$HELPER" --dir "$W/nocreate" --stop
 
 # ------------------------------------------------- create without --start
 note "create without --owner and without a terminal uses the login name"
