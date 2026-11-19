@@ -418,3 +418,199 @@ the remote flow only as a link.
 
 Counts: 21 rows (C1 to C18, E4.1 to E4.3); FIXED 18; CHANGED OTHERWISE 3 (C4,
 C17, E4.1); NOT TAKEN 0.
+
+
+## Critic round 3 (packet DRAFT4 and README DRAFT3)
+
+Source: the CLI-UX critic's cold read of packet DRAFT4 and the README quick
+start DRAFT3 (`review2c.md`, sections A to F). Rows D1 to D15 are the numbered
+defects of section E; P1 to P41 are its polish list, in the order the critic
+gave it; C1, C2 and E1 to E8 are findings of sections C and D that the lists
+do not carry; F1 and F2 are the verdicts. Section A found no line over 80 in
+a default screen and aligned tables; those passes need no change. Where DRAFT5
+means the targets file, the packet or the quick start, it says which. The
+lead's binding decisions of 2026-11-19 (D1, D2, D4, D7, the fingerprint, D9 to
+D11) shaped several dispositions (CHANGED OTHERWISE where the critic's own
+rewrite was not the one taken).
+
+| # | finding | disposition | where in DRAFT5, or why not |
+|---|---|---|---|
+| D1 | status: "last seen" contradicts "alive" (server row; README Step 5 shows `last seen 3h ago` minutes after Bob sent mail) | CHANGED OTHERWISE | The lead decided the server row, not the credentials row: `alive, encrypted (checked 09:42)` when reached, `NOT REACHABLE (last reached 3h ago)` when not, `not checked` otherwise; never `alive` with a past time (targets R11, every `status-*` block, `status --detail`; MCP `server.state` alive/not_reachable/not_checked, `server.checked_at`, `server.last_reached`; decision S8). `LAST SEEN` means an endpoint's last mail activity, in `mash who` only. The quick start's Step 5 proof uses `status-deleted` and no longer shows the contradiction |
+| D2 | status, certificate not trusted: `credentials not checked (the server refused the connection)` has the refusal backwards | FIXED | `trust` blocks: verdict "mash does not trust the server", credentials `not checked (mash did not trust the server)`, and the send error `mash does not trust the server at myserver:4222: its certificate is not from your CA` (S9) |
+| D3 | storage name contradicts itself: `send --detail` says the recipient's, `read --detail` the sender's | FIXED | `read --detail` now reads `storage name  acme_demo_alice (yours)`; `send --detail` keeps `(the recipient's)` |
+| D4 | a JSON line `"endpoint": ...` printed at command position (second endpoint NEXT, status, send and serve none-chosen) | FIXED | R10 amended (CLI rule 30): `add this line to <path>:` then the line indented four spaces, never in command position; the shell form is a separate item labelled `for this shell only:`. `status-choose`, `send-refuse`, `serve` and the plain-text screens; the second-endpoint NEXT (`install-second`, `install-make-second`) now ends in two real commands (`export`, `mash status`). The lint (rule 9) fails a two-space JSON line after `fix:` or `NEXT:` |
+| D5 | a fix uses `credential install --creds ... --ca ... --replace`, a form `mash help credential install` does not allow | FIXED | `help` for `credential install` lists `--key FILE --token FILE [--server URL] [--ca FILE] [--replace]` and the same with `--creds FILE`; the `trust` fixes print `--creds <file> --ca <ca file> --replace` |
+| D6 | `--creds-out` appears from nowhere (status deleted fix; `mashctl endpoint delete` NEXT) | CHANGED OTHERWISE | `status-deleted` fix is `mash key create --out <new-name>.key` (a command the page has met); `ctl-delete` has no NEXT at all (D7). `--creds-out` is named only in the mashctl note, never in a `mash` screen (section 8) |
+| D7 | `mashctl endpoint delete` hint names the wrong next step (create an endpoint) | FIXED | R19 (new, explicit rule: removing access prints no NEXT, at most the proving command as its own item, never a suggestion to create). `ctl-delete` loses its NEXT and now shows what will be lost, the typed address and the result; quick start Step 5 gives the proof as its own command |
+| D8 | pasted-token fix uses the leaked token, then says it is burned | FIXED | `install-refuse` (first block): the fix says the token is in the shell history, ask for a new one, save it to a file, then the command |
+| D9 | README prerequisite 4 cannot be done in the order written (run the command or the guide? adopt and init not shown; nothing installs nats-server) | FIXED | Quick start prerequisite 4: one sentence, the helper's own "What you hold" lines, then `mashctl adopt` (the command the helper prints), `mashctl init` and one ready check (`mashctl status`) with their outputs, and the full link to the guide. The helper downloads and checks `nats-server` itself (said in the sentence); prerequisite 1 states its platform (Debian or Ubuntu x86-64) and tools |
+| D10 | README `--host myserver` is not pasteable | CHANGED OTHERWISE | No `--host` at all: the helper's default is this machine only, address `tls://localhost:4222` (the helper's own output). The page says where outputs show `myserver`, yours shows `localhost`. `--host $(hostname)` was not used because the helper listens on 127.0.0.1 by default and a host name may resolve elsewhere (Debian maps it to 127.0.1.1); not verified, so not offered |
+| D11 | README Step 3: a new terminal without mash on the PATH | FIXED | Prerequisite 3 command 5 (mandatory) writes the PATH line to `~/.zshrc` or `~/.bashrc`, and says what is true: the exported plugin carries no copy and no full path, it runs the first `mash` on the PATH (or `MASH_BIN`) (docs/install.md section 1, `plugin/scripts/mash`); step 3 command 3 checks `command -v mash` in the new terminal and says what to do if empty |
+| D12 | README prerequisite 1: wrong cross-reference ("step 3 says how to skip it") | FIXED | "prerequisite 3, command 3, says how to skip it" |
+| D13 | README Step 1 command 2: output unspecified and its hint would be wrong | FIXED | New target `install-make-second` (mashctl second `--make-key`: `kept` config and CA, NEXT is the two-command choice); quoted in Step 1 command 3 |
+| D14 | README Step 4: "It prints what step 1 printed for Bob" is false | FIXED | "It prints what it printed for Alice, with `you` for `alice`" (Step 4 command 1); the NEXT sentence has no count, so it is true for the third endpoint |
+| D15 | README: "endpoints in a group can see each other" contradicted by `mash who` | FIXED | The word list says what a group does: sorts endpoints (`mash who --by-group`) and lets a mail table show a sender in your own group by name alone; nothing is claimed about limiting mail |
+| P1 | `colour` in `mash help --detail` (rest is US English) | FIXED | `help-settings`: `NO_COLOR ... set to switch color off` |
+| P2 | drop the `NATS word  seed` row of `key create --detail` (a glossary entry, rules 24 and 29) | NOT TAKEN | Contract rev 5 REQ-001 and REQ-003 say `mash key create` explains "NATS calls it a seed" once and `--detail` is where it lives; kept |
+| P3 | "CA" and "TLS" first shown without plain words | FIXED | `server` block explains the CA in its own words; the plain-address error says "an encrypted tls:// connection" |
+| P4 | `sha256 of ca.pem` is jargon: "a checksum of ca.pem" | FIXED | `server` block: `a checksum of ca.pem; the person types it when installing` |
+| P5 | mashctl create's `<fingerprint>` placeholder breaks rule 30 on purpose; say why | FIXED | Gone: there is no fingerprint flag, the hint is a plain command and says mash asks for the fingerprint |
+| P6 | help example `--token bob.token`; every other place uses `acme.demo.bob.token` | FIXED | `help credential install` example uses `acme.demo.bob.token` |
+| P7 | the newhost CA has the same fingerprint as myserver's; the conflict example replaces oldhost with myserver while the `--replace` example uses newhost | FIXED | Three distinct fingerprints (18b3f713..., 92d4e0a7..., the wrong one 4f6a2459...); both examples use `newhost` |
+| P8 | timeouts differ unexplained (status 2s, send 20s, prompt 15m) | FIXED | Section 2, "Timeouts" says why each is what it is; the `send` refusal points to it |
+| P9 | status "none installed" and "readable by others" skip a server check the other states make | FIXED | R11: the server is checked in every state with an address and a tls scheme, credentials or not; `status-none` and `status-unsafe` show `alive, encrypted (checked 09:42)` |
+| P10 | "deleted or reissued" vs DELETED stated outright elsewhere | FIXED | `status-refused` says `REFUSED (deleted, or its key was reissued)` and is shown only for a server that cannot say which; `status-deleted` is the one that can |
+| P11 | `mashctl endpoint show` appears nowhere else | FIXED | `status-refused` fix asks whoever runs the server which of the two it was, and names no command that is not in this document |
+| P12 | plaintext-allowed fix should also unset MASH_INSECURE_PLAINTEXT | FIXED | `status-plain-warning` fix: `unset MASH_SERVER MASH_INSECURE_PLAINTEXT` |
+| P13 | show MASH_SERVER exported, not inline, where the fix is `unset` | FIXED | `status-plain-warning`, `status-plain-refused`, `send-refuse` (plain URL) set it with `export` |
+| P14 | one override warning sentence for status and send | FIXED | `status-plain-inherited` uses `warning: MASH_INSECURE_PLAINTEXT is set; mail may not be encrypted.`, the sentence `send` and `serve` print |
+| P15 | status plaintext row repeats the warning (rule 25) | FIXED | `status-plain-warning`: the row says why it is allowed, the warning says what is at stake (`anyone on the network can read your credentials and your mail`) |
+| P16 | "already trusts a different server" names `--replace` but prints no command | FIXED | `install-refuse`: the fix is the whole command with `--replace` added, built from what the person typed |
+| P17 | "no server known" fix omits `--ca` | FIXED | `install-refuse` (no server known) fix shows `--server tls://<host>:4222 --ca <ca file>`; `status-noconfig` says to add `--ca <ca file>` for a server with its own CA |
+| P18 | typing a 71-character fingerprint to confirm `--replace` is hostile | NOT TAKEN | The lead's ruling (b) and contract INV-004 and REQ-003 require the person to type it; pasting what the operator gave is the expected way (R15 says so) |
+| P19 | prose interleaved between fix commands | FIXED | `install-refuse` (pasted token), `status-none`, `status-refused`, `status-plain-refused`: the prose comes first, the commands last |
+| P20 | `Older messages: add --before 56.` should be a whole command on its own line | FIXED | `inbox` (`--limit 2`): `Older messages are before #56. To see them:` and `mash inbox --limit 2 --before 56`; decision S7 |
+| P21 | full five-term trust legend under inbox `--detail` when all are verified | FIXED | The legend appears only when a row is not verified, in the default view and under `--detail` |
+| P22 | trailing blank line after the default inbox table | FIXED | Removed from the `inbox` block |
+| P23 | `mash send bob "hi"` example suggests mailing bob from an example where you are Bob | FIXED | `send-refuse`: the sender is bob, the bare name is `alice`, the fix is `mash send acme.demo.alice "hi"` |
+| P24 | `No endpoints are registered.` cannot happen for a registered caller | FIXED | Block removed; the `who` text says why there is no empty screen |
+| P25 | define online and offline in `who` (offline 3h ago on the `*` row) | FIXED | Every `who` block ends with `online: a Claude Code session is serving that endpoint now`; the text says the caller at a shell is offline unless a session also runs as it |
+| P26 | `who --by-group` could use short names under the group heading (rule 25) | NOT TAKEN | R14: a person pastes the address into `send`, so every row keeps the full address; said in the text |
+| P27 | `init --local` fix prints two file paths at command position, and `scripts/...` assumes a clone | FIXED | `ctl-init-local`: the fix prints the guide's URL, indented under `fix:` text, not a command; the text notes the release ships the script as `nats-local-setup.sh` |
+| P28 | MCP `who` example omits listed fields (role, description, labels, caps) | FIXED | The `who` example carries all four on every endpoint (null, `{}`, `[]` when none are recorded) and the field table gives their types |
+| P29 | MCP `status` fix for credentials_refused differs from the CLI | FIXED | The failure example's message and fix say the same as `status-refused` (deleted, or reissued; ask whoever runs the server) |
+| P30 | `help send` options omit `--file` | FIXED | `help send` lists `--file FILE` |
+| P31 | README: "the only place this page names it" (the server address) is not so | FIXED | Sentence rewritten: after the adopt command the address is never typed again |
+| P32 | README: "every file goes in ~/mash-demo" vs `~/.local/bin` | FIXED | Prerequisite 2 says apart from `~/.config/mash` and `~/.local/bin` |
+| P33 | README: "a `fix:` you can run" vs the unreachable fix, which is prose | FIXED | "a `fix:`"; and the page gives the `--check` and `--start` commands as blocks under the unreachable screen |
+| P34 | give `--stop` and `--check` as blocks | FIXED | Quick start: `--stop` in the clean-up, `--check` and `--start` under "If `mash status` says something else" |
+| P35 | uninstall the plugin before removing its folder | FIXED | Clean-up block order: `claude plugin uninstall`, `marketplace remove`, then `rm -r` |
+| P36 | `mash version` and `mashctl version` in one paste | FIXED | Prerequisite 3 command 6 is one paste with both |
+| P37 | avoid the deliberate refusal in Step 1 | CHANGED OTHERWISE | Step 1 now shows the healthy `mash status` first (command 2, one endpoint installed) and the choose-refusal once, after Alice exists (command 4); it is not avoidable once two endpoints exist, and it teaches the fix |
+| P38 | README: "because every message is signed" does not follow | FIXED | "mash tells the two apart by the key each one signs with" |
+| P39 | README Step 3 tool list omits reply and version | FIXED | "send, inbox, read, who, reply, version and status" |
+| P40 | README repeats the "guard that file" line the output already says | FIXED | The repeated sentence is removed from Step 1 |
+| P41 | say on the page that the NATS helper is a separate tool of another lane (rule 32) | FIXED | Prerequisite 4 says the helper is a separate tool, not part of mash; `ctl-init-local` note says mash starts and configures nothing |
+| C1 | status table: idle-session warning, how a shell knows about a Claude Code session is unexplained | CHANGED OTHERWISE | `status-claude` fix says to start Claude Code with the flag from the terminal you want it in; the quick start's step 3 and prerequisite 3 say how a session finds mash |
+| C2 | status table: no configuration, `--server <url>` without `--ca` fails on an own-CA server | FIXED | `status-noconfig` fix adds a sentence naming `--ca <ca file>` for a server with its own CA |
+| E1 | D, count: export `MASH_ENDPOINT` before the first status so Step 1 has no refusal (-1) | CHANGED OTHERWISE | Healthy status first with one endpoint (no export needed), refusal once later (item 37); no paste saved, one screen gained |
+| E2 | D, count: merge `mash version` and `mashctl version` (-1) | FIXED | See polish 36 |
+| E3 | D, count: fold the env check into command 1 of prerequisite 2 (-1) | FIXED | Prerequisite 2 is one command with both lines |
+| E4 | D, count: make the PATH line part of command 4 (appended to the shell rc) | CHANGED OTHERWISE | Kept as its own command (prerequisite 3, command 5): it is mandatory now (D11) and a long chain is harder to read; net count unchanged |
+| E5 | D, prerequisite 4's "you now hold" list is more than a newcomer needs (address, CA file, owner, fingerprint you will not use) | FIXED | The list is the helper's own three lines (server address, CA file, server directory) with the owner named; no fingerprint |
+| E6 | D, the NATS bullet says what mash rides on, not what NATS is | FIXED | "a message server program that stores and delivers mail" |
+| E7 | D, the two-machine flow stays four artifacts and two hand-offs | NOT TAKEN | The quick start keeps it off the page by design; one link to docs/operations.md. `server` block now says mash asks for the fingerprint, which removes the 139-column command |
+| E8 | D, whole page: 9 prerequisite pastes plus uncounted guide, 14, cleanup: at least 26 actions and the guide; not minimal | CHANGED OTHERWISE | Counted honestly in the opening paragraph (item 1052-6): 32 pastes and 11 other actions, 43 in all, with the guide's steps now on the page |
+| F1 | Verdict: command output ready to show the owner NO; fix D1, D2, D4, D5, D3, then D6 to D8 | FIXED | All of D1 to D8 and the polish list are applied in the targets (DRAFT5), in the lead's order |
+| F2 | Verdict: README quick start ready NO; fix D9, D10, D11, D13, D7, then D12, D14, D15 | FIXED | All applied in the quick start (DRAFT5), in the lead's order |
+
+Counts: 68 rows (D1 to D15, P1 to P41, C1, C2, E1 to E8, F1, F2); FIXED 56; CHANGED OTHERWISE 8; NOT TAKEN 4.
+
+
+## Junior read of README DRAFT3
+
+Source: the junior developer's read of the quick start DRAFT3 (`review1-d3.md`).
+One row per remark of the walk-through (J1 to J51, in the order of the page),
+per hindrance of section (2) (H1 to H5), per task of section (3) (T1 to T3),
+the verdict of section (4) (T4) and the counts of section (5) (N1 to N3).
+
+| # | finding | disposition | where in DRAFT5, or why not |
+|---|---|---|---|
+| J1 | Intro: "5 steps and 14 pastes, after the prerequisites" undersells; the junior counted about 23 pastes and a guide | FIXED | Opening paragraph states the honest total, computed from the page (32 pastes, 11 other actions); more than the junior's 23 because the guide's commands are now on the page |
+| J2 | Words: "endpoints in a group can see each other" unclear | FIXED | See critic D15 |
+| J3 | Words: "copied from the project's target outputs" unclear | FIXED | "These are the outputs mash is built to print, and a script checks every one" |
+| J4 | Words: "what you see should match" is not literal (times, host names, darwin file names) | FIXED | "Times, host names and file names will differ on your machine; where an output says myserver, yours says localhost" |
+| J5 | Words: "session" only means a Claude Code window | NOT TAKEN | The reader found it clear enough |
+| J6 | Prerequisite 1: the skip of the attestation is in prerequisite 3 command 3, not step 3 | FIXED | See critic D12 |
+| J7 | Prerequisite 1: "Claude Code with channels", "Console sign-in", "Bedrock, Agent Platform or Foundry" unexplained; no check or minimum version | FIXED | Prerequisite 1 says what a channel is, the requirements (2.1.312 or newer; claude.ai or Console; owner switches Channels on where managed; Bedrock, Agent Platform and Foundry have none; from docs/install.md section 3) and gives `claude --version` as the check |
+| J8 | Prerequisite 1: "You now hold: nothing yet" is slightly odd | CHANGED OTHERWISE | "(1) a checked Claude Code" |
+| J9 | Prerequisite 2: `mkdir` fails if the directory exists | FIXED | `mkdir -p` |
+| J10 | Prerequisite 3: the sentence "Install first, then the server..." is confusing | FIXED | Replaced: the helper "starts the NATS server in prerequisite 4" |
+| J11 | Prerequisite 3: command 1, which of linux/darwin and amd64/arm64 (`uname -m`) | FIXED | Command 1 says what `uname -m` prints for each |
+| J12 | Prerequisite 3: variables live only in this shell; a new terminal half way breaks commands 2 to 4 silently | FIXED | The opening paragraph lists the variables and says to start again at command 1 in a new terminal |
+| J13 | Prerequisite 3: command 2 prints nothing; a private repository fails; no check | FIXED | "It prints nothing; `ls` shows four new files"; a failure means the release is not reachable |
+| J14 | Prerequisite 3: command 3, `attested: no` is not explained and gh's messages are thrown away | FIXED | The usual causes (not signed in, `gh` too old) and the command to read gh's message are given under the block |
+| J15 | Prerequisite 3: command 4, `STOP:` gives no next move | FIXED | "paste command 2 again, and if it stops again do not use these files" |
+| J16 | Prerequisite 3: the new-terminal PATH note matters most in step 3 and is not repeated there | FIXED | See critic D11 |
+| J17 | Prerequisite 4: the link is a relative path to a file the reader does not have | FIXED | The full URL https://github.com/bogworks/mash/blob/main/docs/skills/mash-nats-local/SKILL.md |
+| J18 | Prerequisite 4: "SKILL.md" and how a document asks questions are unclear | FIXED | The page calls it "the guide for other setups" and gives the answers inline; the helper command no longer depends on the guide |
+| J19 | Prerequisite 4: which name does `myserver` stand for; the next command hard-codes it | CHANGED OTHERWISE | See critic D10 |
+| J20 | Prerequisite 4: run the command before, during or instead of the guide's helper step; does the helper download the server program | FIXED | See critic D9: the page runs the helper itself; the sentence says it downloads and checks nats-server |
+| J21 | Prerequisite 4: no expected output for the helper | FIXED | The helper's "What you hold" lines follow command 1 |
+| J22 | Prerequisite 4: `mashctl adopt` and `mashctl init` named but not shown | FIXED | Commands 2 and 3, with outputs; each says what it does |
+| J23 | Prerequisite 4: the "apart from the token" sentence about another machine is unclear | FIXED | Removed |
+| J24 | Prerequisite 4: no way to prove the server is ready before step 1 | FIXED | Command 4, `mashctl status`, with its output |
+| J25 | Step 1: credentials = key plus token is never said in one sentence | FIXED | "(the credentials are the key and the token in one file)" |
+| J26 | Step 1: the private key sentence appears in the output and under it | FIXED | The repeated sentence is removed (critic polish 40) |
+| J27 | Step 1: command 2 has no output shown | FIXED | `install-make-second` is shown |
+| J28 | Step 1: `mash status` prints "mail does NOT work" and "last seen not checked" is not understood | FIXED | The healthy screen comes first, the refusal once and explained; "last seen" is gone from the server row (D1) |
+| J29 | Step 2: `--kind` is not explained | FIXED | Command 2 says what a kind is for and which kinds wake an idle session (docs/install.md, spool_from_start) |
+| J30 | Step 2: the page says mail waits until read, yet listing is not reading; what makes a message stop being new; no `mash read` for a person | FIXED | Word list defines new and read; Step 2 command 4 is `mash read 1` and `mash read 2` with the output; "Both are `new`: listing marked nothing" |
+| J31 | Step 3: command 2 has no expected output | CHANGED OTHERWISE | The paste adds `claude plugin list`, whose last line lists `mash@mash`; Claude Code's own lines are not reproduced |
+| J32 | Step 3: a new terminal may lack `mash` on the PATH; say it here | FIXED | See critic D11 |
+| J33 | Step 3: "confirm the flag when Claude Code asks": what does the question look like | CHANGED OTHERWISE | "Claude Code shows a warning about loading a development channel and asks you to confirm it" (docs/install.md says it asks at each launch); the exact wording is not reproduced |
+| J34 | Step 3: unclear whether the hook text appears on the reader's screen or only the agent sees it; no example answer | FIXED | "you do not see the text itself, only what the agent does with it"; the tool results are given in words and the agent's answer is described |
+| J35 | Step 3: only one agent session is ever started; no agent sends and nobody replies | FIXED | Terminals 2 and 3 run Alice's and Bob's sessions; Bob's agent sends, Alice's is woken and answers, Bob's is woken (new second `hook` block) |
+| J36 | Step 4: which terminal for command 1 | FIXED | "Back in terminal 1" |
+| J37 | Step 4: "the same reply" suggests Alice replied | FIXED | "mash prints the same result for the same command" |
+| J38 | Step 4: the live wake-up is a sentence, not an output | CHANGED OTHERWISE | Described in words with the same shape as step 3; no new target block (the only new hook block is step 3's) |
+| J39 | Step 5: the permanent consequence comes after the paste | FIXED | A bold warning precedes command 1: cannot be undone, address never reusable, mail deleted, use only on these three endpoints |
+| J40 | Step 5: does the tool ask for confirmation | FIXED | The `ctl-delete` block shows the prompt; the page says typing the address is the confirmation |
+| J41 | Step 5: the hint contains `--creds-out`, unexplained | FIXED | See critic D6, D7 |
+| J42 | Step 5: only deleting everyone is shown, not deleting one and seeing the others work | CHANGED OTHERWISE | Bob is deleted and proven first (command 2), then Alice and you; Alice's session works until deleted |
+| J43 | Step 5: "Alice's open session is refused the same way; close it" is told, not shown | NOT TAKEN | Accepted by the reader as believable; the page asks to close it |
+| J44 | What stays on disk: the table is the clearest part | NOT TAKEN | No change; one row added for mashctl's key folders and one for the PATH line |
+| J45 | What stays on disk: the server is left running; the exact stop line is a guess | FIXED | `./nats-local-setup.sh --dir ~/mash-demo/nats --stop` is a block |
+| J46 | What stays on disk: the clean-up removes the plugin folder before uninstalling | FIXED | See polish 35 |
+| J47 | What stays on disk: the clean-up block is a fifteenth uncounted paste | FIXED | Counted: 2 pastes in the honest total |
+| J48 | If status says something else: the unreachable fix is not runnable; the start command is left to the guide | FIXED | `--check` and `--start` blocks under the unreachable screen |
+| J49 | If status says something else: the healthy screen was never seen | FIXED | Step 1 command 2 shows it |
+| J50 | Notes for reviewers: the guide's closing lines are assumed | CHANGED OTHERWISE | Quoted from the helper's DRAFT4 hand-over; the one remaining divergence (MASH_TLS_CA vs MASH_CA, and the mashctl lane's `--ca` adopt) is listed in the notes |
+| J51 | (1) Explaining it back in five sentences: understood | NOT TAKEN | No finding; the reader's summary matches the page's intent |
+| H1 | (2) Hindrance 1: prerequisite 4, the whole hand-over to the guide (relative link, before/during/instead, adopt and init not shown, no output, `--host myserver`, no ready check) | FIXED | See D9, D10, J17 to J24 |
+| H2 | (2) Hindrance 2: Step 3 and 4 thinner for the agent than the shell (one session, no sending, no reply, no picture of the wake, no check, PATH) | FIXED | See D11, J31 to J38; items 1052-3 |
+| H3 | (2) Hindrance 3: no healthy `mash status` anywhere; server restart and stop left to the guide | FIXED | See J45, J48, J49; item 1052-1 |
+| H4 | (2) Hindrance 4: what "read" means | FIXED | See J30; item 1052-4 |
+| H5 | (2) Hindrance 5: the permanent consequence after the paste; wrong cross-reference; channels unexplained | FIXED | See J39, D12, J7; item 1052-5 |
+| T1 | (3a) Two agents mailing each other with proof, using only the page: YES but with guessing | FIXED | Step 3 shows both sessions |
+| T2 | (3b) If mail stopped, would status tell what to do: YES for the cases shown; no start command; never saw the healthy screen | FIXED | See J48, J49 |
+| T3 | (3c) Remove one agent's access and be sure: YES; wants the warning before | FIXED | See J39, J42 |
+| T4 | (4) Short and clear enough: the place to stall is prerequisite 4 | FIXED | See H1 |
+| N1 | (5) Counts: 9 prerequisite pastes, 14 steps, uncounted others; 23 pastes, about 29 actions plus the guide | FIXED | Recounted from the page by script: 32 pastes (12 prerequisites, 18 steps, 2 clean-up) and 11 other actions; stated in the opening paragraph |
+| N2 | (5) Counts: the 14 for the steps is reasonable and feels light; the 6 for the download is heavy but accepted | CHANGED OTHERWISE | Steps are now 18 pastes because step 3 starts two sessions and step 1 shows the healthy status; the download stays 6 |
+| N3 | (5) Counts: the intro is honest only with its "after the prerequisites" tail; the guide's size is not stated | FIXED | The tail is gone; the guide's commands are in prerequisite 4 and the total includes them |
+
+Counts: 63 rows; FIXED 51; CHANGED OTHERWISE 8; NOT TAKEN 4.
+
+
+## Rulings and the lead's items of this round (contract rev 5, #1052, #1053)
+
+Rows B1 to B6: ruling (b) and contract revision 5 (the fingerprint). Rows P1
+to P6: the lead's six README items of #1052. Rows L1 to L7: the lead's binding
+decisions of #1053. Earlier rows of this file that mention `--ca-fingerprint`
+(sections "Security read of the contract" and the DRAFT3 rows) are history and
+stand unedited: B1 supersedes them.
+
+| # | finding | disposition | where in DRAFT5, or why not |
+|---|---|---|---|
+| B1 | Ruling (b): the fingerprint is typed by the person whenever a CA is written or changed, never a flag; remove `--ca-fingerprint` everywhere | FIXED | R15 (revised), R17, section 4 step B and step C, `help credential install`, JSON `ca_checked`, MCP status detail, sections 7 and 8; the lint (rule 9) fails any `--ca-fingerprint`. Rows S2, S3 and S6 of section 7 are marked SUPERSEDED or REVISED; earlier rows of this file stay as history |
+| B2 | Contract rev 5: mash never prints the fingerprint it asks the person to type; it says only `fingerprint matches` or `error: the fingerprint does not match the CA in <file>` | FIXED | `install-main`, `install-refuse`, `install-trust`, `install-detail`; `status --detail` and `--json` print the CA path, not a fingerprint (R15); mashctl still prints it for the operator (`server`) |
+| B3 | Rev 5: the typed prompt shows the server address, then `Type the CA fingerprint the operator gave you:` | FIXED | First lines of `install-main`, `install-detail`, the refusal and the trust blocks |
+| B4 | Rev 5: a trust change shows old and new SERVER ADDRESS (not fingerprints), needs `--replace` and the typed fingerprint of the new CA; no terminal exits 4; no `--yes`, no environment variable | FIXED | `install-trust` (three blocks), `install-refuse` (no terminal), R17 |
+| B5 | Rev 5: `credential install` checks that the server at the address presents a certificate from that CA with the matching host name before writing (refusal block) | FIXED | `install-refuse` (otherhost block); `install-main` shows the check line; order of checks in section 4 |
+| B6 | Update the exit table (4 = not authorized) | FIXED | Section 2 table row 4; section 8 list |
+| P1 | #1052 item 1: healthy `mash status` first, the choose-refusal later, once | FIXED | Step 1 commands 2 and 4 |
+| P2 | #1052 item 2: prerequisite 4 (one sentence, the helper's lines, adopt, init, one ready check, full link) | FIXED | See D9 |
+| P3 | #1052 item 3: start both sessions; Bob's agent sends, Alice's receives and replies; show the wake-up; PATH in the new terminal; two terminals each with `export MASH_ENDPOINT=...` | FIXED | Step 3 commands 3 to 5 and the text after them |
+| P4 | #1052 item 4: say what "read" means; show `mash read` for a person | FIXED | Word list; Step 2 command 4 |
+| P5 | #1052 item 5: the irreversible warning before the delete paste; number the "you now hold" items and cross-reference by number; explain channels where first needed with a check from docs/install.md | FIXED | Step 5 warning; every prerequisite ends in a numbered list and the page refers to "prerequisite 3, command 5" and "prerequisite 4" by number; prerequisite 1 |
+| P6 | #1052 item 6: the honest total near the top, recounted | FIXED | Opening paragraph, computed by the generator from the page's own typed blocks |
+| L1 | #1053 D1: the server row says `alive, encrypted (checked 09:42)` or `NOT REACHABLE (last reached 3h ago)`; never alive with last seen; same shape in every state; MCP fields; `LAST SEEN` only in who | FIXED | See D1 |
+| L2 | #1053 D2: an untrusted certificate is mash refusing the server, said in the error and fix | FIXED | See D2 |
+| L3 | #1053 D4: configuration fix prints the file path and the line, labelled, never at command position; env test labelled `for this shell only:` | FIXED | See D4; R10 |
+| L4 | #1053 D7: no NEXT after delete, or only the proof command; stated as a rule | FIXED | R19; `ctl-delete`; Step 5 |
+| L5 | #1053 D11: say how a Claude Code session finds mash, from docs/install.md and the launcher, and show it | FIXED | See D11 |
+| L6 | #1053 D10: no hard-coded `--host myserver` | CHANGED OTHERWISE | See D10 |
+| L7 | #1053 keep all earlier decisions (MASH_ENDPOINT only, one dotted address, NEXT in capitals after a blank line, errors start `error:`, tool-printed lines at most 80, mkpacket markers and keys, the quick start generated from the targets and linted, notes for reviewers last, install from release downloads) | FIXED | Kept; the only new packet key is `install-make-second`, plus a second block of the existing key `hook`; the URL line of `ctl-init-local` (84 columns) and the typed fingerprint answers (118) are added to the exemptions of R1 |
+
+Counts: 19 rows; FIXED 18; CHANGED OTHERWISE 1; NOT TAKEN 0.
