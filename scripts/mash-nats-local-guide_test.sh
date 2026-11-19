@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Test for docs/skills/mash-nats-local/SKILL.md (the guide, DRAFT 6).  Run with:
+# Test for docs/skills/mash-nats-local/SKILL.md (the guide, DRAFT 8 shape: six part-4 blocks) and WHAT-MASH-NEEDS.md.  Run with:
 #
 #     bash scripts/mash-nats-local-guide_test.sh [--update-closing]
 #
@@ -7,9 +7,9 @@
 # in order, and runs each one in ONE fresh rootless podman container (debian
 # bookworm-slim) as user alice: each block as its own `bash -c`, with
 # HOME=/home/alice and PATH=/usr/local/bin:/usr/bin:/bin only; the `sh
-# person` blocks that need a typed confirmation (retire-keys, remove) on a
-# pseudo-terminal with it fed in.  Then four tamper tests of the part-4
-# block, each in its own fresh container.  Nothing runs on the host except
+# person` blocks (remove, rm -r, rm) on a pseudo-terminal with the typed path
+# fed in (--remove also once with no terminal: exit 4).  Then tamper tests of
+# the part-4 blocks, each in its own fresh container.  Nothing runs on the host except
 # the Go build (in a scratch copy of the repo), git (read-only) and podman.
 # The SUBSTITUTIONS section of the report says what differs from the guide.
 # Containers and images are removed by exact (suffixed) name.
@@ -218,10 +218,12 @@ for a in "$@"; do
     https://github.com/bogworks/mash/releases/download/v0.5.6/*)
         f=${a##*/}
         case $f in
-        mash-linux-amd64 | mashctl-linux-amd64 | mash.intoto.jsonl)
-            a=file:///opt/guide-assets/$f
+        mash-linux-amd64 | mashctl-linux-amd64 | mash.intoto.jsonl | SHA256SUMS)
+            # the guide's curl -O names the file after the URL
+            src=/opt/guide-assets/$f
             [ "$mode" = badmash ] && [ "$f" = mash-linux-amd64 ] &&
-                a=file:///opt/guide-assets/mash-evil ;;
+                src=/opt/guide-assets/mash-evil
+            exec cp "$src" "./$f" ;;
         esac ;;
     https://github.com/cli/cli/releases/download/v2.105.0/gh_2.105.0_linux_amd64.tar.gz)
         # the guide's curl -O names the file after the URL
@@ -277,6 +279,14 @@ chmod 755 "$T/assets/gh-wrapper" "$T/assets/curl" "$T/assets/mashctl-linux-amd64
     printf '%s  mash\n' "$(sha256sum "$T/assets/mash-linux-amd64" | cut -d' ' -f1)"
     printf '%s  mashctl\n' "$(sha256sum "$T/assets/mashctl-linux-amd64" | cut -d' ' -f1)"
 } >"$T/assets/expected.sha256"
+# the release's SHA256SUMS (the real one lists every asset; two extra lines
+# here so the guide's grep has something to skip)
+{
+    printf '%s  mash-linux-amd64\n' "$(sha256sum "$T/assets/mash-linux-amd64" | cut -d' ' -f1)"
+    printf '%s  mash-linux-arm64\n' "$(printf 'arm64' | sha256sum | cut -d' ' -f1)"
+    printf '%s  mashctl-linux-amd64\n' "$(sha256sum "$T/assets/mashctl-linux-amd64" | cut -d' ' -f1)"
+    printf '%s  mashctl-linux-arm64\n' "$(printf 'ctlarm64' | sha256sum | cut -d' ' -f1)"
+} >"$T/assets/SHA256SUMS"
 
 cat >"$T/ctx/Containerfile" <<'__CF__'
 FROM docker.io/library/debian:bookworm-slim
@@ -300,7 +310,7 @@ putassets() { # CONTAINER MODE: the shared asset directory
     local c=$1 f
     podman exec --user root "$c" mkdir -p /opt/guide-assets
     for f in mash-linux-amd64 mashctl-linux-amd64 mashctl-real \
-        mash.intoto.jsonl mash-evil expected.sha256 gh-wrapper; do
+        mash.intoto.jsonl mash-evil expected.sha256 gh-wrapper SHA256SUMS; do
         podman cp "$T/assets/$f" "$c:/opt/guide-assets/$f"
     done
     printf '%s\n' "$2" >"$T/mode"
@@ -317,6 +327,8 @@ BFAIL=0
 BWHY=""
 OUT=""
 RC=0
+BK=blk
+PF=
 cexec() {
     podman exec --user alice -w "$CIP" "$C" env -i HOME="$CIP" \
         PATH=/usr/local/bin:/usr/bin:/bin "$@"
@@ -343,11 +355,11 @@ row() { # N METHOD RC
     [ -z "$BWHY" ] || st="FAIL$BWHY"
     case $st in PASS) BPASS=$((BPASS + 1)) ;; *) BFAIL=$((BFAIL + 1)) ;; esac
     local first
-    first=$(head -c 60 "$T/blk/$(printf %02d "$1").sh" | tr '\n' ' ')
-    printf '| %s | `%s` | %s | %s | %s |\n' "$1" \
+    first=$(head -c 60 "$T/$BK/$(printf %02d "$1").sh" | tr '\n' ' ')
+    printf '| %s | `%s` | %s | %s | %s |\n' "$PF$1" \
         "$(printf '%s' "$first" | sed 's/|/\\|/g')" "$2" "$3" "$st" \
         >>"$T/rows.md"
-    printf '%s  block %s (%s rc=%s)%s\n' "${st%%;*}" "$1" "$2" "$3" \
+    printf '%s  block %s (%s rc=%s)%s\n' "${st%%;*}" "$PF$1" "$2" "$3" \
         "${BWHY:+  $BWHY}"
     BWHY=""
 }
@@ -359,27 +371,31 @@ save() { # NAME: keep the current output, secrets scrubbed
 runblk() { # N: as written, its own bash -c
     local f
     # the agent path never runs a person block (runpty is the person's side)
-    if [ "$(cat "$T/blk/$(printf %02d "$1").info")" = "sh person" ]; then
-        echo "BUG: runblk $1 is a person block" >&2
+    if [ "$(cat "$T/$BK/$(printf %02d "$1").info")" = "sh person" ]; then
+        echo "BUG: runblk $PF$1 is a person block" >&2
         exit 2
     fi
-    f=$T/blk/$(printf %02d "$1").sh
+    f=$T/$BK/$(printf %02d "$1").sh
     cin "$(cat "$f")"
-    save "blk$(printf %02d "$1")"
+    save "$BK$(printf %02d "$1")"
 }
 runpty() { # N TYPED: on a pty (script -qec), the confirmation fed in
     local nn f
     nn=$(printf %02d "$1")
-    f=$T/blk/$nn.sh
-    podman cp "$f" "$C:$CIP/blk$nn.sh"
-    podman exec --user root "$C" chown alice:alice "$CIP/blk$nn.sh"
+    f=$T/$BK/$nn.sh
+    [ "$(cat "$T/$BK/$nn.info")" = "sh person" ] || {
+        echo "BUG: runpty $PF$1 is not a person block" >&2
+        exit 2
+    }
+    podman cp "$f" "$C:$CIP/$BK$nn.sh"
+    podman exec --user root "$C" chown alice:alice "$CIP/$BK$nn.sh"
     OUT=$({ sleep 5; printf '%s\n' "$2"; } |
         podman exec -i --user alice -w "$CIP" "$C" env -i HOME="$CIP" \
             PATH=/usr/local/bin:/usr/bin:/bin \
-            script -qec "bash -c \"\$(cat $CIP/blk$nn.sh)\"" /dev/null 2>&1)
+            script -qec "bash -c \"\$(cat $CIP/$BK$nn.sh)\"" /dev/null 2>&1)
     RC=$?
     OUT=$(printf '%s\n' "$OUT" | tr -d '\r')
-    save "blk$nn"
+    save "$BK$nn"
 }
 extra() { # NAME: an extra row (not a guide block)
     local st=PASS
@@ -395,36 +411,38 @@ extra() { # NAME: an extra row (not a guide block)
 say "checking the guide itself"
 BWHY=""
 RC=0
-ck "block count is 33 (got $NBLK)" test "$NBLK" -eq 33
+ck "SKILL.md sh block count is 27 (got $NBLK)" test "$NBLK" -eq 27
+NWB=$(find "$T/wblk" -name '*.sh' | grep -c .)
+ck "WHAT-MASH-NEEDS.md fenced block count is 6 (got $NWB)" test "$NWB" -eq 6
 ck "$WIDE SKILL.md prose lines over 80 columns (fences, tables, URL-only lines exempt)" \
     test "$WIDE" -eq 0
 ck "$WWIDE WHAT-MASH-NEEDS.md prose lines over 80 columns" test "$WWIDE" -eq 0
 ck "non-ASCII characters in SKILL.md" test "$LONGEST_ASCII" -eq 0
 ck "non-ASCII characters in WHAT-MASH-NEEDS.md" \
     test "$(grep -c '[^ -~]' "$WHAT" || true)" -eq 0
-extra "guide: 33 sh blocks, prose <= 80 columns in both documents, ASCII"
+extra "guide: 27 sh blocks in SKILL.md, 6 fences in WHAT-MASH-NEEDS.md, prose <= 80 columns in both documents, ASCII"
 
 # expected signature per block (so a reordered guide fails loudly)
 declare -A SIG=(
     [1]='command -v "$c"' [2]='sudo apt-get install' [3]='exists: $p'
     [4]='sha256sum -c -' [5]='--owner acme --start' [6]='--check'
-    [7]='" version;' [8]='installed and verified in'
-    [9]='bin/mashctl" version' [10]='adopt --from "$HOME/mash-nats" --dry-run'
-    [11]='adopt --from "$HOME/mash-nats"' [12]='stat -c'
-    [13]='create acme.demo.alice' [14]='create acme.demo.bob'
-    [15]='endpoint list' [16]='MASH_ENDPOINT=acme.demo.alice'
-    [17]='MASH_ENDPOINT=acme.demo.bob' [18]='echo "same $p"'
-    [19]='--retire-keys' [20]='mv -i' [21]='--check' [22]='--stop'
-    [23]='--start' [24]='--backup' [25]='not restored:' [26]='--upgrade'
-    [27]='--enable-boot' [28]='--disable-boot' [29]='--remove'
-    [30]='rm -r "$HOME/.config/mash" "$HOME/mash-setup"'
-    [31]='rm "$HOME/.local/bin/mash"' [32]='rm -f'
-    [33]='create acme.demo.design'
+    [7]='" version;' [8]='gh_2.105.0_linux_amd64.tar.gz'
+    [9]='mash.intoto.jsonl SHA256SUMS'
+    [10]='attestation verify mash-linux-amd64'
+    [11]='attestation verify mashctl-linux-amd64'
+    [12]='SHA256SUMS | sha256sum -c -' [13]='chmod +x'
+    [14]='mashctl" version' [15]='adopt --from "$HOME/mash-nats" --dry-run'
+    [16]='adopt --from "$HOME/mash-nats"' [17]='stat -c'
+    [18]='create acme.demo.alice' [19]='create acme.demo.bob'
+    [20]='endpoint list' [21]='MASH_ENDPOINT=acme.demo.alice'
+    [22]='MASH_ENDPOINT=acme.demo.bob' [23]='--stop' [24]='--start'
+    [25]='--remove' [26]='rm -r "$HOME/.config/mash" "$HOME/mash-setup"'
+    [27]='rm "$HOME/.local/bin/mash"'
 )
-declare -A KIND=([19]=person [27]=person [28]=person [29]=person)
-for n in $(seq 1 33); do
-    want="sh"
-    [ -n "${KIND[$n]:-}" ] && want="sh person"
+declare -A INFO=([25]="sh person" [26]="sh person" [27]="sh person")
+for n in $(seq 1 27); do
+    want=sh
+    [ "${INFO[$n]+set}" = set ] && want=${INFO[$n]}
     got=$(cat "$T/blk/$(printf %02d "$n").info" 2>/dev/null)
     BWHY=""
     ck "info string is '$got', expected '$want'" test "$got" = "$want"
@@ -433,33 +451,46 @@ for n in $(seq 1 33); do
         extra "block $n identity"
     fi
 done
+# WHAT-MASH-NEEDS.md: info string and a pattern for every fence
+declare -A WINFO=([1]="")
+declare -A WSIG=(
+    [1]='listen: "127.0.0.1:4222"' [2]='--port 4333 --start'
+    [3]='--dir "$HOME/srv/mash-nats"' [4]='--mash-config "$HOME/mash-conf"'
+    [5]='MASH_CONFIG_DIR="$HOME/mash-conf"' [6]='adopt --dry-run --server'
+)
+for n in $(seq 1 6); do
+    want=sh
+    [ "${WINFO[$n]+set}" = set ] && want=${WINFO[$n]}
+    got=$(cat "$T/wblk/$(printf %02d "$n").info" 2>/dev/null)
+    BWHY=""
+    ck "WHAT block $n info string is '$got', expected '$want'" test "$got" = "$want"
+    ck "WHAT block $n does not contain '${WSIG[$n]}'" grep -qF -- "${WSIG[$n]}" "$T/wblk/$(printf %02d "$n").sh"
+    if [ -n "$BWHY" ]; then
+        extra "WHAT block $n identity"
+    fi
+done
 BWHY=""
 
 # static checks over the block text
-blkcount() { # N PATTERN COUNT
-    [ "$(grep -o -- "$2" "$T/blk/$(printf %02d "$1").sh" | grep -c .)" -eq "$3" ]
-}
 ck "no fenced block in SKILL.md or WHAT-MASH-NEEDS.md contains the word exit" \
     bash -c "! grep -qw exit \"$T\"/sall/*.sh \"$T\"/wblk/*.sh"
-ck "part-4 block (8) has exactly two 'attestation verify' calls" \
-    blkcount 8 'attestation verify' 2
-ck "part-4 block (8) tail is '); [ \$? -eq 0 ] || {' (set -e in force)" \
-    sig 8 '); [ $? -eq 0 ] || { echo "NOT installed'
-ck "part-4 block (8) is a multi-line subshell with set -eu" bash -c \
-    "[ \"\$(head -n1 \"$T/blk/08.sh\")\" = '(' ] && sed -n 2p \"$T/blk/08.sh\" | grep -qx 'set -eu'"
+ck "blocks 10 and 11 each have one attestation verify with -R, --bundle, --signer-workflow, --source-ref refs/tags/v0.5.6" bash -c \
+    "for n in 10 11; do f=\"$T/blk/\$n.sh\"; [ \"\$(grep -o 'attestation verify' \$f | grep -c .)\" -eq 1 ] && grep -qF -- '-R bogworks/mash --bundle mash.intoto.jsonl --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/v0.5.6 &&' \$f || exit 1; done"
+ck "no part-4 block is a subshell (no set -e, no leading paren)" bash -c \
+    "for n in 07 08 09 10 11 12 13 14; do ! head -n1 \"$T/blk/\$n.sh\" | grep -q '^(' && ! grep -qE '^set -|\\bset -e' \"$T/blk/\$n.sh\" || exit 1; done"
 ck "the guide says the person runs the sh person blocks (and the agent never)" \
     grep -q 'never run' "$SKILL"
-ck "every block that retires, removes, or sets boot is marked sh person" bash -c \
-    "for f in \"$T\"/blk/[0-9][0-9].sh; do b=\${f%.sh}; if grep -qE -- '--retire-keys|--remove|--enable-boot|--disable-boot' \$f && [ \"\$(cat \$b.info)\" != 'sh person' ]; then echo \"unmarked: \$f\"; exit 1; fi; done"
-ck "block 16 and 17 use MASH_ENDPOINT" bash -c \
-    "grep -qF MASH_ENDPOINT \"$T/blk/16.sh\" && grep -qF MASH_ENDPOINT \"$T/blk/17.sh\""
+ck "every sh block (both documents) that uses --remove, rm -r of mashctl's folder or rm of the programs is marked sh person" bash -c \
+    "for f in \"$T\"/blk/[0-9][0-9].sh \"$T\"/wblk/[0-9][0-9].sh; do b=\${f%.sh}; case \$(cat \$b.info) in sh*) ;; *) continue ;; esac; if grep -qE -- '--remove|rm -r.*\.config/mash|^rm .*\.local/bin' \$f && [ \"\$(cat \$b.info)\" != 'sh person' ]; then echo \"unmarked: \$f\"; exit 1; fi; done"
+ck "block 21 and 22 use MASH_ENDPOINT" bash -c \
+    "grep -qF MASH_ENDPOINT \"$T/blk/21.sh\" && grep -qF MASH_ENDPOINT \"$T/blk/22.sh\""
 ck "no block has MASH_TLS_CA, MASH_OWNER, MASH_GROUP or MASH_NAME" \
     bash -c "! grep -qE 'MASH_TLS_CA|MASH_OWNER|MASH_GROUP|MASH_NAME' \"$T\"/blk/[0-9][0-9].sh"
 ck "adopt blocks use --from and no long flags" bash -c \
-    "grep -qF 'adopt --from' \"$T/blk/10.sh\" && grep -qF 'adopt --from' \"$T/blk/11.sh\" && ! grep -qE -- '--server|--operator-key|--ca ' \"$T\"/blk/1[01].sh"
+    "grep -qF 'adopt --from' \"$T/blk/15.sh\" && grep -qF 'adopt --from' \"$T/blk/16.sh\" && ! grep -qE -- '--server|--operator-key|--ca ' \"$T\"/blk/1[56].sh"
 ck "endpoint create blocks have --creds-out" bash -c \
-    "grep -qF -- '--creds-out' \"$T/blk/13.sh\" && grep -qF -- '--creds-out' \"$T/blk/14.sh\""
-extra "guide text: no 'exit', two verify calls, MASH_ENDPOINT only, --from, --creds-out"
+    "grep -qF -- '--creds-out' \"$T/blk/18.sh\" && grep -qF -- '--creds-out' \"$T/blk/19.sh\""
+extra "guide text: no 'exit', two verify blocks, no subshell, person blocks marked, MASH_ENDPOINT only, --from, --creds-out"
 
 # the script URL commit and sha in the guide equal git's
 GCOMMIT=$(grep -o 'raw.githubusercontent.com/bogworks/mash/[0-9a-f]\{40\}/scripts/nats-local-setup.sh' \
@@ -478,8 +509,8 @@ ck "the script at that commit has the guide's sha256" test "$COMMITSHA" = "$GSHA
 ck "the script in this tree has the guide's sha256" test "$HELPERSHA" = "$GSHA"
 ck "that commit is on a pushed (remote) branch" bash -c \
     "[ -n \"\$(git -C '$REPO' branch -r --contains '$GCOMMIT' 2>/dev/null)\" ]"
-PIN_COMMIT=8ac4d0b0ee09240fe72c1ac5637444b44d25570f
-PIN_SHA=900f4fcb5b327cc0204954e27536d51b5aecd674817e306b895d11ef989692b0
+PIN_COMMIT=6f3dc46aa51078f386f4c6698f23696808068ab6
+PIN_SHA=1371f18abb8de966346d60dfa0a121af75550b78d7b5ea3126db370f244954da
 ck "the guide's script commit equals the pinned $PIN_COMMIT" \
     test "$GCOMMIT" = "$PIN_COMMIT"
 ck "the guide's script sha256 equals the pinned $PIN_SHA" \
@@ -565,7 +596,7 @@ row 7 "bash -c" "$RC"
 
 # the pinned gh: the real tarball must have the sha256 the guide pins; then a
 # repacked copy (bin/gh = the verify stand-in) is made for the served download
-GHSHA=$(grep -o '[0-9a-f]\{64\}  \$G.tar.gz' "$T/blk/08.sh" | cut -c1-64)
+GHSHA=$(grep -o '[0-9a-f]\{64\}  gh_2.105.0_linux_amd64.tar.gz' "$T/blk/08.sh" | cut -c1-64)
 cinroot "set -e
 d=\$(mktemp -d); cd \$d
 /usr/bin/curl -fsSLO https://github.com/cli/cli/releases/download/v2.105.0/gh_2.105.0_linux_amd64.tar.gz
@@ -594,7 +625,7 @@ save real-gh-v055
 ck "real gh verify of v0.5.5 exits 0" has "gh exit=0"
 extra "REAL gh attestation verify on real v0.5.5 mash-linux-amd64"
 
-# the part-4 block with the pinned gh hash replaced by the repacked tarball's
+# the gh block (8) with the pinned gh hash replaced by the repacked tarball's
 sed "s/$GHSHA/$FAKESHA/" "$T/blk/08.sh" >"$T/blk/08.sub.sh"
 ck "the substitution changed exactly the gh hash" bash -c \
     "[ \"\$(diff '$T/blk/08.sh' '$T/blk/08.sub.sh' | grep -c '^>')\" -eq 1 ]"
@@ -602,54 +633,93 @@ ck "the original block still has the real pinned hash" sig 8 "$GHSHA"
 RC=0
 extra "substituted copy of block 8 (gh hash -> repacked tarball's), made"
 
-# 8: the part-4 block (the substituted copy)
+# 8: fetch the pinned gh and install it (the substituted copy)
 cin "$(cat "$T/blk/08.sub.sh")"
 save blk08
 ck "rc 0" rc0
 ck "gh tarball sha256 OK" has "gh_2.105.0_linux_amd64.tar.gz: OK"
-ck "prints installed and verified in" has "installed and verified in /home/alice/.local/bin"
-ck "no NOT installed" nothas "NOT installed"
 row 8 "bash -c (hash-substituted copy)" "$RC"
-cin 'cat "$HOME/gh-wrapper.log"; ls -l "$HOME/.local/bin" | tail -n +2 | wc -l; ls "$HOME/mash-setup"'
+cin 'ls -A "$HOME/.local/bin"; stat -c "%a %n" "$HOME/.local/bin/gh"'
 save blk08-probe
-ck "stand-in saw 4 verify calls" test "$(printf '%s\n' "$OUT" | grep -c 'attestation verify')" -eq 4
-ck "three programs in .local/bin" has "3"
-ck "the work folder is under mash-setup" has install-
-extra "block 8: four verify calls (two before, two after install), three files"
-cin 'stat -c "%a %n" "$HOME/mash-setup/"install-*'
-save blk08-mode
-ck "work folder is mode 700" has "700 /home/alice/mash-setup/install-"
-extra "block 8: the work folder is mode 700"
+ck "only gh in .local/bin" bash -c "[ \"\$(printf '%s\n' \"$OUT\" | head -n1)\" = gh ]"
+ck "gh mode 755" has "755 /home/alice/.local/bin/gh"
+extra "after block 8: gh (the stand-in) is the only file in .local/bin, mode 755"
 
-# 9: mashctl version
+# 9: download the four release files (shim)
 runblk 9
 ck "rc 0" rc0
-ck "mashctl version printed" has mashctl
-row 9 "bash -c" "$RC"
+cin 'ls "$HOME/mash-setup/dl" | tr "\n" " "'
+save blk09-probe
+for f in mash-linux-amd64 mashctl-linux-amd64 mash.intoto.jsonl SHA256SUMS; do
+    ck "dl has $f" has "$f"
+done
+extra "after block 9: the four release files are in mash-setup/dl"
 
-# 10: dry run (through the harness shim)
+# 10, 11: one verify per file (the stand-in; success prints only our echo)
 runblk 10
+ck "rc 0" rc0
+ck "prints exactly: verified mash" test "$OUT" = "verified mash"
+row 10 "bash -c (gh stand-in)" "$RC"
+runblk 11
+ck "rc 0" rc0
+ck "prints exactly: verified mashctl" test "$OUT" = "verified mashctl"
+row 11 "bash -c (gh stand-in)" "$RC"
+cin 'cat "$HOME/gh-wrapper.log"'
+save blk11-ghlog
+ck "stand-in saw 2 verify calls" test "$(printf '%s\n' "$OUT" | grep -c 'attestation verify')" -eq 2
+ck "calls name each file once" bash -c \
+    "printf '%s\n' \"$OUT\" | grep -q 'verify mash-linux-amd64 -R bogworks/mash --bundle mash.intoto.jsonl' && printf '%s\n' \"$OUT\" | grep -q 'verify mashctl-linux-amd64 -R bogworks/mash --bundle mash.intoto.jsonl'"
+extra "blocks 10 and 11: two verify calls, one per file, with -R, --bundle, --signer-workflow, --source-ref"
+
+# 12: SHA256SUMS
+runblk 12
+ck "rc 0" rc0
+ck "mash-linux-amd64: OK" has "mash-linux-amd64: OK"
+ck "mashctl-linux-amd64: OK" has "mashctl-linux-amd64: OK"
+ck "two OK lines" nlines ": OK" 2
+row 12 "bash -c" "$RC"
+
+# 13: install (after all four checks passed)
+runblk 13
+ck "rc 0" rc0
+row 13 "bash -c" "$RC"
+cin 'ls -A "$HOME/.local/bin" | tr "\n" " "; stat -c "%a %n" "$HOME/.local/bin/mash" "$HOME/.local/bin/mashctl"; ls "$HOME/mash-setup/dl" | tr "\n" " "'
+save blk13-probe
+ck "gh mash mashctl in .local/bin" has "gh mash mashctl"
+ck "mash is 755" has "755 /home/alice/.local/bin/mash"
+ck "mashctl is 755" has "755 /home/alice/.local/bin/mashctl"
+ck "the two binaries left dl" nothas "mash-linux-amd64 mash.intoto"
+extra "after block 13: three programs in .local/bin, binaries moved out of dl"
+
+# 14: mashctl version
+runblk 14
+ck "rc 0" rc0
+ck "mashctl version printed" has mashctl
+row 14 "bash -c" "$RC"
+
+# 15: dry run (through the harness shim)
+runblk 15
 ck "rc 0" rc0
 ck "All checks passed" has "All checks passed"
 ck "dry-run says nothing is written" has "nothing is written"
 ck "no FAIL or error line" nothas "FAIL"
-row 10 "bash -c (adopt --from via shim)" "$RC"
+row 15 "bash -c (adopt --from via shim)" "$RC"
 
-# 11: adopt (an ordinary block now: this machine types no fingerprint)
-runblk 11
+# 16: adopt (an ordinary block: this machine types no fingerprint)
+runblk 16
 ck "rc 0" rc0
 ck "All checks passed" has "All checks passed"
 ck "mashadmin.creds copied, not recorded" nothas "not copied"
 ck "no fingerprint prompt" nothas "ingerprint"
-row 11 "bash -c, no pty (adopt --from via shim)" "$RC"
+row 16 "bash -c, no pty (adopt --from via shim)" "$RC"
 cin 'ls "$HOME/.config/mash" "$HOME/.config/mash/server" "$HOME/.config/mash/keys"'
-save blk11-ls
+save blk16-ls
 ck "config.json written (init ran)" has config.json
 ck "mashadmin.creds in server/" has mashadmin.creds
 extra "after adopt+init: config.json, keys and creds are in mashctl's folder"
 
-# 12: stat
-runblk 12
+# 17: stat
+runblk 17
 ck "rc 0" rc0
 ck "folder 700" has "700 /home/alice/.config/mash"
 ck "keys 700" has "700 /home/alice/.config/mash/keys"
@@ -665,101 +735,60 @@ ck "OBSERVED stat order is 700 600 700 700 (got: $ORDER)" test "$ORDER" = "700 6
 ORDERN=$(printf '%s\n' "$OUT" | sed 's|.*/||' | tr '\n' ' ')
 ck "OBSERVED names in order: mash config.json keys server (got: $ORDERN)" \
     test "$ORDERN" = "mash config.json keys server "
-row 12 "bash -c" "$RC"
-# model folder: the five entries the guide expects, run through the block text
-# with HOME pointed at it (the test makes and keeps it inside the container)
+row 17 "bash -c" "$RC"
 cin 'M=$HOME/stat-model; mkdir -p -m 700 "$M/.config/mash/keys" "$M/.config/mash/server" && chmod 700 "$M/.config/mash" && : >"$M/.config/mash/ca.pem" && chmod 644 "$M/.config/mash/ca.pem" && : >"$M/.config/mash/config.json" && chmod 600 "$M/.config/mash/config.json"'
 ck "model folder made" rc0
-OUTM=$(cexec env HOME=$CIP/stat-model bash -c "$(cat "$T/blk/12.sh")" 2>&1 </dev/null)
+OUTM=$(cexec env HOME=$CIP/stat-model bash -c "$(cat "$T/blk/17.sh")" 2>&1 </dev/null)
 ORDERM=$(printf '%s\n' "$OUTM" | awk '{ printf "%s ", $1 }')
 ORDERMN=$(printf '%s\n' "$OUTM" | sed 's|.*/||' | tr '\n' ' ')
 ck "MODEL folder order is 700 644 600 700 700 (got: $ORDERM)" test "$ORDERM" = "700 644 600 700 700 "
 ck "MODEL names: mash ca.pem config.json keys server (got: $ORDERMN)" \
     test "$ORDERMN" = "mash ca.pem config.json keys server "
-extra "block 12 on a model folder: the guide's five-entry order holds"
+extra "block 17 on a model folder: the guide's five-entry order holds"
 
-# 13-15: endpoints (--creds-out through the shim)
-runblk 13
+# 18-20: endpoints (--creds-out through the shim)
+runblk 18
 ck "rc 0" rc0
 ck "address shown with dots" has acme.demo.alice
-row 13 "bash -c (--creds-out dropped by shim)" "$RC"
-runblk 14
+row 18 "bash -c (--creds-out dropped by shim)" "$RC"
+runblk 19
 ck "rc 0" rc0
-row 14 "bash -c (--creds-out dropped by shim)" "$RC"
-runblk 15
+row 19 "bash -c (--creds-out dropped by shim)" "$RC"
+runblk 20
 ck "rc 0" rc0
 ck "alice listed" has acme.demo.alice
 ck "bob listed" has acme.demo.bob
-row 15 "bash -c" "$RC"
+row 20 "bash -c" "$RC"
 cin 'stat -c "%a %n" "$HOME/.config/mash/acme.demo.alice.creds" "$HOME/.config/mash/acme.demo.bob.creds"'
 save creds-modes
 ck "alice creds 600" has "600 /home/alice/.config/mash/acme.demo.alice.creds"
 ck "bob creds 600" has "600 /home/alice/.config/mash/acme.demo.bob.creds"
 extra "the agents' creds files are where the guide says, mode 600"
 
-# 16-17: alice -> bob.  A COPY of each block maps MASH_ENDPOINT=o.g.n to
+# 21-22: alice -> bob.  A COPY of each block maps MASH_ENDPOINT=o.g.n to
 # MASH_OWNER=o MASH_GROUP=g MASH_NAME=n (the in-tree mash does not read
 # MASH_ENDPOINT yet).
 mapep() { sed -E 's/MASH_ENDPOINT=([a-z0-9-]+)\.([a-z0-9-]+)\.([a-z0-9-]+)/MASH_OWNER=\1 MASH_GROUP=\2 MASH_NAME=\3/' "$1"; }
-mapep "$T/blk/16.sh" >"$T/blk/16.sub.sh"
-mapep "$T/blk/17.sh" >"$T/blk/17.sub.sh"
-cin "$(cat "$T/blk/16.sub.sh")"
-save blk16
+mapep "$T/blk/21.sh" >"$T/blk/21.sub.sh"
+mapep "$T/blk/22.sh" >"$T/blk/22.sub.sh"
+cin "$(cat "$T/blk/21.sub.sh")"
+save blk21
 ck "rc 0" rc0
 ck "sent" has "sent"
-row 16 "bash -c (MASH_ENDPOINT mapped in a copy)" "$RC"
-cin "$(cat "$T/blk/17.sub.sh")"
-save blk17
+row 21 "bash -c (MASH_ENDPOINT mapped in a copy)" "$RC"
+cin "$(cat "$T/blk/22.sub.sh")"
+save blk22
 ck "rc 0" rc0
 ck "[verified]" has "[verified]"
 ck "Hello Bob" has "Hello Bob"
 ck "from alice" has acme.demo.alice
-row 17 "bash -c (MASH_ENDPOINT mapped in a copy)" "$RC"
+row 22 "bash -c (MASH_ENDPOINT mapped in a copy)" "$RC"
 
-# 18: cmp
-runblk 18
-ck "rc 0" rc0
-ck "same four times" nlines "same " 4
-ck "no differ" nothas differ
-row 18 "bash -c" "$RC"
-
-# 29 (negative): --remove must refuse before --retire-keys has archived the keys
-runpty 29 "$D"
-save remove-before-retire
-ck "remove before retire: rc non-zero" rcn0
-cin '[ -d "$HOME/mash-nats" ] && echo dir-kept; [ -e "$HOME/mash-nats/ca.key" ] && echo cakey-kept; [ -d "$HOME/mash-nats/nsc" ] && echo nsc-kept; ss -ltn | grep -c ":4222 "'
-ck "remove before retire: server dir, ca.key and nsc/ all still there" bash -c \
-    "printf '%s\n' \"$OUT\" | grep -qx dir-kept && printf '%s\n' \"$OUT\" | grep -qx cakey-kept && printf '%s\n' \"$OUT\" | grep -qx nsc-kept"
-ck "remove before retire: server still listens on 4222" \
-    test "$(printf '%s\n' "$OUT" | tail -n1)" = 1
+# ---- FACT 1: owner mismatch (the server's owner is acme)
+cin '"$HOME/.local/bin/mashctl" endpoint create other.demo.carol --make-key --creds-out "$HOME/.config/mash/other.demo.carol.creds"; echo "exit=$?"; "$HOME/.local/bin/mashctl" endpoint list; ls "$HOME/.config/mash"'
+save owner-mismatch
 RC=0
-extra "negative: --remove before --retire-keys refuses and deletes nothing"
-
-# 19: retire-keys on a pty
-runpty 19 "$D"
-ck "rc 0" rc0
-row 19 "pty (script -qec)" "$RC"
-cin 'for p in export ca.key nsc; do [ -e "$HOME/mash-nats/$p" ] && echo "STILL: $p"; done; stat -c "%a %n" "$HOME/mash-nats-keys.tar.gz"; tar tzf "$HOME/mash-nats-keys.tar.gz" >"$HOME/keys.lst"; echo "tar rc=$?"; head -n 8 "$HOME/keys.lst"'
-save retire-probe
-ck "export/, ca.key, nsc/ are gone" nothas "STILL:"
-ck "archive mode is 600" has "600 /home/alice/mash-nats-keys.tar.gz"
-ck "archive lists back" has "tar rc=0"
-extra "after retire-keys: files gone, archive 600 and lists back"
-
-# 20: move the archive
-runblk 20
-ck "rc 0" rc0
-cin 'stat -c "%a %n" "$HOME/archive/mash-nats-keys.tar.gz"; [ ! -e "$HOME/mash-nats-keys.tar.gz" ] && echo moved'
-ck "archive in \$HOME/archive, mode 600" has "600 /home/alice/archive/mash-nats-keys.tar.gz"
-ck "gone from home" has moved
-row 20 "bash -c" "$RC"
-
-# 21: check after
-runblk 21
-ck "rc 0" rc0
-ck "no FAIL line" nothas "FAIL"
-ck "check passed" has "check passed"
-row 21 "bash -c" "$RC"
+extra "FACT 1 (observed, not asserted): endpoint create other.demo.carol after adopt with owner acme"
 
 answers() { # the server answers through mashctl, with no MASH_TLS_CA
     cin '$HOME/.local/bin/mashctl endpoint list'
@@ -767,95 +796,62 @@ answers() { # the server answers through mashctl, with no MASH_TLS_CA
     ck "alice still listed" has alice
 }
 
-# 22-24: lifecycle
-runblk 22
+# ---- part 6: stop, stop again, start, check
+runblk 23
+save blk23-first
 ck "rc 0" rc0
-ck "stopped pid" has "stopped pid"
-row 22 "bash -c" "$RC"
+ck "stop: about to: stop nats-server pid N" has "about to: stop nats-server pid"
+ck "stop: did: stopped pid N" has "did: stopped pid"
+row 23 "bash -c" "$RC"
 cin 'ss -ltn | grep ":4222 "; true'
 ck "port 4222 no longer listening" test -z "$OUT"
 extra "after stop: nothing listens on 4222"
-
 runblk 23
+save blk23-again
+ck "stop again: rc 0" rc0
+ck "stop again: says the pid file is stale" has "stale"
+extra "--stop again: stale pid file, exit 0"
+runblk 24
 ck "rc 0" rc0
-row 23 "bash -c" "$RC"
+ck "start: exactly one did: line" nlines "did:" 1
+ck "start: listens on 127.0.0.1:4222 and requires TLS" has "listens on 127.0.0.1:4222 and requires TLS"
+row 24 "bash -c" "$RC"
+runblk 6
+save blk06-after-start
+ck "rc 0" rc0
+ck "check passed after start" has "check passed"
+ck "no FAIL line" nothas "FAIL"
+extra "--check after start (guide part 6: must pass)"
 BWHY=""
 answers
 extra "after start: the server answers (mashctl endpoint list)"
 
-runblk 24
-ck "rc 0" rc0
-row 24 "bash -c" "$RC"
-cin 'stat -c "%a %n" "$HOME/mash-nats-backup.tar.gz"; tar tzf "$HOME/mash-nats-backup.tar.gz" | head -n 5'
-save backup-probe
-ck "backup archive mode 600" has "600 /home/alice/mash-nats-backup.tar.gz"
-answers
-extra "after backup: archive 600, the server answers again"
-
-# 25: restore.  First as written (the directory exists: must refuse), then
-# the guide's own prose: stop, move the directory away, run it, upgrade,
-# start, check.
-runblk 25
-ck "rc 0" rc0
-ck "refuses: already exists" has "not restored: /home/alice/mash-nats already exists"
-row 25 "bash -c (directory exists: refuses)" "$RC"
-cin 'bash "$HOME/mash-setup/nats-local-setup.sh" --dir "$HOME/mash-nats" --stop && mv "$HOME/mash-nats" "$HOME/mash-nats.moved"'
-ck "stop and move aside" rc0
-runblk 25
-save blk25-restore
-ck "rc 0" rc0
-ck "prints restored" has restored
-row 25 "bash -c (second run: directory moved aside)" "$RC"
-cin 'ls "$HOME/mash-nats"; stat -c "%a %n" "$HOME/mash-nats"; [ ! -e "$HOME/mash-nats/bin" ] && echo "no bin"'
-save restore-probe
-ck "server.conf restored" has server.conf
-ck "directory mode 700" has "700 /home/alice/mash-nats"
-ck "bin/ not in the backup" has "no bin"
-extra "after restore: files back, mode 700, no bin/"
-runblk 26
-save blk26
-ck "rc 0 (--upgrade makes bin/ in a restored directory)" rc0
-row 26 "bash -c" "$RC"
-cin 'ls "$HOME/mash-nats/bin"; stat -c "%a %n" "$HOME/mash-nats/bin"'
-ck "bin/ has nats-server and nsc" has nats-server
-ck "bin/ mode 700" has "700 /home/alice/mash-nats/bin"
-extra "after --upgrade: bin/ made, mode 700"
-runblk 26
-save blk26-again
-ck "second --upgrade rc 0 (nothing to do)" rc0
-extra "--upgrade again is a no-op"
-runblk 23
-save blk23-after-restore
-ck "start after restore rc 0" rc0
-extra "start after restore"
-runblk 21
-save blk21-after-restore
-ck "check after restore rc 0" rc0
-ck "check passed" has "check passed"
-extra "check after restore"
-answers
-extra "after restore, upgrade and start: the server answers"
-
-# 33: What next, the design endpoint (run here, while the server is up)
-runblk 33
-ck "rc 0" rc0
-ck "address shown" has acme.demo.design
-row 33 "bash -c (run before remove; --creds-out dropped by shim)" "$RC"
-cin '$HOME/.local/bin/mashctl endpoint list'
-ck "design listed" has acme.demo.design
-extra "after block 33: acme.demo.design is listed"
-
-# 27, 28: boot service needs systemd; not run here
-BWHY=""
-for n in 27 28; do
-    printf '| %s | `%s` | skipped | - | NOT RUN (no systemd here; covered by nats-local-setup_test.sh boot group) |\n' \
-        "$n" "$(head -c 60 "$T/blk/$n.sh" | sed 's/|/\\|/g')" >>"$T/rows.md"
-done
-
-# 29: remove
-runpty 29 "$D"
-ck "rc 0" rc0
-row 29 "pty (script -qec)" "$RC"
+# ---- remove (a person block): first with no terminal (must refuse, exit 4,
+# delete nothing), then on a pty with the directory typed
+runnotty() { # N: a person block with NO terminal (stdin /dev/null)
+    local nn
+    nn=$(printf %02d "$1")
+    [ "$(cat "$T/$BK/$nn.info")" = "sh person" ] || {
+        echo "BUG: runnotty $PF$1 is not a person block" >&2
+        exit 2
+    }
+    cin "$(cat "$T/$BK/$nn.sh")"
+    save "$BK$nn-notty"
+}
+runnotty 25
+ck "remove with no terminal: exit 4" test "$RC" -eq 4
+cin '[ -d "$HOME/mash-nats" ] && echo dir-kept; [ -e "$HOME/mash-nats/ca.key" ] && echo cakey-kept; ss -ltn | grep -c ":4222 "'
+save remove-notty-probe
+ck "no terminal: server dir and ca.key still there, server still listens" bash -c \
+    "printf '%s\n' \"$OUT\" | grep -qx dir-kept && printf '%s\n' \"$OUT\" | grep -qx cakey-kept && [ \"\$(printf '%s\n' \"$OUT\" | tail -n1)\" = 1 ]"
+RC=0
+extra "--remove with no terminal: refuses, deletes nothing (rc 4 asserted above)"
+runpty 25 "$D"
+ck "remove on a pty: rc 0" rc0
+ck "remove: about to: stop nats-server pid" has "about to: stop nats-server pid"
+ck "remove: did: stopped pid" has "did: stopped pid"
+ck "remove: did: removed" has "did: removed"
+row 25 "pty (script -qec), directory typed" "$RC"
 cin '[ ! -e "$HOME/mash-nats" ] && echo gone; [ -d "$HOME/.config/mash" ] && echo "mashctl folder kept"'
 ck "server directory gone" has gone
 ck "mashctl folder kept" has "mashctl folder kept"
@@ -863,24 +859,24 @@ extra "after remove: server dir gone, mashctl folder kept"
 cin 'ss -ltn | grep ":4222 "; true'
 ck "port 4222 free after remove" test -z "$OUT"
 extra "after remove: nothing listens on 4222"
-# 30-32: the rest of "Remove it completely" (blocks 19, 29, 30, 31, 32 ran in
-# the guide's order: retire, remove, config+downloads, programs, archives)
-for n in 30 31 32; do
-    runblk $n
-    ck "rc 0" rc0
-    row $n "bash -c" "$RC"
-done
-cin '[ ! -e "$HOME/.config/mash" ] && echo a; [ ! -e "$HOME/mash-setup" ] && echo b; [ ! -e "$HOME/archive/mash-nats-keys.tar.gz" ] && [ ! -e "$HOME/mash-nats-backup.tar.gz" ] && echo c; [ -z "$(ls -A "$HOME/.local/bin")" ] && echo d'
-ck "mashctl folder, mash-setup, archives gone, .local/bin empty"     test "$OUT" = "$(printf 'a
-b
-c
-d')"
-extra "after blocks 30-32: everything the guide made is gone"
+runpty 26 ""
+ck "rc 0" rc0
+row 26 "pty (script -qec), nothing typed" "$RC"
+runpty 27 ""
+ck "rc 0" rc0
+row 27 "pty (script -qec), nothing typed" "$RC"
+cin '[ ! -e "$HOME/.config/mash" ] && echo a; [ ! -e "$HOME/mash-setup" ] && echo b; [ ! -e "$HOME/mash-nats" ] && echo c; [ -z "$(ls -A "$HOME/.local/bin")" ] && echo d'
+ck "mashctl folder, mash-setup, server dir gone, .local/bin empty" \
+    test "$OUT" = "$(printf 'a\nb\nc\nd')"
+extra "after blocks 25-27: everything the guide made is gone"
 
-# ------------------------------------------------- S5: tamper tests of block 8
+# ------------------------------------------------- S5: tamper tests (part 4)
 # each in its own fresh container (image with the prerequisites in), running a
-# hash-substituted copy of the part-4 block against the shim curl and the
-# gh stand-in (which compares file hashes with the genuine assets).
+# hash-substituted copy of the gh block against the shim curl and the gh
+# stand-in (which compares file hashes with the genuine assets, exit 1 on a
+# mismatch).  The install block (13) is never run after a failed verify.
+BK=blk
+PF=
 C_MAIN=$C
 tb_new() { # SUFFIX MODE
     TB=mash-guidetest-$RUNID-$1
@@ -899,113 +895,105 @@ tb_end() {
     podman rm -f "$TB" >/dev/null 2>&1
     C=$C_MAIN
 }
-
-putmode() { printf '%s\n' "$1" >"$T/mode"; podman cp "$T/mode" "$TB:/opt/guide-assets/mode"; podman exec --user root "$TB" chmod a+r /opt/guide-assets/mode; }
-
-tamper_all() { # LABEL BLOCKFILE(substituted) BLOCKFILE(original) SUFFIX
-    local L=$1 BF=$2 OF=$3 X=$4 x
-    # (a) mash-linux-amd64 substituted before verify
-    tb_new tamper-a-$X badmash
-    cin "$(cat "$BF")"
-    save tamper-a-$X
-    ck "$L (a) block fails (rc != 0)" rcn0
-    ck "$L (a) verification failed is shown" has "Verification failed"
-    ck "$L (a) prints NOT installed, or NOT verified" has "NOT installed, or NOT verified"
-    ck "$L (a) does not print installed and verified" nothas "installed and verified"
-    cin 'ls -A "$HOME/.local/bin" | wc -l'
-    ck "$L (a) nothing in \$HOME/.local/bin" test "$OUT" = 0
-    extra "S5(a) $L: substituted mash before verify: refused, nothing installed"
-    tb_end
-    # (b) mash swapped after the first verification, before the re-verify
-    tb_new tamper-b-$X swap3
-    cin "$(cat "$BF")"
-    save tamper-b-$X
-    ck "$L (b) block fails (rc != 0)" rcn0
-    ck "$L (b) re-verify failure shown" has "Verification failed"
-    ck "$L (b) prints NOT installed" has "NOT installed"
-    ck "$L (b) does not print installed and verified" nothas "installed and verified"
-    cin 'echo "bin=$(ls -A "$HOME/.local/bin" | wc -l)"; echo "rejected=$(ls "$HOME/mash-setup/rejected" 2>&1 | tr "\n" " ")"; echo "calls=$(wc -l <"$HOME/gh-wrapper.log")"'
-    save tamper-b-$X-probe
-    ck "$L (b) .local/bin is empty" has "bin=0"
-    ck "$L (b) rejected has gh mash mashctl" has "rejected=gh mash mashctl "
-    ck "$L (b) three verify calls (two before, one failing re-verify)" has "calls=3"
-    extra "S5(b) $L: mash swapped between verifications: moved to rejected"
-    tb_end
-    # (c) a wrong gh tarball hash
-    tb_new tamper-c-$X normal
-    cin "$(cat "$OF")"
-    save tamper-c1-$X
-    ck "$L (c1) original block (real pinned hash, stand-in tarball) fails" rcn0
-    ck "$L (c1) sha256sum says FAILED" has "FAILED"
-    ck "$L (c1) prints NOT installed, or NOT verified" has "NOT installed, or NOT verified"
-    cin 'ls -A "$HOME/.local/bin" | wc -l'
-    ck "$L (c1) nothing in .local/bin" test "$OUT" = 0
-    extra "S5(c1) $L: real pinned hash vs another tarball: refused"
-    tb_end
-    tb_new tamper-c2-$X badgh
-    cin "$(cat "$BF")"
-    save tamper-c2-$X
-    ck "$L (c2) substituted block, a different tarball served, fails" rcn0
-    ck "$L (c2) sha256sum says FAILED" has "FAILED"
-    ck "$L (c2) prints NOT installed, or NOT verified" has "NOT installed, or NOT verified"
-    cin 'ls -A "$HOME/.local/bin" | wc -l'
-    ck "$L (c2) nothing in .local/bin" test "$OUT" = 0
-    extra "S5(c2) $L: wrong gh tarball: refused, nothing installed"
-    tb_end
-    # (d) one of gh, mash, mashctl already there
-    for x in gh mash mashctl; do
-        tb_new tamper-d-$x-$X normal
-        cin "mkdir -p \"\$HOME/.local/bin\" && echo mine >\"\$HOME/.local/bin/$x\""
-        cin "$(cat "$BF")"
-        save tamper-d-$x-$X
-        ck "$L (d $x) block fails (rc != 0)" rcn0
-        ck "$L (d $x) prints already there: .../$x" has "already there: /home/alice/.local/bin/$x"
-        ck "$L (d $x) prints NOT installed" has "NOT installed"
-        cin "ls -A \"\$HOME/.local/bin\"; cat \"\$HOME/.local/bin/$x\"; ls -A \"\$HOME/mash-setup\" | wc -l"
-        ck "$L (d $x) only that file is there, unchanged, nothing downloaded" \
-            test "$OUT" = "$(printf '%s\nmine\n0' "$x")"
-        extra "S5(d) $L: $x already present: stops, nothing overwritten"
-        tb_end
-    done
+tblk() { # FILE NAME: run a block file in the current box, keep the output
+    cin "$(cat "$1")"
+    save "$2"
 }
-say "S5 tamper tests, the block AS WRITTEN (each in a fresh container)"
-tamper_all "as written" "$T/blk/08.sub.sh" "$T/blk/08.sh" w
+BN() { printf '%s/blk/%02d.sh' "$T" "$1"; }
+say "S5 tamper tests of part 4 (each in a fresh container)"
+SUB=$T/blk/08.sub.sh
+BWHY=""
+# (a) a file swapped after download (a1), or served wrong (a2)
+for v in a1 a2; do
+    mode=normal
+    [ $v = a2 ] && mode=badmash
+    tb_new tamper-$v $mode
+    tblk "$SUB" tamper-$v-b08
+    ck "S5($v) gh block rc 0" rc0
+    tblk "$(BN 9)" tamper-$v-b09
+    ck "S5($v) download rc 0" rc0
+    if [ $v = a1 ]; then
+        cin 'cd "$HOME/mash-setup/dl" && printf x >>mash-linux-amd64'
+        ck "S5(a1) the file is swapped after download" rc0
+    fi
+    tblk "$(BN 10)" tamper-$v-b10
+    ck "S5($v) verify mash block fails (rc != 0)" rcn0
+    ck "S5($v) Verification failed is shown" has "Verification failed"
+    ck "S5($v) does not print verified mash" nothas "verified mash"
+    tblk "$(BN 11)" tamper-$v-b11
+    ck "S5($v) verify mashctl block still passes" rc0
+    ck "S5($v) prints verified mashctl" has "verified mashctl"
+    tblk "$(BN 12)" tamper-$v-b12
+    ck "S5($v) SHA256SUMS check fails" rcn0
+    ck "S5($v) sha256sum says FAILED" has "mash-linux-amd64: FAILED"
+    # the guide says stop: the install block (13) is NOT run
+    cin 'ls -A "$HOME/.local/bin"; ls -A "$HOME/mash-setup/dl" | tr "\n" " "'
+    save tamper-$v-probe
+    ck "S5($v) only gh is in .local/bin (no mash, no mashctl)" bash -c \
+        "[ \"\$(printf '%s\n' \"$OUT\" | head -n1)\" = gh ] && ! printf '%s\n' \"$OUT\" | grep -qx 'mash\|mashctl'"
+    ck "S5($v) the files stay in mash-setup/dl" has "mash-linux-amd64"
+    extra "S5($v): $([ $v = a1 ] && echo 'file swapped after download' || echo 'tampered file served'): verify block fails, install block not run, nothing in .local/bin but gh"
+    tb_end
+done
+# (b) a wrong gh tarball: the original block (real pinned hash, the stand-in
+# tarball served) b1; the substituted block with a different tarball served b2
+tb_new tamper-b1 normal
+tblk "$T/blk/08.sh" tamper-b1
+ck "S5(b1) original gh block (real pinned hash) fails" rcn0
+ck "S5(b1) sha256sum says FAILED" has "FAILED"
+cin 'ls -A "$HOME/.local/bin" | wc -l; ls "$HOME/.local/bin/gh" 2>&1 | head -n1'
+ck "S5(b1) gh is not installed" bash -c \
+    "printf '%s\n' \"$OUT\" | grep -q '^0\$' && printf '%s\n' \"$OUT\" | grep -q 'No such file'"
+extra "S5(b1): real pinned hash vs another tarball: block fails, gh not installed"
+tb_end
+tb_new tamper-b2 badgh
+tblk "$SUB" tamper-b2
+ck "S5(b2) substituted block, a different tarball served, fails" rcn0
+ck "S5(b2) sha256sum says FAILED" has "FAILED"
+cin 'ls -A "$HOME/.local/bin" | wc -l'
+ck "S5(b2) nothing in .local/bin" test "$OUT" = 0
+extra "S5(b2): wrong gh tarball: block fails, gh not installed"
+tb_end
+# (c) a program already there: block 3 prints exists:, block 7 prints a
+# version (the guide's stop rule: stop and ask)
+for x in gh mash mashctl; do
+    tb_new tamper-c-$x normal
+    cin "mkdir -p \"\$HOME/.local/bin\" && printf '#!/bin/sh\\necho \"$x 9.9.9\"\\n' >\"\$HOME/.local/bin/$x\" && chmod 755 \"\$HOME/.local/bin/$x\""
+    ck "S5(c $x) planted" rc0
+    tblk "$(BN 3)" tamper-c-$x-b03
+    ck "S5(c $x) block 3 prints exists: .../$x" has "exists: /home/alice/.local/bin/$x"
+    if [ $x != gh ]; then
+        tblk "$(BN 7)" tamper-c-$x-b07
+        ck "S5(c $x) block 7 prints a version" has "$x 9.9.9"
+        ck "S5(c $x) block 7 reports one missing program" nlines "No such file" 1
+    fi
+    cin "tail -n1 \"\$HOME/.local/bin/$x\"; ls -A \"\$HOME/.local/bin\"; ls -A \"\$HOME/mash-setup\" 2>&1 | head -n1"
+    ck "S5(c $x) the file is unchanged, nothing downloaded" has "echo \"$x 9.9.9\""
+    extra "S5(c) $x already present: block 3 stops with exists:$([ $x != gh ] && echo ', block 7 prints its version'); nothing overwritten"
+    tb_end
+done
 
 # ------------------------------------------------- WHAT-MASH-NEEDS.md
 say "WHAT-MASH-NEEDS.md: every fenced block run, or listed as not run"
 NW=$(find "$T/wblk" -name '*.sh' | grep -c .)
 BWHY=""
 RC=0
-ck "WHAT-MASH-NEEDS.md has 7 fenced blocks (got $NW)" test "$NW" -eq 7
-extra "WHAT-MASH-NEEDS.md has 7 fenced blocks"
-# index: info string | disposition | pattern the block must contain | reason
-wb() { # N INFO DISPOSITION PATTERN REASON
-    local nn
-    nn=$(printf %02d "$1")
-    BWHY=""
-    ck "WHAT block $1 info string is '$2'" \
-        test "$(cat "$T/wblk/$nn.info" 2>/dev/null)" = "$2"
-    ck "WHAT block $1 contains '$4'" grep -qF -- "$4" "$T/wblk/$nn.sh"
-    printf '| W%s | `%s` | %s | %s |\n' "$1" "$4" "$3" "$5" >>"$T/wrows.md"
-    extra "WHAT block $1 ($3): $4"
+ck "WHAT-MASH-NEEDS.md has 6 fenced blocks (got $NW)" test "$NW" -eq 6
+extra "WHAT-MASH-NEEDS.md has 6 fenced blocks"
+# info string and pattern were checked above (WINFO, WSIG); this lists them
+wb() { # N DISPOSITION REASON
+    printf '| W%s | `%s` | %s | %s |\n' "$1" "${WSIG[$1]}" "$2" "$3" >>"$T/wrows.md"
 }
 : >"$T/wrows.md"
-wb 1 "" "documented, not run" 'listen: "127.0.0.1:4222"' \
-    "sample server.conf text, not a command"
-wb 2 sh "RUN (fresh container)" '--port 4333 --start' "create on another port"
-wb 3 sh "documented, not run" '--dir "$HOME/srv/mash-nats"' \
-    "needs $HOME/srv made first; --dir is the same code path the default run used"
-wb 4 sh "documented, not run" '--mash-config "$HOME/mash-conf"' \
-    "only changes the closing text; the folder itself is mashctl's (shimmed here)"
-wb 5 sh "documented, not run" 'MASH_CONFIG_DIR="$HOME/mash-conf"' \
-    "a real adopt writes mashctl state; shimmed mashctl in this harness"
-wb 6 "sh person" "person block, never run by the agent path" '--listen 0.0.0.0' \
-    "typed confirmation; opens every interface: not run"
-wb 7 sh "documented, not run (read-only --dry-run)" 'adopt --dry-run --server' \
-    "uses long flags (--system-credentials) the in-tree mashctl does not have yet"
-ck "WHAT block 7 is a --dry-run" grep -qF -- '--dry-run' "$T/wblk/07.sh"
+wb 1 "documented, not run" "sample server.conf text, not a command"
+wb 2 "RUN (fresh container)" "create on another port"
+wb 3 "documented, not run" "needs a srv folder made first; --dir is the same code path the default run used"
+wb 4 "documented, not run" "only changes the closing text; the folder itself is mashctl's (shimmed here)"
+wb 5 "documented, not run" "a real adopt writes mashctl state; shimmed mashctl in this harness"
+wb 6 "documented, not run (read-only --dry-run)" "uses long flags (--system-credentials) the in-tree mashctl does not have yet"
+ck "WHAT block 6 is a --dry-run" grep -qF -- '--dry-run' "$T/wblk/06.sh"
 RC=0
-extra "WHAT-MASH-NEEDS.md: all 7 blocks classified"
+extra "WHAT-MASH-NEEDS.md: all 6 blocks classified"
 
 # W2 run: the --port 4333 create, in a fresh container (helper copied in from
 # this tree; its sha256 is checked against the guide's pin first)
@@ -1036,8 +1024,8 @@ BWHY=""
 RC=0
 norm() { sed -E 's/([0-9A-Fa-f]{2}:){31}[0-9A-Fa-f]{2}/<FINGERPRINT>/g;s/\b[0-9a-f]{8}( [0-9a-f]{8})+\b/<FINGERPRINT>/g'; }
 ck "closing text captured" test -s "$CL"
-ck "closing text <= 80 columns (the adopt line cannot wrap)" test \
-    "$(grep -v 'adopt --from' "$CL" | awk 'length > 80' | grep -c .)" -eq 0
+ck "closing text <= 80 columns (the adopt line and a lone URL cannot wrap)" test \
+    "$(grep -v 'adopt --from' "$CL" | awk 'length > 80 && !/^ *[^ ]+$/' | grep -c .)" -eq 0
 ck "closing text has no \$HOME" test "$(grep -cF '$HOME' "$CL")" -eq 0
 ck "closing text uses /home/alice paths" grep -q '/home/alice/' "$CL"
 ck "closing text has one 'mashctl adopt --from' line" test \
@@ -1069,6 +1057,18 @@ ck "embedded closing text is not empty" test -s "$T/out/embedded.txt"
 ck "embedded closing text equals the fresh output (CA fingerprint masked)" \
     diff -q "$T/out/embedded.norm" "$T/out/closing.norm"
 extra "embedded closing text equals the fresh create output"
+
+# neither document may carry the removed features (after any --update-closing)
+: >"$T/skill-moved.txt"
+BWHY=""
+RC=0
+for w in --retire-keys --backup --upgrade --enable-boot --disable-boot \
+    --linger --listen --host MASH_INSECURE_PLAINTEXT; do
+    grep -nF -- "$w" "$SKILL" "$WHAT" >>"$T/skill-moved.txt"
+    ck "neither document contains $w" bash -c \
+        "! grep -qF -- '$w' '$SKILL' '$WHAT'"
+done
+extra "neither document contains --retire-keys, --backup, --upgrade, --enable-boot, --disable-boot, --linger, --listen, --host, MASH_INSECURE_PLAINTEXT"
 
 SKILLSHA_AFTER=$(sha256sum "$SKILL" | cut -d' ' -f1)
 say "SKILL.md sha256 used for the blocks: $SKILLSHA"
@@ -1126,17 +1126,20 @@ say "writing the report"
     as COPIES with MASH_ENDPOINT=o.g.n rewritten to MASH_OWNER=o
     MASH_GROUP=g MASH_NAME=n. The guide text itself was checked to contain
     MASH_ENDPOINT and none of MASH_TLS_CA, MASH_OWNER, MASH_GROUP, MASH_NAME.
-(f) Block 33 (What next, `endpoint create acme.demo.design`) ran before the
-    remove blocks (it needs the server). Block 25 (restore) ran first as
-    written (refuses, the directory exists), then after the test stopped
-    the server and renamed the directory to mash-nats.moved; block 26
-    (--upgrade) then made bin/ itself. The person blocks (19, 29) ran on a
-    pty; 29 also ran once BEFORE 19 to check it refuses. Blocks 27 and
-    28 (boot) were not run (no systemd).
+(f) Doc 1 ran on ONE container, in order. The WHAT-MASH-NEEDS.md --port
+    example (W2) ran in its own fresh container; its other blocks are
+    documented, not run (table below). The owner-mismatch endpoint create
+    (FACT 1) ran through the shim, which drops --creds-out after checking its
+    path. --remove ran once with no terminal (nothing typed, stdin
+    /dev/null: refuses, exit 4) and then on a pty with the path typed; the
+    two rm blocks ran on a pty with nothing to type. In the tamper tests the
+    install block (13) is never run after a failed verify. The shim serves
+    SHA256SUMS (the genuine hashes plus two arm64 lines); the stand-in gh is
+    the only gh, so "verified" means the stand-in's hash comparison.
 (g) The image is debian:bookworm-slim plus sudo; user alice (uid 1000,
     NOPASSWD sudo); each block ran as `podman exec --user alice ... env -i
     HOME=/home/alice PATH=/usr/local/bin:/usr/bin:/bin bash -c '<block>'`;
-    blocks 19 and 29 ran under `script -qec` (a pty) with the directory
+    the person blocks ran under `script -qec` (a pty) with the directory
     typed after a 5 second wait. The tamper tests used a second image with
     the prerequisites already installed.
 (h) The CA fingerprint in the embedded closing text is masked in the
@@ -1153,9 +1156,12 @@ __SUBS__
   all only through the shims above.
 - adopt copying ca.pem (0644) into mashctl's folder: the in-tree mashctl
   does not; block 12's five-entry order was checked on a model folder.
-- --enable-boot and --disable-boot, a real reboot.
+- A real reboot (the guide says there is no start at boot).
 - Any distribution other than Debian 12 (bookworm), and Ubuntu.
 __NV__
+    printf '\n## Removed-feature scan (lines of either document naming a removed flag; empty is good)\n\n```\n'
+    cat "$T/skill-moved.txt"
+    printf '```\n'
     printf '\n## Real output (trimmed)\n'
     sec() { # TITLE FILE [LINES]
         [ -f "$2" ] || return 0

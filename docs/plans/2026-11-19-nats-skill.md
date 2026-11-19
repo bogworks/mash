@@ -293,3 +293,19 @@ file format or protocol):
   no step deletes live keys (INV-004).
 - Held under the freeze: the rev 12 release-file install route (helper and
   skill as attested release files), boot-unit work, new flags.
+
+## DRAFT7 update (2026-11-19, after decision 264 / contract rev 15)
+
+- Helper cut to create (--start), --start, --stop, --check, --remove.
+  Removed: --backup, --upgrade, --retire-keys and the archive, boot units,
+  --linger, --host/--listen. Loopback only. --remove needs a terminal
+  (exit 4 without), stops the server, deletes only its own directory.
+- Guide: one loss sentence ("no backup and no restore"); one what-next
+  (README quick start); install as short per-file `gh attestation verify
+  --bundle` blocks; removal blocks marked `sh person`; the standing risk
+  (an agent you run as yourself reads every key; use a sandbox) stated
+  once under "What this opens"; jargon defined where first met.
+- Reference doc: settings, other answers, long-form adopt, other machines
+  (not supported), own server, loss, simplified secrets table.
+- Dropped: the rev 12 release-file install route, SR11-5 baseline list and
+  the exit-4 credentials text (held for Randy).

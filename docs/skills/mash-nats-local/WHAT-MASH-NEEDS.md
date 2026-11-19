@@ -7,17 +7,24 @@ something was lost. Names here follow that guide: owner `acme`, group
 `demo`, server directory `$HOME/mash-nats`, mashctl's folder
 `$HOME/.config/mash`.
 
+**Other machines are not supported yet.** One machine, one user is the
+supported case. Section 4 says what is planned.
+
+**Versions.** Everything here was tested with nats-server v2.15.1 and nsc
+v2.15.0 only. No other version is tested; the minimum that works is not
+known.
+
 Contents: 1 the settings, limits and users mash needs; 2 other answers
 with worked examples; 3 the long form of adopt; 4 other machines; 5 your
-own NATS server; 6 backup and loss.
+own NATS server; 6 loss; 7 where every secret is.
 
 ## 1. The settings mash needs
 
 Read this if you already run a NATS server and want mash to use it,
-or want to know what the script's `server.conf` gives. mash needs seven
-things from the server, and `mashctl adopt` checks them. These are the
-real lines the script wrote in the test (account ids and JWTs, long,
-are shortened):
+or want to know what the script's `server.conf` gives. mash needs the
+seven things listed under the example from the server, and `mashctl adopt`
+checks them. These are the real lines the script wrote in the test (account
+ids and JWTs, long, are shortened):
 
 ```
 listen: "127.0.0.1:4222"
@@ -88,7 +95,7 @@ The two users `mashctl adopt` is given:
 
 Also needed: the operator signing seed (`--operator-key`, starts `SO`)
 and the account identity seed (`--account-key`, starts `SA`), each as a
-0600 file. mashctl keeps both (see part 3, the file list).
+0600 file. mashctl keeps both (see section 7).
 
 ## 2. Other answers, worked
 
@@ -130,25 +137,9 @@ MASH_CONFIG_DIR="$HOME/mash-conf" "$HOME/.local/bin/mashctl" adopt --from "$HOME
 
 The same rules apply to that folder: private, never copied or backed up.
 
-**A name other than this machine's loopback** (`--host`, `--listen`).
-`--host NAME` (repeatable) adds a DNS name or IP to the server's
-certificate, so clients on other machines can verify it; the first is used
-in the URL. `--listen ADDRESS` is where the server accepts connections.
-Naming an address that is not 127.0.0.1, ::1 or localhost makes the server
-listen on EVERY network interface of this machine, whichever address you
-named (the script's confirmation says so). Only a firewall you set up
-yourself limits who can reach the port. The script never opens one. It
-asks you to type the address and port at a terminal; an agent must not type
-that for the person:
-
-```sh person
-bash "$HOME/mash-setup/nats-local-setup.sh" --dir "$HOME/mash-nats" --owner acme --host nats.example.org --listen 0.0.0.0 --start
-```
-
-Read it back: "this server will accept connections from the network on port
-4222; anyone who can reach it still needs credentials, and the keys in
-mashctl's folder can make any identity, so that folder must stay on one
-machine you trust".
+**A server for other machines** is not made by this script: it listens
+on 127.0.0.1 only. A server reachable from other machines is the
+operator's own (section 5).
 
 **A different JetStream size**: `--js-disk 500M`. **A different account
 name**: `--account NAME` (adopt must then be told the same name, section 3).
@@ -175,45 +166,44 @@ credentials also exits 4.
 
 ## 4. Other machines
 
-Another machine reaches the server only if you chose `--host` and
-`--listen` (section 2) and opened the port yourself. What the other
-machine's user needs: the CA file (`ca.pem`, public), the server address,
-and an agent's own credentials. They do NOT get mashctl's folder.
-
-The person on the other machine confirms the CA by typing its fingerprint,
-read to them over a channel you trust (the closing box of the script shows
-it as eight groups of eight). The command, `mash credential install`, is
-planned for 0.5.6 and is not in the tree yet: do not invent it. Until it
-exists, this path is not available; one machine is the supported case.
-
-Signing: making endpoints requires the operator and account seeds, which
-live only in mashctl's folder. With mash across machines those seeds must
-live on one machine you trust and only that machine runs `mashctl endpoint
-create`. That is a design question for 0.5.6, not something this guide sets
-up.
+Not supported yet. The script's server listens on 127.0.0.1 only. A server
+other machines can reach is the operator's own (section 5). What another
+machine's user would need: the CA file (`ca.pem`, public), the server
+address and an agent's own credentials, never mashctl's folder. They would
+confirm the CA by typing its fingerprint, read to them over a channel you
+trust (the closing box shows it as eight groups of eight). The command for
+that, `mash credential install`, is planned and is not in the tree: do not
+invent it. Making endpoints needs the operator and account seeds, which
+live only in mashctl's folder, so only one machine you trust may run
+`mashctl endpoint create`.
 
 ## 5. Your own NATS server
 
 If you run NATS already, you need nothing from this script. Give it the
-seven settings in section 1: operator mode, TLS, JetStream with limits in
+seven things in section 1: operator mode, TLS, JetStream with limits in
 the account JWT, a full resolver, a system account, one admin user for the
 mash account and one system user, then the long form of adopt (section 3).
 `--dry-run` tells you what is missing. Run it before anything else, and do
 not edit a running server's configuration without the person's yes.
 
-## 6. Backup and loss
+## 6. Loss
 
-What is where, and what losing it costs, is the table in part 3 of
-`SKILL.md`. In short:
+There is no backup and no restore; if this machine is lost, set up again
+and reissue every endpoint. What each lost file costs is the table in
+section 7. If only the server directory is lost, the keys in mashctl's
+folder open nothing; set up again. Certificates last ten years; there is
+no renew command: set up again.
 
-- Server directory, backed up with `--backup`: the server, its mail and its
-  accounts. Restore: put the backup in an empty place, `--upgrade`
-  (it creates `bin/`), `--start`, `--check`.
-- mashctl's folder is never backed up (it holds keys that make any
-  agent). If it is lost, there is no restore: set up again and reissue every
-  endpoint. If only the server directory is lost, the keys in mashctl's
-  folder open nothing; set up again.
-- `ca.key` and `nsc/` are in the archive `--retire-keys` wrote. Lose the
-  archive and the server keeps running; you cannot make a new server
-  certificate or new accounts by hand.
-- Certificates last ten years; there is no renew command: set up again.
+## 7. Where every secret is, and what you lose
+
+| What | Where | If it is gone |
+|---|---|---|
+| `ca.key` (CA private key) | server dir | no new server certificate; existing ones keep working |
+| `nsc/` (key store) | server dir | no new accounts or users by hand; mashctl and the server keep working |
+| `export/` (copies of four files) | server dir | nothing: mashctl holds its own copies |
+| mashctl's folder: operator seed, account seed, system and admin credentials, agent creds | `$HOME/.config/mash` | mashctl cannot make, revoke or administer agents; set up again and reissue every endpoint |
+| `server.key` | server dir | the server cannot start; set up again |
+| `jetstream/` (all mail) | server dir | every stored message |
+
+A process running as you can read all of these. mash does not defend
+against that; if it matters to you, run the agent in a sandbox.
