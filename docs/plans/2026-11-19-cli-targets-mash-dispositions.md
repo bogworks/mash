@@ -133,3 +133,147 @@ Rules in DRAFT2: R1 (line 30), R2 (line 33), R3 (line 42), R4 (line 56), R5 (lin
 
 Counts: 118 rows; FIXED 103; CHANGED OTHERWISE 14; NOT TAKEN 1.
 
+## Review of DRAFT2 (critic round 2)
+
+Date: 2026-11-19. Source: the second independent CLI-UX review, of DRAFT2 of
+the target outputs and the quick start (sections A to F of the review: command
+by command, `mash status`, the quick start, consistency, the five most serious
+problems, the open questions and the verdict). Target document: the same file
+(now DRAFT3). Line references are by section, not by line, because the file was
+rewritten. The planner's rulings L1 to L12 bind this round; they are named in
+the last column where a row rests on one. Section C (the README quick start)
+and the verdict on it are NOT answered here: another agent rewrites the quick
+start from the packet blocks. Dispositions as above.
+
+| # | finding (review section) | disposition | where in DRAFT3, or why not |
+|---|---|---|---|
+| 2.1 | Summary 1: one address lives in three places (owner in config, group and name in two variables); every hint carries the MASH_GROUP/MASH_NAME prefix; status says "no endpoint chosen" right after install | FIXED | L4: one setting, `MASH_ENDPOINT` / `"endpoint"`, one installed endpoint needs none; R13, section 3; no block carries a prefix |
+| 2.2 | Summary 2: rule 26 broken wholesale, 28 errors begin `mash:` (and one success line) | FIXED | L6: every error starts `error:`, R4; the serve success line keeps `mash:` and errors no longer share it (row A.12) |
+| 2.3 | Summary 3: `mash status` does not deliver version, server alive/encrypted/last seen, config, creds and nothing else | FIXED | L5: R11 and every status screen in section 5 |
+| 2.4 | Summary 4: the README cannot be followed today and is not minimal | NOT TAKEN | Out of scope for this task: the quick start is rewritten by another agent from the packet blocks (keys listed in the report); the review's section C is not answered here |
+| 2.5 | Summary 5: the mail tables only fit toy names and show urgency, "you" and never-seen in different forms | FIXED | R14, L7: real-name blocks `inbox-long`, `read-long`, `who-long`; one `URGENCY` column; `*` and footer; `now` and `never` |
+| 2.6 | Summary, measured: six lines at 77-80 columns, all built from toy names; real names push the inbox tables and two hints past 80 | FIXED | Real-name case (group 16, names 18 characters) tested in inbox, read and who; widest printed text is 80; section 9 |
+| 2.7 | A.1 key create: repetition (file names on line 1 and again in the rows) | FIXED | Step A: line 1 names no file |
+| 2.8 | A.1 key create: rule 29, say why on the first line | FIXED | Step A: "Created a key pair that proves this endpoint is who it says it is." |
+| 2.9 | A.1 key create: next hint does not mention the same-machine shortcut (`--make-key`) | NOT TAKEN | `--make-key` makes its own key, so offering it after `key create` would leave the new bob.key unused; stated under Step A, Changes |
+| 2.10 | A.1 key create: error P22 starts `mash:` and has no runnable fix line | FIXED | Step A refusals: `error:` and `mash key create --out <new file>.key` |
+| 2.11 | A.1 key create: missing outputs (`--out` omitted, `.pub` exists but not `.key`, directory not writable) | FIXED | Step A refusals, four blocks (exit 2, 1, 6) |
+| 2.12 | A.1 key create: `--detail` label `NATS name` is a label that names nothing | FIXED | `NATS word  seed (NATS's word for the private key)` in Step A, `--detail` |
+| 2.13 | A.2 mashctl endpoint create: first line is a verdict, good | FIXED | Kept (Step B) |
+| 2.14 | A.2 mashctl endpoint create: "Wrote ... It holds no secret" is the best line; keep | CHANGED OTHERWISE | Kept as "The token says, signed by your server, that bob.pub is this endpoint." plus `(holds no secret)` on the table row, because the same review asks for one layout for files written (next row) |
+| 2.15 | A.2 mashctl endpoint create: inconsistent with the `--make-key` form, which prints a `wrote` table; pick one layout | FIXED | Step B and the `--make-key` block both use the `wrote`/`copied`/`kept` table (L11) |
+| 2.16 | A.2 mashctl endpoint create: "agent's machine" vs "endpoint's machine"; one noun | FIXED | "the endpoint's machine" everywhere (Step B, R3) |
+| 2.17 | A.2 mashctl endpoint create: no mashctl error shown (endpoint exists, bad public key, owner not this server's, unreachable, bad address) | NOT TAKEN | mashctl is the CLI team's file; this document shows it only where mash hands over (section 4). The errors belong to their targets file |
+| 2.18 | A.3 credential install: first line is a verdict, yes | FIXED | Kept |
+| 2.19 | A.3 credential install: "Keep bob.key: it is the private half" vs R175 and the cleanup; does `.creds` hold the private key | FIXED | L9, verified in `internal/keycred`: it does. Section 4 states once: keep bob.key as the backup; every block says "They hold bob's private key and the token. Keep bob.key as the backup." |
+| 2.20 | A.3 credential install: `copied  ca.pem to ...` breaks the path column | FIXED | `copied  ~/.config/mash/ca.pem  (from ca.pem, mode 644)`, Step C |
+| 2.21 | A.3 credential install: the next hint carries `MASH_GROUP=demo MASH_NAME=bob` because of two variables; the tool read the address from the token | FIXED | `NEXT: ... mash status` with no variable (L4); a second endpoint on the machine gets the export plus `mash status` (`install-second`) |
+| 2.22 | A.3 credential install: P120-122 the fix describes the command and wraps (rule 28 vs 30) | FIXED | L10: the full command is printed on its own line and is exempt from 80 columns (94 columns, section 9) |
+| 2.23 | A.3 credential install: "(it starts BEGIN CERTIFICATE)"; print the literal | FIXED | `-----BEGIN CERTIFICATE-----` on its own line (install-refuse) |
+| 2.24 | A.3 credential install: `mash: mash connects only over TLS` stutters | FIXED | `error: mash connects only over TLS; nats://myserver:4222 is not encrypted.` |
+| 2.25 | A.3 credential install: "choose another place with --out" is unexplained | FIXED | Dropped from the refusal; the fix names `--force` |
+| 2.26 | A.3 credential install: `--force` repoints the server for every endpoint on the machine; say so | CHANGED OTHERWISE | L11 splits the flags: `--replace` overwrites config.json (the refusal names both servers), `--force` replaces only the credentials file, so the repointing is a separate, named flag |
+| 2.27 | A.3 credential install: `--detail` has `storage name acme_demo_bob` unexplained and `token expires never (provisional)` leaks a note | CHANGED OTHERWISE | "provisional" removed from the block (the PROVISIONAL status stays in the prose and Q13); `storage name` stays, detail only, labelled (R3) |
+| 2.28 | A.3 credential install: two names for the setup guide (`tls-and-clusters.md`, `nats-setup.md`) | FIXED | `docs/tls-and-clusters.md`, the file that exists (section 9) |
+| 2.29 | A.3 credential install: cert-mismatch `mash send` error has the command inline and wrapped | FIXED | Command on its own line: `cp <server ca file> ~/.config/mash/ca.pem` (trust block) |
+| 2.30 | A.5 send: success lines are verdicts and short, good | FIXED | Kept |
+| 2.31 | A.5 send: `--detail` has no blank line after the result | FIXED | send-detail has the blank line |
+| 2.32 | A.5 send: default kind `task` makes "lunch at noon?" a work assignment | FIXED | L7: the kind of a plain message is `message`; the code's five kinds are listed; N12 (needs the contract) |
+| 2.33 | A.5 send: `mash send acme/demo/alice` accepted silently, a second form | FIXED | L3 and R3: refused with the dotted form in the fix (send-refuse) |
+| 2.34 | A.5 send: group and name not set, the fix leads with Claude launch and an unlabelled column-0 line | FIXED | The variables are gone; the "several endpoints, none chosen" refusal leads with the shell form and has no column-0 line |
+| 2.35 | A.5 send: `mash send bob` error is good, but the sender is also bob | FIXED | Sender is alice in that block |
+| 2.36 | A.5 send: missing outputs: server unreachable, empty message, `--file` not found | FIXED | Three new send-refuse blocks |
+| 2.37 | A.5 send: missing outputs: message too large; recipient with no running session | CHANGED OTHERWISE | A `recipient` row in `send --detail` is shown as PROVISIONAL; the size limit was not checked in the source: N9 |
+| 2.38 | A.6 inbox: header line is a verdict with counts, good | FIXED | Kept |
+| 2.39 | A.6 inbox: width with real names, no truncation rule, `--wide` shown nowhere | FIXED | R14: shared prefix said once, MESSAGE cut at 80, `--wide` new (N8), `inbox-long` block |
+| 2.40 | A.6 inbox: `--detail` truncates the message more than the default | FIXED | `--detail` puts the message under its row, with the whole line to itself (R7: never less) |
+| 2.41 | A.6 inbox: urgency is in STATE in inbox and in KIND in read | FIXED | One `URGENCY` column and row, values urgent/normal (L7) |
+| 2.42 | A.6 inbox: `older ones:` is a new hint label | FIXED | `NEXT:` with `mash inbox --before 56` |
+| 2.43 | A.6 inbox: no next hint after a list with new mail | CHANGED OTHERWISE | `NEXT: read the urgent one:` is printed when mail is new; this reverses DRAFT2's R4 (no hint under a listing) |
+| 2.44 | A.6 inbox: leading-space table vs `who` at column 0; pick one | FIXED | R14: every table starts two columns in |
+| 2.45 | A.6 inbox: the trust legend should appear in the default view when a row is not verified | FIXED | `inbox-trust`: TRUST column and legend appear only then |
+| 2.46 | A.6 inbox: the README mock says `12m ago` for mail sent one command earlier | FIXED | The inbox mockups use `10s ago` and `8s ago` (README itself is not in scope) |
+| 2.47 | A.7 read: no first-line verdict, output starts with an indented row | FIXED | `#2 from acme.demo.bob, 8s ago.` |
+| 2.48 | A.7 read: `--detail` drops the next hint the default had | FIXED | `--detail` keeps the `NEXT:` |
+| 2.49 | A.7 read: `answers  no earlier message` is awkward | FIXED | `reply to  -` |
+| 2.50 | A.7 read: `storage name acme_demo_bob` in a message read from alice's inbox; send `--detail` says alice's is `acme_demo_alice` | FIXED | Each value is labelled whose it is: "(the sender's)" in read, "(the recipient's)" in send |
+| 2.51 | A.7 read: does read mark it read? say so | FIXED | `state  read (it was new; reading marks it read)` in `--detail` |
+| 2.52 | A.8 who: `(you)` in an unheaded fourth column | FIXED | L7: `*` marker and the footer `* you` |
+| 2.53 | A.8 who: you are listed `offline` while running the command; name the column for what it measures | CHANGED OTHERWISE | STATE stays (it is the MCP `state` field and the `--online` filter); "online means a Claude Code session is serving that endpoint" is said under the table and in help |
+| 2.54 | A.8 who: LAST SEEN `-` for online and for never | FIXED | `now` and `never`; `-` is not used (L7) |
+| 2.55 | A.8 who: `it.prod.carol` appears to `acme.demo.bob` against the group definition; owner `it` and group `prod` unintroduced | FIXED | The cast has `acme.lab.carol`; `who` shows no other owner's endpoints (L7); the directory scope is N13 |
+| 2.56 | A.8 who: `--by-group` has no header row and repeats owner and group | FIXED | Each group has a header row (`who-by-group`); the full address stays in every row so grep works |
+| 2.57 | A.8 who: `--detail` shows `host  bf2`, never introduced | FIXED | `runs on  myserver` (the cast's machine) |
+| 2.58 | A.8 who: empty `who` unreachable in practice and its hint has no label | FIXED | `NEXT: create one on the server:` with the command on its own line; the block stays for a listing run by a registered endpoint with no peers |
+| 2.59 | A.9 prompt: the waiting line must go to stderr; the answer is unquoted while read quotes sender text; pick one | FIXED | Section 2 (streams) and the prompt block: waiting line on stderr, answer raw on stdout; `> ` quoting only where an agent reads |
+| 2.60 | A.9 prompt: missing timeout, partial answers, Ctrl-C, exit codes | CHANGED OTHERWISE | Timeout (15m, from `cli_timeout`) and exit codes shown; partial answers and Ctrl-C are not specified (N9) |
+| 2.61 | A.10 version: `0.5.5` in a 0.5.6 mockup, and seven other places | FIXED | `mash 0.5.6` and `0.5.6` in every mockup; only the real Before blocks keep the old number (L9) |
+| 2.62 | A.10 version: `--detail` is not a two-column table; add the plugin version | FIXED | `mash version --detail` is two rows, `commit` and `plugin` (the plugin row is PROVISIONAL, N9) |
+| 2.63 | A.11 plugin export: the step after the two commands (start Claude Code with the flag) is not printed | FIXED | Third line of the `NEXT:`: `claude --dangerously-load-development-channels plugin:mash@mash` |
+| 2.64 | A.12 serve: the success line begins `mash:`, same prefix as every error | CHANGED OTHERWISE | Errors now start `error:` (L6), so `mash:` marks only the success line; a log is scanned for `error:` |
+| 2.65 | A.12 serve: "start Claude Code with the group in the environment it starts in" is hard to parse | FIXED | The group variable is gone; the refusal is two pasteable lines (`export`, then `claude ...`) |
+| 2.66 | A.13 hook: newest first in the hook, oldest first in `inbox` and MCP | FIXED | One order, oldest first, in the hook, `inbox` and MCP (section 5, hook) |
+| 2.67 | A.14 help: environment variables are not listed (`MASH_URL`, `MASH_CONFIG_DIR`, ...); status should say which are set | FIXED | `help-settings` block; `settings` row of `status --detail`; section 3 |
+| 2.68 | A.14 help: `--wide` is in the rules and nowhere in the tool | FIXED | `mash inbox --wide` and `mash help inbox` |
+| 2.69 | A.14 help: `--reply-to #` placeholder; use `N` | FIXED | `--reply-to N` in help |
+| 2.70 | A.14 help: `credential create --seed --jwt` migration error should name the renamed flags | FIXED | "it is now credential install; --seed is --key and --jwt is --token" |
+| 2.71 | A.14 help: bare `mash`, state exit code 2 | FIXED | Section 2 table, row 2 |
+| 2.72 | A.15 MCP: one label per thing (instance/name, address/endpoint, seq/#, done/final, in_reply_to/--reply-to/answers) | FIXED | The mapping table at the head of section 6; `instance` becomes `name`, `address` becomes `endpoint`, `final` becomes `done` |
+| 2.73 | A.15 MCP: example data disagrees with itself (members/endpoints, last_seen null vs 3h ago, commit short vs full) | FIXED | Counts are in `detail` and agree with the cast; bob's `last_seen` is 3h before the clock; the commit is short in both |
+| 2.74 | A.15 MCP: `tagged` unexplained | FIXED | The send table says what it means (`kind.Tag`) |
+| 2.75 | A.16 colour, streams, exit codes specified nowhere; colour decoration only, off off-TTY and with NO_COLOR; hints to stderr | FIXED | Section 2. Decision: `NEXT:` is part of the success output, so stdout; `error:`, `fix:`, `warning:` on stderr; `status` is a report on stdout |
+| 2.76 | B. status, owner's ask: version missing from the default screen | FIXED | `version` is the first row (R11) |
+| 2.77 | B. status, owner's ask: last seen missing in the human output | FIXED | Second line of the server row |
+| 2.78 | B. status, owner's ask: nothing else; `group` and `claude code` rows are extra | FIXED | Removed from the default; group counts in `--detail`; the Claude warning is a `warning:` line under the rows (R11) |
+| 2.79 | B. status, state by state: Claude warning's hint is a URL, not a step | FIXED | `fix:` with the `claude --dangerously-load-development-channels plugin:mash@mash` command |
+| 2.80 | B. status, state by state: nothing configured says one thing twice; `<url>` vs `tls://<server>:4222` | CHANGED OTHERWISE | `server NOT SET / not checked` and `config MISSING (path)` are different facts; the placeholder stays `<url>` in the one command |
+| 2.81 | B. status, state by state: no endpoint chosen, two commands and placeholders the tool could fill | FIXED | `status-choose`: the tool names the installed endpoints and fills the example |
+| 2.82 | B. status, state by state: no group; first line says `bob`, placeholder `<group>` | FIXED | The state no longer exists (R13) |
+| 2.83 | B. status, state by state: no credentials, no pointer to `mash key create` if no key exists | FIXED | Said under `status-nocreds` |
+| 2.84 | B. status, state by state: not reachable does not say where the address came from | FIXED | The fix names `"server"` in config.json, or `MASH_SERVER` when the variable is set |
+| 2.85 | B. status, state by state: credentials refused, "run install again" fails without `--force` | FIXED | The fix carries `--force` (`status-refused`) |
+| 2.86 | B. status, state by state: certificate not trusted: yes / yes | FIXED | Kept, in the new layout (`trust`) |
+| 2.87 | B. status, state by state: plain URL allowed: yes / yes | FIXED | Kept, as a report (`status-plain-warning`) |
+| 2.88 | B. status, state by state: plain URL refused makes status an error instead of a report; the fix says "unset MASH_URL if it is set" | FIXED | `status-plain-refused`: a report, exit 1; the fix names the variable the address came from (L5, L6) |
+| 2.89 | B. status, state by state: unknown option: yes / yes | FIXED | Kept with `error:` |
+| 2.90 | B. status, other defects: the row set changes by state (endpoint row appears, group row disappears) | FIXED | R11: the same four rows in every state |
+| 2.91 | B. status, other defects: the server is shown as `myserver:4222` without scheme | FIXED | Address as configured, `tls://myserver:4222` |
+| 2.92 | B. status, other defects: two warning forms (`WARNING:` in the table, `warning:` below) | FIXED | One form, the `warning:` line under the rows |
+| 2.93 | B. status, other defects: "last seen" for a one-shot CLI is "now"; make it mean something via `mash serve` | CHANGED OTHERWISE | `now` after a sign-in, else the time `mash serve` recorded, else `never`; the recording is new (N10) |
+| 2.94 | B. status, other defects: `--detail` has `name rule` and `relays seen` unexplained; move version up | FIXED | `version` is a default row; both rows carry an explanation in `status-detail` |
+| 2.95 | B. status, rewritten target (healthy and unreachable), exit 0 / 1 | CHANGED OTHERWISE | Adopted: verdict `<endpoint>: mail works.`, the four rows, exit 0/1. Differences: the server row is two lines (the address can be long), and unreachable says `last seen 3h ago` not `last reached` |
+| 2.96 | C. README quick start: every step-by-step finding, the action count table, the minimal flow (about 30 bullets) | NOT TAKEN | Out of scope by the brief ("ignore C"); the quick start is rewritten from the packet blocks. Two C notes are met by the targets anyway: status right after step 4 (L4) and a single guide name |
+| 2.97 | D. consistency: an endpoint address has seven forms | FIXED | One dotted form (R3, L3) |
+| 2.98 | D. consistency: the server address has several forms (`--server`, `"url"`, `MASH_URL`, JSON `server`, with and without scheme) | FIXED | `--server`, `"server"`, `MASH_SERVER`, JSON `server.address`, always with the scheme (section 3) |
+| 2.99 | D. consistency: endpoint name is `name` in human text and `instance` in JSON | FIXED | `name` in both |
+| 2.100 | D. consistency: message number is `#2`, `seq`, "their number", "number" | FIXED | Mapping table: `#` and "number" in text, `seq` in JSON; "their number" only in `send --detail` |
+| 2.101 | D. consistency: reply link is `--reply-to`, `in_reply_to`, "answers", "(it answers #2)" | FIXED | `--reply-to N`, `in_reply_to`, `reply to` row; the send confirmation "it answers #2" is a sentence |
+| 2.102 | D. consistency: urgency is STATE in inbox, KIND in read | FIXED | `URGENCY` in both |
+| 2.103 | D. consistency: `-` for online and never-seen, `never` in the README | FIXED | `now` and `never` |
+| 2.104 | D. consistency: "endpoint's machine" vs "agent's machine" | FIXED | "the endpoint's machine" |
+| 2.105 | D. consistency: setup guide named `docs/tls-and-clusters.md` and `docs/nats-setup.md` | FIXED | `docs/tls-and-clusters.md` |
+| 2.106 | D. consistency: version 0.5.5 in 8 places of a 0.5.6 mock | FIXED | No 0.5.5 in a mockup |
+| 2.107 | D. consistency: hint labels (`next:`, `fix:`, `older ones:`, `warning:`, `WARNING:` in a row, `next: See`, unlabelled column-0 lines) | FIXED | R4: `NEXT:`, `fix:`, `error:`, `warning:`; continuation indented |
+| 2.108 | D. consistency: error prefix `mash:` on 28 errors; rule 26 says `error:` | FIXED | `error:` in every block |
+| 2.109 | D. consistency: status failure hint is `next:` in status and `fix:` elsewhere for the same fault | FIXED | `fix:` for every failure; `NEXT:` only after a success |
+| 2.110 | D. consistency: time forms (`12m ago`, `3h ago`, `2 s`, `41 ms`, `1 s ahead`, ...) | FIXED | R12: `12m ago`, `2s`, `41ms`, absolute `2026-11-19 00:21 UTC` in `--detail` |
+| 2.111 | D. consistency: sizes `14 B` with a space but durations without or with | FIXED | R12: no space in both (`14B`, `2s`) |
+| 2.112 | D. consistency: tables (inbox indented, who at column 0, `--by-group` headerless, `(you)` unheaded) | FIXED | R14 |
+| 2.113 | D. consistency: paths `~/...` by default and absolute in `--detail`; state it as the rule | FIXED | R12 |
+| 2.114 | D. consistency: order, inbox oldest first and agent mail newest first | FIXED | Oldest first everywhere |
+| 2.115 | D. consistency: tense and capitals consistent; "Labels lower case except `next: See`" | FIXED | Results keep past tense with a capital; labels are `fix:`, `error:`, `warning:` and `NEXT:` by L1 |
+| 2.116 | D. consistency: exit codes not specified; duplicate `--id` exit 0; `prompt` timeout its own code | CHANGED OTHERWISE | Section 2 table; duplicate `--id` stays 0 (it is not a failure); the `prompt` timeout exits 1, with no code of its own (3 to 5 stay unused) |
+| 2.117 | E.1 One address, three places; the tool asks for what it knows; question on `MASH_GROUP`/`MASH_NAME` compatibility | FIXED | L4 (planner): one variable, auto-pick for one installed endpoint, the `status-choose` screen for several, compatibility dropped with no alias; R13, section 3 |
+| 2.118 | E.2 Errors do not begin `error:`; fixes are described, wrapped and false; rule 28 vs 30 | FIXED | L6 and L10: runnable true fixes; commands are exempt from 80 columns and kept short; continuation indented |
+| 2.119 | E.3 `mash status` is not the screen the owner asked for | FIXED | R11 and section 5, status; every scenario of L5 has a block |
+| 2.120 | E.4 The README quick start cannot be followed, and is not minimal | NOT TAKEN | Out of scope (see section C row) |
+| 2.121 | E.5 The mail tables fit only toy names and say one fact two ways | FIXED | R14 and the three real-name blocks |
+| 2.122 | Open questions answered: "never" vs "-" for never-seen | FIXED | `never`, `now`; `-` means not applicable (who --detail) |
+| 2.123 | Open questions answered: README dependency on `docs/nats-setup.md`; rename one of the two | FIXED | The targets name `docs/tls-and-clusters.md`; the README is not in scope |
+| 2.124 | Open questions answered: `.creds` contents (P66 vs R175) | FIXED | Verified: it holds the private key; one recommendation, section 4 |
+| 2.125 | Open questions answered: rule 28 vs rule 30 | FIXED | Commands win (L10, R9) |
+| 2.126 | Open questions answered: `MASH_GROUP`/`MASH_NAME` compatibility is the owner's call | FIXED | Planner: removed, no compatibility (R13) |
+| 2.127 | F. Verdict, command output: not ready; first steps are one address in one variable, `error:` and true fixes, status rebuilt, table width and one-form rules, version 0.5.6 and exit codes | FIXED | All five steps are in DRAFT3: R13, R4, R11, R14, L9 and section 2 |
+| 2.128 | F. Verdict, README: not ready; publish the release and the guide, ship mashctl as an asset, use `--make-key`, end with an agent mailing, clean up the server | NOT TAKEN | Out of scope: not about the target outputs |
+
+Counts: 128 rows; FIXED 110; CHANGED OTHERWISE 12; NOT TAKEN 6.
