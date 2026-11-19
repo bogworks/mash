@@ -82,13 +82,21 @@ done
 cat >"$T/pty.py" <<'__PTY_PY__'
 # pty.py TYPED CMD...: run CMD on a pseudo-terminal; when it asks for a
 # typed confirmation, send TYPED (or ^D for __eof__, nothing for __none__).
+# When it asks "Owner name (...): " or "Owner name (...) [x]: ", send the
+# next answer of TYPED split on "|" (an empty field is an empty answer);
+# a TYPED that starts with "owner:" is only for those prompts.
 import os, pty, select, sys
 typed, cmd = sys.argv[1], sys.argv[2:]
+owners = []
+if typed.startswith('owner:'):
+    owners = typed[6:].split('|')
+    typed = '__none__'
 pid, fd = pty.fork()
 if pid == 0:
     os.execvp(cmd[0], cmd)
 out = b''
 sent = False
+oseen = 0
 while True:
     r, _, _ = select.select([fd], [], [], 30)
     if not r:
@@ -100,6 +108,10 @@ while True:
     if not d:
         break
     out += d
+    if owners and out.count(b'Owner name (') > oseen and (
+            out.endswith(b'): ') or out.endswith(b']: ')):
+        oseen += 1
+        os.write(fd, owners.pop(0).encode() + b'\n')
     if not sent and out.endswith(b'\n> ') and b'Type this exactly' in out:
         sent = True
         if typed == '__eof__':
@@ -377,11 +389,29 @@ t "help: lists exactly the kept options, no others" \
 t "help: names no removed option" \
     '! hasany --backup --upgrade --retire-keys --keys-retired --enable-boot \
         --disable-boot --linger --host --listen systemd retire'
-run "$HELPER" --dir "$W/x1"
-t "create without --owner refused" \
-    '[ $RC -ne 0 ] && has "needs --owner" && [ ! -e $W/x1 ]'
-run "$HELPER" --dir "$W/x1" --owner alice --stop
-t "create options with a subcommand refused" '[ $RC -ne 0 ]'
+t "help: --owner is optional, defaults to the login name, checked by later modes" \
+    'has "nats-local-setup.sh [create] --dir DIR [--owner NAME] [options]" &&
+     has "(default: your login name; create asks on a terminal)" &&
+     has "it must equal the owner in DIR/mash-setup.json"'
+mkdir -p "$W/idshim"
+printf '%s\n' '#!/bin/bash' 'case "$1" in -un) echo Bad.Login;;' \
+    '*) exec /usr/bin/id "$@";; esac' >"$W/idshim/id"
+chmod +x "$W/idshim/id"
+OWNALLOW="lower-case letters, digits and single hyphens, starting with a letter, at most 32 characters"
+run env PATH="$W/idshim:$PATH" "$HELPER" --dir "$W/x1"
+t "owner: no --owner, no terminal, invalid login: exit 2, hint, nothing made" \
+    '[ $RC -eq 2 ] && has "no --owner given and your login name '"'"'Bad.Login'"'"'
+        is not a valid owner name (allowed: $OWNALLOW). Pass --owner NAME." &&
+     [ ! -e $W/x1 ]'
+runpty "owner:|" env PATH="$W/idshim:$PATH" "$HELPER" --dir "$W/x1"
+t "owner: invalid login on a terminal, empty answers: says why, asks twice, refuses" \
+    '[ $RC -eq 2 ] && has "Your login name '"'"'Bad.Login'"'"' cannot be used as an
+        owner name (allowed: $OWNALLOW)." &&
+     has "Owner name (the first part of every address): " &&
+     has "Try once more." && has "Pass --owner NAME." && [ ! -e $W/x1 ]'
+run "$HELPER" --dir "$W/x1" --port 4999 --stop
+t "create options with a subcommand refused" \
+    '[ $RC -ne 0 ] && has "apply to create only" && [ ! -e $W/x1 ]'
 run "$HELPER" --dir "$W/x1" --stop --check
 t "two subcommands refused" '[ $RC -ne 0 ] && has "one subcommand"'
 run "$HELPER" --dir "$W/x1" --owner alice --yes-expose
@@ -463,11 +493,12 @@ sed -E 's/eyJ[A-Za-z0-9_.-]+/<JWT>/g' "$D/server.conf" >"$W/server.conf.redacted
 t "server.conf has no monitoring port and quotes the paths" \
     '! grep -q "http" $D/server.conf && grep -q "cert_file: \"$D/server.pem\"" \
      $D/server.conf'
-# the printed adopt and init commands, run unmodified in a fresh bash -c
-note "closing output: printed adopt/init run unmodified"
-grep -E '^    (MASH_CONFIG_DIR=[^ ]+ )?mashctl adopt --from ' \
-    "$W/happy.out" >"$W/adopt.cmd" || true
+# the closing no longer prints adopt/init; the end-to-end check below builds
+# the adopt command itself (harness shim) so the exports are still proven
+note "closing output, then adopt of the exported files by the harness"
+printf '    mashctl adopt --from %s\n' "$(printf %q "$D")" >"$W/adopt.cmd"
 oldinit "$W/adopt.cmd" >"$W/init.cmd"
+sed -n '/^Done\./,$p' "$W/happy.out" >"$W/happy.closing"
 FPHEX=$(openssl x509 -in "$D/ca.pem" -noout -fingerprint -sha256 |
     sed 's/^[^=]*=//' | tr -d ':' | tr 'A-F' 'a-f')
 FPGOT=$(awk '/^  CA fingerprint /{on=1; sub(/^  CA fingerprint +/,"")}
@@ -482,16 +513,10 @@ t "closing output: fingerprint is eight groups of eight hex digits" \
      sed -E "s/ +/ /g")"'
 t "closing output: no MASH_TLS_CA anywhere" \
     '! grep -q MASH_TLS_CA $W/happy.out'
-t "closing output: exactly one mashctl adopt --from line, right dir" \
-    '[ "$(grep -Ec "^ +(MASH_CONFIG_DIR=[^ ]+ )?mashctl adopt --from" \
-        $W/happy.out)" = 1 ] &&
-     [ "$(grep -c . $W/adopt.cmd)" = 1 ] &&
-     [ "$(cat $W/adopt.cmd)" = "    mashctl adopt --from $(printf %q "$D")" ]'
 t "closing output: no long adopt flags, no CA env" \
     '! grep -Eq -- "--(sys-creds|system-credentials|admin-creds|admin-credentials|operator-key|account-key)" \
         $W/happy.out &&
-     ! grep -Eq "MASH_TLS_CA|MASH_CA" $W/happy.out &&
-     ! grep -E "mashctl adopt --from" $W/adopt.cmd | grep -q -- "--ca "'
+     ! grep -Eq "MASH_TLS_CA|MASH_CA" $W/happy.out'
 t "closing output: hand-managed paragraph is gone" \
     '! tr -s " \n" " " <$W/happy.out | grep -qF "Hand-managed server"'
 t "closing output: no separate init step" '! grep -q "mashctl init" $W/happy.out'
@@ -531,31 +556,31 @@ t "closing output: the box says ca.key and the nsc store stay in DIR" \
      has_n "running as you can read them, and no step here moves them)" &&
      has_n "Binding 127.0.0.1 keeps the server off the network but does not" &&
      ! has_n "EXPOSED" && ! has_n "Exposed"'
-t "closing output: new fingerprint and adopt-user wording, no typing prompt" \
+t "closing output: fingerprint wording kept, Next is the README step 1 only" \
     'has_n() { tr -s " \n" " " <$W/happy.out | grep -qF -- "$1"; }
      has_n "The CA fingerprint is what a person on ANOTHER machine types to" &&
      has_n "trust this server; this machine does not ask for it." &&
-     has_n "Install mash and mashctl (part 4 of the guide), then adopt the" &&
-     has_n "server into mash as the same user that ran this script (it does" &&
-     has_n "not ask for the fingerprint and sets up mash" &&
-     has_n "README quick start from its \"launch a session\" step:" &&
-     grep -qxF "  https://github.com/bogworks/mash/blob/v0.5.6/README.md#quick-start-one-machine-no-account" \
-        $W/happy.out &&
-     ! has_n "claude plugin" && ! has_n "docs/install.md" &&
-     ! has_n "types the CA fingerprint" && ! has_n "type the CA fingerprint" &&
-     ! has_n "compare it with the CA fingerprint" &&
-     ! has_n "in their own terminal"'
+     [ "$(sed -n "/^Next/,\$p" $W/happy.closing | head -n 4)" = "Next: follow the README quick start, step 1:
+https://github.com/bogworks/mash/blob/v0.5.6/README.md#quick-start-one-machine-no-account
+
+Other commands: --stop, --start, --check, --remove, --help." ] &&
+     [ "$(grep -c "^Next" $W/happy.closing)" = 1 ] &&
+     ! grep -q "^Next$" $W/happy.closing'
+t "closing output: no mashctl, adopt, plugin, config-dir or placeholder text" \
+    '! grep -Eqi "mashctl|adopt|plugin|MASH_CONFIG_DIR|creds|install mash|<[a-z]+>" \
+        $W/happy.closing &&
+     ! grep -q "Start the server first" $W/happy.closing'
 t "closing output is short (<= 45 lines from Done. on)" \
     '[ "$(sed -n "/^Done\./,\$p" $W/happy.out | wc -l)" -le 45 ]'
-t "adopt and init commands found in the output" \
+t "adopt and init commands built for the harness" \
     '[ -s $W/adopt.cmd ] && [ "$(grep -c . $W/init.cmd)" = 1 ]'
 run env -i HOME=/home/alice PATH="$BINP:/usr/bin:/bin" \
     MASH_TLS_CA="$D/ca.pem" bash -c "$(oldadopt "$W/adopt.cmd")"
-t "printed 'mashctl adopt' succeeds in a fresh bash -c" \
+t "harness 'mashctl adopt' of the exports succeeds in a fresh bash -c" \
     '[ $RC -eq 0 ] && has "adopt"'
 run env -i HOME=/home/alice PATH="$BINP:/usr/bin:/bin" bash -c \
     "$(cat "$W/init.cmd")"
-t "printed 'mashctl init' succeeds in a fresh bash -c" '[ $RC -eq 0 ]'
+t "harness 'mashctl init' succeeds in a fresh bash -c" '[ $RC -eq 0 ]'
 run env -i HOME=/home/alice PATH="$BINP:/usr/bin:/bin" \
     mashctl endpoint create alice/dev/design --make-key
 run env -i HOME=/home/alice PATH="$BINP:/usr/bin:/bin" \
@@ -566,7 +591,7 @@ t "mail sent through the helper-made server" '[ $RC -eq 0 ]'
 run env -i HOME=/home/alice PATH="$BINP:/usr/bin:/bin" MASH_OWNER=alice \
     MASH_GROUP=dev MASH_NAME=review mash inbox
 t "mail arrives (Hello Review)" 'has "Hello Review"'
-t "agents' creds file written where the closing text says" \
+t "agents' creds file written in mashctl's folder" \
     '[ -f /home/alice/.config/mash/alice.dev.design.creds ]'
 note "--stop"
 run "$HELPER" --dir "$D" --stop
@@ -583,23 +608,105 @@ t "--start refuses when this dir already has a server" \
 run "$HELPER" --dir "$D" --stop
 
 # ------------------------------------------------- create without --start
-note "create without --start prints the start command"
+note "create without --owner and without a terminal uses the login name"
 np
 D=$W/nostart
-run "$HELPER" --dir "$D" --owner bob-1 --port $PORT --mash-config "$W/mcfg"
+run "$HELPER" --dir "$D" --port $PORT --mash-config "$W/mcfg"
 printf '%s\n' "$OUT" >"$W/nostart.out"
+sed -n '/^Done\./,$p' "$W/nostart.out" >"$W/nostart.closing"
+t "default owner, no terminal: rc 0, no prompt, login name alice used" \
+    '[ $RC -eq 0 ] && ! has "Owner name (" &&
+     has "owner alice (the first part of every address)" &&
+     grep -Eq "^  Owner +alice$" $W/nostart.out &&
+     [ "$(cat $D/mash-setup.json)" = "{\"server\":\"tls://localhost:$PORT\",\"owner\":\"alice\",\"account\":\"MASH\"}" ]'
 t "create without --start rc 0, offers the start command" \
     '[ $RC -eq 0 ] && has "Start the server first" && has "--start"'
-t "--mash-config reaches the closing text and MASH_CONFIG_DIR" \
-    'has "MASH_CONFIG_DIR=$W/mcfg mashctl adopt --from $W/nostart" &&
-     has "mashctl'"'"'s folder ($W/mcfg; set MASH_CONFIG_DIR"'
+t "the printed start command has no placeholder and runs as printed" \
+    '! grep -q "<[a-z]*>" $W/nostart.out &&
+     grep -qxF "  $(printf %q "$HELPER") --dir $D --start" $W/nostart.closing'
+t "closing: Next after the start block; no mashctl, adopt, MASH_CONFIG_DIR" \
+    '[ "$(grep -c "^Next: follow the README quick start, step 1:$" \
+        $W/nostart.closing)" = 1 ] &&
+     ! grep -Eqi "mashctl|adopt|plugin|MASH_CONFIG_DIR|creds" \
+        $W/nostart.closing &&
+     [ "$(sed -n "/^Start the server first/,\$p" $W/nostart.closing | wc -l)" \
+        -le 12 ]'
 t "mash-config dir is not created by the helper" '[ ! -e $W/mcfg ]'
-t "closing text names the agents' creds file" \
-    'has "bob-1.<group>.<agent>.creds" &&
-     ! has "claude plugin marketplace add" &&
-     ! has "docs/install.md"'
+note "create asks for the owner once on a terminal"
+np
+D=$W/askowner
+APORT=$PORT
+runpty "owner:carol-2" "$HELPER" --dir "$D" --port $PORT
+printf '%s\n' "$OUT" >"$W/askowner.out"
+t "owner: pty prompt shows the login default; a typed answer is used" \
+    '[ $RC -eq 0 ] &&
+     has "Owner name (the first part of every address) [alice]: " &&
+     has "owner carol-2 (the first part of every address)" &&
+     grep -Eq "^  Owner +carol-2$" $W/askowner.out &&
+     grep -q "\"owner\":\"carol-2\"" $D/mash-setup.json'
+np
+D=$W/askowner2
+runpty "owner:" "$HELPER" --dir "$D" --port $PORT
+t "owner: an empty answer on a terminal takes the login name" \
+    '[ $RC -eq 0 ] && has "[alice]: " &&
+     has "owner alice (the first part of every address)" &&
+     grep -q "\"owner\":\"alice\"" $D/mash-setup.json'
+D=$W/askbad
+runpty "owner:Bad_Name|ALICE" "$HELPER" --dir "$D"
+t "owner: two bad typed answers refused (exit 2), what is allowed, nothing made" \
+    '[ $RC -eq 2 ] && has "is not a valid owner name. Allowed: $OWNALLOW." &&
+     has "Try once more." && has "Pass --owner NAME." &&
+     [ "$(printf "%s" "$OUT" | grep -c "Owner name (")" = 2 ] && [ ! -e $D ]'
+runpty "owner:Bad_Name|dave" "$HELPER" --dir "$D" --port $PORT
+t "owner: a bad answer then a good one is accepted (asked once more)" \
+    '[ $RC -eq 0 ] && has "Try once more." &&
+     has "owner dave (the first part of every address)"'
+runpty "owner:" "$HELPER" --dir "$W/askbad2" --owner zed --port $PORT
+t "owner: with --owner given the person is not asked" \
+    '! has "Owner name (" && [ $RC -eq 0 ] && grep -q "\"owner\":\"zed\"" \
+        $W/askbad2/mash-setup.json'
+note "later modes: --owner must equal the recorded owner"
+D=$W/askowner
+SNAP=$(snap "$D")
+for m in --check --stop --start; do
+    run "$HELPER" --dir "$D" --owner alice $m
+    t "owner mismatch $m: refused first, exit 1, nothing changed" \
+        '[ $RC -eq 1 ] && has "owner alice differs from the owner this
+            directory was made with (carol-2); nothing was changed" &&
+         [ "$(snap "$D")" = "$SNAP" ]'
+done
+runpty "$D" "$HELPER" --dir "$D" --owner alice --remove
+t "owner mismatch --remove: refused before any prompt, nothing removed" \
+    '[ $RC -eq 1 ] && has "owner alice differs from the owner this directory
+        was made with (carol-2); nothing was changed" &&
+     ! has "Type this exactly" && [ "$(snap "$D")" = "$SNAP" ]'
+run "$HELPER" --dir "$D" --owner carol-2 --check
+t "owner match --check: proceeds as normal" \
+    '[ $RC -eq 0 ] && ! has "differs"'
+run "$HELPER" --dir "$D" --owner carol-2 --start
+t "owner match --start (existing dir): starts the server" \
+    '[ $RC -eq 0 ] && has "requires TLS" && ! has "differs"'
+run "$HELPER" --dir "$D" --owner alice --stop
+t "owner mismatch --stop with a running server: refused, server still up" \
+    '[ $RC -eq 1 ] && has "differs from the owner" &&
+     ss -ltnH | grep -q "127.0.0.1:$APORT"'
+run "$HELPER" --dir "$D" --owner carol-2 --stop
+t "owner match --stop with a running server: stops it" \
+    '[ $RC -eq 0 ] && has "stopped pid"'
+run "$HELPER" --dir "$D" --owner Bad_Name --check
+t "owner given to a later mode is only compared, never validated as new" \
+    '[ $RC -eq 1 ] && has "differs from the owner"'
+run "$HELPER" --dir "$D" --owner carol-2 --port 4999 --check
+t "--port stays create-only for later modes" \
+    '[ $RC -ne 0 ] && has "apply to create only"'
+mkdir -p "$W/noowner/d"
+run "$HELPER" --dir "$W/noowner/d" --owner alice --check
+t "owner given but the directory records none: refused, not a made setup" \
+    '[ $RC -ne 0 ] && has "has no owner"'
+OUT=$(cat "$W/nostart.out")
 t "other commands line printed, no removed option anywhere" \
-    'has "Other commands: --stop, --start, --check, --remove, --help." &&
+    'grep -qxF "Other commands: --stop, --start, --check, --remove, --help." \
+        $W/nostart.out &&
      ! hasany --backup --upgrade --retire-keys --enable-boot --disable-boot \
         --linger --host --listen retire systemd'
 # the adopt --from line is one unbroken line: a long DIR may exceed 80
@@ -610,7 +717,7 @@ t "S2: closing output states the residual race" 'has "$RES"'
 note "arguments"
 for o in Alice 'a--b' '1abc' 'a-' 'abcdefghijklmnopqrstuvwxyz0123456789'; do
     run "$HELPER" --dir "$W/ow" --owner "$o"
-    t "owner '$o' refused" '[ $RC -ne 0 ] && has "--owner" && [ ! -e $W/ow ]'
+    t "owner '$o' refused" '[ $RC -eq 2 ] && has "--owner" && [ ! -e $W/ow ]'
 done
 run "$HELPER" --dir relative/dir/x --owner alice
 t "relative --dir refused" '[ $RC -ne 0 ] && has "absolute"'
@@ -643,8 +750,8 @@ t "F4: server.conf quotes the spaced path and nats-server -t parses it" \
      "$D/bin/nats-server" -t -c "$D/server.conf" 2>&1 | grep -q valid'
 run "$HELPER" --dir "$D" --check
 t "F4: --check passes for the spaced dir" '[ $RC -eq 0 ]'
-t "F4: printed commands quote the space with %q" \
-    'grep -qF "mashctl adopt --from /home/alice/m\\ ash" "$LOGF"'
+t "F4: printed paths quote the space with %q" \
+    'grep -qF "Done. The setup is in /home/alice/m\\ ash." "$LOGF"'
 run "$HELPER" --dir "$D" --stop
 
 # ------------------------------------------------------------- F2 paths

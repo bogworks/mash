@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # nats-local-setup.sh: stand up and look after a local operator-mode NATS
 # server for mash on Debian or Ubuntu (Linux x86-64). It does not use
-# mashctl and never writes to mashctl's folder; create ends by printing the
-# `mashctl adopt` command to run.
+# mashctl and never writes to mashctl's folder; create ends by pointing to
+# the README quick start.
 #
 # Layout rule for this file: indent with 4 spaces (no tabs) and keep every
 # source line and every printed line within 80 columns. Printed text goes
@@ -52,7 +52,7 @@ NSC_SHA=7d55eda757dc9f233675a3038fcf8779bcda99753b1603f7009fc8537e126b7e
 
 usage() {
     cat <<'EOF'
-usage: nats-local-setup.sh [create] --dir DIR --owner NAME [options]
+usage: nats-local-setup.sh [create] --dir DIR [--owner NAME] [options]
        nats-local-setup.sh --dir DIR --start | --stop | --check | --remove
 
 Linux x86-64 (amd64), Debian or Ubuntu only. Needs: curl tar unzip openssl
@@ -65,10 +65,14 @@ root-owned keys). The server listens on 127.0.0.1 only.
                    writable by group or others (so not under /tmp: pick a
                    directory under your home). create makes DIR itself
                    (mode 0700) and refuses an existing path
-  --owner NAME     create: your mash owner name (lower-case letters,
-                   digits, single hyphens, starts with a letter, max 32)
+  --owner NAME     your mash owner name, the first part of every address
+                   (default: your login name; create asks on a terminal).
+                   Lower-case letters, digits, single hyphens, starts with
+                   a letter, max 32. With --start, --stop, --check or
+                   --remove it must equal the owner in DIR/mash-setup.json
   --mash-config D  where mashctl keeps its files (default
-                   $HOME/.config/mash); used only in the closing text
+                   $HOME/.config/mash); only --remove's closing text
+                   names it
   --port N         client port (default 4222)
   --account NAME   account for mash (default MASH)
   --operator NAME  operator name (default mash-operator)
@@ -268,6 +272,7 @@ did() { wrap '    did: ' '         ' "$*"; }
 N=0
 DIR=''
 OWNER=''
+OWNER_GIVEN=0
 MASHCFG=''
 MASHCFG_GIVEN=0
 PORT=4222
@@ -322,7 +327,7 @@ setmode() {
 while [ "$#" -gt 0 ]; do
     case $1 in
     --dir) need_val "$@"; DIR=$2; shift 2 ;;
-    --owner) need_val "$@"; OWNER=$2; CREATE_OPTS=1; shift 2 ;;
+    --owner) need_val "$@"; OWNER=$2; OWNER_GIVEN=1; shift 2 ;;
     --mash-config) need_val "$@"; MASHCFG=$2; MASHCFG_GIVEN=1; shift 2 ;;
     --port) need_val "$@"; PORT=$2; CREATE_OPTS=1; shift 2 ;;
     --account) need_val "$@"; ACCOUNT=$2; CREATE_OPTS=1; shift 2 ;;
@@ -340,10 +345,12 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 
-# --start with --owner (or other create options) is create-and-start; alone
-# it starts an existing setup.
+# --start with create options, or with a DIR that does not exist yet, is
+# create-and-start; with an existing DIR (and --owner, if any, only checked)
+# it starts that setup.
 if [ "$START" -eq 1 ]; then
-    if [ -z "$MODE" ] && [ "$CREATE_OPTS" -eq 0 ]; then MODE=start
+    if [ -z "$MODE" ] && [ "$CREATE_OPTS" -eq 0 ] && [ -e "$DIR" ]; then
+        MODE=start
     elif [ -z "$MODE" ]; then MODE=create
     elif [ "$MODE" != create ]; then
         die "--start cannot be combined with --$MODE"
@@ -351,8 +358,7 @@ if [ "$START" -eq 1 ]; then
 fi
 [ -n "$MODE" ] || MODE=create
 if [ "$MODE" != create ] && [ "$CREATE_OPTS" -eq 1 ]; then
-    die "--owner, --port, --account, --operator and --js-disk apply to" \
-        "create only"
+    die "--port, --account, --operator and --js-disk apply to create only"
 fi
 [ "$MASHCFG_GIVEN" -eq 0 ] || [ "$MODE" = create ] || [ "$MODE" = remove ] ||
     die "--mash-config applies to create and --remove only"
@@ -409,6 +415,59 @@ case " $NEED " in *" openssl "*)
 esac
 
 # ----------------------------------------------------------- validation
+OWNER_WHAT="lower-case letters, digits and single hyphens, starting with a"
+OWNER_WHAT="$OWNER_WHAT letter, at most 32 characters"
+owner_ok() { [[ $1 =~ ^[a-z]([a-z0-9]|-[a-z0-9])*$ ]] && [ "${#1}" -le 32 ]; }
+# die2 TEXT...: a refusal about a value given, exit 2.
+die2() { wrap 'nats-local-setup: ' '    ' "$*" >&2; exit 2; }
+# ask_owner: set OWNER for create. Given with --owner: it must be valid.
+# Not given: the default is your login name (id -un); on a terminal the
+# person is asked once (a second time after a bad answer), without one the
+# default is used silently. A default that is not a valid owner name is
+# refused with a hint to pass --owner.
+ask_owner() {
+    if [ "$OWNER_GIVEN" -eq 1 ]; then
+        owner_ok "$OWNER" || die2 "--owner: $OWNER_WHAT"
+        return 0
+    fi
+    _login=$(id -un 2>/dev/null | safe) || _login=''
+    _tty=0
+    { [ -t 0 ] && [ -t 1 ]; } && _tty=1
+    if [ "$_tty" -eq 0 ]; then
+        owner_ok "$_login" ||
+            die2 "no --owner given and your login name '$_login' is not a" \
+                "valid owner name (allowed: $OWNER_WHAT). Pass --owner NAME."
+        OWNER=$_login
+        return 0
+    fi
+    _dflt=$_login
+    if ! owner_ok "$_login"; then
+        _dflt=''
+        wrap '' '' "Your login name '$_login' cannot be used as an owner" \
+            "name (allowed: $OWNER_WHAT)."
+    fi
+    _try=0
+    while :; do
+        _try=$((_try + 1))
+        if [ -n "$_dflt" ]; then
+            printf 'Owner name (the first part of every address) [%s]: ' \
+                "$_dflt"
+        else
+            printf 'Owner name (the first part of every address): '
+        fi
+        _ans=''
+        read -r _ans || _ans=''
+        [ -n "$_ans" ] || _ans=$_dflt
+        _shown=$(printf '%s' "$_ans" | safe)
+        if owner_ok "$_ans"; then OWNER=$_ans; return 0; fi
+        if [ "$_try" -ge 2 ]; then
+            die2 "'$_shown' is not a valid owner name (allowed: $OWNER_WHAT)." \
+                "Pass --owner NAME."
+        fi
+        wrap '' '' "'$_shown' is not a valid owner name. Allowed:" \
+            "$OWNER_WHAT. Try once more."
+    done
+}
 DIR=$(normpath --dir "$DIR")
 pathchars --dir "$DIR"
 ncomp=$(printf '%s' "$DIR" | tr -s '/' '\n' | grep -c .) || true
@@ -421,10 +480,6 @@ fi
 MASHCFG=$(normpath --mash-config "$MASHCFG")
 pathchars --mash-config "$MASHCFG"
 if [ "$MODE" = create ]; then
-    [ -n "$OWNER" ] || die "create needs --owner NAME (your mash owner)"
-    [[ $OWNER =~ ^[a-z]([a-z0-9]|-[a-z0-9])*$ ]] && [ "${#OWNER}" -le 32 ] ||
-        die "--owner: lower-case letters, digits and single hyphens," \
-            "starting with a letter, at most 32 characters"
     case $PORT in '' | *[!0-9]*) die "--port must be a number" ;; esac
     [ "$PORT" -ge 1 ] && [ "$PORT" -le 65535 ] ||
         die "--port out of range: $PORT"
@@ -436,6 +491,7 @@ if [ "$MODE" = create ]; then
     esac
     _d=${JSDISK%[KMGT]}
     case $_d in '' | *[!0-9]*) die "--js-disk: like 500M or 2G" ;; esac
+    ask_owner
 fi
 
 ME=$(id -u)
@@ -984,20 +1040,38 @@ need_marker() {
         "Refusing."
 }
 
+# owner_check: an --owner given with --start, --stop, --check or --remove
+# must equal the owner in DIR/mash-setup.json; checked before anything runs.
+owner_check() {
+    [ "$OWNER_GIVEN" -eq 1 ] || return 0
+    _rec=''
+    if [ -f mash-setup.json ] && [ ! -L mash-setup.json ]; then
+        _rec=$(sed -n 's/^.*"owner":"\([^"]*\)".*$/\1/p' mash-setup.json |
+            sed -n 1p | safe)
+    fi
+    [ -n "$_rec" ] ||
+        die "cannot check --owner $OWNER: $DIR/mash-setup.json has no owner" \
+            "recorded; nothing was changed"
+    [ "$_rec" = "$OWNER" ] ||
+        die "owner $OWNER differs from the owner this directory was made" \
+            "with ($_rec); nothing was changed"
+}
+
 case $MODE in
 # -------------------------------------------------------------- --stop
 stop)
-    enter "$DIR"; CWDID=$(inode_of .); mklog; need_marker
+    enter "$DIR"; CWDID=$(inode_of .); mklog; need_marker; owner_check
     srv_stop
     exit 0 ;;
 # ------------------------------------------------------------- --check
 check)
-    enter "$DIR"; CWDID=$(inode_of .); mklog
+    enter "$DIR"; CWDID=$(inode_of .); mklog; owner_check
     check_run || die "check: $fails problem(s)"
     exit 0 ;;
 # ------------------------------------------------------------- --start
 start)
-    enter "$DIR"; CWDID=$(inode_of .); mklog; need_marker; need_bin
+    enter "$DIR"; CWDID=$(inode_of .); mklog; need_marker
+    owner_check; need_bin
     [ -f server.conf ] || die "no $CONF: nothing to start"
     pid=$(srv_pid)
     [ -z "$pid" ] || die "a server for this directory is already running" \
@@ -1007,7 +1081,7 @@ start)
 # ------------------------------------------------------------- --remove
 remove)
     enter "$DIR"; CWDID=$(inode_of .)
-    need_marker
+    need_marker; owner_check
     need_terminal "--remove"
     printf '\n'
     wrap '' '' "--remove removes $DIR with everything in it (CA key, nsc" \
@@ -1264,29 +1338,13 @@ printf '\n'
 wrap '' '' "The CA fingerprint is what a person on ANOTHER machine types to" \
     "trust this server; this machine does not ask for it."
 
-printf '\nNext\n'
+printf '\n'
 if [ "$START" -ne 1 ]; then
-    printf '  Start the server first (you did not pass --start):\n\n'
-    OWNIND='    ' own_cmd --dir "$DIR" --start
+    printf 'Start the server first (you did not pass --start):\n\n'
+    own_cmd --dir "$DIR" --start
     printf '\n'
 fi
-CFGENV=()
-[ "$MASHCFG_GIVEN" -eq 0 ] || CFGENV=("MASH_CONFIG_DIR=$(Q "$MASHCFG")")
-wrap '  ' '  ' "Install mash and mashctl (part 4 of the guide), then adopt" \
-    "the server into mash as the same user that ran this script (it does" \
-    "not ask for the fingerprint and sets up mash's storage too):"
-printf '\n'
-if [ "${#CFGENV[@]}" -gt 0 ]; then
-    printf '    %s mashctl adopt --from %s\n' "${CFGENV[0]}" "$(Q "$DIR")"
-else
-    printf '    mashctl adopt --from %s\n' "$(Q "$DIR")"
-fi
-printf '\n'
-wrap '  ' '  ' "Adopt copies the CA, the keys and the credentials into" \
-    "mashctl's folder ($MASHCFG; set MASH_CONFIG_DIR to change that)." \
-    "Agents' credentials are written there as $OWNER.<group>.<agent>.creds."
-printf '\n'
-wrap '  ' '  ' "Then follow the README quick start from its \"launch a" \
-    "session\" step:"
-printf '  %s\n' "https://github.com/bogworks/mash/blob/v0.5.6/README.md#quick-start-one-machine-no-account"
+printf 'Next: follow the README quick start, step 1:\n'
+RM=https://github.com/bogworks/mash/blob/v0.5.6/README.md
+printf '%s\n' "$RM#quick-start-one-machine-no-account"
 printf '\nOther commands: --stop, --start, --check, --remove, --help.\n'
