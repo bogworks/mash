@@ -200,6 +200,7 @@ if [ "$CHECK" -eq 1 ]; then
     mode_is() { # FILE MODE
         [ -e "$1" ] || { bad "missing $1"; return; }
         m=$(stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1")
+        [ "${#m}" -le 3 ] || m=${m#?}   # ignore setgid/sticky bits
         if [ "$m" = "$2" ]; then good "$1 mode $m"
         else bad "$1 mode $m, want $2"; fi
     }
