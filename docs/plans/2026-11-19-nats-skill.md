@@ -231,3 +231,43 @@ the merge commit when this lands.
 Tests: `scripts/nats-local-setup_test.sh` (the helper, 194 cases, podman)
 and `scripts/mash-nats-local-guide_test.sh` (every code block of the guide
 run as its own `bash -c` in a fresh Debian container).
+
+## DRAFT5 update (2026-11-19)
+
+Sources: lead mails #10 (junior read on DRAFT4, 8 items) and #11
+(security reread rev4: S1-S10 and the custody truth); ctl mail #12/#13
+(adopt target: `--ca`, `--system-credentials`, `--admin-credentials`,
+`copied` lines, fingerprint typed by the person, `--dry-run` does not
+prompt, `MASH_ENDPOINT`).
+
+Guide changes:
+
+- Custody truth stated plainly: mashctl's folder keeps the operator and
+  account seeds and the system and admin credentials, because it signs
+  every agent with them; modes; what a holder can do; excluded from
+  backups and sync by name; a shared host or cross-machine use needs
+  signing elsewhere. Only the CA key and nsc's store move off.
+- Part 6 no longer backs up or restores mashctl's folder.
+- One install operation in one private 0700 folder (S5): pinned `gh`,
+  verify both programs against the bundle, install, verify the installed
+  copies again, move them to `rejected/` on failure. `go install` and
+  the plugin route are named as unverified developer routes.
+- Alice and Bob use `MASH_ENDPOINT` (S6); no `MASH_TLS_CA` in typed
+  commands (adopt copies the CA into config).
+- adopt (real) is a person block; the agent hands the exact command out
+  of its session (S1).
+- No `exit` in any block; expected output or its key lines for every
+  step; a table of FAIL lines with verified fixes.
+- Names written where each of `--backup`, `--retire-keys` and
+  `--enable-boot` writes.
+
+Helper v5 (S2 inode recheck, S3 server.log through the diagnostics
+filter, S7 refuse root, S9 compare archive to sources before
+`--retire-keys`), and a closing output aligned to ctl's adopt flags, with
+the CA sha256 fingerprint printed.
+
+Known limits, stated in the guide or the PR: no mashctl release asset
+exists yet and v0.5.6 attestation is untested; adopt's copy behaviour is
+ctl's DRAFT10 target; the same-user race is a residual; the systemd
+journal copy of `server.log` is unfiltered; reboot, Ubuntu and
+`enable-linger` as an ordinary user are untested.
