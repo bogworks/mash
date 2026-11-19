@@ -22,7 +22,7 @@ counted is `readme-step-count.md` (scratchpad), regenerated with the pages by
 | | lines | prose and headings | inside fenced blocks and markers | widest printed block | widest typed block |
 |---|---|---|---|---|---|
 | quick start | 631 | 333 | 298 | 87 columns | 88 columns |
-| Day 2 | 398 | 199 | 199 | 87 columns | 76 columns |
+| Day 2 | 401 | 199 | 202 | 87 columns | 76 columns |
 
 The quick start is 26 pastes, 77 lines and 10 other actions for the whole
 page; the first mail is sent after 11 pastes (52 lines) with the
@@ -50,7 +50,7 @@ requirements-page URL, the deliberate-refusal heading and the lead's question
 
 Not printed on purpose: the targets' `install-check.2` (the `gh` report; its widest
 line is 138 columns, over the 80 limit, and the junior found it frightening; the page
-describes it in one sentence), `status-noconfig` (97 columns: a line of its fix), and
+describes it in one sentence), `status-noconfig` (its fix line was 121 columns in the earlier draft, measured; the block now matches the status-views page and is wrapped, widest line 76, so width is no longer the reason; the pages do not reach that state), and
 the
 `key`, `server`, `install-confirm`, `install-main` and the other install blocks of the other-machine flow (they name
 `bob`, which the quick start has retired; the lead wants `carol` and no invented
@@ -325,7 +325,7 @@ Within Day 2
 
 ## Decisions beyond the brief
 
-- No `gh` report is printed and no `status-noconfig` block (80-column limit).
+- No `gh` report is printed (80-column limit) and no `status-noconfig` block (no step on the pages reaches that state).
 - The helper's long line is wrapped; the download paste changes directory and returns.
 - Step 5 gains two commands (remove the dead credentials files, show `status-none`);
   Step 3 gains one (`mash inbox` as the proof).

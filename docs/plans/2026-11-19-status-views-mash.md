@@ -816,7 +816,8 @@ fix: ask whoever runs your mash server which of the two it was. If the key
      was reissued, move the old credentials aside, then install the new key
      and token (the token is the server's signed approval of your key):
   mv ~/.config/mash/acme.demo.bob.creds ~/.config/mash/acme.demo.bob.creds.old
-  mash credential install --key <key file> --token <token file>
+  mash credential install --key <key file> --token <token file> \
+    --server <address> --ca <ca file> --account <account key>
 ```
 
 The endpoint was deleted (exit 4; needs the server to say "deleted", N11). Once

@@ -24,15 +24,15 @@ mail does NOT work: 2 endpoints are installed here and none is chosen.
   version      0.5.6
   server       reachable, encrypted
   config       ok
-  credentials  not checked (acme.demo.alice, acme.demo.bob)
+  credentials  not checked (no endpoint is chosen)
   mailbox      not checked
   session      not checked
 
-fix: mash never guesses between them. To use acme.demo.alice (or
-     acme.demo.bob), add this line to ~/.config/mash/config.json:
-    "endpoint": "acme.demo.alice"
-     For this shell only, and the Claude Code you start from it:
-  export MASH_ENDPOINT=acme.demo.alice
+fix: mash never guesses between acme.demo.alice and acme.demo.bob. To use
+     acme.demo.bob, set "endpoint" to "acme.demo.bob" in
+     ~/.config/mash/config.json. For this shell only, and the Claude Code
+     you start from it:
+  export MASH_ENDPOINT=acme.demo.bob
 ```
 
 Choose one for a shell with `export MASH_ENDPOINT=...`, or for the machine
@@ -214,9 +214,10 @@ acme.demo.bob: mail does NOT work: the server refused its credentials.
 
 fix: ask whoever runs your mash server which of the two it was. If the key
      was reissued, move the old credentials aside, then install the new key
-     and token:
+     and token (the token is the server's signed approval of your key):
   mv ~/.config/mash/acme.demo.bob.creds ~/.config/mash/acme.demo.bob.creds.old
-  mash credential install --key <key file> --token <token file> --account <account key>
+  mash credential install --key <key file> --token <token file> \
+    --server <address> --ca <ca file> --account <account key>
 ```
 
 No credentials on this machine:
@@ -350,12 +351,14 @@ acme.demo.bob: mail works (1 warning).
   server       reachable, encrypted
   config       ok
   credentials  ok
-  mailbox      3 waiting
+  mailbox      1 waiting
   session      online
 
 warning: an idle Claude Code session is not woken by new mail; the mail
          waits for its next prompt.
-fix: start Claude Code with the mash channel, from the terminal you want it in:
+fix: close the session, then start Claude Code with the mash channel (the
+     link that lets mash wake an idle session), from the terminal you want
+     it in:
   claude --dangerously-load-development-channels plugin:mash@mash
 ```
 

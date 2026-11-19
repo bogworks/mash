@@ -22,8 +22,8 @@ dotted address form, no slash form printed or accepted (L3, R3); one setting
 names the endpoint, `MASH_GROUP`, `MASH_NAME` and `MASH_OWNER` are removed
 (L4, R13, section 3); `status` has one fixed screen (L5, R11); errors start
 `error:`, hints are `fix:` and `NEXT:`, every fix is true (L6, R4); mail
-tables fit real names, one `URGENCY` column, kind `message`, `who` with `now`,
-`never` and `*` (L7, R14); one output contract (L8, section 2); no version
+tables fit real names, one `URGENCY` column, kind `message`, `now`
+and `never` (L7, R14; the `who` listing they were first set for is replaced by `mash endpoint status`); one output contract (L8, section 2); no version
 number but the build's (L9) and the `.creds` file holds the private key, so
 `bob.key` is the backup (L9, section 4); printed commands are exempt from 80
 columns (L10, R9); the CLI team's line shapes and delete text (L11, section 4;
@@ -55,9 +55,10 @@ N1. STILL OPEN. `mash inbox --before SEQ` (older messages) is a NEW flag: the
     source has only `--limit` and `--after`. The older-messages line needs it.
 N2. STILL OPEN. `mash send --reply-to SEQ` is a NEW flag (the MCP tool has
     `in_reply_to`); `mash read`'s `NEXT:` needs it.
-N3. `mash who`: `--by-group` DECIDED. `mash who <address>` for one
+N3. SUPERSEDED: `mash who` is removed (hard cut) and replaced by `mash endpoint status`.
+    (Was: `mash who`: `--by-group` DECIDED. `mash who <address>` for one
     endpoint's `--detail` block: STILL OPEN (small, new). The `*` mark with a
-    `* you` footer, `now` and `never`: DECIDED, planner (L7).
+    `* you` footer, `now` and `never`: DECIDED, planner (L7).)
 N4. DECIDED, planner (L4, supersedes DRAFT2). The JSON field for the name
     part is `name` (was `instance`), the full address is `endpoint`: the
     mapping is the table at the head of section 6.
@@ -84,8 +85,8 @@ N10. STILL OPEN (DRAFT12d: for `mash server status`, not `mash status`, which
     prints no time and no address). `last reached` is the time `mash serve` last
     recorded an answer from the server (state directory); that record is new.
     Without it the row can only say `checked <now>` or `never reached from
-    here`. (DRAFT4 called it "last seen"; the word now belongs to `mash who`
-    alone, D1.)
+    here`. (DRAFT4 called it "last seen"; the word is not used at all now, D1;
+    `mash who` is gone.)
 N11. STILL OPEN, needs the CLI team and the server. The agent's `status`
     can say DELETED only if the server's refusal tells a deleted endpoint
     from a reissued key; the shipped code does not.
@@ -115,15 +116,14 @@ S6. SUPERSEDED (decision 264): after a CA change on purpose the fix is to move
     the old CA copy aside and install again (R17).
 S7. DECIDED here. The older-messages hint under a long inbox is a sentence and
     a whole command (`Older messages are before #56. To see them:` then `mash
-    inbox --limit 2 --before 56`), not a `NEXT:` (listings print none). There is
-    no empty `who`: the caller is always listed.
+    inbox --limit 2 --before 56`), not a `NEXT:` (listings print none). 
 S8. DECIDED, the lead, D1; REPLACED in DRAFT12d by Z26. The server row of
     `status` never says "last seen"; it is `reachable, encrypted`, `NOT
     REACHABLE` or `not checked` with no address and no time (was `alive,
     encrypted (checked 09:42)`, `NOT REACHABLE (last reached 3h ago)`); MCP
     `server.state` is `reachable`, `not_reachable` or `not_checked`, with no
     `server.checked_at` or `server.last_reached`; `LAST
-    SEEN` means an endpoint's last mail activity in `mash who` only. The
+    SEEN` and `mash who` no longer exist (replaced by `mash endpoint status`). The
     server is checked in every state that has an address.
 S9. DECIDED, the lead, D2. A certificate the trusted CA did not sign is mash
     refusing the server, and the error says so: `mash does not trust the
@@ -134,7 +134,7 @@ S10. DECIDED, the lead, D4 (CLI rule 30 amended). A configuration fix prints
     shell only:` (R10).
 S11. DECIDED, the lead, D7. Removing access prints no NEXT (R19); `mashctl
     endpoint delete`'s quoted text has no NEXT.
-N13. STILL OPEN. `mash who` lists the endpoints of the caller's owner; the
+N13. STILL OPEN. The directory read behind `mash endpoint status` (it replaces `mash who`) lists the endpoints of the caller's owner; the
     directory's scope was read from the code in DRAFT2 and not re-checked.
 N14, N15. SUPERSEDED (decision 264): there is no install script. The install
     check is one pasted `gh attestation verify --bundle` (section 5a).
@@ -297,7 +297,7 @@ Z7. DECIDED here. The example server is `tls://localhost:4222` in every
     path (step B, step C, its first-install refusals and its trust screens) and
     in the `mash help credential install` example, where the host is the
     operator's `myserver` by design. The machine name `myserver` stays in the
-    `runs on` and `host` fields of `who`, where it is a host name, not an
+    `runs on` and `host` fields of `mash endpoint status`, where it is a host name, not an
     address. No separate "myserver vs localhost" rule is printed for readers;
     the cast paragraph says it once. The status-views page (not edited here)
     still shows `tls://myserver:4222` on its screens.
@@ -642,13 +642,13 @@ missing one is exit 2, before anything is read),
   not acknowledge and still counts. `mash status` and the MCP `status` show the
   count (`<n> waiting, no limit set` for a limit of 0), and `mash endpoint
   status` has no mailbox column (rev 26).
-- Listings (`inbox`, `who`) print no `NEXT:`.
+- Listings (`inbox`, `mash endpoint status`) print no `NEXT:`.
 - `mash status --debug` stays unsupported (exit 2); one flag, `--detail`.
 - `--detail` is added to `version`, `status`, `send`, `inbox`, `read`,
-  `who`, `key create`, and the help.
+  `key create`, and the help.
 - `mash --version` is new and prints what `mash version` prints.
-- `mash who --long` renamed `--detail` and shown as blocks; `--names`
-  removed; `--by-group` and `mash who <address>` added; `*` and the footer;
+- `mash who` removed (hard cut), replaced by `mash endpoint status`;
+  the `who` JSON changes below went with it;
   JSON field names change (`identity` to `endpoint`, `online` to `state`,
   `agent` to `program`, `lease.host` to `host`, `lease.version` to `version`,
   `instance` to `name`, the storage `name` to `key` behind detail).
@@ -694,7 +694,7 @@ acknowledgement).
 - Every printed command follows R9 and every configuration fix follows R10.
 - MCP: every tool returns JSON (text plus `structuredContent` and
   `outputSchema`); errors are an object with `code`, `message` and `fix`;
-  `who` loses `format`; `inbox` gains `after` and `before`; `status` gains
+  the `who` tool is removed; `inbox` gains `after` and `before`; `status` gains
   `mailbox`; `version` drops the `client:` line and `owner`; the field mapping
   at the head of section 6.
 - Colour (section 2): new in both tools; none exists today.
@@ -905,7 +905,7 @@ today), the real widths with a long home directory (the mockups use `~`), that
 `docs/skills/mash-nats-local/SKILL.md` and `scripts/nats-local-setup.sh` exist
 (they do not in this tree), the `https://github.com/bogworks/mash/blob/main/
 docs/install.md` address (no network check), the directory scope behind `mash
-who` (N13), the token's expiry (Q13), whether a hook that exits 1 behaves as
+endpoint status` (N13), the token's expiry (Q13), whether a hook that exits 1 behaves as
 intended in Claude Code (N6), that the server can say "deleted" (N11), and any
 command on a live server: nothing here was run, these are mockups. Also not
 checked: anything claude prints (UNVERIFIED, N16), that the 0.5.6 release
@@ -935,7 +935,7 @@ ruling 4 on the status-views page, DRAFT5b.)
 | (f4) Whether a rerun prints the full first-install screen (Z2), and whether moving only `config.json` or only `ca.pem` aside lets the same command succeed (Y6, Z4) | The `install-rerun` and trust screens show it | mashctl lane (ctl) and mash core | in a container, kill an install between the CA copy and the credentials, rerun and compare the screen; then move each file aside in turn and rerun |
 | (f5) The probe's "no responders" behaviour | It would make the one-address `online` check cost milliseconds | mash core | in an in-process test server with the production permission set, send a request to `agents.status.<owner>.<group>.<name>` with nothing serving; time the error |
 | (f6) Certificate fields (end date, issuer, the cause of a refusal) | The trust screens and a possible expiry warning name them | mash core | in a test server with a real certificate, read the fields with Go's x509 package and capture the error text for a wrong CA, a wrong host name and an expired certificate |
-| (f7) Two-owner isolation: another owner's endpoints cannot answer a probe, and `mash who` lists other owners' records | The `endpoint status` pattern never crosses owners; N13 says what the directory holds | mash core | a test server with the production permissions and two owners; try the probe and the directory read from each side |
+| (f7) Two-owner isolation: another owner's endpoints cannot answer a probe, and the directory read behind `mash endpoint status` lists other owners' records | The `endpoint status` pattern never crosses owners; N13 says what the directory holds | mash core | a test server with the production permissions and two owners; try the probe and the directory read from each side |
 | (f8) Cluster behaviour (more than one server) | ADR 0066 measured three servers, the maintainer runs one; a cluster needs a sentence about replicas | mash core | a three-server test cluster; run `mash status`, `server status` and a send; read the stream's `cluster.leader` |
 | (f9) Reserved storage (125MB in the run) | Not shown on any screen until it is known what counts toward it | mash core | create inboxes in a test server and compare the account figures before and after |
 | (g) The tombstone route of `mash read` (the route 0.5.6 keeps): a running serve acks within 250 ms; a starting serve acks on redelivery; the spool folder exists only where a session has run on this machine; tombstones of expired messages are pruned | The mailbox row's truth (the count drops when a session starts) depends on it; with no spool folder a read cannot be marked | mash core | in a test: `mash read` with serve running, with serve stopped then started, and on a machine where no session has run (what does `mash read` say?); expire a message and look for the leftover file |
