@@ -387,9 +387,9 @@ Dependencies on other lanes:
 - policy: `--stop`, `--start` and `--remove` and their confirmation are from
   the helper guide revision 5 (section 6 and "Remove it completely"). Their
   output is not shown: it is not in the mash targets.
-- Exit 4 means only "the server refused the credentials" (the lead's ruling);
-  "no terminal" for a confirmation is exit 2. mashctl's own targets still use
-  4 for the second: ctl must agree.
+- Exit 4 means not authorized, with two messages (the lead's ruling): the
+  server refused the credentials, or a person must run a confirmation at a
+  terminal (INV-004). mashctl's targets use 4 for both too.
 - `status-env-override` is a new block of the targets, added in the same
   change as this page (the freeze fix for the environment override).
 

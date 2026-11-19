@@ -704,3 +704,9 @@ rules are fixed; every item that adds a mechanism is HELD.
 
 Re-measured: 172 fenced blocks, 152 chosen by markers (85 keys); no printed text
 over 80 (the widest 80); the exemptions are as in section 9.
+
+## Lead's ruling on exit 4 (undoes CK6-T6's second half)
+
+| # | finding | disposition | where in the targets |
+|---|---|---|---|
+| RL-4 | The lead's ruling: "no terminal" for a confirmation goes BACK to exit 4. INV-004 sets it on purpose, overriding the CLI standard (contract security rev 2 B1). Exit 4 now means not authorized, for one of two causes, each with its own message text that states the reason: the server refused the credentials, or a person must run this at a terminal | FIXED (replaces the second half of CK6-T6) | Section 2 table (row 2 is usage only; row 4 has the two causes), R17, the install refusal lead-in and the `Refusals` heading, the `credential` summary, the mashctl hand-over sentence, the reset intro and its refusal lead-in, S12, X10, X16, section 8 (two places) and the packet intro (`mkpacket.py`). The credentials-refused `Exit 4` lead-ins and the report-only `status-env-override` block (T7) are unchanged. The mashctl delete refusal exits 4 again, as the mashctl targets say |
