@@ -9,9 +9,10 @@ Where the outputs come from:
 - **`mash` commands:** copied from core's targets, `docs/plans/2026-11-19-cli-targets-mash.md` (#820).
 - **NATS helper (Step 1-A):** taken from a real run of mash-policy's helper (#822) on 2026-11-19, with paths shortened
   to `~`.
-- **Commands marked `ctl`:** placeholders until ctl's mashctl targets land.
-- **Commands marked `core`:** placeholders until core's new config command lands.
-- **Commands marked `claude`:** Claude Code's own output, which the recording captures as it is.
+- **Blocks with a "Placeholder: mashctl" note:** stand-ins until ctl's mashctl targets land. The note sits above the
+  block, never in a command line, so every command can be pasted as it stands.
+- **The block with a "Placeholder: core" note:** a stand-in until core's new config command lands.
+- **Blocks with a "Captured from Claude Code" note:** Claude Code's own screens, which the recording captures as they are.
 
 Behind the script, the whole flow ran end to end on 2026-11-19 against main, with today's command names and outputs:
 - the helper, `mashctl adopt` and `mashctl init`;
@@ -96,7 +97,8 @@ The script uses these words:
 
 ### Step 0-A: Make a working directory (command 1 of 4)
 
-Every file this demo makes, apart from mash's own settings in `~/.config/mash`, goes in one directory.
+Every file this demo makes, apart from mash's own settings in `~/.config/mash`, goes in one directory. If you choose
+another directory, use it wherever this script says `~/mash-demo`.
 
 ```
 you@myserver$ mkdir ~/mash-demo && cd ~/mash-demo
@@ -115,8 +117,10 @@ Two settings come first:
 
 On macOS, use `shasum -a 256 -c` in place of `sha256sum -c`.
 
+*Assumes the 0.5.6 release ships `mashctl` and the NATS helper (see the Guide line below).*
+
 ```
-you@myserver$ P=linux-amd64 BIN=~/.local/bin                      ctl
+you@myserver$ P=linux-amd64 BIN=~/.local/bin
 you@myserver$ BASE=https://github.com/bogworks/mash/releases/download/v0.5.6
 you@myserver$ curl -fsSL -O $BASE/mash-$P -O $BASE/mashctl-$P \
                 -O $BASE/nats-local-setup.sh -O $BASE/SHA256SUMS
@@ -141,15 +145,17 @@ The install runs only after each of the three files has passed:
 If any check fails, nothing is installed and the last line says to stop. This chain was
 tested in a scratch directory: a missing line and a changed file each stopped it.
 
-`Guide:` `ctl` marks the one assumption here: that 0.5.6 ships `mashctl` and the NATS helper in the release, listed in
+`Guide:` The one assumption here is that 0.5.6 ships `mashctl` and the NATS helper in the release, listed in
 `SHA256SUMS`. v0.5.5 shipped `mash` only. Next we check what got installed.
 
 ### Step 0-C: Check the versions (command 3 of 4)
 
+*Placeholder: mashctl output until ctl's targets land.*
+
 ```
 you@myserver$ mash version
 mash 0.5.6
-you@myserver$ mashctl version                                     ctl
+you@myserver$ mashctl version
 mashctl 0.5.6
 ```
 
@@ -160,9 +166,11 @@ mashctl 0.5.6
 Claude Code loads mash as a plugin. The plugin starts `mash` inside each session and gives the model mash's tools:
 send, inbox, read, who, status.
 
+*Captured from Claude Code itself; mash prints no output for these commands.*
+
 ```
-you@myserver$ claude plugin marketplace add bogworks/mash      claude
-you@myserver$ claude plugin install mash@mash                  claude
+you@myserver$ claude plugin marketplace add bogworks/mash
+you@myserver$ claude plugin install mash@mash
 ```
 
 `Guide:` Next we start a NATS server for mash.
@@ -243,9 +251,11 @@ Files this step wrote, all in `~/mash-demo/nats`:
 naming the server, the owner `acme`, and the CA file that lets mash trust the server. It changes nothing on the
 server.
 
+*Placeholder: mashctl output until ctl's targets land.*
+
 ```
 you@myserver$ export MASH_TLS_CA=~/mash-demo/nats/ca.pem
-you@myserver$ mashctl adopt --server tls://localhost:4222 \       ctl
+you@myserver$ mashctl adopt --server tls://localhost:4222 \
                 --owner acme --account MASH \
                 --operator-key nats/export/operator.nk \
                 --account-key nats/export/account.nk \
@@ -262,8 +272,10 @@ NEXT: Prepare the server for mail with: mashctl init
 This creates the server's two shared tables, once: the directory of endpoints, and the record of which session is
 running as which endpoint.
 
+*Placeholder: mashctl output until ctl's targets land.*
+
 ```
-you@myserver$ mashctl init                                        ctl
+you@myserver$ mashctl init
 The server is ready for acme's endpoints.
 
 NEXT: Create an endpoint with: mashctl endpoint create acme/demo/bob
@@ -289,8 +301,10 @@ It holds three facts an agent needs:
 What it does not hold is which agent you are. Each Claude Code session says that with `MASH_GROUP` and `MASH_NAME`,
 as Part 6 shows.
 
+*Placeholder: core's config command output, when it lands.*
+
 ```
-you@myserver$ mash config show                                     core
+you@myserver$ mash config show
 Settings in ~/.config/mash/config.json:
 
   server   tls://localhost:4222
@@ -300,7 +314,7 @@ Settings in ~/.config/mash/config.json:
 You choose the agent per session: MASH_GROUP=demo MASH_NAME=bob
 ```
 
-`Guide:` `core` marks a placeholder: core is adding the command that writes and prints these settings, and its output
+`Guide:` The settings block is a placeholder: core is adding the command that writes and prints these settings, and its output
 will replace this block. Next we give Bob an endpoint.
 
 ---
@@ -348,15 +362,18 @@ NEXT: Send bob.pub to whoever runs your mash server (you, if that is this
 machine) and run: mashctl endpoint create acme/demo/bob --public-key bob.pub
 ```
 
-Files: `~/mash-demo/bob.key` (secret) and `~/mash-demo/bob.pub` (public).
+Files: `~/mash-demo/bob.key` (secret) and `~/mash-demo/bob.pub` (public). `bob.pub` replacing the `.key` ending is
+#820's target. Today's mash writes `bob.key.pub` for `--out bob.key`. Until the target ships, add `--pub-out bob.pub`.
 
 ### Step 3-B: Create Bob's endpoint on the server (command 2 of 4)
 
 The server's owner, you here, creates the endpoint `acme.demo.bob` from Bob's public key. The server signs a token
 saying that this public key, and only this one, is `acme.demo.bob`.
 
+*Placeholder: mashctl output until ctl's targets land.*
+
 ```
-you@myserver$ mashctl endpoint create acme/demo/bob \              ctl
+you@myserver$ mashctl endpoint create acme/demo/bob \
                 --public-key bob.pub
 Created endpoint acme.demo.bob.
 Wrote acme.demo.bob.token: your server's signed statement that bob.pub is
@@ -415,8 +432,10 @@ endpoint the short way.
 The agent runs on the machine that runs mashctl, so one command does all of Steps 3-A to 3-C. It makes Alice's
 private key, creates `acme.demo.alice`, and installs her credentials. No file has to be handed over.
 
+*Placeholder: mashctl output until ctl's targets land.*
+
 ```
-you@myserver$ mashctl endpoint create acme/demo/alice --make-key  ctl
+you@myserver$ mashctl endpoint create acme/demo/alice --make-key
 Made a private key for alice.      (alice.key, alice.pub in ~/.config/mash)
 Created endpoint acme.demo.alice.  (token: acme.demo.alice.token)
 Installed credentials for acme.demo.alice in ~/.config/mash.
@@ -447,8 +466,10 @@ Checked mash for acme.demo.alice.
 
 ### Step 4-C: List the endpoints (command 3 of 3)
 
+*Placeholder: mashctl output until ctl's targets land.*
+
 ```
-you@myserver$ mashctl endpoint list                                ctl
+you@myserver$ mashctl endpoint list
 ENDPOINT         CREATED
 acme.demo.alice  2026-11-19 10:02
 acme.demo.bob    2026-11-19 10:01
@@ -524,9 +545,11 @@ Step 0-D, and the model uses mash's tools.
 
 Open a second terminal. The two variables say which agent this session is. The owner comes from the settings file.
 
+*Captured from Claude Code itself; mash prints no output for these commands.*
+
 ```
 you@myserver$ cd ~/mash-demo
-you@myserver$ MASH_GROUP=demo MASH_NAME=bob claude                 claude
+you@myserver$ MASH_GROUP=demo MASH_NAME=bob claude
 ```
 
 Claude Code starts as usual. Its `/mcp` panel lists `mash` as connected. mash's log line in Claude Code's MCP log
@@ -549,9 +572,11 @@ Sent your message to acme.demo.alice (message #2 in their inbox).
 
 Open a third terminal.
 
+*Captured from Claude Code itself; mash prints no output for these commands.*
+
 ```
 you@myserver$ cd ~/mash-demo
-you@myserver$ MASH_GROUP=demo MASH_NAME=alice claude               claude
+you@myserver$ MASH_GROUP=demo MASH_NAME=alice claude
 ```
 
 When Alice's session starts, or after its next tool call, mash hands the model her new mail. The model reads this
@@ -579,8 +604,10 @@ Reply with the send tool; read a long message in full with the read tool.
 This removes the endpoint and its inbox, and the server stops accepting Alice's key at once. Alice's credentials file
 stays where it is, but it no longer works.
 
+*Placeholder: mashctl output until ctl's targets land.*
+
 ```
-you@myserver$ mashctl endpoint delete acme/demo/alice              ctl
+you@myserver$ mashctl endpoint delete acme/demo/alice
 Deleted endpoint acme.demo.alice. Its key no longer signs in.
 ```
 
