@@ -1,43 +1,40 @@
-# mash CLI target outputs (0.5.6 contract input), DRAFT6
+# mash CLI target outputs (0.5.6 contract input), DRAFT7
 
-Date: 2026-11-19. Status: DRAFT6 of the mockups for the maintainer's review.
-It answers the independent CLI-UX review of DRAFT1 (rows in the dispositions
-file, first section), the second review of DRAFT2 (second section) and the
-third read, of DRAFT4 (section "Critic round 3"), and it applies the planner's
-rulings L1 to L12 (marked "DECIDED, planner" below). Every finding has one row
-in `docs/plans/2026-11-19-cli-targets-mash-dispositions.md`. DRAFT4 applied
-the security read of contract revisions 2 and 3 (INV-001, INV-003, INV-004,
-REQ-003, REQ-009, REQ-010; rules R15 to R18). DRAFT5 applied contract
-revision 5: the CA fingerprint is typed by the person and never a flag
-(R15, R17), the server row of `status` says when mash checked, not "last
-seen" (R11), a configuration fix is labelled and never in command position
-(R10), and removing access prints no NEXT (R19). Round 4 added section 5a
-(REQ-011) and rule R20 (files put in place are `wrote` or `kept
-(unchanged)`).
+Date: 2026-11-19. Status: DRAFT7 of the mockups for the maintainer's review.
+Every finding of the earlier rounds has one row in
+`docs/plans/2026-11-19-cli-targets-mash-dispositions.md` (DRAFT1 to DRAFT6);
+the rows of this draft are in its last section, "DRAFT7: the scope ruling
+(decision 264, contract rev 15)".
 
-DRAFT6 applies contract revision 11 (revisions 7 to 10 before it; its rows are
-in the dispositions file, section "DRAFT6 rulings"): the first install of an
-endpoint on a machine makes the TRUST RECORD (REQ-013, R21): the person TYPES
-both the server address and the CA fingerprint, mash checks the server's
-certificate against that CA and host name first, verifies the token against
-the account key the CONNECTED server serves, and writes the configuration, the
-CA, `trust.json` and the credentials as ONE GENERATION with one atomic switch;
-`--replace` and `--server` are gone from `credential install`. Revision 11
-drops the in-place change: `mash trust replace` and `mash trust repair` are not
-in 0.5.6. The one way to change what mash trusts is the new `mash trust reset`
-(the person confirms it at a terminal; it removes this machine's endpoint
-configuration, trust record and credentials and says exactly what), then a
-fresh install under the first-install rules (section 5, "mash trust reset").
-Every use of mash checks that the trust files agree. The install script is
-verified before it runs, with `gh attestation verify` or with a digest from the
-release's attested notes, and rehashes what it installed (REQ-011 (i)); `mash
-plugin install` extracts the plugin embedded in the verified binary and pins
-it to the binary's digest (REQ-011 (iii)); `mash status --detail` shows where
-everything is, in the same rows in every state (REQ-012); `mash serve` names no
-server. The exit-code change (the unreachable server exits 6, a local file
-error exits 1) and the fingerprint rules (8 groups of 8 for the operator, any
-form accepted when typed) are applied. The settings are the names agreed with
-the mashctl lane (section 3). No product code.
+DRAFT7 applies Randy's scope ruling (decision 264, accepted as recommended),
+as written in contract revision 15 (`mash-0.5.6-cli-ux`, rev 15 draft, the
+newest in `masterplanner/for-herds/mash-0.5.6/` at the start and at the end of
+this work). The freeze that held DRAFT6 lifts for this scope only. What it
+CUTS: the trust record (`trust.json`), generations and the pointer, the lock,
+`mash trust reset`, `mash plugin install`, the install script and its helper
+and skill install, with every block, rule, help line, MCP field, status row and
+exit-code sentence that existed only for them. What it CHANGES: `mash
+credential install` takes `--server` and `--ca` on a first install, SHOWS the
+server address and the CA fingerprint and says in one line to compare them with
+what the operator sent, and types nothing back (R15); it checks the server's
+certificate against the CA and host name before writing, and refuses
+untouched, naming the file to move aside, on any difference from what is
+installed (R17); the plain-text variable is
+`MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION` (Randy's name, hard cut, R18); the
+install check is one pasted `gh attestation verify --bundle` (section 5a). What
+it ADDS: REQ-015, the mailbox backlog wake (`mailbox_limit`, default 15): a
+wake line, a mailbox row on every `mash status` screen, the MCP `mailbox`
+object, and section 5b, "What REQ-015 can count". Section 7 says what was
+decided beyond the brief (Y1 to Y16) and which contract lines were not
+conformed to. No product code.
+
+Earlier drafts: DRAFT4 applied the security read of contract revisions 2 and
+3 (INV-001, INV-003, INV-004, REQ-003, REQ-009, REQ-010; rules R15 to R18);
+DRAFT5 made the server row of `status` say when mash checked, labelled
+configuration fixes and removed the NEXT after removing access; round 4 added
+section 5a and rule R20; DRAFT6 applied revision 11 (the trust record, now
+removed).
+
 Every block below is a TARGET (what a person should see) unless it is labelled
 "Before". "Before" blocks are real output of the shipped binary from the
 catalog (`docs/plans/2026-11-19-cli-output-catalog-mash.md`), cut to fit 80
@@ -58,10 +55,12 @@ owner `acme`, the group `release-pipeline` (16 characters) and the names
 3. Settings: config.json and the environment
 4. Key and credential flow (steps A, B, C, and the hand-overs to mashctl)
 5. Commands: version, status, send, inbox, read, who, prompt, key create,
-   credential install, plugin export, trust reset, serve, hook, help,
-   errors
-5a. Install and plugin (REQ-011): the install script, `mash plugin install`,
-   and the two places that are mashctl's (adopt, delete)
+   credential install, plugin export, serve (with the backlog wake), hook,
+   help, errors
+5a. Install check and plugin (REQ-011): the one pasted `gh attestation
+   verify`, the plugin through claude's own commands, and the two places that
+   are mashctl's (adopt, delete)
+5b. What REQ-015 can count
 6. MCP tools (what agents get)
 7. Open questions and decisions
 8. Behaviour changes the contract must decide
@@ -73,8 +72,7 @@ owner `acme`, the group `release-pipeline` (16 characters) and the names
   (a listing that needs more becomes blocks or drops a redundant prefix, R14).
   Exempt: a command a person is told to run (R9), which must stay complete
   and is kept short anyway, a server address and a URL, which are printed
-  whole, and what the person types after a prompt (a fingerprint is 71
-  characters; a server address and a pasted answer have no limit either).
+  whole, and a gh report pasted as the page shows it (gh's own words).
   Section 9 measures every block in this file.
 - R2 No jargon on the default screen. These words never appear: JWT, seed,
   nkey, NATS, name rule, clock, channel allowlist, relay trace, resolver,
@@ -83,14 +81,10 @@ owner `acme`, the group `release-pipeline` (16 characters) and the names
   "this public key is endpoint acme.demo.bob"), CREDENTIALS (the one file mash
   runs with: private key plus token). A key is never called a credential. The CA is the authority that signed the
   server's certificate; its FINGERPRINT is the short code that identifies the
-  CA file, which whoever runs your mash server gives you apart from the token,
-  and which you type when mash asks (R15).
+  CA file, which the first install shows and whoever runs your mash server sends
+  you apart from the token, so that you can compare them (R15).
   "NATS calls the private key a seed" is said once, in `mash key create
-  --detail`, and in the docs. Exception (DRAFT6): the trust screens (`credential
-  install` on a first install, `mash trust reset`, the trust refusals) use
-  `operator` (whoever runs your mash server) and `account` (the owner's key, said
-  with the owner's name: "the account acme"), because those are the words the
-  person is given and has to match (INV-004, REQ-013).
+  --detail`, and in the docs.
 - R3 One vocabulary and one address form, on every screen, in help, in JSON
   and in what a person types (DECIDED, planner, L3). The thing is an
   ENDPOINT; its parts are OWNER, GROUP and NAME. The address is the dotted
@@ -151,39 +145,42 @@ owner `acme`, the group `release-pipeline` (16 characters) and the names
   when shown, is a separate item labelled `for this shell only:` (with the
   Claude Code started from it, where that matters) and is a real command.
   This holds in every command that prints a fix (`status`, `send`, `serve`,
-  `credential install`, `install-mash.sh`). When the file already has the
+  `credential install`). When the file already has the
   line's key (the `server` line of a config that names a server), the label is
   `change the <key> line to:`, not `add`; the line is still indented four
   spaces (the plain-text fix of `status`).
-- R11 `mash status` (DECIDED, planner, L5). The default screen is FIXED and
-  IDENTICAL in every state: a verdict line, a blank line, then exactly these
-  four rows in this order with these labels: `version`, `server`, `config`,
-  `credentials`. The server row is two lines: the address as configured
-  (`tls://myserver:4222`), then the state. The state line has
-  exactly these forms and no other (DECIDED, the lead, D1; completed in
-  round 4): `alive, encrypted (checked 09:42)` when the server answered (the
-  time is when mash asked, on a 24-hour clock, local time); `alive,
-  certificate NOT TRUSTED (checked 09:42)` when it answered with a certificate
-  the trusted CA did not sign; `alive, NOT ENCRYPTED (checked 09:42)` when it
-  answered on a plain address the override allows; `NOT ENCRYPTED (refused;
-  not connected)` when a plain address is refused; `NOT REACHABLE (last
-  reached 3h ago)` when it did not answer (`never reached from here` when no
-  answer was ever recorded); `not checked` when mash did not ask. A THIRD
-  line exists in two cases, both about `MASH_INSECURE_PLAINTEXT`: `allowed by
-  MASH_INSECURE_PLAINTEXT (test servers only)` under `alive, NOT ENCRYPTED`,
-  and `MASH_INSECURE_PLAINTEXT is set; nats:// would be allowed` under a tls
-  address (R18). A SECOND kind of extra lines reports the environment (T7):
-  when `MASH_SERVER` or `MASH_CA` differs from `config.json` and the trust
-  record, the row says so in two lines, `MASH_SERVER overrides config.json:
-  <the environment's value>` and `instead of <config.json's value>` (`MASH_CA
-  overrides the CA in config.json:` for the CA), and the verdict is `mail does
-  NOT work: MASH_SERVER overrides config.json.` (exit 1), because the trust
-  record no longer vouches for what mash would connect to. The one exception is
-  the test-server plain-text override: with `MASH_INSECURE_PLAINTEXT` set an
-  overriding `nats://` `MASH_SERVER` is allowed, still reported on the row, and
-  the verdict stays `mail works (1 warning)`. A variable equal to what
-  `config.json` holds is not an override and is not reported. `--detail` adds one more line, `certificate checked against
-  <path>`, under a tls address.
+- R11 `mash status` (DECIDED, planner, L5; DRAFT7 adds the mailbox row,
+  REQ-015). SUBJECT TO THE STATUS-VIEWS PAGE: this is the target for the
+  current design, and that page may drop the `server` row (section 5, status).
+  The default screen is FIXED and IDENTICAL in every state: a verdict line, a
+  blank line, then exactly these five rows in this order with these labels:
+  `version`, `server`, `config`, `credentials`, `mailbox`. The server row is
+  two lines: the address as configured (`tls://myserver:4222`), then the state.
+  The state line has exactly these forms and no other (DECIDED, the lead, D1;
+  completed in round 4): `alive, encrypted (checked 09:42)` when the server
+  answered (the time is when mash asked, on a 24-hour clock, local time);
+  `alive, certificate NOT TRUSTED (checked 09:42)` when it answered with a
+  certificate the trusted CA did not sign; `alive, NOT ENCRYPTED (checked
+  09:42)` when it answered on a plain address the override allows; `NOT
+  ENCRYPTED (refused; not connected)` when a plain address is refused; `NOT
+  REACHABLE (last reached 3h ago)` when it did not answer (`never reached from
+  here` when no answer was ever recorded); `not checked` when mash did not ask.
+  A THIRD line exists in two cases, both about
+  `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION`: `allowed by
+  MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION` under `alive, NOT ENCRYPTED`, and
+  `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set (not used)` under a tls address
+  (R18). A SECOND kind of extra lines reports the environment (T7): when
+  `MASH_SERVER` or `MASH_CA` differs from `config.json`, the row says so in two
+  lines, `MASH_SERVER overrides config.json: <the environment's value>` and
+  `instead of <config.json's value>` (`MASH_CA overrides the CA in
+  config.json:` for the CA), and the verdict is `mail does NOT work: MASH_SERVER
+  overrides config.json.` (exit 1), because nothing vouches for what mash would
+  connect to. The one exception is the test-server plain-text override: with
+  `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION` set an overriding `nats://`
+  `MASH_SERVER` is allowed, still reported on the row, and the verdict stays
+  `mail works (1 warning)`. A variable equal to what `config.json` holds is not
+  an override and is not reported. `--detail` adds one more line, `certificate
+  checked against <path>`, under a tls address.
   The row NEVER says `alive` and a past time together: `alive` always goes
   with the check that just happened. The server is checked in every state
   that has a server address and a tls:// scheme, whether or not credentials
@@ -191,35 +188,37 @@ owner `acme`, the group `release-pipeline` (16 characters) and the names
   screen: it means the last mail activity of an ENDPOINT, in `mash who`
   (LAST SEEN) and only there. Nothing else is a row on the
   default screen (no group row, no claude row); a state that cannot be
-  checked says `not checked` in its row. The verdict is `<endpoint>: mail
-  works.`, `<endpoint>: mail works (1 warning).` or `<endpoint>: mail does NOT
-  work: <why>.` (`mail does NOT work: <why>.` when no endpoint is known). A
-  problem value is in CAPITALS (`MISSING`, `REFUSED`, `NOT REACHABLE`, `NOT
-  ENCRYPTED`, `NOT TRUSTED`, `NOT SET`, `DELETED`, `UNSAFE`). When `MASH_INSECURE_PLAINTEXT`
-  is set the server row gets a third line saying so (R18). How the endpoint
-  was chosen (R13) is not a default row: it is in `--detail` and on the
-  screens where mash could not choose. `--detail` adds rows after these four
-  and changes none (REQ-012, DRAFT6). The extra rows are the SAME seven, in
-  this order, in EVERY state, with `none`, `missing` or `not set` where a
-  value is absent: `config file`, `ca`, `credentials file`, `trust file`,
-  `trust` (`none`, `matches config` or `differs`),
-  `endpoint` and `chosen by`; the old facts (commit, counts, settings)
-  follow them. The CA is its OWN row: `ca  <path>`, or `ca  this computer's
-  trusted authorities` when no CA is configured. When the trust files do not
-  agree (R21) the `config` row says `REFUSED (disagrees with the trust
-  record)` and the server is not checked.
+  checked says `not checked` in its row. The MAILBOX row (REQ-015, R22) is
+  `<n> waiting`, `<n> waiting, OVER THE LIMIT OF <limit>` (a warning), `off`
+  when `mailbox_limit` is 0, or `not checked` wherever the count cannot be
+  known (no credentials, the server not reached or not asked, the credentials
+  refused); it is last because it needs the credentials above it. The verdict is
+  `<endpoint>: mail works.`, `<endpoint>: mail works (1 warning).` or
+  `<endpoint>: mail does NOT work: <why>.` (`mail does NOT work: <why>.` when no
+  endpoint is known); an over-the-limit mailbox is a warning, never a failure
+  (AT-008). A problem value is in CAPITALS (`MISSING`, `REFUSED`, `NOT
+  REACHABLE`, `NOT ENCRYPTED`, `NOT TRUSTED`, `NOT SET`, `DELETED`, `UNSAFE`,
+  `OVER THE LIMIT`). When `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION` is set the
+  server row gets a third line saying so (R18). How the endpoint was chosen
+  (R13) is not a default row: it is in `--detail` and on the screens where mash
+  could not choose. `--detail` adds rows after these five and changes none
+  (REQ-012). The extra rows are the SAME six, in this order, in EVERY state,
+  with `none`, `missing` or `not set` where a value is absent: `config file`,
+  `ca`, `credentials file`, `endpoint`, `chosen by` and `mailbox limit` (`15
+  (the default)`, `40 ("mailbox_limit" in config.json)`, `40
+  (MASH_MAILBOX_LIMIT)` or `off`); the old facts (commit, counts, settings)
+  follow them, and a line `oldest waiting 12m ago` sits under the mailbox row
+  when something waits. The CA is its OWN row: `ca  <path>`, or `ca  not set`
+  when there is no configuration.
+
 - R12 Units and words. Times are `12m ago`, `3h ago`, `now`, `never`; exact
   times use a 24-hour clock and a date in `--detail` (`2026-11-19 00:21 UTC`);
   the time of a check in `status` is the local clock alone (`checked 09:42`).
   Durations and sizes are a number with its unit and no space (`2s`, `41ms`,
   `14B`). Created things are "Created", written files are "wrote", files
   copied are "copied", files left alone are "kept (unchanged)" (R20); a
-  program put in place by the install script is "installed", and one it
-  verified first, or rehashed after installing, is "checked" (`checked  mash
-  sha256 ok`); the one atomic step of a first install is "switched", a
-  file `mash trust reset` deletes is "removed" (and what it leaves is "kept"),
-  and the plugin's digest check is "pinned". Paths are `~/...` by
-  default and absolute in `--detail`.
+  check `credential install` makes before it writes is "checked". Paths are
+  `~/...` by default and absolute in `--detail`.
 - R13 (DECIDED, planner, L4) One setting names the endpoint by its full
   address: `MASH_ENDPOINT=acme.demo.bob`, or `"endpoint"` in `config.json`.
   When exactly one endpoint is installed on the machine it is used with no
@@ -243,29 +242,27 @@ owner `acme`, the group `release-pipeline` (16 characters) and the names
   `verified`) and `KIND`. `mash who` keeps the full address (a person pastes
   it into `send`). Verified with the real-name case below.
 
-- R15 (REVISED, DRAFT6; contract rev 7, REQ-003, REQ-013, INV-004) The CA
-  fingerprint and the server address are TYPED. The display form is one
-  everywhere the OPERATOR, the helper or mashctl shows it: the lower-case hex
-  SHA-256 of the CA certificate, eight groups of eight characters joined by `-`
-  (71 characters, no spaces, so it pastes as one word). A typed answer is
-  accepted in any of these forms: with or without a `sha256:` prefix, with
-  colons, spaces or dashes between the digits or none, in any case; mash
-  normalizes it before it compares. mashctl prints the fingerprint for the
-  OPERATOR when it makes an endpoint (it is too wide for a row, so it is on a
-  line of its own, indented four spaces), and the operator gives it to the
-  person, with the server address, by a route other than the token. The person
-  TYPES both, whenever an install makes the trust record: at the prompts
-  `Type the server address:` and `Type the CA fingerprint:`. There is NO fingerprint flag and NO `--server`
-  flag for the trust decision (the CA FILE is still given with `--ca`: a
-  file, not a secret), and mash NEVER prints the fingerprint it asks the
-  person to type: it says only `fingerprint matches` or `error: the
-  fingerprint does not match the CA in <file>`, and never the right value
-  (nor the typed one back). For the same reason `status --detail` and
-  `--json` print the CA's path, not its fingerprint. With no CA file (the
-  system's authorities are used) there is no fingerprint to type, and the
-  server address is still typed. The text a person types after a prompt is
-  shown in the mockups after the colon; it is the person's, not mash's, and it
-  is exempt from the 80 columns of R1.
+- R15 (REWRITTEN, DRAFT7; contract rev 15, REQ-003) The CA fingerprint and the
+  server address are SHOWN, never typed. The display form is one everywhere
+  mash or mashctl shows it: the lower-case hex SHA-256 of the CA certificate,
+  eight groups of eight characters joined by `-` (71 characters, no spaces, so
+  it pastes as one word). The FIRST install on a machine shows the person the
+  server address it was given (`--server`) and the fingerprint of the CA file it
+  was given (`--ca`), the fingerprint on a line of its own (it is too wide for a
+  row), and says in ONE line to compare both with what whoever runs the mash
+  server sent separately from the token. NOTHING IS TYPED BACK: there is no
+  prompt, no typed answer and no flag that answers for the person; the
+  comparison is the person's own. (DRAFT6's rule that mash never prints a
+  fingerprint it asks the person to type is gone, because nothing is typed; the
+  display rule stays.) mashctl prints the same two values for the OPERATOR when
+  it makes an endpoint, on lines of their own, indented four spaces. Before it
+  writes anything, install checks that the server at the address presents a
+  certificate from that CA for that host name. `--server` and `--ca` are
+  required on a first install (exit 2, before anything is read, with `error: a
+  first install needs --ca <file>` and the same for `--server`); a later
+  install reads both from `config.json` (R17). The status screens and `--json`
+  of `status` print the CA's path, never its fingerprint.
+
 - R16 (DECIDED, security read, INV-003) No secret on the command line. `--key`,
   `--token` and `--creds` take a FILE NAME, or `-` for standard input (only
   one of them may be `-`). Never the token, the private key or the contents of
@@ -273,33 +270,29 @@ owner `acme`, the group `release-pipeline` (16 characters) and the names
   An argument that looks like a pasted secret (a value beginning `eyJ`, or a
   private key) is refused without printing it back. The files mash writes
   follow the File safety rules of section 2.
-- R17 (REVISED, DRAFT6; contract rev 11) A change of trust is the person's own
-  decision, and there is no change in place in 0.5.6: the person runs `mash
-  trust reset` (section 5) and then installs again under the first-install
-  rules. `credential install` never changes trust: it refuses on any
-  difference from the trust record, without touching a file, and its fix
-  names `mash trust reset` and then the fresh install, labelled; `--replace`
-  is removed from it, from its help and from every fix. `mash trust reset` is
-  INV-004's typed confirmation: it needs a terminal, shows exactly what it
-  will remove and keep, and asks the person to type the endpoint's address (or
-  `reset` when several are installed). There is no `--yes`, no flag and no
-  variable that stands in for it. With no terminal (a pipe, a script, an
-  agent's shell) it refuses with exit 4 (not authorized: a person must run it
-  at a terminal;
-  INV-004 sets this on purpose, overriding the CLI standard's usage code; contract
-  security rev 2 B1) and says so. It works in every state, including when the trust
-  files disagree (that is one of the reasons to run it).
+- R17 (REWRITTEN, DRAFT7; contract rev 15, REQ-003, 0.5.5's rule kept) Install
+  never changes what a machine already has. A server address, a CA or a
+  credentials file that is already installed is never replaced: on any
+  difference from what the person gave, `credential install` refuses WITHOUT
+  touching any file, and its `fix:` names the one file to move aside (an `mv` of
+  it to `<file>.old`), then the same command again. An identical file prints
+  `kept (unchanged)`. There is no trust record, no `mash trust reset`, no
+  `--replace` and no generation in 0.5.6 (decision 264); no `mash` command asks
+  the person to confirm at a terminal (the confirmations of INV-004 are
+  mashctl's).
 
-- R18 (DECIDED, security read, REQ-010) Plain text is a per-run override.
-  `MASH_INSECURE_PLAINTEXT=1` in the environment of that run is the only way
-  to connect to a `nats://` server; the `insecure_plaintext` key of
-  `config.json` is removed (a file that still has it is refused), and no mash
-  command writes the override anywhere. Whenever the variable is set, inherited
-  or not, EVERY command that connects prints one line on stderr (`warning:`,
-  no `fix:`), and `mash status` shows it on its server row. The refusal says
-  that credentials and mail would cross the network unencrypted and that the
-  override is for test servers only; help and the agent's instructions say an
-  agent never sets it.
+- R18 (DECIDED, security read, REQ-010; renamed by Randy, DRAFT7) Plain text is
+  a per-run override. `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1` in the
+  environment of that run is the only way to connect to a `nats://` server (the
+  name Randy chose, "Just put it in their face."; `MASH_INSECURE_PLAINTEXT` is
+  gone, no alias, a hard cut); the `insecure_plaintext` key of `config.json` is
+  removed (a file that still has it is refused), and no mash command writes the
+  override anywhere. Whenever the variable is set, inherited or not, EVERY
+  command that connects prints one line on stderr (`warning:`, no `fix:`), and
+  `mash status` shows it on its server row. The refusal names the new variable
+  and says that credentials and mail would cross the network unencrypted and
+  that the override is for test servers only; help and the agent's instructions
+  say an agent never sets it.
 
 - R19 (DECIDED, the lead, D7; it came up three times) Removing access prints
   NO `NEXT:`. After `mashctl endpoint delete` (and any command whose result is
@@ -309,62 +302,38 @@ owner `acme`, the group `release-pipeline` (16 characters) and the names
   follow is the single command that PROVES the removal (the endpoint's own
   `mash status` showing DELETED), as its own labelled item, never as a
   suggestion to start again. The deleted endpoint's address is never
-  suggested for reuse. The one exception is `mash trust reset`: it removes
-  only this machine's trust record and credentials, retires no address and
-  removes no access on the server, so it ends with the fresh install as a
-  `NEXT:` (X16).
+  suggested for reuse. After a delete the endpoint's credentials file is left
+  as it was (the ctl lane's decision), and `mash status` says DELETED.
 
 - R20 (DECIDED, the lead, round 4; planner's check N1) A command whose job is
   to put files in place reports each file as wrote or kept (unchanged); no
   other command names config or the server in success output. The commands
   whose job it is: `mash credential install`, `mashctl endpoint create
-  --make-key`, `mashctl adopt`, `install-mash.sh`, `mash plugin install`
-  (section 5a) and `mash trust reset` (section 5, which says `removed` and
-  `kept`). Each file such a command is responsible for gets one line:
-  `wrote <path>`, `copied <path>` (a file first placed from another file) or
-  `kept   <path>  (unchanged)` (the file is already there with the same
-  content; `copied` and `wrote` are never used for an unchanged file). One
-  place keeps naming the server by earlier decision (N19): the rows of `mash
-  status` (a report whose job is exactly that). The start-up line of `mash
-  serve` names the endpoint only (DRAFT6).
+  --make-key` and `mashctl adopt`. Each file such a command is responsible for
+  gets one line: `wrote <path>`, `copied <path>` (a file first placed from
+  another file) or `kept   <path>  (unchanged)` (the file is already there with
+  the same content; `copied` and `wrote` are never used for an unchanged file).
+  One place keeps naming the server by earlier decision (N19): the rows of
+  `mash status` (a report whose job is exactly that). The start-up line of
+  `mash serve` names the endpoint only.
 
-- R21 (DECIDED, contract rev 7, REQ-013; DRAFT6) The trust record. The FIRST
-  install of an endpoint on a machine makes `trust.json` in the mash config
-  directory (created exclusively, mode 600), binding the account (the owner's
-  public key), the server address and the CA fingerprint. Before the first
-  write: the person types the server address and the CA fingerprint; mash
-  checks the server's certificate against that CA and that host name FIRST;
-  and it verifies the TOKEN against the account key the CONNECTED server serves
-  (never only against the issuer the token claims). Only then does it write,
-  and it prints each file as a `wrote` line, `trust.json` included. A later
-  install of another endpoint with the same trust asks nothing, checks the
-  token, server and CA against the record, and prints `kept   <path>
-  (unchanged)` for `trust.json`. A later install that does not agree with
-  the record (a token signed by another account, another server or CA, a
-  `config.json` or `ca.pem` that disagrees with `trust.json`) refuses WITHOUT
-  touching any file, and its `fix:` names the labelled way (`mash trust
-  reset`, then install again). EVERY use of mash (status, send, inbox,
-  read, who, prompt, serve, hook) checks first that `trust.json`, `config.json`
-  and the CA file agree, and on any disagreement refuses with `error: this
-  machine's trust files disagree` and does not connect (shown under `status`
-  and under `send` in section 4). `trust.json` protects against other users
-  and accidents, not against a process of the same user (the contract's
-  residual). The GENERATION (rev 10 and 11): one generation holds everything one endpoint
-  needs to connect (`config.json`, the CA file, `trust.json` and the
-  endpoint's credentials), and every command reads ONE generation through a
-  pointer, never files from two. The first install writes all of them, and
-  syncs each, in a new directory; then one atomic switch of the pointer
-  selects it; then the directory is synced. An interruption leaves either
-  nothing selected or the complete set (the output of an interrupted install
-  never says `switched`). Process interruption is the tested fault; power
-  loss is covered by the syncs. A later install of another endpoint with the
-  same trust adds that endpoint's credentials file to the selected generation
-  by the exclusive create and atomic rename of File safety (X2). There is no
-  second generation in 0.5.6: a change of trust is `mash trust reset`, then a
-  first install. On disk (the implementer's, shown only through the paths
-  mash prints, X2): `~/.config/mash` is the pointer, a link to the selected
-  generation `~/.config/mash.d/<N>`, so every path printed as
-  `~/.config/mash/<file>` is a file of the selected generation.
+- R21 (the trust record, DRAFT6) is REMOVED by decision 264: no `trust.json`,
+  no generations, no lock, no `mash trust reset`. The number is not reused.
+
+- R22 (NEW, DRAFT7; contract rev 15, REQ-015) The mailbox. Each endpoint has a
+  backlog limit, the config key `mailbox_limit` (environment
+  `MASH_MAILBOX_LIMIT`): a whole number from 0 to 1000, default 15, 0 = off. The
+  backlog is the count of messages delivered to the endpoint's inbox and not yet
+  shown to its session (section 5b says exactly what mash can count). Past the
+  limit `mash serve` wakes the session at once, whatever the kind, with the one
+  line `mash: <n> messages waiting (limit <limit>), oldest <age>` (the
+  `serve-backlog` blocks), again at most once every 10 minutes while over, and
+  not again once back at the limit. `mash status` shows a mailbox row on EVERY
+  screen (R11): `<n> waiting`, `<n> waiting, OVER THE LIMIT OF <limit>` as a
+  warning (verdict `mail works (1 warning)`, exit 0), `off`, or `not checked`;
+  `--detail` adds the limit and where it came from, and the oldest age; the MCP
+  `status` carries `mailbox {waiting, limit, oldest_age, over_limit}`. No SAP
+  protocol change (BND-002): the count is mash's own.
 
 Conventions in the mockups: `$` marks a typed command; lines after it are
 output; a prompt line shows what the person typed after its colon; no colour
@@ -376,8 +345,8 @@ DECIDED, planner (L8). This section is the one place the contract for exit
 codes, streams and colour is written down; the command sections do not repeat
 it.
 
-Exit codes (DRAFT6: the contract's one table for both tools, rev 7: 0 done,
-1 refused, 2 usage, 3 as the standard defines it, 4 not authorized (the server refused the credentials, or a person must run it at a terminal), 5
+Exit codes (DRAFT7: the contract's one table for both tools, rev 15: 0 done,
+1 refused, 2 usage, 3 as the standard defines it, 4 not authorized (the server refused the credentials; or a person must run it at a terminal, which in 0.5.6 is mashctl's confirmations only), 5
 partial, 6 server unreachable or failed). Checked in the shipped source
 (`cmd/mash/main.go`, `cmd/mash/keycred.go`, `cmd/mashctl/endpoint_create.go`):
 today 0, 1, 2 and 6 exist, and 6 means a file error; 3 and 5 stay unused
@@ -386,9 +355,9 @@ here. The same condition gets the same code in every command.
 | code | meaning | today | change |
 |---|---|---|---|
 | 0 | done; also "mail works with a warning" | same | `status` is 0 only when mail works |
-| 1 | refused or a problem was found: a refused request, no credentials, no endpoint chosen, a certificate mash does not trust, trust files that disagree, a plain URL (both tools), `status` when mail does not work; AND a local file error, said with its cause (a file that cannot be read or written) | send, read, inbox, who: 1 for most refusals; a file error is 6 | plain-URL refusal: 1 in every command (was 2); `status` problem: 1 (was 0); `serve` with no endpoint chosen: 1 (was 2); a file error: 1 (was 6) |
+| 1 | refused or a problem was found: a refused request, no credentials, no endpoint chosen, a certificate mash does not trust, a plain URL (both tools), `status` when mail does not work; AND a local file error, said with its cause (a file that cannot be read or written) | send, read, inbox, who: 1 for most refusals; a file error is 6 | plain-URL refusal: 1 in every command (was 2); `status` problem: 1 (was 0); `serve` with no endpoint chosen: 1 (was 2); a file error: 1 (was 6) |
 | 2 | usage error: unknown command, unknown option, missing argument, bare `mash` | status, key, credential, plugin: 2; inbox, read, send usage: 1 | 2 for every command |
-| 4 | not authorized, in BOTH tools, for one of two causes and the message says which: (a) the server refused the credentials: it answered, and the key or the token it was given is deleted or reissued (`status` prints the exit code on those screens; `send`, `inbox`, `read`, `who` and `mashctl` exit 4 the same way); (b) a person must run this at a terminal: the first install and `mash trust reset` (and the mashctl confirmations) run with none (a pipe, a script, an agent's shell), said as `a person must run it at a terminal` | unused | NEW (the contract's exit table: 4 = not authorized). (b) is on purpose: INV-004 and contract security rev 2 B1 set it, overriding the CLI standard's usage code (the lead's ruling, undoing DRAFT6b). The two causes print two different texts |
+| 4 | not authorized, in BOTH tools, for one of two causes and the message says which: (a) the server refused the credentials: it answered, and the key or the token it was given is deleted or reissued (`status` prints the exit code on those screens; `send`, `inbox`, `read`, `who` and `mashctl` exit 4 the same way); (b) a person must run this at a terminal: mashctl's confirmations of a deletion or an exposure (INV-004); no `mash` command has one in 0.5.6, the first install asks nothing; said as `a person must run it at a terminal` | unused | NEW (the contract's exit table: 4 = not authorized). (b) is on purpose: INV-004 and contract security rev 2 B1 set it, overriding the CLI standard's usage code (the lead's ruling). The two causes print two different texts |
 | 6 | the server is unreachable or failed, in BOTH tools: it did not answer within the time limit, the connection broke, the server returned an error (`status`, `send`, `inbox`, `read`, `who`, `prompt`, `mashctl`) | a file error is 6 | NEW meaning; a file error moves to 1; unreachable was 1 |
 
 Timeouts, said once (they are limits mash applies; an error names the one
@@ -430,7 +399,7 @@ Nothing else is coloured, and the mockups show none.
 
 File safety (DECIDED, security read, INV-003). Every file mash or mashctl
 writes that holds a secret (the private key `bob.key`, the credentials file,
-the token, `trust.json`) is created EXCLUSIVELY, so it must not exist; as a regular file; with
+the token) is created EXCLUSIVELY, so it must not exist; as a regular file; with
 mode 0600 from the moment it exists (there is no moment with a wider mode);
 without following a symbolic link at the target; in a directory the current
 user owns; and it is written to a temporary file in that directory and renamed
@@ -440,11 +409,10 @@ content, and a symbolic link at the target, are refused and left untouched:
 never truncated, never replaced, and no flag changes that (so `--force` does
 not exist). The public key, the CA copy and `config.json` are written the same
 way (exclusive or atomic rename) with their own modes, 644 for the CA copy.
-`config.json`'s server and CA lines and `trust.json` are written only by the
-first install of the machine, as one generation (R21), and removed only by
-`mash trust reset` after the person's typed confirmation (R17). No secret is ever read from the command
-line (R16) or printed (INV-001); `--detail` and `--json` print paths, never
-contents.
+`config.json`'s server and CA lines are written only by the first install of
+the machine, and never changed by a later one (R17). No secret is ever read
+from the command line (R16) or printed (INV-001); `--detail` and `--json` print
+paths, never contents.
 
 ## 3. Settings: config.json and the environment
 
@@ -457,25 +425,33 @@ variables read there).
 | `endpoint` | `MASH_ENDPOINT` | the endpoint to act as, `acme.demo.bob` | NEW: replaces `owner` / `MASH_OWNER`, `MASH_GROUP` and `MASH_NAME`, which are removed |
 | `server` | `MASH_SERVER` | the server address, `tls://myserver:4222` | RENAMED from `url` / `MASH_URL` (this draft's decision, N8) |
 | `ca` | `MASH_CA` | the file of the CA that signed the server's certificate | RENAMED from `tls_ca` / `MASH_TLS_CA` (N8) |
+| `mailbox_limit` | `MASH_MAILBOX_LIMIT` | how many unshown messages may wait before `mash serve` wakes the session (REQ-015): a whole number from 0 to 1000, default 15, 0 = off | NEW |
 | (none) | `MASH_CONFIG_DIR` | the directory of config.json and credentials | unchanged |
-| (none) | `MASH_INSECURE_PLAINTEXT` | allow a plain `nats://` connection, for that run only (R18) | the `insecure_plaintext` key is REMOVED; the variable is unchanged |
+| (none) | `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION` | allow a plain `nats://` connection, for that run only (R18) | REPLACES `MASH_INSECURE_PLAINTEXT` (Randy: "Just put it in their face."; the old name is gone, no alias); the `insecure_plaintext` key stays REMOVED |
+
+`MASH_MAILBOX_LIMIT` is added beside the key because the other wake setting
+already has both forms (`idle_wake` and `MASH_IDLE_WAKE`,
+`internal/config/config.go:96` and `:414`); an agent or a test can set it for
+one run, and the environment wins over the file, as for every setting. The
+range is a decision of this draft (O4, section 5b): above 1000 `mash serve`
+cannot count, because the consumer delivers at most 1000 unacked messages.
 
 What mash writes, reads and ignores (the names agreed with the mashctl lane,
 not yet ratified: X15). mash WRITES `server` and `ca` to `config.json` (on the
-first install) and never `endpoint` or `owner`; it READS `server`, `ca` and
-`endpoint`; the account it trusts is in `trust.json` only, never in
-`config.json`. When mashctl keeps its settings in the same file, mash IGNORES
-mashctl's own keys (`owner`, `account`, `admin_credentials`,
-`system_credentials`, `keys`) and neither tool removes the other's.
+first install) and never `endpoint`, `owner` or `mailbox_limit`; it READS
+`server`, `ca`, `endpoint` and `mailbox_limit`. When mashctl keeps its settings
+in the same file, mash IGNORES mashctl's own keys (`owner`, `account`,
+`admin_credentials`, `system_credentials`, `keys`) and neither tool removes the
+other's.
 
 The other `config.json` keys and `MASH_*` variables (timeouts, spool, name
 rule, client certificate, host) are not people-facing and are unchanged. The
 environment wins over `config.json` for one run, and mash says so on every
-`status`: a `MASH_SERVER` or `MASH_CA` that differs from `config.json` and the
-trust record is reported on the server row and makes the verdict `mail does
-NOT work` (the one exception is `MASH_INSECURE_PLAINTEXT`, below). An absolute path is expected in
-`MASH_CONFIG_DIR`; a relative `ca` in `config.json` is resolved against the
-config directory, as today.
+`status`: a `MASH_SERVER` or `MASH_CA` that differs from `config.json` is
+reported on the server row and makes the verdict `mail does NOT work` (the one
+exception is `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION`, below). An absolute path
+is expected in `MASH_CONFIG_DIR`; a relative `ca` in `config.json` is resolved
+against the config directory, as today.
 
 How the endpoint is found, in this order: `MASH_ENDPOINT`; `"endpoint"` in
 `config.json`; the one installed endpoint. The automatic pick (REQ-009) looks
@@ -491,18 +467,31 @@ several. `mash status` names the endpoint in its verdict; HOW it was chosen
 a row of `--detail` and is said on the choice screens.
 
 A `config.json` that still has the removed `insecure_plaintext` key is
-refused, not ignored (R18, `send-refuse` below). `mash credential install` knows the
-address from the token, so `mash status` right after it needs no variable.
-`credential install` writes `server` and `ca` into `config.json` (with
-`trust.json`, R21) and never writes `endpoint`: choosing an endpoint is a
-decision, not a side effect. On the first install the server is what the
-person types and the CA is the file given with `--ca` (there is no `--server`
-flag, R15); on a later install both come from the trust record. It never reads
-them from `MASH_SERVER` or `MASH_CA` (R17). A `server` or `ca` line in
-`config.json`, or a `ca.pem`, that disagrees with `trust.json` is refused on
-every use (R21).
+refused, not ignored (R18, `send-refuse` below). A `mailbox_limit` that is not
+a whole number from 0 to 1000 is refused the same way (`mailbox-limit-refuse`
+below). `mash credential install` knows the address from the token, so `mash
+status` right after it needs no variable. `credential install` writes `server`
+and `ca` into `config.json` and never writes `endpoint`: choosing an endpoint
+is a decision, not a side effect. On the first install the server is given with
+`--server` and the CA with `--ca` (R15); on a later install both are the ones
+already in `config.json`, and a different value is refused, never replaced
+(R17). It never reads them from `MASH_SERVER` or `MASH_CA`.
 
-`mash help` documents `MASH_ENDPOINT` (section 5, help).
+A bad limit (a setting that is refused the way `insecure_plaintext` is, with
+the file or the variable named; exit 1 in every command that reads the
+configuration):
+
+<!-- packet: mailbox-limit-refuse -->
+```
+$ mash status
+error: config.json: mailbox_limit must be a whole number from 0 to 1000.
+fix: change the mailbox_limit line in ~/.config/mash/config.json (0 turns
+     the check off; the default is 15), for example to:
+    "mailbox_limit": 15
+```
+
+`mash help` documents `MASH_ENDPOINT` and `MASH_MAILBOX_LIMIT` (section 5,
+help).
 
 ## 4. Key and credential flow
 
@@ -515,23 +504,20 @@ here and in the notes under each step:
   configuration fix is a labelled file line, never a command (R10);
 - step C takes `--creds FILE` as an alternative to `--key` and `--token`
   (DECIDED, planner and the CLI team, L11);
-- step C takes `--ca FILE` (the CA file: a file, not a secret) and writes
-  `config.json` (server, CA) beside the credentials, copies the CA file into
-  the config directory and makes the trust record `trust.json` (R21); it
-  prints every file it wrote (EXTENSION, core's, to be agreed with the CLI
-  team; the owner is no longer stored: the endpoint is read from the token).
-  The server address is NOT a flag (DRAFT6): the person types it, with the CA
-  fingerprint, on the first install;
-- a later install that disagrees with the trust record (another account,
-  server or CA) is refused without touching any file; the only way to change
-  what mash trusts is `mash trust reset`, then a fresh install (R17).
-  `--replace` and `--force`
-  are gone: an existing different credentials file is refused, never replaced
-  (INV-003, File safety in section 2);
-- whenever the install makes the trust record (R21), the person types the
-  server address and the CA fingerprint the operator gave them; there is no
-  fingerprint flag and mash never prints it. `--key`, `--token` and `--creds`
-  take file names, `-` for standard input, never the secret itself (R16);
+- step C takes `--ca FILE` (the CA file: a file, not a secret) and `--server
+  URL`, writes `config.json` (server, CA) beside the credentials and copies the
+  CA file into the config directory; it prints every file it wrote (EXTENSION,
+  core's, to be agreed with the CLI team; the owner is no longer stored: the
+  endpoint is read from the token). A first install needs both flags and shows
+  the person the server address and the CA fingerprint to compare with what the
+  operator sent; nothing is typed back (R15). Before writing it checks that the
+  server presents a certificate from that CA for that host name;
+- an existing server, CA or credentials file is never changed by install: on
+  any difference it refuses without touching any file and says which file to
+  move aside (R17, 0.5.5's rule). There is no trust record and no `mash trust
+  reset` in 0.5.6. `--replace` and `--force` do not exist;
+- `--key`, `--token` and `--creds` take file names, `-` for standard input,
+  never the secret itself (R16);
 - mashctl's `endpoint delete` prints the text in "Hand-overs to mashctl".
 
 One thing is written once, here. The private key exists in two places after
@@ -667,61 +653,68 @@ The token says, signed by your server, that bob.pub is this endpoint.
   wrote  acme.demo.bob.token  (mode 600)
 
 Give the person these apart from the token, by another route if you can:
-  server          tls://myserver:4222; the person types it
+  server          tls://myserver:4222
   ca.pem          the file that identifies the authority (the CA) that
                   signed your server's certificate; it holds no secret
-  CA fingerprint  a checksum of ca.pem; the person types it when installing
+  CA fingerprint  a checksum of ca.pem; the person compares it when installing
     18b3f713-809c9df9-4b85107f-964cd475-9b1e08e8-03a1e87d-1c00ba96-7bc06c52
 
 NEXT: take acme.demo.bob.token and ca.pem to the endpoint's machine and run
-      there; mash asks for the server address and the fingerprint above:
-  mash credential install --key bob.key --token acme.demo.bob.token --ca ca.pem
+      there; mash shows the server and the fingerprint to compare:
+  mash credential install --key bob.key --token acme.demo.bob.token --server tls://myserver:4222 --ca ca.pem
 ```
 
 The hand-over is the three lines under "Give the person these": the server
 address, the CA file, and the CA fingerprint in the form of R15 (eight groups
 of eight, joined by `-`) on its own line (it does not fit a row). The person
-types the server address and the fingerprint when `credential install` asks. It is printed on every `endpoint create`,
-because the person cannot install without it. It is the one place the
-fingerprint is printed: here it is for the OPERATOR, to give to the person by
-a route other than the token. It is how the person knows `ca.pem` is your
-server's CA and not another: the token alone cannot say so (R15). The person
-does not put either on the command line; `credential install` asks for them
-(step C). The hint is a plain command with no placeholder for them, so the
-"NEXT" is true as printed. The token is written mode 600 like every file that can sign
-something (INV-003).
+gives the address with `--server` and the file with `--ca`; `credential
+install` shows the address and the fingerprint of the file it was given, and the
+person compares both with what the operator sent (step C). It is printed on
+every `endpoint create`, because the person cannot install without it, and it
+is the one place besides the install screen where the fingerprint is printed.
+The comparison is how the person knows `ca.pem` is your server's CA and not
+another: the token alone cannot say so (R15). The hint is a complete command
+with no placeholder, so the "NEXT" is true as printed (it is wider than 80
+columns and exempt, R9). The token is written mode 600 like every file that
+can sign something (INV-003).
 
-### Step C: Install the credentials and trust the server (command 3 of 3)
+(This is mashctl's text, quoted here so the flow reads end to end. DRAFT6 had
+the person type the address and the fingerprint at prompts; decision 264
+dropped that, so the lines `the person types it` and the `mash asks for` of
+DRAFT6 are gone. The mashctl lane's own targets must say the same.)
+
+### Step C: Install the credentials and show the server (command 3 of 3)
 
 Credentials are the one file mash signs in with: Bob's private key plus the
-server's token. This step joins the two, and, the first time on a machine,
-writes down WHO to trust: the server, the certificate authority (CA) that
-signed its certificate, and the account that signs tokens. That is the trust
-record (R21). Because it decides who mash believes, mash asks the person to
-TYPE the server address and the CA fingerprint that the operator gave them
-apart from the token, and says only whether the fingerprint matched. Then it
-checks, in this order, before it writes anything: the typed fingerprint
-against the CA file; that the server at the typed address presents a
-certificate from that CA for that host name; and that the token is signed by
-the account key the CONNECTED server serves (never only the issuer the token
-claims). Then it writes the configuration, the CA, `trust.json` and the
-credentials as ONE GENERATION (each file synced, then one atomic switch to
-the new generation, R21), which is why the last line of the file list says
-`switched`.
+server's token. This step joins the two and, the first time on a machine,
+writes down WHERE to connect and WHO to believe: the server address and the
+certificate authority (CA) that signed its certificate (contract rev 15,
+REQ-003). Because that decides who mash believes, the first install SHOWS the
+person the server address and the CA fingerprint it is about to use and says,
+in one line, to compare them with what whoever runs the server sent apart from
+the token. NOTHING IS TYPED BACK: there is no prompt, no typed answer and no
+flag that answers for the person. Before it writes anything it checks that the
+server at that address presents a certificate from that CA for that host name.
+Then it writes the credentials, `config.json` (server, CA) and the CA copy.
+It never changes a file that is already there (R17).
+
+A first install needs both `--server` and `--ca`. `--ca` is the CA file (a
+file, not a secret); `--server` is the address, a `tls://` one. A later
+install on a machine that already has them (a second endpoint, or after
+`mashctl adopt`) needs neither and reads them from `config.json`.
 
 <!-- packet: install-main -->
 ```
 $ mash credential install --key bob.key --token acme.demo.bob.token \
-    --ca ca.pem
-This is the first install on this machine, so mash needs to know who to
-trust. Type what whoever runs your mash server gave you, apart from the
-token. mash never prints the values it asks for.
+    --server tls://myserver:4222 --ca ca.pem
+First install on this machine. mash will connect only to this server, and
+trust only server certificates signed by this CA:
+  server          tls://myserver:4222
+  CA fingerprint  of ca.pem
+    18b3f713-809c9df9-4b85107f-964cd475-9b1e08e8-03a1e87d-1c00ba96-7bc06c52
+Compare both with what whoever runs your mash server sent you.
 
-Type the server address: tls://myserver:4222
-Type the CA fingerprint: 18b3f713-809c9df9-4b85107f-964cd475-9b1e08e8-03a1e87d-1c00ba96-7bc06c52
-fingerprint matches
 checked  the server at myserver:4222 presents a certificate from this CA
-checked  the token is signed by the account the server serves (acme)
 
 Installed credentials for acme.demo.bob.
 They hold bob's private key and the token. Keep bob.key as the backup.
@@ -729,8 +722,6 @@ They hold bob's private key and the token. Keep bob.key as the backup.
   wrote   ~/.config/mash/acme.demo.bob.creds  (mode 600)
   wrote   ~/.config/mash/config.json          (server, CA)
   copied  ~/.config/mash/ca.pem               (from ca.pem, mode 644)
-  wrote   ~/.config/mash/trust.json           (account, server, CA)  (mode 600)
-  switched to the new generation  (all four files, at once)
 
 The token file is not needed any more and mash kept no copy: delete
 acme.demo.bob.token.
@@ -743,50 +734,16 @@ NEXT: check that acme.demo.bob can sign in:
 mash read its address from the token. The CA is copied into the config
 directory so the configuration does not depend on where `ca.pem` was when you
 ran the command (Q14); `config.json` names the copy. See "How the agent
-trusts the server" below. The record, the server and the CA are written
-together, once the typed fingerprint has matched the CA file, the server has
-been seen to present a certificate from that CA for that host name, and the
-token has verified against the account key that server serves; and only in
-the current user's mash config directory: never a system trust store. Every
-file follows File safety (section 2): the credentials file and `trust.json`
-are created exclusively, mode 600, without following a link, and an existing
-different one is refused (below). The lines after the two prompts are what the
-person typed (or pasted); mash prints `fingerprint matches` and never the
-fingerprint itself, nor the typed value back.
+trusts the server" below. The check of the server's certificate comes before
+any write, and only the current user's mash config directory is written:
+never a system trust store. Every file follows File safety (section 2): the
+credentials file is created exclusively, mode 600, without following a link,
+and an existing different one is refused (below). The fingerprint is the one of
+the file given with `--ca`, in the display form of R15; what the person
+compares it with is what the operator sent, which mash never sees.
 
-With no CA file (a public server whose certificate the computer's own
-authorities trust) there is no fingerprint to type; the server address is
-still typed, and the record says so:
-
-<!-- packet: install-noca -->
-```
-$ mash credential install --key bob.key --token acme.demo.bob.token
-This is the first install on this machine, so mash needs to know who to
-trust. No CA file was given, so mash trusts the authorities this computer
-trusts. Type the server address whoever runs your mash server gave you,
-apart from the token.
-
-Type the server address: tls://mail.example.com:4222
-checked  the server at mail.example.com:4222 presents a trusted certificate
-checked  the token is signed by the account the server serves (acme)
-
-Installed credentials for acme.demo.bob.
-They hold bob's private key and the token. Keep bob.key as the backup.
-
-  wrote   ~/.config/mash/acme.demo.bob.creds  (mode 600)
-  wrote   ~/.config/mash/config.json          (server)
-  wrote   ~/.config/mash/trust.json           (account, server)  (mode 600)
-  switched to the new generation  (all three files, at once)
-
-The token file is not needed any more and mash kept no copy: delete
-acme.demo.bob.token.
-
-NEXT: check that acme.demo.bob can sign in:
-  mash status
-```
-
-A later install, on a machine that has the trust record, asks nothing: it
-checks the token, the server and the CA against the record, and the files
+A later install, on a machine that already has `config.json` and the CA copy,
+asks for nothing more: it checks the server's certificate again and the files
 that already say the same are `kept (unchanged)`. The credentials file as the
 single input: `--creds FILE` replaces `--key` and `--token` (it already holds
 both; mash copies it into the config directory):
@@ -794,14 +751,15 @@ both; mash copies it into the config directory):
 <!-- packet: install-creds -->
 ```
 $ mash credential install --creds acme.demo.bob.creds
+checked  the server at myserver:4222 presents a certificate from the CA mash
+         uses
+
 Installed credentials for acme.demo.bob.
 They hold the private key and the token. Keep your file as the backup.
 
-  checked  token, server and CA match the trust record
-  wrote    ~/.config/mash/acme.demo.bob.creds  (mode 600)
-  kept     ~/.config/mash/config.json          (unchanged)
-  kept     ~/.config/mash/ca.pem               (unchanged)
-  kept     ~/.config/mash/trust.json           (unchanged)
+  wrote  ~/.config/mash/acme.demo.bob.creds  (mode 600)
+  kept   ~/.config/mash/config.json          (unchanged)
+  kept   ~/.config/mash/ca.pem               (unchanged)
 
 NEXT: check that acme.demo.bob can sign in:
   mash status
@@ -815,40 +773,40 @@ command or in the history):
 ```
 $ ssh admin@myserver cat acme.demo.bob.token | \
     mash credential install --key bob.key --token -
+checked  the server at myserver:4222 presents a certificate from the CA mash
+         uses
+
 Installed credentials for acme.demo.bob.
 They hold bob's private key and the token. Keep bob.key as the backup.
 
-  checked  token, server and CA match the trust record
-  wrote    ~/.config/mash/acme.demo.bob.creds  (mode 600)
-  kept     ~/.config/mash/config.json          (unchanged)
-  kept     ~/.config/mash/ca.pem               (unchanged)
-  kept     ~/.config/mash/trust.json           (unchanged)
+  wrote  ~/.config/mash/acme.demo.bob.creds  (mode 600)
+  kept   ~/.config/mash/config.json          (unchanged)
+  kept   ~/.config/mash/ca.pem               (unchanged)
 
 NEXT: check that acme.demo.bob can sign in:
   mash status
 ```
 
-#### Same machine: a second endpoint keeps the trust
+#### Same machine: a second endpoint keeps the server and the CA
 
-When the trust record exists (an earlier install, or `mashctl adopt`), a
-second endpoint of the same server and account needs nothing typed: mash
-checks the token against the record and says what it kept with `kept
-(unchanged)`, `trust.json` included. A second endpoint on the same machine
-makes a choice necessary, and the hint says so, with two commands (a
-configuration line is not a command, so the file way is in `mash status`,
-which lists both):
+When `config.json` and the CA copy exist (an earlier install, or `mashctl
+adopt`), a second endpoint of the same server needs no `--server` and no
+`--ca`. A second endpoint on the same machine makes a choice necessary, and the
+hint says so, with two commands (a configuration line is not a command, so the
+file way is in `mash status`, which lists both):
 
 <!-- packet: install-second -->
 ```
 $ mash credential install --key alice.key --token acme.demo.alice.token
+checked  the server at myserver:4222 presents a certificate from the CA mash
+         uses
+
 Installed credentials for acme.demo.alice.
 They hold alice's private key and the token. Keep alice.key as the backup.
 
-  checked  token, server and CA match the trust record
-  wrote    ~/.config/mash/acme.demo.alice.creds  (mode 600)
-  kept     ~/.config/mash/config.json            (unchanged)
-  kept     ~/.config/mash/ca.pem                 (unchanged)
-  kept     ~/.config/mash/trust.json             (unchanged)
+  wrote  ~/.config/mash/acme.demo.alice.creds  (mode 600)
+  kept   ~/.config/mash/config.json            (unchanged)
+  kept   ~/.config/mash/ca.pem                 (unchanged)
 
 The token file is not needed any more and mash kept no copy: delete
 acme.demo.alice.token.
@@ -859,21 +817,18 @@ NEXT: this machine has more than one endpoint now. Choose one for this
   mash status
 ```
 
-Nothing is asked here: the server, the CA and the account are the ones in the
-trust record, and nothing about them changes. The person is asked only when
-the install makes the record. When mash takes the settings from mashctl's
-configuration instead, the `kept` lines read `wrote` and `copied` as in the
-first block. There is no `--server`, and no `--ca` that differs from the
-record: a different value is refused (below), and the one way to change what
-mash trusts is `mash trust reset`, then a fresh install.
+Nothing about the server or the CA changes here. When mash takes the settings
+from mashctl's configuration instead, the `kept` lines read `wrote` and
+`copied` as in the first block. A `--server` or `--ca` that differs from what
+the machine already has is refused (below); mash never replaces them.
 
-#### Refusals (exit 1; no terminal exits 4; a usage error exits 2)
+#### Refusals (exit 1; a usage error exits 2)
 
 A file that cannot be read or written is exit 1 with its cause (contract rev
 7; it was 6). A pasted token, or a pasted private key, is refused without
 printing it back (R16; the value here is shortened to the three letters every
 token starts with, which is all mash would ever show). The fix is one thing to
-do, in order; the command is last. Everything after is exit 1:
+do, in order; the command is last. Everything after is exit 1 unless said:
 
 <!-- packet: install-refuse -->
 ```
@@ -897,12 +852,35 @@ error: this token is for a different key than alice.key.
 fix: use the key you made for bob (bob.key), or ask for a new token.
 ```
 
-The `--ca` file cannot be read (exit 1, with its cause):
+A first install with no `--ca` (exit 2, before anything is read or written; the
+fix adds the flag to the command just typed, so it is a sentence, R9):
+
+<!-- packet: install-refuse -->
+```
+$ mash credential install --key bob.key --token acme.demo.bob.token \
+    --server tls://myserver:4222
+error: a first install needs --ca <file>. Nothing was read or written.
+fix: add --ca <ca file> to the same command: the CA file whoever runs your
+     mash server sent you (ca.pem).
+```
+
+A first install with no `--server` (exit 2, the same way):
 
 <!-- packet: install-refuse -->
 ```
 $ mash credential install --key bob.key --token acme.demo.bob.token \
     --ca ca.pem
+error: a first install needs --server <address>. Nothing was read or written.
+fix: add --server <address> to the same command: the server address whoever
+     runs your mash server sent you, such as tls://myserver:4222.
+```
+
+The `--ca` file cannot be read (exit 1, with its cause):
+
+<!-- packet: install-refuse -->
+```
+$ mash credential install --key bob.key --token acme.demo.bob.token \
+    --server tls://myserver:4222 --ca ca.pem
 error: cannot read ca.pem (no such file).
 fix: check the path; whoever set up the server can send you the file.
 ```
@@ -916,31 +894,31 @@ fix: use the CA file from the server's setup; its first line is:
   -----BEGIN CERTIFICATE-----
 ```
 
-The typed server address is a plain `nats://` one (nothing is written; the
-person types the right one on the next run):
-
-<!-- packet: install-refuse -->
-```
-Type the server address: nats://myserver:4222
-error: mash connects only over an encrypted tls:// connection; the address
-       nats://myserver:4222 is not encrypted, so credentials and mail would
-       cross the network in the clear. Nothing was written.
-fix: run the same command again and type the tls:// address.
-```
-
-The old `--server` flag is gone (the address is typed, so it cannot be set by
-something that is not the person); usage error, exit 2:
+The `--server` address is a plain `nats://` one (nothing is written; the person
+gives the right one on the next run):
 
 <!-- packet: install-refuse -->
 ```
 $ mash credential install --key bob.key --token acme.demo.bob.token \
-    --server tls://newhost:4222
-error: unknown option --server for mash credential install.
-fix: mash asks for the server address when it needs it. To move this machine
-     to another server, at a terminal:
-  mash trust reset
-     then install the new server's credentials (mash asks for its address):
-  mash credential install --key <key file> --token <token file> --ca <ca file>
+    --server nats://myserver:4222 --ca ca.pem
+error: mash connects only over an encrypted tls:// connection; the address
+       nats://myserver:4222 is not encrypted, so credentials and mail would
+       cross the network in the clear. Nothing was written.
+fix: run the same command again with the tls:// address.
+```
+
+The server at the address does not present a certificate from that CA for that
+host name (a swapped address, a wrong file; nothing is written: this check
+comes before every write, so a wrong pair leaves nothing behind):
+
+<!-- packet: install-refuse -->
+```
+$ mash credential install --key bob.key --token acme.demo.bob.token \
+    --server tls://otherhost:4222 --ca ca.pem
+error: the server at otherhost:4222 does not present a certificate from the
+       CA in ca.pem for the name otherhost. Nothing was written.
+fix: check the server address and the CA file with whoever runs your mash
+     server.
 ```
 
 The credentials file is already there and is different (nothing is written;
@@ -969,142 +947,33 @@ fix: see where it points, remove it if it is not yours, then run the same
   ls -l ~/.config/mash/acme.demo.bob.creds
 ```
 
-The typed fingerprint is not the one of the CA file (nothing is written; mash
-never shows the right one, so the person has to get it again from the
-operator):
+The machine already uses another server (nothing is written; the rule is
+0.5.6's kept 0.5.5 rule: an existing setting is never changed, and the fix says
+which file to move aside; UNVERIFIED that moving only this file is enough):
 
 <!-- packet: install-refuse -->
 ```
 $ mash credential install --key bob.key --token acme.demo.bob.token \
-    --ca ca.pem
-This is the first install on this machine, so mash needs to know who to
-trust. Type what whoever runs your mash server gave you, apart from the
-token. mash never prints the values it asks for.
-
-Type the server address: tls://myserver:4222
-Type the CA fingerprint: 4f6a2459-1d994ad7-e8a86665-b400fddd-e6fb27e5-345b786f-79c08163-7a983a4b
-error: the fingerprint does not match the CA in ca.pem. Nothing was written.
-fix: do not use this ca.pem. Ask whoever runs your mash server for the
-     right file and fingerprint, by another route than the token.
+    --server tls://newhost:4222 --ca ca.pem
+error: this machine already uses the server tls://myserver:4222, not
+       tls://newhost:4222. Nothing was written.
+fix: mash never replaces a setting that is installed. To use the new server,
+     move the old settings aside, then run the same command again:
+  mv ~/.config/mash/config.json ~/.config/mash/config.json.old
 ```
 
-The fingerprint matches, but the server at the typed address does not present
-a certificate from that CA for that host name (a swapped address, a wrong
-file; nothing is written):
+The machine already uses another CA (nothing is written, the same rule):
 
 <!-- packet: install-refuse -->
 ```
 $ mash credential install --key bob.key --token acme.demo.bob.token \
-    --ca ca.pem
-This is the first install on this machine, so mash needs to know who to
-trust. Type what whoever runs your mash server gave you, apart from the
-token. mash never prints the values it asks for.
-
-Type the server address: tls://otherhost:4222
-Type the CA fingerprint: 18b3f713-809c9df9-4b85107f-964cd475-9b1e08e8-03a1e87d-1c00ba96-7bc06c52
-fingerprint matches
-error: the server at otherhost:4222 does not present a certificate from the
-       CA in ca.pem for the name otherhost. Nothing was written.
-fix: check the server address and the CA file with whoever runs your mash
-     server.
-```
-
-The server is the right one, but the token is not signed by the account key
-that server serves (a token made by another server, or an attacker's own;
-nothing is written; mash checks the server's key, not the issuer the token
-claims):
-
-<!-- packet: install-refuse -->
-```
-$ mash credential install --key bob.key --token acme.demo.bob.token \
-    --ca ca.pem
-This is the first install on this machine, so mash needs to know who to
-trust. Type what whoever runs your mash server gave you, apart from the
-token. mash never prints the values it asks for.
-
-Type the server address: tls://myserver:4222
-Type the CA fingerprint: 18b3f713-809c9df9-4b85107f-964cd475-9b1e08e8-03a1e87d-1c00ba96-7bc06c52
-fingerprint matches
-checked  the server at myserver:4222 presents a certificate from this CA
-error: this token is not signed by the account key that the server at
-       myserver:4222 serves. Nothing was written.
-fix: this token is not from your server. Ask whoever runs it for a new
-     one, by another route than the one this one came by.
-```
-
-On a machine that already has the trust record, a token signed by a different
-account than the one recorded is refused, and so is another server or CA
-(nothing is written, no file is touched; no question is asked, since a
-question cannot change the record):
-
-<!-- packet: install-refuse -->
-```
-$ mash credential install --key bob.key --token acme.demo.bob.token
-error: this token is signed by a different account than the one mash trusts
-       on this machine (the account acme). Nothing was written.
-fix: ask whoever runs your mash server for a token from your server. To move
-     this machine to another account or server, at a terminal:
-  mash trust reset
-     then install again with the new credentials:
-  mash credential install --key <key file> --token <token file> --ca <ca file>
-```
-
-<!-- packet: install-refuse -->
-```
-$ mash credential install --key bob.key --token acme.demo.bob.token \
-    --ca newca.pem
-error: newca.pem is not the CA mash trusts on this machine. Nothing was
-       written.
-fix: if the server's CA changed on purpose, at a terminal:
-  mash trust reset
-     then install again with the new CA (mash asks for its fingerprint):
-  mash credential install --key <key file> --token <token file> --ca newca.pem
-```
-
-The server at the recorded address presents a certificate from another CA than
-the one recorded (nothing is written, no file is touched):
-
-<!-- packet: install-refuse -->
-```
-$ mash credential install --key bob.key --token acme.demo.bob.token
-error: the server at myserver:4222 does not present a certificate from the CA
-       mash trusts on this machine. Nothing was written.
-fix: if the server or its CA changed on purpose, get the new address, CA file
-     and fingerprint from whoever runs your mash server, then at a terminal:
-  mash trust reset
-     then install again:
-  mash credential install --key bob.key --token acme.demo.bob.token --ca <ca file>
-```
-
-If `config.json`, `ca.pem` and `trust.json` do not agree, the install refuses
-before it reads the token, and touches nothing (the same refusal as every
-command, R21; the fix is the one reset, then a fresh install):
-
-<!-- packet: install-refuse -->
-```
-$ mash credential install --key bob.key --token acme.demo.bob.token
-error: this machine's trust files disagree: config.json names
-       tls://otherhost:4222, and trust.json names tls://myserver:4222.
-       Nothing was written.
-fix: to start again, at a terminal:
-  mash trust reset
-     then install again, with your credentials:
-  mash credential install --key bob.key --token acme.demo.bob.token --ca <ca file>
-```
-
-With no terminal (a pipe, a script, an agent's shell) the first install
-refuses before it asks, whenever it would make the trust record. There is no
-`--yes`, no flag and no variable that answers for the person (INV-004; exit 4,
-not authorized: a person must run it at a terminal):
-
-<!-- packet: install-refuse -->
-```
-$ mash credential install --key bob.key --token acme.demo.bob.token \
-    --ca ca.pem
-error: this makes mash trust a server and a CA, so a person must run it at a
-       terminal and type the server address and the fingerprint. No option
-       skips that.
-fix: run the same command yourself, in a terminal.
+    --server tls://myserver:4222 --ca newca.pem
+error: newca.pem is not the CA this machine already uses (~/.config/mash/
+       ca.pem). Nothing was written.
+fix: mash never replaces a setting that is installed. If the server's CA
+     changed on purpose, move the old copy aside, then run the same command
+     again:
+  mv ~/.config/mash/ca.pem ~/.config/mash/ca.pem.old
 ```
 
 The token file is missing (exit 1, with its cause):
@@ -1115,36 +984,28 @@ error: cannot read acme.demo.nobody.token (no such file).
 fix: check the file name; mashctl writes <owner>.<group>.<name>.token.
 ```
 
-#### A change of trust is `mash trust reset`, then a fresh install
-
-`credential install` never changes the server, the CA or the account that
-mash trusts (R17, REQ-013): a token or `--ca` that disagrees with the record
-is refused above, and `--replace` does not exist. Nothing is changed in place
-in 0.5.6 (contract rev 11): the person runs `mash trust reset` (section 5; it
-removes this machine's configuration, trust record and credentials, and says
-exactly what), and installs again under the first-install rules, which type
-the server address and the CA fingerprint again.
+There is no terminal refusal here: install asks nothing, so it runs the same
+with or without a terminal (a script or an agent can run it; the person's
+comparison of the shown values is theirs to make, and the guide says so).
 
 #### `--detail` and `--json`
 
 `--detail` adds the full paths, the storage name, and the token's owner and
 expiry when the token carries them. The expiry line is PROVISIONAL: it is
-shown only if the token's format lets mash read it (Q13). It prints no
-fingerprint (R15), and the person is asked for it all the same:
+shown only if the token's format lets mash read it (Q13):
 
 <!-- packet: install-detail -->
 ```
 $ mash credential install --key bob.key --token acme.demo.bob.token \
-    --ca ca.pem --detail
-This is the first install on this machine, so mash needs to know who to
-trust. Type what whoever runs your mash server gave you, apart from the
-token. mash never prints the values it asks for.
+    --server tls://myserver:4222 --ca ca.pem --detail
+First install on this machine. mash will connect only to this server, and
+trust only server certificates signed by this CA:
+  server          tls://myserver:4222
+  CA fingerprint  of ca.pem
+    18b3f713-809c9df9-4b85107f-964cd475-9b1e08e8-03a1e87d-1c00ba96-7bc06c52
+Compare both with what whoever runs your mash server sent you.
 
-Type the server address: tls://myserver:4222
-Type the CA fingerprint: 18b3f713-809c9df9-4b85107f-964cd475-9b1e08e8-03a1e87d-1c00ba96-7bc06c52
-fingerprint matches
 checked  the server at myserver:4222 presents a certificate from this CA
-checked  the token is signed by the account the server serves (acme)
 
 Installed credentials for acme.demo.bob.
 They hold bob's private key and the token. Keep bob.key as the backup.
@@ -1152,8 +1013,6 @@ They hold bob's private key and the token. Keep bob.key as the backup.
   wrote   /home/bob/.config/mash/acme.demo.bob.creds  (mode 600)
   wrote   /home/bob/.config/mash/config.json          (server, CA)
   copied  /home/bob/.config/mash/ca.pem               (from ca.pem, mode 644)
-  wrote   /home/bob/.config/mash/trust.json           (generation 1, mode 600)
-  switched to the new generation  (generation 1; all four files, at once)
 
   storage name   acme_demo_bob
   token owner    acme
@@ -1166,8 +1025,9 @@ NEXT: check that acme.demo.bob can sign in:
   mash status
 ```
 
-`--json` replaces the screen with one object (schema `mash-credential@2`);
-it needs the same typed answers at a terminal when it makes the record:
+`--json` replaces the screen with one object (schema `mash-credential@2`). It
+runs with or without a terminal, and it carries the two values the screen shows
+(they are public), so a script can log them for the person to compare:
 
 <!-- packet: install-json -->
 ```
@@ -1175,36 +1035,34 @@ it needs the same typed answers at a terminal when it makes the record:
   "creds_path": "/home/bob/.config/mash/acme.demo.bob.creds",
   "config_path": "/home/bob/.config/mash/config.json",
   "ca_path": "/home/bob/.config/mash/ca.pem",
-  "trust_path": "/home/bob/.config/mash/trust.json",
   "server": "tls://myserver:4222",
+  "ca_fingerprint":
+    "18b3f713-809c9df9-4b85107f-964cd475-9b1e08e8-03a1e87d-1c00ba96-7bc06c52",
   "ca_checked": true }
 ```
 
-`ca_path` is `null` and `ca_checked` is `false` when no `--ca` was given and
-the system's authorities are used. No field ever holds a token, a key, a
-fingerprint or the contents of a credentials file (INV-001, R15).
+No field ever holds a token, a key or the contents of a credentials file
+(INV-001). `ca_fingerprint` is a checksum of a public file, not a secret.
 
 #### How the agent trusts the server
 
-The server proves who it is with a certificate. mash checks it against the
-CA file you give with `--ca` (the CA is whoever signed the server's
-certificate), so mash only talks to a server that CA signed. With no `--ca`,
-mash trusts the same authorities your computer does: right for a public
-server. A server whose certificate does not match is refused, with a message
-that says why and what to do (below). Get `ca.pem` from whoever set up the
-server: it holds no secret (the server setup guide, `docs/tls-and-clusters.md`,
-calls it `ca.pem`; copy it, never `ca.key`). Whoever runs your mash server also
-gives you the server address and the CA's fingerprint, apart from the token
-(mashctl prints the fingerprint for them when it makes the endpoint), and you
-type both when `credential install` asks on the first install. That is what
-stops a swapped token with another server and CA from being believed, and why
-mash never prints the fingerprint itself: a value mash printed would only
-prove that the file matches itself. The record `trust.json` then holds the
-account, the server and the CA fingerprint together; every use of mash checks
-that `trust.json`, `config.json` and the CA file agree. `mash status
---detail` shows which CA file is trusted, by path.
+The server proves who it is with a certificate. mash checks it against the CA
+file you give with `--ca` (the CA is whoever signed the server's certificate),
+so mash only talks to a server that CA signed. A server with a public
+certificate needs the file of the authorities that signed it, given the same
+way (for example the system's bundle file); `--ca` is always a file (UNVERIFIED:
+contract rev 15 makes `--ca` required and names no system-store form). A server
+whose certificate does not match is refused, with a message that says why and
+what to do (below). Get `ca.pem` from whoever set up the server: it holds no
+secret (the server setup guide, `docs/tls-and-clusters.md`, calls it `ca.pem`;
+copy it, never `ca.key`). Whoever runs your mash server also gives you the
+server address and the CA's fingerprint, apart from the token (mashctl prints
+both for them when it makes the endpoint). The first install shows both and you
+compare them: that is what tells you the `ca.pem` and the address you hold are
+your server's and not another's, which the token alone cannot say. mash asks you
+to type nothing. `mash status --detail` shows which CA file is used, by path.
 
-When the server's certificate is not signed by the CA mash trusts, mash is
+When the server's certificate is not signed by the CA mash uses, mash is
 refusing the server, and says so, in `mash status` (exit 1) and in `mash send`
 (exit 1):
 
@@ -1218,12 +1076,12 @@ acme.demo.bob: mail does NOT work: mash does not trust the server.
                 alive, certificate NOT TRUSTED (checked 09:42)
   config        ok
   credentials   not checked (mash did not trust the server)
+  mailbox       not checked
 
-fix: if the server's CA changed on purpose, get its address, file and
-     fingerprint from whoever runs your mash server, then at a terminal:
-  mash trust reset
-     then install again with your credentials:
-  mash credential install --key <key file> --token <token file> --ca <ca file>
+fix: if the server's CA changed on purpose, get the new CA file from whoever
+     runs your mash server, move the old copy aside, then install again:
+  mv ~/.config/mash/ca.pem ~/.config/mash/ca.pem.old
+  mash credential install --creds ~/.config/mash/acme.demo.bob.creds --ca <ca file>
 ```
 
 <!-- packet: trust -->
@@ -1231,66 +1089,18 @@ fix: if the server's CA changed on purpose, get its address, file and
 $ mash send acme.demo.alice "hi"
 error: mash does not trust the server at myserver:4222: its certificate is
        not from your CA.
-fix: if the server's CA changed on purpose, get its address, file and
-     fingerprint from whoever runs your mash server, then at a terminal:
-  mash trust reset
-     then install again with your credentials:
-  mash credential install --key <key file> --token <token file> --ca <ca file>
+fix: if the server's CA changed on purpose, get the new CA file from whoever
+     runs your mash server, move the old copy aside, then install again:
+  mv ~/.config/mash/ca.pem ~/.config/mash/ca.pem.old
+  mash credential install --creds ~/.config/mash/acme.demo.bob.creds --ca <ca file>
 ```
 
-When the trust files disagree with each other (a file of the selected
-generation was changed, by hand or by something else), every command refuses before it connects
-(R21). The default screen shows the same four rows. Under `status`,
-`config.json` names another server than `trust.json` (a changed file; the
-server is not checked; the file line that puts it back, and the two commands
-for a change on purpose or a damaged file):
-
-<!-- packet: trust-disagree -->
-```
-$ mash status
-acme.demo.bob: mail does NOT work: this machine's trust files disagree.
-
-  version       0.5.6
-  server        tls://otherhost:4222
-                not checked (the trust files disagree)
-  config        REFUSED (disagrees with the trust record)
-  credentials   not checked
-
-error: this machine's trust files disagree: config.json names
-       tls://otherhost:4222, and trust.json names tls://myserver:4222.
-fix: if you did not change it, change the server line in
-     ~/.config/mash/config.json back to:
-    "server": "tls://myserver:4222"
-     If you changed the server or CA on purpose, or the files are damaged,
-     at a terminal:
-  mash trust reset
-     then install again with your credentials:
-  mash credential install --key <key file> --token <token file>
-```
-
-Under `send` (the same screen in every command that connects), the CA file
-is not the one `trust.json` records:
-
-<!-- packet: trust-disagree -->
-```
-$ mash send acme.demo.alice "hi"
-error: this machine's trust files disagree, so mash did not connect.
-       ca.pem is not the CA that trust.json records.
-fix: if you did not change it, put the CA file back. If you did, or you
-     cannot, at a terminal:
-  mash trust reset
-     then install again with your credentials:
-  mash credential install --key <key file> --token <token file> --ca <ca file>
-```
-
-Exit 1. mash never repairs the trust files itself: a repair would be a change
-of trust that nobody confirmed (INV-004), so the way back is the person's own
-`mash trust reset` (section 5), which works in this state too. An interrupted
-first install cannot leave this state: the generation is selected by one
-atomic switch, so a kill leaves nothing selected (`mash status` then says
-there is no configuration) or the complete set (R21). Without any `--ca` and a private server, the "does not trust" message
-names the system's authorities instead: "its certificate is not from an
-authority your computer trusts."
+Exit 1. mash never replaces the CA itself: it names the file to move aside
+and the command that installs the new one (UNVERIFIED: that `--creds` of the
+installed file, with a new `--ca`, is accepted as a later install once the
+copy is moved aside). The "does not trust" message names the system's
+authorities instead when the CA file given at install was a system bundle: "its
+certificate is not from an authority your computer trusts."
 
 Before (`docs/tls-and-clusters.md`, the same fault today):
 
@@ -1314,29 +1124,33 @@ next: mash status
 Changes: verb `create` becomes `install` (hard cut, no alias: the
 maintainer's rule for migrations; the unknown-command error names the closest
 command); flags `--seed`/`--jwt` become `--key`/`--token`, and the unknown
-flag error says so; NEW flags `--creds FILE` and `--ca FILE`. There is NO
-`--server`, no `--replace` and no fingerprint flag (R15, R17): the first
-install makes the trust record (R21) after the person types the server address
-and the fingerprint, and verifies the token against the account key the
-connected server serves; every later install is checked against the record and
-refused without touching a file when it disagrees. `--key`, `--token` and
-`--creds` take file names or `-`, never a secret; the secret files are created
-exclusively and never replaced (no `--force`); `config.json` is written
-(server, CA) with the CA copied beside it and `trust.json` made, and every
-file written is listed; the explanation is two lines and says to keep
-`bob.key` as the backup; `--dry-run` says "Would install" and lists what it
-would write, and its `NEXT:` is the same command without it (it asks nothing
-and writes nothing); the creds path and the public key move behind
-`--detail`; `--json` keeps its shape with renamed fields (`mash-credential@2`:
-`creds_path` stays, `name` becomes `endpoint`, new `config_path`, `ca_path`,
-`trust_path`, `server`, `ca_checked`). Exit codes: a file that cannot be read
-or written is 1 with its cause (it was 6); a first install with no terminal
-is 4 (a person must run it at a terminal); the other refusals exit 1; a usage error 2.
+flag error says so; NEW flags `--creds FILE`, `--ca FILE` and `--server URL`.
+A first install needs `--server` and `--ca` (exit 2 without either, before
+anything is read) and SHOWS the server address and the CA fingerprint, in one
+line asking the person to compare them with what the operator sent; nothing is
+typed back (R15, contract rev 15). Before writing, it checks that the server
+presents a certificate from that CA for that host name. A server, CA or
+credentials file that is already there is never changed: any difference
+refuses without touching a file and names the file to move aside (R17); there
+is no trust record, no generation, no `--replace`, no `--force` and no
+`mash trust reset`. `--key`, `--token` and `--creds` take file names or `-`,
+never a secret; the secret files are created exclusively and never replaced;
+`config.json` is written (server, CA) with the CA copied beside it, and every
+file written is listed; the explanation is two lines and says to keep `bob.key`
+as the backup; `--dry-run` says "Would install" and lists what it would write,
+and its `NEXT:` is the same command without it (it writes nothing); the creds
+path and the public key move behind `--detail`; `--json` keeps its shape with
+renamed fields (`mash-credential@2`: `creds_path` stays, `name` becomes
+`endpoint`, new `config_path`, `ca_path`, `server`, `ca_fingerprint`,
+`ca_checked`). Exit codes: a file that cannot be read or written is 1 with its
+cause (it was 6); the other refusals exit 1; a usage error, a missing
+`--server` or `--ca` included, 2.
 
 ### Hand-overs to mashctl
 
 Text of the CLI team (L11, L12), used here so the flow can be read end to end
-(DRAFT6 adds the `trust.json` line). Same machine, one command:
+(DRAFT7: no `trust.json` line, the trust record is gone). Same machine, one
+command:
 
 <!-- packet: install-make -->
 ```
@@ -1348,7 +1162,6 @@ The private key is inside the credentials file: guard that file.
   wrote   ~/.config/mash/acme.demo.bob.creds  (mode 600)
   kept    ~/.config/mash/config.json          (unchanged)
   kept    ~/.config/mash/ca.pem               (unchanged)
-  kept    ~/.config/mash/trust.json           (unchanged)
 
 NEXT: check that acme.demo.bob can sign in:
   mash status
@@ -1357,16 +1170,15 @@ NEXT: check that acme.demo.bob can sign in:
 (With `--make-key` mashctl writes the credentials file and no separate key or
 token file: checked in `cmd/mashctl/endpoint_create.go`, "write
 <config dir>/<address>.creds". The server and CA come from mashctl's own
-configuration, so no `--server` or `--ca`, and no fingerprint is typed:
-mashctl uses its own CA, the same trust domain. After `mashctl adopt` that
-configuration IS `~/.config/mash/config.json`, `ca.pem` and `trust.json` (one
-folder for both tools; adopt makes the record, below), so the three lines read
-`kept (unchanged)`, as on the quick start page; on a machine where mashctl runs
-with another config folder (`MASH_CONFIG_DIR`) they read `wrote` and `copied
-(from mashctl's own copy)`, as `credential install` prints them (R20). Whether
-`--make-key` makes the trust record on a machine that has none is the CLI
-team's to say (X7); this draft shows the machine adopt prepared. The block is the CLI
-team's extension; the wrote-lines are the shape agreed in L11. The
+configuration, so no `--server` or `--ca`, and no fingerprint is shown: the CA
+came from the person's own setup through `adopt --from`, and the output says
+so in one line (contract rev 15, REQ-003; the line is the mashctl lane's text).
+After `mashctl adopt` that configuration IS `~/.config/mash/config.json` and
+`ca.pem` (one folder for both tools), so the two lines read `kept
+(unchanged)`, as on the quick start page; on a machine where mashctl runs with
+another config folder (`MASH_CONFIG_DIR`) they read `wrote` and `copied (from
+mashctl's own copy)`, as `credential install` prints them (R20). The block is
+the CLI team's extension; the wrote-lines are the shape agreed in L11. The
 credentials file and the file named by `--creds-out` are created under File
 safety, section 2.)
 
@@ -1384,7 +1196,6 @@ The private key is inside the credentials file: guard that file.
   wrote  ~/.config/mash/acme.demo.alice.creds  (mode 600)
   kept   ~/.config/mash/config.json            (unchanged)
   kept   ~/.config/mash/ca.pem                 (unchanged)
-  kept   ~/.config/mash/trust.json             (unchanged)
 
 NEXT: this machine has more than one endpoint now. Choose one for this
       shell, then check it:
@@ -1402,22 +1213,20 @@ invented here:
 docs/plans/2026-11-19-cli-targets-mashctl.md when it lands)
 ```
 
-Contract revision 7 (REQ-011 (ii)): `mashctl adopt --from <dir>` asks NO
-fingerprint, because the trust comes from a directory the same person owns: it
-is a same-owner local copy, not authentication, and its output says so (the
-mashctl lane's text). DRAFT5 had the person type the helper's fingerprint at
-adopt; that is withdrawn (X6). The CA fingerprint is still printed, in the
-display form of R15 (eight groups of eight, joined by `-`), where the OPERATOR
-needs it: by `mashctl endpoint create` (step B), for the person who will
-install on another machine and TYPES it there. Adopt makes the trust record
-on this machine from that directory (`trust.json`; an existing record is not
-replaced except after `mash trust reset`), which is why the `--make-key` blocks
-above show `kept   ~/.config/mash/trust.json  (unchanged)`.
+`mashctl adopt --from <dir>` asks NO fingerprint, because the trust comes from
+a directory the same person owns: it is a same-owner local copy, not
+authentication, and its output says so (the mashctl lane's text). The CA
+fingerprint is printed, in the display form of R15 (eight groups of eight,
+joined by `-`), where the OPERATOR needs it: by `mashctl endpoint create`
+(step B), for the person who will install on another machine and compare it
+there. Adopt makes no trust record: there is none in 0.5.6.
 
 Deleting an endpoint (the CLI team's text, section B of the mashctl targets:
 it states what will be lost, asks the person to type the address, then
-reports; DRAFT5 removes its NEXT, R19), and what the endpoint's own `mash
-status` says after it (section 5, status):
+reports; no NEXT, R19), and what the endpoint's own `mash status` says after it
+(section 5, status). The ctl lane's decision stands: after `mashctl endpoint
+delete` the endpoint's credentials file is left as it was (no `--delete-creds`
+by default), there is no NEXT, and `mash status` says DELETED:
 
 <!-- packet: ctl-delete -->
 ```
@@ -1447,7 +1256,10 @@ not their next step (R19, D7). The two things that may help are not hints:
 the endpoint's own `mash status` is the proof (section 5, "The endpoint was
 deleted"), and `mashctl endpoint list` shows what is left; neither is printed
 here. The prompt is the person's: the text after the colon is typed, and with
-no terminal the command refuses with exit 4 (the mashctl targets; not authorized: a person must run it at a terminal).
+no terminal the command refuses with exit 4 (INV-004; the mashctl targets;
+not authorized: a person must run it at a terminal). That is mashctl's
+confirmation and the only one left in these two tools: no `mash` command asks
+the person to type anything.
 
 `mashctl init --local` is removed. Its message points to the replacement (the
 guide, with the helper script in it; a URL, not a command, so it is not at
@@ -1510,34 +1322,47 @@ tool says the same short form) and the plugin version that this mash exports
 What it does today: reads the configuration and files and prints 11 labelled
 lines, always exit 0; it connects to nothing (the catalog's note). What the
 target does: it connects once with a 2 second budget and asks the server
-two things: is it reachable and encrypted (this needs no credentials), and
-does it accept this endpoint's credentials. This is a BEHAVIOUR CHANGE: `mash
-status` now touches the network (one connection, one sign-in, closed again),
-and takes up to 2 seconds when the server does not answer. It still works
-with no configuration (it then says what is missing and does not connect).
+three things: is it reachable and encrypted (this needs no credentials), does
+it accept this endpoint's credentials, and how many messages wait in this
+endpoint's inbox (REQ-015; section "What REQ-015 can count"). This is a
+BEHAVIOUR CHANGE: `mash status` now touches the network (one connection, one
+sign-in, closed again), and takes up to 2 seconds when the server does not
+answer. It still works with no configuration (it then says what is missing and
+does not connect).
 
-The screen is fixed (R11): the same verdict line and the same four rows in
+SUBJECT TO THE STATUS-VIEWS PAGE. Contract rev 15 (REQ-004) splits status
+into three views (`mash status` for this endpoint, `mash server status`,
+`mash endpoint status`) and the status-views page (written separately) may
+drop the server address row from `mash status` and settles the exact rows.
+The screens below are the target for the CURRENT design, plus the mailbox row
+of REQ-015 on every screen; when that page lands the `server` rows here follow
+it, and the mailbox row stays (it is `mash status`'s, the endpoint's own).
+
+The screen is fixed (R11): the same verdict line and the same five rows in
 the same order in every state, in the scenarios below: healthy, Claude Code
-not set up, no configuration, no endpoint chosen when several are installed,
-credentials missing, none installed, credentials readable by others, server
-unreachable, certificate not trusted and trust files that disagree (both
-section 4), credentials refused, endpoint DELETED, plain URL with the override, the override set with a tls
-address, plain URL refused. The server row is its address, then one of the
-forms listed in R11 (`alive, encrypted (checked 09:42)`, `alive, certificate
-NOT TRUSTED (checked 09:42)`, `alive, NOT ENCRYPTED (checked 09:42)`, `NOT
-ENCRYPTED (refused; not connected)`, `NOT REACHABLE (last reached 3h ago)`,
-`not checked`), with a third line only for the plain-text variable. It never
-says `alive` together with a past time: that was the
-defect of DRAFT4 (a server that answers now was seen now). "Last reached" is
-the last time this machine's mash heard the server answer, as recorded by
-`mash serve` in the state directory, or `never reached from here` (NEW
-behaviour: `mash serve` writes that time; N10). The group and endpoint counts
-are in `--detail` only.
+not set up, mail backing up (over the limit), no configuration, no endpoint
+chosen when several are installed, credentials missing, none installed,
+credentials readable by others, server unreachable, certificate not trusted
+(section 4), credentials refused, endpoint DELETED, plain URL with the
+override, the override set with a tls address, plain URL refused, the
+environment overriding the server. The server row is its address, then one of
+the forms listed in R11 (`alive, encrypted (checked 09:42)`, `alive,
+certificate NOT TRUSTED (checked 09:42)`, `alive, NOT ENCRYPTED (checked
+09:42)`, `NOT ENCRYPTED (refused; not connected)`, `NOT REACHABLE (last
+reached 3h ago)`, `not checked`), with a third line only for the plain-text
+variable. It never says `alive` together with a past time: that was the defect
+of DRAFT4 (a server that answers now was seen now). "Last reached" is the
+last time this machine's mash heard the server answer, as recorded by `mash
+serve` in the state directory, or `never reached from here` (NEW behaviour:
+`mash serve` writes that time; N10). The mailbox row is `<n> waiting`, `<n>
+waiting, OVER THE LIMIT OF 15`, `off` or `not checked` (R22). The group and
+endpoint counts are in `--detail` only.
 
-Exit codes: 0 when mail works (warnings included), 1 when it does not, 6 when
-the server did not answer or failed (DRAFT6, contract rev 7; the verdict line
-says which), 2 for a usage error (section 2). Today the exit is 0 even when a
-line says FAILED.
+Exit codes: 0 when mail works (warnings included, an over-the-limit mailbox
+included: AT-008), 1 when it does not, 4 when the server refused the
+credentials, 6 when the server did not answer or failed (contract rev 7; the
+verdict line says which), 2 for a usage error (section 2). Today the exit is 0
+even when a line says FAILED.
 
 Before (catalog, healthy, shortened; 11 lines, widest 145 columns):
 
@@ -1567,6 +1392,7 @@ acme.demo.bob: mail works.
                 alive, encrypted (checked 09:42)
   config        ok
   credentials   ok
+  mailbox       0 waiting
 ```
 
 Exit 0. No `NEXT:` (nothing follows). The server address is shown as
@@ -1575,12 +1401,12 @@ what the person reads.
 
 #### Healthy, `--detail`
 
-`--detail` keeps the four rows and adds rows after them (REQ-012): WHERE
-everything is, in seven rows that are the SAME in every state (the absent
-ones say `none`, `missing` or `not set`, so a person can compare screens),
-then the facts of before: the counts of the group (the maintainer's "if
-cheap": one extra read of the endpoint directory on the connection that is
-already open, counting records, never who is online) and the settings in use.
+`--detail` keeps the five rows and adds rows after them (REQ-012): WHERE
+everything is, in six rows that are the SAME in every state (the absent ones
+say `none`, `missing` or `not set`, so a person can compare screens), then the
+facts of before: the counts of the group (the maintainer's "if cheap": one
+extra read of the endpoint directory on the connection that is already open,
+counting records, never who is online) and the settings in use.
 
 <!-- packet: status-detail -->
 ```
@@ -1593,14 +1419,14 @@ acme.demo.bob: mail works.
                 answered in 41ms; the server's clock is 1s ahead of ours
   config        ok
   credentials   ok
+  mailbox       0 waiting
 
   config file       /home/bob/.config/mash/config.json
   ca                /home/bob/.config/mash/ca.pem
   credentials file  /home/bob/.config/mash/acme.demo.bob.creds
-  trust file        /home/bob/.config/mash/trust.json
-  trust             matches config (generation 1; the account acme)
   endpoint          acme.demo.bob
   chosen by         the only one installed here
+  mailbox limit     15 (the default)
 
   commit        e389eaf
   token expires never
@@ -1612,26 +1438,26 @@ acme.demo.bob: mail works.
   settings      MASH_* none set; the server and CA come from config.json
 ```
 
-The seven rows, in this order: `config file` (the path, `(missing)` after it
-when there is no file); `ca` (the CA file's path, `this computer's trusted
-authorities` when no CA is configured, `not set` when there is no
+The six rows, in this order: `config file` (the path, `(missing)` after it
+when there is no file); `ca` (the CA file's path, `not set` when there is no
 configuration); `credentials file` (the path, `(missing)` after it, `none`
-when no endpoint is known and `not set` when none is chosen); `trust file`
-(the path, `(missing)` after it) and `trust` (the record's state: `none` when
-there is no record, `matches config` when `trust.json`, `config.json` and the
-CA file agree, `differs` when they do not, R21); `endpoint` (the address, `not set`) and `chosen
-by`, in one of four fixed phrases: `MASH_ENDPOINT`, `"endpoint" in
-config.json`, `the only one installed here` (REQ-009) or `not set`. The trusted
-CA is named by its file in the `ca` row; its fingerprint is not printed (R15:
-mash never prints the value it asks a person to type). The `settings` row
-names every `MASH_*` variable that is set, never its value, so a person who
-meets an override sees it (for example `MASH_SERVER, MASH_ENDPOINT`). The
-`claude code` row replaces two jargon lines (channel allowlist, delivery); a
-CLI run reports only what it can read (whether the plugin's hooks and the
-channel list are installed); live counts are in the MCP `status` JSON
-(section 6). The next four blocks are the other states of `--detail`, cut to
-the verdict, the rows and the fix: the facts under `commit` follow in every
-one exactly as above and are not repeated.
+when no endpoint is known and `not set` when none is chosen); `endpoint` (the
+address, `not set`) and `chosen by`, in one of four fixed phrases:
+`MASH_ENDPOINT`, `"endpoint" in config.json`, `the only one installed here`
+(REQ-009) or `not set`; and `mailbox limit` (`15 (the default)`, `40
+("mailbox_limit" in config.json)`, `40 (MASH_MAILBOX_LIMIT)` or `off`, R22).
+The CA is named by its file in the `ca` row; its fingerprint is not on the
+status screens (it is shown by the first install and by mashctl, R15). The
+`settings` row names every `MASH_*` variable that is set, never its value, so
+a person who meets an override sees it (for example `MASH_SERVER,
+MASH_ENDPOINT`). The `claude code` row replaces two jargon lines (channel
+allowlist, delivery); a CLI run reports only what it can read (whether the
+plugin's hooks and the channel list are installed); live counts are in the MCP
+`status` JSON (section 6). When something waits, `--detail` adds one line under
+the `mailbox` row, `oldest waiting 12m ago` (the next block but one). The next
+blocks are the other states of `--detail`, cut to the verdict, the rows and the
+fix: the facts under `commit` follow in every one exactly as above and are not
+repeated.
 
 #### Claude Code is not set up for mail (warning, exit 0)
 
@@ -1645,6 +1471,7 @@ acme.demo.bob: mail works (1 warning).
                 alive, encrypted (checked 09:42)
   config        ok
   credentials   ok
+  mailbox       3 waiting
 
 warning: an idle Claude Code session is not woken by new mail; the mail
          waits for its next prompt.
@@ -1659,6 +1486,86 @@ for that session. The warning is a line under the rows, not a row (R11). The
 launch is for the terminal the person is in; how a session finds `mash` is in
 the quick start, prerequisite 3.)
 
+#### Mail is backing up (warning, exit 0)
+
+More messages are waiting than the limit allows (REQ-015, R22; the limit is 15
+unless `mailbox_limit` says otherwise). Mail still works, so the verdict is the
+one-warning form and the exit is 0 (AT-008). The mailbox row is the one place
+that says how many and that the limit is passed:
+
+<!-- packet: status-mailbox-over -->
+```
+$ mash status
+acme.demo.bob: mail works (1 warning).
+
+  version       0.5.6
+  server        tls://myserver:4222
+                alive, encrypted (checked 09:42)
+  config        ok
+  credentials   ok
+  mailbox       22 waiting, OVER THE LIMIT OF 15
+
+warning: 22 messages are waiting for acme.demo.bob, and the oldest has
+         waited 12m. mash serve wakes the session at most every 10 minutes
+         while the mailbox is over the limit.
+fix: have the session read its mail. To change the limit, add this line to
+     ~/.config/mash/config.json (0 turns the check off):
+    "mailbox_limit": 40
+```
+
+With `--detail` (the same rows as in every state; the line under the mailbox
+row is the oldest waiting message and where the limit comes from):
+
+<!-- packet: status-detail-mailbox-over -->
+```
+$ mash status --detail
+acme.demo.bob: mail works (1 warning).
+
+  version       0.5.6
+  server        tls://myserver:4222
+                alive, encrypted (checked 09:42)
+  config        ok
+  credentials   ok
+  mailbox       22 waiting, OVER THE LIMIT OF 15
+                oldest waiting 12m ago
+
+  config file       /home/bob/.config/mash/config.json
+  ca                /home/bob/.config/mash/ca.pem
+  credentials file  /home/bob/.config/mash/acme.demo.bob.creds
+  endpoint          acme.demo.bob
+  chosen by         the only one installed here
+  mailbox limit     15 (the default)
+
+warning: 22 messages are waiting for acme.demo.bob, and the oldest has
+         waited 12m. mash serve wakes the session at most every 10 minutes
+         while the mailbox is over the limit.
+fix: have the session read its mail. To change the limit, add this line to
+     ~/.config/mash/config.json (0 turns the check off):
+    "mailbox_limit": 40
+```
+
+When `mailbox_limit` is 0 the check is off, the row says so, and nothing is
+counted against a limit (the count itself is not shown: `off` is the whole
+row):
+
+<!-- packet: status-mailbox-off -->
+```
+$ mash status
+acme.demo.bob: mail works.
+
+  version       0.5.6
+  server        tls://myserver:4222
+                alive, encrypted (checked 09:42)
+  config        ok
+  credentials   ok
+  mailbox       off
+```
+
+If the config file already has the key, the fix label is `change the
+mailbox_limit line to:` (R10). The count is `not checked` wherever it cannot
+be known: no connection was made, the credentials were refused, or the server
+would not answer the inbox question (every other screen below).
+
 #### No configuration at all
 
 <!-- packet: status-noconfig -->
@@ -1671,21 +1578,21 @@ mail does NOT work: mash has no configuration on this machine.
                 not checked
   config        MISSING (~/.config/mash/config.json)
   credentials   not checked
+  mailbox       not checked
 
-fix: install the credentials your server made. mash asks for the server
-     address and the CA fingerprint that whoever runs your mash server gave
-     you. Add --ca <ca file> for a server with its own CA:
-  mash credential install --key <key file> --token <token file>
+fix: install the credentials your server made. Give the server address and
+     the CA file whoever runs your mash server sent you:
+  mash credential install --key <key file> --token <token file> --server <address> --ca <ca file>
 ```
 
 Exit 1. Today the same case exits 0 and prints 11 lines with two lines over
 200 columns. The fix is the command that makes the files (it is a command,
 so it may stand in command position; the files themselves are not lines the
 person writes here). Where `MASH_CONFIG_DIR` is set the row shows that path.
-For a server with its own CA the person adds `--ca <ca file>` (the fix says
-so in a sentence naming the flag, R9); mash then asks for the server address
-and the fingerprint (the first install makes the trust record, R21), and the
-install refusals and the server setup guide carry the rest.
+A first install needs `--server` and `--ca` (section 4, step C); install
+then shows the address and the CA fingerprint to compare. The install
+refusals and the server setup guide carry the rest. The command is wider than
+80 columns (R9: exempt; it cannot be wrapped).
 
 <!-- packet: status-detail-noconfig -->
 ```
@@ -1697,19 +1604,18 @@ mail does NOT work: mash has no configuration on this machine.
                 not checked
   config        MISSING (~/.config/mash/config.json)
   credentials   not checked
+  mailbox       not checked
 
   config file       /home/bob/.config/mash/config.json  (missing)
   ca                not set
   credentials file  none
-  trust file        /home/bob/.config/mash/trust.json  (missing)
-  trust             none
   endpoint          not set
   chosen by         not set
+  mailbox limit     15 (the default)
 
-fix: install the credentials your server made. mash asks for the server
-     address and the CA fingerprint that whoever runs your mash server gave
-     you. Add --ca <ca file> for a server with its own CA:
-  mash credential install --key <key file> --token <token file>
+fix: install the credentials your server made. Give the server address and
+     the CA file whoever runs your mash server sent you:
+  mash credential install --key <key file> --token <token file> --server <address> --ca <ca file>
 ```
 
 #### Several endpoints installed and none chosen
@@ -1724,6 +1630,7 @@ mail does NOT work: 2 endpoints are installed here and none is chosen.
                 alive, encrypted (checked 09:42)
   config        ok
   credentials   not checked (acme.demo.alice, acme.demo.bob)
+  mailbox       not checked
 
 fix: mash never guesses between them. To use acme.demo.alice (or
      acme.demo.bob), add this line to ~/.config/mash/config.json:
@@ -1750,14 +1657,14 @@ mail does NOT work: 2 endpoints are installed here and none is chosen.
                 alive, encrypted (checked 09:42)
   config        ok
   credentials   not checked (acme.demo.alice, acme.demo.bob)
+  mailbox       not checked
 
   config file       /home/bob/.config/mash/config.json
   ca                /home/bob/.config/mash/ca.pem
   credentials file  not set (no endpoint is chosen)
-  trust file        /home/bob/.config/mash/trust.json
-  trust             matches config (generation 1; the account acme)
   endpoint          not set
   chosen by         not set
+  mailbox limit     15 (the default)
 
 fix: mash never guesses between them. To use acme.demo.alice (or
      acme.demo.bob), add this line to ~/.config/mash/config.json:
@@ -1778,6 +1685,7 @@ mail does NOT work: no endpoint is installed here.
                 alive, encrypted (checked 09:42)
   config        ok
   credentials   MISSING (none in ~/.config/mash)
+  mailbox       not checked
 
 fix: install the credentials your server made for this endpoint. mash then
      uses it by itself; with several installed, name one with MASH_ENDPOINT
@@ -1785,10 +1693,10 @@ fix: install the credentials your server made for this endpoint. mash then
   mash credential install --key <key file> --token <token file>
 ```
 
-Exit 1. `config.json` is there (it has the server); no credentials file is.
-The server is checked all the same: reaching it needs no credentials (R11).
-With no `config.json` either, the screen is the one above ("No configuration
-at all").
+Exit 1. `config.json` is there (it has the server and the CA, so the install
+needs neither flag); no credentials file is. The server is checked all the
+same: reaching it needs no credentials (R11). With no `config.json` either,
+the screen is the one above ("No configuration at all").
 
 #### Credentials file missing
 
@@ -1802,6 +1710,7 @@ acme.demo.bob: mail does NOT work: no credentials on this machine.
                 alive, encrypted (checked 09:42)
   config        ok
   credentials   MISSING
+  mailbox       not checked
 
 fix: install the credentials made for this endpoint:
   mash credential install --key <key file> --token <token file>
@@ -1826,6 +1735,7 @@ acme.demo.bob: mail does NOT work: its credentials file is readable by others.
                 alive, encrypted (checked 09:42)
   config        ok
   credentials   UNSAFE (readable by others; not used)
+  mailbox       not checked
 
 fix: make the file private, then check again:
   chmod 600 ~/.config/mash/acme.demo.bob.creds
@@ -1849,6 +1759,7 @@ acme.demo.bob: mail does NOT work: the server did not answer within 2s.
                 NOT REACHABLE (last reached 3h ago)
   config        ok
   credentials   not checked (the server was not reached)
+  mailbox       not checked
 
 fix: check that the server is running and that "server" in
      ~/.config/mash/config.json is right.
@@ -1859,7 +1770,7 @@ was 1 in DRAFT5). If the address came from `MASH_SERVER` instead of the file,
 the fix names `MASH_SERVER`. If the server is reachable but the sign-in times
 out, the same words. The fix is prose: mash does not start or stop a server
 (cli rule 32); the quick start gives the commands for the helper it uses.
-With `--detail` the same screen shows the seven rows:
+With `--detail` the same screen shows the six rows:
 
 <!-- packet: status-detail-unreachable -->
 ```
@@ -1872,14 +1783,14 @@ acme.demo.bob: mail does NOT work: the server did not answer within 2s.
                 waited 2s; no answer
   config        ok
   credentials   not checked (the server was not reached)
+  mailbox       not checked
 
   config file       /home/bob/.config/mash/config.json
   ca                /home/bob/.config/mash/ca.pem
   credentials file  /home/bob/.config/mash/acme.demo.bob.creds
-  trust file        /home/bob/.config/mash/trust.json
-  trust             matches config (generation 1; the account acme)
   endpoint          acme.demo.bob
   chosen by         the only one installed here
+  mailbox limit     15 (the default)
 
 fix: check that the server is running and that "server" in
      ~/.config/mash/config.json is right.
@@ -1899,6 +1810,7 @@ acme.demo.bob: mail does NOT work: the server refused its credentials.
                 alive, encrypted (checked 09:42)
   config        ok
   credentials   REFUSED (deleted, or its key was reissued)
+  mailbox       not checked
 
 fix: ask whoever runs your mash server which of the two it was. If the key
      was reissued, move the old credentials aside, then install the new key
@@ -1911,9 +1823,11 @@ Exit 4. Detection: the sign-in answers an authorization error; the code
 already recognises that (it records `connection: FAILED` for a running
 session). The fix is true: `credential install` never replaces an installed
 credentials file (section 2, File safety; there is no `--force`), so the fix
-moves the old one aside first. When the server says why (below), the screen is
-the next one. This screen is only for a server that cannot say. Exit 4 (the server
-answered and refused, so not 6 and not 1). With `--detail`, also exit 4:
+moves the old one aside first (the server and CA are already in `config.json`,
+so the install needs neither flag). When the server says why (below), the
+screen is the next one. This screen is only for a server that cannot say. Exit
+4 (the server answered and refused, so not 6 and not 1). With `--detail`, also
+exit 4:
 
 <!-- packet: status-detail-refused -->
 ```
@@ -1925,14 +1839,14 @@ acme.demo.bob: mail does NOT work: the server refused its credentials.
                 alive, encrypted (checked 09:42)
   config        ok
   credentials   REFUSED (deleted, or its key was reissued)
+  mailbox       not checked
 
   config file       /home/bob/.config/mash/config.json
   ca                /home/bob/.config/mash/ca.pem
   credentials file  /home/bob/.config/mash/acme.demo.bob.creds
-  trust file        /home/bob/.config/mash/trust.json
-  trust             matches config (generation 1; the account acme)
   endpoint          acme.demo.bob
   chosen by         MASH_ENDPOINT
+  mailbox limit     15 (the default)
 
 fix: ask whoever runs your mash server which of the two it was. If the key
      was reissued, move the old credentials aside, then install the new key
@@ -1945,7 +1859,9 @@ fix: ask whoever runs your mash server which of the two it was. If the key
 
 After `mashctl endpoint delete` (section 4) the address cannot be used again,
 so the fix never suggests installing the same address, and no command in it
-is one the person has not met. Exit 4 (the server refused the credentials):
+is one the person has not met. The credentials file is left as it was (the ctl
+lane's decision), which is why the server's refusal is what says DELETED. Exit
+4 (the server refused the credentials):
 
 <!-- packet: status-deleted -->
 ```
@@ -1957,6 +1873,7 @@ acme.demo.bob: mail does NOT work: this endpoint was DELETED on the server.
                 alive, encrypted (checked 09:42)
   config        ok
   credentials   REFUSED (endpoint DELETED)
+  mailbox       not checked
 
 fix: its address cannot be used again. For a new endpoint, make a new key,
      then give its .pub file to whoever runs your mash server:
@@ -1981,53 +1898,18 @@ acme.demo.bob: mail does NOT work: this endpoint was DELETED on the server.
                 alive, encrypted (checked 09:42)
   config        ok
   credentials   REFUSED (endpoint DELETED)
+  mailbox       not checked
 
   config file       /home/bob/.config/mash/config.json
   ca                /home/bob/.config/mash/ca.pem
   credentials file  /home/bob/.config/mash/acme.demo.bob.creds
-  trust file        /home/bob/.config/mash/trust.json
-  trust             matches config (generation 1; the account acme)
   endpoint          acme.demo.bob
   chosen by         "endpoint" in config.json
+  mailbox limit     15 (the default)
 
 fix: its address cannot be used again. For a new endpoint, make a new key,
      then give its .pub file to whoever runs your mash server:
   mash key create --out <new-name>.key
-```
-
-One more `--detail` state, about the trust record (R21). When the trust
-files do not agree, `trust` says `differs` and the screen is the refusal of
-section 4 (the way out is `mash trust reset`, which works in this state):
-
-<!-- packet: status-detail-differs -->
-```
-$ mash status --detail
-acme.demo.bob: mail does NOT work: this machine's trust files disagree.
-
-  version       0.5.6
-  server        tls://otherhost:4222
-                not checked (the trust files disagree)
-  config        REFUSED (disagrees with the trust record)
-  credentials   not checked
-
-  config file       /home/bob/.config/mash/config.json
-  ca                /home/bob/.config/mash/ca.pem
-  credentials file  /home/bob/.config/mash/acme.demo.bob.creds
-  trust file        /home/bob/.config/mash/trust.json
-  trust             differs (config.json names another server)
-  endpoint          acme.demo.bob
-  chosen by         the only one installed here
-
-error: this machine's trust files disagree: config.json names
-       tls://otherhost:4222, and trust.json names tls://myserver:4222.
-fix: if you did not change it, change the server line in
-     ~/.config/mash/config.json back to:
-    "server": "tls://myserver:4222"
-     If you changed the server or CA on purpose, or the files are damaged,
-     at a terminal:
-  mash trust reset
-     then install again with your credentials:
-  mash credential install --key <key file> --token <token file>
 ```
 
 #### Plain URL with the override (warning, exit 0)
@@ -2035,7 +1917,7 @@ fix: if you did not change it, change the server line in
 <!-- packet: status-plain-warning -->
 ```
 $ export MASH_SERVER=nats://myserver:4222
-$ export MASH_INSECURE_PLAINTEXT=1
+$ export MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1
 $ mash status
 acme.demo.bob: mail works (1 warning).
 
@@ -2044,31 +1926,34 @@ acme.demo.bob: mail works (1 warning).
                 alive, NOT ENCRYPTED (checked 09:42)
                 MASH_SERVER overrides config.json: nats://myserver:4222
                 instead of tls://myserver:4222
-                allowed by MASH_INSECURE_PLAINTEXT (test servers only)
+                allowed by MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION
   config        ok
   credentials   ok
+  mailbox       2 waiting
 
 warning: anyone on the network can read your credentials and your mail.
          MASH_SERVER is overriding the server in config.json for this run.
+         Use this only for a test server.
 fix: stop overriding it in this shell:
-  unset MASH_SERVER MASH_INSECURE_PLAINTEXT
+  unset MASH_SERVER MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION
 ```
 
 A report, not an error screen (L5). `config.json` already holds
-`tls://myserver:4222` (install refuses a `nats://` address and every use
-checks that the file agrees with `trust.json`, R21), so the plain address can
-come only from `MASH_SERVER`, for this run, and the only fix is to unset it:
-nobody edits `config.json` to a `nats://` address. Today the warning is printed twice, once
-on stdout as the `tls:` line and once on stderr, on every status run (catalog
-DUP); the target prints it once, as part of the report, and the warning does
-not repeat the server row (it says what is at stake, the row says why it is
-allowed). The override exists only through `MASH_INSECURE_PLAINTEXT=1` in the
-environment of that run (R18): the `insecure_plaintext` key of `config.json`
-is removed. Every other command that connects prints the one-line `warning:`
-of R18 on stderr whenever the variable is set (`mash send`, below), with or
-without a plain address, and `status` shows it on the server row, as here and
-in the next screen. Both variables are set with `export` here because the fix
-is to `unset` them: a variable set inline on one command cannot be unset.
+`tls://myserver:4222` (install refuses a `nats://` address), so the plain
+address can come only from `MASH_SERVER`, for this run, and the only fix is to
+unset it: nobody edits `config.json` to a `nats://` address. Today the
+warning is printed twice, once on stdout as the `tls:` line and once on
+stderr, on every status run (catalog DUP); the target prints it once, as part
+of the report, and the warning does not repeat the server row (it says what is
+at stake, the row says why it is allowed). The override exists only through
+`MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1` in the environment of that run (R18;
+Randy's name, `MASH_INSECURE_PLAINTEXT` is gone with no alias): the
+`insecure_plaintext` key of `config.json` is removed. Every other command that
+connects prints the one-line `warning:` of R18 on stderr whenever the variable
+is set (`mash send`, below), with or without a plain address, and `status`
+shows it on the server row, as here and in the next screen. Both variables are
+set with `export` here because the fix is to `unset` them: a variable set
+inline on one command cannot be unset.
 
 #### The override is set, but the server address is tls (warning, exit 0)
 
@@ -2083,17 +1968,18 @@ acme.demo.bob: mail works (1 warning).
   version       0.5.6
   server        tls://myserver:4222
                 alive, encrypted (checked 09:42)
-                MASH_INSECURE_PLAINTEXT is set; nats:// would be allowed
+                MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set (not used)
   config        ok
   credentials   ok
+  mailbox       0 waiting
 
-warning: MASH_INSECURE_PLAINTEXT is set; mail may not be encrypted.
+warning: MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set; mail may be unencrypted.
 fix: unset it unless this is a test server:
-  unset MASH_INSECURE_PLAINTEXT
+  unset MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION
 ```
 
 The warning sentence is the one `send` prints (one sentence for the
-variable everywhere); the row says what it would allow.
+variable everywhere); the row says it is set and not used here.
 
 #### Plain URL without the override (refused, exit 1)
 
@@ -2110,28 +1996,30 @@ acme.demo.bob: mail does NOT work: the server address is not encrypted.
                 instead of tls://myserver:4222
   config        ok
   credentials   not checked (the connection was refused)
+  mailbox       not checked
 
 fix: use a tls:// address. MASH_SERVER is overriding the server in
-     config.json for this run. (With MASH_INSECURE_PLAINTEXT=1 credentials
-     and mail would cross the network unencrypted: test servers only.)
-     Stop overriding it in this shell:
+     config.json for this run. (With MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1
+     credentials and mail would cross the network unencrypted: test servers
+     only.) Stop overriding it in this shell:
   unset MASH_SERVER
 ```
 
 Exit 1 in both tools (L2; today: stdout line `tls: FAILED - ...299 columns`,
 exit 0). The refusal says that, with the override, credentials and mail would
 cross the connection unencrypted and that it is for test servers only (R18),
-before the command, not between commands. The same refusal and the same exit 1 in every command that connects
-(`send`, `inbox`, `read`, `who`, `prompt`, `serve`, `hook`), as an `error:`
-(section 5, send). The address cannot come from the file (install refuses a
-`nats://` address, and a file that disagrees with the trust record is the
-disagree screen, R21), so the fix is always the `unset`.
+before the command, not between commands. The same refusal and the same exit 1
+in every command that connects (`send`, `inbox`, `read`, `who`, `prompt`,
+`serve`, `hook`), as an `error:` (section 5, send). The address cannot come
+from the file (install refuses a `nats://` address), so the fix is always the
+`unset`.
 
 #### The environment overrides the server (not ready, exit 1)
 
 Not only a plain address: any `MASH_SERVER` or `MASH_CA` that differs from
-`config.json` is reported, and the verdict is not ready, because the trust
-record does not vouch for it (T7). Mash does not ask that server:
+`config.json` is reported, and the verdict is not ready, because nothing vouches
+for it (T7: DRAFT6 said "the trust record does not vouch for it"; the record is
+gone, the rule stays). Mash does not ask that server:
 
 <!-- packet: status-env-override -->
 ```
@@ -2146,6 +2034,7 @@ acme.demo.bob: mail does NOT work: MASH_SERVER overrides config.json.
                 instead of tls://myserver:4222
   config        ok
   credentials   not checked (the server was not asked)
+  mailbox       not checked
 
 fix: MASH_SERVER is overriding the server in config.json for this run. Stop
      overriding it in this shell:
@@ -2153,7 +2042,11 @@ fix: MASH_SERVER is overriding the server in config.json for this run. Stop
 ```
 
 A `MASH_CA` that differs reads the same, with `MASH_CA overrides the CA in
-config.json: <path>` and `instead of <path>`, and `unset MASH_CA`.
+config.json: <path>` and `instead of <path>`, and `unset MASH_CA`. The one
+exception is the test-server override: with
+`MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION` set an overriding `nats://`
+`MASH_SERVER` is allowed, still reported on the row (the plain-URL screen
+above), and the verdict stays `mail works (1 warning)`.
 
 #### Unknown flag (exit 2 as today)
 
@@ -2167,23 +2060,24 @@ fix: see the options with:
 
 `--debug` is not added (one flag, `--detail`, on every command; R7).
 
-Changes (status): connects once, 2s budget; exit 1 when mail does not work (4 when the server refused the
-credentials);
-one fixed screen, verdict and four rows, in every state; the server row says
-when mash checked (`alive, encrypted (checked 09:42)`) or when it last
-reached the server (`NOT REACHABLE (last reached 3h ago)`), never "last seen"
-(D1), and the server is checked in every state that has an address, whether or
-not credentials exist; an untrusted certificate says mash did not trust the
-server (D2); `--detail` is new and carries seven rows that are the same in every state (the
-config file, the CA as its own row, the credentials file, the trust file, the
-trust state, the endpoint and how it was chosen), the group counts, the commit
-and the settings; the unreachable server exits 6 and every use checks that the
-trust files agree (R21); the two plaintext messages merge into one, and the server row
-shows `MASH_INSECURE_PLAINTEXT` whenever it is set; a credentials file that
-is not private or not yours is `UNSAFE`; `--detail` names how the endpoint
-was chosen and the CA file; `name rule`, `clock`, `relay trace`, `channel
-allowlist` and `delivery` leave the default screen. The same content is in
-the MCP tool (JSON, section 6).
+Changes (status): connects once, 2s budget; exit 1 when mail does not work (4
+when the server refused the credentials); one fixed screen, verdict and five
+rows, in every state; the server row says when mash checked
+(`alive, encrypted (checked 09:42)`) or when it last reached the server
+(`NOT REACHABLE (last reached 3h ago)`), never "last seen" (D1), and the server
+is checked in every state that has an address, whether or not credentials
+exist; an untrusted certificate says mash did not trust the server (D2); the
+`mailbox` row is new (REQ-015, R22): `<n> waiting`, `<n> waiting, OVER THE
+LIMIT OF 15` (a warning, exit 0), `off` or `not checked`; `--detail` is new and
+carries six rows that are the same in every state (the config file, the CA as
+its own row, the credentials file, the endpoint, how it was chosen and the
+mailbox limit), the group counts, the commit and the settings; the unreachable
+server exits 6; the two plaintext messages merge into one, and the server row
+shows `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION` whenever it is set; a credentials
+file that is not private or not yours is `UNSAFE`; `--detail` names how the
+endpoint was chosen and the CA file; `name rule`, `clock`, `relay trace`,
+`channel allowlist` and `delivery` leave the default screen. The same content
+is in the MCP tool (JSON, section 6).
 
 ### mash send
 
@@ -2246,14 +2140,14 @@ $ mash send acme.demo.bob --reply-to 2 "yes, ready"
 Sent your message to acme.demo.bob (it answers #2).
 ```
 
-With `MASH_INSECURE_PLAINTEXT` set in the environment of the run, inherited or
+With `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION` set in the environment of the run, inherited or
 not, EVERY command that connects prints this one line on stderr first, before
 its result (the result is on stdout, so a pipe gets only the result):
 
 <!-- packet: send-warning -->
 ```
-$ MASH_INSECURE_PLAINTEXT=1 mash send acme.demo.alice "lunch at noon?"
-warning: MASH_INSECURE_PLAINTEXT is set; mail may not be encrypted.
+$ MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1 mash send acme.demo.alice "lunch at noon?"
+warning: MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set; mail may be unencrypted.
 Sent your message to acme.demo.alice.
 ```
 
@@ -2345,8 +2239,8 @@ A `config.json` that still has the removed `insecure_plaintext` key is refused
 $ mash send acme.demo.alice "hi"
 error: config.json: insecure_plaintext is not a setting any more.
 fix: delete that line from ~/.config/mash/config.json and use a tls://
-     server. For a test server only, set MASH_INSECURE_PLAINTEXT=1 for
-     that one run.
+     server. For a test server only, set
+     MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1 for that one run.
 ```
 
 Plain URL (exit 1 now; 2 today; 285 columns before):
@@ -2356,16 +2250,15 @@ Plain URL (exit 1 now; 2 today; 285 columns before):
 $ export MASH_SERVER=nats://myserver:4222
 $ mash send acme.demo.alice "hi"
 error: refusing an unencrypted connection to myserver. With
-       MASH_INSECURE_PLAINTEXT=1 your credentials and mail would cross the
-       network unencrypted; that is for test servers only.
+       MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1 your credentials and mail
+       would cross the network unencrypted; that is for test servers only.
 fix: use a tls:// address. MASH_SERVER is overriding the server in
      config.json for this run; stop overriding it in this shell:
   unset MASH_SERVER
 ```
 
 (MASH_SERVER is exported, not set inline, because the fix is to `unset` it.
-The address cannot come from the file: install refuses a `nats://` address and
-a file that disagrees with the trust record is the disagree screen, R21.)
+The address cannot come from the file: install refuses a `nats://` address.)
 The override is a decision for a person at a test server: the refusal names
 it only to say what it would cost, and agents are told never to set it
 (section 6, instructions).
@@ -2413,7 +2306,7 @@ Changes: the sender is no longer repeated; the kind is spoken in words
 recipient's inbox number is gone from the default (to the sender, `#1`
 collides with their own inbox's `#1`); `--detail` and `--json` are new (same
 object as the MCP tool); `--reply-to N` is new; the slash form is refused; with
-`MASH_INSECURE_PLAINTEXT` set a one-line warning goes to stderr. No
+`MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION` set a one-line warning goes to stderr. No
 `NEXT:`: nothing follows a send. Not checked in the source: a size limit for
 a message (N9).
 
@@ -2829,17 +2722,16 @@ See step A (section 4). The command needs no configuration (as today).
 
 ### mash credential install
 
-See step C (section 4). Renames `mash credential create`, a hard cut with no
+See step C (section 4). Takes `--server` and `--ca` on a first install. Renames `mash credential create`, a hard cut with no
 alias: the old verb gets the ordinary unknown-command error, which names the
 closest command and the renamed flags.
 
 ### mash plugin export DIR
 
-The lower-level command: it only writes the files (the plugin embedded in
-this mash binary, the same version), for a machine where someone adds them to
-Claude Code by hand. `mash plugin install` (section 5a)
-does export, add and install in one command and is what a first-time user
-meets.
+It only writes the files (the plugin embedded in this mash binary, the same
+version), for a machine where someone adds them to Claude Code by hand, as in
+0.5.5. A first-time user installs the plugin with claude's own commands
+(section 5a); there is no `mash plugin install` in 0.5.6.
 
 Before: prints only the directory given (`/w/pluginout`); no `next:`.
 
@@ -2870,231 +2762,6 @@ directory: 5 files. Refusal when DIR is not empty or not writable: `error:
 (exit 2): `error: plugin export needs a directory.` / `fix: use it like
 this:` then `mash plugin export ./mash-plugin` on its own line.
 
-### mash trust reset
-
-The ONE way to change what mash trusts on a machine (the server, the CA that
-signed its certificate, or the account that signs tokens): there is no change
-in place in 0.5.6 (contract rev 11). The person resets, then installs again
-under the first-install rules (section 4, step C), which type the server
-address and the CA fingerprint again. It is INV-004's person-confirmed
-command: it needs a person at a terminal who TYPES the endpoint's address (or
-`reset`, when several endpoints are installed here); there is no `--yes`, no
-other flag and no variable that answers for the person; with no terminal it
-exits 4 ("a person must run this at a terminal"). Usage: `mash trust reset`
-(and `--detail`). There is no `--json`: the command is a conversation.
-
-What it removes, and says it removes before it asks: this machine's endpoint
-configuration (`config.json`, the server and CA settings, and the copy of the
-CA), the trust record (`trust.json`) and the credentials of every endpoint
-installed here (each file holds that endpoint's private key and token; the
-screen says what each holds, never the contents). What it keeps, and says so:
-the person's own key files (such as `bob.key`: the `.key` file a person made
-with `mash key create` is theirs, wherever it is) and anything outside the mash
-config folder. It never touches the server, a message or another program's
-files, and it removes nothing that is not on the list it printed. It works in
-every state: with no configuration it says `nothing to reset`, and with trust
-files that disagree (the state every other command refuses in, R21) it lists
-what is there and removes it, which is how a person gets out of that state.
-
-Resetting is local: nothing on the server changes, and the endpoint's address
-is not retired (that is `mashctl endpoint delete`). So, unlike a delete, its
-success output ends with a `NEXT:` (R19 is about removing access on the
-server): the fresh install. The `NEXT:` never suggests installing a deleted
-or retired address; it names the command with placeholders for the files.
-
-One endpoint installed here (the person types its address):
-
-<!-- packet: trust-reset -->
-```
-$ mash trust reset
-This removes what mash keeps on this machine about its server, so that you
-can trust another server, CA or account. It does not touch the server, any
-message, or your key files.
-
-It will remove, from ~/.config/mash:
-  config.json          the server and CA settings
-  ca.pem               the copy of the CA certificate
-  trust.json           who mash trusts: the account, the server and the CA
-  acme.demo.bob.creds  the credentials for acme.demo.bob (they hold its
-                       private key and token: this machine cannot sign in as
-                       acme.demo.bob until you install again)
-
-It will keep:
-  your own key files, such as bob.key, and everything outside ~/.config/mash
-
-Type the address to reset it: acme.demo.bob
-
-Removed this machine's mash settings, trust record and credentials.
-
-  removed  ~/.config/mash/acme.demo.bob.creds
-  removed  ~/.config/mash/config.json
-  removed  ~/.config/mash/ca.pem
-  removed  ~/.config/mash/trust.json
-  kept     your key files, and everything outside ~/.config/mash
-
-mash trusts no server on this machine now.
-
-NEXT: install again, as on a first install: mash asks for the server address
-      and the CA fingerprint. Add --ca <ca file> for a server with its own CA:
-  mash credential install --key <key file> --token <token file>
-```
-
-Several endpoints installed here: every one of them goes (the credentials of
-all, because the trust they share goes), so the person types `reset`, not one
-address:
-
-<!-- packet: trust-reset -->
-```
-$ mash trust reset
-This removes what mash keeps on this machine about its server, so that you
-can trust another server, CA or account. It does not touch the server, any
-message, or your key files.
-
-It will remove, from ~/.config/mash:
-  config.json              the server and CA settings
-  ca.pem                   the copy of the CA certificate
-  trust.json               who mash trusts: the account, the server, the CA
-  acme.demo.alice.creds    the credentials for acme.demo.alice
-  acme.demo.bob.creds      the credentials for acme.demo.bob
-  Each credentials file holds a private key and a token: this machine cannot
-  sign in as either endpoint until you install again.
-
-It will keep:
-  your own key files, such as alice.key and bob.key, and everything outside
-  ~/.config/mash
-
-Type reset to remove all of this: reset
-
-Removed this machine's mash settings, trust record and credentials.
-
-  removed  ~/.config/mash/acme.demo.alice.creds
-  removed  ~/.config/mash/acme.demo.bob.creds
-  removed  ~/.config/mash/config.json
-  removed  ~/.config/mash/ca.pem
-  removed  ~/.config/mash/trust.json
-  kept     your key files, and everything outside ~/.config/mash
-
-mash trusts no server on this machine now.
-
-NEXT: install again, as on a first install: mash asks for the server address
-      and the CA fingerprint. Add --ca <ca file> for a server with its own CA:
-  mash credential install --key <key file> --token <token file>
-```
-
-With `--detail` the paths are absolute, and the two things that make the
-folder a generation (R21) are named, so nothing is removed that was not on
-the list (the pointer and the folder it selects):
-
-<!-- packet: trust-reset-detail -->
-```
-$ mash trust reset --detail
-This removes what mash keeps on this machine about its server, so that you
-can trust another server, CA or account. It does not touch the server, any
-message, or your key files.
-
-It will remove, from /home/bob/.config/mash (generation 1, in
-/home/bob/.config/mash.d/1):
-  config.json          the server and CA settings
-  ca.pem               the copy of the CA certificate
-  trust.json           who mash trusts: the account, the server and the CA
-  acme.demo.bob.creds  the credentials for acme.demo.bob (they hold its
-                       private key and token: this machine cannot sign in as
-                       acme.demo.bob until you install again)
-  and then the generation's folder and the pointer to it, when empty
-
-It will keep:
-  your own key files, such as bob.key, and everything outside
-  /home/bob/.config/mash and /home/bob/.config/mash.d
-
-Type the address to reset it: acme.demo.bob
-
-Removed this machine's mash settings, trust record and credentials.
-
-  removed  /home/bob/.config/mash/acme.demo.bob.creds
-  removed  /home/bob/.config/mash/config.json
-  removed  /home/bob/.config/mash/ca.pem
-  removed  /home/bob/.config/mash/trust.json
-  removed  /home/bob/.config/mash.d/1  (the generation's folder, now empty)
-  removed  /home/bob/.config/mash  (the pointer to it)
-  kept     your key files, and everything outside the two folders above
-
-mash trusts no server on this machine now.
-
-NEXT: install again, as on a first install: mash asks for the server address
-      and the CA fingerprint. Add --ca <ca file> for a server with its own CA:
-  mash credential install --key <key file> --token <token file>
-```
-
-Nothing to reset (exit 0; nothing is asked or removed, and the `NEXT:` is the
-first install):
-
-<!-- packet: trust-reset-nothing -->
-```
-$ mash trust reset
-nothing to reset
-mash has no settings, trust record or credentials in ~/.config/mash.
-
-NEXT: install the credentials your server made for this endpoint. mash asks
-      for the server address and the CA fingerprint:
-  mash credential install --key <key file> --token <token file>
-```
-
-Refusals. No terminal (a pipe, a script, an agent's shell): exit 4 (not
-authorized: a person must run it at a terminal), nothing asked, nothing
-removed; and the option that does not exist (usage, exit 2):
-
-<!-- packet: trust-reset-refuse -->
-```
-$ echo reset | mash trust reset
-error: this removes this machine's trust record and credentials, so a person
-       must run it at a terminal and type the address. No option skips that.
-fix: run the same command yourself, in a terminal.
-```
-
-<!-- packet: trust-reset-refuse -->
-```
-$ mash trust reset --yes
-error: unknown option --yes for mash trust reset.
-fix: there is no option that skips the question. At a terminal:
-  mash trust reset
-```
-
-The typed answer is not the address (exit 1, nothing removed; the list was
-shown above the prompt, and mash prints it again only if asked again):
-
-<!-- packet: trust-reset-refuse -->
-```
-$ mash trust reset
-...
-Type the address to reset it: acme.demo.alice
-error: that is not acme.demo.bob. Nothing was removed.
-fix: run the same command again and type the address shown.
-```
-
-A file that cannot be removed (a local file error: exit 1, with its cause; it
-says what was removed, and running the same command again removes what is
-left, because reset works on whatever is there):
-
-<!-- packet: trust-reset-refuse -->
-```
-$ mash trust reset
-...
-Type the address to reset it: acme.demo.bob
-
-  removed  ~/.config/mash/acme.demo.bob.creds
-  removed  ~/.config/mash/config.json
-error: cannot remove ~/.config/mash/ca.pem (permission denied). ca.pem and
-       trust.json are still there.
-fix: make the folder yours to change, then run the same command again; it
-     removes what is left:
-  chmod u+w ~/.config/mash.d/1
-```
-
-After a reset, `mash status` says what is missing (section 5, "No
-configuration at all"), and the other commands refuse with the same screens
-as on a machine that never installed anything. `mash status --detail`
-shows the `trust` row as `none`.
-
 ### mash serve (start-up)
 
 Today it prints nothing in the good case, and a missing creds file prints a
@@ -3106,9 +2773,7 @@ only place where a person reading the MCP log can see which endpoint a
 session runs as. DRAFT6: it names the endpoint only, not the server (a log is
 a place that is pasted, and REQ-001 keeps the server out of ordinary output;
 `mash status` says where the server is). Errors in the log start `error:`,
-this line does not, so a log can be scanned for failures. Like every use, it
-checks first that the trust files agree (R21) and refuses with the screen of
-section 4 when they do not:
+this line does not, so a log can be scanned for failures:
 
 <!-- packet: serve -->
 ```
@@ -3140,12 +2805,12 @@ fix: install the key you made and the token your server wrote:
   mash credential install --key <key file> --token <token file>
 ```
 
-With `MASH_INSECURE_PLAINTEXT` set, the warning of R18 comes first, then the
+With `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION` set, the warning of R18 comes first, then the
 start-up line; in the log the person sees both:
 
 <!-- packet: serve -->
 ```
-warning: MASH_INSECURE_PLAINTEXT is set; mail may not be encrypted.
+warning: MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set; mail may be unencrypted.
 mash: serving as acme.demo.bob
 ```
 
@@ -3155,7 +2820,39 @@ A credentials file that is readable by others or not yours is refused as in
 Changes: one new stderr line on success, `mash: serving as <endpoint>` (no
 server); refusal text in plain lines; the
 group refusal (exit 2) is gone with `MASH_GROUP`; a plain URL is refused with
-exit 1 (2 today).
+exit 1 (2 today). The backlog wake of REQ-015 is described next.
+
+#### The backlog wake (REQ-015)
+
+When the messages delivered to this endpoint's inbox and not yet shown to its
+session pass `mailbox_limit` (default 15; the count is defined in section 5b),
+`mash serve` wakes the session at once, whatever the kind of the messages
+(`fyi` and `result` included, which the idle wake never wakes for), with ONE
+line, sent as the same channel event the idle wake uses. It
+wakes again at most once every 10 minutes while the count stays over the limit,
+and not again once it is back at the limit or below. With `mailbox_limit` 0
+nothing is sent. The line is the contract's:
+
+<!-- packet: serve-backlog -->
+```
+mash: 22 messages waiting (limit 15), oldest 12m
+```
+
+Ten minutes later, still over the limit (the age and the count are the
+current ones):
+
+<!-- packet: serve-backlog -->
+```
+mash: 31 messages waiting (limit 15), oldest 22m
+```
+
+With a limit of 5 the same line reads `mash: 6 messages waiting (limit 5),
+oldest 40s` at the sixth message (AT-008). The text is one line of at most 80
+columns, starts with `mash:` like the start-up line (it is not an error, R4),
+and holds no message text, no sender and no address: the session reads its mail
+with the `inbox` and `read` tools, or the hook delivers it (the next
+section). `mash status` says the same thing in the mailbox row (section 5,
+status). The age is R12's duration (`45s`, `12m`, `3h`).
 
 ### The Claude Code hook message (what the model sees)
 
@@ -3231,6 +2928,11 @@ stays 0 and an empty inbox prints nothing, as today. A batch too large
 becomes a digest: header, then one line per message (`#3  message from
 acme.demo.bob (verified): first line of the message...`), as today.
 
+The backlog wake of REQ-015 (section 5, serve) is not part of this text, and
+this text does not change for it: the wake line is `mash serve`'s, and the hook
+delivers up to 10 messages a run, as today, the rest waiting for the next run
+(Y12, O5 of section 5b).
+
 ### mash --help and the top-level help
 
 Before: 33 lines, widest 187, 25 lines over 80, SAP, NATS, JetStream,
@@ -3255,9 +2957,7 @@ Mail
 Set up
   key create          make a private key and a public key
   credential install  join a private key and a token into credentials
-  plugin install      add the mash plugin to Claude Code
   plugin export       write the plugin into a folder, for another machine
-  trust reset         forget this machine's server and credentials (you type it)
   status              check that mail works
 
 Other
@@ -3286,10 +2986,14 @@ Settings (the environment wins for one run, and mash says so on every status)
                            (config.json: "server")
   MASH_CA                  the file of the CA that signed the server's
                            certificate (config.json: "ca")
+  MASH_MAILBOX_LIMIT       wake the session when this many messages wait
+                           unshown: 15 by default, 0 for never
+                           (config.json: "mailbox_limit")
   MASH_CONFIG_DIR          the folder of config.json and credentials
-                           (config.json keys: server, ca, endpoint; other
-                           keys are ignored)
-  MASH_INSECURE_PLAINTEXT  set to 1, for one run, to allow an unencrypted
+                           (config.json keys: server, ca, endpoint,
+                           mailbox_limit; other keys are ignored)
+  MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION
+                           set to 1, for one run, to allow an unencrypted
                            nats:// server: test servers only; an agent must
                            never set it
   NO_COLOR                 set to switch color off
@@ -3327,47 +3031,29 @@ Example: mash send acme.demo.alice "lunch at noon?"
 <!-- packet: help -->
 ```
 $ mash help credential install
-Usage: mash credential install --key FILE --token FILE [--ca FILE]
-       mash credential install --creds FILE [--ca FILE]
+Usage: mash credential install --key FILE --token FILE --server URL --ca FILE
+       mash credential install --key FILE --token FILE
+       mash credential install --creds FILE
 
 Join your private key and the token your server made into credentials. The
-first time on a machine, mash asks you to type the server address and the CA
-fingerprint that whoever runs your mash server gave you, checks them, and
-makes the trust record; later installs are checked against it. Every FILE may
-be - for standard input; the key and the token are never typed as arguments.
-To change who mash trusts, run mash trust reset, then install again.
+first time on a machine, give the server address and the CA file whoever runs
+your mash server sent you: mash shows the address and the CA's fingerprint to
+compare with what you were sent, checks that the server presents a certificate
+from that CA, and writes config.json. Later installs use what is there; mash
+never replaces a server, CA or credentials file that is installed. Every FILE
+may be - for standard input; the key and the token are never typed as
+arguments.
 
   --key FILE    your private key (made by mash key create)
   --token FILE  the token your server made for it
   --creds FILE  credentials from mashctl, instead of key and token
+  --server URL  the server address, tls://host:4222 (first install)
   --ca FILE     the CA that signed the server's certificate (first install)
   --detail      also show full paths
   --json        print the result as JSON, for scripts
 
-Example: mash credential install --key bob.key --token acme.demo.bob.token
-```
-
-`mash help trust reset` (DRAFT6):
-
-<!-- packet: help -->
-```
-$ mash help trust reset
-Usage: mash trust reset
-
-Remove what mash keeps on this machine about its server: the settings
-(config.json), the copy of the CA, the trust record (trust.json) and the
-credentials of every endpoint installed here. Use it to trust another server,
-CA or account, or when mash says its trust files disagree; then install
-again, which asks you to type the server address and the CA fingerprint.
-
-It needs you at a terminal: you type the endpoint's address (or reset when
-several are installed), and no option skips that. It never touches your key
-files (such as bob.key), the server, a message, or anything outside the mash
-folder.
-
-  --detail  also show full paths and the generation folder
-
-Example: mash trust reset
+Example, a first install:
+  mash credential install --key bob.key --token bob.token --server tls://myserver:4222 --ca ca.pem
 ```
 
 `mash help inbox`:
@@ -3422,7 +3108,7 @@ replacement and the renamed flags:
 $ mash credential create --seed bob.key --jwt acme.demo.bob.token
 error: unknown command credential create.
 fix: it is now credential install; --seed is --key and --jwt is --token:
-  mash credential install --key <key file> --token <token file>
+  mash credential install --key <key file> --token <token file> --server <address> --ca <ca file>
 ```
 
 <!-- packet: errors -->
@@ -3442,516 +3128,301 @@ fix: see the options with:
   mash help who
 ```
 
-## 5a. Install and plugin (REQ-011)
+## 5a. Install check and plugin (REQ-011)
 
 Two jobs a reader should not have: fetching and checking the programs, and
-getting the plugin into Claude Code. Counted from the page: **install 3
-pastes; plugin 1 paste.** (REQ-011 (i) and (iii) are below. (ii), `mashctl
-adopt --from <dir>`, and (v), `mashctl endpoint delete` retiring the
-credentials on this machine, are mashctl's: see "Hand-overs to mashctl" in
-section 4 and N17.)
+getting the plugin into Claude Code. Counted from the page: **install 4
+pastes, one of them the check; plugin 2 pastes (claude's own commands).**
+There is NO install script and no `mash plugin install` (Randy's scope ruling,
+decision 264; contract rev 15 REQ-011 (i) and (iii)): nothing is executed that
+was not typed by the person. (REQ-011 (ii), `mashctl adopt --from <dir>`, and
+(v), `mashctl endpoint delete` leaving the credentials file as it was, are
+mashctl's: see "Hand-overs to mashctl" in section 4.)
 
-### Install: the attested script (REQ-011 (i))
+### Install: one pasted check (REQ-011 (i))
 
-The release ships `install-mash.sh` beside `mash-<os>-<arch>` and
-`mashctl-<os>-<arch>`. The release workflow attests the script, and the
-script holds, written into it at release time, the sha256 digest of each
-program it installs for each platform (so verifying the script verifies the
-digests, X8). The page downloads the script into a private folder, VERIFIES IT
-BEFORE IT RUNS, and runs it: three pastes, and no pipe into a shell (the
-person can read the file between paste 2 and paste 3). The page offers two
-ways to verify and the person pastes ONE: `gh attestation verify` naming the
-repository, the workflow, the tag and the file; or the script's digest taken
-from the release's notes, which the release workflow writes and attests, with
-`sha256sum -c`. A checksum file fetched beside the script is not enough, and a
-failed verification installs nothing (the person does not paste paste 3). The
-script is the release's own: it installs the version it was released with,
-never "latest". It needs no root and uses no `sudo`.
+The release carries the binaries (`mash-<os>-<arch>`, `mashctl-<os>-<arch>`),
+`SHA256SUMS` and `mash.intoto.jsonl`, the signed attestation (a Sigstore
+bundle) that the release workflow made for them. The page downloads the four
+files, runs ONE `gh attestation verify` on `SHA256SUMS` with the bundle, names
+this repository, its release workflow and the tag, then checks both binaries
+against the attested sums with `sha256sum -c`, and installs them with plain
+commands as the 0.5.5 README does. The OFFLINE form is used (`--bundle`): it
+needs no GitHub login (tested on the v0.5.5 release bundle with no login: it
+verified, and a tampered `SHA256SUMS` failed with exit 1); the online form
+without `--bundle` needs `gh auth login`. A checksum file alone is not enough,
+which is why the sums file is itself verified; a failed check installs nothing
+(the person does not paste the last block). Binaries go into the user's own
+directory, `~/.local/bin`, never with `sudo`.
 
-Paste 1, make a private folder and download the script into it (prints
-nothing). `mktemp -d` creates the folder exclusively, mode 700, owned by the
-person: that folder is the private copy, and what runs at paste 3 is the file
-in it:
+Download (four pastes in one block, or four lines; Linux amd64 shown, and the
+page says to change the platform part of the names for macOS or arm64):
 
-<!-- packet: install-script-download -->
+<!-- packet: install-check -->
 ```
-$ D=$(mktemp -d) && cd $D
 $ BASE=https://github.com/bogworks/mash/releases/download/v0.5.6
-$ curl -fsSL -O $BASE/install-mash.sh
+$ curl -fsSLO $BASE/mash-linux-amd64
+$ curl -fsSLO $BASE/mashctl-linux-amd64
+$ curl -fsSLO $BASE/SHA256SUMS
+$ curl -fsSLO $BASE/mash.intoto.jsonl
 ```
 
-Paste 2, verify the script BEFORE running anything. With `gh`: the
-attestation names the repository (`bogworks/mash`), the workflow
-(`release.yml`), the tag (`--source-ref refs/tags/v0.5.6`) and the file;
-`gh` prints its own report and exits 0 on success, and anything else means
-stop (nothing was installed):
+The check. This is `gh`'s own report (real output of `gh` 2.103.3 on the
+v0.5.5 release bundle with the tag changed to the one being installed; the
+digest is v0.5.5's, so the one on the page is the release's own; `gh` prints
+the report only when it writes to a terminal, and its first criteria lines are
+wider than 80 columns because they are `gh`'s, not mash's):
 
-<!-- packet: install-script-check -->
+<!-- packet: install-check -->
 ```
-$ gh attestation verify install-mash.sh -R bogworks/mash \
+$ gh attestation verify SHA256SUMS -R bogworks/mash --bundle mash.intoto.jsonl \
     --signer-workflow bogworks/mash/.github/workflows/release.yml \
     --source-ref refs/tags/v0.5.6
+Loaded digest sha256:048d915f361086f94904d3364a8811747c5b4308c90e449aaecb3d5e6d28cb44 for file://SHA256SUMS
+Loaded 1 attestations from mash.intoto.jsonl
+
+The following policy criteria will be enforced:
+- Predicate type must match:................ https://slsa.dev/provenance/v1
+- Source Repository Owner URI must match:... https://github.com/bogworks
+- Source Repository URI must match:......... https://github.com/bogworks/mash
+- Source repo ref must match:............... refs/tags/v0.5.6
+- Subject Alternative Name must match regex: ^https://github\.com/bogworks/mash/\.github/workflows/release\.yml(@(refs/.*|[0-9a-fA-F]+))?$
+- OIDC Issuer must match:................... https://token.actions.githubusercontent.com
+
+✓ Verification succeeded!
+
+The following 1 attestation matched the policy criteria
+
+- Attestation #1
+  - Build repo:..... bogworks/mash
+  - Build workflow:. .github/workflows/release.yml@refs/tags/v0.5.6
+  - Signer repo:.... bogworks/mash
+  - Signer workflow: .github/workflows/release.yml@refs/tags/v0.5.6
 ```
 
-Without `gh`: the release's notes (https://github.com/bogworks/mash/releases/tag/v0.5.6)
-carry the script's digest on one line. The page shows that line and the
-check; the digest below is an example of the shape, and the person pastes the
-one in the notes (on macOS `shasum -a 256 -c -` in place of `sha256sum -c -`).
-It shows the file is the one the release workflow published; it does not show
-who built it, and the page says so in one sentence:
+`gh` exits 0 on success. Anything else means STOP: nothing is installed, and
+the page says to delete the four files and not to continue. A `SHA256SUMS` that
+was changed after the release (the real failure, tampered file, exit 1; the
+policy criteria print first, as above):
 
-<!-- packet: install-script-check -->
+<!-- packet: install-check -->
 ```
-$ echo "68d37cc849316c29cd304f0d9bb754ac381cf4c036333ecdaa1f25a2859bba93  install-mash.sh" \
-    | sha256sum -c -
-install-mash.sh: OK
+✗ Sigstore verification failed
+
+Error: verifying with issuer "sigstore.dev"
 ```
 
-A digest that does not match prints `install-mash.sh: FAILED` (that is
-`sha256sum`'s own line, and it exits 1): the page says to delete the folder
-and start again at paste 1, and not to run the script. (UNVERIFIED here: how
-the release's notes are attested is the release lane's; the mockup assumes
-the notes carry the line and are covered by the release attestation.)
+Then the two binaries, against the sums the attestation just covered (this
+prints one line per file; on macOS `shasum -a 256 -c -` replaces
+`sha256sum -c -`; a line that says `FAILED` means stop, and `sha256sum` exits
+1):
 
-Paste 3, run it. The script is `sh`, with no `sudo`. It detects the platform
-and prints it, PRINTS EVERY PLACE IT WILL WRITE before it writes anything,
-downloads `mash-<os>-<arch>` and `mashctl-<os>-<arch>` into a private
-temporary folder it removes, and compares EACH against the digest written in
-the script before it installs EITHER. A mismatch refuses that program and
-installs neither. Then it installs, and REHASHES each installed program
-against that digest before it reports success. It prints what it did in the
-shape of the `wrote` lines (R20). The programs go in `~/.local/bin` (a
-directory the person owns), made if missing, mode 755, put in place by an
-atomic rename.
-
-<!-- packet: install-script-run -->
+<!-- packet: install-check -->
 ```
-$ sh install-mash.sh
-Installing mash 0.5.6 for Linux amd64. It writes only these places:
-  ~/.local/bin/mash
-  ~/.local/bin/mashctl
-  a private temporary folder (mode 700), which it deletes at the end
-
-  checked    mash-linux-amd64     sha256 matches the digest in this script
-  checked    mashctl-linux-amd64  sha256 matches the digest in this script
-
-  installed  mash 0.5.6     ~/.local/bin/mash
-  installed  mashctl 0.5.6  ~/.local/bin/mashctl
-  checked    mash           sha256 ok  (the installed file)
-  checked    mashctl        sha256 ok  (the installed file)
-
-Installed mash 0.5.6 and mashctl 0.5.6, each checked again after writing.
-
-NEXT: check that mash runs:
-  mash version
+$ grep -E ' (mash|mashctl)-linux-amd64$' SHA256SUMS | sha256sum -c -
+mash-linux-amd64: OK
+mashctl-linux-amd64: OK
 ```
 
-macOS is handled by the same script (it picks `darwin`, `arm64` or `amd64`
-from `uname`, and `shasum -a 256` when there is no `sha256sum`) and says
-which it found. Here the install directory is not on the PATH, so the script
-says so and prints the exact line to add, labelled as R10 labels it (the
-script knows the shell from `$SHELL`: `~/.zshrc` for zsh, `~/.bashrc` for
-bash, and for any other shell `add this line to your shell's startup file:`).
-It never edits a startup file itself. The line carries the directory that was
-used (`--dir` included). The one-shell test is its own labelled item, and the
-`NEXT:` comes last:
+Install: plain commands, no `sudo`, the directory must be on the PATH (the
+page says how to check, and that `go install` is the unverified developer
+route, never the quick start):
 
-<!-- packet: install-script-path -->
+<!-- packet: install-check -->
 ```
-$ sh install-mash.sh
-Installing mash 0.5.6 for macOS arm64. It writes only these places:
-  ~/.local/bin/mash
-  ~/.local/bin/mashctl
-  a private temporary folder (mode 700), which it deletes at the end
+$ chmod +x mash-linux-amd64 mashctl-linux-amd64
+$ mkdir -p ~/.local/bin
+$ mv mash-linux-amd64 ~/.local/bin/mash
+$ mv mashctl-linux-amd64 ~/.local/bin/mashctl
+$ mash version
+mash 0.5.6
+```
 
-  checked    mash-darwin-arm64     sha256 matches the digest in this script
-  checked    mashctl-darwin-arm64  sha256 matches the digest in this script
+If the shell says `mash: command not found`, `~/.local/bin` is not on the
+PATH: the page tells the person to add this line to `~/.bashrc` (bash) or
+`~/.zshrc` (zsh), as a labelled file line (R10), then open a new terminal:
 
-  installed  mash 0.5.6     ~/.local/bin/mash
-  installed  mashctl 0.5.6  ~/.local/bin/mashctl
-  checked    mash           sha256 ok  (the installed file)
-  checked    mashctl        sha256 ok  (the installed file)
-
-Installed mash 0.5.6 and mashctl 0.5.6, each checked again after writing.
-
-warning: ~/.local/bin is not on your PATH, so a new terminal will not find
-         mash.
-fix: add this line to ~/.zshrc:
     export PATH="$HOME/.local/bin:$PATH"
-     For this shell only:
-  export PATH="$HOME/.local/bin:$PATH"
 
-NEXT: check that mash runs:
-  mash version
-```
+`gh` is a prerequisite (the GitHub CLI; no login needed for this form). A
+person without `gh` has no verified route: `go install ...@v0.5.6` builds from
+source on the person's machine, is not the attested build, and `mash version`
+then prints `commit unknown`; the page names it unverified. UNVERIFIED here
+(nothing was run against a 0.5.6 release): that the 0.5.6 release carries
+`mashctl-<os>-<arch>` and `mash.intoto.jsonl`, and that `SHA256SUMS` and both
+binaries are subjects of that bundle (true of the v0.5.5 release workflow for
+`SHA256SUMS` and the four mash binaries: `.github/workflows/release.yml` header).
+If the bundle names the binaries directly, the page may verify `mash-linux-amd64`
+with the same command instead; the shape does not change.
 
-Run again (the same release, the same directory): the script still downloads
-and compares (that is how it knows the files are the same), then changes
-nothing, and rehashes what is there. A different mash or mashctl already at
-the path is replaced: a program is not a secret, so File safety (section 2)
-does not apply to it; a directory or a symbolic link at the path is refused.
-Exit 0:
+### The plugin: claude's own commands (REQ-011 (iii))
 
-<!-- packet: install-script-twice -->
-```
-$ sh install-mash.sh
-Installing mash 0.5.6 for Linux amd64. It writes only these places:
-  ~/.local/bin/mash
-  ~/.local/bin/mashctl
-  a private temporary folder (mode 700), which it deletes at the end
+The plugin is installed as in 0.5.5, with Claude Code's own commands, from the
+repository marketplace; mash prints nothing here and the quick start says the
+plugin is not verified:
 
-  checked    mash-linux-amd64     sha256 matches the digest in this script
-  checked    mashctl-linux-amd64  sha256 matches the digest in this script
+    claude plugin marketplace add bogworks/mash
+    claude plugin install mash@mash
 
-  kept       mash 0.5.6     ~/.local/bin/mash     (unchanged)
-  kept       mashctl 0.5.6  ~/.local/bin/mashctl  (unchanged)
-  checked    mash           sha256 ok  (the installed file)
-  checked    mashctl        sha256 ok  (the installed file)
-
-Nothing to install: mash 0.5.6 and mashctl 0.5.6 are already there.
-
-NEXT: check that mash runs:
-  mash version
-```
-
-A download that does not match the digest in the script: `error:` and
-`fix:`, exit 1, NOTHING installed (the check of both comes first), and the
-temporary folder removed. The `checked` line of the program that did pass
-stays, so the person sees which one failed:
-
-<!-- packet: install-script-mismatch -->
-```
-$ sh install-mash.sh
-Installing mash 0.5.6 for Linux amd64. It writes only these places:
-  ~/.local/bin/mash
-  ~/.local/bin/mashctl
-  a private temporary folder (mode 700), which it deletes at the end
-
-  checked    mash-linux-amd64     sha256 matches the digest in this script
-error: mashctl-linux-amd64 does not match the digest in this script. Nothing
-       was installed, and the downloads were deleted.
-fix: run the script again. If it fails again, do not use this release; tell
-     the project at https://github.com/bogworks/mash/issues
-```
-
-<!-- packet: install-script-mismatch -->
-```
-$ sh install-mash.sh
-Installing mash 0.5.6 for Linux amd64. It writes only these places:
-  ~/.local/bin/mash
-  ~/.local/bin/mashctl
-  a private temporary folder (mode 700), which it deletes at the end
-
-error: this script has no digest for mashctl-linux-amd64, so it cannot be
-       checked. Nothing was installed, and the downloads were deleted.
-fix: run the script again. If it fails again, do not use this release; tell
-     the project at https://github.com/bogworks/mash/issues
-```
-
-An installed file that does not hash to the digest (a swap between the check
-and the install, or a full disk; exit 1). The script removes what it put in
-place and says so:
-
-<!-- packet: install-script-mismatch -->
-```
-$ sh install-mash.sh
-Installing mash 0.5.6 for Linux amd64. It writes only these places:
-  ~/.local/bin/mash
-  ~/.local/bin/mashctl
-  a private temporary folder (mode 700), which it deletes at the end
-
-  checked    mash-linux-amd64     sha256 matches the digest in this script
-  checked    mashctl-linux-amd64  sha256 matches the digest in this script
-
-  installed  mash 0.5.6     ~/.local/bin/mash
-error: ~/.local/bin/mash does not match the digest in this script (its sha256
-       differs). The script removed it and installed nothing else.
-fix: run the script again. If it fails again, do not use this release; tell
-     the project at https://github.com/bogworks/mash/issues
-```
-
-What the script needs, said in its help and in the page: `sh`, `uname`,
-`curl`, and `sha256sum` (Linux) or `shasum` (macOS: it is built in). No `gh`
-(only the page's first way to verify the script uses it), no Go, no root. It
-checks for these first, before it downloads anything, and a missing one is an
-error with the install command alone on its line (exit 1; that one command is
-the page's only `sudo`, said as the person's own choice, never run by the
-script):
-
-<!-- packet: install-script-missing -->
-```
-$ sh install-mash.sh
-error: curl is not installed, and the script needs it to download mash.
-fix: install curl, then run the script again. On Debian and Ubuntu:
-  sudo apt install curl
-```
-
-<!-- packet: install-script-missing -->
-```
-$ sh install-mash.sh
-error: neither sha256sum nor shasum is installed, so the installed files
-       cannot be checked.
-fix: install sha256sum, then run the script again. On Debian and Ubuntu:
-  sudo apt install coreutils
-```
-
-A platform with no release binary (the script runs on anything with `sh`, and
-refuses what it has no program for; `go install` is the developer route):
-
-<!-- packet: install-script-platform -->
-```
-$ sh install-mash.sh
-error: there is no mash release for FreeBSD amd64.
-fix: releases are built for Linux and macOS, on amd64 and arm64. With Go you
-     can build from source instead (not verified):
-  go install github.com/bogworks/mash/cmd/mash@v0.5.6
-  go install github.com/bogworks/mash/cmd/mashctl@v0.5.6
-```
-
-Its help (exit 0), with the developer route as one line:
-
-<!-- packet: install-script-help -->
-```
-$ sh install-mash.sh --help
-Usage: sh install-mash.sh [--dir DIR]
-
-Install mash and mashctl 0.5.6 for this computer: download each program from
-the release, compare it with the digest written in this script, install it in
-DIR (default ~/.local/bin), and check each installed file again. Verify this
-script first (the page shows how, with gh attestation verify or with the
-digest in the release notes): it does not verify itself.
-
-  --dir DIR  install in DIR instead
-  --help     show this text
-
-It needs curl, and sha256sum (Linux) or shasum (macOS). It does not need gh,
-Go or root, and it never uses sudo.
-
-With Go you can build from source instead (not verified; mashctl: cmd/mashctl):
-  go install github.com/bogworks/mash/cmd/mash@v0.5.6
-```
-
-A usage error exits 2, as every command does (section 2):
-
-<!-- packet: install-script-usage -->
-```
-$ sh install-mash.sh --frob
-error: unknown option --frob.
-fix: use it like this:
-  sh install-mash.sh [--dir DIR]
-```
-
-`go install` for both programs stays as the developer route: one line in the
-script's help (above) and one in the install section of the documentation,
-named as unverified. It builds from source on the person's machine, so the
-result is not the attested build and `mash version` prints `commit unknown`
-(as `go install` does today). Not run (UNVERIFIED here): whether `gh
-attestation verify` needs `gh auth login` for a public repository; if it
-does, the page's prerequisites say so (X8).
-
-### The plugin: one command (REQ-011 (iii))
-
-Checked on this host with help commands only (`claude plugin --help`,
-`claude plugin install --help`, `claude plugin marketplace --help` and
-`marketplace add --help`; no `claude` command was run). `claude plugin
-install <plugin>` takes `--marketplace <source>`: "Install <plugin> (its bare
-name) from the marketplace at this source: owner/repo, a git or https URL, or
-a path. A marketplace not added yet is added first, in user settings, under
-the same checks as 'plugin marketplace add'", and `-s, --scope <scope>`
-("Installation scope: user, project, or local (default: "user")"). So Claude
-Code allows the whole of it in ONE command, at user scope, and `mash plugin
-install` runs EXACTLY ONE `claude` command, not two:
-
-    claude plugin install mash --marketplace <the folder> --scope user
-
-(Two would be `claude plugin marketplace add <folder>` and `claude plugin
-install mash@mash`, which is what `mash plugin export` still prints for a
-person who does it by hand.) The command is one paste. `mash plugin install`
-installs the plugin EMBEDDED in the verified mash binary itself (REQ-011
-(iii)): the same version as the binary, and no network. In order: mash looks
-for `claude` on the PATH, and writes nothing if it is not there; it extracts
-the plugin bytes built into this binary to the user's data folder (default
-`~/.local/share/mash/plugin`, which must stay, because Claude Code reads the
-marketplace from it; `--dir DIR` chooses another local folder); it checks
-their sha256 against the digest built into the binary and the plugin's
-permission manifest against the manifest built into it (`pinned`), and
-inspects the destination again after claude has run (REQ-011 (iii), rev 10 and 11:
-any permission beyond the pinned manifest needs the person's separate
-choice, never mash's); it runs the `claude` command with that folder as the
-ONLY source and `--scope user` as the only scope (there is no `--scope`
-option on mash; never global, never `sudo`); it prints each thing it did with
-its result. A `ran` item is the command exactly as it ran, on its own line, and
-the `result` row after it is claude's result: `ok (exit 0)`, `kept
-(unchanged)` when claude says the plugin is already installed at this
-version, or `FAILED (exit N)` with claude's last line. With `--detail` the
-paths are absolute. The `NEXT:` ends with the two launch lines of R13, for
-the first installed endpoint; with none installed the `NEXT:` is `mash key
-create`'s (the person has no endpoint to start). mash does not edit Claude
-Code's settings itself: `claude` does.
-
-The pin is mash's: it compares the extracted files with the digest built into
-the verified binary. Whether Claude Code can itself record and enforce a
-digest for a local marketplace is not known; nothing here claims it does.
-
-<!-- packet: plugin-install-unverified -->
-```
-+------------------------------------------------------------------------+
-| UNVERIFIED: claude's own output has not been seen until someone runs   |
-| it in a container with Claude Code. The `result` rows and the exit     |
-| codes below are what mash would print around it, not what claude says. |
-+------------------------------------------------------------------------+
-```
-
-<!-- packet: plugin-install -->
-```
-$ mash plugin install
-Installed the mash plugin in Claude Code, from this mash (no download).
-
-  wrote   ~/.local/share/mash/plugin  (5 files, from mash 0.5.6)
-  pinned  plugin  sha256 ok  (matches the digest built into mash)
-  pinned  permissions  the manifest built into mash, and no more
-  ran     one claude command, user scope, exactly as it ran:
-  claude plugin install mash --marketplace ~/.local/share/mash/plugin --scope user
-  result  ok (exit 0)
-  pinned  plugin  sha256 ok  (inspected again after claude ran)
-
-NEXT: start Claude Code as one of your endpoints (installed here:
-      acme.demo.alice, acme.demo.bob). In the terminal for the first:
-  export MASH_ENDPOINT=acme.demo.alice
-  claude --dangerously-load-development-channels plugin:mash@mash
-```
-
-Run again, with nothing changed (the files are the same, and claude says it
-is installed; exit 0):
-
-<!-- packet: plugin-install-kept -->
-```
-$ mash plugin install
-The mash plugin is already installed in Claude Code.
-
-  kept    ~/.local/share/mash/plugin  (unchanged)
-  pinned  plugin  sha256 ok  (matches the digest built into mash)
-  pinned  permissions  the manifest built into mash, and no more
-  ran     one claude command, user scope, exactly as it ran:
-  claude plugin install mash --marketplace ~/.local/share/mash/plugin --scope user
-  result  kept (unchanged)
-  pinned  plugin  sha256 ok  (inspected again after claude ran)
-
-NEXT: start Claude Code as one of your endpoints (installed here:
-      acme.demo.alice, acme.demo.bob). In the terminal for the first:
-  export MASH_ENDPOINT=acme.demo.alice
-  claude --dangerously-load-development-channels plugin:mash@mash
-```
-
-`claude` is not on the PATH (exit 1; nothing written; the lower-level
-command is the way out):
-
-<!-- packet: plugin-install-noclaude -->
-```
-$ mash plugin install
-error: claude is not on your PATH, so mash cannot install the plugin.
-       Nothing was written.
-fix: install Claude Code, or put it on your PATH, then run this again. If
-     Claude Code is on another machine, write the plugin to a folder and
-     take that there:
-  mash plugin export ./mash-plugin
-```
-
-`claude` ran and refused (exit 1; the files stay, and the command is given
-alone so the person can read all of what claude says):
-
-<!-- packet: plugin-install-failed -->
-```
-$ mash plugin install
-  wrote   ~/.local/share/mash/plugin  (5 files, from mash 0.5.6)
-  pinned  plugin  sha256 ok  (matches the digest built into mash)
-  pinned  permissions  the manifest built into mash, and no more
-  ran     one claude command, user scope, exactly as it ran:
-  claude plugin install mash --marketplace ~/.local/share/mash/plugin --scope user
-  result  FAILED (exit 1): <the last line claude printed>
-error: claude could not install the plugin.
-fix: to read everything claude says, run it yourself:
-  claude plugin install mash --marketplace ~/.local/share/mash/plugin --scope user
-```
-
-The folder already holds files that are not the plugin built into this mash
-(a changed file, or an older version; exit 1, nothing changed and claude not
-run: mash does not point Claude Code at bytes it cannot vouch for):
-
-<!-- packet: plugin-install-pin -->
-```
-$ mash plugin install
-error: the files in ~/.local/share/mash/plugin are not the plugin built into
-       this mash (their sha256 differs). Nothing was changed.
-fix: move that folder aside, then run this again; mash writes a fresh copy:
-  mv ~/.local/share/mash/plugin ~/.local/share/mash/plugin.old
-```
-
-<!-- packet: plugin-install-pin -->
-```
-$ mash plugin install
-error: the permissions in ~/.local/share/mash/plugin are not the ones built
-       into this mash. Nothing was changed, and claude was not run.
-fix: move that folder aside, then run this again; mash writes a fresh copy:
-  mv ~/.local/share/mash/plugin ~/.local/share/mash/plugin.old
-```
-
-A usage error (exit 2): a folder given as an argument, and the scope option
-that does not exist (the plugin is installed for you, never for a project or
-the whole machine):
-
-<!-- packet: plugin-install-usage -->
-```
-$ mash plugin install ./mash-plugin
-error: plugin install takes no folder.
-fix: to choose the folder, use --dir:
-  mash plugin install --dir ./mash-plugin
-```
-
-<!-- packet: plugin-install-usage -->
-```
-$ mash plugin install --scope project
-error: unknown option --scope for mash plugin install.
-fix: the plugin is installed for you only (user scope), never for a project
-     or the whole machine. See the options with:
-  mash help plugin install
-```
-
-Help (exit 0), and `mash help` lists the command (section 5, help):
-
-<!-- packet: plugin-install-help -->
-```
-$ mash help plugin install
-Usage: mash plugin install [--dir DIR]
-
-Install the mash plugin in Claude Code, from this mash itself: write the
-plugin built into this program (same version, no download) into DIR (default
-~/.local/share/mash/plugin), check its sha256 against the digest built in,
-and run one command, at user scope:
-  claude plugin install mash --marketplace DIR --scope user
-mash prints the claude command it runs, with its result.
-
-  --dir DIR  keep the plugin files in DIR instead
-  --detail   also show full paths
-
-mash plugin export DIR only writes the files, for another machine.
-
-Example: mash plugin install
-```
-
-`mash plugin export DIR` stays as the lower-level command (one line in the
-documentation: "to add the plugin by hand, or on another machine"). The
-`status` screen for Claude Code not set up is unchanged (it starts Claude Code
-with the channel). No MCP tool, field or error code changes.
+(The same two commands are in the 0.5.5 `docs/install.md`, lines 40 and 41 of
+the v0.5.5 tree.) `claude plugin install` installs at user scope by default
+(`--scope user`; same file, line 46). `mash plugin export DIR` stays as in
+0.5.5 for a machine without network access to the repository: it writes the
+plugin embedded in the binary to a folder and prints the same commands with the
+folder as the marketplace (section 5, `mash plugin export DIR`). Nothing was run
+against Claude Code for this draft (UNVERIFIED, N16): the two commands and their
+flags are from `claude plugin --help`, `claude plugin marketplace --help` and the
+v0.5.5 docs, never from running them; what `claude` prints is not shown here. The
+unverified note stays on the page.
 
 ### Connecting mashctl, and delete (REQ-011 (ii) and (v)): mashctl's
 
-`mashctl adopt --from <dir>` and `mashctl endpoint delete` retiring this
-machine's credentials are the mashctl lane's. This file does not invent their
-output: the `adopt-from` block in section 4 is a placeholder, and N17 records
-the dependency. Contract revision 7 says adopt asks no fingerprint (a same-
-owner local copy, said in its output); the fingerprint is typed only on a
-first install by `mash credential install` (section 4).
+`mashctl adopt --from <dir>` and `mashctl endpoint delete` leaving this
+machine's credentials file as it was are the mashctl lane's. This file does not
+invent their output: the `adopt-from` block in section 4 is a placeholder, and
+N17 records the dependency. Contract revision 15 says adopt asks no fingerprint
+(a same-owner local copy, said in its output); the fingerprint is shown by the
+first `mash credential install` (section 4) and by mashctl for the operator.
+
+## 5b. What REQ-015 can count
+
+The lead asked: "Tell me if the count you can actually get differs from 'not
+yet shown'". It does, in four ways, and it is exact in the rest. Every
+reference is to the v0.5.5 tag (`file:line`); the 0.5.6 code does not exist
+yet, so these are what the shipped code already offers, not what 0.5.6 does.
+
+### What the shipped code counts
+
+- A message reaches a session in two steps. `mash serve` receives it from the
+  endpoint's durable consumer `deliver` on the inbox stream and holds it
+  UNACKED (`internal/spool/spool.go:1-13`: "a message is acked only once it
+  has been seen"; the consumer is explicit-ack, 30 s ack wait, at most 1000
+  unacked, delivering from the start: `internal/store/store.go:130-137`). A hook
+  drains it from the spool into the session, and serve acks it then
+  (`internal/endpoint/hook.go:452`, `ackDrained`); with no hook the channel
+  write is what acks it (`internal/endpoint/mail.go:1019-1033`). So "shown to the
+  session" in the shipped code means ACKED: shown by a hook, or written to the
+  channel.
+- `mash serve` already keeps this count in memory: the waking tracker's
+  `unread` set is "received and not yet acked" and survives a restart because
+  the consumer redelivers every unacked message
+  (`internal/endpoint/waking.go:11-34`, set at `waking.go:48`, filled at
+  `mail.go:385`, emptied by `waking.go:184`). But it counts only mail that
+  wakes (kind blocker, question or task, or urgent): `add(seq, wakes)` at
+  `waking.go:144` raises `count` only for those, and `snapshot()` at
+  `waking.go:265` returns that count (published as the lease's
+  `waking_pending`, `endpoint.go:176-181` and `endpoint.go:209-210`). The set
+  holds every kind, so the total is `len(unread)`: one new counter, no new
+  state.
+- A hook's spool holds what serve received and has not yet had drained
+  (`internal/spool/spool.go:322`, `Waiting()`; directory
+  `<state dir>/spool/<owner>/<name>`, `spool.go:117`, mode 0700, one OS user).
+  It is NOT the whole backlog: mail the consumer has not yet delivered is not
+  in it, and with no serve running nothing is.
+- `mash status` from a shell, in v0.5.5, connects to nothing
+  (`cmd/mash/status.go:586-595`, `statusCmd`; `src.cli` makes the live lines
+  empty, `status.go:416` and `:485`). The 0.5.6 target connects once with a 2 s
+  budget (section 5, status). On that connection the endpoint's OWN credentials
+  may already read what a count needs: `STREAM.INFO`, `CONSUMER.INFO` and
+  `DIRECT.GET` on its own inbox stream (`internal/listset/compile.go:186-191`;
+  the same lines in `internal/admin/permissions.go:66-71`). No
+  new permission is needed. The shipped status already does a bounded read of
+  exactly these two (`internal/endpoint/eviction.go:25-42`, 2 s, and it says
+  nothing when the server will not answer), so the pattern exists.
+
+### The definition to implement (recommendation)
+
+`waiting` = the messages in this endpoint's inbox that its consumer has not
+acked. From the server: `NumPending + NumAckPending` of the consumer
+`deliver` (`mail.go:289-305` reads both already for the waking tracker; the
+sum is exact because `NumPending` counts what the 1000-message ack limit has
+not yet delivered). When the consumer does not exist yet (an endpoint that has
+never served), every stored message is waiting: the stream's message count
+from `STREAM.INFO`. In `mash serve` the same number is `len(unread)` of the
+tracker (a cross-check, and the one the wake decision uses, because it is
+already in memory and needs no round trip). `oldest` is the stored time of the
+oldest waiting message: in serve the minimum `At` of the held entries
+(`spool.Entry.At`, `spool.go:31`); from a shell the stored time of the message
+at the consumer's ack floor plus one (`ack_floor.stream + 1`, read with
+`DIRECT.GET`; a gap left by an evicted message makes it the next stored one).
+The age is printed with the unit and no space (R12: `45s`, `12m`, `3h`).
+
+### Where it differs from "not yet shown"
+
+1. SHOWN MEANS ACKED, NOT SEEN. A message acked by a channel write counts as
+   shown whether or not Claude Code took the event (`mail.go:1019-1033`; the hook
+   comment at `internal/endpoint/hook.go:33` says Claude Code can drop channel
+   events). The count is of mail mash has not handed over; it cannot know what
+   the model read.
+2. A DIGEST LINE IS NOT A SHOWING. A hook that cannot fit the bodies lists
+   them in a digest and leaves them unacked (`hook.go:247-253`; ADR 0046;
+   `waking.go:167`, `listed()`, which stops counting them as waking). They
+   still count as waiting here, because their bodies have not been shown. This
+   is a choice, flagged as open question O1.
+3. READING IS NOT SHOWING. The `read` tool, and `mash read` from a shell, do not
+   ack (`waking.go:21`, limit 1): a message read that way still counts until a
+   hook shows it. A person reading mail from a shell cannot lower the
+   backlog; the backlog is the SESSION's.
+4. THE CAP AND THE LAG. The consumer delivers at most 1000 unacked messages, so
+   serve's in-memory count stops at 1000 (`waking.go:26-28`, limit 3), while
+   the server-side sum above does not; a limit above 1000 is unreachable in
+   serve. After a restart the count is unknown for up to the ack wait (30 s,
+   `waking.go:21-26`, limit 2) and is not reported then (serve does not wake on
+   an unknown count; status says `not checked` when the server will not answer).
+   A message evicted by the stream's limits before it was acked is gone from
+   both counts (`waking.go:28-30`, limit 4).
+
+Everything else is exact: duplicates and redeliveries are counted once (the
+consumer counts distinct messages), mail in a hook's spool and mail not yet
+delivered both count, and the shell's number and serve's agree except for the
+four cases above.
+
+### What each command does with it
+
+| who | gets the count from | needs | if it cannot |
+|---|---|---|---|
+| `mash serve` (the wake) | the waking tracker's unread set, all kinds (new counter beside `count`) | nothing new | no wake while the count is unknown (restart, up to 30 s) |
+| `mash status` from a shell | `CONSUMER.INFO` (`NumPending + NumAckPending`), then `DIRECT.GET` of the oldest | the endpoint's own credentials; the connection status already makes (2 s budget) | the mailbox row says `not checked` and the verdict is unchanged |
+| MCP `status` in a session | the same tracker as serve, no new connection | nothing | `mailbox.waiting` is `null` |
+| `mash endpoint status` | the owner's lease records (a `backlog` number written beside `waking_pending`, `endpoint.go:180`) | UNVERIFIED: that an owner may read another endpoint's lease, as `mash who` reads it; the other endpoint's consumer is NOT readable (permissions are own-inbox only) | the endpoint is not flagged (the status-views page decides) |
+
+### The wake, in the shipped code's terms
+
+The existing idle wake does not do this job: it counts only mail that wakes,
+waits for the idle spell (`IdleWake` 45 s, `hook.go:59`), backs off 2x, 4x up
+to 30 minutes (`hook.go:549`), never wakes for listed mail, and wakes for
+result and fyi mail only when 500 are held or a quarter of the inbox's byte
+limit (`SpoolWakeCount`, `hook.go:48`, and `wakeIfIdle`, `hook.go:305-410`).
+REQ-015 is a second, simple trigger beside it: when the unread total passes
+`mailbox_limit`, whatever the kind, send ONE channel line through the same
+`deliver` function the idle wake uses (`hook.go:395`), `mash: <n> messages
+waiting (limit <limit>), oldest <age>`, with the meta key `backlog: true`;
+then at most once every 10 minutes while the total stays over the limit
+(a plain timer, not the doubling backoff), and not again once it has fallen to
+the limit or below. It is evaluated when a message arrives and on that timer,
+and it is switched off when the setting is 0. A session with no hook running
+(the hookless states, `hookless.go`) is still woken by it: the line is the
+same, and the read tool is how it clears the mail there.
+
+### Open questions (for the lead and the mash lane)
+
+- O1. Do digest-listed messages count? Recommended: yes (their bodies are
+  unshown, and the 10-minute cap prevents a loop), which makes the definition
+  one number everywhere. The alternative (ADR 0046's "listed mail never wakes
+  again") needs serve-only knowledge and makes `mash status` read higher than
+  the wake.
+- O2. Should `mash read` / `mash inbox` from a shell lower the count? Today they
+  cannot (limit 3 above). Recommended: no.
+- O3. `mash inbox`'s `STATE` (`new` / `read`) does not exist in v0.5.5 (nothing
+  in `internal/endpoint` or `cmd/mash` keeps a read state). It should use this
+  same definition (new = unacked) so that the inbox header and the mailbox row
+  agree.
+- O4. The range of `mailbox_limit`: recommended 0 to 1000 (above 1000 serve
+  cannot count), refused outside with an `error:` (section 3).
+- O5. After the wake the hook drains at most 10 messages per run
+  (`internal/host/claude.go:193`, `Present`, default `BatchMsgs` 10), so a backlog
+  of 22 takes three runs; the hook text is unchanged (section 5, hook). A
+  one-line "N more waiting" in it is possible and is not part of this draft.
 
 ## 6. MCP tools (what agents get)
 
@@ -4000,8 +3471,8 @@ Error object (every tool):
 
 Codes: `unknown_endpoint`, `bad_address`, `no_such_message`, `bad_seq`,
 `no_credentials`, `credentials_unsafe` (not private, or not yours),
-`setting_removed` (`insecure_plaintext` in config.json), `not_set_up`,
-`no_endpoint_chosen`, `plain_connection`, `server_unreachable`, `certificate_not_trusted`, `trust_files_disagree`, `credentials_refused`,
+`setting_removed` (`insecure_plaintext` in config.json), `bad_setting` (a `mailbox_limit` outside 0 to 1000), `not_set_up`,
+`no_endpoint_chosen`, `plain_connection`, `server_unreachable`, `certificate_not_trusted`, `credentials_refused`,
 `endpoint_deleted`, `no_open_prompt`, `unknown_tool`. (`group_missing` is
 gone with `MASH_GROUP`; `no_endpoint_chosen` is new.) `message` and `fix` are
 plain sentences (R2 applies to them too).
@@ -4162,14 +3633,14 @@ argument, the agent's counterpart of `--detail`).
 ### status
 
 Description: "Say whether mash works for this session: the version, the
-server, the configuration and the credentials, each with a state and what to
-do about it. Works with no endpoint set."
+server, the configuration, the credentials and how many messages wait, each
+with a state and what to do about it. Works with no endpoint set."
 
 No arguments (new optional boolean `detail`). Returns JSON and no human
 text. The `state` of `config` and `credentials` is one of `ok`, `warning`,
 `problem`, `not_checked`; the `state` of `server` is `alive`, `not_reachable`
-or `not_checked` (the same words as the CLI's server row, D1): the same four
-facts as the CLI's four rows.
+or `not_checked` (the same words as the CLI's server row, D1): the same five
+facts as the CLI's five rows.
 
 | field | type | meaning | example | vs today |
 |---|---|---|---|---|
@@ -4180,11 +3651,15 @@ facts as the CLI's four rows.
 | `server.address` | string or null | as configured | `"tls://myserver:4222"` | new |
 | `server.state` | enum | `alive`, `not_reachable` or `not_checked`: the answer of the check just made | `"alive"` | was `connection:`/`tls:` |
 | `server.encrypted` | bool or null | tls connection; null when not checked or not reachable | `true` | was `tls:` line |
-| `server.plaintext_override` | bool | `MASH_INSECURE_PLAINTEXT` is set (inherited or not) | `false` | new (REQ-010) |
+| `server.plaintext_override` | bool | `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION` is set (inherited or not) | `false` | new (REQ-010) |
 | `server.checked_at` | string or null | when mash asked the server; null when it did not ask | `"2026-11-19T09:42:11Z"` | new (the CLI's `checked 09:42`) |
 | `server.last_reached` | string or null | when this machine's mash last heard the server answer (equal to `checked_at` when `alive`); null for never | `"2026-11-19T09:42:11Z"` | new (the CLI's `last reached 3h ago`) |
 | `config.state` | enum | configuration | `"ok"` | was `config:` line |
 | `credentials.state` | enum | credentials | `"ok"` | was `creds:` line |
+| `mailbox.waiting` | int or null | messages delivered to this inbox and not yet shown to the session (section 5b); null when not checked | `0` | new (REQ-015) |
+| `mailbox.limit` | int | the limit, `mailbox_limit`; 0 means off | `15` | new |
+| `mailbox.oldest_age` | string or null | age of the oldest waiting message in R12's form; null when none waits or not checked | `"12m"` | new |
+| `mailbox.over_limit` | bool or null | `waiting` is past `limit`; false when the limit is 0; null when not checked | `false` | new |
 | `problems` | array | `{code, message, fix}` per problem | | new; replaces `Next:` text |
 | `detail` | object | only with `detail: true` | | below |
 
@@ -4193,26 +3668,23 @@ the CLI says `not checked` in the row. Codes in `problems[].code` come from
 the shared list above, plus `config_missing`, `credentials_missing`.
 
 `detail` fields (secrets never; names of settings, never their values; no
-fingerprint, R15). They are the SAME rows as `mash status --detail` (REQ-012,
+fingerprint). They are the SAME rows as `mash status --detail` (REQ-012,
 section 5), in every state, with `null` where the CLI says `none`, `missing`
-or `not set`: `config_path`, `ca_path` (`null` when no CA is configured, the
-computer's own authorities are used), `credentials_path`, `trust_path`,
-`endpoint` and `chosen_by` (`env`, `config`, `only_one`, or `null`; both repeat
-the top-level values, so `detail` stands alone), `server.address` (the same as
-the top-level `server.address`), and `trust`: `{account, server, state}`, where
-`account` is the owner's name (`"acme"`, never a key), `server` the address the
-record binds, and `state` one of `matches`, `differs` or `none`
-(the CLI's `matches config`, `differs`, `none`). Then
-the facts: `group` (`{members, endpoints}`: the other endpoints in the group
-and the endpoints of the owner), `settings` (the `MASH_*` variables that are
-set), `answered_ms`, `key` (storage name), `name_rule`,
-`clock_offset_seconds`, `relay_trace` (`{inbound_via, quick_sends,
+or `not set`: `config_path`, `ca_path` (`null` when there is no
+configuration), `credentials_path`, `endpoint` and `chosen_by` (`env`,
+`config`, `only_one`, or `null`; both repeat the top-level values, so `detail`
+stands alone), `server.address` (the same as the top-level `server.address`),
+and `mailbox_limit_from` (`default`, `config` or `env`; the limit itself is
+`mailbox.limit`). Then the facts: `group` (`{members, endpoints}`: the other
+endpoints in the group and the endpoints of the owner), `settings` (the
+`MASH_*` variables that are set), `answered_ms`, `key` (storage name),
+`name_rule`, `clock_offset_seconds`, `relay_trace` (`{inbound_via, quick_sends,
 declared_relays}`, today's three counts), `commit`, `claude_code`
 (`{hooks_installed, channel_listed, hooks_ran, last_hook_at,
 channel_notifications, last_channel_at}`; the live session counts of today's
-`delivery:` lines), `token_expires` (string or null). A trust record that
-disagrees is a problem with code `trust_files_disagree` (its fix is the
-CLI's: `mash trust reset`, then install again).
+`delivery:` lines), `token_expires` (string or null). A mailbox over its limit
+is not a problem (`ok` stays true, REQ-015 is a warning): `mailbox.over_limit`
+says it.
 
 ```
 { "endpoint": "acme.demo.bob", "ok": true, "version": "0.5.6",
@@ -4223,6 +3695,8 @@ CLI's: `mash trust reset`, then install again).
               "last_reached": "2026-11-19T09:42:11Z" },
   "config": { "state": "ok" },
   "credentials": { "state": "ok" },
+  "mailbox": { "waiting": 0, "limit": 15, "oldest_age": null,
+               "over_limit": false },
   "problems": [] }
 ```
 
@@ -4237,6 +3711,8 @@ Failure example (credentials refused):
               "last_reached": "2026-11-19T09:42:11Z" },
   "config": { "state": "ok" },
   "credentials": { "state": "problem" },
+  "mailbox": { "waiting": null, "limit": 15, "oldest_age": null,
+               "over_limit": null },
   "problems": [ { "code": "credentials_refused",
     "message": "deleted, or its key was reissued",
     "fix": "ask whoever runs your mash server which it was" } ] }
@@ -4253,17 +3729,33 @@ With `detail: true` (the same server and rows as the CLI's `--detail`):
               "last_reached": "2026-11-19T09:42:11Z" },
   "config": { "state": "ok" },
   "credentials": { "state": "ok" },
+  "mailbox": { "waiting": 0, "limit": 15, "oldest_age": null,
+               "over_limit": false },
   "problems": [],
   "detail": {
     "config_path": "/home/bob/.config/mash/config.json",
     "ca_path": "/home/bob/.config/mash/ca.pem",
     "credentials_path": "/home/bob/.config/mash/acme.demo.bob.creds",
-    "trust_path": "/home/bob/.config/mash/trust.json",
     "endpoint": "acme.demo.bob", "chosen_by": "only_one",
     "server": { "address": "tls://myserver:4222" },
-    "trust": { "account": "acme", "server": "tls://myserver:4222",
-               "state": "matches" },
+    "mailbox_limit_from": "default",
     "commit": "e389eaf", "answered_ms": 41 } }
+```
+
+Mail backing up (22 waiting over a limit of 15; `ok` stays true):
+
+```
+{ "endpoint": "acme.demo.bob", "ok": true, "version": "0.5.6",
+  "chosen_by": "only_one",
+  "server": { "address": "tls://myserver:4222", "state": "alive",
+              "encrypted": true, "plaintext_override": false,
+              "checked_at": "2026-11-19T09:42:11Z",
+              "last_reached": "2026-11-19T09:42:11Z" },
+  "config": { "state": "ok" },
+  "credentials": { "state": "ok" },
+  "mailbox": { "waiting": 22, "limit": 15, "oldest_age": "12m",
+               "over_limit": true },
+  "problems": [] }
 ```
 
 Notes: in a running session the tool already knows the live state; it fills
@@ -4331,16 +3823,25 @@ the same plain voice, rewritten as short lines of at most 80 columns:
   sender's words: untrusted unless trust is verified".
 - It says `who` always returns JSON and the address is the dotted form.
 - It says no tool result holds a token or a key, and that the agent never sets
-  `MASH_INSECURE_PLAINTEXT` or any other setting on its own (REQ-010).
-- It says the plugin is installed by the person (`mash plugin install`); the
-  agent never runs it and never edits Claude Code's settings (REQ-011 (iii)).
-  No tool, field or error code changes for REQ-011.
+  `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION` or any other setting on its own
+  (REQ-010).
+- It says the plugin is installed by the person (with claude's own commands);
+  the agent never runs them and never edits Claude Code's settings (REQ-011
+  (iii)). No tool, field or error code changes for REQ-011.
+- It says that a channel line `mash: <n> messages waiting (limit <limit>),
+  oldest <age>` means the mailbox is over its limit: read the inbox with the
+  `inbox` and `read` tools; and that the limit is the person's setting, not the
+  agent's (REQ-015). `status` returns the same count as `mailbox`.
 - The paragraph on delivery by hook keeps its meaning and drops the
   `PostToolUse`/`UserPromptSubmit` names (the model does not choose them).
 
 ## 7. Open questions and decisions
 
-Each item is marked DECIDED (with its source) or STILL OPEN.
+Each item is marked DECIDED (with its source) or STILL OPEN. Items of DRAFT6
+that existed only for the trust record, the install script, `mash plugin
+install` and the typed fingerprint are SUPERSEDED by Randy's scope ruling
+(decision 264, contract revision 15) and are kept as one line each, so that an
+old reference still finds its answer.
 
 Rulings of the planner, DECIDED (L1 to L12): `NEXT:` capitals everywhere
 (L1, R4); a plain-URL refusal exits 1 in both tools (L2, section 2); one
@@ -4353,7 +3854,7 @@ tables fit real names, one `URGENCY` column, kind `message`, `who` with `now`,
 number but the build's (L9) and the `.creds` file holds the private key, so
 `bob.key` is the backup (L9, section 4); printed commands are exempt from 80
 columns (L10, R9); the CLI team's `--creds`, line shapes, delete
-text (L11, section 4; its `--replace` was removed in DRAFT6); `init --local`'s removal message (L12, section 4).
+text (L11, section 4); `init --local`'s removal message (L12, section 4).
 
 13. STILL OPEN. `mash credential install` refusal text for an expired or
     wrong-owner token: the target wording is settled (one sentence naming
@@ -4368,14 +3869,9 @@ text (L11, section 4; its `--replace` was removed in DRAFT6); `init --local`'s r
 15. DECIDED (by an earlier draft). Writing the configuration is flags on
     `credential install`, not a separate `mash config` step. A `mash config`
     verb could come later for changing one value.
-16. SUPERSEDED, DRAFT6 (contract rev 7: `--replace` on `credential install`
-    is removed; `mash trust reset`, then a fresh install, is the one way, rev 11,
-    X1). WAS: DECIDED, planner
-    and CLI team (L11); CHANGED by the security read (S1).
-    `--replace` changes a `config.json` that says something different (server
-    or CA), only with the person's confirmation at a terminal (R17), and
-    never deletes other keys in it; without it a different value is refused,
-    naming what differs. `--force` no longer exists (S1).
+16. SUPERSEDED (decision 264): `--replace` and the in-place change of trust
+    do not exist; an existing different setting is refused and the fix names
+    the file to move aside (R17).
 17. STILL OPEN. Where mash finds a server when neither the flag nor
     `config.json` has one: mashctl's configuration on this machine, as the
     same-machine form shows. Needs the CLI team to confirm the lookup order
@@ -4424,254 +3920,172 @@ N12. STILL OPEN, decided in principle by the planner (L7). The kind
     stores `message` (waking like `task`; an older receiver reads it as
     `task`). The alternative that needs no protocol change is to display
     `task` as `message` and lose the difference between the two.
-S1. DECIDED here, for the lead to confirm. INV-003 says an existing different
-    secret file is refused, never truncated or replaced. `--force`
-    (replace an existing credentials file) contradicts it, so it is removed.
-    The way back after a reissued key is to move the old file aside (the fix
-    names the `mv`). The alternative, an atomic replace behind `--force`,
-    conflicts with the contract text.
-S2. SUPERSEDED, DRAFT5 (contract rev 5, the lead's ruling (b)). DRAFT4 made
-    `--ca-fingerprint` a required flag whenever the install writes or changes
-    the CA. The fingerprint is now TYPED by the person at a prompt, whenever
-    a CA is written or changed, and is never a flag; mash never prints it
-    (R15). A server with a public CA has no CA file to check, and a second
-    endpoint on the same machine changes no CA: nothing is asked then.
-S3. DECIDED here; REVISED, DRAFT5. The fingerprint form (R15) is lower-case hex
-    SHA-256 of the CA certificate, 8 groups of 8 joined by `-`, pasteable as
-    one word; the person may type 64 plain hex digits. mashctl prints it for
-    the operator; the person types it (no flag, no `yes`), and a trust change
-    is `mash trust reset` and then a fresh install, which types the server
-    address and the fingerprint again (contract INV-004: "type it back";
-    DRAFT6: not `--replace` on install, and no in-place `trust replace`).
+S1. DECIDED here. INV-003 says an existing different secret file is refused,
+    never truncated or replaced. `--force` (replace an existing credentials
+    file) contradicts it, so it is removed. The way back after a reissued key
+    is to move the old file aside (the fix names the `mv`).
+S2, S3, S12. SUPERSEDED (decision 264). The typed fingerprint and the typed
+    server address are gone: nothing is typed, and the first install SHOWS the
+    address and the fingerprint (R15, contract rev 15). The display form (8
+    groups of 8, lower-case hex, joined by `-`) stays, and mashctl prints it
+    for the operator.
 S4. DECIDED here, for the lead to confirm. REQ-004 fixes the default rows
     of `status` and REQ-009 says status names how the endpoint was chosen.
-    The targets keep the four rows, name the endpoint in the verdict, and put
+    The targets keep the rows, name the endpoint in the verdict, and put
     "chosen by" in `--detail`, on the choice screens, and in the MCP `status`
     field `chosen_by`.
 S5. DECIDED here. The token is written mode 600 and no longer labelled "holds no
     secret" (INV-001, INV-003 list tokens with seeds). The CA copy and the
     public key are not secrets.
-S6. SUPERSEDED, DRAFT6 (the fix is now `mash trust reset`, then a fresh
-    install with `--ca <ca file>`; `--replace` is removed from install). WAS: DECIDED here; REVISED, DRAFT5.
-    After a CA change on purpose the fix is
-    `mash credential install --creds <the installed file> --ca <file>
-    --replace` (an identical credentials file is `kept (unchanged)`), and
-    the person types the new CA's fingerprint at the prompt. No other verb may
-    write the trust, and `cp` over `ca.pem` would skip the confirmation.
-S7. DECIDED here; REVISED, DRAFT5. The older-messages hint under a long inbox
-    is a sentence and a whole command (`Older messages are before #56. To see
-    them:` then `mash inbox --limit 2 --before 56`), not a `NEXT:` (listings
-    print none). There is no empty `who`: the caller is always listed.
-S8. DECIDED, the lead, D1 (DRAFT5). The server row of `status` never says
-    "last seen": `alive, encrypted (checked 09:42)`, `NOT REACHABLE (last
-    reached 3h ago)` or `not checked`; MCP `server.state` is `alive`,
-    `not_reachable` or `not_checked`, with `server.checked_at` and
-    `server.last_reached`; `LAST SEEN` means an endpoint's last mail activity
-    in `mash who` only. The server is checked in every state that has an
-    address (reaching it needs no credentials).
-S9. DECIDED, the lead, D2 (DRAFT5). A certificate the trusted CA did not sign
-    is mash refusing the server, and the error says so: `mash does not trust
-    the server at myserver:4222: its certificate is not from your CA`.
-S10. DECIDED, the lead, D4 (DRAFT5; CLI rule 30 amended). A configuration fix
-    prints `add this line to <path>:` and the line, indented four spaces,
-    never in command position; a one-shell test is a separate item labelled
-    `for this shell only:` (R10).
-S11. DECIDED, the lead, D7 (DRAFT5). Removing access prints no NEXT (R19);
-    `mashctl endpoint delete`'s quoted text loses its NEXT.
-S12. DECIDED, the lead, contract rev 5 and ruling (b) (DRAFT5). The CA
-    fingerprint is typed, never a flag, never printed by mash (R15, R17);
-    `credential install` also checks that the server presents a certificate
-    from that CA for that host name before writing; no terminal exits 4 (not
-    authorized: a person must run it at a terminal, section 2).
+S6. SUPERSEDED (decision 264): after a CA change on purpose the fix is to move
+    the old CA copy aside and install again (R17).
+S7. DECIDED here. The older-messages hint under a long inbox is a sentence and
+    a whole command (`Older messages are before #56. To see them:` then `mash
+    inbox --limit 2 --before 56`), not a `NEXT:` (listings print none). There is
+    no empty `who`: the caller is always listed.
+S8. DECIDED, the lead, D1. The server row of `status` never says "last seen":
+    `alive, encrypted (checked 09:42)`, `NOT REACHABLE (last reached 3h ago)` or
+    `not checked`; MCP `server.state` is `alive`, `not_reachable` or
+    `not_checked`, with `server.checked_at` and `server.last_reached`; `LAST
+    SEEN` means an endpoint's last mail activity in `mash who` only. The
+    server is checked in every state that has an address.
+S9. DECIDED, the lead, D2. A certificate the trusted CA did not sign is mash
+    refusing the server, and the error says so: `mash does not trust the
+    server at myserver:4222: its certificate is not from your CA`.
+S10. DECIDED, the lead, D4 (CLI rule 30 amended). A configuration fix prints
+    `add this line to <path>:` and the line, indented four spaces, never in
+    command position; a one-shell test is a separate item labelled `for this
+    shell only:` (R10).
+S11. DECIDED, the lead, D7. Removing access prints no NEXT (R19); `mashctl
+    endpoint delete`'s quoted text has no NEXT.
 N13. STILL OPEN. `mash who` lists the endpoints of the caller's owner; the
     directory's scope was read from the code in DRAFT2 and not re-checked.
-
-N14. DECIDED here, for the lead to confirm (REQ-011 (i)). The release ships
-    `install-mash.sh`, attested like the binaries; the script installs the
-    version it was released with. The page's check has two ways (the lead's
-    brief, item 3, which is wider than contract rev 11): `gh attestation
-    verify` naming bogworks/mash, release.yml, the tag and the file; or the
-    script's digest from the release's attested notes with `sha256sum -c`
-    (the digest only shows the file is the one the release published, not who
-    built it). Contract rev 10 and 11 say a digest in the notes is NOT an
-    alternative: not conformed to that sentence, on the lead's brief (X8).
-    The script holds the digest of each program written into it at release
-    time, compares each download before it installs either, and rehashes each
-    installed program (X8); it needs no `gh`.
-N15. DECIDED here, easy to reverse. The script takes `--dir DIR` (no
-    environment variable: readable arguments), defaults to `~/.local/bin`,
-    never edits a shell startup file (it prints the line, R10), and replaces
-    an older mash or mashctl at the path (not a secret). New words `checked`
-    and `installed` in the wrote-line family (R12, R20).
-N16. STILL OPEN, UNVERIFIED. `mash plugin install` runs ONE command, `claude
-    plugin install mash --marketplace <dir> --scope user`, from the help text
-    of `claude plugin install` and `claude plugin marketplace` on this host
-    (`--help` only). Nothing was run against Claude Code: what claude prints,
-    its exit code when the plugin is already installed (the `kept (unchanged)`
-    result assumes it says so), what it does for a newer plugin in the same
-    folder (it may need `claude plugin update`, which would be a second
-    command), whether a path marketplace is read in place or copied (and so
-    whether the second `pinned` check means anything), whether Claude Code can
-    itself pin a local marketplace to a digest, and whether a
-    `--dangerously-load-development-channels` session needs more. Until
-    someone runs it in a container with Claude Code, every `result` row of the
-    plugin blocks is UNVERIFIED (the boxed note in section 5a and in the
-    packet). The default folder `~/.local/share/mash/plugin` is this draft's
-    choice (it must outlive the command).
+N14, N15. SUPERSEDED (decision 264): there is no install script. The install
+    check is one pasted `gh attestation verify --bundle` (section 5a).
+N16. STILL OPEN, UNVERIFIED. The plugin is installed with Claude Code's own
+    commands, `claude plugin marketplace add bogworks/mash` and `claude plugin
+    install mash@mash` (the 0.5.5 `docs/install.md`; `claude plugin --help` on
+    this host for the flags). Nothing was run against Claude Code: what
+    `claude` prints, and its exit code when the plugin is already installed,
+    are not shown anywhere in this file, and the quick start says the plugin
+    is not verified. `mash plugin install` does not exist.
 N17. STILL OPEN, ctl's. REQ-011 (ii) `mashctl adopt --from <dir>` and (v)
-    `mashctl endpoint delete` retiring the credentials on this machine are
-    mashctl output. The `adopt-from` block is a placeholder until
+    `mashctl endpoint delete` leaving this machine's credentials file as it was
+    are mashctl output. The `adopt-from` block is a placeholder until
     `docs/plans/2026-11-19-cli-targets-mashctl.md` lands; the delete text in
-    section 4 is the CLI team's and gets its retire line from there. The
-    quick start's adopt step waits on both.
-N18. SUPERSEDED, DRAFT6 (contract rev 7, REQ-011 (ii): `mashctl adopt` asks no
-    fingerprint). DRAFT5 had the person type the helper's fingerprint at
-    adopt, fed by the page; that is withdrawn (X6). The quick start's adopt step
-    (not changed here) must drop the fingerprint it types there.
+    section 4 is the CLI team's.
+N18. SUPERSEDED (decision 264). `mashctl adopt` asks no fingerprint (REQ-011
+    (ii)).
 N19. FOR THE LEAD. R20 says no other command names config or the server in
     success output. One block still does: the rows of `mash status` (a report;
-    its job is exactly that). The `mash serve` start-up line no longer names
-    the server (X12). Say if the status rows go.
+    its job is exactly that), and the status-views page may drop the server row.
+    The `mash serve` start-up line names the endpoint only (X12).
 
-DRAFT6, decisions beyond the brief or between two contract lines (each is
-easy to reverse; the dispositions file has one row per item of the brief):
+DRAFT6 decisions that SURVIVE the scope ruling: X7 (STILL OPEN, ctl's:
+`--make-key` on a machine that has no `config.json`), X10 (exit codes, below),
+X11 (MCP `chosen_by` is `env`, `config` or `only_one`), X12 (`mash serve`
+prints `mash: serving as <endpoint>` and no server), X15 (config names:
+`server`, `ca`, `endpoint`; `MASH_SERVER`, `MASH_CA`, `MASH_ENDPOINT`,
+`MASH_CONFIG_DIR`, now `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION`). SUPERSEDED:
+X1 (the typed server address), X2 (generations and the pointer), X3 and X4
+(`trust repair`, `trust replace`), X5, X6, X8 (the install script), X9 (`mash
+plugin install`), X13 (trust files that disagree), X14 (the trust-screen
+vocabulary) and X16 (`mash trust reset`). X10, kept: 6 when the server is
+unreachable or failed; 1 for a local file error, with its cause; 2 for usage;
+4 for not authorized, with two message texts (the server refused the
+credentials; and a person must run it at a terminal, which in 0.5.6 is
+mashctl's confirmations only, INV-004); kept at 1: a certificate mash does not
+trust, and a `prompt` nobody answered.
 
-X1. DECIDED here. `credential install` has no `--server` flag. REQ-003 still
-    lists `[--server <url> --ca <file>]`; REQ-013 says the person TYPES the
-    server address and the fingerprint, and INV-004 says no flag stands in for
-    it. This draft follows REQ-013: the server is typed on the first install,
-    `--ca FILE` stays (a file, not a secret), and a later install reads both
-    from the record. With no CA file (system authorities) the person types
-    only the server address (REQ-003: "with no CA involved it asks nothing";
-    REQ-013: types both: the server is still typed, there is no fingerprint to
-    type). Contract lines not conformed: REQ-003's synopsis `[--server <url>
-    --ca <file>]`, its precedence sentence ("the flags, then the token's
-    contents, then existing config") and "with no CA involved it asks
-    nothing" (REQ-013 and INV-004 override them: the address is typed, and
-    the address is still typed when no CA is involved; rev 10 already dropped
-    REQ-003's `--replace` sentence); the contract text should drop the
-    `--server` flag too.
-X2. DECIDED here (the implementer's to change; contract rev 10 and 11,
-    REQ-013). A GENERATION holds config.json, the CA file, trust.json and the
-    endpoint's credentials; every command reads one generation through a
-    pointer. To keep every printed path true, the pointer is the config
-    directory itself: `~/.config/mash` is a link to the selected generation
-    `~/.config/mash.d/<N>`. The first install writes and syncs every file in a
-    new directory, then moves the pointer with one atomic rename, then syncs the
-    directory, and prints `switched to the new generation` after its `wrote`
-    lines. Rev 11 has no second generation (no `trust replace`): a change of
-    trust is `mash trust reset` (it removes the files, the generation folder
-    and the pointer) and a fresh first install. Contract line REQ-013 is
-    conformed in full; what is not specified and is chosen here is the
-    pointer's form, the generation paths, and that a LATER install of another
-    endpoint with the same trust adds its credentials file to the selected
-    generation by the exclusive create and atomic rename of File safety, which
-    is not a switch (so it prints no `switched` line and `trust.json` is `kept
-    (unchanged)`).
-X3. SUPERSEDED, rev 11. `mash trust repair` is dropped from 0.5.6 (it was a
-    repair of an interrupted `replace`, which no longer exists). An
-    interrupted first install leaves nothing selected or the complete set, so
-    there is nothing to repair; trust files that disagree are never repaired by
-    mash (that would be a change of trust nobody confirmed): the way back is
-    `mash trust reset`.
-X4. SUPERSEDED, rev 11. `mash trust replace` is dropped from 0.5.6 (rev 11:
-    "in-place rotation is deferred to a later release"); there is no old
-    generation to keep.
-X5. SUPERSEDED, rev 11 (`trust replace` took the new credentials). Replaced by
-    X16.
-X6. DECIDED, contract rev 7 and 10. `mashctl adopt` asks no fingerprint (REQ-011
-    (ii)); DRAFT5's typed adopt prompt is withdrawn (N18). The fingerprint is
-    typed only on a first `mash credential install` and in `mash trust
-    replace`.
-X7. STILL OPEN, ctl's. Whether `mashctl endpoint create --make-key` makes the
-    trust record on a machine that has none (the blocks show a machine adopt
-    prepared, `kept trust.json`).
-X8. DECIDED, the lead's brief (item 3), over contract rev 10 and 11 (which say
-    a digest in the notes is NOT an alternative to the attestation). The page
-    verifies the script before it runs, either with `gh attestation verify`
-    (repository, workflow, tag, file) or with the digest line of the release's
-    attested notes and `sha256sum -c`; the private folder is `mktemp -d`
-    (exclusive, mode 700). The script holds the sha256 of each program written
-    into it at release time (so the attestation of the script covers them),
-    compares each download before it installs either, and rehashes each
-    installed program (`checked  mash  sha256 ok`); it prints every
-    destination, uses no `sudo`, and needs no `gh`. Not conformed to, stated:
-    REQ-011 (i)'s "digest in the notes is NOT an alternative" and "verifies both
-    binaries the same way [by attestation]" (the script uses its own digests);
-    its "executed from the same held handle" is the script's own business and
-    cannot be shown in a paste. Not known (UNVERIFIED): whether `gh attestation
-    verify` needs `gh auth login` for a public repository, and how the notes'
-    digest is attested.
-X9. DECIDED here. `mash plugin install` shows the one claude command with
-    `--scope user` spelled out (the default, but the contract says "at user
-    scope only"), pins by checking the extracted files against the digest built
-    into the binary and the permission manifest against the one built in (rev
-    10), inspects the destination again after claude runs, and refuses a
-    folder whose files or permissions differ (`plugin-install-pin`, 2 blocks)
-    rather than overwriting it. Any permission beyond the manifest is the
-    person's separate choice, never mash's. Claude Code's own output is
-    UNVERIFIED (N16).
-X10. DECIDED here. Exit codes (contract rev 7 and 10): 6 when the server is
-    unreachable or failed (status, send, and every command that connects);
-    1 for a local file error, with its cause; 2 for usage; 4 for not authorized, two causes
-    with two message texts: the server refused the credentials, or the first
-    install and `trust reset` without a terminal (the lead's ruling, undoing
-    DRAFT6b: INV-004 and contract security rev 2 B1 set 4 for no terminal on
-    purpose, overriding the CLI standard; it was 1 for refused credentials in
-    DRAFT6). Kept at 1: a certificate mash does not trust, trust files that
-    disagree, and a `prompt` nobody answered.
-X11. DECIDED here. MCP `chosen_by` is `env`, `config` or `only_one`
-    (was `only_one_installed`), per the brief.
-X12. DECIDED here. `mash serve` prints `mash: serving as acme.demo.bob` and
-    no server (the brief).
-X13. DECIDED here. The trust files disagreeing refuses every use before it
-    connects (exit 1), `mash trust reset` included in the commands that still
-    work (it is the way out). An interrupted first install cannot leave the
-    files disagreeing (one atomic switch).
-X14. DECIDED here. R2 is relaxed for the trust screens only: `operator` and
-    `account` appear there, because the contract gives the person those words.
-X15. DECIDED with the mashctl lane, not ratified (the brief, item 9). Names:
-    config.json keys `server`, `ca`, `endpoint`; environment `MASH_SERVER`,
-    `MASH_CA`, `MASH_ENDPOINT`, `MASH_CONFIG_DIR` and `MASH_INSECURE_PLAINTEXT`
-    (environment only); `account` only in `trust.json`; mash writes `server`
-    and `ca` (never `endpoint`, never `owner`) and ignores mashctl's own keys
-    (`owner`, `account`, `admin_credentials`, `system_credentials`, `keys`).
-X16. DECIDED here (the brief, item 2, and contract rev 11). `mash trust reset`
-    is INV-004's person-confirmed command: terminal only, the person types the
-    endpoint's address (or `reset`), no `--yes` and no variable, no terminal is
-    exit 4. It removes this machine's endpoint configuration (`config.json`,
-    the CA copy), `trust.json` and the credentials of every endpoint installed
-    here (and the generation folder and the pointer, named under `--detail`),
-    and says exactly what, with what each holds and never the contents; it
-    keeps the person's key files and everything outside the mash config
-    folder, and says so. Chosen here, not in the contract: with SEVERAL
-    endpoints installed the person types `reset` (one address would name one of
-    several things that all go); `nothing to reset` is exit 0; a file that
-    cannot be removed is exit 1 with its cause and the same command removes the
-    rest; it works when the trust files disagree. Nothing on the server
-    changes and the address is not retired, so the success output ends with a
-    `NEXT:` (the fresh install, `mash credential install --key <key file>
-    --token <token file>`), an exception to R19 that the brief asks for; the
-    `NEXT:` never names a deleted address.
+DRAFT7, decisions beyond the brief or between two contract lines (each is easy
+to reverse; the dispositions file has one row per item of the ruling). Contract
+revision 15 (the newest in the shared folder at the start and at the end of
+this work) is conformed to except where a line below says so.
+
+Y1. DECIDED here, for the lead to confirm. `credential install` has a `--server
+    URL` flag on the first install. Rev 15 says the first install SHOWS "the
+    server address" and checks "the server at that address", and AT-007 tests
+    "a substituted server address under the same CA", but REQ-003's synopsis
+    lists only `--key --token --ca` and the token names no server (B2, R5-4),
+    so the address needs an input; with nothing typed, a flag is the only one
+    that works for another machine. Lines not conformed to: REQ-003's synopsis
+    (rev 15 names no `--server`). The README quick start and Day 2 pages (not
+    changed here) must add it to their `credential install` lines.
+Y2. DECIDED here. `--ca` (and `--server`) are required on a FIRST install only;
+    a later install reads both from `config.json`, and a different value is
+    refused (R17). Rev 15 says `--ca` is required and that with none install
+    "refuses (exit 2) before reading anything"; the lead's brief words the error
+    "a first install needs --ca <file>". Lines not conformed to: rev 15's
+    unqualified "`--ca` is required" (a second endpoint on a machine, and
+    `mashctl endpoint create --make-key`, would otherwise have to repeat it).
+Y3. DECIDED here. `--creds FILE` is kept (L11). Rev 15 names it nowhere; the
+    ruling does not remove it.
+Y4. DECIDED here. The check that the token is signed by the account the
+    connected server serves is DROPPED with the trust record; rev 15's REQ-003
+    names only the certificate and host-name check. A token for another server
+    is then caught by the server's refusal of the credentials (`status`,
+    exit 4), not at install.
+Y5. DECIDED here. A later install checks the server's certificate again
+    (the `checked` line), as the contract says "before writing".
+Y6. DECIDED here, UNVERIFIED. The file to move aside is `config.json` for a
+    different server and `ca.pem` for a different CA; whether moving only that
+    one file lets the same command succeed depends on the code of 0.5.6.
+Y7. DECIDED here. `credential install --json` runs without a terminal and
+    carries `ca_fingerprint` (a checksum of a public file); there is no "no
+    terminal" refusal in `mash`. INV-004's exit-4 sentence stays in the output
+    contract (section 2) for mashctl's confirmations only.
+Y8. DECIDED here, UNVERIFIED. The ONE `gh attestation verify --bundle` is run on
+    `SHA256SUMS` (it names both binaries); `sha256sum -c` then checks the two
+    binaries against the sums the attestation covered. If the 0.5.6 bundle names
+    the binaries, the page verifies `mash-linux-amd64` the same way.
+Y9. DECIDED here. The mailbox row is the FIFTH and last row (after the
+    credentials it needs), on every screen; `--detail` adds a `mailbox limit`
+    row (the sixth fixed row) and, when something waits, a line `oldest waiting
+    12m ago` under the mailbox row. SUBJECT TO THE STATUS-VIEWS PAGE (it may
+    drop the `server` row; the order of the others stays).
+Y10. DECIDED here. The setting is `mailbox_limit` / `MASH_MAILBOX_LIMIT`
+    (the second follows `idle_wake` / `MASH_IDLE_WAKE`), a whole number from 0
+    to 1000 (O4); a value outside it is refused (`mailbox-limit-refuse`).
+Y11. DECIDED here. MCP `status` carries `mailbox {waiting, limit, oldest_age,
+    over_limit}`; `oldest_age` is a string in R12's form (`"12m"`) or `null`;
+    an over-limit mailbox is NOT an entry of `problems[]` (it is a warning, and
+    `ok` stays true).
+Y12. DECIDED here. The hook text is unchanged: the wake line is `mash
+    serve`'s, and the hook drains up to 10 messages a run (O5, section 5b).
+Y13. DECIDED here. R2's exception for `operator` and `account` is removed with
+    the trust screens; the install screen says "whoever runs your mash
+    server".
+Y14. DECIDED here. The wake line is the contract's, word for word: `mash: <n>
+    messages waiting (limit <limit>), oldest <age>`; `<age>` is R12's duration
+    (`45s`, `12m`, `3h`). `<n>` is always at least 2, so the plural is always
+    right. The channel event carries the meta key `backlog: true` (this draft's
+    choice, beside `wake: true`).
+Y15. DECIDED here. The first-install hand-over of mashctl (step B) now carries
+    `--server` and `--ca` in its NEXT command and no longer says the person
+    types anything; the mashctl lane's own targets must say the same.
+Y16. STILL OPEN. The comparison after the first install is the person's and
+    happens after mash has written (mash prints the two values first, then
+    checks and writes); a person who finds a difference removes the three
+    files it listed. Nothing prompts, by the ruling. The Day 2 page says so.
 
 ## 8. Behaviour changes the contract must decide
 
 - Settings (section 3): `MASH_ENDPOINT` and `"endpoint"` are new;
   `MASH_OWNER`, `MASH_GROUP`, `MASH_NAME` and the `owner` key are removed;
   `MASH_URL` / `url` become `MASH_SERVER` / `server`, `MASH_TLS_CA` /
-  `tls_ca` become `MASH_CA` / `ca` (N8). One installed endpoint needs no
-  setting. `credential install` never writes `endpoint`. The automatic pick
-  counts only regular files owned by the user with mode 600; none or several
-  is a choice error. The `insecure_plaintext` key of config.json is removed
-  (a file that has it is refused); `MASH_INSECURE_PLAINTEXT=1` for one run is
-  the only override.
+  `tls_ca` become `MASH_CA` / `ca` (N8); `mailbox_limit` / `MASH_MAILBOX_LIMIT`
+  is new (REQ-015). One installed endpoint needs no setting. `credential
+  install` never writes `endpoint`. The automatic pick counts only regular
+  files owned by the user with mode 600; none or several is a choice error. The
+  `insecure_plaintext` key of config.json is removed (a file that has it is
+  refused); `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1` for one run is the only
+  override, and `MASH_INSECURE_PLAINTEXT` is gone (hard cut, no alias).
 - `mash status` connects (once, 2s budget); it may take 2s and exit non-zero
   when the server is down (new network behaviour). Its output is one fixed
-  screen (R11); `--detail` is new.
+  screen (R11) with a mailbox row; `--detail` is new.
 - Exit codes, all changes in one list (section 2):
-  - New: 4 for not authorized (both tools): the server refused the credentials, or
-    the first install or `mash trust reset` with no terminal for the typed server
-    address and fingerprint (the endpoint's address, for reset).
+  - New: 4 for not authorized (both tools): the server refused the credentials,
+    or a person must run it at a terminal (mashctl's confirmations only).
   - New meaning of 6 (contract rev 7): the server is unreachable or failed,
     in both tools (`status` and `send` when it does not answer; was 1). A
     local file error is 1 with its cause (it was 6).
@@ -4680,7 +4094,8 @@ X16. DECIDED here (the brief, item 2, and contract rev 11). `mash trust reset`
   - Plain URL refused: 1 in every command that connects and in `status`
     (was 2, and 0 in `status`; N6 for `serve` and `hook`).
   - Unknown flag or missing argument: 2 for every command (today `inbox`,
-    `read`, `send` usage errors exit 1).
+    `read`, `send` usage errors exit 1), a first `credential install` with no
+    `--server` or no `--ca` included.
   - `serve` with several endpoints and none chosen: 1 (a missing group was
     2). `serve` with no credentials: 0, unchanged.
   - `credential install` with a missing token or `--creds` file or an
@@ -4688,33 +4103,32 @@ X16. DECIDED here (the brief, item 2, and contract rev 11). `mash trust reset`
   - Every other exit code is unchanged.
 - Errors start `error:` in both tools (was `mash:`); hints are `fix:` and
   `NEXT:`; the label `next:` is gone.
-- Plain-text warning: `warning: MASH_INSECURE_PLAINTEXT is set; ...` once, on
-  stderr, in every command that connects whenever the variable is set; in the
-  server row of `status`.
+- Plain-text warning: `warning: MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set;
+  ...` once, on stderr, in every command that connects whenever the variable is
+  set; in the server row of `status`.
 - Secrets (INV-003, R16): `--key`, `--token`, `--creds` take file names or `-`;
   a pasted token or key is refused unprinted; every secret file is created
   exclusively, mode 600, without following links, by atomic rename; an
   existing different file or a symlink is refused; `--force` is removed.
-- Trust (R15, R17, R21): the first `credential install` on a machine makes
-  `trust.json`: the person types the server address and the CA fingerprint,
-  mash says only `fingerprint matches` or refuses, checks the server's
-  certificate against that CA and host name, verifies the token against the
-  account key the connected server serves, and only then writes. There is no
-  fingerprint flag, no `--server` and no `--replace`; mash never prints the
-  value it asks for; mashctl prints the fingerprint (8 groups of 8) for the
-  operator. A later install is checked against the record and refuses without
-  touching a file on a different account, server or CA, or when the trust
-  files disagree. There is no change in place (contract rev 11): `mash trust
-  reset` (the person types the endpoint's address, or `reset`, at a terminal,
-  never `--yes`, exit 4 without one) removes this machine's configuration,
-  trust record and credentials and says exactly what; then a fresh install
-  makes the record again, as one generation with one atomic switch. Every use
-  checks that the trust files agree.
+- Install (R15, R17): the first `credential install` on a machine needs
+  `--server` and `--ca`, SHOWS the server address and the CA fingerprint (8
+  groups of 8) and says in one line to compare them with what the operator
+  sent; nothing is typed back. It checks that the server presents a certificate
+  from that CA for that host name before it writes `config.json` (server, CA),
+  the CA copy and the credentials. An existing server, CA or credentials file is
+  never changed: any difference refuses without touching a file and names the
+  file to move aside. mashctl prints the fingerprint for the operator. There is
+  no trust record, no generation, no `mash trust reset`, no `--replace`.
 - `mash status`: the server row says when mash checked or last reached the
-  server (no "last seen"); `--detail` shows seven rows that are the same in every
-  state (config file, the CA as its own row, credentials file, trust file,
-  trust state, endpoint, how it was chosen; no fingerprint, and a `trust` row of `none`, `matches config` or `differs`); new screens for no endpoint installed, a credentials file
-  that is not private (`UNSAFE`) and the override set with a tls address.
+  server (no "last seen"); the mailbox row is new on every screen; `--detail`
+  shows six rows that are the same in every state (config file, the CA as its
+  own row, credentials file, endpoint, how it was chosen, mailbox limit); new
+  screens for no endpoint installed, a credentials file that is not private
+  (`UNSAFE`), the override set with a tls address, and mail backing up.
+- REQ-015 (section 5b): `mash serve` wakes the session once when more than
+  `mailbox_limit` (default 15) messages wait unshown, whatever their kind, with
+  `mash: <n> messages waiting (limit 15), oldest <age>`, and again at most every
+  10 minutes while over; `mash status` and the MCP `status` show the count.
 - Listings (`inbox`, `who`) print no `NEXT:`.
 - `mash status --debug` stays unsupported (exit 2); one flag, `--detail`.
 - `--detail` is added to `version`, `status`, `send`, `inbox`, `read`,
@@ -4735,13 +4149,13 @@ X16. DECIDED here (the brief, item 2, and contract rev 11). `mash trust reset`
   `question` or `blocker` from another endpoint; reading marks the message
   read (unchanged).
 - `mash credential create` renamed `mash credential install` (hard cut);
-  flags `--seed`/`--jwt` renamed `--key`/`--token`; new `--creds` and `--ca`; no
-  `--server`, no `--replace`, no `--force`, no fingerprint flag; JSON schemas
-  bump to `@2`; the first install writes `config.json` (server, CA), copies the
-  CA and makes `trust.json`; it lists every file written.
-  `mashctl endpoint create --make-key` prints the same wrote-lines;
-  `mashctl endpoint delete` prints the delete text without a NEXT (R19);
-  `--creds-out` is new in mashctl and is not named in any `mash` screen.
+  flags `--seed`/`--jwt` renamed `--key`/`--token`; new `--creds`, `--ca` and
+  `--server`; no `--replace`, no `--force`; JSON schemas bump to `@2`; the first
+  install writes `config.json` (server, CA) and copies the CA; it lists every
+  file written. `mashctl endpoint create --make-key` prints the same
+  wrote-lines; `mashctl endpoint delete` prints the delete text without a NEXT
+  (R19) and leaves the credentials file as it was; `--creds-out` is new in
+  mashctl and is not named in any `mash` screen.
 - A server certificate the trusted CA did not sign is refused with a plain
   message in `status` (exit 1) and in every command that connects.
 - `mash key create`: output text, `.key` naming; `seed_path` becomes
@@ -4750,68 +4164,59 @@ X16. DECIDED here (the brief, item 2, and contract rev 11). `mash trust reset`
   same command without `--dry-run`.
 - `mash prompt`: first line (stderr, terminal only) is new; the timeout is an
   `error:` with exit 1.
-- `mash plugin export`: prints a file count and a three-command `NEXT:`.
-- `mash plugin install` is new (section 5a): extracts the plugin embedded in
-  the verified binary, pins it to the binary's digest, and runs ONE `claude`
-  command at user scope, shown with its result (claude's output UNVERIFIED).
-- `mash trust reset` is new (section 5); `mash trust replace` and `mash trust
-  repair` are NOT in 0.5.6 (contract rev 11).
-- `install-mash.sh` is new (section 5a): a release asset verified before it
-  runs, with `gh attestation verify` or the digest in the release's attested
-  notes; it holds the digest of each program, compares each download before it
-  installs either, prints every place it writes and rehashes each installed
-  program. It needs no `gh`.
+- `mash plugin export`: prints a file count and a three-command `NEXT:`. There
+  is no `mash plugin install`, no `mash trust reset` and no `install-mash.sh`.
+- Install check (section 5a): one pasted `gh attestation verify --bundle`, then
+  `sha256sum -c`, then plain commands; no script is executed.
 - `mash serve`: one stderr line at start-up, `mash: serving as <endpoint>`
-  (no server); refusal texts are plain lines.
+  (no server); refusal texts are plain lines; the backlog wake line above.
 - `mash` with no command prints one usage line (exit 2 unchanged); an unknown
   command suggests the closest one.
 - Top-level help: starts with a `Usage:` line, grouped, at most 80 columns,
-  documents `MASH_ENDPOINT`; `serve`, `hook` and the settings table only
-  behind `--detail`; `mash admin` out of it.
+  documents `MASH_ENDPOINT` and `MASH_MAILBOX_LIMIT`; `serve`, `hook` and the
+  settings table only behind `--detail`; `mash admin` out of it.
 - Hook text: no `instance` id, trust in words, oldest first, no hook jargon.
 - Every printed command follows R9 and every configuration fix follows R10.
 - MCP: every tool returns JSON (text plus `structuredContent` and
   `outputSchema`); errors are an object with `code`, `message` and `fix`;
-  `who` loses `format`; `inbox` gains `after` and `before`; `version` drops
-  the `client:` line and `owner`; the field mapping at the head of section 6.
+  `who` loses `format`; `inbox` gains `after` and `before`; `status` gains
+  `mailbox`; `version` drops the `client:` line and `owner`; the field mapping
+  at the head of section 6.
 - Colour (section 2): new in both tools; none exists today.
 
 ## 9. Checks run
 
-Width (re-measured for DRAFT6, contract revision 11). A script (run with
-`python3 -I`, kept outside the repo) walks the file, tracks the fenced blocks
-and keeps the widest line of each. Result for this file (re-measured after the DRAFT6 freeze fixes): 172 fenced
-blocks (every mockup, Before block and JSON example, the `adopt-from`
-placeholder and the boxed UNVERIFIED note), 152 of them chosen by a `packet:`
-marker (85 distinct keys). The widest line of text that a tool prints is 80 columns (the
-real-name inbox rows and the trust-column inbox row, whose message is cut with
-`...` at column 80 by design, and one line of the top-level help); NO printed
-text is over 80, with four kinds of exemption (R1, R9): a command a person is
-told to run or can run again, a URL (the one link to the guide, 84 columns),
-what the person types after a prompt (the `Type the ... fingerprint:` lines,
-25 and 29 columns for the prompt, 71 for the typed fingerprint: 96 and 100 in
-all; the server address line is short), and a pasted `$` line (the digest
-check of the install page, 92 columns, one line of the digest and the file).
-Widest per category: status screens 79 (the Claude Code warning's fix; the
-`--detail` rows are at most 71), `credential install` 79 (the first-install
-`wrote trust.json` line; the refusals 77), `key create` 75, `mash trust reset`
-78 (the several-endpoint list and `--detail`), the trust screens of section 4
-74, send 74, hook 76, help 80 (the top-level `trust reset` line), mashctl
-hand-overs 72, plugin export 74, `plugin install` 76 (the pin refusal and
-the help), the install script 79 (its PATH warning and its help), prompt 73,
-who 62, read 57, version 17, the boxed UNVERIFIED note 74. The widest printed
-COMMANDS are 82 columns (the one `claude plugin install` command of `mash
-plugin install`, on its own line, with the full default folder; the two
-`credential install` commands in fixes that carry `--ca <ca file>`) and 81
-(the reply command with an 18-character sender name); all are exempt (R9,
-L10); every other printed command is 78 or less.
+Width (re-measured for DRAFT7, contract revision 15). A script (`width7.py`, run
+over the file, kept outside the repo) walks the file, tracks the fenced blocks
+and keeps every line over 80 columns. Result for this file: 148 fenced blocks
+(every mockup, Before block and JSON example and the `adopt-from` placeholder),
+127 of them chosen by a `packet:` marker (66 distinct keys; DRAFT6 had 172, 152
+and 85). The widest line of text that a tool prints is 80 columns (the real-name
+inbox rows and the trust-column inbox row, whose message is cut with `...` at
+column 80 by design); NO printed text is over 80, with these exemptions
+(R1, R9): a command a person is told to run or can run again, on a line of its
+own (the widest are 108 columns, the NEXT of the server-side step with `--server`
+and `--ca` in it, then 98 and 97 for the `credential install` commands of the
+help example, the no-configuration fixes and the removed-verb fix, and 83 for
+the two fixes that re-install from the installed credentials file; every other
+printed command is 81 or less, the reply command with an 18-character sender
+name); a URL (the one link to the guide, 84 columns); a pasted `$` line (the
+send warning's, 84 columns, with the variable in front); and `gh`'s own report
+on the install page (88, 107 and 138 columns, `gh`'s words, not mash's). The
+JSON of `credential install --json` wraps its fingerprint onto its own line
+(78 columns). Widest per category: status screens 79, `credential install` 78
+(the refusals; the first-install screen 75), `key create` 75, the server-side step 78 (its command is the exemption), the
+trust screens 76, send 79, hook 76, help 78, serve and the backlog wake 79 (the
+wake line itself is 48), mashctl hand-overs 72, plugin export 74, prompt 73,
+who 62, read 57 (its reply command 81, exempt), version 23, mailbox 73.
 
-Not covered by the 80-column rule: 43 prose lines that are rows of the field
-tables in sections 2, 3 and 6 (up to 532 columns, the exit-code table's first
+Not covered by the 80-column rule: 51 prose lines that are rows of the field
+tables in sections 2, 3 and 6 (up to 770 columns, the exit-code table's fourth
 row). They are a specification for the contract, not output a person or an
 agent reads from mash.
 
-Checked against the shipped source (the catalog tree of the shipped version) and the host:
+Checked against the shipped source (the v0.5.5 tag, cloned at
+`scratchpad/catalog/src`) and the host:
 
 - `.creds` contents: `keycred.CreateCredentials` writes
   `jwt.FormatUserConfig(token, seed)`: the file holds the private key (the
@@ -4820,12 +4225,15 @@ Checked against the shipped source (the catalog tree of the shipped version) and
 - Settings (`internal/config/config.go`): config.json keys `url`, `owner`,
   `tls_ca`, `insecure_plaintext` (and others); environment `MASH_URL`,
   `MASH_OWNER`, `MASH_GROUP`, `MASH_NAME`, `MASH_TLS_CA`, `MASH_CONFIG_DIR`,
-  `MASH_INSECURE_PLAINTEXT`. `group` was never a config.json key. Section 3
-  says which are new and which are renamed.
+  `MASH_INSECURE_PLAINTEXT`. `group` was never a config.json key. The wake
+  setting `idle_wake` has a key and `MASH_IDLE_WAKE` (`config.go:96`, `:414`):
+  the pattern `mailbox_limit` follows. Section 3 says which are new and which
+  are renamed.
 - Exit codes today: 0, 1, 2 and 6 (`cmd/mash/main.go`, `keycred.go`; mashctl's
   usage text says "0 done or planned, 1 refused, 2 usage, 6 error"); 3, 4 and
   5 are unused. `hook` always exits 0. Plain URL: 2 today in every connecting
-  command (`main.go`), `status` 0.
+  command (`main.go`), `status` 0. 6 is a file error in the shipped source, and
+  becomes "server unreachable or failed"; a file error becomes 1.
 - Kinds (`internal/kind/kind.go`): `blocker`, `question`, `task`, `result`,
   `fyi`; the zero kind and an unknown one read as `task`; `Wakes` is true for
   blocker, question and task. `message` is not a kind today.
@@ -4840,28 +4248,40 @@ Checked against the shipped source (the catalog tree of the shipped version) and
   no reply flag (the MCP tool has `in_reply_to`); the CLI deadline
   (`cli_timeout`, default 15m) and the open timeout (20s) are in
   `internal/config`.
+- REQ-015 (section 5b, with `file:line`): the waking tracker (`internal/endpoint/
+  waking.go`) already holds every unacked message and counts only the ones that
+  wake; the consumer is explicit-ack with 1000 unacked at most
+  (`internal/store/store.go:130-137`); the endpoint's own credentials may read
+  stream and consumer info and get messages of its own inbox
+  (`internal/listset/compile.go:186-191`); v0.5.5's `mash status` from a shell
+  connects to nothing (`cmd/mash/status.go:586-595`) and the shipped inbox line
+  (`internal/endpoint/eviction.go:25-42`) shows the bounded read the count would
+  reuse.
+- The install check was RUN, not only read: on this host `gh` 2.103.3, with no
+  login (a clean config directory, no token in the environment), verified the
+  v0.5.5 release's `SHA256SUMS` against its `mash.intoto.jsonl` bundle with
+  `gh attestation verify SHA256SUMS -R bogworks/mash --bundle mash.intoto.jsonl
+  --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref
+  refs/tags/v0.5.5` (exit 0; the report in section 5a is that run's, with the
+  tag changed to v0.5.6), and the same command on a copy of `SHA256SUMS` with
+  one digit changed failed with exit 1 (`Sigstore verification failed`). Not run
+  for v0.5.6 (it does not exist yet).
 - `claude plugin --help`, `plugin install --help`, `plugin marketplace --help`
   and `marketplace add --help` on this host (rounds 4 and DRAFT6): `plugin
-  install` takes `--marketplace <source>` (owner/repo, a URL or a path) and adds
-  a marketplace that is not added yet first, in user settings, so one `claude`
-  command does both; its scope flag is `-s, --scope <scope>` with `user`,
-  `project` or `local` (default `user`); `marketplace add` takes `--scope`
-  too. No command was run against Claude Code, so every claude result in this
-  file is UNVERIFIED. The plugin export writes 5 files.
-- Contract revision 11 (`contract-0.5.6-cli-ux-rev11-draft.md`, the newest in
-  the shared folder at the start and at the end of this work, read in full;
-  revisions 8 to 11 changed REQ-003, REQ-011 (i) and (iii) and REQ-013, and rev
-  11 dropped `trust replace`): REQ-001, REQ-003, REQ-004, REQ-009 to REQ-013,
-  INV-003, INV-004, the exit-code table, the custody text and the credential
-  inventory were read for every line about mash command output. Lines this
-  file does not fully conform to: X1 (REQ-003's `--server` and its precedence
-  sentence), X8 (REQ-011 (i): a digest in the notes is not an alternative; the
-  script verifies both binaries the same way; the held handle) and X10 (the
-  exit code of refused credentials). Lines the contract does not say and this
-  file chose: X2 (pointer and paths), X16 (reset's details), X15 (config
-  names, the mashctl lane's).
-- Exit codes today, re-checked for DRAFT6: 6 is a file error in the shipped
-  source, and becomes "server unreachable or failed"; a file error becomes 1.
+  install` takes `--marketplace <source>` and a scope flag `-s, --scope
+  <scope>` with `user`, `project` or `local` (default `user`). The two commands
+  of 0.5.5's `docs/install.md` (lines 40 and 41) are what section 5a shows. No
+  command was run against Claude Code, so nothing claude prints is shown or
+  claimed. The plugin export writes 5 files.
+- Contract revision 15 (`contract-0.5.6-cli-ux-rev15-draft.md`, the newest in
+  the shared folder at the start and at the end of this work, read in full):
+  REQ-001, REQ-003, REQ-004, REQ-009 to REQ-013, REQ-015, INV-003, INV-004, the
+  exit-code table, AT-007 and AT-008 were read for every line about mash command
+  output. Lines this file does not fully conform to: REQ-003's synopsis, which
+  names no `--server` while AT-007 and the first-install paragraph need an input
+  for the address (Y1); REQ-003's unqualified "`--ca` is required" (Y2: a first
+  install only); the contract's silence on `--creds` (Y3, kept). Lines the
+  contract does not say and this file chose: Y4 to Y16 (section 7).
 
 Not checked: colours (mockups are plain, and no ANSI exists in either binary
 today), the real widths with a long home directory (the mockups use `~`), that
@@ -4871,10 +4291,9 @@ docs/install.md` address (no network check), the directory scope behind `mash
 who` (N13), the token's expiry (Q13), whether a hook that exits 1 behaves as
 intended in Claude Code (N6), that the server can say "deleted" (N11), and any
 command on a live server: nothing here was run, these are mockups. Also not
-checked in DRAFT6: anything claude prints (UNVERIFIED, N16), the `gh
-attestation verify` flags against a real release (`-R`, `--signer-workflow`
-and `--source-ref` are in `gh attestation verify --help` on this host; none
-was run against a release),
-whether `gh attestation verify` needs a login (X8), and the on-disk layout of the
-trust generations (X2), and the confirmation screen of `mash trust reset`
-(a mockup of INV-004's typed prompt; nothing was run).
+checked: anything claude prints (UNVERIFIED, N16), that the 0.5.6 release
+carries `mashctl-<os>-<arch>` and puts `SHA256SUMS` and both binaries in the
+bundle (Y8), that moving only `config.json` or only `ca.pem` aside lets the same
+install succeed (Y6), that an owner may read another endpoint's lease for `mash
+endpoint status` (section 5b), and the mailbox row's order and the server rows,
+which follow the status-views page.
