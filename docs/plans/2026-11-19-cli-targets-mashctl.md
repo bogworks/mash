@@ -1,33 +1,28 @@
-# mashctl target outputs (0.5.6) - DRAFT7
+# mashctl target outputs (0.5.6) - DRAFT10
 
 Status: design mockups, not code. Nothing here was run. Written to the maintainer's
 feedback on the v0.5.5 video and the CLI standard's rules; BEFORE blocks are
 excerpts of docs/plans/2026-11-19-cli-output-catalog-mashctl.md (v0.5.5 tag).
-DRAFT7 applies four rulings (see "Changes in DRAFT7" at the end): one
-setting, `MASH_ENDPOINT` (config key `endpoint`), names the endpoint by its
-full address and replaces MASH_GROUP and MASH_NAME; every error line starts
-`error:` and every hint is labelled; one conventions block at the top of
-Part 1 states the exit codes, the output streams and the colour rule once;
-mockups print `<version>`, never a version number. DRAFT6 applies the
-maintainer's rulings: the dotted address everywhere
-(typed and printed), a refused plain URL exits 1, no MASH_OWNER in any
-printed command, a delete ends by asking for a new name, the Claude Code
-launch is two lines, the file lines of credentials output (see "Changes
-in DRAFT6" at the end). DRAFT5 adds a one-command same-machine path (`endpoint create --make-key
---creds-out FILE` writes the credentials in place) and makes every result
-line that changes something say which server it changed and why that server
-(see "Changes in DRAFT5" at the end). DRAFT4 applies three review findings (see "Changes in DRAFT4" at the end): adopt
-saves the certificate file as a full path, the walkthrough starts Claude Code
-with the documented solo command, and the drained delete says only what its
-check proves. DRAFT3 applied five review findings: config
-paths follow the resolved folder, a repeat delete claims no revoke, the session
-name comes from MASH_NAME (replaced in DRAFT7), removing init --local is a proposal that needs an
-ADR, and the plain-URL refusal names its override. DRAFT2 applied the rules
-added during review: a command a person must run stands
-alone on its own line (R-paste), a printed fix is true for the broken session
-(R-true-fix), a health report gives its verdict first (R-verdict), one name per
-thing (R-names). Both parts use the table columns OWNER, GROUP, ENDPOINT (the
-name), PATH (the dotted address).
+DRAFT10 applies six directions given for this draft on the critic's second round and a
+real two-machine walk of v0.5.5 (see "Changes in DRAFT10" and, at the very end,
+"Dispositions of the critic's round 2"):
+
+1. The server and the config path are in no success output. They appear on
+   failure, under `--detail` and in `mashctl status`. One warning remains, for
+   a server taken from MASH_URL that differs from the config file.
+2. Destruction needs a typed confirmation, with no flag that skips it: `endpoint delete`,
+   every single `endpoint reissue`, and a bulk reissue (the person types the
+   count). Each says what will be lost first and proves afterwards that the old
+   key is refused.
+3. One exit-code table, the CLI standard's, for every command.
+4. The two-machine flow uses the real values: the hand-off names the files to
+   copy, the install writes the server and the CA, a reissue writes a numbered
+   token, and nothing names an old key.
+5. Printed fixes are true for what is broken (removed-command messages echo the
+   person's own files).
+6. Names: `ADDRESS` replaces `PATH`; `Adopted`; one server form.
+
+Earlier drafts are described under "Changes in DRAFT2" to "Changes in DRAFT9".
 
 Part 1 is the first-run journey, in the order a new user meets it. Part 2 is every
 other mashctl output. Each part ends with its own "Choices to confirm" and "Facts
@@ -35,38 +30,93 @@ to confirm".
 
 ---
 
-# Part 1: the first-run journey (target output for mashctl 0.5.6), DRAFT7
+# Part 1: the first-run journey (target output for mashctl 0.5.6), DRAFT10
 
 Design document. Nothing here was run. BEFORE blocks are excerpts of
 `docs/plans/2026-11-19-cli-output-catalog-mashctl.md` (v0.5.5), trimmed to the
 lines that matter, each marked with the point it breaks (P1..P9, defined in
 the catalog). AFTER blocks are the target, exactly as the terminal shows them,
-every line 80 columns or fewer (checked by `check.sh` and `check3.sh` in this
-directory).
+every line 80 columns or fewer except a command a person is told to run (checked
+by `make_packet.py`, `check.sh` and `check3.sh` in the scratch directory).
 
 ## Conventions for every output (Parts 1 and 2)
 
 These facts are written once, here. Part 2 refers to this block and does not
 repeat them.
 
-- Exit codes. 0: done, planned (`--dry-run`) or unchanged. 1: refused or
-  failed. 2: usage error. 5: partial result of a bulk command. 6: internal
-  error (section E2 also shows 6 for a server that did not answer). A plain
-  URL refused for TLS is 1 in every command (REQ-014 is being updated to 1;
-  the v0.5.5 exit was 2). Three commands keep codes of their own, noted where
-  they are shown: `mashctl endpoint suspended` exits 0 when suspended, 3 when
-  not and 1 on error; `audit` and `inbox inspect` exit 3 when they could not
-  finish; `issued check` exits 2 when the check was incomplete.
+- Exit codes. One table for every command in both parts. It is the CLI
+  standard's rule 14, plus the two codes the contract adds. Rule 14 reads:
+  "Exit codes mean: 0 success; 1 failure; 2 wrong usage (unknown command, bad
+  flag or argument); 3 cancelled; 4 not authorized; any other code is listed on
+  the command's reference page." The contract (Exit codes) adds 5 and 6 and says
+  the same condition gets the same code in every command.
+
+  | Code | Meaning | Where this document uses it |
+  |---|---|---|
+  | 0 | success | done, planned (`--dry-run`), nothing to change, nothing wrong |
+  | 1 | failure | a refusal, or a check that found a problem; a plain URL refused for TLS |
+  | 2 | wrong usage | unknown command or flag, missing or bad argument, a removed command |
+  | 3 | cancelled | the person typed the wrong confirmation |
+  | 4 | not authorized | no person at a terminal for a confirmation, or no administrator credentials |
+  | 5 | partial | part of a bulk command was done |
+  | 6 | the server | could not be reached, or did not confirm (an incomplete check) |
+
+  No command has a code of its own. `mashctl endpoint suspended` is gone (its
+  answer is a line of `endpoint show`), so no command uses an exit code to
+  answer a question.
 - Streams. stdout carries results, tables and `NEXT:` lines. stderr carries
   `error:` lines, `fix:` lines, a `See` line that follows them, and warnings.
 - Labels. Every error line starts `error:`. A warning starts `warning:`.
   Hints are labelled: `fix:` after a failure, `NEXT:` after a success, `See`
-  for a document; a second choice after either starts `Or`. Every fix is true
-  for the broken session (R-true-fix). A verdict line (`OK`, `PROBLEM`,
-  `NOT REACHABLE`) is a result, not an error line: a health command that
-  finds a fault prints its `error:` and `fix:` lines after the rows.
-- Colour. `NEXT:` is coloured only on a terminal. With `NO_COLOR` set, or
-  when output is a pipe, there is no colour and the word stays `NEXT:`.
+  for a document; a second choice after either starts `Or`. A `NEXT:` is set
+  apart by a blank line; a `fix:` follows its `error:` line directly. A fix
+  with a command is one sentence ending in a colon and the command alone on the
+  next line, indented two spaces. A verdict line (`OK`, `PROBLEM`,
+  `NOT REACHABLE`) is a result, not an error line: a health command that finds
+  a fault prints its `error:` and `fix:` lines after the rows.
+- The server is not in the output. The server and the path of the config file
+  appear in no success output. A normal run prints nothing about them. They
+  appear on failure, under `--detail`, and in `mashctl status`. One safety
+  line remains. A `mashctl` run inside a mash session inherits MASH_URL. When
+  the server comes from MASH_URL and the config file names another server, and
+  only then, the command prints this on stderr before it acts:
+
+  ```text
+  warning: using the server from MASH_URL in this shell (the config file names
+           another server)
+  ```
+- Files. A command that writes a file prints one line for it, indented two
+  spaces, with a lowercase verb (`wrote`, `kept`, `copied`, `renamed`) and the
+  file. It shows the path only when the person will need it: the credentials,
+  the token, the CA file. `config.json` is named only in the file lines of
+  `credential install` and `adopt`.
+- Typed confirmation (contract INV-004; CLI standard rule 15). Rule 15 says a
+  command prompts only when standard input is a terminal and, without one, it
+  fails. INV-004 applies it to every change a person must own, without the
+  `--yes` flag that rule 15 allows: no flag and no environment variable stands
+  in for the person. The change of trust is a new server or a new certificate
+  authority. The destruction is `endpoint delete`, any single `endpoint
+  reissue`, a bulk reissue, and the replacement of installed credentials. Before
+  it acts the command says what will be lost. A line that ends in a colon and
+  asks for typing is a prompt; the mockups show what the person types after the
+  colon. The person types the address (or, for a bulk reissue, the count; for a
+  trust change, the fingerprint). A wrong answer exits 3. With no terminal the
+  command exits 4 with `error:` and `fix:`. `--dry-run` prints the same text
+  of what will be lost and asks nothing. A real fingerprint is `sha256:` and 64
+  digits, so the mockups shorten it to `sha256:3f9a...c41e`.
+- Plain-text warning (contract REQ-010). While `MASH_INSECURE_PLAINTEXT` is
+  set, every command that connects prints this first line on stderr, before
+  any result (shown in full once, in E2, on `endpoint list`):
+
+  ```text
+  warning: plain-text connection to myserver (MASH_INSECURE_PLAINTEXT is set):
+           anyone on the network can read mail and obtain signatures
+  ```
+- Colour. On a terminal the words `NEXT:`, `error:` and `warning:` and the
+  verdict words (`OK`, `PROBLEM`, `NOT REACHABLE`) are coloured, in colours
+  that read on a dark and on a light background. There is no colour when
+  `NO_COLOR` is set or when the output is not a terminal; the words stay, and
+  tables do not depend on colour.
 - `--json` is unchanged in every command. Nothing here redesigns any JSON.
 - Paths. Every path printed is the resolved path: an absolute
   `MASH_CONFIG_DIR`, else an absolute `XDG_CONFIG_HOME/mash`, else
@@ -79,42 +129,38 @@ Conventions in the AFTER blocks:
   "what to type now". A blank line always comes before `NEXT:`.
 - A command a person must run stands alone on its own line, indented two
   spaces, complete, never wrapped, with no punctuation after it. The sentence
-  before it ends with a colon and fits one line. Anything mash cannot know is a
-  `<placeholder>`. A document is not a NEXT: it is written `See <path>`.
-- A command that changes something names the server in its own result line
-  and says where that server came from, as part of the same line (never a
-  line before it): `(set by MASH_URL in this shell)` or `(from
-  ~/.config/mash/config.json)`. Reason: `mashctl` run inside a mash session
-  inherits MASH_URL, MASH_OWNER and the rest of the session's environment,
-  and would change the wrong server without saying so. The `Would ...` line
-  of a dry run says it too. The mockups show the config-file form; a long
-  line wraps at 80 columns.
-- Each file a command writes, keeps or copies is named on its own line,
-  indented two spaces, with a lowercase verb (`wrote`, `kept`, `copied`)
-  and a parenthesis after the file: `(mode 600)` for the credentials,
-  what the file holds for `config.json`.
+  before it ends with a colon and fits one line. A command is shown with the
+  values mash knows (the token file, the address, the CA file). Anything mash
+  cannot know is a `<placeholder>`: `<address>` for an endpoint address and
+  `<file>` for a file. A document is not a NEXT: it is written `See <path>`.
 - A fix that sets configuration names the file with its resolved path first
   (mockups: `~/.config/mash/config.json`). An environment variable is offered
   only as the test for one shell.
 - The walkthrough is one terminal that you scroll back through. Nothing clears
   the screen between steps.
-- Paths are shown with `~` for the user's home directory. The config
-  directory mash resolves is an absolute `MASH_CONFIG_DIR`, else an absolute
-  `XDG_CONFIG_HOME/mash`, else `~/.config/mash` (internal/config/config.go,
-  docs/operations.md). The mockups show the default.
+- File names. A key file takes the endpoint's name (`bob.key`, `bob.pub`).
+  A token file and a credentials file take the whole address
+  (`acme.demo.bob.token`, `acme.demo.bob.creds`), because one folder can hold
+  many endpoints' files.
 - Flags the rules rename are used in their new form: `--token-out`,
   `--system-credentials`, `--admin-credentials`, `--make-admin`,
-  `mash credential install --key --token` (or `--creds FILE`),
+  `mash credential install --key --token` (or `--creds <file>`),
   `mash key create --out bob.key`.
-  Labels are called tags (`--tag k=v`) and capabilities `--capability`.
+  Tags are `--tag k=v` and capabilities `--capability`.
   Suspend and resume are `mashctl endpoint suspend` and `mashctl endpoint
   resume`. `mashctl list` is removed (use `mashctl endpoint list`). Flags the
   rules do not name keep today's spelling unless listed under "Choices to
   confirm".
 - Names: endpoint (the thing), name (`bob`), address (the dotted path
-  `acme.demo.bob`, header `PATH` in tables; the name's header is `ENDPOINT`),
-  group, owner. The address is typed and printed in the dotted form;
-  mashctl takes `acme.demo.bob` in every command. Part 2 uses the same headers: `OWNER GROUP ENDPOINT PATH`.
+  `acme.demo.bob`, header `ADDRESS` in tables; the name's header is
+  `ENDPOINT`), group, owner. The address is typed and printed in the dotted
+  form; mashctl takes `acme.demo.bob` in every command. Part 2 uses the same
+  headers: `OWNER GROUP ENDPOINT ADDRESS`.
+- Machines in the walkthrough: `myserver` runs the NATS server and mashctl,
+  and alice runs there; `bobs-laptop` runs bob. The server is written
+  `tls://myserver:4222`, the one form in every mockup. A tool does not know the
+  name of another machine, so a tool's own text says "bob's machine"; the
+  headings of the walkthrough say `bobs-laptop`.
 
 Section order: 0 setup, 1 connect mashctl to the server, 2 endpoint bob and
 endpoint alice, 3 list and show, 4 run a session and prove it works.
@@ -134,37 +180,45 @@ host that runs mashctl" and "the endpoint's machine" (P4 rows 3 and 4).
 **AFTER**
 
 ```text
-We are going to walk you through setting up mash between two endpoints on one
-machine.
+We are going to walk you through setting up mash between two endpoints on two
+machines.
 
-  Host       myserver
-  Owner      acme
-  Group      demo
-  Endpoints  alice and bob
+  Machine      Runs                        Endpoint
+  myserver     the NATS server, mashctl    alice
+  bobs-laptop  mash                        bob
 
-  +--------------------------- myserver ---------------------------+
-  |                                                                |
-  |    +-------------+            +-----------+                    |
-  |    | NATS server |<-----------|  mashctl  |  you run this to   |
-  |    +-------------+            +-----------+  create endpoints  |
-  |        ^      ^                                                |
-  |        |      |                                                |
-  |    +-------+ +-------+                                         |
-  |    | alice | |  bob  |    each endpoint sends and reads mail   |
-  |    +-------+ +-------+                                         |
-  |                                                                |
-  +----------------------------------------------------------------+
+  Owner  acme
+  Group  demo
+
+  +------------- myserver --------------+       +--- bobs-laptop ---+
+  |                                     |       |                   |
+  |  +-------------+   +-----------+    |       |    +---------+    |
+  |  | NATS server |<--|  mashctl  |    |       |    |   bob   |    |
+  |  +-------------+   +-----------+    |       |    +---------+    |
+  |    ^         ^                      |       |         |         |
+  |    |    +---------+                 |       +---------|---------+
+  |    |    |  alice  |                 |                 |
+  |    |    +---------+                 |                 |
+  +----|--------------------------------+                 |
+       +----------------------------------------------------+
 
 An endpoint is an agent or tool on the mail mesh. Its address is written with
 dots: owner.group.name. In acme.demo.bob, the owner is acme, the group is
 demo and the name is bob. mash send and mashctl both take this address.
+
+mashctl is a program you download from the release page: <release page URL>
 ```
 
 **What changed and why**
 
-- P6 (maintainer point 6): host, group, endpoints and the diagram come before
-  the first command, so every later "this machine" has a name.
-- Point 2 and rule 3: alice and bob, owner acme, group demo, machine myserver.
+- DRAFT10 (critic A.0, walk): the setup block tells the two-machine story the
+  steps follow. `myserver` runs the NATS server and mashctl, and alice runs
+  there. `bobs-laptop` runs bob, whose key never leaves it. The earlier text
+  said "two endpoints on one machine" above steps that copy files between
+  machines, and never named bob's machine.
+- P6 (maintainer point 6): machines, group, endpoints and the diagram come
+  before the first command, so every later "this machine" has a name.
+- Point 2 and rule 3: alice and bob, owner acme, group demo.
 - Point 8 (last paragraph asked for the `x/y/z` path explained): one
   paragraph explains the dotted address, owner.group.name, with
   acme.demo.bob as the example. It is the only form shown or typed (R3;
@@ -172,13 +226,17 @@ demo and the name is bob. mash send and mashctl both take this address.
 - Point 4: wrapped by hand at 80 columns or fewer.
 - R-names: "Agents" became "Endpoints"; the path is called the address, written
   with dots.
+- DRAFT8 (T4): the last line says how to get mashctl. It ships as a release
+  binary, so a newcomer does not need Go, and no AFTER block says `go install`.
+  The exact release-page wording is a fact to confirm.
 
 ---
 
 ## 1. Connect mashctl to the server
 
-mashctl does not install or start NATS (rule 14; maintainer point 1). The
-operator who runs the NATS server gives you four things: the server address,
+mashctl does not install or start NATS (rule 14; maintainer point 1). mashctl
+itself is a downloaded program from the release page (DRAFT8), not something
+built with Go. The operator who runs the NATS server gives you four things: the server address,
 the operator key file, the account key file and the system credentials file,
 and the file of the server's certificate authority if the certificate is
 private.
@@ -209,21 +267,29 @@ error: mashctl does not install or start a NATS server.
 fix: set one up first, then connect mashctl to it:
   mashctl adopt --help
 
-See docs/skills/mash-nats-local/SKILL.md and scripts/nats-local-setup.sh
+See the skill that sets up a server:
+https://github.com/bogworks/mash/blob/main/docs/skills/mash-nats-local/SKILL.md
+See the script it runs:
+https://github.com/bogworks/mash/blob/main/scripts/nats-local-setup.sh
 ```
 
-Exit code 2 (usage) [confirm: exit 2 or 1]. `--start`, `--dir` and `--port`
+Exit code 2 (usage: the flag no longer exists) [confirm: exit 2 or 1]. `--start`, `--dir` and `--port`
 get the same message. The skill and the script replace
 `docs/guides/nats-local.md` as the setup instructions; the message names
-both and no longer names the guide.
+both and no longer names the guide. DRAFT9: the message gives URLs on the
+project's repository, because an installed mashctl cannot see repository
+paths such as `docs/skills/...`. [confirm: the final URLs, or the release
+page, once the files are published; Choice 38.]
+
+### 1a, second screen, AFTER: `mashctl list` is removed
 
 `mashctl list` is removed in the same way (it showed what `mashctl endpoint
 list` shows):
 
 ```text
 $ mashctl list
-error: mashctl list was removed; it showed the same as mashctl endpoint list.
-fix: run:
+error: mashctl list was removed.
+fix: list endpoints with the new command:
   mashctl endpoint list
 ```
 
@@ -265,19 +331,27 @@ What adopt does not do: it changes nothing on the server, except that --mint-adm
 **AFTER**
 
 ```text
-$ MASH_TLS_CA=<path to ca.pem> mashctl adopt --server tls://myserver:4222 \
-    --owner acme --account MASH --make-admin \
-    --operator-key operator.nk --account-key account.nk \
-    --system-credentials system.creds
+$ mashctl adopt --server tls://myserver:4222 --owner acme --account MASH \
+    --ca ca.pem --make-admin --operator-key operator.nk \
+    --account-key account.nk --system-credentials system.creds
 
-Checking tls://myserver:4222 (from --server) as owner acme. Nothing is
-written until all the checks pass.
+mashctl will trust the certificate authority in ca.pem for this server. Whoever
+holds its key can pose as that server. Check the fingerprint with your
+operator.
+
+  server       tls://myserver:4222
+  fingerprint  sha256:3f9a...c41e
+
+Type the fingerprint to trust it: sha256:3f9a...c41e
+
+Checking the server as owner acme. Nothing is written until all the checks
+pass.
 
   1 files     ok  The operator key, account key and system credentials files
                   are there, and only you can read them.
   2 server    ok  The server turns away a connection with no credentials and
-                  accepts the system credentials. Only operator-signed
-                  accounts can use it.
+                  accepts the system credentials. Only accounts made by your
+                  operator can use it.
   3 account   ok  Account MASH exists on the server and has not expired.
   4 storage   ok  The account may store messages (2 GiB). mash needs this to
                   keep mail until it is read.
@@ -288,15 +362,21 @@ written until all the checks pass.
   7 admin     ok  The admin credentials that mashctl will use connect, and
                   the server confirms storage is on for the account.
 
-Adopted tls://myserver:4222 (from --server) as owner acme.
+Adopted the server as owner acme.
 
-  Saved the keys, the admin credentials and the settings in ~/.config/mash.
-  The settings hold the certificate file as a full path, the one you typed
-  after MASH_TLS_CA=, so later commands find it from any folder.
+  copied  mashadmin.creds to ~/.config/mash/server/mashadmin.creds  (mode 600)
+  wrote   ~/.config/mash/config.json  (server, owner, certificate file)
+
+  The keys are saved in the same folder. The settings hold the certificate
+  file as a full path, so later commands find it from any folder.
   On the server, the only change is a record of the new admin credentials.
+  mashctl keeps its own copies, so you can remove <export folder> now.
 
-NEXT: on myserver, prepare the server for mash:
+NEXT: on this machine, prepare the server for mash:
   mashctl init
+
+Or, to remove the folder you exported the keys and credentials to:
+  rm -r <export folder>
 ```
 
 When a check fails, the run stops at that line:
@@ -308,16 +388,43 @@ error: account MASH was not found on tls://myserver:4222.
 fix: ask your operator for the account name and pass it as --account <name>
 ```
 
-When the address is `nats://` (plain text):
+When a person who is not at a terminal, or a script, runs adopt with a
+certificate authority file, or types a fingerprint that does not match:
+
+```text
+$ mashctl adopt <the same options>   (no terminal)
+[exit 4]
+error: this makes mash trust a certificate authority, and a person must
+       confirm it at a terminal.
+fix: run the same command in a terminal and type the fingerprint when asked:
+  mashctl adopt <the same options>
+
+$ mashctl adopt <the same options>
+...
+Type the fingerprint to trust it: sha256:0000...0000
+[exit 3]
+error: the fingerprint you typed does not match the file. Nothing was changed.
+fix: get the fingerprint from your operator, then run the command again:
+  mashctl adopt <the same options>
+```
+
+When the address is `nats://` (plain text) and it came from `--server`:
 
 ```text
 $ mashctl adopt --server nats://myserver:4222 --owner acme ...
 error: nats://myserver:4222 is not encrypted, and mash only connects over TLS.
-fix: use a tls:// address. Your operator can give you the certificate file.
+fix: give --server a tls:// address. Your operator can give you the
+     certificate file, which you pass as --ca <file>.
 
-Or, for a throwaway test server only, allow plain text in this shell:
-  export MASH_INSECURE_PLAINTEXT=1
+Or, for a test server only: put MASH_INSECURE_PLAINTEXT=1 before the command:
+  MASH_INSECURE_PLAINTEXT=1 mashctl adopt <the same options>
+
+With it, credentials and mail cross the connection unencrypted.
 ```
+
+If adopt is run without `--server` and the plain address comes from MASH_URL,
+the error names MASH_URL and the fix is the one shown in E2 (Part 2): `unset
+MASH_URL`.
 
 `--detail` adds the key ids and the file paths of each check; `--dry-run`
 prints "Would ..." lines and ends "Nothing was changed." (rule 11).
@@ -329,9 +436,36 @@ its answers before it prints.
 
 **What changed and why**
 
-- The plain-URL refusal also names the override, `insecure_plaintext`
-  (`MASH_INSECURE_PLAINTEXT=1`), because ADR 0146 requires it, and says it is
-  for a throwaway test server only.
+- DRAFT10 (V1, V6, critic A.1b): the result line is `Adopted the server as
+  owner acme.`; no address and no `(from --server)`. The server shows only in
+  the trust prompt, where the person must see it to confirm it. The first line
+  of the checks is `Checking the server as owner acme.` The certificate file
+  is a flag, `--ca <file>`, like `credential install --ca`; the
+  `MASH_TLS_CA=` form and its two-line explanation are gone. Check 2 says
+  "accounts made by your operator", not "operator-signed accounts". The NEXT
+  says `on this machine`: `init` runs wherever mashctl runs, not necessarily on
+  the NATS host. A wrong fingerprint exits 3 (cancelled, rule 14); no terminal
+  exits 4 (not authorized).
+- DRAFT9 (U2, INV-004): adopt with a certificate authority file makes mash
+  trust that authority, so it asks the person to type the fingerprint before
+  anything is checked or written. No flag skips it. With no terminal it
+  refuses with `error:` and `fix:`; a wrong fingerprint refuses and changes
+  nothing. [confirm: how adopt computes the fingerprint of the file it was
+  given.]
+- DRAFT9 (U6): the plain-URL refusal names where the address came from. From
+  `--server` the fix names `--server`; from MASH_URL it is the E2 fix.
+- The plain-URL refusal also names the override, which is the environment
+  variable `MASH_INSECURE_PLAINTEXT=1` for that one run (DRAFT8, REQ-010).
+  The config key `insecure_plaintext` is gone: no file can turn plain text on,
+  and no mash command writes the override. The refusal says plainly that
+  credentials and mail then cross the connection unencrypted, and that it is
+  for a test server only.
+- DRAFT8 (T2, INV-003): adopt copies the admin credentials into mashctl's own
+  folder (mode 600), in the `copied` form of `mash credential install`, so
+  the folder they were exported to can be removed. The closing text says so
+  as a plain sentence and offers the removal as an `Or` hint with the command
+  on its own line (`rm -r <export folder>`; mash cannot know the folder, so
+  it is a placeholder). The `wrote` line names `config.json`.
 - P5 (maintainer point 4): the command is wrapped with `\`, every output line
   is 80 columns or fewer, no line carries a path longer than `~/.config/mash`.
 - P6 (point 8, point 16): each check is one line of meaning in plain words. No
@@ -339,9 +473,8 @@ its answers before it prints.
 - P8 and P9: the three 56-character key ids, the file modes and the resource
   counts (streams, consumers) are gone from the default output; they are in
   `--detail`.
-- Certificate path (review finding 1): the typed command shows
-  `<path to ca.pem>`, a full path, and adopt saves the CA's absolute path in
-  config.json. Today adopt saves the value of MASH_TLS_CA as typed
+- Certificate path (review finding 1): the typed command shows `--ca
+  ca.pem`, and adopt saves the CA's absolute path in config.json. Today adopt saves the value of MASH_TLS_CA as typed
   (cmd/mashctl/adopt.go, `settings["tls_ca"] = cfg.TLSCA`), and later runs
   resolve a relative `tls_ca` under the config folder
   (internal/config/config.go, `inDir`), so `ca.pem` would point to
@@ -354,13 +487,12 @@ its answers before it prints.
   true sentence for this run: the server change is the admin record.
 - P4 (point 11): the `Next:` list of two items, with the `provision`
   placeholder, becomes one `NEXT:` with the command on its own line. The
-  command is the next step in the guide and runs on myserver, the host mashctl
-  read from the address. `provision` is not next in the guide.
+  command is the next step in the guide and runs on this machine. `provision`
+  is not next in the guide.
 - P1 (point 14): adopt printed its own header already; it now says only what
   it is checking and why nothing is written yet.
-- Wrong-server trap (DRAFT5): the checking line and the result line say
-  `(from --server)`, because adopt takes the address from the command you
-  typed, not from the session's environment.
+- Wrong-server trap (DRAFT5, replaced in DRAFT10): the lines no longer say
+  where the address came from. adopt takes it from the command you typed.
 - Rule 10: both refusals use `error:` and `fix:`. The account fix names the
   flag with a `<name>` placeholder (mash does not know the account).
 - Renamed flags (see Choices to confirm, item 3): `--system-credentials`,
@@ -381,14 +513,17 @@ mashctl: directory and lease buckets ready   <- P6 (the user is not told what th
 ```text
 $ mashctl init
 
-Prepared tls://myserver:4222 for mash (from ~/.config/mash/config.json).
+Prepared the server for mash.
 
   mash now has room on the server for:
     - the list of endpoints (what `mashctl endpoint list` shows)
     - the record of every token mash signs
     - the sessions that are running
 
-NEXT: on the machine where the endpoint will run, create its key:
+NEXT: on this machine, create an endpoint:
+  mashctl endpoint create acme.<group>.<name> --make-key
+
+Or, for an endpoint on another machine, start there:
   mash key create --out <name>.key
 ```
 
@@ -396,8 +531,7 @@ Run again on a server that is ready:
 
 ```text
 $ mashctl init
-Already prepared: tls://myserver:4222 (from ~/.config/mash/config.json).
-Nothing was changed.
+Already prepared. Nothing was changed.
 ```
 
 [confirm: init is safe to run twice and says nothing changed; the catalog shows
@@ -405,8 +539,12 @@ Nothing was changed.
 
 **What changed and why**
 
-- P1 (point 14): the three-part preamble is gone; the server is named in the
-  result line.
+- P1 (point 14): the three-part preamble is gone; the result line names no
+  server (DRAFT10).
+- DRAFT10 (critic A.1c): the NEXT offers both paths, as the empty `endpoint
+  list` does: `--make-key` for an endpoint on this machine, and `mash key
+  create` for another machine. The owner is in config, so the command shows
+  `acme.`.
 - P6: "directory and lease buckets" becomes the three things they hold, in plain
   words. [confirm: what the lease storage holds; written here as "the sessions
   that are running"].
@@ -429,7 +567,7 @@ The first line is the verdict, in words that read without colour: `OK`,
 `PROBLEM` or `NOT REACHABLE`. Then only the rows that were asked for (a plain
 run asks for the facts the old preamble gave) or that are wrong. After a
 problem, `error:`, `fix:` and the command. Exit code 0 on `OK`, 1 on `PROBLEM`
-or `NOT REACHABLE`. On a terminal the verdict word is coloured (green, red,
+and 6 on `NOT REACHABLE` (the server did not answer). On a terminal the verdict word is coloured (green, red,
 yellow); the capitals carry the meaning without it.
 
 **BEFORE.** No such command. Today the same facts arrive as the line before
@@ -447,7 +585,7 @@ OK
 
 server:     tls://myserver:4222 (reachable, encrypted)
 owner:      acme
-signed in:  as admin for owner acme
+signed in:  as admin
 prepared:   yes
 config:     ~/.config/mash/config.json
 ```
@@ -462,7 +600,7 @@ server:     tls://myserver:4222 (reachable, encrypted)
 prepared:   NO
 
 error: the server is not prepared for mash.
-fix: prepare the server, on myserver:
+fix: prepare the server, on this machine:
   mashctl init
 ```
 
@@ -473,7 +611,7 @@ $ mashctl status
 NOT REACHABLE: tls://myserver:4222 refused the connection.
 
 error: mashctl cannot check anything else while the server is down.
-fix: start the NATS server on myserver, then check again:
+fix: start the NATS server or ask whoever runs it, then check again:
   mashctl status
 ```
 
@@ -488,7 +626,7 @@ server:              tls://myserver:4222 (reachable, encrypted)
 certificate:         checked against ~/.config/mash/ca.pem
 owner:               acme
 account:             MASH
-signed in:           as admin for owner acme
+signed in:           as admin
 prepared:            yes
 
 config:              ~/.config/mash/config.json
@@ -496,6 +634,7 @@ key directory:       ~/.config/mash/keys
 admin credentials:   ~/.config/mash/server/mashadmin.creds
 system credentials:  ~/.config/mash/server/sys.creds
 
+keys (the operator key made the account; the account key signs each token):
 operator key:        OAQCFPM5BOL22AGI6O76QGKIQHRLYN7DZZEATDRWD6QTEC5462SVCBJU
 account key:         AD7BK6VI6EGIDZ2XXCLTKUBGR5NOIJYVZ77DTRETXNW2XXPNQTK2UGO6
 ```
@@ -506,6 +645,11 @@ account key:         AD7BK6VI6EGIDZ2XXCLTKUBGR5NOIJYVZ77DTRETXNW2XXPNQTK2UGO6
   facts are the same: server (from `url`), owner, the credentials in use, the
   config location. The credentials file path moves to `--detail`; the short
   form says "signed in: as admin for owner acme".
+- DRAFT10 (V1, V3, critic A.1d): `status` is the one command where the server
+  and the config path are the answer, so they stay. `signed in: as admin`
+  does not repeat the owner. `NOT REACHABLE` exits 6 (the server), not 1. The
+  fix for a down server says "or ask whoever runs it". `--detail` says in one
+  line what the operator key and the account key are for.
 - R-verdict: line 1 is `OK`, `PROBLEM: ...` or `NOT REACHABLE: ...`. A problem
   prints only the rows that are wrong, then `error:` and `fix:` with the
   command on its own line (DRAFT7: the verdict is a result, the `error:` line
@@ -530,9 +674,11 @@ account key:         AD7BK6VI6EGIDZ2XXCLTKUBGR5NOIJYVZ77DTRETXNW2XXPNQTK2UGO6
 ## 2. Endpoint bob (three steps, other-machine path) and endpoint alice
 
 The three steps are shown in long form first (what `--explain` prints), then
-once in short form (what a plain run prints). In the walkthrough everything
-runs on myserver, so the copy steps in the NEXT lines are skipped; on two
-machines they apply [Choices to confirm, item 4].
+once in short form (what a plain run prints). Bob runs on `bobs-laptop`: Steps 1
+and 3 run there and Step 2 runs on `myserver`, where mashctl is. Alice runs on
+`myserver`, so one command does everything for her. A tool does not know the
+name of another machine, so its text says "bob's machine"; the headings below
+name it.
 
 Short vocabulary used by all three steps (rule 7): private key, public key,
 token (the statement your mash server signs: "this public key is endpoint
@@ -540,10 +686,10 @@ acme.demo.bob"), credentials (the one file mash runs with: private key plus
 token).
 
 mash and mashctl print `<placeholder>` where they do not know the value. After
-`mash key create` the owner and group are known only if the config names them;
-the mockups show the case where it does not.
+`mash key create` the address is unknown to mash, so the NEXT carries
+`<address>`.
 
-### Step 1 of 3 (long form): `mash key create --out bob.key --explain`
+### Step 1 of 3 (long form), on bobs-laptop: `mash key create --out bob.key --explain`
 
 **BEFORE** (catalog Appendix A, `mash key create`, case 2):
 
@@ -563,8 +709,9 @@ Step 1 of 3: create a key for your agent (on the agent's machine)
 
 This makes a private key (NATS calls it a seed) for bob. Its public half is
 used in the next step to create bob's endpoint on the mail mesh. The private
-key stays on this machine. If someone else runs your mash server, send them
-bob.pub; if mashctl is on another machine, copy bob.pub there.
+key stays on this machine; only bob.pub leaves it. If someone else runs your
+mash server, send them bob.pub; if mashctl is on another machine, copy bob.pub
+there.
 
 $ mash key create --out bob.key
 
@@ -573,8 +720,10 @@ Created a key pair.
   private key  bob.key  (keep it secret; only you can read it)
   public key   bob.pub  (safe to share)
 
+bob.pub goes to whoever runs mashctl. bob.key never leaves this machine.
+
 NEXT: copy bob.pub to the machine that runs mashctl, and run there:
-  mashctl endpoint create <owner>.<group>.bob --public-key bob.pub
+  mashctl endpoint create <address> --public-key bob.pub
 ```
 
 **What changed and why**
@@ -591,12 +740,18 @@ NEXT: copy bob.pub to the machine that runs mashctl, and run there:
 - Rule 9: the `$ command` line is printed by `--explain` without the
   `--explain` flag so a reader can copy it.
 - R-paste: the NEXT sentence ends with a colon on one line; the command is
-  on its own line. `<owner>.<group>` are placeholders, because mash key create
-  was not told them. The managed-setup sentence moved into the why paragraph.
+  on its own line. `<address>` is a placeholder, because `mash key create`
+  was not told the owner or group.
 - R-names: "Created a key pair" (the verb for things created; no owner is
   claimed from a file name).
+- DRAFT10 (critic A.S1, walk finding 1): one line says why the two files
+  differ: bob.pub is handed on, bob.key stays. The NEXT uses `<address>` (one
+  placeholder form). A second key (`bob2.key`, made for a reissue) prints the
+  same NEXT, which names `endpoint create`, and a reissue refuses that verb.
+  mash cannot tell a first key from a replacement, so the reissue step (B2)
+  names the right command. [confirm: Facts to confirm, walk finding 1.]
 
-### Step 2 of 3 (long form): `mashctl endpoint create ... --explain`
+### Step 2 of 3 (long form), on myserver: `mashctl endpoint create ... --explain`
 
 **BEFORE** (catalog `endpoint create`, case 6):
 
@@ -620,48 +775,58 @@ is the group bob mails within, and bob is the name.
 
 mashctl signs bob's public key. The result is bob's token: the statement your
 mash server signs that "this public key is endpoint acme.demo.bob". The
-server accepts bob only with a key and a token that go together.
+server accepts bob only with a key and a token that go together. The token
+also holds the server's address, so bob's machine needs no other setting.
 
 $ mashctl endpoint create acme.demo.bob --public-key bob.pub
 
-Created endpoint acme.demo.bob on tls://myserver:4222
-(from ~/.config/mash/config.json).
+Created endpoint acme.demo.bob.
 
-  Signed bob's public key.
-  Created the token acme.demo.bob.token (not secret).
+  token  ~/acme.demo.bob.token  (proves bob.pub is acme.demo.bob; not secret)
 
-NEXT: copy acme.demo.bob.token to bob's machine, and run there:
-  mash credential install --key <key> --token <token> --server <url> --ca <ca>
+Copy these two files to bob's machine:
+
+  ~/acme.demo.bob.token
+  ~/.config/mash/ca.pem
+
+Give bob's machine this fingerprint of ca.pem separately from the files. The
+install asks for it, so that machine can check that it got the right ca.pem.
+
+  fingerprint  sha256:3f9a...c41e
+
+NEXT: on bob's machine, with bob.key and both files in one folder, run:
+  mash credential install --key bob.key --token acme.demo.bob.token
 ```
 
 **What changed and why**
 
-- P1 (point 14): the preamble is gone; the server is named in the result
-  line.
-- Wrong-server trap (DRAFT5): the result line also says why that server:
-  `(from ~/.config/mash/config.json)`, or `(set by MASH_URL in this shell)`
-  when the variable chose it. mashctl run inside a mash session inherits
-  MASH_URL and MASH_OWNER; without this the person learns it went to the
-  wrong server only afterwards. Example, run in such a session:
-  `Created endpoint acme.demo.bob on tls://other:4222`, then the next line
-  `(set by MASH_URL in this shell).`
-- Next-step command (DRAFT5): the install command now carries `--server`
-  and `--ca`, which a machine without mash's config needs. Written with
-  placeholders so it fits 78 columns. [match mash targets]
+- P1 (point 14): the preamble is gone, and since DRAFT10 the result line names
+  no server and no config file (V1): bob's machine gets the server from the
+  token.
 - P2 and P8 (points 13, 16): the endpoint is printed once, as
   `acme.demo.bob`, the form that was typed.
 - P6 (points 3, 8): `jwt` becomes `token`, with its one-sentence meaning in
-  the why paragraph. The flag is `--token-out` (default `acme.demo.bob.token`
-  in the current directory).
-- P4 (point 8, point 11): the old NEXT named a command with `bob.seed` and
-  `bob.jwt`, which the user has to translate. The new NEXT uses the token file
-  name mashctl wrote. The key file is `<key file>`: mashctl cannot see where
-  bob's private key is.
+  the why paragraph and in the file line (`proves bob.pub is acme.demo.bob`).
+  The flag is `--token-out` (default `acme.demo.bob.token` in the current
+  directory).
+- DRAFT10 (V4, critic A.S2, walk findings 2 and 16): the hand-off names the
+  two files to copy with their full paths on this machine (the token and the
+  CA file; walk: the CA was never mentioned and bob's machine knew nothing of
+  the server), and the fingerprint, which goes separately (DRAFT9, contract
+  REQ-003). The NEXT command carries the real values mashctl knows: the token
+  file and `bob.key` (the name the `.pub` file came from). It has no
+  placeholder: the fingerprint is not in the command but typed at the
+  prompt of the install (Part 1, choice 36).
+- DRAFT10: the token holds the server address, and `credential install` takes
+  the server from the token (contract REQ-003: the flags, then the token's
+  contents, then existing config) and `ca.pem` from beside the token, so
+  `--server` and `--ca` leave the command. [confirm with core: Choice 36 and
+  Facts to confirm.]
 - Point 8 (the request to explain `randy/demo/beta`): the first paragraph
   does it, in one sentence of meaning and one of use.
 - R-names: "Created the token" (was "Wrote").
 
-### Step 3 of 3 (long form): `mash credential install ... --explain`
+### Step 3 of 3 (long form), on bobs-laptop: `mash credential install ... --explain`
 
 **BEFORE** (catalog Appendix A, `mash credential create`, case 8):
 
@@ -681,23 +846,34 @@ Step 3 of 3: install the credentials (on the agent's machine)
 This joins bob's private key and the token from Step 2 into credentials: the
 one file mash runs with. It checks that the token was made for this key, and
 writes acme.demo.bob.creds to mash's config directory. It also saves the
-server's address and the file of its certificate, which mash needs to
-connect. The private key does not leave this machine. When only one endpoint
-is installed on a machine, mash uses it, and the setting MASH_ENDPOINT can be
-left out.
+server's address (from the token) and a copy of ca.pem there, which mash needs
+to connect. The private key does not leave this machine. When only one
+endpoint is installed on a machine, mash uses it, and the setting
+MASH_ENDPOINT can be left out.
 
-$ mash credential install --key bob.key --token acme.demo.bob.token \
-    --server tls://myserver:4222 --ca ca.pem
+mash runs with the credentials file alone. bob.key and the token file were
+only inputs: delete them, or keep them as a backup and keep bob.key private.
+
+$ mash credential install --key bob.key --token acme.demo.bob.token
+
+mash will trust the certificate authority in ca.pem for this server. Whoever
+holds its key can pose as that server. Check the fingerprint with whoever
+runs mashctl.
+
+  server       tls://myserver:4222
+  fingerprint  sha256:3f9a...c41e
+
+Type the fingerprint to trust it: sha256:3f9a...c41e
 
 Installed credentials for acme.demo.bob.
-Keep bob.key: it is the private half. mash signs in with the key and token.
+Checked: ca.pem has the fingerprint you typed.
 
   wrote   ~/.config/mash/acme.demo.bob.creds  (mode 600)
   wrote   ~/.config/mash/config.json          (server, owner, CA)
   copied  ca.pem to ~/.config/mash/ca.pem     (mode 644)
 
-NEXT: check that bob can sign in, on this machine:
-  MASH_ENDPOINT=acme.demo.bob mash status
+NEXT: on this machine, check that bob can sign in. No settings are needed:
+  mash status
 
 Or add another endpoint, starting on its machine:
   mash key create --out <name>.key
@@ -705,37 +881,45 @@ Or add another endpoint, starting on its machine:
 
 **What changed and why**
 
+- DRAFT9 (U1), changed in DRAFT10: a first install makes mash trust a
+  certificate authority, so it shows the server and the fingerprint and the
+  person types the fingerprint (INV-004), as `adopt` does. The fingerprint
+  comes from the hand-off of Step 2. A file that does not match is refused and
+  nothing is written. DRAFT9 put `--ca-fingerprint <fingerprint>` in the
+  command, which was 98 columns and a placeholder for a value mashctl knew.
+  [confirm with core: the wording of the `Checked:` line, and Choice 36.]
+- DRAFT10 (V4, critic A.S3, walk findings 3, 4, 5, 6): install writes
+  `config.json` (server, owner, CA copy) as well as the credentials, because
+  on a fresh machine nothing else tells mash the server, the CA or the group
+  (walk: `mash status` said the server was missing, then `send` failed with an
+  unknown authority and with a missing group). The address in the token gives
+  the owner, group and name, so the NEXT is `mash status` with nothing set.
+  The NEXT sentence says no settings are needed.
+- DRAFT10 (critic A.S3, walk answer c): what bob keeps is said once, in this
+  long form. mash runs with the credentials file alone (walk: moving the key
+  and the token aside left `send` working). The earlier line "Keep bob.key:
+  mash signs in with the key and token" contradicted that and is gone from
+  every block.
 - P6 and the question in point 8 ("one credential a key and the other a
   credential"): `mash credential create --seed --jwt` becomes
   `mash credential install --key --token`. The why paragraph says what the
   file is made of. "Install" says the file goes into the config directory.
-- P4 (point 11): `next: mash status` is replaced by `mash status` with
-  `MASH_ENDPOINT` set to the endpoint's full address on the same line, so the
-  pasted line works in a shell that has not exported anything. The owner is in
-  `config.json`, which install writes or keeps. No printed command sets
-  MASH_OWNER (R4), MASH_GROUP or MASH_NAME (retired in DRAFT7). The line that
-  says `MASH_ENDPOINT` can be left out with one endpoint installed is written
-  once, in the long form of this step. The second item is
-  the other thing a person may do next (the walkthrough makes alice before it
-  starts a session). Rule 6 allows a short list when there is a real choice.
-- R-true-fix: the variable on that line is a test for one command, not the
-  fix; the way to run a session is in section 4.
+- P4 (point 11): `next: mash status` is kept as `mash status`, now with
+  nothing set because exactly one endpoint is installed on this machine
+  (contract REQ-009). The second item is the other thing a person may do
+  next. Rule 6 allows a short list when there is a real choice.
 - P8 and P9: no public key, no repeated path.
-- DRAFT6 (core's block, used unchanged): the output is `Installed
-  credentials for acme.demo.bob.`, the line that says to keep `bob.key`
-  (the private half; mash signs in with the key and token), then three
-  file lines with lowercase verbs and aligned columns: `wrote` the
-  credentials, `wrote` `config.json`, `copied` the certificate file. When
-  `config.json` already points at the same server the second line says
-  `kept` (shown below, short form). A machine that never ran mashctl needs
-  all three files. Flags of `mash credential install` (core): `--key
-  --token [--server] [--ca] [--out <dir>] [--force] [--dry-run] [--detail]
-  [--json]`, and `--creds` in place of `--key --token`.
-  `mashctl endpoint create ... --make-key`, below, prints `wrote` for the
-  credentials and `kept` for `config.json` and the certificate file, which
-  are already on the machine that runs mashctl.
-- Point 10 ("why don't I need a beta.seed"): see alice below, where the same
-  three lines show one command doing all three steps.
+- DRAFT6 (core's block): the output is `Installed credentials for
+  acme.demo.bob.` and three file lines with lowercase verbs and aligned
+  columns: `wrote` the credentials, `wrote` `config.json`, `copied` the
+  certificate file. When `config.json` already points at the same server the
+  second line says `kept` (shown below). Flags of `mash credential install`
+  (core): `--key --token [--server] [--ca] [--out <dir>]
+  [--dry-run] [--detail] [--json]`, and `--creds` in place of `--key --token`.
+  There is no `--force`: replacing credentials is a typed confirmation
+  (below).
+- Point 10 ("why don't I need a beta.seed"): see alice below, where one
+  command does all three steps.
 
 ### The three steps in short form (what a plain run prints)
 
@@ -751,60 +935,116 @@ Created a key pair.
   private key  bob.key  (keep it secret; only you can read it)
   public key   bob.pub  (safe to share)
 
+bob.pub goes to whoever runs mashctl. bob.key never leaves this machine.
+
 NEXT: copy bob.pub to the machine that runs mashctl, and run there:
-  mashctl endpoint create <owner>.<group>.bob --public-key bob.pub
+  mashctl endpoint create <address> --public-key bob.pub
 ```
 
 ```text
 $ mashctl endpoint create acme.demo.bob --public-key bob.pub
 
-Created endpoint acme.demo.bob on tls://myserver:4222
-(from ~/.config/mash/config.json).
+Created endpoint acme.demo.bob.
 
-  Signed bob's public key.
-  Created the token acme.demo.bob.token (not secret).
+  token  ~/acme.demo.bob.token  (proves bob.pub is acme.demo.bob; not secret)
 
-NEXT: copy acme.demo.bob.token to bob's machine, and run there:
-  mash credential install --key <key> --token <token> --server <url> --ca <ca>
+Copy these two files to bob's machine:
+
+  ~/acme.demo.bob.token
+  ~/.config/mash/ca.pem
+
+Give bob's machine this fingerprint of ca.pem separately from the files. The
+install asks for it, so that machine can check that it got the right ca.pem.
+
+  fingerprint  sha256:3f9a...c41e
+
+NEXT: on bob's machine, with bob.key and both files in one folder, run:
+  mash credential install --key bob.key --token acme.demo.bob.token
 ```
 
 ```text
-$ mash credential install --key bob.key --token acme.demo.bob.token \
-    --server tls://myserver:4222 --ca ca.pem
+$ mash credential install --key bob.key --token acme.demo.bob.token
+
+mash will trust the certificate authority in ca.pem for this server. Whoever
+holds its key can pose as that server. Check the fingerprint with whoever
+runs mashctl.
+
+  server       tls://myserver:4222
+  fingerprint  sha256:3f9a...c41e
+
+Type the fingerprint to trust it: sha256:3f9a...c41e
 
 Installed credentials for acme.demo.bob.
-Keep bob.key: it is the private half. mash signs in with the key and token.
+Checked: ca.pem has the fingerprint you typed.
 
   wrote   ~/.config/mash/acme.demo.bob.creds  (mode 600)
   wrote   ~/.config/mash/config.json          (server, owner, CA)
   copied  ca.pem to ~/.config/mash/ca.pem     (mode 644)
 
-NEXT: check that bob can sign in, on this machine:
+NEXT: on this machine, check that bob can sign in. No settings are needed:
+  mash status
+
+Or add another endpoint, starting on its machine:
+  mash key create --out <name>.key
+```
+
+On a machine that already has this server's settings (for example the machine
+that runs mashctl), the middle file line says `kept`:
+
+```text
+$ mash credential install --key bob.key --token acme.demo.bob.token
+
+Installed credentials for acme.demo.bob.
+
+  wrote   ~/.config/mash/acme.demo.bob.creds  (mode 600)
+  kept    ~/.config/mash/config.json          (same server and CA)
+  kept    ~/.config/mash/ca.pem               (same CA)
+
+NEXT: on this machine, check that bob can sign in:
   MASH_ENDPOINT=acme.demo.bob mash status
 
 Or add another endpoint, starting on its machine:
   mash key create --out <name>.key
 ```
 
-When `config.json` already points at the same server (the walkthrough: adopt
-wrote it on this machine), the middle file line says `kept`:
+After a reissue the credentials for the same address are already installed. The
+install says what is replaced and asks the person to type the address; there is
+no `--force`:
 
 ```text
-$ mash credential install --key bob.key --token acme.demo.bob.token \
-    --server tls://myserver:4222 --ca ca.pem
+$ mash credential install --key bob2.key --token acme.demo.bob.2.token
+
+The current credentials for acme.demo.bob use an old key that the server now
+refuses. Installing replaces them.
+
+Type the address to replace them: acme.demo.bob
 
 Installed credentials for acme.demo.bob.
-Keep bob.key: it is the private half. mash signs in with the key and token.
 
-  wrote   ~/.config/mash/acme.demo.bob.creds  (mode 600)
-  kept    ~/.config/mash/config.json          (server myserver:4222)
-  copied  ca.pem to ~/.config/mash/ca.pem     (mode 644)
+  wrote   ~/.config/mash/acme.demo.bob.creds  (replaced the old credentials)
+  kept    ~/.config/mash/config.json          (same server and CA)
+  kept    ~/.config/mash/ca.pem               (same CA)
 
-NEXT: check that bob can sign in, on this machine:
-  MASH_ENDPOINT=acme.demo.bob mash status
+NEXT: on this machine, check that bob can sign in:
+  mash status
+```
 
-Or add another endpoint, starting on its machine:
-  mash key create --out <name>.key
+With no terminal, or with a wrong answer:
+
+```text
+$ mash credential install --key bob2.key --token acme.demo.bob.2.token
+[exit 4]
+error: replacing the installed credentials needs a person at a terminal.
+fix: run the same command in a terminal and type the address when asked:
+  mash credential install --key bob2.key --token acme.demo.bob.2.token
+
+$ mash credential install --key bob2.key --token acme.demo.bob.2.token
+...
+Type the address to replace them: acme.demo.alice
+[exit 3]
+error: what you typed is not acme.demo.bob. Nothing was changed.
+fix: run the command again and type the address of the credentials to replace:
+  mash credential install --key bob2.key --token acme.demo.bob.2.token
 ```
 
 To copy one credentials file to another machine instead, use `mash
@@ -817,6 +1057,12 @@ the key on the agent's machine.
 - Rule 9: the short form keeps the what-happened lines and the NEXT; it drops
   the step header and the why paragraph, which `--explain` brings back.
 - Rule 8: result, then up to three lines.
+- DRAFT10 (V4, V2, walk finding 10): installing over credentials for the same
+  address (the second install after a reissue) used to need `--force`, and the
+  refusal did not say the old file held a revoked key. Now the install says
+  what is replaced and the person types the address; it exits 3 on a wrong
+  answer and 4 without a terminal (Choice 39). [confirm: how install learns
+  that the server refuses the old key; Facts to confirm.]
 
 ### Alice on the same machine: `mashctl endpoint create acme.demo.alice --make-key`
 
@@ -836,70 +1082,78 @@ mashctl: target server tls://127.0.0.1:20001 (from /tmp/mc/cfg/config.json), own
 ```text
 $ mashctl endpoint create acme.demo.alice --make-key
 
-Created endpoint acme.demo.alice on tls://myserver:4222
-(from ~/.config/mash/config.json).
+Created endpoint acme.demo.alice.
 
   1. Created a private key for alice on this machine.
   2. Created her token, signed by your server.
   3. Installed credentials for alice.
 
   wrote   ~/.config/mash/acme.demo.alice.creds  (mode 600)
-  kept    ~/.config/mash/config.json            (server myserver:4222)
-  kept    ~/.config/mash/ca.pem                 (mode 644)
 
-NEXT: check that alice can sign in, on this machine:
-  MASH_ENDPOINT=acme.demo.alice mash status
+NEXT: on this machine, check that alice can sign in:
+  mash status
 
 Or add another endpoint on this machine:
-  mashctl endpoint create acme.demo.<name> --make-key
+  mashctl endpoint create acme.<group>.<name> --make-key
 ```
+
+### Credentials for another machine: `endpoint create --make-key --creds-out`
 
 **AFTER, short form, credentials for another machine (`--creds-out`)**
 
+This is not the same-machine path: carol runs on another machine, so the
+command writes one file to carry there and installs nothing here.
+
 ```text
-$ mashctl endpoint create acme.demo.alice --make-key --creds-out alice.creds
+$ mashctl endpoint create acme.demo.carol --make-key --creds-out carol.creds
 
-Created endpoint acme.demo.alice on tls://myserver:4222
-(from ~/.config/mash/config.json).
+Created endpoint acme.demo.carol.
 
-  1. Created a private key for alice.
+  1. Created a private key for carol.
   2. Created her token, signed by your server.
-  3. Installed credentials for alice.
+  3. Wrote the credentials for carol to one file.
 
-  wrote   alice.creds                 (mode 600)
-  kept    ~/.config/mash/config.json  (server myserver:4222)
-  kept    ~/.config/mash/ca.pem       (mode 644)
+  wrote   ~/carol.creds  (new file, mode 600)
 
-warning: copying alice.creds moves alice's private key to another machine.
-         To keep the key on alice's machine, make it there with mash key
+warning: copying carol.creds moves carol's private key to another machine.
+         To keep the key on carol's machine, make it there with mash key
          create and use mashctl endpoint create with --public-key.
 
-NEXT: copy alice.creds to alice's machine, and run there:
-  mash credential install --creds alice.creds --server <url> --ca <ca>
+Copy these two files to carol's machine:
+
+  ~/carol.creds
+  ~/.config/mash/ca.pem
+
+Give carol's machine this fingerprint of ca.pem separately from the files. The
+install asks for it, so that machine can check that it got the right ca.pem.
+
+  fingerprint  sha256:3f9a...c41e
+
+NEXT: on carol's machine, with both files in one folder, run:
+  mash credential install --creds carol.creds
 ```
 
-**AFTER, short form, run in a mash session (the shell has MASH_URL set)**
+### A MASH_URL that names another server: `endpoint create`
+
+**AFTER, run in a mash session (MASH_URL names another server than the
+config file)**
+
+mashctl run inside a mash session inherits MASH_URL. The administrator
+credentials belong to the server the config file names, so credentials made
+for any other server would not sign in. The command refuses and writes
+nothing:
 
 ```text
-$ mashctl endpoint create acme.demo.alice --make-key
-
-Created endpoint acme.demo.alice on tls://other:4222
-(set by MASH_URL in this shell).
-
-  1. Created a private key for alice on this machine.
-  2. Created her token, signed by your server.
-  3. Installed credentials for alice.
-
-  wrote   ~/.config/mash/acme.demo.alice.creds  (mode 600)
-  kept    ~/.config/mash/config.json            (server myserver:4222)
-  kept    ~/.config/mash/ca.pem                 (mode 644)
-
-NEXT: check that alice can sign in, on this machine:
-  MASH_ENDPOINT=acme.demo.alice mash status
-
-Or add another endpoint on this machine:
-  mashctl endpoint create acme.demo.<name> --make-key
+$ MASH_URL=tls://testserver:4222 mashctl endpoint create acme.demo.alice \
+    --make-key
+[exit 1]
+error: MASH_URL is tls://testserver:4222, but your administrator credentials
+       are for tls://myserver:4222. Nothing was changed.
+fix: run outside the mash session, or unset MASH_URL, then run it again:
+  unset MASH_URL
 ```
+
+### Alice on the same machine, long form: `endpoint create --make-key --explain`
 
 **AFTER, long form (`--explain`)**
 
@@ -908,35 +1162,32 @@ This does all three steps in one command, on one machine. Use it when the
 endpoint runs on the same machine as mashctl. alice's private key is made here
 and never written anywhere except her credentials file.
 
-Step 1 of 3: create a key for your agent (on the agent's machine)
+Step 1 of 3: create a key for your agent (on this machine)
 
   This makes a private key (NATS calls it a seed) for alice. Its public half
   is signed in Step 2.
   Done: created a private key for alice.
 
-Step 2 of 3: create the endpoint (on the machine that runs mashctl)
+Step 2 of 3: create the endpoint (on this machine)
 
   This creates the endpoint acme.demo.alice. mashctl signs alice's public
   key, which makes her token: the statement your mash server signs that
   "this public key is endpoint acme.demo.alice".
-  Done: created the token, endpoint acme.demo.alice exists on
-  tls://myserver:4222 (from ~/.config/mash/config.json).
+  Done: created the token; endpoint acme.demo.alice exists.
 
-Step 3 of 3: install the credentials (on the agent's machine)
+Step 3 of 3: install the credentials (on this machine)
 
   This joins the private key and the token into credentials: the one file
   mash runs with.
   Done: installed credentials for alice.
 
   wrote   ~/.config/mash/acme.demo.alice.creds  (mode 600)
-  kept    ~/.config/mash/config.json            (server myserver:4222)
-  kept    ~/.config/mash/ca.pem                 (mode 644)
 
-NEXT: check that alice can sign in, on this machine:
-  MASH_ENDPOINT=acme.demo.alice mash status
+NEXT: on this machine, check that alice can sign in:
+  mash status
 
 Or add another endpoint on this machine:
-  mashctl endpoint create acme.demo.<name> --make-key
+  mashctl endpoint create acme.<group>.<name> --make-key
 ```
 
 **What changed and why**
@@ -954,17 +1205,33 @@ Or add another endpoint on this machine:
 - The long form has no `$ command` echo per step, because there is one
   command; it is typed once above the output.
 - R-names: each step line starts with "Created" or "Installed".
+- DRAFT10 (V1, critic A.alice): no server and no `kept` lines for files the
+  command did not touch. The default output has one file line, the
+  credentials. With one endpoint installed on this machine, the check is
+  `mash status` with nothing set.
+- DRAFT10 (V5, critic A.alice, F.3): `--creds-out` says `Wrote the credentials
+  ... to one file`, never "Installed"; it installs nothing. It lists the file
+  to carry, the CA file and the fingerprint, and the NEXT names the real
+  values. The example is carol, who runs on another machine, so the heading no
+  longer sits under "same machine". The `--explain` step headings say "on this
+  machine" (they said the agent's machine and the machine that runs mashctl
+  for a one-machine command).
+- DRAFT10 (V5, critic F.3): a MASH_URL that names another server is a
+  refusal, exit 1, naming both servers. DRAFT9 saved credentials for the other
+  server after a `--replace` and a typed fingerprint; that path is gone from
+  `endpoint create` (Choice 35), because credentials made for another server
+  would not sign in with these administrator credentials. A server that
+  replaces another on a machine is `credential install` (a trust change with
+  its own prompt).
+- DRAFT8 (T1, INV-003): `--creds-out FILE` creates a new file. The line says
+  `new file, mode 600`: the file did not exist, only its owner can read it,
+  and it was private from the moment it was made. An existing different file,
+  a path that is a link, and a folder the person does not own are refused
+  (E3). The default path in the config folder keeps `(mode 600)`.
 - DRAFT6 (one command, one file): `--creds-out FILE` writes the credentials
   at FILE (mode 600), so the person copies one file to the machine where
-  alice will run. Without `--creds-out` the credentials go to the config
-  folder, as before. The file lines use the verbs of `mash credential
-  install`: `wrote` for the credentials, `kept` for `config.json` and the
-  certificate file, which adopt already wrote on this machine. The
-  `--creds-out` output adds a `warning:` line: copying that file moves a
-  private key across machines, and the three-step path keeps the key on the
-  agent's machine. The other machine installs the file with `mash
-  credential install --creds FILE` (core accepted it; same writes as
-  `--key --token`).
+  carol will run. The other machine installs it with `mash credential
+  install --creds FILE` (core accepted it; same writes as `--key --token`).
 
 ---
 
@@ -991,7 +1258,7 @@ The preamble and the count are on stderr, the rows on stdout (catalog P1 note).
 ```text
 $ mashctl endpoint list
 
-OWNER  GROUP  ENDPOINT  PATH             CREATED (UTC)
+OWNER  GROUP  ENDPOINT  ADDRESS          CREATED (UTC)
 acme   demo   alice     acme.demo.alice  2026-11-19 00:21
               bob       acme.demo.bob    2026-11-19 00:22
 
@@ -1001,9 +1268,9 @@ acme   demo   alice     acme.demo.alice  2026-11-19 00:21
 ```text
 $ mashctl endpoint list --wide
 
-OWNER  GROUP  ENDPOINT  PATH             TYPE   HOST      CREATED (UTC)     NOTE
-acme   demo   alice     acme.demo.alice  agent  myserver  2026-11-19 00:21  -
-              bob       acme.demo.bob    agent  myserver  2026-11-19 00:22  -
+OWNER  GROUP  ENDPOINT  ADDRESS          TYPE   HOST  CREATED (UTC)     NOTE
+acme   demo   alice     acme.demo.alice  agent  -     2026-11-19 00:21  -
+              bob       acme.demo.bob    agent  -     2026-11-19 00:22  -
 
 2 endpoints
 ```
@@ -1014,7 +1281,7 @@ their first row only, as kubectl does:
 ```text
 $ mashctl endpoint list
 
-OWNER  GROUP  ENDPOINT  PATH              CREATED (UTC)
+OWNER  GROUP  ENDPOINT  ADDRESS           CREATED (UTC)
 acme   demo   alice     acme.demo.alice   2026-11-19 00:21
               bob       acme.demo.bob     2026-11-19 00:22
        prod   deploy    acme.prod.deploy  2026-11-19 00:30
@@ -1029,7 +1296,7 @@ $ mashctl endpoint list
 
 No endpoints yet.
 
-NEXT: create one for an endpoint on this machine:
+NEXT: create an endpoint on this machine:
   mashctl endpoint create acme.<group>.<name> --make-key
 
 Or for an endpoint on another machine, start there:
@@ -1054,14 +1321,16 @@ Removed command, see 1a: `mashctl list` prints the refusal that names
 - Rule 5: dates as `2026-11-19 00:21`, the header says `CREATED (UTC)`.
 - P4: the empty case named `--help` only; it now names the command that
   makes an endpoint, in the same one-command-per-line form as every NEXT.
-- R-names: the table has the columns `OWNER GROUP ENDPOINT PATH`. `ENDPOINT`
-  is the endpoint's name (`bob`) and `PATH` is the dotted address
-  (`acme.demo.bob`), the one `mash send` takes. Part 2's grouped tables use
-  the same `ENDPOINT` header for the name, so the two parts now agree. The
-  earlier `NAME` header and the old `ENDPOINT` header for the dotted address
-  are gone.
+- R-names: the table has the columns `OWNER GROUP ENDPOINT ADDRESS`.
+  `ENDPOINT` is the endpoint's name (`bob`) and `ADDRESS` is the dotted
+  address (`acme.demo.bob`), the one `mash send` takes. DRAFT10 (V6, critic
+  A.list): the column was `PATH`, a word used nowhere else; every other block
+  says "address". Part 2's grouped tables use the same `ENDPOINT` header.
 - `--wide` width: the header and rows with `HOST` and `NOTE` are 77 columns
   for two rows; a longer note is cut to the screen width with `...`.
+- DRAFT10 (critic A.list): `HOST` shows `-` for bob, as `endpoint show
+  --detail` does: the host is empty until `endpoint set --host` sets it.
+  DRAFT9 printed `myserver` in the list and `-` in the show.
 
 ### `mashctl endpoint show acme.demo.bob`
 
@@ -1102,14 +1371,17 @@ Endpoint acme.demo.bob
 created:      2026-11-19 00:22 UTC
 type:         agent
 token:        valid, not revoked
-credentials:  ~/.config/mash/acme.demo.bob.creds
+online:       no
+unread mail:  3
+credentials:  not on this machine
 ```
 
-When bob's credentials are not on this machine, the last line reads
-`credentials:  not on this machine`. A note, host, description or tags
-(`tags:  env=demo`) appear as one more line only when set. A suspended
-endpoint adds `status:  SUSPENDED` (set by `mashctl endpoint suspend`, undone
-by `mashctl endpoint resume`).
+Bob runs on bobs-laptop, so the credentials line says `not on this machine`.
+For alice, whose credentials are here, it names the file. A note, host,
+description or tags (`tags:  env=demo`) appear as one more line only when
+set. A suspended endpoint adds `status:  SUSPENDED since <time>`, then the
+`suspension id` and `last message` lines (set by `mashctl endpoint suspend`,
+undone by `mashctl endpoint resume`; see C3).
 
 **AFTER, `--detail`**
 
@@ -1123,7 +1395,7 @@ group:         demo
 name:          bob
 storage name:  acme_demo_bob
 mail subject:  agents.mail.acme.demo.bob
-agent:         claude-code
+runs with:     claude-code
 created:       2026-11-19 00:22 UTC
 note:          -
 role:          -
@@ -1135,7 +1407,9 @@ capabilities:  -
 account key:   AD7BK6VI6EGIDZ2XXCLTKUBGR5NOIJYVZ77DTRETXNW2XXPNQTK2UGO6
 public key:    UAO35ZE32HBKAMOGS4CYOJCJWGWGGEGGDEWOLR5Q2L47QFBJMQJRU3CC
 token:         signed 2026-11-19 00:22 UTC, purpose issue, not revoked
-credentials:   ~/.config/mash/acme.demo.bob.creds
+online:        no
+unread mail:   3
+credentials:   not on this machine
 ```
 
 **What changed and why**
@@ -1145,8 +1419,14 @@ credentials:   ~/.config/mash/acme.demo.bob.creds
   and name are not repeated on the default screen. In `--detail` the
   storage name appears under its own label, so it is not an unexplained
   second form. The slash form is not shown anywhere.
+- DRAFT10 (critic A.show): the default has the three things people ask
+  about: `online`, `unread mail` and, when set, `status: SUSPENDED`. `type`
+  is the only word for agent or tool; the program an agent runs is `runs
+  with` in `--detail` (it was `agent:`, a second name for type). Bob's
+  credentials are on bobs-laptop, so the example says `not on this machine`.
 - P9 (point 16, "most of this detail could be shoved into --detail"): the
-  default form has four lines: created, type, token, credentials. Empty
+  default form has six lines: created, type, token, online, unread mail,
+  credentials. Empty
   fields are not printed in the default form. Account key, public key, mail
   subject and agent move to `--detail`.
 - P6: `issue record: purpose issue ... not revoked` becomes `token: valid,
@@ -1174,71 +1454,62 @@ next screen in the video was another command (the maintainer's point 11).
 **AFTER**
 
 ```text
-Run a session as bob (on myserver)
+Run a session as bob (on bobs-laptop)
 
-Step 1. Open a terminal on myserver, in the folder bob works in.
+Step 1. Open a terminal on bobs-laptop, in the folder bob works in.
 
 Step 2. Install the mash plugin in Claude Code, once on this machine:
   claude plugin marketplace add bogworks/mash
   claude plugin install mash@mash
 
-Step 3. Tell mash which endpoint this session is. Name it by its full
-address, in "endpoint" in ~/.config/mash/config.json, or in MASH_ENDPOINT in
-the terminal. The file holds one endpoint; with only one endpoint installed
-mash uses it and needs neither. Here alice and bob are both installed, so
-each session names its own. The owner is saved in the same file ("owner"),
-which adopt wrote.
-
-NEXT: in the terminal the session starts from, run these two lines in order:
-  export MASH_ENDPOINT=acme.demo.bob
+Step 3. Start Claude Code with mash's channel on:
   claude --dangerously-load-development-channels plugin:mash@mash
 
-Claude Code asks you to confirm this each time it starts. Answer yes. mash
-signs in with bob's credentials, the file ~/.config/mash/acme.demo.bob.creds.
+Claude Code asks you to confirm this each time it starts. Answer yes. The
+flag is there because mash's channel is not on Claude Code's approved list.
+Without it, mail still arrives at your next prompt; the channel is what wakes
+an idle session.
 
-For alice, open a second terminal and run the same two lines with
-acme.demo.alice in place of acme.demo.bob.
+mash signs in with bob's credentials file, the one Step 3 saved. Only bob is
+installed on bobs-laptop, so no setting is needed. alice runs the same way on
+myserver.
 ```
 
-If a session starts with no endpoint set and two endpoints installed:
+If two endpoints are installed on one machine and none is chosen:
 
 ```text
 $ mash status
-error: no endpoint is set.
-fix: set "endpoint" in ~/.config/mash/config.json to the endpoint's address.
+error: no endpoint is set, and 2 are installed here.
+fix: pick one for this shell:
+  export MASH_ENDPOINT=acme.demo.alice
+  export MASH_ENDPOINT=acme.demo.bob
 
-Or, to test in this shell only, run:
-  export MASH_ENDPOINT=<owner>.<group>.<name>
+Or, to keep the choice, set "endpoint" in ~/.config/mash/config.json to the
+endpoint's address.
 ```
 
 **What changed and why**
 
 - Point 11: the step that follows Step 3 is this one, in the order a user
-  does it, with the exact setting for bob.
-- Launch lines (R6): the export and the launch are two commands, each alone
-  on its own line, in one NEXT: the sentence says to run these two lines in
-  order in the terminal the session starts from. Joined on one line they
-  would pass 80 columns. No printed command sets MASH_OWNER (R4).
+  does it. DRAFT10 (V4, critic A.session): bob runs on bobs-laptop with only
+  his own credentials installed, so no `export` is needed and the launch is
+  one command. DRAFT9 asked for two exports and a long paragraph about the
+  config file; both are gone.
 - One setting (DRAFT7): `MASH_ENDPOINT` takes the endpoint's full address and
-  replaces MASH_GROUP and MASH_NAME. R-true-fix: the persistent place is the
-  config file (`endpoint`, with the resolved path, named first); it holds one
-  endpoint, so with two endpoints on a machine each terminal exports its own.
-  The `export` line is true because Claude Code starts from the same
-  terminal. With exactly one endpoint installed neither is needed. config.json
-  holds the owner and may hold the endpoint (it no longer holds the owner
-  only).
-- No endpoint set: `error: no endpoint is set.`, with a labelled fix that names
-  `endpoint` in the config file first and the export as the one-shell test.
-  There is no refusal that asks for MASH_GROUP or MASH_NAME.
+  replaces MASH_GROUP and MASH_NAME. With exactly one endpoint installed
+  neither it nor `endpoint` in the config file is needed (contract REQ-009).
+- No endpoint set: `error: no endpoint is set, and 2 are installed here.`
+  mash knows which credentials are installed, so the fix lists them
+  (critic A.session). The config file is named for a lasting choice
+  (R-true-fix: an export lives in one shell).
 - Start command (review finding 2): the DRAFT3 command, `claude --channels
   plugin:mash@mash`, is refused ("not on the approved channels allowlist")
   without a managed channel allowlist (docs/install.md section 3). For one
   person section 3 gives the development form, `claude
   --dangerously-load-development-channels plugin:mash@mash`, which needs no
-  administrator and asks for a confirmation at each launch. The walkthrough
-  uses it, and adds the plugin install commands from section 2 as Step 3.
-  Section 3 is optional for one person: without a channel, mail still arrives
-  at the next prompt or tool call; the channel is what wakes an idle session.
+  administrator and asks for a confirmation at each launch. DRAFT10 says
+  once why the flag is there. Section 3 is optional for one person: without a
+  channel, mail still arrives at the next prompt or tool call.
 - Point 18 and rule 15: the session uses the mash tools (MCP). The CLI
   commands in the next part are for the person.
 
@@ -1297,17 +1568,18 @@ exits 1 with `mash: no endpoint named "..."`.
    capabilities `--capability`; suspend and resume are `mashctl endpoint
    suspend|resume`; `mashctl list` is removed. Accepted for the review.
    `endpoint reissue` keeps its name (decided).
-4. The other-machine flow shows the machine name only in the NEXT lines
-   ("on bob's machine", "on the machine that runs mashctl"), because the
-   setup block says one machine. A reader on two machines sees the copy
-   sentences; on one machine they skip them. Reasoning: the maintainer's
-   point 6 wants one machine; the task asks for the other-machine path in full.
+4. The walkthrough is two machines (DRAFT10): `myserver` runs the NATS
+   server and mashctl, and alice runs there; `bobs-laptop` runs bob. The
+   setup block draws both. A tool does not know the name of another machine,
+   so a tool's own text says "bob's machine" and the walkthrough headings
+   name `bobs-laptop`. Reasoning: the critic's A.0 and C.1 (the setup block said
+   one machine above steps that copy files between machines).
 5. After Step 3 and after alice the NEXT is one command (check the endpoint
    signs in) and a second, "Or add another endpoint", separated by a blank
    line. Reasoning: the walkthrough makes alice before a session starts, so a
    single NEXT to the session would be untrue on the screen after bob
-   (point 11). The check line puts the identity on the command so it works in
-   a shell that has exported nothing.
+   (point 11). With one endpoint installed on a machine the check needs no
+   setting; with several it carries `MASH_ENDPOINT=<address>`.
 6. `--explain` on `mashctl endpoint create ... --make-key` prints one opening
    paragraph and three step blocks, each ending `Done: ...`, with no `$`
    echo per step. Reasoning: there is one command, so one `$`; the rules
@@ -1317,7 +1589,8 @@ exits 1 with `mash: no endpoint named "..."`.
    used in `mash send`.
 8. `mashctl endpoint list` counts on stdout (`2 endpoints`), after a blank
    line. Reasoning: the catalog puts it on stderr, which a pipe loses.
-9. The default `show` prints four lines and `--detail` prints the rest;
+9. The default `show` prints six lines (DRAFT10: created, type, token, online,
+   unread mail, credentials) and `--detail` prints the rest;
    `show` omits empty fields by default and `--detail` prints them as `-`.
 10. `mashctl status` prints the verdict first (`OK`, `PROBLEM`, `NOT
     REACHABLE`), then `label: value` lines with a colon like the maintainer's
@@ -1347,24 +1620,26 @@ exits 1 with `mash: no endpoint named "..."`.
     is listed in `--help` and in the walkthrough.
 18. The plain-URL refusal exits 1 in `adopt` and in every command (decided,
     R2; written once in the conventions block). REQ-014 is being updated.
-19. The NEXT after `mash key create` and `mashctl endpoint create` carries
-    `<owner>.<group>` and `<key file>` placeholders. Reasoning: R-paste; mash
-    does not know them unless the config names them.
+19. The NEXT after `mash key create` carries `<address>`, because mash does
+    not know the owner or group on a new machine. The NEXT after `endpoint
+    create --public-key` carries the real token file and `bob.key`; it has no
+    placeholder: the fingerprint is typed at the prompt of the install (36).
 20. The word `seed` stays once, in Step 1 ("NATS calls it a seed"). Review 2
     asked to move it to `--detail`; rule 7 decided it stays in the key step.
-21. Table headers: `ENDPOINT` is the name (`bob`) and `PATH` the dotted
-    address (`acme.demo.bob`), in every grouped table (columns `OWNER GROUP
-    ENDPOINT PATH`), as in the maintainer's mockup and part 2; the old
-    `ADDRESS` and `NAME` headers are retired. `ENDPOINT` is 8 columns wide,
-    so the `--wide` list table header now fills exactly 80 columns; if the
-    NOTE column ever grows its header, drop `HOST` from `--wide` first.
+21. Table headers (DRAFT10): `ENDPOINT` is the name (`bob`) and `ADDRESS` the
+    dotted address (`acme.demo.bob`), in every grouped table (columns `OWNER
+    GROUP ENDPOINT ADDRESS`). `PATH` and the old `NAME` header are retired.
+    `ENDPOINT` is 8 columns wide, so the `--wide` list header fills 77
+    columns; if the NOTE column ever grows its header, drop `HOST` first.
 22. Removing `mashctl init --local` reverses the local TLS quick start that
     ADR 0146 and 0.5.5 shipped. The contract that ratifies this document
     carries the ADR (mash order 17: mashctl does not install, configure or
     start NATS). Until then this is a proposal.
-23. The plain-URL refusal shows the override, because ADR 0146 requires it:
-    `insecure_plaintext` (`MASH_INSECURE_PLAINTEXT=1`), with a warning that it
-    is for a throwaway test server only.
+23. The plain-URL refusal shows the override, because ADR 0146 requires it, in
+    one form only (DRAFT8, REQ-010): `MASH_INSECURE_PLAINTEXT=1` before the
+    command, for that run. The config key `insecure_plaintext` is removed and
+    no mash command writes the override. The refusal says that credentials and
+    mail then cross the connection unencrypted, for a test server only.
 24. adopt saves the CA's absolute path. Reasoning: adopt saves `MASH_TLS_CA`
     as typed today, and a relative value is later read under the config
     folder, so the next `mashctl init` can fail TLS verification. The target
@@ -1378,31 +1653,36 @@ exits 1 with `mash: no endpoint named "..."`.
     It writes the credentials at FILE in one command (mode 0600); without
     it they go to the config folder, as today. Reasoning: a person who runs
     the agent on another machine copies one file, not two.
-27. The source phrase in a result line that changes something: `(set by
-    MASH_URL in this shell)` when the environment chose the server, `(from
-    ~/.config/mash/config.json)` when the config file did, and `(from
-    --server)` for `adopt`. Reasoning: a mashctl run inside a mash session
-    inherits the session's environment and can target the wrong server; the
-    reason sits on the result line itself, so no line comes before it.
-    Alternatives: `(from the environment)`, or the variable name alone.
+27. No success output names the server or the config file (DRAFT10, V1;
+    contract REQ-001). They appear on failure, under `--detail` and in
+    `mashctl status`. One line remains, for the trap of a `mashctl` run inside
+    a mash session, which inherits MASH_URL: when the server comes from
+    MASH_URL and the config file names another server, and only then, the
+    command prints `warning: using the server from MASH_URL in this shell (the
+    config file names another server)` on stderr before it acts. A normal run
+    prints nothing. The result lines that carried `(from ~/.config/mash/
+    config.json)` and `(set by MASH_URL ...)` (36 places in DRAFT9) are
+    shorter. `make_packet.py` fails any success block that contains `tls://` or
+    a config path, except the file lines of `credential install` and `adopt`,
+    the trust prompts and the typed commands (the exceptions are listed in the
+    script).
 28. Both ways to get credentials print file lines in core's shape: two
     spaces, a lowercase verb (`wrote`, `kept`, `copied`), the file, a
     parenthesis (`(mode 600)`, `(server, owner, CA)`). `mash credential
     install` prints `wrote` for the credentials and `config.json` and
     `copied` for the certificate file, or `kept` for `config.json` when it
-    already points at the same server; `endpoint create --make-key` prints
-    `wrote` for the credentials and `kept` for `config.json` and the
-    certificate file, which already exist where mashctl runs. Core confirmed
-    the install block, which is used unchanged.
+    already holds the same server and CA; `endpoint create --make-key` prints
+    only `wrote` for the credentials (DRAFT10: the `kept` lines for files it
+    did not touch are gone). Core confirmed the install block.
 29. `mash credential install --creds FILE` (core accepted it) installs the
     file that `--creds-out` wrote, with the same writes as `--key --token`.
     The `--creds-out` output says that copying the file moves a private key
     across machines, and that the three-step path keeps the key on the
     agent's machine.
-30. The launch of Claude Code is two commands in one NEXT (R6): `export
-    MASH_ENDPOINT=acme.demo.bob`, then `claude
-    --dangerously-load-development-channels plugin:mash@mash`, each alone on
-    its own line, because the two joined pass 80 columns.
+30. The launch of Claude Code is one command (DRAFT10): bob is alone on
+    bobs-laptop, so no `export MASH_ENDPOINT=...` is needed (REQ-009). Where
+    two endpoints are installed on one machine, the `no endpoint is set`
+    error lists them.
 31. No printed NEXT or fix command sets MASH_OWNER (R4): the owner is in
     `config.json`. A session needs its endpoint named in full: `endpoint` in
     `config.json`, or MASH_ENDPOINT in the terminal that launches it.
@@ -1421,6 +1701,99 @@ exits 1 with `mash: no endpoint named "..."`.
     colour rule, `--json`, resolved paths and the label rules are written
     once there. Every error line starts `error:`; hints are `fix:`, `NEXT:`,
     `Or` or `See`. Mockups print `<version>`, never a version number.
+35. Audit of confirmations: every command that changes trust, exposure or
+    destroys something (contract INV-004). The contract's words: "A change of
+    trust (another server or CA for an endpoint) or of exposure (listening on
+    more than loopback, firewall rules, a startup unit) needs the person's own
+    confirmation: an interactive prompt on a terminal that shows the exact
+    address, CA fingerprint, interface or scope and asks the person to type
+    it back. No flag (`--yes` or similar) and no environment variable stands
+    in for it." And: "INV-004 also covers destruction: `mashctl endpoint
+    delete`, and a reissue that replaces a key mash did not make on this
+    machine, state what will be lost before acting ... and need the same typed
+    confirmation; the output afterwards proves the old credential is refused,
+    or gives the one command that proves it." DRAFT10 decides that every
+    single reissue of an endpoint qualifies, because every one revokes a key.
+    No command in this document offers a flag that skips a confirmation.
+
+    | Command | Kind of change | Confirmation (what the person types) |
+    |---|---|---|
+    | `adopt` with a CA file | trust | the fingerprint |
+    | `credential install`, first install | trust | the fingerprint, from the hand-off |
+    | `credential install` replacing the saved server or CA | trust | `--replace` and the new fingerprint |
+    | `credential install` over credentials for the same address | replaces a key | the address |
+    | `MASH_INSECURE_PLAINTEXT` (any command) | plain text | the variable for one run, a warning on every command; see below |
+    | `endpoint delete` | destroys the inbox, retires the address, revokes the key | the address |
+    | `endpoint reissue` (one endpoint) | revokes the old key | the address |
+    | `endpoint reissue --all`, `--changed` | revokes the old keys | the count (`Type 3 to reissue 3 endpoints`) |
+    | `deprovision` | destroys the inbox, revokes the key | the address (D8) |
+    | `set`, `suspend`, `resume`, `provision` | none | none |
+    | `init`, `limits`, `permissions`, `audit`, `issued`, `inbox inspect` | none | none |
+    | `init --local`, `--start` | exposure | removed, so nothing to confirm |
+
+    CLI standard rule 15 says a command prompts only when standard input is a
+    terminal, that every prompt has a flag that answers it (`--yes`), and that
+    without a terminal it fails with exit 2 naming that flag. INV-004 departs
+    from rule 15 on the flag (there is none), and this document departs on the
+    code: a command with no terminal exits 4 (not authorized, rule 14), because
+    no flag can fix it; a wrong answer exits 3 (cancelled, rule 14). [confirm:
+    the contract text cites "the CLI standard's confirmation rule" with no
+    number; this is rule 15 of standard 1.1.1, and the contract cites 1.2.0.]
+    Without a terminal, a confirmation refuses with `error:` and `fix:` (adopt,
+    delete and install show both). [confirm: the plain-text override is a
+    variable, as REQ-010 says, while INV-004 says no environment variable
+    stands in for a confirmation; this document follows REQ-010 and warns on
+    every command, and the contract should say which rule wins.]
+36. The hand-off (DRAFT9 U1, DRAFT10 V4): the two files to copy with their
+    paths on this machine, one sentence on why the fingerprint goes
+    separately, the fingerprint on a line of its own, and a NEXT that carries
+    the real token file and key file. The install then asks the person to type
+    the fingerprint, as `adopt` does. DRAFT9 put `--ca-fingerprint <fingerprint>`
+    in the command (98 columns, with a placeholder for a value mashctl knew; a
+    real fingerprint would make it 150). [confirm with core: contract REQ-003
+    says `credential install` requires `--ca-fingerprint`, and INV-004 says no
+    flag stands in for a typed confirmation. This document follows INV-004. If
+    the flag stays for scripts, it is listed in `--help`, and the person's
+    command is the short one.] [confirm with core: the token carries the server
+    address, and `ca.pem` beside the token is used when `--ca` is not given;
+    without both the NEXT needs `--server` and `--ca`.]
+37. The MASH_ENDPOINT proposal departs from ADR 0012 on the session name, and
+    the removal of `init --local` with its exit code departs from ADR 0146.
+    Both are proposals in this document; the ratifying contract carries the
+    ADRs (choices 32 and 22).
+38. The skill and the script that the `init --local` message names ship from
+    another change. Until it is merged and the files are published at the
+    URLs the message gives, the message points at nothing; the URLs and the
+    release page are to confirm.
+39. Replacing installed credentials (DRAFT10, V4): `mash credential install`
+    over credentials for the same address needs no `--force`. It says what is
+    replaced ("The current credentials for acme.demo.bob use an old key that
+    the server now refuses.") and the person types the address. Wrong answer:
+    exit 3. No terminal: exit 4. Reasoning: the walk showed the second install
+    after a reissue failing with `file_exists` until `--force`.
+40. Reissue writes a numbered token (DRAFT10, V4): the first token for an
+    address is `acme.demo.bob.token`, the next `acme.demo.bob.2.token`, then
+    `.3`. The output says so and keeps the earlier file. Alternative: refuse
+    and name `--token-out`. Reasoning: the walk (finding 8) and the critic (E4)
+    found that a reissue from the folder where `create` wrote the token failed
+    with `file_exists`, so the documented second step failed on first use.
+41. The NEXT after a reissue names the new key file the person made
+    (`bob2.key`, derived from `bob2.pub` by the rule `mash key create` uses),
+    never the old key (walk finding 9: the old line named `bob.seed` and
+    failed with `key_mismatch`).
+42. `endpoint create` with MASH_URL set refuses with `error:` when the
+    administrator credentials in use belong to another server than MASH_URL
+    names (DRAFT10, V5), naming both servers. DRAFT9's `--replace` path for
+    `endpoint create --make-key` is removed.
+43. Exit-code changes in Part 1 (DRAFT10, V3), one per command whose code
+    changed: `mashctl status` NOT REACHABLE 1 to 6; `adopt` wrong fingerprint
+    1 to 3 and no terminal 1 to 4; `endpoint suspended` is gone (it exited 3
+    for "not suspended", the standard's "cancelled").
+44. A delete ends with the command that lists what remains and one sentence
+    that a new endpoint needs a new name (DRAFT10, V5). The earlier rule that
+    every delete ends `NEXT: create an endpoint with a new name` is dropped:
+    it offered a step that was not the next one for a person who deleted by
+    mistake, and nothing can restore the address.
 
 ## Facts to confirm
 
@@ -1431,7 +1804,7 @@ exits 1 with `mash: no endpoint named "..."`.
   running"]
 - [confirm: `mashctl status` connects to the server to test it and to see
   whether init ran; the catalog shows only values read from `config.json`]
-- [confirm: `mashctl status` exits 1 on `PROBLEM` and `NOT REACHABLE`]
+- [confirm: `mashctl status` exits 1 on `PROBLEM` and 6 on `NOT REACHABLE`]
 - [confirm: `mash key create --out bob.key` writes `bob.pub` (the catalog
   says a trailing `.seed` becomes `.pub`, and any other name gets `.pub`
   appended, so `bob.key` would give `bob.key.pub` today; the rules decide
@@ -1461,20 +1834,61 @@ exits 1 with `mash: no endpoint named "..."`.
   not do")]
 - [confirm: the address `tls://myserver:4222` is an example; the TLS
   certificate must name myserver]
-- [confirm: whether mash needs `bob.key` and the token file after
-  `mash credential install`; no line in the output says to keep or delete
-  them]
+- [walk, answer c: mash runs with the credentials file alone; moving the key
+  and the token aside left `mash send` working. Step 3's long form says so.]
+- [walk, findings 2, 3, 5, 6, 16: on a fresh machine, v0.5.5's `credential
+  create` wrote only the credentials file, so the server address, the CA and
+  the group came from nowhere. The target is that `credential install` writes
+  `config.json` (server, owner, CA copy) and takes the address from the
+  token. Confirm with core that the token holds the server address; the walk
+  says today's token holds none.]
+- [walk, finding 4: `endpoint create` and `reissue` print the token path
+  relative (`./acme.demo.bob.jwt`) and do not say the file is mode 0600. The
+  target prints the full path. Confirm the token's mode: the contract says a
+  token is not secret, but the walk found it 0600, so the copy across users
+  failed until `chmod`.]
+- [walk, finding 11: mail that bob sent before a reissue shows as
+  `[unknown-signer]` in his own inbox afterwards, while new mail is
+  `[verified]`. Nothing says so. Confirm whether the reissue output should
+  warn, and what the mash targets show for it.]
+- [walk, finding 12: `endpoint show` printed a creds file path although no
+  file exists on that machine. The target prints `not on this machine`.]
+- [walk, finding 13: a public-key reissue left `acme.demo.bob.creds.lock` on
+  the machine with no credentials for bob. Confirm that a reissue with
+  `--public-key` takes no lock file where nothing is written.]
+- [walk, finding 17: `init --local` listened on 127.0.0.1 only, so a second
+  machine cannot reach it. The two-machine flow assumes a server a second
+  machine can reach; the setup skill owns that.]
+- [confirm: `credential install` can tell that the installed credentials are
+  for the same address and that the server refuses their key; it may need one
+  connection. If it cannot connect, the sentence should say "may use an old
+  key".]
+- [confirm: mashctl records which server the administrator credentials were
+  made for (adopt wrote both), so a MASH_URL that names another server is
+  refused before any connection (the walk saw exit 6 `Authorization
+  Violation` and nothing written).]
+- [confirm: the CLI standard's rules 14 and 15 are quoted from standard 1.1.1;
+  the contract cites 1.2.0 for rules 24 to 33 and gives its "confirmation
+  rule" no number.]
 - [core confirmed: `mash credential install --key K --token T [--server
   <url>] [--ca <ca.pem>] [--out <dir>] [--force] [--dry-run] [--detail]
   [--json]` prints the block in section 2 (`wrote`, `wrote`, `copied`; or
   `kept` for `config.json`), and `--creds FILE` makes the same writes from
   a credentials file made by `mashctl endpoint create --make-key
   --creds-out FILE`]
-- [confirm: the `kept` line for the certificate file in the `endpoint
-  create` output names the folder copy in the mockup; adopt saves the full
-  path of the file as typed, so the line may need to show that path]
-- [confirm: `--creds-out FILE` is written with mode 600 in place, is never
-  overwritten (a refusal names the file) and its folder is not created]
+- [confirm: `--creds-out FILE` is created exclusively as a new regular file in
+  a folder the person owns, without following links, mode 600 from creation,
+  completed atomically (INV-003); an existing different file, a link and a
+  folder the person does not own are refused before the endpoint is made
+  (E3), and the folder is not created]
+- [confirm: `mashctl adopt` copies the admin credentials into mashctl's own
+  folder (mode 600); the destination `~/.config/mash/server/mashadmin.creds`
+  and the `copied` line follow the 0.5.5 layout]
+- [confirm: the exact release-page wording in the setup block (`mashctl is a
+  program you download from the release page`) and the page address]
+- [confirm: a repeat `adopt` keeps the files and prints `kept` lines (H3);
+  `endpoint delete` of an address with no server record but a local
+  credentials file refuses and names `--force` (H7)]
 - [confirm: mashctl can tell that the server came from MASH_URL rather than
   the config file, and the other variables in a session's environment
   (MASH_OWNER, MASH_ENDPOINT) do not change which server is used]
@@ -1521,7 +1935,7 @@ place, not a word).
 
 ---
 
-# mashctl 0.5.6 target output, part 2: every command except the first-run journey, DRAFT7
+# mashctl 0.5.6 target output, part 2: every command except the first-run journey, DRAFT10
 
 Status: design proposal, no code. Written against the catalog
 `docs/plans/2026-11-19-cli-output-catalog-mashctl.md` (v0.5.5) and the rules in
@@ -1537,20 +1951,12 @@ How to read the mockups.
   indented two spaces, complete, not wrapped, with no full stop or comma after
   it, and `<placeholder>` for any value mash cannot know. A document is not a
   NEXT: it is written `See <path>`.
-- A command that reports a state (`audit`, `issued check`, `endpoint suspended`)
+- A command that reports a state (`audit`, `issued check`)
   prints the verdict first, in words that read without colour (`OK`, `PROBLEM`,
   `INCOMPLETE`, `SUSPENDED`), then only what is wrong or asked for.
-- The server named in a result line (`tls://127.0.0.1:24222`) is the server the
-  command changed. It replaces the old `mashctl: target server ...` line, which
-  is gone from every command (P1).
-- A command that changes something says where that server came from in the
-  same result line, never in a line before it: `(from
-  ~/.config/mash/config.json)` or `(set by MASH_URL in this shell)`. A
-  mashctl run inside a mash session inherits MASH_URL and the rest of the
-  session's environment; this is how a person sees a wrong server. The
-  `Would ...` line of a dry run says it too. A line that is longer than 80
-  columns wraps at a space and continues on the next line. Commands that only
-  read name the server without the source.
+- No success output names the server or the config file (conventions block,
+  DRAFT10). A failure names the server it could not use. The old `mashctl:
+  target server ...` line is gone from every command (P1).
 - `$ command` and `[exit N]` lines are annotations for the reader. The program
   prints only the lines under them.
 - Names: owner `acme`, group `demo`, endpoints `alice` and `bob`, machine
@@ -1559,15 +1965,19 @@ How to read the mockups.
   and type it in commands: mashctl takes `acme.demo.bob`. The slash form may
   still work but is not shown. In a grouped
   table the column that holds the name is headed `ENDPOINT`; the dotted address
-  column, where a table has one, is headed `PATH` (part 1's endpoint list has
-  both: `OWNER GROUP ENDPOINT PATH`); a column that holds an address in a
-  message table is headed `ADDRESS` or `FROM`.
+  column, where a table has one, is headed `ADDRESS` (part 1's endpoint list
+  has both: `OWNER GROUP ENDPOINT ADDRESS`); a column that holds an address in
+  a message table is headed `ADDRESS` or `FROM`.
 - Points P1..P9 are the nine points of the catalog (P1 preamble, P2 address three
   ways, P3 unaligned tables, P4 NEXT lines, P5 over 80 columns, P6 undefined
   words, P7 agent output shown to a person, P8 repeated fields, P9 unasked
   detail).
 - Dry-runs end `Nothing was changed.` and print no NEXT, except a bulk reissue
-  dry run, which names the same command with `--yes` (see Choices).
+  dry run, which names the command to run (see Choices). A dry run of a
+  command that asks for typed confirmation prints the same "will lose" text
+  and asks nothing.
+- Exit codes in every `[exit N]` below are the one table in the conventions
+  block (rule 14 of the CLI standard, plus 5 and 6 from the contract).
 
 ---
 
@@ -1582,7 +1992,7 @@ mashctl
                status           show the server mashctl uses, and if it works
   Endpoints    endpoint create | list | show | set
                endpoint reissue | delete
-               endpoint suspend | resume | suspended
+               endpoint suspend | resume
   Inspect      audit
                issued list | check
                inbox inspect
@@ -1596,9 +2006,10 @@ Proposals, each marked as a proposal:
 
 - `endpoint set` replaces `label`, `unlabel` and `set-meta`. One verb changes
   what an endpoint is described as: role, host, description, tags, capabilities.
-- `endpoint suspend`, `endpoint resume` and `endpoint suspended` replace the
-  top-level `suspend`, `resume`, `suspended`. Exit codes stay (0, 1, 2, and 3 for
-  "not suspended").
+- `endpoint suspend` and `endpoint resume` replace the top-level `suspend` and
+  `resume`. `suspended` is gone (DRAFT10): it existed only to answer a question
+  with an exit code (3 for "not suspended"), and 3 is "cancelled" in the one
+  exit-code table. `endpoint show` says whether an endpoint is suspended.
 - `mashctl list` is removed. It is a second, different `endpoint list` (tab
   separated, public key, no header).
 - `provision` and `deprovision` stay, under Advanced, with the same names in
@@ -1640,11 +2051,13 @@ Connect
 
 Endpoints   (an endpoint is an agent or tool with an address on the mail mesh)
   endpoint create     make an endpoint and its credentials
-  endpoint list       list endpoints            endpoint show   show one
+  endpoint list       list endpoints
+  endpoint show       show one endpoint
   endpoint set        change an endpoint's role, host, description, tags
   endpoint reissue    give an endpoint a new key (the old key stops working)
   endpoint delete     delete an endpoint and its inbox for good
-  endpoint suspend    stop delivering mail to an endpoint (resume undoes it)
+  endpoint suspend    stop delivering mail to an endpoint
+  endpoint resume     deliver mail to an endpoint again
 
 Inspect
   audit               what the server holds, and what is left over
@@ -1657,13 +2070,9 @@ Advanced
   provision           register an endpoint whose NATS user someone else made
   deprovision         remove such an endpoint
 
-Moved or removed
-  list                       removed; see endpoint list
-  label, unlabel, set-meta   moved; see endpoint set
-  suspend, resume            moved; see endpoint suspend and endpoint resume
-  init --local, --start      removed; mashctl does not install NATS
-                             See docs/skills/mash-nats-local/SKILL.md and
-                             scripts/nats-local-setup.sh
+To set up a NATS server first, see the setup skill and the script it runs:
+https://github.com/bogworks/mash/blob/main/docs/skills/mash-nats-local/SKILL.md
+https://github.com/bogworks/mash/blob/main/scripts/nats-local-setup.sh
 
 An address is owner.group.name, for example acme.demo.bob. Add --json for
 scripts, --help for a command.
@@ -1678,9 +2087,14 @@ What changed and why:
   instead of two layouts in one table.
 - Feedback 14 and rule 1: nothing about the server is printed here; `status`
   shows it on request.
-- Rule 14 (feedback 1): `init --local` is listed only in the removed block.
+- Rule 14 (feedback 1): `init --local` is not listed; its error (A5) says why.
 - Rule 12: one-line summary, usage, grouped list; the example is in each
   command's own `--help`.
+- DRAFT10 (critic A.A3): `endpoint list` and `endpoint show` are one line each
+  (the column broke when two shared a line); `endpoint resume` is listed; the
+  "Moved or removed" block is gone. The removed commands say what replaced
+  them in their own error (A5) and in the release notes, and the old block
+  lacked `add`, `reissue` and `retire`.
 
 ### A4. AFTER: `mashctl endpoint --help`
 
@@ -1693,13 +2107,21 @@ Usage: mashctl endpoint <command> [options]
 
   create      make an endpoint and its credentials
   list        list endpoints (--wide for more columns)
-  show        show one endpoint
+  show        show one endpoint, and whether it is suspended
   set         change an endpoint's role, host, description or tags
   reissue     give an endpoint a new key; the old key stops working
   delete      delete an endpoint, its inbox and its address for good
   suspend     stop delivering mail to an endpoint
   resume      deliver mail to an endpoint again
-  suspended   say whether an endpoint is suspended (exit 3 if it is not)
+
+Options (each command's --help says which it takes)
+  --all       every endpoint whose credentials are on this machine (reissue)
+  --changed   only the endpoints that need a new key (reissue)
+  --dry-run   print what would be done and change nothing
+  --detail    print everything that was done
+  --wide      add columns to a list
+
+delete and reissue say what will be lost and ask you to type the address.
 
 Example:
   mashctl endpoint create acme.demo.bob --make-key
@@ -1727,24 +2149,36 @@ $ mashctl endpoint create --help
 mashctl endpoint create - make an endpoint on the server
 
 Usage:
-  mashctl endpoint create OWNER.GROUP.NAME --make-key [--creds-out FILE]
-  mashctl endpoint create OWNER.GROUP.NAME --public-key FILE
+  mashctl endpoint create <address> --make-key [--creds-out <file>]
+  mashctl endpoint create <address> --public-key <file>
 
 Use --make-key when the endpoint runs on this machine: one command makes the
 private key, signs it and writes the credentials. Use --public-key when the
 key was made on another machine with mash key create.
 
 Flags:
-  --make-key          make the private key here and write the credentials
-  --creds-out FILE    write the credentials to FILE (mode 0600). Without it
-                      they go to ~/.config/mash/OWNER.GROUP.NAME.creds
-  --public-key FILE   sign a public key made on another machine; writes the
-                      token
-  --token-out FILE    write the token to FILE. Default: OWNER.GROUP.NAME.token
-                      in this folder
-  --tag K=V           add a tag to the endpoint (repeat for more)
-  --explain           print each step and why it is done
-  --detail            print everything that was done
+  --make-key           make the private key here and write the credentials
+  --creds-out <file>   write the credentials to <file>: a new file, private
+                       to you (mode 0600) from the moment it is made, in a
+                       folder you own. A file that already exists is refused.
+                       Without it they go to
+                       ~/.config/mash/<address>.creds
+  --public-key <file>  sign a public key made on another machine; writes the
+                       token and prints what to give that machine: the token
+                       file, the CA file and the CA fingerprint
+  --token-out <file>   write the token to <file>. Default: <address>.token in
+                       this folder
+  --tag K=V            add a tag to the endpoint (repeat for more)
+  --tool               mark the endpoint as a tool, not an agent
+  --note TEXT          a note kept with the endpoint
+  --describe TEXT      one sentence about the endpoint
+  --capability WORD    add a capability (a word for something it can do)
+  --dry-run            print what would be done and change nothing
+  --explain            print each step and why it is done
+  --detail             print everything that was done
+
+The address is one argument, owner.group.name. There are no --owner or
+--group flags.
 
 Example:
   mashctl endpoint create acme.demo.alice --make-key
@@ -1757,29 +2191,44 @@ What changed and why:
   other-machine path, `--public-key FILE`, with the file each one writes.
 - It prints no NEXT: the NEXT of this command depends on the flag used, and
   the command prints it after a run.
+- DRAFT9 (U1, U2): `--public-key` says it prints the hand-off block.
+- DRAFT10 (V5, V6, critic A.A4): `--replace` is gone from `endpoint create`
+  (a MASH_URL that names another server is a refusal; Part 1, choice 42). The
+  help documents exactly the flags that work: the address is one dotted
+  argument, so `--owner` and `--group` are not flags (E1 no longer shows
+  them). Placeholders are `<address>` and `<file>`, one form each. The hand-off
+  no longer lists the server: the token holds it (Part 1, choice 36).
+- DRAFT8: `--creds-out` is described as a new private file (T1); the flags
+  `--tool`, `--note`, `--describe`, `--capability` and `--dry-run`, which the
+  v0.5.5 help had, are listed (T5).
 
 ### A5. AFTER: removed commands and flags
 
-All exit 2, nothing is changed. Two lines, `error:` then `fix:` (rule 10).
+All exit 2 (wrong usage: the command or flag no longer exists), nothing is
+changed. Two lines, `error:` then `fix:` (rule 10). The fix uses the person's
+own address and files when they typed them.
 
 ```text
-$ mashctl add
+$ mashctl add acme.demo.bob --public-key bob.pub
 [exit 2]
 error: mashctl add was removed.
 fix: create an endpoint with the new command:
-  mashctl endpoint create <owner>.<group>.<name> --public-key <file>
+  mashctl endpoint create acme.demo.bob --public-key bob.pub
 
-$ mashctl reissue
+$ mashctl reissue acme.demo.bob
 [exit 2]
 error: mashctl reissue was removed.
-fix: reissue an endpoint with the new command:
-  mashctl endpoint reissue <owner>.<group>.<name> --make-key
+fix: reissue an endpoint, with a new key made on the machine where it runs:
+  mashctl endpoint reissue acme.demo.bob --public-key <file>
 
-$ mashctl retire
+Or, for an endpoint that runs on this machine:
+  mashctl endpoint reissue acme.demo.bob --make-key
+
+$ mashctl retire acme.demo.bob
 [exit 2]
 error: mashctl retire was removed.
 fix: delete an endpoint with the new command:
-  mashctl endpoint delete <owner>.<group>.<name>
+  mashctl endpoint delete acme.demo.bob
 
 $ mashctl list
 [exit 2]
@@ -1810,9 +2259,15 @@ $ mashctl suspend acme.demo.bob
 error: mashctl suspend was replaced by mashctl endpoint suspend.
 fix: use the new command:
   mashctl endpoint suspend acme.demo.bob
+
+$ mashctl suspended acme.demo.bob
+[exit 2]
+error: mashctl suspended was replaced by mashctl endpoint show.
+fix: use the new command; its status line says whether bob is suspended:
+  mashctl endpoint show acme.demo.bob
 ```
 
-`resume` and `suspended` get the same two lines with their own names.
+`resume` gets the same two lines with its own name.
 
 ```text
 $ mashctl init --local
@@ -1821,7 +2276,10 @@ error: mashctl no longer installs or starts a NATS server.
 fix: set one up first, then connect mashctl to it:
   mashctl adopt --help
 
-See docs/skills/mash-nats-local/SKILL.md and scripts/nats-local-setup.sh
+See the skill that sets up a server:
+https://github.com/bogworks/mash/blob/main/docs/skills/mash-nats-local/SKILL.md
+See the script it runs:
+https://github.com/bogworks/mash/blob/main/scripts/nats-local-setup.sh
 
 $ mashctl init --start
 [exit 2]
@@ -1829,7 +2287,10 @@ error: mashctl no longer installs or starts a NATS server.
 fix: set one up first, then connect mashctl to it:
   mashctl adopt --help
 
-See docs/skills/mash-nats-local/SKILL.md and scripts/nats-local-setup.sh
+See the skill that sets up a server:
+https://github.com/bogworks/mash/blob/main/docs/skills/mash-nats-local/SKILL.md
+See the script it runs:
+https://github.com/bogworks/mash/blob/main/scripts/nats-local-setup.sh
 
 $ mashctl endpoint create acme.demo.bob --public-key b.pub --jwt-out b.jwt
 [exit 2]
@@ -1840,14 +2301,14 @@ fix: run it again with the new flag name:
 $ mash credential create --seed bob.seed --jwt acme.demo.bob.jwt
 [exit 2]
 error: mash credential create was replaced by mash credential install.
-fix: use the new command:
-  mash credential install --key bob.key --token acme.demo.bob.token
+fix: use the new command, with the same files:
+  mash credential install --key bob.seed --token acme.demo.bob.jwt
 
 $ mash credential install --seed bob.seed --jwt acme.demo.bob.jwt
 [exit 2]
 error: --seed was renamed --key, and --jwt was renamed --token.
-fix: run it again with the new flag names:
-  mash credential install --key bob.key --token acme.demo.bob.token
+fix: run it again with the new flag names, with the same files:
+  mash credential install --key bob.seed --token acme.demo.bob.jwt
 ```
 
 Unknown commands that were never real (for example `unzone`, `frobnicate`) get
@@ -1866,12 +2327,20 @@ What changed and why:
 
 - P5: each message is two lines, each under 80 columns.
 - P9: a removed command no longer prints the full usage block under its error.
-- Feedback 1 and 14 (rule 14): the `init --local` message names the skill
-  (`docs/skills/mash-nats-local/SKILL.md`) and the script
-  (`scripts/nats-local-setup.sh`), which replace
-  `docs/guides/nats-local.md`; getting a server is done outside mashctl.
+- Feedback 1 and 14 (rule 14): the `init --local` message names the skill and
+  the script, which replace `docs/guides/nats-local.md`; getting a server is
+  done outside mashctl. DRAFT9: it names them by URL, each alone on a line
+  (the URL is 79 columns, so it cannot be indented); a repository path is not
+  visible to a mashctl that was downloaded as a program.
 - The old `--seed` and `--jwt` names appear only in these messages, so a person
   who has them in a script learns the new names at once. They are not in help.
+- DRAFT10 (V5, critic A.A5, F.3): the fixes echo the person's own files and
+  values. DRAFT9 told a person with `bob.seed` and `acme.demo.bob.jwt` to run
+  `--key bob.key --token acme.demo.bob.token`, files that do not exist. `mashctl
+  reissue` no longer suggests `--make-key` first: that moves a remote
+  endpoint's key to this machine. It names `--public-key <file>` first (works
+  wherever the endpoint runs) and `--make-key` second, for this machine only.
+  `mashctl suspended` points at `endpoint show`.
 - Names follow the decided three-step flow (`--token-out`, `credential install`).
 
 ---
@@ -1895,70 +2364,84 @@ revoked user key UAGT4ZQX...: 1 server(s) acknowledged
 AFTER
 
 ```text
-$ mashctl endpoint reissue acme.demo.bob --make-key
-[exit 0]
-Reissued endpoint acme.demo.bob on tls://127.0.0.1:24222
-(from ~/.config/mash/config.json).
-  Created a new key. Credentials: ~/.config/mash/acme.demo.bob.creds
-  The old key no longer works: all 1 servers confirmed it.
-  Unread mail in bob's inbox is kept.
+$ mashctl endpoint reissue acme.demo.alice --make-key
 
-NEXT: on myserver, restart the session that runs as bob, so it uses the
-new credentials. Until then bob is signed out.
+Reissuing acme.demo.alice will:
+  - make a new key here and refuse alice's old key from now
+  - sign out the session that runs as alice, until it is restarted
+  - keep alice's inbox and its 2 unread messages
+
+Type the address to reissue it: acme.demo.alice
+
+Reissued acme.demo.alice.
+  Checked: the server now refuses alice's old key.
+  Unread mail in alice's inbox is kept.
+
+  wrote   ~/.config/mash/acme.demo.alice.creds  (mode 600; the new key)
+
+NEXT: on this machine, restart the session that runs as alice, so it uses
+the new credentials. Until then alice is signed out.
 ```
 
 AFTER, with `--detail`
 
 ```text
-$ mashctl endpoint reissue acme.demo.bob --make-key --detail
-[exit 0]
-Reissued endpoint acme.demo.bob on tls://127.0.0.1:24222
-(from ~/.config/mash/config.json).
-  Created a new key. Credentials: ~/.config/mash/acme.demo.bob.creds
-  The old key no longer works: all 1 servers confirmed it.
-  Unread mail in bob's inbox is kept.
+$ mashctl endpoint reissue acme.demo.alice --make-key --detail
+(the text of what will change and the prompt, as above)
+
+Reissued acme.demo.alice.
+  Checked: the server now refuses alice's old key.
+  Unread mail in alice's inbox is kept.
+
+  wrote   ~/.config/mash/acme.demo.alice.creds  (mode 600; the new key)
 
 Detail
-  directory key     acme_demo_bob
+  storage name      acme_demo_alice
   old public key    UAO35ZE32HBKAMOGS4CYOJCJWGWGGEGGDEWOLR5Q2L47QFBJMQJRU3CC
   new public key    UA2VGOPQ6HQ2U4DAHV5XFS6NHSQCYBKB5RMLXN4Y52OWXWSXTU3FJTQQ
   old key revoked   2026-11-19 00:30 UTC
   new token issued  2026-11-19 00:30 UTC
   servers           1 of 1 answered
-  inbox             kept (3 messages)
+  inbox             kept (2 messages)
 
-NEXT: on myserver, restart the session that runs as bob, so it uses the
-new credentials. Until then bob is signed out.
+NEXT: on this machine, restart the session that runs as alice, so it uses
+the new credentials. Until then alice is signed out.
 ```
 
 AFTER, `--dry-run`
 
 ```text
-$ mashctl endpoint reissue acme.demo.bob --make-key --dry-run
+$ mashctl endpoint reissue acme.demo.alice --make-key --dry-run
 [exit 0]
-Would reissue endpoint acme.demo.bob on tls://127.0.0.1:24222
-(from ~/.config/mash/config.json):
-  - make a new key on this machine
-  - stop the old key working, on every server
-  - replace ~/.config/mash/acme.demo.bob.creds with the new credentials
-  - keep bob's inbox and its unread mail
+Would reissue acme.demo.alice:
+  - make a new key here and refuse alice's old key from now
+  - sign out the session that runs as alice, until it is restarted
+  - replace alice's credentials file here with the new credentials
+  - keep alice's inbox and its 2 unread messages
 Nothing was changed.
 ```
 
 What changed and why:
 
-- P1: no preamble. The server is named once, in the result line.
-- P2, P8: the address is `acme.demo.bob` once. The old output had it as
+- P1: no preamble. DRAFT10 (V1): the result line names no server.
+- P2, P8: the address is `acme.demo.alice` once. The old output had it as
   `acme.team.alice` and `acme.team.alice` on the next line, plus the creds path.
 - P6: "creds", "user key" and "account update" are gone. The two "servers
-  acknowledged" lines (one said "account update", one "revoked user key") are
-  one sentence: the old key no longer works, and how many servers confirmed it.
-  This is what the old lines meant: mashctl sends the change to every server and
-  waits for each one to confirm before it reports success.
-- P4: NEXT names the action, who does it (you) and where (myserver). Before, it
-  sat above the confirmation lines, so the last thing on screen was not it.
-- P9: public keys, the directory key and times are behind `--detail`.
-- `--dry-run` uses "Would" sentences and ends `Nothing was changed.` (rule 11).
+  acknowledged" lines are one `Checked:` line: the server now refuses the old
+  key. This is what the old lines meant: mashctl sends the change to every
+  server and waits for each one to confirm before it reports success. For one
+  server it says "the server"; "N of N servers" appears only when N is more
+  than one (critic D.7).
+- P4: NEXT names the action, who does it and where.
+- P9: public keys, the storage name and times are behind `--detail`.
+- DRAFT10 (V2, critic D.1, D.4, INV-004): every single reissue states what it
+  changes and asks the person to type the address, because it revokes a key
+  and signs a running session out. No flag skips it. The `Checked:` line
+  after it is the proof that the old key is refused (mashctl asks the server
+  to confirm). The refusal without a terminal, and the wrong answer, are in E4.
+  `--dry-run` prints the same text as "Would ..." and asks nothing (rule 11).
+- DRAFT10 (V6): the example is alice, who runs on myserver, so her credentials
+  are here. A reissue of bob, whose credentials are on bobs-laptop, is B2.
 
 ### B2. reissue with `--public-key` (key made on another machine)
 
@@ -1977,16 +2460,23 @@ AFTER
 
 ```text
 $ mashctl endpoint reissue acme.demo.bob --public-key bob2.pub
-[exit 0]
-Reissued endpoint acme.demo.bob on tls://127.0.0.1:24222
-(from ~/.config/mash/config.json).
-  Created a new token, ./acme.demo.bob.token (it names the key in bob2.pub).
-  The old key no longer works: all 1 servers confirmed it.
-  Unread mail in bob's inbox is kept.
-  Bob is signed out until the new credentials are installed.
 
-NEXT: copy the token to bob's machine, and install it there with the key:
-  mash credential install --key bob2.key --token acme.demo.bob.token
+Reissuing acme.demo.bob will:
+  - refuse bob's old key from now, on every machine: bob is signed out until
+    the new credentials are installed on bob's machine
+  - keep bob's inbox and its 3 unread messages
+
+Type the address to reissue it: acme.demo.bob
+
+Reissued acme.demo.bob.
+  Checked: the server now refuses bob's old key, so bob is signed out until
+  the new credentials are installed.
+  Unread mail in bob's inbox is kept.
+
+  token  ~/acme.demo.bob.2.token  (a new file; the first token is kept)
+
+NEXT: copy acme.demo.bob.2.token to bob's machine, and run there:
+  mash credential install --key bob2.key --token acme.demo.bob.2.token
 ```
 
 AFTER, `--dry-run`
@@ -1994,23 +2484,33 @@ AFTER, `--dry-run`
 ```text
 $ mashctl endpoint reissue acme.demo.bob --public-key bob2.pub --dry-run
 [exit 0]
-Would reissue endpoint acme.demo.bob on tls://127.0.0.1:24222
-(from ~/.config/mash/config.json):
+Would reissue acme.demo.bob:
   - sign a new token for the key in bob2.pub
-  - write it to ./acme.demo.bob.token
-  - stop the old key working, on every server
-  - keep bob's inbox and its unread mail
+  - write it to ~/acme.demo.bob.2.token (acme.demo.bob.token already exists)
+  - refuse bob's old key from now, on every machine
+  - keep bob's inbox and its 3 unread messages
 Nothing was changed.
 ```
 
 What changed and why:
 
 - P6: "jwt" and "seed" become token and key (rule 7). The command is the decided
-  `mash credential install`, with the file names the person used.
-- P4: NEXT is the exact command on its own line, names the machine where it
-  runs, and says the token file must travel there.
-- The flag `--jwt-out` is now `--token-out`; the default file is
-  `acme.demo.bob.token` in the current directory.
+  `mash credential install`.
+- DRAFT10 (V4, critic C.3, walk findings 8 and 9): the walk found two faults.
+  A reissue wrote `acme.demo.bob.jwt` again, which `create` had already
+  written, so it failed with `file_exists`. And its NEXT named the old key
+  (`bob.seed`), so following it failed with `key_mismatch`. Now the reissue
+  writes a numbered token, `acme.demo.bob.2.token` (then `.3`), says so and
+  keeps the first one (Part 1, choice 40). The NEXT names the new key file the
+  person made: `bob2.key`, the name `bob2.pub` came from. The old key is not
+  named anywhere.
+- DRAFT10 (V2): the same typed confirmation as B1, and the `Checked:` line.
+  The old key is refused at once, so bob is signed out until the install; the
+  "will lose" text says so before the person types.
+- The install on bob's machine needs no `--force` and no CA flags: it
+  replaces the credentials after a typed confirmation (Part 1, step 3).
+- The flag `--jwt-out` is now `--token-out`; `--token-out <file>` overrides
+  the numbered name.
 
 ### B3. reissue, `--all` and `--changed`
 
@@ -2039,76 +2539,109 @@ partial: some endpoints did not finish; rerun with --changed, not --all (--all r
 next: restart the sessions of the reissued endpoints so they read the new creds
 ```
 
-AFTER, `--dry-run` (a run without `--yes` prints the same)
+AFTER, `--dry-run`
 
 ```text
 $ mashctl endpoint reissue --all --dry-run
 [exit 0]
-Would give new keys to 2 endpoints on tls://127.0.0.1:24222
-(from ~/.config/mash/config.json). The old keys would stop working.
+Would give new keys to 2 endpoints. The old keys would stop working.
 
-OWNER  GROUP  ENDPOINT  CREDENTIALS FILE (THIS MACHINE)
-acme   demo   alice     ~/.config/mash/acme.demo.alice.creds
-              bob       ~/.config/mash/acme.demo.bob.creds
+OWNER  GROUP  ENDPOINT  UNREAD
+acme   demo   alice     2
+              zoe       0
 
-Skipped, no credentials file on this machine (1):
+Skipped, no credentials file on this machine (2):
+  acme.demo.bob
   acme.demo.carol
 
 Nothing was changed.
 
-NEXT: to give alice and bob new keys, run:
-  mashctl endpoint reissue --all --yes
+NEXT: to give alice and zoe new keys, run:
+  mashctl endpoint reissue --all
 
-Or reissue carol, starting on carol's machine:
-  mash key create --out carol.key
+Or reissue bob, starting on bob's machine:
+  mash key create --out bob2.key
 ```
 
-AFTER, `--all --yes`, all done
+AFTER, `--all`, all done
 
 ```text
-$ mashctl endpoint reissue --all --yes
-[exit 0]
-Gave new keys to 2 endpoints on tls://127.0.0.1:24222
-(from ~/.config/mash/config.json).
+$ mashctl endpoint reissue --all
+
+Reissuing 2 endpoints makes a new key for each and refuses the old keys from
+now. The sessions that run as alice and zoe are signed out until they are
+restarted. Unread mail is kept.
+
+OWNER  GROUP  ENDPOINT  UNREAD
+acme   demo   alice     2
+              zoe       0
+
+Type 2 to reissue 2 endpoints: 2
+
+Gave new keys to 2 endpoints.
 
 OWNER  GROUP  ENDPOINT  RESULT
 acme   demo   alice     done
-              bob       done
+              zoe       done
 
-The old keys no longer work: all 1 servers confirmed it.
+Checked: the server now refuses the old keys.
 
-NEXT: on myserver, restart the sessions that run as alice and bob, so
+NEXT: on this machine, restart the sessions that run as alice and zoe, so
 they use the new credentials.
 ```
 
-AFTER, `--all --yes`, partial outcome (exit 5)
+AFTER, `--all`, a wrong count, and no terminal
 
 ```text
-$ mashctl endpoint reissue --all --yes
+$ mashctl endpoint reissue --all
+(the text of what will change, and the prompt, as above)
+Type 2 to reissue 2 endpoints: 3
+[exit 3]
+error: what you typed is not 2. Nothing was changed.
+fix: run the command again and type the number of endpoints it lists:
+  mashctl endpoint reissue --all
+
+$ mashctl endpoint reissue --all
+[exit 4]
+error: a bulk reissue needs a person at a terminal.
+fix: run the same command in a terminal and type the count when asked:
+  mashctl endpoint reissue --all
+
+Or, to see what it would change without changing anything:
+  mashctl endpoint reissue --all --dry-run
+```
+
+AFTER, `--all`, partial outcome (exit 5)
+
+```text
+$ mashctl endpoint reissue --all
+(the text of what will change, and the prompt, as above)
 [exit 5]
-Gave a new key to 1 of 2 endpoints on tls://127.0.0.1:24222
-(from ~/.config/mash/config.json). 1 was not done.
+Gave a new key to 1 of 2 endpoints. 1 was not done.
 
 OWNER  GROUP  ENDPOINT  RESULT
 acme   demo   alice     done
-              bob       not done: its credentials file here is not the one
-                        the server expects (nothing was changed for bob)
+              zoe       not done: its credentials file here is not the one
+                        the server expects (nothing was changed for zoe)
 
-Alice's old key no longer works: all 1 servers confirmed it.
-Bob's key is unchanged.
+Checked: the server now refuses alice's old key.
+The key of zoe is unchanged.
 warning: do not run --all again: it would give alice a second new key. The
-         sessions of alice and bob need a restart once bob is done.
+         sessions of alice and zoe need a restart once zoe is done.
 
-error: bob was not given a new key.
-fix: move bob's file aside, then reissue bob alone:
-  mv ~/.config/mash/acme.demo.bob.creds ~/.config/mash/acme.demo.bob.old
-  mashctl endpoint reissue acme.demo.bob --make-key
+error: zoe was not given a new key.
+fix: reissue zoe alone, with a key made on the machine where zoe runs:
+  mashctl endpoint reissue acme.demo.zoe --public-key <file>
+
+Or, if zoe runs here, move its credentials file aside and reissue it:
+  mv ~/.config/mash/acme.demo.zoe.creds ~/.config/mash/acme.demo.zoe.old
+  mashctl endpoint reissue acme.demo.zoe --make-key
 ```
 
 AFTER, `--changed`, nothing to do
 
 ```text
-$ mashctl endpoint reissue --changed --yes
+$ mashctl endpoint reissue --changed
 [exit 0]
 Nothing to reissue: no endpoint on this machine needs a new key.
 ```
@@ -2122,13 +2655,23 @@ What changed and why:
   one 190 column line. Now: what happened, a `warning:` for what not to do,
   then `error:` and one `fix:`. A partial result is a failure, so it prints
   `fix:`, not `NEXT:` (DRAFT7).
-- The bulk dry run ends with a `NEXT:` that names the same command with
-  `--yes`, and an `Or` for the skipped endpoint (DRAFT7); it replaces the
-  unlabelled "Add --yes to do it." and "To reissue it ..." lines.
-- The old advice ("rerun with --changed") is not used for bob: once the file is
-  moved aside, bob has no credentials file here, so `--changed` would skip him.
+- DRAFT10 (V2, critic D.1): the bulk commands have no confirmation flag. A bulk
+  reissue prints what it will change and asks the person to type the count
+  (`Type 2 to reissue 2 endpoints:`); the typed number is the guard that a
+  person read the list. A wrong count exits 3, no terminal exits 4 (the one
+  table). The dry run ends with `NEXT:` and `mashctl endpoint reissue --all`,
+  and an `Or` for the skipped endpoint. [confirm: that `--changed` takes the
+  same prompt.]
+- DRAFT10 (critic C.3, B.3): the partial-failure fix was `mv` the file aside,
+  then `--make-key`: that moves the identity of an endpoint that runs on another
+  machine to this one. The fix now gives `--public-key <file>` first (true
+  wherever the endpoint runs) and the `mv` form second, for an endpoint that
+  runs here.
+- DRAFT10 (V6): the examples are alice and zoe, whose credentials are on this
+  machine; bob and carol run elsewhere and are skipped.
+- The old advice ("rerun with --changed") is not used for zoe: once the file is
+  moved aside, zoe has no credentials file here, so `--changed` would skip it.
   [confirm: that `--changed` skips an endpoint with no local file]
-- The dry run no longer prints a counter line of zeros under the "would" lines.
 
 ### B4. delete, dry-run and real
 
@@ -2154,59 +2697,121 @@ AFTER, `--dry-run`
 ```text
 $ mashctl endpoint delete acme.demo.bob --dry-run
 [exit 0]
-Would delete endpoint acme.demo.bob on tls://127.0.0.1:24222
-(from ~/.config/mash/config.json):
-  - stop bob's key working, on every server
-  - delete bob's inbox; unread mail is lost
-  - retire the address: it cannot be used again
-  - rename ~/.config/mash/acme.demo.bob.creds to
-    acme.demo.bob.creds.retired-<UTC date and time>
+Would delete acme.demo.bob. It would lose:
+  - its inbox, with 3 unread messages
+  - its address: it would be retired for good and could not be used again
+  - its key: the server would refuse bob's credentials from now, on every
+    machine
 Nothing was changed.
 ```
 
-AFTER, real
+AFTER, real (bob's credentials are on another machine)
 
 ```text
 $ mashctl endpoint delete acme.demo.bob
-[exit 0]
-Deleted acme.demo.bob. Its address cannot be used again.
-  Server: tls://127.0.0.1:24222 (from ~/.config/mash/config.json).
-  Its key no longer works: all 1 servers confirmed it.
-  Its inbox is deleted, with any unread mail.
-  Its credentials file here was renamed to
-  ~/.config/mash/acme.demo.bob.creds.retired-20261119-0024
-  (add --delete-creds to remove the file instead).
-  A session that runs as bob can no longer sign in, and a copy of its
-  credentials file on another machine no longer works.
 
-NEXT: create an endpoint with a new name:
-  mashctl endpoint create acme.demo.<new-name> --make-key --creds-out <path>
+Deleting acme.demo.bob will lose:
+  - its inbox, with 3 unread messages
+  - its address: it is retired for good and cannot be used again
+  - its key: the server will refuse bob's credentials from now, on every
+    machine
+
+Type the address to delete it: acme.demo.bob
+
+Deleted acme.demo.bob. Its address cannot be used again.
+  Checked: the server now refuses bob's old credentials.
+  Its inbox is deleted, with 3 unread messages.
+
+Nothing can restore a deleted address. A new endpoint needs a new name.
+
+NEXT: see what is left:
+  mashctl endpoint list
+
+Or, to see the refusal from bob's machine, run there:
+  MASH_ENDPOINT=acme.demo.bob mash status
+```
+
+What that last command prints on bob's machine (the other author's `mash`
+targets decide the exact lines):
+
+```text
+$ MASH_ENDPOINT=acme.demo.bob mash status
+[exit 4]
+NOT READY: the server refuses bob's credentials.
+
+version:      <version>
+server:       tls://myserver:4222 (reachable; REFUSED the credentials)
+config:       ~/.config/mash/config.json
+credentials:  ~/.config/mash/acme.demo.bob.creds (REFUSED by the server)
+
+error: the credentials for acme.demo.bob are no longer accepted.
+fix: ask whoever runs mashctl whether bob was deleted or given a new key.
+```
+
+AFTER, a credentials file is here (alice): the file is renamed
+
+```text
+$ mashctl endpoint delete acme.demo.alice
+(the text of what will be lost, with one more line, and the prompt)
+  - its credentials file here: renamed, or removed with --delete-creds
+
+Type the address to delete it: acme.demo.alice
+
+Deleted acme.demo.alice. Its address cannot be used again.
+  Checked: the server now refuses alice's old credentials.
+  Its inbox is deleted, with 2 unread messages.
+
+  renamed  ~/.config/mash/acme.demo.alice.creds to
+           acme.demo.alice.creds.retired-20261119-0024
+
+Nothing can restore a deleted address. A new endpoint needs a new name.
+
+NEXT: see what is left:
+  mashctl endpoint list
 ```
 
 AFTER, `--detail`
 
 ```text
 $ mashctl endpoint delete acme.demo.bob --detail
-[exit 0]
+(the text of what will be lost, and the prompt, as above)
+
 Deleted acme.demo.bob. Its address cannot be used again.
-  Server: tls://127.0.0.1:24222 (from ~/.config/mash/config.json).
-  Its key no longer works: all 1 servers confirmed it.
-  Its inbox is deleted, with any unread mail.
-  Its credentials file here was renamed to
-  ~/.config/mash/acme.demo.bob.creds.retired-20261119-0024
-  (add --delete-creds to remove the file instead).
-  A session that runs as bob can no longer sign in, and a copy of its
-  credentials file on another machine no longer works.
+  Checked: the server now refuses bob's old credentials.
+  Its inbox is deleted, with 3 unread messages.
 
 Detail
-  directory key   acme_demo_bob
+  storage name    acme_demo_bob
   public key      UAO35ZE32HBKAMOGS4CYOJCJWGWGGEGGDEWOLR5Q2L47QFBJMQJRU3CC
   key revoked     2026-11-19 00:24 UTC
   servers         1 of 1 answered
   mail lost       3 unread messages
 
-NEXT: create an endpoint with a new name:
-  mashctl endpoint create acme.demo.<new-name> --make-key --creds-out <path>
+Nothing can restore a deleted address. A new endpoint needs a new name.
+
+NEXT: see what is left:
+  mashctl endpoint list
+```
+
+AFTER, a wrong answer, and no terminal
+
+```text
+$ mashctl endpoint delete acme.demo.bob
+(the text of what will be lost, and the prompt, as above)
+Type the address to delete it: acme.demo.alice
+[exit 3]
+error: what you typed is not acme.demo.bob. Nothing was changed.
+fix: run the command again and type the address you want to delete:
+  mashctl endpoint delete acme.demo.bob
+
+$ mashctl endpoint delete acme.demo.bob
+[exit 4]
+error: deleting an endpoint needs a person at a terminal.
+fix: run the same command in a terminal and type the address when asked:
+  mashctl endpoint delete acme.demo.bob
+
+Or, to see what it would lose without deleting anything:
+  mashctl endpoint delete acme.demo.bob --dry-run
 ```
 
 What changed and why:
@@ -2214,17 +2819,30 @@ What changed and why:
 - P2: the address appears once, dotted. The old output printed it as
   `acme.team.dave (acme.team.dave)` on the result line.
 - P8, P9: "revoked" was said three times (twice with the key, once as a count).
-  It is one line now. The key text and the count are in `--detail`.
+  It is one `Checked:` line now. The key text and the count are in `--detail`.
 - P6: "directory record", "burn the address", "creds", "account JWT" are gone;
-  "retire the address ... never be used again" says what burning does.
-- The dry run shows the file name pattern in words instead of the unexpanded
-  `.retired-<time>`, and shows no key.
-- The result line is `Deleted acme.demo.bob. Its address cannot be used again.`
-  (R5); the server and where it came from are on the first indented line.
-  The line about the session and the copies of the credentials file states
-  what the revoked key means (DRAFT7: it was advice, now a fact). The NEXT
-  asks for a new name: the retired
-  address is never offered again, and nothing suggests recreating it.
+  "retired for good and cannot be used again" says what burning does.
+- DRAFT10 (V2, critic D.1, D.2, INV-004; CLI standard rule 15): delete is
+  permanent, so it says what will be lost before it acts (the unread count,
+  the address retired for good, the key refused from now) and the person types
+  the address. The count that was behind `--detail` is in the default. There is
+  no flag that skips it. A wrong answer exits 3; no terminal exits 4 and offers
+  `--dry-run`. The hint to use `--delete-creds` was after the file was
+  renamed, too late to use; it is in the prompt text now, where it can be
+  used. `--dry-run` prints the same "would lose" text and asks nothing.
+- DRAFT10 (V2): the proof that the old credential is refused is two things.
+  mashctl asks the server to confirm and prints `Checked: ...`. And the one
+  command that shows it from bob's machine, `MASH_ENDPOINT=acme.demo.bob mash
+  status`, is the `Or` line, with what it prints. [confirm: the exact lines
+  belong to the `mash` targets; the verdict and exit 4 are this document's
+  proposal.]
+- DRAFT10 (V1, V5, critic B.5, F.3): no server line. The NEXT is no longer
+  "create an endpoint with a new name" (a step the person may not want, and
+  it never offered the retired address). It is the command that lists what
+  remains, with one sentence that a deleted address cannot be restored and a
+  new endpoint needs a new name (Part 1, choice 44).
+- The `renamed` file line shows the path because the person may want the file
+  (a `.retired-` copy of credentials that no longer work).
 
 ### B5. delete, repeat, `--force`, `--no-revoke`
 
@@ -2251,24 +2869,13 @@ $ mashctl endpoint delete acme.demo.bob
 acme.demo.bob was already deleted. Its address cannot be used again.
 Nothing was changed.
 
-NEXT: create an endpoint with a new name:
-  mashctl endpoint create acme.demo.<new-name> --make-key --creds-out <path>
+NEXT: see what is left:
+  mashctl endpoint list
 ```
 
-AFTER, repeat, a credentials file is still here, no server record
-
-```text
-$ mashctl endpoint delete acme.demo.bob
-[exit 0]
-acme.demo.bob was already deleted. Its address cannot be used again.
-  Server: tls://127.0.0.1:24222 (from ~/.config/mash/config.json).
-  mash holds no record or key for it, so there is nothing to revoke.
-  Its credentials file here was renamed to
-  ~/.config/mash/acme.demo.bob.creds.retired-20261119-0031
-
-NEXT: create an endpoint with a new name:
-  mashctl endpoint create acme.demo.<new-name> --make-key --creds-out <path>
-```
+A repeat where a credentials file is still here and the server has no record
+refuses and names `--force` (H7); it does not rename the file by itself. The
+plain command never touches a file it cannot tie to a record.
 
 AFTER, `--force` when the server has no record (finishes a half-done delete)
 
@@ -2276,14 +2883,15 @@ AFTER, `--force` when the server has no record (finishes a half-done delete)
 $ mashctl endpoint delete acme.demo.bob --force
 [exit 0]
 Finished deleting acme.demo.bob. Its address cannot be used again.
-  Server: tls://127.0.0.1:24222 (from ~/.config/mash/config.json).
   The server has no record of it. Only the credentials file here was
-  handled: it was renamed to
-  ~/.config/mash/acme.demo.bob.creds.retired-20261119-0031
+  handled.
   No key was revoked, because mash does not know which key it was.
 
-NEXT: create an endpoint with a new name:
-  mashctl endpoint create acme.demo.<new-name> --make-key --creds-out <path>
+  renamed  ~/.config/mash/acme.demo.bob.creds to
+           acme.demo.bob.creds.retired-20261119-0031
+
+NEXT: see what is left:
+  mashctl endpoint list
 ```
 
 AFTER, `--force --dry-run`
@@ -2291,12 +2899,10 @@ AFTER, `--force --dry-run`
 ```text
 $ mashctl endpoint delete acme.demo.bob --force --dry-run
 [exit 0]
-Would handle acme.demo.bob on tls://127.0.0.1:24222
-(from ~/.config/mash/config.json):
+Would handle acme.demo.bob:
   - the server has no record of it, so no key would be revoked
   - the address stays retired: it cannot be used again
-  - rename ~/.config/mash/acme.demo.bob.creds to
-    acme.demo.bob.creds.retired-<UTC date and time>
+  - its credentials file here would be renamed
 Nothing was changed.
 ```
 
@@ -2304,12 +2910,17 @@ AFTER, `--no-revoke` (the warning is printed once, after the results)
 
 ```text
 $ mashctl endpoint delete acme.demo.bob --no-revoke
-[exit 0]
+
+Deleting acme.demo.bob will lose:
+  - its inbox, with 3 unread messages
+  - its address: it is retired for good and cannot be used again
+Its key will NOT be revoked: bob's credentials keep working until whoever
+runs the server revokes the key.
+
+Type the address to delete it: acme.demo.bob
+
 Deleted acme.demo.bob. Its address cannot be used again. KEY NOT REVOKED.
-  Server: tls://127.0.0.1:24222 (from ~/.config/mash/config.json).
-  Its inbox is deleted, with any unread mail.
-  Its credentials file here was renamed to
-  ~/.config/mash/acme.demo.bob.creds.retired-20261119-0024
+  Its inbox is deleted, with 3 unread messages.
   Its key was not revoked.
 
 warning: bob's key still works. Until it is revoked, a copy of bob's
@@ -2318,8 +2929,8 @@ server to revoke it with their tools (in NATS, add it to the account's
 revocation list). bob's public key is:
   UAO35ZE32HBKAMOGS4CYOJCJWGWGGEGGDEWOLR5Q2L47QFBJMQJRU3CC
 
-NEXT: create an endpoint with a new name:
-  mashctl endpoint create acme.demo.<new-name> --make-key --creds-out <path>
+NEXT: see what is left:
+  mashctl endpoint list
 ```
 
 What changed and why:
@@ -2332,14 +2943,17 @@ What changed and why:
 - P5: the longest old line (250 columns) is wrapped under 80.
 - `--no-revoke`: the old output printed the warning twice (both on stderr) plus
   a third long line on stdout. It now prints the warning once, after the
-  results, in plain words, with what to do.
-- After `--no-revoke` the warning names the key on its own line, because the
-  person must hand it to whoever can revoke it. The first line says `KEY NOT
-  REVOKED` so the state reads before anything else. The NEXT is the same as
-  for every delete (R5): create an endpoint with a new name.
-- Every delete output (single, repeat, `--force`, `--no-revoke`) ends in
-  that NEXT; the dry run prints no NEXT (rule 11) and says the address
-  "cannot be used again".
+  results, in plain words, with what to do. The first line says `KEY NOT
+  REVOKED` so the state reads before anything else. DRAFT10: it asks for the
+  typed address like every delete, and its "will lose" text says the key will
+  not be revoked.
+- DRAFT10 (V2, critic D.3): `--force` and the plain repeat no longer give the
+  same result. The plain command refuses when it finds a credentials file with
+  no record on the server (H7), and `--force` is the way to say "finish it".
+  `--force` loses nothing that exists on the server, so it asks nothing.
+- Every delete that finishes ends with `mashctl endpoint list` and the
+  sentence that a new endpoint needs a new name; the dry run prints no NEXT
+  (rule 11).
 - Delete of an address that never existed is a refusal (section E), exit 1.
 
 ---
@@ -2358,7 +2972,7 @@ $ mashctl endpoint set --help
 [exit 0]
 mashctl endpoint set - change how an endpoint is described
 
-Usage: mashctl endpoint set ADDRESS [options]
+Usage: mashctl endpoint set <address> [options]
 
 Options (use at least one; the value - clears a field)
   --role R               what the endpoint does, for example designer
@@ -2407,13 +3021,12 @@ AFTER, several changes
 $ mashctl endpoint set acme.demo.alice --role designer --host myserver \
 >     --describe "makes designs" --tag team=ui --capability read
 [exit 0]
-Updated endpoint acme.demo.alice on tls://127.0.0.1:24222
-(from ~/.config/mash/config.json).
-  role         designer
-  host         myserver
-  description  makes designs
-  tag added    team=ui
-  capability   read added
+Updated endpoint acme.demo.alice.
+  role              designer
+  host              myserver
+  description       makes designs
+  tag added         team=ui
+  capability added  read
 ```
 
 AFTER, clearing
@@ -2421,8 +3034,7 @@ AFTER, clearing
 ```text
 $ mashctl endpoint set acme.demo.alice --role - --untag team
 [exit 0]
-Updated endpoint acme.demo.alice on tls://127.0.0.1:24222
-(from ~/.config/mash/config.json).
+Updated endpoint acme.demo.alice.
   role         cleared
   tag removed  team
 ```
@@ -2438,9 +3050,9 @@ Endpoint acme.demo.alice already has these values. Nothing was changed.
 AFTER, removing a tag that is not set (warns, still exit 0)
 
 ```text
-$ mashctl endpoint set acme.demo.alice --untag colour
+$ mashctl endpoint set acme.demo.alice --untag color
 [exit 0]
-warning: acme.demo.alice has no tag "colour". Nothing was changed.
+warning: acme.demo.alice has no tag "color". Nothing was changed.
 ```
 
 AFTER, `--dry-run`
@@ -2448,8 +3060,7 @@ AFTER, `--dry-run`
 ```text
 $ mashctl endpoint set acme.demo.alice --role designer --tag team=ui --dry-run
 [exit 0]
-Would update endpoint acme.demo.alice on tls://127.0.0.1:24222
-(from ~/.config/mash/config.json):
+Would update endpoint acme.demo.alice:
   - set role to designer
   - add tag team=ui
 Nothing was changed.
@@ -2460,6 +3071,8 @@ What changed and why:
 - P9: the old line printed all five fields every time, so clearing one printed
   four unchanged values. Only changed fields are shown.
 - P6: role, host, description, tag and capability are defined in `--help`.
+- DRAFT10 (critic A.C2): the result words have one order, `tag added` and
+  `capability added`; the examples use US spelling (`color`).
 - The old dry-run said "would have labeled ... (nothing written)" without saying
   what; the new one lists the changes.
 - No NEXT: nothing is required afterwards, and the key does not change.
@@ -2469,8 +3082,9 @@ What changed and why:
 Behaviour kept (docs/mashctl.md): `suspend` refuses all inbound mail to the
 endpoint's inbox and keeps stored mail readable; the endpoint's key still
 works; suspending twice returns the same suspension. `deprovision` needs the
-suspension id and the last message number from here. `suspended` exits 0 when
-suspended, 3 when not, 1 on error.
+suspension id and the last message number from here. DRAFT10: `suspended` is
+gone; whether an endpoint is suspended is a line of `endpoint show`, which
+also prints the id and the last message number.
 
 BEFORE (catalog, suspend, suspended_yes, suspended_not), marks P1 P5 P6 P9:
 
@@ -2485,12 +3099,11 @@ AFTER
 ```text
 $ mashctl endpoint suspend acme.demo.bob
 [exit 0]
-Suspended mail to endpoint acme.demo.bob on tls://127.0.0.1:24222
-(from ~/.config/mash/config.json).
+Suspended mail to endpoint acme.demo.bob.
   New mail to bob is refused. The 3 messages already stored stay readable.
-  Bob's key still works: it can sign in and read what is stored.
-  Suspension id   63afd15649fb5dee9904fbba687fbe7c
-  Last message    number 3
+  The key of bob still works: it can sign in and read what is stored.
+  suspension id  63afd15649fb5dee9904fbba687fbe7c
+  last message   number 3
 ```
 
 AFTER, resume
@@ -2498,23 +3111,27 @@ AFTER, resume
 ```text
 $ mashctl endpoint resume acme.demo.bob
 [exit 0]
-Resumed mail to endpoint acme.demo.bob on tls://127.0.0.1:24222
-(from ~/.config/mash/config.json).
+Resumed mail to endpoint acme.demo.bob.
   New mail to bob is delivered again.
 ```
 
-AFTER, asking
+AFTER, asking (`endpoint show` of a suspended endpoint)
 
 ```text
-$ mashctl endpoint suspended acme.demo.bob
+$ mashctl endpoint show acme.demo.bob
 [exit 0]
-SUSPENDED: acme.demo.bob, since 2026-11-19 00:22 UTC.
-  Suspension id   63afd15649fb5dee9904fbba687fbe7c
-  Last message    number 3 (3 messages stored)
 
-$ mashctl endpoint suspended acme.demo.alice
-[exit 3]
-NOT SUSPENDED: acme.demo.alice.
+Endpoint acme.demo.bob
+
+created:        2026-11-19 00:22 UTC
+type:           agent
+token:          valid, not revoked
+status:         SUSPENDED since 2026-11-19 00:22 UTC
+suspension id:  63afd15649fb5dee9904fbba687fbe7c
+last message:   number 3 (3 messages stored)
+online:         no
+unread mail:    3
+credentials:    not on this machine
 ```
 
 AFTER, `--dry-run`
@@ -2522,8 +3139,7 @@ AFTER, `--dry-run`
 ```text
 $ mashctl endpoint suspend acme.demo.bob --dry-run
 [exit 0]
-Would suspend mail to endpoint acme.demo.bob on tls://127.0.0.1:24222
-(from ~/.config/mash/config.json):
+Would suspend mail to endpoint acme.demo.bob:
   - refuse new mail to bob; the 3 stored messages stay readable
   - leave bob's key working
 Nothing was changed.
@@ -2531,13 +3147,19 @@ Nothing was changed.
 
 What changed and why:
 
-- P1, P5, P6: no preamble; no `id`, `last_seq`, `msgs`, `parked`. "Suspension
-  id" and "Last message number" stay because `deprovision` needs both, and the
-  text says what they are.
-- Exit codes are kept: suspend 0 (also the second time), resume 0, suspended 0 or
-  3, errors 1, usage 2.
-- No NEXT on suspend, resume or suspended: the next screen is whatever the
-  person decides, not a step of a guide.
+- P1, P5, P6: no preamble; no `id`, `last_seq`, `msgs`, `parked`. "suspension
+  id" and "last message" stay because `deprovision` needs both. DRAFT10
+  (critic A.C3): the labels are lowercase like every other label block. They
+  stay in the default because the person needs them for the drain command;
+  [confirm: or print them only in a NEXT that shows the drain command with the
+  id filled in].
+- DRAFT10 (V3, critic A.A4): `endpoint suspended` is removed. It answered with
+  exit 3 for "not suspended", and 3 is "cancelled" in the one exit-code table.
+  `endpoint show` prints `status: SUSPENDED since <time>` with the id and the
+  last message number; an endpoint that is not suspended prints no status line.
+  Exit codes: suspend 0 (also the second time), resume 0, errors 1, usage 2.
+- No NEXT on suspend or resume: the next screen is whatever the person
+  decides, not a step of a guide.
 - `--dry-run` for suspend and resume is added for the same reason as for the
   other changing commands; the 0.5.5 docs list none. [confirm: add it]
 - Known limit, unchanged: `mash send` to a suspended endpoint fails with "no
@@ -2559,7 +3181,9 @@ directories, changes nothing, and reports state, not use. It lists every
 endpoint and its inbox, and what is left over: inboxes with no endpoint,
 credentials files that match no endpoint, and mail lost unread because an inbox
 was full. `--strict` exits 1 when there is a finding; `--compare FILE` adds what
-moved since an earlier `--json` report; exit 3 when the audit could not finish.
+moved since an earlier `--json` report; exit 6 when the server could not be
+reached. The sentence "changes nothing; shows what the server holds, not who
+used it" is in `mashctl audit --help`, not printed on every run (critic A.D1).
 
 BEFORE (catalog, audit case 2 and case 5), marks P2 P3 P5 P6 P7 P8 P9:
 
@@ -2583,8 +3207,7 @@ $ mashctl audit
 [exit 0]
 OK: nothing is wrong and nothing is left over.
 
-Audit of owner acme on tls://127.0.0.1:24222, 2026-11-19 00:22 UTC
-(changes nothing; shows what the server holds, not who used it)
+Audit of owner acme, 2026-11-19 00:22 UTC
 
 OWNER  GROUP  ENDPOINT  ONLINE  MAIL STORED  UNREAD  DELIVERY
 acme   demo   alice     no      0            0       on
@@ -2598,12 +3221,13 @@ $ mashctl audit --wide
 [exit 0]
 OK: nothing is wrong and nothing is left over.
 
-Audit of owner acme on tls://127.0.0.1:24222, 2026-11-19 00:22 UTC
-(changes nothing; shows what the server holds, not who used it)
+Audit of owner acme, 2026-11-19 00:22 UTC
 
 OWNER  GROUP  ENDPOINT  ONLINE  MAIL STORED  UNREAD  DELIVERY  FIRST  LAST
 acme   demo   alice     no      0            0       on        0      0
               bob       no      3            3       on        1      3
+
+FIRST and LAST are the numbers of the first and last message stored.
 ```
 
 ```text
@@ -2611,8 +3235,7 @@ $ mashctl audit --detail
 [exit 0]
 OK: nothing is wrong and nothing is left over.
 
-Audit of owner acme on tls://127.0.0.1:24222, 2026-11-19 00:22 UTC
-(changes nothing; shows what the server holds, not who used it)
+Audit of owner acme, 2026-11-19 00:22 UTC
 
 OWNER  GROUP  ENDPOINT  ONLINE  MAIL STORED  UNREAD  DELIVERY
 acme   demo   alice     no      0            0       on
@@ -2621,11 +3244,11 @@ acme   demo   alice     no      0            0       on
 Detail
   Credentials folders searched: ~/.config/mash
   acme.demo.bob
-    directory key   acme_demo_bob
+    storage name    acme_demo_bob
     public key      UAO35ZE32HBKAMOGS4CYOJCJWGWGGEGGDEWOLR5Q2L47QFBJMQJRU3CC
     inbox           inbox-acme_demo_bob, messages 1 to 3
     read position   0 confirmed, 0 delivered, 3 waiting, 0 redelivered
-    address for mail  agents.mail.acme.demo.bob
+    mail subject    agents.mail.acme.demo.bob
   Deleted endpoints whose addresses are retired: 3
     acme.demo.dave   retired 2026-11-19 00:24 UTC
     acme.demo.erin   retired 2026-11-19 00:24 UTC
@@ -2641,16 +3264,35 @@ PROBLEM: 1 credentials file belongs to no endpoint.
   ~/.config/mash/acme.demo.dave.creds
   It may be left over from a delete or a reissue that was cut short.
 
-Audit of owner acme on tls://127.0.0.1:24222, 2026-11-19 00:24 UTC
-(changes nothing; shows what the server holds, not who used it)
+Audit of owner acme, 2026-11-19 00:24 UTC
 
 OWNER  GROUP  ENDPOINT  ONLINE  MAIL STORED  UNREAD  DELIVERY
 acme   demo   alice     no      0            0       on
               bob       no      3            3       on
 
 error: the audit found 1 problem.
-fix: if the file is not needed, delete it; if it is, list the endpoints:
+fix: if you do not need that file, finish the delete that left it:
+  mashctl endpoint delete acme.demo.dave --force
+
+Or, if the file may belong to an endpoint that exists, list the endpoints:
   mashctl endpoint list
+```
+
+Without `--strict` the same finding prints the same rows and verdict and
+exits 0; only `--strict` turns a finding into exit 1:
+
+```text
+$ mashctl audit
+[exit 0]
+PROBLEM: 1 credentials file belongs to no endpoint.
+  ~/.config/mash/acme.demo.dave.creds
+  It may be left over from a delete or a reissue that was cut short.
+
+Audit of owner acme, 2026-11-19 00:24 UTC
+
+OWNER  GROUP  ENDPOINT  ONLINE  MAIL STORED  UNREAD  DELIVERY
+acme   demo   alice     no      0            0       on
+              bob       no      3            3       on
 ```
 
 AFTER, `--compare`
@@ -2660,15 +3302,14 @@ $ mashctl audit --compare audit-earlier.json
 [exit 0]
 OK: nothing is wrong and nothing is left over.
 
-Audit of owner acme on tls://127.0.0.1:24222, 2026-11-19 00:25 UTC
-(changes nothing; shows what the server holds, not who used it)
+Audit of owner acme, 2026-11-19 00:25 UTC
 
 OWNER  GROUP  ENDPOINT  ONLINE  MAIL STORED  UNREAD  DELIVERY
 acme   demo   alice     no      0            0       on
               bob       no      3            3       on
 
-Since the audit of 2026-11-19 00:22 UTC: 2 inboxes, 0 changed, 0 gone,
-0 new.
+Compared with the audit of 2026-11-19 00:22 UTC: 2 inboxes checked, 0
+changed, 0 gone, 0 new.
 ```
 
 What changed and why:
@@ -2677,7 +3318,11 @@ What changed and why:
   key, stream name, six consumer fields, subject) is behind `--detail`. The
   eight lines of retired markers and tombstones, which only describe deleted
   endpoints, are behind `--detail` too.
-- P2, P8: one address form; the stream name and directory key are shown only in
+- DRAFT10 (V1, critic A.D1): the `Audit of owner acme` header names no server,
+  and the parenthetical that printed on every run is in `--help`. `--strict`'s
+  fix names the command that finishes the delete that left the file (B5);
+  `FIRST` and `LAST` get a footer; `--compare` says what was compared.
+- P2, P8: one address form; the stream name and storage name are shown only in
   `--detail`. The old line had `acme_team_alice`, `acme.team.alice` and
   `inbox-acme_team_alice` in one row.
 - P3: a table with a header, replacing tab separated `name value` pairs. The
@@ -2686,7 +3331,8 @@ What changed and why:
   "problem" and "credentials file". Online means a session is signed in now.
 - The verdict is the first line: `OK` or `PROBLEM`, then what is wrong. The old
   330 character `--strict` line becomes `error:` and `fix:`; exit codes are
-  unchanged: 0 clean, 1 finding under `--strict`, 3 audit could not finish.
+  0 clean, 1 finding under `--strict`, 6 the server could not be reached
+  (DRAFT10: it was 3).
 - The text form is the same with and without `--strict`; only the exit code and
   the last `error:` and `fix:` lines differ (without `--strict` a finding exits
   0 and the two lines are not printed).
@@ -2710,14 +3356,14 @@ AFTER
 ```text
 $ mashctl issued list
 [exit 0]
-Keys that mash has issued, on tls://127.0.0.1:24222
+Keys that mash has issued
 
 OWNER  GROUP  ENDPOINT   PUBLIC KEY   ISSUED (UTC)      STATUS
 acme   demo   alice      UAGT4ZQX...  2026-11-19 00:21  in use
               bob        UAO35ZE3...  2026-11-19 00:21  in use
--      -      mashadmin  UBFOC5KR...  2026-11-19 00:21  in use  (administrator)
+-      -      mashadmin  UBFOC5KR...  2026-11-19 00:21  in use
 
-3 keys issued, none revoked.
+3 keys issued, none revoked. mashadmin is the key mashctl signs in with.
 ```
 
 AFTER, `--wide`
@@ -2725,14 +3371,14 @@ AFTER, `--wide`
 ```text
 $ mashctl issued list --wide
 [exit 0]
-Keys that mash has issued, on tls://127.0.0.1:24222
+Keys that mash has issued
 
-OWNER  GROUP  ENDPOINT   ISSUED (UTC)      STATUS  PUBLIC KEY
-acme   demo   alice      2026-11-19 00:21  in use  UAGT4ZQXALANXPHIAET7WXOZQ...
-              bob        2026-11-19 00:21  in use  UAO35ZE32HBKAMOGS4CYOJCJW...
--      -      mashadmin  2026-11-19 00:21  in use  UBFOC5KRY5JRFS5QWS3K5GHKT...
+OWNER  GROUP  ENDPOINT   PUBLIC KEY                 ISSUED (UTC)      STATUS
+acme   demo   alice      UAGT4ZQXALANXPHIAET7WXOZQ  2026-11-19 00:21  in use
+              bob        UAO35ZE32HBKAMOGS4CYOJCJW  2026-11-19 00:21  in use
+-      -      mashadmin  UBFOC5KRY5JRFS5QWS3K5GHKT  2026-11-19 00:21  in use
 
-3 keys issued, none revoked.
+3 keys issued, none revoked. mashadmin is the key mashctl signs in with.
 ```
 
 What changed and why:
@@ -2743,8 +3389,12 @@ What changed and why:
   purpose (issue, rotation) and the full public key appear in `--detail`
   [confirm: the exact `--detail` fields are decided with the key store].
 - STATUS is "in use" or "revoked 2026-11-19 00:30" (UTC). "revoked-at" is gone.
-- The administrator row is marked `(administrator)` in the default table only.
-  [confirm: whether to show the administrator key at all without `--detail`]
+- DRAFT10 (critic A.D2): the unheaded seventh column is gone; the footer says
+  what `mashadmin` is. `--wide` has the same column order as the default. It
+  still cuts the public key (to 25 characters, with no `...`): the contract's
+  80-column rule has no `--wide` exemption (declined; `--json` and `--detail`
+  carry the whole key). [confirm: whether to show the administrator key at
+  all without `--detail`]
 
 ### D3. issued check
 
@@ -2752,7 +3402,7 @@ What it does: asks every server which keys are connected now and compares them
 with the keys mash issued. It reports a connected key mash did not issue (key,
 server, connection name, who signed it), a revoked key still connected, and
 keys that are issued but not connected (normal). Exit 0 clean and complete, 1 a
-finding, 2 nothing found but the check was incomplete or failed.
+finding, 6 nothing found but a server did not answer (the check is incomplete).
 
 BEFORE (catalog, ic), marks P3 P5 P6 P7 P9:
 
@@ -2771,7 +3421,7 @@ $ mashctl issued check
 [exit 0]
 OK: every connected key was issued by mash, and none is revoked.
 
-Checked 1 of 1 servers on tls://127.0.0.1:24222. 1 key is connected.
+Checked the server. 1 key is connected.
 ```
 
 AFTER, a finding (exit 1)
@@ -2781,13 +3431,13 @@ $ mashctl issued check
 [exit 1]
 PROBLEM: 1 of the 2 connected keys was not issued by mash.
 
-Checked 1 of 1 servers on tls://127.0.0.1:24222.
+Checked the server.
 
 Connected, not issued by mash
   public key       UBH6YD4HP7LRXHHW7ADO5AKELNC3Z7JKW24V6DRNDKW7QVZVSAIDSKFT
-  server           mash-local
+  server           tls://myserver:4222
   connection name  build-agent
-  signed by        the account's signing key
+  signed by        a key that can sign for your account
 
 error: a key that mash did not issue can sign in to your mash account.
 fix: find who made it. If it is not yours, revoke it with the tools of
@@ -2801,27 +3451,27 @@ $ mashctl issued check
 [exit 1]
 PROBLEM: a revoked key is still connected.
 
-Checked 1 of 1 servers on tls://127.0.0.1:24222. 2 keys are connected.
+Checked the server. 2 keys are connected.
 
 Revoked, still connected
   endpoint         acme.demo.bob
   public key       UAO35ZE32HBKAMOGS4CYOJCJWGWGGEGGDEWOLR5Q2L47QFBJMQJRU3CC
-  server           mash-local
+  server           tls://myserver:4222
 
 error: the revocation of bob's key did not take effect on this server.
 fix: check that every server has the latest account update, then check again:
   mashctl issued check
 ```
 
-AFTER, incomplete (exit 2)
+AFTER, incomplete (exit 6)
 
 ```text
 $ mashctl issued check
-[exit 2]
+[exit 6]
 INCOMPLETE: 1 of 2 servers did not answer.
 
-Checked 1 of 2 servers on tls://127.0.0.1:24222. Nothing wrong was found on
-the server that answered. mashctl expects 2 servers (set with --servers).
+Checked 1 of 2 servers. Nothing wrong was found on the server that answered.
+mashctl expects 2 servers (set with --servers).
 
 error: 1 of 2 servers did not answer, so the check cannot be called clean.
 fix: bring the server back, then run the check again:
@@ -2834,7 +3484,12 @@ What changed and why:
   row, no header) is one sentence with a count. The keys are in `--detail`.
 - P6: "unrecorded", "recorded", "revoked but connected" are gone; "issued by
   mash" and "revoked" are used instead.
-- Exit codes are unchanged. The result is the first line (`OK`, `PROBLEM` or
+- DRAFT10 (V3, critic A.D3): an incomplete check exits 6 (a server did not
+  answer), not 2, which is the usage code; an unreachable server is 6 here as
+  everywhere. The server is named in the finding blocks (a failure) and not in
+  the clean result; "mash-local" is `tls://myserver:4222`; "the account's
+  signing key" is said in plain words.
+- The result is the first line (`OK`, `PROBLEM` or
   `INCOMPLETE`), and `error:` and `fix:` lines follow a finding. The keys that
   are issued but not connected are not printed by default; they are normal.
 - No NEXT: the next step depends on who made the key, which mash cannot tell.
@@ -2842,8 +3497,8 @@ What changed and why:
 ### D4. inbox inspect
 
 What it does: shows one endpoint's stored mail and where its delivery stands.
-It reads only. Exit 0, 1 refusal (no such endpoint, no inbox), 2 usage, 3 could
-not complete.
+It reads only. Exit 0, 1 refusal (no such endpoint, no inbox), 2 usage, 6 the
+server could not be reached.
 
 BEFORE (catalog, ii), marks P2 P5 P6 P7 P8 P9:
 
@@ -2867,6 +3522,8 @@ NO.  FROM             TRUST     STORED (UTC)      SIZE   TYPE      STATE
 1    acme.demo.alice  verified  2026-11-19 00:22  11 B   task      waiting
 2    acme.demo.alice  verified  2026-11-19 00:22  10 B   question  waiting
 3    acme.demo.alice  verified  2026-11-19 00:22  2 B    task      waiting
+
+STATE comes from the inbox's delivery position, not from each message.
 ```
 
 AFTER, a part of the inbox (`--from 2 --limit 1`)
@@ -2918,6 +3575,9 @@ What changed and why:
   (claimed, unknown-signer, stale, forged, malformed, absent) are unchanged.
   [confirm: whether to explain them in `--detail`]
 - Column KIND becomes TYPE (what the message is: task, question).
+- DRAFT10 (critic A.D4): a footer says STATE comes from the inbox's delivery
+  position, so the column does not claim a per-message fact the server does
+  not keep (`--detail` has the full explanation).
 - STATE: undelivered becomes waiting; acked becomes confirmed; the third state
   keeps its meaning, in short words.
 
@@ -2944,13 +3604,15 @@ $ mashctl limits --show
 [exit 0]
 Limits in force
 
-  Inbox size            16 MiB per endpoint (the oldest mail is dropped first)
-  Inbox age             30 days  (older mail is dropped)
-  Directory size        16 MiB
-  Online-status size    4 MiB
-  Readers per inbox     no limit
+  inbox size            16 MiB per endpoint (the oldest mail is dropped first)
+  inbox age             30 days  (older mail is dropped)
+  directory size        16 MiB
+  online-status size    4 MiB
+  readers per inbox     no limit
 
-NEXT: after you change "limits" in ~/.config/mash/config.json, run:
+The limits are set in the config file; mashctl status says where it is.
+
+NEXT: after you change the limits in the config file, run:
   mashctl limits
 ```
 
@@ -2959,8 +3621,7 @@ AFTER, raising
 ```text
 $ mashctl limits
 [exit 0]
-Raised the inbox size limit of 2 endpoints on tls://127.0.0.1:24222
-(from ~/.config/mash/config.json).
+Raised the inbox size limit of 2 endpoints.
 
 OWNER  GROUP  ENDPOINT  WAS     NOW
 acme   demo   alice     16 MiB  32 MiB
@@ -3036,9 +3697,6 @@ It may:
 It may not send to, or read from, another owner's endpoints.
 
 These are the same for every endpoint of owner acme.
-
-See mashctl permissions --help for --detail (the exact NATS subjects) and
---nsc (the flags the nsc tool takes).
 ```
 
 AFTER, `--detail` (first lines)
@@ -3072,6 +3730,8 @@ What changed and why:
   lists in the catalog (own inbox subjects only; owner in the mail subject).
   [confirm: that these two sentences are exactly right]
 - `--nsc` output stays as it is today, because `nsc` reads it.
+- DRAFT10 (critic A.D6): the closing hint is gone; `mashctl permissions --help`
+  lists `--detail` and `--nsc`.
 
 ### D7. provision
 
@@ -3095,10 +3755,10 @@ $ mashctl provision --help
 [exit 0]
 mashctl provision - register an endpoint whose NATS user someone else made
 
-Usage: mashctl provision ADDRESS --user KEY --account KEY [options]
+Usage: mashctl provision <address> --user KEY --account KEY [options]
 
 Use this on a server where mashctl cannot make NATS users. For a server
-that mashctl set up with adopt, use endpoint create instead.
+mashctl adopted and can sign users for, use endpoint create instead.
 
 Options
   --user KEY       the endpoint's NATS user public key (starts with U)
@@ -3118,8 +3778,7 @@ AFTER, real
 ```text
 $ mashctl provision acme.demo.alice --user UD7CJ5RS... --account AD7BK6VI...
 [exit 0]
-Registered endpoint acme.demo.alice on tls://127.0.0.1:24222
-(from ~/.config/mash/config.json).
+Registered endpoint acme.demo.alice.
   Its inbox is ready. mash made no key or credentials: they come from
   whoever made its NATS user.
 
@@ -3164,22 +3823,23 @@ $ mashctl deprovision --help
 [exit 0]
 mashctl deprovision - remove an endpoint made with provision
 
-Usage: mashctl deprovision ADDRESS [options]
+Usage: mashctl deprovision <address> [options]
 
 Revokes the endpoint's NATS user (it stops working), then removes the
-endpoint and its inbox. Unread mail is lost unless you drain it first.
+endpoint and its inbox. Unread mail is lost unless you drain it first. It
+says what will be lost and asks you to type the address.
 
 Options
-  --suspension ID    the suspension id printed by endpoint suspend
-  --drained-to N     the last message number you read (needs --suspension)
-  --user KEY         revoke this NATS user instead of the one on record
-  --no-revoke        remove the endpoint but do not revoke its key
-  --servers N        how many servers must confirm (else MASH_SERVERS)
-  --sys-creds FILE   system account credentials (else MASH_SYS_CREDS)
+  --suspension ID      the suspension id printed by endpoint suspend
+  --drained-to N       the last message number you read (needs --suspension)
+  --user KEY           revoke this NATS user instead of the one on record
+  --no-revoke          remove the endpoint but do not revoke its key
+  --servers N          how many servers must confirm (else MASH_SERVERS)
+  --sys-creds <file>   system account credentials (else MASH_SYS_CREDS)
 
 Example, without losing mail:
   mashctl endpoint suspend acme.demo.alice
-  (read the stored mail, then)
+  mashctl inbox inspect acme.demo.alice
   mashctl deprovision acme.demo.alice --suspension ID --drained-to 41
 ```
 
@@ -3187,13 +3847,16 @@ AFTER, plain
 
 ```text
 $ mashctl deprovision acme.demo.alice
-[exit 0]
-Removed endpoint acme.demo.alice on tls://127.0.0.1:24222
-(from ~/.config/mash/config.json).
-  Its NATS user no longer works: all 1 servers confirmed it.
-  Its inbox is deleted, with any unread mail.
-warning: mash has no record of issuing this key, so it cannot check that
-no credential for it is dated in the future. The key was revoked anyway.
+
+Removing acme.demo.alice will lose:
+  - its inbox, with 2 unread messages
+  - its key: the server will refuse alice's NATS user from now
+
+Type the address to remove it: acme.demo.alice
+
+Removed endpoint acme.demo.alice.
+  Checked: the server now refuses its NATS user.
+  Its inbox is deleted, with 2 unread messages.
 
 NEXT: delete any copy of alice's credentials file on its machine.
 ```
@@ -3202,13 +3865,13 @@ AFTER, after a drain
 
 ```text
 $ mashctl deprovision acme.demo.alice --suspension 63afd156... --drained-to 41
-[exit 0]
-Removed endpoint acme.demo.alice on tls://127.0.0.1:24222
-(from ~/.config/mash/config.json).
+(the text of what will be lost, and the prompt, as above)
+
+Removed endpoint acme.demo.alice.
   Checked before removing: the inbox was suspended with id 63afd156..., and
   no message had arrived after message 41.
   mash does not check that messages 1 to 41 were read. They are deleted.
-  Its NATS user no longer works: all 1 servers confirmed it.
+  Checked: the server now refuses its NATS user.
 
 NEXT: delete any copy of alice's credentials file on its machine.
 ```
@@ -3217,10 +3880,10 @@ AFTER, `--no-revoke` (the warning once)
 
 ```text
 $ mashctl deprovision acme.demo.alice --no-revoke
-[exit 0]
-Removed endpoint acme.demo.alice on tls://127.0.0.1:24222
-(from ~/.config/mash/config.json). KEY NOT REVOKED.
-  Its inbox is deleted, with any unread mail. Its key was not revoked.
+(the text of what will be lost, without the key line, and the prompt)
+
+Removed endpoint acme.demo.alice. KEY NOT REVOKED.
+  Its inbox is deleted, with 2 unread messages. Its key was not revoked.
 
 warning: alice's key still works. Until it is revoked, a copy of alice's
 credentials can still sign in, send and read mail. Revoke it with the
@@ -3234,6 +3897,13 @@ What changed and why:
 
 - P1, P5, P6, P8: one "no longer works" line instead of two; JWT, issue record
   and "revoked in the account JWT" removed; the warning is printed once.
+- DRAFT10 (V2, critic A.D8): `deprovision` destroys an inbox and revokes a
+  key, as `endpoint delete` does, so it says what will be lost and asks the
+  person to type the address (Part 1, choice 35). The warning "mash has no
+  record of issuing this key, so it cannot check that no credential for it is
+  dated in the future" is gone from the default: the person can do nothing
+  with it; it is in `--detail`. The help example names the command that reads
+  the stored mail.
 - P4: NEXT is true: deprovision of an endpoint made by `endpoint create` leaves
   its credentials file in the config folder (catalog, depro_hal).
 - Drained delete (review finding 3): the line "none was lost" is removed. The
@@ -3256,9 +3926,10 @@ command on its own indented line beneath it (a fix that needs no command is one
 sentence ending in a full stop); nothing else by default. Every line is 80
 columns or less, and every command line is 78 or less. The machine code
 (`file_exists`, `key_unchanged`, ...) is printed only with `--json` and
-`--detail`. Exit codes follow the conventions block at the top of Part 1. A
-value that failed a check is named but never printed back, so a secret pasted
-into the wrong place is not echoed. A fix that sets configuration names the
+`--detail`. Exit codes follow the one table in the conventions block at the top
+of Part 1. A key, a token or a tag value that failed a check is named but never
+printed back, so a secret pasted into the wrong place is not echoed; an
+address is not secret and is printed back. A fix that sets configuration names the
 file first, with its resolved path. A variable set with `export` is offered
 only as a test in the current shell, because it does not reach a session
 started anywhere else. A second choice after a fix starts `Or`; a step that
@@ -3296,17 +3967,20 @@ AFTER
 ```text
 $ mashctl endpoint reissue acme.demo.bob
 [exit 2]
-error: a reissue needs a new key: give --make-key or --public-key FILE.
-fix: make the new key here:
+error: a reissue needs a new key: give --public-key <file> or --make-key.
+fix: give the key made on the machine where bob runs:
+  mashctl endpoint reissue acme.demo.bob --public-key <file>
+
+Or, if bob runs on this machine, make the new key here:
   mashctl endpoint reissue acme.demo.bob --make-key
-usage: mashctl endpoint reissue ADDRESS (--make-key | --public-key FILE)
+usage: mashctl endpoint reissue <address> (--make-key | --public-key <file>)
 
 $ mashctl endpoint reissue
 [exit 2]
 error: no endpoint address given.
 fix: name the endpoint to reissue:
-  mashctl endpoint reissue <owner>.<group>.<name> --make-key
-usage: mashctl endpoint reissue ADDRESS (--make-key | --public-key FILE)
+  mashctl endpoint reissue <address> --public-key <file>
+usage: mashctl endpoint reissue <address> (--make-key | --public-key <file>)
 
 $ mashctl endpoint set acme.demo.alice
 [exit 2]
@@ -3314,14 +3988,14 @@ error: nothing to change: give at least one of --role, --host, --describe,
        --tag, --untag, --capability.
 fix: for example, set a role:
   mashctl endpoint set acme.demo.alice --role <role>
-usage: mashctl endpoint set ADDRESS [options]
+usage: mashctl endpoint set <address> [options]
 
 $ mashctl endpoint set acme.demo.alice --policy x
 [exit 2]
 error: unknown option --policy.
 fix: see the options:
   mashctl endpoint set --help
-usage: mashctl endpoint set ADDRESS [options]
+usage: mashctl endpoint set <address> [options]
 
 $ mashctl endpoint frob
 [exit 2]
@@ -3348,21 +4022,20 @@ $ mashctl inbox
 [exit 2]
 error: inbox needs a command: inspect.
 fix: show the mail stored for one endpoint:
-  mashctl inbox inspect <owner>.<group>.<name> --limit 5
-usage: mashctl inbox inspect ADDRESS [--from N] [--to N] [--limit N]
+  mashctl inbox inspect <address> --limit 5
+usage: mashctl inbox inspect <address> [--from N] [--to N] [--limit N]
 
 $ mashctl endpoint delete bob
 [exit 2]
 error: "bob" is not an endpoint address.
 fix: give the whole address, owner, group and name:
-  mashctl endpoint delete <owner>.<group>.<name>
-usage: mashctl endpoint delete ADDRESS [--force] [--no-revoke] [--dry-run]
+  mashctl endpoint delete acme.<group>.bob
+usage: mashctl endpoint delete <address> [--force] [--no-revoke] [--dry-run]
 ```
 
-Note: the address check names the argument and does not print its value in the
-real command. The example above shows `bob` because the test typed it; the real
-message is `error: the address is not an endpoint address.` [confirm: the rule
-that values are never printed back applies to addresses, or only to keys].
+Note (DRAFT10, critic A.E): an address is not secret, so every address error
+prints the value the person typed, as `delete bob` does and as `limits nobody`
+now does. Keys, tokens and tag values are never printed back.
 
 Other usage errors, same form:
 
@@ -3370,9 +4043,9 @@ Other usage errors, same form:
 $ mashctl endpoint reissue acme.demo.bob --make-key --public-key bob.pub
 [exit 2]
 error: give --make-key or --public-key, not both.
-fix: choose one; to make the key here:
-  mashctl endpoint reissue acme.demo.bob --make-key
-usage: mashctl endpoint reissue ADDRESS (--make-key | --public-key FILE)
+fix: choose one; to use the key made on bob's machine:
+  mashctl endpoint reissue acme.demo.bob --public-key bob.pub
+usage: mashctl endpoint reissue <address> (--make-key | --public-key <file>)
 
 $ mashctl endpoint reissue --all --public-key bob.pub
 [exit 2]
@@ -3380,49 +4053,49 @@ error: --all and --changed make the new keys on this machine, so they cannot
        take --public-key.
 fix: leave out --public-key; to see what would change:
   mashctl endpoint reissue --all --dry-run
-usage: mashctl endpoint reissue (--all | --changed) [--yes] [--dry-run]
+usage: mashctl endpoint reissue (--all | --changed) [--dry-run]
+
+$ mashctl endpoint reissue --all --yes
+[exit 2]
+error: unknown option --yes. A bulk reissue asks you to type the count.
+fix: run it without the flag, in a terminal:
+  mashctl endpoint reissue --all
+usage: mashctl endpoint reissue (--all | --changed) [--dry-run]
 
 $ mashctl endpoint create bob
 [exit 2]
 error: an endpoint address has three parts: owner, group and name.
 fix: give all three:
-  mashctl endpoint create <owner>.<group>.bob --make-key
-usage: mashctl endpoint create OWNER.GROUP.NAME (--make-key | --public-key F)
+  mashctl endpoint create acme.<group>.bob --make-key
+usage: mashctl endpoint create <address> (--make-key | --public-key <file>)
 
 $ mashctl endpoint create demo.bob --make-key
 [exit 2]
 error: "demo.bob" has two parts; an address has three, owner.group.name.
 fix: add the owner:
-  mashctl endpoint create <owner>.demo.bob --make-key
-usage: mashctl endpoint create OWNER.GROUP.NAME (--make-key | --public-key F)
+  mashctl endpoint create acme.demo.bob --make-key
+usage: mashctl endpoint create <address> (--make-key | --public-key <file>)
 
 $ mashctl endpoint create bob --owner acme --make-key
 [exit 2]
-error: no group given. Every endpoint belongs to a group.
-fix: add the group:
+error: unknown option --owner.
+fix: the address is one argument, owner.group.name:
   mashctl endpoint create acme.<group>.bob --make-key
-usage: mashctl endpoint create OWNER.GROUP.NAME (--make-key | --public-key F)
+usage: mashctl endpoint create <address> (--make-key | --public-key <file>)
 
 $ mashctl endpoint create acme.demo.bob --group ops --make-key
 [exit 2]
-error: the address says group demo, but --group says ops.
-fix: make them agree; to use the group in the address:
-  mashctl endpoint create acme.demo.bob --make-key
-usage: mashctl endpoint create OWNER.GROUP.NAME (--make-key | --public-key F)
-
-$ mashctl endpoint create demo.bob --group demo --make-key
-[exit 2]
-error: no owner given.
-fix: add the owner:
-  mashctl endpoint create <owner>.demo.bob --make-key
-usage: mashctl endpoint create OWNER.GROUP.NAME (--make-key | --public-key F)
+error: unknown option --group.
+fix: give the group inside the address:
+  mashctl endpoint create acme.ops.bob --make-key
+usage: mashctl endpoint create <address> (--make-key | --public-key <file>)
 
 $ mashctl endpoint create acme.demo --make-key
 [exit 2]
 error: no endpoint name given.
 fix: add the name:
   mashctl endpoint create acme.demo.<name> --make-key
-usage: mashctl endpoint create OWNER.GROUP.NAME (--make-key | --public-key F)
+usage: mashctl endpoint create <address> (--make-key | --public-key <file>)
 
 $ mashctl endpoint create acme.demo.bob --make-key --tag "bad key=x"
 [exit 2]
@@ -3430,42 +4103,42 @@ error: a tag name must start with a letter, then up to 31 letters, digits,
        or _ . -  (the value is not shown).
 fix: write a tag like this:
   mashctl endpoint create acme.demo.bob --make-key --tag team=ui
-usage: mashctl endpoint create OWNER.GROUP.NAME (--make-key | --public-key F)
+usage: mashctl endpoint create <address> (--make-key | --public-key <file>)
 
 $ mashctl endpoint create acme.demo.bob --public-key bob.pub --creds-out b.creds
 [exit 2]
 error: --creds-out goes with --make-key; --public-key writes a token.
 fix: name the token file with --token-out:
   mashctl endpoint create acme.demo.bob --public-key b.pub --token-out b.token
-usage: mashctl endpoint create OWNER.GROUP.NAME (--make-key | --public-key F)
+usage: mashctl endpoint create <address> (--make-key | --public-key <file>)
 
 $ mashctl issued check --servers 0
 [exit 2]
 error: --servers must be a whole number, 1 or more.
 fix: give the number of servers:
   mashctl issued check --servers <number>
-usage: mashctl issued check [--sys-creds FILE] [--servers N]
+usage: mashctl issued check [--sys-creds <file>] [--servers N]
 
 $ mashctl deprovision acme.demo.alice --drained-to 3
 [exit 2]
 error: --drained-to and --suspension go together.
 fix: add the suspension id that endpoint suspend printed:
   mashctl deprovision acme.demo.alice --suspension <id> --drained-to 3
-usage: mashctl deprovision ADDRESS [--suspension ID --drained-to N]
+usage: mashctl deprovision <address> [--suspension ID --drained-to N]
 
 $ mashctl deprovision acme.demo.alice --user U... --drained-to 3 --suspension x
 [exit 2]
 error: --user cannot be combined with --drained-to.
 fix: leave out --user:
   mashctl deprovision acme.demo.alice --suspension x --drained-to 3
-usage: mashctl deprovision ADDRESS [--suspension ID --drained-to N]
+usage: mashctl deprovision <address> [--suspension ID --drained-to N]
 
 $ mashctl provision acme.demo.alice
 [exit 2]
 error: --user is required.
 fix: add the user's and the account's public keys:
   mashctl provision acme.demo.alice --user <user-key> --account <account-key>
-usage: mashctl provision ADDRESS --user KEY --account KEY
+usage: mashctl provision <address> --user KEY --account KEY
 
 $ mashctl provision acme.demo.alice --user notakey --account A...
 [exit 2]
@@ -3473,14 +4146,14 @@ error: --user is not a NATS user public key (it starts with U; the value
        is not shown).
 fix: give the user's public key:
   mashctl provision acme.demo.alice --user <user-key> --account <account-key>
-usage: mashctl provision ADDRESS --user KEY --account KEY
+usage: mashctl provision <address> --user KEY --account KEY
 
 $ mashctl limits nobody
 [exit 2]
-error: the address is not an endpoint address.
+error: "nobody" is not an endpoint address.
 fix: give the whole address, owner, group and name:
-  mashctl limits <owner>.<group>.<name>
-usage: mashctl limits [ADDRESS...] | mashctl limits --show
+  mashctl limits acme.<group>.<name>
+usage: mashctl limits [<address>...] | mashctl limits --show
 ```
 
 What changed and why:
@@ -3490,6 +4163,13 @@ What changed and why:
 - P9: no full command list under an unknown command, as in 0.5.5.
 - P4: the `fix:` command replaces the long advice that was inside the error
   line; it is complete and pasteable, with placeholders where mash cannot know.
+- DRAFT10 (V5, V6, critic A.E): the owner is in the config, so a fix shows
+  `acme.<group>.bob`, as the empty list does. `--owner` and `--group` are not
+  flags (A4a), so the two cases that used them are one `unknown option`; the
+  address is one dotted argument. A reissue with no key flag names
+  `--public-key <file>` first, because `--make-key` moves a remote endpoint's
+  identity to this machine. One placeholder form per role: `<address>`,
+  `<file>`. A confirmation flag is an unknown option.
 - Old codes covered: `usage`, `unknown_flag`, `address_missing`,
   `address_invalid`, `address_ambiguous`, `naming_disagrees`, `group_missing`,
   `owner_missing`, `name_missing`, `key_both`, `key_missing`,
@@ -3510,16 +4190,32 @@ mashctl: endpoint list: mashctl: connect tls://127.0.0.1:20001: nats: no servers
 AFTER
 
 ```text
-$ MASH_URL=nats://127.0.0.1:24222 mashctl endpoint list
+$ MASH_URL=nats://myserver:4222 mashctl endpoint list
 [exit 1]
-error: refusing to connect to 127.0.0.1 without encryption (the address
-       starts with nats://).
-fix: change "url" in ~/.config/mash/config.json to a tls:// address.
-     MASH_URL overrides that file. For a server with its own certificate
-     authority, also set "tls_ca" there to the full path of its file.
+error: MASH_URL is nats://myserver:4222, which is not encrypted.
+fix: use your configured server instead, by removing MASH_URL:
+  unset MASH_URL
 
-Or, for a throwaway test server only, allow plain text in this shell:
-  export MASH_INSECURE_PLAINTEXT=1
+If your profile exports MASH_URL, remove it from the file that sets it, then
+start a new shell. To use another address, set MASH_URL to a tls:// address.
+
+Or, for a test server only: put MASH_INSECURE_PLAINTEXT=1 before the command:
+  MASH_INSECURE_PLAINTEXT=1 mashctl endpoint list
+
+With it, credentials and mail cross the connection unencrypted.
+
+$ mashctl endpoint list
+[exit 1]
+error: refusing to connect to myserver without encryption (the address
+       starts with nats://, and ~/.config/mash/config.json set it).
+fix: change "url" in ~/.config/mash/config.json to a tls:// address. For a
+     server with its own certificate authority, also set "tls_ca" there to
+     the full path of its file.
+
+Or, for a test server only: put MASH_INSECURE_PLAINTEXT=1 before the command:
+  MASH_INSECURE_PLAINTEXT=1 mashctl endpoint list
+
+With it, credentials and mail cross the connection unencrypted.
 
 $ mashctl endpoint list
 [exit 1]
@@ -3528,26 +4224,26 @@ fix: connect mashctl to a server first; for how, run:
   mashctl adopt --help
 
 $ mashctl endpoint create acme.demo.bob --make-key
-[exit 1]
+[exit 4]
 error: mashctl does not have this server's signing key, so it cannot make
        endpoints.
 fix: connect mashctl to the server first; for how, run:
   mashctl adopt --help
 
 $ mashctl endpoint list
-[exit 6]
+[exit 4]
 error: mashctl has no administrator credentials for this server.
 fix: connect mashctl to the server; for how, run:
   mashctl adopt --help
 
 $ mashctl endpoint list
-[exit 6]
+[exit 4]
 error: the administrator credentials file is missing: it cannot be opened.
 fix: restore the file, or connect again; for how, run:
   mashctl adopt --help
 
 $ mashctl endpoint list
-[exit 6]
+[exit 1]
 error: the administrator credentials file can be read by other users
        (mode 0644).
 fix: make the file private to you:
@@ -3555,36 +4251,36 @@ fix: make the file private to you:
 
 $ mashctl endpoint list
 [exit 6]
-error: cannot reach the server tls://127.0.0.1:24222.
+error: cannot reach the server tls://myserver:4222.
 fix: check that the server is running, then see where mashctl stands:
   mashctl status
 
 $ mashctl endpoint create acme.demo.bob --make-key
 [exit 6]
-error: cannot reach the server tls://127.0.0.1:24222. Nothing was changed.
+error: cannot reach the server tls://myserver:4222. Nothing was changed.
 fix: start the server, then run the same command again.
 
 $ mashctl audit
-[exit 3]
-error: cannot reach the server tls://127.0.0.1:24222.
+[exit 6]
+error: cannot reach the server tls://myserver:4222.
 fix: check that the server is running, then see where mashctl stands:
   mashctl status
 
 $ mashctl inbox inspect acme.demo.bob
-[exit 3]
-error: cannot reach the server tls://127.0.0.1:24222.
+[exit 6]
+error: cannot reach the server tls://myserver:4222.
 fix: check that the server is running, then see where mashctl stands:
   mashctl status
 
 $ mashctl issued check
-[exit 2]
-error: cannot reach the server tls://127.0.0.1:24222.
+[exit 6]
+error: cannot reach the server tls://myserver:4222.
 fix: check that the server is running, then see where mashctl stands:
   mashctl status
 
 $ mashctl endpoint delete acme.demo.bob
 [exit 6]
-error: cannot reach the server tls://127.0.0.1:24222. Nothing was changed.
+error: cannot reach the server tls://myserver:4222. Nothing was changed.
 fix: start the server, then run the same command again.
 ```
 
@@ -3592,31 +4288,61 @@ Warnings (not refusals; the command goes on). They replace the two long
 `warning:` lines of 0.5.5 and are printed only when they matter.
 
 ```text
+$ MASH_INSECURE_PLAINTEXT=1 mashctl endpoint list
+[exit 0]
+warning: plain-text connection to myserver (MASH_INSECURE_PLAINTEXT is set):
+         anyone on the network can read mail and obtain signatures
+
+OWNER  GROUP  ENDPOINT  ADDRESS          CREATED (UTC)
+acme   demo   alice     acme.demo.alice  2026-11-19 00:21
+              bob       acme.demo.bob    2026-11-19 00:22
+
+2 endpoints
+
 $ MASH_OWNER=other mashctl endpoint list
 warning: MASH_OWNER=other overrides the owner in your configuration (acme).
          mashctl is acting as owner other. Unset MASH_OWNER to use acme.
 
-$ MASH_URL=tls://localhost:24222 mashctl endpoint list     (inside a session)
-warning: MASH_URL overrides your configuration and this shell looks like it
-         is inside a mash session, so mashctl is acting on that session's own
-         server, tls://localhost:24222. To act on another server, run outside
-         the session, or unset the MASH_* variables first.
+$ MASH_URL=tls://testserver:4222 MASH_ADMIN_CREDS=<file> mashctl endpoint list
+warning: using the server from MASH_URL in this shell (the config file names
+         another server)
+
+(the list prints as usual)
 ```
 
 What changed and why:
 
-- P1: the preamble is gone. A server problem names the server in the error.
+- P1: the preamble is gone. A server problem names the server in the error (a failure may name it).
 - P5, P6: the TLS refusal (310 columns, with `insecure_plaintext` and `tls_ca`
-  explained nowhere) is a short fix. The test-server override,
-  `insecure_plaintext` (`MASH_INSECURE_PLAINTEXT=1`), is named in the fix,
-  because ADR 0146 requires it, and marked for a throwaway test server only.
+  explained nowhere) is a short fix. The test-server override is the
+  environment variable `MASH_INSECURE_PLAINTEXT=1` for one run, named in an
+  `Or` block (DRAFT8, REQ-010); the config key `insecure_plaintext` is not
+  offered. The text says that credentials and mail then cross the connection
+  unencrypted.
+- DRAFT9 (U6): the plain-URL refusal says where the address came from. From
+  MASH_URL the fix is `unset MASH_URL` alone on its line (a test for the
+  shell), then one sentence for a profile that exports it: remove it from the
+  file that sets it. From the configuration file the fix names its `url`.
+  Both end with the same `Or` block for a test server. [confirm: mashctl can
+  tell the two sources apart; Part 1 Facts to confirm 20.]
+- DRAFT9 (U3, REQ-010): while the override is set, every connecting command
+  prints one `warning:` line first on stderr, before any result, in core's
+  words wrapped to 80. It is shown once here, on `endpoint list`, and not in
+  the other mockups. The conventions block states the rule.
 - The wrapper text `mashctl: endpoint list: mashctl: mash:` (the same program
   named three times) is gone.
 - "not initialised" now means "not connected to a server yet": the fix points
   to `mashctl adopt --help`, because `init --local` is removed.
-- Exit codes are as in the catalog (create 6 on a server problem, `list` 6,
-  `audit` and `inbox inspect` 3, `issued check` 2, `init` 1). The TLS refusal
-  is 1 (conventions block).
+- DRAFT10 (V3): every unreachable server is exit 6 (`audit` and `inbox inspect`
+  were 3, `issued check` was 2, the usage code). No administrator credentials,
+  a missing credentials file and a missing signing key are 4 (not authorized;
+  they were 6 and 1). A credentials file other users can read is 1 (a
+  refusal; it was 6). The TLS refusal is 1 (conventions block).
+- DRAFT10 (V1, V5, critic A.E, F.3): the MASH_URL refusal says `MASH_URL is
+  nats://...`, naming the variable that is wrong; the fix removes it. The
+  session trap has one line, the warning of the conventions block, printed
+  when MASH_URL (with its own administrator credentials) overrides the config
+  file's server. The `127.0.0.1` in the second refusal is `myserver`.
 - `status` (part 1) shows the warnings above on request in plain words.
 
 ### E3. endpoint create (refusals)
@@ -3644,7 +4370,7 @@ fix: ask whoever runs the server what the rule is, or pick another name.
 # when: the endpoint already exists
 error: the endpoint acme.demo.bob already exists.
 fix: to give it a new key, reissue it:
-  mashctl endpoint reissue acme.demo.bob --make-key
+  mashctl endpoint reissue acme.demo.bob --public-key <file>
 
 # when: the address was deleted earlier
 error: the address acme.demo.bob was deleted, and a deleted address is
@@ -3670,14 +4396,26 @@ error: this key was revoked, so it can never be used again.
 fix: make a new key on bob's machine:
   mash key create --out bob.key
 
+# when: the token file already exists
+error: ~/acme.demo.bob.token already exists and is never overwritten.
+fix: name another file with --token-out, or delete this one.
+
+# when: a server did not answer the revocation check (exit 6)
+error: mashctl could not check whether this key was revoked: a server did
+       not answer. Nothing was changed.
+fix: bring the server back, then run the same command again.
+
+$ mashctl endpoint create acme.demo.bob --make-key
+[exit 1]
+# when: the endpoint already exists
+error: the endpoint acme.demo.bob already exists.
+fix: to give it a new key, reissue it with a key made where bob runs:
+  mashctl endpoint reissue acme.demo.bob --public-key <file>
+
 # when: the key kept from an unfinished run was revoked
 error: the key waiting from an earlier, unfinished run was revoked.
 fix: delete the key left by the unfinished run, then run the command again:
   rm ~/.config/mash/acme.demo.bob.creds.pending
-
-# when: the token file already exists
-error: ./acme.demo.bob.token already exists and is never overwritten.
-fix: name another file with --token-out, or delete this one.
 
 # when: another key's credentials file is in the way
 error: a credentials file for a different key is already at
@@ -3695,18 +4433,46 @@ error: mashctl cannot write to ~/.config/mash: other users can write there.
        Nothing was changed.
 fix: make the folder private to you:
   chmod 700 ~/.config/mash
+```
 
-# when: a server did not answer the revocation check
-error: mashctl could not check whether this key was revoked: a server did
-       not answer. Nothing was changed.
-fix: bring the server back, then run the same command again.
+When the credentials file named by `--creds-out` cannot be created safely
+(DRAFT8, T1, INV-003). Nothing is written, and the endpoint is not made:
+
+```text
+$ mashctl endpoint create acme.demo.alice --make-key --creds-out alice.creds
+[exit 1]
+# when: the file already exists and is a different file
+error: alice.creds already exists and is a different file. Nothing was
+       changed.
+fix: choose a new path, or remove it yourself if it is yours:
+  rm alice.creds
+
+# when: the path is a link to another file
+error: alice.creds is a link to another file, and mashctl does not write
+       through a link. Nothing was changed.
+fix: choose a path that is not a link:
+  mashctl endpoint create acme.demo.alice --make-key --creds-out <new path>
+
+# when: the folder belongs to someone else
+error: the folder for alice.creds is not yours, so mashctl will not put a
+       private file in it. Nothing was changed.
+fix: choose a path in a folder you own:
+  mashctl endpoint create acme.demo.alice --make-key --creds-out <new path>
 ```
 
 Exit codes in this block: invalid name 1, naming rule 1, exists 1, deleted
 address 1, unreadable key file 1, not a public key 1, key already used 1,
 revoked 1, waiting key revoked 1, token file exists 1, credentials file
-exists 1, no folder 1, folder not safe 6, could not check revocation 6. The
+exists 1, no folder 1, folder not safe 1 (it was 6), could not check
+revocation 6; for `--creds-out`: file exists 1, link 1, folder not yours 1. The
 `error:` text does not repeat the exit code.
+
+DRAFT10 (critic A.E): the cases are split by the command that causes them. The
+first block is `--public-key`; the second is `--make-key`, which alone writes
+a credentials file and can meet a file in its way. The `.pending` file is the
+key `--make-key` keeps until the server answers; no other block shows it
+[confirm: Facts to confirm 21]. The "already exists" fix names
+`--public-key <file>` first.
 
 Codes covered: `name_invalid`, `name_rule`, `address_taken`, `key_retired`,
 `public_key_unreadable`, `public_key_invalid`, `public_key_issued`,
@@ -3728,10 +4494,37 @@ error: bob.pub is already bob's public key, so nothing would change.
 fix: make a new key on bob's machine:
   mash key create --out bob2.key
 
-$ mashctl endpoint reissue acme.demo.bob --public-key bob2.pub
+$ mashctl endpoint reissue acme.demo.bob --public-key b2.pub --token-out t.token
 [exit 1]
-error: ./acme.demo.bob.token already exists and is never overwritten.
+error: t.token already exists and is never overwritten.
 fix: name another file with --token-out, or delete this one.
+
+$ mashctl endpoint reissue acme.demo.bob --public-key bob2.pub
+(the text of what will change, and the prompt, as in B2)
+Type the address to reissue it: acme.demo.alice
+[exit 3]
+error: what you typed is not acme.demo.bob. Nothing was changed.
+fix: run the command again and type the address you want to reissue:
+  mashctl endpoint reissue acme.demo.bob --public-key bob2.pub
+
+$ mashctl endpoint reissue acme.demo.bob --public-key bob2.pub   (no terminal)
+[exit 4]
+error: a reissue needs a person at a terminal.
+fix: run the same command in a terminal and type the address when asked:
+  mashctl endpoint reissue acme.demo.bob --public-key bob2.pub
+
+Or, to see what it would change without changing anything:
+  mashctl endpoint reissue acme.demo.bob --public-key bob2.pub --dry-run
+
+$ mashctl endpoint reissue acme.demo.bob --make-key
+[exit 1]
+error: bob's credentials are not on this machine, so --make-key would move
+       bob's identity here. Nothing was changed.
+fix: give a key made on the machine where bob runs:
+  mashctl endpoint reissue acme.demo.bob --public-key <file>
+
+Or make that key first, on bob's machine:
+  mash key create --out bob2.key
 
 $ mashctl endpoint reissue acme.demo.alice --public-key bob2.pub
 [exit 1]
@@ -3763,7 +4556,7 @@ fix: check this machine's clock, then run the command again.
 
 $ mashctl endpoint reissue acme.demo.bob --make-key
 [exit 1]
-error: another reissue of acme.demo.bob is running (process 85044 on bf2).
+error: another reissue of acme.demo.bob is running (process 85044 on myserver).
 fix: wait for it to finish, then run again. A killed run leaves nothing to
      clean up.
 
@@ -3775,7 +4568,7 @@ fix: if no reissue is running, delete that folder once, then run again:
   rm -r ~/.config/mash/acme.demo.bob.creds.lock
 
 $ mashctl endpoint reissue acme.demo.bob --make-key
-[exit 6]
+[exit 1]
 error: another reissue changed bob's key while this one ran, so the file
        this run wrote was removed. The old key stays revoked.
 fix: run the same command again.
@@ -3797,7 +4590,8 @@ fix: see where mashctl stands, then run the command again:
 In a bulk run (`--all`, `--changed`) a refusal is shown in the RESULT column
 (see B3) with the same words as the `error:` line above, and a skipped endpoint
 that has no credentials file here is shown under "Skipped" (exit 0). The
-unreadable file is exit 6 in a bulk run and exit 1 for one endpoint.
+unreadable file is exit 1 for one endpoint; in a bulk run it is a `not done` row and
+the run exits 5 (partial).
 
 Codes covered: `endpoint_missing`, `key_unchanged`, `file_exists`,
 `public_key_issued`, `creds_mismatch`, `creds_unreadable`, `future_issued`,
@@ -3811,15 +4605,12 @@ Codes covered: `endpoint_missing`, `key_unchanged`, `file_exists`,
 ```text
 $ mashctl endpoint delete acme.demo.zed
 [exit 1]
-error: there is no endpoint acme.demo.zed, and it was never created.
+error: there is no endpoint acme.demo.zed.
 fix: see which endpoints exist:
   mashctl endpoint list
 
-Or, if it was removed only in part, finish the removal:
-  mashctl deprovision acme.demo.zed
-
 $ mashctl endpoint delete acme.demo.bob
-[exit 1]
+[exit 6]
 error: only 1 of 2 servers answered, so the key cannot be shown to be
        revoked. Nothing was changed.
 fix: bring the missing server back and run the command again. If the
@@ -3832,7 +4623,7 @@ error: bob's key has a token dated in the future, so revoking the key would
 fix: check this machine's clock, then run the command again.
 
 $ mashctl endpoint delete acme.demo.bob
-[exit 1]
+[exit 6]
 error: the server could not confirm that bob's key was revoked. Nothing was
        removed.
 fix: run the same command again; revoking twice is safe.
@@ -3847,11 +4638,17 @@ fix: list what the server holds, then remove it by the key you mean:
 
 $ mashctl endpoint delete acme.demo.bob
 [exit 1]
-error: mash cannot show that its record of bob's key is complete (it has
-       been recorded too many times). Nothing was changed.
+error: mash cannot tell which key it issued for bob, so it will not delete
+       bob. Nothing was changed.
 fix: revoke the key with the tools of whoever runs the server, then:
   mashctl endpoint delete acme.demo.bob --no-revoke
 ```
+
+DRAFT10 (critic A.E, V3): "never created" and "removed only in part" were
+two claims in one error; the error says only that no endpoint exists. A delete
+left half done is finished with `--force` (B5, H7), not `deprovision`. The
+"too many times" sentence is in plain words. Too few servers and an
+unconfirmed revocation are exit 6 (they were 1).
 
 Codes covered: `not_found`, too few servers, future issue time, revocation not
 confirmed, record belongs to another key, history not complete; plus
@@ -3885,7 +4682,7 @@ fix: see which endpoints exist:
   mashctl endpoint list
 
 $ mashctl audit --compare nope.json
-[exit 3]
+[exit 1]
 error: the file nope.json does not exist.
 fix: save an earlier audit first:
   mashctl audit --json > audit-earlier.json
@@ -3907,7 +4704,7 @@ $ mashctl deprovision acme.demo.bob --suspension deadbeef --drained-to 0
 error: the inbox is not suspended with that id, or a message arrived after
        message 0. Nothing was revoked.
 fix: read the current suspension:
-  mashctl endpoint suspended acme.demo.bob
+  mashctl endpoint show acme.demo.bob
 
 $ mashctl deprovision acme.demo.bob
 [exit 1]
@@ -3952,15 +4749,17 @@ The two not shown above (`endpoint create` and `adopt`, `mash key create`,
 The form every dry-run follows:
 
 ```text
-Would <verb> <thing> on tls://127.0.0.1:24222 (from ~/.config/mash/config.json):
-  - <one step per line, plain words>
+Would <verb> <thing>:
+  - <one step per line, plain words; what would be lost, when anything>
 Nothing was changed.
 ```
 
 Rules for the form: a dry-run connects when the real command would, so it
 reports the real refusals; it prints `Would` sentences in the same order as the
 real output; it prints no NEXT (a bulk reissue dry run prints one, B3); it
-exits 0 when the real command would run.
+exits 0 when the real command would run. A command that asks for a typed
+confirmation prints the same "will lose" lines as "Would ... It would lose:"
+and asks nothing. The form names no server.
 
 ---
 
@@ -3996,11 +4795,16 @@ Proposed note, as printed at the end of `mashctl provision --help` and
 ```text
 $ mashctl provision --help
 ...
-Not for servers that mashctl set up. Use this when the NATS users are made by
-someone else, such as a hosted NATS service. mash does not make a key or
-credentials here, and mashctl cannot revoke the user unless it holds the
-server's operator key. Then use deprovision --no-revoke and ask the server's
-owner to revoke the key.
+Not for a server mashctl adopted and can sign users for. Use this when the
+NATS users are made by someone else, such as a hosted NATS service. mash does
+not make a key or credentials here, and mashctl cannot revoke the user unless
+it holds the server's operator key. Then use deprovision --no-revoke and ask
+the server's owner to revoke the key.
+
+$ mashctl deprovision --help
+...
+It revokes the user when mashctl holds the operator key. When it does not, use
+--no-revoke and ask the server's owner to revoke the key.
 ```
 
 What changed and why:
@@ -4009,6 +4813,494 @@ What changed and why:
   The new note says who can revoke, and when.
 - Nothing is promised for Synadia beyond the commands above; no unreleased
   integration is named.
+
+---
+
+## H. Help, usage and dry-run screens for adopt, init and endpoint
+
+DRAFT8 (T5). The v0.5.5 screens for these commands ran 100 to 450 columns
+wide. The screens below are the ones the earlier sections did not show: the
+`--help` of each command, the usage errors, the dry runs and the repeat run.
+Each follows the rules above: 80 columns, plain words, one fix with its
+command on its own line.
+
+### H1. AFTER: `mashctl adopt --help`
+
+```text
+$ mashctl adopt --help
+[exit 0]
+mashctl adopt - connect mashctl to a NATS server you already run
+
+Usage:
+  mashctl adopt --server <url> --owner NAME --operator-key <file>
+                --account-key <file> --system-credentials <file>
+                [--account NAME] [--ca <file>]
+                [--make-admin | --admin-credentials <file>] [--dry-run]
+
+adopt checks that you hold the authority over the server, then copies the
+keys and credentials into ~/.config/mash and writes the settings. On the
+server it changes nothing except, with --make-admin, a record of the new
+admin credentials. Your operator gives you the address and the files.
+
+Flags:
+  --server <url>                the server address; it must start with tls://
+  --owner NAME                  the owner name for your endpoints, such as acme
+  --operator-key <file>         the operator key file
+  --account-key <file>          the account key file
+  --system-credentials <file>   the system credentials file
+  --account NAME                the account mash uses on the server
+  --ca <file>                   the certificate file of a server with its own
+                                certificate authority. It asks you to type the
+                                fingerprint; no flag skips it
+  --make-admin                  make the admin credentials mashctl will use
+  --admin-credentials <file>    use admin credentials you already have
+  --dry-run                     run the checks and print what would be saved
+  --detail                      print the key ids and the file of each check
+
+Example:
+  mashctl adopt --server tls://myserver:4222 --owner acme --ca ca.pem \
+    --make-admin --operator-key operator.nk --account-key account.nk \
+    --system-credentials system.creds
+```
+
+### H2. AFTER: `mashctl adopt` usage and file errors
+
+```text
+$ mashctl adopt
+[exit 2]
+error: adopt needs the server address, the owner and the three key files.
+fix: see what each one is:
+  mashctl adopt --help
+usage: mashctl adopt --server <url> --owner NAME [options]
+
+$ mashctl adopt --server tls://myserver:4222 --owner acme ...
+[exit 1]
+Checking the server as owner acme. Nothing is written until all the checks
+pass.
+
+  1 files     FAILED  operator.nk cannot be read.
+
+error: operator.nk cannot be read.
+fix: check the file name and that you can read it.
+
+$ mashctl adopt ... --make-admin --admin-credentials admin.creds
+[exit 2]
+error: give --make-admin or --admin-credentials, not both.
+fix: leave out one of them and run the command again.
+usage: mashctl adopt --server <url> --owner NAME [options]
+```
+
+### H3. AFTER: `mashctl adopt` dry run and repeat run
+
+```text
+$ mashctl adopt --server tls://myserver:4222 --owner acme ... --dry-run
+[exit 0]
+Would adopt the server as owner acme:
+  - check the operator key, account key and system credentials
+  - make admin credentials and record them on the server
+  - copy the admin credentials into mashctl's folder
+  - copy the keys into mashctl's folder
+  - write the settings
+Nothing was changed.
+
+$ mashctl adopt ... --admin-credentials admin.creds --dry-run
+[exit 0]
+Would adopt the server as owner acme:
+  - check the operator key, account key and system credentials
+  - copy admin.creds into mashctl's folder
+  - copy the keys into mashctl's folder
+  - write the settings
+Nothing was changed.
+
+$ mashctl adopt --server tls://myserver:4222 --owner acme ...
+[exit 0]
+(the checks print as in the first run)
+
+Adopted the server as owner acme. Nothing new was copied.
+
+  kept    ~/.config/mash/server/mashadmin.creds  (it connected)
+  kept    ~/.config/mash/config.json             (already has these settings)
+
+NEXT: on this machine, prepare the server for mash:
+  mashctl init
+```
+
+### H4. AFTER: `mashctl init --help` and usage errors
+
+```text
+$ mashctl init --help
+[exit 0]
+mashctl init - prepare the server for mash (once, after adopt)
+
+Usage:
+  mashctl init
+
+init makes room on the server for the list of endpoints, the record of every
+token mash signs and the sessions that are running. It changes nothing that
+is already there, so running it twice is safe.
+
+Flags:
+  --detail    print every step
+  --json      print the result for a script
+
+$ mashctl init now
+[exit 2]
+error: init takes no arguments.
+fix: run it by itself:
+  mashctl init
+usage: mashctl init
+
+$ mashctl init --port 20001
+[exit 2]
+error: unknown option --port.
+fix: see the options:
+  mashctl init --help
+usage: mashctl init
+```
+
+### H5. AFTER: `--help` of endpoint list, show, delete and reissue
+
+```text
+$ mashctl endpoint list --help
+[exit 0]
+mashctl endpoint list - list the endpoints on the server
+
+Usage:
+  mashctl endpoint list [--wide] [--detail]
+
+Flags:
+  --wide      add the type, host and note columns
+  --detail    print everything known about each endpoint
+
+Example:
+  mashctl endpoint list
+
+$ mashctl endpoint show --help
+[exit 0]
+mashctl endpoint show - show one endpoint
+
+Usage:
+  mashctl endpoint show <address> [--detail]
+
+Flags:
+  --detail    add the keys and the server's record
+
+Example:
+  mashctl endpoint show acme.demo.bob
+
+$ mashctl endpoint delete --help
+[exit 0]
+mashctl endpoint delete - delete an endpoint and its inbox for good
+
+Usage:
+  mashctl endpoint delete <address> [--dry-run] [--delete-creds] [--force]
+                          [--no-revoke]
+
+It says what will be lost (the unread mail, the address, the key) and asks
+you to type the address. No flag skips it.
+
+Flags:
+  --dry-run        print what would be lost and change nothing
+  --delete-creds   remove the credentials file here; the default renames it
+  --force          finish a delete that was left half done
+  --no-revoke      delete without stopping the key; use only when the server
+                   owner stops it
+  --detail         print everything that was done
+
+Example:
+  mashctl endpoint delete acme.demo.bob --dry-run
+
+$ mashctl endpoint reissue --help
+[exit 0]
+mashctl endpoint reissue - give an endpoint a new key
+
+Usage:
+  mashctl endpoint reissue <address> --public-key <file>
+  mashctl endpoint reissue <address> --make-key
+  mashctl endpoint reissue (--all | --changed)
+
+The old key stops working. Use --public-key when the new key was made on the
+machine where the endpoint runs, and --make-key only when it runs on this
+machine. It says what will change and asks you to type the address (for --all
+and --changed, the count). No flag skips it.
+
+Flags:
+  --public-key <file> sign a new public key; writes a numbered token
+  --make-key          make the new private key here and write the credentials
+  --token-out <file>  write the token to <file>
+  --all               reissue every endpoint whose credentials are here
+  --changed           reissue only those that need it
+  --dry-run           print what would change and change nothing
+  --detail            print everything that was done
+
+Example:
+  mashctl endpoint reissue acme.demo.bob --public-key bob2.pub
+```
+
+### H6. AFTER: endpoint create without a key choice, and dry runs
+
+```text
+$ mashctl endpoint create
+[exit 2]
+error: no endpoint address given.
+fix: name the endpoint to create:
+  mashctl endpoint create acme.<group>.<name> --make-key
+usage: mashctl endpoint create <address> (--make-key | --public-key <file>)
+
+$ mashctl endpoint create acme.demo.bob
+[exit 2]
+error: an endpoint needs a key: give --make-key or --public-key <file>.
+fix: make the key here:
+  mashctl endpoint create acme.demo.bob --make-key
+usage: mashctl endpoint create <address> (--make-key | --public-key <file>)
+
+$ mashctl endpoint create acme.demo.bob --make-key --color
+[exit 2]
+error: unknown option --color.
+fix: see the options:
+  mashctl endpoint create --help
+usage: mashctl endpoint create <address> (--make-key | --public-key <file>)
+
+$ mashctl endpoint create acme.demo.bob acme.demo.alice --make-key
+[exit 2]
+error: give one endpoint address, not two.
+fix: create them one at a time:
+  mashctl endpoint create acme.demo.bob --make-key
+usage: mashctl endpoint create <address> (--make-key | --public-key <file>)
+
+$ mashctl endpoint create acme.demo.bob --make-key --dry-run
+[exit 0]
+Would create endpoint acme.demo.bob:
+  - make a private key for bob here
+  - sign bob's public key, which makes the token
+  - write bob's credentials file here
+Nothing was changed.
+
+$ mashctl endpoint create acme.demo.bob --public-key bob.pub --dry-run
+[exit 0]
+Would create endpoint acme.demo.bob:
+  - sign bob's public key, which makes the token
+  - write the token to ~/acme.demo.bob.token
+  - print the CA file and its fingerprint to give bob's machine
+Nothing was changed.
+```
+
+### H7. AFTER: show, delete and list, the remaining usage errors and cases
+
+```text
+$ mashctl endpoint show
+[exit 2]
+error: no endpoint address given.
+fix: name the endpoint to show:
+  mashctl endpoint show <address>
+usage: mashctl endpoint show <address> [--detail]
+
+$ mashctl endpoint show bob
+[exit 2]
+error: "bob" is not an endpoint address.
+fix: give the whole address, owner, group and name:
+  mashctl endpoint show acme.<group>.bob
+usage: mashctl endpoint show <address> [--detail]
+
+$ mashctl endpoint show acme.demo.bob
+[exit 0]
+
+Endpoint acme.demo.bob
+
+created:      2026-11-19 00:22 UTC
+type:         agent
+token:        valid, not revoked
+online:       no
+unread mail:  3
+credentials:  not on this machine
+
+$ mashctl endpoint show acme.demo.dave
+[exit 1]
+error: the address acme.demo.dave was deleted, and a deleted address is
+       never used again.
+fix: see which endpoints exist:
+  mashctl endpoint list
+
+$ mashctl endpoint delete
+[exit 2]
+error: no endpoint address given.
+fix: name the endpoint to delete:
+  mashctl endpoint delete <address>
+usage: mashctl endpoint delete <address> [--force] [--no-revoke] [--dry-run]
+
+$ mashctl endpoint delete acme.demo.alice --delete-creds
+(the text of what will be lost, and the prompt)
+Type the address to delete it: acme.demo.alice
+[exit 0]
+Deleted acme.demo.alice. Its address cannot be used again.
+  Checked: the server now refuses alice's old credentials.
+  Its inbox is deleted, with 2 unread messages.
+  Its credentials file here was removed.
+
+Nothing can restore a deleted address. A new endpoint needs a new name.
+
+NEXT: see what is left:
+  mashctl endpoint list
+
+$ mashctl endpoint delete acme.demo.hal
+[exit 1]
+error: the server has no record of acme.demo.hal, but its credentials file
+       is here. Nothing was changed.
+fix: remove what is left on this machine:
+  mashctl endpoint delete acme.demo.hal --force
+
+$ mashctl endpoint list now
+[exit 2]
+error: endpoint list takes no arguments.
+fix: run it by itself:
+  mashctl endpoint list
+usage: mashctl endpoint list [--wide] [--detail]
+
+$ mashctl endpoint reissue acme.demo.bob --make-key
+[exit 1]
+error: the credentials file here is not bob's current key, so it was not
+       replaced. Nothing was changed.
+fix: move that file aside, then run the command again:
+  mv ~/.config/mash/acme.demo.bob.creds ~/.config/mash/acme.demo.bob.old
+```
+
+---
+
+## Wide lines fixed
+
+DRAFT8 (T5). The v0.5.5 catalog has 348 lines over 100 columns in the default
+text output of `adopt`, `init` and `endpoint` (up to 456 columns; notes under
+a case excluded). The table is built by a script over
+`docs/plans/2026-11-19-cli-output-catalog-mashctl.md`: each row is one catalog
+case, with the count of its lines over 100 columns, the widest, the catalog
+line number of the first, and the section of this document that replaces it.
+Every AFTER line in this document is 80 columns or fewer; a typed command a
+person is told to run is the only exception, and those are kept short
+(checked by script over the reviewer packet). `--json` output keeps its form.
+
+| Catalog section and case | Lines over 100 | Widest | First line | Replaced by |
+|---|---|---|---|---|
+| adopt: help_adopt | 1 | 298 | 320 | section H1 |
+| adopt: ad_noargs | 3 | 456 | 333 | section H2 |
+| adopt: ad_missingfile | 3 | 198 | 340 | section H2 |
+| adopt: ad_plain | 4 | 323 | 357 | section 1b (plain-text refusal) |
+| adopt: ad_dry | 14 | 397 | 371 | section H3 |
+| adopt: ad_dry_noadmin | 15 | 397 | 405 | section H3 |
+| adopt: ad_both | 2 | 257 | 438 | section H2 |
+| adopt: ad_real | 13 | 397 | 451 | section 1b |
+| adopt: ad_again | 14 | 397 | 486 | section H3 |
+| endpoint: help_endpoint | 4 | 324 | 980 | section A4 |
+| endpoint: bare_endpoint_nosub | 1 | 120 | 1011 | section E1 |
+| endpoint create: help_endpoint_create | 9 | 119 | 1034 | section A4a |
+| endpoint create: bare_endpoint_create | 1 | 113 | 1061 | section H6 |
+| endpoint create: ec_dry | 1 | 197 | 1077 | section H6 |
+| endpoint create: ec_make | 1 | 197 | 1093 | section 2 (alice, same machine) |
+| endpoint create: ec_make_json | 1 | 197 | 1132 | none: `--json` is unchanged |
+| endpoint create: ec_pub | 2 | 197 | 1140 | section 2 (Step 2, bob) |
+| endpoint create: ec_pub_dry | 2 | 224 | 1160 | section H6 |
+| endpoint create: ec_tool | 1 | 197 | 1177 | section 2 (Step 2, bob) |
+| endpoint create: ec_tool_dry | 1 | 197 | 1193 | section H6 |
+| endpoint create: ecx_default_jwt | 4 | 197 | 1198 | section H6 |
+| endpoint create: kc_ned | 1 | 134 | 1224 | section 2 (Step 1, bob) |
+| endpoint create: ec_ned | 2 | 197 | 1233 | section 2 (Step 2, bob) |
+| endpoint create: ecx_flags | 1 | 197 | 1257 | section H6 |
+| endpoint create: ecx_oneword | 1 | 197 | 1273 | section E1 |
+| endpoint create: ecx_exists | 1 | 169 | 1285 | section E3 |
+| endpoint create: ecx_taken | 3 | 197 | 1293 | section E3 |
+| endpoint create: ecx_two | 1 | 123 | 1310 | section E1 |
+| endpoint create: ecx_nogroup | 1 | 113 | 1322 | section E1 |
+| endpoint create: ecx_nokey | 1 | 187 | 1346 | section H6 |
+| endpoint create: ecx_pubmissing | 1 | 146 | 1370 | section E3 |
+| endpoint create: ecx_pubinvalid | 1 | 192 | 1382 | section E3 |
+| endpoint create: ecx_flag | 9 | 119 | 1395 | section H6 |
+| endpoint create: ecx_extra | 9 | 119 | 1422 | section H6 |
+| endpoint create: ecx_disagree | 1 | 113 | 1448 | section E1 |
+| endpoint create: ecx_label_bad | 9 | 119 | 1461 | section E1 |
+| endpoint create: ecx_json_refusal | 2 | 169 | 1515 | none: `--json` is unchanged |
+| endpoint create: ecx_fileexists | 2 | 159 | 1527 | section E3 |
+| endpoint create: ecx_revoked | 3 | 197 | 1539 | section E3 |
+| endpoint create: ecx_revoked2 | 3 | 197 | 1552 | section E3 |
+| endpoint create: ec_retired | 2 | 197 | 1569 | section E3 |
+| endpoint create: ec_retired_pub | 3 | 197 | 1578 | section E3 |
+| endpoint delete: help_endpoint_delete | 1 | 115 | 1624 | section H5 |
+| endpoint delete: bare_endpoint_delete | 1 | 139 | 1647 | section H7 |
+| endpoint delete: ed_dry | 2 | 197 | 1661 | section B4 |
+| endpoint delete: ed_dry_json | 1 | 197 | 1690 | none: `--json` is unchanged |
+| endpoint delete: ed | 3 | 197 | 1702 | section B4 |
+| endpoint delete: ed_json | 1 | 197 | 1735 | none: `--json` is unchanged |
+| endpoint delete: ed_again | 2 | 197 | 1749 | section B5 |
+| endpoint delete: ed_force | 2 | 197 | 1764 | section B5 |
+| endpoint delete: ed_norevoke | 5 | 325 | 1777 | section B5 |
+| endpoint delete: ed_delcreds | 2 | 197 | 1796 | section H7 |
+| endpoint delete: ed_nrec_nocreds_refuse | 3 | 197 | 1811 | section H7 |
+| endpoint delete: ed_force_dry | 1 | 197 | 1831 | section B5 |
+| endpoint delete: ed_force_creds | 2 | 197 | 1845 | section B5 |
+| endpoint delete: ed_bad | 1 | 132 | 1858 | section E1 |
+| endpoint delete: ed_noarg | 1 | 139 | 1870 | section H7 |
+| endpoint delete: ed_missing | 2 | 250 | 1882 | section E5 |
+| endpoint delete: ed_json_missing | 3 | 250 | 1911 | none: `--json` is unchanged |
+| endpoint list: help_endpoint_list | 1 | 120 | 1963 | section H5 |
+| endpoint list: el_empty | 1 | 197 | 1982 | section 3 (endpoint list) |
+| endpoint list: el_empty_json | 1 | 197 | 1998 | none: `--json` is unchanged |
+| endpoint list: el_three | 2 | 197 | 2012 | section 3 (endpoint list) |
+| endpoint list: el_three_json | 1 | 197 | 2068 | none: `--json` is unchanged |
+| endpoint list: el_after | 3 | 197 | 2079 | section 3 (endpoint list) |
+| endpoint list: el_extra | 1 | 127 | 2110 | section H7 |
+| endpoint reissue: help_endpoint_reissue | 23 | 124 | 2142 | section H5 |
+| endpoint reissue: er_nokey | 1 | 194 | 2204 | section E1 |
+| endpoint reissue: er_unchanged | 3 | 197 | 2224 | section E4 |
+| endpoint reissue: er_missing | 2 | 197 | 2241 | section E4 |
+| endpoint reissue: er_bad | 1 | 158 | 2254 | section E1 |
+| endpoint reissue: er_dry | 1 | 197 | 2270 | section B1 |
+| endpoint reissue: er_dry_json | 1 | 197 | 2308 | none: `--json` is unchanged |
+| endpoint reissue: er_make | 1 | 197 | 2325 | section B1 |
+| endpoint reissue: er_make_json | 1 | 197 | 2366 | none: `--json` is unchanged |
+| endpoint reissue: er_pub_dry | 2 | 197 | 2375 | section B2 |
+| endpoint reissue: er_pub | 2 | 197 | 2391 | section B2 |
+| endpoint reissue: er_pub_exists | 2 | 158 | 2409 | section E4 |
+| endpoint reissue: er_json_unchanged | 4 | 227 | 2421 | none: `--json` is unchanged |
+| endpoint reissue: er_credsmismatch | 2 | 348 | 2467 | section H7 |
+| endpoint reissue: er_busy | 2 | 197 | 2480 | section E4 |
+| endpoint reissue: er_all_dry | 1 | 197 | 2499 | section B3 |
+| endpoint reissue: er_all_dry2 | 2 | 197 | 2514 | section B3 |
+| endpoint reissue: er_all_json | 1 | 197 | 2571 | none: `--json` is unchanged |
+| endpoint reissue: er_all_noyes | 1 | 197 | 2589 | section B3 |
+| endpoint reissue: er_all_yes | 3 | 352 | 2608 | section B3 |
+| endpoint reissue: er_busy_all | 4 | 352 | 2633 | section B3 |
+| endpoint reissue: er_changed | 1 | 197 | 2654 | section B3 |
+| endpoint reissue: er_changed_dry_json | 1 | 197 | 2680 | none: `--json` is unchanged |
+| endpoint reissue: er_changed_yes | 1 | 197 | 2694 | section B3 |
+| endpoint reissue: er_all_nomake | 24 | 175 | 2706 | section B3 |
+| endpoint reissue: er_all_pub | 24 | 175 | 2758 | section B3 |
+| endpoint show: help_endpoint_show | 1 | 116 | 2838 | section H5 |
+| endpoint show: bare_endpoint_show | 1 | 135 | 2856 | section H7 |
+| endpoint show: es_found | 1 | 197 | 2885 | section 3 (endpoint show) |
+| endpoint show: es_after_meta | 1 | 197 | 2914 | section 3 (endpoint show) |
+| endpoint show: es_tool | 1 | 197 | 2943 | section 3 (endpoint show) |
+| endpoint show: es_json | 1 | 197 | 2988 | none: `--json` is unchanged |
+| endpoint show: es_nocreds | 1 | 197 | 3017 | section H7 |
+| endpoint show: es_nocreds_json | 1 | 197 | 3061 | none: `--json` is unchanged |
+| endpoint show: es_notfound | 2 | 197 | 3073 | section E6 |
+| endpoint show: es_json_missing | 2 | 197 | 3111 | none: `--json` is unchanged |
+| endpoint show: es_deleted | 2 | 197 | 3127 | section H7 |
+| endpoint show: es_bad | 1 | 130 | 3140 | section H7 |
+| init: help_init | 2 | 251 | 3386 | section H4 |
+| init: init_local_start | 5 | 248 | 3393 | section 1a, A5 |
+| init: init_after | 1 | 197 | 3425 | section 1c |
+| init: init_extra | 1 | 197 | 3437 | section H4 |
+| init: init_flag | 1 | 197 | 3450 | section H4 |
+| init --local: il_nostart | 4 | 268 | 3482 | section 1a, A5 |
+| init --local: il_dir | 3 | 268 | 3507 | section 1a, A5 |
+| init --local: il_portinuse | 4 | 155 | 3532 | section 1a, A5 |
+| init --local: il_portinuse_again | 1 | 254 | 3554 | section 1a, A5 |
+| init --local: init_again_local | 1 | 277 | 3567 | section 1a, A5 |
+| init --local: il_portword | 1 | 185 | 3592 | section 1a, A5 |
+| init --local: ilx_flag | 1 | 185 | 3605 | section 1a, A5 |
+
+Sections 1a, 1b, 1c, 2, 3, A, B and E are earlier in this document; H is the
+screens that had no replacement before DRAFT8 (the `--help` of adopt, init,
+list, show, delete and reissue; usage errors; dry runs; a repeat adopt; four
+refusals).
 
 ---
 
@@ -4022,18 +5314,18 @@ Decisions the rules left open. Each is one line.
    explanations in C1 notes are needed in `--help`. Accepted for the review.
 2. `--tag` replaces `--label` on `endpoint create` and `provision` too, for the
    same reason (part 1 must agree). Accepted for the review.
-3. `suspend`, `resume`, `suspended` move under `endpoint`; reason: one place for
-   everything about an endpoint. They keep exit codes 0, 1, 2, 3. Accepted for
-   the review.
+3. `suspend` and `resume` move under `endpoint`; reason: one place for
+   everything about an endpoint. They keep exit codes 0, 1, 2. `suspended` is
+   folded into `endpoint show` (DRAFT10, choice 41). Accepted for the review.
 4. `mashctl list` is removed, not aliased; reason: hard cut (no old-state
    tolerance), and `endpoint list` shows everything it showed. Accepted for
    the review.
 5. `provision` and `deprovision` keep their names and move to "Advanced";
    reason: a rename adds nothing and the list stays short.
 6. Dry-runs print no NEXT, except the bulk reissue dry run, which ends with
-   `NEXT:` and the same command with `--yes`; reason: rule 11 says they end
-   `Nothing was changed.`, the next screen is not a step of a guide, and the
-   bulk dry run has no other way to say what to type (DRAFT7).
+   `NEXT:` and the command to run; reason: rule 11 says they end `Nothing was
+   changed.`, the next screen is not a step of a guide, and the bulk dry run
+   has no other way to say what to type (DRAFT7).
 7. Bulk reissue (`--all`, `--changed`) no longer needs `--make-key`; reason:
    `--make-key` was the only form it accepted, so the flag carried no choice.
 8. The partial-reissue `fix:` names a single-endpoint reissue, not `--changed`;
@@ -4042,11 +5334,10 @@ Decisions the rules left open. Each is one line.
    `--nsc` is unchanged; reason: rule 15 (the default is for a person).
 10. `mashctl list`, `label`, `unlabel`, `set-meta`, `suspend`, `resume` get
     removed-command messages (exit 2), not silent aliases; reason: same as 4.
-11. `audit`, `issued check` and `endpoint suspended` print the verdict first
-    (`OK`, `PROBLEM`, `INCOMPLETE`, `SUSPENDED`, `NOT SUSPENDED`); reason: the
-    exit code alone is not visible to a person, and a person reads the first
-    line first. A `--no-revoke` delete or deprovision ends its first line with
-    `KEY NOT REVOKED` for the same reason.
+11. `audit` and `issued check` print the verdict first (`OK`, `PROBLEM`,
+    `INCOMPLETE`); reason: the exit code alone is not visible to a person, and a
+    person reads the first line first. A `--no-revoke` delete or deprovision
+    ends its first line with `KEY NOT REVOKED` for the same reason.
 12. Usage errors print `error:`, a `fix:` sentence with a complete command
     beneath it, and the usage line; reason: one shape for every refusal
     (R-nextcase), the command is pasteable, and a placeholder stands for what
@@ -4069,10 +5360,10 @@ Decisions the rules left open. Each is one line.
     uses and whether it works, in plain words, replacing the old preamble). Part
     2 only points to it, in the fix for a server that cannot be reached.
 19. In a grouped table the name column is headed `ENDPOINT` (`bob`) and the
-    dotted address, where shown, `PATH` (`acme.demo.bob`), following the
-    maintainer's mockup. Part 1's endpoint list uses the same headers, so the
-    two parts now agree. No table here gained a `PATH` column: each already
-    shows owner and group, so the name alone identifies the row.
+    dotted address, where shown, `ADDRESS` (`acme.demo.bob`) (DRAFT10; it was
+    `PATH`). Part 1's endpoint list uses the same headers. No table here gained
+    an `ADDRESS` column: each already shows owner and group, so the name alone
+    identifies the row. [confirm: contract REQ-005 still says `PATH`.]
 20. A usage error's `fix:` command uses the person's own values when they typed
     them and `<owner>.<group>.<name>`-style placeholders when they did not.
 21. A fix that needs a file removed or moved prints the exact `rm`, `rmdir`
@@ -4081,34 +5372,33 @@ Decisions the rules left open. Each is one line.
 22. `Removed`/`Registered`/`Reissued`/`Deleted`/`Suspended` are kept as the verbs
     of those actions; `Created` is used for new keys and tokens made inside
     them.
-23. The bulk reissue dry run ends with a labelled `NEXT:` and the command with
-    `--yes` on its own line (DRAFT7). It replaces the unlabelled "Add --yes to
-    do it.", which was a bare hint.
-24. The plain-URL refusal (E2) shows the override, because ADR 0146 requires
-    it: `insecure_plaintext` (`MASH_INSECURE_PLAINTEXT=1`), with a warning
-    that it is for a throwaway test server only.
+23. The bulk reissue dry run ends with a labelled `NEXT:` and the command on
+    its own line (DRAFT7, `--yes` removed in DRAFT10): `mashctl endpoint
+    reissue --all`, which then asks for the count.
+24. The plain-URL refusal (E2) shows the override in one form only (DRAFT8,
+    REQ-010): `MASH_INSECURE_PLAINTEXT=1` before the command, for that run.
+    The config key `insecure_plaintext` is removed. The text says that
+    credentials and mail then cross the connection unencrypted.
 25. Removing `mashctl init --local` (A5) reverses the local TLS quick start
     that ADR 0146 and 0.5.5 shipped. The contract that ratifies this document
     carries the ADR (mash order 17); until then this is a proposal.
-26. The source phrase after the server in a result line that changes
-    something: `(from ~/.config/mash/config.json)` or `(set by MASH_URL in
-    this shell)`, and `(from --server)` for `adopt` (part 1). Reasoning: a
-    mashctl run inside a mash session inherits MASH_URL and the session's
-    environment. Commands that only read (`audit`, `issued`, `inbox
-    inspect`, `endpoint list`) keep the server without the source;
-    `mashctl status` shows both.
-27. `--creds-out FILE` belongs to `endpoint create --make-key` only; with
+26. No result line names the server or says where it came from (DRAFT10, Part
+    1 choice 27). The one warning for a MASH_URL that overrides the config
+    file is in the conventions block. `mashctl status` shows the server and the
+    config path.
+27. `--creds-out FILE` (DRAFT8: a new private file, never an existing one) belongs to `endpoint create --make-key` only; with
     `--public-key` it is a usage error (E1). `endpoint reissue --make-key`
     still writes to the config folder; give it `--creds-out` too if the
     same one-file copy is wanted after a reissue.
 28. The dotted address is the only form printed or typed (R3): every command
     and every `--help` example takes `acme.demo.bob`. The slash form may
-    still work but is not shown. Usage lines read `OWNER.GROUP.NAME`.
-29. A delete of any kind ends with `NEXT: create an endpoint with a new
-    name:` and `mashctl endpoint create acme.demo.<new-name> --make-key
-    --creds-out <path>` (R5). The result line is `Deleted acme.demo.bob. Its
-    address cannot be used again.`; the server and its source are on the
-    first indented line. Nothing suggests recreating the retired address.
+    still work but is not shown. Usage lines read `<address>` and `<file>`
+    (DRAFT10: one placeholder form per role).
+29. A delete that finishes ends with `NEXT: see what is left:` and `mashctl
+    endpoint list`, after one sentence that a deleted address cannot be
+    restored and a new endpoint needs a new name (DRAFT10, V5; Part 1, choice
+    44). The result line is `Deleted acme.demo.bob. Its address cannot be used
+    again.`; it names no server.
 30. `endpoint reissue` keeps its name (decided).
 31. Removing `init --local` names the two files that replace
     `docs/guides/nats-local.md`: `docs/skills/mash-nats-local/SKILL.md` and
@@ -4121,6 +5411,68 @@ Decisions the rules left open. Each is one line.
 33. The exit codes, the stdout and stderr split, the colour rule, `--json`,
     resolved paths and `<version>` are written once, in the conventions block
     at the top of Part 1, and are not repeated in this part (DRAFT7).
+34. No command has a flag that skips a confirmation (DRAFT10, V2). `endpoint
+    delete`, every single `endpoint reissue`, `deprovision` and `credential
+    install` over credentials for the same address ask for the address;
+    `endpoint reissue --all` and `--changed` ask for the count. DRAFT9 kept
+    `--yes` on the bulk commands because a reissue is neither a trust nor an
+    exposure change; the contract's INV-004 now covers destruction, and every
+    reissue revokes a key. The audit table is Part 1, choice 35.
+35. The plain-text warning is one `warning:` line printed first on stderr by
+    every connecting command (REQ-010). It is shown once in E2; per-command
+    mockups do not repeat it.
+36. The `init --local` message names two URLs on the project's repository
+    (A3, A5), each alone on its line, because an installed mashctl cannot see
+    repository paths. The files ship from another change (Part 1, choice 38).
+37. The ADR points for MASH_ENDPOINT (ADR 0012) and `init --local` with its
+    exit code (ADR 0146) are proposals here; the ratifying contract carries
+    the ADRs (Part 1, choice 37).
+38. Exit codes (DRAFT10, V3): one table for every command, the CLI standard's
+    rule 14 plus 5 and 6 from the contract (conventions block). Choices 39 to
+    48 are one line per command whose code changed.
+39. `mashctl audit`: server unreachable 3 to 6. `audit --compare` with a file
+    that does not exist: 3 to 1 (a refusal).
+40. `mashctl inbox inspect`: server unreachable 3 to 6.
+41. `mashctl issued check`: server unreachable 2 to 6; an incomplete check
+    (`INCOMPLETE`) 2 to 6. `mashctl endpoint suspended` is removed because it
+    answered a question with exit 3 ("not suspended"), and 3 is "cancelled";
+    `endpoint show` prints the status instead.
+42. mashctl with no administrator credentials, a missing credentials file, or
+    no signing key: 6 or 1 to 4 (not authorized). A credentials file other
+    users can read: 6 to 1 (a refusal).
+43. `mashctl endpoint delete`: "only 1 of 2 servers answered" and "the server
+    could not confirm the revocation": 1 to 6. A wrong typed address: 3 (new).
+    No terminal: 4 (new).
+44. `mashctl endpoint reissue` (every form): a wrong typed address or count 3,
+    no terminal 4 (new). "Another reissue changed bob's key": 6 to 1. An
+    unreadable credentials file in a bulk run is a `not done` row, exit 5.
+45. `mashctl endpoint create`: a config folder other users can write to: 6 to
+    1. `--make-key` with a MASH_URL that names another server: 1 (new).
+46. `mashctl deprovision`: the typed address, 3 and 4, as for delete (new).
+47. `mash credential install` over credentials for the same address: wrong
+    address 3, no terminal 4 (new). `mash status` after a delete or a
+    reissue: the server refuses the credentials, exit 4 [confirm with the
+    `mash` targets].
+48. `mashctl adopt` (Part 1): a wrong fingerprint 1 to 3; no terminal 1 to 4.
+    `mashctl status` NOT REACHABLE: 1 to 6.
+49. Rule 15 of the CLI standard says a missing terminal fails with exit 2
+    naming the flag that answers the prompt. There is no such flag here
+    (INV-004), so the code is 4 (not authorized). Alternative: 2, with a fix
+    that names a terminal. Reasoning: 2 means a typo; a script that runs
+    `endpoint delete` without a terminal did not mistype anything.
+50. Typed confirmation on `endpoint reissue --make-key` for an endpoint whose
+    credentials are here is kept (DRAFT10): the person types the address even
+    though the key is made on this machine, because the running session is
+    signed out and the old key is revoked.
+51. The reissue token name is numbered (`acme.demo.bob.2.token`), not dated;
+    alternative: `--token-out` required. Part 1, choice 40.
+52. The packet lints (`make_packet.py`): V1 fails any success block with
+    `tls://` or a config path, except typed commands, the file lines of
+    `credential install`, `endpoint create`, `adopt`, reissue and delete, the
+    adopt trust rows and the CA path to copy; V3 fails an `[exit N]` outside
+    the table or a condition with the wrong code; V2 fails `--yes`; V6 fails a
+    `PATH` column and any server other than `tls://myserver:4222` (and
+    `tls://testserver:4222`, the second server of the MASH_URL examples).
 
 ## Facts to confirm
 
@@ -4164,7 +5516,26 @@ Decisions the rules left open. Each is one line.
 19. [core confirmed: `mash credential install --creds FILE`, which A4a and
     part 1 name as the way to install the file made by `--creds-out`.]
 20. [confirm: mashctl can tell a server chosen by MASH_URL from one read from
-    the config file, for the source phrase.]
+    the config file, for the warning and for the source of a plain-URL
+    refusal.]
+21. [confirm: the `.pending` file, `acme.demo.bob.creds.pending`, is the key
+    `--make-key` keeps until the server answers (E3). No other block shows it;
+    the critic found it hidden state. Say what it is where it is first met,
+    or make it a name a person recognises.]
+22. [confirm: `mash status` after the key was refused prints a verdict and
+    exits 4 (B4); the exact lines belong to the `mash` targets.]
+23. [confirm: `Checked: the server now refuses the old key` is something
+    mashctl can check after a revoke: it asks every server to confirm the
+    revocation; it does not connect with the old credentials.]
+24. [confirm: `endpoint show` can print `online` and `unread mail`; `audit`
+    already has both columns.]
+25. [confirm: what `--capability` grants. If it is a note, `show` and `set
+    --help` should say so; if it grants something, `permissions` must show it
+    (critic A.show).]
+26. [confirm: `endpoint reissue --public-key` writes a numbered token and
+    keeps the earlier one; the number comes from the files in the folder.]
+27. [confirm: `deprovision` asks for the typed address, as delete does (D8);
+    it deletes an inbox and revokes a key.]
 
 ## Changes in DRAFT2
 
@@ -4225,6 +5596,8 @@ By rule (counts are blocks or lines changed in AFTER text):
    person with a throwaway test server what to do, with the command on its own
    line. "What changed and why" is updated; choices 23 (Part 1) and 24
    (Part 2) record that ADR 0146 requires the refusal to show it.
+   [Replaced in DRAFT8: the override is the environment variable alone, for
+   one run; the config key is removed.]
 
 ## Changes in DRAFT4
 
@@ -4393,3 +5766,252 @@ DRAFT3 and DRAFT6 above record those drafts and keep their old wording.
    `version:   mashctl <version>` (it printed `0.5.6`). The AFTER blocks and
    the reviewer packet contain no `0.5.5` or `0.5.6`; BEFORE blocks keep
    v0.5.5 text. The packet header no longer names a version.
+
+## Changes in DRAFT8
+
+Maintainer rulings and security requirements (contract rev 2: INV-003,
+REQ-002, REQ-003, REQ-007, REQ-010), applied as decided.
+
+1. T1, `--creds-out`. It creates a new regular file in a folder the person
+   owns, without following links, mode 600 from creation, completed
+   atomically. Part 2 section E3 shows three refusals (a different file in
+   the way, a path that is a link, a folder the person does not own), each
+   with a `fix:` and its command alone on its line. The credentials line
+   reads `wrote   <path>  (new file, mode 600)`; the `endpoint create --help`
+   flag text says the same (A4a).
+2. T2, adopt copies the admin credentials into mashctl's own folder (mode
+   600). The adopt block has a `copied` line, the closing text says "you can
+   remove <export folder> now" with the removal as an `Or` hint, and the
+   what-changed and choices say so.
+3. T3, the plain-text override is the environment variable
+   `MASH_INSECURE_PLAINTEXT=1` for one run. The config key `insecure_plaintext`
+   is removed from every mockup, note and choice (the DRAFT3 and DRAFT6 logs
+   keep their old wording). The adopt and E2 refusals show one command line
+   with the variable in front, then say that credentials and mail cross the
+   connection unencrypted. The conventions block never named the key.
+4. T4, mashctl is a downloaded program from the release page. The setup block
+   has one line for it, section 1 says it, and no AFTER block names `go
+   install`. The wording is a fact to confirm.
+5. T5, no output line over 80 columns. A script over the reviewer packet
+   finds no AFTER line over 80 columns outside typed commands. The new
+   section "Wide lines fixed" lists the catalog's lines over 100 columns for
+   adopt, init and endpoint, case by case, with the section that replaces
+   each. Section H adds the screens that had no replacement: adopt, init and
+   endpoint `--help`, usage errors, dry runs, a repeat adopt, a repeat of the
+   show, delete and reissue refusals; A4a lists the create flags that were
+   missing.
+
+## Changes in DRAFT9
+
+Contract rev 3 (INV-004, REQ-003, REQ-010) and two review rounds, applied as
+decided.
+
+1. U1, the hand-off. `endpoint create --public-key` prints a block of what
+   bob's machine needs (token file, server, CA file, fingerprint), one
+   sentence on why the fingerprint exists, and a NEXT with `mash credential
+   install ... --ca-fingerprint`. Step 2 (long and short), the step 3 typed
+   commands (three), the `--creds-out` output, the A4a help, the H6 dry run
+   and the choices are updated. Install prints `Checked ca.pem against the
+   fingerprint: it matches.`
+2. U2, INV-004. Adopt with a CA file asks the person to type the fingerprint
+   and has no flag for it; a refusal without a terminal and a wrong
+   fingerprint are shown. The conventions block states the rule. Choice 35
+   audits every command that offers `--yes` or changes trust: only
+   `endpoint reissue --all` and `--changed` offer `--yes`, and they stay,
+   because a reissue is not a trust or exposure change.
+3. U3, the plain-text warning. The conventions block shows the line; E2
+   shows it once on `endpoint list`. No other mockup has it.
+4. U4, the `init --local` message gives two URLs on the project's repository
+   (A3, A5 and the Part 1 block). The files ship from another change.
+5. U5, the alice example. A server that differs from `config.json` needs
+   `--replace` and the typed fingerprint, saves the credentials, `config.json`
+   and `ca.pem`, prints what it saved, and only then says `Created endpoint`.
+6. U6, the plain-URL refusal names its source. From MASH_URL: `unset
+   MASH_URL`, and a sentence for a profile. From the configuration file: its
+   `url`. From `--server` (adopt): `--server`.
+7. U7, ADR points. Choice 37 says the MASH_ENDPOINT and `init --local` ADRs
+   are proposals here and the ratifying contract carries them.
+
+## Changes in DRAFT10
+
+The critic's round 2, a real two-machine walk of v0.5.5 in a container, and the
+six directions given for this draft (V1 to V6), applied as decided. Line numbers refer to
+this file after the change.
+
+1. V1, no server or config path in a success result. The 36 result lines that
+   read `... on tls://... (from ~/.config/mash/config.json)`, the `Server:`
+   body line of delete, `(from --server)` of adopt and `(set by MASH_URL ...)`
+   are gone; the server is in `status`, `--detail` and failures. The one
+   warning for a MASH_URL that overrides the config file is in the conventions
+   block; it replaces the source phrase. A lint in `make_packet.py` fails a
+   success block that holds `tls://` or a config path, except the file lines
+   of the credential commands, the adopt trust rows, the CA path to copy and
+   typed commands. Dry-run lines name no path (they said "replace
+   ~/.config/mash/...").
+2. V2, typed confirmation for destruction. `endpoint delete`, every single
+   `endpoint reissue`, `deprovision` and `credential install` over credentials
+   for the same address print what will be lost first and ask the person to
+   type the address; a bulk reissue asks for the count. `--yes` is removed.
+   The result carries `Checked: the server now refuses ...`; delete adds the
+   one command that proves it from bob's machine and what it prints. No
+   terminal exits 4, a wrong answer exits 3. Cited: INV-004 and CLI standard
+   rule 15 (Part 1, choice 35).
+3. V3, one exit-code table in the conventions block (CLI standard rule 14 plus
+   the contract's 5 and 6), with one Choices line per command whose code changed
+   (Part 2, choices 38 to 52). `endpoint suspended` is removed. A lint fails an
+   `[exit N]` outside the table and an error with the wrong code.
+4. V4, real values and the two-machine flow. The setup block is two machines
+   (myserver, bobs-laptop). The hand-off names the files to copy and their
+   paths; `credential install` writes `config.json` and says so; a reissue
+   writes `acme.demo.bob.2.token`; its NEXT names `bob2.key`, never the old
+   key; installing over the same address is a typed confirmation, no
+   `--force`; what bob keeps is said once; walk finding 11 is under Facts.
+5. V5, false fixes. The MASH_URL error names MASH_URL; the removed-command
+   messages echo the person's files; `reissue` names `--public-key` first;
+   delete's NEXT lists what remains; `endpoint create` refuses a MASH_URL for
+   another server; `--creds-out` says `wrote`; the one-machine `--explain`
+   headings say "on this machine".
+6. V6, names. `PATH` is `ADDRESS`; `Adopted`; one server form
+   (`tls://myserver:4222`, plus `tls://testserver:4222` for the two-server
+   MASH_URL examples); `endpoint --help` lists `--all`, `--changed`,
+   `--dry-run`; `create --help` lists only flags that work; `<address>` and
+   `<file>`.
+7. The conventions block is written for a reader (no internal labels) and is
+   copied into the reviewer packet, which had only three header lines.
+8. Dispositions of every finding of the critic's round 2 are at the end.
+
+## Dispositions of the critic's round 2
+
+Numbers follow the critic's headings: A (every command's output, with the
+measured facts as A.m and each command by name), B (the owner's complaints, B.1
+to B.7), C (flows, C.1 to C.5), D (destructive commands, D.1 to D.7), E
+(consistency, E.1 to E.9), F (the five serious problems, F.1 to F.5) and G (the
+verdict). "Fixed" names the section; "contract" means accepted and left to the
+contract or the build; "declined" gives the reason. Sections are "P1 s.N" for
+Part 1 section N and "P2 X" for Part 2 section X.
+
+| FINDING | DISPOSITION | WHERE |
+|---|---|---|
+| A.m1 lines at 77 to 80 columns, the wide header and the dry-run template at 80 | fixed: the dry-run form names no server, so it is short; lints check width | P2 F, make_packet.py |
+| A.m2 36 lines name the config file or the server's source | fixed (V1) | P1 conventions; every result line |
+| A.m3 seven server forms | fixed (V6); the one second server, `testserver`, is the MASH_URL example | whole file |
+| A.m4 exit codes shown with no table; first-run blocks show no code | fixed: one table; first-run blocks without `[exit N]` exit 0 (stated in conventions); their refusals show codes | P1 conventions |
+| A.0 setup block says one machine over a two-machine flow | fixed | P1 s.0 |
+| A.1a.1 repo-relative SKILL.md exposes plumbing | declined: the URLs name the files the contract (REQ-002) names; an installed binary can open a URL | P1 s.1a, P2 A5 |
+| A.1a.2 `1a` duplicated; two texts for removed `list` | fixed: one text, the A5 text | P1 s.1a |
+| A.1b.1 `(from --server)` | fixed (V1) | P1 s.1b |
+| A.1b.2 check prose behind `--detail` | declined: the maintainer asked each check to say what it means (Part 1, choice 15) | P1 s.1b |
+| A.1b.3 CA by environment variable | fixed: `--ca <file>`; the wart paragraph is gone | P1 s.1b, P2 H1 |
+| A.1b.4 undefined words (`--make-admin`, operator-signed, system credentials) | fixed: check 2 and the help say it in plain words; `system credentials` stays as the name of the file | P1 s.1b, P2 H1 |
+| A.1b.5 NEXT says "on myserver" | fixed: "on this machine" | P1 s.1b |
+| A.1c NEXT offers only the other-machine path | fixed: both paths | P1 s.1c |
+| A.1d.1 `signed in` repeats the owner | fixed | P1 s.1d |
+| A.1d.2 failure forms print two verdicts | declined: verdict first is R-verdict and REQ-004; the verdict is a result and `error:` is the explanation (conventions) | P1 s.1d |
+| A.1d.3 fix assumes the reader runs the server | fixed | P1 s.1d |
+| A.1d.4 `--detail` key words unglossed | fixed: one line says what each key is | P1 s.1d |
+| A.S1 Step 1 does not say why | fixed: one line | P1 s.2 Step 1 |
+| A.S2.1 server and config path in the first line | fixed (V1) | P1 s.2 Step 2 |
+| A.S2.2 token never explained in the short form | fixed: the file line says what it proves | P1 s.2 Step 2 |
+| A.S2.3 NEXT has placeholders for known values and omits the CA | fixed: no placeholder; the fingerprint is typed at the install's prompt (Choice 36) | P1 s.2 Step 2 |
+| A.S3 "Keep bob.key" contradicts "the one file mash runs with" | fixed: said once, in the long form | P1 s.2 Step 3 |
+| A.alice.1 `--creds-out`: false "Installed", `kept` noise, placeholders, heading | fixed | P1 s.2 alice |
+| A.alice.2 MASH_URL variant writes credentials for the wrong server | fixed: a refusal naming both servers | P1 s.2 alice |
+| A.alice.3 `--explain` headings claim two machines | fixed: "on this machine" | P1 s.2 alice |
+| A.list.1 column `PATH` | fixed (V6) | P1 s.3, P2 |
+| A.list.2 `--wide` host contradicts `show --detail` | fixed: both `-` | P1 s.3 |
+| A.show.1 `type` / `agent` / `TYPE` | fixed: `type`; the program is `runs with` | P1 s.3 |
+| A.show.2 credentials line for a remote endpoint | fixed: `not on this machine` | P1 s.3, P2 H7 |
+| A.show.3 no suspended, unread, online | fixed | P1 s.3, P2 C3 |
+| A.show.4 `--detail` fields unexplained, `capability` never explained | contract: Facts 25 asks what `--capability` grants; help text follows the answer | P2 Facts 25 |
+| A.show.5 `storage name` / `directory key`, `mail subject` / `address for mail` | fixed: one label each | P2 B1, D1 |
+| A.session.1 step 3 is config theory | fixed | P1 s.4 |
+| A.session.2 `mash status` error ignores installed endpoints | fixed: lists them | P1 s.4 |
+| A.session.3 why the launch flag | fixed: one sentence | P1 s.4 |
+| A.A3.1 two commands on one help line | fixed | P2 A3 |
+| A.A3.2 `endpoint resume` missing | fixed | P2 A3 |
+| A.A3.3 removed-commands block in top-level help | fixed: removed; the A5 errors say it | P2 A3 |
+| A.A4.1 `endpoint --help` omits `--all`, `--changed`, `--dry-run` | fixed (V6) | P2 A4 |
+| A.A4.2 `create --help` omits `--owner`/`--group` that E1 shows | fixed: E1 no longer shows them; the help says there are none | P2 A4a, E1 |
+| A.A4.3 placeholder forms | fixed for address and file; `KEY`, `ID`, `N` stay | P2 whole |
+| A.A4.4 `suspended` exists to set an exit code | fixed: folded into `show` | P2 A1, C3 |
+| A.A5.1 renames print files that do not exist | fixed (V5) | P2 A5 |
+| A.A5.2 `reissue` fix moves a remote key here | fixed (V5) | P2 A5 |
+| A.B reissue and delete | see D.1 to D.7 | P2 B |
+| A.C2 word order, `colour` | fixed | P2 C2, H6 |
+| A.C3 title-case labels, internal values | fixed: lowercase; the id and the number stay in the default because `deprovision` needs them (Part 2 C3 asks to confirm) | P2 C3 |
+| A.D1.1 parenthetical on every run | fixed: in `--help` | P2 D1 |
+| A.D1.2 second header after the verdict | declined: kept without the server; an audit has a time | P2 D1 |
+| A.D1.3 `FIRST LAST` unexplained | fixed: footer | P2 D1 |
+| A.D1.4 `--strict` fix; exit under PROBLEM | fixed: the delete command; a block shows exit 0 without `--strict` | P2 D1 |
+| A.D1.5 `--compare` footer | fixed | P2 D1 |
+| A.D2.1 unheaded seventh column | fixed: footer | P2 D2 |
+| A.D2.2 `--wide` truncates the key; order changes | fixed: order; declined: truncation, because REQ-001 has no `--wide` exemption (`--json` has the whole key) | P2 D2 |
+| A.D3 `mash-local`, unglossed key words, INCOMPLETE exit 2 | fixed | P2 D3 |
+| A.D4 STATE implies a per-message fact | fixed: footer | P2 D4 |
+| A.D5 title-case labels in `limits --show` | fixed | P2 D5 |
+| A.D6 closing hint names a NATS tool | fixed | P2 D6 |
+| A.D7 "set up with adopt" | fixed: "adopted" | P2 D7, G |
+| A.D8.1 section G heading shows the wrong help | fixed: both helps | P2 G |
+| A.D8.2 future-dated warning | fixed: out of the default | P2 D8 |
+| A.D8.3 help example with no command | fixed | P2 D8 |
+| A.E.1 E2 MASH_URL fix names the wrong thing | fixed (V5) | P2 E2 |
+| A.E.2 E1 prints `<owner>` though the owner is known | fixed | P2 E1 |
+| A.E.3 `limits nobody` does not echo | fixed: addresses are echoed | P2 E1 |
+| A.E.4 E3 shows `--make-key` refusals under `--public-key` | fixed: split by command | P2 E3 |
+| A.E.5 `.creds.pending` is hidden state | contract: Facts 21 | P2 E3, Facts 21 |
+| A.E.6 `bf2` | fixed | P2 E4 |
+| A.E.7 E5 "never created" and "removed in part" | fixed | P2 E5 |
+| A.E.8 E5 "recorded too many times" | fixed | P2 E5 |
+| A.E.9 `fix:` layout inconsistent | fixed: conventions say a `fix:` follows its `error:` and a `NEXT:` is set apart; the two multi-line layouts stay, written down | P1 conventions |
+| A.Color colour off | fixed: off with `NO_COLOR` and when not a terminal; what is coloured is listed | P1 conventions |
+| B.1 trash on every command | fixed (V1) | whole file |
+| B.2 aligned list | answered; `PATH` to `ADDRESS` | P1 s.3 |
+| B.3 `show` repeats names | fixed: unread, online, status added; host agrees | P1 s.3 |
+| B.4 key, endpoint, credential not understandable | fixed | P1 s.2 |
+| B.5 a `next:` that was not the next step | fixed: delete, init, adopt | P1, P2 B4 |
+| B.6 list sketch | fixed: `ADDRESS` | P1 s.3 |
+| B.7 mashctl must not install the server | fixed: "adopted" | P2 D7, G |
+| C.1 bob flow fails as printed, CA hand-off missing | fixed | P1 s.2 |
+| C.2 same machine, MASH_URL and `--creds-out` | fixed | P1 s.2 alice |
+| C.3 reissue: token collision, wrong fix | fixed (V4, V5) | P2 B2, B3 |
+| C.4 delete: nothing proves the old credential is refused | fixed: `Checked:` and the `mash status` block | P2 B4 |
+| C.5 adopt: CA by environment variable | fixed | P1 s.1b |
+| D.1 delete acts with no prompt; the count is hidden | fixed (V2) | P2 B4 |
+| D.2 `--delete-creds` hint comes too late | fixed: in the prompt text | P2 B4 |
+| D.3 repeat and `--force` give the same result | fixed: the plain command refuses, `--force` finishes | P2 B5, H7 |
+| D.4 single reissue with no local credentials | fixed: refusal, and the typed prompt | P2 B1, E4 |
+| D.5 `--no-revoke` | no change asked | P2 B5 |
+| D.6 dry-runs | no change asked; they print the same "would lose" text | P2 B |
+| D.7 "all 1 servers confirmed it" | fixed: "the server" | P2 B |
+| E.1 address forms in file names | fixed: one line in conventions | P1 conventions |
+| E.2 label drift (`PATH`, `type`, storage name, mail subject, creds) | fixed except `.creds` and `--creds`, which are core's names (Part 1, choice 13) | whole file |
+| E.3 server forms | fixed (V6) | whole file |
+| E.4 capitalization | fixed for labels and for sentences that began with a name; `Detail` headings stay as section titles (declined) | P2 B, C3, D |
+| E.5 time forms | no change asked | none |
+| E.6 exit codes | fixed (V3) | P1 conventions |
+| E.7 stdout and stderr | fixed: the conventions block, now in the packet | P1 conventions |
+| E.8 conventions block versus examples | fixed: block rewritten and linted | P1 conventions |
+| E.9 mock hygiene | fixed | P1 s.1a, P2 G |
+| F.1 provenance in the first sentence | fixed (V1) | whole file |
+| F.2 cross-machine flow fails when followed | fixed (V4) | P1 s.2, P2 B2 |
+| F.3 false fixes and NEXT lines | fixed (V5) | P2 A5, B4, E2; P1 s.2 |
+| F.4 destructive commands act without confirmation | fixed (V2) | P2 B |
+| F.5 no conventions; collisions; doubled verdicts | fixed except doubled verdicts (A.1d.2, declined) | P1 conventions |
+| G.1 strip provenance | fixed | whole file |
+| G.2 known values in NEXT, carry the CA | fixed | P1 s.2 |
+| G.3 false fixes | fixed | P2 |
+| G.4 delete and single reissue confirm | fixed | P2 B |
+| G.5 token collision, duplicate and mislabeled blocks | fixed | P2 B2, G |
+| G.6 one exit-code table | fixed | P1 conventions |
+| Direction V1 no server or path in success output; one warning | fixed; lint added | P1 conventions; make_packet.py |
+| Direction V2 destruction typed, no `--yes`, count for bulk | fixed | P2 B |
+| Direction V3 one exit-code table, a line per changed command, a lint | fixed | P1 conventions; P2 choices 38 to 52 |
+| Direction V4 real values, two machines, numbered token, install without `--force` | fixed | P1 s.0, s.2; P2 B2 |
+| Direction V5 false fixes | fixed | P2 A5, E1, E2 |
+| Direction V6 names | fixed | whole file |
+| Contract rev 4 REQ-001: server in no success output | fixed; but REQ-001 and JRN-006 also say a write names its server "as part of a write's confirmation": V1 supersedes that, so the contract needs the same edit | P1 conventions |
+| Contract rev 4 INV-004 destruction | fixed; the contract cites "the CLI standard's confirmation rule" with no number: rule 15 of standard 1.1.1 is quoted | P1 choice 35 |
+| Contract rev 4 exit codes | fixed: 5 and 6 added to rule 14; `3 cancelled` used for a wrong answer | P1 conventions |
+| Contract rev 3 REQ-003 install writes `config.json`, `--ca-fingerprint` | fixed, with one departure: the install asks the person to type the fingerprint (INV-004), so the NEXT stays short; the flag is for the contract to settle. The token carrying the server and `ca.pem` beside it are assumed and listed | P1 s.2, choice 36 |
+| Contract rev 3 REQ-009 one endpoint setting | fixed: no setting where one endpoint is installed | P1 s.4 |
+| Contract REQ-005 table header `PATH` | contract: it must say `ADDRESS` | P2 choice 19 |
