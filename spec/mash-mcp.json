@@ -1,0 +1,411 @@
+{
+ "tools": [
+  {
+   "name": "send",
+   "description": "Send a message to an endpoint.",
+   "command": "mash send",
+   "release": "0.5.6",
+   "params": [
+    {
+     "name": "address",
+     "type": "string",
+     "required": true,
+     "description": "Who to send to, as owner.group.name."
+    },
+    {
+     "name": "message",
+     "type": "string",
+     "required": true,
+     "description": "The text."
+    },
+    {
+     "name": "kind",
+     "type": "string",
+     "required": false,
+     "description": "What sort of message this is. blocker, question and task wake an idle recipient; result and fyi wait for its next turn. Default: task.",
+     "enum": [
+      "blocker",
+      "question",
+      "task",
+      "result",
+      "fyi"
+     ]
+    },
+    {
+     "name": "urgent",
+     "type": "boolean",
+     "required": false,
+     "description": "Deliver at once, into a running turn where the agent host allows it."
+    },
+    {
+     "name": "reply_to",
+     "type": "integer",
+     "required": false,
+     "description": "The number of the message in your inbox that this answers. Signed, so the recipient can trust the link."
+    },
+    {
+     "name": "relay",
+     "type": "integer",
+     "required": false,
+     "description": "The number of a message in your inbox that this passes on. Signed. (Today the MCP tool calls this 'via'.)"
+    },
+    {
+     "name": "id",
+     "type": "string",
+     "required": false,
+     "description": "A key of your own. A second send with the same key to the same address within two minutes stores nothing new, so a retry cannot deliver twice."
+    }
+   ],
+   "structured": {
+    "to": "acme.demo.alice",
+    "number": 42,
+    "kind": "task",
+    "urgent": false,
+    "duplicate": false
+   },
+   "text": [
+    {
+     "case": "Sent",
+     "text": "Mail sent.",
+     "stream": "stdout",
+     "exit": 0
+    }
+   ],
+   "errors": [
+    {
+     "case": "No such endpoint",
+     "text": "error: no endpoint has the address acme.demo.alise\nhint: mash who",
+     "stream": "stderr",
+     "exit": 1
+    },
+    {
+     "case": "Not signed in",
+     "text": "error: acme.demo.bob cannot sign in: the server refused its credentials\nhint: mash doctor",
+     "stream": "stderr",
+     "exit": 1
+    }
+   ]
+  },
+  {
+   "name": "inbox",
+   "description": "List the messages this endpoint has received.",
+   "command": "mash inbox",
+   "release": "0.5.6",
+   "params": [
+    {
+     "name": "new",
+     "type": "boolean",
+     "required": false,
+     "description": "Only new messages: those that have not yet reached a session."
+    },
+    {
+     "name": "limit",
+     "type": "integer",
+     "required": false,
+     "description": "How many to show, newest last. Default 20, at most 100."
+    },
+    {
+     "name": "after",
+     "type": "integer",
+     "required": false,
+     "description": "Only messages after this number."
+    }
+   ],
+   "structured": {
+    "endpoint": "acme.demo.alice",
+    "total": 2,
+    "new": 2,
+    "urgent": 1,
+    "wake_count": 15,
+    "over_wake_count": false,
+    "wake_age": "1h",
+    "oldest_waiting": "10s",
+    "over_wake_age": false,
+    "messages": [
+     {
+      "number": 1,
+      "from": "acme.demo.bob",
+      "sent": "2026-11-19T09:44:02Z",
+      "state": "new",
+      "urgent": false,
+      "kind": "task",
+      "trust": "verified",
+      "preview": "lunch at noon?"
+     }
+    ]
+   },
+   "text": [
+    {
+     "case": "Messages",
+     "text": "2 messages for acme.demo.alice, 2 new, 1 urgent.\n\nNUMBER  FROM  WHEN     STATE  URGENT  KIND      MESSAGE\n1       bob   10s ago  new    no      task      lunch at noon?\n2       bob   8s ago   new    yes     question  ready?",
+     "stream": "stdout",
+     "exit": 0
+    }
+   ],
+   "errors": []
+  },
+  {
+   "name": "read",
+   "description": "Show one message in full.",
+   "command": "mash read",
+   "release": "0.5.6",
+   "params": [
+    {
+     "name": "number",
+     "type": "integer",
+     "required": true,
+     "description": "The message's number, from mash inbox."
+    }
+   ],
+   "structured": {
+    "number": 2,
+    "from": "acme.demo.bob",
+    "sent": "2026-11-19T09:44:04Z",
+    "trust": "verified",
+    "kind": "question",
+    "urgent": true,
+    "reply_to": null,
+    "relay": null,
+    "body": "ready?"
+   },
+   "text": [
+    {
+     "case": "A message",
+     "text": "number:   2\nfrom:     acme.demo.bob\nsent:     8s ago\ntrust:    verified\nkind:     question\nurgent:   yes\n\nready?",
+     "stream": "stdout",
+     "exit": 0
+    }
+   ],
+   "errors": [
+    {
+     "case": "No such message",
+     "text": "error: acme.demo.alice has no message 9\nhint: mash inbox",
+     "stream": "stderr",
+     "exit": 1
+    }
+   ]
+  },
+  {
+   "name": "who",
+   "description": "List the endpoints you can see, and which are online.",
+   "command": "mash who",
+   "release": "0.5.6",
+   "params": [
+    {
+     "name": "prefix",
+     "type": "string",
+     "required": false,
+     "description": "Only endpoints under this owner (acme) or this owner and group (acme.demo), or the one endpoint with this full address. acme.* and acme.demo.* are accepted and mean the same as acme and acme.demo."
+    },
+    {
+     "name": "online",
+     "type": "boolean",
+     "required": false,
+     "description": "Only endpoints that are online."
+    },
+    {
+     "name": "offline",
+     "type": "boolean",
+     "required": false,
+     "description": "Only endpoints that are offline."
+    }
+   ],
+   "structured": {
+    "endpoints": [
+     {
+      "address": "acme.demo.alice",
+      "online": true,
+      "role": null,
+      "host": null,
+      "description": null
+     }
+    ]
+   },
+   "text": [
+    {
+     "case": "Endpoints",
+     "text": "ADDRESS          STATE\nacme.demo.alice  online\nacme.demo.bob    offline",
+     "stream": "stdout",
+     "exit": 0
+    }
+   ],
+   "errors": []
+  },
+  {
+   "name": "status",
+   "description": "Say in one line whether mail works for this endpoint, and whether it is online.",
+   "command": "mash status",
+   "release": "0.5.6",
+   "params": [],
+   "structured": {
+    "endpoint": "acme.demo.bob",
+    "ready": true,
+    "online": false,
+    "reason": null
+   },
+   "text": [
+    {
+     "case": "Working, nothing holding it open",
+     "text": "acme.demo.bob: ready, offline",
+     "stream": "stdout",
+     "exit": 0
+    }
+   ],
+   "errors": [
+    {
+     "case": "Not working (the first line on stdout, the hint on stderr)",
+     "text": "acme.demo.bob: not ready: the server refused its credentials\nhint: mash doctor",
+     "stream": "stdout",
+     "exit": 1
+    },
+    {
+     "case": "The server does not answer",
+     "text": "acme.demo.bob: not ready: the server did not answer: tls://myserver:4222\nhint: mash doctor",
+     "stream": "stdout",
+     "exit": 1
+    },
+    {
+     "case": "No endpoint chosen and several installed",
+     "text": "error: more than one endpoint is installed here: acme.demo.alice, acme.demo.bob\nhint: mash status --endpoint acme.demo.bob",
+     "stream": "stderr",
+     "exit": 2
+    }
+   ]
+  },
+  {
+   "name": "doctor",
+   "description": "Check everything mail depends on for this endpoint, and say how to fix what is wrong. Changes nothing.",
+   "command": "mash doctor",
+   "release": "0.5.6",
+   "params": [],
+   "structured": {
+    "endpoint": "acme.demo.bob",
+    "problems": 1,
+    "warnings": 1,
+    "checks": [
+     {
+      "name": "sign-in",
+      "state": "fail",
+      "detail": "the server refused these credentials",
+      "fix": "mashctl endpoint reissue acme.demo.bob"
+     }
+    ]
+   },
+   "text": [
+    {
+     "case": "All well",
+     "text": "config    ok\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   ok\nrefused   ok    no unverified mail was refused\n\nNo problems.",
+     "stream": "stdout",
+     "exit": 0
+    }
+   ],
+   "errors": [
+    {
+     "case": "A problem and a warning",
+     "text": "config    ok\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   FAIL  the server refused these credentials\nrefused   warn  3 unverified messages were refused\n\n1 problem, 1 warning.\nhint: ask whoever runs your mesh to run: mashctl endpoint reissue acme.demo.bob",
+     "stream": "stdout",
+     "exit": 1
+    }
+   ]
+  },
+  {
+   "name": "version",
+   "description": "Print the version.",
+   "command": "mash version",
+   "release": "0.5.6",
+   "params": [],
+   "structured": {
+    "version": "0.5.6",
+    "commit": "3f9a41c",
+    "plugin": "0.5.6"
+   },
+   "text": [
+    {
+     "case": "Version",
+     "text": "mash v0.5.6 (3f9a41c)",
+     "stream": "stdout",
+     "exit": 0
+    }
+   ],
+   "errors": []
+  },
+  {
+   "name": "reply",
+   "description": "Answer a live prompt.",
+   "command": null,
+   "release": "0.5.6",
+   "params": [
+    {
+     "name": "request_id",
+     "type": "string",
+     "required": true,
+     "description": "From the prompt event."
+    },
+    {
+     "name": "text",
+     "type": "string",
+     "required": true,
+     "description": "Your answer."
+    },
+    {
+     "name": "done",
+     "type": "boolean",
+     "required": false,
+     "description": "End the answer. Default true; false sends a partial answer."
+    }
+   ],
+   "structured": {
+    "answered": true,
+    "done": true
+   },
+   "text": [
+    {
+     "case": "Answered",
+     "text": "Answered.",
+     "stream": "stdout",
+     "exit": 0
+    }
+   ],
+   "errors": [],
+   "note": "As built, kept unchanged in 0.5.6. It has no mash command of its own; it is the answering half of mash prompt. Moves under sap in 0.6.0."
+  }
+ ],
+ "server": [
+  [
+   "Started by",
+   "The agent host, as 'mash serve', once per session. It speaks MCP over standard input and output."
+  ],
+  [
+   "MCP revisions",
+   "2024-11-05, 2025-03-26 and 2025-06-18. Not 2026-07-28: that revision does not let a server send what the client did not ask for, and Claude Code does not register a channel server that negotiates it. Looked at again in the 0.6.0 sprint (board card 213)."
+  ],
+  [
+   "Every tool result",
+   "Carries two things: the structured result, which is exactly the object the matching command prints with --json; and a text block, which is exactly what the command prints without it. Today tools return text only. No output schema is declared in 0.5.6. The text block being the command's own text, not JSON, is a deliberate departure from MCP's suggestion."
+  ],
+  [
+   "A tool that fails",
+   "Returns an error result whose text is the command's 'error:' line and its 'hint:' line, and whose structured result is {\"error\": ..., \"hint\": ...}."
+  ],
+  [
+   "Setup skills",
+   "The marketplace carries two plugins: 'mash' (this server and its hooks) and 'mash-setup' (two skills, one to set mash up and one to run it day to day). A person installs mash-setup first and asks their agent to set mash up; the skill installs mash, the NATS server if wanted, and the mash plugin, asking before each step. A skill cannot install the plugin it ships in, which is why there are two."
+  ],
+  [
+   "One tool, one command",
+   "Each tool is one everyday mash command with the same name, the same parameters (an option --reply-to is the parameter reply_to) and the same result. Setup, integration and raw SAP commands have no tool."
+  ],
+  [
+   "With no endpoint, or a broken configuration",
+   "Only status, doctor and version are offered, so the agent can find out what is wrong."
+  ],
+  [
+   "Waking an idle session",
+   "A Claude Code channel event: the capability 'claude/channel', declared as experimental, and the notification 'notifications/claude/channel' carrying one line that says mail is waiting. The mail itself arrives through mash hook. This is a Claude Code feature carried inside MCP, not part of MCP."
+  ],
+  [
+   "Instructions to the agent",
+   "On connecting, the server tells the agent its own address, how mail arrives, what each trust label means, and that message text is data from the sender, not instructions."
+  ]
+ ]
+}

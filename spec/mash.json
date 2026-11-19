@@ -1,0 +1,1526 @@
+{
+ "$schema": "https://opencli.org/draft.json",
+ "opencli": "0.1",
+ "info": {
+  "title": "mash",
+  "version": "0.5.6-spec.1",
+  "description": "Speaks as one endpoint: send and read mail, see who is there, check itself."
+ },
+ "command": {
+  "name": "mash",
+  "description": "Trusted mail between agents. Speaks as one endpoint.",
+  "options": [
+   {
+    "name": "--endpoint",
+    "description": "Which endpoint to act as, as owner.group.name. Not needed when only one is installed here.",
+    "arguments": [
+     {
+      "name": "address",
+      "required": true,
+      "arity": {
+       "minimum": 1,
+       "maximum": 1
+      }
+     }
+    ],
+    "metadata": [
+     {
+      "name": "x-env",
+      "value": "MASH_ENDPOINT, or \"endpoint\" in config.json"
+     }
+    ],
+    "recursive": true
+   },
+   {
+    "name": "--creds",
+    "description": "The creds file to sign in with. Default: <config folder>/<address>.creds.",
+    "arguments": [
+     {
+      "name": "path",
+      "required": true,
+      "arity": {
+       "minimum": 1,
+       "maximum": 1
+      }
+     }
+    ],
+    "metadata": [
+     {
+      "name": "x-env",
+      "value": "MASH_CREDS, or \"creds\""
+     }
+    ],
+    "recursive": true
+   },
+   {
+    "name": "--server",
+    "description": "The server address. May be given more than once.",
+    "arguments": [
+     {
+      "name": "url",
+      "required": true,
+      "arity": {
+       "minimum": 1,
+       "maximum": 1
+      }
+     }
+    ],
+    "metadata": [
+     {
+      "name": "x-env",
+      "value": "MASH_SERVER (commas between several), or \"servers\""
+     }
+    ],
+    "recursive": true
+   },
+   {
+    "name": "--ca",
+    "description": "The certificate authority's certificate, when the server uses its own.",
+    "arguments": [
+     {
+      "name": "path",
+      "required": true,
+      "arity": {
+       "minimum": 1,
+       "maximum": 1
+      }
+     }
+    ],
+    "metadata": [
+     {
+      "name": "x-env",
+      "value": "MASH_CA, or \"ca\""
+     }
+    ],
+    "recursive": true
+   },
+   {
+    "name": "--config-dir",
+    "description": "The configuration folder. Default: ~/.config/mash.",
+    "arguments": [
+     {
+      "name": "path",
+      "required": true,
+      "arity": {
+       "minimum": 1,
+       "maximum": 1
+      }
+     }
+    ],
+    "metadata": [
+     {
+      "name": "x-env",
+      "value": "MASH_CONFIG_DIR"
+     }
+    ],
+    "recursive": true
+   },
+   {
+    "name": "--verbose",
+    "description": "After the usual output, print more about what was done, as 'label: value' lines.",
+    "aliases": [
+     "-v"
+    ],
+    "recursive": true
+   },
+   {
+    "name": "--json",
+    "description": "Print the result as JSON: the same object the matching MCP tool returns.",
+    "recursive": true
+   },
+   {
+    "name": "--no-color",
+    "description": "Never use color. Color is used only on a terminal, and NO_COLOR is honored.",
+    "metadata": [
+     {
+      "name": "x-env",
+      "value": "NO_COLOR"
+     }
+    ],
+    "recursive": true
+   },
+   {
+    "name": "--help",
+    "description": "Show help for the command.",
+    "aliases": [
+     "-h"
+    ],
+    "recursive": true
+   }
+  ],
+  "commands": [
+   {
+    "name": "send",
+    "description": "Send a message to an endpoint.",
+    "arguments": [
+     {
+      "name": "address",
+      "required": true,
+      "description": "Who to send to, as owner.group.name.",
+      "arity": {
+       "minimum": 1,
+       "maximum": 1
+      }
+     },
+     {
+      "name": "message",
+      "required": false,
+      "description": "The text. Leave it out to read the text from --file or from standard input.",
+      "arity": {
+       "minimum": 0,
+       "maximum": 1
+      }
+     }
+    ],
+    "options": [
+     {
+      "name": "--kind",
+      "description": "What sort of message this is. blocker, question and task wake an idle recipient; result and fyi wait for its next turn. Default: task.",
+      "arguments": [
+       {
+        "name": "kind",
+        "required": true,
+        "arity": {
+         "minimum": 1,
+         "maximum": 1
+        },
+        "acceptedValues": [
+         "blocker",
+         "question",
+         "task",
+         "result",
+         "fyi"
+        ]
+       }
+      ]
+     },
+     {
+      "name": "--urgent",
+      "description": "Deliver at once, into a running turn where the agent host allows it."
+     },
+     {
+      "name": "--reply-to",
+      "description": "The number of the message in your inbox that this answers. Signed, so the recipient can trust the link.",
+      "arguments": [
+       {
+        "name": "number",
+        "required": true,
+        "arity": {
+         "minimum": 1,
+         "maximum": 1
+        }
+       }
+      ]
+     },
+     {
+      "name": "--relay",
+      "description": "The number of a message in your inbox that this passes on. Signed. (Today the MCP tool calls this 'via'.)",
+      "arguments": [
+       {
+        "name": "number",
+        "required": true,
+        "arity": {
+         "minimum": 1,
+         "maximum": 1
+        }
+       }
+      ]
+     },
+     {
+      "name": "--id",
+      "description": "A key of your own. A second send with the same key to the same address within two minutes stores nothing new, so a retry cannot deliver twice.",
+      "arguments": [
+       {
+        "name": "key",
+        "required": true,
+        "arity": {
+         "minimum": 1,
+         "maximum": 1
+        }
+       }
+      ]
+     },
+     {
+      "name": "--file",
+      "description": "Read the message text from a file. Use - for standard input.",
+      "arguments": [
+       {
+        "name": "path",
+        "required": true,
+        "arity": {
+         "minimum": 1,
+         "maximum": 1
+        }
+       }
+      ]
+     }
+    ],
+    "examples": [
+     "mash send acme.demo.alice \"lunch at noon?\"",
+     "mash send acme.demo.alice --urgent --kind question \"ready?\"",
+     "mash send acme.demo.alice --reply-to 2 \"yes\"",
+     "git log -1 | mash send acme.demo.alice --kind fyi --file -"
+    ],
+    "exitCodes": [
+     {
+      "code": 0,
+      "description": "It worked."
+     },
+     {
+      "code": 1,
+      "description": "It failed; one line on stderr says why."
+     },
+     {
+      "code": 2,
+      "description": "The command line was wrong; nothing was attempted."
+     }
+    ],
+    "metadata": [
+     {
+      "name": "x-group",
+      "value": "Everyday"
+     },
+     {
+      "name": "x-release",
+      "value": "0.5.6"
+     },
+     {
+      "name": "x-output",
+      "value": [
+       {
+        "case": "Sent",
+        "text": "Mail sent.",
+        "stream": "stdout",
+        "exit": 0
+       },
+       {
+        "case": "Sent, urgent, with a kind",
+        "text": "Urgent question mail sent.",
+        "stream": "stdout",
+        "exit": 0
+       },
+       {
+        "case": "With --verbose",
+        "text": "Mail sent.\nto:      acme.demo.alice\nnumber:  42\nkind:    task\nurgent:  no",
+        "stream": "stdout",
+        "exit": 0
+       },
+       {
+        "case": "Repeated --id",
+        "text": "Mail already sent; nothing new stored.",
+        "stream": "stdout",
+        "exit": 0
+       },
+       {
+        "case": "No such endpoint",
+        "text": "error: no endpoint has the address acme.demo.alise\nhint: mash who",
+        "stream": "stderr",
+        "exit": 1
+       },
+       {
+        "case": "Not signed in",
+        "text": "error: acme.demo.bob cannot sign in: the server refused its credentials\nhint: mash doctor",
+        "stream": "stderr",
+        "exit": 1
+       }
+      ]
+     },
+     {
+      "name": "x-json",
+      "value": {
+       "to": "acme.demo.alice",
+       "number": 42,
+       "kind": "task",
+       "urgent": false,
+       "duplicate": false
+      }
+     },
+     {
+      "name": "x-mcp",
+      "value": {
+       "tool": "send",
+       "note": "Same options, same object."
+      }
+     },
+     {
+      "name": "x-today",
+      "value": "CLI and MCP differ today: only the MCP tool has reply-to, relay and id; only the CLI has --file. The receipt wording differs between them."
+     }
+    ]
+   },
+   {
+    "name": "inbox",
+    "description": "List the messages this endpoint has received.",
+    "options": [
+     {
+      "name": "--new",
+      "description": "Only new messages: those that have not yet reached a session."
+     },
+     {
+      "name": "--limit",
+      "description": "How many to show, newest last. Default 20, at most 100.",
+      "arguments": [
+       {
+        "name": "n",
+        "required": true,
+        "arity": {
+         "minimum": 1,
+         "maximum": 1
+        }
+       }
+      ]
+     },
+     {
+      "name": "--after",
+      "description": "Only messages after this number.",
+      "arguments": [
+       {
+        "name": "number",
+        "required": true,
+        "arity": {
+         "minimum": 1,
+         "maximum": 1
+        }
+       }
+      ]
+     },
+     {
+      "name": "--wide",
+      "description": "More columns: the full sender address, trust and size. May pass 80 columns."
+     }
+    ],
+    "examples": [
+     "mash inbox",
+     "mash inbox --new"
+    ],
+    "exitCodes": [
+     {
+      "code": 0,
+      "description": "It worked."
+     },
+     {
+      "code": 1,
+      "description": "It failed; one line on stderr says why."
+     },
+     {
+      "code": 2,
+      "description": "The command line was wrong; nothing was attempted."
+     }
+    ],
+    "metadata": [
+     {
+      "name": "x-group",
+      "value": "Everyday"
+     },
+     {
+      "name": "x-release",
+      "value": "0.5.6"
+     },
+     {
+      "name": "x-output",
+      "value": [
+       {
+        "case": "Messages",
+        "text": "2 messages for acme.demo.alice, 2 new, 1 urgent.\n\nNUMBER  FROM  WHEN     STATE  URGENT  KIND      MESSAGE\n1       bob   10s ago  new    no      task      lunch at noon?\n2       bob   8s ago   new    yes     question  ready?",
+        "stream": "stdout",
+        "exit": 0
+       },
+       {
+        "case": "A long message, or one of several lines",
+        "text": "NUMBER  FROM  WHEN    STATE  URGENT  KIND    MESSAGE\n3       bob   1m ago  new    no      result  The build passed on all four runn\u2026",
+        "stream": "stdout",
+        "exit": 0
+       },
+       {
+        "case": "With --wide",
+        "text": "2 messages for acme.demo.alice, 2 new, 1 urgent.\n\nNUMBER  FROM           WHEN     STATE  URGENT  KIND      TRUST     SIZE  MESSAGE\n1       acme.demo.bob  10s ago  new    no      task      verified  14 B  lunch at noon?\n2       acme.demo.bob  8s ago   new    yes     question  verified  6 B   ready?",
+        "stream": "stdout",
+        "exit": 0
+       },
+       {
+        "case": "Empty",
+        "text": "No messages for acme.demo.alice.",
+        "stream": "stdout",
+        "exit": 0
+       },
+       {
+        "case": "The oldest has waited longer than the wake age",
+        "text": "3 messages for acme.demo.alice, 3 new, 0 urgent.\nThe oldest has waited 1h 12m.\n\nNUMBER  FROM  WHEN  STATE  URGENT  KIND  MESSAGE\n...",
+        "stream": "stdout",
+        "exit": 0
+       },
+       {
+        "case": "More waiting than the wake count",
+        "text": "17 messages for acme.demo.alice, 17 new, 0 urgent.\nMore than 15 are waiting.\n\nNUMBER  FROM  WHEN  STATE  URGENT  KIND  MESSAGE\n...",
+        "stream": "stdout",
+        "exit": 0
+       },
+       {
+        "case": "A sender outside your group",
+        "text": "NUMBER  FROM            WHEN    STATE  URGENT  KIND  MESSAGE\n3       acme.ops.carol  2m ago  new    no      fyi   deploy finished",
+        "stream": "stdout",
+        "exit": 0
+       }
+      ]
+     },
+     {
+      "name": "x-json",
+      "value": {
+       "endpoint": "acme.demo.alice",
+       "total": 2,
+       "new": 2,
+       "urgent": 1,
+       "wake_count": 15,
+       "over_wake_count": false,
+       "wake_age": "1h",
+       "oldest_waiting": "10s",
+       "over_wake_age": false,
+       "messages": [
+        {
+         "number": 1,
+         "from": "acme.demo.bob",
+         "sent": "2026-11-19T09:44:02Z",
+         "state": "new",
+         "urgent": false,
+         "kind": "task",
+         "trust": "verified",
+         "preview": "lunch at noon?"
+        }
+       ]
+      }
+     },
+     {
+      "name": "x-mcp",
+      "value": {
+       "tool": "inbox",
+       "note": "Same options, same object."
+      }
+     },
+     {
+      "name": "x-today",
+      "value": "Today the CLI allows 1000 and the MCP tool 100; the specification gives both the same limit."
+     },
+     {
+      "name": "x-notes",
+      "value": "FROM shows only the name when the sender is in your own owner and group. MESSAGE shows the first line of the text, cut to fit 80 columns and ending in \u2026 when there is more; mash read shows all of it. The JSON carries the same cut text as 'preview'."
+     }
+    ]
+   },
+   {
+    "name": "read",
+    "description": "Show one message in full.",
+    "arguments": [
+     {
+      "name": "number",
+      "required": true,
+      "description": "The message's number, from mash inbox.",
+      "arity": {
+       "minimum": 1,
+       "maximum": 1
+      }
+     }
+    ],
+    "examples": [
+     "mash read 2"
+    ],
+    "exitCodes": [
+     {
+      "code": 0,
+      "description": "It worked."
+     },
+     {
+      "code": 1,
+      "description": "It failed; one line on stderr says why."
+     },
+     {
+      "code": 2,
+      "description": "The command line was wrong; nothing was attempted."
+     }
+    ],
+    "metadata": [
+     {
+      "name": "x-group",
+      "value": "Everyday"
+     },
+     {
+      "name": "x-release",
+      "value": "0.5.6"
+     },
+     {
+      "name": "x-output",
+      "value": [
+       {
+        "case": "A message",
+        "text": "number:   2\nfrom:     acme.demo.bob\nsent:     8s ago\ntrust:    verified\nkind:     question\nurgent:   yes\n\nready?",
+        "stream": "stdout",
+        "exit": 0
+       },
+       {
+        "case": "An answer to something you sent",
+        "text": "number:   5\nfrom:     acme.demo.alice\nsent:     1m ago\ntrust:    verified\nkind:     result\nurgent:   no\nreply to: 42\n\nyes",
+        "stream": "stdout",
+        "exit": 0
+       },
+       {
+        "case": "No such message",
+        "text": "error: acme.demo.alice has no message 9\nhint: mash inbox",
+        "stream": "stderr",
+        "exit": 1
+       }
+      ]
+     },
+     {
+      "name": "x-json",
+      "value": {
+       "number": 2,
+       "from": "acme.demo.bob",
+       "sent": "2026-11-19T09:44:04Z",
+       "trust": "verified",
+       "kind": "question",
+       "urgent": true,
+       "reply_to": null,
+       "relay": null,
+       "body": "ready?"
+      }
+     },
+     {
+      "name": "x-mcp",
+      "value": {
+       "tool": "read",
+       "note": "Same object."
+      }
+     },
+     {
+      "name": "x-today",
+      "value": "As built: no new mechanism. The labels are the JSON field names."
+     },
+     {
+      "name": "x-notes",
+      "value": "What 'read' means. A message is 'new' until the server has been told it reached the endpoint's session: when the hook showed it to the agent, or the agent opened it with the read tool. Until then it is waiting. mash read at a shell shows a message but, with no session online, cannot mark it; it stays 'new' until a session next comes online. That limit is tracked in mash's backlog."
+     }
+    ]
+   },
+   {
+    "name": "who",
+    "description": "List the endpoints you can see, and which are online.",
+    "arguments": [
+     {
+      "name": "prefix",
+      "required": false,
+      "description": "Only endpoints under this owner (acme) or this owner and group (acme.demo), or the one endpoint with this full address. acme.* and acme.demo.* are accepted and mean the same as acme and acme.demo.",
+      "arity": {
+       "minimum": 0,
+       "maximum": 1
+      }
+     }
+    ],
+    "options": [
+     {
+      "name": "--online",
+      "description": "Only endpoints that are online."
+     },
+     {
+      "name": "--offline",
+      "description": "Only endpoints that are offline."
+     },
+     {
+      "name": "--wide",
+      "description": "More columns: role, host and description, where recorded. May pass 80 columns."
+     }
+    ],
+    "examples": [
+     "mash who",
+     "mash who acme.demo --online"
+    ],
+    "exitCodes": [
+     {
+      "code": 0,
+      "description": "It worked."
+     },
+     {
+      "code": 1,
+      "description": "It failed; one line on stderr says why."
+     },
+     {
+      "code": 2,
+      "description": "The command line was wrong; nothing was attempted."
+     }
+    ],
+    "metadata": [
+     {
+      "name": "x-group",
+      "value": "Everyday"
+     },
+     {
+      "name": "x-release",
+      "value": "0.5.6"
+     },
+     {
+      "name": "x-output",
+      "value": [
+       {
+        "case": "Endpoints",
+        "text": "ADDRESS          STATE\nacme.demo.alice  online\nacme.demo.bob    offline",
+        "stream": "stdout",
+        "exit": 0
+       },
+       {
+        "case": "With --wide",
+        "text": "ADDRESS          STATE    ROLE      HOST      DESCRIPTION\nacme.demo.alice  online   reviewer  myserver  reviews pull requests\nacme.demo.bob    offline  writer    myserver  -",
+        "stream": "stdout",
+        "exit": 0
+       },
+       {
+        "case": "Nothing under the prefix",
+        "text": "No endpoints under acme.lab",
+        "stream": "stdout",
+        "exit": 0
+       }
+      ]
+     },
+     {
+      "name": "x-json",
+      "value": {
+       "endpoints": [
+        {
+         "address": "acme.demo.alice",
+         "online": true,
+         "role": null,
+         "host": null,
+         "description": null
+        }
+       ]
+      }
+     },
+     {
+      "name": "x-mcp",
+      "value": {
+       "tool": "who",
+       "note": "Same options, same object."
+      }
+     },
+     {
+      "name": "x-today",
+      "value": "Today the MCP tool always returns the long form, the CLI has three output modes, and matching is by substring of several fields."
+     },
+     {
+      "name": "x-notes",
+      "value": "A prefix follows the address the way a domain name does: acme is everything under acme, acme.demo is everything under acme.demo, and acme.demo.bob is that one endpoint, never acme.demo.bobby. There is no other pattern matching."
+     }
+    ]
+   },
+   {
+    "name": "status",
+    "description": "Say in one line whether mail works for this endpoint, and whether it is online.",
+    "examples": [
+     "mash status",
+     "mash status --endpoint acme.demo.alice"
+    ],
+    "exitCodes": [
+     {
+      "code": 0,
+      "description": "It worked."
+     },
+     {
+      "code": 1,
+      "description": "It failed; one line on stderr says why."
+     },
+     {
+      "code": 2,
+      "description": "The command line was wrong; nothing was attempted."
+     }
+    ],
+    "metadata": [
+     {
+      "name": "x-group",
+      "value": "Everyday"
+     },
+     {
+      "name": "x-release",
+      "value": "0.5.6"
+     },
+     {
+      "name": "x-output",
+      "value": [
+       {
+        "case": "Working, nothing holding it open",
+        "text": "acme.demo.bob: ready, offline",
+        "stream": "stdout",
+        "exit": 0
+       },
+       {
+        "case": "Working, an agent session is holding it open",
+        "text": "acme.demo.bob: ready, online",
+        "stream": "stdout",
+        "exit": 0
+       },
+       {
+        "case": "Not working (the first line on stdout, the hint on stderr)",
+        "text": "acme.demo.bob: not ready: the server refused its credentials\nhint: mash doctor",
+        "stream": "stdout",
+        "exit": 1
+       },
+       {
+        "case": "The server does not answer",
+        "text": "acme.demo.bob: not ready: the server did not answer: tls://myserver:4222\nhint: mash doctor",
+        "stream": "stdout",
+        "exit": 1
+       },
+       {
+        "case": "No endpoint chosen and several installed",
+        "text": "error: more than one endpoint is installed here: acme.demo.alice, acme.demo.bob\nhint: mash status --endpoint acme.demo.bob",
+        "stream": "stderr",
+        "exit": 2
+       }
+      ]
+     },
+     {
+      "name": "x-json",
+      "value": {
+       "endpoint": "acme.demo.bob",
+       "ready": true,
+       "online": false,
+       "reason": null
+      }
+     },
+     {
+      "name": "x-mcp",
+      "value": {
+       "tool": "status",
+       "note": "Same object."
+      }
+     },
+     {
+      "name": "x-today",
+      "value": "Today status prints a row for each of name, config, creds, connection and channel. Those checks move to mash doctor; the version to mash version; the mail count to mash inbox."
+     },
+     {
+      "name": "x-notes",
+      "value": "'ready' means: the configuration is readable, the server answers, and it accepts this endpoint's credentials."
+     }
+    ]
+   },
+   {
+    "name": "doctor",
+    "description": "Check everything mail depends on for this endpoint, and say how to fix what is wrong. Changes nothing.",
+    "examples": [
+     "mash doctor"
+    ],
+    "exitCodes": [
+     {
+      "code": 0,
+      "description": "It worked."
+     },
+     {
+      "code": 1,
+      "description": "It failed; one line on stderr says why."
+     },
+     {
+      "code": 2,
+      "description": "The command line was wrong; nothing was attempted."
+     }
+    ],
+    "metadata": [
+     {
+      "name": "x-group",
+      "value": "Everyday"
+     },
+     {
+      "name": "x-release",
+      "value": "0.5.6"
+     },
+     {
+      "name": "x-output",
+      "value": [
+       {
+        "case": "All well",
+        "text": "config    ok\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   ok\nrefused   ok    no unverified mail was refused\n\nNo problems.",
+        "stream": "stdout",
+        "exit": 0
+       },
+       {
+        "case": "A problem and a warning",
+        "text": "config    ok\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   FAIL  the server refused these credentials\nrefused   warn  3 unverified messages were refused\n\n1 problem, 1 warning.\nhint: ask whoever runs your mesh to run: mashctl endpoint reissue acme.demo.bob",
+        "stream": "stdout",
+        "exit": 1
+       }
+      ]
+     },
+     {
+      "name": "x-json",
+      "value": {
+       "endpoint": "acme.demo.bob",
+       "problems": 1,
+       "warnings": 1,
+       "checks": [
+        {
+         "name": "sign-in",
+         "state": "fail",
+         "detail": "the server refused these credentials",
+         "fix": "mashctl endpoint reissue acme.demo.bob"
+        }
+       ]
+      }
+     },
+     {
+      "name": "x-mcp",
+      "value": {
+       "tool": "doctor",
+       "note": "New tool. Same object. An agent can find out why mail is not working."
+      }
+     },
+     {
+      "name": "x-today",
+      "value": "New. It takes over the rows mash status prints today. It has no plugin or channel row in 0.5.6: neither can be checked truthfully from a shell today, and the command and the tool must answer alike."
+     },
+     {
+      "name": "x-notes",
+      "value": "doctor is the one everyday command that prints many lines, as brew doctor and flutter doctor do. It reports on stdout and exits 1 when it found a problem. The 'refused' row counts unverified mail that was refused (see mash serve)."
+     }
+    ]
+   },
+   {
+    "name": "version",
+    "description": "Print the version.",
+    "examples": [
+     "mash version"
+    ],
+    "exitCodes": [
+     {
+      "code": 0,
+      "description": "It worked."
+     },
+     {
+      "code": 1,
+      "description": "It failed; one line on stderr says why."
+     },
+     {
+      "code": 2,
+      "description": "The command line was wrong; nothing was attempted."
+     }
+    ],
+    "metadata": [
+     {
+      "name": "x-group",
+      "value": "Everyday"
+     },
+     {
+      "name": "x-release",
+      "value": "0.5.6"
+     },
+     {
+      "name": "x-output",
+      "value": [
+       {
+        "case": "Version",
+        "text": "mash v0.5.6 (3f9a41c)",
+        "stream": "stdout",
+        "exit": 0
+       }
+      ]
+     },
+     {
+      "name": "x-json",
+      "value": {
+       "version": "0.5.6",
+       "commit": "3f9a41c",
+       "plugin": "0.5.6"
+      }
+     },
+     {
+      "name": "x-mcp",
+      "value": {
+       "tool": "version",
+       "note": "Same object. 'plugin' is filled in when run by the plugin."
+      }
+     },
+     {
+      "name": "x-today",
+      "value": "Today mashctl prints no commit, and the MCP tool adds three more lines."
+     },
+     {
+      "name": "x-notes",
+      "value": "The short commit in brackets tells two builds of the same version apart."
+     }
+    ]
+   },
+   {
+    "name": "join",
+    "description": "Install an endpoint's credentials on this machine from a join file.",
+    "arguments": [
+     {
+      "name": "file",
+      "required": true,
+      "description": "The join file whoever runs the mesh gave you.",
+      "arity": {
+       "minimum": 1,
+       "maximum": 1
+      }
+     }
+    ],
+    "options": [
+     {
+      "name": "--key",
+      "description": "Your own seed file, when the join file was made for a public key you supplied.",
+      "arguments": [
+       {
+        "name": "path",
+        "required": true,
+        "arity": {
+         "minimum": 1,
+         "maximum": 1
+        }
+       }
+      ]
+     },
+     {
+      "name": "--replace",
+      "description": "Replace credentials already installed here for the same address."
+     },
+     {
+      "name": "--dry-run",
+      "description": "Print what would change, and change nothing."
+     }
+    ],
+    "examples": [
+     "mash join acme.demo.bob.join",
+     "mash join acme.demo.bob.join --key bob.seed"
+    ],
+    "exitCodes": [
+     {
+      "code": 0,
+      "description": "It worked."
+     },
+     {
+      "code": 1,
+      "description": "It failed; one line on stderr says why."
+     },
+     {
+      "code": 2,
+      "description": "The command line was wrong; nothing was attempted."
+     }
+    ],
+    "metadata": [
+     {
+      "name": "x-group",
+      "value": "Setup"
+     },
+     {
+      "name": "x-release",
+      "value": "0.5.6"
+     },
+     {
+      "name": "x-output",
+      "value": [
+       {
+        "case": "Joined",
+        "text": "Joined as acme.demo.bob.",
+        "stream": "stdout",
+        "exit": 0
+       },
+       {
+        "case": "Already installed",
+        "text": "error: acme.demo.bob is already installed here\nhint: mash join acme.demo.bob.join --replace",
+        "stream": "stderr",
+        "exit": 1
+       },
+       {
+        "case": "This folder already belongs to another mesh",
+        "text": "error: this configuration folder is set up for tls://other:4222\nhint: mash join acme.demo.bob.join --config-dir <another folder>",
+        "stream": "stderr",
+        "exit": 1
+       },
+       {
+        "case": "With --dry-run",
+        "text": "Would join as acme.demo.bob.",
+        "stream": "stdout",
+        "exit": 0
+       },
+       {
+        "case": "The join file needs your seed",
+        "text": "error: this join file holds no seed; it was made for your own key\nhint: mash join acme.demo.bob.join --key <your seed file>",
+        "stream": "stderr",
+        "exit": 2
+       }
+      ]
+     },
+     {
+      "name": "x-json",
+      "value": {
+       "endpoint": "acme.demo.bob",
+       "servers": [
+        "tls://myserver:4222"
+       ],
+       "creds": "~/.config/mash/acme.demo.bob.creds"
+      }
+     },
+     {
+      "name": "x-mcp",
+      "value": {
+       "tool": null,
+       "why": "Setup. An agent does not hold credentials-making commands."
+      }
+     },
+     {
+      "name": "x-today",
+      "value": "New. Replaces mash credential create (0.5.5) and the unbuilt mash credential install (0.5.6 contract)."
+     },
+     {
+      "name": "x-notes",
+      "value": "It asks nothing: the file came from whoever runs your mesh. How it works. Whoever runs the mesh runs 'mashctl endpoint create acme.demo.bob --out acme.demo.bob.join' and gets one text file. They get that file to the other machine by any route they trust. There, 'mash join acme.demo.bob.join' copies its three parts into the configuration folder: the server address or addresses, the certificate authority's certificate if the server uses its own, and a NATS creds file (a user JWT and its seed). After that, mash status works. When the endpoint made its own key, the join file holds no seed and --key supplies it. In 0.6.0, mash join also gains a way to ask to join and wait for approval (board card 210). THE JOIN FILE is JSON, written with mode 600, with these fields: \"mash_join\": 1 (the format's version); \"address\"; \"servers\": a list of addresses; \"ca\": the certificate authority's certificate as PEM text, or null; and either \"creds\": the whole text of a NATS creds file, or, when the endpoint made its own key, \"user_jwt\": the user JWT alone. One configuration folder serves one mesh; a join file for another mesh needs another folder."
+     }
+    ]
+   },
+   {
+    "name": "key",
+    "description": "Make your own key pair, for when the seed must never leave this machine.",
+    "commands": [
+     {
+      "name": "create",
+      "description": "Make a seed and its public key.",
+      "options": [
+       {
+        "name": "--out",
+        "description": "Where to write the seed. The public key goes beside it with .pub added. Default: mash.seed in the current folder.",
+        "arguments": [
+         {
+          "name": "path",
+          "required": true,
+          "arity": {
+           "minimum": 1,
+           "maximum": 1
+          }
+         }
+        ]
+       }
+      ],
+      "examples": [
+       "mash key create --out bob.seed"
+      ],
+      "exitCodes": [
+       {
+        "code": 0,
+        "description": "It worked."
+       },
+       {
+        "code": 1,
+        "description": "It failed; one line on stderr says why."
+       },
+       {
+        "code": 2,
+        "description": "The command line was wrong; nothing was attempted."
+       }
+      ],
+      "metadata": [
+       {
+        "name": "x-group",
+        "value": "Setup"
+       },
+       {
+        "name": "x-release",
+        "value": "0.5.6"
+       },
+       {
+        "name": "x-output",
+        "value": [
+         {
+          "case": "Created",
+          "text": "Created bob.seed and bob.seed.pub.",
+          "stream": "stdout",
+          "exit": 0
+         },
+         {
+          "case": "File exists",
+          "text": "error: bob.seed already exists; nothing was written",
+          "stream": "stderr",
+          "exit": 1
+         }
+        ]
+       },
+       {
+        "name": "x-json",
+        "value": {
+         "seed": "bob.seed",
+         "public_key": "bob.seed.pub"
+        }
+       },
+       {
+        "name": "x-mcp",
+        "value": {
+         "tool": null,
+         "why": "Setup. An agent does not hold credentials-making commands."
+        }
+       },
+       {
+        "name": "x-today",
+        "value": "As built, renamed to NATS's words. Produces the same pair as NATS's own nk tool."
+       },
+       {
+        "name": "x-notes",
+        "value": "Give the .pub file to whoever runs the mesh: mashctl endpoint create acme.demo.bob --public-key bob.seed.pub"
+       }
+      ]
+     }
+    ],
+    "exitCodes": [
+     {
+      "code": 0,
+      "description": "It worked."
+     },
+     {
+      "code": 1,
+      "description": "It failed; one line on stderr says why."
+     },
+     {
+      "code": 2,
+      "description": "The command line was wrong; nothing was attempted."
+     }
+    ],
+    "metadata": [
+     {
+      "name": "x-group",
+      "value": "Setup"
+     },
+     {
+      "name": "x-release",
+      "value": "0.5.6"
+     }
+    ]
+   },
+   {
+    "name": "serve",
+    "description": "Run as an MCP server for an agent host. Started by the host, not by hand.",
+    "options": [
+     {
+      "name": "--wake-count",
+      "description": "Wake the session when more than this many messages are waiting. Default 15; 0 turns it off.",
+      "arguments": [
+       {
+        "name": "n",
+        "required": true,
+        "arity": {
+         "minimum": 1,
+         "maximum": 1
+        }
+       }
+      ],
+      "metadata": [
+       {
+        "name": "x-env",
+        "value": "MASH_WAKE_COUNT, or \"wake_count\""
+       }
+      ]
+     },
+     {
+      "name": "--wake-age",
+      "description": "Wake the session when the oldest waiting message is older than this. Default 1h; 0 turns it off.",
+      "arguments": [
+       {
+        "name": "duration",
+        "required": true,
+        "arity": {
+         "minimum": 1,
+         "maximum": 1
+        }
+       }
+      ],
+      "metadata": [
+       {
+        "name": "x-env",
+        "value": "MASH_WAKE_AGE, or \"wake_age\""
+       }
+      ]
+     },
+     {
+      "name": "--accept-unverified",
+      "description": "Deliver mail that is not verified, with its trust label. Default: off; such mail is refused.",
+      "metadata": [
+       {
+        "name": "x-env",
+        "value": "MASH_ACCEPT_UNVERIFIED, or \"accept_unverified\""
+       }
+      ]
+     }
+    ],
+    "examples": [
+     "mash serve"
+    ],
+    "exitCodes": [
+     {
+      "code": 0,
+      "description": "It worked."
+     },
+     {
+      "code": 1,
+      "description": "It failed; one line on stderr says why."
+     },
+     {
+      "code": 2,
+      "description": "The command line was wrong; nothing was attempted."
+     }
+    ],
+    "metadata": [
+     {
+      "name": "x-group",
+      "value": "Integration"
+     },
+     {
+      "name": "x-release",
+      "value": "0.5.6"
+     },
+     {
+      "name": "x-output",
+      "value": [
+       {
+        "case": "Started by an agent host",
+        "text": "(speaks MCP on standard input and output; prints nothing for a person)",
+        "stream": "stdout",
+        "exit": 0
+       },
+       {
+        "case": "Run by hand in a terminal",
+        "text": "error: mash serve is started by an agent host, not by hand\nhint: mash serve --help",
+        "stream": "stderr",
+        "exit": 2
+       }
+      ]
+     },
+     {
+      "name": "x-mcp",
+      "value": {
+       "tool": null,
+       "why": "Integration. This is how an agent host runs mash; it is not something an agent calls."
+      }
+     },
+     {
+      "name": "x-today",
+      "value": "As built, plus the two wake settings (Randy, 2026-11-19) and the refusal of unverified mail. It holds the connection to the server, receives mail in the background, wakes an idle session and offers the MCP tools."
+     },
+     {
+      "name": "x-notes",
+      "value": "Waking for a backlog. Whatever the kinds of the messages, serve wakes the session when more than --wake-count are waiting or the oldest has waited longer than --wake-age, at most once every 10 minutes and not in the first 10 minutes after it starts. mash inbox says so on its second line. Refusing unverified mail. Only mail whose trust is 'verified' reaches the session, the inbox listing and mash read. Mail that is unsigned, signed by an unknown key, claimed but unproven, or stale is dropped and counted; mash doctor shows the count. The sender is not told. --accept-unverified delivers it instead, labelled."
+     },
+     {
+      "name": "x-long",
+      "value": "Visible and documented for anyone wiring mash into an agent host other than Claude Code."
+     }
+    ]
+   },
+   {
+    "name": "hook",
+    "description": "Print mail waiting for this session, in the form the agent host expects. Run by the host after each tool call and with each prompt.",
+    "examples": [
+     "mash hook"
+    ],
+    "exitCodes": [
+     {
+      "code": 0,
+      "description": "Always, so that a hook can never block a session."
+     }
+    ],
+    "metadata": [
+     {
+      "name": "x-group",
+      "value": "Integration"
+     },
+     {
+      "name": "x-release",
+      "value": "0.5.6"
+     },
+     {
+      "name": "x-output",
+      "value": [
+       {
+        "case": "Mail waiting",
+        "text": "(the waiting messages, as context for the agent)",
+        "stream": "stdout",
+        "exit": 0
+       },
+       {
+        "case": "Nothing waiting",
+        "text": "(nothing)",
+        "stream": "stdout",
+        "exit": 0
+       }
+      ]
+     },
+     {
+      "name": "x-mcp",
+      "value": {
+       "tool": null,
+       "why": "Integration. This is how an agent host runs mash; it is not something an agent calls."
+      }
+     },
+     {
+      "name": "x-today",
+      "value": "As built. It never connects to the server; it reads what mash serve has stored on disk."
+     },
+     {
+      "name": "x-notes",
+      "value": "When mash is not installed. The plugin's launcher, run at session start, prints one line on stdout, so the agent sees it and can tell the person: 'mash is not installed: the mash plugin found no mash program. Install it: curl -fsSL https://github.com/bogworks/mash/releases/latest/download/install.sh | bash'. Today nothing is said and the agent simply has no mash tools."
+     },
+     {
+      "name": "x-long",
+      "value": "Visible and documented for anyone wiring mash into an agent host other than Claude Code."
+     }
+    ]
+   },
+   {
+    "name": "prompt",
+    "description": "Ask an endpoint a live question and wait for its answer. Not stored: if the recipient is not there, it fails.",
+    "arguments": [
+     {
+      "name": "address",
+      "required": true,
+      "description": "Who to ask.",
+      "arity": {
+       "minimum": 1,
+       "maximum": 1
+      }
+     },
+     {
+      "name": "text",
+      "required": true,
+      "description": "The question.",
+      "arity": {
+       "minimum": 1,
+       "maximum": 1
+      }
+     }
+    ],
+    "examples": [
+     "mash prompt acme.demo.alice \"are you there?\""
+    ],
+    "exitCodes": [
+     {
+      "code": 0,
+      "description": "It worked."
+     },
+     {
+      "code": 1,
+      "description": "It failed; one line on stderr says why."
+     },
+     {
+      "code": 2,
+      "description": "The command line was wrong; nothing was attempted."
+     }
+    ],
+    "metadata": [
+     {
+      "name": "x-group",
+      "value": "Raw SAP"
+     },
+     {
+      "name": "x-release",
+      "value": "0.5.6"
+     },
+     {
+      "name": "x-output",
+      "value": [
+       {
+        "case": "As built",
+        "text": "(what it prints today; unchanged in 0.5.6)",
+        "stream": "stdout",
+        "exit": 0
+       },
+       {
+        "case": "Added: every use, on stderr",
+        "text": "note: 'mash prompt' moves to 'mash sap prompt' in 0.6.0",
+        "stream": "stderr",
+        "exit": 0
+       }
+      ]
+     },
+     {
+      "name": "x-mcp",
+      "value": {
+       "tool": "reply",
+       "note": "The other half: an agent answers a live prompt with the reply tool. Both stay as they are in 0.5.6 and move under 'sap' in 0.6.0."
+      }
+     },
+     {
+      "name": "x-today",
+      "value": "As built, kept unchanged in 0.5.6 at your word. Only a verified sender that is a known endpoint is accepted."
+     }
+    ]
+   },
+   {
+    "name": "sap",
+    "description": "Plain Synadia Agent Protocol operations, for experts. Experimental.",
+    "exitCodes": [
+     {
+      "code": 0,
+      "description": "It worked."
+     },
+     {
+      "code": 1,
+      "description": "It failed; one line on stderr says why."
+     },
+     {
+      "code": 2,
+      "description": "The command line was wrong; nothing was attempted."
+     }
+    ],
+    "metadata": [
+     {
+      "name": "x-group",
+      "value": "Raw SAP"
+     },
+     {
+      "name": "x-release",
+      "value": "0.6.0"
+     },
+     {
+      "name": "x-output",
+      "value": [
+       {
+        "case": "Planned",
+        "text": "(mash sap prompt, mash sap reply and what else SAP offers,\n still subject to mash's policy)",
+        "stream": "stdout",
+        "exit": 0
+       }
+      ]
+     },
+     {
+      "name": "x-mcp",
+      "value": {
+       "tool": null,
+       "why": "To be decided with the 0.6.0 design."
+      }
+     },
+     {
+      "name": "x-today",
+      "value": "Does not exist. mash prompt and the reply tool move here in 0.6.0, which is a breaking change."
+     }
+    ]
+   }
+  ],
+  "metadata": [
+   {
+    "name": "x-removed",
+    "value": [
+     {
+      "what": "mash admin (11 commands)",
+      "why": "Needs an administrator's credentials, so it belongs to mashctl. Already deprecated."
+     },
+     {
+      "what": "mash plugin export",
+      "why": "The plugin is installed from its marketplace: claude plugin marketplace add, then claude plugin install."
+     },
+     {
+      "what": "mash credential create",
+      "why": "Replaced by mash join."
+     },
+     {
+      "what": "mash server status, mash endpoint status (0.5.6 drafts)",
+      "why": "mash has no server point of view. Peers are mash who; the server is mashctl status."
+     },
+     {
+      "what": "MASH_OWNER, MASH_GROUP, MASH_NAME, MASH_URL, MASH_TLS_CA",
+      "why": "One name each: MASH_ENDPOINT, MASH_SERVER, MASH_CA."
+     }
+    ]
+   }
+  ]
+ }
+}
