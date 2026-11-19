@@ -7,16 +7,16 @@ end you delete all three.
 What you need first: a Debian or Ubuntu machine on 64-bit Intel or AMD (the
 server helper in Prerequisite 3 runs there only), Claude Code 2.1.312 or newer
 signed in with a claude.ai or Console account and with channels (the way mash
-wakes an idle session), the GitHub CLI `gh`, and Go 1.27.4 or newer. Prerequisite 3
-may also need `sudo`, once, to install a missing tool. The honest total,
-counted by script from this page: the first mail is sent after 11 pastes
-(52 lines) with the prerequisites, or 4 pastes (6 lines)
-if a server and mashctl are already working; Alice reads it after
-13 pastes (6). The whole page is 26 pastes and 77 lines, and
-10 other actions: two confirmations of a Claude Code flag, two more terminals, one
-sentence typed to Bob's agent, three addresses typed to confirm the deletions,
-two sessions closed. Installing Claude Code, `gh` and Go, and answering any
-question Claude Code itself asks, are not counted.
+wakes an idle session), the GitHub CLI `gh`, and Go 1.27.4 or newer.
+Prerequisite 3 may also need `sudo`, once, to install a missing tool. The
+honest total, counted by script from this page: the first mail is sent after
+11 pastes (52 lines) with the prerequisites, or 4 pastes
+(6 lines) if a server and mashctl are already working; Alice reads it
+after 13 pastes (6). The whole page is 26 pastes and 77 lines, and
+10 other actions: two confirmations of a Claude Code flag, two more
+terminals, one sentence typed to Bob's agent, three addresses typed to confirm
+the deletions, two sessions closed. Installing Claude Code, `gh` and Go, and
+answering any question Claude Code itself asks, are not counted.
 
 ```diagram
  your machine
@@ -116,9 +116,12 @@ and `sha256sum` then prints `mash-linux-amd64: OK`. Anything else
 is on the second page.
 
 The last check before the copy looks at the folder the program goes into, and at
-every folder above it. If one can be written by other users (many Linux accounts
-make new folders writable by their group), the paste stops and prints this; run the
-`chmod` line it shows, then paste the whole block again:
+every folder above it. The command refuses a folder that other users can write
+to, or that is, or sits under, a symbolic link, because someone else could then
+replace mash with a program of their own after you checked it. If one can be
+written by other users (many Linux accounts make new folders writable by their
+group), the paste stops and prints this; run the `chmod` line it shows, then
+paste the whole block again:
 
 <!-- from: targets#install-check-writable -->
 ```

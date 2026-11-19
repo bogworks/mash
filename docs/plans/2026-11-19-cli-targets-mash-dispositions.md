@@ -782,7 +782,7 @@ blocks named are packet keys.
 | D8-1.2 | Two refusal blocks `error: a first install needs --ca <file>` and `... --server <address>`, each with a labelled fix and the full command line to run | FIXED | The two `install-refuse` blocks now end in the whole command (with `<ca file>` or `<address>`); both are over 80 columns and exempt (R9, 111 and 98) |
 | D8-1.3 | A later install for another endpoint uses the configured server and CA; a flag given must match, else it refuses untouched naming the file to move aside | FIXED | R15, R17, section 3, the second-endpoint text, `help`; the two existing refusals (`newhost`, `newca`) show it |
 | D8-1.4 | Update help and every example, block, fix and hand-over text | FIXED | `help` (two usages, text), the status and send fixes keep their later-install form (config exists), the no-configuration and removed-verb fixes carry both flags, the trust fixes |
-| D8-2.1 | NEW CHECK (F15-2): the token's signature verifies against the key of the account of the AUTHENTICATED server, before any write; refusal block with the lead's text and a labelled fix | FIXED | `install-refuse` (`this token was not signed by the account of the server at myserver:4222`), R15, step C, `trust` text; Y4 reversed. The word `account` is the lead's: R2 names it as one exception (Z1) |
+| D8-2.1 | NEW CHECK (F15-2): the token's signature verifies against the key of the account of the AUTHENTICATED server, before any write; refusal block with the lead's text and a labelled fix | FIXED | the refusal block, SUPERSEDED in DRAFT12 (D12-2): one wording now, `install-refuse-refused`; R15, step C, `trust` text; Y4 reversed |
 | D8-2.2 | Success output: no new line; extend the existing `checked` line | FIXED | `checked  the server at myserver:4222: its certificate is from this CA for its name, and it made this token` in every install block (Z1); `--json` gets `token_checked` (Z8) |
 | D8-2.3 | WRITE ORDER (F15-6): preflight, then the CA, then the credentials, then `config.json` last as the commit point; success lines in that order | FIXED | File safety (section 2), R20, step C; every install block, and the two `--make-key` blocks quoted from mashctl (Z3) |
 | D8-2.4 | A rerun COMPLETES an interrupted install; new block `install-rerun` | FIXED | `install-rerun`: CA copy `kept (unchanged)`, credentials and `config.json` `wrote`, `config.json` last; UNVERIFIED that the screen is the full first-install one (Z2) |
@@ -854,7 +854,7 @@ reviewer notes are regenerated.
 | D10-1.4 | Fingerprint display form everywhere = ctl's (groups of 8, space separated, two lines of four): replace the `-` joined form in rules, help, hand-over text, JSON examples, README generator rules and lint | FIXED | R15, `server`, `install-*`, `install-json` (one line, wrapped under its key), the adopt paragraph; `p2/lint-plain.py` (and `p2/neg3.py`, six new cases); packet intro |
 | D10-1.5 | Remove typed-answer rules; replace every "compare after the write" wording | FIXED | R15 (nothing typed but yes/no), R17, step B and C text, "How the agent trusts the server", the `credential install` help, S2/S3/S12 and Y7 marked superseded; Day 2 step 5 |
 | D10-2.1 | The token's issuer must equal the confirmed account; refusal `error: this token belongs to another account than the one you confirmed.` + labelled fix; nothing written | FIXED, reordered by rev 22 to 24 | `install-refuse-account` (now before the question: the local comparison with `--account` is the first check after the files; see D10-6.1) |
-| D10-2.2 | The server must REQUIRE authentication and the connection must succeed; refusal `error: the server at myserver:4222 does not require authentication.` + fix | FIXED | `install-refuse-noauth`; the connection refusal keeps the lead's rev 16 line (exit 4, `install-refuse`); an unreachable server (exit 6) has no block: no wording in the contract |
+| D10-2.2 | The server must REQUIRE authentication and the connection must succeed; refusal `error: the server at myserver:4222 does not require authentication.` + fix | FIXED | `install-refuse-noauth`; the connection refusal is `install-refuse-refused` (exit 4; DRAFT12, D12-2); an unreachable server (exit 6) has no block: no wording in the contract |
 | D10-2.3 | A certificate signed by a DIFFERENT CA than the confirmed one: `error: the server's certificate is not signed by the CA you confirmed.` + fix | FIXED | `install-refuse-ca`; the old combined "CA and name" refusal is now a host-name refusal under `install-refuse` (Z15) |
 | D10-2.4 | NO directory lookup; drop any "no matching record" refusal and any directory-check text | FIXED (nothing to drop) | DRAFT9 had neither; R15 and step C say install reads nothing else from the server |
 | D10-2.5 | Before connecting refuse a key or token file that is a symlink, foreign-owned or broader than 0600: `error: bob.key is readable by others (mode 644).` + `chmod 600 bob.key` on its own indented line; one block per cause | FIXED, fixes chosen here | `install-refuse-keyfile-mode`, `-symlink`, `-owner` |
@@ -885,8 +885,8 @@ characters).
 Contract rev 26 lines not conformed to: REQ-011 (i)'s destination and parent
 checks for the pasted install (D10-6.4); `mash endpoint status` showing the count
 for the caller's own owner (REQ-015) is followed by the targets but not by the
-status-views page; refusal wording for a connection the server refuses beyond the
-lead's rev 16 line and for an unreachable server (the contract names the tests
+status-views page; refusal wording for a connection the server refuses (written in
+DRAFT11, one wording since DRAFT12) and for an unreachable server (the contract names the tests
 only); REQ-003's one line in `--make-key` output on why no fingerprint is shown
 (mashctl's text, not in `install-make`); AT-007's kill and symlink tests are
 behaviour, not output.
@@ -907,10 +907,10 @@ status` mailbox column and the publication list. Target document:
 
 | # | item | disposition | where in the targets (DRAFT11), or why not |
 |---|---|---|---|
-| D11-1 | The pasted install refuses a destination folder, or any parent of it, that is a symlink or writable by another user, before copying; refusal blocks; Mac block before Linux; verify before copy; short enough to paste | FIXED, with one part not taken | section 5a: the paste is one `&&` chain (21 lines in the targets, 31 in the README's whole prerequisite paste, up from 14), the check a subshell loop of `[ -L ]` and `find -maxdepth 0 -perm` (portable, no `stat`), after the verify and right before the copy; blocks `install-check-writable` and `install-check-symlink`; Z22 (a). NOT TAKEN: the Mac block before the Linux one: the README is a Debian or Ubuntu page (README v3 removed the Mac downloads because the helper runs only there); the targets say the same paste works on a Mac with `P` and `shasum -a 256 -c -` |
+| D11-1 | The pasted install refuses a destination folder, or any parent of it, that is a symlink or writable by another user, before copying; refusal blocks; verify before copy; short enough to paste | FIXED, with one part not taken | section 5a: the paste is one `&&` chain (21 lines in the targets, 31 in the README's whole prerequisite paste, up from 14), the check a subshell loop of `[ -L ]` and `find -maxdepth 0 -perm` (portable, no `stat`), after the verify and right before the copy; blocks `install-check-writable` and `install-check-symlink`; Z22 (a). A second platform is not shown: the README is a Debian or Ubuntu page (the helper runs only there); see D12-1 |
 | D11-2 | `mash endpoint status` has NO mailbox column; remove the column and the `unknown` wording from the targets, packet, section 5b | FIXED | R22, section 5b's table, the DRAFT10 summary, the companion's Z6 (superseded) and section 8; the packet never had the column; Z22 (b) |
 | D11-3 | The `no` outcome keeps the `error:` label | FIXED | `install-confirm-no` reads `error: you did not confirm the three values.`, then `Nothing was written. Ask the operator who made this endpoint.`, exit 1; R15 and the block's text; Z14, Z22 (c) |
-| D11-4 | Write the refusals for a server that REFUSES and one UNREACHABLE | FIXED | `install-refuse-refused` (exit 4) and `install-unreachable` (exit 6, 20s, the open timeout: section 2 Timeouts); the exit-code table's rows 4 and 6 and R15 name them; Z22 (d). The older `install-refuse` block for a token not signed by the server's account is kept beside the new one (two words for one exit-4 condition; for the lead) |
+| D11-4 | Write the refusals for a server that REFUSES and one UNREACHABLE | FIXED | `install-refuse-refused` (exit 4) and `install-unreachable` (exit 6, 20s, the open timeout: section 2 Timeouts); the exit-code table's rows 4 and 6 and R15 name them; Z22 (d). The second block DRAFT11 kept for the same exit-4 condition is deleted in DRAFT12 (D12-2) |
 | D11-5 | Yes/no read from the terminal, a later install shows no confirmation, `--dry-run` asks nothing | ACCEPTED, nothing to change | unchanged |
 | D11-6 | Re-measure widths, update counts, packet keys, checks run | FIXED | section 9 (companion): 162 fenced blocks, 141 chosen by markers, 83 keys |
 | D11-7 | Regenerate the README pages, step count and reviewer notes; lint on both | FIXED | see the report of this draft; the status-views page is not edited |
@@ -927,3 +927,21 @@ destination check (behaviour, not output: only the refusal texts are shown);
 the contract's "a destination that does not exist yet (created by the person's
 own user, 0755, then checked)" is applied by `umask 022` and `mkdir -p`, which is
 UNVERIFIED against a release (nothing was run against one).
+
+## DRAFT12: lead rulings of 11:17Z
+
+Source: the lead's four rulings of 11:17Z. Target document:
+`docs/plans/2026-11-19-cli-targets-mash.md` (DRAFT12). The contract is
+`contract-0.5.6-cli-ux-rev26.md`, final; downloaded again at the start and at
+the end of this work (the newest in `masterplanner/for-herds/mash-0.5.6/`).
+
+| # | item | disposition | where in the targets (DRAFT12), or why not |
+|---|---|---|---|
+| D12-1 | No Mac block anywhere in the quick start; it is the Debian or Ubuntu path the helper supports; no Mac or `shasum` text in the page or in the targets' install text; `Linux amd64` stated once; a Day 2 line only if a built command needs one | FIXED | section 5a: the sentences about another platform are gone (the download lead-in states Linux amd64 once; the paragraph after the install block says the README shows this Linux paste alone); the quick start page, Day 2 and the notes carry no such text; no built command needs a Day 2 line, so none was added; Z23 (a) |
+| D12-2 | ONE wording for a server that refuses the credentials: keep `install-refuse-refused` (`error: the server at myserver:4222 refused this key and token.`); delete the rev 16 wording everywhere | FIXED | the old `install-refuse` block and its lead-in are deleted from section 5a; the R2 exception for `account` in that refusal is deleted; the Z1, Z15 and Z22 texts that named it are rewritten; D8-2.1 and D10-2.2 above are marked superseded; the packet no longer has the block (the key `install-refuse` keeps its other blocks); the exit-code rows, the JSON error codes (`credentials_refused`) and the README never carried the old words; Z23 (b). SUPERSEDED rows: D8-2.1 (the refusal wording), D10-2.2 (the connection refusal's wording), D11-4 (its last sentence) |
+| D12-3 | Contract file is `contract-0.5.6-cli-ux-rev26.md`; fetch the newest final and conform | FIXED | the newest in the folder is still rev 26 (final, 11:08Z); nothing new to conform to |
+| D12-4 | Say once on the page why the pasted install refuses a folder others can write to, or that sits under a link | FIXED | section 5a (before the refusals) and the README prerequisite where the refusal block is shown carry the same sentence; the packet's section 0 carries it too; Z23 (d) |
+| D12-5 | Re-measure widths, counts, packet keys, checks run; regenerate the README pages, step count and notes; lint | FIXED | section 9 (companion): 161 fenced blocks, 140 chosen by markers, 83 keys; the pages' counts are unchanged (26 pastes, 77 lines, 10 other actions) |
+
+Packet keys added: none. Removed: none (one `install-refuse` block is out, a
+block and not a key).

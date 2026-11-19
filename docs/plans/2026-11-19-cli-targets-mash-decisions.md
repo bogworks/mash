@@ -1,7 +1,7 @@
 # mash CLI targets: decisions, behaviour changes and checks (sections 7 to 9)
 
 This file is the decisions, behaviour-changes and checks part of
-[the mash CLI target outputs](2026-11-19-cli-targets-mash.md) (DRAFT11). It was
+[the mash CLI target outputs](2026-11-19-cli-targets-mash.md) (DRAFT12). It was
 split out only to keep the main file under the repository's size limit for
 committed files. Sections 7, 8 and 9 below are unchanged and keep their
 numbers; every output block (the ones the reviewer packet and the README pages
@@ -254,10 +254,9 @@ Z1. DECIDED here (the `checked` wording is superseded by Z15 and the
     is part of the one `checked` line, which now reads `checked  the server at
     myserver:4222: its certificate is from this CA for its name, and it
     accepted this key and token` (two lines, the second indented). On refusal it is the block
-    `error: this token was not signed by the account of the server at
-    myserver:4222. Nothing was written.` with a labelled `fix:` and the whole
-    command to run. The word `account` is the lead's text and the contract's;
-    R2 lists it as the one exception.
+    the refusal block for a server that does not accept the key and token
+    (reworded in DRAFT12, Z23: `error: the server at myserver:4222 refused
+    this key and token.`, with a labelled `fix:` and the whole command to run).
 Z2. DECIDED here. WRITE ORDER (F15-6), shown in every success block in this
     order: the CA copy (`copied`, or `kept` when it is already there), the
     credentials (`wrote`), `config.json` last (`wrote ... written last`, or
@@ -359,10 +358,8 @@ Z15. DECIDED, the lead (rev 18 to 24), blocks chosen here. New refusal blocks,
     built code). The earlier refusal for a certificate that was not from the CA
     for the name is now two: `install-refuse-ca` (a different CA than the
     confirmed one) and a host-name block (`not for the name otherhost`, under
-    `install-refuse`), the second reworded because the CA half moved. The lead's
-    rev 16 line `this token was not signed by the account of the server at
-    <host>:<port>` stays, as the refusal for a server that does not accept the
-    key and token (exit 4). The three file refusals are shown with the KEY file;
+    `install-refuse`), the second reworded because the CA half moved. The refusal for a server
+    that does not accept the key and token (exit 4) is one block (Z23). The three file refusals are shown with the KEY file;
     a token file says the same with its own name. A server that cannot be
     reached (exit 6) and a connection the server refuses beyond the line above
     have no block of their own: the contract names the tests and gives no
@@ -429,7 +426,7 @@ Z22. DECIDED, the lead. (a) The pasted install checks its destination (rev 24,
     `install-check-writable` and `install-check-symlink`, shown for
     `/home/ada/.local/bin`). Chosen here: the check is a subshell loop from the
     destination up to `/` using `[ -L ]` and `find ... -maxdepth 0 -perm`
-    (portable to macOS, where `stat` differs); it comes right before the copy
+    (`stat` differs between systems, so it is not used); it comes right before the copy
     in the same `&&` chain, after the verify; the folder is made first with
     `umask 022` (rev 24: "created by the person's own user, 0755, then
     checked"); the symlink refusal gives no command, because only the person
@@ -439,11 +436,10 @@ Z22. DECIDED, the lead. (a) The pasted install checks its destination (rev 24,
     the system's (`/home` on some distributions), because the rev 24 test
     names a symlinked parent. Measured on the author's own Linux account: the
     ordinary `~/.local/bin` there is `0775`, so the refusal will fire on many
-    Linux accounts; the `chmod go-w` fix is the answer. The macOS block of the
-    earlier README (Mac before Linux) is NOT restored: the quick start is a
+    Linux accounts; the `chmod go-w` fix is the answer. The quick start is a
     Debian or Ubuntu page (decided at the README v3 rewrite, its server helper
-    runs there only), so the targets (section 5a) say the same paste works on
-    a Mac with `P` and `shasum -a 256 -c -`, and the README shows Linux alone.
+    runs there only), so the targets (section 5a) and the README show the Linux
+    paste alone (Z23).
     (b) `mash endpoint status` has no mailbox column (rev 26): removed from R22,
     section 5b's table, the DRAFT10 summary and Z6; a caller's own count is in
     its own `mash status`. (c) The answer `no` keeps the `error:` label:
@@ -453,12 +449,32 @@ Z22. DECIDED, the lead. (a) The pasted install checks its destination (rev 24,
     a `yes`, both writing nothing: `install-refuse-refused` (exit 4) and
     `install-unreachable` (exit 6, `did not answer within 20s`, the open
     timeout a connecting command uses, section 2 Timeouts, not status's 2
-    seconds). The older block for a token "not signed by the account of the
-    server" (rev 16's text) is KEPT beside the new `install-refuse-refused`:
-    two words for one exit-4 condition; the lead may pick one (mash cannot tell
-    the causes apart). (e) Accepted as is: yes and no are read from the
+    seconds). (The first draft of DRAFT11 kept a second block
+    for the same exit-4 condition; Z23 deletes it.) (e) Accepted as is: yes and no are read from the
     terminal, a later install shows no confirmation, and `--dry-run` asks
     nothing.
+
+DRAFT12's decisions (the lead's rulings of 11:17Z; the contract is still rev
+26, final). Each is easy to reverse.
+
+Z23. DECIDED, the lead. (a) NO second platform anywhere: the README quick start
+    is the Debian or Ubuntu path its server helper supports (Linux amd64,
+    stated once), the targets' install text no longer describes another
+    platform, and no Day 2 line is added because no built command needs one.
+    (b) ONE WORDING for the condition "the server refused the key and token":
+    `error: the server at myserver:4222 refused this key and token.` (exit 4,
+    `install-refuse-refused`). The older block, its sentence in the rules (the
+    R2 exception for `account` in that refusal), the exit-4 and R15 text that
+    named it, and its place in the packet are deleted. (c) The contract file
+    is `contract-0.5.6-cli-ux-rev26.md`; downloaded again at the end of this
+    draft, no newer revision exists. (d) The page SAYS WHY the pasted install
+    refuses a folder that other users can write to, or that is or sits under a
+    symbolic link: someone else could replace mash with a program of their own
+    after you checked it (one sentence in section 5a and the same sentence in
+    the README where the refusal is shown). Chosen here: "after you checked it"
+    (the verify has just run) rather than "after you installed it"; the
+    sentence says "other users" (the group counts) and "is, or sits under" a
+    link, which is what the check tests.
 
 ## 8. Behaviour changes the contract must decide
 
@@ -602,11 +618,13 @@ and lowers the mailbox count (CHANGED, rev 21: today `mash read` never acks).
 
 ## 9. Checks run
 
-Width (re-measured for DRAFT11, contract revision 26 final). A script (`width.py`, run
+Width (re-measured for DRAFT12, contract revision 26 final). A script (`width.py`, run
 over the file, kept outside the repo) walks the file, tracks the fenced blocks
-and keeps every line over 80 columns. Result for this file: 162 fenced blocks
+and keeps every line over 80 columns. Result for this file: 161 fenced blocks
 (every mockup, Before block and JSON example and the `adopt-from` placeholder),
-141 of them chosen by a `packet:` marker (83 distinct keys; DRAFT10 had 157,
+140 of them chosen by a `packet:` marker (83 distinct keys; DRAFT12 removes one
+block, the older token refusal, one of the `install-refuse` blocks, and no key
+(the key keeps its other blocks); DRAFT11 had 162, 141 and 83; DRAFT10 had 157,
 136 and 79: four keys are new, `install-check-writable`, `install-check-symlink`,
 `install-refuse-refused` and `install-unreachable`, and none is out; the
 `install-check` key has one more block, the `mash version` check on its own,
@@ -624,7 +642,7 @@ again, on a line of its own (`--account` is on every `credential install`
 command, so they are longer: the widest are 175 columns, the NEXT of the
 server-side step and the fixes (DRAFT11 adds two, `install-refuse-refused` and
 `install-unreachable`) that repeat the whole command with the real
-56-character account key; then 168, 135, 134, 132 and 125 for the other such
+56-character account key; then 168, 135, 134 and 132 for the other such
 fixes with real values, 122 for the one that has a token placeholder; 121 for
 the no-configuration, trust, `ctl-make-key-refuse`, removed-verb and status
 fixes that use `<key file>` placeholders and `--account <account key>`; 87 for

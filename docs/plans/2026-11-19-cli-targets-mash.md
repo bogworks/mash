@@ -1,10 +1,24 @@
-# mash CLI target outputs (0.5.6 contract input), DRAFT11
+# mash CLI target outputs (0.5.6 contract input), DRAFT12
 
-Date: 2026-11-19. Status: DRAFT11 of the mockups for the maintainer's review.
+Date: 2026-11-19. Status: DRAFT12 of the mockups for the maintainer's review.
 Every finding of the earlier rounds has one row in
-`docs/plans/2026-11-19-cli-targets-mash-dispositions.md` (DRAFT1 to DRAFT10);
-the rows of this draft are in its last section, "DRAFT11: lead rulings of
-11:08Z".
+`docs/plans/2026-11-19-cli-targets-mash-dispositions.md` (DRAFT1 to DRAFT11);
+the rows of this draft are in its last section, "DRAFT12: lead rulings of
+11:17Z".
+
+DRAFT12 applies the lead's four rulings of 11:17Z (the contract is still rev
+26, final, the newest in `masterplanner/for-herds/mash-0.5.6/`). (1) The README
+quick start is the Debian or Ubuntu path the server helper supports, Linux
+amd64, stated once; no other platform is shown or described, and nothing built
+needs a line for one. (2) ONE WORDING for a server that refuses the key and
+token: `error: the server at myserver:4222 refused this key and token.` (exit
+4, `install-refuse-refused`); the earlier second wording for the same condition
+is deleted from the targets, the packet and the rules, and the word `account`
+is no longer used in a refusal about the server. (3) The contract file read is
+`contract-0.5.6-cli-ux-rev26.md`, final; no newer revision exists. (4) THE PAGE
+SAYS WHY the pasted install refuses a folder that others can write to or a
+symbolic link (section 5a; the README says the same sentence). The rest of
+DRAFT11 stands.
 
 DRAFT11 applies the lead's four rulings of 11:08Z (contract rev 26, final:
 the critic's read of rev 26 was clean) and changes no other rule. (1) THE
@@ -179,8 +193,7 @@ owner `acme`, the group `release-pipeline` (16 characters) and the names
   21): `account` and `operator` appear in the first-install confirmation of
   `credential install` (the `account` line, the question `Do these three
   match what the operator sent you?` and the refusals around it) and in
-  mashctl's hand-over (step B); `account` also in the refusal for a token the
-  server does not accept (`install-refuse`). Vocabulary: PRIVATE KEY (the file
+  mashctl's hand-over (step B); Vocabulary: PRIVATE KEY (the file
   only the endpoint's machine keeps), PUBLIC KEY (safe to share), TOKEN (what
   mashctl's signing key signs: "this public key is endpoint acme.demo.bob"),
   CREDENTIALS (the one file mash runs with: private key plus token). A key is
@@ -1390,31 +1403,12 @@ fix: mash will not install credentials for a server that lets anyone in. Ask
 ```
 
 The certificate, the host name and the confirmed account are right, but the
-server does not accept this key and token (exit 4, not authorized; the lead's
-text of rev 16, kept: a token made
-for a server this one does not serve, or a deleted or reissued endpoint;
-nothing is written, because this check too comes before every write; the two
-blocks after it are the words DRAFT11 adds for a connection the server refuses
-and for a server that cannot be reached):
-
-<!-- packet: install-refuse -->
-```
-$ mash credential install --key bob.key --token acme.demo.bob.token \
-    --server tls://myserver:4222 --ca ca.pem \
-    --account ADQ6KRG4JFLSMDNOLVYUFUXM3JOVHOS5OJZPTIFCCRPM3DTQKTE4VLXF
-Do these three match what the operator sent you? (yes/no) yes
-error: this token was not signed by the account of the server at
-       myserver:4222. Nothing was written.
-fix: ask whoever runs your mash server for a token made on this server, save
-     it to a file, and run the command again with that file:
-  mash credential install --key bob.key --token <token file> --server tls://myserver:4222 --ca ca.pem --account <account key>
-```
-
-The server answered and REFUSED the key and token (exit 4, not authorized: the
+server answered and REFUSED the key and token (exit 4, not authorized: the
 endpoint does not exist on that server, was deleted or reissued, or one of the
-three values is wrong; DRAFT11's words, contract rev 17 and later give the test
-and no text; nothing is written, and mash cannot tell the causes apart, so it
-names none):
+three values is wrong; the one wording for this condition, DRAFT11's words
+kept in DRAFT12, because the contract gives the test and no text; nothing is
+written, because this check too comes before every write, and mash cannot tell
+the causes apart, so it names none):
 
 <!-- packet: install-refuse-refused -->
 ```
@@ -3841,8 +3835,8 @@ which is why the sums file is itself verified; a failed check installs nothing
 refuse too). Binaries go into the user's own directory, `~/.local/bin`, never
 with `sudo`.
 
-Download (four pastes in one block, or four lines; Linux amd64 shown, and the
-page says to change the platform part of the names for macOS or arm64):
+Download (four pastes in one block, or four lines; Linux amd64 is the one
+platform the page supports and is stated once here):
 
 <!-- packet: install-check -->
 ```
@@ -3899,9 +3893,8 @@ Error: verifying with issuer "sigstore.dev"
 ```
 
 Then the two binaries, against the sums the attestation just covered (this
-prints one line per file; on macOS `shasum -a 256 -c -` replaces
-`sha256sum -c -`; a line that says `FAILED` means stop, and `sha256sum` exits
-1):
+prints one line per file; a line that says `FAILED` means stop, and
+`sha256sum` exits 1):
 
 <!-- packet: install-check -->
 ```
@@ -3919,7 +3912,7 @@ world), and says which folder and what to do. The folder is made first by the
 person's own user with `umask 022` (so a new one is 0755), then every
 component from the destination up to `/` is checked: `[ -L ]` for a link and
 `find ... -maxdepth 0 -perm` for the group and world write bits, both of which
-behave the same on Linux and macOS (`stat` does not, so it is not used). The
+are plain POSIX tools (`stat` differs between systems, so it is not used). The
 check sits after the verify and right before the copy, in the same `&&` chain,
 so a refusal stops the chain and copies nothing; it is a subshell, so its
 `exit` ends the check and not the person's terminal. It is plain POSIX shell
@@ -3959,10 +3952,13 @@ $ mash version
 mash 0.5.6
 ```
 
-On macOS the same paste works with `P=darwin-arm64` (`darwin-amd64` on an Intel
-Mac) in the names and `shasum -a 256 -c -` for `sha256sum -c -`; nothing in the
-destination check is Linux-only. The README quick start is a Debian or Ubuntu
-page (its server helper runs there only), so it shows the Linux paste alone.
+The README quick start is a Debian or Ubuntu page (its server helper runs
+there only), so it shows this Linux paste alone; no other platform is shown.
+
+WHY the paste refuses (said once here, and once on the README page where its
+refusal is shown): the command refuses a folder that other users can write to,
+or that is, or sits under, a symbolic link, because someone else could then
+replace mash with a program of their own after you checked it.
 
 The refusals, printed by the paste's own `echo` lines to the error stream
 (the folder named is the real one, here `/home/ada/.local/bin`; nothing was

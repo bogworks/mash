@@ -5,8 +5,8 @@ Not README text. These notes go with
 `docs/plans/2026-11-19-readme-day2-plain-mash.md` (Day 2). The two pages carry no
 notes section and no internal marks: everything a reviewer needs is here.
 
-Built on the targets DRAFT11 (`docs/plans/2026-11-19-cli-targets-mash.md`, contract
-revision 26) for the ruled scope (Randy's decision 264). Regenerated after DRAFT11 (contract revision 26 final; the lead's rulings of 11:08Z: the pasted install refuses a destination folder, or a folder above it, that is a link or that other users can write, and prints the refusal; `mash endpoint status` has no mailbox column; the answer `no` keeps the `error:` label; the refusals for a server that refuses and for one that does not answer are written). Earlier, after DRAFT10 (contract revisions
+Built on the targets DRAFT12 (`docs/plans/2026-11-19-cli-targets-mash.md`, contract
+revision 26) for the ruled scope (Randy's decision 264). Regenerated after DRAFT12 (contract revision 26, still final; the lead's rulings of 11:17Z: the quick start is the Debian or Ubuntu path the helper supports, with no other platform described; one wording for a server that refuses the key and token, which this page does not print; the page says why the pasted install refuses a folder that others can write to or a link). After DRAFT11 (contract revision 26 final; the lead's rulings of 11:08Z: the pasted install refuses a destination folder, or a folder above it, that is a link or that other users can write, and prints the refusal; `mash endpoint status` has no mailbox column; the answer `no` keeps the `error:` label; the refusals for a server that refuses and for one that does not answer are written). Earlier, after DRAFT10 (contract revisions
 18 to 26: revisions 22 to 26 appeared while the regeneration ran and were applied): every install takes `--account <key>` (the operator's account key, copied whole) and the first install confirms three values before it writes anything; the
 fingerprint is in groups of eight separated by spaces; the count of the mailbox row is unacknowledged mail and
 reading acknowledges. The lead's count of what is
@@ -17,7 +17,7 @@ counted is `readme-step-count.md` (scratchpad), regenerated with the pages by
 
 | | lines | prose and headings | inside fenced blocks and markers | widest printed block | widest typed block |
 |---|---|---|---|---|---|
-| quick start | 628 | 330 | 298 | 87 columns | 88 columns |
+| quick start | 631 | 333 | 298 | 87 columns | 88 columns |
 | Day 2 | 394 | 199 | 195 | 87 columns | 76 columns |
 
 The quick start is 26 pastes, 77 lines and 10 other actions for the whole
@@ -120,7 +120,9 @@ in plain sentences, or is off the page.
 - Contract rev 24 to 26, REQ-011 (i), now CONFORMED (DRAFT11): the pasted install (Prerequisite 2) refuses a
   destination folder, or any folder above it, that is a symbolic link or that another user can write, before it
   copies, and prints the two refusals. The paste grew from 14 lines to 31 (the check is 16); it uses `[ -L ]` and
-  `find -maxdepth 0 -perm`, which behave the same on macOS, but the page stays Linux only. A folder made
+  `find -maxdepth 0 -perm`, and the page is Linux only. DRAFT12 adds one sentence, where the refusal is shown, on why
+  it refuses (a folder others can write to, or a link, lets someone swap mash for their own program after the
+  check). A folder made
   `0775` (common on Linux accounts) is refused, and the fix is a `chmod go-w` on that folder. UNVERIFIED: that
   the real 0.5.6 release and a real run behave as the mockup; nothing was run against a release.
 - The status-views page (DRAFT4) and the targets now agree: `mash endpoint status` has no mailbox column (contract rev 26).
@@ -150,8 +152,7 @@ in plain sentences, or is off the page.
   line of `status-deleted` in Step 5.
 - The targets and the helper both use `tls://localhost:4222` on one machine now
   (DRAFT8): regenerated, the "screens show myserver" sentence is gone.
-- Sized choices: the Mac and Arm downloads are gone (the helper is Debian or Ubuntu
-  amd64 only); the download paste works in `~/mash-setup/dl` and ends in `$HOME` so Day 2
+- Sized choices: the page is the Debian or Ubuntu amd64 path (the helper runs only there); the download paste works in `~/mash-setup/dl` and ends in `$HOME` so Day 2
   can remove the downloads and the plugin folder by a known path; the helper's one long
   line is wrapped with variables; Step 5 removes the three dead credentials files and
   ends with the `status-none` screen (a failing screen by design, said so on the page).
@@ -193,7 +194,7 @@ Prerequisite 1
    a missing `gh attestation` looks like and installs nothing.
 
 Prerequisite 2
-8. Mac block first on a Linux page: FIXED. Mac and Arm removed.
+8. A second platform's block first on a Linux page: FIXED (DRAFT12 ruling: no second platform anywhere).
 9. A wall of `gh` text: CHANGED. The report is not printed (also 138 columns wide); the
    page says it ends with "Verification succeeded!" and that `sha256sum` prints `OK`.
 10. Where the files land: FIXED (`~/mash-setup/dl`, back to `$HOME`).
@@ -323,6 +324,6 @@ Within Day 2
 - The helper's long line is wrapped; the download paste changes directory and returns.
 - Step 5 gains two commands (remove the dead credentials files, show `status-none`);
   Step 3 gains one (`mash inbox` as the proof).
-- The quick start no longer has the Mac and Arm downloads.
+- The quick start has one platform, Linux amd64.
 - Day 2's delete section describes the proof instead of printing bob's screens.
 - Lines are counted physically.
