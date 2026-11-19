@@ -8,16 +8,18 @@
 # through wrap(), which breaks at spaces; only an unbreakable word (a very
 # long --dir path) can exceed 80.
 #
-# Everything goes under --dir (mode 0700): a private CA and server
+# Everything goes under --dir (mode 0700), which this script creates itself
+# with mkdir (never an existing directory): a private CA and server
 # certificate (ca.*, server.*), an isolated nsc store (nsc/, nothing in
 # ~/.nsc or ~/.local/share/nats), the server configuration (server.conf,
-# resolver/, jetstream/), and the files adopt takes (export/).
+# resolver/, jetstream/), and the files adopt takes (export/). Files are
+# created new (noclobber, umask 077), never over an existing path.
 #
 # Usage: nats-local-setup.sh --dir DIR [--port N] [--host NAME]...
-#        [--listen ADDR] [--account NAME] [--operator NAME]
+#        [--listen ADDR [--yes-expose]] [--account NAME] [--operator NAME]
 #        [--js-disk SIZE] [--start]
 #        | --dir DIR --check | --dir DIR --stop | --help
-set -eu
+set -euC
 umask 077
 
 usage() {
@@ -29,21 +31,28 @@ usage: nats-local-setup.sh --dir DIR [options]
        nats-local-setup.sh --dir DIR --stop
            stop the server recorded in DIR/server.pid
 
-  --dir DIR        required; must be absent or empty, at least 3 path
-                   components deep
+  --dir DIR        required; must NOT exist (not even empty): the script
+                   creates it with mode 0700. At least 3 path components
+                   deep; the parent must exist, be a real directory (no
+                   symlinks in the path), be owned by you or root, and not
+                   be group/world-writable unless sticky (like /tmp)
   --port N         client port (default 4222)
   --host NAME      repeatable; extra DNS name or IP (v4 or v6) for the
                    server certificate (localhost, 127.0.0.1 and ::1 are
                    always included); the first one is used in the URL
-  --listen ADDR    listen address (default 127.0.0.1)
+  --listen ADDR    listen address (default 127.0.0.1); anything but
+                   127.0.0.1, ::1 or localhost is refused without
+                   --yes-expose
+  --yes-expose     allow a non-loopback --listen; says what is exposed.
+                   The script never touches a firewall or any service
   --account NAME   account for mash (default MASH)
   --operator NAME  operator name (default mash-operator)
-  --js-disk SIZE   JetStream disk for the account (default 2G; 64 streams,
-                   128 consumers)
+  --js-disk SIZE   JetStream disk for the account, like 500M or 2G (default
+                   2G; 64 streams, 128 consumers)
   --start          start nats-server detached (pid DIR/server.pid, log
                    DIR/server.log)
-  --check          do not create anything: verify files, modes, config,
-                   and the TLS port if the server is running
+  --check          do not create anything: verify owner, type, modes,
+                   files, config, and the TLS port if the server is up
   --stop           stop the server in DIR/server.pid (only if it is
                    `nats-server -c DIR/server.conf`)
   --help           this text
@@ -68,6 +77,24 @@ wrap() {
             print (cur == "" ? "" : pre cur); pre = p2
         }'
 }
+# safe: stdin minus lines that look like secrets (nkey seeds, whole PEM
+# blocks, JWTs, "seed/creds/secret: value"), then a note of how many lines
+# were withheld.
+SECRE='S[OAUNCX][A-Z2-7]{40,}|-----BEGIN|-----END|eyJ[A-Za-z0-9_-]{10,}'
+SECRE="$SECRE|([Ss]eed|[Cc]reds|[Ss]ecret)[^ ]* *[:=] *[^ ]"
+safe() {
+    _in=$(cat)
+    [ -n "$_in" ] || return 0
+    _k=$(printf '%s\n' "$_in" | sed '/-----BEGIN/,/-----END/d' |
+        grep -Ev "$SECRE" || true)
+    _t=$(printf '%s\n' "$_in" | grep -c '')
+    _c=0
+    [ -z "$_k" ] || { _c=$(printf '%s\n' "$_k" | grep -c ''); }
+    [ -z "$_k" ] || printf '%s\n' "$_k"
+    [ "$_t" -eq "$_c" ] ||
+        printf '(%s line(s) withheld: they looked like secrets)\n' \
+            "$((_t - _c))"
+}
 # cut: show external text (logs) folded to 80 columns.
 fold80() { fold -w 80; }
 
@@ -87,6 +114,27 @@ START=0
 CHECK=0
 STOP=0
 HOSTS=''
+EXPOSE=0
+LOG=''
+
+# valid_host H: a DNS name ([A-Za-z0-9.-]) or an IPv4 or IPv6 literal.
+valid_host() {
+    case $1 in
+    '' | -* | .* | *.) return 1 ;;
+    *:*:*) case $1 in *[!0-9A-Fa-f:.]*) return 1 ;; esac; return 0 ;;
+    *:*) return 1 ;;
+    *[!A-Za-z0-9.-]*) return 1 ;;
+    *[!0-9.]*) return 0 ;; # a name
+    esac
+    IFS=. read -r _a _b _c _d _e <<EOF
+$1
+EOF
+    [ -z "$_e" ] && [ -n "$_d" ] || return 1
+    for _x in "$_a" "$_b" "$_c" "$_d"; do
+        case $_x in '' | ????* | *[!0-9]*) return 1 ;; esac
+        [ "$_x" -le 255 ] || return 1
+    done
+}
 
 need_val() { [ "$#" -ge 2 ] || die "$1 needs a value"; }
 while [ "$#" -gt 0 ]; do
@@ -95,12 +143,11 @@ while [ "$#" -gt 0 ]; do
     --port) need_val "$@"; PORT=$2; shift 2 ;;
     --host)
         need_val "$@"
-        case $2 in
-        '' | *[!A-Za-z0-9.:-]*)
-            die "--host $2: use a DNS name or an IP address" ;;
-        esac
+        valid_host "$2" ||
+            die "--host: use a DNS name or an IPv4/IPv6 address"
         HOSTS="$HOSTS $2"; shift 2 ;;
     --listen) need_val "$@"; LISTEN=$2; shift 2 ;;
+    --yes-expose) EXPOSE=1; shift ;;
     --account) need_val "$@"; ACCOUNT=$2; shift 2 ;;
     --operator) need_val "$@"; OPERATOR=$2; shift 2 ;;
     --js-disk) need_val "$@"; JSDISK=$2; shift 2 ;;
@@ -130,13 +177,36 @@ ncomp=$(printf '%s' "$DIR" | tr -s '/' '\n' | grep -c .) || true
     die "refusing --dir $DIR: needs at least 3 path components"
 case $PORT in '' | *[!0-9]*) die "--port must be a number" ;; esac
 [ "$PORT" -ge 1 ] && [ "$PORT" -le 65535 ] || die "--port out of range: $PORT"
-case $ACCOUNT$OPERATOR in
-*[!A-Za-z0-9_-]*)
-    die "--account and --operator: letters, digits, _ and - only" ;;
+case $ACCOUNT in '' | *[!A-Za-z0-9_-]*)
+    die "--account: letters, digits, _ and - only" ;;
 esac
+case $OPERATOR in '' | *[!A-Za-z0-9_-]*)
+    die "--operator: letters, digits, _ and - only" ;;
+esac
+_d=${JSDISK%[KMGT]}
+case $_d in '' | *[!0-9]*) die "--js-disk: like 500M or 2G" ;; esac
+case $LISTEN in '' | *[!A-Za-z0-9.:\[\]-]*)
+    die "--listen: an IP address or a host name" ;;
+esac
+case $DIR in *[[:cntrl:]]*) die "--dir must not contain control characters" ;;
+esac
+LOOPBACK=0
+case $LISTEN in 127.0.0.1 | ::1 | '[::1]' | localhost) LOOPBACK=1 ;; esac
+if [ "$LOOPBACK" -eq 0 ] && [ "$EXPOSE" -eq 0 ] && [ "$((CHECK + STOP))" -eq 0 ]
+then
+    die "--listen $LISTEN is not loopback: other machines could reach the" \
+        "server. Add --yes-expose if you mean that (this script never" \
+        "changes a firewall or a service)."
+fi
 [ "$((CHECK + STOP))" -le 1 ] || die "--check and --stop are alternatives"
 [ "$((CHECK + STOP + START))" -le 1 ] ||
     die "--start applies to create mode only"
+
+# uid_of / rawmode PATH: owner uid and octal mode (Linux, then BSD stat).
+uid_of() { stat -c %u "$1" 2>/dev/null || stat -f %u "$1"; }
+rawmode() { stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"; }
+# Q VALUE: shell-quoted for pasting.
+Q() { printf '%q' "$1"; }
 
 CONF=$DIR/server.conf
 PIDF=$DIR/server.pid
@@ -197,18 +267,27 @@ if [ "$CHECK" -eq 1 ]; then
     fails=0
     bad() { wrap '  FAIL  ' '        ' "$*"; fails=$((fails + 1)); }
     good() { wrap '  ok    ' '        ' "$*"; }
-    mode_is() { # FILE MODE
+    mode_is() { # PATH MODE d|f: exists, right type, not a link, mine, mode
         [ -e "$1" ] || { bad "missing $1"; return; }
-        m=$(stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1")
+        if [ -L "$1" ]; then bad "$1 is a symlink"; return; fi
+        if [ "$3" = d ] && [ ! -d "$1" ]; then bad "$1 is not a directory"
+            return; fi
+        if [ "$3" = f ] && [ ! -f "$1" ]; then bad "$1 is not a regular file"
+            return; fi
+        u=$(uid_of "$1")
+        [ "$u" = "$(id -u)" ] || { bad "$1 is owned by uid $u, not you"
+            return; }
+        m=$(rawmode "$1")
         [ "${#m}" -le 3 ] || m=${m#?}   # ignore setgid/sticky bits
-        if [ "$m" = "$2" ]; then good "$1 mode $m"
+        if [ "$m" = "$2" ]; then good "$1 is yours, mode $m"
         else bad "$1 mode $m, want $2"; fi
     }
     say "checking the setup in $DIR (creates nothing)"
-    mode_is "$DIR" 700
+    mode_is "$DIR" 700 d
+    mode_is "$DIR/export" 700 d
     for f in ca.key server.key export/operator.nk export/account.nk \
         export/sys.creds export/mashadmin.creds; do
-        mode_is "$DIR/$f" 600
+        mode_is "$DIR/$f" 600 f
     done
     for f in ca.pem server.pem server.conf operator.jwt; do
         if [ -f "$DIR/$f" ]; then good "$DIR/$f exists"
@@ -228,7 +307,10 @@ if [ "$CHECK" -eq 1 ]; then
         if out=$(nats-server -t -c "$CONF" 2>&1); then
             out=$(printf '%s\n' "$out" | sed 's/ *(sha256:[0-9a-f]*)//')
             good "nats-server -t -c: $out"
-        else bad "nats-server -t -c $CONF: $out"; fi
+        else
+            out=$(printf '%s\n' "$out" | safe)
+            bad "nats-server -t -c $CONF: $out"
+        fi
         lp=$(conf_listen)
         [ -n "$lp" ] || lp="127.0.0.1 4222"
         h=$(probe_host "${lp% *}")
@@ -252,21 +334,48 @@ step "preflight (tools, directory, port)"
 for t in nsc openssl nats-server; do
     command -v "$t" >/dev/null 2>&1 || die "$t is not on PATH"
 done
+if [ "$LOOPBACK" -eq 0 ]; then
+    say "EXPOSED (--yes-expose): the server will listen on $LISTEN:$PORT," \
+        "which other machines may reach. TLS is required and clients need" \
+        "credentials. This script changes no firewall and no service."
+fi
 did "$(nsc --version 2>&1 | tail -n 1); $(openssl version | cut -d" " -f1-2);" \
     "$(nats-server -v)"
-if [ -e "$DIR" ]; then
-    [ -d "$DIR" ] || die "$DIR exists and is not a directory"
-    [ -z "$(ls -A "$DIR")" ] ||
-        die "$DIR is not empty: use an absent or empty directory"
+if [ -e "$DIR" ] || [ -L "$DIR" ]; then
+    die "$DIR already exists: this script creates --dir itself and" \
+        "refuses any existing path (even an empty directory)"
+fi
+PARENT=${DIR%/*}
+[ -d "$PARENT" ] || die "parent $PARENT does not exist or is not a directory"
+[ ! -L "$PARENT" ] || die "parent $PARENT is a symlink: refusing"
+REAL=$(cd -P -- "$PARENT" 2>/dev/null && pwd -P) ||
+    die "cannot enter parent $PARENT"
+[ "$REAL" = "$PARENT" ] ||
+    die "parent $PARENT is not a plain path (resolves to $REAL; a symlink" \
+        "in the path): use the real path"
+ME=$(id -u)
+puid=$(uid_of "$PARENT")
+[ "$puid" = "$ME" ] || [ "$puid" = 0 ] ||
+    die "parent $PARENT is owned by uid $puid: need you ($ME) or root"
+pm=$(rawmode "$PARENT")
+if [ $((8#$pm & 8#022)) -ne 0 ] && [ $((8#$pm & 8#1000)) -eq 0 ]; then
+    die "parent $PARENT (mode $pm) is group/world-writable and not sticky:" \
+        "others could swap things in it. Use a private parent directory."
 fi
 ph=$(probe_host "$LISTEN")
 if port_open "$ph" "$PORT"; then
     die "port $ph:$PORT is already taken by something (nothing was killed" \
         "or changed): use --port"
 fi
-mkdir -p "$DIR"
-chmod 700 "$DIR"
-did "tools found; $DIR is usable (mode 0700); $ph:$PORT is free"
+mkdir -m 0700 "$DIR" || die "could not create $DIR (it must not exist)"
+[ -d "$DIR" ] && [ ! -L "$DIR" ] || die "$DIR is not a plain directory"
+[ "$(uid_of "$DIR")" = "$ME" ] || die "$DIR is not owned by you"
+[ "$(rawmode "$DIR")" = 700 ] || die "$DIR is not mode 700"
+LOG=$(mktemp "$DIR/.cmd.XXXXXX") || die "cannot make a temp file in $DIR"
+trap 'rm -f "$LOG"' EXIT
+trap 'exit 1' INT TERM HUP
+did "tools found; $DIR created by this script (mode 0700, yours);" \
+    "$ph:$PORT is free"
 
 step "make a private CA and a server certificate (ECDSA P-256, 10 years)"
 SANS='DNS:localhost,IP:127.0.0.1,IP:::1'
@@ -284,7 +393,8 @@ openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
     -days 3650 -keyout "$DIR/ca.key" -out "$DIR/ca.pem" \
     -subj '/CN=mash local CA' \
     -addext 'basicConstraints=critical,CA:TRUE' \
-    -addext 'keyUsage=critical,keyCertSign,cRLSign' 2>/dev/null
+    -addext 'keyUsage=critical,keyCertSign,cRLSign' 2>/dev/null ||
+    die "openssl could not make the CA"
 openssl req -new -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
     -keyout "$DIR/server.key" -subj '/CN=mash local server' 2>/dev/null |
     openssl x509 -req -in /dev/stdin -CA "$DIR/ca.pem" -CAkey "$DIR/ca.key" \
@@ -292,9 +402,8 @@ openssl req -new -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
         -extfile <(printf '%s\n' 'basicConstraints=CA:FALSE' \
             'keyUsage=critical,digitalSignature' \
             'extendedKeyUsage=serverAuth' "subjectAltName=$SANS") \
-        -out "$DIR/server.pem" 2>/dev/null
-chmod 600 "$DIR/ca.key" "$DIR/server.key"
-chmod 644 "$DIR/ca.pem" "$DIR/server.pem"
+        -out "$DIR/server.pem" 2>/dev/null ||
+    die "openssl could not make the server certificate"
 openssl verify -CAfile "$DIR/ca.pem" -purpose sslserver "$DIR/server.pem" \
     >/dev/null
 did "ca.pem, ca.key, server.pem, server.key written; SANs: $SANS"
@@ -302,17 +411,24 @@ did "ca.pem, ca.key, server.pem, server.key written; SANs: $SANS"
 step "make the operator, accounts and users with nsc, in an isolated store" \
     "under $DIR/nsc"
 NSCD=$DIR/nsc
-mkdir -p "$NSCD/data" "$NSCD/config" "$NSCD/keys" "$NSCD/home"
+mkdir -m 0700 "$NSCD" "$NSCD/data" "$NSCD/config" "$NSCD/keys" "$NSCD/home"
 export XDG_DATA_HOME=$NSCD/data XDG_CONFIG_HOME=$NSCD/config
 export NKEYS_PATH=$NSCD/keys NSC_HOME=$NSCD/home NATS_CONFIG_HOME=$NSCD/config
-NSCLOG=$NSCD/nsc.log
-q() { # run nsc quietly; show the tail of its log if it fails
-    if ! nsc "$@" >>"$NSCLOG" 2>&1; then
-        tail -n 15 "$NSCLOG" | fold80 >&2
-        die "nsc $* failed (log: $NSCLOG)"
-    fi
+# Tool output goes to the temp file $LOG (mode 0600, removed on every exit),
+# never to a persistent log. On failure only a redacted tail is shown.
+capfail() { # WHAT
+    tail -n 15 "$LOG" | safe | fold80 >&2
+    die "$1 failed (its output is not kept: it may hold secrets)"
 }
-f() { nsc "$@" 2>>"$NSCLOG" | tr -d '"' ; } # a --field value without quotes
+q() { # run nsc quietly
+    : >|"$LOG"
+    nsc "$@" >>"$LOG" 2>&1 || capfail "nsc $1 $2"
+}
+f() { # a --field value without quotes
+    : >|"$LOG"
+    _v=$(nsc "$@" 2>>"$LOG") || capfail "nsc $1 $2"
+    printf '%s\n' "$_v" | tr -d '"'
+}
 q add operator "$OPERATOR" --sys
 q add account "$ACCOUNT"
 q edit account "$ACCOUNT" --js-disk-storage "$JSDISK" --js-streams 64 \
@@ -332,11 +448,15 @@ did "JetStream on $ACCOUNT: disk $JSDISK, 64 streams, 128 consumers (memory" \
 did "users: mashadmin in $ACCOUNT, sys in SYS; all keys are in $NKEYS_PATH"
 
 step "write the server configuration and test it"
-mkdir -p "$DIR/resolver" "$DIR/jetstream"
-nsc describe operator --raw >"$DIR/operator.jwt" 2>>"$NSCLOG"
+mkdir -m 0700 "$DIR/resolver" "$DIR/jetstream"
 OPJWT=$DIR/operator.jwt
-ACCJWT=$(nsc describe account "$ACCOUNT" --raw 2>>"$NSCLOG")
-SYSJWT=$(nsc describe account SYS --raw 2>>"$NSCLOG")
+: >|"$LOG"
+nsc describe operator --raw >"$OPJWT" 2>>"$LOG" ||
+    capfail "nsc describe operator"
+ACCJWT=$(nsc describe account "$ACCOUNT" --raw 2>>"$LOG") ||
+    capfail "nsc describe account"
+SYSJWT=$(nsc describe account SYS --raw 2>>"$LOG") ||
+    capfail "nsc describe account"
 CONFLISTEN=$LISTEN
 case $LISTEN in \[*) ;; *:*) CONFLISTEN="[$LISTEN]" ;; esac
 cat >"$CONF" <<EOF
@@ -365,17 +485,14 @@ resolver_preload: {
   $ACCPUB: "$ACCJWT"
 }
 EOF
-chmod 600 "$CONF"
-if ! nats-server -t -c "$CONF" >>"$NSCLOG" 2>&1; then
-    tail -n 10 "$NSCLOG" | fold80 >&2
-    die "nats-server -t -c failed"
-fi
+: >|"$LOG"
+nats-server -t -c "$CONF" >>"$LOG" 2>&1 || capfail "nats-server -t -c"
 did "$CONF written (self-contained; operator JWT in $OPJWT) and" \
     "'nats-server -t -c' passes"
 
 step "export the files mashctl adopt takes into $DIR/export (mode 0600)"
 EXP=$DIR/export
-mkdir -p "$EXP"
+mkdir -m 0700 "$EXP"
 seed_of() { # PUBLIC-KEY: print the seed file of a key nsc made
     p=$(find "$NKEYS_PATH/keys" -name "$1.nk" | head -n 1)
     [ -n "$p" ] || die "no seed for $1 under $NKEYS_PATH"
@@ -383,11 +500,11 @@ seed_of() { # PUBLIC-KEY: print the seed file of a key nsc made
 }
 cat "$(seed_of "$OPPUB")" >"$EXP/operator.nk"
 cat "$(seed_of "$ACCPUB")" >"$EXP/account.nk"
-nsc generate creds -a SYS -n sys >"$EXP/sys.creds" 2>>"$NSCLOG"
+: >|"$LOG"
+nsc generate creds -a SYS -n sys >"$EXP/sys.creds" 2>>"$LOG" ||
+    capfail "nsc generate creds"
 nsc generate creds -a "$ACCOUNT" -n mashadmin >"$EXP/mashadmin.creds" \
-    2>>"$NSCLOG"
-chmod 600 "$EXP"/operator.nk "$EXP"/account.nk "$EXP"/sys.creds \
-    "$EXP"/mashadmin.creds
+    2>>"$LOG" || capfail "nsc generate creds"
 case $(cut -c1-2 "$EXP/operator.nk") in
 SO) ;; *) die "operator.nk is not an SO seed" ;;
 esac
@@ -405,7 +522,7 @@ if [ "$START" -eq 1 ]; then
     until port_open "$ph" "$PORT"; do
         i=$((i + 1))
         alive "$(cat "$PIDF")" || {
-            tail -n 10 "$DIR/server.log" | fold80 >&2
+            tail -n 10 "$DIR/server.log" | safe | fold80 >&2
             die "server exited"
         }
         [ "$i" -lt 75 ] ||
@@ -420,11 +537,23 @@ URLHOST=$FIRSTHOST
 case $URLHOST in *:*) URLHOST="[$URLHOST]" ;; esac
 SELF=$(basename "$0")
 file() { printf '  %-24s %s\n' "$1" "$2"; }
+# Everything printed below inside a command is shell-quoted with %q.
+QDIR=$(Q "$DIR")
 
 printf '\n'
-wrap '' '' "Done. The setup is in $DIR. Nothing above printed a seed or" \
+wrap '' '' "Done. The setup is in $QDIR. Nothing above printed a seed or" \
     "a credential, and nothing below does."
-printf '\nFiles left for you (all under %s):\n' "$DIR"
+if [ "$LOOPBACK" -eq 1 ]; then
+    printf '\n'
+    wrap '' '' "Other users on this machine can still reach $LISTEN:$PORT;" \
+        "they cannot connect without credentials."
+else
+    printf '\n'
+    wrap '' '' "Exposed: $LISTEN:$PORT is reachable from other machines" \
+        "(TLS required, credentials needed). No firewall or service was" \
+        "touched."
+fi
+printf '\nFiles left for you (all under %s):\n' "$QDIR"
 file ca.pem 'CA certificate: give this to clients'
 file server.conf 'nats-server configuration (no seeds)'
 file export/mashadmin.creds 'admin credentials (secret)'
@@ -438,25 +567,21 @@ fi
 
 printf '\nNext:\n'
 if [ "$START" -ne 1 ]; then
-    printf '  # start the server\n  nats-server \\\n      -c %s\n\n' "$CONF"
+    printf '  # start the server\n  nats-server \\\n      -c %s\n\n' \
+        "$(Q "$CONF")"
 fi
-cat <<EOF
-  # adopt it into mash (replace <owner> with your owner name)
-  cd $EXP
-  export MASH_TLS_CA=$DIR/ca.pem
-  mashctl adopt \\
-      --server tls://$URLHOST:$PORT \\
-      --owner <owner> \\
-      --account $ACCOUNT \\
-      --operator-key operator.nk \\
-      --account-key account.nk \\
-      --sys-creds sys.creds \\
-      --admin-creds mashadmin.creds
-  mashctl init
-
-Later:
-  $SELF --check \\
-      --dir $DIR
-  $SELF --stop \\
-      --dir $DIR
-EOF
+printf '  # adopt it into mash (replace <owner> with your owner name)\n'
+printf '  cd %s\n' "$(Q "$EXP")"
+printf '  export MASH_TLS_CA=%s\n' "$(Q "$DIR/ca.pem")"
+printf '  mashctl adopt \\\n'
+printf '      --server %s \\\n' "$(Q "tls://$URLHOST:$PORT")"
+printf '      --owner <owner> \\\n'
+printf '      --account %s \\\n' "$(Q "$ACCOUNT")"
+printf '      --operator-key operator.nk \\\n'
+printf '      --account-key account.nk \\\n'
+printf '      --sys-creds sys.creds \\\n'
+printf '      --admin-creds mashadmin.creds\n'
+printf '  mashctl init\n'
+printf '\nLater:\n'
+printf '  %s --check \\\n      --dir %s\n' "$(Q "$SELF")" "$QDIR"
+printf '  %s --stop \\\n      --dir %s\n' "$(Q "$SELF")" "$QDIR"
