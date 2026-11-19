@@ -106,27 +106,43 @@ you@myserver$ mkdir ~/mash-demo && cd ~/mash-demo
 
 ### Step 0-B: Install mash and mashctl from the release (command 2 of 4)
 
-Download both programs and the release's checksum file. Check that the downloads are exactly what the release
-published, then put them on your `PATH`. On macOS, use `darwin` for `linux` and `shasum -a 256 -c` for `sha256sum
--c`.
+Download both programs, the NATS helper and the release's checksum file. Each file must have its own line in the
+checksum file and match it; if any file fails, stop. Then put the programs in a directory on your `PATH`.
+
+Two settings come first:
+- `P` is your platform: `linux` or `darwin`, then `amd64` or `arm64`.
+- `BIN` is where the programs go. It is created if it is missing.
+
+On macOS, use `shasum -a 256 -c` in place of `sha256sum -c`.
 
 ```
+you@myserver$ P=linux-amd64 BIN=~/.local/bin                      ctl
 you@myserver$ BASE=https://github.com/bogworks/mash/releases/download/v0.5.6
-you@myserver$ curl -fsSLO $BASE/mash-linux-amd64 \               ctl
-                -O $BASE/mashctl-linux-amd64 -O $BASE/SHA256SUMS \
-                -O $BASE/nats-local-setup.sh
-you@myserver$ sha256sum -c --ignore-missing SHA256SUMS
+you@myserver$ curl -fsSL -O $BASE/mash-$P -O $BASE/mashctl-$P \
+                -O $BASE/nats-local-setup.sh -O $BASE/SHA256SUMS
+you@myserver$ grep -E " (mash-$P|mashctl-$P|nats-local-setup\.sh)\$" \
+                SHA256SUMS > mine.sums && [ $(wc -l < mine.sums) -eq 3 ] &&
+              sha256sum -c mine.sums &&
+              mkdir -p $BIN && install -m 755 mash-$P $BIN/mash &&
+              install -m 755 mashctl-$P $BIN/mashctl &&
+              chmod +x nats-local-setup.sh ||
+              echo "STOP: a file is missing from SHA256SUMS or does not match"
 mash-linux-amd64: OK
 mashctl-linux-amd64: OK
 nats-local-setup.sh: OK
-you@myserver$ chmod +x nats-local-setup.sh
-you@myserver$ install -m 755 mash-linux-amd64 ~/.local/bin/mash
-you@myserver$ install -m 755 mashctl-linux-amd64 ~/.local/bin/mashctl
+you@myserver$ case ":$PATH:" in *":$BIN:"*) ;;
+                *) echo "add $BIN to your PATH" ;; esac
 ```
 
-`Guide:` `ctl` marks the one assumption here: that 0.5.6 ships `mashctl` and the NATS helper in the release. v0.5.5
-shipped `mash` only. Next we
-check what got installed.
+The install runs only after each of the three files has passed:
+- each file needs its own line in `SHA256SUMS`, and there must be exactly three;
+- each file must match its line.
+
+If any check fails, nothing is installed and the last line says to stop. This chain was
+tested in a scratch directory: a missing line and a changed file each stopped it.
+
+`Guide:` `ctl` marks the one assumption here: that 0.5.6 ships `mashctl` and the NATS helper in the release, listed in
+`SHA256SUMS`. v0.5.5 shipped `mash` only. Next we check what got installed.
 
 ### Step 0-C: Check the versions (command 3 of 4)
 
