@@ -1732,8 +1732,8 @@ wrap '  Server directory   ' '                     ' "$DIR"
 wrap '                     ' '                     ' "(mode 0700; holds the" \
     "CA key and the nsc keys until you run --retire-keys)"
 printf '\n'
-wrap '' '' "The person who runs adopt types the CA fingerprint at adopt's" \
-    "prompt; compare it with the CA fingerprint line above."
+wrap '' '' "The CA fingerprint is what a person on ANOTHER machine types to" \
+    "trust this server; this machine does not ask for it."
 
 printf '\nNext\n'
 if [ "$START" -ne 1 ]; then
@@ -1743,9 +1743,9 @@ if [ "$START" -ne 1 ]; then
 fi
 CFGENV=()
 [ "$MASHCFG_GIVEN" -eq 0 ] || CFGENV=("MASH_CONFIG_DIR=$(Q "$MASHCFG")")
-wrap '  ' '  ' "Adopt the server into mash (a person runs this, in their" \
-    "own terminal: it asks them to type the CA fingerprint above, then sets" \
-    "up mash's storage too, so there is no separate init):"
+wrap '  ' '  ' "Adopt the server into mash, as the same user that ran this" \
+    "script (it does not ask for the fingerprint, and it sets up mash's" \
+    "storage too, so there is no separate init):"
 printf '\n'
 if [ "${#CFGENV[@]}" -gt 0 ]; then
     printf '    %s mashctl adopt --from %s\n' "${CFGENV[0]}" "$(Q "$DIR")"
@@ -1762,7 +1762,8 @@ wrap '  ' '  ' "Hand-managed server instead? see the long form in the guide" \
     "(mashctl adopt --server ... --ca ...)."
 printf '\n'
 wrap '  ' '  ' "Or, after adopt succeeds, to retire the setup's keys:" \
-    "--retire-keys (item 2 below)."
+    "--retire-keys (item 2 below). --retire-keys archives the keys first;" \
+    "nothing here asks you to delete the server directory by hand."
 printf '\n'
 wrap '  ' '  ' "Another machine that wants to use this server needs the CA" \
     "file and an address for the server that machine can reach (the one in" \

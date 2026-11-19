@@ -500,6 +500,18 @@ t "closing output: retire-keys pointer and other-machine sentence" \
     'grep -q "Or, after adopt succeeds, to retire the setup.s keys: --retire-keys (item 2" \
         $W/happy.out && tr -s " \n" " " <$W/happy.out |
         grep -q "a credential carries no address"'
+t "closing output: new fingerprint and adopt-user wording, no typing prompt" \
+    'has_n() { tr -s " \n" " " <$W/happy.out | grep -qF -- "$1"; }
+     has_n "The CA fingerprint is what a person on ANOTHER machine types to" &&
+     has_n "trust this server; this machine does not ask for it." &&
+     has_n "Adopt the server into mash, as the same user that ran this" &&
+     has_n "script (it does not ask for the fingerprint, and it sets up" &&
+     has_n "so there is no separate init):" &&
+     has_n "--retire-keys archives the keys first; nothing here asks you to" &&
+     has_n "delete the server directory by hand." &&
+     ! has_n "types the CA fingerprint" && ! has_n "type the CA fingerprint" &&
+     ! has_n "compare it with the CA fingerprint" &&
+     ! has_n "in their own terminal"'
 t "adopt and init commands found in the output" \
     '[ -s $W/adopt.cmd ] && [ "$(grep -c . $W/init.cmd)" = 1 ]'
 run env -i HOME=/home/alice PATH="$BINP:/usr/bin:/bin" \
