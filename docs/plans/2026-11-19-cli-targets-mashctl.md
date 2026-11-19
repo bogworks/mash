@@ -1,9 +1,28 @@
-# mashctl target outputs (0.5.6) - DRAFT17
+# mashctl target outputs (0.5.6) - DRAFT18
 
 Status: design mockups, not code. Nothing here was run. Written to the maintainer's
 feedback on the v0.5.5 video and the CLI standard's rules (version 1.2.5);
 BEFORE blocks are excerpts of
 docs/plans/2026-11-19-cli-output-catalog-mashctl.md (v0.5.5 tag).
+DRAFT18 applies four text fixes decided by the maintainer during the 0.5.6
+freeze (no new command, file format or protocol; see "Changes in DRAFT18"; the
+items are in `mashctl-dispositions.md`, section 7):
+
+D1. `mashctl endpoint delete` never renames or removes the credentials file on
+    this machine. When the file is here the output says `Its credentials file
+    here was left as it was; mash status will report it as DELETED.`; when it
+    is elsewhere there is nothing to say about it. `--delete-creds` stays,
+    with its typed confirmation. [confirm with core: the status wording and
+    exit code, DELETED and exit 4.]
+D2. No `NEXT:` after any removal (delete in every form, `deprovision`,
+    `--delete-creds`). The proof may stay as a plain sentence that names what
+    `mash status` prints. [confirm with core.]
+D3. Exit 4 stays for "no terminal" and also covers "the server refuses the
+    credentials"; the error line says which.
+D4. `adopt`'s closing text no longer mentions `mash trust replace`. The `kept
+    trust.json` lines are marked `[HELD until the scope ruling: trust
+    record]` above their blocks and kept.
+
 DRAFT17 applies twelve decisions of the maintainer on contract revision 11
 and answers the check of reviewer packet DRAFT5 (decided; see "Changes in
 DRAFT17"; the items of that check are in `mashctl-dispositions.md`, section 6):
@@ -93,10 +112,10 @@ packet DRAFT3 (decided; see "Changes in DRAFT14"; the dispositions of that
 check are at the end of this file, and in the standalone file
 `mashctl-dispositions.md`):
 
-Z1. A delete's `NEXT:` is never `mashctl endpoint list`. It is the one proof
-    command (`MASH_ENDPOINT=acme.demo.bob mash status`, with the refusal it
-    prints) when the endpoint's credentials are on another machine and the key
-    was revoked, and no `NEXT:` otherwise.
+Z1. A delete's `NEXT:` is never `mashctl endpoint list`. It was the one proof
+    command when the endpoint's credentials are on another machine and the key
+    was revoked. (Superseded in DRAFT18, D2: no `NEXT:` after any removal; the
+    proof is a plain sentence.)
 Z2. `adopt --from <dir>` reads the account from `mash-setup.json`; in the
     long-flag form `--account <name>` is required (no default) and the
     failure says where the name is. No "ask your operator" where there is no
@@ -135,7 +154,7 @@ Y3. One CA name in both tools: `--ca <file>`, the environment variable
     `MASH_CA`, the config key `ca` [confirm].
 Y4. `mashctl endpoint delete` retires the endpoint's credentials on this
     machine itself, or prints the one line that removes them on the other
-    machine.
+    machine. (Withdrawn in DRAFT18, D1: delete does not touch the file.)
 
 DRAFT12 applied six rulings of the maintainer on contract revision 5 (decided;
 see "Changes in DRAFT12"):
@@ -200,7 +219,7 @@ to confirm".
 
 ---
 
-# Part 1: the first-run journey (target output for mashctl 0.5.6), DRAFT17
+# Part 1: the first-run journey (target output for mashctl 0.5.6), DRAFT18
 
 Design document. Nothing here was run. BEFORE blocks are excerpts of
 `docs/plans/2026-11-19-cli-output-catalog-mashctl.md` (v0.5.5), trimmed to the
@@ -230,7 +249,7 @@ repeat them.
   | 1 | failure | a refusal; a health command that reports `PROBLEM`; a plain URL refused for TLS |
   | 2 | wrong usage | unknown command or flag, missing or bad argument, a removed command |
   | 3 | cancelled | the person typed a wrong confirmation (the command stops, nothing changes) |
-  | 4 | not authorized | no person at a terminal for a confirmation; no administrator credentials; credentials the server refuses (`NOT READY`) |
+  | 4 | not authorized | no person at a terminal for a confirmation (`error: a person must run this at a terminal.`); no administrator credentials; credentials the server refuses (`error: the server refuses these credentials.`, `NOT READY`) |
   | 5 | partial | part of a bulk command was done |
   | 6 | server unreachable | the server could not be reached or did not answer (`NOT REACHABLE`, `INCOMPLETE`, "only 1 of 2 servers answered"); the same in mash and mashctl |
 
@@ -269,8 +288,8 @@ repeat them.
   file already in place with the same contents, always as `kept  <file>
   (unchanged)`. That is the command's result, and it lets a person trust a
   rerun: nothing is left unsaid and nothing was touched. No other command
-  names the config folder or the server in a success output (a `renamed` line
-  of `endpoint delete` names only the file's own name). A command that writes
+  names the config folder or the server in a success output. A command that
+  writes
   one file says so in one line. A file line shows the path only when the
   person will need it: the credentials, the token, the CA file, `config.json`,
   the trust record.
@@ -1544,7 +1563,7 @@ NEXT: on this machine, create an endpoint:
   names the check that failed, in plain words, says `Nothing was changed.`,
   and the swap says that no half-made copy was left. A changed rerun is
   refused because the folder's CA or account differ from mashctl's own
-  settings (no `mash trust replace` here: it is dropped from 0.5.6).
+  settings.
 - DRAFT15 (A1; contract revision 6, REQ-011 ii): `adopt --from`
   says in its output that its trust comes from a folder the same person owns
   and that it does not authenticate the server, and it shows the folder
@@ -2284,6 +2303,8 @@ for no address and no fingerprint, says what it checked, writes the
 credentials, and reports the three files already in place as `kept
 (unchanged)` (DRAFT15, A2; DRAFT14, Z4; DRAFT13, Y2):
 
+[HELD until the scope ruling: trust record]
+
 ```text
 $ mash credential install --key bob.key --token acme.demo.bob.token
 
@@ -2368,6 +2389,8 @@ $ mash trust reset
 Run again over the same key and token, the install changes nothing and says so
 for each file, so a person can trust a rerun:
 
+[HELD until the scope ruling: trust record]
+
 ```text
 $ mash credential install --key bob.key --token acme.demo.bob.token
 
@@ -2413,6 +2436,8 @@ no `--force`. This is install's own behaviour for the same account and the
 same server: the credentials are replaced and the trust record is not touched
 [confirm with core]:
 
+[HELD until the scope ruling: trust record]
+
 ```text
 $ mash credential install --key bob2.key --token acme.demo.bob.2.token
 
@@ -2455,7 +2480,7 @@ With no terminal, or with a wrong answer:
 ```text
 $ mash credential install --key bob2.key --token acme.demo.bob.2.token
 [exit 4]
-error: replacing the installed credentials needs a person at a terminal.
+error: a person must run this at a terminal.
 fix: run the same command in a terminal and type the address when asked:
   mash credential install --key bob2.key --token acme.demo.bob.2.token
 
@@ -2578,6 +2603,8 @@ When credentials for another endpoint are already installed on this machine,
 `--make-key` names the new endpoint (DRAFT17, C11). The second block here is
 alice's, made after another endpoint's credentials were installed here:
 
+[HELD until the scope ruling: trust record]
+
 ```text
 $ mashctl endpoint create acme.demo.alice --make-key
 
@@ -2601,6 +2628,8 @@ Run again after an earlier run was cut off once the credentials were written
 (the credentials file already holds alice's key, and it matches the token the
 server signed), the command finishes, changes nothing, and says so for the file
 it is responsible for [confirm with core]:
+
+[HELD until the scope ruling: trust record]
 
 ```text
 $ mashctl endpoint create acme.demo.alice --make-key
@@ -3289,7 +3318,9 @@ exits 1 with `mash: no endpoint named "..."`.
     without a terminal it fails with exit 2 naming that flag. INV-004 departs
     from rule 15 on the flag (there is none), and this document departs on the
     code: a command with no terminal exits 4 (not authorized, rule 14), because
-    no flag can fix it; a wrong answer exits 3 (cancelled, rule 14). The
+    no flag can fix it (its error says `a person must run this at a terminal.`;
+    the same code covers credentials the server refuses, and that error says
+    `the server refuses these credentials.`: DRAFT18, D3); a wrong answer exits 3 (cancelled, rule 14). The
     contract text cites "the CLI standard's confirmation rule" with no number;
     it is rule 15 of standard 1.2.5, which was read for this draft (rules 14,
     15, 26 and 28 are quoted from it). The contract's list of exit codes omits
@@ -3344,11 +3375,9 @@ exits 1 with `mash: no endpoint named "..."`.
     changed: `mashctl status` NOT REACHABLE 1 to 6; `adopt` wrong fingerprint
     1 to 3 and no terminal 1 to 4; `endpoint suspended` is gone (it exited 3
     for "not suspended", the standard's "cancelled").
-44. A delete ends with the command that lists what remains and one sentence
-    that a new endpoint needs a new name (DRAFT10, V5; DRAFT13, Y4; DRAFT14,
-    Z1: superseded: no `NEXT:` lists endpoints; when the credentials are
-    elsewhere the `NEXT:` is the one proof command, otherwise none; Choice
-    60). The earlier rule that
+44. A delete ends with one sentence that a new endpoint needs a new name
+    (DRAFT10, V5; DRAFT13, Y4; DRAFT14, Z1; DRAFT18, D2: superseded: no
+    `NEXT:` after any removal; Choice 60). The earlier rule that
     every delete ends `NEXT: create an endpoint with a new name` is dropped:
     it offered a step that was not the next one for a person who deleted by
     mistake, and nothing can restore the address.
@@ -3456,17 +3485,22 @@ exits 1 with `mash: no endpoint named "..."`.
     A lint fails them in an AFTER block. [confirm: the contract revision 5
     does not name the config key; `ca` is proposed, and core states what it
     uses.]
-60. `mashctl endpoint delete` retires the endpoint's credentials (DRAFT13, Y4;
-    REQ-011 v). When the file is on this machine it renames it (`.retired-` and
-    the time added to its name; `--delete-creds` removes it instead) and says
-    which in one line. When it is elsewhere it says so (DRAFT14, Z1) and its
-    `NEXT:` is the one proof command, `MASH_ENDPOINT=acme.demo.bob mash
-    status`, alone on its line, with the person's own address, run on the
-    other machine; the removal command is gone and no `NEXT:` lists
-    endpoints. The sentence names the machine: `on bob's machine`, not
+60. `mashctl endpoint delete` does not touch the credentials file (DRAFT18,
+    D1). DRAFT13 (Y4, REQ-011 v) had it rename the file here (`.retired-` and
+    the time added to its name); dropped: a renamed file makes mash status say
+    MISSING, so the proof would not hold; agreed with core's README
+    cross-check. When the file is here the result says `Its credentials file
+    here was left as it was; mash status will report it as DELETED.`; when it
+    is elsewhere there is nothing to say about it. `--delete-creds` stays: it
+    asks the person to type the address and says `It will remove
+    acme.demo.alice's credentials file here.` No delete prints a `NEXT:`
+    (DRAFT18, D2). The proof is one plain sentence, `On bob's machine, mash
+    status now says DELETED.`, and the machine is `bob's machine`, not
     `bobs-laptop`, because a tool does not know the name of another machine
     (Choice 4) [confirm: the ruling's example said `on bobs-laptop`; that works
-    only when the endpoint's host is recorded with `endpoint set --host`].
+    only when the endpoint's host is recorded with `endpoint set --host`]
+    [confirm with core: the status wording and exit code, DELETED and exit 4].
+    (A1, A3, H4).
 61. The trust record (DRAFT15, A2; DRAFT16, B2, B3; contract revision 9,
     REQ-013). A token names no server, so `mash credential install` cannot
     know that settings already on the machine belong to the server that signed
@@ -3808,7 +3842,7 @@ place, not a word).
 
 ---
 
-# mashctl 0.5.6 target output, part 2: every command except the first-run journey, DRAFT17
+# mashctl 0.5.6 target output, part 2: every command except the first-run journey, DRAFT18
 
 Status: design proposal, no code. Written against the catalog
 `docs/plans/2026-11-19-cli-output-catalog-mashctl.md` (v0.5.5) and the rules in
@@ -4547,7 +4581,7 @@ fix: run the command again and type the number of endpoints it lists:
 
 $ mashctl endpoint reissue --all
 [exit 4]
-error: a bulk reissue needs a person at a terminal.
+error: a person must run this at a terminal.
 fix: run the same command in a terminal and type the count when asked:
   mashctl endpoint reissue --all
 
@@ -4661,8 +4695,7 @@ Would delete acme.demo.alice. It would lose:
   - its address: it would be retired for good and could not be used again
   - its key: the server would refuse alice's credentials from now, on every
     machine
-Would rename its credentials file here, acme.demo.alice.creds, to
-acme.demo.alice.creds.retired-<time>
+Its credentials file here would be left as it is.
 Nothing was changed.
 ```
 
@@ -4682,46 +4715,43 @@ Type the address to delete it: acme.demo.bob
 Deleted acme.demo.bob. Its address cannot be used again.
   Checked: the server now refuses bob's old credentials.
   Its inbox is deleted, with 3 unread messages.
-  Its credentials are not on this machine. On bob's machine they no longer
-  work, and the file there can be deleted.
+
+On bob's machine, mash status now says DELETED.
 
 Nothing can restore a deleted address. A new endpoint needs a new name.
-
-NEXT: to see the server refuse bob's credentials, run this on bob's machine:
-  MASH_ENDPOINT=acme.demo.bob mash status
 ```
 
-What that command prints on bob's machine (the other author's `mash` targets
-decide the exact lines):
+What `mash status` prints on bob's machine (the other author's `mash` targets
+decide the exact lines [mash output: see the mash targets file; wording and exit 4 given by core]):
 
 ```text
 $ MASH_ENDPOINT=acme.demo.bob mash status
 [exit 4]
-NOT READY: the server refuses bob's credentials.
+acme.demo.bob: mail does NOT work: this endpoint was DELETED on the server.
+  version       <version>
+  server        tls://myserver:4222
+                alive, encrypted (checked 09:42)
+  config        ok
+  credentials   REFUSED (endpoint DELETED)
 
-version:      <version>
-server:       tls://myserver:4222 (reachable; REFUSED the credentials)
-config:       ~/.config/mash/config.json
-credentials:  ~/.config/mash/acme.demo.bob.creds (REFUSED by the server)
-
-error: the credentials for acme.demo.bob are no longer accepted.
-fix: ask whoever runs mashctl whether bob was deleted or given a new key.
+fix: its address cannot be used again. For a new endpoint, make a new key,
+     then give its .pub file to whoever runs your mash server:
+  mash key create --out <new-name>.key
 ```
 
-AFTER, a credentials file is here (alice): the command retires it itself
+AFTER, a credentials file is here (alice): the command leaves it as it was
 
 ```text
 $ mashctl endpoint delete acme.demo.alice
-(the text of what will be lost, with one more line, and the prompt)
-  - its credentials file here: renamed, or removed with --delete-creds (which
-    still asks)
+(the text of what will be lost, and the prompt, as above)
 
 Type the address to delete it: acme.demo.alice
 
 Deleted acme.demo.alice. Its address cannot be used again.
   Checked: the server now refuses alice's old credentials.
   Its inbox is deleted, with 2 unread messages.
-  Its credentials file here was renamed (.retired-20261119-0024 added).
+  Its credentials file here was left as it was; mash status will report it
+  as DELETED.
 
 Nothing can restore a deleted address. A new endpoint needs a new name.
 ```
@@ -4735,8 +4765,6 @@ $ mashctl endpoint delete acme.demo.bob --detail
 Deleted acme.demo.bob. Its address cannot be used again.
   Checked: the server now refuses bob's old credentials.
   Its inbox is deleted, with 3 unread messages.
-  Its credentials are not on this machine. On bob's machine they no longer
-  work, and the file there can be deleted.
 
 Detail
   storage name    acme_demo_bob
@@ -4745,10 +4773,9 @@ Detail
   servers         1 of 1 answered
   mail lost       3 unread messages
 
-Nothing can restore a deleted address. A new endpoint needs a new name.
+On bob's machine, mash status now says DELETED.
 
-NEXT: to see the server refuse bob's credentials, run this on bob's machine:
-  MASH_ENDPOINT=acme.demo.bob mash status
+Nothing can restore a deleted address. A new endpoint needs a new name.
 ```
 
 AFTER, a wrong answer, and no terminal
@@ -4764,7 +4791,7 @@ fix: run the command again and type the address you want to delete:
 
 $ mashctl endpoint delete acme.demo.bob
 [exit 4]
-error: deleting an endpoint needs a person at a terminal.
+error: a person must run this at a terminal.
 fix: run the same command in a terminal and type the address when asked:
   mashctl endpoint delete acme.demo.bob
 
@@ -4785,44 +4812,34 @@ What changed and why:
   the address retired for good, the key refused from now) and the person types
   the address. The count that was behind `--detail` is in the default. There is
   no flag that skips it. A wrong answer exits 3; no terminal exits 4 and offers
-  `--dry-run`. The hint to use `--delete-creds` was after the file was
-  renamed, too late to use; it is in the prompt text now, where it can be
-  used. `--dry-run` prints the same "would lose" text and asks nothing.
+  `--dry-run`. `--dry-run` prints the same "would lose" text and asks nothing.
+  DRAFT18 (D1): the command never renames or removes the credentials file;
+  only `--delete-creds` removes it (help, H7).
 - DRAFT10 (V2): the proof that the old credential is refused is two things.
-  mashctl asks the server to confirm and prints `Checked: ...`. And the one
-  command that shows it from bob's machine, `MASH_ENDPOINT=acme.demo.bob mash
-  status`, is the `Or` line, with what it prints. [confirm: the exact lines
-  belong to the `mash` targets; the verdict and exit 4 are this document's
-  proposal.]
+  mashctl asks the server to confirm and prints `Checked: ...`. And, for bob,
+  one plain sentence says what `mash status` prints on bob's machine (DRAFT18,
+  D2: it is no longer a `NEXT:`), with the block of what it prints.
+  [confirm: the exact lines belong to the `mash` targets; DELETED and exit 4
+  are this document's proposal.]
 - DRAFT10 (V1, V5, critic B.5, F.3): no server line. The NEXT is no longer
   "create an endpoint with a new name" (a step the person may not want, and
   it never offered the retired address). It is the command that lists what
   remains, with one sentence that a deleted address cannot be restored and a
   new endpoint needs a new name (Part 1, choice 44).
-- DRAFT14 (Z1; the check of packet DRAFT3, rule break 1): no delete ends with
-  `NEXT: see what is left` and `mashctl endpoint list`: the list is not the
-  next step of anything. A delete whose credentials are here (alice) ends with
-  the sentence that a new endpoint needs a new name and no `NEXT:`. A delete
-  of bob, whose credentials are on bob's machine and whose key was revoked,
-  ends with the one proof command, `MASH_ENDPOINT=acme.demo.bob mash status`,
-  run on bob's machine, and the result says that the file there can be
-  deleted (the removal command of DRAFT13 is a sentence now: the refusal
-  screen below is the proof, and `mash status` prints its own fix). The
-  repeat prints the same proof, in `if` form. `--delete-creds` prints no
-  `NEXT:`. `--no-revoke` prints none either: its key still works, so
-  the proof would not show a refusal; its `warning:` is the closing text.
-- DRAFT13 (Y4, REQ-011 v): delete retires the endpoint's credentials itself.
-  On this machine it renames the file (`.retired-` and the time added to its
-  name; `--delete-creds` removes it instead) and says which in one result
-  line, `Its credentials file here was renamed (...)`; the `renamed` file
-  line and its path are gone (DRAFT10 showed the path because the person may
-  want the file; the name is enough, and no config path is in the success
-  output). When the file is elsewhere the result says so and the `NEXT:`
-  gives the one command that removes it, alone on its line, with the person's
-  own address (R-paste). The machine is `bob's machine`, not `bobs-laptop`: a
-  tool does not know it (Part 1, choice 60). The refusal proof stays as an
-  `Or`. The dry runs say `Would rename ... to ...` or that they would print
-  the one command.
+- DRAFT18 (D1, D2): `endpoint delete` does not rename or remove the
+  credentials file here, and no delete prints a `NEXT:`. When a credentials
+  file is here (alice) the result says `Its credentials file here was left as
+  it was; mash status will report it as DELETED.`, in two lines to stay under
+  80 columns; when the file is elsewhere (bob) there is nothing to say about
+  it, and one plain sentence says `On bob's machine, mash status now says
+  DELETED.` The dry run says the file would be left as it is. `--delete-creds`
+  is the only way the command touches the file (H7). This replaces the
+  DRAFT13 (Y4, REQ-011 v) behaviour, delete retires the credentials itself
+  (dropped: a renamed file makes mash status say MISSING, so the proof would
+  not hold; agreed with core's README cross-check), and the DRAFT14 (Z1) proof
+  `NEXT:`. The machine is `bob's machine`, not `bobs-laptop`: a tool does not
+  know it (Part 1, choice 60). [confirm with core: the status wording and exit
+  code, DELETED and exit 4.]
 
 ### B5. delete, repeat, a file left here, `--no-revoke`
 
@@ -4849,12 +4866,12 @@ $ mashctl endpoint delete acme.demo.bob
 acme.demo.bob was already deleted. Its address cannot be used again.
 Nothing was changed.
 
-NEXT: on bob's machine, if bob's credentials are still there, check them:
-  MASH_ENDPOINT=acme.demo.bob mash status
+If bob's credentials are still on bob's machine, mash status there says
+DELETED.
 ```
 
 A repeat where a credentials file is still here and the server has no record
-refuses and says how to clean up the file by hand (H7); it does not rename the
+refuses and says how to clean up the file by hand (H7); it does not touch the
 file by itself, and no flag finishes it. The plain command never touches a
 file it cannot tie to a record.
 
@@ -4886,7 +4903,6 @@ Type the address to delete it: acme.demo.bob
 Deleted acme.demo.bob. Its address cannot be used again. KEY NOT REVOKED.
   Its inbox is deleted, with 3 unread messages.
   Its key was not revoked.
-  Its credentials are not on this machine.
 
 warning: bob's key still works. Until it is revoked, a copy of bob's
          credentials can still sign in, send and read mail. Ask whoever runs
@@ -4916,10 +4932,10 @@ What changed and why:
   `rm` of that file) [confirm with core]. (DRAFT10 made `--force` finish a
   half-done delete; withdrawn.)
 - Every delete that finishes ends with the sentence that a new endpoint needs
-  a new name; the dry run prints no NEXT (rule 11). DRAFT14 (Z1): the `NEXT:`
-  is the proof command on the other machine (not the removal, not the list),
-  and the repeat prints it in `if` form, because it cannot know whether the
-  first run's proof was run.
+  a new name; the dry run prints no NEXT (rule 11). DRAFT18 (D2): no delete
+  prints a `NEXT:` (it is a removal). The repeat says in `if` form what `mash
+  status` prints on bob's machine, because it cannot know whether the first
+  run's proof was seen.
 - Delete of an address that never existed is a refusal (section E), exit 1.
 
 ---
@@ -5857,8 +5873,9 @@ What changed and why:
   dated in the future" is gone from the default: the person can do nothing
   with it; it is in `--detail`. The help example names the command that reads
   the stored mail.
-- P4: NEXT is true: deprovision of an endpoint made by `endpoint create` leaves
-  its credentials file in the config folder (catalog, depro_hal).
+- P4: deprovision of an endpoint made by `endpoint create` leaves its
+  credentials file in the config folder (catalog, depro_hal). DRAFT18 (D2): the
+  closing line is a plain sentence; `deprovision` prints no `NEXT:`.
 - Drained delete (review finding 3): the line "none was lost" is removed. The
   guard (`--suspension ID --drained-to N`) proves two things: the inbox was
   still suspended with that id, and its last stored message number is N (no
@@ -6502,7 +6519,7 @@ fix: run the command again and type the address you want to reissue:
 
 $ mashctl endpoint reissue acme.demo.bob --public-key bob2.pub   (no terminal)
 [exit 4]
-error: a reissue needs a person at a terminal.
+error: a person must run this at a terminal.
 fix: run the same command in a terminal and type the address when asked:
   mashctl endpoint reissue acme.demo.bob --public-key bob2.pub
 
@@ -7148,15 +7165,13 @@ Usage:
   mashctl endpoint delete <address> [--dry-run] [--delete-creds] [--no-revoke]
 
 It says what will be lost (the unread mail, the address, the key) and asks
-you to type the address. No flag skips it. It retires the endpoint's
-credentials on this machine itself, or, when they are on another machine,
-says so and offers the command that shows the server refusing them there.
+you to type the address. No flag skips it. It leaves the credentials file on
+this machine as it is, unless you give --delete-creds.
 
 Flags:
   --dry-run        print what would be lost and change nothing
-  --delete-creds   remove the credentials file here; the default renames it
-                   (.retired- and the time are added to its name). It still
-                   asks you to type the address
+  --delete-creds   also remove the credentials file here. It still asks you
+                   to type the address
   --no-revoke      delete without stopping the key; use only when the server
                    owner stops it
   --detail         print everything that was done
@@ -7569,11 +7584,11 @@ Decisions the rules left open. Each is one line.
     (DRAFT10: one placeholder form per role).
 29. A delete that finishes ends with one sentence that a deleted address
     cannot be restored and a new endpoint needs a new name (DRAFT10, V5; Part
-    1, choice 44). DRAFT14 (Z1): never with `mashctl endpoint list`; when the
-    credentials are on another machine and the key was revoked, the `NEXT:` is
-    the one proof command, `MASH_ENDPOINT=acme.demo.bob mash status`, run
-    there (Part 1, choice 60); otherwise there is no `NEXT:`. The result line is `Deleted acme.demo.bob. Its address cannot be used
-    again.`; it names no server.
+    1, choice 44). DRAFT14 (Z1): never with `mashctl endpoint list`. DRAFT18
+    (D2): never with a `NEXT:` (no `NEXT:` after any removal); for bob, whose
+    credentials are on another machine, one plain sentence says what `mash
+    status` prints there (Part 1, choice 60). The result line is `Deleted
+    acme.demo.bob. Its address cannot be used again.`; it names no server.
 30. `endpoint reissue` keeps its name (decided).
 31. Removing `init --local` names the two files that replace
     `docs/guides/nats-local.md`: `docs/skills/mash-nats-local/SKILL.md` and
@@ -7629,8 +7644,10 @@ Decisions the rules left open. Each is one line.
 46. `mashctl deprovision`: the typed address, 3 and 4, as for delete (new).
 47. `mash credential install` over credentials for the same address: wrong
     address 3, no terminal 4 (new). `mash status` after a delete or a
-    reissue: the server refuses the credentials, exit 4 [confirm with the
-    `mash` targets].
+    reissue: the server refuses the credentials, exit 4, and the error says so
+    (`error: the server refuses these credentials.`; no terminal says `error:
+    a person must run this at a terminal.`: DRAFT18, D3) [confirm with the
+    `mash` targets: the wording, DELETED, and exit 4].
 48. `mashctl adopt` (Part 1): a wrong fingerprint 1 to 3; no terminal 1 to 4.
     `mashctl status` NOT REACHABLE: 1 to 6.
 49. Rule 15 of the CLI standard says a missing terminal fails with exit 2
@@ -7684,10 +7701,9 @@ Decisions the rules left open. Each is one line.
 56. `issued list --wide` shows the whole public key (DRAFT11). A `--wide` row
     stays on one line and may pass 80 columns (contract revision 4).
 57. A closing line that names no command is a plain sentence, not a `NEXT:`
-    (DRAFT11, critic A4): the session restarts after a reissue. (DRAFT13, Y4:
-    the copy of a deleted endpoint's credentials on its machine had a `NEXT:`
-    with the removal command; DRAFT14, Z1: it is a sentence in the result, and
-    the `NEXT:` is the proof command.)
+    (DRAFT11, critic A4): the session restarts after a reissue. (DRAFT18, D2:
+    no removal prints a `NEXT:`; the proof after a delete is a plain
+    sentence.)
 58. `adopt` (DRAFT13, Y1; Part 1, choices 56 to 58): `--from <dir>` is the
     first form in `--help`; the long flags are the second form, for a server
     set up by hand; the two are mutually exclusive (H2 shows the refusal). The
@@ -7698,10 +7714,10 @@ Decisions the rules left open. Each is one line.
     (H3), the identical `credential install` and the repeat `endpoint create
     --make-key` (Part 1) report each file as `kept (unchanged)`. No other
     command in this part prints a `kept` line.
-60. `endpoint delete` retires the credentials (DRAFT13, Y4; Part 1, choice
-    60): renamed here (`--delete-creds` removes), or, for the other machine,
-    the result says the file there can be deleted and the `NEXT:` is the proof
-    command (DRAFT14, Z1); B4, B5, H5 and H7 show it.
+60. `endpoint delete` leaves the credentials file as it was (DRAFT18, D1;
+    Part 1, choice 60): the result says so when the file is here, and says
+    nothing about it when it is elsewhere; only `--delete-creds` removes it.
+    No `NEXT:` after a delete (D2); B4, B5, H5 and H7 show it.
 61. A reissue leaves no lock file (DRAFT14, Z9; walk finding 13). `endpoint
     reissue` removes `~/.config/mash/<address>.creds.lock` when it finishes,
     on success and on failure, so a `--public-key` reissue leaves none on the
@@ -7728,6 +7744,10 @@ Decisions the rules left open. Each is one line.
    `-` and `_`.]
 4. [confirm: what "name rule" is and whether it will stay; the feedback
    (point 17) hopes it is not the legacy one. E3 keeps one generic message.]
+4a. [DRAFT18, D1, D2: `mash status` says DELETED and exits 4 for credentials
+   of a deleted endpoint; `endpoint delete` leaves its credentials file as it
+   was; no delete or deprovision prints a `NEXT:`. [confirm with core: the
+   status wording and exit code.]]
 5. [confirm: `endpoint delete` of an address with no server record and no
    credentials file; docs say exit 1 ("refuses"), the catalog says exit 0 when
    the address was retired. B5 uses the catalog for retired and exit 1 for
@@ -8228,6 +8248,58 @@ numbers refer to the file as of DRAFT12's lint run; they are in the report.
    form and is marked `[the helper prints the fingerprint in this form once
    aligned]`. W2 recognises the new form; lint F1 fails a colon-separated or
    shortened fingerprint outside the helper block. Choice 53.
+
+## Changes in DRAFT18
+
+Four text fixes decided by the maintainer during the 0.5.6 freeze (no new
+command, file format or protocol). Section 7 of `mashctl-dispositions.md` has
+them in table form. Line numbers are in the report.
+
+1. D1. `mashctl endpoint delete` does not rename or remove the credentials
+   file on this machine. Removed: every `renamed to .retired-<time>` line,
+   the `Would rename ... to ...` dry-run lines, the loss-text line `its
+   credentials file here: renamed, or removed with --delete-creds`, and the
+   REQ-011 (v) behaviour "delete retires the credentials itself" (Part 1,
+   Choice 60; Part 2, Choices 29, 57, 60; Y4 in the DRAFT13 list). Dropped:
+   a renamed file makes mash status say MISSING, so the proof would not hold;
+   agreed with core's README cross-check. Now: when the file is here the result
+   says `Its credentials file here was left as it was; mash status will
+   report it as DELETED.` (two lines, to stay under 80 columns); when it is
+   elsewhere it says nothing about the file; the dry run says the file would
+   be left as it is. Changed: B4 (dry runs, bob, alice, `--detail`), B5
+   (repeat, `--no-revoke`), H5 (help text and flag row), the intro and
+   Choices. `--delete-creds` stays, with the typed address and `It will remove
+   acme.demo.alice's credentials file here.` (H7). The DRAFT13 entry 4 below
+   is superseded. [confirm with core: the status wording and exit code,
+   DELETED and exit 4.]
+2. D2. No `NEXT:` after any removal: the `NEXT:` blocks that named
+   `MASH_ENDPOINT=acme.demo.bob mash status` are gone from B4 (bob, `--detail`)
+   and B5 (repeat). The proof is a plain sentence: `On bob's machine, mash
+   status now says DELETED.` (the repeat: `If bob's credentials are still on
+   bob's machine, mash status there says DELETED.`), and the block that shows
+   what `mash status` prints stays, now with `NOT READY: acme.demo.bob was
+   deleted.`, `credentials: ... (DELETED)` and `error: the server refuses
+   these credentials.` `deprovision` and `--delete-creds` already printed no
+   `NEXT:`; their notes say so. Lint N1 (a delete or deprovision block has no
+   `NEXT:`) replaces the Z1 rule that a delete's `NEXT:` was the proof.
+   [confirm with core.]
+3. D3. Exit 4 stays for "no terminal" (INV-004) and also covers "the server
+   refuses the credentials"; the error says which. The exit-code row, the
+   prose after the confirmations table and Choice 47 say so; the four
+   no-terminal errors of destruction (delete, single and bulk reissue, the
+   replacement of installed credentials) are `error: a person must run this at
+   a terminal.` The trust confirmations of `adopt` and `credential install`
+   keep their own sentence, which also says `a person must`. The lint's
+   exit-code table maps `the server refuses these credentials` to 4.
+4. D4. The adopt tail no longer mentions `mash trust replace` (the parenthesis
+   in the DRAFT17 note on adopt is gone; no adopt block, help or tail ever
+   printed it). The five blocks with a `kept ... trust.json` line (three
+   install blocks, the second `endpoint create --make-key` on one machine, the
+   cut-off rerun) carry `[HELD until the scope ruling: trust record]` in the
+   text just above them and keep their content. The packet generator copies
+   the marker into the block's title (lint N4: a HELD block names
+   `trust.json`). No `--creds-out` block writes or names `trust.json`; its
+   hand-off says nothing of trust writes, so nothing there is marked.
 
 ## Changes in DRAFT17
 
