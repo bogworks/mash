@@ -201,7 +201,9 @@ mashctl endpoint create acme.demo.bob --make-key
 <!-- from: targets#install-make -->
 ```
 $ mashctl endpoint create acme.demo.bob --make-key
-Created a key pair and endpoint acme.demo.bob.
+Made a key pair for acme.demo.bob: the private half is kept in the
+credentials file on this machine, and your mashctl's signing key signed a
+token saying this public key is acme.demo.bob.
 Installed credentials for acme.demo.bob.
 The private key is inside the credentials file: guard that file.
 
@@ -245,7 +247,9 @@ mashctl endpoint create acme.demo.alice --make-key
 <!-- from: targets#install-make-second -->
 ```
 $ mashctl endpoint create acme.demo.alice --make-key
-Created a key pair and endpoint acme.demo.alice.
+Made a key pair for acme.demo.alice: the private half is kept in the
+credentials file on this machine, and your mashctl's signing key signed a
+token saying this public key is acme.demo.alice.
 Installed credentials for acme.demo.alice.
 The private key is inside the credentials file: guard that file.
 
@@ -558,8 +562,8 @@ mail does NOT work: no endpoint is installed here.
   credentials   MISSING (none in ~/.config/mash)
   mailbox       not checked
 
-fix: install the credentials your server made for this endpoint. mash then
-     uses it by itself; with several installed, name one with MASH_ENDPOINT
+fix: install your key and the token you were sent for this endpoint. mash
+     then uses it by itself; with several installed, name one with MASH_ENDPOINT
      or "endpoint" in config.json:
   mash credential install --key <key file> --token <token file>
 ```

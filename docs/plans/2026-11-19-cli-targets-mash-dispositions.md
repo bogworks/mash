@@ -803,3 +803,33 @@ points are UNVERIFIED (REQ-015's owner-wide read with the caller's own
 credentials; that a rerun prints the full first-install screen; the file set
 named by the trust screens). Packet keys removed (1): `install-creds`. Added
 (1): `install-rerun`.
+
+## DRAFT9: contract rev 17 and who signs
+
+Sources: the lead's brief for DRAFT9 (four numbered items) and contract
+revision 17 (`mash-0.5.6-cli-ux`, rev 17 draft, the newest in
+`masterplanner/for-herds/mash-0.5.6/` at the start of this work; compared line
+by line with revision 16). Ids are `D9-1.n` to `D9-4.n`. Z9 to Z13 are the
+decisions in section 7 of the targets file; blocks named are packet keys.
+
+| # | item | disposition | where in the targets (DRAFT9), or why not |
+|---|---|---|---|
+| D9-1.1 | ctl's agreed `--make-key` first lines (`Made a key pair for acme.demo.bob: ...`), wrapped at 80 by hand | FIXED | `install-make`, `install-make-second` (Z9) |
+| D9-1.2 | ctl's agreed `--public-key` line (`Your mashctl's signing key signed a token saying this public key is acme.demo.bob.`) | FIXED | `server` (Z9) |
+| D9-1.3 | `--make-key` refuses when `config.json` has no `server` and `ca`; writes nothing; new block quoted from ctl, key `ctl-make-key-refuse` | FIXED, one point UNVERIFIED | `ctl-make-key-refuse`; the error line is ctl's, the `fix:` wording is the targets' (Z10) |
+| D9-2.1 | Remove "signed by your server" and "it made this token" from the `server` and `install-main` blocks and every other place | FIXED | the `checked` line in `install-main`, `install-rerun`, `install-stdin`, `install-second`, `install-detail`; `server`; R2, R12, R15, step B and C text, the `credential install` change notes, Z1, Z4 |
+| D9-2.2 | Also "your server made", "the server made", "the server did not make" | FIXED | `status-noconfig`, `status-detail-noconfig`, `status-nocreds`, `help` (text and `--token`), R2 exception wording; packet prose |
+| D9-2.3 | A plain accurate check line | FIXED, chosen here | `its certificate is from this CA for its name, and it accepted this key and token` (Z9) |
+| D9-3.1 | An agent never runs `credential install` or the plugin install: the person does | FIXED | `help` (credential install text), MCP initialize instructions (section 6) (Z11) |
+| D9-3.2 | README: one plain line in a skill hand-off section, if there is one | NOT TAKEN HERE | the README has no skill hand-off section; nothing invented |
+| D9-4.1 | `mailbox_limit` 0 reads `no limit set` | FIXED | `status-mailbox-off`, R11/R22 text, section 5 and 6 mentions (Z12) |
+| D9-4.2 | Leave REQ-015's count text; add one line in section 5b: the count is messages not yet delivered; the unacked definition is superseded, see the status-views page | FIXED | section 5b, first lines; Z13 |
+| D9-4.3 | Do not rewrite the mailbox blocks; DRAFT10 regenerates them | NOT TAKEN HERE | the status-views agent owns that wording |
+| D9-4.4 | Re-measure widths, update counts, packet keys and checks run | FIXED | section 9: 145 fenced blocks, 124 chosen by markers, 67 keys |
+
+Contract rev 17 lines not conformed to: REQ-015's `status says off` for a limit
+of 0 (the planner's newer ruling, `no limit set`, is used); REQ-015's unacked
+count (superseded by the planner's delivery definition; text left); the
+refusal blocks for a connection the server refuses and for an unreachable
+server during `credential install` (the contract gives tests, not wording).
+Packet keys added (1): `ctl-make-key-refuse`. Removed: none.

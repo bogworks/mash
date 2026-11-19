@@ -1,10 +1,29 @@
-# mash CLI target outputs (0.5.6 contract input), DRAFT8
+# mash CLI target outputs (0.5.6 contract input), DRAFT9
 
-Date: 2026-11-19. Status: DRAFT8 of the mockups for the maintainer's review.
+Date: 2026-11-19. Status: DRAFT9 of the mockups for the maintainer's review.
 Every finding of the earlier rounds has one row in
-`docs/plans/2026-11-19-cli-targets-mash-dispositions.md` (DRAFT1 to DRAFT7);
-the rows of this draft are in its last section, "DRAFT8: contract rev 16
-rulings".
+`docs/plans/2026-11-19-cli-targets-mash-dispositions.md` (DRAFT1 to DRAFT8);
+the rows of this draft are in its last section, "DRAFT9: contract rev 17 and
+who signs".
+
+DRAFT9 applies contract revision 17 (`mash-0.5.6-cli-ux`, rev 17 draft, the
+newest in `masterplanner/for-herds/mash-0.5.6/` at the start of this work) and
+four rulings. (1) WHO SIGNS: the token is signed by mashctl's account signing
+key, not "by your server"; `endpoint create --make-key` and `--public-key` say
+so in mashctl's agreed words (`Made a key pair for acme.demo.bob: ...` and
+`Your mashctl's signing key signed a token saying this public key is
+acme.demo.bob.`), and `--make-key` REFUSES, writing nothing, when `config.json`
+has no `server` and `ca` (new block `ctl-make-key-refuse`). (2) Every sentence
+that said the server "made" or "signed" the token is reworded: the `checked`
+line of `credential install` now says the server accepted this key and token
+(rev 17: install connects with the new key and token over the verified
+connection, and an accepted connection is the server vouching for the token's
+account). (3) An agent never runs `mash credential install` or the plugin
+install: the person does (help text and MCP instructions say so). (4) A
+`mailbox_limit` of 0 reads `no limit set` in the mailbox row (the planner's
+newest ruling); the mailbox COUNT is being redefined by the status-views page
+(section 5b says so; the mailbox blocks are regenerated in DRAFT10). No product
+code.
 
 DRAFT8 applies the lead's rulings of contract revision 16 (`mash-0.5.6-cli-ux`,
 rev 16 draft, the newest in `masterplanner/for-herds/mash-0.5.6/` at the start
@@ -104,7 +123,7 @@ owner `acme`, the group `release-pipeline` (16 characters) and the names
 - R2 No jargon on the default screen. These words never appear: JWT, seed,
   nkey, NATS, name rule, clock, channel allowlist, relay trace, resolver,
   operator, account (DRAFT8, one exception, the lead's text of contract rev
-  16: `account` is in the refusal for a token the server did not make,
+  16: `account` is in the refusal for a token the server does not accept,
   `install-refuse`). Vocabulary: PRIVATE KEY (the file only the endpoint's
   machine keeps), PUBLIC KEY (safe to share), TOKEN (what a server signs:
   "this public key is endpoint acme.demo.bob"), CREDENTIALS (the one file mash
@@ -218,8 +237,8 @@ owner `acme`, the group `release-pipeline` (16 characters) and the names
   (LAST SEEN) and only there. Nothing else is a row on the
   default screen (no group row, no claude row); a state that cannot be
   checked says `not checked` in its row. The MAILBOX row (REQ-015, R22) is
-  `<n> waiting`, `<n> waiting, OVER THE LIMIT OF <limit>` (a warning), `off`
-  when `mailbox_limit` is 0, or `not checked` wherever the count cannot be
+  `<n> waiting`, `<n> waiting, OVER THE LIMIT OF <limit>` (a warning),
+  `no limit set` when `mailbox_limit` is 0, or `not checked` wherever the count cannot be
   known (no credentials, the server not reached or not asked, the credentials
   refused); it is last because it needs the credentials above it. The verdict is
   `<endpoint>: mail works.`, `<endpoint>: mail works (1 warning).` or
@@ -235,7 +254,7 @@ owner `acme`, the group `release-pipeline` (16 characters) and the names
   with `none`, `missing` or `not set` where a value is absent: `config file`,
   `ca`, `credentials file`, `endpoint`, `chosen by` and `mailbox limit` (`15
   (the default)`, `40 ("mailbox_limit" in config.json)`, `40
-  (MASH_MAILBOX_LIMIT)` or `off`); the old facts (commit, counts, settings)
+  (MASH_MAILBOX_LIMIT)` or `no limit set`); the old facts (commit, counts, settings)
   follow them, and a line `oldest waiting 12m ago` sits under the mailbox row
   when something waits. The CA is its OWN row: `ca  <path>`, or `ca  not set`
   when there is no configuration.
@@ -247,7 +266,7 @@ owner `acme`, the group `release-pipeline` (16 characters) and the names
   `14B`). Created things are "Created", written files are "wrote", files
   copied are "copied", files left alone are "kept (unchanged)" (R20); a
   check `credential install` makes before it writes is "checked" (the
-  server's certificate and host name, and that the server made the token). Paths are
+  server's certificate and host name, and that the server accepted the key and token). Paths are
   `~/...` by default and absolute in `--detail`.
 - R13 (DECIDED, planner, L4) One setting names the endpoint by its full
   address: `MASH_ENDPOINT=acme.demo.bob`, or `"endpoint"` in `config.json`.
@@ -287,9 +306,12 @@ owner `acme`, the group `release-pipeline` (16 characters) and the names
   display rule stays.) mashctl prints the same two values for the OPERATOR when
   it makes an endpoint, on lines of their own, indented four spaces. Before it
   writes anything, install checks that the server at the address presents a
-  certificate from that CA for that host name, and that the token's signature
-  verifies against the key of the account the AUTHENTICATED server serves, never
-  only against the issuer the token claims (DRAFT8, F15-2: a valid token made
+  certificate from that CA for that host name, and then connects to it with the
+  new key and token over that verified connection: the token is signed by
+  mashctl's account signing key, and the server accepts a user token only when
+  an account it holds signed it, so an accepted connection is the server
+  vouching for the token's account, never only the issuer the token claims
+  (DRAFT9, rev 17, R16-2; DRAFT8, F15-2: a valid token made
   on another server is refused, `error: this token was not signed by the
   account of the server at <host>:<port>`). `--server` and `--ca` are BOTH
   required on a first install: each missing one exits 2, checked BEFORE
@@ -380,7 +402,8 @@ owner `acme`, the group `release-pipeline` (16 characters) and the names
   endpoints of the caller's own owner, read with the caller's own credentials and
   never admin; for any other endpoint it says `unknown` (F15-8). `mash status` shows a mailbox row on EVERY
   screen (R11): `<n> waiting`, `<n> waiting, OVER THE LIMIT OF <limit>` as a
-  warning (verdict `mail works (1 warning)`, exit 0), `off`, or `not checked`;
+  warning (verdict `mail works (1 warning)`, exit 0), `no limit set`, or
+  `not checked`;
   `--detail` adds the limit and where it came from, and the oldest age; the MCP
   `status` carries `mailbox {waiting, limit, oldest_age, over_limit}`. No SAP
   protocol change (BND-002): the count is mash's own.
@@ -577,7 +600,9 @@ here and in the notes under each step:
   BOTH flags and shows the person the server address and the CA fingerprint to
   compare with what the operator sent; nothing is typed back (R15). Before
   writing it checks that the server presents a certificate from that CA for that
-  host name and that the token was signed by the account of that server;
+  host name and that the server accepts a connection made with the key and the
+  token (the token is signed by mashctl's account signing key; contract rev
+  17, R16-2);
 - an existing server, CA or credentials file is never changed by install: on
   any difference it refuses without touching any file and says which file to
   move aside (R17, 0.5.5's rule). There is no trust record and no `mash trust
@@ -714,7 +739,8 @@ hand-over. It runs where mashctl runs, here `myserver`.
 ```
 $ mashctl endpoint create acme.demo.bob --public-key bob.pub
 Created endpoint acme.demo.bob.
-The token says, signed by your server, that bob.pub is this endpoint.
+Your mashctl's signing key signed a token saying this public key is
+acme.demo.bob.
 
   wrote  acme.demo.bob.token  (mode 600)
 
@@ -761,8 +787,11 @@ in one line, to compare them with what whoever runs the server sent apart from
 the token. NOTHING IS TYPED BACK: there is no prompt, no typed answer and no
 flag that answers for the person. Before it writes anything it checks that the
 server at that address presents a certificate from that CA for that host name,
-and that the token was signed by the account of that same, authenticated
-server (a token made on another server is refused, `install-refuse`). Then it
+and that the same, authenticated server accepts a connection made with the key
+and the token: the token is signed by mashctl's account signing key, and the
+server accepts it only for an account it holds (a token made for another
+server is refused, `install-refuse`; so is a connection the server refuses,
+and a server that cannot be reached: nothing is written, nothing falls back). Then it
 writes, in this order, the CA copy, the credentials and `config.json`
 (server, CA) LAST: `config.json` is the commit point, and a rerun after an
 interruption completes the install (`install-rerun`). It never changes a file
@@ -788,7 +817,7 @@ trust only server certificates signed by this CA:
 Compare both with what whoever runs your mash server sent you.
 
 checked  the server at myserver:4222: its certificate is from this CA for
-         its name, and it made this token
+         its name, and it accepted this key and token
 
 Installed credentials for acme.demo.bob.
 They hold bob's private key and the token. Keep bob.key as the backup.
@@ -809,7 +838,7 @@ mash read its address from the token. The CA is copied into the config
 directory so the configuration does not depend on where `ca.pem` was when you
 ran the command (Q14); `config.json` names the copy. See "How the agent
 trusts the server" below. The checks (the server's certificate and host name,
-and the token against the server's account key) come before any write, and only
+and a connection made with the key and the token) come before any write, and only
 the current user's mash config directory is written:
 never a system trust store. Every file follows File safety (section 2): the
 credentials file is created exclusively, mode 600, without following a link,
@@ -842,7 +871,7 @@ trust only server certificates signed by this CA:
 Compare both with what whoever runs your mash server sent you.
 
 checked  the server at myserver:4222: its certificate is from this CA for
-         its name, and it made this token
+         its name, and it accepted this key and token
 
 Installed credentials for acme.demo.bob.
 They hold bob's private key and the token. Keep bob.key as the backup.
@@ -872,7 +901,7 @@ history):
 $ ssh admin@myserver cat acme.demo.bob.token | \
     mash credential install --key bob.key --token -
 checked  the server at myserver:4222: its certificate is from the CA mash
-         uses for its name, and it made this token
+         uses for its name, and it accepted this key and token
 
 Installed credentials for acme.demo.bob.
 They hold bob's private key and the token. Keep bob.key as the backup.
@@ -897,7 +926,7 @@ file way is in `mash status`, which lists both):
 ```
 $ mash credential install --key alice.key --token acme.demo.alice.token
 checked  the server at localhost:4222: its certificate is from the CA mash
-         uses for its name, and it made this token
+         uses for its name, and it accepted this key and token
 
 Installed credentials for acme.demo.alice.
 They hold alice's private key and the token. Keep alice.key as the backup.
@@ -1023,10 +1052,10 @@ fix: check the server address and the CA file with whoever runs your mash
      server.
 ```
 
-The certificate and host name are right, but the token was not made by this
-server (a valid token of another account, or of another server, with a good
-certificate; nothing is written, because this check too comes before every
-write, F15-2):
+The certificate and host name are right, but this server does not accept the
+token: it was not signed by an account the server holds (a valid token of
+another account, or of another server, with a good certificate; nothing is
+written, because this check too comes before every write, F15-2, R16-2):
 
 <!-- packet: install-refuse -->
 ```
@@ -1128,7 +1157,7 @@ trust only server certificates signed by this CA:
 Compare both with what whoever runs your mash server sent you.
 
 checked  the server at myserver:4222: its certificate is from this CA for
-         its name, and it made this token
+         its name, and it accepted this key and token
 
 Installed credentials for acme.demo.bob.
 They hold bob's private key and the token. Keep bob.key as the backup.
@@ -1262,7 +1291,8 @@ is exit 2, before anything is read) and SHOWS the server address and the CA
 fingerprint, in one line asking the person to compare them with what the
 operator sent; nothing is typed back (R15, contract rev 16). Before writing, it
 checks that the server presents a certificate from that CA for that host name
-and that the token was signed by the account of that server. It writes the CA
+and that the server accepts a connection made with the key and the token (the
+token is signed by mashctl's account signing key). It writes the CA
 copy, then the credentials, then `config.json` last; a rerun completes an
 interrupted install. A server, CA or
 credentials file that is already there is never changed: any difference
@@ -1292,7 +1322,9 @@ Same machine, one command:
 <!-- packet: install-make -->
 ```
 $ mashctl endpoint create acme.demo.bob --make-key
-Created a key pair and endpoint acme.demo.bob.
+Made a key pair for acme.demo.bob: the private half is kept in the
+credentials file on this machine, and your mashctl's signing key signed a
+token saying this public key is acme.demo.bob.
 Installed credentials for acme.demo.bob.
 The private key is inside the credentials file: guard that file.
 
@@ -1328,7 +1360,9 @@ two commands as `credential install` above; DRAFT5 target, D13):
 <!-- packet: install-make-second -->
 ```
 $ mashctl endpoint create acme.demo.alice --make-key
-Created a key pair and endpoint acme.demo.alice.
+Made a key pair for acme.demo.alice: the private half is kept in the
+credentials file on this machine, and your mashctl's signing key signed a
+token saying this public key is acme.demo.alice.
 Installed credentials for acme.demo.alice.
 The private key is inside the credentials file: guard that file.
 
@@ -1340,6 +1374,21 @@ NEXT: this machine has more than one endpoint now. Choose one for this
       shell, then check it:
   export MASH_ENDPOINT=acme.demo.alice
   mash status
+```
+
+`--make-key` needs the server and the CA this machine's mash uses. When
+`config.json` has no `server` and `ca` it refuses and writes nothing (contract
+rev 17; mashctl's text, relayed by the mashctl lane: the error line is theirs
+word for word, the fix names the two ways in that they gave, wrapped here):
+
+<!-- packet: ctl-make-key-refuse -->
+```
+$ mashctl endpoint create acme.demo.bob --make-key
+error: mash on this machine has no server and CA configured.
+fix: connect this machine to your server first. If the NATS helper made it:
+  mashctl adopt --from <dir>
+     If someone else runs it, install a key and token with the address and CA:
+  mash credential install --key <key file> --token <token file> --server <address> --ca <ca file>
 ```
 
 Connecting mashctl to a server the NATS helper made is `mashctl adopt --from
@@ -1494,7 +1543,7 @@ of DRAFT4 (a server that answers now was seen now). "Last reached" is the
 last time this machine's mash heard the server answer, as recorded by `mash
 serve` in the state directory, or `never reached from here` (NEW behaviour:
 `mash serve` writes that time; N10). The mailbox row is `<n> waiting`, `<n>
-waiting, OVER THE LIMIT OF 15`, `off` or `not checked` (R22). The group and
+waiting, OVER THE LIMIT OF 15`, `no limit set` or `not checked` (R22). The group and
 endpoint counts are in `--detail` only.
 
 Exit codes: 0 when mail works (warnings included, an over-the-limit mailbox
@@ -1584,7 +1633,7 @@ when no endpoint is known and `not set` when none is chosen); `endpoint` (the
 address, `not set`) and `chosen by`, in one of four fixed phrases:
 `MASH_ENDPOINT`, `"endpoint" in config.json`, `the only one installed here`
 (REQ-009) or `not set`; and `mailbox limit` (`15 (the default)`, `40
-("mailbox_limit" in config.json)`, `40 (MASH_MAILBOX_LIMIT)` or `off`, R22).
+("mailbox_limit" in config.json)`, `40 (MASH_MAILBOX_LIMIT)` or `no limit set`, R22).
 The CA is named by its file in the `ca` row; its fingerprint is not on the
 status screens (it is shown by the first install and by mashctl, R15). The
 `settings` row names every `MASH_*` variable that is set, never its value, so
@@ -1683,9 +1732,9 @@ fix: have the session read its mail. To change the limit, add this line to
     "mailbox_limit": 40
 ```
 
-When `mailbox_limit` is 0 the check is off, the row says so, and nothing is
-counted against a limit (the count itself is not shown: `off` is the whole
-row):
+When `mailbox_limit` is 0 the check is off, the row says `no limit set`
+(the planner's newest ruling), and nothing is counted against a limit (the
+count itself is not shown: `no limit set` is the whole row):
 
 <!-- packet: status-mailbox-off -->
 ```
@@ -1697,7 +1746,7 @@ acme.demo.bob: mail works.
                 alive, encrypted (checked 09:42)
   config        ok
   credentials   ok
-  mailbox       off
+  mailbox       no limit set
 ```
 
 If the config file already has the key, the fix label is `change the
@@ -1719,8 +1768,8 @@ mail does NOT work: mash has no configuration on this machine.
   credentials   not checked
   mailbox       not checked
 
-fix: install the credentials your server made. Give the server address and
-     the CA file whoever runs your mash server sent you:
+fix: install your key and the token you were sent. Give the server address
+     and the CA file whoever runs your mash server sent you:
   mash credential install --key <key file> --token <token file> --server <address> --ca <ca file>
 ```
 
@@ -1752,8 +1801,8 @@ mail does NOT work: mash has no configuration on this machine.
   chosen by         not set
   mailbox limit     15 (the default)
 
-fix: install the credentials your server made. Give the server address and
-     the CA file whoever runs your mash server sent you:
+fix: install your key and the token you were sent. Give the server address
+     and the CA file whoever runs your mash server sent you:
   mash credential install --key <key file> --token <token file> --server <address> --ca <ca file>
 ```
 
@@ -1826,8 +1875,8 @@ mail does NOT work: no endpoint is installed here.
   credentials   MISSING (none in ~/.config/mash)
   mailbox       not checked
 
-fix: install the credentials your server made for this endpoint. mash then
-     uses it by itself; with several installed, name one with MASH_ENDPOINT
+fix: install your key and the token you were sent for this endpoint. mash
+     then uses it by itself; with several installed, name one with MASH_ENDPOINT
      or "endpoint" in config.json:
   mash credential install --key <key file> --token <token file>
 ```
@@ -2207,7 +2256,7 @@ rows, in every state; the server row says when mash checked
 is checked in every state that has an address, whether or not credentials
 exist; an untrusted certificate says mash did not trust the server (D2); the
 `mailbox` row is new (REQ-015, R22): `<n> waiting`, `<n> waiting, OVER THE
-LIMIT OF 15` (a warning, exit 0), `off` or `not checked`; `--detail` is new and
+LIMIT OF 15` (a warning, exit 0), `no limit set` or `not checked`; `--detail` is new and
 carries six rows that are the same in every state (the config file, the CA as
 its own row, the credentials file, the endpoint, how it was chosen and the
 mailbox limit), the group counts, the commit and the settings; the unreachable
@@ -3177,19 +3226,20 @@ $ mash help credential install
 Usage: mash credential install --key FILE --token FILE --server URL --ca FILE
        mash credential install --key FILE --token FILE
 
-Join your private key and the token your server made into credentials. The
+Join your private key and the token you were sent into credentials. The
 first time on a machine, --server and --ca are both required: give the server
 address and the CA file whoever runs your mash server sent you. mash shows the
 address and the CA's fingerprint to compare with what you were sent, checks
-that the server presents a certificate from that CA and made your token, and
-only then writes the CA copy, the credentials and, last, config.json. A later
-install for another endpoint uses what is there; a --server or --ca you give
-must match it. mash never replaces a server, CA or credentials file that is
-installed. Either FILE may be - for standard input; the key and the token are
-never typed as arguments.
+that the server presents a certificate from that CA and accepts your key and
+token, and only then writes the CA copy, the credentials and, last,
+config.json. A later install for another endpoint uses what is there; a
+--server or --ca you give must match it. mash never replaces a server, CA or
+credentials file that is installed. Either FILE may be - for standard input;
+the key and the token are never typed as arguments. You run this command, not
+an agent.
 
   --key FILE    your private key (made by mash key create)
-  --token FILE  the token your server made for it
+  --token FILE  the token you were sent for it
   --server URL  the server address, tls://host:4222 (first install)
   --ca FILE     the CA that signed the server's certificate (first install)
   --detail      also show full paths
@@ -3428,6 +3478,10 @@ N17 records the dependency. Contract revision 15 says adopt asks no fingerprint
 first `mash credential install` (section 4) and by mashctl for the operator.
 
 ## 5b. What REQ-015 can count
+
+Superseded in part (DRAFT9): the planner has ruled the count is messages NOT
+YET DELIVERED to the session (delivered = shown in hook context or read); the
+definition below (unacked) is superseded: see the status-views page.
 
 The lead asked: "Tell me if the count you can actually get differs from 'not
 yet shown'". It does, in four ways, and it is exact in the rest. Every
@@ -3977,9 +4031,10 @@ the same plain voice, rewritten as short lines of at most 80 columns:
 - It says no tool result holds a token or a key, and that the agent never sets
   `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION` or any other setting on its own
   (REQ-010).
-- It says the plugin is installed by the person (with claude's own commands);
-  the agent never runs them and never edits Claude Code's settings (REQ-011
-  (iii)). No tool, field or error code changes for REQ-011.
+- It says the plugin is installed by the person (with claude's own commands)
+  and `mash credential install` is run by the person; an agent never runs
+  either, and never edits Claude Code's settings (REQ-011 (iii); contract rev
+  17, R16-1, R16-3). No tool, field or error code changes for REQ-011.
 - It says that a channel line `mash: <n> messages waiting (limit <limit>),
   oldest <age>` means the mailbox is over its limit: read the inbox with the
   `inbox` and `read` tools; and that the limit is the person's setting, not the
@@ -4224,12 +4279,13 @@ Y16. STILL OPEN. The comparison after the first install is the person's and
 DRAFT8, decisions beyond the brief or between two contract lines (each is easy
 to reverse; the dispositions file has one row per item of the ruling).
 Contract revision 16 (the newest in the shared folder at the start and at the
-end of this work) is conformed to except where a line below says so.
+end of that work) was conformed to except where a line below says so. Z9 to Z13
+are DRAFT9's (contract revision 17).
 
 Z1. DECIDED here. The new token check prints no line of its own on success: it
     is part of the one `checked` line, which now reads `checked  the server at
-    myserver:4222: its certificate is from this CA for its name, and it made
-    this token` (two lines, the second indented). On refusal it is the block
+    myserver:4222: its certificate is from this CA for its name, and it
+    accepted this key and token` (two lines, the second indented). On refusal it is the block
     `error: this token was not signed by the account of the server at
     myserver:4222. Nothing was written.` with a labelled `fix:` and the whole
     command to run. The word `account` is the lead's text and the contract's;
@@ -4249,7 +4305,7 @@ Z3. DECIDED here. The two `mashctl endpoint create --make-key` blocks quoted in
 Z4. DECIDED here, UNVERIFIED. With `--creds` gone, the fix of the "certificate
     not trusted" screens moves the old `ca.pem` and `config.json` aside and
     prints a first install with `<key file>`, `<token file>`, `<address>` and
-    `<ca file>`: after a CA change the person needs a token the new server made
+    `<ca file>`: after a CA change the person needs a token for the new server
     (the new CA is a new server), and the credentials file already installed
     may need moving aside too (R17); that is not said on these screens.
 Z5. DECIDED, the lead (rev 16): REQ-015's count is unacked, pending plus
@@ -4279,6 +4335,38 @@ Z7. DECIDED here. The example server is `tls://localhost:4222` in every
     still shows `tls://myserver:4222` on its screens.
 Z8. DECIDED here. The `--json` of `credential install` gets `token_checked:
     true`, beside `ca_checked`.
+Z9. DECIDED, the lead (DRAFT9), conformed to contract rev 17. WHO SIGNS: the
+    token is signed by mashctl's account signing key. No block or sentence says
+    the server "made" or "signed" it. The one phrase for the install `checked`
+    line is `its certificate is from this CA for its name, and it accepted this
+    key and token` (chosen here: rev 17 has install connect with the new key
+    and token, and a server in operator mode accepts a user token only when an
+    account it holds signed it, so "accepted" is exact and "made" was not).
+    mashctl's agreed first lines are quoted word for word, wrapped by hand at
+    80: `--make-key` (`Made a key pair for acme.demo.bob: ...`) and
+    `--public-key` (`Your mashctl's signing key signed a token saying this
+    public key is acme.demo.bob.`); the rest of mashctl's quoted blocks is kept.
+Z10. DECIDED, the lead (DRAFT9). `mashctl endpoint create --make-key` refuses
+    when `config.json` has no `server` and `ca`, writes nothing, and names the
+    two ways in (`mashctl adopt --from <dir>`, or `mash credential install`
+    with `--server` and `--ca`): block `ctl-make-key-refuse`. UNVERIFIED: the
+    brief relayed mashctl's error line and the two commands, not the full
+    block; the `fix:` wording is the targets' and mashctl's text wins.
+Z11. DECIDED, contract rev 17 (R16-1, R16-3). An agent never runs `mash
+    credential install` or installs the plugin; the person does. Said in the
+    `mash help credential install` text and in the MCP initialize instructions
+    (section 6). The README has no skill hand-off section, so nothing is
+    added there.
+Z12. DECIDED, the planner's newest ruling (DRAFT9). `mailbox_limit` 0 reads
+    `no limit set` in the mailbox row (and in the `mailbox limit` row of
+    `--detail`), not `off`; the setting's own meaning ("0 turns the check
+    off") is unchanged.
+Z13. DECIDED, the planner (DRAFT9). The mailbox COUNT is messages NOT YET
+    DELIVERED to the session (delivered = shown in hook context or read). The
+    unacked definition of REQ-015, R22 and section 5b is superseded and is NOT
+    rewritten in this draft: the status-views page owns the wording, and the
+    mailbox blocks are regenerated from it in DRAFT10. Section 5b opens with
+    one line saying so.
 
 ## 8. Behaviour changes the contract must decide
 
@@ -4327,8 +4415,9 @@ Z8. DECIDED here. The `--json` of `credential install` gets `token_checked:
   SHOWS the server address and the CA fingerprint (8
   groups of 8) and says in one line to compare them with what the operator
   sent; nothing is typed back. It checks that the server presents a certificate
-  from that CA for that host name, and that the token was signed by the account
-  of that server (F15-2), before it writes anything; then it writes the CA
+  from that CA for that host name, and that the server accepts a connection made
+  with the key and the token (the token is signed by mashctl's account signing
+  key; F15-2, R16-2), before it writes anything; then it writes the CA
   copy, the credentials and `config.json` (server, CA) last, so a rerun
   completes an interrupted install (F15-6). A later install for another
   endpoint uses the configured server and CA, and a flag given must match them.
@@ -4406,12 +4495,12 @@ Z8. DECIDED here. The `--json` of `credential install` gets `token_checked:
 
 ## 9. Checks run
 
-Width (re-measured for DRAFT8, contract revision 16). A script (`width.py`, run
+Width (re-measured for DRAFT9, contract revision 17). A script (`width.py`, run
 over the file, kept outside the repo) walks the file, tracks the fenced blocks
-and keeps every line over 80 columns. Result for this file: 144 fenced blocks
+and keeps every line over 80 columns. Result for this file: 145 fenced blocks
 (every mockup, Before block and JSON example and the `adopt-from` placeholder),
-123 of them chosen by a `packet:` marker (66 distinct keys; DRAFT7 had 143, 122
-and 66: `install-creds` is out, `install-rerun` is in). The widest line of text
+124 of them chosen by a `packet:` marker (67 distinct keys; DRAFT8 had 144, 123
+and 66: `ctl-make-key-refuse` is in, no key is out). The widest line of text
 that a tool prints is 80 columns (the real-name inbox rows and the trust-column
 inbox row, whose message is cut with `...` at column 80 by design, and the
 `--detail` install screen's `config.json` line); NO printed text is over 80,
@@ -4420,8 +4509,9 @@ again, on a line of its own (the widest are 111 columns, the fix of the
 untouched-token refusal; 108 for the NEXT of the server-side step; then 101, 98
 and 97 for the other `credential install` commands of the refusal fixes, the
 help example, the no-configuration fixes, the trust fixes and the removed-verb
-fix; every other printed command is 81 or less, the reply command with an
-18-character sender name); a URL (the one link to the guide, 84 columns); a
+fix; the `ctl-make-key-refuse` `credential install` fix is 97; every other
+printed command is 81 or less, the reply command with an 18-character sender
+name); a URL (the one link to the guide, 84 columns); a
 pasted `$` line (the send warning's, 84 columns, with the variable in front);
 and `gh`'s own report on the install page (88, 107 and 138 columns, `gh`'s
 words, not mash's). The JSON of `credential install --json` wraps its
@@ -4497,8 +4587,16 @@ Checked against the shipped source (the v0.5.5 tag, cloned at
   of 0.5.5's `docs/install.md` (lines 40 and 41) are what section 5a shows. No
   command was run against Claude Code, so nothing claude prints is shown or
   claimed. The plugin export writes 5 files.
-- Contract revision 16 (`contract-0.5.6-cli-ux-rev16-draft.md`, the newest in
-  the shared folder at the start and at the end of this work, read in full):
+- Contract revision 17 (`contract-0.5.6-cli-ux-rev17-draft.md`, the newest in
+  the shared folder at the start of this work; it was read in full and compared
+  line by line with revision 16): REQ-001's new exception (the address and
+  config path in `credential install`'s first-install screen and in
+  `endpoint create --public-key`'s hand-over), REQ-003's connection check and
+  its refusals (a refused or unreachable server writes nothing), REQ-003's
+  rule that `credential install` is a person's command, REQ-011 (iii)'s rule
+  that an agent never installs the plugin, and the section on what an agent
+  may run were applied to the help text, the MCP instructions and the blocks.
+  Revision 16, read the same way before, was:
   REQ-001, REQ-003, REQ-004, REQ-009 to REQ-013, REQ-015, INV-003, INV-004, the
   exit-code table, AT-007 and AT-008 were read for every line about mash command
   output. Conformed to, line by line: REQ-003's synopsis (`--key --token
@@ -4509,12 +4607,18 @@ Checked against the shipped source (the v0.5.5 tag, cloned at
   completes an interrupted install (F15-6), REQ-015's unacked count, the
   cooldown per endpoint from the last wake not surviving a restart (F15-5), and
   the `unknown` of `mash endpoint status` for another owner (F15-8). Lines this
-  file does not conform to: none that a target output can show. What a target
+  file does not conform to (rev 17): REQ-015's "0 turns it off and status says
+  `off`" (the planner's newer ruling is `no limit set`, used here), REQ-015's
+  unacked count (the planner has ruled delivery, not acknowledgement; section
+  5b says so and the status-views page owns the wording), and the two refusal
+  blocks for a connection the server refuses and for an unreachable server
+  during `credential install` (the contract names the tests, no wording is
+  given; not invented here). Rev 16: none that a target output can show. What a target
   cannot settle and is UNVERIFIED (section 7): REQ-015's "read with the caller's
   own credentials" for the owner's other endpoints (today's permissions are
   own-inbox only; Z6); that a rerun prints the full first-install screen (Z2);
   the exact fix of the trust screens now that `--creds` is gone (Z4). Lines the
-  contract does not say and this file chose: Y5 to Y16 and Z1 to Z8
+  contract does not say and this file chose: Y5 to Y16 and Z1 to Z13
   (section 7).
 
 Not checked: colours (mockups are plain, and no ANSI exists in either binary

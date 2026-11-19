@@ -1,47 +1,76 @@
-# mash status views, DRAFT2
+# mash status views, DRAFT3
 
-Date: 2026-11-19. Status: DRAFT2, paper design only (nothing is built, no
-product code, the targets document is not edited). It answers the maintainer's
-comment on the noon page: "I see no reason to put the mash server details in
-the mash status. There's only one server in your mash and if you don't know
-what it is, it's a problem." He proposes `mash status` (my local agent
-endpoint), `mash server status` (my mash server) and `mash endpoint status`
-(all endpoints by my owner, taking an endpoint path and simple patterns), and
-asks: "Other?", "can you see heartbeat status?" and "What does mash report via
-SAP status, and should it be in mash status?".
+Date: 2026-11-19. Status: DRAFT3, paper design only (nothing is built, no
+product code; the targets document and the READMEs are edited by others). It
+answers the maintainer's comment on the noon page: "I see no reason to put the
+mash server details in the mash status. There's only one server in your mash
+and if you don't know what it is, it's a problem." He proposes `mash status`
+(my local agent endpoint), `mash server status` (my mash server) and `mash
+endpoint status` (all endpoints by my owner, taking an endpoint path and simple
+regexes), and asks: "Other?", "can you see heartbeat status?" and "What does
+mash report via SAP status, and should it be in mash status?".
+
+Two things for Randy, first, because they change what he asked for:
+
+1. HEARTBEAT, LAST SEEN. Heartbeats are sent every 30 s and nothing stores
+   them, so mash cannot say when another endpoint was last alive; do you want
+   that built (new), or is "answers now / does not answer" enough for 0.5.6?
+   This page shows no "last seen" anywhere by default; `--detail` of one
+   endpoint says plainly that no history is kept (section 3, section 4.3).
+2. PATTERNS. You asked for simple regexes; we propose one wildcard, `*`,
+   because it is one grammar to learn, it needs no escaping, and it is safe in
+   a shell and in the directory's own subjects (where `.` and `*` already
+   mean something and a regex's `.` would not). The common case needs no
+   wildcard at all: `acme.demo` means "everything in demo". Wherever a
+   pattern holds `*` the help and every example quote it, because zsh (your
+   shell) stops with "no matches found" before mash runs. The grammar is
+   written once, in section 4.3.
 
 Proposed to Randy, hard cut of `mash who`: the view set `mash status` (this
 endpoint), `mash server status` (the server) and `mash endpoint status
 [<address or pattern>]`, which REPLACES `mash who` with no alias. The lead
 accepted this set as the proposal; the maintainer has not ruled on it yet.
 
-decision 249: where it sits is being decided now.
+Decision 249 owns the SENDER's side of mail: did my message arrive, did the
+session wake. This page does not answer it; section 5 says what a sender can
+see today, and what only decision 249 can add.
 
-(That decision is about mail that waits in an idle mailbox; meanwhile status
-shows the mailbox count, and the backlog wake of REQ-015 covers the rest.)
+What DRAFT3 changes, in one paragraph (the finding-by-finding list is section
+10): the mailbox row counts mail NOT YET DELIVERED to the session, not mail
+unacknowledged (section 4.4, with what must change in the code); one word and
+one source for "is a session there" (`online`, from the presence probe); no
+no remembered "last seen" of any kind; no `MAILBOX` column in the list; one
+timeout (2 s); one rule for `MASH_SERVER`; one pattern grammar; no legend under
+a list; no server detail in `mash status --detail`; no trust record (the
+contract, rev 17, removed it); the plain-text override is
+`MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION` (REQ-010).
 
-DRAFT2 changes DRAFT1 as the lead ruled: the view set is the proposal above;
-`LAST SEEN` is a local record, labelled `LAST SEEN HERE` (section 4.4); the
-`inbox` row is the `mailbox` row of REQ-015 on every screen; `mashctl status`
-keeps its name (section 6, item 9). Section 7 marks what is settled.
-
-No clock: quality first. The fixed-rows idea of the status screen stays (R11 of
-`docs/plans/2026-11-19-cli-targets-mash.md`, DRAFT6c); the rows change.
+The fixed-rows idea of the status screen stays (R11 of
+`docs/plans/2026-11-19-cli-targets-mash.md`, DRAFT8); the rows change.
 
 Sources. The v0.5.5 source at tag v0.5.5 (cited `file:line`, paths relative to
 the repository root), run for the permission facts (section 1: an in-process
 test server with the production permission set, a throwaway test that was
-deleted afterwards). The targets (`docs/plans/2026-11-19-cli-targets-mash.md`,
-cited "targets"), the catalog of today's output
+deleted afterwards). The contract, rev 17 (cited "contract", REQ-004, REQ-010,
+REQ-012, REQ-015), the targets (cited "targets"), the catalog of today's output
 (`docs/plans/2026-11-19-cli-output-catalog-mash.md`), the mashctl lane's
-DRAFT15 (cited "ctl D15", its `mashctl status`, `endpoint list`, `--wide` and
-`issued` parts), the CLI standard 1.2.6 (`~/ops/standards/cli/STANDARD.md`,
-cited "standard") and ADR 0066 (`docs/decisions/0066-...`).
+DRAFT15 (cited "ctl D15"), the CLI standard 1.2.6
+(`~/ops/standards/cli/STANDARD.md`, cited "standard"), ADR 0041, 0046, 0066 and
+0069 (`docs/decisions/`), and the two independent reads of DRAFT2 (the CLI-UX
+critic, "critic", and a junior developer, "junior"; both answered in section
+10). Codes: R-numbers and N-numbers are the targets' rules and notes, REQ-nnn
+and AT-nnn the contract's requirements and acceptance tests, D229 decision 229
+(stance belongs in mash: no SAP protocol change, no new permission without
+Randy), and "decision 249" the lead's open decision about mail that waits in an
+idle mailbox.
 
 Every fenced block that starts with `$` is a TARGET (what a person should see),
 in the style of the targets: owner `acme`, group `demo`, endpoints
 `acme.demo.alice`, `acme.demo.bob` (the person at the keyboard) and
-`acme.lab.carol`, machine `myserver`, server `tls://myserver:4222`. Section 9
+`acme.lab.carol`. One-machine blocks use `tls://localhost:4222` and host
+`localhost`, as the targets do; a reader with the server on another machine
+reads that machine's name. In every block alice and bob have a Claude Code
+session running and carol has none, unless a block says otherwise. Section 9
 measures every fenced block.
 
 ## Contents
@@ -49,76 +78,76 @@ measures every fenced block.
 0. In short
 1. Tone: what a status screen is for
 2. What an endpoint may read (the facts every view stands on)
-3. (b) What mash reports through SAP status today, field by field
-4. (a) The three views: `mash status`, `mash server status`,
-   `mash endpoint status`; 4.4 the last-seen-here record
-5. (c) "Other?": the questions none of the three answer, and the names
-6. (d) Fit with the CLI standard; Agree with ctl
+3. What mash reports through SAP status today, field by field
+4. The three views: 4.1 `mash status`; 4.2 `mash server status`; 4.3 `mash
+   endpoint status`; 4.4 What REQ-015 counts: delivery, not acknowledgement
+5. "Other?": the questions none of the three answer, and the names
+6. Fit with the CLI standard; Agree with ctl
 7. Open questions for the maintainer
-8. What this changes in the targets doc
+8. What this changes in the targets doc and the contract
 9. What I could not verify, and checks run
+10. Disposition of the critic's and the junior's findings
 
 ## 0. In short
 
 The recommended view set (one name per thing):
 
 - `mash status`: this endpoint only. Verdict, then six fixed rows: version,
-  server (reachable or not, no address), config, credentials, mailbox (how
-  many messages are waiting, REQ-015), session (is a Claude Code session
-  serving it).
-- `mash server status`: the server. Address, reachable, encrypted and its
-  certificate, clock, storage, message limit, endpoints registered. Only what
-  an ordinary endpoint's credentials may read; the rest is `mashctl`.
-- `mash endpoint status [<address or pattern>]`: the endpoints of your owner,
-  live: online or offline, `LAST SEEN HERE` (the last time this machine saw it
-  online, from a local record) and `MAILBOX` (a count for your own endpoint,
-  `unknown` for the others). It REPLACES `mash who` (hard cut, no alias). A
-  pattern is three dotted parts, owner literal, `*` inside a part.
+  server (reachable or not, no address), config, credentials, mailbox (how many
+  messages are waiting to be delivered to the session), session (`online` or
+  `offline`).
+- `mash server status`: the server. Verdict, then four fixed rows: address,
+  state, encryption, mail storage; `--detail` adds the rest. Only what an
+  ordinary endpoint's credentials may read; the rest is `mashctl`.
+- `mash endpoint status [<address or pattern>]`: the endpoints of your owner:
+  `online` or `offline` now, and nothing remembered. `--wide` adds version,
+  host and role; one address gives a block. It REPLACES `mash who` (hard cut,
+  no alias).
 - `mashctl endpoint list` stays the administrator's registry (created, type,
-  note, never-seen endpoints included). ONE name for the administrator's
-  status: `mashctl status` stays (about the operator's tool: admin sign-in,
-  shared storage, key directory, config paths), next to `mash server status`
-  (the server as an endpoint's credentials see it); `mashctl server status`
-  is withdrawn. Confirmation from ctl pending (section 6, item 9).
-- Heartbeat and SAP status stay internal. A person sees conclusions
-  (online, session serving), never the payload.
+  note, never-seen endpoints included). `mashctl status` stays (the operator's
+  tool: admin sign-in, shared storage, key directory, config paths).
+- Heartbeat and SAP status stay internal. A person sees conclusions (`online`,
+  `offline`), never the payload, and no history.
 
 His two direct questions, plainly (evidence in section 3):
 
 Can you see heartbeat status? There is a heartbeat: each running session
 publishes a signed one every 30 seconds (`internal/endpoint/service.go:67,
-201-219, 274-287`), but since ADR 0066 nothing in mash listens to it. What
-replaced it is a probe made when someone asks (`client.go:474-500`): "online"
-means "answered the probe just now", about 0.3 seconds when anyone answers and
-2 seconds when nobody does (`client.go:26-32`). No heartbeat time or age is
-stored anywhere, so you can see online now; you cannot see "heartbeat status".
+201-219, 274-287`), but since ADR 0066 nothing in mash listens to it, and
+nothing stores it. What replaced it is a probe made when someone asks
+(`client.go:474-500`): "online" means "answered the probe just now". So you can
+see online now; you cannot see "heartbeat status", and you cannot see when an
+endpoint was last alive. That is the first question at the top.
 
 What does mash report via SAP status, and should it be in `mash status`? The
 `status` verb (`agents.status.<owner>.<group>.<name>`) answers with the same
 eight-field payload as the heartbeat, which has no health data at all: no host,
 no version, no mail count (`service.go:179-199, 260-266`); and no mash command
 asks it. It should NOT be in `mash status`: it says only "I answered", which
-`mash status` shows as the session row and `mash endpoint status` as `online`.
+`mash status` shows as the `session` row and `mash endpoint status` as
+`online`.
 
-What the targets get wrong today, found while reading (details in sections 3
-and 7): the `LAST SEEN 3h ago` of `mash who` cannot be produced by 0.5.5 (the
-time is kept in the memory of one process and is set only for an endpoint that
-answered a probe, `directory.go:25,79,94`; DRAFT2 gives it a local record,
-section 4.4); the claim that `mash who` shows only
-your owner's endpoints (N13) is wrong (`directory.go:89-103` filters nothing,
-presence is the part that is owner-only, `directory.go:64`); and `runs on` in
-`who --detail` is the directory's `host` field, where an administrator says the
+What the targets got wrong, found while reading (details in sections 3 and 7):
+the `LAST SEEN 3h ago` of `mash who` cannot be produced by 0.5.5 (the time is
+kept in the memory of one process and is set only for an endpoint that answered
+a probe, `directory.go:25,79,94`); the claim that `mash who` shows only your
+owner's endpoints (N13) is wrong (`directory.go:89-103` filters nothing,
+presence is the part that is owner-only, `directory.go:64`); `runs on` in `who
+--detail` is the directory's `host` field, where an administrator says the
 endpoint is meant to run, not a live fact for any endpoint but your own
-(`cmd/mash/serve.go:914-922`).
+(`cmd/mash/serve.go:914-922`); and `mash read` does not mark a message read
+today (`cmd/mash/cli.go:134-148`), which the targets' `state` row assumes
+(section 4.4).
 
 ## 1. Tone: what a status screen is for
 
 The maintainer's comment is the whole rule: show a person only what they cannot
-be expected to know, and say it in the words of their own work. Eight rules for
-the three views, each one a question the screen must pass:
+be expected to know, and say it in the words of their own work. Rules for the
+three views, each one a question the screen must pass:
 
-1. The first line is the answer, in a sentence, about the thing asked.
-   `acme.demo.bob: mail works.` A person who reads one line knows.
+1. The first line is the answer, in a sentence, about the thing asked, and it
+   is true as written. `acme.demo.bob: mail works.` If mash did not check, it
+   says `not checked`, never `does NOT work`.
 2. Ask about one thing, answer about that thing. `mash status` is about this
    endpoint; it does not report the server's address, the group, or anyone
    else's state. A neighbour's facts have their own command.
@@ -129,15 +158,36 @@ the three views, each one a question the screen must pass:
    41ms` (that is behind `--detail` or on `mash server status`).
 5. Capitals only for a problem. `NOT REACHABLE`, `REFUSED`. Offline is not a
    problem: an endpoint that nobody is running is normal, and shown in lower
-   case, with exit 0.
+   case, with exit 0. A mailbox over its limit is a warning, shown in lower
+   case in the row and explained in a `warning:` block.
 6. Nothing a person is expected to know is printed. The server address, the
-   endpoint's own address (named once, in the verdict), the version of the
-   protocol under the mail: absent. The address appears in an error or a fix
-   only when it is what the person must check.
-7. One thing, one name, one form: the dotted address, `online`, `offline`,
-   `waiting`. No second word for the same thing (`unread`, `alive`, `lease`).
-8. A fix is a true next step and a command stands alone (R4, R9, R10). A
-   screen that worked ends without a hint: the answer was the point.
+   endpoint's own address (named once, in the verdict). The address appears in
+   an error or a fix only when it is what the person must check.
+7. One thing, one name, one form, one source: the dotted address; `online` and
+   `offline` (a session answered the probe just now, or not); `waiting to be
+   delivered`. No second word for the same thing (`serving`, `unread`,
+   `alive`, `lease`).
+8. A fix is a true next step and a command stands alone (R4, R9, R10); a step
+   that is not a command and cannot clear the problem is labelled `next:`. A
+   screen that worked ends without a hint, and a list has no legend under it:
+   definitions live in `mash help <command>` and in the one-address view.
+9. One alignment per screen: every value starts in the same column, at least
+   two spaces after the longest label of that screen.
+
+Two numbers every view shares, stated once:
+
+- THE TIMEOUT. Every status view waits at most 2 s for the server to answer a
+  connection, and says `the server did not answer within 2s` (the same words,
+  in all three). The contract bounds the new `mash status` connect at 2 s
+  (contract, section 5 "Security, reliability, compatibility, performance").
+  0.5.5's own wait is 20 s (`DefaultOpenTimeout`,
+  `internal/config/config.go:26`), which is too long for a screen whose job is
+  a quick answer; the status views need a shorter bound of their own. The 2 s
+  of `client.go:26-32` (`PresenceCap`) is a different thing: how long the
+  "who is online" probe waits for answers; it is never printed.
+- TIMES. A time on a default screen is in the computer's own time zone, as
+  `09:40` for today and `yesterday 23:10` or `2026-11-17 14:02` before that;
+  `--detail` prints the full stamp with its offset, `2026-11-19 09:40 +00:00`.
 
 ## 2. What an endpoint may read (the facts every view stands on)
 
@@ -181,20 +231,20 @@ What this decides:
   whether it is encrypted and its certificate (and how long it is valid), its
   clock against theirs, the account's storage used and its limits (shared by
   every owner in the account), the stream count against its limit, the largest
-  message, the number of registered endpoints, their own inbox's fill, kept
-  time and counts, and who is online in their OWN owner.
-- A person CANNOT see: the server's connections, uptime, software of other
-  servers, load or logs (`$SYS`); any other inbox; the list of streams; who is
-  online in ANOTHER owner. For the last: an endpoint publishes replies only
-  into `_INBOX.<its owner>.>` (`permissions.go:19-24,63`), so another owner's
-  agents cannot answer it, and `applyPresence` drops any answer whose
-  metadata owner is not the caller's (`directory.go:64`). That is a fact, not
-  a rule mash chose: "an address pattern never crosses owners" (section 4) is
-  the only honest rule, because beyond the owner nothing is knowable.
+  message, the number of registered endpoints, their own inbox's counts, and
+  who answers now in their OWN owner.
+- A person CANNOT see: the server's connections, uptime, load or logs
+  (`$SYS`); any other inbox; the list of streams; who is online in ANOTHER
+  owner. For the last: an endpoint publishes replies only into
+  `_INBOX.<its owner>.>` (`permissions.go:19-24,63`), so another owner's agents
+  cannot answer it, and `applyPresence` drops any answer whose metadata owner
+  is not the caller's (`directory.go:64`). That is a fact, not a rule mash
+  chose: "an address pattern never crosses owners" (section 4.3) is the only
+  honest rule.
 - All of that beyond a person's rights is `mashctl` (it signs in as the
   administrator; ctl D15 `status`, `audit`, `issued`, `limits`, `permissions`).
 
-## 3. (b) What mash reports through SAP status today, field by field
+## 3. What mash reports through SAP status today, field by field
 
 Three different messages carry "status" and are easy to confuse:
 
@@ -216,39 +266,36 @@ families, each with what a person should see and where:
 
 | field | where it comes from | what a person should see | where |
 |---|---|---|---|
-| `agent` = `claude-code` | `service.go:183-199`, `sap/subjects.go:8` | the program an endpoint runs | endpoint status `--detail` (`program`) |
+| `agent` = `claude-code` | `service.go:183-199`, `sap/subjects.go:8` | nothing: it is the same on every row | `--json` only |
 | `owner` | `service.go:183-199` | nothing: it is in the address | nowhere |
-| `session` (the storage name `acme_demo_bob`) | `service.go:183-199` (`e.key`) | nothing (R3: storage name only behind `--detail`) | nowhere; `--detail` of the owner's views at most |
+| `session` (the storage name `acme_demo_bob`) | `service.go:183-199` (`e.key`) | nothing (R3: storage name only behind `--detail`) | one-address `--detail` |
 | `instance_id` (the service's random id) | `service.go:183-199`, `Instance()` `:166-172` | nothing: it changes with every serve | nowhere |
 | `ts` (the second it was made) | `service.go:183-199` | nothing: it is "now" | nowhere (internal) |
 | `interval_s` = 30 | `service.go:67,189` | nothing | nowhere (internal) |
 | `protocol_version` = 0.3 | `sap/subjects.go:9` | nothing a newcomer can act on | nowhere (internal) |
-| `endpoints.prompt.subject`, `endpoints.mail.subject` | `service.go:183-199` | nothing (`mail subject` is ctl `show --detail`) | nowhere |
-| `endpoints.prompt.metadata` (`max_payload` 1MB, `attachments_ok` false, `min_sender_trust` signed) | `service.go:174-176` | nothing; a live prompt that is too long is refused with its own error | nowhere |
-| `endpoints.mail.metadata` (`durable` true) | `service.go:183-199` | nothing | nowhere |
+| `endpoints.*` (subjects, `max_payload`, `attachments_ok`, `min_sender_trust`, `durable`) | `service.go:174-199` | nothing; a live prompt that is too long is refused with its own error | nowhere |
 | signature header on the heartbeat | `service.go:208-216` | nothing | nowhere |
-| `$SRV.INFO` `version` (the answering mash) | `service.go:230-231`, `CurrentVersion()` | the version a peer runs, for an online peer | endpoint status (`--wide` `VERSION`, one-address view) |
+| `$SRV.INFO` `version` (the answering mash) | `service.go:230-231`, `CurrentVersion()` | the version a peer runs, for an endpoint that answers | `--wide` `VERSION`, one-address view |
 | `$SRV.INFO` `description`, `name` | `service.go:230,232` | nothing | nowhere |
 | `$SRV.INFO` metadata `agent`, `owner`, `group`, `instance` | `service.go:233-238` | the address | the address column |
 | `$SRV.INFO` metadata `user_nkey`, `account`, `id_sig`, `mail_subject` | `service.go:233-238` | nothing (the key is checked against the directory, then dropped) | nowhere (internal; `directory.go:54-85`) |
-| online (the probe) | `client.go:474-500`, `directory.go:54-103` | online or offline | endpoint status `STATE`; `session` row of `mash status` (own) |
-| last seen | `directory.go:25,79,94` (memory of one process) | when it last answered | endpoint status `LAST SEEN HERE`, from a local record (section 4.4) |
+| online (the probe) | `client.go:474-500`, `directory.go:54-103` | `online` or `offline` | `STATE` of the list, the one-address block; the `session` row of `mash status` |
+| last seen | `directory.go:25,79,94` (memory of one process) | NOTHING: no source in 0.5.5 and none proposed (first question at the top) | one-address `--detail` says "not recorded" |
 | directory record: owner, group, instance | `store/store.go:223-228` | the address | address column |
-| directory record: `agent` | `store.go:227` | the program | `--detail` |
+| directory record: `agent` | `store.go:227` | nothing | `--json` |
 | directory record: account, user, mail_subject | `store.go:228-230` | nothing | nowhere (internal) |
-| directory record: created | `store.go:231` | when it was registered | endpoint status `--detail` (`registered`) |
-| directory record: note, role, host, description, caps, labels | `store.go:232-242` | what it is for; where it is meant to run (`host`) | `--wide` / `--detail`; `--role`, `--label`, `--cap` filters |
-| own lease: `host`, `since`, `version`, `commit`, `pid`, `machine` | `endpoint.go:147-168` | whether a session serves this endpoint, since when, on which machine | `mash status` row `session`; `--detail` for host |
+| directory record: created | `store.go:231` | when it was registered | one-address `--detail` (`registered`) |
+| directory record: note, role, host, description, caps, labels | `store.go:232-242` | what it is for; where it is meant to run (`host`) | `--wide` / `--detail`; `--role`, `--label`, `--cap`, `--match` filters |
+| own lease: `host`, `since`, `version`, `commit`, `pid`, `machine` | `endpoint.go:147-168` | when and where this session started | `mash status --detail` row `session started` |
 | own lease: `mcp_seen`, `launch_token`, `ppid`, `session` | `endpoint.go:155-171` | nothing | nowhere (internal, takeover logic) |
-| own lease: `waking_pending` + `_at` | `endpoint.go:172-178`, `waking.go` | nothing: it counts mail that should WAKE, not the backlog | nowhere (the mailbox row uses the inbox's own unacknowledged count) |
-| own inbox: counts, fill, evictions | `eviction.go:22-40` | mail waiting (pending plus delivered-unacknowledged); a warning when mail was lost, the inbox is nearly full, or the count passes the limit | `mash status` row `mailbox` and a `warning:`; `MAILBOX` of your own endpoint |
-| clock offset | `endpoint.go:855-868`, `status.go:325-345` | only when it is wrong (beyond 10s) | `mash server status` row `clock` |
-| server `max_payload` | `mail.go:715,798` | the largest message | `mash server status` row `message limit` |
+| own lease: `waking_pending` + `_at` | `endpoint.go:172-178`, `waking.go` | nothing: it counts mail that should WAKE, not the backlog | nowhere; section 4.4 adds the lease's `backlog` beside it |
+| own inbox: counts, fill, evictions | `eviction.go:22-40` | a warning when mail was lost or the inbox is nearly full | `warning:` of `mash status` |
+| clock offset | `endpoint.go:855-868`, `status.go:325-345` | only when it is wrong (beyond 10s) | a `warning:` of `mash server status` |
+| server `max_payload` | `mail.go:715,798` | the largest message | `mash server status --detail` |
 
 What `mash who` uses today (`cmd/mash/cli.go:166-179`, `clientNeeds`
-`:211-213`):
-the whole directory (`FullDirectory`, every owner), a presence probe
-(`Refresh`), and with `--long` the caller's own lease only (`liveLeases`,
+`:211-213`): the whole directory (`FullDirectory`, every owner), a presence
+probe (`Refresh`), and with `--long` the caller's own lease only (`liveLeases`,
 `serve.go:914-922`). Its JSON carries `last_seen` only when the probe was
 answered (`whofilter.go:130-132`).
 
@@ -270,26 +317,31 @@ verifies and its key is the directory's key for that name (`directory.go:
 What does "online" mean, and how late is it? Online means "answered the latest
 probe" (`directory.go:89-103`; the 90-second `OnlineWindow` of the old
 heartbeat rule survives only for a process that has not probed yet,
-`directory.go:17-19`). The window closes 300ms after the last answer, or at 2s
-when nobody answers (`PresenceQuiet`, `PresenceCap`, `client.go:26-32`); ADR
-0066 measured about 312ms. Inside a session the result is cached 30 seconds
-(`presence.go:11`); `mash who` from a shell probes every time. The cost of the
-cap: an endpoint that answers after the quiet window shows offline for that
-ask (ADR 0066, Consequences).
+`directory.go:17-19`). The probe window closes 300ms after the last answer, or
+at 2s when nobody answers (`PresenceQuiet`, `PresenceCap`, `client.go:26-32`);
+ADR 0066 measured about 312ms. The cost of the cap: an endpoint that answers
+after the quiet window shows offline for that ask (ADR 0066, Consequences).
+`mash status` and `mash endpoint status` therefore cost about 0.3 s more when
+anyone answers and up to 2 s more when nobody does. If a request addressed to
+the one endpoint (`agents.status.<owner>.<group>.<name>`, which a serving
+endpoint answers, `service.go:260-266`) fails at once with "no responders" when
+nobody serves, a one-address check would cost milliseconds instead of 2 s; I did
+not run that (section 9).
 
 Is the time of the last heartbeat or answer kept? No. `lastSeen` lives in the
 process's memory (`endpoint.go:100`, set at `directory.go:79`), so a one-shot
-`mash who` knows a last-seen time only for the endpoints that answered it, and
-that time is "now". An endpoint that was online yesterday shows no last-seen at
-all today. The target `LAST SEEN 3h ago` (targets, `who`, lines 2663-2684) has
-no source in 0.5.5. Section 4.4 says what the local record is.
+command knows a last-seen time only for the endpoints that answered it, and
+that time is "now". The target `LAST SEEN 3h ago` (targets, `who`) has no
+source in 0.5.5, and a record kept on this machine would measure how long
+since you last asked, not when the endpoint went away, so none is proposed.
+Building a real history is the first question at the top.
 
 Should the SAP status payload be in `mash status`? No. Every field is either
 internal (instance id, timestamp, interval, subjects, protocol) or a limit of
-the live-prompt path nobody asked about. What a person asks, "is it serving,
-is it reachable", is a conclusion, and the screens show it as one.
+the live-prompt path nobody asked about. What a person asks, "is a session
+there, is it reachable", is a conclusion, and the screens show it as one.
 
-## 4. (a) The three views
+## 4. The three views
 
 ### 4.1 `mash status`: this endpoint only
 
@@ -302,56 +354,75 @@ The six fixed rows, in this order, in every state, each with its reason:
 
 | row | why it is there, in one line |
 |---|---|
-| `version` | which mash this is: the first thing anyone asks, and the plugin-drift warning hangs on it |
+| `version` | which mash this is: the first thing anyone asks |
 | `server` | can this machine reach the server, encrypted and trusted; the one outside fact mail needs; NO address |
-| `config` | is there a configuration whose trust files agree (R21) |
+| `config` | is there a configuration mash can use |
 | `credentials` | is this endpoint's own file there, private, and accepted by the server |
-| `mailbox` | how many messages wait, against the limit of REQ-015: the first thing a person wants to know once it works |
-| `session` | does a Claude Code session serve this endpoint: kept because it says why mail, or the backlog wake of REQ-015, did or did not reach a session on its own; it costs one lease read and is `not checked` without sign-in |
+| `mailbox` | how many messages are waiting to be delivered to the session, against the limit of REQ-015 (section 4.4) |
+| `session` | is a Claude Code session there: it says why mail, or the backlog wake of REQ-015, did or did not reach a session on its own |
 
 Not rows: the endpoint (it is in the verdict and in `--detail`), how it was
-chosen (`--detail`), the server's address (`mash server status`; in an error
-or fix only when it is the thing to check; `--detail` keeps a `server` fact
-row, question 3), the group and owner counts (the verdict line of `mash
-endpoint status`), heartbeat, hooks, clock, name rule, relay trace (`--detail`
-or internal).
+chosen (`--detail`), the server's address and any other server fact (`mash
+server status`; in an error or fix only when it is the thing to check), the
+group and owner counts (the verdict line of `mash endpoint status`: they are
+about other endpoints, and counting them reads the whole directory and probes
+everyone; the maintainer's own condition, "if that takes too long, nevermind",
+is why they are not in the screen that must be quick. The `session` row does
+probe, but for one endpoint, section 3), heartbeat, hooks, clock, relay trace
+(`--detail` or internal).
 
 Row values, the complete lists (anything else is a defect):
 
 - `version`: the number.
-- `server`: `reachable`; `reachable, NOT ENCRYPTED` (the override allows a
-  plain address); `reachable, certificate NOT TRUSTED`; `NOT REACHABLE`;
-  `NOT ENCRYPTED (refused; not connected)`; `not checked` with a reason when
-  mash did not ask. No time and no address: a row that says `reachable` was
-  checked just now, so the DRAFT4 defect (`alive` with a past time) cannot
-  occur, and the `last reached` of N10 is no longer needed here.
+- `server`: `reachable, encrypted`; `reachable, NOT ENCRYPTED` (the test-server
+  override allows a plain address); `reachable, certificate NOT TRUSTED`; `NOT
+  REACHABLE`; `NOT ENCRYPTED (refused; not connected)`; `not checked` with a
+  reason when mash did not ask. No time and no address: a row that says
+  `reachable` was checked just now.
 - `config`, `credentials`: as the targets (`ok`, `MISSING`, `REFUSED`,
   `UNSAFE`, `not checked`).
-- `mailbox` (REQ-015): `0 waiting`; `2 waiting`; `17 waiting, OVER THE LIMIT
-  OF 15` (a warning: the verdict says `mail works (1 warning)`, exit 0);
-  `off` (the config key `mailbox_limit` is 0); `not checked`. The count is
-  the BACKLOG: messages delivered to the endpoint's inbox that the inbox
-  consumer has not acknowledged, pending plus delivered-unacknowledged. A
-  message listed in a digest still counts, and reading it with `mash read`
-  does not lower the count. The count comes from the endpoint's own inbox and
-  consumer, which its credentials may read (section 2). The limit is the
-  config key `mailbox_limit` (default 15). When the count passes the limit,
-  `mash serve` wakes the session at once, whatever the kind of the messages;
-  the cooldown is per endpoint, from the last backlog wake, at most one wake
-  per 10 minutes, and it does not survive a restart of `mash serve`. When
-  mail was lost or the inbox is nearly full, a second `warning:` follows
-  (`eviction.go:22-60`).
-- `session`: `serving since 09:12`; `not running`; `not checked`. From the
-  endpoint's own lease (section 2), and fresh within 90 seconds
-  (`store.LeaseTTL`, `store.go:22`; the lease is renewed every 30s,
-  `endpoint.go:30`).
+- `mailbox` (REQ-015, section 4.4): `0 waiting to be delivered`; `2 waiting to
+  be delivered`; `17 waiting to be delivered, over the limit of 15` (a warning:
+  the verdict says `mail works (1 warning)`, exit 0); `3 waiting to be
+  delivered, no limit set` (the config key `mailbox_limit` is 0; mash never
+  wakes the session for a backlog); `not checked`. In order: how many are
+  waiting to be delivered; whether that is over the limit; when it is, the
+  `warning:` says `mash woke the session at 09:40`; and the one thing a person
+  does if it stays over, `the session is not taking mail: look at it`. "Limit"
+  means one thing: the number that triggers a wake. It is not a capacity: the
+  inbox's capacity is 16MB or 30 days, a separate warning (below).
+- `session`: `online`; `offline (mail waits for the next session)`; `not
+  checked`. `online` means a Claude Code session answered the presence probe
+  for this endpoint just now, the same words and the same source as `STATE` in
+  `mash endpoint status` (section 4.3). The probe, not the lease, is the one
+  source: the lease says what a session wrote up to 90 s ago
+  (`store.LeaseTTL`, `store.go:22`), the probe says who answers now, and it is
+  the only thing that can be asked about another endpoint at all, so the same
+  question has the same answer wherever it is asked. The lease still supplies
+  facts that are not a state: when and where this session started
+  (`--detail`) and, new in this draft, when mash last woke it (section 4.4).
+  Cost: about 0.3 s more when a session answers, up to 2 s more when none does.
 
-Verdict forms are the targets': `<endpoint>: mail works.`, `... (1 warning).`,
-`... mail does NOT work: <why>.`, `mail does NOT work: <why>.` when no endpoint
-is known. `session: not running` does not change the verdict: mail waits.
+When mail was lost or the inbox is nearly full, a second `warning:` follows
+(`eviction.go:22-60`).
+
+Verdict forms are the targets', plus one: `<endpoint>: mail works.`, `...
+(1 warning).`, `... mail does NOT work: <why>.`, `mail does NOT work: <why>.`
+when no endpoint is known, and `<endpoint>: not checked: <why>.` when mash did
+not ask (the environment rule, below). `session: offline` does not change the
+verdict: mail waits.
+
+THE ENVIRONMENT RULE, one rule for `MASH_SERVER` and `MASH_CA`. A value that
+differs from what `config.json` holds is not used: nothing vouches for it, so
+mash asks nothing and the verdict is `not checked` (exit 1, not ready). The one
+exception is the test-server override: a `nats://` address in `MASH_SERVER`
+together with `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1` (REQ-010) is used, with
+a warning, and the verdict stays `mail works (1 warning)`. A value equal to
+`config.json` is not an override and is not reported. So a tls address in
+`MASH_SERVER` is never used, and a plain one is used only with the variable.
 
 Exit codes as the contract (section 2 of the targets): 0 mail works, 1 it does
-not, 4 refused, 6 unreachable, 2 usage.
+not or was not checked, 4 refused, 6 unreachable, 2 usage.
 
 Healthy:
 
@@ -361,49 +432,61 @@ $ mash status
 acme.demo.bob: mail works.
 
   version      0.5.6
-  server       reachable
+  server       reachable, encrypted
   config       ok
   credentials  ok
-  mailbox      2 waiting
-  session      serving since 09:12
+  mailbox      2 waiting to be delivered
+  session      online
 ```
 
-Healthy, `--detail`. The seven rows of REQ-012 are unchanged and come after
-the six. The group counts leave (they are the verdict of `mash endpoint
-status`), the clock and the answer time leave (they are `mash server status`);
-the configured server address is one fact row (question 3) and the mailbox
-limit is one fact row (an eighth fact row, which REQ-012 needs a note for):
+Healthy, `--detail`. The six rows come first, then the facts; one value column
+for the whole screen. REQ-012's rows stay (config file, CA file, credentials
+file, selected endpoint, how it was chosen); the group counts, the clock and
+every server fact are gone (they are `mash endpoint status` and `mash server
+status`), and so are the trust rows (the contract, rev 17, has no trust
+record). Added: the mailbox limit, mail named in a digest and not read, when
+and where the session started:
 
 <!-- packet: status-detail -->
 ```
 $ mash status --detail
 acme.demo.bob: mail works.
 
-  version      0.5.6
-  server       reachable
-  config       ok
-  credentials  ok
-  mailbox      2 waiting
-  session      serving since 09:12
+  version           0.5.6
+  server            reachable, encrypted
+  config            ok
+  credentials       ok
+  mailbox           2 waiting to be delivered
+  session           online
 
   config file       /home/bob/.config/mash/config.json
-  ca                /home/bob/.config/mash/ca.pem
+  ca file           /home/bob/.config/mash/ca.pem
   credentials file  /home/bob/.config/mash/acme.demo.bob.creds
-  trust file        /home/bob/.config/mash/trust.json
-  trust             matches config (generation 1; the account acme)
   endpoint          acme.demo.bob
   chosen by         the only one installed here
-  mailbox limit     15 (mailbox_limit in config.json)
+  mailbox limit     15 (config key mailbox_limit)
+  listed, not read  0 (named in a digest, not read yet)
+  session started   2026-11-19 09:12 +00:00 on localhost
+  claude code       set up to tell an idle session about new mail
+  token expires     never
+  commit            e389eaf
+  settings          no MASH_* variable is set
+  server details    mash server status
+```
 
-  server        tls://myserver:4222
-  commit        e389eaf
-  token expires never
-  storage name  acme_demo_bob
-  name rule     none set (no list limits which names are accepted)
-  session       on myserver since 2026-11-19 09:12 UTC
-  claude code   plugin hooks installed; mash may wake an idle session
-  relays seen   0 messages relayed through another endpoint
-  settings      MASH_* none set; the server and CA come from config.json
+The session is not running (nothing to wake; mail waits):
+
+<!-- packet: status-offline -->
+```
+$ mash status
+acme.demo.bob: mail works.
+
+  version      0.5.6
+  server       reachable, encrypted
+  config       ok
+  credentials  ok
+  mailbox      2 waiting to be delivered
+  session      offline (mail waits for the next session)
 ```
 
 Claude Code is not set up to wake an idle session (warning, exit 0; the
@@ -415,11 +498,11 @@ $ mash status
 acme.demo.bob: mail works (1 warning).
 
   version      0.5.6
-  server       reachable
+  server       reachable, encrypted
   config       ok
   credentials  ok
-  mailbox      1 waiting
-  session      serving since 09:12
+  mailbox      1 waiting to be delivered
+  session      online
 
 warning: an idle Claude Code session is not woken by new mail; the mail
          waits for its next prompt.
@@ -427,9 +510,10 @@ fix: start Claude Code with the mash channel, from the terminal you want it in:
   claude --dangerously-load-development-channels plugin:mash@mash
 ```
 
-The mailbox is over its limit (warning, exit 0; AT-008). The count is the
-backlog, and reading a message does not lower it, so the warning says so and
-does not promise a way out that the contract does not give (section 9):
+The mailbox is over its limit and a session is there (warning, exit 0; AT-008).
+This is the screen the maintainer asked for ("more than X messages stack up
+... undelivered"), so it says what the number counts, what the limit is, that
+mash has acted, and the one thing a person does:
 
 <!-- packet: status-mailbox-over -->
 ```
@@ -437,16 +521,59 @@ $ mash status
 acme.demo.bob: mail works (1 warning).
 
   version      0.5.6
-  server       reachable
+  server       reachable, encrypted
   config       ok
   credentials  ok
-  mailbox      17 waiting, OVER THE LIMIT OF 15
-  session      serving since 09:12
+  mailbox      17 waiting to be delivered, over the limit of 15
+  session      online
 
-warning: 17 messages are waiting here, over the limit of 15. Reading a
-         message does not lower the count.
-fix: see what is waiting:
-  mash inbox
+warning: 17 messages are waiting to be delivered to the session, more than
+         the limit of 15. The limit is the number that triggers a wake: mash
+         woke the session at 09:40, and wakes it again at most every 10
+         minutes while more than 15 wait. A message is delivered when the
+         session is shown it or reads it.
+next: if the count stays over the limit, the session is not taking mail:
+      look at it.
+```
+
+Before the first wake the warning says `mash wakes the session at most every 10
+minutes, and has not yet` instead of the time (the 10 minutes count from the
+start of `mash serve`, so a restart never wakes sooner). `next:` is not `fix:`:
+it is not a command, and no command clears the count; delivery does.
+
+The mailbox is over its limit and no session is there (warning, exit 0). There
+is no one to wake and nothing to look at:
+
+<!-- packet: status-mailbox-over-offline -->
+```
+$ mash status
+acme.demo.bob: mail works (1 warning).
+
+  version      0.5.6
+  server       reachable, encrypted
+  config       ok
+  credentials  ok
+  mailbox      17 waiting to be delivered, over the limit of 15
+  session      offline (mail waits for the next session)
+
+warning: 17 messages are waiting to be delivered, more than the limit of 15.
+         No session is running, so mash has no one to wake: the mail waits
+         for the next session.
+```
+
+The limit is turned off (`mailbox_limit` 0; exit 0, no warning):
+
+<!-- packet: status-mailbox-off -->
+```
+$ mash status
+acme.demo.bob: mail works.
+
+  version      0.5.6
+  server       reachable, encrypted
+  config       ok
+  credentials  ok
+  mailbox      3 waiting to be delivered, no limit set
+  session      online
 ```
 
 Server not reachable (exit 6). The address appears in the fix only: it is the
@@ -465,7 +592,7 @@ acme.demo.bob: mail does NOT work: the server did not answer within 2s.
   mailbox      not checked
   session      not checked
 
-fix: check that the server at tls://myserver:4222 is running, and that
+fix: check that the server at tls://localhost:4222 is running, and that
      "server" in ~/.config/mash/config.json is right.
 ```
 
@@ -477,7 +604,7 @@ $ mash status
 acme.demo.bob: mail does NOT work: the server refused its credentials.
 
   version      0.5.6
-  server       reachable
+  server       reachable, encrypted
   config       ok
   credentials  REFUSED (deleted, or its key was reissued)
   mailbox      not checked
@@ -498,7 +625,7 @@ $ mash status
 acme.demo.bob: mail does NOT work: this endpoint was DELETED on the server.
 
   version      0.5.6
-  server       reachable
+  server       reachable, encrypted
   config       ok
   credentials  REFUSED (endpoint DELETED)
   mailbox      not checked
@@ -524,15 +651,17 @@ mail does NOT work: mash has no configuration on this machine.
   mailbox      not checked
   session      not checked
 
-fix: install the credentials your server made. mash asks for the server
-     address and the CA fingerprint that whoever runs your mash server gave
-     you. Add --ca <ca file> for a server with its own CA:
+fix: ask whoever runs your mash server for a key file and a token file.
+     mash asks for the server address and the CA fingerprint they gave you.
+     Add --ca <ca file> for a server with its own CA:
   mash credential install --key <key file> --token <token file>
 ```
 
 Several endpoints installed and none chosen (exit 1). The server needs no
 credentials, so it is still checked; the candidates move from the credentials
-row to the fix, where they are acted on:
+row to the fix, where they are acted on. The first fix sets it for good (a
+command that writes the key does not exist in 0.5.6, so the person edits the
+file), the second for one shell:
 
 <!-- packet: status-choose -->
 ```
@@ -540,26 +669,27 @@ $ mash status
 mail does NOT work: 2 endpoints are installed here and none is chosen.
 
   version      0.5.6
-  server       reachable
+  server       reachable, encrypted
   config       ok
   credentials  not checked (no endpoint is chosen)
   mailbox      not checked
   session      not checked
 
 fix: mash never guesses between acme.demo.alice and acme.demo.bob. To use
-     acme.demo.alice, add this line to ~/.config/mash/config.json:
-    "endpoint": "acme.demo.alice"
-     For this shell only, and the Claude Code you start from it:
-  export MASH_ENDPOINT=acme.demo.alice
+     acme.demo.bob, set "endpoint" to "acme.demo.bob" in
+     ~/.config/mash/config.json. For this shell only, and the Claude Code
+     you start from it:
+  export MASH_ENDPOINT=acme.demo.bob
 ```
 
-Plain text with the override (warning, exit 0). Both addresses of the override
-are in the warning, because the person must see what is overriding what:
+Plain text with the test-server override (warning, exit 0). Both addresses of
+the override are in the warning, because the person must see what is
+overriding what:
 
 <!-- packet: status-plain-warning -->
 ```
-$ export MASH_SERVER=nats://myserver:4222
-$ export MASH_INSECURE_PLAINTEXT=1
+$ export MASH_SERVER=nats://localhost:4222
+$ export MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1
 $ mash status
 acme.demo.bob: mail works (1 warning).
 
@@ -567,77 +697,83 @@ acme.demo.bob: mail works (1 warning).
   server       reachable, NOT ENCRYPTED
   config       ok
   credentials  ok
-  mailbox      2 waiting
-  session      serving since 09:12
+  mailbox      2 waiting to be delivered
+  session      online
 
 warning: anyone on the network can read your credentials and your mail.
          MASH_SERVER overrides the server in config.json for this run:
-         nats://myserver:4222 instead of tls://myserver:4222. It is allowed
-         only because MASH_INSECURE_PLAINTEXT is set (test servers only).
+         nats://localhost:4222 instead of tls://localhost:4222. It is allowed
+         only because MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set (test
+         servers only).
 fix: stop overriding it in this shell:
-  unset MASH_SERVER MASH_INSECURE_PLAINTEXT
+  unset MASH_SERVER MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION
 ```
 
-The environment overrides the server (not ready, exit 1; mash does not ask
-that server). A `MASH_CA` that differs reads the same with `MASH_CA`:
+The environment names a server that `config.json` does not have (not checked,
+exit 1; mash does not ask that server). A `MASH_CA` that differs reads the same
+with `MASH_CA`:
 
 <!-- packet: status-env-override -->
 ```
 $ export MASH_SERVER=tls://other:4222
 $ mash status
-acme.demo.bob: mail does NOT work: MASH_SERVER overrides config.json.
+acme.demo.bob: not checked: MASH_SERVER is not the server in config.json.
 
   version      0.5.6
-  server       not checked (MASH_SERVER overrides config.json)
+  server       not checked (MASH_SERVER is not the server in config.json)
   config       ok
   credentials  not checked (the server was not asked)
   mailbox      not checked
   session      not checked
 
 fix: MASH_SERVER is overriding the server in config.json for this run
-     (tls://other:4222 instead of tls://myserver:4222). Stop overriding
+     (tls://other:4222 instead of tls://localhost:4222). Stop overriding
      it in this shell:
   unset MASH_SERVER
 ```
 
-The other states keep the targets' text with the two rows changed the same
-way: a plain address without the override (`server  NOT ENCRYPTED (refused;
-not connected)`, exit 1), the override set with a tls address (a warning;
-`server  reachable`), a credentials file that is not private (`credentials
-UNSAFE ...`, exit 1) or missing, and the trust files that disagree (`config
-REFUSED (disagrees with the trust record)`, `server  not checked (the trust
-files disagree)`). In a running session the MCP `status` tool returns the
-same six facts (section 8). With `mailbox_limit` 0 the row says `off`.
+The other states keep the targets' text with the rows changed the same way: a
+plain address without the override (`server  NOT ENCRYPTED (refused; not
+connected)`, exit 1), the override set with a tls address (a warning;
+`server  reachable, encrypted`, and the warning says the variable is set and
+not used), and a credentials file that is not private (`credentials  UNSAFE
+...`, exit 1) or missing. In a running session the MCP `status` tool returns
+the same six facts (section 8). The plugin-drift warning that hangs on the
+`version` row is the targets' and is not redrawn here (I could not determine
+its fix command: `plugin install` is out of 0.5.6, section 9).
 
 ### 4.2 `mash server status`: the server
 
 The question: "is my server up, is it safe to talk to, and has it room?" The
 rows are what section 2 shows an endpoint may read, nothing from `$SYS` and
-nothing that asks a denied subject. It needs the credentials only for the
-storage rows (JetStream answers only a signed-in endpoint); reachability and
-encryption need none, so they are shown even when the credentials are missing
-or refused, and the storage rows say `not checked (<why>)`.
+nothing that asks a denied subject. Reachability and encryption need no
+credentials; only the storage row does (JetStream answers only a signed-in
+endpoint). A credentials problem is a fact about this endpoint, not about the
+server, so it never turns a healthy server into a failed screen (below).
 
-Fixed rows, in this order, in every state:
+Four fixed rows, in this order, in every state:
 
 | row | why, in one line | source |
 |---|---|---|
 | `address` | the one place the address is shown, as configured, with its scheme | config |
 | `state` | reachable, and how fast it answered (the connection and one request) | connect time |
-| `encryption` | encrypted or not; the certificate trusted, and until when; a problem says which | the TLS handshake and chain |
-| `clock` | the server's clock against this computer's: a skew beyond 10s makes peers look offline and mail `[stale]` (`status.go:321-345`) | `ts` of a stream or account answer |
-| `mail storage` | space used of the limit (the account is shared by every owner) | `$JS.API.INFO` |
-| `message limit` | the largest message the server accepts | the server's greeting |
-| `endpoints` | how many are registered | directory stream info |
+| `encryption` | encrypted or not; the certificate trusted; a problem says which | the TLS handshake and chain |
+| `mail storage` | what the server holds for all owners, in use now; `NEARLY FULL` past 90% of its limit | `$JS.API.INFO` |
 
-`--detail` adds, same screen plus rows: `server software` (NATS 2.15.1),
+`--detail` adds, in the same screen: `server software` (NATS 2.15.1),
 `certificate` (checked against which CA file), `certificate ends` (the date and
-the days left), `streams` (7 of 50 in use; a stream holds an inbox or mash's
-own records), `inbox rules` (each inbox keeps 16MB or 30 days of mail:
-`permissions` allow the endpoint's own stream info, `eviction.go:31-37`) and
-`storage set aside` (the server's `reserved_storage`, 125MB here, which counts
-toward the limit; read as a number only, see section 9). A certificate within
-30 days of its end is a warning (question 11).
+the days left; within 30 days is a warning), `clock` (the server's against this
+computer's; beyond 10 s it is a `warning:` too, because a skew that large makes
+peers look offline and mail `[stale]`, `status.go:321-345`), `storage limit`,
+`mail stores` (a store holds one inbox, or mash's own records), `inbox rules`
+(each inbox keeps 16MB or 30 days of mail, `eviction.go:31-37`), `message
+limit` (the largest message) and `endpoints` (how many are registered, ALL
+owners: the directory holds every owner's, so this number can be larger than
+the "endpoints of acme" of `mash endpoint status`). The reserved storage the
+server reports (125MB in my run) is not shown: what counts toward it is
+unverified (section 9), and a row that answers "has it room" must not stand on
+it. Each fact appears once on a screen: the certificate's date is in
+`certificate ends` only.
 
 Healthy:
 
@@ -646,13 +782,10 @@ Healthy:
 $ mash server status
 The server is reachable and encrypted.
 
-  address        tls://myserver:4222
-  state          reachable (answered in 41ms)
-  encryption     encrypted; certificate trusted until 2027-02-01
-  clock          1s ahead of this computer
-  mail storage   1KB used of 256MB
-  message limit  1MB
-  endpoints      3 registered
+  address       tls://localhost:4222
+  state         reachable (answered in 41ms)
+  encryption    encrypted; certificate trusted
+  mail storage  1KB in use
 ```
 
 Healthy, `--detail`:
@@ -662,100 +795,107 @@ Healthy, `--detail`:
 $ mash server status --detail
 The server is reachable and encrypted.
 
-  address        tls://myserver:4222
-  state          reachable (answered in 41ms)
-  encryption     encrypted; certificate trusted until 2027-02-01
-  clock          1s ahead of this computer
-  mail storage   1KB used of 256MB
-  message limit  1MB
-  endpoints      3 registered
+  address           tls://localhost:4222
+  state             reachable (answered in 41ms)
+  encryption        encrypted; certificate trusted
+  mail storage      1KB in use
 
   server software   NATS 2.15.1
   certificate       checked against /home/bob/.config/mash/ca.pem
   certificate ends  2027-02-01 (in 74 days)
-  streams           7 of 50 in use (an inbox each, and mash's own records)
+  clock             1s ahead of this computer
+  storage limit     256MB
+  mail stores       7 of 50 in use (one per endpoint, and mash's own records)
   inbox rules       each inbox keeps up to 16MB and 30 days of mail
-  storage set aside 125MB of the 256MB, counted against the limit
+  message limit     1MB for one message
+  endpoints         3 registered, all owners
 ```
 
-Server not reachable (exit 6; every row after `state` is `not checked`):
+Server not reachable (exit 6; every row after `state` is `not checked`). The
+same sentence as `mash status` and `mash endpoint status`:
 
 <!-- packet: server-unreachable -->
 ```
 $ mash server status
-The server is NOT REACHABLE.
+The server did not answer within 2s.
 
-  address        tls://myserver:4222
-  state          NOT REACHABLE (no answer within 2s)
-  encryption     not checked
-  clock          not checked
-  mail storage   not checked
-  message limit  not checked
-  endpoints      not checked
+  address       tls://localhost:4222
+  state         NOT REACHABLE
+  encryption    not checked
+  mail storage  not checked
 
 fix: check that the server is running and that "server" in
      ~/.config/mash/config.json is right.
 ```
 
-Plain text with the override (a warning, exit 0; the connection is allowed, so
-the rest is read):
+Plain text with the test-server override (a warning, exit 0; the connection is
+allowed, so the rest is read):
 
 <!-- packet: server-plaintext -->
 ```
-$ export MASH_SERVER=nats://myserver:4222
-$ export MASH_INSECURE_PLAINTEXT=1
+$ export MASH_SERVER=nats://localhost:4222
+$ export MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1
 $ mash server status
 The server is reachable, but NOT ENCRYPTED (1 warning).
 
-  address        nats://myserver:4222
-  state          reachable (answered in 3ms)
-  encryption     NOT ENCRYPTED (allowed by MASH_INSECURE_PLAINTEXT)
-  clock          1s ahead of this computer
-  mail storage   1KB used of 256MB
-  message limit  1MB
-  endpoints      3 registered
+  address       nats://localhost:4222
+  state         reachable (answered in 3ms)
+  encryption    NOT ENCRYPTED (allowed by the override)
+  mail storage  1KB in use
 
 warning: anyone on the network can read your credentials and your mail.
          MASH_SERVER overrides the server in config.json for this run.
 fix: stop overriding it in this shell:
-  unset MASH_SERVER MASH_INSECURE_PLAINTEXT
+  unset MASH_SERVER MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION
 ```
 
-The certificate is not trusted (exit 1). The server answered, but mash does
-not talk further to a server it does not trust, so the rest is `not checked`.
-The cause is named in the row: not signed by this machine's CA, expired, or
-for another host name:
+The certificate is not trusted (exit 1). The server answered, but mash does not
+talk further to a server it does not trust, so the rest is `not checked`. The
+cause is named in the row: not signed by this machine's CA, expired, or made
+for another host name. There is no trust record and no `mash trust reset` in
+0.5.6 (contract, rev 17), so the way out is the rule of `credential install`:
+it never changes an existing CA file, it says which file to move aside:
 
 <!-- packet: server-untrusted -->
 ```
 $ mash server status
 The server's certificate is NOT TRUSTED.
 
-  address        tls://myserver:4222
-  state          reachable (answered in 41ms)
-  encryption     certificate NOT TRUSTED (not signed by the CA in
-                 ~/.config/mash/ca.pem)
-  clock          not checked (mash does not trust this server)
-  mail storage   not checked (mash does not trust this server)
-  message limit  not checked (mash does not trust this server)
-  endpoints      not checked (mash does not trust this server)
+  address       tls://localhost:4222
+  state         reachable (answered in 41ms)
+  encryption    certificate NOT TRUSTED (not signed by the CA in
+                ~/.config/mash/ca.pem)
+  mail storage  not checked (mash does not trust this server)
 
 fix: do not go on if you did not expect this. Ask whoever runs your mash
-     server whether it changed its certificate. If it did, at a terminal:
-  mash trust reset
-     then install again with your credentials:
-  mash credential install --key <key file> --token <token file>
+     server whether it changed its certificate. If it did, they give you the
+     new CA file: move the old one aside, then install again with it:
+  mv ~/.config/mash/ca.pem ~/.config/mash/ca.pem.old
+  mash credential install --key <key file> --token <token file> --ca <ca file>
 ```
 
 For an expired certificate or a wrong host name the same screen says `expired
-2026-11-01` or `made for another host name`, and the fix is to ask whoever
-runs the server to renew it or to give the right address: `mash trust reset`
-would not help, so it is not named. With credentials the server refuses the
-screen is the same as the healthy one down to `encryption`, with `mail
-storage`, `clock`, `message limit` and `endpoints` as `not checked
-(credentials refused)`, exit 4. With no credentials installed, the same with
-`not checked (no credentials here)`, exit 1. `mash server status` never asks a
-`$SYS` subject: it would be dropped and cost the whole timeout.
+2026-11-01` or `made for another host name`, and the fix is to ask whoever runs
+the server to renew it or to give the right address.
+
+This endpoint's credentials are refused or missing (exit 0: the server is fine;
+the storage row says why it is blank and where to look):
+
+<!-- packet: server-no-credentials -->
+```
+$ mash server status
+The server is reachable and encrypted.
+
+  address       tls://localhost:4222
+  state         reachable (answered in 41ms)
+  encryption    encrypted; certificate trusted
+  mail storage  not checked (needs this endpoint's credentials: mash status)
+```
+
+Exit codes: 0 the server is fine (a credentials problem does not change it), 1 a
+problem with the server itself (not trusted, expired, wrong host name), 6 not
+reachable. `mash server status` never asks a `$SYS` subject: it would be
+dropped and cost the whole timeout.
 
 What needs `mashctl`, said in `mash help server status` and nowhere on the
 screen: who is connected now, the server's uptime and load, every inbox's size
@@ -764,110 +904,136 @@ limit (`mashctl limits`).
 
 ### 4.3 `mash endpoint status [<address or pattern>]`: your owner's endpoints
 
-The question: "which of our endpoints exist, and which are online?" It replaces
+The question: "which of our endpoints exist, and which answer now?" It replaces
 `mash who` (section 5). It lists only the endpoints of the caller's owner,
 because beyond the owner nothing can be known (section 2); this also corrects
 the targets, where N13 assumed `who` already did so.
 
-The pattern syntax, chosen small enough to say in one sentence: an address is
-`owner.group.name`; a pattern is the same three parts, where a part may hold
-`*`, which stands for any run of characters (including none) inside that part
-and never crosses a dot. The owner part must be written out and must be your
-owner: a pattern never crosses owners.
+THE PATTERN GRAMMAR, stated once, for `mash endpoint status` and, with the one
+difference below, `mashctl endpoint list`. An address is `owner.group.name`. A
+pattern is an address, or an address cut short after a dot, in which a part may
+hold `*`: any run of characters (including none) inside that part, never
+across a dot; a part that is only `*` is any one part. A cut-short pattern means
+the missing parts are `*`: `acme.demo` is `acme.demo.*`, "everything in demo".
+The owner part is written out and must be your owner: a pattern never crosses
+owners. No `?`, no `[...]`, no regular expressions. ctl's answer (appendix)
+agrees on three-part patterns and on `*` as a whole part; this grammar adds two
+things it does not say, `*` inside a part (`acme.demo.b*`) and the cut-short
+form, which ctl still has to accept (section 6, item 4). `mashctl`'s only
+difference is that an administrator may name another owner, or `*` for any.
 
 | written | matches |
 |---|---|
 | (nothing) | every endpoint of your owner, the same as `acme.*.*` |
 | `acme.demo.alice` | that one endpoint (the one-address view) |
-| `acme.demo.*` | every endpoint in the group `demo` |
-| `acme.*.bob` | every endpoint named `bob`, in any group |
-| `acme.demo.b*` | `bob`, `bart`, ... in the group `demo` |
-| `acme.release-*.deploy-*` | `acme.release-pipeline.deploy-coordinator` |
-| `*.demo.*` or `zed.demo.alice` | refused: the owner is not `acme` (exit 2) |
-| `acme.demo` | refused: it needs three parts (exit 2) |
+| `acme.demo` | every endpoint in the group `demo`, the same as `'acme.demo.*'` |
+| `'acme.demo.*'` | every endpoint in the group `demo` |
+| `'acme.*.bob'` | every endpoint named `bob`, in any group |
+| `'acme.demo.b*'` | `bob`, `bart`, ... in the group `demo` |
+| `'acme.release-*.deploy-*'` | `acme.release-pipeline.deploy-coordinator` |
+| `'*.demo.*'` or `zed.demo.alice` | refused: the owner is not `acme` (exit 2) |
 
-A shell expands an unquoted `*` against the files in the folder, so the help
-and every example quote the pattern: `mash endpoint status 'acme.demo.*'`.
-(No `?`, no `[...]`, no regular expressions: one wildcard, so one sentence.)
+The help and every example show the QUOTED form wherever a pattern holds `*`:
+`mash endpoint status 'acme.demo.*'`. Unquoted, zsh stops with "no matches
+found" before mash runs (and bash may expand it against the files in the
+folder); quoted, the shell passes it through. `acme.demo` needs no quote, which
+is why it is accepted. One command takes one address or pattern; for two groups
+run it twice.
+
 The filters of `who` that are not a name stay as flags: `--online`,
-`--offline`, `--role SUB`, `--label K[=V]`, `--cap C`, `--match TEXT`. `--owner`
-and `--name` are removed: the pattern says both.
+`--offline`, `--role SUB`, `--label K[=V]`, `--cap C`, `--match TEXT`. `--match`
+is a case-insensitive search of the description and the capabilities
+(`internal/endpoint/whofilter.go:14,122`); it no longer searches the address,
+which the pattern says (one way to say it). `--owner` and `--name` are removed.
 
-Columns: `ENDPOINT`, `STATE` (`online` or `offline`), `LAST SEEN HERE` and
-`MAILBOX`. `*` marks the caller.
+Columns: `ENDPOINT` and `STATE` (`online` or `offline`), nothing else by
+default; `--wide` adds `VERSION`, `HOST` and `ROLE`. The caller's own row ends
+`(you)`. Nothing is remembered: `online` means a Claude Code session answered
+the presence probe just now (section 4.1), `offline` means none did, and that
+is normal. There is no `LAST SEEN` column and no `MAILBOX` column: a last-seen
+time has no source (section 3), and the credentials read their OWN inbox only
+(section 2), so a mailbox count would be `unknown` on every row but yours, which
+is noise. Your own count is in `mash status` and in the one-address view of
+your own endpoint. This amends REQ-015, which words it as "the caller's own
+owner's endpoints" (section 8). The list is thinner than "more detailed" sounds;
+what is true about another endpoint is its address, whether it answers, its
+version, host and role, and the directory's description.
 
-`LAST SEEN HERE` is the time this machine last saw the endpoint online, from
-the local record of section 4.4, and nothing else: an online endpoint says
-`now`, an offline one the time since the record (`3h ago`), or `never seen
-here`. It is the same fact whoever runs the command, and a different one on
-another machine. The label and the footer line say "from this machine", so
-nobody reads it as a clock kept by the server.
+The verdict line names the set and the counts, which says which endpoints the
+default acted on (standard rule 8). Sorted by address. No `NEXT:` under a
+listing and no legend: the definitions are in `mash help endpoint status`:
 
-`MAILBOX` is the backlog of REQ-015 (section 4.1), a plain number, followed
-by `OVER` (as in `17 OVER`) when it is past the limit of the caller's own
-endpoint. It is real only
-for the caller's own endpoint: the credentials may read their own inbox and
-no other (section 2), so every other row says `unknown`. REQ-015 words it as
-"only for the caller's own owner's endpoints"; the permissions allow less than
-that, so I read it as "only your own endpoint" (question 14).
+<!-- packet: endpoint-status-help -->
+```
+$ mash help endpoint status
+mash endpoint status [<address or pattern>]
 
-The verdict line names the set and the counts, which says which
-endpoints the default acted on (standard rule 8). Sorted by address, because
-a person pastes the address and `grep` finds it. No `NEXT:` under a listing.
+Which endpoints of your owner exist, and which answer now.
+
+  mash endpoint status                  every endpoint of your owner
+  mash endpoint status acme.demo        everything in the group demo
+  mash endpoint status 'acme.demo.b*'   names starting with b, in demo
+  mash endpoint status acme.demo.alice  one endpoint, in full
+
+Quote a pattern that holds *: zsh stops with "no matches found" before mash
+runs. A part may hold * for any run of characters; the owner must be yours.
+
+online   a Claude Code session answered for that endpoint just now
+offline  none did. That is normal: its mail waits for the next session
+
+Flags: --online --offline --role --label --cap --match --wide --all --json
+```
+
 Exit 0 whenever the question was asked and answered, even if every endpoint is
-offline: offline is a state, not an error. `--json` and the other exits are in
-the end of this section.
+offline or a pattern matches nothing: offline and empty are answers. `--json`
+and the other exits are at the end of this section.
 
 All endpoints of your owner:
 
 <!-- packet: endpoint-status -->
 ```
 $ mash endpoint status
-3 endpoints of acme: 1 online, 2 offline.
+3 endpoints of acme: 2 online, 1 offline.
 
-  ENDPOINT         STATE    LAST SEEN HERE   MAILBOX
-  acme.demo.alice  online   now              unknown
-* acme.demo.bob    offline  3h ago           2
-  acme.lab.carol   offline  never seen here  unknown
-
-* you
-online: a Claude Code session is serving that endpoint now
-last seen here: from this machine: the last time it saw the endpoint online
-mailbox: messages waiting; only your own can be read, else unknown
-n OVER: the count is past your limit
+  ENDPOINT         STATE
+  acme.demo.alice  online
+  acme.demo.bob    online (you)
+  acme.lab.carol   offline
 ```
 
-A pattern with matches:
+A pattern with matches, and the group form that needs no quote:
 
 <!-- packet: endpoint-status-pattern -->
 ```
 $ mash endpoint status 'acme.demo.*'
-2 endpoints match acme.demo.*: 1 online, 1 offline.
+2 endpoints match acme.demo.*: 2 online.
 
-  ENDPOINT         STATE    LAST SEEN HERE   MAILBOX
-  acme.demo.alice  online   now              unknown
-* acme.demo.bob    offline  3h ago           2
-
-* you
-online: a Claude Code session is serving that endpoint now
-last seen here: from this machine: the last time it saw the endpoint online
-mailbox: messages waiting; only your own can be read, else unknown
-n OVER: the count is past your limit
+  ENDPOINT         STATE
+  acme.demo.alice  online
+  acme.demo.bob    online (you)
 ```
 
-A pattern with no match (exit 1; stderr). The fix is true: it is the command
-that lists what exists:
+<!-- packet: endpoint-status-group -->
+```
+$ mash endpoint status acme.demo
+2 endpoints match acme.demo.*: 2 online.
+
+  ENDPOINT         STATE
+  acme.demo.alice  online
+  acme.demo.bob    online (you)
+```
+
+A pattern with no match is an answer (exit 0, stdout), as `gh` and `kubectl`
+treat an empty filtered list:
 
 <!-- packet: endpoint-status-nomatch -->
 ```
 $ mash endpoint status 'acme.demo.z*'
-error: no endpoint matches acme.demo.z*.
-fix: see the endpoints of acme:
-  mash endpoint status
+0 endpoints match acme.demo.z*.
 ```
 
-An owner that is not yours, or a pattern that is not three parts (exit 2, a bad
-argument; the fix names the corrected pattern, which mash can derive):
+An owner that is not yours (exit 2, a bad argument; the fix names the corrected
+pattern, which mash can derive):
 
 <!-- packet: endpoint-status-owner -->
 ```
@@ -875,14 +1041,6 @@ $ mash endpoint status '*.demo.*'
 error: the owner of a pattern must be acme, your owner: mash shows only
        the endpoints of acme.
 fix: write the owner out:
-  mash endpoint status 'acme.demo.*'
-```
-
-<!-- packet: endpoint-status-parts -->
-```
-$ mash endpoint status acme.demo
-error: acme.demo is not an address or a pattern: it needs three parts.
-fix: write owner.group.name, with * for a part you do not know:
   mash endpoint status 'acme.demo.*'
 ```
 
@@ -895,72 +1053,75 @@ names one thing that is not there:
 $ mash endpoint status acme.demo.zed
 error: acme.demo.zed is not an endpoint of acme.
 fix: see the endpoints of its group:
-  mash endpoint status 'acme.demo.*'
+  mash endpoint status acme.demo
 ```
 
 One address: a block. The facts are the ones a person can read about another
-endpoint (section 2): online from the probe, its version from the answer, the
-rest from the directory record. `host` is the machine an administrator says
-the endpoint is meant to run on, not a live fact (question 5):
+endpoint (section 2): `state` from the probe, its version from the answer, the
+rest from the directory record. `host` is the machine an administrator says the
+endpoint is meant to run on, not a live fact (question 5):
 
 <!-- packet: endpoint-status-one -->
 ```
 $ mash endpoint status acme.demo.alice
 acme.demo.alice: online.
 
-  endpoint        acme.demo.alice
-  state           online
-  last seen here  now
-  mailbox         unknown (only your own can be read)
-  version         0.5.6
-  program         claude-code
-  host            myserver
+  endpoint  acme.demo.alice
+  state     online
+  version   0.5.6
+  host      localhost
 ```
 
-The caller's own endpoint reads its mailbox with the caller's credentials, so
-`mash endpoint status acme.demo.bob` says `mailbox  2 waiting` (or `17
-waiting, OVER THE LIMIT OF 15`) in the same place.
+Your own endpoint adds the one row only you can read, the mailbox, in the words
+of `mash status`:
 
-An endpoint that never reported (registered, never seen online from this
-machine). Nothing is made up: unknown is `-`, and the verdict says what is
-true:
+<!-- packet: endpoint-status-own -->
+```
+$ mash endpoint status acme.demo.bob
+acme.demo.bob: online (you).
 
-<!-- packet: endpoint-status-never -->
+  endpoint  acme.demo.bob
+  state     online
+  mailbox   2 waiting to be delivered
+  version   0.5.6
+  host      localhost
+```
+
+An endpoint nobody is running (registered; nothing is made up: unknown is `-`):
+
+<!-- packet: endpoint-status-offline -->
 ```
 $ mash endpoint status acme.lab.carol
-acme.lab.carol: offline, never seen here.
+acme.lab.carol: offline.
 
-  endpoint        acme.lab.carol
-  state           offline
-  last seen here  never seen here
-  mailbox         unknown (only your own can be read)
-  version         -
-  program         claude-code
-  host            -
+  endpoint  acme.lab.carol
+  state     offline
+  version   -
+  host      -
 ```
 
-One address, `--detail` (more rows, never a different screen; the storage name
-is shown only here, R3):
+One address, `--detail` (more rows, never a different screen). The last row is
+the honest answer to "heartbeat status": there is none to show (first question
+at the top):
 
 <!-- packet: endpoint-status-detail -->
 ```
 $ mash endpoint status acme.demo.alice --detail
 acme.demo.alice: online.
 
-  endpoint        acme.demo.alice
-  state           online
-  last seen here  now
-  mailbox         unknown (only your own can be read)
-  version         0.5.6
-  program         claude-code
-  host            myserver
+  endpoint      acme.demo.alice
+  state         online
+  version       0.5.6
+  host          localhost
 
-  registered     2026-11-19 00:21 UTC
-  role           reviewer
-  description    reviews the release plan
-  capabilities   review
-  labels         team=demo
-  storage name   acme_demo_alice
+  registered    2026-11-19 00:21 +00:00
+  role          reviewer
+  description   reviews the release plan
+  capabilities  review
+  labels        team=demo
+  program       claude-code
+  storage name  acme_demo_alice (its mail store on the server)
+  heartbeats    not recorded (mash asks now; nothing keeps the history)
 ```
 
 A list with `--wide`: more columns on the same row, which may pass 80 columns
@@ -969,41 +1130,33 @@ A list with `--wide`: more columns on the same row, which may pass 80 columns
 <!-- packet: endpoint-status-wide -->
 ```
 $ mash endpoint status --wide
-3 endpoints of acme: 1 online, 2 offline.
+3 endpoints of acme: 2 online, 1 offline.
 
-  ENDPOINT         STATE    LAST SEEN HERE   MAILBOX  VERSION  PROGRAM      HOST      ROLE
-  acme.demo.alice  online   now              unknown  0.5.6    claude-code  myserver  reviewer
-* acme.demo.bob    offline  3h ago           2        -        claude-code  myserver  -
-  acme.lab.carol   offline  never seen here  unknown  -        claude-code  -         -
-
-* you
-online: a Claude Code session is serving that endpoint now
-last seen here: from this machine: the last time it saw the endpoint online
-mailbox: messages waiting; only your own can be read, else unknown
-n OVER: the count is past your limit
+  ENDPOINT         STATE    VERSION  HOST       ROLE
+  acme.demo.alice  online   0.5.6    localhost  reviewer
+  acme.demo.bob    online   0.5.6    localhost  -         (you)
+  acme.lab.carol   offline  -        -          -
 ```
 
 Many endpoints. Past 40 rows the table stops and says so; the verdict counts
-all of them; `--all` shows every row, a pattern or `--online` narrows it (the
-four rows shown stand for the first 40; the `...` stands for the rest, which
-the real output prints):
+all of them; `--all` shows every row, a pattern or `--online` narrows it. The
+caller's own row is always printed, last, when it is not among the 40, so a
+person can find themselves (the four rows shown stand for the first 40; the
+`...` stands for the rest, which the real output prints):
 
 <!-- packet: endpoint-status-many -->
 ```
 $ mash endpoint status
 112 endpoints of acme: 7 online, 105 offline. Showing the first 40.
 
-  ENDPOINT               STATE    LAST SEEN HERE   MAILBOX
-  acme.build.runner-001  online   now              unknown
-  acme.build.runner-002  offline  2d ago           unknown
-  acme.build.runner-003  offline  never seen here  unknown
-  acme.build.runner-004  online   now              unknown
+  ENDPOINT               STATE
+  acme.build.runner-001  online
+  acme.build.runner-002  offline
+  acme.build.runner-003  offline
+  acme.build.runner-004  online
   ...
+  acme.demo.bob          online (you)
 
-online: a Claude Code session is serving that endpoint now
-last seen here: from this machine: the last time it saw the endpoint online
-mailbox: messages waiting; only your own can be read, else unknown
-n OVER: the count is past your limit
 To see more, narrow it with a pattern or --online, or use --all.
 ```
 
@@ -1012,17 +1165,11 @@ The real-name case (address kept whole, widest 54 columns):
 <!-- packet: endpoint-status-long -->
 ```
 $ mash endpoint status
-2 endpoints of acme: 1 online, 1 offline.
+2 endpoints of acme: 2 online.
 
-  ENDPOINT                                  STATE    LAST SEEN HERE  MAILBOX
-  acme.release-pipeline.build-watcher-prod  online   now             unknown
-* acme.release-pipeline.deploy-coordinator  offline  3h ago          2
-
-* you
-online: a Claude Code session is serving that endpoint now
-last seen here: from this machine: the last time it saw the endpoint online
-mailbox: messages waiting; only your own can be read, else unknown
-n OVER: the count is past your limit
+  ENDPOINT                                  STATE
+  acme.release-pipeline.build-watcher-prod  online
+  acme.release-pipeline.deploy-coordinator  online (you)
 ```
 
 The server cannot be reached (exit 6, stderr: the whole answer depends on it).
@@ -1031,470 +1178,604 @@ The fix names the one command that shows the address and the cause:
 <!-- packet: endpoint-status-unreachable -->
 ```
 $ mash endpoint status
-error: the server did not answer within 20s.
+error: the server did not answer within 2s.
 fix: check that the server is running and that "server" in
      ~/.config/mash/config.json is right. To see the address mash tried:
   mash server status
 ```
 
 `--json` (one document, standard rule 10; the fields keep the names of the MCP
-`who` result of the targets, section 6, plus the pattern and `mailbox`;
-`last_seen` is documented as "last seen from this machine", and `mailbox` is
-`null` for every endpoint but the caller's own):
+`who` result of the targets, section 6, plus the pattern; `you` and `mailbox`
+appear on the caller's own entry only; there is no `last_seen`):
 
 ```
 { "owner": "acme", "pattern": "acme.demo.*",
   "endpoints": [
     { "endpoint": "acme.demo.alice", "state": "online",
-      "last_seen": "2026-11-19T09:42:11Z", "mailbox": null,
-      "version": "0.5.6", "program": "claude-code", "host": "myserver",
+      "version": "0.5.6", "program": "claude-code", "host": "localhost",
       "role": "reviewer" },
-    { "endpoint": "acme.demo.bob", "state": "offline",
-      "last_seen": "2026-11-19T06:41:02Z",
-      "mailbox": { "waiting": 2, "limit": 15 }, "version": null,
-      "program": "claude-code", "host": "myserver", "role": null } ] }
+    { "endpoint": "acme.demo.bob", "state": "online", "you": true,
+      "mailbox": { "waiting": 2, "limit": 15 }, "version": "0.5.6",
+      "program": "claude-code", "host": "localhost", "role": null } ] }
 ```
 
-Exit codes: 0 asked and answered; 1 an address or pattern with no endpoint
-(its own words), a refused connection, trust files that disagree; 2 a
-pattern that is not three parts, an owner that is not yours, an unknown flag;
-4 the credentials were refused; 6 the server did not answer.
+Exit codes: 0 asked and answered (including no match and every endpoint
+offline); 1 an address that is not registered, trust or configuration problems
+(`mash status` says which); 2 a pattern that is not an address or cut-short
+address, an owner that is not yours, an unknown flag; 4 the credentials were
+refused; 6 the server did not answer.
 
-### 4.4 The last-seen-here record (new mechanism, for the scope table)
+### 4.4 What REQ-015 counts: delivery, not acknowledgement
 
-The column `LAST SEEN HERE` needs one thing 0.5.5 does not have: a time that
-outlives the process (section 3). Decided as the lead ruled: a LOCAL record,
-no server change, no new permission, no protocol change (D229).
+The behaviour first, in the maintainer's words: "if more than X messages stack
+up ... undelivered", then wake the session and "show it in status". So the
+number is the messages the server holds for this endpoint that have NOT been
+DELIVERED to its session, and delivery lowers it. Delivered means: (1) shown to
+the session in hook context, or (2) read with the `read` tool or `mash read`,
+and, by the recommendation below, (3) named in a digest line. The earlier
+definition in the contract (rev 15 to 17) and in the targets (DRAFT8, decisions
+O1 and O2) is the opposite: unacknowledged; reading does not lower it; a digest
+line does not. That is wrong for his feature: it leaves a warning on every `mash
+status` after a person has read all 17 messages, and it wakes a session every 10
+minutes for mail it has already seen. What follows is what the shipped code does
+and exactly what must change.
 
-What it is, exactly:
+What v0.5.5 does with acknowledgement today, path by path:
 
-- One small file in this machine's mash state directory (`$MASH_STATE_DIR`,
-  default `$XDG_STATE_HOME/mash`, else `~/.local/state/mash`; `cmd/mash/
-  main.go:52`), next to the spool and `hook.log`. Proposed name: `seen-here`.
-- One line per endpoint: the dotted address, a space, the UTC time of the last
-  probe that saw that endpoint online (RFC 3339). Nothing else.
-- Written when a probe sees an endpoint answer: `mash endpoint status`
-  certainly, and `mash send` and `mash serve` where they already probe today
-  (section 9 says I did not check which do). An endpoint that did not answer
-  is not written, so an offline endpoint keeps its old time; an endpoint that
-  is no longer in the directory is dropped at the next write, so the file
-  holds at most the endpoints of the caller's own owner.
-- Per OS user and per state directory, like the spool; it is read by nothing
-  but mash on this machine. The server never sees it and it is never sent.
-- Deleted with the state directory: afterwards every offline endpoint says
-  `never seen here` until it is seen again. It is a convenience, not a log.
+| path | what happens | acks? | where |
+|---|---|---|---|
+| the consumer | durable `deliver`, explicit ack, ack wait 30 s, at most 1000 unacked, redelivered until acked (MaxDeliver -1), from the start of the stream | - | `internal/store/store.go:130-137` |
+| mail arrives | `mash serve` receives it, classifies it, queues it, and HOLDS it unacked | no | `internal/endpoint/mail.go:339-387` |
+| a hook shows it in full | the hook prints up to 10 messages (and 16 KiB) as hook context, then marks each drained in the local spool; serve sees the mark within 250 ms and acks (double ack, 2 s) | YES | `cmd/mash/hook.go:140-176`, `internal/host/claude.go:189-249`, `internal/endpoint/hook.go:39,256-258,478-492` |
+| a hook shows a digest | the hook prints one line per message (sender, size, first line) and marks each LISTED, not drained; the message stays unacked, never wakes, and waits to be read | no | `cmd/mash/hook.go:160-170`, `internal/spool/spool.go:395-435`, ADR 0046 |
+| the `read` tool (MCP) | after the result is written to the model it drains a message that was LISTED, or one waiting in a session proven hookless; any other waiting message is left for a hook | only those two | `cmd/mash/serve.go:708-722`, `internal/endpoint/hookless.go:144-185` |
+| `mash read` (shell) | reads the stored message straight from the stream; no consumer, no spool | no | `cmd/mash/cli.go:134-148`, `internal/endpoint/mail.go:870-895` |
+| `mash inbox`, the MCP `inbox` tool | list stored messages straight from the stream | no | `internal/endpoint/mail.go:899-943`, `hookless.go:148` ("the inbox tool never calls it"), ADR 0046 |
+| before any hook ran (no spool-from-start) | the channel write is the delivery; serve acks it after the write | YES | `internal/endpoint/mail.go:1007-1033` |
+| a hold, a nak, a lost lease | the message stays unacked and is redelivered after a delay; while held, serve extends its ack deadline every 10 s | no | `hook.go:127,171,178,286-291`, `mail.go:356` |
+| serve restarts | the consumer redelivers every unacked message after the 30 s ack wait; a message a hook had drained before the crash has a tombstone and is acked then, not shown again | on redelivery | `waking.go:25-34`, `mail.go:462-467`, `hook.go:162` |
 
-Why it must be labelled: it says what THIS machine saw, not what the endpoint
-did. Another machine, another user or a fresh state directory has another
-answer, and a machine that was off all week says `3d ago` for an endpoint that
-ran all week elsewhere. The header says `HERE`, the footer says "from this
-machine", the one-address view says `last seen here`, and `--json` documents
-`last_seen` the same way. An online endpoint is always `now`.
+So a full hook showing already lowers the unacked count today, and one hook run
+lowers it by at most 10 (`BatchMsgs`, `claude.go:193,208-210`); with the default
+limit of 15, a backlog of 17 clears in two runs of an active session. What does
+not lower it today: a digest line, the `read` tool on a message no digest
+listed, and `mash read` and `mash inbox` always.
 
-Flags for the scope table and the security read: it is a NEW FILE (a new
-mechanism, not a changed one). What it stores: addresses and times only, no
-keys, tokens, message text or host names. Points the security read should look
-at: the write must be atomic (a temp file, then a rename) so a reader never
-sees half a line; the file and the directory must be private to the user (mode
-0600 in a directory that is already 0700, like the spool); mash must refuse to
-follow a link or to read a file another user owns, by the same rules the state
-directory already has (I did not read those rules, section 9); and the file
-is bounded, because entries are dropped when the endpoint leaves the
-directory. A person who must not leave a trace deletes the state directory.
+What must change so that delivery lowers the count, in order:
 
-## 5. (c) "Other?": the questions none of the three answer, and the names
+1. THE NUMBER IS NOT "UNACKED". It is: unacknowledged, minus the messages a
+   digest listed, minus the messages already drained and waiting for their ack.
+   `mash serve` computes it, because only it knows (the waking tracker's unread
+   set, `waking.go:42-49`, already holds every message received and not yet
+   acked; it gains the listed and drained marks the spool already keeps) and
+   writes it into the endpoint's own lease as `backlog` (with its time), beside
+   `waking_pending` (`endpoint.go:176-181`). The lease is the endpoint's own
+   record, readable by its own credentials; it is not a SAP field, so BND-002
+   holds. A shell (`mash status`) reads that number when a session is there.
+   With no session there is no delivery: every stored message not yet acked is
+   waiting, so it reads the consumer's `NumPending + NumAckPending` instead.
+2. A DIGEST LINE COUNTS AS DELIVERED, for the number and the wake, and still
+   does not ack. Recommended. A digest line is shown in hook context: the
+   session has been told the sender, the size and the first line of every
+   message, and told to read them. If the session is taking mail, that is what
+   the maintainer asked about. ADR 0046 already says listed mail never wakes,
+   so counting it as waiting would make the row say "over the limit" about mail
+   a wake cannot help. What a digest line is not is a showing of the body: the
+   instruction may sit past the first line, so it stays unacked until it is
+   read, and `--detail` shows it as `listed, not read` (ADR 0046 is unchanged).
+   The alternative, ack on listing, is the pre-0.5.5 behaviour that ADR 0046
+   rejected (the unread count lied, issue #44); not recommended.
+3. THE `read` TOOL DRAINS ANY WAITING MESSAGE, not only a listed one or one in
+   a proven-hookless session: change the condition in `MarkRead`
+   (`hookless.go:157-170`) so a message read while it is still waiting for a
+   hook is drained, and serve acks it. The hook then does not show it again (it
+   shows only what is waiting in the spool). A model that reads a message by
+   `#seq` before the next hook run has been shown it.
+4. `mash read` DRAINS TOO. A shell process holds no consumer, so it cannot ack;
+   it does what a hook does: under the spool lock it writes the message's
+   drained tombstone (`spool.Drained`, `spool.go:441-460`), and serve acks
+   within 250 ms (`hook.go:256-258`), or, if no session is running, when the
+   next serve starts and the consumer redelivers it (`mail.go:462-467`). This
+   works only where the endpoint's spool directory exists, that is, where a
+   session has run on this machine (section 9). The targets' `state` row of
+   `mash read --detail` ("reading marks it read") needs this change: today it is
+   false (`cli.go:134-148`).
+5. THE WAKE TIME IS WRITTEN DOWN. REQ-015 keeps the time of the last backlog
+   wake in memory (it does not survive a restart); the status row cannot say
+   "mash woke the session at 09:40" from memory it cannot reach. `mash serve`
+   writes it into the lease too (`backlog_woke_at`), next to `backlog`. The
+   10-minute cooldown itself stays in memory as the contract has it.
+6. THE TRIGGER USES THE SAME NUMBER: the wake fires when `backlog` passes the
+   limit, so a session that has been shown or has read its mail is not woken.
+   Everything else of REQ-015 stands: the line text, the cooldown,
+   `mailbox_limit` 0 turns it off.
 
-Every question a person plausibly has, the view that answers it, and whether
-`mash who` and `mashctl endpoint list` already cover it or collide with it
-(who = `mash who` of the targets, list = `mashctl endpoint list` of ctl D15):
+A message acked by being shown whose session never really saw it. The ack comes
+only after the hook has written the context to its output (`hook.go:155-170` of
+`cmd/mash`; a failed write leaves it spooled), and Claude Code's
+10,000-character cut is avoided by fitting the text first (`claude.go:211-233`).
+What mash cannot know is whether the model used it: that is the existing rule,
+"an ack means the session has been shown it" (ADR 0024), and the count is of
+mail mash has handed over, not of mail the model absorbed. Such a message is not
+lost: it is acked, so the consumer never redelivers it, but it stays in the
+inbox stream for 30 days or 16MB (section 2), so `mash read <seq>` and `mash
+inbox` still show it. A crash between printing and acking leaves a tombstone;
+the message is acked, never shown again, at the next serve (`mail.go:462-467`).
+AckWait (30 s) and MaxDeliver (-1) matter only for what is held unacked, which
+serve keeps alive every 10 s while a session is there (`hook.go:286-291`);
+nothing about them changes.
+
+Does this change ack semantics anywhere else? PLAINLY, three places, and nothing
+else:
+
+- CHANGED: the `read` tool now drains (and so acks) any waiting message, not
+  only a listed or hookless one (item 3). Reading by `#seq` is delivery.
+- CHANGED: `mash read` now drains a message it reads (item 4). Today it never
+  acks.
+- CHANGED: the REQ-015 number and the wake are "not delivered", not "not acked"
+  (items 1, 2, 6): a digest-listed message no longer counts, though it stays
+  unacked.
+- Because of the third, the number in `mash status` can be SMALLER than the
+  server's own: `mashctl audit` reads the consumer's pending, ack-pending and
+  ack floor (`internal/admin/audit.go:171-173`, `cmd/mashctl/audit.go:295-310`)
+  and keeps counting a listed message until it is read. That is correct for an
+  operator (the message is unacked) and is the one place the two numbers differ,
+  by the `listed, not read` count.
+
+NOT changed: what a hook does with a batch of 10 or fewer, 16 KiB or less (shown
+in full, acked); the digest still lists and does not ack (ADR 0046); `mash
+inbox` and the MCP `inbox` tool still never ack; the channel write before any
+hook still acks; the hook's 10 messages per run (`claude.go:208-210`); ADR 0069
+(its 500-held and byte lines decide when a crowded spool wakes a session that no
+hook is draining; REQ-015's limit is a separate, lower trigger on the new
+number); the `[stale]` trust label (it compares the signature's age with the
+stored time, `render` and `classify`, and has nothing to do with acks); and the
+inbox stream's own limits (a message past 30 days or 16MB is gone, read or
+not). The `new` and `read` words of `mash inbox` (the targets, 0.5.6): 0.5.5 has
+no per-message state to show (`internal/render/render.go:20-47`), so they are
+new and must mean the same as the number: `new` = not yet delivered. From a
+shell the consumer reports counts and an ack floor, not which message above the
+floor was acked, so the number is exact and a per-message `new` is exact only at
+or below the floor (section 9). ADR 0041's rule that the `read` tool acks only
+in a hookless session, and ADR 0046's "`inbox` never acks", stand; item 3 and 4
+amend the first, so the pull request that builds them adds an ADR (AGENTS.md).
+
+## 5. "Other?": the questions none of the three answer, and the names
+
+Every question a person plausibly has, and the view that answers it (who = `mash
+who` of the targets, list = `mashctl endpoint list` of ctl D15):
 
 | question | answered by | who | list |
 |---|---|---|---|
 | Does mail work from this machine? | `mash status` | no | no |
-| Which endpoint am I? | `mash status` verdict; `*` row of `endpoint status` | `*` row | no |
-| Is mail waiting, how much? | `mash status` row `mailbox`; the table of `mash inbox` | no | `show` has `unread mail` for ONE endpoint (admin) |
-| Is a Claude Code session serving me? | `mash status` row `session` | `online` of the `*` row only | `show` has `online` (admin) |
+| Which endpoint am I? | `mash status` verdict; `(you)` in `endpoint status` | the `*` row | no |
+| Is mail waiting to be delivered, how much? | `mash status` row `mailbox`; `mash inbox` | no | `show` has `unread mail` for ONE endpoint (admin) |
+| Is a Claude Code session there? | `mash status` row `session` | `online` of your own row | `show` has `online` (admin) |
 | Is my plugin installed, are its hooks set? | `mash status` warning, `--detail` row `claude code` | no | no |
-| Is this machine's trust record fine? | `mash status` row `config`, `--detail` rows `trust` | no | no |
-| Is the server up and encrypted? | `mash server status`; the `server` row of `mash status` (reachable only) | no | `mashctl status` shows it (admin) |
-| Is the server full, how long is my mail kept? | `mash server status --detail` | no | `mashctl limits` (admin) |
-| Who is online in my group? | `mash endpoint status 'acme.demo.*'` | YES: collides | no |
-| Is Carol online, when last (from here)? | `mash endpoint status acme.lab.carol` | YES: collides | no |
+| Is the server up and encrypted? | `mash server status`; the `server` row of `mash status` | no | `mashctl status` shows it (admin) |
+| Is the server full, how long is my mail kept? | `mash server status`, `--detail` | no | `mashctl limits` (admin) |
+| Who is online in my group? | `mash endpoint status acme.demo` | YES: collides | no |
+| Is Carol there now? | `mash endpoint status acme.lab.carol` | YES: collides | no |
 | Which endpoints exist in my owner? | `mash endpoint status` | YES: collides | YES: overlaps (admin sees more) |
 | Who can do a thing (role, label, capability)? | `mash endpoint status --role ... --cap ...` | YES (the same flags) | `show` only |
 | Which version do my peers run? | `mash endpoint status --wide` | no | no |
-| Who may I mail? | everyone registered in your owner; `mash send` refuses the rest. The token holds the exact list, no view reads it | no | `mashctl permissions` (admin) |
+| Which endpoints are installed on this machine? | `mash status --detail` row `endpoint` names the one in use; with several, `mash status` lists them in its fix (`status-choose`) | no | no |
+| Is my plugin older than mash? | the `version` row's warning, as the targets word it; not redrawn here | no | no |
+| Is my token about to expire? | `mash status --detail` row `token expires`; no warning for a near date is proposed (I could not determine that tokens expire at all in 0.5.6) | no | `issued list` (admin) |
+| Did my message to carol arrive? | DECISION 249's question; what a sender sees today is below | no | no |
+| Why didn't my session wake, and when was it last woken? | the mailbox `warning:` of `mash status` says when mash last woke it (section 4.4); the rest is DECISION 249's | no | no |
+| Who may I mail? | everyone registered in your owner; `mash send` refuses the rest | no | `mashctl permissions` (admin) |
 | Who is connected to the server, every inbox, the keys? | `mashctl` only (section 2) | no | `audit`, `issued` |
+
+What a sender can see TODAY about mail they sent, from the code, short and
+honest:
+
+- `mash send` prints `sent #7 from acme.demo.bob to acme.demo.alice`
+  (`cmd/mash/cli.go:133`). That means the server stored the message in alice's
+  inbox and gave it that number. It does not say that alice's session received,
+  was shown or read it.
+- `mash endpoint status acme.demo.alice` says whether a session answers for
+  alice now: `online`, or `offline` (her mail waits for the next session). That
+  is the whole of it, and it is the answer to "is my mail to bob sitting?": if
+  he is `offline` it is sitting, by design; if he is `online` mash cannot tell a
+  sender whether the mail has been delivered, how many messages wait in his
+  inbox (the credentials may not read another inbox, section 2), or whether his
+  session was woken.
+- The only proof that a person or a session saw the mail is a reply.
+- Everything beyond this (delivery state of sent mail, why a session did not
+  wake, when it was last woken, from the sender's side) is decision 249. This
+  page does not add it, and `mash endpoint status` shows none of it.
 
 Three of the answers collide with `mash who`. One name per thing means `mash
 who` goes. The alternatives:
 
 | option | the set | for | against |
 |---|---|---|---|
-| A (recommended) | `mash who` is removed; `mash endpoint status` is the one live view of your owner's endpoints; `mashctl endpoint list` stays the administrator's registry (created, type, note, never-seen endpoints, every owner of the account) | one name per thing, noun-verb as the standard says, liveness is `status` and an inventory is `list`, as the standard's verb table defines them; the maintainer's own proposal | `who` is the word people and agents know; a hard cut, but the targets already hard-cut `create`, `--long`, `--names` |
-| B | keep `mash who` as the peer list and add `endpoint status` for ONE address only | no rename; `who` stays short | two names for one set; `who` breaks standard rule 1 and 6; the maintainer's "taking a pattern" is lost |
-| C | `mash endpoint list` (directory, no probe, fast) and `mash endpoint status` (probes); `who` removed | cheap inventory without a 0.3s probe; the standard's `list` and `status` verbs both used | a person rarely wants the list without liveness; two views of one set differ only by a probe; a third name for the same endpoints next to ctl's list |
-| D | keep `mash who` only; no `endpoint status`; add `server status` | smallest change | the maintainer asked for endpoint status; `who` stays outside the noun-verb shape the standard fixes for the major revision; patterns need a new flag family |
+| A (recommended) | `mash who` is removed; `mash endpoint status` is the one live view of your owner's endpoints; `mashctl endpoint list` stays the administrator's registry | one name per thing, noun-verb as the standard says; liveness is `status` and an inventory is `list`; the maintainer's own proposal | `who` is the word people and agents know; a hard cut, but the targets already hard-cut `create`, `--long`, `--names` |
+| B | keep `mash who` as the peer list and add `endpoint status` for ONE address only | no rename | two names for one set; breaks standard rules 1 and 6 |
+| C | `mash endpoint list` (no probe) and `mash endpoint status` (probes); `who` removed | a cheap inventory | two views of one set differ only by a probe; a third name next to ctl's list |
+| D | keep `mash who` only; add `server status` | smallest change | the maintainer asked for endpoint status; patterns need a new flag family |
 
-Recommendation: A. What it makes of the three neighbours:
+Recommendation: A. What it makes of the neighbours:
 
 - `mash who` becomes an unknown command with an error that names its
-  replacement (the targets already do this for removed verbs, section 5 "Unknown
-  command", for `credential create`): `error: unknown command who.` `fix: the
-  endpoints of acme, and who is online:` then `mash endpoint status`. No alias
-  (standard rule 6). Its flags: `--online`, `--offline`, `--role`, `--label`,
-  `--cap`, `--match` move over unchanged; `--name` and `--owner` become the
-  pattern; `--long` is `--detail` for one address and `--wide` for the list
-  (the targets' `--by-group` is dropped: a pattern `acme.demo.*` per group says
-  it, and the table is one address per row).
+  replacement (the targets do this for removed verbs, section 5 "Unknown
+  command"): `error: unknown command who.` `fix: the endpoints of acme, and who
+  is online:` then `mash endpoint status`. No alias (standard rule 6). Its
+  flags `--online`, `--offline`, `--role`, `--label`, `--cap`, `--match` move
+  over; `--name` and `--owner` become the pattern; `--long` is `--detail` for
+  one address and `--wide` for the list; `--by-group` is dropped (`acme.demo`
+  says it).
 - `mashctl endpoint list` is the registry: every endpoint the administrator
   made, with the date it was made, including those that never ran. It does not
-  say who is online (that is `mash endpoint status`; ctl's `endpoint show`
-  carries `online` and `unread mail` for one endpoint, which only an
-  administrator can read: questions for ctl, section 6).
-- The agent's MCP tool `who` is the same view. One name per thing says rename
-  it `endpoint_status` in the same release (the result already renames its
-  fields, targets section 6); question 2.
+  say who is online (that is `mash endpoint status`).
+- `mashctl status` stays, as ctl confirmed (appendix): how the operator's tool
+  is set up. Nothing about it is redrawn on this page; it is ctl's screen. For
+  the person who runs the server, the server is `mash server status` (when they
+  hold an endpoint's credentials) and `mashctl status`, `mashctl audit` and
+  `mashctl issued` for everything an endpoint may not read.
+- The agent's MCP tool `who` is the same view. One name per thing says rename it
+  `endpoint_status` in the same release (question 2).
 
 The set, as a table of things and names (the whole interface in six lines):
 
 | the thing | the person's command | the administrator's |
 |---|---|---|
-| this endpoint, can it mail | `mash status` | (none: an endpoint is not the administrator's concern) |
-| the server | `mash server status` | `mashctl status` (the operator's tool: admin sign-in, shared storage, key directory, config paths; no endpoint, no second `server status`) |
+| this endpoint, can it mail | `mash status` | (none) |
+| the server | `mash server status` | `mashctl status` (the operator's tool; no second `server status`) |
 | the endpoints of my owner, live | `mash endpoint status [pattern]` | `mashctl endpoint show`, `list` (registry) |
 | one endpoint, in full | `mash endpoint status <address>` | `mashctl endpoint show <address>` |
 | mail | `mash send`, `inbox`, `read` | `mashctl inbox inspect` |
-| the machine's trust | `mash trust reset` | `mashctl adopt` |
+| the machine's trust | (none in 0.5.6: no trust record) | `mashctl adopt` |
 
-## 6. (d) Fit with the CLI standard; Agree with ctl
+## 6. Fit with the CLI standard; Agree with ctl
 
 The standard was found (`~/ops/standards/cli/STANDARD.md`, version 1.2.6, read
 in full; the targets cite its numbered rules as "cli rule N"). It is not in the
-repository: there is no copy under `docs/`, and the targets quote it by rule
-number. What I applied, and where I had to assume:
+repository, and the targets quote it by rule number. What I applied:
 
-- Rule 1 and 2 (`<tool> <noun> <verb>`, one noun, singular): `mash server
+- Rules 1 and 2 (`<tool> <noun> <verb>`, one noun, singular): `mash server
   status` and `mash endpoint status` conform. `mash send`, `inbox`, `read`,
   `prompt`, `hook` do not, and the standard's own table says they move under
-  nouns at mash's major revision (`mash message send`); the targets keep them
-  for 0.5.6, and I assumed so too. The new commands are noun-verb now so the
-  major revision renames nothing of this document.
-- Rule 3 (top-level verbs): `mash status` is allowed only as "a verb that acts
-  on that thing itself in a tool named for a thing" (the `range status`
-  precedent: the range's own status). I ASSUMED mash is named for the thing it
-  acts as, the endpoint. That is an assumption: if the planner reads rule 3
-  more narrowly, the name for the readiness check is `mash doctor` (the table's
-  `doctor`: "check this machine and say what is missing, with the command that
-  fixes each"), which is almost the screen above. The maintainer, the README
-  and the quick start say `mash status`; I keep it and ask (question 12).
+  nouns at mash's major revision; the targets keep them for 0.5.6, and I assumed
+  so too.
+- Rule 3 (top-level verbs): `mash status` is allowed as "a verb that acts on
+  that thing itself in a tool named for a thing" (the `range status`
+  precedent). Closed, not asked: the maintainer, the README and the quick start
+  say `mash status`, and the rule's own exception covers it.
 - Rule 4 (the verb table): `status` is "one object's live state, or a summary
-  of all of them with no name given". `mash endpoint status` with no name is
-  exactly that summary; with an address it is the one object. `list` is "the
-  objects of this noun, one per line": `mashctl endpoint list`.
-- Rule 6 (no aliases): `mash who` is removed, not kept beside `endpoint
-  status`.
-- Rule 7 and 8 (the object's name is the positional; an optional name acts on
+  of all of them with no name given"; `list` is "the objects of this noun, one
+  per line": `mashctl endpoint list`.
+- Rule 6 (no aliases): `mash who` is removed, not kept beside `endpoint status`.
+- Rules 7 and 8 (the object's name is the positional; an optional name acts on
   what the context gives and says which): the pattern is the one positional;
   the verdict line says `3 endpoints of acme`.
-- Rule 10 (`--json` on every read command): each view has it; the fields are
-  the ones of the MCP tools (section 8, "Section 6 MCP").
-- Rules 24 to 28: default answers only what was asked (six rows); `--detail`
-  is more about the same thing, `--wide` is more columns of a list; no
-  preamble; tables aligned with a header; 80 columns, with `--wide` exempt.
+- Rule 10 (`--json` on every read command): each view has it.
+- Rules 24 to 28: default answers only what was asked; `--detail` is more about
+  the same thing, `--wide` is more columns of a list; no preamble, no legend;
+  aligned tables; 80 columns, with `--wide` exempt.
 - Rule 14 (exit codes): 0, 1, 2, 3 cancelled, 4 not authorized, and the
-  contract's 5 and 6; I use 0, 1, 2, 4, 6 as the output contract does.
+  contract's 5 and 6; I use 0, 1, 2, 4, 6.
 
 ### Agree with ctl
 
-Not agreed with the mashctl lane; these are the questions I would put to them,
-each with a proposal. (ctl D15 as cited: `status` 1458-1580, `endpoint list`
-and `show` 2452-2656, `issued list` 4918-4975.)
+Not agreed with the mashctl lane except where ctl's answer (appendix) says so.
+The questions I would put to them, each with a proposal. (ctl D15 as cited:
+`status` 1458-1580, `endpoint list` and `show` 2452-2656, `issued list`
+4918-4975.)
 
-1. (SUPERSEDED in DRAFT2: see item 9; the lead's ruling keeps `mashctl
-   status`.) Name. `mashctl status` is the administrator's view of the SERVER
-   (what `config.json` and the admin credentials say about it; its own text says it
-   "knows no endpoint"). Under rule 1 a top-level `status` needs "a tool named
-   for a thing"; `mashctl` is not. Proposal: `mashctl server status`, the same
-   noun as `mash server status`. Is that agreed?
-2. One screen, two tools. Both show reachable, encrypted, certificate. Proposal:
-   the row labels and values for those facts are written once (`address`,
-   `state`, `encryption`) and used by both; ctl adds the administrator's rows
-   (`signed in`, `prepared`, owner, the keys). Their first line is `OK` or
-   `PROBLEM: ...` where mine is `The server is reachable and encrypted.`:
-   proposal, both use a sentence for the verdict. And rows: ctl prints
-   `label:` with a colon, mash prints the label alone (13 screens of the
-   targets); proposal, one style in both tools, without the colon. Agreed?
-3. `endpoint list` against `mash endpoint status`. Does `list` include
-   endpoints that never ran (it reads the registry, so it should), and does it
-   show every owner of the account or only the configured owner? My proposal:
-   registry, every endpoint, never-seen included, no liveness column (the one
-   live view is `mash endpoint status`).
-4. The same patterns. Proposal: `mashctl endpoint list [<pattern>]` takes the
-   same three-part pattern, the same one wildcard. The administrator may write
-   any owner (the account holds several), so the owner part may be a literal
-   other owner, or `*`: that is the one place the two tools differ, and the
-   help says so. Agreed?
+1. One screen, two tools. Both show reachable, encrypted, certificate.
+   Proposal: the row labels and values for those facts are written once
+   (`address`, `state`, `encryption`) and used by both; ctl adds the
+   administrator's rows. Their first line is `OK` or `PROBLEM: ...` where
+   mine is `The server is reachable and encrypted.`: both use a sentence. ctl
+   prints `label:` with a colon, mash prints the label alone: one style, without
+   the colon. Agreed?
+2. `endpoint list` against `mash endpoint status`. ctl says the two share four
+   leading columns (OWNER GROUP ENDPOINT ADDRESS CREATED). This page's list has
+   one address column, `ENDPOINT`, and `STATE`; the owner and group are in the
+   address. Proposal: both use `ENDPOINT` (the dotted address) and neither
+   repeats it as separate OWNER, GROUP and ADDRESS columns, since a person
+   pastes the address. Does `list` include endpoints that never ran (it reads
+   the registry, so it should), and every owner of the account or only the
+   configured one? My proposal: registry, every endpoint, never-seen included,
+   no liveness column.
+3. SETTLED with the lead, confirmed by ctl in its answer: ONE name,
+   `mashctl status` stays (how the operator's tool is set up; it never repeats a
+   server fact except the one reachable/encrypted line that explains a failure),
+   next to `mash server status`. `mashctl server status` is not proposed.
+4. The grammar. Stated once in section 4.3. ctl's answer agrees on three-part
+   patterns and `*` as a whole part. Two additions need ctl's yes: `*` inside a
+   part (`acme.demo.b*`), and the cut-short form (`acme.demo`), where ctl's
+   answer says a pattern that is not three parts is an error. And the one
+   difference to keep: `mashctl endpoint list` may take another owner, or `*`
+   for any, since an administrator sees the whole account. Agreed?
 5. `HOST`. In `list --wide` it is the directory's `host` (the machine the
    endpoint is meant to run on, set by `mashctl endpoint set --host`): ctl D15
-   shows `-` for bob until it is set. In `mash endpoint status --wide` it is
-   the same field. Proposal: both tools call it `host`, and neither says `runs
-   on` (the targets' `who --detail` says `runs on`, which is wrong for any
-   endpoint but your own). Agreed?
-6. `unread mail` (ctl `show`) against `new` (the targets' `inbox`, status
-   `inbox` row). Proposal: `new` in both. And where does ctl read `online:` for
-   an endpoint (an administrator may ping `$SYS`, an endpoint may not): by the
-   same `$SRV.INFO` probe? If so say `online`/`offline` in both tools, the
-   same two words.
+   shows `-` for bob until it is set. In `mash endpoint status --wide` it is the
+   same field. Proposal: both tools call it `host`, and neither says `runs on`.
+6. Words. ctl `show` says `unread mail`; this page says `waiting to be
+   delivered` (section 4.4 defines it, and it is not "unacknowledged"). And
+   where does ctl read `online:` for an endpoint (an administrator may ping
+   `$SYS`, an endpoint may not): by the same `$SRV.INFO` probe? If so say
+   `online`/`offline` in both tools, the same two words, one source.
 7. Flags. ctl uses `--detail` on `status` and `show` and `--wide` on lists
-   (standard rule 24). The targets' `who` used `--detail` blocks for a list.
-   Proposal: lists take `--wide` (more columns, one row each, may pass 80),
-   single-object views take `--detail`; that is what `mash endpoint status`
-   does above.
+   (standard rule 24); `mash endpoint status` does the same.
 8. Exit codes for `server status`: ctl says 0 OK, 1 PROBLEM, 6 NOT REACHABLE.
-   Mine are the same, plus 4 when the credentials are refused (the storage
-   rows then say why). Agreed?
-9. ONE name, `mashctl status` (appended in DRAFT2; the lead's ruling, to be
-   settled with ctl). Core's position, sent to ctl: withdraw `mashctl server
-   status` (item 1 of DRAFT1 proposed it) and KEEP `mashctl status`, which ctl
-   already answered is about the operator's tool (admin sign-in, shared
-   storage, key directory, config paths), next to `mash server status`, the
-   server as an endpoint's credentials see it. They do not overlap: neither
-   tool repeats the other's rows, and `mashctl status` shows a server fact
-   only to explain a failure, as ctl said. Confirmation from ctl pending (its
-   answer is not in my inputs).
-10. Counts on `mash server status`. ctl's answer says "no counts"; this page
-   shows `mail storage`, `endpoints` (a count) and, with `--detail`,
-   `streams`, because the maintainer asked for storage and limits "if a
-   person can read them without admin credentials" and section 2 shows they
+   Mine are the same; a credentials problem does not change the server's exit
+   (section 4.2).
+9. Counts on `mash server status`. ctl's answer says "no counts"; this page
+   shows `mail storage` (default) and, with `--detail`, `mail stores` and
+   `endpoints` (counts), because the maintainer asked for storage and limits "if
+   a person can read them without admin credentials" and section 2 shows they
    can. Is that agreed, or does ctl want them only in `mashctl`?
 
 ## 7. Open questions for the maintainer
 
-1. SETTLED as the proposal (the lead accepted it; it goes to Randy as "hard
-   cut of `mash who`", his ruling is not yet in). The set of names.
-   Recommendation: A of section 5: `mash status`, `mash
-   server status`, `mash endpoint status [pattern]`, `mash who` removed with no
-   alias, `mashctl endpoint list` kept as the registry. The "Other?" of the
-   comment is answered by the table in section 5: the nearest thing not covered
-   is "who may I mail", which has no view and needs none in 0.5.6.
-2. The agent's `who` tool. Recommendation: rename it `endpoint_status` in 0.5.6
-   (one name per thing, the JSON already changes; the plugin's instructions
-   are regenerated). The alternative is to keep `who` for agents only, which
-   leaves two names for one view for the life of the tool.
-3. OPEN. The server's address in `mash status --detail`. Recommendation: yes,
-one
-   fact row (`server  tls://myserver:4222`), because `--detail` already says
-   where everything is (the config file, the CA, the credentials file). The
-   default screen has none, as you said. If you want it nowhere in `mash
-   status`, `mash server status` is the only place and the `--detail` row goes.
-4. SETTLED: the lead chose option (a); section 4.4 describes it; the label is
-   `LAST SEEN HERE`. The question was: `LAST SEEN` has no source in 0.5.5
-   (section 3), the time is in one process's memory. Options: (a) a record in
-   this machine's state directory,
-   written by every `mash endpoint status`, `serve` and `send` that sees an
-   answer: no server change, no new permission, honest label "the last time
-   THIS computer saw it answer" (as N10's `last reached`); (b) a record the
-   endpoint writes for its owner to read: it needs a new KV bucket and new
-   permissions, which is a protocol and permission change that D229 rules out
-   without Randy; (c) drop the column and show `online`/`offline` only.
-   Recommendation: (a) now, and say so in the footer; (c) if you want nothing
-   that can be wrong. Not (b) in 0.5.6.
+Marked SETTLED when the lead or the contract has ruled, OPEN when Randy or ctl
+has not.
+
+1. SETTLED as the proposal (the lead accepted it; it goes to Randy as "hard cut
+   of `mash who`", his ruling is not yet in). The set of names: option A of
+   section 5. The "Other?" of the comment is answered by the table in section 5.
+2. OPEN. The agent's `who` tool. Recommendation: rename it `endpoint_status` in
+   0.5.6 (one name per thing, the JSON already changes; the plugin's
+   instructions are regenerated). The alternative is to keep `who` for agents
+   only, which leaves two names for one view for the life of the tool.
+3. SETTLED (planner's ruling): no server detail in `mash status`, not even in
+   `--detail`; the one line `server details  mash server status` points to it.
+4. OPEN, the first question at the top: heartbeat history. Is "answers now /
+   does not answer" enough for 0.5.6, or should mash store a last-alive time
+   (new: it needs either every endpoint to write one to the server, a protocol
+   and permission change that D229 rules out without Randy, or every listener to
+   subscribe to heartbeats again, which ADR 0066 removed)? Recommendation:
+   enough for 0.5.6; nothing in this page needs history.
 5. `host`. It is the directory's field, set by an administrator, the machine an
    endpoint is MEANT to run on (`store.go:233-235`), not where it runs. Only
    your own endpoint's live host is readable (`serve.go:914-922`).
-   Recommendation:
-   show it as `host` in `--wide` and one-address views, never `runs on`, and
-   show `session ... on myserver` (live) only for your own endpoint in `mash
-   status --detail`.
-6. Patterns. Recommendation: the owner must be literal and yours; `*` inside a
-   group or name part; no `?`; the pattern is quoted in every example. The
-   alternative is a `--group demo` flag (standard rule 7: scope as a flag),
-   which is simpler to type and to say but cannot say `acme.*.bob`.
-7. The table limit. Recommendation: 40 rows by default, sorted by address,
-   with `--all`; the verdict line counts everything. Online-first sorting
-   is the alternative, with the cost that the order changes between runs.
-8. `mash server status` shows the ACCOUNT's storage and stream totals, which
-   every owner in the account shares (ADR 0006). Recommendation: show them, as
-   `mail storage` and `streams` (`--detail`), because a full account is the
-   one server problem a person can hit; the label says nothing about owners.
-9. Offline exits 0. `mash endpoint status acme.lab.carol` for an offline
-   endpoint is exit 0 (the question was answered), as `status` of a healthy
-   screen with a warning is 0. A script that wants a gate uses `--json`.
-   Recommendation: keep 0. The alternative (1 when the one asked-for endpoint
-   is offline) turns an answer into a failure.
-10. SETTLED for the mailbox row: REQ-015 puts it on every screen, and the
-    count is the unacknowledged backlog (section 4.1); the open wording part
-    is point 15. The `mailbox` and `session` rows add two lookups to `mash
-    status` (own inbox consumer, own lease) on the connection that already
-    signs in; they are `not checked` whenever the sign-in did not happen.
-    Recommendation for `session`: keep it (section 4.1 says why).
-11. The certificate's end date. Recommendation: show it in `mash server
-    status` and warn within 30 days; mash reads no certificate field today
+   Recommendation: show it as `host` in `--wide` and one-address views, never
+   `runs on`, and show `session started ... on localhost` (live) only for your
+   own endpoint in `mash status --detail`.
+6. OPEN, the second question at the top: the pattern grammar (one wildcard, `*`;
+   the cut-short form; quoted in every example). The alternative is a `--group
+   demo` flag (standard rule 7: scope as a flag), which cannot say `acme.*.bob`.
+7. The table limit. Recommendation: 40 rows by default, sorted by address, with
+   `--all`; the verdict line counts everything and your own row is always
+   printed.
+8. `mash server status` shows the ACCOUNT's storage, which every owner in the
+   account shares (ADR 0006). Recommendation: show it, because a full account
+   is the one server problem a person can hit; the label says nothing about
+   owners.
+9. Offline exits 0, and so does a pattern that matches nothing. A script that
+   wants a gate uses `--json`. Recommendation: keep 0.
+10. SETTLED by the behaviour Randy described: the mailbox count is mail not yet
+    delivered (section 4.4). OPEN inside it, for the mash lane and the planner,
+    three recommendations that change code: a digest line counts as delivered
+    but stays unacked; the `read` tool and `mash read` deliver (and so ack) any
+    waiting message; serve writes `backlog` and `backlog_woke_at` into the
+    endpoint's own lease. They amend ADR 0041 and need an ADR.
+11. The certificate's end date. Recommendation: show it in `mash server status
+    --detail` and warn within 30 days; mash reads no certificate field today
     (section 2), so it is new code but no new permission.
-12. Rule 3 of the standard and `mash status` (section 6). Recommendation: keep
-    `mash status`, record the reading of rule 3 in the contract; if the planner
-    refuses it the name is `mash doctor`, and `status` would then mean only
-    `mash endpoint status <own address>`.
-13. The server address in errors. Recommendation: a fix may name the address
-    (`check that the server at tls://myserver:4222 is running`), because it is
-    the thing to check; no other line of `mash status` does. OPEN.
-14. OPEN. The `MAILBOX` of other endpoints. REQ-015 says `mash endpoint
-    status` shows the count for "the caller's own owner's endpoints", with the
-    caller's own credentials, never admin. The permission set lets those
-    credentials read their OWN inbox only (section 2; ctl said the same), so
-    a count for Carol would need an admin or a new permission, which the
-    contract forbids. This page shows the number for the caller's own
-    endpoint and `unknown` for every other row. If the contract meant the
-    other endpoints of the owner too, it is not possible as written.
-15. OPEN. Two small wording points of the `mailbox` row. (a) `mash inbox` says
-    `new` in its header today (targets) and the row says `waiting`: two words
-    for two counts, or one word for one count? What counts as new may differ
-    from unacknowledged, so I used `waiting`, REQ-015's word, and the inbox
-    contract decides whether its header says it too. (b) With `mailbox_limit`
-    0 the contract says status says `off`; I used the single word `off` and
-    show no count then. The alternative is `3 waiting, wake off`.
-16. OPEN. The record of section 4.4: which commands write it (only `endpoint
-    status`, or also `send` and `serve`), and its name. Recommendation: every
-    command that already probes who is online, so a person is not shown
-    `never seen here` for an endpoint they mailed an hour ago.
+12. CLOSED: rule 3 of the standard and `mash status`; the exception covers it
+    (section 6).
+13. CLOSED: the server address in errors. A fix may name the address, because it
+    is the thing to check; no other line of `mash status` does.
+14. CLOSED: the `MAILBOX` of other endpoints. No column; REQ-015 is amended to
+    "your own endpoint" (section 8).
+15. CLOSED by the same ruling: with `mailbox_limit` 0 the row says `3 waiting to
+    be delivered, no limit set`.
+16. OPEN, small. Time format (section 1): local time on default screens, with
+    the offset behind `--detail`. Recommendation: as written.
+17. OPEN, small. `mash status` now probes presence for the `session` row: about
+    0.3 s more when a session answers, up to 2 s more when none does
+    (section 3). Recommendation: accept; test the one-address "no responders"
+    shortcut, which would make it milliseconds.
 
-## 8. What this changes in the targets doc
+## 8. What this changes in the targets doc and the contract
 
-Not edited. The sections and blocks that would change:
+Not edited by this page. The sections and blocks that would change:
 
-- Rule R11 (lines 158-210): the default screen is the verdict and SIX rows
-  (`version`, `server`, `config`, `credentials`, `mailbox`, `session`); the
-  server row is one word (`reachable`, `reachable, NOT ENCRYPTED`, ...), no
-  address, no time; the two and three line forms, the `checked 09:42` and
-  `last reached` texts and the env override lines in the row go; the override
-  moves into the `warning:`/`fix:` text. `--detail`: the seven rows of REQ-012
-  stay, the `group` fact leaves, a `server` (address), a `session` and a
-  `mailbox limit` fact are added. The `mailbox` row is the one of REQ-015
-  (`<n> waiting`, `OVER THE LIMIT OF 15`, `off`, `not checked`) in every
-  block, with the over-the-limit block added (`status-mailbox-over`).
-- R14 (lines 234-244) and R3 (94-105): add `endpoint status` columns
-  (`LAST SEEN HERE`, `MAILBOX`) and the
-  pattern; "the address is the dotted path" gains the pattern form (the one
-  wildcard).
-- R20 (317-329): "one place keeps naming the server ... the rows of `mash
-  status`" (N19) is now `mash server status`.
-- Section 5 `mash status` (1508-2186): the lead paragraph; every block
-  (healthy, detail, Claude, no configuration, none chosen, none installed,
-  credentials missing, unsafe, unreachable, refused, deleted, differs, plain
-  with the override, override with a tls address, plain refused, environment
-  overrides, unknown flag) takes the six rows; the `--detail` blocks add the
-  `server` and `session` fact rows; "Changes (status)" (2170-2186) is
-  rewritten.
-- Section 5 `mash who` (2649-2767): replaced by `mash endpoint status` (the
-  blocks of section 4.3 here), with `mash who` in "Unknown command" (3394-)
-  naming it; N3 (`--by-group`, `mash who <address>`) is closed by the pattern;
-  N13 is answered (the directory holds every owner; presence is owner-only).
-- New sections 5 `mash server status` and `mash endpoint status` (sections 4.2
-  and 4.3 here).
-- Help (3234-3300): `who` leaves "Mail"; a `Server` and `Endpoints` group, or
-  `endpoint status`/`server status` lines, appear; `status` stays under "Set
-  up".
-- Section 4 (key and credential flow) and the READMEs (`docs/plans/
-  2026-11-19-readme-quickstart-*.md`, `...-day2-plain-mash.md`): every healthy
-  `mash status` they quote ("this is how a healthy `mash status` looks") takes
-  the six rows.
+- Rule R11 (the default screen): the verdict and SIX rows (`version`, `server`,
+  `config`, `credentials`, `mailbox`, `session`); the server row is one phrase
+  (`reachable, encrypted`, `reachable, NOT ENCRYPTED`, ...), no address, no
+  time; the two and three line forms, the `checked 09:42` and `last reached`
+  texts and the environment lines in the row go; the override moves into the
+  `warning:`/`fix:` text. `--detail`: REQ-012's rows stay without the trust
+  rows and the `group` fact; added: `mailbox limit`, `listed, not read`,
+  `session started`, `server details`. The `mailbox` row is `<n> waiting to be
+  delivered`, `..., over the limit of <limit>`, `..., no limit set`, `not
+  checked`, in every block, with the over-the-limit blocks added.
+- The environment rule (section 4.1): the targets' DRAFT8 says `mail does NOT
+  work: MASH_SERVER overrides config.json` for a differing value; this page says
+  `not checked`, because mash did not check (critic, defect 7). One word to
+  change in the targets' verdict forms.
+- R14 and R3: `endpoint status` columns (`ENDPOINT`, `STATE`; `--wide`:
+  `VERSION`, `HOST`, `ROLE`) and the pattern; "the address is the dotted path"
+  gains the pattern form.
+- R20: "one place keeps naming the server ... the rows of `mash status`" (N19)
+  is now `mash server status`.
+- Section 5 `mash status`: the lead paragraph; every block takes the six rows;
+  the `--detail` blocks take the new fact rows; "Changes (status)" is rewritten.
+- Section 5 `mash who`: replaced by `mash endpoint status` (the blocks of 4.3
+  here); `mash who` in "Unknown command" names it; N3 closes by the pattern; N13
+  is answered (the directory holds every owner; presence is owner-only).
+- New sections `mash server status` and `mash endpoint status` (4.2 and 4.3).
+- Help: `who` leaves "Mail"; `endpoint status` and `server status` lines appear;
+  `status` stays under "Set up".
+- The mailbox section of the targets (the definition DECIDED at rev 16): items
+  "A digest line is not a showing" (O1) and "Reading is not showing" (O2) are
+  reversed by section 4.4 here, on Randy's own words; "What each command does
+  with it" gains the lease's `backlog` and `backlog_woke_at`; the `mash endpoint
+  status` row (a `MAILBOX` column) goes; `mash read --detail` `state` is true
+  only after change 4 of section 4.4.
+- The contract: REQ-015's sentence "a digest line does not acknowledge, and
+  reading with `mash read` does not lower the count" becomes the definition of
+  section 4.4; "`mash endpoint status` shows the count only for the caller's own
+  owner's endpoints" becomes "for the caller's own endpoint only"; REQ-015 adds
+  the row wording and the recorded wake time. REQ-004's `mash server status:
+  address, alive, encrypted, last seen` and `mash endpoint status: ... heartbeat
+  or last seen` become the rows and the `online`/`offline` of this page (no last
+  seen). REQ-012: its list is unchanged; two fact rows are added by this page.
+  REQ-010's variable name is used throughout (`MASH_DANGEROUSLY_SKIP_NATS_
+  ENCRYPTION`); there is no trust record.
 - Section 6 MCP: `who` becomes `endpoint_status` (question 2) with the pattern
-  argument, `last_seen` documented as local, `mailbox` added (null for others);
-  `status` takes the six rows (`server.address`, `server.checked_at`,
-  `server.last_reached` leave the default JSON; `mailbox: {waiting, limit}`
-  and `session: {serving, since}` are new); new tool `server_status`; the
-  initialize `instructions` text (4316-)
-  names the new tools.
-- Section 7: N10 (`last reached`) closes for `mash status` and moves to the
-  last-seen-here record (section 4.4; question 4 is settled); N13 closes; new N
-  for the pattern and the
-  limit. Section 8 (behaviour changes): `who` removed, `status` reads the
-  mailbox count and the lease, two new commands, a local last-seen record (a
-  new file in the state directory: scope table row and security read, section
-  4.4). The
-  contract's REQ-012 (the seven detail rows) needs a note that two fact rows
-  are added.
-- The name of the administrator's status: `mashctl status` stays (section 6,
-  item 9, confirmation from ctl pending); the targets and ctl D15 need no
-  rename.
-- Section 2 (exit codes): the table gains the exit-code row of `server status`
-  and `endpoint status` (section 4.3 of this document).
-- Section 9 (checks) and the dispositions file: rows for D1 (the server row
-  forms) and L5.
+  argument and `mailbox` for the caller's own entry; `status` takes the six rows
+  (`mailbox: {waiting, limit}`, `session: online|offline`); new tool
+  `server_status`; the initialize `instructions` text names the new tools.
+- Section 7 and 8 of the targets: N10 (`last reached`) closes for `mash status`
+  and is dropped for the list (no last seen); N13 closes; the behaviour changes
+  list gains: `who` removed, `status` reads the mailbox number and probes, two
+  new commands, `mash read` and the `read` tool deliver, the lease gains two
+  fields.
+- The READMEs: every healthy `mash status` they quote takes the six rows.
+- Section 9 (checks) and the dispositions file: rows for these findings.
 
 ## 9. What I could not verify, and checks run
 
 What I could not verify:
 
-- Another owner's agents cannot answer an endpoint's probe. It follows from
-  the permission list (`permissions.go:19-24,63`) and the comment on it; I
-  tested only one owner, so the claim for two owners is a reading, not a run.
-  That `mash who` lists other owners' records is a reading of `directory.go:
-  89-103` and `client.go:234-258`, also not run.
-- `reserved_storage` (125MB in the run): I show it as a number the server
-  reports and did not establish what counts toward it; the detail row's
-  wording may need to change.
-- The certificate fields (end date, issuer, the cause of a refusal): my run
-  used the plain test server (`tlsreq: false`), so no certificate was read. Go's
-  API gives them; mash reads none today.
-- The `mailbox` count and the `session` row. The inbox consumer (its ack and
-  pending counts) and the own lease are readable (the consumer info answered
-  live; the lease read is `OwnLease`, `directory.go:138-148`). I did not run
-  the count as REQ-015 defines it (pending plus delivered-unacknowledged), the
-  backlog wake or its cooldown, and I did not check that a one-shot CLI can
-  read the lease fresh enough: `ClientOptions.Lease` (`client.go:49-50`)
-  exists for the launch path.
-- What lowers the mailbox count. REQ-015 says reading does not, and a digest
-  does not acknowledge. What does acknowledge (so what a person does about
-  `OVER THE LIMIT`) I could not determine, so the warning's fix only says
-  `mash inbox`, to see what waits.
-- The MAILBOX of other endpoints (question 14): the permissions deny another
-  inbox, so the contract's "the caller's own owner's endpoints" cannot be
-  met; I show `unknown` for them. A run with an admin-less second endpoint
-  would confirm it; I did not run it.
-- The local record (section 4.4): which commands probe today and so could
-  write it, and the state directory's own permission and link rules, which I
-  did not read. The file name `seen-here` is mine.
-- `off` for `mailbox_limit` 0: the contract says status says `off`; whether a
-  count is shown with it is not stated (question 15).
-- ctl's answer on `mashctl status` (item 9 of section 6): not in my inputs.
-- A multi-server cluster: ADR 0066 measured three servers, the maintainer says
-  one. `mash server status` talks to the server it connects to; a cluster would
-  need a sentence about replicas (stream info has `cluster.leader`).
+- Another owner's agents cannot answer an endpoint's probe. It follows from the
+  permission list (`permissions.go:19-24,63`) and its comment; I tested only one
+  owner, so the claim for two owners is a reading, not a run. That `mash who`
+  lists other owners' records is a reading of `directory.go:89-103` and
+  `client.go:234-258`, also not run.
+- A directed request to `agents.status.<owner>.<group>.<name>` failing at once
+  with "no responders" when nothing serves (it would make the one-address
+  `online` check cost milliseconds, section 3): not run.
+- `reserved_storage` (125MB in the run): not shown on any screen until it is
+  known what counts toward it.
+- The certificate fields (end date, issuer, the cause of a refusal): my run used
+  the plain test server, so no certificate was read. Go's API gives them; mash
+  reads none today.
+- Section 4.4. I read the code paths of every ack, and did not run the changes:
+  that a tombstone written by `mash read` is acked by a running serve within
+  250 ms, and by a starting serve on redelivery; that the spool directory
+  exists for an endpoint whose session has run on this machine and not for one
+  whose session never has (if it does not, `mash read` cannot deliver there and
+  the message stays counted until a session shows it); that a tombstone for a
+  message the stream has since expired is pruned (I did not find where, so it
+  may leak a few empty files); and the lease's two new fields and the freshness
+  of `backlog` (the throttle on lease writes is `WakingWriteMin`, 5 s,
+  `waking.go:36-38`).
+- Per-message `new`/`read` from a shell: the consumer reports counts and an ack
+  floor, not which message above the floor was acked. The number is exact; the
+  per-message state is exact only at or below the floor.
+- Whether Claude Code reliably puts a hook's context in front of the model: not
+  testable from the code (the 10,000-character cut is handled,
+  `claude.go:211-233`).
+- The plugin-drift warning's fix command (`mash plugin install` is out of 0.5.6)
+  and whether a token can expire at all in 0.5.6: not determined.
+- The exact command after an untrusted certificate (move the old CA aside and
+  install again) follows REQ-003's rule as I read it; I did not run install.
 - Whether a `listset` policy (`internal/listset/compile.go`) narrows who an
   endpoint may mail beyond its owner; the permission set alone says "any
   endpoint of the same owner".
 - How ctl reads `online` and `unread mail` for another endpoint: ctl D15 does
   not say.
+- A multi-server cluster: ADR 0066 measured three servers, the maintainer says
+  one; a cluster would need a sentence about replicas (stream info has
+  `cluster.leader`).
 - The in-session MCP status: not run; the six facts are the CLI's.
 - The test server's numbers (7 streams of 50, 256MB, 64MB memory) are the
   repository's test fixture, not a production server's.
-- The cast: every output in this document is a target, not output of a binary.
+- Every output in this document is a target, not output of a binary.
 
-Checks run: the facts of section 2 were obtained by a throwaway test against
-the in-process test server in a scratch clone of v0.5.5 (deleted; the clone
-unchanged: `git status` clean); the denied subjects were observed as timeouts,
-the granted ones as replies. The fenced blocks were measured with a script
-(Python 3, `-I`, characters per line of every fenced block, `$`-blocks and the
-JSON block included):
+Checks run: the facts of section 2 were obtained by a throwaway test against the
+in-process test server in a scratch clone of v0.5.5 (deleted; the clone
+unchanged); the denied subjects were observed as timeouts, the granted ones as
+replies. For DRAFT3 I read, without running: the consumer config, the receive
+path, the hook, the digest, the `read` tool, `mash read`, `mash inbox`, the
+channel path, the lease record, the audit's consumer fields, and ADR 0041,
+0046, 0066 and 0069. The fenced blocks were measured with a script (Python 3,
+`-I`, characters per line of every fenced block, `$` blocks and the JSON block
+included):
 
-Re-measured for DRAFT2: 30 fenced blocks (the `$` blocks and the one JSON
-block). None is over 80 columns except the `--wide` table of section 4.3
-(`endpoint-status-wide`, 94 columns at its widest), which the standard exempts
-(rule 28) and which does not wrap. Of the rest the widest is 79 (the Claude
-Code fix line of `status-claude`); the widest of the `mash status` blocks is
-the new `status-mailbox-over` (its warning lines are under 70). The default
-`mash endpoint status` tables are 52 columns (the `MAILBOX` column included),
-the long-name table is 76 and the footer lines are under 80. Prose lines outside tables: none
-over 80. Tables in this file are not measured (a markdown table row cannot
-wrap). Not measured, by the same rule as the targets: only the `--wide` block.
+DRAFT3, measured: 36 fenced blocks (the `$` blocks and the one JSON block).
+None is over 80 columns. The widest is 79 (the Claude Code fix line of
+`status-claude`, unchanged from DRAFT2); the widest of the new or rewritten
+`mash status` blocks is `status-refused` at 78 (its fix, unchanged) and
+`status-mailbox-over` at 76 (the warning). `mash server status`: 78
+(`server-untrusted`, the fix line). `mash endpoint status`: the default tables
+are 41 columns, the `--wide` table 63 (it no longer needs the exemption of
+standard rule 28), the real-name table 56, the help block 75, the JSON block
+72. Prose lines outside tables and quoted text: none over 80 (checked with the
+same script, after wrapping). One value column per screen in every key/value
+block (checked with a second script). Tables in this file are not measured (a
+markdown table row cannot wrap).
+
+## 10. Disposition of the critic's and the junior's findings
+
+One row per finding. FIXED: the page now says what the finding asked. CHANGED:
+done differently, with the reason. NOT TAKEN: not done, with the reason. Defects
+are the critic's numbers (F, 1 to 18); "critic A to E" are its sections;
+"junior" is its part 3 unless named.
+
+| finding | status | where, and what |
+|---|---|---|
+| critic D1: one fact, two names, two sources | FIXED | `online`/`offline`, from the presence probe, in `mash status` (section 4.1) and `mash endpoint status` (4.3); rule 7. The lease is not the state source: it can be 90 s old, and cannot be read for another endpoint |
+| critic D2: the count cannot be lowered | FIXED | section 4.4: the count is mail not yet delivered; `next:` label instead of `fix:` |
+| critic D3: the wake is not shown | FIXED | `status-mailbox-over` says when mash woke the session; the time is kept in the lease (4.4, item 5) |
+| critic D4: `off` and `LIMIT` mislead | FIXED | `no limit set`; "limit" is defined once as the number that triggers a wake, and is not a capacity |
+| critic D5: no-match is both legitimate and an error | FIXED | `endpoint-status-nomatch`: exit 0, stdout; an unregistered full address stays exit 1 |
+| critic D6: two timeouts | FIXED | one value, 2 s, and one sentence in all three views; the source of the number is stated once (section 1) |
+| critic D7: a verdict not true as written | FIXED | `not checked: MASH_SERVER is not the server in config.json`; the one environment rule is in 4.1; the targets' wording needs the same change (section 8) |
+| critic D8: `mashctl status` contradicted | FIXED | the superseded item and the appendix's closing paragraph are gone; settled in section 6, item 3 |
+| critic D9: two pattern dialects | CHANGED | one grammar, stated once (4.3). It is not identical to ctl's answer: it adds `*` inside a part and the cut-short form; those two are an explicit open item with ctl (6.4, 7.6), not silent |
+| critic D10: `--json` drops "here" | FIXED | by removal: no `last_seen` anywhere |
+| critic D11: "last seen here" claims more than it knows | FIXED | by removal (planner's ruling): no last-seen by default and no local record; the question to Randy is at the top; `--detail` says `heartbeats  not recorded` |
+| critic D12: the same fact twice on one screen | FIXED | `status-detail` has no server or session fact rows (one pointer line); the certificate date appears once |
+| critic D13: a legend under every list | FIXED | no legend; `endpoint-status-help` holds the definitions; the caller is marked `(you)` |
+| critic D14: the `MAILBOX` column is `unknown` | FIXED | the column is gone; REQ-015 is amended to "your own endpoint" (section 8) |
+| critic D15: `server status` fails on a credentials problem | FIXED | `server-no-credentials`: the server's verdict, exit 0, storage row `not checked (...)` |
+| critic D16: the `status-choose` fix is not pasteable | FIXED | prose for the file edit, the command for the shell; indents 5 and 2 |
+| critic D17: two alignments on one screen | FIXED | one value column per screen (rule 9) in every block |
+| critic D18: `mail storage` may overstate the room | FIXED | `1KB in use`; the reserved storage is not shown until verified |
+| critic A: "encrypted" in his sketch | FIXED | the healthy row is `reachable, encrypted` |
+| critic A: tie the dropped group counts to his "if that takes too long" | FIXED | 4.1, "Not rows" |
+| critic A: `--match` unexplained | FIXED | 4.3: a search of description and capabilities, no longer the address |
+| critic B: ctl's "same four leading columns" unreconciled | CHANGED | section 6, item 2: one `ENDPOINT` column; asked of ctl |
+| critic B: `*` is both wildcard and "you" | FIXED | the marker is `(you)` |
+| critic B: capitals on a warning | FIXED | the row is lower case; capitals only for a problem (rule 5) |
+| critic C: jargon in `--detail` | FIXED | trust rows, `relays seen` and `name rule` are gone; `storage name` is explained; `account` and `generation` are gone with the trust record |
+| critic C: default `server status` rows | FIXED | four rows; clock, limits and counts behind `--detail`; a wrong clock is a warning |
+| critic C: `endpoints 3 registered` vs "3 of acme" | FIXED | `3 registered, all owners` |
+| critic C: `warning:` runs into `fix:` | NOT TAKEN | decided once: they are one block, as in the targets, and a blank line separates it from the rows |
+| critic C: "your server made" credentials | FIXED | `status-noconfig` |
+| critic C: `serving since` has no zone | FIXED | the times rule (section 1) |
+| critic E: did my message arrive; why no wake; which endpoints here | FIXED | section 5, with what a sender sees today and what is decision 249's |
+| critic E: plugin drift, token expiry have no screen | CHANGED | answered in section 5; no new block (the fix command and token expiry could not be determined, section 9) |
+| critic E: `PROGRAM`, the legend, `relays seen`, `name rule` | FIXED | all removed from the default views |
+| critic E: close question 12 | FIXED | closed (7.12) |
+| critic polish: say "you said regexes" in the open | FIXED | question 2 at the top |
+| critic polish: accept `acme.demo` | FIXED | 4.3, `acme.demo` is `acme.demo.*` |
+| critic polish: zsh and unquoted `*` | FIXED | top, 4.3, help |
+| critic polish: orphan "decision 249" line | CHANGED | a plain sentence at the top says what decision 249 owns |
+| critic polish: stale appendix note | FIXED | removed |
+| critic polish: bare codes | FIXED | R-numbers and N-numbers are the targets' rules and notes, REQ-nnn the contract's, D229 decision 229 (no SAP protocol change); stated in "Sources" |
+| junior: 2 s against 20 s | FIXED | section 1: 2 s for the status views, 20 s is 0.5.5's default and the reason for the shorter bound |
+| junior: `MASH_SERVER` has two verdicts | FIXED | one rule, 4.1 |
+| junior: the leftover `mashctl server status` paragraph | FIXED | deleted |
+| junior: what `*` means | FIXED | the grammar, once; `(you)` is the marker |
+| junior: bob serving and offline | FIXED | one word, one source; the cast has bob online in every block |
+| junior: what the mailbox number counts, the limit, the one thing to do (Q5) | FIXED | `status-mailbox-over` and 4.4 |
+| junior: Q7, "is my mail to bob sitting?" | FIXED | section 5: what mash can and cannot tell a sender today; the rest is decision 249 |
+| junior: Q8, two patterns at once | FIXED | one address or pattern per command; run it twice |
+| junior: Q10, the person who runs the server | CHANGED | section 5 and the set table name `mash server status`, `mashctl status`, `audit`, `issued`; no `mashctl` screen is drawn here, it is ctl's |
+| junior: `session not running` has no block | FIXED | `status-offline` |
+| junior: `serving` unexplained; 09:12 without a zone | FIXED | `online`; the times rule |
+| junior: the `--dangerously-load-development-channels` flag | NOT TAKEN | it is the flag Claude Code requires; the targets own the wording |
+| junior: "token", "CA fingerprint" | NOT TAKEN | the install flow's words, owned by the targets |
+| junior: the unreachable fix prints the address in one view and not the other | NOT TAKEN | `mash status` prints it because it is the thing to check; `mash endpoint status` points to `mash server status` for it; the rule is in 7.13 |
+| junior: my mail works but someone does not answer: nothing points on | NOT TAKEN | a screen that worked ends without a hint (rule 8) |
+| junior: counting detail rows, section letters, broken line, "at a terminal" | FIXED | the sections are rewritten |
+| junior: the cast shares one host name | CHANGED | one-machine blocks read `localhost`, as the targets do |
 
 ## Appendix: the CLI team's answers, quoted unchanged
 
-Received after the sections above were written. The "Agree with ctl" section
-above lists my questions; these are ctl's answers (mail of 2026-11-19, 09:03 and
-09:04Z). Where they differ from my proposal, the page above is not yet updated.
+Received after DRAFT1 was written. The "Agree with ctl" section above lists my
+questions; these are ctl's answers (mail of 2026-11-19, 09:03 and 09:04Z). Where
+my proposal goes beyond them, section 6 says where.
 
 > An endpoint's own credentials may (a) read the WHOLE directory bucket (stream
 > info + direct get on KV_mash-directory: every record, all owners), (b)
@@ -1534,9 +1815,3 @@ above lists my questions; these are ctl's answers (mail of 2026-11-19, 09:03 and
 > `endpoint list` and `endpoint show` only for one address; `mash endpoint
 > status` never crosses owners (a different owner in the pattern is refused:
 > `error: you can only see endpoints of owner acme`).
-
-Difference to resolve with ctl: they keep the name `mashctl status`; this page
-proposes `mashctl server status`. And rev 15 REQ-015 adds a MAILBOX row to
-`mash status` (`<n> waiting`, or `OVER THE LIMIT OF 15`): the `inbox` row of
-section 1 is the same row, to be renamed `mailbox` and given the limit wording
-in the next draft.
