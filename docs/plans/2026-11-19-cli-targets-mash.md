@@ -12,7 +12,12 @@ revision 5: the CA fingerprint is typed by the person and never a flag
 (R15, R17), and the lead's rulings of this round: the server row of `status`
 says when mash checked, not "last seen" (R11), a configuration fix is labelled
 and never in command position (R10), and removing access prints no NEXT
-(R19). No product code.
+(R19). Round 4 adds section 5a (REQ-011: the attested install script and `mash
+plugin install`), rule R20 (files put in place are `wrote` or `kept
+(unchanged)`), and the corrections of the planner's check of DRAFT5 (N1 to N7,
+rows in the dispositions file). The exit-code change (the unreachable server
+exits 6) and the fingerprint display change (8 groups of 8) are NOT applied
+yet: the lead said after round 3. No product code.
 Every block below is a TARGET (what a person should see) unless it is labelled
 "Before". "Before" blocks are real output of the shipped binary from the
 catalog (`docs/plans/2026-11-19-cli-output-catalog-mash.md`), cut to fit 80
@@ -34,6 +39,8 @@ owner `acme`, the group `release-pipeline` (16 characters) and the names
 4. Key and credential flow (steps A, B, C, and the hand-overs to mashctl)
 5. Commands: version, status, send, inbox, read, who, prompt, key create,
    credential install, plugin export, serve, hook, help, errors
+5a. Install and plugin (REQ-011): the install script, `mash plugin install`,
+   and the two places that are mashctl's (adopt, delete)
 6. MCP tools (what agents get)
 7. Open questions and decisions
 8. Behaviour changes the contract must decide
@@ -119,17 +126,29 @@ owner `acme`, the group `release-pipeline` (16 characters) and the names
   when shown, is a separate item labelled `for this shell only:` (with the
   Claude Code started from it, where that matters) and is a real command.
   This holds in every command that prints a fix (`status`, `send`, `serve`,
-  `credential install`).
+  `credential install`, `install-mash.sh`). When the file already has the
+  line's key (the `server` line of a config that names a server), the label is
+  `change the <key> line to:`, not `add`; the line is still indented four
+  spaces (the plain-text fix of `status`).
 - R11 `mash status` (DECIDED, planner, L5). The default screen is FIXED and
   IDENTICAL in every state: a verdict line, a blank line, then exactly these
   four rows in this order with these labels: `version`, `server`, `config`,
   `credentials`. The server row is two lines: the address as configured
-  (`tls://myserver:4222`), then one fixed shape for every state (DECIDED, the
-  lead, D1): `alive, encrypted (checked 09:42)` when the server answered (the
-  time is when mash asked, on a 24-hour clock, local time),
-  `NOT REACHABLE (last reached 3h ago)` when it did not (`never reached from
-  here` when no answer was ever recorded), `not checked` when mash did not ask.
-  The other two-token words are `NOT ENCRYPTED` and `certificate NOT TRUSTED`.
+  (`tls://myserver:4222`), then the state. The state line has
+  exactly these forms and no other (DECIDED, the lead, D1; completed in
+  round 4): `alive, encrypted (checked 09:42)` when the server answered (the
+  time is when mash asked, on a 24-hour clock, local time); `alive,
+  certificate NOT TRUSTED (checked 09:42)` when it answered with a certificate
+  the trusted CA did not sign; `alive, NOT ENCRYPTED (checked 09:42)` when it
+  answered on a plain address the override allows; `NOT ENCRYPTED (refused;
+  not connected)` when a plain address is refused; `NOT REACHABLE (last
+  reached 3h ago)` when it did not answer (`never reached from here` when no
+  answer was ever recorded); `not checked` when mash did not ask. A THIRD
+  line exists in two cases, both about `MASH_INSECURE_PLAINTEXT`: `allowed by
+  MASH_INSECURE_PLAINTEXT (test servers only)` under `alive, NOT ENCRYPTED`,
+  and `MASH_INSECURE_PLAINTEXT is set; nats:// would be allowed` under a tls
+  address (R18). `--detail` adds one more line, `certificate checked against
+  <path>`, under a tls address.
   The row NEVER says `alive` and a past time together: `alive` always goes
   with the check that just happened. The server is checked in every state
   that has a server address and a tls:// scheme, whether or not credentials
@@ -151,7 +170,9 @@ owner `acme`, the group `release-pipeline` (16 characters) and the names
   the time of a check in `status` is the local clock alone (`checked 09:42`).
   Durations and sizes are a number with its unit and no space (`2s`, `41ms`,
   `14B`). Created things are "Created", written files are "wrote", files
-  copied are "copied", files left alone are "kept". Paths are `~/...` by
+  copied are "copied", files left alone are "kept (unchanged)" (R20); a
+  program put in place by the install script is "installed", and one it
+  verified first is "checked". Paths are `~/...` by
   default and absolute in `--detail`.
 - R13 (DECIDED, planner, L4) One setting names the endpoint by its full
   address: `MASH_ENDPOINT=acme.demo.bob`, or `"endpoint"` in `config.json`.
@@ -235,6 +256,19 @@ owner `acme`, the group `release-pipeline` (16 characters) and the names
   suggestion to start again. The deleted endpoint's address is never
   suggested for reuse.
 
+- R20 (DECIDED, the lead, round 4; planner's check N1) A command whose job is
+  to put files in place reports each file as wrote or kept (unchanged); no
+  other command names config or the server in success output. The commands
+  whose job it is: `mash credential install`, `mashctl endpoint create
+  --make-key`, `mashctl adopt`, `install-mash.sh` and `mash plugin install`
+  (section 5a). Each file such a command is responsible for gets one line:
+  `wrote <path>`, `copied <path>` (a file first placed from another file) or
+  `kept   <path>  (unchanged)` (the file is already there with the same
+  content; `copied` and `wrote` are never used for an unchanged file). Two
+  places keep naming the server by earlier decision and are listed to the lead
+  (N19): the rows of `mash status` (a report whose job is exactly that) and
+  the one start-up line of `mash serve` (Q12).
+
 Conventions in the mockups: `$` marks a typed command; lines after it are
 output; a prompt line shows what the person typed after its colon; no colour
 is shown (section 2 says where it goes).
@@ -298,7 +332,7 @@ mode 0600 from the moment it exists (there is no moment with a wider mode);
 without following a symbolic link at the target; in a directory the current
 user owns; and it is written to a temporary file in that directory and renamed
 into place, so a reader sees all of it or none. An existing file with the same
-content is reported `kept ... unchanged`. An existing file with different
+content is reported `kept (unchanged)`. An existing file with different
 content, and a symbolic link at the target, are refused and left untouched:
 never truncated, never replaced, and no flag changes that (so `--force` does
 not exist). The public key, the CA copy and `config.json` are written the same
@@ -588,8 +622,8 @@ Installed credentials for acme.demo.bob.
 They hold the private key and the token. Keep your file as the backup.
 
   wrote  ~/.config/mash/acme.demo.bob.creds  (mode 600)
-  kept   ~/.config/mash/config.json          unchanged
-  kept   ~/.config/mash/ca.pem               unchanged
+  kept   ~/.config/mash/config.json          (unchanged)
+  kept   ~/.config/mash/ca.pem               (unchanged)
 
 NEXT: check that acme.demo.bob can sign in:
   mash status
@@ -607,8 +641,8 @@ Installed credentials for acme.demo.bob.
 They hold bob's private key and the token. Keep bob.key as the backup.
 
   wrote  ~/.config/mash/acme.demo.bob.creds  (mode 600)
-  kept   ~/.config/mash/config.json          unchanged
-  kept   ~/.config/mash/ca.pem               unchanged
+  kept   ~/.config/mash/config.json          (unchanged)
+  kept   ~/.config/mash/ca.pem               (unchanged)
 
 NEXT: check that acme.demo.bob can sign in:
   mash status
@@ -618,7 +652,7 @@ NEXT: check that acme.demo.bob can sign in:
 
 When `config.json` already names the server (an earlier install, or
 `mashctl endpoint create --make-key`), mash uses it and the flags can be left
-out. mash says which it did with `kept` and `unchanged`. A second endpoint on
+out. mash says which it did with `kept (unchanged)`. A second endpoint on
 the same machine makes a choice necessary, and the hint says so, with two
 commands (a configuration line is not a command, so the file way is in
 `mash status`, which lists both):
@@ -630,8 +664,8 @@ Installed credentials for acme.demo.alice.
 They hold alice's private key and the token. Keep alice.key as the backup.
 
   wrote  ~/.config/mash/acme.demo.alice.creds  (mode 600)
-  kept   ~/.config/mash/config.json            unchanged
-  kept   ~/.config/mash/ca.pem                 unchanged
+  kept   ~/.config/mash/config.json            (unchanged)
+  kept   ~/.config/mash/ca.pem                 (unchanged)
 
 NEXT: this machine has more than one endpoint now. Choose one for this
       shell, then check it:
@@ -732,7 +766,7 @@ fix: this changes who mash trusts. At a terminal, run the same command with
 ```
 
 The credentials file is already there and is different (nothing is written;
-an identical file prints `kept ... unchanged`; there is no `--force`):
+an identical file prints `kept (unchanged)`; there is no `--force`):
 
 <!-- packet: install-refuse -->
 ```
@@ -847,7 +881,7 @@ Changed the server and CA mash trusts for acme.demo.bob.
 
   wrote   ~/.config/mash/config.json          (server, CA)
   copied  ~/.config/mash/ca.pem               (from newca.pem, mode 644)
-  kept    ~/.config/mash/acme.demo.bob.creds  unchanged
+  kept    ~/.config/mash/acme.demo.bob.creds  (unchanged)
 
 NEXT: check that acme.demo.bob can sign in:
   mash status
@@ -1034,8 +1068,8 @@ Installed credentials for acme.demo.bob.
 The private key is inside the credentials file: guard that file.
 
   wrote   ~/.config/mash/acme.demo.bob.creds  (mode 600)
-  wrote   ~/.config/mash/config.json          (server, CA)
-  copied  ~/.config/mash/ca.pem               (from mashctl's own copy)
+  kept    ~/.config/mash/config.json          (unchanged)
+  kept    ~/.config/mash/ca.pem               (unchanged)
 
 NEXT: check that acme.demo.bob can sign in:
   mash status
@@ -1045,7 +1079,12 @@ NEXT: check that acme.demo.bob can sign in:
 token file: checked in `cmd/mashctl/endpoint_create.go`, "write
 <config dir>/<address>.creds". The server and CA come from mashctl's own
 configuration, so no `--server` or `--ca`, and no fingerprint is typed:
-mashctl copies its own CA, the same trust domain. The block is the CLI
+mashctl uses its own CA, the same trust domain. After `mashctl adopt` that
+configuration IS `~/.config/mash/config.json` and `ca.pem` (one folder for
+both tools), so the two lines read `kept (unchanged)`, as on the quick start
+page; on a machine where mashctl runs with another config folder
+(`MASH_CONFIG_DIR`) they read `wrote` and `copied (from mashctl's own copy)`,
+as `credential install` prints them (R20). The block is the CLI
 team's extension; the wrote-lines are the shape agreed in L11. The
 credentials file and the file named by `--creds-out` are created under File
 safety, section 2.)
@@ -1062,14 +1101,33 @@ Installed credentials for acme.demo.alice.
 The private key is inside the credentials file: guard that file.
 
   wrote  ~/.config/mash/acme.demo.alice.creds  (mode 600)
-  kept   ~/.config/mash/config.json            unchanged
-  kept   ~/.config/mash/ca.pem                 unchanged
+  kept   ~/.config/mash/config.json            (unchanged)
+  kept   ~/.config/mash/ca.pem                 (unchanged)
 
 NEXT: this machine has more than one endpoint now. Choose one for this
       shell, then check it:
   export MASH_ENDPOINT=acme.demo.alice
   mash status
 ```
+
+Connecting mashctl to a server the NATS helper made is `mashctl adopt --from
+<dir>` (REQ-011 (ii)). Its output belongs to the mashctl lane and is not
+invented here:
+
+<!-- packet: adopt-from -->
+```
+(ctl's target: take it from
+docs/plans/2026-11-19-cli-targets-mashctl.md when it lands)
+```
+
+The fingerprint prompt of adopt is FED BY THE PAGE. The helper's closing
+output prints the CA fingerprint (the form of R15, on a line of its own)
+beside the one `mashctl adopt --from <dir>` line; the page that quotes the
+helper's output shows that fingerprint where the helper printed it, and the
+person TYPES it when `mashctl adopt` asks. mashctl never prints it back, and
+there is no fingerprint flag on adopt. So the person never has to find the
+value: it is on the page, from the helper, a few lines above the prompt, and
+what is typed is checked against the CA file adopt is about to trust.
 
 Deleting an endpoint (the CLI team's text, section B of the mashctl targets:
 it states what will be lost, asks the person to type the address, then
@@ -1094,6 +1152,10 @@ Deleted acme.demo.bob. Its address cannot be used again.
 
 Nothing can restore a deleted address.
 ```
+
+The count in `its inbox, with 1 message` is that endpoint's own: two deletes
+never print the same lines, and no page may promise they do (`with 12
+messages`, `with 1 message`, and `its inbox, empty` when there is none).
 
 No `NEXT:`: a person who deletes is removing access, and starting again is
 not their next step (R19, D7). The two things that may help are not hints:
@@ -1175,10 +1237,12 @@ not set up, no configuration, no endpoint chosen when several are installed,
 credentials missing, none installed, credentials readable by others, server
 unreachable, certificate not trusted (section 4), credentials refused,
 endpoint DELETED, plain URL with the override, the override set with a tls
-address, plain URL refused. The server row has one shape in every state
-(R11, D1): `alive, encrypted (checked 09:42)` when the server answered now,
-`NOT REACHABLE (last reached 3h ago)` when it did not, `not checked` when mash
-did not ask. It never says `alive` together with a past time: that was the
+address, plain URL refused. The server row is its address, then one of the
+forms listed in R11 (`alive, encrypted (checked 09:42)`, `alive, certificate
+NOT TRUSTED (checked 09:42)`, `alive, NOT ENCRYPTED (checked 09:42)`, `NOT
+ENCRYPTED (refused; not connected)`, `NOT REACHABLE (last reached 3h ago)`,
+`not checked`), with a third line only for the plain-text variable. It never
+says `alive` together with a past time: that was the
 defect of DRAFT4 (a server that answers now was seen now). "Last reached" is
 the last time this machine's mash heard the server answer, as recorded by
 `mash serve` in the state directory, or `never reached from here` (NEW
@@ -1514,7 +1578,8 @@ acme.demo.bob: mail works (1 warning).
   credentials   ok
 
 warning: anyone on the network can read your credentials and your mail.
-fix: use a tls:// address. Add this line to ~/.config/mash/config.json:
+fix: use a tls:// address. In ~/.config/mash/config.json, change the server
+     line to:
     "server": "tls://myserver:4222"
      Then stop overriding it in this shell:
   unset MASH_SERVER MASH_INSECURE_PLAINTEXT
@@ -2264,6 +2329,11 @@ closest command and the renamed flags.
 
 ### mash plugin export DIR
 
+The lower-level command: it only writes the files, for a machine where
+someone adds them to Claude Code by hand. `mash plugin install` (section 5a)
+does export, add and install in one command and is what a first-time user
+meets.
+
 Before: prints only the directory given (`/w/pluginout`); no `next:`.
 
 After:
@@ -2448,7 +2518,8 @@ Mail
 Set up
   key create          make a private key and a public key
   credential install  join a private key and a token into credentials
-  plugin export       write the Claude Code plugin into a folder
+  plugin install      add the mash plugin to Claude Code
+  plugin export       write the plugin into a folder, for another machine
   status              check that mail works
 
 Other
@@ -2610,6 +2681,374 @@ error: unknown option --bogus for mash who.
 fix: see the options with:
   mash help who
 ```
+
+## 5a. Install and plugin (REQ-011)
+
+Two jobs a reader should not have: fetching and checking the programs, and
+getting the plugin into Claude Code. Counted from the page: **install 3
+pastes; plugin 1 paste.** (REQ-011 (i) and (iii) are below. (ii), `mashctl
+adopt --from <dir>`, and (v), `mashctl endpoint delete` retiring the
+credentials on this machine, are mashctl's: see "Hand-overs to mashctl" in
+section 4 and N17.)
+
+### Install: the attested script (REQ-011 (i))
+
+The release ships `install-mash.sh` beside `mash-<os>-<arch>`,
+`mashctl-<os>-<arch>` and `SHA256SUMS`. The release workflow attests the
+script and `SHA256SUMS` as it does the binaries. The page downloads the
+script, checks it, and runs it: three pastes, and no pipe into a shell (the
+person can read the file between paste 1 and paste 3). The script is the
+release's own: it installs the version it was released with, never "latest".
+
+Paste 1, download (prints nothing):
+
+<!-- packet: install-script-download -->
+```
+$ BASE=https://github.com/bogworks/mash/releases/download/v0.5.6
+$ curl -fsSL -O $BASE/install-mash.sh -O $BASE/SHA256SUMS
+```
+
+Paste 2, check the script and the sums. The page offers two ways and the
+person pastes ONE. With `gh` (it shows who built the files, and the script's
+own check of each binary is then worth something, because `SHA256SUMS` came
+from the same attested build; `gh` prints its own report and exits 0, and
+anything else means stop):
+
+<!-- packet: install-script-check -->
+```
+$ for f in install-mash.sh SHA256SUMS; do gh attestation verify $f \
+    -R bogworks/mash \
+    --signer-workflow bogworks/mash/.github/workflows/release.yml \
+    --source-ref refs/tags/v0.5.6 || break; done
+```
+
+Without `gh`, and without Go: the digest only (on macOS, `shasum -a 256 -c -`
+in place of `sha256sum -c -`). It needs nothing but what is already on the
+machine. It shows the file arrived whole and is the one `SHA256SUMS` lists;
+it does not show who built it, and the page says so in one sentence:
+
+<!-- packet: install-script-check -->
+```
+$ grep ' install-mash.sh$' SHA256SUMS | sha256sum -c -
+install-mash.sh: OK
+```
+
+A digest that does not match prints `install-mash.sh: FAILED` (that is
+`sha256sum`'s own line, and it exits 1): the page says to delete the two files
+and start again at paste 1, and not to run the script.
+
+Paste 3, run it. It detects the platform and prints it, downloads
+`mash-<os>-<arch>` and `mashctl-<os>-<arch>` into a temporary folder it
+removes, and checks EACH against its line in `SHA256SUMS` before it installs
+EITHER. It prints what it installed and where, in the shape of the
+`wrote` lines (R20). The programs go in `~/.local/bin` (a directory the person
+owns; no root), made if missing, mode 755, put in place by an atomic rename.
+
+<!-- packet: install-script-run -->
+```
+$ sh install-mash.sh
+Installing mash 0.5.6 for Linux amd64 into ~/.local/bin.
+
+  checked    mash-linux-amd64     matches its line in SHA256SUMS
+  checked    mashctl-linux-amd64  matches its line in SHA256SUMS
+
+Installed mash 0.5.6 and mashctl 0.5.6.
+
+  installed  mash 0.5.6     ~/.local/bin/mash
+  installed  mashctl 0.5.6  ~/.local/bin/mashctl
+
+NEXT: check that mash runs:
+  mash version
+```
+
+macOS is handled by the same script (it picks `darwin`, `arm64` or `amd64`
+from `uname`, and `shasum -a 256` when there is no `sha256sum`) and says
+which it found. Here the install directory is not on the PATH, so the script
+says so and prints the exact line to add, labelled as R10 labels it (the
+script knows the shell from `$SHELL`: `~/.zshrc` for zsh, `~/.bashrc` for
+bash, and for any other shell `add this line to your shell's startup file:`).
+It never edits a startup file itself. The line carries the directory that was
+used (`--dir` included). The one-shell test is its own labelled item, and the
+`NEXT:` comes last:
+
+<!-- packet: install-script-path -->
+```
+$ sh install-mash.sh
+Installing mash 0.5.6 for macOS arm64 into ~/.local/bin.
+
+  checked    mash-darwin-arm64     matches its line in SHA256SUMS
+  checked    mashctl-darwin-arm64  matches its line in SHA256SUMS
+
+Installed mash 0.5.6 and mashctl 0.5.6.
+
+  installed  mash 0.5.6     ~/.local/bin/mash
+  installed  mashctl 0.5.6  ~/.local/bin/mashctl
+
+warning: ~/.local/bin is not on your PATH, so a new terminal will not find
+         mash.
+fix: add this line to ~/.zshrc:
+    export PATH="$HOME/.local/bin:$PATH"
+     For this shell only:
+  export PATH="$HOME/.local/bin:$PATH"
+
+NEXT: check that mash runs:
+  mash version
+```
+
+Run again (the same release, the same directory): the script still downloads
+and checks (that is how it knows the files are the same), then changes
+nothing. A different mash or mashctl already at the path is replaced: a
+program is not a secret, so File safety (section 2) does not apply to it; a
+directory or a symbolic link at the path is refused. Exit 0:
+
+<!-- packet: install-script-twice -->
+```
+$ sh install-mash.sh
+Installing mash 0.5.6 for Linux amd64 into ~/.local/bin.
+
+  checked    mash-linux-amd64     matches its line in SHA256SUMS
+  checked    mashctl-linux-amd64  matches its line in SHA256SUMS
+
+Nothing to install: mash 0.5.6 and mashctl 0.5.6 are already there.
+
+  kept       mash 0.5.6     ~/.local/bin/mash     (unchanged)
+  kept       mashctl 0.5.6  ~/.local/bin/mashctl  (unchanged)
+
+NEXT: check that mash runs:
+  mash version
+```
+
+A checksum that does not match, or a program with no line in `SHA256SUMS`:
+`error:` and `fix:`, exit 1, NOTHING installed (the check of both comes
+first), and the temporary folder removed. The `checked` line of the program
+that did pass stays, so the person sees which one failed:
+
+<!-- packet: install-script-mismatch -->
+```
+$ sh install-mash.sh
+Installing mash 0.5.6 for Linux amd64 into ~/.local/bin.
+
+  checked    mash-linux-amd64     matches its line in SHA256SUMS
+error: mashctl-linux-amd64 does not match its line in SHA256SUMS. Nothing
+       was installed, and the downloads were deleted.
+fix: run the script again. If it fails again, do not use this release; tell
+     the project at https://github.com/bogworks/mash/issues
+```
+
+<!-- packet: install-script-mismatch -->
+```
+$ sh install-mash.sh
+Installing mash 0.5.6 for Linux amd64 into ~/.local/bin.
+
+error: SHA256SUMS has no line for mashctl-linux-amd64, so it cannot be
+       checked. Nothing was installed, and the downloads were deleted.
+fix: run the script again. If it fails again, do not use this release; tell
+     the project at https://github.com/bogworks/mash/issues
+```
+
+What the script needs, said in its help and in the page: `sh`, `uname`,
+`curl`, and `sha256sum` (Linux) or `shasum` (macOS: it is built in). No `gh`,
+no Go, no root. It checks for these first, before it downloads anything, and
+a missing one is an error with the install command alone on its line (exit 1):
+
+<!-- packet: install-script-missing -->
+```
+$ sh install-mash.sh
+error: curl is not installed, and the script needs it to download mash.
+fix: install curl, then run the script again. On Debian and Ubuntu:
+  sudo apt install curl
+```
+
+<!-- packet: install-script-missing -->
+```
+$ sh install-mash.sh
+error: neither sha256sum nor shasum is installed, so the downloads cannot be
+       checked.
+fix: install sha256sum, then run the script again. On Debian and Ubuntu:
+  sudo apt install coreutils
+```
+
+A platform with no release binary (the script runs on anything with `sh`, and
+refuses what it has no program for; `go install` is the developer route):
+
+<!-- packet: install-script-platform -->
+```
+$ sh install-mash.sh
+error: there is no mash release for FreeBSD amd64.
+fix: releases are built for Linux and macOS, on amd64 and arm64. With Go you
+     can build from source instead:
+  go install github.com/bogworks/mash/cmd/mash@v0.5.6
+  go install github.com/bogworks/mash/cmd/mashctl@v0.5.6
+```
+
+Its help (exit 0), with the developer route as one line:
+
+<!-- packet: install-script-help -->
+```
+$ sh install-mash.sh --help
+Usage: sh install-mash.sh [--dir DIR]
+
+Install mash and mashctl 0.5.6 for this computer: download each program from
+the release, check it against SHA256SUMS, and only then install it in DIR
+(default ~/.local/bin).
+
+  --dir DIR  install in DIR instead
+  --help     show this text
+
+It needs curl, and sha256sum (Linux) or shasum (macOS). It does not need gh,
+Go or root.
+
+With Go you can build from source instead (mashctl: cmd/mashctl):
+  go install github.com/bogworks/mash/cmd/mash@v0.5.6
+```
+
+A usage error exits 2, as every command does (section 2):
+
+<!-- packet: install-script-usage -->
+```
+$ sh install-mash.sh --frob
+error: unknown option --frob.
+fix: use it like this:
+  sh install-mash.sh [--dir DIR]
+```
+
+`go install` for both programs stays as the developer route: one line in the
+script's help (above) and one in the install section of the documentation. It
+builds from source on the person's machine, so the result is not the attested
+build and `mash version` prints `commit unknown` (as `go install` does
+today).
+
+### The plugin: one command (REQ-011 (iii))
+
+Checked on this host with help commands only (`claude plugin --help`,
+`claude plugin install --help`, `claude plugin marketplace --help` and
+`marketplace add --help`; no `claude` command was run). `claude plugin
+install <plugin>` takes `--marketplace <source>`: "Install <plugin> (its bare
+name) from the marketplace at this source ... A marketplace not added yet is
+added first, in user settings, under the same checks as 'plugin marketplace
+add'." So Claude Code allows the whole of it in ONE command, and
+`mash plugin install` runs EXACTLY ONE `claude` command, not two:
+
+    claude plugin install mash --marketplace <the folder it exported to>
+
+(Two would be `claude plugin marketplace add <folder>` and `claude plugin
+install mash@mash`, which is what `mash plugin export` still prints for a
+person who does it by hand.) The command is one paste. In order: mash looks
+for `claude` on the PATH, and writes nothing if it is not there; it exports
+the plugin (default folder `~/.local/share/mash/plugin`, which must stay,
+because Claude Code reads the marketplace from it; `--dir DIR` chooses
+another); it runs the `claude` command; it prints each thing it did with its
+result. A `ran` line is the command exactly as it ran, and its second line is
+claude's result: `ok (exit 0)`, `kept (unchanged)` when claude says the plugin
+is already installed at this version, or `FAILED (exit N)` with claude's last
+line. With `--detail` the paths are absolute. The `NEXT:` ends with the two
+launch lines of R13, for the first installed endpoint; with none installed the
+`NEXT:` is `mash key create`'s (the person has no endpoint to start). mash
+does not edit Claude Code's settings itself: `claude` does.
+
+<!-- packet: plugin-install -->
+```
+$ mash plugin install
+Installed the mash plugin in Claude Code (1 claude command run).
+
+  wrote  ~/.local/share/mash/plugin  (5 files)
+  ran    claude plugin install mash --marketplace ~/.local/share/mash/plugin
+         ok (exit 0)
+
+NEXT: start Claude Code as one of your endpoints (installed here:
+      acme.demo.alice, acme.demo.bob). In the terminal for the first:
+  export MASH_ENDPOINT=acme.demo.alice
+  claude --dangerously-load-development-channels plugin:mash@mash
+```
+
+Run again, with nothing changed (the files are the same, and claude says it
+is installed; exit 0):
+
+<!-- packet: plugin-install-kept -->
+```
+$ mash plugin install
+The mash plugin is already installed in Claude Code.
+
+  kept   ~/.local/share/mash/plugin  (unchanged)
+  ran    claude plugin install mash --marketplace ~/.local/share/mash/plugin
+         kept (unchanged)
+
+NEXT: start Claude Code as one of your endpoints (installed here:
+      acme.demo.alice, acme.demo.bob). In the terminal for the first:
+  export MASH_ENDPOINT=acme.demo.alice
+  claude --dangerously-load-development-channels plugin:mash@mash
+```
+
+`claude` is not on the PATH (exit 1; nothing written; the lower-level
+command is the way out):
+
+<!-- packet: plugin-install-noclaude -->
+```
+$ mash plugin install
+error: claude is not on your PATH, so mash cannot install the plugin.
+       Nothing was written.
+fix: install Claude Code, or put it on your PATH, then run this again. If
+     Claude Code is on another machine, write the plugin to a folder and
+     take that there:
+  mash plugin export ./mash-plugin
+```
+
+`claude` ran and refused (exit 1; the files stay, and the command is given
+alone so the person can read all of what claude says):
+
+<!-- packet: plugin-install-failed -->
+```
+$ mash plugin install
+  wrote  ~/.local/share/mash/plugin  (5 files)
+  ran    claude plugin install mash --marketplace ~/.local/share/mash/plugin
+         FAILED (exit 1): <the last line claude printed>
+error: claude could not install the plugin.
+fix: to read everything claude says, run it yourself:
+  claude plugin install mash --marketplace ~/.local/share/mash/plugin
+```
+
+A usage error (exit 2):
+
+<!-- packet: plugin-install-usage -->
+```
+$ mash plugin install ./mash-plugin
+error: plugin install takes no folder.
+fix: to choose the folder, use --dir:
+  mash plugin install --dir ./mash-plugin
+```
+
+Help (exit 0), and `mash help` lists the command (section 5, help):
+
+<!-- packet: plugin-install-help -->
+```
+$ mash help plugin install
+Usage: mash plugin install [--dir DIR]
+
+Write the mash plugin into DIR (default ~/.local/share/mash/plugin) and
+install it in Claude Code with one command:
+  claude plugin install mash --marketplace DIR
+mash prints each claude command it runs, with its result.
+
+  --dir DIR  keep the plugin files in DIR instead
+  --detail   also show full paths
+
+mash plugin export DIR only writes the files, for another machine.
+
+Example: mash plugin install
+```
+
+`mash plugin export DIR` stays as the lower-level command (one line in the
+documentation: "to add the plugin by hand, or on another machine"). The
+`status` screen for Claude Code not set up is unchanged (it starts Claude Code
+with the channel). No MCP tool, field or error code changes.
+
+### Connecting mashctl, and delete (REQ-011 (ii) and (v)): mashctl's
+
+`mashctl adopt --from <dir>` and `mashctl endpoint delete` retiring this
+machine's credentials are the mashctl lane's. This file does not invent their
+output: the `adopt-from` block in section 4 is a placeholder, and N17 records
+the dependency. Where the helper's output meets the quick start, the
+fingerprint is fed by the page (section 4).
 
 ## 6. MCP tools (what agents get)
 
@@ -2954,6 +3393,9 @@ the same plain voice, rewritten as short lines of at most 80 columns:
 - It says `who` always returns JSON and the address is the dotted form.
 - It says no tool result holds a token or a key, and that the agent never sets
   `MASH_INSECURE_PLAINTEXT` or any other setting on its own (REQ-010).
+- It says the plugin is installed by the person (`mash plugin install`); the
+  agent never runs it and never edits Claude Code's settings (REQ-011 (iii)).
+  No tool, field or error code changes for REQ-011.
 - The paragraph on delivery by hook keeps its meaning and drops the
   `PostToolUse`/`UserPromptSubmit` names (the model does not choose them).
 
@@ -3068,7 +3510,7 @@ S5. DECIDED here. The token is written mode 600 and no longer labelled "holds no
     public key are not secrets.
 S6. DECIDED here; REVISED, DRAFT5. After a CA change on purpose the fix is
     `mash credential install --creds <the installed file> --ca <file>
-    --replace` (an identical credentials file is `kept ... unchanged`), and
+    --replace` (an identical credentials file is `kept (unchanged)`), and
     the person types the new CA's fingerprint at the prompt. No other verb may
     write the trust, and `cp` over `ca.pem` would skip the confirmation.
 S7. DECIDED here; REVISED, DRAFT5. The older-messages hint under a long inbox
@@ -3098,6 +3540,44 @@ S12. DECIDED, the lead, contract rev 5 and ruling (b) (DRAFT5). The CA
     authorized, section 2).
 N13. STILL OPEN. `mash who` lists the endpoints of the caller's owner; the
     directory's scope was read from the code in DRAFT2 and not re-checked.
+
+N14. DECIDED here, for the lead to confirm (REQ-011 (i)). The release ships
+    `install-mash.sh`, attested like the binaries and listed in `SHA256SUMS`
+    (the same attestation rule as `SHA256SUMS` itself); the script installs the
+    version it was released with. The page's check has two ways: `gh
+    attestation verify` on the script and on `SHA256SUMS` (who built them),
+    or the digest alone (it arrived whole, not who built it). The script
+    verifies each program against `SHA256SUMS` only, and does not itself run
+    `gh` (a person with no `gh` must be able to install).
+N15. DECIDED here, easy to reverse. The script takes `--dir DIR` (no
+    environment variable: readable arguments), defaults to `~/.local/bin`,
+    never edits a shell startup file (it prints the line, R10), and replaces
+    an older mash or mashctl at the path (not a secret). New words `checked`
+    and `installed` in the wrote-line family (R12, R20).
+N16. STILL OPEN, not verified. `mash plugin install` runs ONE command,
+    `claude plugin install mash --marketplace <dir>`, from the help text of
+    `claude plugin install` on this host. Nothing was run against Claude Code:
+    what claude prints, its exit code when the plugin is already installed
+    (the `kept (unchanged)` line assumes it says so), what it does for a newer
+    plugin in the same folder (it may need `claude plugin update`, which would
+    be a second command), whether a path marketplace is read in place, and
+    whether a `--dangerously-load-development-channels` session needs more.
+    The default folder `~/.local/share/mash/plugin` is this draft's choice
+    (it must outlive the command).
+N17. STILL OPEN, ctl's. REQ-011 (ii) `mashctl adopt --from <dir>` and (v)
+    `mashctl endpoint delete` retiring the credentials on this machine are
+    mashctl output. The `adopt-from` block is a placeholder until
+    `docs/plans/2026-11-19-cli-targets-mashctl.md` lands; the delete text in
+    section 4 is the CLI team's and gets its retire line from there. The
+    quick start's adopt step waits on both.
+N18. DECIDED here. The adopt fingerprint prompt is fed by the page, not by a
+    flag: the helper prints the fingerprint, the page shows it, the person
+    types it (section 4).
+N19. FOR THE LEAD. R20 says no other command names config or the server in
+    success output. Two blocks still do: the rows of `mash status` (a report;
+    its job is exactly that) and the `mash serve` start-up line
+    `mash: serving as acme.demo.bob (tls://myserver:4222)` (decided, Q12,
+    to show in the MCP log which server a session is on). Say if either goes.
 
 ## 8. Behaviour changes the contract must decide
 
@@ -3183,6 +3663,10 @@ N13. STILL OPEN. `mash who` lists the endpoints of the caller's owner; the
 - `mash prompt`: first line (stderr, terminal only) is new; the timeout is an
   `error:` with exit 1.
 - `mash plugin export`: prints a file count and a three-command `NEXT:`.
+- `mash plugin install` is new (section 5a): export, add and install in one
+  command, one `claude` command run, shown with its result.
+- `install-mash.sh` is new (section 5a): an attested release asset that
+  verifies each binary against `SHA256SUMS` before installing it.
 - `mash serve`: one stderr line at start-up, `mash: serving as <endpoint>
   (<server>)`; refusal texts are plain lines.
 - `mash` with no command prints one usage line (exit 2 unchanged); an unknown
@@ -3202,7 +3686,8 @@ N13. STILL OPEN. `mash who` lists the endpoints of the caller's owner; the
 
 Width. A script (run with `python3 -I`, kept outside the repo) walks the file,
 tracks the fenced blocks and keeps the widest line of each. Result for this
-file: 126 fenced blocks (every mockup, Before block and JSON example). The
+file: 147 fenced blocks (every mockup, Before block and JSON example, and the
+`adopt-from` placeholder). The
 widest line of text that a tool prints is 80 columns (the real-name inbox rows
 and the trust-column inbox row, whose message is cut with `...` at column 80
 by design); no printed text is over 80, with three kinds of exemption (R1):
@@ -3211,8 +3696,10 @@ columns) and what the person types after a prompt (the six `Type the CA
 fingerprint ...:` lines; the prompt itself is 47 columns, the typed
 fingerprint after it 71, 118 in all). Widest per category: status screens 79
 (the Claude Code warning's fix), `credential install` 79 (the trust-change
-screen; the success screens 71) and `key create` 75, send 74, hook 76, help
-78, mashctl hand-overs 72, plugin export 74, prompt 73, who 62, read 57,
+screen; the success screens 74 (the `kept (unchanged)` lines)) and `key create` 75, send 74, hook 76, help
+78, mashctl hand-overs 72, plugin export 74, `plugin install` 76 (the `ran`
+line), the install script 76 (its error lines; its typed `$` lines are at most
+68), prompt 73, who 62, read 57,
 version 17. The widest printed COMMANDS are 120 columns (the `--replace`
 command of the "already trusts a different server" refusal), 109 (the
 `credential install` fix when no server is known), 108 (the hand-over's
@@ -3255,9 +3742,11 @@ Checked against the shipped source (the catalog tree of the shipped version) and
   no reply flag (the MCP tool has `in_reply_to`); the CLI deadline
   (`cli_timeout`, default 15m) and the open timeout (20s) are in
   `internal/config`.
-- `claude plugin --help`, `marketplace --help` and `install --help` on this
-  host, as in DRAFT2; no command was run against Claude Code. The plugin
-  export writes 5 files.
+- `claude plugin --help`, `plugin install --help`, `plugin marketplace --help`
+  and `marketplace add --help` on this host (round 4): `plugin install` takes
+  `--marketplace <source>` and adds a marketplace that is not added yet first,
+  so one `claude` command does both; no command was run against Claude Code.
+  The plugin export writes 5 files.
 
 Not checked: colours (mockups are plain, and no ANSI exists in either binary
 today), the real widths with a long home directory (the mockups use `~`), that
