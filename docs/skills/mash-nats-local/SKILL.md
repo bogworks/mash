@@ -474,7 +474,7 @@ needs the install yes. If you do not get `installed and verified`, do
 not use the programs:
 
 ```sh
-( set -eu; H="$HOME/mash-setup"; B="$HOME/.local/bin"; V=v0.5.6; G=gh_2.105.0_linux_amd64; A="-R bogworks/mash --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/$V"; mkdir -p "$H" "$B"; for x in gh mash mashctl; do [ ! -e "$B/$x" ] || { echo "already there: $B/$x"; false; }; done; w="$H/install-$$"; mkdir -m 0700 "$w"; cd "$w"; curl -fsSLO "https://github.com/cli/cli/releases/download/v2.105.0/$G.tar.gz"; echo "79e7ab5db738c48777b696e374f8b428f0647debfb424f44d2f426370407fe2f  $G.tar.gz" | sha256sum -c -; tar -xzf "$G.tar.gz"; for f in mash-linux-amd64 mashctl-linux-amd64 mash.intoto.jsonl; do curl -fsSLO "https://github.com/bogworks/mash/releases/download/$V/$f"; done; for f in mash-linux-amd64 mashctl-linux-amd64; do "$G/bin/gh" attestation verify "$f" --bundle mash.intoto.jsonl $A; done; install -m 755 "$G/bin/gh" "$B/gh"; install -m 755 mash-linux-amd64 "$B/mash"; install -m 755 mashctl-linux-amd64 "$B/mashctl"; for p in mash mashctl; do "$G/bin/gh" attestation verify "$B/$p" --bundle mash.intoto.jsonl $A || { mkdir -p "$H/rejected"; mv "$B/gh" "$B/mash" "$B/mashctl" "$H/rejected/"; false; }; done; echo "installed and verified in $B" ) || { echo "NOT installed, or NOT verified: do not use these programs"; false; }
+( set -eu; H="$HOME/mash-setup"; B="$HOME/.local/bin"; V=v0.5.6; G=gh_2.105.0_linux_amd64; A="-R bogworks/mash --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/$V"; mkdir -p "$H" "$B"; for x in gh mash mashctl; do [ ! -e "$B/$x" ] || { echo "already there: $B/$x"; false; }; done; w="$H/install-$$"; mkdir -m 0700 "$w"; cd "$w"; curl -fsSLO "https://github.com/cli/cli/releases/download/v2.105.0/$G.tar.gz"; echo "79e7ab5db738c48777b696e374f8b428f0647debfb424f44d2f426370407fe2f  $G.tar.gz" | sha256sum -c -; tar -xzf "$G.tar.gz"; for f in mash-linux-amd64 mashctl-linux-amd64 mash.intoto.jsonl; do curl -fsSLO "https://github.com/bogworks/mash/releases/download/$V/$f"; done; for f in mash-linux-amd64 mashctl-linux-amd64; do "$G/bin/gh" attestation verify "$f" --bundle mash.intoto.jsonl $A; done; install -m 755 "$G/bin/gh" "$B/gh"; install -m 755 mash-linux-amd64 "$B/mash"; install -m 755 mashctl-linux-amd64 "$B/mashctl"; for p in mash mashctl; do "$G/bin/gh" attestation verify "$B/$p" --bundle mash.intoto.jsonl $A || { mkdir -p "$H/rejected"; mv "$B/gh" "$B/mash" "$B/mashctl" "$H/rejected/"; false; }; done; echo "installed and verified in $B" ); [ $? -eq 0 ] || { echo "NOT installed, or NOT verified: do not use these programs"; false; }
 ```
 
 Expected: `gh_2.105.0_linux_amd64.tar.gz: OK`, then, for each of the four
@@ -701,8 +701,11 @@ empty location and stops if anything already exists there:
 if [ -e "$HOME/mash-nats" ]; then echo "not restored: $HOME/mash-nats already exists"; else mkdir -m 0700 "$HOME/mash-nats" && tar -xzf "$HOME/mash-nats-backup.tar.gz" -C "$HOME/mash-nats" && echo restored || { echo "not restored: a step failed"; false; }; fi
 ```
 
-Then run `--upgrade` (it installs the two programs the backup left out),
-then `--start`, then `--check`. mashctl's folder is not in the backup:
+Known limit in this version: the script refuses to run in a directory
+with no `bin/`, so `--upgrade`, `--start` and `--check` stop with "bin is
+missing". A fix is planned (the next script version lets `--upgrade`
+make `bin/`). Until then a restore is incomplete: do not rely on it, and
+tell the person. mashctl's folder is not in the backup:
 it stays where it is (or is gone with the machine; see above).
 
 Upgrade installs the versions pinned in the script you hold (nats-server
@@ -730,8 +733,9 @@ bash "$HOME/mash-setup/nats-local-setup.sh" --dir "$HOME/mash-nats" --disable-bo
 
 ### Remove it completely
 
-Five things, in this order, and a sixth if you used boot start (the first step removes its unit). Ask first: the second and fourth cannot be
-undone. The person types the directory name to confirm the first.
+Five things, in this order (the first also removes the boot unit, if
+you made one). Ask first: the second and fourth cannot be undone. The
+person types the directory name to confirm the first.
 
 1. Delete the server directory, with the mail and any keys you did not
    retire; this also stops the server and removes the boot unit if the
@@ -813,6 +817,111 @@ login, when `$HOME/.local/bin` joins your PATH, use the full path
 person:
 
 <!-- closing-begin -->
+```
+Done. The setup is in /home/alice/mash-nats. Nothing above printed a seed or a
+credential, and nothing below does.
+
+Other users on this machine can still reach 127.0.0.1:4222; they cannot connect
+without credentials.
+
+A process running as you can still swap a path between the recheck and the
+write; this script does not defend against that.
+
+Files (all under /home/alice/mash-nats):
+  bin/nats-server          server, v2.15.1 (sha256 checked)
+  bin/nsc                  nsc, v2.15.0 (sha256 checked)
+  ca.pem                   CA certificate: give this to clients
+  mash-setup.json          what adopt --from reads (no secrets)
+  server.conf              nats-server configuration (no seeds)
+  export/mashadmin.creds   admin credentials (secret)
+  export/sys.creds         system account credentials (secret)
+  export/operator.nk       operator seed (secret)
+  export/account.nk        account seed (secret)
+  ca.key                   CA private key (secret)
+  nsc/                     nsc store with all signing keys (secret)
+  server.log               server log (known-safe line shapes only)
+  server.pid               server process id (--stop reads it)
+
+What you hold
+  Server address     tls://localhost:4222
+  CA file            /home/alice/mash-nats/ca.pem
+  CA fingerprint     sha256:9e60b822 421afaed 85f841a2 9d79041d 49e4553a
+                     f21d0967 0639dd4e b1de192a
+  Server directory   /home/alice/mash-nats
+                     (mode 0700; holds the CA key and the nsc keys until you run
+                     --retire-keys)
+
+The person who runs adopt types the CA fingerprint at adopt's prompt; compare it
+with the CA fingerprint line above.
+
+Next
+  Adopt the server into mash (a person runs this, in their own terminal: it asks
+  them to type the CA fingerprint above, then sets up mash's storage too, so
+  there is no separate init):
+
+    mashctl adopt --from /home/alice/mash-nats
+
+  Adopt copies the CA, the keys and the credentials into mashctl's folder
+  (/home/alice/.config/mash; set MASH_CONFIG_DIR to change that) and prints one
+  'copied' line per file, so export/ is no longer needed. Agents' credentials
+  are written there as acme.<group>.<agent>.creds.
+
+  Hand-managed server instead? see the long form in the guide (mashctl adopt
+  --server ... --ca ...).
+
+  Or, after adopt succeeds, to retire the setup's keys: --retire-keys (item 2
+  below).
+
+  Another machine that wants to use this server needs the CA file and an address
+  for the server that machine can reach (the one in the certificate); a
+  credential carries no address.
+
+  To use mash in Claude Code, run these two lines in Claude Code, then see the
+  guide:
+
+    claude plugin marketplace add bogworks/mash
+    claude plugin install mash@mash
+
+  https://github.com/bogworks/mash/blob/v0.5.6/docs/install.md
+
+  2. Looking after the server later (each takes --dir):
+
+  start the server
+    /home/alice/mash-setup/nats-local-setup.sh --dir /home/alice/mash-nats \
+        --start
+
+  stop it
+    /home/alice/mash-setup/nats-local-setup.sh --dir /home/alice/mash-nats \
+        --stop
+
+  check it
+    /home/alice/mash-setup/nats-local-setup.sh --dir /home/alice/mash-nats \
+        --check
+
+  back it up (the archive holds secrets)
+    /home/alice/mash-setup/nats-local-setup.sh --dir /home/alice/mash-nats \
+        --backup /home/alice/mash-nats-backup.tar.gz
+
+  after adopt, move the offline-only secrets off this machine
+    /home/alice/mash-setup/nats-local-setup.sh --dir /home/alice/mash-nats \
+        --retire-keys /home/alice/mash-nats-keys.tar.gz
+
+  upgrade nats-server and nsc to the pinned versions
+    /home/alice/mash-setup/nats-local-setup.sh --dir /home/alice/mash-nats \
+        --upgrade
+
+  start it at boot (systemd user unit)
+    /home/alice/mash-setup/nats-local-setup.sh --dir /home/alice/mash-nats \
+        --enable-boot
+
+  stop starting it at boot
+    /home/alice/mash-setup/nats-local-setup.sh --dir /home/alice/mash-nats \
+        --disable-boot
+
+  remove it all
+    /home/alice/mash-setup/nats-local-setup.sh --dir /home/alice/mash-nats \
+        --remove
+```
 <!-- closing-end -->
 
 ## If something is wrong
@@ -908,11 +1017,12 @@ The two users `mashctl adopt` is given:
   the five buckets and each agent's stream. The script's `mashadmin` has
   no permission limits. If the operator uses strict signing keys, the user
   must be signed by an account signing key (adopt says so).
-- The system user (`--system-credentials`) must belong to the system account and be
-  allowed to ping the server (`$SYS.REQ.SERVER.PING`), look up accounts
-  and push an account update (`$SYS.REQ.CLAIMS.UPDATE`); adopt checks the
-  first two, and `mashctl endpoint delete` uses the third. The script's
-  `sys` user has no permission limits.
+- The system user (`--system-credentials`) must belong to the system
+  account and be allowed to ping the server (`$SYS.REQ.SERVER.PING`),
+  look up accounts and push an account update
+  (`$SYS.REQ.CLAIMS.UPDATE`); adopt checks the first two, and `mashctl
+  endpoint delete` uses the third. The script's `sys` user has no
+  permission limits.
 
 Also needed: the operator signing seed (`--operator-key`, starts `SO`)
 and the account identity seed (`--account-key`, starts `SA`), each as a
