@@ -75,12 +75,13 @@ in plain sentences, or is off the page.
   contradicts (the person confirms three values, a yes or a no, and types nothing else). Both need a change in the guide
   and the helper before the box can be printed. The page lists the three things the
   summary names (address, CA file, folder), which are the guide's.
-- Reading acknowledges (contract rev 21). The sentences "reading a message stops it
-  waiting" (Step 3) and "a message stops waiting when the session is shown it in full or
+- Reading acknowledges (contract rev 21, 26). The sentences "a message stops waiting when the
+  session reads it" (Step 3) and "a message stops waiting when the session is shown it in full or
   reads it" (Day 2) are true only after three changes that are not built: the `read` tool
-  draining any waiting message, `mash read` writing the drained tombstone, and `mash serve`
-  writing the count into the lease (targets section 5b). Today `mash read` never acknowledges
-  and the `read` tool only some messages.
+  draining any waiting message, `mash read` writing the drained tombstone (so with no session
+  running the count drops when the next session starts; no direct acknowledgement in 0.5.6), and
+  `mash serve` writing the count into the lease (targets section 5b). Today `mash read` never
+  acknowledges and the `read` tool only some messages.
 - The `--account` flag and the first install's confirmation (yes or no, in a terminal) are not built; Day 2 describes it
   in prose and does not print it. An agent or script that runs the install is refused (exit 4):
   the page says so in one clause.

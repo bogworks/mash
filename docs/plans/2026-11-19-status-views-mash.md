@@ -1,6 +1,6 @@
-# mash status views, DRAFT5
+# mash status views, DRAFT5c
 
-Date: 2026-11-19. Status: DRAFT5, paper design only (nothing is built, no
+Date: 2026-11-19. Status: DRAFT5c, paper design only (nothing is built, no
 product code; the targets document and the READMEs are edited by others). It
 answers Randy's comment on the noon page: "I see no reason to put the mash
 server details in the mash status. There's only one server in your mash and if
@@ -47,12 +47,32 @@ Decision 249 is the lead's open decision about the SENDER's side of mail: did
 my message arrive, did the session wake. This page does not answer it; section
 5 says what a sender can see today, and what only decision 249 can add.
 
+DRAFT5c (the age trigger; Randy said yes at 11:30Z, "configurable but defaults
+to like 1 hour", and the contract, rev 26, REQ-015 now has it). The mailbox
+wakes the session, and shows a warning, when the OLDEST waiting message is
+older than `mailbox_age` (default 1 hour, 0 = off) as well as when more than
+`mailbox_limit` wait: one new screen, `status-mailbox-age-over`; a second line
+under `mailbox limit` in `--detail`; the age predicate and its build plan in
+4.4; the MCP `mailbox` object is `{waiting, limit, oldest_age, age_limit,
+over_limit, over_age_limit, woke_at}`. Nothing else changes.
+
+DRAFT5b (the lead's four rulings on DRAFT5, same day). (1) `mash read` does
+NOT acknowledge directly in 0.5.6: it keeps the tombstone, so with no session
+running the count drops when the next session starts; every screen and sentence
+says so (4.4 item 2 is now "not in 0.5.6"). (2) Problem values stay in capitals,
+the contract's `OVER THE LIMIT OF 15` included; rule 5 is reversed. (3) The
+one-address view of your own endpoint shows the mailbox row: the contract says
+so now, and section 8 no longer flags it. (4) What could not be determined is
+a list of build-time checks, "Verify at build", in the targets' decisions file;
+section 9 points to it.
+
 What DRAFT5 changes, in order (the lead's items a to f and rulings 1 to 8, the
 planner's check of DRAFT4 and the junior's read; each is a row of section 10):
 
 - One source for the mailbox count: the consumer's own number, stated once in
-  4.4. `mash read` acknowledges directly, with or without a session; 4.4 says
-  exactly what that needs in the code.
+  4.4. `mash read` marks the message read here (the drained tombstone); the
+  count drops within 250 ms of a running session's serve, or when the next
+  session starts. A direct acknowledgement is not in 0.5.6 (4.4, item 2).
 - REQ-015 is stated once, in 4.3 (the contract, rev 26, already says it);
   section 8's "open difference" is deleted.
 - The over-the-limit screens carry a concrete action (read the mail yourself;
@@ -198,11 +218,12 @@ three views, each one a question the screen must pass:
    checked`, with the reason in brackets when the reason is not obvious.
 4. A row holds a conclusion, not a measurement. `reachable`, not `answered in
    41ms` (that is behind `--detail` or on `mash server status`).
-5. Capitals only for a problem or a security risk. `NOT REACHABLE`, `REFUSED`,
-   `NOT ENCRYPTED`, `NOT TRUSTED`. Offline is not a
-   problem: an endpoint that nobody is running is normal, and shown in lower
-   case, with exit 0. A mailbox over its limit is a warning, shown in lower
-   case in the row and explained in a `warning:` block.
+5. A problem value is in capitals (REQ-004), and only a problem. `NOT
+   REACHABLE`, `REFUSED`, `NOT ENCRYPTED`, `NOT TRUSTED`, `OVER THE LIMIT OF
+   15`. Offline is not a problem: an endpoint that nobody is running is
+   normal, and shown in lower case, with exit 0. A mailbox over its limit is a
+   problem value in the row, a warning (exit 0), explained in a `warning:`
+   block.
 6. Nothing a person is expected to know is printed. The server address, the
    endpoint's own address (named once, in the verdict). `mash status` prints no
    server address: `mash server status` is the one place that shows it, and
@@ -429,15 +450,20 @@ Row values, the complete lists (anything else is a defect):
 - `config`, `credentials`: as the targets (`ok`, `MISSING`, `REFUSED`,
   `UNSAFE`, `not checked`).
 - `mailbox` (REQ-015, section 4.4): `0 waiting`; `2 waiting`; `17 waiting,
-  over the limit of 15 (woke the session at 09:40)` (a warning: the verdict
+  OVER THE LIMIT OF 15 (woke the session at 09:40)` (a warning: the verdict
   says `mail works (1 warning)`, exit 0); `3 waiting, no limit set` (the config
   key `mailbox_limit` is 0; mash never wakes the session for a backlog; the
   count is still shown); `not checked`. In order: how many are waiting; whether
-  that is over the limit; when it is, whether and when mash woke the session
-  (`woke the session at 09:40`, `no wake yet`, or `no session to wake`). The
+  that is OVER THE LIMIT; when it is, whether and when mash woke the session
+  (`woke the session at 09:40`, `no wake yet`, or `no session to wake`). When
+  the OLDEST message is past `mailbox_age` the row is `3 waiting, oldest 1h
+  12m, OVER THE AGE LIMIT OF 1h`, with the wake on its second line; when both
+  limits are passed, `22 waiting, OVER THE LIMIT OF 15 AND THE AGE LIMIT OF
+  1h`, and the second line is `oldest 1h 12m (woke the session at 09:40)`. The
   `warning:` and the `fix:` under the rows say what to do.
 - "Limit" means one thing, and every screen that shows it says so: the limit
-  is the number that triggers a wake. It is not a capacity: the inbox's
+  is the number that triggers a wake, and the age limit is the age that
+  triggers a wake. It is not a capacity: the inbox's
   capacity is 16MB or 30 days, a separate warning (below).
 - A "wake" is a note that mash sends an idle session to say mail is waiting;
   the screen that shows a wake says so in the same words.
@@ -527,6 +553,7 @@ acme.demo.bob: mail works.
   chosen by         the only one installed here
   waiting means     not yet shown to the session in full, and not read
   mailbox limit     15 (the number that triggers a wake; key mailbox_limit)
+                    age 1h (the age that triggers a wake; key mailbox_age)
   summary only      0 (shown as a one-line summary, not read; still waiting)
   session started   2026-11-19 09:12 +00:00 on localhost
   claude code       set up to tell an idle session about new mail
@@ -592,18 +619,18 @@ acme.demo.bob: mail works (1 warning).
   server       reachable, encrypted
   config       ok
   credentials  ok
-  mailbox      17 waiting, over the limit of 15 (woke the session at 09:40)
+  mailbox      17 waiting, OVER THE LIMIT OF 15 (woke the session at 09:40)
   session      online
 
 warning: 17 messages are waiting. The limit, 15, is the number that triggers
          a wake: a note mash sends an idle session to say mail is waiting.
          It sends one at most every 10 minutes while more than 15 wait. A
          message stops waiting when the session is shown it in full or reads
-         it, or when you read it; a one-line summary of a message does not
-         count as shown.
+         it. A one-line summary of a message does not count as shown.
 fix: if the count stays over the limit, the session is not taking mail. Look
      at the terminal it runs in: it may be stuck or waiting for you. Or read
-     the mail yourself; each message you read stops waiting:
+     the mail yourself; the session is running, so a message you read leaves
+     the count within a second:
   mash inbox
   mash read <number>
 ```
@@ -611,7 +638,42 @@ fix: if the count stays over the limit, the session is not taking mail. Look
 Before the first wake the row says `(no wake yet)` instead of the time (the 10
 minutes count from the start of `mash serve`, so a restart never wakes sooner).
 `mash inbox` lists the mail, the unread first, with each message's number;
-`mash read` acknowledges what it reads, with or without a session (4.4).
+`mash read` marks what it reads as read here: a running session's serve
+acknowledges it within 250 ms, and with no session the count drops when the
+next one starts (4.4).
+
+The oldest waiting message is older than the age limit (warning, exit 0;
+AT-008), however few wait. The row says how many, how old the oldest is, that
+the AGE limit is passed, and when mash woke the session (its second line):
+
+<!-- packet: status-mailbox-age-over -->
+```
+$ mash status
+acme.demo.bob: mail works (1 warning).
+
+  version      0.5.6
+  server       reachable, encrypted
+  config       ok
+  credentials  ok
+  mailbox      3 waiting, oldest 1h 12m, OVER THE AGE LIMIT OF 1h
+               (woke the session at 09:40)
+  session      online
+
+warning: 3 messages are waiting, and the oldest has waited 1h 12m. The age
+         limit, 1h, is the age that triggers a wake: a note mash sends an
+         idle session to say mail is waiting. It sends one at most every 10
+         minutes while the oldest message is older than that.
+fix: have the session read its mail: the session is running, so a message
+     you read leaves the count within a second:
+  mash inbox
+  mash read <number>
+To change the age limit, add this line to ~/.config/mash/config.json (0
+turns the age check off):
+    "mailbox_age": "2h"
+```
+
+With `mailbox_age` 0, the `--detail` line under `mailbox limit` reads `no age
+limit set` and the age never wakes the session.
 
 The mailbox is over its limit and no session is there (warning, exit 0). There
 is no one to wake, so the action is to start one or to read the mail:
@@ -625,15 +687,15 @@ acme.demo.bob: mail works (1 warning).
   server       reachable, encrypted
   config       ok
   credentials  ok
-  mailbox      17 waiting, over the limit of 15 (no session to wake)
+  mailbox      17 waiting, OVER THE LIMIT OF 15 (no session to wake)
   session      offline (mail waits for the next session)
 
 warning: 17 messages are waiting. The limit, 15, is the number that triggers
          a wake (a note mash sends an idle session). No session is running,
          so there is no one to wake: the mail waits for the next session.
 fix: start Claude Code in the terminal you want it in: it is shown the
-     waiting mail. Or read the mail yourself; each message you read stops
-     waiting:
+     waiting mail. Or read the mail yourself; no session is running, so the
+     count drops when the next one starts, not when you read:
   mash inbox
   mash read <number>
 ```
@@ -1327,8 +1389,11 @@ there is no `last_seen`):
       "version": "0.5.6", "program": "claude-code", "host": "localhost",
       "role": "reviewer" },
     { "endpoint": "acme.demo.bob", "state": "online", "you": true,
-      "mailbox": { "waiting": 2, "limit": 15 }, "version": "0.5.6",
-      "program": "claude-code", "host": "localhost", "role": null } ] }
+      "mailbox": { "waiting": 2, "limit": 15, "oldest_age": "9m",
+                   "age_limit": "1h", "over_limit": false,
+                   "over_age_limit": false, "woke_at": null },
+      "version": "0.5.6", "program": "claude-code", "host": "localhost",
+      "role": null } ] }
 ```
 
 Exit codes: 0 asked and answered (including no match and every endpoint
@@ -1359,9 +1424,11 @@ readable by its own credentials; it is not a SAP field, so BND-002 holds.
 
 THE RULING (the lead, contract rev 21; REQ-015 of rev 26 words it), which
 replaced DRAFT3's section 4.4. What changes is what ACKNOWLEDGES. DELIVERY
-ACKNOWLEDGES: a message shown in full in the session's hook context, read with
-the `read` tool or read with `mash read` is acknowledged and no longer counts,
-so reading lowers the number. A digest does not acknowledge. A digest is the
+ACKNOWLEDGES: a message shown in full in the session's hook context or read
+with the `read` tool is acknowledged and no longer counts. `mash read` from a
+shell marks the message read here, and it stops counting within 250 ms if a
+session's serve is running, otherwise when the next session starts (item 2). A
+digest does not acknowledge. A digest is the
 hook's one-line summary of a message (sender, size, first line), which it
 prints instead of the whole text when many messages wait; on a screen this page
 says "a one-line summary of the message". A message the hook only summarised
@@ -1378,7 +1445,7 @@ what 0.5.6 does). The table cells are long; each row is one line of the file:
 | a hook shows it in full | the hook prints up to 10 messages (and 16 KiB) as hook context, then marks each drained in the local spool; serve sees the mark within 250 ms and acks (double ack, 2 s) | YES | same | `cmd/mash/hook.go:140-176`, `internal/host/claude.go:189-249`, `internal/endpoint/hook.go:39,256-258,478-492` |
 | a hook shows a digest | the hook prints one line per message and marks each LISTED, not drained; the message stays unacked, never wakes, and waits to be read | no | same: no ack, and it COUNTS | `cmd/mash/hook.go:160-170`, `internal/spool/spool.go:395-435`, ADR 0046 |
 | the `read` tool (MCP) | after the result is written to the model it drains a message that was LISTED, or one waiting in a session proven hookless; any other waiting message is left for a hook | only those two | ANY waiting message | `cmd/mash/serve.go:708-722`, `internal/endpoint/hookless.go:144-185` |
-| `mash read` (shell) | reads the stored message straight from the stream; no consumer, no spool | no | YES, directly at the consumer, with or without a session (item 2) | `cmd/mash/cli.go:134-148`, `internal/endpoint/mail.go:870-895` |
+| `mash read` (shell) | reads the stored message straight from the stream; no consumer, no spool | no | the drained tombstone: a running serve acks within 250 ms, else the next serve start (item 2); no direct ack in 0.5.6 | `cmd/mash/cli.go:134-148`, `internal/endpoint/mail.go:870-895` |
 | `mash inbox`, the MCP `inbox` tool | list stored messages straight from the stream | no | no (listing is not reading) | `internal/endpoint/mail.go:899-943`, `hookless.go:148`, ADR 0046 |
 | before any hook ran (no spool-from-start) | the channel write is the delivery; serve acks it after the write | YES | same | `internal/endpoint/mail.go:1007-1033` |
 | a hold, a nak, a lost lease | the message stays unacked and is redelivered after a delay; while held, serve extends its ack deadline every 10 s | no | same | `hook.go:127,171,178,286-291`, `mail.go:356` |
@@ -1388,8 +1455,8 @@ So a full hook showing already lowers the count today, and one hook run lowers
 it by at most 10 (`BatchMsgs`, `claude.go:193,208-210`); with the default limit
 of 15, a backlog of 17 clears in two runs of an active session. What does not
 lower it today, and does in 0.5.6: the `read` tool on a message no summary
-listed, and `mash read`. What still does not: a one-line summary, and `mash
-inbox`.
+listed, and `mash read` (through the tombstone, so with a session). What
+still does not: a one-line summary, and `mash inbox`.
 
 WHICH CODE CHANGES THAT, and anything else the ack change touches:
 
@@ -1399,53 +1466,19 @@ WHICH CODE CHANGES THAT, and anything else the ack change touches:
    and serve acks it. The hook then does not show it again (it shows only what
    is waiting in the spool). A model that reads a message by `#seq` before the
    next hook run has been shown it.
-2. `mash read` ACKNOWLEDGES DIRECTLY, with or without a session (the lead's
-   ruling 3: it is the person reading their own mail, and REQ-015 says `mash
-   read` acknowledges). DRAFT4's way, a drained tombstone in the local spool
-   (`spool.Drained`, `internal/spool/spool.go:441-460`), is not enough: it acks
-   only through a running `mash serve` (within 250 ms) or at the next serve
-   start, and only where the endpoint's spool directory exists, so with no
-   session the message would stay counted. Acknowledging at the consumer itself
-   needs MORE than the other changes of this section, and it is exactly this
-   (a reading of the v0.5.5 code; none of it was run):
-   - `cmd/mash/cli.go:134-148`: after `ep.Read` succeeds and the message is
-     printed, call one new method, `Endpoint.AckRead(ctx, seq)`. If it cannot
-     ack, it prints a one-line warning on stderr and the command still exits
-     0 (the message was read).
-   - `internal/endpoint/mail.go`, beside `ReadRef` (`:875-895`): `AckRead` opens
-     the durable consumer as serve does (`e.js.Consumer(ctx,
-     e.ident.InboxStream(), store.Consumer)`, as at `:333`) and pulls
-     messages in stream order (the pull request is
-     `$JS.API.CONSUMER.MSG.NEXT.<inbox>.deliver`) until it receives the one
-     whose stream sequence is `seq` (`Metadata().Sequence.Stream`, as at
-     `:348-354`). It acks that one with `DoubleAck` (as
-     `internal/endpoint/hook.go:485`), and NAKs every other message it
-     received (`Nak()`, no delay, so the server redelivers it at once; serve
-     uses `NakWithDelay(time.Second)` for a message it lets go,
-     `mail.go:356`). A JetStream ack needs the delivery's own reply subject,
-     which only the client that received the message has, so a shell cannot
-     ack by number alone; it has to receive the message, and with no serve
-     running it can.
-   - A message the shell cannot receive: already acked (nothing to do), or
-     held unacked by a running `mash serve` (ack-pending: not delivered again
-     until its ack wait ends, and serve keeps extending it every 10 s). For the
-     second case `AckRead` falls back to DRAFT4's tombstone (`spool.Drained`):
-     the running serve acks it within 250 ms. If there is no spool directory
-     either, it says on stderr that the message was read and will clear when
-     the session shows it.
-   - No new permission: the three subjects it uses (consumer info, the pull
-     request, and the ack subject `$JS.ACK.<inbox>.deliver.>`) are already
-     granted, `internal/admin/permissions.go:67-69`. No SAP change.
-   - What this costs: to reach a message deep in a backlog the shell receives
-     and naks each earlier one (at most the consumer's 1000 unacked,
-     `store.go:130-137`); a message beyond that cannot be reached by number
-     until the earlier ones are read. A serve that starts during the few
-     milliseconds a shell holds messages receives them on the redelivery.
-   If the freeze does not allow this, the page still tells the truth: the row
-   shows the consumer's number, so a `mash read` with no session running
-   leaves the message counted until a session shows it or the next serve start
-   acks the tombstone, and the sentence "or when you read it" in the over-the-
-   limit warning (4.1) is true only with a session running.
+2. `mash read` KEEPS THE TOMBSTONE (the lead, 0.5.6: a direct acknowledgement,
+   `Endpoint.AckRead`, is NOT IN 0.5.6; the contract, rev 26, records it).
+   `cmd/mash/cli.go:134-148` writes the drained tombstone
+   (`spool.Drained`, `internal/spool/spool.go:441-460`) after the message is
+   printed: a running `mash serve` acks within 250 ms
+   (`internal/endpoint/hook.go:256-258`), and with no session running the next
+   serve start acks it when the consumer redelivers it. The truth on every
+   screen: with no session running, reading marks the message read HERE, and
+   the count drops when the next session starts. Why no direct ack: a shell
+   cannot ack by number, it has to receive the message, so it would receive and
+   nak up to 1000 earlier messages, a new mechanism with side effects
+   (delivery counts, redelivery), and the freeze holds. The build-time checks it
+   would need are kept in "Verify at build" (targets decisions file).
 3. `mash serve` WRITES THE WAKE TIME: `backlog_woke_at` in the endpoint's own
    lease (the count itself is not written, above). The 10-minute cooldown stays
    in memory as the contract has it, and starts when serve starts.
@@ -1454,6 +1487,27 @@ WHICH CODE CHANGES THAT, and anything else the ack change touches:
    backlog already over the limit when serve starts wakes once, at 10 minutes
    after the start, if still over (REQ-015). Everything else of REQ-015
    stands: the line text, the cooldown, `mailbox_limit` 0 turns it off.
+5. THE AGE TRIGGER (the contract, rev 26, REQ-015; Randy: "configurable but
+   defaults to like 1 hour"). WHAT IT COUNTS: the age of the OLDEST waiting
+   message, by the time the SERVER stored it (not the time serve first saw it),
+   against `mailbox_age` (default 1 hour, 0 turns it off). When it is older, the
+   same wake fires, under the same cooldown (per endpoint, 10 minutes from the
+   last wake, not kept over a restart) and the same start hold (a backlog
+   already over at the start wakes once, at 10 minutes), however few messages
+   wait. The wake line and the row say which limit was passed (`oldest 1h 12m,
+   over the age limit of 1h`; `status-mailbox-age-over`). BUILD PLAN. In
+   `mash serve`: a third predicate in `wakeIfIdle`
+   (`internal/endpoint/hook.go:305-317`) beside the count, and the waking
+   tracker (`internal/endpoint/waking.go:48`, `:144`) keeps the stream's
+   stored time of each unread message (the mail's `At`, which survives a
+   restart because redelivery keeps it), with a `min()` for the oldest. In
+   `mash status` from a SHELL (no session running): ONE extra direct get on its
+   own inbox stream; the consumer's ack floor says which sequence is the oldest
+   unacked, and its stored time is the age. The endpoint's own credentials
+   already allow a direct get on its own inbox
+   (`internal/admin/permissions.go:70-71`; read, not run: "Verify at build"
+   (j)). No new SAP field (BND-002), and no new mechanism for a security read:
+   it reads its own inbox only. The count itself is unchanged.
 
 This amends ADR 0041 (the `read` tool acks only in a hookless session, and `mash
 read` never acks); the pull request that builds items 1 to 3 adds an ADR
@@ -1477,7 +1531,7 @@ What else the ack change touches (a short list; nothing else changes):
    (`hook.go:286-291`). Nothing about the values changes.
 4. The hook's 10 messages per run (`claude.go:193,208-210`) is unchanged: with
    the limit at 15, a backlog of 22 takes three runs of an active session, and
-   reading by `#seq` lowers the count faster.
+   reading by `#seq` with the `read` tool lowers the count faster.
 5. ADR 0069 (its 500-held and byte lines decide when a crowded spool wakes a
    session that no hook is draining) and ADR 0046 (a digest lists and does not
    ack; `inbox` never acks) are unchanged; REQ-015's limit is a separate, lower
@@ -1723,11 +1777,11 @@ decide. OPEN: Randy or ctl has not ruled; the recommendation is given.
    that wants a gate uses `--json`. Recommendation: keep 0.
 10. SETTLED, the lead (rev 21, contract rev 26): the mailbox count is
     unacknowledged mail, and delivery acknowledges (4.4). The code changes (the
-    `read` tool drains any waiting message; `mash read` acknowledges directly at
-    the consumer; serve writes `backlog_woke_at` into the endpoint's own lease)
-    amend ADR 0041 and need an ADR. A one-line summary does not acknowledge and
-    still counts. The only open part is whether the freeze allows item 2 of 4.4
-    (the direct acknowledgement): the lead judges that.
+    `read` tool drains any waiting message; `mash read` keeps the tombstone;
+    serve writes `backlog_woke_at` into the endpoint's own lease) amend ADR 0041
+    and need an ADR. A one-line summary does not acknowledge and still counts.
+    Nothing is open: the lead ruled that a direct acknowledgement from the
+    shell is not in 0.5.6 (4.4, item 2).
 11. OPEN. The certificate's end date. Recommendation: show it in `mash server
     status --detail` and warn within 30 days; mash reads no certificate field
     today (section 2), so it is new code but no new permission.
@@ -1759,7 +1813,7 @@ Not edited by this page. The sections and blocks that would change:
   `warning:`/`fix:` text. `--detail`: REQ-012's rows stay without the trust
   rows and the `group` fact; added: `waiting means`, `mailbox limit`, `summary
   only`, `session started`, `server details`. The `mailbox` row is `<n>
-  waiting`, `..., over the limit of <limit> (<wake>)`, `..., no limit set`,
+  waiting`, `..., OVER THE LIMIT OF <limit> (<wake>)`, `..., no limit set`,
   `not checked`, in every block, with the over-the-limit blocks, their `fix:`
   and the `no limit set` note added.
 - The environment rule (section 4.1): the targets' DRAFT11 says `mail does NOT
@@ -1783,20 +1837,20 @@ Not edited by this page. The sections and blocks that would change:
   `status` stays under "Set up".
 - The mailbox section of the targets (DRAFT11): O1 (a one-line summary counts
   and does not acknowledge) stands, O2 is reversed by the lead's rev 21
-  (reading acknowledges and lowers the count), and "What each command does with
+  (reading acknowledges and lowers the count; `mash read` through the
+  tombstone), and "What each command does with
   it" gains the lease's `backlog_woke_at` (no `backlog` field: the count has one
-  source, 4.4); `mash read --detail` `state` is true only after change 2 of 4.4.
+  source, 4.4); `mash read --detail` `state` is true only after change 2 of 4.4
+  (the tombstone).
 - The contract, rev 26 (the final one). REQ-015 already has the definition of
   4.4 (unacknowledged; shown in full or read is acknowledged; a one-line
   summary is not), the `mash endpoint status` rule (stated once, in 4.3) and
-  `no limit set`. This page adds to it: (1) the row wording, `<n> waiting, over
-  the limit of <limit> (woke the session at 09:40)`, in lower case where the
-  contract prints `OVER THE LIMIT OF <limit>` in capitals (rule 5: capitals only
-  for a problem); (2) the recorded wake time, `backlog_woke_at`; (3) the
-  one-address view of your own endpoint shows the mailbox row, which the
-  contract's "only by that endpoint's own `mash status`" does not say; (4) the
-  direct acknowledgement of `mash read` (4.4, item 2), which the contract
-  already requires and which needs more than a spool tombstone. REQ-004's `mash
+  `no limit set`. This page adds to it: (1) the row wording, `<n> waiting,
+  OVER THE LIMIT OF <limit> (woke the session at 09:40)`, the contract's
+  capitals with the wake time added; (2) the recorded wake time,
+  `backlog_woke_at`. The contract already has the one-address view of your own
+  endpoint showing the mailbox row, and `mash read` marking the message read
+  locally (the count drops when the next session starts). REQ-004's `mash
   server status: address, alive, encrypted, last seen` and `mash endpoint
   status: ... heartbeat or last seen` become the rows and the `online`/`offline`
   of this page (no last seen). REQ-012: its list is unchanged; the fact rows of
@@ -1804,7 +1858,8 @@ Not edited by this page. The sections and blocks that would change:
   (`MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION`); there is no trust record.
 - Section 6 MCP: `who` becomes `endpoint_status` (7.2) with the pattern
   argument and `mailbox` for the caller's own entry; `status` takes the six rows
-  (`mailbox: {waiting, limit}`, `session: online|offline`); new tool
+  (`mailbox: {waiting, limit, oldest_age, age_limit, over_limit,
+  over_age_limit, woke_at}`, `session: online|offline`); new tool
   `server_status`; the initialize `instructions` text names the new tools.
 - Section 7 and 8 of the targets: N10 (`last reached`) closes for `mash status`
   and is dropped for the list (no last seen); N13 closes; the behaviour changes
@@ -1831,20 +1886,23 @@ What I could not verify:
 - The certificate fields (end date, issuer, the cause of a refusal): my run used
   the plain test server, so no certificate was read. Go's API gives them; mash
   reads none today.
-- Section 4.4. I read the code paths of every ack, and did not run the
-  changes. Not run: that a shell can receive a message with the pull request
-  and ack it (`AckRead`, item 2), that the naks of the others redeliver at
-  once, how long it takes to reach a message deep in a backlog, and whether a
-  server accepts the ack of a message received by a client that exits at once
-  (I expect it to; the ack is the delivery's own reply subject). Not run, for
-  the fallback and for DRAFT4's tombstone: that a tombstone written by `mash
-  read` is acked by a running serve within 250 ms, and by a starting serve on
-  redelivery; that the spool directory exists for an endpoint whose session
-  has run on this machine and not for one whose session never has; that a
-  tombstone for a message the stream has since expired is pruned (I did not
-  find where, so it may leak a few empty files); the lease's new field and its
-  freshness (the throttle on lease writes is `WakingWriteMin`, 5 s,
-  `waking.go:36-38`).
+- Build-time checks. Everything this page could not determine is one table,
+  "Verify at build", in `docs/plans/2026-11-19-cli-targets-mash-decisions.md`
+  (item, why it matters, who checks, how). The list below is what I did not
+  run, with the reason.
+- Section 4.4. I read the code paths of every ack, and did not run the changes.
+  Not run (a direct acknowledgement is not in 0.5.6; its checks are kept for
+  later in "Verify at build"): that a shell can receive a message with the pull
+  request and ack it, that the naks of the others redeliver at once, how long it
+  takes to reach a message deep in a backlog, and whether a server accepts the
+  ack of a message received by a client that exits at once. Not run, for the
+  tombstone, which 0.5.6 keeps: that a tombstone written by `mash read` is acked
+  by a running serve within 250 ms, and by a starting serve on redelivery; that
+  the spool directory exists for an endpoint whose session has run on this
+  machine and not for one whose session never has; that a tombstone for a
+  message the stream has since expired is pruned (I did not find where, so it
+  may leak a few empty files); the lease's new field and its freshness (the
+  throttle on lease writes is `WakingWriteMin`, 5 s, `waking.go:36-38`).
 - Per-message `new`/`read` from a shell: the consumer reports counts and an ack
   floor, not which message above the floor was acked. The number is exact; the
   per-message state is exact only at or below the floor.
@@ -1886,7 +1944,11 @@ read`, `mash inbox`, the channel path, the lease record, the audit's consumer
 fields, the permission list (`permissions.go:67-69` for the pull and the ack),
 and ADR 0041, 0046, 0066 and 0069.
 
-DRAFT5, measured (a Python 3 script, `-I`, characters per line of every fenced
+DRAFT5c adds one block, `status-mailbox-age-over`, and a line to `status-detail`
+(37 fenced blocks in all, 36 before; the widest printed line is
+still 78: re-measured, none is over 80).
+
+DRAFT5b, measured (a Python 3 script, `-I`, characters per line of every fenced
 block, the `$` blocks and the JSON block included; a second pass checks that
 every key/value block has one value column; a third lists prose lines over 80
 outside tables): 36 fenced blocks, the same 36 as DRAFT4. NO printed line is
@@ -1904,12 +1966,12 @@ table row cannot wrap; each is one line of the file).
 
 ## 10. Disposition of the findings
 
-DRAFT5 answers the planner's check of DRAFT4, the junior's read of DRAFT4, and
-the lead's items a to f and rulings 1 to 8 (rows below, after the older ones).
-One row per finding. FIXED: the page now says what the finding asked. CHANGED:
-done differently, with the reason. NOT TAKEN: not done, with the reason. Defects
-are the critic's numbers (D, 1 to 18); "critic A to E" are its sections;
-"junior" is its part 3 unless named.
+DRAFT5 and DRAFT5b answer the planner's check of DRAFT4, the junior's read of
+DRAFT4, and the lead's items a to f and rulings 1 to 8 (rows below, after the
+older ones). One row per finding. FIXED: the page now says what the finding
+asked. CHANGED: done differently, with the reason. NOT TAKEN: not done, with the
+reason. Defects are the critic's numbers (D, 1 to 18); "critic A to E" are its
+sections; "junior" is its part 3 unless named.
 
 | finding | status | where, and what |
 |---|---|---|
@@ -1936,7 +1998,7 @@ are the critic's numbers (D, 1 to 18); "critic A to E" are its sections;
 | critic A: `--match` unexplained | FIXED | 4.3: a search of description and capabilities, no longer the address |
 | critic B: ctl's "same four leading columns" unreconciled | CHANGED | section 6, item 2: one `ENDPOINT` column; asked of ctl |
 | critic B: `*` is both wildcard and "you" | FIXED | the marker is `(you)` |
-| critic B: capitals on a warning | FIXED | the row is lower case; capitals only for a problem (rule 5) |
+| critic B: capitals on a warning | CHANGED (DRAFT5b) | the lead ruled problem values stay in capitals (REQ-004): the row is `OVER THE LIMIT OF 15`; rule 5 reversed |
 | critic C: jargon in `--detail` | FIXED | trust rows, `relays seen` and `name rule` are gone; `storage name` is explained; `account` and `generation` are gone with the trust record |
 | critic C: default `server status` rows | FIXED | four rows; clock, limits and counts behind `--detail`; a wrong clock is a warning |
 | critic C: `endpoints 3 registered` vs "3 of acme" | FIXED | `3 registered, all owners` |
@@ -1978,7 +2040,7 @@ are the critic's numbers (D, 1 to 18); "critic A to E" are its sections;
 | planner check, R6 (unreachable fix prints the address) | FIXED | no address in `mash status`; `fix: ... details, with the address mash tried: mash server status` (ruling 5) |
 | planner check, R7 (installed endpoints row; cast mixup) | FIXED | section 5: the row says what is true (listed only when none is chosen); the sender bullet is alice's, from bob's side |
 | planner check, R8 and step 5 item 1 (two sources for the count) | FIXED | one source, the consumer's number, stated once in 4.4; the lease's `backlog` field is gone (ruling 3) |
-| planner check, step 5 item 2 (`mash read` offline does not lower the count) | FIXED | `mash read` acknowledges directly at the consumer (4.4, item 2), which needs one new method and no new permission; what it needs is exact there, and what the row says if the freeze forbids it (ruling 3) |
+| planner check, step 5 item 2 (`mash read` offline does not lower the count) | CHANGED (DRAFT5b) | with no session running reading marks the message read here and the count drops when the next session starts; the screens say so (4.4, item 2) |
 | planner check, step 5 item 5 ("the session row probes for one endpoint") | FIXED | 4.1 "Not rows": the `session` row uses the same probe; group counts are left out because they are about other endpoints |
 | planner check, step 5 item 7 ("when the server is back") | FIXED | the sentence is deleted; the unreachable screen does not print the address |
 | planner check, step 5 item 9 (help omits `--detail`) | FIXED | `endpoint-status-help` explains every flag and has `--detail` (lead item f) |
@@ -1994,7 +2056,7 @@ are the critic's numbers (D, 1 to 18); "critic A to E" are its sections;
 | lead (f): the endpoint status help | FIXED | each flag explained, `--detail` included; `online`/`offline` defined once there, and `mash status --detail` points to it |
 | lead ruling 1: env override | FIXED | see planner check, defect 7 |
 | lead ruling 2: REQ-015 once | FIXED | see planner check, defect 14 |
-| lead ruling 3: one source; `mash read` acks directly | FIXED | 4.4; the exact need is item 2 of 4.4 (file:line from the v0.5.5 clone) |
+| lead ruling 3: one source; `mash read` acks directly | CHANGED (DRAFT5b) | 4.4; the lead ruled no direct ack in 0.5.6: `mash read` keeps the tombstone (item 2) |
 | lead ruling 4: limit explained once per screen; no "digest"; wake time in the row | FIXED | `status-mailbox-over` and the other screens; the row reads `(woke the session at 09:40)` |
 | lead ruling 5: no address when unreachable | FIXED | `status-unreachable` |
 | lead ruling 6: say honestly what the endpoint list can show | FIXED | top item 1, next to the heartbeat sentence; the list is not padded. One change from the ruling's words: "group" is not a `--wide` column, it is in the address |
@@ -2014,6 +2076,11 @@ are the critic's numbers (D, 1 to 18); "critic A to E" are its sections;
 | junior: two screens for "deleted" | NOT TAKEN | which appears depends on what the server says (N11); both are targets |
 | junior: whether the running session closes first (status-claude) | FIXED | the fix says close it first (not run, section 9) |
 | junior: "Question 2" meant two things; marks missing; rev and DRAFT numbers; who is who; 54 against 56; two DRAFT paragraphs; "Proposed to Randy" not a sentence; broken rows | FIXED | "top item N" and "7.N"; every item of section 7 has one mark; contract rev 26 and targets DRAFT11 throughout; a who-is-who paragraph; 56; one measurement paragraph; sentences mended; rows joined |
+| DRAFT5b, lead 1: `mash read` direct ack | CHANGED | not in 0.5.6; tombstone kept; every sentence and both over-the-limit screens say the count drops when the next session starts |
+| DRAFT5b, lead 2: capitals | FIXED | `OVER THE LIMIT OF 15` in every block, row list, rule 5 and section 8 |
+| DRAFT5b, lead 3: own-endpoint one-address view | FIXED | the flag is removed from section 8 (the contract says it now) |
+| DRAFT5b, lead 4: open items | FIXED | "Verify at build", a table in the targets decisions file; one pointer in section 9 |
+| DRAFT5c, the age trigger (Randy, 11:30Z; contract rev 26 REQ-015) | FIXED | `status-mailbox-age-over`, the second line of `mailbox limit` in `--detail`, 4.4 item 5 (the predicate and the build plan), the MCP object; the shell's one direct get is "Verify at build" (j) |
 | junior: sections 2, 3, 4.4 need the code to read | CHANGED | they are for a reviewer; the words a person needs are in the screens |
 
 ## Appendix: the CLI team's answers, quoted unchanged

@@ -381,8 +381,8 @@ the plugin: you never run it yourself. Mail reaches an agent in two ways. The
 hook delivers waiting mail when the session next acts (after a tool call, or
 with your next prompt). A channel wake pushes a one-line message to an idle
 session so that it acts and the hook delivers. A third thing is separate: when
-more than 15 messages are waiting (the default limit; reading a message stops
-it waiting), `mash serve` wakes the session, at most every 10 minutes.
+more than 15 messages are waiting (the default limit; a message stops waiting
+when the session reads it), `mash serve` wakes the session, at most every 10 minutes.
 
 In terminal 1 (where you have been working), export the plugin to a folder and
 add it to Claude Code. Claude Code adds a plugin from a marketplace, even a

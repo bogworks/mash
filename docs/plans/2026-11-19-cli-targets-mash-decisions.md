@@ -1,10 +1,10 @@
-# mash CLI targets: decisions, behaviour changes and checks (sections 7 to 9)
+# mash CLI targets: decisions, behaviour changes and checks (sections 7 to 10)
 
 This file is the decisions, behaviour-changes and checks part of
 [the mash CLI target outputs](2026-11-19-cli-targets-mash.md) (DRAFT12). It was
 split out only to keep the main file under the repository's size limit for
 committed files. Sections 7, 8 and 9 below are unchanged and keep their
-numbers; every output block (the ones the reviewer packet and the README pages
+numbers (section 10, "Verify at build", was added after DRAFT12); every output block (the ones the reviewer packet and the README pages
 are generated from) stays in the main file, and section references such as
 "section 9" in either file mean the section here.
 
@@ -370,10 +370,13 @@ Z16. DECIDED, the lead (rev 21), UNVERIFIED in code. Every interrupted state is
     killed run left is never read and never counted as installed. Said in
     section 2's write-order rule and in `install-rerun`'s text.
 Z17. DECIDED, the lead (rev 21). REQ-015's count STAYS pending plus ack-pending
-    and DELIVERY ACKNOWLEDGES: shown in full, read with the `read` tool and read
-    with `mash read` all acknowledge and lower the count; a digest line does not
-    and still counts. Section 5b, R22 and the serve text say it and list the
-    code that changes (`hookless.go:144-185`, `cli.go:134-148`, the lease's
+    and DELIVERY ACKNOWLEDGES: shown in full and read with the `read` tool
+    acknowledge and lower the count; `mash read` marks the message read here
+    (the tombstone) and the count drops when a session runs, with no session
+    when the next one starts (the lead, 0.5.6: no direct acknowledgement); a
+    digest line does not and still counts. Section 5b, R22 and the serve text
+    say it and list the code that changes (`hookless.go:144-185`,
+    `cli.go:134-148`, the lease's
     `backlog` and `backlog_woke_at`) and what else it touches. The line DRAFT9
     added to 5b ("superseded by the status-views page") is gone. The brief's
     sentence that `mashctl audit` can exceed the status number by the
@@ -475,6 +478,40 @@ Z23. DECIDED, the lead. (a) NO second platform anywhere: the README quick start
     (the verify has just run) rather than "after you installed it"; the
     sentence says "other users" (the group counts) and "is, or sits under" a
     link, which is what the check tests.
+Z24. DECIDED, the lead and Randy (contract rev 26, REQ-015, 11:29Z; Randy at
+    11:30Z: "configurable but defaults to like 1 hour... not a high priority").
+    The age trigger. (a) Setting: `mailbox_age` / `MASH_MAILBOX_AGE`, beside
+    `mailbox_limit` / `MASH_MAILBOX_LIMIT` (the same family: a key and a
+    variable, the environment wins). Form chosen here: a whole number and a
+    unit, `30m`, `1h`, `2d`, from 1m to 30d (30 days is the inbox's own
+    lifetime), default `1h`, `0` = off (`no age limit set`); a bare number
+    other than 0 has no unit and is refused with the same kind of `error:` and
+    `fix:` as the count's (no new block: the text is in section 3). (b) The wake
+    is the count's wake: the same channel event, cooldown and start hold; the
+    age is the stored time of the oldest unacked message. (c) ONE line for
+    every case, chosen here: the lead's wording `mash: 3 messages waiting
+    (limit 15), oldest 1h 12m, over the age limit of 1h` is used whenever the
+    age is passed, and when the count is passed too nothing else is added,
+    because `22 messages waiting (limit 15)` already says it (the `(limit)`
+    clause is dropped when `mailbox_limit` is 0). It stays within 80 columns at
+    1000 waiting, which is why an age from a day is printed in days alone
+    (`29d`): the two-unit form `1h 12m` is for under a day. (d) The row:
+    `3 waiting, oldest 1h 12m, OVER THE AGE LIMIT OF 1h`, with the wake time on
+    the row's second line (the one line would be 93 columns); both passed, `22
+    waiting, OVER THE LIMIT OF 15 AND THE AGE LIMIT OF 1h` and the age moves to
+    the second line. `--detail` keeps its six rows: the age limit is a second
+    line of the `mailbox limit` row (`age 1h (the default)`, `no age limit
+    set`), so no block gains a row. (e) MCP: `mailbox {waiting, limit,
+    oldest_age, age_limit, over_limit, over_age_limit, woke_at}`; `age_limit`
+    is a string in the same form, `"0"` off. (f) Build plan, short: serve-side,
+    the third predicate in `wakeIfIdle` (`internal/endpoint/hook.go:305-317`)
+    plus the tracker's timestamp (the stream's stored time, `mail.At`, in
+    `internal/endpoint/waking.go:48,144`; it survives a restart) and a `min()`
+    for the oldest; `mash status` from a shell makes ONE extra direct get on
+    its own inbox stream (the consumer's ack floor says which sequence is the
+    oldest unacked; the permission is already granted, `internal/admin/
+    permissions.go:70-71`); no new SAP field; no new mechanism for a security
+    read (own inbox only). Not run: "Verify at build" (j).
 
 ## 8. Behaviour changes the contract must decide
 
@@ -556,7 +593,8 @@ missing one is exit 2, before anything is read),
   clock starts when serve starts and is not kept across a restart); a backlog
   over the limit at the start wakes once, at 10 minutes. DELIVERY
   ACKNOWLEDGES (new in 0.5.6: the `read` tool drains any waiting message,
-  `mash read` writes the drained tombstone, serve writes `backlog` and
+  `mash read` writes the drained tombstone (with no session running the count
+  drops when the next session starts), serve writes `backlog` and
   `backlog_woke_at` into the lease; an ADR amends ADR 0041); a digest line does
   not acknowledge and still counts. `mash status` and the MCP `status` show the
   count (`<n> waiting, no limit set` for a limit of 0), and `mash endpoint
@@ -578,8 +616,10 @@ missing one is exit 2, before anything is read),
   drops the recipient's inbox number; the slash form is refused; the default
   kind is `message` (N12).
 - `mash read`: first line, aligned rows with `urgency`; `NEXT:` only for a
-`question` or `blocker` from another endpoint; reading acknowledges the message
-and lowers the mailbox count (CHANGED, rev 21: today `mash read` never acks).
+`question` or `blocker` from another endpoint; reading marks the message read
+here and the mailbox count drops when the next session starts (CHANGED, rev 21
+and the lead's 0.5.6 ruling: today `mash read` never marks; no direct
+acknowledgement).
 - `mash credential create` renamed `mash credential install` (hard cut);
   flags `--seed`/`--jwt` renamed `--key`/`--token`; new `--ca` and `--server`
   (no `--creds`); no `--replace`, no `--force`; JSON schemas bump to `@2`; the first
@@ -754,7 +794,8 @@ Checked against the shipped source (the v0.5.5 tag, cloned at
   block), the address grammar and the byte-identical `--server` and `--ca` of a
   later install (stated in section 2); REQ-015's
   unacked count with acknowledgement on delivery (shown in full, `read` tool,
-  `mash read`; a digest line does not acknowledge), the wake 10 minutes after a
+  `mash read` through the tombstone; a digest line does not acknowledge), the
+  wake 10 minutes after a
   start over the limit, and `no limit set` with the count still shown. Where
   revs conflicted, the newest won: rev 24 over the brief's "mash computes the
   account from the token's issuer" (the account is now the person's
@@ -818,3 +859,31 @@ bundle (Y8), that moving only `config.json` or only `ca.pem` aside lets the same
 install succeed (Y6), that an owner may read another endpoint's lease for `mash
 endpoint status` (section 5b), and the mailbox row's order and the server rows,
 which follow the status-views page.
+
+## 10. Verify at build
+
+What could not be determined on paper. Each row is a check the builder or the
+named lane runs against a built binary or a real release, and each answer goes
+in the building pull request. Nothing here blocks the paper design. (The lead,
+ruling 4 on the status-views page, DRAFT5b.)
+
+| item | why it matters | who checks | how |
+|---|---|---|---|
+| (a) Whether the server accepts an ack from a client that exits at once, and how long reaching a message deep in a backlog takes (up to the consumer's 1000 unacked) | Only a direct acknowledgement from `mash read` needs it, and that is not in 0.5.6 (the tombstone route stays); keep for later | mash core, later | a test against a local NATS server with JetStream: a 1000-message backlog, a client that pulls, double-acks one message and exits; read the ack floor; time the pull to the last message |
+| (b) Whether a token can expire in 0.5.6 (`token expires never` is a target) | The row and the quick start say `never`; if a token can expire, they must say when | mashctl lane (ctl) | decode the token `mashctl endpoint create` writes and read its expiry claim; try an expiry option; then show the row for both |
+| (c) Whether a running session must be closed before restarting with the mash channel | The `status-claude` fix says to close it first | mash core | start Claude Code with the plugin, then start it again in the same terminal with the channel flag while the first runs; write down what happens |
+| (d) What the other stores are on a production server (`3 inboxes, the rest are mash's own`) | The `server status` row names the stores by that sentence | mash core with the operator | list the streams of a real server (`mashctl audit` or the NATS stream listing), count the inboxes and name the rest |
+| (e) The NEARLY FULL threshold (90% of the inbox's limit) | The warning's trigger rests on the same accounting as reserved storage | mash core | in a test server with a small storage limit, fill the inbox past 80, 90 and 100% and read the figures the status call sees |
+| (f1) `mkdir` under `umask 022` against a real release | The pasted install makes the folder 0755 by that umask; a person's own umask may differ | release lane | run the pasted chain as a normal user in a throwaway container, once with `umask 022` and once with 077; check the folder's mode and that the install still works |
+| (f2) What `claude` prints, and its exit code, for `claude plugin marketplace add` and `claude plugin install` (N16) | The quick start shows these commands and says what a person sees | mash core | run both twice in a throwaway home in a container (clean, then already installed); record the output and exit codes |
+| (f3) `gh attestation verify` on the 0.5.6 release (Y8) | The one pasted check names `SHA256SUMS`; the binaries must be named in the bundle | release lane | on the release candidate, run `gh attestation verify SHA256SUMS -R bogworks/mash --bundle mash.intoto.jsonl`, then `sha256sum -c`; check that `mash-linux-amd64` verifies the same way, and the failure text for a changed byte |
+| (f4) Whether a rerun prints the full first-install screen (Z2), and whether moving only `config.json` or only `ca.pem` aside lets the same command succeed (Y6, Z4) | The `install-rerun` and trust screens show it | mashctl lane (ctl) and mash core | in a container, kill an install between the CA copy and the credentials, rerun and compare the screen; then move each file aside in turn and rerun |
+| (f5) The probe's "no responders" behaviour | It would make the one-address `online` check cost milliseconds | mash core | in an in-process test server with the production permission set, send a request to `agents.status.<owner>.<group>.<name>` with nothing serving; time the error |
+| (f6) Certificate fields (end date, issuer, the cause of a refusal) | The trust screens and a possible expiry warning name them | mash core | in a test server with a real certificate, read the fields with Go's x509 package and capture the error text for a wrong CA, a wrong host name and an expired certificate |
+| (f7) Two-owner isolation: another owner's endpoints cannot answer a probe, and `mash who` lists other owners' records | The `endpoint status` pattern never crosses owners; N13 says what the directory holds | mash core | a test server with the production permissions and two owners; try the probe and the directory read from each side |
+| (f8) Cluster behaviour (more than one server) | ADR 0066 measured three servers, the maintainer runs one; a cluster needs a sentence about replicas | mash core | a three-server test cluster; run `mash status`, `server status` and a send; read the stream's `cluster.leader` |
+| (f9) Reserved storage (125MB in the run) | Not shown on any screen until it is known what counts toward it | mash core | create inboxes in a test server and compare the account figures before and after |
+| (g) The tombstone route of `mash read` (the route 0.5.6 keeps): a running serve acks within 250 ms; a starting serve acks on redelivery; the spool folder exists only where a session has run on this machine; tombstones of expired messages are pruned | The mailbox row's truth (the count drops when a session starts) depends on it; with no spool folder a read cannot be marked | mash core | in a test: `mash read` with serve running, with serve stopped then started, and on a machine where no session has run (what does `mash read` say?); expire a message and look for the leftover file |
+| (h) The wording the built code gives to the refusals and fixes the targets wrote (Z4, Z10, Z15, Z16, the `checked` line) | The targets' `fix:` text is the target; the built text wins where they differ | mash core, mashctl lane | run each refusal block against the built binary and diff the output against the packet |
+| (i) A hook that exits 2 against Claude Code's hook documentation (N6) | The plain-URL refusal makes `hook` exit 1, where it exits 0 today | mash core | read the hook documentation and run a hook that exits 1 and 2 in a session; see whether either blocks |
+| (j) The age trigger's direct get from a shell (REQ-015, rev 26): that the endpoint's own credentials can `DIRECT.GET` its own inbox stream by sequence (`internal/admin/permissions.go:70-71` grants `DIRECT.GET.<inbox>` and `.>`, read and not run); what the get returns when the sequence after the consumer's ack floor was evicted (the next stored message, or a refusal); that the stream's stored time is the time the server stored it and a restart's redelivery keeps it; how far a skewed local clock moves the age | The shell's `mash status` age, and the serve-side tracker's `At`, rest on them; the contract wants the server's stored time, not the time serve first saw the message | mash core | in a test server with the production permission set: store a message, wait, read the stored time with a direct get made with the endpoint's own credentials; evict the message at the floor and repeat; restart serve and compare the age; set the local clock a few minutes off and compare with `clock_offset_seconds` |

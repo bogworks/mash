@@ -65,10 +65,11 @@ whatever the person would answer; the confirmation comes after that and before
 any connection that carries the key or token (a "no" means the server never
 sees an authentication attempt); a later install writes its credentials under a
 temporary name and renames it last. (3) REQ-015's count STAYS
-pending plus ack-pending, and DELIVERY ACKNOWLEDGES: a message shown in full,
-read with the `read` tool or read with `mash read` is acknowledged and lowers
-the count; a digest line does not acknowledge and still counts (section 5b
-says which code changes). (4) A backlog already over the limit when `mash
+pending plus ack-pending, and DELIVERY ACKNOWLEDGES: a message shown in full or
+read with the `read` tool is acknowledged and lowers the count; `mash read`
+from a shell marks it read here and the count drops when a session next runs
+(a direct acknowledgement is not in 0.5.6); a digest line does not
+acknowledge and still counts (section 5b says which code changes). (4) A backlog already over the limit when `mash
 serve` starts wakes once, 10 minutes after the start, if it is still over; the
 cooldown starts at the start of `mash serve`. A `mailbox_limit` of 0 keeps
 showing the count (`3 waiting, no limit set`, rev 21). No product code.
@@ -310,7 +311,9 @@ owner `acme`, the group `release-pipeline` (16 characters) and the names
   checked says `not checked` in its row. The MAILBOX row (REQ-015, R22) is
   `<n> waiting`, `<n> waiting, OVER THE LIMIT OF <limit>` (a warning),
   `<n> waiting, no limit set` when `mailbox_limit` is 0 (the count is still
-  shown, contract rev 21), or `not checked` wherever the count cannot be
+  shown, contract rev 21), `<n> waiting, oldest 1h 12m, OVER THE AGE LIMIT OF
+  1h` when the oldest message is past `mailbox_age` (a warning too; the wake time
+  is on the row's second line), or `not checked` wherever the count cannot be
   known (no credentials, the server not reached or not asked, the credentials
   refused); it is last because it needs the credentials above it. The verdict is
   `<endpoint>: mail works.`, `<endpoint>: mail works (1 warning).` or
@@ -326,8 +329,10 @@ owner `acme`, the group `release-pipeline` (16 characters) and the names
   with `none`, `missing` or `not set` where a value is absent: `config file`,
   `ca`, `credentials file`, `endpoint`, `chosen by` and `mailbox limit` (`15
   (the default)`, `40 ("mailbox_limit" in config.json)`, `40
-  (MASH_MAILBOX_LIMIT)` or `no limit set`); the old facts (commit, counts, settings)
-  follow them, and a line `oldest waiting 12m ago` sits under the mailbox row
+  (MASH_MAILBOX_LIMIT)` or `no limit set`), whose second line is the age limit
+  (`age 1h (the default)`, `age 2h ("mailbox_age" in config.json)`, `age 2h
+  (MASH_MAILBOX_AGE)` or `no age limit set`); the old facts (commit, counts,
+  settings) follow them, and a line `oldest waiting 12m ago` sits under the mailbox row
   when something waits. The CA is its OWN row: `ca  <path>`, or `ca  not set`
   when there is no configuration.
 
@@ -335,7 +340,8 @@ owner `acme`, the group `release-pipeline` (16 characters) and the names
   times use a 24-hour clock and a date in `--detail` (`2026-11-19 00:21 UTC`);
   the time of a check in `status` is the local clock alone (`checked 09:42`).
   Durations and sizes are a number with its unit and no space (`2s`, `41ms`,
-  `14B`). Created things are "Created", written files are "wrote", files
+  `14B`); an age under an hour is `45s` or `12m`, from an hour it is `3h` or
+  `1h 12m` (the contract's own form), from a day `2d`. Created things are "Created", written files are "wrote", files
   copied are "copied", files left alone are "kept (unchanged)" (R20); a
   check `credential install` makes before it writes is "checked" (the
   token's account, the server's certificate and host name, that the server
@@ -504,11 +510,15 @@ owner `acme`, the group `release-pipeline` (16 characters) and the names
 - R22 (REWRITTEN, DRAFT10; contract rev 21, REQ-015) The mailbox. Each endpoint
   has a backlog limit, the config key `mailbox_limit` (environment
   `MASH_MAILBOX_LIMIT`): a whole number from 0 to 1000, default 15, 0 = `no
-  limit set`. The backlog is UNACKED: the inbox consumer's pending plus
+  limit set`. A second setting, `mailbox_age` (`MASH_MAILBOX_AGE`), is the age
+  limit (rev 26, Randy: configurable, default 1 hour): `30m`, `1h`, `2d`, from
+  1m to 30d, default `1h`, `0` = `no age limit set`. The backlog is UNACKED: the inbox consumer's pending plus
   delivered-and-not-acknowledged messages (`NumPending + NumAckPending`).
   DELIVERY ACKNOWLEDGES, so reading lowers the count: a message shown in full
-  in the session's hook context, read with the `read` tool or read with `mash
-  read` is acknowledged and stops waiting; a DIGEST line only lists a message,
+  in the session's hook context or read with the `read` tool is acknowledged
+  and stops waiting; `mash read` from a shell marks it read here, and the
+  count drops when the next session starts (a running session acks it within
+  250 ms); a DIGEST line only lists a message,
   does not acknowledge it, and the message still counts (O1, O2; section 5b
   says which code changes). Past the limit `mash serve` wakes the session,
   whatever the kind, with the one line `mash: <n> messages waiting (limit
@@ -520,7 +530,11 @@ owner `acme`, the group `release-pipeline` (16 characters) and the names
   restart, or a crash loop, never wakes sooner than 10 minutes after the
   start (F15-5, R16-5). A backlog already over the limit when `mash serve`
   starts wakes ONCE, at 10 minutes after the start, if it is still over then
-  (rev 19; the same line, the same cooldown). `mash endpoint status` shows no
+  (rev 19; the same line, the same cooldown). The same wake also fires when the
+  OLDEST waiting message, by the time the server stored it, is older than
+  `mailbox_age`, whatever the count, under the same cooldown and the same start
+  hold (the line and the row say which limit was passed: `serve-backlog-age`,
+  `status-mailbox-age-over`). `mash endpoint status` shows no
   mailbox column: an endpoint's credentials can read only its own inbox, so the
   count is shown only by that endpoint's own `mash status` (F15-8, rev 26).
   `mash status` shows a mailbox row on
@@ -528,7 +542,7 @@ owner `acme`, the group `release-pipeline` (16 characters) and the names
   as a warning (verdict `mail works (1 warning)`, exit 0), `<n> waiting, no
   limit set`, or `not checked`; `--detail` adds the limit and where it came
   from, and the oldest age; the MCP `status` carries `mailbox {waiting, limit,
-  oldest_age, over_limit}`. No SAP protocol change (BND-002): the count is
+  oldest_age, age_limit, over_limit, over_age_limit, woke_at}`. No SAP protocol change (BND-002): the count is
   mash's own.
 
 Conventions in the mockups: `$` marks a typed command; lines after it are
@@ -669,21 +683,26 @@ variables read there).
 | `server` | `MASH_SERVER` | the server address, `tls://myserver:4222` | RENAMED from `url` / `MASH_URL` (this draft's decision, N8) |
 | `ca` | `MASH_CA` | the file of the CA that signed the server's certificate | RENAMED from `tls_ca` / `MASH_TLS_CA` (N8) |
 | `mailbox_limit` | `MASH_MAILBOX_LIMIT` | how many unacknowledged messages may wait before `mash serve` wakes the session (REQ-015): a whole number from 0 to 1000, default 15, 0 = off | NEW |
+| `mailbox_age` | `MASH_MAILBOX_AGE` | how old the oldest waiting message may be before `mash serve` wakes the session, the same wake and cooldown as the count (REQ-015): `30m`, `1h` or `2d` (whole number and unit m, h or d), 1m to 30d, default `1h`, `0` = off | NEW |
 | (none) | `MASH_CONFIG_DIR` | the directory of config.json and credentials | unchanged |
 | (none) | `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION` | allow a plain `nats://` connection, for that run only (R18) | REPLACES `MASH_INSECURE_PLAINTEXT` (Randy: "Just put it in their face."; the old name is gone, no alias); the `insecure_plaintext` key stays REMOVED |
 
-`MASH_MAILBOX_LIMIT` is added beside the key because the other wake setting
+`MASH_MAILBOX_LIMIT` and `MASH_MAILBOX_AGE` are added beside the keys because the other wake setting
 already has both forms (`idle_wake` and `MASH_IDLE_WAKE`,
 `internal/config/config.go:96` and `:414`); an agent or a test can set it for
 one run, and the environment wins over the file, as for every setting. The
 range is a decision of this draft (O4, section 5b): above 1000 `mash serve`
 cannot count, because the consumer delivers at most 1000 unacked messages.
-With 0 the row still shows the count (`3 waiting, no limit set`, rev 21).
+With 0 the row still shows the count (`3 waiting, no limit set`, rev 21). `mailbox_age` is a string in config.json
+(`"mailbox_age": "2h"`; a bare `0` is also read), is refused outside 1m to 30d (a bare number other than 0 has
+no unit and is refused), and is shown in `--detail` as `age 1h (the default)`, `age 2h ("mailbox_age" in config.json)`,
+`age 2h (MASH_MAILBOX_AGE)` or `no age limit set`. 0 turns only the age wake off; the count wake is the other
+setting's.
 
 What mash writes, reads and ignores (the names agreed with the mashctl lane,
 not yet ratified: X15). mash WRITES `server` and `ca` to `config.json` (on the
-first install) and never `endpoint`, `owner` or `mailbox_limit`; it READS
-`server`, `ca`, `endpoint` and `mailbox_limit`. When mashctl keeps its settings
+first install) and never `endpoint`, `owner`, `mailbox_limit` or `mailbox_age`; it READS
+`server`, `ca`, `endpoint`, `mailbox_limit` and `mailbox_age`. When mashctl keeps its settings
 in the same file, mash IGNORES mashctl's own keys (`owner`, `account`,
 `admin_credentials`, `system_credentials`, `keys`) and neither tool removes the
 other's.
@@ -713,7 +732,9 @@ a row of `--detail` and is said on the choice screens.
 A `config.json` that still has the removed `insecure_plaintext` key is
 refused, not ignored (R18, `send-refuse` below). A `mailbox_limit` that is not
 a whole number from 0 to 1000 is refused the same way (`mailbox-limit-refuse`
-below). `mash credential install` knows the address from the token, so `mash
+below), and so is a `mailbox_age` that is not `0` or a whole number with m, h or
+d from 1m to 30d (`error: config.json: mailbox_age must be 0 or from 1m to
+30d, such as 30m or 2h.`, the same `fix:`). `mash credential install` knows the address from the token, so `mash
 status` right after it needs no variable. `credential install` writes `server`
 and `ca` into `config.json` (last, R20) and never writes `endpoint`: choosing an
 endpoint is a decision, not a side effect. On the first install the server is
@@ -735,7 +756,7 @@ fix: change the mailbox_limit line in ~/.config/mash/config.json (0 turns
     "mailbox_limit": 15
 ```
 
-`mash help` documents `MASH_ENDPOINT` and `MASH_MAILBOX_LIMIT` (section 5,
+`mash help` documents `MASH_ENDPOINT`, `MASH_MAILBOX_LIMIT` and `MASH_MAILBOX_AGE` (section 5,
 help).
 
 ## 4. Key and credential flow
@@ -2076,6 +2097,7 @@ acme.demo.bob: mail works.
   endpoint          acme.demo.bob
   chosen by         the only one installed here
   mailbox limit     15 (the default)
+                    age 1h (the default)
 
   commit        e389eaf
   token expires never
@@ -2094,7 +2116,8 @@ when no endpoint is known and `not set` when none is chosen); `endpoint` (the
 address, `not set`) and `chosen by`, in one of four fixed phrases:
 `MASH_ENDPOINT`, `"endpoint" in config.json`, `the only one installed here`
 (REQ-009) or `not set`; and `mailbox limit` (`15 (the default)`, `40
-("mailbox_limit" in config.json)`, `40 (MASH_MAILBOX_LIMIT)` or `no limit set`, R22).
+("mailbox_limit" in config.json)`, `40 (MASH_MAILBOX_LIMIT)` or `no limit set`, R22), with a second line for the
+age limit (`age 1h (the default)`, `age 2h ("mailbox_age" in config.json)`, `age 2h (MASH_MAILBOX_AGE)` or `no age limit set`; the row count stays six).
 The CA is named by its file in the `ca` row; its fingerprint is not on the
 status screens (it is shown by the first install and by mashctl, R15). The
 `settings` row names every `MASH_*` variable that is set, never its value, so
@@ -2184,6 +2207,7 @@ acme.demo.bob: mail works (1 warning).
   endpoint          acme.demo.bob
   chosen by         the only one installed here
   mailbox limit     15 (the default)
+                    age 1h (the default)
 
 warning: 22 messages are waiting for acme.demo.bob, and the oldest has
          waited 12m. mash serve wakes the session at most every 10 minutes
@@ -2191,6 +2215,48 @@ warning: 22 messages are waiting for acme.demo.bob, and the oldest has
 fix: have the session read its mail. To change the limit, add this line to
      ~/.config/mash/config.json (0 turns the check off):
     "mailbox_limit": 40
+```
+
+The age limit is the second way a mailbox backs up (REQ-015, rev 26): the
+oldest waiting message is older than `mailbox_age` (`1h` unless set), however
+few wait. The row says how many, how old the oldest is and that the AGE limit
+is passed, and when mash woke the session (second line of the row, from the
+lease's `backlog_woke_at`; `no wake yet` before the first, `no session to wake`
+with no session); the warning says what the age limit is, in the words of the
+count's: the age that triggers a wake. If the count is over too, the row is `22
+waiting, OVER THE LIMIT OF 15 AND THE AGE LIMIT OF 1h` and its second line
+`oldest 1h 12m (woke the session at 09:40)`:
+
+<!-- packet: status-mailbox-age-over -->
+```
+$ mash status
+acme.demo.bob: mail works (1 warning).
+
+  version       0.5.6
+  server        tls://localhost:4222
+                alive, encrypted (checked 09:42)
+  config        ok
+  credentials   ok
+  mailbox       3 waiting, oldest 1h 12m, OVER THE AGE LIMIT OF 1h
+                (woke the session at 09:40)
+
+warning: 3 messages are waiting for acme.demo.bob, and the oldest has
+         waited 1h 12m. The age limit, 1h, is the age that triggers a wake:
+         a note mash sends an idle session to say mail is waiting. It sends
+         one at most every 10 minutes while the oldest message is older
+         than that.
+fix: have the session read its mail. To change the age limit, add this
+     line to ~/.config/mash/config.json (0 turns the age check off):
+    "mailbox_age": "2h"
+```
+
+With `mailbox_age` 0 (`--detail`, the rows under the mailbox limit; no age is
+compared and the age never wakes the session; the default screen has nothing to
+say, as for the other limit):
+
+```
+  mailbox limit     15 (the default)
+                    no age limit set
 ```
 
 When `mailbox_limit` is 0 the check is off: the row shows the count and then
@@ -2263,6 +2329,7 @@ mail does NOT work: mash has no configuration on this machine.
   endpoint          not set
   chosen by         not set
   mailbox limit     15 (the default)
+                    age 1h (the default)
 
 fix: install your key and the token you were sent. Give the server address
      and the CA file whoever runs your mash server sent you:
@@ -2316,6 +2383,7 @@ mail does NOT work: 2 endpoints are installed here and none is chosen.
   endpoint          not set
   chosen by         not set
   mailbox limit     15 (the default)
+                    age 1h (the default)
 
 fix: mash never guesses between them. To use acme.demo.alice (or
      acme.demo.bob), add this line to ~/.config/mash/config.json:
@@ -2442,6 +2510,7 @@ acme.demo.bob: mail does NOT work: the server did not answer within 2s.
   endpoint          acme.demo.bob
   chosen by         the only one installed here
   mailbox limit     15 (the default)
+                    age 1h (the default)
 
 fix: check that the server is running and that "server" in
      ~/.config/mash/config.json is right.
@@ -2498,6 +2567,7 @@ acme.demo.bob: mail does NOT work: the server refused its credentials.
   endpoint          acme.demo.bob
   chosen by         MASH_ENDPOINT
   mailbox limit     15 (the default)
+                    age 1h (the default)
 
 fix: ask whoever runs your mash server which of the two it was. If the key
      was reissued, move the old credentials aside, then install the new key
@@ -2557,6 +2627,7 @@ acme.demo.bob: mail does NOT work: this endpoint was DELETED on the server.
   endpoint          acme.demo.bob
   chosen by         "endpoint" in config.json
   mailbox limit     15 (the default)
+                    age 1h (the default)
 
 fix: its address cannot be used again. For a new endpoint, make a new key,
      then give its .pub file to whoever runs your mash server:
@@ -3187,10 +3258,10 @@ only the sender's own text is inside the `> ` quote, and nothing mash adds
 ever is; `NEXT:` appears only when the message is a `question` or a
 `blocker` from a different endpoint (a `message`, `fyi`, `result` or `task`
 needs no answer from here) and it links the reply with `--reply-to` (N2);
-`--detail` keeps the `NEXT:`; reading acknowledges the message, so it stops
-waiting and lowers the mailbox count (contract rev 21; today `mash read` never
-acknowledges, section 5b says which code changes; the `state` row of `--detail`
-shows the change). The printed command with long
+`--detail` keeps the `NEXT:`; reading marks the message read here, and the mailbox count
+drops when the next session starts, or within 250 ms of a running session's
+serve (contract rev 26; today `mash read` marks nothing, section 5b says which
+code changes; the `state` row of `--detail` shows the change). The printed command with long
 names is wider than 80 columns and exempt (R9, L10).
 
 ### mash who
@@ -3492,16 +3563,22 @@ When the messages delivered to this endpoint's inbox and not yet acknowledged
 messages (`fyi` and `result` included, which the idle wake never wakes for),
 with ONE line, sent as the same channel event the idle wake uses.
 Acknowledgement is delivery: a message the hook shows in full, or that the
-`read` tool or `mash read` reads, is acknowledged and stops counting; a message
+`read` tool reads, is acknowledged and stops counting; one that `mash read`
+reads is marked read here and stops counting when a session runs; a message
 only named in a digest line stays unacknowledged and counts. The cooldown is
 per endpoint and runs from the last wake: at most one wake in 10 minutes,
-whatever the count does in between (a drain and a refill does not wake again);
-after 10 minutes, still over the limit, it wakes once more. The clock starts
+whatever the count does in between (a drain and a refill does not wake again).
+For the count: after 10 minutes, still over the limit, it wakes once more.
+The age trigger (rev 26, Randy) is the same wake, under the same cooldown and
+start hold: it fires too when the OLDEST waiting message, by the time the
+server stored it, is older than `mailbox_age` (default 1 hour, 0 = off),
+however few wait. The clock starts
 when `mash serve` starts and is not kept across a restart: a restart, or a
 crash loop, never wakes sooner than 10 minutes after the start. A backlog that
 is already over the limit at the start wakes ONCE, at 10 minutes after the
 start, if it is still over then (rev 19; the same line, the same cooldown).
-With `mailbox_limit` 0 nothing is sent. The line is the contract's:
+With `mailbox_limit` 0 the count never wakes (the age still does, unless
+`mailbox_age` is 0 too; both 0 sends nothing). The line is the contract's:
 
 <!-- packet: serve-backlog -->
 ```
@@ -3514,6 +3591,27 @@ current ones):
 <!-- packet: serve-backlog -->
 ```
 mash: 31 messages waiting (limit 15), oldest 22m
+```
+
+When the oldest message is past the age limit the line says so, whether or not
+the count is also over (the `(limit 15)` beside the number shows that; one
+line, at most 80 columns even at 1000 waiting; the clause is `over the age
+limit of ` and the setting as written, `1h`). The lead's wording for the age
+alone, then both passed, then with `mailbox_limit` 0 (no `(limit ...)`):
+
+<!-- packet: serve-backlog-age -->
+```
+mash: 3 messages waiting (limit 15), oldest 1h 12m, over the age limit of 1h
+```
+
+<!-- packet: serve-backlog-age -->
+```
+mash: 22 messages waiting (limit 15), oldest 1h 12m, over the age limit of 1h
+```
+
+<!-- packet: serve-backlog-age -->
+```
+mash: 3 messages waiting, oldest 1h 12m, over the age limit of 1h
 ```
 
 With a limit of 5 the same line reads `mash: 6 messages waiting (limit 5),
@@ -3661,9 +3759,13 @@ Settings (the environment wins for one run, and mash says so on every status)
   MASH_MAILBOX_LIMIT       wake the session when this many messages wait
                            unacknowledged: 15 by default, 0 for never
                            (config.json: "mailbox_limit")
+  MASH_MAILBOX_AGE         wake the session when the oldest waiting message
+                           is this old, such as 30m or 2h: 1h by default, 0
+                           for never (config.json: "mailbox_age")
   MASH_CONFIG_DIR          the folder of config.json and credentials
                            (config.json keys: server, ca, endpoint,
-                           mailbox_limit; other keys are ignored)
+                           mailbox_limit, mailbox_age; other keys are
+                           ignored)
   MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION
                            set to 1, for one run, to allow an unencrypted
                            nats:// server: test servers only; an agent must
@@ -4033,10 +4135,12 @@ first `mash credential install` (section 4) and by mashctl for the operator.
 
 DECIDED, the lead (contract rev 16 and rev 21): the count is UNACKED, the inbox
 consumer's pending plus delivered-and-not-acknowledged messages, and DELIVERY
-ACKNOWLEDGES: a message shown in full in the session's hook context, read with
-the `read` tool or read with `mash read` is acknowledged and no longer counts;
-a DIGEST line lists a message, does not acknowledge it, and the message still
-counts. So reading lowers the count, and a digest line does not. (The
+ACKNOWLEDGES: a message shown in full in the session's hook context or read with
+the `read` tool is acknowledged and no longer counts; `mash read` marks the
+message read here and it no longer counts when a session runs (not at once:
+no direct acknowledgement in 0.5.6); a DIGEST line lists a message, does not
+acknowledge it, and the message still counts. So reading lowers the count, and
+a digest line does not. (The
 planner's earlier "not yet delivered" definition and the status-views page's
 DRAFT3 recommendation that a digest counts as delivered are both replaced by
 this ruling; the status-views page, DRAFT4, says the same.)
@@ -4116,8 +4220,9 @@ one). The age is printed with the unit and no space (R12: `45s`, `12m`, `3h`).
    still count as waiting here, because their bodies have not been shown.
    DECIDED (O1, the lead): they count, and a digest line does not acknowledge.
 3. READING IS A SHOWING, SO IT ACKNOWLEDGES (CHANGED, rev 21). The `read` tool
-   and `mash read` acknowledge the message they read, which lowers the count
-   (O2). Today they do not (`waking.go:21`, limit 1; the `read` tool acks only a
+   acknowledges the message it reads, which lowers the count; `mash read` does
+   it through the tombstone below, so with no session running the count drops
+   when the next session starts (O2). Today they do not (`waking.go:21`, limit 1; the `read` tool acks only a
    listed or hookless message and `mash read` never): the changes that make it
    so are listed below. `mash inbox` and the MCP `inbox` tool still never ack
    (ADR 0046): listing is not reading.
@@ -4208,7 +4313,21 @@ waiting (limit <limit>), oldest <age>`, with the meta key `backlog: true`;
 then at most one wake in 10 minutes per endpoint, counted from the last wake
 (a plain timer, not the doubling backoff), whatever the total does in between
 (a drain and a refill does not wake again); once 10 minutes have passed and the
-total is still over the limit, one more. The clock starts when `mash serve`
+total is still over the limit, one more. THE AGE TRIGGER (contract rev 26, Randy;
+`mailbox_age`, default 1h, 0 = off) is a THIRD predicate on the same wake, with
+the same cooldown and start hold: the oldest unacked message, by the time the
+server stored it, is older than `mailbox_age`. BUILD PLAN: serve-side, one more
+test in `wakeIfIdle` (`internal/endpoint/hook.go:305-317`) beside the count
+and the byte tests, and the tracker (`waking.go:48`, `:144`) keeps the stream's
+stored time of each unread message (the mail's `At`, which a restart's
+redelivery keeps, so the age survives a restart; the clock for the wake does
+not), with a `min()` for the oldest. `mash status` from a shell (no session
+running) makes ONE extra direct get on its own inbox stream: the consumer's
+ack floor says which sequence is the oldest unacked, and the stored time is
+that message's. Its own credentials already allow it
+(`internal/admin/permissions.go:70-71`: `DIRECT.GET.<inbox>` and `.>`; read,
+not run: "Verify at build" (j)). No new SAP field, no new mechanism for a
+security read: it reads its own inbox only. The clock starts when `mash serve`
 starts, and the time of the last wake is held in memory (and written to the
 lease as `backlog_woke_at` for `mash status`): it does not survive a restart,
 so after a restart the first wake never comes sooner than 10 minutes after the
@@ -4226,9 +4345,11 @@ line is the same, and the read tool is how it clears the mail there.
   loop), which makes the definition one number everywhere. The alternative
   (ADR 0046's "listed mail never wakes again") needs serve-only knowledge and
   makes `mash status` read higher than the wake.
-- O2. DECIDED, the lead (rev 21): yes, reading acknowledges and so lowers the
-  count: the `read` tool and `mash read` (code changes 1 and 2 above); `mash
-  inbox` only lists and does not. (Rev 16 had ruled the opposite; rev 21 is
+- O2. DECIDED, the lead (rev 21, ruled again for 0.5.6): yes, reading
+  acknowledges and so lowers the count: the `read` tool at once, `mash read`
+  through the tombstone (code changes 1 and 2 above: with no session running,
+  the count drops when the next session starts; no direct acknowledgement in
+  0.5.6); `mash inbox` only lists and does not. (Rev 16 had ruled the opposite; rev 21 is
   binding.) Was: should `mash read` / `mash inbox` from a shell lower it?
 - O3. `mash inbox`'s `STATE` (`new` / `read`) does not exist in v0.5.5 (nothing
   in `internal/endpoint` or `cmd/mash` keeps a read state). It should use this
@@ -4476,7 +4597,10 @@ facts as the CLI's five rows.
 | `mailbox.waiting` | int or null | unacked messages of this inbox: pending plus ack-pending (section 5b); null when not checked | `0` | new (REQ-015) |
 | `mailbox.limit` | int | the limit, `mailbox_limit`; 0 means off | `15` | new |
 | `mailbox.oldest_age` | string or null | age of the oldest waiting message in R12's form; null when none waits or not checked | `"12m"` | new |
+| `mailbox.age_limit` | string | the age limit, `mailbox_age`, in R12's form; `"0"` means off | `"1h"` | new |
 | `mailbox.over_limit` | bool or null | `waiting` is past `limit`; false when the limit is 0; null when not checked | `false` | new |
+| `mailbox.over_age_limit` | bool or null | `oldest_age` is past `age_limit`; false when it is `"0"`; null when not checked | `false` | new |
+| `mailbox.woke_at` | string or null | when mash last woke the session for a backlog, from the lease's `backlog_woke_at`; null for none yet or no session | `null` | new |
 | `problems` | array | `{code, message, fix}` per problem | | new; replaces `Next:` text |
 | `detail` | object | only with `detail: true` | | below |
 
@@ -4491,8 +4615,8 @@ or `not set`: `config_path`, `ca_path` (`null` when there is no
 configuration), `credentials_path`, `endpoint` and `chosen_by` (`env`,
 `config`, `only_one`, or `null`; both repeat the top-level values, so `detail`
 stands alone), `server.address` (the same as the top-level `server.address`),
-and `mailbox_limit_from` (`default`, `config` or `env`; the limit itself is
-`mailbox.limit`). Then the facts: `group` (`{members, endpoints}`: the other
+and `mailbox_limit_from` and `mailbox_age_from` (`default`, `config` or `env`; the
+limits themselves are `mailbox.limit` and `mailbox.age_limit`). Then the facts: `group` (`{members, endpoints}`: the other
 endpoints in the group and the endpoints of the owner), `settings` (the
 `MASH_*` variables that are set), `answered_ms`, `key` (storage name),
 `name_rule`, `clock_offset_seconds`, `relay_trace` (`{inbound_via, quick_sends,
@@ -4513,7 +4637,8 @@ says it.
   "config": { "state": "ok" },
   "credentials": { "state": "ok" },
   "mailbox": { "waiting": 0, "limit": 15, "oldest_age": null,
-               "over_limit": false },
+               "age_limit": "1h", "over_limit": false,
+               "over_age_limit": false, "woke_at": null },
   "problems": [] }
 ```
 
@@ -4529,7 +4654,8 @@ Failure example (credentials refused):
   "config": { "state": "ok" },
   "credentials": { "state": "problem" },
   "mailbox": { "waiting": null, "limit": 15, "oldest_age": null,
-               "over_limit": null },
+               "age_limit": "1h", "over_limit": null,
+               "over_age_limit": null, "woke_at": null },
   "problems": [ { "code": "credentials_refused",
     "message": "deleted, or its key was reissued",
     "fix": "ask whoever runs your mash server which it was" } ] }
@@ -4547,7 +4673,8 @@ With `detail: true` (the same server and rows as the CLI's `--detail`):
   "config": { "state": "ok" },
   "credentials": { "state": "ok" },
   "mailbox": { "waiting": 0, "limit": 15, "oldest_age": null,
-               "over_limit": false },
+               "age_limit": "1h", "over_limit": false,
+               "over_age_limit": false, "woke_at": null },
   "problems": [],
   "detail": {
     "config_path": "/home/bob/.config/mash/config.json",
@@ -4555,7 +4682,7 @@ With `detail: true` (the same server and rows as the CLI's `--detail`):
     "credentials_path": "/home/bob/.config/mash/acme.demo.bob.creds",
     "endpoint": "acme.demo.bob", "chosen_by": "only_one",
     "server": { "address": "tls://localhost:4222" },
-    "mailbox_limit_from": "default",
+    "mailbox_limit_from": "default", "mailbox_age_from": "default",
     "commit": "e389eaf", "answered_ms": 41 } }
 ```
 
@@ -4571,7 +4698,25 @@ Mail backing up (22 waiting over a limit of 15; `ok` stays true):
   "config": { "state": "ok" },
   "credentials": { "state": "ok" },
   "mailbox": { "waiting": 22, "limit": 15, "oldest_age": "12m",
-               "over_limit": true },
+               "age_limit": "1h", "over_limit": true,
+               "over_age_limit": false, "woke_at": "2026-11-19T09:40:11Z" },
+  "problems": [] }
+```
+
+Oldest message past the age limit (3 waiting, `ok` stays true):
+
+```
+{ "endpoint": "acme.demo.bob", "ok": true, "version": "0.5.6",
+  "chosen_by": "only_one",
+  "server": { "address": "tls://localhost:4222", "state": "alive",
+              "encrypted": true, "plaintext_override": false,
+              "checked_at": "2026-11-19T09:42:11Z",
+              "last_reached": "2026-11-19T09:42:11Z" },
+  "config": { "state": "ok" },
+  "credentials": { "state": "ok" },
+  "mailbox": { "waiting": 3, "limit": 15, "oldest_age": "1h 12m",
+               "age_limit": "1h", "over_limit": false,
+               "over_age_limit": true, "woke_at": "2026-11-19T09:40:11Z" },
   "problems": [] }
 ```
 
@@ -4647,10 +4792,11 @@ the same plain voice, rewritten as short lines of at most 80 columns:
   either, and never edits Claude Code's settings (REQ-011 (iii); contract rev
   17, R16-1, R16-3). No tool, field or error code changes for REQ-011.
 - It says that a channel line `mash: <n> messages waiting (limit <limit>),
-  oldest <age>` means the mailbox is over its limit: read the inbox with the
-  `inbox` and `read` tools; and that the limit is the person's setting, not the
+  oldest <age>` (and, from the age trigger, `, over the age limit of <age>`)
+  means the mailbox is over its limit: read the inbox with the
+  `inbox` and `read` tools; and that the limits are the person's settings, not the
   agent's (REQ-015). Reading a message with `read` acknowledges it and lowers
-  the count; a digest line does not. `status` returns the same count as
+  the count (the shell's `mash read` lowers it when a session runs); a digest line does not. `status` returns the same count as
   `mailbox`.
 - The paragraph on delivery by hook keeps its meaning and drops the
   `PostToolUse`/`UserPromptSubmit` names (the model does not choose them).

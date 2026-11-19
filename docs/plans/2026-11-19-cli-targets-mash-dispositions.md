@@ -945,3 +945,22 @@ the end of this work (the newest in `masterplanner/for-herds/mash-0.5.6/`).
 
 Packet keys added: none. Removed: none (one `install-refuse` block is out, a
 block and not a key).
+
+## DRAFT5c: the age trigger (Randy, 11:30Z)
+
+Source: the lead's brief after Randy said yes ("configurable but defaults to
+like 1 hour... not a high priority") and the contract, rev 26, REQ-015 (the file
+updated about 11:29Z; downloaded at the start and at the end of this work).
+Targets: `docs/plans/2026-11-19-cli-targets-mash.md`; status views DRAFT5c.
+
+| # | item | disposition | where |
+|---|---|---|---|
+| D5c-1 | Config `mailbox_age`, default 1h, 0 = off; env `MASH_MAILBOX_AGE`, the same family as `mailbox_limit` | FIXED | targets section 3 (table, form, range, refusal text), R22, help-settings, Z24 (a) |
+| D5c-2 | Wake line over the age limit: `mash: <n> messages waiting (limit 15), oldest 1h 12m, over the age limit of 1h`; both limits: one line | FIXED | `serve-backlog-age` (three blocks), section 5 wake text, Z24 (c) |
+| D5c-3 | Mailbox row for the over-age case, with the wake time in the row; `fix:`; the "limit" words for age | FIXED | `status-mailbox-age-over` in the targets and in the status-views page; Z24 (d) |
+| D5c-4 | `mailbox_age` 0 in `--detail` and the settings text | FIXED | second line of the `mailbox limit` row in every `--detail` block (`age 1h (the default)`, `no age limit set`), help-settings |
+| D5c-5 | MCP `mailbox {waiting, limit, oldest_age, age_limit, over_limit, over_age_limit, woke_at}` | FIXED | targets section 6 (field table, five JSON examples, detail `mailbox_age_from`), status-views JSON block |
+| D5c-6 | Status views 4.4: the age predicate, the build plan | FIXED | 4.4 item 5; the table row of section 10 |
+| D5c-7 | Does the endpoint's own credentials allow a direct get on its own inbox stream by sequence | READ, NOT RUN | `internal/admin/permissions.go:70-71` grants `DIRECT.GET.<inbox>` and `.>`; "Verify at build" (j) |
+
+Packet keys added: `serve-backlog-age`, `status-mailbox-age-over`. Removed: none.
