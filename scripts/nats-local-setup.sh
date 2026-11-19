@@ -83,7 +83,9 @@ create is the default. Run it as your own user, not root: it refuses root
   --operator NAME  operator name (default mash-operator)
   --js-disk SIZE   JetStream disk, like 500M or 2G (default 2G)
   --start          with create: start the server afterwards. Alone: start
-                   the server of an existing setup
+                   the server of an existing setup. Each start keeps the
+                   last two server.log files (server.log, server.log.1);
+                   the log is kept at most 7 days
   --stop           stop the server recorded in DIR/server.pid
   --check          verify files, modes, tools, config, TLS and what listens
   --upgrade        install this script's pinned nats-server and nsc
@@ -99,7 +101,8 @@ create is the default. Run it as your own user, not root: it refuses root
   --disable-boot   removes that unit file (typed confirmation)
   --remove         removes DIR (and the unit file, if this script made one);
                    typed confirmation; only a directory this script made,
-                   found by DIR/.mash-nats-setup
+                   found by DIR/.mash-nats-setup; refused until
+                   --retire-keys has run (it never removes live keys)
   --help           this text
 
 Before each write or remove the script re-resolves every parent directory and
@@ -429,11 +432,12 @@ case $OSID in *" debian "* | *" ubuntu "*) ;; *)
         "${OSID:-nothing})" ;;
 esac
 case $MODE in
-create | upgrade) NEED='curl tar unzip openssl sha256sum ss' ;;
+create | upgrade) NEED='curl tar unzip openssl sha256sum ss find' ;;
 check) NEED='openssl sha256sum ss' ;;
 backup) NEED='tar sha256sum' ;;
 retire-keys) NEED='tar sha256sum diff find' ;;
-start | stop | enable-boot | disable-boot | remove) NEED='sha256sum' ;;
+start) NEED='sha256sum find' ;;
+stop | enable-boot | disable-boot | remove) NEED='sha256sum' ;;
 esac
 miss=''
 pk=''
@@ -675,8 +679,14 @@ unit_rm() { ( unit_cd && rm -f -- "$UNITNAME" ); }
 # Tool output goes to the temp file $LOG (mode 0600, removed on every exit),
 # never to a persistent log. On failure only a redacted tail is shown.
 VDIR=''
+BINMADE=0
 cleanup() {
     [ -z "$LOG" ] || rm -f -- "$LOG"
+    # an --upgrade that made bin/ and stopped before installing leaves it
+    # empty; remove it again (rmdir refuses a directory with anything in it)
+    if [ "$BINMADE" = 1 ] && [ -d bin ] && [ ! -L bin ]; then
+        rmdir bin 2>/dev/null || true
+    fi
     # VDIR is the exact relative name made by verify_archive in DIR (the
     # directory this process is in); it holds secrets.
     if [ -n "$VDIR" ] && [ -d "$VDIR" ] && [ ! -L "$VDIR" ]; then
@@ -813,6 +823,24 @@ srv_stop() {
     did "stopped pid $_p"
 }
 
+# rotate_log: on every start keep only server.log.1 (the previous
+# server.log, renamed, so it keeps its 0600) and the new server.log, and
+# delete any server.log* in DIR (regular files you own, nothing followed)
+# not written for 7 days (10080 minutes). Nothing outside DIR is touched.
+rotate_log() {
+    chkdir
+    if [ -e server.log ] || [ -L server.log ]; then
+        { [ -f server.log ] && [ ! -L server.log ] &&
+            [ "$(uid_of server.log)" = "$ME" ]; } ||
+            die "server.log is not a regular file of yours: not touching" \
+                "it (nothing was started)"
+        mv -f -- server.log server.log.1
+    fi
+    find . -maxdepth 1 -type f -user "$ME" -name 'server.log*' \
+        -mmin +10080 -delete ||
+        die "could not delete old server logs in $DIR"
+}
+
 # srv_start: start the server (boot unit or detached) and wait for TLS.
 srv_start() {
     _lp=$(conf_listen)
@@ -823,6 +851,7 @@ srv_start() {
         die "port $_h:$_pt is already taken by something else (nothing was" \
             "killed or changed): free it or recreate with another --port"
     fi
+    rotate_log
     if boot_ours; then
         sysd start "$UNITNAME"
     else
@@ -860,8 +889,13 @@ man_get() { # NAME FIELD(3|4) -> value
 # bin_problems: one line per problem with DIR/bin; returns 1 if any.
 bin_problems() {
     _bad=0
+    if [ ! -e bin ] && [ ! -L bin ]; then
+        echo "bin is missing (as after a restore from a backup): run" \
+            "--upgrade"
+        return 1
+    fi
     if [ ! -d bin ] || [ -L bin ]; then
-        echo "bin is missing or not a directory"
+        echo "bin is not a directory"
         return 1
     fi
     [ "$(uid_of bin)" = "$ME" ] || { echo "bin is not yours"; _bad=1; }
@@ -1181,7 +1215,18 @@ start)
     exit 0 ;;
 # ----------------------------------------------------------- --upgrade
 upgrade)
-    enter "$DIR"; CWDID=$(inode_of .); mklog; need_marker; need_bin
+    enter "$DIR"; CWDID=$(inode_of .); mklog; need_marker
+    if [ ! -e bin ] && [ ! -L bin ]; then
+        # only --upgrade accepts a missing bin (a restore from a backup,
+        # which leaves bin out): made exclusively, mode 0700, as at create
+        chkdir
+        mkdir -m 0700 bin
+        BINMADE=1
+        did "made $DIR/bin (mode 0700, yours): it was missing, as after" \
+            "a restore from a backup"
+    else
+        need_bin
+    fi
     if [ "$(man_get nats-server 3)" = "$NS_SHA" ] &&
         [ "$(man_get nsc 3)" = "$NSC_SHA" ]; then
         say "already current: nats-server $NS_VER and nsc $NSC_VER"
@@ -1192,6 +1237,7 @@ upgrade)
     was=$(srv_pid)
     if [ -n "$was" ]; then srv_stop; fi
     install_tools upgrade
+    BINMADE=0
     if [ -n "$was" ]; then srv_start; fi
     check_run || die "check: $fails problem(s)"
     exit 0 ;;
@@ -1371,6 +1417,12 @@ enable-boot | disable-boot)
 remove)
     enter "$DIR"; CWDID=$(inode_of .)
     need_marker
+    if { [ -e ca.key ] || [ -e nsc ] || [ -e export ]; } &&
+        [ ! -e .keys-retired ]; then
+        die "the CA key and signing keys are still here: run --retire-keys" \
+            "first (it archives them, checks the archive, then removes" \
+            "them); nothing was changed"
+    fi
     need_terminal "--remove"
     if [ -e "$UNITPATH" ] || [ -L "$UNITPATH" ]; then unit_prep; fi
     printf '\n'
@@ -1640,8 +1692,10 @@ wrap '' '' "Done. The setup is in $QDIR. Nothing above printed a seed or" \
     "a credential, and nothing below does."
 if [ "$LOOPBACK" -eq 1 ]; then
     printf '\n'
-    wrap '' '' "Other users on this machine can still reach $LISTEN:$PORT;" \
-        "they cannot connect without credentials."
+    wrap '' '' "Binding $LISTEN keeps the server off the network but does" \
+        "not limit it to you: every user on this machine can reach port" \
+        "$PORT. They cannot connect without credentials, read mail or make" \
+        "agents."
 else
     printf '\n'
     wrap '' '' "Exposed: $LISTEN:$PORT is reachable from other machines" \
@@ -1663,7 +1717,7 @@ file export/account.nk 'account seed (secret)'
 file ca.key 'CA private key (secret)'
 file nsc/ 'nsc store with all signing keys (secret)'
 if [ "$START" -eq 1 ]; then
-    file server.log 'server log (known-safe line shapes only)'
+    file server.log 'server log (the log is kept at most 7 days)'
     file server.pid 'server process id (--stop reads it)'
 fi
 
@@ -1733,4 +1787,4 @@ lc 'after adopt, move the offline-only secrets off this machine' \
 lc 'upgrade nats-server and nsc to the pinned versions' --dir "$DIR" --upgrade
 lc 'start it at boot (systemd user unit)' --dir "$DIR" --enable-boot
 lc 'stop starting it at boot' --dir "$DIR" --disable-boot
-lc 'remove it all' --dir "$DIR" --remove
+lc 'remove it all (after --retire-keys)' --dir "$DIR" --remove

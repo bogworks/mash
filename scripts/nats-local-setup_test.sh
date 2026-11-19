@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Test harness for scripts/nats-local-setup.sh.  Run it with:
 #
-#     bash scripts/nats-local-setup_test.sh [main] [osrel] [boot]
+#     bash scripts/nats-local-setup_test.sh [main] [osrel] [sec] [reach] [root] [boot]
 #
 # Every test runs inside throwaway rootless podman containers made from
 # debian:bookworm-slim (the helper's target OS); nothing is installed, started
@@ -17,6 +17,9 @@
 #   sec    path-swap rechecks (device:inode), the server-log allowlist,
 #          --retire-keys archive verification (partial, truncated and
 #          altered archives), and where each command writes
+#   reach  a second OS user (useradd in the container): can reach the
+#          listening port, cannot connect with NATS without credentials,
+#          cannot read DIR, server.log or mash-setup.json
 #   root   every subcommand refuses to run as root (podman exec --user root)
 #   boot   --enable-boot / --disable-boot against a real systemd user manager
 #          (systemd as PID 1 in the container), including a user-manager
@@ -51,7 +54,7 @@ IMG1=localhost/mash-natssetup-test-$RUNID$SFX
 IMG2=localhost/mash-natssetup-test-sd-$RUNID$SFX
 BUILT_IMG1=0
 BUILT_IMG2=0
-GROUPS_WANTED=${*:-main osrel sec root boot}
+GROUPS_WANTED=${*:-main osrel sec reach root boot}
 TOTAL_FAIL=0
 TOTAL_PASS=0
 
@@ -119,6 +122,131 @@ except ChildProcessError:
 sys.stdout.write(out.decode(errors='replace').replace('\r', ''))
 sys.exit(os.waitstatus_to_exitcode(st))
 __PTY_PY__
+
+cat >"$T/probe.py" <<'__PROBE_PY__'
+# probe.py MODE HOST PORT CA: what a local user's client sees on a NATS port.
+#   tcp    open a TCP connection, print "connected"
+#   tls    read INFO, TLS handshake (CA from the file), send CONNECT without
+#          credentials and a PING, print what comes back
+#   plain  read INFO, send CONNECT and a PING in plain text, print what
+#          comes back
+import json, socket, ssl, sys
+mode, host, port, ca = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]
+try:
+    s = socket.create_connection((host, port), timeout=5)
+except OSError as e:
+    print('connect-failed', e.__class__.__name__)
+    sys.exit(0)
+if mode == 'tcp':
+    print('connected')
+    sys.exit(0)
+s.settimeout(5)
+info = b''
+while not info.endswith(b'\n'):
+    d = s.recv(4096)
+    if not d:
+        break
+    info += d
+print('info-tls-required=%s' % ('"tls_required":true' in info.decode(
+    errors='replace')))
+if mode == 'tls':
+    ctx = ssl.create_default_context(cafile=ca)
+    try:
+        s = ctx.wrap_socket(s, server_hostname='localhost')
+    except (ssl.SSLError, OSError) as e:
+        print('handshake-failed', e.__class__.__name__)
+        sys.exit(0)
+    print('handshake-ok')
+    msg = b'CONNECT {"verbose":false,"pedantic":false,"tls_required":true,' \
+        b'"protocol":1}\r\nPING\r\n'
+else:
+    msg = b'CONNECT {"verbose":false,"pedantic":false}\r\nPING\r\n'
+try:
+    s.sendall(msg)
+except OSError:
+    print('closed-on-send')
+s.settimeout(3)
+got = b''
+try:
+    while True:
+        d = s.recv(4096)
+        if not d:
+            print('closed-by-server')
+            break
+        got += d
+except (socket.timeout, OSError):
+    pass
+t = got.decode(errors='replace')
+print('got-pong=%s' % ('PONG' in t))
+print('got-ok=%s' % ('+OK' in t))
+print('got-err=%s' % ('-ERR' in t))
+print('got-authz=%s' % ('uthori' in t or 'uthentic' in t))
+print('got-info=%s' % ('INFO' in t))
+__PROBE_PY__
+
+cat >"$T/bob.sh" <<'__BOB__'
+#!/usr/bin/env bash
+# Runs INSIDE the container as the SECOND OS USER (bob), who is not the
+# owner of the setup. Reads /tmp/reach-info (written by alice's reach-up).
+set -u
+. /tmp/reach-info
+PASSN=0
+FAILN=0
+pass() { printf 'PASS  %s\n' "$1"; PASSN=$((PASSN + 1)); }
+fail() { printf 'FAIL  %s%s\n' "$1" "${2:+  ($2)}"; FAILN=$((FAILN + 1)); }
+t() { if eval "$2"; then pass "$1"; else fail "$1" "$2"; fi; }
+P() { python3 -I /tmp/reach-probe.py "$@" 2>&1; }
+t "reach: this really is a second user, not alice" \
+    '[ "$(id -un)" = bob ] && [ "$(id -u)" != "$ALICEUID" ]'
+TGTS=("127.0.0.1 $PORT /tmp/reach-ca.pem"
+    "127.0.0.1 $PORT2 /tmp/reach-ca2.pem")
+[ -z "$EXTIP" ] || TGTS+=("$EXTIP $PORT2 /tmp/reach-ca2.pem")
+for tgt in "${TGTS[@]}"; do
+    # shellcheck disable=SC2086
+    set -- $tgt
+    case $1:$2 in
+    127.0.0.1:$PORT) lab="loopback-only server, 127.0.0.1:$PORT" ;;
+    127.0.0.1:$PORT2) lab="non-loopback server, 127.0.0.1:$PORT2" ;;
+    *) lab="non-loopback server, $1:$2" ;;
+    esac
+    r=$(P tcp "$1" "$2" "$3")
+    t "reach: every local user can reach a loopback port: bob opens TCP to the $lab" \
+        '[ "$r" = connected ]'
+    r=$(P tls "$1" "$2" "$3")
+    t "reach: bob's TLS handshake works ($lab) with the CA from a world-readable copy" \
+        'printf "%s\n" "$r" | grep -q "^handshake-ok"'
+    t "reach: bob cannot connect with NATS without credentials ($lab): error, no PONG" \
+        'printf "%s\n" "$r" | grep -q "^got-err=True" &&
+         printf "%s\n" "$r" | grep -q "^got-authz=True" &&
+         printf "%s\n" "$r" | grep -q "^got-pong=False" &&
+         printf "%s\n" "$r" | grep -q "^got-ok=False"'
+    # The helper never enables plain text; no plain-text override exists, so
+    # none is tested. nats-server announces tls_required in its plain INFO
+    # line (the helper reads that line); a plain-text client gets no +OK and
+    # no PONG, i.e. no session.
+    r=$(P plain "$1" "$2" "$3")
+    t "reach: plain text is refused ($lab): INFO says tls_required, no +OK, no PONG" \
+        'printf "%s\n" "$r" | grep -q "^info-tls-required=True" &&
+         printf "%s\n" "$r" | grep -q "^got-pong=False" &&
+         printf "%s\n" "$r" | grep -q "^got-ok=False"'
+done
+r=$(ls "$DIR" 2>&1); rc=$?
+t "reach: bob cannot list DIR (mode 0700)" \
+    '[ $rc -ne 0 ] && printf "%s" "$r" | grep -q "Permission denied"'
+for f in server.log mash-setup.json server.conf ca.key; do
+    r=$(cat "$DIR/$f" 2>&1); rc=$?
+    t "reach: bob cannot read DIR/$f" \
+        '[ $rc -ne 0 ] && printf "%s" "$r" | grep -q "Permission denied" &&
+         [ -z "$(printf "%s" "$r" | grep -v "Permission denied")" ]'
+done
+r=$(cat "$DIR/ca.pem" 2>&1); rc=$?
+t "reach: bob cannot read DIR/ca.pem either (the world-readable copy is alice's)" \
+    '[ $rc -ne 0 ]'
+t "reach: bob cannot create a file in DIR" \
+    '! touch "$DIR/bob-was-here" 2>/dev/null'
+printf '\nSUMMARY: %s passed, %s failed\n' "$PASSN" "$FAILN"
+[ "$FAILN" -eq 0 ]
+__BOB__
 
 cat >"$T/incont.sh" <<'__INCONT__'
 #!/usr/bin/env bash
@@ -227,6 +355,9 @@ ssl() { # ss -ltn to stdout, and into the transcript
 }
 nlisten() { ss -ltnH | grep -c LISTEN || true; }
 H() { "$HELPER" "$@"; }
+# snap DIR: a digest of every path, size and mode under DIR (not jetstream/)
+snap() { (cd "$1" && find . ! -path './jetstream*' -printf '%p %s %m\n' |
+    sort | md5sum); }
 
 group_main() {
 cd /home/alice || exit 1
@@ -243,6 +374,9 @@ t "help: names where each command writes, root refusal, residual" \
      has "--disable-boot   removes that unit file" &&
      has "--remove removes DIR (and the unit file, if this script
         made one)" && has "not root" && has "$RES"'
+t "help: the log is kept at most 7 days, --remove needs --retire-keys first" \
+    'has "the log is kept at most 7 days" &&
+     has "refused until --retire-keys has run"'
 run "$HELPER" --dir "$W/x1"
 t "create without --owner refused" \
     '[ $RC -ne 0 ] && has "needs --owner" && [ ! -e $W/x1 ]'
@@ -791,7 +925,10 @@ SEEDED=$(wc -l <"$D/server.log")
 run env PATH="$FK/sh:$PATH" "$FK/h-ns-run.sh" --dir "$D" --start
 t "F5 --start failure tail: rc!=0, server exited" \
     '[ $RC -ne 0 ] && has "server exited"'
-LEAKSKIP=server.log fclean "--start failure with canaries in server.log (seeded)"
+# the start rotates the seeded server.log to server.log.1 (skipped here, as
+# the seeded file was); the failing server's own server.log is now checked
+LEAKSKIP=server.log.1 fclean "--start failure with canaries in server.log (seeded)"
+SEEDED=0
 t "F5 server.log: nothing written after the seed holds a canary" \
     '[ "$(tail -n +$((SEEDED + 1)) $D/server.log | grep -c -E "$SEED|$JWTC|$PEMC|hunter2")" = 0 ]'
 t "S3: what the failing server wrote to server.log is only withheld lines" \
@@ -800,7 +937,7 @@ t "S3: what the failing server wrote to server.log is only withheld lines" \
         grep -vc "^<line withheld>$")" = 0 ] && has "<line withheld>"'
 run env PATH="$FK/sh:$PATH" "$FK/h-ns-run.sh" --dir "$D" --check
 t "F5 --check on that setup (fake binary has its own digest): no canary" \
-    '[ "$(LEAKSKIP=server.log leaks "$D")" = 0 ]'
+    '[ "$(LEAKSKIP=server.log.1 leaks "$D")" = 0 ]'
 setmodes tar=fail
 fcase tar 0 0
 t "F5 tar failing with canaries: rc!=0" '[ $RC -ne 0 ] && has "tar extract"'
@@ -969,6 +1106,106 @@ run "$HELPER" --dir "$D" --backup 'relative.tgz'
 t "--backup: relative DEST refused" '[ $RC -ne 0 ]'
 run "$HELPER" --dir "$D" --stop
 
+# ----------------------------------------- restore: --upgrade makes bin/
+note "restore: a backup extracted into an empty directory has no bin"
+mv "$D" "$D.orig"
+mkdir -m 700 "$D"
+tar -xzf "$W/bk.tar.gz" -C "$D" --no-same-owner
+t "restore: extracted (marker, keys, config), and there is no bin" \
+    '[ ! -e $D/bin ] && [ -f $D/.mash-nats-setup ] && [ -f $D/ca.key ] &&
+     [ -f $D/server.conf ]'
+run "$HELPER" --dir "$D" --start
+t "restore: --start refuses a missing bin and says run --upgrade" \
+    '[ $RC -ne 0 ] && has "bin is missing" && has "run --upgrade" &&
+     [ ! -e $D/bin ] && ! ss -ltnH | grep -q ":$PORT "'
+run "$HELPER" --dir "$D" --check
+t "restore: --check fails on a missing bin and says run --upgrade" \
+    '[ $RC -ne 0 ] && has "bin is missing" && has "run --upgrade" &&
+     [ ! -e $D/bin ]'
+run "$HELPER" --dir "$D" --upgrade
+t "restore: --upgrade makes bin (0700) and installs the two programs" \
+    '[ $RC -eq 0 ] && has "made $D/bin (mode 0700" && has "installed nats-server" &&
+     [ "$(stat -c %a $D/bin)" = 700 ] &&
+     [ "$(ls -A $D/bin | tr "\n" " ")" = ".manifest nats-server nsc " ]'
+run "$HELPER" --dir "$D" --start
+t "restore: --start then works" \
+    '[ $RC -eq 0 ] && has "requires TLS" && [ -f $D/server.pid ]'
+run "$HELPER" --dir "$D" --check
+t "restore: --check then passes" '[ $RC -eq 0 ] && has "check passed"'
+run "$HELPER" --dir "$D" --stop
+for v in empty stray mode link; do
+    rm -rf "$W/rst-$v"
+    mkdir -m 700 "$W/rst-$v"
+    tar -xzf "$W/bk.tar.gz" -C "$W/rst-$v" --no-same-owner
+    case $v in
+    empty) mkdir -m 700 "$W/rst-$v/bin" ;;
+    stray) mkdir -m 700 "$W/rst-$v/bin"; echo x >"$W/rst-$v/bin/stray" ;;
+    mode) mkdir -m 755 "$W/rst-$v/bin" ;;
+    link) ln -s /nonexistent-bin "$W/rst-$v/bin" ;;
+    esac
+    BEFORE=$(snap "$W/rst-$v")
+    run "$HELPER" --dir "$W/rst-$v" --upgrade
+    t "restore: --upgrade still refuses a bin that is not as left ($v)" \
+        '[ $RC -ne 0 ] && has "is not as this script left it" &&
+         [ "$(snap $W/rst-$v)" = "$BEFORE" ]'
+    rm -rf "$W/rst-$v"
+done
+rm -rf "$D.orig"
+
+# ----------------------------------------------- server.log rotation (7d)
+note "server.log: rotated on every start, nothing older than 7 days kept"
+np
+D=$W/lg
+mkdir -p "$W/lgout"
+echo "outside one" >"$W/lgout/server.log.1"
+echo "outside two" >"$W/lgout/server.log.old"
+touch -d '30 days ago' "$W/lgout/server.log.1" "$W/lgout/server.log.old"
+OUTSIDE=$(cd "$W/lgout" && find . -printf '%p %s %m %T@\n' | sort |
+    md5sum)
+OUTSHA=$(sha256sum "$W/lgout"/* | md5sum)
+run "$HELPER" --dir "$D" --owner alice --port $PORT --start
+t "log: create --start makes server.log (0600), no .1 yet" \
+    '[ $RC -eq 0 ] && [ "$(stat -c %a $D/server.log)" = 600 ] &&
+     [ ! -e $D/server.log.1 ] && has "the log is kept at most 7 days"'
+run "$HELPER" --dir "$D" --stop
+echo "first-run marker" >>"$D/server.log"
+LOG1=$(sha256sum <"$D/server.log")
+echo "old three" >"$D/server.log.3"
+chmod 600 "$D/server.log.3"
+touch -d '8 days ago' "$D/server.log.3"
+ln -s "$W/lgout/server.log.1" "$D/server.log.9"
+echo "old file, name starts with server.log" >"$D/server.logfile"
+touch -d '8 days ago' "$D/server.logfile"
+echo "not a log" >"$D/notes.txt"
+touch -d '30 days ago' "$D/notes.txt"
+run "$HELPER" --dir "$D" --start
+t "log: start renames server.log to server.log.1 (same content, 0600)" \
+    '[ $RC -eq 0 ] && [ "$(sha256sum <$D/server.log.1)" = "$LOG1" ] &&
+     [ "$(stat -c %a $D/server.log.1)" = 600 ] &&
+     ! grep -q "first-run marker" $D/server.log'
+t "log: the new server.log is 0600 and fresh" \
+    '[ "$(stat -c %a $D/server.log)" = 600 ] &&
+     grep -q "Server is ready" $D/server.log'
+t "log: a server.log* file older than 7 days is gone" \
+    '[ ! -e $D/server.log.3 ] && [ ! -e $D/server.logfile ]'
+t "log: a symlink named server.log* is not followed or removed, nor is a file that is not server.log*" \
+    '[ -L $D/server.log.9 ] && [ -f $D/notes.txt ] &&
+     [ "$(cat $W/lgout/server.log.1)" = "outside one" ]'
+t "log: nothing outside DIR was touched (list, size, mode, mtime, sha256)" \
+    '[ "$(cd $W/lgout && find . -printf "%p %s %m %T@\n" | sort | md5sum)" = "$OUTSIDE" ] &&
+     [ "$(sha256sum $W/lgout/* | md5sum)" = "$OUTSHA" ]'
+run "$HELPER" --dir "$D" --stop
+echo "second-run marker" >>"$D/server.log"
+touch -d '8 days ago' "$D/server.log"
+run "$HELPER" --dir "$D" --start
+t "log: a server.log older than 7 days is rotated and then deleted" \
+    '[ $RC -eq 0 ] && ! grep -rq "second-run marker" $D/server.log* &&
+     [ "$(stat -c %a $D/server.log)" = 600 ]'
+t "log: the aged log is gone, no .1 left, only the new server.log" \
+    '[ ! -e $D/server.log.1 ] &&
+     [ "$(cd $D && ls -A | grep "^server.log" | tr "\n" " ")" = "server.log server.log.9 " ]'
+run "$HELPER" --dir "$D" --stop
+
 # ---------------------------------------------------------- --retire-keys
 note "--retire-keys"
 np
@@ -1030,6 +1267,22 @@ run "$HELPER" --dir "$W/nomark" --remove
 t "--remove refuses a dir without the marker and says what it found" \
     '[ $RC -ne 0 ] && has "no .mash-nats-setup marker" && has "a-file" &&
      [ -f $W/nomark/a-file ]'
+MSGRK="the CA key and signing keys are still here: run --retire-keys first"
+BEFORE=$(snap "$D")
+run "$HELPER" --dir "$D" --remove
+t "remove before retire: piped, refused, says run --retire-keys, no change" \
+    '[ $RC -ne 0 ] && has "$MSGRK" && has "nothing was changed" &&
+     [ -f $D/ca.key ] && [ -d $D/nsc ] && [ -d $D/export ] &&
+     [ "$(snap $D)" = "$BEFORE" ] &&
+     [ "$(nlisten)" -ge 1 ]'
+runpty "$D" "$HELPER" --dir "$D" --remove
+t "remove before retire: even with the right typed text, refused, no change" \
+    '[ $RC -ne 0 ] && has "$MSGRK" && ! has "Type this exactly" &&
+     [ -f $D/ca.key ] && [ "$(snap $D)" = "$BEFORE" ] &&
+     [ "$(nlisten)" -ge 1 ]'
+runpty "$D" "$HELPER" --dir "$D" --retire-keys "$W/rm-keys.tgz"
+t "remove: keys retired first (the --retire-keys path)" \
+    '[ $RC -eq 0 ] && [ -f $D/.keys-retired ] && [ ! -e $D/ca.key ]'
 run "$HELPER" --dir "$D" --remove
 t "F1: --remove piped: refused, nothing removed" \
     '[ $RC -ne 0 ] && has "Run this yourself" && [ -d $D ]'
@@ -1129,6 +1382,8 @@ mkevil() { # fresh EVIL directory holding one canary file
     rm -rf "$S/evil"
     mkdir -m 700 "$S/evil"
     echo "do not touch" >"$S/evil/canary"
+    EVILSHA=$(sha256sum <"$S/evil/canary")
+    EVILLIST=$(cd "$S/evil" && find . -mindepth 1 | sort)
 }
 cat >"$S/swapenv" <<SH
 #!/bin/bash
@@ -1143,6 +1398,15 @@ chmod +x "$S/swapenv"
 untouched() { # SWAPP now is EVIL: only the canary, mode 0700
     [ "$(ls -A "$1")" = canary ] && [ "$(stat -c %a "$1")" = 700 ] &&
         [ "$(cat "$1/canary")" = "do not touch" ]
+}
+# evil_exact DIR: the unintended destination (the directory swapped in) holds
+# exactly what the test put there (the full listing, hidden files included,
+# and the sentinel's sha256) and nothing else: no helper file, key, archive,
+# temp file or directory landed in it
+evil_exact() {
+    [ "$(cd "$1" && find . -mindepth 1 | sort)" = "$EVILLIST" ] &&
+        [ "$(sha256sum <"$1/canary")" = "$EVILSHA" ] &&
+        [ -z "$(find "$1" -mindepth 1 ! -path "$1/canary")" ]
 }
 swapped() { [ -d "$1.orig" ]; }
 refused() { has "replaced" || has "no longer leads"; }
@@ -1163,6 +1427,9 @@ for n in 2 3; do
         '[ $RC -ne 0 ] && { [ $n = 3 ] || { refused && has "device:inode"; }; }'
     t "S2: creation, swap #$n: the replacement is untouched" \
         'untouched $S/cpar'
+    t "S2: creation, swap #$n: the unintended destination holds exactly the
+        sentinel (listing, sha256): no helper file, key or archive" \
+        'evil_exact $S/cpar'
 done
 for n in 2 3 4; do
     mkevil
@@ -1179,6 +1446,9 @@ for n in 2 3 4; do
          ! has "wrote $S/bpar/b.tgz"'
     t "S2: --backup swap #$n: the replacement is untouched" \
         'untouched $S/bpar'
+    t "S2: --backup swap #$n: the unintended destination holds exactly the
+        sentinel (listing, sha256): no archive, helper file or key" \
+        'evil_exact $S/bpar'
     t "S2: --backup swap #$n: DIR itself is intact" \
         '[ -f $S/db$n/ca.key ] && [ -d $S/db$n/nsc ]'
 done
@@ -1195,6 +1465,9 @@ for n in 2 3 4 5; do
         'swapped $S/kpar'
     t "S2: --retire-keys swap #$n: aborts, names device:inode" \
         '[ $RC -ne 0 ] && refused && has "device:inode"'
+    t "S2: --retire-keys swap #$n: the unintended destination holds exactly
+        the sentinel (listing, sha256): no archive, helper file or key" \
+        'evil_exact $S/kpar'
     t "S2: --retire-keys swap #$n: replacement untouched, sources retained" \
         'untouched $S/kpar && [ -f $S/dk$n/ca.key ] && [ -d $S/dk$n/nsc ] &&
          [ -d $S/dk$n/export ] && [ ! -e $S/dk$n/.keys-retired ] &&
@@ -1206,6 +1479,11 @@ for n in 2 3; do
     mkdir -m 700 "$S/rpar"
     cp -a "$BASE" "$S/rpar/d"
     TYPED="$S/rpar/d"
+    rm -f "$S/rk-r$n.tgz"
+    runpty "$TYPED" "$HELPER" --dir "$S/rpar/d" --retire-keys "$S/rk-r$n.tgz"
+    t "S2: --remove swap #$n: keys retired first (no swap yet)" \
+        '[ $RC -eq 0 ] && [ -f $S/rpar/d/.keys-retired ]'
+    mkevil
     runpty "$TYPED" "$S/swapenv" $n "$S/rpar" "$HELPER" --dir "$S/rpar/d" \
         --remove
     note "S2 remove #$n: stat calls: $(cat "$S/cnt")"
@@ -1213,9 +1491,32 @@ for n in 2 3; do
         'swapped $S/rpar'
     t "S2: --remove swap #$n: aborts, names device:inode" \
         '[ $RC -ne 0 ] && refused && has "device:inode"'
+    t "S2: --remove swap #$n: the unintended destination holds exactly the
+        sentinel (listing, sha256): nothing was removed into or from it" \
+        'evil_exact $S/rpar'
     t "S2: --remove swap #$n: replacement untouched, original DIR not removed" \
         'untouched $S/rpar && [ -f $S/rpar.orig/d/.mash-nats-setup ] &&
-         [ -f $S/rpar.orig/d/ca.key ]'
+         [ -f $S/rpar.orig/d/.keys-retired ] && [ -f $S/rpar.orig/d/server.conf ]'
+done
+# ------------------- --remove refuses while any key is still here
+note "remove refuses until --retire-keys has run"
+MSGRK="the CA key and signing keys are still here: run --retire-keys first"
+for k in ca.key nsc export; do
+    rm -rf "$S/rf-$k"
+    cp -a "$BASE" "$S/rf-$k"
+    for o in ca.key nsc export; do
+        [ "$o" = "$k" ] || rm -rf "$S/rf-$k/$o"
+    done
+    BEFORE=$(snap "$S/rf-$k")
+    runpty "$S/rf-$k" "$HELPER" --dir "$S/rf-$k" --remove
+    t "remove refused with only $k left, no .keys-retired: nothing changed" \
+        '[ $RC -ne 0 ] && has "$MSGRK" && has "nothing was changed" &&
+         ! has "Type this exactly" && [ "$(snap $S/rf-$k)" = "$BEFORE" ] &&
+         [ -f $S/rf-$k/.mash-nats-setup ]'
+    run "$HELPER" --dir "$S/rf-$k" --remove
+    t "remove refused with only $k left, piped: nothing changed" \
+        '[ $RC -ne 0 ] && has "$MSGRK" && [ "$(snap $S/rf-$k)" = "$BEFORE" ]'
+    rm -rf "$S/rf-$k"
 done
 # ------------------------------ S9: --retire-keys verifies the archive
 note "S9: tar shims make a partial, a truncated and an altered archive"
@@ -1471,13 +1772,77 @@ run "$HELPER" --dir "$D" --stop
 if [ -f "$UNITDIR/$U2" ]; then
     TYPED=$D2
     runpty "$TYPED" "$HELPER" --dir "$D2" --remove
+    t "boot: --remove before --retire-keys is refused, unit and DIR stay" \
+        '[ $RC -ne 0 ] && has "run --retire-keys first" && [ -d $D2 ] &&
+         [ -f $UNITDIR/$U2 ]'
+    runpty "$TYPED" "$HELPER" --dir "$D2" --retire-keys "$W/boot2-keys.tgz"
+    t "boot: keys retired before the remove" \
+        '[ $RC -eq 0 ] && [ -f $D2/.keys-retired ]'
+    runpty "$TYPED" "$HELPER" --dir "$D2" --remove
     t "boot: --remove with a boot unit: unit file and DIR both removed" \
         '[ $RC -eq 0 ] && [ ! -e $UNITDIR/$U2 ] && [ ! -e $D2 ] &&
          has "disabled $U2"'
 fi
 }
 
+group_reach_up() {
+cd /home/alice || exit 1
+PORT=4700
+# bob must be able to walk to DIR so that only DIR's own mode (0700) keeps
+# him out, not the home directory's
+chmod 755 /home/alice
+note "reach: a loopback-only setup and a non-loopback one"
+D=$W/reach
+run "$HELPER" --dir "$D" --owner alice --port $PORT --start
+t "reach: loopback setup created and running" \
+    '[ $RC -eq 0 ] && has "requires TLS"'
+t "reach: DIR is 0700, server.log and mash-setup.json are 0600" \
+    '[ "$(stat -c %a $D)" = 700 ] && [ "$(stat -c %a $D/server.log)" = 600 ] &&
+     [ "$(stat -c %a $D/mash-setup.json)" = 600 ]'
+t "reach: the closing text says every user on this machine can reach the port" \
+    'has "Binding 127.0.0.1 keeps the server off the network but does not
+        limit it to you: every user on this machine can reach port $PORT.
+        They cannot connect without credentials, read mail or make agents."'
+t "reach: only 127.0.0.1:$PORT listens for it" \
+    'ss -ltnH | grep -q "127.0.0.1:$PORT" &&
+     ! ss -ltnH | grep -qE "(0.0.0.0|\*):$PORT"'
+cp "$D/ca.pem" /tmp/reach-ca.pem
+chmod 644 /tmp/reach-ca.pem
+PORT2=4701
+D2=$W/reach2
+runpty "0.0.0.0:$PORT2" "$HELPER" --dir "$D2" --owner alice --listen 0.0.0.0 \
+    --port $PORT2 --start
+t "reach: non-loopback setup created and running (typed confirmation)" \
+    '[ $RC -eq 0 ] && has "Exposed: 0.0.0.0:$PORT2 is reachable from other
+        machines" && ! has "Binding 0.0.0.0"'
+cp "$D2/ca.pem" /tmp/reach-ca2.pem
+chmod 644 /tmp/reach-ca2.pem
+EXTIP=$(python3 -I -c 'import socket
+a = socket.gethostbyname(socket.gethostname())
+print("" if a.startswith("127.") else a)')
+note "reach: the container's own non-loopback address: ${EXTIP:-none found}"
+{
+    printf 'DIR=%q\nPORT=%q\nPORT2=%q\nEXTIP=%q\nALICEUID=%q\n' \
+        "$D" "$PORT" "$PORT2" "$EXTIP" "$(id -u)"
+} >/tmp/reach-info
+chmod 644 /tmp/reach-info
+}
+group_reach_down() {
+cd /home/alice || exit 1
+D=$W/reach
+D2=$W/reach2
+run "$HELPER" --dir "$D" --check
+t "reach: after bob, the loopback setup still checks clean" '[ $RC -eq 0 ]'
+t "reach: bob left no file in DIR" '[ ! -e $D/bob-was-here ]'
+run "$HELPER" --dir "$D" --stop
+t "reach: loopback setup stopped" '[ $RC -eq 0 ]'
+run "$HELPER" --dir "$D2" --stop
+t "reach: non-loopback setup stopped" '[ $RC -eq 0 ]'
+}
+
 case ${1:-main} in
+reach-up) group_reach_up ;;
+reach-down) group_reach_down ;;
 main) group_main ;;
 sec) group_sec ;;
 root) group_root ;;
@@ -1526,7 +1891,7 @@ report() {
 }
 
 # ----------------------------------------------------------------- main
-if want main || want osrel || want sec || want root; then
+if want main || want osrel || want sec || want root || want reach; then
     say "building the plain image $IMG1"
     podman build -q -t "$IMG1" "$T/ctx1" >/dev/null || exit 2
     BUILT_IMG1=1
@@ -1546,6 +1911,17 @@ if want sec; then
     report sec podman exec "$C1" bash /home/alice/incont.sh sec
     podman cp "$C1:/home/alice/transcript.txt" "$T/out/transcript-sec.txt" \
         2>/dev/null
+fi
+if want reach; then
+    say "group reach (a second OS user, bob, made with useradd in the container)"
+    podman exec --user root "$C1" useradd -m -s /bin/bash bob
+    podman cp "$T/bob.sh" "$C1:/tmp/reach-bob.sh"
+    podman cp "$T/probe.py" "$C1:/tmp/reach-probe.py"
+    podman exec --user root "$C1" chmod 755 /tmp/reach-bob.sh
+    podman exec --user root "$C1" chmod 644 /tmp/reach-probe.py
+    report reach-up podman exec "$C1" bash /home/alice/incont.sh reach-up
+    report reach-bob podman exec --user bob "$C1" bash /tmp/reach-bob.sh
+    report reach-down podman exec "$C1" bash /home/alice/incont.sh reach-down
 fi
 if want root; then
     say "group root (the helper as uid 0 in the container)"
