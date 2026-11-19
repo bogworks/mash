@@ -180,3 +180,7 @@ A create that fails partway leaves a non-empty dir to clear by hand.
   script's wiring land together; this PR is held.
 - The 0.5.5 CLI promised one command. The skill is more steps for the
   newcomer; the questions and the explanations are the price Randy chose.
+
+## Update 2026-11-19 (lead #4, #5)
+
+Skill ships in the plugin too (one source file, wiring in the implementing PR). `mashctl adopt` prints a one-line hint naming what to run next when no server is reachable. nsc is a prerequisite for 0.5.6; the skill shows how to install it. A later mashctl could create the nsc objects itself (operator, accounts, users) but not the CA, config or process; not planned. Script and skill lines are <= 80 columns; the script ends by printing the files it left and the adopt command. Second test run (podman): IPv6 --host and --listen ::1, non-default --operator/--account/--js-disk passed; macOS not run.
