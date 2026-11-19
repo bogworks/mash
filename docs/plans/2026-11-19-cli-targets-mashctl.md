@@ -1,9 +1,13 @@
-# mashctl target outputs (0.5.6) - DRAFT2
+# mashctl target outputs (0.5.6) - DRAFT3
 
 Status: design mockups, not code. Nothing here was run. Written to the maintainer's
 feedback on the v0.5.5 video and the CLI standard's rules; BEFORE blocks are
 excerpts of docs/plans/2026-11-19-cli-output-catalog-mashctl.md (v0.5.5 tag).
-DRAFT2 applies the rules added during review: a command a person must run stands
+DRAFT3 applies five review findings (see "Changes in DRAFT3" at the end): config
+paths follow the resolved folder, a repeat delete claims no revoke, the session
+name comes from MASH_NAME, removing init --local is a proposal that needs an
+ADR, and the plain-URL refusal names its override. DRAFT2 applied the rules
+added during review: a command a person must run stands
 alone on its own line (R-paste), a printed fix is true for the broken session
 (R-true-fix), a health report gives its verdict first (R-verdict), one name per
 thing (R-names). Both parts use the table columns OWNER, GROUP, ENDPOINT (the
@@ -15,7 +19,7 @@ to confirm".
 
 ---
 
-# Part 1: the first-run journey (target output for mashctl 0.5.6), DRAFT2
+# Part 1: the first-run journey (target output for mashctl 0.5.6), DRAFT3
 
 Design document. Nothing here was run. BEFORE blocks are excerpts of
 `docs/plans/2026-11-19-cli-output-catalog-mashctl.md` (v0.5.5), trimmed to the
@@ -35,13 +39,17 @@ Conventions in the AFTER blocks:
   spaces, complete, never wrapped, with no punctuation after it. The sentence
   before it ends with a colon and fits one line. Anything mash cannot know is a
   `<placeholder>`. A document is not a NEXT: it is written `See <path>`.
+- Every path in a message is the path mash resolved (MASH_CONFIG_DIR, then
+  XDG_CONFIG_HOME/mash, then ~/.config/mash); mockups show the default.
 - A fix that sets configuration names the file with its resolved path first
-  (`~/.config/mash/config.json`, or the directory in `MASH_CONFIG_DIR`). An
-  environment variable is offered only as the test for one shell.
+  (mockups: `~/.config/mash/config.json`). An environment variable is offered
+  only as the test for one shell.
 - The walkthrough is one terminal that you scroll back through. Nothing clears
   the screen between steps.
 - Paths are shown with `~` for the user's home directory. The config
-  directory is `~/.config/mash` (docs/synadia.md and docs/tls-and-clusters.md).
+  directory mash resolves is an absolute `MASH_CONFIG_DIR`, else an absolute
+  `XDG_CONFIG_HOME/mash`, else `~/.config/mash` (internal/config/config.go,
+  docs/operations.md). The mockups show the default.
 - Flags the rules rename are used in their new form: `--token-out`,
   `--system-credentials`, `--admin-credentials`, `--make-admin`,
   `mash credential install --key --token`, `mash key create --out bob.key`.
@@ -121,6 +129,11 @@ and the file of the server's certificate authority if the certificate is
 private.
 
 ### 1a. If there is no server yet: `mashctl init --local`
+
+This section proposes removing `mashctl init --local`. Removing it reverses the
+local TLS quick start that ADR 0146 and 0.5.5 shipped. The contract that
+ratifies this document carries the ADR (mash order 17: mashctl does not
+install, configure or start NATS). This document is a proposal until then.
 
 **BEFORE** (catalog `init`, case 2; the first lines, the rest is 9 more
 paths):
@@ -243,6 +256,9 @@ When the address is `nats://` (plain text):
 $ mashctl adopt --server nats://myserver:4222 --owner acme ...
 error: nats://myserver:4222 is not encrypted, and mash only connects over TLS.
 fix: use a tls:// address. Your operator can give you the certificate file.
+     For a throwaway test server only, allow plain text in this shell (the
+     setting is insecure_plaintext):
+  export MASH_INSECURE_PLAINTEXT=1
 ```
 
 Exit code 2 for the plain-text refusal (rule 10, R-exit). `--detail` adds the
@@ -256,6 +272,9 @@ its answers before it prints.
 
 **What changed and why**
 
+- The plain-URL refusal also names the override, `insecure_plaintext`
+  (`MASH_INSECURE_PLAINTEXT=1`), because ADR 0146 requires it, and says it is
+  for a throwaway test server only.
 - P5 (maintainer point 4): the command is wrapped with `\`, every output line
   is 80 columns or fewer, no line carries a path longer than `~/.config/mash`.
 - P6 (point 8, point 16): each check is one line of meaning in plain words. No
@@ -953,14 +972,16 @@ Run a session as bob (on myserver)
 
 Step 1. Open a terminal on myserver, in the folder bob works in.
 
-Step 2. Tell mash who this session is. mash reads it from
-~/.config/mash/config.json ("owner", "group" and "name"). That file names one
-endpoint, so alice and bob on one machine cannot both use it. Instead, set
-the variables in the terminal each session starts from:
-  export MASH_OWNER=acme MASH_GROUP=demo MASH_NAME=bob
+Step 2. Tell mash who this session is, in the terminal it starts from. The
+owner is saved in ~/.config/mash/config.json ("owner"), which adopt wrote.
+The group and the name are given each time a session starts, so alice and
+bob can run on one machine. In that terminal, set:
+  export MASH_GROUP=demo MASH_NAME=bob
 
 Step 3. Start Claude Code in that same terminal, with the mash plugin
-installed [confirm: the exact start command and the plugin install step].
+installed:
+  claude --channels plugin:mash@mash
+[confirm: the plugin install step, and that this flag is the start command].
 
 Step 4. mash signs in with bob's credentials, the file
 ~/.config/mash/acme.demo.bob.creds.
@@ -972,12 +993,13 @@ For alice, open a second terminal and set MASH_NAME=alice instead.
 
 - Point 11: the step that follows Step 3 is this one, in the order a user
   does it, with the exact variables for bob.
-- R-true-fix: the file that holds the identity is named first, with the
-  resolved path. The `export` line is offered because the walkthrough has two
-  endpoints on one machine; it is true there because Claude Code starts from
-  the same terminal. On a machine with one endpoint, the file is the fix.
-- The three names (`MASH_OWNER`, `MASH_GROUP`, `MASH_NAME`) are set once;
-  they match the address (acme.demo.bob).
+- R-true-fix: the persistent place for the owner is the config file, named
+  with its resolved path. The name comes from MASH_NAME at launch (ADR 0012,
+  docs/operations.md) and the group from MASH_GROUP at launch (config.json has
+  no group key, docs/install.md); neither can be saved in the file. The
+  `export` line is true because Claude Code starts from the same terminal.
+- The owner, `MASH_GROUP` and `MASH_NAME` together match the address
+  (acme.demo.bob). The start command is the one in docs/install.md section 3.
 - Point 18 and rule 15: the session uses the mash tools (MCP). The CLI
   commands in the next part are for the person.
 
@@ -1099,6 +1121,13 @@ exits 1 with `mash: no endpoint named "..."`.
     `ADDRESS` and `NAME` headers are retired. `ENDPOINT` is 8 columns wide,
     so the `--wide` list table header now fills exactly 80 columns; if the
     NOTE column ever grows its header, drop `HOST` from `--wide` first.
+22. Removing `mashctl init --local` reverses the local TLS quick start that
+    ADR 0146 and 0.5.5 shipped. The contract that ratifies this document
+    carries the ADR (mash order 17: mashctl does not install, configure or
+    start NATS). Until then this is a proposal.
+23. The plain-URL refusal shows the override, because ADR 0146 requires it:
+    `insecure_plaintext` (`MASH_INSECURE_PLAINTEXT=1`), with a warning that it
+    is for a throwaway test server only.
 
 ## Facts to confirm
 
@@ -1117,10 +1146,11 @@ exits 1 with `mash: no endpoint named "..."`.
   appended, so `bob.key` would give `bob.key.pub` today; the rules decide
   `bob.pub`)]
 - [confirm: the default config directory is `~/.config/mash` on this
-  machine; the docs show it for synadia and TLS examples; `MASH_CONFIG_DIR`
-  changes it, and every printed path then shows the resolved directory]
-- [confirm: `config.json` accepts `owner`, `group` and `name` for the
-  endpoint a session runs as]
+  machine; the order is `MASH_CONFIG_DIR`, then an absolute
+  `XDG_CONFIG_HOME/mash`, then `~/.config/mash`, and every printed path shows
+  the resolved directory]
+- [confirm: `config.json` holds `owner` only; `MASH_GROUP` and `MASH_NAME` are
+  set per session at launch (docs/install.md, ADR 0012)]
 - [confirm: `--detail` of `show` prints capabilities and tags when set, under
   the words `capabilities` and `tags`]
 - [confirm: `endpoint show` can tell a suspended endpoint, and prints it as a
@@ -1188,6 +1218,8 @@ Status: design proposal, no code. Written against the catalog
 show, key and credentials steps) is in part 1 and is not repeated here.
 
 How to read the mockups.
+- Every path in a message is the path mash resolved (MASH_CONFIG_DIR, then
+  XDG_CONFIG_HOME/mash, then ~/.config/mash); mockups show the default.
 - In every AFTER block the word NEXT is coloured on a terminal. When output is
   not a terminal, or `NO_COLOR` is set, the word stays `NEXT:` with no colour.
 - `NEXT:` follows a success and `fix:` follows a failure. Both are one sentence
@@ -1830,8 +1862,7 @@ AFTER, repeat, a credentials file is still here, no server record
 $ mashctl endpoint delete acme/demo/bob
 [exit 0]
 Endpoint acme.demo.bob is already deleted on tls://127.0.0.1:24222.
-  mash holds no key for it, so there is nothing to revoke. Its key was
-  revoked when it was deleted.
+  mash holds no record or key for it, so there is nothing to revoke.
   Its credentials file here was renamed to
   ~/.config/mash/acme.demo.bob.creds.retired-20261119-0031
 ```
@@ -1883,6 +1914,9 @@ What changed and why:
 
 - P1, P2, P8: no preamble, one address form, and the "already retired" case is
   one sentence. The old output said `deleted ...` when nothing was deleted.
+- A repeat delete says only what the command can know: the endpoint is already
+  deleted and mash holds no record or key for it. It does not say the key was
+  revoked, because the first delete may have used `--no-revoke`.
 - P5: the longest old line (250 columns) is wrapped under 80.
 - `--no-revoke`: the old output printed the warning twice (both on stderr) plus
   a third long line on stdout. It now prints the warning once, after the
@@ -2787,8 +2821,9 @@ columns or less, and every command line is 78 or less. The machine code
 6 error, and for `audit` 3 could not finish) except that a plain URL refused
 for TLS now exits 2 in every command (contract REQ-014). A value that failed a check is named but
 never printed back, so a secret pasted into the wrong place is not echoed.
-A fix that sets configuration names the file first, with its resolved path
-(`~/.config/mash/config.json`, or the folder `MASH_CONFIG_DIR` names); a
+A fix that sets configuration names the file first, with its resolved path.
+The folder is an absolute `MASH_CONFIG_DIR`, else an absolute
+`XDG_CONFIG_HOME/mash`, else `~/.config/mash`; mockups show the default. A
 variable set with `export` is offered only as a test in the current shell,
 because it does not reach a session started anywhere else.
 
@@ -3038,6 +3073,9 @@ error: refusing to connect to 127.0.0.1 without encryption (the address
 fix: use a tls:// address: change "url" in ~/.config/mash/config.json (or
      MASH_URL, which overrides it). For a server with its own certificate
      authority, also set "tls_ca" there to its file.
+     For a throwaway test server only, set insecure_plaintext to true in
+     that file, or allow plain text in this shell:
+  export MASH_INSECURE_PLAINTEXT=1
 
 $ mashctl endpoint list
 [exit 1]
@@ -3125,9 +3163,9 @@ What changed and why:
 
 - P1: the preamble is gone. A server problem names the server in the error.
 - P5, P6: the TLS refusal (310 columns, with `insecure_plaintext` and `tls_ca`
-  explained nowhere) is two lines. The test-server escape hatch,
-  `MASH_INSECURE_PLAINTEXT=1`, is documented in `--detail` and in
-  docs/operations.md, not offered in the default text.
+  explained nowhere) is a short fix. The test-server override,
+  `insecure_plaintext` (`MASH_INSECURE_PLAINTEXT=1`), is named in the fix,
+  because ADR 0146 requires it, and marked for a throwaway test server only.
 - The wrapper text `mashctl: endpoint list: mashctl: mash:` (the same program
   named three times) is gone.
 - "not initialised" now means "not connected to a server yet": the fix points
@@ -3572,7 +3610,8 @@ Decisions the rules left open. Each is one line.
     address that never existed exits 1; reason: the catalog behaves this way and
     a killed delete must finish when run again.
 15. Config folder shown as `~/.config/mash`; reason: a person needs a real
-    path; the actual folder follows `MASH_CONFIG_DIR`.
+    path; the actual folder is the one mash resolved (`MASH_CONFIG_DIR`, then
+    `XDG_CONFIG_HOME/mash`, then `~/.config/mash`).
 16. The administrator key is listed in `issued list` with `-` for owner and
     group; reason: it is a key mash issued, and hiding it would hide a key that
     can sign in.
@@ -3598,6 +3637,12 @@ Decisions the rules left open. Each is one line.
 23. A dry-run that ends "Add --yes to do it." is not a NEXT (rule 11); the
     flag is named, not a command line, because the command the person typed is
     already on their screen.
+24. The plain-URL refusal (E2) shows the override, because ADR 0146 requires
+    it: `insecure_plaintext` (`MASH_INSECURE_PLAINTEXT=1`), with a warning
+    that it is for a throwaway test server only.
+25. Removing `mashctl init --local` (A5) reverses the local TLS quick start
+    that ADR 0146 and 0.5.5 shipped. The contract that ratifies this document
+    carries the ADR (mash order 17); until then this is a proposal.
 
 ## Facts to confirm
 
@@ -3630,8 +3675,9 @@ Decisions the rules left open. Each is one line.
     (`~/.config/mash/acme.demo.bob.creds`) match part 1.]
 14. [confirm: `endpoint suspend` prints the number of stored messages
     (`msgs` today) and `Last message number` is the old `last_seq`.]
-15. [confirm: mashctl's configuration file is `~/.config/mash/config.json`, or
-    the folder named by `MASH_CONFIG_DIR`, and holds `url`, `tls_ca` and
+15. [confirm: mashctl's configuration file is `config.json` in the resolved
+    config folder (`MASH_CONFIG_DIR`, then `XDG_CONFIG_HOME/mash`, then
+    `~/.config/mash`), and holds `url`, `tls_ca` and
     `limits` (E2, D5); part 1 shows the same path.]
 16. [confirm: `mashctl adopt --help` is the pointer to print when mashctl has no
     server (a full `adopt` command needs the operator's files, which mash cannot
@@ -3672,3 +3718,30 @@ By rule (counts are blocks or lines changed in AFTER text):
 - Section E gained the usage-error shape (`error:`, `fix:` with command,
   `usage:`) in place of `error:`, `usage:`, `example:`.
 
+## Changes in DRAFT3
+
+1. Config paths. A rule at the top of Part 1 and Part 2 says every path in a
+   message is the one mash resolved (MASH_CONFIG_DIR, then XDG_CONFIG_HOME/mash,
+   then ~/.config/mash) and mockups show the default. Statements that the
+   config is only under ~/.config/mash or MASH_CONFIG_DIR now list all three
+   places (Part 1 conventions, Part 2 section E intro, choice 15, fact 15).
+2. Repeat delete. The claim that the key was revoked when the endpoint was
+   deleted is removed; the output says only that the endpoint is already
+   deleted and mash holds no record or key for it. "What changed and why"
+   says why.
+3. Session name. config.json holds the owner only; the name comes from
+   MASH_NAME at launch (ADR 0012) and the group from MASH_GROUP at launch
+   (docs/install.md). Step 2 of the walkthrough now sets MASH_GROUP and
+   MASH_NAME in the starting terminal, and Step 3 uses the start command from
+   docs/install.md. The claim that config.json can hold the name or group is
+   removed everywhere.
+4. Removing `mashctl init --local`. Section 1a of Part 1, choice 22 and
+   choice 25 of Part 2 say that removal reverses the local TLS quick start
+   that ADR 0146 and 0.5.5 shipped, that the contract that ratifies this
+   document carries the ADR (mash order 17), and that this document is a
+   proposal until then. No ADR file is added.
+5. Plain-URL refusal. The refusals in Part 1 adopt and Part 2 E2 name the
+   override `insecure_plaintext` (`MASH_INSECURE_PLAINTEXT=1`) and tell a
+   person with a throwaway test server what to do, with the command on its own
+   line. "What changed and why" is updated; choices 23 (Part 1) and 24
+   (Part 2) record that ADR 0146 requires the refusal to show it.
