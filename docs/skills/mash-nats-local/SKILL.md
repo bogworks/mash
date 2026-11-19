@@ -9,7 +9,7 @@ description: >-
 
 # Set up a NATS server for mash
 
-DRAFT 2 (0.5.6). For a person, or for an agent following it.
+DRAFT 3 (0.5.6). For a person, or for an agent following it.
 
 mash gives each AI agent session an inbox that keeps its mail, so agents
 can message each other. The inbox lives on a NATS server. mashctl is
@@ -24,7 +24,13 @@ does not install or start NATS. This guide does, in five parts:
 
 If you are an agent: you may propose each answer, but the person
 decides. Ask every question before you run anything. Do not pick paths
-or ports for them. Do not run commands with sudo unless they said you may.
+or ports for them.
+
+These each need their own explicit yes from the person, never implied by
+"set it up": installing software (show the source, version and exact
+command first), using sudo, listening on anything but this machine,
+opening a firewall port, and installing a service that starts at boot.
+Never pipe a download into a shell.
 
 ## What you end up with
 
@@ -77,8 +83,8 @@ Write the answers down.
    - Default: trial. Reason: you can remove it with one command.
    - Trial: start the server from the script, stop it when finished. It
      does not return after a reboot.
-   - Permanent: also set up the restart unit in part 6, and keep the
-     files somewhere backed up.
+   - Permanent: keep the files somewhere backed up. A start-at-boot
+     service (part 6) is a separate yes, asked when you get there.
 
 2. Is mash already installed and set up on this machine?
    - Default: no. Check with the `mash version` and `mashctl version`
@@ -89,15 +95,17 @@ Write the answers down.
 3. May this guide install software, and may it use sudo?
    - Default: install in your own home, no sudo. Reason: nothing outside
      your home changes. It uses `~/.local/bin`.
-   - With sudo: you may use `apt install` for the nats-server package.
-   - Say what is allowed before part 2. Never use sudo unasked.
+   - With sudo: you may install the nats-server package with `dpkg`.
+   - Say what is allowed before part 2. For each install, show the
+     person the source, the version and the exact command, and wait.
 
 4. Which directory holds the server's files (keys, certificates, mail,
    log)?
    - Default: `~/mash-nats` (for example /home/alice/mash-nats).
-   - It must not exist, or be empty. Never `/`, never a top-level
-     directory like /demo. It needs free disk: 2 GB is the default mail
-     limit.
+   - It must not exist yet: the script creates it, owned by you, mode
+     0700. Its parent must be yours and not writable by other users.
+     Never `/`, never a top-level directory like /demo. It needs free
+     disk: 2 GB is the default mail limit.
 
 5. Which port?
    - Default: 4222, the NATS standard.
@@ -110,17 +118,21 @@ Write the answers down.
      example `~/mash-config`, and set MASH_CONFIG_DIR to it (part 4).
 
 7. Who may connect: this machine only, or others too?
-   - Default: this machine only. The server listens on 127.0.0.1.
-   - Others: give the name or address they will type. Add `--host NAME`
-     (repeat for several) and `--listen 0.0.0.0` in part 3. See "Who can
-     connect" below. Copy `ca.pem` to every client machine.
+   - Default: this machine only. The server listens on 127.0.0.1. Other
+     users of this machine can still reach that port; they need
+     credentials to get in (see "Who can connect").
+   - Others: a separate explicit yes. The person gives the exact address
+     the server should listen on and the name clients will type. Add
+     `--host NAME`, `--listen ADDRESS` and `--yes-expose` in part 3.
+     Copy `ca.pem` to every client machine. Opening a firewall port is
+     a further yes; the script never changes a firewall.
 
 8. Where should `export/` end up after hand-over?
-   - Default: leave it in place. Reason: mashctl keeps a pointer to
-     `export/mashadmin.creds`, not a copy.
-   - You may move `operator.nk`, `account.nk` and `sys.creds` somewhere
-     safe after part 4 (a password manager, an encrypted disk): mashctl
-     has its own copies. Keep `mashadmin.creds` where it is.
+   - Default: nowhere. mashctl adopt copies the files it needs into its
+     own folder, so you may delete `export/` after part 4. Reason: it
+     holds the operator and account seeds, which can sign anything.
+   - If you want a spare copy of the keys, put it in a password manager
+     or an encrypted disk, not in a plain backup.
 
 9. Owner name (the first part of every address)?
    - Default: your login name, for example alice. Lower-case letters,
@@ -133,13 +145,18 @@ streams (about 59 agents), the account named MASH.
 ## Who can connect
 
 By default only programs on this machine: the server listens on
-127.0.0.1, which other machines cannot reach. Every connection uses TLS,
-and a client must also hold credentials for the MASH account, or the
-server refuses it before it says anything (mashctl adopt checks this).
-With `--listen 0.0.0.0` the port is open to your whole network: anyone who
-can reach it can start a TLS handshake, but only a holder of valid
+127.0.0.1, which other machines cannot reach. Other users on this
+machine can reach it: a loopback port is not private to one user. Every
+connection uses TLS, and a client must also hold credentials for the
+MASH account, or the server refuses it (mashctl adopt checks this). On a
+shared machine, remember that anyone who can read your files can read
+the credentials in them.
+
+If the person says yes to other machines, the server listens on the
+address they name and the port is open to whatever network reaches it:
+anyone there can start a TLS handshake, but only a holder of valid
 credentials gets in, and only to the MASH account. The certificate names
-only the hosts you list with `--host`. Use a firewall as well.
+only the hosts you list with `--host`. A firewall is theirs to manage.
 
 ## 2. Install the four programs
 
@@ -161,15 +178,22 @@ mash version
 mashctl version
 ```
 
-The versions this guide was tested with, and the minimum:
+The versions this guide pins (the ones it was tested with):
 
-- nats-server 2.15.1 (minimum: 2.15)
-- nsc 2.15.0 (minimum: 2.15)
-- mash and mashctl from the same release, 0.5.5 or newer
-- openssl 3 (Debian already has it: `openssl version`)
+- nats-server v2.15.1
+- nsc v2.15.0
+- mash and mashctl v0.5.6 (same release)
+- openssl 3 (Debian has it: `openssl version`)
 
-Install what is missing (Debian or Ubuntu, 64-bit Intel or AMD; for an
-Arm machine, use arm64 in the names). Make a working folder first:
+Install what is missing, only as far as question 3 allows. For each one,
+show the person the source, the version and the command, and wait for a
+yes. Every download below is checked against a SHA-256 digest before it
+is run; if a check prints FAILED, stop and tell the person. Never use
+`@latest`, never pipe a download into a shell. This is for Debian or
+Ubuntu on 64-bit Intel or AMD; for Arm, use arm64 in the names and take
+the digests from the release's own checksum file.
+
+Make a working folder:
 
 ```sh
 mkdir -p ~/mash-setup ~/.local/bin
@@ -179,28 +203,36 @@ mkdir -p ~/mash-setup ~/.local/bin
 cd ~/mash-setup
 ```
 
-nats-server, with sudo (the Debian package):
+nats-server v2.15.1, from the NATS project's release page
+(https://github.com/nats-io/nats-server/releases/tag/v2.15.1):
 
 ```sh
-NV=v2.15.3
+GH=https://github.com/nats-io/nats-server/releases/download/v2.15.1
 ```
 
 ```sh
-GH=https://github.com/nats-io/nats-server/releases/download
+curl -fsSLO $GH/nats-server-v2.15.1-linux-amd64.tar.gz
 ```
 
 ```sh
-curl -fsSLO $GH/$NV/nats-server-$NV-amd64.deb
+sha256sum nats-server-v2.15.1-linux-amd64.tar.gz
+```
+
+The hash must be:
+
+```
+bf5edc7b1ce98e885c368cb43a886eb148dc5d0551d99f3cf6141fb5e1954c70
 ```
 
 ```sh
-sudo dpkg -i nats-server-$NV-amd64.deb
+tar -xzf nats-server-v2.15.1-linux-amd64.tar.gz
 ```
 
-Without sudo, download `nats-server-$NV-linux-amd64.tar.gz` from the same
-place, unpack it, and copy the `nats-server` file to `~/.local/bin`.
+```sh
+install -m 755 nats-server-v2.15.1-linux-amd64/nats-server ~/.local/bin
+```
 
-nsc:
+nsc v2.15.0 (https://github.com/nats-io/nsc/releases/tag/v2.15.0):
 
 ```sh
 NS=https://github.com/nats-io/nsc/releases/download/v2.15.0
@@ -211,13 +243,23 @@ curl -fsSLO $NS/nsc-linux-amd64.zip
 ```
 
 ```sh
+sha256sum nsc-linux-amd64.zip
+```
+
+The hash must be:
+
+```
+7d55eda757dc9f233675a3038fcf8779bcda99753b1603f7009fc8537e126b7e
+```
+
+```sh
 unzip -o nsc-linux-amd64.zip nsc -d ~/.local/bin
 ```
 
-mash, from the latest release (the SHA256SUMS file lists the right hash):
+mash and mashctl v0.5.6 (https://github.com/bogworks/mash/releases):
 
 ```sh
-MR=https://github.com/bogworks/mash/releases/latest/download
+MR=https://github.com/bogworks/mash/releases/download/v0.5.6
 ```
 
 ```sh
@@ -225,26 +267,31 @@ curl -fsSLO $MR/mash-linux-amd64
 ```
 
 ```sh
+curl -fsSLO $MR/mashctl-linux-amd64
+```
+
+```sh
 curl -fsSLO $MR/SHA256SUMS
 ```
 
 ```sh
-grep ' mash-linux-amd64$' SHA256SUMS | sha256sum -c
+sha256sum -c --ignore-missing SHA256SUMS
 ```
+
+Both lines must say OK. SHA256SUMS comes from the same release page, so
+it proves the download is intact; to check who published it, compare with
+the hashes on the release page itself.
 
 ```sh
 install -m 755 mash-linux-amd64 ~/.local/bin/mash
 ```
 
-mashctl is not a release download yet. Until it is, build it. This needs
-Go 1.27.4 or newer (https://go.dev/dl/):
-
 ```sh
-go install github.com/bogworks/mash/cmd/mashctl@latest
+install -m 755 mashctl-linux-amd64 ~/.local/bin/mashctl
 ```
 
-Go puts it in `$(go env GOPATH)/bin`. Make sure `~/.local/bin` and that
-folder are on your PATH, then run the four version commands again.
+Make sure `~/.local/bin` is on your PATH, then run the four version
+commands again.
 
 ## 3. Make the server (one command)
 
@@ -252,7 +299,7 @@ Get the script from one exact version of the repository and check its
 hash. Do not run a script you have not checked:
 
 ```sh
-export MASH_REF=84cc7ffed66152af2f3ea194f7713b1aba2a4a62
+export MASH_REF=566155d615e404c9d7f8ac1b9f298ee0b3fd6c58
 ```
 
 ```sh
@@ -270,11 +317,14 @@ sha256sum nats-local-setup.sh
 The line must start with:
 
 ```
-35eb7b81a96667f4d7fef118f54a45cd43f9af7636cae98b3b78a4bb27439746
+16fc1dcc97c68e36e28f2c895b8f5c904d1841334ac16ee7172186b49b8eaa60
 ```
 
-Read the script; it is short and only writes under the directory you
-give it. Then run it with your answers (question 4 and 5; add `--host`,
+Read the script; it only writes under the directory you give it. The
+script creates that directory (it must not exist yet), refuses a parent
+that other users can write to, never prints a secret, and never touches a
+firewall or a service. A listen address other than this machine needs
+`--yes-expose`. Then run it with your answers (question 4 and 5; add `--host`,
 `--listen` for question 7):
 
 ```sh
@@ -304,7 +354,7 @@ Done. The setup is in /home/alice/mash-nats. Nothing above printed a seed
 or a credential, and nothing below does.
 
 Files left for you (all under /home/alice/mash-nats):
-  ca.pem                   CA certificate: give this to clients
+  ca.pem                   CA certificate: copy this to clients
   server.conf              nats-server configuration (no seeds)
   export/mashadmin.creds   admin credentials (secret)
   export/sys.creds         system account credentials (secret)
@@ -337,6 +387,12 @@ If a line starts with FAIL, fix that first.
 Every file in the directory, what breaks if you lose it, and where
 mashctl keeps its own copy. `nsc/` holds the master copy of all keys.
 
+Who keeps what: you do. The script writes everything into your
+directory and nobody else holds a copy. `ca.key` and the seeds can sign
+anything for this server: keep the directory mode 0700, keep it out of
+shared folders and plain backups, and treat a copy of it like a copy of a
+password.
+
 - `nsc/`: every key and JWT the script made.
   Lost: you can no longer make new accounts or users by hand; the running
   server and mashctl keep working. Back it up.
@@ -366,8 +422,9 @@ mashctl keeps its own copy. `nsc/` holds the master copy of all keys.
   Lost: mashctl cannot revoke keys.
   mashctl copy: `server/sys.creds` in MASH_CONFIG_DIR.
 - `export/mashadmin.creds`: admin user credentials. Secret.
-  Lost: mashctl cannot administer the server.
-  mashctl copy: none, config.json holds its path. Keep it.
+  Lost: mashctl cannot administer the server; make new ones from `nsc/`.
+  mashctl copy: `server/mashadmin.creds` in MASH_CONFIG_DIR (adopt copies
+  it in 0.5.6).
 - `server.log`, `server.pid`: log and process id. Not secret.
 
 ## 4. Hand the server to mashctl
@@ -408,7 +465,9 @@ All checks passed. --dry-run: nothing is written. ...
 ```
 
 Then run the same command again without `--dry-run`. It prints the same
-checks, then the files it wrote (shortened):
+checks, then the files it wrote. The sample is from the 0.5.5 build,
+which recorded the admin credentials' path; 0.5.6 copies the file, as
+`server/mashadmin.creds` in the same folder (shortened):
 
 ```
 All checks passed.
@@ -431,7 +490,15 @@ mashctl: directory and lease buckets ready
 ```
 
 (The real output has a first line about the target server; it is long and
-not shortened here.) Now do what you decided in question 8.
+not shortened here.)
+
+What is still needed after adopt: mashctl's own folder (MASH_CONFIG_DIR)
+holds everything it needs, including its copies of the keys and the admin
+credentials. So `export/` can go now, as you decided in question 8. What
+you must keep: `ca.pem` (clients need it), `server.conf`, `jetstream/`
+and the rest of the server directory, which the server runs from. The
+CA key `ca.key` and the `nsc/` folder stay in the server directory; keep
+them private, as above.
 
 ## 5. Try it: Alice and Bob
 
@@ -504,9 +571,10 @@ nohup nats-server -c ~/mash-nats/server.conf >> ~/mash-nats/server.log 2>&1 &
 This does not update `server.pid`, so `--stop` will later say the pid is
 stale. Stop that one with `kill` and the pid you started it with.
 
-To start it at every boot as a systemd user service, write
-`~/.config/systemd/user/mash-nats.service` with this (the paths are your
-own; `command -v nats-server` shows the first one):
+A service that starts at every boot is a separate yes from the person:
+it keeps a network server running after you log out. Ask first. If they
+agree, write `~/.config/systemd/user/mash-nats.service` with this (the
+paths are your own; `command -v nats-server` shows the first one):
 
 ```
 [Unit]
@@ -538,8 +606,10 @@ or the port is taken.
 
 Full removal. Stop the server, then delete these by their exact paths:
 
-- the server directory, `~/mash-nats`
+- the server directory, `~/mash-nats` (it holds the CA key and `nsc/`)
+- `~/mash-nats/export`, if you kept it (it is inside the directory)
 - mashctl's folder, `~/mash-config` (keys, copies, and the agents' creds)
+- any backup copy of either folder you made
 - `~/mash-setup`, the downloads
 - the unit file, if you made one
 
@@ -550,8 +620,10 @@ without the keys nobody can revoke or add agents.
 
 - The server address: `tls://localhost:4222`
 - The CA file: `~/mash-nats/ca.pem`
-- The admin credentials: `~/mash-nats/export/mashadmin.creds`
-- mashctl's folder, with its copy of the operator and account keys
+- The admin credentials: `~/mash-config/server/mashadmin.creds`
+- mashctl's folder, `~/mash-config`, with its copy of the keys, and the
+  server directory `~/mash-nats`, which holds the CA key: keep both
+  private
 
 ## Next
 
