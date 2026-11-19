@@ -957,14 +957,14 @@ Send these three another way than the files:
   server address   tls://myserver:4222
   CA fingerprint   3f9a41c2 7b0d9e55 a1c4e08b 2d77f3a9
                    5e1b6c40 98aa0d12 c3f5e7b6 4a21d90c
-  account          ADB7BK6VI6EGIDZ2XXCLTKUBGR5NOIJYVZ77DTRETXNW2XXPNQTK2UGO
+  account          ADQ6KRG4JFLSMDNOLVYUFUXM3JOVHOS5OJZPTIFCCRPM3DTQKTE4VLXF
 
 The account is the one your mashctl signs tokens for.
 
 bob will be asked to confirm that these three values match what you send him.
 
 NEXT: on bob's machine, in the folder with bob.key, the token and ca.pem, run:
-  mash credential install --key bob.key --token acme.demo.bob.token --server tls://myserver:4222 --ca ca.pem --account ADB7BK6VI6EGIDZ2XXCLTKUBGR5NOIJYVZ77DTRETXNW2XXPNQTK2UGO
+  mash credential install --key bob.key --token acme.demo.bob.token --server tls://myserver:4222 --ca ca.pem --account ADQ6KRG4JFLSMDNOLVYUFUXM3JOVHOS5OJZPTIFCCRPM3DTQKTE4VLXF
 ```
 
 **AFTER, on bobs-laptop: the install**
@@ -976,14 +976,14 @@ targets file]; the question and the refusals below are this document's wording
 [match mash targets].
 
 ```text
-$ mash credential install --key bob.key --token acme.demo.bob.token --server tls://myserver:4222 --ca ca.pem --account ADB7BK6VI6EGIDZ2XXCLTKUBGR5NOIJYVZ77DTRETXNW2XXPNQTK2UGO
+$ mash credential install --key bob.key --token acme.demo.bob.token --server tls://myserver:4222 --ca ca.pem --account ADQ6KRG4JFLSMDNOLVYUFUXM3JOVHOS5OJZPTIFCCRPM3DTQKTE4VLXF
 
 Confirm that these three values match what the operator sent you:
 
   server address   tls://myserver:4222
   CA fingerprint   3f9a41c2 7b0d9e55 a1c4e08b 2d77f3a9
                    5e1b6c40 98aa0d12 c3f5e7b6 4a21d90c
-  account          ADB7BK6VI6EGIDZ2XXCLTKUBGR5NOIJYVZ77DTRETXNW2XXPNQTK2UGO
+  account          ADQ6KRG4JFLSMDNOLVYUFUXM3JOVHOS5OJZPTIFCCRPM3DTQKTE4VLXF
 
 Do these three match what the operator sent you? (yes/no): yes
 
@@ -1009,26 +1009,26 @@ If bob answers no, nothing is written, and with no terminal the install
 refuses:
 
 ```text
-$ mash credential install --key bob.key --token acme.demo.bob.token --server tls://myserver:4222 --ca ca.pem --account ADB7BK6VI6EGIDZ2XXCLTKUBGR5NOIJYVZ77DTRETXNW2XXPNQTK2UGO
+$ mash credential install --key bob.key --token acme.demo.bob.token --server tls://myserver:4222 --ca ca.pem --account ADQ6KRG4JFLSMDNOLVYUFUXM3JOVHOS5OJZPTIFCCRPM3DTQKTE4VLXF
 
 Confirm that these three values match what the operator sent you:
 
   server address   tls://myserver:4222
   CA fingerprint   3f9a41c2 7b0d9e55 a1c4e08b 2d77f3a9
                    5e1b6c40 98aa0d12 c3f5e7b6 4a21d90c
-  account          ADB7BK6VI6EGIDZ2XXCLTKUBGR5NOIJYVZ77DTRETXNW2XXPNQTK2UGO
+  account          ADQ6KRG4JFLSMDNOLVYUFUXM3JOVHOS5OJZPTIFCCRPM3DTQKTE4VLXF
 
 Do these three match what the operator sent you? (yes/no): no
 [exit 1]
 error: you answered that these three values do not match.
 Nothing was written. Ask the operator who made this endpoint.
 
-$ mash credential install --key bob.key --token acme.demo.bob.token --server tls://myserver:4222 --ca ca.pem --account ADB7BK6VI6EGIDZ2XXCLTKUBGR5NOIJYVZ77DTRETXNW2XXPNQTK2UGO
+$ mash credential install --key bob.key --token acme.demo.bob.token --server tls://myserver:4222 --ca ca.pem --account ADQ6KRG4JFLSMDNOLVYUFUXM3JOVHOS5OJZPTIFCCRPM3DTQKTE4VLXF
 [exit 4]
 error: this needs a person at a terminal to compare the three values.
        Nothing was written.
 fix: run the same command in a terminal and answer the question:
-  mash credential install --key bob.key --token acme.demo.bob.token --server tls://myserver:4222 --ca ca.pem --account ADB7BK6VI6EGIDZ2XXCLTKUBGR5NOIJYVZ77DTRETXNW2XXPNQTK2UGO
+  mash credential install --key bob.key --token acme.demo.bob.token --server tls://myserver:4222 --ca ca.pem --account ADQ6KRG4JFLSMDNOLVYUFUXM3JOVHOS5OJZPTIFCCRPM3DTQKTE4VLXF
 
 [mash output: see the mash targets file]
 [match mash targets: the question and the refusals]
@@ -1040,11 +1040,12 @@ The check the NEXT names, on bobs-laptop, run as bob:
 $ mash status
 acme.demo.bob: mail works.
 
-  version       <version>
-  server        tls://myserver:4222
-                alive, encrypted (checked 09:42)
-  config        ok
-  credentials   ok
+  version      0.5.6
+  server       reachable, encrypted
+  config       ok
+  credentials  ok
+  mailbox      2 waiting
+  session      online
 
 [mash output: see the mash targets file]
 ```
@@ -1201,7 +1202,7 @@ columns, the closing paragraph is 330):
 ```text
 $ mashctl adopt --server tls://127.0.0.1:20001 --operator-key /tmp/mc/adopt-src/operator.nk --account-key /tmp/mc/adopt-src/account.nk --sys-creds /tmp/mc/adopt-src/sys.creds --owner acme --account MASH --mint-admin   <- P5
 mashctl adopt: checking tls://127.0.0.1:20001 as owner "acme", account "MASH" (read-only: nothing is written until every check passes)   <- P5
-  1. files          ok: operator key OAQCFPM5BOL22AGI6O76QGKIQHRLYN7DZZEATDRWD6QTEC5462SVCBJU, account key AD7BK6VI6EGIDZ2XXCLTKUBGR5NOIJYVZ77DTRETXNW2XXPNQTK2UGO6, system creds (modes 0600, seeds not printed)   <- P5 P6 P8
+  1. files          ok: operator key OAQCFPM5BOL22AGI6O76QGKIQHRLYN7DZZEATDRWD6QTEC5462SVCBJU, account key ADQ6KRG4JFLSMDNOLVYUFUXM3JOVHOS5OJZPTIFCCRPM3DTQKTE4VLXF, system creds (modes 0600, seeds not printed)   <- P5 P6 P8
   2. account        ok: "MASH" found on the resolver, subject = the account key, not expired. Not visible from here: whether the operator has revoked it   <- P6
   3. jetstream      ok: the account JWT gives it: disk 2GiB, streams 64, consumers 128   <- P6 P9
   4. system user    ok: the ping was answered (standalone, 1 server(s) replied) and the claims lookup worked. The claims update (push) permission is not exercised here: `mashctl endpoint delete` is the first to use it   <- P5 P6 P9
@@ -2107,7 +2108,7 @@ keys:                ~/.config/mash/keys
 
 who signed what (operator key made the account; account key signs tokens):
 operator key:        OAQCFPM5BOL22AGI6O76QGKIQHRLYN7DZZEATDRWD6QTEC5462SVCBJU
-account key:         AD7BK6VI6EGIDZ2XXCLTKUBGR5NOIJYVZ77DTRETXNW2XXPNQTK2UGO6
+account key:         ADQ6KRG4JFLSMDNOLVYUFUXM3JOVHOS5OJZPTIFCCRPM3DTQKTE4VLXF
 ```
 
 **What changed and why**
@@ -2321,14 +2322,14 @@ Send these three another way than the files:
   server address   tls://myserver:4222
   CA fingerprint   3f9a41c2 7b0d9e55 a1c4e08b 2d77f3a9
                    5e1b6c40 98aa0d12 c3f5e7b6 4a21d90c
-  account          ADB7BK6VI6EGIDZ2XXCLTKUBGR5NOIJYVZ77DTRETXNW2XXPNQTK2UGO
+  account          ADQ6KRG4JFLSMDNOLVYUFUXM3JOVHOS5OJZPTIFCCRPM3DTQKTE4VLXF
 
 The account is the one your mashctl signs tokens for.
 
 bob will be asked to confirm that these three values match what you send him.
 
 NEXT: on bob's machine, in the folder with bob.key, the token and ca.pem, run:
-  mash credential install --key bob.key --token acme.demo.bob.token --server tls://myserver:4222 --ca ca.pem --account ADB7BK6VI6EGIDZ2XXCLTKUBGR5NOIJYVZ77DTRETXNW2XXPNQTK2UGO
+  mash credential install --key bob.key --token acme.demo.bob.token --server tls://myserver:4222 --ca ca.pem --account ADQ6KRG4JFLSMDNOLVYUFUXM3JOVHOS5OJZPTIFCCRPM3DTQKTE4VLXF
 ```
 
 **What changed and why**
@@ -2406,14 +2407,14 @@ setting MASH_ENDPOINT can be left out.
 mash runs with the credentials file alone. bob.key and the token file were
 only inputs: delete them, or keep them as a backup and keep both private.
 
-$ mash credential install --key bob.key --token acme.demo.bob.token --server tls://myserver:4222 --ca ca.pem --account ADB7BK6VI6EGIDZ2XXCLTKUBGR5NOIJYVZ77DTRETXNW2XXPNQTK2UGO
+$ mash credential install --key bob.key --token acme.demo.bob.token --server tls://myserver:4222 --ca ca.pem --account ADQ6KRG4JFLSMDNOLVYUFUXM3JOVHOS5OJZPTIFCCRPM3DTQKTE4VLXF
 
 Confirm that these three values match what the operator sent you:
 
   server address   tls://myserver:4222
   CA fingerprint   3f9a41c2 7b0d9e55 a1c4e08b 2d77f3a9
                    5e1b6c40 98aa0d12 c3f5e7b6 4a21d90c
-  account          ADB7BK6VI6EGIDZ2XXCLTKUBGR5NOIJYVZ77DTRETXNW2XXPNQTK2UGO
+  account          ADQ6KRG4JFLSMDNOLVYUFUXM3JOVHOS5OJZPTIFCCRPM3DTQKTE4VLXF
 
 Do these three match what the operator sent you? (yes/no): yes
 
@@ -2527,25 +2528,25 @@ Send these three another way than the files:
   server address   tls://myserver:4222
   CA fingerprint   3f9a41c2 7b0d9e55 a1c4e08b 2d77f3a9
                    5e1b6c40 98aa0d12 c3f5e7b6 4a21d90c
-  account          ADB7BK6VI6EGIDZ2XXCLTKUBGR5NOIJYVZ77DTRETXNW2XXPNQTK2UGO
+  account          ADQ6KRG4JFLSMDNOLVYUFUXM3JOVHOS5OJZPTIFCCRPM3DTQKTE4VLXF
 
 The account is the one your mashctl signs tokens for.
 
 bob will be asked to confirm that these three values match what you send him.
 
 NEXT: on bob's machine, in the folder with bob.key, the token and ca.pem, run:
-  mash credential install --key bob.key --token acme.demo.bob.token --server tls://myserver:4222 --ca ca.pem --account ADB7BK6VI6EGIDZ2XXCLTKUBGR5NOIJYVZ77DTRETXNW2XXPNQTK2UGO
+  mash credential install --key bob.key --token acme.demo.bob.token --server tls://myserver:4222 --ca ca.pem --account ADQ6KRG4JFLSMDNOLVYUFUXM3JOVHOS5OJZPTIFCCRPM3DTQKTE4VLXF
 ```
 
 ```text
-$ mash credential install --key bob.key --token acme.demo.bob.token --server tls://myserver:4222 --ca ca.pem --account ADB7BK6VI6EGIDZ2XXCLTKUBGR5NOIJYVZ77DTRETXNW2XXPNQTK2UGO
+$ mash credential install --key bob.key --token acme.demo.bob.token --server tls://myserver:4222 --ca ca.pem --account ADQ6KRG4JFLSMDNOLVYUFUXM3JOVHOS5OJZPTIFCCRPM3DTQKTE4VLXF
 
 Confirm that these three values match what the operator sent you:
 
   server address   tls://myserver:4222
   CA fingerprint   3f9a41c2 7b0d9e55 a1c4e08b 2d77f3a9
                    5e1b6c40 98aa0d12 c3f5e7b6 4a21d90c
-  account          ADB7BK6VI6EGIDZ2XXCLTKUBGR5NOIJYVZ77DTRETXNW2XXPNQTK2UGO
+  account          ADQ6KRG4JFLSMDNOLVYUFUXM3JOVHOS5OJZPTIFCCRPM3DTQKTE4VLXF
 
 Do these three match what the operator sent you? (yes/no): yes
 
@@ -2573,11 +2574,12 @@ The check the NEXT names, on bobs-laptop, run as bob:
 $ mash status
 acme.demo.bob: mail works.
 
-  version       <version>
-  server        tls://myserver:4222
-                alive, encrypted (checked 09:42)
-  config        ok
-  credentials   ok
+  version      0.5.6
+  server       reachable, encrypted
+  config       ok
+  credentials  ok
+  mailbox      2 waiting
+  session      online
 
 [mash output: see the mash targets file]
 ```
@@ -2591,7 +2593,7 @@ changes nothing and says so for each file, so a person can trust a rerun:
 **AFTER, the install run again over the same key and token**
 
 ```text
-$ mash credential install --key bob.key --token acme.demo.bob.token --server tls://myserver:4222 --ca ca.pem --account ADB7BK6VI6EGIDZ2XXCLTKUBGR5NOIJYVZ77DTRETXNW2XXPNQTK2UGO
+$ mash credential install --key bob.key --token acme.demo.bob.token --server tls://myserver:4222 --ca ca.pem --account ADQ6KRG4JFLSMDNOLVYUFUXM3JOVHOS5OJZPTIFCCRPM3DTQKTE4VLXF
 
 The credentials for acme.demo.bob are already installed. Nothing was changed.
 
@@ -2636,7 +2638,7 @@ $ mash credential install --key bob.key --token acme.demo.bob.token
 error: the first install on this machine needs --server, --ca and
        --account. Nothing was read or changed.
 fix: add the server address, the CA file and the account key you were sent:
-  mash credential install --key bob.key --token acme.demo.bob.token --server tls://myserver:4222 --ca ca.pem --account ADB7BK6VI6EGIDZ2XXCLTKUBGR5NOIJYVZ77DTRETXNW2XXPNQTK2UGO
+  mash credential install --key bob.key --token acme.demo.bob.token --server tls://myserver:4222 --ca ca.pem --account ADQ6KRG4JFLSMDNOLVYUFUXM3JOVHOS5OJZPTIFCCRPM3DTQKTE4VLXF
 ```
 
 On any difference it refuses, touches no file, and says which file to move
@@ -2646,7 +2648,7 @@ aside. A token from another account, a server that is not the one in
 **AFTER, the install refuses to change a file that is there**
 
 ```text
-$ mash credential install --key bob.key --token acme.demo.bob.token --server tls://myserver:4222 --ca ca.pem --account ADB7BK6VI6EGIDZ2XXCLTKUBGR5NOIJYVZ77DTRETXNW2XXPNQTK2UGO
+$ mash credential install --key bob.key --token acme.demo.bob.token --server tls://myserver:4222 --ca ca.pem --account ADQ6KRG4JFLSMDNOLVYUFUXM3JOVHOS5OJZPTIFCCRPM3DTQKTE4VLXF
 [exit 1]
 error: ~/.config/mash/acme.demo.bob.creds already holds credentials for
        another account. Nothing was changed.
@@ -2654,9 +2656,9 @@ fix: move it aside:
   mv ~/.config/mash/acme.demo.bob.creds ~/.config/mash/acme.demo.bob.creds.old
 
 Then run the install again:
-  mash credential install --key bob.key --token acme.demo.bob.token --server tls://myserver:4222 --ca ca.pem --account ADB7BK6VI6EGIDZ2XXCLTKUBGR5NOIJYVZ77DTRETXNW2XXPNQTK2UGO
+  mash credential install --key bob.key --token acme.demo.bob.token --server tls://myserver:4222 --ca ca.pem --account ADQ6KRG4JFLSMDNOLVYUFUXM3JOVHOS5OJZPTIFCCRPM3DTQKTE4VLXF
 
-$ mash credential install --key bob.key --token acme.demo.bob.token --server tls://myserver2:4222 --ca ca.pem --account ADB7BK6VI6EGIDZ2XXCLTKUBGR5NOIJYVZ77DTRETXNW2XXPNQTK2UGO
+$ mash credential install --key bob.key --token acme.demo.bob.token --server tls://myserver2:4222 --ca ca.pem --account ADQ6KRG4JFLSMDNOLVYUFUXM3JOVHOS5OJZPTIFCCRPM3DTQKTE4VLXF
 [exit 1]
 error: ~/.config/mash/config.json already holds settings for another server.
        Nothing was changed.
@@ -2664,7 +2666,7 @@ fix: move it aside:
   mv ~/.config/mash/config.json ~/.config/mash/config.json.old
 
 Then run the install again:
-  mash credential install --key bob.key --token acme.demo.bob.token --server tls://myserver2:4222 --ca ca.pem --account ADB7BK6VI6EGIDZ2XXCLTKUBGR5NOIJYVZ77DTRETXNW2XXPNQTK2UGO
+  mash credential install --key bob.key --token acme.demo.bob.token --server tls://myserver2:4222 --ca ca.pem --account ADQ6KRG4JFLSMDNOLVYUFUXM3JOVHOS5OJZPTIFCCRPM3DTQKTE4VLXF
 
 $ mash credential install --key bob.key --token acme.demo.bob.token --ca new-ca.pem
 [exit 1]
@@ -2685,14 +2687,14 @@ be read by others. Each refusal writes nothing:
 **AFTER, the install refuses before it writes**
 
 ```text
-$ mash credential install --key bob.key --token acme.demo.bob.token --server tls://myserver:4222 --ca ca.pem --account ADB7BK6VI6EGIDZ2XXCLTKUBGR5NOIJYVZ77DTRETXNW2XXPNQTK2UGO
+$ mash credential install --key bob.key --token acme.demo.bob.token --server tls://myserver:4222 --ca ca.pem --account ADQ6KRG4JFLSMDNOLVYUFUXM3JOVHOS5OJZPTIFCCRPM3DTQKTE4VLXF
 
 Confirm that these three values match what the operator sent you:
 
   server address   tls://myserver:4222
   CA fingerprint   3f9a41c2 7b0d9e55 a1c4e08b 2d77f3a9
                    5e1b6c40 98aa0d12 c3f5e7b6 4a21d90c
-  account          ADB7BK6VI6EGIDZ2XXCLTKUBGR5NOIJYVZ77DTRETXNW2XXPNQTK2UGO
+  account          ADQ6KRG4JFLSMDNOLVYUFUXM3JOVHOS5OJZPTIFCCRPM3DTQKTE4VLXF
 
 Do these three match what the operator sent you? (yes/no): yes
 [exit 1]
@@ -2700,14 +2702,14 @@ error: this token was issued by a different account than the one you were given.
 Nothing was written.
 fix: ask the operator who made this endpoint to send the token again.
 
-$ mash credential install --key bob.key --token acme.demo.bob.token --server tls://myserver:4222 --ca ca.pem --account ADB7BK6VI6EGIDZ2XXCLTKUBGR5NOIJYVZ77DTRETXNW2XXPNQTK2UGO
+$ mash credential install --key bob.key --token acme.demo.bob.token --server tls://myserver:4222 --ca ca.pem --account ADQ6KRG4JFLSMDNOLVYUFUXM3JOVHOS5OJZPTIFCCRPM3DTQKTE4VLXF
 
 Confirm that these three values match what the operator sent you:
 
   server address   tls://myserver:4222
   CA fingerprint   3f9a41c2 7b0d9e55 a1c4e08b 2d77f3a9
                    5e1b6c40 98aa0d12 c3f5e7b6 4a21d90c
-  account          ADB7BK6VI6EGIDZ2XXCLTKUBGR5NOIJYVZ77DTRETXNW2XXPNQTK2UGO
+  account          ADQ6KRG4JFLSMDNOLVYUFUXM3JOVHOS5OJZPTIFCCRPM3DTQKTE4VLXF
 
 Do these three match what the operator sent you? (yes/no): yes
 [exit 1]
@@ -2717,16 +2719,16 @@ fix: check that ca.pem and the server address are the ones the operator
      sent.
 
 Then run the install again:
-  mash credential install --key bob.key --token acme.demo.bob.token --server tls://myserver:4222 --ca ca.pem --account ADB7BK6VI6EGIDZ2XXCLTKUBGR5NOIJYVZ77DTRETXNW2XXPNQTK2UGO
+  mash credential install --key bob.key --token acme.demo.bob.token --server tls://myserver:4222 --ca ca.pem --account ADQ6KRG4JFLSMDNOLVYUFUXM3JOVHOS5OJZPTIFCCRPM3DTQKTE4VLXF
 
-$ mash credential install --key bob.key --token acme.demo.bob.token --server tls://myserver:4222 --ca ca.pem --account ADB7BK6VI6EGIDZ2XXCLTKUBGR5NOIJYVZ77DTRETXNW2XXPNQTK2UGO
+$ mash credential install --key bob.key --token acme.demo.bob.token --server tls://myserver:4222 --ca ca.pem --account ADQ6KRG4JFLSMDNOLVYUFUXM3JOVHOS5OJZPTIFCCRPM3DTQKTE4VLXF
 [exit 1]
 error: bob.key can be read by others (mode 644).
 fix: make it private to you:
   chmod 600 bob.key
 
 Then run the install again:
-  mash credential install --key bob.key --token acme.demo.bob.token --server tls://myserver:4222 --ca ca.pem --account ADB7BK6VI6EGIDZ2XXCLTKUBGR5NOIJYVZ77DTRETXNW2XXPNQTK2UGO
+  mash credential install --key bob.key --token acme.demo.bob.token --server tls://myserver:4222 --ca ca.pem --account ADQ6KRG4JFLSMDNOLVYUFUXM3JOVHOS5OJZPTIFCCRPM3DTQKTE4VLXF
 
 [mash output: see the mash targets file]
 [match mash targets: the refusals]
@@ -2761,11 +2763,12 @@ key:
 $ mash status
 acme.demo.bob: mail works.
 
-  version       <version>
-  server        tls://myserver:4222
-                alive, encrypted (checked 09:42)
-  config        ok
-  credentials   ok
+  version      0.5.6
+  server       reachable, encrypted
+  config       ok
+  credentials  ok
+  mailbox      2 waiting
+  session      online
 
 [mash output: see the mash targets file]
 ```
@@ -2879,11 +2882,12 @@ The check the NEXT names, on this machine, run as alice:
 $ mash status
 acme.demo.alice: mail works.
 
-  version       <version>
-  server        tls://myserver:4222
-                alive, encrypted (checked 09:42)
-  config        ok
-  credentials   ok
+  version      0.5.6
+  server       reachable, encrypted
+  config       ok
+  credentials  ok
+  mailbox      2 waiting
+  session      online
 
 [mash output: see the mash targets file]
 ```
@@ -3237,7 +3241,7 @@ acme/team/alice  acme.team.alice   <- P2
   group:        team   <- P8
   instance:     alice   <- P8
   agent:        claude-code   <- P9
-  account:      AD7BK6VI6EGIDZ2XXCLTKUBGR5NOIJYVZ77DTRETXNW2XXPNQTK2UGO6   <- P9
+  account:      ADQ6KRG4JFLSMDNOLVYUFUXM3JOVHOS5OJZPTIFCCRPM3DTQKTE4VLXF   <- P9
   user key:     UAGT4ZQXALANXPHIAET7WXOZQRCNHQWDUU2UMRFXF23KU6FJQVUH7KOQ   <- P9
   mail subject: agents.mail.acme.team.alice   <- P9
   created:      2026-11-19T00:21:38Z
@@ -3298,7 +3302,7 @@ description:   -
 tags:          -
 capabilities:  -
 
-account key:   AD7BK6VI6EGIDZ2XXCLTKUBGR5NOIJYVZ77DTRETXNW2XXPNQTK2UGO6
+account key:   ADQ6KRG4JFLSMDNOLVYUFUXM3JOVHOS5OJZPTIFCCRPM3DTQKTE4VLXF
 public key:    UAO35ZE32HBKAMOGS4CYOJCJWGWGGEGGDEWOLR5Q2L47QFBJMQJRU3CC
 token:         signed 2026-11-19 00:22 UTC, purpose issue, not revoked
 online:        no
@@ -5256,7 +5260,7 @@ AFTER, `--dry-run`
 $ mashctl endpoint delete acme.demo.bob --dry-run
 [exit 0]
 Would delete acme.demo.bob. It would lose:
-  - its inbox, with 3 unread messages
+  - its inbox, with 1 message
   - its address: it would be retired for good and could not be used again
   - its key: the server would refuse bob's credentials from now, on every
     machine
@@ -5267,7 +5271,7 @@ Nothing was changed.
 $ mashctl endpoint delete acme.demo.alice --dry-run
 [exit 0]
 Would delete acme.demo.alice. It would lose:
-  - its inbox, with 2 unread messages
+  - its inbox, with 2 messages
   - its address: it would be retired for good and could not be used again
   - its key: the server would refuse alice's credentials from now, on every
     machine
@@ -5281,7 +5285,7 @@ AFTER, real (bob's credentials are on another machine)
 $ mashctl endpoint delete acme.demo.bob
 
 Deleting acme.demo.bob will lose:
-  - its inbox, with 3 unread messages
+  - its inbox, with 1 message
   - its address: it is retired for good and cannot be used again
   - its key: the server will refuse bob's credentials from now, on every
     machine
@@ -5290,7 +5294,7 @@ Type the address to delete it: acme.demo.bob
 
 Deleted acme.demo.bob. Its address cannot be used again.
   Checked: the server now refuses bob's old credentials.
-  Its inbox is deleted, with 3 unread messages.
+  Its inbox is deleted, with 1 message.
 
 On bob's machine, mash status now says DELETED.
 
@@ -5331,7 +5335,7 @@ AFTER, a credentials file is here (alice): the command leaves it as it was
 $ mashctl endpoint delete acme.demo.alice
 
 Deleting acme.demo.alice will lose:
-  - its inbox, with 2 unread messages
+  - its inbox, with 2 messages
   - its address: it is retired for good and cannot be used again
   - its key: the server will refuse alice's credentials from now, on every
     machine
@@ -5340,7 +5344,7 @@ Type the address to delete it: acme.demo.alice
 
 Deleted acme.demo.alice. Its address cannot be used again.
   Checked: the server now refuses alice's old credentials.
-  Its inbox is deleted, with 2 unread messages.
+  Its inbox is deleted, with 2 messages.
   Its credentials file here was left as it was; mash status will report it
   as DELETED.
 
@@ -5353,7 +5357,7 @@ AFTER, `--detail`
 $ mashctl endpoint delete acme.demo.bob --detail
 
 Deleting acme.demo.bob will lose:
-  - its inbox, with 3 unread messages
+  - its inbox, with 1 message
   - its address: it is retired for good and cannot be used again
   - its key: the server will refuse bob's credentials from now, on every
     machine
@@ -5362,14 +5366,14 @@ Type the address to delete it: acme.demo.bob
 
 Deleted acme.demo.bob. Its address cannot be used again.
   Checked: the server now refuses bob's old credentials.
-  Its inbox is deleted, with 3 unread messages.
+  Its inbox is deleted, with 1 message.
 
 Detail
   storage name    acme_demo_bob
   public key      UAO35ZE32HBKAMOGS4CYOJCJWGWGGEGGDEWOLR5Q2L47QFBJMQJRU3CC
   key revoked     2026-11-19 00:24 UTC
   servers         1 of 1 answered
-  mail lost       3 unread messages
+  mail lost       1 message
 
 On bob's machine, mash status now says DELETED.
 
@@ -5382,7 +5386,7 @@ AFTER, a wrong answer, and no terminal
 $ mashctl endpoint delete acme.demo.bob
 
 Deleting acme.demo.bob will lose:
-  - its inbox, with 3 unread messages
+  - its inbox, with 1 message
   - its address: it is retired for good and cannot be used again
   - its key: the server will refuse bob's credentials from now, on every
     machine
@@ -5496,7 +5500,7 @@ AFTER, `--no-revoke` (the warning is printed once, after the results)
 $ mashctl endpoint delete acme.demo.bob --no-revoke
 
 Deleting acme.demo.bob will lose:
-  - its inbox, with 3 unread messages
+  - its inbox, with 1 message
   - its address: it is retired for good and cannot be used again
 Its key will NOT be revoked: bob's credentials keep working until you
 revoke the key.
@@ -5504,7 +5508,7 @@ revoke the key.
 Type the address to delete it: acme.demo.bob
 
 Deleted acme.demo.bob. Its address cannot be used again. KEY NOT REVOKED.
-  Its inbox is deleted, with 3 unread messages.
+  Its inbox is deleted, with 1 message.
   Its key was not revoked.
 
 warning: bob's key still works. Until it is revoked, a copy of bob's
@@ -5563,7 +5567,7 @@ Options (use at least one; the value - clears a field)
   --role R               what the endpoint does, for example designer
   --host H               the machine it runs on
   --describe TEXT        one sentence about it
-  --tag K=V              add or change a tag (a note shown by mash who --detail)
+  --tag K=V              add or change a tag (a note shown by mash endpoint status --detail)
   --untag K              remove a tag
   --capability WORD      add a capability (a word for something it can do)
   --remove-capability W  remove a capability; --capability - removes all
@@ -5588,7 +5592,7 @@ What changed and why:
 - P5, P6: the 230 column usage is a short table. Tags and capabilities each get
   one explaining clause.
 - C1 notes: if the old names must stay, the flags are `--label K=V` ("add or
-  change a label, a note shown by mash who --detail"), `--cap WORD` ("add a
+  change a label, a note shown by mash endpoint status --detail"), `--cap WORD` ("add a
   capability, a word for something it can do") and `--uncap WORD`.
 
 ### C2. set: result forms
@@ -6422,14 +6426,14 @@ AFTER, plain
 $ mashctl deprovision acme.demo.alice
 
 Removing acme.demo.alice will lose:
-  - its inbox, with 2 unread messages
+  - its inbox, with 2 messages
   - its key: the server will refuse alice's NATS user from now
 
 Type the address to remove it: acme.demo.alice
 
 Removed endpoint acme.demo.alice.
   Checked: the server now refuses its NATS user.
-  Its inbox is deleted, with 2 unread messages.
+  Its inbox is deleted, with 2 messages.
 
 Delete any copy of alice's credentials file on its machine.
 ```
@@ -6440,7 +6444,7 @@ AFTER, after a drain
 $ mashctl deprovision acme.demo.alice --suspension 63afd156... --drained-to 41
 
 Removing acme.demo.alice will lose:
-  - its inbox, with 2 unread messages
+  - its inbox, with 2 messages
   - its key: the server will refuse alice's NATS user from now
 
 Type the address to remove it: acme.demo.alice
@@ -6460,14 +6464,14 @@ AFTER, `--no-revoke` (the warning once)
 $ mashctl deprovision acme.demo.alice --no-revoke
 
 Removing acme.demo.alice will lose:
-  - its inbox, with 2 unread messages
+  - its inbox, with 2 messages
 Its key will NOT be revoked: alice's credentials keep working until you
 revoke the key.
 
 Type the address to remove it: acme.demo.alice
 
 Removed endpoint acme.demo.alice. KEY NOT REVOKED.
-  Its inbox is deleted, with 2 unread messages. Its key was not revoked.
+  Its inbox is deleted, with 2 messages. Its key was not revoked.
 
 warning: alice's key still works. Until it is revoked, a copy of alice's
          credentials can still sign in, send and read mail. Revoke it with
@@ -7144,14 +7148,14 @@ Send these another way than the files:
 
   CA fingerprint   3f9a41c2 7b0d9e55 a1c4e08b 2d77f3a9
                    5e1b6c40 98aa0d12 c3f5e7b6 4a21d90c
-  account          ADB7BK6VI6EGIDZ2XXCLTKUBGR5NOIJYVZ77DTRETXNW2XXPNQTK2UGO
+  account          ADQ6KRG4JFLSMDNOLVYUFUXM3JOVHOS5OJZPTIFCCRPM3DTQKTE4VLXF
 
 The account is the one your mashctl signs tokens for.
 
 error: this server's address is localhost, which only this machine can reach.
        Send bob the address that his machine uses to reach this server.
 fix: on bob's machine, in the folder with bob.key, the token and ca.pem, run:
-  mash credential install --key bob.key --token acme.demo.bob.token --server <server address> --ca ca.pem --account ADB7BK6VI6EGIDZ2XXCLTKUBGR5NOIJYVZ77DTRETXNW2XXPNQTK2UGO
+  mash credential install --key bob.key --token acme.demo.bob.token --server <server address> --ca ca.pem --account ADQ6KRG4JFLSMDNOLVYUFUXM3JOVHOS5OJZPTIFCCRPM3DTQKTE4VLXF
 ```
 
 Exit codes in this block: invalid name 1, naming rule 1, exists 1, deleted
@@ -8053,7 +8057,7 @@ $ mashctl endpoint delete acme.demo.alice --delete-creds
 [exit 0]
 
 Deleting acme.demo.alice will lose:
-  - its inbox, with 2 unread messages
+  - its inbox, with 2 messages
   - its address: it is retired for good and cannot be used again
   - its key: the server will refuse alice's credentials from now, on every
     machine
@@ -8063,7 +8067,7 @@ Type the address to delete it: acme.demo.alice
 
 Deleted acme.demo.alice. Its address cannot be used again.
   Checked: the server now refuses alice's old credentials.
-  Its inbox is deleted, with 2 unread messages.
+  Its inbox is deleted, with 2 messages.
   Its credentials file here was removed.
 
 Nothing can restore a deleted address. A new endpoint needs a new name.
@@ -8550,7 +8554,7 @@ Decisions the rules left open. Each is one line.
 16. [confirm: `mashctl adopt --help` is the pointer to print when mashctl has no
     server (a full `adopt` command needs the operator's files, which mash cannot
     name).]
-17. [confirm: `mash who --detail` shows tags (C1 help text).]
+17. [confirm: `mash endpoint status --detail` shows tags (C1 help text).]
 18. [confirm: `rm -r` of the lock folder named in E4 is safe when no reissue is
     running.]
 19. [DRAFT20, F3: `mash credential install --creds FILE` is dropped; another
