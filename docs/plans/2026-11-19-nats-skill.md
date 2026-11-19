@@ -127,7 +127,7 @@ What mashctl needs from the server (the contract the script meets):
 operator mode with a full resolver preloaded with SYS and the mash
 account; JetStream file store; account limits enough for `endpoints + 5`
 streams; TLS on the client port with a CA the clients trust; sys creds;
-admin creds; the operator signing seed (SO) and the account identity seed
+admin creds; the operator seed (SO) and the account identity seed
 (SA) as 0600 files.
 
 ## Randy's other points that touch this
