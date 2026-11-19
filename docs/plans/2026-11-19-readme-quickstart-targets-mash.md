@@ -167,16 +167,31 @@ Alice's machine; here the same machine).
 
 Credentials are the one file mash signs in with: Alice's private key plus
 the server's token. This step joins the two and puts the result in mash's
-config directory.
+config directory. It also writes down where the server is and which CA
+(certificate authority) mash trusts, so you can see all of it: `--server`
+is the server's address, and `--ca` is the `ca.pem` file from the NATS setup
+guide (the server proves itself with a certificate; mash will only talk to a
+server that this CA signed; the file holds no secret).
 
 ```
-$ mash credential install --key alice.key --token acme.demo.alice.token
-Installed credentials for acme.demo.alice in ~/.config/mash.
+$ mash credential install --key alice.key --token acme.demo.alice.token \
+    --server tls://myserver:4222 --ca ca.pem
+Installed credentials for acme.demo.alice.
 They combine alice.key and the token; mash uses them to sign in.
 
-NEXT: Check that Alice can sign in, with: export MASH_OWNER=acme
-MASH_GROUP=demo MASH_NAME=alice; mash status
+  wrote   ~/.config/mash/acme.demo.alice.creds  (mode 600)
+  wrote   ~/.config/mash/config.json            (server, owner, CA)
+  copied  ca.pem to ~/.config/mash/ca.pem       (mode 644)
+
+NEXT: Start Claude Code as this agent:
+      MASH_GROUP=demo MASH_NAME=alice claude
+      (or check first: MASH_GROUP=demo MASH_NAME=alice mash status)
 ```
+
+`config.json` stores the owner too (it comes from the token), so only
+`MASH_GROUP` and `MASH_NAME` are needed from here on. This guide checks
+first (step 6) and starts Claude Code in step 9, after the plugin is
+installed.
 
 NEXT: Make Bob's endpoint the short way, with
 `mashctl endpoint create acme/demo/bob --make-key` (you, on myserver).
@@ -191,24 +206,36 @@ steps above (docs/operations.md, "An endpoint on another machine").
 
 ```
 $ mashctl endpoint create acme/demo/bob --make-key
-Made a private key for bob.      (bob.key, bob.pub in ~/.config/mash)
-Created endpoint acme.demo.bob.  (token: acme.demo.bob.token)
-Installed credentials for acme.demo.bob in ~/.config/mash.
+Made a private key for bob.
+  wrote  ~/.config/mash/bob.key, bob.pub
+Created endpoint acme.demo.bob.
+  wrote  ~/.config/mash/acme.demo.bob.token
+Installed credentials for acme.demo.bob.
+  wrote   ~/.config/mash/acme.demo.bob.creds  (mode 600)
+  wrote   ~/.config/mash/config.json          (server, owner, CA)
+  copied  ca.pem to ~/.config/mash/ca.pem     (mode 644)
 
-NEXT: Check that Bob can sign in, with: MASH_OWNER=acme MASH_GROUP=demo
-MASH_NAME=bob mash status
+NEXT: Start Claude Code as this agent:
+      MASH_GROUP=demo MASH_NAME=bob claude
+      (or check first: MASH_GROUP=demo MASH_NAME=bob mash status)
 ```
+
+No `--server` or `--ca` here: `mashctl` already knows the server and the CA
+from the NATS setup, and writes them for `mash` too (the `config.json` and
+`ca.pem` lines). Alice's step 4 did the same job with the two flags.
 
 NEXT: Check that Alice can sign in with `mash status` (you, as alice).
 
 ### Step 6: Check that Alice can sign in (command 1 of 1)
 
 `mash status` tells you who mash thinks you are, and whether the server
-accepts you. The first command says you are acting as Alice; it stays in
+accepts you. The owner (`acme`) and the server are already in
+`config.json`; the first command says which group and agent you are acting
+as, Alice; it stays in
 effect for this shell.
 
 ```sh
-export MASH_OWNER=acme MASH_GROUP=demo MASH_NAME=alice
+export MASH_GROUP=demo MASH_NAME=alice
 ```
 
 ```
@@ -219,7 +246,7 @@ Checked mash for acme.demo.alice.
   server       reachable, encrypted
   config       valid
   credentials  valid
-  group        2 other endpoints in demo, 5 under acme
+  group        1 other endpoint in demo, 3 under acme
 ```
 
 NEXT: Send Bob a message with `mash send` (you, as alice).
@@ -284,7 +311,7 @@ into `mash send`.
 $ mash who
 ENDPOINT         STATE    LAST SEEN
 acme.demo.alice  online   now
-acme.demo.bob    offline  3 h ago
+acme.demo.bob    offline  not seen yet
 ```
 
 NEXT: Add mash to Claude Code with `mash plugin export` (you, on myserver).
@@ -298,7 +325,7 @@ does not type these commands. Four short lines:
 mash plugin export ./mash-plugin
 claude plugin marketplace add ./mash-plugin
 claude plugin install mash@mash
-MASH_OWNER=acme MASH_GROUP=demo MASH_NAME=alice \
+MASH_GROUP=demo MASH_NAME=alice \
   claude --dangerously-load-development-channels plugin:mash@mash
 ```
 
@@ -333,6 +360,9 @@ command.
 - The server is set up first, by the NATS setup guide; `mashctl init
   --local --start` is not part of the quick start.
 - Alice and Bob, host `myserver`, group `demo`, are named up front.
+- Step 4 takes `--server` and `--ca` and writes `config.json` and the CA
+  copy, and prints each file it wrote; only `MASH_GROUP` and `MASH_NAME`
+  are set by hand afterwards (`MASH_OWNER` was needed before).
 - The three-command endpoint flow is `mash key create --out alice.key`,
   `mashctl endpoint create ... --public-key alice.pub`, `mash credential
   install --key alice.key --token ...` (was `credential create`).

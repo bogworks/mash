@@ -89,8 +89,19 @@ The CLI team's proposal, quoted unchanged:
 Notes on the proposal, for the contract:
 
 - The proposal's last NEXT is not a command (the maintainer's point 11). The
-  target below gives a pasteable line that does what it says: it exports the
-  three variables and runs `mash status`.
+  target below gives a pasteable line that does what it says: it sets the two
+  variables mash still needs and starts Claude Code (or runs `mash status`).
+- EXTENSION to the proposal, core's, to be agreed with the CLI team: a person
+  must be able to see the step that writes the endpoint's configuration and
+  trust, which today happens off screen. Step 3-C therefore takes two new
+  flags, `--server URL` and `--ca FILE`, writes `config.json` (server, owner,
+  CA) beside the credentials, copies the CA file into the config directory,
+  and prints each file it wrote and where. The owner comes from the token
+  (`acme`), so the next command needs only `MASH_GROUP` and `MASH_NAME`.
+  Checked in the source: `config.json` holds `url`, `owner` and `tls_ca`;
+  `internal/config` reads `owner` from it (`MASH_OWNER` overrides) and
+  resolves a relative `tls_ca` against the config directory; the group has
+  no `config.json` key, so it stays in `MASH_GROUP`.
 - Every step opens with a header in the maintainer's format, one sentence of
   why, a blank line, the command, its output, a blank line, NEXT. The header
   and the why sentence belong to the guide (walkthrough, docs), not to the
@@ -157,26 +168,62 @@ NEXT: Take acme.demo.bob.token to the agent's machine and run: mash
 credential install --key bob.key --token acme.demo.bob.token
 ```
 
-### Step 3-C: Install the credentials (command 3 of 3)
+### Step 3-C: Install the credentials and trust the server (command 3 of 3)
 
 Credentials are the one file mash signs in with: Bob's private key plus the
-server's token. This step joins the two.
+server's token. This step joins the two, and writes down where the server is
+and which certificate authority (CA) to trust, so nothing about the setup
+happens off screen.
+
+```
+$ mash credential install --key bob.key --token acme.demo.bob.token \
+    --server tls://myserver:4222 --ca ca.pem
+Installed credentials for acme.demo.bob.
+They combine bob.key and the token; mash uses them to sign in.
+
+  wrote   ~/.config/mash/acme.demo.bob.creds  (mode 600)
+  wrote   ~/.config/mash/config.json          (server, owner, CA)
+  copied  ca.pem to ~/.config/mash/ca.pem     (mode 644)
+
+NEXT: Start Claude Code as this agent:
+      MASH_GROUP=demo MASH_NAME=bob claude
+      (or check first: MASH_GROUP=demo MASH_NAME=bob mash status)
+```
+
+`config.json` stores the owner too (it comes from the token), so the NEXT
+needs only `MASH_GROUP` and `MASH_NAME`. The CA is copied into the config
+directory so the configuration does not depend on where `ca.pem` was when
+you ran the command (Q14); `config.json` names the copy. See "How the agent
+trusts the server" below.
+
+#### Same machine: `--server` and `--ca` are optional
+
+When `config.json` already names the server (an earlier install, or
+`mashctl endpoint create --make-key`, below), or mashctl's own configuration
+on this machine does, mash uses it and the flags can be left out. mash says
+which it did:
 
 ```
 $ mash credential install --key bob.key --token acme.demo.bob.token
-Installed credentials for acme.demo.bob in ~/.config/mash.
+Installed credentials for acme.demo.bob.
 They combine bob.key and the token; mash uses them to sign in.
 
-NEXT: Check that Bob can sign in, with: export MASH_OWNER=acme
-MASH_GROUP=demo MASH_NAME=bob; mash status
+  wrote  ~/.config/mash/acme.demo.bob.creds  (mode 600)
+  kept   ~/.config/mash/config.json          (server tls://myserver:4222)
+  kept   ~/.config/mash/ca.pem               (the server's CA)
+
+NEXT: Start Claude Code as this agent:
+      MASH_GROUP=demo MASH_NAME=bob claude
+      (or check first: MASH_GROUP=demo MASH_NAME=bob mash status)
 ```
 
-The NEXT sentence is two commands on purpose (the second line is a
-pasteable `export ...; mash status`). If the contract prefers one command:
-`MASH_OWNER=acme MASH_GROUP=demo MASH_NAME=bob mash status`, which also
-works pasted and changes nothing in the shell.
+When mash takes the settings from mashctl's configuration instead, the
+`kept` lines read `wrote` and `copied` as in the first block. `--server` or
+`--ca` given on the command line always win over what is already there.
 
-Refusal, exit 1 as today:
+#### Refusals (same two-line form, exit 1)
+
+Token for a different key (the existing text, unchanged):
 
 ```
 $ mash credential install --key alice.key --token acme.demo.bob.token
@@ -184,7 +231,45 @@ mash: this token is for a different key than alice.key.
 fix: use the key you made for bob (bob.key), or ask for a new token.
 ```
 
-Other refusals, same two-line form:
+No `--server` and no `config.json` to take it from:
+
+```
+$ mash credential install --key bob.key --token acme.demo.bob.token
+mash: mash does not know where your server is.
+fix: add --server tls://myserver:4222 (and --ca ca.pem for a private CA).
+```
+
+The `--ca` file cannot be read:
+
+```
+$ mash credential install --key bob.key --token acme.demo.bob.token \
+    --server tls://myserver:4222 --ca ca.pem
+mash: cannot read ca.pem (no such file).
+fix: check the path; whoever set up the server can send you the file.
+```
+
+The `--ca` file is not a certificate:
+
+```
+mash: ca.pem is not a certificate.
+fix: use the CA file from the server's setup (it starts BEGIN CERTIFICATE).
+```
+
+The `--server` address is a plain `nats://` one:
+
+```
+mash: mash connects only over TLS; nats://myserver:4222 is not encrypted.
+fix: use tls://myserver:4222.
+```
+
+`config.json` already points at a different server:
+
+```
+mash: config.json already points at tls://oldhost:4222.
+fix: add --force to point mash at tls://myserver:4222 instead.
+```
+
+Other refusals:
 
 ```
 mash: acme.demo.bob.creds is already installed in ~/.config/mash.
@@ -195,6 +280,92 @@ fix: add --force to replace it, or choose another place with --out.
 mash: cannot read acme.demo.nobody.token (no such file).
 fix: check the file name; the token is the file mashctl wrote.
 ```
+
+#### `--detail` and `--json`
+
+`--detail` adds the full paths, the flat key, and the token's owner and
+expiry when the token carries them. The expiry line is PROVISIONAL: it is
+shown only if the token's format lets mash read it (Q13).
+
+```
+$ mash credential install --key bob.key --token acme.demo.bob.token \
+    --server tls://myserver:4222 --ca ca.pem --detail
+Installed credentials for acme.demo.bob (detail).
+They combine bob.key and the token; mash uses them to sign in.
+
+  wrote   /home/bob/.config/mash/acme.demo.bob.creds  (mode 600)
+  wrote   /home/bob/.config/mash/config.json          (server, owner, CA)
+  copied  ca.pem to /home/bob/.config/mash/ca.pem     (mode 644)
+
+  flat key       acme_demo_bob
+  token owner    acme
+  token expires  never  (provisional)
+
+NEXT: Start Claude Code as this agent:
+      MASH_GROUP=demo MASH_NAME=bob claude
+      (or check first: MASH_GROUP=demo MASH_NAME=bob mash status)
+```
+
+`--json` replaces the screen with one object (schema `mash-credential@2`):
+
+```
+{ "endpoint": "acme.demo.bob",
+  "creds_path": "/home/bob/.config/mash/acme.demo.bob.creds",
+  "config_path": "/home/bob/.config/mash/config.json",
+  "ca_path": "/home/bob/.config/mash/ca.pem",
+  "server": "tls://myserver:4222" }
+```
+
+`ca_path` is `null` when no `--ca` was given and the system's authorities
+are used.
+
+#### How the agent trusts the server
+
+The server proves who it is with a certificate. mash checks it against the
+CA file you give with `--ca` (the CA is whoever signed the server's
+certificate), so mash only talks to a server that CA signed. With no `--ca`,
+mash trusts the same authorities your computer does: right for a public
+server. A server whose certificate does not match is refused, with a message
+that says why and what to do (below). Get `ca.pem` from whoever set up the
+server: it holds no secret (the NATS setup guide, `docs/tls-and-clusters.md`,
+calls it `ca.pem`; copy it, never `ca.key`). `mash status --detail` shows
+which CA is trusted.
+
+When the server's certificate is not signed by the CA mash trusts, as
+`mash status` (exit 1) and as `mash send` (exit 1):
+
+```
+$ mash status
+Checked mash for acme.demo.bob.
+
+  version      mash 0.5.5
+  server       refused: its certificate is not signed by ca.pem
+  config       valid
+  credentials  valid, not tested
+  group        not known
+
+NEXT: Replace the CA file with the one your server uses, then run mash
+status again: cp ca.pem ~/.config/mash/ca.pem
+```
+
+```
+$ mash send acme.demo.alice "hi"
+mash: the server's certificate is not signed by ca.pem.
+fix: get the server's CA file from whoever set it up; mash status --detail
+shows the one mash trusts now.
+```
+
+Before (`docs/tls-and-clusters.md`, the same fault today):
+
+```
+x509: certificate signed by unknown authority (the server's certificate is
+not trusted: set tls_ca or MASH_TLS_CA ...)
+```
+
+(Line 95 of that file, wrapped to fit 80 columns, the words unchanged.)
+Without any `--ca` and a private server, the message names
+the system's authorities instead: "the server's certificate is not signed by
+an authority your computer trusts."
 
 Before (catalog, shortened):
 
@@ -207,28 +378,41 @@ next: mash status
 
 Changes: verb `create` becomes `install` (hard cut, no alias: the
 maintainer's rule for migrations); flags `--seed`/`--jwt` become
-`--key`/`--token`; `--dry-run` says "Would install" and its NEXT is the same
-command without it; the creds path and the public key move behind
-`--detail`; `--json` keeps its shape with renamed fields
-(`mash-credential@2`: `creds_path` stays, `name` becomes `endpoint`). The
-exit code for a missing token file today is 6; the target keeps 6 (I/O
-error) and lists it in section 6.
+`--key`/`--token`; NEW flags `--server URL` and `--ca FILE`; `config.json`
+is now written (server, owner, CA) with the CA copied beside it, and every
+file written is listed; existing `config.json` values are kept unless
+`--force`; `--dry-run` says "Would install" and lists what it would write,
+and its NEXT is the same command without it; the creds path and the public
+key move behind `--detail`; `--json` keeps its shape with renamed fields
+(`mash-credential@2`: `creds_path` stays, `name` becomes `endpoint`, new
+`config_path`, `ca_path`, `server`). The exit code for a missing token file
+today is 6; the target keeps 6 (I/O error) and lists it in section 6. The
+new refusals exit 1 (a `--ca` file that cannot be read exits 6, as a missing
+token does).
 
 ### Same machine: one command
 
 ```
 $ mashctl endpoint create acme/demo/bob --make-key
-Made a private key for bob.      (bob.key, bob.pub in ~/.config/mash)
-Created endpoint acme.demo.bob.  (token: acme.demo.bob.token)
-Installed credentials for acme.demo.bob in ~/.config/mash.
+Made a private key for bob.
+  wrote  ~/.config/mash/bob.key, bob.pub
+Created endpoint acme.demo.bob.
+  wrote  ~/.config/mash/acme.demo.bob.token
+Installed credentials for acme.demo.bob.
+  wrote   ~/.config/mash/acme.demo.bob.creds  (mode 600)
+  wrote   ~/.config/mash/config.json          (server, owner, CA)
+  copied  ca.pem to ~/.config/mash/ca.pem     (mode 644)
 
-NEXT: Check that Bob can sign in, with: MASH_OWNER=acme MASH_GROUP=demo
-MASH_NAME=bob mash status
+NEXT: Start Claude Code as this agent:
+      MASH_GROUP=demo MASH_NAME=bob claude
+      (or check first: MASH_GROUP=demo MASH_NAME=bob mash status)
 ```
 
-(CLI team's output, quoted for consistency. With `--make-key` the key and
-token files are kept in the config directory, so the shown file names are
-the proof that nothing secret was sent anywhere.)
+(CLI team's command, extended here for consistency: three short results,
+key, endpoint, installed, each with its wrote-lines. With `--make-key` the
+key and token files are kept in the config directory, so the shown file
+names are the proof that nothing secret was sent anywhere, and the server
+and CA come from mashctl's own configuration, so no `--server` or `--ca`.)
 
 ## 3. Commands
 
@@ -315,7 +499,7 @@ Checked mash for acme.demo.bob.
   server       reachable, encrypted
   config       valid
   credentials  valid
-  group        2 other endpoints in demo, 5 under acme
+  group        1 other endpoint in demo, 3 under acme
 ```
 
 Exit 0. No NEXT (nothing follows).
@@ -329,11 +513,12 @@ Checked mash for acme.demo.bob (detail).
   version      mash 0.5.5, commit e389eaf
   server       reachable, encrypted, answered in 41 ms
                tls://myserver:4222
+               certificate checked against ~/.config/mash/ca.pem
   config       valid, from ~/.config/mash/config.json
   credentials  valid
                ~/.config/mash/acme.demo.bob.creds
                token expires: never
-  group        2 other endpoints in demo, 5 under acme
+  group        1 other endpoint in demo, 3 under acme
   flat key     acme_demo_bob
   name rule    none set
   clock        server is 1 s ahead of this machine
@@ -341,7 +526,9 @@ Checked mash for acme.demo.bob (detail).
   relay trace  0 relayed messages seen
 ```
 
-The `claude code` line replaces two jargon lines (channel allowlist,
+The `certificate checked against` line names the CA mash trusts; with no CA
+configured it reads `certificate checked against this computer's trusted
+authorities`. The `claude code` line replaces two jargon lines (channel allowlist,
 delivery). In a CLI run, hook and channel counts exist only inside a running
 session (catalog note); the CLI line reports only what it can read: whether
 the plugin's hooks and the channel list are installed. Live counts (hooks
@@ -360,7 +547,7 @@ Checked mash for acme.demo.bob.
   server       reachable, encrypted
   config       valid
   credentials  valid
-  group        2 other endpoints in demo, 5 under acme
+  group        1 other endpoint in demo, 3 under acme
   claude code  warning: mail will not wake an idle session
 
 NEXT: Follow section 3 of docs/install.md, then run mash status again.
@@ -500,7 +687,7 @@ Checked mash for acme.demo.bob.
   server       reachable, NOT encrypted
   config       valid
   credentials  valid
-  group        2 other endpoints in demo, 5 under acme
+  group        1 other endpoint in demo, 3 under acme
 
 mash: warning: this connection is not encrypted. Anyone on the network can
 read your mail. Use a tls:// address.
@@ -1390,6 +1577,26 @@ the same plain voice, rewritten as short lines of at most 80 columns:
     token for expiry in the step and refuse with a plain sentence; needs the
     CLI team's token format.
 
+14. Copy the CA file into the config directory (`~/.config/mash/ca.pem`, and
+    `config.json` names the copy), or record the path you gave? Recommendation:
+    copy, so the configuration does not break when the file moves; the copy
+    is printed as a `copied` line. It holds no secret, mode 644.
+15. Should writing the configuration be a separate `mash config` step
+    instead of flags on `credential install`? Recommendation: no, flags on
+    `credential install` (one step fewer for the person, and Step 3-C is
+    where the server's token and the server's address meet); a `mash config`
+    verb could still come later for changing one value.
+16. `--force` semantics. Recommendation: `--force` on `credential install`
+    replaces an existing `creds` file and an existing `config.json` server
+    value (owner and CA with it); it never deletes other keys in
+    `config.json`, and without it a different server is refused, naming
+    what the file says today.
+17. Where mash finds a server when neither the flag nor `config.json` has
+    one: mashctl's configuration on this machine, as the same-machine form
+    shows. Recommendation: confirm the lookup order (flag, config.json,
+    mashctl's configuration) and that mash never reads mashctl's admin
+    credentials, only the server address and CA.
+
 ## 6. Behaviour changes the contract must decide
 
 - `mash status` connects (once, 2 s budget); it may take 2 s and exit
@@ -1409,6 +1616,17 @@ the same plain voice, rewritten as short lines of at most 80 columns:
   `version`, `name` to `key` behind detail).
 - `mash credential create` renamed `mash credential install`; flags
   `--seed`/`--jwt` renamed `--key`/`--token`; JSON schemas bump to `@2`.
+- `mash credential install` (core's extension, to agree with the CLI team):
+  new flags `--server URL` and `--ca FILE`; it now writes `config.json`
+  (server, owner, CA) and copies the CA into the config directory; it lists
+  every file written; `--force` replaces a different server in an existing
+  `config.json`; new refusals (no server known, CA unreadable or not a
+  certificate, plain `nats://` URL, different server); `--json` gains
+  `config_path`, `ca_path`, `server`. `mashctl endpoint create --make-key`
+  prints the same wrote-lines.
+- A server certificate that the trusted CA did not sign is refused with a
+  plain message in `status` (server line, exit 1) and in every command that
+  connects; `status --detail` names the CA mash trusts.
 - `mash key create`: output text and `.key` file naming; `seed_path` becomes
   `private_key_path` (schema `mash-key@2`).
 - `mash key create --dry-run` and `credential install --dry-run`: the NEXT
@@ -1443,7 +1661,7 @@ also checked for the file as a whole.
 Script (run with `python3 -I`, kept outside the repo): it walks the file,
 tracks the fenced blocks and keeps the widest line of each.
 
-Result: 74 fenced blocks (every mockup, Before block and JSON example), the
+Result: 85 fenced blocks (every mockup, Before block and JSON example), the
 widest line of any block is 80 columns, no block is over 80. PASS for R1.
 
 Not covered by the 80-column rule, and reported honestly: 16 prose lines
