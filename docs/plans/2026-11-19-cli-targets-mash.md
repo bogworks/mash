@@ -172,7 +172,17 @@ owner `acme`, the group `release-pipeline` (16 characters) and the names
   line exists in two cases, both about `MASH_INSECURE_PLAINTEXT`: `allowed by
   MASH_INSECURE_PLAINTEXT (test servers only)` under `alive, NOT ENCRYPTED`,
   and `MASH_INSECURE_PLAINTEXT is set; nats:// would be allowed` under a tls
-  address (R18). `--detail` adds one more line, `certificate checked against
+  address (R18). A SECOND kind of extra lines reports the environment (T7):
+  when `MASH_SERVER` or `MASH_CA` differs from `config.json` and the trust
+  record, the row says so in two lines, `MASH_SERVER overrides config.json:
+  <the environment's value>` and `instead of <config.json's value>` (`MASH_CA
+  overrides the CA in config.json:` for the CA), and the verdict is `mail does
+  NOT work: MASH_SERVER overrides config.json.` (exit 1), because the trust
+  record no longer vouches for what mash would connect to. The one exception is
+  the test-server plain-text override: with `MASH_INSECURE_PLAINTEXT` set an
+  overriding `nats://` `MASH_SERVER` is allowed, still reported on the row, and
+  the verdict stays `mail works (1 warning)`. A variable equal to what
+  `config.json` holds is not an override and is not reported. `--detail` adds one more line, `certificate checked against
   <path>`, under a tls address.
   The row NEVER says `alive` and a past time together: `alive` always goes
   with the check that just happened. The server is checked in every state
@@ -274,8 +284,9 @@ owner `acme`, the group `release-pipeline` (16 characters) and the names
   will remove and keep, and asks the person to type the endpoint's address (or
   `reset` when several are installed). There is no `--yes`, no flag and no
   variable that stands in for it. With no terminal (a pipe, a script, an
-  agent's shell) it refuses with exit 4 (not authorized) and says a person
-  must run it at a terminal. It works in every state, including when the trust
+  agent's shell) it refuses with exit 2 (usage: it needs a terminal) and says a
+  person must run it at a terminal. Exit 4 has one meaning in both tools: the
+  server refused the credentials. It works in every state, including when the trust
   files disagree (that is one of the reasons to run it).
 
 - R18 (DECIDED, security read, REQ-010) Plain text is a per-run override.
@@ -365,7 +376,7 @@ codes, streams and colour is written down; the command sections do not repeat
 it.
 
 Exit codes (DRAFT6: the contract's one table for both tools, rev 7: 0 done,
-1 refused, 2 usage, 3 as the standard defines it, 4 not authorized, 5
+1 refused, 2 usage, 3 as the standard defines it, 4 the server refused the credentials, 5
 partial, 6 server unreachable or failed). Checked in the shipped source
 (`cmd/mash/main.go`, `cmd/mash/keycred.go`, `cmd/mashctl/endpoint_create.go`):
 today 0, 1, 2 and 6 exist, and 6 means a file error; 3 and 5 stay unused
@@ -374,9 +385,9 @@ here. The same condition gets the same code in every command.
 | code | meaning | today | change |
 |---|---|---|---|
 | 0 | done; also "mail works with a warning" | same | `status` is 0 only when mail works |
-| 1 | refused or a problem was found: a refused request, no credentials, no endpoint chosen, credentials refused, a certificate mash does not trust, trust files that disagree, a plain URL (both tools), `status` when mail does not work; AND a local file error, said with its cause (a file that cannot be read or written) | send, read, inbox, who: 1 for most refusals; a file error is 6 | plain-URL refusal: 1 in every command (was 2); `status` problem: 1 (was 0); `serve` with no endpoint chosen: 1 (was 2); a file error: 1 (was 6) |
-| 2 | usage error: unknown command, unknown option, missing argument, bare `mash` | status, key, credential, plugin: 2; inbox, read, send usage: 1 | 2 for every command |
-| 4 | not authorized: a change of trust or exposure (the first install, `mash trust reset`) needs a person at a terminal typing the server address and the fingerprint (reset: the endpoint's address), and there is none (a pipe, a script, an agent's shell); no option or variable stands in | unused | NEW (INV-004; the contract's exit table: 4 = not authorized) |
+| 1 | refused or a problem was found: a refused request, no credentials, no endpoint chosen, a certificate mash does not trust, trust files that disagree, a plain URL (both tools), `status` when mail does not work; AND a local file error, said with its cause (a file that cannot be read or written) | send, read, inbox, who: 1 for most refusals; a file error is 6 | plain-URL refusal: 1 in every command (was 2); `status` problem: 1 (was 0); `serve` with no endpoint chosen: 1 (was 2); a file error: 1 (was 6) |
+| 2 | usage error: unknown command, unknown option, missing argument, bare `mash`; AND a command that needs a person at a terminal (the first install, `mash trust reset`) run with none (a pipe, a script, an agent's shell): said as `a person must run it at a terminal` | status, key, credential, plugin: 2; inbox, read, send usage: 1 | 2 for every command; no terminal is 2 (it was 4 in DRAFT6) |
+| 4 | the server refused the credentials, in BOTH tools: it answered, and the key or the token it was given is deleted or reissued (`status` prints the exit code on those screens; `send`, `inbox`, `read`, `who` and `mashctl` exit 4 the same way) | unused | NEW (the contract's exit table, rev 12: 4 = the server refused the credentials). Exit 4 never means "no terminal": that is 2 |
 | 6 | the server is unreachable or failed, in BOTH tools: it did not answer within the time limit, the connection broke, the server returned an error (`status`, `send`, `inbox`, `read`, `who`, `prompt`, `mashctl`) | a file error is 6 | NEW meaning; a file error moves to 1; unreachable was 1 |
 
 Timeouts, said once (they are limits mash applies; an error names the one
@@ -458,7 +469,10 @@ mashctl's own keys (`owner`, `account`, `admin_credentials`,
 
 The other `config.json` keys and `MASH_*` variables (timeouts, spool, name
 rule, client certificate, host) are not people-facing and are unchanged. The
-environment wins over `config.json`, as today. An absolute path is expected in
+environment wins over `config.json` for one run, and mash says so on every
+`status`: a `MASH_SERVER` or `MASH_CA` that differs from `config.json` and the
+trust record is reported on the server row and makes the verdict `mail does
+NOT work` (the one exception is `MASH_INSECURE_PLAINTEXT`, below). An absolute path is expected in
 `MASH_CONFIG_DIR`; a relative `ca` in `config.json` is resolved against the
 config directory, as today.
 
@@ -852,7 +866,7 @@ first block. There is no `--server`, and no `--ca` that differs from the
 record: a different value is refused (below), and the one way to change what
 mash trusts is `mash trust reset`, then a fresh install.
 
-#### Refusals (exit 1; no terminal exits 4; a usage error exits 2)
+#### Refusals (exit 1; no terminal exits 2; a usage error exits 2)
 
 A file that cannot be read or written is exit 1 with its cause (contract rev
 7; it was 6). A pasted token, or a pasted private key, is refused without
@@ -1079,8 +1093,8 @@ fix: to start again, at a terminal:
 
 With no terminal (a pipe, a script, an agent's shell) the first install
 refuses before it asks, whenever it would make the trust record. There is no
-`--yes`, no flag and no variable that answers for the person (INV-004; exit 4,
-not authorized):
+`--yes`, no flag and no variable that answers for the person (INV-004; exit 2,
+usage: it needs a terminal):
 
 <!-- packet: install-refuse -->
 ```
@@ -1316,7 +1330,7 @@ and writes nothing); the creds path and the public key move behind
 `creds_path` stays, `name` becomes `endpoint`, new `config_path`, `ca_path`,
 `trust_path`, `server`, `ca_checked`). Exit codes: a file that cannot be read
 or written is 1 with its cause (it was 6); a first install with no terminal
-is 4 (not authorized); the other refusals exit 1; a usage error 2.
+is 2 (it needs a terminal); the other refusals exit 1; a usage error 2.
 
 ### Hand-overs to mashctl
 
@@ -1432,7 +1446,7 @@ not their next step (R19, D7). The two things that may help are not hints:
 the endpoint's own `mash status` is the proof (section 5, "The endpoint was
 deleted"), and `mashctl endpoint list` shows what is left; neither is printed
 here. The prompt is the person's: the text after the colon is typed, and with
-no terminal the command refuses with exit 4 (the mashctl targets).
+no terminal the command refuses with exit 2 (the mashctl targets; usage: it needs a terminal).
 
 `mashctl init --local` is removed. Its message points to the replacement (the
 guide, with the helper script in it; a URL, not a command, so it is not at
@@ -1872,6 +1886,8 @@ fix: check that the server is running and that "server" in
 
 #### Credentials refused
 
+Exit 4 (the server refused the credentials; the same code in both tools):
+
 <!-- packet: status-refused -->
 ```
 $ mash status
@@ -1890,13 +1906,13 @@ fix: ask whoever runs your mash server which of the two it was. If the key
   mash credential install --key <key file> --token <token file>
 ```
 
-Exit 1. Detection: the sign-in answers an authorization error; the code
+Exit 4. Detection: the sign-in answers an authorization error; the code
 already recognises that (it records `connection: FAILED` for a running
 session). The fix is true: `credential install` never replaces an installed
 credentials file (section 2, File safety; there is no `--force`), so the fix
 moves the old one aside first. When the server says why (below), the screen is
-the next one. This screen is only for a server that cannot say. Exit 1 (a
-refusal; the server answered, so not 6). With `--detail`:
+the next one. This screen is only for a server that cannot say. Exit 4 (the server
+answered and refused, so not 6 and not 1). With `--detail`, also exit 4:
 
 <!-- packet: status-detail-refused -->
 ```
@@ -1928,7 +1944,7 @@ fix: ask whoever runs your mash server which of the two it was. If the key
 
 After `mashctl endpoint delete` (section 4) the address cannot be used again,
 so the fix never suggests installing the same address, and no command in it
-is one the person has not met:
+is one the person has not met. Exit 4 (the server refused the credentials):
 
 <!-- packet: status-deleted -->
 ```
@@ -1946,13 +1962,13 @@ fix: its address cannot be used again. For a new endpoint, make a new key,
   mash key create --out <new-name>.key
 ```
 
-Exit 1. NEEDS the server to say "deleted" and not only "refused" (N11): the
+Exit 4. NEEDS the server to say "deleted" and not only "refused" (N11): the
 shipped code cannot tell a deleted endpoint from a reissued key; until it can,
 the previous screen is shown. This screen uses `fix:`, not `NEXT:`, because
 status is reporting a problem (R4). DRAFT4 named `mashctl endpoint create ...
 --creds-out`, a flag no screen of this document had introduced (D6); the
 person's own next step is `mash key create`, which prints the rest.
-With `--detail` (the rows are the same as in every state):
+With `--detail` (the rows are the same as in every state; exit 4):
 
 <!-- packet: status-detail-deleted -->
 ```
@@ -2025,19 +2041,23 @@ acme.demo.bob: mail works (1 warning).
   version       0.5.6
   server        nats://myserver:4222
                 alive, NOT ENCRYPTED (checked 09:42)
+                MASH_SERVER overrides config.json: nats://myserver:4222
+                instead of tls://myserver:4222
                 allowed by MASH_INSECURE_PLAINTEXT (test servers only)
   config        ok
   credentials   ok
 
 warning: anyone on the network can read your credentials and your mail.
-fix: use a tls:// address. In ~/.config/mash/config.json, change the server
-     line to:
-    "server": "tls://myserver:4222"
-     Then stop overriding it in this shell:
+         MASH_SERVER is overriding the server in config.json for this run.
+fix: stop overriding it in this shell:
   unset MASH_SERVER MASH_INSECURE_PLAINTEXT
 ```
 
-A report, not an error screen (L5). Today the warning is printed twice, once
+A report, not an error screen (L5). `config.json` already holds
+`tls://myserver:4222` (install refuses a `nats://` address and every use
+checks that the file agrees with `trust.json`, R21), so the plain address can
+come only from `MASH_SERVER`, for this run, and the only fix is to unset it:
+nobody edits `config.json` to a `nats://` address. Today the warning is printed twice, once
 on stdout as the `tls:` line and once on stderr, on every status run (catalog
 DUP); the target prints it once, as part of the report, and the warning does
 not repeat the server row (it says what is at stake, the row says why it is
@@ -2085,13 +2105,15 @@ acme.demo.bob: mail does NOT work: the server address is not encrypted.
   version       0.5.6
   server        nats://myserver:4222
                 NOT ENCRYPTED (refused; not connected)
+                MASH_SERVER overrides config.json: nats://myserver:4222
+                instead of tls://myserver:4222
   config        ok
   credentials   not checked (the connection was refused)
 
-fix: use a tls:// address. MASH_SERVER overrides config.json and holds a
-     nats:// address. (With MASH_INSECURE_PLAINTEXT=1 credentials and mail
-     would cross the network unencrypted: test servers only.) Remove it
-     from this shell:
+fix: use a tls:// address. MASH_SERVER is overriding the server in
+     config.json for this run. (With MASH_INSECURE_PLAINTEXT=1 credentials
+     and mail would cross the network unencrypted: test servers only.)
+     Stop overriding it in this shell:
   unset MASH_SERVER
 ```
 
@@ -2100,9 +2122,37 @@ exit 0). The refusal says that, with the override, credentials and mail would
 cross the connection unencrypted and that it is for test servers only (R18),
 before the command, not between commands. The same refusal and the same exit 1 in every command that connects
 (`send`, `inbox`, `read`, `who`, `prompt`, `serve`, `hook`), as an `error:`
-(section 5, send). If the address came from the file, the fix is a labelled
-file line (R10): `add this line to ~/.config/mash/config.json:` and
-`"server": "tls://myserver:4222"`.
+(section 5, send). The address cannot come from the file (install refuses a
+`nats://` address, and a file that disagrees with the trust record is the
+disagree screen, R21), so the fix is always the `unset`.
+
+#### The environment overrides the server (not ready, exit 1)
+
+Not only a plain address: any `MASH_SERVER` or `MASH_CA` that differs from
+`config.json` is reported, and the verdict is not ready, because the trust
+record does not vouch for it (T7). Mash does not ask that server:
+
+<!-- packet: status-env-override -->
+```
+$ export MASH_SERVER=tls://other:4222
+$ mash status
+acme.demo.bob: mail does NOT work: MASH_SERVER overrides config.json.
+
+  version       0.5.6
+  server        tls://other:4222
+                not checked
+                MASH_SERVER overrides config.json: tls://other:4222
+                instead of tls://myserver:4222
+  config        ok
+  credentials   not checked (the server was not asked)
+
+fix: MASH_SERVER is overriding the server in config.json for this run. Stop
+     overriding it in this shell:
+  unset MASH_SERVER
+```
+
+A `MASH_CA` that differs reads the same, with `MASH_CA overrides the CA in
+config.json: <path>` and `instead of <path>`, and `unset MASH_CA`.
 
 #### Unknown flag (exit 2 as today)
 
@@ -2116,7 +2166,8 @@ fix: see the options with:
 
 `--debug` is not added (one flag, `--detail`, on every command; R7).
 
-Changes (status): connects once, 2s budget; exit 1 when mail does not work;
+Changes (status): connects once, 2s budget; exit 1 when mail does not work (4 when the server refused the
+credentials);
 one fixed screen, verdict and four rows, in every state; the server row says
 when mash checked (`alive, encrypted (checked 09:42)`) or when it last
 reached the server (`NOT REACHABLE (last reached 3h ago)`), never "last seen"
@@ -2306,16 +2357,14 @@ $ mash send acme.demo.alice "hi"
 error: refusing an unencrypted connection to myserver. With
        MASH_INSECURE_PLAINTEXT=1 your credentials and mail would cross the
        network unencrypted; that is for test servers only.
-fix: use a tls:// address. MASH_SERVER overrides config.json and holds a
-     nats:// address; remove it from this shell:
+fix: use a tls:// address. MASH_SERVER is overriding the server in
+     config.json for this run; stop overriding it in this shell:
   unset MASH_SERVER
 ```
 
-(MASH_SERVER is exported, not set inline, because the fix is to `unset` it. When
-the address came from the file the fix reads `fix: use a tls:// address. Add
-this line to ~/.config/mash/config.json:` and the line `"server":
-"tls://myserver:4222"` indented four spaces, R10. The tool knows which it
-is.)
+(MASH_SERVER is exported, not set inline, because the fix is to `unset` it.
+The address cannot come from the file: install refuses a `nats://` address and
+a file that disagrees with the trust record is the disagree screen, R21.)
 The override is a decision for a person at a test server: the refusal names
 it only to say what it would cost, and agents are told never to set it
 (section 6, instructions).
@@ -2830,7 +2879,7 @@ address and the CA fingerprint again. It is INV-004's person-confirmed
 command: it needs a person at a terminal who TYPES the endpoint's address (or
 `reset`, when several endpoints are installed here); there is no `--yes`, no
 other flag and no variable that answers for the person; with no terminal it
-exits 4 ("a person must run this at a terminal"). Usage: `mash trust reset`
+exits 2 ("a person must run this at a terminal"). Usage: `mash trust reset`
 (and `--detail`). There is no `--json`: the command is a conversation.
 
 What it removes, and says it removes before it asks: this machine's endpoint
@@ -2989,7 +3038,7 @@ NEXT: install the credentials your server made for this endpoint. mash asks
   mash credential install --key <key file> --token <token file>
 ```
 
-Refusals. No terminal (a pipe, a script, an agent's shell): exit 4, nothing
+Refusals. No terminal (a pipe, a script, an agent's shell): exit 2, nothing
 asked, nothing removed; and the option that does not exist (usage, exit 2):
 
 <!-- packet: trust-reset-refuse -->
@@ -3228,7 +3277,7 @@ columns. The settings part:
 ```
 $ mash help --detail
 ...
-Settings (the environment wins over config.json)
+Settings (the environment wins for one run, and mash says so on every status)
   MASH_ENDPOINT            the endpoint to act as, such as acme.demo.bob
                            (config.json: "endpoint")
   MASH_SERVER              the server address, tls://host:4222
@@ -4430,8 +4479,8 @@ S11. DECIDED, the lead, D7 (DRAFT5). Removing access prints no NEXT (R19);
 S12. DECIDED, the lead, contract rev 5 and ruling (b) (DRAFT5). The CA
     fingerprint is typed, never a flag, never printed by mash (R15, R17);
     `credential install` also checks that the server presents a certificate
-    from that CA for that host name before writing; no terminal exits 4 (not
-    authorized, section 2).
+    from that CA for that host name before writing; no terminal exits 2 (usage:
+    it needs a terminal, section 2).
 N13. STILL OPEN. `mash who` lists the endpoints of the caller's owner; the
     directory's scope was read from the code in DRAFT2 and not re-checked.
 
@@ -4562,13 +4611,12 @@ X9. DECIDED here. `mash plugin install` shows the one claude command with
     UNVERIFIED (N16).
 X10. DECIDED here. Exit codes (contract rev 7 and 10): 6 when the server is
     unreachable or failed (status, send, and every command that connects);
-    1 for a local file error, with its cause; 4 for the first install and
-    `trust reset` without a terminal; 2 for usage. NOT decided by the
-    contract and kept at 1 here: the server refusing credentials (the server
-    answered; the contract's "4 not authorized" is the person's INV-004
-    authorization, not the server's), a certificate mash does not trust, trust
-    files that disagree, and a `prompt` nobody answered. Say if the first
-    should be 4.
+    1 for a local file error, with its cause; 2 for usage, which includes the
+    first install and `trust reset` without a terminal; 4 for the server
+    refusing the credentials (the lead's ruling, rev 12: ONE meaning for exit
+    4 in both tools; it was 4 for no terminal and 1 for refused credentials in
+    DRAFT6). Kept at 1: a certificate mash does not trust, trust files that
+    disagree, and a `prompt` nobody answered.
 X11. DECIDED here. MCP `chosen_by` is `env`, `config` or `only_one`
     (was `only_one_installed`), per the brief.
 X12. DECIDED here. `mash serve` prints `mash: serving as acme.demo.bob` and
@@ -4588,7 +4636,7 @@ X15. DECIDED with the mashctl lane, not ratified (the brief, item 9). Names:
 X16. DECIDED here (the brief, item 2, and contract rev 11). `mash trust reset`
     is INV-004's person-confirmed command: terminal only, the person types the
     endpoint's address (or `reset`), no `--yes` and no variable, no terminal is
-    exit 4. It removes this machine's endpoint configuration (`config.json`,
+    exit 2. It removes this machine's endpoint configuration (`config.json`,
     the CA copy), `trust.json` and the credentials of every endpoint installed
     here (and the generation folder and the pointer, named under `--detail`),
     and says exactly what, with what each holds and never the contents; it
@@ -4618,9 +4666,9 @@ X16. DECIDED here (the brief, item 2, and contract rev 11). `mash trust reset`
   when the server is down (new network behaviour). Its output is one fixed
   screen (R11); `--detail` is new.
 - Exit codes, all changes in one list (section 2):
-  - New: 4 (not authorized) when the first install or `mash trust reset`
-    has no terminal for the typed server address and fingerprint (the
-    endpoint's address, for reset).
+  - New: 4 when the server refused the credentials (both tools). The first
+    install or `mash trust reset` with no terminal for the typed server
+    address and fingerprint (the endpoint's address, for reset) is 2.
   - New meaning of 6 (contract rev 7): the server is unreachable or failed,
     in both tools (`status` and `send` when it does not answer; was 1). A
     local file error is 1 with its cause (it was 6).
@@ -4655,7 +4703,7 @@ X16. DECIDED here (the brief, item 2, and contract rev 11). `mash trust reset`
   touching a file on a different account, server or CA, or when the trust
   files disagree. There is no change in place (contract rev 11): `mash trust
   reset` (the person types the endpoint's address, or `reset`, at a terminal,
-  never `--yes`, exit 4 without one) removes this machine's configuration,
+  never `--yes`, exit 2 without one) removes this machine's configuration,
   trust record and credentials and says exactly what; then a fresh install
   makes the record again, as one generation with one atomic switch. Every use
   checks that the trust files agree.
@@ -4729,10 +4777,10 @@ X16. DECIDED here (the brief, item 2, and contract rev 11). `mash trust reset`
 
 Width (re-measured for DRAFT6, contract revision 11). A script (run with
 `python3 -I`, kept outside the repo) walks the file, tracks the fenced blocks
-and keeps the widest line of each. Result for this file: 171 fenced blocks
-(every mockup, Before block and JSON example, the `adopt-from` placeholder and
-the boxed UNVERIFIED note), 151 of them chosen by a `packet:` marker (84
-distinct keys). The widest line of text that a tool prints is 80 columns (the
+and keeps the widest line of each. Result for this file (re-measured after the DRAFT6 freeze fixes): 172 fenced
+blocks (every mockup, Before block and JSON example, the `adopt-from`
+placeholder and the boxed UNVERIFIED note), 152 of them chosen by a `packet:`
+marker (85 distinct keys). The widest line of text that a tool prints is 80 columns (the
 real-name inbox rows and the trust-column inbox row, whose message is cut with
 `...` at column 80 by design, and one line of the top-level help); NO printed
 text is over 80, with four kinds of exemption (R1, R9): a command a person is

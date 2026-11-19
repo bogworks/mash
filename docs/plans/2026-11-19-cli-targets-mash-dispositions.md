@@ -686,3 +686,21 @@ X1, X8; D6-7 flags X10). Contract rev 11 lines not conformed to, in one list:
 REQ-003's `--server` synopsis and precedence sentence (X1); REQ-011 (i)'s
 "a digest in the notes is NOT an alternative" and "verifies both binaries the
 same way" (X8, on the brief).
+
+
+## Check of DRAFT6: freeze fixes
+
+Source: the planner's check of DRAFT6 (N6, T1 to T14) and the freeze from the
+lead and planner: no new command, file format or protocol until the 0.5.6
+scope is ruled. Only the three text items that are wrong under the doc's own
+rules are fixed; every item that adds a mechanism is HELD.
+
+| # | finding | disposition | where in the targets |
+|---|---|---|---|
+| CK6-N6 | The plaintext-allowed fix says to change the `server` line of config.json, which already holds `tls://myserver:4222` (config.json must agree with trust.json; install refuses `nats://`) | FIXED | `status-plain-warning`: the warning now says `MASH_SERVER is overriding the server in config.json for this run.` and the fix is the `unset` alone; the prose says why config.json is never edited to a `nats://` address. `status-plain-refused` and the plain-URL `send-refuse` say the same; the "if the address came from the file" sentences are removed (it cannot) |
+| CK6-T7 | The environment bypasses the trust record in silence ("the environment wins") | FIXED, one rule | The environment wins for one run and mash says so on every status: a `MASH_SERVER` or `MASH_CA` that differs from config.json and the trust record is reported on the server row (`MASH_SERVER overrides config.json: tls://other:4222` / `instead of tls://myserver:4222`) and the verdict is `mail does NOT work` (exit 1), except the test-server override: with `MASH_INSECURE_PLAINTEXT` set an overriding `nats://` address is allowed, still reported, verdict `mail works (1 warning)`. Applied to: R11 (row forms), section 3 prose, the help text (`Settings (the environment wins for one run, and mash says so on every status)`), `status-plain-warning`, `status-plain-refused`, `send-refuse`, and one new report block `status-env-override` (a tls address, not ready); no new command or file |
+| CK6-T6 | Exit 4 means "no terminal" against the rule 4 = the server refused the credentials; the credentials-refused screens print no exit code | FIXED (lead's rev 12 ruling) | One meaning: exit 4 = the server refused the credentials, in both tools. The "no terminal" refusal of the first install and `mash trust reset` is exit 2 (usage: it needs a terminal): section 2 table (rows 1, 2 and 4), R17, the install and reset sections, X10, S12, X16, section 8 and the packet intro. `status-refused`, `status-detail-refused`, `status-deleted` and `status-detail-deleted` say `Exit 4` in their lead-in lines. The mashctl delete refusal is said to exit 2 here; the mashctl targets must agree (flagged to ctl) |
+| CK6-T1 to T5, T8 to T13 | Reset loses a `--make-key` endpoint's only key; reset's NEXT needs a deleted token; install's fix goes to the destructive reset; "server in config.json is right"; disagree fix drops `--ca`; plugin install output; the missing-digest fix; `sha256sum` on macOS; `copied` and the generation line; reset's config.json description | HELD | They change or add mechanism (the generation lock, reset order, `--ca` required, plugin install fixes, trust reset changes): not in the freeze scope. T14 (leftovers) held with them |
+
+Re-measured: 172 fenced blocks, 152 chosen by markers (85 keys); no printed text
+over 80 (the widest 80); the exemptions are as in section 9.
