@@ -184,3 +184,50 @@ A create that fails partway leaves a non-empty dir to clear by hand.
 ## Update 2026-11-19 (lead #4, #5)
 
 Skill ships in the plugin too (one source file, wiring in the implementing PR). `mashctl adopt` prints a one-line hint naming what to run next when no server is reachable. nsc is a prerequisite for 0.5.6; the skill shows how to install it. A later mashctl could create the nsc objects itself (operator, accounts, users) but not the CA, config or process; not planned. Script and skill lines are <= 80 columns; the script ends by printing the files it left and the adopt command. Second test run (podman): IPv6 --host and --listen ::1, non-default --operator/--account/--js-disk passed; macOS not run.
+
+## Update 2026-11-19 (DRAFT4: reviews and security rev3)
+
+The script changed shape; the interface block above is superseded.
+
+```
+nats-local-setup.sh [create] --dir DIR --owner NAME [options]
+nats-local-setup.sh --dir DIR --start | --stop | --check | --upgrade
+nats-local-setup.sh --dir DIR --backup DEST | --retire-keys DEST
+nats-local-setup.sh --dir DIR --enable-boot [--linger]
+nats-local-setup.sh --dir DIR --disable-boot | --remove
+```
+
+- Linux x86-64, Debian or Ubuntu only; other platforms stop with a message.
+- It installs nats-server v2.15.1 and nsc v2.15.0 itself, into `DIR/bin`,
+  from pinned URLs with digests written in the script, and runs only those
+  two paths (never a copy found on PATH). The skill no longer installs them.
+- `DIR` is made exclusively (0700); every path component is checked
+  (real directory, yours or root's, not group- or world-writable).
+  Characters that mean something in `server.conf` are refused in `--dir`.
+- A listen address other than loopback needs the person to type it at a
+  terminal. There is no `--yes-expose`. `--retire-keys`, `--enable-boot`,
+  `--disable-boot` and `--remove` also need a typed confirmation.
+- Every subprocess's output is redacted before it is shown or logged; a
+  canary-secret test covers each path.
+- `--retire-keys DEST` moves `ca.key`, `nsc/` and `export/` into one
+  0600 archive, checks it lists back, then removes them from `DIR`. The
+  server keeps `server.pem`, `server.key`, `ca.pem`.
+- Lifecycle: start, stop, check, upgrade, backup, boot, remove: one
+  command each, each tested in a rootless podman container (boot under
+  systemd as PID 1).
+- mash and mashctl are verified with `gh attestation verify --bundle
+  mash.intoto.jsonl` (works with no login), not with SHA256SUMS fetched
+  beside the binaries.
+
+Open dependencies (not in this PR): v0.5.5's release has no `mashctl`
+asset, and `release.yml` does not publish one yet; the guide assumes
+`mashctl-linux-amd64` is built and attested in the 0.5.6 release. The
+guide also assumes 0.5.6 `mashctl adopt` copies `mashadmin.creds` into
+its own folder (today it records the path: "the file is not copied");
+the guide's verify-then-retire block fails safe if it does not. The
+script's raw URL is pinned to a commit on this branch; the pin moves to
+the merge commit when this lands.
+
+Tests: `scripts/nats-local-setup_test.sh` (the helper, 194 cases, podman)
+and `scripts/mash-nats-local-guide_test.sh` (every code block of the guide
+run as its own `bash -c` in a fresh Debian container).

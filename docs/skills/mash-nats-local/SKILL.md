@@ -1,41 +1,80 @@
 ---
 name: mash-nats-local
 description: >-
-  Set up a NATS server on this machine for mash: questions first,
-  then installs, one helper script, hand-over to mashctl, and a
-  two-agent test. Use when a person or an agent needs a mash server
-  and has none. mashctl does not install or start NATS; this does.
+  Set up a NATS server on this machine for mash: questions first, then
+  one helper script, hand-over to mashctl, and a two-agent test. Use when
+  a person or an agent needs a mash server and has none. mashctl does not
+  install or start NATS; this does.
 ---
 
 # Set up a NATS server for mash
 
-DRAFT 3 (0.5.6). For a person, or for an agent following it.
+DRAFT 4 (0.5.6). For a person, or for an agent following it. Debian or
+Ubuntu, 64-bit Intel or AMD only.
 
 mash gives each AI agent session an inbox that keeps its mail, so agents
 can message each other. The inbox lives on a NATS server. mashctl is
-mash's admin tool: it creates agents' mailboxes on that server. mashctl
-does not install or start NATS. This guide does, in five parts:
+mash's admin tool: it makes agents' mailboxes on that server. mashctl
+does not install or start NATS. This guide does, in six parts:
 
-1. Answer the questions.
-2. Install the four programs.
+1. Answer the questions, and read the answers back.
+2. Install the prerequisites.
 3. Run one script that makes the server.
-4. Hand the server to mashctl.
-5. Test it with two agents, Alice and Bob.
+4. Install mash and mashctl.
+5. Hand the server to mashctl, then test it with Alice and Bob.
+6. Look after it: stop, start, back up, upgrade, remove.
+
+Every command block below runs on its own in a fresh shell. Nothing
+depends on a variable or a directory set by an earlier block. Run the
+blocks exactly as they are written; replace the names as the next
+section says.
 
 If you are an agent: you may propose each answer, but the person
-decides. Ask every question before you run anything. Do not pick paths
-or ports for them.
+decides. Ask every question before you run anything that changes
+anything. Do not pick paths or ports for them.
 
-These each need their own explicit yes from the person, never implied by
-"set it up": installing software (show the source, version and exact
-command first), using sudo, listening on anything but this machine,
-opening a firewall port, and installing a service that starts at boot.
-Never pipe a download into a shell.
+## The names in this guide
+
+One sheet, used everywhere. Replace each name in every block if the
+person's answers differ.
+
+| In this guide | Meaning | Replace with |
+|---|---|---|
+| `acme` | owner: the first part of every address | your owner name |
+| `demo` | group of agents that may mail each other | your group |
+| `alice`, `bob` | the two test agents | your agents |
+| `$HOME/mash-nats` | the server's directory | your directory |
+| `4222` | the client port | your port |
+| `$HOME/.config/mash` | mashctl's folder | your choice |
+
+An agent's address is owner.group.agent, for example acme.demo.alice. On
+a command line it is written acme/demo/alice.
+
+## What you must say yes to, one at a time
+
+Never implied by "set it up". Each is asked when its step comes:
+
+- installing software (the source, version and exact command are shown)
+- using sudo (part 2 only: `apt-get install` of prerequisites)
+- listening on anything but this machine
+- opening a firewall port (the script never does)
+- a start-at-boot service
+
+Reading is always allowed before the questions end: the checks marked
+"read-only" below change nothing. Never pipe a download into a shell.
+
+## Stop and ask the person when
+
+- a command prints FAILED, an error, or a line you do not understand
+- a hash differs from the one printed here
+- a path, port or program already exists and this guide did not make it
+- you are asked to use root, to turn off a check, or to skip a yes
+- the machine is not Debian or Ubuntu on 64-bit Intel or AMD
 
 ## What you end up with
 
 ```
-  one machine ("myserver")
+  one machine
   +----------------------------------------------+
   |  nats-server: TLS, JetStream, operator mode  |
   |  keys, certificates, store, log: in YOUR dir |
@@ -46,20 +85,13 @@ Never pipe a download into a shell.
        mash group "demo":  Alice  <---->  Bob
 ```
 
-An agent's address has three parts, owner.group.agent, for example
-acme.demo.alice. On the command line it is written acme/demo/alice. The
-owner runs the server, the group is a set of agents that may mail each
-other, the agent is one session or tool.
-
 ## Words you will meet
 
 - NATS: an open-source message server. mash keeps its mail on one.
-- nats-server: the NATS server program.
-- nsc: NATS's own tool for making keys and accounts. The script uses it.
+- nats-server: the NATS server program. nsc: NATS's own tool for making
+  keys and accounts. The script downloads both, checked, into your server
+  directory only.
 - JetStream: the part of NATS that stores messages on disk.
-- Stream, consumer, bucket: JetStream's storage units. A stream holds
-  messages, a consumer reads one, a bucket is a small key-value store.
-  mash makes them for you; you only meet the counts in the limits.
 - TLS: encryption on the connection, as in HTTPS. mash requires it.
 - Certificate and CA: the server's ID card, and the authority (made here,
   by you) whose signature clients trust. Clients are given the CA file.
@@ -69,572 +101,525 @@ other, the agent is one session or tool.
 - System account: a built-in account for running the server. mashctl
   uses it to revoke a lost agent key.
 - JWT: a signed token that says who someone is and what they may do.
-- Seed: a private key, starting with S (SO operator, SA account, SU
-  user). Never print it, mail it or paste it into a chat.
+- Seed: a private key, starting with S. Never print it, mail it or paste
+  it into a chat.
 - Credentials (a .creds file): a user's JWT plus its seed. Whoever holds
   the file is that user.
+
+## What mash needs from NATS
+
+mash needs seven things from the server. The script writes a
+`server.conf` that gives them. These are the real lines it wrote in the
+test (the JWTs, long, are shown as `<JWT>`):
+
+```
+listen: "127.0.0.1:4222"
+tls {
+  cert_file: "/home/alice/mash-nats/server.pem"
+  key_file: "/home/alice/mash-nats/server.key"
+}
+jetstream {
+  store_dir: "/home/alice/mash-nats/jetstream"
+}
+operator: "/home/alice/mash-nats/operator.jwt"
+system_account: "ABOJ...A3QQ"
+resolver {
+  type: full
+  dir: "/home/alice/mash-nats/resolver"
+  allow_delete: true
+  interval: "2m"
+  timeout: "1.9s"
+}
+resolver_preload: {
+  ABOJ...A3QQ: "<JWT>"
+  ABZ3...7ZIK: "<JWT>"
+}
+```
+
+In plain words:
+
+1. `listen`: where the server accepts connections (this machine only,
+   unless you said otherwise).
+2. `tls`: every connection is encrypted; mash refuses a plain one.
+3. `jetstream`: mail is kept on disk in `store_dir`. The account may use
+   2 GB, 64 streams (one per agent, plus 5 mash uses itself) and 128
+   consumers.
+4. `operator`: operator mode: nobody connects without credentials signed
+   by this operator.
+5. `system_account`: the account mashctl uses to revoke a lost key.
+6. `resolver { type: full }`: the server keeps account records on disk,
+   so mashctl can add and revoke without restarting the server.
+7. `resolver_preload`: the two accounts (system, and MASH) the server
+   starts knowing.
+
+If you already run a NATS server, it must give these seven, and you use
+`mashctl adopt` against it (part 5) instead of the script.
+
+## What this opens
+
+- The server listens on one address and port. Default: 127.0.0.1:4222,
+  this machine only. In the test, `ss -ltn` showed exactly
+  `127.0.0.1:4222` and nothing else.
+- Other users of this machine can reach that port. They need credentials
+  to get in; they cannot read mail or make agents without them.
+- `--listen ::1` listens on IPv6 loopback only (`[::1]:4304` in the
+  test).
+- Any other address (so other machines can connect) listens on all
+  interfaces named by it (the test showed `*:4303`). The script then
+  makes you type the address at a terminal. You must also give each
+  client the CA file, and open a firewall port yourself if you want one.
+- The script opens no other port. It does not touch a firewall, a
+  service manager (unless you ask for boot start) or any file outside
+  your server directory and mashctl's folder.
 
 ## 1. Questions
 
 Ask them in order. Each has a default and says what the answer changes.
-Write the answers down.
 
 1. Trial or permanent?
-   - Default: trial. Reason: you can remove it with one command.
-   - Trial: start the server from the script, stop it when finished. It
-     does not return after a reboot.
-   - Permanent: keep the files somewhere backed up. A start-at-boot
-     service (part 6) is a separate yes, asked when you get there.
+   - Default: trial. You can remove it with one command, and it does not
+     return after a reboot.
+   - Permanent: also back it up (part 6) and decide about boot start.
+2. Is mash already set up on this machine?
+   - Default: no. Part 4 checks.
+   - Yes, with another server: use a different mashctl folder (question
+     5) so you do not overwrite it.
+3. Which directory holds the server's files?
+   - Default: `$HOME/mash-nats`. It must not exist yet; the script makes
+     it (mode 0700). Never `/`, never under `/tmp`, never a top-level
+     directory like /demo. Needs 2 GB of disk free.
+4. Which port?
+   - Default: 4222. If taken, pick another and never stop what holds it.
+5. Where does mashctl keep its files?
+   - Default: `$HOME/.config/mash` (mode set by mashctl; part 5 shows
+     it). Another folder: set `MASH_CONFIG_DIR` in every mashctl and mash
+     command.
+6. Who may connect?
+   - Default: this machine only. Others: a separate yes (see "What this
+     opens"). The person names the address and the host name.
+7. Owner name?
+   - Default: your login name. Lower-case letters, digits, single
+     hyphens, starting with a letter, up to 32 characters. One per
+     server; changing it means starting over.
+8. May this guide use sudo to install prerequisites?
+   - Default: only if something in part 2 is missing; ask then.
 
-2. Is mash already installed and set up on this machine?
-   - Default: no. Check with the `mash version` and `mashctl version`
-     commands in part 2.
-   - Yes, and it works with another server: use a new, separate
-     MASH_CONFIG_DIR (question 6) so you do not overwrite it.
+### Read the answers back
 
-3. May this guide install software, and may it use sudo?
-   - Default: install in your own home, no sudo. Reason: nothing outside
-     your home changes. It uses `~/.local/bin`.
-   - With sudo: you may install the nats-server package with `dpkg`.
-   - Say what is allowed before part 2. For each install, show the
-     person the source, the version and the exact command, and wait.
+Before running anything that changes anything, say this to the person,
+filled in, and wait for a yes:
 
-4. Which directory holds the server's files (keys, certificates, mail,
-   log)?
-   - Default: `~/mash-nats` (for example /home/alice/mash-nats).
-   - It must not exist yet: the script creates it, owned by you, mode
-     0700. Its parent must be yours and not writable by other users.
-     Never `/`, never a top-level directory like /demo. It needs free
-     disk: 2 GB is the default mail limit.
+```
+I will:
+  make a server directory at   $HOME/mash-nats   (nothing is there yet)
+  listen on                    127.0.0.1:4222     (this machine only)
+  use the owner name           acme
+  keep mashctl's files in      $HOME/.config/mash
+  install                      prerequisites with sudo: only if missing
+                               nats-server, nsc (in the server dir only)
+                               gh, mash, mashctl in $HOME/.local/bin
+Say yes to go ahead.
+```
 
-5. Which port?
-   - Default: 4222, the NATS standard.
-   - If it is taken (another NATS runs here), pick another. Check:
-     `ss -ltn | grep :4222`. Never stop the other server.
+## 2. Prerequisites
 
-6. Where does mashctl keep its settings and key copies?
-   - Default: `~/.config/mash`.
-   - To keep it apart from an existing mash, choose another folder, for
-     example `~/mash-config`, and set MASH_CONFIG_DIR to it (part 4).
-
-7. Who may connect: this machine only, or others too?
-   - Default: this machine only. The server listens on 127.0.0.1. Other
-     users of this machine can still reach that port; they need
-     credentials to get in (see "Who can connect").
-   - Others: a separate explicit yes. The person gives the exact address
-     the server should listen on and the name clients will type. Add
-     `--host NAME`, `--listen ADDRESS` and `--yes-expose` in part 3.
-     Copy `ca.pem` to every client machine. Opening a firewall port is
-     a further yes; the script never changes a firewall.
-
-8. Where should `export/` end up after hand-over?
-   - Default: nowhere. mashctl adopt copies the files it needs into its
-     own folder, so you may delete `export/` after part 4. Reason: it
-     holds the operator and account seeds, which can sign anything.
-   - If you want a spare copy of the keys, put it in a password manager
-     or an encrypted disk, not in a plain backup.
-
-9. Owner name (the first part of every address)?
-   - Default: your login name, for example alice. Lower-case letters,
-     digits, single hyphens, starting with a letter, up to 32 characters.
-   - One owner per server. It can be changed only by starting over.
-
-The rest are defaults you need not ask about: 2 GB of mail disk, up to 64
-streams (about 59 agents), the account named MASH.
-
-## Who can connect
-
-By default only programs on this machine: the server listens on
-127.0.0.1, which other machines cannot reach. Other users on this
-machine can reach it: a loopback port is not private to one user. Every
-connection uses TLS, and a client must also hold credentials for the
-MASH account, or the server refuses it (mashctl adopt checks this). On a
-shared machine, remember that anyone who can read your files can read
-the credentials in them.
-
-If the person says yes to other machines, the server listens on the
-address they name and the port is open to whatever network reaches it:
-anyone there can start a TLS handshake, but only a holder of valid
-credentials gets in, and only to the MASH account. The certificate names
-only the hosts you list with `--host`. A firewall is theirs to manage.
-
-## 2. Install the four programs
-
-Check what you already have:
+The script needs curl, tar, unzip, openssl, sha256sum and ss. Read-only
+check; it prints `missing:` for each one that is not there:
 
 ```sh
-nats-server --version
+for c in curl tar unzip openssl sha256sum ss; do command -v "$c" >/dev/null || echo "missing: $c"; done; echo checked
 ```
+
+If anything is missing, this needs the sudo yes. It installs from your
+distribution only:
 
 ```sh
-nsc --version
+sudo apt-get install -y curl tar unzip openssl iproute2 ca-certificates coreutils
 ```
+
+Read-only: nothing must exist already that this guide would create. Each
+line that prints is a stop:
 
 ```sh
-mash version
+for p in "$HOME/mash-nats" "$HOME/.local/bin/mash" "$HOME/.local/bin/mashctl" "$HOME/.local/bin/gh"; do [ ! -e "$p" ] || echo "exists: $p"; done; ss -ltn | grep ':4222 ' ; echo checked
 ```
+
+A line `exists:` or a line for port 4222 means: stop and ask. Do not
+overwrite, move or stop it.
+
+## 3. Make the server
+
+Fetch the script from one exact commit and check its hash. Do not run a
+script you have not checked:
 
 ```sh
-mashctl version
+mkdir -p "$HOME/mash-setup" && curl -fsSL -o "$HOME/mash-setup/nats-local-setup.sh" https://raw.githubusercontent.com/bogworks/mash/aab2c1b44faadfcd0657cf72b178a9756306e5c4/scripts/nats-local-setup.sh && echo "0377924074b2d3220e35231cabe2128959090b94646cd62203122c68d4108378  $HOME/mash-setup/nats-local-setup.sh" | sha256sum -c -
 ```
 
-The versions this guide pins (the ones it was tested with):
+The last line must say `OK`. The script only writes under the directory
+you give it, plus `$HOME/mash-setup`. It makes nothing outside, and it
+installs two programs, nats-server v2.15.1 and nsc v2.15.0, into
+`$HOME/mash-nats/bin`, after checking each download against a hash that
+is written in the script. It runs no program found on your PATH.
 
-- nats-server v2.15.1
-- nsc v2.15.0
-- mash and mashctl v0.5.6 (same release)
-- openssl 3 (Debian has it: `openssl version`)
-
-Install what is missing, only as far as question 3 allows. For each one,
-show the person the source, the version and the command, and wait for a
-yes. Every download below is checked against a SHA-256 digest before it
-is run; if a check prints FAILED, stop and tell the person. Never use
-`@latest`, never pipe a download into a shell. This is for Debian or
-Ubuntu on 64-bit Intel or AMD; for Arm, use arm64 in the names and take
-the digests from the release's own checksum file.
-
-Make a working folder:
+Run it with your answers:
 
 ```sh
-mkdir -p ~/mash-setup ~/.local/bin
+bash "$HOME/mash-setup/nats-local-setup.sh" --dir "$HOME/mash-nats" --owner acme --start
 ```
+
+Leave out `--start` to start the server yourself (part 6). For question
+4 add `--port N`; for question 6 add `--host NAME` and `--listen ADDRESS`
+(the script asks the person to type the address). It prints seven steps,
+then what it left, in the output shown in "What you hold" below.
+
+Check it (changes nothing):
 
 ```sh
-cd ~/mash-setup
-```
-
-nats-server v2.15.1, from the NATS project's release page
-(https://github.com/nats-io/nats-server/releases/tag/v2.15.1):
-
-```sh
-GH=https://github.com/nats-io/nats-server/releases/download/v2.15.1
-```
-
-```sh
-curl -fsSLO $GH/nats-server-v2.15.1-linux-amd64.tar.gz
-```
-
-```sh
-sha256sum nats-server-v2.15.1-linux-amd64.tar.gz
-```
-
-The hash must be:
-
-```
-bf5edc7b1ce98e885c368cb43a886eb148dc5d0551d99f3cf6141fb5e1954c70
-```
-
-```sh
-tar -xzf nats-server-v2.15.1-linux-amd64.tar.gz
-```
-
-```sh
-install -m 755 nats-server-v2.15.1-linux-amd64/nats-server ~/.local/bin
-```
-
-nsc v2.15.0 (https://github.com/nats-io/nsc/releases/tag/v2.15.0):
-
-```sh
-NS=https://github.com/nats-io/nsc/releases/download/v2.15.0
-```
-
-```sh
-curl -fsSLO $NS/nsc-linux-amd64.zip
-```
-
-```sh
-sha256sum nsc-linux-amd64.zip
-```
-
-The hash must be:
-
-```
-7d55eda757dc9f233675a3038fcf8779bcda99753b1603f7009fc8537e126b7e
-```
-
-```sh
-unzip -o nsc-linux-amd64.zip nsc -d ~/.local/bin
-```
-
-mash and mashctl v0.5.6 (https://github.com/bogworks/mash/releases):
-
-```sh
-MR=https://github.com/bogworks/mash/releases/download/v0.5.6
-```
-
-```sh
-curl -fsSLO $MR/mash-linux-amd64
-```
-
-```sh
-curl -fsSLO $MR/mashctl-linux-amd64
-```
-
-```sh
-curl -fsSLO $MR/SHA256SUMS
-```
-
-```sh
-sha256sum -c --ignore-missing SHA256SUMS
-```
-
-Both lines must say OK. SHA256SUMS comes from the same release page, so
-it proves the download is intact; to check who published it, compare with
-the hashes on the release page itself.
-
-```sh
-install -m 755 mash-linux-amd64 ~/.local/bin/mash
-```
-
-```sh
-install -m 755 mashctl-linux-amd64 ~/.local/bin/mashctl
-```
-
-Make sure `~/.local/bin` is on your PATH, then run the four version
-commands again.
-
-## 3. Make the server (one command)
-
-Get the script from one exact version of the repository and check its
-hash. Do not run a script you have not checked:
-
-```sh
-export MASH_REF=566155d615e404c9d7f8ac1b9f298ee0b3fd6c58
-```
-
-```sh
-RAW=https://raw.githubusercontent.com/bogworks/mash/$MASH_REF/scripts
-```
-
-```sh
-curl -fsSLO $RAW/nats-local-setup.sh
-```
-
-```sh
-sha256sum nats-local-setup.sh
-```
-
-The line must start with:
-
-```
-16fc1dcc97c68e36e28f2c895b8f5c904d1841334ac16ee7172186b49b8eaa60
-```
-
-Read the script; it only writes under the directory you give it. The
-script creates that directory (it must not exist yet), refuses a parent
-that other users can write to, never prints a secret, and never touches a
-firewall or a service. A listen address other than this machine needs
-`--yes-expose`. Then run it with your answers (question 4 and 5; add `--host`,
-`--listen` for question 7):
-
-```sh
-bash nats-local-setup.sh --dir ~/mash-nats --port 4222 --start
-```
-
-Leave out `--start` if you want to start the server yourself (part 6).
-You should see six steps, then the list of files. It looks like this (the
-key names after "operator" and "account" differ on your machine):
-
-```
-[1] about to: preflight (tools, directory, port)
-    did: nsc version 2.15.0; OpenSSL 3.3.7; nats-server: v2.15.1
-    did: tools found; /home/alice/mash-nats is usable (mode 0700);
-         127.0.0.1:4222 is free
-
-[2] about to: make a private CA and a server certificate (ECDSA P-256,
-    10 years)
-    did: ca.pem, ca.key, server.pem, server.key written; SANs:
-         DNS:localhost,IP:127.0.0.1,IP:::1
-...
-[6] about to: start nats-server detached
-    did: nats-server pid 227 listens on 127.0.0.1:4222 (log
-         /home/alice/mash-nats/server.log)
-
-Done. The setup is in /home/alice/mash-nats. Nothing above printed a seed
-or a credential, and nothing below does.
-
-Files left for you (all under /home/alice/mash-nats):
-  ca.pem                   CA certificate: copy this to clients
-  server.conf              nats-server configuration (no seeds)
-  export/mashadmin.creds   admin credentials (secret)
-  export/sys.creds         system account credentials (secret)
-  export/operator.nk       operator seed (secret)
-  export/account.nk        account seed (secret)
-  server.log               server log
-  server.pid               server process id (--stop reads it)
-```
-
-Check it:
-
-```sh
-bash nats-local-setup.sh --dir ~/mash-nats --check
-```
-
-```
-checking the setup in /home/alice/mash-nats (creates nothing)
-  ok    /home/alice/mash-nats mode 700
-  ok    /home/alice/mash-nats/ca.key mode 600
-...
-  ok    nats-server -t -c: nats-server: configuration file
-        /home/alice/mash-nats/server.conf is valid
-  ok    127.0.0.1:4222 answers and requires TLS
+bash "$HOME/mash-setup/nats-local-setup.sh" --dir "$HOME/mash-nats" --check
 ```
 
 If a line starts with FAIL, fix that first.
 
-### What each file is for
+### Every file, and what it exposes if it leaks
 
-Every file in the directory, what breaks if you lose it, and where
-mashctl keeps its own copy. `nsc/` holds the master copy of all keys.
+Everything is under `$HOME/mash-nats` (mode 0700). Nobody else keeps a
+copy: if it is lost, it is lost. "Lost (every copy)" means this file and
+any backup you made.
 
-Who keeps what: you do. The script writes everything into your
-directory and nobody else holds a copy. `ca.key` and the seeds can sign
-anything for this server: keep the directory mode 0700, keep it out of
-shared folders and plain backups, and treat a copy of it like a copy of a
-password.
+- `ca.key`: the CA's private key. **If it leaks:** someone can make a
+  certificate the clients trust, and pose as your server. **Lost (every
+  copy):** you cannot make a new server certificate with this CA.
+- `nsc/`: every key and JWT the script made. **If it leaks:** someone can
+  make accounts and users, and so agents. **Lost (every copy):** you can
+  no longer make accounts or users by hand; the running server and
+  mashctl keep working.
+- `export/operator.nk`: the operator seed. **If it leaks:** someone can
+  sign anything for this server. **Lost (every copy):** mashctl cannot
+  revoke a lost agent key. mashctl keeps its own copy.
+- `export/account.nk`: the MASH account seed. **If it leaks:** someone
+  can make agents and change what they may do. **Lost (every copy):**
+  mashctl cannot create agents. mashctl keeps its own copy.
+- `export/mashadmin.creds`: the admin user. **If it leaks:** someone can
+  administer the server's mail space and read every agent's mail.
+  **Lost (every copy):** mashctl cannot administer it; make new ones from
+  `nsc/`. mashctl keeps its own copy.
+- `export/sys.creds`: the system user. **If it leaks:** someone can
+  revoke keys and see the server's state. **Lost (every copy):** mashctl
+  cannot revoke keys. mashctl keeps its own copy.
+- Agents' creds files, `acme.<group>.<agent>.creds`, in mashctl's folder
+  (not here): **if one leaks:** someone can send and read as that agent.
+  **Lost:** `mashctl endpoint reissue` makes a new one.
+- `server.key`: the server's private key. **If it leaks:** someone can
+  pose as your server. **Lost:** the server cannot start; make a new
+  server directory.
+- `server.pem`, `ca.pem`, `server.conf`, `operator.jwt`, `resolver/`:
+  not secret. `ca.pem` is what clients need; give it to them. **Lost:**
+  the server cannot start, or clients cannot trust it.
+- `jetstream/`: all the mail. Not a key, but private. **Lost:** every
+  stored message.
+- `server.log`, `server.pid`: the log (lines that look secret are held
+  back) and the process id. Not secret.
+- `bin/`: the two programs the script installed. **Lost:** run
+  `--upgrade` to get them again.
 
-- `nsc/`: every key and JWT the script made.
-  Lost: you can no longer make new accounts or users by hand; the running
-  server and mashctl keep working. Back it up.
-  mashctl copy: none.
-- `ca.pem`: the CA certificate. Clients use it to trust the server.
-  Lost: clients cannot connect until you give them a copy; it is not
-  secret. mashctl copy: none; you set MASH_TLS_CA to its path.
-- `ca.key`: the CA's private key. Secret.
-  Lost: you cannot make a new server certificate with the same CA.
-  mashctl copy: none, it never needs it.
-- `server.pem`, `server.key`: the server's certificate and key.
-  Lost: the server cannot start. `server.key` is secret.
-  mashctl copy: none.
-- `server.conf`, `operator.jwt`, `resolver/`: the server's configuration
-  and account records. Not secret.
-  Lost: the server cannot start with its old accounts.
-  mashctl copy: none.
-- `jetstream/`: all the mail. Not a key, but private.
-  Lost: all stored messages. mashctl copy: none.
-- `export/operator.nk`: operator seed. Secret.
-  Lost: mashctl cannot revoke a lost agent key.
-  mashctl copy: `keys/operator.nk` in MASH_CONFIG_DIR.
-- `export/account.nk`: account seed. Secret.
-  Lost: mashctl cannot create agents.
-  mashctl copy: `keys/account.nk` in MASH_CONFIG_DIR.
-- `export/sys.creds`: system user credentials. Secret.
-  Lost: mashctl cannot revoke keys.
-  mashctl copy: `server/sys.creds` in MASH_CONFIG_DIR.
-- `export/mashadmin.creds`: admin user credentials. Secret.
-  Lost: mashctl cannot administer the server; make new ones from `nsc/`.
-  mashctl copy: `server/mashadmin.creds` in MASH_CONFIG_DIR (adopt copies
-  it in 0.5.6).
-- `server.log`, `server.pid`: log and process id. Not secret.
+Certificates last ten years: the CA and the server certificate expire
+about ten years after the script ran. When they do, clients stop
+connecting with an `x509: certificate has expired` error. There is no
+renew command in 0.5.6: you make a new server directory (the same
+steps), or make a new server certificate by hand from `ca.key`, which is
+why you keep the archive in part 5. Accounts and users carry no expiry.
 
-## 4. Hand the server to mashctl
+## 4. Install mash and mashctl
 
-Use the folder from question 6. Skip the first line if you chose the
-default `~/.config/mash`:
-
-```sh
-export MASH_CONFIG_DIR=~/mash-config
-```
-
-```sh
-export MASH_TLS_CA=~/mash-nats/ca.pem
-```
+Check what you have (read-only):
 
 ```sh
-cd ~/mash-nats/export
+"$HOME/.local/bin/mash" version; "$HOME/.local/bin/mashctl" version; echo checked
 ```
 
-Check first. `--dry-run` changes nothing. Use your owner name:
+Both must print "No such file" or nothing useful; if one works, stop and
+ask (question 2). Debian and Ubuntu put `$HOME/.local/bin` on your PATH
+at your next login, when the folder exists; until then every block here
+spells the full path.
+
+The releases are signed by the project's own build. You check that with
+`gh`, GitHub's tool. Debian's own `gh` is too old for this, so install
+the pinned one (v2.105.0, from the GitHub CLI project) into
+`$HOME/.local/bin`. This needs the install yes; it overwrites nothing
+(it stops if `gh` is there):
 
 ```sh
-mashctl adopt --server tls://localhost:4222 --owner acme \
-  --account MASH --operator-key operator.nk --account-key account.nk \
-  --sys-creds sys.creds --admin-creds mashadmin.creds --dry-run
+mkdir -p "$HOME/mash-setup/dl" "$HOME/.local/bin" && cd "$HOME/mash-setup/dl" && curl -fsSLO https://github.com/cli/cli/releases/download/v2.105.0/gh_2.105.0_linux_amd64.tar.gz && echo "79e7ab5db738c48777b696e374f8b428f0647debfb424f44d2f426370407fe2f  gh_2.105.0_linux_amd64.tar.gz" | sha256sum -c - && tar -xzf gh_2.105.0_linux_amd64.tar.gz && test ! -e "$HOME/.local/bin/gh" && install -m 755 gh_2.105.0_linux_amd64/bin/gh "$HOME/.local/bin/gh" && "$HOME/.local/bin/gh" --version
 ```
 
-Every check should say ok (output shortened):
-
-```
-mashctl adopt: checking tls://localhost:4222 as owner "acme", account
-"MASH" (read-only: nothing is written until every check passes)
-  1. files          ok: operator key O..., account key A...
-  2. server         ok: refused a connection without credentials ...
-  ...
-  6. jetstream      ok: the server answered for the account: 0 stream(s)
-All checks passed. --dry-run: nothing is written. ...
-```
-
-Then run the same command again without `--dry-run`. It prints the same
-checks, then the files it wrote. The sample is from the 0.5.5 build,
-which recorded the admin credentials' path; 0.5.6 copies the file, as
-`server/mashadmin.creds` in the same folder (shortened):
-
-```
-All checks passed.
-  operator key O... imported in /home/alice/mash-config/keys
-  account key A... imported in /home/alice/mash-config/keys
-  system creds copied at /home/alice/mash-config/server/sys.creds
-  record the admin creds path /home/alice/mash-nats/export/mashadmin.creds
-    (the file is not copied)
-  write /home/alice/mash-config/config.json with "url": ...
-```
-
-Then make mash's storage on the server, once:
+Download mash, mashctl and the signed record that covers them:
 
 ```sh
-mashctl init
+mkdir -p "$HOME/mash-setup/dl" && cd "$HOME/mash-setup/dl" && for f in mash-linux-amd64 mashctl-linux-amd64 mash.intoto.jsonl; do curl -fsSLO "https://github.com/bogworks/mash/releases/download/v0.5.6/$f"; done; ls -l
 ```
 
-```
-mashctl: directory and lease buckets ready
-```
-
-(The real output has a first line about the target server; it is long and
-not shortened here.)
-
-What is still needed after adopt: mashctl's own folder (MASH_CONFIG_DIR)
-holds everything it needs, including its copies of the keys and the admin
-credentials. So `export/` can go now, as you decided in question 8. What
-you must keep: `ca.pem` (clients need it), `server.conf`, `jetstream/`
-and the rest of the server directory, which the server runs from. The
-CA key `ca.key` and the `nsc/` folder stay in the server directory; keep
-them private, as above.
-
-## 5. Try it: Alice and Bob
+Verify both. The command needs no GitHub login because it reads the
+signed record you just downloaded. On success it prints nothing unless
+you run it in a terminal; the exit code is what counts, and this block
+prints `verified` only when both pass:
 
 ```sh
-mashctl endpoint create acme/demo/alice --make-key
+cd "$HOME/mash-setup/dl" && for f in mash-linux-amd64 mashctl-linux-amd64; do "$HOME/.local/bin/gh" attestation verify "$f" -R bogworks/mash --bundle mash.intoto.jsonl --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/v0.5.6 || exit 1; done; echo verified
 ```
 
-```
-created endpoint acme/demo/alice
-  address  acme.demo.alice
-  creds    /home/alice/mash-config/acme.demo.alice.creds
-```
-
-(The real output adds a first and a last line; see mashctl help.) Now Bob:
+If it does not print `verified`, stop: do not install the files. Then
+install them (each stops if the program is already there):
 
 ```sh
-mashctl endpoint create acme/demo/bob --make-key
+cd "$HOME/mash-setup/dl" && for f in mash mashctl; do test ! -e "$HOME/.local/bin/$f" && install -m 755 "$f-linux-amd64" "$HOME/.local/bin/$f" || exit 1; done; "$HOME/.local/bin/mashctl" version
+```
+
+## 5. Hand the server to mashctl, then test
+
+Check first. `--dry-run` changes nothing. Every check must say ok:
+
+```sh
+MASH_TLS_CA="$HOME/mash-nats/ca.pem" "$HOME/.local/bin/mashctl" adopt --server tls://localhost:4222 --owner acme --account MASH --operator-key "$HOME/mash-nats/export/operator.nk" --account-key "$HOME/mash-nats/export/account.nk" --sys-creds "$HOME/mash-nats/export/sys.creds" --admin-creds "$HOME/mash-nats/export/mashadmin.creds" --dry-run
+```
+
+Then the same command without `--dry-run`. It writes mashctl's folder
+(default `$HOME/.config/mash`) with its copies of the keys and the admin
+and system credentials:
+
+```sh
+MASH_TLS_CA="$HOME/mash-nats/ca.pem" "$HOME/.local/bin/mashctl" adopt --server tls://localhost:4222 --owner acme --account MASH --operator-key "$HOME/mash-nats/export/operator.nk" --account-key "$HOME/mash-nats/export/account.nk" --sys-creds "$HOME/mash-nats/export/sys.creds" --admin-creds "$HOME/mash-nats/export/mashadmin.creds"
+```
+
+Make mash's storage on the server, once:
+
+```sh
+MASH_TLS_CA="$HOME/mash-nats/ca.pem" "$HOME/.local/bin/mashctl" init
+```
+
+The mode of mashctl's folder: it holds keys, so it must not be open to
+others:
+
+```sh
+stat -c '%a %n' "$HOME/.config/mash" "$HOME/.config/mash"/*
+```
+
+The first number must be `700`. If it is not, run
+`chmod 700 "$HOME/.config/mash"` and tell the person.
+
+### Alice and Bob
+
+```sh
+MASH_TLS_CA="$HOME/mash-nats/ca.pem" "$HOME/.local/bin/mashctl" endpoint create acme/demo/alice --make-key
 ```
 
 ```sh
-mashctl endpoint list
+MASH_TLS_CA="$HOME/mash-nats/ca.pem" "$HOME/.local/bin/mashctl" endpoint create acme/demo/bob --make-key
 ```
 
-```
-acme/demo/alice  acme.demo.alice  acme_demo_alice  created 2026-11-19T01:57:35Z
-acme/demo/bob  acme.demo.bob  acme_demo_bob  created 2026-11-19T01:57:35Z
-2 endpoints
+```sh
+MASH_TLS_CA="$HOME/mash-nats/ca.pem" "$HOME/.local/bin/mashctl" endpoint list
 ```
 
 Alice sends, Bob reads:
 
 ```sh
-export MASH_OWNER=acme MASH_GROUP=demo
+MASH_TLS_CA="$HOME/mash-nats/ca.pem" MASH_OWNER=acme MASH_GROUP=demo MASH_NAME=alice "$HOME/.local/bin/mash" send acme.demo.bob "Hello Bob"
 ```
 
 ```sh
-MASH_NAME=alice mash send acme.demo.bob "Hello Bob"
+MASH_TLS_CA="$HOME/mash-nats/ca.pem" MASH_OWNER=acme MASH_GROUP=demo MASH_NAME=bob "$HOME/.local/bin/mash" inbox
 ```
 
-```
-sent #1 from acme.demo.alice to acme.demo.bob
-```
+`[verified]` beside Alice's name means the message is signed by her key.
+It works.
+
+### Move the keys off this machine
+
+The files in `export/`, plus `ca.key` and `nsc/`, can sign anything for
+this server. The server does not need them to run. After adopt they
+belong off this machine. First prove mashctl has its own copies (each
+line must print `same`; a `differ` or an error means: do not go on):
 
 ```sh
-MASH_NAME=bob mash inbox
+for p in keys/operator.nk keys/account.nk server/sys.creds server/mashadmin.creds; do f="$HOME/mash-nats/export/$(basename "$p")"; [ -s "$f" ] && [ "$(cat "$f")" = "$(cat "$HOME/.config/mash/$p")" ] && echo "same $p" || echo "differ $p"; done
 ```
 
+Then retire them. This command asks the person to type the server
+directory at a terminal, so an agent cannot run it; the person does. It
+writes one archive (mode 0600), checks that it lists back, and only then
+removes `ca.key`, `nsc/` and `export/` from the server directory. The
+server keeps running, and keeps `server.pem`, `server.key`, `ca.pem`:
+
+```sh person
+bash "$HOME/mash-setup/nats-local-setup.sh" --dir "$HOME/mash-nats" --retire-keys "$HOME/mash-nats-keys.tar.gz"
 ```
-#1  from acme.demo.alice [verified]  2026-11-19T01:57:35Z  9 B  Hello Bob
-```
 
-`[verified]` means the message is signed by Alice's key. It works.
-
-## 6. Stop, start again, remove
-
-Stop the server the script started. It stops only the process whose id is
-in `server.pid`, and only if it is this server:
+Then move `mash-nats-keys.tar.gz` off this machine: an encrypted disk or
+a password manager's file store, not a plain backup, not a chat. Keep it:
+it is the only copy of the CA key and the keys that make new accounts.
+Check the result (changes nothing):
 
 ```sh
-bash nats-local-setup.sh --dir ~/mash-nats --stop
+bash "$HOME/mash-setup/nats-local-setup.sh" --dir "$HOME/mash-nats" --check
 ```
 
-Your mail stays in `jetstream/`. Start it again by hand (after a reboot,
-for example):
+## 6. Look after it
+
+Each is one script command, with the same `--dir`. Stop acts only on
+the pid it recorded, and only if that pid is this server.
+
+Stop:
 
 ```sh
-nohup nats-server -c ~/mash-nats/server.conf >> ~/mash-nats/server.log 2>&1 &
+bash "$HOME/mash-setup/nats-local-setup.sh" --dir "$HOME/mash-nats" --stop
 ```
 
-This does not update `server.pid`, so `--stop` will later say the pid is
-stale. Stop that one with `kill` and the pid you started it with.
-
-A service that starts at every boot is a separate yes from the person:
-it keeps a network server running after you log out. Ask first. If they
-agree, write `~/.config/systemd/user/mash-nats.service` with this (the
-paths are your own; `command -v nats-server` shows the first one):
-
-```
-[Unit]
-Description=NATS server for mash
-
-[Service]
-ExecStart=/usr/bin/nats-server -c /home/alice/mash-nats/server.conf
-Restart=on-failure
-
-[Install]
-WantedBy=default.target
-```
+Start (after a reboot, for example):
 
 ```sh
-systemctl --user daemon-reload
+bash "$HOME/mash-setup/nats-local-setup.sh" --dir "$HOME/mash-nats" --start
 ```
+
+Back up (the archive holds secrets: keep it private and off this
+machine). It stops the server for a moment and restarts it:
 
 ```sh
-systemctl --user enable --now mash-nats
+bash "$HOME/mash-setup/nats-local-setup.sh" --dir "$HOME/mash-nats" --backup "$HOME/mash-nats-backup.tar.gz"
 ```
+
+Upgrade nats-server and nsc to the versions the script pins:
 
 ```sh
-loginctl enable-linger "$USER"
+bash "$HOME/mash-setup/nats-local-setup.sh" --dir "$HOME/mash-nats" --upgrade
 ```
 
-(The unit file was not run in the tests for this guide; check it with
-`systemctl --user status mash-nats`.) Stop the script's own copy first,
-or the port is taken.
+Start at boot is a separate yes: it keeps a network server running
+after you log out. The person types the confirmation, so an agent
+cannot run these. `--linger` also runs `loginctl enable-linger`, which
+may say "Access denied" for an ordinary user; the script then prints the
+command for you to run:
 
-Full removal. Stop the server, then delete these by their exact paths:
-
-- the server directory, `~/mash-nats` (it holds the CA key and `nsc/`)
-- `~/mash-nats/export`, if you kept it (it is inside the directory)
-- mashctl's folder, `~/mash-config` (keys, copies, and the agents' creds)
-- any backup copy of either folder you made
-- `~/mash-setup`, the downloads
-- the unit file, if you made one
-
-Delete mashctl's folder only when you will not use this server again:
-without the keys nobody can revoke or add agents.
-
-## You now hold
-
-- The server address: `tls://localhost:4222`
-- The CA file: `~/mash-nats/ca.pem`
-- The admin credentials: `~/mash-config/server/mashadmin.creds`
-- mashctl's folder, `~/mash-config`, with its copy of the keys, and the
-  server directory `~/mash-nats`, which holds the CA key: keep both
-  private
-
-## Next
-
-To use mash from Claude Code, install the plugin and start a session as
-Alice or Bob, with the same three variables:
-
-```sh
-claude plugin install mash@mash
+```sh person
+bash "$HOME/mash-setup/nats-local-setup.sh" --dir "$HOME/mash-nats" --enable-boot
 ```
 
-See docs/install.md for the rest.
+```sh person
+bash "$HOME/mash-setup/nats-local-setup.sh" --dir "$HOME/mash-nats" --disable-boot
+```
+
+Remove it all. This deletes `$HOME/mash-nats` with everything in it: the
+mail, and the keys if you have not retired them. The person types the
+directory name to confirm. It leaves mashctl's folder and says so:
+
+```sh person
+bash "$HOME/mash-setup/nats-local-setup.sh" --dir "$HOME/mash-nats" --remove
+```
+
+## What you hold
+
+The script ends by printing this. It is the real output of the test
+(after `Done.`); your paths differ. Its commands say `mashctl`; until
+your next login, when `$HOME/.local/bin` joins your PATH, use the full
+path `$HOME/.local/bin/mashctl`, as the blocks above do. Read it back to
+the person:
+
+<!-- closing-begin -->
+```
+Done. The setup is in /home/alice/mash-nats. Nothing above printed a seed or a
+credential, and nothing below does.
+
+Other users on this machine can still reach 127.0.0.1:4222; they cannot connect
+without credentials.
+
+Files (all under /home/alice/mash-nats):
+  bin/nats-server          server, v2.15.1 (sha256 checked)
+  bin/nsc                  nsc, v2.15.0 (sha256 checked)
+  ca.pem                   CA certificate: give this to clients
+  server.conf              nats-server configuration (no seeds)
+  export/mashadmin.creds   admin credentials (secret)
+  export/sys.creds         system account credentials (secret)
+  export/operator.nk       operator seed (secret)
+  export/account.nk        account seed (secret)
+  ca.key                   CA private key (secret)
+  nsc/                     nsc store with all signing keys (secret)
+  server.log               server log (secret-looking lines withheld)
+  server.pid               server process id (--stop reads it)
+
+What you hold
+  Server address     tls://localhost:4222
+  CA file            /home/alice/mash-nats/ca.pem
+  Server directory   /home/alice/mash-nats
+                     (mode 0700; holds the CA key and the nsc keys until you run
+                     --retire-keys)
+
+Next
+  1. Adopt the server into mash. One command; run it as it is:
+
+    MASH_TLS_CA=/home/alice/mash-nats/ca.pem mashctl adopt \
+    --server tls://localhost:4222 \
+    --owner acme \
+    --account MASH \
+    --operator-key /home/alice/mash-nats/export/operator.nk \
+    --account-key /home/alice/mash-nats/export/account.nk \
+    --sys-creds /home/alice/mash-nats/export/sys.creds \
+    --admin-creds /home/alice/mash-nats/export/mashadmin.creds
+
+  2. Create the directory and lease buckets:
+
+    mashctl init
+
+  mashctl keeps its files in /home/alice/.config/mash (set MASH_CONFIG_DIR to
+  change that). Agents' credentials are written there as
+  acme.<group>.<agent>.creds.
+
+  To use mash in Claude Code, run these two lines in Claude Code, then see the
+  guide:
+
+    claude plugin marketplace add bogworks/mash
+    claude plugin install mash@mash
+
+  https://github.com/bogworks/mash/blob/v0.5.6/docs/install.md
+
+  3. Looking after the server later (each takes --dir):
+
+  start the server
+    /home/alice/mash-setup/nats-local-setup.sh --dir /home/alice/mash-nats \
+        --start
+
+  stop it
+    /home/alice/mash-setup/nats-local-setup.sh --dir /home/alice/mash-nats \
+        --stop
+
+  check it
+    /home/alice/mash-setup/nats-local-setup.sh --dir /home/alice/mash-nats \
+        --check
+
+  back it up (the archive holds secrets)
+    /home/alice/mash-setup/nats-local-setup.sh --dir /home/alice/mash-nats \
+        --backup /home/alice/mash-nats-backup.tar.gz
+
+  after adopt, move the offline-only secrets off this machine
+    /home/alice/mash-setup/nats-local-setup.sh --dir /home/alice/mash-nats \
+        --retire-keys /home/alice/mash-nats-keys.tar.gz
+
+  upgrade nats-server and nsc to the pinned versions
+    /home/alice/mash-setup/nats-local-setup.sh --dir /home/alice/mash-nats \
+        --upgrade
+
+  start it at boot (systemd user unit)
+    /home/alice/mash-setup/nats-local-setup.sh --dir /home/alice/mash-nats \
+        --enable-boot
+
+  stop starting it at boot
+    /home/alice/mash-setup/nats-local-setup.sh --dir /home/alice/mash-nats \
+        --disable-boot
+
+  remove it all
+    /home/alice/mash-setup/nats-local-setup.sh --dir /home/alice/mash-nats \
+        --remove
+```
+<!-- closing-end -->
 
 ## If something is wrong
 
@@ -643,10 +628,10 @@ See docs/install.md for the rest.
   the `ca.pem` of this server.
 - `x509` host name error: the name in the URL is not in the certificate.
   Make a new server directory with `--host`.
-- adopt says the account is named MASH, not your owner: add
-  `--account MASH`.
 - adopt says JetStream is not enabled: the configuration has no
   JetStream block, or the disk limit is 0.
+- The script refuses a directory: read its message; it says which
+  component is wrong. Do not work around it.
 
 ## Do not
 
@@ -654,3 +639,5 @@ See docs/install.md for the rest.
 - Do not put seeds or credentials in a message, a log or a chat.
 - Do not use `pkill`, `killall` or `pgrep -f` to stop NATS.
 - Do not run the script before the person has answered the questions.
+- Do not delete `export/`, `nsc/` or `ca.key` by hand: use
+  `--retire-keys`, which keeps the only copy.
