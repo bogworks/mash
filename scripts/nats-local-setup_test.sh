@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Test harness for scripts/nats-local-setup.sh.  Run it with:
 #
-#     bash scripts/nats-local-setup_test.sh [main] [osrel] [sec] [reach] [root] [boot]
+#     bash scripts/nats-local-setup_test.sh [main] [osrel] [sec] [reach] [root]
 #
 # Every test runs inside throwaway rootless podman containers made from
 # debian:bookworm-slim (the helper's target OS); nothing is installed, started
@@ -14,16 +14,12 @@
 #   main   the whole helper as an ordinary user, with fake downloads, shims
 #          and canary secrets
 #   osrel  a non-Debian /etc/os-release is refused
-#   sec    path-swap rechecks (device:inode), the server-log allowlist,
-#          --retire-keys archive verification (partial, truncated and
-#          altered archives), and where each command writes
+#   sec    path-swap rechecks (device:inode), the server-log allowlist, and
+#          where each command writes
 #   reach  a second OS user (useradd in the container): can reach the
 #          listening port, cannot connect with NATS without credentials,
 #          cannot read DIR, server.log or mash-setup.json
 #   root   every subcommand refuses to run as root (podman exec --user root)
-#   boot   --enable-boot / --disable-boot against a real systemd user manager
-#          (systemd as PID 1 in the container), including a user-manager
-#          restart that stands in for a reboot
 #
 # Environment: NATSSETUP_TEST_SUFFIX=-xx is appended to the container and
 # image names (so concurrent users of podman never collide);
@@ -49,12 +45,9 @@ RUNID=${T##*.}
 RUNID=$(printf '%s' "$RUNID" | tr 'A-Z' 'a-z')
 SFX=${NATSSETUP_TEST_SUFFIX:-}
 C1=mash-natssetup-test-$RUNID$SFX
-C2=mash-natssetup-test-sd-$RUNID$SFX
 IMG1=localhost/mash-natssetup-test-$RUNID$SFX
-IMG2=localhost/mash-natssetup-test-sd-$RUNID$SFX
 BUILT_IMG1=0
-BUILT_IMG2=0
-GROUPS_WANTED=${*:-main osrel sec reach root boot}
+GROUPS_WANTED=${*:-main osrel sec reach root}
 TOTAL_FAIL=0
 TOTAL_PASS=0
 
@@ -65,9 +58,7 @@ cleanup() {
         cp -r "$T/out" "$NATSSETUP_TEST_OUT"
     fi
     podman rm -f "$C1" >/dev/null 2>&1
-    podman rm -f "$C2" >/dev/null 2>&1
     [ "$BUILT_IMG1" = 1 ] && podman rmi -f "$IMG1" >/dev/null 2>&1
-    [ "$BUILT_IMG2" = 1 ] && podman rmi -f "$IMG2" >/dev/null 2>&1
     case $T in
     */natssetup-test.*) rm -rf -- "$T" ;;
     esac
@@ -79,7 +70,7 @@ want() { case " $GROUPS_WANTED " in *" $1 "*) return 0 ;; esac; return 1; }
 
 # ---------------------------------------------------------------- build
 say "building mashctl and mash (CGO_ENABLED=0) into $T/bin"
-mkdir -p "$T/bin" "$T/gocache" "$T/ctx1" "$T/ctx2" "$T/out"
+mkdir -p "$T/bin" "$T/gocache" "$T/ctx1" "$T/out"
 for b in mashctl mash; do
     (cd "$REPO" && CGO_ENABLED=0 GOCACHE="$T/gocache" \
         go build -o "$T/bin/$b" "./cmd/$b") || {
@@ -198,17 +189,11 @@ t() { if eval "$2"; then pass "$1"; else fail "$1" "$2"; fi; }
 P() { python3 -I /tmp/reach-probe.py "$@" 2>&1; }
 t "reach: this really is a second user, not alice" \
     '[ "$(id -un)" = bob ] && [ "$(id -u)" != "$ALICEUID" ]'
-TGTS=("127.0.0.1 $PORT /tmp/reach-ca.pem"
-    "127.0.0.1 $PORT2 /tmp/reach-ca2.pem")
-[ -z "$EXTIP" ] || TGTS+=("$EXTIP $PORT2 /tmp/reach-ca2.pem")
+TGTS=("127.0.0.1 $PORT /tmp/reach-ca.pem")
 for tgt in "${TGTS[@]}"; do
     # shellcheck disable=SC2086
     set -- $tgt
-    case $1:$2 in
-    127.0.0.1:$PORT) lab="loopback-only server, 127.0.0.1:$PORT" ;;
-    127.0.0.1:$PORT2) lab="non-loopback server, 127.0.0.1:$PORT2" ;;
-    *) lab="non-loopback server, $1:$2" ;;
-    esac
+    lab="loopback-only server, 127.0.0.1:$PORT"
     r=$(P tcp "$1" "$2" "$3")
     t "reach: every local user can reach a loopback port: bob opens TCP to the $lab" \
         '[ "$r" = connected ]'
@@ -323,6 +308,11 @@ has() { # wrap-insensitive: whitespace squeezed on both sides
     _hn=$(printf "%s" "$1" | tr -s " \n" "  ")
     [[ $_ho == *"$_hn"* ]]
 }
+hasany() { # succeeds if $OUT holds any of the arguments
+    local _w
+    for _w in "$@"; do has "$_w" && return 0; done
+    return 1
+}
 t() { # NAME CONDITION(eval)
     if eval "$2"; then pass "$1"; else fail "$1" "$2"; fi
 }
@@ -333,6 +323,8 @@ wide() {
     printf '%s\n' "$OUT" | grep -v 'README.md#quick-start' |
         awk 'length > 80' | grep -c . || true
 }
+GONE="--(backup|upgrade|enable-boot|disable-boot|retire-keys|linger|host"
+GONE="$GONE|listen)|retire|systemd"
 PORT=4300
 np() { PORT=$((PORT + 1)); }
 SEED=SUAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB
@@ -369,18 +361,22 @@ cd /home/alice || exit 1
 note "help and usage"
 run "$HELPER" --help
 t "help: rc 0, <= 80 columns, no emoji" '[ $RC -eq 0 ] && [ "$(wide)" = 0 ]'
-t "help: names where each command writes, root refusal, residual" \
-    'has "--backup DEST writes DEST (mode 0600" && has "and nothing else" &&
-     has "writes DEST (0600) and DIR/.keys-retired and removes ca.key,
-        nsc/ and export/ from DIR" &&
-     has "writes the systemd user unit file at its real path
-        \$HOME/.config/systemd/user/<name> and enables it" &&
-     has "--disable-boot   removes that unit file" &&
-     has "--remove removes DIR (and the unit file, if this script
-        made one)" && has "not root" && has "$RES"'
-t "help: the log is kept at most 7 days, --remove needs --retire-keys first" \
-    'has "the log is kept at most 7 days" &&
-     has "refused until --retire-keys has run"'
+t "help: the modes, remove's terminal rule and exit 4, root refusal, residual" \
+    'has "nats-local-setup.sh --dir DIR --start | --stop | --check |
+        --remove" &&
+     has "--remove         stops the server recorded in DIR/server.pid and
+        removes DIR; you type DIR at a terminal to confirm, and with no
+        terminal it refuses and exits 4" &&
+     has "The server listens on 127.0.0.1 only" && has "not root" &&
+     has "the log is kept at most 7 days" && has "$RES"'
+OPTS="--dir --owner --mash-config --port --account --operator --js-disk"
+OPTS="$OPTS --start --stop --check --remove --help "
+t "help: lists exactly the kept options, no others" \
+    '[ "$(printf "%s\n" "$OUT" | grep -oE "^  --[a-z-]+" | tr -d " " |
+        tr "\n" " ")" = "$OPTS" ]'
+t "help: names no removed option" \
+    '! hasany --backup --upgrade --retire-keys --keys-retired --enable-boot \
+        --disable-boot --linger --host --listen systemd retire'
 run "$HELPER" --dir "$W/x1"
 t "create without --owner refused" \
     '[ $RC -ne 0 ] && has "needs --owner" && [ ! -e $W/x1 ]'
@@ -391,6 +387,18 @@ t "two subcommands refused" '[ $RC -ne 0 ] && has "one subcommand"'
 run "$HELPER" --dir "$W/x1" --owner alice --yes-expose
 t "F1: --yes-expose no longer exists" \
     '[ $RC -ne 0 ] && has "unknown argument: --yes-expose"'
+for o in "--backup $W/x.tgz" --upgrade "--retire-keys $W/x.tgz" \
+    --enable-boot --disable-boot --linger "--host box.example" \
+    "--listen 0.0.0.0"; do
+    # shellcheck disable=SC2086
+    run "$HELPER" --dir "$W/x1" $o
+    t "removed option '$o': unknown argument, usage, exit 2, nothing made" \
+        '[ $RC -eq 2 ] && has "usage: nats-local-setup.sh" &&
+         has "unknown argument: ${o%% *}" && [ ! -e $W/x1 ]'
+done
+run "$HELPER" --dir "$W/x1" --owner alice --listen ::1 --start
+t "removed option --listen with create options: exit 2, nothing made" \
+    '[ $RC -eq 2 ] && has "unknown argument: --listen" && [ ! -e $W/x1 ]'
 
 # ---------------------------------------------- platform and prerequisites
 note "platform and prerequisites"
@@ -509,15 +517,20 @@ t "closing output: removed paragraphs are gone" \
     '! grep -q "Or, after adopt succeeds" $W/happy.out &&
      ! tr -s " \n" " " <$W/happy.out | grep -q "a credential carries no" &&
      ! grep -q "Looking after the server later" $W/happy.out &&
-     ! grep -Eq -- "--(backup|upgrade|enable-boot|disable-boot|remove|retire-keys .*tar)" \
-        $W/happy.out'
+     ! grep -Eq -- "$GONE" $W/happy.out'
 t "closing output: other-commands line, Done and race sentences" \
     'has_n() { tr -s " \n" " " <$W/happy.out | grep -qF -- "$1"; }
-     grep -qxF "Other commands: --stop, --start, --check, --help." \
+     grep -qxF "Other commands: --stop, --start, --check, --remove, --help." \
         $W/happy.out &&
      has_n "Done. The setup is in" &&
      has_n "does not limit it to you" &&
      has_n "A process running as you can still swap a path"'
+t "closing output: the box says ca.key and the nsc store stay in DIR" \
+    'has_n() { tr -s " \n" " " <$W/happy.out | grep -qF -- "$1"; }
+     has_n "(mode 0700. ca.key and the nsc store stay in it: a process" &&
+     has_n "running as you can read them, and no step here moves them)" &&
+     has_n "Binding 127.0.0.1 keeps the server off the network but does not" &&
+     ! has_n "EXPOSED" && ! has_n "Exposed"'
 t "closing output: new fingerprint and adopt-user wording, no typing prompt" \
     'has_n() { tr -s " \n" " " <$W/happy.out | grep -qF -- "$1"; }
      has_n "The CA fingerprint is what a person on ANOTHER machine types to" &&
@@ -585,10 +598,10 @@ t "closing text names the agents' creds file" \
     'has "bob-1.<group>.<agent>.creds" &&
      ! has "claude plugin marketplace add" &&
      ! has "docs/install.md"'
-t "other commands line printed, long command list gone" \
-    'has "Other commands: --stop, --start, --check, --help." &&
-     for w in --backup --upgrade --enable-boot --disable-boot --remove; do
-         ! has "$w" || exit 1; done'
+t "other commands line printed, no removed option anywhere" \
+    'has "Other commands: --stop, --start, --check, --remove, --help." &&
+     ! hasany --backup --upgrade --retire-keys --enable-boot --disable-boot \
+        --linger --host --listen retire systemd'
 # the adopt --from line is one unbroken line: a long DIR may exceed 80
 t "closing output <= 80 columns (but the adopt line)" \
     '[ "$(printf "%s\n" "$OUT" | grep -v "mashctl adopt --from\|README.md#" |
@@ -694,60 +707,6 @@ for n in 1 2; do
 done
 rm -rf "$W/swp"
 
-# --------------------------------------------------------- F1 exposure
-note "F1: non-loopback listen needs a person typing the address"
-np
-D=$W/expo
-run "$HELPER" --dir "$D" --owner alice --listen 0.0.0.0 --port $PORT
-t "F1: piped (no terminal): refused, nothing created, prints the command" \
-    '[ $RC -ne 0 ] && [ ! -e $D ] && has "Run this yourself" &&
-     has "--listen 0.0.0.0" && has "$HELPER"'
-run "$HELPER" --dir "$D" --owner alice --listen 0.0.0.0 --port $PORT --start
-runpipe "0.0.0.0:$PORT
-" "$HELPER" --dir "$D" --owner alice --listen 0.0.0.0 --port $PORT
-t "F1: typed text on a pipe does not count" '[ $RC -ne 0 ] && [ ! -e $D ]'
-TYPED="0.0.0.0:1"
-runpty "$TYPED" "$HELPER" --dir "$D" --owner alice --listen 0.0.0.0 \
-    --port $PORT --host box.example
-t "F1: terminal but wrong text: refused, nothing created" \
-    '[ $RC -ne 0 ] && [ ! -e $D ] && has "not the confirmation"'
-t "F1: the exposure text names address, TLS, credentials, cert names" \
-    'has "0.0.0.0:$PORT" && has "TLS is required" && has "NATS credentials" &&
-     has "DNS:box.example"'
-TYPED="__eof__"
-runpty "$TYPED" "$HELPER" --dir "$D" --owner alice --listen 0.0.0.0 \
-    --port $PORT
-t "F1: terminal, no answer (EOF): refused, nothing created" \
-    '[ $RC -ne 0 ] && [ ! -e $D ]'
-TYPED="0.0.0.0:$PORT"
-runpty "$TYPED" "$HELPER" --dir "$D" --owner alice --listen 0.0.0.0 \
-    --port $PORT --host box.example --start
-printf '%s\n' "$OUT" >"$W/expo.out"
-t "F1: terminal and the exact address:port typed: created and started" \
-    '[ $RC -eq 0 ] && grep -q "listen: \"0.0.0.0:$PORT\"" $D/server.conf'
-t "F1: the typed-confirmation create printed the first host in the URL" \
-    'has "tls://box.example:$PORT"'
-ssl >"$W/ss-expose.txt"
-t "ss: only the typed-confirmed port is open, on 0.0.0.0" \
-    '[ "$(nlisten)" -ge 1 ] && grep -qE "(0.0.0.0|\*):$PORT" $W/ss-expose.txt &&
-     [ "$(grep -cE "(0.0.0.0|\*):$PORT" $W/ss-expose.txt)" = 1 ]'
-run "$HELPER" --dir "$D" --check
-t "F1: --check on the exposed setup passes (one socket, client port)" \
-    '[ $RC -eq 0 ] && has "listens on *:$PORT (the client port)"'
-run "$HELPER" --dir "$D" --stop
-note "IPv6 loopback"
-np
-D=$W/v6
-run "$HELPER" --dir "$D" --owner alice --listen ::1 --port $PORT --start
-t "--listen ::1 needs no confirmation, starts" \
-    '[ $RC -eq 0 ] && grep -q "listen: \"\[::1\]:$PORT\"" $D/server.conf'
-ssl >"$W/ss-v6.txt"
-t "ss: only [::1]:PORT is open" \
-    '[ "$(nlisten)" = 1 ] && grep -q "\[::1\]:$PORT" $W/ss-v6.txt'
-run "$HELPER" --dir "$D" --check
-t "--check passes on ::1" '[ $RC -eq 0 ] && has "(the client port)"'
-run "$HELPER" --dir "$D" --stop
-
 # ----------------------------------------------------------- F3 downloads
 note "F3: pinned digests, tampered download, hostile PATH"
 np
@@ -795,9 +754,6 @@ run env PATH="$W/evil:$PATH" "$HELPER" --dir "$D" --stop
 run env PATH="$W/evil:$PATH" "$HELPER" --dir "$D" --start
 t "F3(c): --stop/--start with the hostile PATH, canary absent" \
     '[ $RC -eq 0 ] && [ ! -e $W/CANARY-path ]'
-run env PATH="$W/evil:$PATH" "$HELPER" --dir "$D" --upgrade
-t "F3(c): --upgrade (already current) with the hostile PATH, canary absent" \
-    '[ $RC -eq 0 ] && has "already current" && [ ! -e $W/CANARY-path ]'
 run "$HELPER" --dir "$D" --stop
 note "F3: DIR/bin tampering is detected and never executed"
 cp "$D/bin/nats-server" "$W/ns.good"
@@ -811,9 +767,6 @@ t "F3: replaced nats-server: --check FAIL on its digest, not executed" \
 run "$HELPER" --dir "$D" --start
 t "F3: --start refuses a replaced nats-server, not executed" \
     '[ $RC -ne 0 ] && has "Nothing was run" && [ ! -e $W/CANARY-bin ]'
-run "$HELPER" --dir "$D" --upgrade
-t "F3: --upgrade refuses to overwrite a file it did not create" \
-    '[ $RC -ne 0 ] && has "differs from the recorded" && [ ! -e $W/CANARY-bin ]'
 cat "$W/ns.good" >"$D/bin/nats-server.tmp"
 chmod 700 "$D/bin/nats-server.tmp"
 mv -f "$D/bin/nats-server.tmp" "$D/bin/nats-server"
@@ -821,9 +774,6 @@ touch "$D/bin/extra-tool"
 run "$HELPER" --dir "$D" --check
 t "F3: an unexpected file in bin: --check says what it found" \
     '[ $RC -ne 0 ] && has "unexpected extra-tool in bin"'
-run "$HELPER" --dir "$D" --upgrade
-t "F3: --upgrade stops and says what it found" \
-    '[ $RC -ne 0 ] && has "unexpected extra-tool"'
 mv "$D/bin/extra-tool" "$W/extra-tool.moved"
 run "$HELPER" --dir "$D" --check
 t "F3: after removing the stray file --check passes again" '[ $RC -eq 0 ]'
@@ -1052,140 +1002,6 @@ touch "$W/nomark/a-file" "$W/nomark/b-file"
 run "$HELPER" --dir "$W/nomark" --check
 t "--check on a dir without the marker FAILs" '[ $RC -ne 0 ] && has "missing $W/nomark/.mash-nats-setup"'
 
-# ------------------------------------------------------------- --upgrade
-note "--upgrade: older pinned tools to the helper's pins"
-OLDNS=v2.14.0
-OLDNSC=v2.14.0
-mkdir -p "$W/old"
-curl -fsSL -o "$W/old/ns.tgz" \
-    "https://github.com/nats-io/nats-server/releases/download/$OLDNS/nats-server-$OLDNS-linux-amd64.tar.gz"
-curl -fsSL -o "$W/old/nsc.zip" \
-    "https://github.com/nats-io/nsc/releases/download/$OLDNSC/nsc-linux-amd64.zip"
-OSHA=$(sha256sum <"$W/old/ns.tgz" | cut -d' ' -f1)
-OCSHA=$(sha256sum <"$W/old/nsc.zip" | cut -d' ' -f1)
-cp "$HELPER" "$W/h-old.sh"
-sed -i -e "s#^NS_VER=.*#NS_VER=$OLDNS#" \
-    -e "s#^NS_VERLINE=.*#NS_VERLINE='nats-server: $OLDNS'#" \
-    -e "s#^NS_BASE=.*#NS_BASE=https://github.com/nats-io/nats-server/releases/download/$OLDNS#" \
-    -e "s#^NS_FILE=.*#NS_FILE=nats-server-$OLDNS-linux-amd64.tar.gz#" \
-    -e "s#^NS_MEMBER=.*#NS_MEMBER=nats-server-$OLDNS-linux-amd64/nats-server#" \
-    -e "s#^NS_SHA=.*#NS_SHA=$OSHA#" \
-    -e "s#^NSC_VER=.*#NSC_VER=$OLDNSC#" \
-    -e "s#^NSC_VERLINE=.*#NSC_VERLINE='nsc version ${OLDNSC#v}'#" \
-    -e "s#^NSC_BASE=.*#NSC_BASE=https://github.com/nats-io/nsc/releases/download/$OLDNSC#" \
-    -e "s#^NSC_SHA=.*#NSC_SHA=$OCSHA#" "$W/h-old.sh"
-chmod +x "$W/h-old.sh"
-np
-D=$W/upg
-run "$W/h-old.sh" --dir "$D" --owner alice --port $PORT --start
-t "upgrade setup: created with the older pinned tools, running" \
-    '[ $RC -eq 0 ] && has "nats-server reports '"'"'nats-server: $OLDNS'"'"'"'
-run "$HELPER" --dir "$D" --check
-t "--check says the tools are older than the pins, still passes" \
-    '[ $RC -eq 0 ] && has "older than this script"'
-OLDPID=$(cat "$D/server.pid")
-run "$HELPER" --dir "$D" --upgrade
-t "--upgrade (running): stops, replaces, restarts, checks" \
-    '[ $RC -eq 0 ] && has "stopped pid $OLDPID" && has "installed nats-server" &&
-     has "listens on 127.0.0.1:$PORT" && has "check passed"'
-UPG_OUT=$OUT
-t "--upgrade: new versions in DIR/bin, server runs the new binary" \
-    '[ "$("$D/bin/nats-server" -v)" = "nats-server: v2.15.1" ] &&
-     [ "$(cat $D/server.pid)" != "$OLDPID" ]'
-t "--upgrade: bin has only our files, manifest updated" \
-    '[ "$(ls -A $D/bin | tr "\n" " ")" = ".manifest nats-server nsc " ]'
-run "$HELPER" --dir "$D" --upgrade
-t "--upgrade again: already current (idempotent), rc 0" \
-    '[ $RC -eq 0 ] && has "already current"'
-run "$HELPER" --dir "$D" --stop
-note "--upgrade of a stopped setup leaves it stopped"
-np
-D=$W/upg2
-run "$W/h-old.sh" --dir "$D" --owner alice --port $PORT
-run "$HELPER" --dir "$D" --upgrade
-t "--upgrade (stopped): installs, does not start" \
-    '[ $RC -eq 0 ] && has "installed nats-server" && [ ! -f $D/server.pid ]'
-
-# -------------------------------------------------------------- --backup
-note "--backup"
-np
-D=$W/bk
-run "$HELPER" --dir "$D" --owner alice --port $PORT --start
-run "$HELPER" --dir "$D" --backup "$W/bk.tar.gz"
-t "--backup rc 0, mode 0600, holds-secrets notice, server restarted" \
-    '[ $RC -eq 0 ] && [ "$(stat -c %a $W/bk.tar.gz)" = 600 ] &&
-     has "holds secrets" && has "stopped pid" && has "listens on"'
-t "names: --backup says it writes DEST (0600) and nothing else, and the race" \
-    'has "--backup writes $W/bk.tar.gz (mode 0600) and nothing else" &&
-     has "$RES"'
-t "--backup archive lists, has ca.key and nsc, no bin" \
-    'tar -tzf $W/bk.tar.gz | grep -q "ca.key" &&
-     tar -tzf $W/bk.tar.gz | grep -q "nsc/" &&
-     ! tar -tzf $W/bk.tar.gz | grep -q "^./bin"'
-t "--backup: the archive leaves no .cmd temp file inside" \
-    '! tar -tzf $W/bk.tar.gz | grep -q "\.cmd\."'
-run "$HELPER" --dir "$D" --check
-t "--check passes after the backup restart" '[ $RC -eq 0 ]'
-run "$HELPER" --dir "$D" --backup "$W/bk.tar.gz"
-t "--backup: DEST must not exist" '[ $RC -ne 0 ] && has "already exists"'
-run "$HELPER" --dir "$D" --backup /tmp/bk.tar.gz
-t "--backup: DEST parent /tmp refused (parent-safety)" \
-    '[ $RC -ne 0 ] && has "writable by group or others" && [ ! -e /tmp/bk.tar.gz ]'
-run "$HELPER" --dir "$D" --backup "$D/inside.tgz"
-t "--backup: DEST inside DIR refused" '[ $RC -ne 0 ] && has "outside"'
-run "$HELPER" --dir "$D" --backup "$W/linkp/x.tgz"
-t "--backup: DEST under a symlinked parent refused" \
-    '[ $RC -ne 0 ] && has "symlink" && [ -z "$(ls -A $W/realp)" ]'
-run "$HELPER" --dir "$D" --backup 'relative.tgz'
-t "--backup: relative DEST refused" '[ $RC -ne 0 ]'
-run "$HELPER" --dir "$D" --stop
-
-# ----------------------------------------- restore: --upgrade makes bin/
-note "restore: a backup extracted into an empty directory has no bin"
-mv "$D" "$D.orig"
-mkdir -m 700 "$D"
-tar -xzf "$W/bk.tar.gz" -C "$D" --no-same-owner
-t "restore: extracted (marker, keys, config), and there is no bin" \
-    '[ ! -e $D/bin ] && [ -f $D/.mash-nats-setup ] && [ -f $D/ca.key ] &&
-     [ -f $D/server.conf ]'
-run "$HELPER" --dir "$D" --start
-t "restore: --start refuses a missing bin and says run --upgrade" \
-    '[ $RC -ne 0 ] && has "bin is missing" && has "run --upgrade" &&
-     [ ! -e $D/bin ] && ! ss -ltnH | grep -q ":$PORT "'
-run "$HELPER" --dir "$D" --check
-t "restore: --check fails on a missing bin and says run --upgrade" \
-    '[ $RC -ne 0 ] && has "bin is missing" && has "run --upgrade" &&
-     [ ! -e $D/bin ]'
-run "$HELPER" --dir "$D" --upgrade
-t "restore: --upgrade makes bin (0700) and installs the two programs" \
-    '[ $RC -eq 0 ] && has "made $D/bin (mode 0700" && has "installed nats-server" &&
-     [ "$(stat -c %a $D/bin)" = 700 ] &&
-     [ "$(ls -A $D/bin | tr "\n" " ")" = ".manifest nats-server nsc " ]'
-run "$HELPER" --dir "$D" --start
-t "restore: --start then works" \
-    '[ $RC -eq 0 ] && has "requires TLS" && [ -f $D/server.pid ]'
-run "$HELPER" --dir "$D" --check
-t "restore: --check then passes" '[ $RC -eq 0 ] && has "check passed"'
-run "$HELPER" --dir "$D" --stop
-for v in empty stray mode link; do
-    rm -rf "$W/rst-$v"
-    mkdir -m 700 "$W/rst-$v"
-    tar -xzf "$W/bk.tar.gz" -C "$W/rst-$v" --no-same-owner
-    case $v in
-    empty) mkdir -m 700 "$W/rst-$v/bin" ;;
-    stray) mkdir -m 700 "$W/rst-$v/bin"; echo x >"$W/rst-$v/bin/stray" ;;
-    mode) mkdir -m 755 "$W/rst-$v/bin" ;;
-    link) ln -s /nonexistent-bin "$W/rst-$v/bin" ;;
-    esac
-    BEFORE=$(snap "$W/rst-$v")
-    run "$HELPER" --dir "$W/rst-$v" --upgrade
-    t "restore: --upgrade still refuses a bin that is not as left ($v)" \
-        '[ $RC -ne 0 ] && has "is not as this script left it" &&
-         [ "$(snap $W/rst-$v)" = "$BEFORE" ]'
-    rm -rf "$W/rst-$v"
-done
-rm -rf "$D.orig"
-
 # ----------------------------------------------- server.log rotation (7d)
 note "server.log: rotated on every start, nothing older than 7 days kept"
 np
@@ -1241,55 +1057,6 @@ t "log: the aged log is gone, no .1 left, only the new server.log" \
      [ "$(cd $D && ls -A | grep "^server.log" | tr "\n" " ")" = "server.log server.log.9 " ]'
 run "$HELPER" --dir "$D" --stop
 
-# ---------------------------------------------------------- --retire-keys
-note "--retire-keys"
-np
-D=$W/rk
-run "$HELPER" --dir "$D" --owner alice --port $PORT --start
-run "$HELPER" --dir "$D" --retire-keys "$W/rk.tar.gz"
-t "F1: --retire-keys piped (no terminal): refused, nothing changed" \
-    '[ $RC -ne 0 ] && has "Run this yourself" && [ -f $D/ca.key ] &&
-     [ ! -e $W/rk.tar.gz ]'
-TYPED="wrong"
-runpty "$TYPED" "$HELPER" --dir "$D" --retire-keys "$W/rk.tar.gz"
-t "F1: --retire-keys wrong typed text: refused, nothing changed" \
-    '[ $RC -ne 0 ] && [ -f $D/ca.key ] && [ -d $D/nsc ] && [ -d $D/export ] &&
-     [ ! -e $W/rk.tar.gz ]'
-t "names: --retire-keys prompt says what it writes and removes, and the race" \
-    'has "--retire-keys writes $W/rk.tar.gz (mode 0600) and
-        $D/.keys-retired and removes ca.key, nsc/ and export/ from $D" &&
-     has "extracts $W/rk.tar.gz into a private temporary directory under $D" &&
-     has "$RES"'
-TYPED="$D"
-runpty "$TYPED" "$HELPER" --dir "$D" --retire-keys "$W/rk.tar.gz"
-t "F1: --retire-keys typed correctly: archive written, three paths removed" \
-    '[ $RC -eq 0 ] && [ "$(stat -c %a $W/rk.tar.gz)" = 600 ] &&
-     [ ! -e $D/ca.key ] && [ ! -e $D/nsc ] && [ ! -e $D/export ] &&
-     [ -f $D/.keys-retired ]'
-t "--retire-keys archive holds ca.key, nsc/ and export/ and lists back" \
-    'tar -tzf $W/rk.tar.gz | grep -q "^ca.key" &&
-     tar -tzf $W/rk.tar.gz | grep -q "^nsc/" &&
-     tar -tzf $W/rk.tar.gz | grep -q "^export/operator.nk"'
-t "--retire-keys left everything else (server files) in place" \
-    '[ -f $D/server.pem ] && [ -f $D/server.key ] && [ -f $D/ca.pem ] &&
-     [ -f $D/operator.jwt ] && [ -d $D/resolver ] && [ -d $D/jetstream ] &&
-     [ -f $D/server.conf ]'
-run "$HELPER" --dir "$D" --check
-t "--check treats the retired setup as valid ('keys retired')" \
-    '[ $RC -eq 0 ] && has "keys retired"'
-run "$HELPER" --dir "$D" --stop
-t "--stop works after retire" '[ $RC -eq 0 ]'
-run "$HELPER" --dir "$D" --start
-t "--start works after retire (TLS answers)" \
-    '[ $RC -eq 0 ] && has "requires TLS"'
-run "$HELPER" --dir "$D" --upgrade
-t "--upgrade works after retire" '[ $RC -eq 0 ] && has "already current"'
-run "$HELPER" --dir "$D" --backup "$W/rk-backup.tar.gz"
-t "--backup works after retire" '[ $RC -eq 0 ]'
-run "$HELPER" --dir "$D" --retire-keys "$W/rk2.tar.gz"
-t "--retire-keys twice refused" '[ $RC -ne 0 ] && has "already retired"'
-run "$HELPER" --dir "$D" --stop
-
 # --------------------------------------------------------------- --remove
 note "--remove"
 mkdir -p "$W/cfgkeep"
@@ -1302,36 +1069,33 @@ run "$HELPER" --dir "$W/nomark" --remove
 t "--remove refuses a dir without the marker and says what it found" \
     '[ $RC -ne 0 ] && has "no .mash-nats-setup marker" && has "a-file" &&
      [ -f $W/nomark/a-file ]'
-MSGRK="the CA key and signing keys are still here: run --retire-keys first"
 BEFORE=$(snap "$D")
 run "$HELPER" --dir "$D" --remove
-t "remove before retire: piped, refused, says run --retire-keys, no change" \
-    '[ $RC -ne 0 ] && has "$MSGRK" && has "nothing was changed" &&
-     [ -f $D/ca.key ] && [ -d $D/nsc ] && [ -d $D/export ] &&
-     [ "$(snap $D)" = "$BEFORE" ] &&
+t "--remove with no terminal: exit 4, message, command, no change" \
+    '[ $RC -eq 4 ] && has "--remove needs a person at a terminal" &&
+     has "nothing was changed" && has "Run this yourself" &&
+     has "$HELPER --dir $D --remove" && ! has "Type this exactly" &&
+     [ -f $D/ca.key ] && [ -d $D/nsc ] && [ "$(snap $D)" = "$BEFORE" ] &&
      [ "$(nlisten)" -ge 1 ]'
-runpty "$D" "$HELPER" --dir "$D" --remove
-t "remove before retire: even with the right typed text, refused, no change" \
-    '[ $RC -ne 0 ] && has "$MSGRK" && ! has "Type this exactly" &&
-     [ -f $D/ca.key ] && [ "$(snap $D)" = "$BEFORE" ] &&
+runpipe "$D
+" "$HELPER" --dir "$D" --remove
+t "--remove: the path typed on a pipe does not count: exit 4, no change" \
+    '[ $RC -eq 4 ] && [ -d $D ] && [ "$(snap $D)" = "$BEFORE" ] &&
      [ "$(nlisten)" -ge 1 ]'
-runpty "$D" "$HELPER" --dir "$D" --retire-keys "$W/rm-keys.tgz"
-t "remove: keys retired first (the --retire-keys path)" \
-    '[ $RC -eq 0 ] && [ -f $D/.keys-retired ] && [ ! -e $D/ca.key ]'
-run "$HELPER" --dir "$D" --remove
-t "F1: --remove piped: refused, nothing removed" \
-    '[ $RC -ne 0 ] && has "Run this yourself" && [ -d $D ]'
 TYPED="nope"
 runpty "$TYPED" "$HELPER" --dir "$D" --remove
-t "F1: --remove wrong text: refused, nothing removed, server still up" \
-    '[ $RC -ne 0 ] && [ -d $D ] && [ "$(nlisten)" -ge 1 ]'
-t "names: --remove prompt says it removes DIR and the unit file, and the race" \
+t "--remove wrong text on a terminal: refused, nothing removed" \
+    '[ $RC -ne 0 ] && has "not the confirmation" && [ -d $D ] &&
+     [ -f $D/ca.key ] && [ "$(snap $D)" = "$BEFORE" ] && [ "$(nlisten)" -ge 1 ]'
+t "names: --remove prompt says it removes DIR, stops the server, and the race" \
     'has "--remove removes $D with everything in it" &&
-     has "the unit file $HOME/.config/systemd/user/mash-nats-" && has "$RES"'
+     has "it stops the server first" && has "$RES" &&
+     ! has "unit file" && ! has "retire"'
 TYPED="$D"
 runpty "$TYPED" "$HELPER" --dir "$D" --remove --mash-config "$W/cfgkeep"
-t "F1: --remove typed correctly: server stopped, DIR gone" \
-    '[ $RC -eq 0 ] && [ ! -e $D ] && has "removed $D"'
+t "--remove typed path on a terminal: server stopped, DIR gone" \
+    '[ $RC -eq 0 ] && [ ! -e $D ] && has "removed $D" && has "stopped pid" &&
+     ! has "retire"'
 t "--remove prints that mashctl's folder is untouched and its command" \
     'has "mashctl'"'"'s folder was not touched" && has "rm -r -- $W/cfgkeep"'
 t "--remove did not touch the mashctl folder" '[ -f $W/cfgkeep/keep.txt ]'
@@ -1466,59 +1230,12 @@ for n in 2 3; do
         sentinel (listing, sha256): no helper file, key or archive" \
         'evil_exact $S/cpar'
 done
-for n in 2 3 4; do
-    mkevil
-    rm -rf "$S/bpar" "$S/bpar.orig" "$S/db$n"
-    mkdir -m 700 "$S/bpar"
-    cp -a "$BASE" "$S/db$n"
-    run "$S/swapenv" $n "$S/bpar" "$HELPER" --dir "$S/db$n" --backup \
-        "$S/bpar/b.tgz"
-    note "S2 backup #$n: stat calls on the destination parent: $(cat "$S/cnt")"
-    t "S2: --backup, destination parent swapped at recheck #$n: it happened" \
-        'swapped $S/bpar'
-    t "S2: --backup swap #$n: aborts, names device:inode, nothing written" \
-        '[ $RC -ne 0 ] && refused && has "device:inode" &&
-         ! has "wrote $S/bpar/b.tgz"'
-    t "S2: --backup swap #$n: the replacement is untouched" \
-        'untouched $S/bpar'
-    t "S2: --backup swap #$n: the unintended destination holds exactly the
-        sentinel (listing, sha256): no archive, helper file or key" \
-        'evil_exact $S/bpar'
-    t "S2: --backup swap #$n: DIR itself is intact" \
-        '[ -f $S/db$n/ca.key ] && [ -d $S/db$n/nsc ]'
-done
-for n in 2 3 4 5; do
-    mkevil
-    rm -rf "$S/kpar" "$S/kpar.orig" "$S/dk$n"
-    mkdir -m 700 "$S/kpar"
-    cp -a "$BASE" "$S/dk$n"
-    TYPED="$S/dk$n"
-    runpty "$TYPED" "$S/swapenv" $n "$S/kpar" "$HELPER" --dir "$S/dk$n" \
-        --retire-keys "$S/kpar/k.tgz"
-    note "S2 retire-keys #$n: stat calls: $(cat "$S/cnt")"
-    t "S2: --retire-keys, dest parent swapped at recheck #$n: it happened" \
-        'swapped $S/kpar'
-    t "S2: --retire-keys swap #$n: aborts, names device:inode" \
-        '[ $RC -ne 0 ] && refused && has "device:inode"'
-    t "S2: --retire-keys swap #$n: the unintended destination holds exactly
-        the sentinel (listing, sha256): no archive, helper file or key" \
-        'evil_exact $S/kpar'
-    t "S2: --retire-keys swap #$n: replacement untouched, sources retained" \
-        'untouched $S/kpar && [ -f $S/dk$n/ca.key ] && [ -d $S/dk$n/nsc ] &&
-         [ -d $S/dk$n/export ] && [ ! -e $S/dk$n/.keys-retired ] &&
-         [ -z "$(ls -A $S/dk$n | grep "^.verify")" ]'
-done
 for n in 2 3; do
     mkevil
     rm -rf "$S/rpar" "$S/rpar.orig"
     mkdir -m 700 "$S/rpar"
     cp -a "$BASE" "$S/rpar/d"
     TYPED="$S/rpar/d"
-    rm -f "$S/rk-r$n.tgz"
-    runpty "$TYPED" "$HELPER" --dir "$S/rpar/d" --retire-keys "$S/rk-r$n.tgz"
-    t "S2: --remove swap #$n: keys retired first (no swap yet)" \
-        '[ $RC -eq 0 ] && [ -f $S/rpar/d/.keys-retired ]'
-    mkevil
     runpty "$TYPED" "$S/swapenv" $n "$S/rpar" "$HELPER" --dir "$S/rpar/d" \
         --remove
     note "S2 remove #$n: stat calls: $(cat "$S/cnt")"
@@ -1531,89 +1248,9 @@ for n in 2 3; do
         'evil_exact $S/rpar'
     t "S2: --remove swap #$n: replacement untouched, original DIR not removed" \
         'untouched $S/rpar && [ -f $S/rpar.orig/d/.mash-nats-setup ] &&
-         [ -f $S/rpar.orig/d/.keys-retired ] && [ -f $S/rpar.orig/d/server.conf ]'
+         [ -f $S/rpar.orig/d/ca.key ] && [ -f $S/rpar.orig/d/server.conf ]'
 done
-# ------------------- --remove refuses while any key is still here
-note "remove refuses until --retire-keys has run"
-MSGRK="the CA key and signing keys are still here: run --retire-keys first"
-for k in ca.key nsc export; do
-    rm -rf "$S/rf-$k"
-    cp -a "$BASE" "$S/rf-$k"
-    for o in ca.key nsc export; do
-        [ "$o" = "$k" ] || rm -rf "$S/rf-$k/$o"
-    done
-    BEFORE=$(snap "$S/rf-$k")
-    runpty "$S/rf-$k" "$HELPER" --dir "$S/rf-$k" --remove
-    t "remove refused with only $k left, no .keys-retired: nothing changed" \
-        '[ $RC -ne 0 ] && has "$MSGRK" && has "nothing was changed" &&
-         ! has "Type this exactly" && [ "$(snap $S/rf-$k)" = "$BEFORE" ] &&
-         [ -f $S/rf-$k/.mash-nats-setup ]'
-    run "$HELPER" --dir "$S/rf-$k" --remove
-    t "remove refused with only $k left, piped: nothing changed" \
-        '[ $RC -ne 0 ] && has "$MSGRK" && [ "$(snap $S/rf-$k)" = "$BEFORE" ]'
-    rm -rf "$S/rf-$k"
-done
-# ------------------------------ S9: --retire-keys verifies the archive
-note "S9: tar shims make a partial, a truncated and an altered archive"
-mkdir -p "$S/sh-tar"
-cat >"$S/sh-tar/tar" <<'SH'
-#!/bin/bash
-# test shim, TARMODE: partial (the archive lacks export/), trunc (the
-# archive is cut in half), alter (extracting changes one byte of ca.key)
-real=/usr/bin/tar
-case "${TARMODE:-}:${1:-}" in
-partial:-czf)
-    a=()
-    for x in "$@"; do [ "$x" = export ] || a+=("$x"); done
-    exec $real "${a[@]}" ;;
-trunc:-czf)
-    $real "$@" || exit
-    sz=$(/usr/bin/stat -c %s "$2")
-    truncate -s $((sz / 2)) "$2" ;;
-alter:-xzf)
-    $real "$@" || exit
-    c=''
-    while [ $# -gt 0 ]; do
-        [ "$1" = -C ] && c=$2
-        shift
-    done
-    printf 'x' >>"$c/ca.key" ;;
-*) exec $real "$@" ;;
-esac
-SH
-chmod +x "$S/sh-tar/tar"
-for m in partial trunc alter; do
-    rm -rf "$S/dt-$m" "$S/t-$m.tgz"
-    cp -a "$BASE" "$S/dt-$m"
-    TYPED="$S/dt-$m"
-    runpty "$TYPED" env PATH="$S/sh-tar:$PATH" TARMODE=$m "$HELPER" \
-        --dir "$S/dt-$m" --retire-keys "$S/t-$m.tgz"
-    case $m in
-    partial) MSGS='has "lacks ca.key, nsc/ or export/"' ;;
-    trunc) MSGS='has "could not be extracted" || has "did not list back"' ;;
-    alter) MSGS='has "differs from the one in"' ;;
-    esac
-    t "S9: $m archive: aborts with a reason, sources retained, none removed" \
-        '[ $RC -ne 0 ] && { '"$MSGS"'; } && [ -f $S/dt-$m/ca.key ] &&
-         [ -d $S/dt-$m/nsc ] && [ -d $S/dt-$m/export ] &&
-         [ ! -e $S/dt-$m/.keys-retired ] && [ -f $S/dt-$m/server.pem ] &&
-         [ -f $S/dt-$m/operator.jwt ]'
-    t "S9: $m archive: the temporary extraction directory is gone" \
-        '[ -z "$(ls -A $S/dt-$m | grep "^.verify")" ] &&
-         [ -z "$(ls -A $S/dt-$m | grep "^.cmd")" ]'
-    t "S9: $m archive: no key content in the output" \
-        '! has "$(head -c 20 $S/dt-$m/ca.key | tr -d "\n")"'
-done
-rm -rf "$S/dt-good" "$S/t-good.tgz"
-cp -a "$BASE" "$S/dt-good"
-runpty "$S/dt-good" "$HELPER" --dir "$S/dt-good" --retire-keys \
-    "$S/t-good.tgz"
-t "S9: a good archive: verified identical, sources removed, extraction gone" \
-    '[ $RC -eq 0 ] && has "identical to the sources" &&
-     [ ! -e $S/dt-good/ca.key ] && [ ! -e $S/dt-good/nsc ] &&
-     [ ! -e $S/dt-good/export ] && [ -f $S/dt-good/.keys-retired ] &&
-     [ -z "$(ls -A $S/dt-good | grep "^.verify")" ] &&
-     [ "$(stat -c %a $S/t-good.tgz)" = 600 ]'
+
 }
 
 group_root() {
@@ -1624,15 +1261,13 @@ MSG="run as your own user, not root; sudo would make root-owned keys"
 before=$(find /root -xdev 2>/dev/null | sort | md5sum)
 t "root: this really is uid 0" '[ "$(id -u)" = 0 ]'
 for a in "--owner alice" "--owner alice --start" --start --stop --check \
-    --upgrade "--backup /root/rt-h5-b.tgz" "--retire-keys /root/rt-h5-k.tgz" \
-    --enable-boot --disable-boot --remove; do
+    --remove; do
     # shellcheck disable=SC2086
     run "$HELPER" --dir "$R/d" $a
     t "S7: as root, '$a': refused with the fixed message, exit != 0" \
         '[ $RC -ne 0 ] && has "$MSG"'
     t "S7: as root, '$a': nothing created" \
-        '[ ! -e $R ] && [ ! -e /root/rt-h5-b.tgz ] &&
-         [ ! -e /root/rt-h5-k.tgz ] &&
+        '[ ! -e $R ] &&
          [ "$(find /root -xdev 2>/dev/null | sort | md5sum)" = "$before" ]'
 done
 runpty "$R/d" "$HELPER" --dir "$R/d" --remove
@@ -1649,184 +1284,13 @@ t "non-Debian /etc/os-release (fedora): refused, nothing created" \
 }
 
 
-# ------------------------------------------------- boot (systemd as PID 1)
-UNITDIR=/home/alice/.config/systemd/user
-unit_of() { printf 'mash-nats-%s.service' \
-    "$(printf '%s' "$1" | sha256sum | cut -c1-12)"; }
-sc() { systemctl --user "$@"; }
-mashenv() { env -i HOME=/home/alice PATH="$BINP:/usr/bin:/bin" "$@"; }
-group_boot1() {
-cd /home/alice || exit 1
-note "boot: systemd user manager in the container"
-t "systemd user manager is up (systemctl --user)" \
-    '[ "$(sc is-system-running 2>&1)" = running ]'
-D=$W/boot
-U=$(unit_of "$D")
-run "$HELPER" --dir "$D" --owner alice --start
-t "boot: create --start (helper-started copy)" '[ $RC -eq 0 ]'
-grep -E '^    (MASH_CONFIG_DIR=[^ ]+ )?mashctl adopt --from ' <<<"$OUT" \
-    >"$W/b-adopt.cmd" || true
-oldinit "$W/b-adopt.cmd" >"$W/b-init.cmd"
-run mashenv MASH_TLS_CA="$D/ca.pem" bash -c \
-    "$(oldadopt "$W/b-adopt.cmd")"
-t "boot: printed adopt command works" '[ $RC -eq 0 ]'
-run mashenv bash -c "$(cat "$W/b-init.cmd")"
-t "boot: printed init command works" '[ $RC -eq 0 ]'
-run mashenv mashctl endpoint create alice/dev/design --make-key
-run mashenv mashctl endpoint create alice/dev/review --make-key
-run mashenv MASH_OWNER=alice MASH_GROUP=dev MASH_NAME=design mash send \
-    alice.dev.review "Mail before reboot"
-t "boot: mail sent before enabling boot" '[ $RC -eq 0 ]'
-OLDPID=$(cat "$D/server.pid")
-run "$HELPER" --dir "$D" --enable-boot
-t "F1: --enable-boot piped: refused, nothing written" \
-    '[ $RC -ne 0 ] && has "Run this yourself" && [ ! -e $UNITDIR/$U ]'
-TYPED=wrong
-runpty "$TYPED" "$HELPER" --dir "$D" --enable-boot
-t "F1: --enable-boot wrong text: refused, nothing written, copy still up" \
-    '[ $RC -ne 0 ] && [ ! -e $UNITDIR/$U ] && kill -0 $OLDPID'
-t "names: --enable-boot prompt names the unit file at its real path" \
-    'has "--enable-boot writes the unit file $UNITDIR/$U" &&
-     has "It writes nothing else" && has "$RES"'
-t "boot: the confirmation text says what linger changes only with --linger" \
-    'has "Without --linger"'
-TYPED=$U
-runpty "$TYPED" "$HELPER" --dir "$D" --enable-boot
-printf '%s\n' "$OUT" >"$W/enable.out"
-t "F1: --enable-boot typed correctly: unit written, enabled, started" \
-    '[ $RC -eq 0 ] && has "enabled and started $U" && [ -f $UNITDIR/$U ]'
-run sc status "$U" --no-pager
-printf '%s\n' "$OUT" >"$W/status1.out"
-t "boot: systemctl --user status shows active (running)" \
-    'has "Active: active (running)"'
-run cat "$UNITDIR/$U"
-printf '%s\n' "$OUT" >"$W/unit.out"
-t "boot: unit has the absolute ExecStart and Restart=on-failure" \
-    'has "ExecStart=\"$D/bin/nats-server\" -c \"$D/server.conf\"" &&
-     has "Restart=on-failure"'
-t "boot: the helper-started copy was stopped first" '! kill -0 $OLDPID 2>/dev/null'
-run "$HELPER" --dir "$D" --check
-t "boot: --check sees the systemd server (exact command, one socket)" \
-    '[ $RC -eq 0 ] && has "runs exactly nats-server -c server.conf" &&
-     has "(the client port)"'
-ssl >"$W/ss-boot.txt"
-t "ss: only the client port with the systemd-run server" \
-    '[ "$(nlisten)" = 1 ]'
-run "$HELPER" --dir "$D" --start
-t "boot: --start refuses (already running under systemd)" \
-    '[ $RC -ne 0 ] && has "already running"'
-# restart through systemd (emulates a boot of the user manager's service)
-run sc restart "$U"
-sleep 4
-run mashenv MASH_OWNER=alice MASH_GROUP=dev MASH_NAME=review mash inbox
-t "boot: after systemctl --user restart the server is back with the mail" \
-    '[ "$(sc is-active $U)" = active ] && has "Mail before reboot"'
-# crash: kill -9 the main pid, Restart=on-failure brings it back
-MP=$(sc show -p MainPID --value "$U")
-kill -9 "$MP"
-sleep 5
-t "boot: kill -9 of the server: systemd restarted it (Restart=on-failure)" \
-    '[ "$(sc is-active $U)" = active ] &&
-     [ "$(sc show -p MainPID --value $U)" != "$MP" ]'
-# a unit file we did not write is never touched
-D2=$W/boot2
-run "$HELPER" --dir "$D2" --owner alice --port 4333
-U2=$(unit_of "$D2")
-printf '%s\n' '[Unit]' 'Description=someone else' >"$UNITDIR/$U2"
-TYPED=$U2
-runpty "$TYPED" "$HELPER" --dir "$D2" --enable-boot
-t "boot: an existing unit file we did not write: refused, untouched" \
-    '[ $RC -ne 0 ] && has "did not write it" &&
-     [ "$(cat $UNITDIR/$U2 | head -n 1)" = "[Unit]" ]'
-mv "$UNITDIR/$U2" "$W/foreign-unit.moved"
-# --linger: says exactly what it changes
-TYPED=$U2
-runpty "$TYPED" "$HELPER" --dir "$D2" --enable-boot --linger
-printf '%s\n' "$OUT" >"$W/enable-linger.out"
-t "boot: --linger text says what linger changes and how to undo it" \
-    'has "loginctl enable-linger alice" && has "keep running when" &&
-     has "loginctl" && has "disable-linger alice"'
-t "boot: --enable-boot --linger completed (or failed clearly)" \
-    '[ $RC -eq 0 ] || has "failed"'
-note "boot: linger now: $(loginctl show-user alice -p Linger 2>&1)"
-}
-group_boot2() {
-cd /home/alice || exit 1
-D=$W/boot
-U=$(unit_of "$D")
-D2=$W/boot2
-U2=$(unit_of "$D2")
-note "boot: after the user manager was restarted (emulated boot)"
-i=0
-while [ $i -lt 30 ] && [ "$(sc is-active "$U" 2>&1)" != active ]; do
-    sleep 1
-    i=$((i + 1))
-done
-t "boot: after restarting the user manager the unit is active again" \
-    '[ "$(sc is-active $U)" = active ]'
-run sc status "$U" --no-pager
-printf '%s\n' "$OUT" >"$W/status2.out"
-t "boot: status shows active (running) after the manager restart" \
-    'has "Active: active (running)"'
-run "$HELPER" --dir "$D" --check
-t "boot: --check passes after the restart" '[ $RC -eq 0 ]'
-run mashenv MASH_OWNER=alice MASH_GROUP=dev MASH_NAME=review mash inbox
-t "boot: the server came back with the mail" 'has "Mail before reboot"'
-run "$HELPER" --dir "$D" --stop
-t "boot: --stop works through systemd" \
-    '[ $RC -eq 0 ] && [ "$(sc is-active $U)" != active ]'
-run "$HELPER" --dir "$D" --start
-t "boot: --start works through systemd" \
-    '[ $RC -eq 0 ] && [ "$(sc is-active $U)" = active ]'
-run "$HELPER" --dir "$D" --backup "$W/boot-bk.tar.gz"
-t "boot: --backup stops and restarts the systemd server" \
-    '[ $RC -eq 0 ] && [ "$(sc is-active $U)" = active ]'
-run "$HELPER" --dir "$D" --disable-boot
-t "F1: --disable-boot piped: refused, unit still there" \
-    '[ $RC -ne 0 ] && has "Run this yourself" && [ -f $UNITDIR/$U ]'
-TYPED=wrong
-runpty "$TYPED" "$HELPER" --dir "$D" --disable-boot
-t "F1: --disable-boot wrong text: refused, unit still enabled" \
-    '[ $RC -ne 0 ] && [ -f $UNITDIR/$U ] && [ "$(sc is-enabled $U)" = enabled ]'
-t "names: --disable-boot prompt says it removes that unit file" \
-    'has "--disable-boot removes the unit file $UNITDIR/$U" && has "$RES"'
-TYPED=$U
-runpty "$TYPED" "$HELPER" --dir "$D" --disable-boot
-printf '%s\n' "$OUT" >"$W/disable.out"
-t "F1: --disable-boot typed correctly: disabled, stopped, file removed" \
-    '[ $RC -eq 0 ] && [ ! -e $UNITDIR/$U ] && [ "$(sc is-active $U)" != active ]'
-t "boot: --disable-boot says linger was not touched and how to turn it off" \
-    'has "linger was not touched" && has "loginctl disable-linger alice"'
-t "boot: --disable-boot never turned linger off" \
-    '[ "$(loginctl show-user alice -p Linger)" = Linger=yes ]'
-run "$HELPER" --dir "$D" --start
-t "boot: after --disable-boot the helper starts it by hand again" \
-    '[ $RC -eq 0 ] && [ -f $D/server.pid ]'
-run "$HELPER" --dir "$D" --stop
-# --remove with a unit we wrote: the unit goes too
-if [ -f "$UNITDIR/$U2" ]; then
-    TYPED=$D2
-    runpty "$TYPED" "$HELPER" --dir "$D2" --remove
-    t "boot: --remove before --retire-keys is refused, unit and DIR stay" \
-        '[ $RC -ne 0 ] && has "run --retire-keys first" && [ -d $D2 ] &&
-         [ -f $UNITDIR/$U2 ]'
-    runpty "$TYPED" "$HELPER" --dir "$D2" --retire-keys "$W/boot2-keys.tgz"
-    t "boot: keys retired before the remove" \
-        '[ $RC -eq 0 ] && [ -f $D2/.keys-retired ]'
-    runpty "$TYPED" "$HELPER" --dir "$D2" --remove
-    t "boot: --remove with a boot unit: unit file and DIR both removed" \
-        '[ $RC -eq 0 ] && [ ! -e $UNITDIR/$U2 ] && [ ! -e $D2 ] &&
-         has "disabled $U2"'
-fi
-}
-
 group_reach_up() {
 cd /home/alice || exit 1
 PORT=4700
 # bob must be able to walk to DIR so that only DIR's own mode (0700) keeps
 # him out, not the home directory's
 chmod 755 /home/alice
-note "reach: a loopback-only setup and a non-loopback one"
+note "reach: a loopback-only setup"
 D=$W/reach
 run "$HELPER" --dir "$D" --owner alice --port $PORT --start
 t "reach: loopback setup created and running" \
@@ -1843,36 +1307,19 @@ t "reach: only 127.0.0.1:$PORT listens for it" \
      ! ss -ltnH | grep -qE "(0.0.0.0|\*):$PORT"'
 cp "$D/ca.pem" /tmp/reach-ca.pem
 chmod 644 /tmp/reach-ca.pem
-PORT2=4701
-D2=$W/reach2
-runpty "0.0.0.0:$PORT2" "$HELPER" --dir "$D2" --owner alice --listen 0.0.0.0 \
-    --port $PORT2 --start
-t "reach: non-loopback setup created and running (typed confirmation)" \
-    '[ $RC -eq 0 ] && has "Exposed: 0.0.0.0:$PORT2 is reachable from other
-        machines" && ! has "Binding 0.0.0.0"'
-cp "$D2/ca.pem" /tmp/reach-ca2.pem
-chmod 644 /tmp/reach-ca2.pem
-EXTIP=$(python3 -I -c 'import socket
-a = socket.gethostbyname(socket.gethostname())
-print("" if a.startswith("127.") else a)')
-note "reach: the container's own non-loopback address: ${EXTIP:-none found}"
 {
-    printf 'DIR=%q\nPORT=%q\nPORT2=%q\nEXTIP=%q\nALICEUID=%q\n' \
-        "$D" "$PORT" "$PORT2" "$EXTIP" "$(id -u)"
+    printf 'DIR=%q\nPORT=%q\nALICEUID=%q\n' "$D" "$PORT" "$(id -u)"
 } >/tmp/reach-info
 chmod 644 /tmp/reach-info
 }
 group_reach_down() {
 cd /home/alice || exit 1
 D=$W/reach
-D2=$W/reach2
 run "$HELPER" --dir "$D" --check
 t "reach: after bob, the loopback setup still checks clean" '[ $RC -eq 0 ]'
 t "reach: bob left no file in DIR" '[ ! -e $D/bob-was-here ]'
 run "$HELPER" --dir "$D" --stop
 t "reach: loopback setup stopped" '[ $RC -eq 0 ]'
-run "$HELPER" --dir "$D2" --stop
-t "reach: non-loopback setup stopped" '[ $RC -eq 0 ]'
 }
 
 case ${1:-main} in
@@ -1882,8 +1329,6 @@ main) group_main ;;
 sec) group_sec ;;
 root) group_root ;;
 osrel) group_osrel ;;
-boot1) group_boot1 ;;
-boot2) group_boot2 ;;
 esac
 printf '\nSUMMARY: %s passed, %s failed\n' "$PASSN" "$FAILN"
 [ "$FAILN" -eq 0 ]
@@ -1894,13 +1339,6 @@ FROM docker.io/library/debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends curl tar unzip openssl iproute2 ca-certificates python3 && rm -rf /var/lib/apt/lists/*
 RUN useradd -m -u 1000 -s /bin/bash alice
 __CF1__
-cat >"$T/ctx2/Containerfile" <<'__CF2__'
-FROM docker.io/library/debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends systemd systemd-sysv dbus dbus-user-session curl tar unzip openssl iproute2 ca-certificates python3 procps && rm -rf /var/lib/apt/lists/*
-RUN useradd -m -u 1000 -s /bin/bash alice
-STOPSIGNAL SIGRTMIN+3
-CMD ["/sbin/init"]
-__CF2__
 
 # $1 container, $2 user: put the helper, binaries and test files in place
 stage() {
@@ -1942,7 +1380,7 @@ if want main; then
         2>/dev/null
 fi
 if want sec; then
-    say "group sec (path swaps, server-log allowlist, archive verification)"
+    say "group sec (path swaps, server-log allowlist)"
     report sec podman exec "$C1" bash /home/alice/incont.sh sec
     podman cp "$C1:/home/alice/transcript.txt" "$T/out/transcript-sec.txt" \
         2>/dev/null
@@ -1972,40 +1410,6 @@ if want osrel; then
     podman exec --user root "$C1" mv /etc/os-release.orig /etc/os-release
 fi
 
-# ----------------------------------------------------------------- boot
-if want boot; then
-    say "building the systemd image $IMG2"
-    podman build -q -t "$IMG2" "$T/ctx2" >/dev/null || exit 2
-    BUILT_IMG2=1
-    podman run -d --name "$C2" --systemd=always "$IMG2" >/dev/null || exit 2
-    i=0
-    while [ $i -lt 60 ] && ! podman exec "$C2" systemctl is-system-running \
-        2>/dev/null | grep -qE 'running|degraded'; do
-        sleep 1
-        i=$((i + 1))
-    done
-    # lets alice have a user manager without logging in, as a booted
-    # machine with a login would
-    podman exec "$C2" loginctl enable-linger alice
-    UX="podman exec --user alice -e XDG_RUNTIME_DIR=/run/user/1000"
-    UX="$UX -e DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus $C2"
-    i=0
-    while [ $i -lt 60 ] && ! $UX systemctl --user is-system-running \
-        2>/dev/null | grep -q running; do
-        sleep 1
-        i=$((i + 1))
-    done
-    stage "$C2"
-    say "group boot, part 1 (enable, crash, restart)"
-    report boot1 $UX bash /home/alice/incont.sh boot1
-    say "restarting the user manager (stands in for a reboot)"
-    podman exec "$C2" systemctl restart user@1000
-    sleep 5
-    say "group boot, part 2 (after the restart)"
-    report boot2 $UX bash /home/alice/incont.sh boot2
-    podman cp "$C2:/home/alice/transcript.txt" "$T/out/transcript-boot.txt" \
-        2>/dev/null
-fi
 
 printf '\nTOTAL: %s passed, %s failed\n' "$TOTAL_PASS" "$TOTAL_FAIL"
 [ "$TOTAL_FAIL" -eq 0 ]

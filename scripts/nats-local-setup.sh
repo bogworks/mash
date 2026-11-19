@@ -31,11 +31,11 @@
 #    log (server.log and any server line shown on the terminal) is different:
 #    it goes through srvlog_filter, an allowlist of known-safe line shapes;
 #    every other line is replaced by a fixed text.
-#  - Decisions that matter (non-loopback listen, retire-keys, remove, boot)
-#    need a person typing a confirmation at a terminal.
+#  - Decisions that matter (--remove) need a person typing a confirmation
+#    at a terminal; with no terminal --remove refuses (exit 4).
+#  - The server listens on 127.0.0.1 only; there is no option to change it.
 set -euC
 umask 077
-MAINPID=$$
 
 # ------------------------------------------------------- pinned downloads
 NS_VER=v2.15.1
@@ -53,15 +53,12 @@ NSC_SHA=7d55eda757dc9f233675a3038fcf8779bcda99753b1603f7009fc8537e126b7e
 usage() {
     cat <<'EOF'
 usage: nats-local-setup.sh [create] --dir DIR --owner NAME [options]
-       nats-local-setup.sh --dir DIR --start | --stop | --check | --upgrade
-       nats-local-setup.sh --dir DIR --backup DEST | --retire-keys DEST
-       nats-local-setup.sh --dir DIR --enable-boot [--linger]
-       nats-local-setup.sh --dir DIR --disable-boot | --remove
+       nats-local-setup.sh --dir DIR --start | --stop | --check | --remove
 
 Linux x86-64 (amd64), Debian or Ubuntu only. Needs: curl tar unzip openssl
-sha256sum ss (--retire-keys also diff, find). Exactly one subcommand per run;
-create is the default. Run it as your own user, not root: it refuses root
-(sudo would make root-owned keys).
+sha256sum ss find. Exactly one subcommand per run; create is the default.
+Run it as your own user, not root: it refuses root (sudo would make
+root-owned keys). The server listens on 127.0.0.1 only.
 
   --dir DIR        required, absolute. Every component must be a real
                    directory (no symlinks) owned by you or root and not
@@ -73,12 +70,6 @@ create is the default. Run it as your own user, not root: it refuses root
   --mash-config D  where mashctl keeps its files (default
                    $HOME/.config/mash); used only in the closing text
   --port N         client port (default 4222)
-  --host NAME      repeatable; extra DNS name or IP for the server
-                   certificate (localhost, 127.0.0.1 and ::1 always
-                   included); the first one is used in the URL
-  --listen ADDR    listen address (default 127.0.0.1). Anything but
-                   127.0.0.1, ::1 or localhost needs you to type the
-                   address:port at a terminal
   --account NAME   account for mash (default MASH)
   --operator NAME  operator name (default mash-operator)
   --js-disk SIZE   JetStream disk, like 500M or 2G (default 2G)
@@ -88,21 +79,10 @@ create is the default. Run it as your own user, not root: it refuses root
                    the log is kept at most 7 days
   --stop           stop the server recorded in DIR/server.pid
   --check          verify files, modes, tools, config, TLS and what listens
-  --upgrade        install this script's pinned nats-server and nsc
-  --backup DEST    writes DEST (mode 0600, one tar.gz of DIR except
-                   DIR/bin; it holds secrets) and nothing else
-  --retire-keys DEST  writes DEST (0600) and DIR/.keys-retired and removes
-                   ca.key, nsc/ and export/ from DIR, but only after it
-                   extracts DEST into a private temporary directory and finds
-                   it identical to them (typed confirmation)
-  --enable-boot    writes the systemd user unit file at its real path
-                   $HOME/.config/systemd/user/<name> and enables it (typed
-                   confirmation); --linger also runs loginctl enable-linger
-  --disable-boot   removes that unit file (typed confirmation)
-  --remove         removes DIR (and the unit file, if this script made one);
-                   typed confirmation; only a directory this script made,
-                   found by DIR/.mash-nats-setup; refused until
-                   --retire-keys has run (it never removes live keys)
+  --remove         stops the server recorded in DIR/server.pid and removes
+                   DIR; you type DIR at a terminal to confirm, and with no
+                   terminal it refuses and exits 4. Only a directory this
+                   script made, found by DIR/.mash-nats-setup
   --help           this text
 
 Before each write or remove the script re-resolves every parent directory and
@@ -295,11 +275,8 @@ LISTEN=127.0.0.1
 ACCOUNT=MASH
 OPERATOR=mash-operator
 JSDISK=2G
-HOSTS=''
 MODE=''
 START=0
-LINGER=0
-DEST=''
 LOG=''
 CREATE_OPTS=0
 ORIG=("$@")
@@ -308,27 +285,8 @@ ORIG=("$@")
 SELFABS=$(cd -P -- "$(dirname -- "$0")" 2>/dev/null && pwd -P)
 SELFABS=$SELFABS/$(basename -- "$0")
 
-# valid_host H: a DNS name ([A-Za-z0-9.-]) or an IPv4 or IPv6 literal.
-valid_host() {
-    case $1 in
-    '' | -* | .* | *.) return 1 ;;
-    *:*:*) case $1 in *[!0-9A-Fa-f:.]*) return 1 ;; esac; return 0 ;;
-    *:*) return 1 ;;
-    *[!A-Za-z0-9.-]*) return 1 ;;
-    *[!0-9.]*) return 0 ;; # a name
-    esac
-    IFS=. read -r _a _b _c _d _e <<EOF
-$1
-EOF
-    [ -z "$_e" ] && [ -n "$_d" ] || return 1
-    for _x in "$_a" "$_b" "$_c" "$_d"; do
-        case $_x in '' | ????* | *[!0-9]*) return 1 ;; esac
-        [ "$_x" -le 255 ] || return 1
-    done
-}
-
 # pathchars WHAT VALUE: refuse characters that could change the meaning of
-# a value written into server.conf, a unit file or a shell word.
+# a value written into server.conf or a shell word.
 pathchars() {
     case $2 in
     *[[:cntrl:]]*) die "$1 must not contain control characters or newlines" ;;
@@ -367,27 +325,18 @@ while [ "$#" -gt 0 ]; do
     --owner) need_val "$@"; OWNER=$2; CREATE_OPTS=1; shift 2 ;;
     --mash-config) need_val "$@"; MASHCFG=$2; MASHCFG_GIVEN=1; shift 2 ;;
     --port) need_val "$@"; PORT=$2; CREATE_OPTS=1; shift 2 ;;
-    --host)
-        need_val "$@"
-        valid_host "$2" ||
-            die "--host: use a DNS name or an IPv4/IPv6 address"
-        HOSTS="$HOSTS $2"; CREATE_OPTS=1; shift 2 ;;
-    --listen) need_val "$@"; LISTEN=$2; CREATE_OPTS=1; shift 2 ;;
     --account) need_val "$@"; ACCOUNT=$2; CREATE_OPTS=1; shift 2 ;;
     --operator) need_val "$@"; OPERATOR=$2; CREATE_OPTS=1; shift 2 ;;
     --js-disk) need_val "$@"; JSDISK=$2; CREATE_OPTS=1; shift 2 ;;
     --start) START=1; shift ;;
-    --linger) LINGER=1; shift ;;
     --stop) setmode stop; shift ;;
     --check) setmode check; shift ;;
-    --upgrade) setmode upgrade; shift ;;
-    --enable-boot) setmode enable-boot; shift ;;
-    --disable-boot) setmode disable-boot; shift ;;
     --remove) setmode remove; shift ;;
-    --backup) need_val "$@"; setmode backup; DEST=$2; shift 2 ;;
-    --retire-keys) need_val "$@"; setmode retire-keys; DEST=$2; shift 2 ;;
     --help | -h) usage; exit 0 ;;
-    *) usage >&2; die "unknown argument: $1" ;;
+    *)
+        usage >&2
+        wrap 'nats-local-setup: ' '    ' "unknown argument: $1" >&2
+        exit 2 ;;
     esac
 done
 
@@ -402,11 +351,9 @@ if [ "$START" -eq 1 ]; then
 fi
 [ -n "$MODE" ] || MODE=create
 if [ "$MODE" != create ] && [ "$CREATE_OPTS" -eq 1 ]; then
-    die "--owner, --port, --host, --listen, --account, --operator and" \
-        "--js-disk apply to create only"
+    die "--owner, --port, --account, --operator and --js-disk apply to" \
+        "create only"
 fi
-[ "$LINGER" -eq 0 ] || [ "$MODE" = enable-boot ] ||
-    die "--linger applies to --enable-boot only"
 [ "$MASHCFG_GIVEN" -eq 0 ] || [ "$MODE" = create ] || [ "$MODE" = remove ] ||
     die "--mash-config applies to create and --remove only"
 
@@ -432,12 +379,10 @@ case $OSID in *" debian "* | *" ubuntu "*) ;; *)
         "${OSID:-nothing})" ;;
 esac
 case $MODE in
-create | upgrade) NEED='curl tar unzip openssl sha256sum ss find' ;;
+create) NEED='curl tar unzip openssl sha256sum ss find' ;;
 check) NEED='openssl sha256sum ss' ;;
-backup) NEED='tar sha256sum' ;;
-retire-keys) NEED='tar sha256sum diff find' ;;
 start) NEED='sha256sum find' ;;
-stop | enable-boot | disable-boot | remove) NEED='sha256sum' ;;
+stop | remove) NEED='sha256sum' ;;
 esac
 miss=''
 pk=''
@@ -447,7 +392,6 @@ for t in $NEED; do
     case $t in
     sha256sum) p=coreutils ;;
     ss) p=iproute2 ;;
-    diff) p=diffutils ;;
     find) p=findutils ;;
     *) p=$t ;;
     esac
@@ -476,17 +420,6 @@ if [ -z "$MASHCFG" ]; then
 fi
 MASHCFG=$(normpath --mash-config "$MASHCFG")
 pathchars --mash-config "$MASHCFG"
-case $MODE in
-backup | retire-keys)
-    DEST=$(normpath "--$MODE DEST" "$DEST")
-    pathchars "--$MODE DEST" "$DEST"
-    case "$DEST/" in "$DIR"/*) die "--$MODE DEST must be outside $DIR" ;;
-    esac ;;
-enable-boot | disable-boot)
-    case $DIR in *%*) die "--dir must not contain % (systemd would read it" \
-        "as a specifier)" ;; esac
-    [ -n "${HOME:-}" ] || die "HOME is not set" ;;
-esac
 if [ "$MODE" = create ]; then
     [ -n "$OWNER" ] || die "create needs --owner NAME (your mash owner)"
     [[ $OWNER =~ ^[a-z]([a-z0-9]|-[a-z0-9])*$ ]] && [ "${#OWNER}" -le 32 ] ||
@@ -503,12 +436,7 @@ if [ "$MODE" = create ]; then
     esac
     _d=${JSDISK%[KMGT]}
     case $_d in '' | *[!0-9]*) die "--js-disk: like 500M or 2G" ;; esac
-    case $LISTEN in '' | *[!A-Za-z0-9.:\[\]-]*)
-        die "--listen: an IP address or a host name" ;;
-    esac
 fi
-LOOPBACK=0
-case $LISTEN in 127.0.0.1 | ::1 | '[::1]' | localhost) LOOPBACK=1 ;; esac
 
 ME=$(id -u)
 # Q VALUE: shell-quoted for pasting.
@@ -550,7 +478,7 @@ need_terminal() { # WHAT
     _w=("$(Q "$SELFABS")")
     for _a in "${ORIG[@]}"; do _w+=("$(Q "$_a")"); done
     emit_cmd '  ' "${_w[@]}" >&2
-    exit 1
+    exit 4
 }
 # confirm TEXT: ask the person to type TEXT exactly.
 confirm() {
@@ -657,41 +585,11 @@ chkdir() {
             "(its device:inode changed, something replaced a path" \
             "component): stopping"
 }
-# split_dest: DESTPARENT and DESTNAME from DEST; DEST must not exist and its
-# parent must pass the same checks as --dir's parent (and is recorded).
-split_dest() {
-    DESTPARENT=${DEST%/*}
-    DESTNAME=${DEST##*/}
-    [ -n "$DESTPARENT" ] || DESTPARENT=/
-    chain_rec dest "$DESTPARENT"
-    [ ! -e "$DEST" ] && [ ! -L "$DEST" ] ||
-        die "$DEST already exists: choose a path that does not exist"
-}
-# dest_cd: recheck DEST's parent by device:inode and enter it (run in a
-# subshell, then write or remove DESTNAME there).
-dest_cd() { goto dest "$DESTPARENT"; }
-dest_rm() { ( dest_cd && rm -f -- "$DESTNAME" ) 2>/dev/null || true; }
-# unit_cd: recheck the user-unit directory and enter it (subshell use).
-unit_cd() { goto unit "$UNITDIR"; }
-unit_rm() { ( unit_cd && rm -f -- "$UNITNAME" ); }
-
 # ---------------------------------------------------------- run helpers
 # Tool output goes to the temp file $LOG (mode 0600, removed on every exit),
 # never to a persistent log. On failure only a redacted tail is shown.
-VDIR=''
-BINMADE=0
 cleanup() {
     [ -z "$LOG" ] || rm -f -- "$LOG"
-    # an --upgrade that made bin/ and stopped before installing leaves it
-    # empty; remove it again (rmdir refuses a directory with anything in it)
-    if [ "$BINMADE" = 1 ] && [ -d bin ] && [ ! -L bin ]; then
-        rmdir bin 2>/dev/null || true
-    fi
-    # VDIR is the exact relative name made by verify_archive in DIR (the
-    # directory this process is in); it holds secrets.
-    if [ -n "$VDIR" ] && [ -d "$VDIR" ] && [ ! -L "$VDIR" ]; then
-        rm -rf -- "$VDIR"
-    fi
 }
 trap cleanup EXIT
 trap 'exit 1' INT TERM HUP
@@ -715,12 +613,6 @@ shown() { # print the first line of $LOG, redacted
 # ------------------------------------------------------------ server state
 CONF=$DIR/server.conf
 PIDF=server.pid
-UNITNAME=mash-nats-$(printf '%s' "$DIR" | sha256sum | cut -c1-12).service
-UNITDIR=${HOME:-/nonexistent}/.config/systemd/user
-UNITPATH=$UNITDIR/$UNITNAME
-UNITMARK="# written by nats-local-setup.sh for $DIR"
-
-uidline() { id -un 2>/dev/null || echo "$ME"; }
 # alive PID: running (a zombie nobody has reaped yet counts as gone).
 alive() {
     _st=$(sed -n 's/^.*) \(.\).*$/\1/p' "/proc/$1/stat" 2>/dev/null) ||
@@ -733,38 +625,10 @@ ours() {
     cmp -s <(printf '%s\0%s\0%s\0' "$DIR/bin/nats-server" -c "$CONF") \
         "/proc/$1/cmdline"
 }
-boot_ours() {
-    [ -f "$UNITPATH" ] && [ ! -L "$UNITPATH" ] &&
-        [ "$(sed -n 1p "$UNITPATH")" = "$UNITMARK" ]
-}
-# unit_prep: record the chain of the unit directory if it exists, else of
-# the deepest existing directory above it (UNITBASE), by device:inode.
-unit_prep() {
-    UNITBASE=$UNITDIR
-    while [ -n "$UNITBASE" ] && [ ! -d "$UNITBASE" ]; do
-        UNITBASE=${UNITBASE%/*}
-    done
-    [ -n "$UNITBASE" ] || die "no existing directory above $UNITDIR"
-    chain_rec ubase "$UNITBASE"
-    if [ "$UNITBASE" = "$UNITDIR" ]; then REC[unit]=${REC[ubase]}; fi
-}
-# unit_make: create the missing directories of UNITDIR relative to the
-# rechecked UNITBASE, then record the chain of UNITDIR.
-unit_make() {
-    [ "$UNITBASE" != "$UNITDIR" ] || return 0
-    ( goto ubase "$UNITBASE" && mkdir -p -- "${UNITDIR#"$UNITBASE"/}" )
-    chain_recheck ubase "$UNITBASE"
-    chain_rec unit "$UNITDIR"
-    UNITBASE=$UNITDIR
-}
 # srv_pid: print the pid of this directory's running server, if any.
 srv_pid() {
     _p=''
-    if boot_ours; then
-        _p=$(systemctl --user show -p MainPID --value "$UNITNAME" \
-            2>/dev/null || true)
-        [ "$_p" != 0 ] || _p=''
-    elif [ -f "$PIDF" ]; then
+    if [ -f "$PIDF" ]; then
         _p=$(cat "$PIDF")
     fi
     case $_p in '' | *[!0-9]*) return 0 ;; esac
@@ -792,19 +656,9 @@ tls_required() {
     exec 3<&- 3>&-
     case $line in INFO*'"tls_required":true'*) return 0 ;; *) return 1 ;; esac
 }
-sysd() { # systemctl --user ARGS...: output to $LOG, redacted tail on failure
-    runlog "systemctl --user $1" systemctl --user "$@"
-}
 
-# srv_stop: stop this directory's server (pid file or boot unit).
+# srv_stop: stop this directory's server (the pid in its pid file).
 srv_stop() {
-    if boot_ours; then
-        _p=$(srv_pid)
-        [ -n "$_p" ] || { say "the boot unit is not running"; return 0; }
-        sysd stop "$UNITNAME"
-        did "stopped $UNITNAME (pid $_p)"
-        return 0
-    fi
     [ -f "$PIDF" ] || die "no $DIR/$PIDF: nothing recorded to stop"
     _p=$(cat "$PIDF")
     case $_p in '' | *[!0-9]*) die "$DIR/$PIDF does not hold a pid" ;; esac
@@ -841,7 +695,7 @@ rotate_log() {
         die "could not delete old server logs in $DIR"
 }
 
-# srv_start: start the server (boot unit or detached) and wait for TLS.
+# srv_start: start the server detached and wait for TLS.
 srv_start() {
     _lp=$(conf_listen)
     [ -n "$_lp" ] || die "cannot read the listen address from $CONF"
@@ -852,14 +706,10 @@ srv_start() {
             "killed or changed): free it or recreate with another --port"
     fi
     rotate_log
-    if boot_ours; then
-        sysd start "$UNITNAME"
-    else
-        chkdir
-        nohup "$DIR/bin/nats-server" -c "$CONF" </dev/null \
-            > >(trap '' HUP; exec >>server.log 2>&1; srvlog_filter) 2>&1 &
-        echo $! >|"$PIDF"
-    fi
+    chkdir
+    nohup "$DIR/bin/nats-server" -c "$CONF" </dev/null \
+        > >(trap '' HUP; exec >>server.log 2>&1; srvlog_filter) 2>&1 &
+    echo $! >|"$PIDF"
     _i=0
     until port_open "$_h" "$_pt" && tls_required "$_h" "$_pt"; do
         _i=$((_i + 1))
@@ -890,8 +740,7 @@ man_get() { # NAME FIELD(3|4) -> value
 bin_problems() {
     _bad=0
     if [ ! -e bin ] && [ ! -L bin ]; then
-        echo "bin is missing (as after a restore from a backup): run" \
-            "--upgrade"
+        echo "bin is missing"
         return 1
     fi
     if [ ! -d bin ] || [ -L bin ]; then
@@ -943,7 +792,7 @@ fetch() {
     fi
     did "$2 matches the pinned sha256"
 }
-# install_tools create|upgrade
+# install_tools: download, check and install the two pinned tools
 install_tools() {
     [ ! -e bin/.dl ] || die "bin/.dl exists (an earlier run was cut short):" \
         "check it, move it away and run again"
@@ -978,7 +827,7 @@ install_tools() {
     chkdir
     for _t in nats-server nsc; do
         if [ -e "bin/$_t" ] || [ -L "bin/$_t" ]; then
-            [ "$1" = upgrade ] || die "bin/$_t exists: not overwriting"
+            die "bin/$_t exists: not overwriting"
         fi
         mv -f -- "bin/.new-$_t" "bin/$_t"
     done
@@ -1018,22 +867,13 @@ check_run() {
     say "checking the setup in $DIR (creates nothing)"
     mode_is . 700 d
     mode_is .mash-nats-setup 600 f
-    if [ -f .keys-retired ]; then
-        good "keys retired: ca.key, nsc/ and export/ are off this machine"
-        for f in ca.key nsc export; do
-            if [ -e "$f" ] || [ -L "$f" ]; then
-                bad "$f is marked retired but is still in $DIR"
-            fi
-        done
-    else
-        mode_is export 700 d
-        for f in ca.key export/operator.nk export/account.nk \
-            export/sys.creds export/mashadmin.creds; do
-            mode_is "$f" 600 f
-        done
-        if [ -d nsc ]; then good "$DIR/nsc exists"
-        else bad "missing $DIR/nsc"; fi
-    fi
+    mode_is export 700 d
+    for f in ca.key export/operator.nk export/account.nk \
+        export/sys.creds export/mashadmin.creds; do
+        mode_is "$f" 600 f
+    done
+    if [ -d nsc ]; then good "$DIR/nsc exists"
+    else bad "missing $DIR/nsc"; fi
     mode_is server.key 600 f
     mode_is mash-setup.json 600 f
     if [ -f mash-setup.json ] && [ ! -L mash-setup.json ]; then
@@ -1076,13 +916,6 @@ check_run() {
         binok=1
         good "$DIR/bin: nats-server and nsc match their recorded sha256," \
             "yours, mode 700, nothing else there"
-        if [ "$(man_get nats-server 3)" = "$NS_SHA" ] &&
-            [ "$(man_get nsc 3)" = "$NSC_SHA" ]; then
-            good "tool versions are current ($NS_VER, $NSC_VER)"
-        else
-            say "  note  the tools are older than this script's pins" \
-                "($NS_VER, $NSC_VER): --upgrade replaces them"
-        fi
     else
         while IFS= read -r l; do bad "$DIR/bin: $l"; done <<<"$pr"
     fi
@@ -1141,48 +974,6 @@ check_run() {
     say "check passed"
 }
 
-# verify_archive (--retire-keys): before anything is removed, extract DEST
-# into a private 0700 directory made under DIR (the place the temp logs
-# already live, never /tmp) and compare it with the sources: ca.key, nsc/
-# and export/ all present, nothing else, every file identical (diff names a
-# file that differs; it never shows content) and the same number of
-# entries. Any difference: the bad archive is removed, nothing else is, and
-# the extraction directory (it holds secrets) is removed by its exact name.
-vfail() {
-    [ ! -s "$LOG" ] || tail -n 3 "$LOG" | safe | fold80 >&2
-    dest_rm
-    die "$1: the archive $DEST was removed; nothing in $DIR was removed" \
-        "or changed"
-}
-verify_archive() {
-    VDIR=$(mktemp -d ./.verify.XXXXXX) || die "cannot make a temp directory" \
-        "in $DIR"
-    chkdir
-    : >|"$LOG"
-    ( dest_cd && tar -xzf "$DESTNAME" --no-same-owner \
-        -C "/proc/$MAINPID/cwd/$VDIR" ) >>"$LOG" 2>&1 ||
-        vfail "the archive could not be extracted again"
-    [ -f "$VDIR/ca.key" ] && [ -d "$VDIR/nsc" ] && [ -d "$VDIR/export" ] ||
-        vfail "the archive lacks ca.key, nsc/ or export/"
-    [ "$(ls -A "$VDIR" | tr '\n' ' ')" = "ca.key export nsc " ] ||
-        vfail "the archive holds entries other than ca.key, nsc/ and export/"
-    _na=$(find ca.key nsc export -print0 | tr -cd '\0' | wc -c)
-    _nb=$( (cd "$VDIR" && find ca.key nsc export -print0 | tr -cd '\0' |
-        wc -c) )
-    [ "$_na" = "$_nb" ] || vfail "the archive holds $_nb entries, the" \
-        "sources $_na"
-    for _m in ca.key nsc export; do
-        diff -rq --no-dereference -- "$_m" "$VDIR/$_m" >>"$LOG" 2>&1 ||
-            vfail "the archive's $_m differs from the one in $DIR"
-    done
-    rm -rf -- "$VDIR"
-    [ ! -e "$VDIR" ] || die "could not remove the extraction directory" \
-        "$DIR/$VDIR (it holds secrets): remove it yourself"
-    VDIR=''
-    did "extracted $DEST and found ca.key, nsc/ and export/ identical to" \
-        "the sources ($_na entries); the extraction was removed"
-}
-
 # ------------------------------------------------------------------ modes
 need_marker() {
     [ -f .mash-nats-setup ] && [ ! -L .mash-nats-setup ] &&
@@ -1213,235 +1004,18 @@ start)
         "(pid $pid)"
     srv_start
     exit 0 ;;
-# ----------------------------------------------------------- --upgrade
-upgrade)
-    enter "$DIR"; CWDID=$(inode_of .); mklog; need_marker
-    if [ ! -e bin ] && [ ! -L bin ]; then
-        # only --upgrade accepts a missing bin (a restore from a backup,
-        # which leaves bin out): made exclusively, mode 0700, as at create
-        chkdir
-        mkdir -m 0700 bin
-        BINMADE=1
-        did "made $DIR/bin (mode 0700, yours): it was missing, as after" \
-            "a restore from a backup"
-    else
-        need_bin
-    fi
-    if [ "$(man_get nats-server 3)" = "$NS_SHA" ] &&
-        [ "$(man_get nsc 3)" = "$NSC_SHA" ]; then
-        say "already current: nats-server $NS_VER and nsc $NSC_VER"
-        check_run || die "check: $fails problem(s)"
-        exit 0
-    fi
-    step "upgrade nats-server and nsc in $DIR/bin to $NS_VER and $NSC_VER"
-    was=$(srv_pid)
-    if [ -n "$was" ]; then srv_stop; fi
-    install_tools upgrade
-    BINMADE=0
-    if [ -n "$was" ]; then srv_start; fi
-    check_run || die "check: $fails problem(s)"
-    exit 0 ;;
-# ------------------------------------------------------------- --backup
-backup | retire-keys)
-    split_dest
-    enter "$DIR"; CWDID=$(inode_of .); mklog; need_marker
-    if [ "$MODE" = retire-keys ]; then
-        [ ! -f .keys-retired ] || die "keys were already retired"
-        for f in ca.key nsc export; do
-            [ -e "$f" ] || die "$DIR/$f is missing: nothing consistent to" \
-                "retire (run --check)"
-        done
-        need_terminal "--retire-keys"
-        printf '\n'
-        wrap '' '' "--retire-keys writes $DEST (mode 0600) and" \
-            "$DIR/.keys-retired and removes ca.key, nsc/ and export/ from" \
-            "$DIR. Before it removes anything it extracts $DEST into a" \
-            "private temporary directory under $DIR and checks that every" \
-            "file is identical to the one it will remove; if not, it stops" \
-            "and removes nothing. After that the server still runs, but" \
-            "this machine can no longer sign new certificates, accounts or" \
-            "users. Do this only after mashctl adopt succeeded. The" \
-            "archive holds secrets: move it off this machine."
-        wrap '' '' "$RESIDUAL"
-        confirm "$DIR"
-    else
-        printf '\n'
-        wrap '' '' "--backup writes $DEST (mode 0600) and nothing else. It" \
-            "stops the server while it reads DIR and starts it again."
-        wrap '' '' "$RESIDUAL"
-    fi
-    was=$(srv_pid)
-    if [ "$MODE" = backup ] && [ -n "$was" ]; then srv_stop; fi
-    created=0
-    ( dest_cd && : >"$DESTNAME" ) ||
-        die "could not create $DEST exclusively (nothing was written)"
-    created=1
-    case $MODE in
-    backup) members=(--exclude=./bin '--exclude=./.cmd.*' .) ;;
-    *) members=(ca.key nsc export) ;;
-    esac
-    : >|"$LOG"
-    if ! ( dest_cd && tar -czf "$DESTNAME" -C "/proc/$MAINPID/cwd" \
-        "${members[@]}" ) >>"$LOG" 2>&1; then
-        [ "$created" -eq 0 ] || dest_rm
-        capfail "tar"
-    fi
-    n=$( (dest_cd && tar -tzf "$DESTNAME" 2>>"$LOG") | grep -c '') || n=0
-    if [ "$n" -lt 2 ]; then
-        dest_rm
-        die "the archive $DEST did not list back: removed it"
-    fi
-    if [ "$MODE" = backup ] &&
-        (dest_cd && tar -tzf "$DESTNAME") 2>/dev/null |
-        grep -q '^\./bin/'; then
-        dest_rm
-        die "the archive contained bin/: removed it"
-    fi
-    if [ "$MODE" = retire-keys ]; then verify_archive; fi
-    dmode=$( (dest_cd && rawmode "$DESTNAME") ) || dmode=unknown
-    did "wrote $DEST (mode $dmode, $n entries, lists back)"
-    if [ "$MODE" = backup ]; then
-        if [ -n "$was" ]; then srv_start; fi
-        say "this archive holds secrets (CA key, nsc keys, creds): keep it" \
-            "private and off this machine"
-    else
-        chkdir
-        rm -r -- ca.key nsc export
-        printf 'retired to %s\n' "$DEST" >.keys-retired
-        did "removed $DIR/ca.key, $DIR/nsc and $DIR/export; wrote" \
-            "$DIR/.keys-retired"
-        say "the server needs only server.pem, server.key, ca.pem," \
-            "operator.jwt, resolver/, jetstream/ and server.conf, so it" \
-            "keeps running. The archive holds secrets: move it off this" \
-            "machine and keep it safe."
-    fi
-    residual
-    exit 0 ;;
-# ---------------------------------------------------------- boot units
-enable-boot | disable-boot)
-    enter "$DIR"; CWDID=$(inode_of .); mklog; need_marker
-    need_terminal "--$MODE"
-    command -v systemctl >/dev/null 2>&1 ||
-        die "systemctl is not available: no systemd here"
-    runlog "reaching your systemd user manager (systemctl --user)" \
-        systemctl --user show-environment
-    U=$(uidline)
-    if [ "$MODE" = enable-boot ]; then
-        need_bin
-        if [ -e "$UNITPATH" ] || [ -L "$UNITPATH" ]; then
-            boot_ours || die "$UNITPATH exists and this script did not" \
-                "write it: not touching it"
-        fi
-        unit_prep
-        printf '\n'
-        wrap '' '' "--enable-boot writes the unit file $UNITPATH (a systemd" \
-            "user unit that runs $DIR/bin/nats-server -c $CONF, restarting" \
-            "it on failure) and enables it: it runs systemctl --user" \
-            "daemon-reload and systemctl --user enable --now $UNITNAME, and" \
-            "stops the server this script started, if any, because systemd" \
-            "takes over. It writes nothing else."
-        wrap '' '' "$RESIDUAL"
-        if [ "$LINGER" -eq 1 ]; then
-            wrap '' '' "--linger will ALSO run loginctl enable-linger $U." \
-                "That changes your account on this machine: your user" \
-                "services start when the machine boots and keep running when" \
-                "you log out. It stays on until you run loginctl" \
-                "disable-linger $U (this script never turns it off)."
-        else
-            wrap '' '' "Without --linger the unit starts when you log in" \
-                "and stops when your last session ends."
-        fi
-        confirm "$UNITNAME"
-        was=$(srv_pid)
-        if [ -n "$was" ] && ! boot_ours; then srv_stop; fi
-        if ! boot_ours; then
-            unit_make
-            chkdir
-            (
-                unit_cd
-                {
-                    printf '%s\n' "$UNITMARK" '[Unit]' \
-                        "Description=mash NATS server for $DIR" \
-                        'After=network-online.target' '' '[Service]' \
-                        "ExecStart=\"$DIR/bin/nats-server\" -c \"$CONF\"" \
-                        'Restart=on-failure' 'RestartSec=2' \
-                        'NoNewPrivileges=yes' '' '[Install]' \
-                        'WantedBy=default.target'
-                } >"$UNITNAME"
-            ) || die "could not write $UNITPATH (nothing was written)"
-            did "wrote $UNITPATH"
-        fi
-        sysd daemon-reload
-        sysd enable --now "$UNITNAME"
-        did "enabled and started $UNITNAME"
-        if [ "$LINGER" -eq 1 ]; then
-            runlog "loginctl enable-linger" loginctl enable-linger "$U"
-            did "ran loginctl enable-linger $U (undo: loginctl" \
-                "disable-linger $U)"
-        fi
-        _lp=$(conf_listen)
-        _i=0
-        until port_open "$(probe_host "${_lp% *}")" "${_lp#* }"; do
-            _i=$((_i + 1))
-            [ "$_i" -lt 75 ] || die "the server did not answer in 15 s: see" \
-                "systemctl --user status $UNITNAME"
-            sleep 0.2
-        done
-        did "the server answers on ${_lp% *}:${_lp#* }"
-        residual
-    else
-        if [ ! -e "$UNITPATH" ] && [ ! -L "$UNITPATH" ]; then
-            say "no boot unit $UNITNAME for this directory: nothing to do"
-            exit 0
-        fi
-        boot_ours || die "$UNITPATH exists and this script did not write" \
-            "it: not touching it"
-        unit_prep
-        printf '\n'
-        wrap '' '' "--disable-boot removes the unit file $UNITPATH and runs" \
-            "systemctl --user disable --now $UNITNAME (this STOPS the" \
-            "server). It does not change linger and writes nothing."
-        wrap '' '' "$RESIDUAL"
-        confirm "$UNITNAME"
-        sysd disable --now "$UNITNAME"
-        unit_rm || die "could not remove $UNITPATH (nothing was removed)"
-        sysd daemon-reload
-        did "disabled $UNITNAME and removed $UNITPATH"
-        say "linger was not touched. If you turned it on and want it off:" \
-            "loginctl disable-linger $U"
-        say "start the server again by hand with --start"
-        residual
-    fi
-    exit 0 ;;
 # ------------------------------------------------------------- --remove
 remove)
     enter "$DIR"; CWDID=$(inode_of .)
     need_marker
-    if { [ -e ca.key ] || [ -e nsc ] || [ -e export ]; } &&
-        [ ! -e .keys-retired ]; then
-        die "the CA key and signing keys are still here: run --retire-keys" \
-            "first (it archives them, checks the archive, then removes" \
-            "them); nothing was changed"
-    fi
     need_terminal "--remove"
-    if [ -e "$UNITPATH" ] || [ -L "$UNITPATH" ]; then unit_prep; fi
     printf '\n'
     wrap '' '' "--remove removes $DIR with everything in it (CA key, nsc" \
-        "keys, creds, mail stored in JetStream) and, if this script made" \
-        "one, the unit file $UNITPATH; it stops the server first. Back up" \
-        "first if you need any of it."
+        "keys, creds, mail stored in JetStream); it stops the server first." \
+        "Copy anything you need before you type the confirmation."
     wrap '' '' "$RESIDUAL"
     confirm "$DIR"
-    mklog
     if [ -n "$(srv_pid)" ]; then srv_stop; fi
-    if boot_ours; then
-        sysd disable --now "$UNITNAME"
-        unit_rm || die "could not remove $UNITPATH (nothing was removed)"
-        sysd daemon-reload
-        did "disabled $UNITNAME and removed $UNITPATH"
-    fi
-    rm -f -- "$LOG"
-    LOG=''
     chkdir
     RPARENT=${DIR%/*}
     cd -P -- .. || die "cannot leave $DIR"
@@ -1461,27 +1035,7 @@ remove)
 esac
 
 # ---------------------------------------------------------------- create
-CONFLISTEN=$LISTEN
-case $LISTEN in \[*) ;; *:*) CONFLISTEN="[$LISTEN]" ;; esac
 SANS='DNS:localhost,IP:127.0.0.1,IP:::1'
-FIRSTHOST=localhost
-for h in $HOSTS; do
-    case $h in
-    localhost | 127.0.0.1 | ::1) ;; # already in the list
-    *:* | [0-9]*.[0-9]*.[0-9]*.[0-9]*) SANS="$SANS,IP:$h" ;;
-    *) SANS="$SANS,DNS:$h" ;;
-    esac
-    [ "$FIRSTHOST" != localhost ] || FIRSTHOST=$h
-done
-if [ "$LOOPBACK" -eq 0 ]; then
-    need_terminal "a non-loopback --listen"
-    printf '\n'
-    wrap '' '' "EXPOSED: the server will listen on $LISTEN:$PORT, which" \
-        "other machines may be able to reach. TLS is required and clients" \
-        "need NATS credentials. The certificate will name: ${SANS//,/ }." \
-        "This script changes no firewall and no service."
-    confirm "$LISTEN:$PORT"
-fi
 
 step "preflight (directory, port)"
 PARENT=${DIR%/*}
@@ -1490,7 +1044,7 @@ chain_rec parent "$PARENT"
 [ ! -e "$DIR" ] && [ ! -L "$DIR" ] ||
     die "$DIR already exists: this script creates --dir itself and" \
         "refuses any existing path (even an empty directory)"
-ph=$(probe_host "$LISTEN")
+ph=$LISTEN
 if port_open "$ph" "$PORT"; then
     die "port $ph:$PORT is already taken by something (nothing was killed" \
         "or changed): use --port"
@@ -1524,8 +1078,6 @@ printf 'mash-nats-setup 1 created by uid %s\n' "$ME" >.mash-nats-setup
 mklog
 did "$DIR created by this script (mode 0700, yours); $ph:$PORT is free;" \
     "owner $OWNER (the first part of every address)"
-[ "$LOOPBACK" -eq 1 ] || did "EXPOSED: $LISTEN:$PORT, typed confirmation" \
-    "given"
 
 step "install nats-server and nsc into $DIR/bin (pinned, checked)"
 chkdir
@@ -1614,7 +1166,7 @@ cat >server.conf <<EOF
 # written by nats-local-setup.sh: operator mode, full resolver, TLS required,
 # JetStream on. (The resolver_preload lines hold the account JWTs: long.)
 server_name: "mash-local"
-listen: "$CONFLISTEN:$PORT"
+listen: "$LISTEN:$PORT"
 tls {
   cert_file: "$DIR/server.pem"
   key_file: "$DIR/server.key"
@@ -1664,9 +1216,7 @@ esac
 case $(cut -c1-2 export/account.nk) in
 SA) ;; *) die "account.nk is not an SA seed" ;;
 esac
-URLHOST=$FIRSTHOST
-case $URLHOST in *:*) URLHOST="[$URLHOST]" ;; esac
-SERVERURL=tls://$URLHOST:$PORT
+SERVERURL=tls://localhost:$PORT
 json_esc() { # VALUE: JSON string body (no control characters allowed)
     [ -z "$(printf '%s' "$1" | tr -d '[:print:]')" ] ||
         die "a value for mash-setup.json has a control character"
@@ -1690,18 +1240,10 @@ QDIR=$(Q "$DIR")
 printf '\n'
 wrap '' '' "Done. The setup is in $QDIR. Nothing above printed a seed or" \
     "a credential, and nothing below does."
-if [ "$LOOPBACK" -eq 1 ]; then
-    printf '\n'
-    wrap '' '' "Binding $LISTEN keeps the server off the network but does" \
-        "not limit it to you: every user on this machine can reach port" \
-        "$PORT. They cannot connect without credentials, read mail or make" \
-        "agents."
-else
-    printf '\n'
-    wrap '' '' "Exposed: $LISTEN:$PORT is reachable from other machines" \
-        "(TLS required, credentials needed). No firewall or service was" \
-        "touched."
-fi
+printf '\n'
+wrap '' '' "Binding $LISTEN keeps the server off the network but does not" \
+    "limit it to you: every user on this machine can reach port $PORT." \
+    "They cannot connect without credentials, read mail or make agents."
 printf '\n'
 residual
 printf '\nEverything is in %s; run --check to list it.\n' "$QDIR"
@@ -1715,8 +1257,9 @@ CAFP=$(openssl x509 -in "$DIR/ca.pem" -noout -fingerprint -sha256 |
 CAFPG=$(printf '%s' "$CAFP" | sed -E 's/(.{8})/\1 /g; s/ $//')
 wrap '  CA fingerprint     ' '                     ' "sha256:$CAFPG"
 wrap '  Server directory   ' '                     ' "$DIR"
-wrap '                     ' '                     ' "(mode 0700; holds the" \
-    "CA key and the nsc keys until you run --retire-keys)"
+wrap '                     ' '                     ' "(mode 0700. ca.key" \
+    "and the nsc store stay in it: a process running as you can read them," \
+    "and no step here moves them)"
 printf '\n'
 wrap '' '' "The CA fingerprint is what a person on ANOTHER machine types to" \
     "trust this server; this machine does not ask for it."
@@ -1746,4 +1289,4 @@ printf '\n'
 wrap '  ' '  ' "Then follow the README quick start from its \"launch a" \
     "session\" step:"
 printf '  %s\n' "https://github.com/bogworks/mash/blob/v0.5.6/README.md#quick-start-one-machine-no-account"
-printf '\nOther commands: --stop, --start, --check, --help.\n'
+printf '\nOther commands: --stop, --start, --check, --remove, --help.\n'
