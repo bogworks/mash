@@ -110,12 +110,16 @@ func (a *AT) StartSession(h Home, group, name string, more ...string) (*Proc, []
 	return p, extra, nil
 }
 
-// StartServer makes and starts the scenario's one local server with the policy script (`--dir <srv> --owner alice`; the
+// StartServer (only inside a container: it refuses on the test host) makes and starts the scenario's one local server with the policy script (`--dir <srv> --owner alice`; the
 // script picks port 4222 or the next free one, and a.R.Port becomes that port), records the server's PID (the script
 // writes it to server.pid), then runs `mashctl init --config <srv>/mash-setup.yaml` in home h, which makes mash's
 // buckets and writes h's config.json. The script is run with the scenario's environment (a.Env(h)), and the srv
 // directory must not exist before the call: the script makes it.
 func (a *AT) StartServer(h Home) bool {
+	if !insideContainer() {
+		a.C.Check("the setup script runs inside a container", false, errSetupOnHost)
+		return false
+	}
 	if err := waitPortFree(a.R.Port, 5*time.Second); err != nil {
 		a.C.Check("the port is free before the server starts", false, err.Error())
 		return false
@@ -292,7 +296,7 @@ func parseJSON(s string) (any, error) {
 }
 
 // Snapshot is the state of the server and the files, as far as the harness can see without a NATS client of its own:
-// the directory (mashctl endpoint list), the doctor report (`doctor --json`: the server, storage, endpoints and keys checks; it has no
+// the directory (mashctl endpoint list --wide), each endpoint's record and issue state (endpoint show) and stored mail (endpoint inbox), the doctor report (`doctor --json`: the server, storage, endpoints and keys checks; it has no
 // timestamp, so two reports of an unchanged server are byte-identical), and a
 // digest of each home's file tree (all of it, except snapshotExclusions).
 type Snapshot struct {
@@ -308,7 +312,7 @@ func (a *AT) Snapshot(label string, ctlHome Home, trees ...Home) Snapshot {
 		name string
 		args []string
 	}{
-		{"list", []string{"endpoint", "list"}},
+		{"list", []string{"endpoint", "list", "--wide", "--json"}},
 		{"doctor", []string{"doctor", "--json"}},
 	} {
 		r := a.Ctl("snap-"+label+"-"+c.name, ctlHome, a.Conn(), c.args...)
@@ -317,6 +321,32 @@ func (a *AT) Snapshot(label string, ctlHome Home, trees ...Home) Snapshot {
 		}
 		s.Raw[c.name] = r.Stdout
 		s.Hash[c.name] = digest(r.Stdout)
+	}
+	// doctor is a health summary: a refusal that wrote a record would not change it. The records themselves are read
+	// per endpoint (the directory record and issue state with `endpoint show`, the stored mail with `endpoint inbox`).
+	if v, err := parseJSON(s.Raw["list"]); err == nil {
+		for _, o := range findObjects(v, "address") {
+			addr, _ := o["address"].(string)
+			if addr == "" {
+				continue
+			}
+			for _, c := range []struct {
+				name string
+				args []string
+			}{
+				{"show " + addr, []string{"endpoint", "show", addr, "--json"}},
+				{"inbox " + addr, []string{"endpoint", "inbox", addr, "--json", "--limit", "10000"}},
+			} {
+				r := a.Ctl("snap-"+label+"-"+strings.ReplaceAll(c.name, " ", "-"), ctlHome, a.Conn(), c.args...)
+				if r.Code != 0 {
+					s.Bad = append(s.Bad, fmt.Sprintf("%s exit %d", strings.Join(c.args, " "), r.Code))
+				}
+				s.Raw[c.name] = r.Stdout
+				s.Hash[c.name] = digest(r.Stdout)
+			}
+		}
+	} else {
+		s.Bad = append(s.Bad, "endpoint list --json is not JSON: "+err.Error())
 	}
 	hashes, bad := treeHashes(trees, snapshotExclusions)
 	for k, v := range hashes {

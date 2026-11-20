@@ -25,8 +25,10 @@ import (
 // destroys. Nothing is installed or left on the host: every container, the network and the image carry the label
 // mash-at005=<run id>, and removal is by that label, with this run's id as the value: a run never touches another run's resources.
 //
-//   - The image is FROM scratch (Containerfile.at005): mash, mashctl, nats-server and nodeinit as static binaries in
-//     /bin. Nothing is pulled at run time.
+//   - The image is a pinned minimal Debian (Containerfile.at005) with bash, openssl and iproute2, the static mash,
+//     mashctl, nats-server and nodeinit, the pinned nats command and the setup script, all in /usr/local/bin. The
+//     base is pulled by tag when the image is built and its digest is recorded in the run record. Nodes run as the
+//     non-root image user mash (uid 1000); the setup script runs inside a node, never on the host.
 //   - One private network with a /24 inside 10.89.0.0/16 by default, or the /16 of --subnet-base (a third octet that no
 //     podman network, host route or host address overlaps); the
 //     nodes have fixed addresses .11, .12 and .13, so certificates carry the node address before the node starts.
@@ -105,6 +107,8 @@ type Podman struct {
 	SubnetBase string
 	// HostAddrs lists the host's own interface addresses (default net.InterfaceAddrs).
 	HostAddrs func() ([]net.Addr, error)
+	// Fetch downloads a URL for the build context (the pinned nats command); nil: an HTTP GET.
+	Fetch func(url string) ([]byte, error)
 }
 
 // defaultSubnetBase is the /16 of the test network when --subnet-base is not given.
@@ -179,10 +183,11 @@ func (c *podCtx) do(args ...string) (string, error) {
 	return out, nil
 }
 
-// Open builds the image, makes the network and starts the three nodes.
-func (p *Podman) Open(r *Run) ([]Host, error) {
+// prepare checks podman, registers the destruction of this run's resources and builds the image: the part of Open and
+// of OpenSandbox that comes before any container.
+func (p *Podman) prepare(r *Run) (*podCtx, string, error) {
 	if err := p.Preflight(); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	rt := p.Runner
 	if rt == nil {
@@ -193,15 +198,15 @@ func (p *Podman) Open(r *Run) ([]Host, error) {
 		c.base = defaultSubnetBase
 	}
 	if !validSubnetBase(c.base) {
-		return nil, fmt.Errorf("subnet base %q is not a private IPv4 /16 (10.x, 172.16-31.x or 192.168)", c.base)
+		return nil, "", fmt.Errorf("subnet base %q is not a private IPv4 /16 (10.x, 172.16-31.x or 192.168)", c.base)
 	}
 	c.execFn = func(name string, argv []string) Result { return r.Runner.RunIn(r.Dir, name, argv, podmanEnv(), "") }
 	out, err := c.do("info", "--format", "{{.Host.Security.Rootless}}")
 	if err != nil {
-		return nil, fmt.Errorf("podman is installed but does not work (podman info failed): %w", err)
+		return nil, "", fmt.Errorf("podman is installed but does not work (podman info failed): %w", err)
 	}
 	if strings.TrimSpace(out) != "true" {
-		return nil, fmt.Errorf("podman is not rootless (podman info says Host.Security.Rootless is %q): AT-005 runs only rootless", strings.TrimSpace(out))
+		return nil, "", fmt.Errorf("podman is not rootless (podman info says Host.Security.Rootless is %q): AT-005 runs only rootless", strings.TrimSpace(out))
 	}
 	// From here on something may exist: Close removes it by label, whatever happens next.
 	r.OnClose(func() error { return p.destroy(rt, r) })
@@ -209,10 +214,56 @@ func (p *Podman) Open(r *Run) ([]Host, error) {
 	c.tmp = filepath.Join(r.Dir, "podman-tmp")
 	for _, d := range []string{ctx, c.tmp} {
 		if err := os.Mkdir(d, 0o700); err != nil {
-			return nil, err
+			return nil, "", err
 		}
 	}
 	if err := p.buildImage(c, ctx); err != nil {
+		return nil, "", err
+	}
+	return c, ctx, nil
+}
+
+func (c *podCtx) newHost(role, name, addr string, ports Ports) *podHost {
+	return &podHost{c: c, role: role, name: name, addr: addr, ports: ports,
+		home: Home{Dir: nodeHome, Config: nodeHome + "/config", Keys: nodeHome + "/keys", State: nodeHome + "/state", Tmp: nodeHome + "/tmp"}}
+}
+
+// startContainer runs one container of the image as the non-root image user and makes the directories of its home.
+func (c *podCtx) startContainer(h *podHost, netArgs []string) error {
+	args := append([]string{"run", "-d", "--name", h.name}, netArgs...)
+	args = append(args, "--user", nodeUID, "--label", labelKey+"="+c.id, "--read-only=false", c.image, nodeBin+"/nodeinit", "serve")
+	if _, err := c.do(args...); err != nil {
+		return err
+	}
+	for _, d := range []string{h.home.Dir, h.home.State, h.home.Tmp, h.ServerDir(), h.TLSDir(), h.runDir(), "/tmp"} {
+		if _, err := c.do("exec", h.name, nodeBin+"/nodeinit", "mkdir", d); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// sandboxName is the name of the one container of a sandboxed AT-001 to AT-003 run.
+func sandboxName(id string) string { return "mash-at005-" + id + "-sbx" }
+
+// OpenSandbox builds the image and starts ONE throwaway rootless container of it, with no network but loopback and no
+// published port, as the non-root image user. The sandboxed AT-001 to AT-003 run inside it (sandbox.go).
+func (p *Podman) OpenSandbox(r *Run) (*podHost, error) {
+	c, _, err := p.prepare(r)
+	if err != nil {
+		return nil, err
+	}
+	h := c.newHost("SBX", sandboxName(r.ID), "127.0.0.1", Ports{})
+	if err := c.startContainer(h, []string{"--network", "none"}); err != nil {
+		return nil, err
+	}
+	return h, nil
+}
+
+// Open builds the image, makes the network and starts the three nodes.
+func (p *Podman) Open(r *Run) ([]Host, error) {
+	c, _, err := p.prepare(r)
+	if err != nil {
 		return nil, err
 	}
 	pick := p.Pick
@@ -229,15 +280,9 @@ func (p *Podman) Open(r *Run) ([]Host, error) {
 	var hs []Host
 	for i, ports := range DefaultPorts {
 		n := i + 1
-		h := &podHost{c: c, role: "M" + strconv.Itoa(n), name: containerName(r.ID, n), addr: fmt.Sprintf("%s.%d.%d", c.base, octet, 10+n), ports: ports,
-			home: Home{Dir: nodeHome, Config: nodeHome + "/config", Keys: nodeHome + "/keys", State: nodeHome + "/state", Tmp: nodeHome + "/tmp"}}
-		if _, err := c.do("run", "-d", "--name", h.name, "--network", c.network, "--ip", h.addr, "--label", labelKey+"="+r.ID, "--read-only=false", c.image, "/bin/nodeinit", "serve"); err != nil {
+		h := c.newHost("M"+strconv.Itoa(n), containerName(r.ID, n), fmt.Sprintf("%s.%d.%d", c.base, octet, 10+n), ports)
+		if err := c.startContainer(h, []string{"--network", c.network, "--ip", h.addr}); err != nil {
 			return nil, err
-		}
-		for _, d := range []string{h.home.Dir, h.home.State, h.home.Tmp, h.ServerDir(), h.TLSDir(), h.runDir(), "/tmp"} {
-			if _, err := c.do("exec", h.name, "/bin/nodeinit", "mkdir", d); err != nil {
-				return nil, err
-			}
 		}
 		hs = append(hs, h)
 	}
@@ -263,14 +308,28 @@ func (p *Podman) buildImage(c *podCtx, ctx string) error {
 	if err := os.WriteFile(filepath.Join(ctx, "nats-server"), nb, 0o755); err != nil {
 		return err
 	}
+	if err := writeNatsCLI(ctx, p.Fetch); err != nil {
+		return err
+	}
+	sb, err := os.ReadFile(r.scriptPath())
+	if err != nil {
+		return fmt.Errorf("the setup script for the node image: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(ctx, "mash-local-nats-setup.sh"), sb, 0o755); err != nil {
+		return err
+	}
 	if err := os.WriteFile(filepath.Join(ctx, "Containerfile"), []byte(containerfile), 0o644); err != nil {
 		return err
 	}
-	_, err = c.do("build", "--label", labelKey+"="+r.ID, "-t", c.image, ctx)
-	return err
+	if _, err = c.do("build", "--label", labelKey+"="+r.ID, "-t", c.image, ctx); err != nil {
+		return err
+	}
+	dg, _ := c.do("image", "inspect", "--format", "{{.Digest}}", baseImage)
+	r.ImageLines = []string{baseImageLine(dg), natsCLILine()}
+	return nil
 }
 
-// checkStatic fails unless the binary can run in a FROM scratch image: an ELF file for this machine's architecture
+// checkStatic fails unless the binary can run in any image: an ELF file for this machine's architecture
 // with no program interpreter and no needed shared library. (A dynamic section as such is allowed: a static PIE has one.)
 func checkStatic(path string) error {
 	f, err := elf.Open(path)
@@ -280,11 +339,11 @@ func checkStatic(path string) error {
 	defer f.Close()
 	for _, pr := range f.Progs {
 		if pr.Type == elf.PT_INTERP {
-			return fmt.Errorf("nats-server (%s) is dynamically linked (it names a program interpreter); the AT-005 image is FROM scratch and needs a static binary: use a release build or CGO_ENABLED=0 go build", path)
+			return fmt.Errorf("nats-server (%s) is dynamically linked (it names a program interpreter); the node image takes a static binary only: use a release build or CGO_ENABLED=0 go build", path)
 		}
 	}
 	if libs, _ := f.ImportedLibraries(); len(libs) > 0 {
-		return fmt.Errorf("nats-server (%s) is dynamically linked (needs %s); the AT-005 image is FROM scratch and needs a static binary: use a release build or CGO_ENABLED=0 go build", path, strings.Join(libs, ", "))
+		return fmt.Errorf("nats-server (%s) is dynamically linked (needs %s); the node image takes a static binary only: use a release build or CGO_ENABLED=0 go build", path, strings.Join(libs, ", "))
 	}
 	want := map[string]elf.Machine{"amd64": elf.EM_X86_64, "arm64": elf.EM_AARCH64}[runtime.GOARCH]
 	if want != 0 && f.Machine != want {
@@ -593,7 +652,7 @@ func (h *podHost) Home() Home        { return h.home }
 func (h *podHost) ServerDir() string { return nodeHome + "/server" }
 func (h *podHost) TLSDir() string    { return nodeHome + "/tls" }
 func (h *podHost) Bin(name string) string {
-	return "/bin/" + name
+	return nodeBin + "/" + name
 }
 
 // execArgs is the command line of one command in the node: the working directory and the environment are set on the
@@ -603,9 +662,11 @@ func execArgs(container string, args, env []string, stdin bool) []string {
 	if stdin {
 		a = append(a, "-i")
 	}
-	a = append(a, "--workdir", nodeHome)
+	a = append(a, "--workdir", nodeHome, "-e", "PATH="+nodePath) // the node's PATH, never the host's
 	for _, kv := range env {
-		a = append(a, "-e", kv)
+		if !strings.HasPrefix(kv, "PATH=") {
+			a = append(a, "-e", kv)
+		}
 	}
 	a = append(a, container)
 	return append(a, args...)
@@ -626,7 +687,7 @@ func (h *podHost) pidfile(label string) string {
 
 // spawnArgs is the command line of a spawned process: nodeinit runs it in the node and records its PID in pidfile.
 func spawnArgs(container, pidfile string, args, env []string) []string {
-	return execArgs(container, append([]string{"/bin/nodeinit", "run", "--pidfile", pidfile, "--"}, args...), env, true)
+	return execArgs(container, append([]string{nodeBin + "/nodeinit", "run", "--pidfile", pidfile, "--"}, args...), env, true)
 }
 
 // Spawn starts the process in the node under `nodeinit run` and records the PID of the local `podman exec -i` client.
@@ -647,12 +708,12 @@ func (h *podHost) Spawn(label string, args, env []string) (*Proc, error) {
 
 // stopInNode ends the process whose PID is in pidfile, inside the node (nodeinit stop: SIGTERM, then SIGKILL, to that PID).
 func (h *podHost) stopInNode(pidfile string) error {
-	_, err := h.c.do("exec", h.name, "/bin/nodeinit", "stop", "--pidfile", pidfile, "--grace", "5s")
+	_, err := h.c.do("exec", h.name, nodeBin+"/nodeinit", "stop", "--pidfile", pidfile, "--grace", "5s")
 	return err
 }
 
 func (h *podHost) tool(args ...string) (string, error) {
-	return h.c.do(append([]string{"exec", h.name, "/bin/nodeinit"}, args...)...)
+	return h.c.do(append([]string{"exec", h.name, nodeBin + "/nodeinit"}, args...)...)
 }
 
 func (h *podHost) tmpFile(kind string) string {

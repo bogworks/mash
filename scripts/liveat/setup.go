@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -86,6 +87,19 @@ func (f SetupFile) Render() string {
 	fmt.Fprintf(&b, "admin_creds: %s\nsystem_creds: %s\n", yamlQuote(f.AdminCreds), yamlQuote(f.SystemCreds))
 	fmt.Fprintf(&b, "operator_key: %s\naccount_key: %s\n", yamlQuote(f.OperatorKey), yamlQuote(f.AccountKey))
 	return b.String()
+}
+
+// errSetupOnHost is why the setup script is never run on the machine the harness itself runs on: the script makes keys,
+// credentials and a NATS server, and tests run only in containers or VMs that the test makes and destroys.
+const errSetupOnHost = "setup runs only inside a node container: the setup script is never run on the test host (AT-001 to AT-003 start their own sandbox container; AT-005 runs it in M1; --hosts local cannot run it)"
+
+// containerEnvFile is the file podman puts in every container it makes.
+const containerEnvFile = "/run/.containerenv"
+
+// insideContainer reports whether this process runs in a podman container. Tests replace it.
+var insideContainer = func() bool {
+	_, err := os.Stat(containerEnvFile)
+	return err == nil
 }
 
 // scriptPath is the setup script: the Run's SetupScript, or the default under the checkout.

@@ -38,9 +38,12 @@ type Run struct {
 	// SetupScript is the policy script that makes a local NATS server (bash path). Empty: scripts/mash-local-nats-setup.sh
 	// under Repo; the environment variable LIVEAT_SETUP_SCRIPT overrides it.
 	SetupScript string
-	Runner      *Runner
-	Out         string
-	LogFile     *os.File
+	// ImageLines are the record lines about the node image (base image digest, nats command pin); they are made when the
+	// image is built, or, in a sandbox run, handed in by the host that built it.
+	ImageLines []string
+	Runner     *Runner
+	Out        string
+	LogFile    *os.File
 
 	mu    sync.Mutex
 	procs []*Proc
@@ -235,6 +238,53 @@ func (r *Run) Prepare() error {
 	return nil
 }
 
+// PrepareNatsOnly is Prepare for a sandbox host: it records the revision and builds nats-server from the go.mod pin
+// (the image gets it), but builds no mash or mashctl for the host: the image's own static ones are used.
+func (r *Run) PrepareNatsOnly() error {
+	rev, err := gitRevision(r.Repo)
+	if err != nil {
+		return err
+	}
+	r.Revision = rev
+	bin := filepath.Join(r.Dir, "bin")
+	if err := os.Mkdir(bin, 0o700); err != nil {
+		return err
+	}
+	return r.buildNats(bin, execBuild)
+}
+
+// The environment names by which a sandbox host hands what it knows to the run inside the container.
+const (
+	envInsideRevision = "LIVEAT_REVISION"
+	envInsideNatsPin  = "LIVEAT_NATS_PIN"
+	envInsideImage    = "LIVEAT_IMAGE_LINES" // record lines about the image, separated by "|"
+)
+
+// PrepareInside is Prepare for a run inside the sandbox container: nothing is built (there is no Go toolchain, no git
+// and no checkout there); the binaries, the nats command and the setup script are the ones in the image, and the
+// revision, the nats-server pin and the image's record lines come from the host that built it.
+func (r *Run) PrepareInside(getenv func(string) string) error {
+	r.Revision = getenv(envInsideRevision)
+	pin := getenv(envInsideNatsPin)
+	if r.Revision == "" || pin == "" {
+		return fmt.Errorf("liveat: --inside is for the run the sandbox starts (it sets %s and %s)", envInsideRevision, envInsideNatsPin)
+	}
+	r.Mash, r.Mashctl, r.NatsBin = nodeBin+"/mash", nodeBin+"/mashctl", nodeBin+"/nats-server"
+	r.SetupScript = nodeSetupPath
+	if l := getenv(envInsideImage); l != "" {
+		r.ImageLines = strings.Split(l, "|")
+	}
+	vb, err := execBuild(r.Dir, nil, r.NatsBin, "--version")
+	if err != nil {
+		return fmt.Errorf("nats-server --version: %w", err)
+	}
+	if got, want := strings.TrimSpace(vb), "nats-server: "+pin; got != want {
+		return fmt.Errorf("liveat: the nats-server in the image reports %q, not %q", got, want)
+	}
+	r.NatsVer = fmt.Sprintf("%s (built from the go.mod pin %s)", pin, pin)
+	return nil
+}
+
 // natsPkg is the module whose version go.mod pins and whose main package is nats-server.
 //
 // It is a Go module path, not a URL; it is written in two parts so the portable-code scan (R3), which reads string
@@ -299,12 +349,13 @@ func (r *Run) buildNats(bin string, run buildFn) error {
 
 // EnvLines is the environment section of a record. Scratch names are relative to the run directory.
 func (r *Run) EnvLines(scratch []string) []string {
-	return []string{
+	l := []string{
 		runtime.GOOS + "/" + runtime.GOARCH,
 		"go: " + runtime.Version(),
 		"nats-server: " + r.NatsVer,
-		"scratch (relative to the run directory): " + strings.Join(scratch, ", "),
 	}
+	l = append(l, r.ImageLines...)
+	return append(l, "scratch (relative to the run directory): "+strings.Join(scratch, ", "))
 }
 
 // stopPID stops a process this run recorded: SIGTERM, then SIGKILL after 10 seconds, to that PID only. It first checks

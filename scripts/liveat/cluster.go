@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -123,7 +122,7 @@ type At5 struct {
 	leaks      []Leak
 	srv        []*Proc // the three nats-server processes, by recorded PID
 	lastCreate string
-	stage      string // the directory the setup script made on the test host (a template, stopped), source of M1's and M2's files
+	stage      string // the directory the setup script made inside M1 (a template, stopped), source of M1's and M2's files
 	dry        bool
 	runLine    string
 }
@@ -195,41 +194,51 @@ func (s *At5) BuildCerts(now time.Time) error {
 	return nil
 }
 
-// stageSetup runs the setup script on the test host (not on a node: the podman image has no bash, openssl or nats
-// command) into a new directory <run>/at005-setup, and stops the server it starts: the cluster runs its own three
-// servers, and this one only supplies the operator, the account, the keys, the creds and the server.conf template.
-// The script picks its own port (4222 or the next free); the cluster does not use it.
+// setupCmd is the command line of one call of the setup script on h: bash and the script in the node image (a podman
+// node), or the Run's script (a local machine, which only a run inside a container may use).
+func (s *At5) setupCmd(h Host, dir string, more ...string) []string {
+	if _, ok := h.(*podHost); ok {
+		return append([]string{"bash", nodeSetupPath, "--dir", dir}, more...)
+	}
+	return s.R.setupArgs(dir, more...)
+}
+
+// stageGet reads one file of the setup script's directory on M1 (the stage), through the Host.
+func (s *At5) stageGet(file string) ([]byte, error) { return s.M(1).Get(filepath.Join(s.stage, file)) }
+
+// stageSetup runs the setup script INSIDE M1 (a node container, as its non-root user; never on the test host) into a
+// new directory <M1's directory>/setup, and stops the server it starts: the cluster runs its own three servers, and
+// this one only supplies the operator, the account, the keys, the creds and the server.conf template. The script
+// picks its own port (4222 or the next free, on M1's loopback); the cluster does not use it.
 func (s *At5) stageSetup() bool {
-	r := s.R
-	s.stage = filepath.Join(r.Dir, "at005-setup")
-	home, err := NewHome(filepath.Join(r.Dir, "at005-setup-home"))
-	if err != nil {
-		s.check("the scratch home of the setup script is made", false, err.Error())
+	m1 := s.M(1)
+	if _, local := m1.(*localHost); local && !insideContainer() {
+		s.check("the setup script runs inside a node container", false, errSetupOnHost)
 		return false
 	}
-	env := BuildEnv(home, []string{filepath.Dir(r.NatsBin)})
-	res := r.Runner.RunIn(home.Dir, "setup-script", r.setupArgs(s.stage, "--owner", "alice"), env, "")
+	s.stage = filepath.Join(filepath.Dir(m1.ServerDir()), "setup")
+	env := s.env(m1)
+	res := m1.Exec("setup-script", s.setupCmd(m1, s.stage, "--owner", "alice"), env)
 	_, perr := parseSetupPort(res.Stdout)
-	ok := s.check("the setup script makes the operator, the account, the keys, the creds and the server.conf template", res.Code == 0 && perr == nil, exitDetail(res)+"; "+errText(perr))
-	s.mu.Lock()
+	ok := s.check("the setup script makes the operator, the account, the keys, the creds and the server.conf template (run inside M1)", res.Code == 0 && perr == nil, exitDetail(res)+"; "+errText(perr))
 	for _, k := range secretFiles {
-		if kb, err := os.ReadFile(filepath.Join(s.stage, k.file)); err == nil {
+		if kb, err := s.stageGet(k.file); err == nil {
+			s.mu.Lock()
 			registerKeyLines(s.secrets, "setup "+k.label, kb)
+			s.mu.Unlock()
 		}
 	}
-	s.mu.Unlock()
 	pid := 0
-	if b, err := os.ReadFile(filepath.Join(s.stage, fileServerPID)); err == nil {
+	if b, err := s.stageGet(fileServerPID); err == nil {
 		pid, _ = parsePIDFile(b)
 	}
 	if pid > 0 {
-		r.record(pid, s.stage)
-		st := r.Runner.RunIn(home.Dir, "setup-stop", r.setupArgs(s.stage, "--stop"), env, "")
-		if st.Code != 0 || alive(pid) {
-			stopPID(pid, s.stage, r.Runner.logf)
+		st := m1.Exec("setup-stop", s.setupCmd(m1, s.stage, "--stop"), env)
+		if st.Code != 0 && m1.Exists(filepath.Join(s.stage, fileServerPID)) {
+			// the script's stop failed: end exactly the PID in its pid file, inside M1
+			m1.Exec("setup-stop-pid", []string{m1.Bin("nodeinit"), "stop", "--pidfile", filepath.Join(s.stage, fileServerPID), "--grace", "5s"}, env)
 		}
-		r.forget(pid)
-		s.check("the setup script's own server is stopped again (the cluster runs its own three)", !alive(pid), exitDetail(st))
+		s.check("the setup script's own server is stopped again (the cluster runs its own three)", st.Code == 0 || !m1.Exists(filepath.Join("/proc", strconv.Itoa(pid), "exe")), exitDetail(st))
 	}
 	return ok && pid > 0
 }
@@ -240,7 +249,7 @@ func (s *At5) InitM1() bool {
 	if !s.stageSetup() {
 		return false
 	}
-	b, err := os.ReadFile(filepath.Join(s.stage, fileServerConf))
+	b, err := s.stageGet(fileServerConf)
 	if err != nil {
 		s.check("the template server.conf is readable", false, err.Error())
 		return false
@@ -250,7 +259,7 @@ func (s *At5) InitM1() bool {
 		s.check("the template has a system account and a resolver_preload", false, err.Error())
 		return false
 	}
-	opJWT, err := os.ReadFile(filepath.Join(s.stage, fileOperator))
+	opJWT, err := s.stageGet(fileOperator)
 	if err != nil {
 		s.check("operator.jwt is readable", false, err.Error())
 		return false
@@ -379,7 +388,7 @@ func (s *At5) initFromSetup(h Host) (res Result, gone bool, err error) {
 		_ = h.Remove(in) // the directory this harness made, now empty
 	}
 	for _, f := range files {
-		b, rerr := os.ReadFile(filepath.Join(s.stage, f.src))
+		b, rerr := s.stageGet(f.src)
 		if rerr != nil {
 			cleanup()
 			return res, true, fmt.Errorf("%s is not readable for the copy: %v", f.src, rerr)
