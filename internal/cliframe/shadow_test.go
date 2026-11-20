@@ -71,3 +71,14 @@ func TestExtractOwningKeepsItsFlagsForItsVerbs(t *testing.T) {
 		t.Error("a global flag without its value is still an error")
 	}
 }
+
+func TestDetailFlagIsGlobalAnywhere(t *testing.T) {
+	spec := Spec{Tool: "mash", CredsEnv: "MASH_CREDS", CredsKey: "creds"}
+	own := map[string][]string{"who": {"--json"}}
+	for _, args := range [][]string{{DetailFlag, "who", "a"}, {"who", DetailFlag, "a"}, {"who", "a", DetailFlag}} {
+		g, rest, err := ExtractOwning(spec, args, own)
+		if err != nil || !g.Detail || !reflect.DeepEqual(rest, []string{"who", "a"}) {
+			t.Errorf("%q: %+v %q %v", args, g, rest, err)
+		}
+	}
+}

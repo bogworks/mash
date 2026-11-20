@@ -216,7 +216,7 @@ func runInit(args []string, g cliframe.Global, env func(string) string, lookup c
 		return cliframe.Report(stdout, stderr, err, jsonRequested(args, "--config"))
 	}
 	jsonOut := in.json || g.JSON
-	return cliframe.Report(stdout, stderr, doInit(in.values["--config"], in.flags["--dry-run"], jsonOut, g.Verbose, env, lookup, stdout, stderr), jsonOut)
+	return cliframe.Report(stdout, stderr, doInit(in.values["--config"], in.flags["--dry-run"], jsonOut, g.Detail, env, lookup, stdout, stderr), jsonOut)
 }
 
 // step is one `label: value` line of --verbose.

@@ -164,7 +164,7 @@ func TestLimitsApply(t *testing.T) {
 		t.Fatalf("group prefix: %d %q %q", code, out, errb)
 	}
 	// one address, with --verbose naming it
-	if out, _, code = h.run("limits", "apply", b.String(), "--verbose"); code != 0 || !strings.HasPrefix(out, "Raised 1 inbox\n"+b.String()+": max_bytes 16777216 -> 33554432") {
+	if out, _, code = h.run("limits", "apply", b.String(), "--detail"); code != 0 || !strings.HasPrefix(out, "Raised 1 inbox\n"+b.String()+": max_bytes 16777216 -> 33554432") {
 		t.Fatalf("one address: %d %q", code, out)
 	}
 	// nothing left, by every prefix form

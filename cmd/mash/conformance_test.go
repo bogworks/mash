@@ -459,13 +459,13 @@ func confRules(t *testing.T, spec confSpec) {
 		env := confEnv(t)
 		d := t.TempDir()
 		globals := []string{"--endpoint", "a.b.c", "--creds", filepath.Join(d, "c"), "--server", "nats://127.0.0.1:1", "--ca", filepath.Join(d, "ca"),
-			"--config-dir", d, "--verbose", "--json", "--no-color"}
+			"--config-dir", d, "--detail", "--json", "--no-color"}
 		after := runMash(env, append([]string{"version"}, globals...)...)
 		before := runMash(env, append(append([]string{}, globals...), "version")...)
 		if after.code != 0 || after != before {
 			t.Errorf("mash version with every global option: want exit 0 and the same output before and after the command, got after %+v, before %+v", after, before)
 		}
-		short := runMash(env, "version", "-v")
+		short := runMash(env, "version", "--detail")
 		if short.code != 0 {
 			t.Errorf("mash version -v: want exit 0, got %+v", short)
 		}

@@ -9,8 +9,8 @@
    "detail": "Past tense, naming the thing: 'Created endpoint acme.demo.bob', 'Mail sent (number 42).' It does not print what another command already shows; it does print an identifier the person can get nowhere else."
   },
   {
-   "rule": "--verbose adds detail, --wide adds columns",
-   "detail": "Neither is the default. --verbose (-v) follows an action's line with 'label: value' lines. --wide adds columns to a table and may pass 80 columns. Every table's --wide form is written out in this specification."
+   "rule": "Minimal by default, in text and in JSON alike; --detail gives the fuller answer in both",
+   "detail": "A command's usual answer is the least that answers the question, and --json prints that same least as an object. --detail asks for more: in text, 'label: value' lines after the usual line; with --json, a fuller object that contains the usual one. A program that needs the fuller object asks for it, as a person does. An MCP tool takes detail the same way. --wide is the same idea for a table: more columns, and it may pass 80 columns. --detail is one option with one meaning on every command of both tools, so nobody has to learn which commands have it: where a command has nothing more to say, --detail prints what it prints without it. Every --detail and --wide form that does add something is written out in this specification. (This is the command-line standard's rule 24; an earlier pass of this specification called it --verbose.)"
   },
   {
    "rule": "A list is a plain table",
@@ -107,6 +107,10 @@
   {
    "rule": "Encryption can be turned off in one way only, and it says so every time",
    "detail": "Both tools talk to the server over TLS. The one way to turn that off is the environment variable MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1. There is no flag and no configuration-file key for it: this is the one setting that cannot be given three ways, so that it cannot be left on in a file and forgotten. While it is set, every command of both tools first prints, on stderr: 'warning: encryption to the server is OFF (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set)'. The older names, MASH_INSECURE_PLAINTEXT and the key insecure_plaintext, are refused with an error naming the new one."
+  },
+  {
+   "rule": "A folder left by mash 0.5.5 is named for what it is",
+   "detail": "When the configuration folder holds 0.5.5's settings (the keys url and tls_ca), every command of both tools stops with 'error: <folder> holds a mash 0.5.5 configuration' and 'hint: <release base>/mash-migrate-0.5.5.sh', exit 1, and changes nothing. It never reads the old keys and never guesses. The migration is a script, run once by the person or by whatever manages the machine: it rewrites the two keys in place, keeps a backup beside the file, and touches nothing on the server. Nothing on the server needs migrating: 0.5.6 reuses the stores and endpoint records 0.5.5 made, and endpoints of the two versions can mail each other on one server (shown by a live run, 2026-11-20)."
   },
   {
    "rule": "Only a destructive command asks",
@@ -242,6 +246,11 @@
   }
  ],
  "setup": [
+  {
+   "name": "mash-migrate-0.5.5.sh",
+   "command": "curl -fsSL https://github.com/bogworks/mash/releases/latest/download/mash-migrate-0.5.5.sh | bash",
+   "what": "For a machine that ran mash 0.5.5. Run once. It rewrites config.json's two renamed keys (url becomes servers, tls_ca becomes ca), keeps the old file beside it as a backup, prints one line saying what it changed, and touches nothing on the server. Addresses written with slashes and the old variable names are not its business: they are refused where they are used, each with its own error line."
+  },
   {
    "name": "install.sh",
    "command": "curl -fsSL https://github.com/bogworks/mash/releases/latest/download/install.sh | bash",

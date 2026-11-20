@@ -198,7 +198,7 @@ func TestTargetLineComesBeforeAWriteAndOfflineVerbsPrintNone(t *testing.T) {
 			t.Errorf("%v: a target line without --verbose: %q", args, errb)
 		}
 	}
-	for _, args := range [][]string{{"--verbose", "limits", "apply"}, {"endpoint", "delete", "o.g.zz", "--yes", "--verbose"}} {
+	for _, args := range [][]string{{"--detail", "limits", "apply"}, {"endpoint", "delete", "o.g.zz", "--yes", "--detail"}} {
 		_, errb, _ := h.run(args...)
 		want := "mashctl: target server " + h.e.URL + " (from MASH_SERVER), owner " + h.e.Owner + " (from MASH_ENDPOINT), admin creds " + h.e.AdminCreds + " (from MASH_ADMIN_CREDS)\n"
 		if !strings.HasPrefix(errb, want) {

@@ -263,12 +263,12 @@ func runEndpointCreate(args []string, g cliframe.Global, env func(string) string
 	if err != nil {
 		return cliframe.Report(stdout, stderr, err, jsonRequested(args, "--out", "--public-key"))
 	}
-	in.verbose = g.Verbose
+	in.verbose = g.Detail
 	t, res, err := epCreate(&in, env, lookup, stderr)
 	if err != nil {
 		return cliframe.Report(stdout, stderr, err, in.json)
 	}
-	epPrint(stdout, "create", t, res, g.Verbose, in.json)
+	epPrint(stdout, "create", t, res, g.Detail, in.json)
 	return 0
 }
 

@@ -969,7 +969,7 @@ func (s *at4) join() {
 	// it may be echoed, in a success, a refusal, --dry-run or --json --verbose. The command lines hold paths only.
 	{
 		cfg, _ := freshCfg("join-json")
-		run("join-json", cfg, "join", jf, "--key", seed, "--json", "--verbose")
+		run("join-json", cfg, "join", jf, "--key", seed, "--json", "--detail")
 		bad := joinSecretFree(runs, a.secrets)
 		a.C.Check("files: no output of "+strconv.Itoa(len(runs))+" mash join runs (refusals, --replace, --dry-run, --json --verbose) holds a seed, a JWT or a creds text", len(bad) == 0, strings.Join(bad, "; "))
 	}
@@ -990,7 +990,7 @@ func (s *at4) wide() {
 	setup := filepath.Join(a.srvDir, fileSetupYAML)
 	wseed := filepath.Join(s.work, "wide.seed")
 	wpub := pubOf(wseed)
-	r := s.mash("wide-key", he, a.Conn(), "key", "create", "--out", wseed, "--json", "--verbose")
+	r := s.mash("wide-key", he, a.Conn(), "key", "create", "--out", wseed, "--json", "--detail")
 	a.C.Check("wide: mash key create --json --verbose succeeds", r.Code == 0, exitDetail(r))
 	a.Watch("seed wide", wseed)
 
@@ -1008,34 +1008,34 @@ func (s *at4) wide() {
 	dEnv := s.designEnv
 	cmds := []c{
 		// mash, as design
-		{"mash-status", true, dEnv, []string{"status"}}, {"mash-status-json", true, dEnv, []string{"status", "--json"}}, {"mash-status-verbose", true, dEnv, []string{"status", "--verbose"}},
-		{"mash-doctor", true, dEnv, []string{"doctor"}}, {"mash-doctor-json", true, dEnv, []string{"doctor", "--json"}}, {"mash-doctor-verbose", true, dEnv, []string{"doctor", "--verbose"}},
-		{"mash-who", true, dEnv, []string{"who"}}, {"mash-who-json", true, dEnv, []string{"who", "--json"}}, {"mash-who-verbose", true, dEnv, []string{"who", "--verbose"}},
-		{"mash-send", true, dEnv, []string{"send", "alice.dev.review", "wide-set hello"}}, {"mash-send-json", true, dEnv, []string{"send", "alice.dev.review", "wide-set again", "--json", "--verbose"}},
-		{"mash-inbox", true, dEnv, []string{"inbox"}}, {"mash-inbox-verbose", true, dEnv, []string{"inbox", "--verbose"}},
-		{"mash-read-missing", true, dEnv, []string{"read", "9999"}}, {"mash-read-missing-json", true, dEnv, []string{"read", "9999", "--json", "--verbose"}},
+		{"mash-status", true, dEnv, []string{"status"}}, {"mash-status-json", true, dEnv, []string{"status", "--json"}}, {"mash-status-verbose", true, dEnv, []string{"status", "--detail"}},
+		{"mash-doctor", true, dEnv, []string{"doctor"}}, {"mash-doctor-json", true, dEnv, []string{"doctor", "--json"}}, {"mash-doctor-verbose", true, dEnv, []string{"doctor", "--detail"}},
+		{"mash-who", true, dEnv, []string{"who"}}, {"mash-who-json", true, dEnv, []string{"who", "--json"}}, {"mash-who-verbose", true, dEnv, []string{"who", "--detail"}},
+		{"mash-send", true, dEnv, []string{"send", "alice.dev.review", "wide-set hello"}}, {"mash-send-json", true, dEnv, []string{"send", "alice.dev.review", "wide-set again", "--json", "--detail"}},
+		{"mash-inbox", true, dEnv, []string{"inbox"}}, {"mash-inbox-verbose", true, dEnv, []string{"inbox", "--detail"}},
+		{"mash-read-missing", true, dEnv, []string{"read", "9999"}}, {"mash-read-missing-json", true, dEnv, []string{"read", "9999", "--json", "--detail"}},
 		{"mash-version-json", true, dEnv, []string{"version", "--json"}},
-		{"mash-key-dry", true, a.Conn(), []string{"key", "create", "--out", filepath.Join(s.work, "dry.seed"), "--dry-run", "--json", "--verbose"}},
-		{"mash-join-json", true, wcfg("wj1"), []string{"join", s.design.join, "--key", s.design.seed, "--json", "--verbose"}},
+		{"mash-key-dry", true, a.Conn(), []string{"key", "create", "--out", filepath.Join(s.work, "dry.seed"), "--dry-run", "--json", "--detail"}},
+		{"mash-join-json", true, wcfg("wj1"), []string{"join", s.design.join, "--key", s.design.seed, "--json", "--detail"}},
 		{"mash-join-dry", true, wcfg("wj2"), []string{"join", s.design.join, "--key", s.design.seed, "--dry-run", "--json"}},
 		// failure paths of mash: the wrong kind of file in an option
-		{"mash-join-swapped", true, wcfg("wj3"), []string{"join", s.design.seed, "--key", s.design.jwt, "--verbose"}},
+		{"mash-join-swapped", true, wcfg("wj3"), []string{"join", s.design.seed, "--key", s.design.jwt, "--detail"}},
 		{"mash-join-swapped-json", true, wcfg("wj4"), []string{"join", s.design.seed, "--key", s.design.jwt, "--json"}},
 		{"mash-join-join-as-seed", true, wcfg("wj5"), []string{"join", s.design.join, "--key", join}},
 		{"mash-join-creds-as-join", true, wcfg("wj6"), []string{"join", s.design.creds, "--key", s.design.seed}},
-		{"mash-join-creds-as-seed", true, wcfg("wj7"), []string{"join", s.design.join, "--key", s.design.creds, "--verbose"}},
-		{"mash-join-wrong-pair", true, wcfg("wj8"), []string{"join", s.design.join, "--key", s.review.seed, "--verbose"}},
+		{"mash-join-creds-as-seed", true, wcfg("wj7"), []string{"join", s.design.join, "--key", s.design.creds, "--detail"}},
+		{"mash-join-wrong-pair", true, wcfg("wj8"), []string{"join", s.design.join, "--key", s.review.seed, "--detail"}},
 		{"mash-join-missing", true, wcfg("wj9"), []string{"join", s.design.join, "--key", filepath.Join(s.work, "no-such.seed")}},
 		{"mash-join-missing-file", true, wcfg("wj10"), []string{"join", filepath.Join(s.work, "no-such.join"), "--key", s.design.seed}},
 		{"mash-key-missing-dir", true, a.Conn(), []string{"key", "create", "--out", filepath.Join(s.work, "no", "such", "dir", "k.seed"), "--json"}},
-		{"mash-key-existing", true, a.Conn(), []string{"key", "create", "--out", s.design.seed, "--verbose"}},
+		{"mash-key-existing", true, a.Conn(), []string{"key", "create", "--out", s.design.seed, "--detail"}},
 		{"mash-key-existing-json", true, a.Conn(), []string{"key", "create", "--out", s.design.seed, "--json"}},
-		{"mash-status-seed-as-creds", true, append(slices.Clone(dEnv), "MASH_CREDS="+s.design.seed), []string{"status", "--verbose"}},
-		{"mash-inbox-join-as-creds", true, append(slices.Clone(dEnv), "MASH_CREDS="+join), []string{"inbox", "--verbose"}},
-		{"mash-doctor-jwt-as-creds", true, append(slices.Clone(dEnv), "MASH_CREDS="+s.design.jwt), []string{"doctor", "--verbose"}},
-		{"mash-who-creds-flag-seed", true, dEnv, []string{"who", "--creds", s.design.seed, "--verbose"}},
-		{"mash-status-ca-is-creds", true, append(slices.Clone(dEnv), "MASH_CA="+s.design.creds), []string{"status", "--verbose"}},
-		{"mash-inbox-ca-is-seed", true, append(slices.Clone(dEnv), "MASH_CA="+s.design.seed), []string{"inbox", "--verbose"}},
+		{"mash-status-seed-as-creds", true, append(slices.Clone(dEnv), "MASH_CREDS="+s.design.seed), []string{"status", "--detail"}},
+		{"mash-inbox-join-as-creds", true, append(slices.Clone(dEnv), "MASH_CREDS="+join), []string{"inbox", "--detail"}},
+		{"mash-doctor-jwt-as-creds", true, append(slices.Clone(dEnv), "MASH_CREDS="+s.design.jwt), []string{"doctor", "--detail"}},
+		{"mash-who-creds-flag-seed", true, dEnv, []string{"who", "--creds", s.design.seed, "--detail"}},
+		{"mash-status-ca-is-creds", true, append(slices.Clone(dEnv), "MASH_CA="+s.design.creds), []string{"status", "--detail"}},
+		{"mash-inbox-ca-is-seed", true, append(slices.Clone(dEnv), "MASH_CA="+s.design.seed), []string{"inbox", "--detail"}},
 	}
 	for _, x := range cmds {
 		if x.mash {
@@ -1048,59 +1048,59 @@ func (s *at4) wide() {
 	ctl := func(label string, args ...string) { s.ctl(label, ha, nil, args...) }
 	ctl("ctl-status", "status")
 	ctl("ctl-status-json", "status", "--json")
-	ctl("ctl-status-verbose", "status", "--verbose")
+	ctl("ctl-status-verbose", "status", "--detail")
 	ctl("ctl-doctor", "doctor")
 	ctl("ctl-doctor-json", "doctor", "--json")
-	ctl("ctl-doctor-verbose", "doctor", "--verbose")
+	ctl("ctl-doctor-verbose", "doctor", "--detail")
 	ctl("ctl-limits", "limits", "show")
 	ctl("ctl-limits-json", "limits", "show", "--json")
-	ctl("ctl-limits-verbose", "limits", "show", "--verbose")
+	ctl("ctl-limits-verbose", "limits", "show", "--detail")
 	ctl("ctl-init-dry", "init", "--config", setup, "--dry-run")
-	ctl("ctl-init-dry-json", "init", "--config", setup, "--dry-run", "--json", "--verbose")
+	ctl("ctl-init-dry-json", "init", "--config", setup, "--dry-run", "--json", "--detail")
 	ctl("ctl-list", "endpoint", "list")
 	ctl("ctl-list-wide-json", "endpoint", "list", "--wide", "--json")
-	ctl("ctl-list-verbose", "endpoint", "list", "--verbose")
+	ctl("ctl-list-verbose", "endpoint", "list", "--detail")
 	ctl("ctl-show", "endpoint", "show", "alice.dev.design")
 	ctl("ctl-show-json", "endpoint", "show", "alice.dev.design", "--json")
-	ctl("ctl-show-verbose", "endpoint", "show", "alice.dev.design", "--verbose")
+	ctl("ctl-show-verbose", "endpoint", "show", "alice.dev.design", "--detail")
 	ctl("ctl-inbox", "endpoint", "inbox", "alice.dev.review")
-	ctl("ctl-inbox-json", "endpoint", "inbox", "alice.dev.review", "--json", "--verbose")
+	ctl("ctl-inbox-json", "endpoint", "inbox", "alice.dev.review", "--json", "--detail")
 	ctl("ctl-permissions", "endpoint", "permissions", "alice.dev.design")
 	ctl("ctl-version-json", "version", "--json")
-	ctl("ctl-create-w1", "endpoint", "create", "alice.dev.w1", "--public-key", wpub, "--out", filepath.Join(s.work, "w1.join"), "--json", "--verbose")
+	ctl("ctl-create-w1", "endpoint", "create", "alice.dev.w1", "--public-key", wpub, "--out", filepath.Join(s.work, "w1.join"), "--json", "--detail")
 	a.watchFile("w1 join", filepath.Join(s.work, "w1.join"))
-	ctl("ctl-create-dry", "endpoint", "create", "alice.dev.w2", "--dry-run", "--json", "--verbose")
-	ctl("ctl-create-w3-installs-creds", "endpoint", "create", "alice.dev.w3", "--json", "--verbose")
+	ctl("ctl-create-dry", "endpoint", "create", "alice.dev.w2", "--dry-run", "--json", "--detail")
+	ctl("ctl-create-w3-installs-creds", "endpoint", "create", "alice.dev.w3", "--json", "--detail")
 	a.watchFile("w3 creds", filepath.Join(ha.Config, "alice.dev.w3.creds"))
-	ctl("ctl-reissue-w3-json", "endpoint", "reissue", "alice.dev.w3", "--json", "--verbose")
+	ctl("ctl-reissue-w3-json", "endpoint", "reissue", "alice.dev.w3", "--json", "--detail")
 	a.watchFile("w3 creds reissued", filepath.Join(ha.Config, "alice.dev.w3.creds"))
-	ctl("ctl-create-w4-out-keymade", "endpoint", "create", "alice.dev.w4", "--out", filepath.Join(s.work, "w4.join"), "--verbose")
+	ctl("ctl-create-w4-out-keymade", "endpoint", "create", "alice.dev.w4", "--out", filepath.Join(s.work, "w4.join"), "--detail")
 	a.watchFile("w4 join", filepath.Join(s.work, "w4.join"))
-	ctl("ctl-delete-w3", "endpoint", "delete", "alice.dev.w3", "--yes", "--json", "--verbose")
-	ctl("ctl-delete-w4", "endpoint", "delete", "alice.dev.w4", "--yes", "--verbose")
+	ctl("ctl-delete-w3", "endpoint", "delete", "alice.dev.w3", "--yes", "--json", "--detail")
+	ctl("ctl-delete-w4", "endpoint", "delete", "alice.dev.w4", "--yes", "--detail")
 	// failure paths of mashctl, including a secret where something else is expected
-	ctl("ctl-show-missing", "endpoint", "show", "alice.dev.nobody", "--json", "--verbose")
-	ctl("ctl-create-existing", "endpoint", "create", "alice.dev.design", "--verbose", "--json")
-	ctl("ctl-create-deleted", "endpoint", "create", "alice.dev.w3", "--verbose")
-	ctl("ctl-create-seed-as-pubkey", "endpoint", "create", "alice.dev.s1", "--public-key", s.design.seed, "--out", filepath.Join(s.work, "s1.join"), "--verbose")
+	ctl("ctl-show-missing", "endpoint", "show", "alice.dev.nobody", "--json", "--detail")
+	ctl("ctl-create-existing", "endpoint", "create", "alice.dev.design", "--detail", "--json")
+	ctl("ctl-create-deleted", "endpoint", "create", "alice.dev.w3", "--detail")
+	ctl("ctl-create-seed-as-pubkey", "endpoint", "create", "alice.dev.s1", "--public-key", s.design.seed, "--out", filepath.Join(s.work, "s1.join"), "--detail")
 	ctl("ctl-create-join-as-pubkey", "endpoint", "create", "alice.dev.s2", "--public-key", join, "--out", filepath.Join(s.work, "s2.join"), "--json")
 	ctl("ctl-create-creds-as-pubkey", "endpoint", "create", "alice.dev.s3", "--public-key", s.design.creds, "--out", filepath.Join(s.work, "s3.join"))
-	ctl("ctl-create-jwt-as-pubkey", "endpoint", "create", "alice.dev.s4", "--public-key", s.design.jwt, "--out", filepath.Join(s.work, "s4.join"), "--verbose")
-	ctl("ctl-reissue-seed-as-pubkey", "endpoint", "reissue", "alice.dev.design", "--public-key", s.design.seed, "--out", filepath.Join(s.work, "s5.join"), "--verbose")
-	ctl("ctl-init-key-as-config", "init", "--config", filepath.Join(a.srvDir, fileAccountNK), "--dry-run", "--verbose")
+	ctl("ctl-create-jwt-as-pubkey", "endpoint", "create", "alice.dev.s4", "--public-key", s.design.jwt, "--out", filepath.Join(s.work, "s4.join"), "--detail")
+	ctl("ctl-reissue-seed-as-pubkey", "endpoint", "reissue", "alice.dev.design", "--public-key", s.design.seed, "--out", filepath.Join(s.work, "s5.join"), "--detail")
+	ctl("ctl-init-key-as-config", "init", "--config", filepath.Join(a.srvDir, fileAccountNK), "--dry-run", "--detail")
 	ctl("ctl-init-opkey-as-config-json", "init", "--config", filepath.Join(a.srvDir, fileOperatorNK), "--dry-run", "--json")
-	ctl("ctl-init-creds-as-config", "init", "--config", filepath.Join(a.srvDir, fileAdminCreds), "--dry-run", "--verbose")
+	ctl("ctl-init-creds-as-config", "init", "--config", filepath.Join(a.srvDir, fileAdminCreds), "--dry-run", "--detail")
 	ctl("ctl-init-cakey-as-config", "init", "--config", filepath.Join(a.srvDir, fileCAKey), "--dry-run")
 	ctl("ctl-init-serverkey-as-config", "init", "--config", filepath.Join(a.srvDir, fileServerKey), "--dry-run", "--json")
-	ctl("ctl-init-seed-as-config", "init", "--config", s.design.seed, "--dry-run", "--verbose")
-	s.ctl("ctl-status-admin-creds-seed", ha, []string{"MASH_ADMIN_CREDS=" + s.design.seed}, "status", "--verbose")
-	s.ctl("ctl-doctor-admin-creds-join", ha, []string{"MASH_ADMIN_CREDS=" + join}, "doctor", "--verbose", "--json")
-	s.ctl("ctl-list-ca-is-key", ha, []string{"MASH_CA=" + filepath.Join(a.srvDir, fileCAKey)}, "endpoint", "list", "--verbose")
-	s.ctl("ctl-list-ca-is-seed-json", ha, []string{"MASH_CA=" + s.design.seed}, "endpoint", "list", "--json", "--verbose")
-	s.ctl("ctl-create-no-account-key", hn, []string{"MASH_ADMIN_CREDS=" + filepath.Join(a.srvDir, fileAdminCreds)}, "endpoint", "create", "alice.dev.nk", "--public-key", wpub, "--out", filepath.Join(s.work, "nk.join"), "--verbose")
-	s.ctl("ctl-keys-dir-is-creds", ha, []string{"MASH_KEYS_DIR=" + filepath.Join(a.srvDir, "creds")}, "endpoint", "create", "alice.dev.nk2", "--public-key", wpub, "--out", filepath.Join(s.work, "nk2.join"), "--verbose")
-	s.ctl("ctl-bad-server", ha, []string{"MASH_SERVER=tls://127.0.0.1:1", "MASH_OPEN_TIMEOUT=2s"}, "endpoint", "list", "--verbose", "--json")
-	s.ctl("ctl-wrong-ca", ha, []string{"MASH_CA=" + filepath.Join(a.srvDir, "server.pem")}, "status", "--verbose")
+	ctl("ctl-init-seed-as-config", "init", "--config", s.design.seed, "--dry-run", "--detail")
+	s.ctl("ctl-status-admin-creds-seed", ha, []string{"MASH_ADMIN_CREDS=" + s.design.seed}, "status", "--detail")
+	s.ctl("ctl-doctor-admin-creds-join", ha, []string{"MASH_ADMIN_CREDS=" + join}, "doctor", "--detail", "--json")
+	s.ctl("ctl-list-ca-is-key", ha, []string{"MASH_CA=" + filepath.Join(a.srvDir, fileCAKey)}, "endpoint", "list", "--detail")
+	s.ctl("ctl-list-ca-is-seed-json", ha, []string{"MASH_CA=" + s.design.seed}, "endpoint", "list", "--json", "--detail")
+	s.ctl("ctl-create-no-account-key", hn, []string{"MASH_ADMIN_CREDS=" + filepath.Join(a.srvDir, fileAdminCreds)}, "endpoint", "create", "alice.dev.nk", "--public-key", wpub, "--out", filepath.Join(s.work, "nk.join"), "--detail")
+	s.ctl("ctl-keys-dir-is-creds", ha, []string{"MASH_KEYS_DIR=" + filepath.Join(a.srvDir, "creds")}, "endpoint", "create", "alice.dev.nk2", "--public-key", wpub, "--out", filepath.Join(s.work, "nk2.join"), "--detail")
+	s.ctl("ctl-bad-server", ha, []string{"MASH_SERVER=tls://127.0.0.1:1", "MASH_OPEN_TIMEOUT=2s"}, "endpoint", "list", "--detail", "--json")
+	s.ctl("ctl-wrong-ca", ha, []string{"MASH_CA=" + filepath.Join(a.srvDir, "server.pem")}, "status", "--detail")
 
 	n := 0
 	var crashes []string

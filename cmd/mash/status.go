@@ -84,7 +84,35 @@ type sessionSvc struct {
 }
 
 func (s sessionSvc) Health(ctx context.Context) (cmds.HealthReport, error) {
-	return (&healthSvc{cfg: s.src.cfg, cfgErr: s.src.cfgErr, session: true, mailHeld: s.src.mailHeld, lease: s.src.lease}).Health(ctx)
+	rep, err := (&healthSvc{cfg: s.src.cfg, cfgErr: s.src.cfgErr, session: true, mailHeld: s.src.mailHeld, lease: s.src.lease}).Health(ctx)
+	if err == nil {
+		rep.Session = s.src.sessionNow(rep.Lease == "")
+	}
+	return rep, err
+}
+
+// sessionNow is what status --detail says about this session: whether it holds its endpoint, what the hook detector
+// has seen (ran when no hook is known to have failed to run), and whether its mail folder works.
+func (s *statusSource) sessionNow(noLease bool) *cmds.SessionState {
+	st := &cmds.SessionState{HoldsEndpoint: false, Hooks: cmds.HooksRan, Storage: cmds.StorageOK}
+	if s.state == nil {
+		return st
+	}
+	cur := s.state.Load()
+	if cur == nil || cur.ep == nil {
+		return st
+	}
+	st.HoldsEndpoint = noLease
+	switch h, _ := cur.ep.Hookless(); h {
+	case endpoint.HooklessProven:
+		st.Hooks = cmds.HooksNotRun
+	case endpoint.HooklessSuspected:
+		st.Hooks = cmds.HooksSuspected
+	}
+	if s.mailHeld() {
+		st.Storage = cmds.StorageFailing
+	}
+	return st
 }
 
 // infoTools are the tools every serve mode has, because they need no endpoint: version, status and doctor. They are

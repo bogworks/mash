@@ -100,7 +100,29 @@ type HealthReport struct {
 	// (LeaseCause says why, for the last). A session that does not hold its endpoint is not online and not ready.
 	Lease      string
 	LeaseCause string
+	// Session is what a session says about itself for status's detail; nil at a shell.
+	Session *SessionState
 }
+
+// SessionState is what the session says about itself: whether it holds its endpoint, whether the agent host's hooks
+// have delivered mail in it (the Hooks words), and whether its mail folder works (Storage).
+type SessionState struct {
+	HoldsEndpoint bool   `json:"holds_endpoint"`
+	Hooks         string `json:"hooks"`
+	Storage       string `json:"storage"`
+}
+
+// The words of SessionState.Hooks and SessionState.Storage, and of status's reason_code.
+const (
+	HooksRan       = "ran"
+	HooksNotRun    = "not_run"
+	HooksSuspected = "suspected"
+	HooksDegraded  = "degraded"
+	HooksRefused   = "refused"
+
+	StorageOK      = "ok"
+	StorageFailing = "failing"
+)
 
 // Health is the service status and doctor need from Env.Svc. It returns config.SeveralEndpointsError (wrapped or not)
 // when no endpoint is chosen and several are installed, and ErrNoEndpointInstalled when none is chosen and none is
@@ -145,6 +167,68 @@ type StatusResult struct {
 	Ready    bool    `json:"ready"`
 	Online   bool    `json:"online"`
 	Reason   *string `json:"reason"`
+
+	// The fuller answer (DetailValue): not part of the usual object.
+	reasonCode string
+	session    *SessionState
+}
+
+// StatusDetail is status's fuller object: the usual four things, then reason_code and session. reason_code is a fixed
+// word beside the free-text reason, null when ready. session is null at a shell.
+type StatusDetail struct {
+	Endpoint   *string       `json:"endpoint"`
+	Ready      bool          `json:"ready"`
+	Online     bool          `json:"online"`
+	Reason     *string       `json:"reason"`
+	ReasonCode *string       `json:"reason_code"`
+	Session    *SessionState `json:"session"`
+}
+
+// DetailValue is the fuller object, which contains the usual one.
+func (r StatusResult) DetailValue() any {
+	return StatusDetail{r.Endpoint, r.Ready, r.Online, r.Reason, strPtr(r.reasonCode), r.session}
+}
+
+// DetailText is the session's state as 'label: value' lines, or "session: none" at a shell.
+func (r StatusResult) DetailText(cmdcore.Opts) string {
+	if r.session == nil {
+		return "session:        none"
+	}
+	yn := map[bool]string{true: "yes", false: "no"}
+	return fmt.Sprintf("holds endpoint: %s\nhooks:          %s\nstorage:        %s", yn[r.session.HoldsEndpoint], r.session.Hooks, r.session.Storage)
+}
+
+// reasonCodeOf is the fixed word for the check (or session state) that made status say not ready.
+func reasonCodeOf(check, reason string) string {
+	switch check {
+	case CheckConfig:
+		switch {
+		case reason == ReasonNoSessionEndpoint || strings.Contains(reason, "no endpoint"):
+			return "no_endpoint"
+		case strings.Contains(reason, "more than one endpoint"):
+			return "endpoints_ambiguous"
+		}
+		return "config_unreadable"
+	case CheckCreds:
+		return "creds_missing"
+	case CheckServer:
+		switch {
+		case strings.Contains(reason, "not trusted"):
+			return "server_untrusted"
+		case strings.Contains(reason, "did not offer TLS"):
+			return "server_no_tls"
+		}
+		return "server_unreachable"
+	case CheckSignIn:
+		switch {
+		case strings.Contains(reason, "refused"):
+			return "creds_refused"
+		case strings.Contains(reason, "does not exist") || strings.Contains(reason, "deleted"):
+			return "endpoint_deleted"
+		}
+		return "server_unreachable"
+	}
+	return ""
 }
 
 // noSessionEndpoint is the answer of a session that names no endpoint.
@@ -219,7 +303,7 @@ var Status = cmdcore.Command[StatusParams, StatusResult]{
 		if err != nil {
 			return StatusResult{}, err
 		}
-		r := StatusResult{Endpoint: strPtr(rep.Endpoint), Ready: true}
+		r := StatusResult{Endpoint: strPtr(rep.Endpoint), Ready: true, session: rep.Session}
 		for _, c := range rep.Checks {
 			if c.State == CheckFail && statusChecks(c.Name) {
 				reason := c.Reason
@@ -227,16 +311,18 @@ var Status = cmdcore.Command[StatusParams, StatusResult]{
 					reason = c.Detail
 				}
 				r.Ready, r.Reason = false, &reason
+				r.reasonCode = reasonCodeOf(c.Name, reason)
 				break
 			}
 		}
 		// a row that fails is the first thing to mend and is what both doors say; the session's own state comes next
 		if reason := leaseReason(rep.Lease, rep.LeaseCause); r.Ready && reason != "" {
 			r.Ready, r.Reason = false, &reason
+			r.reasonCode = map[string]string{LeaseOther: "endpoint_held_elsewhere", LeaseLost: "endpoint_lost", LeaseFailed: "endpoint_not_taken"}[rep.Lease]
 		}
 		if r.Ready && rep.MailHeld {
 			reason := ReasonMailHeld
-			r.Ready, r.Reason = false, &reason
+			r.Ready, r.Reason, r.reasonCode = false, &reason, "storage_unwritable"
 		}
 		r.Online = r.Ready && rep.Online
 		return r, nil

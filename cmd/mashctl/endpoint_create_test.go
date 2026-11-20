@@ -228,7 +228,7 @@ func TestEndpointCreateDefaultInstalls(t *testing.T) {
 		t.Errorf("json %d %q", code, so)
 	}
 	// --verbose
-	so, _, code = h.run("endpoint", "create", ad("same3").String(), "--verbose")
+	so, _, code = h.run("endpoint", "create", ad("same3").String(), "--detail")
 	lines := strings.Split(strings.TrimRight(so, "\n"), "\n")
 	rec, _ := h.record(ad("same3"))
 	if code != 0 || len(lines) != 4 || lines[0] != "Created endpoint "+ad("same3").String() || lines[1] != "servers: "+h.env["MASH_SERVER"] ||
@@ -302,7 +302,7 @@ func TestEndpointCreateOut(t *testing.T) {
 		t.Errorf("json %d %q", code, so)
 	}
 	jf3 := filepath.Join(out, "far4.join")
-	so, _, code = h.run("endpoint", "create", ad("far4").String(), "--out", jf3, "-v")
+	so, _, code = h.run("endpoint", "create", ad("far4").String(), "--out", jf3, "--detail")
 	if code != 0 || !strings.Contains(so, "\nservers: "+h.env["MASH_SERVER"]+"\njoin file: "+jf3+"\npublic key: U") {
 		t.Errorf("verbose %d %q", code, so)
 	}

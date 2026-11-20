@@ -26,7 +26,7 @@ func TestSendCommandBothForms(t *testing.T) {
 	if code != 0 || errb != "" || out != `{"to":"o.dev.a","number":1,"kind":"task","urgent":false,"duplicate":false,"retagged":false}`+"\n" {
 		t.Fatalf("--json: %d %q %q", code, out, errb)
 	}
-	out, _, code = runSplit(t, w, "b", "send", tTo("a"), "--kind", "fyi", "--urgent", "second", "-v")
+	out, _, code = runSplit(t, w, "b", "send", tTo("a"), "--kind", "fyi", "--urgent", "second", "--detail")
 	if code != 0 || out != "Urgent fyi mail sent (number 2).\nto:      o.dev.a\nkind:    fyi\nurgent:  yes\n" {
 		t.Fatalf("-v: %d %q", code, out)
 	}

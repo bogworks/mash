@@ -54,7 +54,7 @@ func CLIWith[P any, R Result](c Command[P, R], env EnvFunc, frame Frame) CLIFunc
 			return cliframe.Report(stdout, stderr, errNoEnv(c.Name), g.JSON)
 		}
 		tty := isTTY(stdout)
-		e.Opts = Opts{Verbose: g.Verbose, NoColor: g.NoColor || os.Getenv("NO_COLOR") != "", TTY: tty,
+		e.Opts = Opts{Detail: g.Detail, NoColor: g.NoColor || os.Getenv("NO_COLOR") != "", TTY: tty,
 			Width: render.Width(os.Getenv, tty)}
 		e.Stdin, e.StdinPiped = stdin, piped(stdin)
 		r, err := c.Run(ctx, e, p)
@@ -65,15 +65,29 @@ func CLIWith[P any, R Result](c Command[P, R], env EnvFunc, frame Frame) CLIFunc
 		if x, ok := any(r).(ExitCoder); ok {
 			code = x.ExitCode()
 		}
+		var detail Detailer
+		if g.Detail {
+			detail, _ = any(r).(Detailer)
+		}
 		if g.JSON {
-			b, err := marshal(r)
+			var v any = r
+			if detail != nil {
+				v = detail.DetailValue()
+			}
+			b, err := marshal(v)
 			if err != nil {
 				return cliframe.Report(stdout, stderr, err, g.JSON)
 			}
 			fmt.Fprintf(stdout, "%s\n", b)
 			return code
 		}
-		fmt.Fprintf(stdout, "%s\n", r.Text(e.Opts))
+		out := r.Text(e.Opts)
+		if detail != nil {
+			if more := detail.DetailText(e.Opts); more != "" {
+				out += "\n" + more
+			}
+		}
+		fmt.Fprintf(stdout, "%s\n", out)
 		if h, ok := any(r).(Hinter); ok && h.Hint() != "" {
 			fmt.Fprintf(stderr, "hint: %s\n", h.Hint())
 		}

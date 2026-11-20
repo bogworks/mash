@@ -4,6 +4,7 @@
    "name": "send",
    "description": "Send mail to another endpoint by its address, owner.group.name. Choose the kind for what you need from the recipient: blocker (you cannot continue without them), question (you need an answer) and task (you are asking them to do something; the default) wake an idle recipient; result (the outcome of something they asked for) and fyi (information, no answer needed) wait for their next turn. Use urgent only for what cannot wait: it interrupts. When you answer a message, set reply_to to its number so the recipient sees which one. When you pass a message on, set relay to its number. Do not send a reply that only acknowledges. A reply marked question that asks nothing is sent as fyi. Use id when you retry after a timeout, so the message is not delivered twice.",
    "command": "mash send",
+   "structured_detail": null,
    "release": "0.5.6",
    "params": [
     {
@@ -103,6 +104,7 @@
    "name": "inbox",
    "description": "List the messages this endpoint has received.",
    "command": "mash inbox",
+   "structured_detail": null,
    "release": "0.5.6",
    "params": [
     {
@@ -167,6 +169,7 @@
    "name": "read",
    "description": "Show one message in full.",
    "command": "mash read",
+   "structured_detail": null,
    "release": "0.5.6",
    "params": [
     {
@@ -214,6 +217,7 @@
    "name": "who",
    "description": "List the endpoints you can see, and which are online.",
    "command": "mash who",
+   "structured_detail": null,
    "release": "0.5.6",
    "params": [
     {
@@ -297,12 +301,31 @@
    "name": "status",
    "description": "Say in one line whether mail works for this endpoint, and whether it is online.",
    "command": "mash status",
+   "structured_detail": {
+    "endpoint": "acme.demo.bob",
+    "ready": true,
+    "online": true,
+    "reason": null,
+    "reason_code": null,
+    "session": {
+     "holds_endpoint": true,
+     "hooks": "ran",
+     "storage": "ok"
+    }
+   },
    "release": "0.5.6",
-   "params": [],
+   "params": [
+    {
+     "name": "detail",
+     "type": "boolean",
+     "required": false,
+     "description": "Return the fuller object. Default false: the usual, minimal one."
+    }
+   ],
    "structured": {
     "endpoint": "acme.demo.bob",
     "ready": true,
-    "online": false,
+    "online": true,
     "reason": null
    },
    "text": [
@@ -374,6 +397,7 @@
    "name": "doctor",
    "description": "Check everything mail depends on for this endpoint, and say how to fix what is wrong. Changes nothing.",
    "command": "mash doctor",
+   "structured_detail": null,
    "release": "0.5.6",
    "params": [
     {
@@ -453,11 +477,12 @@
    "name": "version",
    "description": "Print the version.",
    "command": "mash version",
+   "structured_detail": null,
    "release": "0.5.6",
    "params": [],
    "structured": {
     "version": "0.5.6",
-    "commit": "3f9a41c",
+    "commit": "3f9a41c2e0b7d5a1c4e08b2d77f3a95e1b6c4098",
     "plugin": "0.5.6"
    },
    "text": [

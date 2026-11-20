@@ -43,10 +43,10 @@ func TestEndpointDeleteRemovesRecordRenamesCredsRevokesKey(t *testing.T) {
 	h.seed(ad("c"))
 	_, user := h.credsClaims(ad("c"))
 	h.seed(ad("d"))
-	if so, _, code := h.run("endpoint", "delete", "o.g.d", "--yes", "--json", "--verbose"); code != 0 || !strings.Contains(so, `"deleted": true`) {
+	if so, _, code := h.run("endpoint", "delete", "o.g.d", "--yes", "--json", "--detail"); code != 0 || !strings.Contains(so, `"deleted": true`) {
 		t.Errorf("delete json %d %q", code, so)
 	}
-	out, errb, code := h.run("endpoint", "delete", "o.g.c", "--yes", "--verbose")
+	out, errb, code := h.run("endpoint", "delete", "o.g.c", "--yes", "--detail")
 	if code != 0 || !strings.HasPrefix(out, "Deleted endpoint o.g.c\n") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}

@@ -300,7 +300,7 @@ func TestJoinJSON(t *testing.T) {
 
 func TestJoinVerbose(t *testing.T) {
 	w := newJoinWorld(t)
-	r := w.run("join", "acme.demo.bob.join", "--verbose")
+	r := w.run("join", "acme.demo.bob.join", "--detail")
 	if r.code != 0 || r.out != "Joined as acme.demo.bob.\nservers: tls://myserver:4222\ncreds: ~/.config/mash/acme.demo.bob.creds\n" {
 		t.Errorf("%+v", r)
 	}
@@ -498,8 +498,8 @@ func TestJoinNeverPrintsSecrets(t *testing.T) {
 		{"join", "acme.demo.bob.join"},
 		{"join", "acme.demo.bob.join"},
 		{"join", "acme.demo.bob.join", "--json", "--replace"},
-		{"join", "acme.demo.bob.join", "--verbose", "--replace"},
-		{"join", "acme.demo.bob.join", "--dry-run", "--verbose", "--json"},
+		{"join", "acme.demo.bob.join", "--detail", "--replace"},
+		{"join", "acme.demo.bob.join", "--dry-run", "--detail", "--json"},
 		{"join", "acme.demo.bob.join", "--help"},
 	} {
 		r := w.run(args...)

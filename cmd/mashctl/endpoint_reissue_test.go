@@ -115,7 +115,7 @@ func TestEndpointReissueInstalledHere(t *testing.T) {
 	if json.Unmarshal([]byte(so), &doc) != nil || !sameKeys(doc, []string{"address", "join_file"}) || doc["join_file"] != nil {
 		t.Errorf("json %q", so)
 	}
-	so, _, _ = h.run("endpoint", "reissue", a.String(), "--verbose")
+	so, _, _ = h.run("endpoint", "reissue", a.String(), "--detail")
 	if so != "Reissued credentials for "+a.String()+"\nservers acknowledged: 3\n" {
 		t.Errorf("verbose %q", so)
 	}

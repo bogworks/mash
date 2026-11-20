@@ -41,7 +41,7 @@ var helpFrame = cmdcore.Frame{Tool: "mash", Globals: []cmdcore.HelpOption{
 	{Flag: "--server", Value: "url", Desc: "The server address. May be given more than once."},
 	{Flag: "--ca", Value: "path", Desc: "The certificate authority's certificate, when the server uses its own."},
 	{Flag: "--config-dir", Value: "path", Desc: "The configuration folder. Default: ~/.config/mash."},
-	{Flag: "--verbose", Short: "-v", Desc: "After the usual output, print more about what was done, as 'label: value' lines."},
+	{Flag: cliframe.DetailFlag, Desc: "Print the fuller answer: after the usual line, more as 'label: value' lines; with --json, the fuller object."},
 	{Flag: "--json", Desc: "Print the result as JSON: the same object the matching MCP tool returns."},
 	{Flag: "--no-color", Desc: "Never use color. Color is used only on a terminal, and NO_COLOR is honored."},
 	{Flag: "--help", Short: "-h", Desc: "Show help for the command."},

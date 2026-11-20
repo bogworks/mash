@@ -97,7 +97,7 @@ func TestNaming21_TokensShownByteIdentical(t *testing.T) {
 	}
 
 	// send prints the recipient; the wake carries the sender.
-	sent := cliAs(t, peerEnv, "send", me.String(), "naming21 payload", "-v") // -v names the recipient
+	sent := cliAs(t, peerEnv, "send", me.String(), "naming21 payload", "--detail") // -v names the recipient
 	assertShows(t, "send", sent, me)
 	wake := content(ns.await(t, 15*time.Second, isChannel))
 	if wake != "1 message from "+peer.String()+" (task)" {

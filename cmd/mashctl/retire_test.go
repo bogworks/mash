@@ -43,7 +43,7 @@ func TestRetireRenamesCredsByDefault(t *testing.T) {
 	h := newFleetEnv(t)
 	h.seed(ad("c"))
 	want, _ := os.ReadFile(h.creds(ad("c")))
-	out, errb, code := h.run("endpoint", "delete", "o.g.c", "--yes", "--verbose")
+	out, errb, code := h.run("endpoint", "delete", "o.g.c", "--yes", "--detail")
 	if code != 0 {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}

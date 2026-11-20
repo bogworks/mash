@@ -53,7 +53,7 @@ func (r JoinResult) Text(o cmdcore.Opts) string {
 	if r.DryRun {
 		s = "Would join as " + r.Endpoint + "."
 	}
-	if o.Verbose {
+	if o.Detail {
 		s += "\nservers: " + strings.Join(r.Servers, ", ") + "\ncreds: " + r.Creds
 	}
 	return s

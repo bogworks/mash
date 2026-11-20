@@ -139,7 +139,7 @@ On a machine that runs `mashctl`, `mashctl init --config FILE` writes `servers`,
 
 The environment wins over the file.
 
-**Global flags.** `mash` and `mashctl` accept `--endpoint ADDR`, `--creds`, `--server` (repeatable), `--ca`, `--config-dir`, `--verbose`/`-v`, `--json` and `--no-color` anywhere in the command line. A setting comes from the flag first, then the environment, then `config.json`.
+**Global flags.** `mash` and `mashctl` accept `--endpoint ADDR`, `--creds`, `--server` (repeatable), `--ca`, `--config-dir`, `--detail`, `--json` and `--no-color` anywhere in the command line. A setting comes from the flag first, then the environment, then `config.json`.
 
 **Installing an endpoint.** `mash join FILE` installs the endpoint a join file describes. It writes `<address>.creds` (mode 0600) into the config directory, the server addresses into `servers` in `config.json`, and, when the server uses its own certificate authority, the certificate as `ca.pem` in the same directory with `ca` pointing at it. It needs no endpoint and no server. When the join file was made for a public key you supplied (`mash key create`), add `--key` with your seed file. One config directory serves one mesh: a join file for other servers is refused and `--config-dir` names another directory. `--replace` overwrites an installed endpoint, and `--dry-run` writes nothing.
 

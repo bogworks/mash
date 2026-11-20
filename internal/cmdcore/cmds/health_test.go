@@ -105,13 +105,28 @@ func TestStatusMatchesSpec(t *testing.T) {
 	if cmds.Status.Group != meta["x-group"] {
 		t.Errorf("group %q, spec %v", cmds.Status.Group, meta["x-group"])
 	}
-	if props := cmdcore.Schema[cmds.StatusParams]()["properties"].(map[string]any); len(props) != 0 || len(specTool(t, "status")["params"].([]any)) != 0 {
-		t.Errorf("status takes no parameters: %v", props)
+	// the one parameter is detail, which the tool takes because status has a fuller answer
+	sp := specTool(t, "status")["params"].([]any)
+	if len(sp) != 1 || sp[0].(map[string]any)["name"] != cliframe.DetailParam || sp[0].(map[string]any)["description"] != cmdcore.DetailParamDescription {
+		t.Errorf("spec params %v", sp)
+	}
+	tp := cmdcore.MCPTool(cmds.Status, nil).Schema["properties"].(map[string]any)
+	if d, _ := tp[cliframe.DetailParam].(map[string]any); len(tp) != 1 || d["type"] != "boolean" || d["description"] != sp[0].(map[string]any)["description"] {
+		t.Errorf("status tool params: %v", tp)
 	}
 	// the object
-	st := runStatusObject(t, report("acme.demo.bob", false, ok("config", ""), ok("creds", ""), ok("server", "tls://myserver:4222"), ok("sign-in", "")))
+	st := runStatusObject(t, report("acme.demo.bob", true, ok("config", ""), ok("creds", ""), ok("server", "tls://myserver:4222"), ok("sign-in", "")))
 	if !sameJSON(t, st, string(mustJSON(meta["x-json"]))) || !sameJSON(t, st, string(mustJSON(specTool(t, "status")["structured"]))) {
 		t.Errorf("object %s, spec %v", st, meta["x-json"])
+	}
+	// the fuller object contains the usual one, and is the specification's
+	inSession := func() *fakeHealth {
+		f := report("acme.demo.bob", true, ok("config", ""), ok("creds", ""), ok("server", "tls://myserver:4222"), ok("sign-in", ""))
+		f.rep.Session = &cmds.SessionState{HoldsEndpoint: true, Hooks: cmds.HooksRan, Storage: cmds.StorageOK}
+		return f
+	}
+	if _, js, _ := runStatus(inSession(), cliframe.Global{JSON: true, Detail: true}); !sameJSON(t, js+"\n", string(mustJSON(specTool(t, "status")["structured_detail"]))) || !sameJSON(t, js+"\n", string(mustJSON(meta["x-json-detail"]))) {
+		t.Errorf("fuller object %s", js)
 	}
 	fails := map[string]*fakeHealth{
 		"Not working (the first line on stdout, the hint on stderr)": report("acme.demo.bob", false, ok("config", ""), ok("creds", ""), ok("server", "tls://myserver:4222"),
@@ -132,6 +147,10 @@ func TestStatusMatchesSpec(t *testing.T) {
 			code, out, errs = runStatus(report("acme.demo.bob", false, ok("config", ""), ok("sign-in", "")), cliframe.Global{})
 		case "Working, an agent session is holding it open":
 			code, out, errs = runStatus(report("acme.demo.bob", true, ok("config", ""), ok("sign-in", "")), cliframe.Global{})
+		case "With --detail, inside a session":
+			code, out, errs = runStatus(inSession(), cliframe.Global{Detail: true})
+		case "With --detail, at a shell with no session":
+			code, out, errs = runStatus(report("acme.demo.bob", false, ok("config", ""), ok("sign-in", "")), cliframe.Global{Detail: true})
 		case "In a session that cannot store arriving mail on this machine":
 			held := &fakeHealth{rep: cmds.HealthReport{Endpoint: "acme.demo.bob", MailHeld: true, Checks: []cmds.HealthCheck{ok("config", ""), ok("sign-in", "")}}}
 			code, out, errs = runStatus(held, cliframe.Global{})
@@ -602,5 +621,21 @@ func TestDoctorToolStrictMarksTheResultAnError(t *testing.T) {
 	}
 	if _, _, err := tool.CallStructured(context.Background(), json.RawMessage(`{"strict":false}`)); err != nil {
 		t.Errorf("strict false: %v", err)
+	}
+}
+
+func TestStatusDetailReasonCode(t *testing.T) {
+	f := report("acme.demo.bob", false, ok("config", ""), ok("creds", ""), ok("server", "tls://myserver:4222"),
+		cmds.HealthCheck{Name: "sign-in", State: cmds.CheckFail, Detail: "the server refused these credentials", Reason: "the server refused its credentials"})
+	_, js, _ := runStatus(f, cliframe.Global{JSON: true, Detail: true})
+	if !strings.Contains(js, `"reason_code":"creds_refused"`) || !strings.Contains(js, `"session":null`) {
+		t.Errorf("%s", js)
+	}
+	if _, usual, _ := runStatus(f, cliframe.Global{JSON: true}); strings.Contains(usual, "reason_code") {
+		t.Errorf("usual object has reason_code: %s", usual)
+	}
+	lr := leaseReport(cmds.LeaseLost, "")
+	if _, js, _ = runStatus(lr, cliframe.Global{JSON: true, Detail: true}); !strings.Contains(js, `"reason_code":"endpoint_lost"`) {
+		t.Errorf("%s", js)
 	}
 }

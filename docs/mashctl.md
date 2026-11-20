@@ -38,7 +38,7 @@ mashctl limits apply [prefix] [--dry-run]
 
 `status` prints one line per configured server: `tls://host:4222: ok, 3 endpoints, 1 online`, or `tls://host:4222: not ok: the server did not answer`. It exits 1 when any server is not ok, and then prints `hint: mashctl doctor` on stderr. `--json` prints `{"server", "ok", "endpoints", "online", "reason"}` for one server, and `{"servers": [...]}` for several.
 
-`limits show` prints the inbox size and age limits in force (`inbox size:  16 MiB`, `inbox age:   30 days`; `--json`: `{"inbox_bytes", "inbox_age"}`). `limits apply` raises existing inboxes to the limits in `config.json` and never lowers one: it prints `Raised 2 inboxes` or `Nothing to raise`, and `--verbose` adds a line for each inbox. Its prefix is an owner (`acme`), an owner and group (`acme.demo`), or one address; the default is every inbox. See [Changing limits later](operations.md#changing-limits-later).
+`limits show` prints the inbox size and age limits in force (`inbox size:  16 MiB`, `inbox age:   30 days`; `--json`: `{"inbox_bytes", "inbox_age"}`). `limits apply` raises existing inboxes to the limits in `config.json` and never lowers one: it prints `Raised 2 inboxes` or `Nothing to raise`, and `--detail` adds a line for each inbox. Its prefix is an owner (`acme`), an owner and group (`acme.demo`), or one address; the default is every inbox. See [Changing limits later](operations.md#changing-limits-later).
 
 ## The issue record
 
@@ -163,7 +163,7 @@ Created endpoint alice.dev.design
 Join file: alice.dev.design.join
 ```
 
-With `--verbose` the lines `servers: ...`, `credentials file: PATH` (or `join file: PATH`) and `public key: KEY` follow. With `--dry-run` it prints one line, and with `--json` the same object plus `"dry_run": true`:
+With `--detail` the lines `servers: ...`, `credentials file: PATH` (or `join file: PATH`) and `public key: KEY` follow. With `--dry-run` it prints one line, and with `--json` the same object plus `"dry_run": true`:
 
 ```text
 Would create endpoint alice.dev.design
@@ -192,7 +192,7 @@ Gives an existing endpoint new credentials and cancels the old ones. It revokes 
 
 With no option the new key pair is made on this host and `<config dir>/<address>.creds` is replaced. With `--out PATH` the command writes a join file for another machine and installs nothing here. With `--out PATH --public-key PATH` it signs the endpoint's new public key and the join file holds the user JWT. `--public-key` needs `--out`.
 
-On success it prints `Reissued credentials for alice.dev.design`, then `Join file: PATH` with `--out`. With `--verbose` it adds the line `servers acknowledged: N`. With `--dry-run` it prints `Would reissue credentials for alice.dev.design`, and with `--json` the same object plus `"dry_run": true`. If the join file cannot be written after the key changed, the hint is `remove PATH or choose another --out`. With `--json` it prints `{"address": "alice.dev.design", "join_file": null}`; with `--out` `join_file` is the path. There is no bulk form: reissue takes one address.
+On success it prints `Reissued credentials for alice.dev.design`, then `Join file: PATH` with `--out`. With `--detail` it adds the line `servers acknowledged: N`. With `--dry-run` it prints `Would reissue credentials for alice.dev.design`, and with `--json` the same object plus `"dry_run": true`. If the join file cannot be written after the key changed, the hint is `remove PATH or choose another --out`. With `--json` it prints `{"address": "alice.dev.design", "join_file": null}`; with `--out` `join_file` is the path. There is no bulk form: reissue takes one address.
 
 `--public-key` naming the key the endpoint already has is refused: nothing would be rotated. Make a new key with `mash key create --out NAME.seed`. The one exception is a rerun after a killed `--public-key` reissue: the command leaves `<PATH>.pending` while the key changes, and a rerun with the same key and `--out` finishes the join file and removes the file.
 
@@ -215,7 +215,7 @@ Deletes an endpoint, its inbox and its credentials. The address can never be use
 3. burns the address: it is never assigned again, to any key;
 4. renames the creds file, if one is in the config directories, to `<address>.creds.deleted` (`.deleted.1`, `.deleted.2` and so on if that name is taken; nothing is overwritten). The file is no longer counted as an installed endpoint.
 
-On success it prints `Deleted endpoint <address>`; `--verbose` adds `retired marker: written`, `servers acknowledged: N` and `credentials file: set aside as <path>`. `--dry-run` prints `Would delete endpoint <address> and the N messages in its inbox`, asks nothing and changes nothing. `--json` prints `{"address", "deleted", "messages_deleted"}`, and with `--dry-run` the same object plus `"dry_run": true`; a failure prints `{"error", "hint"}`. An address that does not exist is `error: <address> does not exist`, exit 1. A killed run finishes when you run the same command again. Exit codes: 0 deleted, 1 refused, partial or error, 2 usage error. After a partial delete the message is `error: deleted <address>, but <what is left>` with `hint: mashctl endpoint delete <address>`; running the same command again is safe and finishes it. The options `--force`, `--delete-creds` and `--no-revoke` no longer exist.
+On success it prints `Deleted endpoint <address>`; `--detail` adds `retired marker: written`, `servers acknowledged: N` and `credentials file: set aside as <path>`. `--dry-run` prints `Would delete endpoint <address> and the N messages in its inbox`, asks nothing and changes nothing. `--json` prints `{"address", "deleted", "messages_deleted"}`, and with `--dry-run` the same object plus `"dry_run": true`; a failure prints `{"error", "hint"}`. An address that does not exist is `error: <address> does not exist`, exit 1. A killed run finishes when you run the same command again. Exit codes: 0 deleted, 1 refused, partial or error, 2 usage error. After a partial delete the message is `error: deleted <address>, but <what is left>` with `hint: mashctl endpoint delete <address>`; running the same command again is safe and finishes it. The options `--force`, `--delete-creds` and `--no-revoke` no longer exist.
 
 ## mashctl endpoint list and show
 

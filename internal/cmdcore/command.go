@@ -32,6 +32,16 @@ type ExitCoder interface {
 	ExitCode() int
 }
 
+// Detailer is implemented by a result that has more to say under the global detail option (cliframe.DetailFlag). In text
+// the command line and the MCP tool print Text and then DetailText, the 'label: value' lines; with --json they print
+// DetailValue, a fuller object that contains the usual one, in place of the result. A command whose result has no
+// Detailer has nothing more to say, and the option changes nothing (a Text may still read Opts.Detail on its own). An
+// MCP tool whose result is a Detailer takes the boolean param cliframe.DetailParam.
+type Detailer interface {
+	DetailText(o Opts) string
+	DetailValue() any
+}
+
 // Hinter is implemented by a result that carries a hint for a person: the command line prints it as "hint: HINT" on
 // standard error (never with --json, whose object is the whole answer), and an MCP tool, which has no standard error,
 // ends its text with the same line. An empty hint is no hint.
