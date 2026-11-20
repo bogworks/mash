@@ -136,8 +136,8 @@ marker_get() { # KEY: string value from mash-setup.json (one key per line)
 }
 
 proc_alive() {
-    [ -d "/proc/$1" ] || return 1
-    ! grep -q '^State:[[:space:]]*Z' "/proc/$1/status" 2>/dev/null
+    _st=$(sed -n 's/^State:[[:space:]]*\(.\).*/\1/p' "/proc/$1/status" 2>/dev/null)
+    [ -n "$_st" ] && [ "$_st" != Z ] && [ "$_st" != X ]
 }
 # proc_ours PID: running nats-server whose arguments name this DIR's server.conf
 proc_ours() {
@@ -236,7 +236,7 @@ start_server() { # needs PORT
     if proc_alive "$SPID" && listening && verify; then return 0; fi
     echo "error: the server did not come up; last log lines:" >&2
     tail -n 5 "$DIR/server.log" 2>/dev/null |
-        grep -Ev 'S[OANUCX][A-Z2-7]{50,}|eyJ[A-Za-z0-9_-]{20,}|-----' |
+        tr -d '\000' | grep -Eva 'S[OANUCX][A-Z2-7]{50,}|eyJ[A-Za-z0-9_-]{20,}|-----' |
         cut -c1-200 | sed 's/^/  /' >&2 || true
     if proc_ours "$SPID"; then kill -TERM "$SPID" 2>/dev/null || true; rm -f "$DIR/server.pid"; fi
     SAID=1
