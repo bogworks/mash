@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nkeys"
@@ -71,8 +73,7 @@ func readJoinFile(path string) (joinfile.File, error) {
 		return zero, notJoinFile(path)
 	}
 	if j.CA != nil {
-		blk, _ := pem.Decode([]byte(*j.CA))
-		if blk == nil || blk.Type != "CERTIFICATE" {
+		if _, _, err := certsIn([]byte(*j.CA)); err != nil {
 			return zero, notJoinFile(path)
 		}
 	}
@@ -123,7 +124,8 @@ func credsText(j joinfile.File, req cmds.JoinRequest) ([]byte, error) {
 			return nil, notJoinFile(req.File)
 		}
 		pub, _ := kp.PublicKey()
-		if c, err := jwt.DecodeUserClaims(token); err != nil || c.Subject != pub {
+		// the JWT's name is the endpoint it was issued for: it must be the address the join file says
+		if c, err := jwt.DecodeUserClaims(token); err != nil || c.Subject != pub || c.Name != j.Address {
 			return nil, notJoinFile(req.File)
 		}
 		text := j.Creds
@@ -133,7 +135,7 @@ func credsText(j joinfile.File, req cmds.JoinRequest) ([]byte, error) {
 		return []byte(text), nil
 	}
 	claims, err := jwt.DecodeUserClaims(j.UserJWT)
-	if err != nil {
+	if err != nil || claims.Name != j.Address {
 		return nil, notJoinFile(req.File)
 	}
 	if req.Key == "" {
@@ -191,9 +193,86 @@ func (s joinSvc) shown(path string) string {
 	return config.TildeIn(path, strings.TrimRight(s.home, "/"))
 }
 
-// Join installs the join file into the configuration folder. Everything is checked before anything is written; the
-// files are then written whole to temporary files and renamed, the creds file last, so a run that stops part-way leaves
-// no half-written file and no creds file, and is safe to run again.
+// certsIn parses a PEM text that must hold certificates and nothing else: every block a CERTIFICATE (no headers) that
+// x509 accepts, at least one, and only white space after the last. It returns the PEM re-encoded from the parsed blocks
+// (what is written as ca.pem) and the certificates' DER bytes, sorted, which is what two authorities are compared by.
+func certsIn(text []byte) (pemOut []byte, ders []string, err error) {
+	rest := text
+	for {
+		blk, r := pem.Decode(rest)
+		if blk == nil {
+			if len(bytes.TrimSpace(rest)) != 0 {
+				return nil, nil, errors.New("not only certificates")
+			}
+			break
+		}
+		if blk.Type != "CERTIFICATE" || len(blk.Headers) != 0 {
+			return nil, nil, errors.New("not only certificates")
+		}
+		if _, err := x509.ParseCertificate(blk.Bytes); err != nil {
+			return nil, nil, err
+		}
+		pemOut = append(pemOut, pem.EncodeToMemory(blk)...)
+		ders = append(ders, string(blk.Bytes))
+		rest = r
+	}
+	if len(ders) == 0 {
+		return nil, nil, errors.New("no certificate")
+	}
+	slices.Sort(ders)
+	return pemOut, slices.Compact(ders), nil
+}
+
+// folderCA is the certificate authority the configuration folder trusts: the file config.json's "ca" names (read
+// against the folder when relative), else ca.pem. have is false when the folder names none and has no ca.pem. ders is
+// nil when the file is there but holds no certificates, which no join file's authority equals.
+func (s joinSvc) folderCA(dir string, cfg map[string]json.RawMessage) (have bool, ders []string, err error) {
+	path := filepath.Join(dir, joinCAFile)
+	var named string
+	if json.Unmarshal(cfg["ca"], &named) == nil && named != "" {
+		path = named
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(dir, path)
+		}
+	}
+	raw, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) && named == "" {
+		return false, nil, nil
+	}
+	if err != nil {
+		return false, nil, cliframe.Failf("cannot read %s: %v", s.shown(path), errors.Unwrap(err))
+	}
+	_, ders, perr := certsIn(raw)
+	if perr != nil {
+		ders = nil
+	}
+	return true, ders, nil
+}
+
+// lockDir takes an exclusive advisory lock on the configuration folder itself, so two joins into one folder run one
+// after the other. The kernel drops it when the process ends, so there is no stale lock. unlock releases it.
+func lockDir(dir string) (unlock func(), err error) {
+	f, err := os.Open(dir)
+	if err != nil {
+		return nil, err
+	}
+	for {
+		err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX)
+		if !errors.Is(err, syscall.EINTR) {
+			break
+		}
+	}
+	if err != nil {
+		f.Close()
+		return nil, err
+	}
+	return func() { _ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN); f.Close() }, nil
+}
+
+// Join installs the join file into the configuration folder. Everything is checked before anything is written, under a
+// lock on the folder; the files are written whole to temporary files and renamed or linked into place, the creds file
+// first, then ca.pem, then config.json, so a run whose creds step fails has installed nothing, and a run that fails
+// later removes what it made.
 func (s joinSvc) Join(_ context.Context, req cmds.JoinRequest) (cmds.JoinOutcome, error) {
 	j, err := readJoinFile(req.File)
 	if err != nil {
@@ -211,12 +290,22 @@ func (s joinSvc) Join(_ context.Context, req cmds.JoinRequest) (cmds.JoinOutcome
 	if dir == "" {
 		return cmds.JoinOutcome{}, cliframe.Usagef("there is no configuration folder: HOME is not set").WithHint("mash join " + req.File + " --config-dir <folder>")
 	}
-	otherFolder := func(servers []string) error {
-		return cliframe.Failf("this configuration folder is set up for %s", config.Clean(strings.Join(servers, ", "))).
+	if !req.DryRun {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return cmds.JoinOutcome{}, cliframe.Failf("cannot make %s: %v", s.shown(dir), errors.Unwrap(err))
+		}
+		unlock, err := lockDir(dir)
+		if err != nil {
+			return cmds.JoinOutcome{}, cliframe.Failf("cannot lock %s: %v", s.shown(dir), errors.Unwrap(err))
+		}
+		defer unlock()
+	}
+	otherFolder := func(what string) error {
+		return cliframe.Failf("%s was set up with a different %s;\n       nothing was changed", s.shown(dir), what).
 			WithHint("mash join " + req.File + " --config-dir <another folder>")
 	}
 
-	// config.json: one folder serves one mesh.
+	// config.json: one folder serves one mesh and one certificate authority.
 	cfgPath := filepath.Join(dir, "config.json")
 	cfg := map[string]json.RawMessage{}
 	cfgMode := os.FileMode(0o600)
@@ -234,39 +323,38 @@ func (s joinSvc) Join(_ context.Context, req cmds.JoinRequest) (cmds.JoinOutcome
 	}
 	have := serversIn(cfg["servers"])
 	if len(have) > 0 && !sameServers(have, j.Servers) {
-		return cmds.JoinOutcome{}, otherFolder(have)
+		return cmds.JoinOutcome{}, otherFolder("server")
+	}
+
+	// The certificate authority: the folder's, if it has one, must be this join file's, whatever --replace says.
+	var caText []byte
+	var joinDers []string
+	if j.CA != nil {
+		if caText, joinDers, err = certsIn([]byte(*j.CA)); err != nil {
+			return cmds.JoinOutcome{}, notJoinFile(req.File)
+		}
+	}
+	haveCA, folderDers, err := s.folderCA(dir, cfg)
+	if err != nil {
+		return cmds.JoinOutcome{}, err
+	}
+	if haveCA && (j.CA == nil || !slices.Equal(folderDers, joinDers)) {
+		return cmds.JoinOutcome{}, otherFolder("ca")
 	}
 
 	address := j.Address
 	credsPath := filepath.Join(dir, address+".creds")
 	out := cmds.JoinOutcome{Endpoint: address, Servers: slices.Clone(j.Servers), Creds: s.shown(credsPath)}
-	if _, err := os.Lstat(credsPath); err == nil && !req.Replace {
+	_, lerr := os.Lstat(credsPath)
+	credsExist := lerr == nil
+	if credsExist && !req.Replace {
 		return cmds.JoinOutcome{}, cliframe.Failf("%s is already installed here", address).WithHint("mash join " + req.File + " --replace")
 	}
 
-	// The certificate authority.
+	// What else is written: --replace of installed creds replaces the creds and nothing else.
 	caPath := filepath.Join(dir, joinCAFile)
-	var caText []byte
-	writeCA := false
-	if j.CA != nil {
-		caText = []byte(*j.CA)
-		if !bytes.HasSuffix(caText, []byte("\n")) {
-			caText = append(caText, '\n')
-		}
-		old, err := os.ReadFile(caPath)
-		switch {
-		case err == nil && bytes.Equal(old, caText):
-		case err == nil && !req.Replace:
-			return cmds.JoinOutcome{}, cliframe.Failf("%s here is a different certificate authority than this join file's", s.shown(caPath)).
-				WithHint("mash join " + req.File + " --replace")
-		case err == nil || errors.Is(err, fs.ErrNotExist):
-			writeCA = true
-		default:
-			return cmds.JoinOutcome{}, cliframe.Failf("cannot read %s: %v", s.shown(caPath), errors.Unwrap(err))
-		}
-	}
-
-	// What config.json will say: the servers, and ca when none is set.
+	replacing := req.Replace && credsExist
+	writeCA := j.CA != nil && !haveCA && !replacing
 	newCfg := cloneConfig(cfg)
 	if len(have) == 0 {
 		b, _ := json.Marshal(j.Servers)
@@ -276,16 +364,13 @@ func (s joinSvc) Join(_ context.Context, req cmds.JoinRequest) (cmds.JoinOutcome
 		b, _ := json.Marshal(joinCAFile)
 		newCfg["ca"] = b
 	}
-	writeCfg := len(have) == 0 || len(cfg["ca"]) == 0 && j.CA != nil
+	writeCfg := !replacing && (len(have) == 0 || len(cfg["ca"]) == 0 && j.CA != nil)
 
 	if req.DryRun {
 		return out, nil
 	}
 
-	// Write: temporary files first, then the renames.
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return cmds.JoinOutcome{}, cliframe.Failf("cannot make %s: %v", s.shown(dir), errors.Unwrap(err))
-	}
+	// Write: temporary files first, then the creds, ca.pem and config.json into place, in that order.
 	var temps []string
 	defer func() {
 		for _, t := range temps {
@@ -339,23 +424,46 @@ func (s joinSvc) Join(_ context.Context, req cmds.JoinRequest) (cmds.JoinOutcome
 	if err != nil {
 		return fail(err)
 	}
-	if caTmp != "" {
-		if err := os.Rename(caTmp, caPath); err != nil {
+
+	// The creds first. A replaced creds file is kept under a temporary name until the run is whole, so a later failure
+	// can put it back.
+	var backup string
+	if replacing {
+		backup = filepath.Join(dir, ".join-backup-"+filepath.Base(credsTmp))
+		if err := os.Link(credsPath, backup); err != nil {
 			return fail(err)
 		}
-	}
-	if cfgTmp != "" {
-		if err := os.Rename(cfgTmp, cfgPath); err != nil {
-			return fail(err)
-		}
-	}
-	if req.Replace {
+		temps = append(temps, backup)
 		err = os.Rename(credsTmp, credsPath)
 	} else if err = os.Link(credsTmp, credsPath); errors.Is(err, fs.ErrExist) { // made since the check above
 		return cmds.JoinOutcome{}, cliframe.Failf("%s is already installed here", address).WithHint("mash join " + req.File + " --replace")
 	}
 	if err != nil {
 		return fail(err)
+	}
+	var made []string // what this run created, by exact path, removed if a later step fails
+	undo := func() {
+		for _, m := range made {
+			os.Remove(m)
+		}
+		if backup != "" {
+			os.Rename(backup, credsPath)
+		} else {
+			os.Remove(credsPath)
+		}
+	}
+	if caTmp != "" {
+		if err := os.Rename(caTmp, caPath); err != nil {
+			undo()
+			return fail(err)
+		}
+		made = append(made, caPath)
+	}
+	if cfgTmp != "" {
+		if err := os.Rename(cfgTmp, cfgPath); err != nil {
+			undo()
+			return fail(err)
+		}
 	}
 	return out, nil
 }

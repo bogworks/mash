@@ -1147,7 +1147,7 @@
       "name": "x-json",
       "value": {
        "version": "0.5.6",
-       "commit": "3f9a41c",
+       "commit": "3f9a41c2e0b7d5a1c4e08b2d77f3a95e1b6c4098",
        "plugin": "0.5.6"
       }
      },
@@ -1164,7 +1164,7 @@
      },
      {
       "name": "x-notes",
-      "value": "The short commit in brackets tells two builds of the same version apart."
+      "value": "The short commit in brackets, seven characters, tells two builds of the same version apart. --json carries the whole commit, so a tool that pins a version can compare it exactly."
      }
     ]
    },
@@ -1199,7 +1199,7 @@
      },
      {
       "name": "--replace",
-      "description": "Replace credentials already installed here for the same address."
+      "description": "Replace the creds already installed here for the same address. It replaces nothing else: not the server, not the certificate authority."
      },
      {
       "name": "--dry-run",
@@ -1250,7 +1250,13 @@
        },
        {
         "case": "This folder already belongs to another mesh",
-        "text": "error: this configuration folder is set up for tls://other:4222\nhint: mash join acme.demo.bob.join --config-dir <another folder>",
+        "text": "error: ~/.config/mash was set up with a different server;\n       nothing was changed\nhint: mash join acme.demo.bob.join --config-dir <another folder>",
+        "stream": "stderr",
+        "exit": 1
+       },
+       {
+        "case": "This folder trusts a different certificate authority",
+        "text": "error: ~/.config/mash was set up with a different ca;\n       nothing was changed\nhint: mash join acme.demo.bob.join --config-dir <another folder>",
         "stream": "stderr",
         "exit": 1
        },
@@ -1291,7 +1297,7 @@
      },
      {
       "name": "x-notes",
-      "value": "It asks nothing: the file came from whoever runs your mesh. How it works. Whoever runs the mesh runs 'mashctl endpoint create acme.demo.bob --out acme.demo.bob.join' and gets one text file. They get that file to the other machine by any route they trust. There, 'mash join acme.demo.bob.join' copies its three parts into the configuration folder: the server address or addresses, the certificate authority's certificate if the server uses its own, and a NATS creds file (a user JWT and its seed). After that, mash status works. When the endpoint made its own key, the join file holds no seed and --key supplies it. In 0.6.0, mash join also gains a way to ask to join and wait for approval (board card 210). THE JOIN FILE is JSON, written with mode 600, with these fields: \"mash_join\": 1 (the format's version); \"address\"; \"servers\": a list of addresses; \"ca\": the certificate authority's certificate as PEM text, or null; and either \"creds\": the whole text of a NATS creds file, or, when the endpoint made its own key, \"user_jwt\": the user JWT alone. One configuration folder serves one mesh; a join file for another mesh needs another folder."
+      "value": "It asks nothing: the file came from whoever runs your mesh. How it works. Whoever runs the mesh runs 'mashctl endpoint create acme.demo.bob --out acme.demo.bob.join' and gets one text file. They get that file to the other machine by any route they trust. There, 'mash join acme.demo.bob.join' copies its three parts into the configuration folder: the server address or addresses, the certificate authority's certificate if the server uses its own, and a NATS creds file (a user JWT and its seed). After that, mash status works. When the endpoint made its own key, the join file holds no seed and --key supplies it. In 0.6.0, mash join also gains a way to ask to join and wait for approval (board card 210). THE JOIN FILE is JSON, written with mode 600, with these fields: \"mash_join\": 1 (the format's version); \"address\"; \"servers\": a list of addresses; \"ca\": the certificate authority's certificate as PEM text, or null; and either \"creds\": the whole text of a NATS creds file, or, when the endpoint made its own key, \"user_jwt\": the user JWT alone. One configuration folder serves one mesh; a join file for another mesh needs another folder. The certificate authority's certificate is kept in the folder as ca.pem, and every endpoint in the folder trusts it; a join file that brings a different one, or none where the folder has one, is refused, with or without --replace."
      }
     ]
    },

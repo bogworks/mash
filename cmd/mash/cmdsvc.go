@@ -78,7 +78,11 @@ func shortCommit(c string) string {
 type buildVersion struct{ pluginRoot string }
 
 func (b buildVersion) Version() (version, commit, plugin string) {
-	return endpoint.CurrentVersion(), shortCommit(endpoint.CurrentCommit()), pluginVersion(b.pluginRoot)
+	commit = endpoint.CurrentCommit() // the whole revision: the text form shortens it, --json carries it
+	if commit == "" {
+		commit = "unknown"
+	}
+	return endpoint.CurrentVersion(), commit, pluginVersion(b.pluginRoot)
 }
 
 // sendOn sends as ep: the checks the send tool and the command line share (the numbers name messages of ep's own

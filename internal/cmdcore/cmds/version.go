@@ -2,6 +2,7 @@ package cmds
 
 import (
 	"context"
+	"strings"
 
 	"github.com/bogworks/mash/internal/cliframe"
 	"github.com/bogworks/mash/internal/cmdcore"
@@ -22,9 +23,21 @@ type VersionResult struct {
 	Plugin  string `json:"plugin"`
 }
 
-// Text is "mash v<version> (<commit>)".
+// ShortCommit is the commit as the text form shows it: the first 7 characters of a revision, "+dirty" kept.
+func ShortCommit(c string) string {
+	rev, dirty := strings.CutSuffix(c, "+dirty")
+	if len(rev) > 7 {
+		rev = rev[:7]
+	}
+	if dirty {
+		rev += "+dirty"
+	}
+	return rev
+}
+
+// Text is "mash v<version> (<commit>)", the commit short. The JSON form carries the whole commit.
 func (r VersionResult) Text(cmdcore.Opts) string {
-	return "mash v" + r.Version + " (" + r.Commit + ")"
+	return "mash v" + r.Version + " (" + ShortCommit(r.Commit) + ")"
 }
 
 // Version is the version command.
