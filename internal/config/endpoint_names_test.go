@@ -336,3 +336,24 @@ func TestExplicitOwnerNeverComesFromInstalledCreds(t *testing.T) {
 		t.Fatalf("env endpoint: %+v %v", c, err)
 	}
 }
+
+// LoadNamedOnly never picks the one installed endpoint; Load does.
+func TestLoadNamedOnlyDoesNotAutoPick(t *testing.T) {
+	home := t.TempDir()
+	writeFile(t, home, `{"servers":"tls://x:1"}`)
+	installCreds(t, home, "alice.dev.design.creds", 0o600)
+	c, err := LoadNamedOnly(LookupFromFunc(envOf(nil)), home)
+	if err != nil || !c.Inert() || c.Owner != "" || c.Group != "" || c.Source["endpoint"] != "unset" {
+		t.Fatalf("%+v %v", c, err)
+	}
+	// Several installed endpoints are not an error either: nothing is picked.
+	installCreds(t, home, "bob.dev.build.creds", 0o600)
+	if c, err = LoadNamedOnly(LookupFromFunc(envOf(nil)), home); err != nil || !c.Inert() {
+		t.Fatalf("%+v %v", c, err)
+	}
+	// A named endpoint is taken as always.
+	c, err = LoadNamedOnly(LookupFromFunc(envOf(map[string]string{"MASH_ENDPOINT": "alice.dev.design"})), home)
+	if err != nil || c.Name != "design" || c.Source["endpoint"] != "MASH_ENDPOINT" {
+		t.Fatalf("%+v %v", c, err)
+	}
+}

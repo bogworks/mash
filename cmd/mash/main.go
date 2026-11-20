@@ -207,7 +207,11 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 	if home == "" {
 		home, _ = os.UserHomeDir()
 	}
-	cfg, err := config.Load(lookup, home)
+	load := config.Load
+	if args[0] == "serve" || args[0] == "hook" {
+		load = config.LoadNamedOnly // a session never picks an endpoint for itself
+	}
+	cfg, err := load(lookup, home)
 	// A session named without a group has no address and no default: it stops at once naming MASH_ENDPOINT.
 	// A hook never fails the session (REQ-002 applies to the session itself, which serve stops), so it says so on
 	// stderr and exits 0; status reports it as a line.
