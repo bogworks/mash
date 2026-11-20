@@ -56,6 +56,7 @@ var inboxNow = time.Now
 type inboxMessageJSON struct {
 	Number    uint64 `json:"number"`
 	From      string `json:"from"`
+	Trust     string `json:"trust"`
 	Delivered bool   `json:"delivered"`
 	Kind      string `json:"kind"`
 	Size      int    `json:"size"`
@@ -67,6 +68,17 @@ type inboxJSON struct {
 	Total       uint64             `json:"total"`
 	Undelivered uint64             `json:"undelivered"`
 	Messages    []inboxMessageJSON `json:"messages"`
+}
+
+// inboxTrust is a message's trust label as shown: malformed mail is treated like forged, and no label is "-".
+func inboxTrust(t string) string {
+	switch t {
+	case "":
+		return "-"
+	case "malformed":
+		return "forged"
+	}
+	return t
 }
 
 // senderAddress is a message's sender as an address: the stored flat name read as owner.group.name, else as stored.
@@ -113,7 +125,7 @@ func buildInboxJSON(addr sap.Address, in *admin.InboxInspection) inboxJSON {
 		rep.Undelivered = in.Consumer.NumPending
 	}
 	for _, m := range in.Messages {
-		rep.Messages = append(rep.Messages, inboxMessageJSON{Number: m.Seq, From: senderAddress(m.Sender), Delivered: m.State != admin.StateUndelivered, Kind: m.Kind, Size: m.Size})
+		rep.Messages = append(rep.Messages, inboxMessageJSON{Number: m.Seq, From: senderAddress(m.Sender), Trust: inboxTrust(m.Trust), Delivered: m.State != admin.StateUndelivered, Kind: m.Kind, Size: m.Size})
 	}
 	return rep
 }
@@ -148,25 +160,30 @@ func runEndpointInbox(args []string, g cliframe.Global, env func(string) string,
 		if len(msgs) == 0 {
 			return nil
 		}
-		fmt.Fprintln(stdout)
-		now := inboxNow()
-		tw := tabwriter.NewWriter(stdout, 0, 4, 2, ' ', 0)
-		fmt.Fprintln(tw, "NUMBER\tFROM\tWHEN\tDELIVERED\tKIND\tSIZE")
-		for i, m := range msgs {
-			from := config.Clean(m.From)
-			if a, err := sap.ParseAddress(m.From); err == nil && a.Owner == addr.Owner && a.Group == addr.Group {
-				from = a.Instance
-			}
-			delivered := "no"
-			if m.Delivered {
-				delivered = "yes"
-			}
-			kind := m.Kind
-			if kind == "" {
-				kind = "-"
-			}
-			fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\n", m.Number, from, ago(now, in.Messages[i].StoredAt), delivered, config.Clean(kind), byteSize(m.Size))
-		}
-		return failErr(tw.Flush())
+		return failErr(writeInboxTable(stdout, addr, msgs, in.Messages, inboxNow()))
 	})
+}
+
+// writeInboxTable prints the message table: one row per message, FROM short inside the endpoint's own owner and group.
+func writeInboxTable(stdout io.Writer, addr sap.Address, msgs []inboxMessageJSON, raw []admin.InspectedMessage, now time.Time) error {
+	fmt.Fprintln(stdout)
+	tw := tabwriter.NewWriter(stdout, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(tw, "NUMBER\tFROM\tWHEN\tTRUST\tDELIVERED\tKIND\tSIZE")
+	for i, m := range msgs {
+		from := config.Clean(m.From)
+		if a, err := sap.ParseAddress(m.From); err == nil && a.Owner == addr.Owner && a.Group == addr.Group {
+			from = a.Instance
+		}
+		delivered := "no"
+		switch {
+		case m.Delivered:
+			delivered = "yes"
+		}
+		kind := m.Kind
+		if kind == "" {
+			kind = "-"
+		}
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\t%s\n", m.Number, from, ago(now, raw[i].StoredAt), config.Clean(m.Trust), delivered, config.Clean(kind), byteSize(m.Size))
+	}
+	return tw.Flush()
 }

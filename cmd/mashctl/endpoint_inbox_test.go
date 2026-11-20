@@ -111,11 +111,49 @@ func TestEndpointInboxJSONGolden(t *testing.T) {
 			t.Errorf("%s lacks %s", eb, w)
 		}
 	}
-	for _, banned := range []string{"text", "body", "payload", "trust", "msg_id"} {
+	for _, banned := range []string{"text", "body", "payload", "msg_id"} {
 		if strings.Contains(got, `"`+banned+`"`) {
 			t.Errorf("the JSON carries %q", banned)
 		}
 	}
+}
+
+// TestEndpointInboxTable pins the text table: the TRUST column, malformed shown as forged, with DELIVERED yes or no only.
+func TestEndpointInboxTable(t *testing.T) {
+	addr := sap.Address{Owner: "acme", Group: "demo", Instance: "bob"}
+	now := time.Date(2026, 11, 19, 12, 0, 0, 0, time.UTC)
+	in := &admin.InboxInspection{
+		Stream:   admin.InspectedStream{Name: "inbox-acme_demo_bob", Messages: 3},
+		Consumer: &admin.InspectedConsumer{Name: "deliver", Delivered: admin.Cursor{Stream: 3, Consumer: 3}, NumPending: 0},
+		Messages: []admin.InspectedMessage{
+			{Seq: 1, Sender: "acme_demo_alice", Trust: "verified", StoredAt: now.Add(-2 * time.Minute), Size: 48, Kind: "task", State: admin.DeliveryState(1, nil)},
+			{Seq: 2, Sender: "acme_lab_mallet", Trust: "forged", StoredAt: now.Add(-time.Minute), Size: 61, Kind: "task", State: admin.DeliveryState(2, nil)},
+			{Seq: 3, Sender: "acme_lab_mallet", Trust: "malformed", StoredAt: now.Add(-time.Minute), Size: 5, Kind: "task", State: admin.DeliveryState(3, nil)},
+			{Seq: 4, Sender: "acme_demo_alice", Trust: "", StoredAt: now.Add(-time.Minute), Size: 5, Kind: "task", State: admin.DeliveryState(4, in3())},
+		},
+	}
+	rep := buildInboxJSON(addr, in)
+	var buf strings.Builder
+	if err := writeInboxTable(&buf, addr, rep.Messages, in.Messages, now); err != nil {
+		t.Fatal(err)
+	}
+	want := "\n" +
+		"NUMBER  FROM             WHEN    TRUST     DELIVERED  KIND  SIZE\n" +
+		"1       alice            2m ago  verified  no         task  48 B\n" +
+		"2       acme.lab.mallet  1m ago  forged    no         task  61 B\n" +
+		"3       acme.lab.mallet  1m ago  forged    no         task  5 B\n" +
+		"4       alice            1m ago  -         yes        task  5 B\n"
+	if buf.String() != want {
+		t.Errorf("table:\n%s\nwant:\n%s", buf.String(), want)
+	}
+	if rep.Messages[1].Trust != "forged" || rep.Messages[1].Delivered || rep.Messages[2].Trust != "forged" {
+		t.Errorf("json rows: %+v", rep.Messages)
+	}
+}
+
+// in3 is a consumer that delivered through message 4.
+func in3() *admin.InspectedConsumer {
+	return &admin.InspectedConsumer{Name: "deliver", Delivered: admin.Cursor{Stream: 4, Consumer: 4}}
 }
 
 func TestInboxWordsAndSizes(t *testing.T) {
@@ -391,10 +429,14 @@ func TestEndpointInboxLive(t *testing.T) {
 	if lines := strings.Split(txt, "\n"); !strings.HasPrefix(lines[3], "1       snd   ") || !strings.Contains(lines[3], "yes") || !strings.Contains(lines[3], " 3 B") {
 		t.Errorf("first row %q: the sender is the name in the endpoint's own owner and group", lines[3])
 	}
-	for _, banned := range []string{"tampered", "verified", "msg-1", "three"} {
+	for _, banned := range []string{"tampered", "msg-1", "three"} {
 		if strings.Contains(txt, banned) {
 			t.Errorf("the text carries %q", banned)
 		}
+	}
+
+	if !strings.Contains(txt, "TRUST") || !strings.Contains(txt, "verified") {
+		t.Errorf("the text lacks the TRUST column:\n%s", txt)
 	}
 
 	// after and limit

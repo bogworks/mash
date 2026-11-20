@@ -1516,7 +1516,7 @@
         "value": [
          {
           "case": "Messages",
-          "text": "1 message for acme.demo.bob, 1 not delivered.\n\nNUMBER  FROM   WHEN    DELIVERED  KIND  SIZE\n7       alice  2m ago  no         task  48 B",
+          "text": "2 messages for acme.demo.bob, 1 not delivered.\n\nNUMBER  FROM            WHEN    TRUST     DELIVERED  KIND  SIZE\n7       alice           2m ago  verified  no         task  48 B\n8       acme.lab.mallet 1m ago  absent    yes        task  61 B",
           "stream": "stdout",
           "exit": 0
          }
@@ -1526,15 +1526,24 @@
         "name": "x-json",
         "value": {
          "address": "acme.demo.bob",
-         "total": 1,
+         "total": 2,
          "undelivered": 1,
          "messages": [
           {
            "number": 7,
            "from": "acme.demo.alice",
+           "trust": "verified",
            "delivered": false,
            "kind": "task",
            "size": 48
+          },
+          {
+           "number": 8,
+           "from": "acme.lab.mallet",
+           "trust": "absent",
+           "delivered": true,
+           "kind": "task",
+           "size": 61
           }
          ]
         }
@@ -1549,6 +1558,10 @@
        {
         "name": "x-today",
         "value": "Today mashctl inbox inspect, with --from and --to; those are replaced by --after, the option mash inbox has."
+       },
+       {
+        "name": "x-notes",
+        "value": "An administrator sees everything stored. FROM is the address a message claims; TRUST says whether that claim was proven, in mash's own labels: verified, unknown-signer, claimed, absent, stale or forged. DELIVERED is yes or no, and means only that the endpoint took the message off the server. Whether the endpoint then showed it or refused it is decided on the endpoint's own machine and is not something mashctl can see: by default an endpoint refuses everything that is not verified, so a 'yes' beside any other trust label most likely means it was refused."
        }
       ]
      },
