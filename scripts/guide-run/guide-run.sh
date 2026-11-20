@@ -32,7 +32,7 @@ SELF=$HERE/$(basename "${BASH_SOURCE[0]}")
 GUIDE_DEFAULT=$ROOT/docs/guide/walkthrough.md
 
 # The step ids, in run order; each is a block id in the guide.
-STEP_IDS=(install server endpoints status send inbox read json-send json-read
+STEP_IDS=(install server endpoints status who send inbox read json-send json-read
     json-inbox json-jq delete refused lifecycle)
 # Ids the guide has that this harness cannot record (a model is needed).
 MANUAL_IDS=(claude-code)
@@ -517,6 +517,12 @@ step_status() {
     step_end
 }
 
+step_who() {
+    step_begin who
+    step_cmd zero "$CHOME" "MASH_ENDPOINT=$OWNER.demo.bob mash who"
+    step_end
+}
+
 step_send() {
     step_begin send
     step_cmd zero "$CHOME" "MASH_ENDPOINT=$OWNER.demo.bob mash send $OWNER.demo.alice \"lunch at noon?\""
@@ -765,6 +771,7 @@ CF
     fi
     if [ "$ABORT" = 0 ]; then
         step_status
+        step_who
         step_send
         step_inbox
         step_read
