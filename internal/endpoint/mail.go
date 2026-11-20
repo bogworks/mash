@@ -393,7 +393,7 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 			// Dropped and counted, never delivered: acked so it is not redelivered for ever. The sender is told nothing.
 			// Without the lease the new holder gets it (and counts it), so it is nak'd, not counted.
 			if e.mayAck(pending{}) {
-				e.refuse(ref.Seq, claimedAddress(h, from), trust)
+				recorded := e.refuse(ref.Seq, claimedAddress(h, from), trust)
 				if e.refusedHook != nil {
 					e.refusedHook()
 				}
@@ -402,7 +402,9 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 				if e.mayAck(pending{}) {
 					_ = m.Ack()
 				} else {
-					e.unrecordRefusal(ref.Seq)
+					if recorded { // only what was recorded is taken back
+						e.unrecordRefusal(ref.Seq)
+					}
 					_ = m.Nak()
 				}
 			} else {

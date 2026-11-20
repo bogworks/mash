@@ -32,15 +32,22 @@ func TestUnknownSignerLookupIsCachedForAPollInterval(t *testing.T) {
 	if n := lookups.Load(); n != 1 {
 		t.Fatalf("%d lookups for 50 messages of one unknown (name, key), want 1", n)
 	}
-	// The table is bounded: when full of unexpired entries, a new key is not looked up at all.
+	// The table is bounded: when full of unexpired entries, a new key is still looked up, the oldest entry making room.
 	a.mu.Lock()
 	for i := 0; len(a.failedLookups) < maxFailedLookups; i++ {
 		a.failedLookups[time.Duration(i).String()] = time.Now().Add(time.Minute)
 	}
 	a.mu.Unlock()
 	before := lookups.Load()
-	if a.reloadSender(sap.SenderHeader{V: 1, User: "UNEW", Name: tkey("b")}) || lookups.Load() != before {
-		t.Fatal("a full table still looked up")
+	a.reloadSender(sap.SenderHeader{V: 1, User: "UNEW", Name: tkey("b")})
+	if lookups.Load() != before+1 {
+		t.Fatal("a full table did not look up")
+	}
+	a.mu.Lock()
+	size := len(a.failedLookups)
+	a.mu.Unlock()
+	if size > maxFailedLookups {
+		t.Fatalf("table grew to %d", size)
 	}
 }
 

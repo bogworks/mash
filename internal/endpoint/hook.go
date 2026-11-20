@@ -85,8 +85,8 @@ func (e *Endpoint) SetSpool(s spool.Spool, owner string) error {
 	if err != nil {
 		return fmt.Errorf("mash: inbox: %w", err)
 	}
-	info := st.CachedInfo()                              // the response to the request just made
-	if !e.cfg.AcceptUnverified && e.cfg.StateDir != "" { // no request: the identity is read from the info in hand
+	info := st.CachedInfo()   // the response to the request just made
+	if e.cfg.StateDir != "" { // whatever accept_unverified is: a recorded refusal stays refused. No request: the info is in hand
 		if _, err := e.bindRefusalsTo(streamIdentity(info)); err != nil {
 			e.log.Printf("refused-mail count not tied to the inbox stream: %v", err)
 		}

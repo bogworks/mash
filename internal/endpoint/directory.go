@@ -220,7 +220,7 @@ func (e *Endpoint) reloadSender(h sap.SenderHeader) bool {
 		return false
 	}
 	// A lookup that found nothing for this (name, key) is not repeated for one directory poll interval, and the memory
-	// of them is bounded: a full table of unexpired entries refuses further lookups until some expire.
+	// of them is bounded: a full table evicts its oldest entry, never refusing a lookup.
 	fail := h.Name + "\x00" + h.User
 	e.mu.Lock()
 	if until, ok := e.failedLookups[fail]; ok && time.Now().Before(until) {
@@ -228,15 +228,19 @@ func (e *Endpoint) reloadSender(h sap.SenderHeader) bool {
 		return false
 	}
 	if len(e.failedLookups) >= maxFailedLookups {
+		// Full: expired entries go, and if none had expired the oldest (the earliest to expire) makes room, so a
+		// flood of fake keys never stops the lookup of a real new sender.
 		now := time.Now()
+		oldestK, oldest := "", time.Time{}
 		for k, until := range e.failedLookups {
 			if !now.Before(until) {
 				delete(e.failedLookups, k)
+			} else if oldestK == "" || until.Before(oldest) {
+				oldestK, oldest = k, until
 			}
 		}
-		if len(e.failedLookups) >= maxFailedLookups {
-			e.mu.Unlock()
-			return false
+		if len(e.failedLookups) >= maxFailedLookups && oldestK != "" {
+			delete(e.failedLookups, oldestK)
 		}
 	}
 	e.mu.Unlock()
