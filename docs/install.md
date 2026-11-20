@@ -177,30 +177,6 @@ The CLI never takes the lease, so it works alongside the running session.
 
 `send --id KEY` (the send tool's `id`) is an idempotency key, 1 to 128 printable ASCII characters. Re-running a send with the same key to the same recipient from the same endpoint, within the inbox stream's two-minute duplicate window, stores nothing new: it succeeds, reports the original `#seq` and says it was a duplicate. If a send times out waiting for the stream's acknowledgement, the message may or may not have landed; the error prints a key to retry with (`mash send <to> --id <key> ...`), which delivers it at most once, but only within that two-minute window: after it a retry may store a second copy, which the recipient shows as a new message. Without `--id` every send is a new message.
 
-## Quick start on Synadia Cloud
+## Synadia Cloud
 
-If you use [Synadia Cloud](https://cloud.synadia.com), [`scripts/quickstart-synadia.sh`](../scripts/quickstart-synadia.sh) does the server side (operations.md) for you from one API token. It is a script outside the binary (it needs curl and jq; [ADR 0038](decisions/0038-synadia-setup-is-a-script-outside-the-binary.md)). Install the binary and the plugin (sections 1 to 3) first.
-
-1. In the Synadia Cloud console, create an API token for your team.
-2. Give it to the script through the environment (or `--token-stdin`, or the prompt in a terminal; never on the command line), and look at the plan first:
-
-   ```sh
-   export SYNADIA_API_TOKEN=...
-   scripts/quickstart-synadia.sh --dry-run --endpoint design --endpoint review
-   scripts/quickstart-synadia.sh --endpoint design --endpoint review
-   ```
-
-   With no `--endpoint`, it makes one named `<user>-<host>`. If the token sees several teams or accounts, name one with `--team` or `--account`. `--owner` defaults to your user name.
-3. It creates a temporary admin user (named `mash-quickstart-admin-` and 8 random hex characters), a NATS user and a creds file in `~/.config/mash/<name>.creds` (mode 0600) for each endpoint, and writes `~/.config/mash/config.json` (it refuses to change a different `servers` or `endpoint` without `--force`). Then it runs `mash admin init` and `mash admin provision` for each endpoint, sends a test message from the first endpoint to the second, and deletes the admin user, also when it fails. It refuses to reuse a NATS user that already exists; delete it in the console first. The API token is not stored, and no admin credential is left behind. [docs/synadia.md](synadia.md) lists what it does and does not check.
-4. Start two sessions, each as an endpoint (section 5):
-
-   ```sh
-   MASH_ENDPOINT=alice.dev.design claude --channels plugin:mash@mash
-   MASH_ENDPOINT=alice.dev.review claude --channels plugin:mash@mash
-   ```
-
-Notes:
-
-- The free tier allows 5 streams. mash takes 2 for its shared buckets and 1 per endpoint, so it fits **3 endpoints**; the script checks this first and, if the plan does not fit, creates nothing and says how many would.
-- Synadia's control-plane API (`/api/core/beta/`) is not documented or stable. If its shape changes, the script stops with an error rather than guessing.
-- The account's message limit is 512 KiB, half of mash's own 1 MiB cap.
+Synadia Cloud is not supported by mashctl in 0.5.6; see [#876](https://github.com/bogworks/mash/issues/876).

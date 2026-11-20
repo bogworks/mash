@@ -14,7 +14,7 @@ Subagents and agent teams are helpers that one session starts and directs, on on
 
 ## What do I need to run it?
 
-- A NATS server in operator mode (JWT credentials) with JetStream, and one account for mash. Self-hosted, or the Synadia Cloud free tier ([synadia.md](synadia.md)).
+- A NATS server in operator mode (JWT credentials) with JetStream, and one account for mash. Self-hosted; Synadia Cloud is not supported by mashctl in 0.5.6 ([synadia.md](synadia.md)).
 - Claude Code with channels: a claude.ai or Console sign-in, not Bedrock, Agent Platform or Foundry. An organisation Owner must allow mash, and the channel needs an allowlist entry in managed settings ([install.md](install.md) section 3).
 - The `mash` binary and the plugin. A pinned plugin release fetches and verifies its own binary; an unpinned one uses `mash` from your `PATH` ([install.md](install.md) section 1).
 
@@ -24,7 +24,7 @@ No. mash needs a NATS server in operator mode with JWT user credentials. In the 
 
 ## Do I have to run a server?
 
-Either run your own NATS server in operator mode, or use Synadia Cloud. [`scripts/quickstart-synadia.sh`](../scripts/quickstart-synadia.sh) sets up the server side on the free tier from one API token ([install.md](install.md) "Quick start on Synadia Cloud", [synadia.md](synadia.md)). The free tier allows 5 streams, so 3 endpoints, and a 512 KiB payload.
+Yes. Run your own NATS server in operator mode. Synadia Cloud is not supported by mashctl in 0.5.6 ([synadia.md](synadia.md)).
 
 ## How durable is the mail?
 

@@ -27,22 +27,20 @@ import (
 // its own fresh builds of X (and found signed by a release signer), and those builds' hashes. Publishing is bound to it,
 // so a draft whose assets were replaced after the gate, even by another validly signed set, is never published.
 type gateRecord struct {
-	sums       []byte
-	hashes     map[release.Binary]string
-	scriptHash string // sha256 of scripts/quickstart-synadia.sh at X
+	sums   []byte
+	hashes map[release.Binary]string
 }
 
-func (g *gateRecord) set(sums []byte, hashes map[release.Binary]string, scriptHash string) {
+func (g *gateRecord) set(sums []byte, hashes map[release.Binary]string) {
 	if g == nil {
 		return
 	}
 	g.sums = append([]byte(nil), sums...)
 	g.hashes = hashes
-	g.scriptHash = scriptHash
 }
 
 func (g *gateRecord) ok() bool {
-	return g != nil && g.sums != nil && g.hashes != nil && len(g.scriptHash) == 64
+	return g != nil && g.sums != nil && g.hashes != nil
 }
 
 // signersPath is where X carries the keys allowed to sign a release's SHA256SUMS.
@@ -54,13 +52,13 @@ const signerPrincipal = "release"
 var sumsLine = regexp.MustCompile(`^([0-9a-f]{64}) [ *]([^ ]+)$`)
 
 // checkSumEntries holds every line of SHA256SUMS to the hash of our own fresh build of X for that target (hashes, made
-// by buildFresh from the tagged commit) and the quickstart-synadia.sh line to scriptHash (the script at X). A malformed line, a duplicate name, a name that is not mash-<os>-<arch> or mashctl-<os>-<arch> of a
+// by buildFresh from the tagged commit). A malformed line, a duplicate name, a name that is not mash-<os>-<arch> or mashctl-<os>-<arch> of a
 // release target, a digest that differs from our build, a listed name that is not attached (or is attached with
 // another digest) and an attached mash-* asset that is not listed are each refused; so is a target the sums omit.
 // The SBOMs and the SLSA provenance (release.CIAssetNames) must be listed too; their digests are the attached ones.
 // For a keyless release the provenance bundle is not listed (it cannot list itself) and a line for it is refused; it
 // is verified by its attestation instead.
-func checkSumEntries(sums []byte, have map[string]string, hashes map[release.Binary]string, scriptHash string, keyless bool) error {
+func checkSumEntries(sums []byte, have map[string]string, hashes map[release.Binary]string, keyless bool) error {
 	byName := map[string]release.Binary{}
 	for _, t := range release.Binaries() {
 		byName[t.AssetName()] = t
@@ -84,18 +82,12 @@ func checkSumEntries(sums []byte, have map[string]string, hashes map[release.Bin
 			return fmt.Errorf("SHA256SUMS lists %s more than once", name)
 		}
 		listed[name] = hash
-		if name == release.ScriptName {
-			if hash != scriptHash {
-				return fmt.Errorf("SHA256SUMS lists %s as sha256:%s, the script at X is sha256:%s", name, hash, scriptHash)
-			}
-			continue
-		}
 		if isCI[name] {
 			continue // its digest is held to the attached asset's below
 		}
 		t, ok := byName[name]
 		if !ok {
-			return fmt.Errorf("SHA256SUMS lists %s, which is neither mash-<os>-<arch> nor mashctl-<os>-<arch> of a release target, nor %s, nor an SBOM or the provenance of the release", name, release.ScriptName)
+			return fmt.Errorf("SHA256SUMS lists %s, which is neither mash-<os>-<arch> nor mashctl-<os>-<arch> of a release target, nor an SBOM or the provenance of the release", name)
 		}
 		if want := hashes[t]; hash != want {
 			return fmt.Errorf("SHA256SUMS lists %s as sha256:%s, a fresh reproducible build of X gives sha256:%s", name, hash, want)
@@ -111,15 +103,11 @@ func checkSumEntries(sums []byte, have map[string]string, hashes map[release.Bin
 			return fmt.Errorf("SHA256SUMS does not list %s", n)
 		}
 	}
-	if _, ok := listed[release.ScriptName]; !ok {
-		return fmt.Errorf("SHA256SUMS does not list %s", release.ScriptName)
-	}
 	for _, n := range ciNames {
 		if _, ok := listed[n]; !ok {
 			return fmt.Errorf("SHA256SUMS does not list %s", n)
 		}
 	}
-	names = append(names, release.ScriptName)
 	names = append(names, ciNames...)
 	for _, n := range names {
 		digest, ok := have[n]
@@ -241,7 +229,7 @@ func verifyReleaseSig(o Options, tag, x string) error {
 // from the release and requires: SHA256SUMS is byte-for-byte the one the gate checked; its signature verifies against
 // the signers file at x; the release's assets as GitHub reports them right now (name -> "sha256:<hex>") include
 // SHA256SUMS and SHA256SUMS.sig with digests equal to the bytes just downloaded; every mash-<os>-<arch> asset has the
-// digest of the gate's fresh build of that target, and quickstart-synadia.sh the gate's hash of the script at X; and nothing is attached that the signed sums do not list. So a
+// digest of the gate's fresh build of that target; and nothing is attached that the signed sums do not list. So a
 // binary swapped or added after the gate, or the whole asset set replaced by another validly signed release's, is
 // refused. GitHub has no compare-and-swap on assets, so a swap in the instant between this check and the publish call
 // remains; the release is immutable once published, and that closes it.
@@ -331,15 +319,6 @@ func verifyPublishable(o Options, tag, x string, rec *gateRecord) error {
 			return fmt.Errorf("asset %s is not our fresh build of X: the release has %q, the --assets gate built %s", n, have[n], want)
 		}
 	}
-	if want := "sha256:" + rec.scriptHash; have[release.ScriptName] != want {
-		if _, ok := have[release.ScriptName]; !ok {
-			return fmt.Errorf("%s is no longer attached to the release", release.ScriptName)
-		}
-		return fmt.Errorf("asset %s is not the script at X: the release has %q, the --assets gate hashed %s", release.ScriptName, have[release.ScriptName], want)
-	}
-	if listed[release.ScriptName] != rec.scriptHash {
-		return fmt.Errorf("SHA256SUMS lists %s as sha256:%s, the script at X is sha256:%s", release.ScriptName, listed[release.ScriptName], rec.scriptHash)
-	}
 	names := make([]string, 0, len(listed))
 	for n := range listed {
 		names = append(names, n)
@@ -417,9 +396,9 @@ func gitBytes(dir string, args ...string) ([]byte, error) {
 //   - none attached on a published release is refused: a published release is never amended;
 //   - none attached on a draft is made with the release key (RELEASE_SIGNING_KEY), verified against the signers file at X, uploaded and
 //     read back.
-func signedSums(o Options, tag, x string, draft, kl bool, have map[string]string, hashes map[release.Binary]string, scriptHash string, rec *gateRecord) error {
+func signedSums(o Options, tag, x string, draft, kl bool, have map[string]string, hashes map[release.Binary]string, rec *gateRecord) error {
 	if kl {
-		return keylessSums(o, tag, x, have, hashes, scriptHash, rec)
+		return keylessSums(o, tag, x, have, hashes, rec)
 	}
 	// The sums are verified against the committed file at X, which consumers trust; RELEASE_SIGNERS is the maintainer's
 	// own file for the tag and is deliberately not used here.
@@ -434,7 +413,7 @@ func signedSums(o Options, tag, x string, draft, kl bool, have map[string]string
 	if err != nil {
 		return err
 	}
-	if err := checkSumEntries(sums, have, hashes, scriptHash, false); err != nil {
+	if err := checkSumEntries(sums, have, hashes, false); err != nil {
 		return err
 	}
 	if _, ok := have[release.SumsSigName]; ok {
@@ -445,7 +424,7 @@ func signedSums(o Options, tag, x string, draft, kl bool, have map[string]string
 		if err := verifySums(signers, sums, sig); err != nil { // verifies: reuse it; does not: refuse, never replace
 			return err
 		}
-		rec.set(sums, hashes, scriptHash)
+		rec.set(sums, hashes)
 		return nil
 	}
 	if !draft {
@@ -469,13 +448,13 @@ func signedSums(o Options, tag, x string, draft, kl bool, have map[string]string
 	if err := verifyReleaseSig(o, tag, x); err != nil {
 		return err
 	}
-	rec.set(sums, hashes, scriptHash)
+	rec.set(sums, hashes)
 	return nil
 }
 
 // keylessSums is signedSums for a release at or above the cutover: the same line-by-line check of SHA256SUMS against
 // our fresh builds, then the attestation of SHA256SUMS itself instead of a signature.
-func keylessSums(o Options, tag, x string, have map[string]string, hashes map[release.Binary]string, scriptHash string, rec *gateRecord) error {
+func keylessSums(o Options, tag, x string, have map[string]string, hashes map[release.Binary]string, rec *gateRecord) error {
 	if _, ok := have[release.SumsSigName]; ok {
 		return fmt.Errorf("a keyless release carries no %s", release.SumsSigName)
 	}
@@ -486,13 +465,13 @@ func keylessSums(o Options, tag, x string, have map[string]string, hashes map[re
 	if err != nil {
 		return err
 	}
-	if err := checkSumEntries(sums, have, hashes, scriptHash, true); err != nil {
+	if err := checkSumEntries(sums, have, hashes, true); err != nil {
 		return err
 	}
 	if err := verifySumsAttestation(o, tag, x, sums); err != nil {
 		return err
 	}
-	rec.set(sums, hashes, scriptHash)
+	rec.set(sums, hashes)
 	return nil
 }
 

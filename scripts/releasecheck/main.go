@@ -23,8 +23,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -693,20 +691,6 @@ func checkAssetsRecord(ctx context.Context, o Options, rec *gateRecord) error {
 		hashes[t] = h
 	}
 	buildOK := r.step("fresh build of X for every target", errors.Join(berrs...))
-	// The quickstart script is a release asset: its expected hash is the tagged source's.
-	var scriptHash string
-	script, found, serr := fileAt(o.Repo, x, "scripts/"+release.ScriptName)
-	switch {
-	case serr != nil:
-		r.step("scripts/"+release.ScriptName+" at X", serr)
-	case !found:
-		r.step("scripts/"+release.ScriptName+" at X", fmt.Errorf("the script is missing at %s, so the release cannot carry it", x))
-	default:
-		sum := sha256.Sum256([]byte(script))
-		scriptHash = hex.EncodeToString(sum[:])
-		r.step("scripts/"+release.ScriptName+" at X", nil)
-	}
-
 	b, err := gh(o, "release", "view", tag, "--repo", o.GHRepo, "--json", "assets,isDraft")
 	if !r.step("the release exists", op(err)) {
 		return r.result("release " + tag + " assets")
@@ -740,8 +724,8 @@ func checkAssetsRecord(ctx context.Context, o Options, rec *gateRecord) error {
 			r.step("tag "+tag+" still is the verified object", fmt.Errorf("now %q -> %q", obj, c))
 		}
 	}
-	if buildOK && scriptHash != "" {
-		if r.step("the release carries exactly our build of X and the script at X", release.CheckAssets(have, hashes, scriptHash, kl)) && terr == nil && r.ok() {
+	if buildOK {
+		if r.step("the release carries exactly our build of X", release.CheckAssets(have, hashes, kl)) && terr == nil && r.ok() {
 			// Not skippable: no flag reaches past it. Only a release whose tag, assets and builds all passed is signed.
 			// Attestations, SBOMs and the build provenance are verified first, so no maintainer signature is ever made over
 			// assets the gate rejected. They also cover a resumed or hand-made draft that release.yml's attest job never
@@ -754,9 +738,9 @@ func checkAssetsRecord(ctx context.Context, o Options, rec *gateRecord) error {
 			// A keyless release has none: its SHA256SUMS is an attested subject instead.
 			if r.ok() {
 				if kl {
-					r.step("SHA256SUMS is checked against our builds and the script at X, and its attestation verifies (keyless: no SHA256SUMS.sig)", signedSums(o, tag, x, resp.IsDraft, true, have, hashes, scriptHash, rec))
+					r.step("SHA256SUMS is checked against our builds, and its attestation verifies (keyless: no SHA256SUMS.sig)", signedSums(o, tag, x, resp.IsDraft, true, have, hashes, rec))
 				} else {
-					r.step("SHA256SUMS is checked against our builds and the script at X, and signed by a release signer", signedSums(o, tag, x, resp.IsDraft, false, have, hashes, scriptHash, rec))
+					r.step("SHA256SUMS is checked against our builds, and signed by a release signer", signedSums(o, tag, x, resp.IsDraft, false, have, hashes, rec))
 				}
 			}
 		}

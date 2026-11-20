@@ -98,8 +98,6 @@ func hashes() map[Binary]string {
 	return m
 }
 
-var scriptHash = strings.Repeat("9", 64)
-
 // ciHashes are the hex digests of the SBOMs and the provenance, which the gate cannot rebuild.
 func ciHashes() map[string]string {
 	m := map[string]string{}
@@ -110,11 +108,11 @@ func ciHashes() map[string]string {
 }
 
 // goodSums is the SHA256SUMS the draft job makes for goodAssets.
-func goodSums() string { return ExpectedSums(hashes(), scriptHash, ciHashes(), false) }
+func goodSums() string { return ExpectedSums(hashes(), ciHashes(), false) }
 
 func goodAssets() map[string]string {
 	h := hashes()
-	have := map[string]string{SumsName: "sha256:" + sha([]byte(goodSums())), ScriptName: "sha256:" + scriptHash}
+	have := map[string]string{SumsName: "sha256:" + sha([]byte(goodSums()))}
 	for _, t := range Binaries() {
 		have[t.AssetName()] = "sha256:" + h[t]
 	}
@@ -128,10 +126,10 @@ func TestExpectedSums_isSha256sumOutput(t *testing.T) {
 	got := goodSums()
 	lines := strings.Split(strings.TrimSuffix(got, "\n"), "\n")
 	want := []string{"mash-darwin-amd64", "mash-darwin-arm64", "mash-linux-amd64", "mash-linux-arm64",
-		"mashctl-darwin-amd64", "mashctl-darwin-arm64", "mashctl-linux-amd64", "mashctl-linux-arm64", ScriptName,
+		"mashctl-darwin-amd64", "mashctl-darwin-arm64", "mashctl-linux-amd64", "mashctl-linux-arm64",
 		"mash-darwin-amd64.cdx.json", "mash-darwin-arm64.cdx.json", "mash-linux-amd64.cdx.json", "mash-linux-arm64.cdx.json",
 		"mashctl-darwin-amd64.cdx.json", "mashctl-darwin-arm64.cdx.json", "mashctl-linux-amd64.cdx.json", "mashctl-linux-arm64.cdx.json", ProvenanceName}
-	if len(lines) != 18 {
+	if len(lines) != 17 {
 		t.Fatalf("%q", got)
 	}
 	for i, ln := range lines {
@@ -146,7 +144,7 @@ func TestExpectedSums_isSha256sumOutput(t *testing.T) {
 }
 
 func TestCheckAssets(t *testing.T) {
-	if err := CheckAssets(goodAssets(), hashes(), scriptHash, false); err != nil {
+	if err := CheckAssets(goodAssets(), hashes(), false); err != nil {
 		t.Fatalf("a correct release was refused: %v", err)
 	}
 	mutate := func(f func(m map[string]string)) map[string]string {
@@ -159,8 +157,6 @@ func TestCheckAssets(t *testing.T) {
 		want string
 	}{
 		"missing binary":     {mutate(func(m map[string]string) { delete(m, "mash-linux-arm64") }), "mash-linux-arm64 is missing"},
-		"missing script":     {mutate(func(m map[string]string) { delete(m, ScriptName) }), "quickstart-synadia.sh is missing"},
-		"wrong script":       {mutate(func(m map[string]string) { m[ScriptName] = "sha256:" + strings.Repeat("0", 64) }), "quickstart-synadia.sh has digest"},
 		"missing sums":       {mutate(func(m map[string]string) { delete(m, SumsName) }), "SHA256SUMS is missing"},
 		"substituted binary": {mutate(func(m map[string]string) { m["mash-darwin-arm64"] = "sha256:" + strings.Repeat("0", 64) }), "mash-darwin-arm64 has digest"},
 		"extra asset":        {mutate(func(m map[string]string) { m["mash-windows-amd64.exe"] = "sha256:x" }), "mash-windows-amd64.exe is not one"},
@@ -168,7 +164,7 @@ func TestCheckAssets(t *testing.T) {
 			m["mash-linux-x86_64"] = m["mash-linux-amd64"]
 			delete(m, "mash-linux-amd64")
 		}), "mash-linux-amd64 is missing"},
-		"sums without script": {mutate(func(m map[string]string) {
+		"truncated sums": {mutate(func(m map[string]string) {
 			m[SumsName] = "sha256:" + sha([]byte(goodSums()[:8*(64+2)+4*len("mash-linux-amd64")+4*len("mashctl-linux-amd64")]))
 		}), "SHA256SUMS has digest"},
 		"missing mashctl binary": {mutate(func(m map[string]string) { delete(m, "mashctl-linux-arm64") }), "mashctl-linux-arm64 is missing"},
@@ -177,7 +173,7 @@ func TestCheckAssets(t *testing.T) {
 		"mashctl missing from the sums": {mutate(func(m map[string]string) {
 			h := hashes()
 			delete(h, Binary{"mashctl", Target{"linux", "amd64"}})
-			m[SumsName] = "sha256:" + sha([]byte(ExpectedSums(h, scriptHash, ciHashes(), false)))
+			m[SumsName] = "sha256:" + sha([]byte(ExpectedSums(h, ciHashes(), false)))
 		}), "SHA256SUMS has digest"},
 		"missing sbom":        {mutate(func(m map[string]string) { delete(m, "mash-linux-arm64.cdx.json") }), "mash-linux-arm64.cdx.json is missing"},
 		"missing provenance":  {mutate(func(m map[string]string) { delete(m, ProvenanceName) }), "mash.intoto.jsonl is missing"},
@@ -189,14 +185,14 @@ func TestCheckAssets(t *testing.T) {
 		"digest without algo": {mutate(func(m map[string]string) { m["mash-linux-amd64"] = hashes()[Binary{"mash", Target{"linux", "amd64"}}] }), "mash-linux-amd64 has digest"},
 	}
 	for name, c := range cases {
-		if err := CheckAssets(c.have, hashes(), scriptHash, false); err == nil || !strings.Contains(err.Error(), c.want) {
+		if err := CheckAssets(c.have, hashes(), false); err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%s: %v (want %q)", name, err, c.want)
 		}
 	}
 	// An unusable build hash is a problem of its own, not a silent pass.
 	h := hashes()
 	h[Binary{"mashctl", Target{"linux", "amd64"}}] = ""
-	if err := CheckAssets(goodAssets(), h, scriptHash, false); err == nil || !strings.Contains(err.Error(), "no usable build hash") {
+	if err := CheckAssets(goodAssets(), h, false); err == nil || !strings.Contains(err.Error(), "no usable build hash") {
 		t.Fatalf("%v", err)
 	}
 }
@@ -247,48 +243,48 @@ func TestCheckCI_theAdvisoryMacOSCheckNeitherPassesNorBlocks(t *testing.T) {
 // keylessAssets is a release at or above the cutover: SHA256SUMS does not list the provenance bundle, which is attached.
 func keylessAssets() map[string]string {
 	m := goodAssets()
-	m[SumsName] = "sha256:" + sha([]byte(ExpectedSums(hashes(), scriptHash, ciHashes(), true)))
+	m[SumsName] = "sha256:" + sha([]byte(ExpectedSums(hashes(), ciHashes(), true)))
 	return m
 }
 
 func TestExpectedSums_keylessOmitsTheProvenance(t *testing.T) {
-	got := ExpectedSums(hashes(), scriptHash, ciHashes(), true)
+	got := ExpectedSums(hashes(), ciHashes(), true)
 	lines := strings.Split(strings.TrimSuffix(got, "\n"), "\n")
-	if len(lines) != 17 || strings.Contains(got, ProvenanceName) {
+	if len(lines) != 16 || strings.Contains(got, ProvenanceName) {
 		t.Fatalf("keyless sums:\n%s", got)
 	}
-	if want := strings.TrimSuffix(goodSums(), strings.Split(goodSums(), "\n")[17]+"\n"); got != want {
-		t.Errorf("keyless sums are not the others' first seventeen lines:\n%s", got)
+	if want := strings.TrimSuffix(goodSums(), strings.Split(goodSums(), "\n")[16]+"\n"); got != want {
+		t.Errorf("keyless sums are not the others' first sixteen lines:\n%s", got)
 	}
 }
 
 func TestCheckAssets_keyless(t *testing.T) {
-	if err := CheckAssets(keylessAssets(), hashes(), scriptHash, true); err != nil {
+	if err := CheckAssets(keylessAssets(), hashes(), true); err != nil {
 		t.Fatalf("a correct keyless release was refused: %v", err)
 	}
 	// The sums that list the provenance are the pre-cutover ones: refused when keyless.
-	if err := CheckAssets(goodAssets(), hashes(), scriptHash, true); err == nil || !strings.Contains(err.Error(), "SHA256SUMS has digest") {
+	if err := CheckAssets(goodAssets(), hashes(), true); err == nil || !strings.Contains(err.Error(), "SHA256SUMS has digest") {
 		t.Errorf("pre-cutover sums accepted when keyless: %v", err)
 	}
 	// ... and the keyless sums are refused before the cutover.
-	if err := CheckAssets(keylessAssets(), hashes(), scriptHash, false); err == nil || !strings.Contains(err.Error(), "SHA256SUMS has digest") {
+	if err := CheckAssets(keylessAssets(), hashes(), false); err == nil || !strings.Contains(err.Error(), "SHA256SUMS has digest") {
 		t.Errorf("keyless sums accepted before the cutover: %v", err)
 	}
 	// The provenance stays required.
 	m := keylessAssets()
 	delete(m, ProvenanceName)
-	if err := CheckAssets(m, hashes(), scriptHash, true); err == nil || !strings.Contains(err.Error(), "mash.intoto.jsonl is missing") {
+	if err := CheckAssets(m, hashes(), true); err == nil || !strings.Contains(err.Error(), "mash.intoto.jsonl is missing") {
 		t.Errorf("missing provenance: %v", err)
 	}
 	// A SHA256SUMS.sig is refused when keyless, allowed otherwise.
 	m = keylessAssets()
 	m[SumsSigName] = "sha256:" + strings.Repeat("a", 64)
-	if err := CheckAssets(m, hashes(), scriptHash, true); err == nil || !strings.Contains(err.Error(), "keyless release carries no SHA256SUMS.sig") {
+	if err := CheckAssets(m, hashes(), true); err == nil || !strings.Contains(err.Error(), "keyless release carries no SHA256SUMS.sig") {
 		t.Errorf("sig on a keyless release: %v", err)
 	}
 	g := goodAssets()
 	g[SumsSigName] = "sha256:" + strings.Repeat("a", 64)
-	if err := CheckAssets(g, hashes(), scriptHash, false); err != nil {
+	if err := CheckAssets(g, hashes(), false); err != nil {
 		t.Errorf("sig before the cutover refused: %v", err)
 	}
 }

@@ -69,7 +69,7 @@ What mash deliberately does not do:
 | Group or broadcast delivery | Each message goes to one endpoint. There is no group inbox, queue or broadcast ([ADR-0009][0009]) |
 | Delivery between NATS accounts | All endpoints share one account. Cross-account delivery was a non-goal of the design ([ADR-0006][0006]) |
 | Workflow or task orchestration | mash carries messages and keeps no task state, assignment or ordering. A `task` kind only says the mail should wake the recipient ([ADR-0027][0027]) |
-| Issuing NATS identities | The operator's own tooling issues users. mash never mints users or holds account seeds. On the hosted service, `scripts/quickstart-synadia.sh` (curl and jq, outside the binary) asks the service's API to do it ([ADR-0008][0008], [ADR-0038][0038]) |
+| Issuing NATS identities | The operator's own tooling issues users. mash never mints users or holds account seeds ([ADR-0008][0008]) |
 | Model or agent host logic in the core | Agent host specifics live only in the host adapter, and a test checks that no product source calls an agent host ([ADR-0032][0032]) |
 | Deciding whether mail is obeyed | A trust label proves who sent a message. Whether to act on it is the session's own instructions ([ADR-0020][0020]) |
 
@@ -174,7 +174,7 @@ never connects to NATS.*
 | `mash serve` (mash) | The endpoint manager. A long-lived MCP server that the agent host starts once per session. It holds the NATS connection, the lease, the SAP registration and the inbox consumer, and offers the session its tools: `send`, `read`, `inbox`, `who`, `reply`, `version`, `status` | Already connected when mail arrives, and a send is one tool call and one round trip ([ADR-0022][0022]). Without `MASH_ENDPOINT` it connects to nothing and offers only `status` and `version` ([ADR-0012][0012]) |
 | `mash hook` (mash) | A short-lived command the agent host runs after each tool call and with each prompt. It prints spooled mail as hook context and makes no network call | A busy session sees mail with no turn of its own ([ADR-0024][0024]) |
 | Spool (mash) | One directory per endpoint, files `<seq>.json` plus `shown/`, `listed/` and `drained/` marks (`listed/` is a message a digest named and the model has not read: still waiting and unacked, drained by `read` or a full showing, [ADR-0046][0046]); directories 0700, files 0600 | Hands mail from serve to the hook, so an acknowledgement means the mail was shown ([ADR-0025][0025]). Its `.owner` file records the owner (serve's parent pid, session id and launch token as JSON); a hook drains only if its session id or launch token matches, or the pid is among its ancestors, and a hook that matches none is refused and recorded in `.refused` ([ADR-0040][0040]) |
-| `mash` CLI (mash) | One-shot commands for people and scripts, using the same identity. It never takes the lease. `mash admin` provisions endpoints. Setting up a hosted account is a script outside the binary, `scripts/quickstart-synadia.sh` | Shells and scripts need a way in without a session ([ADR-0022][0022]) |
+| `mash` CLI (mash) | One-shot commands for people and scripts, using the same identity. It never takes the lease. `mash admin` provisions endpoints. | Shells and scripts need a way in without a session ([ADR-0022][0022]) |
 | Agent host (agent host) | Claude Code, through the mash plugin: an MCP server entry and two hooks | The plugin is the unit of distribution ([ADR-0033][0033]) |
 | NATS server (NATS) | Inbox streams, two KV buckets, and the SAP subjects | See section 8.2 |
 
@@ -245,8 +245,8 @@ have happened ([ADR-0025][0025]).
 |---|---|---|
 | Server | `nats-server` in operator mode with JetStream, file storage | Synadia's service. The free tier allows 5 streams, 5 connections, 512 KiB payload and no replicas |
 | Account | One account for mash, sized for 1 stream and 1 consumer per endpoint plus 2 buckets | One existing account |
-| Users | Signed by `mashctl endpoint create` with the account signing key, from the endpoint's own public key; `mashctl permissions <owner.group.instance>` prints the set (JSON or `nsc` flags). An endpoint's seed stays on its machine (with `--make-key`, `mashctl` makes it on its own host) | `scripts/quickstart-synadia.sh` asks Synadia's API to create them, with a temporary admin user that it deletes afterwards ([ADR-0038][0038]). mash itself never calls that API |
-| Endpoints | `mashctl init` once, then `mashctl endpoint create <owner/group/instance>` per endpoint | Created by `scripts/quickstart-synadia.sh`. With 2 shared buckets and 1 stream per endpoint, the free tier fits 3 endpoints |
+| Users | Signed by `mashctl endpoint create` with the account signing key, from the endpoint's own public key; `mashctl permissions <owner.group.instance>` prints the set (JSON or `nsc` flags). An endpoint's seed stays on its machine (with `--make-key`, `mashctl` makes it on its own host) | Not applicable: Synadia Cloud is not supported by mashctl in 0.5.6 (#876) |
+| Endpoints | `mashctl init` once, then `mashctl endpoint create <owner/group/instance>` per endpoint | Not applicable: Synadia Cloud is not supported by mashctl in 0.5.6 (#876) |
 | Removing | `mashctl endpoint delete` / `mashctl deprovision` (revokes the user), or `mash admin deprovision` and revoke the user yourself | Same, with an admin user made in the console |
 
 Each endpoint machine needs the `mash` binary on `PATH`, the Claude Code plugin, a credentials file at mode 0600 and
@@ -393,7 +393,7 @@ service's API token, which only the quickstart script ever sees.
 | Flooding an inbox | None | Oldest mail, read or unread, is evicted at 16 MiB |
 | Live prompt from an unproven sender | `min_sender_trust: signed`: 401 unsigned, 400 malformed, 403 not in the directory ([ADR-0030][0030]) | Reply chunks are not signed. They travel on the caller's private reply prefix |
 | A deprovisioned endpoint keeps sending | Its name is fenced and its mail reads `unknown-signer` ([ADR-0015][0015]) | It still connects until the operator revokes the user |
-| Leaked hosted API token or admin user | The token is never taken from the command line and never stored. The script deletes its temporary admin user on exit ([ADR-0038][0038]) | A crashed run may leave an admin user. It is warned about |
+| Leaked hosted API token or admin user | Not applicable: the script that used the token is retired in 0.5.6 | None |
 | Credentials readable by others | serve refuses a creds file that its group or other users can read ([ADR-0008][0008]) | Root and the owning user can read it |
 | Planting mail in the spool | Directory 0700, files 0600. The spool is bound to the Claude Code process that holds the lease | Anyone who can write as that user can plant mail with any label |
 
@@ -476,7 +476,6 @@ About 400 Go test functions cover the product code, not counting release tooling
 | Process-level tests on the built binary | `cmd/mash` | The binary as users run it: the standalone tests with a scrubbed environment, the hook crash matrix (SIGKILL at failpoints), and the process chain with a stand-in for Claude Code. The stand-in is the test binary itself, acting as the parent of a real `mash serve` and its hooks |
 | In-process session tests | `cmd/mash` (`run()` with a test MCP client over pipes) | `mash serve` as an MCP server with no agent host: tools, leases, retries, prompts, timeouts |
 | Contract tests on output | `internal/render/testdata/contract.txt`, plugin command and manifest tests, `who` format | Text that other programs parse does not change unnoticed ([ADR-0034][0034]) |
-| Fake external service | `scripts/quickstart_synadia_test.go` | `scripts/quickstart-synadia.sh` against an `httptest` fake of the Synadia API that mints real credentials, with a real NATS server |
 | Opt-in live test with a real agent host | `TestLiveClaudeAnswersServePings`, run with `MASH_LIVE_CLAUDE=1` | The installed Claude Code answers serve's pings |
 | Recorded live runs | `docs/evidence/` receipts, produced by scripted runs that are not part of `go test` | Real Claude Code (mid-turn, idle and urgent delivery, early mail), the real Synadia free tier, and `kill -9` lease takeover with timings |
 
@@ -513,7 +512,6 @@ that takes channel events.
 | Every endpoint shares one account: names are account-wide and account limits are shared | None yet ([ADR-0006][0006]) |
 | A stream per endpoint caps endpoints on accounts with a stream limit (3 on the free tier) | None yet |
 | Live prompts are not durable and have no hook path | None yet. Mail is the durable path |
-| `scripts/quickstart-synadia.sh` relies on an undocumented beta API | It fails loudly on any unexpected shape, and breaks a script a user can edit, not a released binary |
 | The host adapter was shaped by one host | None yet. A second adapter is not built |
 | SAP evolves outside mash's control. mash pins SAP 0.3.0 and an older MCP revision | Known-answer test for signing. Revision pin ([ADR-0023][0023]) |
 | Most numeric limits have no recorded reason | Recorded as such in the ADRs |
@@ -567,7 +565,7 @@ the 0.3.0 tree.
 | Trust classes `verified`, `unknown-signer`, `claimed`, `absent`, with forged mail dropped | Adds `stale`. Bodies quoted (both added the same night) | [0019][0019], [0021][0021] |
 | Lease value: instance, host, pid, since | Adds start time, machine id, launch token, version, commit, `mcp_seen`, `waking_pending`, `waking_pending_at`. A tombstone value on deprovision | [0014][0014], [0015][0015], [0016][0016] |
 | Deprovision deletes the record, the lease and the inbox | It fences the lease key with a tombstone first | [0015][0015] |
-| mash never mints NATS users | True. On the hosted service the quickstart script, not mash, has the API create users, so no seed or user-creating code is in mash | [0008][0008], [0038][0038] |
+| mash never mints NATS users | True. No seed or user-creating code is in mash | [0008][0008], [0038][0038] |
 | `policy.md` is "the blocklist hook" | Free text appended under "Operator policy (overrides the default above)" | [0020][0020] |
 | KV buckets with no size cap | 16 MiB and 4 MiB caps, for hosted accounts | [0010][0010] |
 | Send tool: `to`, `text`, `in_reply_to` | Adds `urgent`, `kind` and `id`. New tools `version` and `status` | [0027][0027], [0029][0029], [0031][0031] |
@@ -578,7 +576,7 @@ the 0.3.0 tree.
 | An address is unique within the account | The flat key `owner_group_instance` is the directory and lease key | [0006][0006] |
 | Other agents later | A host adapter seam, Claude Code the only host, every endpoint's `agent` metadata `claude-code` | [0032][0032] |
 | (Not in the design) | Rendered text and plugin commands became a contract | [0034][0034] |
-| (Not in the design) | Hosted quickstart, `mash init synadia` at first, then `scripts/quickstart-synadia.sh` | [0035][0035] superseded by [0038][0038] |
+| (Not in the design) | Hosted quickstart, `mash init synadia` at first, then a script (retired in 0.5.6) | [0035][0035] superseded by [0038][0038] |
 | Config: `servers`, `endpoint`, `creds`, `MASH_ENDPOINT`, batching | Adds `idle_wake`, `open_timeout`, `call_timeout`, `host`, `spool_from_start`, `admin_creds`, `MASH_LAUNCH_TOKEN` | various |
 | Later phases: archive past 30 days, monitoring, approvals | Not built | none |
 | Unchanged | SAP 0.3 plus `mail`, subjects, one stream per endpoint, inbox limits, batching thresholds, text-only mail, own marketplace | [0003][0003], [0005][0005], [0009][0009], [0026][0026], [0037][0037], [0033][0033] |
@@ -729,9 +727,9 @@ All paths are in the mash repository (0.3.0 tree) unless marked otherwise.
 | 8.2 | `internal/store/store.go`; `internal/admin/admin.go`; `internal/endpoint/endpoint.go` (`leaseValue`) |
 | 8.3 | `internal/admin/permissions.go`; `internal/sap/sender.go`; `internal/endpoint/{mail,service,instructions}.go`; `internal/config/credsmode.go`; `SECURITY.md`; SAP §10, §13.7-§13.9; NATS security documentation (<https://docs.nats.io/learn/security/>) |
 | 8.4, 8.5, C | `internal/config/config.go`; `internal/store/store.go`; `internal/render/render.go`; `internal/sap/subjects.go`; `internal/spool/spool.go` |
-| 10 | `*_test.go` across `cmd/mash` and `internal/`; `internal/testenv/`; `scripts/quickstart-synadia.sh`, `scripts/quickstart_synadia_test.go`; `docs/evidence/*` |
+| 10 | `*_test.go` across `cmd/mash` and `internal/`; `internal/testenv/`; `docs/evidence/*` |
 | A | `git show 5ab1e4b:docs/specs/2026-10-21-mash-design.md` compared with the 0.3.0 code; ADRs |
-| B | Claude Code documentation pages linked in B.1 (read 2026-10-31); `docs/install.md` §3; `docs/evidence/2026-10-22-live-e2e.md`, `docs/evidence/2026-10-31-quickstart-synadia-live/RECEIPT.md` (the quickstart script against the real Synadia API), `docs/evidence/2026-10-28-hook-delivery-live/RECEIPT.md`; ADR-0024; the maintainers' channel findings of 2026-10-31 (not in the repository) |
+| B | Claude Code documentation pages linked in B.1 (read 2026-10-31); `docs/install.md` §3; `docs/evidence/2026-10-22-live-e2e.md`, `docs/evidence/2026-10-31-quickstart-synadia-live/RECEIPT.md` (the retired quickstart script against the real Synadia API), `docs/evidence/2026-10-28-hook-delivery-live/RECEIPT.md`; ADR-0024; the maintainers' channel findings of 2026-10-31 (not in the repository) |
 
 [0002]: decisions/0002-record-architecture-decisions-as-madr-records.md
 [0003]: decisions/0003-sap-plus-mail-verb-and-jetstream-durability.md

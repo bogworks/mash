@@ -122,47 +122,9 @@ When you are done, stop the local server: `D=<the server directory that mashctl 
 
 The config and the credentials land in the config directory, `~/.config/mash` by default or `$MASH_CONFIG_DIR`; `init --local` prints it. The development flag lets the plugin wake an idle session without the channel allowlist (a list of channel plugins that Claude Code lets run without asking), and Claude Code asks you to confirm it at each launch; that is expected. Without the flag, mail still arrives at a session's next prompt or tool call. The steps are explained in [docs/install.md](docs/install.md), and [docs/operations.md](docs/operations.md#local-setup-with-mashctl-init---local) covers the local server, including how to stop it and start it again.
 
-## Quickstart on Synadia Cloud (free tier)
+## Synadia Cloud
 
-This is the second path, for a server you do not run yourself. Use a free [Synadia Cloud](https://cloud.synadia.com) account: [`scripts/quickstart-synadia.sh`](scripts/quickstart-synadia.sh) sets up the server side from one API token (it needs curl and jq; it is a script, not part of the mash binary). You need Go 1.27.4 or newer (or the release binary above) and Claude Code with channels: a claude.ai or Console sign-in, not Bedrock, Agent Platform or Foundry; organisations need an Owner to allow mash ([docs/install.md](docs/install.md)).
-
-See it working first: [two Claude Code sessions exchanging mail, one woken by it](docs/demo/) (a recording to play with `asciinema play`).
-
-1. Sign up for Synadia Cloud (the free tier is enough) and create an API token for your team in the Synadia console.
-2. Install mash, the plugin, and the channel allowlist (once per machine; the allowlist step is a managed settings file, shown in [docs/install.md](docs/install.md#managed-settings-teams-and-managed-machines)), as in [docs/install.md](docs/install.md) sections 1 to 3:
-
-   ```sh
-   go install github.com/bogworks/mash/cmd/mash@v0.5.5   # or the release binary above
-   claude plugin marketplace add bogworks/mash
-   claude plugin install mash@mash
-   ```
-
-3. Give the token to the script through the environment (or `--token-stdin`, or the prompt in a terminal; it is never taken from the command line and never stored), look at the plan, then run it:
-
-   ```sh
-   export SYNADIA_API_TOKEN=...
-   curl -fsSLO https://github.com/bogworks/mash/releases/download/v0.5.5/quickstart-synadia.sh
-   curl -fsSLO https://github.com/bogworks/mash/releases/download/v0.5.5/SHA256SUMS
-   test "$(grep -c ' quickstart-synadia.sh$' SHA256SUMS)" = 1 &&
-     grep ' quickstart-synadia.sh$' SHA256SUMS | sha256sum -c - &&   # macOS: shasum -a 256 -c -
-     bash quickstart-synadia.sh --dry-run --endpoint alice --endpoint bob &&
-     bash quickstart-synadia.sh --endpoint alice --endpoint bob
-   ```
-
-   The Synadia script is part of the v0.5.5 release, and it was not part of 0.5.5's acceptance tests.
-
-   The script comes from the release, not from `main`, and nothing runs unless its checksum matches (the `&&` chain stops at the first failure). Contributors can run the script from their checkout instead.
-
-   `--endpoint` repeats; with none, the script makes one named `<user>-<host>`. It checks the account's stream limit first and, if the plan does not fit, creates nothing and says so. It uses a temporary admin user, which it deletes at the end, and writes `~/.config/mash/config.json` and one `~/.config/mash/<owner>.<group>.<instance>.creds` per endpoint (mode 0600). With two or more endpoints it sends a test mail from the first to the second (`--no-test` skips it).
-4. Start a session as an endpoint, and mail the other one:
-
-   ```sh
-   MASH_ENDPOINT=<owner>.<group>.<name> claude --channels plugin:mash@mash
-   ```
-
-   Ask Claude to send "hello" to `<owner>.<group>.bob`. In a second terminal, `MASH_ENDPOINT=<owner>.<group>.<name> claude --channels plugin:mash@mash` receives it; Claude can answer with the `reply` or `send` tool, and `MASH_ENDPOINT=<owner>.<group>.alice mash inbox` shows the mailbox from a shell.
-
-The free tier allows 5 streams (mash uses 2 shared, plus 1 per endpoint, so 3 endpoints), 5 connections (one per live session), a 512 KiB message payload (mash caps sends to the server's `max_payload`), and R1 only (no replication, so no HA). Limits, and what to do when the script fails, are in [docs/synadia.md](docs/synadia.md).
+Synadia Cloud is not supported by mashctl in 0.5.6; see [#876](https://github.com/bogworks/mash/issues/876).
 
 ## Addresses and the Synadia Agent Protocol
 
@@ -219,7 +181,7 @@ Operators set up the server with `mashctl init` (or `mashctl adopt` for a server
 
 ## Status
 
-mash is v0.5.5. Use the same version of `mash` and `mashctl` (the quick start needs 0.5.5's `mash key create` and `mash credential create`, which 0.5.0 does not have); 0.5.0 (released 2026-11-16) stays the version for running deployments until they are moved (see the release notes). It supports Claude Code sessions as endpoints: durable, signed mail with trust labels, delivered by the plugin's hooks with a channel wake for idle sessions, on a NATS server you run or on Synadia Cloud's free tier ([`scripts/quickstart-synadia.sh`](scripts/quickstart-synadia.sh); see [docs/install.md](docs/install.md)). The spec is in docs/specs, and an integration suite runs against an in-process NATS server carrying the production permissions. Mail survives process restarts. To survive a host crash on a self-hosted server set `sync_interval: always` ([docs/operations.md](docs/operations.md#durability-and-sync_interval)). "Durable" means stored on the NATS server until read, for up to 30 days and 16 MiB per inbox, on one replica. Past those limits the oldest messages go first, read or not, and an inbox on a clustered server is unavailable while its node is down; see [inbox limits](docs/operations.md#inbox-limits) and [durability](docs/operations.md#durability-and-sync_interval). Upgrading to 0.5.5 is a clean break from 0.5.0: make new endpoints with `mashctl endpoint create` and remove the old ones with `mashctl endpoint delete`. Mail unread in an old endpoint is not carried over. Interfaces may still change before the next major revision. Later phases (an archive leaf node, monitoring, approvals) are listed in the spec.
+mash is v0.5.5. Use the same version of `mash` and `mashctl` (the quick start needs 0.5.5's `mash key create` and `mash credential create`, which 0.5.0 does not have); 0.5.0 (released 2026-11-16) stays the version for running deployments until they are moved (see the release notes). It supports Claude Code sessions as endpoints: durable, signed mail with trust labels, delivered by the plugin's hooks with a channel wake for idle sessions, on a NATS server you run (see [docs/install.md](docs/install.md)). The spec is in docs/specs, and an integration suite runs against an in-process NATS server carrying the production permissions. Mail survives process restarts. To survive a host crash on a self-hosted server set `sync_interval: always` ([docs/operations.md](docs/operations.md#durability-and-sync_interval)). "Durable" means stored on the NATS server until read, for up to 30 days and 16 MiB per inbox, on one replica. Past those limits the oldest messages go first, read or not, and an inbox on a clustered server is unavailable while its node is down; see [inbox limits](docs/operations.md#inbox-limits) and [durability](docs/operations.md#durability-and-sync_interval). Upgrading to 0.5.5 is a clean break from 0.5.0: make new endpoints with `mashctl endpoint create` and remove the old ones with `mashctl endpoint delete`. Mail unread in an old endpoint is not carried over. Interfaces may still change before the next major revision. Later phases (an archive leaf node, monitoring, approvals) are listed in the spec.
 
 ## Releases
 
