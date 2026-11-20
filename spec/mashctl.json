@@ -1516,7 +1516,7 @@
         "value": [
          {
           "case": "Messages",
-          "text": "1 message for acme.demo.bob, 1 not delivered.\n\nNUMBER  FROM   WHEN    DELIVERED  KIND  SIZE\n7       alice  2m ago  no         task  48 B",
+          "text": "2 messages for acme.demo.bob, 1 not delivered.\n\nNUMBER  FROM            WHEN    TRUST     DELIVERED  KIND  SIZE\n7       alice           2m ago  verified  no         task  48 B\n8       acme.lab.mallet 1m ago  absent    refused    task  61 B",
           "stream": "stdout",
           "exit": 0
          }
@@ -1526,12 +1526,13 @@
         "name": "x-json",
         "value": {
          "address": "acme.demo.bob",
-         "total": 1,
+         "total": 2,
          "undelivered": 1,
          "messages": [
           {
            "number": 7,
            "from": "acme.demo.alice",
+           "trust": "verified",
            "delivered": false,
            "kind": "task",
            "size": 48
@@ -1549,6 +1550,10 @@
        {
         "name": "x-today",
         "value": "Today mashctl inbox inspect, with --from and --to; those are replaced by --after, the option mash inbox has."
+       },
+       {
+        "name": "x-notes",
+        "value": "An administrator sees everything stored, including mail the endpoint refused. FROM is the address a message claims; TRUST says whether that claim was proven, in mash's own labels: verified, unknown-signer, claimed, absent, stale or forged. DELIVERED is yes, no, or refused."
        }
       ]
      },

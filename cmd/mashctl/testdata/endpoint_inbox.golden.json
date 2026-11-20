@@ -6,6 +6,7 @@
     {
       "number": 1,
       "from": "acme.team1.bob",
+      "trust": "verified",
       "delivered": true,
       "kind": "message",
       "size": 10
@@ -13,6 +14,7 @@
     {
       "number": 2,
       "from": "acme.team1.bob",
+      "trust": "claimed",
       "delivered": true,
       "kind": "message",
       "size": 20
@@ -20,13 +22,15 @@
     {
       "number": 3,
       "from": "acme.team1.bob",
-      "delivered": true,
+      "trust": "forged",
+      "delivered": false,
       "kind": "message",
       "size": 30
     },
     {
       "number": 4,
       "from": "acme.team1.bob",
+      "trust": "unknown-signer",
       "delivered": false,
       "kind": "message",
       "size": 40

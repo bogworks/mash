@@ -87,11 +87,14 @@ Lists the messages stored in one endpoint's inbox and whether each was delivered
 The text form prints a line with the count, then a table:
 
 ```text
-1 message for acme.demo.bob, 1 not delivered.
+2 messages for acme.demo.bob, 1 not delivered.
 
-NUMBER  FROM   WHEN    DELIVERED  KIND  SIZE
-7       alice  2m ago  no         task  48 B
+NUMBER  FROM             WHEN    TRUST     DELIVERED  KIND  SIZE
+7       alice            2m ago  verified  no         task  48 B
+8       acme.lab.mallet  1m ago  absent    refused    task  61 B
 ```
+
+TRUST says whether the claimed sender was proven: `verified`, `unknown-signer`, `claimed`, `absent`, `stale` or `forged` (malformed mail shows as `forged`); `-` when there is no label. DELIVERED is `yes`, `no` or `refused`: `refused` is mail the endpoint never shows (forged), which an administrator still sees here.
 
 FROM is the sender's name when the sender is in the endpoint's owner and group, else its whole address, and `?` when the message names none. `--json` prints one object:
 
@@ -102,7 +105,8 @@ FROM is the sender's name when the sender is in the endpoint's owner and group, 
 | `undelivered` | the messages the `deliver` consumer has not delivered; all of them when the consumer does not exist |
 | `messages[].number` | the stream sequence |
 | `messages[].from` | the sender's address |
-| `messages[].delivered` | `true` when the sequence is at or below the consumer's last delivered sequence |
+| `messages[].trust` | the trust label, as in the text form |
+| `messages[].delivered` | `true` when the sequence is at or below the consumer's last delivered sequence and the message was not refused |
 | `messages[].kind` | the `Mash-Kind` header |
 | `messages[].size` | payload size in bytes |
 
