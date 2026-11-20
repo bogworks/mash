@@ -11,8 +11,6 @@ import (
 	"io/fs"
 	"net"
 	"os"
-	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -26,7 +24,6 @@ import (
 	"github.com/bogworks/mash/internal/endpoint"
 	"github.com/bogworks/mash/internal/host"
 	"github.com/bogworks/mash/internal/mcp"
-	"github.com/bogworks/mash/internal/render"
 	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/spool"
 )
@@ -594,59 +591,18 @@ func tools(state *atomic.Pointer[sessionState], src *statusSource) []mcp.Tool {
 			return f(ctx, ep, args)
 		}
 	}
-	svc := &mcpSvc{buildVersion: buildVersion{pluginRoot: src.pluginRoot}, state: state, name: name, callTimeout: callTimeout}
+	svc := &mcpSvc{buildVersion: buildVersion{pluginRoot: src.pluginRoot}, state: state, name: name, callTimeout: callTimeout, wake: wakeOf(src.cfg)}
 	table := newCommands(func(context.Context) (*cmdcore.Env, error) { return &cmdcore.Env{Svc: svc}, nil })
 	send, _ := table.Lookup("send")
 	who, _ := table.Lookup("who")
+	inbox, _ := table.Lookup("inbox")
+	read, _ := table.Lookup("read")
+	readTool := read.Tool(table.Env).MCP()
+	readTool.AfterWrite = svc.readAck
 	return append([]mcp.Tool{
 		send.Tool(table.Env).MCP(),
-		{Name: "read", Description: "Read one message from your inbox by #seq.",
-			// Only after the result is written to the client has the model the body. That counts as seen, so serve
-			// acks the message, for one a hook listed in a digest (any mode, ADR 0046) and for one waiting in a
-			// session proven hookless (no hook will show it). Everywhere else the message stays held for a hook.
-			AfterWrite: func(raw json.RawMessage) {
-				var a struct {
-					Seq msgNumber `json:"seq"`
-				}
-				if json.Unmarshal(raw, &a) == nil {
-					if ep, err := state.Load().usable(name); err == nil {
-						if ref, err := ep.ResolveRef(string(a.Seq)); err == nil {
-							ep.MarkRead(ref)
-						}
-					}
-				}
-			},
-			Schema: schema(map[string]any{"seq": num("message #seq")}, "seq"),
-			Call: call(func(ctx context.Context, ep *endpoint.Endpoint, raw json.RawMessage) (string, error) {
-				var a struct {
-					Seq msgNumber `json:"seq"`
-				}
-				if err := json.Unmarshal(raw, &a); err != nil {
-					return "", err
-				}
-				ref, err := ep.ResolveRef(string(a.Seq))
-				if err != nil {
-					return "", err
-				}
-				m, err := ep.ReadRef(ctx, ref)
-				if err != nil {
-					return "", err
-				}
-				return render.One(m), nil
-			})},
-		{Name: "inbox", Description: "List recent messages in your inbox (newest last), one line each.",
-			Schema: schema(map[string]any{"limit": num("how many (default 20, max 100)")}),
-			Call: call(func(ctx context.Context, ep *endpoint.Endpoint, raw json.RawMessage) (string, error) {
-				var a struct {
-					Limit int `json:"limit"`
-				}
-				_ = json.Unmarshal(raw, &a)
-				ms, err := ep.Inbox(ctx, clampLimit(a.Limit))
-				if err != nil {
-					return "", err
-				}
-				return inboxText(ms), nil
-			})},
+		inbox.Tool(table.Env).MCP(),
+		readTool,
 		who.Tool(table.Env).MCP(),
 		{Name: "reply", Description: "Answer a live prompt by its request_id. done=false streams a partial answer.",
 			Schema: schema(map[string]any{"request_id": str("from the prompt event"), "text": str("your answer"),
@@ -670,45 +626,6 @@ func tools(state *atomic.Pointer[sessionState], src *statusSource) []mcp.Tool {
 				return "partial answer sent", nil
 			})},
 	}, infoTools(src)...)
-}
-
-// msgNumber is a message number as the read tool takes it: a JSON integer (5) or a string ("5", "#5"),
-// kept as text for Endpoint.ResolveRef.
-type msgNumber string
-
-func (n *msgNumber) UnmarshalJSON(b []byte) error {
-	var s string
-	if err := json.Unmarshal(b, &s); err == nil {
-		*n = msgNumber(s)
-		return nil
-	}
-	var u uint64
-	if err := json.Unmarshal(b, &u); err != nil {
-		return fmt.Errorf("seq must be a message number such as 5")
-	}
-	*n = msgNumber(strconv.FormatUint(u, 10))
-	return nil
-}
-
-func clampLimit(n int) int {
-	switch {
-	case n <= 0:
-		return 20
-	case n > 100:
-		return 100
-	}
-	return n
-}
-
-func inboxText(ms []render.Mail) string {
-	if len(ms) == 0 {
-		return "inbox empty"
-	}
-	lines := make([]string, len(ms))
-	for i, m := range ms {
-		lines[i] = render.Line(m)
-	}
-	return strings.Join(lines, "\n")
 }
 
 // PromptTextMax is the most bytes of a live prompt's text. It is the endpoint's limit, the one number: the service

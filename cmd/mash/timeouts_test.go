@@ -35,7 +35,7 @@ func TestConfiguredTimeoutsApply(t *testing.T) {
 	}
 	t.Run("cli open", func(t *testing.T) {
 		out, code := cli(envFor("me", map[string]string{"MASH_OPEN_TIMEOUT": "10ms"}), "inbox")
-		if code == 0 || !openTimedOut(out) {
+		if code == 0 || !openTimedOut(out) && !strings.Contains(out, "error: the server did not answer: ") {
 			t.Fatalf("exit %d: %s", code, out)
 		}
 	})

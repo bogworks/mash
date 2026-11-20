@@ -43,7 +43,7 @@ func TestReadToolAcksOnlyWhenProvenHookless(t *testing.T) {
 	w, s := hooklessWorld(t, 150*time.Millisecond)
 	sp := spoolFor(w, "a")
 	e := sendAndWaitSpooled(t, w, "the body")
-	seqArg := `{"seq":` + itoa(int(e.Seq)) + `}`
+	seqArg := `{"number":` + itoa(int(e.Seq)) + `}`
 	held := func(what string) {
 		t.Helper()
 		if ws, _ := sp.Waiting(); len(ws) != 1 || unreadOf(t, w, "a") != 1 {
@@ -57,7 +57,7 @@ func TestReadToolAcksOnlyWhenProvenHookless(t *testing.T) {
 	held("first read")
 	time.Sleep(endpoint.HookGrace + 100*time.Millisecond)
 	// Proven by now, but inbox never acks.
-	if out := resultText(s.call(t, 21, "inbox", `{}`)); !strings.Contains(out, "#"+itoa(int(e.Seq))) {
+	if out := resultText(s.call(t, 21, "inbox", `{}`)); !strings.Contains(out, "\n"+itoa(int(e.Seq))+" ") || !strings.Contains(out, "the body") {
 		t.Fatalf("inbox: %s", out)
 	}
 	held("inbox")
@@ -118,7 +118,7 @@ func TestReadToolDoesNotDrainWhenResultWriteFails(t *testing.T) {
 	s.initialize(t)
 	sp := spoolFor(w, "a")
 	e := sendAndWaitSpooled(t, w, "the body")
-	seqArg := `{"seq":` + itoa(int(e.Seq)) + `}`
+	seqArg := `{"number":` + itoa(int(e.Seq)) + `}`
 	s.call(t, 30, "inbox", `{}`)
 	time.Sleep(endpoint.HookGrace + 100*time.Millisecond)
 	s.call(t, 31, "inbox", `{}`) // the second call, far enough after the first: proven hookless

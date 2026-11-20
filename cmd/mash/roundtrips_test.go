@@ -132,17 +132,17 @@ func TestCLIRoundTrips(t *testing.T) {
 		check func(t *testing.T, out string)
 	}{
 		{"inbox-limit-1", "", []string{"inbox", "--limit", "1"}, func(t *testing.T, out string) {
-			if !strings.HasPrefix(out, "#25\t") || strings.Count(out, "\n") != 1 {
+			if !strings.HasPrefix(out, "25 messages for ") || !strings.Contains(out, "\n25      sender  ") || strings.Count(out, "\n") != 5 {
 				t.Fatalf("inbox --limit 1: %q", out)
 			}
 		}},
 		{"inbox-limit-20", "", []string{"inbox", "--limit", "20"}, func(t *testing.T, out string) {
-			if !strings.HasPrefix(out, "#6\t") || strings.Count(out, "\n") != 20 || !strings.Contains(out, "verified") {
+			if !strings.Contains(out, "\n6       sender  ") || strings.Contains(out, "\n5       sender  ") || strings.Count(out, "\n") != 20+4 {
 				t.Fatalf("inbox --limit 20: %q", out)
 			}
 		}},
-		{"read", "", []string{"read", "#7"}, func(t *testing.T, out string) {
-			if !strings.Contains(out, "message 7 from sender") || !strings.Contains(out, "verified") {
+		{"read", "", []string{"read", "7"}, func(t *testing.T, out string) {
+			if !strings.Contains(out, "number:   7\n") || !strings.Contains(out, "\n\nmessage 7 from sender") || !strings.Contains(out, "verified") {
 				t.Fatalf("read: %q", out)
 			}
 		}},

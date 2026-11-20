@@ -197,13 +197,13 @@ func TestServeRetriesHeldLease(t *testing.T) {
 	if txt := resultText(s.call(t, 11, "inbox", `{}`)); !strings.Contains(txt, "sent while held") || !strings.Contains(txt, "hello after recovery") {
 		t.Fatalf("inbox after recovery: %s", txt)
 	}
-	if txt := resultText(s.call(t, 12, "read", `{"seq":1}`)); !strings.Contains(txt, "sent while held") {
+	if txt := resultText(s.call(t, 12, "read", `{"number":1}`)); !strings.Contains(txt, "sent while held") {
 		t.Fatalf("read after recovery: %s", txt)
 	}
 	if txt := resultText(s.call(t, 13, "who", `{}`)); !whoShows(txt, tTo("a"), "online") {
 		t.Fatalf("who after recovery: %s", txt)
 	}
-	if out, _ := w.cli(t, "b", "inbox"); !strings.Contains(out, "from o.dev.a [verified]") || !strings.Contains(out, "thanks") {
+	if out, _ := w.cli(t, "b", "inbox", "--wide"); !strings.Contains(out, "o.dev.a") || !strings.Contains(out, "verified") || !strings.Contains(out, "thanks") {
 		t.Fatalf("b's inbox: %s", out)
 	}
 	if out, _ := w.cli(t, "b", "who"); !whoShows(out, tTo("a"), "online") {
@@ -282,7 +282,7 @@ func TestServeWaitingToolsAreSafe(t *testing.T) {
 	s := startServe(t, w.env["a"])
 	s.initialize(t)
 	calls := map[string]string{
-		"send": `{"address":"o.dev.x","message":"y"}`, "read": `{"seq":1}`, "inbox": `{}`, "who": `{}`,
+		"send": `{"address":"o.dev.x","message":"y"}`, "read": `{"number":1}`, "inbox": `{}`, "who": `{}`,
 		"reply": `{"request_id":"r","text":"t"}`,
 	}
 	id := 20

@@ -14,9 +14,9 @@ func TestTopLevelHelpGolden(t *testing.T) {
 
 Everyday:
   mash send <address> [<message>] [options]    Send a message to an endpoint.
-  mash inbox [--limit N] [--after SEQ]         Recent messages, or the N after
-                                               SEQ (oldest first)
-  mash read <seq>                              Print one message from your inbox
+  mash inbox [options]                         List the messages this endpoint
+                                               has received.
+  mash read <number>                           Show one message in full.
   mash who [<prefix>] [options]                List the endpoints you can see,
                                                and which are online.
   mash status                                  Say in one line whether mail

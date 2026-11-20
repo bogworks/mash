@@ -20,7 +20,7 @@ func TestSendDashReadsStdin(t *testing.T) {
 	if out, errb, code := runStdin(w, "b", "from a pipe\n", "send", tTo("a"), "-"); code != 0 {
 		t.Fatalf("send -: %d %q %q", code, out, errb)
 	}
-	if rd, _ := w.cli(t, "a", "read", "1"); !strings.Contains(rd, "> from a pipe\n") || strings.Contains(rd, "> -\n") {
+	if rd, _ := w.cli(t, "a", "read", "1"); !strings.Contains(rd, "\n\nfrom a pipe\n") || strings.Contains(rd, "\n\n-\n") {
 		t.Fatalf("read #1: %q", rd)
 	}
 	_, errb, code := runStdin(w, "b", "x\n", "send", tTo("a"), "-", "--file", "-")
@@ -35,7 +35,7 @@ func TestSendDashReadsStdin(t *testing.T) {
 	}
 	rd2, _ := w.cli(t, "a", "read", "2")
 	rd3, _ := w.cli(t, "a", "read", "3")
-	if !strings.Contains(rd2, "> -x\n") || !strings.Contains(rd3, "> --dashes\n") {
+	if !strings.Contains(rd2, "\n\n-x\n") || !strings.Contains(rd3, "\n\n--dashes\n") {
 		t.Fatalf("literal: %q %q", rd2, rd3)
 	}
 	if n := inboxCount(t, w, "a"); n != 3 {

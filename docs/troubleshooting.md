@@ -136,7 +136,7 @@ Without a channel, mail still arrives at the next prompt or tool call, but nothi
 A session's mail delivery is in one of these states (no command prints it; `hook.log` shows the symptoms):
 - Hooks have not run yet in this session: normal until the first prompt or tool call.
 - Suspected: three wakes and no hook; re-waking stopped. A session that makes no tool calls stays here. Mail is read with the `read` tool.
-- Degraded: no mash hook has run although this session has made tool calls. Hooks are not running. Read each message with the `read` tool (by `#seq`).
+- Degraded: no mash hook has run although this session has made tool calls. Hooks are not running. Read each message with the `read` tool (by its number).
 - Refused: mash's hook runs in this session but is not recognised as this session's: the hook ran outside the process tree of `mash serve` and its session id did not match.
 
 Causes and fixes for degraded:
@@ -155,11 +155,11 @@ Subagents have no mailbox, and their tool calls do not deliver mail. It waits fo
 
 ## A digest lists messages, but their text is missing
 
-A batch of more than 10 messages or 16 KiB is shown as a digest: one line per message with an unquoted preview of its first line, which is the sender's text. Ask Claude to call `read` with the `#seq`. Listed messages are not acked: they stay unread until `read` is called for their `#seq`, and they do not wake the session again. `inbox` lists recent messages and never acks. After a restart of the session, unread listed mail is listed again once (see [Hook delivery](operations.md#hook-delivery)). Senders should still put the action in the first line.
+A batch of more than 10 messages or 16 KiB is shown as a digest: one line per message with an unquoted preview of its first line, which is the sender's text. Ask Claude to call `read` with the message number. Listed messages are not acked: they stay unread until `read` is called for their number, and they do not wake the session again. `inbox` lists the messages the endpoint holds, with their state (`new` until the session has been told of it), and never acks. After a restart of the session, unread listed mail is listed again once (see [Hook delivery](operations.md#hook-delivery)). Senders should still put the action in the first line.
 
 ## Mail from the recipient's side seems to be missing
 
-- The inbox keeps 30 days or 16 MiB and drops the oldest first, unread included. Run `mash inbox --after N --limit 50` and compare the `#seq` values.
+- The inbox keeps 30 days or 16 MiB and drops the oldest first, unread included. Run `mash inbox --after N --limit 50` and compare the NUMBER column.
 - If the sender saw `sent #N` before a host crash of a self-hosted server, up to about 2 minutes may be lost without `sync_interval: always` ([operations.md](operations.md#durability-and-sync_interval)).
 - `mashctl limits show` prints the limits in force.
 
