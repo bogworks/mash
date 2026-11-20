@@ -277,22 +277,21 @@ func TestHostLineNamesOSKernelAndArch(t *testing.T) {
 }
 
 func TestShowRefusalAssertsTheCode(t *testing.T) {
-	good := `{"schema":"x","outcome":"refused","refusal":{"code":"not_found","detail":"no directory record"}}`
+	good := `{"error":"no endpoint alice.dev.review","hint":"mashctl endpoint list"}`
 	for _, c := range []struct {
 		name   string
 		code   int
 		out    string
 		wantOK bool
 	}{
-		{"not_found", 1, good, true},
-		{"other code", 1, `{"outcome":"refused","refusal":{"code":"unavailable","detail":"x"}}`, false},
+		{"not found", 1, good, true},
+		{"other error", 1, `{"error":"no servers available"}`, false},
 		{"exit 1, no JSON", 1, "", false},
 		{"exit 1, text only", 1, "mashctl: endpoint show: revoked", false},
 		{"exit 0 with the document", 0, good, false},
 		{"exit 2", 2, good, false},
-		{"found endpoint", 1, `{"outcome":"ok"}`, false},
-		{"refusal is a bare string", 1, `{"outcome":"refused","refusal":"not_found"}`, false},
-		{"refused without refusal", 1, `{"outcome":"refused"}`, false},
+		{"found endpoint", 1, `{"address":"alice.dev.review","state":"offline"}`, false},
+		{"empty error", 1, `{"error":""}`, false},
 	} {
 		if ok, d := showRefusal(c.code, c.out); ok != c.wantOK {
 			t.Errorf("%s: got %v (%s), want %v", c.name, ok, d, c.wantOK)

@@ -1,8 +1,8 @@
 # mashctl: creating, labeling and deleting endpoints
 
-Endpoints are made by `mashctl endpoint create`, and every endpoint carries the same kind of permission set, the owner-line set for its address `owner.group.instance` (it may mail the endpoints of its own owner and read what it needs to; the owner is the fence). `mashctl permissions ADDRESS` prints that set. A NATS user is signed by the account signing key (`account.nk` in the key directory, `<config dir>/keys` or `MASH_KEYS_DIR`) and carries its permission set in its JWT; there is no policy file and no tag. See [ADR 0052](decisions/0052-mashctl-mints-nats-users-and-holds-the-account-signing-key.md).
+Endpoints are made by `mashctl endpoint create`, and every endpoint carries the same kind of permission set, the owner-line set for its address `owner.group.instance` (it may mail the endpoints of its own owner and read what it needs to; the owner is the fence). `mashctl endpoint permissions ADDRESS` prints that set. A NATS user is signed by the account signing key (`account.nk` in the key directory, `<config dir>/keys` or `MASH_KEYS_DIR`) and carries its permission set in its JWT; there is no policy file and no tag. See [ADR 0052](decisions/0052-mashctl-mints-nats-users-and-holds-the-account-signing-key.md).
 
-Every verb that names an endpoint takes its address, `owner.group.instance`, or the flat key `owner_group_instance`. A bare name is refused (exit 2).
+`endpoint list`, `show`, `set`, `unset`, `suspend`, `resume`, `inbox` and `permissions` take an endpoint as `owner.group.name`: dotted, three parts. A bare name, the flat key `owner_group_name` and the slash form are refused (exit 2).
 
 `mashctl endpoint create`, `reissue`, `delete`, `list` and `show` are described [below](#mashctl-endpoint-create); `mash key create` and `mash credential create` make the endpoint's key and creds file.
 
@@ -41,21 +41,30 @@ Every user JWT `mashctl` issues is written to the issue record, the `mash-issued
 
 `issued check` asks every server, through the system account (`--sys-creds FILE`, else `MASH_SYS_CREDS`, else the `sys.creds` next to `admin_creds`), which user public keys are connected in the MASH account, and compares them with the record. It reports, per server, any connected key mash did not issue (the key, the server, the account, the client's connection name, the key that signed the JWT and its tags), the recorded keys that are not connected (informational) and a count summary. No key is exempt, not even the admin user this command connects with: it must be in the record (`mashctl init` and `adopt --mint-admin` record it). The system account's users never appear in the MASH account's connection list. A connected key that the record holds as revoked is reported apart, as `REVOKED key K still connected`: the revocation did not take effect (revoke it again, and look at the account JWT). A recorded key of any purpose counts as issued by mash. Exit codes: 0 when no unrecorded key and no revoked key is connected and the scan was complete; 1 when a finding was found, even if the scan was incomplete; 2 when nothing was found but the scan was incomplete or failed: bad arguments, a connection failure, a server that did not answer, a server whose connection list changed while it was read and could not be read whole (a list that fits one page is one snapshot; a list of several pages is accepted only when two consecutive complete scans collect the same connections, and each server is scanned up to 3 times), or a server set that cannot be shown to be complete (a cluster needs `--servers N` or `MASH_SERVERS`, as `endpoint delete` does). Whenever the scan was incomplete the text says `INCOMPLETE` and names why, and the JSON has `complete: false` and `incomplete` with the reason, with or without a finding. `--json` prints `clean`, `complete`, `incomplete`, `account`, `record_present`, `servers` (`answered`, `missing`, `expected`), `unrecorded`, `revoked_connected`, `recorded_not_connected` and `summary`. Only public keys are printed. See [operations.md](operations.md#the-issue-record-and-the-drift-check) for what it can and cannot see.
 
-## Labels
+## Setting and removing values on an endpoint
 
 ```sh
-mashctl label ADDRESS k=v [k=v]... [--dry-run]
-mashctl unlabel ADDRESS k [k]... [--dry-run]
+mashctl endpoint set ADDRESS key=value... [--dry-run] [--json]
+mashctl endpoint unset ADDRESS key... [--dry-run] [--json]
 ```
 
-These set and clear labels on the endpoint's directory record (`mash who` no longer shows them). They connect with the admin credentials and need no file and no creds: the endpoint must have a directory record, and keys and values are checked as the directory checks labels. `label` prints `labeled ADDRESS: k=v ...` and `unlabel` prints `unlabeled ADDRESS: -k ...`; a change that leaves the labels as they are prints `ADDRESS: nothing to change`. `unlabel` of a label that is not set warns and exits 0. `--dry-run` says what would change and writes nothing. There are no `--policy` and `--sync` flags (both are unknown options): the record is the only place a label lives.
+These change the endpoint's directory record (what `who --long` shows). They connect with the admin credentials and need no file and no creds: the endpoint must have a directory record. The keys are `role`, `description`, `host`, `note`, `capability` and `label.NAME`.
+
+- `set` gives each key its value and leaves every other field as it is. `capability=a,b` takes a list with commas and sets the whole list, replacing what was there. `label.team=blue` sets the label `team`. A label name is a letter, then up to 31 of `a-z 0-9 _ . -`; keys and values are checked as the directory checks them.
+- `unset` clears each key. `unset capability` removes every capability; to remove one, set the list again without it. `unset label.team` removes the label `team`; a label that is not set gives a warning and exit 0.
+- Both print `Updated endpoint ADDRESS`. A command that leaves the record as it is prints `Nothing to change on endpoint ADDRESS`.
+- `--dry-run` prints `Would update endpoint ADDRESS: what` and `Nothing was changed.`, and changes nothing.
+- `--json` prints `{"address": ..., "set": {...}}` or `{"address": ..., "unset": [...]}`, with `"dry_run": true` for a dry run.
+- A key that cannot be set, a missing value, a key given twice and an unknown option exit 2 and are not echoed back. An endpoint with no directory record exits 1.
 
 Labels do not change a minted user: the permissions of an endpoint do not depend on them, so setting one leaves nothing to reissue.
+
 ## Suspending an endpoint's inbound mail
 
-- `mashctl suspend ADDRESS` refuses all inbound mail to ADDRESS's inbox and prints `suspended ADDRESS: id ID, last_seq N, msgs M (new mail parked; the endpoint's credentials are still valid)`. Suspend does not revoke: it is reversible, and the endpoint can still connect with its creds. The id is a random token naming this one suspension. Stored mail stays readable; the sequence is final while the suspension holds.
-- `mashctl resume ADDRESS` restores delivery and prints `resumed ADDRESS`.
-- `mashctl suspended ADDRESS` prints `suspended ADDRESS since T: id ID, last_seq N, msgs M` and exits 0, or `ADDRESS is not suspended` and exits 1. Any error exits 1.
+- `mashctl endpoint suspend ADDRESS` refuses all inbound mail to ADDRESS's inbox and prints `Suspended endpoint ADDRESS`. Suspend does not revoke: it is reversible, and the endpoint can still connect with its creds. Stored mail stays readable and is not purged.
+- `mashctl endpoint resume ADDRESS` restores delivery and prints `Resumed endpoint ADDRESS`.
+- `mashctl endpoint show ADDRESS` shows `state: suspended` for a suspended endpoint, and `endpoint list` shows `suspended` in its STATE column.
+- Both take `--dry-run` (print `Would suspend endpoint ADDRESS` or `Would resume endpoint ADDRESS` and `Nothing was changed.`) and `--json` (`{"address": ..., "state": ...}`). An endpoint with no inbox stream exits 1.
 
 See [operations.md](operations.md#suspend-an-endpoints-inbound-mail).
 
@@ -63,40 +72,41 @@ See [operations.md](operations.md#suspend-an-endpoints-inbound-mail).
 
 `mashctl audit [--json] [--strict] [--creds-dir DIR] [--compare EARLIER.json]` lists what the server and the creds directories hold, changes nothing, and reports state, not use: it cannot see publishes, connections or endpoints with no stream. `--compare` adds what moved since an earlier `--json` report. Exit codes: 0 clean (or findings without `--strict`), 1 findings under `--strict` (orphans, unreadable items, movement found by `--compare`), 2 usage. A server that cannot be reached, unreadable required input and a bad `--compare` file also exit 1. See [audit.md](audit.md).
 
-## mashctl inbox inspect
+## mashctl endpoint inbox
 
 ```text
-mashctl inbox inspect <address> [--json] [--from SEQ] [--to SEQ] [--limit N]
+mashctl endpoint inbox ADDRESS [--after NUMBER] [--limit n] [--json]
 ```
 
-Shows one endpoint's stored messages and where its `deliver` consumer stands, so a test can prove what the transport kept and delivered. It is read only: it uses stream info, a direct get of a message by sequence and consumer info of the existing `deliver` consumer, and nothing else. It never creates, updates, binds or fetches from a consumer, never acknowledges, and writes nothing to the directory, a bucket or a file. It runs with the same admin credentials as `audit`.
+Lists the messages stored in one endpoint's inbox and whether each was delivered, so a test can prove what the transport kept and delivered. It never shows a message's text. It is read only: it uses stream info, a direct get of a message by sequence and consumer info of the existing `deliver` consumer, and nothing else. It never creates, updates, binds or fetches from a consumer, never acknowledges, and writes nothing to the directory, a bucket or a file. It runs with the same admin credentials as `audit`.
 
-- `address` is `owner.group.instance` or the flat key `owner_group_instance`. It is read from the directory record, one key; an address that names no record is refused (exit 1).
-- The default is the last 20 messages, oldest first. `--limit N` caps the count. `--from SEQ` and `--to SEQ` are an inclusive stream-sequence range, clamped to the stream's first and last sequence; with `--from` the first N messages from it are shown.
+- ADDRESS is read from the directory record, one key; an address that names no record is refused (exit 1).
+- The default is the last 20 messages, oldest first. `--limit n` caps the count. `--after NUMBER` shows only the messages after that message number, as `mash inbox --after` does; with it the first n messages after the number are shown. A value that is not a whole number exits 2 with `error: --after must be a whole number`.
 - Exit codes: 0 success, 1 a refusal (an unknown endpoint, no inbox stream) or it could not complete (no server, no credentials), 2 a usage error.
 
-The text form prints the stream and consumer totals, a table of messages and a `note:` line for each limit. `--json` prints one object. The schema string and the field names are a stable contract; they change only when a field is removed or changes meaning.
+The text form prints a line with the count, then a table:
+
+```text
+1 message for acme.demo.bob, 1 not delivered.
+
+NUMBER  FROM   WHEN    DELIVERED  KIND  SIZE
+7       alice  2m ago  no         task  48 B
+```
+
+FROM is the sender's name when the sender is in the endpoint's owner and group, else its whole address, and `?` when the message names none. `--json` prints one object:
 
 | field | meaning |
 | --- | --- |
-| `schema` | `mash-inbox-inspect@1` |
-| `address` | the address as given |
-| `stream` | `name`, `first_seq`, `last_seq`, `messages`, `bytes` of the inbox stream |
-| `consumer` | the `deliver` consumer, or `null` when it does not exist (every message is then `undelivered`): `name`; `ack_floor` and `delivered`, each `{stream_seq, consumer_seq}`; `num_pending`; `num_redelivered`; `num_ack_pending` |
-| `messages[].seq` | the stream sequence |
-| `messages[].msg_id` | the `Nats-Msg-Id` header, empty when there is none |
-| `messages[].sender` | the sender's address: from the directory for `verified` and `stale`, the signed address for the others, `?` when the header names none |
-| `messages[].trust` | `verified`, `claimed`, `unknown-signer`, `stale`, `forged`, `malformed` or `absent`, from the stored `Agent-Sender` header (forged and malformed mail is shown, not hidden) |
-| `messages[].stored_at` | the stream's store time, RFC 3339 UTC |
-| `messages[].size` | payload size in bytes |
+| `address` | the endpoint |
+| `total` | the messages in the inbox stream |
+| `undelivered` | the messages the `deliver` consumer has not delivered; all of them when the consumer does not exist |
+| `messages[].number` | the stream sequence |
+| `messages[].from` | the sender's address |
+| `messages[].delivered` | `true` when the sequence is at or below the consumer's last delivered sequence |
 | `messages[].kind` | the `Mash-Kind` header |
-| `messages[].state` | `acked`, `undelivered` or `delivered-unacked-or-acked-out-of-order` (text form: `delivered, ack not confirmed`) |
-| `messages[].delivery_count`, `messages[].ack_time` | always `null` |
-| `limits` | the strings below |
+| `messages[].size` | payload size in bytes |
 
-The state comes from the consumer's cursors alone: `acked` when the sequence is at or below `ack_floor.stream_seq`, `undelivered` when it is above `delivered.stream_seq`, otherwise `delivered-unacked-or-acked-out-of-order`, because NATS does not report acknowledgements above the ack floor. The trust label is worked out as the receiving endpoint does, except that the signer is looked up by the address it signed (one directory key read) instead of by listing the directory: a signature by a key that is not on that address's record is `unknown-signer`, and a signed header with no name is too.
-
-Limits, also in the `limits` array: per-message delivery count and ack time are not kept by JetStream or mash; the consumer's `num_redelivered` is the aggregate. A message above the ack floor and at or below the last delivered sequence may be unacknowledged or acknowledged out of order, and the server does not say which.
+Delivered comes from the consumer's cursors alone. NATS does not report acknowledgements above the ack floor, so a delivered message may be unacknowledged or acknowledged out of order, and the server does not say which. A per-message delivery count and ack time are not kept by JetStream or mash.
 
 See also [audit.md](audit.md) for the consumer fields (`delivered`, `ack_floor`, `num_redelivered`, `pending`, `ack_pending`) the audit reports per inbox.
 
@@ -181,11 +191,37 @@ Removes an endpoint. In order, it:
 ## mashctl endpoint list and show
 
 ```sh
-mashctl endpoint list [--json]
+mashctl endpoint list [PREFIX] [--wide] [--json]
 mashctl endpoint show ADDRESS [--json]
 ```
 
-`list` prints one line per endpoint in the directory: `owner/group/instance`, `owner.group.instance`, the flat key and the creation time, then a count. It exits 0, also when there are none. `show` prints one endpoint's whole directory record, the path of its creds file in the config directories, and its issue record entry (when issued and whether revoked). It exits 1 when the endpoint does not exist. Both change nothing. The JSON schemas are `mashctl-endpoint-list@1` and `mashctl-endpoint@1`.
+`list` prints a table of the endpoints in the directory, sorted by address. PREFIX is an owner (`acme`) or an owner and group (`acme.demo`); only endpoints under it are listed. An owner or group that repeats the row above is left blank. STATE is `online` (a session holds the endpoint's lease), `offline`, or `suspended`. `--wide` adds CREATED (UTC), WAITING (messages not yet delivered) and LABELS (`-` when there are none). With no endpoint it prints `No endpoints.` It exits 0, also when there are none.
+
+```text
+OWNER  GROUP  NAME   STATE
+acme   demo   alice  online
+              bob    offline
+       ops    carol  suspended
+```
+
+`show` prints one endpoint:
+
+```text
+address:    acme.demo.bob
+state:      offline
+created:    2026-11-19 09:40 UTC
+waiting:    1 message
+labels:     team=blue
+public key: UDXU4RCSV3GJRXWQ4PNDKYEL7ZBSMSGGTJYNDQGHFM4QWHBRD3ZTQ4LX
+```
+
+`role`, `host`, `description`, `capability` and `note` lines appear when the record has them. It exits 1 when the endpoint does not exist. Both change nothing.
+
+`--json` prints, for `list`, `{"endpoints": [{"address", "owner", "group", "name", "state"}]}`, and for `show`, `address`, `state`, `created` (RFC 3339), `waiting`, `labels`, `public_key` and the optional fields above.
+
+## mashctl version
+
+`mashctl version` prints `mashctl vVERSION (COMMIT)`, where COMMIT is the first seven characters of the commit the binary was built from (`unknown` when the build has none). `--json` prints `{"version": "VERSION", "commit": "COMMIT"}`.
 
 ## mash key create and mash credential create
 
@@ -259,7 +295,7 @@ Endpoints made by 0.5.0 do not work with 0.5.5. Make new ones with `endpoint cre
 
 ## Revocation
 
-`endpoint delete` and `endpoint reissue` revoke the endpoint's NATS user in the same command (`mashctl suspend` does not). The revocation is an entry in the account JWT, by user public key and time: NATS refuses a user JWT for that key issued at or before the revocation time, and a connected user is closed when the server takes the account update, so credentials stop working everywhere the update reached. mashctl signs the update with the operator key, pushes it through the system account to every known server, requires every one to acknowledge it, and reads it back; if that cannot be shown it exits non-zero with `not confirmed` and running the command again is safe. An existing revocation is never lowered or removed.
+`endpoint delete` and `endpoint reissue` revoke the endpoint's NATS user in the same command (`mashctl endpoint suspend` does not). The revocation is an entry in the account JWT, by user public key and time: NATS refuses a user JWT for that key issued at or before the revocation time, and a connected user is closed when the server takes the account update, so credentials stop working everywhere the update reached. mashctl signs the update with the operator key, pushes it through the system account to every known server, requires every one to acknowledge it, and reads it back; if that cannot be shown it exits non-zero with `not confirmed` and running the command again is safe. An existing revocation is never lowered or removed.
 
 `endpoint delete ADDRESS` revokes the user of ADDRESS's directory record. With no record there is nothing to revoke. `--no-revoke` (same warning, same temporary name) is the one mashctl option for it, and the system credentials and server count come from `MASH_SYS_CREDS` and `MASH_SERVERS`.
 
@@ -271,7 +307,7 @@ Because revocation is by key and time, a new credential for an endpoint needs a 
 
 ## Exit codes and arguments
 
-mashctl exits with 0, 1 or 2 only: 0 it worked, 1 it failed (one line on standard error says why), 2 the command line was wrong or the command cannot run here, and nothing was attempted. Every verb exits 0 on success, 2 for a usage error (a wrong or missing argument, an unknown flag, a stray argument, an argument that fails validation) and 1 for any failure; `suspended` exits 1 for "not suspended"; `audit` exits 1 for `--strict` findings and when it could not complete (see [audit.md](audit.md#exit-codes)). An argument that fails validation is named in the message but never printed back, so a secret pasted into the wrong place is not echoed. `mashctl permissions ADDRESS` prints the permission set of the endpoint's NATS user (stdout stays the JSON or the `--nsc` flags).
+mashctl exits with 0, 1 or 2 only: 0 it worked, 1 it failed (one line on standard error says why), 2 the command line was wrong or the command cannot run here, and nothing was attempted. Every verb exits 0 on success, 2 for a usage error (a wrong or missing argument, an unknown flag, a stray argument, an argument that fails validation) and 1 for any failure; `audit` exits 1 for `--strict` findings and when it could not complete (see [audit.md](audit.md#exit-codes)). An argument that fails validation is named in the message but never printed back, so a secret pasted into the wrong place is not echoed. `mashctl endpoint permissions ADDRESS` prints the permission set of the endpoint's NATS user as JSON, and nothing else, on stdout; it reads no server. The keys are `pub` and `sub`, each with `allow` and `deny`; `deny` is always printed, as `[]` when it is empty. Errors are `error: WHAT` on standard error, then an optional `hint: COMMAND`; with `--json` the commands of this form print `{"error": ..., "hint": ...}` on standard output instead.
 
 ## Before you push with nsc
 

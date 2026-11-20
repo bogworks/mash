@@ -3,14 +3,12 @@ package ctl
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"slices"
-	"sort"
 	"strings"
 	"time"
 
@@ -57,14 +55,6 @@ func parseAddr(arg string) (sap.Address, error) {
 	return sap.Address{}, notAddress(arg)
 }
 
-func suspendUsage(prog, verb string) string {
-	return "usage: " + prog + " " + verb + " <owner.group.instance>"
-}
-
-func setMetaUsage(prog string) string {
-	return "usage: " + prog + " set-meta <owner.group.instance> [--role R] [--host H] [--label k=v]... [--describe TEXT] [--cap C]... [--uncap C]...   (at least one; a value of - clears the field; --label k=- clears that label; --cap C adds a capability, --uncap C removes one, --cap - clears them all)"
-}
-
 // Usage is the full verb listing for prog.
 func Usage(prog string) string {
 	var b strings.Builder
@@ -80,18 +70,12 @@ func Usage(prog string) string {
 	line("init --local [--dir D] [--owner O] [--port P] [--start]", "write the configuration of a local operator-mode NATS server with JetStream (loopback, TLS only), keys and credentials, for one developer; --start also starts it and creates the buckets")
 	line("limits [address...]", "raise existing inboxes to the configured limits (config.json \"limits\"; never lowers)")
 	line("limits --show", "print the effective limits")
-	line("permissions <owner.group.instance> [--nsc]", "the NATS permissions an endpoint user needs")
-	line("set-meta <owner.group.instance> [--role R] [--host H] [--label k=v]... [--describe TEXT] [--cap C]... [--uncap C]...", "(a value of - clears the field; --label k=- clears that label; --cap C adds a capability, --uncap C removes one, --cap - clears them all)")
-	line("suspend <owner.group.instance>", "refuse all inbound mail to an endpoint (its stored mail stays readable); prints the last sequence; the endpoint's credentials stay valid")
-	line("resume <owner.group.instance>", "undo suspend")
-	line("suspended <owner.group.instance>", "print whether an endpoint is suspended and its last sequence; exit 0 if suspended, 1 if not or on error")
 	if prog == "mashctl" {
 		line("audit [--json] [--strict] [--creds-dir DIR]", "read only: list every directory record, inbox stream, lease and creds file with their state, the orphans; --strict exits 1 on an orphan, an unreadable item, or unread mail lost to eviction (a lower bound from consumer sequences: mail fetched but never shown, or redelivered, can make it undercount, so a clean audit does not prove nothing was lost)")
-		line("inbox inspect <owner.group.instance> [--json] [--from SEQ] [--to SEQ] [--limit N]", "read only: one inbox's stored messages (default the last 20) with sender, trust, store time, size, kind and delivery state derived from the deliver consumer's cursors, and the consumer's totals; never creates, fetches from or acknowledges a consumer")
 		adoptLines(line)
 		issuedLines(line)
 		endpointLines(line)
-		labelLines(line)
+		line("version [--json]", "print the version and the commit")
 	}
 	return b.String()
 }
@@ -106,16 +90,17 @@ func issuedLines(line func(left, right string)) {
 }
 
 func endpointLines(line func(left, right string)) {
-	line("endpoint create [ADDRESS] [--owner O] [--group G] [--name N] (--public-key FILE | --make-key) [--jwt-out FILE] [--label k=v]... [--tool] [--note N] [--describe T] [--cap C]... [--servers N] [--sys-creds FILE] [--dry-run] [--json]", "sign the endpoint's key and write its directory record, for example alice/dev/design")
+	line("endpoint list [prefix] [--wide]", "the endpoints in the directory")
+	line("endpoint show ADDRESS", "one endpoint: its state, labels and public key")
+	line("endpoint create [ADDRESS] [--owner O] [--group G] [--name N] (--public-key FILE | --make-key) [--jwt-out FILE] [--label k=v]... [--tool] [--note N] [--describe T] [--cap C]... [--servers N] [--sys-creds FILE] [--dry-run] [--json]", "sign the endpoint's key and write its directory record, for example acme.demo.bob")
 	line("endpoint reissue ADDRESS (--public-key FILE | --make-key) [--jwt-out FILE] [--servers N] [--sys-creds FILE] [--dry-run] [--json]", "revoke the old key on every server and name a new one")
 	line("endpoint delete ADDRESS [--delete-creds] [--force] [--no-revoke] [--dry-run] [--json] [--servers N] [--sys-creds FILE]", "revoke the endpoint's user key, remove its record and inbox, burn the address, rename its creds file")
-	line("endpoint list [--json]", "the endpoints in the directory")
-	line("endpoint show ADDRESS [--json]", "one endpoint's directory record, creds file path and issue record")
-}
-
-func labelLines(line func(left, right string)) {
-	line("label <owner.group.instance> k=v... [--dry-run]", "set labels on the endpoint's directory record")
-	line("unlabel <owner.group.instance> k... [--dry-run]", "remove labels from the endpoint's directory record")
+	line("endpoint set ADDRESS key=value... [--dry-run]", "set role, description, host, capability or label.NAME")
+	line("endpoint unset ADDRESS key... [--dry-run]", "remove those values")
+	line("endpoint suspend ADDRESS [--dry-run]", "refuse new mail to an endpoint; its stored mail and credentials stay")
+	line("endpoint resume ADDRESS [--dry-run]", "undo suspend")
+	line("endpoint inbox ADDRESS [--limit n]", "what is in an endpoint's inbox, without any message text")
+	line("endpoint permissions ADDRESS", "the NATS permissions an endpoint's user needs")
 }
 
 // OpenAdmin connects to the server with the admin credentials and returns the admin handle, a context carrying the
@@ -187,25 +172,6 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 	if cfg.Owner == "" {
 		return fail(errors.New(pfx + ": no owner: set \"owner\" in config.json, or MASH_ENDPOINT or --endpoint (its owner part is the owner these commands act for)"))
 	}
-	if args[0] == "permissions" {
-		if len(args) < 2 || len(args) > 3 || (len(args) == 3 && args[2] != "--nsc") {
-			return usage(errors.New("usage: " + prog + " permissions <owner.group.instance> [--nsc]"))
-		}
-		addr, err := parseAddr(args[1])
-		if err != nil {
-			return usage(err)
-		}
-		// On stderr: the output is consumed whole (jq, mapfile), so a note on stdout would break it.
-		fmt.Fprintln(stderr, permissionsNote(prog))
-		if len(args) == 3 {
-			// One argument per line: mapfile -t flags < <(mashctl permissions n --nsc)
-			fmt.Fprintln(stdout, strings.Join(madmin.NSCFlags(addr), "\n"))
-			return 0
-		}
-		b, _ := json.MarshalIndent(madmin.Permissions(addr), "", "  ")
-		fmt.Fprintln(stdout, string(b))
-		return 0
-	}
 	if args[0] == "limits" && len(args) == 2 && args[1] == "--show" {
 		l := cfg.Limits
 		fmt.Fprintf(stdout, "inbox_max_bytes %s\ninbox_max_age %s\ndirectory_max_bytes %s\nlease_max_bytes %s\ninbox_max_consumers %d\n",
@@ -243,54 +209,6 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		if err != nil {
 			return fail(err)
 		}
-	case "set-meta":
-		if len(args) < 3 {
-			return usage(errors.New(setMetaUsage(prog)))
-		}
-		addr, err := parseAddr(args[1])
-		if err != nil {
-			return usage(fmt.Errorf("%s\n%w", setMetaUsage(prog), err))
-		}
-		u, err := setMetaUpdate(prog, args)
-		if err != nil {
-			return usage(err)
-		}
-		rec, err := a.SetMeta(ctx, addr, u)
-		if err != nil {
-			return fail(err)
-		}
-		fmt.Fprintf(stdout, "updated %s: role %q, host %q, labels %s%s\n", config.Clean(addr.String()), config.Clean(rec.Role), config.Clean(rec.Host), labelList(rec.Labels), metaSuffix(rec))
-	case "suspend", "resume", "suspended":
-		if len(args) != 2 {
-			return usage(errors.New(suspendUsage(prog, args[0])))
-		}
-		addr, err := parseAddr(args[1])
-		if err != nil {
-			return usage(fmt.Errorf("%s\n%w", suspendUsage(prog, args[0]), err))
-		}
-		switch args[0] {
-		case "suspend":
-			st, err := a.Suspend(ctx, addr)
-			if err != nil {
-				return fail(err)
-			}
-			fmt.Fprintf(stdout, "suspended %s: id %s, last_seq %d, msgs %d (new mail parked; the endpoint's credentials are still valid)\n", addr, config.Clean(st.ID), st.LastSeq, st.Msgs)
-		case "resume":
-			if err := a.Resume(ctx, addr); err != nil {
-				return fail(err)
-			}
-			fmt.Fprintf(stdout, "resumed %s\n", addr)
-		default:
-			st, err := a.Suspended(ctx, addr)
-			if err != nil {
-				return fail(err)
-			}
-			if !st.Suspended {
-				fmt.Fprintf(stdout, "%s is not suspended\n", addr)
-				return 1
-			}
-			fmt.Fprintf(stdout, "suspended %s since %s: id %s, last_seq %d, msgs %d\n", addr, config.Clean(st.Since), config.Clean(st.ID), st.LastSeq, st.Msgs)
-		}
 	default:
 		fmt.Fprintf(stderr, "%s: unknown command %q\n\n%s", prog, args[0], Usage(prog))
 		return 2
@@ -298,89 +216,8 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 	return 0
 }
 
-// metaSuffix is the confirmation line's tail for the description and capabilities, empty when neither is set.
-func metaSuffix(r store.Record) string {
-	var b strings.Builder
-	if r.Description != "" {
-		fmt.Fprintf(&b, ", description %q", config.Clean(r.Description))
-	}
-	if len(r.Caps) > 0 {
-		fmt.Fprintf(&b, ", caps %s", config.Clean(strings.Join(r.Caps, ",")))
-	}
-	return b.String()
-}
-
 func initUsage(prog string) string {
 	return "usage: " + prog + " init   |   " + prog + " init --local [--dir D] [--owner O] [--port P] [--start]"
-}
-
-// permissionsNote says what `permissions` prints.
-func permissionsNote(prog string) string {
-	return "note: these are the permissions of the endpoint's NATS user: the owner-line set for its address."
-}
-
-// setMetaUpdate reads set-meta's flags (args[0] is "set-meta", args[1] the name) into a MetaUpdate.
-func setMetaUpdate(prog string, args []string) (madmin.MetaUpdate, error) {
-	var u madmin.MetaUpdate
-	bad := errors.New(setMetaUsage(prog))
-	dst := map[string]**string{"--role": &u.Role, "--host": &u.Host, "--describe": &u.Description}
-	for i := 2; i < len(args); i += 2 {
-		if i+1 >= len(args) {
-			return u, bad
-		}
-		val := args[i+1]
-		switch args[i] {
-		case "--label":
-			k, v, ok := strings.Cut(val, "=")
-			if !ok {
-				return u, bad
-			}
-			if v == "-" {
-				v = ""
-			}
-			if u.Labels == nil {
-				u.Labels = map[string]string{}
-			}
-			if _, dup := u.Labels[k]; dup {
-				return u, bad
-			}
-			u.Labels[k] = v
-		case "--cap":
-			if val == "-" {
-				u.ClearCaps = true
-			} else {
-				u.AddCaps = append(u.AddCaps, val)
-			}
-		case "--uncap":
-			u.DropCaps = append(u.DropCaps, val)
-		default:
-			p, ok := dst[args[i]]
-			if !ok || *p != nil {
-				return u, bad
-			}
-			if val == "-" {
-				val = ""
-			}
-			*p = &val
-		}
-	}
-	return u, nil
-}
-
-// labelList renders labels sorted as k=v, space separated; "none" when there are none.
-func labelList(l map[string]string) string {
-	if len(l) == 0 {
-		return "none"
-	}
-	keys := make([]string, 0, len(l))
-	for k := range l {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for i, k := range keys {
-		keys[i] = config.Clean(k) + "=" + config.Clean(l[k])
-	}
-	return strings.Join(keys, " ")
 }
 
 // adminDeadline is the total deadline of one admin command: admin_timeout, else 30 seconds.

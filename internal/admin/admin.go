@@ -314,7 +314,11 @@ func (a *Admin) createStreamLocked(ctx context.Context, lk *streamLock, key stri
 		existing = nil
 	} else {
 		if _, ok := suspendedSubjects(key, existing.CachedInfo().Config); ok {
-			return nil, fmt.Errorf("mash: inbox of %s is suspended; run `mashctl resume %s` first", key, key)
+			shown := key
+			if a, err := sap.AddressFromFlat(key); err == nil {
+				shown = a.String()
+			}
+			return nil, fmt.Errorf("mash: inbox of %s is suspended; run `mashctl endpoint resume %s` first", key, shown)
 		}
 		if err := refuseLowering(key, existing.CachedInfo().Config, a.limits); err != nil {
 			return nil, err
@@ -633,6 +637,7 @@ func (a *Admin) applyInboxLimitsLocked(ctx context.Context, lk *streamLock, name
 // removes every capability first (then AddCaps still apply).
 type MetaUpdate struct {
 	Role, Host  *string
+	Note        *string
 	Labels      map[string]string
 	Description *string
 	AddCaps     []string
@@ -676,6 +681,12 @@ func (a *Admin) SetMeta(ctx context.Context, addr sap.Address, u MetaUpdate) (st
 			return store.Record{}, err
 		}
 		fields["description"] = u.Description
+	}
+	if u.Note != nil {
+		if err := store.ValidDescription(*u.Note); err != nil {
+			return store.Record{}, err
+		}
+		fields["note"] = u.Note
 	}
 	for _, c := range append(append([]string(nil), u.AddCaps...), u.DropCaps...) {
 		if !store.ValidCap(c) {
@@ -793,7 +804,7 @@ func (a *Admin) SetMeta(ctx context.Context, addr sap.Address, u MetaUpdate) (st
 		}
 		return store.ParseRecord(name, val)
 	}
-	return store.Record{}, fmt.Errorf("mash: directory %s kept changing under set-meta; try again", name)
+	return store.Record{}, fmt.Errorf("mash: directory %s kept changing under the update; try again", name)
 }
 
 // NameLock is a held name lock (ADR 0048, ADR 0058), handed to the func WithNameLock runs. It is valid only inside that

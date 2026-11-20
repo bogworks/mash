@@ -60,7 +60,7 @@ Adopt changes nothing on the server except one thing: with `--mint-admin` it rec
 
 `mashctl` takes the server, the owner and the admin credentials from `config.json` in the config directory; the endpoint's own `MASH_*` variables (`MASH_SERVER`, `MASH_ENDPOINT`, `MASH_ADMIN_CREDS`, `MASH_CA`, ...) win over the file, and the global flags (`--server`, `--ca`, `--creds`, `--endpoint`) win over both. The owner is the owner part of `MASH_ENDPOINT` or `--endpoint`. Run from a shell inside a mash agent session, those variables are the session's, so `mashctl init`, `list` and the other verbs act on the session's own server, not the scratch one you may have meant.
 
-Every verb that connects to a server or changes one (`init`, `limits`, `set-meta`, `suspend`, `resume`, `suspended`, `endpoint create`, `endpoint reissue`, `endpoint delete`, `endpoint list`, `endpoint show`, `label` and `unlabel`) first prints, to stderr, what it is about to act on and where each setting came from:
+Every verb that connects to a server or changes one (`init`, `limits`, `endpoint create`, `endpoint reissue`, `endpoint delete`, `endpoint list`, `endpoint show`, `endpoint set`, `endpoint unset`, `endpoint suspend`, `endpoint resume` and `endpoint inbox`) first prints, to stderr, what it is about to act on and where each setting came from:
 
 ```
 mashctl: target server tls://host:4222 (from MASH_SERVER), owner acme (from MASH_ENDPOINT), admin creds /home/me/.config/mash/admin.creds (from MASH_ADMIN_CREDS)
@@ -76,7 +76,7 @@ The account seed in the key store (`account.nk`, with `operator.nk` and `system.
 
 What `mashctl` prints and reads follows from not trusting the server:
 
-- Strings that came from a server or a directory record (server names, ack messages, scoped signing key roles, record fields in `list` and `suspended`) are printed escaped: every control character (ESC, CR, newline, and the C1 range) and invalid UTF-8 shows as `\xNN` or `\uNNNN`, and a value is cut at 256 characters with `...`. Ordinary text, accented letters included, is unchanged.
+- Strings that came from a server or a directory record (server names, ack messages, scoped signing key roles, record fields in `endpoint list` and `endpoint show`) are printed escaped: every control character (ESC, CR, newline, and the C1 range) and invalid UTF-8 shows as `\xNN` or `\uNNNN`, and a value is cut at 256 characters with `...`. Ordinary text, accented letters included, is unchanged.
 - A reply from the system account is bounded: a claims reply over the account JWT limit (1 MiB) is refused with `reply of N bytes over the limit`, more than 1024 distinct server names ends the ping with `more than 1024 servers answered: refusing`, and a collection stops after 4096 replies.
 - A server URL with credentials in it (`nats://user:pass@host`) is not supported. `adopt` refuses it, so it is never written to `config.json`; give the credentials as files (`--sys-creds`, `--admin-creds`). A URL that reaches `mashctl` through `config.json` or `MASH_SERVER` is printed with the user information replaced by `***@`.
 - `config.json` is refused when it is writable by every user (`chmod go-w` it); its owner is not checked, since a config map is often a symlink owned by another user. A relative `admin_creds`, `ca`, `tls_cert` or `tls_key` in `config.json` is resolved against the config directory, not the working directory.
@@ -142,7 +142,7 @@ The creds file is named `<owner>.<group>.<instance>.creds`. It holds the seed. K
 
 Before a command changes anything, `--dry-run` says what it would do: `mashctl endpoint create alice/dev/design --public-key design.pub --dry-run`.
 
-`mashctl permissions <owner.group.instance>` prints the permission set as JSON; `--nsc` prints the same set as `nsc add user` flags, one argument per line. The set lets an endpoint:
+`mashctl endpoint permissions <owner.group.name>` prints the permission set as JSON, and nothing else, on stdout; it reads no server. The keys are `pub` and `sub`, each with `allow` and `deny`. The set lets an endpoint:
 
 - publish mail, live SAP prompts and status probes to any endpoint of its owner: `agents.mail.<owner>.*.*`, `agents.prompt.<owner>.*.*` and `agents.status.<owner>.*.*`, so a credential is open to the whole owner by default and reaches no other owner;
 - publish its own heartbeat, `agents.hb.<owner>.<group>.<instance>`, and answer SAP discovery;
@@ -169,19 +169,20 @@ Multi-server and TLS use, and a second `mashctl` machine, are described in [TLS,
 
 ### Directory metadata
 
-An endpoint's directory record can carry optional fields: `--role` (what it is for), `--host` (the machine it is meant to run on) and up to 64 free-form labels, `--label key=value` (repeatable), for grouping or tagging endpoints, for example `team=acme` or `project=billing`. `endpoint create` sets labels (`--label`), the description (`--describe`), capabilities (`--cap`) and a note (`--note`); `set-meta` sets the role and host and changes the rest later. They are the endpoint's identity on record, set by the admin; they are not live state. A role, host or label value is up to 64 printable characters with no tab or newline. A label key is a lowercase letter followed by up to 31 of `a-z`, `0-9`, `_`, `.` and `-`.
+An endpoint's directory record can carry optional fields: `--role` (what it is for), `--host` (the machine it is meant to run on) and up to 64 free-form labels, `--label key=value` (repeatable), for grouping or tagging endpoints, for example `team=acme` or `project=billing`. `endpoint create` sets labels (`--label`), the description (`--describe`), capabilities (`--cap`) and a note (`--note`); `endpoint set` and `endpoint unset` change them later. They are the endpoint's identity on record, set by the admin; they are not live state. A role, host or label value is up to 64 printable characters with no tab or newline. A label key is a lowercase letter followed by up to 31 of `a-z`, `0-9`, `_`, `.` and `-`.
 
 Two more fields say what the endpoint does: `--describe TEXT`, free text of up to 256 printable characters (no tab or newline), and up to 8 capability words, `--cap C` (repeatable), each a lowercase letter followed by up to 31 of `a-z`, `0-9`, `_`, `.` and `-`, with no repeats. Capabilities are stored sorted. A label holds one value per key and there are only 8 of them; capabilities are a list of words to find an endpoint by, and the description is the longer sentence ([ADR-0050](decisions/0050-the-directory-record-says-what-an-endpoint-does-with-a-description-and-capabilities.md)).
 
 ```sh
 mashctl endpoint create alice/dev/design --public-key design.pub --label team=acme --label tier=1 --describe "Keeps the NATS accounts current" --cap nats-accounts --cap review --note "design session on laptop"
-mashctl set-meta alice.dev.design --role reviewer --host laptop     # role and host are set after create
-mashctl set-meta alice.dev.design --role builder --host - --label tier=- --label env=prod   # change role, clear host, clear one label, set another; everything else stays
-mashctl set-meta alice.dev.design --describe "New text" --cap deploy --uncap review   # replace the description, add one capability, remove another
-mashctl set-meta alice.dev.design --describe - --cap -                              # clear the description and every capability
+mashctl endpoint set alice.dev.design role=reviewer host=laptop     # role and host are set after create
+mashctl endpoint set alice.dev.design role=builder label.env=prod   # change the role, set a label; everything else stays
+mashctl endpoint unset alice.dev.design host label.tier             # clear the host, remove one label
+mashctl endpoint set alice.dev.design description="New text" capability=deploy,review   # replace the description and the whole capability list
+mashctl endpoint unset alice.dev.design description capability      # clear the description and every capability
 ```
 
-`set-meta` needs at least one flag, changes only the fields given, and writes with a compare-and-set, re-reading and retrying if another write lands first. A value of `-` clears a field, and `--label k=-` clears that one label while the other labels stay. `--describe -` clears the description. `--cap C` adds a capability, `--uncap C` removes one, and `--cap -` clears them all (added in the same command afterwards). The 8-label and 8-capability caps are checked after the merge. The confirmation line also shows the description and capabilities when set. Fields a newer mash wrote to the record are kept. Older mash versions ignore the labels, so mixed versions are safe. 
+`endpoint set` and `endpoint unset` need an address and at least one key, change only the fields given, and write with a compare-and-set, re-reading and retrying if another write lands first. The keys are `role`, `description`, `host`, `note`, `capability` and `label.NAME`. `capability=a,b` sets the whole list, and `unset capability` clears it; to remove one capability, set the list again without it. `--dry-run` prints what would change and changes nothing. The 8-label and 8-capability caps are checked after the merge. Fields a newer mash wrote to the record are kept. Older mash versions ignore the labels, so mixed versions are safe. 
 
 The first column of `mash who` is the endpoint's address `owner.group.instance` (for example `alice.dev.design`). `mash who --wide` (and the `who` tool a session's model sees, with `wide`) adds `ROLE`, `HOST` and `DESCRIPTION` columns, with `-` where nothing is recorded. The labels and capabilities are in the JSON, not the table. The directory metadata is only the record of intent; the live lease is not shown by `who`, because other endpoints' leases are not readable with an endpoint's permissions.
 
@@ -291,18 +292,19 @@ Unlike the lease tombstone above, the marker has no TTL, so the refusal does not
 To read the last of an endpoint's mail before removing it, stop new mail first, then drain, then remove it ([ADR 0057](decisions/0057-an-admin-can-suspend-an-endpoints-inbound-mail-by-parking-its-inbox-stream-subjects.md)):
 
 ```sh
-mashctl suspend design      # suspended design: id 9f3c..., last_seq 41, msgs 38
-mashctl suspended design    # exit 0 if suspended, 1 if not or on any error
-# read the inbox through sequence 41 (the last_seq above); it is final while the endpoint stays suspended (suspend waits for a publish accepted just before the park to land, so it is already final when printed)
+mashctl endpoint suspend acme.dev.design   # Suspended endpoint acme.dev.design
+mashctl endpoint show acme.dev.design      # state: suspended
+mashctl endpoint inbox acme.dev.design     # the messages stored, without their text
+# the stored mail is final while the endpoint stays suspended (suspend waits for a publish accepted just before the park to land, so it is already final when it returns)
 ```
 
-`suspend` replaces the inbox stream's subjects with one subject no endpoint may publish to and saves the originals in the stream's metadata; nothing is purged and no other field changes. Mail sent while the endpoint is suspended is refused, not queued: the sender's publish finds no inbox and fails, and the sender cannot tell that from an endpoint that does not exist, so it must send again after `mashctl resume design`, which restores the saved subjects. Mail stored before the suspension stays readable, and the endpoint's own session keeps running. `limits` keeps the suspension; creating an endpoint over a suspended endpoint's stream refuses. Suspend does not revoke: it prints `new mail parked; the endpoint's credentials are still valid`, and the endpoint can still connect and send. Revocation happens in `endpoint delete`. Both `suspend` and `resume` can be repeated safely. Suspending and resuming are admin operations: an endpoint's credentials cannot update its stream.
+`endpoint suspend` replaces the inbox stream's subjects with one subject no endpoint may publish to and saves the originals in the stream's metadata; nothing is purged and no other field changes. Mail sent while the endpoint is suspended is refused, not queued: the sender's publish finds no inbox and fails, and the sender cannot tell that from an endpoint that does not exist, so it must send again after `mashctl endpoint resume acme.dev.design`, which restores the saved subjects. Mail stored before the suspension stays readable, and the endpoint's own session keeps running. `limits` keeps the suspension; creating an endpoint over a suspended endpoint's stream refuses. Suspend does not revoke: the endpoint's credentials are still valid, and the endpoint can still connect and send. Revocation happens in `endpoint delete`. Both `endpoint suspend` and `endpoint resume` can be repeated safely, and take `--dry-run`. Suspending and resuming are admin operations: an endpoint's credentials cannot update its stream.
 
 ## Topologies
 
 mash supports one NATS server, or a cluster, in the default JetStream domain, with the default API prefix. Inboxes are single-replica ([Durability](#durability-and-sync_interval)), so on a cluster an inbox is unavailable while its node is down.
 
-JetStream domains, leaf-node inboxes and subject mappings are not supported. The endpoint permissions that `mashctl permissions` generates (`$JS.API.*`, `$JS.ACK.<stream>.<consumer>.>`) and the client (`jetstream.New` with no domain or API prefix) assume the default domain. On a leaf node with its own domain, or behind subject mappings, the API and ACK subjects differ: acks can be denied (endless redelivery), the inbox may be unreachable, and signatures over mapped subjects may not verify. A `js_domain` setting is not implemented.
+JetStream domains, leaf-node inboxes and subject mappings are not supported. The endpoint permissions that `mashctl endpoint permissions` prints (`$JS.API.*`, `$JS.ACK.<stream>.<consumer>.>`) and the client (`jetstream.New` with no domain or API prefix) assume the default domain. On a leaf node with its own domain, or behind subject mappings, the API and ACK subjects differ: acks can be denied (endless redelivery), the inbox may be unreachable, and signatures over mapped subjects may not verify. A `js_domain` setting is not implemented.
 
 ## Several servers
 

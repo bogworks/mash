@@ -361,15 +361,6 @@ var refusalCases = []refCase{
 		}
 		t.Cleanup(func() { afterRetireRead = nil })
 	}, "refused", 1},
-
-	// list and show
-	{"list_usage", []string{"endpoint", "list", "o/g/a"}, nil, "usage", 2},
-	{"list_unknown_flag", []string{"endpoint", "list", "--bogus"}, nil, "unknown_flag", 2},
-	{"show_usage", []string{"endpoint", "show", "o/g/a", "o/g/b"}, nil, "usage", 2},
-	{"show_unknown_flag", []string{"endpoint", "show", "--bogus"}, nil, "unknown_flag", 2},
-	{"show_address_missing", []string{"endpoint", "show"}, nil, "address_missing", 2},
-	{"show_address_invalid", []string{"endpoint", "show", "bad address"}, nil, "address_invalid", 2},
-	{"show_not_found", []string{"endpoint", "show", "o/g/none"}, nil, "not_found", 1},
 }
 
 var (

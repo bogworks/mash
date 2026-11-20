@@ -15,7 +15,7 @@ import (
 	"github.com/bogworks/mash/internal/store"
 )
 
-// InspectSchema is the schema string of the JSON `mashctl inbox inspect` prints. It is a contract with the readers of
+// InspectSchema is the schema string of the JSON `mashctl endpoint inbox` used to print. It is a contract with the readers of
 // that output and changes only when a field is removed or changes meaning.
 const InspectSchema = "mash-inbox-inspect@1"
 

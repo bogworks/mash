@@ -156,22 +156,7 @@ func versionLine(version, ldflags string, bi *debug.BuildInfo) string {
 // buildRevision is the commit this binary was built from: the ldflag, else the VCS revision go build stamped (with
 // "+dirty" for a modified tree), else "".
 func buildRevision(ldflags string, bi *debug.BuildInfo) string {
-	rev := ldflags
-	if rev == "" && bi != nil {
-		modified := false
-		for _, s := range bi.Settings {
-			switch s.Key {
-			case "vcs.revision":
-				rev = s.Value
-			case "vcs.modified":
-				modified = s.Value == "true"
-			}
-		}
-		if rev != "" && modified {
-			rev += "+dirty"
-		}
-	}
-	return rev
+	return endpoint.BuildRevision(ldflags, bi)
 }
 
 // verbUsage is the usage line of each endpoint verb that is not on the command table, printed for `mash VERB --help`.

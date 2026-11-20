@@ -19,13 +19,14 @@ func TestUsageErrorsExit2(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"suspend"}, "usage: mashctl suspend <owner.group.instance>"},
-		{[]string{"resume"}, "usage: mashctl resume <owner.group.instance>"},
-		{[]string{"suspended", "o.g.c", "extra"}, "usage: mashctl suspended <owner.group.instance>"},
-		{[]string{"permissions"}, "usage: mashctl permissions"},
-		{[]string{"permissions", "o.g.c", "--bogus"}, "usage: mashctl permissions"},
-		{[]string{"permissions", "o.g.c", "--nsc", "x"}, "usage: mashctl permissions"},
-		{[]string{"set-meta", "o.g.c"}, "usage: mashctl set-meta"},
+		{[]string{"endpoint", "suspend"}, "error: missing the endpoint address"},
+		{[]string{"endpoint", "resume"}, "error: missing the endpoint address"},
+		{[]string{"endpoint", "suspend", "o.g.c", "extra"}, "error: too many arguments"},
+		{[]string{"endpoint", "permissions"}, "error: missing the endpoint address"},
+		{[]string{"endpoint", "permissions", "o.g.c", "--bogus"}, `error: unknown option "--bogus"`},
+		{[]string{"endpoint", "permissions", "o.g.c", "x"}, "error: too many arguments"},
+		{[]string{"endpoint", "set", "o.g.c"}, "error: missing the endpoint address and at least one key=value"},
+		{[]string{"endpoint", "unset", "o.g.c"}, "error: missing the endpoint address and at least one key"},
 		{[]string{"limits", "--bogus"}, "usage: mashctl limits"},
 		{[]string{"limits", "--show", "x"}, "usage: mashctl limits"},
 		{[]string{"init", "--bogus"}, "usage: mashctl init"},
@@ -38,21 +39,16 @@ func TestUsageErrorsExit2(t *testing.T) {
 		}
 	}
 	// the endpoint was not touched by any of them
-	if out, _, code := ctlRun(t, e, "endpoint", "list"); code != 0 || !strings.Contains(out, "o/g/c") {
+	if out, _, code := ctlRun(t, e, "endpoint", "list"); code != 0 || !strings.Contains(out, "o      g      c") {
 		t.Fatalf("endpoint list: %d %q", code, out)
 	}
 }
 
-func TestPermissionsNoteIsOnStderr(t *testing.T) {
+func TestPermissionsPrintsDataOnly(t *testing.T) {
 	e := testenv.Start(t)
-	for _, args := range [][]string{{"permissions", "o.g.c"}, {"permissions", "o.g.c", "--nsc"}} {
-		out, errb, code := ctlRun(t, e, args...)
-		if code != 0 || !strings.Contains(errb, "the owner-line set") || false || strings.Contains(out, "NATS user") {
-			t.Fatalf("%v: %d out %q err %q", args, code, out, errb)
-		}
-		if len(args) == 2 && !strings.HasPrefix(out, "{") {
-			t.Errorf("stdout is not the JSON alone: %q", out)
-		}
+	out, errb, code := ctlRun(t, e, "endpoint", "permissions", "o.g.c")
+	if code != 0 || errb != "" || !strings.HasPrefix(out, "{") || !strings.HasSuffix(out, "}\n") {
+		t.Fatalf("%d out %q err %q", code, out, errb)
 	}
 }
 
@@ -61,9 +57,11 @@ func TestInvalidArgumentsAreNotEchoed(t *testing.T) {
 	ctlRun(t, e, "init")
 	provisionAs(t, e, "c", admin.Meta{})
 	for _, args := range [][]string{
-		{"set-meta", "o.g.c", "--label", seedShaped + "=x"},
-		{"suspend", seedShaped},
-		{"permissions", seedShaped},
+		{"endpoint", "set", "o.g.c", seedShaped + "=x"},
+		{"endpoint", "set", "o.g.c", "label." + seedShaped + "=x"},
+		{"endpoint", "unset", "o.g.c", seedShaped},
+		{"endpoint", "suspend", seedShaped},
+		{"endpoint", "permissions", seedShaped},
 		{"limits", seedShaped},
 	} {
 		out, errb, code := ctlRun(t, e, args...)
@@ -73,15 +71,17 @@ func TestInvalidArgumentsAreNotEchoed(t *testing.T) {
 	}
 }
 
-func TestLabelAndPolicyDoNotEchoInvalidArguments(t *testing.T) {
+func TestSetAndPolicyDoNotEchoInvalidArguments(t *testing.T) {
 	h := newFleetEnv(t)
 	h.seed(ad("a"))
 	for _, args := range [][]string{
-		{"label", seedShaped, "team=x"},
-		{"unlabel", seedShaped, "team"},
-		{"label", "o.g.a", seedShaped},
-		{"label", "o.g.a", seedShaped + "=x"},
-		{"unlabel", "o.g.a", seedShaped + "=x"},
+		{"endpoint", "set", seedShaped, "label.team=x"},
+		{"endpoint", "unset", seedShaped, "label.team"},
+		{"endpoint", "set", "o.g.a", seedShaped},
+		{"endpoint", "set", "o.g.a", seedShaped + "=x"},
+		{"endpoint", "unset", "o.g.a", seedShaped + "=x"},
+		{"endpoint", "show", seedShaped},
+		{"endpoint", "inbox", seedShaped},
 		{"endpoint", "delete", seedShaped},
 		{"policy", seedShaped},
 		{"policy", "--" + seedShaped + "=1"},

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -543,4 +544,25 @@ func secretInbox(nc *nats.Conn) string {
 		panic(err) // crypto/rand does not fail on supported platforms
 	}
 	return in[:strings.LastIndex(in, ".")+1] + hex.EncodeToString(b[:])
+}
+
+// BuildRevision is the commit a binary was built from: the ldflag value, else the VCS revision go build stamped (with
+// "+dirty" for a modified tree), else "".
+func BuildRevision(ldflags string, bi *debug.BuildInfo) string {
+	rev := ldflags
+	if rev == "" && bi != nil {
+		modified := false
+		for _, s := range bi.Settings {
+			switch s.Key {
+			case "vcs.revision":
+				rev = s.Value
+			case "vcs.modified":
+				modified = s.Value == "true"
+			}
+		}
+		if rev != "" && modified {
+			rev += "+dirty"
+		}
+	}
+	return rev
 }

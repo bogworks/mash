@@ -55,7 +55,7 @@ func SuspendedInboxDetail(addresses []string) string {
 	if n := len(addresses) - len(shown); n > 0 {
 		list += fmt.Sprintf(" and %d more", n)
 	}
-	return list + ": its inbox is suspended; resume it first (mashctl resume). The change was refused and nothing was pushed; " +
+	return list + ": its inbox is suspended; resume it first (mashctl endpoint resume ADDRESS). The change was refused and nothing was pushed; " +
 		"submit it again once the inbox is resumed."
 }
 
@@ -109,7 +109,7 @@ func (p Provisioner) MissingInbox(ctx context.Context, address string) (string, 
 	case got.Stream == "":
 		return address + " has no inbox stream", nil
 	case got.Suspended:
-		return address + SuspendedReason + "; run mashctl resume " + id.Flat(), nil
+		return address + SuspendedReason + "; run mashctl endpoint resume " + id.String(), nil
 	case !got.Consumer:
 		return address + " has an inbox stream (" + got.Stream + ") but not the consumer that reads it", nil
 	}

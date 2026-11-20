@@ -16,15 +16,13 @@ func runEnv(args []string, env func(string) string, stdout, stderr io.Writer) in
 	return run(args, env, config.LookupFromFunc(env), stdout, stderr)
 }
 
-func TestParseAddr(t *testing.T) {
-	for _, in := range []string{"acme.team1.ops1", "acme_team1_ops1"} {
-		a, err := parseAddr(in)
-		if err != nil || a.String() != "acme.team1.ops1" {
-			t.Errorf("%q: %v %v", in, a, err)
-		}
+func TestParseEpAddress(t *testing.T) {
+	a, err := parseEpAddress("acme.team1.ops1")
+	if err != nil || a.String() != "acme.team1.ops1" {
+		t.Errorf("%v %v", a, err)
 	}
-	for _, in := range []string{"ops1", "acme.ops1", "acme.team1.ops1.x", "Acme.team1.ops1", "acme_team1", ""} {
-		if _, err := parseAddr(in); err == nil || !strings.Contains(err.Error(), "give owner.group.instance") {
+	for _, in := range []string{"ops1", "acme.ops1", "acme.team1.ops1.x", "Acme.team1.ops1", "acme_team1", "acme_team1_ops1", "acme/team1/ops1", ""} {
+		if _, err := parseEpAddress(in); err == nil || !strings.Contains(err.Error(), "write owner.group.name") {
 			t.Errorf("%q: err %v", in, err)
 		}
 	}

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/cliframe"
 	"github.com/bogworks/mash/internal/cmdcore"
 	"github.com/bogworks/mash/internal/cmdcore/cmds"
@@ -85,8 +86,8 @@ func TestWhoTextEscapesRecordFields(t *testing.T) {
 // near miss, the dotted forms only, and the --json object.
 func TestWhoCLI(t *testing.T) {
 	w := newWorld(t, "a", "b", "bb")
-	if out, code := w.admin(t, "set-meta", tTo("a"), "--role", "reviewer", "--host", "myserver", "--describe", "reviews pull requests", "--cap", "review", "--label", "team=blue"); code != 0 {
-		t.Fatalf("set-meta: %d %s", code, out)
+	if err := w.setMeta(t, "a", admin.MetaUpdate{Role: strp("reviewer"), Host: strp("myserver"), Description: strp("reviews pull requests"), AddCaps: []string{"review"}, Labels: map[string]string{"team": "blue"}}); err != nil {
+		t.Fatalf("set-meta: %v", err)
 	}
 	out, code := w.cli(t, "b", "who")
 	if code != 0 || !reflect.DeepEqual(strings.Fields(strings.Split(out, "\n")[0]), []string{"ADDRESS", "STATE"}) || strings.Contains(out, "\t") {
@@ -219,8 +220,8 @@ func TestWhoCLI(t *testing.T) {
 // parameters are refused.
 func TestWhoMCPTool(t *testing.T) {
 	w := newWorld(t, "a", "b")
-	if out, code := w.admin(t, "set-meta", tTo("a"), "--role", "reviewer", "--host", "myserver", "--describe", "reviews pull requests", "--cap", "review", "--label", "team=blue"); code != 0 {
-		t.Fatalf("set-meta: %d %s", code, out)
+	if err := w.setMeta(t, "a", admin.MetaUpdate{Role: strp("reviewer"), Host: strp("myserver"), Description: strp("reviews pull requests"), AddCaps: []string{"review"}, Labels: map[string]string{"team": "blue"}}); err != nil {
+		t.Fatalf("set-meta: %v", err)
 	}
 	s := startServe(t, w.env["b"])
 	s.initialize(t)

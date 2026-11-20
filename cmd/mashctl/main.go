@@ -12,7 +12,6 @@ import (
 	"github.com/bogworks/mash/internal/cliframe"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/ctl"
-	"github.com/bogworks/mash/internal/endpoint"
 )
 
 func main() {
@@ -59,7 +58,7 @@ func runVerbs(args []string, env func(string) string, lookup config.Lookup, stdo
 	// The global options are taken out of the arguments wherever they stand; a flag shadows its environment variable.
 	// mashctl's own --sys-creds and --servers stay as they are (extractServerFlags below).
 	spec := cliframe.Spec{Tool: "mashctl", CredsEnv: "MASH_ADMIN_CREDS", CredsKey: "admin_creds"}
-	global, rest0, gerr := cliframe.ExtractOwning(spec, args, map[string][]string{"endpoint": {"--json"}, "audit": {"--json"}, "issued": {"--json"}, "inbox": {"--json"}, "adopt": {"--server"}}) // these parse their own
+	global, rest0, gerr := cliframe.ExtractOwning(spec, args, map[string][]string{"endpoint": {"--json"}, "audit": {"--json"}, "issued": {"--json"}, "version": {"--json"}, "adopt": {"--server"}}) // these parse their own
 	if gerr != nil {
 		fmt.Fprintf(stderr, "mashctl: %s\n", gerr)
 		return 2
@@ -80,17 +79,12 @@ func runVerbs(args []string, env func(string) string, lookup config.Lookup, stdo
 	}
 	switch args[0] {
 	case "version":
-		if helpRequested("version", args[1:]) {
-			fmt.Fprintln(stdout, "usage: mashctl version")
-			return 0
-		}
-		fmt.Fprintf(stdout, "mashctl %s\n", endpoint.CurrentVersion())
-		return 0
+		return runVersion(args[1:], stdout, stderr)
 	case "help", "-h", "--help":
 		fmt.Fprint(stdout, ctl.Usage("mashctl"))
 		return 0
 	}
-	if isVerb(args[0]) && helpRequested(args[0], args[1:]) { // before any dispatch or config load: help changes nothing
+	if isVerb(args[0]) && args[0] != "endpoint" && helpRequested(args[0], args[1:]) { // before any dispatch or config load: help changes nothing
 		fmt.Fprint(stdout, verbUsage(args))
 		return 0
 	}
@@ -99,15 +93,11 @@ func runVerbs(args []string, env func(string) string, lookup config.Lookup, stdo
 		return runAdopt(args[1:], env, lookup, stdout, stderr)
 	case "audit": // read-only: lists what the server and the creds directories hold; writes nothing
 		return runAudit(args[1:], env, lookup, stdout, stderr)
-	case "inbox": // read-only: `inbox inspect` shows one inbox's stored messages and their delivery state; writes nothing
-		return runInbox(args[1:], env, lookup, stdout, stderr)
 	case "issued": // read-only: the issue record and the check of it against the connected keys
 		return runIssued(args[1:], env, lookup, stdout, stderr)
-	case "label", "unlabel": // the labels on the directory record
-		return runLabel(args[0] == "unlabel", args[1:], env, lookup, stdout, stderr)
 	case "endpoint":
 		return runEndpoint(args[1:], env, lookup, stdout, stderr)
-	case "init", "limits", "permissions", "set-meta", "suspend", "resume", "suspended":
+	case "init", "limits":
 	default:
 		fmt.Fprintf(stderr, "mashctl: unknown command %q\n\n%s", args[0], ctl.Usage("mashctl"))
 		return 2
@@ -124,21 +114,21 @@ func runVerbs(args []string, env func(string) string, lookup config.Lookup, stdo
 }
 
 // helpRequested reports whether -h or --help is the first argument after the verb, or, for a verb with sub-verbs
-// (`issued check`, `inbox inspect`), the first argument after the sub-verb. Text further along is never read for help:
+// (`issued check`), the first argument after the sub-verb. Text further along is never read for help:
 // a value, a note or a message may contain the words.
 func helpRequested(verb string, args []string) bool {
 	isHelp := func(a string) bool { return a == "-h" || a == "--help" }
 	if len(args) > 0 && isHelp(args[0]) {
 		return true
 	}
-	if (verb == "issued" || verb == "inbox") && len(args) > 1 && !strings.HasPrefix(args[0], "-") && isHelp(args[1]) {
+	if verb == "issued" && len(args) > 1 && !strings.HasPrefix(args[0], "-") && isHelp(args[1]) {
 		return true
 	}
 	return false
 }
 
 // verbUsage is the lines of the mashctl usage for the verb in args: those that begin with its first two words
-// when some do (`issued check`, `inbox inspect`), else with its first word; the whole usage when none does (a verb
+// when some do (`issued check`), else with its first word; the whole usage when none does (a verb
 // whose usage lives in its own file).
 func verbUsage(args []string) string {
 	words := []string{args[0]}
@@ -163,8 +153,7 @@ func verbUsage(args []string) string {
 // isVerb reports whether name is a verb run dispatches.
 func isVerb(name string) bool {
 	switch name {
-	case "adopt", "audit", "endpoint", "inbox", "issued", "label", "unlabel",
-		"init", "limits", "permissions", "set-meta", "suspend", "resume", "suspended":
+	case "adopt", "audit", "endpoint", "issued", "init", "limits":
 		return true
 	}
 	return false

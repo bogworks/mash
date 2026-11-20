@@ -191,8 +191,8 @@ func TestPlainURLRefusalExitsTwoEverywhere(t *testing.T) {
 	for _, args := range [][]string{
 		{"endpoint", "list"},
 		{"endpoint", "list", "--json"},
-		{"endpoint", "show", "o/g/a"},
-		{"endpoint", "show", "o/g/a", "--json"},
+		{"endpoint", "show", "o.g.a"},
+		{"endpoint", "show", "o.g.a", "--json"},
 		{"endpoint", "create", "o/g/a", "--make-key"},
 		{"endpoint", "reissue", "o/g/a", "--make-key"},
 		{"endpoint", "reissue", "--all", "--make-key", "--yes"},

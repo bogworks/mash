@@ -1,23 +1,15 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/bogworks/mash/internal/admin"
-	"github.com/bogworks/mash/internal/config"
-	"github.com/bogworks/mash/internal/ctl"
 )
 
-func (w *world) admin(t *testing.T, args ...string) (string, int) {
-	t.Helper()
-	var out, errb bytes.Buffer
-	code := ctl.Run("mashctl", config.Config{InsecurePlaintext: true, URL: w.e.URL, Owner: w.e.Owner, AdminCreds: w.e.AdminCreds}, args, &out, &errb)
-	return out.String() + errb.String(), code
-}
+func strp(s string) *string { return &s }
 
 // provision creates the directory record of name for user u through the admin API the endpoint verbs use.
 func (w *world) provision(t *testing.T, name, u, note string, meta admin.Meta) error {
@@ -30,16 +22,15 @@ func (w *world) provision(t *testing.T, name, u, note string, meta admin.Meta) e
 	return err
 }
 
-// setMeta changes the metadata of name through the admin API the endpoint verbs use.
-func (w *world) setMeta(t *testing.T, name string, u admin.MetaUpdate) {
+// setMeta changes the metadata of name's directory record through the admin call `mashctl endpoint set` and `unset` use.
+func (w *world) setMeta(t *testing.T, name string, u admin.MetaUpdate) error {
 	t.Helper()
 	adm, err := admin.New(w.e.Conn(t, w.e.AdminCreds), w.e.Owner)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := adm.SetMeta(context.Background(), tAddr(name), u); err != nil {
-		t.Fatalf("set meta: %v", err)
-	}
+	_, err = adm.SetMeta(context.Background(), tAddr(name), u)
+	return err
 }
 
 func TestWhoShowsProvisionedMeta(t *testing.T) {
@@ -74,8 +65,8 @@ func TestWhoShowsProvisionedMeta(t *testing.T) {
 
 func TestWhoWideAndMCPWhoShowMeta(t *testing.T) {
 	w := newWorld(t, "a", "b")
-	if out, code := w.admin(t, "set-meta", tTo("a"), "--role", "chief", "--label", "team=h1", "--host", "elsewhere-box"); code != 0 {
-		t.Fatalf("set-meta: %d %s", code, out)
+	if err := w.setMeta(t, "a", admin.MetaUpdate{Role: strp("chief"), Labels: map[string]string{"team": "h1"}, Host: strp("elsewhere-box")}); err != nil {
+		t.Fatalf("set meta: %v", err)
 	}
 	s := startServe(t, w.env["a"])
 	s.initialize(t)

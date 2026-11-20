@@ -220,7 +220,7 @@ entry has `creation_unknown: true`, `compare.creation_unknown` counts it and the
 With `--strict`, `--compare` fails (exit 1) when `moved`, `vanished`, `recreated` or `creation_unknown` is above 0 or `account_unverified` is true, and on every other finding: any
 orphan, any problem.
 
-To see the stored messages of one inbox and their delivery state, use [`mashctl inbox inspect`](mashctl.md#mashctl-inbox-inspect).
+To see the stored messages of one inbox and their delivery state, use [`mashctl endpoint inbox`](mashctl.md#mashctl-endpoint-inbox).
 
 ## What it cannot see
 

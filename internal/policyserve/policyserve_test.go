@@ -327,7 +327,7 @@ func TestSuspendedInboxIsRefusedWithTheResumeStep(t *testing.T) {
 	}}
 	p := Provisioner{Inboxes: inb}
 	err := p.CreateInbox(ctx, "foo.c.parked")
-	if err == nil || !strings.Contains(err.Error(), "suspended") || !strings.Contains(err.Error(), "mashctl resume") {
+	if err == nil || !strings.Contains(err.Error(), "suspended") || !strings.Contains(err.Error(), "mashctl endpoint resume") {
 		t.Fatalf("a suspended inbox: %v", err)
 	}
 	m, err := p.MissingInbox(ctx, "foo.c.parked")
