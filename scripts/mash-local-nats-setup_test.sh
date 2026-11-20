@@ -20,7 +20,7 @@
 #
 # Environment:
 #   MLNT_IMAGES   space-separated image tags (default: debian:stable ubuntu:24.04 ubuntu:26.04)
-#   MLNT_CASES    space-separated case numbers (default: 1 2 ... 22)
+#   MLNT_CASES    space-separated case numbers (default: 1 2 ... 23)
 #   MLNT_MODES    space-separated modes (default: linux darwin)
 #   MLNT_REPORT   receipt file (markdown; default: receipt-<run id>.md in the scratch
 #                 directory, or in ${TMPDIR:-/tmp} when the scratch directory is made here)
@@ -1221,11 +1221,58 @@ case21() { # the pid-reuse guard
     chk "the test's nats-server is stopped by its recorded pid" gone "$NS"
 }
 
+case23() { # HOME is needed only for the default folder; --dir works without it
+    local d=$W/nohome pid pt h
+    ROUTE="file"
+    PRE=(env -u HOME)
+    # (1) no --dir: HOME unset, empty or relative is refused
+    run --owner acme
+    chk "no --dir, HOME unset: exit 1" rc_is 1
+    chk "no --dir, HOME unset: says HOME is not an absolute path" hasx "$W/err" 'error: HOME is not set to an absolute path'
+    chk "no --dir, HOME unset: hint says set HOME or pass --dir" has "$W/err" 'hint: set HOME and retry, or pass --dir'
+    for h in '' relative/path; do
+        PRE=(env "HOME=$h")
+        run --owner acme
+        chk "no --dir, HOME='$h': exit 1" rc_is 1
+        chk "no --dir, HOME='$h': says HOME is not an absolute path" hasx "$W/err" 'error: HOME is not set to an absolute path'
+        chk "no --dir, HOME='$h': hint says set HOME or pass --dir" has "$W/err" 'hint: set HOME and retry, or pass --dir'
+    done
+    PRE=(env -u HOME)
+    # (2) an absolute --dir with HOME unset: the whole life cycle
+    run --owner acme --dir "$d"
+    check_success "$d" acme
+    chk "create, HOME unset: no mention of HOME" bash -c '! cat "$0" "$1" | grep -q HOME' "$W/out" "$W/err"
+    pid=$(pid_of "$d"); pt=$(port_of "$d")
+    chk "create, HOME unset: the server answers TLS with the admin creds" nn "$d" "$pt" account info
+    run --stop --dir "$d"
+    chk "--stop, HOME unset: exit 0" rc_is 0
+    chk "--stop, HOME unset: no mention of HOME" bash -c '! cat "$0" "$1" | grep -q HOME' "$W/out" "$W/err"
+    chk "--stop, HOME unset: server gone" gone "$pid"
+    run --start --dir "$d"
+    chk "--start, HOME unset: exit 0" rc_is 0
+    chk "--start, HOME unset: no mention of HOME" bash -c '! cat "$0" "$1" | grep -q HOME' "$W/out" "$W/err"
+    chk "--start, HOME unset: a live pid" alive "$(pid_of "$d")"
+    pid=$(pid_of "$d"); pt=$(port_of "$d")
+    chk "--start, HOME unset: the server answers TLS with the admin creds" nn "$d" "$pt" account info
+    ptyrun "$d" env -u HOME bash "$SCRIPT" --remove --dir "$d"
+    chk "--remove on a terminal, HOME unset: exit 0" rc_is 0
+    chk "--remove, HOME unset: no mention of HOME" bash -c '! grep -q HOME "$0"' "$W/out"
+    chk "--remove, HOME unset: dir gone" absent "$d"
+    chk "--remove, HOME unset: server gone" gone "$pid"
+    # (3) a relative --dir with HOME unset: refused cleanly
+    run --owner acme --dir rel/dir
+    chk "relative --dir, HOME unset: exit 1" rc_is 1
+    chk "relative --dir, HOME unset: says --dir must be absolute" has "$W/err" 'error: --dir must be an absolute path'
+    chk "relative --dir, HOME unset: no unbound variable" lacks "$W/err" 'unbound'
+    chk "relative --dir, HOME unset: nothing made" absent rel/dir
+    PRE=()
+}
+
 run_case() {
     case $CASE in
     15) case15 ;; 16) case16 ;; 17) case17 ;; 18) case18 ;; 19) case19 ;; 20) case20 ;; 21) case21 ;;
     1) case1 ;; 2) case2 ;; 3) case3 ;; 4) case4 ;; 5) case5 ;; 6) case6 ;; 7) case7 ;;
-    8) case8 ;; 9) case9 ;; 10) case10 ;; 11) case11 ;; 12) case12 ;; 13) case13 ;; 14) case14 ;; 22) case22 ;;
+    8) case8 ;; 9) case9 ;; 10) case10 ;; 11) case11 ;; 12) case12 ;; 13) case13 ;; 14) case14 ;; 22) case22 ;; 23) case23 ;;
     *) echo "FAIL: c$CASE: no such case" ;;
     esac
 }
@@ -1260,7 +1307,7 @@ else
     MADE_SCRATCH=1
 fi
 IMAGES=${MLNT_IMAGES:-"debian:stable ubuntu:24.04 ubuntu:26.04"}
-CASES=${MLNT_CASES:-"1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22"}
+CASES=${MLNT_CASES:-"1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23"}
 MODES=${MLNT_MODES:-"linux darwin"}
 NCV=${MLNT_NATSCLI:-0.5.2}
 # sha256 of https://github.com/nats-io/natscli/releases/download/v0.5.2/nats-0.5.2-linux-amd64.zip,

@@ -105,13 +105,17 @@ check_owner() { # NAME; "system" is the name of the operator's system account
 # ---------------------------------------------------------------- paths
 set_paths() {
     HOME_DIR=${HOME:-}
-    case $HOME_DIR in
-    /?*) ;;
-    *) die 1 "HOME is not set to an absolute path" "set HOME and retry" ;;
-    esac
     HOME_DIR=${HOME_DIR%/}
     DEFAULT_DIR=0
-    if [ -z "$DIR" ]; then DIR=$HOME_DIR/mash-nats; DEFAULT_DIR=1; fi
+    if [ -z "$DIR" ]; then
+        # HOME is needed only to choose the default folder
+        case $HOME_DIR in
+        /?*) ;;
+        *) die 1 "HOME is not set to an absolute path" "set HOME and retry, or pass --dir" ;;
+        esac
+        DIR=$HOME_DIR/mash-nats
+        DEFAULT_DIR=1
+    fi
     DIR=${DIR%/}
     UID_NOW=$(id -u)
 }
@@ -160,7 +164,7 @@ check_dir_path() {
     case $DIR in
     /?*) ;;
     *) die 1 "--dir must be an absolute path, and not /: ${DIR:-/}" \
-        "for example $HOME_DIR/mash-nats" ;;
+        "for example ${HOME_DIR:-/home/you}/mash-nats" ;;
     esac
     case $DIR in
     *[!A-Za-z0-9._/-]*)
