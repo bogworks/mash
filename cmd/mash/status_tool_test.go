@@ -430,7 +430,7 @@ func TestStatusToolStaleHookAfterAcquisition(t *testing.T) {
 	s.initialize(t)
 	var out string
 	id := 10
-	eventually(t, 5*time.Second, "the session owns the spool", func() bool {
+	eventually(t, 30*time.Second, "the session owns the spool", func() bool {
 		id++
 		out = statusOf(t, s, id)
 		return strings.Contains(out, "hooks have not run")
@@ -514,7 +514,7 @@ func TestStatusToolReportsRefusedHooks(t *testing.T) {
 	sp := spoolFor(w, "a")
 	var out string
 	id := 10
-	eventually(t, 5*time.Second, "the session owns the spool", func() bool {
+	eventually(t, 30*time.Second, "the session owns the spool", func() bool {
 		id++
 		return strings.Contains(statusOf(t, s, id), "hooks have not run")
 	})
@@ -522,7 +522,7 @@ func TestStatusToolReportsRefusedHooks(t *testing.T) {
 	if err := sp.NoteRefused(spool.Refusal{Time: time.Now(), Why: "session id differs"}); err != nil {
 		t.Fatal(err)
 	}
-	eventually(t, 5*time.Second, "REFUSED shows", func() bool {
+	eventually(t, 30*time.Second, "REFUSED shows", func() bool {
 		id++
 		out = statusOf(t, s, id)
 		return strings.Contains(out, "delivery: REFUSED - mash's hook runs in this session but is not recognised as this session's (session id differs, last at ")

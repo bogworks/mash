@@ -502,7 +502,11 @@ func TestSettleCatchesAViolationDeliveredAfterTheFlush(t *testing.T) {
 	r := newRefusals()
 	const subj = "a.b"
 	r.flush = func(context.Context) error {
-		go func() { time.Sleep(5 * time.Millisecond); r.note(violation(subj)) }()
+		// The error handler's own goroutine, started as the flush returns. It carries no wall-clock delay: the settle's
+		// window is two 5 ms quiet ticks (25 ms cap), so any sleep here is a bet on how long a loaded runner takes to
+		// wake this goroutine (a 12 ms lag already fails the test; see the REAL RACE note on settle). With no sleep the
+		// test needs only the goroutine to run within that window, and still fails without the settle.
+		go r.note(violation(subj))
 		return nil
 	}
 	r.markDirty(subj)
