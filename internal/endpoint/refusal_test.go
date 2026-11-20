@@ -188,7 +188,7 @@ func TestAmbiguityDoesNotLeakToALaterSend(t *testing.T) {
 
 // A flagged send that times out says the violation could not be attributed; an unflagged one does not.
 func TestAmbiguousTimeoutCarriesClause(t *testing.T) {
-	const clause = "; a permission violation on this subject was seen while several sends were in flight, so it could not be attributed (mashctl permissions NAME shows what an endpoint may publish)"
+	const clause = "; a permission violation on this subject was seen while several sends were in flight, so it could not be attributed (mashctl endpoint permissions ADDRESS shows what an endpoint may publish)"
 	f := newFixture(t, "ok")
 	s := f.restrictedSender(t, "ok")
 	subj := taddr("ok").Subjects().Mail

@@ -227,7 +227,7 @@ func TestEndpointSetConsequences(t *testing.T) {
 	h.provisionDeclared("b")
 	for _, args := range [][]string{{"set", "o.g.b", "label.kind=tool"}, {"set", "o.g.a", "label.net=blue"}, {"unset", "o.g.b", "label.kind"}} {
 		out, errb, code := h.run(append([]string{"endpoint"}, args...)...)
-		if code != 0 || strings.Contains(out, "needed") || strings.Contains(out, "set-zone") || strings.Contains(out, "reissue") {
+		if code != 0 || strings.Contains(out, "needed") || strings.Contains(out, "reissue") {
 			t.Fatalf("%v: %d %q %q", args, code, out, errb)
 		}
 	}

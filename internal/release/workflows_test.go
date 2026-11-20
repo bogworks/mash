@@ -1121,7 +1121,7 @@ func TestBuildTwice_buildsMashctlWhenAsked(t *testing.T) {
 		t.Fatalf("output %q", got)
 	}
 	line, err := exec.Command(out, "version").Output()
-	if err != nil || strings.TrimSpace(string(line)) != "mashctl 0.1.0" {
+	if err != nil || !regexp.MustCompile(`^mashctl v0\.1\.0 \(\S+\)$`).MatchString(strings.TrimSpace(string(line))) {
 		t.Fatalf("%q %v", line, err)
 	}
 	if _, err := buildTwice(t, root, "", "-", "-", "0.1.0", x, out, "mashd"); err == nil {
