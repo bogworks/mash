@@ -171,10 +171,10 @@ func OpenAdmin(prog string, cfg config.Config) (*madmin.Admin, context.Context, 
 		cfg.Limits = store.DefaultLimits()
 	}
 	if cfg.Owner == "" {
-		return nil, nil, nil, errors.New(pfx + ": no owner (config.json \"owner\" or MASH_OWNER)")
+		return nil, nil, nil, errors.New(pfx + ": no owner: set \"owner\" in config.json, or MASH_ENDPOINT or --endpoint (its owner part is the owner these commands act for)")
 	}
 	if cfg.URL == "" || cfg.AdminCreds == "" {
-		return nil, nil, nil, errors.New(pfx + ": admin commands need MASH_URL and MASH_ADMIN_CREDS")
+		return nil, nil, nil, errors.New(pfx + ": admin commands need MASH_SERVER and MASH_ADMIN_CREDS")
 	}
 	if raw, err := config.ReadCredsFile(cfg.AdminCreds); err != nil {
 		var pe *fs.PathError
@@ -232,7 +232,7 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 		return usage(errors.New("usage: " + prog + " list"))
 	}
 	if cfg.Owner == "" {
-		return fail(errors.New(pfx + ": no owner (config.json \"owner\" or MASH_OWNER)"))
+		return fail(errors.New(pfx + ": no owner: set \"owner\" in config.json, or MASH_ENDPOINT or --endpoint (its owner part is the owner these commands act for)"))
 	}
 	if args[0] == "permissions" {
 		if len(args) < 2 || len(args) > 3 || (len(args) == 3 && args[2] != "--nsc") {

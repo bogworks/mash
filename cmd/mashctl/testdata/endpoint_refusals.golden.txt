@@ -169,7 +169,7 @@ stdout:
 == create_owner_missing
 exit 2
 stderr:
-mashctl: endpoint create: error (owner_missing): no owner: write --owner, alice/dev/design, or set MASH_OWNER (config.json "owner")
+mashctl: endpoint create: error (owner_missing): no owner: write --owner, alice/dev/design, or set MASH_ENDPOINT
 stdout:
 {
   "schema": "mashctl-endpoint@1",
@@ -186,7 +186,7 @@ stdout:
   "next_steps": [],
   "refusal": {
     "code": "owner_missing",
-    "detail": "no owner: write --owner, alice/dev/design, or set MASH_OWNER (config.json \"owner\")"
+    "detail": "no owner: write --owner, alice/dev/design, or set MASH_ENDPOINT"
   }
 }
 == create_name_missing
@@ -525,7 +525,7 @@ stdout:
 == create_server
 exit 6
 stderr:
-mashctl: endpoint create: error (server): mashctl: connect nats://127.0.0.1:1: nats: no servers available for connection (check MASH_URL and that at least one listed server is up); nothing was changed, run the same command again once the server is reachable
+mashctl: endpoint create: error (server): mashctl: connect nats://127.0.0.1:1: nats: no servers available for connection (check MASH_SERVER and that at least one listed server is up); nothing was changed, run the same command again once the server is reachable
 stdout:
 {
   "schema": "mashctl-endpoint@1",
@@ -544,7 +544,7 @@ stdout:
   "next_steps": [],
   "refusal": {
     "code": "server",
-    "detail": "mashctl: connect nats://127.0.0.1:1: nats: no servers available for connection (check MASH_URL and that at least one listed server is up); nothing was changed, run the same command again once the server is reachable"
+    "detail": "mashctl: connect nats://127.0.0.1:1: nats: no servers available for connection (check MASH_SERVER and that at least one listed server is up); nothing was changed, run the same command again once the server is reachable"
   }
 }
 == create_enroll_server
@@ -1076,7 +1076,7 @@ stdout:
 == reissue_server
 exit 6
 stderr:
-mashctl: endpoint reissue: error (server): mashctl: connect nats://127.0.0.1:1: nats: no servers available for connection (check MASH_URL and that at least one listed server is up); nothing was changed
+mashctl: endpoint reissue: error (server): mashctl: connect nats://127.0.0.1:1: nats: no servers available for connection (check MASH_SERVER and that at least one listed server is up); nothing was changed
 stdout:
 {
   "schema": "mashctl-endpoint@1",
@@ -1095,7 +1095,7 @@ stdout:
   "next_steps": [],
   "refusal": {
     "code": "server",
-    "detail": "mashctl: connect nats://127.0.0.1:1: nats: no servers available for connection (check MASH_URL and that at least one listed server is up); nothing was changed"
+    "detail": "mashctl: connect nats://127.0.0.1:1: nats: no servers available for connection (check MASH_SERVER and that at least one listed server is up); nothing was changed"
   }
 }
 == reissue_enroll_server
@@ -1626,7 +1626,7 @@ stdout:
 == bulk_server
 exit 6
 stderr:
-mashctl: endpoint reissue: error (server): mashctl: connect nats://127.0.0.1:1: nats: no servers available for connection (check MASH_URL and that at least one listed server is up); nothing was changed
+mashctl: endpoint reissue: error (server): mashctl: connect nats://127.0.0.1:1: nats: no servers available for connection (check MASH_SERVER and that at least one listed server is up); nothing was changed
 stdout:
 {
   "schema": "mashctl-endpoint-bulk@1",
@@ -1642,7 +1642,7 @@ stdout:
   "next_steps": [],
   "refusal": {
     "code": "server",
-    "detail": "mashctl: connect nats://127.0.0.1:1: nats: no servers available for connection (check MASH_URL and that at least one listed server is up); nothing was changed"
+    "detail": "mashctl: connect nats://127.0.0.1:1: nats: no servers available for connection (check MASH_SERVER and that at least one listed server is up); nothing was changed"
   }
 }
 == bulk_servers

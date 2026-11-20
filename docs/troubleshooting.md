@@ -4,9 +4,9 @@ Symptoms, their causes, how to check, and the fix, using the exact messages mash
 
 ## First check
 
-In the session, ask Claude to call the `status` tool. It answers in every session, even one with no `MASH_NAME`, and prints one line per part: `name`, `config`, `creds`, `connection`, `channel allowlist`, `environment` (only when it applies), `delivery`, `version`, `client` and (only when it applies) `plugin`. Each line that is not OK ends with "Next: ...". Start from the first line that is not OK.
+In the session, ask Claude to call the `status` tool. It answers in every session, even one with no `MASH_ENDPOINT`, and prints one line per part: `name`, `config`, `creds`, `connection`, `channel allowlist`, `environment` (only when it applies), `delivery`, `version`, `client` and (only when it applies) `plugin`. Each line that is not OK ends with "Next: ...". Start from the first line that is not OK.
 
-From a shell, `mash version` prints the binary's version and commit. `mash status` prints the same lines as the `status` tool for the environment you run it in (name, config, creds, channel allowlist, environment, version), so you can check a launch before Claude Code starts. It connects to nothing and needs no `MASH_NAME` (without one it prints `name: MISSING`); `connection` and `delivery` are live-only, so it says they are not checked and a running session reports them. It always exits 0, because it is a report. The other CLI commands are `send`, `read`, `inbox`, `who`, `prompt`, `admin` and `plugin export`. The CLI needs `MASH_NAME` set and does not take the lease, so it works beside a running session.
+From a shell, `mash version` prints the binary's version and commit. `mash status` prints the same lines as the `status` tool for the environment you run it in (name, config, creds, channel allowlist, environment, version), so you can check a launch before Claude Code starts. It connects to nothing and needs no `MASH_ENDPOINT` (without one it prints `name: MISSING`); `connection` and `delivery` are live-only, so it says they are not checked and a running session reports them. It always exits 0, because it is a report. The other CLI commands are `send`, `read`, `inbox`, `who`, `prompt`, `admin` and `plugin export`. The CLI needs an endpoint (`MASH_ENDPOINT`, or the one installed endpoint) and does not take the lease, so it works beside a running session.
 
 The hook's stderr goes to `hook.log` in the state directory (`$MASH_STATE_DIR`, else `$XDG_STATE_HOME/mash`, else `~/.local/state/mash`). `mash serve` writes its own messages, such as the lease and spool errors below, to its stderr.
 
@@ -17,13 +17,13 @@ The hook's stderr goes to `hook.log` in the state directory (`$MASH_STATE_DIR`, 
 
 ## The session has no mail tools, or says it has no mash identity
 
-Message: "mash is installed but this session has no mash identity (MASH_NAME is not set), so mail is off." `status` shows `name: MISSING - not set`. The CLI says `mash: set MASH_NAME to the endpoint you are acting as`. Run `mash status` in the shell you launch Claude Code from to see the same `name: MISSING` line before you start.
+Message: "mash is installed but this session has no mash identity (MASH_ENDPOINT is not set), so mail is off. Start Claude Code with MASH_ENDPOINT=<owner.group.name> ..." `status` shows `name: MISSING - not set. Next: start Claude Code with MASH_ENDPOINT=<owner.group.name>, or install credentials for one endpoint`. The CLI says `mash: no endpoint: set MASH_ENDPOINT, --endpoint, or install credentials for one endpoint`. Run `mash status` in the shell you launch Claude Code from to see the same `name: MISSING` line before you start.
 
-Cause: `MASH_NAME` was not in the environment Claude Code started with. The plugin is inert by design without it, with only `status` and `version`. The name comes only from the environment, never from config.json or the conversation. `claude --resume` and `--continue` need it again: see [Sessions and resume](install.md#sessions-and-resume).
+Cause: `MASH_ENDPOINT` was not in the environment Claude Code started with, and no single endpoint's creds file was installed. The plugin is inert by design without it, with only `status` and `version`. The name comes from the environment (or the one installed creds file), never from the conversation. `claude --resume` and `--continue` need it again: see [Sessions and resume](install.md#sessions-and-resume).
 
-Fix: start Claude Code as `MASH_GROUP=dev MASH_NAME=design claude --channels plugin:mash@mash`, then check `status` (or run `MASH_GROUP=dev MASH_NAME=design mash status` first).
+Fix: start Claude Code as `MASH_ENDPOINT=alice.dev.design claude --channels plugin:mash@mash`, then check `status` (or run `MASH_ENDPOINT=alice.dev.design mash status` first).
 
-If `status` shows `name: FAILED - group_missing: no group`, `MASH_GROUP` was not set: the group has no default and is not a `config.json` key, so set it in the environment (exit 2 for the CLI). If it says to fix `MASH_OWNER`, `MASH_GROUP` or `MASH_NAME`, change the one it names: each is 1-32 lower-case letters, digits and single hyphens, starting with a letter.
+If several endpoints are installed and none is named, mash stops with `more than one endpoint is installed here: a, b`: name one with `MASH_ENDPOINT`. If it says to fix `MASH_ENDPOINT`, the value is not three dotted parts `owner.group.name`, each 1-32 lower-case letters, digits and single hyphens, starting with a letter.
 
 ## `mash: no binary found`
 
@@ -39,9 +39,9 @@ Fix: `go install github.com/bogworks/mash/cmd/mash@latest`, and make sure its di
 
 ## `config: MISSING` or `config: FAILED`
 
-Messages: `mash: no NATS url (config.json "url" or MASH_URL)` and `mash: no owner (config.json "owner" or MASH_OWNER)`. A bad value names its source, for example `mash: MASH_IDLE_WAKE ...` or `mash: MASH_SPOOL_FROM_START="x" is not 1, true, 0 or false`.
+Messages: `mash: no server: set MASH_SERVER, --server, or "servers" in config.json` and `mash: no endpoint: set MASH_ENDPOINT, --endpoint, or install credentials for one endpoint`. A bad value names its source, for example `mash: MASH_IDLE_WAKE ...` or `mash: MASH_SPOOL_FROM_START="x" is not 1, true, 0 or false`.
 
-Fix: set `url` and `owner` in `~/.config/mash/config.json`, or `MASH_URL` and `MASH_OWNER`. The environment wins over the file. The owner is 1 to 32 lower-case letters, digits and single hyphens ([install.md](install.md) section 4).
+Fix: set `servers` in `~/.config/mash/config.json`, or `MASH_SERVER`, and set `MASH_ENDPOINT`. A flag wins over the environment, and the environment over the file. The owner (the first part of the endpoint) is 1 to 32 lower-case letters, digits and single hyphens ([install.md](install.md) section 4).
 
 mash reads `$MASH_CONFIG_DIR/config.json` when that variable is set (an absolute path; no other directory is consulted), else `$XDG_CONFIG_HOME/mash/config.json` when `XDG_CONFIG_HOME` is an absolute path and that file exists, and otherwise `~/.config/mash/config.json` under `$HOME`. A leading `~/` (or a bare `~`) in `creds` and `admin_creds` is expanded to your home; `policy.md` and default creds files are also found in `~/.config/mash` when the XDG directory has no copy; `~user/` is not. A `policy.md` that exists but cannot be read is a configuration error that names the file (`mash: reading <path>: ...`), not an empty policy; fix its permissions or remove it. With neither `HOME` nor an absolute `XDG_CONFIG_HOME` set (some systemd units and minimal containers), mash stops with `mash: cannot find a config directory: set HOME or XDG_CONFIG_HOME, or use the MASH_* variables`; set one of them, or give everything through the `MASH_*` variables, including `MASH_CREDS`.
 
@@ -55,7 +55,7 @@ mash reads `$MASH_CONFIG_DIR/config.json` when that variable is set (an absolute
 
 ## `mash: endpoint X is not provisioned`
 
-The directory has no record for the address. Check `MASH_OWNER`, `MASH_GROUP` and `MASH_NAME` for a typo, then as the admin run `mashctl endpoint list` to see which endpoints exist. If it is missing, make it with `mashctl endpoint create alice/dev/design --public-key design.pub`, then `mash credential create` on the endpoint's machine ([operations.md](operations.md#adding-an-endpoint)). The address in `endpoint list` may differ from the one you started: an endpoint that was deleted keeps its address burned, so it cannot be made again.
+The directory has no record for the address. Check `MASH_ENDPOINT` for a typo, then as the admin run `mashctl endpoint list` to see which endpoints exist. If it is missing, make it with `mashctl endpoint create alice/dev/design --public-key design.pub`, then `mash credential create` on the endpoint's machine ([operations.md](operations.md#adding-an-endpoint)). The address in `endpoint list` may differ from the one you started: an endpoint that was deleted keeps its address burned, so it cannot be made again.
 
 ## `do not match endpoint`
 
@@ -67,15 +67,15 @@ Two forms: `mash: the credentials in <path> do not match endpoint X (they are fo
 
 Cause: another live session holds the address, or one that died within the last 90 seconds does. The session retries every 10 seconds, tells Claude when mail is on, and needs no restart.
 
-Fix: end the other session, or start this one with a different `MASH_NAME` or `MASH_GROUP`. Addresses are unique per NATS account, so a teammate who uses the same owner, group and instance counts. `mash who` lists the endpoints.
+Fix: end the other session, or start this one with a different `MASH_ENDPOINT`. Addresses are unique per NATS account, so a teammate who uses the same owner, group and instance counts. `mash who` lists the endpoints.
 
 ## `mash: lost the lease on X to another session`
 
-Shown as `mash: endpoint X stopped: ... Mail is off for this session.` The lease is rewritten every 30 seconds and expires after 90. If the lease expires while the session sleeps or loses the network (longer than 90 seconds) and no one else took the name, the session takes it back at its next refresh. If another session took it, or the name was deprovisioned, the loss is final: the session stops and does not try again. Restart Claude Code with the same `MASH_NAME`; the restart takes the name once no one else holds it. See [Sessions and resume](install.md#sessions-and-resume).
+Shown as `mash: endpoint X stopped: ... Mail is off for this session.` The lease is rewritten every 30 seconds and expires after 90. If the lease expires while the session sleeps or loses the network (longer than 90 seconds) and no one else took the name, the session takes it back at its next refresh. If another session took it, or the name was deprovisioned, the loss is final: the session stops and does not try again. Restart Claude Code with the same `MASH_ENDPOINT`; the restart takes the name once no one else holds it. See [Sessions and resume](install.md#sessions-and-resume).
 
 ## `connection: RETRYING` or `FAILED`
 
-- `RETRYING - could not reach the server, last error: ...`: mash retries on its own. Check the `url`, that the host is reachable, and the clock (below). On a slow link raise `open_timeout` (default 20s) or `call_timeout` (default 15s).
+- `RETRYING - could not reach the server, last error: ...`: mash retries on its own. Check `servers`, that the host is reachable, and the clock (below). On a slow link raise `open_timeout` (default 20s) or `call_timeout` (default 15s).
 - `FAILED - ... Next: fix the cause (see the creds and config lines) and restart Claude Code`: the first failure was permanent. Fix what the earlier lines show.
 - `mash status` from a shell makes no connection, but it shows a failure the session recorded: `connection: FAILED - ... Authorization Violation (recorded by the session at T)` means the endpoint was deleted or its key reissued, so the old credentials no longer work; ask whoever runs mashctl for a new credentials file (`mashctl endpoint show <address>`). The record is kept in the endpoint's state directory (`connection.json`, no secret) and is cleared when a session connects again.
 - After a network blip, clients can take 30 to 60 seconds to reconnect because the server rate-limits new connections per source address ([operations.md](operations.md) Troubleshooting).
@@ -175,7 +175,7 @@ Fix, either one: free disk under the server's store directory (or move the store
 
 ## `environment: STRIPPED`
 
-Claude Code passes MCP servers only a baseline environment, so `MASH_NAME` cannot reach `mash serve`. mash is unsupported in that mode until the organisation drops the setting. Put `url` and `owner` in config.json; the name cannot be.
+Claude Code passes MCP servers only a baseline environment, so `MASH_ENDPOINT` cannot reach `mash serve`. mash is unsupported in that mode until the organisation drops the setting. Put `servers` and `endpoint` in config.json.
 
 ## Reporting a problem
 

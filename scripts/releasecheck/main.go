@@ -1278,7 +1278,7 @@ func onlyUnknownHook(log string) bool {
 
 const mcpInitialize = `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"release-check","version":"1"}}}` + "\n"
 
-// mcpHandshake starts bin with spec.Args (serve, inert: no MASH_NAME) under a minimal environment plus the plugin's env
+// mcpHandshake starts bin with spec.Args (serve, inert: no MASH_ENDPOINT) under a minimal environment plus the plugin's env
 // block (which cannot replace PATH or HOME, the isolation), sends an MCP initialize
 // and requires a valid answer within the deadline. A failure to start it is an op error; anything else is a finding.
 func mcpHandshake(ctx context.Context, bin string, spec serveSpec, label string) error {

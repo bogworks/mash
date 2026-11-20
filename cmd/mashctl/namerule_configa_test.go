@@ -96,7 +96,7 @@ func TestConfigAMashctlRequiredWithoutFileRefusesToStart(t *testing.T) {
 	for _, how := range []string{"environment", "config.json"} {
 		for _, args := range verbs {
 			dir := t.TempDir()
-			env := map[string]string{"HOME": t.TempDir(), "MASH_URL": "nats://127.0.0.1:1", "MASH_OWNER": "o", "MASH_CONFIG_DIR": dir}
+			env := map[string]string{"HOME": t.TempDir(), "MASH_SERVER": "nats://127.0.0.1:1", "MASH_ENDPOINT": "o.dev.x", "MASH_CONFIG_DIR": dir}
 			if how == "environment" {
 				env["MASH_NAME_RULE_REQUIRED"] = "true"
 			} else {
@@ -115,7 +115,7 @@ func TestConfigAMashctlRequiredWithoutFileRefusesToStart(t *testing.T) {
 		"empty":   {"", "MASH_NAME_RULE_FILE is set but empty"},
 		"missing": {absent, absent},
 	} {
-		env := map[string]string{"HOME": t.TempDir(), "MASH_URL": "nats://127.0.0.1:1", "MASH_OWNER": "o"}
+		env := map[string]string{"HOME": t.TempDir(), "MASH_SERVER": "nats://127.0.0.1:1", "MASH_ENDPOINT": "o.dev.x"}
 		lookup := func(k string) (string, bool) {
 			if k == "MASH_NAME_RULE_FILE" {
 				return c.val, true // set, possibly empty: the lookup says so, as the process environment does

@@ -166,14 +166,14 @@ var AT003 = Scenario{
 			a.refusal(ha, trees, c)
 		}
 
-		// A session with no MASH_GROUP.
+		// A session whose endpoint has no group.
 		before := a.Snapshot("no-group-session-before", ha, trees...)
-		gextra := append(a.Conn(), "MASH_NAME=ghost", "MASH_STATE_DIR="+filepath.Join(he.State, "ghost"))
+		gextra := append(a.Conn(), "MASH_ENDPOINT=alice.ghost", "MASH_STATE_DIR="+filepath.Join(he.State, "ghost"))
 		r = a.Mash("session-no-group", he, gextra, "serve")
 		after := a.Snapshot("no-group-session-after", ha, trees...)
-		a.C.Check("a session with no MASH_GROUP: exit code 2", r.Code == 2, exitDetail(r))
-		a.C.Check("a session with no MASH_GROUP: standard error names MASH_GROUP", strings.Contains(r.Stderr, "MASH_GROUP"), "")
-		a.C.Check("a session with no MASH_GROUP: no directory record, stream, consumer, lease or service was made for it",
+		a.C.Check("a session whose endpoint has no group: exit code 1", r.Code == 1, exitDetail(r))
+		a.C.Check("a session whose endpoint has no group: standard error names MASH_ENDPOINT", strings.Contains(r.Stderr, "MASH_ENDPOINT"), "")
+		a.C.Check("a session whose endpoint has no group: no directory record, stream, consumer, lease or service was made for it",
 			len(before.Diff(after)) == 0 && !strings.Contains(after.Raw["audit"], "ghost") && !strings.Contains(after.Raw["list"], "ghost"), "changed: "+orNone(strings.Join(before.Diff(after), ", ")))
 
 		// The three removed commands.
@@ -228,7 +228,7 @@ collect:
 	}
 	a.C.Check("INV-002: the server refuses bob's publish to agents.mail.alice.dev.design with a permissions violation", mail, "")
 	a.C.Check("INV-002: the server refuses bob's request to agents.prompt.alice.dev.design with a permissions violation", prompt, "")
-	aliceEnv := append(a.Conn(), "MASH_GROUP=dev", "MASH_NAME=design", "MASH_CREDS="+alice.creds, "MASH_STATE_DIR="+filepath.Join(he.State, "design"))
+	aliceEnv := append(a.Conn(), "MASH_ENDPOINT=alice.dev.design", "MASH_CREDS="+alice.creds, "MASH_STATE_DIR="+filepath.Join(he.State, "design"))
 	a.forgedReplies(he, nc, errs, aliceEnv)
 	r := a.Mash("inbox-alice", he, aliceEnv, "inbox")
 	a.C.Check("alice's inbox is read with her own credentials", r.Code == 0, exitDetail(r))

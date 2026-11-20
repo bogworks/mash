@@ -171,7 +171,7 @@ never connects to NATS.*
 
 | Container | What it is | Why it exists |
 |---|---|---|
-| `mash serve` (mash) | The endpoint manager. A long-lived MCP server that the agent host starts once per session. It holds the NATS connection, the lease, the SAP registration and the inbox consumer, and offers the session its tools: `send`, `read`, `inbox`, `who`, `reply`, `version`, `status` | Already connected when mail arrives, and a send is one tool call and one round trip ([ADR-0022][0022]). Without `MASH_NAME` it connects to nothing and offers only `status` and `version` ([ADR-0012][0012]) |
+| `mash serve` (mash) | The endpoint manager. A long-lived MCP server that the agent host starts once per session. It holds the NATS connection, the lease, the SAP registration and the inbox consumer, and offers the session its tools: `send`, `read`, `inbox`, `who`, `reply`, `version`, `status` | Already connected when mail arrives, and a send is one tool call and one round trip ([ADR-0022][0022]). Without `MASH_ENDPOINT` it connects to nothing and offers only `status` and `version` ([ADR-0012][0012]) |
 | `mash hook` (mash) | A short-lived command the agent host runs after each tool call and with each prompt. It prints spooled mail as hook context and makes no network call | A busy session sees mail with no turn of its own ([ADR-0024][0024]) |
 | Spool (mash) | One directory per endpoint, files `<seq>.json` plus `shown/`, `listed/` and `drained/` marks (`listed/` is a message a digest named and the model has not read: still waiting and unacked, drained by `read` or a full showing, [ADR-0046][0046]); directories 0700, files 0600 | Hands mail from serve to the hook, so an acknowledgement means the mail was shown ([ADR-0025][0025]). Its `.owner` file records the owner (serve's parent pid, session id and launch token as JSON); a hook drains only if its session id or launch token matches, or the pid is among its ancestors, and a hook that matches none is refused and recorded in `.refused` ([ADR-0040][0040]) |
 | `mash` CLI (mash) | One-shot commands for people and scripts, using the same identity. It never takes the lease. `mash admin` provisions endpoints. Setting up a hosted account is a script outside the binary, `scripts/quickstart-synadia.sh` | Shells and scripts need a way in without a session ([ADR-0022][0022]) |
@@ -250,7 +250,7 @@ have happened ([ADR-0025][0025]).
 | Removing | `mashctl endpoint delete` / `mashctl deprovision` (revokes the user), or `mash admin deprovision` and revoke the user yourself | Same, with an admin user made in the console |
 
 Each endpoint machine needs the `mash` binary on `PATH`, the Claude Code plugin, a credentials file at mode 0600 and
-`MASH_NAME` set at launch. The idle wake also needs channels allowed for the plugin on that machine.
+`MASH_ENDPOINT` set at launch. The idle wake also needs channels allowed for the plugin on that machine.
 
 ### Settings and limits
 
@@ -410,7 +410,7 @@ name, KV key, user name and file path mash builds ([ADR-0036][0036]). A sender i
 ### 8.5 Configuration
 
 Settings come from three places, in rising precedence: built-in defaults, then `~/.config/mash/config.json`, then the
-environment (`MASH_*`). A malformed value is an error that names its source. `MASH_GROUP` (no default, no config key) and `MASH_NAME`, the instance, come only from the
+environment (`MASH_*`). A malformed value is an error that names its source. `MASH_ENDPOINT` (the full address `owner.group.name`; no default) comes only from the
 environment, so each launch chooses its address ([ADR-0012][0012]). The credentials default to
 `~/.config/mash/<owner>.<group>.<instance>.creds`, and `~/.config/mash/policy.md`, if present, is appended to the session's instructions
 ([ADR-0020][0020]). The spool and hook log live under `$XDG_STATE_HOME/mash` (default `~/.local/state/mash`). The plugin
@@ -429,7 +429,7 @@ The complete index is [`docs/decisions/INDEX.md`](decisions/INDEX.md), generated
   root of identity · [0036][0036] name rules.
 - **Storage:** [0009][0009] one inbox stream and consumer per endpoint · [0010][0010] inbox limits, append-only ·
   [0031][0031] at-most-once send with a key.
-- **Sessions and names:** [0012][0012] endpoint chosen by `MASH_NAME` · [0013][0013] the lease · [0014][0014] wait, and
+- **Sessions and names:** [0012][0012] endpoint chosen by `MASH_ENDPOINT` · [0013][0013] the lease · [0014][0014] wait, and
   take over a dead holder · [0015][0015] deprovision fences the name · [0016][0016] the lease as a zero-turn health
   record · [0022][0022] one endpoint manager per session.
 - **Signing and trust:** [0017][0017] SAP §13 signatures · [0018][0018] mash's signed marks · [0019][0019] five trust
@@ -535,7 +535,7 @@ that takes channel events.
 | SAP service | SAP | A NATS micro service (NATS's request/reply service framework) named `agents`, which every SAP agent registers. Tools find agents with `$SRV.INFO` requests |
 | status probe | SAP | A request to an agent's `status` endpoint. It returns the heartbeat payload and is never refused for who asked |
 | owner | SAP | The fourth subject token: the operator who owns the agents. One per mash deployment. It is a label, not a NATS account |
-| endpoint | mash | One addressed mailbox and identity: an address `owner.group.instance`, a NATS user, an inbox stream and a directory record. A session becomes an endpoint by launching with `MASH_OWNER`, `MASH_GROUP` and `MASH_NAME` |
+| endpoint | mash | One addressed mailbox and identity: an address `owner.group.instance`, a NATS user, an inbox stream and a directory record. A session becomes an endpoint by launching with `MASH_ENDPOINT` set to its address |
 | directory | mash | The `mash-directory` KV bucket: address to user key and mail subject. Written only by the admin. The root of identity |
 | lease | mash | An entry in the `mash-leases` bucket that lets one live session hold a name. It expires after 90 s unless refreshed |
 | spool | mash | The per-endpoint directory on disk where serve leaves mail for the hook |
@@ -561,7 +561,7 @@ the 0.3.0 tree.
 |---|---|---|
 | Mail is pushed as channel events and acknowledged once written to stdout | Hooks deliver mail from a spool, acknowledged once shown. The channel carries only the idle wake, live prompts and notices | [0024][0024], [0025][0025] |
 | A second session under a held name refuses to start | It waits and retries. A dead holder on the same machine is taken over at once | [0014][0014] |
-| Without `MASH_NAME`, serve registers no tools | It offers `status` and `version`, so the session can say what is wrong | [0012][0012] |
+| Without `MASH_ENDPOINT`, serve registers no tools | It offers `status` and `version`, so the session can say what is wrong | [0012][0012] |
 | Endpoints read the directory by a KV watch | They poll every 15 s, because a watch needs consumer rights that endpoints lack (changed the same night) | [0011][0011] |
 | Replies through NATS's `allow_responses` permission | Replies only to `_INBOX.<owner>.>`, with a private prefix per endpoint (changed the same night) | [0007][0007] |
 | Trust classes `verified`, `unknown-signer`, `claimed`, `absent`, with forged mail dropped | Adds `stale`. Bodies quoted (both added the same night) | [0019][0019], [0021][0021] |
@@ -579,7 +579,7 @@ the 0.3.0 tree.
 | Other agents later | A host adapter seam, Claude Code the only host, every endpoint's `agent` metadata `claude-code` | [0032][0032] |
 | (Not in the design) | Rendered text and plugin commands became a contract | [0034][0034] |
 | (Not in the design) | Hosted quickstart, `mash init synadia` at first, then `scripts/quickstart-synadia.sh` | [0035][0035] superseded by [0038][0038] |
-| Config: `url`, `owner`, `creds`, `MASH_NAME`, batching | Adds `idle_wake`, `open_timeout`, `call_timeout`, `host`, `spool_from_start`, `admin_creds`, `MASH_LAUNCH_TOKEN` | various |
+| Config: `servers`, `endpoint`, `creds`, `MASH_ENDPOINT`, batching | Adds `idle_wake`, `open_timeout`, `call_timeout`, `host`, `spool_from_start`, `admin_creds`, `MASH_LAUNCH_TOKEN` | various |
 | Later phases: archive past 30 days, monitoring, approvals | Not built | none |
 | Unchanged | SAP 0.3 plus `mail`, subjects, one stream per endpoint, inbox limits, batching thresholds, text-only mail, own marketplace | [0003][0003], [0005][0005], [0009][0009], [0026][0026], [0037][0037], [0033][0033] |
 
@@ -707,7 +707,7 @@ idle wake.
 | Shown sender | The sender's address. An address that is not valid is shown as a short key fragment (`UABC…WXYZ`). `?` when there is no header |
 | Message header line | `--- #<seq> from <sender> [<trust>] at <time>`, then optional `urgent: yes` and `instance:` lines, then `kind: <kind>`, then the body with each line prefixed `> ` |
 | Files | `~/.config/mash/config.json`, `~/.config/mash/<owner>.<group>.<instance>.creds`, `~/.config/mash/policy.md`. `$XDG_STATE_HOME/mash/spool/<owner>/<flat key>/` and `$XDG_STATE_HOME/mash/hook.log` |
-| Environment | `MASH_URL`, `MASH_OWNER`, `MASH_GROUP`, `MASH_NAME`, `MASH_CREDS`, `MASH_ADMIN_CREDS`, `MASH_HOST`, `MASH_LAUNCH_TOKEN`, `MASH_SPOOL_FROM_START`, `MASH_IDLE_WAKE`, `MASH_SETTLE_MS`, `MASH_BATCH_MSGS`, `MASH_BATCH_BYTES`, `MASH_OPEN_TIMEOUT`, `MASH_CALL_TIMEOUT` |
+| Environment | `MASH_SERVER`, `MASH_ENDPOINT`, `MASH_CA`, `MASH_CREDS`, `MASH_ADMIN_CREDS`, `MASH_HOST`, `MASH_LAUNCH_TOKEN`, `MASH_SPOOL_FROM_START`, `MASH_IDLE_WAKE`, `MASH_SETTLE_MS`, `MASH_BATCH_MSGS`, `MASH_BATCH_BYTES`, `MASH_OPEN_TIMEOUT`, `MASH_CALL_TIMEOUT` |
 
 ## Appendix D. Source map
 

@@ -153,7 +153,7 @@ func (s *session) tools(t *testing.T) []any {
 func TestServeInertWithoutName(t *testing.T) {
 	s := startServe(t, map[string]string{"HOME": t.TempDir()})
 	r := s.initialize(t)
-	if instr := r["result"].(map[string]any)["instructions"].(string); !strings.Contains(instr, "MASH_NAME") {
+	if instr := r["result"].(map[string]any)["instructions"].(string); !strings.Contains(instr, "MASH_ENDPOINT") {
 		t.Fatalf("instructions %q", instr)
 	}
 	if names := toolNames(t, s); len(names) != 2 || !names["status"] || !names["version"] {
@@ -201,8 +201,8 @@ func newWorldWith(t *testing.T, o testenv.Options, names ...string) *world {
 		if _, err := adm.Provision(context.Background(), tAddr(n), u, e.Account, "", admin.Meta{}); err != nil {
 			t.Fatal(err)
 		}
-		w.env[n] = map[string]string{"HOME": t.TempDir(), "MASH_NAME": n, "MASH_GROUP": testGroup, "MASH_URL": e.URL,
-			"MASH_OWNER": e.Owner, "MASH_CREDS": c, "MASH_SETTLE_MS": "20"}
+		w.env[n] = map[string]string{"HOME": t.TempDir(), "MASH_ENDPOINT": e.Owner + "." + testGroup + "." + n, "MASH_SERVER": e.URL,
+			"MASH_CREDS": c, "MASH_SETTLE_MS": "20"}
 		if !o.TLS {
 			// REQ-014: these tests are not about TLS; the override is explicit.
 			w.env[n]["MASH_INSECURE_PLAINTEXT"] = "1"
@@ -338,7 +338,7 @@ func TestServeLeaseConflict(t *testing.T) {
 func TestAdminCLI(t *testing.T) {
 	e := testenv.Start(t)
 	c, u := e.Mint(t, tAddr("z"))
-	env := map[string]string{"HOME": t.TempDir(), "MASH_URL": e.URL, "MASH_OWNER": e.Owner, "MASH_ADMIN_CREDS": e.AdminCreds, "MASH_INSECURE_PLAINTEXT": "1"}
+	env := map[string]string{"HOME": t.TempDir(), "MASH_SERVER": e.URL, "MASH_ENDPOINT": e.Owner + ".dev." + "x", "MASH_ADMIN_CREDS": e.AdminCreds, "MASH_INSECURE_PLAINTEXT": "1"}
 	runAdmin := func(args ...string) (string, int) {
 		var out bytes.Buffer
 		code := run(append([]string{"admin"}, args...), envFrom(env), strings.NewReader(""), &out, &out)

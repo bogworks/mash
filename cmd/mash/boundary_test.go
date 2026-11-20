@@ -95,7 +95,7 @@ func entries(t *testing.T, sp spool.Spool, bodies []string, urgentLast bool) {
 }
 
 func hookEnv(t *testing.T, extra map[string]string) map[string]string {
-	env := map[string]string{"HOME": t.TempDir(), "MASH_NAME": "a", "MASH_GROUP": testGroup, "MASH_OWNER": "o", "MASH_URL": "nats://127.0.0.1:1", "MASH_CREDS": "/none"}
+	env := map[string]string{"HOME": t.TempDir(), "MASH_ENDPOINT": "o." + testGroup + ".a", "MASH_SERVER": "nats://127.0.0.1:1", "MASH_CREDS": "/none"}
 	for k, v := range extra {
 		env[k] = v
 	}

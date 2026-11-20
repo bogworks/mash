@@ -349,7 +349,7 @@ func OpenClient(ctx context.Context, cfg config.Config) (*Endpoint, error) {
 // with the identity check, so the command pays for one wave of round trips, not one per thing it reads.
 func OpenClientWith(ctx context.Context, cfg config.Config, opts ClientOptions) (*Endpoint, error) {
 	if cfg.Inert() {
-		return nil, errors.New("mash: no endpoint name (set MASH_NAME)")
+		return nil, errors.New("mash: no endpoint (set MASH_ENDPOINT)")
 	}
 	// The plain-text warning is not printed here: the command prints it once on its own standard error before it
 	// connects (cmd/mash run), and serve at start (reportSettings), not at every retry of its open.

@@ -83,7 +83,7 @@ func TestServeSpoolRequiredHoldsMailAndBindsWhenTheSpoolRecovers(t *testing.T) {
 	if err := os.MkdirAll(state, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	sp := spool.Spool{Dir: spool.Dir(state, w.env["a"]["MASH_OWNER"], tAddr(w.env["a"]["MASH_NAME"]).Flat())}
+	sp := spool.Spool{Dir: spool.Dir(state, endpointPart(w.env["a"], 0), tAddr(endpointPart(w.env["a"], 2)).Flat())}
 	eventually(t, 3*spoolRetryEvery+30*time.Second, "the held mail is spooled", func() bool { e, _ := sp.Waiting(); return len(e) == 1 })
 	if n := unreadOf(t, w, "a"); n != 1 {
 		t.Fatalf("unread %d, want 1: spooled, not yet drained", n)

@@ -125,8 +125,8 @@ func TestStandaloneOnlyNATS(t *testing.T) {
 	bin := mashBinary(t)
 	e := testenv.Start(t)
 
-	base := map[string]string{"MASH_URL": e.URL, "MASH_OWNER": e.Owner, "MASH_GROUP": testGroup}
-	adminEnv := scrubbedEnv(t, map[string]string{"MASH_URL": e.URL, "MASH_OWNER": e.Owner, "MASH_ADMIN_CREDS": e.AdminCreds, "MASH_INSECURE_PLAINTEXT": "1"})
+	base := map[string]string{"MASH_SERVER": e.URL}
+	adminEnv := scrubbedEnv(t, map[string]string{"MASH_SERVER": e.URL, "MASH_ENDPOINT": e.Owner + ".dev." + "x", "MASH_ADMIN_CREDS": e.AdminCreds, "MASH_INSECURE_PLAINTEXT": "1"})
 	assertToolsAbsent(t, adminEnv)
 	mustRun(t, bin, adminEnv, "admin", "init")
 	envs := map[string][]string{}
@@ -140,7 +140,7 @@ func TestStandaloneOnlyNATS(t *testing.T) {
 		if !strings.Contains(out, "provisioned "+tTo(n)) {
 			t.Fatalf("provision %s: %s", n, out)
 		}
-		m := map[string]string{"MASH_NAME": n, "MASH_CREDS": creds}
+		m := map[string]string{"MASH_ENDPOINT": e.Owner + "." + testGroup + "." + n, "MASH_CREDS": creds}
 		for k, v := range base {
 			m[k] = v
 		}
@@ -183,7 +183,7 @@ func TestStandaloneOnlyNATS(t *testing.T) {
 func TestStandaloneEnvOnlyConfig(t *testing.T) {
 	bin := mashBinary(t)
 	e := testenv.Start(t)
-	adminEnv := scrubbedEnv(t, map[string]string{"MASH_URL": e.URL, "MASH_OWNER": e.Owner, "MASH_ADMIN_CREDS": e.AdminCreds, "MASH_INSECURE_PLAINTEXT": "1"})
+	adminEnv := scrubbedEnv(t, map[string]string{"MASH_SERVER": e.URL, "MASH_ENDPOINT": e.Owner + ".dev." + "x", "MASH_ADMIN_CREDS": e.AdminCreds, "MASH_INSECURE_PLAINTEXT": "1"})
 	mustRun(t, bin, adminEnv, "admin", "init")
 	creds, user, err := e.MintEndpoint(tAddr("solo"))
 	if err != nil {
@@ -191,7 +191,7 @@ func TestStandaloneEnvOnlyConfig(t *testing.T) {
 	}
 	mustRun(t, bin, adminEnv, "admin", "provision", tTo("solo"), "--user", user, "--account", e.Account)
 
-	env := scrubbedEnv(t, map[string]string{"MASH_URL": e.URL, "MASH_OWNER": e.Owner, "MASH_GROUP": testGroup, "MASH_NAME": "solo", "MASH_CREDS": creds})
+	env := scrubbedEnv(t, map[string]string{"MASH_SERVER": e.URL, "MASH_ENDPOINT": e.Owner + "." + testGroup + ".solo", "MASH_CREDS": creds})
 	assertToolsAbsent(t, env)
 	for _, kv := range env {
 		if v, ok := strings.CutPrefix(kv, "HOME="); ok {
@@ -208,7 +208,7 @@ func TestStandaloneEnvOnlyConfig(t *testing.T) {
 	}
 	// Without the environment and with no config.json, mash says what is missing, rather than reaching for a tool.
 	bare := scrubbedEnv(t, nil)
-	if out, code := mashRun(t, bin, bare, "", "who"); code == 0 || !strings.Contains(out, "MASH_NAME") {
+	if out, code := mashRun(t, bin, bare, "", "who"); code == 0 || !strings.Contains(out, "MASH_ENDPOINT") {
 		t.Fatalf("who with no configuration: exit %d, %s", code, out)
 	}
 }

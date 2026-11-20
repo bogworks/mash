@@ -146,7 +146,7 @@ type plugSession struct {
 }
 
 // StartPluginSession starts `sh <launcher> serve` as .mcp.json declares, with the plugin env and the session's
-// MASH_OWNER, MASH_GROUP and MASH_NAME, and takes it through the MCP handshake.
+// MASH_ENDPOINT, and takes it through the MCP handshake.
 func (a *AT) StartPluginSession(pl pluginLaunch, h Home, group, name string) (*plugSession, error) {
 	pe, data := a.pluginEnv(pl, name)
 	extra := a.SessionEnv(h, group, name, pe...)

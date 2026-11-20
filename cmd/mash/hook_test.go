@@ -57,7 +57,12 @@ func runHookAs(t *testing.T, env map[string]string, event, session string) strin
 }
 
 func spoolOf(env map[string]string) spool.Spool {
-	return spool.Spool{Dir: spool.Dir(filepath.Join(env["HOME"], ".local", "state", "mash"), env["MASH_OWNER"], env["MASH_OWNER"]+"_"+env["MASH_GROUP"]+"_"+env["MASH_NAME"])}
+	return spool.Spool{Dir: spool.Dir(filepath.Join(env["HOME"], ".local", "state", "mash"), endpointPart(env, 0), endpointPart(env, 0)+"_"+endpointPart(env, 1)+"_"+endpointPart(env, 2))}
+}
+
+// endpointPart is the owner (0), group (1) or name (2) of the MASH_ENDPOINT in env.
+func endpointPart(env map[string]string, i int) string {
+	return strings.Split(env["MASH_ENDPOINT"], ".")[i]
 }
 
 func unreadOf(t *testing.T, w *world, name string) uint64 {
@@ -137,7 +142,7 @@ func TestStateDirOverridePlacesTheSpool(t *testing.T) {
 
 // One run shows at most BatchMsgs messages; the rest wait for the next run, oldest first.
 func TestHookDrainIsCapped(t *testing.T) {
-	env := map[string]string{"HOME": t.TempDir(), "MASH_NAME": "a", "MASH_GROUP": testGroup, "MASH_OWNER": "o", "MASH_URL": "nats://127.0.0.1:1", "MASH_CREDS": "/none",
+	env := map[string]string{"HOME": t.TempDir(), "MASH_ENDPOINT": "o." + testGroup + ".a", "MASH_SERVER": "nats://127.0.0.1:1", "MASH_CREDS": "/none",
 		"MASH_BATCH_MSGS": "3"}
 	sp := spoolOf(env)
 	if err := sp.Init(); err != nil {
@@ -168,8 +173,8 @@ func TestHookDrainIsCapped(t *testing.T) {
 func TestHookIsSilentWithoutAnEndpoint(t *testing.T) {
 	for name, env := range map[string]map[string]string{
 		"no identity": {"HOME": t.TempDir()},
-		"bad config":  {"HOME": t.TempDir(), "MASH_NAME": "A B"},
-		"no spool":    {"HOME": t.TempDir(), "MASH_NAME": "a", "MASH_GROUP": testGroup, "MASH_OWNER": "o", "MASH_URL": "nats://x", "MASH_CREDS": "/none"},
+		"bad config":  {"HOME": t.TempDir(), "MASH_ENDPOINT": "A B"},
+		"no spool":    {"HOME": t.TempDir(), "MASH_ENDPOINT": "o." + testGroup + ".a", "MASH_SERVER": "nats://x", "MASH_CREDS": "/none"},
 	} {
 		if got := runHook(t, env, "UserPromptSubmit"); got != "" {
 			t.Errorf("%s: printed %q", name, got)
@@ -179,7 +184,7 @@ func TestHookIsSilentWithoutAnEndpoint(t *testing.T) {
 
 // codex M2 on #21: MASH_BATCH_MSGS=0 means "digest", not "show nothing".
 func TestHookDrainWithZeroBatchMsgs(t *testing.T) {
-	env := map[string]string{"HOME": t.TempDir(), "MASH_NAME": "a", "MASH_GROUP": testGroup, "MASH_OWNER": "o", "MASH_URL": "nats://127.0.0.1:1", "MASH_CREDS": "/none",
+	env := map[string]string{"HOME": t.TempDir(), "MASH_ENDPOINT": "o." + testGroup + ".a", "MASH_SERVER": "nats://127.0.0.1:1", "MASH_CREDS": "/none",
 		"MASH_BATCH_MSGS": "0"}
 	sp := spoolOf(env)
 	if err := sp.Init(); err != nil {
@@ -222,7 +227,7 @@ func stubAncestors(t *testing.T, pids ...int) {
 // its mail nor marks it hooked.
 func TestHookAcceptsSpoolOfItsClaudeProcess(t *testing.T) {
 	stubAncestors(t, 111, 222)
-	env := map[string]string{"HOME": t.TempDir(), "MASH_NAME": "a", "MASH_GROUP": testGroup, "MASH_OWNER": "o", "MASH_URL": "nats://127.0.0.1:1", "MASH_CREDS": "/none"}
+	env := map[string]string{"HOME": t.TempDir(), "MASH_ENDPOINT": "o." + testGroup + ".a", "MASH_SERVER": "nats://127.0.0.1:1", "MASH_CREDS": "/none"}
 	sp := spoolOf(env)
 	if err := sp.Init(); err != nil {
 		t.Fatal(err)
@@ -243,7 +248,7 @@ func TestHookAcceptsSpoolOfItsClaudeProcess(t *testing.T) {
 
 func TestHookIgnoresAnotherProcessesSpool(t *testing.T) {
 	stubAncestors(t, 111, 222)
-	env := map[string]string{"HOME": t.TempDir(), "MASH_NAME": "a", "MASH_GROUP": testGroup, "MASH_OWNER": "o", "MASH_URL": "nats://127.0.0.1:1", "MASH_CREDS": "/none"}
+	env := map[string]string{"HOME": t.TempDir(), "MASH_ENDPOINT": "o." + testGroup + ".a", "MASH_SERVER": "nats://127.0.0.1:1", "MASH_CREDS": "/none"}
 	sp := spoolOf(env)
 	if err := sp.Init(); err != nil {
 		t.Fatal(err)
@@ -268,7 +273,7 @@ func TestHookIgnoresAnotherProcessesSpool(t *testing.T) {
 // Claude Code truncates hook context over 10,000 characters, so one run shows only what fits, and marks drained
 // only what it showed; the rest waits for the next run.
 func TestHookContextFitsClaudeCodeLimit(t *testing.T) {
-	env := map[string]string{"HOME": t.TempDir(), "MASH_NAME": "a", "MASH_GROUP": testGroup, "MASH_OWNER": "o", "MASH_URL": "nats://127.0.0.1:1", "MASH_CREDS": "/none"}
+	env := map[string]string{"HOME": t.TempDir(), "MASH_ENDPOINT": "o." + testGroup + ".a", "MASH_SERVER": "nats://127.0.0.1:1", "MASH_CREDS": "/none"}
 	sp := spoolOf(env)
 	if err := sp.Init(); err != nil {
 		t.Fatal(err)
@@ -307,7 +312,7 @@ func TestHookContextFitsClaudeCodeLimit(t *testing.T) {
 
 // Claude Code counts additionalContext in UTF-16 units, so an emoji is two (codex H1 on #21, round 8).
 func TestHookContextCountsUTF16Units(t *testing.T) {
-	env := map[string]string{"HOME": t.TempDir(), "MASH_NAME": "a", "MASH_GROUP": testGroup, "MASH_OWNER": "o", "MASH_URL": "nats://127.0.0.1:1", "MASH_CREDS": "/none"}
+	env := map[string]string{"HOME": t.TempDir(), "MASH_ENDPOINT": "o." + testGroup + ".a", "MASH_SERVER": "nats://127.0.0.1:1", "MASH_CREDS": "/none"}
 	sp := spoolOf(env)
 	if err := sp.Init(); err != nil {
 		t.Fatal(err)
@@ -335,7 +340,7 @@ func TestHookContextCountsUTF16Units(t *testing.T) {
 
 // With no .owner file any session's hook drains, as before.
 func TestHookUnownedSpoolDrainsForAnySession(t *testing.T) {
-	env := map[string]string{"HOME": t.TempDir(), "MASH_NAME": "a", "MASH_GROUP": testGroup, "MASH_OWNER": "o", "MASH_URL": "nats://127.0.0.1:1", "MASH_CREDS": "/none"}
+	env := map[string]string{"HOME": t.TempDir(), "MASH_ENDPOINT": "o." + testGroup + ".a", "MASH_SERVER": "nats://127.0.0.1:1", "MASH_CREDS": "/none"}
 	sp := spoolOf(env)
 	if err := sp.Init(); err != nil {
 		t.Fatal(err)
@@ -350,7 +355,7 @@ func TestHookUnownedSpoolDrainsForAnySession(t *testing.T) {
 
 // A present but corrupt .owner is refused, never read as "no owner": nothing drains and the refusal is recorded.
 func TestHookRefusesCorruptOwnerRecord(t *testing.T) {
-	env := map[string]string{"HOME": t.TempDir(), "MASH_NAME": "a", "MASH_GROUP": testGroup, "MASH_OWNER": "o", "MASH_URL": "nats://127.0.0.1:1", "MASH_CREDS": "/none"}
+	env := map[string]string{"HOME": t.TempDir(), "MASH_ENDPOINT": "o." + testGroup + ".a", "MASH_SERVER": "nats://127.0.0.1:1", "MASH_CREDS": "/none"}
 	sp := spoolOf(env)
 	if err := sp.Init(); err != nil {
 		t.Fatal(err)
@@ -376,7 +381,7 @@ func TestHookRefusesCorruptOwnerRecord(t *testing.T) {
 // still waiting.
 func hookWith(t *testing.T, stdin string) (string, []spool.Entry) {
 	t.Helper()
-	env := map[string]string{"HOME": t.TempDir(), "MASH_NAME": "a", "MASH_GROUP": testGroup, "MASH_OWNER": "o", "MASH_URL": "nats://127.0.0.1:1", "MASH_CREDS": "/none"}
+	env := map[string]string{"HOME": t.TempDir(), "MASH_ENDPOINT": "o." + testGroup + ".a", "MASH_SERVER": "nats://127.0.0.1:1", "MASH_CREDS": "/none"}
 	sp := spoolOf(env)
 	if err := sp.Init(); err != nil {
 		t.Fatal(err)
@@ -427,7 +432,7 @@ func TestHookIgnoresUnreadableOrUnknownInput(t *testing.T) {
 // A subagent's PostToolUse hook input carries a non-empty agent_id: it must not drain or mark the main session's
 // spool; the mail waits for the main session's next hook (codex H1 on #21, round 6).
 func TestHookIgnoresASubagent(t *testing.T) {
-	env := map[string]string{"HOME": t.TempDir(), "MASH_NAME": "a", "MASH_GROUP": testGroup, "MASH_OWNER": "o", "MASH_URL": "nats://127.0.0.1:1", "MASH_CREDS": "/none"}
+	env := map[string]string{"HOME": t.TempDir(), "MASH_ENDPOINT": "o." + testGroup + ".a", "MASH_SERVER": "nats://127.0.0.1:1", "MASH_CREDS": "/none"}
 	sp := spoolOf(env)
 	if err := sp.Init(); err != nil {
 		t.Fatal(err)
@@ -462,7 +467,7 @@ func TestHookIgnoresASubagent(t *testing.T) {
 // The hook runs under the spool's lock: while someone else holds it (serve rebinding the spool) the hook waits, and
 // drains once it is released (codex H1 on #21, round 7).
 func TestHookWaitsForTheSpoolLock(t *testing.T) {
-	env := map[string]string{"HOME": t.TempDir(), "MASH_NAME": "a", "MASH_GROUP": testGroup, "MASH_OWNER": "o", "MASH_URL": "nats://127.0.0.1:1", "MASH_CREDS": "/none"}
+	env := map[string]string{"HOME": t.TempDir(), "MASH_ENDPOINT": "o." + testGroup + ".a", "MASH_SERVER": "nats://127.0.0.1:1", "MASH_CREDS": "/none"}
 	sp := spoolOf(env)
 	if err := sp.Init(); err != nil {
 		t.Fatal(err)
@@ -510,7 +515,7 @@ func TestSendUrgentFromTheCLI(t *testing.T) {
 
 // An urgent message queued behind a full batch of normal mail is shown first (codex H1 on #23).
 func TestHookDrainShowsUrgentFirst(t *testing.T) {
-	env := map[string]string{"HOME": t.TempDir(), "MASH_NAME": "a", "MASH_GROUP": testGroup, "MASH_OWNER": "o", "MASH_URL": "nats://127.0.0.1:1", "MASH_CREDS": "/none"}
+	env := map[string]string{"HOME": t.TempDir(), "MASH_ENDPOINT": "o." + testGroup + ".a", "MASH_SERVER": "nats://127.0.0.1:1", "MASH_CREDS": "/none"}
 	sp := spoolOf(env)
 	if err := sp.Init(); err != nil {
 		t.Fatal(err)
@@ -564,7 +569,7 @@ func (f *fakeHost) Waker(n func(string, map[string]string) error) func(string, m
 
 func TestHookLoopWithAFakeAdapter(t *testing.T) {
 	setup := func(t *testing.T) (config.Config, spool.Spool) {
-		env := map[string]string{"HOME": t.TempDir(), "MASH_NAME": "a", "MASH_GROUP": testGroup, "MASH_OWNER": "o", "MASH_URL": "nats://127.0.0.1:1", "MASH_CREDS": "/none"}
+		env := map[string]string{"HOME": t.TempDir(), "MASH_ENDPOINT": "o." + testGroup + ".a", "MASH_SERVER": "nats://127.0.0.1:1", "MASH_CREDS": "/none"}
 		cfg, err := config.Load(config.LookupFromFunc(envFrom(env)), env["HOME"])
 		if err != nil {
 			t.Fatal(err)
@@ -620,7 +625,7 @@ func TestHookLoopWithAFakeAdapter(t *testing.T) {
 }
 
 func TestUnknownHostIsRefused(t *testing.T) {
-	env := map[string]string{"HOME": t.TempDir(), "MASH_NAME": "a", "MASH_GROUP": testGroup, "MASH_OWNER": "o", "MASH_URL": "nats://127.0.0.1:1", "MASH_CREDS": "/none", "MASH_HOST": "nope"}
+	env := map[string]string{"HOME": t.TempDir(), "MASH_ENDPOINT": "o." + testGroup + ".a", "MASH_SERVER": "nats://127.0.0.1:1", "MASH_CREDS": "/none", "MASH_HOST": "nope"}
 	for _, cmd := range []string{"hook", "serve"} {
 		var out, errb bytes.Buffer
 		done := make(chan int, 1)
@@ -641,7 +646,7 @@ func TestUnknownHostIsRefused(t *testing.T) {
 // A subagent's hook of this session records .alive (hooks work here) and nothing else: no drain, no .hooked. One
 // refused as another session's records no .alive, so another Claude's subagent cannot mark this spool alive.
 func TestHookSubagentTouchesAlive(t *testing.T) {
-	env := map[string]string{"HOME": t.TempDir(), "MASH_NAME": "a", "MASH_GROUP": testGroup, "MASH_OWNER": "o", "MASH_URL": "nats://127.0.0.1:1", "MASH_CREDS": "/none"}
+	env := map[string]string{"HOME": t.TempDir(), "MASH_ENDPOINT": "o." + testGroup + ".a", "MASH_SERVER": "nats://127.0.0.1:1", "MASH_CREDS": "/none"}
 	sp := spoolOf(env)
 	if err := sp.Init(); err != nil {
 		t.Fatal(err)
@@ -683,7 +688,7 @@ func TestHookSubagentTouchesAlive(t *testing.T) {
 // A digest lists what it shows and drains none of it: the entries stay waiting with a listed mark (so serve does not
 // ack them), the text says they stay unread until read, and the next run, with nothing new, shows nothing again.
 func TestHookDigestListsAndDoesNotDrain(t *testing.T) {
-	env := map[string]string{"HOME": t.TempDir(), "MASH_NAME": "a", "MASH_GROUP": testGroup, "MASH_OWNER": "o", "MASH_URL": "nats://127.0.0.1:1", "MASH_CREDS": "/none",
+	env := map[string]string{"HOME": t.TempDir(), "MASH_ENDPOINT": "o." + testGroup + ".a", "MASH_SERVER": "nats://127.0.0.1:1", "MASH_CREDS": "/none",
 		"MASH_BATCH_BYTES": "100"}
 	sp := spoolOf(env)
 	if err := sp.Init(); err != nil {
@@ -711,7 +716,7 @@ func TestHookDigestListsAndDoesNotDrain(t *testing.T) {
 // New mail shown in full takes the listed mail with it when the whole batch fits in full, and drains both; when it
 // does not fit, the new mail is shown alone and the listed mail is not repeated.
 func TestHookALaterFullShowingDrainsListedMail(t *testing.T) {
-	env := map[string]string{"HOME": t.TempDir(), "MASH_NAME": "a", "MASH_GROUP": testGroup, "MASH_OWNER": "o", "MASH_URL": "nats://127.0.0.1:1", "MASH_CREDS": "/none",
+	env := map[string]string{"HOME": t.TempDir(), "MASH_ENDPOINT": "o." + testGroup + ".a", "MASH_SERVER": "nats://127.0.0.1:1", "MASH_CREDS": "/none",
 		"MASH_BATCH_BYTES": "100"}
 	sp := spoolOf(env)
 	if err := sp.Init(); err != nil {

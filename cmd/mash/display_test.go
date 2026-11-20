@@ -76,9 +76,9 @@ func TestLiveHolderErrorNamesDotted(t *testing.T) {
 	}
 }
 
-func TestNameLineWithoutGroupNamesMASHGROUP(t *testing.T) {
+func TestNameLineWithoutGroupNamesMASHENDPOINT(t *testing.T) {
 	got := nameLine(config.Config{Name: "ops", Owner: "x"})
-	if !strings.Contains(got, "name: FAILED") || !strings.Contains(got, config.CodeGroupMissing) || !strings.Contains(got, "MASH_GROUP") {
+	if !strings.Contains(got, "name: FAILED") || !strings.Contains(got, config.CodeGroupMissing) || !strings.Contains(got, "MASH_ENDPOINT") {
 		t.Fatalf("nameLine %q", got)
 	}
 }

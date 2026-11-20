@@ -39,7 +39,7 @@ import (
 //     the caller's MASH_*, ANTHROPIC_*, CLAUDE_* or key-like variables is copied.
 //   - No key is ever in the child's environment (the model can run `env`). Authentication is a credentials file copied
 //     from the path in MASH_LIVE_CLAUDE_CREDS to <config dir>/.credentials.json at 0600 and removed in t.Cleanup.
-//     The mash identity (MASH_NAME, MASH_URL, MASH_OWNER, MASH_SPOOL_FROM_START) and MASH_CREDS, a path to the scratch
+//     The mash identity (MASH_ENDPOINT, MASH_SERVER, MASH_SPOOL_FROM_START) and MASH_CREDS, a path to the scratch
 //     endpoint's creds file (not key material), are in the child's environment so they reach serve and the hooks:
 //     Claude Code hands its environment to both. Whether it does, in every setup, is part of what these runs show.
 //   - Bash is limited to `sleep`, the model is haiku, a scenario is capped at 5 minutes and 8 turns.
@@ -548,8 +548,8 @@ func (sc *lsScenario) env(path string, minimal bool, extra map[string]string) ma
 func (sc *lsScenario) identity(w *world, name string, extra map[string]string) map[string]string {
 	src := w.env[name]
 	ls.addFileSecrets(src["MASH_CREDS"])
-	ls.addSecret(src["MASH_CREDS"], src["MASH_URL"], src["MASH_OWNER"], filepath.Dir(src["MASH_CREDS"]))
-	out := map[string]string{"MASH_NAME": name, "MASH_GROUP": testGroup, "MASH_URL": src["MASH_URL"], "MASH_OWNER": src["MASH_OWNER"],
+	ls.addSecret(src["MASH_CREDS"], src["MASH_SERVER"], endpointPart(src, 0), filepath.Dir(src["MASH_CREDS"]))
+	out := map[string]string{"MASH_ENDPOINT": endpointPart(src, 0) + "." + testGroup + "." + name, "MASH_SERVER": src["MASH_SERVER"],
 		"MASH_CREDS": src["MASH_CREDS"], "MASH_SPOOL_FROM_START": "1", "XDG_STATE_HOME": sc.state,
 		"MASH_INSECURE_PLAINTEXT": "1"} // REQ-014: these tests are not about TLS; the override is explicit
 	for k, v := range extra {
@@ -912,7 +912,7 @@ func TestLiveStrangerL3MinimalEnvironment(t *testing.T) {
 	m := lsMarker("L3")
 	lsSend(t, w, id, m)
 	env2 := sc.env(sc.mashPath(), true, sc.identity(w, "a", map[string]string{"MASH_HOOK_TRACE": "1"}))
-	sp := spool.Spool{Dir: spool.Dir(filepath.Join(sc.state, "mash"), w.env["a"]["MASH_OWNER"], tAddr("a").Flat())}
+	sp := spool.Spool{Dir: spool.Dir(filepath.Join(sc.state, "mash"), endpointPart(w.env["a"], 0), tAddr("a").Flat())}
 	var owner string
 	prompt2 := "Run the shell command `sleep 8`, then reply with one line listing every token in this session starting with MARK-L3 (look in any mash mail context too), and nothing else."
 	seen := false

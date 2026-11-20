@@ -17,17 +17,17 @@ func loadPresence(t *testing.T, fileBody string, env map[string]string) (Config,
 }
 
 func TestEmptyOtherVariablesStillReadAsUnset(t *testing.T) {
-	c, err := loadPresence(t, idFile+`}`, map[string]string{"MASH_NAME": "a", "MASH_GROUP": "g", "MASH_OWNER": "", "MASH_URL": "", "MASH_CREDS": ""})
+	c, err := loadPresence(t, `{"servers":"tls://x:4222","endpoint":"o.g.a"}`, map[string]string{"MASH_SERVER": "", "MASH_ENDPOINT": "", "MASH_CREDS": ""})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Owner != "o" || c.URL != "tls://x:4222" || c.Source["owner"] != "config.json" {
+	if c.Owner != "o" || c.URL != "tls://x:4222" || c.Source["endpoint"] != "config.json" {
 		t.Fatalf("%+v %v", c, c.Source)
 	}
 }
 
-func TestInertConfigIgnoresEmptyGroup(t *testing.T) {
-	if _, err := loadPresence(t, idFile+`}`, map[string]string{"MASH_GROUP": ""}); err != nil {
-		t.Fatal(err)
+func TestEmptyEndpointReadsAsUnset(t *testing.T) {
+	if c, err := loadPresence(t, `{"servers":"tls://x:4222"}`, map[string]string{"MASH_ENDPOINT": ""}); err != nil || !c.Inert() {
+		t.Fatalf("%+v %v", c, err)
 	}
 }

@@ -121,8 +121,8 @@ func TestRunnerTimeout(t *testing.T) {
 }
 
 func TestBuildEnvInheritsNothing(t *testing.T) {
-	t.Setenv("MASH_URL", "nats://caller.invalid:1")
-	t.Setenv("MASH_OWNER", "caller")
+	t.Setenv("MASH_SERVER", "nats://caller.invalid:1")
+	t.Setenv("MASH_ENDPOINT", "caller.g.n")
 	t.Setenv("NATS_URL", "nats://caller.invalid:2")
 	t.Setenv("HOME", "/caller/home")
 	t.Setenv("XDG_CONFIG_HOME", "/caller/xdg")
@@ -131,7 +131,7 @@ func TestBuildEnvInheritsNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	env := BuildEnv(h, []string{"/opt/nats"}, "MASH_URL=nats://127.0.0.1:1", "MASH_OWNER=alice", "MASH_OWNER=bob")
+	env := BuildEnv(h, []string{"/opt/nats"}, "MASH_SERVER=nats://127.0.0.1:1", "MASH_ENDPOINT=alice.g.n", "MASH_ENDPOINT=bob.g.n")
 	got := map[string]string{}
 	for _, kv := range env {
 		k, v, _ := strings.Cut(kv, "=")
@@ -143,7 +143,7 @@ func TestBuildEnvInheritsNothing(t *testing.T) {
 	if got["HOME"] != h.Dir || got["MASH_CONFIG_DIR"] != h.Config || got["MASH_KEYS_DIR"] != h.Keys {
 		t.Errorf("scratch values missing: %v", got)
 	}
-	if got["MASH_URL"] != "nats://127.0.0.1:1" || got["MASH_OWNER"] != "bob" {
+	if got["MASH_SERVER"] != "nats://127.0.0.1:1" || got["MASH_ENDPOINT"] != "bob.g.n" {
 		t.Errorf("extra does not win, last extra wins: %v", got)
 	}
 	for k := range got {

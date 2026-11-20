@@ -125,7 +125,7 @@ func TestAdminAndSystemConnectionsRequireTLS(t *testing.T) {
 	}
 	// a non-loopback plain URL is refused without the override, before any connection; with it, it is allowed (and
 	// warned about), so the failure is a connection failure, not a refusal
-	e.env["MASH_URL"] = "nats://192.0.2.1:4222"
+	e.env["MASH_SERVER"] = "nats://192.0.2.1:4222"
 	for _, args := range [][]string{{"issued", "check"}, {"list"}} {
 		e.env["MASH_INSECURE_PLAINTEXT"] = ""
 		out, errb, code := e.run(args...)
@@ -168,7 +168,7 @@ func runWithProcessStderr(t *testing.T, run func(args ...string) (string, string
 
 func TestAdminVerbsAcceptATLSServer(t *testing.T) {
 	e := testenv.StartWith(t, testenv.Options{TLS: true})
-	env := map[string]string{"HOME": t.TempDir(), "MASH_URL": e.URL, "MASH_OWNER": e.Owner, "MASH_ADMIN_CREDS": e.AdminCreds, "MASH_TLS_CA": e.CAFile}
+	env := map[string]string{"HOME": t.TempDir(), "MASH_SERVER": e.URL, "MASH_ENDPOINT": e.Owner + ".dev." + "x", "MASH_ADMIN_CREDS": e.AdminCreds, "MASH_CA": e.CAFile}
 	var out, errb bytes.Buffer
 	if code := runEnv([]string{"init"}, func(k string) string { return env[k] }, &out, &errb); code != 0 {
 		t.Fatalf("init over TLS without insecure_plaintext: %d\n%s\n%s", code, out.String(), errb.String())
@@ -210,7 +210,7 @@ func TestPlainURLRefusalExitsTwoEverywhere(t *testing.T) {
 	}
 	// with the override and an address nothing listens on, the failure is an ordinary one, not a refusal
 	e.env["MASH_INSECURE_PLAINTEXT"] = "1"
-	e.env["MASH_URL"] = "nats://127.0.0.1:1"
+	e.env["MASH_SERVER"] = "nats://127.0.0.1:1"
 	out, errb, code := e.run("endpoint", "list")
 	if code != 6 || strings.Contains(out+errb, "refusing a plain") {
 		t.Fatalf("unreachable server with the override: exit %d, want its ordinary 6\n%s\n%s", code, out, errb)

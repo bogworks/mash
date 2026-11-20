@@ -109,7 +109,7 @@ func (r *rttWorld) measure(t *testing.T, token string, args ...string) (string, 
 	for k, v := range r.env["me"] {
 		env[k] = v
 	}
-	env["MASH_URL"] = r.px.URL()
+	env["MASH_SERVER"] = r.px.URL()
 	if token != "" {
 		env["MASH_LAUNCH_TOKEN"] = token
 	}

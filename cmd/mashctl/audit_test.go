@@ -457,7 +457,7 @@ func TestAuditUsageAndErrors(t *testing.T) {
 		}
 	}
 	// no server: exit 3 (could not complete)
-	env := map[string]string{"HOME": t.TempDir(), "MASH_URL": "nats://127.0.0.1:1", "MASH_OWNER": "o", "MASH_ADMIN_CREDS": e.AdminCreds, "MASH_INSECURE_PLAINTEXT": "1"}
+	env := map[string]string{"HOME": t.TempDir(), "MASH_SERVER": "nats://127.0.0.1:1", "MASH_ENDPOINT": "o.dev.x", "MASH_ADMIN_CREDS": e.AdminCreds, "MASH_INSECURE_PLAINTEXT": "1"}
 	var out, errb bytes.Buffer
 	if code := runEnv([]string{"audit"}, func(k string) string { return env[k] }, &out, &errb); code != 3 {
 		t.Errorf("unreachable server: %d %q", code, errb.String())

@@ -95,7 +95,7 @@ func (e *Endpoint) SetSpool(s spool.Spool, owner string) error {
 	if err := s.ClearWaiting(); err != nil {
 		return err
 	}
-	// Only the lease holder gets here: bind the spool to its session, so a waiting session's hooks (same MASH_NAME)
+	// Only the lease holder gets here: bind the spool to its session, so a waiting session's hooks (same endpoint)
 	// cannot drain this one's mail (codex H1 on #21, round 3).
 	if err := s.Own(owner); err != nil {
 		return err

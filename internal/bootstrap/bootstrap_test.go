@@ -238,7 +238,7 @@ func TestConfigIsWritten(t *testing.T) {
 		t.Fatal("a policy file was written: the policy file is gone")
 	}
 	cfg, err := os.ReadFile(s.cfgPath)
-	if err != nil || !strings.Contains(string(cfg), `"tls://127.0.0.1:4222"`) || !strings.Contains(string(cfg), `"owner": "alice"`) || !strings.Contains(string(cfg), s.pl.Creds) || !strings.Contains(string(cfg), `"tls_ca": "`+filepath.Join(s.serverDir, "ca.pem")+`"`) || strings.Contains(string(cfg), "insecure_loopback") {
+	if err != nil || !strings.Contains(string(cfg), `"tls://127.0.0.1:4222"`) || !strings.Contains(string(cfg), `"owner": "alice"`) || !strings.Contains(string(cfg), s.pl.Creds) || !strings.Contains(string(cfg), `"ca": "`+filepath.Join(s.serverDir, "ca.pem")+`"`) || strings.Contains(string(cfg), "insecure_loopback") {
 		t.Fatalf("config.json: %s %v", cfg, err)
 	}
 	// The written config.json is one mash loads.
@@ -249,7 +249,7 @@ func TestConfigIsWritten(t *testing.T) {
 		return ""
 	}
 	c, err := config.Load(config.LookupFromFunc(env), "")
-	if err != nil || c.AdminCreds != s.pl.Creds || c.Owner != "alice" || c.TLSCA != s.pl.CA {
+	if err != nil || c.AdminCreds != s.pl.Creds || c.URL != s.pl.URL || c.TLSCA != s.pl.CA {
 		t.Fatalf("config.Load: %+v %v", c, err)
 	}
 }
@@ -259,7 +259,7 @@ func TestExistingConfigUntouched(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(s.cfgPath), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	const mine = "{\"url\": \"tls://elsewhere:4222\", \"owner\": \"bob\"}\n"
+	const mine = "{\"servers\": \"tls://elsewhere:4222\", \"endpoint\": \"bob.g.a\"}\n"
 	if err := os.WriteFile(s.cfgPath, []byte(mine), 0o600); err != nil {
 		t.Fatal(err)
 	}

@@ -621,6 +621,7 @@ func TestAdoptMintAdminRecordsTheAdmin(t *testing.T) {
 	if out, errb, code := a.adopt("--mint-admin"); code != 0 {
 		t.Fatalf("second adopt %d\n%s\n%s", code, out, errb)
 	}
+
 	if out, errb, code := a.run("init"); code != 0 {
 		t.Fatalf("init %d\n%s\n%s", code, out, errb)
 	}

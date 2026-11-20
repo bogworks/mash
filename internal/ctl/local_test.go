@@ -88,7 +88,7 @@ func TestInitLocalWithNoConfig(t *testing.T) {
 		}
 	}
 	c, err := os.ReadFile(filepath.Join(e.root, "cfg", "config.json"))
-	if err != nil || !strings.Contains(string(c), "tls://127.0.0.1:4333") || !strings.Contains(string(c), `"tls_ca"`) || strings.Contains(string(c), "insecure_plaintext") {
+	if err != nil || !strings.Contains(string(c), "tls://127.0.0.1:4333") || !strings.Contains(string(c), `"ca"`) || strings.Contains(string(c), "insecure_plaintext") {
 		t.Fatalf("config.json: %s %v", c, err)
 	}
 	if _, err := os.Stat(filepath.Join(e.root, "cfg", "policy.yaml")); err == nil {
@@ -121,7 +121,7 @@ func TestInitLocalLeavesExistingConfig(t *testing.T) {
 	if b, _ := os.ReadFile(cfgPath); string(b) != "{}\n" {
 		t.Fatal("config.json was touched")
 	}
-	for _, want := range []string{"not touched", `"url": "tls://127.0.0.1:4222"`, `"owner": "carol"`, "admin_creds", `"tls_ca"`} {
+	for _, want := range []string{"not touched", `"servers": ["tls://127.0.0.1:4222"]`, `"owner": "carol"`, "admin_creds", `"ca"`} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}
@@ -193,7 +193,7 @@ func TestPlainInitIsUnchanged(t *testing.T) {
 	}
 	e.cfg.Owner = "alice"
 	code, _, errs = e.run("init")
-	if code != 1 || !strings.Contains(errs, "MASH_URL") {
+	if code != 1 || !strings.Contains(errs, "MASH_SERVER") {
 		t.Fatalf("plain init: %d %s", code, errs)
 	}
 }
@@ -219,7 +219,7 @@ func TestInitLocalStartConfigElsewhere(t *testing.T) {
 		"config.json elsewhere": func(e *localEnv) {
 			e.cfg.URL, e.cfg.Owner, e.cfg.AdminCreds = "nats://other:4222", "alice", "/x/admin.creds"
 		},
-		"MASH_URL override": func(e *localEnv) {
+		"MASH_SERVER override": func(e *localEnv) {
 			e.cfg.URL = "nats://other:4222"
 			e.cfg.Owner = "alice"
 			e.cfg.AdminCreds = filepath.Join(e.root, "cfg", "server", "mashadmin.creds")
@@ -232,7 +232,7 @@ func TestInitLocalStartConfigElsewhere(t *testing.T) {
 			if code != 0 {
 				t.Fatalf("exit %d: %s", code, errs)
 			}
-			for _, want := range []string{"points elsewhere", `"url": "tls://127.0.0.1:4222"`, `"owner": "alice"`, "admin_creds", `"tls_ca"`, "MASH_URL"} {
+			for _, want := range []string{"points elsewhere", `"servers": ["tls://127.0.0.1:4222"]`, `"owner": "alice"`, "admin_creds", `"ca"`, "MASH_SERVER"} {
 				if !strings.Contains(out, want) {
 					t.Errorf("output lacks %q:\n%s", want, out)
 				}
@@ -300,7 +300,7 @@ func TestInitLocalRecordsOperatorJWTAndATLSOnlyConfig(t *testing.T) {
 		t.Fatalf("operator.jwt in the key directory: %v %v", st, err)
 	}
 	cfg, err := os.ReadFile(filepath.Join(e.root, "cfg", "config.json"))
-	if err != nil || !strings.Contains(string(cfg), `"tls_ca"`) || strings.Contains(string(cfg), "insecure_plaintext") {
+	if err != nil || !strings.Contains(string(cfg), `"ca"`) || strings.Contains(string(cfg), "insecure_plaintext") {
 		t.Fatalf("config.json: %s %v", cfg, err)
 	}
 	// a second init on another directory keeps the first operator JWT

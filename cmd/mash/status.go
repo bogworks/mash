@@ -146,29 +146,33 @@ func statusText(src *statusSource) string {
 func nameLine(cfg config.Config) string {
 	switch {
 	case cfg.Name == "":
-		return "name: MISSING - not set. Next: start Claude Code with MASH_NAME=<endpoint>"
+		return "name: MISSING - not set. Next: start Claude Code with MASH_ENDPOINT=<owner.group.name>, or install credentials for one endpoint"
 	case cfg.Group == "" && cfg.Owner != "":
-		return "name: FAILED - " + config.CodeGroupMissing + ": no group. Next: start Claude Code with MASH_GROUP=<group> (the group has no default), for example MASH_GROUP=dev"
+		return "name: FAILED - " + config.CodeGroupMissing + ": no group. Next: start Claude Code with MASH_ENDPOINT=<owner.group.name> (the group has no default), for example MASH_ENDPOINT=alice.dev.design"
 	}
 	if _, err := cfg.Identity(); err != nil && cfg.Owner != "" {
-		return fmt.Sprintf("name: FAILED - %s. Next: fix MASH_OWNER, MASH_GROUP or MASH_NAME: each is 1-32 lower-case letters, digits and single hyphens, starting with a letter", err)
+		return fmt.Sprintf("name: FAILED - %s. Next: fix MASH_ENDPOINT (owner.group.name): each part is 1-32 lower-case letters, digits and single hyphens, starting with a letter", err)
 	}
 	return "name: OK - " + cfg.DisplayName()
 }
 
 func configLine(cfg config.Config, cfgErr error) string {
+	file := "config.json in the mash config folder"
+	if cfg.Dir != "" {
+		file = filepath.Join(cfg.Dir, "config.json")
+	}
 	if cfgErr != nil && !errors.Is(cfgErr, config.ErrNoURL) && !errors.Is(cfgErr, config.ErrNoOwner) {
 		// The error stopped loading before the environment applied, so an empty field is unresolved, not missing.
-		line := fmt.Sprintf("config: FAILED - %s. Next: fix it in ~/.config/mash/config.json or the environment", redactText(cfgErr.Error()))
+		line := fmt.Sprintf("config: FAILED - %s. Next: fix it in %s or the environment", redactText(cfgErr.Error()), file)
 		if errors.Is(cfgErr, config.ErrGroupMissing) {
-			line = fmt.Sprintf("config: FAILED - %s: %s. Next: set MASH_GROUP in the environment (it is not a config.json key)", config.CodeGroupMissing, redactText(cfgErr.Error()))
+			line = fmt.Sprintf("config: FAILED - %s: %s. Next: set MASH_ENDPOINT to owner.group.name", config.CodeGroupMissing, redactText(cfgErr.Error()))
 		}
 		var un []string
 		if cfg.URL == "" {
-			un = append(un, "url")
+			un = append(un, "server")
 		}
 		if cfg.Owner == "" {
-			un = append(un, "owner")
+			un = append(un, "endpoint")
 		}
 		if len(un) > 0 {
 			line += "; " + strings.Join(un, " and ") + " could not be resolved because of this error"
@@ -177,15 +181,15 @@ func configLine(cfg config.Config, cfgErr error) string {
 	}
 	var missing []string
 	if cfg.URL == "" {
-		missing = append(missing, `url is not set. Next: set "url" in ~/.config/mash/config.json or the MASH_URL environment variable`)
+		missing = append(missing, `server is not set. Next: set "servers" in `+file+` or the MASH_SERVER environment variable`)
 	}
 	if cfg.Owner == "" {
-		missing = append(missing, `owner is not set. Next: set "owner" in ~/.config/mash/config.json or the MASH_OWNER environment variable`)
+		missing = append(missing, `endpoint is not set. Next: set "endpoint" in `+file+` or the MASH_ENDPOINT environment variable, or install credentials for one endpoint`)
 	}
 	if len(missing) > 0 {
 		return "config: MISSING - " + strings.Join(missing, "; ")
 	}
-	return fmt.Sprintf("config: OK - url %s, owner %s", redactURL(cfg.URL), cfg.Owner)
+	return fmt.Sprintf("config: OK - server %s, owner %s", redactURL(cfg.URL), cfg.Owner)
 }
 
 var (
@@ -312,7 +316,7 @@ func connectionLine(src *statusSource) string {
 		return fmt.Sprintf("connection: SUPERSEDED - a newer mash serve of this session (host %s, pid %s) holds endpoint %s and handles its mail; this server is inactive and exits when its client closes it. Next: use the mash tools of the newer server",
 			redactText(st.superseded.Host), redactText(st.superseded.PID), cfg.DisplayName())
 	case st.waiting != nil:
-		return fmt.Sprintf("connection: WAITING - the lease for endpoint %s is held by another session (host %s, pid %s, since %s). mash retries on its own. Next: end that session, or start this one with a different MASH_NAME",
+		return fmt.Sprintf("connection: WAITING - the lease for endpoint %s is held by another session (host %s, pid %s, since %s). mash retries on its own. Next: end that session, or start this one with a different endpoint name (MASH_ENDPOINT)",
 			cfg.DisplayName(), redactText(st.waiting.Host), redactText(st.waiting.PID), redactText(st.waiting.Since))
 	}
 	return "connection: STARTING - mash is opening endpoint " + cfg.DisplayName()

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -35,11 +36,14 @@ const (
 
 // Config is the resolved configuration for one process.
 type Config struct {
-	URL             string        // NATS URL
-	Owner           string        // SAP owner token
+	URL   string // the server address, or the comma-joined list of them (MASH_SERVER / "servers")
+	Owner string // SAP owner token: the owner part of the endpoint address (from the one installed endpoint too)
+	// ExplicitOwner is the owner mashctl acts for: the owner part of an endpoint that was set (--endpoint, MASH_ENDPOINT,
+	// config.json "endpoint"), else config.json "owner". It is never taken from an installed endpoint's creds file.
+	ExplicitOwner   string
 	StateDir        string        // $MASH_STATE_DIR, else $XDG_STATE_HOME/mash, else ~/.local/state/mash: holds spool/ and hook.log
-	Name            string        // the endpoint's instance token (MASH_NAME); empty = inert
-	Group           string        // the endpoint's group token (MASH_GROUP only, not a config.json key); no default
+	Name            string        // the endpoint's instance token: the name part of the endpoint address; empty = inert
+	Group           string        // the endpoint's group token: the group part of the endpoint address; no default
 	Creds           string        // endpoint credentials file
 	SettleMS        int           // quiet time before a batch is pushed
 	BatchMsgs       int           // a batch up to this many messages is shown in full
@@ -54,7 +58,7 @@ type Config struct {
 	CLITimeout      time.Duration // total deadline of one CLI command (zero = 15m)
 	AdminTimeout    time.Duration // total deadline of one `mash admin` command (zero = 30s)
 	AdminCreds      string        // admin credentials for `mash admin`
-	TLSCA           string        // MASH_TLS_CA / "tls_ca": PEM file of the CA that signed the server's certificate (empty = system roots)
+	TLSCA           string        // MASH_CA / "ca": PEM file of the CA that signed the server's certificate (empty = system roots)
 	TLSCert         string        // MASH_TLS_CERT / "tls_cert": PEM client certificate, for a server that requires one; set with TLSKey
 	TLSKey          string        // MASH_TLS_KEY / "tls_key": PEM private key of TLSCert
 	// InsecurePlaintext is the one override of the TLS requirement (REQ-014): every connection mash and mashctl make
@@ -76,24 +80,31 @@ type Config struct {
 	// Provenance of the settings that decide which server a command acts on, for a command to say what it is about to
 	// act on (it informs; it changes no precedence). Keys: SourceKeys.
 	File       string            // the config.json that was read ("" when there is none)
-	Source     map[string]string // key -> where its value came from: an environment variable name (MASH_URL), "config.json", "default" or "unset"
+	Source     map[string]string // key -> where its value came from: an environment variable name (MASH_SERVER), "flag:--server", "config.json", "default" or "unset"
 	FileValues map[string]string // key -> what config.json itself said (only keys it set), to compare with the effective value
 }
 
 // SourceKeys are the keys of Config.Source and Config.FileValues, and the environment variable each one is read from.
 var SourceKeys = map[string]string{
-	"url": "MASH_URL", "owner": "MASH_OWNER", "group": "MASH_GROUP", "admin_creds": "MASH_ADMIN_CREDS",
-	"tls_ca": "MASH_TLS_CA", "tls_cert": "MASH_TLS_CERT", "tls_key": "MASH_TLS_KEY", "insecure_plaintext": "MASH_INSECURE_PLAINTEXT",
+	"endpoint": "MASH_ENDPOINT", "servers": "MASH_SERVER", "admin_creds": "MASH_ADMIN_CREDS",
+	"ca": "MASH_CA", "tls_cert": "MASH_TLS_CERT", "tls_key": "MASH_TLS_KEY", "insecure_plaintext": "MASH_INSECURE_PLAINTEXT",
 }
 
+// FlagSourcePrefix is the prefix of the Lookup keys with which a Lookup that carries global flag values (see
+// cliframe.Global.Shadow) says which flag supplied the environment variable named after the prefix: looking up
+// FlagSourcePrefix+"MASH_SERVER" answers "--server" when the value of MASH_SERVER came from that flag. The NUL byte
+// keeps it out of any real environment.
+const FlagSourcePrefix = "\x00flag:"
+
 type file struct {
-	URL        string `json:"url"`
-	Owner      string `json:"owner"`
-	Creds      string `json:"creds"`
-	SettleMS   *int   `json:"settle_ms"`
-	BatchMsgs  *int   `json:"batch_msgs"`
-	BatchBytes *int   `json:"batch_bytes"`
-	IdleWake   string `json:"idle_wake"`
+	Endpoint   string          `json:"endpoint"` // owner.group.name
+	Owner      string          `json:"owner"`    // read by mashctl only (until init --config lands): the owner it acts for
+	Servers    json.RawMessage `json:"servers"`  // a JSON array of strings, or one string (a comma list)
+	Creds      string          `json:"creds"`
+	SettleMS   *int            `json:"settle_ms"`
+	BatchMsgs  *int            `json:"batch_msgs"`
+	BatchBytes *int            `json:"batch_bytes"`
+	IdleWake   string          `json:"idle_wake"`
 
 	RelayWindow string `json:"relay_window"`
 
@@ -109,7 +120,7 @@ type file struct {
 	AdminCreds string `json:"admin_creds"`
 	Host       string `json:"host"`
 
-	TLSCA   string `json:"tls_ca"`
+	CA      string `json:"ca"`
 	TLSCert string `json:"tls_cert"`
 	TLSKey  string `json:"tls_key"`
 
@@ -144,12 +155,92 @@ const CodeGroupMissing = "group_missing"
 var (
 	// ErrNameRuleRequired is Load's error for a required name rule with no file loaded.
 	ErrNameRuleRequired = errors.New("mash: a name rule is required (name_rule_required or MASH_NAME_RULE_REQUIRED is true) but no rule file is set: set name_rule_file (MASH_NAME_RULE_FILE) to a name-rule file")
-	ErrNoURL            = errors.New("mash: no NATS url (config.json \"url\" or MASH_URL)")
-	ErrNoOwner          = errors.New("mash: no owner (config.json \"owner\" or MASH_OWNER)")
-	// ErrGroupMissing is Load's error, and Identity's, for an endpoint name with no group. A *GroupMissingError wrapping
-	// none: compare with errors.Is. Its text names MASH_GROUP; the CLI reports CodeGroupMissing.
-	ErrGroupMissing = errors.New("mash: no group: set MASH_GROUP (the endpoint's group has no default), for example MASH_OWNER=alice MASH_GROUP=dev MASH_NAME=design for alice.dev.design")
+	ErrNoURL            = errors.New("mash: no server: set MASH_SERVER, --server, or \"servers\" in config.json")
+	ErrNoOwner          = errors.New("mash: no endpoint: set MASH_ENDPOINT, --endpoint, or install credentials for one endpoint")
+	// ErrGroupMissing is Load's error, and Identity's, for an endpoint name with no group. Compare with errors.Is. Its
+	// text names the endpoint setting; the CLI reports CodeGroupMissing.
+	ErrGroupMissing = errors.New("mash: no endpoint: set MASH_ENDPOINT, --endpoint, or install credentials for one endpoint (an endpoint address is owner.group.name, for example alice.dev.design)")
 )
+
+// SeveralEndpointsError is Load's error when no endpoint is set and more than one endpoint's creds file is installed
+// in the config directory, so none can be chosen. Addresses are the installed endpoints, sorted. Match it with
+// errors.As.
+type SeveralEndpointsError struct{ Addresses []string }
+
+func (e *SeveralEndpointsError) Error() string {
+	return "more than one endpoint is installed here: " + strings.Join(e.Addresses, ", ")
+}
+
+// ErrSeveralEndpoints is the documented name of the error: use errors.As with a *SeveralEndpointsError, or
+// errors.Is(err, ErrSeveralEndpoints).
+var ErrSeveralEndpoints = &SeveralEndpointsError{}
+
+// Is makes errors.Is(err, ErrSeveralEndpoints) true for any *SeveralEndpointsError.
+func (e *SeveralEndpointsError) Is(target error) bool { return target == ErrSeveralEndpoints }
+
+// credsFileRE is an installed endpoint's creds file: owner.group.name.creds, each part 1-63 of [a-z0-9-].
+var credsFileRE = regexp.MustCompile(`^([a-z0-9-]{1,63})\.([a-z0-9-]{1,63})\.([a-z0-9-]{1,63})\.creds$`)
+
+// installedEndpoints lists, sorted, the addresses of the regular files directly in dir named owner.group.name.creds that
+// are owned by the current user and have mode 0600; any other file does not count.
+func installedEndpoints(dir string) []string {
+	if dir == "" {
+		return nil
+	}
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range ents {
+		m := credsFileRE.FindStringSubmatch(e.Name())
+		if m == nil {
+			continue
+		}
+		fi, err := os.Lstat(filepath.Join(dir, e.Name()))
+		if err != nil || !fi.Mode().IsRegular() || fi.Mode().Perm() != 0o600 {
+			continue
+		}
+		if st, ok := fi.Sys().(*syscall.Stat_t); !ok || int(st.Uid) != os.Getuid() {
+			continue
+		}
+		out = append(out, strings.TrimSuffix(e.Name(), ".creds"))
+	}
+	sort.Strings(out)
+	return out
+}
+
+// serverList reads the config.json "servers" value: a JSON array of strings or one string; each string may be a comma
+// list. Empty items are dropped.
+func serverList(raw json.RawMessage) ([]string, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var one string
+	if json.Unmarshal(raw, &one) == nil {
+		return splitServers(one), nil
+	}
+	var many []string
+	if json.Unmarshal(raw, &many) == nil {
+		var out []string
+		for _, m := range many {
+			out = append(out, splitServers(m)...)
+		}
+		return out, nil
+	}
+	return nil, errors.New("mash: config.json \"servers\" must be a JSON array of strings or one string (a comma list)")
+}
+
+// splitServers splits a comma list of server addresses, trimming each and dropping empty items.
+func splitServers(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
 
 // ValidateFile reports whether raw is a config.json that Load would accept as far as the file itself goes: it must
 // parse into the known fields with the right types, and "idle_wake" must be a valid duration. The environment is not
@@ -157,6 +248,9 @@ var (
 func ValidateFile(raw []byte) error {
 	var f file
 	if err := json.Unmarshal(raw, &f); err != nil {
+		return err
+	}
+	if _, err := serverList(f.Servers); err != nil {
 		return err
 	}
 	if f.IdleWake != "" {
@@ -307,9 +401,13 @@ func Load(lookup Lookup, home string) (Config, error) {
 	}
 	// Relative paths in the file are relative to the config directory, not to wherever mash was started.
 	f.AdminCreds = inDir(dir, ExpandHome(f.AdminCreds, home))
-	f.TLSCA, f.TLSCert, f.TLSKey = inDir(dir, f.TLSCA), inDir(dir, f.TLSCert), inDir(dir, f.TLSKey)
-	c.URL, c.Owner, c.Creds, c.AdminCreds, c.Host = f.URL, f.Owner, f.Creds, f.AdminCreds, f.Host
-	c.TLSCA, c.TLSCert, c.TLSKey = f.TLSCA, f.TLSCert, f.TLSKey
+	f.CA, f.TLSCert, f.TLSKey = inDir(dir, f.CA), inDir(dir, f.TLSCert), inDir(dir, f.TLSKey)
+	fileServers, err := serverList(f.Servers)
+	if err != nil {
+		return c, err
+	}
+	c.URL, c.Creds, c.AdminCreds, c.Host = strings.Join(fileServers, ","), f.Creds, f.AdminCreds, f.Host
+	c.TLSCA, c.TLSCert, c.TLSKey = f.CA, f.TLSCert, f.TLSKey
 	if f.SpoolFromStart != nil {
 		c.SpoolFromStart = *f.SpoolFromStart
 	}
@@ -353,17 +451,50 @@ func Load(lookup Lookup, home string) (Config, error) {
 			*dst = v
 		}
 	}
-	str(&c.URL, "MASH_URL")
-	str(&c.Owner, "MASH_OWNER")
-	str(&c.Name, "MASH_NAME")
-	str(&c.Group, "MASH_GROUP")
+	if l := splitServers(env("MASH_SERVER")); len(l) > 0 {
+		c.URL = strings.Join(l, ",")
+	}
 	str(&c.Creds, "MASH_CREDS")
 	str(&c.AdminCreds, "MASH_ADMIN_CREDS")
 	c.Creds, c.AdminCreds = ExpandHome(c.Creds, home), ExpandHome(c.AdminCreds, home)
-	c.recordSources(f, env, home)
+	// The endpoint: MASH_ENDPOINT, else config.json "endpoint", else the one installed endpoint (the creds file named for
+	// it in the config directory). An address that does not parse fails Load after the rest is resolved.
+	endpoint, endpointSetting := env("MASH_ENDPOINT"), "MASH_ENDPOINT"
+	if endpoint == "" {
+		endpoint, endpointSetting = f.Endpoint, `config.json "endpoint"`
+	}
+	var endpointErr error
+	autoPicked := false
+	c.ExplicitOwner = f.Owner
+	switch {
+	case endpoint != "":
+		if a, err := sap.ParseAddress(endpoint); err != nil {
+			endpointErr = fmt.Errorf("mash: %s: %w", endpointSetting, err)
+		} else {
+			c.Owner, c.Group, c.Name = a.Owner, a.Group, a.Instance
+			c.ExplicitOwner = a.Owner
+		}
+	case c.Creds != "":
+		// A creds path was set (--creds, MASH_CREDS, "creds"): installed creds must not pick the address, or one
+		// endpoint's address would be signed with another's creds.
+	default:
+		switch found := installedEndpoints(dir); len(found) {
+		case 0:
+		case 1:
+			autoPicked = true
+			if a, err := sap.ParseAddress(found[0]); err != nil {
+				endpointErr = fmt.Errorf("mash: the installed endpoint %s: %w", found[0], err)
+			} else {
+				c.Owner, c.Group, c.Name = a.Owner, a.Group, a.Instance
+			}
+		default:
+			endpointErr = &SeveralEndpointsError{Addresses: found}
+		}
+	}
+	c.recordSources(f, fileServers, lookup, home, autoPicked)
 	str(&c.LaunchToken, "MASH_LAUNCH_TOKEN")
 	str(&c.Host, "MASH_HOST")
-	str(&c.TLSCA, "MASH_TLS_CA")
+	str(&c.TLSCA, "MASH_CA")
 	str(&c.TLSCert, "MASH_TLS_CERT")
 	str(&c.TLSKey, "MASH_TLS_KEY")
 	for _, p := range []struct {
@@ -461,6 +592,9 @@ func Load(lookup Lookup, home string) (Config, error) {
 	if err := c.loadNameRule(lookup, f, dir, home); err != nil {
 		return c, err
 	}
+	if endpointErr != nil {
+		return c, endpointErr
+	}
 	if c.Name == "" {
 		return c, nil
 	}
@@ -480,7 +614,7 @@ func Load(lookup Lookup, home string) (Config, error) {
 		return c, ErrGroupMissing
 	}
 	if _, err := c.Identity(); err != nil {
-		return c, fmt.Errorf("mash: %s: %w", identitySetting(err), err)
+		return c, fmt.Errorf("mash: %s: %w", endpointSetting, err)
 	}
 	if c.Creds == "" {
 		if dir == "" {
@@ -495,7 +629,7 @@ func Load(lookup Lookup, home string) (Config, error) {
 // set and Group is not (there is no default group). The error of sap is returned as is; it names the rule that failed.
 func (c Config) Identity() (sap.Address, error) {
 	if c.Name == "" {
-		return sap.Address{}, errors.New("mash: no identity: no endpoint name is configured (MASH_NAME)")
+		return sap.Address{}, errors.New("mash: no identity: no endpoint is configured (MASH_ENDPOINT)")
 	}
 	if c.Group == "" {
 		return sap.Address{}, ErrGroupMissing
@@ -512,26 +646,14 @@ func (c Config) CredsName() string {
 	return c.Name
 }
 
-// identitySetting names the setting a sap address error is about.
-func identitySetting(err error) string {
-	m := err.Error()
-	switch {
-	case strings.HasPrefix(m, "sap: owner"):
-		return "owner (config.json \"owner\" or MASH_OWNER)"
-	case strings.HasPrefix(m, "sap: group"):
-		return "MASH_GROUP"
-	case strings.HasPrefix(m, "sap: instance"):
-		return "MASH_NAME"
-	}
-	return "MASH_OWNER, MASH_GROUP and MASH_NAME"
-}
-
 // recordSources fills Source and FileValues from the file f and the environment, as Load applied them: an environment
-// variable that is set and not empty wins, else a value the file set, else the default.
-func (c *Config) recordSources(f file, env func(string) string, home string) {
+// variable that is set and not empty wins (recorded as "flag:--name" when a global flag supplied it, see
+// FlagSourcePrefix), else a value the file set, else the one installed endpoint, else the default.
+func (c *Config) recordSources(f file, fileServers []string, lookup Lookup, home string, autoPicked bool) {
+	env := func(k string) string { v, _ := lookup(k); return v }
 	c.Source, c.FileValues = map[string]string{}, map[string]string{}
-	fileVals := map[string]string{"url": f.URL, "owner": f.Owner, "admin_creds": ExpandHome(f.AdminCreds, home),
-		"tls_ca": f.TLSCA, "tls_cert": f.TLSCert, "tls_key": f.TLSKey}
+	fileVals := map[string]string{"endpoint": f.Endpoint, "servers": strings.Join(fileServers, ","), "admin_creds": ExpandHome(f.AdminCreds, home),
+		"ca": f.CA, "tls_cert": f.TLSCert, "tls_key": f.TLSKey}
 	if f.InsecurePlaintext != nil {
 		fileVals["insecure_plaintext"] = strconv.FormatBool(*f.InsecurePlaintext)
 	}
@@ -543,8 +665,13 @@ func (c *Config) recordSources(f file, env func(string) string, home string) {
 		switch {
 		case env(ev) != "":
 			c.Source[key] = ev
+			if fl, ok := lookup(FlagSourcePrefix + ev); ok && fl != "" {
+				c.Source[key] = "flag:" + fl
+			}
 		case fv != "":
 			c.Source[key] = "config.json"
+		case key == "endpoint" && autoPicked:
+			c.Source[key] = "installed creds"
 		case key == "insecure_plaintext":
 			c.Source[key] = "default"
 		default:

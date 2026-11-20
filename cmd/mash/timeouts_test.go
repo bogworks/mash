@@ -18,7 +18,7 @@ func TestConfiguredTimeoutsApply(t *testing.T) {
 		for k, v := range r.env[as] {
 			env[k] = v
 		}
-		env["MASH_URL"] = r.px.URL()
+		env["MASH_SERVER"] = r.px.URL()
 		for k, v := range extra {
 			env[k] = v
 		}
@@ -92,7 +92,7 @@ func TestOpenTimeoutBoundsTheConnect(t *testing.T) {
 	for k, v := range w.env["a"] {
 		env[k] = v
 	}
-	env["MASH_URL"] = "nats://" + ln.Addr().String()
+	env["MASH_SERVER"] = "nats://" + ln.Addr().String()
 	env["MASH_OPEN_TIMEOUT"] = "300ms"
 	var out, errb bytes.Buffer
 	start := time.Now()
@@ -129,7 +129,7 @@ func TestSendAdoptionUsesTheCallTimeout(t *testing.T) {
 		for k, v := range r.env["me"] {
 			env[k] = v
 		}
-		env["MASH_URL"] = r.px.URL()
+		env["MASH_SERVER"] = r.px.URL()
 		env["MASH_LAUNCH_TOKEN"] = rttToken
 		if callTimeout != "" {
 			env["MASH_CALL_TIMEOUT"] = callTimeout

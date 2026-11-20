@@ -42,8 +42,8 @@ func newConnectCounter(t *testing.T) *connectCounter {
 // requirement name exactly the variables they mean, and use envStrict.
 func plainEnv(t *testing.T, url string) map[string]string {
 	t.Helper()
-	return map[string]string{"HOME": t.TempDir(), "MASH_NAME": "a", "MASH_GROUP": testGroup, "MASH_OWNER": "o", "MASH_CREDS": "/none",
-		"MASH_URL": url}
+	return map[string]string{"HOME": t.TempDir(), "MASH_ENDPOINT": "o." + testGroup + ".a", "MASH_CREDS": "/none",
+		"MASH_SERVER": url}
 }
 
 // withRealCreds gives env a credentials file the identity checks accept, so that a connection attempt is reached.
@@ -58,7 +58,7 @@ func withRealCreds(t *testing.T, env map[string]string) map[string]string {
 
 // refusalWant are the parts every refusal of a plain URL has: the scheme, the override named both ways, and the fix.
 func refusalWant(host string) []string {
-	return []string{`refusing a plain nats:// connection to "` + host + `"`, "insecure_plaintext", "MASH_INSECURE_PLAINTEXT=1", "tls://", "tls_ca"}
+	return []string{`refusing a plain nats:// connection to "` + host + `"`, "insecure_plaintext", "MASH_INSECURE_PLAINTEXT=1", "tls://", "MASH_CA"}
 }
 
 func wantAllIn(t *testing.T, what, got string, wants []string) {
@@ -252,7 +252,7 @@ func TestStatusCommandPlainWarningDespiteConfigError(t *testing.T) {
 	const warning = "WARNING: plain-text connection to 127.0.0.1"
 	env := plainEnv(t, "nats://127.0.0.1:4222")
 	env["MASH_INSECURE_PLAINTEXT"] = "1"
-	delete(env, "MASH_GROUP")
+	env["MASH_ENDPOINT"] = "o.a" // no group: not an address
 	var out, errb bytes.Buffer
 	if code := run([]string{"status"}, envStrict(env), strings.NewReader(""), &out, &errb); code != 0 {
 		t.Fatalf("mash status exit %d: %s", code, errb.String())

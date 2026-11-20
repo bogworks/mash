@@ -570,7 +570,7 @@ func TestServeFirstOpenUnresponsiveThenEOF(t *testing.T) {
 	for k, v := range w.env["a"] {
 		env[k] = v
 	}
-	env["MASH_URL"] = "nats://" + ln.Addr().String()
+	env["MASH_SERVER"] = "nats://" + ln.Addr().String()
 	inR, inW := io.Pipe()
 	outR, outW := io.Pipe()
 	done := make(chan int, 1)

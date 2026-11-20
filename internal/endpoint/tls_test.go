@@ -28,8 +28,8 @@ func TestTLSPrivateCA(t *testing.T) {
 	for name, ca := range map[string]string{"no CA": "", "other CA": testenv.OtherCA(t)} {
 		cfg.TLSCA = ca
 		_, err := OpenClient(context.Background(), cfg)
-		if err == nil || !strings.Contains(err.Error(), "tls_ca") || !strings.Contains(err.Error(), "MASH_TLS_CA") {
-			t.Errorf("%s: err = %v, want a hint naming tls_ca", name, err)
+		if err == nil || !strings.Contains(err.Error(), "MASH_CA") || !strings.Contains(err.Error(), "MASH_CA") {
+			t.Errorf("%s: err = %v, want a hint naming MASH_CA", name, err)
 		}
 	}
 }

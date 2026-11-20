@@ -219,7 +219,7 @@ func Build(p Params, ks *ctlkeys.Authority) (*Plan, error) {
 		{p.ConfPath(), []byte(serverConfFor(p, sysPub, sysJWT, acctPub, acctJWT))},
 	}
 	if p.ConfigPath != "" && config.Absent(p.ConfigPath) {
-		pl.Config = &File{p.ConfigPath, []byte(fmt.Sprintf("{\n  \"url\": %s,\n  \"owner\": %s,\n  \"admin_creds\": %s,\n  \"tls_ca\": %s\n}\n",
+		pl.Config = &File{p.ConfigPath, []byte(fmt.Sprintf("{\n  \"servers\": [%s],\n  \"owner\": %s,\n  \"admin_creds\": %s,\n  \"ca\": %s\n}\n",
 			strconv.Quote(pl.URL), strconv.Quote(p.Owner), strconv.Quote(pl.Creds), strconv.Quote(pl.CA)))}
 	}
 	return pl, nil

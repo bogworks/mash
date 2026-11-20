@@ -30,7 +30,7 @@ func loadWith(t *testing.T, fileBody string, env map[string]string) (Config, err
 }
 
 func TestNameRuleUnsetIsNoRule(t *testing.T) {
-	c, err := loadWith(t, idFile+`}`, map[string]string{"MASH_NAME": "a", "MASH_GROUP": "g"})
+	c, err := loadWith(t, idFile+`}`, map[string]string{"MASH_ENDPOINT": "o.g.a"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestNameRuleUnsetIsNoRule(t *testing.T) {
 
 func TestNameRuleFromEnvAndFile(t *testing.T) {
 	p := ruleFileIn(t, goodRuleFile)
-	c, err := loadWith(t, idFile+`}`, map[string]string{"MASH_NAME": "a", "MASH_GROUP": "g", "MASH_NAME_RULE_FILE": p})
+	c, err := loadWith(t, idFile+`}`, map[string]string{"MASH_ENDPOINT": "o.g.a", "MASH_NAME_RULE_FILE": p})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestNameRuleFileKeyRelativeToConfigDir(t *testing.T) {
 
 func TestNameRuleSetButEmptyIsInvalid(t *testing.T) {
 	// A variable that is set but empty is invalid, not absent: Load sees it through a real Lookup.
-	_, err := loadWith(t, idFile+`}`, map[string]string{"MASH_NAME": "a", "MASH_GROUP": "g", "MASH_NAME_RULE_FILE": ""})
+	_, err := loadWith(t, idFile+`}`, map[string]string{"MASH_ENDPOINT": "o.g.a", "MASH_NAME_RULE_FILE": ""})
 	if err == nil || !strings.Contains(err.Error(), "MASH_NAME_RULE_FILE") || !strings.Contains(err.Error(), "empty") {
 		t.Fatalf("env empty: %v", err)
 	}
@@ -119,8 +119,7 @@ func TestNameRuleBadFileRefusesLoadNamingTheFile(t *testing.T) {
 	for _, name := range []string{"a", ""} {
 		env := map[string]string{"MASH_NAME_RULE_FILE": p}
 		if name != "" {
-			env["MASH_NAME"] = name
-			env["MASH_GROUP"] = "g"
+			env["MASH_ENDPOINT"] = "o.g." + name
 		}
 		_, err := loadWith(t, idFile+`}`, env)
 		if err == nil || !strings.Contains(err.Error(), p) {
@@ -190,7 +189,7 @@ func TestNameRulePathIsAbsolute(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := loadWith(t, idFile+`}`, map[string]string{"MASH_NAME": "a", "MASH_GROUP": "g", "MASH_NAME_RULE_FILE": "rule.json"})
+	c, err := loadWith(t, idFile+`}`, map[string]string{"MASH_ENDPOINT": "o.g.a", "MASH_NAME_RULE_FILE": "rule.json"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +199,7 @@ func TestNameRulePathIsAbsolute(t *testing.T) {
 	if got := c.NameRule.StatusLine(c.NameRulePath); !strings.Contains(got, want) {
 		t.Fatalf("status %q does not show %q", got, want)
 	}
-	_, err = loadWith(t, idFile+`}`, map[string]string{"MASH_NAME": "a", "MASH_GROUP": "g", "MASH_NAME_RULE_FILE": "missing.json"})
+	_, err = loadWith(t, idFile+`}`, map[string]string{"MASH_ENDPOINT": "o.g.a", "MASH_NAME_RULE_FILE": "missing.json"})
 	if err == nil || !strings.Contains(err.Error(), filepath.Join(cwd, "missing.json")) {
 		t.Fatalf("error does not name the absolute path: %v", err)
 	}

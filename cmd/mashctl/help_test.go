@@ -28,7 +28,7 @@ func TestVerbHelpPrintsUsageAndChangesNothing(t *testing.T) {
 				vars := map[string]string{
 					"HOME": home, "XDG_CONFIG_HOME": filepath.Join(home, "c"),
 					"XDG_DATA_HOME": filepath.Join(home, "d"), "XDG_STATE_HOME": filepath.Join(home, "s"),
-					"MASH_URL": "nats://127.0.0.1:1",
+					"MASH_SERVER": "nats://127.0.0.1:1",
 				}
 				env := func(k string) string { return vars[k] }
 				lookup := func(k string) (string, bool) { x, ok := vars[k]; return x, ok }

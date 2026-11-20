@@ -14,7 +14,7 @@ import (
 
 func ctlRun(t *testing.T, e *testenv.Env, args ...string) (string, string, int) {
 	t.Helper()
-	env := map[string]string{"HOME": t.TempDir(), "MASH_URL": e.URL, "MASH_OWNER": e.Owner, "MASH_ADMIN_CREDS": e.AdminCreds, "MASH_INSECURE_PLAINTEXT": "1"}
+	env := map[string]string{"HOME": t.TempDir(), "MASH_SERVER": e.URL, "MASH_ENDPOINT": e.Owner + ".dev." + "x", "MASH_ADMIN_CREDS": e.AdminCreds, "MASH_INSECURE_PLAINTEXT": "1"}
 	var out, errb bytes.Buffer
 	code := runEnv(args, func(k string) string { return env[k] }, &out, &errb)
 	return out.String(), errb.String(), code
@@ -80,7 +80,7 @@ func TestMashctlUsageAndErrors(t *testing.T) {
 	}
 	// config errors fail the verbs that need config
 	var out, errb bytes.Buffer
-	env := map[string]string{"HOME": t.TempDir(), "MASH_URL": e.URL} // no owner
+	env := map[string]string{"HOME": t.TempDir(), "MASH_SERVER": e.URL} // no owner
 	if code := runEnv([]string{"list"}, func(k string) string { return env[k] }, &out, &errb); code != 1 || !strings.Contains(errb.String(), "mashctl: no owner") {
 		t.Fatalf("no owner: %d %q", code, errb.String())
 	}

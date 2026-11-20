@@ -66,9 +66,10 @@ func (a *AT) tlsURL() string { return "tls://127.0.0.1:" + strconv.Itoa(a.R.Port
 func (a *AT) caPath() string { return filepath.Join(a.srvDir, bootstrap.CACert) }
 
 // Conn is the connection settings of every endpoint and mashctl command of the scenario: the one local server over
-// TLS, trusting the CA init --local made, with no insecure_plaintext override (REQ-014, AT-001).
+// TLS, trusting the CA init --local made, with no insecure_plaintext override (REQ-014, AT-001). The endpoint is a
+// placeholder that gives the commands their owner, alice; a session names its own (SessionEnv), which comes later and wins.
 func (a *AT) Conn() []string {
-	return []string{"MASH_URL=" + a.tlsURL(), "MASH_TLS_CA=" + a.caPath(), "MASH_OWNER=alice"}
+	return []string{"MASH_SERVER=" + a.tlsURL(), "MASH_CA=" + a.caPath(), "MASH_ENDPOINT=alice.dev.ctl"}
 }
 
 // Env is the environment for a command in home h: scratch values only, plus extra.
@@ -86,13 +87,14 @@ func (a *AT) Mash(label string, h Home, extra []string, args ...string) Result {
 	return a.R.Runner.RunIn(h.Dir, label, append([]string{a.R.Mash}, args...), a.Env(h, extra...), "")
 }
 
-// SessionEnv is the extra environment of a session for owner.group.name: the connection settings and the three
-// parts of the address, with a state directory of its own.
+// SessionEnv is the extra environment of a session for owner.group.name: the connection settings and the address,
+// with a state directory of its own. An empty group makes an address with no group (alice.NAME), which is refused.
 func (a *AT) SessionEnv(h Home, group, name string, more ...string) []string {
-	e := append(a.Conn(), "MASH_NAME="+name, "MASH_STATE_DIR="+filepath.Join(h.State, name))
+	addr := "alice." + name
 	if group != "" {
-		e = append(e, "MASH_GROUP="+group)
+		addr = "alice." + group + "." + name
 	}
+	e := append(a.Conn(), "MASH_ENDPOINT="+addr, "MASH_STATE_DIR="+filepath.Join(h.State, name))
 	return append(e, more...)
 }
 

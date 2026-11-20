@@ -390,7 +390,7 @@ func (l *lab) endpointEnv(ctx context.Context, name string, plugin bool) ([]stri
 	if plugin {
 		env = append(env, l.spec.envPairs()...)
 	}
-	return append(env, "MASH_NAME="+name, "MASH_URL="+l.ne.URL, "MASH_OWNER="+l.ne.Owner, "MASH_GROUP="+labGroup, "MASH_CREDS="+creds,
+	return append(env, "MASH_ENDPOINT="+l.ne.Owner+"."+labGroup+"."+name, "MASH_SERVER="+l.ne.URL, "MASH_CREDS="+creds,
 		// REQ-014: this check is not about TLS; the override is explicit.
 		"MASH_INSECURE_PLAINTEXT=1"), nil
 }

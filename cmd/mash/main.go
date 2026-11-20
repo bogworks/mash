@@ -14,6 +14,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/bogworks/mash/internal/cliframe"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/endpoint"
 	"github.com/bogworks/mash/internal/host"
@@ -24,7 +25,7 @@ const usage = `mash: a messaging mesh for agents (SAP 0.3 + mail, on NATS JetStr
   mash serve                                   the Claude Code channel server (started by the plugin)
   mash hook                                    the plugin's hook: shows the session its spooled mail
   mash send <to> [--urgent] [--kind K] [--id KEY] [text... | --file F | -]   mail an endpoint (<to> is owner.group.instance or its flat key
-                                               owner_group_instance; as MASH_OWNER.MASH_GROUP.MASH_NAME); --urgent
+                                               owner_group_instance; as MASH_ENDPOINT); --urgent
                                                wakes it at once; K is blocker|question|task (wake an idle recipient)
                                                or result|fyi (opt-in; wait for its next turn); default task;
                                                --id KEY makes the send at-most-once: re-running it with the same KEY
@@ -45,10 +46,12 @@ const usage = `mash: a messaging mesh for agents (SAP 0.3 + mail, on NATS JetStr
   mash plugin export <dir>                     write this build's Claude Code plugin and a marketplace for it into <dir>
   mash version
 
-An endpoint is addressed owner.group.instance: MASH_OWNER (or config.json "owner"), MASH_GROUP (no default, no config key; a
-session without it stops, exit 2, group_missing) and MASH_NAME, the instance.
-Configuration: config.json {"url","owner"} in $MASH_CONFIG_DIR (default ~/.config/mash, or $XDG_CONFIG_HOME/mash), overridden by
-MASH_URL, MASH_OWNER, MASH_GROUP, MASH_NAME, MASH_CREDS, MASH_ADMIN_CREDS, MASH_HOST (see docs/install.md).
+An endpoint is addressed owner.group.name: MASH_ENDPOINT (or config.json "endpoint", or --endpoint). With none set, the one
+endpoint whose creds file (owner.group.name.creds, mode 0600) is in the config directory is used; with several, name one.
+Global options, anywhere in the command: --endpoint ADDR, --creds PATH, --server URL (repeatable), --ca PATH, --config-dir PATH,
+--verbose, --json, --no-color. A flag beats its environment variable, which beats config.json.
+Configuration: config.json {"servers","endpoint","ca"} in $MASH_CONFIG_DIR (default ~/.config/mash, or $XDG_CONFIG_HOME/mash), overridden by
+MASH_SERVER (commas between several), MASH_ENDPOINT, MASH_CA, MASH_CREDS, MASH_ADMIN_CREDS, MASH_HOST (see docs/install.md).
 State (spool, hook.log): $MASH_STATE_DIR (default $XDG_STATE_HOME/mash, else ~/.local/state/mash).
 Slow link: "open_timeout" (default 20s) and "call_timeout" (default 15s), or MASH_OPEN_TIMEOUT and MASH_CALL_TIMEOUT.
 Also tunable: lease_retry, transient_budget, transient_max, cli_timeout, admin_timeout (MASH_LEASE_RETRY, MASH_TRANSIENT_BUDGET, MASH_TRANSIENT_MAX, MASH_CLI_TIMEOUT, MASH_ADMIN_TIMEOUT).
@@ -159,6 +162,18 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 		fmt.Fprint(stderr, usage)
 		return 2
 	}
+	// The global options (--endpoint, --creds, --server, --ca, --config-dir, --verbose, --json, --no-color) are taken out
+	// of the arguments wherever they stand, before any verb runs; a flag shadows its environment variable.
+	global, args, gerr := cliframe.ExtractOwning(cliframe.Spec{Tool: "mash", CredsEnv: "MASH_CREDS", CredsKey: "creds"}, args, map[string][]string{"who": {"--json"}, "key": {"--json"}, "credential": {"--json"}}) // these parse --json themselves
+	if gerr != nil {
+		fmt.Fprintf(stderr, "mash: %s\n", gerr)
+		return 2
+	}
+	if len(args) == 0 {
+		fmt.Fprint(stderr, usage)
+		return 2
+	}
+	env, lookup = global.Shadow(cliframe.Spec{Tool: "mash", CredsEnv: "MASH_CREDS", CredsKey: "creds"}, env, lookup)
 	if u, ok := helpUsage(args); ok { // before any dispatch, config load or write: help changes nothing
 		fmt.Fprint(stdout, u)
 		return 0
@@ -193,7 +208,7 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 		home, _ = os.UserHomeDir()
 	}
 	cfg, err := config.Load(lookup, home)
-	// A session named without a group has no address and no default: it stops at once, exit 2, naming MASH_GROUP.
+	// A session named without a group has no address and no default: it stops at once naming MASH_ENDPOINT.
 	// A hook never fails the session (REQ-002 applies to the session itself, which serve stops), so it says so on
 	// stderr and exits 0; status reports it as a line.
 	if errors.Is(err, config.ErrGroupMissing) && args[0] != "status" {

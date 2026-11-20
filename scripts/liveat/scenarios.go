@@ -312,7 +312,7 @@ var AT001 = Scenario{
 	Scenario: "AT-001, the solo developer, standalone: a fresh scratch home; mashctl init --local --owner alice --start; for design and review, " +
 		"mash key create, mashctl endpoint create alice/dev/<name> --public-key, mash credential create; two sessions started through the plugin launcher " +
 		"and hooks, as Claude Code starts the plugin (sh plugin/scripts/mash serve with the env of plugin/.mcp.json, MASH_BIN set to the built binary, no download; " +
-		"MASH_OWNER=alice MASH_GROUP=dev MASH_NAME=design|review); mail each way through the sessions' MCP send tool, delivered by the hook commands of plugin/hooks/hooks.json " +
+		"MASH_ENDPOINT=alice.dev.design|review); mail each way through the sessions' MCP send tool, delivered by the hook commands of plugin/hooks/hooks.json " +
 		"(UserPromptSubmit and PostToolUse, run under sh -c with the hook JSON on stdin) with the sender's verified trust label, cross-checked with the MCP inbox and read tools; endpoint list --json; service metadata (mash who --json); " +
 		"mash admin permissions alice.dev.design; mashctl endpoint delete alice/dev/review, then the review session's connection, a reconnect and mash status, both through the plugin launcher. Not driven: a real Claude Code session (the harness plays Claude Code's two roles, starting the MCP server and running the hooks with their JSON, and no model is involved).",
 	Body: func(a *AT) {
@@ -327,7 +327,7 @@ var AT001 = Scenario{
 			}
 		}
 		a.C.Check("REQ-014: the quick start runs with no override: the environment of init, serve and the ctl commands holds no MASH_INSECURE_PLAINTEXT, and the URL is tls://",
-			!envHasOverride && strings.Contains(strings.Join(a.Conn(), " "), "MASH_URL=tls://"), "")
+			!envHasOverride && strings.Contains(strings.Join(a.Conn(), " "), "MASH_SERVER=tls://"), "")
 		for _, n := range []string{"design", "review"} {
 			if _, ok := a.provision(h, h, "alice", "dev", n, "", false); !ok {
 				return
@@ -352,7 +352,7 @@ var AT001 = Scenario{
 			if err != nil {
 				detail = redact(err.Error())
 			}
-			if !a.C.Check("the "+n+" session starts through the plugin launcher (sh plugin/scripts/mash serve) with MASH_GROUP=dev and completes the MCP handshake", err == nil, detail) {
+			if !a.C.Check("the "+n+" session starts through the plugin launcher (sh plugin/scripts/mash serve) with MASH_ENDPOINT=alice.dev.<name> and completes the MCP handshake", err == nil, detail) {
 				return
 			}
 			sess[n], procs[n], envs[n] = s, s.P, s.Env

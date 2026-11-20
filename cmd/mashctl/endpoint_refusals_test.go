@@ -96,7 +96,7 @@ func noKeys(t *testing.T, r *refEnv) {
 	r.h.env["MASH_KEYS_DIR"] = filepath.Join(r.aux, "nokeys")
 }
 
-func unreachable(t *testing.T, r *refEnv) { r.h.env["MASH_URL"] = "nats://127.0.0.1:1" }
+func unreachable(t *testing.T, r *refEnv) { r.h.env["MASH_SERVER"] = "nats://127.0.0.1:1" }
 
 func noConfigDir(t *testing.T, r *refEnv) {
 	delete(r.h.env, "MASH_CONFIG_DIR")
@@ -198,7 +198,7 @@ var refusalCases = []refCase{
 	{"create_address_ambiguous", []string{"endpoint", "create", "g/a", "--public-key", "{PUB}"}, nil, "address_ambiguous", 2},
 	{"create_naming_disagrees", []string{"endpoint", "create", "o/g/a", "--group", "h", "--public-key", "{PUB}"}, nil, "naming_disagrees", 2},
 	{"create_group_missing", []string{"endpoint", "create", "a", "--public-key", "{PUB}"}, nil, "group_missing", 2},
-	{"create_owner_missing", []string{"endpoint", "create", "--group", "g", "--name", "a", "--public-key", "{PUB}"}, noEnv("MASH_OWNER"), "owner_missing", 2},
+	{"create_owner_missing", []string{"endpoint", "create", "--group", "g", "--name", "a", "--public-key", "{PUB}"}, noEnv("MASH_ENDPOINT"), "owner_missing", 2},
 	{"create_name_missing", []string{"endpoint", "create", "--group", "g", "--public-key", "{PUB}"}, nil, "name_missing", 2},
 	{"create_name_rule", []string{"endpoint", "create", "o/g/blocked", "--public-key", "{PUB}"}, func(t *testing.T, r *refEnv) {
 		p := filepath.Join(r.aux, "rule.json")

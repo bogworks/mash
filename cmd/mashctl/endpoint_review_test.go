@@ -29,10 +29,10 @@ func jsonObject(t *testing.T, s string) map[string]any {
 	return m
 }
 
-func TestEndpointCreateIgnoresMashGroup(t *testing.T) {
+func TestEndpointCreateIgnoresTheEndpointGroup(t *testing.T) {
 	h := newFleetEnv(t)
 	_, pubFile, _ := epKey(t, t.TempDir(), "k")
-	h.env["MASH_GROUP"] = "dev"
+	h.env["MASH_ENDPOINT"] = h.e.Owner + ".dev.x" // only its owner part counts to mashctl
 	so, se, code := h.run("endpoint", "create", "design", "--public-key", pubFile, "--json")
 	if code != 2 || jsonObject(t, so)["refusal"].(map[string]any)["code"] != "group_missing" {
 		t.Fatalf("code %d %q %q", code, so, se)

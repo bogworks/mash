@@ -41,9 +41,9 @@ claude plugin marketplace add bogworks/mash
 claude plugin install mash@mash
 ```
 
-The plugin declares an MCP server, `mash serve` (started through the plugin's launcher script, with `MASH_SPOOL_FROM_START=1`), a SessionStart hook that prefetches the pinned binary, and two hooks, PostToolUse and UserPromptSubmit, which run `mash hook`. Mail reaches the session through those hooks, as "mash mail" context; see [Hook delivery](operations.md). A session without a mash identity (no `MASH_NAME`) gets an inert server with only the `status` and `version` tools, so it is safe to install for every session.
+The plugin declares an MCP server, `mash serve` (started through the plugin's launcher script, with `MASH_SPOOL_FROM_START=1`), a SessionStart hook that prefetches the pinned binary, and two hooks, PostToolUse and UserPromptSubmit, which run `mash hook`. Mail reaches the session through those hooks, as "mash mail" context; see [Hook delivery](operations.md). A session without a mash identity (no `MASH_ENDPOINT`) gets an inert server with only the `status` and `version` tools, so it is safe to install for every session.
 
-**Install scope.** `claude plugin install` installs at user scope by default (`--scope user`), which records the plugin in `enabledPlugins` in `~/.claude/settings.json` so every session on the machine has mash; a session without `MASH_NAME` stays inert. Project scope (`.claude/settings.json`) and local scope (`.claude/settings.local.json`) enable it in one repository only, so the mash server and hooks are absent in every other project. A narrower scope overrides a wider one, so a project can turn off a user-scope install. An organisation can force-enable `mash@mash` in managed `enabledPlugins`, which Claude Code lists at Managed scope and users cannot disable in `/plugin`; that is also what keeps the hooks under `allowManagedHooksOnly` (below). The `status` tool says which parts are missing in a session. See [Choose an install scope](https://code.claude.com/docs/en/plugins/install#choose-an-install-scope) in the Claude Code docs.
+**Install scope.** `claude plugin install` installs at user scope by default (`--scope user`), which records the plugin in `enabledPlugins` in `~/.claude/settings.json` so every session on the machine has mash; a session without `MASH_ENDPOINT` stays inert. Project scope (`.claude/settings.json`) and local scope (`.claude/settings.local.json`) enable it in one repository only, so the mash server and hooks are absent in every other project. A narrower scope overrides a wider one, so a project can turn off a user-scope install. An organisation can force-enable `mash@mash` in managed `enabledPlugins`, which Claude Code lists at Managed scope and users cannot disable in `/plugin`; that is also what keeps the hooks under `allowManagedHooksOnly` (below). The `status` tool says which parts are missing in a session. See [Choose an install scope](https://code.claude.com/docs/en/plugins/install#choose-an-install-scope) in the Claude Code docs.
 
 Mail needs those hooks to run. They do not run with `disableAllHooks: true` in any Claude Code settings file, or under a managed `allowManagedHooksOnly` unless an administrator force-enables `mash@mash` in managed `enabledPlugins`. Then mash stops waking the session after a few tries and `status` reports `delivery: DEGRADED`; see [Hook delivery](operations.md).
 
@@ -52,7 +52,7 @@ Mail needs those hooks to run. They do not run with `disableAllHooks: true` in a
 **This step is optional for one person on one machine.** Without it, mail still arrives at the session's next prompt or tool call. The idle wake, which rouses a session that is waiting for input, needs either a channel allowlist entry or the development flag. For a solo developer the development flag is fine and needs no root:
 
 ```sh
-MASH_GROUP=dev MASH_NAME=design claude --dangerously-load-development-channels plugin:mash@mash
+MASH_ENDPOINT=alice.dev.design claude --dangerously-load-development-channels plugin:mash@mash
 ```
 
 Claude Code asks you to confirm the flag at each launch; that is expected. When the allowlist is missing, `mash status` prints this line:
@@ -89,23 +89,22 @@ Without this, `--channels plugin:mash@mash` is refused ("not on the approved cha
 
 On one machine with no NATS server yet, `mashctl init --local --owner <name> --start` sets up a local operator-mode server with JetStream and writes this configuration for you (see [Local setup](operations.md#local-setup-with-mashctl-init---local)); then make each endpoint with `mashctl endpoint create` ([Adding an endpoint](operations.md#adding-an-endpoint)); the rest of this section is for an existing server.
 
-`~/.config/mash/config.json`, or `$XDG_CONFIG_HOME/mash/config.json` when `XDG_CONFIG_HOME` is an absolute path and that file exists (an existing `~/.config/mash` install keeps working). With no `HOME` and no absolute `XDG_CONFIG_HOME`, mash stops with an error unless everything comes from the `MASH_*` variables. A leading `~/` in `creds` and `admin_creds` (and in `MASH_CREDS` and `MASH_ADMIN_CREDS`) is expanded to your home; `~user/` is not. `policy.md` and the default creds files live in the same directory; when the XDG directory has no copy of one, mash also finds it in `~/.config/mash` (the XDG copy wins when both exist). A relative `admin_creds`, `tls_ca`, `tls_cert` or `tls_key` in `config.json` is resolved against the config directory, not the working directory. `config.json` that is writable by every user is refused; run `chmod go-w` on it.
+`~/.config/mash/config.json`, or `$XDG_CONFIG_HOME/mash/config.json` when `XDG_CONFIG_HOME` is an absolute path and that file exists (an existing `~/.config/mash` install keeps working). With no `HOME` and no absolute `XDG_CONFIG_HOME`, mash stops with an error unless everything comes from the `MASH_*` variables. A leading `~/` in `creds` and `admin_creds` (and in `MASH_CREDS` and `MASH_ADMIN_CREDS`) is expanded to your home; `~user/` is not. `policy.md` and the default creds files live in the same directory; when the XDG directory has no copy of one, mash also finds it in `~/.config/mash` (the XDG copy wins when both exist). A relative `admin_creds`, `ca`, `tls_cert` or `tls_key` in `config.json` is resolved against the config directory, not the working directory. `config.json` that is writable by every user is refused; run `chmod go-w` on it.
 
 ```json
-{ "url": "tls://nats.example.com:4222", "owner": "alice" }
+{ "servers": ["tls://nats.example.com:4222"], "endpoint": "alice.dev.design" }
 ```
 
 | Key | Env | Meaning |
 |---|---|---|
-| `url` | `MASH_URL` | The NATS server. Use `tls://`: SAP identity is only meaningful over a verified connection. A plain `nats://` url is refused, loopback included, unless `insecure_plaintext` is set. For a private CA or a server that requires client certificates, set `tls_ca`, `tls_cert` and `tls_key` below. |
-| `tls_ca` | `MASH_TLS_CA` | PEM file of the CA that signed the server's certificate, for a private CA. Without it the system trust store is used. |
+| `servers` | `MASH_SERVER`, `--server` | The NATS server or servers. In the environment a comma list; in `config.json` a JSON array of strings, or one string with commas; the flag repeats. Use `tls://`: SAP identity is only meaningful over a verified connection. A plain `nats://` url is refused, loopback included, unless `insecure_plaintext` is set. For a private CA or a server that requires client certificates, set `ca`, `tls_cert` and `tls_key` below. |
+| `ca` | `MASH_CA`, `--ca` | PEM file of the CA that signed the server's certificate, for a private CA. Without it the system trust store is used. |
 | `tls_cert`, `tls_key` | `MASH_TLS_CERT`, `MASH_TLS_KEY` | PEM client certificate and its private key, for a server that requires client certificates (mutual TLS). Set both or neither. |
-| `owner` | `MASH_OWNER` | Your owner token (lower-case letters, digits, single hyphens): the first token of every address, and the fence a credential reaches. |
-| `creds` | `MASH_CREDS` | The endpoint's credentials file. Default `<owner>.<group>.<instance>.creds` in the config directory (`~/.config/mash/` by default). |
-| | `MASH_CONFIG_DIR` | The config directory (`config.json`, `policy.md`, default creds). An absolute path (a relative one is an error); it wins over `XDG_CONFIG_HOME` and `~/.config/mash`, which is not consulted. |
+| `endpoint` | `MASH_ENDPOINT`, `--endpoint` | The full address of the endpoint a session runs as, `owner.group.name`, for example `alice.dev.design`. Each token is lower-case letters, digits and single hyphens. The owner, the first token, is also the fence a credential reaches. See "Which endpoint" below. Apps started from a GUI or IDE usually do not inherit your shell's variables, so set it where Claude Code is launched (the IDE's own environment setting, or the launch command). `mash status` shows what a session would see, before you launch. |
+| `owner` | (none) | `mashctl` only: the owner it acts for when no endpoint is set. Written by `mashctl init --local` and `mashctl adopt`. `mash` ignores it. |
+| `creds` | `MASH_CREDS`, `--creds` | The endpoint's credentials file. Default `<owner>.<group>.<name>.creds` in the config directory (`~/.config/mash/` by default). Setting it turns off the pick of the one installed endpoint: with no endpoint set, the session stays inert. |
+| | `MASH_CONFIG_DIR`, `--config-dir` | The config directory (`config.json`, `policy.md`, default creds). An absolute path (a relative one is an error); it wins over `XDG_CONFIG_HOME` and `~/.config/mash`, which is not consulted. |
 | | `MASH_STATE_DIR` | The directory that holds `spool/` and `hook.log`. An absolute path (a relative one is an error). Default `$XDG_STATE_HOME/mash` if `XDG_STATE_HOME` is absolute, else `~/.local/state/mash`. |
-| | `MASH_GROUP` | The endpoint's group, the second token of its address. No default and no `config.json` key: a session without it stops with `group_missing` (exit 2). Set per session at launch, like `MASH_NAME`. |
-| | `MASH_NAME` | The endpoint's instance, the third token of its address, set per session at launch. Apps started from a GUI or IDE usually do not inherit your shell's variables, so set it where Claude Code is launched (the IDE's own environment setting, or the launch command). `mash status` shows what a session would see, before you launch. |
 | | `MASH_RELEASE_BASE` | Plugin launcher only: the base URL the pinned binary is downloaded from, default `https://github.com/bogworks/mash/releases/download`; the launcher fetches `<base>/v<version>/mash-<os>-<arch>`. It changes only where the bytes come from: the sha256 pin still applies, and a download that does not match is refused and deleted. Plain `http` is not refused, so use an `https` base. |
 | | `MASH_PLUGIN_ROOT` | Set by the plugin's `.mcp.json` to the plugin's own root (`${CLAUDE_PLUGIN_ROOT}`). `mash serve` and `mash status` read the plugin's version from `<root>/.claude-plugin/plugin.json` to report whether the plugin and the binary versions have drifted (a major or minor difference). You normally never set it. |
 | | `MASH_MANAGED_SETTINGS_DIR` | Absolute path: the directory where `status` looks for Claude Code's managed settings, default the OS location; for non-standard installs and tests. A relative value is ignored. |
@@ -114,7 +113,7 @@ On one machine with no NATS server yet, `mashctl init --local --owner <name> --s
 | `batch_msgs`, `batch_bytes` | `MASH_BATCH_MSGS`, `MASH_BATCH_BYTES` | A batch up to 10 messages and 16 KiB is shown in full; more becomes a digest. |
 | `spool_from_start` | `MASH_SPOOL_FROM_START` | `1`/`true` (or `0`/`false`; anything else is an error). Spool mail from the first message, to be shown by the hooks, instead of delivering it by channel until a hook has run: Claude Code drops channel events that arrive before its first prompt. The plugin sets it. Mail that wakes (not fyi or result) wakes the session at once until the first hook has run. Without a usable spool, mail is held unacked in the inbox (read it with the inbox and read tools). |
 | `spool_required` | `MASH_SPOOL_REQUIRED` | `1`/`true` (or `0`/`false`; anything else is an error). Default off. Fail closed: mail is never delivered by the channel. It is spooled from the first message and acked only after a hook has drained it; mail the spool cannot take (no spool, or a failing one) is held unacked in the inbox, and the failure is reported on stderr, in a channel notice and in the `status` tool's `spool: FAILING` line, which clears when the spool works again. A spool that cannot be made at start is retried every 5 seconds. Held mail is read with the inbox and read tools, and is delivered once the spool recovers. |
-| `insecure_plaintext` | `MASH_INSECURE_PLAINTEXT` | `1`/`true` (or `0`/`false`; anything else is an error; the variable beats `config.json`). Default off. Every mash connection (`mashctl`, `mash serve`, `mash hook` and the CLI commands `send`, `read`, `inbox`, `who`, `prompt`, `status`) requires TLS to any host, loopback included, and a plain URL (any scheme other than `tls` and `wss`) is refused before any connection is made, exit code 2, with the host, this setting and the fix (`tls://` with the server's certificate, `tls_ca` for a private CA). When set, plain text is allowed and each command prints a warning on stderr. Use it for a throwaway server in a test, never on a network you do not control: plain text lets anyone on the network read mail and obtain signatures. `init --local` makes a certificate authority and does not need it. |
+| `insecure_plaintext` | `MASH_INSECURE_PLAINTEXT` | `1`/`true` (or `0`/`false`; anything else is an error; the variable beats `config.json`). Default off. Every mash connection (`mashctl`, `mash serve`, `mash hook` and the CLI commands `send`, `read`, `inbox`, `who`, `prompt`, `status`) requires TLS to any host, loopback included, and a plain URL (any scheme other than `tls` and `wss`) is refused before any connection is made, exit code 2, with the host, this setting and the fix (`tls://` with the server's certificate, `ca` for a private CA). When set, plain text is allowed and each command prints a warning on stderr. Use it for a throwaway server in a test, never on a network you do not control: plain text lets anyone on the network read mail and obtain signatures. `init --local` makes a certificate authority and does not need it. |
 | `idle_wake` | `MASH_IDLE_WAKE` | Hook mode: how long spooled mail waits for a hook before serve wakes the idle session. A Go duration, 5s to 30m. Default `45s`; re-wakes double from there, to 30 minutes. |
 | `relay_window` | `MASH_RELAY_WINDOW` | serve: how soon after mail from one sender a send to another endpoint is traced as a relay candidate (see "Relay tracing" in operations.md). Nothing is blocked. A Go duration, 1s to 1h. Default `60s`. |
 | `open_timeout` | `MASH_OPEN_TIMEOUT` | How long a command or serve may spend opening: connecting to its data and checking its identity. A Go duration above zero (for example `"45s"`), for slow links. Default `20s`. |
@@ -125,39 +124,45 @@ On one machine with no NATS server yet, `mashctl init --local --owner <name> --s
 | `cli_timeout` | `MASH_CLI_TIMEOUT` | The total deadline of one command (`send`, `inbox`, `who` and the rest), open included. A Go duration above zero. Default `15m`. |
 | `admin_timeout` | `MASH_ADMIN_TIMEOUT` | The total deadline of one `mash admin` command. A Go duration above zero, for a large fleet or a slow link. Default `30s`. |
 
-The environment wins over the file. Credentials files must be mode 0600; they hold the endpoint's private key, and mash refuses to use a credentials file that other users can read (fix it with `chmod 600`). `mashctl` applies the same check to the admin credentials and to the system account credentials (`--sys-creds`, `MASH_SYS_CREDS`, or `sys.creds` in the server directory). A symlink is followed and the file it points to is checked.
+The environment wins over the file.
+
+**Global flags.** `mash` and `mashctl` accept `--endpoint ADDR`, `--creds`, `--server` (repeatable), `--ca`, `--config-dir`, `--verbose`/`-v`, `--json` and `--no-color` anywhere in the command line. A setting comes from the flag first, then the environment, then `config.json`. (`mashctl adopt --server URL` keeps its own meaning, and `--servers N` and `--sys-creds` are unchanged.)
+
+**Which endpoint.** `MASH_ENDPOINT` (or `endpoint` in `config.json`, or `--endpoint`) holds the full address `owner.group.name`, for example `alice.dev.design`. If none is set, mash uses the one endpoint whose creds file `<owner>.<group>.<name>.creds` (mode 0600, owned by you) sits directly in the config directory. If several are installed it stops with `more than one endpoint is installed here: a, b` and you name one. A value that is not three dotted parts is a configuration error naming `MASH_ENDPOINT`. `mashctl` never takes its owner from an installed creds file. Its owner is the owner part of an endpoint you set (`--endpoint`, `MASH_ENDPOINT` or `endpoint` in `config.json`; any group and name will do), else the `owner` key of `config.json` (`mashctl init --local` and `mashctl adopt` write it). `mash` ignores the `owner` key.
+
+Credentials files must be mode 0600; they hold the endpoint's private key, and mash refuses to use a credentials file that other users can read (fix it with `chmod 600`). `mashctl` applies the same check to the admin credentials and to the system account credentials (`--sys-creds`, `MASH_SYS_CREDS`, or `sys.creds` in the server directory). A symlink is followed and the file it points to is checked.
 
 Optional: the session instruction file `~/.config/mash/policy.md` is appended to every session's instructions. By default, mail from a verified mash endpoint is treated as a delegated request from the fleet's operator; use `policy.md` to carve out what still needs a human, for example "Ask me before spending money or touching production."
 
 ## 5. Launch a session
 
 ```sh
-MASH_GROUP=dev MASH_NAME=design claude --channels plugin:mash@mash
+MASH_ENDPOINT=alice.dev.design claude --channels plugin:mash@mash
 ```
 
 The session registers as a SAP agent, takes the lease on its name, and starts receiving mail. If another live session already holds the name, this one starts without mail tools and says why.
 
 Keep this machine's clock in sync (NTP): more than 30 s of skew from the server makes peers look offline and mail `[stale]`. `status` shows a `clock:` line (see [Troubleshooting](operations.md)).
 
-In the session, Claude has seven tools: `send`, `read`, `inbox`, `who`, `reply`, `version` and `status`. `status` says what works and what is missing, with the next step for each: the name, config, creds, connection and delivery. It answers in every session, even one with no `MASH_NAME` or a start that failed, where it and `version` are the only tools. `version` shows the mash binary's version and commit, the plugin's version and this endpoint's address. `mash status` from a shell prints the same lines for the environment it runs in, without connecting, so a missing name or creds shows before you launch (the connection and delivery lines are live-only and say so). From a shell, the same identity can use the CLI:
+In the session, Claude has seven tools: `send`, `read`, `inbox`, `who`, `reply`, `version` and `status`. `status` says what works and what is missing, with the next step for each: the name, config, creds, connection and delivery. It answers in every session, even one with no `MASH_ENDPOINT` or a start that failed, where it and `version` are the only tools. `version` shows the mash binary's version and commit, the plugin's version and this endpoint's address. `mash status` from a shell prints the same lines for the environment it runs in, without connecting, so a missing name or creds shows before you launch (the connection and delivery lines are live-only and say so). From a shell, the same identity can use the CLI:
 
 ```sh
-MASH_GROUP=dev MASH_NAME=design mash who
-MASH_GROUP=dev MASH_NAME=design mash send <owner>.dev.review "Spec is at docs/specs/x.md; please review section 4."
-MASH_GROUP=dev MASH_NAME=design mash send <owner>.dev.review --id spec-review-1 "Spec is at docs/specs/x.md."   # safe to re-run: stored once
-MASH_GROUP=dev MASH_NAME=design mash prompt <owner>.dev.review "Are you still on the auth bug?"
-MASH_GROUP=dev MASH_NAME=design mash inbox --after 120 --limit 50   # the 50 messages after #120, oldest first
+MASH_ENDPOINT=alice.dev.design mash who
+MASH_ENDPOINT=alice.dev.design mash send <owner>.dev.review "Spec is at docs/specs/x.md; please review section 4."
+MASH_ENDPOINT=alice.dev.design mash send <owner>.dev.review --id spec-review-1 "Spec is at docs/specs/x.md."   # safe to re-run: stored once
+MASH_ENDPOINT=alice.dev.design mash prompt <owner>.dev.review "Are you still on the auth bug?"
+MASH_ENDPOINT=alice.dev.design mash inbox --after 120 --limit 50   # the 50 messages after #120, oldest first
 ```
 
 A live prompt is at most 32768 bytes; a longer one is refused with an error, so send the longer text as mail.
 
 ### Sessions and resume
 
-The endpoint's address belongs to the launch, not to the conversation. The group and instance come only from `MASH_GROUP` and `MASH_NAME` in the environment Claude Code starts with ([ADR 0012](decisions/0012-endpoint-chosen-per-launch-by-mash-name.md)).
+The endpoint's address belongs to the launch, not to the conversation. The address comes only from `MASH_ENDPOINT` in the environment Claude Code starts with ([ADR 0012](decisions/0012-endpoint-chosen-per-launch-by-mash-name.md)).
 
-- `claude --resume` or `--continue` without `MASH_NAME` gives an inert session, and without `MASH_GROUP` a session that stops. With a different address, the conversation gets that address's mailbox, and reusing an address in an unrelated conversation hands it that endpoint's backlog. Resume with the same `MASH_GROUP` and `MASH_NAME`.
+- `claude --resume` or `--continue` without `MASH_ENDPOINT` gives an inert session. With a different address, the conversation gets that address's mailbox, and reusing an address in an unrelated conversation hands it that endpoint's backlog. Resume with the same `MASH_ENDPOINT`.
 - One live session holds an address. A session that finds its address held starts without mail tools and retries. Do not resume a conversation while its original process is still running: a second process in the same Claude session can drain the holder's spooled mail without any signal ([receipt](evidence/2026-11-01-dual-resume/RECEIPT.md)).
-- The lease expires 90 seconds after its last refresh (`store.LeaseTTL`), and a running session refreshes it every 30 seconds (`endpoint.LeaseRefresh`). A laptop that sleeps longer than 90 seconds loses it. When the session wakes, if nobody else took the name, `mash serve` takes it back. If another session took it, the loss is final: lease loss after a start is terminal, and the session must be restarted. Run `status` to see whether the name is still held, and restart with the same `MASH_NAME`; the restart takes the name back once the other holder is gone.
+- The lease expires 90 seconds after its last refresh (`store.LeaseTTL`), and a running session refreshes it every 30 seconds (`endpoint.LeaseRefresh`). A laptop that sleeps longer than 90 seconds loses it. When the session wakes, if nobody else took the name, `mash serve` takes it back. If another session took it, the loss is final: lease loss after a start is terminal, and the session must be restarted. Run `status` to see whether the name is still held, and restart with the same `MASH_ENDPOINT`; the restart takes the name back once the other holder is gone.
 
 ### Lease fields a supervisor can read
 
@@ -186,12 +191,12 @@ If you use [Synadia Cloud](https://cloud.synadia.com), [`scripts/quickstart-syna
    ```
 
    With no `--endpoint`, it makes one named `<user>-<host>`. If the token sees several teams or accounts, name one with `--team` or `--account`. `--owner` defaults to your user name.
-3. It creates a temporary admin user (named `mash-quickstart-admin-` and 8 random hex characters), a NATS user and a creds file in `~/.config/mash/<name>.creds` (mode 0600) for each endpoint, and writes `~/.config/mash/config.json` (it refuses to change a different `url` or `owner` without `--force`). Then it runs `mash admin init` and `mash admin provision` for each endpoint, sends a test message from the first endpoint to the second, and deletes the admin user, also when it fails. It refuses to reuse a NATS user that already exists; delete it in the console first. The API token is not stored, and no admin credential is left behind. [docs/synadia.md](synadia.md) lists what it does and does not check.
+3. It creates a temporary admin user (named `mash-quickstart-admin-` and 8 random hex characters), a NATS user and a creds file in `~/.config/mash/<name>.creds` (mode 0600) for each endpoint, and writes `~/.config/mash/config.json` (it refuses to change a different `servers` or `endpoint` without `--force`). Then it runs `mash admin init` and `mash admin provision` for each endpoint, sends a test message from the first endpoint to the second, and deletes the admin user, also when it fails. It refuses to reuse a NATS user that already exists; delete it in the console first. The API token is not stored, and no admin credential is left behind. [docs/synadia.md](synadia.md) lists what it does and does not check.
 4. Start two sessions, each as an endpoint (section 5):
 
    ```sh
-   MASH_GROUP=dev MASH_NAME=design claude --channels plugin:mash@mash
-   MASH_GROUP=dev MASH_NAME=review claude --channels plugin:mash@mash
+   MASH_ENDPOINT=alice.dev.design claude --channels plugin:mash@mash
+   MASH_ENDPOINT=alice.dev.review claude --channels plugin:mash@mash
    ```
 
 Notes:

@@ -21,8 +21,8 @@ func waitHookEnv(t *testing.T) (map[string]string, spool.Spool) {
 	if err := os.WriteFile(creds, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	env := map[string]string{"HOME": t.TempDir(), "MASH_NAME": "a", "MASH_GROUP": testGroup, "MASH_URL": "nats://127.0.0.1:1",
-		"MASH_OWNER": "o", "MASH_CREDS": creds}
+	env := map[string]string{"HOME": t.TempDir(), "MASH_ENDPOINT": "o." + testGroup + ".a", "MASH_SERVER": "nats://127.0.0.1:1",
+		"MASH_CREDS": creds}
 	sp := spoolOf(env)
 	if err := sp.Init(); err != nil {
 		t.Fatal(err)

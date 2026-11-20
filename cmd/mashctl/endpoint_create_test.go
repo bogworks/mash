@@ -255,7 +255,7 @@ func TestEndpointCreateMakeKey(t *testing.T) {
 		t.Error("creds file changed")
 	}
 	so, _, _ = h.run("endpoint", "create", ad("same2").String(), "--make-key")
-	if !strings.Contains(so, "next: start a session as this endpoint: MASH_OWNER="+testenv.Owner+" MASH_GROUP=g MASH_NAME=same2") {
+	if !strings.Contains(so, "next: start a session as this endpoint: MASH_ENDPOINT="+testenv.Owner+".g.same2") {
 		t.Errorf("next line %q", so)
 	}
 }
