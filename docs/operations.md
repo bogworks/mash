@@ -28,7 +28,7 @@ account_key: account.nk
 - `owner`: the first owner.
 - `admin_creds`: the administrator's creds file, a user of the mash account.
 - `system_creds`: the system account's creds file. Cancelling a deleted endpoint's key needs it.
-- `operator_key`: the operator **signing** seed (starts with `SO`). A revocation (`endpoint delete`, `endpoint reissue`) signs the account JWT with it.
+- `operator_key`: the seed of the operator key that signs the account (starts with `SO`): the operator's identity key when the server was set up with the `nats` command, or a signing key if your operator uses one. Whoever holds it can sign any account for that operator, so keep it as you keep the operator's identity. A revocation (`endpoint delete`, `endpoint reissue`) signs the account JWT with it.
 - `account_key`: the **identity** seed of the mash account (starts with `SA`; its public key is the account JWT's subject).
 
 An unknown key is an error (`error: setup.yaml: unknown key colour`), and so is a missing one other than `ca` (`error: setup.yaml: missing key owner`). Seeds and creds are read from files only, never from arguments or environment values; the files must be mode 0600, and a seed is never printed. A hosted NATS where you do not hold the operator key, such as Synadia Cloud, is not supported by `mashctl` in 0.5.6; `mash` itself works against any conforming server.
@@ -360,7 +360,7 @@ Listen on addresses the central host and the other nodes can reach, and use TLS 
 
 Set `interval` in every node's `resolver` block. The full resolver syncs from a timer only, one interval after the node starts (default one minute), and nothing holds clients back until it has. A node that was down while a key was revoked therefore accepts the revoked credential until its first sync; `interval: "5s"` shortens that to the interval plus about 0.03 to 0.1 s on a loopback cluster (measured: restart to refusal took 5.03 to 5.11 s with `interval: "5s"`); a real network may add route formation time. To close it completely, keep the returning node's client port closed (a firewall rule, or listen on a private address first) until `mashctl doctor` reports no problem.
 2. Start the nodes.
-3. On the host that runs `mashctl`, copy the operator signing seed, the account identity seed, the system creds and the admin creds, and write a setup file that lists every server:
+3. On the host that runs `mashctl`, copy the operator key that signs the account, the account identity seed, the system creds and the admin creds, and write a setup file that lists every server:
 
 ```yaml
 servers:
