@@ -361,6 +361,18 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 			return
 		}
 		ref := MsgRef{Seq: meta.Sequence.Stream}
+		if meta.NumDelivered > 1 {
+			// A redelivery of mail already refused (its ack was lost): still refused, whatever the directory or the
+			// setting says now. Acknowledged without a second count.
+			if id := e.refusedStream.Load(); id != nil && e.refusedSeq(ref.Seq, *id) {
+				if e.mayAck(pending{}) {
+					_ = m.Ack()
+				} else {
+					_ = m.Nak()
+				}
+				return
+			}
+		}
 		if e.leaseGone.Load() {
 			_ = m.NakWithDelay(time.Second) // the lease is gone: not queued, not acked; redelivered after a second, not in a loop
 			return
@@ -382,7 +394,17 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 			// Without the lease the new holder gets it (and counts it), so it is nak'd, not counted.
 			if e.mayAck(pending{}) {
 				e.refuse(ref.Seq, claimedAddress(h, from), trust)
-				_ = m.Ack()
+				if e.refusedHook != nil {
+					e.refusedHook()
+				}
+				// Recording can take seconds: the lease is checked again right before the ack, and on a loss the
+				// count is taken back (the holder that acknowledges the message counts it) and the message nak'd.
+				if e.mayAck(pending{}) {
+					_ = m.Ack()
+				} else {
+					e.unrecordRefusal(ref.Seq)
+					_ = m.Nak()
+				}
 			} else {
 				_ = m.Nak()
 			}
@@ -882,6 +904,8 @@ func (e *Endpoint) inbox(ctx context.Context) (jetstream.Stream, error) {
 	if err != nil {
 		return nil, fmt.Errorf("mash: inbox: %w", err)
 	}
+	id := streamIdentity(s.CachedInfo())
+	e.inboxID.Store(&id)
 	return s, nil
 }
 
@@ -889,6 +913,9 @@ func (e *Endpoint) toMail(raw *jetstream.RawStreamMsg) (render.Mail, bool) {
 	from, trust, h, ok := e.classify(raw.Subject, raw.Header, raw.Data, raw.Time)
 	if !ok {
 		return render.Mail{Seq: raw.Sequence, From: "?", Trust: trust, At: raw.Time}, false
+	}
+	if id := e.inboxID.Load(); id != nil && e.refusedSeq(raw.Sequence, *id) { // refused earlier: stays refused
+		return render.Mail{Seq: raw.Sequence, From: from, Trust: trust, At: raw.Time}, false
 	}
 	if e.refuses(trust) { // stored, but not shown: serve counted and dropped it (refuse.go)
 		return render.Mail{Seq: raw.Sequence, From: from, Trust: trust, At: raw.Time}, false
