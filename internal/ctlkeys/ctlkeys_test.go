@@ -274,3 +274,29 @@ func TestStoreHasNoZoneKeys(t *testing.T) {
 		t.Fatal("the old zone key file was changed")
 	}
 }
+
+func TestCheckParentDirRefusesGroupWritableUnlessSticky(t *testing.T) {
+	base := t.TempDir()
+	mk := func(name string, mode os.FileMode) string {
+		d := filepath.Join(base, name)
+		if err := os.Mkdir(d, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(d, mode); err != nil {
+			t.Fatal(err)
+		}
+		return d
+	}
+	if err := CheckParentDir(mk("ok", 0o755)); err != nil {
+		t.Fatalf("0755 refused: %v", err)
+	}
+	if err := CheckParentDir(mk("grp", 0o775)); err == nil || !strings.Contains(err.Error(), "chmod g-w") {
+		t.Fatalf("0775 not refused with the fix: %v", err)
+	}
+	if err := CheckParentDir(mk("sticky", 0o775|os.ModeSticky)); err != nil {
+		t.Fatalf("sticky group-writable refused: %v", err)
+	}
+	if err := CheckParentDir(mk("oth", 0o757)); err == nil {
+		t.Fatal("other-writable not refused")
+	}
+}

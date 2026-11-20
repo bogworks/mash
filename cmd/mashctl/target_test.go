@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/bogworks/mash/internal/config"
@@ -15,6 +16,7 @@ import (
 // tests of the lines themselves read them through showTarget.
 func TestMain(m *testing.M) {
 	announceSink = io.Discard
+	syscall.Umask(0o022) // the folder check refuses a group-writable folder; a 002 umask would make every test folder one
 	os.Exit(m.Run())
 }
 

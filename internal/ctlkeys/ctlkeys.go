@@ -130,7 +130,7 @@ func ownerErr(fi fs.FileInfo, path, what string) error {
 func CheckOwned(fi fs.FileInfo, path, what string) error { return ownerErr(fi, path, what) }
 
 // CheckParentDir refuses a directory that is not a real directory (a symlink is refused), is not owned by the
-// effective uid, or is writable by other users (group-writable is allowed: under the usual user-private-group umask 002 a config directory is 0775 and the group is the owner alone): a place where a creds file may be created without another user
+// effective uid, or is writable by other users or by its group (unless the group-writable directory is sticky): a place where a creds file may be created without another user
 // being able to swap or replace it. A missing directory is an error wrapping fs.ErrNotExist.
 func CheckParentDir(d string) error {
 	fi, err := os.Lstat(d)
@@ -145,6 +145,9 @@ func CheckParentDir(d string) error {
 	}
 	if fi.Mode().Perm()&0o002 != 0 {
 		return fmt.Errorf("directory %s has mode %04o: it is writable by every user. Run: chmod o-w %s", d, fi.Mode().Perm(), d)
+	}
+	if fi.Mode().Perm()&0o020 != 0 && fi.Mode()&fs.ModeSticky == 0 {
+		return fmt.Errorf("directory %s has mode %04o: its group can write it and could replace the files in it. Run: chmod g-w %s", d, fi.Mode().Perm(), d)
 	}
 	if err := ownerErr(fi, d, "directory"); err != nil {
 		return err
