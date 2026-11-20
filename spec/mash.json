@@ -1313,6 +1313,18 @@
         "text": "error: this join file holds no seed; it was made for your own key\nhint: mash join acme.demo.bob.join --key <your seed file>",
         "stream": "stderr",
         "exit": 2
+       },
+       {
+        "case": "The folder cannot be written",
+        "text": "error: cannot write into ~/.config/mash: permission denied; nothing was installed\nhint: mash doctor",
+        "stream": "stderr",
+        "exit": 1
+       },
+       {
+        "case": "Could not finish and could not undo",
+        "text": "error: could not finish and could not undo: ~/.config/mash/acme.demo.bob.creds left; old creds kept at ~/.config/mash/acme.demo.bob.creds.old\nhint: mash doctor",
+        "stream": "stderr",
+        "exit": 1
        }
       ]
      },
