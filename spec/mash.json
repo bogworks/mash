@@ -289,25 +289,25 @@
       "value": [
        {
         "case": "Sent",
-        "text": "Mail sent.",
+        "text": "Mail sent (number 42).",
         "stream": "stdout",
         "exit": 0
        },
        {
         "case": "Sent, urgent, with a kind",
-        "text": "Urgent question mail sent.",
+        "text": "Urgent question mail sent (number 43).",
         "stream": "stdout",
         "exit": 0
        },
        {
         "case": "With --verbose",
-        "text": "Mail sent.\nto:      acme.demo.alice\nnumber:  42\nkind:    task\nurgent:  no",
+        "text": "Mail sent (number 42).\nto:      acme.demo.alice\nkind:    task\nurgent:  no",
         "stream": "stdout",
         "exit": 0
        },
        {
         "case": "A reply marked question that asks nothing",
-        "text": "Mail sent as fyi: a reply marked question that asks nothing.",
+        "text": "Mail sent as fyi (number 44): a reply marked question that asks nothing.",
         "stream": "stdout",
         "exit": 0
        },
@@ -362,7 +362,7 @@
      },
      {
       "name": "x-notes",
-      "value": "send has no --dry-run: sending is the act itself, not a change to the mesh."
+      "value": "send has no --dry-run: sending is the act itself, not a change to the mesh. The number is the message's number in the recipient's inbox. It is printed because the sender can find it nowhere else, and needs it: an answer arrives marked 'reply to: 42'."
      }
     ]
    },

@@ -6,7 +6,7 @@
   },
   {
    "rule": "An action prints one line",
-   "detail": "Past tense, naming the thing: 'Created endpoint acme.demo.bob', 'Mail sent.' It does not print what another command already shows."
+   "detail": "Past tense, naming the thing: 'Created endpoint acme.demo.bob', 'Mail sent (number 42).' It does not print what another command already shows; it does print an identifier the person can get nowhere else."
   },
   {
    "rule": "--verbose adds detail, --wide adds columns",

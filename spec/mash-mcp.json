@@ -67,7 +67,7 @@
    "text": [
     {
      "case": "Sent",
-     "text": "Mail sent.",
+     "text": "Mail sent (number 42).",
      "stream": "stdout",
      "exit": 0
     }
