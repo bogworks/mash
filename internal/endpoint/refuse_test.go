@@ -11,8 +11,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nats-io/nats.go/jetstream"
+
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/sap"
+	"github.com/bogworks/mash/internal/store"
 )
 
 // cfgState is cfg(name) with its own state directory and the refusal of unverified mail on or off.
@@ -192,6 +195,8 @@ func TestForgedMailIsNotCountedAsRefused(t *testing.T) {
 func TestRefusedCountConcurrent(t *testing.T) {
 	cfg := config.Config{Owner: "acme", Group: "demo", Name: "bob", StateDir: t.TempDir()}
 	e := &Endpoint{cfg: cfg}
+	id := "inbox@now"
+	e.refusedStream.Store(&id)
 	const n = 60
 	var wg sync.WaitGroup
 	for i := 1; i <= n; i++ {
@@ -208,10 +213,10 @@ func TestRefusedCountConcurrent(t *testing.T) {
 	if got := RefusedCount(cfg); got != n {
 		t.Fatalf("count %d, want %d", got, n)
 	}
-	if got := e.refusedStored(1, n); got != n {
+	if got := e.refusedStored(1, n, id); got != n {
 		t.Fatalf("stored %d, want %d", got, n)
 	}
-	if got := e.refusedStored(31, n); got != n-30 {
+	if got := e.refusedStored(31, n, id); got != n-30 {
 		t.Fatalf("stored above 30: %d", got)
 	}
 }
@@ -281,5 +286,84 @@ func TestRefusedSenderEscapes(t *testing.T) {
 		if got := refusedSender(in); got != want {
 			t.Errorf("%q: got %q, want %q", in, got, want)
 		}
+	}
+}
+
+// A sender created after the directory was read is not unknown: its verified mail is delivered, not refused. The
+// record is read once, for that sender, before the message is called unknown-signer.
+func TestVerifiedMailFromANewSenderIsDelivered(t *testing.T) {
+	f := newFixture(t, "a", "b")
+	cfg := f.cfgState("a", t.TempDir(), false)
+	_, ev, _ := serveCfg(t, cfg) // the directory is read now: it has a and b only
+	f.add(t, "c")
+	if _, err := f.client(t, "c").Send(context.Background(), tdot("a"), "hello from c", 0); err != nil {
+		t.Fatal(err)
+	}
+	got := ev.waitFor(t, 1, 5*time.Second)
+	if !strings.Contains(got[0], "[verified]") || !strings.Contains(got[0], "hello from c") {
+		t.Fatalf("event: %s", got[0])
+	}
+	if n := RefusedCount(cfg); n != 0 {
+		t.Fatalf("refused %d", n)
+	}
+}
+
+// The count and the sequences belong to one stream: a recreated stream restarts its sequences, and mail that
+// arrives in it is not read as refused by the old stream's list.
+func TestRefusalFilesAreTiedToTheStream(t *testing.T) {
+	f := newFixture(t, "a", "b")
+	cfg := f.cfgState("a", t.TempDir(), false)
+	f.publishUnverified(t, "a")
+	_, _, stop := serveCfg(t, cfg)
+	waitRefused(t, cfg, 4)
+	stop()
+
+	ctx := context.Background()
+	ajs, err := jetstream.New(f.e.Conn(t, f.e.AdminCreds))
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(10 * time.Millisecond)
+	if err := ajs.DeleteStream(ctx, taddr("a").InboxStream()); err != nil {
+		t.Fatal(err)
+	}
+	s, err := ajs.CreateStream(ctx, store.InboxConfig(taddr("a")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateOrUpdateConsumer(ctx, store.ConsumerConfig()); err != nil {
+		t.Fatal(err)
+	}
+	seq, err := f.client(t, "b").Send(ctx, tdot("a"), "after the recreation", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seq > 4 {
+		t.Fatalf("sequence %d did not restart", seq)
+	}
+
+	// Before any serve: the stale list is not applied to the new stream.
+	c, err := OpenClient(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if m, err := c.Read(ctx, seq); err != nil || m.Trust != sap.TrustVerified {
+		t.Fatalf("read of new mail: %+v %v", m, err)
+	}
+	if r, err := c.ReadInbox(ctx, InboxQuery{Limit: 20}); err != nil || r.State.Total != 1 || len(r.Mail) != 1 {
+		t.Fatalf("ReadInbox: %+v %v", r, err)
+	}
+
+	// A serve on the new stream delivers the mail, and the first refusal there starts a new count.
+	f.publishUnverified(t, "a")
+	_, ev, _ := serveCfg(t, cfg)
+	if got := ev.waitFor(t, 1, 5*time.Second); !strings.Contains(got[0], "after the recreation") {
+		t.Fatalf("event: %s", got[0])
+	}
+	waitRefused(t, cfg, 4)
+	time.Sleep(300 * time.Millisecond)
+	if n := RefusedCount(cfg); n != 4 {
+		t.Fatalf("the old stream's count survives: %d, want 4", n)
 	}
 }
