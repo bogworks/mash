@@ -188,7 +188,7 @@ func TestHelpCommandMatchesHelpFlag(t *testing.T) {
 		}
 	}
 	var o, e bytes.Buffer
-	if code := run([]string{"help", "nosuch"}, envFrom(nil), strings.NewReader(""), &o, &e); code != 2 || o.Len() != 0 ||
+	if code := run([]string{"help", "nosuch"}, envFrom(nil), strings.NewReader(""), &o, quiet(&e)); code != 2 || o.Len() != 0 ||
 		e.String() != "error: mash has no command nosuch\nhint: mash help\n" {
 		t.Errorf("help nosuch: %d %q %q", code, o.String(), e.String())
 	}
