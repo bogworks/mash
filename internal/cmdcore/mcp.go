@@ -161,6 +161,9 @@ func decodeArgs[P any](fields []field, args json.RawMessage, p *P) error {
 			delete(raw, f.json)
 			continue
 		}
+		if f.repeat && strings.HasPrefix(strings.TrimSpace(string(v)), `"`) {
+			return cliframe.Usagef("%s must be an array of strings, not a string", f.json)
+		}
 		if typ, _ := schemaType(f.typ); typ == "integer" {
 			n, err := wholeNumber(f, v)
 			if err != nil {

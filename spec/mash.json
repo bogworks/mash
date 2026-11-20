@@ -590,6 +590,12 @@
         "text": "error: acme.demo.alice has no message 9\nhint: mash inbox",
         "stream": "stderr",
         "exit": 1
+       },
+       {
+        "case": "A message that was refused",
+        "text": "error: message 12 was refused: it was not verified\nhint: mash doctor",
+        "stream": "stderr",
+        "exit": 1
        }
       ]
      },
@@ -648,13 +654,56 @@
       "description": "Only endpoints that are offline."
      },
      {
+      "name": "--role",
+      "description": "Only endpoints whose role contains this text.",
+      "arguments": [
+       {
+        "name": "text",
+        "required": true,
+        "arity": {
+         "minimum": 1,
+         "maximum": 1
+        }
+       }
+      ]
+     },
+     {
+      "name": "--capability",
+      "description": "Only endpoints that have this capability. May be given more than once; all must be present.",
+      "arguments": [
+       {
+        "name": "name",
+        "required": true,
+        "arity": {
+         "minimum": 1,
+         "maximum": 1
+        }
+       }
+      ]
+     },
+     {
+      "name": "--label",
+      "description": "Only endpoints with this label, as name or name=value. May be given more than once; all must match.",
+      "arguments": [
+       {
+        "name": "label",
+        "required": true,
+        "arity": {
+         "minimum": 1,
+         "maximum": 1
+        }
+       }
+      ]
+     },
+     {
       "name": "--wide",
       "description": "More columns: role, host and description, where recorded. May pass 80 columns."
      }
     ],
     "examples": [
      "mash who",
-     "mash who acme.demo --online"
+     "mash who acme.demo --online",
+     "mash who --capability review --online"
     ],
     "exitCodes": [
      {
@@ -759,7 +808,7 @@
      },
      {
       "name": "x-notes",
-      "value": "A prefix follows the address the way a domain name does: acme is everything under acme, acme.demo is everything under acme.demo, and acme.demo.bob is that one endpoint, never acme.demo.bobby. There is no other pattern matching: capitals are refused, acme.demo.bob.* is refused, and an empty prefix means none. The filters by role, capability, label and free text that today's command and tool have are gone in 0.5.6; the JSON and the MCP tool's structured result carry role, host, description, capability and labels for every endpoint, so a caller can still choose by them."
+      "value": "A prefix follows the address the way a domain name does: acme is everything under acme, acme.demo is everything under acme.demo, and acme.demo.bob is that one endpoint, never acme.demo.bobby. There is no other pattern matching: capitals are refused, acme.demo.bob.* is refused, and an empty prefix means none. The filters by role, capability and label stay, as --role, --capability and --label, in the command and the tool: an agent uses them to find a peer by what it does. Only the free-text match and the alternative output modes are gone. The JSON and the MCP tool's structured result carry role, host, description, capability and labels for every endpoint."
      }
     ]
    },
@@ -821,6 +870,24 @@
         "exit": 1
        },
        {
+        "case": "In a session, when another session holds this endpoint",
+        "text": "acme.demo.bob: not ready: another session holds this endpoint\nhint: mash doctor",
+        "stream": "stdout",
+        "exit": 1
+       },
+       {
+        "case": "In a session that a newer session replaced",
+        "text": "acme.demo.bob: not ready: this session lost this endpoint to a newer one\nhint: mash doctor",
+        "stream": "stdout",
+        "exit": 1
+       },
+       {
+        "case": "In a session that could not take the endpoint",
+        "text": "acme.demo.bob: not ready: this session could not take this endpoint:\n  the server did not answer: tls://myserver:4222\nhint: mash doctor",
+        "stream": "stdout",
+        "exit": 1
+       },
+       {
         "case": "In a session that cannot store arriving mail on this machine",
         "text": "acme.demo.bob: not ready: mail is held: its folder cannot be written\nhint: mash doctor",
         "stream": "stdout",
@@ -868,7 +935,7 @@
      },
      {
       "name": "x-notes",
-      "value": "'ready' means: the configuration is readable, the server answers, and it accepts this endpoint's credentials. A hint names the first installed address in alphabetical order. At a shell every 'hint:' line goes to stderr; an MCP tool's text block puts the hint on the line after the result."
+      "value": "'ready' means: the configuration is readable, the server answers, and it accepts this endpoint's credentials. Inside a session, when the configuration, the creds, the server or sign-in fails, that failure is what status reports, even if the session also does not hold its endpoint: the root cause comes first, and a session and a shell then name the same cause. Asked inside a session (the MCP tool), status and doctor report on that session itself, not on a fresh connection: 'ready, online' there means this session holds the endpoint and its mail will reach it. A hint names the first installed address in alphabetical order. At a shell every 'hint:' line goes to stderr; an MCP tool's text block puts the hint on the line after the result."
      }
     ]
    },
@@ -931,6 +998,18 @@
        {
         "case": "At a shell, where there is no session to deliver to",
         "text": "delivery  skip  needs a session",
+        "stream": "stdout",
+        "exit": 0
+       },
+       {
+        "case": "In a session that does not hold its endpoint",
+        "text": "delivery  FAIL  another session holds this endpoint",
+        "stream": "stdout",
+        "exit": 0
+       },
+       {
+        "case": "In a session that a newer session replaced",
+        "text": "delivery  FAIL  this session lost this endpoint to a newer one",
         "stream": "stdout",
         "exit": 0
        },
@@ -1436,7 +1515,7 @@
      },
      {
       "name": "x-notes",
-      "value": "Which endpoint. serve never picks an endpoint by itself, even when only one is installed: it acts as the one named by --endpoint, MASH_ENDPOINT or the configuration file, and with none named it offers only status, doctor and version, whose answer is 'no endpoint is chosen for this session' with the hint 'start the session with MASH_ENDPOINT=<address>'. Otherwise every agent session on a machine with one endpoint installed would become that endpoint by accident, and two sessions would fight over it. Waking for a backlog. Whatever the kinds of the messages, serve wakes the session when more than --wake-count are waiting or the oldest has waited longer than --wake-age, at most once every 10 minutes and not in the first 10 minutes after it starts. mash inbox says so on its second line. Refusing unverified mail. Only mail whose trust is 'verified' reaches the session, the inbox listing and mash read. Mail that is unsigned, signed by an unknown key, claimed but unproven, or stale is dropped and counted; mash doctor shows the count. The sender is not told. --accept-unverified delivers it instead, labelled."
+      "value": "Which endpoint. serve never picks an endpoint by itself, even when only one is installed: it acts as the one named by --endpoint, MASH_ENDPOINT or the configuration file, and with none named it offers only status, doctor and version, whose answer is 'no endpoint is chosen for this session' with the hint 'start the session with MASH_ENDPOINT=<address>'. Otherwise every agent session on a machine with one endpoint installed would become that endpoint by accident, and two sessions would fight over it. Waking for a backlog. Whatever the kinds of the messages, serve wakes the session when more than --wake-count are waiting or the oldest has waited longer than --wake-age, at most once every 10 minutes and not in the first 10 minutes after it starts. mash inbox says so on its second line. Refusing unverified mail. Only mail whose trust is 'verified' reaches the session, the inbox listing and mash read. Mail that is unsigned, signed by an unknown key, claimed but unproven, or stale is dropped and counted; mash doctor shows the count. The sender is not told. --accept-unverified delivers it instead, labelled. A refused message is invisible at a shell too: it is not in mash inbox's count or listing, and mash read on its number says it was refused. When serve refuses a message it writes one line to its log: 'refused message 12 from acme.demo.x: not verified (absent)', where the address is the one the message claims, with control characters escaped, and the word in brackets is the trust label. What 'waiting' means for the wake: a message that has arrived and has not yet reached the session. In a session that takes delivery by channel alone, a message reaches it on arrival, so nothing waits and the wake never fires; the wake exists for sessions where mail can pile up."
      },
      {
       "name": "x-long",

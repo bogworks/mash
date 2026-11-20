@@ -314,8 +314,12 @@ func confToolProblems(want confTool, got map[string]any) []string {
 			p = append(p, fmt.Sprintf("param %s: want it (%s), not offered; offered %v", w.Name, w.Type, confKeys(props)))
 			continue
 		}
-		if g["type"] != w.Type {
-			p = append(p, fmt.Sprintf("param %s type: want %q, got %v", w.Name, w.Type, g["type"]))
+		gotType := fmt.Sprint(g["type"])
+		if items, ok := g["items"].(map[string]any); ok && g["type"] == "array" {
+			gotType = "array of " + fmt.Sprint(items["type"])
+		}
+		if gotType != w.Type {
+			p = append(p, fmt.Sprintf("param %s type: want %q, got %v", w.Name, w.Type, gotType))
 		}
 		if req[w.Name] != w.Required {
 			p = append(p, fmt.Sprintf("param %s required: want %v, got %v", w.Name, w.Required, req[w.Name]))

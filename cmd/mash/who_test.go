@@ -233,7 +233,8 @@ func TestWhoMCPTool(t *testing.T) {
 		}
 	}
 	props := tool["inputSchema"].(map[string]any)["properties"].(map[string]any)
-	if len(props) != 4 || props["prefix"] == nil || props["online"] == nil || props["offline"] == nil || props["wide"] == nil {
+	if len(props) != 7 || props["prefix"] == nil || props["online"] == nil || props["offline"] == nil || props["wide"] == nil ||
+		props["role"] == nil || props["capability"] == nil || props["label"] == nil {
 		t.Fatalf("who schema: %v", props)
 	}
 	var cliOut string
@@ -283,8 +284,44 @@ func TestWhoMCPTool(t *testing.T) {
 	if got := resultText(s.call(t, 44, "who", `{"prefix":"o.lab"}`)); got != "No endpoints under o.lab" {
 		t.Fatalf("empty: %q", got)
 	}
+	// the filters through the tool: the same endpoints as the command line, text and object
+	for _, c := range []struct {
+		args string
+		argv []string
+		want []string
+	}{
+		{`{"role":"REVIEW"}`, []string{"--role", "REVIEW"}, []string{tTo("a")}},
+		{`{"capability":["review"]}`, []string{"--capability", "review"}, []string{tTo("a")}},
+		{`{"capability":["review","x"]}`, []string{"--capability", "review", "--capability", "x"}, nil},
+		{`{"label":["team=blue"],"online":false}`, []string{"--label", "team=blue"}, []string{tTo("a")}},
+		{`{"label":["team","team=blue"],"capability":["review"]}`, []string{"--label", "team", "--label", "team=blue", "--capability", "review"}, []string{tTo("a")}},
+		{`{"label":["team=red"]}`, []string{"--label", "team=red"}, nil},
+		{`{"capability":["review"],"online":true}`, []string{"--capability", "review", "--online"}, nil},
+	} {
+		r := s.call(t, 60, "who", c.args)
+		cli, code := w.cli(t, "a", append([]string{"who", "--json"}, c.argv...)...)
+		if r["isError"] == true || code != 0 {
+			t.Fatalf("who %s: %v / %d %s", c.args, r, code, cli)
+		}
+		var got []string
+		sc, _ := r["structuredContent"].(map[string]any)
+		for _, e := range sc["endpoints"].([]any) {
+			got = append(got, e.(map[string]any)["address"].(string))
+		}
+		raw, _ := json.Marshal(sc)
+		var typed struct {
+			Endpoints []cmds.WhoEndpoint `json:"endpoints"`
+		}
+		_ = json.Unmarshal(raw, &typed)
+		if b, _ := json.Marshal(typed); string(b)+"\n" != cli || !reflect.DeepEqual(got, c.want) {
+			t.Errorf("who %s: tool %v, cli %q, want %v", c.args, got, cli, c.want)
+		}
+		if len(c.want) == 0 && resultText(r) != "No endpoints" && resultText(r) != "No online endpoints" {
+			t.Errorf("who %s: empty text %q", c.args, resultText(r))
+		}
+	}
 	// errors: {error, hint}, and the old parameters are not accepted
-	for _, args := range []string{`{"prefix":"o_dev_b"}`, `{"online":true,"offline":true}`, `{"match":"x"}`, `{"format":"json"}`, `{"label":["a"]}`, `{"online":"yes"}`} {
+	for _, args := range []string{`{"prefix":"o_dev_b"}`, `{"online":true,"offline":true}`, `{"match":"x"}`, `{"format":"json"}`, `{"label":[3]}`, `{"label":"a="}`, `{"capability":"review"}`, `{"online":"yes"}`} {
 		r := s.call(t, 45, "who", args)
 		sc, _ := r["structuredContent"].(map[string]any)
 		if r["isError"] != true || sc["error"] == nil {

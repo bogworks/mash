@@ -230,6 +230,11 @@ func TestWhoDoorsAgree(t *testing.T) {
 		{"offline", []string{"--offline"}, `{"offline":true}`},
 		{"nothing", []string{"acme.zzz"}, `{"prefix":"acme.zzz"}`},
 		{"empty prefix", nil, `{"prefix":""}`},
+		{"role", []string{"--role", "REVIEW"}, `{"role":"REVIEW"}`},
+		{"capability", []string{"--capability", "review"}, `{"capability":["review"]}`},
+		{"capability twice", []string{"--capability", "review", "--capability", "x"}, `{"capability":["review","x"]}`},
+		{"label", []string{"--label", "team=blue", "--label", "team"}, `{"label":["team=blue","team"]}`},
+		{"all", []string{"--online", "--role", "rev", "--capability", "review", "--label", "team=blue", "acme"}, `{"online":true,"role":"rev","capability":["review"],"label":["team=blue"],"prefix":"acme"}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := directory()
@@ -261,7 +266,7 @@ func TestWhoDoorsAgree(t *testing.T) {
 	}
 	// the old array form is gone; the bad arguments are errors with {error, hint}
 	tool := cmdcore.MCPTool(cmds.Who, whoEnv(directory()))
-	for _, bad := range []string{`{"format":"json"}`, `{"match":"x"}`, `{"label":["a"]}`, `{"online":true,"offline":true}`, `{"prefix":"acme_demo"}`, `{"prefix":3}`, `[]`} {
+	for _, bad := range []string{`{"format":"json"}`, `{"match":"x"}`, `{"label":[3]}`, `{"label":""}`, `{"label":"a="}`, `{"capability":[""]}`, `{"online":true,"offline":true}`, `{"prefix":"acme_demo"}`, `{"prefix":3}`, `[]`} {
 		_, _, err := tool.CallStructured(context.Background(), json.RawMessage(bad))
 		var se interface{ Structured() any }
 		if err == nil || !errors.As(err, &se) {
@@ -343,7 +348,8 @@ func TestWhoMatchesSpec(t *testing.T) {
 		pm := p.(map[string]any)
 		specNames = append(specNames, pm["name"].(string))
 		got, ok := props[pm["name"].(string)].(map[string]any)
-		if !ok || got["description"] != pm["description"] || got["type"] != map[string]string{"string": "string", "boolean": "boolean"}[pm["type"].(string)] {
+		wantType := map[string]string{"string": "string", "boolean": "boolean", "array of string": "array"}[pm["type"].(string)]
+		if !ok || got["description"] != pm["description"] || got["type"] != wantType {
 			t.Errorf("param %v: schema %v", pm["name"], got)
 		}
 	}
@@ -426,4 +432,89 @@ func sameJSON(t *testing.T, a, b string) bool {
 		t.Fatalf("not JSON: %s / %s", a, b)
 	}
 	return reflect.DeepEqual(x, y)
+}
+
+func whoAddrs(t *testing.T, svc any, argv ...string) []string {
+	t.Helper()
+	code, out, errs := runWho(svc, cliframe.Global{JSON: true}, argv...)
+	if code != 0 {
+		t.Fatalf("who %v: %d %s", argv, code, errs)
+	}
+	return addresses(t, out)
+}
+
+func filterDir() *fakeDir {
+	return &fakeDir{entries: []cmds.WhoEntry{
+		{Address: "acme.demo.alice", Online: true, Role: "Code Reviewer", Capabilities: []string{"review", "test"}, Labels: map[string]string{"team": "blue", "tier": "1"}},
+		{Address: "acme.demo.bob", Online: false, Role: "writer", Capabilities: []string{"review"}, Labels: map[string]string{"team": "red"}},
+		{Address: "acme.lab.carol", Online: true, Role: "reviewer", Capabilities: []string{"reviewer"}},
+		{Address: "acme.lab.dan", Online: true},
+	}}
+}
+
+func TestWhoFilters(t *testing.T) {
+	d := filterDir()
+	for _, tc := range []struct {
+		name string
+		argv []string
+		want []string
+	}{
+		{"role contains, any case", []string{"--role", "review"}, []string{"acme.demo.alice", "acme.lab.carol"}},
+		{"role upper", []string{"--role", "WRITE"}, []string{"acme.demo.bob"}},
+		{"capability is an exact word", []string{"--capability", "review"}, []string{"acme.demo.alice", "acme.demo.bob"}},
+		{"capability is case sensitive and whole", []string{"--capability", "Review"}, nil},
+		{"capabilities all", []string{"--capability", "review", "--capability", "test"}, []string{"acme.demo.alice"}},
+		{"label present", []string{"--label", "team"}, []string{"acme.demo.alice", "acme.demo.bob"}},
+		{"label value", []string{"--label", "team=blue"}, []string{"acme.demo.alice"}},
+		{"label value exact", []string{"--label", "team=blu"}, nil},
+		{"labels all", []string{"--label", "team=blue", "--label", "tier"}, []string{"acme.demo.alice"}},
+		{"labels one missing", []string{"--label", "team=blue", "--label", "x"}, nil},
+		{"with online", []string{"--capability", "review", "--online"}, []string{"acme.demo.alice"}},
+		{"with offline", []string{"--capability", "review", "--offline"}, []string{"acme.demo.bob"}},
+		{"with prefix", []string{"--role", "review", "acme.lab"}, []string{"acme.lab.carol"}},
+		{"everything", []string{"--role", "rev", "--capability", "test", "--label", "tier=1", "--online", "acme.demo"}, []string{"acme.demo.alice"}},
+		{"label value with =", []string{"--label", "team=blue=x"}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := whoAddrs(t, d, tc.argv...); !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("%v: %v, want %v", tc.argv, got, tc.want)
+			}
+		})
+	}
+	// nothing matched: the text says so, with the prefix and online/offline where given
+	_, out, _ := runWho(d, cliframe.Global{}, "--capability", "nope")
+	if out != "No endpoints\n" {
+		t.Errorf("empty: %q", out)
+	}
+	_, out, _ = runWho(d, cliframe.Global{}, "--role", "nope", "--online", "acme.lab")
+	if out != "No online endpoints under acme.lab\n" {
+		t.Errorf("empty: %q", out)
+	}
+	// the tool: an array for the repeatable ones; a bare string is refused
+	tool := cmdcore.MCPTool(cmds.Who, whoEnv(d))
+	for args, want := range map[string]string{
+		`{"capability":["review"],"label":["team=blue"]}`:        "acme.demo.alice",
+		`{"capability":["review","test"],"label":["team=blue"]}`: "acme.demo.alice",
+		`{"role":"WRITER"}`: "acme.demo.bob",
+	} {
+		_, st, err := tool.CallStructured(context.Background(), json.RawMessage(args))
+		if err != nil {
+			t.Fatalf("%s: %v", args, err)
+		}
+		r := st.(cmds.WhoResult)
+		if len(r.Endpoints) != 1 || r.Endpoints[0].Address != want {
+			t.Errorf("%s: %+v", args, r.Endpoints)
+		}
+	}
+	for _, args := range []string{`{"capability":"review"}`, `{"label":"team=blue"}`} {
+		if _, _, err := tool.CallStructured(context.Background(), json.RawMessage(args)); err == nil || !strings.Contains(err.Error(), "must be an array of strings") {
+			t.Errorf("%s: %v", args, err)
+		}
+	}
+	// bad filters are usage errors
+	for _, argv := range [][]string{{"--role", " "}, {"--label", "="}, {"--label", "a="}, {"--label", "=b"}, {"--capability", " "}} {
+		if code, _, errs := runWho(d, cliframe.Global{}, argv...); code != 2 || !strings.Contains(errs, "hint: mash who --help") {
+			t.Errorf("%v: %d %q", argv, code, errs)
+		}
+	}
 }

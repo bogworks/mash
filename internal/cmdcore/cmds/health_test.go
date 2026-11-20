@@ -70,6 +70,12 @@ func noSessionEndpoint() *fakeHealth {
 		skip("creds", "config"), skip("server", "config"), skip("sign-in", "config"), skip("delivery", "config"), skip("refused", "config"))
 }
 
+// leaseReport is the report of a session that does not hold its endpoint: every row is fine.
+func leaseReport(lease, cause string) *fakeHealth {
+	return &fakeHealth{rep: cmds.HealthReport{Endpoint: "acme.demo.bob", Online: true, Lease: lease, LeaseCause: cause,
+		Checks: []cmds.HealthCheck{ok("config", ""), ok("creds", ""), ok("server", "tls://myserver:4222"), ok("sign-in", "")}}}
+}
+
 func skip(name, needs string) cmds.HealthCheck {
 	return cmds.HealthCheck{Name: name, State: cmds.CheckSkip, Detail: "needs the " + needs}
 }
@@ -112,6 +118,9 @@ func TestStatusMatchesSpec(t *testing.T) {
 			cmds.HealthCheck{Name: "sign-in", State: cmds.CheckFail, Detail: "the server refused these credentials", Reason: "the server refused its credentials"}),
 		"The server does not answer": report("acme.demo.bob", false, ok("config", ""), ok("creds", ""),
 			cmds.HealthCheck{Name: "server", State: cmds.CheckFail, Detail: "the server did not answer: tls://myserver:4222"}),
+		"In a session, when another session holds this endpoint": leaseReport(cmds.LeaseOther, ""),
+		"In a session that a newer session replaced":             leaseReport(cmds.LeaseLost, ""),
+		"In a session that could not take the endpoint":          leaseReport(cmds.LeaseFailed, "the server did not answer: tls://myserver:4222"),
 	}
 	for _, x := range meta["x-output"].([]any) {
 		oc := x.(map[string]any)
@@ -302,6 +311,15 @@ func TestDoctorMatchesSpec(t *testing.T) {
 				t.Errorf("%s: %q lacks %q", oc["case"], out, oc["text"])
 			}
 			continue
+		case "In a session that does not hold its endpoint", "In a session that a newer session replaced":
+			// the spec gives the delivery row alone
+			row := strings.TrimPrefix(oc["text"].(string), "delivery  FAIL  ")
+			_, out, _ := runDoctor(report("acme.demo.bob", false, ok("config", ""),
+				cmds.HealthCheck{Name: "delivery", State: cmds.CheckFail, Detail: row}), cliframe.Global{})
+			if !strings.Contains(out, oc["text"].(string)+"\n") {
+				t.Errorf("%s: %q lacks %q", oc["case"], out, oc["text"])
+			}
+			continue
 		case "The server's certificate is not trusted", "The server does not offer encryption":
 			// the spec gives the server row alone: the row of a report with that detail is word for word the spec's
 			row := strings.TrimPrefix(oc["text"].(string), "server    FAIL  ")
@@ -423,9 +441,10 @@ func TestDoctorSummaryAndHint(t *testing.T) {
 		{"two problems and warnings", []cmds.HealthCheck{fail(""), fail(""), warn, warn}, "2 problems, 2 warnings.", 1, ""},
 		{"mashctl fix", []cmds.HealthCheck{fail("mashctl endpoint reissue a.b.c")}, "1 problem.", 1, "ask whoever runs your mesh to run: mashctl endpoint reissue a.b.c"},
 		{"other fix", []cmds.HealthCheck{fail("chmod 600 /x")}, "1 problem.", 1, "chmod 600 /x"},
-		{"first fixable only", []cmds.HealthCheck{fail(""), fail("chmod 600 /x"), fail("mashctl x")}, "3 problems.", 1, "chmod 600 /x"},
+		{"the first problem only", []cmds.HealthCheck{fail(""), fail("chmod 600 /x"), fail("mashctl x")}, "3 problems.", 1, ""},
 		{"a skip is neither a problem nor a warning", []cmds.HealthCheck{fail("mashctl x"), skip("sign-in", "creds"), skip("refused", "creds")}, "1 problem.", 1, "ask whoever runs your mesh to run: mashctl x"},
-		{"a warn's fix is no hint", []cmds.HealthCheck{{Name: "refused", State: cmds.CheckWarn, Detail: "w", Fix: "mashctl y"}}, "1 warning.", 0, ""},
+		{"with no problem the first warning's fix", []cmds.HealthCheck{{Name: "refused", State: cmds.CheckWarn, Detail: "w", Fix: "mashctl y"}}, "1 warning.", 0, "ask whoever runs your mesh to run: mashctl y"},
+		{"a problem outranks an earlier warning", []cmds.HealthCheck{{Name: "refused", State: cmds.CheckWarn, Detail: "w", Fix: "mashctl y"}, fail("chmod 600 /x")}, "1 problem, 1 warning.", 1, "chmod 600 /x"},
 	} {
 		code, out, errs := runDoctor(report("a.b.c", false, tc.checks...), cliframe.Global{})
 		if !strings.HasSuffix(out, "\n\n"+tc.summary+"\n") || code != tc.code {
@@ -507,5 +526,25 @@ func TestDoctorDeliveryFailIsAProblem(t *testing.T) {
 	}
 	if strings.Contains(out, "spool") {
 		t.Errorf("the word spool in %q", out)
+	}
+}
+
+// A session that could not take its endpoint says why on the next line; the cause is in the JSON reason after a colon.
+func TestStatusAndDoctorCouldNotTake(t *testing.T) {
+	f := leaseReport(cmds.LeaseFailed, "the server did not answer: tls://myserver:4222")
+	_, out, _ := runStatus(f, cliframe.Global{JSON: true})
+	if out != `{"endpoint":"acme.demo.bob","ready":false,"online":false,"reason":"this session could not take this endpoint: the server did not answer: tls://myserver:4222"}`+"\n" {
+		t.Errorf("status json: %s", out)
+	}
+	for _, c := range []struct{ lease, reason string }{{cmds.LeaseOther, "another session holds this endpoint"}, {cmds.LeaseLost, "this session lost this endpoint to a newer one"}} {
+		_, out, _ = runStatus(leaseReport(c.lease, ""), cliframe.Global{JSON: true})
+		if !strings.Contains(out, `"ready":false,"online":false,"reason":"`+c.reason+`"`) {
+			t.Errorf("%s: %s", c.lease, out)
+		}
+	}
+	_, out, _ = runDoctor(&fakeHealth{rep: cmds.HealthReport{Endpoint: "acme.demo.bob", Checks: []cmds.HealthCheck{ok("config", ""),
+		{Name: "delivery", State: cmds.CheckFail, Detail: cmds.ReasonCouldNotTake + ": the server did not answer: tls://myserver:4222"}}}}, cliframe.Global{})
+	if !strings.Contains(out, "delivery  FAIL  this session could not take this endpoint:\n                the server did not answer: tls://myserver:4222\n") {
+		t.Errorf("doctor: %q", out)
 	}
 }

@@ -25,6 +25,17 @@ type healthSvc struct {
 	session bool
 	// mailHeld says, in a session, whether it holds mail because the folder it requires cannot be written. nil at a shell.
 	mailHeld func() bool
+	// lease says, in a session, whether it holds its endpoint now: "" when it does (or at a shell, where it is nil),
+	// else cmds.LeaseOther, LeaseLost or LeaseFailed with the cause of the last.
+	lease func() (state, cause string)
+}
+
+// leaseNow is the session's lease state, "" when it holds the endpoint or there is no session.
+func (h *healthSvc) leaseNow() (state, cause string) {
+	if !h.session || h.lease == nil {
+		return "", ""
+	}
+	return h.lease()
 }
 
 // credsPath is the creds file the endpoint signs in with: MASH_CREDS or "creds", else the endpoint's default; "" with no name.
@@ -215,6 +226,16 @@ func skipped(name, needs string) cmds.HealthCheck {
 // stored on this machine. It reads the session's own state (the same source status uses) and writes nothing. A held
 // session fails with the folder, shown with ~ for the home directory, after a colon.
 func (h *healthSvc) deliveryCheck() cmds.HealthCheck {
+	if lease, cause := h.leaseNow(); lease != "" {
+		d := map[string]string{cmds.LeaseOther: cmds.ReasonAnotherSession, cmds.LeaseLost: cmds.ReasonLostToNewer}[lease]
+		if lease == cmds.LeaseFailed {
+			d = cmds.ReasonCouldNotTake
+			if cause != "" {
+				d += ": " + cause
+			}
+		}
+		return cmds.HealthCheck{Name: cmds.CheckDelivery, State: cmds.CheckFail, Detail: d}
+	}
 	if h.mailHeld == nil || !h.mailHeld() {
 		return cmds.HealthCheck{Name: cmds.CheckDelivery, State: cmds.CheckOK}
 	}
@@ -282,6 +303,9 @@ func (h *healthSvc) Health(ctx context.Context) (cmds.HealthReport, error) {
 	}
 	rep.Checks = append(rep.Checks, h.refusedCheck()) // the count is kept on this machine: it shows with the server down
 	rep.MailHeld = h.mailHeld != nil && h.mailHeld()
+	if rep.Lease, rep.LeaseCause = h.leaseNow(); rep.Lease != "" {
+		rep.Online = false // this session does not hold the endpoint: its mail does not reach it
+	}
 	if err := parent.Err(); err != nil { // the caller gave up (an MCP call was cancelled): there is no report to give
 		return cmds.HealthReport{}, err
 	}
