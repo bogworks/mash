@@ -1,0 +1,1783 @@
+{
+ "$schema": "https://opencli.org/draft.json",
+ "opencli": "0.1",
+ "info": {
+  "title": "mashctl",
+  "version": "0.5.6-spec.1",
+  "description": "Speaks for the mesh, through a server: set it up, check it, make and remove endpoints."
+ },
+ "command": {
+  "name": "mashctl",
+  "description": "Administers a mash mesh through a server.",
+  "options": [
+   {
+    "name": "--server",
+    "description": "The server address. May be given more than once.",
+    "arguments": [
+     {
+      "name": "url",
+      "required": true,
+      "arity": {
+       "minimum": 1,
+       "maximum": 1
+      }
+     }
+    ],
+    "metadata": [
+     {
+      "name": "x-env",
+      "value": "MASH_SERVER (commas between several), or \"servers\""
+     }
+    ],
+    "recursive": true
+   },
+   {
+    "name": "--creds",
+    "description": "The administrator's creds file.",
+    "arguments": [
+     {
+      "name": "path",
+      "required": true,
+      "arity": {
+       "minimum": 1,
+       "maximum": 1
+      }
+     }
+    ],
+    "metadata": [
+     {
+      "name": "x-env",
+      "value": "MASH_ADMIN_CREDS, or \"admin_creds\""
+     }
+    ],
+    "recursive": true
+   },
+   {
+    "name": "--ca",
+    "description": "The certificate authority's certificate, when the server uses its own.",
+    "arguments": [
+     {
+      "name": "path",
+      "required": true,
+      "arity": {
+       "minimum": 1,
+       "maximum": 1
+      }
+     }
+    ],
+    "metadata": [
+     {
+      "name": "x-env",
+      "value": "MASH_CA, or \"ca\""
+     }
+    ],
+    "recursive": true
+   },
+   {
+    "name": "--config-dir",
+    "description": "The configuration folder. Default: ~/.config/mash.",
+    "arguments": [
+     {
+      "name": "path",
+      "required": true,
+      "arity": {
+       "minimum": 1,
+       "maximum": 1
+      }
+     }
+    ],
+    "metadata": [
+     {
+      "name": "x-env",
+      "value": "MASH_CONFIG_DIR"
+     }
+    ],
+    "recursive": true
+   },
+   {
+    "name": "--verbose",
+    "description": "After the usual output, print more about what was done, as 'label: value' lines.",
+    "aliases": [
+     "-v"
+    ],
+    "recursive": true
+   },
+   {
+    "name": "--json",
+    "description": "Print the result as JSON.",
+    "recursive": true
+   },
+   {
+    "name": "--no-color",
+    "description": "Never use color.",
+    "metadata": [
+     {
+      "name": "x-env",
+      "value": "NO_COLOR"
+     }
+    ],
+    "recursive": true
+   },
+   {
+    "name": "--help",
+    "description": "Show help for the command.",
+    "aliases": [
+     "-h"
+    ],
+    "recursive": true
+   }
+  ],
+  "commands": [
+   {
+    "name": "init",
+    "description": "Set mash up on a NATS server you already have, from a file.",
+    "options": [
+     {
+      "name": "--config",
+      "description": "The setup file. See Notes for its fields.",
+      "arguments": [
+       {
+        "name": "path",
+        "required": true,
+        "arity": {
+         "minimum": 1,
+         "maximum": 1
+        }
+       }
+      ]
+     },
+     {
+      "name": "--dry-run",
+      "description": "Print what would change, and change nothing."
+     }
+    ],
+    "examples": [
+     "mashctl init --config ~/mash-nats/mash-setup.yaml"
+    ],
+    "exitCodes": [
+     {
+      "code": 0,
+      "description": "It worked."
+     },
+     {
+      "code": 1,
+      "description": "It failed; one line on stderr says why."
+     },
+     {
+      "code": 2,
+      "description": "The command line was wrong; nothing was attempted."
+     }
+    ],
+    "metadata": [
+     {
+      "name": "x-group",
+      "value": "Mesh"
+     },
+     {
+      "name": "x-release",
+      "value": "0.5.6"
+     },
+     {
+      "name": "x-output",
+      "value": [
+       {
+        "case": "Set up",
+        "text": "Initialized mash on tls://localhost:4222 for owner acme",
+        "stream": "stdout",
+        "exit": 0
+       },
+       {
+        "case": "Already set up",
+        "text": "Already initialized on tls://localhost:4222; nothing changed",
+        "stream": "stdout",
+        "exit": 0
+       },
+       {
+        "case": "Cannot reach the server",
+        "text": "error: cannot reach tls://localhost:4222\nhint: mashctl doctor",
+        "stream": "stderr",
+        "exit": 1
+       }
+      ]
+     },
+     {
+      "name": "x-json",
+      "value": {
+       "server": [
+        "tls://localhost:4222"
+       ],
+       "owner": "acme",
+       "changed": true
+      }
+     },
+     {
+      "name": "x-mcp",
+      "value": {
+       "tool": null,
+       "why": "Administration. There are no MCP tools for mashctl."
+      }
+     },
+     {
+      "name": "x-today",
+      "value": "Replaces mashctl adopt, mashctl init and mashctl init --local. mashctl does not install or start NATS; the NATS quick-start script writes this file as its last step."
+     },
+     {
+      "name": "x-notes",
+      "value": "Safe to run again. THE SETUP FILE is YAML, and holds paths, never secrets: 'servers' (a list of addresses), 'ca' (the certificate authority's certificate, if the server uses its own), 'owner' (the first owner), 'admin_creds' (the administrator's creds file), 'system_creds' (the system account's creds file), 'operator_key' (the operator's signing key) and 'account_key' (the account's signing key). The last three are what cancelling a deleted endpoint's key needs. A hosted NATS where you do not hold the operator key, such as Synadia Cloud, is not supported by mashctl in 0.5.6; mash itself works against any conforming server."
+     }
+    ]
+   },
+   {
+    "name": "status",
+    "description": "Say in one line whether the server is working, and how many endpoints it has.",
+    "examples": [
+     "mashctl status"
+    ],
+    "exitCodes": [
+     {
+      "code": 0,
+      "description": "It worked."
+     },
+     {
+      "code": 1,
+      "description": "It failed; one line on stderr says why."
+     },
+     {
+      "code": 2,
+      "description": "The command line was wrong; nothing was attempted."
+     }
+    ],
+    "metadata": [
+     {
+      "name": "x-group",
+      "value": "Mesh"
+     },
+     {
+      "name": "x-release",
+      "value": "0.5.6"
+     },
+     {
+      "name": "x-output",
+      "value": [
+       {
+        "case": "Working",
+        "text": "tls://localhost:4222: ok, 3 endpoints, 1 online",
+        "stream": "stdout",
+        "exit": 0
+       },
+       {
+        "case": "Several servers: one line each",
+        "text": "tls://a.example:4222: ok, 3 endpoints, 1 online\ntls://b.example:4222: not ok: the server did not answer\nhint: mashctl doctor",
+        "stream": "stdout",
+        "exit": 1
+       },
+       {
+        "case": "Not working (the line on stdout, the hint on stderr)",
+        "text": "tls://localhost:4222: not ok: the server did not answer\nhint: mashctl doctor",
+        "stream": "stdout",
+        "exit": 1
+       }
+      ]
+     },
+     {
+      "name": "x-json",
+      "value": {
+       "server": "tls://localhost:4222",
+       "ok": true,
+       "endpoints": 3,
+       "online": 1,
+       "reason": null
+      }
+     },
+     {
+      "name": "x-mcp",
+      "value": {
+       "tool": null,
+       "why": "Administration. There are no MCP tools for mashctl."
+      }
+     },
+     {
+      "name": "x-today",
+      "value": "New."
+     }
+    ]
+   },
+   {
+    "name": "doctor",
+    "description": "Check the server, mash's storage on it and every endpoint's records, and say how to fix what is wrong. Changes nothing.",
+    "options": [
+     {
+      "name": "--strict",
+      "description": "Exit 1 on a warning too."
+     }
+    ],
+    "examples": [
+     "mashctl doctor"
+    ],
+    "exitCodes": [
+     {
+      "code": 0,
+      "description": "It worked."
+     },
+     {
+      "code": 1,
+      "description": "It failed; one line on stderr says why."
+     },
+     {
+      "code": 2,
+      "description": "The command line was wrong; nothing was attempted."
+     }
+    ],
+    "metadata": [
+     {
+      "name": "x-group",
+      "value": "Mesh"
+     },
+     {
+      "name": "x-release",
+      "value": "0.5.6"
+     },
+     {
+      "name": "x-output",
+      "value": [
+       {
+        "case": "All well",
+        "text": "config     ok\nserver     ok    tls://localhost:4222\nsign-in    ok\nstorage    ok\nendpoints  ok    3 records, 3 inboxes\nkeys       ok    every connected key was issued here\n\nNo problems.",
+        "stream": "stdout",
+        "exit": 0
+       },
+       {
+        "case": "A problem",
+        "text": "endpoints  FAIL  1 inbox has no endpoint record: acme.demo.dave\n\n1 problem.\nhint: mashctl endpoint show acme.demo.dave",
+        "stream": "stdout",
+        "exit": 1
+       }
+      ]
+     },
+     {
+      "name": "x-json",
+      "value": {
+       "problems": 0,
+       "warnings": 0,
+       "checks": [
+        {
+         "name": "server",
+         "state": "ok",
+         "detail": "tls://localhost:4222",
+         "fix": null
+        }
+       ]
+      }
+     },
+     {
+      "name": "x-mcp",
+      "value": {
+       "tool": null,
+       "why": "Administration. There are no MCP tools for mashctl."
+      }
+     },
+     {
+      "name": "x-today",
+      "value": "Takes over mashctl audit and mashctl issued check."
+     }
+    ]
+   },
+   {
+    "name": "limits",
+    "description": "Show or apply the storage limits.",
+    "commands": [
+     {
+      "name": "show",
+      "description": "Print the limits in force.",
+      "examples": [
+       "mashctl limits show"
+      ],
+      "exitCodes": [
+       {
+        "code": 0,
+        "description": "It worked."
+       },
+       {
+        "code": 1,
+        "description": "It failed; one line on stderr says why."
+       },
+       {
+        "code": 2,
+        "description": "The command line was wrong; nothing was attempted."
+       }
+      ],
+      "metadata": [
+       {
+        "name": "x-group",
+        "value": "Mesh"
+       },
+       {
+        "name": "x-release",
+        "value": "0.5.6"
+       },
+       {
+        "name": "x-output",
+        "value": [
+         {
+          "case": "Limits",
+          "text": "inbox size:  16 MiB\ninbox age:   30 days",
+          "stream": "stdout",
+          "exit": 0
+         }
+        ]
+       },
+       {
+        "name": "x-json",
+        "value": {
+         "inbox_bytes": 16777216,
+         "inbox_age": "720h"
+        }
+       },
+       {
+        "name": "x-mcp",
+        "value": {
+         "tool": null,
+         "why": "Administration. There are no MCP tools for mashctl."
+        }
+       },
+       {
+        "name": "x-today",
+        "value": "Today mashctl limits --show. The numbers shown are examples; the defaults are the code's."
+       },
+       {
+        "name": "x-notes",
+        "value": "These are the server's storage limits. When a session is woken for a backlog is an endpoint's own setting: see mash serve."
+       }
+      ]
+     },
+     {
+      "name": "apply",
+      "description": "Raise existing inboxes to the configured limits. Never lowers one.",
+      "arguments": [
+       {
+        "name": "prefix",
+        "required": false,
+        "description": "Only inboxes under this owner (acme), this owner and group (acme.demo), or the one endpoint with this address. Default: all.",
+        "arity": {
+         "minimum": 0,
+         "maximum": 1
+        }
+       }
+      ],
+      "options": [
+       {
+        "name": "--dry-run",
+        "description": "Print what would change, and change nothing."
+       }
+      ],
+      "examples": [
+       "mashctl limits apply",
+       "mashctl limits apply acme.demo"
+      ],
+      "exitCodes": [
+       {
+        "code": 0,
+        "description": "It worked."
+       },
+       {
+        "code": 1,
+        "description": "It failed; one line on stderr says why."
+       },
+       {
+        "code": 2,
+        "description": "The command line was wrong; nothing was attempted."
+       }
+      ],
+      "metadata": [
+       {
+        "name": "x-group",
+        "value": "Mesh"
+       },
+       {
+        "name": "x-release",
+        "value": "0.5.6"
+       },
+       {
+        "name": "x-output",
+        "value": [
+         {
+          "case": "Applied",
+          "text": "Raised 2 inboxes",
+          "stream": "stdout",
+          "exit": 0
+         },
+         {
+          "case": "Nothing to do",
+          "text": "Nothing to raise",
+          "stream": "stdout",
+          "exit": 0
+         }
+        ]
+       },
+       {
+        "name": "x-json",
+        "value": {
+         "raised": 2
+        }
+       },
+       {
+        "name": "x-mcp",
+        "value": {
+         "tool": null,
+         "why": "Administration. There are no MCP tools for mashctl."
+        }
+       },
+       {
+        "name": "x-today",
+        "value": "Today mashctl limits."
+       },
+       {
+        "name": "x-notes",
+        "value": "When it is needed. An inbox gets its limits when its endpoint is created. If you later raise the limits in config.json, inboxes that already exist keep the old ones until you run this. To be looked at again by 2026-11-27: whether a change to the limits should simply apply everywhere by itself."
+       }
+      ]
+     }
+    ],
+    "exitCodes": [
+     {
+      "code": 0,
+      "description": "It worked."
+     },
+     {
+      "code": 1,
+      "description": "It failed; one line on stderr says why."
+     },
+     {
+      "code": 2,
+      "description": "The command line was wrong; nothing was attempted."
+     }
+    ],
+    "metadata": [
+     {
+      "name": "x-group",
+      "value": "Mesh"
+     },
+     {
+      "name": "x-release",
+      "value": "0.5.6"
+     },
+     {
+      "name": "x-mcp",
+      "value": {
+       "tool": null,
+       "why": "Administration. There are no MCP tools for mashctl."
+      }
+     }
+    ]
+   },
+   {
+    "name": "endpoint",
+    "description": "Create, change and remove endpoints.",
+    "commands": [
+     {
+      "name": "create",
+      "description": "Create an endpoint and its credentials.",
+      "arguments": [
+       {
+        "name": "address",
+        "required": true,
+        "description": "The endpoint, as owner.group.name.",
+        "arity": {
+         "minimum": 1,
+         "maximum": 1
+        }
+       }
+      ],
+      "options": [
+       {
+        "name": "--out",
+        "description": "Write a join file for another machine and install nothing here.",
+        "arguments": [
+         {
+          "name": "path",
+          "required": true,
+          "arity": {
+           "minimum": 1,
+           "maximum": 1
+          }
+         }
+        ]
+       },
+       {
+        "name": "--public-key",
+        "description": "Sign this public key and make no seed. Needs --out. For an endpoint that made its own key with mash key create.",
+        "arguments": [
+         {
+          "name": "path",
+          "required": true,
+          "arity": {
+           "minimum": 1,
+           "maximum": 1
+          }
+         }
+        ]
+       },
+       {
+        "name": "--dry-run",
+        "description": "Print what would change, and change nothing."
+       }
+      ],
+      "examples": [
+       "mashctl endpoint create acme.demo.bob",
+       "mashctl endpoint create acme.demo.bob --out acme.demo.bob.join",
+       "mashctl endpoint create acme.demo.bob --public-key bob.seed.pub --out acme.demo.bob.join"
+      ],
+      "exitCodes": [
+       {
+        "code": 0,
+        "description": "It worked."
+       },
+       {
+        "code": 1,
+        "description": "It failed; one line on stderr says why."
+       },
+       {
+        "code": 2,
+        "description": "The command line was wrong; nothing was attempted."
+       }
+      ],
+      "metadata": [
+       {
+        "name": "x-group",
+        "value": "Endpoints"
+       },
+       {
+        "name": "x-release",
+        "value": "0.5.6"
+       },
+       {
+        "name": "x-output",
+        "value": [
+         {
+          "case": "Created, credentials installed on this machine",
+          "text": "Created endpoint acme.demo.bob",
+          "stream": "stdout",
+          "exit": 0
+         },
+         {
+          "case": "Created, with a join file",
+          "text": "Created endpoint acme.demo.bob\nJoin file: acme.demo.bob.join",
+          "stream": "stdout",
+          "exit": 0
+         },
+         {
+          "case": "With --dry-run",
+          "text": "Would create endpoint acme.demo.bob",
+          "stream": "stdout",
+          "exit": 0
+         },
+         {
+          "case": "--public-key without --out",
+          "text": "error: --public-key needs --out, the join file to write",
+          "stream": "stderr",
+          "exit": 2
+         },
+         {
+          "case": "The address exists",
+          "text": "error: acme.demo.bob already exists",
+          "stream": "stderr",
+          "exit": 1
+         },
+         {
+          "case": "The address was deleted before",
+          "text": "error: acme.demo.bob was deleted and its address cannot be used again",
+          "stream": "stderr",
+          "exit": 1
+         }
+        ]
+       },
+       {
+        "name": "x-json",
+        "value": {
+         "address": "acme.demo.bob",
+         "installed_here": true,
+         "join_file": null
+        }
+       },
+       {
+        "name": "x-mcp",
+        "value": {
+         "tool": null,
+         "why": "Administration. There are no MCP tools for mashctl."
+        }
+       },
+       {
+        "name": "x-today",
+        "value": "Today this takes --make-key or --public-key, accepts three address forms, and prints about ten lines. provision does the same job and is removed."
+       },
+       {
+        "name": "x-notes",
+        "value": "With no option, the endpoint can be used on this machine at once: what a solo developer wants. --out is for another machine. --public-key is for when the seed must never leave that machine."
+       }
+      ]
+     },
+     {
+      "name": "delete",
+      "description": "Delete an endpoint, its inbox and its credentials. The address can never be used again.",
+      "arguments": [
+       {
+        "name": "address",
+        "required": true,
+        "description": "The endpoint, as owner.group.name.",
+        "arity": {
+         "minimum": 1,
+         "maximum": 1
+        }
+       }
+      ],
+      "options": [
+       {
+        "name": "--yes",
+        "description": "Do not ask."
+       },
+       {
+        "name": "--dry-run",
+        "description": "Print what would change, and change nothing."
+       }
+      ],
+      "examples": [
+       "mashctl endpoint delete acme.demo.bob"
+      ],
+      "exitCodes": [
+       {
+        "code": 0,
+        "description": "It worked."
+       },
+       {
+        "code": 1,
+        "description": "It failed; one line on stderr says why."
+       },
+       {
+        "code": 2,
+        "description": "The command line was wrong; nothing was attempted."
+       }
+      ],
+      "metadata": [
+       {
+        "name": "x-group",
+        "value": "Endpoints"
+       },
+       {
+        "name": "x-release",
+        "value": "0.5.6"
+       },
+       {
+        "name": "x-output",
+        "value": [
+         {
+          "case": "Asked, then deleted",
+          "text": "This deletes acme.demo.bob and the 1 message in its inbox. It cannot be undone.\nType the address to confirm: acme.demo.bob\nDeleted endpoint acme.demo.bob",
+          "stream": "stdout",
+          "exit": 0
+         },
+         {
+          "case": "With --yes",
+          "text": "Deleted endpoint acme.demo.bob",
+          "stream": "stdout",
+          "exit": 0
+         },
+         {
+          "case": "Wrong text typed",
+          "text": "error: that was not the address; nothing was deleted",
+          "stream": "stderr",
+          "exit": 1
+         },
+         {
+          "case": "No terminal and no --yes",
+          "text": "error: deleting needs a terminal to confirm, or --yes",
+          "stream": "stderr",
+          "exit": 2
+         },
+         {
+          "case": "Deleted here but not yet cancelled on every server",
+          "text": "error: deleted acme.demo.bob, but 1 of 2 servers has not cancelled its key\nhint: mashctl endpoint delete acme.demo.bob",
+          "stream": "stderr",
+          "exit": 1
+         }
+        ]
+       },
+       {
+        "name": "x-json",
+        "value": {
+         "address": "acme.demo.bob",
+         "deleted": true,
+         "messages_deleted": 1
+        }
+       },
+       {
+        "name": "x-mcp",
+        "value": {
+         "tool": null,
+         "why": "Administration. There are no MCP tools for mashctl."
+        }
+       },
+       {
+        "name": "x-today",
+        "value": "Today also reachable as deprovision, which is removed. Typing the name to confirm is what gh repo delete does."
+       }
+      ]
+     },
+     {
+      "name": "list",
+      "description": "List endpoints.",
+      "arguments": [
+       {
+        "name": "prefix",
+        "required": false,
+        "description": "Only endpoints under this owner (acme) or this owner and group (acme.demo). The same rule as mash who.",
+        "arity": {
+         "minimum": 0,
+         "maximum": 1
+        }
+       }
+      ],
+      "options": [
+       {
+        "name": "--wide",
+        "description": "More columns: created, messages waiting and labels. May pass 80 columns."
+       }
+      ],
+      "examples": [
+       "mashctl endpoint list",
+       "mashctl endpoint list acme.demo"
+      ],
+      "exitCodes": [
+       {
+        "code": 0,
+        "description": "It worked."
+       },
+       {
+        "code": 1,
+        "description": "It failed; one line on stderr says why."
+       },
+       {
+        "code": 2,
+        "description": "The command line was wrong; nothing was attempted."
+       }
+      ],
+      "metadata": [
+       {
+        "name": "x-group",
+        "value": "Endpoints"
+       },
+       {
+        "name": "x-release",
+        "value": "0.5.6"
+       },
+       {
+        "name": "x-output",
+        "value": [
+         {
+          "case": "Endpoints",
+          "text": "OWNER  GROUP  NAME   STATE\nacme   demo   alice  online\n              bob    offline\n       ops    carol  suspended",
+          "stream": "stdout",
+          "exit": 0
+         },
+         {
+          "case": "With --wide",
+          "text": "OWNER  GROUP  NAME   STATE      CREATED           WAITING  LABELS\nacme   demo   alice  online     2026-11-19 09:40  0        team=blue\n              bob    offline    2026-11-19 09:41  1        -\n       ops    carol  suspended  2026-11-18 16:02  0        -",
+          "stream": "stdout",
+          "exit": 0
+         },
+         {
+          "case": "None",
+          "text": "No endpoints.",
+          "stream": "stdout",
+          "exit": 0
+         }
+        ]
+       },
+       {
+        "name": "x-json",
+        "value": {
+         "endpoints": [
+          {
+           "address": "acme.demo.alice",
+           "owner": "acme",
+           "group": "demo",
+           "name": "alice",
+           "state": "online"
+          }
+         ]
+        }
+       },
+       {
+        "name": "x-mcp",
+        "value": {
+         "tool": null,
+         "why": "Administration. There are no MCP tools for mashctl."
+        }
+       },
+       {
+        "name": "x-today",
+        "value": "Today also reachable as mashctl list, which is removed."
+       },
+       {
+        "name": "x-notes",
+        "value": "A repeated owner or group is left blank, so the eye finds where one ends."
+       }
+      ]
+     },
+     {
+      "name": "show",
+      "description": "Show one endpoint.",
+      "arguments": [
+       {
+        "name": "address",
+        "required": true,
+        "description": "The endpoint, as owner.group.name.",
+        "arity": {
+         "minimum": 1,
+         "maximum": 1
+        }
+       }
+      ],
+      "examples": [
+       "mashctl endpoint show acme.demo.bob"
+      ],
+      "exitCodes": [
+       {
+        "code": 0,
+        "description": "It worked."
+       },
+       {
+        "code": 1,
+        "description": "It failed; one line on stderr says why."
+       },
+       {
+        "code": 2,
+        "description": "The command line was wrong; nothing was attempted."
+       }
+      ],
+      "metadata": [
+       {
+        "name": "x-group",
+        "value": "Endpoints"
+       },
+       {
+        "name": "x-release",
+        "value": "0.5.6"
+       },
+       {
+        "name": "x-output",
+        "value": [
+         {
+          "case": "An endpoint",
+          "text": "address:    acme.demo.bob\nstate:      offline\ncreated:    2026-11-19 09:40 UTC\nwaiting:    1 message\nlabels:     team=blue\npublic key: UDXU4RCSV3GJRXWQ4PNDKYEL7ZBSMSGGTJYNDQGHFM4QWHBRD3ZTQ4LX",
+          "stream": "stdout",
+          "exit": 0
+         }
+        ]
+       },
+       {
+        "name": "x-json",
+        "value": {
+         "address": "acme.demo.bob",
+         "state": "offline",
+         "created": "2026-11-19T09:40:00Z",
+         "waiting": 1,
+         "labels": {
+          "team": "blue"
+         },
+         "public_key": "UDXU4RCSV3GJRXWQ4PNDKYEL7ZBSMSGGTJYNDQGHFM4QWHBRD3ZTQ4LX"
+        }
+       },
+       {
+        "name": "x-mcp",
+        "value": {
+         "tool": null,
+         "why": "Administration. There are no MCP tools for mashctl."
+        }
+       },
+       {
+        "name": "x-today",
+        "value": "Takes over mashctl suspended and mashctl issued list for one endpoint."
+       }
+      ]
+     },
+     {
+      "name": "set",
+      "description": "Set a value on an endpoint's record.",
+      "arguments": [
+       {
+        "name": "address",
+        "required": true,
+        "description": "The endpoint, as owner.group.name.",
+        "arity": {
+         "minimum": 1,
+         "maximum": 1
+        }
+       },
+       {
+        "name": "key=value",
+        "required": true,
+        "description": "One or more. Keys: role, description, host, capability, label.<name>.",
+        "arity": {
+         "minimum": 1
+        }
+       }
+      ],
+      "options": [
+       {
+        "name": "--dry-run",
+        "description": "Print what would change, and change nothing."
+       }
+      ],
+      "examples": [
+       "mashctl endpoint set acme.demo.bob role=reviewer label.team=blue"
+      ],
+      "exitCodes": [
+       {
+        "code": 0,
+        "description": "It worked."
+       },
+       {
+        "code": 1,
+        "description": "It failed; one line on stderr says why."
+       },
+       {
+        "code": 2,
+        "description": "The command line was wrong; nothing was attempted."
+       }
+      ],
+      "metadata": [
+       {
+        "name": "x-group",
+        "value": "Endpoints"
+       },
+       {
+        "name": "x-release",
+        "value": "0.5.6"
+       },
+       {
+        "name": "x-output",
+        "value": [
+         {
+          "case": "Updated",
+          "text": "Updated endpoint acme.demo.bob",
+          "stream": "stdout",
+          "exit": 0
+         }
+        ]
+       },
+       {
+        "name": "x-json",
+        "value": {
+         "address": "acme.demo.bob",
+         "set": {
+          "role": "reviewer"
+         }
+        }
+       },
+       {
+        "name": "x-mcp",
+        "value": {
+         "tool": null,
+         "why": "Administration. There are no MCP tools for mashctl."
+        }
+       },
+       {
+        "name": "x-today",
+        "value": "Replaces set-meta and label."
+       }
+      ]
+     },
+     {
+      "name": "unset",
+      "description": "Remove a value from an endpoint's record.",
+      "arguments": [
+       {
+        "name": "address",
+        "required": true,
+        "description": "The endpoint, as owner.group.name.",
+        "arity": {
+         "minimum": 1,
+         "maximum": 1
+        }
+       },
+       {
+        "name": "key",
+        "required": true,
+        "description": "One or more keys.",
+        "arity": {
+         "minimum": 1
+        }
+       }
+      ],
+      "examples": [
+       "mashctl endpoint unset acme.demo.bob label.team"
+      ],
+      "exitCodes": [
+       {
+        "code": 0,
+        "description": "It worked."
+       },
+       {
+        "code": 1,
+        "description": "It failed; one line on stderr says why."
+       },
+       {
+        "code": 2,
+        "description": "The command line was wrong; nothing was attempted."
+       }
+      ],
+      "metadata": [
+       {
+        "name": "x-group",
+        "value": "Endpoints"
+       },
+       {
+        "name": "x-release",
+        "value": "0.5.6"
+       },
+       {
+        "name": "x-output",
+        "value": [
+         {
+          "case": "Updated",
+          "text": "Updated endpoint acme.demo.bob",
+          "stream": "stdout",
+          "exit": 0
+         }
+        ]
+       },
+       {
+        "name": "x-json",
+        "value": {
+         "address": "acme.demo.bob",
+         "unset": [
+          "label.team"
+         ]
+        }
+       },
+       {
+        "name": "x-mcp",
+        "value": {
+         "tool": null,
+         "why": "Administration. There are no MCP tools for mashctl."
+        }
+       },
+       {
+        "name": "x-today",
+        "value": "Replaces set-meta with a '-' value, and unlabel."
+       }
+      ]
+     },
+     {
+      "name": "suspend",
+      "description": "Refuse new mail to an endpoint. Its stored mail and its credentials are untouched.",
+      "arguments": [
+       {
+        "name": "address",
+        "required": true,
+        "description": "The endpoint, as owner.group.name.",
+        "arity": {
+         "minimum": 1,
+         "maximum": 1
+        }
+       }
+      ],
+      "examples": [
+       "mashctl endpoint suspend acme.demo.bob"
+      ],
+      "exitCodes": [
+       {
+        "code": 0,
+        "description": "It worked."
+       },
+       {
+        "code": 1,
+        "description": "It failed; one line on stderr says why."
+       },
+       {
+        "code": 2,
+        "description": "The command line was wrong; nothing was attempted."
+       }
+      ],
+      "metadata": [
+       {
+        "name": "x-group",
+        "value": "Endpoints"
+       },
+       {
+        "name": "x-release",
+        "value": "0.5.6"
+       },
+       {
+        "name": "x-output",
+        "value": [
+         {
+          "case": "Suspended",
+          "text": "Suspended endpoint acme.demo.bob",
+          "stream": "stdout",
+          "exit": 0
+         }
+        ]
+       },
+       {
+        "name": "x-json",
+        "value": {
+         "address": "acme.demo.bob",
+         "state": "suspended"
+        }
+       },
+       {
+        "name": "x-mcp",
+        "value": {
+         "tool": null,
+         "why": "Administration. There are no MCP tools for mashctl."
+        }
+       },
+       {
+        "name": "x-today",
+        "value": "Today a top-level command, mashctl suspend."
+       }
+      ]
+     },
+     {
+      "name": "resume",
+      "description": "Undo suspend.",
+      "arguments": [
+       {
+        "name": "address",
+        "required": true,
+        "description": "The endpoint, as owner.group.name.",
+        "arity": {
+         "minimum": 1,
+         "maximum": 1
+        }
+       }
+      ],
+      "examples": [
+       "mashctl endpoint resume acme.demo.bob"
+      ],
+      "exitCodes": [
+       {
+        "code": 0,
+        "description": "It worked."
+       },
+       {
+        "code": 1,
+        "description": "It failed; one line on stderr says why."
+       },
+       {
+        "code": 2,
+        "description": "The command line was wrong; nothing was attempted."
+       }
+      ],
+      "metadata": [
+       {
+        "name": "x-group",
+        "value": "Endpoints"
+       },
+       {
+        "name": "x-release",
+        "value": "0.5.6"
+       },
+       {
+        "name": "x-output",
+        "value": [
+         {
+          "case": "Resumed",
+          "text": "Resumed endpoint acme.demo.bob",
+          "stream": "stdout",
+          "exit": 0
+         }
+        ]
+       },
+       {
+        "name": "x-json",
+        "value": {
+         "address": "acme.demo.bob",
+         "state": "offline"
+        }
+       },
+       {
+        "name": "x-mcp",
+        "value": {
+         "tool": null,
+         "why": "Administration. There are no MCP tools for mashctl."
+        }
+       },
+       {
+        "name": "x-today",
+        "value": "Today a top-level command, mashctl resume."
+       }
+      ]
+     },
+     {
+      "name": "reissue",
+      "description": "Give an endpoint new credentials and cancel the old ones.",
+      "arguments": [
+       {
+        "name": "address",
+        "required": true,
+        "description": "The endpoint, as owner.group.name.",
+        "arity": {
+         "minimum": 1,
+         "maximum": 1
+        }
+       }
+      ],
+      "options": [
+       {
+        "name": "--out",
+        "description": "Write a join file for another machine.",
+        "arguments": [
+         {
+          "name": "path",
+          "required": true,
+          "arity": {
+           "minimum": 1,
+           "maximum": 1
+          }
+         }
+        ]
+       },
+       {
+        "name": "--public-key",
+        "description": "Sign this public key. Needs --out.",
+        "arguments": [
+         {
+          "name": "path",
+          "required": true,
+          "arity": {
+           "minimum": 1,
+           "maximum": 1
+          }
+         }
+        ]
+       },
+       {
+        "name": "--dry-run",
+        "description": "Print what would change, and change nothing."
+       }
+      ],
+      "examples": [
+       "mashctl endpoint reissue acme.demo.bob --out acme.demo.bob.join"
+      ],
+      "exitCodes": [
+       {
+        "code": 0,
+        "description": "It worked."
+       },
+       {
+        "code": 1,
+        "description": "It failed; one line on stderr says why."
+       },
+       {
+        "code": 2,
+        "description": "The command line was wrong; nothing was attempted."
+       }
+      ],
+      "metadata": [
+       {
+        "name": "x-group",
+        "value": "Endpoints"
+       },
+       {
+        "name": "x-release",
+        "value": "0.5.6"
+       },
+       {
+        "name": "x-output",
+        "value": [
+         {
+          "case": "Reissued",
+          "text": "Reissued credentials for acme.demo.bob\nJoin file: acme.demo.bob.join",
+          "stream": "stdout",
+          "exit": 0
+         }
+        ]
+       },
+       {
+        "name": "x-json",
+        "value": {
+         "address": "acme.demo.bob",
+         "join_file": "acme.demo.bob.join"
+        }
+       },
+       {
+        "name": "x-mcp",
+        "value": {
+         "tool": null,
+         "why": "Administration. There are no MCP tools for mashctl."
+        }
+       },
+       {
+        "name": "x-today",
+        "value": "As built, with the same options as create."
+       }
+      ]
+     },
+     {
+      "name": "inbox",
+      "description": "List what is in an endpoint's inbox, without showing any message's text.",
+      "arguments": [
+       {
+        "name": "address",
+        "required": true,
+        "description": "The endpoint, as owner.group.name.",
+        "arity": {
+         "minimum": 1,
+         "maximum": 1
+        }
+       }
+      ],
+      "options": [
+       {
+        "name": "--limit",
+        "description": "How many, newest last. Default 20.",
+        "arguments": [
+         {
+          "name": "n",
+          "required": true,
+          "arity": {
+           "minimum": 1,
+           "maximum": 1
+          }
+         }
+        ]
+       }
+      ],
+      "examples": [
+       "mashctl endpoint inbox acme.demo.bob"
+      ],
+      "exitCodes": [
+       {
+        "code": 0,
+        "description": "It worked."
+       },
+       {
+        "code": 1,
+        "description": "It failed; one line on stderr says why."
+       },
+       {
+        "code": 2,
+        "description": "The command line was wrong; nothing was attempted."
+       }
+      ],
+      "metadata": [
+       {
+        "name": "x-group",
+        "value": "Endpoints"
+       },
+       {
+        "name": "x-release",
+        "value": "0.5.6"
+       },
+       {
+        "name": "x-output",
+        "value": [
+         {
+          "case": "Messages",
+          "text": "1 message for acme.demo.bob, 1 not delivered.\n\nNUMBER  FROM   WHEN    DELIVERED  KIND  SIZE\n7       alice  2m ago  no         task  48 B",
+          "stream": "stdout",
+          "exit": 0
+         }
+        ]
+       },
+       {
+        "name": "x-json",
+        "value": {
+         "address": "acme.demo.bob",
+         "total": 1,
+         "undelivered": 1,
+         "messages": [
+          {
+           "number": 7,
+           "from": "acme.demo.alice",
+           "delivered": false,
+           "kind": "task",
+           "size": 48
+          }
+         ]
+        }
+       },
+       {
+        "name": "x-mcp",
+        "value": {
+         "tool": null,
+         "why": "Administration. There are no MCP tools for mashctl."
+        }
+       },
+       {
+        "name": "x-today",
+        "value": "Today mashctl inbox inspect."
+       }
+      ]
+     },
+     {
+      "name": "permissions",
+      "description": "Print the NATS permissions an endpoint's user needs, for someone who runs their own NATS.",
+      "arguments": [
+       {
+        "name": "address",
+        "required": true,
+        "description": "The endpoint, as owner.group.name.",
+        "arity": {
+         "minimum": 1,
+         "maximum": 1
+        }
+       }
+      ],
+      "examples": [
+       "mashctl endpoint permissions acme.demo.bob"
+      ],
+      "exitCodes": [
+       {
+        "code": 0,
+        "description": "It worked."
+       },
+       {
+        "code": 1,
+        "description": "It failed; one line on stderr says why."
+       },
+       {
+        "code": 2,
+        "description": "The command line was wrong; nothing was attempted."
+       }
+      ],
+      "metadata": [
+       {
+        "name": "x-group",
+        "value": "Endpoints"
+       },
+       {
+        "name": "x-release",
+        "value": "0.5.6"
+       },
+       {
+        "name": "x-output",
+        "value": [
+         {
+          "case": "Permissions",
+          "text": "(the same JSON as --json: this command prints data,\n for pasting into a NATS configuration)",
+          "stream": "stdout",
+          "exit": 0
+         }
+        ]
+       },
+       {
+        "name": "x-json",
+        "value": {
+         "publish": {
+          "allow": [
+           "agents.mail.acme.>",
+           "_INBOX.acme.>"
+          ]
+         },
+         "subscribe": {
+          "allow": [
+           "_INBOX.acme.acme_demo_bob.>"
+          ]
+         }
+        }
+       },
+       {
+        "name": "x-mcp",
+        "value": {
+         "tool": null,
+         "why": "Administration. There are no MCP tools for mashctl."
+        }
+       },
+       {
+        "name": "x-today",
+        "value": "Today a top-level command, mashctl permissions."
+       },
+       {
+        "name": "x-notes",
+        "value": "The exact subjects are the code's; the example shows the shape, which is NATS's own permissions object."
+       }
+      ]
+     }
+    ],
+    "exitCodes": [
+     {
+      "code": 0,
+      "description": "It worked."
+     },
+     {
+      "code": 1,
+      "description": "It failed; one line on stderr says why."
+     },
+     {
+      "code": 2,
+      "description": "The command line was wrong; nothing was attempted."
+     }
+    ],
+    "metadata": [
+     {
+      "name": "x-group",
+      "value": "Endpoints"
+     },
+     {
+      "name": "x-release",
+      "value": "0.5.6"
+     },
+     {
+      "name": "x-mcp",
+      "value": {
+       "tool": null,
+       "why": "Administration. There are no MCP tools for mashctl."
+      }
+     }
+    ]
+   },
+   {
+    "name": "owner",
+    "description": "Create, list and remove owners.",
+    "exitCodes": [
+     {
+      "code": 0,
+      "description": "It worked."
+     },
+     {
+      "code": 1,
+      "description": "It failed; one line on stderr says why."
+     },
+     {
+      "code": 2,
+      "description": "The command line was wrong; nothing was attempted."
+     }
+    ],
+    "metadata": [
+     {
+      "name": "x-group",
+      "value": "Owners"
+     },
+     {
+      "name": "x-release",
+      "value": "0.6.0"
+     },
+     {
+      "name": "x-output",
+      "value": [
+       {
+        "case": "Planned",
+        "text": "(mashctl owner create, list and delete)",
+        "stream": "stdout",
+        "exit": 0
+       }
+      ]
+     },
+     {
+      "name": "x-mcp",
+      "value": {
+       "tool": null,
+       "why": "Administration. There are no MCP tools for mashctl."
+      }
+     },
+     {
+      "name": "x-today",
+      "value": "Does not exist. In 0.5.6 a mesh has the one owner named at mashctl init; nothing in the grammar assumes one."
+     }
+    ]
+   },
+   {
+    "name": "version",
+    "description": "Print the version.",
+    "examples": [
+     "mashctl version"
+    ],
+    "exitCodes": [
+     {
+      "code": 0,
+      "description": "It worked."
+     },
+     {
+      "code": 1,
+      "description": "It failed; one line on stderr says why."
+     },
+     {
+      "code": 2,
+      "description": "The command line was wrong; nothing was attempted."
+     }
+    ],
+    "metadata": [
+     {
+      "name": "x-group",
+      "value": "Mesh"
+     },
+     {
+      "name": "x-release",
+      "value": "0.5.6"
+     },
+     {
+      "name": "x-output",
+      "value": [
+       {
+        "case": "Version",
+        "text": "mashctl v0.5.6 (3f9a41c)",
+        "stream": "stdout",
+        "exit": 0
+       }
+      ]
+     },
+     {
+      "name": "x-json",
+      "value": {
+       "version": "0.5.6",
+       "commit": "3f9a41c"
+      }
+     },
+     {
+      "name": "x-mcp",
+      "value": {
+       "tool": null,
+       "why": "Administration. There are no MCP tools for mashctl."
+      }
+     },
+     {
+      "name": "x-today",
+      "value": "Today prints no commit."
+     }
+    ]
+   }
+  ],
+  "metadata": [
+   {
+    "name": "x-removed",
+    "value": [
+     {
+      "what": "adopt, init --local, init --start",
+      "why": "One setup command: mashctl init --config. mashctl does not install or start NATS."
+     },
+     {
+      "what": "provision, deprovision, list",
+      "why": "Duplicates of endpoint create, endpoint delete and endpoint list."
+     },
+     {
+      "what": "set-meta, label, unlabel",
+      "why": "Replaced by endpoint set and endpoint unset."
+     },
+     {
+      "what": "suspend, resume, permissions (top level)",
+      "why": "Moved under endpoint, where every other endpoint command is."
+     },
+     {
+      "what": "suspended",
+      "why": "endpoint show says whether an endpoint is suspended."
+     },
+     {
+      "what": "audit, issued list, issued check",
+      "why": "The checks are mashctl doctor; the records are in endpoint show."
+     },
+     {
+      "what": "inbox inspect",
+      "why": "Now endpoint inbox."
+     },
+     {
+      "what": "add, reissue, retire (messages only)",
+      "why": "Left over from 0.5.5's renames; nobody uses 0.5.5."
+     }
+    ]
+   }
+  ]
+ }
+}
