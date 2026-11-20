@@ -40,6 +40,41 @@ func (s *statusSource) mailHeld() bool {
 	return failing
 }
 
+// lease is the session's own lease state for status and doctor: "" when it holds its endpoint (or has not tried
+// yet, or hands over from an earlier serve of its own session, which is not a loss), cmds.LeaseOther while another
+// session holds the endpoint, cmds.LeaseLost once a newer session took it, and cmds.LeaseFailed, with the cause, when
+// serve could not take it (the server did not answer, or refused its credentials).
+func (s *statusSource) lease() (state, cause string) {
+	if s.state == nil {
+		return "", ""
+	}
+	st := s.state.Load()
+	switch {
+	case st == nil:
+	case st.lost != nil || st.superseded != nil:
+		return cmds.LeaseLost, ""
+	case st.waiting != nil && !st.waiting.SameSession:
+		return cmds.LeaseOther, ""
+	case st.retrying != nil:
+		return cmds.LeaseFailed, leaseCause(s.cfg, st.retrying)
+	case st.failed != nil:
+		return cmds.LeaseFailed, leaseCause(s.cfg, st.failed)
+	}
+	return "", ""
+}
+
+// leaseCause words why a serve could not take its endpoint, as the sign-in row words a failed sign-in.
+func leaseCause(cfg config.Config, err error) string {
+	switch msg := err.Error(); {
+	case endpoint.IsAuthFailure(err):
+		return "the server refused its credentials"
+	case transient(err) || strings.Contains(msg, "no servers available"):
+		return "the server did not answer: " + config.RedactURL(cfg.URL)
+	default:
+		return redactText(strings.TrimPrefix(msg, "mash: "))
+	}
+}
+
 // sessionSvc is the service the tools every serve mode has run against: the build (version) and the endpoint's checks
 // (status and doctor), neither of which needs an endpoint start to have worked. The configuration is read from the
 // source at each call, so a failure serve found after it began (a policy file it cannot read) is in the answer.
@@ -49,7 +84,7 @@ type sessionSvc struct {
 }
 
 func (s sessionSvc) Health(ctx context.Context) (cmds.HealthReport, error) {
-	return (&healthSvc{cfg: s.src.cfg, cfgErr: s.src.cfgErr, session: true, mailHeld: s.src.mailHeld}).Health(ctx)
+	return (&healthSvc{cfg: s.src.cfg, cfgErr: s.src.cfgErr, session: true, mailHeld: s.src.mailHeld, lease: s.src.lease}).Health(ctx)
 }
 
 // infoTools are the tools every serve mode has, because they need no endpoint: version, status and doctor. They are

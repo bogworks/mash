@@ -31,6 +31,35 @@ const SessionEndpointFix = cmdcore.SessionNoEndpointHint
 // the folder it requires for arriving mail cannot be written.
 const ReasonMailHeld = "mail is held: its folder cannot be written"
 
+// The ways a session can fail to hold its endpoint (HealthReport.Lease), and the words for them. Asked inside a session,
+// status and doctor report on that session itself: "ready, online" means this session holds the endpoint.
+const (
+	LeaseOther  = "other"  // another session holds the endpoint
+	LeaseLost   = "lost"   // a newer session took it from this one
+	LeaseFailed = "failed" // this session could not take it; HealthReport.LeaseCause says why
+
+	ReasonAnotherSession = "another session holds this endpoint"
+	ReasonLostToNewer    = "this session lost this endpoint to a newer one"
+	ReasonCouldNotTake   = "this session could not take this endpoint"
+)
+
+// leaseReason is the words for a session that does not hold its endpoint ("" when it does): the cause of one that
+// could not take it follows after ": ".
+func leaseReason(lease, cause string) string {
+	switch lease {
+	case LeaseOther:
+		return ReasonAnotherSession
+	case LeaseLost:
+		return ReasonLostToNewer
+	case LeaseFailed:
+		if cause == "" {
+			return ReasonCouldNotTake
+		}
+		return ReasonCouldNotTake + ": " + cause
+	}
+	return ""
+}
+
 // ErrNoEndpointInstalled is what Health returns at a shell where no endpoint is chosen and none is installed. The
 // command turns it into the usage error "no endpoint is installed here" (hint "mash join <file>"), exit 2.
 var ErrNoEndpointInstalled = errors.New(cmdcore.NoEndpoint(cmdcore.NoneInstalled, "", nil).Msg)
@@ -67,6 +96,10 @@ type HealthReport struct {
 	// MailHeld is true in a session that holds mail because the folder it requires (MASH_SPOOL_REQUIRED) cannot be
 	// written: the rows are fine and mail does not work. Status says so; doctor shows it as the delivery row.
 	MailHeld bool
+	// Lease is "" at a shell and in a session that holds its endpoint; otherwise LeaseOther, LeaseLost or LeaseFailed
+	// (LeaseCause says why, for the last). A session that does not hold its endpoint is not online and not ready.
+	Lease      string
+	LeaseCause string
 }
 
 // Health is the service status and doctor need from Env.Svc. It returns config.SeveralEndpointsError (wrapped or not)
@@ -134,6 +167,10 @@ func (r StatusResult) Text(cmdcore.Opts) string {
 		if r.Reason != nil {
 			reason = config.Clean(*r.Reason)
 		}
+		// the cause of a session that could not take its endpoint goes on the next line, indented
+		if cause, ok := strings.CutPrefix(reason, ReasonCouldNotTake+": "); ok {
+			reason = ReasonCouldNotTake + ":\n  " + cause
+		}
 		return name + ": not ready: " + reason
 	}
 	if r.Online {
@@ -193,6 +230,10 @@ var Status = cmdcore.Command[StatusParams, StatusResult]{
 				break
 			}
 		}
+		// a row that fails is the first thing to mend and is what both doors say; the session's own state comes next
+		if reason := leaseReason(rep.Lease, rep.LeaseCause); r.Ready && reason != "" {
+			r.Ready, r.Reason = false, &reason
+		}
 		if r.Ready && rep.MailHeld {
 			reason := ReasonMailHeld
 			r.Ready, r.Reason = false, &reason
@@ -242,8 +283,10 @@ func (r DoctorResult) Text(cmdcore.Opts) string {
 			detail := config.Clean(*c.Detail)
 			// a held folder's path goes on the next line, under the detail column
 			if c.Name == CheckDelivery && c.State == CheckFail {
-				if path, ok := strings.CutPrefix(detail, ReasonMailHeld+": "); ok {
-					detail, extra = ReasonMailHeld+":", "\n"+strings.Repeat(" ", 16)+path
+				for _, head := range []string{ReasonMailHeld, ReasonCouldNotTake} {
+					if path, ok := strings.CutPrefix(detail, head+": "); ok {
+						detail, extra = head+":", "\n"+strings.Repeat(" ", 16)+path
+					}
 				}
 			}
 			line += detail

@@ -99,6 +99,9 @@ type sessionState struct {
 	// superseded: a newer mash serve of the same session took the lease from this one; it names that serve. This
 	// server is inactive: it answers the tools with that and exits when its client closes it or its parent changes.
 	superseded *endpoint.LeaseLostError
+	// lost: another session took the lease from this one after it started. Serve ends right after; status and doctor
+	// say so in the meantime.
+	lost *endpoint.LeaseLostError
 }
 
 // supersededText is what a superseded serve says: the newer serve of the same session handles the mail.
@@ -120,6 +123,8 @@ func (s *sessionState) usable(name string) (*endpoint.Endpoint, error) {
 			name, s.retrying)
 	case s.superseded != nil:
 		return nil, errors.New(supersededText(name, s.superseded))
+	case s.lost != nil:
+		return nil, fmt.Errorf("mash lost endpoint %s to another session; mail is off for this session", name)
 	default:
 		return nil, fmt.Errorf("mash is waiting for endpoint %s (held by %s pid %s since %s); mail is off until it is free",
 			name, s.waiting.Host, s.waiting.PID, s.waiting.Since)
@@ -386,6 +391,10 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 			// one, then tell Claude, but never let a blocked stdout hold up
 			// the shutdown. Lease loss after a start stays terminal.
 			lost.Store(true)
+			var lostErr *endpoint.LeaseLostError
+			if errors.As(err, &lostErr) {
+				state.Store(&sessionState{lost: lostErr})
+			}
 			stopSvc()
 			fmt.Fprintln(stderr, err)
 			told := make(chan struct{})

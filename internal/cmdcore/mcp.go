@@ -161,6 +161,11 @@ func decodeArgs[P any](fields []field, args json.RawMessage, p *P) error {
 			delete(raw, f.json)
 			continue
 		}
+		if f.repeat && strings.HasPrefix(strings.TrimSpace(string(v)), `"`) {
+			// a repeatable option is an array of strings; one string is accepted as an array of one
+			raw[f.json] = json.RawMessage("[" + strings.TrimSpace(string(v)) + "]")
+			v = raw[f.json]
+		}
 		if typ, _ := schemaType(f.typ); typ == "integer" {
 			n, err := wholeNumber(f, v)
 			if err != nil {

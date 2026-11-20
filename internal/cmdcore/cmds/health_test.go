@@ -70,6 +70,12 @@ func noSessionEndpoint() *fakeHealth {
 		skip("creds", "config"), skip("server", "config"), skip("sign-in", "config"), skip("delivery", "config"), skip("refused", "config"))
 }
 
+// leaseReport is the report of a session that does not hold its endpoint: every row is fine.
+func leaseReport(lease, cause string) *fakeHealth {
+	return &fakeHealth{rep: cmds.HealthReport{Endpoint: "acme.demo.bob", Online: true, Lease: lease, LeaseCause: cause,
+		Checks: []cmds.HealthCheck{ok("config", ""), ok("creds", ""), ok("server", "tls://myserver:4222"), ok("sign-in", "")}}}
+}
+
 func skip(name, needs string) cmds.HealthCheck {
 	return cmds.HealthCheck{Name: name, State: cmds.CheckSkip, Detail: "needs the " + needs}
 }
@@ -112,6 +118,9 @@ func TestStatusMatchesSpec(t *testing.T) {
 			cmds.HealthCheck{Name: "sign-in", State: cmds.CheckFail, Detail: "the server refused these credentials", Reason: "the server refused its credentials"}),
 		"The server does not answer": report("acme.demo.bob", false, ok("config", ""), ok("creds", ""),
 			cmds.HealthCheck{Name: "server", State: cmds.CheckFail, Detail: "the server did not answer: tls://myserver:4222"}),
+		"In a session, when another session holds this endpoint": leaseReport(cmds.LeaseOther, ""),
+		"In a session that a newer session replaced":             leaseReport(cmds.LeaseLost, ""),
+		"In a session that could not take the endpoint":          leaseReport(cmds.LeaseFailed, "the server did not answer: tls://myserver:4222"),
 	}
 	for _, x := range meta["x-output"].([]any) {
 		oc := x.(map[string]any)
@@ -298,6 +307,15 @@ func TestDoctorMatchesSpec(t *testing.T) {
 		case "At a shell, where there is no session to deliver to":
 			_, out, _ := runDoctor(report("acme.demo.bob", false, ok("config", ""),
 				cmds.HealthCheck{Name: "delivery", State: cmds.CheckSkip, Detail: "needs a session"}), cliframe.Global{})
+			if !strings.Contains(out, oc["text"].(string)+"\n") {
+				t.Errorf("%s: %q lacks %q", oc["case"], out, oc["text"])
+			}
+			continue
+		case "In a session that does not hold its endpoint", "In a session that a newer session replaced":
+			// the spec gives the delivery row alone
+			row := strings.TrimPrefix(oc["text"].(string), "delivery  FAIL  ")
+			_, out, _ := runDoctor(report("acme.demo.bob", false, ok("config", ""),
+				cmds.HealthCheck{Name: "delivery", State: cmds.CheckFail, Detail: row}), cliframe.Global{})
 			if !strings.Contains(out, oc["text"].(string)+"\n") {
 				t.Errorf("%s: %q lacks %q", oc["case"], out, oc["text"])
 			}
@@ -507,5 +525,25 @@ func TestDoctorDeliveryFailIsAProblem(t *testing.T) {
 	}
 	if strings.Contains(out, "spool") {
 		t.Errorf("the word spool in %q", out)
+	}
+}
+
+// A session that could not take its endpoint says why on the next line; the cause is in the JSON reason after a colon.
+func TestStatusAndDoctorCouldNotTake(t *testing.T) {
+	f := leaseReport(cmds.LeaseFailed, "the server did not answer: tls://myserver:4222")
+	_, out, _ := runStatus(f, cliframe.Global{JSON: true})
+	if out != `{"endpoint":"acme.demo.bob","ready":false,"online":false,"reason":"this session could not take this endpoint: the server did not answer: tls://myserver:4222"}`+"\n" {
+		t.Errorf("status json: %s", out)
+	}
+	for _, c := range []struct{ lease, reason string }{{cmds.LeaseOther, "another session holds this endpoint"}, {cmds.LeaseLost, "this session lost this endpoint to a newer one"}} {
+		_, out, _ = runStatus(leaseReport(c.lease, ""), cliframe.Global{JSON: true})
+		if !strings.Contains(out, `"ready":false,"online":false,"reason":"`+c.reason+`"`) {
+			t.Errorf("%s: %s", c.lease, out)
+		}
+	}
+	_, out, _ = runDoctor(&fakeHealth{rep: cmds.HealthReport{Endpoint: "acme.demo.bob", Checks: []cmds.HealthCheck{ok("config", ""),
+		{Name: "delivery", State: cmds.CheckFail, Detail: cmds.ReasonCouldNotTake + ": the server did not answer: tls://myserver:4222"}}}}, cliframe.Global{})
+	if !strings.Contains(out, "delivery  FAIL  this session could not take this endpoint:\n                the server did not answer: tls://myserver:4222\n") {
+		t.Errorf("doctor: %q", out)
 	}
 }
