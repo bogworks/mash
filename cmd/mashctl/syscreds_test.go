@@ -16,24 +16,24 @@ import (
 	"github.com/nats-io/nats.go"
 
 	"github.com/bogworks/mash/internal/admin"
-	"github.com/bogworks/mash/internal/bootstrap"
 	"github.com/bogworks/mash/internal/cliframe"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/ctlkeys"
 	"github.com/bogworks/mash/internal/mint"
 	"github.com/bogworks/mash/internal/natsauth"
+	"github.com/bogworks/mash/internal/natsfixture"
 	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/store"
 )
 
-// applyEnv is a local operator-mode server (bootstrap's configuration, run in process) and the environment mashctl
+// applyEnv is a local operator-mode server (natsfixture's configuration, run in process) and the environment mashctl
 // needs to reach it.
 type applyEnv struct {
 	t        *testing.T
 	root     string
 	keyDir   string
 	srv      *server.Server
-	pl       *bootstrap.Plan
+	pl       *natsfixture.Plan
 	env      map[string]string
 	ks       *ctlkeys.Authority
 	acctPub  string
@@ -64,7 +64,7 @@ func newApplyEnvOpts(t *testing.T, tweak func(e *applyEnv), optsHook func(o *ser
 		t.Fatal(err)
 	}
 	e.ks = ks
-	pl, err := bootstrap.Build(bootstrap.Params{Dir: filepath.Join(root, "server"), Owner: "alice", Port: 4222, JetStreamDisk: 256 << 20}, ks)
+	pl, err := natsfixture.Build(natsfixture.Params{Dir: filepath.Join(root, "server"), Owner: "alice", Port: 4222, JetStreamDisk: 256 << 20}, ks)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,8 +82,8 @@ func newApplyEnvOpts(t *testing.T, tweak func(e *applyEnv), optsHook func(o *ser
 	}
 	opts.Port = -1
 	opts.NoLog, opts.NoSigs = true, true
-	// bootstrap's server.conf is TLS only; these tests drive the verbs against a plain loopback server, so they
-	// drop its tls block here. The TLS behaviour of the generated server is tested in internal/bootstrap.
+	// natsfixture's server.conf is TLS only; these tests drive the verbs against a plain loopback server, so they
+	// drop its tls block here. The TLS behaviour of the generated server is tested in internal/natsfixture.
 	opts.TLS, opts.TLSConfig, opts.TLSCert, opts.TLSKey, opts.TLSCaCert = false, nil, "", "", ""
 	if optsHook != nil {
 		optsHook(opts)
@@ -98,7 +98,7 @@ func newApplyEnvOpts(t *testing.T, tweak func(e *applyEnv), optsHook func(o *ser
 	}
 	t.Cleanup(func() { srv.Shutdown(); srv.WaitForShutdown() })
 	e.srv = srv
-	e.sysCreds = filepath.Join(pl.Dir, bootstrap.SysCreds)
+	e.sysCreds = filepath.Join(pl.Dir, natsfixture.SysCreds)
 	e.writeConfig(`{"system_creds":"` + e.sysCreds + `"}`)
 	e.env = map[string]string{
 		"HOME": root, "MASH_CONFIG_DIR": filepath.Join(root, "cfg"), "MASH_SERVER": srv.ClientURL(), "MASH_INSECURE_PLAINTEXT": "1", "MASH_ENDPOINT": "alice.dev.x",
@@ -245,7 +245,7 @@ func (e *applyEnv) endpoint(a sap.Address, labels map[string]string) {
 	}
 }
 
-// newXYEnv is a bootstrap server with the directory made and endpoints alice.g.x (net a, label team=red) and alice.g.y
+// newXYEnv is a natsfixture server with the directory made and endpoints alice.g.x (net a, label team=red) and alice.g.y
 // (net b): the clean state.
 func newXYEnv(t *testing.T) *applyEnv {
 	t.Helper()

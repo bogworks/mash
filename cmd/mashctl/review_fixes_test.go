@@ -10,9 +10,9 @@ import (
 	"github.com/nats-io/nkeys"
 
 	"github.com/bogworks/mash/internal/apply"
-	"github.com/bogworks/mash/internal/bootstrap"
 	"github.com/bogworks/mash/internal/cliframe"
 	"github.com/bogworks/mash/internal/config"
+	"github.com/bogworks/mash/internal/natsfixture"
 )
 
 // One address against a cluster is never a complete set, so a revocation is refused, not confirmed by one server.
@@ -84,7 +84,7 @@ func TestCheckAdminCredsRefusesAnotherAccount(t *testing.T) {
 	otherPub, _ := other.PublicKey()
 	dir := t.TempDir()
 	// signed by the other account's identity key (no issuer_account)
-	identity, err := bootstrap.MintAdminCreds(other)
+	identity, err := natsfixture.MintAdminCreds(other)
 	if err != nil {
 		t.Fatal(err)
 	}

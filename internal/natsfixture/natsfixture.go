@@ -1,8 +1,9 @@
-// Package bootstrap stands up the configuration of a local operator-mode NATS server with JetStream for one
-// developer (`mashctl init --local`, ADR 0052): keys through the ctlkeys store, the operator, system account, MASH
-// account and two user JWTs, a server.conf that preloads them and a config.json. Build computes
-// every file's content and creates the keys; Plan.Write puts the files down without clobbering anything.
-package bootstrap
+// Package natsfixture is test fixtures only: nothing in a release binary may import it (isolation_test.go
+// checks). It stands up the configuration of a local operator-mode NATS server with JetStream for the cmd/mashctl
+// tests: keys through the ctlkeys store, the operator, system account, MASH account and two user JWTs, a server.conf
+// that preloads them, a config.json, and the test PKI and creds. Build computes every file's content and creates the
+// keys; Plan.Write puts the files down without clobbering anything.
+package natsfixture
 
 import (
 	"errors"
