@@ -13,10 +13,12 @@
 # absolute $XDG_CONFIG_HOME/mash; else $HOME/.config/mash.
 #
 # It refuses (exit 1, "error:" and "hint:" lines on stderr, nothing changed)
-# when there is nothing to migrate, when the file already has "servers" or "ca"
+# when the folder is writable by group or other (unless sticky), when there is nothing to migrate, when the file already has "servers" or "ca"
 # next to an old key, when "url" is not a string or holds no address, when the file is not valid JSON
-# (a mismatched or trailing bracket, a comma before a closer, a control character
-# inside a string, an unterminated structure), or when the backup exists.
+# (any break in the JSON grammar: a missing comma or colon, a mismatched bracket,
+# a comma before a closer, a control character inside a string, trailing text, an
+# unterminated structure), when a top-level key uses an escape, or when the backup
+# exists.
 # Exit codes: 0 done, 1 refused, 2 usage.
 #
 # Plain bash, awk and the usual tools only (bash 3.2 and BSD awk are enough).
@@ -40,9 +42,11 @@ refuse() { # MESSAGE HINT
 
 TMP=''
 STAT=''
+BTMP=''
 BACKUP_MADE=''
 cleanup() {
     [ -z "$TMP" ] || rm -f -- "$TMP"
+    [ -z "$BTMP" ] || rm -f -- "$BTMP"
     [ -z "$STAT" ] || rm -f -- "$STAT"
     [ -z "$BACKUP_MADE" ] || rm -f -- "$BACKUP_MADE"
 }
@@ -53,6 +57,20 @@ cleanup() {
 # shellcheck disable=SC2016
 AWK_PROG='
 function fail(m) { print "err " m > st; close(st); bad = 1; exit 3 }
+function litok(t) {
+    if (t == "true" || t == "false" || t == "null") return 1
+    return (t ~ /^-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][-+]?[0-9]+)?$/)
+}
+function closer(c,   want) {
+    want = (c == "}") ? "{" : "["
+    if (depth < 1 || stk[depth] != want) fail("a closing " c " does not match what it closes")
+    if (state == "V" || state == "K") {
+        if (last == ",") fail("a comma directly before " c)
+        fail("invalid")
+    }
+    depth--
+    state = (depth == 0) ? "E" : "A"
+}
 function emit_list(raw,   n, parts, i, p, s, o) {
     n = split(raw, parts, ",")
     o = ""
@@ -66,7 +84,7 @@ function emit_list(raw,   n, parts, i, p, s, o) {
     if (o == "") fail("url is empty")
     return "[" o "]"
 }
-BEGIN { depth = 0; instr = 0; esc = 0; last = ""; mode = 0; top = ""; nurl = 0; nca = 0 }
+BEGIN { depth = 0; instr = 0; esc = 0; last = ""; mode = 0; nurl = 0; nca = 0; state = "V"; intok = 0 }
 {
     line = $0 "\n"
     n = length(line)
@@ -81,63 +99,82 @@ BEGIN { depth = 0; instr = 0; esc = 0; last = ""; mode = 0; top = ""; nurl = 0; 
             instr = 0
             if (isval) {
                 out = out emit_list(tok)
-                isval = 0; mode = 0; last = "\""
+                isval = 0; mode = 0; last = "\""; state = "A"
                 continue
             }
-            if (depth == 1 && iskey) {
-                if (tok == "url") {
-                    if (nurl++) fail("url appears twice")
-                    out = out "\"servers\""; mode = 1
-                    print "url" > st
-                } else if (tok == "tls_ca") {
-                    if (nca++) fail("tls_ca appears twice")
-                    out = out "\"ca\""; mode = 0
-                    print "tls_ca" > st
+            if (iskey) {
+                if (depth == 1) {
+                    if (index(tok, "\\")) fail("key escape")
+                    if (tok == "url") {
+                        if (nurl++) fail("url appears twice")
+                        out = out "\"servers\""; mode = 1
+                        print "url" > st
+                    } else if (tok == "tls_ca") {
+                        if (nca++) fail("tls_ca appears twice")
+                        out = out "\"ca\""; mode = 0
+                        print "tls_ca" > st
+                    } else {
+                        out = out "\"" tok "\""
+                        if (tok == "servers") print "has_servers" > st
+                        if (tok == "ca") print "has_ca" > st
+                    }
                 } else {
                     out = out "\"" tok "\""
-                    if (tok == "servers") print "has_servers" > st
-                    if (tok == "ca") print "has_ca" > st
                 }
-            } else {
-                out = out "\"" tok "\""
+                iskey = 0; state = "C"; last = "\""
+                continue
             }
-            iskey = 0; last = "\""
+            out = out "\"" tok "\""
+            last = "\""; state = (depth == 0) ? "E" : "A"
             continue
+        }
+        if (intok) {
+            if (c ~ /[-+.0-9A-Za-z]/) { tokv = tokv c; out = out c; continue }
+            if (!litok(tokv)) fail("invalid")
+            intok = 0; state = (depth == 0) ? "E" : "A"
+            i--; continue
         }
         if (mode == 1 || mode == 2) {
             # between the url key and its value: only space, then a colon, then a string
             if (c == " " || c == "\t" || c == "\n" || c == "\r") { out = out c; continue }
             if (mode == 1) {
                 if (c != ":") fail("not a key and a value after url")
-                out = out c; mode = 2; continue
+                out = out c; mode = 2; state = "V"; last = ":"; continue
             }
             if (c != "\"") fail("url is not a string")
-            instr = 1; isval = 1; tok = ""; mode = 0
-            continue
-        }
-        if (c == "\"") {
-            instr = 1; tok = ""
-            iskey = (depth == 1 && top == "{" && (last == "{" || last == ","))
+            instr = 1; isval = 1; iskey = 0; tok = ""; mode = 0
             continue
         }
         if (c == " " || c == "\t" || c == "\n" || c == "\r") { out = out c; continue }
-        if (top == "") top = c
-        if (c == "{" || c == "[") {
-            depth++
-            stk[depth] = c
-        } else if (c == "}" || c == "]") {
-            want = (c == "}") ? "{" : "["
-            if (depth < 1 || stk[depth] != want) fail("a closing " c " does not match what it closes")
-            if (last == ",") fail("a comma directly before " c)
-            depth--
+        if (state == "E") fail("invalid")
+        if (state == "C") {
+            if (c != ":") fail("invalid")
+            state = "V"; out = out c; last = c
+            continue
         }
-        out = out c
-        last = c
+        if (state == "A") {
+            if (c == ",") { state = (stk[depth] == "{") ? "K" : "V"; out = out c; last = c; continue }
+            if (c == "}" || c == "]") { closer(c); out = out c; last = c; continue }
+            fail("invalid")
+        }
+        if (c == "}" || c == "]") { closer(c); out = out c; last = c; continue }
+        if (state == "K" || state == "J") {
+            if (c != "\"") fail("invalid")
+            instr = 1; tok = ""; iskey = 1
+            continue
+        }
+        # state V or W: a value
+        if (c == "\"") { instr = 1; tok = ""; iskey = 0; continue }
+        if (c == "{") { depth++; stk[depth] = "{"; state = "J"; out = out c; last = c; continue }
+        if (c == "[") { depth++; stk[depth] = "["; state = "W"; out = out c; last = c; continue }
+        if (c ~ /[-0-9tfn]/) { intok = 1; tokv = c; out = out c; last = "x"; continue }
+        fail("invalid")
     }
 }
 END {
     if (bad) exit 3
-    if (instr || depth != 0 || mode != 0) fail("config.json is not valid JSON")
+    if (intok && !litok(tokv)) fail("invalid")
+    if (instr || mode != 0 || state != "E") fail("invalid")
     printf "%s", (nonl ? substr(out, 1, length(out) - 1) : out)
     close(st)
 }
@@ -174,21 +211,38 @@ main() {
         "this script is for a machine that ran mash 0.5.5"
     [ -r "$file" ] || refuse "cannot read $file" "check its permissions"
 
+    # a folder other users can write in is not one to put files in (a sticky one is fine)
+    local perms
+    # shellcheck disable=SC2012 # ls -ld is the portable way to read a mode
+    perms=$(ls -ld -- "$dir/." | awk '{print $1}')
+    case "${perms:5:1}${perms:8:1}" in
+    *w*)
+        case "${perms:9:1}" in
+        t | T) ;;
+        *) refuse "$dir is writable by other users" "run chmod go-w on it, then run this again" ;;
+        esac
+        ;;
+    esac
+
     trap cleanup EXIT
-    TMP=$dir/.config.json.migrate.$$
-    STAT=$dir/.config.json.migrate.$$.st
     local nonl=0
     if [ -s "$file" ] && [ -n "$(tail -c 1 "$file" | tr -d '\n')" ]; then nonl=1; fi
 
     umask 077
     local rc=0
-    (set -C; : >"$TMP") 2>/dev/null || { TMP=''; refuse "cannot write in $dir" "check the folder's permissions"; }
-    (set -C; : >"$STAT") 2>/dev/null || { STAT=''; refuse "cannot write in $dir" "check the folder's permissions"; }
+    # unpredictable names, made by mktemp (GNU and BSD alike), each recorded for cleanup
+    TMP=$(mktemp "$dir/.mash-migrate.XXXXXX" 2>/dev/null) || { TMP=''; refuse "cannot write in $dir" "check the folder's permissions"; }
+    STAT=$(mktemp "$dir/.mash-migrate.XXXXXX" 2>/dev/null) || { STAT=''; refuse "cannot write in $dir" "check the folder's permissions"; }
     LC_ALL=C awk -v st="$STAT" -v nonl="$nonl" "$AWK_PROG" "$file" >"$TMP" || rc=$?
     if [ "$rc" != 0 ]; then
         local why
         why=$(sed -n 's/^err //p' "$STAT" 2>/dev/null | head -n 1)
         [ "$why" != "url is empty" ] || refuse "url is empty: nothing to migrate" "set servers by hand"
+        case $why in
+        invalid) refuse "$file is not valid JSON" "fix the file by hand, then run this again" ;;
+        "key escape") refuse "a key in $file uses an escape: not a file this script wrote" \
+            "edit by hand: rename url to servers (a list) and tls_ca to ca" ;;
+        esac
         refuse "cannot migrate $file: ${why:-the scanner failed}" \
             "fix config.json by hand: rename url to servers (a list) and tls_ca to ca"
     fi
@@ -212,12 +266,19 @@ main() {
     fi
 
     chmod 600 "$TMP" || refuse "cannot set the mode of the new file" "check the folder's permissions"
-    # the backup: created exclusively (never over anything), then a copy that keeps the mode
-    (set -C; : >"$backup") 2>/dev/null ||
-        refuse "$backup already exists; not overwriting it" \
-            "move it aside, or remove it if you no longer need it, and run again"
+    { [ ! -e "$backup" ] && [ ! -L "$backup" ]; } || refuse "$backup already exists; not overwriting it" \
+        "move it aside, or remove it if you no longer need it, and run again"
+    # The backup: a complete copy (keeping the mode) under a private name, then hard-linked
+    # to the backup name.  ln does not replace anything, so a backup that appeared meanwhile
+    # is refused, and the backup name never shows a partial file.
+    BTMP=$(mktemp "$dir/.mash-migrate.XXXXXX" 2>/dev/null) || { BTMP=''; refuse "cannot write in $dir" "check the folder's permissions"; }
+    cp -p "$file" "$BTMP" || refuse "cannot write the backup $backup" "check the folder's permissions"
+    ln -- "$BTMP" "$backup" 2>/dev/null ||
+        refuse "cannot make the backup $backup (it exists, or links are not allowed here)" \
+            "move an existing backup aside and run again"
     BACKUP_MADE=$backup
-    cp -p "$file" "$backup" || refuse "cannot write the backup $backup" "check the folder's permissions"
+    rm -f -- "$BTMP" || refuse "cannot remove the temporary copy $BTMP" "check the folder's permissions"
+    BTMP=''
     # From here the new file and the backup are no longer cleanup's to remove: an
     # interrupt after the replace must not delete the backup.  If the replace
     # itself fails, remove both by their recorded paths.

@@ -11,7 +11,7 @@
 # directory.
 #
 # Environment:
-#   MMIG_CASES        space-separated case numbers (default: 1 ... 10 and 12, and 11 when MMIG_SERVER_TEST=1)
+#   MMIG_CASES        space-separated case numbers (default: 1 ... 10, 12 and 13, and 11 when MMIG_SERVER_TEST=1)
 #   MMIG_REPORT       receipt file (markdown; default: mmig-receipt-<run id>.md under ${TMPDIR:-/tmp})
 #   MMIG_SCRATCH      scratch directory (default: a new mktemp -d, removed at the end when
 #                     the test made it and nothing failed)
@@ -40,7 +40,7 @@ set -u
 SCRIPT=/t/mash-migrate-0.5.5.sh
 CASE=$1
 H=${HOME:?}
-W=$(mktemp -d /var/tmp/w.XXXXXX)
+W=$(mktemp -d "${TMPDIR:-/tmp}/w.XXXXXX")
 RC=0
 CFG=$H/.config/mash
 
@@ -112,7 +112,9 @@ case1() { # a real 0.5.5 file
     chk "one line on stdout" lines_of "$W/out" 1
     chk "stderr is empty" empty "$W/err"
     chk "the line says what changed" has "$W/out" "Migrated $CFG/config.json: url -> servers, tls_ca -> ca (old file kept as $CFG/config.json.0.5.5)"
-    chk "no temp file is left" bash -c '[ "$(ls -A "$1" | wc -l)" = 2 ]' _ "$CFG"
+    chk "no temp file is left: only config.json and the backup remain" bash -c '[ "$(ls -A "$1")" = "config.json
+config.json.0.5.5" ]' _ "$CFG"
+    chk "the script has no predictable pid-based name" bash -c '! grep -Fq "\$\$" "$1"' _ "$SCRIPT"
 }
 
 case2() { # commas
@@ -303,10 +305,10 @@ EOF
 case9() { # no network, no writes outside the folder
     printf '%s\n' "$REAL055" | put "$CFG/config.json"
     chk "the container has only the loopback interface" bash -c '[ "$(ls /sys/class/net)" = lo ]'
-    find "$H" /tmp -mindepth 1 2>/dev/null | sort >"$W/before"
+    find "$H" /tmp -mindepth 1 -path "$W" -prune -o -print 2>/dev/null | sort >"$W/before"
     snap "$H" >"$W/snap0"
     mig HOME="$H"
-    find "$H" /tmp -mindepth 1 2>/dev/null | sort >"$W/after"
+    find "$H" /tmp -mindepth 1 -path "$W" -prune -o -print 2>/dev/null | sort >"$W/after"
     chk "exit 0" rc_is 0
     chk "the only new path under HOME and /tmp is the backup" bash -c '[ "$(comm -13 "$1" "$2")" = "$3" ] && [ -z "$(comm -23 "$1" "$2")" ]' _ "$W/before" "$W/after" "$CFG/config.json.0.5.5"
     chk "the script names no network tool" bash -c '! grep -Ev "^[[:space:]]*#" "$1" | grep -Eq "(^|[^a-z])(curl|wget|nc|ssh|nats|telnet)[[:space:]]"' _ "$SCRIPT"
@@ -458,34 +460,96 @@ case12() { # invalid JSON and empty url are refusals, not invalid output; temp n
     mig HOME="$H"
     chk "tabs and newlines outside strings: exit 0" rc_is 0
     chk "tabs and newlines outside strings: kept as written" same "$CFG/config.json" <(printf '{\t"servers":\t["tls://a:1"]\r\n,\t"n":[1,\n2]\n}\n')
-    # the temp and stat names are predictable ($$), so each is created without following
-    # anything already there.  exec keeps the pid, so the planted name is the one the script uses.
-    local kind pre planted
-    for kind in tmp stat; do
+    # grammar: a missing comma or colon, extra values, trailing text, bad literals
+    local je="$CFG/config.json is not valid JSON" jh="fix the file by hand, then run this again"
+    refuse_case "missing comma between members" '{"url":"a" "owner":"b"}\n' "$je" "$jh"
+    refuse_case "missing colon" '{"owner" "b","url":"a"}\n' "$je" "$jh"
+    refuse_case "missing colon after url" '{"url" "a"}\n'
+    refuse_case "two top-level values" '{"url":"a"}{"url":"b"}\n' "$je" "$jh"
+    refuse_case "a second top-level value after the object" '{"url":"a"} 5\n' "$je" "$jh"
+    refuse_case "trailing garbage after the object" '{"url":"a"} x\n' "$je" "$jh"
+    refuse_case "bad literal tru" '{"url":"a","f":tru}\n' "$je" "$jh"
+    refuse_case "bad literal nulll" '{"url":"a","f":nulll}\n' "$je" "$jh"
+    refuse_case "bad number 1." '{"url":"a","n":1.}\n' "$je" "$jh"
+    refuse_case "bad number -" '{"url":"a","n":-}\n' "$je" "$jh"
+    refuse_case "missing value" '{"url":"a","n":}\n' "$je" "$jh"
+    refuse_case "missing comma in an array" '{"url":"a","l":[1 2]}\n' "$je" "$jh"
+    refuse_case "a key that is not a string" '{"url":"a",1:2}\n' "$je" "$jh"
+    refuse_case "a colon in an array" '{"url":"a","l":[1:2]}\n' "$je" "$jh"
+    refuse_case "empty file" '' "$je" "$jh"
+    refuse_case "a bare word at top level" 'url\n' "$je" "$jh"
+    # an escaped top-level key evades a raw-text comparison: refused
+    local ke="a key in $CFG/config.json uses an escape: not a file this script wrote" kh="edit by hand: rename url to servers (a list) and tls_ca to ca"
+    refuse_case "escaped top-level key servers beside url" '{"\\u0073ervers":["x"],"url":"a"}\n' "$ke" "$kh"
+    refuse_case "escaped top-level key url" '{"ur\\u006c":"a","tls_ca":"/c"}\n' "$ke" "$kh"
+    # nested keys and escapes in values stay allowed
+    rm -f "$CFG/config.json.0.5.5"
+    printf '{"limits":{"a\\u0062":1},"note":"x\\ny","url":"tls://a:1"}\n' | put "$CFG/config.json"
+    mig HOME="$H"
+    chk "an escaped nested key and an escaped value: exit 0" rc_is 0
+    chk "an escaped nested key and an escaped value: kept as written" same "$CFG/config.json" <(printf '{"limits":{"a\\u0062":1},"note":"x\\ny","servers":["tls://a:1"]}\n')
+}
+
+case13() { # folder mode, unpredictable temp names, atomic backup, planted old names
+    local m before pid
+    mkdir -p "$CFG"
+    for m in 777 775 757 770 702; do
         rm -f "$CFG/config.json.0.5.5"
-        printf '{"url":"tls://a:1"}\n' | put "$CFG/config.json"
+        chmod 700 "$CFG"
+        printf '%s\n' "$REAL055" | put "$CFG/config.json"
         cp -p "$CFG/config.json" "$W/orig"
-        printf 'victim\n' >"$W/victim"
-        cp -p "$W/victim" "$W/victim.orig"
-        pre=.config.json.migrate.PID
-        [ "$kind" = tmp ] || pre=.config.json.migrate.PID.st
-        env -u MASH_CONFIG_DIR -u XDG_CONFIG_HOME HOME="$H" bash -c \
-            'ln -s "$1" "$2/$(printf %s "$4" | sed "s/PID/$$/")"; exec bash "$3"' _ "$W/victim" "$CFG" "$SCRIPT" "$pre" \
-            >"$W/out" 2>"$W/err" </dev/null
-        RC=$?
-        chk "planted $kind name (symlink to a file): refused" refused
-        chk "planted $kind name: the file it pointed at is untouched" same "$W/victim" "$W/victim.orig"
-        chk "planted $kind name: config.json byte-identical" same "$CFG/config.json" "$W/orig"
-        chk "planted $kind name: nothing else left (config.json and the planted link only)" bash -c '[ "$(ls -A "$1" | wc -l)" = 2 ]' _ "$CFG"
-        planted=$(find "$CFG" -maxdepth 1 -type l)
-        [ -z "$planted" ] || rm -f -- "$planted"
+        chmod "$m" "$CFG"
+        mig HOME="$H"
+        chmod 700 "$CFG"
+        chk "folder mode $m: refused" refused
+        chk "folder mode $m: error text" has "$W/err" "error: $CFG is writable by other users"
+        chk "folder mode $m: hint text" has "$W/err" "hint: run chmod go-w on it, then run this again"
+        chk "folder mode $m: config.json byte-identical, nothing else created" bash -c '[ "$(ls -A "$1")" = config.json ] && cmp -s "$1/config.json" "$2"' _ "$CFG" "$W/orig"
     done
+    for m in 755 700 750 1755 1777; do
+        rm -f "$CFG/config.json.0.5.5"
+        chmod 700 "$CFG"
+        printf '%s\n' "$REAL055" | put "$CFG/config.json"
+        cp -p "$CFG/config.json" "$W/orig"
+        printf '%s\n' "$EXP056" >"$W/exp"
+        chmod "$m" "$CFG"
+        mig HOME="$H"
+        chk "folder mode $m: exit 0" rc_is 0
+        chk "folder mode $m: migrated" same "$CFG/config.json" "$W/exp"
+        chk "folder mode $m: only config.json and the backup remain" bash -c '[ "$(ls -A "$1")" = "config.json
+config.json.0.5.5" ]' _ "$CFG"
+        chk "folder mode $m: backup equals the original" same "$CFG/config.json.0.5.5" "$W/orig"
+    done
+    chmod 700 "$CFG"
+    # a complete backup of a larger file
+    rm -f "$CFG/config.json.0.5.5"
+    { printf '{"url":"tls://a:1","pad":"'; head -c 300000 /dev/zero | tr '\0' 'x'; printf '","tls_ca":"/c"}\n'; } | put "$CFG/config.json"
+    cp -p "$CFG/config.json" "$W/orig"
+    mig HOME="$H"
+    chk "large file: exit 0" rc_is 0
+    chk "large file: backup equals the original byte for byte" same "$CFG/config.json.0.5.5" "$W/orig"
+    chk "large file: backup mode 600" mode_is "$CFG/config.json.0.5.5" 600
+    # the old predictable names (pid-based) are not used: plant symlinks under them, the migration ignores them
+    rm -f "$CFG/config.json.0.5.5"
+    printf '{"url":"tls://a:1"}\n' | put "$CFG/config.json"
+    printf 'victim\n' >"$W/victim"
+    cp -p "$W/victim" "$W/victim.orig"
+    env -u MASH_CONFIG_DIR -u XDG_CONFIG_HOME HOME="$H" bash -c \
+        'echo "$$" >"$1"; ln -s "$2" "$3/.config.json.migrate.$$"; ln -s "$2" "$3/.config.json.migrate.$$.st"; ln -s "$2" "$3/.config.json.$$.tmp"; ln -s "$2" "$3/.config.json.$$.st"; exec bash "$4"' \
+        _ "$W/pid" "$W/victim" "$CFG" "$SCRIPT" >"$W/out" 2>"$W/err" </dev/null
+    RC=$?
+    pid=$(cat "$W/pid")
+    chk "planted old names: exit 0" rc_is 0
+    chk "planted old names: the file they pointed at is untouched" same "$W/victim" "$W/victim.orig"
+    chk "planted old names: migrated" same "$CFG/config.json" <(printf '{"servers":["tls://a:1"]}\n')
+    chk "planted old names: still four links, config.json and the backup, nothing else" bash -c '[ "$(ls -A "$1" | wc -l)" = 6 ]' _ "$CFG"
+    rm -f -- "$CFG/.config.json.migrate.$pid" "$CFG/.config.json.migrate.$pid.st" "$CFG/.config.json.$pid.tmp" "$CFG/.config.json.$pid.st"
 }
 
 run_case() {
     case $CASE in
     1) case1 ;; 2) case2 ;; 3) case3 ;; 4) case4 ;; 5) case5 ;; 6) case6 ;; 7) case7 ;;
-    8) case8 ;; 9) case9 ;; 10) case10 ;; 11) case11 ;; 12) case12 ;;
+    8) case8 ;; 9) case9 ;; 10) case10 ;; 11) case11 ;; 12) case12 ;; 13) case13 ;;
     *) echo "FAIL: c$CASE: no such case" ;;
     esac
 }
@@ -519,7 +583,7 @@ if [ "$SERVER" = 1 ]; then
     [ -f "$SETUP_SRC" ] || { echo "no $SETUP_SRC" >&2; exit 2; }
 fi
 if [ -n "${MMIG_MASH:-}" ] && [ ! -f "$MMIG_MASH" ]; then echo "no $MMIG_MASH (MMIG_MASH)" >&2; exit 2; fi
-CASES=${MMIG_CASES:-"1 2 3 4 5 6 7 8 9 10 12"}
+CASES=${MMIG_CASES:-"1 2 3 4 5 6 7 8 9 10 12 13"}
 [ -n "${MMIG_CASES:-}" ] || [ "$SERVER" != 1 ] || CASES="$CASES 11"
 NCV=${MMIG_NATSCLI:-0.5.2}
 # sha256 of the natscli v0.5.2 linux-amd64 zip, the same pin as mash-local-nats-setup_test.sh

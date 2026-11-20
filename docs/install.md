@@ -194,21 +194,23 @@ The CLI never takes the lease, so it works alongside the running session.
 ## If you ran mash 0.5.5
 
 Mash 0.5.6 renamed two settings in `config.json`, in the mash
-configuration folder. If your machine ran 0.5.5, run this once:
-
-```sh
-curl -fsSL https://github.com/bogworks/mash/releases/latest/download/mash-migrate-0.5.5.sh | bash
-```
-
-To read it before you run it, download it and check it against
-`SHA256SUMS`, the same way as the other scripts
-([Verify what you download](#verify-what-you-download)):
+configuration folder. If your machine ran 0.5.5, run this once. Download the
+script, check it against the release's `SHA256SUMS`, read it, then run it
+([Verify what you download](#verify-what-you-download) shows how to check
+`SHA256SUMS` itself against the attestation):
 
 ```sh
 BASE=https://github.com/bogworks/mash/releases/latest/download
 curl -fsSLO $BASE/mash-migrate-0.5.5.sh -O $BASE/SHA256SUMS
 grep ' mash-migrate-0.5.5.sh$' SHA256SUMS | sha256sum -c -
 less mash-migrate-0.5.5.sh && bash mash-migrate-0.5.5.sh
+```
+
+If you accept trusting GitHub's TLS alone, the one-line form the release
+page gives also works. It runs what it downloads without a check:
+
+```sh
+curl -fsSL https://github.com/bogworks/mash/releases/latest/download/mash-migrate-0.5.5.sh | bash
 ```
 
 What it changes:
