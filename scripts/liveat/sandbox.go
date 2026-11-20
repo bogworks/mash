@@ -126,6 +126,12 @@ func sandboxMain(cmd string, port int, keep bool, stdout, stderr io.Writer, p *P
 			fmt.Fprintf(stdout, "records and output copied out: %s\n", back)
 		}
 	}
+	// The container and image go now, not in a deferred close that only logs: one that cannot be removed holds keys
+	// this run made, so it fails the run.
+	if derr := r.Destroy(); derr != nil {
+		fmt.Fprintln(stderr, "liveat: the sandbox container or image could not be removed:", derr)
+		code = 1
+	}
 	if keep {
 		fmt.Fprintf(stdout, "kept: %s (the sandbox container and image are still destroyed)\n", r.Dir)
 	}
