@@ -4,49 +4,61 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/bogworks/mash/internal/cliframe"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/ctl"
+	"github.com/bogworks/mash/internal/natsauth"
 )
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Getenv, os.LookupEnv, os.Stdout, os.Stderr))
 }
 
-// plainRefusalMarker is the text of natsauth's refusal of a plain URL, which every connecting verb prints verbatim.
-const plainRefusalMarker = "every mash connection requires TLS, to any host"
+// codedError is an error that says its message and carries exit code 2.
+type codedError struct{ error }
 
-// plainWatch passes writes through and records whether the plain-URL refusal went by.
-type plainWatch struct {
-	w    io.Writer
-	seen bool
-}
+func (codedError) ExitCode() int { return 2 }
 
-func (p *plainWatch) Write(b []byte) (int, error) {
-	if strings.Contains(string(b), plainRefusalMarker) {
-		p.seen = true
+func (e codedError) Unwrap() error { return e.error }
+
+// withPlainCode is out, made to exit 2 when its cause is natsauth's refusal of a plain URL. The code comes from the
+// error itself, never from the text a command printed.
+func withPlainCode(out, cause error) error {
+	var p *natsauth.PlainRefusalError
+	if !errors.As(cause, &p) {
+		return out
 	}
-	return p.w.Write(b)
+	var e *cliframe.Error
+	if errors.As(out, &e) && e != nil {
+		c := *e
+		c.Code = 2
+		return &c
+	}
+	return codedError{out}
 }
 
-// run is main with its environment injected, for tests. A plain URL refused for TLS is a usage error (exit 2) in every
-// verb, whichever path reported it.
+// run is main with its environment injected, for tests. The encryption override is checked once, here, before any
+// command dispatches: a removed name or a bad value is refused for every command (exit 2, help and version included),
+// and while the override is on every command prints the warning on stderr, once.
 func run(args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
-	pw := &plainWatch{w: stderr}
-	pwOut := &plainWatch{w: stdout} // a --json run reports its error on stdout
-	code := runVerbs(args, env, lookup, pwOut, pw)
-	if code != 0 && code != 2 && (pw.seen || pwOut.seen) {
-		return 2
-	}
-	return code
+	return runVerbs(args, env, lookup, stdout, stderr)
 }
 
 func runVerbs(args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
+	// The encryption override is the very first thing checked, before any argument is read (bare `mashctl`, a removed
+	// command, a bad flag): a removed name or a bad value is refused (exit 2), and while the override is on every
+	// invocation prints the warning on stderr, once.
+	if skipErr := config.CheckSkipEncryption(lookup, env("HOME")); skipErr != nil {
+		return cliframe.Report(stdout, stderr, cliframe.Usagef("%s", skipErr.Msg()).WithHint(skipErr.Hint()), slices.Contains(args, "--json"))
+	}
+	config.WarnSkipEncryption(lookup, stderr)
 	if len(args) == 0 {
 		fmt.Fprint(stderr, ctl.Usage("mashctl"))
 		return 2
@@ -68,6 +80,9 @@ func runVerbs(args []string, env func(string) string, lookup config.Lookup, stdo
 	}
 	args = rest0
 	env, lookup = global.Shadow(spec, env, lookup)
+	if skipErr := config.CheckSkipEncryption(lookup, env("HOME")); skipErr != nil { // a --config-dir flag may point at a file with the removed key: refusal only, the warning is out
+		return cliframe.Report(stdout, stderr, cliframe.Usagef("%s", skipErr.Msg()).WithHint(skipErr.Hint()), jsonRequested(args[1:]) || global.JSON)
+	}
 	switch args[0] {
 	case "version":
 		return runVersion(args[1:], stdout, stderr)

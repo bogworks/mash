@@ -26,14 +26,14 @@ import (
 )
 
 // envFrom is the environment of a test whose subject is not TLS. REQ-014: these tests are not about TLS; the override
-// is explicit. MASH_INSECURE_PLAINTEXT is 1 unless the test names it, and a test about TLS names it ("" or "0" for
+// is explicit. MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is 1 unless the test names it, and a test about TLS names it ("" or "0" for
 // none), or uses envStrict.
 func envFrom(m map[string]string) func(string) string {
 	return func(k string) string {
 		if v, ok := m[k]; ok {
 			return v
 		}
-		if k == "MASH_INSECURE_PLAINTEXT" {
+		if k == "MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION" {
 			return "1"
 		}
 		return ""
@@ -205,7 +205,7 @@ func newWorldWith(t *testing.T, o testenv.Options, names ...string) *world {
 			"MASH_CREDS": c, "MASH_SETTLE_MS": "20"}
 		if !o.TLS {
 			// REQ-014: these tests are not about TLS; the override is explicit.
-			w.env[n]["MASH_INSECURE_PLAINTEXT"] = "1"
+			w.env[n]["MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION"] = "1"
 		}
 	}
 	return w
@@ -218,10 +218,23 @@ func (w *world) cli(t *testing.T, as string, args ...string) (string, int) {
 	return out.String() + withoutPlainWarning(errb.String()), code
 }
 
-// plainWarningLine is the line a command prints on standard error when insecure_plaintext lets a plain URL through.
+// plainWarningLine is the line a command prints on standard error while MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set.
 // REQ-014: these tests are not about TLS; the override is explicit, and the helpers that merge the two streams leave
 // that one line out. The line itself is asserted in plaintext_refusal_test.go.
-var plainWarningLine = regexp.MustCompile(`(?m)^mash: WARNING: plain-text connection to [^\n]*\n`)
+var plainWarningLine = regexp.MustCompile(`(?m)^warning: encryption to the server is OFF \(MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set\)\n`)
+
+// quiet wraps w so that the encryption-off line is dropped: the default test environment sets the override, so
+// every command prints the line, and the tests that compare a whole stream are not about it.
+func quiet(w io.Writer) io.Writer { return quietWriter{w} }
+
+type quietWriter struct{ w io.Writer }
+
+func (q quietWriter) Write(b []byte) (int, error) {
+	if plainWarningLine.Match(b) && len(plainWarningLine.ReplaceAll(b, nil)) == 0 {
+		return len(b), nil
+	}
+	return q.w.Write(b)
+}
 
 func withoutPlainWarning(s string) string { return plainWarningLine.ReplaceAllString(s, "") }
 
@@ -348,11 +361,11 @@ func TestAdminIsAnUnknownCommand(t *testing.T) {
 
 func TestUsage(t *testing.T) {
 	var out bytes.Buffer
-	if code := run(nil, envFrom(nil), strings.NewReader(""), &out, &out); code != 2 || out.String() != "error: mash needs a command\nhint: mash --help\n" {
+	if code := run(nil, envFrom(nil), strings.NewReader(""), quiet(&out), quiet(&out)); code != 2 || out.String() != "error: mash needs a command\nhint: mash --help\n" {
 		t.Fatalf("usage: %d %s", code, out.String())
 	}
 	out.Reset()
-	if code := run([]string{"version"}, envFrom(nil), strings.NewReader(""), &out, &out); code != 0 || !strings.HasPrefix(out.String(), "mash v") {
+	if code := run([]string{"version"}, envFrom(nil), strings.NewReader(""), quiet(&out), quiet(&out)); code != 0 || !strings.HasPrefix(out.String(), "mash v") {
 		t.Fatalf("version: %d %s", code, out.String())
 	}
 }
@@ -531,7 +544,7 @@ func TestVersionCommandSetsTheServiceVersion(t *testing.T) {
 	defer endpoint.SetVersion(old)
 	endpoint.SetVersion(endpoint.DevVersion)
 	var out bytes.Buffer
-	if code := run([]string{"version"}, envFrom(nil), strings.NewReader(""), &out, &out); code != 0 {
+	if code := run([]string{"version"}, envFrom(nil), strings.NewReader(""), quiet(&out), quiet(&out)); code != 0 {
 		t.Fatal(out.String())
 	}
 	line := out.String()
@@ -550,7 +563,7 @@ func TestVersionIsResolvedBeforeDispatch(t *testing.T) {
 		return &debug.BuildInfo{Main: debug.Module{Version: "v1.2.3"}}, true
 	}
 	var out bytes.Buffer
-	if code := run([]string{"version"}, envFrom(nil), strings.NewReader(""), &out, &out); code != 0 {
+	if code := run([]string{"version"}, envFrom(nil), strings.NewReader(""), quiet(&out), quiet(&out)); code != 0 {
 		t.Fatal(out.String())
 	}
 	if !strings.HasPrefix(out.String(), "mash v1.2.3 (") || endpoint.CurrentVersion() != "1.2.3" {

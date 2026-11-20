@@ -551,7 +551,7 @@ func (sc *lsScenario) identity(w *world, name string, extra map[string]string) m
 	ls.addSecret(src["MASH_CREDS"], src["MASH_SERVER"], endpointPart(src, 0), filepath.Dir(src["MASH_CREDS"]))
 	out := map[string]string{"MASH_ENDPOINT": endpointPart(src, 0) + "." + testGroup + "." + name, "MASH_SERVER": src["MASH_SERVER"],
 		"MASH_CREDS": src["MASH_CREDS"], "MASH_SPOOL_FROM_START": "1", "XDG_STATE_HOME": sc.state,
-		"MASH_INSECURE_PLAINTEXT": "1"} // REQ-014: these tests are not about TLS; the override is explicit
+		"MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION": "1"} // REQ-014: these tests are not about TLS; the override is explicit
 	for k, v := range extra {
 		out[k] = v
 	}

@@ -20,7 +20,7 @@ carries the checkout's copy; `LIVEAT_SETUP_SCRIPT` names the file to put in the 
 (`ca.pem`, `server.pem`, `server.key` in the server directory). The script chooses its own port (4222, or the next free one
 up to 4272); `P` is only checked free before it starts. It needs `nats`, `nats-server`, `openssl` and `ss`, all in the image, and refuses root (the container user is not root).
 Every command of AT-001 to AT-003 connects to `tls://127.0.0.1:<the chosen port>` with `MASH_CA` set to
-that `ca.pem` and no `MASH_INSECURE_PLAINTEXT` (REQ-014); AT-001 asserts that and that `mash doctor` says the server row is ok on tls://.
+that `ca.pem` and no `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION` (REQ-014); AT-001 asserts that and that `mash doctor` says the server row is ok on tls://.
 Only AT-003's plain-URL case sets the override, per command, against a counting listener. The server key's text is
 searched for in all captured output like a seed.
 

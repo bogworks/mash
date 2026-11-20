@@ -123,13 +123,9 @@ func redactText(s string) string {
 	return seedText.ReplaceAllString(s, "REDACTED")
 }
 
-// reportSettings prints once, at serve start, what the log of a session should say about its settings: the plain-text
-// warning when insecure_plaintext lets a plain connection through, and the warning for a server address that carries
-// a password or token.
+// reportSettings prints once, at serve start, what the log of a session should say about its settings: the warning for a
+// server address that carries a password or token. (The encryption-off line is printed by every command at start.)
 func reportSettings(src *statusSource, stderr io.Writer) {
-	if w := endpoint.PlainWarning(src.cfg); w != "" {
-		fmt.Fprintln(stderr, w)
-	}
 	if w := urlSecretWarning(src.cfg); w != "" {
 		fmt.Fprintln(stderr, "mash: "+w)
 	}

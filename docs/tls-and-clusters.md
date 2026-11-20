@@ -82,7 +82,6 @@ Copy `ca.pem` (not `ca.key`) to every machine that connects. In `config.json`:
 | `servers` | `MASH_SERVER`, `--server` | `tls://host:port`; several separated by commas in the environment, or a JSON array in the file. |
 | `ca` | `MASH_CA`, `--ca` | The CA that signed the server's certificate. Without it the system trust store is used. |
 | `tls_cert`, `tls_key` | `MASH_TLS_CERT`, `MASH_TLS_KEY` | A client certificate and its key, for a server with `verify: true`. Set both or neither. |
-| `insecure_plaintext` | `MASH_INSECURE_PLAINTEXT` | `1` allows plain text (below). Off by default. |
 
 A variable overrides the same key in `config.json`. A relative path in `config.json` is resolved against the config directory. The files are read at connect time.
 
@@ -97,20 +96,22 @@ The same settings serve `mashctl`, `mash serve`, `mash hook` and the other `mash
 | Set `tls_cert` without `tls_key` | `tls_cert and tls_key (MASH_TLS_CERT and MASH_TLS_KEY) must be set together` |
 | Named a host the certificate does not list | an `x509` host name error. Add the name to the SAN and sign again. |
 
-### Plain text and `MASH_INSECURE_PLAINTEXT`
+### Plain text and `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION`
 
-Every mash connection requires TLS, to any host, loopback included: `mashctl`, `mash serve`, `mash hook` and the commands `send`, `read`, `inbox`, `who`, `prompt`, `status` and `doctor`. A plain `nats://` or `ws://` URL is refused before any connection is made, and so is any other scheme that is not `tls://` or `wss://`. `mashctl init --local` makes a certificate authority and a server certificate, so the quick start runs over TLS with no extra setting. The one override is `insecure_plaintext` (`MASH_INSECURE_PLAINTEXT`): `1`/`true` or `0`/`false`, anything else is an error, and the variable beats `config.json`. 
+Every mash connection requires TLS, to any host, loopback included: `mashctl`, `mash serve`, `mash hook` and the commands `send`, `read`, `inbox`, `who`, `prompt`, `status` and `doctor`. A plain `nats://` or `ws://` URL is refused before any connection is made, and so is any other scheme that is not `tls://` or `wss://`. `mashctl init --local` makes a certificate authority and a server certificate, so the quick start runs over TLS with no extra setting.
 
-A plain URL without the override fails with exit code 2 and this text:
+Encryption can be turned off in one way only: the environment variable `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1`, for `mash` and `mashctl` alike. It is not a setting in the table above: there is no flag and no `config.json` key. Its only value is `1`; empty or `0` is off, anything else is an error naming the variable. The old names, `MASH_INSECURE_PLAINTEXT` and the `insecure_plaintext` key, are refused with an error naming the new variable (exit 2).
 
-```
-mash: refusing a plain nats:// connection to "HOST": every mash connection requires TLS, to any host (loopback included); set insecure_plaintext (MASH_INSECURE_PLAINTEXT=1) to allow plain text; the fix is to use a tls:// URL with the server's certificate (ca for a private CA)
-```
-
-With the override set, each command connects and prints this line on stderr:
+A plain URL without it fails with exit code 2 and this text:
 
 ```
-mash: WARNING: plain-text connection to HOST (insecure_plaintext is set); anyone on the network can read mail and obtain signatures
+mash: refusing a plain nats:// connection to "HOST": every mash connection requires TLS, to any host (loopback included); set MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1 to allow plain text; the fix is to use a tls:// URL with the server's certificate (MASH_CA or "ca" for a private CA)
+```
+
+With it set, every command of both tools prints this line on stderr, once, before it does anything else, and nothing extra on stdout:
+
+```
+warning: encryption to the server is OFF (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set)
 ```
 
 Use it only for a throwaway server in a test. Never use it on a network you do not control: plain text lets anyone on the network read mail and obtain signatures. It does not turn a `tls://` connection off.
@@ -118,7 +119,7 @@ Use it only for a throwaway server in a test. Never use it on a network you do n
 `mash doctor` shows the result on its `server` row:
 
 - `server    ok    tls://myserver:4222` for a `tls://` URL that a server answers.
-- `server    warn  ... is plain text: insecure_plaintext is set` when the override is set and the URL is plain.
+- `server    warn  ... is plain text: MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set` when the override is set and the URL is plain.
 - `server    FAIL  ...` when the override is not set and the URL is plain; the connection is refused before it is made.
 
 ### `mashctl init` with a `tls://` URL

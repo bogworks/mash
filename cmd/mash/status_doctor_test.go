@@ -84,7 +84,7 @@ type ran struct {
 
 func runMash(env map[string]string, args ...string) ran {
 	var out, errb bytes.Buffer
-	code := run(args, envStrict(env), strings.NewReader(""), &out, &errb)
+	code := run(args, envStrict(env), strings.NewReader(""), &out, quiet(&errb))
 	return ran{code, out.String(), errb.String()}
 }
 
@@ -370,16 +370,16 @@ func TestDoctorServerNotAnsweringAndCredsProblems(t *testing.T) {
 
 // A plain URL: refused with no override (the refusal is the server row, not a failure of the command), a warning with it.
 func TestDoctorPlainURL(t *testing.T) {
-	w := newWorld(t, "a") // a plain server, with insecure_plaintext set
+	w := newWorld(t, "a") // a plain server, with the override set
 	r := runMash(w.env["a"], "doctor")
-	if r.code != 0 || !strings.Contains(r.out, "server    warn  "+w.e.URL+" is plain text: insecure_plaintext is set\n") || !strings.Contains(r.out, "sign-in   ok\n") ||
+	if r.code != 0 || !strings.Contains(r.out, "server    warn  "+w.e.URL+" is plain text: MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set\n") || !strings.Contains(r.out, "sign-in   ok\n") ||
 		!strings.HasSuffix(r.out, "\n\n1 warning.\n") {
 		t.Fatalf("doctor with the override: %+v", r)
 	}
 	env := strictEnv(w, "a", nil)
-	delete(env, "MASH_INSECURE_PLAINTEXT")
+	delete(env, "MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION")
 	r = runMash(env, "doctor")
-	if r.code != 1 || !strings.Contains(r.out, "server    FAIL  ") || !strings.Contains(r.out, "insecure_plaintext") ||
+	if r.code != 1 || !strings.Contains(r.out, "server    FAIL  ") || !strings.Contains(r.out, "MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION") ||
 		!strings.Contains(r.out, "sign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no unverified mail was refused\n") ||
 		!strings.HasPrefix(r.errs, "hint: use a tls:// server address") {
 		t.Fatalf("doctor without it: %+v", r)
@@ -580,14 +580,14 @@ func TestStatusAndDoctorNotATLSServer(t *testing.T) {
 	if j.code != 1 || j.out != `{"endpoint":"`+tTo("a")+`","ready":false,"online":false,"reason":"`+text+`"}`+"\n" {
 		t.Fatalf("status --json: %+v", j)
 	}
-	const fix = `use the server's plain address with insecure_plaintext set, or ask whoever runs your mesh for its tls:// address`
+	const fix = `use the server's plain address with MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1 set, or ask whoever runs your mesh for its tls:// address`
 	d := runMash(env, "doctor")
 	want := "config    ok\ncreds     ok\nserver    FAIL  " + text + "\nsign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no unverified mail was refused\n\n1 problem.\n"
 	if d.code != 1 || d.out != want || d.errs != "hint: "+fix+"\n" || strings.Contains(d.out, "did not answer:") {
 		t.Fatalf("doctor:\n%+v\nwant %q", d, want)
 	}
 	dj := runMash(env, "doctor", "--json")
-	if !strings.Contains(dj.out, `{"name":"server","state":"fail","detail":"`+text+`","fix":"use the server's plain address with insecure_plaintext set, or ask whoever runs your mesh for its tls:// address"}`) {
+	if !strings.Contains(dj.out, `{"name":"server","state":"fail","detail":"`+text+`","fix":"use the server's plain address with MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1 set, or ask whoever runs your mesh for its tls:// address"}`) {
 		t.Fatalf("doctor --json: %+v", dj)
 	}
 }

@@ -79,7 +79,7 @@ Shown as `mash: endpoint X stopped: ... Mail is off for this session.` The lease
 
 - `the server did not answer: <address>` (`status`), or `server  FAIL` in `doctor`: mash could not reach the server. Check `servers` and that the host is reachable, and the clock (below). A running session retries on its own. On a slow link raise `open_timeout` (default 20s) or `call_timeout` (default 15s).
 - `the server's certificate is not trusted: <address>` (`status`), or `server  FAIL` in `doctor`: the server answered with a certificate this machine does not trust, such as a self-signed one. Set `ca` (or `MASH_CA`) to the PEM file of the CA that signed it.
-- `the server did not offer TLS: <address>` (`status`), or `server  FAIL` in `doctor`: the address is `tls://` but what answered speaks plain text. Use the server's `tls://` address, or its plain address with `insecure_plaintext` set.
+- `the server did not offer TLS: <address>` (`status`), or `server  FAIL` in `doctor`: the address is `tls://` but what answered speaks plain text. Use the server's `tls://` address, or its plain address with `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1` set.
 - `the server refused its credentials` (`status`), or `sign-in  FAIL  the server refused these credentials` in `doctor`: the endpoint was deleted or its key reissued, so the old credentials no longer work. Ask whoever runs mashctl for a new credentials file (`mashctl endpoint reissue <address>`; `doctor` prints the exact command as its hint).
 - After a network blip, clients can take 30 to 60 seconds to reconnect because the server rate-limits new connections per source address ([operations.md](operations.md) Troubleshooting).
 - Synadia Cloud's free tier allows 5 connections, one per live session ([synadia.md](synadia.md)).

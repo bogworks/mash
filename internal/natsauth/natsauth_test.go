@@ -124,12 +124,12 @@ func TestAdvertisedServersAreNotUsed(t *testing.T) {
 	}
 	nc.Close()
 
-	opts, warning, err := natsauth.RequireTLS(url, true)
+	opts, plain, err := natsauth.RequireTLS(url, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if warning == "" {
-		t.Error("no warning for a plain connection under insecure_plaintext")
+	if !plain {
+		t.Error("a plain connection under the override is not reported as plain")
 	}
 	nc, err = nats.Connect(url, opts...)
 	if err != nil {
@@ -172,44 +172,44 @@ func TestRequireTLS(t *testing.T) {
 		override bool
 		wantErr  string // "" = accepted
 		secure   bool   // the options force TLS
-		warnHost string // the host the warning names ("" = no warning)
+		plain    bool   // the URL has a plain entry the override let through
 	}{
-		{"tls://example.com:4222", false, "", true, ""},
-		{"tls://127.0.0.1:4222", false, "", true, ""},
-		{"tls://localhost:4222", false, "", true, ""},
-		{"wss://[::1]:443", false, "", true, ""},
-		{"tls://a.example.com:4222,tls://b.example.com:4222", false, "", true, ""},
-		{"tls://example.com:4222", true, "", true, ""},
-		{"nats://127.0.0.1:4222", false, "refusing a plain nats:// connection to \"127.0.0.1\"", false, ""},
-		{"nats://localhost:4222", false, "refusing a plain nats:// connection to \"localhost\"", false, ""},
-		{"nats://[::1]:4222", false, "refusing a plain nats:// connection to \"::1\"", false, ""},
-		{"nats://example.com:4222", false, "refusing a plain nats:// connection to \"example.com\"", false, ""},
-		{"ws://example.com:80", false, "refusing a plain ws://", false, ""},
-		{"example.com:4222", false, "refusing a plain nats://", false, ""},
-		{"127.0.0.1:4222", false, "refusing a plain nats://", false, ""},
-		{"foo://example.com:4222", false, "unsupported scheme \"foo\"", false, ""},
-		{"foo://127.0.0.1:4222", true, "unsupported scheme \"foo\"", false, ""},
-		{"tls://a.example.com:4222,nats://b.example.com:4222", false, "refusing a plain nats:// connection to \"b.example.com\"", false, ""},
-		{"nats://127.0.0.1:4222,tls://example.com:4222", false, "refusing a plain nats://", false, ""},
-		{"nats://127.0.0.1:4222", true, "", false, "127.0.0.1"},
-		{"nats://localhost:4222", true, "", false, "localhost"},
-		{"nats://[::1]:4222", true, "", false, "::1"},
-		{"nats://example.com:4222", true, "", false, "example.com"},
-		{"ws://example.com:80", true, "", false, "example.com"},
-		{"example.com:4222", true, "", false, "example.com"},
-		{"tls://a.example.com:4222,nats://b.example.com:4222", true, "", false, "b.example.com"},
-		{"nats://x.example.com:4222,nats://y.example.com:4222", true, "", false, "x.example.com"},
+		{"tls://example.com:4222", false, "", true, false},
+		{"tls://127.0.0.1:4222", false, "", true, false},
+		{"tls://localhost:4222", false, "", true, false},
+		{"wss://[::1]:443", false, "", true, false},
+		{"tls://a.example.com:4222,tls://b.example.com:4222", false, "", true, false},
+		{"tls://example.com:4222", true, "", true, false},
+		{"nats://127.0.0.1:4222", false, "refusing a plain nats:// connection to \"127.0.0.1\"", false, false},
+		{"nats://localhost:4222", false, "refusing a plain nats:// connection to \"localhost\"", false, false},
+		{"nats://[::1]:4222", false, "refusing a plain nats:// connection to \"::1\"", false, false},
+		{"nats://example.com:4222", false, "refusing a plain nats:// connection to \"example.com\"", false, false},
+		{"ws://example.com:80", false, "refusing a plain ws://", false, false},
+		{"example.com:4222", false, "refusing a plain nats://", false, false},
+		{"127.0.0.1:4222", false, "refusing a plain nats://", false, false},
+		{"foo://example.com:4222", false, "unsupported scheme \"foo\"", false, false},
+		{"foo://127.0.0.1:4222", true, "unsupported scheme \"foo\"", false, false},
+		{"tls://a.example.com:4222,nats://b.example.com:4222", false, "refusing a plain nats:// connection to \"b.example.com\"", false, false},
+		{"nats://127.0.0.1:4222,tls://example.com:4222", false, "refusing a plain nats://", false, false},
+		{"nats://127.0.0.1:4222", true, "", false, true},
+		{"nats://localhost:4222", true, "", false, true},
+		{"nats://[::1]:4222", true, "", false, true},
+		{"nats://example.com:4222", true, "", false, true},
+		{"ws://example.com:80", true, "", false, true},
+		{"example.com:4222", true, "", false, true},
+		{"tls://a.example.com:4222,nats://b.example.com:4222", true, "", false, true},
+		{"nats://x.example.com:4222,nats://y.example.com:4222", true, "", false, true},
 	} {
-		opts, warning, err := natsauth.RequireTLS(tc.url, tc.override)
+		opts, plain, err := natsauth.RequireTLS(tc.url, tc.override)
 		if tc.wantErr != "" {
 			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 				t.Errorf("%s override=%v: err %v, want %q", tc.url, tc.override, err, tc.wantErr)
 			}
-			if err != nil && (opts != nil || warning != "") {
-				t.Errorf("%s: a refusal returned options or a warning", tc.url)
+			if err != nil && (opts != nil || plain) {
+				t.Errorf("%s: a refusal returned options or plain", tc.url)
 			}
-			if err != nil && !strings.Contains(tc.wantErr, "unsupported") && !strings.Contains(err.Error(), "insecure_plaintext") {
-				t.Errorf("%s: refusal does not name insecure_plaintext: %v", tc.url, err)
+			if err != nil && !strings.Contains(tc.wantErr, "unsupported") && !strings.Contains(err.Error(), "MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1") {
+				t.Errorf("%s: refusal does not name MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION: %v", tc.url, err)
 			}
 			if err != nil && !strings.Contains(err.Error(), `"ca"`) {
 				t.Errorf("%s: refusal does not name the fix: %v", tc.url, err)
@@ -227,12 +227,8 @@ func TestRequireTLS(t *testing.T) {
 		if !o.IgnoreDiscoveredServers || o.CustomDialer != nil {
 			t.Errorf("%s: IgnoreDiscoveredServers = %v, CustomDialer set = %v", tc.url, o.IgnoreDiscoveredServers, o.CustomDialer != nil)
 		}
-		want := ""
-		if tc.warnHost != "" {
-			want = "mash: WARNING: plain-text connection to " + tc.warnHost + " (insecure_plaintext is set); anyone on the network can read mail and obtain signatures"
-		}
-		if warning != want {
-			t.Errorf("%s override=%v: warning %q, want %q", tc.url, tc.override, warning, want)
+		if plain != tc.plain {
+			t.Errorf("%s override=%v: plain = %v, want %v", tc.url, tc.override, plain, tc.plain)
 		}
 	}
 }
@@ -249,9 +245,8 @@ func TestRequireTLSNeverPrintsUserinfo(t *testing.T) {
 			}
 		}
 	}
-	_, w, err := natsauth.RequireTLS("nats://user:s3cret@example.com:4222", true)
-	if err != nil || strings.Contains(w, "s3cret") || !strings.Contains(w, "example.com") {
-		t.Errorf("override: warning %q, err %v", w, err)
+	if _, plain, err := natsauth.RequireTLS("nats://user:s3cret@example.com:4222", true); err != nil || !plain {
+		t.Errorf("override: plain %v, err %v", plain, err)
 	}
 }
 

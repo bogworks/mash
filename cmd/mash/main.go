@@ -192,6 +192,18 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 	if c := buildRevision(commit, bi); c != endpoint.CurrentCommit() {
 		endpoint.SetCommit(c)
 	}
+	// The encryption override is the very first thing checked, before any argument is read (bare `mash`, a bad flag,
+	// help and version included): a removed name or a bad value is refused (exit 2), and while the override is on
+	// every invocation prints the warning on stderr, once. A hook never blocks the session: it says the refusal on
+	// stderr, exits 0, and reads and writes nothing.
+	if skipErr := config.CheckSkipEncryption(lookup, env("HOME")); skipErr != nil {
+		if len(args) > 0 && args[0] == "hook" {
+			fmt.Fprintf(stderr, "mash hook: %s\n", skipErr.Msg())
+			return 0
+		}
+		return cliframe.Report(stdout, stderr, cliframe.Usagef("%s", skipErr.Msg()).WithHint(skipErr.Hint()), slices.Contains(args, "--json"))
+	}
+	config.WarnSkipEncryption(lookup, stderr)
 	// An error before a command runs is one framed error (cliframe.Report): "error: MSG" and a hint on stderr, or with
 	// --json {"error","hint"} on stdout and nothing on stderr. The code is the error's own (1 failure, 2 usage).
 	if len(args) == 0 {
@@ -209,6 +221,11 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 		return cliframe.Report(stdout, stderr, cliframe.Usagef("mash needs a command").WithHint("mash --help"), global.JSON)
 	}
 	env, lookup = global.Shadow(cliframe.Spec{Tool: "mash", CredsEnv: "MASH_CREDS", CredsKey: "creds"}, env, lookup)
+	// The refusal was made (and the warning printed) before the arguments were read; a --config-dir flag can point at a
+	// file with the removed key, so that file is checked again here, refusal only.
+	if skipErr := config.CheckSkipEncryption(lookup, env("HOME")); skipErr != nil {
+		return cliframe.Report(stdout, stderr, cliframe.Usagef("%s", skipErr.Msg()).WithHint(skipErr.Hint()), global.JSON)
+	}
 	if args[0] == "help" { // `mash help` prints what `mash --help` does; `mash help send` what `mash send --help` does
 		if len(args) == 1 {
 			args = []string{"--help"}
@@ -308,18 +325,18 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 	if errors.As(err, &several) && slices.Contains([]string{"send", "who", "inbox", "read", "prompt"}, args[0]) {
 		return cliframe.Report(stdout, stderr, cmdcore.NoEndpoint(cmdcore.SeveralInstalled, args[0], several.Addresses), jsonOut)
 	}
+	var skipErr *config.SkipEncryptionError
+	if errors.As(err, &skipErr) && args[0] != "hook" && !report { // the removed names or a bad value: a configuration error, exit 2
+		return cliframe.Report(stdout, stderr, cliframe.Usagef("%s", skipErr.Msg()).WithHint("mash doctor"), jsonOut)
+	}
 	if err != nil && args[0] != "serve" && !report {
 		return cliframe.Report(stdout, stderr, cliframe.Failf("%s", strings.TrimPrefix(err.Error(), "mash: ")).WithHint("mash doctor"), jsonOut)
 	}
-	// A plain URL with no insecure_plaintext is refused before anything is connected (REQ-014): serve stops at session
+	// A plain URL with no MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1 is refused before anything is connected (REQ-014): serve stops at session
 	// start and the commands that connect stop, exit 2, with the refusal on stderr.
 	if err == nil && !cfg.Inert() {
 		if _, perr := endpoint.EndpointTLS(cfg); perr != nil && !report { // a report says it as a row
 			return cliframe.Report(stdout, stderr, cliframe.Usagef("%s", strings.TrimPrefix(perr.Error(), "mash: ")).WithHint("mash doctor"), jsonOut)
-		}
-		// serve says it once at start (reportSettings); a command says it here, once, before it connects.
-		if w := endpoint.PlainWarning(cfg); w != "" && args[0] != "serve" {
-			fmt.Fprintln(stderr, w)
 		}
 	}
 	switch args[0] {

@@ -323,20 +323,17 @@ func SpoolDir(cfg config.Config) (string, error) {
 }
 
 // EndpointTLS is the extra connection options an endpoint connection under cfg needs, or the refusal: a plain URL is
-// refused here, before anything is connected, unless insecure_plaintext is set (natsauth.RequireTLS, REQ-014). It prints
-// nothing. PlainWarning is the line to print to standard error when a plain URL was let through.
+// refused here, before anything is connected, unless MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1 is set (natsauth.RequireTLS, REQ-014). It prints
+// nothing; PlainURL says whether a plain URL was let through.
 func EndpointTLS(cfg config.Config) ([]nats.Option, error) {
-	opts, _, err := natsauth.RequireTLS(cfg.URL, cfg.InsecurePlaintext)
+	opts, _, err := natsauth.RequireTLS(cfg.URL, cfg.SkipEncryption)
 	return opts, err
 }
 
-// PlainWarning is the plain-text warning for cfg ("" when its URL is all TLS or is refused).
-func PlainWarning(cfg config.Config) string {
-	_, w, err := natsauth.RequireTLS(cfg.URL, cfg.InsecurePlaintext)
-	if err != nil {
-		return ""
-	}
-	return w
+// PlainURL reports whether cfg's URL has a plain entry that the override let through (false when it is all TLS or is refused).
+func PlainURL(cfg config.Config) bool {
+	_, plain, err := natsauth.RequireTLS(cfg.URL, cfg.SkipEncryption)
+	return err == nil && plain
 }
 
 // OpenClient connects as cfg.Name and checks the identity, without a lease. It loads the whole directory: serve and

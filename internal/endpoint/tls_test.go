@@ -16,7 +16,7 @@ func TestTLSPrivateCA(t *testing.T) {
 		t.Fatalf("URL = %s, want tls://", f.e.URL)
 	}
 	cfg := f.cfg("a")
-	cfg.InsecurePlaintext = false // these tests are about TLS: no override
+	cfg.SkipEncryption = false // these tests are about TLS: no override
 
 	cfg.TLSCA = f.e.CAFile
 	ep, err := OpenClient(context.Background(), cfg)
@@ -37,7 +37,7 @@ func TestTLSPrivateCA(t *testing.T) {
 func TestTLSClientCert(t *testing.T) {
 	f := newFixtureWith(t, testenv.Options{TLS: true, RequireClientCert: true}, "a")
 	cfg := f.cfg("a")
-	cfg.InsecurePlaintext = false // these tests are about TLS: no override
+	cfg.SkipEncryption = false // these tests are about TLS: no override
 	cfg.TLSCA = f.e.CAFile
 
 	_, err := OpenClient(context.Background(), cfg)
@@ -73,7 +73,7 @@ func TestPlainURLRefusedWithoutTheOverrideAndNoConnectionMade(t *testing.T) {
 	}()
 	f := newFixture(t, "a")
 	cfg := f.cfg("a")
-	cfg.InsecurePlaintext = false // this test is about TLS: no override
+	cfg.SkipEncryption = false // this test is about TLS: no override
 	for _, url := range []string{"nats://" + ln.Addr().String(), ln.Addr().String(), "ws://" + ln.Addr().String()} {
 		cfg.URL = url
 		for name, open := range map[string]func() error{
@@ -81,7 +81,7 @@ func TestPlainURLRefusedWithoutTheOverrideAndNoConnectionMade(t *testing.T) {
 			"Open":       func() error { _, err := Open(context.Background(), cfg); return err },
 		} {
 			err := open()
-			if err == nil || !strings.Contains(err.Error(), "insecure_plaintext") || !strings.Contains(err.Error(), "MASH_INSECURE_PLAINTEXT=1") {
+			if err == nil || !strings.Contains(err.Error(), "MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1") {
 				t.Errorf("%s %s: err = %v, want the refusal naming the override", name, url, err)
 			}
 		}
