@@ -129,8 +129,8 @@ mashctl endpoint create alice.dev.design --out alice.dev.design.join
 When the seed must never leave the endpoint's machine, make the key there and send only the public key file to the `mashctl` host. `--public-key` signs that key and needs `--out`; the join file holds the user JWT and no seed:
 
 ```sh
-mash key create --out design.seed                                                          # on the endpoint's machine: writes design.seed and design.pub
-mashctl endpoint create alice.dev.design --out alice.dev.design.join --public-key design.pub   # on the mashctl host
+mash key create --out design.seed                                                               # on the endpoint's machine: writes design.seed and design.seed.pub
+mashctl endpoint create alice.dev.design --out alice.dev.design.join --public-key design.seed.pub   # on the mashctl host
 ```
 
 The options and the join file are described in [mashctl.md](mashctl.md#mashctl-endpoint-create).
@@ -154,9 +154,9 @@ It cannot read another endpoint's inbox, history or replies (each endpoint recei
 
 The endpoint's seed is its private key. In this form it is made on the endpoint's machine and never leaves it. Only the public key goes to the `mashctl` host, and only the join file, which holds the signed JWT and no seed, comes back.
 
-1. On the endpoint's machine, make the key: `mash key create --out design.seed`. It writes `design.seed` (mode 0600) and `design.pub`.
-2. Copy only `design.pub` to the host that runs `mashctl`. Do not copy `design.seed`.
-3. On the `mashctl` host, sign it: `mashctl endpoint create alice.dev.design --out alice.dev.design.join --public-key design.pub`. It writes the endpoint's record and the join file.
+1. On the endpoint's machine, make the key: `mash key create --out design.seed`. It writes `design.seed` (mode 0600) and `design.seed.pub`.
+2. Copy only `design.seed.pub` to the host that runs `mashctl`. Do not copy `design.seed`.
+3. On the `mashctl` host, sign it: `mashctl endpoint create alice.dev.design --out alice.dev.design.join --public-key design.seed.pub`. It writes the endpoint's record and the join file.
 4. Copy only `alice.dev.design.join` back to the endpoint's machine. With `--public-key` the join file holds a JWT and no secret.
 5. On the endpoint's machine, run `mash join` on the join file and give it the seed with `--key design.seed`.
 

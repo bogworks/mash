@@ -15,12 +15,6 @@ func helpUsage(args []string) (string, bool) {
 		u, known = commandLines(usage, "  mash "+args[0]), true
 	case "plugin":
 		u, known = pluginUsage, true
-	case "key", "credential":
-		first := keycredHelpFirst(args)
-		if first < len(args) && (args[first] == "-h" || args[first] == "--help") {
-			return keycredUsage(args), true
-		}
-		return "", false
 	}
 	if !known {
 		return "", false

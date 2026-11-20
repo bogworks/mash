@@ -42,10 +42,6 @@ var knownGaps = map[string]string{
 	"help read":       "inbox/read on the command table: S4b (hand-written one-line help)",
 	"tools inbox":     "inbox/read on the command table: S4b (the MCP tool is the old hand-written one)",
 	"tools read":      "inbox/read on the command table: S4b (the MCP tool is the old hand-written one)",
-	"help join":       "join: slice S5 (the command does not exist)",
-	"toplevel join":   "join: slice S5 (the command does not exist)",
-	"help key":        "key is not on the command table yet: hand-written help, no Setup group parent layout",
-	"help key create": "key create is not on the command table yet: hand-written help, flags beyond the spec (--pub-out, --json, --dry-run), and its output is the old multi-line \"created key\" block (public key, seed, public file, next:), not the spec's 'Created bob.seed and bob.seed.pub.' (and the public file is bob.pub, not bob.seed.pub): S5 replaces it",
 	"help serve":      "serve is hand-written: its --help prints the top-level line, not the generated layout",
 	"help hook":       "hook is hand-written: its --help prints the top-level line, not the generated layout",
 	"help prompt":     "prompt is hand-written: one-line usage, not the generated layout",
@@ -60,11 +56,15 @@ var knownDrift = map[string]string{
 	"bad-option version":           confUnknownOption,
 	"bad-option status":            confUnknownOption,
 	"bad-option doctor":            confUnknownOption,
+	"bad-option join":              confUnknownOption,
+	"bad-option key create":        confUnknownOption,
 	"bad-option-json send":         confUnknownOption,
 	"bad-option-json who":          confUnknownOption,
 	"bad-option-json version":      confUnknownOption,
 	"bad-option-json status":       confUnknownOption,
 	"bad-option-json doctor":       confUnknownOption,
+	"bad-option-json join":         confUnknownOption,
+	"bad-option-json key create":   confUnknownOption,
 	"help-spelling -h version":     confHelpFirst,
 	"help-spelling --help version": confHelpFirst,
 }
@@ -80,8 +80,7 @@ const confUnknownOption = "the build appends ' for mash <command>' to the unknow
 
 // confRemoved are the commands the build lists that the specification does not have, because they are being removed.
 var confRemoved = map[string]string{
-	"plugin":     "being removed from the command list",
-	"credential": "replaced by join",
+	"plugin": "being removed from the command list",
 }
 
 // confCheck applies the rule of the two tables to the problems of one check.
@@ -375,15 +374,25 @@ func confRules(t *testing.T, spec confSpec) {
 		}
 	}
 	// the arguments a command needs to get past its own usage checks
-	positional := map[string][]string{"send": {"a.b.c", "hi"}, "who": nil, "version": nil, "status": nil, "doctor": nil}
+	positional := map[string][]string{"send": {"a.b.c", "hi"}, "who": nil, "version": nil, "status": nil, "doctor": nil, "join": {"x.join"}}
+	// setup commands make the configuration or a key: they need no endpoint, so the rule on having none does not apply
+	setup := map[string]bool{"join": true, "key create": true}
 	for _, e := range commandEntries {
 		name := e.CLIName()
+		words := strings.Fields(name) // "key create" is two words on the command line
 		pos := positional[name]
 		t.Run(name, func(t *testing.T) {
 			env := confEnv(t)
+			if name == "key create" { // a seed path that cannot be made (its parent is a file), so a run writes nothing
+				f := filepath.Join(t.TempDir(), "file")
+				if err := os.WriteFile(f, nil, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				pos = []string{"--out", filepath.Join(f, "x.seed")}
+			}
 
 			t.Run("width", func(t *testing.T) { // (a) 80 columns
-				r := runMash(env, name, "--help")
+				r := runMash(env, append(append([]string{}, words...), "--help")...)
 				var p []string
 				for i, line := range strings.Split(r.out, "\n") {
 					if n := len([]rune(line)); n > 80 {
@@ -394,7 +403,7 @@ func confRules(t *testing.T, spec confSpec) {
 			})
 
 			t.Run("bad option", func(t *testing.T) { // (b) and (d): exit 2, an error line, the command's own help as the hint
-				r := runMash(env, append([]string{name}, append(pos, "--x")...)...)
+				r := runMash(env, append(append([]string{}, words...), append(pos, "--x")...)...)
 				var p []string
 				lines := strings.Split(strings.TrimSuffix(r.errs, "\n"), "\n")
 				if r.code != 2 {
@@ -417,7 +426,7 @@ func confRules(t *testing.T, spec confSpec) {
 			})
 
 			t.Run("bad option as json", func(t *testing.T) { // (c): {error, hint} on stdout, nothing on stderr, the same exit code
-				r := runMash(env, append([]string{name}, append(pos, "--x", "--json")...)...)
+				r := runMash(env, append(append([]string{}, words...), append(pos, "--x", "--json")...)...)
 				var p []string
 				var obj map[string]any
 				if err := json.Unmarshal([]byte(r.out), &obj); err != nil {
@@ -434,9 +443,9 @@ func confRules(t *testing.T, spec confSpec) {
 				confCheckAny(t, "bad-option-json "+name, p)
 			})
 
-			if name != "version" { // (d) and the rule on having no endpoint: the same three-wording sentence everywhere
+			if name != "version" && !setup[name] { // (d) and the rule on having no endpoint: the same three-wording sentence everywhere
 				t.Run("no endpoint", func(t *testing.T) {
-					r := runMash(env, append([]string{name}, pos...)...)
+					r := runMash(env, append(append([]string{}, words...), pos...)...)
 					var p []string
 					if r.code != 2 || r.out != "" || r.errs != confNoEndpoint {
 						p = append(p, fmt.Sprintf("with no endpoint installed: want exit 2, no stdout, stderr %q; got exit %d, stdout %q, stderr %q", confNoEndpoint, r.code, r.out, r.errs))
@@ -444,7 +453,7 @@ func confRules(t *testing.T, spec confSpec) {
 					confCheckAny(t, "no-endpoint "+name, p)
 				})
 				t.Run("no endpoint as json", func(t *testing.T) {
-					r := runMash(env, append([]string{name}, append(pos, "--json")...)...)
+					r := runMash(env, append(append([]string{}, words...), append(pos, "--json")...)...)
 					want := `{"error":"no endpoint is installed here","hint":"mash join <file>"}` + "\n"
 					var p []string
 					if r.code != 2 || r.out != want || r.errs != "" {
@@ -457,8 +466,8 @@ func confRules(t *testing.T, spec confSpec) {
 			t.Run("global options anywhere", func(t *testing.T) { // (e)
 				d := t.TempDir()
 				globals := []string{"--no-color", "--config-dir", d, "--json"}
-				after := runMash(env, append(append([]string{name}, pos...), globals...)...)
-				before := runMash(env, append(append(append([]string{}, globals...), name), pos...)...)
+				after := runMash(env, append(append(append([]string{}, words...), pos...), globals...)...)
+				before := runMash(env, append(append(append([]string{}, globals...), words...), pos...)...)
 				var p []string
 				if after != before {
 					p = append(p, fmt.Sprintf("%v after the command and before it differ: after %+v, before %+v", globals, after, before))

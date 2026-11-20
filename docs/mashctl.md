@@ -4,7 +4,7 @@ Endpoints are made by `mashctl endpoint create`, and every endpoint carries the 
 
 `endpoint create`, `reissue`, `delete`, `list`, `show`, `set`, `unset`, `suspend`, `resume`, `inbox` and `permissions` take an endpoint as `owner.group.name`: dotted, three parts. A bare name, the flat key `owner_group_name` and the slash form are refused (exit 2).
 
-`mashctl endpoint create`, `reissue`, `delete`, `list` and `show` are described [below](#mashctl-endpoint-create); `mash key create` and `mash credential create` make the endpoint's key and creds file.
+`mashctl endpoint create`, `reissue`, `delete`, `list` and `show` are described [below](#mashctl-endpoint-create); `mash key create` makes the endpoint's own key, and `mash join` installs its creds file from the join file.
 
 ## Prerequisites
 
@@ -252,18 +252,18 @@ public key: UDXU4RCSV3GJRXWQ4PNDKYEL7ZBSMSGGTJYNDQGHFM4QWHBRD3ZTQ4LX
 
 `mashctl version` prints `mashctl vVERSION (COMMIT)`, where COMMIT is the first seven characters of the commit the binary was built from (`unknown` when the build has none). `--json` prints `{"version": "VERSION", "commit": "COMMIT"}`.
 
-## mash key create and mash credential create
+## mash key create and mash join
 
 These two run on the endpoint's machine and need no server and no admin credentials.
 
 ```sh
-mash key create --out FILE [--pub-out FILE] [--json] [--dry-run]
-mash credential create --seed FILE --jwt FILE [--out CREDS] [--force] [--json] [--dry-run]
+mash key create [--out FILE]
+mash join FILE [--key SEED] [--replace] [--dry-run]
 ```
 
-`mash key create` makes a user key pair. The seed goes to `FILE` (mode 0600), and the public key to the same name with `.seed` replaced by `.pub` (or to `--pub-out`). It makes a missing parent directory (mode 0700), refuses to overwrite either file, and prints the public key and both paths, never the seed.
+`mash key create` makes a user key pair. The seed goes to `FILE` (mode 0600; default `mash.seed` in the current folder), and the public key beside it, with `.pub` added to the whole seed path: `bob.seed` and `bob.seed.pub`. It makes a missing parent directory (mode 0700), refuses to overwrite either file (`error: bob.seed already exists; nothing was written`, exit 1), and prints `Created bob.seed and bob.seed.pub.` The key itself is never printed. `--json` prints `{"seed": "bob.seed", "public_key": "bob.seed.pub"}`, the two paths.
 
-`mash credential create` joins a seed and a JWT file into a creds file (mode 0600). By default the file is `<config dir>/<JWT name>.creds`; `--out` names another. It checks the structure of the JWT, its self-signature, that it is a user JWT, and that it names the seed's key (`key_mismatch` if not). It does not check the issuing account or the expiry. It refuses to replace an existing file unless `--force` is given, and it prints the path and the public key, never the seed or the JWT.
+`mash join` installs the endpoint from a join file, the one text file `mashctl endpoint create --out` writes. It copies the servers and the certificate authority's certificate into the configuration folder (`config.json` `servers`, and `ca.pem` named by `ca`) and writes `<address>.creds` there (mode 0600). A join file made for a public key you supplied holds no seed: give your seed file with `--key`. One configuration folder serves one mesh, so a join file for other servers is refused (`--config-dir` names another folder). An endpoint already installed is refused unless `--replace` is given. `--dry-run` says what it would do and writes nothing. It prints `Joined as alice.dev.design.`; `--json` prints `{"endpoint", "servers", "creds"}`. The join file's format is described in [the specification](../spec/mash.json) under `join`: JSON with `mash_join` (1), `address`, `servers`, `ca` (PEM text or null), and `creds` (the whole creds file) or `user_jwt`.
 
 ## Errors of create and reissue
 

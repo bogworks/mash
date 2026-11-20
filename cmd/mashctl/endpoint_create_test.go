@@ -338,7 +338,7 @@ func TestEndpointCreateOutCarriesCA(t *testing.T) {
 		t.Fatalf("base %+v %v", base, err)
 	}
 	j := base.withCreds("o.g.a", []byte("creds text\n"))
-	raw, err := j.encode()
+	raw, err := j.Encode()
 	if err != nil || !strings.Contains(string(raw), `"ca": "-----BEGIN CERTIFICATE-----\n`) {
 		t.Errorf("encoded %q %v", raw, err)
 	}

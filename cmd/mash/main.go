@@ -18,6 +18,7 @@ import (
 
 	"github.com/bogworks/mash/internal/cliframe"
 	"github.com/bogworks/mash/internal/cmdcore"
+	"github.com/bogworks/mash/internal/cmdcore/cmds"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/endpoint"
 	"github.com/bogworks/mash/internal/host"
@@ -57,21 +58,20 @@ var helpGroups = []string{"Everyday", "Setup", "Integration", "Raw SAP"}
 // listed from the table (its synopsis and description are generated); one that is not yet is listed from handCommands.
 var helpLayout = map[string][]string{
 	"Everyday":    {"send", "inbox", "read", "who", "status", "doctor", "version"},
-	"Setup":       {"key", "credential"},
+	"Setup":       {"join", "key"},
 	"Integration": {"serve", "hook", "plugin"},
 	"Raw SAP":     {"prompt"},
 }
 
 // handCommands are the synopsis and one-line description of the commands that are not on the command table yet.
 var handCommands = map[string][2]string{
-	"inbox":      {"mash inbox [--limit N] [--after SEQ]", "Recent messages, or the N after SEQ (oldest first)"},
-	"read":       {"mash read <seq>", "Print one message from your inbox"},
-	"key":        {"mash key create --out FILE [options]", "Make a user key pair: seed to FILE (0600), public key to FILE.pub; needs no config"},
-	"credential": {"mash credential create --seed FILE --jwt FILE [options]", "Join a seed and its user JWT into a credentials file; needs no config"},
-	"serve":      {"mash serve", "The Claude Code channel server (started by the plugin)"},
-	"hook":       {"mash hook", "The plugin's hook: shows the session its spooled mail"},
-	"plugin":     {"mash plugin export <dir>", "Write this build's Claude Code plugin and a marketplace for it into <dir>"},
-	"prompt":     {"mash prompt <to> <text...>", "A live, signed SAP prompt; prints the reply"},
+	"inbox":  {"mash inbox [--limit N] [--after SEQ]", "Recent messages, or the N after SEQ (oldest first)"},
+	"read":   {"mash read <seq>", "Print one message from your inbox"},
+	"key":    {"mash key create [options]", cmds.KeyParent},
+	"serve":  {"mash serve", "The Claude Code channel server (started by the plugin)"},
+	"hook":   {"mash hook", "The plugin's hook: shows the session its spooled mail"},
+	"plugin": {"mash plugin export <dir>", "Write this build's Claude Code plugin and a marketplace for it into <dir>"},
+	"prompt": {"mash prompt <to> <text...>", "A live, signed SAP prompt; prints the reply"},
 }
 
 // usageFor is the tool's own help for the table r: the commands listed by group, each with its one-line description.
@@ -84,7 +84,7 @@ func usageFor(r *cmdcore.Registry) string {
 		b.WriteString("\n" + g + ":\n")
 		names := helpLayout[g]
 		for _, n := range r.Groups(g) {
-			if !slices.Contains(names, n) {
+			if !slices.Contains(names, n) && !strings.Contains(n, " ") { // key create is listed as its parent, key
 				names = append(slices.Clone(names), n)
 			}
 		}
@@ -168,10 +168,9 @@ var verbUsage = map[string]string{
 
 // helpTopic is the verbs that are not on the table and have help of their own: `mash help VERB` prints their
 // `mash VERB --help`.
-var helpTopic = map[string]bool{"serve": true, "hook": true, "plugin": true, "key": true, "credential": true, "read": true, "inbox": true, "prompt": true}
+var helpTopic = map[string]bool{"serve": true, "hook": true, "plugin": true, "key": true, "read": true, "inbox": true, "prompt": true}
 
-// noJSONForm is the verbs that have no --json form: a --json given to one is a usage error. key and credential
-// parse --json themselves, and send, version and who are commands of the table.
+// noJSONForm is the verbs that have no --json form: a --json given to one is a usage error.
 var noJSONForm = map[string]bool{"read": true, "inbox": true, "prompt": true, "serve": true, "hook": true, "plugin": true}
 
 // stdinWait is how long a message read from standard input has to arrive: 15 minutes, as the send help says. It is its
@@ -180,19 +179,6 @@ const stdinWait = 15 * time.Minute
 
 // stdinLimit is stdinWait; a variable only so a test can shorten it.
 var stdinLimit = stdinWait
-
-// jsonRequested is whether the errors before a verb runs are framed as JSON: --json as a global option, or --json given
-// to a verb that parses it itself (key, credential), which the global parse leaves in the arguments.
-func jsonRequested(global cliframe.Global, args []string) bool {
-	if global.JSON {
-		return true
-	}
-	switch args[0] {
-	case "key", "credential":
-		return slices.Contains(args[1:], "--json")
-	}
-	return false
-}
 
 // runLookup is main with its environment injected. lookup must agree with env; it is what config.Load reads.
 func runLookup(ctx context.Context, args []string, env func(string) string, lookup config.Lookup, stdin io.Reader, stdout, stderr io.Writer) int {
@@ -214,7 +200,7 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 	// The global options (--endpoint, --creds, --server, --ca, --config-dir, --verbose, --json, --no-color) are taken out
 	// of the arguments wherever they stand, before any verb runs; a flag shadows its environment variable.
 	rawArgs := args
-	global, args, gerr := cliframe.ExtractOwning(cliframe.Spec{Tool: "mash", CredsEnv: "MASH_CREDS", CredsKey: "creds"}, args, map[string][]string{"key": {"--json"}, "credential": {"--json"}}) // these parse --json themselves
+	global, args, gerr := cliframe.ExtractOwning(cliframe.Spec{Tool: "mash", CredsEnv: "MASH_CREDS", CredsKey: "creds"}, args, nil)
 	if gerr != nil {
 		// The options did not parse, so --json is looked for by hand.
 		return cliframe.Report(stdout, stderr, cliframe.Usagef("%s", strings.TrimPrefix(gerr.Error(), "mash: ")).WithHint("mash --help"), slices.Contains(rawArgs, "--json"))
@@ -228,12 +214,18 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 			args = []string{"--help"}
 		} else if _, known := helpTopic[args[1]]; !known && !commandVerb(args[1]) {
 			return cliframe.Report(stdout, stderr, cliframe.Usagef("mash has no command %s", args[1]).WithHint("mash help"), global.JSON)
+		} else if args[1] == "key" && len(args) > 2 && args[2] == "create" {
+			args = []string{"key", "create", "--help"}
 		} else {
 			args = []string{args[1], "--help"}
 		}
 	}
 	if u, ok := newCommands(nil).HelpFor(args[0], args[1:]); ok { // the generated help of the commands on the table
 		fmt.Fprint(stdout, u)
+		return 0
+	}
+	if args[0] == "key" && len(args) > 1 && (args[1] == "-h" || args[1] == "--help") { // before any dispatch: help changes nothing
+		fmt.Fprint(stdout, keyHelp())
 		return 0
 	}
 	if u, ok := helpUsage(args); ok { // before any dispatch, config load or write: help changes nothing
@@ -266,14 +258,20 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 	if args[0] == "plugin" { // before config: an install runs it with no endpoint and no environment
 		return pluginCmd(args[1:], stdout, stderr)
 	}
-	if args[0] == "key" || args[0] == "credential" { // before config: these need no endpoint, config file or account key
-		return keycredCmd(args, env, stdout, stderr)
+	if args[0] == "key" { // before config: it needs no endpoint, config file or account key
+		return keyCmd(args, stdin, stdout, stderr, global)
 	}
-	jsonOut := jsonRequested(global, args)
 	home := env("HOME")
 	if home == "" {
 		home, _ = os.UserHomeDir()
 	}
+	if args[0] == "join" { // before config: it makes the configuration, so it reads none
+		mk := func(context.Context) (*cmdcore.Env, error) {
+			return &cmdcore.Env{Svc: joinSvc{env: env, home: home}}, nil
+		}
+		return newCommands(mk).RunCLI("join", args[1:], stdin, stdout, stderr, global)
+	}
+	jsonOut := global.JSON
 	load := config.Load
 	if args[0] == "serve" || args[0] == "hook" {
 		load = config.LoadNamedOnly // a session never picks an endpoint for itself

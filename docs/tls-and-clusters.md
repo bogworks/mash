@@ -262,17 +262,17 @@ The endpoint's key is made on the endpoint's machine and its seed never leaves i
 ```sh
 # on the endpoint's machine (M3)
 mash key create --out design.seed
-# copy design.pub to a mashctl machine
+# copy design.seed.pub to a mashctl machine
 
 # on a mashctl machine (M1 or M2)
-mashctl endpoint create acme/dev/design --public-key design.pub
-# copy acme.dev.design.jwt back to M3
+mashctl endpoint create acme.dev.design --out acme.dev.design.join --public-key design.seed.pub
+# copy acme.dev.design.join back to M3
 
 # on the endpoint's machine (M3)
-mash credential create --seed design.seed --jwt acme.dev.design.jwt
+mash join acme.dev.design.join --key design.seed
 ```
 
-Only `design.pub` and the JWT file travel. M3 also needs `ca.pem` and the settings in section 1: `servers`, `ca`, and a client certificate when the servers require one. M3 can name any one of the three servers in `servers`, or all three.
+Only `design.seed.pub` and the join file travel. The join file carries the servers and the CA certificate, so `mash join` writes `servers` and `ca` into M3's configuration folder. M3 also needs a client certificate when the servers require one (section 1). M3 can name any one of the three servers in `servers`, or all three.
 
 ## Not tested in 0.5.5
 
@@ -282,7 +282,7 @@ While this page was written, these steps were also run on one host, on loopback,
 
 - One operator-mode server, with the `tls` block above added: `mashctl` over `tls://localhost` failed without `ca` and worked with it.
 - The same server with `verify: true`: a connection without a client certificate failed with the message above, and one with `tls_cert` and `tls_key` worked.
-- `mashctl` set up with a `tls://` URL and its own admin user in a second, empty config directory, then `endpoint create --public-key` from it, `mash key create` and `mash credential create` in a third, and `endpoint delete` with `system_creds` in `config.json`.
+- `mashctl` set up with a `tls://` URL and its own admin user in a second, empty config directory, then `endpoint create --public-key` from it, `mash key create` and `mash join` in a third, and `endpoint delete` with `system_creds` in `config.json`.
 - Three servers in one cluster with the `cluster` TLS block and `verify: true`, one shared certificate for all three, listing `localhost` and `127.0.0.1`: the setup step reported `3 server(s) replied`, then bucket creation, `mashctl doctor` (the `keys` check, with all three servers answering), `endpoint create` and `endpoint delete` (`3 server(s) acknowledged`) worked with a three-entry `url`.
 
 What was not run, by AT-005 or by these steps:

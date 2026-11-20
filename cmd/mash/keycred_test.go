@@ -2,254 +2,186 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nkeys"
 )
 
-// kcRun runs mash with a config directory that does not exist and no other environment.
-func kcRun(t *testing.T, cfgDir string, args ...string) (int, string, string) {
+// kcRun runs mash in the current folder with a config directory that does not exist and no other environment.
+func kcRun(t *testing.T, args ...string) (int, string, string) {
 	t.Helper()
-	vars := map[string]string{"HOME": t.TempDir(), "MASH_CONFIG_DIR": cfgDir}
+	vars := map[string]string{"HOME": t.TempDir(), "MASH_CONFIG_DIR": filepath.Join(t.TempDir(), "nocfg")}
 	var out, errb bytes.Buffer
-	rc := run(args, func(k string) string { return vars[k] }, strings.NewReader(""), &out, &errb)
+	rc := run(args, envStrict(vars), strings.NewReader(""), &out, &errb)
 	return rc, out.String(), errb.String()
 }
 
-func TestKeyCreateCLI(t *testing.T) {
-	dir := t.TempDir()
-	seed := filepath.Join(dir, "design.seed")
-	rc, out, errb := kcRun(t, filepath.Join(dir, "nocfg"), "key", "create", "--out", seed)
-	if rc != 0 || errb != "" {
-		t.Fatalf("rc %d, stderr %q", rc, errb)
-	}
-	pubRaw, _ := os.ReadFile(filepath.Join(dir, "design.pub"))
-	pub := strings.TrimSpace(string(pubRaw))
-	for _, want := range []string{"created key", "public key  " + pub, "seed        " + seed, "public file " + filepath.Join(dir, "design.pub"), "mashctl endpoint create ADDRESS --public-key"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("output lacks %q:\n%s", want, out)
-		}
-	}
-	// a second run refuses, exit 1
-	rc, _, errb = kcRun(t, "", "key", "create", "--out", seed)
-	if rc != 1 || !strings.Contains(errb, "file_exists") || !strings.Contains(errb, "next:") {
-		t.Errorf("rc %d, stderr %q", rc, errb)
-	}
-}
-
-func TestKeyCreateJSONGolden(t *testing.T) {
-	dir := t.TempDir()
-	seed := filepath.Join(dir, "k.seed")
-	rc, out, _ := kcRun(t, "", "key", "create", "--out", seed, "--json", "--dry-run")
-	if rc != 0 {
-		t.Fatal(rc)
-	}
-	pubStart := strings.Index(out, `"public_key":"`) + len(`"public_key":"`)
-	pub := out[pubStart : pubStart+56]
-	want := `{"schema":"mash-key@1","outcome":"planned","public_key":"` + pub + `","seed_path":"` + seed + `","public_path":"` + filepath.Join(dir, "k.pub") + `","refusal":null}` + "\n"
-	if out != want {
-		t.Errorf("got  %s\nwant %s", out, want)
-	}
-	if ents, _ := os.ReadDir(dir); len(ents) != 0 {
-		t.Errorf("dry run wrote %v", ents)
-	}
-	os.WriteFile(seed, []byte("x"), 0o600)
-	rc, out, _ = kcRun(t, "", "key", "create", "--out", seed, "--json")
-	if rc != 1 || !strings.Contains(out, `"outcome":"refused"`) || !strings.Contains(out, `"code":"file_exists"`) {
-		t.Errorf("rc %d, %s", rc, out)
-	}
-}
-
-func kcCredFixture(t *testing.T, name string) (dir, seedPath, jwtPath, seed, tok string) {
+// chdirTemp makes the test run in a new folder and returns it.
+func chdirTemp(t *testing.T) string {
 	t.Helper()
-	dir = t.TempDir()
-	kp, _ := nkeys.CreateUser()
+	d := t.TempDir()
+	t.Chdir(d)
+	return d
+}
+
+func readTrim(t *testing.T, p string) string {
+	t.Helper()
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.TrimSpace(string(b))
+}
+
+// The two files: the seed (mode 0600) and the public key beside it with .pub added to the whole seed path.
+func TestKeyCreateWritesTheSeedAndThePublicKey(t *testing.T) {
+	dir := chdirTemp(t)
+	rc, out, errb := kcRun(t, "key", "create", "--out", "bob.seed")
+	if rc != 0 || errb != "" || out != "Created bob.seed and bob.seed.pub.\n" {
+		t.Fatalf("rc %d, stdout %q, stderr %q", rc, out, errb)
+	}
+	st, err := os.Stat(filepath.Join(dir, "bob.seed"))
+	if err != nil || st.Mode().Perm() != 0o600 {
+		t.Errorf("seed mode: %v, %v", st, err)
+	}
+	kp, err := nkeys.FromSeed([]byte(readTrim(t, "bob.seed")))
+	if err != nil {
+		t.Fatal(err)
+	}
 	pub, _ := kp.PublicKey()
-	sb, _ := kp.Seed()
-	seed = string(sb)
-	acct, _ := nkeys.CreateAccount()
-	uc := jwt.NewUserClaims(pub)
-	uc.Name = name
-	tok, _ = uc.Encode(acct)
-	seedPath, jwtPath = filepath.Join(dir, "u.seed"), filepath.Join(dir, "u.jwt")
-	os.WriteFile(seedPath, []byte(seed+"\n"), 0o600)
-	os.WriteFile(jwtPath, []byte(tok+"\n"), 0o600)
-	return
-}
-
-func TestCredentialCreateCLI(t *testing.T) {
-	dir, seedPath, jwtPath, _, _ := kcCredFixture(t, "design")
-	cfg := filepath.Join(dir, "cfg")
-	rc, out, errb := kcRun(t, cfg, "credential", "create", "--seed", seedPath, "--jwt", jwtPath)
-	if rc != 0 || errb != "" {
-		t.Fatalf("rc %d, stderr %q", rc, errb)
+	if got := readTrim(t, "bob.seed.pub"); got != pub || !strings.HasPrefix(pub, "U") {
+		t.Errorf("public file %q, want %q", got, pub)
 	}
-	creds := filepath.Join(cfg, "design.creds")
-	if !strings.Contains(out, "created credentials") || !strings.Contains(out, "creds       "+creds) || !strings.Contains(out, "next: mash status") {
-		t.Errorf("output:\n%s", out)
+	for _, n := range []string{"bob.pub", "bob.seed.pub.pub"} {
+		if _, err := os.Stat(n); err == nil {
+			t.Errorf("%s was made", n)
+		}
 	}
-	rc, _, errb = kcRun(t, cfg, "credential", "create", "--seed", seedPath, "--jwt", jwtPath)
-	if rc != 1 || !strings.Contains(errb, "--force") {
-		t.Errorf("rc %d, stderr %q", rc, errb)
-	}
-	rc, _, _ = kcRun(t, cfg, "credential", "create", "--seed", seedPath, "--jwt", jwtPath, "--force")
-	if rc != 0 {
-		t.Errorf("force rc %d", rc)
-	}
-	// a mismatched seed
-	other := filepath.Join(dir, "o.seed")
-	kp, _ := nkeys.CreateUser()
-	sb, _ := kp.Seed()
-	os.WriteFile(other, sb, 0o600)
-	rc, _, errb = kcRun(t, cfg, "credential", "create", "--seed", other, "--jwt", jwtPath, "--out", filepath.Join(dir, "m.creds"))
-	if rc != 1 || !strings.Contains(errb, "key_mismatch") {
-		t.Errorf("rc %d, stderr %q", rc, errb)
+	// neither the seed nor the public key is ever printed
+	if strings.Contains(out+errb, pub) || strings.Contains(out+errb, readTrim(t, "bob.seed")) {
+		t.Errorf("a key was printed: %q %q", out, errb)
 	}
 }
 
-func TestCredentialEmptyNameNeedsOut(t *testing.T) {
-	dir, seedPath, jwtPath, _, _ := kcCredFixture(t, "")
-	rc, _, errb := kcRun(t, filepath.Join(dir, "cfg"), "credential", "create", "--seed", seedPath, "--jwt", jwtPath)
-	if rc != 2 || !strings.Contains(errb, "--out") {
-		t.Errorf("rc %d, stderr %q", rc, errb)
+func TestKeyCreateDefaultsToMashSeed(t *testing.T) {
+	chdirTemp(t)
+	rc, out, errb := kcRun(t, "key", "create")
+	if rc != 0 || errb != "" || out != "Created mash.seed and mash.seed.pub.\n" {
+		t.Fatalf("rc %d, stdout %q, stderr %q", rc, out, errb)
 	}
-}
-
-func TestCredentialJSON(t *testing.T) {
-	dir, seedPath, jwtPath, _, _ := kcCredFixture(t, "design")
-	rc, out, _ := kcRun(t, "", "credential", "create", "--seed", seedPath, "--jwt", jwtPath, "--out", filepath.Join(dir, "x.creds"), "--json")
-	if rc != 0 || !strings.HasPrefix(out, `{"schema":"mash-credential@1","outcome":"created","public_key":"U`) || !strings.Contains(out, `"name":"design","refusal":null}`) {
-		t.Errorf("rc %d, %s", rc, out)
-	}
-}
-
-// INV-001: neither command prints a seed or a JWT, in text or JSON mode, on stdout or stderr.
-func TestKeycredNeverPrintsSecrets(t *testing.T) {
-	for _, js := range []bool{false, true} {
-		for _, again := range []bool{false, true} { // the second pass is a refusal
-			dir, seedPath, jwtPath, seed, tok := kcCredFixture(t, "design")
-			cfg := filepath.Join(dir, "cfg")
-			keySeed := filepath.Join(dir, "n.seed")
-			cmds := [][]string{
-				{"key", "create", "--out", keySeed},
-				{"credential", "create", "--seed", seedPath, "--jwt", jwtPath},
-				{"credential", "create", "--seed", seedPath, "--jwt", jwtPath, "--out", filepath.Join(dir, "m.creds"), "--dry-run"},
-			}
-			for _, c := range cmds {
-				if js {
-					c = append(c, "--json")
-				}
-				n := 1
-				if again {
-					n = 2
-				}
-				for i := 0; i < n; i++ {
-					_, out, errb := kcRun(t, cfg, c...)
-					all := out + errb
-					if i == 0 && c[0] == "key" {
-						b, _ := os.ReadFile(keySeed)
-						if s := strings.TrimSpace(string(b)); s == "" || strings.Contains(all, s) {
-							t.Errorf("%v: key seed in output or not written", c)
-						}
-					}
-					if strings.Contains(all, seed) || strings.Contains(all, tok) {
-						t.Errorf("%v json=%v: output holds a secret:\n%s", c, js, all)
-					}
-				}
-			}
+	for _, n := range []string{"mash.seed", "mash.seed.pub"} {
+		if _, err := os.Stat(n); err != nil {
+			t.Error(err)
 		}
 	}
 }
 
-func TestKeycredUsageErrors(t *testing.T) {
-	dir := t.TempDir()
-	cases := []struct {
-		name string
-		args []string
-		want string
-	}{
-		{"unknown key sub", []string{"key", "nope"}, "create"},
-		{"unknown credential sub", []string{"credential", "nope"}, "create"},
-		{"key no sub", []string{"key"}, "create"},
-		{"key missing out", []string{"key", "create"}, "--out is required"},
-		{"credential missing seed", []string{"credential", "create", "--jwt", "j"}, "--seed is required"},
-		{"credential missing jwt", []string{"credential", "create", "--seed", "s"}, "--jwt is required"},
-		{"dash value", []string{"key", "create", "--out", "--json"}, "looks like a flag (write --out=--json"},
-		{"unknown flag", []string{"key", "create", "--out", filepath.Join(dir, "a"), "--bogus"}, "--bogus"},
-		{"force on key", []string{"key", "create", "--out", filepath.Join(dir, "a"), "--force"}, "--force"},
+func TestKeyCreateRefusesToOverwrite(t *testing.T) {
+	dir := chdirTemp(t)
+	if err := os.WriteFile("bob.seed", []byte("mine"), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	for _, c := range cases {
-		rc, _, errb := kcRun(t, "", c.args...)
-		if rc != 2 || !strings.Contains(errb, c.want) {
-			t.Errorf("%s: rc %d, stderr %q, want 2 and %q", c.name, rc, errb, c.want)
-		}
+	rc, out, errb := kcRun(t, "key", "create", "--out", "bob.seed")
+	if rc != 1 || out != "" || errb != "error: bob.seed already exists; nothing was written\n" {
+		t.Fatalf("rc %d, stdout %q, stderr %q", rc, out, errb)
 	}
-	// the inline form takes a value that starts with '-'
-	t.Chdir(dir)
-	rc, _, _ := kcRun(t, "", "key", "create", "--out=-x.seed")
-	if rc != 0 {
-		t.Errorf("--out=-x.seed rc %d", rc)
+	if readTrim(t, "bob.seed") != "mine" {
+		t.Error("the existing seed was changed")
 	}
-}
-
-func TestKeycredHelp(t *testing.T) {
-	for _, a := range [][]string{{"key"}, {"key", "create"}, {"credential"}, {"credential", "create"}} {
-		for _, h := range []string{"--help", "-h"} {
-			rc, out, errb := kcRun(t, "", append(append([]string{}, a...), h)...)
-			if rc != 0 || errb != "" || !strings.Contains(out, "Example") || !strings.Contains(out, "usage: mash "+a[0]) {
-				t.Errorf("%v %s: rc %d out %q err %q", a, h, rc, out, errb)
-			}
-		}
+	if _, err := os.Stat(filepath.Join(dir, "bob.seed.pub")); err == nil {
+		t.Error("a public key file was written")
+	}
+	// the public key's file in the way is named
+	if err := os.Remove("bob.seed"); err != nil { // a file this test made
+		t.Fatal(err)
+	}
+	if err := os.WriteFile("bob.seed.pub", []byte("mine"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rc, out, errb = kcRun(t, "key", "create", "--out", "bob.seed")
+	if rc != 1 || out != "" || errb != "error: bob.seed.pub already exists; nothing was written\n" {
+		t.Fatalf("rc %d, stdout %q, stderr %q", rc, out, errb)
+	}
+	if _, err := os.Stat("bob.seed"); err == nil {
+		t.Error("a seed was written beside an existing public key file")
 	}
 }
 
-func TestCredentialHelpSaysWhatIsChecked(t *testing.T) {
-	for _, a := range [][]string{{"credential"}, {"credential", "create"}} {
-		_, out, _ := kcRun(t, "", append(append([]string{}, a...), "--help")...)
-		if !strings.Contains(out, "issuing account") || !strings.Contains(out, "expiry") {
-			t.Errorf("%v help: %q", a, out)
+func TestKeyCreateJSON(t *testing.T) {
+	chdirTemp(t)
+	rc, out, errb := kcRun(t, "key", "create", "--out", "bob.seed", "--json")
+	if rc != 0 || errb != "" || out != `{"seed":"bob.seed","public_key":"bob.seed.pub"}`+"\n" {
+		t.Fatalf("rc %d, stdout %q, stderr %q", rc, out, errb)
+	}
+	rc, out, errb = kcRun(t, "key", "create", "--out", "bob.seed", "--json")
+	var obj map[string]string
+	if rc != 1 || errb != "" || json.Unmarshal([]byte(out), &obj) != nil ||
+		obj["error"] != "bob.seed already exists; nothing was written" || len(obj) != 1 {
+		t.Fatalf("a refusal as JSON: rc %d, stdout %q, stderr %q", rc, out, errb)
+	}
+}
+
+// The flags the specification does not have are gone.
+func TestKeyCreateHasOnlyTheSpecifiedOptions(t *testing.T) {
+	chdirTemp(t)
+	for _, flag := range []string{"--pub-out", "--dry-run", "--force"} {
+		rc, out, errb := kcRun(t, "key", "create", flag, "x")
+		if rc != 2 || out != "" || !strings.HasPrefix(errb, "error: unknown option "+flag) || !strings.HasSuffix(errb, "hint: mash key create --help\n") {
+			t.Errorf("%s: rc %d, stdout %q, stderr %q", flag, rc, out, errb)
 		}
+	}
+	if ents, _ := os.ReadDir("."); len(ents) != 0 {
+		t.Errorf("a refused command line wrote %v", ents)
 	}
 }
 
 func TestKeyCreateMakesParentDirectory(t *testing.T) {
-	dir := t.TempDir()
-	seed := filepath.Join(dir, "new", "d.seed")
-	rc, out, errb := kcRun(t, "", "key", "create", "--out", seed)
-	if rc != 0 {
-		t.Fatalf("rc %d out %q err %q", rc, out, errb)
+	dir := chdirTemp(t)
+	rc, out, errb := kcRun(t, "key", "create", "--out", "keys/bob.seed")
+	if rc != 0 || errb != "" || out != "Created keys/bob.seed and keys/bob.seed.pub.\n" {
+		t.Fatalf("rc %d, stdout %q, stderr %q", rc, out, errb)
 	}
-	if st, err := os.Stat(filepath.Join(dir, "new")); err != nil || st.Mode().Perm() != 0o700 {
-		t.Errorf("directory: %v, %v", st, err)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "new", "d.pub")); err != nil {
-		t.Error(err)
+	if st, err := os.Stat(filepath.Join(dir, "keys")); err != nil || st.Mode().Perm() != 0o700 {
+		t.Errorf("keys directory: %v, %v", st, err)
 	}
 }
 
-func TestFlagValueRule(t *testing.T) {
-	i := 0
-	if v, err := flagValue([]string{"--out", "f"}, &i, "--out", "", false); v != "f" || err != nil || i != 1 {
-		t.Errorf("%q %v %d", v, err, i)
+func TestKeyHelp(t *testing.T) {
+	for _, args := range [][]string{{"key", "--help"}, {"help", "key"}} {
+		rc, out, errb := kcRun(t, args...)
+		if rc != 0 || errb != "" || !strings.HasPrefix(out, "Make your own key pair, for when the seed must never leave this machine.\n\nUsage:\n  mash key create [options]\n\nGlobal options:\n") {
+			t.Errorf("%v: rc %d, stdout %q, stderr %q", args, rc, out, errb)
+		}
 	}
-	i = 0
-	if v, err := flagValue([]string{"--out", "-"}, &i, "--out", "", false); v != "-" || err != nil {
-		t.Errorf("bare dash: %q %v", v, err)
+	a := runMash(map[string]string{"HOME": t.TempDir()}, "key", "create", "--help")
+	b := runMash(map[string]string{"HOME": t.TempDir()}, "help", "key", "create")
+	if a.code != 0 || a != b || !strings.Contains(a.out, "Usage:\n  mash key create [options]\n") {
+		t.Errorf("key create --help and help key create: %+v, %+v", a, b)
 	}
-	i = 0
-	if _, err := flagValue([]string{"--out", "--help"}, &i, "--out", "", false); err == nil || !strings.Contains(err.Error(), "write --out=--help") {
-		t.Errorf("err %v", err)
+}
+
+func TestKeyNeedsACommand(t *testing.T) {
+	rc, out, errb := kcRun(t, "key")
+	if rc != 2 || out != "" || errb != "error: mash key needs a command: create\nhint: mash key --help\n" {
+		t.Errorf("rc %d, stdout %q, stderr %q", rc, out, errb)
 	}
-	i = 0
-	if v, err := flagValue([]string{"--out=-x"}, &i, "--out", "-x", true); v != "-x" || err != nil {
-		t.Errorf("inline: %q %v", v, err)
+	rc, out, errb = kcRun(t, "key", "new")
+	if rc != 2 || out != "" || errb != "error: mash key has no command new\nhint: mash key --help\n" {
+		t.Errorf("rc %d, stdout %q, stderr %q", rc, out, errb)
 	}
-	i = 0
-	if _, err := flagValue([]string{"--out"}, &i, "--out", "", false); err == nil {
-		t.Error("missing value accepted")
+}
+
+// mash credential is gone: it is an unknown command, with no alias.
+func TestCredentialIsRemoved(t *testing.T) {
+	rc, out, errb := kcRun(t, "credential", "create", "--seed", "a", "--jwt", "b")
+	if rc != 2 || out != "" || errb != "error: mash has no command credential\nhint: mash --help\n" {
+		t.Errorf("rc %d, stdout %q, stderr %q", rc, out, errb)
+	}
+	if strings.Contains(usage, "mash credential") {
+		t.Errorf("mash --help still names credential:\n%s", usage)
 	}
 }
