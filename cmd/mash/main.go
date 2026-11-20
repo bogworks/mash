@@ -300,12 +300,22 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 	if args[0] == "hook" { // never fails the session: a bad config is a silent no-op
 		return hook(cfg, err, adapter, env, stdin, stdout, stderr)
 	}
+	// A command of the table parses its arguments before it needs the endpoint, so a bad option is a usage error, with
+	// no endpoint chosen or installed, and not the configuration's error: the error waits in the environment.
+	var cfgFail error
 	var several *config.SeveralEndpointsError
-	if errors.As(err, &several) && slices.Contains([]string{"send", "who", "inbox", "read", "prompt"}, args[0]) {
-		return cliframe.Report(stdout, stderr, cmdcore.NoEndpoint(cmdcore.SeveralInstalled, args[0], several.Addresses), jsonOut)
+	switch {
+	case errors.As(err, &several) && slices.Contains([]string{"send", "who", "inbox", "read", "prompt"}, args[0]):
+		cfgFail = cmdcore.NoEndpoint(cmdcore.SeveralInstalled, args[0], several.Addresses)
+	case err != nil && args[0] != "serve" && !report:
+		cfgFail = cliframe.Failf("%s", strings.TrimPrefix(err.Error(), "mash: ")).WithHint("mash doctor")
 	}
-	if err != nil && args[0] != "serve" && !report {
-		return cliframe.Report(stdout, stderr, cliframe.Failf("%s", strings.TrimPrefix(err.Error(), "mash: ")).WithHint("mash doctor"), jsonOut)
+	if cfgFail != nil {
+		if slices.Contains([]string{"send", "who", "inbox", "read"}, args[0]) {
+			mk := func(context.Context) (*cmdcore.Env, error) { return nil, cfgFail }
+			return newCommands(mk).RunCLI(args[0], args[1:], stdin, stdout, stderr, global)
+		}
+		return cliframe.Report(stdout, stderr, cfgFail, jsonOut)
 	}
 	// A plain URL with no insecure_plaintext is refused before anything is connected (REQ-014): serve stops at session
 	// start and the commands that connect stop, exit 2, with the refusal on stderr.
@@ -320,6 +330,9 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 	}
 	switch args[0] {
 	case "serve":
+		if cfg.WakeErr != nil && err == nil { // the wake settings are serve's: a bad one stops it, no other command minds
+			return cliframe.Report(stdout, stderr, cliframe.Usagef("%s", strings.TrimPrefix(cfg.WakeErr.Error(), "mash: ")).WithHint("mash --help serve"), jsonOut)
+		}
 		return serve(ctx, cfg, err, adapter, env("MASH_PLUGIN_ROOT"), stdin, stdout, stderr)
 	case "send":
 		mk := func(context.Context) (*cmdcore.Env, error) {

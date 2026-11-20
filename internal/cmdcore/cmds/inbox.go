@@ -304,7 +304,7 @@ type ReadResult struct {
 }
 
 // Text is the labelled lines (number, from, sent, trust, kind, urgent, and reply to and relayed from when the message
-// carries them), a blank line and the whole text with "> " before every line (an empty line is ">"). The body is
+// carries them), a blank line and the whole text with "> " before every line (an empty line is "> "). The body is
 // already escaped; the object (--json, the tool's structured result) carries it unquoted.
 func (r ReadResult) Text(cmdcore.Opts) string {
 	lines := []string{
@@ -323,10 +323,7 @@ func (r ReadResult) Text(cmdcore.Opts) string {
 	}
 	body := strings.Split(strings.TrimRight(r.Body, "\n"), "\n")
 	for i, l := range body {
-		body[i] = ">"
-		if l != "" {
-			body[i] = "> " + l
-		}
+		body[i] = "> " + l
 	}
 	return strings.Join(lines, "\n") + "\n\n" + strings.Join(body, "\n")
 }
