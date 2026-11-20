@@ -6,9 +6,14 @@ does.
 
 ```mermaid
 flowchart TB
-    M["mash<br/>durable signed mail, inboxes,<br/>the directory of endpoints,<br/>delivery into an agent session"]
-    S["Synadia Agent Protocol (SAP)<br/>agents as discoverable services,<br/>live prompts, status, heartbeat,<br/>sender identity"]
-    N["NATS<br/>servers, accounts, users, keys,<br/>credentials, subjects, streams"]
+    M["mash<br/>durable signed mail, inboxes,
+       the directory of endpoints,
+       delivery into an agent session"]
+    S["Synadia Agent Protocol (SAP)<br/>agents as discoverable services,
+       live prompts, status, heartbeat,
+       sender identity"]
+    N["NATS<br/>servers, accounts, users, keys,
+       credentials, subjects, streams"]
     M --> S --> N
 ```
 
