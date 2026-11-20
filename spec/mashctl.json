@@ -712,7 +712,7 @@
        },
        {
         "name": "x-notes",
-        "value": "With no option, the endpoint can be used on this machine at once: what a solo developer wants. --out is for another machine. --public-key is for when the seed must never leave that machine."
+        "value": "With no option, the endpoint can be used on this machine at once: what a solo developer wants. --out is for another machine. --public-key is for when the seed must never leave that machine. When mashctl has no certificate authority file configured, the join file's \"ca\" is null, and mash then trusts the server only through the machine's own trusted certificate authorities, as a browser would."
        }
       ]
      },
@@ -794,8 +794,14 @@
           "exit": 2
          },
          {
-          "case": "Deleted here but not yet cancelled on every server",
-          "text": "error: deleted acme.demo.bob, but 1 of 2 servers has not cancelled its key\nhint: mashctl endpoint delete acme.demo.bob",
+          "case": "A server did not confirm the key was cancelled: nothing is deleted",
+          "text": "error: acme.demo.bob was not deleted: 1 of 2 servers did not confirm\n       its key was cancelled\nhint: mashctl endpoint delete acme.demo.bob",
+          "stream": "stderr",
+          "exit": 1
+         },
+         {
+          "case": "Cancelled everywhere, then a later step failed",
+          "text": "error: deleted acme.demo.bob, but its inbox could not be removed\nhint: mashctl endpoint delete acme.demo.bob",
           "stream": "stderr",
           "exit": 1
          }
@@ -819,6 +825,10 @@
        {
         "name": "x-today",
         "value": "Today also reachable as deprovision, which is removed. Typing the name to confirm is what gh repo delete does."
+       },
+       {
+        "name": "x-notes",
+        "value": "Order. The endpoint's key is cancelled on every server first; only when every server confirms is anything removed, so a failure there leaves the endpoint whole. If this machine holds the endpoint's creds file, it is set aside as <address>.creds.deleted, so mash no longer counts it as installed; --verbose says so. Nothing else on any machine is touched."
        }
       ]
      },
@@ -996,7 +1006,11 @@
        },
        {
         "name": "x-today",
-        "value": "Takes over mashctl suspended and mashctl issued list for one endpoint."
+        "value": "Takes over mashctl suspended and mashctl issued list for one endpoint. It no longer prints the creds file's path, the issue record, the agent, the account or the mail subject."
+       },
+       {
+        "name": "x-notes",
+        "value": "role, host, description, capability and note each appear only when set. 'online' here means something holds the endpoint's lease, which lapses 90 seconds after its holder stops; mash who reads the endpoint's own heartbeat over the same 90 seconds. The two answer the same question and can differ for up to that long."
        }
       ]
      },
@@ -1016,7 +1030,7 @@
        {
         "name": "key=value",
         "required": true,
-        "description": "One or more. Keys: role, description, host, capability, label.<name>.",
+        "description": "One or more. Keys: role, description, host, note, capability (a list, with commas: capability=review,deploy), label.<name>.",
         "arity": {
          "minimum": 1
         }
@@ -1103,10 +1117,16 @@
        {
         "name": "key",
         "required": true,
-        "description": "One or more keys.",
+        "description": "One or more keys. capability removes every capability; to remove one, set the list again without it.",
         "arity": {
          "minimum": 1
         }
+       }
+      ],
+      "options": [
+       {
+        "name": "--dry-run",
+        "description": "Print what would change, and change nothing."
        }
       ],
       "examples": [
@@ -1392,6 +1412,12 @@
           "text": "Reissued credentials for acme.demo.bob\nJoin file: acme.demo.bob.join",
           "stream": "stdout",
           "exit": 0
+         },
+         {
+          "case": "With --verbose",
+          "text": "Reissued credentials for acme.demo.bob\nJoin file: acme.demo.bob.join\nservers acknowledged: 2",
+          "stream": "stdout",
+          "exit": 0
          }
         ]
        },
@@ -1436,6 +1462,20 @@
         "arguments": [
          {
           "name": "n",
+          "required": true,
+          "arity": {
+           "minimum": 1,
+           "maximum": 1
+          }
+         }
+        ]
+       },
+       {
+        "name": "--after",
+        "description": "Only messages after this number. The same option as mash inbox.",
+        "arguments": [
+         {
+          "name": "number",
           "required": true,
           "arity": {
            "minimum": 1,
@@ -1508,7 +1548,7 @@
        },
        {
         "name": "x-today",
-        "value": "Today mashctl inbox inspect."
+        "value": "Today mashctl inbox inspect, with --from and --to; those are replaced by --after, the option mash inbox has."
        }
       ]
      },
@@ -1566,16 +1606,18 @@
        {
         "name": "x-json",
         "value": {
-         "publish": {
+         "pub": {
           "allow": [
            "agents.mail.acme.>",
            "_INBOX.acme.>"
-          ]
+          ],
+          "deny": []
          },
-         "subscribe": {
+         "sub": {
           "allow": [
            "_INBOX.acme.acme_demo_bob.>"
-          ]
+          ],
+          "deny": []
          }
         }
        },
@@ -1592,7 +1634,7 @@
        },
        {
         "name": "x-notes",
-        "value": "The exact subjects are the code's; the example shows the shape, which is NATS's own permissions object."
+        "value": "The exact subjects are the code's; the example shows the shape, which is the permissions object of a NATS user JWT, with NATS's own key names: pub and sub, each with allow and deny."
        }
       ]
      }
@@ -1714,6 +1756,12 @@
        {
         "case": "Version",
         "text": "mashctl v0.5.6 (3f9a41c)",
+        "stream": "stdout",
+        "exit": 0
+       },
+       {
+        "case": "A build with no version stamped",
+        "text": "mashctl v0.0.0-dev (unknown)",
         "stream": "stdout",
         "exit": 0
        }

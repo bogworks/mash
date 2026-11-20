@@ -38,12 +38,12 @@ type epInput struct {
 	json   bool
 
 	// set by a command's check
-	addr   sap.Address
-	prefix []string
-	limit  int
-	from   uint64
-	to     uint64
-	edit   metaEdit
+	addr     sap.Address
+	prefix   []string
+	limit    int
+	after    uint64
+	afterSet bool
+	edit     metaEdit
 }
 
 // epRuntime is what a command's body works with.
@@ -96,6 +96,9 @@ func parseEpInput(s epSpec, args []string) (epInput, error) {
 	}
 	if s.check != nil {
 		if err := s.check(&in); err != nil {
+			if ce, ok := err.(*cliframe.Error); ok && ce.Hint == "" {
+				err = ce.WithHint(hint)
+			}
 			return in, err
 		}
 	}

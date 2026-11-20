@@ -637,6 +637,7 @@ func (a *Admin) applyInboxLimitsLocked(ctx context.Context, lk *streamLock, name
 // removes every capability first (then AddCaps still apply).
 type MetaUpdate struct {
 	Role, Host  *string
+	Note        *string
 	Labels      map[string]string
 	Description *string
 	AddCaps     []string
@@ -680,6 +681,12 @@ func (a *Admin) SetMeta(ctx context.Context, addr sap.Address, u MetaUpdate) (st
 			return store.Record{}, err
 		}
 		fields["description"] = u.Description
+	}
+	if u.Note != nil {
+		if err := store.ValidDescription(*u.Note); err != nil {
+			return store.Record{}, err
+		}
+		fields["note"] = u.Note
 	}
 	for _, c := range append(append([]string(nil), u.AddCaps...), u.DropCaps...) {
 		if !store.ValidCap(c) {

@@ -29,27 +29,29 @@ var updateInspectGolden = flag.Bool("update-inspect", false, "rewrite cmd/mashct
 
 func TestEndpointInboxArgs(t *testing.T) {
 	type want struct {
-		addr     string
-		json     bool
-		from, to uint64
-		limit    int
+		addr  string
+		json  bool
+		after uint64
+		set   bool
+		limit int
 	}
 	ok := []struct {
 		args []string
 		want want
 	}{
 		{[]string{"a.b.c"}, want{addr: "a.b.c"}},
-		{[]string{"a.b.c", "--json", "--from", "3", "--to=9", "--limit", "5"}, want{addr: "a.b.c", json: true, from: 3, to: 9, limit: 5}},
+		{[]string{"a.b.c", "--json", "--after", "3", "--limit", "5"}, want{addr: "a.b.c", json: true, after: 3, set: true, limit: 5}},
+		{[]string{"a.b.c", "--after=0"}, want{addr: "a.b.c", set: true}},
 		{[]string{"--limit=2", "x.y.z"}, want{addr: "x.y.z", limit: 2}},
 	}
 	for _, c := range ok {
 		got, err := parseEpInput(endpointInboxSpec, c.args)
-		if err != nil || (want{got.addr.String(), got.json, got.from, got.to, got.limit}) != c.want {
+		if err != nil || (want{got.addr.String(), got.json, got.after, got.afterSet, got.limit}) != c.want {
 			t.Errorf("%v: %+v %v, want %+v", c.args, got, err, c.want)
 		}
 	}
-	for _, bad := range [][]string{nil, {"--json"}, {"a.b.c", "d.e.f"}, {"a.b.c", "--from"}, {"a.b.c", "--from", "0"}, {"a.b.c", "--from", "x"}, {"a.b.c", "--limit", "0"},
-		{"a.b.c", "--limit", "-1"}, {"a.b.c", "--from", "5", "--to", "4"}, {"a.b.c", "--frob"}, {"a.b.c", "--json=1"}, {"a.b.c", "--legacy"}, {"a_b_c"}, {"a/b/c"}, {"a.b"}} {
+	for _, bad := range [][]string{nil, {"--json"}, {"a.b.c", "d.e.f"}, {"a.b.c", "--after"}, {"a.b.c", "--after", "x"}, {"a.b.c", "--after", "-1"}, {"a.b.c", "--from", "2"}, {"a.b.c", "--to", "2"}, {"a.b.c", "--limit", "0"},
+		{"a.b.c", "--limit", "-1"}, {"a.b.c", "--frob"}, {"a.b.c", "--json=1"}, {"a.b.c", "--legacy"}, {"a_b_c"}, {"a/b/c"}, {"a.b"}} {
 		_, err := parseEpInput(endpointInboxSpec, bad)
 		var ce *cliframe.Error
 		if err == nil || !errors.As(err, &ce) || ce.Code != 2 {
@@ -395,10 +397,18 @@ func TestEndpointInboxLive(t *testing.T) {
 		}
 	}
 
-	// range and limit
-	txt, _, code = ctlRun(t, f.e, "endpoint", "inbox", "o.g.box", "--from", "2", "--to", "9", "--limit", "3")
-	if code != 0 || strings.Join(inboxRows(txt), ",") != "2,3,4" {
-		t.Errorf("--from 2 --to 9 --limit 3: %d\n%s", code, txt)
+	// after and limit
+	txt, _, code = ctlRun(t, f.e, "endpoint", "inbox", "o.g.box", "--after", "2", "--limit", "3")
+	if code != 0 || strings.Join(inboxRows(txt), ",") != "3,4,5" {
+		t.Errorf("--after 2 --limit 3: %d\n%s", code, txt)
+	}
+	for _, flag := range []string{"--from", "--to"} {
+		if o, e, code := ctlRun(t, f.e, "endpoint", "inbox", "o.g.box", flag, "2"); code != 2 || o != "" || !strings.HasPrefix(e, "error: unknown ") {
+			t.Errorf("%s: %d %q %q", flag, code, o, e)
+		}
+	}
+	if o, e, code := ctlRun(t, f.e, "endpoint", "inbox", "o.g.box", "--after", "x"); code != 2 || o != "" || !strings.HasPrefix(e, "error: --after must be a whole number\nhint: mashctl endpoint inbox --help") {
+		t.Errorf("--after x: %d %q %q", code, o, e)
 	}
 	out, _, _ = ctlRun(t, f.e, "endpoint", "inbox", "o.g.box", "--json", "--limit", "2")
 	var r2 struct {

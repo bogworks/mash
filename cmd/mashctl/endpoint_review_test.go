@@ -172,7 +172,7 @@ func TestEndpointReadUsageErrorsInJSON(t *testing.T) {
 	}{
 		{[]string{"show", "o.g.x", "--bogus", "--json"}, `{"error":"unknown option \"--bogus\"","hint":"mashctl endpoint show --help"}`},
 		{[]string{"show", "--json"}, `{"error":"missing the endpoint address (owner.group.name)","hint":"mashctl endpoint show --help"}`},
-		{[]string{"show", "Not A Valid!", "--json"}, `{"error":"not an endpoint address (the value is not shown): write owner.group.name, for example acme.demo.bob"}`},
+		{[]string{"show", "Not A Valid!", "--json"}, `{"error":"not an endpoint address (the value is not shown): write owner.group.name, for example acme.demo.bob","hint":"mashctl endpoint show --help"}`},
 		{[]string{"list", "--bogus", "--json"}, `{"error":"unknown option \"--bogus\"","hint":"mashctl endpoint list --help"}`},
 		{[]string{"list", "a.b.c", "--json"}, `{"error":"not an owner or owner.group prefix (the value is not shown): write acme or acme.demo","hint":"mashctl endpoint list --help"}`},
 		{[]string{"list", "a", "b", "--json"}, `{"error":"too many arguments","hint":"mashctl endpoint list --help"}`},

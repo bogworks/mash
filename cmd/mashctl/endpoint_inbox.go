@@ -13,11 +13,10 @@ import (
 	"github.com/bogworks/mash/internal/sap"
 )
 
-const endpointInboxUsage = `usage: mashctl endpoint inbox <address> [--limit n] [--json]
+const endpointInboxUsage = `usage: mashctl endpoint inbox <address> [--after number] [--limit n] [--json]
   address  the endpoint, as owner.group.name
-  --limit  how many messages to list, newest last (default 20)
-  --from   list from this stream sequence on, oldest first
-  --to     list up to this stream sequence
+  --after  only messages after this message number, oldest first
+  --limit  how many messages to list (default 20)
   --json   print the list as JSON
   Shows who sent each message, when, its kind and size. Never shows its text.
 Example:
@@ -25,7 +24,7 @@ Example:
 `
 
 var endpointInboxSpec = epSpec{
-	name: "inbox", usage: endpointInboxUsage, values: []string{"--limit", "--from", "--to"}, min: 1, max: 1,
+	name: "inbox", usage: endpointInboxUsage, values: []string{"--limit", "--after"}, min: 1, max: 1,
 	need: "the endpoint address (owner.group.name)",
 	check: func(in *epInput) error {
 		if err := checkAddress(in); err != nil {
@@ -39,23 +38,12 @@ var endpointInboxSpec = epSpec{
 			}
 			in.limit = n
 		}
-		for _, name := range []string{"--from", "--to"} {
-			v, ok := in.values[name]
-			if !ok {
-				continue
-			}
+		if v, ok := in.values["--after"]; ok {
 			n, err := strconv.ParseUint(v, 10, 64)
-			if err != nil || n == 0 {
-				return cliframe.Usagef("%s needs a stream sequence of 1 or more", name).WithHint(hint)
+			if err != nil {
+				return cliframe.Usagef("--after must be a whole number").WithHint(hint)
 			}
-			if name == "--from" {
-				in.from = n
-			} else {
-				in.to = n
-			}
-		}
-		if in.from != 0 && in.to != 0 && in.from > in.to {
-			return cliframe.Usagef("--from is after --to").WithHint(hint)
+			in.after, in.afterSet = n, true
 		}
 		return nil
 	},
@@ -138,7 +126,11 @@ func runEndpointInbox(args []string, env func(string) string, lookup config.Look
 		if _, err := rt.adm.ResolveInbox(rt.ctx, addr.String()); err != nil {
 			return failErr(err)
 		}
-		in, err := rt.adm.InspectInbox(rt.ctx, addr, admin.InspectOptions{From: o.from, To: o.to, Limit: o.limit})
+		opts := admin.InspectOptions{Limit: o.limit}
+		if o.afterSet {
+			opts.From = o.after + 1
+		}
+		in, err := rt.adm.InspectInbox(rt.ctx, addr, opts)
 		if err != nil {
 			return failErr(err)
 		}

@@ -41,22 +41,36 @@ func TestEndpointSetSeveralPairs(t *testing.T) {
 	h := newFleetEnv(t)
 	h.provisionDeclared("b")
 	filesBefore := dirNames(t, h.dir)
-	out, errb, code := h.run("endpoint", "set", "o.g.b", "role=reviewer", "host=laptop", "description=checks the diffs", "capability=review", "capability=lint", "label.team=blue", "label.kind=tool")
+	out, errb, code := h.run("endpoint", "set", "o.g.b", "role=reviewer", "host=laptop", "description=checks the diffs", "note=first pass", "capability=review,lint", "label.team=blue", "label.kind=tool")
 	if code != 0 || out != "Updated endpoint o.g.b\n" || errb != "" {
 		t.Fatalf("set: %d %q %q", code, out, errb)
 	}
 	r := h.recordOf("b")
-	if r.Role != "reviewer" || r.Host != "laptop" || r.Description != "checks the diffs" || !slices.Equal(r.Caps, []string{"lint", "review"}) ||
+	if r.Role != "reviewer" || r.Host != "laptop" || r.Description != "checks the diffs" || r.Note != "first pass" || !slices.Equal(r.Caps, []string{"lint", "review"}) ||
 		r.Labels["team"] != "blue" || r.Labels["kind"] != "tool" || len(r.Labels) != 2 {
 		t.Errorf("record %+v", r)
 	}
 	// another set changes only what it names: the rest stays
-	if out, _, code = h.run("endpoint", "set", "o.g.b", "role=builder", "label.team=red", "capability=review"); code != 0 || out != "Updated endpoint o.g.b\n" {
+	if out, _, code = h.run("endpoint", "set", "o.g.b", "role=builder", "label.team=red", "capability=review,deploy"); code != 0 || out != "Updated endpoint o.g.b\n" {
 		t.Fatalf("set again: %d %q", code, out)
 	}
 	r = h.recordOf("b")
-	if r.Role != "builder" || r.Host != "laptop" || r.Labels["team"] != "red" || r.Labels["kind"] != "tool" || !slices.Equal(r.Caps, []string{"lint", "review"}) {
-		t.Errorf("record %+v", r)
+	if r.Role != "builder" || r.Host != "laptop" || r.Note != "first pass" || r.Labels["team"] != "red" || r.Labels["kind"] != "tool" || !slices.Equal(r.Caps, []string{"deploy", "review"}) {
+		t.Errorf("record %+v: capability= replaces the list", r)
+	}
+	// the same list in another order is no change
+	if out, _, code = h.run("endpoint", "set", "o.g.b", "capability=review,deploy"); code != 0 || out != "Nothing to change on endpoint o.g.b\n" {
+		t.Fatalf("same list: %d %q", code, out)
+	}
+	// a capability given twice, or a bad name in the list, is refused
+	for _, a := range []string{"capability=a,b", "capability=a,,b", "capability=A"} {
+		_, errb2, code := h.run("endpoint", "set", "o.g.b", a, "capability=x")
+		if code != 2 || !strings.HasPrefix(errb2, "error: ") {
+			t.Errorf("%q twice: %d %q", a, code, errb2)
+		}
+	}
+	if _, errb2, code := h.run("endpoint", "set", "o.g.b", "capability=a,,b"); code != 2 || !strings.HasPrefix(errb2, "error: capability needs names") {
+		t.Errorf("empty name: %d %q", code, errb2)
 	}
 	// the same values again change nothing
 	if out, _, code = h.run("endpoint", "set", "o.g.b", "role=builder", "label.team=red"); code != 0 || out != "Nothing to change on endpoint o.g.b\n" {
@@ -71,7 +85,7 @@ func TestEndpointSetSeveralPairs(t *testing.T) {
 func TestEndpointUnsetClearsValues(t *testing.T) {
 	h := newFleetEnv(t)
 	h.provisionDeclared("b")
-	if _, _, code := h.run("endpoint", "set", "o.g.b", "role=r", "host=h", "description=d", "capability=c", "label.team=x", "label.kind=tool"); code != 0 {
+	if _, _, code := h.run("endpoint", "set", "o.g.b", "role=r", "host=h", "description=d", "note=n", "capability=c,d", "label.team=x", "label.kind=tool"); code != 0 {
 		t.Fatal(code)
 	}
 	out, errb, code := h.run("endpoint", "unset", "o.g.b", "host", "label.team")
@@ -79,13 +93,13 @@ func TestEndpointUnsetClearsValues(t *testing.T) {
 		t.Fatalf("unset: %d %q %q", code, out, errb)
 	}
 	r := h.recordOf("b")
-	if r.Host != "" || r.Role != "r" || r.Description != "d" || len(r.Caps) != 1 || r.Labels["team"] != "" || r.Labels["kind"] != "tool" {
+	if r.Host != "" || r.Role != "r" || r.Description != "d" || r.Note != "n" || len(r.Caps) != 2 || r.Labels["team"] != "" || r.Labels["kind"] != "tool" {
 		t.Errorf("record %+v", r)
 	}
-	if _, _, code := h.run("endpoint", "unset", "o.g.b", "role", "description", "capability", "label.kind"); code != 0 {
+	if _, _, code := h.run("endpoint", "unset", "o.g.b", "role", "description", "note", "capability", "label.kind"); code != 0 {
 		t.Fatal(code)
 	}
-	if r := h.recordOf("b"); r.Role != "" || r.Description != "" || len(r.Caps) != 0 || len(r.Labels) != 0 {
+	if r := h.recordOf("b"); r.Role != "" || r.Description != "" || r.Note != "" || len(r.Caps) != 0 || len(r.Labels) != 0 {
 		t.Errorf("record %+v", r)
 	}
 }
@@ -147,7 +161,7 @@ func equalRecords(a, b store.Record) bool {
 func TestEndpointSetUnsetJSON(t *testing.T) {
 	h := newFleetEnv(t)
 	h.provisionDeclared("b")
-	out, errb, code := h.run("endpoint", "set", "o.g.b", "role=reviewer", "capability=a", "capability=b", "label.team=blue", "--json")
+	out, errb, code := h.run("endpoint", "set", "o.g.b", "role=reviewer", "capability=b,a", "label.team=blue", "--json")
 	if code != 0 || errb != "" || out != "{\n  \"address\": \"o.g.b\",\n  \"set\": {\n    \"capability\": [\n      \"a\",\n      \"b\"\n    ],\n    \"label.team\": \"blue\",\n    \"role\": \"reviewer\"\n  }\n}\n" {
 		t.Fatalf("set --json: %d %q %q", code, out, errb)
 	}

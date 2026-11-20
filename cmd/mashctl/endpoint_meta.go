@@ -14,8 +14,10 @@ import (
 
 const endpointSetUsage = `usage: mashctl endpoint set <address> key=value... [--dry-run] [--json]
   address    the endpoint, as owner.group.name
-  key=value  one or more of: role, description, host, capability, label.<name>
-             capability adds one capability each time it is given
+  key=value  one or more of: role, description, host, note, capability,
+             label.<name>
+             capability is a list, capability=review,deploy; it replaces
+             the whole list
   --dry-run  print what would change, and change nothing
   --json     print the result as JSON
 Example:
@@ -24,8 +26,10 @@ Example:
 
 const endpointUnsetUsage = `usage: mashctl endpoint unset <address> key... [--dry-run] [--json]
   address    the endpoint, as owner.group.name
-  key        one or more of: role, description, host, capability, label.<name>
-             capability removes every capability
+  key        one or more of: role, description, host, note, capability,
+             label.<name>
+             capability removes every capability; to remove one, set the
+             list again without it
   --dry-run  print what would change, and change nothing
   --json     print the result as JSON
 Example:
@@ -33,7 +37,7 @@ Example:
 `
 
 // metaKeys are the keys of `endpoint set` and `endpoint unset`, besides label.<name>.
-const metaKeys = "role, description, host, capability, label.<name>"
+const metaKeys = "role, description, host, note, capability, label.<name>"
 
 // metaPair is one key=value of `endpoint set`.
 type metaPair struct{ key, value string }
@@ -47,7 +51,7 @@ type metaEdit struct {
 // metaKeyOK reports whether k is a key of the record that set and unset take.
 func metaKeyOK(k string) bool {
 	switch k {
-	case "role", "description", "host", "capability":
+	case "role", "description", "host", "note", "capability":
 		return true
 	}
 	name, ok := strings.CutPrefix(k, "label.")
@@ -69,7 +73,14 @@ func parseMetaPairs(args []string) ([]metaPair, error) {
 		if v == "" {
 			return nil, cliframe.Usagef("%s has no value", k).WithHint("to remove it: mashctl endpoint unset ADDRESS " + k)
 		}
-		if k != "capability" && seen[k] {
+		if k == "capability" {
+			for _, c := range strings.Split(v, ",") {
+				if !store.ValidCap(c) {
+					return nil, cliframe.Usagef("capability needs names separated by commas, each a letter, then up to 31 of a-z 0-9 _ . - (the value is not shown)").WithHint("mashctl endpoint set --help")
+				}
+			}
+		}
+		if seen[k] {
 			return nil, cliframe.Usagef("%s is given twice", k).WithHint("mashctl endpoint set --help")
 		}
 		seen[k] = true
@@ -120,6 +131,13 @@ var endpointUnsetSpec = epSpec{
 	},
 }
 
+// capList is the sorted capabilities of a comma-separated value, without repeats.
+func capList(v string) []string {
+	out := strings.Split(v, ",")
+	slices.Sort(out)
+	return slices.Compact(out)
+}
+
 // metaChange is the update an edit makes to a record, the words that say it, and the warnings it gives.
 type metaChange struct {
 	update   admin.MetaUpdate
@@ -157,10 +175,16 @@ func (e metaEdit) plan(rec store.Record) (metaChange, error) {
 			field("host", &u.Host, rec.Host, p.value)
 		case "description":
 			field("description", &u.Description, rec.Description, p.value)
+		case "note":
+			field("note", &u.Note, rec.Note, p.value)
 		case "capability":
-			if !slices.Contains(rec.Caps, p.value) && !slices.Contains(u.AddCaps, p.value) {
-				u.AddCaps = append(u.AddCaps, p.value)
-				c.what = append(c.what, "capability="+p.value)
+			want := capList(p.value)
+			have := append([]string(nil), rec.Caps...)
+			slices.Sort(have)
+			if !slices.Equal(have, want) {
+				u.ClearCaps = true
+				u.AddCaps = want
+				c.what = append(c.what, "capability="+strings.Join(want, ","))
 			}
 		default:
 			name := strings.TrimPrefix(p.key, "label.")
@@ -183,6 +207,10 @@ func (e metaEdit) plan(rec store.Record) (metaChange, error) {
 		case "host":
 			if rec.Host != "" {
 				field("host", &u.Host, rec.Host, "")
+			}
+		case "note":
+			if rec.Note != "" {
+				field("note", &u.Note, rec.Note, "")
 			}
 		case "description":
 			if rec.Description != "" {
@@ -233,8 +261,7 @@ func runEndpointSet(args []string, env func(string) string, lookup config.Lookup
 		set := map[string]any{}
 		for _, p := range rt.in.edit.set {
 			if p.key == "capability" {
-				caps, _ := set["capability"].([]string)
-				set["capability"] = append(caps, p.value)
+				set["capability"] = capList(p.value)
 				continue
 			}
 			set[p.key] = p.value

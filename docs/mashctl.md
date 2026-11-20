@@ -48,14 +48,14 @@ mashctl endpoint set ADDRESS key=value... [--dry-run] [--json]
 mashctl endpoint unset ADDRESS key... [--dry-run] [--json]
 ```
 
-These change the endpoint's directory record (what `who --long` shows). They connect with the admin credentials and need no file and no creds: the endpoint must have a directory record. The keys are `role`, `description`, `host`, `capability` and `label.NAME`.
+These change the endpoint's directory record (what `who --long` shows). They connect with the admin credentials and need no file and no creds: the endpoint must have a directory record. The keys are `role`, `description`, `host`, `note`, `capability` and `label.NAME`.
 
-- `set` gives each key its value and leaves every other field as it is. `capability=C` adds the capability C each time it is given. `label.team=blue` sets the label `team`. A label name is a letter, then up to 31 of `a-z 0-9 _ . -`; keys and values are checked as the directory checks them.
-- `unset` clears each key. `unset capability` removes every capability. `unset label.team` removes the label `team`; a label that is not set gives a warning and exit 0.
+- `set` gives each key its value and leaves every other field as it is. `capability=a,b` takes a list with commas and sets the whole list, replacing what was there. `label.team=blue` sets the label `team`. A label name is a letter, then up to 31 of `a-z 0-9 _ . -`; keys and values are checked as the directory checks them.
+- `unset` clears each key. `unset capability` removes every capability; to remove one, set the list again without it. `unset label.team` removes the label `team`; a label that is not set gives a warning and exit 0.
 - Both print `Updated endpoint ADDRESS`. A command that leaves the record as it is prints `Nothing to change on endpoint ADDRESS`.
 - `--dry-run` prints `Would update endpoint ADDRESS: what` and `Nothing was changed.`, and changes nothing.
 - `--json` prints `{"address": ..., "set": {...}}` or `{"address": ..., "unset": [...]}`, with `"dry_run": true` for a dry run.
-- A key that cannot be set, a missing value, a key given twice (other than `capability`) and an unknown option exit 2 and are not echoed back. An endpoint with no directory record exits 1.
+- A key that cannot be set, a missing value, a key given twice and an unknown option exit 2 and are not echoed back. An endpoint with no directory record exits 1.
 
 Labels do not change a minted user: the permissions of an endpoint do not depend on them, so setting one leaves nothing to reissue.
 
@@ -75,13 +75,13 @@ See [operations.md](operations.md#suspend-an-endpoints-inbound-mail).
 ## mashctl endpoint inbox
 
 ```text
-mashctl endpoint inbox ADDRESS [--limit n] [--from SEQ] [--to SEQ] [--json]
+mashctl endpoint inbox ADDRESS [--after NUMBER] [--limit n] [--json]
 ```
 
 Lists the messages stored in one endpoint's inbox and whether each was delivered, so a test can prove what the transport kept and delivered. It never shows a message's text. It is read only: it uses stream info, a direct get of a message by sequence and consumer info of the existing `deliver` consumer, and nothing else. It never creates, updates, binds or fetches from a consumer, never acknowledges, and writes nothing to the directory, a bucket or a file. It runs with the same admin credentials as `audit`.
 
 - ADDRESS is read from the directory record, one key; an address that names no record is refused (exit 1).
-- The default is the last 20 messages, oldest first. `--limit n` caps the count. `--from SEQ` and `--to SEQ` bound the stream sequences shown, inclusive and clamped to the stream's first and last sequence; with `--from` the first n messages from it are shown.
+- The default is the last 20 messages, oldest first. `--limit n` caps the count. `--after NUMBER` shows only the messages after that message number, as `mash inbox --after` does; with it the first n messages after the number are shown. A value that is not a whole number exits 2 with `error: --after must be a whole number`.
 - Exit codes: 0 success, 1 a refusal (an unknown endpoint, no inbox stream) or it could not complete (no server, no credentials), 2 a usage error.
 
 The text form prints a line with the count, then a table:
@@ -307,7 +307,7 @@ Because revocation is by key and time, a new credential for an endpoint needs a 
 
 ## Exit codes and arguments
 
-mashctl exits with 0, 1 or 2 only: 0 it worked, 1 it failed (one line on standard error says why), 2 the command line was wrong or the command cannot run here, and nothing was attempted. Every verb exits 0 on success, 2 for a usage error (a wrong or missing argument, an unknown flag, a stray argument, an argument that fails validation) and 1 for any failure; `audit` exits 1 for `--strict` findings and when it could not complete (see [audit.md](audit.md#exit-codes)). An argument that fails validation is named in the message but never printed back, so a secret pasted into the wrong place is not echoed. `mashctl endpoint permissions ADDRESS` prints the permission set of the endpoint's NATS user as JSON, and nothing else, on stdout; it reads no server. Errors are `error: WHAT` on standard error, then an optional `hint: COMMAND`; with `--json` the commands of this form print `{"error": ..., "hint": ...}` on standard output instead.
+mashctl exits with 0, 1 or 2 only: 0 it worked, 1 it failed (one line on standard error says why), 2 the command line was wrong or the command cannot run here, and nothing was attempted. Every verb exits 0 on success, 2 for a usage error (a wrong or missing argument, an unknown flag, a stray argument, an argument that fails validation) and 1 for any failure; `audit` exits 1 for `--strict` findings and when it could not complete (see [audit.md](audit.md#exit-codes)). An argument that fails validation is named in the message but never printed back, so a secret pasted into the wrong place is not echoed. `mashctl endpoint permissions ADDRESS` prints the permission set of the endpoint's NATS user as JSON, and nothing else, on stdout; it reads no server. The keys are `pub` and `sub`, each with `allow` and `deny`; `deny` is always printed, as `[]` when it is empty. Errors are `error: WHAT` on standard error, then an optional `hint: COMMAND`; with `--json` the commands of this form print `{"error": ..., "hint": ...}` on standard output instead.
 
 ## Before you push with nsc
 

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"regexp"
+	"runtime/debug"
+	"slices"
 	"strings"
 	"testing"
 
@@ -172,13 +174,25 @@ func TestEndpointPermissions(t *testing.T) {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
 	a, _ := sap.NewAddress("acme", "demo", "bob")
-	want, _ := json.MarshalIndent(admin.Permissions(a), "", "  ")
+	want, _ := json.MarshalIndent(permissionsJSON(admin.Permissions(a)), "", "  ")
 	if out != string(want)+"\n" {
 		t.Fatalf("permissions: %q, want %q", out, want)
 	}
 	var p map[string]map[string][]string
-	if err := json.Unmarshal([]byte(out), &p); err != nil || len(p["pub"]["allow"]) == 0 || len(p["sub"]["allow"]) == 0 {
+	if err := json.Unmarshal([]byte(out), &p); err != nil || len(p) != 2 || len(p["pub"]["allow"]) == 0 || len(p["sub"]["allow"]) == 0 {
 		t.Fatalf("not the permissions object: %q", out)
+	}
+	real := admin.Permissions(a)
+	if !slices.Equal(p["pub"]["allow"], real.Pub.Allow) || !slices.Equal(p["sub"]["allow"], real.Sub.Allow) {
+		t.Errorf("allow lists differ from the code's permissions: %q", out)
+	}
+	for _, dir := range []string{"pub", "sub"} {
+		if d, ok := p[dir]["deny"]; !ok || d == nil || len(d) != 0 {
+			t.Errorf("%s deny is %v: want present and empty", dir, d)
+		}
+	}
+	if !strings.Contains(out, `"deny": []`) {
+		t.Errorf("deny is not printed as []: %q", out)
 	}
 	if o2, _, code := h.run("endpoint", "permissions", "acme.demo.bob", "--json"); code != 0 || o2 != out {
 		t.Errorf("--json: %d %q", code, o2)
@@ -208,6 +222,14 @@ func TestVersionOutput(t *testing.T) {
 	var j struct{ Version, Commit string }
 	if code != 0 || errb != "" || json.Unmarshal([]byte(out), &j) != nil || j.Commit != "3f9a41c" || j.Version == "" || strings.HasPrefix(j.Version, "v") {
 		t.Fatalf("--json: %d %q %q", code, out, errb)
+	}
+	// a build with nothing stamped
+	commit = ""
+	old := readBuildInfo
+	readBuildInfo = func() (*debug.BuildInfo, bool) { return nil, false }
+	t.Cleanup(func() { readBuildInfo = old })
+	if out, errb, code := h.run("version"); code != 0 || errb != "" || out != "mashctl v0.0.0-dev (unknown)\n" {
+		t.Errorf("unstamped: %d %q %q", code, out, errb)
 	}
 	if shortCommit("") != "unknown" || shortCommit("abc") != "abc" || shortCommit("3f9a41c8d2e0+dirty") != "3f9a41c+dirty" {
 		t.Error("shortCommit")

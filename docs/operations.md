@@ -142,7 +142,7 @@ The creds file is named `<owner>.<group>.<instance>.creds`. It holds the seed. K
 
 Before a command changes anything, `--dry-run` says what it would do: `mashctl endpoint create alice/dev/design --public-key design.pub --dry-run`.
 
-`mashctl endpoint permissions <owner.group.name>` prints the permission set as JSON, and nothing else, on stdout; it reads no server. The set lets an endpoint:
+`mashctl endpoint permissions <owner.group.name>` prints the permission set as JSON, and nothing else, on stdout; it reads no server. The keys are `pub` and `sub`, each with `allow` and `deny`. The set lets an endpoint:
 
 - publish mail, live SAP prompts and status probes to any endpoint of its owner: `agents.mail.<owner>.*.*`, `agents.prompt.<owner>.*.*` and `agents.status.<owner>.*.*`, so a credential is open to the whole owner by default and reaches no other owner;
 - publish its own heartbeat, `agents.hb.<owner>.<group>.<instance>`, and answer SAP discovery;
@@ -178,11 +178,11 @@ mashctl endpoint create alice/dev/design --public-key design.pub --label team=ac
 mashctl endpoint set alice.dev.design role=reviewer host=laptop     # role and host are set after create
 mashctl endpoint set alice.dev.design role=builder label.env=prod   # change the role, set a label; everything else stays
 mashctl endpoint unset alice.dev.design host label.tier             # clear the host, remove one label
-mashctl endpoint set alice.dev.design description="New text" capability=deploy   # replace the description, add one capability
+mashctl endpoint set alice.dev.design description="New text" capability=deploy,review   # replace the description and the whole capability list
 mashctl endpoint unset alice.dev.design description capability      # clear the description and every capability
 ```
 
-`endpoint set` and `endpoint unset` need an address and at least one key, change only the fields given, and write with a compare-and-set, re-reading and retrying if another write lands first. The keys are `role`, `description`, `host`, `capability` and `label.NAME`. `capability=C` adds a capability, and `unset capability` clears them all. `--dry-run` prints what would change and changes nothing. The 8-label and 8-capability caps are checked after the merge. Fields a newer mash wrote to the record are kept. Older mash versions ignore the labels, so mixed versions are safe. 
+`endpoint set` and `endpoint unset` need an address and at least one key, change only the fields given, and write with a compare-and-set, re-reading and retrying if another write lands first. The keys are `role`, `description`, `host`, `note`, `capability` and `label.NAME`. `capability=a,b` sets the whole list, and `unset capability` clears it; to remove one capability, set the list again without it. `--dry-run` prints what would change and changes nothing. The 8-label and 8-capability caps are checked after the merge. Fields a newer mash wrote to the record are kept. Older mash versions ignore the labels, so mixed versions are safe. 
 
 The first column of `mash who` is the endpoint's address `owner.group.instance` (for example `alice.dev.design`). `mash who --wide` (and the `who` tool a session's model sees, with `wide`) adds `ROLE`, `HOST` and `DESCRIPTION` columns, with `-` where nothing is recorded. The labels and capabilities are in the JSON, not the table. The directory metadata is only the record of intent; the live lease is not shown by `who`, because other endpoints' leases are not readable with an endpoint's permissions.
 
