@@ -318,31 +318,3 @@ func (e *Endpoint) refusedStored(first, last uint64, stream string) (stored int)
 	}
 	return len(seen)
 }
-
-// unrecordRefusal undoes recordRefusal for seq: a serve that lost its lease while recording does not acknowledge the
-// message, so the holder that does acknowledge it counts it, once.
-func (e *Endpoint) unrecordRefusal(seq uint64) {
-	if e.cfg.StateDir == "" {
-		return
-	}
-	dir, err := SpoolDir(e.cfg)
-	if err != nil {
-		return
-	}
-	refusedMu.Lock()
-	defer refusedMu.Unlock()
-	if n := RefusedCount(e.cfg); n > 0 {
-		_ = replaceFile(filepath.Join(dir, RefusedFile), []byte(strconv.Itoa(n-1)+"\n"))
-	}
-	p := filepath.Join(dir, refusedSeqsFile)
-	id, seqs := readRefusedSeqs(p)
-	if i := slices.Index(seqs, seq); i >= 0 {
-		seqs = slices.Delete(seqs, i, i+1)
-		var b strings.Builder
-		b.WriteString(refusedSeqsHeader + id + "\n")
-		for _, s := range seqs {
-			b.WriteString(strconv.FormatUint(s, 10) + "\n")
-		}
-		_ = replaceFile(p, []byte(b.String()))
-	}
-}
