@@ -368,6 +368,17 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 			}
 			return
 		}
+		if e.refuses(trust) {
+			// Dropped and counted, never delivered: acked so it is not redelivered for ever. The sender is told nothing.
+			// Without the lease the new holder gets it (and counts it), so it is nak'd, not counted.
+			if e.mayAck(pending{}) {
+				e.refuse(ref.Seq, from, trust)
+				_ = m.Ack()
+			} else {
+				_ = m.Nak()
+			}
+			return
+		}
 		var key string
 		if trust == sap.TrustVerified || trust == sap.TrustUnknownSigner || trust == sap.TrustStale {
 			key = h.User + "\x00" + h.Nonce
@@ -870,6 +881,9 @@ func (e *Endpoint) toMail(raw *jetstream.RawStreamMsg) (render.Mail, bool) {
 	if !ok {
 		return render.Mail{Seq: raw.Sequence, From: "?", Trust: trust, At: raw.Time}, false
 	}
+	if e.refuses(trust) { // stored, but not shown: serve counted and dropped it (refuse.go)
+		return render.Mail{Seq: raw.Sequence, From: from, Trust: trust, At: raw.Time}, false
+	}
 	replyTo, via := senderMarks(raw.Header, trust, h)
 	via, _ = e.viaAllowed(via) // dropped here too; the serve path logs it
 	return render.Mail{Seq: raw.Sequence, From: from, Trust: trust, At: raw.Time, Body: raw.Data, ReplyTo: replyTo, Via: via,
@@ -929,7 +943,9 @@ func (e *Endpoint) ReadInbox(ctx context.Context, q InboxQuery) (InboxRead, erro
 	}
 	info := s.CachedInfo()
 	first, last := info.State.FirstSeq, info.State.LastSeq
-	st := InboxState{Total: int(info.State.Msgs), Waiting: int(info.State.Msgs)}
+	// The stream keeps the refused mail it stored; the counts are of what the inbox shows.
+	shown := max(int(info.State.Msgs)-e.refusedStored(first, last), 0)
+	st := InboxState{Total: shown, Waiting: shown}
 	cons, err, ok := e.pre.takeConsumer()
 	if !ok {
 		cons, err = e.js.Consumer(ctx, e.ident.InboxStream(), store.Consumer)
@@ -1085,6 +1101,9 @@ func (e *Endpoint) ReadRef(ctx context.Context, r MsgRef) (render.Mail, error) {
 		return render.Mail{}, err
 	}
 	m, ok := e.toMail(raw)
+	if !ok && e.refuses(m.Trust) && m.Trust != sap.TrustForged && m.Trust != sap.TrustMalformed {
+		return render.Mail{}, &NoMessageError{Seq: r.Seq, Endpoint: e.Display()} // refused mail is not there to read
+	}
 	if !ok {
 		return m, fmt.Errorf("mash: message #%s has a %s sender header and is not shown", FormatMsgRef(r), m.Trust)
 	}

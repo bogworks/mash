@@ -369,6 +369,44 @@ func TestLoadSpoolRequired(t *testing.T) {
 	}
 }
 
+func TestLoadAcceptUnverified(t *testing.T) {
+	load := func(t *testing.T, file string, env map[string]string) (Config, error) {
+		t.Helper()
+		home := t.TempDir()
+		writeFile(t, home, file)
+		env["MASH_ENDPOINT"] = "o.g.a"
+		return load(envOf(env), home)
+	}
+	base := `"servers":"tls://x:4222"`
+	for _, tc := range []struct {
+		name, file string
+		env        map[string]string
+		want       bool
+	}{
+		{"default off", `{` + base + `}`, map[string]string{}, false},
+		{"env 1", `{` + base + `}`, map[string]string{"MASH_ACCEPT_UNVERIFIED": "1"}, true},
+		{"env true", `{` + base + `}`, map[string]string{"MASH_ACCEPT_UNVERIFIED": "true"}, true},
+		{"file key", `{` + base + `,"accept_unverified":true}`, map[string]string{}, true},
+		{"env 0 beats the file", `{` + base + `,"accept_unverified":true}`, map[string]string{"MASH_ACCEPT_UNVERIFIED": "0"}, false},
+		{"env false beats the file", `{` + base + `,"accept_unverified":true}`, map[string]string{"MASH_ACCEPT_UNVERIFIED": "false"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := load(t, tc.file, tc.env)
+			if err != nil || c.AcceptUnverified != tc.want {
+				t.Fatalf("AcceptUnverified = %v, %v; want %v", c.AcceptUnverified, err, tc.want)
+			}
+		})
+	}
+	for _, v := range []string{"yes", "on", "TRUE", "2", " 1"} {
+		if _, err := load(t, `{`+base+`}`, map[string]string{"MASH_ACCEPT_UNVERIFIED": v}); err == nil || !strings.Contains(err.Error(), "MASH_ACCEPT_UNVERIFIED") {
+			t.Fatalf("%q: err %v, want a MASH_ACCEPT_UNVERIFIED error", v, err)
+		}
+	}
+	if _, err := load(t, `{`+base+`,"accept_unverified":"yes"}`, map[string]string{}); err == nil || !strings.Contains(err.Error(), "accept_unverified") {
+		t.Fatalf("a non-boolean key: %v, want an error naming accept_unverified", err)
+	}
+}
+
 func TestLimitsConfig(t *testing.T) {
 	home := t.TempDir()
 	c, err := load(envOf(nil), home)

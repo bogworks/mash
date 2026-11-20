@@ -74,10 +74,15 @@ func (s *session) stderr() string {
 
 func startServe(t *testing.T, env map[string]string) *session {
 	t.Helper()
+	return startServeArgs(t, env, "serve")
+}
+
+func startServeArgs(t *testing.T, env map[string]string, args ...string) *session {
+	t.Helper()
 	inR, inW := io.Pipe()
 	outR, outW := io.Pipe()
 	s := &session{in: inW, lines: make(chan map[string]any, 100), done: make(chan int, 1)}
-	go func() { s.done <- run([]string{"serve"}, envFrom(env), inR, outW, &s.errs); outW.Close() }()
+	go func() { s.done <- run(args, envFrom(env), inR, outW, &s.errs); outW.Close() }()
 	go func() {
 		sc := bufio.NewScanner(outR)
 		sc.Buffer(make([]byte, 1<<20), 1<<24)

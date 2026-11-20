@@ -115,7 +115,13 @@ Check:
 
 `who` lists only the endpoints of your own owner, and `mash who --wide` adds the role, host and description on record; other endpoints' live host is not shown without admin access.
 
+## Mail does not arrive and `mash doctor` says unverified messages were refused
+
+By default `mash serve` delivers only mail whose trust is `verified`. Mail that is unsigned (`[absent]`), signed by an unknown key (`[unknown-signer]`), `[claimed]` or `[stale]` is dropped and counted; the `refused` row of `mash doctor` shows the count, and the sender is not told. Find out why the sender is not verified (below). To receive such mail anyway, with its label, start the session with `MASH_ACCEPT_UNVERIFIED=1` (or set `accept_unverified` in `config.json`, or run `mash serve --accept-unverified`). Mail refused earlier is not delivered afterwards.
+
 ## Mail arrives labelled `[unknown-signer]`, `[claimed]`, `[absent]` or `[stale]`
+
+These labels appear only when `accept_unverified` is set (above); otherwise that mail is refused and counted.
 
 - `[unknown-signer]`: the sender's key is not in the directory. It was deprovisioned (`mash admin deprovision` does not revoke its NATS user), or it is not a mash endpoint. Run `mashctl endpoint list`.
 - `[stale]`: the signature was made more than 5 minutes before the message was stored, or more than 30 seconds after. A replay looks like this. Another cause is a skewed clock on the sender or the receiver (tracked in #36).
