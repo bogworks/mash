@@ -822,9 +822,21 @@
        },
        {
         "case": "No endpoint chosen and several installed",
-        "text": "error: more than one endpoint is installed here: acme.demo.alice, acme.demo.bob\nhint: mash status --endpoint acme.demo.bob",
+        "text": "error: more than one endpoint is installed here: acme.demo.alice, acme.demo.bob\nhint: mash status --endpoint acme.demo.alice",
         "stream": "stderr",
         "exit": 2
+       },
+       {
+        "case": "No endpoint installed",
+        "text": "error: no endpoint is installed here\nhint: mash join <file>",
+        "stream": "stderr",
+        "exit": 2
+       },
+       {
+        "case": "As an MCP tool in a session with no endpoint named",
+        "text": "No endpoint is chosen for this session.\nhint: start the session with MASH_ENDPOINT=<address>",
+        "stream": "stdout",
+        "exit": 1
        }
       ]
      },
@@ -850,7 +862,7 @@
      },
      {
       "name": "x-notes",
-      "value": "'ready' means: the configuration is readable, the server answers, and it accepts this endpoint's credentials."
+      "value": "'ready' means: the configuration is readable, the server answers, and it accepts this endpoint's credentials. A hint names the first installed address in alphabetical order. At a shell every 'hint:' line goes to stderr; an MCP tool's text block puts the hint on the line after the result."
      }
     ]
    },
@@ -897,6 +909,12 @@
         "text": "config    ok\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   FAIL  the server refused these credentials\nrefused   warn  3 unverified messages were refused\n\n1 problem, 1 warning.\nhint: ask whoever runs your mesh to run: mashctl endpoint reissue acme.demo.bob",
         "stream": "stdout",
         "exit": 1
+       },
+       {
+        "case": "A check that could not run",
+        "text": "config    ok\ncreds     ok\nserver    FAIL  the server did not answer: tls://myserver:4222\nsign-in   skip  needs the server\nrefused   skip  needs the server\n\n1 problem.",
+        "stream": "stdout",
+        "exit": 1
        }
       ]
      },
@@ -908,10 +926,34 @@
        "warnings": 1,
        "checks": [
         {
+         "name": "config",
+         "state": "ok",
+         "detail": null,
+         "fix": null
+        },
+        {
+         "name": "creds",
+         "state": "ok",
+         "detail": null,
+         "fix": null
+        },
+        {
+         "name": "server",
+         "state": "ok",
+         "detail": "tls://myserver:4222",
+         "fix": null
+        },
+        {
          "name": "sign-in",
          "state": "fail",
          "detail": "the server refused these credentials",
          "fix": "mashctl endpoint reissue acme.demo.bob"
+        },
+        {
+         "name": "refused",
+         "state": "warn",
+         "detail": "3 unverified messages were refused",
+         "fix": null
         }
        ]
       }
@@ -929,7 +971,7 @@
      },
      {
       "name": "x-notes",
-      "value": "doctor is the one everyday command that prints many lines, as brew doctor and flutter doctor do. It reports on stdout and exits 1 when it found a problem. The 'refused' row counts unverified mail that was refused (see mash serve)."
+      "value": "doctor is the one everyday command that prints many lines, as brew doctor and flutter doctor do. It reports on stdout and exits 1 when it found a problem. Every row is always printed, and 'checks' in the JSON always lists every row, each with a state of ok, warn, fail or skip; a row is skipped when an earlier failure means it cannot be run. The 'refused' row counts unverified mail that was refused (see mash serve)."
      }
     ]
    },
