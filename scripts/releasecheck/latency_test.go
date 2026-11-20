@@ -319,3 +319,29 @@ func TestNextAny_countsNonMailAndSkipsOld(t *testing.T) {
 		t.Errorf("a non-mail notification: nextAny = %v, %q; want gotEvent with its meta", got, ev.Meta)
 	}
 }
+
+// The online wait reads the candidate's JSON object and the previous release's tab text, and nothing else.
+func TestWhoOnlineBothForms(t *testing.T) {
+	const addr = "o.lab.r1"
+	for _, c := range []struct {
+		name, out         string
+		online, isNewForm bool
+		text              bool
+	}{
+		{"new, online", `{"endpoints":[{"address":"o.lab.r1","online":true,"role":null,"host":null,"description":null,"capability":[],"labels":{}}]}` + "\n", true, true, false},
+		{"new, offline", `{"endpoints":[{"address":"o.lab.r1","online":false}]}`, false, true, false},
+		{"new, another endpoint online", `{"endpoints":[{"address":"o.lab.r2","online":true}]}`, false, true, false},
+		{"new, nothing", `{"endpoints":[]}`, false, true, false},
+		{"old text, online", "r1\tonline\nr2\toffline\n", false, false, true},
+		{"old text, offline", "r1\toffline\n", false, false, false},
+		{"old error", "error: unknown option --json\n", false, false, false},
+	} {
+		on, isNew := whoJSONOnline(c.out, addr)
+		if on != c.online || isNew != c.isNewForm {
+			t.Errorf("%s: JSON reading (%v, %v), want (%v, %v)", c.name, on, isNew, c.online, c.isNewForm)
+		}
+		if got := whoTextOnline(c.out, "r1"); got != c.text {
+			t.Errorf("%s: text reading %v, want %v", c.name, got, c.text)
+		}
+	}
+}

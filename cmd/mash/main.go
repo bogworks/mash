@@ -23,50 +23,86 @@ import (
 	"github.com/bogworks/mash/internal/host"
 )
 
-// usageText is the tool's own help, `mash --help` and `mash help`. The commands on the command table are lines generated
-// from it (their synopsis and one-line description); the rest is written by hand until they are on the table too.
-const usageText = `mash: a messaging mesh for agents (SAP 0.3 + mail, on NATS JetStream)
+// helpIntro is the first line of the tool's own help, `mash --help` and `mash help`.
+const helpIntro = "mash: a messaging mesh for agents (SAP 0.3 + mail, on NATS JetStream)"
 
-  mash serve                                   the Claude Code channel server (started by the plugin)
-  mash hook                                    the plugin's hook: shows the session its spooled mail
-{{send}}
-  mash read <seq>                              print one message from your inbox
-  mash inbox [--limit N] [--after SEQ]         recent messages, or the N after SEQ (oldest first)
-  mash who [--long] [--json] [--names] [--match TEXT] [--name SUB] [--owner O] [--role SUB] [--label K[=V]]... [--online|--offline]
-                                               endpoints, and who is online (--long: role, host, labels, lease);
-                                               filters AND; --names one per line; --json a stable array
-  mash prompt <to> <text...>                   a live, signed SAP prompt; prints the reply
-  mash status                                  what a session would see (name, config, creds, channel allowlist), before launch;
-                                               connects to nothing; the live parts say they need a running session
-  mash admin <verb> ...                        deprecated; use mashctl
-  mash key create --out FILE [--pub-out FILE] [--json] [--dry-run]
-                                               make a user key pair: seed to FILE (0600), public key to FILE.pub; needs no config
-  mash credential create --seed FILE --jwt FILE [--out CREDS] [--force] [--json] [--dry-run]
-                                               join a seed and its user JWT into a credentials file; needs no config
-  mash plugin export <dir>                     write this build's Claude Code plugin and a marketplace for it into <dir>
-{{version}}
-
-An endpoint is addressed owner.group.name: MASH_ENDPOINT (or config.json "endpoint", or --endpoint). With none set, the one
-endpoint whose creds file (owner.group.name.creds, mode 0600) is in the config directory is used; with several, name one.
-Global options, anywhere in the command: --endpoint ADDR, --creds PATH, --server URL (repeatable), --ca PATH, --config-dir PATH,
---verbose, --json, --no-color. A flag beats its environment variable, which beats config.json.
-Configuration: config.json {"servers","endpoint","ca"} in $MASH_CONFIG_DIR (default ~/.config/mash, or $XDG_CONFIG_HOME/mash), overridden by
-MASH_SERVER (commas between several), MASH_ENDPOINT, MASH_CA, MASH_CREDS, MASH_ADMIN_CREDS, MASH_HOST (see docs/install.md).
-State (spool, hook.log): $MASH_STATE_DIR (default $XDG_STATE_HOME/mash, else ~/.local/state/mash).
-Slow link: "open_timeout" (default 20s) and "call_timeout" (default 15s), or MASH_OPEN_TIMEOUT and MASH_CALL_TIMEOUT.
-Also tunable: lease_retry, transient_budget, transient_max, cli_timeout, admin_timeout (MASH_LEASE_RETRY, MASH_TRANSIENT_BUDGET, MASH_TRANSIENT_MAX, MASH_CLI_TIMEOUT, MASH_ADMIN_TIMEOUT).
+// helpTail is what follows the commands: how an endpoint is addressed, the global options and the configuration.
+const helpTail = `An endpoint is addressed owner.group.name: MASH_ENDPOINT (or config.json
+"endpoint", or --endpoint). With none set, the one endpoint whose creds file
+(owner.group.name.creds, mode 0600) is in the config directory is used; with
+several, name one.
+Global options, anywhere in the command: --endpoint ADDR, --creds PATH, --server
+URL (repeatable), --ca PATH, --config-dir PATH, --verbose, --json, --no-color. A
+flag beats its environment variable, which beats config.json.
+Configuration: config.json {"servers","endpoint","ca"} in $MASH_CONFIG_DIR
+(default ~/.config/mash, or $XDG_CONFIG_HOME/mash), overridden by MASH_SERVER
+(commas between several), MASH_ENDPOINT, MASH_CA, MASH_CREDS, MASH_ADMIN_CREDS,
+MASH_HOST (see docs/install.md).
+State (spool, hook.log): $MASH_STATE_DIR (default $XDG_STATE_HOME/mash, else
+~/.local/state/mash).
+Slow link: "open_timeout" (default 20s) and "call_timeout" (default 15s), or
+MASH_OPEN_TIMEOUT and MASH_CALL_TIMEOUT.
+Also tunable: lease_retry, transient_budget, transient_max, cli_timeout,
+admin_timeout (MASH_LEASE_RETRY, MASH_TRANSIENT_BUDGET, MASH_TRANSIENT_MAX,
+MASH_CLI_TIMEOUT, MASH_ADMIN_TIMEOUT).
 `
 
-// usage is usageText with the lines of the commands on the table filled in.
-var usage = func() string {
-	r := newCommands(nil)
-	const col = 47 // where the descriptions of the hand-written lines start
-	u := usageText
-	for _, name := range []string{"send", "version"} {
-		u = strings.Replace(u, "{{"+name+"}}", r.ListLine(name, col), 1)
+// helpCol is the column the commands' one-line descriptions start at.
+const helpCol = 47
+
+// helpGroups are the headings of the tool's own help, in order (the specification's x-group).
+var helpGroups = []string{"Everyday", "Setup", "Integration", "Raw SAP"}
+
+// helpLayout is the commands under each heading in the order of the specification. A command on the command table is
+// listed from the table (its synopsis and description are generated); one that is not yet is listed from handCommands.
+var helpLayout = map[string][]string{
+	"Everyday":    {"send", "inbox", "read", "who", "status", "version"},
+	"Setup":       {"key", "credential", "admin"},
+	"Integration": {"serve", "hook", "plugin"},
+	"Raw SAP":     {"prompt"},
+}
+
+// handCommands are the synopsis and one-line description of the commands that are not on the command table yet.
+var handCommands = map[string][2]string{
+	"inbox":      {"mash inbox [--limit N] [--after SEQ]", "Recent messages, or the N after SEQ (oldest first)"},
+	"read":       {"mash read <seq>", "Print one message from your inbox"},
+	"status":     {"mash status", "What a session would see (name, config, creds, channel allowlist), before launch; connects to nothing; the live parts say they need a running session"},
+	"key":        {"mash key create --out FILE [options]", "Make a user key pair: seed to FILE (0600), public key to FILE.pub; needs no config"},
+	"credential": {"mash credential create --seed FILE --jwt FILE [options]", "Join a seed and its user JWT into a credentials file; needs no config"},
+	"admin":      {"mash admin <verb> ...", "Deprecated; use mashctl"},
+	"serve":      {"mash serve", "The Claude Code channel server (started by the plugin)"},
+	"hook":       {"mash hook", "The plugin's hook: shows the session its spooled mail"},
+	"plugin":     {"mash plugin export <dir>", "Write this build's Claude Code plugin and a marketplace for it into <dir>"},
+	"prompt":     {"mash prompt <to> <text...>", "A live, signed SAP prompt; prints the reply"},
+}
+
+// usageFor is the tool's own help for the table r: the commands listed by group, each with its one-line description.
+// The commands on the table come from it (their group, synopsis and description); the rest are hand-written. A command on
+// the table that the layout does not name is listed last under its own group.
+func usageFor(r *cmdcore.Registry) string {
+	var b strings.Builder
+	b.WriteString(helpIntro + "\n")
+	for _, g := range helpGroups {
+		b.WriteString("\n" + g + ":\n")
+		names := helpLayout[g]
+		for _, n := range r.Groups(g) {
+			if !slices.Contains(names, n) {
+				names = append(slices.Clone(names), n)
+			}
+		}
+		for _, n := range names {
+			if _, ok := r.Lookup(n); ok {
+				b.WriteString(r.ListLine(n, helpCol) + "\n")
+			} else if h, ok := handCommands[n]; ok {
+				b.WriteString(cmdcore.ListLine(h[0], h[1], helpCol) + "\n")
+			}
+		}
 	}
-	return u
-}()
+	return b.String() + "\n" + helpTail
+}
+
+// usage is the help of the command table.
+var usage = usageFor(newCommands(nil))
 
 func main() {
 	// A session that is killed (Claude Code exiting, a closed terminal) shuts
@@ -145,16 +181,15 @@ var verbUsage = map[string]string{
 	"status": "usage: mash status",
 	"read":   "usage: mash read <seq>",
 	"inbox":  "usage: mash inbox [--limit N] [--after SEQ]",
-	"who":    whoUsage,
 	"prompt": "usage: mash prompt <to> <text...>",
 }
 
 // helpTopic is the verbs that are not on the table and have help of their own: `mash help VERB` prints their
 // `mash VERB --help`.
-var helpTopic = map[string]bool{"serve": true, "hook": true, "plugin": true, "key": true, "credential": true, "status": true, "read": true, "inbox": true, "who": true, "prompt": true}
+var helpTopic = map[string]bool{"serve": true, "hook": true, "plugin": true, "key": true, "credential": true, "status": true, "read": true, "inbox": true, "prompt": true}
 
-// noJSONForm is the verbs that have no --json form: a --json given to one is a usage error. who, key and credential
-// parse --json themselves, and send and version are commands of the table; admin is deprecated and left as it was.
+// noJSONForm is the verbs that have no --json form: a --json given to one is a usage error. key and credential
+// parse --json themselves, and send, version and who are commands of the table; admin is deprecated and left as it was.
 var noJSONForm = map[string]bool{"status": true, "read": true, "inbox": true, "prompt": true, "serve": true, "hook": true, "plugin": true}
 
 // stdinWait is how long a message read from standard input has to arrive: 15 minutes, as the send help says. It is its
@@ -165,13 +200,13 @@ const stdinWait = 15 * time.Minute
 var stdinLimit = stdinWait
 
 // jsonRequested is whether the errors before a verb runs are framed as JSON: --json as a global option, or --json given
-// to a verb that parses it itself (who, key, credential), which the global parse leaves in the arguments.
+// to a verb that parses it itself (key, credential), which the global parse leaves in the arguments.
 func jsonRequested(global cliframe.Global, args []string) bool {
 	if global.JSON {
 		return true
 	}
 	switch args[0] {
-	case "who", "key", "credential":
+	case "key", "credential":
 		return slices.Contains(args[1:], "--json")
 	}
 	return false
@@ -197,7 +232,7 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 	// The global options (--endpoint, --creds, --server, --ca, --config-dir, --verbose, --json, --no-color) are taken out
 	// of the arguments wherever they stand, before any verb runs; a flag shadows its environment variable.
 	rawArgs := args
-	global, args, gerr := cliframe.ExtractOwning(cliframe.Spec{Tool: "mash", CredsEnv: "MASH_CREDS", CredsKey: "creds"}, args, map[string][]string{"who": {"--json"}, "key": {"--json"}, "credential": {"--json"}}) // these parse --json themselves
+	global, args, gerr := cliframe.ExtractOwning(cliframe.Spec{Tool: "mash", CredsEnv: "MASH_CREDS", CredsKey: "creds"}, args, map[string][]string{"key": {"--json"}, "credential": {"--json"}}) // these parse --json themselves
 	if gerr != nil {
 		// The options did not parse, so --json is looked for by hand.
 		return cliframe.Report(stdout, stderr, cliframe.Usagef("%s", strings.TrimPrefix(gerr.Error(), "mash: ")).WithHint("mash --help"), slices.Contains(rawArgs, "--json"))
@@ -314,7 +349,12 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 			return &cmdcore.Env{Svc: &cliSvc{cfg: cfg, stderr: stderr}, StdinTimeout: stdinLimit}, nil
 		}
 		return newCommands(mk).RunCLI("send", args[1:], stdin, stdout, stderr, global)
-	case "read", "inbox", "who", "prompt":
+	case "who":
+		mk := func(context.Context) (*cmdcore.Env, error) {
+			return &cmdcore.Env{Svc: &cliSvc{cfg: cfg, stderr: stderr}}, nil
+		}
+		return newCommands(mk).RunCLI("who", args[1:], stdin, stdout, stderr, global)
+	case "read", "inbox", "prompt":
 		return cli(cfg, args, stdin, stdout, stderr)
 	case "admin":
 		return adminCmd(cfg, args[1:], stdout, stderr)

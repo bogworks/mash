@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"errors"
 	"strings"
 	"sync/atomic"
@@ -9,7 +8,6 @@ import (
 
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/endpoint"
-	"github.com/bogworks/mash/internal/store"
 )
 
 // An endpoint is shown as owner.group.instance on every human surface of the client and the serve (ADR 0145); the
@@ -18,29 +16,6 @@ import (
 var nfCfg = config.Config{Name: "sap-go-sdk", Owner: "x", Group: "grp"}
 
 const nfDot = "x.grp.sap-go-sdk"
-
-func TestWhoTextShowsDottedWhoNamesStaysFlat(t *testing.T) {
-	r := store.Record{Owner: "acme", Group: "team1", Instance: "ops1"}
-	ps := []endpoint.Presence{{Record: r}}
-	if got := whoNames(ps); got != "acme_team1_ops1" {
-		t.Fatalf("--names is a script contract and stays flat: %q", got)
-	}
-	text := whoText(ps, false, nil)
-	if !strings.HasPrefix(text, "acme.team1.ops1\toffline") || strings.Contains(text, "acme_team1") {
-		t.Fatalf("text:\n%s", text)
-	}
-}
-
-func TestWhoJSONCarriesNameAndIdentity(t *testing.T) {
-	r := store.Record{Owner: "acme", Group: "team1", Instance: "ops1"}
-	var arr []map[string]any
-	if err := json.Unmarshal([]byte(whoJSON([]endpoint.Presence{{Record: r}}, false, nil)), &arr); err != nil {
-		t.Fatal(err)
-	}
-	if arr[0]["name"] != "acme_team1_ops1" || arr[0]["identity"] != "acme.team1.ops1" {
-		t.Fatalf("entry: %v", arr[0])
-	}
-}
 
 func TestNameLineAndConnectionShowDotted(t *testing.T) {
 	if got := nameLine(nfCfg); got != "name: OK - "+nfDot {

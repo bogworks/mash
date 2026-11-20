@@ -90,7 +90,7 @@ func TestHookDeliveryEndToEnd(t *testing.T) {
 	s := startServe(t, w.env["a"])
 	s.initialize(t)
 	s.tools(t)
-	eventually(t, 5*time.Second, "a online", func() bool { out, _ := w.cli(t, "a", "who"); return strings.Contains(out, tTo("a")+"\tonline") })
+	eventually(t, 5*time.Second, "a online", func() bool { out, _ := w.cli(t, "a", "who"); return whoShows(out, tTo("a"), "online") })
 	sp := spoolOf(w.env["a"])
 	eventually(t, 5*time.Second, "serve made the spool", func() bool { _, err := os.Stat(sp.Dir); return err == nil })
 	if got := runHook(t, w.env["a"], "UserPromptSubmit"); got != "" {
@@ -128,7 +128,7 @@ func TestStateDirOverridePlacesTheSpool(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(w.env["a"]["HOME"], ".local", "state", "mash")); err == nil {
 		t.Fatal("the default state directory was used too")
 	}
-	eventually(t, 5*time.Second, "a online", func() bool { out, _ := w.cli(t, "a", "who"); return strings.Contains(out, tTo("a")+"\tonline") })
+	eventually(t, 5*time.Second, "a online", func() bool { out, _ := w.cli(t, "a", "who"); return whoShows(out, tTo("a"), "online") })
 	runHook(t, w.env["a"], "UserPromptSubmit") // the first hook switches the session to the spool
 	if _, code := w.cli(t, "b", "send", tTo("a"), "--kind", "question", "via the override"); code != 0 {
 		t.Fatal("send failed")
@@ -503,7 +503,7 @@ func TestSendUrgentFromTheCLI(t *testing.T) {
 	s := startServe(t, w.env["a"])
 	s.initialize(t)
 	s.tools(t)
-	eventually(t, 5*time.Second, "a online", func() bool { out, _ := w.cli(t, "a", "who"); return strings.Contains(out, tTo("a")+"\tonline") })
+	eventually(t, 5*time.Second, "a online", func() bool { out, _ := w.cli(t, "a", "who"); return whoShows(out, tTo("a"), "online") })
 	if out, code := w.cli(t, "b", "send", tTo("a"), "--urgent", "the build is red"); code != 0 {
 		t.Fatalf("send: %d %s", code, out)
 	}

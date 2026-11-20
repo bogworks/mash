@@ -80,7 +80,7 @@ func TestNaming21_TokensShownByteIdentical(t *testing.T) {
 	eventually(t, 10*time.Second, "me online", func() bool {
 		// Readiness only, display-agnostic: the display assertions below pin the form.
 		out := cliAsQuiet(peerEnv, "who")
-		return strings.Contains(out, me.String()+"\tonline") || strings.Contains(out, me.Flat()+"\tonline")
+		return whoShows(out, me.String(), "online")
 	})
 
 	// who, from the peer's side: the endpoint, with its tokens.

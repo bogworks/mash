@@ -16,7 +16,7 @@ func helpUsage(args []string) (string, bool) {
 	u, known := verbUsage[args[0]]
 	switch args[0] {
 	case "serve", "hook":
-		u, known = linesOf(usage, "  mash "+args[0]), true
+		u, known = commandLines(usage, "  mash "+args[0]), true
 	case "plugin":
 		u, known = pluginUsage, true
 	case "key", "credential":
@@ -48,6 +48,23 @@ func linesOf(text, prefix string) string {
 	var b strings.Builder
 	for _, l := range strings.SplitAfter(text, "\n") {
 		if rest, ok := strings.CutPrefix(l, prefix); ok && (rest == "" || rest[0] == ' ' || rest[0] == '\n') {
+			b.WriteString(l)
+		}
+	}
+	return strings.TrimSuffix(b.String(), "\n")
+}
+
+// commandLines is linesOf, with the lines that continue the command's description (indented to helpCol) after it.
+func commandLines(text, prefix string) string {
+	var b strings.Builder
+	on := false
+	for _, l := range strings.SplitAfter(text, "\n") {
+		if rest, ok := strings.CutPrefix(l, prefix); ok && (rest == "" || rest[0] == ' ' || rest[0] == '\n') {
+			on = true
+		} else if !strings.HasPrefix(l, strings.Repeat(" ", helpCol)) {
+			on = false
+		}
+		if on {
 			b.WriteString(l)
 		}
 	}

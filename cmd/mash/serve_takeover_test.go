@@ -38,7 +38,7 @@ func TestServeExitsWhenStdinReachesEOF(t *testing.T) {
 	s := startServe(t, w.env["a"])
 	s.initialize(t)
 	s.tools(t)
-	eventually(t, 5*time.Second, "a online", func() bool { out, _ := w.cli(t, "a", "who"); return strings.Contains(out, tTo("a")+"\tonline") })
+	eventually(t, 5*time.Second, "a online", func() bool { out, _ := w.cli(t, "a", "who"); return whoShows(out, tTo("a"), "online") })
 	s.in.Close() // EOF on serve's stdin
 	s.exited(t, 5*time.Second)
 	code := <-s.done
@@ -62,7 +62,7 @@ func TestServeSameSessionTakesOverAndSupersedesOld(t *testing.T) {
 	old := startServe(t, w.env["a"])
 	old.initialize(t)
 	old.tools(t)
-	eventually(t, 5*time.Second, "old online", func() bool { out, _ := w.cli(t, "a", "who"); return strings.Contains(out, tTo("a")+"\tonline") })
+	eventually(t, 5*time.Second, "old online", func() bool { out, _ := w.cli(t, "a", "who"); return whoShows(out, tTo("a"), "online") })
 
 	attempts := acquireAttempts.Load()
 	fresh := startServe(t, w.env["a"])
@@ -140,7 +140,7 @@ func TestServeSupersededExitsWhenParentChanges(t *testing.T) {
 	old := startServe(t, w.env["a"])
 	old.initialize(t)
 	old.tools(t)
-	eventually(t, 5*time.Second, "old online", func() bool { out, _ := w.cli(t, "a", "who"); return strings.Contains(out, tTo("a")+"\tonline") })
+	eventually(t, 5*time.Second, "old online", func() bool { out, _ := w.cli(t, "a", "who"); return whoShows(out, tTo("a"), "online") })
 	fresh := startServe(t, w.env["a"])
 	fresh.initialize(t)
 	fresh.tools(t)

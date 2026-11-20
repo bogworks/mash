@@ -44,13 +44,10 @@ func TestCLIShowsAndAcceptsTheCanonicalForm(t *testing.T) {
 		}
 	}
 
-	if got := cliAs(t, sendEnv, "who", "--names"); !strings.Contains(got, "acme_team1_recv") || strings.Contains(got, "acme.team1") {
-		t.Fatalf("who --names is flat:\n%s", got)
-	}
-	if got := cliAs(t, sendEnv, "who"); !strings.Contains(got, "acme.team1.recv\t") || strings.Contains(got, "acme_team1") {
+	if got := cliAs(t, sendEnv, "who"); !whoShows(got, "acme.team1.recv", "offline") && !whoShows(got, "acme.team1.recv", "online") || strings.Contains(got, "acme_team1") {
 		t.Fatalf("who:\n%s", got)
 	}
-	if got := cliAs(t, sendEnv, "who", "--json"); !strings.Contains(got, `"name": "acme_team1_recv"`) || !strings.Contains(got, `"identity": "acme.team1.recv"`) {
+	if got := cliAs(t, sendEnv, "who", "--json"); !strings.Contains(got, `"address":"acme.team1.recv"`) || strings.Contains(got, "acme_team1") {
 		t.Fatalf("who --json:\n%s", got)
 	}
 	if got := cliAs(t, sendEnv, "status"); !strings.Contains(got, "name: OK - acme.team1.sender") {

@@ -84,6 +84,9 @@ func (e *Endpoint) applyPresence(m *nats.Msg) (counted int) {
 	return counted
 }
 
+// flatOf is a record's flat directory key, owner_group_instance.
+func flatOf(r store.Record) string { return r.Owner + "_" + r.Group + "_" + r.Instance }
+
 // Who returns the directory with presence, sorted by directory key. After a presence probe has completed an endpoint is online
 // when it answered that probe or a later one; before any probe, when it was seen within OnlineWindow.
 func (e *Endpoint) Who() []Presence {

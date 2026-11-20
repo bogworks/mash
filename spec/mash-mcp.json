@@ -122,6 +122,12 @@
      "type": "integer",
      "required": false,
      "description": "Only messages after this number."
+    },
+    {
+     "name": "wide",
+     "type": "boolean",
+     "required": false,
+     "description": "More columns: the full sender address, trust and size. May pass 80 columns."
     }
    ],
    "structured": {
@@ -221,6 +227,12 @@
      "type": "boolean",
      "required": false,
      "description": "Only endpoints that are offline."
+    },
+    {
+     "name": "wide",
+     "type": "boolean",
+     "required": false,
+     "description": "More columns: role, host and description, where recorded. May pass 80 columns."
     }
    ],
    "structured": {
@@ -228,9 +240,15 @@
      {
       "address": "acme.demo.alice",
       "online": true,
-      "role": null,
-      "host": null,
-      "description": null
+      "role": "reviewer",
+      "host": "myserver",
+      "description": "reviews pull requests",
+      "capability": [
+       "review"
+      ],
+      "labels": {
+       "team": "blue"
+      }
      }
     ]
    },
@@ -242,7 +260,14 @@
      "exit": 0
     }
    ],
-   "errors": []
+   "errors": [
+    {
+     "case": "A prefix that is not part of an address",
+     "text": "error: Acme.Demo is not an owner, an owner.group or an address\nhint: mash who --help",
+     "stream": "stderr",
+     "exit": 2
+    }
+   ]
   },
   {
    "name": "status",
@@ -407,6 +432,10 @@
   [
    "A tool's description is written for the agent",
    "It may be longer than the command's one line: it tells the model when to use the tool and how to choose its parameters. It is part of this specification and is the text the server sends."
+  ],
+  [
+   "wide on a tool",
+   "Where a command has --wide, its tool has wide. It changes only the text block; the structured result always carries every field."
   ],
   [
    "One tool, one command",

@@ -30,6 +30,7 @@ func (r VersionResult) Text(cmdcore.Opts) string {
 // Version is the version command.
 var Version = cmdcore.Command[VersionParams, VersionResult]{
 	Name:        "version",
+	Group:       "Everyday",
 	Summary:     "Print the version.",
 	Description: "Print the version.",
 	Examples:    []string{"mash version"},

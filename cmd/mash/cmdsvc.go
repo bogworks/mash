@@ -23,6 +23,7 @@ import (
 var commandEntries = []cmdcore.Entry{
 	cmdcore.Register(cmds.Send),
 	cmdcore.Register(cmds.Version),
+	cmdcore.Register(cmds.Who),
 }
 
 // helpFrame is what --help prints after a command's own options. The descriptions are the specification's.
@@ -160,6 +161,59 @@ func (s *cliSvc) Send(ctx context.Context, to, text string, o cmds.SendOptions) 
 	return sendOn(c, ep, to, text, o)
 }
 
+// whoEntries is the directory as the who command reads it: the dotted address, whether it is online, and the role, host,
+// description, capabilities and labels where recorded. Only the endpoints of owner (the caller's own) are kept: who
+// never lists another owner's, whatever the account holds. The command sorts and filters.
+func whoEntries(ps []endpoint.Presence, owner string) []cmds.WhoEntry {
+	out := make([]cmds.WhoEntry, 0, len(ps))
+	for _, p := range ps {
+		r := p.Record
+		if r.Owner != owner {
+			continue
+		}
+		out = append(out, cmds.WhoEntry{Address: r.Owner + "." + r.Group + "." + r.Instance, Online: p.Online,
+			Role: r.Role, Host: r.Host, Description: r.Description, Capabilities: r.Caps, Labels: r.Labels})
+	}
+	return out
+}
+
+// Who reads the whole directory and which endpoints answer a presence probe, in one open: over a slow link every
+// dependent request is a round trip.
+func (s *cliSvc) Who(ctx context.Context) ([]cmds.WhoEntry, error) {
+	cfg := s.cfg
+	if cfg.Inert() {
+		return nil, cliframe.Failf("no endpoint: set MASH_ENDPOINT (owner.group.name), --endpoint, or install credentials for one endpoint").WithHint("mash status")
+	}
+	ctx, cancel := context.WithTimeout(ctx, cliDeadline(cfg))
+	defer cancel()
+	openCtx, openCancel := context.WithTimeout(ctx, cfg.OpenTimeout)
+	ep, err := endpoint.OpenClientWith(openCtx, cfg, endpoint.ClientOptions{FullDirectory: true, Presence: true})
+	openCancel()
+	if err != nil {
+		return nil, openFailure(cfg, err)
+	}
+	defer ep.Close()
+	c, cc := context.WithTimeout(ctx, cfg.CallTimeout)
+	defer cc()
+	if err := ep.Refresh(c); err != nil {
+		return nil, refreshFailure(cfg, err)
+	}
+	return whoEntries(ep.Who(), cfg.Owner), nil
+}
+
+// refreshFailure words a failure of the wait for who is online. A wait that ran out is not a failure to connect: the
+// server answered, the endpoints did not, so it is "the directory could not be read" (hint mash doctor), exit 1.
+// Anything else is worded as a failure to open is.
+func refreshFailure(cfg config.Config, err error) error {
+	if !errors.Is(err, context.DeadlineExceeded) {
+		if f := openFailure(cfg, err); f != err {
+			return f
+		}
+		return cliframe.Failf("the directory could not be read: %s", err).WithHint("mash doctor")
+	}
+	return cliframe.Failf("the directory could not be read: the endpoints did not answer in time").WithHint("mash doctor")
+}
+
 // mcpSvc is the service the MCP tools run against: the session's endpoint, which may not be usable yet.
 type mcpSvc struct {
 	buildVersion
@@ -176,4 +230,19 @@ func (s *mcpSvc) Send(ctx context.Context, to, text string, o cmds.SendOptions) 
 	ctx, cancel := context.WithTimeout(ctx, s.callTimeout)
 	defer cancel()
 	return sendOn(ctx, ep, to, text, o)
+}
+
+// Who asks every endpoint now whether it is there (the answer is reused for 30 seconds), then reads the directory.
+func (s *mcpSvc) Who(ctx context.Context) ([]cmds.WhoEntry, error) {
+	ep, err := s.state.Load().usable(s.name)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, s.callTimeout)
+	defer cancel()
+	ps, err := ep.WhoFresh(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("who: asking who is online: %w", err)
+	}
+	return whoEntries(ps, ep.Address().Owner), nil
 }

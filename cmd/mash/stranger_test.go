@@ -213,9 +213,9 @@ func TestServeWhoToolAsksNow(t *testing.T) {
 	c := startFakeClaude(t, strangerEnv(w, nil), true)
 	eventually(t, 20*time.Second, "who shows a online", func() bool {
 		out := c.call(t, "who", `{}`)
-		return strings.Contains(out, tTo("a")+"\tonline") && strings.Contains(out, tTo("b")+"\toffline")
+		return whoShows(out, tTo("a"), "online") && whoShows(out, tTo("b"), "offline")
 	})
-	if out := c.call(t, "who", `{"online":true,"format":"json"}`); !strings.Contains(out, `"a"`) || strings.Contains(out, `"b"`) {
-		t.Fatalf("who online json:\n%s", out)
+	if out := c.call(t, "who", `{"online":true}`); !strings.Contains(out, tTo("a")) || strings.Contains(out, tTo("b")) {
+		t.Fatalf("who online:\n%s", out)
 	}
 }

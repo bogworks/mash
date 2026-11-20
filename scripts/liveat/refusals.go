@@ -291,7 +291,7 @@ collect:
 	online := ""
 	for _, e := range es {
 		if e.Online {
-			online += e.Identity + " "
+			online += e.Address + " "
 		}
 	}
 	a.C.Check("REQ-005: alice's who does not list her offline endpoints as online", online == "", "online: "+orNone(online))

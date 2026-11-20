@@ -183,7 +183,7 @@ mashctl set-meta alice.dev.design --describe - --cap -                          
 
 `set-meta` needs at least one flag, changes only the fields given, and writes with a compare-and-set, re-reading and retrying if another write lands first. A value of `-` clears a field, and `--label k=-` clears that one label while the other labels stay. `--describe -` clears the description. `--cap C` adds a capability, `--uncap C` removes one, and `--cap -` clears them all (added in the same command afterwards). The 8-label and 8-capability caps are checked after the merge. The confirmation line also shows the description and capabilities when set. Fields a newer mash wrote to the record are kept. Older mash versions ignore the labels, so mixed versions are safe. 
 
-The first column of `mash who` is the endpoint's address `owner.group.instance` (for example `alice.dev.design`), not its flat directory key; a script that needs the key uses `--names` or `--json`'s `name`. `mash who --long` (and the `who` tool a session's model sees) appends `role R` and `host H` for the fields that are set, then `desc TEXT` and `caps a,b,c` columns when set, then one `label.K=V` column per label sorted by key, each as its own tab-separated column. For the endpoint you run it as, it also appends the live lease's `lease host` and `lease version`, and the note `lease host X differs from directory host Y` when both hosts are set and differ. Other endpoints' leases are not readable with an endpoint's permissions, so their live host is not shown. The lease is the live view; the directory metadata is only the record of intent.
+The first column of `mash who` is the endpoint's address `owner.group.instance` (for example `alice.dev.design`). `mash who --wide` (and the `who` tool a session's model sees, with `wide`) adds `ROLE`, `HOST` and `DESCRIPTION` columns, with `-` where nothing is recorded. The labels and capabilities are in the JSON, not the table. The directory metadata is only the record of intent; the live lease is not shown by `who`, because other endpoints' leases are not readable with an endpoint's permissions.
 
 ### Writing the account JWT: revocation
 
@@ -203,39 +203,35 @@ A revocation is not a transaction across NATS claims, JetStream resources and lo
 
 What a revocation does not do: credentials minted by other tools (for example `nsc`) under the account key keep their own permissions until they are revoked. `mashctl issued check` finds a connected key that mash did not issue.
 
-### Finding endpoints: `who` filters and `--json`
+### Finding endpoints: `who` and `--json`
 
 ```
-mash who [--long] [--json] [--names] [--match TEXT] [--name SUB] [--owner O] [--role SUB] [--label K[=V]]... [--cap C]... [--online|--offline]
+mash who [<prefix>] [--online | --offline] [--wide] [--json]
 ```
 
-Filters all have to match. `--name`, `--role` and `--match` are case-insensitive substrings; `--owner` is exact; `--label K` keeps endpoints that have label `K`, and `--label K=V` those whose value is exactly `V` (case-sensitive; repeat the flag to require several). `--cap C` keeps endpoints that have capability `C` (exact; repeat the flag to require several, and an invalid word is an error). `--match TEXT` looks in the name, role, note, description, capabilities and label keys and values at once. `--online` and `--offline` exclude each other. A flag takes its value as the next argument or as `--flag=value`. With no match the command exits 0 with empty output (`[]` for `--json`); a bad flag or value exits 2 with the usage on stderr. `mash who` with no flags prints what it always did, and `no endpoints` only when the directory itself is empty.
+`mash who` lists the endpoints of your own owner, sorted by address, as a headed table: `ADDRESS` and `STATE` (`online` or `offline`). A prefix follows the address the way a domain name does: `acme` is everything under `acme`, `acme.demo` is everything under `acme.demo`, and `acme.demo.bob` is that one endpoint, never `acme.demo.bobby`. `acme.*` and `acme.demo.*` mean the same as `acme` and `acme.demo`. There is no other pattern: capitals, `acme.demo.bob.*`, the flat `acme_demo_bob` and the slashed `acme/demo` are refused with `error: <text> is not an owner, an owner.group or an address` and `hint: mash who --help`, exit 2. `--online` and `--offline` exclude each other (`error: mash who takes --online or --offline, not both`, exit 2). With nothing to show the command exits 0 and says why in a sentence: `No endpoints`, `No online endpoints under acme.lab`. If the endpoints do not answer the presence probe in time, it exits 1 with `error: the directory could not be read: the endpoints did not answer in time` and `hint: mash doctor`. The filters by role, capability, label and text of earlier versions are gone: select from the JSON.
 
 ```sh
-mash who --match nats                       # replaces: mash who | grep -i nats
-mash who --role reviewer --online --names   # names only, one per line, for scripts
-mash who --label team=acme --json           # machine-readable
-mash who --cap nats-accounts --online --names   # who can do this right now, for scripts
+mash who acme.demo --online                 # the online endpoints of one group
+mash who --wide                             # role, host and description as well
+mash who --json                             # machine-readable
+mash who acme.demo.alice --json             # one endpoint: its online state is endpoints[0].online
 ```
 
-`--names` prints one name per line: the directory key, the flat key `owner_group_instance`, which `send` and `prompt` accept (so does `owner.group.instance`). `--json` prints an array, one object per endpoint, in name order; `--long` adds `lease`. `--json` and `--names` exclude each other. These field names are stable:
+`--json` always prints one object, `{"endpoints": [...]}`, in address order, and `{"endpoints":[]}` when none match. The `who` tool's structured result is the same object, byte for byte. `--wide` and the tool's `wide` change only the text: the object always carries every field of every endpoint:
 
 | Field | Type | Present |
 |---|---|---|
-| `name` | string | always |
-| `identity` | string | always: the address `owner.group.instance`, beside the flat key in `name` |
-| `owner`, `group`, `instance` | string | always |
-| `agent` | string | when the record names it: the harness that runs the endpoint, for example `claude-code` |
+| `address` | string | always: `owner.group.instance` |
 | `online` | boolean | always |
-| `last_seen` | string, RFC 3339 UTC | when the endpoint last answered a presence probe (not its last heartbeat) |
-| `role`, `host`, `note`, `description` | string | when set |
-| `labels` | object, key to value | when there is at least one |
-| `caps` | array of strings, sorted | when there is at least one |
-| `lease` | object with `host` and `version` | with `--long`, when this endpoint's own live lease is known |
+| `role`, `host`, `description` | string | `null` when not recorded |
+| `capability` | array of strings | always; `[]` when there are none |
+| `labels` | object, key to value | always; `{}` when there are none |
 
-**How presence works.** Heartbeats are still published every 30 seconds by each running endpoint, and another SAP tool may listen to them, but `mash serve` no longer subscribes to them ([ADR-0066](decisions/0066-mash-serve-asks-who-is-online-when-someone-asks-instead-of-listening-to-every-heartbeat.md)). Presence is asked for when someone asks: `mash who` and the `who` tool send one request to `$SRV.INFO.agents`, which every running endpoint answers with its registration, and wait until the answers stop coming (300 ms after the last one, at most 2 s). An answer counts only when its identity signature verifies and its key is the one the directory has for that name. An endpoint is online when it answered the latest probe; `seen T ago` and `last_seen` are the time of its last answer to a probe, not of its last heartbeat. The `who` tool inside a session reuses a probe's result for 30 seconds (`endpoint.PresenceCacheTTL`) and asks again after that; one probe at a time, and after a probe that failed, or that no registration answered, the next one waits at least 5 seconds (`endpoint.PresenceRetryGap`). So the tool can be up to 30 seconds behind, and takes about a third of a second when it has to ask. `mash who` on the command line always probes. Before the first probe an endpoint with no answer shows offline.
 
-The `who` tool takes the same filters as optional parameters: `match`, `name`, `role` (strings), `label` (an array of `"k"` or `"k=v"`), `cap` (an array of capability words), `online` (`true` online only, `false` offline only, absent both) and `format` (`text`, the default, or `json`, the same array as above including `lease`). A call with no arguments is unchanged; an unknown `format` is a tool error.
+**How presence works.** Heartbeats are still published every 30 seconds by each running endpoint, and another SAP tool may listen to them, but `mash serve` no longer subscribes to them ([ADR-0066](decisions/0066-mash-serve-asks-who-is-online-when-someone-asks-instead-of-listening-to-every-heartbeat.md)). Presence is asked for when someone asks: `mash who` and the `who` tool send one request to `$SRV.INFO.agents`, which every running endpoint answers with its registration, and wait until the answers stop coming (300 ms after the last one, at most 2 s). An answer counts only when its identity signature verifies and its key is the one the directory has for that name. An endpoint is online when it answered the latest probe.  The `who` tool inside a session reuses a probe's result for 30 seconds (`endpoint.PresenceCacheTTL`) and asks again after that; one probe at a time, and after a probe that failed, or that no registration answered, the next one waits at least 5 seconds (`endpoint.PresenceRetryGap`). So the tool can be up to 30 seconds behind, and takes about a third of a second when it has to ask. `mash who` on the command line always probes. Before the first probe an endpoint with no answer shows offline.
+
+The `who` tool takes the same parameters: `prefix` (a string), `online`, `offline` and `wide` (booleans). A call with no arguments lists every endpoint of the owner. Its text is the command's stdout and its structured result is the `--json` object.
 
 There is no policy file; see [mashctl.md](mashctl.md).
 

@@ -11,7 +11,6 @@ import (
 	"io/fs"
 	"net"
 	"os"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -616,6 +615,7 @@ func tools(state *atomic.Pointer[sessionState], src *statusSource) []mcp.Tool {
 	svc := &mcpSvc{buildVersion: buildVersion{pluginRoot: src.pluginRoot}, state: state, name: name, callTimeout: callTimeout}
 	table := newCommands(func(context.Context) (*cmdcore.Env, error) { return &cmdcore.Env{Svc: svc}, nil })
 	send, _ := table.Lookup("send")
+	who, _ := table.Lookup("who")
 	return append([]mcp.Tool{
 		send.Tool(table.Env).MCP(),
 		{Name: "read", Description: "Read one message from your inbox by #seq.",
@@ -665,49 +665,7 @@ func tools(state *atomic.Pointer[sessionState], src *statusSource) []mcp.Tool {
 				}
 				return inboxText(ms), nil
 			})},
-		{Name: "who", Description: "List mash endpoints and whether each is online (asked of every endpoint now; the answer is reused for 30 seconds), with their address (owner.group.instance), harness, role, host, description, capabilities and labels when recorded. " +
-			"Optional filters (all must match): match (text in the address, role, note, description, capabilities or labels), cap (capability words, all must be present), name (an address or a substring of one), role (case-insensitive substrings), " +
-			"label (\"k\" or \"k=v\" strings), online (true: online only, false: offline only). format: text (default) or json.",
-			Schema: schema(map[string]any{
-				"match":  str("case-insensitive text found in the address (owner.group.instance), role, note, description, a capability, or a label key or value"),
-				"name":   str("an owner.group.instance address or flat key (exact), or a case-insensitive substring of the address"),
-				"role":   str("case-insensitive substring of the role"),
-				"cap":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "each an exact capability word the endpoint must have"},
-				"label":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "each \"k\" (label present) or \"k=v\" (exact value)"},
-				"online": flag("true: only online endpoints; false: only offline; absent: both"),
-				"format": map[string]any{"type": "string", "enum": []string{"text", "json"}, "description": "text (default) or json"},
-			}),
-			Call: call(func(ctx context.Context, ep *endpoint.Endpoint, raw json.RawMessage) (string, error) {
-				var a struct {
-					Match  string   `json:"match"`
-					Name   string   `json:"name"`
-					Role   string   `json:"role"`
-					Label  []string `json:"label"`
-					Cap    []string `json:"cap"`
-					Online *bool    `json:"online"`
-					Format string   `json:"format"`
-				}
-				if len(raw) > 0 {
-					if err := json.Unmarshal(raw, &a); err != nil {
-						return "", err
-					}
-				}
-				if a.Format != "" && a.Format != "text" && a.Format != "json" {
-					return "", fmt.Errorf("who: format %q is not text or json", a.Format)
-				}
-				f := endpoint.WhoFilter{Match: a.Match, Name: a.Name, Role: a.Role, Labels: a.Label, Caps: a.Cap}
-				if a.Online != nil {
-					f.Online, f.Offline = *a.Online, !*a.Online
-				}
-				if err := f.Validate(); err != nil {
-					return "", err
-				}
-				ps, err := ep.WhoFresh(ctx)
-				if err != nil {
-					return "", fmt.Errorf("who: asking who is online: %w", err)
-				}
-				return whoRender(f.Apply(ps), whoOutput{Long: true, JSON: a.Format == "json"}, !f.IsZero(), liveLeases(ctx, ep)), nil
-			})},
+		who.Tool(table.Env).MCP(),
 		{Name: "reply", Description: "Answer a live prompt by its request_id. done=false streams a partial answer.",
 			Schema: schema(map[string]any{"request_id": str("from the prompt event"), "text": str("your answer"),
 				"done": flag("end the answer (default true)")}, "request_id", "text"),
@@ -771,16 +729,6 @@ func inboxText(ms []render.Mail) string {
 	return strings.Join(lines, "\n")
 }
 
-// liveLeases is the live lease info whoText can show: this endpoint's own, the only lease its permissions read.
-func liveLeases(ctx context.Context, ep *endpoint.Endpoint) map[string]endpoint.LeaseInfo {
-	c, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	if li, ok := ep.OwnLease(c); ok {
-		return map[string]endpoint.LeaseInfo{ep.Key(): li}
-	}
-	return nil
-}
-
 // PromptTextMax is the most bytes of a live prompt's text. It is the endpoint's limit, the one number: the service
 // refuses a longer prompt to its caller before the session hears of it, so the notice below never cuts.
 const PromptTextMax = endpoint.MaxPromptBytes
@@ -799,57 +747,6 @@ func promptNotice(p endpoint.PromptEvent) (string, bool) {
 	}
 	return fmt.Sprintf("mash: live prompt from %s [%s] (request_id %s). The caller is waiting: answer with the reply tool.\n\n%s",
 		config.Clean(sap.Display(p.From)), config.Clean(string(p.Trust)), config.Clean(p.RequestID), body), true
-}
-
-// whoText renders the directory with presence. The default lines are parsed by other tools (a launcher): never change
-// them. long appends the optional directory metadata and, from live, the lease's host and version.
-func whoText(ps []endpoint.Presence, long bool, live map[string]endpoint.LeaseInfo) string {
-	if len(ps) == 0 {
-		return "no endpoints"
-	}
-	var b strings.Builder
-	for _, p := range ps {
-		state := "offline"
-		if p.Online {
-			state = "online"
-		}
-		fmt.Fprintf(&b, "%s\t%s", config.Clean(recordAddress(p.Record)), state)
-		if !p.LastSeen.IsZero() {
-			fmt.Fprintf(&b, "\tseen %s ago", time.Since(p.LastSeen).Round(time.Second))
-		}
-		if p.Record.Note != "" {
-			fmt.Fprintf(&b, "\t%s", config.Clean(p.Record.Note))
-		}
-		if long {
-			r := p.Record
-			for _, f := range []struct{ k, v string }{{"agent", r.Agent}, {"role", r.Role}, {"host", r.Host}, {"desc", r.Description}, {"caps", strings.Join(r.Caps, ",")}} {
-				if f.v != "" {
-					fmt.Fprintf(&b, "\t%s %s", f.k, config.Clean(f.v))
-				}
-			}
-			lk := make([]string, 0, len(r.Labels))
-			for k := range r.Labels {
-				lk = append(lk, k)
-			}
-			sort.Strings(lk)
-			for _, k := range lk {
-				fmt.Fprintf(&b, "\tlabel.%s=%s", config.Clean(k), config.Clean(r.Labels[k]))
-			}
-			if li, ok := live[recordKey(r)]; ok {
-				if li.Host != "" {
-					fmt.Fprintf(&b, "\tlease host %s", config.Clean(li.Host))
-				}
-				if li.Version != "" {
-					fmt.Fprintf(&b, "\tlease version %s", config.Clean(li.Version))
-				}
-				if li.Host != "" && r.Host != "" && li.Host != r.Host {
-					fmt.Fprintf(&b, "\tlease host %s differs from directory host %s", config.Clean(li.Host), config.Clean(r.Host))
-				}
-			}
-		}
-		b.WriteString("\n")
-	}
-	return strings.TrimRight(b.String(), "\n")
 }
 
 // transient reports whether err is a failure that may fix itself (the broker is slow, restarting or briefly

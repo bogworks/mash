@@ -87,17 +87,13 @@ func modeDetail(st os.FileInfo, err error) string {
 	return fmt.Sprintf("mode %04o", st.Mode().Perm())
 }
 
-// whoEntry is one element of `mash who --json`.
+// whoEntry is one element of the endpoints list of `mash who --json`.
 type whoEntry struct {
-	Identity string
-	Agent    string
-	Owner    string
-	Group    string
-	Instance string
-	Online   bool
+	Address string
+	Online  bool
 }
 
-// who reads `mash who --json` as the endpoint with environment extra.
+// who reads `mash who --json` ({"endpoints":[{"address":...,"online":...,...}]}) as the endpoint with environment extra.
 func (a *AT) who(h Home, extra []string) ([]whoEntry, Result) {
 	r := a.Mash("who", h, extra, "who", "--json")
 	v, err := parseJSON(r.Stdout)
@@ -105,10 +101,10 @@ func (a *AT) who(h Home, extra []string) ([]whoEntry, Result) {
 		return nil, r
 	}
 	var out []whoEntry
-	for _, o := range findObjects(v, "identity") {
-		s := func(k string) string { x, _ := o[k].(string); return x }
+	for _, o := range findObjects(v, "address") {
+		addr, _ := o["address"].(string)
 		on, _ := o["online"].(bool)
-		out = append(out, whoEntry{s("identity"), s("agent"), s("owner"), s("group"), s("instance"), on})
+		out = append(out, whoEntry{addr, on})
 	}
 	return out, r
 }
@@ -120,7 +116,7 @@ func (a *AT) waitOnline(h Home, extra []string, ids ...string) bool {
 		es, _ := a.who(h, extra)
 		n := 0
 		for _, e := range es {
-			if e.Online && slices.Contains(ids, e.Identity) {
+			if e.Online && slices.Contains(ids, e.Address) {
 				n++
 			}
 		}
@@ -368,30 +364,24 @@ var AT001 = Scenario{
 
 		r := a.Ctl("endpoint-list", h, a.Conn(), "endpoint", "list", "--json")
 		a.C.Check("mashctl endpoint list --json succeeds", r.Code == 0, exitDetail(r))
-		groups := map[string]string{}
+		type listed struct{ owner, group, instance string }
+		seen := map[string]listed{}
 		if v, err := parseJSON(r.Stdout); err == nil {
-			for _, o := range findObjects(v, "group") {
-				inst, _ := o["instance"].(string)
+			for _, o := range findObjects(v, "address") {
+				addr, _ := o["address"].(string)
+				ow, _ := o["owner"].(string)
 				g, _ := o["group"].(string)
-				groups[inst] = g
+				inst, _ := o["instance"].(string)
+				seen[addr] = listed{ow, g, inst}
 			}
 		}
-		a.C.Check("endpoint list --json shows design and review, each with group dev", groups["design"] == "dev" && groups["review"] == "dev", fmt.Sprintf("groups seen: %v", groups))
+		a.C.Check("endpoint list --json shows design and review, each with group dev", seen["alice.dev.design"].group == "dev" && seen["alice.dev.review"].group == "dev", fmt.Sprintf("seen: %v", seen))
 
-		es, _ := a.who(h, envs["design"])
+		// The agent field is not in the new who, nor in `mashctl endpoint list --json` (its record has owner, group,
+		// instance and address, no agent), so REQ-006's agent check is dropped; owner, group and instance stay.
 		for _, n := range []string{"design", "review"} {
-			var got *whoEntry
-			for i := range es {
-				if es[i].Identity == "alice."+"dev."+n {
-					got = &es[i]
-				}
-			}
-			ok := got != nil && got.Agent == "claude-code" && got.Owner == "alice" && got.Group == "dev" && got.Instance == n
-			d := "not listed"
-			if got != nil {
-				d = fmt.Sprintf("agent %q owner %q group %q instance %q", got.Agent, got.Owner, got.Group, got.Instance)
-			}
-			a.C.Check("REQ-006: the service metadata of "+n+" shows agent claude-code and its owner, group and instance", ok, d)
+			got, ok := seen["alice.dev."+n]
+			a.C.Check("REQ-006: the directory record of "+n+" shows its owner, group and instance", ok && got.owner == "alice" && got.group == "dev" && got.instance == n, fmt.Sprintf("%+v", got))
 		}
 
 		a.permissions(h, "alice", "dev", "design")

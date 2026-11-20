@@ -437,12 +437,12 @@ func (l *lab) session(ctx context.Context, name string) (p *serveProc, env []str
 	// Mail sent before serve holds its lease is still delivered, but the wait would count in the timing: wait until it is online.
 	deadline := time.Now().Add(onlineTimeout)
 	for {
-		out, code, err := l.runPlain(ctx, "who")
+		out, online, err := l.whoOnline(ctx, name)
 		if err != nil {
 			p.stop()
 			return nil, nil, "", err
 		}
-		if code == 0 && strings.Contains(out, name+"\tonline") {
+		if online {
 			return p, env, "", nil
 		}
 		if time.Now().After(deadline) || ctx.Err() != nil {
@@ -452,6 +452,49 @@ func (l *lab) session(ctx context.Context, name string) (p *serveProc, env []str
 		time.Sleep(100 * time.Millisecond)
 	}
 }
+
+// whoOnline is whether the lab endpoint name is online, and what who printed. The candidate prints the JSON object
+// {"endpoints":[{"address":...,"online":...}]} for `mash who <address> --json`; the previous release (the baseline goes
+// through here too) does not take that, and prints "<name>\tonline" lines in plain `mash who`. Both are accepted: the
+// JSON first, the plain text when the JSON form is not the new object.
+func (l *lab) whoOnline(ctx context.Context, name string) (out string, online bool, err error) {
+	address := l.ne.Owner + "." + labGroup + "." + name
+	// stdout alone: the object is on it, and a warning on stderr would spoil the parse
+	out, _, code, err := runBounded(ctx, l.bin, []string{"who", address, "--json"}, l.senderE, "")
+	if err != nil {
+		return "", false, err
+	}
+	if on, isNew := whoJSONOnline(out, address); isNew {
+		return out, code == 0 && on, nil
+	}
+	out, code, err = l.runPlain(ctx, "who")
+	if err != nil {
+		return "", false, err
+	}
+	return out, code == 0 && whoTextOnline(out, name), nil
+}
+
+// whoJSONOnline reads the new who object: whether address is listed online, and whether out is that object at all.
+func whoJSONOnline(out, address string) (online, isNew bool) {
+	var o struct {
+		Endpoints *[]struct {
+			Address string `json:"address"`
+			Online  bool   `json:"online"`
+		} `json:"endpoints"`
+	}
+	if json.Unmarshal([]byte(strings.TrimSpace(out)), &o) != nil || o.Endpoints == nil {
+		return false, false
+	}
+	for _, e := range *o.Endpoints {
+		if e.Address == address && e.Online {
+			return true, true
+		}
+	}
+	return false, true
+}
+
+// whoTextOnline is the previous release's form: a line "<name>\tonline".
+func whoTextOnline(out, name string) bool { return strings.Contains(out, name+"\tonline") }
 
 func (l *lab) runPlain(ctx context.Context, args ...string) (string, int, error) {
 	stdout, stderr, code, err := runBounded(ctx, l.bin, args, l.senderE, "")
