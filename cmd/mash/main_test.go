@@ -394,11 +394,11 @@ func TestAdminCLI(t *testing.T) {
 
 func TestUsage(t *testing.T) {
 	var out bytes.Buffer
-	if code := run(nil, envFrom(nil), strings.NewReader(""), &out, &out); code != 2 || !strings.Contains(out.String(), "mash serve") {
+	if code := run(nil, envFrom(nil), strings.NewReader(""), &out, &out); code != 2 || out.String() != "error: mash needs a command\nhint: mash --help\n" {
 		t.Fatalf("usage: %d %s", code, out.String())
 	}
 	out.Reset()
-	if code := run([]string{"version"}, envFrom(nil), strings.NewReader(""), &out, &out); code != 0 || !strings.Contains(out.String(), "mash ") {
+	if code := run([]string{"version"}, envFrom(nil), strings.NewReader(""), &out, &out); code != 0 || !strings.HasPrefix(out.String(), "mash v") {
 		t.Fatalf("version: %d %s", code, out.String())
 	}
 }
@@ -510,11 +510,11 @@ func TestVersionLine(t *testing.T) {
 		info          *debug.BuildInfo
 		want          string
 	}{
-		{"ldflags wins", "abc1234", bi("ffff", ""), "mash 0.1.0 (commit abc1234)"},
-		{"vcs revision", "", bi("0123456789abcdef", "false"), "mash 0.1.0 (commit 0123456789abcdef)"},
-		{"modified tree", "", bi("0123456789abcdef", "true"), "mash 0.1.0 (commit 0123456789abcdef+dirty)"},
-		{"no build info", "", nil, "mash 0.1.0 (commit unknown)"},
-		{"no vcs settings", "", &debug.BuildInfo{}, "mash 0.1.0 (commit unknown)"},
+		{"ldflags wins", "abc1234", bi("ffff", ""), "mash v0.1.0 (abc1234)"},
+		{"vcs revision", "", bi("0123456789abcdef", "false"), "mash v0.1.0 (0123456)"},
+		{"modified tree", "", bi("0123456789abcdef", "true"), "mash v0.1.0 (0123456+dirty)"},
+		{"no build info", "", nil, "mash v0.1.0 (unknown)"},
+		{"no vcs settings", "", &debug.BuildInfo{}, "mash v0.1.0 (unknown)"},
 	}
 	for _, c := range cases {
 		if got := versionLine("0.1.0", c.ldflags, c.info); got != c.want {

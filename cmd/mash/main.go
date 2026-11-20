@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"regexp"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"syscall"
 
@@ -111,13 +112,10 @@ var pseudoVersion = regexp.MustCompile(`[-.]\d{14}-[0-9a-f]{12}$`)
 // releaseTag is vN.N.N with an optional -prerelease that is not a pseudo-version's timestamp-and-sha tail.
 var releaseTag = regexp.MustCompile(`^v\d+\.\d+\.\d+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$`)
 
-// versionLine is "mash <version> (commit <rev>)". It names the commit so a pinned build can be checked.
+// versionLine is "mash v<version> (<commit>)", as `mash version` prints it: the commit is its first 7 characters
+// ("unknown" when the build has none). It names the commit so a pinned build can be checked.
 func versionLine(version, ldflags string, bi *debug.BuildInfo) string {
-	rev := buildRevision(ldflags, bi)
-	if rev == "" {
-		rev = "unknown"
-	}
-	return fmt.Sprintf("mash %s (commit %s)", version, rev)
+	return fmt.Sprintf("mash v%s (%s)", version, shortCommit(buildRevision(ldflags, bi)))
 }
 
 // buildRevision is the commit this binary was built from: the ldflag, else the VCS revision go build stamped (with
@@ -170,20 +168,21 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 	if c := buildRevision(commit, bi); c != endpoint.CurrentCommit() {
 		endpoint.SetCommit(c)
 	}
+	// An error before a command runs is one framed error (cliframe.Report): "error: MSG" and a hint on stderr, or with
+	// --json {"error","hint"} on stdout and nothing on stderr. The code is the error's own (1 failure, 2 usage).
 	if len(args) == 0 {
-		fmt.Fprint(stderr, usage)
-		return 2
+		return cliframe.Report(stdout, stderr, cliframe.Usagef("mash needs a command").WithHint("mash --help"), false)
 	}
 	// The global options (--endpoint, --creds, --server, --ca, --config-dir, --verbose, --json, --no-color) are taken out
 	// of the arguments wherever they stand, before any verb runs; a flag shadows its environment variable.
+	rawArgs := args
 	global, args, gerr := cliframe.ExtractOwning(cliframe.Spec{Tool: "mash", CredsEnv: "MASH_CREDS", CredsKey: "creds"}, args, map[string][]string{"who": {"--json"}, "key": {"--json"}, "credential": {"--json"}}) // these parse --json themselves
 	if gerr != nil {
-		fmt.Fprintf(stderr, "mash: %s\n", gerr)
-		return 2
+		// The options did not parse, so --json is looked for by hand.
+		return cliframe.Report(stdout, stderr, cliframe.Usagef("%s", strings.TrimPrefix(gerr.Error(), "mash: ")).WithHint("mash --help"), slices.Contains(rawArgs, "--json"))
 	}
 	if len(args) == 0 {
-		fmt.Fprint(stderr, usage)
-		return 2
+		return cliframe.Report(stdout, stderr, cliframe.Usagef("mash needs a command").WithHint("mash --help"), global.JSON)
 	}
 	env, lookup = global.Shadow(cliframe.Spec{Tool: "mash", CredsEnv: "MASH_CREDS", CredsKey: "creds"}, env, lookup)
 	if args[0] == "help" { // `mash help` prints what `mash --help` does; `mash help send` what `mash send --help` does
@@ -213,8 +212,7 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 			return 0
 		}
 		if args[0] == "status" { // this takes no arguments: refuse rather than ignore
-			fmt.Fprintf(stderr, "mash %s: unexpected %s\n%s\n", args[0], config.RejectedArg(args[1]), u)
-			return 2
+			return cliframe.Report(stdout, stderr, cliframe.Usagef("mash %s: unexpected %s", args[0], config.RejectedArg(args[1])).WithHint("mash status --help"), false)
 		}
 	}
 	if args[0] == "version" { // needs no endpoint, so before config
@@ -250,8 +248,7 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 			fmt.Fprintf(stderr, "mash hook: %s: %v\n", config.CodeGroupMissing, err)
 			return 0
 		}
-		fmt.Fprintf(stderr, "%s: %v\n", config.CodeGroupMissing, err)
-		return 2
+		return cliframe.Report(stdout, stderr, cliframe.Usagef("%s: %s", config.CodeGroupMissing, strings.TrimPrefix(err.Error(), "mash: ")).WithHint("mash status"), global.JSON)
 	}
 	var adapter host.Adapter
 	if args[0] == "hook" || args[0] == "serve" {
@@ -259,8 +256,11 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 		// drain mail into the wrong place.
 		var herr error
 		if adapter, herr = host.Select(cfg.Host); herr != nil {
-			fmt.Fprintln(stderr, herr)
-			return 1
+			if args[0] == "hook" { // as it was: the hook's own line, nothing framed
+				fmt.Fprintln(stderr, herr)
+				return 1
+			}
+			return cliframe.Report(stdout, stderr, cliframe.Failf("%s", strings.TrimPrefix(herr.Error(), "mash: ")).WithHint("mash status"), global.JSON)
 		}
 	}
 	if args[0] == "hook" { // never fails the session: a bad config is a silent no-op
@@ -270,15 +270,13 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 		return statusCmd(cfg, err, env, stdout, stderr)
 	}
 	if err != nil && args[0] != "serve" {
-		fmt.Fprintln(stderr, err)
-		return 1
+		return cliframe.Report(stdout, stderr, cliframe.Failf("%s", strings.TrimPrefix(err.Error(), "mash: ")).WithHint("mash status"), global.JSON)
 	}
 	// A plain URL with no insecure_plaintext is refused before anything is connected (REQ-014): serve stops at session
 	// start and the commands that connect stop, exit 2, with the refusal on stderr.
 	if err == nil && !cfg.Inert() && args[0] != "admin" {
 		if _, perr := endpoint.EndpointTLS(cfg); perr != nil {
-			fmt.Fprintln(stderr, perr)
-			return 2
+			return cliframe.Report(stdout, stderr, cliframe.Usagef("%s", strings.TrimPrefix(perr.Error(), "mash: ")).WithHint("mash status"), global.JSON)
 		}
 		// serve says it once at start (reportSettings); a command says it here, once, before it connects.
 		if w := endpoint.PlainWarning(cfg); w != "" && args[0] != "serve" {
@@ -290,7 +288,8 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 		return serve(ctx, cfg, err, adapter, env("MASH_PLUGIN_ROOT"), stdin, stdout, stderr)
 	case "send":
 		mk := func(context.Context) (*cmdcore.Env, error) {
-			return &cmdcore.Env{Svc: &cliSvc{cfg: cfg, stderr: stderr}}, nil
+			// A message read from standard input has the command's whole deadline to arrive.
+			return &cmdcore.Env{Svc: &cliSvc{cfg: cfg, stderr: stderr}, StdinTimeout: cliDeadline(cfg)}, nil
 		}
 		return newCommands(mk).RunCLI("send", args[1:], stdin, stdout, stderr, global)
 	case "read", "inbox", "who", "prompt":
@@ -298,6 +297,5 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 	case "admin":
 		return adminCmd(cfg, args[1:], stdout, stderr)
 	}
-	fmt.Fprintf(stderr, "mash: unknown command %q\n\n%s", args[0], usage)
-	return 2
+	return cliframe.Report(stdout, stderr, cliframe.Usagef("mash has no command %s", args[0]).WithHint("mash --help"), global.JSON)
 }

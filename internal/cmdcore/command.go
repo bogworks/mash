@@ -36,6 +36,9 @@ type Env struct {
 	// terminal.
 	Stdin      io.Reader
 	StdinPiped bool
+	// StdinTimeout bounds a read of Stdin: a pipe that never writes would otherwise block the command for ever. Zero
+	// means no bound.
+	StdinTimeout time.Duration
 	// ReadFile reads a file for --file style options; nil means os.ReadFile.
 	ReadFile func(path string) ([]byte, error)
 }

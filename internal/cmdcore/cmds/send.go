@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/bogworks/mash/internal/cliframe"
 	"github.com/bogworks/mash/internal/cmdcore"
@@ -206,7 +207,11 @@ func messageText(env *cmdcore.Env, p SendParams) (string, error) {
 		if env.Stdin == nil {
 			return "", usageNeedsText()
 		}
-		b, err = io.ReadAll(env.Stdin)
+		b, err = readStdin(env)
+		if errors.Is(err, errStdinTimeout) {
+			// A failure, exit 1: the command was well formed and nothing arrived in time.
+			return "", cliframe.Failf("no message text arrived on standard input").WithHint("mash send --help")
+		}
 	case env.ReadFile != nil:
 		b, err = env.ReadFile(p.File)
 	default:
@@ -223,4 +228,32 @@ func messageText(env *cmdcore.Env, p SendParams) (string, error) {
 		return "", usageNeedsText()
 	}
 	return text, nil
+}
+
+// errStdinTimeout says the standard input gave no end of text within the command's deadline.
+var errStdinTimeout = errors.New("standard input timed out")
+
+// readStdin reads all of env.Stdin, giving up after env.StdinTimeout (when set). The read runs in a goroutine: one
+// blocked on a pipe nobody writes to is abandoned, and the process ends before it matters.
+func readStdin(env *cmdcore.Env) ([]byte, error) {
+	if env.StdinTimeout <= 0 {
+		return io.ReadAll(env.Stdin)
+	}
+	type result struct {
+		b   []byte
+		err error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		b, err := io.ReadAll(env.Stdin)
+		ch <- result{b, err}
+	}()
+	t := time.NewTimer(env.StdinTimeout)
+	defer t.Stop()
+	select {
+	case r := <-ch:
+		return r.b, r.err
+	case <-t.C:
+		return nil, errStdinTimeout
+	}
 }

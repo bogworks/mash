@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/bogworks/mash/internal/cliframe"
 	"github.com/bogworks/mash/internal/cmdcore"
@@ -791,6 +792,35 @@ func TestSendRetaggedFlag(t *testing.T) {
 		_, structured, err := cmdcore.MCPTool(cmds.Send, envOf(f, false, nil)).CallStructured(context.Background(), json.RawMessage(`{"address":"acme.demo.alice","message":"ok"}`))
 		if err != nil || string(mustJSON(structured)) != tc.want {
 			t.Errorf("structured %s, %v; want %s", mustJSON(structured), err, tc.want)
+		}
+	}
+}
+
+// A pipe that is never written to does not block the command for ever: the read gives up at the deadline, and that is
+// a failure (exit 1), not a usage error.
+func TestImplicitStdinHasADeadline(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	defer w.Close() // held open, never written
+	for _, asJSON := range []bool{false, true} {
+		var o, e bytes.Buffer
+		f := &fakeSvc{}
+		env := func(context.Context) (*cmdcore.Env, error) {
+			return &cmdcore.Env{Svc: f, StdinTimeout: 100 * time.Millisecond}, nil
+		}
+		start := time.Now()
+		code := cmdcore.CLI(cmds.Send, env)([]string{"a.b.c"}, r, &o, &e, cliframe.Global{JSON: asJSON})
+		if time.Since(start) > 5*time.Second || code != 1 || f.calls != 0 {
+			t.Fatalf("json=%v: code %d calls %d after %v", asJSON, code, f.calls, time.Since(start))
+		}
+		if asJSON && (e.String() != "" || o.String() != `{"error":"no message text arrived on standard input","hint":"mash send --help"}`+"\n") {
+			t.Errorf("json: %q %q", o.String(), e.String())
+		}
+		if !asJSON && (o.String() != "" || e.String() != "error: no message text arrived on standard input\nhint: mash send --help\n") {
+			t.Errorf("text: %q %q", o.String(), e.String())
 		}
 	}
 }
