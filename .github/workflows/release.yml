@@ -178,19 +178,14 @@ jobs:
         with:
           path: dist
           merge-multiple: true
-      - name: Quickstart script and release notes
+      - name: Release notes
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           commit="$(git rev-parse "$GITHUB_REF_NAME^{commit}")"
-          # The quickstart script travels as a release asset, so the README can fetch it from the tag and check it.
-          [ -f scripts/quickstart-synadia.sh ] || { echo "scripts/quickstart-synadia.sh is missing at $GITHUB_REF_NAME" >&2; exit 1; }
-          cp -p scripts/quickstart-synadia.sh dist/quickstart-synadia.sh
-          # SHA256SUMS was made by the sums job and attested with the binaries: it is attached unchanged. It must list the
-          # script just copied, byte for byte.
+          # SHA256SUMS was made by the sums job and attested with the binaries: it is attached unchanged.
           [ -f dist/SHA256SUMS ] || { echo "the sums artifact brought no SHA256SUMS" >&2; exit 1; }
-          (cd dist && grep ' quickstart-synadia.sh$' SHA256SUMS | sha256sum -c -)
           # The base is the highest PUBLISHED release that is an ancestor of the commit, not the last tag: the compare link
           # runs from it. None means the first release.
           gh release list --limit 200 --json tagName,isDraft,isPrerelease > "$RUNNER_TEMP/releases.json"
@@ -219,15 +214,15 @@ jobs:
             dist/mashctl-darwin-amd64 dist/mashctl-darwin-arm64 dist/mashctl-linux-amd64 dist/mashctl-linux-arm64 \
             dist/mash-darwin-amd64.cdx.json dist/mash-darwin-arm64.cdx.json dist/mash-linux-amd64.cdx.json dist/mash-linux-arm64.cdx.json \
             dist/mashctl-darwin-amd64.cdx.json dist/mashctl-darwin-arm64.cdx.json dist/mashctl-linux-amd64.cdx.json dist/mashctl-linux-arm64.cdx.json \
-            dist/mash.intoto.jsonl dist/quickstart-synadia.sh dist/SHA256SUMS
+            dist/mash.intoto.jsonl dist/SHA256SUMS
           # The guard job's check and this creation are not atomic, and the concurrency group is per tag, so two tags'
           # runs can both pass the guard. Re-check now that the draft exists: a lower draft or a higher published
           # release makes THIS run fail, naming it. The guard never deletes: the draft stays for the maintainer to resolve
           # (`gh release delete <tag>` after checking its state, or publish the lower one first, then rerun; ADR 0001, rule 5).
           scripts/draft-guard --after-create "$GITHUB_REF_NAME"
   sums:
-    # SHA256SUMS lists every asset except the provenance bundle (which cannot list itself): the eight binaries (mash and mashctl),
-    # the quickstart script and the eight SBOMs. It is made here, before the attestation, so the attest job can attest it. Named, not globbed, so a missing
+    # SHA256SUMS lists every asset except the provenance bundle (which cannot list itself): the eight binaries (mash and mashctl)
+    # and the eight SBOMs. It is made here, before the attestation, so the attest job can attest it. Named, not globbed, so a missing
     # file fails here and a stray one is never listed.
     needs: [build, sbom]
     if: ${{ !cancelled() && needs.build.result == 'success' && needs.sbom.result == 'success' }} # explicit: see build
@@ -260,13 +255,9 @@ jobs:
       - name: SHA256SUMS
         run: |
           set -euo pipefail
-          # The quickstart script travels as a release asset, so the README can fetch it from the tag and check it.
-          [ -f scripts/quickstart-synadia.sh ] || { echo "scripts/quickstart-synadia.sh is missing at $RELEASE_REF" >&2; exit 1; }
-          cp -p scripts/quickstart-synadia.sh dist/quickstart-synadia.sh
           (cd dist && sha256sum \
             mash-darwin-amd64 mash-darwin-arm64 mash-linux-amd64 mash-linux-arm64 \
             mashctl-darwin-amd64 mashctl-darwin-arm64 mashctl-linux-amd64 mashctl-linux-arm64 \
-            quickstart-synadia.sh \
             mash-darwin-amd64.cdx.json mash-darwin-arm64.cdx.json mash-linux-amd64.cdx.json mash-linux-arm64.cdx.json \
             mashctl-darwin-amd64.cdx.json mashctl-darwin-arm64.cdx.json mashctl-linux-amd64.cdx.json mashctl-linux-arm64.cdx.json \
             > SHA256SUMS)

@@ -116,9 +116,6 @@ func TestSums_checkEntries(t *testing.T) {
 		have[n] = "sha256:" + h
 		lines = append(lines, h+"  "+n)
 	}
-	script := strings.Repeat("d", 64)
-	have[release.ScriptName] = "sha256:" + script
-	lines = append(lines, script+"  "+release.ScriptName)
 	good := strings.Join(lines, "\n") + "\n"
 	have[release.SumsName] = "sha256:x"
 	mod := func(f func(sums *string, have map[string]string)) (string, map[string]string) {
@@ -129,7 +126,7 @@ func TestSums_checkEntries(t *testing.T) {
 		f(&s, h)
 		return s, h
 	}
-	if err := checkSumEntries([]byte(good), have, hashes, script, false); err != nil {
+	if err := checkSumEntries([]byte(good), have, hashes, false); err != nil {
 		t.Fatalf("good sums refused: %v", err)
 	}
 	first := release.Binaries()[0].AssetName()
@@ -142,13 +139,6 @@ func TestSums_checkEntries(t *testing.T) {
 		"digest differs from build": func(s *string, h map[string]string) {
 			*s = strings.Replace(*s, hashes[release.Binaries()[0]], strings.Repeat("0", 64), 1)
 		},
-		"script digest differs from the script at X": func(s *string, h map[string]string) {
-			*s = strings.Replace(*s, script, strings.Repeat("0", 64), 1)
-			h[release.ScriptName] = "sha256:" + strings.Repeat("0", 64)
-		},
-		"script missing from sums":            func(s *string, h map[string]string) { *s = strings.Join(lines[:len(lines)-1], "\n") + "\n" },
-		"script listed but not attached":      func(s *string, h map[string]string) { delete(h, release.ScriptName) },
-		"script attached with another digest": func(s *string, h map[string]string) { h[release.ScriptName] = "sha256:" + strings.Repeat("0", 64) },
 		"sbom missing from sums": func(s *string, h map[string]string) {
 			*s = strings.Replace(*s, strings.Repeat("0", 64)+"  "+release.Binaries()[0].SBOMName()+"\n", "", 1)
 		},
@@ -178,7 +168,7 @@ func TestSums_checkEntries(t *testing.T) {
 	}
 	for name, f := range cases {
 		s, h := mod(f)
-		if err := checkSumEntries([]byte(s), h, hashes, script, false); err == nil {
+		if err := checkSumEntries([]byte(s), h, hashes, false); err == nil {
 			t.Errorf("%s: passed", name)
 		}
 	}
@@ -520,9 +510,6 @@ func TestPublish_signedAssetRemovedOrExtraAssetAddedIsRefused(t *testing.T) {
 		"an unlisted installer": {func(s string) string {
 			return strings.Replace(s, `"assets":[`, `"assets":[{"name":"install.sh","digest":"sha256:`+strings.Repeat("f", 64)+`"},`, 1)
 		}, "not listed in the signed SHA256SUMS"},
-		"the script swapped after the gate": {func(s string) string {
-			return strings.Replace(s, "sha256:"+shaOf("#!/bin/sh\necho quickstart\n"), "sha256:"+strings.Repeat("0", 64), 1)
-		}, "not the script at X"},
 		"a signed asset gone": {func(s string) string {
 			return strings.Replace(s, `"name":"`+release.Binaries()[0].AssetName()+`"`, `"name":"renamed"`, 1)
 		}, "no longer attached"},
@@ -582,7 +569,7 @@ func TestPublish_wholeAssetSetReplacedAfterTheGateIsRefused(t *testing.T) {
 		other[tg] = strings.Repeat(string("abcdef97"[i]), 64) // binaries that were never built from X
 		assets = append(assets, map[string]string{"name": tg.AssetName(), "digest": "sha256:" + other[tg]})
 	}
-	sums := release.ExpectedSums(other, shaOf("#!/bin/sh\necho quickstart\n"), nil, false)
+	sums := release.ExpectedSums(other, nil, false)
 	sig := mustSign(t, keyOfFixture(t, f), sums) // validly signed by the release key
 	files := filepath.Join(f.ghDir(), "files")
 	write(t, files, release.SumsName, sums)

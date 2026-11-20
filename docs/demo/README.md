@@ -2,7 +2,7 @@
 
 `two-sessions.cast` is a real recording (nothing scripted or edited except trimming the end and replacing the
 working-directory path in the banner): two Claude Code sessions, `alice` (right) and `bob` (left), on a free
-[Synadia Cloud](https://cloud.synadia.com) account set up with [`scripts/quickstart-synadia.sh`](../../scripts/quickstart-synadia.sh).
+[Synadia Cloud](https://cloud.synadia.com) account. The script that set it up is retired (Synadia Cloud is not supported by mashctl in 0.5.6; see #876).
 
 Play it in a terminal (the recording has long waits; `-i 2` caps any pause at two seconds):
 
@@ -34,7 +34,7 @@ bob                                                         alice
 ## How it was made
 
 - mash 0.3.0 built from this repository; the plugin installed from `mash plugin export`.
-- The endpoints were created with `scripts/quickstart-synadia.sh --owner demo --endpoint alice --endpoint bob`.
+- The endpoints were `alice` and `bob`, created before the script was retired.
 - `MASH_IDLE_WAKE=5s` was set for both sessions so the wake arrives within seconds. The default is 45 seconds
   (a blocker, question or task wakes an idle session after that; see [operations](../operations.md)).
 - The model's wording differs from run to run; the mechanism (wake by mail, signed delivery, the reply) does not.

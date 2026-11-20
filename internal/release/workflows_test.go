@@ -1,8 +1,6 @@
 package release
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"os/exec"
@@ -817,26 +815,11 @@ echo '[{"tagName":"v0.1.0","isDraft":false,"isPrerelease":false}]'
 		cmd.Env = append(os.Environ(), "PATH="+ghBin+":"+path, "RUNNER_TEMP="+t.TempDir(), "GITHUB_REF_NAME=v0.2.0", "GITHUB_REPOSITORY=bogworks/mash", "GITHUB_SHA="+g("rev-parse", "v0.2.0"))
 		return cmd.CombinedOutput()
 	}
-	// The tagged checkout must carry the script: without it the step fails.
-	if out, err := runScript(); err == nil || !strings.Contains(string(out), "quickstart-synadia.sh is missing") {
-		t.Fatalf("a checkout without the script passed: %v\n%s", err, out)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "scripts", "quickstart-synadia.sh"), []byte("#!/bin/sh\necho q\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	// The draft does not make SHA256SUMS (the sums job did, and it was attested): without it the step fails, and a listing
-	// whose line for the script does not match the copied script fails too.
+	// The draft does not make SHA256SUMS (the sums job did, and it was attested): without it the step fails.
 	if out, err := runScript(); err == nil || !strings.Contains(string(out), "no SHA256SUMS") {
 		t.Fatalf("a missing SHA256SUMS passed: %v\n%s", err, out)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "dist", "SHA256SUMS"), []byte(strings.Repeat("0", 64)+"  quickstart-synadia.sh\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if out, err := runScript(); err == nil {
-		t.Fatalf("a SHA256SUMS that does not match the script passed:\n%s", out)
-	}
-	sum := sha256.Sum256([]byte("#!/bin/sh\necho q\n"))
-	listing := hex.EncodeToString(sum[:]) + "  quickstart-synadia.sh\n"
+	listing := strings.Repeat("0", 64) + "  mash-linux-amd64\n"
 	if err := os.WriteFile(filepath.Join(dir, "dist", "SHA256SUMS"), []byte(listing), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -880,12 +863,9 @@ echo '[{"tagName":"v0.1.0","isDraft":false,"isPrerelease":false}]'
 	if got, _ := os.ReadFile(filepath.Join(dir, "dist", "SHA256SUMS")); string(got) != listing {
 		t.Fatalf("the draft changed SHA256SUMS:\n%s", got)
 	}
-	if st, err := os.Stat(filepath.Join(dir, "dist", "quickstart-synadia.sh")); err != nil || st.Mode().Perm()&0o100 == 0 {
-		t.Fatalf("the script was not copied with its mode: %v", err)
-	}
 }
 
-// releaseCIAssets are the SBOMs and the build provenance the draft job attaches besides the binaries and the script.
+// releaseCIAssets are the SBOMs and the build provenance the draft job attaches besides the binaries.
 var releaseCIAssets = []string{"mash-darwin-amd64.cdx.json", "mash-darwin-arm64.cdx.json", "mash-linux-amd64.cdx.json", "mash-linux-arm64.cdx.json",
 	"mashctl-darwin-amd64.cdx.json", "mashctl-darwin-arm64.cdx.json", "mashctl-linux-amd64.cdx.json", "mashctl-linux-arm64.cdx.json", "mash.intoto.jsonl"}
 
@@ -1012,7 +992,7 @@ func TestRelease_draftScriptCreatesOnlyADraft(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, "dist"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for _, n := range []string{"mash-linux-amd64", "quickstart-synadia.sh", "SHA256SUMS", "CHANGELOG.md"} {
+	for _, n := range []string{"mash-linux-amd64", "SHA256SUMS", "CHANGELOG.md"} {
 		if err := os.WriteFile(filepath.Join(dir, "dist", n), []byte("x"), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -1046,9 +1026,6 @@ func TestRelease_draftScriptCreatesOnlyADraft(t *testing.T) {
 	}
 	b, _ := os.ReadFile(log)
 	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
-	if !strings.Contains(lines[0], " dist/quickstart-synadia.sh ") {
-		t.Fatalf("the script is not attached: %s", lines[0])
-	}
 	if len(lines) != 2 || lines[1] != "release list --limit 200 --json tagName,isDraft" || !strings.HasPrefix(lines[0], "release create v0.1.0 ") || !strings.Contains(lines[0], " --draft ") || !strings.Contains(lines[0], "--verify-tag") ||
 		strings.Contains(lines[0], "--draft=false") || strings.Contains(lines[0], "--latest") {
 		t.Fatalf("gh was called as %q", lines)
@@ -1848,7 +1825,7 @@ func TestRelease_draftCarriesAndSumsTheSBOMsAndProvenance(t *testing.T) {
 		}
 	}
 	names := append([]string{"mash-darwin-amd64", "mash-darwin-arm64", "mash-linux-amd64", "mash-linux-arm64",
-		"mashctl-darwin-amd64", "mashctl-darwin-arm64", "mashctl-linux-amd64", "mashctl-linux-arm64", "quickstart-synadia.sh"}, releaseCIAssets...)
+		"mashctl-darwin-amd64", "mashctl-darwin-arm64", "mashctl-linux-amd64", "mashctl-linux-arm64"}, releaseCIAssets...)
 	for _, n := range names {
 		if !strings.Contains(create, "dist/"+n) {
 			t.Errorf("the draft does not attach %s:\n%s", n, create)
@@ -1874,7 +1851,7 @@ func TestRelease_draftCarriesAndSumsTheSBOMsAndProvenance(t *testing.T) {
 	}
 }
 
-// The sums job, run for real: it downloads the eight binaries and the eight SBOMs, copies the quickstart script and writes
+// The sums job, run for real: it downloads the eight binaries and the eight SBOMs, writes
 // SHA256SUMS in the documented order without the provenance bundle, and uploads it as the `sums` artifact.
 func TestRelease_sumsJobListsEveryAssetButTheBundleAndUploadsIt(t *testing.T) {
 	w := load(t, "release.yml")
@@ -1908,9 +1885,6 @@ func TestRelease_sumsJobListsEveryAssetButTheBundleAndUploadsIt(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, "dist"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join(dir, "scripts"), 0o755); err != nil {
-		t.Fatal(err)
-	}
 	bins := []string{"mash-darwin-amd64", "mash-darwin-arm64", "mash-linux-amd64", "mash-linux-arm64",
 		"mashctl-darwin-amd64", "mashctl-darwin-arm64", "mashctl-linux-amd64", "mashctl-linux-arm64"}
 	for _, n := range append(append([]string{}, bins...), releaseCIAssets...) {
@@ -1932,18 +1906,12 @@ func TestRelease_sumsJobListsEveryAssetButTheBundleAndUploadsIt(t *testing.T) {
 		cmd.Env = append(os.Environ(), "PATH="+path, "RELEASE_REF=v0.4.0")
 		return cmd.CombinedOutput()
 	}
-	if out, err := run(); err == nil || !strings.Contains(string(out), "quickstart-synadia.sh is missing") {
-		t.Fatalf("a checkout without the script passed: %v\n%s", err, out)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "scripts", "quickstart-synadia.sh"), []byte("#!/bin/sh\necho q\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
 	if out, err := run(); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	sums, _ := os.ReadFile(filepath.Join(dir, "dist", "SHA256SUMS"))
 	sl := strings.Split(strings.TrimSpace(string(sums)), "\n")
-	want := append(append(append([]string{}, bins...), "quickstart-synadia.sh"), releaseCIAssets[:8]...)
+	want := append(append([]string{}, bins...), releaseCIAssets[:8]...)
 	if len(sl) != len(want) {
 		t.Fatalf("SHA256SUMS:\n%s", sums)
 	}
@@ -1954,9 +1922,6 @@ func TestRelease_sumsJobListsEveryAssetButTheBundleAndUploadsIt(t *testing.T) {
 	}
 	if strings.Contains(string(sums), "mash.intoto.jsonl") {
 		t.Errorf("SHA256SUMS lists the provenance bundle:\n%s", sums)
-	}
-	if st, err := os.Stat(filepath.Join(dir, "dist", "quickstart-synadia.sh")); err != nil || st.Mode().Perm()&0o100 == 0 {
-		t.Errorf("the script was not copied with its mode: %v", err)
 	}
 	// Whatever is missing, the sums are not made.
 	for _, missing := range []string{"mash-linux-arm64.cdx.json", "mashctl-linux-arm64.cdx.json", "mashctl-darwin-amd64"} {

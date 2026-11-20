@@ -73,7 +73,6 @@ func newFixture(t *testing.T) *fixture {
 	write(t, repo, "plugin/.claude-plugin/plugin.json", "{\"name\": \"mash\", \"version\": \"0.1.0\"}\n")
 	write(t, repo, release.PluginHooks, hardenedHooks)
 	write(t, repo, renderContractPath, "contract v1\n")
-	write(t, repo, "scripts/"+release.ScriptName, "#!/bin/sh\necho quickstart\n")
 	write(t, repo, release.PluginMCP, "{\"mcpServers\": {\"mash\": {\"command\": \"mash\", \"args\": [\"serve\"]}}}\n")
 	gitT(t, repo, "add", "-A")
 	gitT(t, repo, "commit", "-q", "-m", "candidate")
@@ -263,8 +262,7 @@ func setAssets(t *testing.T, f *fixture, mutate func(map[string]string)) {
 		have[n] = "sha256:" + shaOf(body)
 		ci[n] = shaOf(body)
 	}
-	sums := release.ExpectedSums(h, shaOf("#!/bin/sh\necho quickstart\n"), ci, f.keyless)
-	have[release.ScriptName] = "sha256:" + shaOf("#!/bin/sh\necho quickstart\n")
+	sums := release.ExpectedSums(h, ci, f.keyless)
 	have[release.SumsName] = "sha256:" + shaOf(sums)
 	if mutate != nil {
 		mutate(have)
@@ -488,9 +486,7 @@ func TestAssets_everyWrongAssetSetIsRefused(t *testing.T) {
 			m["mash-linux-x86_64"] = m["mash-linux-amd64"]
 			delete(m, "mash-linux-amd64")
 		},
-		"missing script":  func(m map[string]string) { delete(m, release.ScriptName) },
-		"modified script": func(m map[string]string) { m[release.ScriptName] = "sha256:" + strings.Repeat("0", 64) },
-		"wrong sums":      func(m map[string]string) { m[release.SumsName] = "sha256:" + strings.Repeat("1", 64) },
+		"wrong sums": func(m map[string]string) { m[release.SumsName] = "sha256:" + strings.Repeat("1", 64) },
 	}
 	for name, mutate := range cases {
 		f := newFixture(t)
@@ -1582,20 +1578,5 @@ func TestGHRepoDefaults(t *testing.T) {
 	}
 	if o := resolve(Options{Repo: repo, GHRepo: "opt/repo"}); o.GHRepo != "opt/repo" {
 		t.Errorf("option: %q", o.GHRepo)
-	}
-}
-
-func TestAssets_aScriptMissingAtXIsAClearError(t *testing.T) {
-	f := newFixture(t)
-	setAssets(t, f, nil)
-	gitT(t, f.repo, "rm", "-q", "scripts/"+release.ScriptName)
-	gitT(t, f.repo, "commit", "-q", "-m", "drop the script")
-	f.o.X = gitT(t, f.repo, "rev-parse", "HEAD")
-	gitT(t, f.repo, "push", "-q", "origin", "main")
-	gitT(t, f.repo, "tag", "-s", "-f", "v0.1.0", "-m", "release", f.o.X)
-	gitT(t, f.repo, "push", "-q", "-f", "origin", "v0.1.0")
-	err := checkAssets(context.Background(), f.o)
-	if err == nil || !strings.Contains(err.Error(), "script is missing at") {
-		t.Fatalf("%v", err)
 	}
 }
