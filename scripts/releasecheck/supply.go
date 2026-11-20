@@ -33,7 +33,8 @@ func attestFlags(o Options, tag, x string) []string {
 }
 
 // verifySupplyChain holds the release's SBOMs and build provenance to what release.yml promises, on every binary; any
-// failure is a refusal (exit 3) naming the file, and a failed download is the gate's. For each binary it requires that
+// failure is a refusal (exit 3) naming the file, and a failed download is the gate's. For each of the two scripts it requires
+// that `gh attestation verify <script> --bundle mash.intoto.jsonl` passes with the same flags. For each binary it requires that
 //   - the attached mash-<os>-<arch>.cdx.json is CycloneDX JSON with components and a described main component or tool;
 //   - `gh attestation verify <binary> -R <repo> --signer-workflow <repo>/.github/workflows/release.yml --source-ref
 //     refs/tags/v<version> --source-digest <X> --predicate-type https://cyclonedx.org/bom` passes and a verified
@@ -84,6 +85,17 @@ func verifySupplyChain(o Options, tag, x string) error {
 			bad = append(bad, fmt.Sprintf("%s: %v", name, err))
 		}
 		args := append([]string{"attestation", "verify", bin}, attestFlags(o, tag, x)...)
+		if _, err := gh(o, append(args, "--bundle", prov)...); err != nil {
+			bad = append(bad, fmt.Sprintf("%s: no verifying build provenance in %s: %v", name, release.ProvenanceName, err))
+		}
+	}
+	// The two scripts are subjects of the same provenance as the binaries (and have no SBOM).
+	for _, name := range release.ScriptNames() {
+		p, _, err := fetch(name)
+		if err != nil {
+			return err
+		}
+		args := append([]string{"attestation", "verify", p}, attestFlags(o, tag, x)...)
 		if _, err := gh(o, append(args, "--bundle", prov)...); err != nil {
 			bad = append(bad, fmt.Sprintf("%s: no verifying build provenance in %s: %v", name, release.ProvenanceName, err))
 		}

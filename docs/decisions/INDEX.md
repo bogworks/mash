@@ -127,3 +127,4 @@
 | [0147](0147-the-0-5-6-command-line-and-mcp-surface-is-built-from-a-specification-that-supersedes-contract-revision-26.md) | The 0.5.6 command-line and MCP surface is built from a specification that supersedes contract revision 26 | accepted | 2026-11-20 |
 | [0148](0148-releases-build-mashctl-beside-mash-with-the-same-supply-chain-checks.md) | Releases build mashctl beside mash with the same supply-chain checks | accepted | 2026-11-20 |
 | [0149](0149-further-departures-of-the-0-5-6-specification-by-the-maintainers-word.md) | Further departures of the 0.5.6 specification, by the maintainer's word (ADR 0147) | accepted | 2026-11-20 |
+| [0150](0150-releases-carry-install-and-local-nats-setup-scripts-as-attested-assets.md) | Releases carry the install and local NATS setup scripts as attested assets | accepted | 2026-11-20 |

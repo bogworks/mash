@@ -22,15 +22,32 @@ mash is one static Go binary. **Install it first (below) until your plugin relea
 - The MCP server runs `${CLAUDE_PLUGIN_ROOT}/scripts/mash` directly, so the launcher needs its exec bit: git-based marketplace installs preserve the mode and `mash plugin export` sets it. The hooks run it as `sh ${CLAUDE_PLUGIN_ROOT}/scripts/mash`, which needs no exec bit.
 - Offline, or on an unsupported platform, the plugin uses a `mash` already on the `PATH` or a copy it downloaded earlier; if there is neither, it says so on stderr and the server does not start.
 
-To install the binary yourself (required for an unpinned plugin; also for the CLI in section 5, or an air-gapped machine):
+To install the binaries yourself (required for an unpinned plugin; also for the CLI in section 5, or an air-gapped machine), run the install script of the release:
 
 ```sh
-go install github.com/bogworks/mash/cmd/mash@latest
-go install github.com/bogworks/mash/cmd/mashctl@latest   # the admin tool
-mash version
+curl -fsSL https://github.com/bogworks/mash/releases/latest/download/install.sh | bash
 ```
 
-`mashctl` is not in the release assets: a release carries only the four `mash-<os>-<arch>` binaries, so install `mashctl` with `go install` as above. It needs Go 1.27.4 or newer (the version `go.mod` requires), and the directory `go install` writes to (`go env GOBIN`, or `$(go env GOPATH)/bin`) must be on your `PATH`.
+It finds the machine's type (Linux or macOS, amd64 or arm64), downloads `mash` and `mashctl` from the same release together with that release's `SHA256SUMS`, checks each binary against it, and puts both in `~/.local/bin` (`MASH_INSTALL_DIR` names another folder; `MASH_VERSION=v0.5.6` pins a release). It prints one line for each, with the path it used, for example `Installed mash v0.5.6 (3f9a41c) in ~/.local/bin`, asks nothing and needs no `sudo`. If the folder is not on your `PATH` it says so in one line. It refuses to write into a folder that is a symbolic link or that other users can write to, and on any failed check nothing is installed.
+
+If you want a NATS server on this machine, `mash-local-nats-setup.sh` is the other script of the release; see the quick start in the [README](../README.md).
+
+### Verify what you download
+
+Every file of a release is covered by `SHA256SUMS`, and `SHA256SUMS` and the binaries and both scripts (`install.sh`, `mash-local-nats-setup.sh`) are subjects of the release's build provenance attestation. `install.sh` checks the binaries against `SHA256SUMS` itself. With `gh` (the [GitHub CLI](https://cli.github.com/)) installed it also verifies `SHA256SUMS` against the attestation before it installs anything, and refuses on failure; without `gh` it says `gh not found: checked the checksums only` and goes on. To check the script before you run it, and the attestation yourself:
+
+```sh
+BASE=https://github.com/bogworks/mash/releases/latest/download   # or .../releases/download/v0.5.6 for a pinned release
+curl -fsSLO $BASE/install.sh -O $BASE/SHA256SUMS -O $BASE/mash.intoto.jsonl
+gh attestation verify SHA256SUMS -R bogworks/mash --bundle mash.intoto.jsonl \
+  --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/v0.5.6
+grep ' install.sh$' SHA256SUMS | sha256sum -c -            # macOS: shasum -a 256 -c -
+less install.sh && bash install.sh
+```
+
+An agent does not pipe a download into a shell: the setup skill downloads each script, checks it against `SHA256SUMS`, shows you what it is about to run and runs it after a yes. Both scripts are also the repository's own `scripts/` files at the release commit, byte for byte; the release check compares them ([ADR 0150](decisions/0150-releases-carry-install-and-local-nats-setup-scripts-as-attested-assets.md)).
+
+To build from source instead, `go install github.com/bogworks/mash/cmd/mash@latest` and `.../cmd/mashctl@latest` need Go 1.27.4 or newer; the result is not the attested build.
 
 ## 2. The plugin
 

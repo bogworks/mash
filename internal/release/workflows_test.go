@@ -769,11 +769,25 @@ func TestRelease_notesAreTheChangeLogSectionWithTheCompareLink(t *testing.T) {
 		return strings.TrimSpace(string(out))
 	}
 	g("tag", "-s", "v0.1.0", "-m", "one", x)
-	g("commit", "-q", "--allow-empty", "-m", "second change")
-	g("tag", "-s", "v0.2.0", "-m", "two", "HEAD")
+	// The second change adds the two scripts; the sums job copies them into dist, and the draft job refuses a copy that is
+	// not the repository's file at the tagged commit.
+	if err := os.MkdirAll(filepath.Join(dir, "scripts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.MkdirAll(filepath.Join(dir, "dist"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	for _, n := range releaseScripts {
+		body := []byte("#!/bin/sh\n# " + n + "\n")
+		for _, p := range []string{filepath.Join(dir, "scripts", n), filepath.Join(dir, "dist", n)} {
+			if err := os.WriteFile(p, body, 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		g("add", "scripts/"+n)
+	}
+	g("commit", "-q", "-m", "second change")
+	g("tag", "-s", "v0.2.0", "-m", "two", "HEAD")
 	// The runner is Linux and has sha256sum; the test also runs where only shasum exists (macOS).
 	shim := t.TempDir()
 	if err := os.WriteFile(filepath.Join(shim, "sha256sum"), []byte("#!/bin/sh\nexec shasum -a 256 \"$@\"\n"), 0o755); err != nil {
@@ -814,6 +828,16 @@ echo '[{"tagName":"v0.1.0","isDraft":false,"isPrerelease":false}]'
 		cmd.Dir = dir
 		cmd.Env = append(os.Environ(), "PATH="+ghBin+":"+path, "RUNNER_TEMP="+t.TempDir(), "GITHUB_REF_NAME=v0.2.0", "GITHUB_REPOSITORY=bogworks/mash", "GITHUB_SHA="+g("rev-parse", "v0.2.0"))
 		return cmd.CombinedOutput()
+	}
+	// A script in dist that is not the repository's at the tagged commit stops the draft before anything is attached.
+	if err := os.WriteFile(filepath.Join(dir, "dist", "install.sh"), []byte("#!/bin/sh\necho tampered\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := runScript(); err == nil || !strings.Contains(string(out), "dist/install.sh is not scripts/install.sh") {
+		t.Fatalf("a changed install.sh passed: %v\n%s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "dist", "install.sh"), []byte("#!/bin/sh\n# install.sh\n"), 0o755); err != nil {
+		t.Fatal(err)
 	}
 	// The draft does not make SHA256SUMS (the sums job did, and it was attested): without it the step fails.
 	if out, err := runScript(); err == nil || !strings.Contains(string(out), "no SHA256SUMS") {
@@ -865,6 +889,9 @@ echo '[{"tagName":"v0.1.0","isDraft":false,"isPrerelease":false}]'
 	}
 }
 
+// releaseScripts are the two scripts the sums job copies into dist and every later job carries (ADR 0150).
+var releaseScripts = []string{"install.sh", "mash-local-nats-setup.sh"}
+
 // releaseCIAssets are the SBOMs and the build provenance the draft job attaches besides the binaries.
 var releaseCIAssets = []string{"mash-darwin-amd64.cdx.json", "mash-darwin-arm64.cdx.json", "mash-linux-amd64.cdx.json", "mash-linux-arm64.cdx.json",
 	"mashctl-darwin-amd64.cdx.json", "mashctl-darwin-arm64.cdx.json", "mashctl-linux-amd64.cdx.json", "mashctl-linux-arm64.cdx.json", "mash.intoto.jsonl"}
@@ -905,9 +932,9 @@ func TestRelease_attestJobAttestsBuildProvenance(t *testing.T) {
 	for _, st := range j.Steps {
 		if attest.MatchString(st.Uses) {
 			found = true
-			// SHA256SUMS is a subject beside the eight binaries; the provenance bundle (made by this step) cannot be one.
-			if got := strings.Fields(fmt.Sprint(st.With["subject-path"])); strings.Join(got, " ") != "dist/mash-linux-amd64 dist/mash-linux-arm64 dist/mash-darwin-amd64 dist/mash-darwin-arm64 dist/mashctl-linux-amd64 dist/mashctl-linux-arm64 dist/mashctl-darwin-amd64 dist/mashctl-darwin-arm64 dist/SHA256SUMS" {
-				t.Errorf("attest subject-path = %q, want the eight binaries by name and dist/SHA256SUMS", st.With["subject-path"])
+			// SHA256SUMS and the two scripts are subjects beside the eight binaries; the provenance bundle (made by this step) cannot be one.
+			if got := strings.Fields(fmt.Sprint(st.With["subject-path"])); strings.Join(got, " ") != "dist/mash-linux-amd64 dist/mash-linux-arm64 dist/mash-darwin-amd64 dist/mash-darwin-arm64 dist/mashctl-linux-amd64 dist/mashctl-linux-arm64 dist/mashctl-darwin-amd64 dist/mashctl-darwin-arm64 dist/install.sh dist/mash-local-nats-setup.sh dist/SHA256SUMS" {
+				t.Errorf("attest subject-path = %q, want the eight binaries and the two scripts by name and dist/SHA256SUMS", st.With["subject-path"])
 			}
 			if strings.Contains(fmt.Sprint(st.With["subject-path"]), "*") {
 				t.Errorf("attest subject-path must not glob (a stale file in dist would be attested): %q", st.With["subject-path"])
@@ -1698,19 +1725,24 @@ func TestRelease_attestJobKeepsTheBundleAsTheProvenanceAsset(t *testing.T) {
 	if n := jobNeeds(j.Needs); len(n) != 2 || !(n[0] == "build" && n[1] == "sums" || n[0] == "sums" && n[1] == "build") {
 		t.Errorf("attest needs %v, want build and sums (SHA256SUMS is made before it is attested)", j.Needs)
 	}
-	gotSums := false
+	gotSums, gotScripts := false, false
 	for _, st := range j.Steps {
 		if !strings.HasPrefix(st.Uses, "actions/download-artifact@") {
 			continue
 		}
 		if st.With["name"] == "sums" {
 			gotSums = true
+		} else if st.With["name"] == "release-scripts" {
+			gotScripts = true
 		} else if st.With["pattern"] != "mash-*" && st.With["pattern"] != "mashctl-*" {
-			t.Errorf("attest downloads %v, not just the binaries (patterns mash-* and mashctl-*) and the sums artifact", st.With)
+			t.Errorf("attest downloads %v, not just the binaries (patterns mash-* and mashctl-*) the release-scripts artifact and the sums artifact", st.With)
 		}
 	}
 	if !gotSums {
 		t.Error("attest does not download the sums artifact")
+	}
+	if !gotScripts {
+		t.Error("attest does not download the release-scripts artifact (the two scripts are attested subjects)")
 	}
 	var script, bundleEnv string
 	var attestID string
@@ -1747,19 +1779,19 @@ func TestRelease_attestJobKeepsTheBundleAsTheProvenanceAsset(t *testing.T) {
 	if err := os.WriteFile(bundle, []byte("{}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	for _, n := range []string{"mash-darwin-amd64", "mash-darwin-arm64", "mash-linux-amd64", "mashctl-darwin-amd64", "mashctl-darwin-arm64", "mashctl-linux-amd64", "mashctl-linux-arm64", "SHA256SUMS"} {
+	for _, n := range []string{"mash-darwin-amd64", "mash-darwin-arm64", "mash-linux-amd64", "mashctl-darwin-amd64", "mashctl-darwin-arm64", "mashctl-linux-amd64", "mashctl-linux-arm64", "SHA256SUMS", "install.sh", "mash-local-nats-setup.sh"} {
 		if err := os.WriteFile(filepath.Join(dir, "dist", n), []byte(n), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if run() == nil {
-		t.Error("seven binaries and SHA256SUMS were attested")
+		t.Error("seven binaries, the scripts and SHA256SUMS were attested")
 	}
 	if err := os.WriteFile(filepath.Join(dir, "dist", "mash-linux-arm64"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := run(); err != nil {
-		t.Fatalf("eight binaries, SHA256SUMS and a bundle: %v", err)
+		t.Fatalf("eight binaries, two scripts, SHA256SUMS and a bundle: %v", err)
 	}
 	if b, err := os.ReadFile(filepath.Join(dir, "provenance", "mash.intoto.jsonl")); err != nil || string(b) != "{}\n" {
 		t.Errorf("provenance/mash.intoto.jsonl = %q, %v", b, err)
@@ -1771,6 +1803,13 @@ func TestRelease_attestJobKeepsTheBundleAsTheProvenanceAsset(t *testing.T) {
 		t.Error("an extra file in dist was attested")
 	}
 	os.Remove(filepath.Join(dir, "dist", "mash-linux-arm64.cdx.json"))
+	os.Remove(filepath.Join(dir, "dist", "install.sh"))
+	if run() == nil {
+		t.Error("a dist without install.sh was attested")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "dist", "install.sh"), []byte("install.sh"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	os.Remove(filepath.Join(dir, "dist", "SHA256SUMS"))
 	if run() == nil {
 		t.Error("eight binaries without SHA256SUMS were attested")
@@ -1859,9 +1898,16 @@ func TestRelease_sumsJobListsEveryAssetButTheBundleAndUploadsIt(t *testing.T) {
 	if !ok {
 		t.Fatal("release.yml has no sums job")
 	}
-	var script string
-	patterns, uploaded, checkout := map[string]bool{}, false, false
+	var script, copyStep string
+	patterns, uploaded, checkout, scriptsUploaded := map[string]bool{}, false, false, false
 	for _, st := range j.Steps {
+		if strings.Contains(st.Run, "cp scripts/install.sh scripts/mash-local-nats-setup.sh dist/") {
+			copyStep = st.Run
+		}
+		if strings.HasPrefix(st.Uses, "actions/upload-artifact@") && st.With["name"] == "release-scripts" &&
+			strings.Fields(fmt.Sprint(st.With["path"]))[0] == "dist/install.sh" && strings.Contains(fmt.Sprint(st.With["path"]), "dist/mash-local-nats-setup.sh") {
+			scriptsUploaded = true
+		}
 		if strings.HasPrefix(st.Uses, "actions/checkout@") {
 			checkout = true
 		}
@@ -1881,13 +1927,16 @@ func TestRelease_sumsJobListsEveryAssetButTheBundleAndUploadsIt(t *testing.T) {
 	if script == "" {
 		t.Fatal("the sums job has no sha256sum step")
 	}
+	if copyStep == "" || !scriptsUploaded {
+		t.Errorf("the sums job must copy scripts/install.sh and scripts/mash-local-nats-setup.sh into dist (%q) and upload them as release-scripts (%v)", copyStep, scriptsUploaded)
+	}
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "dist"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	bins := []string{"mash-darwin-amd64", "mash-darwin-arm64", "mash-linux-amd64", "mash-linux-arm64",
 		"mashctl-darwin-amd64", "mashctl-darwin-arm64", "mashctl-linux-amd64", "mashctl-linux-arm64"}
-	for _, n := range append(append([]string{}, bins...), releaseCIAssets...) {
+	for _, n := range append(append(append([]string{}, bins...), releaseScripts...), releaseCIAssets...) {
 		if err := os.WriteFile(filepath.Join(dir, "dist", n), []byte(n), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -1911,7 +1960,8 @@ func TestRelease_sumsJobListsEveryAssetButTheBundleAndUploadsIt(t *testing.T) {
 	}
 	sums, _ := os.ReadFile(filepath.Join(dir, "dist", "SHA256SUMS"))
 	sl := strings.Split(strings.TrimSpace(string(sums)), "\n")
-	want := append(append([]string{}, bins...), releaseCIAssets[:8]...)
+	// The binaries, then the two scripts, then the SBOMs: the order release.ExpectedSums gives.
+	want := append(append(append([]string{}, bins...), releaseScripts...), releaseCIAssets[:8]...)
 	if len(sl) != len(want) {
 		t.Fatalf("SHA256SUMS:\n%s", sums)
 	}
@@ -1924,7 +1974,7 @@ func TestRelease_sumsJobListsEveryAssetButTheBundleAndUploadsIt(t *testing.T) {
 		t.Errorf("SHA256SUMS lists the provenance bundle:\n%s", sums)
 	}
 	// Whatever is missing, the sums are not made.
-	for _, missing := range []string{"mash-linux-arm64.cdx.json", "mashctl-linux-arm64.cdx.json", "mashctl-darwin-amd64"} {
+	for _, missing := range []string{"mash-linux-arm64.cdx.json", "mashctl-linux-arm64.cdx.json", "mashctl-darwin-amd64", "install.sh", "mash-local-nats-setup.sh"} {
 		if err := os.Remove(filepath.Join(dir, "dist", missing)); err != nil {
 			t.Fatal(err)
 		}
@@ -1995,14 +2045,15 @@ func TestRelease_dryRunVerifiesAndNeverReleases(t *testing.T) {
 		`".github/workflows/release.yml"`,
 		"--predicate-type https://cyclonedx.org/bom --format json",
 		"jq -S",
+		"for n in install.sh mash-local-nats-setup.sh; do",
 		"mash-linux-amd64 mash-linux-arm64 mash-darwin-amd64 mash-darwin-arm64 mashctl-linux-amd64 mashctl-linux-arm64 mashctl-darwin-amd64 mashctl-darwin-arm64",
 	} {
 		if !strings.Contains(run, must) {
 			t.Errorf("dry-run-verify lacks %q:\n%s", must, run)
 		}
 	}
-	if strings.Count(run, "--signer-workflow") != 5 || strings.Count(run, "--source-ref refs/heads/main") != 5 || strings.Count(run, `--source-digest "$GITHUB_SHA"`) != 5 {
-		t.Errorf("all five gh attestation verify calls (the bundle and the held attestation for the binaries and for SHA256SUMS, and the SBOM) need the signer, ref and commit flags:\n%s", run)
+	if strings.Count(run, "--signer-workflow") != 7 || strings.Count(run, "--source-ref refs/heads/main") != 7 || strings.Count(run, `--source-digest "$GITHUB_SHA"`) != 7 {
+		t.Errorf("all seven gh attestation verify calls (the bundle and the held attestation for the binaries, the scripts and SHA256SUMS, and the SBOM) need the signer, ref and commit flags:\n%s", run)
 	}
 	if strings.Contains(run, "--deny-self-hosted-runners") {
 		t.Errorf("the dry run must not deny self-hosted runners: our releases are built on them by design (ADR 0087):\n%s", run)
@@ -2411,5 +2462,45 @@ func TestRelease_mashctlIsBuiltAndCarriedThroughEveryJob(t *testing.T) {
 	// scripts/build-twice names the program it builds, and the workflow asks for mashctl by name.
 	if !strings.Contains(text("build"), `"dist/$name" mashctl`) {
 		t.Error("the build job does not pass mashctl to scripts/build-twice")
+	}
+}
+
+// ADR 0150: the two scripts travel with the binaries. The sums job copies them from the checkout and lists them between the
+// binaries and the SBOMs, hands them on as one artifact, the attest job makes them subjects of the provenance, the draft job
+// attaches them (after comparing them with the repository's own files at the tagged commit) and the dry run verifies them.
+func TestRelease_scriptsAreCarriedThroughEveryJob(t *testing.T) {
+	w := load(t, "release.yml")
+	text := func(jn string) string {
+		var b strings.Builder
+		for _, st := range w.Jobs[jn].Steps {
+			b.WriteString(st.Run + "\n")
+			for k, v := range st.With {
+				b.WriteString(fmt.Sprintf("%s=%v\n", k, v))
+			}
+		}
+		return b.String()
+	}
+	for jn, wants := range map[string][]string{
+		"sums":           {"cp scripts/install.sh scripts/mash-local-nats-setup.sh dist/", "install.sh mash-local-nats-setup.sh \\", "name=release-scripts"},
+		"attest":         {"name=release-scripts", "dist/install.sh", "dist/mash-local-nats-setup.sh"},
+		"draft":          {"dist/install.sh dist/mash-local-nats-setup.sh", `git show "$commit:scripts/$n" | cmp -s - "dist/$n"`},
+		"dry-run-verify": {"for n in install.sh mash-local-nats-setup.sh; do"},
+	} {
+		got := text(jn)
+		for _, want := range wants {
+			if !strings.Contains(got, want) {
+				t.Errorf("job %s does not mention %q:\n%s", jn, want, got)
+			}
+		}
+	}
+	// The order in sums' sha256sum line is release.ExpectedSums's: binaries, scripts, SBOMs.
+	sums := text("sums")
+	i, j, k := strings.Index(sums, "mashctl-linux-arm64 \\"), strings.Index(sums, "install.sh mash-local-nats-setup.sh \\"), strings.Index(sums, "mash-darwin-amd64.cdx.json")
+	if !(i >= 0 && i < j && j < k) {
+		t.Errorf("sha256sum line is not binaries, scripts, SBOMs:\n%s", sums)
+	}
+	// No SBOM job or artifact handles the scripts: they have none.
+	if strings.Contains(text("sbom"), "install.sh") || strings.Contains(text("attest-sbom"), "install.sh") {
+		t.Error("the scripts have no SBOM")
 	}
 }

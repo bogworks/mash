@@ -55,7 +55,7 @@ var sumsLine = regexp.MustCompile(`^([0-9a-f]{64}) [ *]([^ ]+)$`)
 // by buildFresh from the tagged commit). A malformed line, a duplicate name, a name that is not mash-<os>-<arch> or mashctl-<os>-<arch> of a
 // release target, a digest that differs from our build, a listed name that is not attached (or is attached with
 // another digest) and an attached mash-* asset that is not listed are each refused; so is a target the sums omit.
-// The SBOMs and the SLSA provenance (release.CIAssetNames) must be listed too; their digests are the attached ones.
+// The two scripts, the SBOMs and the SLSA provenance (release.CIAssetNames) must be listed too; their digests are the attached ones.
 // For a keyless release the provenance bundle is not listed (it cannot list itself) and a line for it is refused; it
 // is verified by its attestation instead.
 func checkSumEntries(sums []byte, have map[string]string, hashes map[release.Binary]string, keyless bool) error {
@@ -87,7 +87,7 @@ func checkSumEntries(sums []byte, have map[string]string, hashes map[release.Bin
 		}
 		t, ok := byName[name]
 		if !ok {
-			return fmt.Errorf("SHA256SUMS lists %s, which is neither mash-<os>-<arch> nor mashctl-<os>-<arch> of a release target, nor an SBOM or the provenance of the release", name)
+			return fmt.Errorf("SHA256SUMS lists %s, which is neither mash-<os>-<arch> nor mashctl-<os>-<arch> of a release target, nor one of the release's scripts, an SBOM or the provenance", name)
 		}
 		if want := hashes[t]; hash != want {
 			return fmt.Errorf("SHA256SUMS lists %s as sha256:%s, a fresh reproducible build of X gives sha256:%s", name, hash, want)
@@ -475,7 +475,7 @@ func keylessSums(o Options, tag, x string, have map[string]string, hashes map[re
 	return nil
 }
 
-// verifyAttestations downloads each of the eight binaries (mash and mashctl) from the release into a temporary directory and runs
+// verifyAttestations downloads each of the eight binaries (mash and mashctl) and the two scripts from the release into a temporary directory and runs
 // `gh attestation verify <file>` on it, pinned to the release repository o.GHRepo, its release.yml and the tag (attestFlags: the repository, the workflow, the tag and the commit x). A binary
 // with no attestation, or one that does not verify, is refused naming it (exit 3); a download that fails is the
 // gate's (could not decide). It keeps a draft that release.yml's attest job never saw (an older one, or one made by
@@ -487,8 +487,11 @@ func verifyAttestations(o Options, tag, x string) error {
 	}
 	defer os.RemoveAll(dir)
 	var bad []string
+	names := release.ScriptNames()
 	for _, t := range release.Binaries() {
-		name := t.AssetName()
+		names = append(names, t.AssetName())
+	}
+	for _, name := range names {
 		b, err := downloadAsset(o, tag, name)
 		if err != nil {
 			return err

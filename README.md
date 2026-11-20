@@ -51,6 +51,8 @@ mash version
 
 The checksum shows the file arrived whole. The attestation, a record signed by GitHub, shows that this binary was built from the `v0.5.5` tag by the release workflow ([more](docs/release.md)). `gh` is the [GitHub CLI](https://cli.github.com/).
 
+**One command (from the release that carries `install.sh`).** `curl -fsSL https://github.com/bogworks/mash/releases/latest/download/install.sh | bash` installs `mash` and `mashctl` from the same release into `~/.local/bin`, after checking each against the release's checksums (and the attestation too, when `gh` is installed). [docs/install.md](docs/install.md#1-the-binary) says what it does and how to check the script first.
+
 **`go install` (builds from source).** `go install github.com/bogworks/mash/cmd/mash@v0.5.5` needs Go 1.27.4 or newer. It compiles the source on your machine, so the result is not the attested build, and `mash version` prints `unknown` as the commit.
 
 **`mashctl`** (the tool that sets up servers and administers endpoints) is not among the release assets: v0.5.5 carries only the four `mash-<os>-<arch>` binaries. For now install it with `go install github.com/bogworks/mash/cmd/mashctl@v0.5.5`; `mashctl version` prints `0.0.0-dev` from a go install.
