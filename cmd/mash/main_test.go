@@ -335,60 +335,14 @@ func TestServeLeaseConflict(t *testing.T) {
 	}
 }
 
-func TestAdminCLI(t *testing.T) {
-	e := testenv.Start(t)
-	c, u := e.Mint(t, tAddr("z"))
-	env := map[string]string{"HOME": t.TempDir(), "MASH_SERVER": e.URL, "MASH_ENDPOINT": e.Owner + ".dev." + "x", "MASH_ADMIN_CREDS": e.AdminCreds, "MASH_INSECURE_PLAINTEXT": "1"}
-	runAdmin := func(args ...string) (string, int) {
-		var out bytes.Buffer
-		code := run(append([]string{"admin"}, args...), envFrom(env), strings.NewReader(""), &out, &out)
-		return out.String(), code
-	}
-	if out, code := runAdmin("permissions", tTo("z"), "--nsc"); code != 0 || !strings.Contains(out, "--allow-pub\nagents.mail.o.*.*\n") {
-		t.Fatalf("permissions: %d %s", code, out)
-	}
-	if out, code := runAdmin("permissions", tTo("z")); code != 0 || !strings.Contains(out, `"pub"`) {
-		t.Fatalf("permissions json: %d %s", code, out)
-	}
-	if out, code := runAdmin("init"); code != 0 {
-		t.Fatalf("init: %s", out)
-	}
-	if out, code := runAdmin("provision", tTo("z"), "--user", u, "--account", e.Account, "--note", "zed"); code != 0 || !strings.Contains(out, "agents.mail.o.dev.z") {
-		t.Fatalf("provision: %d %s", code, out)
-	}
-	if out, code := runAdmin("list"); code != 0 || !strings.Contains(out, "o.dev.z\t") || !strings.Contains(out, "zed") {
-		t.Fatalf("list: %d %s", code, out)
-	}
-	_ = c
-	for _, bad := range [][]string{
-		{"deprovision", tTo("z"), "--user"},
-		{"deprovision", tTo("z"), "--user", "notakey"},
-		{"deprovision", tTo("z"), "--user", "u" + u[1:]},
-		{"deprovision", tTo("z"), "--user", "A" + u[1:]},
-		{"deprovision", tTo("z"), "--user", u + "A"},
-		{"deprovision", tTo("z"), "--who", u},
-		{"deprovision", tTo("z"), u},
-	} {
-		if out, code := runAdmin(bad...); code == 0 || !strings.Contains(out, "usage: mash admin deprovision <owner.group.instance> [--user <public-key> | --drained-to SEQ --suspension ID]") {
-			t.Fatalf("%v: %d %s", bad, code, out)
+// The admin command was removed: it answers as any unknown command does.
+func TestAdminIsAnUnknownCommand(t *testing.T) {
+	for _, args := range [][]string{{"admin"}, {"admin", "list"}, {"admin", "provision", "o.dev.z"}, {"admin", "-h"}} {
+		var out, errb bytes.Buffer
+		code := run(args, envFrom(nil), strings.NewReader(""), &out, &errb)
+		if code != 2 || !strings.Contains(errb.String(), `mash has no command admin`) || out.Len() != 0 {
+			t.Fatalf("%v: %d out=%q err=%q", args, code, out.String(), errb.String())
 		}
-	}
-	_, other := e.Mint(t, tAddr("y"))
-	if out, code := runAdmin("deprovision", tTo("z"), "--user", other); code == 0 || !strings.Contains(out, "refusing to deprovision o_dev_z: its record belongs to another user key (left in place)") || strings.Contains(out, other[:9]) {
-		t.Fatalf("other key: %d %s", code, out)
-	}
-	if out, code := runAdmin("list"); code != 0 || !strings.Contains(out, "o.dev.z\t") {
-		t.Fatalf("a refused deprovision removed the record: %d %s", code, out)
-	}
-	if out, code := runAdmin("deprovision", tTo("z"), "--user", u); code != 0 || !strings.Contains(out, "deprovisioned") || strings.Contains(out, u[:9]) {
-		t.Fatalf("deprovision --user: %d %s", code, out)
-	}
-	// A deprovisioned address is retired and never assigned again.
-	if out, code := runAdmin("provision", tTo("z"), "--user", u, "--account", e.Account); code == 0 || !strings.Contains(out, "retired") {
-		t.Fatalf("re-provision of a retired address: %d %s", code, out)
-	}
-	if out, code := runAdmin("bogus"); code == 0 {
-		t.Fatalf("unknown admin command accepted: %s", out)
 	}
 }
 

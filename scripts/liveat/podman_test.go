@@ -383,8 +383,8 @@ func TestPodmanExecAndSpawnArgs(t *testing.T) {
 	hs := openPodman(t, f, r)
 	var got []string
 	hs[0].(*podHost).c.execFn = func(name string, argv []string) Result { got = append([]string{name}, argv...); return Result{Code: 7} }
-	res := hs[0].Exec("x", []string{"/bin/mashctl", "list"}, []string{"K=V"})
-	if res.Code != 7 || got[0] != "M1-x" || !strings.Contains(strings.Join(got, " "), "-e K=V mash-at005-"+testRunID+"-m1 /bin/mashctl list") {
+	res := hs[0].Exec("x", []string{"/bin/mashctl", "endpoint", "list"}, []string{"K=V"})
+	if res.Code != 7 || got[0] != "M1-x" || !strings.Contains(strings.Join(got, " "), "-e K=V mash-at005-"+testRunID+"-m1 /bin/mashctl endpoint list") {
 		t.Fatalf("%v %+v", got, res)
 	}
 }

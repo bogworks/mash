@@ -10,7 +10,7 @@ import (
 )
 
 // ErrLeaseBucketRollup is returned when the lease bucket's stream allows rollup and that could not be changed.
-var ErrLeaseBucketRollup = errors.New("lease bucket allows rollup; run `mash admin init`")
+var ErrLeaseBucketRollup = errors.New("lease bucket allows rollup; run `mashctl init`")
 
 // LeaseStreamName is the stream that backs the lease bucket.
 const LeaseStreamName = "KV_" + LeaseBucket

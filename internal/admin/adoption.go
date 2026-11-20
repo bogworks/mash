@@ -67,7 +67,7 @@ func (a *Admin) adoptionKV(ctx context.Context) (jetstream.KeyValue, error) {
 		if down := bucketDown(store.AdoptionBucket, err); down != nil {
 			return nil, down
 		}
-		return nil, fmt.Errorf("mash: adoption bucket (run `mash admin init`): %w", err)
+		return nil, fmt.Errorf("mash: adoption bucket (run `mashctl init`): %w", err)
 	}
 	if err := store.VerifyAdoptionBucket(ctx, a.js); err != nil {
 		return nil, err

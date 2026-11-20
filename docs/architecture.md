@@ -174,7 +174,7 @@ never connects to NATS.*
 | `mash serve` (mash) | The endpoint manager. A long-lived MCP server that the agent host starts once per session. It holds the NATS connection, the lease, the SAP registration and the inbox consumer, and offers the session its tools: `send`, `read`, `inbox`, `who`, `reply`, `version`, `status` | Already connected when mail arrives, and a send is one tool call and one round trip ([ADR-0022][0022]). Without `MASH_ENDPOINT` it connects to nothing and offers only `status` and `version` ([ADR-0012][0012]) |
 | `mash hook` (mash) | A short-lived command the agent host runs after each tool call and with each prompt. It prints spooled mail as hook context and makes no network call | A busy session sees mail with no turn of its own ([ADR-0024][0024]) |
 | Spool (mash) | One directory per endpoint, files `<seq>.json` plus `shown/`, `listed/` and `drained/` marks (`listed/` is a message a digest named and the model has not read: still waiting and unacked, drained by `read` or a full showing, [ADR-0046][0046]); directories 0700, files 0600 | Hands mail from serve to the hook, so an acknowledgement means the mail was shown ([ADR-0025][0025]). Its `.owner` file records the owner (serve's parent pid, session id and launch token as JSON); a hook drains only if its session id or launch token matches, or the pid is among its ancestors, and a hook that matches none is refused and recorded in `.refused` ([ADR-0040][0040]) |
-| `mash` CLI (mash) | One-shot commands for people and scripts, using the same identity. It never takes the lease. `mash admin` provisions endpoints. | Shells and scripts need a way in without a session ([ADR-0022][0022]) |
+| `mash` CLI (mash) | One-shot commands for people and scripts, using the same identity. It never takes the lease. `mashctl` makes endpoints. | Shells and scripts need a way in without a session ([ADR-0022][0022]) |
 | Agent host (agent host) | Claude Code, through the mash plugin: an MCP server entry and two hooks | The plugin is the unit of distribution ([ADR-0033][0033]) |
 | NATS server (NATS) | Inbox streams, two KV buckets, and the SAP subjects | See section 8.2 |
 
@@ -247,7 +247,7 @@ have happened ([ADR-0025][0025]).
 | Account | One account for mash, sized for 1 stream and 1 consumer per endpoint plus 2 buckets | One existing account |
 | Users | Signed by `mashctl endpoint create` with the account signing key, from the endpoint's own public key; `mashctl permissions <owner.group.instance>` prints the set (JSON or `nsc` flags). An endpoint's seed stays on its machine (with `--make-key`, `mashctl` makes it on its own host) | Not applicable: Synadia Cloud is not supported by mashctl in 0.5.6 (#876) |
 | Endpoints | `mashctl init` once, then `mashctl endpoint create <owner/group/instance>` per endpoint | Not applicable: Synadia Cloud is not supported by mashctl in 0.5.6 (#876) |
-| Removing | `mashctl endpoint delete` / `mashctl deprovision` (revokes the user), or `mash admin deprovision` and revoke the user yourself | Same, with an admin user made in the console |
+| Removing | `mashctl endpoint delete` (revokes the user) | Same, with an admin user made in the console |
 
 Each endpoint machine needs the `mash` binary on `PATH`, the Claude Code plugin, a credentials file at mode 0600 and
 `MASH_ENDPOINT` set at launch. The idle wake also needs channels allowed for the plugin on that machine.
@@ -323,7 +323,7 @@ the signed one.
 
 Nothing is kept past 30 days. An archive was planned in the design and not built (Appendix A).
 
-`mash admin init` creates the `mash-leases` bucket, and brings an existing one, with its stream set so that it does not allow rollup. Mash removes lease keys by a delete on the key's revision, not by a purge. After an upgrade, `mash admin init` must be re-run to harden an existing bucket; `mashctl audit` reports a bucket that has not been hardened ([ADR 0093](decisions/0093-the-lease-bucket-does-not-allow-rollup-writes.md)).
+`mashctl init` creates the `mash-leases` bucket, and brings an existing one, with its stream set so that it does not allow rollup. Mash removes lease keys by a delete on the key's revision, not by a purge. After an upgrade, `mashctl init` must be re-run to harden an existing bucket; `mashctl audit` reports a bucket that has not been hardened ([ADR 0093](decisions/0093-the-lease-bucket-does-not-allow-rollup-writes.md)).
 
 ### 8.3 Identity, trust and the security model
 
@@ -399,7 +399,7 @@ service's API token, which only the quickstart script ever sees.
 
 **Residual risks, summarised.** The model rests on each endpoint's seed staying private. A verified sender is trusted
 by design, so one compromised endpoint can direct its peers. Any endpoint can evict another's old mail by flooding it.
-`mash admin deprovision` does not revoke a user; `mashctl endpoint delete` and `mashctl deprovision` do, unless `--no-revoke`. The operator of the account keys can impersonate anyone.
+`mashctl endpoint delete` revokes the user, unless `--no-revoke`. The operator of the account keys can impersonate anyone.
 
 ### 8.4 Naming and addressing
 

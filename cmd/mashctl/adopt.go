@@ -282,7 +282,7 @@ func runAdopt(args []string, env func(string) string, lookup config.Lookup, stdo
 	}
 	fmt.Fprintf(stdout, "  4. system user    ok: the ping was answered (%s, %d server(s) replied) and the claims lookup worked. The claims update (push) permission is not exercised here: `mashctl endpoint delete` is the first to use it\n", shape, len(set.Names))
 	if set.Cluster != "" || set.Gateways {
-		warns = append(warns, "the server is part of a cluster: pass --servers N (or set MASH_SERVERS) to `mashctl endpoint delete` and `deprovision` so they can confirm every server took the update")
+		warns = append(warns, "the server is part of a cluster: pass --servers N (or set MASH_SERVERS) to `mashctl endpoint delete` so it can confirm every server took the update")
 	}
 
 	// (5) can the operator key sign for this account?
@@ -429,7 +429,7 @@ func runAdopt(args []string, env func(string) string, lookup config.Lookup, stdo
 		step("%s exists and is left as it is; make sure it has: %s", st.cfgPath, settingsText(settings))
 	}
 
-	fmt.Fprintf(stdout, "\nNext:\n  1. mashctl init                                  the directory and lease buckets (needs the admin creds)\n  2. mashctl provision owner.group.instance ...    declare an endpoint (see mashctl help)\n")
+	fmt.Fprintf(stdout, "\nNext:\n  1. mashctl init                                  the directory and lease buckets (needs the admin creds)\n  2. mashctl endpoint create owner/group/instance ...  make an endpoint (see mashctl endpoint create --help)\n")
 	if adminPath == "" {
 		fmt.Fprintf(stdout, "  no admin creds were given: `mashctl init` and `provision` need them. Pass --admin-creds FILE or --mint-admin, or set \"admin_creds\" in config.json\n")
 	}

@@ -149,7 +149,7 @@ func TestAuditRetiredListsFinalAndPending(t *testing.T) {
 	}
 	// a pending marker is an unfinished retirement: a finding, so --strict exits 1
 	if code != 1 || len(r.Problems) != 1 || r.Problems[0].What != "retired" || r.Problems[0].Item != "acme_team2_half" ||
-		!strings.Contains(r.Problems[0].Error, "rerun deprovision") || !strings.Contains(errb, "--strict") {
+		!strings.Contains(r.Problems[0].Error, "rerun mashctl endpoint delete") || !strings.Contains(errb, "--strict") {
 		t.Errorf("pending marker must be a finding: exit %d %+v err=%q", code, r.Problems, errb)
 	}
 	txt, _, _ := f.run(t)

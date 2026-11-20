@@ -263,7 +263,7 @@ func (a *Admin) dir(ctx context.Context) (jetstream.KeyValue, error) {
 		if down := bucketDown(store.DirectoryBucket, err); down != nil {
 			return nil, down
 		}
-		return nil, fmt.Errorf("mash: directory bucket (run `mash admin init`): %w", err)
+		return nil, fmt.Errorf("mash: directory bucket (run `mashctl init`): %w", err)
 	}
 	return kv, nil
 }
@@ -434,7 +434,7 @@ func firstInboxDiff(what, name string, fields []inboxField) error {
 	for _, f := range fields {
 		if fmt.Sprint(f.got) != fmt.Sprint(f.want) {
 			return fmt.Errorf("mash: inbox %s of %s has %s %v where mash needs %v; mash does not change an existing inbox, because that could discard stored mail; "+
-				"if the mail in it can go, run `mash admin deprovision %s` and provision it again", what, name, f.name, f.got, f.want, name)
+				"if the mail in it can go, run `mashctl endpoint delete %s` and create an endpoint under a new name (a deleted address cannot be used again)", what, name, f.name, f.got, f.want, name)
 		}
 	}
 	return nil
@@ -564,11 +564,11 @@ func capText(n int64, finite string) string {
 func refuseLowering(name string, cfg jetstream.StreamConfig, l store.Limits) error {
 	if lowers(cfg.MaxBytes, l.InboxMaxBytes) {
 		return fmt.Errorf("mash: inbox of %s has max_bytes %s, above the configured %d; mash never lowers a limit, because that could discard stored mail; "+
-			"to lower it, run `mash admin deprovision %s` and provision it again", name, capText(cfg.MaxBytes, strconv.FormatInt(cfg.MaxBytes, 10)), l.InboxMaxBytes, name)
+			"to lower it, run `mashctl endpoint delete %s` and create an endpoint under a new name (a deleted address cannot be used again)", name, capText(cfg.MaxBytes, strconv.FormatInt(cfg.MaxBytes, 10)), l.InboxMaxBytes, name)
 	}
 	if lowers(int64(cfg.MaxAge), int64(l.InboxMaxAge)) {
 		return fmt.Errorf("mash: inbox of %s has max_age %s, above the configured %s; mash never lowers a limit, because that could discard stored mail; "+
-			"to lower it, run `mash admin deprovision %s` and provision it again", name, capText(int64(cfg.MaxAge), cfg.MaxAge.String()), l.InboxMaxAge, name)
+			"to lower it, run `mashctl endpoint delete %s` and create an endpoint under a new name (a deleted address cannot be used again)", name, capText(int64(cfg.MaxAge), cfg.MaxAge.String()), l.InboxMaxAge, name)
 	}
 	return nil
 }
@@ -1579,7 +1579,7 @@ func RewordUnavailable(msg string) string {
 const jsErrStreamOffline = 10118
 
 // bucketDown words a NATS "stream is offline" error (err_code 10118) on a bucket: the server that holds the bucket's
-// stream is down, so the bucket exists and `mash admin init` would not help. It words err_code 10008 (JetStream
+// stream is down, so the bucket exists and `mashctl init` would not help. It words err_code 10008 (JetStream
 // unavailable, no quorum) the same way. It returns nil for any other error.
 func bucketDown(bucket string, err error) error {
 	if err == nil {

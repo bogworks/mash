@@ -15,9 +15,9 @@ func TestGlobalFlagsShadowEnvironmentAndNameTheFlagAsSource(t *testing.T) {
 	good := h.env["MASH_SERVER"]
 	h.env["MASH_SERVER"] = "nats://127.0.0.1:1" // wrong: only the flag reaches the server
 	for _, args := range [][]string{
-		{"--server", good, "list"},
-		{"list", "--server=" + good},
-		{"--verbose", "list", "--no-color"},
+		{"--server", good, "limits"},
+		{"limits", "--server=" + good},
+		{"--verbose", "limits", "--no-color"},
 	} {
 		_, errb, code := h.run(args...)
 		flagged := strings.Contains(strings.Join(args, " "), "--server")
@@ -36,10 +36,10 @@ func TestGlobalEndpointAndCredsFlagsSupplyOwnerAndAdminCreds(t *testing.T) {
 	admin := h.env["MASH_ADMIN_CREDS"]
 	delete(h.env, "MASH_ENDPOINT")
 	delete(h.env, "MASH_ADMIN_CREDS")
-	if _, errb, code := h.run("list"); code == 0 || !strings.Contains(errb, "no owner") {
+	if _, errb, code := h.run("limits"); code == 0 || !strings.Contains(errb, "no owner") {
 		t.Fatalf("no owner: %d %q", code, errb)
 	}
-	_, errb, code := h.run("--endpoint", h.e.Owner+".dev.x", "--creds", admin, "list")
+	_, errb, code := h.run("--endpoint", h.e.Owner+".dev.x", "--creds", admin, "limits")
 	if code != 0 || !strings.Contains(errb, "owner "+h.e.Owner+" (from flag:--endpoint)") || !strings.Contains(errb, "admin creds "+admin+" (from flag:--creds)") {
 		t.Fatalf("%d %q", code, errb)
 	}
@@ -52,17 +52,17 @@ func TestGlobalConfigDirFlag(t *testing.T) {
 		t.Fatal(err)
 	}
 	delete(h.env, "MASH_SERVER")
-	if _, errb, code := h.run("list"); code == 0 {
-		t.Fatalf("list worked with no server: %q", errb)
+	if _, errb, code := h.run("limits"); code == 0 {
+		t.Fatalf("limits worked with no server: %q", errb)
 	}
-	if _, errb, code := h.run("list", "--config-dir", dir); code != 0 {
+	if _, errb, code := h.run("limits", "--config-dir", dir); code != 0 {
 		t.Fatalf("--config-dir: %d %q", code, errb)
 	}
 }
 
 func TestGlobalFlagErrorsAreUsageExit2(t *testing.T) {
 	h := newFleetEnv(t)
-	for _, args := range [][]string{{"list", "--server"}, {"--endpoint", "--json", "list"}} {
+	for _, args := range [][]string{{"limits", "--server"}, {"--endpoint", "--json", "limits"}} {
 		_, errb, code := h.run(args...)
 		if code != 2 || !strings.HasPrefix(errb, "mashctl: --") || !strings.Contains(errb, "needs a value") {
 			t.Errorf("%v: %d %q", args, code, errb)

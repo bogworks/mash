@@ -2055,7 +2055,7 @@ stdout:
 == delete_not_found
 exit 1
 stderr:
-mashctl: endpoint delete o/g/none: no directory record on the server (mashctl endpoint list shows the endpoints that exist; --force handles the creds file anyway); if the endpoint was partly removed, finish with mashctl deprovision o.g.none
+mashctl: endpoint delete o/g/none: no directory record on the server (mashctl endpoint list shows the endpoints that exist; --force handles the creds file anyway); if the endpoint was partly removed, finish with mashctl endpoint delete o.g.none
 stdout:
 {
   "schema": "mashctl-endpoint@1",
@@ -2074,7 +2074,7 @@ stdout:
   ],
   "refusal": {
     "code": "not_found",
-    "detail": "no directory record on the server (mashctl endpoint list shows the endpoints that exist; --force handles the creds file anyway); if the endpoint was partly removed, finish with mashctl deprovision o.g.none"
+    "detail": "no directory record on the server (mashctl endpoint list shows the endpoints that exist; --force handles the creds file anyway); if the endpoint was partly removed, finish with mashctl endpoint delete o.g.none"
   }
 }
 == delete_no_creds_file

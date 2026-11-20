@@ -14,7 +14,7 @@ import (
 // the group "retired" and the instance "mash". These tests are permanent; none may be skipped or weakened.
 // The full table is in internal/endpoint/namerule_configa_test.go.
 //
-// An address is owner.group.instance; the rule matches its three tokens. `provision` is the entry point mashctl has
+// An address is owner.group.instance; the rule matches its three tokens. `endpoint create` is the entry point mashctl has
 // that makes an endpoint, and the rule is applied before the directory is read.
 const (
 	configAMashctlRule = `{"version":1,"rules":[` +
@@ -32,18 +32,16 @@ func writeRule(t *testing.T, dir, name, body string) string {
 	return p
 }
 
-// provisionOf runs `provision` for the address, with a user key minted for it.
+// provisionOf runs `endpoint create` for the address (owner.group.instance), with a key made for it.
 func (h *fleetEnv) provisionOf(addr string) (string, string, int) {
 	h.t.Helper()
-	a, err := parseAddr(addr)
-	if err != nil {
+	if _, err := parseAddr(addr); err != nil {
 		h.t.Fatal(err)
 	}
-	_, user := h.e.Mint(h.t, a)
-	return h.run("provision", addr, "--user", user, "--account", h.e.Account)
+	return h.run("endpoint", "create", strings.ReplaceAll(addr, ".", "/"), "--make-key")
 }
 
-func TestConfigAMashctlProvision(t *testing.T) {
+func TestConfigAMashctlEndpointCreate(t *testing.T) {
 	h := newFleetEnv(t)
 	h.seed(ad("early"))
 	h.env["MASH_NAME_RULE_FILE"] = writeRule(t, h.dir, "name-rule.json", configAMashctlRule)
@@ -54,7 +52,6 @@ func TestConfigAMashctlProvision(t *testing.T) {
 	}{
 		{"group refused", "o.retired.fresh", []string{`name rule "no-retired"`, "the group retired is closed"}},
 		{"instance refused", "o.g.mash", []string{`name rule "no-mash"`, "the instance mash is reserved"}},
-		{"flat key, group refused", "o_retired_fresh", []string{`name rule "no-retired"`}},
 		{"record exists, instance refused", "o.g.early", []string{"already"}},
 	}
 	for _, c := range cases {
@@ -89,7 +86,7 @@ func TestConfigAMashctlProvision(t *testing.T) {
 // to start, from the environment and from config.json alike.
 func TestConfigAMashctlRequiredWithoutFileRefusesToStart(t *testing.T) {
 	verbs := [][]string{
-		{"list"}, {"init"}, {"limits"}, {"provision", "o.g.x", "--user", "U", "--account", "A"},
+		{"endpoint", "list"}, {"init"}, {"limits"}, {"endpoint", "create", "o/g/x", "--make-key"},
 		{"label", "o.g.x", "k=v"}, {"endpoint", "delete", "o.g.x"},
 		{"adopt", "--server", "nats://127.0.0.1:1", "--operator-key", "/x", "--account-key", "/x", "--sys-creds", "/x", "--admin-creds", "/x"},
 	}
@@ -123,7 +120,7 @@ func TestConfigAMashctlRequiredWithoutFileRefusesToStart(t *testing.T) {
 			return env[k], env[k] != ""
 		}
 		var out, errb bytes.Buffer
-		code := run([]string{"list"}, func(k string) string { return env[k] }, lookup, &out, &errb)
+		code := run([]string{"limits"}, func(k string) string { return env[k] }, lookup, &out, &errb)
 		if code == 0 || !strings.Contains(errb.String(), c.want) {
 			t.Errorf("%s rule file: %d %q %q", name, code, out.String(), errb.String())
 		}

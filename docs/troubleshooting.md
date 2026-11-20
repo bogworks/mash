@@ -113,7 +113,7 @@ Check:
 
 ## Mail arrives labelled `[unknown-signer]`, `[claimed]`, `[absent]` or `[stale]`
 
-- `[unknown-signer]`: the sender's key is not in the directory. It was deprovisioned (and its NATS user not revoked: `mash admin deprovision` and `--no-revoke` leave that to you), or it is not a mash endpoint. Run `mash admin list`.
+- `[unknown-signer]`: the sender's key is not in the directory. It was deprovisioned (and its NATS user not revoked: `--no-revoke` leaves that to you), or it is not a mash endpoint. Run `mashctl endpoint list`.
 - `[stale]`: the signature was made more than 5 minutes before the message was stored, or more than 30 seconds after. A replay looks like this. Another cause is a skewed clock on the sender or the receiver (tracked in #36).
 - `[claimed]` and `[absent]`: the sender named itself without proof, or sent no signature.
 
@@ -157,15 +157,15 @@ A batch of more than 10 messages or 16 KiB is shown as a digest: one line per me
 
 - The inbox keeps 30 days or 16 MiB and drops the oldest first, unread included. Run `mash inbox --after N --limit 50` and compare the `#seq` values.
 - If the sender saw `sent #N` before a host crash of a self-hosted server, up to about 2 minutes may be lost without `sync_interval: always` ([operations.md](operations.md#durability-and-sync_interval)).
-- `mash admin limits` shows the effective limits with `--show`.
+- `mashctl limits` shows the effective limits with `--show`.
 
-## `mash admin limits` refuses
+## `mashctl limits` refuses
 
-`mash: inbox of X has max_bytes ..., above the configured ...; mash never lowers a limit, because that could discard stored mail; to lower it, run mash admin deprovision X and provision it again`. Limits only go up. Deprovisioning removes the mail in that inbox. The same applies to `max_age` ([operations.md](operations.md#changing-limits-later)). Run `mash admin limits` from one admin at a time.
+`mash: inbox of X has max_bytes ..., above the configured ...; mash never lowers a limit, because that could discard stored mail; to lower it, run mashctl endpoint delete X and create an endpoint under a new name (a deleted address cannot be used again)`. Limits only go up. Deleting the endpoint removes the mail in that inbox, and its address cannot be used again. The same applies to `max_age` ([operations.md](operations.md#changing-limits-later)). Run `mashctl limits` from one admin at a time.
 
 ## Account full or `maximum number of streams`
 
-Each endpoint takes one stream, and the two shared buckets take two. On Synadia's free tier (5 streams) that is 3 endpoints. Remove an endpoint with `mash admin deprovision <owner.group.instance>` and an admin credential.
+Each endpoint takes one stream, and the two shared buckets take two. Remove an endpoint with `mashctl endpoint delete <owner.group.name>` and an admin credential.
 
 ## `jetstream not enabled` (code 503, err_code 10076) or `the server could not enable JetStream for the account`
 

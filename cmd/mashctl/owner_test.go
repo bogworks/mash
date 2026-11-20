@@ -45,8 +45,8 @@ func TestSeveralInstalledEndpointsDoNotStopMashctl(t *testing.T) {
 	}
 	installEndpointCreds(t, h.dir, h.e.Owner+".dev.a.creds")
 	installEndpointCreds(t, h.dir, h.e.Owner+".dev.b.creds")
-	if _, errb, code := h.run("list"); code != 0 || strings.Contains(errb, "more than one") {
-		t.Fatalf("list with two installed endpoints: %d %q", code, errb)
+	if _, errb, code := h.run("limits"); code != 0 || strings.Contains(errb, "more than one") {
+		t.Fatalf("limits with two installed endpoints: %d %q", code, errb)
 	}
 }
 
@@ -56,22 +56,22 @@ func TestForeignInstalledEndpointDoesNotChangeMashctlsOwner(t *testing.T) {
 	delete(h.env, "MASH_ENDPOINT")
 	installEndpointCreds(t, h.dir, "zed.dev.x.creds")
 	// no owner configured: mashctl says so, it does not become zed
-	if _, errb, code := h.run("list"); code != 1 || !strings.Contains(errb, "no owner") {
+	if _, errb, code := h.run("limits"); code != 1 || !strings.Contains(errb, "no owner") {
 		t.Fatalf("no owner configured: %d %q", code, errb)
 	}
 	// owner configured: it acts as that owner
 	if err := os.WriteFile(filepath.Join(h.dir, "config.json"), []byte(`{"owner":"`+h.e.Owner+`"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	out, errb, code := h.run("list")
+	out, errb, code := h.run("limits")
 	if code != 0 {
-		t.Fatalf("list: %d %q", code, errb)
+		t.Fatalf("limits: %d %q", code, errb)
 	}
 	if strings.Contains(out+errb, "zed") {
 		t.Errorf("acted as the installed endpoint's owner:\n%s\n%s", out, errb)
 	}
 	showTarget(t)
-	if _, errb, _ = h.run("list"); !strings.Contains(errb, "owner "+h.e.Owner+" (from config.json \"owner\")") {
+	if _, errb, _ = h.run("limits"); !strings.Contains(errb, "owner "+h.e.Owner+" (from config.json \"owner\")") {
 		t.Errorf("target line: %q", errb)
 	}
 }

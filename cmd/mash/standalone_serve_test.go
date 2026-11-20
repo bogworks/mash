@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"io"
 	"os/exec"
@@ -9,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/testenv"
 )
 
@@ -21,15 +23,16 @@ import (
 func standaloneWorld(t *testing.T, bin string, names ...string) map[string][]string {
 	t.Helper()
 	e := testenv.Start(t)
-	adminEnv := scrubbedEnv(t, map[string]string{"MASH_SERVER": e.URL, "MASH_ENDPOINT": e.Owner + ".dev." + "x", "MASH_ADMIN_CREDS": e.AdminCreds, "MASH_INSECURE_PLAINTEXT": "1"})
-	mustRun(t, bin, adminEnv, "admin", "init")
+	adm := standaloneAdmin(t, e)
 	envs := map[string][]string{}
 	for _, n := range names {
 		creds, user, err := e.MintEndpoint(tAddr(n))
 		if err != nil {
 			t.Fatal(err)
 		}
-		mustRun(t, bin, adminEnv, "admin", "provision", tTo(n), "--user", user, "--account", e.Account)
+		if _, err := adm.Provision(context.Background(), tAddr(n), user, e.Account, "", admin.Meta{}); err != nil {
+			t.Fatal(err)
+		}
 		envs[n] = scrubbedEnv(t, map[string]string{"MASH_SERVER": e.URL, "MASH_ENDPOINT": e.Owner + "." + testGroup + "." + n,
 			"MASH_CREDS": creds, "MASH_SETTLE_MS": "20"})
 		assertToolsAbsent(t, envs[n])

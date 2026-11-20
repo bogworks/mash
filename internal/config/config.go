@@ -56,8 +56,8 @@ type Config struct {
 	TransientBudget time.Duration // serve: transient failures in a row for longer than this end the wait (zero = 15m)
 	TransientMax    time.Duration // serve: the retry backoff doubles up to this (zero = 2m)
 	CLITimeout      time.Duration // total deadline of one CLI command (zero = 15m)
-	AdminTimeout    time.Duration // total deadline of one `mash admin` command (zero = 30s)
-	AdminCreds      string        // admin credentials for `mash admin`
+	AdminTimeout    time.Duration // total deadline of one `mashctl` command (zero = 30s)
+	AdminCreds      string        // admin credentials for `mashctl`
 	TLSCA           string        // MASH_CA / "ca": PEM file of the CA that signed the server's certificate (empty = system roots)
 	TLSCert         string        // MASH_TLS_CERT / "tls_cert": PEM client certificate, for a server that requires one; set with TLSKey
 	TLSKey          string        // MASH_TLS_KEY / "tls_key": PEM private key of TLSCert

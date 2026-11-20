@@ -1,5 +1,5 @@
 // Package policy holds the size limits the JWTs mash makes must fit. The policy file and its compiler are gone: endpoints
-// are declared in the directory by `mashctl provision` (and `mashctl endpoint create` once it lands), and their permissions are admin.Permissions(address).
+// are declared in the directory by `mashctl endpoint create`, and their permissions are admin.Permissions(address).
 package policy
 
 // Limits the JWTs mash makes must fit.
