@@ -5,7 +5,6 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/nats-io/jwt/v2"
 
@@ -27,15 +26,6 @@ func credsSeed(t *testing.T, path string) []byte {
 	return seed
 }
 
-func refusalCode(t *testing.T, so string) string {
-	t.Helper()
-	d := epDocOf(t, so)
-	if d.Refusal == nil {
-		t.Fatalf("no refusal in %q", so)
-	}
-	return d.Refusal.Code
-}
-
 func gone(t *testing.T, p string) bool {
 	t.Helper()
 	_, err := os.Lstat(p)
@@ -48,7 +38,7 @@ func TestEndpointCreateMakeKeyShortcutNeedsMatchingRecord(t *testing.T) {
 	h := newFleetEnv(t)
 	fakeRevoke(t, nil)
 	args := func(a sap.Address) []string {
-		return []string{"endpoint", "create", a.String(), "--make-key", "--json"}
+		return []string{"endpoint", "create", a.String()}
 	}
 
 	// the record names the staged key: the run only missed the removal of the pending file
@@ -60,7 +50,7 @@ func TestEndpointCreateMakeKeyShortcutNeedsMatchingRecord(t *testing.T) {
 		t.Fatal(err)
 	}
 	so, se, code := h.run(args(a)...)
-	if code != 0 || epDocOf(t, so).Outcome != "created" || !gone(t, h.creds(a)+".pending") {
+	if code != 0 || so != "Created endpoint "+a.String()+"\n" || !gone(t, h.creds(a)+".pending") {
 		t.Fatalf("matching record: %d %q %q", code, so, se)
 	}
 
@@ -71,7 +61,7 @@ func TestEndpointCreateMakeKeyShortcutNeedsMatchingRecord(t *testing.T) {
 	}
 	oldCreds, _ := os.ReadFile(h.creds(b))
 	oldSeed := credsSeed(t, h.creds(b))
-	if _, se, code := h.run("endpoint", "reissue", b.String(), "--make-key"); code != 0 {
+	if _, se, code := h.run("endpoint", "reissue", b.String()); code != 0 {
 		t.Fatalf("reissue %q", se)
 	}
 	if err := os.WriteFile(h.creds(b), oldCreds, 0o600); err != nil {
@@ -80,12 +70,12 @@ func TestEndpointCreateMakeKeyShortcutNeedsMatchingRecord(t *testing.T) {
 	if err := os.WriteFile(h.creds(b)+".pending", oldSeed, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	so, _, code = h.run(args(b)...)
-	if code != 1 || refusalCode(t, so) != "address_taken" || epDocOf(t, so).Outcome == "created" {
-		t.Fatalf("reissued record: %d %q", code, so)
+	so, se, code = h.run(args(b)...)
+	if code != 1 || so != "" || se != "error: "+b.String()+" already exists\n" {
+		t.Fatalf("reissued record: %d %q %q", code, so, se)
 	}
 	if !gone(t, h.creds(b)+".pending") {
-		t.Error("pending file left after address_taken")
+		t.Error("pending file left after the address was found taken")
 	}
 
 	// deleted since: the address is burned
@@ -104,12 +94,12 @@ func TestEndpointCreateMakeKeyShortcutNeedsMatchingRecord(t *testing.T) {
 	if err := os.WriteFile(h.creds(c)+".pending", oldSeed, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	so, _, code = h.run(args(c)...)
-	if code != 1 || refusalCode(t, so) != "key_retired" {
-		t.Fatalf("burned: %d %q", code, so)
+	so, se, code = h.run(args(c)...)
+	if code != 1 || so != "" || se != "error: "+c.String()+" was deleted and its address cannot be used again\n" {
+		t.Fatalf("burned: %d %q %q", code, so, se)
 	}
 	if !gone(t, h.creds(c)+".pending") {
-		t.Error("pending file left after key_retired")
+		t.Error("pending file left after the address was found deleted")
 	}
 }
 
@@ -122,20 +112,20 @@ func TestEndpointCreateStagedKeyRevoked(t *testing.T) {
 	if err := os.WriteFile(pending, seed, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	args := []string{"endpoint", "create", a.String(), "--make-key", "--json"}
+	args := []string{"endpoint", "create", a.String()}
 	fakeKeyRevoked(t, func(p string) (bool, error) { return p == pub, nil })
 	before := epSnapshot(t, h, h.dir)
-	so, _, code := h.run(args...)
-	if code != 1 || refusalCode(t, so) != "staged_key_revoked" || !strings.Contains(epDocOf(t, so).Refusal.Detail, "was revoked; remove "+pending+" and run the command again") {
-		t.Fatalf("revoked: %d %q", code, so)
+	so, se, code := h.run(args...)
+	if code != 1 || so != "" || se != "error: the staged key "+pending+" was revoked\nhint: rm "+pending+"\n" {
+		t.Fatalf("revoked: %d %q %q", code, so, se)
 	}
 	if epSnapshot(t, h, h.dir) != before {
 		t.Error("a refusal changed state")
 	}
 	fakeKeyRevoked(t, func(string) (bool, error) { return false, errors.New("no answer") })
-	so, _, code = h.run(args...)
-	if code != 1 || refusalCode(t, so) != "revocation_unknown" || epSnapshot(t, h, h.dir) != before {
-		t.Fatalf("unknown: %d %q", code, so)
+	so, se, code = h.run(args...)
+	if code != 1 || !strings.Contains(se, "cannot tell whether the staged key") || epSnapshot(t, h, h.dir) != before {
+		t.Fatalf("unknown: %d %q %q", code, so, se)
 	}
 }
 
@@ -149,17 +139,17 @@ func TestEndpointReissueStagedKeyRevoked(t *testing.T) {
 	if err := os.WriteFile(pending, seed, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	args := []string{"endpoint", "reissue", a.String(), "--make-key", "--json"}
+	args := []string{"endpoint", "reissue", a.String()}
 	fakeKeyRevoked(t, func(p string) (bool, error) { return p == pub, nil })
 	before := epSnapshot(t, h, h.dir)
-	so, _, code := h.run(args...)
-	if code != 1 || refusalCode(t, so) != "staged_key_revoked" {
-		t.Fatalf("revoked: %d %q", code, so)
+	so, se, code := h.run(args...)
+	if code != 1 || !strings.Contains(se, "hint: rm "+pending) {
+		t.Fatalf("revoked: %d %q %q", code, so, se)
 	}
 	fakeKeyRevoked(t, func(string) (bool, error) { return false, errors.New("no answer") })
-	so, _, code = h.run(args...)
-	if code != 1 || refusalCode(t, so) != "revocation_unknown" {
-		t.Fatalf("unknown: %d %q", code, so)
+	so, se, code = h.run(args...)
+	if code != 1 || !strings.Contains(se, "cannot tell whether the staged key") {
+		t.Fatalf("unknown: %d %q %q", code, so, se)
 	}
 	if epSnapshot(t, h, h.dir) != before {
 		t.Error("a refusal changed state")
@@ -171,7 +161,7 @@ func TestEndpointCreateRefusalRemovesPending(t *testing.T) {
 	h := newFleetEnv(t)
 	fakeRevoke(t, nil)
 	args := func(a sap.Address) []string {
-		return []string{"endpoint", "create", a.String(), "--make-key", "--json"}
+		return []string{"endpoint", "create", a.String()}
 	}
 	_, _, seed := epKey(t, t.TempDir(), "p")
 
@@ -183,9 +173,9 @@ func TestEndpointCreateRefusalRemovesPending(t *testing.T) {
 	if err := os.WriteFile(h.creds(taken)+".pending", seed, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	so, _, code := h.run(args(taken)...)
-	if code != 1 || refusalCode(t, so) != "address_taken" || !gone(t, h.creds(taken)+".pending") {
-		t.Fatalf("taken: %d %q", code, so)
+	so, se, code := h.run(args(taken)...)
+	if code != 1 || se != "error: "+taken.String()+" already exists\n" || !gone(t, h.creds(taken)+".pending") {
+		t.Fatalf("taken: %d %q %q", code, so, se)
 	}
 
 	burned := ad("t2")
@@ -196,42 +186,9 @@ func TestEndpointCreateRefusalRemovesPending(t *testing.T) {
 	if err := os.WriteFile(h.creds(burned)+".pending", seed, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	so, _, code = h.run(args(burned)...)
-	if code != 1 || refusalCode(t, so) != "key_retired" || !gone(t, h.creds(burned)+".pending") {
-		t.Fatalf("burned: %d %q", code, so)
-	}
-}
-
-func TestEndpointBulkPartialNamesChanged(t *testing.T) {
-	h := newFleetEnv(t)
-	fakeRevoke(t, nil)
-	a, b := ad("a"), ad("b")
-	h.seed(a)
-	h.seed(b)
-	holdLock(t, h.creds(b)+".lock")
-	prev := epLockWait
-	epLockWait = 20 * time.Millisecond
-	t.Cleanup(func() { epLockWait = prev })
-	so, _, code := h.run("endpoint", "reissue", "--all", "--make-key", "--yes")
-	if code != 1 || !strings.Contains(so, "rerun with --changed, not --all") {
-		t.Fatalf("text: %d %q", code, so)
-	}
-	so, _, code = h.run("endpoint", "reissue", "--all", "--make-key", "--yes", "--json")
-	d := bulkDoc(t, so)
-	found := false
-	for _, s := range d.NextSteps {
-		if s.Detail == "mashctl endpoint reissue --changed --make-key --yes" {
-			found = true
-		}
-		if strings.Contains(s.Detail, "--all") {
-			t.Errorf("next step names --all: %+v", s)
-		}
-	}
-	if code != 1 || !found {
-		t.Fatalf("json: %d %q", code, so)
-	}
-	if !strings.Contains(endpointReissueUsage, "--changed") || strings.Contains(strings.ToLower(endpointReissueUsage), "rerun with --all") {
-		t.Error("usage")
+	so, se, code = h.run(args(burned)...)
+	if code != 1 || se != "error: "+burned.String()+" was deleted and its address cannot be used again\n" || !gone(t, h.creds(burned)+".pending") {
+		t.Fatalf("burned: %d %q %q", code, so, se)
 	}
 }
 
@@ -252,8 +209,8 @@ func TestEndpointStagedSeedMustBePrivate(t *testing.T) {
 	}
 	before := epSnapshot(t, h, h.dir)
 	for _, args := range [][]string{
-		{"endpoint", "create", a.String(), "--make-key"},
-		{"endpoint", "reissue", b.String(), "--make-key"},
+		{"endpoint", "create", a.String()},
+		{"endpoint", "reissue", b.String()},
 	} {
 		_, se, code := h.run(args...)
 		if code == 0 || !strings.Contains(se, "exposes the seed") {
@@ -288,7 +245,7 @@ func TestEndpointShortcutNeedsASeedInTheCreds(t *testing.T) {
 	fakeKeyRevoked(t, func(string) (bool, error) { return false, nil })
 	a := ad("noseed")
 	// a finished create: the record names the key and the creds file holds the JWT and the seed
-	if _, se, code := h.run("endpoint", "create", a.String(), "--make-key"); code != 0 {
+	if _, se, code := h.run("endpoint", "create", a.String()); code != 0 {
 		t.Fatalf("create: %q", se)
 	}
 	seed := credsSeed(t, h.creds(a))
@@ -308,9 +265,9 @@ func TestEndpointShortcutNeedsASeedInTheCreds(t *testing.T) {
 	if err := os.WriteFile(h.creds(a), []byte(tok+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	so, _, code := h.run("endpoint", "create", a.String(), "--make-key", "--json")
-	if code != 1 || refusalCode(t, so) != "creds_exists" {
-		t.Fatalf("%d %q", code, so)
+	so, se, code := h.run("endpoint", "create", a.String())
+	if code != 1 || so != "" || se != "error: "+h.creds(a)+" already exists\n" {
+		t.Fatalf("%d %q %q", code, so, se)
 	}
 	if _, err := os.Stat(pending); err != nil {
 		t.Errorf("the staged seed was removed: %v", err)

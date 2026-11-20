@@ -3,11 +3,9 @@ package main
 import (
 	"fmt"
 	"io"
-	"strings"
 
 	"github.com/bogworks/mash/internal/cliframe"
 	"github.com/bogworks/mash/internal/config"
-	"github.com/bogworks/mash/internal/sap"
 )
 
 // endpointVerbs are the verbs of `mashctl endpoint`.
@@ -19,7 +17,7 @@ const endpointVerbs = "create, reissue, delete, list, show, set, unset, suspend,
 // takes --dry-run.
 var endpointVerbTable = []struct {
 	name    string
-	run     func(args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int
+	run     func(args []string, g cliframe.Global, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int
 	read    bool
 	changes bool
 }{
@@ -41,8 +39,8 @@ const endpointHelp = `usage: mashctl endpoint <command> [args]
 commands:
   list [prefix] [--wide]      list the endpoints
   show <address>              show one endpoint
-  create [address] ...        make an endpoint
-  reissue <address> ...       give an endpoint a new key
+  create <address> ...        make an endpoint and its credentials
+  reissue <address> ...       give an endpoint new credentials
   delete <address> ...        remove an endpoint
   set <address> key=value...  set role, description, host, capability, labels
   unset <address> key...      remove those values
@@ -54,7 +52,7 @@ Run mashctl endpoint <command> --help for a command's options.
 `
 
 // runEndpoint is `mashctl endpoint <verb>`. Each verb has the signature of the run functions of this package.
-func runEndpoint(args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
+func runEndpoint(args []string, g cliframe.Global, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		return cliframe.Report(stdout, stderr, cliframe.Usagef("missing command").WithHint("mashctl endpoint --help"), false)
 	}
@@ -65,21 +63,8 @@ func runEndpoint(args []string, env func(string) string, lookup config.Lookup, s
 	rest := args[1:]
 	for _, v := range endpointVerbTable {
 		if v.name == args[0] {
-			return v.run(rest, env, lookup, stdout, stderr)
+			return v.run(rest, g, env, lookup, stdout, stderr)
 		}
 	}
 	return cliframe.Report(stdout, stderr, cliframe.Usagef("unknown command %q", config.Clean(args[0])).WithHint("mashctl endpoint --help"), jsonRequested(rest))
-}
-
-// parseEndpointRef reads an endpoint reference: the shortcut owner/group/instance or the dotted owner.group.instance.
-// The error never shows the value.
-func parseEndpointRef(s string) (sap.Address, error) {
-	if strings.Contains(s, "/") {
-		s = strings.ReplaceAll(s, "/", ".")
-	}
-	a, err := sap.ParseAddress(s)
-	if err != nil {
-		return sap.Address{}, fmt.Errorf("not an endpoint address (the value is not shown): write owner/group/instance, for example alice/dev/design")
-	}
-	return a, nil
 }

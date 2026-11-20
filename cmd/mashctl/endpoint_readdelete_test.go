@@ -44,12 +44,12 @@ func TestEndpointDeleteRemovesRecordRenamesCredsRevokesKey(t *testing.T) {
 	h.seed(ad("c"))
 	_, user := h.credsClaims(ad("c"))
 	h.seed(ad("d"))
-	if so, _, code := h.run("endpoint", "delete", "o/g/d", "--yes", "--json", "--verbose"); code != 0 || !strings.Contains(so, `"deleted": true`) {
+	if so, _, code := h.run("endpoint", "delete", "o.g.d", "--yes", "--json", "--verbose"); code != 0 || !strings.Contains(so, `"deleted": true`) {
 		t.Errorf("delete json %d %q", code, so)
 	}
 	retireNow = func() time.Time { return time.Date(2026, 11, 2, 3, 4, 5, 0, time.UTC) }
 	t.Cleanup(func() { retireNow = time.Now })
-	out, errb, code := h.run("endpoint", "delete", "o/g/c", "--yes", "--verbose")
+	out, errb, code := h.run("endpoint", "delete", "o.g.c", "--yes", "--verbose")
 	if code != 0 || !strings.HasPrefix(out, "Deleted endpoint o.g.c\n") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
@@ -75,11 +75,11 @@ func TestEndpointDeleteRemovesRecordRenamesCredsRevokesKey(t *testing.T) {
 	}
 }
 
-func TestEndpointDeleteAcceptsDottedAndShortcut(t *testing.T) {
+func TestEndpointDeleteAcceptsDotted(t *testing.T) {
 	h := newFleetEnv(t)
 	h.seed(ad("a"))
 	h.seed(ad("b"))
-	for _, ref := range []string{"o.g.a", "o/g/b"} {
+	for _, ref := range []string{"o.g.a", "o.g.b"} {
 		if out, errb, code := h.run("endpoint", "delete", ref, "--yes"); code != 0 {
 			t.Fatalf("%s: %d %q %q", ref, code, out, errb)
 		}
@@ -93,7 +93,7 @@ func TestEndpointDeleteDryRunChangesNothing(t *testing.T) {
 	h := newFleetEnv(t)
 	h.seed(ad("c"))
 	before, _ := os.ReadFile(h.creds(ad("c")))
-	out, errb, code := h.run("endpoint", "delete", "o/g/c", "--dry-run")
+	out, errb, code := h.run("endpoint", "delete", "o.g.c", "--dry-run")
 	if code != 0 || out != "Would delete endpoint o.g.c and its empty inbox\nNothing was changed.\n" || errb != "" {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
@@ -119,11 +119,11 @@ func TestEndpointDeleteDryRunChangesNothing(t *testing.T) {
 
 func TestEndpointDeleteMissingIsRefused(t *testing.T) {
 	h := newFleetEnv(t)
-	out, errb, code := h.run("endpoint", "delete", "o/g/none", "--yes")
+	out, errb, code := h.run("endpoint", "delete", "o.g.none", "--yes")
 	if code != 1 || out != "" || errb != "error: o.g.none does not exist\nhint: mashctl endpoint list\n" {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
-	out, errb, code = h.run("endpoint", "delete", "o/g/none", "--yes", "--json")
+	out, errb, code = h.run("endpoint", "delete", "o.g.none", "--yes", "--json")
 	if code != 1 || errb != "" || out != "{\"error\":\"o.g.none does not exist\",\"hint\":\"mashctl endpoint list\"}\n" {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
@@ -134,7 +134,7 @@ func TestEndpointDeleteRefusesAsRetireDoes(t *testing.T) {
 	h.seed(ad("c"))
 	// a record whose user key is replaced between the read and the removal is refused, as retire refuses it
 	_, retErr, retCode := h.run("endpoint", "delete", "o.g.zzz", "--yes")
-	_, delErr, delCode := h.run("endpoint", "delete", "o/g/zzz", "--yes")
+	_, delErr, delCode := h.run("endpoint", "delete", "o.g.zzz", "--yes")
 	if retCode != 1 || delCode != 1 {
 		t.Fatalf("codes %d %d", retCode, delCode)
 	}
@@ -242,19 +242,19 @@ func TestEndpointGoldens(t *testing.T) {
 	}
 	checkGolden(t, "endpoint_show.golden.json", h.scrub(out))
 
-	out, errb, code = h.run("endpoint", "delete", "o/g/a", "--yes", "--dry-run", "--json")
+	out, errb, code = h.run("endpoint", "delete", "o.g.a", "--yes", "--dry-run", "--json")
 	if code != 0 {
 		t.Fatalf("plan: %d %q", code, errb)
 	}
 	checkGolden(t, "endpoint_delete_planned.golden.json", h.scrub(out))
 
-	out, errb, code = h.run("endpoint", "delete", "o/g/a", "--yes", "--json")
+	out, errb, code = h.run("endpoint", "delete", "o.g.a", "--yes", "--json")
 	if code != 0 {
 		t.Fatalf("delete: %d %q", code, errb)
 	}
 	checkGolden(t, "endpoint_delete.golden.json", h.scrub(out))
 
-	out, errb, code = h.run("endpoint", "delete", "o/g/a", "--yes", "--json")
+	out, errb, code = h.run("endpoint", "delete", "o.g.a", "--yes", "--json")
 	if code != 1 || errb != "" {
 		t.Fatalf("delete again: %d %q %q", code, out, errb)
 	}

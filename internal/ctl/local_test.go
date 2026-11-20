@@ -57,7 +57,7 @@ func TestInitLocalCommandsNameTheOwner(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d: %s %s", code, out, errs)
 	}
-	for _, want := range []string{"mashctl endpoint create carol/dev/design", "carol.dev.design.jwt"} {
+	for _, want := range []string{"mashctl endpoint create carol.dev.design", "design.join"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}
@@ -73,7 +73,7 @@ func TestInitLocalWithNoConfig(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d: %s %s", code, out, errs)
 	}
-	for _, want := range []string{"nats-server -c " + filepath.Join(e.root, "cfg", "server", "server.conf"), "mashctl init", "mashctl endpoint create alice/dev/design", "alice.dev.design.jwt", "loopback only, TLS", "server cert", "ca.pem", "127.0.0.1:4333"} {
+	for _, want := range []string{"nats-server -c " + filepath.Join(e.root, "cfg", "server", "server.conf"), "mashctl init", "mashctl endpoint create alice.dev.design", "design.join", "loopback only, TLS", "server cert", "ca.pem", "127.0.0.1:4333"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}

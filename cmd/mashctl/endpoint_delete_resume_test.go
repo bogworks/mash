@@ -103,7 +103,7 @@ func TestEndpointDeleteFinalMarkerNothingLeftDoesNotExist(t *testing.T) {
 	fakeRevoke(t, nil)
 	a := ad("un")
 	h.seed(a)
-	if _, se, code := h.run("endpoint", "delete", slashForm(a), "--yes"); code != 0 {
+	if _, se, code := h.run("endpoint", "delete", a.String(), "--yes"); code != 0 {
 		t.Fatalf("first: %d %q", code, se)
 	}
 	if err := os.Remove(h.creds(a)); err != nil && !os.IsNotExist(err) {
@@ -152,9 +152,8 @@ func TestEndpointReissueFutureIssuedCheckedUnderTheLock(t *testing.T) {
 	rec, _ := h.record(a)
 	epBeforeRevokeCheck = func() { h.recordIssuedAt(rec.User, time.Now().Add(time.Hour)) }
 	t.Cleanup(func() { epBeforeRevokeCheck = nil })
-	so, se, code := h.run("endpoint", "reissue", a.String(), "--make-key", "--json")
-	d := epDocOf(t, so)
-	if code != 1 || d.Refusal == nil || d.Refusal.Code != "future_issued" {
+	so, se, code := h.run("endpoint", "reissue", a.String())
+	if code != 1 || so != "" || !strings.HasPrefix(se, "error: ") || !strings.Contains(se, "issued") {
 		t.Fatalf("%d %q %q", code, so, se)
 	}
 	if len(*calls) != 0 {

@@ -74,7 +74,7 @@ func recordAddress(r store.Record) sap.Address {
 }
 
 // runEndpointList is `mashctl endpoint list`.
-func runEndpointList(args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
+func runEndpointList(args []string, g cliframe.Global, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
 	return runEp(endpointListSpec, args, env, lookup, stdout, stderr, func(rt *epRuntime) error {
 		recs, bad, err := rt.adm.List(rt.ctx)
 		if err != nil {

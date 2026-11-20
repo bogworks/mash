@@ -5,6 +5,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/bogworks/mash/internal/cliframe"
 	"github.com/bogworks/mash/internal/config"
 )
 
@@ -35,7 +36,7 @@ type showJSON struct {
 }
 
 // runEndpointShow is `mashctl endpoint show`.
-func runEndpointShow(args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
+func runEndpointShow(args []string, g cliframe.Global, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
 	return runEp(endpointShowSpec, args, env, lookup, stdout, stderr, func(rt *epRuntime) error {
 		rec, err := rt.loadRecord(rt.in.addr)
 		if err != nil {

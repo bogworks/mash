@@ -51,11 +51,11 @@ func TestEndpointReissueMakeKeyKilledAfterPublish(t *testing.T) {
 	h := newFleetEnv(t)
 	calls := fakeRevoke(t, nil)
 	a := ad("rt1")
-	if _, se, code := h.run("endpoint", "create", a.String(), "--make-key"); code != 0 {
+	if _, se, code := h.run("endpoint", "create", a.String()); code != 0 {
 		t.Fatalf("create %q", se)
 	}
 	old := credsPub(t, h, a)
-	args := []string{"endpoint", "reissue", a.String(), "--make-key"}
+	args := []string{"endpoint", "reissue", a.String()}
 	if code := killAt(h, &epBeforeVerify, args...); code != -1 {
 		t.Fatalf("not stopped: %d", code)
 	}
@@ -74,15 +74,15 @@ func TestEndpointReissueMakeKeyReadbackFailsThenRetry(t *testing.T) {
 	h := newFleetEnv(t)
 	calls := fakeRevoke(t, nil)
 	a := ad("rt2")
-	if _, se, code := h.run("endpoint", "create", a.String(), "--make-key"); code != 0 {
+	if _, se, code := h.run("endpoint", "create", a.String()); code != 0 {
 		t.Fatalf("create %q", se)
 	}
 	old := credsPub(t, h, a)
-	args := []string{"endpoint", "reissue", a.String(), "--make-key"}
+	args := []string{"endpoint", "reissue", a.String()}
 	epVerifyFail = func() error { return errors.New("timeout") }
 	_, se, code := h.run(args...)
 	epVerifyFail = nil
-	if code == 0 || !strings.Contains(se, "could not be confirmed") || !strings.Contains(se, "run the same command again") {
+	if code != 1 || !strings.Contains(se, "could not be confirmed") || !strings.HasSuffix(se, "\nhint: mashctl endpoint reissue "+a.String()+"\n") {
 		t.Fatalf("%d %q", code, se)
 	}
 	installed := credsPub(t, h, a)

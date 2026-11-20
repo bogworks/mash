@@ -85,9 +85,9 @@ func seedFilePub(t *testing.T, path string) string {
 // with one identity.
 func TestEndpointKilledCreateRerunCompletesWithOneIdentity(t *testing.T) {
 	for _, makeKey := range []bool{false, true} {
-		name := "public key and jwt out"
+		name := "public key and join file"
 		if makeKey {
-			name = "make key, staged seed"
+			name = "key made here, staged seed"
 		}
 		t.Run(name, func(t *testing.T) {
 			h := newFleetEnv(t)
@@ -100,12 +100,12 @@ func TestEndpointKilledCreateRerunCompletesWithOneIdentity(t *testing.T) {
 			var outFile, pub string
 			if makeKey {
 				outFile = h.creds(a)
-				args = []string{"endpoint", "create", a.String(), "--make-key"}
+				args = []string{"endpoint", "create", a.String()}
 			} else {
 				var keyFile string
 				pub, keyFile, _ = epKey(t, dir, "k")
-				outFile = filepath.Join(dir, "k.jwt")
-				args = []string{"endpoint", "create", a.String(), "--public-key", keyFile, "--jwt-out", outFile}
+				outFile = filepath.Join(dir, "k.join")
+				args = []string{"endpoint", "create", a.String(), "--out", outFile, "--public-key", keyFile}
 			}
 
 			if !runKilled(t, h, args...) {
@@ -140,7 +140,7 @@ func TestEndpointKilledCreateRerunCompletesWithOneIdentity(t *testing.T) {
 			// the same command, run again, then once more
 			for _, label := range []string{"rerun", "third run"} {
 				so, se, code := h.run(args...)
-				// Observed: the third run exits 1, refused (file_exists): the output file is never overwritten. It changes nothing.
+				// Observed: the third run exits 1, refused: the output file is never overwritten. It changes nothing.
 				if code != 0 {
 					if label == "rerun" {
 						t.Fatalf("rerun exit %d: %q %q", code, so, se)
@@ -168,11 +168,8 @@ func TestEndpointKilledCreateRerunCompletesWithOneIdentity(t *testing.T) {
 				if makeKey {
 					sub = credsSeedPub(t, outFile)
 				} else {
-					raw, err := os.ReadFile(outFile)
-					if err != nil {
-						t.Fatal(err)
-					}
-					uc, err := jwt.DecodeUserClaims(strings.TrimSpace(string(raw)))
+					j, _ := readJoin(t, outFile)
+					uc, err := jwt.DecodeUserClaims(j.UserJWT)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -204,14 +201,14 @@ func TestEndpointKilledCreateJSONPrintsNothing(t *testing.T) {
 	a := ad("killedjson")
 	dir := t.TempDir()
 	_, keyFile, _ := epKey(t, dir, "k")
-	args := []string{"endpoint", "create", a.String(), "--public-key", keyFile, "--jwt-out", filepath.Join(dir, "k.jwt"), "--json"}
+	args := []string{"endpoint", "create", a.String(), "--out", filepath.Join(dir, "k.join"), "--public-key", keyFile, "--json"}
 
 	// a panic unwinds before h.run returns, so a killed run has no output to return
 	if !runKilled(t, h, args...) {
 		t.Fatal("the hook did not kill the run")
 	}
 	so, se, code := h.run(args...)
-	if code != 0 || epDocOf(t, so).Outcome != "created" {
+	if code != 0 || !strings.Contains(so, `"installed_here": false`) {
 		t.Fatalf("rerun: %d %q %q", code, so, se)
 	}
 	noSecrets(t, so, se)

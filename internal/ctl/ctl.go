@@ -87,8 +87,8 @@ func issuedLines(line func(left, right string)) {
 func endpointLines(line func(left, right string)) {
 	line("endpoint list [prefix] [--wide]", "the endpoints in the directory")
 	line("endpoint show ADDRESS", "one endpoint: its state, labels and public key")
-	line("endpoint create [ADDRESS] [--owner O] [--group G] [--name N] (--public-key FILE | --make-key) [--jwt-out FILE] [--label k=v]... [--tool] [--note N] [--describe T] [--cap C]... [--servers N] [--sys-creds FILE] [--dry-run] [--json]", "sign the endpoint's key and write its directory record, for example acme.demo.bob")
-	line("endpoint reissue ADDRESS (--public-key FILE | --make-key) [--jwt-out FILE] [--servers N] [--sys-creds FILE] [--dry-run] [--json]", "revoke the old key on every server and name a new one")
+	line("endpoint create ADDRESS [--out PATH] [--public-key PATH] [--servers N] [--sys-creds FILE] [--dry-run] [--json]", "make an endpoint and its credentials, for example acme.demo.bob")
+	line("endpoint reissue ADDRESS [--out PATH] [--public-key PATH] [--servers N] [--sys-creds FILE] [--dry-run] [--json]", "give an endpoint new credentials and cancel the old ones")
 	line("endpoint delete ADDRESS [--yes] [--dry-run] [--json] [--servers N] [--sys-creds FILE]", "revoke the endpoint's user key, remove its record and inbox, burn the address, rename its creds file")
 	line("endpoint set ADDRESS key=value... [--dry-run]", "set role, description, host, capability or label.NAME")
 	line("endpoint unset ADDRESS key... [--dry-run]", "remove those values")
@@ -292,7 +292,7 @@ func CheckNotFutureIssued(ctx context.Context, a *madmin.Admin, targets []Revoke
 		times, found, err := a.IssuedHistoryByKey(ctx, t.Key)
 		var bad *madmin.MalformedIssuedAtError
 		if errors.As(err, &bad) {
-			return fmt.Errorf("user key %s...: its issue record has a missing or malformed issued_at (%q) in revision %d, so a future-dated credential cannot be ruled out; restore the record with `mashctl endpoint reissue ADDRESS --public-key FILE`, giving the endpoint's current public key file (the same key is recorded again) and run again; nothing was changed", ShortKey(t.Key), bad.Value, bad.Revision)
+			return fmt.Errorf("user key %s...: its issue record has a missing or malformed issued_at (%q) in revision %d, so a future-dated credential cannot be ruled out; restore the record with `mashctl endpoint reissue ADDRESS --out FILE --public-key FILE`, giving the endpoint's current public key file (the same key is recorded again) and run again; nothing was changed", ShortKey(t.Key), bad.Value, bad.Revision)
 		}
 		var incomplete *madmin.IncompleteHistoryError
 		if errors.As(err, &incomplete) {

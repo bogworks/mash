@@ -25,9 +25,6 @@ Example:
   mashctl endpoint delete acme.demo.bob
 `
 
-// verboseEnv is the environment name under which main tells a command that the global --verbose was given.
-const verboseEnv = "MASH_CTL_VERBOSE_FLAG"
-
 // stdinIsTerminal says whether standard input is a terminal; a test replaces it.
 var stdinIsTerminal = func() bool {
 	fi, err := os.Stdin.Stat()
@@ -45,19 +42,9 @@ var confirmStdin = func() io.Reader { return os.Stdin }
 
 var endpointDeleteSpec = epSpec{
 	name: "delete", usage: endpointDeleteUsage, flags: []string{"--yes", "--dry-run"}, min: 1, max: 1,
-	need: "the endpoint address (owner.group.name)",
-	check: func(in *epInput) error {
-		a, err := parseEndpointRef(in.pos[0])
-		if err != nil {
-			return cliframe.Usagef("%v", err).WithHint("mashctl endpoint delete --help")
-		}
-		in.addr = a
-		return nil
-	},
+	need:  "the endpoint address (owner.group.name)",
+	check: checkAddress,
 }
-
-// slashForm is owner/group/instance.
-func slashForm(a sap.Address) string { return a.Owner + "/" + a.Group + "/" + a.Instance }
 
 // writeJSON prints v as indented JSON and a newline.
 func writeJSON(w io.Writer, v any) {
@@ -110,7 +97,7 @@ func confirmDelete(prompt io.Writer, addr sap.Address, messages uint64) error {
 }
 
 // runEndpointDelete is `mashctl endpoint delete`.
-func runEndpointDelete(args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
+func runEndpointDelete(args []string, g cliframe.Global, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
 	if helpAsked(args) {
 		fmt.Fprint(stdout, endpointDeleteUsage)
 		return 0
@@ -143,7 +130,7 @@ func runEndpointDelete(args []string, env func(string) string, lookup config.Loo
 		return 0
 	}
 	fmt.Fprintf(stdout, "Deleted endpoint %s\n", name)
-	if env(verboseEnv) != "" {
+	if g.Verbose {
 		if res.marker != "" {
 			fmt.Fprintf(stdout, "retired marker: %s\n", res.marker)
 		}

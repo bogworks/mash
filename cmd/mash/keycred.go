@@ -252,7 +252,7 @@ func keyCreateCmd(args []string, stdout, stderr io.Writer) int {
 	if res.Outcome == keycred.Planned {
 		head = "would create key (dry run, nothing written)"
 	}
-	fmt.Fprintf(stdout, "%s\n  public key  %s\n  seed        %s\n  public file %s\nnext: send %s to the host that runs mashctl, then: mashctl endpoint create ADDRESS --public-key %s\n",
+	fmt.Fprintf(stdout, "%s\n  public key  %s\n  seed        %s\n  public file %s\nnext: send %s to the host that runs mashctl, then: mashctl endpoint create ADDRESS --public-key %s --out ADDRESS.join\n",
 		head, res.PublicKey, res.SeedPath, res.PublicPath, res.PublicPath, res.PublicPath)
 	return 0
 }

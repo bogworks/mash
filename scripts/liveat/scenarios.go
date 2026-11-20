@@ -15,12 +15,26 @@ import (
 // The CLI forms these scenarios use that this build may not have yet (contract 0.5.5, REQ-003, REQ-004, REQ-010):
 //
 //	mash key create --out FILE                      (writes FILE, mode 0600, and FILE with .seed replaced by .pub)
-//	mashctl endpoint create O/G/N --public-key FILE [--jwt-out FILE] [--json]
+//	mashctl endpoint create O.G.N --out FILE --public-key FILE [--json]   (FILE is a join file; its user_jwt is the JWT)
 //	mashctl endpoint list --json
-//	mashctl endpoint delete O/G/N
+//	mashctl endpoint delete O.G.N
 //	mash credential create --seed FILE --jwt FILE [--out CREDS]
 //
 // A command that is unknown fails its assertion with that fact; nothing is stubbed.
+
+// joinUserJWT is the user_jwt field of the text of a join file.
+func joinUserJWT(b []byte) ([]byte, error) {
+	var j struct {
+		UserJWT string `json:"user_jwt"`
+	}
+	if err := json.Unmarshal(b, &j); err != nil {
+		return nil, err
+	}
+	if j.UserJWT == "" {
+		return nil, fmt.Errorf("the join file has no user_jwt")
+	}
+	return []byte(j.UserJWT), nil
+}
 
 // ep is the files of one endpoint made the contract's way.
 type ep struct{ seed, pub, jwt, creds string }
@@ -29,7 +43,7 @@ type ep struct{ seed, pub, jwt, creds string }
 // the mashctl host (ctl), carried by copying the JWT file only, and the creds file assembled on keyHome. creds "" is
 // the default path; noCreds skips the assembly.
 func (a *AT) provision(ctl, keyHome Home, owner, group, name, creds string, noCreds bool) (ep, bool) {
-	who := owner + "/" + group + "/" + name
+	who := owner + "." + group + "." + name
 	e := ep{seed: filepath.Join(keyHome.Dir, name+".seed")}
 	e.pub = strings.TrimSuffix(e.seed, ".seed") + ".pub"
 	ctlJWT := filepath.Join(ctl.Dir, owner+"."+group+"."+name+".jwt")
@@ -54,8 +68,19 @@ func (a *AT) provision(ctl, keyHome Home, owner, group, name, creds string, noCr
 		}
 		ok = a.C.Check("the public key file is carried to the mashctl host", err == nil, "") && ok
 	}
-	r = a.Ctl("endpoint-create-"+name, ctl, a.Conn(), "endpoint", "create", who, "--public-key", pubForCtl, "--jwt-out", ctlJWT)
-	ok = a.C.Check("mashctl endpoint create "+who+" --public-key signs for the endpoint's own key", r.Code == 0, exitDetail(r)) && ok
+	ctlJoin := ctlJWT + ".join"
+	r = a.Ctl("endpoint-create-"+name, ctl, a.Conn(), "endpoint", "create", who, "--out", ctlJoin, "--public-key", pubForCtl)
+	ok = a.C.Check("mashctl endpoint create "+who+" --out --public-key signs for the endpoint's own key", r.Code == 0, exitDetail(r)) && ok
+	a.Watch("join file "+name, ctlJoin)
+	a.checkMode(name+" join file is mode 0600", ctlJoin)
+	if jb, err := os.ReadFile(ctlJoin); err == nil {
+		// the join file holds the user JWT alone; mash credential create takes it as a JWT file
+		if tok, err := joinUserJWT(jb); err == nil {
+			_ = os.WriteFile(ctlJWT, append(tok, '\n'), 0o600)
+		} else {
+			ok = a.C.Check("the join file of "+name+" holds a user_jwt", false, err.Error()) && ok
+		}
+	}
 	a.Watch("jwt "+name, ctlJWT)
 	a.checkMode(name+" JWT file is mode 0600", ctlJWT)
 	if ctl.Dir != keyHome.Dir {
@@ -304,7 +329,7 @@ var authRE = regexp.MustCompile(`(?i)authori[sz]ation|not authori[sz]ed|revoked`
 var AT001 = Scenario{
 	ID: "at001",
 	Scenario: "AT-001, the solo developer, standalone: a fresh scratch home; mashctl init --local --owner alice --start; for design and review, " +
-		"mash key create, mashctl endpoint create alice/dev/<name> --public-key, mash credential create; two sessions started through the plugin launcher " +
+		"mash key create, mashctl endpoint create alice.dev.<name> --out --public-key, mash credential create; two sessions started through the plugin launcher " +
 		"and hooks, as Claude Code starts the plugin (sh plugin/scripts/mash serve with the env of plugin/.mcp.json, MASH_BIN set to the built binary, no download; " +
 		"MASH_ENDPOINT=alice.dev.design|review); mail each way through the sessions' MCP send tool, delivered by the hook commands of plugin/hooks/hooks.json " +
 		"(UserPromptSubmit and PostToolUse, run under sh -c with the hook JSON on stdin) with the sender's verified trust label, cross-checked with the MCP inbox and read tools; endpoint list --json; service metadata (mash who --json); " +
@@ -397,7 +422,7 @@ var AT001 = Scenario{
 		}
 		a.C.Check("review's creds file is copied to a private path before the delete", kept, "")
 		revEnv := append(slices.Clone(envs["review"]), "MASH_CREDS="+revokedCreds)
-		r = a.Ctl("endpoint-delete-review", h, a.Conn(), "endpoint", "delete", "alice/dev/review", "--yes")
+		r = a.Ctl("endpoint-delete-review", h, a.Conn(), "endpoint", "delete", "alice.dev.review", "--yes")
 		a.C.Check("mashctl endpoint delete alice/dev/review succeeds", r.Code == 0, exitDetail(r))
 		deadline := time.Now().Add(30 * time.Second)
 		closed := false
@@ -421,7 +446,7 @@ var AT001 = Scenario{
 var AT002 = Scenario{
 	ID: "at002",
 	Scenario: "AT-002, the key crosses no machine: two scratch homes, A (mashctl host) and B (endpoint). B runs mash key create; A runs " +
-		"mashctl endpoint create alice/dev/design --public-key with B's public key file; B runs mash credential create and connects; the endpoint " +
+		"mashctl endpoint create alice.dev.design --out --public-key with B's public key file; B runs mash credential create and connects; the endpoint " +
 		"mails a peer. All captured output and A's home are searched for B's seed, and all captured output for the JWT.",
 	Body: func(a *AT) {
 		ha, err1 := a.Home("home-a")
