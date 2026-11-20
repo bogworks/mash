@@ -93,22 +93,22 @@ var AT003 = Scenario{
 		adminCreds := filepath.Join(a.srvDir, fileAdminCreds)
 
 		// Setup: four endpoints made the contract's way, one of them deleted so that its address is burned.
-		design, ok := a.provision(ha, he, "alice", "dev", "design", filepath.Join(he.Dir, "design.creds"), false)
+		design, ok := a.provision(ha, he, "alice", "dev", "design", false)
 		if !ok {
 			return
 		}
-		review, ok := a.provision(ha, he, "alice", "dev", "review", filepath.Join(he.Dir, "review.creds"), false)
+		review, ok := a.provision(ha, he, "alice", "dev", "review", false)
 		if !ok {
 			return
 		}
-		if _, ok = a.provision(ha, he, "alice", "dev", "gone", "", true); !ok {
+		if _, ok = a.provision(ha, he, "alice", "dev", "gone", true); !ok {
 			return
 		}
 		r := a.Ctl("endpoint-delete-gone", ha, a.Conn(), "endpoint", "delete", "alice.dev.gone", "--yes")
 		if !a.C.Check("setup: mashctl endpoint delete alice/dev/gone burns the address", r.Code == 0, exitDetail(r)) {
 			return
 		}
-		bob, ok := a.provision(ha, he, "bob", "dev", "build", filepath.Join(he.Dir, "bob.creds"), false)
+		bob, ok := a.provision(ha, he, "bob", "dev", "build", false)
 		if !ok {
 			return
 		}
@@ -116,7 +116,7 @@ var AT003 = Scenario{
 		if !a.C.Check("setup: a key that has never been issued", r.Code == 0, exitDetail(r)) {
 			return
 		}
-		fresh := filepath.Join(he.Dir, "fresh.pub")
+		fresh := pubOf(filepath.Join(he.Dir, "fresh.seed"))
 		bad := filepath.Join(he.Dir, "bad.pub")
 		rule := filepath.Join(he.Dir, "rule.json")
 		taken := filepath.Join(he.Dir, "taken.join")
@@ -164,10 +164,16 @@ var AT003 = Scenario{
 				Hint: [][]string{{"already exists"}}},
 			{Name: "no account key on the mashctl host", Label: "no-account-key", Home: hn, Extra: []string{"MASH_ADMIN_CREDS=" + adminCreds}, Args: create("alice.dev.other", pk...), Exit: 1, NoJSON: true,
 				Hint: [][]string{{"mashctl init", "MASH_KEYS_DIR", "account key"}}},
-			// T1b-b: the `mash credential create` flow below waits for core's `mash join`; it is left as it is until then.
-			{Name: "mash credential create with a seed and a JWT for different keys", Label: "creds-mismatch", Home: he, Mash: true, NoJSON: true, Exit: 1,
-				Args: []string{"credential", "create", "--seed", design.seed, "--jwt", review.jwt, "--out", filepath.Join(he.Dir, "mismatch.creds")},
-				Hint: [][]string{{"mash key create", "--seed", "--jwt", "same key", "different", "belong together"}}},
+			// mash join: a join file made for a public key is installed only with the seed of that key.
+			{Name: "mash join of a join file made for design with the seed of review", Label: "join-wrong-seed", Home: he, Mash: true, NoJSON: true, Exit: 1,
+				Args: []string{"join", design.join, "--key", review.seed},
+				Hint: [][]string{{"is not the key this join file was made for"}}},
+			{Name: "mash join of an address that is already installed", Label: "join-installed", Home: he, Mash: true, NoJSON: true, Exit: 1,
+				Args: []string{"join", design.join, "--key", design.seed},
+				Hint: [][]string{{"alice.dev.design is already installed here"}, {"mash join " + design.join + " --replace"}}},
+			{Name: "mash join of a join file that needs a seed, with no --key", Label: "join-needs-seed", Home: he, Mash: true, NoJSON: true, Exit: 2,
+				Args: []string{"join", design.join},
+				Hint: [][]string{{"this join file holds no seed; it was made for your own key"}, {"mash join " + design.join + " --key <your seed file>"}}},
 		}
 		for _, c := range cases {
 			a.refusal(ha, trees, c)
@@ -178,7 +184,7 @@ var AT003 = Scenario{
 		gextra := append(a.Conn(), "MASH_ENDPOINT=alice.ghost", "MASH_STATE_DIR="+filepath.Join(he.State, "ghost"))
 		r = a.Mash("session-no-group", he, gextra, "serve")
 		after := a.Snapshot("no-group-session-after", ha, trees...)
-		a.C.Check("a session whose endpoint has no group: exit code 1", r.Code == 1, exitDetail(r))
+		a.C.Check("a session whose endpoint has no group: exit code 1", r.Code == 1, exitDetail(r)+": "+snip(r.Stderr))
 		a.C.Check("a session whose endpoint has no group: standard error names MASH_ENDPOINT", strings.Contains(r.Stderr, "MASH_ENDPOINT"), "")
 		a.C.Check("a session whose endpoint has no group: no directory record, stream, consumer, lease or service was made for it",
 			len(before.Diff(after)) == 0 && !strings.Contains(after.Raw["doctor"], "ghost") && !strings.Contains(after.Raw["list"], "ghost"), "changed: "+orNone(strings.Join(before.Diff(after), ", ")))

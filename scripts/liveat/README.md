@@ -34,8 +34,10 @@ check is a negative test: it fails when its protection is removed.
    and failure paths, including a seed, a join file, a creds file or a key fed to an option that expects something else. All output, every
    recorded argv of the run (`Runner.Argvs`) and the command line of every process in the container (`/proc/*/cmdline`) are scanned, once while a `mash serve` session is live and once at the end; a scan that read fewer than two processes, or not the server's own, fails.
 2. Secret files are refused over an existing file, a symlink and a dangling symlink, and left byte-identical: the creds file in the config
-   folder, the join file of `endpoint create` and `reissue --out`, `mash key create` (seed, `.pub`, `--pub-out`), the key pending file,
-   `mash credential create --out` (and `--force` replaces a link, never writes through it).
+   folder, the join file of `endpoint create` and `reissue --out`, `mash key create` (the seed and `NAME.seed.pub`), the key pending file,
+   and the creds file of `mash join` (refused over each without `--replace`, config folder left untouched; `--replace` over a symlink replaces the link itself and
+   never writes through it; a seed of another key, a missing `--key`, a join file given as the key and `--dry-run` change nothing; no secret in any output). `mash credential create`
+   is an unknown command (exit 2).
 3. Unverified mail: absent, claimed, unknown-signer and stale mail is published with the sender's own creds (headers crafted with `sap`),
    the recipient's session, `mash inbox` and `mash read` are checked, a signed control message must be present in all three places (a missing control, or `mash inbox` or `mash read` exiting non-zero, fails the check: it would prove nothing), and `mashctl endpoint inbox`
    shows each stored message with its trust label.
@@ -47,7 +49,7 @@ check is a negative test: it fails when its protection is removed.
 A check whose protection is not built is **pending**: the table line says `PEND`, the record says `pending`, it is not counted as a pass,
 and the result reads `PASS WITH PENDING (not a clean pass)`. Without `--strict` such a run still exits 0; with `--strict` (accepted by `at001`..`at004` and `all`) it prints `pending checks fail under --strict: <names>` and exits 3 (1 fail, 2 usage, 3 pending under --strict, 4 setup). The final release gate runs `liveat all --strict`; AT-005 has no pending check today. `at4Pending` in `at004.go` lists them with a reason; a listed check that starts to
 pass fails the run until its entry is removed, so the list only shrinks. Pending today: the `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION`
-behaviour (core's R1-2), the refusal of unverified mail by `mash serve`, `mash inbox` and `mash read`, and the `mash join` checks.
+behaviour (core's R1-2) and the refusal of unverified mail by `mash serve`, `mash inbox` and `mash read`.
 
 ## AT-005: three machines, TLS, a cluster, two mashctl machines
 
