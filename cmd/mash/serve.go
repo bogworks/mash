@@ -11,7 +11,7 @@ import (
 	"io/fs"
 	"net"
 	"os"
-	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -20,6 +20,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
+	"github.com/bogworks/mash/internal/cliframe"
 	"github.com/bogworks/mash/internal/cmdcore"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/endpoint"
@@ -138,30 +139,73 @@ const retryingLine = "\n\nmash could not reach its server yet and is retrying; m
 	"mash retries on its own and will tell you when mail is on."
 
 // serve runs the endpoint manager for one Claude session until stdin closes.
-// acceptUnverifiedFlag is serve's one flag (the specification's --accept-unverified): the boolean form of
+// acceptUnverifiedFlag is serve's boolean flag (the specification's --accept-unverified): the boolean form of
 // MASH_ACCEPT_UNVERIFIED and "accept_unverified". Like the global options it is taken out of the arguments wherever it
 // stands and shadows the environment and the file.
 const acceptUnverifiedFlag = "--accept-unverified"
 
-// serveFlags takes --accept-unverified out of the arguments of `mash serve` and, when it was there, makes the
-// environment and the lookup config.Load reads say MASH_ACCEPT_UNVERIFIED=1. Other commands pass through unchanged.
-func serveFlags(args []string, env func(string) string, lookup config.Lookup) ([]string, func(string) string, config.Lookup) {
-	if args[0] != "serve" || !slices.Contains(args[1:], acceptUnverifiedFlag) {
-		return args, env, lookup
+// The wake flags of serve, each with a value (--wake-count 3 or --wake-count=3).
+const (
+	wakeCountFlag = "--wake-count"
+	wakeAgeFlag   = "--wake-age"
+)
+
+// serveFlags takes --accept-unverified, --wake-count and --wake-age out of the arguments of `mash serve` and, for each one given, makes the
+// environment and the lookup config.Load reads say its variable (MASH_ACCEPT_UNVERIFIED=1, MASH_WAKE_COUNT, MASH_WAKE_AGE). A
+// wake flag with a missing or invalid value is a usage error (exit 2). Other commands pass through unchanged.
+func serveFlags(args []string, env func(string) string, lookup config.Lookup) ([]string, func(string) string, config.Lookup, error) {
+	if args[0] != "serve" {
+		return args, env, lookup, nil
 	}
-	rest := slices.DeleteFunc(slices.Clone(args), func(a string) bool { return a == acceptUnverifiedFlag })
-	const key = "MASH_ACCEPT_UNVERIFIED"
+	set := map[string]string{} // environment variable -> the flag's value, for the flags that were given
+	rest := []string{args[0]}
+	for i := 1; i < len(args); i++ {
+		a := args[i]
+		switch name, val, has := strings.Cut(a, "="); {
+		case a == acceptUnverifiedFlag:
+			set["MASH_ACCEPT_UNVERIFIED"] = "1"
+		case name == wakeCountFlag || name == wakeAgeFlag:
+			if !has {
+				if i+1 >= len(args) {
+					return nil, env, lookup, serveFlagError(name)
+				}
+				i++
+				val = args[i]
+			}
+			if (name == wakeCountFlag && !config.ValidWakeCount(val)) || (name == wakeAgeFlag && !config.ValidWakeAge(val)) {
+				return nil, env, lookup, serveFlagError(name)
+			}
+			if name == wakeCountFlag {
+				set["MASH_WAKE_COUNT"] = val
+			} else {
+				set["MASH_WAKE_AGE"] = val
+			}
+		default:
+			rest = append(rest, a)
+		}
+	}
+	if len(set) == 0 {
+		return args, env, lookup, nil
+	}
 	return rest, func(k string) string {
-			if k == key {
-				return "1"
+			if v, ok := set[k]; ok {
+				return v
 			}
 			return env(k)
 		}, func(k string) (string, bool) {
-			if k == key {
-				return "1", true
+			if v, ok := set[k]; ok {
+				return v, true
 			}
 			return lookup(k)
-		}
+		}, nil
+}
+
+// serveFlagError is the usage error of a serve flag whose value is missing or wrong.
+func serveFlagError(name string) error {
+	if name == wakeCountFlag {
+		return cliframe.Usagef("--wake-count must be a whole number from 0 to 1000").WithHint("mash serve --help")
+	}
+	return cliframe.Usagef("--wake-age must be a whole number with m, h or d, such as 30m or 1h, or 0").WithHint("mash serve --help")
 }
 
 func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host.Adapter, pluginRoot string, stdin io.Reader, stdout, stderr io.Writer) int {

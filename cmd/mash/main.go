@@ -205,7 +205,10 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 		return cliframe.Report(stdout, stderr, cliframe.Usagef("mash needs a command").WithHint("mash --help"), global.JSON)
 	}
 	env, lookup = global.Shadow(cliframe.Spec{Tool: "mash", CredsEnv: "MASH_CREDS", CredsKey: "creds"}, env, lookup)
-	args, env, lookup = serveFlags(args, env, lookup)
+	var serr error
+	if args, env, lookup, serr = serveFlags(args, env, lookup); serr != nil {
+		return cliframe.Report(stdout, stderr, serr, global.JSON)
+	}
 	if args[0] == "help" { // `mash help` prints what `mash --help` does; `mash help send` what `mash send --help` does
 		if len(args) == 1 {
 			args = []string{"--help"}

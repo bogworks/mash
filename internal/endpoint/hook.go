@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	cmdrender "github.com/bogworks/mash/internal/cmdcore/render"
 	"github.com/bogworks/mash/internal/kind"
 	"github.com/bogworks/mash/internal/render"
 	"github.com/bogworks/mash/internal/sap"
@@ -106,6 +107,7 @@ func (e *Endpoint) SetSpool(s spool.Spool, owner string) error {
 		return err
 	}
 	e.spool, e.since = &s, time.Now()
+	e.wakeStart = backlogClock()
 	e.hl.bind(s, e.since)
 	return nil
 }
@@ -289,7 +291,9 @@ func (e *Endpoint) settleHeld(deliver Deliverer, h *held) {
 		h.hookHeld, h.hookStored = max(len(h.msgs)-h.added, 0), h.stored
 	}
 	e.healHeld(h)
-	e.wakeIfIdle(deliver, h, hl)
+	if !e.wakeIfIdle(deliver, h, hl) {
+		e.wakeBacklog(deliver, h, hl)
+	}
 	if time.Since(h.alive) >= SpoolKeepAlive {
 		for _, p := range h.msgs {
 			_ = p.msg.InProgress()
@@ -307,14 +311,14 @@ func (e *Endpoint) settleHeld(deliver Deliverer, h *held) {
 // in this serve, mail that wakes (kind.Wakes) rings at once like urgent mail, each message once, with no idle wait: a fresh session has run no hook to drain it, and
 // waiting out the idle wake would delay its first mail. That ring does not start the backoff, so the idle wake still
 // follows if it starts no turn (Claude Code may drop a channel event before its first prompt). Result and fyi mail still waits. Once a hook has run, the rules above apply unchanged.
-func (e *Endpoint) wakeIfIdle(deliver Deliverer, h *held, hl Hookless) {
+func (e *Endpoint) wakeIfIdle(deliver Deliverer, h *held, hl Hookless) bool {
 	if len(h.msgs) == 0 {
-		return
+		return false
 	}
 	var ring []spool.Ref
 	// Listed mail was announced by the digest and waits for the model to read it: it never wakes (ADR 0046).
 	if len(h.msgs) == len(h.listed) {
-		return
+		return false
 	}
 	// Before the first hook, waking mail rings at once (see above).
 	prehook := e.fromStart && !e.spool.HookedSince(e.since)
@@ -335,7 +339,7 @@ func (e *Endpoint) wakeIfIdle(deliver Deliverer, h *held, hl Hookless) {
 	// would stay unread unless the model checks.
 	notice := hl == HooklessProven && !e.hl.noticed()
 	if oldest.IsZero() && !notice {
-		return // only result and fyi mail: it waits for the next hook run
+		return false // only result and fyi mail: it waits for the next hook run
 	}
 	// due: the normal idle/backoff rule says wake now. urgent: an urgent message rings. A wake that is neither is a
 	// pre-hook ring alone, and it must not start the backoff.
@@ -377,7 +381,7 @@ func (e *Endpoint) wakeIfIdle(deliver Deliverer, h *held, hl Hookless) {
 		due = false
 	}
 	if len(ring) == 0 && !due && !notice {
-		return
+		return false
 	}
 	seqs := make([]spool.Ref, 0, len(h.msgs))
 	for seq := range h.msgs {
@@ -399,7 +403,7 @@ func (e *Endpoint) wakeIfIdle(deliver Deliverer, h *held, hl Hookless) {
 	meta := map[string]string{"to": e.cfg.Name, "count": strconv.Itoa(len(mails)), "seqs": strings.Join(ids, ","), "wake": "true"}
 	if err := deliver(line, meta); err != nil {
 		e.log.Printf("wake failed, retried next check: %v", err)
-		return
+		return false
 	}
 	e.hl.woke(hl == HooklessProven)
 	if due || urgent {
@@ -409,6 +413,85 @@ func (e *Endpoint) wakeIfIdle(deliver Deliverer, h *held, hl Hookless) {
 	for _, seq := range ring {
 		h.rung[seq] = true
 	}
+	return true
+}
+
+// wakeCooldown is the least time between two backlog wakes of an endpoint, and how long after serve starts the first
+// waits: 10 minutes (the specification's "at most once every 10 minutes and not in the first 10 minutes").
+const wakeCooldown = 10 * time.Minute
+
+// backlogClock is the clock of the backlog wake and the age of the mail it judges; tests replace it.
+var backlogClock = time.Now
+
+// arrived is when a held message reached the inbox: the stream's time on the message, else when it was spooled.
+func (h *held) arrived(seq spool.Ref, p pending) time.Time {
+	if !p.mail.At.IsZero() {
+		return p.mail.At
+	}
+	return h.at[seq]
+}
+
+// wakeBacklog wakes the session when the mail waiting for it is a backlog, whatever the kinds of the messages: more
+// than cfg.WakeCount messages are waiting (0 turns it off), or the oldest has waited longer than cfg.WakeAge (0 turns it
+// off). Waiting means held and not yet acknowledged: mail a hook showed in full or the model read is gone from the
+// count, mail only listed in a digest is still waiting and counts. The wake is the summary line of all waiting mail
+// (listed included, so the line says how many wait), at most once every wakeCooldown from the previous backlog wake and
+// not until wakeCooldown after serve started: a restart keeps nothing, so a backlog already over at start wakes once at
+// 10 minutes. A drain does not reset the cooldown. It is independent of the idle wake and its backoff, and a wake the
+// idle rules sent in the same pass stands for it.
+func (e *Endpoint) wakeBacklog(deliver Deliverer, h *held, hl Hookless) {
+	if e.cfg.WakeCount <= 0 && e.cfg.WakeAge <= 0 {
+		return
+	}
+	now := backlogClock()
+	if e.wakeStart.IsZero() || now.Sub(e.wakeStart) < wakeCooldown ||
+		(!e.backlogAt.IsZero() && now.Sub(e.backlogAt) < wakeCooldown) {
+		return
+	}
+	seqs := make([]spool.Ref, 0, len(h.msgs))
+	oldest := time.Time{}
+	for seq, p := range h.msgs {
+		if e.spool.IsDrained(seq) {
+			continue
+		}
+		seqs = append(seqs, seq)
+		if t := h.arrived(seq, p); oldest.IsZero() || t.Before(oldest) {
+			oldest = t
+		}
+	}
+	over := e.cfg.WakeCount > 0 && len(seqs) > e.cfg.WakeCount
+	if !over && e.cfg.WakeAge > 0 && len(seqs) > 0 && !oldest.IsZero() {
+		over = now.Sub(oldest) > e.cfg.WakeAge
+	}
+	if !over {
+		return
+	}
+	sort.Slice(seqs, func(i, j int) bool { return seqs[i].Less(seqs[j]) })
+	mails := make([]render.Mail, len(seqs))
+	ids := make([]string, len(seqs))
+	listed := 0
+	for i, seq := range seqs {
+		mails[i] = h.msgs[seq].mail
+		ids[i] = FormatMsgRef(seq)
+		if h.listed[seq] {
+			listed++
+		}
+	}
+	line, _, _ := strings.Cut(render.Batch(e.cfg.Name, e.cfg.Owner, mails, e.cfg.BatchMsgs, e.cfg.BatchBytes), "\n")
+	line += " waiting, the oldest for " + cmdrender.Age(now.Sub(oldest)) + "."
+	if listed > 0 {
+		line += " " + strconv.Itoa(listed) + " already listed: read them with the read tool (#seq)."
+	}
+	if hl == HooklessProven {
+		line += " " + HooklessReadHint
+	}
+	meta := map[string]string{"to": e.cfg.Name, "count": strconv.Itoa(len(mails)), "seqs": strings.Join(ids, ","), "wake": "true"}
+	if err := deliver(line, meta); err != nil {
+		e.log.Printf("wake failed, retried next check: %v", err)
+		return
+	}
+	e.hl.woke(hl == HooklessProven)
+	e.backlogAt = now
 }
 
 // headroomTTL is how long a stream-info reading stands; headroomTimeout bounds one read.

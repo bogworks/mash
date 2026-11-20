@@ -97,7 +97,7 @@ func TestServeFlagsShadowTheEnvironment(t *testing.T) {
 		return ""
 	}
 	lookup := func(k string) (string, bool) { v := env(k); return v, v != "" }
-	args, env2, lookup2 := serveFlags([]string{"serve", "--accept-unverified"}, env, lookup)
+	args, env2, lookup2, _ := serveFlags([]string{"serve", "--accept-unverified"}, env, lookup)
 	if len(args) != 1 || args[0] != "serve" || env2("MASH_ACCEPT_UNVERIFIED") != "1" {
 		t.Fatalf("serve: %v %q", args, env2("MASH_ACCEPT_UNVERIFIED"))
 	}
@@ -107,11 +107,11 @@ func TestServeFlagsShadowTheEnvironment(t *testing.T) {
 	if v, _ := lookup2("OTHER"); v != "" {
 		t.Fatal(v)
 	}
-	args, env3, _ := serveFlags([]string{"serve"}, env, lookup)
+	args, env3, _, _ := serveFlags([]string{"serve"}, env, lookup)
 	if len(args) != 1 || env3("MASH_ACCEPT_UNVERIFIED") != "0" {
 		t.Fatal("no flag: nothing changes")
 	}
-	args, env4, _ := serveFlags([]string{"inbox", "--accept-unverified"}, env, lookup)
+	args, env4, _, _ := serveFlags([]string{"inbox", "--accept-unverified"}, env, lookup)
 	if len(args) != 2 || env4("MASH_ACCEPT_UNVERIFIED") != "0" {
 		t.Fatal("only serve takes the flag")
 	}

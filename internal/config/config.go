@@ -956,6 +956,20 @@ func (c *Config) loadWake(f file, env func(string) string) error {
 	return nil
 }
 
+// ValidWakeCount reports whether v is a wake count: a whole number from 0 to 1000 (the rule of MASH_WAKE_COUNT, wake_count
+// and serve's --wake-count).
+func ValidWakeCount(v string) bool {
+	n, err := strconv.Atoi(v)
+	return err == nil && n >= 0 && n <= maxWakeCount && strconv.Itoa(n) == v
+}
+
+// ValidWakeAge reports whether v is a wake age: 0, or a whole number and m, h or d from 1m to 30d (the rule of
+// MASH_WAKE_AGE, wake_age and serve's --wake-age).
+func ValidWakeAge(v string) bool {
+	_, err := wakeAge(v)
+	return err == nil
+}
+
 func quoteSetting(v string) string {
 	if strings.HasPrefix(strings.TrimSpace(v), `"`) {
 		return strings.TrimSpace(v)
