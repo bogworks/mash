@@ -59,7 +59,12 @@ func TestPluginManifests(t *testing.T) {
 func TestMarketplaceOwnerFromAuthor(t *testing.T) {
 	var m struct{ Owner map[string]string }
 	readJSON(t, "../../.claude-plugin/marketplace.json", &m)
-	if m.Owner["name"] != "Bogworks" || m.Owner["url"] != "https://github.com/bogworks" || len(m.Owner) != 2 {
-		t.Fatalf("owner = %v", m.Owner)
+	var p struct{ Author map[string]string }
+	readJSON(t, "../../plugin/.claude-plugin/plugin.json", &p)
+	if len(p.Author) != 2 || p.Author["name"] == "" || p.Author["url"] == "" {
+		t.Fatalf("plugin author = %v, want a name and a url", p.Author)
+	}
+	if len(m.Owner) != 2 || m.Owner["name"] != p.Author["name"] || m.Owner["url"] != p.Author["url"] {
+		t.Fatalf("marketplace owner = %v, plugin author = %v: they must be the same", m.Owner, p.Author)
 	}
 }
