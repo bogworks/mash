@@ -85,7 +85,18 @@ type Endpoint struct {
 	// leaseGone: this endpoint's own lease is lost (a failed refresh, or the watch saw another holder). From then on no
 	// message of any stream is delivered or acknowledged by it (mayAck, dropUnleased, dropHeld): JetStream redelivers
 	// it all to the new holder.
-	leaseGone atomic.Bool
+	// refusedStream is the identity of the inbox stream the refusal files are tied to (refuse.go); nil until bound.
+	refusedStream atomic.Pointer[string]
+	// inboxID is the identity of the inbox stream the last read of it saw (inbox); toMail checks recorded refusals against it.
+	inboxID atomic.Pointer[string]
+	// refusedHook, when set (tests), runs in serve's handler after a refusal is recorded and before it is acknowledged.
+	refusedHook func()
+	// firstSeqFn, when set, stands for the inbox stream's first sequence (tests); nil reads it from the stream.
+	firstSeqFn func(context.Context) (uint64, error)
+	// failedLookups remembers, until the time it holds, a sender lookup (name, key) that found no matching record, so a
+	// flood of mail from one unknown signer costs one directory read per poll interval (reloadSender). Guarded by mu.
+	failedLookups map[string]time.Time
+	leaseGone     atomic.Bool
 	// loseOwn marks the own lease lost, as the watch or a failed refresh does (set by keepLease).
 	loseOwn func(error)
 	// live is the cache of the ack-time lease check (lease_fence.go).
