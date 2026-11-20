@@ -467,7 +467,7 @@ func TestInboxReadMatchSpec(t *testing.T) {
 	}
 }
 
-func TestInboxReadSpecOutputCases(t *testing.T) {
+func TestInboxAndReadMatchesSpec(t *testing.T) {
 	_, meta := specCommand(t, "inbox")
 	long := "The build passed on all four runners, and the rest of the line"
 	for _, x := range meta["x-output"].([]any) {
@@ -529,6 +529,8 @@ func TestInboxReadSpecOutputCases(t *testing.T) {
 			code, out, errs = runRead(readBox(), cliframe.Global{}, "5")
 		case "No such message":
 			code, out, errs = runRead(readBox(), cliframe.Global{}, "9")
+		case "A message that was refused":
+			continue // the refusal of unverified mail is slice S7: its tests compare this case
 		default:
 			t.Errorf("unknown spec case %v", oc["case"])
 			continue

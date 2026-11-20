@@ -22,12 +22,12 @@ func TestVerbHelpAndStrayArguments(t *testing.T) {
 		}
 	}
 	var out, errb bytes.Buffer
-	if code := run([]string{"status", "--bogus"}, env, strings.NewReader(""), &out, &errb); code != 2 || out.Len() != 0 || errb.String() != "error: unknown option --bogus for mash status\nhint: mash status --help\n" {
+	if code := run([]string{"status", "--bogus"}, env, strings.NewReader(""), &out, &errb); code != 2 || out.Len() != 0 || errb.String() != "error: unknown option --bogus\nhint: mash status --help\n" {
 		t.Errorf("status --bogus: %d %q %q", code, out.String(), errb.String())
 	}
 	out.Reset()
 	errb.Reset()
-	if code := run([]string{"version", "--bogus"}, env, strings.NewReader(""), &out, &errb); code != 2 || out.Len() != 0 || errb.String() != "error: unknown option --bogus for mash version\nhint: mash version --help\n" {
+	if code := run([]string{"version", "--bogus"}, env, strings.NewReader(""), &out, &errb); code != 2 || out.Len() != 0 || errb.String() != "error: unknown option --bogus\nhint: mash version --help\n" {
 		t.Errorf("version --bogus: %d %q %q", code, out.String(), errb.String())
 	}
 }

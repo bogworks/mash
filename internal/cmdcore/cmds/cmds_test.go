@@ -101,9 +101,9 @@ func TestSendUsageErrors(t *testing.T) {
 		args []string
 		want string
 	}{
-		{"unknown option", []string{"a.b.c", "hi", "--bogus"}, "error: unknown option --bogus for mash send\n" + hint},
-		{"unknown option with value", []string{"a.b.c", "hi", "--bogus=1"}, "error: unknown option --bogus for mash send\n" + hint},
-		{"unknown short", []string{"a.b.c", "hi", "-z"}, "error: unknown option -z for mash send\n" + hint},
+		{"unknown option", []string{"a.b.c", "hi", "--bogus"}, "error: unknown option --bogus\n" + hint},
+		{"unknown option with value", []string{"a.b.c", "hi", "--bogus=1"}, "error: unknown option --bogus\n" + hint},
+		{"unknown short", []string{"a.b.c", "hi", "-z"}, "error: unknown option -z\n" + hint},
 		{"no address", nil, "error: mash send needs <address>\n" + hint},
 		{"flag without value", []string{"a.b.c", "hi", "--kind"}, "error: --kind needs a value\n" + hint},
 		{"bad enum", []string{"a.b.c", "hi", "--kind", "loud"}, "error: --kind must be one of blocker, question, task, result, fyi\n" + hint},
@@ -121,7 +121,7 @@ func TestSendUsageErrors(t *testing.T) {
 		{"kind twice", []string{"a.b.c", "hi", "--kind", "fyi", "--kind=task"}, "error: --kind was given twice\n" + hint},
 		{"urgent twice", []string{"a.b.c", "hi", "--urgent", "--urgent"}, "error: --urgent was given twice\n" + hint},
 		{"id twice", []string{"a.b.c", "hi", "--id", "x", "--id", "y"}, "error: --id was given twice\n" + hint},
-		{"positional flag name", []string{"a.b.c", "--address", "x"}, "error: unknown option --address for mash send\n" + hint},
+		{"positional flag name", []string{"a.b.c", "--address", "x"}, "error: unknown option --address\n" + hint},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := &fakeSvc{}
@@ -146,7 +146,7 @@ func TestSendUsageErrors(t *testing.T) {
 	}
 	// usage error in --json mode
 	code, out, _ := runSend(&fakeSvc{}, "", nil, cliframe.Global{JSON: true}, "a.b.c", "hi", "--bogus")
-	if code != 2 || out != `{"error":"unknown option --bogus for mash send","hint":"mash send --help"}`+"\n" {
+	if code != 2 || out != `{"error":"unknown option --bogus","hint":"mash send --help"}`+"\n" {
 		t.Errorf("json usage: %d %q", code, out)
 	}
 }

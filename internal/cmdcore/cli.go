@@ -130,7 +130,7 @@ func parseArgs(name string, fields []field, args []string, pv reflect.Value) err
 		return nil
 	}
 	unknown := func(a string) error {
-		return cliframe.Usagef("unknown option %s for mash %s", a, name).WithHint("mash " + name + " --help")
+		return cliframe.Usagef("unknown option %s", a).WithHint("mash " + name + " --help")
 	}
 	usage := func(format string, a ...any) error {
 		return cliframe.Usagef(format, a...).WithHint("mash " + name + " --help")

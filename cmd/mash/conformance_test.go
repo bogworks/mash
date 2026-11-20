@@ -38,10 +38,6 @@ import (
 
 // knownGaps: key is "<check> <name>" as the subtest names it. The value is why it is not built yet.
 var knownGaps = map[string]string{
-	"help inbox":      "inbox/read on the command table: S4b (hand-written one-line help)",
-	"help read":       "inbox/read on the command table: S4b (hand-written one-line help)",
-	"tools inbox":     "inbox/read on the command table: S4b (the MCP tool is the old hand-written one)",
-	"tools read":      "inbox/read on the command table: S4b (the MCP tool is the old hand-written one)",
 	"help join":       "join: slice S5 (the command does not exist)",
 	"toplevel join":   "join: slice S5 (the command does not exist)",
 	"help key":        "key is not on the command table yet: hand-written help, no Setup group parent layout",
@@ -55,16 +51,6 @@ var knownGaps = map[string]string{
 
 // knownDrift: key is "<rule> <command>"; the value says what differs and what closes it.
 var knownDrift = map[string]string{
-	"bad-option send":              confUnknownOption,
-	"bad-option who":               confUnknownOption,
-	"bad-option version":           confUnknownOption,
-	"bad-option status":            confUnknownOption,
-	"bad-option doctor":            confUnknownOption,
-	"bad-option-json send":         confUnknownOption,
-	"bad-option-json who":          confUnknownOption,
-	"bad-option-json version":      confUnknownOption,
-	"bad-option-json status":       confUnknownOption,
-	"bad-option-json doctor":       confUnknownOption,
 	"help-spelling -h version":     confHelpFirst,
 	"help-spelling --help version": confHelpFirst,
 }
@@ -72,11 +58,6 @@ var knownDrift = map[string]string{
 // confHelpFirst: rules.json says options go before or after the command, and help is also a command; the build takes a
 // help option before the command as the tool's own help (cmd/mash/main.go, cli.go).
 const confHelpFirst = "a help option before the command prints the tool's own help; rules.json: 'mash -h version' is 'mash version --help'"
-
-// confUnknownOption: rules.json says 'error: unknown option --x'; the build says 'error: unknown option --x for mash <command>'
-// (internal/cmdcore/cli.go, locked in by send_args_test.go and internal/cmdcore/cmds/cmds_test.go). The fix changes the
-// wording there and in those tests; then these entries go.
-const confUnknownOption = "the build appends ' for mash <command>' to the unknown-option line; rules.json has the line without it"
 
 // confRemoved are the commands the build lists that the specification does not have, because they are being removed.
 var confRemoved = map[string]string{
@@ -375,7 +356,7 @@ func confRules(t *testing.T, spec confSpec) {
 		}
 	}
 	// the arguments a command needs to get past its own usage checks
-	positional := map[string][]string{"send": {"a.b.c", "hi"}, "who": nil, "version": nil, "status": nil, "doctor": nil}
+	positional := map[string][]string{"send": {"a.b.c", "hi"}, "who": nil, "version": nil, "status": nil, "doctor": nil, "inbox": nil, "read": {"1"}}
 	for _, e := range commandEntries {
 		name := e.CLIName()
 		pos := positional[name]
