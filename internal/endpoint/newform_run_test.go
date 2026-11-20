@@ -73,7 +73,7 @@ func (f *fixture) addAt(t *testing.T, group, name string, o addOpts) sap.Address
 
 func (f *fixture) cfgAt(a sap.Address) config.Config {
 	// REQ-014: these tests are not about TLS; the override is explicit.
-	return config.Config{URL: f.e.URL, InsecurePlaintext: true, Owner: a.Owner, Group: a.Group, Name: a.Instance, Creds: f.creds[a.Flat()],
+	return config.Config{URL: f.e.URL, InsecurePlaintext: true, Owner: a.Owner, Group: a.Group, Name: a.Instance, Creds: f.creds[a.Flat()], AcceptUnverified: true,
 		SettleMS: 50, BatchMsgs: 10, BatchBytes: 16384}
 }
 

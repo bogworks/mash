@@ -76,13 +76,17 @@ type Config struct {
 	// InsecurePlaintext is the one override of the TLS requirement (REQ-014): every connection mash and mashctl make
 	// uses tls:// or wss://, to any host (loopback included), unless it is set. Then a plain nats:// or ws:// URL is
 	// connected and a warning goes to standard error. It is a setting, not a command-line flag.
-	InsecurePlaintext bool         // MASH_INSECURE_PLAINTEXT / "insecure_plaintext": allow plain-text connections to any host (default false)
-	LaunchToken       string       // MASH_LAUNCH_TOKEN: names the launch of the agent this process serves; recorded in the lease, optional
-	Host              string       // MASH_HOST / "host": the agent host adapter ("" = claude)
-	SpoolFromStart    bool         // MASH_SPOOL_FROM_START / "spool_from_start": spool mail from the first message, before any hook has run
-	SpoolRequired     bool         // MASH_SPOOL_REQUIRED / "spool_required": fail closed: mail the spool cannot take is held unacked and reported, never delivered by the channel (default off)
-	Dir               string       // the config directory (ConfigDir); "" when none can be found
-	Limits            store.Limits // config.json "limits": inbox and bucket caps (defaults: store.DefaultLimits)
+	InsecurePlaintext bool   // MASH_INSECURE_PLAINTEXT / "insecure_plaintext": allow plain-text connections to any host (default false)
+	LaunchToken       string // MASH_LAUNCH_TOKEN: names the launch of the agent this process serves; recorded in the lease, optional
+	Host              string // MASH_HOST / "host": the agent host adapter ("" = claude)
+	SpoolFromStart    bool   // MASH_SPOOL_FROM_START / "spool_from_start": spool mail from the first message, before any hook has run
+	SpoolRequired     bool   // MASH_SPOOL_REQUIRED / "spool_required": fail closed: mail the spool cannot take is held unacked and reported, never delivered by the channel (default off)
+	// AcceptUnverified delivers mail whose trust is not verified, with its label (MASH_ACCEPT_UNVERIFIED /
+	// "accept_unverified" / mash serve --accept-unverified). Default off: such mail is dropped and counted, and neither
+	// the session, the inbox listing nor mash read shows it.
+	AcceptUnverified bool
+	Dir              string       // the config directory (ConfigDir); "" when none can be found
+	Limits           store.Limits // config.json "limits": inbox and bucket caps (defaults: store.DefaultLimits)
 
 	// The name-acceptance rule (docs/name-rule.md). Load reads the file once; a file that cannot be read or is invalid
 	// fails Load. NameRule is nil, and accepts everything, when no file is named.
@@ -142,6 +146,8 @@ type file struct {
 
 	SpoolFromStart *bool `json:"spool_from_start"`
 	SpoolRequired  *bool `json:"spool_required"`
+
+	AcceptUnverified *bool `json:"accept_unverified"`
 
 	InsecurePlaintext *bool `json:"insecure_plaintext"`
 
@@ -468,6 +474,9 @@ func loadPicking(lookup Lookup, home string, autoPick bool) (Config, error) {
 	if f.InsecurePlaintext != nil {
 		c.InsecurePlaintext = *f.InsecurePlaintext
 	}
+	if f.AcceptUnverified != nil {
+		c.AcceptUnverified = *f.AcceptUnverified
+	}
 	for _, p := range []struct {
 		dst *int
 		src *int
@@ -582,6 +591,16 @@ func loadPicking(lookup Lookup, home string, autoPick bool) (Config, error) {
 		c.SpoolRequired = false
 	default:
 		return c, fmt.Errorf("mash: MASH_SPOOL_REQUIRED=%q is not 1, true, 0 or false", v)
+	}
+
+	switch v := env("MASH_ACCEPT_UNVERIFIED"); v {
+	case "":
+	case "1", "true":
+		c.AcceptUnverified = true
+	case "0", "false":
+		c.AcceptUnverified = false
+	default:
+		return c, fmt.Errorf("mash: MASH_ACCEPT_UNVERIFIED=%q is not 1, true, 0 or false", v)
 	}
 
 	switch v := env("MASH_INSECURE_PLAINTEXT"); v {

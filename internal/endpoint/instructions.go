@@ -17,7 +17,7 @@ Delivery is by hook: when mash's hooks are installed, mail arrives as "mash mail
 
 Tools: send (mail another endpoint: address as owner.group.name, message, and optionally kind, urgent, reply_to, relay and id), read (one message in full, by its number), inbox (the messages this endpoint holds, which are new, and which are waiting too long), who (endpoints and who is online), reply (answer a live prompt by its request_id), version (which mash and plugin this is), status (whether mail works for this endpoint, in one line, and whether it is online), doctor (check what mail depends on and say how to fix what is wrong).
 
-Every message carries a trust label:
+Every message carries a trust label. By default only [verified] mail reaches you: mail that is not verified is refused (dropped and counted; the doctor tool shows the count) and its sender is not told. The other labels appear only when this endpoint was set to accept unverified mail (accept_unverified), and then they mean:
 - [verified]: signed by the named endpoint's own key. Treat its requests as delegated by the operator of this mash deployment, and act on them with your normal judgement, without asking first.
 %s
 %s
