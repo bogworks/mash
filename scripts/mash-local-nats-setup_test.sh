@@ -20,7 +20,7 @@
 #
 # Environment:
 #   MLNT_IMAGES   space-separated image tags (default: debian:stable ubuntu:24.04 ubuntu:26.04)
-#   MLNT_CASES    space-separated case numbers (default: 1 2 ... 25)
+#   MLNT_CASES    space-separated case numbers (default: 1 2 ... 26)
 #   MLNT_MODES    space-separated modes (default: linux darwin)
 #   MLNT_REPORT   receipt file (markdown; default: receipt-<run id>.md in the scratch
 #                 directory, or in ${TMPDIR:-/tmp} when the scratch directory is made here)
@@ -1146,7 +1146,7 @@ SH
     chk "--start, port taken just now: exit 1" rc_is 1
     chk "--start: the message names the port" hasx "$W/err" "error: port $p was taken just now by another program"
     chk "--start: the hint says --start again" hasre "$W/err" '^hint: .*--start again'
-    chk "--start: no server.pid left" absent "$d/server.pid"
+    chk "--start: the recorded server is not running" nopid "$d/server.pid"
     chk "--start: no server was started" bash -c '! "$REALSS" -ltn | grep -q ":'"$p"'"'
     PRE=()
     run --start
@@ -1387,11 +1387,69 @@ case25() { # one lifecycle lock: create, --start, --stop, --remove do not overla
     done
 }
 
+case26() { # a port held by another user is invisible to this one: the failure says so
+    local d=$W/mash-nats26 pt
+    mkdir -p "$W/blind"
+    # the port tools see nothing, as on a Mac when another user holds the port
+    printf '#!/bin/sh\nexit 0\n' >"$W/blind/ss"
+    printf '#!/bin/sh\nexit 1\n' >"$W/blind/lsof"
+    chmod 755 "$W/blind/ss" "$W/blind/lsof"
+    foreign() { # PORT: a listener the script cannot see; its pid in FP
+        python3 -c 'import socket,sys,time
+s=socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+s.bind(("127.0.0.1", int(sys.argv[1]))); s.listen(5); time.sleep(600)' "$1" &
+        FP=$!
+        waitlisten "$1"
+    }
+    ROUTE="file"
+    # (a) create
+    foreign 4222
+    chk "control: the foreign listener holds 4222" listening 4222
+    PRE=(env "PATH=$W/blind:$PATH")
+    run --owner acme --dir "$d"
+    chk "create: exit 1" rc_is 1
+    chk "create: did not come up" has "$W/err" 'error: the server did not come up'
+    chk "create: says port 4222 may be in use by another user" has "$W/err" 'port 4222 may be in use by another user'
+    chk "create: the exact line" hasx "$W/err" 'error: port 4222 may be in use by another user (this system shows only your own listeners)'
+    chk "create: the hint says free the port and run --start again" hasre "$W/err" '^hint: free port 4222 or ask who holds it, then run .*mash-local-nats-setup.sh --start again'
+    chk "create: the folder is kept, as for any later failure (it has its marker)" [ -f "$d/mash-setup.json" ]
+    chk "create: the recorded server is not running" nopid "$d/server.pid"
+    chk "create: no nats-server of ours on 4222" bash -c '! "$REALSS" -ltnp | grep ":4222" | grep -q nats-server'
+    chk "create: the foreign listener is still alive" alive "$FP"
+    kill "$FP"; wait "$FP" 2>/dev/null
+    chk "create: the test's listener is stopped by its recorded pid" gone "$FP"
+    # (b) --start on a dir made on a free port
+    d=$W/mash-nats26b
+    PRE=()
+    run --owner acme --dir "$d"
+    chk "setup ran" rc_is 0
+    pt=$(port_of "$d")
+    stopdir "$d"
+    foreign "$pt"
+    chk "--start: control: the foreign listener holds $pt" listening "$pt"
+    PRE=(env "PATH=$W/blind:$PATH")
+    run --start --dir "$d"
+    chk "--start: exit 1" rc_is 1
+    chk "--start: the exact line" hasx "$W/err" "error: port $pt may be in use by another user (this system shows only your own listeners)"
+    chk "--start: the hint says --start again" hasre "$W/err" "^hint: free port $pt or ask who holds it, then run .*mash-local-nats-setup.sh --start again"
+    chk "--start: the dir is intact" [ -f "$d/mash-setup.json" ]
+    chk "--start: the recorded server is not running" nopid "$d/server.pid"
+    chk "--start: no nats-server of ours" bash -c '! "$REALSS" -ltnp | grep ":'"$pt"'" | grep -q nats-server'
+    chk "--start: the foreign listener is still alive" alive "$FP"
+    chk "--start: no seed or cred text in the output" bash -c '! cat "$1" "$2" | grep -Eq "S[OANUCX][A-Z2-7]{50,}|eyJ[A-Za-z0-9_-]{20,}|-----"' _ "$W/out" "$W/err"
+    kill "$FP"; wait "$FP" 2>/dev/null
+    chk "--start: the test's listener is stopped by its recorded pid" gone "$FP"
+    PRE=()
+    run --start --dir "$d"
+    chk "control: with the port free, --start works" rc_is 0
+    stopdir "$d"
+}
+
 run_case() {
     case $CASE in
     15) case15 ;; 16) case16 ;; 17) case17 ;; 18) case18 ;; 19) case19 ;; 20) case20 ;; 21) case21 ;;
     1) case1 ;; 2) case2 ;; 3) case3 ;; 4) case4 ;; 5) case5 ;; 6) case6 ;; 7) case7 ;;
-    8) case8 ;; 9) case9 ;; 10) case10 ;; 11) case11 ;; 12) case12 ;; 13) case13 ;; 14) case14 ;; 22) case22 ;; 23) case23 ;; 24) case24 ;; 25) case25 ;;
+    8) case8 ;; 9) case9 ;; 10) case10 ;; 11) case11 ;; 12) case12 ;; 13) case13 ;; 14) case14 ;; 22) case22 ;; 23) case23 ;; 24) case24 ;; 25) case25 ;; 26) case26 ;;
     *) echo "FAIL: c$CASE: no such case" ;;
     esac
 }
@@ -1426,7 +1484,7 @@ else
     MADE_SCRATCH=1
 fi
 IMAGES=${MLNT_IMAGES:-"debian:stable ubuntu:24.04 ubuntu:26.04"}
-CASES=${MLNT_CASES:-"1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25"}
+CASES=${MLNT_CASES:-"1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26"}
 MODES=${MLNT_MODES:-"linux darwin"}
 NCV=${MLNT_NATSCLI:-0.5.2}
 # sha256 of https://github.com/nats-io/natscli/releases/download/v0.5.2/nats-0.5.2-linux-amd64.zip,
