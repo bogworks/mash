@@ -44,6 +44,9 @@ func realMain(args []string, stdout, stderr io.Writer) (code int) {
 	if args[0] == "at005-cleanup" {
 		return at005Cleanup(args[1:], stdout, stderr, nil, nil)
 	}
+	if args[0] == "rehearse" { // one script in one sandbox container (rehearse.go)
+		return rehearseMain(args[1:], stdout, stderr, &Podman{})
+	}
 	if args[0] == "at005" { // the reserved ports are fixed: no --port
 		return at005Main(args[1:], stdout, stderr)
 	}
