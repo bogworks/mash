@@ -36,8 +36,12 @@ func TestServeNeverAutoPicksAnEndpoint(t *testing.T) {
 	if names := toolNames(t, s); len(names) != 3 || !names["status"] || !names["doctor"] || !names["version"] {
 		t.Fatalf("serve with no endpoint named exposes %v, want version, status and doctor", names)
 	}
-	wantAll(t, "status, no endpoint named", toolText(t, s, 10, "status"), "no endpoint is chosen for this session")
-	wantAll(t, "doctor, no endpoint named", toolText(t, s, 11, "doctor"), "no endpoint is chosen for this session", "MASH_ENDPOINT=<address>")
+	const want = "No endpoint is chosen for this session.\nhint: start the session with MASH_ENDPOINT=<address>"
+	for i, tool := range []string{"status", "doctor"} {
+		if got := toolText(t, s, 10+i, tool); got != want {
+			t.Errorf("%s, no endpoint named: %q, want %q", tool, got, want)
+		}
+	}
 }
 
 func TestServeTakesTheNamedEndpoint(t *testing.T) {

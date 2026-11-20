@@ -2,12 +2,18 @@ package endpoint
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/nats-io/nats.go"
 
 	"github.com/bogworks/mash/internal/config"
 )
@@ -31,7 +37,7 @@ func TestRefusedCount(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	for body, want := range map[string]int{"3\n": 3, "12": 12, "0": 0, "": 0, "many": 0, "-2": 0, "1.5": 0} {
+	for body, want := range map[string]int{"3\n": 3, "12": 12, " 7 \n": 7, "0": 0, "": 0, "many": 0, "-2": 0, "1.5": 0, "5\n6\n": 0, "\x00\xff": 0} {
 		if err := os.WriteFile(filepath.Join(dir, RefusedFile), []byte(body), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -41,6 +47,58 @@ func TestRefusedCount(t *testing.T) {
 	}
 	if n := RefusedCount(config.Config{}); n != 0 {
 		t.Errorf("no endpoint: %d", n)
+	}
+}
+
+// The contract with the writer (S7's refusing serve): the file is "refused-unverified" in the endpoint's spool directory,
+// one decimal number, and the reader finds it where SpoolDir says. A fixed name: the writer is built against it.
+func TestRefusedFileContract(t *testing.T) {
+	if RefusedFile != "refused-unverified" {
+		t.Fatalf("the file is %q", RefusedFile)
+	}
+	cfg, dir := refusedCfg(t)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "refused-unverified"), []byte("3\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if n := RefusedCount(cfg); n != 3 {
+		t.Fatalf("a writer that follows the contract: %d", n)
+	}
+	// the file of another endpoint is not this one's
+	other := cfg
+	other.Name = "carol"
+	if n := RefusedCount(other); n != 0 {
+		t.Fatalf("another endpoint: %d", n)
+	}
+}
+
+// The failures CheckServer tells apart, from the errors a TLS connection gives.
+func TestClassifyServerError(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want error
+	}{
+		{"unknown authority", x509.UnknownAuthorityError{}, ErrServerCertUntrusted},
+		{"wrapped unknown authority", fmt.Errorf("tls: failed to verify certificate: %w", x509.UnknownAuthorityError{}), ErrServerCertUntrusted},
+		{"hostname", x509.HostnameError{Certificate: &x509.Certificate{}, Host: "h"}, ErrServerCertUntrusted},
+		{"expired", x509.CertificateInvalidError{Reason: x509.Expired}, ErrServerCertUntrusted},
+		{"x509 text", errors.New("x509: certificate has expired"), ErrServerCertUntrusted},
+		{"record header", tls.RecordHeaderError{Msg: "first record does not look like a TLS handshake"}, ErrServerNotTLS},
+		{"record header text", errors.New("tls: first record does not look like a TLS handshake"), ErrServerNotTLS},
+		{"plain nats server", nats.ErrSecureConnWanted, ErrServerNotTLS},
+		{"client cert refused", errors.New("remote error: tls: bad certificate"), ErrServerRefusedClientCert},
+		{"nothing listens", errors.New("dial tcp 127.0.0.1:1: connect: connection refused"), nil},
+	} {
+		if got := classifyServerError(tc.err); got != tc.want {
+			t.Errorf("%s: %v, want %v", tc.name, got, tc.want)
+		}
+	}
+	e := &ServerError{Kind: ErrServerNotTLS, Err: errors.New("mash: connect x: boom")}
+	if !errors.Is(e, ErrServerNotTLS) || errors.Is(e, ErrServerCertUntrusted) || e.Error() != "mash: connect x: boom" {
+		t.Errorf("ServerError: %v", e)
 	}
 }
 

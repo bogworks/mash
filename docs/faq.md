@@ -20,7 +20,7 @@ Subagents and agent teams are helpers that one session starts and directs, on on
 
 ## Does it work with a NATS server that uses a token, user and password, or a plain nkey?
 
-No. mash needs a NATS server in operator mode with JWT user credentials. In the code, an endpoint connects with a creds file only, and its sender identity is read from that file's user JWT and seed (`IdentityFromCreds` in `internal/sap/sender.go`). A creds file with no JWT or no seed fails with an error that says it is not operator-mode JWT credentials, and `mash status` warns when the url carries a password or token. Use `nsc` or Synadia Cloud to create a user with JWT credentials.
+No. mash needs a NATS server in operator mode with JWT user credentials. In the code, an endpoint connects with a creds file only, and its sender identity is read from that file's user JWT and seed (`IdentityFromCreds` in `internal/sap/sender.go`). A creds file with no JWT or no seed fails with an error that says it is not operator-mode JWT credentials, and `mash doctor` warns on its `server` row when the server address carries a password or token, which mash never uses. Use `nsc` or Synadia Cloud to create a user with JWT credentials.
 
 ## Do I have to run a server?
 

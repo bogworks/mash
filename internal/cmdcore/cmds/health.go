@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/bogworks/mash/internal/cliframe"
@@ -16,7 +17,20 @@ const (
 	CheckOK   = "ok"
 	CheckWarn = "warn"
 	CheckFail = "fail"
+	// CheckSkip is a row that could not be run because an earlier one failed. It is neither a problem nor a warning.
+	CheckSkip = "skip"
 )
+
+// ReasonNoSessionEndpoint is the config row's detail, and status's reason, in a session that names no endpoint. It is
+// the one case in which status and doctor answer in words of their own instead of the row table or the one line.
+const ReasonNoSessionEndpoint = "no endpoint is chosen for this session"
+
+// SessionEndpointFix is what to do about a session that names no endpoint.
+const SessionEndpointFix = "start the session with MASH_ENDPOINT=<address>"
+
+// ErrNoEndpointInstalled is what Health returns at a shell where no endpoint is chosen and none is installed. The
+// command turns it into the usage error "no endpoint is installed here" (hint "mash join <file>"), exit 2.
+var ErrNoEndpointInstalled = errors.New("no endpoint is installed here")
 
 // The checks of doctor, in the order it reports them.
 const (
@@ -48,12 +62,13 @@ type HealthReport struct {
 }
 
 // Health is the service status and doctor need from Env.Svc. It returns config.SeveralEndpointsError (wrapped or not)
-// when no endpoint is chosen and several are installed.
+// when no endpoint is chosen and several are installed, and ErrNoEndpointInstalled when none is chosen and none is
+// installed (a session that names no endpoint is a report instead, see ReasonNoSessionEndpoint).
 type Health interface {
 	Health(ctx context.Context) (HealthReport, error)
 }
 
-func healthOf(env *cmdcore.Env, name string) (HealthReport, error) {
+func healthOf(ctx context.Context, env *cmdcore.Env, name string) (HealthReport, error) {
 	if env == nil {
 		return HealthReport{}, cliframe.Failf("internal: mash %s has no environment to run in", name)
 	}
@@ -61,10 +76,15 @@ func healthOf(env *cmdcore.Env, name string) (HealthReport, error) {
 	if !ok || svc == nil {
 		return HealthReport{}, cliframe.Failf("internal: mash %s has no way to check the endpoint", name)
 	}
-	r, err := svc.Health(context.Background())
+	r, err := svc.Health(ctx)
 	var se *config.SeveralEndpointsError
 	if errors.As(err, &se) && len(se.Addresses) > 0 {
-		return HealthReport{}, cliframe.Usagef("%s", se.Error()).WithHint("mash " + name + " --endpoint " + se.Addresses[0])
+		// the hint names the first installed address in alphabetical order
+		first := slices.Min(se.Addresses)
+		return HealthReport{}, cliframe.Usagef("%s", se.Error()).WithHint("mash " + name + " --endpoint " + first)
+	}
+	if errors.Is(err, ErrNoEndpointInstalled) {
+		return HealthReport{}, cliframe.Usagef("%s", ErrNoEndpointInstalled.Error()).WithHint("mash join <file>")
 	}
 	return r, err
 }
@@ -88,9 +108,17 @@ type StatusResult struct {
 	Reason   *string `json:"reason"`
 }
 
+// noSessionEndpoint is the answer of a session that names no endpoint.
+func (r StatusResult) noSessionEndpoint() bool {
+	return !r.Ready && r.Endpoint == nil && r.Reason != nil && *r.Reason == ReasonNoSessionEndpoint
+}
+
 // Text is "<endpoint>: ready, offline", "<endpoint>: ready, online" or "<endpoint>: not ready: <reason>"; with no
-// endpoint chosen the name is "mash".
+// endpoint chosen the name is "mash". A session that names no endpoint says "No endpoint is chosen for this session."
 func (r StatusResult) Text(cmdcore.Opts) string {
+	if r.noSessionEndpoint() {
+		return "No endpoint is chosen for this session."
+	}
 	name := "mash"
 	if r.Endpoint != nil {
 		name = config.Clean(*r.Endpoint)
@@ -116,10 +144,13 @@ func (r StatusResult) ExitCode() int {
 	return 1
 }
 
-// Hint is "mash doctor" when the endpoint is not ready.
+// Hint is "mash doctor" when the endpoint is not ready; for a session that names no endpoint it is how to name one.
 func (r StatusResult) Hint() string {
 	if r.Ready {
 		return ""
+	}
+	if r.noSessionEndpoint() {
+		return SessionEndpointFix
 	}
 	return "mash doctor"
 }
@@ -140,8 +171,8 @@ var Status = cmdcore.Command[StatusParams, StatusResult]{
 	Summary:     "Say in one line whether mail works for this endpoint, and whether it is online.",
 	Description: "Say in one line whether mail works for this endpoint, and whether it is online.",
 	Examples:    []string{"mash status", "mash status --endpoint acme.demo.alice"},
-	Run: func(_ context.Context, env *cmdcore.Env, _ StatusParams) (StatusResult, error) {
-		rep, err := healthOf(env, "status")
+	Run: func(ctx context.Context, env *cmdcore.Env, _ StatusParams) (StatusResult, error) {
+		rep, err := healthOf(ctx, env, "status")
 		if err != nil {
 			return StatusResult{}, err
 		}
@@ -172,7 +203,8 @@ type DoctorCheck struct {
 	Fix    *string `json:"fix"`
 }
 
-// DoctorResult is every check that could be made. Problems counts the rows in state fail, Warnings those in state warn.
+// DoctorResult is every check, in order, with a state of ok, warn, fail or skip. Problems counts the rows in state fail,
+// Warnings those in state warn; a skipped row is neither.
 type DoctorResult struct {
 	Endpoint *string       `json:"endpoint"`
 	Problems int           `json:"problems"`
@@ -182,7 +214,12 @@ type DoctorResult struct {
 
 // Text is a row per check (the name in 10 columns, the state in 6, then the detail), a blank line, and the count:
 // "No problems.", or the problems and the warnings that there are ("1 problem, 1 warning.", "2 problems.", "1 warning.").
+// A session that names no endpoint says "No endpoint is chosen for this session." instead.
 func (r DoctorResult) Text(cmdcore.Opts) string {
+	if r.Endpoint == nil && len(r.Checks) > 0 && r.Checks[0].Name == CheckConfig && r.Checks[0].State == CheckFail &&
+		r.Checks[0].Detail != nil && *r.Checks[0].Detail == ReasonNoSessionEndpoint {
+		return "No endpoint is chosen for this session."
+	}
 	var b strings.Builder
 	for _, c := range r.Checks {
 		state := c.State
@@ -247,8 +284,8 @@ var Doctor = cmdcore.Command[DoctorParams, DoctorResult]{
 	Summary:     "Check everything mail depends on for this endpoint, and say how to fix what is wrong. Changes nothing.",
 	Description: "Check everything mail depends on for this endpoint, and say how to fix what is wrong. Changes nothing.",
 	Examples:    []string{"mash doctor"},
-	Run: func(_ context.Context, env *cmdcore.Env, _ DoctorParams) (DoctorResult, error) {
-		rep, err := healthOf(env, "doctor")
+	Run: func(ctx context.Context, env *cmdcore.Env, _ DoctorParams) (DoctorResult, error) {
+		rep, err := healthOf(ctx, env, "doctor")
 		if err != nil {
 			return DoctorResult{}, err
 		}

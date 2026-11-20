@@ -2,8 +2,11 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -185,14 +188,17 @@ func TestStatusConfigAndCredsReasons(t *testing.T) {
 	}
 }
 
-func TestStatusNoEndpointChosen(t *testing.T) {
-	r := runMash(map[string]string{"HOME": t.TempDir()}, "status")
-	if r.code != 1 || r.out != "mash: not ready: no endpoint is chosen\n" || r.errs != "hint: mash doctor\n" {
-		t.Fatalf("status: %+v", r)
-	}
-	j := runMash(map[string]string{"HOME": t.TempDir()}, "status", "--json")
-	if j.code != 1 || j.out != `{"endpoint":null,"ready":false,"online":false,"reason":"no endpoint is chosen"}`+"\n" {
-		t.Fatalf("status --json: %+v", j)
+// At a shell with no endpoint chosen and none installed, status and doctor give the specification's error: stderr, exit 2.
+func TestStatusAndDoctorNoEndpointInstalled(t *testing.T) {
+	for _, verb := range []string{"status", "doctor"} {
+		r := runMash(map[string]string{"HOME": t.TempDir()}, verb)
+		if r.code != 2 || r.out != "" || r.errs != "error: no endpoint is installed here\nhint: mash join <file>\n" {
+			t.Fatalf("%s: %+v", verb, r)
+		}
+		j := runMash(map[string]string{"HOME": t.TempDir()}, verb, "--json")
+		if j.code != 2 || j.errs != "" || j.out != `{"error":"no endpoint is installed here","hint":"mash join <file>"}`+"\n" {
+			t.Fatalf("%s --json: %+v", verb, j)
+		}
 	}
 }
 
@@ -325,7 +331,7 @@ func TestDoctorServerNotAnsweringAndCredsProblems(t *testing.T) {
 	w := tlsWorld(t, "a")
 	env := strictEnv(w, "a", map[string]string{"MASH_SERVER": "tls://127.0.0.1:1", "MASH_OPEN_TIMEOUT": "2s"})
 	r := runMash(env, "doctor")
-	want := "config    ok\ncreds     ok\nserver    FAIL  the server did not answer: tls://127.0.0.1:1\nrefused   ok    no unverified mail was refused\n\n1 problem.\n"
+	want := "config    ok\ncreds     ok\nserver    FAIL  the server did not answer: tls://127.0.0.1:1\nsign-in   skip  needs the server\nrefused   skip  needs the server\n\n1 problem.\n"
 	if r.code != 1 || r.out != want || r.errs != "" { // no command mends it: no hint
 		t.Fatalf("doctor:\n%+v", r)
 	}
@@ -336,7 +342,7 @@ func TestDoctorServerNotAnsweringAndCredsProblems(t *testing.T) {
 	p := w.env["a"]["MASH_CREDS"]
 	r = runMash(w.env["a"], "doctor")
 	if r.code != 1 || !strings.Contains(r.out, "creds     FAIL  the creds file can be read by other users: "+p+"\n") ||
-		strings.Contains(r.out, "sign-in") || r.errs != "hint: chmod 600 "+p+"\n" {
+		!strings.Contains(r.out, "sign-in   skip  needs the creds\n") || !strings.Contains(r.out, "refused   ok    ") || r.errs != "hint: chmod 600 "+p+"\n" {
 		t.Fatalf("doctor, creds mode: %+v", r)
 	}
 	// not a creds file: its content is never printed
@@ -371,20 +377,13 @@ func TestDoctorPlainURL(t *testing.T) {
 	env := strictEnv(w, "a", nil)
 	delete(env, "MASH_INSECURE_PLAINTEXT")
 	r = runMash(env, "doctor")
-	if r.code != 1 || !strings.Contains(r.out, "server    FAIL  ") || !strings.Contains(r.out, "insecure_plaintext") || strings.Contains(r.out, "sign-in") ||
+	if r.code != 1 || !strings.Contains(r.out, "server    FAIL  ") || !strings.Contains(r.out, "insecure_plaintext") ||
+		!strings.Contains(r.out, "sign-in   skip  needs the server\nrefused   skip  needs the server\n") ||
 		!strings.HasPrefix(r.errs, "hint: use a tls:// server address") {
 		t.Fatalf("doctor without it: %+v", r)
 	}
 	if s := runMash(env, "status"); s.code != 1 || !strings.HasPrefix(s.out, tTo("a")+": not ready: ") || s.errs != "hint: mash doctor\n" {
 		t.Fatalf("status without it: %+v", s)
-	}
-}
-
-func TestDoctorNoEndpointChosen(t *testing.T) {
-	r := runMash(map[string]string{"HOME": t.TempDir()}, "doctor")
-	if r.code != 1 || r.out != "config    FAIL  no endpoint is chosen\n\n1 problem.\n" ||
-		r.errs != "hint: set MASH_ENDPOINT=<address> or pass --endpoint <address>, or install credentials for one endpoint\n" {
-		t.Fatalf("doctor: %+v", r)
 	}
 }
 
@@ -483,19 +482,28 @@ func TestDegradedServeAnswersStatusAndDoctor(t *testing.T) {
 	if names := toolNames(t, s); len(names) != 3 || !names["version"] || !names["status"] || !names["doctor"] {
 		t.Fatalf("tools %v", names)
 	}
-	if got := toolText(t, s, 10, "status"); got != "mash: not ready: no endpoint is chosen for this session\nhint: mash doctor" {
+	// a normal answer (not an error): the line, then the hint on the next line
+	const want = "No endpoint is chosen for this session.\nhint: start the session with MASH_ENDPOINT=<address>"
+	if got := toolText(t, s, 10, "status"); got != want {
 		t.Fatalf("status: %q", got)
 	}
-	got := toolText(t, s, 11, "doctor")
-	if got != "config    FAIL  no endpoint is chosen for this session\n\n1 problem.\nhint: start the session with MASH_ENDPOINT=<address>" {
+	if got := toolText(t, s, 11, "doctor"); got != want {
 		t.Fatalf("doctor: %q", got)
 	}
-	r := s.call(t, 12, "doctor", `{}`)
+	r := s.call(t, 12, "status", `{}`)
+	if sc, _ := r["structuredContent"].(map[string]any); !reflect.DeepEqual(sc, map[string]any{"endpoint": nil, "ready": false, "online": false, "reason": "no endpoint is chosen for this session"}) {
+		t.Fatalf("status structured %v", r)
+	}
+	r = s.call(t, 13, "doctor", `{}`)
 	sc, _ := r["structuredContent"].(map[string]any)
-	if sc == nil || sc["endpoint"] != nil || sc["problems"] != float64(1) || sc["warnings"] != float64(0) {
+	rows, _ := sc["checks"].([]any)
+	if sc == nil || sc["endpoint"] != nil || sc["problems"] != float64(1) || sc["warnings"] != float64(0) || len(rows) != 5 {
 		t.Fatalf("structured %v", r)
 	}
-	if r := s.call(t, 13, "status", `{"x":1}`); r["isError"] != true || !strings.Contains(resultText(r), "unknown argument x") {
+	if rows[1].(map[string]any)["state"] != "skip" || rows[1].(map[string]any)["detail"] != "needs the config" {
+		t.Fatalf("rows %v", rows)
+	}
+	if r := s.call(t, 14, "status", `{"x":1}`); r["isError"] != true || !strings.Contains(resultText(r), "unknown argument x") {
 		t.Errorf("an argument: %v", r)
 	}
 }
@@ -517,5 +525,92 @@ func TestStatusHasNoOldRows(t *testing.T) {
 		if strings.Contains(d.out, none) {
 			t.Errorf("doctor has a %q row: %q", none, d.out)
 		}
+	}
+}
+
+// A server whose certificate the client does not trust (a self-signed one, or a CA it was not given) has its own text,
+// not "did not answer": the reason in status, the detail and the fix in doctor, and the same in the JSON.
+func TestStatusAndDoctorUntrustedCertificate(t *testing.T) {
+	w := tlsWorld(t, "a")
+	env := strictEnv(w, "a", nil)
+	delete(env, "MASH_CA")
+	text := "the server's certificate is not trusted: " + w.e.URL
+	r := runMash(env, "status")
+	if r.code != 1 || r.out != tTo("a")+": not ready: "+text+"\n" || r.errs != "hint: mash doctor\n" {
+		t.Fatalf("status: %+v", r)
+	}
+	j := runMash(env, "status", "--json")
+	if j.code != 1 || j.out != `{"endpoint":"`+tTo("a")+`","ready":false,"online":false,"reason":"`+text+`"}`+"\n" {
+		t.Fatalf("status --json: %+v", j)
+	}
+	const fix = `set "ca" or MASH_CA to the PEM file of the CA that signed it`
+	d := runMash(env, "doctor")
+	want := "config    ok\ncreds     ok\nserver    FAIL  " + text + "\nsign-in   skip  needs the server\nrefused   skip  needs the server\n\n1 problem.\n"
+	if d.code != 1 || d.out != want || d.errs != "hint: "+fix+"\n" || strings.Contains(d.out, "did not answer") {
+		t.Fatalf("doctor:\n%+v\nwant %q", d, want)
+	}
+	dj := runMash(env, "doctor", "--json")
+	if !strings.Contains(dj.out, `{"name":"server","state":"fail","detail":"`+text+`","fix":"set \"ca\" or MASH_CA to the PEM file of the CA that signed it"}`) {
+		t.Fatalf("doctor --json: %+v", dj)
+	}
+}
+
+// A plain (non-TLS) server behind a tls:// address has its own text too.
+func TestStatusAndDoctorNotATLSServer(t *testing.T) {
+	w := newWorld(t, "a") // a plain server
+	url := "tls://" + strings.TrimPrefix(w.e.URL, "nats://")
+	env := strictEnv(w, "a", map[string]string{"MASH_SERVER": url, "MASH_OPEN_TIMEOUT": "5s"})
+	text := "the server did not answer a TLS handshake (not a TLS server): " + url
+	r := runMash(env, "status")
+	if r.code != 1 || r.out != tTo("a")+": not ready: "+text+"\n" || r.errs != "hint: mash doctor\n" {
+		t.Fatalf("status: %+v", r)
+	}
+	j := runMash(env, "status", "--json")
+	if j.code != 1 || j.out != `{"endpoint":"`+tTo("a")+`","ready":false,"online":false,"reason":"`+text+`"}`+"\n" {
+		t.Fatalf("status --json: %+v", j)
+	}
+	const fix = `use the server's plain address with insecure_plaintext set, or ask whoever runs your mesh for its tls:// address`
+	d := runMash(env, "doctor")
+	want := "config    ok\ncreds     ok\nserver    FAIL  " + text + "\nsign-in   skip  needs the server\nrefused   skip  needs the server\n\n1 problem.\n"
+	if d.code != 1 || d.out != want || d.errs != "hint: "+fix+"\n" || strings.Contains(d.out, "did not answer:") {
+		t.Fatalf("doctor:\n%+v\nwant %q", d, want)
+	}
+	dj := runMash(env, "doctor", "--json")
+	if !strings.Contains(dj.out, `{"name":"server","state":"fail","detail":"`+text+`","fix":"use the server's plain address with insecure_plaintext set, or ask whoever runs your mesh for its tls:// address"}`) {
+		t.Fatalf("doctor --json: %+v", dj)
+	}
+}
+
+// A cancelled call stops the checks at once, whatever the open timeout: a server that accepts and never speaks would
+// otherwise hold a cancelled MCP call for open_timeout.
+func TestHealthStopsWhenItsContextIsCancelled(t *testing.T) {
+	w := tlsWorld(t, "a")
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			defer c.Close() // held open, never answered, until the test ends
+		}
+	}()
+	cfg, err := loadCfg(strictEnv(w, "a", map[string]string{"MASH_SERVER": "tls://" + ln.Addr().String(), "MASH_OPEN_TIMEOUT": "30s", "MASH_CLI_TIMEOUT": "60s"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(200*time.Millisecond, cancel)
+	start := time.Now()
+	_, err = (&healthSvc{cfg: cfg}).Health(ctx)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err %v", err)
+	}
+	if d := time.Since(start); d > 5*time.Second {
+		t.Fatalf("took %v after the cancel", d)
 	}
 }

@@ -52,13 +52,6 @@ func urlSecretWarning(cfg config.Config) string {
 	return ""
 }
 
-func (h *healthSvc) noEndpoint() (detail, fix string) {
-	if h.session {
-		return "no endpoint is chosen for this session", "start the session with MASH_ENDPOINT=<address>"
-	}
-	return "no endpoint is chosen", "set MASH_ENDPOINT=<address> or pass --endpoint <address>, or install credentials for one endpoint"
-}
-
 // configCheck is the config row: whether the configuration is readable and names an endpoint and a server.
 func (h *healthSvc) configCheck() cmds.HealthCheck {
 	c := cmds.HealthCheck{Name: cmds.CheckConfig, State: cmds.CheckFail}
@@ -76,7 +69,8 @@ func (h *healthSvc) configCheck() cmds.HealthCheck {
 			c.Fix = "set MASH_ENDPOINT=<owner.group.name>"
 		}
 	case h.cfg.Name == "":
-		c.Detail, c.Fix = h.noEndpoint()
+		// only a session reaches here: at a shell Health stops before the rows with "no endpoint is installed here"
+		c.Detail, c.Fix = cmds.ReasonNoSessionEndpoint, cmds.SessionEndpointFix
 	case func() bool { _, err := h.cfg.Identity(); return err != nil }():
 		_, err := h.cfg.Identity()
 		c.Detail = redactText(strings.TrimPrefix(err.Error(), "mash: "))
@@ -139,16 +133,19 @@ func (h *healthSvc) serverCheck(ctx context.Context) cmds.HealthCheck {
 	octx, cancel := context.WithTimeout(ctx, openFor(h.cfg))
 	defer cancel()
 	if err := endpoint.CheckServer(octx, h.cfg); err != nil {
-		c.Reason = "the server did not answer: " + url
-		c.Detail = c.Reason
-		switch msg := err.Error(); {
-		case strings.Contains(msg, "the server's certificate is not trusted"):
+		c.Detail = "the server did not answer: " + url
+		switch {
+		case errors.Is(err, endpoint.ErrServerCertUntrusted):
 			c.Detail = "the server's certificate is not trusted: " + url
 			c.Fix = `set "ca" or MASH_CA to the PEM file of the CA that signed it`
-		case strings.Contains(msg, "refused the client certificate"):
+		case errors.Is(err, endpoint.ErrServerNotTLS):
+			c.Detail = "the server did not answer a TLS handshake (not a TLS server): " + url
+			c.Fix = `use the server's plain address with insecure_plaintext set, or ask whoever runs your mesh for its tls:// address`
+		case errors.Is(err, endpoint.ErrServerRefusedClientCert):
 			c.Detail = "the server refused the client certificate: " + url
 			c.Fix = "set tls_cert and tls_key, or MASH_TLS_CERT and MASH_TLS_KEY, to a certificate the server's CA signed"
 		}
+		c.Reason = c.Detail
 		return c
 	}
 	c.State, c.Detail = cmds.CheckOK, url
@@ -207,12 +204,22 @@ func (h *healthSvc) refusedCheck() cmds.HealthCheck {
 	return cmds.HealthCheck{Name: cmds.CheckRefused, State: cmds.CheckWarn, Detail: fmt.Sprintf("%d unverified messages were refused", n)}
 }
 
-// Health runs the checks in order: config, creds, server, sign-in, refused. A failed config stops the rest; a failed
-// creds row leaves out sign-in, and so does a failed server row.
+// skipped is a row that could not be run: needs says which earlier row it waits on.
+func skipped(name, needs string) cmds.HealthCheck {
+	return cmds.HealthCheck{Name: name, State: cmds.CheckSkip, Detail: "needs the " + needs}
+}
+
+// Health runs the checks in order: config, creds, server, sign-in, refused, and always returns all five rows. A row
+// that an earlier failure means it cannot run is skipped: a failed config skips all four after it; sign-in needs creds
+// and server; refused needs server. The creds row and the server row do not wait on each other (the server is probed
+// with no credentials). At a shell with no endpoint chosen and none installed it returns cmds.ErrNoEndpointInstalled.
 func (h *healthSvc) Health(ctx context.Context) (cmds.HealthReport, error) {
 	var se *config.SeveralEndpointsError
 	if errors.As(h.cfgErr, &se) {
 		return cmds.HealthReport{}, h.cfgErr
+	}
+	if !h.session && h.cfgErr == nil && h.cfg.Name == "" {
+		return cmds.HealthReport{}, cmds.ErrNoEndpointInstalled
 	}
 	rep := cmds.HealthReport{}
 	if h.cfg.Name != "" {
@@ -221,8 +228,12 @@ func (h *healthSvc) Health(ctx context.Context) (cmds.HealthReport, error) {
 	cfgc := h.configCheck()
 	rep.Checks = append(rep.Checks, cfgc)
 	if cfgc.State == cmds.CheckFail {
+		for _, n := range []string{cmds.CheckCreds, cmds.CheckServer, cmds.CheckSignIn, cmds.CheckRefused} {
+			rep.Checks = append(rep.Checks, skipped(n, "config"))
+		}
 		return rep, nil
 	}
+	parent := ctx
 	if d := cliDeadline(h.cfg); d > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, d)
@@ -231,12 +242,24 @@ func (h *healthSvc) Health(ctx context.Context) (cmds.HealthReport, error) {
 	creds := h.credsCheck()
 	server := h.serverCheck(ctx)
 	rep.Checks = append(rep.Checks, creds, server)
-	if creds.State != cmds.CheckFail && server.State != cmds.CheckFail {
+	switch {
+	case creds.State == cmds.CheckFail:
+		rep.Checks = append(rep.Checks, skipped(cmds.CheckSignIn, "creds"))
+	case server.State == cmds.CheckFail:
+		rep.Checks = append(rep.Checks, skipped(cmds.CheckSignIn, "server"))
+	default:
 		sign, online := h.signInCheck(ctx)
 		rep.Checks = append(rep.Checks, sign)
 		rep.Online = online
 	}
-	rep.Checks = append(rep.Checks, h.refusedCheck())
+	if server.State == cmds.CheckFail {
+		rep.Checks = append(rep.Checks, skipped(cmds.CheckRefused, "server"))
+	} else {
+		rep.Checks = append(rep.Checks, h.refusedCheck())
+	}
+	if err := parent.Err(); err != nil { // the caller gave up (an MCP call was cancelled): there is no report to give
+		return cmds.HealthReport{}, err
+	}
 	return rep, nil
 }
 

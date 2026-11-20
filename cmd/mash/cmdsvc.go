@@ -140,7 +140,7 @@ func (s *cliSvc) Send(ctx context.Context, to, text string, o cmds.SendOptions) 
 		return cmds.SendReceipt{}, err.WithHint("mash send --help")
 	}
 	if cfg.Inert() {
-		return cmds.SendReceipt{}, cliframe.Failf("no endpoint: set MASH_ENDPOINT (owner.group.name), --endpoint, or install credentials for one endpoint").WithHint("mash status")
+		return cmds.SendReceipt{}, cliframe.Failf("no endpoint: set MASH_ENDPOINT (owner.group.name), --endpoint, or install credentials for one endpoint").WithHint("mash doctor")
 	}
 	ctx, cancel := context.WithTimeout(ctx, cliDeadline(cfg))
 	defer cancel()
@@ -190,7 +190,7 @@ func whoEntries(ps []endpoint.Presence, owner string) []cmds.WhoEntry {
 func (s *cliSvc) Who(ctx context.Context) ([]cmds.WhoEntry, error) {
 	cfg := s.cfg
 	if cfg.Inert() {
-		return nil, cliframe.Failf("no endpoint: set MASH_ENDPOINT (owner.group.name), --endpoint, or install credentials for one endpoint").WithHint("mash status")
+		return nil, cliframe.Failf("no endpoint: set MASH_ENDPOINT (owner.group.name), --endpoint, or install credentials for one endpoint").WithHint("mash doctor")
 	}
 	ctx, cancel := context.WithTimeout(ctx, cliDeadline(cfg))
 	defer cancel()

@@ -101,26 +101,6 @@ type sessionState struct {
 	superseded *endpoint.LeaseLostError
 }
 
-// recordConnection writes the session's terminal connection failure (err, redacted) to the endpoint's state
-// directory (a record nothing reads now that `mash status` signs in itself). Best effort: a failed
-// write is ignored. It runs before serve exits on the failure.
-func recordConnection(cfg config.Config, err error) {
-	_ = endpoint.RecordConnection(cfg, "failed", redactText(err.Error()), time.Now())
-}
-
-// watchConnection records the endpoint as connected (clearing any recorded failure) and records an authorization
-// failure of its live connection (its key revoked or reissued) when one arrives; a reconnect clears it again.
-func watchConnection(cfg config.Config, ep *endpoint.Endpoint) {
-	_ = endpoint.RecordConnection(cfg, "ok", "", time.Now())
-	ep.SetConnectionHook(func(err error) {
-		if err != nil {
-			recordConnection(cfg, err)
-			return
-		}
-		_ = endpoint.RecordConnection(cfg, "ok", "", time.Now())
-	})
-}
-
 // supersededText is what a superseded serve says: the newer serve of the same session handles the mail.
 func supersededText(name string, l *endpoint.LeaseLostError) string {
 	return fmt.Sprintf("mash: this server was superseded by a newer mash serve of the same session (pid %s, host %s); "+
@@ -222,7 +202,6 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 			fmt.Fprintln(stderr, err)
 			src.state = &atomic.Pointer[sessionState]{}
 			src.state.Store(&sessionState{failed: err})
-			recordConnection(cfg, err)
 			return degraded(endpoint.ErrorInstructions(cfg.DisplayName(), err), true)
 		}
 		startErr = err
@@ -234,7 +213,6 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 	switch {
 	case ep != nil:
 		state.Store(&sessionState{ep: ep})
-		watchConnection(cfg, ep)
 	case held != nil:
 		state.Store(&sessionState{waiting: held})
 		instr += waitingLine
@@ -487,7 +465,6 @@ func acquire(ctx context.Context, cfg config.Config, srv *mcp.Server, state *ato
 		case r.err == nil:
 			acquiredCount.Add(1)
 			state.Store(&sessionState{ep: r.ep})
-			watchConnection(cfg, r.ep)
 			return r.ep, true
 		case ctx.Err() != nil:
 			return nil, true // cancellation is never "held"
@@ -518,7 +495,6 @@ func acquire(ctx context.Context, cfg config.Config, srv *mcp.Server, state *ato
 			fmt.Fprintln(stderr, r.err)
 			failed = r.err
 			state.Store(&sessionState{failed: r.err})
-			recordConnection(cfg, r.err)
 			if ready == nil { // Claude is already listening: say so now
 				notify(endpoint.ErrorInstructions(cfg.DisplayName(), r.err))
 				return nil, true

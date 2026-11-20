@@ -301,7 +301,7 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 			fmt.Fprintf(stderr, "mash hook: %s: %v\n", config.CodeGroupMissing, err)
 			return 0
 		}
-		return cliframe.Report(stdout, stderr, cliframe.Usagef("%s: %s", config.CodeGroupMissing, strings.TrimPrefix(err.Error(), "mash: ")).WithHint("mash status"), jsonOut)
+		return cliframe.Report(stdout, stderr, cliframe.Usagef("%s: %s", config.CodeGroupMissing, strings.TrimPrefix(err.Error(), "mash: ")).WithHint("mash doctor"), jsonOut)
 	}
 	var adapter host.Adapter
 	if args[0] == "hook" || args[0] == "serve" {
@@ -313,20 +313,20 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 				fmt.Fprintln(stderr, herr)
 				return 1
 			}
-			return cliframe.Report(stdout, stderr, cliframe.Failf("%s", strings.TrimPrefix(herr.Error(), "mash: ")).WithHint("mash status"), jsonOut)
+			return cliframe.Report(stdout, stderr, cliframe.Failf("%s", strings.TrimPrefix(herr.Error(), "mash: ")).WithHint("mash doctor"), jsonOut)
 		}
 	}
 	if args[0] == "hook" { // never fails the session: a bad config is a silent no-op
 		return hook(cfg, err, adapter, env, stdin, stdout, stderr)
 	}
 	if err != nil && args[0] != "serve" && !report {
-		return cliframe.Report(stdout, stderr, cliframe.Failf("%s", strings.TrimPrefix(err.Error(), "mash: ")).WithHint("mash status"), jsonOut)
+		return cliframe.Report(stdout, stderr, cliframe.Failf("%s", strings.TrimPrefix(err.Error(), "mash: ")).WithHint("mash doctor"), jsonOut)
 	}
 	// A plain URL with no insecure_plaintext is refused before anything is connected (REQ-014): serve stops at session
 	// start and the commands that connect stop, exit 2, with the refusal on stderr.
 	if err == nil && !cfg.Inert() && args[0] != "admin" {
 		if _, perr := endpoint.EndpointTLS(cfg); perr != nil && !report { // a report says it as a row
-			return cliframe.Report(stdout, stderr, cliframe.Usagef("%s", strings.TrimPrefix(perr.Error(), "mash: ")).WithHint("mash status"), jsonOut)
+			return cliframe.Report(stdout, stderr, cliframe.Usagef("%s", strings.TrimPrefix(perr.Error(), "mash: ")).WithHint("mash doctor"), jsonOut)
 		}
 		// serve says it once at start (reportSettings); a command says it here, once, before it connects.
 		if w := endpoint.PlainWarning(cfg); w != "" && args[0] != "serve" {

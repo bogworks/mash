@@ -12,7 +12,7 @@ func loadCfg(env map[string]string) (config.Config, error) {
 	return config.Load(config.LookupFromFunc(e), e("HOME"))
 }
 
-// A future error must not be able to carry a credential into connection.json or the status output: a JWT and an nkey
+// A future error must not be able to carry a credential into an error text, a log or a report: a JWT and an nkey
 // seed are masked as well as URL userinfo.
 func TestRedactTextMasksJWTAndSeed(t *testing.T) {
 	jwtLike := "eyJ0eXAiOiJKV1QiLCJhbGciOiJlZDI1NTE5LW5rZXkifQ.eyJqdGkiOiJBQkNERUZHSElKS0xNTk9QIiwiaWF0IjoxNzAwMDAwMDAwfQ.c2lnbmF0dXJlLWJ5dGVzLWhlcmU"

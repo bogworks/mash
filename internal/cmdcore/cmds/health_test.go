@@ -40,6 +40,13 @@ func refusedSignIn() *fakeHealth {
 		{Name: "refused", State: cmds.CheckWarn, Detail: "3 unverified messages were refused"}}}}
 }
 
+// skippedAfterServer is the report of the specification's "A check that could not run" case.
+func skippedAfterServer() *fakeHealth {
+	return report("acme.demo.bob", false, ok("config", ""), ok("creds", ""),
+		cmds.HealthCheck{Name: "server", State: cmds.CheckFail, Detail: "the server did not answer: tls://myserver:4222"},
+		skip("sign-in", "server"), skip("refused", "server"))
+}
+
 func healthEnv(svc any) cmdcore.EnvFunc {
 	return func(context.Context) (*cmdcore.Env, error) { return &cmdcore.Env{Svc: svc}, nil }
 }
@@ -54,6 +61,16 @@ func runDoctor(svc any, g cliframe.Global, args ...string) (code int, out, errs 
 	var o, e bytes.Buffer
 	code = cmdcore.CLI(cmds.Doctor, healthEnv(svc))(args, strings.NewReader(""), &o, &e, g)
 	return code, o.String(), e.String()
+}
+
+// noSessionEndpoint is what a session that names no endpoint reports: the config row fails and the rest cannot run.
+func noSessionEndpoint() *fakeHealth {
+	return report("", false, cmds.HealthCheck{Name: "config", State: cmds.CheckFail, Detail: cmds.ReasonNoSessionEndpoint, Fix: cmds.SessionEndpointFix},
+		skip("creds", "config"), skip("server", "config"), skip("sign-in", "config"), skip("refused", "config"))
+}
+
+func skip(name, needs string) cmds.HealthCheck {
+	return cmds.HealthCheck{Name: name, State: cmds.CheckSkip, Detail: "needs the " + needs}
 }
 
 func report(endpoint string, online bool, checks ...cmds.HealthCheck) *fakeHealth {
@@ -106,11 +123,37 @@ func TestStatusMatchesSpec(t *testing.T) {
 		case "Working, an agent session is holding it open":
 			code, out, errs = runStatus(report("acme.demo.bob", true, ok("config", ""), ok("sign-in", "")), cliframe.Global{})
 		case "No endpoint chosen and several installed":
+			// the specification's own text, then the hint when the addresses come in no particular order
+			code, out, errs = runStatus(&fakeHealth{err: &config.SeveralEndpointsError{Addresses: []string{"acme.demo.bob", "acme.demo.alice"}}}, cliframe.Global{})
+			wantErr := strings.SplitN(text, "\n", 2)[0]
+			wantErr = "error: more than one endpoint is installed here: acme.demo.bob, acme.demo.alice"
+			_ = wantErr
 			code, out, errs = runStatus(&fakeHealth{err: &config.SeveralEndpointsError{Addresses: []string{"acme.demo.alice", "acme.demo.bob"}}}, cliframe.Global{})
-			// the spec's text is the error, then a hint; the hint names the first address installed (the spec's example names the second)
-			wantErr := strings.SplitN(text, "\n", 2)[0] + "\n"
-			if code != 2 || out != "" || !strings.HasPrefix(errs, wantErr) || errs != wantErr+"hint: mash status --endpoint acme.demo.alice\n" {
+			if code != 2 || out != "" || errs != text+"\n" || code != int(oc["exit"].(float64)) {
 				t.Errorf("%s: %d %q %q, spec %q", oc["case"], code, out, errs, text)
+			}
+			_, _, errs = runStatus(&fakeHealth{err: &config.SeveralEndpointsError{Addresses: []string{"acme.demo.bob", "acme.demo.alice"}}}, cliframe.Global{})
+			if !strings.HasSuffix(errs, "\nhint: mash status --endpoint acme.demo.alice\n") {
+				t.Errorf("unsorted addresses: %q", errs)
+			}
+			continue
+		case "No endpoint installed":
+			code, out, errs = runStatus(&fakeHealth{err: cmds.ErrNoEndpointInstalled}, cliframe.Global{})
+			if code != 2 || out != "" || errs != text+"\n" || code != int(oc["exit"].(float64)) {
+				t.Errorf("%s: %d %q %q, spec %q", oc["case"], code, out, errs, text)
+			}
+			continue
+		case "As an MCP tool in a session with no endpoint named":
+			// a normal answer: the text block is the line, then the hint on the next line
+			rep := noSessionEndpoint()
+			reg := cmdcore.NewRegistry(healthEnv(rep), cmdcore.Register(cmds.Status))
+			e, _ := reg.Lookup("status")
+			got, structured, err := e.Tool(reg.Env).CallStructured(context.Background(), nil)
+			if err != nil || got != text {
+				t.Errorf("%s: %q %v, spec %q", oc["case"], got, err, text)
+			}
+			if b, _ := json.Marshal(structured); string(b) != `{"endpoint":null,"ready":false,"online":false,"reason":"no endpoint is chosen for this session"}` {
+				t.Errorf("%s: structured %s", oc["case"], b)
 			}
 			continue
 		default:
@@ -160,10 +203,15 @@ func TestStatusStates(t *testing.T) {
 	if code != 0 || out != "a.b.c: ready, online\n" || errs != "" {
 		t.Errorf("warn: %d %q %q", code, out, errs)
 	}
-	// no endpoint: named "mash", the endpoint is null
-	code, out, _ = runStatus(report("", false, cmds.HealthCheck{Name: "config", State: cmds.CheckFail, Detail: "no endpoint is chosen for this session"}), cliframe.Global{})
-	if code != 1 || out != "mash: not ready: no endpoint is chosen for this session\n" {
-		t.Errorf("no endpoint: %d %q", code, out)
+	// a session with no endpoint named: its own line and hint, the endpoint is null
+	code, out, errs = runStatus(noSessionEndpoint(), cliframe.Global{})
+	if code != 1 || out != "No endpoint is chosen for this session.\n" || errs != "hint: start the session with MASH_ENDPOINT=<address>\n" {
+		t.Errorf("no endpoint: %d %q %q", code, out, errs)
+	}
+	// any other row that fails with no endpoint (a config that does not load): named "mash"
+	code, out, errs = runStatus(report("", false, cmds.HealthCheck{Name: "config", State: cmds.CheckFail, Detail: "config.json is not valid"}), cliframe.Global{})
+	if code != 1 || out != "mash: not ready: config.json is not valid\n" || errs != "hint: mash doctor\n" {
+		t.Errorf("no endpoint, bad config: %d %q %q", code, out, errs)
 	}
 	_, out, _ = runStatus(report("", false, cmds.HealthCheck{Name: "config", State: cmds.CheckFail, Detail: "d"}), cliframe.Global{JSON: true})
 	if out != `{"endpoint":null,"ready":false,"online":false,"reason":"d"}`+"\n" {
@@ -228,6 +276,8 @@ func TestDoctorMatchesSpec(t *testing.T) {
 			f = allWell()
 		case "A problem and a warning":
 			f = refusedSignIn()
+		case "A check that could not run":
+			f = skippedAfterServer()
 		default:
 			t.Errorf("unknown spec case %v", oc["case"])
 			continue
@@ -242,7 +292,7 @@ func TestDoctorMatchesSpec(t *testing.T) {
 			t.Errorf("%s: %d %q %q\nspec %q", oc["case"], code, out, errs, oc["text"])
 		}
 	}
-	// the object: the spec's x-json lists the failing check; ours lists every row, and the failing one is the spec's
+	// the object: the spec's x-json lists every row, each with the four keys
 	_, out, _ := runDoctor(refusedSignIn(), cliframe.Global{JSON: true})
 	var got, spec struct {
 		Endpoint string
@@ -256,11 +306,14 @@ func TestDoctorMatchesSpec(t *testing.T) {
 	if err := json.Unmarshal(mustJSON(meta["x-json"]), &spec); err != nil {
 		t.Fatal(err)
 	}
-	if got.Endpoint != spec.Endpoint || got.Problems != spec.Problems || got.Warnings != spec.Warnings || len(got.Checks) != 5 {
+	if got.Endpoint != spec.Endpoint || got.Problems != spec.Problems || got.Warnings != spec.Warnings || !reflect.DeepEqual(got.Checks, spec.Checks) {
 		t.Errorf("object %s, spec x-json %v", out, meta["x-json"])
 	}
-	if !reflect.DeepEqual(got.Checks[3], spec.Checks[0]) {
-		t.Errorf("the failing check %v, spec %v", got.Checks[3], spec.Checks[0])
+	// skipped rows are in the object with state skip and the detail, and are neither a problem nor a warning
+	_, sk, _ := runDoctor(skippedAfterServer(), cliframe.Global{JSON: true})
+	if !strings.Contains(sk, `"problems":1,"warnings":0`) || !strings.Contains(sk, `{"name":"sign-in","state":"skip","detail":"needs the server","fix":null}`) ||
+		!strings.Contains(sk, `{"name":"refused","state":"skip","detail":"needs the server","fix":null}`) {
+		t.Errorf("skipped rows: %s", sk)
 	}
 	if !sameJSON(t, string(mustJSON(meta["x-json"])), string(mustJSON(specTool(t, "doctor")["structured"]))) {
 		t.Error("spec/mash.json x-json and spec/mash-mcp.json structured differ")
@@ -271,6 +324,51 @@ func TestDoctorMatchesSpec(t *testing.T) {
 	// every row has the four keys; null where nothing is said
 	if !strings.Contains(out, `{"name":"config","state":"ok","detail":null,"fix":null}`) || !strings.Contains(out, `{"name":"server","state":"ok","detail":"tls://myserver:4222","fix":null}`) {
 		t.Errorf("rows: %s", out)
+	}
+}
+
+// A session that names no endpoint: doctor says so in the one line, with the fix as its hint, and the object lists every row.
+func TestDoctorNoSessionEndpoint(t *testing.T) {
+	code, out, errs := runDoctor(noSessionEndpoint(), cliframe.Global{})
+	if code != 1 || out != "No endpoint is chosen for this session.\n" || errs != "hint: start the session with MASH_ENDPOINT=<address>\n" {
+		t.Errorf("%d %q %q", code, out, errs)
+	}
+	_, out, _ = runDoctor(noSessionEndpoint(), cliframe.Global{JSON: true})
+	if !strings.HasPrefix(out, `{"endpoint":null,"problems":1,"warnings":0,"checks":[{"name":"config","state":"fail",`) || strings.Count(out, `"name"`) != 5 {
+		t.Errorf("object %s", out)
+	}
+	if code, out, errs := runDoctor(&fakeHealth{err: cmds.ErrNoEndpointInstalled}, cliframe.Global{}); code != 2 || out != "" ||
+		errs != "error: no endpoint is installed here\nhint: mash join <file>\n" {
+		t.Errorf("none installed: %d %q %q", code, out, errs)
+	}
+	if code, out, errs := runDoctor(&fakeHealth{err: cmds.ErrNoEndpointInstalled}, cliframe.Global{JSON: true}); code != 2 || errs != "" ||
+		out != `{"error":"no endpoint is installed here","hint":"mash join <file>"}`+"\n" {
+		t.Errorf("none installed, json: %d %q %q", code, out, errs)
+	}
+}
+
+// What the command is called with is the caller's context, so a cancelled call stops what the checks wait on.
+type ctxHealth struct{ got context.Context }
+
+func (c *ctxHealth) Health(ctx context.Context) (cmds.HealthReport, error) {
+	c.got = ctx
+	return cmds.HealthReport{}, ctx.Err()
+}
+
+func TestStatusAndDoctorPassTheCallersContext(t *testing.T) {
+	type key struct{}
+	for _, name := range []string{"status", "doctor"} {
+		f := &ctxHealth{}
+		reg := cmdcore.NewRegistry(healthEnv(f), cmdcore.Register(cmds.Status), cmdcore.Register(cmds.Doctor))
+		e, _ := reg.Lookup(name)
+		ctx, cancel := context.WithCancel(context.WithValue(context.Background(), key{}, 1))
+		cancel()
+		if _, _, err := e.Tool(reg.Env).CallStructured(ctx, nil); err == nil {
+			t.Errorf("%s: a cancelled call answered", name)
+		}
+		if f.got == nil || f.got.Value(key{}) != 1 || f.got.Err() == nil {
+			t.Errorf("%s: the service got a context that is not the caller's: %v", name, f.got)
+		}
 	}
 }
 
@@ -293,6 +391,7 @@ func TestDoctorSummaryAndHint(t *testing.T) {
 		{"mashctl fix", []cmds.HealthCheck{fail("mashctl endpoint reissue a.b.c")}, "1 problem.", 1, "ask whoever runs your mesh to run: mashctl endpoint reissue a.b.c"},
 		{"other fix", []cmds.HealthCheck{fail("chmod 600 /x")}, "1 problem.", 1, "chmod 600 /x"},
 		{"first fixable only", []cmds.HealthCheck{fail(""), fail("chmod 600 /x"), fail("mashctl x")}, "3 problems.", 1, "chmod 600 /x"},
+		{"a skip is neither a problem nor a warning", []cmds.HealthCheck{fail("mashctl x"), skip("sign-in", "creds"), skip("refused", "creds")}, "1 problem.", 1, "ask whoever runs your mesh to run: mashctl x"},
 		{"a warn's fix is no hint", []cmds.HealthCheck{{Name: "refused", State: cmds.CheckWarn, Detail: "w", Fix: "mashctl y"}}, "1 warning.", 0, ""},
 	} {
 		code, out, errs := runDoctor(report("a.b.c", false, tc.checks...), cliframe.Global{})
@@ -330,7 +429,9 @@ func TestStatusAndDoctorDoorsAgree(t *testing.T) {
 		{"status not ready", "status", refusedSignIn()},
 		{"doctor well", "doctor", allWell()},
 		{"doctor problem", "doctor", refusedSignIn()},
-		{"doctor no endpoint", "doctor", report("", false, cmds.HealthCheck{Name: "config", State: cmds.CheckFail, Detail: "no endpoint is chosen for this session", Fix: "start the session with MASH_ENDPOINT=<address>"})},
+		{"doctor no endpoint", "doctor", noSessionEndpoint()},
+		{"status no endpoint", "status", noSessionEndpoint()},
+		{"doctor skipped rows", "doctor", skippedAfterServer()},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			reg := cmdcore.NewRegistry(healthEnv(tc.f), cmdcore.Register(cmds.Status), cmdcore.Register(cmds.Doctor))
