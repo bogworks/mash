@@ -664,6 +664,18 @@ func (s Spool) Refused() (at time.Time, why string, ok bool) {
 // It holds no mail and no secret. Own removes it, so it is always the current holder's.
 func (s Spool) NoteHookState(b []byte) error { return s.writeOrRemove(hookState, string(b)) }
 
+// Writable says whether the folder takes a file now, by trying it: it creates a file of its own name in the folder and
+// removes that exact path. Nothing is recorded about the result; whoever asks tries for itself.
+func (s Spool) Writable() bool {
+	p := filepath.Join(s.Dir, fmt.Sprintf(".probe-%d-%d", os.Getpid(), time.Now().UnixNano()))
+	f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return false
+	}
+	f.Close()
+	return os.Remove(p) == nil
+}
+
 // HookState is what NoteHookState recorded, and whether there is one.
 func (s Spool) HookState() ([]byte, bool) {
 	b, err := os.ReadFile(filepath.Join(s.Dir, hookState))

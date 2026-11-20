@@ -152,6 +152,15 @@ func credsText(j joinfile.File, req cmds.JoinRequest) ([]byte, error) {
 }
 
 // serversIn is the servers a config.json value names: a JSON array of strings, or one string that is a comma list.
+// stringIn is the JSON string raw holds, "" when it is absent or not a string.
+func stringIn(raw json.RawMessage) string {
+	var v string
+	if json.Unmarshal(raw, &v) != nil {
+		return ""
+	}
+	return v
+}
+
 func serversIn(raw json.RawMessage) []string {
 	if len(raw) == 0 {
 		return nil
@@ -240,7 +249,15 @@ func (s joinSvc) Join(_ context.Context, req cmds.JoinRequest) (cmds.JoinOutcome
 
 	// The certificate authority: the folder's ca.pem is every endpoint's trust, so a join file that brings a different
 	// one, or none where the folder has one, is refused.
-	caPath := filepath.Join(dir, joinCAFile)
+	// The folder's certificate authority is the file config.json's "ca" names (a relative path is read against the
+	// folder, a ~ against the home), else ca.pem.
+	caPath, caSet := filepath.Join(dir, joinCAFile), false
+	if named := stringIn(cfg["ca"]); named != "" {
+		caSet = true
+		if caPath = config.ExpandHome(named, s.home); !filepath.IsAbs(caPath) {
+			caPath = filepath.Join(dir, caPath)
+		}
+	}
 	var caText []byte
 	writeCA := false
 	old, caErr := os.ReadFile(caPath)
@@ -254,7 +271,13 @@ func (s joinSvc) Join(_ context.Context, req cmds.JoinRequest) (cmds.JoinOutcome
 		}
 	}
 	switch {
+	case caErr != nil && caSet && j.CA != nil: // config.json names a certificate authority file that is not there: nothing to compare with
+		return cmds.JoinOutcome{}, cliframe.Failf("cannot read %s: it is missing", s.shown(caPath)).WithHint("mash doctor")
 	case caErr == nil && !bytes.Equal(old, caText):
+		return cmds.JoinOutcome{}, otherFolder("ca")
+	case caErr != nil && j.CA != nil && len(config.InstalledEndpoints(dir)) > 0:
+		// the folder has no certificate authority and already holds an endpoint: that endpoint trusts the system's
+		// roots, and one that brings a ca would change what it trusts. The first join into an empty folder sets it.
 		return cmds.JoinOutcome{}, otherFolder("ca")
 	case caErr != nil && j.CA != nil:
 		writeCA = true

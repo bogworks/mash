@@ -46,9 +46,18 @@ const (
 // The delivery row's words for a session whose hooks have not delivered mail yet (a warning) and for one whose hooks
 // are suspected, degraded or refused (a failure).
 const (
-	ReasonHooksNotRun  = "hooks have not run in this session yet"
-	ReasonHooksFailing = "hooks are not delivering mail to this session"
+	ReasonHooksNotRun  = "hooks have not run in this session yet; they run with the first prompt or tool call"
+	ReasonHooksFailing = "hooks are not delivering mail to this session; restart the session after reinstalling"
+	// HooksFailingFix is the delivery row's fix for failing hooks. The not-yet-run warning has none: no command fixes it.
+	HooksFailingFix = "claude plugin install mash@mash"
 )
+
+// hookRowWraps is where the text form breaks the delivery row's two hook details, as the specification's page shows them:
+// the line, and the rest under the detail column.
+var hookRowWraps = map[string][2]string{
+	ReasonHooksNotRun:  {"hooks have not run in this session yet; they run with", "the first prompt or tool call"},
+	ReasonHooksFailing: {"hooks are not delivering mail to this session;", "restart the session after reinstalling"},
+}
 
 // leaseReason is the words for a session that does not hold its endpoint ("" when it does): the cause of one that
 // could not take it follows after ": ".
@@ -82,6 +91,23 @@ const (
 	CheckRefused  = "refused"
 )
 
+// The reason codes of status --detail: a fixed word beside the free-text reason. Each names the failure that produces it.
+const (
+	CodeNoEndpoint            = "no_endpoint"             // a session names no endpoint
+	CodeEndpointsAmbiguous    = "endpoints_ambiguous"     // no endpoint is named and several are installed
+	CodeConfigUnreadable      = "config_unreadable"       // the configuration cannot be read or is incomplete
+	CodeCredsMissing          = "creds_missing"           // the creds file is missing or unusable
+	CodeCredsRefused          = "creds_refused"           // the server refused the creds, or they are another endpoint's
+	CodeEndpointDeleted       = "endpoint_deleted"        // the endpoint's directory record is gone
+	CodeServerUnreachable     = "server_unreachable"      // no server answered
+	CodeServerUntrusted       = "server_untrusted"        // the server's certificate is not trusted, or it refused ours
+	CodeServerNoTLS           = "server_no_tls"           // a plain address, or a server that offers no TLS
+	CodeEndpointHeldElsewhere = "endpoint_held_elsewhere" // another session holds the endpoint
+	CodeEndpointLost          = "endpoint_lost"           // a newer session took it from this one
+	CodeEndpointNotTaken      = "endpoint_not_taken"      // this session could not take it
+	CodeStorageUnwritable     = "storage_unwritable"      // the mail folder cannot be written
+)
+
 // HealthCheck is one row the service found. Detail is what the row says after its state ("" says nothing). Fix is the
 // command or step that mends a warn or fail row ("" when none is known). Reason is how status words a failing row when
 // that differs from Detail ("" means Detail).
@@ -91,6 +117,9 @@ type HealthCheck struct {
 	Detail string
 	Fix    string
 	Reason string
+	// Code is the reason_code status gives when this row fails (one of the Code constants), set where the failure is
+	// classified; "" on a row that did not fail.
+	Code string
 }
 
 // HealthReport is what status and doctor are both made from: the endpoint (empty when none is chosen), whether an
@@ -205,39 +234,6 @@ func (r StatusResult) DetailText(cmdcore.Opts) string {
 	return fmt.Sprintf("holds endpoint: %s\nhooks:          %s\nstorage:        %s", yn[r.session.HoldsEndpoint], r.session.Hooks, r.session.Storage)
 }
 
-// reasonCodeOf is the fixed word for the check (or session state) that made status say not ready.
-func reasonCodeOf(check, reason string) string {
-	switch check {
-	case CheckConfig:
-		switch {
-		case reason == ReasonNoSessionEndpoint || strings.Contains(reason, "no endpoint"):
-			return "no_endpoint"
-		case strings.Contains(reason, "more than one endpoint"):
-			return "endpoints_ambiguous"
-		}
-		return "config_unreadable"
-	case CheckCreds:
-		return "creds_missing"
-	case CheckServer:
-		switch {
-		case strings.Contains(reason, "not trusted"):
-			return "server_untrusted"
-		case strings.Contains(reason, "did not offer TLS"):
-			return "server_no_tls"
-		}
-		return "server_unreachable"
-	case CheckSignIn:
-		switch {
-		case strings.Contains(reason, "refused"):
-			return "creds_refused"
-		case strings.Contains(reason, "does not exist") || strings.Contains(reason, "deleted"):
-			return "endpoint_deleted"
-		}
-		return "server_unreachable"
-	}
-	return ""
-}
-
 // noSessionEndpoint is the answer of a session that names no endpoint.
 func (r StatusResult) noSessionEndpoint() bool {
 	return !r.Ready && r.Endpoint == nil && r.Reason != nil && *r.Reason == ReasonNoSessionEndpoint
@@ -318,18 +314,18 @@ var Status = cmdcore.Command[StatusParams, StatusResult]{
 					reason = c.Detail
 				}
 				r.Ready, r.Reason = false, &reason
-				r.reasonCode = reasonCodeOf(c.Name, reason)
+				r.reasonCode = c.Code
 				break
 			}
 		}
 		// a row that fails is the first thing to mend and is what both doors say; the session's own state comes next
 		if reason := leaseReason(rep.Lease, rep.LeaseCause); r.Ready && reason != "" {
 			r.Ready, r.Reason = false, &reason
-			r.reasonCode = map[string]string{LeaseOther: "endpoint_held_elsewhere", LeaseLost: "endpoint_lost", LeaseFailed: "endpoint_not_taken"}[rep.Lease]
+			r.reasonCode = map[string]string{LeaseOther: CodeEndpointHeldElsewhere, LeaseLost: CodeEndpointLost, LeaseFailed: CodeEndpointNotTaken}[rep.Lease]
 		}
 		if r.Ready && rep.MailHeld {
 			reason := ReasonMailHeld
-			r.Ready, r.Reason, r.reasonCode = false, &reason, "storage_unwritable"
+			r.Ready, r.Reason, r.reasonCode = false, &reason, CodeStorageUnwritable
 		}
 		r.Online = r.Ready && rep.Online
 		return r, nil
@@ -385,6 +381,9 @@ func (r DoctorResult) Text(cmdcore.Opts) string {
 						detail, extra = head+":", "\n"+strings.Repeat(" ", 16)+path
 					}
 				}
+			}
+			if w, ok := hookRowWraps[detail]; ok && c.Name == CheckDelivery {
+				detail, extra = w[0], "\n"+strings.Repeat(" ", 16)+w[1]
 			}
 			line += detail
 		}

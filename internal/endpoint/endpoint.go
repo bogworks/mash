@@ -266,7 +266,7 @@ func checkCredsFor(path, name string) error {
 	if addr, perr := sap.AddressFromFlat(name); perr == nil && allow.Contains(addr.InboxPrefix()+".>") {
 		return nil
 	}
-	return fmt.Errorf("mash: the credentials in %s do not match endpoint %s (they are for another endpoint)", path, sap.Display(name))
+	return &sentinelError{kind: ErrCredsMismatch, err: fmt.Errorf("mash: the credentials in %s do not match endpoint %s (they are for another endpoint)", path, sap.Display(name))}
 }
 
 func readIdentity(path string) (sap.Identity, error) {

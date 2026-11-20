@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,8 +19,19 @@ func recordTo(t *testing.T, sp spool.Spool, rec HookRecord) {
 	}
 }
 
+// readOnly makes dir refuse new files for the rest of the test, and says false when the test runs where that is not
+// possible (as root, whom a mode does not stop).
+func readOnly(t *testing.T, dir string) bool {
+	t.Helper()
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(dir, 0o700) })
+	return !(spool.Spool{Dir: dir}).Writable()
+}
+
 // A shell reads the session from the record only while the serve that wrote it exists, on this machine; a hook run and a
-// refusal are read from the spool itself.
+// refusal are read from the spool itself, and the storage by trying the folder.
 func TestSessionOnDisk(t *testing.T) {
 	sp := spool.Spool{Dir: t.TempDir()}
 	host, _ := os.Hostname()
@@ -27,20 +39,30 @@ func TestSessionOnDisk(t *testing.T) {
 	if _, _, ok := SessionOnDisk(sp); ok {
 		t.Fatal("a session with no record")
 	}
-	self := HookRecord{Hooks: HookSuspected, Storage: StorageOK, Since: since, Host: host, PID: strconv.Itoa(os.Getpid())}
+	self := HookRecord{Hooks: HookSuspected, Since: since, Host: host, PID: strconv.Itoa(os.Getpid())}
 	self.Start, _ = procStart(os.Getpid())
 	recordTo(t, sp, self)
 	if h, st, ok := SessionOnDisk(sp); !ok || h != HookSuspected || st != StorageOK {
 		t.Errorf("suspected: %q %q %v", h, st, ok)
 	}
-	self.Hooks, self.Storage = "", StorageFailing
+	self.Hooks = ""
 	recordTo(t, sp, self)
-	if h, st, ok := SessionOnDisk(sp); !ok || h != HookNotRun || st != StorageFailing {
-		t.Errorf("not run: %q %q %v", h, st, ok)
+	if h, _, ok := SessionOnDisk(sp); !ok || h != HookNotRun {
+		t.Errorf("not run: %q %v", h, ok)
+	}
+	self.Hooks = HookDegraded
+	recordTo(t, sp, self)
+	if h, _, _ := SessionOnDisk(sp); h != HookDegraded {
+		t.Errorf("degraded: %q", h)
 	}
 	if err := sp.NoteRefused(spool.Refusal{Time: time.Now(), Why: "x"}); err != nil {
 		t.Fatal(err)
 	}
+	if h, _, _ := SessionOnDisk(sp); h != HookDegraded {
+		t.Errorf("degraded outranks a refusal: %q", h)
+	}
+	self.Hooks = ""
+	recordTo(t, sp, self)
 	if h, _, _ := SessionOnDisk(sp); h != HookRefused {
 		t.Errorf("refused: %q", h)
 	}
@@ -56,11 +78,92 @@ func TestSessionOnDisk(t *testing.T) {
 	if _, _, ok := SessionOnDisk(sp); ok {
 		t.Error("a record of another machine")
 	}
+	gone := self
+	gone.PID = "2147483646" // no such process
+	gone.Start = ""
+	recordTo(t, sp, gone)
+	if _, _, ok := SessionOnDisk(sp); ok {
+		t.Error("a record of a serve that is gone")
+	}
 	// Own starts the next holder clean
 	if err := sp.Own(`{"pid":1}`); err != nil {
 		t.Fatal(err)
 	}
 	if _, found := sp.HookState(); found {
 		t.Error("the record outlived Own")
+	}
+}
+
+// The storage is the reader's own try at the folder; the record says nothing about it.
+func TestSessionOnDiskStorageIsTriedByTheReader(t *testing.T) {
+	dir := t.TempDir()
+	sp := spool.Spool{Dir: dir}
+	host, _ := os.Hostname()
+	self := HookRecord{Since: time.Now().Add(-time.Minute), Host: host, PID: strconv.Itoa(os.Getpid())}
+	self.Start, _ = procStart(os.Getpid())
+	recordTo(t, sp, self)
+	if b, _ := sp.HookState(); strings.Contains(string(b), "storage") {
+		t.Errorf("the record holds a storage field: %s", b)
+	}
+	if !readOnly(t, dir) {
+		t.Skip("a read-only folder is still writable here")
+	}
+	if _, st, ok := SessionOnDisk(sp); !ok || st != StorageFailing {
+		t.Errorf("read-only folder: %q %v", st, ok)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 1 {
+		t.Errorf("the try left files behind: %v", entries)
+	}
+}
+
+func boundEndpoint(t *testing.T, since time.Time) (*Endpoint, spool.Spool) {
+	t.Helper()
+	sp := spool.Spool{Dir: t.TempDir()}
+	e := &Endpoint{}
+	e.hl.bind(sp, since)
+	e.hl.fromStart()
+	return e, sp
+}
+
+// The periodic recorder reads the detector as it stands: one real tool call followed by HookGrace is not two calls.
+func TestRecordHookStateSuppliesNoSyntheticCall(t *testing.T) {
+	e, sp := boundEndpoint(t, time.Now().Add(-time.Minute))
+	e.ToolCalled(time.Now().Add(-HookGrace - time.Second))
+	e.RecordHookState()
+	b, found := sp.HookState()
+	if !found {
+		t.Fatal("nothing recorded")
+	}
+	var rec HookRecord
+	if err := json.Unmarshal(b, &rec); err != nil || rec.Hooks != "" {
+		t.Errorf("one real call recorded as %q (%v)", rec.Hooks, err)
+	}
+	// two real calls HookGrace apart are proof
+	e.ToolCalled(time.Now())
+	e.RecordHookState()
+	b, _ = sp.HookState()
+	_ = json.Unmarshal(b, &rec)
+	if rec.Hooks != HookDegraded {
+		t.Errorf("two real calls recorded as %q", rec.Hooks)
+	}
+}
+
+// A serve that stops holding the endpoint takes its own record away, and only its own.
+func TestClearHookStateRemovesOnlyItsOwn(t *testing.T) {
+	e, sp := boundEndpoint(t, time.Now().Add(-time.Minute))
+	e.RecordHookState()
+	if _, found := sp.HookState(); !found {
+		t.Fatal("nothing recorded")
+	}
+	e.clearHookState()
+	if _, found := sp.HookState(); found {
+		t.Error("the record outlived the serve's hold")
+	}
+	// a newer serve's record is left alone
+	newer := HookRecord{Since: time.Now(), PID: "1", Host: "h"}
+	recordTo(t, sp, newer)
+	e.clearHookState()
+	if _, found := sp.HookState(); !found {
+		t.Error("another serve's record was removed")
 	}
 }

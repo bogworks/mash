@@ -60,8 +60,12 @@ func checkVersion(t *testing.T, r map[string]any, plugin string) {
 	if sc == nil {
 		t.Fatalf("no structuredContent in %v", r)
 	}
-	if sc["version"] != version || sc["commit"] != commit || sc["plugin"] != plugin || len(sc) != 3 {
-		t.Errorf("structuredContent %v, want version %q commit %q plugin %q", sc, version, commit, plugin)
+	full := endpoint.CurrentCommit()
+	if full == "" {
+		full = "unknown"
+	}
+	if sc["version"] != version || sc["commit"] != full || sc["plugin"] != plugin || len(sc) != 3 {
+		t.Errorf("structuredContent %v, want version %q commit %q plugin %q", sc, version, full, plugin)
 	}
 }
 

@@ -47,7 +47,7 @@ func TestStatusDetailHookStatesAgreeAtShellAndInSession(t *testing.T) {
 	if got := toolSession(t, s, 30); got != notRun {
 		t.Errorf("tool: %s", got)
 	}
-	if out := resultText(s.call(t, 31, "doctor", `{}`)); !strings.Contains(out, "delivery  warn  hooks have not run in this session yet") {
+	if out := resultText(s.call(t, 31, "doctor", `{}`)); !strings.Contains(out, "delivery  warn  hooks have not run in this session yet; they run with\n                the first prompt or tool call\n") {
 		t.Errorf("doctor: %s", out)
 	}
 	time.Sleep(endpoint.HookGrace + 100*time.Millisecond)
@@ -57,7 +57,7 @@ func TestStatusDetailHookStatesAgreeAtShellAndInSession(t *testing.T) {
 		t.Errorf("tool: %s", got)
 	}
 	eventually(t, 10*time.Second, "shell sees degraded", func() bool { got, _ := shellSession(t, w); return got == degraded })
-	if out := resultText(s.call(t, 34, "doctor", `{}`)); !strings.Contains(out, "delivery  FAIL  hooks are not delivering mail to this session") {
+	if out := resultText(s.call(t, 34, "doctor", `{}`)); !strings.Contains(out, "delivery  FAIL  hooks are not delivering mail to this session;\n                restart the session after reinstalling\n") {
 		t.Errorf("doctor: %s", out)
 	}
 	// a hook runs: both say ran at once, with no wait for serve
@@ -94,4 +94,34 @@ func hookRan(t *testing.T, w *world, s *session, name string) {
 		hookRanID++
 		return strings.Contains(resultText(s.call(t, hookRanID, "status", `{"detail":true}`)), "hooks:          ran")
 	})
+}
+
+// The delivery row's two hook texts are the specification's: a warning with no hint while hooks have not run (so
+// doctor --strict fails until the first hook runs: there is no grace timer), and a failure with the hint to reinstall.
+func TestDoctorDeliveryRowHookTexts(t *testing.T) {
+	w, s := hooklessWorld(t, 150*time.Millisecond)
+	eventually(t, 10*time.Second, "shell sees the session", func() bool { got, _ := shellSession(t, w); return strings.Contains(got, "not_run") })
+	const warn = "delivery  warn  hooks have not run in this session yet; they run with\n                the first prompt or tool call\n"
+	if out := resultText(s.call(t, 80, "doctor", `{}`)); !strings.Contains(out, warn) || strings.Contains(out, "hint:") {
+		t.Errorf("not yet run: %q", out) // no hint line after it
+	}
+	strict := s.call(t, 81, "doctor", `{"strict":true}`)
+	if strict["isError"] != true {
+		t.Errorf("a just-started session passed --strict: %v", strict)
+	}
+	sc, _ := s.call(t, 82, "doctor", `{}`)["structuredContent"].(map[string]any)
+	if row := deliveryRow(t, sc); row["detail"] != "hooks have not run in this session yet; they run with the first prompt or tool call" || row["fix"] != nil {
+		t.Errorf("row: %v", row)
+	}
+	time.Sleep(endpoint.HookGrace + 100*time.Millisecond)
+	toolSession(t, s, 83)
+	toolSession(t, s, 84) // two calls well apart, no hook: degraded
+	const fail = "delivery  FAIL  hooks are not delivering mail to this session;\n                restart the session after reinstalling\n"
+	if out := resultText(s.call(t, 85, "doctor", `{}`)); !strings.Contains(out, fail) || !strings.HasSuffix(out, "\nhint: claude plugin install mash@mash") {
+		t.Errorf("failing: %q", out)
+	}
+	sc, _ = s.call(t, 86, "doctor", `{}`)["structuredContent"].(map[string]any)
+	if row := deliveryRow(t, sc); row["detail"] != "hooks are not delivering mail to this session; restart the session after reinstalling" || row["fix"] != "claude plugin install mash@mash" {
+		t.Errorf("row: %v", row)
+	}
 }

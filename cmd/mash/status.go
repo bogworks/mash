@@ -27,7 +27,8 @@ type statusSource struct {
 	state      *atomic.Pointer[sessionState]
 }
 
-// mailHeld is whether the session holds mail because the spool it requires (MASH_SPOOL_REQUIRED) is failing now.
+// mailHeld is whether the session holds mail because its mail folder cannot be written now: the spool it requires
+// (MASH_SPOOL_REQUIRED) is failing, or a try at writing to the folder fails.
 func (s *statusSource) mailHeld() bool {
 	if s.state == nil {
 		return false
@@ -36,8 +37,7 @@ func (s *statusSource) mailHeld() bool {
 	if st == nil || st.ep == nil {
 		return false
 	}
-	_, failing := st.ep.SpoolFaultLine()
-	return failing
+	return st.ep.StorageState() == endpoint.StorageFailing
 }
 
 // hookState is the session's hook state (endpoint.HookRan and the others): not_run until a spool is bound.

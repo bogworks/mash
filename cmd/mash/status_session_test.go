@@ -119,7 +119,7 @@ func TestSessionStatusLostToANewerOne(t *testing.T) {
 		return text == tTo("a")+": ready, online"
 	})
 	text, _ = toolObject(t, fresh, 42, "doctor")
-	if !strings.Contains(text, "\ndelivery  warn  hooks have not run in this session yet\n") {
+	if !strings.Contains(text, "\ndelivery  warn  hooks have not run in this session yet; they run with\n                the first prompt or tool call\n") {
 		t.Fatalf("new doctor: %q", text)
 	}
 }

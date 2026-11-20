@@ -613,3 +613,60 @@ func TestJoinHelp(t *testing.T) {
 		t.Errorf("mash help join differs from mash join --help")
 	}
 }
+
+// join compares a join file's certificate authority with the one the folder is configured with, which config.json's "ca"
+// may name as a file other than ca.pem.
+func TestJoinComparesWithTheConfiguredCA(t *testing.T) {
+	w := newJoinWorld(t)
+	if err := os.MkdirAll(w.cfg, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(w.cfg, "mesh-ca.pem"), []byte(testCAPEM), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(w.cfg, "config.json"), []byte(`{"servers":["tls://myserver:4222"],"ca":"mesh-ca.pem"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// the same certificate authority: joined, and no second copy is written
+	if r := w.run("join", "acme.demo.bob.join"); r.code != 0 {
+		t.Fatalf("same ca: %+v", r)
+	}
+	if _, err := os.Stat(filepath.Join(w.cfg, "ca.pem")); err == nil {
+		t.Error("a ca.pem was written beside the configured file")
+	}
+	m := newJoinMaterial(t, "acme.demo.carol")
+	other := strings.Replace(testCAPEM, "MIIBhTCC", "MIIBhTCD", 1)
+	writeJoin(t, "carol.join", joinfile.File{MashJoin: 1, Address: "acme.demo.carol", Servers: []string{"tls://myserver:4222"}, CA: &other, Creds: string(m.creds)})
+	for _, args := range [][]string{{"join", "carol.join"}, {"join", "carol.join", "--replace"}} {
+		if r := w.run(args...); r.code != 1 || !strings.Contains(r.errs, " was set up with a different ca;") {
+			t.Errorf("%v: %+v", args, r)
+		}
+	}
+	writeJoin(t, "dan.join", joinfile.File{MashJoin: 1, Address: "acme.demo.dan", Servers: []string{"tls://myserver:4222"}, Creds: string(m.creds)})
+	if r := w.run("join", "dan.join"); r.code != 1 || !strings.Contains(r.errs, " was set up with a different ca;") {
+		t.Errorf("no ca: %+v", r)
+	}
+	if got, _ := os.ReadFile(filepath.Join(w.cfg, "mesh-ca.pem")); string(got) != testCAPEM {
+		t.Error("the configured ca file was replaced")
+	}
+}
+
+// A folder that has no certificate authority and already holds an endpoint refuses a join file that brings one; the
+// first join into an empty folder sets it.
+func TestJoinCARefusedWhereTheFolderHasNoneAndAnEndpoint(t *testing.T) {
+	w := newJoinWorld(t)
+	m := newJoinMaterial(t, "acme.demo.carol")
+	writeJoin(t, "carol.join", joinfile.File{MashJoin: 1, Address: "acme.demo.carol", Servers: []string{"tls://myserver:4222"}, Creds: string(m.creds)})
+	if r := w.run("join", "carol.join"); r.code != 0 { // no ca into an empty folder
+		t.Fatalf("carol: %+v", r)
+	}
+	for _, args := range [][]string{{"join", "acme.demo.bob.join"}, {"join", "acme.demo.bob.join", "--replace"}} {
+		r := w.run(args...)
+		if r.code != 1 || !strings.Contains(r.errs, " was set up with a different ca;\n       nothing was changed\n") {
+			t.Errorf("%v: %+v", args, r)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(w.cfg, "ca.pem")); err == nil {
+		t.Error("ca.pem was written into a folder that holds an endpoint")
+	}
+}

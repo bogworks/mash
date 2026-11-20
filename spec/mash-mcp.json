@@ -470,6 +470,12 @@
      "text": "config    ok\ncreds     ok\nserver    FAIL  the server did not answer: tls://myserver:4222\nsign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no unverified mail was refused\n\n1 problem.",
      "stream": "stdout",
      "exit": 1
+    },
+    {
+     "case": "In a session whose hooks are failing",
+     "text": "delivery  FAIL  hooks are not delivering mail to this session;\n                restart the session after reinstalling\n\n1 problem.\nhint: claude plugin install mash@mash",
+     "stream": "stdout",
+     "exit": 1
     }
    ]
   },

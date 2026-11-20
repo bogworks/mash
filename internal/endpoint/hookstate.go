@@ -20,7 +20,8 @@ const (
 	HookRefused   = "refused"   // a hook ran, but was refused as another session's
 )
 
-// The storage words of a session's record.
+// The storage words of a session: decided by whoever asks, by trying the folder (spool.Spool.Writable); nothing about
+// storage is recorded.
 const (
 	StorageOK      = "ok"
 	StorageFailing = "failing"
@@ -28,15 +29,15 @@ const (
 
 // HookRecord is what serve records in the spool (spool.NoteHookState) when its detectors change, so that mash status at
 // the session's shell reads what the tool says. It holds no mail and no secret: the detector's verdict, when the serve
-// bound the spool, which serve wrote it, and whether the mail folder worked. At is when it was written.
+// bound the spool, and which serve wrote it. It exists only while that serve holds the endpoint: serve removes it when it
+// stops holding it. At is when it was written.
 type HookRecord struct {
-	Hooks   string    `json:"hooks"` // "", HookSuspected or HookDegraded: what only serve knows
-	Storage string    `json:"storage"`
-	Since   time.Time `json:"since"`
-	Host    string    `json:"host"`
-	PID     string    `json:"pid"`
-	Start   string    `json:"start,omitempty"`
-	At      time.Time `json:"at"`
+	Hooks string    `json:"hooks"` // "", HookSuspected or HookDegraded: what only serve knows
+	Since time.Time `json:"since"`
+	Host  string    `json:"host"`
+	PID   string    `json:"pid"`
+	Start string    `json:"start,omitempty"`
+	At    time.Time `json:"at"`
 }
 
 // hookStateOf is the hook state from the spool's own files and the detector's verdict. A hook run since the bind (the
@@ -70,6 +71,18 @@ func (e *Endpoint) HookState() string {
 	return hookStateOf(sp, since, e.hl.state(time.Now()))
 }
 
+// StorageState is StorageOK or StorageFailing for the folder this session spools to: failing when serve reports the
+// folder it requires as failing, or when a try at writing to it fails now. Before the spool is bound there is no folder.
+func (e *Endpoint) StorageState() string {
+	e.hl.mu.Lock()
+	sp, bound := e.hl.sp, e.hl.bound
+	e.hl.mu.Unlock()
+	if _, failing := e.SpoolFaultLine(); failing || (bound && !sp.Writable()) {
+		return StorageFailing
+	}
+	return StorageOK
+}
+
 // RecordHookState writes the detectors' state to the spool when it differs from what was last written (the mail
 // folder's state with it). It does nothing before the spool is bound. A folder that cannot be written cannot take the
 // record either, so a failed write is not an error.
@@ -80,17 +93,16 @@ func (e *Endpoint) RecordHookState() {
 	if !bound {
 		return
 	}
-	rec := HookRecord{Storage: StorageOK, Since: since, PID: strconv.Itoa(os.Getpid())}
+	rec := HookRecord{Since: since, PID: strconv.Itoa(os.Getpid())}
 	rec.Host, _ = os.Hostname()
 	rec.Start, _ = procStart(os.Getpid())
-	switch e.hl.state(time.Now()) {
+	// The detector's state as it stands: no call is ending now, so none is supplied (a synthetic call time would make one
+	// real call followed by HookGrace look like a second call that never happened).
+	switch e.hl.state(time.Time{}) {
 	case HooklessProven:
 		rec.Hooks = HookDegraded
 	case HooklessSuspected:
 		rec.Hooks = HookSuspected
-	}
-	if _, failing := e.SpoolFaultLine(); failing {
-		rec.Storage = StorageFailing
 	}
 	kb, _ := json.Marshal(rec) // without At: the key of what was last written
 	if last := e.hookRecorded.Load(); last != nil && *last == string(kb) {
@@ -110,6 +122,7 @@ var recordEvery = 2 * time.Second
 func (e *Endpoint) recordHookStates(ctx context.Context) {
 	t := time.NewTicker(recordEvery)
 	defer t.Stop()
+	defer e.clearHookState() // serve stops here when it no longer holds the endpoint (lease lost) or is shutting down
 	for {
 		e.RecordHookState()
 		select {
@@ -120,9 +133,34 @@ func (e *Endpoint) recordHookStates(ctx context.Context) {
 	}
 }
 
+// clearHookState removes the record when it is this serve's own: a newer serve of the session may already have written its
+// own, which stays. The spool's lock is held across the check and the removal.
+func (e *Endpoint) clearHookState() {
+	e.hl.mu.Lock()
+	sp, bound := e.hl.sp, e.hl.bound
+	e.hl.mu.Unlock()
+	if !bound {
+		return
+	}
+	unlock, err := sp.Lock()
+	if err != nil {
+		return
+	}
+	defer unlock()
+	if b, found := sp.HookState(); found {
+		var rec HookRecord
+		if json.Unmarshal(b, &rec) == nil && rec.PID != strconv.Itoa(os.Getpid()) {
+			return
+		}
+		_ = sp.NoteHookState(nil)
+	}
+	e.hookRecorded.Store(nil)
+}
+
 // SessionOnDisk is what mash status at a shell says about the session on this machine whose serve recorded its state in
-// the spool: the hook state and the storage word. ok is false when no live serve of this machine recorded one (no
-// session). The serve's process must still exist: a killed serve leaves its file behind.
+// the spool: the hook state and the storage word, which is decided here, by trying the folder. ok is false when no live
+// serve of this machine recorded one (no session, or one that no longer holds the endpoint). The serve's process must
+// still exist: a killed serve leaves its file behind.
 func SessionOnDisk(sp spool.Spool) (hooks, storage string, ok bool) {
 	b, found := sp.HookState()
 	if !found {
@@ -142,9 +180,9 @@ func SessionOnDisk(sp spool.Spool) (hooks, storage string, ok bool) {
 	case HookSuspected:
 		det = HooklessSuspected
 	}
-	st := rec.Storage
-	if st != StorageFailing {
-		st = StorageOK
+	st := StorageOK
+	if !sp.Writable() {
+		st = StorageFailing
 	}
 	return hookStateOf(sp, rec.Since, det), st, true
 }

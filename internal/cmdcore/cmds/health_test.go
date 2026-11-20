@@ -130,7 +130,7 @@ func TestStatusMatchesSpec(t *testing.T) {
 	}
 	fails := map[string]*fakeHealth{
 		"Not working (the first line on stdout, the hint on stderr)": report("acme.demo.bob", false, ok("config", ""), ok("creds", ""), ok("server", "tls://myserver:4222"),
-			cmds.HealthCheck{Name: "sign-in", State: cmds.CheckFail, Detail: "the server refused these credentials", Reason: "the server refused its credentials"}),
+			cmds.HealthCheck{Name: "sign-in", State: cmds.CheckFail, Detail: "the server refused these credentials", Reason: "the server refused its credentials", Code: cmds.CodeCredsRefused}),
 		"The server does not answer": report("acme.demo.bob", false, ok("config", ""), ok("creds", ""),
 			cmds.HealthCheck{Name: "server", State: cmds.CheckFail, Detail: "the server did not answer: tls://myserver:4222"}),
 		"In a session, when another session holds this endpoint": leaseReport(cmds.LeaseOther, ""),
@@ -345,12 +345,16 @@ func TestDoctorMatchesSpec(t *testing.T) {
 			continue
 		case "In a session whose hooks have not delivered yet", "In a session whose hooks are failing":
 			// the spec gives the delivery row alone: warn for hooks that have not run, FAIL for hooks that are failing
-			state, detail := cmds.CheckWarn, cmds.ReasonHooksNotRun
+			state, detail, fix := cmds.CheckWarn, cmds.ReasonHooksNotRun, ""
 			if oc["case"] == "In a session whose hooks are failing" {
-				state, detail = cmds.CheckFail, cmds.ReasonHooksFailing
+				state, detail, fix = cmds.CheckFail, cmds.ReasonHooksFailing, cmds.HooksFailingFix
 			}
-			_, out, _ := runDoctor(report("acme.demo.bob", false, ok("config", ""),
-				cmds.HealthCheck{Name: "delivery", State: state, Detail: detail}), cliframe.Global{})
+			_, out, errs := runDoctor(report("acme.demo.bob", false, ok("config", ""),
+				cmds.HealthCheck{Name: "delivery", State: state, Detail: detail, Fix: fix}), cliframe.Global{})
+			// the spec's text carries the hint line, which the command line prints on standard error
+			if hint, _, _ := strings.Cut(errs, "\n"); hint != "" {
+				out += hint + "\n"
+			}
 			if !strings.Contains(out, oc["text"].(string)+"\n") {
 				t.Errorf("%s: %q lacks %q", oc["case"], out, oc["text"])
 			}
@@ -638,7 +642,7 @@ func TestDoctorToolStrictMarksTheResultAnError(t *testing.T) {
 
 func TestStatusDetailReasonCode(t *testing.T) {
 	f := report("acme.demo.bob", false, ok("config", ""), ok("creds", ""), ok("server", "tls://myserver:4222"),
-		cmds.HealthCheck{Name: "sign-in", State: cmds.CheckFail, Detail: "the server refused these credentials", Reason: "the server refused its credentials"})
+		cmds.HealthCheck{Name: "sign-in", State: cmds.CheckFail, Detail: "the server refused these credentials", Reason: "the server refused its credentials", Code: cmds.CodeCredsRefused})
 	_, js, _ := runStatus(f, cliframe.Global{JSON: true, Detail: true})
 	if !strings.Contains(js, `"reason_code":"creds_refused"`) || !strings.Contains(js, `"session":null`) {
 		t.Errorf("%s", js)
