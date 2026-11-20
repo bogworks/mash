@@ -146,7 +146,7 @@ func TestInstallSysCredsComparesAnExistingFile(t *testing.T) {
 		t.Fatalf("identical content: %v", err)
 	}
 	st.sysCredsRaw = []byte("creds-b")
-	if err := installSysCreds(st); err == nil || !strings.Contains(err.Error(), "already holds different system creds") {
+	if err := installSysCreds(st); err == nil || !strings.Contains(err.Error(), "a different system creds") {
 		t.Fatalf("different content: %v", err)
 	}
 	if b, _ := os.ReadFile(st.sysDst); string(b) != "creds-a" {

@@ -185,9 +185,10 @@ type initState struct {
 	serverDir        string
 	sysDst           string
 	cfgPath          string
-	haveOp, haveAcct bool // the key store already holds this very key
-	haveSys          bool // sys.creds already in place with the same content
-	haveCfg          bool // config.json already holds these settings
+	folder           string // the configuration folder as shown in a refusal: the home directory written as ~
+	haveOp, haveAcct bool   // the key store already holds this very key
+	haveSys          bool   // sys.creds already in place with the same content
+	haveCfg          bool   // config.json already holds these settings
 }
 
 // initResult is what `mashctl init --json` prints.
@@ -250,6 +251,7 @@ func doInit(setupPath string, dry, jsonOut, verbose bool, env func(string) strin
 		return failErr(err)
 	}
 	st := &initState{serverDir: filepath.Join(cfg.Dir, "server"), cfgPath: cfg.Find("config.json")}
+	st.folder = shownFolder(cfg.Dir, env("HOME"))
 	st.sysDst = filepath.Join(st.serverDir, sysCredsFile)
 	cfg.SysCreds = st.sysDst
 	defer func() {
@@ -283,10 +285,10 @@ func doInit(setupPath string, dry, jsonOut, verbose bool, env func(string) strin
 	// The key store, the destination files and config.json must not conflict: checked now so nothing is written on a
 	// refusal.
 	if err := checkStore(ks, st); err != nil {
-		return cliframe.Failf("%v", err)
+		return failErr(err)
 	}
 	if err := checkDestinations(st); err != nil {
-		return cliframe.Failf("%v", err)
+		return failErr(err)
 	}
 	if err := checkConfigFile(st, cfg, sf); err != nil {
 		return err
@@ -496,9 +498,26 @@ func installSysCreds(st *initState) error {
 	}
 	defer clear(have)
 	if !bytes.Equal(have, st.sysCredsRaw) {
-		return fmt.Errorf("%s already holds different system creds: refusing to replace them. Move it aside, or point system_creds at it", st.sysDst)
+		return differentSetup(st, "system creds")
 	}
 	return nil
+}
+
+// shownFolder is dir with the home directory written as ~; a folder outside the home directory is shown whole.
+func shownFolder(dir, home string) string {
+	if home != "" {
+		if rel, err := filepath.Rel(home, dir); err == nil && (rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel))) {
+			return filepath.Join("~", rel)
+		}
+	}
+	return dir
+}
+
+// differentSetup is the refusal when the configuration folder holds a different what than the setup file gives: init
+// never replaces what the folder holds.
+func differentSetup(st *initState, what string) error {
+	return cliframe.Failf("%s was set up with a different %s;\n       nothing was changed", st.folder, what).
+		WithHint("mashctl init --config <file> --config-dir <a new folder>")
 }
 
 // finishInit prints the one line of init (and, with verbose, the steps), or the JSON object.
@@ -598,7 +617,7 @@ func checkConfigFile(st *initState, cfg config.Config, sf setupFile) error {
 		}
 	}
 	if len(differ) > 0 {
-		return cliframe.Failf("%s already holds different settings (%s): init does not replace it. Move it aside, or make the setup file agree with it (nothing was changed)", st.cfgPath, strings.Join(differ, ", "))
+		return differentSetup(st, map[string]string{"servers": "server", "ca": "server", "owner": "owner", "admin_creds": "admin creds", "system_creds": "system creds"}[differ[0]])
 	}
 	st.haveCfg = true
 	return nil
@@ -670,7 +689,7 @@ func checkStore(ks *ctlkeys.Authority, st *initState) error {
 		default:
 			kp.Wipe()
 			if pub != k.want {
-				return fmt.Errorf("the key store already holds a different %s key (%s, not %s): refusing to replace it. Use a key store of its own (MASH_KEYS_DIR), or move the old key aside if you mean to replace it (nothing was changed)", k.what, pub, k.want)
+				return differentSetup(st, k.what+" key")
 			}
 			*k.have = true
 		}
@@ -682,7 +701,7 @@ func checkStore(ks *ctlkeys.Authority, st *initState) error {
 func checkDestinations(st *initState) error {
 	if b, err := os.ReadFile(st.sysDst); err == nil {
 		if !bytes.Equal(b, st.sysCredsRaw) {
-			return fmt.Errorf("%s already holds different system creds: refusing to replace them. Move it aside, or point system_creds at it (nothing was changed)", st.sysDst)
+			return differentSetup(st, "system creds")
 		}
 		st.haveSys = true
 	} else if !errors.Is(err, fs.ErrNotExist) {
