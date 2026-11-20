@@ -38,16 +38,14 @@ func TestAuditLeaseBucketThatAllowsRollupIsAProblemUntilInit(t *testing.T) {
 	}
 	r, errb, code := f.retiredAudit(t, "--strict")
 	lp := leaseProblems(r)
-	if code != 1 || len(lp) != 1 || !strings.Contains(lp[0], `lease bucket allows rollup writes; run "mashctl init" to harden it`) ||
+	if code != 1 || len(lp) != 1 || !strings.Contains(lp[0], `lease bucket allows rollup writes; run "mashctl init --config FILE" to harden it`) ||
 		!strings.Contains(errb, "--strict") {
 		t.Fatalf("un-hardened bucket: exit %d %v err=%q", code, lp, errb)
 	}
 	if txt, _, _ := f.run(t); !strings.Contains(txt, "allows rollup writes") {
 		t.Errorf("text form must report it:\n%s", txt)
 	}
-	if _, errb, code := ctlRun(t, f.e, "init"); code != 0 {
-		t.Fatalf("init: %d %q", code, errb)
-	}
+	makeStorageFor(t, f.e)
 	r, _, code = f.retiredAudit(t, "--strict")
 	if code != 0 || len(r.Problems) != 0 {
 		t.Fatalf("after init: exit %d %+v", code, r.Problems)

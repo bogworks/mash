@@ -13,7 +13,7 @@ var seedShaped = "SU" + strings.Repeat("ABCDEFGH234567", 4)[:54]
 
 func TestUsageErrorsExit2(t *testing.T) {
 	e := testenv.Start(t)
-	ctlRun(t, e, "init")
+	makeStorageFor(t, e)
 	provisionAs(t, e, "c", admin.Meta{})
 	cases := []struct {
 		args []string
@@ -23,14 +23,24 @@ func TestUsageErrorsExit2(t *testing.T) {
 		{[]string{"endpoint", "resume"}, "error: missing the endpoint address"},
 		{[]string{"endpoint", "suspend", "o.g.c", "extra"}, "error: too many arguments"},
 		{[]string{"endpoint", "permissions"}, "error: missing the endpoint address"},
-		{[]string{"endpoint", "permissions", "o.g.c", "--bogus"}, `error: unknown option "--bogus"`},
+		{[]string{"endpoint", "permissions", "o.g.c", "--bogus"}, `error: unknown option --bogus`},
 		{[]string{"endpoint", "permissions", "o.g.c", "x"}, "error: too many arguments"},
 		{[]string{"endpoint", "set", "o.g.c"}, "error: missing the endpoint address and at least one key=value"},
 		{[]string{"endpoint", "unset", "o.g.c"}, "error: missing the endpoint address and at least one key"},
-		{[]string{"limits", "--bogus"}, "usage: mashctl limits"},
-		{[]string{"limits", "--show", "x"}, "usage: mashctl limits"},
-		{[]string{"init", "--bogus"}, "usage: mashctl init"},
-		{[]string{"init", "extra"}, "usage: mashctl init"},
+		{[]string{"limits", "--bogus"}, "error: unknown option --bogus\nhint: mashctl limits --help\n"},
+		{[]string{"limits", "--show"}, "error: unknown option --show\nhint: mashctl limits --help\n"},
+		{[]string{"limits", "show", "x"}, "error: too many arguments\nhint: mashctl limits show --help\n"},
+		{[]string{"limits", "show", "--bogus"}, "error: unknown option --bogus\nhint: mashctl limits show --help\n"},
+		{[]string{"limits", "apply", "--bogus"}, "error: unknown option --bogus\nhint: mashctl limits apply --help\n"},
+		{[]string{"limits", "apply", "a.b.c.d"}, "error: not an owner, owner.group or owner.group.name prefix"},
+		{[]string{"limits", "apply", "a", "b"}, "error: too many arguments\nhint: mashctl limits apply --help\n"},
+		{[]string{"status", "--bogus"}, "error: unknown option --bogus\nhint: mashctl status --help\n"},
+		{[]string{"status", "extra"}, "error: too many arguments\nhint: mashctl status --help\n"},
+		{[]string{"init", "--bogus"}, "error: unknown option --bogus\nhint: mashctl init --help\n"},
+		{[]string{"init", "extra"}, "error: too many arguments\nhint: mashctl init --help\n"},
+		{[]string{"init"}, "error: mashctl init needs --config <file>\nhint: mashctl init --help\n"},
+		{[]string{"limits"}, "usage: mashctl limits <command>"},
+		{[]string{"adopt"}, "error: unknown command \"adopt\"\nhint: mashctl --help\n"},
 	}
 	for _, c := range cases {
 		out, errb, code := ctlRun(t, e, c.args...)
@@ -54,7 +64,7 @@ func TestPermissionsPrintsDataOnly(t *testing.T) {
 
 func TestInvalidArgumentsAreNotEchoed(t *testing.T) {
 	e := testenv.Start(t)
-	ctlRun(t, e, "init")
+	makeStorageFor(t, e)
 	provisionAs(t, e, "c", admin.Meta{})
 	for _, args := range [][]string{
 		{"endpoint", "set", "o.g.c", seedShaped + "=x"},

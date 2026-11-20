@@ -73,7 +73,7 @@ type epFail struct {
 func epErrOf(addr sap.Address, code, detail string) *cliframe.Error {
 	detail = strings.TrimPrefix(strings.TrimPrefix(detail, "mashctl: "), "mash: ")
 	if code == "no_account_key" {
-		return cliframe.Failf("no account signing key").WithHint("mashctl init")
+		return cliframe.Failf("no account signing key").WithHint("mashctl init --help")
 	}
 	switch code {
 	case enroll.CodeAddressTaken:

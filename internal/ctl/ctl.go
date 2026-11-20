@@ -8,12 +8,10 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"slices"
 	"strings"
 	"time"
 
 	"github.com/bogworks/mash/internal/natsauth"
-	"github.com/bogworks/mash/internal/sap"
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats.go"
 
@@ -29,27 +27,6 @@ const NotRevoked = "nothing was revoked; the key is still valid"
 // directory record may be short or malformed, and slicing it must never panic.
 func ShortKey(k string) string { return config.Clean(fmt.Sprintf("%.8s", k)) }
 
-func limitsUsage(prog string) string {
-	return "usage: " + prog + " limits [address...] | " + prog + " limits --show"
-}
-
-// notAddress is the refusal of an argument that is not an endpoint address.
-func notAddress(arg string) error {
-	return fmt.Errorf("mash: not an endpoint address (the value is not shown): give owner.group.instance")
-}
-
-// parseAddr reads an endpoint address argument: the dotted form owner.group.instance or the flat key
-// owner_group_instance. Anything else is refused.
-func parseAddr(arg string) (sap.Address, error) {
-	if a, err := sap.ParseAddress(arg); err == nil {
-		return a, nil
-	}
-	if a, err := sap.AddressFromFlat(arg); err == nil {
-		return a, nil
-	}
-	return sap.Address{}, notAddress(arg)
-}
-
 // Usage is the full verb listing for prog.
 func Usage(prog string) string {
 	var b strings.Builder
@@ -61,22 +38,17 @@ func Usage(prog string) string {
 		}
 		fmt.Fprintf(&b, "  %-44s %s\n", prog+" "+left, right)
 	}
-	line("init", "create the directory and lease buckets (or raise their caps to the configured limits)")
-	line("init --local [--dir D] [--owner O] [--port P] [--start]", "write the configuration of a local operator-mode NATS server with JetStream (loopback, TLS only), keys and credentials, for one developer; --start also starts it and creates the buckets")
-	line("limits [address...]", "raise existing inboxes to the configured limits (config.json \"limits\"; never lowers)")
-	line("limits --show", "print the effective limits")
+	line("init --config FILE [--dry-run] [--json]", "set mash up on a NATS server you already have, from a setup file; safe to run again")
+	line("status [--json]", "one line per server: whether it works, how many endpoints it has, how many are online")
+	line("limits show [--json]", "print the limits in force")
+	line("limits apply [prefix] [--dry-run] [--json]", "raise existing inboxes to the configured limits (never lowers); prefix is an owner, owner.group or one address")
 	if prog == "mashctl" {
 		line("audit [--json] [--strict] [--creds-dir DIR]", "read only: list every directory record, inbox stream, lease and creds file with their state, the orphans; --strict exits 1 on an orphan, an unreadable item, or unread mail lost to eviction (a lower bound from consumer sequences: mail fetched but never shown, or redelivered, can make it undercount, so a clean audit does not prove nothing was lost)")
-		adoptLines(line)
 		issuedLines(line)
 		endpointLines(line)
 		line("version [--json]", "print the version and the commit")
 	}
 	return b.String()
-}
-
-func adoptLines(line func(left, right string)) {
-	line("adopt --server URL --operator-key F --account-key F --sys-creds F [--account N] [--admin-creds F | --mint-admin] [--owner O] [--dry-run]", "take over an operator-mode server you already run: check your authority over it, then keep the keys and write the config; changes nothing on the server")
 }
 
 func issuedLines(line func(left, right string)) {
@@ -146,75 +118,6 @@ func OpenAdmin(prog string, cfg config.Config) (*madmin.Admin, context.Context, 
 	return a, ctx, func() { cancel(); nc.Close() }, nil
 }
 
-// Run executes one admin verb. prog is the command prefix used in usage and error text.
-func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer) int {
-	pfx, _, _ := strings.Cut(prog, " ") // "mash" or "mashctl", the prefix of error lines
-	fail := func(err error) int { fmt.Fprintln(stderr, err); return 1 }
-	usage := func(err error) int { fmt.Fprintln(stderr, err); return 2 } // a misuse of the verb, not a failure of it
-	if len(args) == 0 {
-		fmt.Fprint(stderr, Usage(prog))
-		return 2
-	}
-	if args[0] == "init" && slices.Contains(args[1:], "--local") {
-		return runInitLocal(prog, cfg, args[1:], stdout, stderr)
-	}
-	if cfg.Limits == (store.Limits{}) { // a Config not made by Load
-		cfg.Limits = store.DefaultLimits()
-	}
-	if args[0] == "init" && len(args) > 1 {
-		return usage(errors.New(initUsage(prog)))
-	}
-	if cfg.Owner == "" {
-		return fail(errors.New(pfx + ": no owner: set \"owner\" in config.json, or MASH_ENDPOINT or --endpoint (its owner part is the owner these commands act for)"))
-	}
-	if args[0] == "limits" && len(args) == 2 && args[1] == "--show" {
-		l := cfg.Limits
-		fmt.Fprintf(stdout, "inbox_max_bytes %s\ninbox_max_age %s\ndirectory_max_bytes %s\nlease_max_bytes %s\ninbox_max_consumers %d\n",
-			config.FormatSize(l.InboxMaxBytes), config.FormatAge(l.InboxMaxAge), config.FormatSize(l.DirectoryMaxBytes),
-			config.FormatSize(l.LeaseMaxBytes), l.InboxMaxConsumers)
-		return 0
-	}
-	a, ctx, closeAdmin, err := OpenAdmin(prog, cfg)
-	if err != nil {
-		return fail(err)
-	}
-	defer closeAdmin()
-	switch args[0] {
-	case "init":
-		if err := a.Init(ctx); err != nil {
-			return fail(err)
-		}
-		if err := recordAdminUser(ctx, a, cfg); err != nil {
-			return fail(err)
-		}
-		fmt.Fprintln(stdout, pfx+": directory and lease buckets ready")
-	case "limits":
-		var addrs []sap.Address
-		for _, n := range args[1:] {
-			addr, err := parseAddr(n)
-			if err != nil {
-				return usage(fmt.Errorf("%s\n%w", limitsUsage(prog), err))
-			}
-			addrs = append(addrs, addr)
-		}
-		lines, err := a.ApplyLimits(ctx, addrs...)
-		for _, l := range lines {
-			fmt.Fprintln(stdout, l)
-		}
-		if err != nil {
-			return fail(err)
-		}
-	default:
-		fmt.Fprintf(stderr, "%s: unknown command %q\n\n%s", prog, args[0], Usage(prog))
-		return 2
-	}
-	return 0
-}
-
-func initUsage(prog string) string {
-	return "usage: " + prog + " init   |   " + prog + " init --local [--dir D] [--owner O] [--port P] [--start]"
-}
-
 // adminDeadline is the total deadline of one admin command: admin_timeout, else 30 seconds.
 func adminDeadline(cfg config.Config) time.Duration {
 	if cfg.AdminTimeout > 0 {
@@ -223,21 +126,8 @@ func adminDeadline(cfg config.Config) time.Duration {
 	return config.DefaultAdminTimeout
 }
 
-// recordAdminUser puts the admin user of cfg's admin credentials in the issue record, kind "admin": mash's own admin
-// user (the one `init --local` writes, or `adopt --mint-admin` mints) is issued outside `mint`, so it is recorded the
-// first time init runs with it. Only the public key and the JWT's name and tags are read; the seed is never used.
-func recordAdminUser(ctx context.Context, a *madmin.Admin, cfg config.Config) error {
-	raw, err := config.ReadCredsFile(cfg.AdminCreds)
-	if err != nil {
-		return fmt.Errorf("mash: admin credentials: %w", err)
-	}
-	defer clear(raw)
-	return RecordAdminCreds(ctx, a, cfg.Owner, raw)
-}
-
 // RecordAdminCreds puts the admin user held in the creds bytes raw in the issue record (kind admin, purpose issue), over
-// a's connection. `mashctl init` uses it for the configured admin creds and `mashctl adopt --mint-admin` for the user it
-// mints, before the creds file is written. Only the public key and the JWT's name, tags and issue time are read.
+// a's connection. `mashctl init` uses it for the configured admin creds. Only the public key and the JWT's name, tags and issue time are read.
 func RecordAdminCreds(ctx context.Context, a *madmin.Admin, owner string, raw []byte) error {
 	tok, err := jwt.ParseDecoratedJWT(raw)
 	if err != nil {

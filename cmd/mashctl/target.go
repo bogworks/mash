@@ -101,19 +101,3 @@ func announceTarget(cfg config.Config, env func(string) string, stderr io.Writer
 		fmt.Fprintf(stderr, "warning: MASH_LAUNCH_TOKEN is set, so this shell looks like it is inside a mash session, and %s (MASH_SERVER) is that session's own server. To act on another server, run outside the session or with `env -u MASH_SERVER ...` (and the other MASH_* variables) and config.json.\n", maskURL(cfg.URL))
 	}
 }
-
-// announcesVerb reports whether the verb of the common admin path (ctl.Run) connects to a server: every one but
-// `limits --show` and `init --local`, which are offline.
-func announcesVerb(args []string) bool {
-	switch args[0] {
-	case "limits":
-		return !(len(args) == 2 && args[1] == "--show")
-	case "init":
-		for _, a := range args[1:] {
-			if a == "--local" {
-				return false
-			}
-		}
-	}
-	return true
-}

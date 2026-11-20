@@ -125,9 +125,7 @@ func (f *auditFixture) ackAll(t *testing.T, a sap.Address) {
 func newAuditEnv(t *testing.T) *auditFixture {
 	t.Helper()
 	e := testenv.Start(t)
-	if _, errb, code := ctlRun(t, e, "init"); code != 0 {
-		t.Fatalf("init: %d %q", code, errb)
-	}
+	makeStorageFor(t, e)
 	nc := e.Conn(t, e.AdminCreds)
 	js, err := jetstream.New(nc)
 	if err != nil {
@@ -473,7 +471,7 @@ func TestAuditStrictExitCodes(t *testing.T) {
 
 func TestAuditUsageAndErrors(t *testing.T) {
 	e := testenv.Start(t)
-	ctlRun(t, e, "init")
+	makeStorageFor(t, e)
 	for _, args := range [][]string{{"audit", "extra"}, {"audit", "--bogus"}, {"audit", "--creds-dir"}} {
 		if _, errb, code := ctlRun(t, e, args...); code != 2 || !strings.Contains(errb, "usage: mashctl audit") {
 			t.Errorf("%v: %d %q", args, code, errb)

@@ -111,15 +111,17 @@ func (a *AT) StartSession(h Home, group, name string, more ...string) (*Proc, []
 	return p, extra, nil
 }
 
-// StartServer runs `mashctl init --local --owner alice --dir <srv> --port P --start` in home h, records the server's
-// PID (mashctl writes it to server.pid) and checks the first run.
+// StartServer used to run `mashctl init --local --owner alice --dir <srv> --port P --start` in home h, record the
+// server's PID (mashctl writes it to server.pid) and check the first run.
 func (a *AT) StartServer(h Home) bool {
 	if err := waitPortFree(a.R.Port, 5*time.Second); err != nil {
 		a.C.Check("the port is free before the server starts", false, err.Error())
 		return false
 	}
-	res := a.Ctl("init-local", h, nil, "init", "--local", "--owner", "alice", "--dir", a.srvDir, "--port", strconv.Itoa(a.R.Port), "--start")
-	ok := a.C.Check("mashctl init --local --owner alice --start brings up one local server", res.Code == 0, exitDetail(res))
+	// T1b: `mashctl init --local --start` is removed. The live setup is rewritten later; until then the setup is a failed
+	// check and nothing is run. (h is kept for the rewrite.)
+	_ = h
+	ok := a.C.Check("setup rewrite pending", false, "")
 	// The CA key and the server key are private: every line of each is searched for in all captured output.
 	for _, k := range []struct{ label, file string }{{"ca key", bootstrap.CAKey}, {"server key", bootstrap.ServerKey}} {
 		if kb, err := os.ReadFile(filepath.Join(a.srvDir, k.file)); err == nil {

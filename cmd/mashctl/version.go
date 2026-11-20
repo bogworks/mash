@@ -49,7 +49,7 @@ func runVersion(args []string, stdout, stderr io.Writer) int {
 		case a == "--json":
 			asJSON = true
 		default:
-			return cliframe.Report(stdout, stderr, cliframe.Usagef("unknown %s", config.RejectedArg(a)).WithHint("mashctl version --help"), jsonRequested(args))
+			return cliframe.Report(stdout, stderr, cliframe.Usagef("unknown %s", config.RejectedOption(a)).WithHint("mashctl version --help"), jsonRequested(args))
 		}
 	}
 	bi, _ := readBuildInfo()

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -106,7 +105,7 @@ func TestRemovedDeleteFlagsAreUnknownOptions(t *testing.T) {
 	s := stubRevoke(t)
 	for _, f := range []string{"--no-revoke", "--force", "--delete-creds"} {
 		out, errb, code := h.run("endpoint", "delete", "o.g.a", "--yes", f)
-		want := "error: unknown option " + strconv.Quote(f) + "\nhint: mashctl endpoint delete --help\n"
+		want := "error: unknown option " + f + "\nhint: mashctl endpoint delete --help\n"
 		if code != 2 || out != "" || errb != want {
 			t.Errorf("%s: %d %q %q", f, code, out, errb)
 		}

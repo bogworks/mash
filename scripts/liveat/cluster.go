@@ -218,8 +218,9 @@ func (s *At5) BuildCerts(now time.Time) error {
 // the operator JWT is copied to M2 and M3, each node gets its own names, ports and directories.
 func (s *At5) InitM1() bool {
 	m1 := s.M(1)
-	res := s.ctl(m1, "init-local", nil, "init", "--local", "--owner", "alice", "--dir", m1.ServerDir(), "--port", strconv.Itoa(m1.Ports().Client))
-	if !s.check("M1: mashctl init --local --owner alice (without --start) writes the server template and the keys", res.Code == 0, exitDetail(res)) {
+	// T1b: `mashctl init --local` is removed. The live setup is rewritten later; until then the setup is a failed
+	// check and nothing is run. (The code after this check is the part the rewrite keeps.)
+	if !s.check("setup rewrite pending", false, "") {
 		return false
 	}
 	b, err := m1.Get(filepath.Join(m1.ServerDir(), "server.conf"))
@@ -340,11 +341,9 @@ func (s *At5) InitBuckets() bool {
 	if !s.check("M1: config.json names all three servers and ca", err == nil, errText(err)) {
 		return false
 	}
-	res := retry(60*time.Second, 2*time.Second, func() (Result, bool) {
-		r := s.ctl(m1, "init-buckets", nil, "init")
-		return r, r.Code == 0
-	})
-	return s.check("M1: mashctl init creates the buckets over the cluster", res.Code == 0, exitDetail(res))
+	// T1b: `mashctl init` with no setup file is removed (`mashctl init --config FILE` replaces it). The live setup is
+	// rewritten later; until then the setup is a failed check and nothing is run.
+	return s.check("setup rewrite pending", false, "")
 }
 
 // AdoptM2 sets M2 up as DEC-004 records: the operator signing seed, the account identity seed and sys.creds are copied
@@ -381,11 +380,9 @@ func (s *At5) AdoptM2() bool {
 		clear(b)
 		copies = append(copies, dst)
 	}
-	res := retry(30*time.Second, 2*time.Second, func() (Result, bool) {
-		r := s.ctl(m2, "adopt", []string{"MASH_CA=" + s.TLS[1].CA}, "adopt", "--server", s.urlOf(m2), "--owner", "alice", "--account", "MASH",
-			"--operator-key", files2(in, "operator.nk"), "--account-key", files2(in, "account.nk"), "--sys-creds", files2(in, "sys.creds"), "--mint-admin")
-		return r, r.Code == 0
-	})
+	// T1b: `mashctl adopt` is removed (`mashctl init --config FILE` replaces it). The live setup is rewritten later;
+	// until then the setup is a failed check and nothing is run.
+	res := Result{Code: 1}
 	cleanup()
 	gone := true
 	for _, p := range copies {
@@ -393,7 +390,7 @@ func (s *At5) AdoptM2() bool {
 			gone = false
 		}
 	}
-	ok := s.check("M2: mashctl adopt --server tls://M2 --owner alice --account MASH --operator-key --account-key --sys-creds --mint-admin with the same seeds as M1", res.Code == 0, exitDetail(res))
+	ok := s.check("setup rewrite pending", res.Code == 0, "")
 	s.check("the copies of the seeds and sys.creds that the harness made on M2 are deleted by exact path", gone, "")
 	if !ok {
 		return false

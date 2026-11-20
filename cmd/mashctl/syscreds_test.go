@@ -78,7 +78,7 @@ func newApplyEnvOpts(t *testing.T, tweak func(e *applyEnv), optsHook func(o *ser
 	}
 	opts.Port = -1
 	opts.NoLog, opts.NoSigs = true, true
-	// init --local's server.conf is TLS only; these tests drive the verbs against a plain loopback server, so they
+	// bootstrap's server.conf is TLS only; these tests drive the verbs against a plain loopback server, so they
 	// drop its tls block here. The TLS behaviour of the generated server is tested in internal/bootstrap.
 	opts.TLS, opts.TLSConfig, opts.TLSCert, opts.TLSKey, opts.TLSCaCert = false, nil, "", "", ""
 	if optsHook != nil {
@@ -107,9 +107,7 @@ func newApplyEnvOpts(t *testing.T, tweak func(e *applyEnv), optsHook func(o *ser
 func (e *applyEnv) withDirectory() *applyEnv {
 	e.t.Helper()
 	e.env["MASH_ADMIN_CREDS"] = e.pl.Creds
-	if out, errb, code := e.run("init"); code != 0 {
-		e.t.Fatalf("init: %d %s %s", code, out, errb)
-	}
+	e.makeStorage(e.pl.Creds)
 	return e
 }
 
@@ -230,9 +228,7 @@ func newXYEnv(t *testing.T) *applyEnv {
 	e := newApplyEnv(t)
 	e.env["MASH_ADMIN_CREDS"] = e.pl.Creds
 	e.env["MASH_INSECURE_PLAINTEXT"] = "1"
-	if _, errb, code := e.run("init"); code != 0 {
-		t.Fatalf("init: %s", errb)
-	}
+	e.makeStorage(e.pl.Creds)
 	e.endpoint(xy("x"), map[string]string{"net": "a", "team": "red"})
 	e.endpoint(xy("y"), map[string]string{"net": "b"})
 	return e

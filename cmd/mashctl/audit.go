@@ -418,7 +418,7 @@ func buildAudit(owner string, snap admin.AuditSnapshot, dirs []string, creds []c
 	rep.Problems = append(rep.Problems, retiredProbs...)
 	if snap.LeaseRollup {
 		rep.Problems = append(rep.Problems, auditProblem{What: "lease", Item: store.LeaseBucket,
-			Error: `lease bucket allows rollup writes; run "mashctl init" to harden it`})
+			Error: `lease bucket allows rollup writes; run "mashctl init --config FILE" to harden it`})
 	}
 	if snap.LeaseError != "" {
 		rep.Problems = append(rep.Problems, auditProblem{What: "lease", Item: store.LeaseBucket,
@@ -505,7 +505,7 @@ func parseAuditArgs(args []string) (auditOpts, error) {
 		switch name {
 		case "--json", "--strict":
 			if hasInline {
-				return o, fmt.Errorf("unexpected %s", config.RejectedArg(a))
+				return o, fmt.Errorf("unexpected %s", config.RejectedOption(a))
 			}
 			if name == "--json" {
 				o.json = true
@@ -523,7 +523,7 @@ func parseAuditArgs(args []string) (auditOpts, error) {
 				o.compare = v
 			}
 		default:
-			return o, fmt.Errorf("unexpected %s", config.RejectedArg(a))
+			return o, fmt.Errorf("unexpected %s", config.RejectedOption(a))
 		}
 	}
 	return o, nil

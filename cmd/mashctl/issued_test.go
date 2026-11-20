@@ -526,7 +526,7 @@ func TestIssuedListShowsAMissingPurposeAsIssue(t *testing.T) {
 	}
 }
 
-// --- no exemption, adopt records the admin, incompleteness --------------------------------------------------------
+// --- no exemption, init records the admin, incompleteness --------------------------------------------------------
 
 // mintUnrecordedAdmin writes a new admin creds file for the account that mash never recorded and returns its path and key.
 func mintUnrecordedAdmin(t *testing.T, e *applyEnv) (string, string) {
@@ -568,7 +568,7 @@ func TestIssuedCheckHasNoExemptionForTheCommandsOwnAdmin(t *testing.T) {
 		t.Fatalf("text: %d %s", code, out)
 	}
 
-	// Record it (as init and adopt do) and the same connection is clean.
+	// Record it (as init does) and the same connection is clean.
 	adm, ctx, done := e.admin()
 	raw, err := readCreds(path)
 	if err != nil {
@@ -583,43 +583,35 @@ func TestIssuedCheckHasNoExemptionForTheCommandsOwnAdmin(t *testing.T) {
 	}
 }
 
-// `adopt --mint-admin` records the admin user it mints, before the creds file exists, and `init` afterwards still works.
-func TestAdoptMintAdminRecordsTheAdmin(t *testing.T) {
+// `init` records the admin user of the creds it is given, and running it again keeps the one record.
+func TestInitRecordsTheAdmin(t *testing.T) {
 	e := newApplyEnv(t)
-	a := newAdopter(t, e)
-	out, errb, code := a.adopt("--mint-admin")
-	if code != 0 || !strings.Contains(out, "recorded the admin user in the issue record") {
+	a := newIniter(t, e)
+	if out, errb, code := a.init(); code != 0 {
 		t.Fatalf("%d\n%s\n%s", code, out, errb)
 	}
-	path := filepath.Join(a.env["MASH_CONFIG_DIR"], "server", "mashadmin.creds")
-	pub, err := issuedCredsKey(path)
+	pub, err := issuedCredsKey(a.admin)
 	if err != nil {
 		t.Fatal(err)
 	}
-	adm, ctx, done := e.admin()
-	recs, present, err := adm.Issued(ctx)
-	done()
-	if err != nil || !present || len(recs) != 1 || recs[0].PublicKey != pub || recs[0].Kind != store.IssuedAdmin || recs[0].Purpose != store.PurposeIssue || recs[0].Owner != "alice" {
-		t.Fatalf("record after adopt: %+v %v %v", recs, present, err)
+	check := func(when string) {
+		t.Helper()
+		adm, ctx, done := e.admin()
+		recs, present, err := adm.Issued(ctx)
+		done()
+		if err != nil || !present || len(recs) != 1 || recs[0].PublicKey != pub || recs[0].Kind != store.IssuedAdmin || recs[0].Purpose != store.PurposeIssue || recs[0].Owner != "alice" {
+			t.Fatalf("record %s: %+v %v %v", when, recs, present, err)
+		}
 	}
-	// An adopt again keeps the file and records again (same key, one more revision); init after that is fine.
-	if out, errb, code := a.adopt("--mint-admin"); code != 0 {
-		t.Fatalf("second adopt %d\n%s\n%s", code, out, errb)
+	check("after init")
+	if out, errb, code := a.init(); code != 0 {
+		t.Fatalf("second init %d\n%s\n%s", code, out, errb)
 	}
-
-	if out, errb, code := a.run("init"); code != 0 {
-		t.Fatalf("init %d\n%s\n%s", code, out, errb)
-	}
-	adm, ctx, done = e.admin()
-	recs, _, err = adm.Issued(ctx)
-	done()
-	if err != nil || len(recs) != 1 || recs[0].PublicKey != pub {
-		t.Fatalf("record after init: %+v %v", recs, err)
-	}
+	check("after a second init")
 }
 
-// If the record cannot be written, adopt fails loudly, says the admin credentials were NOT recorded and leaves no creds file.
-func TestAdoptMintAdminFailsWhenTheRecordCannotBeWritten(t *testing.T) {
+// If the issue record cannot be made safely (its bucket allows rollup), init fails and says so.
+func TestInitFailsWhenTheRecordCannotBeWritten(t *testing.T) {
 	e := newApplyEnv(t)
 	nc := e.connect(natsauth.UserCredentials(e.pl.Creds))
 	js, err := jetstream.New(nc)
@@ -629,13 +621,10 @@ func TestAdoptMintAdminFailsWhenTheRecordCannotBeWritten(t *testing.T) {
 	if _, err := js.CreateKeyValue(context.Background(), store.IssuedConfig()); err != nil { // allows rollup: not hardened
 		t.Fatal(err)
 	}
-	a := newAdopter(t, e)
-	out, errb, code := a.adopt("--mint-admin")
-	if code == 0 || !strings.Contains(out+errb, "NOT recorded") || !strings.Contains(out+errb, "no credential was handed out") {
+	a := newIniter(t, e)
+	out, errb, code := a.init()
+	if code == 0 || !strings.Contains(out+errb, "not hardened") {
 		t.Fatalf("%d\n%s\n%s", code, out, errb)
-	}
-	if _, err := os.Stat(filepath.Join(a.env["MASH_CONFIG_DIR"], "server", "mashadmin.creds")); err == nil {
-		t.Error("the creds file was left behind")
 	}
 }
 

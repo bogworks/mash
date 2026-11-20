@@ -14,8 +14,8 @@ import (
 
 // helpVerbs is every verb run dispatches; each takes -h and --help, prints its usage and changes nothing.
 var helpVerbs = [][]string{
-	{"adopt"}, {"audit"}, {"issued"}, {"issued", "list"}, {"issued", "check"}, {"version"},
-	{"endpoint"}, {"init"}, {"limits"},
+	{"audit"}, {"issued"}, {"issued", "list"}, {"issued", "check"}, {"version"},
+	{"endpoint"}, {"init"}, {"status"}, {"limits"}, {"limits", "show"}, {"limits", "apply"},
 	{"endpoint", "list"}, {"endpoint", "show"}, {"endpoint", "set"}, {"endpoint", "unset"}, {"endpoint", "suspend"}, {"endpoint", "resume"},
 	{"endpoint", "inbox"}, {"endpoint", "permissions"}, {"endpoint", "create"}, {"endpoint", "reissue"}, {"endpoint", "delete"},
 }
@@ -72,6 +72,8 @@ func TestVerbUsagePicksOwnLines(t *testing.T) {
 		{[]string{"issued", "check"}, "mashctl issued check", "mashctl issued list"},
 		{[]string{"issued", "list"}, "mashctl issued list", "mashctl issued check"},
 		{[]string{"version"}, "usage: mashctl version", ""},
+		{[]string{"limits", "show"}, "mashctl limits show", "mashctl limits apply"},
+		{[]string{"limits", "apply"}, "mashctl limits apply", "mashctl limits show"},
 	}
 	for _, c := range cases {
 		var out, errb bytes.Buffer
@@ -96,6 +98,7 @@ func TestHelpRequestedOnlyFirstArgument(t *testing.T) {
 	}{
 		{"endpoint", []string{"-h"}}, {"limits", []string{"-h"}},
 		{"issued", []string{"check", "--help"}}, {"issued", []string{"list", "-h"}}, {"issued", []string{"-h"}},
+		{"limits", []string{"apply", "--help"}}, {"limits", []string{"show", "-h"}},
 		{"version", []string{"--help"}},
 	}
 	for _, c := range yes {
@@ -107,7 +110,7 @@ func TestHelpRequestedOnlyFirstArgument(t *testing.T) {
 		verb string
 		args []string
 	}{
-		{"endpoint", []string{"n", "-h"}}, {"limits", []string{"n", "--help"}},
+		{"endpoint", []string{"n", "-h"}}, {"limits", []string{"-x", "--help"}}, {"init", []string{"n", "--help"}},
 		{"issued", []string{"check", "n", "--help"}},
 	}
 	for _, c := range no {

@@ -14,22 +14,20 @@ func installEndpointCreds(t *testing.T, dir, name string) {
 	}
 }
 
-// (a) init --local writes the owner, and mashctl then works from config.json alone (no MASH_ENDPOINT).
-func TestInitLocalWritesTheOwnerAndMashctlUsesIt(t *testing.T) {
-	root := t.TempDir()
-	env := map[string]string{"HOME": root, "MASH_CONFIG_DIR": filepath.Join(root, "cfg"), "MASH_KEYS_DIR": filepath.Join(root, "keys")}
-	var out, errb strings.Builder
-	code := runEnv([]string{"init", "--local", "--owner", "acme", "--dir", filepath.Join(root, "srv"), "--port", "4399"}, func(k string) string { return env[k] }, &out, &errb)
-	if code != 0 {
-		t.Fatalf("init --local: %d\n%s\n%s", code, out.String(), errb.String())
+// (a) init writes the owner, and mashctl then works from config.json alone (no MASH_ENDPOINT).
+func TestInitWritesTheOwnerAndMashctlUsesIt(t *testing.T) {
+	a := newIniter(t, newApplyEnv(t))
+	if out, errb, code := a.init(); code != 0 {
+		t.Fatalf("init: %d\n%s\n%s", code, out, errb)
 	}
-	raw, err := os.ReadFile(filepath.Join(env["MASH_CONFIG_DIR"], "config.json"))
-	if err != nil || !strings.Contains(string(raw), `"owner": "acme"`) {
+	raw, err := os.ReadFile(filepath.Join(a.env["MASH_CONFIG_DIR"], "config.json"))
+	if err != nil || !strings.Contains(string(raw), `"owner": "alice"`) {
 		t.Fatalf("config.json: %s %v", raw, err)
 	}
-	cfg, err := loadConfig(func(k string) string { return env[k] }, lk(func(k string) string { return env[k] }))
-	if err != nil || cfg.Owner != "acme" {
-		t.Fatalf("mashctl owner after init --local: %q %v", cfg.Owner, err)
+	env := func(k string) string { return a.env[k] }
+	cfg, err := loadConfig(env, lk(env))
+	if err != nil || cfg.Owner != "alice" || cfg.SysCreds != filepath.Join(a.env["MASH_CONFIG_DIR"], "server", "sys.creds") {
+		t.Fatalf("mashctl owner and system creds after init: %q %q %v", cfg.Owner, cfg.SysCreds, err)
 	}
 }
 
@@ -40,12 +38,9 @@ func TestSeveralInstalledEndpointsDoNotStopMashctl(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(h.dir, "config.json"), []byte(`{"owner":"`+h.e.Owner+`"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, errb, code := h.run("init"); code != 0 {
-		t.Fatalf("init from config.json owner: %d %q", code, errb)
-	}
 	installEndpointCreds(t, h.dir, h.e.Owner+".dev.a.creds")
 	installEndpointCreds(t, h.dir, h.e.Owner+".dev.b.creds")
-	if _, errb, code := h.run("limits"); code != 0 || strings.Contains(errb, "more than one") {
+	if _, errb, code := h.run("limits", "apply"); code != 0 || strings.Contains(errb, "more than one") {
 		t.Fatalf("limits with two installed endpoints: %d %q", code, errb)
 	}
 }
@@ -56,14 +51,14 @@ func TestForeignInstalledEndpointDoesNotChangeMashctlsOwner(t *testing.T) {
 	delete(h.env, "MASH_ENDPOINT")
 	installEndpointCreds(t, h.dir, "zed.dev.x.creds")
 	// no owner configured: mashctl says so, it does not become zed
-	if _, errb, code := h.run("limits"); code != 1 || !strings.Contains(errb, "no owner") {
+	if _, errb, code := h.run("limits", "apply"); code != 1 || !strings.Contains(errb, "no owner") {
 		t.Fatalf("no owner configured: %d %q", code, errb)
 	}
 	// owner configured: it acts as that owner
 	if err := os.WriteFile(filepath.Join(h.dir, "config.json"), []byte(`{"owner":"`+h.e.Owner+`"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	out, errb, code := h.run("limits")
+	out, errb, code := h.run("limits", "apply")
 	if code != 0 {
 		t.Fatalf("limits: %d %q", code, errb)
 	}
@@ -71,7 +66,7 @@ func TestForeignInstalledEndpointDoesNotChangeMashctlsOwner(t *testing.T) {
 		t.Errorf("acted as the installed endpoint's owner:\n%s\n%s", out, errb)
 	}
 	showTarget(t)
-	if _, errb, _ = h.run("limits"); !strings.Contains(errb, "owner "+h.e.Owner+" (from config.json \"owner\")") {
+	if _, errb, _ = h.run("limits", "apply"); !strings.Contains(errb, "owner "+h.e.Owner+" (from config.json \"owner\")") {
 		t.Errorf("target line: %q", errb)
 	}
 }

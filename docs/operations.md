@@ -2,71 +2,66 @@
 
 mash needs a NATS server in operator mode with JetStream, and one account for mash. the `mash` binary never mints NATS users and never holds an operator or account seed. `mashctl` holds the account signing key. It signs each endpoint's user from the endpoint's own public key (`mashctl endpoint create`), with the permissions `mashctl permissions` prints, and it writes the directory record and the inbox behind it.
 
-## Local setup with `mashctl init --local`
+## Setting mash up with `mashctl init --config`
 
-For one developer on one machine, `mashctl init --local` writes the whole NATS side in one command, so the manual `nsc` steps below are not needed. It needs no `config.json` and no running server:
-
-```sh
-mashctl init --local --owner alice [--dir D] [--port P] [--start]
-```
-
-You need `nats-server` on your `PATH`, a current 2.x release with JetStream (get it from the [nats-server releases](https://github.com/nats-io/nats-server/releases); this repository builds and tests against 2.15). `init --local` prints the config directory it writes to (`~/.config/mash` by default, or `$MASH_CONFIG_DIR`).
-
-It creates, in `D` (default `<config dir>/server`; mode 0700): `server.conf` (an operator-mode server listening on `127.0.0.1:P`, default 4222, TLS only, with JetStream on file storage and the accounts preloaded into a full resolver), `operator.jwt`, a local certificate authority (`ca.pem` and `ca.key`) and a server certificate it signs (`server.pem` and `server.key`; valid 10 years, for `localhost`, `127.0.0.1` and `::1`), and the credentials `mashadmin.creds` (full access within the MASH account, for `mashctl`) and `sys.creds` (system account), all 0600. The operator, system-account and MASH-account signing seeds go to the `mashctl` key store (`operator.nk`, `system.nk`, `account.nk`, 0600, in `<config dir>/keys` or `$MASH_KEYS_DIR`); they are never printed. The MASH account gets the limits [below](#limits) describe (2G of disk, 64 streams, 128 consumers). If none exists it also writes a `config.json` with `servers` (an array holding a `tls://` URL), `admin_creds` and `ca` (the path of `ca.pem`); an existing `config.json` is never touched, and the four settings to add are printed. No policy file is written: endpoints are made by `mashctl endpoint create`.
-
-The server listens on loopback only and accepts TLS connections only, using that certificate. It is for development on this machine, not for remote endpoints. `mashctl` and endpoints on this host need no extra setting: the URL is `tls://127.0.0.1:P` and `ca` in `config.json` names `ca.pem`. For remote endpoints, follow the manual steps below with a server whose certificate they can verify.
-
-Every mash connection requires TLS, to any host, loopback included, so a plain `nats://` URL is refused for admin and system connections (`mashctl` with the admin or system creds) and for endpoint connections, with exit code 2. Local servers made by `init --local` use TLS, so they need no override. `init --local --start` connects over TLS to the loopback server that run just generated and started, and trusts only the `ca.pem` that run made; without `--start` nothing connects. `init --local` also records a copy of the operator JWT as `operator.jwt` in the key directory (0600, never replacing a file), which the commands that read the account JWT (a revocation, `issued check`, `adopt`) use to know which issuers to accept (see [Writing the account JWT](#writing-the-account-jwt-revocation)). The one override is `insecure_plaintext` (`MASH_INSECURE_PLAINTEXT=1`), for a throwaway server in a test; with it set each command prints a warning, because plain text lets anyone on the network read mail and obtain signatures. Do not set it on a network you do not control. Admin and system connections never add servers the server advertises. See [TLS](tls-and-clusters.md#plain-text-and-mash_insecure_plaintext).
-
-`init --local` refuses, and changes nothing, if `D` already holds any file it would create. Then:
+`mashctl init --config FILE` sets mash up on a NATS server you already run in operator mode with a full resolver and JetStream. `mashctl` does not install, configure or start NATS. A server address alone proves nothing about a server: not that it is in operator mode, nor that you hold authority over its account, system account and resolver. So `init` needs the authority to exist already, checks it, and refuses when a prerequisite is absent. It is safe to run again.
 
 ```sh
-nats-server -c ~/.config/mash/server/server.conf   # or: add --start to the command above
-mashctl init                                        # the directory and lease buckets
-mashctl endpoint create alice.dev.design   # one per endpoint, see "Adding an endpoint"
+mashctl init --config setup.yaml [--dry-run] [--json]
 ```
 
-With `--start`, `mashctl` looks for `nats-server` on `PATH` (if it is missing it says so, and the files stay), starts it detached with its output in `D/server.log` and its pid in `D/server.pid`, waits up to 15 seconds for a connection with `mashadmin.creds`, and creates the buckets. To stop the server: `kill $(cat D/server.pid)`.
+The setup file is YAML. It holds paths and addresses, never secrets. A relative path is resolved against the folder that holds the setup file. It has these keys, and no others:
 
-## Adopting an existing server
-
-`mashctl init --local` stands up a server. `mashctl adopt` is its counterpart for a NATS server you already run in operator mode with a full resolver and JetStream. A URL alone proves nothing about a server: not that it is in operator mode, nor that you hold authority over its account, system account and resolver, and `mashctl` cannot stand up or reconfigure a remote server from a client URL. So adopt requires the authority to exist already, checks it, and refuses when a prerequisite is absent.
-
-```sh
-mashctl adopt --server URL [--account NAME] --operator-key FILE --account-key FILE --sys-creds FILE \
-              [--admin-creds FILE | --mint-admin] [--owner O] [--dry-run]
+```yaml
+servers:
+  - tls://nats.example.com:4222
+ca: ca.pem
+owner: acme
+admin_creds: admin.creds
+system_creds: sys.creds
+operator_key: operator.nk
+account_key: account.nk
 ```
 
-Prerequisites, all of which you supply:
+- `servers`: the addresses of the servers, as a list.
+- `ca`: the certificate authority's certificate, when the server uses its own. Optional.
+- `owner`: the first owner.
+- `admin_creds`: the administrator's creds file, a user of the mash account.
+- `system_creds`: the system account's creds file. Cancelling a deleted endpoint's key needs it.
+- `operator_key`: the operator **signing** seed (starts with `SO`). A revocation (`endpoint delete`, `endpoint reissue`) signs the account JWT with it.
+- `account_key`: the **identity** seed of the mash account (starts with `SA`; its public key is the account JWT's subject).
 
-- `--operator-key FILE`: the operator **signing** seed (starts with `SO`). a revocation (`endpoint delete`, `endpoint reissue`) signs the account JWT with it.
-- `--account-key FILE`: the **identity** seed of the mash account (starts with `SA`; its public key is the account JWT's subject).
-- `--sys-creds FILE`: creds of a user of the system account.
-- `--server URL`, and the TLS settings of the loaded configuration (`ca`, `tls_cert`, `tls_key`), as every other verb uses them. `--account NAME` is the account's name in its JWT (default: the owner), and `--owner O` defaults to the configured owner.
+An unknown key is an error (`error: setup.yaml: unknown key colour`), and so is a missing one other than `ca` (`error: setup.yaml: missing key owner`). Seeds and creds are read from files only, never from arguments or environment values; the files must be mode 0600, and a seed is never printed. A hosted NATS where you do not hold the operator key, such as Synadia Cloud, is not supported by `mashctl` in 0.5.6; `mash` itself works against any conforming server.
 
-Seeds are read from files only, never from arguments or environment values, the files must be mode 0600, and a seed is never printed. Without `--operator-key`, `--account-key` or `--sys-creds`, adopt exits 2 and says which is missing and why.
+`init` first runs read-only checks and writes nothing until all pass: (1) the files parse and have the right seed prefixes; (2) the server refuses a connection without credentials (a server that accepts one, or whose system account answers nothing, is refused as not looking like an operator-mode server with a full resolver), the system creds connect, and the resolver has a JWT for the account key's public key whose subject is that key and which is not expired; (3) the account has JetStream file storage (disk limit other than 0), with a warning when its disk, stream and consumer limits are below what one endpoint needs (3 streams, 1 consumer, about 36 MiB; see [Account limits](#account-limits)); (4) the system account answers `$SYS.REQ.SERVER.PING` and the claims lookup; (5) the account JWT carries a valid signature by its issuer, and the issuer is the operator key you gave; any other issuer is refused (exit 1, nothing written), naming the issuer and the accepted keys; (6) the admin creds belong to the account, connect, and the server answers for the account's JetStream. The connections require TLS, or the `insecure_plaintext` setting for a throwaway server. The check also refuses a key store that already holds a different operator or account key, a `sys.creds` that already holds other creds, and a `config.json` that holds other settings. The permission to push claims updates is not tested, because that would change the server: `mashctl endpoint delete` is the first to use it.
 
-Adopt first runs read-only checks, in this order, and writes nothing until all pass: (1) the files parse and have the right seed prefixes; (2) the server refuses a connection without credentials (a server that accepts one, or whose system account answers nothing, is refused as not looking like an operator-mode server with a full resolver), the system creds connect, and the resolver has a JWT for the account key's public key whose subject is that key, whose name is `NAME` and which is not expired; (3) the account has JetStream file storage (disk limit other than 0), and its disk, stream and consumer limits are shown, with a warning when they are below what one endpoint needs (3 streams, 1 consumer, about 36 MiB; see [Account limits](#account-limits)); (4) the system account answers the `$SYS.REQ.SERVER.PING` and the claims lookup, which is reported as standalone or as a cluster; (5) the account JWT carries a valid signature by its issuer, and the issuer is the operator key you gave; any other issuer is refused (exit 1, nothing written), naming the issuer and the accepted keys. The system and admin connections require TLS, or the `insecure_plaintext` setting for a throwaway server (see [Local setup](#local-setup-with-mashctl-init---local)). The permission to push claims updates is not tested, because that would change the server: `mashctl endpoint delete` is the first to use it. The check also refuses a key store that already holds a different operator or account key, and a `sys.creds` that already holds other creds.
+Then it writes, in this order: the two keys into the key store (`operator.nk`, `account.nk`; 0600, created without replacing anything; the same key already stored is fine, a different one is refused); the system creds as `<config dir>/server/sys.creds` (0600, where a revocation looks for them); mash's storage on the server (the directory, lease, retired-name, issue-record and adoption buckets, hardened); the admin user in the issue record; and `config.json` with `servers`, `ca`, `owner`, `admin_creds` (the path of the file you gave; it is not copied) and `system_creds`. It prints one line:
 
-Then it writes, or with `--dry-run` prints exactly what it would write: the two keys into the key store (`operator.nk`, `account.nk`; 0600, created without replacing anything, fsynced; the same key already stored is fine, a different one is refused); the system creds as `<config dir>/server/sys.creds` (0600, where a revocation looks for them); with `--admin-creds FILE`, that path as `admin_creds` in `config.json` (the file is checked to connect and not copied), or with `--mint-admin` a `mashadmin` user of the account, signed by the account identity key with full access as `init --local` makes it, as `<config dir>/server/mashadmin.creds` (0600; one already there that is valid for this account and connects is kept, not replaced); `config.json` (`servers`, `admin_creds`, and `ca`, `tls_cert`, `tls_key` when the loaded configuration sets them) only if there is none (otherwise the settings are printed); and the open `policy.yaml` only if there is none. Running adopt again with the same inputs changes nothing.
+```
+Initialized mash on tls://nats.example.com:4222 for owner acme
+```
 
-Adopt connect-tests whatever admin creds it ends with before it prints "All checks passed", and the summary says which it tested (`admin creds ok: connected (given)`, `(minted)` or `(kept)`). A `--mint-admin` user is made in memory and connected with in the read-only phase, so `--dry-run` reports a failure too and a failure writes nothing. An existing `mashadmin.creds` that parses but cannot connect is refused, not kept: move it aside to mint a new one. On an operator with strict signing key usage (`strict_signing_key_usage: true`), the server accepts only users signed by an account signing key, and the account identity key cannot sign users, so a minted `mashadmin` is rejected and adopt refuses with that explanation and the server's error text. mashctl does not fall back to another signing key. The way out is `--admin-creds FILE` with a user signed by one of the account's signing keys.
+Run again with the same file it changes nothing and says `Already initialized on tls://nats.example.com:4222; nothing changed`. `--dry-run` runs the checks, prints `Would initialize mash on ...` and `Nothing was changed.`, and writes nothing. `--verbose` adds a `label: value` line for each path it wrote. `--json` prints `{"server": [...], "owner": "acme", "changed": true}`. A server that does not answer is `error: cannot reach tls://nats.example.com:4222` with the hint `mashctl doctor`, exit 1. `mashctl init` without `--config` is a usage error (exit 2).
 
-The `mashadmin` creds that `--mint-admin` writes carry no permission limits on the account (when the server accepts them: see the strict-signing note above): whoever holds `mashadmin.creds` can publish and subscribe on every subject of the account, read every inbox and change the directory. Keep the file at 0600 on the machine that runs `mashctl`, and give endpoints their own creds, never these.
+Every mash connection requires TLS, to any host, loopback included, so a plain `nats://` URL is refused for admin and system connections (`mashctl` with the admin or system creds) and for endpoint connections, with exit code 2. The one override is `insecure_plaintext` (`MASH_INSECURE_PLAINTEXT=1`), for a throwaway server in a test; with it set each command prints a warning, because plain text lets anyone on the network read mail and obtain signatures. Do not set it on a network you do not control. Admin and system connections never add servers the server advertises. See [TLS](tls-and-clusters.md#plain-text-and-mash_insecure_plaintext). The commands that read the account JWT (a revocation, `issued check`) accept the operator key you gave, or a signing key the operator JWT declares (see [Writing the account JWT](#writing-the-account-jwt-revocation)).
 
-Adopt changes nothing on the server except one thing: with `--mint-admin` it records the minted `mashadmin` user in the issue record (creating the `mash-issued` bucket if the account has none), before it writes the creds file, so the credential it hands out is never unrecorded; if that write fails, adopt fails, says the admin credentials were not recorded and writes no creds file. Otherwise it pushes no account update and creates no NATS user there (a minted `mashadmin` exists only as a local creds file, usable because the account key signed it) and no other bucket. The cutover of a live account, meaning revoking the credentials issued before, is a separate step the operator runs: `mashctl init` creates the buckets and `mashctl endpoint create` makes endpoints. Until then, credentials minted by other tools keep working.
+On an operator with strict signing key usage (`strict_signing_key_usage: true`), the server accepts only users signed by an account signing key, and the account identity key cannot sign users. Give `admin_creds` a user signed by one of the account's signing keys; `init` refuses an admin user the server rejects, with the server's error text, and changes nothing.
+
+The `admin_creds` user carries no permission limits on the account when it is a full-access user: whoever holds the file can publish and subscribe on every subject of the account, read every inbox and change the directory. Keep the file at 0600 on the machine that runs `mashctl`, and give endpoints their own creds, never these.
+
+`init` changes nothing on the server except mash's own storage and the admin user's entry in the issue record. It pushes no account update and creates no NATS user there. The cutover of a live account, meaning revoking the credentials issued before, is a separate step you run yourself. Until then, credentials minted by other tools keep working. Then make endpoints with `mashctl endpoint create`.
 
 ## Which server does mashctl change?
 
-`mashctl` takes the server, the owner and the admin credentials from `config.json` in the config directory; the endpoint's own `MASH_*` variables (`MASH_SERVER`, `MASH_ENDPOINT`, `MASH_ADMIN_CREDS`, `MASH_CA`, ...) win over the file, and the global flags (`--server`, `--ca`, `--creds`, `--endpoint`) win over both. The owner is the owner part of `MASH_ENDPOINT` or `--endpoint`. Run from a shell inside a mash agent session, those variables are the session's, so `mashctl init`, `list` and the other verbs act on the session's own server, not the scratch one you may have meant.
+`mashctl` takes the server, the owner and the admin credentials from `config.json` in the config directory; the endpoint's own `MASH_*` variables (`MASH_SERVER`, `MASH_ENDPOINT`, `MASH_ADMIN_CREDS`, `MASH_CA`, ...) win over the file, and the global flags (`--server`, `--ca`, `--creds`, `--endpoint`) win over both. The owner is the owner part of `MASH_ENDPOINT` or `--endpoint`. Run from a shell inside a mash agent session, those variables are the session's, so `mashctl status`, `endpoint list` and the other verbs act on the session's own server, not the scratch one you may have meant.
 
-Every verb that connects to a server or changes one (`init`, `limits`, `endpoint create`, `endpoint reissue`, `endpoint delete`, `endpoint list`, `endpoint show`, `endpoint set`, `endpoint unset`, `endpoint suspend`, `endpoint resume` and `endpoint inbox`) first prints, to stderr, what it is about to act on and where each setting came from:
+Every verb that connects to a server or changes one (`limits apply`, `endpoint create`, `endpoint reissue`, `endpoint delete`, `endpoint list`, `endpoint show`, `endpoint set`, `endpoint unset`, `endpoint suspend`, `endpoint resume` and `endpoint inbox`) first prints, to stderr, what it is about to act on and where each setting came from:
 
 ```
 mashctl: target server tls://host:4222 (from MASH_SERVER), owner acme (from MASH_ENDPOINT), admin creds /home/me/.config/mash/admin.creds (from MASH_ADMIN_CREDS)
 ```
 
-The verbs that revoke add the system credentials' path when it is known. Credentials files are named, never printed; the user information of a URL is shown as `***@`. When an environment variable overrides a different value in `config.json` (the servers, endpoint, admin creds or `ca`), a warning names both values, and when `MASH_ENDPOINT` or `MASH_LAUNCH_TOKEN` is set and the server came from `MASH_SERVER`, a second warning says the shell looks like it is inside a mash session. These lines inform; they never refuse, and the TLS and issuer rules are unchanged. The offline verbs (`permissions`, `limits --show`, `policy`, `init --local`) print nothing of this.
+The verbs that revoke add the system credentials' path when it is known. Credentials files are named, never printed; the user information of a URL is shown as `***@`. When an environment variable overrides a different value in `config.json` (the servers, endpoint, admin creds or `ca`), a warning names both values, and when `MASH_ENDPOINT` or `MASH_LAUNCH_TOKEN` is set and the server came from `MASH_SERVER`, a second warning says the shell looks like it is inside a mash session. These lines inform; they never refuse, and the TLS and issuer rules are unchanged. `init`, `status`, `limits show` and `endpoint permissions` print nothing of this.
 
 To choose the target explicitly, pass `--server`, `--creds`, `--endpoint` or `--config-dir`; or, to use `config.json` instead of the session's variables, run `env -u MASH_SERVER -u MASH_ENDPOINT -u MASH_ADMIN_CREDS -u MASH_CA mashctl ...`, or run mashctl outside the session.
 
@@ -78,7 +73,7 @@ What `mashctl` prints and reads follows from not trusting the server:
 
 - Strings that came from a server or a directory record (server names, ack messages, scoped signing key roles, record fields in `endpoint list` and `endpoint show`) are printed escaped: every control character (ESC, CR, newline, and the C1 range) and invalid UTF-8 shows as `\xNN` or `\uNNNN`, and a value is cut at 256 characters with `...`. Ordinary text, accented letters included, is unchanged.
 - A reply from the system account is bounded: a claims reply over the account JWT limit (1 MiB) is refused with `reply of N bytes over the limit`, more than 1024 distinct server names ends the ping with `more than 1024 servers answered: refusing`, and a collection stops after 4096 replies.
-- A server URL with credentials in it (`nats://user:pass@host`) is not supported. `adopt` refuses it, so it is never written to `config.json`; give the credentials as files (`--sys-creds`, `--admin-creds`). A URL that reaches `mashctl` through `config.json` or `MASH_SERVER` is printed with the user information replaced by `***@`.
+- A server URL with credentials in it (`nats://user:pass@host`) is not supported. `init` refuses it in the setup file, so it is never written to `config.json`; give the credentials as files (`system_creds`, `admin_creds`). A URL that reaches `mashctl` through `config.json` or `MASH_SERVER` is printed with the user information replaced by `***@`.
 - `config.json` is refused when it is writable by every user (`chmod go-w` it); its owner is not checked, since a config map is often a symlink owned by another user. A relative `admin_creds`, `ca`, `tls_cert` or `tls_key` in `config.json` is resolved against the config directory, not the working directory.
 
 ## The account
@@ -105,16 +100,15 @@ nsc generate creds --account "$ACCOUNT" --name mashadmin > ~/.config/mash/admin.
 chmod 600 ~/.config/mash/admin.creds
 ```
 
-Then create the directory and lease buckets once:
+Then write the setup file [described above](#setting-mash-up-with-mashctl-init---config) and make mash's storage once:
 
 ```sh
-export MASH_SERVER=tls://nats.example.com:4222 MASH_ENDPOINT=alice.dev.admin MASH_ADMIN_CREDS=~/.config/mash/admin.creds
-mashctl init
+mashctl init --config setup.yaml
 ```
 
-Every bucket carries a size cap, because hosted NATS accounts (Synadia Cloud's free tier, for one) refuse a stream with no max bytes. By default the directory bucket gets 16 MiB and the lease bucket 4 MiB; both hold tiny records, so that is generous (see [Limits](#limits) to change them). Running `mashctl init` again is safe: a bucket made by an older mash with no cap is bounded in place with a stream update, keeping every key; a bucket whose cap is smaller than the configured one is raised to it; a bucket with a larger cap keeps it. Init never lowers a cap and never purges anything.
+Every bucket carries a size cap, because hosted NATS accounts (Synadia Cloud's free tier, for one) refuse a stream with no max bytes. By default the directory bucket gets 16 MiB and the lease bucket 4 MiB; both hold tiny records, so that is generous (see [Limits](#limits) to change them). Running `mashctl init --config` again is safe: a bucket made by an older mash with no cap is bounded in place with a stream update, keeping every key; a bucket whose cap is smaller than the configured one is raised to it; a bucket with a larger cap keeps it. Init never lowers a cap and never purges anything.
 
-After upgrading mash, re-run `mashctl init`: it hardens the lease bucket, so that it no longer allows rollup writes (a deployment that has not re-run it keeps its old bucket until an admin lock runs). `mashctl audit` reports a lease bucket that has not been hardened as a problem, with the text `lease bucket allows rollup writes; run "mashctl init" to harden it`, and `--strict` then exits 1. An endpoint also warns once at start when the bucket still allows rollup writes; the warning never stops it from starting.
+After upgrading mash, re-run `mashctl init --config FILE`: it hardens the lease bucket, so that it no longer allows rollup writes (a deployment that has not re-run it keeps its old bucket until an admin lock runs). `mashctl audit` reports a lease bucket that has not been hardened as a problem, with the text `lease bucket allows rollup writes; run "mashctl init --config FILE" to harden it`, and `--strict` then exits 1. An endpoint also warns once at start when the bucket still allows rollup writes; the warning never stops it from starting.
 
 ## Adding an endpoint
 
@@ -246,7 +240,7 @@ There is no policy file; see [mashctl.md](mashctl.md).
 - **Who writes it.** Only the admin connection `mashctl` holds. Endpoint users have no permission on `$KV.mash-issued.>` or on the stream's `$JS.API` subjects, not even to read, and a test asserts that no permission list mash makes grants anything on it. The stream is created by `mashctl init` (or on first use, over the admin connection) with file storage, no TTL, a history of 64 revisions per key (the most a KV bucket allows: the last 64 revisions of a key are kept, and a key is re-recorded only when a credential is reissued under it; a bucket from the first version, with 8, is accepted and `mashctl init` raises it to 64 without losing a record), a size cap of 8 MiB (one more stream, and 8 MiB more disk, in the account's [limits](#account-limits)), discard-new when full (a full bucket refuses new issues instead of losing a record), and rollup, message delete and purge refused. mash verifies these on use and refuses to write to a bucket that was made otherwise (`recreate it as mashctl init makes it, copying its records`). A holder of the admin creds can still write the bucket, so the record protects against signing-key copies, not against the admin creds ([Who holds which key](security/threat-model.md#10-who-holds-which-key)).
 - **What the check sees.** `mashctl issued check` sends the system account's `$SYS.REQ.SERVER.PING.CONNZ` request with `auth` on and the MASH account as filter. For a JWT user the server reports the user's public key as `authorized_user`, plus the connection's name, the key that signed its JWT (`issuer_key`) and its tags; the connection's JWT also comes back and is never read or printed. A request asks for up to 8192 connections, so a typical scan is one reply; the rest of a larger server's connections are read with further requests to that server's own subject (offset and limit). Pages are separate snapshots, so a connection closing or opening between two pages can shift the list: the scan of a server is accepted only when the connections collected (by connection id) match the total the server reports on its first and last page with none repeated, is made again up to 3 times otherwise, and a server that still does not reconcile counts as one that did not answer (`INCOMPLETE`). No key is exempt from the check: the admin user must be in the record (`mashctl init` and `adopt --mint-admin` record it), and the system account's users never appear in the MASH account's connection list. Connections of other accounts are not asked for.
 - **What it does not see.** Only connections open when the check runs: a user that connected and left between checks is not seen, so run it on a schedule and after a key leak. It does not see a user that has not connected. It cannot tell a server that is down from one that has no connections except by the server set: give `--servers N` (or `MASH_SERVERS`) the real server count, or the run is `INCOMPLETE` and exits 2.
-- **Complete history.** The stream's metadata key `mash_issued_history` says whether a key's retained revisions can be trusted to be all of them: `full` for a bucket created at 64, `raised:N:S` written once by `mashctl init` when it raises an older bucket from N (S is the stream's last sequence, read after the limit is raised; if the marker write fails, `init` reports the error, the limit stays raised and the bucket has no marker, so the legacy rule applies until `init` is run again), none for a bucket from before the marker. `endpoint delete` refuses to revoke a key whose history is not shown complete (8 or more revisions with no marker; N or more at or below S after a raise), and say to revoke it by hand in the account JWT only after checking where it was issued. Run `mashctl init` on an older deployment so a later raise is marked; a raise already done without a marker cannot be marked afterwards.
+- **Complete history.** The stream's metadata key `mash_issued_history` says whether a key's retained revisions can be trusted to be all of them: `full` for a bucket created at 64, `raised:N:S` written once by `mashctl init --config` when it raises an older bucket from N (S is the stream's last sequence, read after the limit is raised; if the marker write fails, `init` reports the error, the limit stays raised and the bucket has no marker, so the legacy rule applies until `init` is run again), none for a bucket from before the marker. `endpoint delete` refuses to revoke a key whose history is not shown complete (8 or more revisions with no marker; N or more at or below S after a raise), and say to revoke it by hand in the account JWT only after checking where it was issued. Run `mashctl init` on an older deployment so a later raise is marked; a raise already done without a marker cannot be marked afterwards.
 - **Revoked keys.** `endpoint delete` and `endpoint reissue` set `revoked_at` on the key's entry after the revocation succeeds (best effort: a failure is a warning on stderr, and the revocation stands). A key that is recorded as revoked and still connected is reported as `revoked key still connected` and exits 1, because the revocation did not take effect: check that every server holds the account JWT with the revocation, and revoke the key again. Exit codes of `mashctl issued check`: 0 clean; 1 an unrecorded key or a revoked key is connected; 2 the check could not be made. A key revoked outside `mashctl` (nsc) is not marked, so it is not reported this way.
 - **After a finding.** The finding names the key and the signer. If the signer is a key that should not sign users, remove it from the account (with the tool that added it), replace the credentials of the endpoints it signed, and revoke the unknown key in the account JWT. A key that is yours but predates the record is recorded when its credential is next reissued (`mashctl endpoint reissue`).
 
@@ -320,7 +314,7 @@ Keep the admin credentials, the system account credentials and the key store (`o
 
 - `MASH_SERVER` lists every server, separated by commas (or `servers` in `config.json`), so a connection still succeeds when one of them is down.
 - `MASH_SERVERS=N` or `--servers N` is how many servers the cluster has. `endpoint create`, `endpoint reissue` and `endpoint delete` take `--servers N`, which overrides `MASH_SERVERS`. A server count that is not a whole number of 1 or more is refused. Without it, a command that writes the account JWT waits for a quiet period instead of for N replies, and a cluster member that sees no peers is refused as an unverifiable server set.
-- `--sys-creds FILE` or `MASH_SYS_CREDS` names the system account creds. The same verbs take `--sys-creds FILE`, which overrides `MASH_SYS_CREDS`. Without either, `mashctl` looks for `sys.creds` next to the admin creds, then in `<config dir>/server/` (where `adopt` puts it).
+- `--sys-creds FILE` or `MASH_SYS_CREDS` names the system account creds. The same verbs take `--sys-creds FILE`, which overrides `MASH_SYS_CREDS`. Without either, `mashctl` uses `system_creds` from `config.json`, then looks for `sys.creds` next to the admin creds, then in `<config dir>/server/` (where `init` puts it).
 
 ```sh
 mashctl endpoint delete alice.dev.design --servers 3 --sys-creds /secure/sys.creds
@@ -332,16 +326,15 @@ A creds file holds the user seed. The seed never leaves the endpoint's machine: 
 
 - Each bucket and each inbox has one replica, on one node. Any one node down therefore blocks the writing commands (`endpoint create`, `endpoint reissue`, `endpoint delete`), because each of them writes to a bucket or inbox that node may hold. `endpoint list` can still work when the directory bucket is on a live node. This stays so until the buckets get replicas.
 - `endpoint delete` also refuses when fewer servers answer than the count says: `refusing: only N of M servers answered: a server may be down (bring it back and run the command again), or the server count is wrong (pass --servers N or set MASH_SERVERS)`. It does not name the silent server, because the lookup does not say which one it was. Bring the server back first. Lower the count only when it was wrong.
-- When the server that holds a stream or bucket is down, the command says `the server holding bucket X is down: bring it back and run the command again` (`audit` and `issued` say `the server holding stream X is down`, or `a stream or bucket` when the error does not name it), followed by the raw NATS text. `mashctl init` does not help, because the bucket exists.
+- When the server that holds a stream or bucket is down, the command says `the server holding bucket X is down: bring it back and run the command again` (`audit` and `issued` say `the server holding stream X is down`, or `a stream or bucket` when the error does not name it), followed by the raw NATS text. `mashctl init --config` does not help, because the bucket exists.
 - `endpoint delete` checks the server set before they change the directory record, the lease or the inbox. When it is short they print `nothing was revoked; the key is still valid` and leave the record as it was. Run the command again when the server is back. If the revoke failed after the update was pushed, the text says the revocation may already be in force on some servers, with `hint: mashctl endpoint delete <address>`; run the same command again (revoking again is safe). If the revocation completed and a later step failed, the message is `error: deleted <address>, but <what is left>` with the same hint. Running the same command again finishes it.
 - `MASH_SERVER` (or `servers` in config.json: a JSON array, or one string with commas; or `--server`, repeated) takes a list, so a connection still succeeds when the first server is down. If every listed server is down, the error is `no servers available for connection`, with a hint to check `MASH_SERVER` and that at least one listed server is up.
 
 ### A three-node cluster
 
-`mashctl init --local` builds one node only: loopback, TLS only, `server_name: mash-local`, no cluster block. For a cluster:
+`mashctl` does not build or start servers. Set up the three nodes yourself, then run `mashctl init --config` once from the host that runs `mashctl`.
 
-1. On node 1 run `mashctl init --local` (without `--start`). It writes `server.conf`, `operator.jwt`, `mashadmin.creds` and `sys.creds` in the server directory, and the signing keys in the key store on that host. Do not start node 1 yet.
-2. Edit node 1's own `server.conf`: give it a new `server_name` (it is `mash-local`) and add a `cluster` block. Then copy `operator.jwt` and `server.conf` to the other nodes as a template. The `tls` block names node 1's certificate and key by absolute path, and that certificate lists only `localhost`, `127.0.0.1` and `::1`, so it works for no other node: for each node make a certificate and key that list the node's own host names and addresses, signed by a CA the clients trust (see [TLS, clusters and a second mashctl machine](tls-and-clusters.md)), set `cert_file` and `key_file` in that node's `tls` block, and give clients `ca`. In each copy set a different `server_name` and `listen` address, a different `dir` in the `resolver` block, a different `store_dir` in the `jetstream` block, and a different cluster `listen`. Keep the same `resolver_preload` (the system and account JWTs), so every node starts with the same accounts. The `operator` line is the path of `operator.jwt` on that node. The `cluster` block of node 1 in a three-node cluster on one test host looks like this; `routes` lists the other nodes' cluster addresses, and `name` is the same on every node:
+1. Give every node the same operator JWT and the same `resolver_preload` (the system and account JWTs), so every node starts with the same accounts. Give each node its own `server_name`, `listen` address, `dir` in the `resolver` block, `store_dir` in the `jetstream` block and cluster `listen`. Each node needs a certificate and key that list the node's own host names and addresses, signed by a CA the clients trust (see [TLS, clusters and a second mashctl machine](tls-and-clusters.md)); set `cert_file` and `key_file` in that node's `tls` block, and give clients `ca`. The `operator` line is the path of the operator JWT on that node. The `cluster` block of node 1 in a three-node cluster on one test host looks like this; `routes` lists the other nodes' cluster addresses, and `name` is the same on every node:
 
 ```
 server_name: mash-n1
@@ -362,21 +355,28 @@ cluster: {
 }
 ```
 
-   Listen on addresses the central host and the other nodes can reach, and use TLS for anything beyond a test (the template has none).
+Listen on addresses the central host and the other nodes can reach, and use TLS for anything beyond a test.
 
-   Set `interval` in every node's `resolver` block. The full resolver syncs from a timer only, one interval after the node starts (default one minute), and nothing holds clients back until it has. A node that was down while a key was revoked therefore accepts the revoked credential until its first sync; `interval: "5s"` shortens that to the interval plus about 0.03 to 0.1 s on a loopback cluster (measured: restart to refusal took 5.03 to 5.11 s with `interval: "5s"`); a real network may add route formation time. To close it completely, keep the returning node's client port closed (a firewall rule, or listen on a private address first) until `mashctl audit` shows no `revocation_pending`.
-3. Start the nodes. Check that the cluster formed with `mashctl issued check --servers 3` once step 5 is done (it needs the admin creds and the issue record): its last line, `summary: ... 3 of 3 servers answered`, counts the servers that answered the system account, and it exits 2 with `INCOMPLETE` when fewer did. `adopt` also prints `3 server(s) replied`.
-4. On the central host, copy the operator signing seed, the account identity seed and `sys.creds` from node 1, and run `adopt`. It creates the central host's config.json, imports the operator and account keys into its key store, copies `sys.creds` to `<config dir>/server/` and, with `--mint-admin`, writes `mashadmin.creds` there. A fresh central host has no configured owner, so pass `--owner`:
 
-```sh
-mashctl adopt --server tls://node1:4222 --owner O --account MASH \
-  --operator-key operator.nk --account-key account.nk --sys-creds sys.creds --mint-admin
+Set `interval` in every node's `resolver` block. The full resolver syncs from a timer only, one interval after the node starts (default one minute), and nothing holds clients back until it has. A node that was down while a key was revoked therefore accepts the revoked credential until its first sync; `interval: "5s"` shortens that to the interval plus about 0.03 to 0.1 s on a loopback cluster (measured: restart to refusal took 5.03 to 5.11 s with `interval: "5s"`); a real network may add route formation time. To close it completely, keep the returning node's client port closed (a firewall rule, or listen on a private address first) until `mashctl audit` shows no `revocation_pending`.
+2. Start the nodes.
+3. On the host that runs `mashctl`, copy the operator signing seed, the account identity seed, the system creds and the admin creds, and write a setup file that lists every server:
+
+```yaml
+servers:
+  - tls://node1:4222
+  - tls://node2:4222
+  - tls://node3:4222
+ca: ca.pem
+owner: acme
+admin_creds: admin.creds
+system_creds: sys.creds
+operator_key: operator.nk
+account_key: account.nk
 ```
 
-5. On the central host run `mashctl init` (no `--local`). `adopt` does not create the directory and lease buckets; this does, over the cluster, with the admin creds `adopt` wrote. `init --local` is not run on the central host: it would make a second, local server and a second set of keys.
-6. Put every server in config.json's `servers`, for example `"servers": ["tls://node1:4222", "tls://node2:4222", "tls://node3:4222"]`, and set `MASH_SERVERS=3` (or pass `--servers 3`).
-
-`--account` must be the account name `init --local` chose, `MASH` by default; the default for `--account` is the owner, which fails when the owner is another name. `adopt` takes one `--server` URL and writes it to config.json. For a test cluster without TLS, run `adopt` as `MASH_INSECURE_PLAINTEXT=1 mashctl adopt --server nats://127.0.0.1:4222 ...`: it prints the plain-text warning, and writes `insecure_plaintext` into config.json, so the later commands do not need the variable. Never do this on a network you do not control. The seed files must be mode 0600. Delete the copies you made when `adopt` has stored the keys.
+   Run `mashctl init --config setup.yaml`. It checks the cluster, imports the keys into the key store, copies `sys.creds` to `<config dir>/server/`, makes the directory, lease and other buckets over the cluster, and writes `config.json` with all three servers. Set `MASH_SERVERS=3` (or pass `--servers 3`). For a test cluster without TLS, set `MASH_INSECURE_PLAINTEXT=1`: `init` prints the plain-text warning and writes `insecure_plaintext` into `config.json`, so the later commands do not need the variable. Never do this on a network you do not control. The seed and creds files must be mode 0600. Delete the copies you made when `init` has stored the keys.
+4. Check that the cluster formed with `mashctl status` and `mashctl issued check --servers 3` (it needs the admin creds and the issue record): its last line, `summary: ... 3 of 3 servers answered`, counts the servers that answered the system account, and it exits 2 with `INCOMPLETE` when fewer did.
 
 ## Inbox limits
 
@@ -412,19 +412,28 @@ An optional `limits` object in `~/.config/mash/config.json` changes them; leave 
 }
 ```
 
-`mashctl limits --show` prints the effective limits, one `key value` per line.
+`mashctl limits show` prints the limits in force:
+
+```
+inbox size:  16 MiB
+inbox age:   30 days
+```
+
+`--json` prints `{"inbox_bytes": 16777216, "inbox_age": "720h"}`.
 
 ### Changing limits later
 
 Limits only go up. Edit config.json, then apply it:
 
 ```sh
-mashctl init              # raises the two buckets (a larger existing cap is kept)
-mashctl limits            # raises every inbox's max_bytes and max_age, and sets max_consumers
-mashctl limits alice.dev.design   # or only the named inboxes
+mashctl init --config setup.yaml   # raises the two buckets (a larger existing cap is kept)
+mashctl limits apply               # raises every inbox's max_bytes and max_age, and sets max_consumers
+mashctl limits apply alice         # or only the inboxes under an owner,
+mashctl limits apply alice.dev     # under an owner and group,
+mashctl limits apply alice.dev.design   # or one endpoint's
 ```
 
-New endpoints (`mashctl endpoint create`) get the configured limits at once. `mashctl limits` updates each existing stream in place, keeping its mail, and prints a line per endpoint saying what changed. It refuses to lower `max_bytes` or `max_age` on an endpoint, with an error naming the endpoint and field, and changes nothing for it, because a lower cap could discard stored mail. To lower an inbox's limits, run `mashctl endpoint delete <name>` (which removes the mail in it) and create it again. `mashctl init` likewise never lowers a bucket. The check that runs on an existing inbox still reports any stream that differs from the configured limits. JetStream has no compare-and-set on a stream's configuration, so each change to an inbox's limits (`mashctl limits`, and the stream step of `mashctl endpoint create`) takes a per-stream lock first: the key `limits-lock.<name>` in the lease bucket, held from the read of the stream's caps until its update is written. Two admins changing one inbox at once are serialised, so the second sees the first's caps and is refused if it would lower them. The lock lasts 30 s and expires on its own if the admin dies; a second admin waits up to 20 s for a held lock and then fails with `mash: another admin is changing the limits of <name> (lock held until <time>); try again`, which is safe to retry. Every operation under the lock now stops about 5 s before it expires and re-checks it before writes that cannot be undone, so a stalled admin fails with `try again` instead of overlapping another admin. Over many inboxes the locks are taken one at a time. Expiry is judged by each admin's own clock, so keep admins' clocks within a few seconds of each other; with clocks 45 s apart, one admin can take a lock the other still holds, and the one that lost it is refused with `the lock of <name> was lost or is about to expire ... try again` (two admins creating one endpoint still never both succeed, because the directory record is created only once). Endpoints cannot read or write the lock. A deployment that never ran `mashctl init` for the lease bucket has it created on first use ([ADR-0048](decisions/0048-limit-changes-take-a-per-stream-kv-lock-with-expiry.md)).
+New endpoints (`mashctl endpoint create`) get the configured limits at once. `mashctl limits apply` updates each existing stream in place, keeping its mail, and prints `Raised N inboxes` (or `Nothing to raise`); `--verbose` adds a line per endpoint saying what changed, and `--dry-run` prints what it would raise and changes nothing. It refuses to lower `max_bytes` or `max_age` on an endpoint, with an error naming the endpoint and field, and changes nothing for it, because a lower cap could discard stored mail. To lower an inbox's limits, run `mashctl endpoint delete <name>` (which removes the mail in it) and create it again. `mashctl init --config` likewise never lowers a bucket. The check that runs on an existing inbox still reports any stream that differs from the configured limits. JetStream has no compare-and-set on a stream's configuration, so each change to an inbox's limits (`mashctl limits apply`, and the stream step of `mashctl endpoint create`) takes a per-stream lock first: the key `limits-lock.<name>` in the lease bucket, held from the read of the stream's caps until its update is written. Two admins changing one inbox at once are serialised, so the second sees the first's caps and is refused if it would lower them. The lock lasts 30 s and expires on its own if the admin dies; a second admin waits up to 20 s for a held lock and then fails with `mash: another admin is changing the limits of <name> (lock held until <time>); try again`, which is safe to retry. Every operation under the lock now stops about 5 s before it expires and re-checks it before writes that cannot be undone, so a stalled admin fails with `try again` instead of overlapping another admin. Over many inboxes the locks are taken one at a time. Expiry is judged by each admin's own clock, so keep admins' clocks within a few seconds of each other; with clocks 45 s apart, one admin can take a lock the other still holds, and the one that lost it is refused with `the lock of <name> was lost or is about to expire ... try again` (two admins creating one endpoint still never both succeed, because the directory record is created only once). Endpoints cannot read or write the lock. A deployment that never ran `mashctl init --config` for the lease bucket has it created on first use ([ADR-0048](decisions/0048-limit-changes-take-a-per-stream-kv-lock-with-expiry.md)).
 
 ### Account limits
 

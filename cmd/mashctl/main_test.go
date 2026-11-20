@@ -36,9 +36,7 @@ func provisionAs(t *testing.T, e *testenv.Env, instance string, meta admin.Meta)
 
 func TestMashctlVerbs(t *testing.T) {
 	e := testenv.Start(t)
-	if out, errb, code := ctlRun(t, e, "init"); code != 0 || !strings.Contains(out, "mashctl: directory and lease buckets ready") {
-		t.Fatalf("init: %d %q %q", code, out, errb)
-	}
+	makeStorageFor(t, e)
 	provisionAs(t, e, "c", admin.Meta{Role: "r"})
 	if out, _, code := ctlRun(t, e, "endpoint", "list"); code != 0 || out != "OWNER  GROUP  NAME  STATE\no      g      c     offline\n" {
 		t.Fatalf("endpoint list: %d %q", code, out)
@@ -46,11 +44,11 @@ func TestMashctlVerbs(t *testing.T) {
 	if out, errb, code := ctlRun(t, e, "endpoint", "set", "o.g.c", "host=h1"); code != 0 || out != "Updated endpoint o.g.c\n" {
 		t.Fatalf("endpoint set: %d %q %q", code, out, errb)
 	}
-	if out, _, code := ctlRun(t, e, "limits", "--show"); code != 0 || !strings.Contains(out, "inbox_max_bytes") {
-		t.Fatalf("limits --show: %d %q", code, out)
+	if out, _, code := ctlRun(t, e, "limits", "show"); code != 0 || out != "inbox size:  16 MiB\ninbox age:   30 days\n" {
+		t.Fatalf("limits show: %d %q", code, out)
 	}
-	if out, _, code := ctlRun(t, e, "limits", "o.g.c"); code != 0 {
-		t.Fatalf("limits: %d %q", code, out)
+	if out, _, code := ctlRun(t, e, "limits", "apply", "o.g.c"); code != 0 || out != "Nothing to raise\n" {
+		t.Fatalf("limits apply: %d %q", code, out)
 	}
 	if out, errb, code := ctlRun(t, e, "endpoint", "permissions", "o.g.c"); code != 0 || !strings.HasPrefix(out, "{") || errb != "" {
 		t.Fatalf("permissions: %d %q %q", code, out, errb)
@@ -70,12 +68,12 @@ func TestMashctlUsageAndErrors(t *testing.T) {
 	// the removed verbs are unknown commands, like any other
 	for _, verb := range []string{"provision", "deprovision", "list", "show", "set-meta", "label", "unlabel", "suspend", "resume", "suspended", "permissions", "inbox"} {
 		for _, args := range [][]string{{verb}, {verb, "o.g.c"}, {verb, "--help"}} {
-			if out, errb, code := ctlRun(t, e, args...); code != 2 || out != "" || !strings.Contains(errb, `mashctl: unknown command "`+verb+`"`) || !strings.Contains(errb, "mashctl init") {
+			if out, errb, code := ctlRun(t, e, args...); code != 2 || out != "" || errb != "error: unknown command \""+verb+"\"\nhint: mashctl --help\n" {
 				t.Errorf("%v: %d %q %q", args, code, out, errb)
 			}
 		}
 	}
-	if out, errb, code := ctlRun(t, e, "frob"); code != 2 || out != "" || !strings.Contains(errb, `mashctl: unknown command "frob"`) || !strings.Contains(errb, "mashctl init") {
+	if out, errb, code := ctlRun(t, e, "frob"); code != 2 || out != "" || errb != "error: unknown command \"frob\"\nhint: mashctl --help\n" {
 		t.Fatalf("unknown: %d %q %q", code, out, errb)
 	}
 	if out, _, code := ctlRun(t, e, "version"); code != 0 || !regexp.MustCompile(`^mashctl v\S+ \(\S+\)\n$`).MatchString(out) {
@@ -93,9 +91,7 @@ func TestMashctlUsageAndErrors(t *testing.T) {
 // give. The removed verbs are unknown commands.
 func TestMashctlAddressOnly(t *testing.T) {
 	e := testenv.Start(t)
-	if _, errb, code := ctlRun(t, e, "init"); code != 0 {
-		t.Fatalf("init: %d %q", code, errb)
-	}
+	makeStorageFor(t, e)
 	provisionAs(t, e, "leg", admin.Meta{})
 	for _, args := range [][]string{
 		{"endpoint", "set", "leg", "role=r"}, {"endpoint", "unset", "leg", "role"},

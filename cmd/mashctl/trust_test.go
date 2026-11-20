@@ -76,10 +76,10 @@ func TestIssuedCheckRefusesForeignIssuer(t *testing.T) {
 	}
 }
 
-func TestAdoptRefusesForeignIssuerAndInstallsNoOperatorJWT(t *testing.T) {
+func TestInitRefusesForeignIssuerAndInstallsNoOperatorJWT(t *testing.T) {
 	lookupWait = 1e9
 	e := newApplyEnv(t)
-	a := newAdopter(t, e)
+	a := newIniter(t, e)
 	realPub := mustPub(t, a.opSeed)
 
 	// another operator key: the account JWT was issued by a key this operator key does not stand for
@@ -90,15 +90,14 @@ func TestAdoptRefusesForeignIssuerAndInstallsNoOperatorJWT(t *testing.T) {
 		t.Fatal(err)
 	}
 	otherPub, _ := other.PublicKey()
-	a.refuses(1, []string{"not an accepted issuer", realPub, otherPub, "nothing was changed"}, "--operator-key", otherSeed)
-	a.refuses(2, []string{"--operator-jwt"}, "--operator-key", otherSeed, "--operator-jwt", otherSeed)
+	a.refuses(1, []string{"not an accepted issuer", realPub, otherPub, "nothing was changed"}, map[string]any{"operator_key": otherSeed})
 
 	// the operator key that issued the JWT: accepted, and no operator.jwt is installed
-	if out, errb, code := a.adopt(); code != 0 {
-		t.Fatalf("adopt: %d\n%s\n%s", code, out, errb)
+	if out, errb, code := a.init(); code != 0 {
+		t.Fatalf("init: %d\n%s\n%s", code, out, errb)
 	}
 	if _, err := os.Stat(filepath.Join(a.env["MASH_KEYS_DIR"], "operator.jwt")); err == nil {
-		t.Fatal("adopt installed an operator.jwt")
+		t.Fatal("init installed an operator.jwt")
 	}
 }
 
@@ -114,7 +113,7 @@ func TestAdminAndSystemConnectionsRequireTLS(t *testing.T) {
 	e := newApplyEnv(t).withDirectory()
 	e.env["MASH_INSECURE_PLAINTEXT"] = ""
 	e.env["MASH_ADMIN_CREDS"] = e.pl.Creds
-	for _, args := range [][]string{{"issued", "check"}, {"endpoint", "list"}, {"init"}} {
+	for _, args := range [][]string{{"issued", "check"}, {"endpoint", "list"}, {"limits", "apply"}, {"status"}} {
 		out, errb, code := e.run(args...)
 		refused(t, fmt.Sprint(args), code, out, errb)
 	}
@@ -136,14 +135,15 @@ func TestAdminAndSystemConnectionsRequireTLS(t *testing.T) {
 			t.Fatalf("%v non-loopback with the override: %d\n%s\n%s", args, code, out, errb)
 		}
 	}
-	// the same for adopt, which names its server on the command line
-	a := newAdopter(t, newApplyEnv(t))
+	// the same for init, which names its servers in the setup file
+	a := newIniter(t, newApplyEnv(t))
 	a.env["MASH_INSECURE_PLAINTEXT"] = ""
-	a.refuses(2, []string{"refusing a plain nats://", "insecure_plaintext", "MASH_INSECURE_PLAINTEXT=1", "tls://"})
-	a.refuses(2, []string{"refusing a plain nats://", "MASH_INSECURE_PLAINTEXT=1"}, "--server", "nats://192.0.2.1:4222")
+	a.refuses(2, []string{"refusing a plain nats://", "insecure_plaintext", "MASH_INSECURE_PLAINTEXT=1", "tls://"}, nil)
+	a.refuses(2, []string{"refusing a plain nats://", "MASH_INSECURE_PLAINTEXT=1"}, map[string]any{"servers": []string{"nats://192.0.2.1:4222"}})
 	a.env["MASH_INSECURE_PLAINTEXT"] = "1"
-	if out, errb, code := runWithProcessStderr(a.t, a.adopt, "--server", "nats://192.0.2.1:4222", "--dry-run"); code == 0 || !strings.Contains(errb, "mash: WARNING: plain-text connection to 192.0.2.1") {
-		t.Fatalf("adopt non-loopback with the override: %d\n%s\n%s", code, out, errb)
+	a.vals["servers"] = []string{"nats://192.0.2.1:4222"}
+	if out, errb, code := runWithProcessStderr(a.t, a.init, "--dry-run"); code == 0 || !strings.Contains(errb, "mash: WARNING: plain-text connection to 192.0.2.1") {
+		t.Fatalf("init non-loopback with the override: %d\n%s\n%s", code, out, errb)
 	}
 }
 
@@ -169,9 +169,10 @@ func runWithProcessStderr(t *testing.T, run func(args ...string) (string, string
 func TestAdminVerbsAcceptATLSServer(t *testing.T) {
 	e := testenv.StartWith(t, testenv.Options{TLS: true})
 	env := map[string]string{"HOME": t.TempDir(), "MASH_SERVER": e.URL, "MASH_ENDPOINT": e.Owner + ".dev." + "x", "MASH_ADMIN_CREDS": e.AdminCreds, "MASH_CA": e.CAFile}
+	makeStorageFor(t, e)
 	var out, errb bytes.Buffer
-	if code := runEnv([]string{"init"}, func(k string) string { return env[k] }, &out, &errb); code != 0 {
-		t.Fatalf("init over TLS without insecure_plaintext: %d\n%s\n%s", code, out.String(), errb.String())
+	if code := runEnv([]string{"limits", "apply"}, func(k string) string { return env[k] }, &out, &errb); code != 0 {
+		t.Fatalf("limits apply over TLS without insecure_plaintext: %d\n%s\n%s", code, out.String(), errb.String())
 	}
 	// the override does not turn a TLS connection off
 	env["MASH_INSECURE_PLAINTEXT"] = "1"
@@ -198,8 +199,8 @@ func TestPlainURLRefusalExitsTwoEverywhere(t *testing.T) {
 		{"endpoint", "delete", "o.g.a", "--yes"},
 		{"issued", "check"},
 		{"audit"},
-
-		{"init"},
+		{"limits", "apply"},
+		{"status"},
 	} {
 		out, errb, code := e.run(args...)
 		all := out + errb

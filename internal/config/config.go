@@ -58,6 +58,7 @@ type Config struct {
 	CLITimeout      time.Duration // total deadline of one CLI command (zero = 15m)
 	AdminTimeout    time.Duration // total deadline of one `mashctl` command (zero = 30s)
 	AdminCreds      string        // admin credentials for `mashctl`
+	SysCreds        string        // config.json "system_creds": the system account's creds file, for `mashctl` (empty = none set)
 	TLSCA           string        // MASH_CA / "ca": PEM file of the CA that signed the server's certificate (empty = system roots)
 	TLSCert         string        // MASH_TLS_CERT / "tls_cert": PEM client certificate, for a server that requires one; set with TLSKey
 	TLSKey          string        // MASH_TLS_KEY / "tls_key": PEM private key of TLSCert
@@ -118,6 +119,7 @@ type file struct {
 	AdminTimeout    string `json:"admin_timeout"`
 
 	AdminCreds string `json:"admin_creds"`
+	SysCreds   string `json:"system_creds"`
 	Host       string `json:"host"`
 
 	CA      string `json:"ca"`
@@ -427,6 +429,7 @@ func loadPicking(lookup Lookup, home string, autoPick bool) (Config, error) {
 	}
 	// Relative paths in the file are relative to the config directory, not to wherever mash was started.
 	f.AdminCreds = inDir(dir, ExpandHome(f.AdminCreds, home))
+	c.SysCreds = inDir(dir, ExpandHome(f.SysCreds, home))
 	f.CA, f.TLSCert, f.TLSKey = inDir(dir, f.CA), inDir(dir, f.TLSCert), inDir(dir, f.TLSKey)
 	fileServers, err := serverList(f.Servers)
 	if err != nil {
@@ -762,6 +765,18 @@ func RejectedArg(a string) string {
 		name = name[:32]
 	}
 	return "option " + strconv.Quote(name)
+}
+
+// RejectedOption is RejectedArg with the option name unquoted, as mashctl words it: "option --x", or "argument".
+func RejectedOption(a string) string {
+	if !strings.HasPrefix(a, "-") {
+		return "argument"
+	}
+	name, _, _ := strings.Cut(a, "=")
+	if len(name) > 32 {
+		name = name[:32]
+	}
+	return "option " + Clean(name)
 }
 
 // nameRuleFileKey is the value of a present name_rule_file key: set is false when the key is absent. A key that is

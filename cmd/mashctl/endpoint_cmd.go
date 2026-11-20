@@ -19,6 +19,7 @@ import (
 // epSpec is one command of `mashctl endpoint` that reads its arguments through parseEpInput.
 type epSpec struct {
 	name    string
+	verb    string   // the words after "mashctl" when the command is not an endpoint command ("limits apply"); its help is the hint
 	usage   string   // the text of --help; its first line is the usage line and it ends with an Example
 	flags   []string // options without a value, besides --json
 	values  []string // options that take a value
@@ -68,6 +69,9 @@ func parseEpInput(s epSpec, args []string) (epInput, error) {
 		isValue[f] = true
 	}
 	hint := "mashctl endpoint " + s.name + " --help"
+	if s.verb != "" {
+		hint = "mashctl " + s.verb + " --help"
+	}
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		name, inline, hasInline := strings.Cut(a, "=")
@@ -83,7 +87,7 @@ func parseEpInput(s epSpec, args []string) (epInput, error) {
 			}
 			in.values[name] = v
 		case a != "-" && strings.HasPrefix(a, "-"):
-			return in, cliframe.Usagef("unknown %s", config.RejectedArg(a)).WithHint(hint)
+			return in, cliframe.Usagef("unknown %s", config.RejectedOption(a)).WithHint(hint)
 		default:
 			in.pos = append(in.pos, a)
 		}

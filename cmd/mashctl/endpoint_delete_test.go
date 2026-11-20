@@ -175,7 +175,7 @@ func TestEndpointDeleteMessageCountWords(t *testing.T) {
 func TestEndpointDeleteJSONUsageErrors(t *testing.T) {
 	h := newFleetEnv(t)
 	for _, c := range []struct{ args, want string }{
-		{"o.g.x --bogus", `{"error":"unknown option \"--bogus\"","hint":"mashctl endpoint delete --help"}`},
+		{"o.g.x --bogus", `{"error":"unknown option --bogus","hint":"mashctl endpoint delete --help"}`},
 		{"", `{"error":"missing the endpoint address (owner.group.name)","hint":"mashctl endpoint delete --help"}`},
 		{"o.g.x o.g.y", `{"error":"too many arguments","hint":"mashctl endpoint delete --help"}`},
 	} {

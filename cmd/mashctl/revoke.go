@@ -20,7 +20,7 @@ import (
 )
 
 // noSysCredsMsg is the refusal when no system account credentials are configured.
-const noSysCredsMsg = "no system account credentials: pass --sys-creds FILE or set MASH_SYS_CREDS to a file of system account user creds (a server `mashctl init --local` stood up has them in <server dir>/sys.creds)"
+const noSysCredsMsg = "no system account credentials: pass --sys-creds FILE or set MASH_SYS_CREDS to a file of system account user creds (`mashctl init --config` keeps them in <config folder>/server/sys.creds)"
 
 // revokeUsers revokes user keys in the account JWT and returns how many servers took the update; a test replaces it.
 var revokeUsers = revokeUserKeys

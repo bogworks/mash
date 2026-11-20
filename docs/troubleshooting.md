@@ -157,11 +157,11 @@ A batch of more than 10 messages or 16 KiB is shown as a digest: one line per me
 
 - The inbox keeps 30 days or 16 MiB and drops the oldest first, unread included. Run `mash inbox --after N --limit 50` and compare the `#seq` values.
 - If the sender saw `sent #N` before a host crash of a self-hosted server, up to about 2 minutes may be lost without `sync_interval: always` ([operations.md](operations.md#durability-and-sync_interval)).
-- `mashctl limits` shows the effective limits with `--show`.
+- `mashctl limits show` prints the limits in force.
 
-## `mashctl limits` refuses
+## `mashctl limits apply` refuses
 
-`mash: inbox of X has max_bytes ..., above the configured ...; mash never lowers a limit, because that could discard stored mail; to lower it, run mashctl endpoint delete X and create an endpoint under a new name (a deleted address cannot be used again)`. Limits only go up. Deleting the endpoint removes the mail in that inbox, and its address cannot be used again. The same applies to `max_age` ([operations.md](operations.md#changing-limits-later)). Run `mashctl limits` from one admin at a time.
+`mash: inbox of X has max_bytes ..., above the configured ...; mash never lowers a limit, because that could discard stored mail; to lower it, run mashctl endpoint delete X and create an endpoint under a new name (a deleted address cannot be used again)`. Limits only go up. Deleting the endpoint removes the mail in that inbox, and its address cannot be used again. The same applies to `max_age` ([operations.md](operations.md#changing-limits-later)). Run `mashctl limits apply` from one admin at a time.
 
 ## Account full or `maximum number of streams`
 
@@ -169,9 +169,9 @@ Each endpoint takes one stream, and the two shared buckets take two. Remove an e
 
 ## `jetstream not enabled` (code 503, err_code 10076) or `the server could not enable JetStream for the account`
 
-Symptom: `mashctl init`, `mashctl adopt` or any JetStream call fails with `nats: API error: code=503 err_code=10076 description=jetstream not enabled` (or `no responders available for request`), and mash adds "the server could not enable JetStream for the account: it could not reserve the account's disk limit (2 GiB). nats-server gives JetStream 75% of the free disk by default, so the free disk under the server's store directory is probably under about 2.7 GiB".
+Symptom: `mashctl init --config` or any JetStream call fails with `nats: API error: code=503 err_code=10076 description=jetstream not enabled` (or `no responders available for request`), and mash adds "the server could not enable JetStream for the account: it could not reserve the account's disk limit (2 GiB). nats-server gives JetStream 75% of the free disk by default, so the free disk under the server's store directory is probably under about 2.7 GiB".
 
-Cause: nats-server gives JetStream a store budget of 75% of the free disk when it starts. The account JWT asks for a disk limit (2 GiB in the account `init --local` makes). When the limit is more than what is left of that budget, the server silently leaves JetStream off for the account, and every JetStream call fails. The account JWT looks fine, because the limit is only a request: `mashctl adopt` step 6 asks the server and is the check that catches it.
+Cause: nats-server gives JetStream a store budget of 75% of the free disk when it starts. The account JWT asks for a disk limit (for example 2 GiB). When the limit is more than what is left of that budget, the server silently leaves JetStream off for the account, and every JetStream call fails. The account JWT looks fine, because the limit is only a request: `mashctl init --config` asks the server for the account's JetStream info and is the check that catches it.
 
 Fix, either one: free disk under the server's store directory (or move the store to a larger disk), then restart the server; or lower the account's limit, for example `nsc edit account NAME --js-disk-storage 1G`, then push the account.
 

@@ -58,7 +58,7 @@ func runVerbs(args []string, env func(string) string, lookup config.Lookup, stdo
 	// The global options are taken out of the arguments wherever they stand; a flag shadows its environment variable.
 	// mashctl's own --sys-creds and --servers stay as they are (extractServerFlags below).
 	spec := cliframe.Spec{Tool: "mashctl", CredsEnv: "MASH_ADMIN_CREDS", CredsKey: "admin_creds"}
-	global, rest0, gerr := cliframe.ExtractOwning(spec, args, map[string][]string{"endpoint": {"--json"}, "audit": {"--json"}, "issued": {"--json"}, "version": {"--json"}, "adopt": {"--server"}}) // these parse their own
+	global, rest0, gerr := cliframe.ExtractOwning(spec, args, map[string][]string{"endpoint": {"--json"}, "audit": {"--json"}, "issued": {"--json"}, "version": {"--json"}, "init": {"--json"}, "status": {"--json"}, "limits": {"--json"}}) // these parse their own
 	if gerr != nil {
 		fmt.Fprintf(stderr, "mashctl: %s\n", gerr)
 		return 2
@@ -89,28 +89,21 @@ func runVerbs(args []string, env func(string) string, lookup config.Lookup, stdo
 		return 0
 	}
 	switch args[0] {
-	case "adopt": // takes over a server you already run: the config and the key store, not a server
-		return runAdopt(args[1:], env, lookup, stdout, stderr)
+	case "init": // takes over a server you already run, from a setup file
+		return runInit(args[1:], global, env, lookup, stdout, stderr)
+	case "status":
+		return runStatus(args[1:], global, env, lookup, stdout, stderr)
+	case "limits":
+		return runLimits(args[1:], global, env, lookup, stdout, stderr)
 	case "audit": // read-only: lists what the server and the creds directories hold; writes nothing
 		return runAudit(args[1:], env, lookup, stdout, stderr)
 	case "issued": // read-only: the issue record and the check of it against the connected keys
 		return runIssued(args[1:], env, lookup, stdout, stderr)
 	case "endpoint":
 		return runEndpoint(args[1:], global, env, lookup, stdout, stderr)
-	case "init", "limits":
 	default:
-		fmt.Fprintf(stderr, "mashctl: unknown command %q\n\n%s", args[0], ctl.Usage("mashctl"))
-		return 2
+		return cliframe.Report(stdout, stderr, cliframe.Usagef("unknown command %q", config.Clean(args[0])).WithHint("mashctl --help"), jsonRequested(args[1:]))
 	}
-	cfg, err := loadConfig(env, lookup)
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	if announcesVerb(args) {
-		announceTarget(cfg, env, stderr, nil)
-	}
-	return ctl.Run("mashctl", cfg, args, stdout, stderr)
 }
 
 // helpRequested reports whether -h or --help is the first argument after the verb, or, for a verb with sub-verbs
@@ -121,7 +114,7 @@ func helpRequested(verb string, args []string) bool {
 	if len(args) > 0 && isHelp(args[0]) {
 		return true
 	}
-	if verb == "issued" && len(args) > 1 && !strings.HasPrefix(args[0], "-") && isHelp(args[1]) {
+	if (verb == "issued" || verb == "limits") && len(args) > 1 && !strings.HasPrefix(args[0], "-") && isHelp(args[1]) {
 		return true
 	}
 	return false
@@ -153,7 +146,7 @@ func verbUsage(args []string) string {
 // isVerb reports whether name is a verb run dispatches.
 func isVerb(name string) bool {
 	switch name {
-	case "adopt", "audit", "endpoint", "issued", "init", "limits":
+	case "audit", "endpoint", "issued", "init", "limits", "status":
 		return true
 	}
 	return false
