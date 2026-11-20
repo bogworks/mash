@@ -45,7 +45,7 @@ var knownGaps = map[string]string{
 	"help join":       "join: slice S5 (the command does not exist)",
 	"toplevel join":   "join: slice S5 (the command does not exist)",
 	"help key":        "key is not on the command table yet: hand-written help, no Setup group parent layout",
-	"help key create": "key create is not on the command table yet: hand-written help, flags beyond the spec (--pub-out, --json, --dry-run)",
+	"help key create": "key create is not on the command table yet: hand-written help, flags beyond the spec (--pub-out, --json, --dry-run), and its output is the old multi-line \"created key\" block (public key, seed, public file, next:), not the spec's 'Created bob.seed and bob.seed.pub.' (and the public file is bob.pub, not bob.seed.pub): S5 replaces it",
 	"help serve":      "serve is hand-written: its --help prints the top-level line, not the generated layout",
 	"help hook":       "hook is hand-written: its --help prints the top-level line, not the generated layout",
 	"help prompt":     "prompt is hand-written: one-line usage, not the generated layout",

@@ -27,7 +27,7 @@ type Result interface {
 }
 
 // ExitCoder is implemented by a result that carries the exit code of a report: status and doctor report on stdout and
-// exit 1 when they found a problem, so a problem is a result, not an error. A result without it exits 0.
+// exit 1 when they found a problem: a problem is a result (exit 1 on the command line), not a failure to run. A result without it exits 0.
 type ExitCoder interface {
 	ExitCode() int
 }
