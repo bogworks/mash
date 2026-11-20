@@ -406,9 +406,9 @@ func TestIssuedPurposePerPath(t *testing.T) {
 	}
 }
 
-// retire and deprovision mark the key revoked after the revocation succeeded; a failed revocation marks nothing; a
+// retire marks the key revoked after the revocation succeeded; a failed revocation marks nothing; a
 // failed mark is a warning and the revocation still stands; a key mash never recorded is no warning.
-func TestRetireAndDeprovisionMarkTheKeyRevoked(t *testing.T) {
+func TestRetireMarksTheKeyRevoked(t *testing.T) {
 	t.Run("retire", func(t *testing.T) {
 		h := newFleetEnv(t)
 		h.seedMeta(ad("n"), admin.Meta{Labels: map[string]string{"net": "green"}}, nil)
@@ -426,21 +426,6 @@ func TestRetireAndDeprovisionMarkTheKeyRevoked(t *testing.T) {
 			t.Fatalf("%d %s %s", code, out, errb)
 		}
 		if len(s.calls) < 2 || s.calls[len(s.calls)-1] != pub {
-			t.Fatalf("revoke calls %v", s.calls)
-		}
-		if h.issued()[pub].RevokedAt == "" {
-			t.Errorf("not marked: %+v", h.issued()[pub])
-		}
-	})
-	t.Run("deprovision", func(t *testing.T) {
-		h := newFleetEnv(t)
-		h.seedMeta(ad("n"), admin.Meta{Labels: map[string]string{"net": "green"}}, nil)
-		_, pub := h.credsClaims(ad("n"))
-		s := stubRevoke(t)
-		if out, errb, code := h.run("deprovision", "o.g.n"); code != 0 {
-			t.Fatalf("%d %s %s", code, out, errb)
-		}
-		if len(s.calls) != 1 || s.calls[0] != pub {
 			t.Fatalf("revoke calls %v", s.calls)
 		}
 		if h.issued()[pub].RevokedAt == "" {

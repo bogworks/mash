@@ -177,7 +177,7 @@ func buildRetired(snap admin.AuditRetired) (auditRetired, []auditProblem) {
 		if m.Marker.IsPending() {
 			state = store.RetiredPending
 			ar.Pending++
-			probs = append(probs, auditProblem{What: "retired", Item: m.Key, Error: "pending retired marker: a retirement was started and not finished (the name stays refused); rerun deprovision for it"})
+			probs = append(probs, auditProblem{What: "retired", Item: m.Key, Error: "pending retired marker: a retirement was started and not finished (the name stays refused); rerun mashctl endpoint delete for it"})
 		} else {
 			ar.Final++
 			if m.Marker.State != "" && m.Marker.State != store.RetiredFinal {
@@ -418,7 +418,7 @@ func buildAudit(owner string, snap admin.AuditSnapshot, dirs []string, creds []c
 	rep.Problems = append(rep.Problems, retiredProbs...)
 	if snap.LeaseRollup {
 		rep.Problems = append(rep.Problems, auditProblem{What: "lease", Item: store.LeaseBucket,
-			Error: `lease bucket allows rollup writes; run "mash admin init" to harden it`})
+			Error: `lease bucket allows rollup writes; run "mashctl init" to harden it`})
 	}
 	if snap.LeaseError != "" {
 		rep.Problems = append(rep.Problems, auditProblem{What: "lease", Item: store.LeaseBucket,

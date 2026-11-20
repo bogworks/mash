@@ -16,9 +16,6 @@ var helpVerbs = [][]string{
 	{"serve"}, {"hook"}, {"send"}, {"read"}, {"inbox"}, {"who"}, {"prompt"}, {"status"}, {"doctor"}, {"version"},
 	{"plugin"}, {"plugin", "export"},
 	{"key"}, {"key", "create"}, {"credential"}, {"credential", "create"},
-	{"admin"}, {"admin", "init"}, {"admin", "limits"}, {"admin", "permissions"}, {"admin", "provision"},
-	{"admin", "set-meta"}, {"admin", "suspend"}, {"admin", "resume"}, {"admin", "suspended"},
-	{"admin", "deprovision"}, {"admin", "list"},
 }
 
 func listTree(root string) []string {
@@ -78,14 +75,13 @@ func TestVerbHelpPrintsUsageAndChangesNothing(t *testing.T) {
 	}
 }
 
-// Help is only the first argument after the verb (after the sub-verb for admin): free text and values that contain
+// Help is only the first argument after the verb: free text and values that contain
 // -h or --help, anywhere further along, are never help.
 func TestHelpUsageOnlyFirstArgument(t *testing.T) {
 	yes := [][]string{
 		{"prompt", "--help"}, {"prompt", "-h"},
 		{"read", "-h"}, {"inbox", "--help"}, {"serve", "-h"}, {"hook", "--help"},
 		{"plugin", "--help"}, {"plugin", "export", "-h"},
-		{"admin", "-h"}, {"admin", "--help"}, {"admin", "set-meta", "-h"}, {"admin", "suspend", "--help"},
 	}
 	for _, a := range yes {
 		if _, ok := helpUsage(a); !ok {
@@ -96,9 +92,6 @@ func TestHelpUsageOnlyFirstArgument(t *testing.T) {
 		{"send", tTo("y"), "--help"}, {"send", tTo("y"), "-h"}, // send is on the command table: its help is cmdcore's
 		{"prompt", tTo("y"), "what", "does", "-h", "do"}, {"prompt", tTo("y"), "--help"}, {"prompt", tTo("y"), "-h"},
 		{"read", "3", "--help"}, {"read", "--json", "-h"}, {"inbox", "5", "-h"}, {"inbox", "--limit", "--help"},
-		{"admin", "set-meta", "y", "--help"}, {"admin", "set-meta", "y", "note", "-h"},
-		{"admin", "suspend", "y", "--help"}, {"admin", "suspend", "y", "-h"},
-		{"admin", "provision", "y", "--help"}, {"admin", "deprovision", "y", "-h"},
 		{"plugin", "export", "--help-me"}, {"plugin", "export", "dir", "-h"},
 		{"nosuch", "--help"},
 	}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/testenv"
 )
 
@@ -111,6 +113,19 @@ func mashRunSplit(t *testing.T, bin string, env []string, stdin string, args ...
 	return out.String(), errb.String(), code
 }
 
+// standaloneAdmin opens the admin API on e and creates the buckets: the setup the endpoint verbs of mashctl do.
+func standaloneAdmin(t *testing.T, e *testenv.Env) *admin.Admin {
+	t.Helper()
+	adm, err := admin.New(e.Conn(t, e.AdminCreds), e.Owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := adm.Init(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	return adm
+}
+
 func mustRun(t *testing.T, bin string, env []string, args ...string) string {
 	t.Helper()
 	out, code := mashRun(t, bin, env, "", args...)
@@ -126,19 +141,15 @@ func TestStandaloneOnlyNATS(t *testing.T) {
 	e := testenv.Start(t)
 
 	base := map[string]string{"MASH_SERVER": e.URL}
-	adminEnv := scrubbedEnv(t, map[string]string{"MASH_SERVER": e.URL, "MASH_ENDPOINT": e.Owner + ".dev." + "x", "MASH_ADMIN_CREDS": e.AdminCreds, "MASH_INSECURE_PLAINTEXT": "1"})
-	assertToolsAbsent(t, adminEnv)
-	mustRun(t, bin, adminEnv, "admin", "init")
+	adm := standaloneAdmin(t, e)
 	envs := map[string][]string{}
 	for _, n := range []string{"alpha", "beta"} {
 		creds, user, err := e.MintEndpoint(tAddr(n))
 		if err != nil {
 			t.Fatal(err)
 		}
-		out := mustRun(t, bin, adminEnv, "admin", "provision", tTo(n), "--user", user, "--account", e.Account,
-			"--role", "tester-"+n, "--host", "standalone")
-		if !strings.Contains(out, "provisioned "+tTo(n)) {
-			t.Fatalf("provision %s: %s", n, out)
+		if _, err := adm.Provision(context.Background(), tAddr(n), user, e.Account, "", admin.Meta{Role: "tester-" + n, Host: "standalone"}); err != nil {
+			t.Fatalf("provision %s: %v", n, err)
 		}
 		m := map[string]string{"MASH_ENDPOINT": e.Owner + "." + testGroup + "." + n, "MASH_CREDS": creds}
 		for k, v := range base {
@@ -183,13 +194,14 @@ func TestStandaloneOnlyNATS(t *testing.T) {
 func TestStandaloneEnvOnlyConfig(t *testing.T) {
 	bin := mashBinary(t)
 	e := testenv.Start(t)
-	adminEnv := scrubbedEnv(t, map[string]string{"MASH_SERVER": e.URL, "MASH_ENDPOINT": e.Owner + ".dev." + "x", "MASH_ADMIN_CREDS": e.AdminCreds, "MASH_INSECURE_PLAINTEXT": "1"})
-	mustRun(t, bin, adminEnv, "admin", "init")
+	adm := standaloneAdmin(t, e)
 	creds, user, err := e.MintEndpoint(tAddr("solo"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	mustRun(t, bin, adminEnv, "admin", "provision", tTo("solo"), "--user", user, "--account", e.Account)
+	if _, err := adm.Provision(context.Background(), tAddr("solo"), user, e.Account, "", admin.Meta{}); err != nil {
+		t.Fatal(err)
+	}
 
 	env := scrubbedEnv(t, map[string]string{"MASH_SERVER": e.URL, "MASH_ENDPOINT": e.Owner + "." + testGroup + ".solo", "MASH_CREDS": creds})
 	assertToolsAbsent(t, env)

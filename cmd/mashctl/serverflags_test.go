@@ -78,7 +78,6 @@ func TestBadServersFlagIsRefusedOnEveryVerb(t *testing.T) {
 	h := newFleetEnv(t)
 	for _, args := range [][]string{
 		{"endpoint", "delete", "o.g.a", "--servers", "x"},
-		{"deprovision", "o.g.a", "--servers", "x"},
 	} {
 		_, errb, code := h.run(args...)
 		if code != 2 || !strings.Contains(errb, "must be a whole number of servers, 1 or more") {
@@ -126,7 +125,7 @@ func TestRetireShortServerSetChangesNothing(t *testing.T) {
 	}
 }
 
-func TestDeprovisionShortServerSetChangesNothing(t *testing.T) {
+func TestEndpointDeleteShortServerSetChangesNothing(t *testing.T) {
 	h := newFleetEnv(t)
 	h.provisionDeclared("a")
 	s := stubRevoke(t)
@@ -135,7 +134,7 @@ func TestDeprovisionShortServerSetChangesNothing(t *testing.T) {
 		return errors.New("only 2 of 3 servers answered the account lookup")
 	}
 	t.Cleanup(func() { checkServerSet = old })
-	_, errb, code := h.run("deprovision", "o.g.a")
+	_, errb, code := h.run("endpoint", "delete", "o.g.a")
 	if code != 1 || !strings.Contains(errb, "nothing was revoked; the key is still valid") {
 		t.Fatalf("%d %q", code, errb)
 	}
@@ -171,23 +170,5 @@ func TestRetireFailureBeforeAnyRevokeSaysKeyStillValid(t *testing.T) {
 	_, errb, code := h.run("endpoint", "delete", "o.g.b")
 	if code != 6 || strings.Contains(errb, "PARTIAL") || !strings.Contains(errb, "nothing was revoked; the key is still valid") {
 		t.Fatalf("%d %q", code, errb)
-	}
-}
-
-func TestDeprovisionDrainedShortServerSetChangesNothing(t *testing.T) {
-	h := newFleetEnv(t)
-	h.provisionDeclared("a")
-	s := stubRevoke(t)
-	old := checkServerSet
-	checkServerSet = func(context.Context, config.Config, func(string) string, int) error {
-		return errors.New("only 2 of 3 servers answered the account lookup")
-	}
-	t.Cleanup(func() { checkServerSet = old })
-	_, errb, code := h.run("deprovision", "o.g.a", "--drained-to", "0", "--suspension", "s1")
-	if code != 1 || !strings.Contains(errb, "nothing was revoked; the key is still valid") {
-		t.Fatalf("%d %q", code, errb)
-	}
-	if len(s.calls) != 0 || len(h.records()) != 1 {
-		t.Errorf("changed something: calls %v records %v", s.calls, h.records())
 	}
 }

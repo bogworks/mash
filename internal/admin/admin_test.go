@@ -345,7 +345,7 @@ func TestEnsureInboxRejectsAWrongInbox(t *testing.T) {
 			}
 			before := s.CachedInfo().Config
 			_, err = a.EnsureInbox(ctx, ep(t, "alpha"))
-			if err == nil || !strings.Contains(err.Error(), tc.field) || !strings.Contains(err.Error(), "mash admin deprovision o_dev_alpha") {
+			if err == nil || !strings.Contains(err.Error(), tc.field) || !strings.Contains(err.Error(), "mashctl endpoint delete o_dev_alpha") {
 				t.Fatalf("err %v, want one naming %s and the deprovision command", err, tc.field)
 			}
 			s2, err := js.Stream(ctx, "inbox-o_dev_alpha")

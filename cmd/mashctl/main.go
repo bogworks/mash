@@ -1,15 +1,13 @@
-// Command mashctl administers a mash deployment: it creates the directory and lease buckets, provisions and
-// deprovisions endpoints, sets their metadata, and prints limits and the NATS permissions an endpoint user needs.
+// Command mashctl administers a mash deployment: it creates the directory and lease buckets, sets endpoint metadata,
+// and prints limits and the NATS permissions an endpoint user needs.
 // It needs admin credentials (MASH_ADMIN_CREDS); the endpoint CLI is mash.
 package main
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/bogworks/mash/internal/cliframe"
 	"github.com/bogworks/mash/internal/config"
@@ -109,7 +107,7 @@ func runVerbs(args []string, env func(string) string, lookup config.Lookup, stdo
 		return runLabel(args[0] == "unlabel", args[1:], env, lookup, stdout, stderr)
 	case "endpoint":
 		return runEndpoint(args[1:], env, lookup, stdout, stderr)
-	case "init", "limits", "permissions", "provision", "set-meta", "suspend", "resume", "suspended", "deprovision", "list":
+	case "init", "limits", "permissions", "set-meta", "suspend", "resume", "suspended":
 	default:
 		fmt.Fprintf(stderr, "mashctl: unknown command %q\n\n%s", args[0], ctl.Usage("mashctl"))
 		return 2
@@ -118,21 +116,6 @@ func runVerbs(args []string, env func(string) string, lookup config.Lookup, stdo
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
-	}
-	ctl.RevokeUsers = func(ctx context.Context, cfg config.Config, users []string, stdout io.Writer, now func() time.Time) error {
-		n, err := parseServers(env)
-		if err != nil {
-			return err
-		}
-		_, err = revokeUsers(ctx, cfg, env, n, users, stdout, now)
-		return err
-	}
-	ctl.CheckRevokeServers = func(ctx context.Context, cfg config.Config) error {
-		n, err := parseServers(env)
-		if err != nil {
-			return err
-		}
-		return checkServerSet(ctx, cfg, env, n)
 	}
 	if announcesVerb(args) {
 		announceTarget(cfg, env, stderr, nil)
@@ -181,7 +164,7 @@ func verbUsage(args []string) string {
 func isVerb(name string) bool {
 	switch name {
 	case "adopt", "audit", "endpoint", "inbox", "issued", "label", "unlabel",
-		"init", "limits", "permissions", "provision", "set-meta", "suspend", "resume", "suspended", "deprovision", "list":
+		"init", "limits", "permissions", "set-meta", "suspend", "resume", "suspended":
 		return true
 	}
 	return false

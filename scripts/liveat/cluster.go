@@ -444,8 +444,8 @@ func (s *At5) Setup(now time.Time) bool {
 func (s *At5) listBoth() bool {
 	ok := true
 	for _, h := range s.Hosts[:2] {
-		r := s.ctl(h, "list", nil, "list")
-		ok = s.check(h.Role()+": mashctl list works", r.Code == 0, exitDetail(r)) && ok
+		r := s.ctl(h, "list", nil, "endpoint", "list")
+		ok = s.check(h.Role()+": mashctl endpoint list works", r.Code == 0, exitDetail(r)) && ok
 	}
 	return ok
 }

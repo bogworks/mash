@@ -281,7 +281,7 @@ func parseJSON(s string) (any, error) {
 }
 
 // Snapshot is the state of the server and the files, as far as the harness can see without a NATS client of its own:
-// the directory (mashctl list), the audit (directory, streams, consumers, leases, creds files), the issue record, and a
+// the directory (mashctl endpoint list), the audit (directory, streams, consumers, leases, creds files), the issue record, and a
 // digest of each home's file tree (all of it, except snapshotExclusions).
 type Snapshot struct {
 	Hash map[string]string
@@ -296,7 +296,7 @@ func (a *AT) Snapshot(label string, ctlHome Home, trees ...Home) Snapshot {
 		name string
 		args []string
 	}{
-		{"list", []string{"list"}},
+		{"list", []string{"endpoint", "list"}},
 		{"audit", []string{"audit", "--json"}},
 		{"issued", []string{"issued", "list", "--json"}},
 	} {

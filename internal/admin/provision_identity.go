@@ -138,7 +138,7 @@ func (e *alreadyProvisionedError) Is(target error) bool { return target == ErrAl
 const retiredMarkerReserve = 512
 
 // retiredKV returns the retired-name bucket, creating it if a deployment from before it existed has not been
-// re-initialised (`mash admin init` creates it). It fails closed on the bucket's configuration (a TTL would expire
+// re-initialised (`mashctl init` creates it). It fails closed on the bucket's configuration (a TTL would expire
 // markers; see store.VerifyRetiredStatus) and never changes an existing bucket.
 func (a *Admin) retiredKV(ctx context.Context) (jetstream.KeyValue, error) {
 	kv, _, err := a.openRetired(ctx)
@@ -157,7 +157,7 @@ func (a *Admin) openRetired(ctx context.Context) (jetstream.KeyValue, *jetstream
 		if down := bucketDown(store.RetiredBucket, err); down != nil {
 			return nil, nil, down
 		}
-		return nil, nil, fmt.Errorf("mash: retired-name bucket (run `mash admin init`): %w", err)
+		return nil, nil, fmt.Errorf("mash: retired-name bucket (run `mashctl init`): %w", err)
 	}
 	st, err := kv.Status(ctx)
 	if err != nil {
