@@ -78,49 +78,52 @@ func TestEndpointDeleteFinishesAfterKilledPurge(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				so, se, code := h.run("endpoint", "delete", slashForm(a))
+				so, se, code := h.run("endpoint", "delete", a.String(), "--yes", "--verbose")
 				if code != 0 {
 					t.Fatalf("%d %q %q", code, so, se)
 				}
 				h.assertCleaned(a)
-				m, _ := filepath.Glob(h.creds(a) + ".retired-*")
+				m, _ := filepath.Glob(h.creds(a) + ".deleted*")
 				if withCreds && len(m) != 1 {
 					t.Errorf("creds not renamed: %v", m)
 				}
-				if !strings.Contains(so, "finished the retirement") {
+				if !strings.HasPrefix(so, "Deleted endpoint o.g.kd\nretired marker: finished\n") {
 					t.Errorf("text: %q", so)
+				}
+				if withCreds && !strings.Contains(so, "credentials file: set aside as ") {
+					t.Errorf("verbose lacks the renamed file: %q", so)
 				}
 			})
 		}
 	}
 }
 
-func TestEndpointDeleteFinalMarkerNothingLeftIsUnchanged(t *testing.T) {
+func TestEndpointDeleteFinalMarkerNothingLeftDoesNotExist(t *testing.T) {
 	h := newFleetEnv(t)
 	fakeRevoke(t, nil)
 	a := ad("un")
 	h.seed(a)
-	if _, se, code := h.run("endpoint", "delete", slashForm(a)); code != 0 {
+	if _, se, code := h.run("endpoint", "delete", a.String(), "--yes"); code != 0 {
 		t.Fatalf("first: %d %q", code, se)
 	}
 	if err := os.Remove(h.creds(a)); err != nil && !os.IsNotExist(err) {
 		t.Fatal(err)
 	}
-	so, se, code := h.run("endpoint", "delete", slashForm(a), "--json")
-	if code != 0 || !strings.Contains(so, `"outcome": "unchanged"`) {
+	so, se, code := h.run("endpoint", "delete", a.String(), "--yes")
+	if code != 1 || so != "" || se != "error: o.g.un does not exist\nhint: mashctl endpoint list\n" {
 		t.Fatalf("%d %q %q", code, so, se)
 	}
 }
 
 func TestEndpointDeleteNeverExistedIsNotFound(t *testing.T) {
 	h := newFleetEnv(t)
-	so, se, code := h.run("endpoint", "delete", "o/g/ghost", "--json")
-	if code != 1 || !strings.Contains(so, "not_found") {
+	so, se, code := h.run("endpoint", "delete", "o.g.ghost", "--yes", "--json")
+	if code != 1 || !strings.Contains(so, "o.g.ghost does not exist") {
 		t.Fatalf("%d %q %q", code, so, se)
 	}
 }
 
-func TestEndpointDeleteCleanupFailureIsServerError(t *testing.T) {
+func TestEndpointDeleteCleanupFailureIsAnError(t *testing.T) {
 	h := newFleetEnv(t)
 	fakeRevoke(t, nil)
 	a := ad("cf")
@@ -132,8 +135,8 @@ func TestEndpointDeleteCleanupFailureIsServerError(t *testing.T) {
 	if _, err := rk.Put(context.Background(), a.Flat(), []byte("not json")); err != nil {
 		t.Fatal(err)
 	}
-	so, se, code := h.run("endpoint", "delete", slashForm(a), "--json")
-	if code != 1 || !strings.Contains(so, `"server"`) {
+	so, se, code := h.run("endpoint", "delete", a.String(), "--yes")
+	if code != 1 || so != "" || !strings.HasPrefix(se, "error: ") {
 		t.Fatalf("%d %q %q", code, so, se)
 	}
 	if _, err := os.Lstat(h.creds(a)); err != nil {
@@ -149,9 +152,8 @@ func TestEndpointReissueFutureIssuedCheckedUnderTheLock(t *testing.T) {
 	rec, _ := h.record(a)
 	epBeforeRevokeCheck = func() { h.recordIssuedAt(rec.User, time.Now().Add(time.Hour)) }
 	t.Cleanup(func() { epBeforeRevokeCheck = nil })
-	so, se, code := h.run("endpoint", "reissue", a.String(), "--make-key", "--json")
-	d := epDocOf(t, so)
-	if code != 1 || d.Refusal == nil || d.Refusal.Code != "future_issued" {
+	so, se, code := h.run("endpoint", "reissue", a.String())
+	if code != 1 || so != "" || !strings.HasPrefix(se, "error: ") || !strings.Contains(se, "issued") {
 		t.Fatalf("%d %q %q", code, so, se)
 	}
 	if len(*calls) != 0 {

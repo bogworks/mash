@@ -65,7 +65,7 @@ func TestVerbsAcceptServersAndSysCredsFlags(t *testing.T) {
 	h.provisionDeclared("a")
 	s := stubRevoke(t)
 	h.env["MASH_SERVERS"], h.env["MASH_SYS_CREDS"] = "2", "/env/sys.creds"
-	out, errb, code := h.run("endpoint", "delete", "o.g.a", "--servers", "3", "--sys-creds=/flag/sys.creds")
+	out, errb, code := h.run("endpoint", "delete", "o.g.a", "--yes", "--servers", "3", "--sys-creds=/flag/sys.creds")
 	if code != 0 {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
@@ -77,7 +77,7 @@ func TestVerbsAcceptServersAndSysCredsFlags(t *testing.T) {
 func TestBadServersFlagIsRefusedOnEveryVerb(t *testing.T) {
 	h := newFleetEnv(t)
 	for _, args := range [][]string{
-		{"endpoint", "delete", "o.g.a", "--servers", "x"},
+		{"endpoint", "delete", "o.g.a", "--yes", "--servers", "x"},
 	} {
 		_, errb, code := h.run(args...)
 		if code != 2 || !strings.Contains(errb, "must be a whole number of servers, 1 or more") {
@@ -109,19 +109,15 @@ func TestRetireShortServerSetChangesNothing(t *testing.T) {
 		return errors.New("only 2 of 3 servers answered the account lookup")
 	}
 	t.Cleanup(func() { checkServerSet = old })
-	out, errb, code := h.run("endpoint", "delete", "o.g.a")
-	if code != 1 || strings.Contains(out, "deleted") {
+	out, errb, code := h.run("endpoint", "delete", "o.g.a", "--yes")
+	if code != 1 || out != "" {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
 	if !strings.Contains(errb, "nothing was revoked; the key is still valid") || !strings.Contains(errb, "only 2 of 3") {
 		t.Errorf("stderr %q", errb)
 	}
-	if strings.Contains(errb, "PARTIAL") || len(s.calls) != 0 || len(h.records()) != 1 {
+	if strings.Contains(errb, "deleted o.g.a") || len(s.calls) != 0 || len(h.records()) != 1 {
 		t.Errorf("changed something: %q calls %v records %v", errb, s.calls, h.records())
-	}
-	// --no-revoke needs no server set
-	if _, errb, code := h.run("endpoint", "delete", "o.g.a", "--no-revoke"); code != 0 {
-		t.Errorf("--no-revoke: %d %q", code, errb)
 	}
 }
 
@@ -134,7 +130,7 @@ func TestEndpointDeleteShortServerSetChangesNothing(t *testing.T) {
 		return errors.New("only 2 of 3 servers answered the account lookup")
 	}
 	t.Cleanup(func() { checkServerSet = old })
-	_, errb, code := h.run("endpoint", "delete", "o.g.a")
+	_, errb, code := h.run("endpoint", "delete", "o.g.a", "--yes")
 	if code != 1 || !strings.Contains(errb, "nothing was revoked; the key is still valid") {
 		t.Fatalf("%d %q", code, errb)
 	}
@@ -148,15 +144,12 @@ func TestRetirePartialListsWhatWasRevokedAndWhatIsPending(t *testing.T) {
 	h.provisionDeclared("b")
 	stubRevoke(t)
 	failAfterPurge(t)
-	out, errb, code := h.run("endpoint", "delete", "o.g.b")
+	out, errb, code := h.run("endpoint", "delete", "o.g.b", "--yes")
 	if code != 1 {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
-	all := out + errb
-	for _, w := range []string{"PARTIAL", "1 server(s) acknowledged", "still pending", "directory record", "running it again finishes it"} {
-		if !strings.Contains(all, w) {
-			t.Errorf("output lacks %q: %q", w, all)
-		}
+	if out != "" || !strings.Contains(errb, "error: deleted o.g.b, but ") || !strings.HasSuffix(errb, "hint: mashctl endpoint delete o.g.b\n") {
+		t.Errorf("stderr: %q", errb)
 	}
 }
 
@@ -167,8 +160,8 @@ func TestRetireFailureBeforeAnyRevokeSaysKeyStillValid(t *testing.T) {
 		return errors.New("the server holding bucket KV_lease is down")
 	}
 	t.Cleanup(func() { deprovisionIfUser = (*admin.Admin).DeprovisionIfUser })
-	_, errb, code := h.run("endpoint", "delete", "o.g.b")
-	if code != 1 || strings.Contains(errb, "PARTIAL") || !strings.Contains(errb, "nothing was revoked; the key is still valid") {
+	_, errb, code := h.run("endpoint", "delete", "o.g.b", "--yes")
+	if code != 1 || strings.Contains(errb, "deleted o.g.b") || !strings.Contains(errb, "nothing was revoked; the key is still valid") {
 		t.Fatalf("%d %q", code, errb)
 	}
 }

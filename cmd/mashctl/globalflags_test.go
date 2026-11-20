@@ -76,7 +76,7 @@ func TestGlobalFlagsLeaveTheVerbsOwnFlagsAlone(t *testing.T) {
 	if so, _, code := h.run("endpoint", "show", "--bogus", "--json"); code != 2 || !strings.HasPrefix(so, `{"error":"unknown option \"--bogus\""`) {
 		t.Errorf("endpoint --json: %d %q", code, so)
 	}
-	if so, _, _ := h.run("endpoint", "create", "o/g/x", "--note", "--json", "--bogus"); so != "" {
+	if so, _, _ := h.run("endpoint", "create", "o.g.x", "--out", "--json", "--bogus"); so != "" {
 		t.Errorf("--json taken as a value printed %q", so)
 	}
 }

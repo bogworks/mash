@@ -25,16 +25,14 @@ type treeSample struct {
 	readArgs func(a sap.Address) []string
 	// dryArgs are the arguments after the verb of a changing command, with --dry-run added by the test, that succeed
 	dryArgs func(seeded sap.Address, pubFile string) []string
-	// needsKey is set when the verb requires --public-key or --make-key, so the positional-count check supplies one
-	needsKey bool
 }
 
 var treeSamples = map[string]treeSample{
-	"create": {usage: endpointCreateUsage, positional: 1, arg: "ADDRESS", needsKey: true,
-		dryArgs: func(_ sap.Address, pub string) []string { return []string{ad("treenew").String(), "--public-key", pub} }},
-	"reissue": {usage: endpointReissueUsage, positional: 1, arg: "ADDRESS", needsKey: true,
-		dryArgs: func(a sap.Address, pub string) []string { return []string{a.String(), "--public-key", pub} }},
-	"delete": {usage: endpointDeleteUsage, positional: 1, arg: "ADDRESS",
+	"create": {usage: endpointCreateUsage, positional: 1, arg: "<address>",
+		dryArgs: func(_ sap.Address, _ string) []string { return []string{ad("treenew").String()} }},
+	"reissue": {usage: endpointReissueUsage, positional: 1, arg: "<address>",
+		dryArgs: func(a sap.Address, _ string) []string { return []string{a.String()} }},
+	"delete": {usage: endpointDeleteUsage, positional: 1, arg: "<address>",
 		dryArgs: func(a sap.Address, _ string) []string { return []string{a.String()} }},
 	"list": {usage: endpointListUsage, positional: 1, arg: "[prefix]",
 		readArgs: func(sap.Address) []string { return nil }},
@@ -127,10 +125,7 @@ func TestEndpointCommandTree(t *testing.T) {
 				if smp.positional >= 0 {
 					args := []string{"endpoint", c.name}
 					for i := 0; i <= smp.positional; i++ {
-						args = append(args, "x"+string(rune('a'+i))+"/dev/y")
-					}
-					if smp.needsKey {
-						args = append(args, "--public-key", pubFile)
+						args = append(args, "x"+string(rune('a'+i))+".dev.y")
 					}
 					if _, _, code := h.run(args...); code != 2 {
 						t.Errorf("%d positional arguments: exit %d, want 2", smp.positional+1, code)
@@ -212,15 +207,15 @@ func TestEndpointCreateAfterKill(t *testing.T) {
 		}
 		return
 	}
-	jf := filepath.Join(dir, "design.jwt")
-	// run 1 finishes the killed create; run 2 names the same --jwt-out, which exists and is never overwritten, so it
+	jf := filepath.Join(dir, "design.join")
+	// run 1 finishes the killed create; run 2 names the same --out, which exists and is never overwritten, so it
 	// is refused (exit 1) before anything is written; run 3 names a new file and signs again, as enroll.Create does for
 	// a finished endpoint with the same key (exit 0). The directory record and the issued key stay single.
 	for run, want := range []struct {
 		file string
 		code int
-	}{{jf, 0}, {jf, 1}, {filepath.Join(dir, "again.jwt"), 0}} {
-		out, errb, code := h.run("endpoint", "create", slashForm(a), "--public-key", pubFile, "--jwt-out", want.file)
+	}{{jf, 0}, {jf, 1}, {filepath.Join(dir, "again.join"), 0}} {
+		out, errb, code := h.run("endpoint", "create", a.String(), "--out", want.file, "--public-key", pubFile)
 		if code != want.code {
 			t.Fatalf("run %d: exit %d, want %d; stdout %q stderr %q", run+1, code, want.code, out, errb)
 		}

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -66,7 +67,7 @@ func TestRetireRevokesBeforeDeleting(t *testing.T) {
 	s := stubRevoke(t)
 	s.probe = h.records
 	h.env["MASH_SYS_CREDS"], h.env["MASH_SERVERS"] = "/x/sys.creds", "3"
-	out, errb, code := h.run("endpoint", "delete", "o.g.a")
+	out, errb, code := h.run("endpoint", "delete", "o.g.a", "--yes")
 	if code != 0 {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
@@ -79,7 +80,7 @@ func TestRetireRevokesBeforeDeleting(t *testing.T) {
 	if len(h.records()) != 0 {
 		t.Error("record left")
 	}
-	if !strings.HasPrefix(out, "deleted o/g/a (o.g.a)\n") || !strings.Contains(out, "revoked in the account JWT") || strings.Contains(out, "not implemented") {
+	if out != "Deleted endpoint o.g.a\n" {
 		t.Errorf("out %q", out)
 	}
 }
@@ -89,8 +90,8 @@ func TestRetireRefusedWhenRevokeFails(t *testing.T) {
 	h.provisionDeclared("a")
 	s := stubRevoke(t)
 	s.err = errors.New("no system account credentials")
-	out, errb, code := h.run("endpoint", "delete", "o.g.a")
-	if code != 1 || strings.Contains(out, "deleted") || !strings.Contains(errb, "no system account credentials") || !strings.Contains(errb, "--no-revoke") || !strings.Contains(errb, "nothing was removed") {
+	out, errb, code := h.run("endpoint", "delete", "o.g.a", "--yes")
+	if code != 1 || out != "" || !strings.Contains(errb, "error: ") || !strings.Contains(errb, "no system account credentials") || strings.Contains(errb, "--no-revoke") || !strings.Contains(errb, "nothing was removed") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
 	if len(h.records()) != 1 {
@@ -98,26 +99,28 @@ func TestRetireRefusedWhenRevokeFails(t *testing.T) {
 	}
 }
 
-func TestRetireNoRevokeSkips(t *testing.T) {
+// --no-revoke, --force and --delete-creds are gone: each is an unknown option, and nothing is attempted.
+func TestRemovedDeleteFlagsAreUnknownOptions(t *testing.T) {
 	h := newFleetEnv(t)
 	h.provisionDeclared("a")
 	s := stubRevoke(t)
-	s.err = errors.New("must not be called")
-	out, errb, code := h.run("endpoint", "delete", "o.g.a", "--no-revoke")
-	if code != 0 || len(s.calls) != 0 || !strings.Contains(out, "not revoked") {
-		t.Fatalf("%d %v %q %q", code, s.calls, out, errb)
+	for _, f := range []string{"--no-revoke", "--force", "--delete-creds"} {
+		out, errb, code := h.run("endpoint", "delete", "o.g.a", "--yes", f)
+		want := "error: unknown option " + strconv.Quote(f) + "\nhint: mashctl endpoint delete --help\n"
+		if code != 2 || out != "" || errb != want {
+			t.Errorf("%s: %d %q %q", f, code, out, errb)
+		}
 	}
-	// the warning is on stderr before the removal and again after it
-	if n := strings.Count(errb, "WARNING: --no-revoke: o.g.a's NATS user key U"); n != 2 || !strings.Contains(errb, "is NOT revoked and can still connect, publish and receive until it is revoked in the account JWT; credentials issued to it stay valid.") {
-		t.Errorf("warning count %d: %q", n, errb)
+	if len(s.calls) != 0 || len(h.records()) != 1 {
+		t.Errorf("something ran: calls %v records %v", s.calls, h.records())
 	}
 }
 
-func TestRetireForceWithoutRecordRevokesNothing(t *testing.T) {
+func TestRetireNoRecordRevokesNothing(t *testing.T) {
 	h := newFleetEnv(t)
 	s := stubRevoke(t)
-	out, errb, code := h.run("endpoint", "delete", "o.g.a", "--force")
-	if code != 0 || len(s.calls) != 0 || !strings.Contains(errb, "nothing was revoked") {
+	out, errb, code := h.run("endpoint", "delete", "o.g.a", "--yes")
+	if code != 1 || len(s.calls) != 0 || out != "" || !strings.Contains(errb, "o.g.a does not exist") {
 		t.Fatalf("%d %v %q %q", code, s.calls, out, errb)
 	}
 }
@@ -125,11 +128,11 @@ func TestRetireForceWithoutRecordRevokesNothing(t *testing.T) {
 func TestRetireBadServersAndUsage(t *testing.T) {
 	h := newFleetEnv(t)
 	h.env["MASH_SERVERS"] = "zero"
-	if _, errb, code := h.run("endpoint", "delete", "o.g.a"); code != 2 || !strings.Contains(errb, "MASH_SERVERS must be") {
+	if _, errb, code := h.run("endpoint", "delete", "o.g.a", "--yes"); code != 2 || !strings.Contains(errb, "MASH_SERVERS must be") {
 		t.Fatalf("%d %q", code, errb)
 	}
 	delete(h.env, "MASH_SERVERS")
-	if _, errb, code := h.run("endpoint", "delete", "o.g.a", "--bogus"); code != 2 || !strings.Contains(errb, "unknown option") || !strings.Contains(errb, "endpoint delete --help") {
+	if _, errb, code := h.run("endpoint", "delete", "o.g.a", "--yes", "--bogus"); code != 2 || !strings.Contains(errb, "unknown option") || !strings.Contains(errb, "endpoint delete --help") {
 		t.Fatalf("%d %q", code, errb)
 	}
 }
@@ -138,7 +141,7 @@ func TestEndpointDeleteAcceptsServersAndSysCredsFlags(t *testing.T) {
 	h := newFleetEnv(t)
 	h.provisionDeclared("a")
 	s := stubRevoke(t)
-	if _, errb, code := h.run("endpoint", "delete", "o.g.a", "--sys-creds=/s.creds", "--servers=2"); code != 0 || len(s.calls) != 1 || s.srv[0] != 2 || s.creds[0] != "/s.creds" || len(h.records()) != 0 {
+	if _, errb, code := h.run("endpoint", "delete", "o.g.a", "--yes", "--sys-creds=/s.creds", "--servers=2"); code != 0 || len(s.calls) != 1 || s.srv[0] != 2 || s.creds[0] != "/s.creds" || len(h.records()) != 0 {
 		t.Fatalf("%d %q %v %v", code, errb, s.srv, s.creds)
 	}
 }
@@ -154,7 +157,7 @@ func TestRevokeUserKeysNoSysCredsSaysMashSysCreds(t *testing.T) {
 }
 
 func TestUsageTexts(t *testing.T) {
-	if !strings.Contains(endpointDeleteUsage, "[--force] [--no-revoke]") || !strings.Contains(endpointDeleteUsage, "--sys-creds FILE") || !strings.Contains(endpointDeleteUsage, "--servers N") {
+	if !strings.Contains(endpointDeleteUsage, "[--yes] [--dry-run]") || strings.Contains(endpointDeleteUsage, "--force") || strings.Contains(endpointDeleteUsage, "--no-revoke") || strings.Contains(endpointDeleteUsage, "--delete-creds") || !strings.Contains(endpointDeleteUsage, "--sys-creds FILE") || !strings.Contains(endpointDeleteUsage, "--servers N") {
 		t.Errorf("endpointDeleteUsage %q", endpointDeleteUsage)
 	}
 }
@@ -189,12 +192,12 @@ func TestRetireWithAShortUserValueDoesNotPanic(t *testing.T) {
 	h.shortUser("b", "abc")
 	s := stubRevoke(t)
 	s.err = errors.New("resolver down")
-	if _, errb, code := h.run("endpoint", "delete", "o.g.b"); code != 1 || !strings.Contains(errb, "user key abc...") {
+	if _, errb, code := h.run("endpoint", "delete", "o.g.b", "--yes"); code != 1 || !strings.Contains(errb, "user key abc...") {
 		t.Fatalf("%d %q", code, errb)
 	}
 	s.err = nil
-	out, errb, code := h.run("endpoint", "delete", "o.g.b")
-	if code != 0 || !strings.Contains(out, "user key abc... revoked") {
+	out, errb, code := h.run("endpoint", "delete", "o.g.b", "--yes")
+	if code != 0 || out != "Deleted endpoint o.g.b\n" {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
 }

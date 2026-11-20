@@ -120,7 +120,7 @@ func buildInboxJSON(addr sap.Address, in *admin.InboxInspection) inboxJSON {
 
 // runEndpointInbox is `mashctl endpoint inbox`: a read-only view of one endpoint's stored messages and their delivery
 // state. It reads stream info, messages by sequence and the existing consumer's info, and writes nothing.
-func runEndpointInbox(args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
+func runEndpointInbox(args []string, g cliframe.Global, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
 	return runEp(endpointInboxSpec, args, env, lookup, stdout, stderr, func(rt *epRuntime) error {
 		addr, o := rt.in.addr, rt.in
 		if _, err := rt.adm.ResolveInbox(rt.ctx, addr.String()); err != nil {

@@ -96,7 +96,7 @@ func runVerbs(args []string, env func(string) string, lookup config.Lookup, stdo
 	case "issued": // read-only: the issue record and the check of it against the connected keys
 		return runIssued(args[1:], env, lookup, stdout, stderr)
 	case "endpoint":
-		return runEndpoint(args[1:], env, lookup, stdout, stderr)
+		return runEndpoint(args[1:], global, env, lookup, stdout, stderr)
 	case "init", "limits":
 	default:
 		fmt.Fprintf(stderr, "mashctl: unknown command %q\n\n%s", args[0], ctl.Usage("mashctl"))
@@ -161,7 +161,7 @@ func isVerb(name string) bool {
 
 // removedCommands are the verbs `endpoint` replaced. They run nothing and name the replacement; they are not aliases.
 var removedCommands = map[string]string{
-	"add":     "mashctl: add was removed. Use: mashctl endpoint create alice/dev/design --public-key design.pub   (see: mashctl endpoint create --help)",
-	"reissue": "mashctl: reissue was removed. Use: mashctl endpoint reissue alice/dev/design --public-key FILE   (see: mashctl endpoint reissue --help)",
-	"retire":  "mashctl: retire was removed. Use: mashctl endpoint delete alice/dev/design   (see: mashctl endpoint delete --help)",
+	"add":     "mashctl: add was removed. Use: mashctl endpoint create acme.demo.bob   (see: mashctl endpoint create --help)",
+	"reissue": "mashctl: reissue was removed. Use: mashctl endpoint reissue acme.demo.bob   (see: mashctl endpoint reissue --help)",
+	"retire":  "mashctl: retire was removed. Use: mashctl endpoint delete acme.demo.bob   (see: mashctl endpoint delete --help)",
 }

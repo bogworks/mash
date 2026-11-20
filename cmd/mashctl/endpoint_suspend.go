@@ -8,6 +8,7 @@ import (
 	"github.com/nats-io/jwt/v2"
 
 	"github.com/bogworks/mash/internal/admin"
+	"github.com/bogworks/mash/internal/cliframe"
 	"github.com/bogworks/mash/internal/config"
 )
 
@@ -61,14 +62,14 @@ type stateResultJSON struct {
 }
 
 // runEndpointSuspend is `mashctl endpoint suspend` (ADR 0057: the inbox stream's subjects are parked).
-func runEndpointSuspend(args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
+func runEndpointSuspend(args []string, g cliframe.Global, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
 	return runEp(endpointSuspendSpec, args, env, lookup, stdout, stderr, func(rt *epRuntime) error {
 		return changeSuspension(rt, true)
 	})
 }
 
 // runEndpointResume is `mashctl endpoint resume`.
-func runEndpointResume(args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
+func runEndpointResume(args []string, g cliframe.Global, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
 	return runEp(endpointResumeSpec, args, env, lookup, stdout, stderr, func(rt *epRuntime) error {
 		return changeSuspension(rt, false)
 	})
@@ -142,7 +143,7 @@ func permissionsJSON(p *jwt.Permissions) permsJSON {
 }
 
 // runEndpointPermissions is `mashctl endpoint permissions`: the permission set as JSON on stdout, nothing else.
-func runEndpointPermissions(args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
+func runEndpointPermissions(args []string, g cliframe.Global, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
 	return runEp(endpointPermissionsSpec, args, env, lookup, stdout, stderr, func(rt *epRuntime) error {
 		b, err := json.MarshalIndent(permissionsJSON(admin.Permissions(rt.in.addr)), "", "  ")
 		if err != nil {

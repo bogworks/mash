@@ -75,3 +75,23 @@ func (a *Admin) EndpointState(ctx context.Context, addr sap.Address, withWaiting
 	}
 	return st, nil
 }
+
+// InboxMessages is how many messages addr's inbox stream holds; 0 when it has no inbox stream. It writes nothing.
+func (a *Admin) InboxMessages(ctx context.Context, addr sap.Address) (uint64, error) {
+	if err := addr.Validate(); err != nil {
+		return 0, fmt.Errorf("mash: inbox messages: %w", err)
+	}
+	name := addr.Flat()
+	s, err := a.js.Stream(ctx, sap.InboxStream(name))
+	switch {
+	case errors.Is(err, jetstream.ErrStreamNotFound):
+		return 0, nil
+	case err != nil:
+		return 0, fmt.Errorf("mash: inbox stream of %s: %w", name, err)
+	}
+	info, err := s.Info(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("mash: inbox stream of %s: %w", name, err)
+	}
+	return info.State.Msgs, nil
+}

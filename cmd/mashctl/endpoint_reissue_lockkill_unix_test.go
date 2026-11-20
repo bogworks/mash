@@ -31,7 +31,7 @@ func TestEndpointReissueLockAfterRealKill(t *testing.T) {
 	h := newFleetEnv(t)
 	fakeRevoke(t, nil)
 	a := ad("rk")
-	if _, se, code := h.run("endpoint", "create", a.String(), "--make-key"); code != 0 {
+	if _, se, code := h.run("endpoint", "create", a.String()); code != 0 {
 		t.Fatalf("create %q", se)
 	}
 	old := credsPub(t, h, a)
@@ -82,7 +82,7 @@ func TestEndpointReissueLockAfterRealKill(t *testing.T) {
 	cmd.Wait()
 	done = true
 
-	if _, se, code := h.run("endpoint", "reissue", a.String(), "--make-key"); code != 0 {
+	if _, se, code := h.run("endpoint", "reissue", a.String()); code != 0 {
 		t.Fatalf("reissue after a kill: %d %q", code, se)
 	}
 	if credsPub(t, h, a) == old {

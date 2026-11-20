@@ -245,8 +245,8 @@ have happened ([ADR-0025][0025]).
 |---|---|---|
 | Server | `nats-server` in operator mode with JetStream, file storage | Synadia's service. The free tier allows 5 streams, 5 connections, 512 KiB payload and no replicas |
 | Account | One account for mash, sized for 1 stream and 1 consumer per endpoint plus 2 buckets | One existing account |
-| Users | Signed by `mashctl endpoint create` with the account signing key, from the endpoint's own public key; `mashctl permissions <owner.group.instance>` prints the set (JSON or `nsc` flags). An endpoint's seed stays on its machine (with `--make-key`, `mashctl` makes it on its own host) | Not applicable: Synadia Cloud is not supported by mashctl in 0.5.6 (#876) |
-| Endpoints | `mashctl init` once, then `mashctl endpoint create <owner/group/instance>` per endpoint | Not applicable: Synadia Cloud is not supported by mashctl in 0.5.6 (#876) |
+| Users | Signed by `mashctl endpoint create` with the account signing key, from the endpoint's own public key; `mashctl permissions <owner.group.instance>` prints the set (JSON or `nsc` flags). An endpoint's seed stays on its machine (with no `--public-key`, `mashctl` makes it on its own host) | Not applicable: Synadia Cloud is not supported by mashctl in 0.5.6 (#876) |
+| Endpoints | `mashctl init` once, then `mashctl endpoint create <owner.group.name>` per endpoint | Not applicable: Synadia Cloud is not supported by mashctl in 0.5.6 (#876) |
 | Removing | `mashctl endpoint delete` (revokes the user) | Same, with an admin user made in the console |
 
 Each endpoint machine needs the `mash` binary on `PATH`, the Claude Code plugin, a credentials file at mode 0600 and

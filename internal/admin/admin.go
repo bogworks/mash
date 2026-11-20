@@ -1020,7 +1020,7 @@ func (a *Admin) deprovisionLocked(ctx context.Context, lk *streamLock, addr sap.
 		case perr == nil:
 			ruser = rec.User
 		case a.revoke != nil:
-			return &refusedError{name: name, why: perr, text: "its record cannot be read, so its user key is unknown; --no-revoke removes it without revoking (nothing was removed): " + perr.Error()}
+			return &refusedError{name: name, why: perr, text: "its record cannot be read, so its user key is unknown (nothing was removed): " + perr.Error()}
 		}
 	case !errors.Is(err, jetstream.ErrKeyNotFound) && !errors.Is(err, jetstream.ErrKeyDeleted):
 		return fmt.Errorf("mash: directory %s: %w; nothing was removed", name, err)

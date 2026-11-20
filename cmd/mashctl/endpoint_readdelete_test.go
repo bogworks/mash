@@ -8,7 +8,6 @@ import (
 	"regexp"
 	"strings"
 	"testing"
-	"time"
 )
 
 var updateEndpointGolden = flag.Bool("update-endpoint", false, "rewrite the cmd/mashctl/testdata/endpoint_*.golden.json files")
@@ -44,16 +43,14 @@ func TestEndpointDeleteRemovesRecordRenamesCredsRevokesKey(t *testing.T) {
 	h.seed(ad("c"))
 	_, user := h.credsClaims(ad("c"))
 	h.seed(ad("d"))
-	if so, _, code := h.run("endpoint", "delete", "o/g/d", "--json"); code != 0 || !strings.Contains(so, `"servers_acknowledged": 1`) {
+	if so, _, code := h.run("endpoint", "delete", "o.g.d", "--yes", "--json", "--verbose"); code != 0 || !strings.Contains(so, `"deleted": true`) {
 		t.Errorf("delete json %d %q", code, so)
 	}
-	retireNow = func() time.Time { return time.Date(2026, 11, 2, 3, 4, 5, 0, time.UTC) }
-	t.Cleanup(func() { retireNow = time.Now })
-	out, errb, code := h.run("endpoint", "delete", "o/g/c")
-	if code != 0 || !strings.HasPrefix(out, "deleted o/g/c (o.g.c)\n") {
+	out, errb, code := h.run("endpoint", "delete", "o.g.c", "--yes", "--verbose")
+	if code != 0 || !strings.HasPrefix(out, "Deleted endpoint o.g.c\n") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
-	if !strings.Contains(out, "revoked in the account JWT") || !strings.Contains(out, "1 server(s) acknowledged") || !strings.Contains(out, ".retired-20261102T030405Z") {
+	if !strings.Contains(out, "servers acknowledged: 1\n") || !strings.Contains(out, "credentials file: set aside as ") || !strings.Contains(out, ".deleted") || !strings.Contains(out, "retired marker: written\n") {
 		t.Errorf("report: %q", out)
 	}
 	noSecrets(t, out, errb)
@@ -63,7 +60,7 @@ func TestEndpointDeleteRemovesRecordRenamesCredsRevokesKey(t *testing.T) {
 	if _, err := os.Lstat(h.creds(ad("c"))); !os.IsNotExist(err) {
 		t.Errorf("creds still at the old name: %v", err)
 	}
-	if _, err := os.Lstat(h.creds(ad("c")) + ".retired-20261102T030405Z"); err != nil {
+	if _, err := os.Lstat(h.creds(ad("c")) + ".deleted"); err != nil {
 		t.Errorf("renamed file: %v", err)
 	}
 	rec, found, err := h.adminOf().IssuedByKey(t.Context(), user)
@@ -75,12 +72,12 @@ func TestEndpointDeleteRemovesRecordRenamesCredsRevokesKey(t *testing.T) {
 	}
 }
 
-func TestEndpointDeleteAcceptsDottedAndShortcut(t *testing.T) {
+func TestEndpointDeleteAcceptsDotted(t *testing.T) {
 	h := newFleetEnv(t)
 	h.seed(ad("a"))
 	h.seed(ad("b"))
-	for _, ref := range []string{"o.g.a", "o/g/b"} {
-		if out, errb, code := h.run("endpoint", "delete", ref); code != 0 {
+	for _, ref := range []string{"o.g.a", "o.g.b"} {
+		if out, errb, code := h.run("endpoint", "delete", ref, "--yes"); code != 0 {
 			t.Fatalf("%s: %d %q %q", ref, code, out, errb)
 		}
 	}
@@ -93,8 +90,8 @@ func TestEndpointDeleteDryRunChangesNothing(t *testing.T) {
 	h := newFleetEnv(t)
 	h.seed(ad("c"))
 	before, _ := os.ReadFile(h.creds(ad("c")))
-	out, errb, code := h.run("endpoint", "delete", "o/g/c", "--dry-run")
-	if code != 0 || !strings.Contains(out, "would revoke user key") || !strings.Contains(out, "would rename creds file") {
+	out, errb, code := h.run("endpoint", "delete", "o.g.c", "--dry-run")
+	if code != 0 || out != "Would delete endpoint o.g.c and its empty inbox\n" || errb != "" {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
 	if r := h.records(); len(r) != 1 {
@@ -119,33 +116,13 @@ func TestEndpointDeleteDryRunChangesNothing(t *testing.T) {
 
 func TestEndpointDeleteMissingIsRefused(t *testing.T) {
 	h := newFleetEnv(t)
-	out, errb, code := h.run("endpoint", "delete", "o/g/none")
-	if code != 1 || out != "" || !strings.Contains(errb, "mashctl endpoint list") || !strings.Contains(errb, "no directory record") {
+	out, errb, code := h.run("endpoint", "delete", "o.g.none", "--yes")
+	if code != 1 || out != "" || errb != "error: o.g.none does not exist\nhint: mashctl endpoint list\n" {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
-	out, errb, code = h.run("endpoint", "delete", "o/g/none", "--json")
-	if code != 1 || !strings.Contains(out, `"outcome": "refused"`) || !strings.Contains(out, `"code": "not_found"`) {
+	out, errb, code = h.run("endpoint", "delete", "o.g.none", "--yes", "--json")
+	if code != 1 || errb != "" || out != "{\"error\":\"o.g.none does not exist\",\"hint\":\"mashctl endpoint list\"}\n" {
 		t.Fatalf("%d %q %q", code, out, errb)
-	}
-}
-
-func TestEndpointDeleteForceWithoutRecordIsUnchanged(t *testing.T) {
-	h := newFleetEnv(t)
-	out, errb, code := h.run("endpoint", "delete", "o/g/none", "--force", "--json")
-	if code != 0 || !strings.Contains(out, `"outcome": "unchanged"`) {
-		t.Fatalf("%d %q %q", code, out, errb)
-	}
-}
-
-func TestEndpointDeleteDeleteCredsRemovesTheFile(t *testing.T) {
-	h := newFleetEnv(t)
-	h.seed(ad("c"))
-	out, errb, code := h.run("endpoint", "delete", "o/g/c", "--delete-creds", "--json")
-	if code != 0 || !strings.Contains(out, `"action": "removed"`) {
-		t.Fatalf("%d %q %q", code, out, errb)
-	}
-	if names := dirNames(t, h.dir); strings.Contains(strings.Join(names, " "), "retired") || strings.Contains(strings.Join(names, " "), ".creds") {
-		t.Errorf("files left: %v", names)
 	}
 }
 
@@ -153,12 +130,12 @@ func TestEndpointDeleteRefusesAsRetireDoes(t *testing.T) {
 	h := newFleetEnv(t)
 	h.seed(ad("c"))
 	// a record whose user key is replaced between the read and the removal is refused, as retire refuses it
-	_, retErr, retCode := h.run("endpoint", "delete", "o.g.zzz")
-	_, delErr, delCode := h.run("endpoint", "delete", "o/g/zzz")
+	_, retErr, retCode := h.run("endpoint", "delete", "o.g.zzz", "--yes")
+	_, delErr, delCode := h.run("endpoint", "delete", "o.g.zzz", "--yes")
 	if retCode != 1 || delCode != 1 {
 		t.Fatalf("codes %d %d", retCode, delCode)
 	}
-	if !strings.Contains(retErr, "no directory record") || !strings.Contains(delErr, "no directory record") {
+	if !strings.Contains(retErr, "o.g.zzz does not exist") || !strings.Contains(delErr, "o.g.zzz does not exist") {
 		t.Errorf("%q %q", retErr, delErr)
 	}
 	if r := h.records(); len(r) != 1 {
@@ -247,8 +224,6 @@ func TestEndpointGoldens(t *testing.T) {
 	h := newFleetEnv(t)
 	h.seed(ad("a"))
 	h.seed(ad("b"))
-	retireNow = func() time.Time { return time.Date(2026, 11, 2, 3, 4, 5, 0, time.UTC) }
-	t.Cleanup(func() { retireNow = time.Now })
 
 	out, errb, code := h.run("endpoint", "list", "--json")
 	if code != 0 {
@@ -262,21 +237,21 @@ func TestEndpointGoldens(t *testing.T) {
 	}
 	checkGolden(t, "endpoint_show.golden.json", h.scrub(out))
 
-	out, errb, code = h.run("endpoint", "delete", "o/g/a", "--dry-run", "--json")
+	out, errb, code = h.run("endpoint", "delete", "o.g.a", "--yes", "--dry-run", "--json")
 	if code != 0 {
 		t.Fatalf("plan: %d %q", code, errb)
 	}
 	checkGolden(t, "endpoint_delete_planned.golden.json", h.scrub(out))
 
-	out, errb, code = h.run("endpoint", "delete", "o/g/a", "--json")
+	out, errb, code = h.run("endpoint", "delete", "o.g.a", "--yes", "--json")
 	if code != 0 {
 		t.Fatalf("delete: %d %q", code, errb)
 	}
 	checkGolden(t, "endpoint_delete.golden.json", h.scrub(out))
 
-	out, errb, code = h.run("endpoint", "delete", "o/g/a", "--json")
-	if code != 0 {
-		t.Fatalf("delete again: %d %q", code, errb)
+	out, errb, code = h.run("endpoint", "delete", "o.g.a", "--yes", "--json")
+	if code != 1 || errb != "" {
+		t.Fatalf("delete again: %d %q %q", code, out, errb)
 	}
-	checkGolden(t, "endpoint_delete_unchanged.golden.json", h.scrub(out))
+	checkGolden(t, "endpoint_delete_not_found.golden.json", h.scrub(out))
 }

@@ -2,7 +2,7 @@
 
 Endpoints are made by `mashctl endpoint create`, and every endpoint carries the same kind of permission set, the owner-line set for its address `owner.group.instance` (it may mail the endpoints of its own owner and read what it needs to; the owner is the fence). `mashctl endpoint permissions ADDRESS` prints that set. A NATS user is signed by the account signing key (`account.nk` in the key directory, `<config dir>/keys` or `MASH_KEYS_DIR`) and carries its permission set in its JWT; there is no policy file and no tag. See [ADR 0052](decisions/0052-mashctl-mints-nats-users-and-holds-the-account-signing-key.md).
 
-`endpoint list`, `show`, `set`, `unset`, `suspend`, `resume`, `inbox` and `permissions` take an endpoint as `owner.group.name`: dotted, three parts. A bare name, the flat key `owner_group_name` and the slash form are refused (exit 2).
+`endpoint create`, `reissue`, `delete`, `list`, `show`, `set`, `unset`, `suspend`, `resume`, `inbox` and `permissions` take an endpoint as `owner.group.name`: dotted, three parts. A bare name, the flat key `owner_group_name` and the slash form are refused (exit 2).
 
 `mashctl endpoint create`, `reissue`, `delete`, `list` and `show` are described [below](#mashctl-endpoint-create); `mash key create` and `mash credential create` make the endpoint's key and creds file.
 
@@ -113,80 +113,100 @@ See also [audit.md](audit.md) for the consumer fields (`delivered`, `ack_floor`,
 ## mashctl endpoint create
 
 ```sh
-mashctl endpoint create [ADDRESS] [--owner O] [--group G] [--name N] (--public-key FILE | --make-key)
-                        [--jwt-out FILE] [--label k=v]... [--tool] [--note N] [--describe T] [--cap C]...
-                        [--servers N] [--sys-creds FILE] [--dry-run] [--json]
+mashctl endpoint create ADDRESS [--out PATH] [--public-key PATH] [--servers N] [--sys-creds FILE] [--dry-run] [--json]
 ```
 
-Creates an endpoint: it signs the endpoint's user key with the account signing key, writes the directory record and the inbox, and records the key in the issue record. The record, the inbox and the issue record are written before the JWT or creds file, so a user that can connect is always on record.
+Creates an endpoint: it signs the endpoint's user key with the account signing key, writes the directory record and the inbox, and records the key in the issue record. The record, the inbox and the issue record are written before the creds file or join file, so a user that can connect is always on record.
 
-**Naming.** Write the address one of three ways:
+**The address** is `owner.group.name`: three tokens joined by dots. Other forms, such as `alice/dev/design` or a name alone, are a usage error. A group cannot be changed later: delete the endpoint and create a new one. The old address is never reused. Role, host, labels and the other directory fields are set after the endpoint exists, with `mashctl endpoint set`.
 
-- `mashctl endpoint create alice/dev/design ...`: owner, group and instance in one argument. This is the usual form. The dotted form `alice.dev.design` also works.
-- `mashctl endpoint create design --group dev ...`: one token is the instance. The owner comes from `--owner`, or the owner part of `MASH_ENDPOINT` or `--endpoint`.
-- `mashctl endpoint create --owner alice --group dev --name design ...`: every token by flag.
+**With no option** the key pair is made on this host and `<config dir>/<address>.creds` is written (mode 0600, never over an existing file). The endpoint can be used on this machine at once. The `mashctl` host holds the key while the command runs. The key is kept in `<creds file>.pending` until the creds file is written.
 
-Two tokens (`dev/design`) are refused as ambiguous. A group is always named: there is no default and no `config.json` key for it, and the environment does not supply one. An address and a flag that name different values are refused (`naming_disagrees`); the same value twice is fine. A group cannot be changed later: delete the endpoint and create a new one. The old address is never reused.
+**With `--out PATH`** the key pair is made, the user JWT is signed, and nothing is installed on this machine. The command writes a join file at `PATH` for another machine. Take that file to the endpoint's machine and run `mash join` there. The join file holds the seed: move it as you would a creds file.
 
-**The key.** Give exactly one of two flags.
+**With `--public-key PATH`** (which needs `--out`) the command signs a public key that the endpoint made with `mash key create`. No seed is made, and the join file holds the user JWT and no seed. On the endpoint's machine, `mash join` takes the seed with `--key`. The seed never reaches the `mashctl` host.
 
-- `--public-key FILE` signs the public key the endpoint made with `mash key create`. The JWT goes to `--jwt-out FILE`, by default `<owner>.<group>.<instance>.jwt` in the current directory, and is never overwritten. The endpoint then runs `mash credential create` to join the JWT and its seed. The seed never reaches the `mashctl` host. Use this form when the endpoint runs on another machine ([operations.md](operations.md#an-endpoint-on-another-machine)).
-- `--make-key` makes the key on this host and writes `<config dir>/<address>.creds` (mode 0600). The `mashctl` host makes and holds the key while the command runs, so use it only when the endpoint runs on this host. The key is kept in `<creds file>.pending` until the creds file is written.
+A key is used at one address, once. A key that was issued before, or revoked, is refused.
 
-A key is used at one address, once. A key that was issued before, or revoked, is refused (`public_key_issued`, `key_revoked`).
+**The join file** is JSON, mode 0600, written to a temporary file in the same folder and then renamed. A path that exists is refused, and so is a folder that other users can write in (this holds for `--out` on every form, and for the `<PATH>.pending` file beside it). The CA file may hold certificates only: only its `CERTIFICATE` blocks are copied, and a file with a private key or any other block in it is refused with `error: FILE must hold only certificates`. It has these fields and no others:
 
-**Other flags.** `--label k=v` (repeatable) sets directory labels, `--tool` adds the label `kind=tool`, `--note N` and `--describe T` set the note and the description, and `--cap C` (repeatable) adds capabilities. These are checked as `set-meta` checks them. `--servers N` and `--sys-creds FILE` name the server count and the system account creds for a cluster, as the other verbs do. `--dry-run` connects, checks everything, says what it would do and changes nothing. `--json` prints one JSON document (schema `mashctl-endpoint@1`).
+| Field | Holds |
+| --- | --- |
+| `mash_join` | `1`, the version of the format |
+| `address` | the endpoint, as `owner.group.name` |
+| `servers` | the server addresses from the configuration |
+| `ca` | the certificate authority certificates as PEM text, read from the configured CA file, or `null` when none is configured (`mash join` then trusts the system roots) |
+| `creds` | the whole text of the NATS creds file, user JWT and seed (without `--public-key`) |
+| `user_jwt` | the user JWT alone (with `--public-key`) |
 
-**What it prints.** On success, with `--public-key`:
+**Other options.** `--servers N` and `--sys-creds FILE` name the server count and the system account creds for a cluster, as the other verbs do. `--dry-run` connects, checks everything, says what it would do and changes nothing. `--json` prints one JSON object.
+
+**What it prints.** On success:
 
 ```text
-created endpoint alice/dev/design
-  address  alice.dev.design
-  jwt      ./alice.dev.design.jwt
-next: on the endpoint's machine, run: mash credential create --seed design.seed --jwt alice.dev.design.jwt
+Created endpoint alice.dev.design
 ```
 
-With `--make-key` the third line is `  creds    <config dir>/alice.dev.design.creds` and the last line is `next: start a session as this endpoint: MASH_ENDPOINT=alice.dev.design`. Progress, warnings and errors go to standard error.
+With `--out` a second line names the file:
 
-**Exit codes.** 0 done or planned, 1 refused, 2 usage error. An error (a server or a file failed) also exits 1; the JSON `outcome` says `error`. A refusal and an error name a code in the message, for example `refused (address_taken)`, and the [table below](#refusal-codes) lists them.
+```text
+Created endpoint alice.dev.design
+Join file: alice.dev.design.join
+```
 
-**A killed run.** Run the same command again. With `--make-key` the key waits in `<creds file>.pending`, so the second run finishes with the same key. With `--public-key` the second run writes the JWT again (if you removed the first, or it was never written). A creds file or inbox left by a run that never completed shows as an orphan in `mashctl audit`.
+With `--verbose` the lines `servers: ...`, `credentials file: PATH` (or `join file: PATH`) and `public key: KEY` follow. With `--dry-run` it prints one line, and with `--json` the same object plus `"dry_run": true`:
+
+```text
+Would create endpoint alice.dev.design
+```
+
+With `--json`, `{"address": "alice.dev.design", "installed_here": true, "join_file": null}`. With `--out`, `installed_here` is `false` and `join_file` is the path. Neither the seed nor the JWT is printed.
+
+**Errors** are one line on standard error, `error: WHAT`, and at most one line `hint: COMMAND`; with `--json` they are `{"error": ..., "hint": ...}` on standard output. Exit codes: 0 done or planned, 1 failed, 2 the command line was wrong. For example:
+
+```text
+error: alice.dev.design already exists
+error: alice.dev.design was deleted and its address cannot be used again
+error: --public-key needs --out, the join file to write
+hint: mashctl endpoint create --help
+```
+
+**A killed run.** Run the same command again. The key waits in `<creds file>.pending` (or `<PATH>.pending` with `--out`), so the second run finishes with the same key and removes the file. With `--public-key` the second run signs again and writes the join file. A creds file or inbox left by a run that never completed shows as an orphan in `mashctl audit`.
 
 ## mashctl endpoint reissue
 
 ```sh
-mashctl endpoint reissue ADDRESS (--public-key FILE | --make-key) [--jwt-out FILE]
-                         [--servers N] [--sys-creds FILE] [--dry-run] [--json]
-mashctl endpoint reissue (--all | --changed) --make-key [--yes] [--servers N] [--sys-creds FILE] [--dry-run] [--json]
+mashctl endpoint reissue ADDRESS [--out PATH] [--public-key PATH] [--servers N] [--sys-creds FILE] [--dry-run] [--json]
 ```
 
-Gives an existing endpoint a new key. It revokes the old key on every server, then makes the directory record name the new key. The inbox and its unread mail stay. A session that runs as the endpoint must restart to read the new creds. `--public-key FILE`, `--make-key`, `--jwt-out`, `--dry-run` and `--json` work as for `create`. With `--make-key` the new creds replace `<config dir>/<address>.creds`.
+Gives an existing endpoint new credentials and cancels the old ones. It revokes the old key on every server, then makes the directory record name the new key. The inbox and its unread mail stay. A session that runs as the endpoint must restart to read the new creds. The options work as for `create`.
 
-`--public-key` naming the key the endpoint already has is refused (`key_unchanged`): nothing would be rotated. Make a new key with `mash key create --out NAME.seed`. The one exception is a rerun after a killed `--public-key` reissue: the command leaves `<jwt-out>.pending` while the key changes, and a rerun with the same key and `--jwt-out` finishes the JWT and removes the file.
+With no option the new key pair is made on this host and `<config dir>/<address>.creds` is replaced. With `--out PATH` the command writes a join file for another machine and installs nothing here. With `--out PATH --public-key PATH` it signs the endpoint's new public key and the join file holds the user JWT. `--public-key` needs `--out`.
 
-Before it revokes, `reissue` refuses when the old key's issue record shows a JWT issued in the future (`future_issued`: fix the clock), because the revocation would not cover that JWT. With `--make-key` it also checks the existing creds file first: it must name this endpoint, hold a seed and a JWT for the same key, match the directory's key and the account that signs (`creds_mismatch`; an unreadable file is `creds_unreadable`). Move an unrelated file aside and run again.
+On success it prints `Reissued credentials for alice.dev.design`, then `Join file: PATH` with `--out`. With `--verbose` it adds the line `servers acknowledged: N`. With `--dry-run` it prints `Would reissue credentials for alice.dev.design`, and with `--json` the same object plus `"dry_run": true`. If the join file cannot be written after the key changed, the hint is `remove PATH or choose another --out`. With `--json` it prints `{"address": "alice.dev.design", "join_file": null}`; with `--out` `join_file` is the path. There is no bulk form: reissue takes one address.
 
-**Bulk.** `--all` reissues every endpoint that has a creds file on this host. `--changed` reissues the ones whose creds file carries a permission set that differs from the current one, and also those with a rotation left half done (`<creds file>.pending` exists) or whose current key is revoked. If it cannot check whether a key is revoked, it reports that endpoint as an error (`revocation_unknown`) and does not call it unchanged. Both take `--make-key` only, because many public keys cannot arrive in one command. An endpoint with no creds file on this host is skipped (`no_local_creds`), never rotated. Without `--yes`, or with `--dry-run`, the command lists what it would reissue and changes nothing. With `--yes` it reissues one endpoint at a time in address order. A refusal or error on one endpoint does not stop the rest. The JSON schema is `mashctl-endpoint-bulk@1`.
+`--public-key` naming the key the endpoint already has is refused: nothing would be rotated. Make a new key with `mash key create --out NAME.seed`. The one exception is a rerun after a killed `--public-key` reissue: the command leaves `<PATH>.pending` while the key changes, and a rerun with the same key and `--out` finishes the join file and removes the file.
 
-Two `mashctl` machines must not reissue the same endpoint at the same moment. The command checks the directory key after it writes and reports `superseded` if another run replaced it; it cannot stop the race, and the older key stays revoked either way.
+Before it revokes, `reissue` refuses when the old key's issue record shows a JWT issued in the future, because the revocation would not cover that JWT; fix the clock. With no `--out` it also checks the existing creds file first: it must name this endpoint, hold a seed and a JWT for the same key, and match the directory's key and the account that signs. Move an unrelated file aside, as the hint says, and run again.
 
-**Exit codes.** 0 done, planned or unchanged, 1 refused, partial (a bulk run in which some endpoints were not reissued) or error, 2 usage error. A killed run is finished by running the same command again; with `--make-key` the new key waits in `<creds file>.pending`. With `--make-key`, a reissue that stopped after the new credentials were written, or could not read the directory record back to confirm them, is finished by running the same command again: it keeps the new key, confirms it and removes `<creds file>.pending`, and does not revoke the new key.
+Two `mashctl` machines must not reissue the same endpoint at the same moment. The command checks the directory key after it writes and reports that another reissue changed the key if so; it cannot stop the race, and the older key stays revoked either way. On one host, a lock on the creds file's `.lock` file keeps two reissues of an address apart; the operating system releases it when the run ends or is killed. The lock works on a local filesystem, not across hosts or on a network filesystem that does not honour `flock`.
+
+**A killed run** is finished by running the same command again. The new key waits in `<creds file>.pending` (or `<PATH>.pending` with `--out`). A reissue that stopped after the new credentials were written, or could not read the directory record back to confirm them, is finished the same way: it keeps the new key, confirms it and removes the `.pending` file, and does not revoke the new key.
 
 ## mashctl endpoint delete
 
 ```sh
-mashctl endpoint delete ADDRESS [--delete-creds] [--force] [--no-revoke] [--dry-run] [--json]
-                        [--servers N] [--sys-creds FILE]
+mashctl endpoint delete ADDRESS [--yes] [--dry-run] [--json] [--servers N] [--sys-creds FILE]
 ```
 
-Removes an endpoint. In order, it:
+Deletes an endpoint, its inbox and its credentials. The address can never be used again. Without `--yes` it prints `This deletes <address> and the <N> messages in its inbox. It cannot be undone.` and asks you to type the address; any other text deletes nothing and exits 1. That needs a terminal: with no terminal and no `--yes` it prints `error: deleting needs a terminal to confirm, or --yes` and exits 2. The question comes after the endpoint is found and its messages counted, and before anything changes. In order, it:
 
-1. revokes the endpoint's user key in the account JWT, on every server (see [Revocation](#revocation)); a revocation that cannot be confirmed stops the command with nothing removed;
+1. revokes the endpoint's user key in the account JWT, on every server (see [Revocation](#revocation)); a revocation that some server did not confirm stops the command with nothing removed (`error: ADDRESS was not deleted: K of N servers did not confirm its key was cancelled`, with the same command as the hint);
 2. removes the directory record and the inbox, so unread mail is lost;
 3. burns the address: it is never assigned again, to any key;
-4. renames the creds file, if one is in the config directories, to `<address>.creds.retired-<UTC time>`, or removes it with `--delete-creds`.
+4. renames the creds file, if one is in the config directories, to `<address>.creds.deleted` (`.deleted.1`, `.deleted.2` and so on if that name is taken; nothing is overwritten). The file is no longer counted as an installed endpoint.
 
-`--force` also handles the creds file when the server has no record. `--no-revoke` skips the revocation, and the user can still connect; the command warns. `--dry-run` says what would happen and changes nothing. `--json` uses schema `mashctl-endpoint@1`. A killed run finishes when you run the same command again. Exit codes: 0 deleted or unchanged, 1 refused, partial or error, 2 usage error. After a partial delete, the message says what is left; running the same command again is safe and finishes it.
+On success it prints `Deleted endpoint <address>`; `--verbose` adds `retired marker: written`, `servers acknowledged: N` and `credentials file: set aside as <path>`. `--dry-run` prints `Would delete endpoint <address> and the N messages in its inbox`, asks nothing and changes nothing. `--json` prints `{"address", "deleted", "messages_deleted"}`, and with `--dry-run` the same object plus `"dry_run": true`; a failure prints `{"error", "hint"}`. An address that does not exist is `error: <address> does not exist`, exit 1. A killed run finishes when you run the same command again. Exit codes: 0 deleted, 1 refused, partial or error, 2 usage error. After a partial delete the message is `error: deleted <address>, but <what is left>` with `hint: mashctl endpoint delete <address>`; running the same command again is safe and finishes it. The options `--force`, `--delete-creds` and `--no-revoke` no longer exist.
 
 ## mashctl endpoint list and show
 
@@ -234,52 +254,39 @@ mash credential create --seed FILE --jwt FILE [--out CREDS] [--force] [--json] [
 
 `mash key create` makes a user key pair. The seed goes to `FILE` (mode 0600), and the public key to the same name with `.seed` replaced by `.pub` (or to `--pub-out`). It makes a missing parent directory (mode 0700), refuses to overwrite either file, and prints the public key and both paths, never the seed.
 
-`mash credential create` joins the seed and the JWT that `mashctl endpoint create` wrote into a creds file (mode 0600). By default the file is `<config dir>/<JWT name>.creds`; `--out` names another. It checks the structure of the JWT, its self-signature, that it is a user JWT, and that it names the seed's key (`key_mismatch` if not). It does not check the issuing account or the expiry. It refuses to replace an existing file unless `--force` is given, and it prints the path and the public key, never the seed or the JWT.
+`mash credential create` joins a seed and a JWT file into a creds file (mode 0600). By default the file is `<config dir>/<JWT name>.creds`; `--out` names another. It checks the structure of the JWT, its self-signature, that it is a user JWT, and that it names the seed's key (`key_mismatch` if not). It does not check the issuing account or the expiry. It refuses to replace an existing file unless `--force` is given, and it prints the path and the public key, never the seed or the JWT.
 
-## Refusal codes
+## Errors of create and reissue
 
-A refusal exits 1, a usage error exits 2 and an error exits 1. The message names the code. Every code below is tested.
+Every failure is `error: WHAT` on standard error and at most one `hint: COMMAND`. A wrong command line exits 2 with the hint `mashctl endpoint create --help` (or `reissue`). Any other failure exits 1. A command that did part of its work exits 1, says what is left, and is safe to run again: the hint is the command to run.
 
-| Code | Exit | Command | Meaning |
-| --- | --- | --- | --- |
-| `name_invalid` | 1 | create | A token is empty or has a character mash does not allow. |
-| `name_rule` | 1 | create | The name rule refuses the name. |
-| `address_ambiguous` | 2 | create | Two tokens: write `alice/dev/design` or `--group dev design`. |
-| `naming_disagrees` | 2 | create | The address and a flag name different values. |
-| `group_missing` | 2 | create | No group: write `--group dev` or `alice/dev/design`. |
-| `owner_missing` | 2 | create | No owner: write `--owner`, the three-token form, or set `owner` in `config.json` or `MASH_ENDPOINT`. |
-| `name_missing` | 2 | create | No instance name. |
-| `address_missing`, `address_invalid` | 2 | reissue, delete, show | No address, or one that is not an address. |
-| `key_both`, `key_missing` | 2 | create, reissue | Give exactly one of `--public-key` and `--make-key`. |
-| `unknown_flag`, `usage` | 2 | every verb | An unknown flag, or arguments the verb does not take. With `--json` the document has outcome `error` and the code. |
-| `bulk_needs_make_key` | 2 | reissue | `--all` and `--changed` take `--make-key` only. |
-| `staged_key_revoked` | 1 | create, reissue | The key staged in `<creds file>.pending` was revoked: remove the file and run again. |
-| `labels_invalid` | 2 | create | A label key or value is not allowed. |
-| `servers_invalid` | 2 | create, reissue, delete | `--servers` or `MASH_SERVERS` is not a whole number of 1 or more. |
-| `no_config_dir` | 1 | create, reissue | No config directory for the creds file: set `MASH_CONFIG_DIR`. |
-| `public_key_unreadable` | 1 | create, reissue | The `--public-key` file cannot be read. |
-| `public_key_invalid` | 1 | create | The file does not hold a NATS user public key. |
-| `file_exists` | 1 | create, reissue | The JWT or creds file exists and is never overwritten: name another with `--jwt-out`. |
-| `creds_exists` | 1 | create | A creds file for another key exists: move it aside. |
-| `no_account_key` | 1 | create, reissue, bulk | No account signing key: run `mashctl init` first. |
-| `address_taken` | 1 | create | The endpoint exists: use `endpoint reissue`. |
-| `key_retired` | 1 | create, reissue | The address was deleted and is never reassigned. |
-| `public_key_issued` | 1 | create, reissue | The key was issued to another address: make a new key. |
-| `key_revoked` | 1 | create, reissue | The key was revoked in the account JWT, or was issued and revoked before: make a new key. A supplied key is checked before it is signed. |
-| `key_unchanged` | 1 | reissue | The key is already the endpoint's key. |
-| `endpoint_missing` | 1 | reissue | No such endpoint. |
-| `future_issued` | 1 | reissue, bulk | The old key's JWT was issued after now: fix the clock. Nothing was changed. |
-| `creds_mismatch` | 1 | reissue, bulk | The creds file at the creds path is not this endpoint's current creds. Move it aside. |
-| `reissue_busy` | 1 | reissue, bulk | Another reissue of the endpoint holds the lock on its creds file's `.lock` file; the detail names its pid and host when readable. The operating system releases the lock when that run ends or is killed, so a killed run needs nothing removed: run again later. The lock works on one host (a local filesystem), not across hosts or on a network filesystem that does not honour `flock`. A `.lock` directory made by an earlier mash is reported the same way; if no reissue is running, remove it once by hand. |
-| `server` | 1 | create, reissue, bulk | The server could not be reached or answered with an error. Nothing was changed. |
-| `superseded` | 1 | reissue, bulk | Another reissue changed the endpoint's key while this one ran, so the file this run wrote was removed. Run the command again. |
-| `servers` | 1 | reissue, bulk | Fewer servers answered than the count says. Nothing was revoked. |
-| `write` | 1 | create, reissue | A directory is writable by every user or cannot be used. Nothing was changed. |
-| `creds_unreadable` | 1 (6 in bulk) | reissue, bulk | A creds file on this host cannot be read or parsed. |
-| `revocation_unknown` | 1 | create, reissue, bulk | Whether a key is revoked could not be checked (a server did not answer). Nothing was changed. |
-| `no_local_creds` | 0 | bulk | Skipped: no creds file on this host. |
+| Error | Exit | Meaning |
+| --- | --- | --- |
+| `unknown option --x` | 2 | An option that does not exist. `--make-key`, `--jwt-out`, `--creds-out`, `--label`, `--owner`, `--group`, `--name` and the other metadata options are gone. |
+| `not an endpoint address` | 2 | The address is not `owner.group.name`. |
+| `--public-key needs --out, the join file to write` | 2 | A public key is signed for a machine that makes its own seed. |
+| `ADDRESS already exists` | 1 | create: the endpoint exists. Use `endpoint reissue`. |
+| `ADDRESS was deleted and its address cannot be used again` | 1 | create or reissue: the address was deleted. |
+| `ADDRESS does not exist` | 1 | reissue: no such endpoint. |
+| `PATH already exists` | 1 | The join file path is taken; nothing is written over it. |
+| `no server is configured` | 1 | Set a server with `--server` or `MASH_SERVER`. Nothing was written. |
+| `cannot read the CA file` | 1 | The configured CA file cannot be read. |
+| `FILE must hold only certificates` | 1 | The configured CA file holds a private key, another block or text that is not PEM. Nothing is written. |
+| `the folder DIR is not usable` | 1 | The `--out` folder can be written by other users. Nothing is written. |
+| `no config folder to write the credentials file in` | 1 | Set `MASH_CONFIG_DIR`, or use `--out`. |
+| `no account signing key` | 1 | Run `mashctl init` first. |
+| `the public key ... was already issued to another address`, `... was revoked` | 1 | A key is used at one address, once: make a new key with `mash key create`. A supplied key is checked before it is signed. |
+| `the public key is already this endpoint's key` | 1 | reissue: nothing would be rotated. |
+| `the staged key ... was revoked` | 1 | The key staged in the `.pending` file was revoked: remove the file and run again. |
+| `another reissue of ADDRESS holds the lock` | 1 | The detail names its pid and host when readable. Run again later. A `.lock` directory made by an earlier mash is reported the same way; if no reissue is running, remove it once by hand. |
+| `the creds file ... is not this endpoint's current creds`, `... exists but ...` | 1 | reissue: the creds file here is not this endpoint's. Move it aside, as the hint says. |
+| `another reissue changed ADDRESS's key while this one ran` | 1 | The file this run wrote was removed. Run the command again. |
+| `... issued in the future` | 1 | reissue: the old key's JWT was issued after now. Fix the clock. Nothing was changed. |
+| `only N of M servers answered` | 1 | Fewer servers answered than the count says. Nothing was revoked. |
+| `... cannot tell whether the public key ... is revoked` | 1 | A server did not answer. Nothing was changed. |
+| server unreachable, directory not writable | 1 | Nothing was changed. |
 
-`endpoint show` exits 1 when there is no such endpoint. `endpoint delete` refuses with a plain message and exit 1 when there is no directory record on the server (`--force` still handles the creds file), too few servers answered the account lookup, the user key's issue time is in the future (fix the clock), the revocation could not be confirmed, or the record belongs to another user key. Nothing is changed in any of these cases.
+`endpoint show` exits 1 when there is no such endpoint. `endpoint delete` refuses with a plain message and exit 1 when the address does not exist, too few servers answered the account lookup, the user key's issue time is in the future (fix the clock), the revocation could not be confirmed, or the record belongs to another user key. Nothing is changed in any of these cases.
 
 ## Removed commands
 
@@ -287,9 +294,9 @@ Three verbs from 0.5.0 are gone. Each exits 2 and prints its replacement.
 
 | Removed | Use |
 | --- | --- |
-| `mashctl add` | `mashctl endpoint create alice/dev/design --public-key design.pub` |
-| `mashctl reissue` | `mashctl endpoint reissue alice/dev/design --public-key FILE` |
-| `mashctl retire` | `mashctl endpoint delete alice/dev/design` |
+| `mashctl add` | `mashctl endpoint create alice.dev.design` |
+| `mashctl reissue` | `mashctl endpoint reissue alice.dev.design` |
+| `mashctl retire` | `mashctl endpoint delete alice.dev.design` |
 
 Endpoints made by 0.5.0 do not work with 0.5.5. Make new ones with `endpoint create` and remove the old ones. Mail unread in an old endpoint is not carried over.
 
@@ -297,7 +304,7 @@ Endpoints made by 0.5.0 do not work with 0.5.5. Make new ones with `endpoint cre
 
 `endpoint delete` and `endpoint reissue` revoke the endpoint's NATS user in the same command (`mashctl endpoint suspend` does not). The revocation is an entry in the account JWT, by user public key and time: NATS refuses a user JWT for that key issued at or before the revocation time, and a connected user is closed when the server takes the account update, so credentials stop working everywhere the update reached. mashctl signs the update with the operator key, pushes it through the system account to every known server, requires every one to acknowledge it, and reads it back; if that cannot be shown it exits non-zero with `not confirmed` and running the command again is safe. An existing revocation is never lowered or removed.
 
-`endpoint delete ADDRESS` revokes the user of ADDRESS's directory record. With no record there is nothing to revoke. `--no-revoke` (same warning, same temporary name) is the one mashctl option for it, and the system credentials and server count come from `MASH_SYS_CREDS` and `MASH_SERVERS`.
+`endpoint delete ADDRESS` revokes the user of ADDRESS's directory record. With no record there is nothing to revoke. There is no option to skip the revocation. The system credentials and server count come from `MASH_SYS_CREDS` and `MASH_SERVERS`.
 
 Before a revocation is written, `endpoint delete` reads the issue record of each key and refuses, changing nothing, when any retained revision of it has an issue time after the revocation time: NATS honours a revocation only for credentials issued at or before it, so a credential dated in the future would stay valid. Every revision counts, not only the latest, because a credential reissued under the same key writes a new revision and, after a clock rollback, the newer revision can carry an earlier time than an older credential that is still held. The record keeps 64 revisions of a key; a key at that cap may have lost its oldest ones, so it is refused too (`the key has been re-recorded 64 times or more; its oldest issue times are no longer kept; cannot show that no earlier credential is dated in the future`) unless a retained revision is already future-dated, which gets the usual refusal. To proceed, fix the clock, or run again later once the clock is known to be right. A key with no record warns and the revocation goes on; a record that cannot be read, or has a revision whose `issued_at` is missing or malformed, refuses.
 
@@ -316,5 +323,5 @@ If you also edit the account with `nsc`, these steps keep it from undoing mashct
 - Run `nsc pull -A` before any `nsc push`, so a push from a stale local copy does not overwrite a revocation mashctl made. `mashctl issued check` shows keys connected to a server that mash did not issue.
 - `nsc push` rejects an account server URL that starts with `tls://`; give nsc a `nats://` URL. For a server with a private CA, nsc needs `SSL_CERT_FILE` set to the CA's PEM file (mashctl takes `ca` instead).
 - `nsc revocations add-user` followed by an `nsc push` revokes a user; `mashctl endpoint delete` revokes the user of an endpoint itself.
-- To cut off old creds and keep the endpoint, run `mashctl endpoint reissue ADDRESS --make-key` (or `--public-key FILE`): it revokes the old key and names a new one. `mashctl endpoint delete ADDRESS` revokes the user and removes the endpoint for good.
+- To cut off old creds and keep the endpoint, run `mashctl endpoint reissue ADDRESS` (or `--out PATH --public-key FILE`): it revokes the old key and names a new one. `mashctl endpoint delete ADDRESS` revokes the user and removes the endpoint for good.
 - A suspended endpoint's stored mail stays readable. `mash send` to a suspended endpoint fails with "no response from stream" and does not say the endpoint is suspended; this is a known limitation.

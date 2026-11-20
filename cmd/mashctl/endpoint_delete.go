@@ -1,62 +1,45 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
+	"golang.org/x/term"
+
+	"github.com/bogworks/mash/internal/cliframe"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/sap"
 )
 
-const endpointDeleteUsage = `usage: mashctl endpoint delete ADDRESS [--delete-creds] [--force] [--no-revoke] [--dry-run] [--json]
-  ADDRESS is owner/group/instance (for example alice/dev/design) or owner.group.instance.
-  Revokes the endpoint's user key, removes its directory record and inbox, burns the address, and renames its creds
-  file (if one is in the config directories) to NAME.creds.retired-<time>.
-  --delete-creds   remove the creds file instead of renaming it
-  --force          also handle the creds file when the server has no record
-  --no-revoke      do not revoke the user key
-  --dry-run        say what would happen and change nothing
-  --json           print the result as JSON (schema mashctl-endpoint@1)
-  --servers N and --sys-creds FILE override MASH_SERVERS and MASH_SYS_CREDS
-  exit: 0 deleted or unchanged, 1 refused, partial or error, 2 usage
+const endpointDeleteUsage = `usage: mashctl endpoint delete <address> [--yes] [--dry-run] [--json]
+  address    the endpoint, as owner.group.name
+  --yes      do not ask
+  --dry-run  print what would change, and change nothing
+  --json     print the result as JSON
+  Deletes the endpoint, its inbox and its credentials. The address can never be used again.
+  Without --yes it asks you to type the address, and needs a terminal for that.
+  --servers N and --sys-creds FILE override MASH_SERVERS and MASH_SYS_CREDS.
 Example:
-  mashctl endpoint delete alice/dev/design --dry-run
+  mashctl endpoint delete acme.demo.bob
 `
 
-// endpointObject holds the names of an endpoint; the delete and show JSON carry them at the top level.
-type endpointObject struct {
-	Owner    string `json:"owner"`
-	Group    string `json:"group"`
-	Instance string `json:"instance"`
-	Address  string `json:"address"`
-	Key      string `json:"key"`
+// stdinIsTerminal says whether standard input is a terminal; a test replaces it.
+var stdinIsTerminal = func() bool {
+	return term.IsTerminal(int(os.Stdin.Fd()))
 }
 
-type deleteCredsJSON struct {
-	Path   string `json:"path"`
-	Action string `json:"action"`
-}
+// confirmStdin is where the typed confirmation is read from; a test replaces it.
+var confirmStdin = func() io.Reader { return os.Stdin }
 
-type refusalJSON struct {
-	Code   string `json:"code"`
-	Detail string `json:"detail"`
+var endpointDeleteSpec = epSpec{
+	name: "delete", usage: endpointDeleteUsage, flags: []string{"--yes", "--dry-run"}, min: 1, max: 1,
+	need:  "the endpoint address (owner.group.name)",
+	check: checkAddress,
 }
-
-type deleteJSON struct {
-	Schema  string `json:"schema"`
-	Outcome string `json:"outcome"`
-	endpointObject
-	Creds deleteCredsJSON `json:"creds"`
-	// ServersAcknowledged is how many servers took the revocation of the user key; always present when the outcome is deleted, 0 when this run revoked none.
-	ServersAcknowledged *int         `json:"servers_acknowledged,omitempty"`
-	NextSteps           []string     `json:"next_steps"`
-	Refusal             *refusalJSON `json:"refusal"`
-}
-
-// slashForm is owner/group/instance.
-func slashForm(a sap.Address) string { return a.Owner + "/" + a.Group + "/" + a.Instance }
 
 // writeJSON prints v as indented JSON and a newline.
 func writeJSON(w io.Writer, v any) {
@@ -64,105 +47,94 @@ func writeJSON(w io.Writer, v any) {
 	fmt.Fprintf(w, "%s\n", b)
 }
 
-// runEndpointDelete is `mashctl endpoint delete`: retire's removal behind the endpoint noun.
-func runEndpointDelete(args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
-	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
+// inboxWords is how a message count is said: "the 3 messages in its inbox", "its empty inbox".
+func inboxWords(n uint64) string {
+	switch n {
+	case 0:
+		return "its empty inbox"
+	case 1:
+		return "the 1 message in its inbox"
+	}
+	return fmt.Sprintf("the %d messages in its inbox", n)
+}
+
+// deleteJSON is the JSON of a delete.
+type deleteJSON struct {
+	Address         string `json:"address"`
+	Deleted         bool   `json:"deleted"`
+	MessagesDeleted uint64 `json:"messages_deleted"`
+}
+
+// deletePlanJSON is the JSON of a delete with --dry-run.
+type deletePlanJSON struct {
+	Address         string `json:"address"`
+	Deleted         bool   `json:"deleted"`
+	MessagesDeleted uint64 `json:"messages_deleted"`
+	DryRun          bool   `json:"dry_run"`
+}
+
+// confirmDelete asks the person to type the address. It runs after the endpoint is found and its messages counted, and
+// before anything changes. The question goes to prompt (stderr with --json, so stdout stays one object).
+func confirmDelete(prompt io.Writer, addr sap.Address, messages uint64) error {
+	if !stdinIsTerminal() {
+		return cliframe.Usagef("deleting needs a terminal to confirm, or --yes")
+	}
+	fmt.Fprintf(prompt, "This deletes %s and %s. It cannot be undone.\nType the address to confirm: ", addr, inboxWords(messages))
+	line, err := bufio.NewReader(confirmStdin()).ReadString('\n')
+	if err != nil && line == "" {
+		fmt.Fprintln(prompt)
+		return cliframe.Failf("that was not the address; nothing was deleted")
+	}
+	if strings.TrimRight(line, "\r\n") != addr.String() {
+		return cliframe.Failf("that was not the address; nothing was deleted")
+	}
+	return nil
+}
+
+// runEndpointDelete is `mashctl endpoint delete`.
+func runEndpointDelete(args []string, g cliframe.Global, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
+	if helpAsked(args) {
 		fmt.Fprint(stdout, endpointDeleteUsage)
 		return 0
 	}
-	var arg string
-	var opts retireOpts
-	asJSON := jsonRequested(args)
-	var names endpointObject
-	// usageErr answers a usage error: the sentence on stderr, and with --json the document on stdout.
-	usageErr := func(code, msg string) int {
-		fmt.Fprintf(stderr, "mashctl: endpoint delete: %s\n", msg)
-		if asJSON {
-			writeJSON(stdout, deleteJSON{Schema: endpointSchema, Outcome: "error", endpointObject: names,
-				Creds: deleteCredsJSON{Action: "none"}, NextSteps: []string{}, Refusal: &refusalJSON{Code: code, Detail: msg}})
-		}
-		return 2
-	}
-	for _, a := range args {
-		switch {
-		case a == "--delete-creds":
-			opts.deleteCreds = true
-		case a == "--force":
-			opts.force = true
-		case a == "--no-revoke":
-			opts.noRevoke = true
-		case a == "--dry-run":
-			opts.dryRun = true
-		case a == "--json":
-		case a == "--help" || a == "-h":
-			fmt.Fprint(stdout, endpointDeleteUsage)
-			return 0
-		case strings.HasPrefix(a, "-"):
-			return usageErr("unknown_flag", fmt.Sprintf("unknown %s; try: mashctl endpoint delete --help", config.RejectedArg(a)))
-		case arg != "":
-			return usageErr("usage", "one endpoint address only; try: mashctl endpoint delete --help")
-		default:
-			arg = a
-		}
-	}
-	if arg == "" {
-		return usageErr("address_missing", "no endpoint address: give owner/group/instance, for example alice/dev/design; try: mashctl endpoint delete --help")
-	}
-	addr, err := parseEndpointRef(arg)
+	in, err := parseEpInput(endpointDeleteSpec, args)
 	if err != nil {
-		return usageErr("address_invalid", err.Error())
+		return cliframe.Report(stdout, stderr, err, jsonRequested(args))
 	}
-	names = endpointObject{Owner: addr.Owner, Group: addr.Group, Instance: addr.Instance, Address: addr.String(), Key: addr.Flat()}
-	short := slashForm(addr)
-	opts.verb = "endpoint delete"
-	opts.label = short
-	opts.full = short + " (" + addr.String() + ")"
-	opts.again = "mashctl endpoint delete " + short
-	opts.done = "deleted"
-	opts.usage = endpointDeleteUsage
-	opts.listHint = "mashctl endpoint list shows the endpoints that exist"
-	out := stdout
-	if asJSON {
-		out = io.Discard
+	opts := retireOpts{dryRun: in.flags["--dry-run"], yes: in.flags["--yes"], again: "mashctl endpoint delete " + in.addr.String()}
+	prompt := stdout
+	if in.json {
+		prompt = stderr
 	}
-	res := retireAddress(addr, opts, env, lookup, out, stderr)
-	if res.pendingUsage {
-		if asJSON {
-			writeJSON(stdout, deleteJSON{Schema: endpointSchema, Outcome: "error", endpointObject: names,
-				Creds: deleteCredsJSON{Action: "none"}, NextSteps: []string{}, Refusal: &refusalJSON{Code: "servers_invalid", Detail: res.detail}})
-		}
-		return 2
+	opts.confirm = func(messages uint64) error { return confirmDelete(prompt, in.addr, messages) }
+	res, err := retireAddress(in.addr, opts, env, lookup, stderr)
+	if err != nil {
+		return cliframe.Report(stdout, stderr, err, in.json)
 	}
-	if res.kind == "deleted" {
-		fmt.Fprintf(out, "servers acknowledged the revocation: %d\n", res.acked)
-	}
-	if asJSON {
-		j := deleteJSON{
-			Schema: endpointSchema, Outcome: res.kind, endpointObject: names,
-			Creds:     deleteCredsJSON{Path: res.credsPath, Action: res.credsAction},
-			NextSteps: res.nextSteps,
+	name := in.addr.String()
+	if res.planned {
+		if in.json {
+			writeJSON(stdout, deletePlanJSON{Address: name, Deleted: true, MessagesDeleted: res.messages, DryRun: true})
+			return 0
 		}
-		if j.Creds.Action == "" {
-			j.Creds.Action = "none"
-		}
-		if j.NextSteps == nil {
-			j.NextSteps = []string{}
-		}
-		if res.kind == "deleted" {
-			j.ServersAcknowledged = &res.acked
-		}
-		if res.kind == "refused" || (res.kind == "error" && res.refusalCode != "") {
-			j.Refusal = &refusalJSON{Code: res.refusalCode, Detail: res.detail}
-		}
-		writeJSON(stdout, j)
-	}
-	switch res.kind {
-	case "deleted", "unchanged", "planned":
+		fmt.Fprintf(stdout, "Would delete endpoint %s and %s\n", name, inboxWords(res.messages))
 		return 0
-	case "refused":
-		return 1
-	case "partial":
-		return 1
 	}
-	return 1
+	if in.json {
+		writeJSON(stdout, deleteJSON{Address: name, Deleted: true, MessagesDeleted: res.messages})
+		return 0
+	}
+	fmt.Fprintf(stdout, "Deleted endpoint %s\n", name)
+	if g.Verbose {
+		if res.marker != "" {
+			fmt.Fprintf(stdout, "retired marker: %s\n", res.marker)
+		}
+		if res.acked > 0 {
+			fmt.Fprintf(stdout, "servers acknowledged: %d\n", res.acked)
+		}
+		if res.renamedTo != "" {
+			fmt.Fprintf(stdout, "credentials file: set aside as %s\n", res.renamedTo)
+		}
+	}
+	return 0
 }

@@ -201,7 +201,7 @@ const at005Scenario = "AT-005, across machines, over TLS, on a cluster, from two
 	"(M1, M2, M3) of one cluster, TLS on client and route connections under a CA the harness made, one account, scratch homes. " +
 	"M1 is set up by mashctl init --local (then the config is edited for TLS and cluster and copied to M2 and M3); M2 by mashctl adopt " +
 	"with the same operator signing seed, account identity seed and sys.creds (DEC-004); both with --servers 3. " +
-	"endpoint create alice/dev/design from M1 (key made by mash key create on M3, session on M3 connecting to the server of M2) and " +
+	"endpoint create alice.dev.design from M1 (key made by mash key create on M3, session on M3 connecting to the server of M2) and " +
 	"alice/dev/review from M2 (key made on M1, session on M1 connecting to the server on M3); mail each way; endpoint list --json on M1 and M2; " +
 	"a second owner's endpoint bob/dev/x (key and creds on M3) forging and replaying answers into alice's discovery while her mash who runs on M1, with alice/dev/ghost offline; " +
 	"endpoint reissue of design from M2 with a new key made on M3 (old session dropped, old key refused on each of the three servers); " +
@@ -392,10 +392,13 @@ func (s *At5) provision(ctl Host, verb string, e *ep5, credsPath string) bool {
 	if !s.check("the public key of "+e.name+" is carried to "+ctl.Role(), err == nil, errText(err)) {
 		return false
 	}
-	jwtCarry := filepath.Join(ctl.Home().Dir, e.jwtBase()+"."+verb+".out.jwt") // written on ctl; the courier moves it
-	args := []string{"endpoint", verb, owner + "/dev/" + e.name, "--public-key", pubOnCtl, "--jwt-out", jwtCarry}
+	jwtCarry := filepath.Join(ctl.Home().Dir, e.jwtBase()+"."+verb+".out.join") // a join file written on ctl; the courier moves its JWT
+	args := []string{"endpoint", verb, owner + ".dev." + e.name, "--out", jwtCarry, "--public-key", pubOnCtl}
+	if verb == "reissue" {
+		args = append(args, "--verbose") // the count of servers that took the account update is a --verbose line
+	}
 	r := s.ctl(ctl, "endpoint-"+verb+"-"+e.name, nil, args...)
-	ok := s.check(ctl.Role()+": mashctl endpoint "+verb+" "+owner+"/dev/"+e.name+" --public-key succeeds", r.Code == 0, exitSnip(r))
+	ok := s.check(ctl.Role()+": mashctl endpoint "+verb+" "+owner+".dev."+e.name+" --out --public-key succeeds", r.Code == 0, exitSnip(r))
 	if !ok {
 		return false
 	}
@@ -409,14 +412,19 @@ func (s *At5) provision(ctl Host, verb string, e *ep5, credsPath string) bool {
 			"not applicable: create makes no account update, so there is nothing to acknowledge; known issue #766")
 	} else {
 		s.check(ctl.Role()+": endpoint "+verb+" reports that all three servers took the account update",
-			strings.Contains(r.Stdout, "3 server(s) acknowledged") || strings.Contains(r.Stdout, "servers acknowledged the account update: 3"),
-			snip(grepLine(r.Stdout, "acknowledged")))
+			strings.Contains(r.Stdout, "servers acknowledged: 3"), snip(grepLine(r.Stdout, "acknowledged")))
 	}
 	s.watch(ctl, "jwt", e.name+verb, jwtCarry)
 	jb, err := ctl.Get(jwtCarry)
 	if err != nil {
-		s.check("the JWT file is written by endpoint "+verb, false, err.Error())
+		s.check("the join file is written by endpoint "+verb, false, err.Error())
 		return false
+	}
+	if tok, terr := joinUserJWT(jb); terr != nil {
+		s.check("the join file written by endpoint "+verb+" holds a user_jwt", false, terr.Error())
+		return false
+	} else {
+		jb = append(tok, '\n')
 	}
 	// the courier carries the JWT file to the endpoint's machine
 	e.jwt = filepath.Join(e.host.Home().Dir, e.jwtBase()+"."+verb+".jwt")
@@ -643,9 +651,9 @@ func (s *At5) Scenario() {
 	oldReview := filepath.Join(m1.Home().Dir, "review-old.creds")
 	s.check("M1: the review creds are copied to a private path before the delete", s.copyPrivate(m1, reviewCreds, oldReview, "review-old"), "")
 	s.acceptedOn("review key before the delete (control)", m1, "review", oldReview)
-	r := s.ctl(m1, "endpoint-delete-review", nil, "endpoint", "delete", "alice/dev/review")
+	r := s.ctl(m1, "endpoint-delete-review", nil, "endpoint", "delete", "alice.dev.review", "--yes", "--verbose")
 	s.check("M1: mashctl endpoint delete alice/dev/review succeeds", r.Code == 0, exitSnip(r))
-	s.check("M1: endpoint delete reports that all three servers acknowledged the revocation", strings.Contains(r.Stdout, "3 server(s) acknowledged"), snip(grepLine(r.Stdout, "acknowledged")))
+	s.check("M1: endpoint delete reports that all three servers acknowledged the revocation", strings.Contains(r.Stdout, "servers acknowledged: 3"), snip(grepLine(r.Stdout, "acknowledged")))
 	s.check("REQ-011: the review session is dropped (its serve exits or reports the authorization failure)", s.closed(rp), "")
 	s.refusedOn("the deleted review key", m1, "review", oldReview)
 	st := s.mash(m1, "status-review", s.epEnv(m1, m3, "review", oldReview), "status")
@@ -949,7 +957,7 @@ func (s *At5) race(addr string) {
 		go func(i int, c side) {
 			defer wg.Done()
 			<-start
-			res[i] = s.ctl(c.h, "race-"+addr, nil, "endpoint", "create", "alice/dev/"+addr, "--public-key", c.pub, "--jwt-out", c.jwt, "--json")
+			res[i] = s.ctl(c.h, "race-"+addr, nil, "endpoint", "create", "alice.dev."+addr, "--out", c.jwt, "--public-key", c.pub, "--json")
 		}(i, c)
 	}
 	time.Sleep(200 * time.Millisecond)
@@ -959,22 +967,22 @@ func (s *At5) race(addr string) {
 	for _, r := range res {
 		if r.Code == 0 {
 			ok++
-		} else if refusalCode5(r.Stdout) == "address_taken" || strings.Contains(r.Text(), "address_taken") {
+		} else if strings.Contains(r.Text(), "already exists") {
 			taken++
 			if r.Code != 1 {
 				badExit++
 			}
 		}
 	}
-	s.check("concurrent endpoint create of alice/dev/"+addr+" from M1 and M2: exactly one succeeds and the other is refused address_taken with exit 1",
-		ok == 1 && taken == 1 && badExit == 0, fmt.Sprintf("M1 exit %d, M2 exit %d; refused address_taken: %d; %s | %s", res[0].Code, res[1].Code, taken, snip(res[0].Stdout), snip(res[1].Stdout)))
+	s.check("concurrent endpoint create of alice.dev."+addr+" from M1 and M2: exactly one succeeds and the other is refused as already existing with exit 1",
+		ok == 1 && taken == 1 && badExit == 0, fmt.Sprintf("M1 exit %d, M2 exit %d; refused already exists: %d; %s | %s", res[0].Code, res[1].Code, taken, snip(res[0].Stdout), snip(res[1].Stdout)))
 	var loser int
 	if res[1].Code != 0 {
 		loser = 1
 	}
 	lk := []ep5{k1, k2}[loser]
-	again := s.ctl(sides[loser].h, "race-again-"+addr, nil, "endpoint", "create", "alice/dev/"+addr, "--public-key", lk.pub, "--jwt-out", sides[loser].jwt, "--json")
-	s.check("the loser's create, run again on its own, is refused address_taken", again.Code != 0 && refusalCode5(again.Stdout) == "address_taken", exitSnip(again))
+	again := s.ctl(sides[loser].h, "race-again-"+addr, nil, "endpoint", "create", "alice.dev."+addr, "--out", sides[loser].jwt+".again", "--public-key", lk.pub, "--json")
+	s.check("the loser's create, run again on its own, is refused as already existing", again.Code != 0 && strings.Contains(again.Text(), "already exists"), exitSnip(again))
 	r := s.ctl(m1, "list-after-"+addr, nil, "endpoint", "list", "--json")
 	n := 0
 	if v, err := parseJSON(r.Stdout); err == nil {
@@ -1035,7 +1043,7 @@ func (s *At5) sessions() []*Proc {
 // search looks for secrets: every captured output for any seed or JWT and for the exact endpoint secrets; the homes on
 // M1 and M2 for the exact endpoint SEEDS only, except those of an endpoint whose own machine that home is (review's
 // key was made on M1 and its creds hold its seed there, by design). A JWT is not a secret key: the JWT files that
-// `endpoint create --jwt-out` writes are on the mashctl machine by design, so the home search ignores JWTs.
+// `endpoint create --out` writes are on the mashctl machine by design, so the home search ignores JWTs.
 func (s *At5) search() {
 	found, err := scanDir5(s.R.Out)
 	s.check("INV-001: no captured output holds a seed or a JWT", err == nil && len(found) == 0, leakNames(found))

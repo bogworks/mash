@@ -25,11 +25,6 @@ import (
 // NotRevoked is the line printed when a command stopped before it revoked anything.
 const NotRevoked = "nothing was revoked; the key is still valid"
 
-// NoRevokeWarning is the stderr block for a removal with --no-revoke: the user key keeps working.
-func NoRevokeWarning(name, user string) string {
-	return "WARNING: --no-revoke: " + name + "'s NATS user key " + config.Clean(user) + " is NOT revoked and can still connect, publish and receive until it is revoked in the account JWT; credentials issued to it stay valid. (--no-revoke is a temporary flag name: it will be renamed with the CLI redesign.)\n"
-}
-
 // ShortKey is the first 8 characters of a key for messages, or all of it when it is shorter: a user key read from a
 // directory record may be short or malformed, and slicing it must never panic.
 func ShortKey(k string) string { return config.Clean(fmt.Sprintf("%.8s", k)) }
@@ -92,9 +87,9 @@ func issuedLines(line func(left, right string)) {
 func endpointLines(line func(left, right string)) {
 	line("endpoint list [prefix] [--wide]", "the endpoints in the directory")
 	line("endpoint show ADDRESS", "one endpoint: its state, labels and public key")
-	line("endpoint create [ADDRESS] [--owner O] [--group G] [--name N] (--public-key FILE | --make-key) [--jwt-out FILE] [--label k=v]... [--tool] [--note N] [--describe T] [--cap C]... [--servers N] [--sys-creds FILE] [--dry-run] [--json]", "sign the endpoint's key and write its directory record, for example acme.demo.bob")
-	line("endpoint reissue ADDRESS (--public-key FILE | --make-key) [--jwt-out FILE] [--servers N] [--sys-creds FILE] [--dry-run] [--json]", "revoke the old key on every server and name a new one")
-	line("endpoint delete ADDRESS [--delete-creds] [--force] [--no-revoke] [--dry-run] [--json] [--servers N] [--sys-creds FILE]", "revoke the endpoint's user key, remove its record and inbox, burn the address, rename its creds file")
+	line("endpoint create ADDRESS [--out PATH] [--public-key PATH] [--servers N] [--sys-creds FILE] [--dry-run] [--json]", "make an endpoint and its credentials, for example acme.demo.bob")
+	line("endpoint reissue ADDRESS [--out PATH] [--public-key PATH] [--servers N] [--sys-creds FILE] [--dry-run] [--json]", "give an endpoint new credentials and cancel the old ones")
+	line("endpoint delete ADDRESS [--yes] [--dry-run] [--json] [--servers N] [--sys-creds FILE]", "revoke the endpoint's user key, remove its record and inbox, burn the address, rename its creds file")
 	line("endpoint set ADDRESS key=value... [--dry-run]", "set role, description, host, capability or label.NAME")
 	line("endpoint unset ADDRESS key... [--dry-run]", "remove those values")
 	line("endpoint suspend ADDRESS [--dry-run]", "refuse new mail to an endpoint; its stored mail and credentials stay")
@@ -297,7 +292,7 @@ func CheckNotFutureIssued(ctx context.Context, a *madmin.Admin, targets []Revoke
 		times, found, err := a.IssuedHistoryByKey(ctx, t.Key)
 		var bad *madmin.MalformedIssuedAtError
 		if errors.As(err, &bad) {
-			return fmt.Errorf("user key %s...: its issue record has a missing or malformed issued_at (%q) in revision %d, so a future-dated credential cannot be ruled out; restore the record with `mashctl endpoint reissue ADDRESS --public-key FILE`, giving the endpoint's current public key file (the same key is recorded again) and run again; nothing was changed", ShortKey(t.Key), bad.Value, bad.Revision)
+			return fmt.Errorf("user key %s...: its issue record has a missing or malformed issued_at (%q) in revision %d, so a future-dated credential cannot be ruled out; restore the record with `mashctl endpoint reissue ADDRESS --out FILE --public-key FILE`, giving the endpoint's current public key file (the same key is recorded again) and run again; nothing was changed", ShortKey(t.Key), bad.Value, bad.Revision)
 		}
 		var incomplete *madmin.IncompleteHistoryError
 		if errors.As(err, &incomplete) {

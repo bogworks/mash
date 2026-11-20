@@ -23,7 +23,7 @@ Every mash connection requires TLS, to any host, loopback included, so a plain `
 ```sh
 nats-server -c ~/.config/mash/server/server.conf   # or: add --start to the command above
 mashctl init                                        # the directory and lease buckets
-mashctl endpoint create alice/dev/design --make-key   # one per endpoint, see "Adding an endpoint"
+mashctl endpoint create alice.dev.design   # one per endpoint, see "Adding an endpoint"
 ```
 
 With `--start`, `mashctl` looks for `nats-server` on `PATH` (if it is missing it says so, and the files stay), starts it detached with its output in `D/server.log` and its pid in `D/server.pid`, waits up to 15 seconds for a connection with `mashadmin.creds`, and creates the buckets. To stop the server: `kill $(cat D/server.pid)`.
@@ -120,27 +120,30 @@ After upgrading mash, re-run `mashctl init`: it hardens the lease bucket, so tha
 
 An endpoint is one Claude Code session, addressed `owner.group.instance` (for example `alice.dev.design`). Each token is lower-case letters, digits and single hyphens, starting with a letter, 1 to 32 characters, and the three with their two dots total at most 64. The whole address is set as `MASH_ENDPOINT` (for example `MASH_ENDPOINT=alice.dev.design`); a value that is not three dotted parts is a configuration error naming `MASH_ENDPOINT`, and with none set mash uses the one endpoint whose creds file sits directly in the config directory. An address is unique in the NATS account, and every endpoint in the account can read the whole directory, other owners' records included (see [ADR 0006](decisions/0006-one-shared-nats-account-one-owner-per-deployment.md), one owner per deployment).
 
-`mashctl endpoint create` makes an endpoint. It signs the endpoint's public key as a NATS user with the account signing key, writes the endpoint's directory record and inbox, and gives the signed JWT back. The user key is the endpoint's own: either the endpoint makes it (the three-command form) or `mashctl` makes it on its own host (`--make-key`). Both forms are described in [mashctl.md](mashctl.md#mashctl-endpoint-create).
-
-On the machine that runs the endpoint, make the key. On the `mashctl` host, sign it. On the endpoint's machine again, join the JWT and the seed into a creds file:
+`mashctl endpoint create` makes an endpoint. It signs the endpoint's public key as a NATS user with the account signing key, writes the endpoint's directory record and inbox, and writes the credentials. The address is `owner.group.name`, dotted. With no option `mashctl` makes the key pair on its own host and writes `<config dir>/<address>.creds`, so the endpoint can run on that host at once:
 
 ```sh
-mash key create --out design.seed                                        # writes design.seed and design.pub
-mashctl endpoint create alice/dev/design --public-key design.pub         # writes alice.dev.design.jwt
-mash credential create --seed design.seed --jwt alice.dev.design.jwt     # writes alice.dev.design.creds in the config directory
+mashctl endpoint create alice.dev.design
 ```
 
-When the endpoint and `mashctl` are on one machine, one command does all three:
+For an endpoint on another machine, `--out` writes a join file and installs nothing on the `mashctl` host. Take the join file to the endpoint's machine and run `mash join` there:
 
 ```sh
-mashctl endpoint create alice/dev/design --make-key
+mashctl endpoint create alice.dev.design --out alice.dev.design.join
 ```
 
-`--make-key` makes the key on the `mashctl` host and holds it while the command runs. Use it only when the endpoint runs on that host. A creds file written this way is `<config dir>/alice.dev.design.creds`.
+When the seed must never leave the endpoint's machine, make the key there and send only the public key file to the `mashctl` host. `--public-key` signs that key and needs `--out`; the join file holds the user JWT and no seed:
 
-The creds file is named `<owner>.<group>.<instance>.creds`. It holds the seed. Keep it on the machine that runs the session, and nowhere else. The three-command form never moves the seed: see [An endpoint on another machine](#an-endpoint-on-another-machine).
+```sh
+mash key create --out design.seed                                                          # on the endpoint's machine: writes design.seed and design.pub
+mashctl endpoint create alice.dev.design --out alice.dev.design.join --public-key design.pub   # on the mashctl host
+```
 
-Before a command changes anything, `--dry-run` says what it would do: `mashctl endpoint create alice/dev/design --public-key design.pub --dry-run`.
+The options and the join file are described in [mashctl.md](mashctl.md#mashctl-endpoint-create).
+
+The creds file is named `<owner>.<group>.<instance>.creds`. It holds the seed. Keep it on the machine that runs the session, and nowhere else. The `--public-key` form never moves the seed: see [An endpoint on another machine](#an-endpoint-on-another-machine).
+
+Before a command changes anything, `--dry-run` says what it would do: `mashctl endpoint create alice.dev.design --dry-run`.
 
 `mashctl endpoint permissions <owner.group.name>` prints the permission set as JSON, and nothing else, on stdout; it reads no server. The keys are `pub` and `sub`, each with `allow` and `deny`. The set lets an endpoint:
 
@@ -155,26 +158,26 @@ It cannot read another endpoint's inbox, history or replies (each endpoint recei
 
 ### An endpoint on another machine
 
-The endpoint's seed is its private key. In this form it is made on the endpoint's machine and never leaves it. Only the public key goes to the `mashctl` host, and only the signed JWT comes back.
+The endpoint's seed is its private key. In this form it is made on the endpoint's machine and never leaves it. Only the public key goes to the `mashctl` host, and only the join file, which holds the signed JWT and no seed, comes back.
 
 1. On the endpoint's machine, make the key: `mash key create --out design.seed`. It writes `design.seed` (mode 0600) and `design.pub`.
 2. Copy only `design.pub` to the host that runs `mashctl`. Do not copy `design.seed`.
-3. On the `mashctl` host, sign it: `mashctl endpoint create alice/dev/design --public-key design.pub`. It writes the endpoint's record and `alice.dev.design.jwt` (in the current directory, or where `--jwt-out FILE` says).
-4. Copy only `alice.dev.design.jwt` back to the endpoint's machine. A JWT holds no secret.
-5. On the endpoint's machine, join them: `mash credential create --seed design.seed --jwt alice.dev.design.jwt`. It writes `alice.dev.design.creds` in the config directory (mode 0600) and checks that the JWT names the seed's key. It refuses a JWT issued for another key (`key_mismatch`) and does not check the issuing account or the expiry.
+3. On the `mashctl` host, sign it: `mashctl endpoint create alice.dev.design --out alice.dev.design.join --public-key design.pub`. It writes the endpoint's record and the join file.
+4. Copy only `alice.dev.design.join` back to the endpoint's machine. With `--public-key` the join file holds a JWT and no secret.
+5. On the endpoint's machine, run `mash join` on the join file and give it the seed with `--key design.seed`.
 
-If the command in step 3 is killed, run the same command again with the same arguments. If step 3 refuses because the JWT file exists, name another file with `--jwt-out` or remove the old one.
+If the command in step 3 is killed, run the same command again with the same arguments. If step 3 refuses because the join file exists, name another path with `--out` or remove the old file.
 
 Multi-server and TLS use, and a second `mashctl` machine, are described in [TLS, clusters and a second mashctl machine](tls-and-clusters.md). The 0.5.5 acceptance run (AT-005) tested all three by hand, in rootless containers on one host: three NATS servers of one cluster with TLS on the client and route connections, endpoints on separate nodes, and two `mashctl` machines. It did not test real separate hosts or a physical network, clock drift between hosts, or certificate expiry and renewal; the [Not tested in 0.5.5](tls-and-clusters.md#not-tested-in-055) box lists everything that was not run.
 
 ### Directory metadata
 
-An endpoint's directory record can carry optional fields: `--role` (what it is for), `--host` (the machine it is meant to run on) and up to 64 free-form labels, `--label key=value` (repeatable), for grouping or tagging endpoints, for example `team=acme` or `project=billing`. `endpoint create` sets labels (`--label`), the description (`--describe`), capabilities (`--cap`) and a note (`--note`); `endpoint set` and `endpoint unset` change them later. They are the endpoint's identity on record, set by the admin; they are not live state. A role, host or label value is up to 64 printable characters with no tab or newline. A label key is a lowercase letter followed by up to 31 of `a-z`, `0-9`, `_`, `.` and `-`.
+An endpoint's directory record can carry optional fields: a role (what it is for), a host (the machine it is meant to run on), up to 64 free-form labels, for grouping or tagging endpoints, for example `team=acme` or `project=billing`, a description and capabilities. `endpoint create` sets none of them; `endpoint set` and `endpoint unset` set and change them after the endpoint exists. They are the endpoint's identity on record, set by the admin; they are not live state. A role, host or label value is up to 64 printable characters with no tab or newline. A label key is a lowercase letter followed by up to 31 of `a-z`, `0-9`, `_`, `.` and `-`.
 
-Two more fields say what the endpoint does: `--describe TEXT`, free text of up to 256 printable characters (no tab or newline), and up to 8 capability words, `--cap C` (repeatable), each a lowercase letter followed by up to 31 of `a-z`, `0-9`, `_`, `.` and `-`, with no repeats. Capabilities are stored sorted. A label holds one value per key and there are only 8 of them; capabilities are a list of words to find an endpoint by, and the description is the longer sentence ([ADR-0050](decisions/0050-the-directory-record-says-what-an-endpoint-does-with-a-description-and-capabilities.md)).
+Two more fields say what the endpoint does: a description, free text of up to 256 printable characters (no tab or newline), and up to 8 capability words, each a lowercase letter followed by up to 31 of `a-z`, `0-9`, `_`, `.` and `-`, with no repeats. Capabilities are stored sorted. A label holds one value per key and there are only 8 of them; capabilities are a list of words to find an endpoint by, and the description is the longer sentence ([ADR-0050](decisions/0050-the-directory-record-says-what-an-endpoint-does-with-a-description-and-capabilities.md)).
 
 ```sh
-mashctl endpoint create alice/dev/design --public-key design.pub --label team=acme --label tier=1 --describe "Keeps the NATS accounts current" --cap nats-accounts --cap review --note "design session on laptop"
+mashctl endpoint create alice.dev.design
 mashctl endpoint set alice.dev.design role=reviewer host=laptop     # role and host are set after create
 mashctl endpoint set alice.dev.design role=builder label.env=prod   # change the role, set a label; everything else stays
 mashctl endpoint unset alice.dev.design host label.tier             # clear the host, remove one label
@@ -250,23 +253,24 @@ There is no policy file; see [mashctl.md](mashctl.md).
 ## Removing an endpoint
 
 ```sh
-mashctl endpoint delete alice/dev/design    # revokes the endpoint's user, removes the record and inbox, burns the address, sets the creds file aside
-mashctl endpoint delete alice/dev/design --dry-run   # say what would happen; change nothing
+mashctl endpoint delete alice.dev.design    # asks you to type the address, then revokes the endpoint's user, removes the record and inbox, burns the address, sets the creds file aside
+mashctl endpoint delete alice.dev.design --yes       # do not ask
+mashctl endpoint delete alice.dev.design --dry-run   # say what would happen; change nothing
 ```
 
-`mashctl endpoint delete` revokes the endpoint's NATS user in the same command. It needs the operator and account keys in the key store and the system account credentials (`MASH_SYS_CREDS`, else the `sys.creds` next to `admin_creds` or in `<config dir>/server`; `MASH_SERVERS`; `endpoint delete` takes `--servers N` and `--sys-creds FILE`, which override them). The revocation is added to the account JWT by user key and time, signed with the operator key, pushed to every server, and read back; a connected user is closed when the server takes the update. It happens before anything is removed, so a revocation that fails or cannot be confirmed (no key store, no system credentials, a server that did not acknowledge) refuses the command with the endpoint intact; running it again is safe. `--no-revoke` removes without revoking, and the user can then still connect: it prints a `WARNING: --no-revoke: ... is NOT revoked and can still connect` block on stderr before it starts and again after it finishes. A revoked key stays revoked, so a name that comes back needs a new user key. The account JWT is replaced whole and the resolver has no compare-and-set, so account changes (`endpoint delete`, `endpoint reissue`) are serialised only per key directory: two operators with separate key directories must not run them at the same moment, or the later push can erase the earlier one's change (including a revocation). Run them from one operator at a time.
+`mashctl endpoint delete` revokes the endpoint's NATS user in the same command. It needs the operator and account keys in the key store and the system account credentials (`MASH_SYS_CREDS`, else the `sys.creds` next to `admin_creds` or in `<config dir>/server`; `MASH_SERVERS`; `endpoint delete` takes `--servers N` and `--sys-creds FILE`, which override them). The revocation is added to the account JWT by user key and time, signed with the operator key, pushed to every server, and read back; a connected user is closed when the server takes the update. It happens before anything is removed, so a revocation that fails or cannot be confirmed (no key store, no system credentials, a server that did not acknowledge) refuses the command with the endpoint intact; running it again is safe. A revoked key stays revoked, so a name that comes back needs a new user key. The account JWT is replaced whole and the resolver has no compare-and-set, so account changes (`endpoint delete`, `endpoint reissue`) are serialised only per key directory: two operators with separate key directories must not run them at the same moment, or the later push can erase the earlier one's change (including a revocation). Run them from one operator at a time.
 
 Deleting an endpoint fences the name, then removes the directory record and the inbox stream. The fence is a tombstone in the endpoint's lease key: a session still running under the name stops at its next lease refresh (within 30 seconds), and one starting up is refused, instead of either taking the name back. The tombstone expires with the lease TTL (90 seconds), and creating the name again clears it at once. Endpoint create and delete hold the name's lock ([ADR-0048](decisions/0048-limit-changes-take-a-per-stream-kv-lock-with-expiry.md), see [Limits](#limits)) for their whole run, so a second admin working on the same name waits for the first to finish (up to 20 s, then "try again") and cannot have its new endpoint fenced or its inbox deleted by it. Until the user is revoked, mail it sends still arrives, but labelled `[unknown-signer]`, because its key is no longer in the directory.
 
-`mashctl endpoint delete ADDRESS` renames `NAME.creds` to `NAME.creds.retired-<UTC timestamp>` (or deletes it with `--delete-creds`), so a creds file is never in the way of a new one; the retired file still holds the old seed. A creation killed mid-run can leave a creds file or an inbox with no complete record; `mashctl audit` lists them as orphans, and `mashctl endpoint delete ADDRESS --force --delete-creds` clears the creds file. A killed `endpoint delete` finishes when you run the same command again; a killed `endpoint create` finishes the same way.
+`mashctl endpoint delete ADDRESS` renames `NAME.creds` to `NAME.creds.deleted` (`.deleted.1`, `.deleted.2` if that name is taken) so a creds file is never in the way of a new one and mash does not count it as installed; the file still holds the old seed. A creation killed mid-run can leave a creds file or an inbox with no complete record; `mashctl audit` lists them as orphans, and delete the creds file by hand. A killed `endpoint delete` finishes when you run the same command again; a killed `endpoint create` finishes the same way.
 
 ### Creating and deleting endpoints
 
-`mashctl endpoint create` and `mashctl endpoint delete` do this work for an endpoint, including the NATS user and the creds file. They take the address as `owner/group/instance` or `owner.group.instance`; all three tokens are required: a bare name is refused (exit 2).
+`mashctl endpoint create` and `mashctl endpoint delete` do this work for an endpoint, including the NATS user and the creds file. They take the address as `owner.group.name`; all three tokens are required: a bare name or the slash form is refused (exit 2).
 
 ```bash
-mashctl endpoint create alice/dev/recv --public-key recv.pub
-mashctl endpoint delete alice/dev/recv
+mashctl endpoint create alice.dev.recv
+mashctl endpoint delete alice.dev.recv
 ```
 
 A refusal (the name rule, an address already in the directory, a retired address) exits with the reason, nothing changed. A retired address is refused with `endpoint alice.dev.recv is retired ... never reassigned (INV-002)`. `set-meta`, `suspend`, `resume`, `suspended` and `label` take the address as `owner.group.instance` or the flat key `owner_group_instance`.
@@ -319,17 +323,17 @@ Keep the admin credentials, the system account credentials and the key store (`o
 - `--sys-creds FILE` or `MASH_SYS_CREDS` names the system account creds. The same verbs take `--sys-creds FILE`, which overrides `MASH_SYS_CREDS`. Without either, `mashctl` looks for `sys.creds` next to the admin creds, then in `<config dir>/server/` (where `adopt` puts it).
 
 ```sh
-mashctl endpoint delete alice/dev/design --servers 3 --sys-creds /secure/sys.creds
+mashctl endpoint delete alice.dev.design --servers 3 --sys-creds /secure/sys.creds
 ```
 
-A creds file holds the user seed. The seed never leaves the endpoint's machine: make the key there with `mash key create` and send only the public key file to the `mashctl` host. Only with `--make-key`, which is for an endpoint on the `mashctl` host itself, does `mashctl` write a creds file, and that file stays on that host.
+A creds file holds the user seed. The seed never leaves the endpoint's machine: make the key there with `mash key create` and send only the public key file to the `mashctl` host. With no `--public-key`, `mashctl` makes the key pair itself: it writes a creds file on its own host, or with `--out` a join file that holds the seed, and you move that file to the endpoint's machine.
 
 ### One server down
 
 - Each bucket and each inbox has one replica, on one node. Any one node down therefore blocks the writing commands (`endpoint create`, `endpoint reissue`, `endpoint delete`), because each of them writes to a bucket or inbox that node may hold. `endpoint list` can still work when the directory bucket is on a live node. This stays so until the buckets get replicas.
 - `endpoint delete` also refuses when fewer servers answer than the count says: `refusing: only N of M servers answered: a server may be down (bring it back and run the command again), or the server count is wrong (pass --servers N or set MASH_SERVERS)`. It does not name the silent server, because the lookup does not say which one it was. Bring the server back first. Lower the count only when it was wrong.
 - When the server that holds a stream or bucket is down, the command says `the server holding bucket X is down: bring it back and run the command again` (`audit` and `issued` say `the server holding stream X is down`, or `a stream or bucket` when the error does not name it), followed by the raw NATS text. `mashctl init` does not help, because the bucket exists.
-- `endpoint delete` checks the server set before they change the directory record, the lease or the inbox. When it is short they print `nothing was revoked; the key is still valid` and leave the record as it was. Run the command again when the server is back. If the revoke failed after the update was pushed, the text says the revocation may already be in force on some servers and that the directory record was not changed; run the same command again (revoking again is safe). If the revocation completed and a later step failed, the PARTIAL message says the key was revoked, with the number of servers that acknowledged, and that the removal of the record, the lease and the inbox is still pending. Running the same command again finishes it.
+- `endpoint delete` checks the server set before they change the directory record, the lease or the inbox. When it is short they print `nothing was revoked; the key is still valid` and leave the record as it was. Run the command again when the server is back. If the revoke failed after the update was pushed, the text says the revocation may already be in force on some servers, with `hint: mashctl endpoint delete <address>`; run the same command again (revoking again is safe). If the revocation completed and a later step failed, the message is `error: deleted <address>, but <what is left>` with the same hint. Running the same command again finishes it.
 - `MASH_SERVER` (or `servers` in config.json: a JSON array, or one string with commas; or `--server`, repeated) takes a list, so a connection still succeeds when the first server is down. If every listed server is down, the error is `no servers available for connection`, with a hint to check `MASH_SERVER` and that at least one listed server is up.
 
 ### A three-node cluster

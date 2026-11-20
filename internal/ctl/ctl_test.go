@@ -1,7 +1,6 @@
 package ctl
 
 import (
-	"strings"
 	"testing"
 	"time"
 
@@ -18,16 +17,6 @@ func TestShortKey(t *testing.T) {
 	for in, want := range map[string]string{"": "", "abc": "abc", "12345678": "12345678", "UABCDEFGHIJK": "UABCDEFG"} {
 		if got := ShortKey(in); got != want {
 			t.Errorf("ShortKey(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
-func TestMetaFieldsAreEscaped(t *testing.T) {
-	hostile := "x\x1b[2K\r\nREFUSED"
-	want := `x\x1b[2K\x0d\x0aREFUSED`
-	for _, got := range []string{NoRevokeWarning("a", hostile)} {
-		if strings.ContainsAny(got, "\x1b\r") || !strings.Contains(got, want) {
-			t.Errorf("not escaped: %q", got)
 		}
 	}
 }

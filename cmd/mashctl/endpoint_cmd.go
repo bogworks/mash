@@ -105,6 +105,23 @@ func parseEpInput(s epSpec, args []string) (epInput, error) {
 	return in, nil
 }
 
+// jsonRequested reports whether args hold a bare --json, so a usage error can be answered in JSON. The value after a
+// flag that takes one is skipped.
+func jsonRequested(args []string, valueFlags ...string) bool {
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--json" {
+			return true
+		}
+		for _, f := range valueFlags {
+			if args[i] == f {
+				i++
+				break
+			}
+		}
+	}
+	return false
+}
+
 // helpAsked reports whether args hold -h or --help as an argument of their own.
 func helpAsked(args []string) bool {
 	for _, a := range args {

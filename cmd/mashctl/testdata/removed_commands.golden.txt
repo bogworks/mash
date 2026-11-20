@@ -1,12 +1,12 @@
 $ mashctl add
-mashctl: add was removed. Use: mashctl endpoint create alice/dev/design --public-key design.pub   (see: mashctl endpoint create --help)
+mashctl: add was removed. Use: mashctl endpoint create acme.demo.bob   (see: mashctl endpoint create --help)
 exit 2
 
 $ mashctl reissue
-mashctl: reissue was removed. Use: mashctl endpoint reissue alice/dev/design --public-key FILE   (see: mashctl endpoint reissue --help)
+mashctl: reissue was removed. Use: mashctl endpoint reissue acme.demo.bob   (see: mashctl endpoint reissue --help)
 exit 2
 
 $ mashctl retire
-mashctl: retire was removed. Use: mashctl endpoint delete alice/dev/design   (see: mashctl endpoint delete --help)
+mashctl: retire was removed. Use: mashctl endpoint delete acme.demo.bob   (see: mashctl endpoint delete --help)
 exit 2
 

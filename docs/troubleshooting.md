@@ -57,11 +57,11 @@ mash reads `$MASH_CONFIG_DIR/config.json` when that variable is set (an absolute
 
 ## `mash: endpoint X is not provisioned`
 
-The directory has no record for the address. Check `MASH_ENDPOINT` for a typo, then as the admin run `mashctl endpoint list` to see which endpoints exist. If it is missing, make it with `mashctl endpoint create alice/dev/design --public-key design.pub`, then `mash credential create` on the endpoint's machine ([operations.md](operations.md#adding-an-endpoint)). The address in `endpoint list` may differ from the one you started: an endpoint that was deleted keeps its address burned, so it cannot be made again.
+The directory has no record for the address. Check `MASH_ENDPOINT` for a typo, then as the admin run `mashctl endpoint list` to see which endpoints exist. If it is missing, make it with `mashctl endpoint create alice.dev.design` (on the `mashctl` host), or with `--out alice.dev.design.join` and `mash join` on the endpoint's machine ([operations.md](operations.md#adding-an-endpoint)). The address in `endpoint list` may differ from the one you started: an endpoint that was deleted keeps its address burned, so it cannot be made again.
 
 ## `do not match endpoint`
 
-Two forms: `mash: the credentials in <path> do not match endpoint X (they are for another endpoint)` and `mash: the credentials in <path> (user U) do not match endpoint X (user V)`. The creds file belongs to another endpoint, or the directory record names a different NATS user key. Use the right creds file for the address, or compare the user in `mashctl endpoint show alice/dev/design` with the user in your creds. To give the endpoint a new key, run `mashctl endpoint reissue alice/dev/design --public-key design.pub` (the unread mail stays). Do not delete the endpoint to fix this: `mashctl endpoint delete` removes the inbox stream, so every unread message in it is lost, and the address is never reused.
+Two forms: `mash: the credentials in <path> do not match endpoint X (they are for another endpoint)` and `mash: the credentials in <path> (user U) do not match endpoint X (user V)`. The creds file belongs to another endpoint, or the directory record names a different NATS user key. Use the right creds file for the address, or compare the user in `mashctl endpoint show alice.dev.design` with the user in your creds. To give the endpoint a new key, run `mashctl endpoint reissue alice.dev.design` (the unread mail stays), or with `--out alice.dev.design.join --public-key design.pub` for a key made on the endpoint's machine. Do not delete the endpoint to fix this: `mashctl endpoint delete` removes the inbox stream, so every unread message in it is lost, and the address is never reused.
 
 ## The session says the address is in use or waiting
 
@@ -113,7 +113,7 @@ Check:
 
 ## Mail arrives labelled `[unknown-signer]`, `[claimed]`, `[absent]` or `[stale]`
 
-- `[unknown-signer]`: the sender's key is not in the directory. It was deprovisioned (and its NATS user not revoked: `--no-revoke` leaves that to you), or it is not a mash endpoint. Run `mashctl endpoint list`.
+- `[unknown-signer]`: the sender's key is not in the directory. It was deprovisioned (`mash admin deprovision` does not revoke its NATS user), or it is not a mash endpoint. Run `mashctl endpoint list`.
 - `[stale]`: the signature was made more than 5 minutes before the message was stored, or more than 30 seconds after. A replay looks like this. Another cause is a skewed clock on the sender or the receiver (tracked in #36).
 - `[claimed]` and `[absent]`: the sender named itself without proof, or sent no signature.
 

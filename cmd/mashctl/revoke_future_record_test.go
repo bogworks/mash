@@ -36,7 +36,7 @@ func TestEndpointDeleteRefusesAKeyTheRecordDatesInTheFuture(t *testing.T) {
 	calls := fakeRevoke(t, nil)
 	recs := h.records()
 
-	out, errb, code := h.run("endpoint", "delete", "o.g.n")
+	out, errb, code := h.run("endpoint", "delete", "o.g.n", "--yes")
 	if code != 1 || out != "" || !strings.Contains(errb, "n's current creds JWT claims it was issued in the future (") || !strings.Contains(errb, "fix this machine's clock") || !strings.Contains(errb, "nothing was changed") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
@@ -47,7 +47,7 @@ func TestEndpointDeleteRefusesAKeyTheRecordDatesInTheFuture(t *testing.T) {
 
 	// Re-recording the key with a time in the past does not clear the future-dated revision: still refused.
 	h.recordIssuedAt(pub, time.Now().Add(-clockBehind))
-	out, errb, code = h.run("endpoint", "delete", "o.g.n")
+	out, errb, code = h.run("endpoint", "delete", "o.g.n", "--yes")
 	if code != 1 || len(*calls) != 0 || !strings.Contains(errb, "an earlier credential of this key was dated in the future") {
 		t.Fatalf("%d %q %q calls %+v", code, out, errb, *calls)
 	}
@@ -57,7 +57,7 @@ func TestEndpointDeleteWarnsAndRevokesWithoutARecord(t *testing.T) {
 	h := newFleetEnv(t)
 	u := h.provisionDeclared("a") // not minted through the issue path: no issue record
 	calls := fakeRevoke(t, nil)
-	out, errb, code := h.run("endpoint", "delete", "o.g.a")
+	out, errb, code := h.run("endpoint", "delete", "o.g.a", "--yes")
 	if code != 0 || len(*calls) != 1 || (*calls)[0].users[0] != u {
 		t.Fatalf("%d %q %q calls %+v", code, out, errb, *calls)
 	}
@@ -163,7 +163,7 @@ func TestEndpointDeleteRefusesAMalformedIssueTime(t *testing.T) {
 		}
 		calls := fakeRevoke(t, nil)
 		recs := h.records()
-		out, errb, code := h.run("endpoint", "delete", "o.g.n")
+		out, errb, code := h.run("endpoint", "delete", "o.g.n", "--yes")
 		if code != 1 || out != "" || !strings.Contains(errb, "user key "+ctl.ShortKey(pub)+"...") || !strings.Contains(errb, "missing or malformed issued_at") || !strings.Contains(errb, "mashctl endpoint reissue ADDRESS") || !strings.Contains(errb, "nothing was changed") {
 			t.Fatalf("%q: %d %q %q", bad, code, out, errb)
 		}
@@ -202,7 +202,7 @@ func deleteAfterRevisions(t *testing.T, ats func() []time.Time) (h *fleetEnv, pu
 	_, pub = h.credsClaims(ad("n"))
 	h.recordRevisions(pub, ats()...)
 	calls = fakeRevoke(t, nil)
-	out, errb, code = h.run("endpoint", "delete", "o.g.n")
+	out, errb, code = h.run("endpoint", "delete", "o.g.n", "--yes")
 	return
 }
 
@@ -281,7 +281,7 @@ func TestEndpointDeleteRefusesAMalformedOlderRevision(t *testing.T) {
 	}
 	h.recordRevisions(pub, time.Now().Add(-time.Hour))
 	calls := fakeRevoke(t, nil)
-	out, errb, code := h.run("endpoint", "delete", "o.g.n")
+	out, errb, code := h.run("endpoint", "delete", "o.g.n", "--yes")
 	if code != 1 || out != "" || !strings.Contains(errb, "missing or malformed issued_at") || !strings.Contains(errb, "nothing was changed") || len(*calls) != 0 {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}

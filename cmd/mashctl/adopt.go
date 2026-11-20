@@ -429,7 +429,7 @@ func runAdopt(args []string, env func(string) string, lookup config.Lookup, stdo
 		step("%s exists and is left as it is; make sure it has: %s", st.cfgPath, settingsText(settings))
 	}
 
-	fmt.Fprintf(stdout, "\nNext:\n  1. mashctl init                                  the directory and lease buckets (needs the admin creds)\n  2. mashctl endpoint create owner/group/instance ...  make an endpoint (see mashctl endpoint create --help)\n")
+	fmt.Fprintf(stdout, "\nNext:\n  1. mashctl init                                  the directory and lease buckets (needs the admin creds)\n  2. mashctl endpoint create owner.group.name  make an endpoint (see mashctl endpoint create --help)\n")
 	if adminPath == "" {
 		fmt.Fprintf(stdout, "  no admin creds were given: `mashctl init` and `provision` need them. Pass --admin-creds FILE or --mint-admin, or set \"admin_creds\" in config.json\n")
 	}

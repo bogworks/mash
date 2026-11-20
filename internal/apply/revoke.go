@@ -18,6 +18,44 @@ import (
 // them, but it was not confirmed on every one. Running the revoke again is safe.
 var ErrNotConfirmed = errors.New("the revocation was pushed but not confirmed")
 
+// ConfirmError is an ErrNotConfirmed failure that knows how many servers confirmed the revocation (Confirmed) and how
+// many servers there are (Listed).
+type ConfirmError struct {
+	Confirmed, Listed int
+	Msg               string
+}
+
+func (e *ConfirmError) Error() string        { return e.Msg }
+func (e *ConfirmError) Is(target error) bool { return target == ErrNotConfirmed }
+
+// ConfirmCounts returns the counts of a ConfirmError in err's chain.
+func ConfirmCounts(err error) (confirmed, listed int, ok bool) {
+	var ce *ConfirmError
+	if errors.As(err, &ce) {
+		return ce.Confirmed, ce.Listed, true
+	}
+	return 0, 0, false
+}
+
+// notConfirmed builds the ConfirmError for a push that acks acknowledged, out of the servers of set (or inventory,
+// when that is more).
+func notConfirmed(acks []ServerAck, set ServerSet, inventory int, format string, a ...any) error {
+	k := 0
+	for _, ack := range acks {
+		if ack.OK() {
+			k++
+		}
+	}
+	n := len(set.Names)
+	if inventory > n {
+		n = inventory
+	}
+	if k > n {
+		n = k
+	}
+	return &ConfirmError{Confirmed: k, Listed: n, Msg: fmt.Sprintf(format, a...)}
+}
+
 // RevokeParams is one revocation of user keys in the account JWT.
 type RevokeParams struct {
 	Keys     *ctlkeys.Authority
@@ -191,7 +229,7 @@ func RevokeUsers(ctx context.Context, p RevokeParams, users []string) (RevokeRes
 	acks, why := pushAndCheck(ctx, p.Resolver, token, set.Names)
 	res.Acked = len(acks)
 	if why != "" {
-		return res, fmt.Errorf("revoke: %w: the update was not acknowledged: %s; running the revoke again is safe", ErrNotConfirmed, why)
+		return res, notConfirmed(acks, set, p.Servers, "revoke: %s: the update was not acknowledged: %s; running the revoke again is safe", ErrNotConfirmed, why)
 	}
 	confirm := map[string]int64{}
 	for _, u := range res.Revoked {
@@ -201,7 +239,7 @@ func RevokeUsers(ctx context.Context, p RevokeParams, users []string) (RevokeRes
 		confirm = want
 	}
 	if msg := verifyRevoked(ctx, p, acctPub, trust, token, expect, confirm); msg != "" {
-		return res, fmt.Errorf("revoke: %w: %d server(s) acknowledged the update but the read-back %s; running the revoke again is safe", ErrNotConfirmed, len(acks), msg)
+		return res, notConfirmed(acks, set, p.Servers, "revoke: %s: %d server(s) acknowledged the update but the read-back %s; running the revoke again is safe", ErrNotConfirmed, len(acks), msg)
 	}
 	res.Complete = set.Complete(p.Servers)
 	if !res.Complete {
@@ -209,7 +247,7 @@ func RevokeUsers(ctx context.Context, p RevokeParams, users []string) (RevokeRes
 		if kerr != nil {
 			why = kerr.Error()
 		}
-		return res, fmt.Errorf("revoke: %w: the server set could not be verified (%s): %d server(s) that replied acknowledged the update, the others may not hold it; running the revoke again is safe", ErrNotConfirmed, why, len(acks))
+		return res, notConfirmed(acks, set, p.Servers, "revoke: %s: the server set could not be verified (%s): %d server(s) that replied acknowledged the update, the others may not hold it; running the revoke again is safe", ErrNotConfirmed, why, len(acks))
 	}
 	return res, nil
 }

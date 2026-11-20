@@ -104,7 +104,7 @@ var AT003 = Scenario{
 		if _, ok = a.provision(ha, he, "alice", "dev", "gone", "", true); !ok {
 			return
 		}
-		r := a.Ctl("endpoint-delete-gone", ha, a.Conn(), "endpoint", "delete", "alice/dev/gone")
+		r := a.Ctl("endpoint-delete-gone", ha, a.Conn(), "endpoint", "delete", "alice.dev.gone", "--yes")
 		if !a.C.Check("setup: mashctl endpoint delete alice/dev/gone burns the address", r.Code == 0, exitDetail(r)) {
 			return
 		}
@@ -119,7 +119,7 @@ var AT003 = Scenario{
 		fresh := filepath.Join(he.Dir, "fresh.pub")
 		bad := filepath.Join(he.Dir, "bad.pub")
 		rule := filepath.Join(he.Dir, "rule.json")
-		taken := filepath.Join(he.Dir, "taken.jwt")
+		taken := filepath.Join(he.Dir, "taken.join")
 		if err := writeFile(bad, "this is not a public key\n"); err != nil {
 			a.C.Check("setup: the scratch files are written", false, err.Error())
 			return
@@ -127,36 +127,42 @@ var AT003 = Scenario{
 		_ = writeFile(taken, "an existing file\n")
 		_ = writeFile(rule, `{"version":1,"rules":[{"id":"no-scratch","match":{"group":{"is":"scratch"}},"message":"the group scratch is not for real work"}]}`+"\n")
 
+		// A refusal of create is `error: <what>` and at most one `hint: <command>` on standard error, exit 1; a wrong command
+		// line is exit 2 with the hint `mashctl endpoint create --help`. Neither carries a refusal code, so these cases
+		// check the exit code and the text.
 		create := func(addr string, more ...string) []string {
-			return append([]string{"endpoint", "create", addr, "--json"}, more...)
+			return append([]string{"endpoint", "create", addr}, more...)
 		}
-		pk := []string{"--public-key", fresh}
+		out := func(name string) []string { return []string{"--out", filepath.Join(he.Dir, name)} }
+		pk := append([]string{"--public-key", fresh}, out("pk.join")...)
 		cases := []refusalCase{
-			{Name: "no group", Label: "no-group", Home: ha, Args: create("design", pk...), Exit: 2, Code: "group_missing",
-				Hint: [][]string{{"--group"}, {"alice/dev/", "owner/group/", "OWNER/GROUP"}}},
-			{Name: "two-token form", Label: "two-token", Home: ha, Args: create("alice/design", pk...), Exit: 2,
-				Hint: [][]string{{"alice/dev/", "owner/group/", "--group"}}},
-			{Name: "neither --public-key nor the same-host flag", Label: "key-missing", Home: ha, Args: create("alice/dev/solo"), Exit: 2, Code: "key_missing",
-				Hint: [][]string{{"--public-key"}, {"--make-key"}}},
-			{Name: "a token with a capital", Label: "name-capital", Home: ha, Args: create("alice/dev/Design", pk...), Exit: 1, Code: "name_invalid",
-				Hint: [][]string{{"lower-case", "lowercase", "[a-z]"}}},
-			{Name: "a token with a double dash", Label: "name-dashes", Home: ha, Args: create("alice/dev/a--b", pk...), Exit: 1, Code: "name_invalid",
-				Hint: [][]string{{"lower-case", "lowercase", "[a-z]", "--"}}},
-			{Name: "a token of 33 characters", Label: "name-long", Home: ha, Args: create("alice/dev/"+strings.Repeat("a", 33), pk...), Exit: 1, Code: "name_invalid",
-				Hint: [][]string{{"32", "shorter", "characters"}}},
-			{Name: "a token the name rule file refuses", Label: "name-rule", Home: ha, Extra: []string{"MASH_NAME_RULE_FILE=" + rule}, Args: create("alice/scratch/x", pk...), Exit: 1, Code: "name_rule",
+			{Name: "an address that is not owner.group.name", Label: "no-group", Home: ha, Args: create("design", pk...), Exit: 2, NoJSON: true,
+				Hint: [][]string{{"owner.group.name"}, {"mashctl endpoint create --help"}}},
+			{Name: "the slash form of an address", Label: "slash-form", Home: ha, Args: create("alice/dev/design", pk...), Exit: 2, NoJSON: true,
+				Hint: [][]string{{"owner.group.name"}, {"mashctl endpoint create --help"}}},
+			{Name: "--public-key without --out", Label: "key-without-out", Home: ha, Args: create("alice.dev.solo", "--public-key", fresh), Exit: 2, NoJSON: true,
+				Hint: [][]string{{"--public-key needs --out"}, {"mashctl endpoint create --help"}}},
+			{Name: "a removed option", Label: "removed-option", Home: ha, Args: create("alice.dev.solo", "--make-key"), Exit: 2, NoJSON: true,
+				Hint: [][]string{{"unknown option"}, {"mashctl endpoint create --help"}}},
+			{Name: "a token with a capital", Label: "name-capital", Home: ha, Args: create("alice.dev.Design", pk...), Exit: 2, NoJSON: true,
+				Hint: [][]string{{"owner.group.name"}}},
+			{Name: "a token with a double dash", Label: "name-dashes", Home: ha, Args: create("alice.dev.a--b", pk...), Exit: 2, NoJSON: true,
+				Hint: [][]string{{"owner.group.name"}}},
+			{Name: "a token of 33 characters", Label: "name-long", Home: ha, Args: create("alice.dev."+strings.Repeat("a", 33), pk...), Exit: 2, NoJSON: true,
+				Hint: [][]string{{"owner.group.name"}}},
+			{Name: "a token the name rule file refuses", Label: "name-rule", Home: ha, Extra: []string{"MASH_NAME_RULE_FILE=" + rule}, Args: create("alice.scratch.x", pk...), Exit: 1, NoJSON: true,
 				Hint: [][]string{{"no-scratch"}}},
-			{Name: "an address that exists", Label: "address-taken", Home: ha, Args: create("alice/dev/design", append(pk, "--jwt-out", filepath.Join(he.Dir, "taken-address.jwt"))...), Exit: 1, Code: "address_taken",
-				Hint: [][]string{{"endpoint", "another", "different"}}},
-			{Name: "a deleted, burned address", Label: "key-retired", Home: ha, Args: create("alice/dev/gone", append(pk, "--jwt-out", filepath.Join(he.Dir, "burned-address.jwt"))...), Exit: 1, Code: "key_retired",
-				Hint: [][]string{{"endpoint create", "another", "new name", "different"}}},
-			{Name: "a malformed public key file", Label: "pubkey-invalid", Home: ha, Args: create("alice/dev/other", "--public-key", bad), Exit: 1, Code: "public_key_invalid",
-				Hint: [][]string{{"mash key create", "--public-key"}}},
-			{Name: "a public key already issued at another address", Label: "pubkey-issued", Home: ha, Args: create("alice/dev/other", "--public-key", design.pub), Exit: 1, Code: "public_key_issued",
-				Hint: [][]string{{"mash key create", "endpoint reissue", "new key", "another key"}}},
-			{Name: "a JWT output file that exists", Label: "file-exists", Home: ha, Args: create("alice/dev/other", append(pk, "--jwt-out", taken)...), Exit: 1, Code: "file_exists",
-				Hint: [][]string{{"--jwt-out"}}},
-			{Name: "no account key on the mashctl host", Label: "no-account-key", Home: hn, Extra: []string{"MASH_ADMIN_CREDS=" + adminCreds}, Args: create("alice/dev/other", pk...), Exit: 1, Code: "no_account_key",
+			{Name: "an address that exists", Label: "address-taken", Home: ha, Args: create("alice.dev.design", append([]string{"--public-key", fresh}, out("taken-address.join")...)...), Exit: 1, NoJSON: true,
+				Hint: [][]string{{"alice.dev.design already exists"}}},
+			{Name: "a deleted, burned address", Label: "key-retired", Home: ha, Args: create("alice.dev.gone", append([]string{"--public-key", fresh}, out("burned-address.join")...)...), Exit: 1, NoJSON: true,
+				Hint: [][]string{{"alice.dev.gone was deleted and its address cannot be used again"}}},
+			{Name: "a malformed public key file", Label: "pubkey-invalid", Home: ha, Args: create("alice.dev.other", append([]string{"--public-key", bad}, out("bad.join")...)...), Exit: 1, NoJSON: true,
+				Hint: [][]string{{"mash key create"}}},
+			{Name: "a public key already issued at another address", Label: "pubkey-issued", Home: ha, Args: create("alice.dev.other", append([]string{"--public-key", design.pub}, out("issued.join")...)...), Exit: 1, NoJSON: true,
+				Hint: [][]string{{"mash key create"}}},
+			{Name: "a join file path that exists", Label: "file-exists", Home: ha, Args: create("alice.dev.other", "--public-key", fresh, "--out", taken), Exit: 1, NoJSON: true,
+				Hint: [][]string{{"already exists"}}},
+			{Name: "no account key on the mashctl host", Label: "no-account-key", Home: hn, Extra: []string{"MASH_ADMIN_CREDS=" + adminCreds}, Args: create("alice.dev.other", pk...), Exit: 1, NoJSON: true,
 				Hint: [][]string{{"mashctl init", "mashctl adopt", "MASH_KEYS_DIR", "account key"}}},
 			{Name: "mash credential create with a seed and a JWT for different keys", Label: "creds-mismatch", Home: he, Mash: true, NoJSON: true, Exit: 1,
 				Args: []string{"credential", "create", "--seed", design.seed, "--jwt", review.jwt, "--out", filepath.Join(he.Dir, "mismatch.creds")},
@@ -178,9 +184,9 @@ var AT003 = Scenario{
 
 		// The three removed commands.
 		for _, c := range []refusalCase{
-			{Name: "mashctl add", Label: "removed-add", Home: ha, Args: []string{"add", "alice/dev/old"}, Exit: 2, NoJSON: true, Hint: [][]string{{"endpoint create"}}},
-			{Name: "mashctl reissue", Label: "removed-reissue", Home: ha, Args: []string{"reissue", "alice/dev/design"}, Exit: 2, NoJSON: true, Hint: [][]string{{"endpoint reissue"}}},
-			{Name: "mashctl retire", Label: "removed-retire", Home: ha, Args: []string{"retire", "alice/dev/design"}, Exit: 2, NoJSON: true, Hint: [][]string{{"endpoint delete"}}},
+			{Name: "mashctl add", Label: "removed-add", Home: ha, Args: []string{"add", "alice.dev.old"}, Exit: 2, NoJSON: true, Hint: [][]string{{"endpoint create"}}},
+			{Name: "mashctl reissue", Label: "removed-reissue", Home: ha, Args: []string{"reissue", "alice.dev.design"}, Exit: 2, NoJSON: true, Hint: [][]string{{"endpoint reissue"}}},
+			{Name: "mashctl retire", Label: "removed-retire", Home: ha, Args: []string{"retire", "alice.dev.design"}, Exit: 2, NoJSON: true, Hint: [][]string{{"endpoint delete"}}},
 		} {
 			a.refusal(ha, trees, c)
 		}

@@ -38,7 +38,7 @@ func (h *fleetEnv) provisionOf(addr string) (string, string, int) {
 	if _, err := parseEpAddress(addr); err != nil {
 		h.t.Fatal(err)
 	}
-	return h.run("endpoint", "create", strings.ReplaceAll(addr, ".", "/"), "--make-key")
+	return h.run("endpoint", "create", addr)
 }
 
 func TestConfigAMashctlEndpointCreate(t *testing.T) {
@@ -86,8 +86,8 @@ func TestConfigAMashctlEndpointCreate(t *testing.T) {
 // to start, from the environment and from config.json alike.
 func TestConfigAMashctlRequiredWithoutFileRefusesToStart(t *testing.T) {
 	verbs := [][]string{
-		{"endpoint", "list"}, {"init"}, {"limits"}, {"endpoint", "create", "o/g/x", "--make-key"},
-		{"endpoint", "set", "o.g.x", "label.k=v"}, {"endpoint", "delete", "o.g.x"},
+		{"endpoint", "list"}, {"init"}, {"limits"}, {"endpoint", "create", "o.g.x"},
+		{"endpoint", "set", "o.g.x", "label.k=v"}, {"endpoint", "delete", "o.g.x", "--yes"},
 		{"adopt", "--server", "nats://127.0.0.1:1", "--operator-key", "/x", "--account-key", "/x", "--sys-creds", "/x", "--admin-creds", "/x"},
 	}
 	for _, how := range []string{"environment", "config.json"} {

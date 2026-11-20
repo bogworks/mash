@@ -33,8 +33,8 @@ func TestEndpointCreateIgnoresTheEndpointGroup(t *testing.T) {
 	h := newFleetEnv(t)
 	_, pubFile, _ := epKey(t, t.TempDir(), "k")
 	h.env["MASH_ENDPOINT"] = h.e.Owner + ".dev.x" // only its owner part counts to mashctl
-	so, se, code := h.run("endpoint", "create", "design", "--public-key", pubFile, "--json")
-	if code != 2 || jsonObject(t, so)["refusal"].(map[string]any)["code"] != "group_missing" {
+	so, se, code := h.run("endpoint", "create", "design", "--out", filepath.Join(t.TempDir(), "d.join"), "--public-key", pubFile, "--json")
+	if code != 2 || !strings.HasPrefix(jsonObject(t, so)["error"].(string), "not an endpoint address") {
 		t.Fatalf("code %d %q %q", code, so, se)
 	}
 	if len(h.records()) != 0 {
@@ -117,32 +117,18 @@ func TestEndpointCreateFlatJSON(t *testing.T) {
 	out := t.TempDir()
 	_, pubFile, _ := epKey(t, out, "k")
 	a := ad("flat")
-	so, se, code := h.run("endpoint", "create", a.String(), "--public-key", pubFile, "--jwt-out", filepath.Join(out, "f.jwt"), "--json")
+	so, se, code := h.run("endpoint", "create", a.String(), "--out", filepath.Join(out, "f.join"), "--public-key", pubFile, "--json")
 	if code != 0 {
 		t.Fatalf("%d %q %q", code, so, se)
 	}
 	m := jsonObject(t, so)
-	for k, want := range map[string]string{"schema": "mashctl-endpoint@1", "outcome": "created", "owner": a.Owner, "group": a.Group,
-		"instance": a.Instance, "address": a.String(), "key": a.Flat(), "jwt_path": filepath.Join(out, "f.jwt")} {
-		if m[k] != want {
-			t.Errorf("%s = %v, want %s", k, m[k], want)
-		}
+	if len(m) != 3 || m["address"] != a.String() || m["installed_here"] != false || m["join_file"] != filepath.Join(out, "f.join") {
+		t.Errorf("out doc %v", m)
 	}
-	for _, k := range []string{"endpoint", "jwt", "creds"} {
-		if _, ok := m[k]; ok {
-			t.Errorf("nested object %q", k)
-		}
-	}
-	if _, ok := m["next_steps"]; !ok {
-		t.Error("no next_steps")
-	}
-	if v, ok := m["refusal"]; !ok || v != nil {
-		t.Errorf("refusal %v %v", v, ok)
-	}
-	so, _, _ = h.run("endpoint", "create", ad("flat2").String(), "--make-key", "--json")
+	so, _, _ = h.run("endpoint", "create", ad("flat2").String(), "--json")
 	m = jsonObject(t, so)
-	if m["creds_path"] != h.creds(ad("flat2")) || m["creds_written"] != true || m["key"] != ad("flat2").Flat() {
-		t.Errorf("make-key doc %v", m)
+	if len(m) != 3 || m["address"] != ad("flat2").String() || m["installed_here"] != true || m["join_file"] != nil {
+		t.Errorf("installed doc %v", m)
 	}
 }
 
@@ -154,14 +140,13 @@ func TestEndpointShowDeleteFlatJSON(t *testing.T) {
 	if m["address"] != "o.g.s" || m["state"] != "offline" || m["public_key"] == "" || m["endpoint"] != nil || m["labels"] == nil {
 		t.Errorf("show %v", m)
 	}
-	so, _, _ = h.run("endpoint", "delete", "o/g/s", "--json")
+	so, _, _ = h.run("endpoint", "delete", "o.g.s", "--yes", "--json")
 	m = jsonObject(t, so)
-	if m["group"] != "g" || m["instance"] != "s" || m["key"] != "o_g_s" || m["outcome"] != "deleted" || m["endpoint"] != nil {
+	if m["address"] != "o.g.s" || m["deleted"] != true || m["messages_deleted"] != float64(0) || len(m) != 3 {
 		t.Errorf("delete %v", m)
 	}
 }
 
-// TestEndpointUsageErrorsInJSON: with --json a usage error also prints the refusal document on stdout.
 // TestEndpointReadUsageErrorsInJSON: with --json the commands of the new form print one {"error","hint"} line on stdout
 // and nothing on stderr.
 func TestEndpointReadUsageErrorsInJSON(t *testing.T) {
@@ -190,50 +175,36 @@ func TestEndpointReadUsageErrorsInJSON(t *testing.T) {
 	}
 }
 
+// With --json a wrong command line of create or reissue prints one {"error","hint"} line on stdout and nothing on stderr.
 func TestEndpointUsageErrorsInJSON(t *testing.T) {
 	h := newFleetEnv(t)
 	_, pubFile, _ := epKey(t, t.TempDir(), "k")
 	cases := []struct {
 		name string
 		args []string
-		code string
+		want string
 	}{
-		{"create unknown flag", []string{"create", "o/g/x", "--public-key", pubFile, "--bogus", "--json"}, "unknown_flag"},
-		{"create unknown flag, json first", []string{"create", "--json", "o/g/x", "--bogus"}, "unknown_flag"},
-		{"create no value", []string{"create", "o/g/x", "--json", "--public-key"}, "usage"},
-		{"create two addresses", []string{"create", "o/g/x", "o/g/y", "--json"}, "usage"},
-		{"create bad label", []string{"create", "o/g/x", "--label", "nokv", "--json"}, "usage"},
-		{"create key_missing", []string{"create", "o/g/x", "--json"}, "key_missing"},
-		{"reissue unknown flag", []string{"reissue", "o/g/x", "--bogus", "--json"}, "unknown_flag"},
-		{"reissue no address", []string{"reissue", "--public-key", pubFile, "--json"}, "address_missing"},
-		{"reissue bad address", []string{"reissue", "Not A Valid!", "--public-key", pubFile, "--json"}, "address_invalid"},
-		{"reissue no key", []string{"reissue", "o/g/x", "--json"}, "key_missing"},
-		{"delete unknown flag", []string{"delete", "o/g/x", "--bogus", "--json"}, "unknown_flag"},
-		{"delete no address", []string{"delete", "--json"}, "address_missing"},
-		{"delete bad address", []string{"delete", "Not A Valid!", "--json"}, "address_invalid"},
+		{"create unknown option", []string{"create", "o.g.x", "--bogus", "--json"}, `{"error":"unknown option \"--bogus\"","hint":"mashctl endpoint create --help"}`},
+		{"create unknown option, json first", []string{"create", "--json", "o.g.x", "--bogus"}, `{"error":"unknown option \"--bogus\"","hint":"mashctl endpoint create --help"}`},
+		{"create removed option", []string{"create", "o.g.x", "--label", "k=v", "--json"}, `{"error":"unknown option \"--label\"","hint":"mashctl endpoint create --help"}`},
+		{"create no value", []string{"create", "o.g.x", "--json", "--out"}, `{"error":"--out needs a value","hint":"mashctl endpoint create --help"}`},
+		{"create two addresses", []string{"create", "o.g.x", "o.g.y", "--json"}, `{"error":"too many arguments","hint":"mashctl endpoint create --help"}`},
+		{"create public key without out", []string{"create", "o.g.x", "--public-key", pubFile, "--json"}, `{"error":"--public-key needs --out, the join file to write","hint":"mashctl endpoint create --help"}`},
+		{"reissue unknown option", []string{"reissue", "o.g.x", "--bogus", "--json"}, `{"error":"unknown option \"--bogus\"","hint":"mashctl endpoint reissue --help"}`},
+		{"reissue no address", []string{"reissue", "--json"}, `{"error":"missing the endpoint address (owner.group.name)","hint":"mashctl endpoint reissue --help"}`},
+		{"reissue bad address", []string{"reissue", "Not A Valid!", "--json"}, `{"error":"not an endpoint address (the value is not shown): write owner.group.name, for example acme.demo.bob","hint":"mashctl endpoint reissue --help"}`},
+		{"reissue public key without out", []string{"reissue", "o.g.x", "--public-key", pubFile, "--json"}, `{"error":"--public-key needs --out, the join file to write","hint":"mashctl endpoint reissue --help"}`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			so, se, code := h.run(append([]string{"endpoint"}, c.args...)...)
-			if code != 2 {
-				t.Fatalf("code %d, want 2; %q %q", code, so, se)
-			}
-			m := jsonObject(t, so)
-			ref, _ := m["refusal"].(map[string]any)
-			if ref == nil || ref["code"] != c.code || m["outcome"] != "error" || m["schema"] == nil {
-				t.Errorf("document %v, want code %s", m, c.code)
-			}
-			if se == "" {
-				t.Error("no sentence on stderr")
+			if code != 2 || se != "" || strings.TrimSpace(so) != c.want {
+				t.Errorf("%d %q %q, want 2 %q", code, so, se, c.want)
 			}
 		})
 	}
-	// without --json nothing goes to stdout
-	if so, _, code := h.run("endpoint", "show", "--bogus"); code != 2 || so != "" { // a show error is the new form: see TestEndpointReadUsageErrorsInJSON
-		t.Errorf("plain usage error: %d %q", code, so)
-	}
 	// a value that looks like --json is a value, not the flag
-	if so, _, _ := h.run("endpoint", "create", "o/g/x", "--note", "--json", "--bogus"); so != "" {
+	if so, _, _ := h.run("endpoint", "create", "o.g.x", "--out", "--json", "--bogus"); so != "" {
 		t.Errorf("--json taken as a value printed %q", so)
 	}
 }
@@ -244,38 +215,36 @@ func TestEndpointDryRunRefusals(t *testing.T) {
 	out := t.TempDir()
 	_, pubA, _ := epKey(t, out, "a")
 	_, pubB, _ := epKey(t, out, "b")
-	if _, se, code := h.run("endpoint", "create", ad("a").String(), "--public-key", pubA, "--jwt-out", filepath.Join(out, "a.jwt")); code != 0 {
+	if _, se, code := h.run("endpoint", "create", ad("a").String(), "--out", filepath.Join(out, "a.join"), "--public-key", pubA); code != 0 {
 		t.Fatalf("create a: %q", se)
 	}
-	if _, se, code := h.run("endpoint", "create", ad("b").String(), "--public-key", pubB, "--jwt-out", filepath.Join(out, "b.jwt")); code != 0 {
+	if _, se, code := h.run("endpoint", "create", ad("b").String(), "--out", filepath.Join(out, "b.join"), "--public-key", pubB); code != 0 {
 		t.Fatalf("create b: %q", se)
 	}
 	refused := func(want string, args ...string) {
 		t.Helper()
-		so, se, code := h.run(append(args, "--dry-run", "--json")...)
-		m := jsonObject(t, so)
-		ref, _ := m["refusal"].(map[string]any)
-		if code != 1 || m["outcome"] != "refused" || ref == nil || ref["code"] != want {
-			t.Errorf("%v: want refused %s, got %d %q %q", args, want, code, so, se)
+		so, se, code := h.run(append(args, "--dry-run")...)
+		if code != 1 || so != "" || !strings.HasPrefix(se, "error: ") || !strings.Contains(se, want) {
+			t.Errorf("%v: want an error holding %q, got %d %q %q", args, want, code, so, se)
 		}
 	}
 	// the key of a is already issued at a
-	refused("public_key_issued", "endpoint", "create", ad("c").String(), "--public-key", pubA, "--jwt-out", filepath.Join(out, "c.jwt"))
-	refused("public_key_issued", "endpoint", "reissue", ad("b").String(), "--public-key", pubA, "--jwt-out", filepath.Join(out, "c.jwt"))
-	refused("address_taken", "endpoint", "create", ad("a").String(), "--public-key", pubB, "--jwt-out", filepath.Join(out, "c.jwt"))
+	refused("was already issued to another address", "endpoint", "create", ad("c").String(), "--out", filepath.Join(out, "c.join"), "--public-key", pubA)
+	refused("was already issued to another address", "endpoint", "reissue", ad("b").String(), "--out", filepath.Join(out, "c.join"), "--public-key", pubA)
+	refused("already exists", "endpoint", "create", ad("a").String(), "--out", filepath.Join(out, "c.join"), "--public-key", pubB)
 	// the same key at its own address plans a rerun
-	if so, se, code := h.run("endpoint", "create", ad("a").String(), "--public-key", pubA, "--jwt-out", filepath.Join(out, "c.jwt"), "--dry-run"); code != 0 {
+	if so, se, code := h.run("endpoint", "create", ad("a").String(), "--out", filepath.Join(out, "c.join"), "--public-key", pubA, "--dry-run"); code != 0 {
 		t.Errorf("own key: %d %q %q", code, so, se)
 	}
 	// a deleted endpoint's address is burned
-	if _, se, code := h.run("endpoint", "delete", ad("b").String()); code != 0 {
+	if _, se, code := h.run("endpoint", "delete", ad("b").String(), "--yes"); code != 0 {
 		t.Fatalf("delete: %q", se)
 	}
-	refused("key_retired", "endpoint", "create", ad("b").String(), "--public-key", pubB, "--jwt-out", filepath.Join(out, "c.jwt"))
-	refused("key_retired", "endpoint", "reissue", ad("b").String(), "--public-key", pubB, "--jwt-out", filepath.Join(out, "c.jwt"))
+	refused("was deleted and its address cannot be used again", "endpoint", "create", ad("b").String(), "--out", filepath.Join(out, "c.join"), "--public-key", pubB)
+	refused("was deleted and its address cannot be used again", "endpoint", "reissue", ad("b").String(), "--out", filepath.Join(out, "c.join"), "--public-key", pubB)
 	// the revoked key of b is refused at a new address
-	refused("key_revoked", "endpoint", "create", ad("d").String(), "--public-key", pubB, "--jwt-out", filepath.Join(out, "c.jwt"))
-	if _, err := os.Lstat(filepath.Join(out, "c.jwt")); err == nil {
+	refused("revoked", "endpoint", "create", ad("d").String(), "--out", filepath.Join(out, "c.join"), "--public-key", pubB)
+	if _, err := os.Lstat(filepath.Join(out, "c.join")); err == nil {
 		t.Error("a dry run wrote a file")
 	}
 }
@@ -292,7 +261,7 @@ func TestEndpointReissueConcurrentSameHost(t *testing.T) {
 	}
 	t.Cleanup(func() { revokeUsers = prev })
 	a := ad("race")
-	if _, se, code := h.run("endpoint", "create", a.String(), "--make-key"); code != 0 {
+	if _, se, code := h.run("endpoint", "create", a.String()); code != 0 {
 		t.Fatalf("create: %q", se)
 	}
 	var wg sync.WaitGroup
@@ -302,7 +271,7 @@ func TestEndpointReissueConcurrentSameHost(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, errs[i], codes[i] = h.run("endpoint", "reissue", a.String(), "--make-key")
+			_, errs[i], codes[i] = h.run("endpoint", "reissue", a.String())
 		}()
 	}
 	wg.Wait()
@@ -342,7 +311,7 @@ func TestEndpointReissueBusy(t *testing.T) {
 	h := newFleetEnv(t)
 	fakeRevoke(t, nil)
 	a := ad("busy")
-	if _, se, code := h.run("endpoint", "create", a.String(), "--make-key"); code != 0 {
+	if _, se, code := h.run("endpoint", "create", a.String()); code != 0 {
 		t.Fatalf("create: %q", se)
 	}
 	before, _ := os.ReadFile(h.creds(a))
@@ -351,8 +320,8 @@ func TestEndpointReissueBusy(t *testing.T) {
 	prev := epLockWait
 	epLockWait = 150 * time.Millisecond
 	t.Cleanup(func() { epLockWait = prev })
-	so, se, code := h.run("endpoint", "reissue", a.String(), "--make-key", "--json")
-	if code != 1 || !strings.Contains(se, "reissue_busy") || !strings.Contains(se, fmt.Sprintf("pid %d", os.Getpid())) {
+	so, se, code := h.run("endpoint", "reissue", a.String())
+	if code != 1 || !strings.Contains(se, "another reissue of "+a.String()+" holds the lock") || !strings.Contains(se, fmt.Sprintf("pid %d", os.Getpid())) {
 		t.Fatalf("%d %q %q", code, so, se)
 	}
 	if after, _ := os.ReadFile(h.creds(a)); string(after) != string(before) {
@@ -368,23 +337,12 @@ func TestEndpointPublicKeyIssuedNamesRemedy(t *testing.T) {
 	fakeKeyRevoked(t, func(string) (bool, error) { return false, nil })
 	out := t.TempDir()
 	_, pubA, _ := epKey(t, out, "a")
-	if _, se, code := h.run("endpoint", "create", ad("a").String(), "--public-key", pubA, "--jwt-out", filepath.Join(out, "a.jwt")); code != 0 {
+	if _, se, code := h.run("endpoint", "create", ad("a").String(), "--out", filepath.Join(out, "a.join"), "--public-key", pubA); code != 0 {
 		t.Fatalf("create a: %q", se)
 	}
-	so, se, code := h.run("endpoint", "create", ad("c").String(), "--public-key", pubA, "--jwt-out", filepath.Join(out, "c.jwt"), "--json")
-	if code != 1 || !strings.Contains(se, "mash key create") {
-		t.Fatalf("code %d, stderr %q", code, se)
-	}
-	var doc struct {
-		Refusal   struct{ Code, Detail string }
-		NextSteps []struct{ Detail string } `json:"next_steps"`
-	}
-	if err := json.Unmarshal([]byte(so), &doc); err != nil {
-		t.Fatal(err)
-	}
-	if doc.Refusal.Code != "public_key_issued" || !strings.Contains(doc.Refusal.Detail, "mash key create") ||
-		len(doc.NextSteps) != 1 || !strings.Contains(doc.NextSteps[0].Detail, "mash key create") {
-		t.Errorf("%+v", doc)
+	so, se, code := h.run("endpoint", "create", ad("c").String(), "--out", filepath.Join(out, "c.join"), "--public-key", pubA)
+	if code != 1 || so != "" || !strings.HasSuffix(se, "\nhint: mash key create --out NAME.seed\n") || !strings.Contains(se, "already issued to another address") {
+		t.Fatalf("code %d, stdout %q stderr %q", code, so, se)
 	}
 }
 
@@ -405,12 +363,12 @@ func TestEndpointReissueConcurrentPublicKey(t *testing.T) {
 	out := t.TempDir()
 	a := ad("pk")
 	_, pub0, _ := epKey(t, out, "k0")
-	if _, se, code := h.run("endpoint", "create", a.String(), "--public-key", pub0, "--jwt-out", filepath.Join(out, "k0.jwt")); code != 0 {
+	if _, se, code := h.run("endpoint", "create", a.String(), "--out", filepath.Join(out, "k0.join"), "--public-key", pub0); code != 0 {
 		t.Fatalf("create: %q", se)
 	}
 	_, pub1, _ := epKey(t, out, "k1")
 	_, pub2, _ := epKey(t, out, "k2")
-	jwtOut := filepath.Join(out, "new.jwt")
+	jwtOut := filepath.Join(out, "new.join")
 	var wg sync.WaitGroup
 	codes := make([]int, 2)
 	errs := make([]string, 2)
@@ -418,7 +376,7 @@ func TestEndpointReissueConcurrentPublicKey(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, errs[i], codes[i] = h.run("endpoint", "reissue", a.String(), "--public-key", pub, "--jwt-out", jwtOut)
+			_, errs[i], codes[i] = h.run("endpoint", "reissue", a.String(), "--out", jwtOut, "--public-key", pub)
 		}()
 	}
 	wg.Wait()
@@ -428,8 +386,8 @@ func TestEndpointReissueConcurrentPublicKey(t *testing.T) {
 		case 0:
 			ok++
 		case 1:
-			if !strings.Contains(errs[i], "file_exists") && !strings.Contains(errs[i], "key_revoked") {
-				t.Errorf("run %d: exit 1 without file_exists: %s", i, errs[i])
+			if !strings.Contains(errs[i], "already exists") && !strings.Contains(errs[i], "was revoked") {
+				t.Errorf("run %d: exit 1 without a refusal for the taken path: %s", i, errs[i])
 			}
 		default:
 			t.Errorf("run %d: exit %d: %s", i, c, errs[i])
@@ -438,11 +396,8 @@ func TestEndpointReissueConcurrentPublicKey(t *testing.T) {
 	if ok != 1 || rotations != 1 {
 		t.Fatalf("%d runs succeeded, the server key rotated %d times; want 1 and 1 (%v)", ok, rotations, errs)
 	}
-	tok, err := os.ReadFile(jwtOut)
-	if err != nil {
-		t.Fatal(err)
-	}
-	uc, err := jwt.DecodeUserClaims(strings.TrimSpace(string(tok)))
+	j, _ := readJoin(t, jwtOut)
+	uc, err := jwt.DecodeUserClaims(j.UserJWT)
 	if err != nil {
 		t.Fatal(err)
 	}

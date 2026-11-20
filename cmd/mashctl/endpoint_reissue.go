@@ -16,6 +16,7 @@ import (
 	"github.com/nats-io/nkeys"
 
 	"github.com/bogworks/mash/internal/admin"
+	"github.com/bogworks/mash/internal/cliframe"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/ctl"
 	"github.com/bogworks/mash/internal/ctlkeys"
@@ -23,47 +24,25 @@ import (
 	"github.com/bogworks/mash/internal/sap"
 )
 
-const endpointReissueUsage = `usage: mashctl endpoint reissue ADDRESS (--public-key FILE | --make-key) [--jwt-out FILE]
-                                [--servers N] [--sys-creds FILE] [--dry-run] [--json]
-       mashctl endpoint reissue (--all | --changed) --make-key [--yes] [--servers N] [--sys-creds FILE] [--dry-run] [--json]
-  ADDRESS is alice/dev/design. The old key is revoked on every server, then the directory record names the new key.
-  --public-key FILE  sign the new public key the endpoint made; the JWT is written to --jwt-out
-  --make-key         make the key on this host and replace <config dir>/<address>.creds
-  --all              every endpoint that has a creds file on this host (same-host only: --make-key, never --public-key);
-                     an endpoint with no creds file here is skipped (no_local_creds), not rotated
-  --changed          every endpoint whose creds file on this host has a permission set that differs from the current one;
-                     an endpoint with no creds file here is skipped (no_local_creds)
-  --yes              do the bulk reissue; without it (or with --dry-run) the command lists what it would reissue
-  A bulk run reissues one endpoint at a time in address order; a refusal or error on one does not stop the others.
-  The bulk JSON has schema mashctl-endpoint-bulk@1.
-  A key made by --make-key is kept in <creds file>.pending (mode 0600) until the creds file is written, so the same
-  command run again after a kill finishes with the same key.
-  A rerun of --public-key FILE --jwt-out FILE after a run that switched the directory to the key but did not write the
-  JWT is a resume: <jwt-out>.pending (mode 0600) records the rotation, and the rerun writes the JWT and removes it.
-  --public-key FILE is checked first: a key the account JWT revokes is refused (key_revoked), also when it is the
-  endpoint's current key (a resume or a restore never signs a revoked key; make a new key with mash key create);
-  a check that cannot be made is an error (revocation_unknown), and nothing is changed.
-  A staged key that the account revokes is refused (staged_key_revoked): remove the .pending file and run again;
-  a check that cannot be made is an error (revocation_unknown).
-  --changed also reissues an endpoint with a staged <creds file>.pending (rotation_pending) or whose current key is
-  revoked (key_revoked); one whose revocation cannot be checked is an error, revocation_unknown, never "unchanged".
-  Refusals include key_unchanged: --public-key names the key the endpoint already has, so nothing would be rotated.
-  Other refusals: future_issued (the old key's issue record is dated after the revocation time; fix the clock),
-  creds_mismatch (--make-key found a creds file that is not this endpoint's current creds: its name, key or account
-  differs; move it aside with mv FILE FILE.old and run again, or use --public-key), creds_unreadable (the file exists
-  and cannot be read or parsed).
-  Errors include superseded: another reissue changed the endpoint's key while this one ran, so the file this run wrote
-  was removed; run the command again.
-  Refusals include reissue_busy: another reissue of ADDRESS holds the lock (its pid and host are named when readable).
-  A reissue of an endpoint holds a lock on its creds file's .lock file; the operating system releases it when the run
-  ends or is killed, so a killed run needs nothing removed. The lock works on one host (a local filesystem), not across
-  hosts or on a network filesystem that does not honour flock. A .lock directory made by an earlier mash is reported
-  and removed once by hand.
-  exit codes: 0 done, planned or unchanged, 1 refused, partial (bulk) or error, 2 usage
+const endpointReissueUsage = `usage: mashctl endpoint reissue <address> [--out PATH] [--public-key PATH] [--dry-run] [--json]
+  address            the endpoint, as owner.group.name
+  --out PATH         write a join file for another machine and install nothing here
+  --public-key PATH  sign this public key; needs --out
+  --dry-run          print what would change, and change nothing
+  --json             print the result as JSON
+  With no option the key pair is made here and <address>.creds in the config folder is replaced.
+  The old key is cancelled on every server before anything is removed. A run that was stopped is finished by
+  running the same command again. Only one reissue of an address runs at a time.
+  --servers N and --sys-creds FILE override MASH_SERVERS and MASH_SYS_CREDS.
 Example:
-  mashctl endpoint reissue alice/dev/design --public-key design.pub
-  mashctl endpoint reissue --changed --make-key --yes
+  mashctl endpoint reissue acme.demo.bob
+  mashctl endpoint reissue acme.demo.bob --out acme.demo.bob.join
 `
+
+var endpointReissueSpec = epSpec{
+	name: "reissue", usage: endpointReissueUsage, flags: []string{"--dry-run"}, values: []string{"--out", "--public-key"},
+	min: 1, max: 1, need: "the endpoint address (owner.group.name)", check: checkIssueArgs,
+}
 
 // errEpBusy is returned by epLock when the lock stayed held for epLockWait.
 var errEpBusy = errors.New("lock busy")
@@ -95,130 +74,70 @@ func epBusyDetail(addr sap.Address, lockPath string, oldDir bool) string {
 }
 
 // runEndpointReissue is `mashctl endpoint reissue`.
-func runEndpointReissue(args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
-	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help") {
+func runEndpointReissue(args []string, g cliframe.Global, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
+	if helpAsked(args) {
 		fmt.Fprint(stdout, endpointReissueUsage)
 		return 0
 	}
-	var c epCommon
-	var positional string
-	var all, changed, yes bool
-	c.jsonOut = jsonRequested(args, epValueFlags...)
-	doc := epDocFor(sap.Address{})
-	usageCode := "usage"
-	usage := func(msg string) int {
-		code := usageCode
-		usageCode = "usage"
-		return epUsage("reissue", endpointReissueUsage, doc, code, msg, c.jsonOut, stdout, stderr)
-	}
-	for i := 0; i < len(args); i++ {
-		flag, inline, hasInline := splitFlag(args, i)
-		get := func() (string, error) { return flagValue(args, &i, flag, inline, hasInline) }
-		if ok, err := c.take(flag, get); ok {
-			if err != nil {
-				return usage(err.Error())
-			}
-			continue
-		}
-		switch {
-		case flag == "--all":
-			all = true
-		case flag == "--changed":
-			changed = true
-		case flag == "--yes":
-			yes = true
-		case strings.HasPrefix(flag, "-"):
-			usageCode = "unknown_flag"
-			return usage("unknown " + config.RejectedArg(flag))
-		case positional != "":
-			return usage("one endpoint address only")
-		default:
-			positional = flag
-		}
-	}
-	if all || changed || yes {
-		return runEndpointBulk(bulkArgs{all: all, changed: changed, yes: yes, positional: positional, c: c}, env, lookup, stdout, stderr)
-	}
-	var addr sap.Address
-	refuse := func(code int, ref *epRefusal) int {
-		doc.Refusal = ref
-		if code == 2 {
-			doc.Outcome = "error"
-		}
-		return epReport("reissue", doc, nil, code, stdout, stderr, c.jsonOut)
-	}
-	if positional == "" {
-		return refuse(2, &epRefusal{"address_missing", "no endpoint address: write alice/dev/design"})
-	}
-	addr, err := parseEndpointRef(positional)
+	in, err := parseEpInput(endpointReissueSpec, args)
 	if err != nil {
-		return refuse(2, &epRefusal{"address_invalid", err.Error()})
+		return cliframe.Report(stdout, stderr, err, jsonRequested(args, "--out", "--public-key"))
 	}
-	doc.setAddr(addr)
-	switch {
-	case c.makeKey && c.publicKey != "":
-		return refuse(2, &epRefusal{"key_both", "give one of --public-key FILE and --make-key, not both"})
-	case !c.makeKey && c.publicKey == "":
-		return refuse(2, &epRefusal{"key_missing", "a reissue needs a new key: write --public-key FILE (the endpoint's new public key, from mash key create) or --make-key (make the key on this host)"})
+	t, res, err := epReissue(&in, env, lookup, stderr)
+	if err != nil {
+		return cliframe.Report(stdout, stderr, err, in.json)
 	}
+	epPrint(stdout, "reissue", t, res, g.Verbose, in.json)
+	return 0
+}
+
+// epReissue gives the endpoint new credentials, or with --dry-run checks that it could.
+func epReissue(in *epInput, env func(string) string, lookup config.Lookup, stderr io.Writer) (epTarget, epResult, error) {
+	addr, dry := in.addr, in.flags["--dry-run"]
 	servers, err := parseServers(env)
 	if err != nil {
-		return refuse(2, &epRefusal{"servers_invalid", err.Error()})
+		return epTarget{addr: addr}, epResult{}, cliframe.Usagef("%v", err).WithHint("mashctl endpoint reissue --help")
 	}
-	cfg, err := loadCtlConfig(env, lookup, true)
+	t, err := epLoadTarget("reissue", in, env, lookup)
 	if err != nil {
-		return epErr(doc, "reissue", "config", err.Error(), c.jsonOut, stdout, stderr)
+		return t, epResult{}, err
 	}
-
-	var pub, outPath string
-	resume := false // --public-key names the directory's key and a matching rotation marker is there
-	out := epOutput{doc: &doc, creds: c.makeKey}
-	var ref *epRefusal
-	if c.makeKey {
-		p, err := credsFileFor(cfg, addr)
-		if err != nil {
-			return refuse(1, &epRefusal{"no_config_dir", "no config directory to write the creds file in; set MASH_CONFIG_DIR"})
+	cfg, outPath, pub := t.cfg, t.outPath, t.pub
+	refuse := func(r *epRefusal) (epTarget, epResult, error) { return t, epResult{}, r.err(addr) }
+	if t.join {
+		// A join file is never written over a file. The one exception is the staged key of a killed run (below).
+		if _, perr := os.Lstat(outPath + ".pending"); !t.makeKey || perr != nil {
+			if ref := epPathFree(outPath); ref != nil {
+				return refuse(ref)
+			}
 		}
-		outPath = p
-		out.set(p)
-	} else {
-		if pub, ref = epReadPublicKey(c.publicKey); ref != nil {
-			return refuse(1, ref)
-		}
-		outPath = c.jwtOut
-		display := c.jwtOut
-		if outPath == "" {
-			outPath = addr.String() + ".jwt"
-			display = "./" + outPath
-		}
-		if ref := epPathFree(outPath); ref != nil {
-			return refuse(1, ref)
-		}
-		out.set(display)
 	}
 	keys, acct, err := epAccountOf(cfg, env)
 	if err != nil {
-		return refuse(1, &epRefusal{"no_account_key", err.Error()})
+		return refuse(&epRefusal{"no_account_key", err.Error()})
 	}
 	announceTarget(cfg, env, stderr, nil)
 	adm, ctx, closeAdmin, err := ctl.OpenAdmin("mashctl", cfg)
 	if err != nil {
-		return epErr(doc, "reissue", "server", admin.RewordUnavailable(err.Error())+"; nothing was changed", c.jsonOut, stdout, stderr)
+		return t, epResult{}, epErrOf(addr, "server", admin.RewordUnavailable(err.Error())+"; nothing was changed")
 	}
 	defer closeAdmin()
 
-	run := epRun{ctx: ctx, adm: adm, cfg: cfg, env: env, servers: servers, keys: keys, acct: acct, stderr: stderr}
-	failed := func(f *epFail) int {
-		if f.refused {
-			return refuse(1, &epRefusal{f.code, f.detail})
+	run := epRun{ctx: ctx, adm: adm, cfg: cfg, env: env, servers: servers, keys: keys, acct: acct, stderr: stderr,
+		base: t.base, join: t.join, again: t.again}
+	failed := func(f *epFail) (epTarget, epResult, error) {
+		e := f.err(addr)
+		if f.again && f.hint == "" {
+			e = e.WithHint(t.again)
 		}
-		return epErr(doc, "reissue", f.code, f.detail, c.jsonOut, stdout, stderr)
+		return t, epResult{}, e
 	}
 	if f := run.preflight(addr); f != nil {
 		return failed(f)
 	}
 
-	if !c.makeKey {
+	resume := false // --public-key names the directory's key and a matching rotation marker is there
+	if !t.makeKey {
 		// The supplied key is never signed (or re-signed, in the resume and restore cases of epKeyUnchanged, where it
 		// is the directory's current key) while the account JWT revokes it. A refusal here leaves any marker as it is.
 		if f := epKeyRevokedFail(ctx, cfg, env, servers, pub); f != nil {
@@ -226,65 +145,34 @@ func runEndpointReissue(args []string, env func(string) string, lookup config.Lo
 		}
 		ref, res, err := epKeyUnchanged(ctx, adm, addr, pub, outPath)
 		if err != nil {
-			return epErr(doc, "reissue", "server", admin.RewordUnavailable(err.Error()), c.jsonOut, stdout, stderr)
+			return t, epResult{}, epErrOf(addr, "server", admin.RewordUnavailable(err.Error()))
 		} else if ref != nil {
-			return refuse(1, ref)
+			return refuse(ref)
 		}
 		resume = res
 	}
-
-	var step epStep
-	if c.makeKey {
-		step = epStep{Sender: "endpoint", Step: "session", Action: "restart the sessions of this endpoint so they read the new creds",
-			Address: addr.String(), Purpose: "use", Detail: "creds file " + out.path()}
-	} else {
-		step = epNextCredential(addr, out.path())
-	}
-	doc.NextSteps = []epStep{step}
-	lines := func(w io.Writer) {
-		fmt.Fprintf(w, "  address  %s\n", addr)
-		if c.makeKey {
-			fmt.Fprintf(w, "  creds    %s\n", out.path())
-			fmt.Fprintln(w, "next: restart the sessions of this endpoint so they read the new creds")
-		} else {
-			fmt.Fprintf(w, "  jwt      %s\n", out.path())
-			fmt.Fprintln(w, "next: on the endpoint's machine, run: "+step.Detail)
+	if dry {
+		if !t.makeKey {
+			if ref, err := epIssuedRefusal(ctx, adm, addr, pub); err != nil {
+				return t, epResult{}, epErrOf(addr, "server", admin.RewordUnavailable(err.Error()))
+			} else if ref != nil {
+				return refuse(ref)
+			}
 		}
-	}
-	if c.dryRun && !c.makeKey {
-		if ref, err := epIssuedRefusal(ctx, adm, addr, pub); err != nil {
-			return epErr(doc, "reissue", "server", admin.RewordUnavailable(err.Error()), c.jsonOut, stdout, stderr)
-		} else if ref != nil {
-			return refuse(1, ref)
-		}
-	}
-	if c.dryRun {
-		doc.Outcome = "planned"
-		return epReport("reissue", doc, func(w io.Writer) {
-			fmt.Fprintf(w, "would reissue endpoint %s\n", epShortcut(addr))
-			lines(w)
-		}, 0, stdout, stderr, c.jsonOut)
+		return t, epResult{planned: true}, nil
 	}
 
 	if err := checkServerSet(ctx, cfg, env, servers); err != nil {
-		return epErr(doc, "reissue", "servers", fmt.Sprintf("%v; %s", err, ctl.NotRevoked), c.jsonOut, stdout, stderr)
+		return t, epResult{}, cliframe.Failf("%v", err).WithHint("mashctl doctor")
 	}
-	userPub, acked, f := run.reissue(addr, c.makeKey, pub, outPath, resume)
+	userPub, acked, f := run.reissue(addr, t.makeKey, pub, outPath, resume)
 	if f != nil {
 		return failed(f)
 	}
-	doc.UserPublicKey = userPub
-	doc.ServersAcknowledged = &acked
-	out.written()
-	doc.Outcome = "reissued"
-	return epReport("reissue", doc, func(w io.Writer) {
-		fmt.Fprintf(w, "reissued endpoint %s\n", epShortcut(addr))
-		lines(w)
-		fmt.Fprintf(w, "servers acknowledged the account update: %d\n", acked)
-	}, 0, stdout, stderr, c.jsonOut)
+	return t, epResult{userPub: userPub, acked: acked}, nil
 }
 
-// epMarker is what the rotation marker <jwt-out>.pending holds: the public key being rotated to and the address.
+// epMarker is what the rotation marker <out>.pending holds: the public key being rotated to and the address.
 func epMarker(pub string, addr sap.Address) []byte { return []byte(pub + "\n" + addr.String() + "\n") }
 
 // epMarkerMatches reports whether the marker file for outPath names pub and addr.
@@ -351,7 +239,7 @@ func epStagedPub(pending string) string {
 // earlier run was stopped after the directory moved), so the file still holds the previous key. No file is fine.
 func epCheckCreds(path string, addr sap.Address, dirUser, dirAcct string, staged bool) *epFail {
 	unreadable := func(why string) *epFail {
-		return &epFail{refused: true, code: "creds_unreadable", detail: fmt.Sprintf("the creds file %s exists but %s; nothing was changed: move the file aside (mv %s %s.old) and run again, or use --public-key", path, why, path, path)}
+		return &epFail{refused: true, code: "creds_unreadable", detail: fmt.Sprintf("the creds file %s exists but %s; nothing was changed", path, why), hint: fmt.Sprintf("mv %s %s.old", path, path)}
 	}
 	fi, err := os.Stat(path)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -403,7 +291,7 @@ func epCheckCreds(path string, addr sap.Address, dirUser, dirAcct string, staged
 	if why == "" {
 		return nil
 	}
-	return &epFail{refused: true, code: "creds_mismatch", detail: fmt.Sprintf("the creds file %s is not this endpoint's current creds: %s; nothing was changed: move the file aside (mv %s %s.old) and run again, or use --public-key", path, why, path, path)}
+	return &epFail{refused: true, code: "creds_mismatch", detail: fmt.Sprintf("the creds file %s is not this endpoint's current creds: %s; nothing was changed", path, why), hint: fmt.Sprintf("mv %s %s.old", path, path)}
 }
 
 // epRun is what one reissue needs: the open admin connection, the keys and the server settings.
@@ -416,6 +304,9 @@ type epRun struct {
 	keys    *ctlkeys.Authority
 	acct    string
 	stderr  io.Writer
+	base    joinBase // the servers and CA of a join file
+	join    bool     // --out: the output is a join file and nothing is installed here
+	again   string   // the command that finishes a run that did part of its work
 }
 
 // epBeforeRevokeCheck is a test seam called inside the revoke hook, under the name's lock, before its future-issued check.
@@ -426,12 +317,6 @@ type epFutureIssuedError struct{ err error }
 
 func (e *epFutureIssuedError) Error() string { return e.err.Error() }
 func (e *epFutureIssuedError) Unwrap() error { return e.err }
-
-// epFail is a refusal (refused, exit 1) or an error (also exit 1) of one endpoint, by its code.
-type epFail struct {
-	refused      bool
-	code, detail string
-}
 
 // preflight is the checks before a reissue changes anything: the address is not burned and has a directory record.
 func (r epRun) preflight(addr sap.Address) *epFail {
@@ -444,7 +329,7 @@ func (r epRun) preflight(addr sap.Address) *epFail {
 	}
 	switch _, _, err := r.adm.UserOf(r.ctx, addr); {
 	case errors.Is(err, admin.ErrNoRecord):
-		return &epFail{refused: true, code: "endpoint_missing", detail: fmt.Sprintf("endpoint %s does not exist; create it with: mashctl endpoint create %s", addr, epShortcut(addr))}
+		return &epFail{refused: true, code: "endpoint_missing", detail: ""}
 	case err != nil:
 		return &epFail{code: "server", detail: admin.RewordUnavailable(err.Error())}
 	}
@@ -477,12 +362,13 @@ func (r epRun) reissue(addr sap.Address, makeKey bool, pub, outPath string, resu
 	defer unlock()
 	old, dirAcct, uerr := r.adm.UserOf(r.ctx, addr)
 	if errors.Is(uerr, admin.ErrNoRecord) {
-		return "", 0, &epFail{refused: true, code: "endpoint_missing", detail: fmt.Sprintf("endpoint %s does not exist; create it with: mashctl endpoint create %s", addr, epShortcut(addr))}
+		return "", 0, &epFail{refused: true, code: "endpoint_missing", detail: ""}
 	}
 	if uerr != nil {
 		return "", 0, &epFail{code: "server", detail: admin.RewordUnavailable(uerr.Error())}
 	}
 	rotating := true // the directory key will be revoked: false for a resume, which only writes the output
+	written := false // the join file already holds the staged key: an earlier run wrote it and was stopped
 	if makeKey {
 		// The creds file is checked under the lock, before anything is staged or revoked: a file that is not this
 		// endpoint's current creds is never overwritten.
@@ -494,11 +380,21 @@ func (r epRun) reissue(addr sap.Address, makeKey bool, pub, outPath string, resu
 				return "", 0, &epFail{code: "revocation_unknown", detail: fmt.Sprintf("cannot tell whether the staged key %s is revoked: %v; nothing was changed", pending, rerr)}
 			}
 			if revoked {
-				return "", 0, &epFail{refused: true, code: "staged_key_revoked", detail: fmt.Sprintf("the staged key %s was revoked; remove %s and run the command again", pending, pending)}
+				return "", 0, &epFail{refused: true, code: "staged_key_revoked", detail: fmt.Sprintf("the staged key %s was revoked", pending), hint: "rm " + pending}
 			}
 		}
 		staged := stagedPub != "" && stagedPub == old
-		if f := epCheckCreds(outPath, addr, old, dirAcct, staged); f != nil {
+		if r.join {
+			// Nothing is installed here: the join file is the output, and only the staged key of a killed run may
+			// have written it already.
+			if _, serr := os.Lstat(outPath); serr == nil {
+				have, herr := epOutUser(outPath, addr, true)
+				if herr != nil || !staged || have != stagedPub {
+					return "", 0, &epFail{refused: true, code: "file_exists", detail: fmt.Sprintf("%s already exists", outPath)}
+				}
+				written = true
+			}
+		} else if f := epCheckCreds(outPath, addr, old, dirAcct, staged); f != nil {
 			return "", 0, f
 		}
 		rotating = !staged
@@ -506,7 +402,7 @@ func (r epRun) reissue(addr sap.Address, makeKey bool, pub, outPath string, resu
 		// A run that held the lock before this one may have written the file: check again under the lock, before the
 		// server key is rotated, so a refusal here changes nothing.
 		if _, serr := os.Lstat(outPath); serr == nil {
-			return "", 0, &epFail{refused: true, code: "file_exists", detail: fmt.Sprintf("%s already exists and is never overwritten; nothing was changed: name another file with --jwt-out", outPath)}
+			return "", 0, &epFail{refused: true, code: "file_exists", detail: fmt.Sprintf("%s already exists", outPath)}
 		}
 		if resume {
 			if old != pub || !epMarkerMatches(outPath, pub, addr) {
@@ -557,7 +453,12 @@ func (r epRun) reissue(addr sap.Address, makeKey bool, pub, outPath string, resu
 			}
 			var out bytes.Buffer
 			n, err := revokeUsers(ctx, r.cfg, r.env, r.servers, []string{u}, &out, func() time.Time { return revokeAt })
-			r.stderr.Write(out.Bytes())
+			// A warning from the revocation is kept; the rest of its lines are the acknowledgement counts.
+			for _, l := range strings.Split(out.String(), "\n") {
+				if strings.HasPrefix(l, "warning: ") {
+					fmt.Fprintln(r.stderr, l)
+				}
+			}
 			acked = n
 			return err
 		}}
@@ -580,29 +481,38 @@ func (r epRun) reissue(addr sap.Address, makeKey bool, pub, outPath string, resu
 			}
 			return "", 0, &epFail{refused: true, code: ref.Code, detail: ref.Detail}
 		}
-		return "", 0, &epFail{code: "server", detail: admin.RewordUnavailable(err.Error()) + "; run the same command again to finish it"}
+		return "", 0, &epFail{code: "server", detail: admin.RewordUnavailable(err.Error()) + "; the endpoint may be partly reissued", again: true}
 	}
 	var werr error
-	if makeKey {
+	switch {
+	case makeKey && written:
+		// The join file already holds this key: nothing to write.
+	case makeKey && r.join:
+		werr = epPublishStagedJoin(r.base, addr, res.JWT, seed, outPath, pending, false)
+	case makeKey:
 		werr = epPublishStaged(res.JWT, seed, outPath, pending, true, false)
-	} else {
+	default:
 		if epAfterEnroll != nil {
 			epAfterEnroll()
 		}
-		werr = epWriteNew(outPath, []byte(res.JWT+"\n"))
+		werr = writeJoinFile(outPath, r.base.withJWT(addr.String(), res.JWT))
 		if werr == nil {
 			os.Remove(marker)
 		}
 	}
 	if errors.Is(werr, fs.ErrExist) {
-		return "", 0, &epFail{refused: true, code: "file_exists", detail: fmt.Sprintf("%s appeared while the command ran and is never overwritten; endpoint %s was reissued: run the same command again with another --jwt-out", outPath, addr)}
+		return "", 0, &epFail{refused: true, code: "file_exists", detail: fmt.Sprintf("%s appeared while the command ran; endpoint %s was reissued but %s was not written", outPath, addr, outPath), again: true}
 	}
 	if werr != nil {
-		finish := "run the same command with --public-key again to write the JWT"
-		if makeKey {
-			finish = fmt.Sprintf("the new key is kept in %s; run the same command again to finish it", pending)
+		joinHint := ""
+		if r.join {
+			joinHint = fmt.Sprintf("remove %s or choose another --out", outPath)
 		}
-		return "", 0, &epFail{code: "write", detail: fmt.Sprintf("endpoint %s was reissued but %s was not written (%v); %s", addr, outPath, werr, finish)}
+		kept := ""
+		if makeKey {
+			kept = fmt.Sprintf("; the new key is kept in %s", pending)
+		}
+		return "", 0, &epFail{code: "write", detail: fmt.Sprintf("endpoint %s was reissued but %s was not written (%v)%s", addr, outPath, werr, kept), again: true, hint: joinHint}
 	}
 	// enroll.Reissue released the server's name lock before the file was written, and the lock above is local to this
 	// host: a run on another host may have changed the key since. Read the record again and compare.
@@ -620,9 +530,9 @@ func (r epRun) reissue(addr sap.Address, makeKey bool, pub, outPath string, resu
 	if verr != nil {
 		kept := ""
 		if makeKey {
-			kept = fmt.Sprintf(" The staged key %s was kept: run the same command again to finish it; the new key is not revoked.", pending)
+			kept = fmt.Sprintf(" The staged key %s was kept; the new key is not revoked.", pending)
 		}
-		return "", 0, &epFail{code: "server", detail: fmt.Sprintf("endpoint %s was reissued and %s was written, but the result could not be confirmed (%s) and the file was kept: run mashctl endpoint show %s and compare its key with the one in the file.%s", addr, outPath, admin.RewordUnavailable(verr.Error()), epShortcut(addr), kept)}
+		return "", 0, &epFail{code: "server", detail: fmt.Sprintf("endpoint %s was reissued and %s was written, but the result could not be confirmed (%s) and the file was kept: run mashctl endpoint show %s and compare its key with the one in the file.%s", addr, outPath, admin.RewordUnavailable(verr.Error()), addr, kept), again: true}
 	}
 	if cur != res.PublicKey {
 		os.Remove(outPath)
@@ -630,7 +540,7 @@ func (r epRun) reissue(addr sap.Address, makeKey bool, pub, outPath string, resu
 		if makeKey {
 			os.Remove(pending)
 		}
-		return "", 0, &epFail{code: "superseded", detail: fmt.Sprintf("another reissue changed %s's key while this one ran, so the credentials this run wrote are for a key that is no longer the endpoint's; they were removed; run the command again", addr)}
+		return "", 0, &epFail{code: "superseded", detail: fmt.Sprintf("another reissue changed %s's key while this one ran, so the credentials this run wrote are for a key that is no longer the endpoint's; they were removed", addr), again: true}
 	}
 	if makeKey {
 		// The readback confirmed the key: the staged seed is not needed any more. Removed only now, so a run stopped

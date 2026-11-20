@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/bogworks/mash/internal/admin"
@@ -16,29 +17,26 @@ func TestEndpointCreatePublicKeyRefusesRevokedKey(t *testing.T) {
 	out := t.TempDir()
 	pub, file, _ := epKey(t, out, "k")
 	a := ad("rk")
-	jf := filepath.Join(out, "rk.jwt")
+	jf := filepath.Join(out, "rk.join")
 	before := epSnapshot(t, h, out)
 	for _, dry := range []bool{false, true} {
 		fakeKeyRevoked(t, func(p string) (bool, error) { return p == pub, nil })
-		args := []string{"endpoint", "create", a.String(), "--public-key", file, "--jwt-out", jf, "--json"}
+		args := []string{"endpoint", "create", a.String(), "--out", jf, "--public-key", file}
 		if dry {
 			args = append(args, "--dry-run")
 		}
 		so, se, code := h.run(args...)
-		if code != 1 || refusalCode(t, so) != "key_revoked" {
+		if code != 1 || so != "" || !strings.Contains(se, "was revoked") || !strings.HasSuffix(se, "\nhint: mash key create --out NAME.seed\n") {
 			t.Fatalf("dry=%v revoked: %d %q %q", dry, code, so, se)
-		}
-		if d := epDocOf(t, so); len(d.NextSteps) != 1 || d.NextSteps[0].Detail != "mash key create --out rk.seed" {
-			t.Errorf("next steps %+v", d.NextSteps)
 		}
 		fakeKeyRevoked(t, func(string) (bool, error) { return false, errors.New("no answer") })
 		so, se, code = h.run(args...)
-		if code != 1 || refusalCode(t, so) != "revocation_unknown" {
+		if code != 1 || !strings.Contains(se, "cannot tell whether the public key") {
 			t.Fatalf("dry=%v unknown: %d %q %q", dry, code, so, se)
 		}
 	}
 	if _, err := os.Lstat(jf); !os.IsNotExist(err) {
-		t.Error("a JWT file was written")
+		t.Error("a join file was written")
 	}
 	if _, ok := h.record(a); ok {
 		t.Error("a directory record was written")
@@ -54,25 +52,25 @@ func TestEndpointReissuePublicKeyRefusesRevokedKey(t *testing.T) {
 	out := t.TempDir()
 	a := ad("rr")
 	_, file0, _ := epKey(t, out, "k0")
-	if _, se, code := h.run("endpoint", "create", a.String(), "--public-key", file0, "--jwt-out", filepath.Join(out, "k0.jwt")); code != 0 {
+	if _, se, code := h.run("endpoint", "create", a.String(), "--out", filepath.Join(out, "k0.join"), "--public-key", file0); code != 0 {
 		t.Fatalf("create: %q", se)
 	}
 	pub1, file1, _ := epKey(t, out, "k1")
-	jf := filepath.Join(out, "new.jwt")
+	jf := filepath.Join(out, "new.join")
 	before := epSnapshot(t, h, out)
 	for _, dry := range []bool{false, true} {
 		fakeKeyRevoked(t, func(p string) (bool, error) { return p == pub1, nil })
-		args := []string{"endpoint", "reissue", a.String(), "--public-key", file1, "--jwt-out", jf, "--json"}
+		args := []string{"endpoint", "reissue", a.String(), "--out", jf, "--public-key", file1}
 		if dry {
 			args = append(args, "--dry-run")
 		}
 		so, se, code := h.run(args...)
-		if code != 1 || refusalCode(t, so) != "key_revoked" {
+		if code != 1 || !strings.Contains(se, "was revoked") {
 			t.Fatalf("dry=%v revoked: %d %q %q", dry, code, so, se)
 		}
 		fakeKeyRevoked(t, func(string) (bool, error) { return false, errors.New("no answer") })
 		so, se, code = h.run(args...)
-		if code != 1 || refusalCode(t, so) != "revocation_unknown" {
+		if code != 1 || !strings.Contains(se, "cannot tell whether the public key") {
 			t.Fatalf("dry=%v unknown: %d %q %q", dry, code, so, se)
 		}
 	}
@@ -88,12 +86,12 @@ func TestEndpointReissueNeverResignsRevokedCurrentKey(t *testing.T) {
 	out := t.TempDir()
 	a := ad("rv")
 	_, file0, _ := epKey(t, out, "k0")
-	if _, se, code := h.run("endpoint", "create", a.String(), "--public-key", file0, "--jwt-out", filepath.Join(out, "k0.jwt")); code != 0 {
+	if _, se, code := h.run("endpoint", "create", a.String(), "--out", filepath.Join(out, "k0.join"), "--public-key", file0); code != 0 {
 		t.Fatalf("create: %q", se)
 	}
 	pub1, file1, _ := epKey(t, out, "k1")
-	jwtOut := filepath.Join(out, "new.jwt")
-	args := []string{"endpoint", "reissue", a.String(), "--public-key", file1, "--jwt-out", jwtOut, "--json"}
+	jwtOut := filepath.Join(out, "new.join")
+	args := []string{"endpoint", "reissue", a.String(), "--out", jwtOut, "--public-key", file1}
 	if code := killAt(h, &epAfterEnroll, args...); code != -1 {
 		t.Fatalf("not stopped: %d", code)
 	}
@@ -101,18 +99,18 @@ func TestEndpointReissueNeverResignsRevokedCurrentKey(t *testing.T) {
 	before, _ := os.ReadFile(marker)
 	fakeKeyRevoked(t, func(p string) (bool, error) { return p == pub1, nil })
 	so, se, code := h.run(args...)
-	if code != 1 || refusalCode(t, so) != "key_revoked" {
+	if code != 1 || !strings.Contains(se, "was revoked") {
 		t.Fatalf("resume revoked: %d %q %q", code, so, se)
 	}
 	if got, err := os.ReadFile(marker); err != nil || string(got) != string(before) {
 		t.Errorf("marker not kept: %v", err)
 	}
 	if _, err := os.Lstat(jwtOut); !os.IsNotExist(err) {
-		t.Error("a JWT was written")
+		t.Error("a join file was written")
 	}
 	fakeKeyRevoked(t, func(string) (bool, error) { return false, errors.New("no answer") })
 	so, se, code = h.run(args...)
-	if code != 1 || refusalCode(t, so) != "revocation_unknown" {
+	if code != 1 || !strings.Contains(se, "cannot tell whether the public key") {
 		t.Fatalf("resume unknown: %d %q %q", code, so, se)
 	}
 	if _, err := os.Lstat(marker); err != nil {
@@ -132,19 +130,19 @@ func TestEndpointReissueNeverResignsRevokedCurrentKey(t *testing.T) {
 	if err := os.WriteFile(curFile, []byte(cur+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	rj := filepath.Join(out, "r.jwt")
-	rargs := []string{"endpoint", "reissue", b.String(), "--public-key", curFile, "--jwt-out", rj, "--json"}
+	rj := filepath.Join(out, "r.join")
+	rargs := []string{"endpoint", "reissue", b.String(), "--out", rj, "--public-key", curFile}
 	fakeKeyRevoked(t, func(p string) (bool, error) { return p == cur, nil })
 	so, se, code = h.run(rargs...)
-	if code != 1 || refusalCode(t, so) != "key_revoked" {
+	if code != 1 || !strings.Contains(se, "was revoked") {
 		t.Fatalf("restore revoked: %d %q %q", code, so, se)
 	}
 	fakeKeyRevoked(t, func(string) (bool, error) { return false, errors.New("no answer") })
 	so, se, code = h.run(rargs...)
-	if code != 1 || refusalCode(t, so) != "revocation_unknown" {
+	if code != 1 || !strings.Contains(se, "cannot tell whether the public key") {
 		t.Fatalf("restore unknown: %d %q %q", code, so, se)
 	}
 	if _, err := os.Lstat(rj); !os.IsNotExist(err) {
-		t.Error("a JWT was written")
+		t.Error("a join file was written")
 	}
 }
