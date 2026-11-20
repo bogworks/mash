@@ -187,13 +187,14 @@ func TestRotateNeverConnectsRevokesAtDeadline(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			e := newRotEnv(t, 150*time.Millisecond)
 			e.in.Deliverer = rotDeliverer{ev: e.ev, err: derr}
-			start := time.Now()
 			res, err := Rotate(context.Background(), e.in)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if d := time.Since(start); d < 150*time.Millisecond {
-				t.Errorf("returned after %v, before the deadline", d)
+			// Measured against the deadline Rotate was given, not a start taken later: the deadline was fixed in
+			// newRotEnv, and a loaded runner can run a while between that and here.
+			if now := time.Now(); now.Before(e.in.Deadline) {
+				t.Errorf("returned %v before the deadline", e.in.Deadline.Sub(now))
 			}
 			if res.Connected {
 				t.Error("reported connected")

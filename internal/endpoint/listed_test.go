@@ -174,6 +174,10 @@ func TestListedIsAckedWhenALaterHookShowsItInFull(t *testing.T) {
 // A restart (a rebind) spools the unacked listed mail again as new mail: one digest of it, then no wake loop.
 func TestListedMailIsListedOnceAgainAfterARebind(t *testing.T) {
 	listedKnobs(t)
+	// The respooled mail wakes IdleWake after it is spooled unless the serve loop has seen it listed by then. At 300 ms
+	// a loaded runner can take longer than that between the respool and the loop noticing the listing, so a first
+	// wake fires for mail already listed. A long idle wake gives the listing a wide margin; the waits are bounded by it.
+	IdleWake = 2 * time.Second
 	f := newFixture(t, "a", "b")
 	sp := spool.Spool{Dir: t.TempDir() + "/spool"}
 	open := func() (*Endpoint, *events, func()) {
@@ -224,7 +228,7 @@ func TestListedMailIsListedOnceAgainAfterARebind(t *testing.T) {
 	}
 	listAll(t, sp)
 	rung := len(ev2.all())
-	time.Sleep(6 * IdleWake)
+	time.Sleep(IdleWake + IdleWake/2) // past the first wake it would have rung, were the mail not listed
 	if got := ev2.all(); len(got) != rung {
 		t.Fatalf("a wake loop after the rebind: %q", got)
 	}
