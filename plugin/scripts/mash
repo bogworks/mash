@@ -1,6 +1,7 @@
 #!/bin/sh
 # mash launcher for the Claude Code plugin. Resolves, and if needed downloads and verifies, the mash binary,
-# then execs it. stdout belongs to the binary (it is the MCP stream); everything here goes to stderr.
+# then execs it. stdout belongs to the binary (it is the MCP stream); everything here goes to stderr, except the
+# one not-installed line that `__prefetch` (the SessionStart hook) prints on stdout when no mash program is available.
 #
 # The release pin lives beside this script in `mash.pins` (written after a release by plugin/scripts/pin-plugin):
 #   version=<N.N.N>
@@ -27,11 +28,12 @@ if [ -f "$PINS" ]; then
 fi
 
 REPO_URL="https://github.com/bogworks/mash"
-if [ -n "${MASH_RELEASE_BASE:-}" ]; then
-  HINT="mash: no binary found. Install it with install.sh from your release source ($MASH_RELEASE_BASE): curl -fsSL <that release's install.sh> | bash"
-else
-  HINT="mash: no binary found. Install it: curl -fsSL $REPO_URL/releases/latest/download/install.sh | bash"
-fi
+# The one release-base setting: MASH_RELEASE_BASE when set (a fork or a mirror points at itself), else the project's own.
+# Versioned downloads are $MASH_RELEASE_BASE/v<version>/<asset> (default $REPO_URL/releases/download/v<version>/<asset>);
+# the install line names the "latest" base ($REPO_URL/releases/latest/download by default). Always filled in.
+INSTALL_BASE="${MASH_RELEASE_BASE:-$REPO_URL/releases/latest/download}"
+NOT_INSTALLED="mash is not installed: the mash plugin found no mash program. Install it: curl -fsSL $INSTALL_BASE/install.sh | bash"
+HINT="$NOT_INSTALLED"
 
 log() { printf '%s\n' "mash launcher: $*" >&2; }
 
@@ -279,9 +281,13 @@ resolve() {
 }
 
 if [ "$PREFETCH" = 1 ]; then
-  # Warm the managed copy only; an override needs no prefetch. Never fails, never writes stdout.
+  # Warm the managed copy only; an override needs no prefetch. Never fails. The one thing it may write to stdout (the
+  # SessionStart hook's stdout is shown to the agent) is the not-installed line, when no mash program is available.
   if [ -z "${MASH_BIN:-}" ] && ! managed_ok && [ -n "$MASH_VERSION" ]; then
     download >/dev/null || log "prefetch did not install a binary"
+  fi
+  if [ -z "${MASH_BIN:-}" ] && ! managed_ok && ! path_mash >/dev/null; then
+    printf '%s\n' "$NOT_INSTALLED"
   fi
   exit 0
 fi

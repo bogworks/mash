@@ -900,7 +900,7 @@ func TestLiveStrangerL3MinimalEnvironment(t *testing.T) {
 	ls.info(t, id, "no mash on PATH: MCP server state (init message)", "%s", strings.Join(st.mcp, ", "))
 	logb, _ := os.ReadFile(filepath.Join(sc.home, ".local", "state", "mash", "hook.log"))
 	hl := string(logb)
-	ls.check(t, id, "no mash on PATH: hook.log says so", strings.Contains(hl, "no binary found") || strings.Contains(hl, "not found"), "hook.log (%d bytes): %s", len(logb), firstLines(hl, 3))
+	ls.check(t, id, "no mash on PATH: hook.log says so", strings.Contains(hl, "is not installed") || strings.Contains(hl, "not found"), "hook.log (%d bytes): %s", len(logb), firstLines(hl, 3))
 
 	ls.info(t, id, "a failed plugin MCP server is cached per config dir", "%s", "a failed plugin MCP server is cached per config dir for ~15 min")
 	if sc.inPlace {

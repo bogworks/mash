@@ -96,8 +96,8 @@ func TestStrangerMinimalPathHookIsVisible(t *testing.T) {
 			t.Fatalf("%s: stdout %q stderr %q, want nothing (the hook's stderr goes to hook.log)", h.Event, out.String(), errb.String())
 		}
 		log, err := os.ReadFile(filepath.Join(state, "mash", "hook.log"))
-		if err != nil || !strings.Contains(string(log), "no binary found") {
-			t.Fatalf("%s: hook.log %q (%v), want a \"no binary found\" line", h.Event, log, err)
+		if err != nil || !strings.Contains(string(log), "is not installed") {
+			t.Fatalf("%s: hook.log %q (%v), want an \"is not installed\" line", h.Event, log, err)
 		}
 	}
 	if ran != 2 {
