@@ -20,7 +20,7 @@
 #
 # Environment:
 #   MLNT_IMAGES   space-separated image tags (default: debian:stable ubuntu:24.04 ubuntu:26.04)
-#   MLNT_CASES    space-separated case numbers (default: 1 2 ... 23)
+#   MLNT_CASES    space-separated case numbers (default: 1 2 ... 25)
 #   MLNT_MODES    space-separated modes (default: linux darwin)
 #   MLNT_REPORT   receipt file (markdown; default: receipt-<run id>.md in the scratch
 #                 directory, or in ${TMPDIR:-/tmp} when the scratch directory is made here)
@@ -1268,11 +1268,130 @@ case23() { # HOME is needed only for the default folder; --dir works without it
     PRE=()
 }
 
+case24() { # the nats store layout is checked before any file is read
+    local d=$H/mash-nats real n
+    real=$(command -v nats)
+    ROUTE=pipe
+    mkdir -p "$W/shim"
+    cat >"$W/shim/nats" <<SH
+#!/bin/sh
+$real "\$@" || exit \$?
+case "\$*" in
+*"auth user add sys"*) rm -f "\$XDG_DATA_HOME/nats/nsc/stores/mash/accounts/SYSTEM/SYSTEM.jwt" ;;
+esac
+SH
+    chmod 755 "$W/shim/nats"
+    PRE=(env "PATH=$W/shim:$PATH"); run --owner acme
+    chk "moved store file: exit 1" rc_is 1
+    chk "moved store file: the exact message, then the hint" \
+        bash -c '[ "$(sed -n 1p "$0")" = "error: the nats command stored its keys somewhere unexpected (tested with nats v0.5.2)" ] && [ "$(sed -n 2p "$0")" = "hint: use nats v0.5.2, or report this; nothing was left behind" ]' "$W/err"
+    n=$(grep -c 'stored its keys' "$W/err")
+    chk "moved store file: the message is printed once (got $n)" [ "$n" = 1 ]
+    chk "moved store file: nothing but those two lines" [ "$(wc -l <"$W/err")" -eq 2 ]
+    chk "moved store file: the dir is gone" absent "$d"
+    chk "moved store file: no server on 4222" bash -c '! "$REALSS" -ltn | grep -q 127.0.0.1:4222'
+    rm -f "$W/shim/nats"
+    PRE=()
+    run --owner acme
+    check_success "$d" acme
+    chk "a normal run afterwards: no lock left" absent "$d/.lock"
+    stopdir "$d"
+}
+
+case25() { # one lifecycle lock: create, --start, --stop, --remove do not overlap
+    local d=$H/lk pid pt SP DP i rca rcb rc1 rc2 e2 w
+    ROUTE="file"
+    # (a) two creates at once on the same --dir: exactly one wins
+    bash "$SCRIPT" --owner acme --dir "$d" >"$W/o1" 2>"$W/e1" </dev/null & rca=$!
+    bash "$SCRIPT" --owner acme --dir "$d" >"$W/o2" 2>"$W/e2" </dev/null & rcb=$!
+    wait "$rca"; rc1=$?
+    wait "$rcb"; rc2=$?
+    chk "two creates: exactly one succeeds (rc $rc1, $rc2)" \
+        bash -c '{ [ "$1" = 0 ] && [ "$2" != 0 ]; } || { [ "$1" != 0 ] && [ "$2" = 0 ]; }' _ "$rc1" "$rc2"
+    if [ "$rc1" = 0 ]; then cp "$W/o1" "$W/out"; cp "$W/e1" "$W/err"; e2=$W/e2
+    else cp "$W/o2" "$W/out"; cp "$W/e2" "$W/err"; e2=$W/e1; fi
+    RC=0
+    chk "two creates: the loser says an error" hasre "$e2" '^error: '
+    check_success "$d" acme
+    pid=$(pid_of "$d"); pt=$(port_of "$d")
+    chk "two creates: the first one's server answers" nn "$d" "$pt" account info
+    chk "two creates: no lock left" absent "$d/.lock"
+    # (b) a lock held by a live pid: nothing runs, nothing changes
+    sleep 300 & SP=$!
+    echo "$SP" >"$d/.lock"
+    run --stop --dir "$d"
+    chk "live lock, --stop: exit 1" rc_is 1
+    chk "live lock, --stop: says another run is using it" has "$W/err" "error: another run is using $d (pid $SP)"
+    chk "live lock, --stop: the server is untouched" alive "$pid"
+    chk "live lock, --stop: the lock is still the sleeper's" [ "$(cat "$d/.lock")" = "$SP" ]
+    rm -f "$d/.lock"
+    run --stop --dir "$d"
+    chk "no lock, --stop: exit 0" rc_is 0
+    chk "no lock, --stop: server gone" gone "$pid"
+    chk "no lock, --stop: no lock left" absent "$d/.lock"
+    echo "$SP" >"$d/.lock"
+    run --start --dir "$d"
+    chk "live lock, --start: exit 1" rc_is 1
+    chk "live lock, --start: says another run is using it" has "$W/err" "error: another run is using $d (pid $SP)"
+    chk "live lock, --start: no server started" bash -c '! "$REALSS" -ltn | grep -q 127.0.0.1:'"$pt"
+    ptyrun "$d" bash "$SCRIPT" --remove --dir "$d"
+    chk "live lock, --remove: exit 1" rc_is 1
+    chk "live lock, --remove: says another run is using it" has "$W/out" "error: another run is using $d (pid $SP)"
+    chk "live lock, --remove: the dir is intact" [ -f "$d/mash-setup.json" ]
+    chk "live lock, --remove: the sleeper still holds the lock" [ "$(cat "$d/.lock")" = "$SP" ]
+    kill "$SP"; wait "$SP" 2>/dev/null
+    chk "the test's sleep is stopped by its recorded pid" gone "$SP"
+    # (c) a lock holding a dead pid is taken over
+    true & DP=$!
+    wait "$DP"
+    chk "control: the pid in the stale lock is dead" gone "$DP"
+    rm -f "$d/.lock"; echo "$DP" >"$d/.lock"
+    run --start --dir "$d"
+    chk "stale lock, --start: exit 0" rc_is 0
+    chk "stale lock, --start: no lock left" absent "$d/.lock"
+    chk "stale lock, --start: the server answers" nn "$d" "$pt" account info
+    echo "$DP" >"$d/.lock"
+    run --stop --dir "$d"
+    chk "stale lock, --stop: exit 0" rc_is 0
+    chk "stale lock, --stop: no lock left" absent "$d/.lock"
+    chk "stale lock, --stop: server gone" bash -c '! "$REALSS" -ltn | grep -q 127.0.0.1:'"$pt"
+    mkdir "$d/.lock"
+    run --start --dir "$d"
+    chk "empty lock, --start: exit 0 (taken over)" rc_is 0
+    chk "empty lock, --start: no lock left" absent "$d/.lock"
+    stopdir "$d"
+    # (d) --start and --remove at once: never a server on a deleted store
+    for i in 1 2 3; do
+        w=$H/race$i
+        run --owner acme --dir "$w"
+        chk "race $i: control, create ok" rc_is 0
+        pt=$(port_of "$w")
+        stopdir "$w"
+        bash "$SCRIPT" --start --dir "$w" >"$W/o1" 2>"$W/e1" </dev/null & rca=$!
+        ptyrun "$w" bash "$SCRIPT" --remove --dir "$w"
+        rc2=$RC
+        wait "$rca"; rc1=$?
+        sleep 1
+        if [ -d "$w" ]; then
+            chk "race $i: dir kept, so --remove failed (rc $rc2)" [ "$rc2" != 0 ]
+            chk "race $i: dir kept, so --start succeeded (rc $rc1)" [ "$rc1" = 0 ]
+            chk "race $i: dir kept, the server answers" nn "$w" "$pt" account info
+            chk "race $i: dir kept, no lock left" absent "$w/.lock"
+            stopdir "$w"
+            ptyrun "$w" bash "$SCRIPT" --remove --dir "$w"
+        else
+            chk "race $i: dir gone, so --remove succeeded (rc $rc2)" [ "$rc2" = 0 ]
+            chk "race $i: dir gone, no server listens" bash -c '! "$REALSS" -ltn | grep -q 127.0.0.1:'"$pt"
+        fi
+        chk "race $i: finally the dir is gone" absent "$w"
+    done
+}
+
 run_case() {
     case $CASE in
     15) case15 ;; 16) case16 ;; 17) case17 ;; 18) case18 ;; 19) case19 ;; 20) case20 ;; 21) case21 ;;
     1) case1 ;; 2) case2 ;; 3) case3 ;; 4) case4 ;; 5) case5 ;; 6) case6 ;; 7) case7 ;;
-    8) case8 ;; 9) case9 ;; 10) case10 ;; 11) case11 ;; 12) case12 ;; 13) case13 ;; 14) case14 ;; 22) case22 ;; 23) case23 ;;
+    8) case8 ;; 9) case9 ;; 10) case10 ;; 11) case11 ;; 12) case12 ;; 13) case13 ;; 14) case14 ;; 22) case22 ;; 23) case23 ;; 24) case24 ;; 25) case25 ;;
     *) echo "FAIL: c$CASE: no such case" ;;
     esac
 }
@@ -1307,7 +1426,7 @@ else
     MADE_SCRATCH=1
 fi
 IMAGES=${MLNT_IMAGES:-"debian:stable ubuntu:24.04 ubuntu:26.04"}
-CASES=${MLNT_CASES:-"1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23"}
+CASES=${MLNT_CASES:-"1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25"}
 MODES=${MLNT_MODES:-"linux darwin"}
 NCV=${MLNT_NATSCLI:-0.5.2}
 # sha256 of https://github.com/nats-io/natscli/releases/download/v0.5.2/nats-0.5.2-linux-amd64.zip,

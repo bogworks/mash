@@ -18,6 +18,10 @@
 # anything runs from main(), the last line of the file, so a truncated download
 # piped into bash defines functions and runs nothing.
 #
+# One exclusive lifecycle lock (the file DIR/.lock, holding the pid) is held
+# across the whole of create, --start, --stop and --remove, so they cannot
+# overlap; a lock whose pid is gone is taken over.
+#
 # Portability: file owner and mode come from GNU stat (-c) or BSD stat (-f),
 # found by trying `stat -c %u /` once; process checks use /proc on Linux and
 # kill -0 plus ps on macOS; listeners are read with ss (Linux) or lsof (macOS).
@@ -381,14 +385,55 @@ start_server() { # needs PORT
     exit 1
 }
 
+# ---------------------------------------------------------------- lock
+LOCKED=0
+release_lock() {
+    if [ "$LOCKED" = 1 ]; then
+        LOCKED=0
+        [ "$(cat "$DIR/.lock" 2>/dev/null || true)" != "$$" ] || rm -f "$DIR/.lock" 2>/dev/null || true
+    fi
+    return 0
+}
+busy() { die 1 "another run is using $DIR (pid ${1:-?})" "wait for it to finish, then run $SELF again"; }
+# the lock is the file DIR/.lock holding the pid, made with noclobber (O_EXCL),
+# which is atomic and exclusive on every system (mkdir is not, in uutils
+# coreutils on Ubuntu 26.04)
+lock_make() { ( set -C; printf '%s\n' "$$" >"$DIR/.lock" ) 2>/dev/null; }
+lock_dir() {
+    if ! lock_make; then
+        _lp=$(cat "$DIR/.lock" 2>/dev/null || true)
+        if [ -z "$_lp" ]; then
+            sleep 1
+            _lp=$(cat "$DIR/.lock" 2>/dev/null || true)
+        fi
+        case $_lp in *[!0-9]*) _lp='' ;; esac
+        if [ -n "$_lp" ] && kill -0 "$_lp" 2>/dev/null; then busy "$_lp"; fi
+        # stale: its run is gone; take over by recorded path
+        if [ -d "$DIR/.lock" ] && [ ! -L "$DIR/.lock" ]; then
+            rmdir "$DIR/.lock" 2>/dev/null || busy "$_lp"
+        else
+            rm -f "$DIR/.lock" 2>/dev/null || busy "$_lp"
+        fi
+        lock_make || busy "$_lp"
+    fi
+    LOCKED=1
+}
+lock_mode() { # for --start, --stop, --remove
+    trap release_lock EXIT
+    trap 'exit 1' INT TERM HUP
+    lock_dir
+}
+
 # ---------------------------------------------------------------- stop/start/remove
 mode_stop() {
     require_made_dir
+    lock_mode
     do_stop
 }
 
 mode_start() {
     require_made_dir
+    lock_mode
     if _p=$(recorded_pid) && proc_ours "$_p"; then
         echo "already running: pid $_p on 127.0.0.1:$PORT"; return 0
     fi
@@ -409,6 +454,7 @@ mode_remove() {
     need_port_tool
     tty_ok || die 4 "--remove needs a terminal to confirm" \
         "run it from a terminal; nothing was changed"
+    lock_mode
     printf 'type the folder to remove (%s): ' "$DIR" >/dev/tty
     IFS= read -r ans </dev/tty || ans=''
     [ "$ans" = "$DIR" ] || die 1 "the path typed does not match" "nothing was changed"
@@ -428,6 +474,7 @@ add_miss() { miss="${miss:+$miss, }$1"; hints="${hints:+$hints; }$2"; }
 cleanup() {
     _rc=$?
     trap - EXIT INT TERM
+    release_lock
     if [ "$_rc" -ne 0 ] && [ "$SAID" = 0 ]; then
         printf 'error: a step failed\n' >&2
         printf 'hint: nothing was left behind; check the tools and retry\n' >&2
@@ -517,6 +564,13 @@ https://github.com/nats-io/natscli/releases"
     trap 'exit 1' INT TERM HUP
 
     mkdir -m 700 "$DIR" || die 1 "cannot make $DIR" "check the folder and retry"
+    # mkdir is not exclusive everywhere (uutils), so the lock decides who made DIR;
+    # CREATED is set only by the winner, and a loser never removes anything
+    lock_dir
+    for _f in "$DIR"/* "$DIR"/.[!.]*; do
+        [ ! -e "$_f" ] && [ ! -L "$_f" ] || [ "$_f" = "$DIR/.lock" ] ||
+            die 1 "$DIR already exists" "pick another --dir, or use --start, --stop or --remove on it"
+    done
     CREATED=1
     cd "$DIR"
     mkdir -m 700 keys creds jetstream resolver nats-store nats-store/config
@@ -577,10 +631,19 @@ CNF
     ACCPUB=$(acct_pub "$OWNER")
     OPSIGN=$(nats auth operator info "$OP" 2>/dev/null </dev/null |
         sed -n 's/^ *Signing Keys: *\(O[A-Z2-7]*\).*$/\1/p' | head -n 1)
-    [ -n "$SYSPUB" ] && [ -n "$ACCPUB" ] && [ -n "$OPSIGN" ] ||
-        die 1 "could not read the new operator or accounts" "run $SELF --remove, then retry"
-    [ -f "$(keyfile "$OPSIGN")" ] && [ -f "$(keyfile "$ACCPUB")" ] ||
-        die 1 "could not find the new keys" "run $SELF --remove, then retry"
+    # every file the next steps read must be where this nats version puts it
+    _ok=1
+    [ -n "$SYSPUB" ] && [ -n "$ACCPUB" ] && [ -n "$OPSIGN" ] || _ok=0
+    if [ "$_ok" = 1 ]; then
+        for _f in "$DIR/creds/mashadmin.creds" "$DIR/creds/sys.creds" "$ST/$OP.jwt" \
+            "$ST/accounts/SYSTEM/SYSTEM.jwt" "$ST/accounts/$OWNER/$OWNER.jwt" \
+            "$(keyfile "$OPSIGN")" "$(keyfile "$ACCPUB")"; do
+            [ -f "$_f" ] || _ok=0
+        done
+    fi
+    [ "$_ok" = 1 ] ||
+        die 1 "the nats command stored its keys somewhere unexpected (tested with nats v0.5.2)" \
+            "use nats v0.5.2, or report this; nothing was left behind"
     cp "$(keyfile "$OPSIGN")" keys/operator.nk
     cp "$(keyfile "$ACCPUB")" keys/account.nk
     chmod 600 keys/operator.nk keys/account.nk
@@ -643,6 +706,7 @@ JSON
     start_server
     echo "started: nats-server pid $SPID on 127.0.0.1:$PORT"
     echo "checked: sign-in and system ping ok"
+    release_lock
     echo "mashctl init --config $DIR/mash-setup.yaml"
 }
 
