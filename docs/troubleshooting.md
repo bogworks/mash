@@ -37,7 +37,7 @@ Fix: run the script once, `curl -fsSL <hint address> | bash`. It renames the key
 
 ## `mash: no binary found`
 
-Full text: `mash: no binary found. Install: go install github.com/bogworks/mash/cmd/mash@latest  (or see docs/install.md)`, preceded by `mash launcher:` lines on stderr, and exit status 127. The MCP server does not start.
+Full text: `mash: no binary found. Install it: curl -fsSL https://github.com/bogworks/mash/releases/latest/download/install.sh | bash`, preceded by `mash launcher:` lines on stderr, and exit status 127. The MCP server does not start.
 
 Causes:
 - The plugin is unpinned (a repository checkout or `mash plugin export`) and there is no `mash` on the `PATH` of the process that started it. An unpinned launcher never downloads.
@@ -45,7 +45,7 @@ Causes:
 
 Check: `command -v mash` and `mash version` in the shell Claude Code was launched from. Read the `mash launcher:` lines.
 
-Fix: `go install github.com/bogworks/mash/cmd/mash@latest`, and make sure its directory is on the `PATH` of the launching environment. Or set `MASH_BIN` to a binary path. Hooks never wait more than 5 seconds for a download, and after a failure skip downloading for 5 minutes ([install.md](install.md) section 1).
+Fix: run that line (it installs the attested release and says where), and make sure its directory is on the `PATH` of the launching environment. Or set `MASH_BIN` to a binary path. Hooks never wait more than 5 seconds for a download, and after a failure skip downloading for 5 minutes ([install.md](install.md) section 1).
 
 ## The `config` row fails, or `no server is set`
 

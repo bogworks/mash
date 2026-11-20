@@ -359,7 +359,7 @@ D7="$T/data7"
 CLAUDE_PLUGIN_DATA="$D7" PATH="$BASEPATH" sh "$P3/scripts/mash" serve > "$T/out" 2> "$T/err"; RC=$?
 check "unpinned with nothing resolvable exits 127" eq "$RC" 127
 check "unpinned never downloads" absent "$D7"
-check "unpinned prints install hint on stderr" contains "$(cat "$T/err")" "go install github.com/bogworks/mash/cmd/mash@latest"
+check "unpinned prints install hint on stderr" contains "$(cat "$T/err")" "releases/latest/download/install.sh"
 check "unpinned wrote nothing to stdout" empty_file "$T/out"
 
 # --- prefetch
