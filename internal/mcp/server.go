@@ -344,13 +344,21 @@ func (s *Server) handle(ctx context.Context, line []byte) {
 	}
 }
 
+// StructuredError is an error a tool returns that also has a JSON object form. The server replies with isError and
+// the text err.Error(); at 2025-06-18 it adds Structured() as structuredContent when that marshals to a JSON object.
+// Older revisions get the text only.
+type StructuredError interface {
+	error
+	Structured() any
+}
+
 func (s *Server) call(ctx context.Context, id json.RawMessage, name string, args json.RawMessage) {
 	reply := func(t string, isErr bool, structured any) error {
 		r := map[string]any{"content": []map[string]string{{"type": "text", "text": t}}}
 		if isErr {
 			r["isError"] = true
 		}
-		if structured != nil && !isErr && s.structuredOK() {
+		if structured != nil && s.structuredOK() {
 			r["structuredContent"] = structured
 		}
 		return s.result(id, r)
@@ -379,6 +387,15 @@ func (s *Server) call(ctx context.Context, id json.RawMessage, name string, args
 		s.OnToolCall(name)
 	}
 	if err != nil {
+		var se StructuredError
+		if errors.As(err, &se) {
+			if v := se.Structured(); v != nil {
+				if b, merr := json.Marshal(v); merr == nil && len(b) > 0 && b[0] == '{' {
+					_ = reply(err.Error(), true, v)
+					return
+				}
+			}
+		}
 		_ = text(err.Error(), true)
 		return
 	}

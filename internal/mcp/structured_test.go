@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 )
@@ -89,5 +90,50 @@ func TestToolsListDeclaresNoOutputSchemaAndOldCallUnchanged(t *testing.T) {
 	res := h.next(t)["result"].(map[string]any)
 	if _, has := res["structuredContent"]; has || res["content"].([]any)[0].(map[string]any)["text"] != "echo: hi" {
 		t.Fatalf("old-style Call changed: %v", res)
+	}
+}
+
+type structErr struct{ v any }
+
+func (e structErr) Error() string   { return "error: boom\nhint: try" }
+func (e structErr) Structured() any { return e.v }
+
+func TestStructuredErrorShape(t *testing.T) {
+	cases := []struct {
+		name, request string
+		v             any
+		want          any // nil: structuredContent absent
+	}{
+		{"object at 2025-06-18", "2025-06-18", map[string]any{"error": "boom", "hint": "try"}, map[string]any{"error": "boom", "hint": "try"}},
+		{"text only at 2025-03-26", "2025-03-26", map[string]any{"error": "boom"}, nil},
+		{"non-object is text only", "2025-06-18", []string{"x"}, nil},
+		{"nil is text only", "2025-06-18", nil, nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tool := Tool{Name: "se", Description: "se", Schema: map[string]any{"type": "object"},
+				CallStructured: func(context.Context, json.RawMessage) (string, any, error) {
+					return "", nil, fmt.Errorf("wrapped: %w", structErr{c.v})
+				}}
+			h := start(t, []Tool{tool})
+			h.send(t, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"`+c.request+`","capabilities":{},"clientInfo":{"name":"x","version":"1"}}}`)
+			h.next(t)
+			h.send(t, `{"jsonrpc":"2.0","method":"notifications/initialized"}`)
+			h.send(t, `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"se","arguments":{}}}`)
+			res := h.next(t)["result"].(map[string]any)
+			if res["isError"] != true {
+				t.Fatalf("isError %v", res["isError"])
+			}
+			if txt := res["content"].([]any)[0].(map[string]any)["text"]; txt != "wrapped: error: boom\nhint: try" {
+				t.Fatalf("text %q", txt)
+			}
+			sc, has := res["structuredContent"]
+			if c.want == nil && has {
+				t.Fatalf("unexpected structuredContent %v", sc)
+			}
+			if c.want != nil && !reflect.DeepEqual(sc, c.want) {
+				t.Fatalf("structuredContent %v, want %v", sc, c.want)
+			}
+		})
 	}
 }
