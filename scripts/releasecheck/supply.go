@@ -33,7 +33,7 @@ func attestFlags(o Options, tag, x string) []string {
 }
 
 // verifySupplyChain holds the release's SBOMs and build provenance to what release.yml promises, on every binary; any
-// failure is a refusal (exit 3) naming the file, and a failed download is the gate's. For each of the two scripts it requires
+// failure is a refusal (exit 3) naming the file, and a failed download is the gate's. For each of the three scripts it requires
 // that `gh attestation verify <script> --bundle mash.intoto.jsonl` passes with the same flags. For each binary it requires that
 //   - the attached mash-<os>-<arch>.cdx.json is CycloneDX JSON with components and a described main component or tool;
 //   - `gh attestation verify <binary> -R <repo> --signer-workflow <repo>/.github/workflows/release.yml --source-ref
@@ -89,7 +89,7 @@ func verifySupplyChain(o Options, tag, x string) error {
 			bad = append(bad, fmt.Sprintf("%s: no verifying build provenance in %s: %v", name, release.ProvenanceName, err))
 		}
 	}
-	// The two scripts are subjects of the same provenance as the binaries (and have no SBOM).
+	// The three scripts are subjects of the same provenance as the binaries (and have no SBOM).
 	for _, name := range release.ScriptNames() {
 		p, _, err := fetch(name)
 		if err != nil {

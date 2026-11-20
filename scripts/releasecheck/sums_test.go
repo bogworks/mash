@@ -621,7 +621,7 @@ func (f *fixture) noAttestation(t *testing.T, name string) {
 
 // The gate verifies build provenance of every binary with gh attestation verify, against the release repository.
 func TestAssets_verifiesAttestationOfEveryBinary(t *testing.T) {
-	t.Run("all eight binaries and both scripts verify", func(t *testing.T) {
+	t.Run("all eight binaries and the three scripts verify", func(t *testing.T) {
 		f := signedFixture(t, nil)
 		if err := checkAssets(context.Background(), f.o); err != nil {
 			t.Fatalf("a correct draft was refused: %v", err)
@@ -648,8 +648,8 @@ func TestAssets_verifiesAttestationOfEveryBinary(t *testing.T) {
 				}
 			}
 		}
-		if calls != 28 {
-			t.Errorf("%d gh attestation verify calls, want 28 (8 build provenance, 8 attached provenance bundles, 8 SBOM; and 2 build provenance and 2 attached bundles for the scripts)", calls)
+		if calls != 30 {
+			t.Errorf("%d gh attestation verify calls, want 30 (8 build provenance, 8 attached provenance bundles, 8 SBOM; and 3 build provenance and 3 attached bundles for the scripts)", calls)
 		}
 	})
 	t.Run("a mashctl binary without an attestation is refused naming it", func(t *testing.T) {
@@ -924,7 +924,7 @@ func TestAssets_verifiesSBOMAndBuildProvenanceOfEveryBinary(t *testing.T) {
 		f.markerFor(t, "noprov", "mash-linux-arm64")
 		refused(t, f, "mash-linux-arm64")
 	})
-	// ADR 0150: install.sh and mash-local-nats-setup.sh are attested subjects and the repository's own files at X.
+	// ADR 0150, 0151: the three scripts are attested subjects and the repository's own files at X.
 	for _, script := range release.ScriptNames() {
 		script := script
 		t.Run("a missing "+script, func(t *testing.T) {
@@ -961,7 +961,7 @@ func TestAssets_verifiesSBOMAndBuildProvenanceOfEveryBinary(t *testing.T) {
 	t.Run("the scripts are listed after the binaries and before the SBOMs", func(t *testing.T) {
 		f := signedFixture(t, nil)
 		lines := strings.Split(strings.TrimSpace(string(sumsOfFixture(t, f))), "\n")
-		if !strings.HasSuffix(lines[8], "  install.sh") || !strings.HasSuffix(lines[9], "  mash-local-nats-setup.sh") || !strings.HasSuffix(lines[10], ".cdx.json") {
+		if !strings.HasSuffix(lines[8], "  install.sh") || !strings.HasSuffix(lines[9], "  mash-local-nats-setup.sh") || !strings.HasSuffix(lines[10], "  mash-migrate-0.5.5.sh") || !strings.HasSuffix(lines[11], ".cdx.json") {
 			t.Fatalf("SHA256SUMS order:\n%s", strings.Join(lines, "\n"))
 		}
 		// The same lines in another order are not what the workflow writes: refused.

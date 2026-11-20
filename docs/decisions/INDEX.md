@@ -128,3 +128,4 @@
 | [0148](0148-releases-build-mashctl-beside-mash-with-the-same-supply-chain-checks.md) | Releases build mashctl beside mash with the same supply-chain checks | accepted | 2026-11-20 |
 | [0149](0149-further-departures-of-the-0-5-6-specification-by-the-maintainers-word.md) | Further departures of the 0.5.6 specification, by the maintainer's word (ADR 0147) | accepted | 2026-11-20 |
 | [0150](0150-releases-carry-install-and-local-nats-setup-scripts-as-attested-assets.md) | Releases carry the install and local NATS setup scripts as attested assets | accepted | 2026-11-20 |
+| [0151](0151-the-release-carries-a-one-time-0-5-5-migration-script.md) | The release carries a one-time 0.5.5 migration script | accepted | 2026-11-20 |

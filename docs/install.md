@@ -34,7 +34,7 @@ If you want a NATS server on this machine, `mash-local-nats-setup.sh` is the oth
 
 ### Verify what you download
 
-Every file of a release is covered by `SHA256SUMS`, and `SHA256SUMS` and the binaries and both scripts (`install.sh`, `mash-local-nats-setup.sh`) are subjects of the release's build provenance attestation. `install.sh` checks the binaries against `SHA256SUMS` itself. With `gh` (the [GitHub CLI](https://cli.github.com/)) installed it also verifies `SHA256SUMS` against the attestation, pinned to the release tag, before it installs anything, and refuses on failure. Without `gh`, or with one too old to have `gh attestation verify`, it says the checksums come from the same download, so it trusts github.com's TLS, and goes on. To check the script before you run it, and the attestation yourself:
+Every file of a release is covered by `SHA256SUMS`, and `SHA256SUMS` and the binaries and the three scripts (`install.sh`, `mash-local-nats-setup.sh`, `mash-migrate-0.5.5.sh`) are subjects of the release's build provenance attestation. `install.sh` checks the binaries against `SHA256SUMS` itself. With `gh` (the [GitHub CLI](https://cli.github.com/)) installed it also verifies `SHA256SUMS` against the attestation, pinned to the release tag, before it installs anything, and refuses on failure. Without `gh`, or with one too old to have `gh attestation verify`, it says the checksums come from the same download, so it trusts github.com's TLS, and goes on. To check the script before you run it, and the attestation yourself:
 
 ```sh
 BASE=https://github.com/bogworks/mash/releases/download/v0.5.6   # use the tag of the release you want; for another repository (MASH_REPO) change bogworks/mash here and in -R and --signer-workflow
@@ -45,7 +45,7 @@ grep ' install.sh$' SHA256SUMS | sha256sum -c -            # macOS: shasum -a 25
 less install.sh && bash install.sh
 ```
 
-An agent does not pipe a download into a shell: the setup skill downloads each script, checks it against `SHA256SUMS`, shows you what it is about to run and runs it after a yes. Both scripts are also the repository's own `scripts/` files at the release commit, byte for byte; the release check compares them ([ADR 0150](decisions/0150-releases-carry-install-and-local-nats-setup-scripts-as-attested-assets.md)).
+An agent does not pipe a download into a shell: the setup skill downloads each script, checks it against `SHA256SUMS`, shows you what it is about to run and runs it after a yes. All three scripts are also the repository's own `scripts/` files at the release commit, byte for byte; the release check compares them ([ADR 0150](decisions/0150-releases-carry-install-and-local-nats-setup-scripts-as-attested-assets.md), [ADR 0151](decisions/0151-the-release-carries-a-one-time-0-5-5-migration-script.md)).
 
 To build from source instead, `go install github.com/bogworks/mash/cmd/mash@latest` and `.../cmd/mashctl@latest` need Go 1.27.4 or newer; the result is not the attested build.
 
@@ -190,6 +190,39 @@ A reader treats the count as fresh when `waking_pending_at` is within 90 s (the 
 The CLI never takes the lease, so it works alongside the running session.
 
 `send --id KEY` (the send tool's `id`) is an idempotency key, 1 to 128 printable ASCII characters. Re-running a send with the same key to the same recipient from the same endpoint, within the inbox stream's two-minute duplicate window, stores nothing new: it succeeds, reports the original `#seq` and says it was a duplicate. If a send times out waiting for the stream's acknowledgement, the message may or may not have landed; the error prints a key to retry with (`mash send <to> --id <key> ...`), which delivers it at most once, but only within that two-minute window: after it a retry may store a second copy, which the recipient shows as a new message. Without `--id` every send is a new message.
+
+## If you ran mash 0.5.5
+
+Mash 0.5.6 renamed two settings in `config.json`, in the mash
+configuration folder. If your machine ran 0.5.5, run this once:
+
+```sh
+curl -fsSL https://github.com/bogworks/mash/releases/latest/download/mash-migrate-0.5.5.sh | bash
+```
+
+To read it before you run it, download it and check it against
+`SHA256SUMS`, the same way as the other scripts
+([Verify what you download](#verify-what-you-download)):
+
+```sh
+BASE=https://github.com/bogworks/mash/releases/latest/download
+curl -fsSLO $BASE/mash-migrate-0.5.5.sh -O $BASE/SHA256SUMS
+grep ' mash-migrate-0.5.5.sh$' SHA256SUMS | sha256sum -c -
+less mash-migrate-0.5.5.sh && bash mash-migrate-0.5.5.sh
+```
+
+What it changes:
+
+* In `config.json`, `url` becomes `servers` and `tls_ca` becomes `ca`.
+* Your old file stays beside the new one as `config.json.0.5.5`.
+* It prints one line saying what it changed.
+* It touches nothing on the server. Nothing there needs to change, and
+  0.5.5 and 0.5.6 can mail each other on one server.
+
+If you skip it, nothing is lost: when 0.5.6 finds the old settings it
+changes nothing and stops with a message that names this script. It is a
+script you run once, not a `mash` or `mashctl` command
+([ADR 0151](decisions/0151-the-release-carries-a-one-time-0-5-5-migration-script.md)).
 
 ## Synadia Cloud
 
