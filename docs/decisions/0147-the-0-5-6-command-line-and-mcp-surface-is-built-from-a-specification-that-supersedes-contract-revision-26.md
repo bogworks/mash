@@ -32,7 +32,7 @@ single source and are kept in the repository unchanged from the planner's copy; 
 nothing else goes in `spec/`. Where a file is wrong or silent the builder reports the command and the problem and does not
 improvise.
 
-It reverses, from contract revision 26, by the maintainer's word: the removal of an executing install script, the ban on an agent installing the plugin, the ban on pipe-to-shell installation, and `mashctl endpoint delete` always asking for a confirmation at a terminal (it takes `--yes`). It also supersedes:
+It reverses, from contract revision 26, by the maintainer's word: the removal of an executing install script, the ban on an agent installing the plugin, the ban on pipe-to-shell installation, and `mashctl endpoint delete` always asking for a confirmation at a terminal (it takes `--yes`). It also amends [ADR 0019](0019-five-trust-labels-forged-never-shown-stale-after-five-minutes.md): unverified mail (absent, claimed, unknown-signer, stale) is refused on receipt by default, not shown with a label, and the setting `accept_unverified` restores ADR 0019's behaviour. It also supersedes:
 
 * the three-value confirmation of `mash credential install`;
 * `mash endpoint status` and `mash server status`, and the six-row `mash status` (it is one line; `mash doctor` owns the checks);

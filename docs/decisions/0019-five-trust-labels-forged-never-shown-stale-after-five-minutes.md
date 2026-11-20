@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: accepted; amended by ADR-0147 (unverified mail is refused on receipt by default; accept_unverified restores the labelled delivery)
 date: 2026-10-21
 decision-makers: Randy Bias (mash maintainer)
 recorded: 2026-10-31 (backfilled)
