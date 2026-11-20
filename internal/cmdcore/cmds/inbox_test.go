@@ -554,7 +554,16 @@ func TestReadServiceFailure(t *testing.T) {
 
 func TestReadQuotesEveryLineEmptyOnesToo(t *testing.T) {
 	r := cmds.ReadResult{Number: 1, From: "a.b.c", Trust: "verified", Kind: "fyi", Body: "one\n\nthree\n"}
-	if got := r.Text(cmdcore.Opts{}); !strings.HasSuffix(got, "\n\n> one\n>\n> three") {
+	if got := r.Text(cmdcore.Opts{}); !strings.HasSuffix(got, "\n\n> one\n> \n> three") {
 		t.Errorf("text: %q", got)
+	}
+}
+
+// Every line of a read's text starts with "> ", an empty one too, as the hook quotes it (rules.json).
+func TestReadQuotesEveryLineWithASpace(t *testing.T) {
+	out := cmds.ReadResult{Number: 1, Body: "one\n\nthree\n"}.Text(cmdcore.Opts{})
+	_, body, _ := strings.Cut(out, "\n\n")
+	if want := "> one\n> \n> three"; body != want {
+		t.Fatalf("body %q, want %q", body, want)
 	}
 }

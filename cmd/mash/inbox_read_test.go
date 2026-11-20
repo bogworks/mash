@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -141,14 +144,55 @@ func TestInboxWakeSettingsFromConfig(t *testing.T) {
 	if strings.Contains(out, "More than") || m["wake_count"] != float64(0) || m["wake_age"] != "0" || m["over_wake_count"] != false {
 		t.Fatalf("off: %q %s", out, js)
 	}
+	// A bad wake setting is serve's to refuse: the other commands ignore it and use the default.
 	w.env["a"]["MASH_WAKE_COUNT"] = "many"
-	if out, code := w.cli(t, "a", "inbox"); code != 1 || !strings.HasPrefix(out, "error: MASH_WAKE_COUNT \"many\" is not a whole number from 0 to 1000") {
+	w.env["a"]["MASH_WAKE_AGE"] = "30 seconds"
+	if out, code := w.cli(t, "a", "inbox"); code != 0 || !strings.Contains(out, "3 messages for o.dev.a") || strings.Contains(out, "More than") {
 		t.Fatalf("bad setting: %d %q", code, out)
 	}
-	delete(w.env["a"], "MASH_WAKE_COUNT")
-	w.env["a"]["MASH_WAKE_AGE"] = "30s"
-	if out, code := w.cli(t, "a", "inbox"); code != 1 || !strings.Contains(out, "MASH_WAKE_AGE \"30s\"") {
-		t.Fatalf("bad age: %d %q", code, out)
+	for _, args := range [][]string{{"who"}, {"read", "1"}, {"send", tTo("b"), "still works"}} {
+		if out, code := w.cli(t, "a", args...); code != 0 {
+			t.Errorf("%v with a bad wake setting: %d %q", args, code, out)
+		}
+	}
+	var out2, err2 bytes.Buffer
+	if code := run([]string{"serve"}, envFrom(w.env["a"]), strings.NewReader(""), &out2, &err2); code != 2 ||
+		!strings.HasPrefix(err2.String(), "error: MASH_WAKE_COUNT \"many\" is not a whole number of messages") {
+		t.Fatalf("serve with a bad setting: %d %q %q", code, out2.String(), err2.String())
+	}
+}
+
+// Help and a bad option need no endpoint: with several installed and none chosen, they are not the endpoint error.
+func TestInboxAndReadHelpAndUsageNeedNoEndpoint(t *testing.T) {
+	w := tlsWorld(t, "a", "b")
+	home := t.TempDir()
+	dir := filepath.Join(home, ".config", "mash")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []string{"a", "b"} {
+		b, err := os.ReadFile(w.env[n]["MASH_CREDS"])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, tTo(n)+".creds"), b, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	env := map[string]string{"HOME": home, "MASH_SERVER": w.env["a"]["MASH_SERVER"], "MASH_CA": w.e.CAFile}
+	for _, verb := range []string{"inbox", "read", "send", "who"} {
+		r := runMash(env, verb, "--help")
+		if r.code != 0 || !strings.Contains(r.out, "mash "+verb) || r.errs != "" {
+			t.Errorf("%s --help: %+v", verb, r)
+		}
+		r = runMash(env, verb, "--bogus")
+		if r.code != 2 || r.out != "" || !strings.HasPrefix(r.errs, "error: unknown option --bogus\n") {
+			t.Errorf("%s --bogus: %+v", verb, r)
+		}
+	}
+	// a good command still gets the endpoint error
+	if r := runMash(env, "inbox"); r.code != 2 || !strings.Contains(r.errs, "more than one endpoint") {
+		t.Errorf("inbox: %+v", r)
 	}
 }
 

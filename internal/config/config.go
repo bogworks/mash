@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -57,11 +58,14 @@ type Config struct {
 	TransientMax    time.Duration // serve: the retry backoff doubles up to this (zero = 2m)
 	CLITimeout      time.Duration // total deadline of one CLI command (zero = 15m)
 	// WakeCount is how many waiting messages are more than the session is left with (MASH_WAKE_COUNT / "wake_count": a
-	// whole number from 0 to 1000, default 15, 0 = off). WakeAge is how long the oldest waiting message may wait
-	// (MASH_WAKE_AGE / "wake_age": a whole number and m, h or d, from 1m to 30d, default 1h; 0 = off, WakeAge zero).
+	// whole number, default 15, 0 = off). WakeAge is how long the oldest waiting message may wait
+	// (MASH_WAKE_AGE / "wake_age": a whole number and m, h or d, or a Go duration, default 1h; 0 = off, WakeAge zero).
 	// WakeAgeText is the age as it was written ("1h", "0"). The wake itself is serve's; mash inbox reports against them.
-	WakeCount    int
-	WakeAge      time.Duration
+	WakeCount int
+	WakeAge   time.Duration
+	// WakeErr is why wake_count or wake_age is not valid (nil when both are); the setting is then at its default.
+	// Only mash serve refuses it, every other command ignores it.
+	WakeErr      error
 	WakeAgeText  string
 	AdminTimeout time.Duration // total deadline of one `mashctl` command (zero = 30s)
 	AdminCreds   string        // admin credentials for `mashctl`
@@ -622,9 +626,8 @@ func loadPicking(lookup Lookup, home string, autoPick bool) (Config, error) {
 		*p.dst = d
 	}
 
-	if err := c.loadWake(f, env); err != nil {
-		return c, err
-	}
+	// The wake settings are serve's: a bad one is kept in WakeErr (the defaults stay), so only serve refuses it.
+	c.WakeErr = c.loadWake(f, env)
 
 	if (c.TLSCert == "") != (c.TLSKey == "") {
 		return c, errors.New("mash: tls_cert and tls_key (MASH_TLS_CERT and MASH_TLS_KEY) must be set together")
@@ -877,10 +880,6 @@ const (
 	DefaultWakeCount   = 15
 	DefaultWakeAge     = time.Hour
 	DefaultWakeAgeText = "1h"
-	maxWakeCount       = 1000
-	minWakeAge         = time.Minute
-	maxWakeAge         = 30 * 24 * time.Hour
-	maxWakeAgeMinutes  = 30 * 24 * 60
 )
 
 // wakeUnits are the units of wake_age.
@@ -898,8 +897,8 @@ func (c *Config) loadWake(f file, env func(string) string) error {
 	}
 	if count != "" {
 		n, err := strconv.Atoi(strings.TrimSpace(count))
-		if err != nil || n < 0 || n > maxWakeCount || strings.TrimSpace(count) != strconv.Itoa(n) {
-			return fmt.Errorf("mash: %s %s is not a whole number from 0 to %d (0 turns the wake off)", from, quoteSetting(count), maxWakeCount)
+		if err != nil || n < 0 || strings.TrimSpace(count) != strconv.Itoa(n) {
+			return fmt.Errorf("mash: %s %s is not a whole number of messages, 0 or more (0 turns the wake off)", from, quoteSetting(count))
 		}
 		c.WakeCount = n
 	}
@@ -917,7 +916,7 @@ func (c *Config) loadWake(f file, env func(string) string) error {
 		case raw == "0":
 			age = "0"
 		default:
-			return fmt.Errorf("mash: %s %s is not a whole number and m, h or d from 1m to 30d, or 0 (for example \"30m\", \"1h\" or \"2d\")", from, raw)
+			return fmt.Errorf("mash: %s %s is not a duration (for example \"30m\", \"1h\" or \"2d\") or 0", from, raw)
 		}
 	}
 	if age != "" {
@@ -937,25 +936,24 @@ func quoteSetting(v string) string {
 	return strconv.Quote(strings.TrimSpace(v))
 }
 
-// wakeAge parses the wake age: 0, or a whole number and m, h or d (minutes, hours, days), from 1m to 30d.
+// wakeAge parses the wake age: 0 (off), a whole number and m, h or d (minutes, hours, days), or a Go duration such as
+// 90s or 1h30m; any positive length.
 func wakeAge(v string) (time.Duration, error) {
-	bad := fmt.Errorf("%q is not a whole number and m, h or d from 1m to 30d, or 0 (for example \"30m\", \"1h\" or \"2d\")", v)
+	bad := fmt.Errorf("%q is not a duration (for example \"30m\", \"1h\" or \"2d\") or 0", v)
 	t := strings.TrimSpace(v)
 	if t == "0" {
 		return 0, nil
 	}
-	if len(t) < 2 {
-		return 0, bad
+	if len(t) >= 2 {
+		if unit := wakeUnits[t[len(t)-1]]; unit != 0 {
+			digits := t[:len(t)-1]
+			if n, err := strconv.Atoi(digits); err == nil && n >= 1 && strconv.Itoa(n) == digits && time.Duration(n) <= math.MaxInt64/unit {
+				return time.Duration(n) * unit, nil
+			}
+		}
 	}
-	unit := wakeUnits[t[len(t)-1]]
-	digits := t[:len(t)-1]
-	n, err := strconv.Atoi(digits)
-	if unit == 0 || err != nil || strconv.Itoa(n) != digits || n < 1 || n > maxWakeAgeMinutes {
-		return 0, bad
+	if d, err := time.ParseDuration(t); err == nil && d > 0 {
+		return d, nil
 	}
-	d := time.Duration(n) * unit
-	if d < minWakeAge || d > maxWakeAge {
-		return 0, bad
-	}
-	return d, nil
+	return 0, bad
 }
