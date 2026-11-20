@@ -16,6 +16,8 @@ type Entry interface {
 	Summary() string
 	// Group is the heading the tool's own help lists the command under.
 	Group() string
+	// HasMCP is whether the command is also an MCP tool.
+	HasMCP() bool
 	Tool(env EnvFunc) Tool
 	RunCLI(env EnvFunc, fr Frame, args []string, stdin io.Reader, stdout, stderr io.Writer, g cliframe.Global) int
 	// HelpFor is the --help text when args ask for it, and whether they do: it reads nothing and runs nothing.
@@ -36,6 +38,7 @@ func Register[P any, R Result](c Command[P, R]) Entry {
 func (e entry[P, R]) CLIName() string { return e.c.Name }
 func (e entry[P, R]) Summary() string { return e.c.Summary }
 func (e entry[P, R]) Group() string   { return e.c.Group }
+func (e entry[P, R]) HasMCP() bool    { return !e.c.NoMCP }
 func (e entry[P, R]) Tool(env EnvFunc) Tool {
 	return MCPTool(e.c, env)
 }
@@ -164,10 +167,13 @@ func (r *Registry) Names() []string {
 	return n
 }
 
-// Tools returns every command as an MCP tool, in registration order.
+// Tools returns every command that has one as an MCP tool, in registration order.
 func (r *Registry) Tools() []Tool {
 	var t []Tool
 	for _, e := range r.Entries {
+		if !e.HasMCP() {
+			continue
+		}
 		t = append(t, e.Tool(r.Env))
 	}
 	return t

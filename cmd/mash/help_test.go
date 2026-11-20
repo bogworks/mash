@@ -15,7 +15,7 @@ import (
 var helpVerbs = [][]string{
 	{"serve"}, {"hook"}, {"send"}, {"read"}, {"inbox"}, {"who"}, {"prompt"}, {"status"}, {"doctor"}, {"version"},
 	{"plugin"}, {"plugin", "export"},
-	{"key"}, {"key", "create"}, {"credential"}, {"credential", "create"},
+	{"key"}, {"key", "create"}, {"join"},
 }
 
 func listTree(root string) []string {

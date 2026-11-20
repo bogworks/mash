@@ -342,7 +342,15 @@ func inDir(dir, p string) string {
 // is not under the home directory or the home is unknown.
 func Tilde(p string) string {
 	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
+	if err != nil {
+		return p
+	}
+	return TildeIn(p, home)
+}
+
+// TildeIn is Tilde for a home directory the caller already knows.
+func TildeIn(p, home string) string {
+	if home == "" {
 		return p
 	}
 	if p == home {

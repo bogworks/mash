@@ -174,3 +174,17 @@ func wrap(s string, width int) []string {
 	}
 	return lines
 }
+
+// ParentHelp is the --help of a command that only holds others (mash key): its description, Usage with one line per
+// command under it, and the Global options, in the same layout and width as a command's own.
+func ParentHelp(fr Frame, description string, usages []string) string {
+	sections := []string{strings.Join(wrap(description, helpWidth), "\n"), "Usage:\n  " + strings.Join(usages, "\n  ")}
+	var rows [][2]string
+	for _, g := range fr.Globals {
+		rows = append(rows, [2]string{optionLabel(g.Short, g.Flag, g.Value), g.Desc})
+	}
+	if len(rows) > 0 {
+		sections = append(sections, "Global options:\n"+table(rows))
+	}
+	return strings.Join(sections, "\n\n") + "\n"
+}

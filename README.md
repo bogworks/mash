@@ -76,16 +76,16 @@ mashctl init --local --owner alice --start                # a TLS-only NATS serv
 
 An agent is an endpoint with an address of three tokens, `owner.group.instance`. Here the owner is `alice`, the group is `dev` and the instances are `design` and `review`, so the addresses are `alice.dev.design` and `alice.dev.review`. A group has no default: you always name it.
 
-Make each endpoint in three commands. The endpoint makes its own key, `mashctl` signs the public half, and the endpoint joins the signed JWT to its seed. The seed never leaves the endpoint's machine.
+Make each endpoint in three commands. The endpoint makes its own key, `mashctl` signs the public half into a join file, and the endpoint joins with it. The seed never leaves the endpoint's machine.
 
 ```sh
-mash key create --out design.seed                                        # writes design.seed and design.pub
-mashctl endpoint create alice/dev/design --public-key design.pub         # writes alice.dev.design.jwt
-mash credential create --seed design.seed --jwt alice.dev.design.jwt     # writes alice.dev.design.creds in the config directory
+mash key create --out design.seed                                                   # writes design.seed and design.seed.pub
+mashctl endpoint create alice.dev.design --out alice.dev.design.join --public-key design.seed.pub
+mash join alice.dev.design.join --key design.seed                                   # installs alice.dev.design in the config directory
 
 mash key create --out review.seed
-mashctl endpoint create alice/dev/review --public-key review.pub
-mash credential create --seed review.seed --jwt alice.dev.review.jwt
+mashctl endpoint create alice.dev.review --out alice.dev.review.join --public-key review.seed.pub
+mash join alice.dev.review.join --key review.seed
 ```
 
 When the endpoint and `mashctl` are on the same machine, one command does all three:
@@ -183,7 +183,7 @@ Operators set up the server with `mashctl init` (or `mashctl adopt` for a server
 
 ## Status
 
-mash is v0.5.5. Use the same version of `mash` and `mashctl` (the quick start needs 0.5.5's `mash key create` and `mash credential create`, which 0.5.0 does not have); 0.5.0 (released 2026-11-16) stays the version for running deployments until they are moved (see the release notes). It supports Claude Code sessions as endpoints: durable, signed mail with trust labels, delivered by the plugin's hooks with a channel wake for idle sessions, on a NATS server you run (see [docs/install.md](docs/install.md)). The spec is in docs/specs, and an integration suite runs against an in-process NATS server carrying the production permissions. Mail survives process restarts. To survive a host crash on a self-hosted server set `sync_interval: always` ([docs/operations.md](docs/operations.md#durability-and-sync_interval)). "Durable" means stored on the NATS server until read, for up to 30 days and 16 MiB per inbox, on one replica. Past those limits the oldest messages go first, read or not, and an inbox on a clustered server is unavailable while its node is down; see [inbox limits](docs/operations.md#inbox-limits) and [durability](docs/operations.md#durability-and-sync_interval). Upgrading to 0.5.5 is a clean break from 0.5.0: make new endpoints with `mashctl endpoint create` and remove the old ones with `mashctl endpoint delete`. Mail unread in an old endpoint is not carried over. Interfaces may still change before the next major revision. Later phases (an archive leaf node, monitoring, approvals) are listed in the spec.
+mash is v0.5.5. Use the same version of `mash` and `mashctl` (the quick start needs `mash key create` and `mash join`, which 0.5.0 does not have); 0.5.0 (released 2026-11-16) stays the version for running deployments until they are moved (see the release notes). It supports Claude Code sessions as endpoints: durable, signed mail with trust labels, delivered by the plugin's hooks with a channel wake for idle sessions, on a NATS server you run (see [docs/install.md](docs/install.md)). The spec is in docs/specs, and an integration suite runs against an in-process NATS server carrying the production permissions. Mail survives process restarts. To survive a host crash on a self-hosted server set `sync_interval: always` ([docs/operations.md](docs/operations.md#durability-and-sync_interval)). "Durable" means stored on the NATS server until read, for up to 30 days and 16 MiB per inbox, on one replica. Past those limits the oldest messages go first, read or not, and an inbox on a clustered server is unavailable while its node is down; see [inbox limits](docs/operations.md#inbox-limits) and [durability](docs/operations.md#durability-and-sync_interval). Upgrading to 0.5.5 is a clean break from 0.5.0: make new endpoints with `mashctl endpoint create` and remove the old ones with `mashctl endpoint delete`. Mail unread in an old endpoint is not carried over. Interfaces may still change before the next major revision. Later phases (an archive leaf node, monitoring, approvals) are listed in the spec.
 
 ## Releases
 

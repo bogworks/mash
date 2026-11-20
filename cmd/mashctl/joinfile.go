@@ -11,22 +11,15 @@ import (
 	"strings"
 
 	"github.com/bogworks/mash/internal/config"
+	"github.com/bogworks/mash/internal/joinfile"
 )
 
 // joinFormat is the version of the join file: the value of its "mash_join" field.
-const joinFormat = 1
+const joinFormat = joinfile.Format
 
 // joinFile is the file `mashctl endpoint create --out` and `endpoint reissue --out` write for another machine, and
-// `mash join` reads. It holds either Creds, the whole text of a NATS creds file (user JWT and seed), or UserJWT, the
-// user JWT alone, for an endpoint that made its own key. It holds nothing else.
-type joinFile struct {
-	MashJoin int      `json:"mash_join"`
-	Address  string   `json:"address"`
-	Servers  []string `json:"servers"`
-	CA       *string  `json:"ca"`
-	Creds    string   `json:"creds,omitempty"`
-	UserJWT  string   `json:"user_jwt,omitempty"`
-}
+// `mash join` reads: one definition, shared in internal/joinfile.
+type joinFile = joinfile.File
 
 // joinBase is what every join file of one run shares: the servers and the CA certificate the configuration names.
 type joinBase struct {
@@ -98,28 +91,13 @@ func (b joinBase) withJWT(addr, userJWT string) joinFile {
 	return joinFile{MashJoin: joinFormat, Address: addr, Servers: b.servers, CA: b.ca, UserJWT: userJWT}
 }
 
-// encode is the file's bytes: JSON with a two-space indent and one trailing newline.
-func (j joinFile) encode() ([]byte, error) {
-	if j.Servers == nil {
-		j.Servers = []string{}
-	}
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(j); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
-}
-
 // errJoinExists is returned by writeJoinFile for a path that is taken.
 var errJoinExists = errors.New("the join file path is taken")
 
 // writeJoinFile writes j to path, mode 0600, never over anything that exists there: a temp file made exclusively in the
 // same folder, then a link to path that fails when path exists. A run killed part-way leaves no truncated file at path.
 func writeJoinFile(path string, j joinFile) error {
-	data, err := j.encode()
+	data, err := j.Encode()
 	if err != nil {
 		return err
 	}

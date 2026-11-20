@@ -80,7 +80,7 @@ func TestGlobalVerboseAndNoColorAreStripped(t *testing.T) {
 func TestGlobalJSONStillReachesTheVerbsThatParseIt(t *testing.T) {
 	for _, pos := range []string{"before", "after"} {
 		seed := filepath.Join(t.TempDir(), "k.seed")
-		args := []string{"key", "create", "--out", seed, "--dry-run"}
+		args := []string{"key", "create", "--out", seed}
 		if pos == "before" {
 			args = append([]string{"--json"}, args...)
 		} else {

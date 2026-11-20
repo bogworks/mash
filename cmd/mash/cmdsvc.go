@@ -26,6 +26,8 @@ var commandEntries = []cmdcore.Entry{
 	cmdcore.Register(cmds.Who),
 	cmdcore.Register(cmds.Status),
 	cmdcore.Register(cmds.Doctor),
+	cmdcore.Register(cmds.Join),
+	cmdcore.Register(cmds.KeyCreate),
 }
 
 // helpFrame is what --help prints after a command's own options. The descriptions are the specification's.

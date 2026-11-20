@@ -1,15 +1,11 @@
-// Package keycred makes a user key pair and builds a credentials file from a seed and a user JWT. It reads and writes
-// files only: it needs no server, no config file and no account key.
+// Package keycred makes a user key pair. It writes files only: it needs no server, no config file and no account key.
 package keycred
 
 import (
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
-	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nkeys"
 )
 
@@ -23,11 +19,7 @@ const (
 
 // Refusal codes.
 const (
-	CodeFileExists  = "file_exists"
-	CodeKeyMismatch = "key_mismatch"
-	CodeBadSeed     = "bad_seed"
-	CodeBadJWT      = "bad_jwt"
-	CodeOutIsInput  = "out_is_input"
+	CodeFileExists = "file_exists"
 )
 
 // Refusal says why a run did nothing.
@@ -35,9 +27,6 @@ type Refusal struct {
 	Code   string `json:"code"`
 	Detail string `json:"detail"`
 }
-
-// ErrNeedOut is returned by CreateCredentials when no output path was given and the JWT has no name to build one from.
-var ErrNeedOut = errors.New("the user JWT has no name, so there is no default file name; give --out")
 
 // KeyOptions are the inputs of CreateKey.
 type KeyOptions struct {
@@ -55,15 +44,11 @@ type KeyResult struct {
 	SeedPath   string
 	PublicPath string
 	Refusal    *Refusal
+	Existing   string // the path that was already there, when Refusal is file_exists
 }
 
-// PublicPathFor is the public key file for a seed file: a trailing .seed becomes .pub, else .pub is appended.
-func PublicPathFor(seed string) string {
-	if s, ok := strings.CutSuffix(seed, ".seed"); ok && s != "" && !strings.HasSuffix(s, "/") {
-		return s + ".pub"
-	}
-	return seed + ".pub"
-}
+// PublicPathFor is the public key file for a seed file: the seed's whole path with .pub added (bob.seed.pub).
+func PublicPathFor(seed string) string { return seed + ".pub" }
 
 func exists(p string) (bool, error) {
 	_, err := os.Lstat(p)
@@ -98,6 +83,7 @@ func CreateKey(o KeyOptions) (KeyResult, error) {
 		}
 		if ok {
 			res.Outcome = Refused
+			res.Existing = p
 			res.Refusal = &Refusal{CodeFileExists, p + " exists; mash does not overwrite it"}
 			return res, nil
 		}
@@ -155,6 +141,7 @@ func CreateKey(o KeyOptions) (KeyResult, error) {
 func refuseExists(res KeyResult, p string, err error) (KeyResult, error) {
 	if errors.Is(err, os.ErrExist) {
 		res.Outcome = Refused
+		res.Existing = p
 		res.Refusal = &Refusal{CodeFileExists, p + " exists; mash does not overwrite it"}
 		return res, nil
 	}
@@ -182,135 +169,4 @@ func writeTemp(target, pattern string, data []byte, mode os.FileMode) (string, e
 	}
 	os.Remove(name)
 	return "", err
-}
-
-// CredOptions are the inputs of CreateCredentials.
-type CredOptions struct {
-	Seed      string // seed file
-	JWT       string // user JWT file
-	Out       string // creds file; empty means ConfigDir/<name>.creds
-	ConfigDir string
-	Force     bool
-	DryRun    bool
-}
-
-// CredResult is what CreateCredentials did. Neither the seed nor the JWT is part of it.
-type CredResult struct {
-	Outcome   string
-	PublicKey string
-	CredsPath string
-	Name      string
-	Refusal   *Refusal
-}
-
-// CreateCredentials checks that the JWT names the seed's public key and writes the creds file (0600, by rename).
-func CreateCredentials(o CredOptions) (CredResult, error) {
-	var res CredResult
-	seedRaw, err := os.ReadFile(o.Seed)
-	if err != nil {
-		return res, err
-	}
-	jwtRaw, err := os.ReadFile(o.JWT)
-	if err != nil {
-		return res, err
-	}
-	seed := []byte(strings.TrimSpace(string(seedRaw)))
-	token := strings.TrimSpace(string(jwtRaw))
-	kp, err := nkeys.FromSeed(seed)
-	if err != nil {
-		return refuse(res, CodeBadSeed, o.Seed+" does not hold an nkey seed"), nil
-	}
-	pub, err := kp.PublicKey()
-	if err != nil || !nkeys.IsValidPublicUserKey(pub) {
-		return refuse(res, CodeBadSeed, o.Seed+" is not a user key seed"), nil
-	}
-	res.PublicKey = pub
-	claims, err := jwt.DecodeUserClaims(token)
-	if err != nil {
-		return refuse(res, CodeBadJWT, o.JWT+" is not a user JWT"), nil
-	}
-	res.Name = claims.Name
-	if claims.Subject != pub {
-		return refuse(res, CodeKeyMismatch, fmt.Sprintf("the JWT is for %s, the seed is for %s", claims.Subject, pub)), nil
-	}
-	out := o.Out
-	if out == "" {
-		if claims.Name == "" || strings.ContainsAny(claims.Name, `/\`) || claims.Name == "." || claims.Name == ".." {
-			return res, ErrNeedOut
-		}
-		if o.ConfigDir == "" {
-			return res, errors.New("no config directory; give --out")
-		}
-		out = filepath.Join(o.ConfigDir, claims.Name+".creds")
-	}
-	res.CredsPath = out
-	// --force must never replace an input: a seed lost this way cannot be recovered.
-	if outFi, serr := os.Stat(out); serr == nil {
-		for _, in := range []string{o.Seed, o.JWT} {
-			if inFi, ierr := os.Stat(in); ierr == nil && os.SameFile(outFi, inFi) {
-				return refuse(res, CodeOutIsInput, out+" is the same file as the input "+in+"; choose another --out"), nil
-			}
-		}
-	}
-	ok, err := exists(out)
-	if err != nil {
-		return res, err
-	}
-	if ok && !o.Force {
-		return refuse(res, CodeFileExists, out+" exists; pass --force to replace it"), nil
-	}
-	if o.DryRun {
-		res.Outcome = Planned
-		return res, nil
-	}
-	creds, err := jwt.FormatUserConfig(token, seed)
-	if err != nil {
-		return res, err
-	}
-	dir := filepath.Dir(out)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return res, err
-	}
-	tmp, err := os.CreateTemp(dir, ".creds-*")
-	if err != nil {
-		return res, err
-	}
-	tmpName := tmp.Name()
-	fail := func(e error) (CredResult, error) {
-		tmp.Close()
-		os.Remove(tmpName) // the temp file this call made
-		return res, e
-	}
-	if err := tmp.Chmod(0o600); err != nil {
-		return fail(err)
-	}
-	if _, err := tmp.Write(creds); err != nil {
-		return fail(err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fail(err)
-	}
-	if o.Force {
-		if err := os.Rename(tmpName, out); err != nil {
-			return fail(err)
-		}
-	} else {
-		// A link fails when out exists, so a file made since the check above is not replaced.
-		err := os.Link(tmpName, out)
-		os.Remove(tmpName) // the temp file this call made
-		if errors.Is(err, os.ErrExist) {
-			return refuse(res, CodeFileExists, out+" exists; pass --force to replace it"), nil
-		}
-		if err != nil {
-			return res, err
-		}
-	}
-	res.Outcome = Created
-	return res, nil
-}
-
-func refuse(res CredResult, code, detail string) CredResult {
-	res.Outcome = Refused
-	res.Refusal = &Refusal{code, detail}
-	return res
 }

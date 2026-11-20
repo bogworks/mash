@@ -66,7 +66,10 @@ type Command[P any, R Result] struct {
 	Name string
 	// Group is the heading the tool's own help lists the command under (the specification's x-group): Everyday, Setup,
 	// Integration or Raw SAP.
-	Group          string
+	Group string
+	// NoMCP says the command has no MCP tool (the specification's x-mcp tool is null): a setup command an agent does
+	// not hold. The command table's Tools and MCPTools leave it out.
+	NoMCP          bool
 	Summary        string
 	MCPDescription string
 	Description    string

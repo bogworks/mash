@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"github.com/bogworks/mash/internal/cmdcore"
 	"strings"
 	"testing"
 )
@@ -28,13 +29,11 @@ Everyday:
   mash version                                 Print the version.
 
 Setup:
-  mash key create --out FILE [options]         Make a user key pair: seed to
-                                               FILE (0600), public key to
-                                               FILE.pub; needs no config
-  mash credential create --seed FILE --jwt FILE [options]
-                                               Join a seed and its user JWT into
-                                               a credentials file; needs no
-                                               config
+  mash join <file> [options]                   Install an endpoint's credentials
+                                               on this machine from a join file.
+  mash key create [options]                    Make your own key pair, for when
+                                               the seed must never leave this
+                                               machine.
 
 Integration:
   mash serve                                   The Claude Code channel server
@@ -78,6 +77,13 @@ func TestHelpLayoutAgreesWithTable(t *testing.T) {
 	}
 	for _, e := range commandEntries {
 		name, group := e.CLIName(), e.Group()
+		if parent, _, sub := strings.Cut(name, " "); sub { // key create: the help lists its parent, key, under the same group
+			h, ok := handCommands[parent]
+			if !ok || seen[parent] != group || !strings.Contains(usage, "\n"+cmdcore.ListLine(h[0], h[1], helpCol)+"\n") {
+				t.Errorf("%s: its parent %s is not listed under %s in the help", name, parent, group)
+			}
+			continue
+		}
 		if group == "" {
 			t.Errorf("%s has no group", name)
 		}
