@@ -86,7 +86,7 @@ func at005Main(args []string, stdout, stderr io.Writer) int {
 	scenario := at005Scenario
 	if *dry {
 		id = "at005-dry-setup"
-		scenario = "At005 --dry-setup: certificates; M1 by the setup script; the three-node TLS cluster; the buckets (mashctl init --config); M2 by init --config; mashctl endpoint list from both; everything stopped by PID and cleaned up."
+		scenario = "At005 --dry-setup: certificates; M1 by the setup script; the three-node TLS cluster; init --config with one server listed refused; the buckets (mashctl init --config); M2 by init --config; mashctl endpoint list from both; everything stopped by PID and cleaned up."
 	}
 	func() {
 		defer func() {
@@ -200,6 +200,7 @@ func runLine(hs Hosts, runBy, label string) string {
 const at005Scenario = "AT-005, across machines, over TLS, on a cluster, from two mashctl machines: three NATS servers on three machines " +
 	"(M1, M2, M3) of one cluster, TLS on client and route connections under a CA the harness made, one account, scratch homes. " +
 	"M1's operator, account, keys and server.conf template come from the setup script (the config is then edited for TLS and cluster and copied to M2 and M3); M1 and M2 run mashctl init --config " +
+	"after the cluster is up, init --config on M1 with only M1's server listed must be refused (a cluster with more servers than the file lists; exit 1, nothing written); " +
 	"with the same operator signing seed, account identity seed, sys.creds and admin creds (DEC-004); both with a setup file and config.json listing three servers. " +
 	"endpoint create alice.dev.design from M1 (key made by mash key create on M3, session on M3 connecting to the server of M2) and " +
 	"alice/dev/review from M2 (key made on M1, session on M1 connecting to the server on M3); mail each way; endpoint list --json on M1 and M2; " +

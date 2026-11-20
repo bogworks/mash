@@ -106,3 +106,10 @@ func TestTemplatePartsReadsTheScriptsServerConf(t *testing.T) {
 		t.Errorf("preload block: %q", pre)
 	}
 }
+
+func TestSetupFileRendersOneServer(t *testing.T) {
+	out := SetupFile{Servers: []string{"tls://10.0.0.1:4222"}, CA: "/ca.pem", Owner: "alice"}.Render()
+	if !strings.Contains(out, `servers: ["tls://10.0.0.1:4222"]`) {
+		t.Fatalf("render: %s", out)
+	}
+}

@@ -372,6 +372,12 @@ func (s *At5) urlSlice() []string {
 // retried. The seed and sys.creds copies are removed by their exact paths afterwards. It returns the last result and whether the
 // copies are gone.
 func (s *At5) initFromSetup(h Host) (res Result, gone bool, err error) {
+	return s.initFromSetupWith(h, s.urlSlice(), false)
+}
+
+// initFromSetupWith is initFromSetup with the setup file's server list given. With once set the command runs a single
+// time (no retry), for a run that is expected to be refused.
+func (s *At5) initFromSetupWith(h Host, servers []string, once bool) (res Result, gone bool, err error) {
 	in := filepath.Join(h.ServerDir(), "init-in")
 	admin := filepath.Join(h.ServerDir(), fileAdminCreds)
 	files := []struct{ src, dst string }{
@@ -409,7 +415,7 @@ func (s *At5) initFromSetup(h Host) (res Result, gone bool, err error) {
 		}
 	}
 	setup := SetupFile{
-		Servers: s.urlSlice(), CA: ca, Owner: "alice", AdminCreds: admin,
+		Servers: servers, CA: ca, Owner: "alice", AdminCreds: admin,
 		SystemCreds: filepath.Join(in, "sys.creds"), OperatorKey: filepath.Join(in, "operator.nk"), AccountKey: filepath.Join(in, "account.nk"),
 	}
 	file := filepath.Join(h.ServerDir(), fileSetupYAML)
@@ -417,10 +423,14 @@ func (s *At5) initFromSetup(h Host) (res Result, gone bool, err error) {
 		cleanup()
 		return res, true, perr
 	}
-	res = retry(40*time.Second, 2*time.Second, func() (Result, bool) {
-		r := s.ctl(h, "init-config", nil, "init", "--config", file)
-		return r, r.Code == 0
-	})
+	if once {
+		res = s.ctl(h, "init-config-refused", nil, "init", "--config", file)
+	} else {
+		res = retry(40*time.Second, 2*time.Second, func() (Result, bool) {
+			r := s.ctl(h, "init-config", nil, "init", "--config", file)
+			return r, r.Code == 0
+		})
+	}
 	cleanup()
 	gone = true
 	for _, p := range temp {
@@ -429,6 +439,24 @@ func (s *At5) initFromSetup(h Host) (res Result, gone bool, err error) {
 		}
 	}
 	return res, gone, nil
+}
+
+// InitRefusedForOneServer runs `mashctl init --config` once on M1 with a setup file that lists only M1's own server of
+// the three-node cluster. The ping sees a cluster that reports more servers than the file lists, so init must refuse
+// (exit 1, "the setup file lists ... servers") and change nothing: M1 has no config.json afterwards.
+func (s *At5) InitRefusedForOneServer() bool {
+	h := s.M(1)
+	res, gone, err := s.initFromSetupWith(h, []string{s.urlOf(h)}, true)
+	if err != nil {
+		s.check("M1: the setup file for the refused mashctl init --config is made", false, err.Error())
+		return false
+	}
+	t := res.Text()
+	ok := s.check("M1: mashctl init --config with only M1's server listed is refused: the server is part of a cluster but the setup file lists fewer servers (exit 1)", res.Code == 1, exitDetail(res))
+	ok = s.check("M1: the refusal says the setup file lists the servers and names the cluster", strings.Contains(t, "setup file lists") && strings.Contains(t, "cluster"), "output: "+strings.TrimSpace(t)) && ok
+	ok = s.check("M1: the refused mashctl init --config changed nothing: there is no config.json", !h.Exists(filepath.Join(h.Home().Config, "config.json")), "") && ok
+	ok = s.check("the copies of the seeds and sys.creds that the harness made on M1 for the refused run are deleted by exact path", gone, "") && ok
+	return ok
 }
 
 // InitBuckets runs `mashctl init --config` on M1 with a setup file that lists all three servers and the cluster's CA,
@@ -516,7 +544,7 @@ func (s *At5) Setup(now time.Time) bool {
 		return false
 	}
 	s.check("the harness makes its certificate authority and one certificate per node, each chain verified with the SANs of the node's address", true, "")
-	return s.InitM1() && s.StartServers() && s.InitBuckets() && s.AdoptM2() &&
+	return s.InitM1() && s.StartServers() && s.InitRefusedForOneServer() && s.InitBuckets() && s.AdoptM2() &&
 		s.ClusterCheck(s.M(1), "M1") && s.ClusterCheck(s.M(2), "M2") && s.listBoth()
 }
 
