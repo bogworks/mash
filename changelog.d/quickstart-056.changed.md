@@ -1,0 +1,1 @@
+The README and docs/install.md quick start now show the 0.5.6 way: the checked `install.sh` line, the local NATS script, `mashctl init --config`, `mashctl endpoint create --out`, `mash join`, and the marketplace plugins. Examples use Alice and Bob.
