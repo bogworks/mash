@@ -361,7 +361,17 @@ func LookupFromFunc(env func(string) string) Lookup {
 
 // Load resolves the configuration. lookup is os.LookupEnv in production; home is $HOME, or the OS's idea of the user's
 // home when that is unset ("" when unknown). An empty value of any variable reads as unset.
-func Load(lookup Lookup, home string) (Config, error) {
+func Load(lookup Lookup, home string) (Config, error) { return loadPicking(lookup, home, true) }
+
+// LoadNamedOnly is Load without the one-installed-endpoint pick: the endpoint is the one MASH_ENDPOINT (or --endpoint)
+// or config.json "endpoint" names, and with none named the Config is inert (Name empty, Source["endpoint"] "unset"),
+// whatever creds are installed. A session (mash serve, mash hook) uses it: it acts only for an endpoint it was told.
+// The commands you type use Load.
+func LoadNamedOnly(lookup Lookup, home string) (Config, error) {
+	return loadPicking(lookup, home, false)
+}
+
+func loadPicking(lookup Lookup, home string, autoPick bool) (Config, error) {
 	env := func(k string) string { v, _ := lookup(k); return v }
 	if _, err := explicitDir(env, "MASH_CONFIG_DIR"); err != nil {
 		return Config{}, err
@@ -477,6 +487,7 @@ func Load(lookup Lookup, home string) (Config, error) {
 	case c.Creds != "":
 		// A creds path was set (--creds, MASH_CREDS, "creds"): installed creds must not pick the address, or one
 		// endpoint's address would be signed with another's creds.
+	case !autoPick:
 	default:
 		switch found := installedEndpoints(dir); len(found) {
 		case 0:

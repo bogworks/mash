@@ -78,7 +78,7 @@ func TestStatusToolInert(t *testing.T) {
 	wantAll(t, "inert", out,
 		"name: MISSING",
 		"not set",
-		"start Claude Code with MASH_ENDPOINT=<owner.group.name>",
+		"no endpoint is chosen for this session", "start the session with MASH_ENDPOINT=<address>",
 		"config: MISSING",
 		"server",
 		"MASH_SERVER",

@@ -108,6 +108,10 @@ func statusTool(src *statusSource) mcp.Tool {
 func statusText(src *statusSource) string {
 	cfg := src.cfg
 	lines := []string{nameLine(cfg)}
+	if !src.cli && cfg.Name == "" && src.cfgErr == nil {
+		// A session never picks an endpoint for itself (even with creds installed): it acts for the one it was told.
+		lines[0] = "name: MISSING - not set: no endpoint is chosen for this session. Next: start the session with MASH_ENDPOINT=<address>"
+	}
 	lines = append(lines, configLine(cfg, src.cfgErr))
 	// A load error that came before the rule was read leaves it unset: that is the config line's error, not "none set".
 	if src.cfgErr == nil || cfg.NameRule != nil || errors.Is(src.cfgErr, config.ErrNoURL) || errors.Is(src.cfgErr, config.ErrNoOwner) {
