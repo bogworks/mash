@@ -181,28 +181,33 @@ func TestStatusSessionAtShellWithTheServerDown(t *testing.T) {
 
 // A refused hook and a suspected session read the same at the shell and in the tool.
 func TestStatusSessionRefusedAndSuspectedAtShellAndTool(t *testing.T) {
-	w, s := hooklessWorld(t, time.Hour)
-	sp := spoolFor(w, "a")
-	eventually(t, 10*time.Second, "shell sees the session", func() bool { got, _ := shellSession(t, w); return strings.Contains(got, "not_run") })
-	if err := sp.NoteRefused(spool.Refusal{Time: time.Now().Add(time.Second), Why: "another session's"}); err != nil {
-		t.Fatal(err)
-	}
-	const refused = `{"holds_endpoint":true,"hooks":"refused","storage":"ok"}`
-	if got, _ := shellSession(t, w); got != refused {
-		t.Errorf("shell: %s", got)
-	}
-	if got := toolSession(t, s, 60); got != refused {
-		t.Errorf("tool: %s", got)
-	}
-	// suspected: a wake was sent (HooklessWakes is 1) and no hook ran; the refusal is cleared by a new holder, so use a
-	// fresh world
-	w2, s2 := hooklessWorld(t, time.Hour)
-	sendAndWaitSpooled(t, w2, "wake me")
-	const suspected = `{"holds_endpoint":true,"hooks":"suspected","storage":"ok"}`
-	eventually(t, 15*time.Second, "shell sees suspected", func() bool { got, _ := shellSession(t, w2); return got == suspected })
-	if got := toolSession(t, s2, 61); got != suspected {
-		t.Errorf("tool: %s", got)
-	}
+	// Two subtests, one after the other: each starts its own serve and restores the detector's knobs only after that
+	// serve has stopped (a second hooklessWorld in the same test would write the knobs under the first serve's goroutines).
+	t.Run("refused", func(t *testing.T) {
+		w, s := hooklessWorld(t, time.Hour)
+		sp := spoolFor(w, "a")
+		eventually(t, 10*time.Second, "shell sees the session", func() bool { got, _ := shellSession(t, w); return strings.Contains(got, "not_run") })
+		if err := sp.NoteRefused(spool.Refusal{Time: time.Now().Add(time.Second), Why: "another session's"}); err != nil {
+			t.Fatal(err)
+		}
+		const refused = `{"holds_endpoint":true,"hooks":"refused","storage":"ok"}`
+		if got, _ := shellSession(t, w); got != refused {
+			t.Errorf("shell: %s", got)
+		}
+		if got := toolSession(t, s, 60); got != refused {
+			t.Errorf("tool: %s", got)
+		}
+	})
+	// suspected: a wake was sent (HooklessWakes is 1) and no hook ran; a new holder clears the refusal, so this is a fresh world
+	t.Run("suspected", func(t *testing.T) {
+		w2, s2 := hooklessWorld(t, time.Hour)
+		sendAndWaitSpooled(t, w2, "wake me")
+		const suspected = `{"holds_endpoint":true,"hooks":"suspected","storage":"ok"}`
+		eventually(t, 15*time.Second, "shell sees suspected", func() bool { got, _ := shellSession(t, w2); return got == suspected })
+		if got := toolSession(t, s2, 61); got != suspected {
+			t.Errorf("tool: %s", got)
+		}
+	})
 }
 
 // One real tool call followed by the grace is not two calls: the recorder does not say degraded for a second call that

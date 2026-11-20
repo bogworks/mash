@@ -99,7 +99,8 @@ func hookRan(t *testing.T, w *world, s *session, name string) {
 // The delivery row's two hook texts are the specification's: a warning with no hint while hooks have not run (so
 // doctor --strict fails until the first hook runs: there is no grace timer), and a failure with the hint to reinstall.
 func TestDoctorDeliveryRowHookTexts(t *testing.T) {
-	w, s := hooklessWorld(t, 150*time.Millisecond)
+	// The grace is long enough that the calls of the first phase, on a loaded machine, are not two calls "well apart".
+	w, s := hooklessWorld(t, time.Second)
 	eventually(t, 10*time.Second, "shell sees the session", func() bool { got, _ := shellSession(t, w); return strings.Contains(got, "not_run") })
 	const warn = "delivery  warn  hooks have not run in this session yet; they run with\n                the first prompt or tool call\n"
 	if out := resultText(s.call(t, 80, "doctor", `{}`)); !strings.Contains(out, warn) || strings.Contains(out, "hint:") {
