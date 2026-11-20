@@ -643,8 +643,10 @@ CNF
     KS=$XDG_DATA_HOME/nats/nsc/keys/keys
     SYSPUB=$(acct_pub SYSTEM)
     ACCPUB=$(acct_pub "$OWNER")
+    # the nats command signs the accounts with the operator's own (identity) key, not
+    # its signing key, and mashctl init needs operator.nk to be the key that signed them
     OPSIGN=$(nats auth operator info "$OP" 2>/dev/null </dev/null |
-        sed -n 's/^ *Signing Keys: *\(O[A-Z2-7]*\).*$/\1/p' | head -n 1)
+        sed -n '1s/^Operator .* (\(O[A-Z2-7]*\))$/\1/p')
     # every file the next steps read must be where this nats version puts it
     _ok=1
     [ -n "$SYSPUB" ] && [ -n "$ACCPUB" ] && [ -n "$OPSIGN" ] || _ok=0

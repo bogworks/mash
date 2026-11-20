@@ -20,7 +20,7 @@
 #
 # Environment:
 #   MLNT_IMAGES   space-separated image tags (default: debian:stable ubuntu:24.04 ubuntu:26.04)
-#   MLNT_CASES    space-separated case numbers (default: 1 2 ... 26)
+#   MLNT_CASES    space-separated case numbers (default: 1 2 ... 27)
 #   MLNT_MODES    space-separated modes (default: linux darwin)
 #   MLNT_REPORT   receipt file (markdown; default: receipt-<run id>.md in the scratch
 #                 directory, or in ${TMPDIR:-/tmp} when the scratch directory is made here)
@@ -28,6 +28,9 @@
 #                 removed at the end only when the test made it and nothing failed)
 #   MLNT_NATSCLI  natscli version (default 0.5.2; any other version needs MLNT_NATSCLI_SHA256)
 #   MLNT_SCRIPT   test another copy of the script (default: scripts/mash-local-nats-setup.sh)
+#   MLNT_MASHCTL  path to a LINUX amd64 static mashctl binary that has `init --config`; case 27
+#                 copies it into the container and runs the script's printed `mashctl init` line
+#                 twice (default unset: that part prints "skipped: MLNT_MASHCTL not set")
 #
 # Every assertion prints "ok: ..." or "FAIL: ..."; the totals come last and the
 # exit status is non-zero when any assertion failed.
@@ -1445,11 +1448,58 @@ s.bind(("127.0.0.1", int(sys.argv[1]))); s.listen(5); time.sleep(600)' "$1" &
     stopdir "$d"
 }
 
+case27() { # the keys mashctl init checks: operator.nk signed the accounts; mashctl init accepts the output
+    local d=$H/c27 KS a pub iss opsub who mout
+    ROUTE="file"
+    run --owner acme --dir "$d"
+    chk "setup ran" rc_is 0
+    KS=$d/nats-store/nats/nsc/keys/keys
+    nsc() { XDG_DATA_HOME=$d/nats-store XDG_CONFIG_HOME=$d/nats-store/config nats "$@" </dev/null; }
+    # the key file the nats store keeps for the public key $1
+    kfile() { printf '%s/%s/%s/%s.nk' "$KS" "$(printf %s "$1" | cut -c1)" "$(printf %s "$1" | cut -c2-3)" "$1"; }
+    opsub=$(python3 -c 'import base64,json,sys
+p=open(sys.argv[1]).read().strip().split(".")[1]
+print(json.loads(base64.urlsafe_b64decode(p + "=" * (-len(p) % 4)))["sub"])' "$d/operator.jwt")
+    chk "operator.jwt subject is an operator public key (O...)" bash -c '[[ "$1" =~ ^O[A-Z2-7]{55}$ ]]' _ "$opsub"
+    chk "operator.nk is the operator's own seed: the nats store's key file for the operator jwt subject" \
+        cmp -s "$d/keys/operator.nk" "$(kfile "$opsub")"
+    for a in "acme" SYSTEM; do
+        iss=$(nsc auth account info "$a" --operator mash 2>&1 | sed -n 's/^ *Issuer: *\(O[A-Z2-7]*\).*$/\1/p' | head -n 1)
+        chk "$a: the account jwt names an issuer (O...)" [ -n "$iss" ]
+        chk "$a: the account jwt issuer is the operator jwt subject" [ "$iss" = "$opsub" ]
+        chk "$a: keys/operator.nk is byte-identical to the key file of the issuer $iss" \
+            cmp -s "$d/keys/operator.nk" "$(kfile "$iss")"
+    done
+    pub=$(nsc auth account info acme --operator mash 2>&1 | sed -n '1s/^Account .* (\(A[A-Z2-7]*\))$/\1/p')
+    chk "acme: the account public key is known (A...)" [ -n "$pub" ]
+    chk "acme: keys/account.nk is the seed of that account key" cmp -s "$d/keys/account.nk" "$(kfile "$pub")"
+    # end to end with the real mashctl, when the harness copied one in (MLNT_MASHCTL)
+    if [ ! -x /t/mashctl ]; then
+        ok "skipped: MLNT_MASHCTL not set (no mashctl init check)"
+    else
+        mkdir -p "$W/mbin" "$W/mh"
+        ln -sf /t/mashctl "$W/mbin/mashctl"
+        who=$(tail -n 1 "$W/out")
+        chk "the script's last line is the mashctl init command" \
+            [ "$who" = "mashctl init --config $d/mash-setup.yaml" ]
+        for a in first second; do
+            mout=$W/mashctl.$a
+            env "PATH=$W/mbin:$PATH" "HOME=$W/mh" "XDG_CONFIG_HOME=$W/mh/c" "XDG_DATA_HOME=$W/mh/d" \
+                "XDG_STATE_HOME=$W/mh/s" "XDG_CACHE_HOME=$W/mh/x" bash -c "$who" >"$mout" 2>&1 </dev/null
+            RC=$?
+            cp "$mout" "$W/out"; : >"$W/err"
+            chk "mashctl init, $a run: exit 0" rc_is 0
+            chk "mashctl init, $a run: output has no 'refusing'" bash -c '! grep -qi refusing "$1"' _ "$mout"
+        done
+    fi
+    stopdir "$d"
+}
+
 run_case() {
     case $CASE in
     15) case15 ;; 16) case16 ;; 17) case17 ;; 18) case18 ;; 19) case19 ;; 20) case20 ;; 21) case21 ;;
     1) case1 ;; 2) case2 ;; 3) case3 ;; 4) case4 ;; 5) case5 ;; 6) case6 ;; 7) case7 ;;
-    8) case8 ;; 9) case9 ;; 10) case10 ;; 11) case11 ;; 12) case12 ;; 13) case13 ;; 14) case14 ;; 22) case22 ;; 23) case23 ;; 24) case24 ;; 25) case25 ;; 26) case26 ;;
+    8) case8 ;; 9) case9 ;; 10) case10 ;; 11) case11 ;; 12) case12 ;; 13) case13 ;; 14) case14 ;; 22) case22 ;; 23) case23 ;; 24) case24 ;; 25) case25 ;; 26) case26 ;; 27) case27 ;;
     *) echo "FAIL: c$CASE: no such case" ;;
     esac
 }
@@ -1484,7 +1534,7 @@ else
     MADE_SCRATCH=1
 fi
 IMAGES=${MLNT_IMAGES:-"debian:stable ubuntu:24.04 ubuntu:26.04"}
-CASES=${MLNT_CASES:-"1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26"}
+CASES=${MLNT_CASES:-"1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27"}
 MODES=${MLNT_MODES:-"linux darwin"}
 NCV=${MLNT_NATSCLI:-0.5.2}
 # sha256 of https://github.com/nats-io/natscli/releases/download/v0.5.2/nats-0.5.2-linux-amd64.zip,
@@ -1610,6 +1660,10 @@ DISK0=$(free_mb "$SCRATCH")
 
 mkdir -p "$CTX" "$LOGS" || exit 2
 echo "== run $RUN: images: $IMAGES; cases: $CASES"
+if [ -n "${MLNT_MASHCTL:-}" ]; then
+    [ -f "$MLNT_MASHCTL" ] || { echo "no $MLNT_MASHCTL (MLNT_MASHCTL)" >&2; exit 2; }
+    cp -- "$MLNT_MASHCTL" "$CTX/mashctl" && chmod 755 "$CTX/mashctl" || exit 2
+fi
 echo "== downloading natscli v$NCV"
 curl -fsSL -o "$CTX/nats.zip" \
     "https://github.com/nats-io/natscli/releases/download/v$NCV/nats-$NCV-linux-amd64.zip" || {
@@ -1682,6 +1736,7 @@ for tag in $IMAGES; do
             --security-opt no-new-privileges --cap-drop=all --pids-limit 2048 \
             -e MLNT_INSIDE=1 "${envs[@]+"${envs[@]}"}" \
             -v "$SELF_TEST:/t/test.sh:ro" -v "$SCRIPT_SRC:/t/mash-local-nats-setup.sh:ro" \
+            ${MLNT_MASHCTL:+-v "$CTX/mashctl:/t/mashctl:ro"} \
             "$img" bash /t/test.sh "$n" >"$lg" 2>&1
         rc=$?
         podman rm -f "$name" >/dev/null 2>&1
