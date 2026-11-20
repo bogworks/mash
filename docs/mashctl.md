@@ -75,7 +75,7 @@ See [operations.md](operations.md#suspend-an-endpoints-inbound-mail).
 
 ## Checking the deployment
 
-`mashctl doctor [--strict] [--json]` checks the server, mash's storage on it and every endpoint's records, changes nothing, and says how to fix what is wrong. It reports state, not use: it cannot see publishes, connections or endpoints with no stream. Exit codes: 0 no problem (and no warning with `--strict`), 1 a problem, 2 usage. See [doctor.md](doctor.md).
+`mashctl doctor [--strict] [--json]` checks the server, mash's storage on it and every endpoint's records, changes nothing, and says how to fix what is wrong. It always prints every check (`ok`, `warn`, `FAIL`, or `skip` for one that could not run), then the count and one `hint:` line when the first problem has a fix. It reports state, not use: it cannot see publishes, connections or endpoints with no stream. Exit codes: 0 no problem (and no warning with `--strict`), 1 a problem, 2 usage. See [doctor.md](doctor.md).
 
 ## mashctl endpoint inbox
 

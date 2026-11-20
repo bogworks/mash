@@ -53,6 +53,10 @@
    "detail": "0 it worked, 1 it failed, 2 the command line was wrong. Today the same failure exits 2, 3 or 6 depending on the command. A command that did part of its work exits 1, says what is left, and is safe to run again."
   },
   {
+   "rule": "Both doctors work the same way",
+   "detail": "mash doctor and mashctl doctor print every row every time, each marked ok, warn, FAIL or skip; a row that cannot run because an earlier one failed is skip, with what it needs. 'checks' in --json always lists every row, whatever failed. After the rows come one blank line and a count ('No problems.', '1 problem, 1 warning.'). One hint follows when the first problem, or with no problem the first warning, has a command that fixes it; where no command does, there is no hint and the row's own text says what is wrong. Exit 1 when there is a problem; warnings alone exit 0, or 1 with --strict. A server row shows the address as configured."
+  },
+  {
    "rule": "status and doctor report, they do not fail",
    "detail": "Their lines go to stdout whatever they find, and they exit 1 when they found a problem. Any hint still goes to stderr."
   },

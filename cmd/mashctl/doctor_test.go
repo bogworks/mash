@@ -71,7 +71,7 @@ func TestDoctorAllWell(t *testing.T) {
 	}
 }
 
-// A problem prints only the check that failed, the count and the fix; exit 1.
+// A problem still prints every row (ok ones too), then the count and the one hint; exit 1.
 func TestDoctorAProblemShowsTheFailureAndTheFix(t *testing.T) {
 	e := newXYEnv(t)
 	nc := e.connect(natsauth.UserCredentials(e.pl.Creds))
@@ -84,9 +84,9 @@ func TestDoctorAProblemShowsTheFailureAndTheFix(t *testing.T) {
 		t.Fatal(err)
 	}
 	out, _, code := e.run("doctor")
-	want := "endpoints  FAIL  1 inbox has no endpoint record: alice.g.ghost\n\n1 problem.\nhint: mashctl endpoint show alice.g.ghost\n"
-	if code != 1 || out != want {
-		t.Fatalf("exit %d\n%q\nwant\n%q", code, out, want)
+	want := "config     ok\nserver     ok    tls://localhost:4222\nsign-in    ok\nstorage    ok\nendpoints  FAIL  1 inbox has no endpoint record: alice.g.ghost\nkeys       ok    every connected key was issued here\n\n1 problem.\nhint: mashctl endpoint show alice.g.ghost\n"
+	if code != 1 || cleanText(e, out) != want {
+		t.Fatalf("exit %d\n%q\nwant\n%q", code, cleanText(e, out), want)
 	}
 	rep, by, code := doctorJSON(t, e.run)
 	c := by["endpoints"]
@@ -103,7 +103,7 @@ func TestDoctorWarningAndStrict(t *testing.T) {
 	f := newAuditEnv(t)
 	f.endpoint(t, ad("a"))
 	out, errb, code := ctlRun(t, f.e, "doctor")
-	want := "keys       warn  no system_creds in the configuration; connected keys were not checked\n\nNo problems, 1 warning.\nhint: mashctl init --config <file>\n"
+	want := "config     ok\nserver     ok    " + f.e.URL + "\nsign-in    ok\nstorage    ok\nendpoints  ok    1 record, 1 inbox\nkeys       warn  no system_creds in the configuration; connected keys were not checked\n\nNo problems, 1 warning.\nhint: mashctl init --config <file>\n"
 	if code != 0 || out != want {
 		t.Fatalf("exit %d stderr %q\n%q\nwant\n%q", code, errb, out, want)
 	}
@@ -144,7 +144,7 @@ func TestDoctorUsageAndRemovedVerbs(t *testing.T) {
 	}
 }
 
-// A failed config stops everything after it: nothing else runs and nothing is counted.
+// A failed config stops everything after it: the later rows are skip with what they need, and nothing else is counted.
 func TestDoctorStopsAtTheFirstFailedCheck(t *testing.T) {
 	home := t.TempDir()
 	env := map[string]string{"HOME": home, "MASH_CONFIG_DIR": home + "/none"}
@@ -154,26 +154,36 @@ func TestDoctorStopsAtTheFirstFailedCheck(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
 		t.Fatalf("%v\n%s\n%s", err, out.String(), errb.String())
 	}
-	if code != 1 || rep.Problems != 1 || len(rep.Checks) != 1 || rep.Checks[0].Name != "config" || rep.Checks[0].State != "fail" ||
+	if code != 1 || rep.Problems != 1 || rep.Warnings != 0 || len(rep.Checks) != 6 || rep.Checks[0].Name != "config" || rep.Checks[0].State != "fail" ||
 		rep.Checks[0].Detail == "" || rep.Checks[0].Fix == nil || *rep.Checks[0].Fix != "mashctl init --config <file>" {
 		t.Fatalf("%d %+v", code, rep)
+	}
+	for i, needs := range []string{"needs the config", "needs the server", "needs sign-in", "needs the storage", "needs sign-in"} {
+		if c := rep.Checks[i+1]; c.State != "skip" || c.Detail != needs || c.Fix != nil {
+			t.Errorf("row %d: %+v", i+1, c)
+		}
 	}
 	out.Reset()
 	code = runEnv([]string{"doctor"}, func(k string) string { return env[k] }, &out, &errb)
 	if code != 1 || !strings.HasPrefix(out.String(), "config     FAIL  ") || !strings.HasSuffix(out.String(), "\n\n1 problem.\nhint: mashctl init --config <file>\n") ||
-		strings.Count(out.String(), "\n") != 4 {
+		strings.Count(out.String(), "\n") != 9 {
 		t.Fatalf("%d %q", code, out.String())
 	}
 }
 
-// A server that does not answer stops the checks that need it.
+// A server that does not answer skips the checks that need it.
 func TestDoctorServerDown(t *testing.T) {
 	e := newXYEnv(t)
 	e.env["MASH_SERVER"] = "nats://127.0.0.1:1"
 	rep, by, code := doctorJSON(t, e.run)
-	if code != 1 || len(rep.Checks) != 2 || by["config"].State != "ok" || by["server"].State != "fail" || by["server"].Detail != serverSilent ||
+	if code != 1 || len(rep.Checks) != 6 || by["config"].State != "ok" || by["server"].State != "fail" || by["server"].Detail != serverSilent ||
 		by["server"].Fix == nil || *by["server"].Fix != "mashctl status" {
 		t.Fatalf("%d %+v", code, rep)
+	}
+	for _, n := range []string{"sign-in", "storage", "endpoints", "keys"} {
+		if by[n].State != "skip" {
+			t.Errorf("%s ran without the server: %+v", n, by[n])
+		}
 	}
 }
 
@@ -183,12 +193,17 @@ func TestDoctorSignInRefused(t *testing.T) {
 	other := newApplyEnv(t) // another deployment's admin creds
 	e.env["MASH_ADMIN_CREDS"] = other.pl.Creds
 	rep, by, code := doctorJSON(t, e.run)
-	if code != 1 || len(rep.Checks) != 3 || by["server"].State != "ok" || by["sign-in"].State != "fail" || by["sign-in"].Fix == nil {
+	if code != 1 || len(rep.Checks) != 6 || by["server"].State != "ok" || by["sign-in"].State != "fail" || by["sign-in"].Fix == nil {
 		t.Fatalf("%d %+v", code, rep)
+	}
+	for _, n := range []string{"storage", "endpoints", "keys"} {
+		if by[n].State != "skip" {
+			t.Errorf("%s ran without sign-in: %+v", n, by[n])
+		}
 	}
 }
 
-// A missing bucket fails storage and stops the endpoints check; a cap below the configured one warns.
+// A missing bucket fails storage and skips the endpoints check; a cap below the configured one warns.
 func TestDoctorStorage(t *testing.T) {
 	f := newAuditEnv(t)
 	f.endpoint(t, ad("a"))
@@ -220,7 +235,7 @@ func TestDoctorStorage(t *testing.T) {
 	if c := by["storage"]; c.State != "fail" || c.Detail != "the "+store.LeaseBucket+" bucket is missing" || c.Fix == nil || code != 1 {
 		t.Fatalf("missing: %d %+v", code, c)
 	}
-	if _, ok := by["endpoints"]; ok {
+	if c := by["endpoints"]; c.State != "skip" || c.Detail != "needs the storage" {
 		t.Errorf("endpoints ran without storage: %+v", rep.Checks)
 	}
 }
@@ -385,9 +400,9 @@ func TestDoctorKeysReportsAKeyMashDidNotIssue(t *testing.T) {
 		t.Fatal("the rogue did not connect")
 	}
 	out, _, code := e.run("doctor")
-	want := "keys       FAIL  1 connected key was not issued here\n\n1 problem.\nhint: mashctl endpoint list\n"
-	if code != 1 || out != want {
-		t.Fatalf("exit %d\n%q\nwant\n%q", code, out, want)
+	want := "config     ok\nserver     ok    tls://localhost:4222\nsign-in    ok\nstorage    ok\nendpoints  ok    2 records, 2 inboxes\nkeys       FAIL  1 connected key was not issued here\n\n1 problem.\nhint: mashctl endpoint list\n"
+	if code != 1 || cleanText(e, out) != want {
+		t.Fatalf("exit %d\n%q\nwant\n%q", code, cleanText(e, out), want)
 	}
 	rogue.Close()
 	time.Sleep(200 * time.Millisecond)
@@ -455,5 +470,48 @@ func TestDoctorKeysUnusableSystemCreds(t *testing.T) {
 	_, by, code := doctorJSON(t, e.run)
 	if c := by["keys"]; code != 1 || c.State != "fail" || !strings.Contains(c.Detail, "system account credentials") {
 		t.Fatalf("%d %+v", code, c)
+	}
+}
+
+// When the first problem names no fix there is no hint, even if a later row has one.
+func TestDoctorNoHintWhenTheFirstProblemHasNoFix(t *testing.T) {
+	rep := doctorReport{Checks: []doctorCheck{}}
+	fix := "mashctl status"
+	rep.add("config", stateOK, "", "")
+	rep.add("server", stateFail, "no answer", "")
+	rep.add("sign-in", stateFail, "refused", fix)
+	rep.complete()
+	if rep.Checks[1].Fix != nil || rep.hint() != "" {
+		t.Fatalf("hint %q for %+v", rep.hint(), rep.Checks)
+	}
+	var out bytes.Buffer
+	rep.writeText(&out)
+	if strings.Contains(out.String(), "hint:") || !strings.HasSuffix(out.String(), "\n\n2 problems.\n") {
+		t.Errorf("%q", out.String())
+	}
+	// and a warnings-only run whose first warning has no fix
+	w := doctorReport{Checks: []doctorCheck{}}
+	w.add("config", stateWarn, "old", "")
+	w.add("keys", stateWarn, "x", fix)
+	w.complete()
+	if w.hint() != "" {
+		t.Errorf("warning hint %q", w.hint())
+	}
+}
+
+// Skip rows are printed in the text with what they need, and counted as neither problems nor warnings.
+func TestDoctorSkipRowsInText(t *testing.T) {
+	home := t.TempDir()
+	env := map[string]string{"HOME": home, "MASH_CONFIG_DIR": home + "/none"}
+	var out, errb bytes.Buffer
+	runEnv([]string{"doctor"}, func(k string) string { return env[k] }, &out, &errb)
+	for _, line := range []string{"server     skip  needs the config\n", "sign-in    skip  needs the server\n", "storage    skip  needs sign-in\n",
+		"endpoints  skip  needs the storage\n", "keys       skip  needs sign-in\n"} {
+		if !strings.Contains(out.String(), line) {
+			t.Errorf("missing %q in\n%s", line, out.String())
+		}
+	}
+	if !strings.Contains(out.String(), "\n\n1 problem.\n") {
+		t.Errorf("skip rows were counted:\n%s", out.String())
 	}
 }

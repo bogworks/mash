@@ -18,7 +18,8 @@ are unknown commands (exit 2). The records of one endpoint are `mashctl endpoint
 
 ## The output
 
-When all is well, one line per check, then the verdict:
+Every check always has its line, whatever the result, then a blank line, the count and, when the first problem has a
+fix, one `hint:` line. When all is well:
 
 ```text
 config     ok
@@ -31,24 +32,33 @@ keys       ok    every connected key was issued here
 No problems.
 ```
 
-When a check fails or warns, only the lines that are not `ok` are printed, then the count, then one `hint:` line with
-the command that fixes the first check that failed (the first that warned, when none failed):
+When a check fails or warns, the `ok` lines are still printed, and so is one `hint:` line with the command that fixes
+the first problem (the first warning, when nothing failed). When that first one has no command that fixes it, there is
+no hint:
 
 ```text
+config     ok
+server     ok    tls://localhost:4222
+sign-in    ok
+storage    ok
 endpoints  FAIL  1 inbox has no endpoint record: acme.demo.dave
+keys       ok    every connected key was issued here
 
 1 problem.
 hint: mashctl endpoint show acme.demo.dave
 ```
 
-A line is the check's name, its state (`ok`, `warn` or `FAIL`) and, after that, its detail when it has one. The count is
-`No problems.`, `1 problem.`, `2 problems.`, and a warning is added after a comma: `1 problem, 2 warnings.`,
-`No problems, 1 warning.`. Addresses are shown dotted (`owner.group.name`).
+A line is the check's name, its state (`ok`, `warn`, `FAIL` or `skip`) and, after that, its detail when it has one. A
+`skip` line is a check that could not run because an earlier one failed; its detail says what it needs (`needs the
+config`, `needs the server`, `needs sign-in`, `needs the storage`), and it counts as neither a problem nor a warning.
+The count is `No problems.`, `1 problem.`, `2 problems.`, and a warning is added after a comma: `1 problem, 2 warnings.`,
+`No problems, 1 warning.`. Addresses are shown dotted (`owner.group.name`). `--json` lists all six checks in `checks`
+too, with `"state": "skip"` for a skipped one.
 
 ## The checks
 
-They run in this order. A check that cannot run because an earlier one failed is not run and is not counted, so a
-server that does not answer shows one `FAIL` line and not five.
+They run in this order. A check that cannot run because an earlier one failed is shown as `skip` and is not counted, so a
+server that does not answer shows one `FAIL` line and four `skip` lines, not five failures.
 
 | Check | `FAIL` when | `warn` when | Fix |
 | --- | --- | --- | --- |

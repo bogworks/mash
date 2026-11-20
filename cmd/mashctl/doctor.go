@@ -47,6 +47,7 @@ const (
 	stateOK   = "ok"
 	stateWarn = "warn"
 	stateFail = "fail"
+	stateSkip = "skip" // a row that could not run because an earlier one failed
 )
 
 // doctorCheck is one line of the report: the text form and one object of the JSON.
@@ -80,6 +81,28 @@ func (r *doctorReport) add(name, state, detail, fix string) {
 	}
 }
 
+// doctorRows are the rows in the order they are printed, and what each needs when it is skipped.
+var doctorRows = []struct{ name, needs string }{
+	{"config", ""}, {"server", "needs the config"}, {"sign-in", "needs the server"},
+	{"storage", "needs sign-in"}, {"endpoints", "needs the storage"}, {"keys", "needs sign-in"},
+}
+
+// complete makes every row appear, in order: a row that did not run is skip, with what it needs.
+func (r *doctorReport) complete() {
+	have := map[string]doctorCheck{}
+	for _, c := range r.Checks {
+		have[c.Name] = c
+	}
+	r.Checks = r.Checks[:0:0]
+	for _, row := range doctorRows {
+		if c, ok := have[row.name]; ok {
+			r.Checks = append(r.Checks, c)
+			continue
+		}
+		r.Checks = append(r.Checks, doctorCheck{Name: row.name, State: stateSkip, Detail: row.needs})
+	}
+}
+
 // doctorWord is how the text form says a state.
 func doctorWord(s string) string {
 	switch s {
@@ -87,6 +110,8 @@ func doctorWord(s string) string {
 		return "FAIL"
 	case stateWarn:
 		return "warn"
+	case stateSkip:
+		return "skip"
 	}
 	return "ok"
 }
@@ -103,30 +128,30 @@ func (r doctorReport) summary() string {
 	return p + "."
 }
 
-// hint is the fix of the first check that failed, else of the first that warned ("" when none names one).
+// hint is the fix of the first problem, or with no problem the first warning ("" when that one names none).
 func (r doctorReport) hint() string {
-	for _, st := range []string{stateFail, stateWarn} {
-		for _, c := range r.Checks {
-			if c.State == st && c.Fix != nil {
+	st := stateWarn
+	if r.Problems > 0 {
+		st = stateFail
+	}
+	for _, c := range r.Checks {
+		if c.State == st {
+			if c.Fix != nil {
 				return *c.Fix
 			}
+			return "" // the first problem (or warning) has no command that fixes it: no hint
 		}
 	}
 	return ""
 }
 
-// writeText prints the report: every check when all is well, else only the checks that are not ok, then the summary
-// and the hint.
+// writeText prints every row, then a blank line, the count and the one hint.
 func (r doctorReport) writeText(w io.Writer) {
-	all := r.Problems == 0 && r.Warnings == 0
 	for _, c := range r.Checks {
-		if !all && c.State == stateOK {
-			continue
-		}
 		fmt.Fprintln(w, strings.TrimRight(fmt.Sprintf("%-11s%-6s%s", c.Name, doctorWord(c.State), c.Detail), " "))
 	}
 	fmt.Fprintf(w, "\n%s\n", r.summary())
-	if h := r.hint(); h != "" && !all {
+	if h := r.hint(); h != "" {
 		fmt.Fprintf(w, "hint: %s\n", h)
 	}
 }
@@ -141,6 +166,7 @@ func runDoctor(args []string, g cliframe.Global, env func(string) string, lookup
 	}
 	rep := doctorReport{Checks: []doctorCheck{}}
 	doctorChecks(&rep, env, lookup)
+	rep.complete()
 	if jsonOut {
 		writeJSON(stdout, rep)
 	} else {
