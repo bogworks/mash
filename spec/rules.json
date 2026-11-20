@@ -93,6 +93,10 @@
    "detail": "Every option, global or the command's own, is accepted before or after the command and its arguments, as with kubectl and gh. Help and documentation always write them last: mash status --endpoint acme.demo.alice."
   },
   {
+   "rule": "A sender's words are always marked as the sender's",
+   "detail": "Wherever mash prints a message's text in full, every line starts with '> ' and control characters are escaped, at a shell and in an MCP tool alike. It reads as quoted mail does to a person, and it shows an agent where data from someone else begins and ends. A table's MESSAGE column holds the sender's words too."
+  },
+  {
    "rule": "Only a destructive command asks",
    "detail": "It asks you to type the address, and --yes skips the question."
   },

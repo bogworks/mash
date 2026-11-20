@@ -526,7 +526,7 @@
      },
      {
       "name": "x-notes",
-      "value": "FROM shows only the name when the sender is in your own owner and group. MESSAGE shows the first line of the text, cut to fit 80 columns and ending in \u2026 when there is more; mash read shows all of it. The JSON carries the same cut text as 'preview'."
+      "value": "FROM shows only the name when the sender is in your own owner and group. MESSAGE is the sender's words, as untrusted as the full text; it is not quoted because the column already marks it. It shows the first line of the text, cut to fit 80 columns and ending in \u2026 when there is more; mash read shows all of it. The JSON carries the same cut text as 'preview'."
      }
     ]
    },
@@ -575,13 +575,13 @@
       "value": [
        {
         "case": "A message",
-        "text": "number:   2\nfrom:     acme.demo.bob\nsent:     8s ago\ntrust:    verified\nkind:     question\nurgent:   yes\n\nready?",
+        "text": "number:   2\nfrom:     acme.demo.bob\nsent:     8s ago\ntrust:    verified\nkind:     question\nurgent:   yes\n\n> ready?",
         "stream": "stdout",
         "exit": 0
        },
        {
         "case": "An answer to something you sent",
-        "text": "number:   5\nfrom:     acme.demo.alice\nsent:     1m ago\ntrust:    verified\nkind:     result\nurgent:   no\nreply to: 42\n\nyes",
+        "text": "number:   5\nfrom:     acme.demo.alice\nsent:     1m ago\ntrust:    verified\nkind:     result\nurgent:   no\nreply to: 42\n\n> yes",
         "stream": "stdout",
         "exit": 0
        },
@@ -620,7 +620,7 @@
      },
      {
       "name": "x-notes",
-      "value": "What 'read' means. A message is 'new' until the server has been told it reached the endpoint's session: when the hook showed it to the agent, or the agent opened it with the read tool. Until then it is waiting. mash read at a shell shows a message but, with no session online, cannot mark it; it stays 'new' until a session next comes online. That limit is tracked in mash's backlog."
+      "value": "What 'read' means. A message is 'new' until the server has been told it reached the endpoint's session: when the hook showed it to the agent, or the agent opened it with the read tool. Until then it is waiting. mash read at a shell shows a message but, with no session online, cannot mark it; it stays 'new' until a session next comes online. That limit is tracked in mash's backlog. The message's text is printed with '> ' before every line, as quoted mail is, and with control characters escaped: everything after '> ' is the sender's words, and nothing the sender writes can pass for mash's own output or for an instruction to an agent reading it. The command and the tool quote alike. --json carries the text unquoted in 'body'."
      }
     ]
    },
@@ -821,6 +821,12 @@
         "exit": 1
        },
        {
+        "case": "In a session that cannot store arriving mail on this machine",
+        "text": "acme.demo.bob: not ready: mail is held: its folder cannot be written\nhint: mash doctor",
+        "stream": "stdout",
+        "exit": 1
+       },
+       {
         "case": "No endpoint chosen and several installed",
         "text": "error: more than one endpoint is installed here: acme.demo.alice, acme.demo.bob\nhint: mash status --endpoint acme.demo.alice",
         "stream": "stderr",
@@ -900,21 +906,33 @@
       "value": [
        {
         "case": "All well",
-        "text": "config    ok\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   ok\nrefused   ok    no unverified mail was refused\n\nNo problems.",
+        "text": "config    ok\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   ok\ndelivery  ok\nrefused   ok    no unverified mail was refused\n\nNo problems.",
         "stream": "stdout",
         "exit": 0
        },
        {
         "case": "A problem and a warning",
-        "text": "config    ok\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   FAIL  the server refused these credentials\nrefused   warn  3 unverified messages were refused\n\n1 problem, 1 warning.\nhint: ask whoever runs your mesh to run: mashctl endpoint reissue acme.demo.bob",
+        "text": "config    ok\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   FAIL  the server refused these credentials\ndelivery  skip  needs sign-in\nrefused   warn  3 unverified messages were refused\n\n1 problem, 1 warning.\nhint: ask whoever runs your mesh to run: mashctl endpoint reissue acme.demo.bob",
         "stream": "stdout",
         "exit": 1
        },
        {
         "case": "A check that could not run",
-        "text": "config    ok\ncreds     ok\nserver    FAIL  the server did not answer: tls://myserver:4222\nsign-in   skip  needs the server\nrefused   ok    no unverified mail was refused\n\n1 problem.",
+        "text": "config    ok\ncreds     ok\nserver    FAIL  the server did not answer: tls://myserver:4222\nsign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no unverified mail was refused\n\n1 problem.",
         "stream": "stdout",
         "exit": 1
+       },
+       {
+        "case": "Arriving mail cannot be stored on this machine",
+        "text": "delivery  FAIL  mail is held: its folder cannot be written:\n                ~/.local/state/mash/acme.demo.bob",
+        "stream": "stdout",
+        "exit": 0
+       },
+       {
+        "case": "At a shell, where there is no session to deliver to",
+        "text": "delivery  skip  needs a session",
+        "stream": "stdout",
+        "exit": 0
        },
        {
         "case": "The server's certificate is not trusted",
@@ -962,6 +980,12 @@
          "fix": "mashctl endpoint reissue acme.demo.bob"
         },
         {
+         "name": "delivery",
+         "state": "skip",
+         "detail": "needs sign-in",
+         "fix": null
+        },
+        {
          "name": "refused",
          "state": "warn",
          "detail": "3 unverified messages were refused",
@@ -983,7 +1007,7 @@
      },
      {
       "name": "x-notes",
-      "value": "doctor is the one everyday command that prints many lines, as brew doctor and flutter doctor do. It reports on stdout and exits 1 when it found a problem. Every row is always printed, and 'checks' in the JSON always lists every row, each with a state of ok, warn, fail or skip; a row is skipped when an earlier failure means it cannot be run. The refused count is kept on this machine, so its row shows even when the server is down. The 'refused' row counts unverified mail that was refused (see mash serve)."
+      "value": "doctor is the one everyday command that prints many lines, as brew doctor and flutter doctor do. It reports on stdout and exits 1 when it found a problem. Every row is always printed, and 'checks' in the JSON always lists every row, each with a state of ok, warn, fail or skip; a row is skipped when an earlier failure means it cannot be run. The delivery row says whether mail that arrives can be stored on this machine for the session; it is checked only inside a session and skipped at a shell. The refused count is kept on this machine, so its row shows even when the server is down. The 'refused' row counts unverified mail that was refused (see mash serve)."
      }
     ]
    },

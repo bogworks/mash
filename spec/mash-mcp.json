@@ -190,7 +190,7 @@
    "text": [
     {
      "case": "A message",
-     "text": "number:   2\nfrom:     acme.demo.bob\nsent:     8s ago\ntrust:    verified\nkind:     question\nurgent:   yes\n\nready?",
+     "text": "number:   2\nfrom:     acme.demo.bob\nsent:     8s ago\ntrust:    verified\nkind:     question\nurgent:   yes\n\n> ready?",
      "stream": "stdout",
      "exit": 0
     }
@@ -303,6 +303,12 @@
      "exit": 1
     },
     {
+     "case": "In a session that cannot store arriving mail on this machine",
+     "text": "acme.demo.bob: not ready: mail is held: its folder cannot be written\nhint: mash doctor",
+     "stream": "stdout",
+     "exit": 1
+    },
+    {
      "case": "No endpoint chosen and several installed",
      "text": "error: more than one endpoint is installed here: acme.demo.alice, acme.demo.bob\nhint: mash status --endpoint acme.demo.alice",
      "stream": "stderr",
@@ -358,6 +364,12 @@
       "fix": "mashctl endpoint reissue acme.demo.bob"
      },
      {
+      "name": "delivery",
+      "state": "skip",
+      "detail": "needs sign-in",
+      "fix": null
+     },
+     {
       "name": "refused",
       "state": "warn",
       "detail": "3 unverified messages were refused",
@@ -368,7 +380,7 @@
    "text": [
     {
      "case": "All well",
-     "text": "config    ok\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   ok\nrefused   ok    no unverified mail was refused\n\nNo problems.",
+     "text": "config    ok\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   ok\ndelivery  ok\nrefused   ok    no unverified mail was refused\n\nNo problems.",
      "stream": "stdout",
      "exit": 0
     }
@@ -376,13 +388,13 @@
    "errors": [
     {
      "case": "A problem and a warning",
-     "text": "config    ok\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   FAIL  the server refused these credentials\nrefused   warn  3 unverified messages were refused\n\n1 problem, 1 warning.\nhint: ask whoever runs your mesh to run: mashctl endpoint reissue acme.demo.bob",
+     "text": "config    ok\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   FAIL  the server refused these credentials\ndelivery  skip  needs sign-in\nrefused   warn  3 unverified messages were refused\n\n1 problem, 1 warning.\nhint: ask whoever runs your mesh to run: mashctl endpoint reissue acme.demo.bob",
      "stream": "stdout",
      "exit": 1
     },
     {
      "case": "A check that could not run",
-     "text": "config    ok\ncreds     ok\nserver    FAIL  the server did not answer: tls://myserver:4222\nsign-in   skip  needs the server\nrefused   ok    no unverified mail was refused\n\n1 problem.",
+     "text": "config    ok\ncreds     ok\nserver    FAIL  the server did not answer: tls://myserver:4222\nsign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no unverified mail was refused\n\n1 problem.",
      "stream": "stdout",
      "exit": 1
     }
