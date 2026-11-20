@@ -67,7 +67,7 @@ If `MASH_SERVER`, `MASH_ENDPOINT` or other `MASH_*` variables are set from anoth
 ```sh
 BASE=https://github.com/bogworks/mash/releases/latest/download
 curl -fsSLO $BASE/mash-local-nats-setup.sh -O $BASE/SHA256SUMS
-grep ' mash-local-nats-setup.sh$' SHA256SUMS | sha256sum -c -     # macOS: shasum -a 256 -c -
+grep ' mash-local-nats-setup.sh$' SHA256SUMS | sha256sum -c - &&  # macOS: shasum -a 256 -c -
 bash mash-local-nats-setup.sh --owner acme
 ```
 
