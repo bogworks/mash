@@ -382,7 +382,7 @@
     },
     {
      "case": "A check that could not run",
-     "text": "config    ok\ncreds     ok\nserver    FAIL  the server did not answer: tls://myserver:4222\nsign-in   skip  needs the server\nrefused   skip  needs the server\n\n1 problem.",
+     "text": "config    ok\ncreds     ok\nserver    FAIL  the server did not answer: tls://myserver:4222\nsign-in   skip  needs the server\nrefused   ok    no unverified mail was refused\n\n1 problem.",
      "stream": "stdout",
      "exit": 1
     }

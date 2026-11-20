@@ -912,9 +912,21 @@
        },
        {
         "case": "A check that could not run",
-        "text": "config    ok\ncreds     ok\nserver    FAIL  the server did not answer: tls://myserver:4222\nsign-in   skip  needs the server\nrefused   skip  needs the server\n\n1 problem.",
+        "text": "config    ok\ncreds     ok\nserver    FAIL  the server did not answer: tls://myserver:4222\nsign-in   skip  needs the server\nrefused   ok    no unverified mail was refused\n\n1 problem.",
         "stream": "stdout",
         "exit": 1
+       },
+       {
+        "case": "The server's certificate is not trusted",
+        "text": "server    FAIL  the server's certificate is not trusted: tls://myserver:4222",
+        "stream": "stdout",
+        "exit": 0
+       },
+       {
+        "case": "The server does not offer encryption",
+        "text": "server    FAIL  the server did not offer TLS: tls://myserver:4222",
+        "stream": "stdout",
+        "exit": 0
        }
       ]
      },
@@ -971,7 +983,7 @@
      },
      {
       "name": "x-notes",
-      "value": "doctor is the one everyday command that prints many lines, as brew doctor and flutter doctor do. It reports on stdout and exits 1 when it found a problem. Every row is always printed, and 'checks' in the JSON always lists every row, each with a state of ok, warn, fail or skip; a row is skipped when an earlier failure means it cannot be run. The 'refused' row counts unverified mail that was refused (see mash serve)."
+      "value": "doctor is the one everyday command that prints many lines, as brew doctor and flutter doctor do. It reports on stdout and exits 1 when it found a problem. Every row is always printed, and 'checks' in the JSON always lists every row, each with a state of ok, warn, fail or skip; a row is skipped when an earlier failure means it cannot be run. The refused count is kept on this machine, so its row shows even when the server is down. The 'refused' row counts unverified mail that was refused (see mash serve)."
      }
     ]
    },
