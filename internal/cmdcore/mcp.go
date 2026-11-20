@@ -107,6 +107,9 @@ func MCPTool[P any, R Result](c Command[P, R], env EnvFunc) Tool {
 				return "", nil, toolError(err)
 			}
 			text := r.Text(e.Opts)
+			if h, ok := any(r).(Hinter); ok && h.Hint() != "" {
+				text += "\nhint: " + h.Hint()
+			}
 			b, err := marshal(r)
 			if err != nil {
 				return "", nil, toolError(err)

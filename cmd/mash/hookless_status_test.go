@@ -38,66 +38,6 @@ func sendAndWaitSpooled(t *testing.T, w *world, body string) spool.Entry {
 	return e[0]
 }
 
-// Wakes with no hook run make the session suspected, and status says so, with the count.
-func TestStatusToolSuspected(t *testing.T) {
-	// Polling status is itself tool calls: with a long grace they are never far enough apart to prove anything.
-	w, s := hooklessWorld(t, time.Hour)
-	sendAndWaitSpooled(t, w, "hello")
-	var out string
-	id := 10
-	eventually(t, 10*time.Second, "SUSPECTED shows", func() bool {
-		id++
-		out = statusOf(t, s, id)
-		return strings.Contains(out, "delivery: SUSPECTED - the last 1 wakes started no turn (no hook since ")
-	})
-	if line := statusLine(t, out, "delivery: SUSPECTED"); !strings.HasSuffix(line, "; channel writes are not counted as delivery; re-waking stopped") {
-		t.Fatalf("suspected line %q", line)
-	}
-	if strings.Contains(out, "DEGRADED") || strings.Contains(out, "hooks have not run") {
-		t.Fatalf("more than one delivery verdict:\n%s", out)
-	}
-}
-
-// Tool calls HookGrace apart with no hook run prove it: status reports DEGRADED, the likely cause and the way out.
-func TestStatusToolDegraded(t *testing.T) {
-	_, s := hooklessWorld(t, 150*time.Millisecond)
-	var out string
-	id := 10
-	eventually(t, 10*time.Second, "DEGRADED shows", func() bool {
-		id++
-		out = statusOf(t, s, id)
-		time.Sleep(60 * time.Millisecond)
-		return strings.Contains(out, "delivery: DEGRADED - no mash hook has run since ")
-	})
-	line := statusLine(t, out, "delivery: DEGRADED")
-	wantAll(t, "degraded", line, " although this session has made tool calls. Likely cause: ", "disableAllHooks", "allowManagedHooksOnly",
-		"hook.log", ". Mail now: read each message with the read tool. Next: ", "mash@mash")
-}
-
-// A refusal recorded since the bind is the cause, and the fix is the launch token.
-func TestStatusToolDegradedNamesARefusal(t *testing.T) {
-	w, s := hooklessWorld(t, 150*time.Millisecond)
-	sp := spoolFor(w, "a")
-	id := 10
-	eventually(t, 5*time.Second, "the session owns the spool", func() bool {
-		id++
-		return strings.Contains(statusOf(t, s, id), "hooks have not run")
-	})
-	time.Sleep(20 * time.Millisecond)
-	if err := sp.NoteRefused(spool.Refusal{Time: time.Now(), Why: "session id differs"}); err != nil {
-		t.Fatal(err)
-	}
-	var out string
-	eventually(t, 10*time.Second, "DEGRADED shows", func() bool {
-		id++
-		out = statusOf(t, s, id)
-		time.Sleep(60 * time.Millisecond)
-		return strings.Contains(out, "delivery: DEGRADED")
-	})
-	wantAll(t, "degraded by a refusal", statusLine(t, out, "delivery: DEGRADED"), "Likely cause: mash's hook runs but is not recognised as this session's (session id differs, last at ",
-		"Next: start Claude Code with MASH_LAUNCH_TOKEN=<any unique value>")
-}
-
 // The read tool acks a held message only once the session is proven hookless; the inbox tool never does.
 func TestReadToolAcksOnlyWhenProvenHookless(t *testing.T) {
 	w, s := hooklessWorld(t, 150*time.Millisecond)

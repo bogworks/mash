@@ -354,8 +354,8 @@ var AT001 = Scenario{
 		}
 		a.C.Check("both sessions are online", a.waitOnline(h, envs["design"], "alice.dev.design", "alice.dev.review"), "")
 
-		st := a.Mash("status-design", h, envs["design"], "status")
-		a.C.Check("REQ-014: mash status for a session says tls: OK (no override set)", strings.Contains(st.Text(), "tls: OK"), snip(grepLine(st.Text(), "tls:")))
+		st := a.Mash("doctor-design", h, envs["design"], "doctor")
+		a.C.Check("REQ-014: mash doctor for a session says the server row is ok, tls:// (no override set)", strings.Contains(st.Stdout, "server    ok    tls://"), snip(grepLine(st.Text(), "server")))
 
 		a.pluginMail(pl, "design-to-review (UserPromptSubmit)", h, sess["design"], sess["review"], "UserPromptSubmit", "hello review from design")
 		a.pluginMail(pl, "review-to-design (PostToolUse)", h, sess["review"], sess["design"], "PostToolUse", "hello design from review")
@@ -412,7 +412,7 @@ var AT001 = Scenario{
 		r = a.Launcher(pl, "reconnect-review", h, revEnv, "inbox")
 		a.C.Check("REQ-011: a reconnect by the review key through the plugin launcher is refused as not authorized", r.Code != 0 && authRE.MatchString(r.Text()), exitDetail(r))
 		r = a.Launcher(pl, "status-review", h, revEnv, "status")
-		a.C.Check("REQ-011: mash status through the plugin launcher says why (an authorization failure)", authRE.MatchString(r.Text()), exitDetail(r))
+		a.C.Check("REQ-011: mash status through the plugin launcher says why (the server refused its credentials)", r.Code == 1 && strings.Contains(r.Stdout, "not ready: the server refused its credentials"), exitDetail(r))
 		a.noDownload(sess["design"], sess["review"])
 	},
 }

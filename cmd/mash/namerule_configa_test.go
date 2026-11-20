@@ -107,7 +107,7 @@ func TestConfigAMashStart(t *testing.T) {
 }
 
 // serve (the MCP server, what a session runs): a refused identity does not start. serve stays up so the session can
-// ask why: it exposes only status and version, and says the rule and its message; the control starts with its tools.
+// ask why: it exposes only version, status and doctor, and says the rule and its message; the control starts with its tools.
 func TestConfigAMashServeStart(t *testing.T) {
 	w := newConfigAMashWorld(t)
 	for _, c := range []struct {
@@ -124,8 +124,8 @@ func TestConfigAMashServeStart(t *testing.T) {
 			if !strings.Contains(instr, `name rule "`+c.want+`"`) {
 				t.Fatalf("the session is not told the rule: %q", instr)
 			}
-			if names := toolNames(t, s); len(names) != 2 || !names["status"] || !names["version"] {
-				t.Fatalf("a refused identity exposes %v, want status and version only", names)
+			if names := toolNames(t, s); len(names) != 3 || !names["status"] || !names["doctor"] || !names["version"] {
+				t.Fatalf("a refused identity exposes %v, want version, status and doctor only", names)
 			}
 			if !strings.Contains(s.stderr(), `name rule "`+c.want+`"`) {
 				t.Fatalf("stderr does not name the rule: %q", s.stderr())
@@ -281,19 +281,19 @@ func TestConfigAMashRequiredWithoutFileRefusesToStart(t *testing.T) {
 				}
 			})
 		}
-		t.Run(how+"/serve", func(t *testing.T) { // serve stays up to say why; it exposes status and version only
+		t.Run(how+"/serve", func(t *testing.T) { // serve stays up to say why; it exposes version, status and doctor only
 			s := startServe(t, env())
 			instr := s.initialize(t)["result"].(map[string]any)["instructions"].(string)
 			if !strings.Contains(instr, want) {
 				t.Fatalf("the session is not told: %q", instr)
 			}
-			if names := toolNames(t, s); len(names) != 2 || !names["status"] || !names["version"] {
+			if names := toolNames(t, s); len(names) != 3 || !names["status"] || !names["doctor"] || !names["version"] {
 				t.Fatalf("serve without its required rule exposes %v", names)
 			}
 		})
-		t.Run(how+"/status", func(t *testing.T) { // a report: the error is a line of it, never "none set"
+		t.Run(how+"/status", func(t *testing.T) { // a report: the error is its reason
 			out, _ := configARun(env(), "status")
-			if !strings.Contains(out, want) || strings.Contains(out, "name rule: none set") {
+			if !strings.Contains(out, want) || !strings.Contains(out, ": not ready: ") {
 				t.Fatalf("%s", out)
 			}
 		})
@@ -348,13 +348,10 @@ func TestConfigAMashRuleFileEnvironmentWinsOverConfigJSON(t *testing.T) {
 		}
 		return m
 	}
-	// config.json names the permissive file; the environment names configuration A: refused, and status shows A.
+	// config.json names the permissive file; the environment names configuration A: refused.
 	configARuleFile(t, dir, "config.json", `{"name_rule_file":"`+permissive+`"}`)
 	if out, code := configARun(base(a), "inbox"); code == 0 || !strings.Contains(out, `name rule "no-retired"`) {
 		t.Fatalf("environment configuration A over a permissive config.json: %d %s", code, out)
-	}
-	if out, _ := configARun(base(a), "status"); !strings.Contains(out, "name rule: "+a+" ") {
-		t.Fatalf("status does not show the environment's file:\n%s", out)
 	}
 	// config.json alone names configuration A: refused.
 	configARuleFile(t, dir, "config.json", `{"name_rule_file":"`+a+`"}`)
@@ -364,8 +361,5 @@ func TestConfigAMashRuleFileEnvironmentWinsOverConfigJSON(t *testing.T) {
 	// config.json names configuration A; the environment names the permissive file: the environment wins.
 	if out, code := configARun(base(permissive), "inbox"); code != 0 {
 		t.Fatalf("a permissive environment over configuration A in config.json: %d %s", code, out)
-	}
-	if out, _ := configARun(base(permissive), "status"); !strings.Contains(out, "name rule: "+permissive+" ") {
-		t.Fatalf("status does not show the environment's file:\n%s", out)
 	}
 }

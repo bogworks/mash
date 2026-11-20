@@ -4,26 +4,28 @@ Symptoms, their causes, how to check, and the fix, using the exact messages mash
 
 ## First check
 
-In the session, ask Claude to call the `status` tool. It answers in every session, even one with no `MASH_ENDPOINT`, and prints one line per part: `name`, `config`, `creds`, `connection`, `channel allowlist`, `environment` (only when it applies), `delivery`, `version`, `client` and (only when it applies) `plugin`. Each line that is not OK ends with "Next: ...". Start from the first line that is not OK.
+In the session, ask Claude to call the `status` tool. It answers in every session, even one with no `MASH_ENDPOINT`, and says one line: `<endpoint>: ready, offline`, `<endpoint>: ready, online` (online means an agent session holds the endpoint open now) or `<endpoint>: not ready: <reason>`. The reasons are `the server refused its credentials`, `the server did not answer: <address>`, `the creds file is missing: <path>`, `the creds file can be read by other users: <path>`, `no server is set` and `no endpoint is chosen for this session`. When it is not ready, call the `doctor` tool.
 
-From a shell, `mash version` prints the binary's version and commit. `mash status` prints the same lines as the `status` tool for the environment you run it in (name, config, creds, channel allowlist, environment, version), so you can check a launch before Claude Code starts. It connects to nothing and needs no `MASH_ENDPOINT` (without one it prints `name: MISSING`); `connection` and `delivery` are live-only, so it says they are not checked and a running session reports them. It always exits 0, because it is a report. The other CLI commands are `send`, `read`, `inbox`, `who`, `prompt`, `admin` and `plugin export`. The CLI needs an endpoint (`MASH_ENDPOINT`, or the one installed endpoint) and does not take the lease, so it works beside a running session.
+`doctor` checks each part in turn and prints a row for each: `config`, `creds`, `server`, `sign-in` and `refused`, with a state (`ok`, `warn` or `FAIL`) and a detail. Then a summary (`No problems.` or `1 problem, 1 warning.`), and the fix for the first failure as `hint: <fix>`. A row that cannot be checked because an earlier one failed is left out. Start from the first row that is not `ok`. It never prints the contents of the creds file.
+
+From a shell, the same two checks are `mash status` and `mash doctor`, for the environment you run them in, so you can check a launch before Claude Code starts. `mash status` prints the one line, and when the endpoint is not ready it prints `hint: mash doctor` on stderr and exits 1. `mash doctor` exits 1 if any row is `FAIL` and 0 for warnings only. Both take `--json`. With several endpoints installed and none chosen, they stop with `error: more than one endpoint is installed here: a, b` and `hint: mash status --endpoint a` (exit 2). `mash version` prints the binary's version and commit, and `mash inbox` shows mail. The other CLI commands are `send`, `read`, `who`, `prompt`, `admin` and `plugin export`. The CLI needs an endpoint (`MASH_ENDPOINT`, or the one installed endpoint) and does not take the lease, so it works beside a running session.
 
 The hook's stderr goes to `hook.log` in the state directory (`$MASH_STATE_DIR`, else `$XDG_STATE_HOME/mash`, else `~/.local/state/mash`). `mash serve` writes its own messages, such as the lease and spool errors below, to its stderr.
 
-## `client: WARN` or `plugin: WARN`
+## Claude Code or plugin version differs from the binary
 
-- `client: WARN - Claude Code <v> is older than 2.1.312, the oldest version mash has a passing live receipt on.` mash does not refuse the version, but it has no live receipt on it, so channels, hook context or hook fields may behave differently. Update Claude Code. The `version` and `status` tools show `client: Claude Code <v>` from what the client sent at startup; a client other than Claude Code is shown without a warning.
-- `plugin: WARN - plugin <pv> and binary <bv> differ in major or minor.` The plugin (hooks and MCP command) and the `mash` binary are from different releases. Update both to the same one: `claude plugin update mash@mash`, and reinstall the binary (`go install github.com/bogworks/mash/cmd/mash@<tag>`). The plugin launcher downloads a pinned binary, so this is mostly a hand-installed binary on PATH that is out of step.
+- Claude Code older than 2.1.312: that is the oldest version mash has a passing live receipt on. mash does not refuse older versions, but channels, hook context or hook fields may behave differently. Update Claude Code.
+- Plugin and binary from different releases (different major or minor): the plugin (hooks and MCP command) and the `mash` binary should be the same release. Update both: `claude plugin update mash@mash`, and reinstall the binary (`go install github.com/bogworks/mash/cmd/mash@<tag>`). The plugin launcher downloads a pinned binary, so this is mostly a hand-installed binary on PATH that is out of step. `mash version` prints the binary's version.
 
 ## The session has no mail tools, or says it has no mash identity
 
-Message: "mash is installed but this session has no mash identity (MASH_ENDPOINT is not set), so mail is off. Start Claude Code with MASH_ENDPOINT=<owner.group.name> ..." `status` shows `name: MISSING - not set. Next: start Claude Code with MASH_ENDPOINT=<owner.group.name>, or install credentials for one endpoint`. The CLI says `mash: no endpoint: set MASH_ENDPOINT, --endpoint, or install credentials for one endpoint`. Run `mash status` in the shell you launch Claude Code from to see the same `name: MISSING` line before you start.
+Message: "mash is installed but this session has no mash identity (MASH_ENDPOINT is not set), so mail is off. Start Claude Code with MASH_ENDPOINT=<owner.group.name> ..." The `status` tool says `no endpoint is chosen for this session`. The CLI says `mash: no endpoint: set MASH_ENDPOINT, --endpoint, or install credentials for one endpoint`, and `mash status` says `no endpoint is chosen`. Run `mash status` in the shell you launch Claude Code from to see this before you start.
 
-Cause: `MASH_ENDPOINT` was not in the environment Claude Code started with, and no single endpoint's creds file was installed. The plugin is inert by design without it, with only `status` and `version`. The name comes from the environment (or the one installed creds file), never from the conversation. `claude --resume` and `--continue` need it again: see [Sessions and resume](install.md#sessions-and-resume).
+Cause: `MASH_ENDPOINT` was not in the environment Claude Code started with, and no single endpoint's creds file was installed. The plugin is inert by design without it, with only `version`, `status` and `doctor`. The name comes from the environment (or the one installed creds file), never from the conversation. `claude --resume` and `--continue` need it again: see [Sessions and resume](install.md#sessions-and-resume).
 
 Fix: start Claude Code as `MASH_ENDPOINT=alice.dev.design claude --channels plugin:mash@mash`, then check `status` (or run `MASH_ENDPOINT=alice.dev.design mash status` first).
 
-If several endpoints are installed and none is named, mash stops with `more than one endpoint is installed here: a, b`: name one with `MASH_ENDPOINT`. If it says to fix `MASH_ENDPOINT`, the value is not three dotted parts `owner.group.name`, each 1-32 lower-case letters, digits and single hyphens, starting with a letter.
+If several endpoints are installed and none is named, mash stops with `error: more than one endpoint is installed here: a, b` and `hint: mash status --endpoint a`: name one with `MASH_ENDPOINT` or `--endpoint`. If it says to fix `MASH_ENDPOINT`, the value is not three dotted parts `owner.group.name`, each 1-32 lower-case letters, digits and single hyphens, starting with a letter.
 
 ## `mash: no binary found`
 
@@ -37,21 +39,21 @@ Check: `command -v mash` and `mash version` in the shell Claude Code was launche
 
 Fix: `go install github.com/bogworks/mash/cmd/mash@latest`, and make sure its directory is on the `PATH` of the launching environment. Or set `MASH_BIN` to a binary path. Hooks never wait more than 5 seconds for a download, and after a failure skip downloading for 5 minutes ([install.md](install.md) section 1).
 
-## `config: MISSING` or `config: FAILED`
+## The `config` row fails, or `no server is set`
 
-Messages: `mash: no server: set MASH_SERVER, --server, or "servers" in config.json` and `mash: no endpoint: set MASH_ENDPOINT, --endpoint, or install credentials for one endpoint`. A bad value names its source, for example `mash: MASH_IDLE_WAKE ...` or `mash: MASH_SPOOL_FROM_START="x" is not 1, true, 0 or false`.
+`mash doctor` shows `config  FAIL` and a hint. Messages: `mash: no server: set MASH_SERVER, --server, or "servers" in config.json` and `mash: no endpoint: set MASH_ENDPOINT, --endpoint, or install credentials for one endpoint`. A bad value names its source, for example `mash: MASH_IDLE_WAKE ...` or `mash: MASH_SPOOL_FROM_START="x" is not 1, true, 0 or false`.
 
 Fix: set `servers` in `~/.config/mash/config.json`, or `MASH_SERVER`, and set `MASH_ENDPOINT`. A flag wins over the environment, and the environment over the file. The owner (the first part of the endpoint) is 1 to 32 lower-case letters, digits and single hyphens ([install.md](install.md) section 4).
 
 mash reads `$MASH_CONFIG_DIR/config.json` when that variable is set (an absolute path; no other directory is consulted), else `$XDG_CONFIG_HOME/mash/config.json` when `XDG_CONFIG_HOME` is an absolute path and that file exists, and otherwise `~/.config/mash/config.json` under `$HOME`. A leading `~/` (or a bare `~`) in `creds` and `admin_creds` is expanded to your home; `policy.md` and default creds files are also found in `~/.config/mash` when the XDG directory has no copy; `~user/` is not. A `policy.md` that exists but cannot be read is a configuration error that names the file (`mash: reading <path>: ...`), not an empty policy; fix its permissions or remove it. With neither `HOME` nor an absolute `XDG_CONFIG_HOME` set (some systemd units and minimal containers), mash stops with `mash: cannot find a config directory: set HOME or XDG_CONFIG_HOME, or use the MASH_* variables`; set one of them, or give everything through the `MASH_*` variables, including `MASH_CREDS`.
 
-## `creds: MISSING`, or the creds file is refused
+## The creds file is missing or refused
 
-- `creds: MISSING - <path> does not exist`: the file for this endpoint is not at `<owner>.<group>.<instance>.creds` in the config directory (`~/.config/mash` unless `XDG_CONFIG_HOME` points at a mash config). Put it there or set `MASH_CREDS` (or `creds` in config.json).
+- `the creds file is missing: <path>` (`status`), or `creds  FAIL` in `doctor`: the file for this endpoint is not at `<owner>.<group>.<instance>.creds` in the config directory (`~/.config/mash` unless `XDG_CONFIG_HOME` points at a mash config). Put it there or set `MASH_CREDS` (or `creds` in config.json).
 - `mash: credentials file <path> has mode 0644: it is readable by other users. Run: chmod 600 <path>`: run exactly that. Creds files hold the endpoint's private key and must not be readable by others.
-- `creds: FAILED - ... is a directory` or `is not readable`: fix the path or ownership.
+- A creds path that is a directory or is not readable: fix the path or ownership.
 - `mash: <path> is not operator-mode JWT credentials ...`: the file has no user JWT or no seed (a bare token, a `user:password` line, a plain nkey seed, an empty file, or a JWT without its seed). mash supports only operator-mode servers with JWT user credentials; token, user/password and plain-nkey servers are not supported. Next: create a user with `nsc` or Synadia Cloud and set `creds` (or `admin_creds`) to its `.creds` file.
-- `auth: WARN` in `status`: the url carries a password or token, which mash ignores. Remove it from the url and use a creds file.
+- A server url that carries a password or token: mash ignores it. Remove it from the url and use a creds file.
 
 ## `mash: endpoint X is not provisioned`
 
@@ -63,7 +65,7 @@ Two forms: `mash: the credentials in <path> do not match endpoint X (they are fo
 
 ## The session says the address is in use or waiting
 
-`status` shows `connection: WAITING - the lease for endpoint X is held by another session (host H, pid P, since T). mash retries on its own.` The tool error says `mash is waiting for endpoint X (held by ...); mail is off until it is free`.
+The session's tools say `mash is waiting for endpoint X (held by ...); mail is off until it is free`.
 
 Cause: another live session holds the address, or one that died within the last 90 seconds does. The session retries every 10 seconds, tells Claude when mail is on, and needs no restart.
 
@@ -73,11 +75,10 @@ Fix: end the other session, or start this one with a different `MASH_ENDPOINT`. 
 
 Shown as `mash: endpoint X stopped: ... Mail is off for this session.` The lease is rewritten every 30 seconds and expires after 90. If the lease expires while the session sleeps or loses the network (longer than 90 seconds) and no one else took the name, the session takes it back at its next refresh. If another session took it, or the name was deprovisioned, the loss is final: the session stops and does not try again. Restart Claude Code with the same `MASH_ENDPOINT`; the restart takes the name once no one else holds it. See [Sessions and resume](install.md#sessions-and-resume).
 
-## `connection: RETRYING` or `FAILED`
+## The server does not answer, or refuses the credentials
 
-- `RETRYING - could not reach the server, last error: ...`: mash retries on its own. Check `servers`, that the host is reachable, and the clock (below). On a slow link raise `open_timeout` (default 20s) or `call_timeout` (default 15s).
-- `FAILED - ... Next: fix the cause (see the creds and config lines) and restart Claude Code`: the first failure was permanent. Fix what the earlier lines show.
-- `mash status` from a shell makes no connection, but it shows a failure the session recorded: `connection: FAILED - ... Authorization Violation (recorded by the session at T)` means the endpoint was deleted or its key reissued, so the old credentials no longer work; ask whoever runs mashctl for a new credentials file (`mashctl endpoint show <address>`). The record is kept in the endpoint's state directory (`connection.json`, no secret) and is cleared when a session connects again.
+- `the server did not answer: <address>` (`status`), or `server  FAIL` in `doctor`: mash could not reach the server. Check `servers` and that the host is reachable, and the clock (below). A running session retries on its own. On a slow link raise `open_timeout` (default 20s) or `call_timeout` (default 15s).
+- `the server refused its credentials` (`status`), or `sign-in  FAIL  the server refused these credentials` in `doctor`: the endpoint was deleted or its key reissued, so the old credentials no longer work. Ask whoever runs mashctl for a new credentials file (`mashctl endpoint reissue <address>`; `doctor` prints the exact command as its hint).
 - After a network blip, clients can take 30 to 60 seconds to reconnect because the server rate-limits new connections per source address ([operations.md](operations.md) Troubleshooting).
 - Synadia Cloud's free tier allows 5 connections, one per live session ([synadia.md](synadia.md)).
 
@@ -91,7 +92,7 @@ Shown as `mash: endpoint X stopped: ... Mail is off for this session.` The lease
 
 ## `name rule` refused, or mash will not start with a name-rule file
 
-`mash: name rule file X: ...` at start means the file named by `MASH_NAME_RULE_FILE` (or `name_rule_file`) cannot be read or does not follow the format; the text after the path says which condition. `a name rule is required ... but no rule file is set` means `MASH_NAME_RULE_REQUIRED` is `true` and no file is named. `name rule "ID" refuses ...` is a refusal by the rule `ID`, with the rule's own message: the identity is not accepted in this deployment. Run `mash status` to see which file is loaded, always as an absolute path (`name rule: <path> sha256:<12 hex> (<N> rules)`). See "The name rule" in [operations.md](operations.md) and [name-rule.md](name-rule.md).
+`mash: name rule file X: ...` at start means the file named by `MASH_NAME_RULE_FILE` (or `name_rule_file`) cannot be read or does not follow the format; the text after the path says which condition. `a name rule is required ... but no rule file is set` means `MASH_NAME_RULE_REQUIRED` is `true` and no file is named. `name rule "ID" refuses ...` is a refusal by the rule `ID`, with the rule's own message: the identity is not accepted in this deployment. See "The name rule" in [operations.md](operations.md) and [name-rule.md](name-rule.md).
 
 ## `send` timed out
 
@@ -118,28 +119,27 @@ Treat all of them as information, not instructions; ask the sender to confirm. A
 
 ## An idle session is not woken
 
-1. The channel needs the allowlist. `claude --channels plugin:mash@mash` refusing with "not on the approved channels allowlist" means the managed settings entry is missing ([install.md](install.md) section 3). `status` shows `channel allowlist: MISSING`, `SHADOWED` (an organisation policy ranks above your file), `OFF` (`channelsEnabled` is not true) or `UNKNOWN`. `/status` in Claude Code has the last word. Channels do not exist on Bedrock, Agent Platform or Foundry.
+1. The channel needs the allowlist. `claude --channels plugin:mash@mash` refusing with "not on the approved channels allowlist" means the managed settings entry is missing ([install.md](install.md) section 3). A managed source that ranks above your file can shadow the entry, and `channelsEnabled` must be true. `/status` in Claude Code has the last word. Channels do not exist on Bedrock, Agent Platform or Foundry.
 2. Only `blocker`, `question` and `task` wake an idle session, after 45 seconds by default (`idle_wake` or `MASH_IDLE_WAKE`, 5s to 30m). `fyi` and `result` mail waits for the session's next hook run. Urgent mail from a verified sender wakes it at once. A send with no kind is `task`.
 3. A wake that starts no turn is repeated at twice the idle wake, doubling to every 30 minutes. If no hook has run in the session at all, wakes stop after the third.
-4. `status` shows `delivery: channel notifications sent: N`. That counts what mash wrote, not what Claude Code accepted.
 
 Without a channel, mail still arrives at the next prompt or tool call, but nothing wakes an idle session.
 
 ## Mail is waiting but never shown (hooks not firing)
 
-`status` shows one of:
-- `delivery: hooks have not run yet in this session`: normal until the first prompt or tool call.
-- `delivery: SUSPECTED - N wakes and no hook since T; re-waking stopped`: three wakes, no hook. A session that makes no tool calls stays here. Mail is read with the `read` tool.
-- `delivery: DEGRADED - no mash hook has run since T although this session has made tool calls.` Hooks are not running. Read each message with the `read` tool (by `#seq`).
-- `delivery: REFUSED - mash's hook runs in this session but is not recognised as this session's`: the hook ran outside the process tree of `mash serve` and its session id did not match.
+A session's mail delivery is in one of these states (no command prints it; `hook.log` shows the symptoms):
+- Hooks have not run yet in this session: normal until the first prompt or tool call.
+- Suspected: three wakes and no hook; re-waking stopped. A session that makes no tool calls stays here. Mail is read with the `read` tool.
+- Degraded: no mash hook has run although this session has made tool calls. Hooks are not running. Read each message with the `read` tool (by `#seq`).
+- Refused: mash's hook runs in this session but is not recognised as this session's: the hook ran outside the process tree of `mash serve` and its session id did not match.
 
-Causes and fixes for DEGRADED:
+Causes and fixes for degraded:
 - `disableAllHooks: true` in a user, project, local or managed settings file: remove it.
 - Managed `allowManagedHooksOnly`: an administrator must force-enable `mash@mash` in managed `enabledPlugins`.
 - The plugin is not enabled in this project, or its hooks did not load: check that it is enabled for the project, then restart.
 - `mash` is not on the hook's `PATH`: look for `command not found` in `hook.log`. The launcher also logs download problems there.
 
-Fix for REFUSED: start Claude Code with a fresh `MASH_LAUNCH_TOKEN` per launch, for example `MASH_LAUNCH_TOKEN=$(uuidgen) claude --channels plugin:mash@mash`. Never reuse a value across launches or share it between sessions. `hook.log` then shows `mash hook: not this session's spool (...); mail left for its owner`. For more detail set `MASH_HOOK_TRACE=1` ([operations.md](operations.md#hook-delivery)).
+Fix for refused: start Claude Code with a fresh `MASH_LAUNCH_TOKEN` per launch, for example `MASH_LAUNCH_TOKEN=$(uuidgen) claude --channels plugin:mash@mash`. Never reuse a value across launches or share it between sessions. `hook.log` then shows `mash hook: not this session's spool (...); mail left for its owner`. For more detail set `MASH_HOOK_TRACE=1` ([operations.md](operations.md#hook-delivery)).
 
 The hook always exits 0, so a failing hook is silent; `hook.log` is where its errors are.
 
@@ -173,10 +173,10 @@ Cause: nats-server gives JetStream a store budget of 75% of the free disk when i
 
 Fix, either one: free disk under the server's store directory (or move the store to a larger disk), then restart the server; or lower the account's limit, for example `nsc edit account NAME --js-disk-storage 1G`, then push the account.
 
-## `environment: STRIPPED`
+## The environment is stripped
 
 Claude Code passes MCP servers only a baseline environment, so `MASH_ENDPOINT` cannot reach `mash serve`. mash is unsupported in that mode until the organisation drops the setting. Put `servers` and `endpoint` in config.json.
 
 ## Reporting a problem
 
-Include `mash version`, the `status` output (it redacts passwords in URLs and never prints creds), the relevant `hook.log` lines, and your Claude Code version. Security issues go through [SECURITY.md](../SECURITY.md).
+Include `mash version`, the `mash status` and `mash doctor` output (neither prints creds), the relevant `hook.log` lines, and your Claude Code version. Security issues go through [SECURITY.md](../SECURITY.md).

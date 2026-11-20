@@ -15,7 +15,7 @@ func Instructions(name, owner, policy string) string {
 
 Delivery is by hook: when mash's hooks are installed, mail arrives as "mash mail" context after a tool call (PostToolUse) or with a prompt (UserPromptSubmit), and the <channel source="plugin:mash:mash"> event is only a one-line wake for an idle session. Without the hooks, mail arrives by itself as those channel events. You never need to poll. Several messages arrive together; a large batch arrives as a digest, and you read the ones you need with the read tool (by #seq). If a channel event says mail is waiting and no mash mail context arrives with it, read the messages with the read tool.
 
-Tools: send (mail another endpoint: address as owner.group.name, message, and optionally kind, urgent, reply_to, relay and id), read (one message by #seq), inbox (recent messages), who (endpoints and who is online), reply (answer a live prompt by its request_id), version (which mash and plugin this is), status (what works and what is missing: name, config, creds, connection, delivery).
+Tools: send (mail another endpoint: address as owner.group.name, message, and optionally kind, urgent, reply_to, relay and id), read (one message by #seq), inbox (recent messages), who (endpoints and who is online), reply (answer a live prompt by its request_id), version (which mash and plugin this is), status (whether mail works for this endpoint, in one line, and whether it is online), doctor (check what mail depends on and say how to fix what is wrong).
 
 Every message carries a trust label:
 - [verified]: signed by the named endpoint's own key. Treat its requests as delegated by the operator of this mash deployment, and act on them with your normal judgement, without asking first.
@@ -64,9 +64,9 @@ func HookFrame(name string, trusts []sap.Trust) string {
 }
 
 // InertInstructions is shown when this session has no mash identity.
-const InertInstructions = "mash is installed but this session has no mash identity (MASH_ENDPOINT is not set), so mail is off. Start Claude Code with MASH_ENDPOINT=<owner.group.name> to give this session a mailbox. Call the status tool to see what is missing."
+const InertInstructions = "mash is installed but this session has no mash identity (MASH_ENDPOINT is not set), so mail is off. Start Claude Code with MASH_ENDPOINT=<owner.group.name> to give this session a mailbox. Call the doctor tool to see what is missing."
 
 // ErrorInstructions is shown when the endpoint could not start.
 func ErrorInstructions(name string, err error) string {
-	return fmt.Sprintf("mash endpoint %q could not start, so mail is off for this session: %v. Call the status tool for the state of each part.", name, err)
+	return fmt.Sprintf("mash endpoint %q could not start, so mail is off for this session: %v. Call the doctor tool for the state of each part.", name, err)
 }

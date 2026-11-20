@@ -86,13 +86,13 @@ func TestServeSendToolRefusedByPolicy(t *testing.T) {
 }
 
 // An endpoint with no group (MASH_ENDPOINT is not owner.group.name) is a config error naming MASH_ENDPOINT at every
-// entry that runs an endpoint (serve stays up with its status tool); a hook never fails the session; status reports it.
+// entry that runs an endpoint (serve stays up with its status and doctor tools); a hook never fails the session; status reports it.
 func TestMalformedEndpointStopsTheSession(t *testing.T) {
 	env := map[string]string{"HOME": t.TempDir(), "MASH_SERVER": "nats://127.0.0.1:1", "MASH_ENDPOINT": "o.a", "MASH_CREDS": "/nonexistent"}
 	for _, args := range [][]string{{"serve"}, {"send", "o.dev.b", "x"}, {"inbox"}, {"who"}, {"read", "1"}, {"prompt", "o.dev.b", "x"}} {
 		var out, errb strings.Builder
 		code := run(args, envFrom(env), strings.NewReader(""), &out, &errb)
-		// serve, like for any config error, stays up with status and version only and says why on stderr.
+		// serve, like for any config error, stays up with version, status and doctor only and says why on stderr.
 		if (code == 0 && args[0] != "serve") || !strings.Contains(errb.String(), "MASH_ENDPOINT") || !strings.Contains(errb.String(), "three") {
 			t.Errorf("%v: exit %d, stdout %q, stderr %q", args, code, out.String(), errb.String())
 		}
@@ -102,8 +102,14 @@ func TestMalformedEndpointStopsTheSession(t *testing.T) {
 		t.Errorf("hook: exit %d, stdout %q, stderr %q", code, out.String(), errb.String())
 	}
 	out.Reset()
-	if code := run([]string{"status"}, envFrom(env), strings.NewReader(""), &out, &errb); code != 0 ||
-		!strings.Contains(out.String(), "MASH_ENDPOINT") {
+	if code := run([]string{"status"}, envFrom(env), strings.NewReader(""), &out, &errb); code != 1 ||
+		!strings.Contains(out.String(), "not ready: MASH_ENDPOINT: ") {
 		t.Errorf("status: exit %d, %q", code, out.String())
+	}
+	out.Reset()
+	errb.Reset()
+	if code := run([]string{"doctor"}, envFrom(env), strings.NewReader(""), &out, &errb); code != 1 ||
+		!strings.Contains(out.String(), "config    FAIL  ") || !strings.Contains(errb.String(), "MASH_ENDPOINT") {
+		t.Errorf("doctor: exit %d, %q, %q", code, out.String(), errb.String())
 	}
 }

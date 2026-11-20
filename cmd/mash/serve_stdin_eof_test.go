@@ -75,8 +75,8 @@ func TestServeStdinEOFWhileHoldingReleasesLeaseAndExits(t *testing.T) {
 		id, ok := leaseInstance(t, w, tAddr("a").Flat())
 		return ok && id != held
 	})
-	if txt := resultText(b.call(t, 5, "status", `{}`)); !strings.Contains(txt, "connection: OK") {
-		t.Fatalf("the next serve's status: %s", txt)
+	if r := b.call(t, 5, "inbox", `{}`); r["isError"] == true {
+		t.Fatalf("the next serve's inbox: %s", resultText(r))
 	}
 	if n := acquireAttempts.Load(); n != attempts {
 		t.Fatalf("the next serve needed %d retries; the lease was not free at once", n-attempts)
@@ -169,7 +169,7 @@ func TestServeSupersededNeverRefreshesThenEOFLeavesHolder(t *testing.T) {
 		return ok && id != oldID
 	})
 	eventually(t, 5*time.Second, "the old serve steps down", func() bool {
-		return strings.Contains(resultText(old.call(t, 20, "status", `{}`)), "SUPERSEDED")
+		return strings.Contains(resultText(old.call(t, 20, "inbox", `{}`)), "superseded by a newer mash serve")
 	})
 
 	// Over many refresh intervals (the new holder rewrites the key every 50 ms, the old one would too) the key is only

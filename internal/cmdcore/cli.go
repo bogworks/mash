@@ -24,7 +24,7 @@ type CLIFunc func(args []string, stdin io.Reader, stdout, stderr io.Writer, g cl
 // Arguments are parsed from the params tags: positionals in field order, --flag value, --flag=value, short flags, bool
 // flags, repeated flags for []string, and "--" to end the options. A bare "-" is a positional (standard input for
 // --file, and for send's message). An unknown option, a missing value, a bad enum value, number or boolean, an empty required positional, a
-// single-value option given twice and surplus positionals are usage errors (exit 2). On success the result's Text, or with --json its compact JSON, goes to stdout.
+// single-value option given twice and surplus positionals are usage errors (exit 2). On success the result's Text, or with --json its compact JSON, goes to stdout; a result that is an ExitCoder sets the exit code and one that is a Hinter adds a hint line on stderr.
 func CLI[P any, R Result](c Command[P, R], env EnvFunc) CLIFunc {
 	return CLIWith(c, env, Frame{Tool: "mash"})
 }
@@ -61,16 +61,23 @@ func CLIWith[P any, R Result](c Command[P, R], env EnvFunc, frame Frame) CLIFunc
 		if err != nil {
 			return cliframe.Report(stdout, stderr, err, g.JSON)
 		}
+		code := 0
+		if x, ok := any(r).(ExitCoder); ok {
+			code = x.ExitCode()
+		}
 		if g.JSON {
 			b, err := marshal(r)
 			if err != nil {
 				return cliframe.Report(stdout, stderr, err, g.JSON)
 			}
 			fmt.Fprintf(stdout, "%s\n", b)
-			return 0
+			return code
 		}
 		fmt.Fprintf(stdout, "%s\n", r.Text(e.Opts))
-		return 0
+		if h, ok := any(r).(Hinter); ok && h.Hint() != "" {
+			fmt.Fprintf(stderr, "hint: %s\n", h.Hint())
+		}
+		return code
 	}
 }
 

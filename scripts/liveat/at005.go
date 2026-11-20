@@ -649,7 +649,7 @@ func (s *At5) Scenario() {
 	s.check("REQ-011: the review session is dropped (its serve exits or reports the authorization failure)", s.closed(rp), "")
 	s.refusedOn("the deleted review key", m1, "review", oldReview)
 	st := s.mash(m1, "status-review", s.epEnv(m1, m3, "review", oldReview), "status")
-	s.check("mash status (the command) with the deleted key: observed, it does not connect", true, "connection line: "+snip(grepLine(st.Text(), "connection:")))
+	s.check("mash status (the command) with the deleted key says why: not ready, the server refused its credentials", st.Code == 1 && strings.Contains(st.Stdout, "not ready: the server refused its credentials"), exitSnip(st))
 	s.statusSaysWhy(m1, m3, "review", oldReview)
 
 	// 6. a revocation made on M1 is seen from M2.
@@ -917,7 +917,9 @@ func (s *At5) plainRefusals(m1, m3 Host) {
 	txt := r.Text()
 	s.check("REQ-014: with no override an endpoint refuses to connect to a plain nats:// URL on a non-loopback address (refused before any connection; no plain server started)", r.Code != 0 && strings.Contains(strings.ToLower(txt), "tls"), exitSnip(r))
 	st := s.mash(m3, "plain-status", env, "status")
-	s.check("REQ-014: mash status says tls: FAILED for it", strings.Contains(st.Text(), "tls: FAILED"), snip(grepLine(st.Text(), "tls:")))
+	dr := s.mash(m3, "plain-doctor", env, "doctor")
+	s.check("REQ-014: mash doctor says the server row FAILs for it", strings.Contains(dr.Stdout, "server    FAIL  "), snip(grepLine(dr.Text(), "server")))
+	s.check("REQ-014: mash status says it is not ready", st.Code == 1 && strings.Contains(st.Stdout, "not ready: "), exitSnip(st))
 	r = s.ctl(m1, "plain-admin", []string{"MASH_SERVER=" + url, "MASH_INSECURE_PLAINTEXT=0"}, "list")
 	s.check("REQ-014: mashctl refuses an admin connection to a plain nats:// URL on a non-loopback address", r.Code != 0 && strings.Contains(strings.ToLower(r.Text()), "tls"), exitSnip(r))
 }
@@ -1168,8 +1170,8 @@ func refusalCode5(stdout string) string {
 	return ""
 }
 
-// statusSaysWhy starts a session with the revoked creds and asks its status tool: the status of a running session is
-// where the connection state is (the command `mash status` says "not checked from the CLI").
+// statusSaysWhy starts a session with the revoked creds and asks its status tool, which says the server refused the
+// credentials, as the command does.
 func (s *At5) statusSaysWhy(h, srv Host, name, creds string) {
 	env := s.epEnv(h, srv, name, creds)
 	p, err := h.Spawn("serve-status-"+name, []string{h.Bin("mash"), "serve"}, s.env(h, env...))
@@ -1183,10 +1185,10 @@ func (s *At5) statusSaysWhy(h, srv Host, name, creds string) {
 	all := p.Stdout() + p.Stderr()
 	line := ""
 	for _, l := range strings.Split(strings.ReplaceAll(all, `\n`, "\n"), "\n") {
-		if strings.Contains(l, "connection:") {
+		if strings.Contains(l, "not ready") {
 			line = l
 		}
 	}
 	p.Stop()
-	s.check("REQ-011: the status tool of a session with the deleted key says why (an authorization failure)", auth5RE.MatchString(all), snip(line))
+	s.check("REQ-011: the status tool of a session with the deleted key says why (the server refused its credentials)", strings.Contains(all, "not ready: the server refused its credentials"), snip(line))
 }

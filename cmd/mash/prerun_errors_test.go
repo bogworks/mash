@@ -51,7 +51,7 @@ func TestPreRunErrorsAreFramed(t *testing.T) {
 	}
 }
 
-// A config that cannot be read is a failure (exit 1) with the status hint; status itself still reports it as a line.
+// A config that cannot be read is a failure (exit 1) with the status hint; status itself still reports it, as its reason.
 func TestPreRunConfigErrorIsFramed(t *testing.T) {
 	dir := t.TempDir()
 	if err := writeFile(dir+"/config.json", `{not json`); err != nil {
@@ -66,7 +66,7 @@ func TestPreRunConfigErrorIsFramed(t *testing.T) {
 	if jcode != 1 || jerr != "" || !strings.HasPrefix(jout, `{"error":"`) || !strings.HasSuffix(jout, `","hint":"mash status"}`+"\n") {
 		t.Fatalf("json: %d %q %q", jcode, jout, jerr)
 	}
-	if sout, _, scode := statusOut(t, env, "--config-dir", dir, "status"); scode != 0 || sout == "" {
+	if sout, _, scode := statusOut(t, env, "--config-dir", dir, "status"); scode != 1 || sout == "" {
 		t.Fatalf("status: %d %q", scode, sout)
 	}
 }
@@ -74,7 +74,7 @@ func TestPreRunConfigErrorIsFramed(t *testing.T) {
 // status with a stray argument is a usage error.
 func TestStatusStrayArgumentIsFramed(t *testing.T) {
 	out, errb, code := statusOut(t, map[string]string{"HOME": t.TempDir()}, "status", "extra")
-	if code != 2 || out != "" || !strings.HasPrefix(errb, "error: mash status: unexpected ") || !strings.HasSuffix(errb, "\nhint: mash status --help\n") {
+	if code != 2 || out != "" || !strings.HasPrefix(errb, "error: unexpected argument ") || !strings.HasSuffix(errb, "\nhint: mash status --help\n") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
 }

@@ -9,7 +9,7 @@ import (
 // Help for the table's commands is generated (cmdcore); for the others it is the usage line.
 func TestVerbHelpAndStrayArguments(t *testing.T) {
 	env := func(string) string { return "" }
-	for _, verb := range []string{"status", "version", "who", "read", "inbox", "send", "prompt"} {
+	for _, verb := range []string{"status", "doctor", "version", "who", "read", "inbox", "send", "prompt"} {
 		for _, h := range []string{"--help", "-h"} {
 			var out, errb bytes.Buffer
 			want := "usage: mash " + verb
@@ -22,7 +22,7 @@ func TestVerbHelpAndStrayArguments(t *testing.T) {
 		}
 	}
 	var out, errb bytes.Buffer
-	if code := run([]string{"status", "--bogus"}, env, strings.NewReader(""), &out, &errb); code != 2 || out.Len() != 0 || errb.String() != "error: mash status: unexpected option \"--bogus\"\nhint: mash status --help\n" {
+	if code := run([]string{"status", "--bogus"}, env, strings.NewReader(""), &out, &errb); code != 2 || out.Len() != 0 || errb.String() != "error: unknown option --bogus for mash status\nhint: mash status --help\n" {
 		t.Errorf("status --bogus: %d %q %q", code, out.String(), errb.String())
 	}
 	out.Reset()
@@ -35,7 +35,7 @@ func TestVerbHelpAndStrayArguments(t *testing.T) {
 // --json on a verb with no JSON form is a usage error, and nothing is attempted: {"error","hint"} on stdout, exit 2.
 func TestNoJSONFormIsRefused(t *testing.T) {
 	env := func(string) string { return "" }
-	for _, verb := range []string{"status", "read", "inbox", "prompt", "serve", "hook", "plugin"} {
+	for _, verb := range []string{"read", "inbox", "prompt", "serve", "hook", "plugin"} {
 		for _, args := range [][]string{{verb, "--json"}, {"--json", verb}, {verb, "x", "--json"}} {
 			var out, errb bytes.Buffer
 			want := "{\"error\":\"mash " + verb + " has no --json form\",\"hint\":\"mash " + verb + " --help\"}\n"
@@ -46,10 +46,10 @@ func TestNoJSONFormIsRefused(t *testing.T) {
 	}
 	// help still comes first, and the verbs that have a JSON form are not refused
 	var out, errb bytes.Buffer
-	if code := run([]string{"status", "--json", "--help"}, env, strings.NewReader(""), &out, &errb); code != 0 || !strings.HasPrefix(out.String(), "usage: mash status") {
-		t.Errorf("status --json --help: %d %q %q", code, out.String(), errb.String())
+	if code := run([]string{"read", "--json", "--help"}, env, strings.NewReader(""), &out, &errb); code != 0 || !strings.HasPrefix(out.String(), "usage: mash read") {
+		t.Errorf("read --json --help: %d %q %q", code, out.String(), errb.String())
 	}
-	for _, args := range [][]string{{"version", "--json"}, {"who", "--json"}, {"send", "--json"}} {
+	for _, args := range [][]string{{"version", "--json"}, {"who", "--json"}, {"send", "--json"}, {"status", "--json"}, {"doctor", "--json"}} {
 		out.Reset()
 		errb.Reset()
 		run(args, env, strings.NewReader(""), &out, &errb)

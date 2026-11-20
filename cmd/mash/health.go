@@ -1,0 +1,256 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io/fs"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/bogworks/mash/internal/cmdcore/cmds"
+	"github.com/bogworks/mash/internal/config"
+	"github.com/bogworks/mash/internal/endpoint"
+	"github.com/bogworks/mash/internal/natsauth"
+)
+
+// healthSvc is cmds.Health: the checks behind status and doctor, one implementation for the command line and the MCP
+// tools. It reads the configuration it was given and connects as the endpoint to see for itself; it never takes the
+// endpoint's lease, writes nothing and prints no secret. session says the configuration was loaded for a session
+// (mash serve), which never picks an endpoint for itself.
+type healthSvc struct {
+	cfg     config.Config
+	cfgErr  error
+	session bool
+}
+
+// credsPath is the creds file the endpoint signs in with: MASH_CREDS or "creds", else the endpoint's default; "" with no name.
+func credsPath(cfg config.Config) string {
+	switch {
+	case cfg.Creds != "":
+		return cfg.Creds
+	case cfg.Name != "" && cfg.Dir != "":
+		return cfg.Find(cfg.CredsName() + ".creds")
+	}
+	return ""
+}
+
+// urlSecretWarning is the warning for a server address that carries a password or token, which mash never uses: it
+// signs in with operator-mode JWT credentials only. "" when no address does. The secret is not printed.
+func urlSecretWarning(cfg config.Config) string {
+	for _, e := range strings.Split(cfg.URL, ",") {
+		_, rest, ok := strings.Cut(strings.TrimSpace(e), "://")
+		if !ok {
+			rest = strings.TrimSpace(e)
+		}
+		rest, _, _ = strings.Cut(rest, "/")
+		if strings.Contains(rest, "@") {
+			return "the server address carries a password or token, which mash does not use: it signs in with the creds file"
+		}
+	}
+	return ""
+}
+
+func (h *healthSvc) noEndpoint() (detail, fix string) {
+	if h.session {
+		return "no endpoint is chosen for this session", "start the session with MASH_ENDPOINT=<address>"
+	}
+	return "no endpoint is chosen", "set MASH_ENDPOINT=<address> or pass --endpoint <address>, or install credentials for one endpoint"
+}
+
+// configCheck is the config row: whether the configuration is readable and names an endpoint and a server.
+func (h *healthSvc) configCheck() cmds.HealthCheck {
+	c := cmds.HealthCheck{Name: cmds.CheckConfig, State: cmds.CheckFail}
+	file := "config.json"
+	if h.cfg.Dir != "" {
+		file = filepath.Join(h.cfg.Dir, "config.json")
+	}
+	switch {
+	case errors.Is(h.cfgErr, config.ErrGroupMissing):
+		c.Detail = "the endpoint address has no group: " + config.CodeGroupMissing
+		c.Fix = "set MASH_ENDPOINT=<owner.group.name>"
+	case h.cfgErr != nil && !errors.Is(h.cfgErr, config.ErrNoURL) && !errors.Is(h.cfgErr, config.ErrNoOwner):
+		c.Detail = redactText(strings.TrimPrefix(h.cfgErr.Error(), "mash: "))
+		if strings.Contains(c.Detail, "MASH_ENDPOINT") {
+			c.Fix = "set MASH_ENDPOINT=<owner.group.name>"
+		}
+	case h.cfg.Name == "":
+		c.Detail, c.Fix = h.noEndpoint()
+	case func() bool { _, err := h.cfg.Identity(); return err != nil }():
+		_, err := h.cfg.Identity()
+		c.Detail = redactText(strings.TrimPrefix(err.Error(), "mash: "))
+		c.Fix = "set MASH_ENDPOINT=<owner.group.name>"
+	case h.cfg.URL == "":
+		c.Detail = "no server is set"
+		c.Fix = `set "servers" in ` + file + " or MASH_SERVER"
+	default:
+		c.State = cmds.CheckOK
+	}
+	c.Reason = c.Detail
+	return c
+}
+
+// credsCheck is the creds row: the file exists, is a regular file only this user can read, and holds a user JWT and
+// its seed. It reads the file to check its shape and prints none of it.
+func (h *healthSvc) credsCheck() cmds.HealthCheck {
+	c := cmds.HealthCheck{Name: cmds.CheckCreds, State: cmds.CheckFail}
+	addr := h.cfg.DisplayName()
+	p := credsPath(h.cfg)
+	if p == "" {
+		c.Detail = "no creds file is chosen"
+		c.Reason = c.Detail
+		return c
+	}
+	raw, err := config.ReadCredsFile(p)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		c.Detail = "the creds file is missing: " + p
+		c.Fix = "mashctl endpoint reissue " + addr
+	case err != nil && strings.Contains(err.Error(), "readable by other users"):
+		c.Detail = "the creds file can be read by other users: " + p
+		c.Fix = "chmod 600 " + p
+	case err != nil && strings.Contains(err.Error(), "not a regular file"):
+		c.Detail = "the creds file is not a regular file: " + p
+	case err != nil:
+		c.Detail = "the creds file cannot be read: " + p
+	default:
+		if cerr := natsauth.CheckCreds(p, raw); cerr != nil {
+			c.Detail = "the creds file is not a creds file: " + p
+			c.Fix = "mashctl endpoint reissue " + addr
+		} else {
+			c.State = cmds.CheckOK
+		}
+	}
+	c.Reason = c.Detail
+	return c
+}
+
+// serverCheck is the server row: the address is allowed (tls, or plain with insecure_plaintext) and a server answers.
+func (h *healthSvc) serverCheck(ctx context.Context) cmds.HealthCheck {
+	c := cmds.HealthCheck{Name: cmds.CheckServer, State: cmds.CheckFail}
+	url := config.RedactURL(h.cfg.URL)
+	if _, err := endpoint.EndpointTLS(h.cfg); err != nil {
+		c.Detail = redactText(strings.TrimPrefix(err.Error(), "mash: "))
+		c.Fix = `use a tls:// server address (MASH_SERVER or "servers" in config.json)`
+		c.Reason = c.Detail
+		return c
+	}
+	octx, cancel := context.WithTimeout(ctx, openFor(h.cfg))
+	defer cancel()
+	if err := endpoint.CheckServer(octx, h.cfg); err != nil {
+		c.Reason = "the server did not answer: " + url
+		c.Detail = c.Reason
+		switch msg := err.Error(); {
+		case strings.Contains(msg, "the server's certificate is not trusted"):
+			c.Detail = "the server's certificate is not trusted: " + url
+			c.Fix = `set "ca" or MASH_CA to the PEM file of the CA that signed it`
+		case strings.Contains(msg, "refused the client certificate"):
+			c.Detail = "the server refused the client certificate: " + url
+			c.Fix = "set tls_cert and tls_key, or MASH_TLS_CERT and MASH_TLS_KEY, to a certificate the server's CA signed"
+		}
+		return c
+	}
+	c.State, c.Detail = cmds.CheckOK, url
+	if endpoint.PlainWarning(h.cfg) != "" {
+		c.State, c.Detail = cmds.CheckWarn, url+" is plain text: insecure_plaintext is set"
+	} else if w := urlSecretWarning(h.cfg); w != "" {
+		c.State, c.Detail = cmds.CheckWarn, w
+	}
+	return c
+}
+
+// signInCheck is the sign-in row: the server accepts this endpoint's credentials and knows the endpoint. It also says
+// whether an agent session holds the endpoint open now (its lease).
+func (h *healthSvc) signInCheck(ctx context.Context) (c cmds.HealthCheck, online bool) {
+	c = cmds.HealthCheck{Name: cmds.CheckSignIn, State: cmds.CheckFail}
+	addr := h.cfg.DisplayName()
+	octx, cancel := context.WithTimeout(ctx, openFor(h.cfg))
+	ep, err := endpoint.OpenClientWith(octx, h.cfg, endpoint.ClientOptions{Lease: true})
+	cancel()
+	if err != nil {
+		switch msg := err.Error(); {
+		case endpoint.IsAuthFailure(err):
+			c.Detail, c.Reason = "the server refused these credentials", "the server refused its credentials"
+			c.Fix = "mashctl endpoint reissue " + addr
+		case transient(err) || strings.Contains(msg, "no servers available"):
+			c.Detail = "the server did not answer: " + config.RedactURL(h.cfg.URL)
+			c.Reason = c.Detail
+		case strings.Contains(msg, "do not match endpoint"):
+			c.Detail = "the creds file belongs to another endpoint than " + addr
+			c.Fix = "mashctl endpoint reissue " + addr
+		default:
+			c.Detail = redactText(strings.TrimPrefix(msg, "mash: "))
+		}
+		if c.Reason == "" {
+			c.Reason = c.Detail
+		}
+		return c, false
+	}
+	defer ep.Close()
+	lctx, lcancel := context.WithTimeout(ctx, callFor(h.cfg))
+	_, online = ep.OwnLease(lctx)
+	lcancel()
+	c.State = cmds.CheckOK
+	return c, online
+}
+
+// refusedCheck is the refused row: how many unverified messages the endpoint refused.
+func (h *healthSvc) refusedCheck() cmds.HealthCheck {
+	n := endpoint.RefusedCount(h.cfg)
+	switch n {
+	case 0:
+		return cmds.HealthCheck{Name: cmds.CheckRefused, State: cmds.CheckOK, Detail: "no unverified mail was refused"}
+	case 1:
+		return cmds.HealthCheck{Name: cmds.CheckRefused, State: cmds.CheckWarn, Detail: "1 unverified message was refused"}
+	}
+	return cmds.HealthCheck{Name: cmds.CheckRefused, State: cmds.CheckWarn, Detail: fmt.Sprintf("%d unverified messages were refused", n)}
+}
+
+// Health runs the checks in order: config, creds, server, sign-in, refused. A failed config stops the rest; a failed
+// creds row leaves out sign-in, and so does a failed server row.
+func (h *healthSvc) Health(ctx context.Context) (cmds.HealthReport, error) {
+	var se *config.SeveralEndpointsError
+	if errors.As(h.cfgErr, &se) {
+		return cmds.HealthReport{}, h.cfgErr
+	}
+	rep := cmds.HealthReport{}
+	if h.cfg.Name != "" {
+		rep.Endpoint = h.cfg.DisplayName()
+	}
+	cfgc := h.configCheck()
+	rep.Checks = append(rep.Checks, cfgc)
+	if cfgc.State == cmds.CheckFail {
+		return rep, nil
+	}
+	if d := cliDeadline(h.cfg); d > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, d)
+		defer cancel()
+	}
+	creds := h.credsCheck()
+	server := h.serverCheck(ctx)
+	rep.Checks = append(rep.Checks, creds, server)
+	if creds.State != cmds.CheckFail && server.State != cmds.CheckFail {
+		sign, online := h.signInCheck(ctx)
+		rep.Checks = append(rep.Checks, sign)
+		rep.Online = online
+	}
+	rep.Checks = append(rep.Checks, h.refusedCheck())
+	return rep, nil
+}
+
+// openFor is the bound on one connection of a check: open_timeout, or its default when the configuration has none.
+func openFor(cfg config.Config) time.Duration {
+	if cfg.OpenTimeout > 0 {
+		return cfg.OpenTimeout
+	}
+	return config.DefaultOpenTimeout
+}
+
+func callFor(cfg config.Config) time.Duration {
+	if cfg.CallTimeout > 0 {
+		return cfg.CallTimeout
+	}
+	return config.DefaultCallTimeout
+}

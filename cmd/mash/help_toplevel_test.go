@@ -18,12 +18,13 @@ Everyday:
   mash read <seq>                              Print one message from your inbox
   mash who [<prefix>] [options]                List the endpoints you can see,
                                                and which are online.
-  mash status                                  What a session would see (name,
-                                               config, creds, channel
-                                               allowlist), before launch;
-                                               connects to nothing; the live
-                                               parts say they need a running
-                                               session
+  mash status                                  Say in one line whether mail
+                                               works for this endpoint, and
+                                               whether it is online.
+  mash doctor                                  Check everything mail depends on
+                                               for this endpoint, and say how to
+                                               fix what is wrong. Changes
+                                               nothing.
   mash version                                 Print the version.
 
 Setup:

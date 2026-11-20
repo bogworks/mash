@@ -19,8 +19,8 @@ func statusOut(t *testing.T, env map[string]string, args ...string) (string, str
 
 func TestGlobalEndpointFlagShadowsEnvironment(t *testing.T) {
 	env := map[string]string{"HOME": t.TempDir(), "MASH_ENDPOINT": "env.dev.fromenv", "MASH_SERVER": "tls://x:4222"}
-	out, _, code := statusOut(t, env, "status")
-	if code != 0 || !strings.Contains(out, "name: OK - env.dev.fromenv") {
+	out, _, code := statusOut(t, env, "status") // no creds: not ready, but it names the endpoint it chose
+	if code != 1 || !strings.HasPrefix(out, "env.dev.fromenv: not ready: ") {
 		t.Fatalf("env: %d %s", code, out)
 	}
 	for _, args := range [][]string{
@@ -29,7 +29,7 @@ func TestGlobalEndpointFlagShadowsEnvironment(t *testing.T) {
 		{"status", "--endpoint=flag.dev.fromflag"},
 	} {
 		out, errb, code := statusOut(t, env, args...)
-		if code != 0 || !strings.Contains(out, "name: OK - flag.dev.fromflag") || strings.Contains(out, "fromenv") {
+		if code != 1 || !strings.HasPrefix(out, "flag.dev.fromflag: not ready: ") || strings.Contains(out, "fromenv") {
 			t.Errorf("%v: %d %s %s", args, code, out, errb)
 		}
 	}
@@ -40,10 +40,13 @@ func TestGlobalServerAndConfigDirFlags(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"servers":"tls://file:4222","endpoint":"file.dev.fromfile"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	env := map[string]string{"HOME": t.TempDir(), "MASH_SERVER": "tls://env:4222"}
-	out, _, code := statusOut(t, env, "--config-dir", dir, "--server", "tls://flag1:4222", "--server=tls://flag2:4222", "status")
-	if code != 0 || !strings.Contains(out, "name: OK - file.dev.fromfile") || !strings.Contains(out, "tls://flag1:4222,tls://flag2:4222") {
+	env := map[string]string{"HOME": t.TempDir(), "MASH_SERVER": "tls://env:4222", "MASH_OPEN_TIMEOUT": "2s"}
+	out, _, code := statusOut(t, env, "--config-dir", dir, "--server", "tls://flag1:4222", "--server=tls://flag2:4222", "doctor")
+	if code != 1 || !strings.Contains(out, "tls://flag1:4222,tls://flag2:4222") {
 		t.Fatalf("%d %s", code, out)
+	}
+	if st, _, code := statusOut(t, env, "--config-dir", dir, "status"); code != 1 || !strings.HasPrefix(st, "file.dev.fromfile: not ready: ") {
+		t.Fatalf("the endpoint of config.json: %d %s", code, st)
 	}
 	if strings.Contains(out, "tls://env:4222") || strings.Contains(out, "tls://file:4222") {
 		t.Errorf("a flag did not shadow:\n%s", out)
@@ -67,7 +70,7 @@ func TestGlobalFlagErrorIsUsageExit2(t *testing.T) {
 func TestGlobalVerboseAndNoColorAreStripped(t *testing.T) {
 	env := map[string]string{"HOME": t.TempDir()}
 	for _, args := range [][]string{{"--verbose", "status"}, {"status", "-v", "--no-color"}} {
-		if out, errb, code := statusOut(t, env, args...); code != 0 || !strings.Contains(out, "name: MISSING") {
+		if out, errb, code := statusOut(t, env, args...); code != 1 || out != "mash: not ready: no endpoint is chosen\n" {
 			t.Errorf("%v: %d %s %s", args, code, out, errb)
 		}
 	}
@@ -95,7 +98,7 @@ func TestGlobalJSONStillReachesTheVerbsThatParseIt(t *testing.T) {
 func TestOldEnvironmentNamesAreNotRead(t *testing.T) {
 	env := map[string]string{"HOME": t.TempDir(), "MASH_OWNER": "alice", "MASH_GROUP": "dev", "MASH_NAME": "design", "MASH_URL": "tls://old:4222", "MASH_TLS_CA": "/old.pem"}
 	out, _, code := statusOut(t, env, "status")
-	if code != 0 || !strings.Contains(out, "name: MISSING") || strings.Contains(out, "tls://old") {
+	if code != 1 || out != "mash: not ready: no endpoint is chosen\n" {
 		t.Fatalf("%d %s", code, out)
 	}
 }

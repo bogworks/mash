@@ -64,17 +64,18 @@ func plainWarnedOK(r Result, connects int64) (bool, string) {
 	return ok, fmt.Sprintf("%d connections reached the server; warning on stderr %v, on stdout %v; %s", connects, warned, onStdout, exitDetail(r))
 }
 
-// statusWarnedOnStderr is the check that `mash status` under the override says the plain-text warning on standard
-// error. The report itself (with its tls: WARN line) is on stdout; the standalone warning line must not be.
-func statusWarnedOnStderr(r Result) (bool, string) {
+// doctorWarnedOnStderr is the check that `mash doctor` under the override says the plain-text warning on standard
+// error. The report itself is on stdout; the standalone warning line must not be. The exit code is not part of it: the
+// counting listener the harness stands in for the server does not answer, so the report finds a problem.
+func doctorWarnedOnStderr(r Result) (bool, string) {
 	warned := strings.Contains(strings.ToLower(r.Stderr), "warning: plain-text")
-	onStdout := false // the report's own tls: line quotes the warning; a line that is the warning itself is the standalone one
+	onStdout := false
 	for _, l := range strings.Split(r.Stdout, "\n") {
 		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(l)), "mash: warning: plain") {
 			onStdout = true
 		}
 	}
-	return warned && !onStdout && r.Code == 0, fmt.Sprintf("warning on stderr %v, standalone on stdout %v; %s", warned, onStdout, exitDetail(r))
+	return warned && !onStdout, fmt.Sprintf("warning on stderr %v, standalone on stdout %v; %s", warned, onStdout, exitDetail(r))
 }
 
 // plainText is AT-003's plain-URL case (REQ-014). A plain nats:// URL to a loopback address, with no override, is refused
@@ -115,10 +116,10 @@ func (a *AT) plainText(ha, he Home, design ep) {
 		ok, detail := plainWarnedOK(res, cc.Count()-before)
 		a.C.Check("REQ-014: "+r.name+" with insecure_plaintext set connects and prints the plain-text warning on standard error", ok, detail)
 	}
-	st := a.Mash("plain-status", he, append(base("1"), session...), "status")
-	a.C.Check("REQ-014: mash status with the override says tls: WARN", strings.Contains(st.Text(), "tls: WARN"), snip(grepLine(st.Text(), "tls:")))
-	ok, detail := statusWarnedOnStderr(st)
-	a.C.Check("REQ-014: mash status with the override prints the plain-text warning on standard error, not standard output", ok, detail)
-	st = a.Mash("plain-status-refused", he, append(base("0"), session...), "status")
-	a.C.Check("REQ-014: mash status without it says tls: FAILED", strings.Contains(st.Text(), "tls: FAILED"), snip(grepLine(st.Text(), "tls:")))
+	st := a.Mash("plain-doctor", he, append(base("1"), session...), "doctor")
+	ok, detail := doctorWarnedOnStderr(st)
+	a.C.Check("REQ-014: mash doctor with the override prints the plain-text warning on standard error, not standard output", ok, detail)
+	a.C.Check("REQ-014: mash doctor with the override does not report the plain URL as refused", !strings.Contains(st.Stdout, "insecure_plaintext"), snip(grepLine(st.Text(), "server")))
+	st = a.Mash("plain-doctor-refused", he, append(base("0"), session...), "doctor")
+	a.C.Check("REQ-014: mash doctor without it says the server row FAILs and names insecure_plaintext", strings.Contains(st.Stdout, "server    FAIL  ") && strings.Contains(st.Stdout, "insecure_plaintext"), snip(grepLine(st.Text(), "server")))
 }
