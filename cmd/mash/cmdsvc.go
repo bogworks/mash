@@ -296,7 +296,7 @@ func messageOn(ctx context.Context, ep *endpoint.Endpoint, number int) (cmds.Rea
 func (s *cliSvc) openMailbox(ctx context.Context) (context.Context, *endpoint.Endpoint, func(), error) {
 	cfg := s.cfg
 	if cfg.Inert() {
-		return nil, nil, nil, cliframe.Failf("no endpoint: set MASH_ENDPOINT (owner.group.name), --endpoint, or install credentials for one endpoint").WithHint("mash doctor")
+		return nil, nil, nil, cmdcore.NoEndpoint(cmdcore.NoneInstalled, "inbox", nil)
 	}
 	ctx, cancel := context.WithTimeout(ctx, cliDeadline(cfg))
 	openCtx, openCancel := context.WithTimeout(ctx, cfg.OpenTimeout)

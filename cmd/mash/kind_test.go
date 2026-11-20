@@ -18,7 +18,7 @@ func TestSendKindFromTheCLI(t *testing.T) {
 	if out, _ := w.cli(t, "a", "read", "1"); !strings.Contains(out, "\nkind:     question\n") {
 		t.Fatalf("read #1: %s", out)
 	}
-	if out, _ := w.cli(t, "a", "read", "2"); !strings.Contains(out, "\nkind:     blocker\n") || !strings.Contains(out, "\nurgent:   yes\n") || !strings.HasSuffix(out, "\n\nstuck\n") {
+	if out, _ := w.cli(t, "a", "read", "2"); !strings.Contains(out, "\nkind:     blocker\n") || !strings.Contains(out, "\nurgent:   yes\n") || !strings.HasSuffix(out, "\n\n> stuck\n") {
 		t.Fatalf("read #2: %s", out)
 	}
 	out, code := w.cli(t, "b", "send", tTo("a"), "--kind", "urgent", "x")
@@ -143,7 +143,7 @@ func TestSendViaFromTheMCPTool(t *testing.T) {
 		t.Fatalf("send: %v", resultText(r))
 	}
 	out, _ := w.cli(t, "a", "read", "1")
-	if !strings.Contains(out, "\ntrust:    verified\n") || !strings.Contains(out, "\nreply to: 9\nrelay:    o.dev.c #1\n") || !strings.HasSuffix(out, "\n\nfwd\n") {
+	if !strings.Contains(out, "\ntrust:    verified\n") || !strings.Contains(out, "\nreply to: 9\nrelay:    o.dev.c #1\n") || !strings.HasSuffix(out, "\n\n> fwd\n") {
 		t.Fatalf("read #1:\n%s", out)
 	}
 	for i, args := range []string{`{"address":"o.dev.a","message":"x","relay":7}`, `{"address":"o.dev.a","message":"x","relay":-1}`, `{"address":"o.dev.a","message":"x","relay":"L1"}`, `{"address":"o.dev.a","message":"x","relay":1.5}`} {

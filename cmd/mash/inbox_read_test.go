@@ -64,7 +64,7 @@ func TestInboxAndReadDoorsOnARealEndpoint(t *testing.T) {
 
 	// the command line shows the message and cannot mark it
 	rd, code := w.cli(t, "a", "read", num)
-	if code != 0 || !strings.HasSuffix(rd, "\n\nthe body\nsecond line\n") || !strings.Contains(rd, "from:     o.dev.b\n") {
+	if code != 0 || !strings.HasSuffix(rd, "\n\n> the body\n> second line\n") || !strings.Contains(rd, "from:     o.dev.b\n") {
 		t.Fatalf("cli read: %d %q", code, rd)
 	}
 	if out, _ := w.cli(t, "a", "inbox", "--new"); !strings.HasPrefix(out, "1 message for o.dev.a, 1 new") || unreadOf(t, w, "a") != 1 {
