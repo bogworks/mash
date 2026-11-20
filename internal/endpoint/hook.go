@@ -260,6 +260,7 @@ func (e *Endpoint) settleHeld(deliver Deliverer, h *held) {
 			h.listed[seq] = true
 			e.waking.listed(seq)
 			h.wakeAt, h.wakes = time.Time{}, 0
+			h.hookSeen = backlogClock() // a digest is a hook run: the session is busy, as after a drain
 		}
 		if e.spool.IsDrained(seq) {
 			ran = true
@@ -345,9 +346,9 @@ func (e *Endpoint) wakeIfIdle(deliver Deliverer, h *held, hl Hookless) bool {
 	}
 	// due: the normal idle/backoff rule says wake now. urgent: an urgent message rings. A wake that is neither is a
 	// pre-hook ring alone, and it must not start the backoff.
-	var due bool
+	var due, atOnce bool
 	if !h.wakeAt.IsZero() {
-		due = !oldest.IsZero() && time.Since(h.wakeAt) >= wakeBackoff(e.idleWake(), h.wakes)
+		due = !oldest.IsZero() && backlogClock().Sub(h.wakeAt) >= wakeBackoff(e.idleWake(), h.wakes)
 	} else {
 		// A crowded backlog wakes at once: waiting could cost mail behind it (codex H2 on #75). Not while a hook is
 		// draining it: a drain shows a bounded batch, the held count stays high for many runs, and the idle spell
@@ -367,7 +368,8 @@ func (e *Endpoint) wakeIfIdle(deliver Deliverer, h *held, hl Hookless) bool {
 		if active && crowded && !e.streamHasHeadroom(context.Background()) {
 			active = false
 		}
-		due = !oldest.IsZero() && ((crowded && !active) || time.Since(since) >= e.idleWake())
+		atOnce = crowded && !active
+		due = !oldest.IsZero() && (atOnce || time.Since(since) >= e.idleWake())
 	}
 	urgent := false
 	for _, seq := range ring {
@@ -380,6 +382,13 @@ func (e *Endpoint) wakeIfIdle(deliver Deliverer, h *held, hl Hookless) bool {
 	// waking message still rings once (above), and the entry into the proven state sends one wake that says how to
 	// read the mail.
 	if hl != HooklessNone {
+		due = false
+	}
+	// One last-wake time for every kind of wake: an idle wake is spaced from the last wake of any kind (a backlog wake
+	// included) by the idle backoff. A ring (urgent mail, or the first mail of a fresh session) is exempt from the
+	// reading, so urgent mail still wakes an idle session at once; it still sets the time below.
+	// A backlog near capacity wakes at once for the same reason (above).
+	if len(ring) == 0 && !atOnce && !e.lastWake.IsZero() && backlogClock().Sub(e.lastWake) < wakeBackoff(e.idleWake(), h.wakes) {
 		due = false
 	}
 	if len(ring) == 0 && !due && !notice {
@@ -410,7 +419,7 @@ func (e *Endpoint) wakeIfIdle(deliver Deliverer, h *held, hl Hookless) bool {
 	e.hl.woke(hl == HooklessProven)
 	e.lastWake = backlogClock()
 	if due || urgent {
-		h.wakeAt = time.Now()
+		h.wakeAt = backlogClock()
 		h.wakes++
 	}
 	for _, seq := range ring {
@@ -442,13 +451,13 @@ func (h *held) arrived(seq spool.Ref, p pending) time.Time {
 // not until wakeCooldown after serve started: a restart keeps nothing, so a backlog already over at start wakes once at
 // 10 minutes. A drain does not reset the cooldown. The cooldown runs from the last wake of any kind (idle, urgent or
 // backlog: one time, e.lastWake), so a backlog wake never follows another wake within it, and it is not sent while a
-// hook has run within it (the session is busy) or when no hook runs in the session (HooklessSuspected).
+// hook has run within it (the session is busy) or when no hook is known to run in the session (suspected or proven hookless).
 func (e *Endpoint) wakeBacklog(deliver Deliverer, h *held, hl Hookless) {
 	if e.cfg.WakeCount <= 0 && e.cfg.WakeAge <= 0 {
 		return
 	}
 	// No hook is running in this session (hookless.go): a repeated wake cannot get the mail shown, as for the idle wake.
-	if hl == HooklessSuspected {
+	if hl != HooklessNone {
 		return
 	}
 	now := backlogClock()
@@ -494,16 +503,16 @@ func (e *Endpoint) wakeBacklog(deliver Deliverer, h *held, hl Hookless) {
 	if listed > 0 {
 		line += " " + strconv.Itoa(listed) + " already listed: read them with the read tool (#seq)."
 	}
-	if hl == HooklessProven {
-		line += " " + HooklessReadHint
-	}
 	meta := map[string]string{"to": e.cfg.Name, "count": strconv.Itoa(len(mails)), "seqs": strings.Join(ids, ","), "wake": "true"}
 	if err := deliver(line, meta); err != nil {
 		e.log.Printf("wake failed, retried next check: %v", err)
 		return
 	}
-	e.hl.woke(hl == HooklessProven)
+	e.hl.woke(false)
 	e.lastWake = now
+	// The backlog wake starts the idle backoff like any other wake, so an idle wake does not follow it within seconds.
+	h.wakeAt = now
+	h.wakes++
 }
 
 // headroomTTL is how long a stream-info reading stands; headroomTimeout bounds one read.

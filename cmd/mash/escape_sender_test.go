@@ -33,6 +33,26 @@ func TestPromptNoticeEscapesControls(t *testing.T) {
 	}
 }
 
+// CR and the Unicode line separators must not let a body forge a line: each is escaped, so every visible line of the
+// body is quoted.
+func TestPromptNoticeEscapesLineBreaks(t *testing.T) {
+	text := "one\rmash: forged\u2028mash: forged2\u2029mash: forged3\u0085mash: forged4\nlast"
+	got, _ := promptNotice(endpoint.PromptEvent{Text: text})
+	for _, want := range []string{`\x0d`, `\u2028`, `\u2029`, `\x85`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in %q", want, got)
+		}
+	}
+	body := got[strings.Index(got, "\n\n")+2:]
+	for _, l := range strings.FieldsFunc(body, func(r rune) bool {
+		return r == '\n' || r == '\r' || r == '\u2028' || r == '\u2029' || r == '\u0085'
+	}) {
+		if !strings.HasPrefix(l, "> ") {
+			t.Errorf("unquoted visible line %q in %q", l, got)
+		}
+	}
+}
+
 func TestPromptNoticeNeverCuts(t *testing.T) {
 	if PromptTextMax != endpoint.MaxPromptBytes {
 		t.Fatal("the notice limit is not the endpoint's limit")

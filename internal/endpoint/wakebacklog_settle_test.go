@@ -49,6 +49,7 @@ func TestBacklogHonoursTheHooklessStop(t *testing.T) {
 // An idle wake and a backlog wake share one last-wake time: the backlog wake is not sent just after an idle wake.
 func TestBacklogIsSpacedFromTheIdleWake(t *testing.T) {
 	r := newBacklogRig(t, 3, 0)
+	r.e.cfg.IdleWake = time.Hour // the idle backoff outlasts the test's clock steps
 	for range 5 {
 		r.oldTask()
 	}
@@ -148,4 +149,63 @@ func TestBacklogDoesNotCountRefusedMail(t *testing.T) {
 		}
 		return false
 	})
+}
+
+// A backlog wake starts the idle backoff: an idle wake is not sent seconds after it, only once the backoff has passed.
+func TestIdleWakeIsSpacedFromTheBacklogWake(t *testing.T) {
+	r := newBacklogRig(t, 3, 0)
+	r.addN(5, kind.Result, 0)
+	r.settle(wakeCooldown).want(1) // the backlog wake: results alone never wake idle
+	if !strings.Contains(r.wakes[0], "waiting, the oldest") {
+		t.Fatalf("the first wake is the backlog's: %q", r.wakes[0])
+	}
+	r.oldTask() // waiting mail that has waited long enough for the idle wake
+	r.settle(time.Second).want(1)
+	r.settle(r.e.idleWake()).want(1) // the backoff after one wake is double the idle wake
+	r.settle(r.e.idleWake()).want(2)
+	if strings.Contains(r.wakes[1], "waiting, the oldest") {
+		t.Fatalf("the second wake is the idle one: %q", r.wakes[1])
+	}
+}
+
+// Urgent mail is exempt from the spacing: it wakes an idle session at once, after a backlog wake too.
+func TestUrgentWakeIsNotSpacedFromTheBacklogWake(t *testing.T) {
+	r := newBacklogRig(t, 3, 0)
+	r.addN(5, kind.Result, 0)
+	r.settle(wakeCooldown).want(1)
+	ref := r.add(kind.Task, 0)
+	m := r.h.msgs[ref]
+	m.mail.Urgent = true
+	r.h.msgs[ref] = m
+	r.h.at[ref] = time.Now()
+	r.h.rung = map[spool.Ref]bool{}
+	r.settle(time.Second).want(2)
+	if r.e.lastWake != r.now {
+		t.Fatal("the urgent wake did not set the shared last-wake time")
+	}
+}
+
+// A hook that only listed mail in a digest is a hook run: the session is busy and the backlog does not wake it.
+func TestBacklogIsNotSentRightAfterADigest(t *testing.T) {
+	r := newBacklogRig(t, 3, 0)
+	r.addN(5, kind.Result, 0)
+	listed := r.add(kind.Result, 0)
+	if err := r.sp.Listed(listed); err != nil {
+		t.Fatal(err)
+	}
+	r.settle(wakeCooldown).want(0)
+	if r.h.hookSeen.IsZero() {
+		t.Fatal("the digest was not taken as a hook run")
+	}
+	r.settle(wakeCooldown - time.Second).want(0)
+	r.settle(2 * time.Second).want(1)
+}
+
+// A session proven hookless is not woken by a backlog either.
+func TestBacklogHonoursTheProvenHooklessStop(t *testing.T) {
+	r := newBacklogRig(t, 3, 0)
+	r.addN(5, kind.Result, 0)
+	r.now = r.now.Add(wakeCooldown + time.Second)
+	r.e.wakeBacklog(func(string, map[string]string) error { r.wakes = append(r.wakes, "x"); return nil }, r.h, HooklessProven)
+	r.want(0)
 }
