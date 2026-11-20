@@ -58,7 +58,12 @@ No problems.
 Stream: stdout. Exit code: 1.
 
 ```text
+config     ok
+server     ok    tls://localhost:4222
+sign-in    ok
+storage    ok
 endpoints  FAIL  1 inbox has no endpoint record: acme.demo.dave
+keys       ok    every connected key was issued here
 
 1 problem.
 hint: mashctl endpoint show acme.demo.dave

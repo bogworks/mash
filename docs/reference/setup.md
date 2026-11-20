@@ -7,7 +7,9 @@ The scripts that install mash and set up a local NATS server.
 ## install.sh
 
 Finds the machine's type, downloads mash and mashctl from the same release,
-checks each against the release's checksums, puts them in ~/.local/bin unless
+checks each against the release's checksums, and against the release's signed
+record too when the gh command is there to do it (without gh it says in one
+line that it checked checksums only), puts them in ~/.local/bin unless
 MASH_INSTALL_DIR names another folder, and prints one line for each, with the
 path it actually used: 'Installed mash v0.5.6 (3f9a41c) in ~/.local/bin'. It
 asks nothing and needs no sudo. If that folder is not on the PATH it says so
@@ -38,7 +40,9 @@ makes is named after the owner; the system account keeps NATS's own name,
 SYSTEM. The server runs as your own user's process, not as a system service,
 so it does not come back after a reboot: run the script again with --start to
 start it (it never creates anything then), --stop to stop it, or --remove to
-remove it.
+remove it. After --remove it prints two lines: that mashctl's folder still
+points at the server just removed, and how to set up again (a new
+configuration folder, or moving the old one aside).
 
 ```sh
 curl -fsSL https://github.com/bogworks/mash/releases/latest/download/mash-local-nats-setup.sh | bash

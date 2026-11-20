@@ -83,13 +83,19 @@ The rules every mash command and tool follows.
    whatever they find, and they exit 1 when they found a problem. Any hint
    still goes to stderr.
 
-16. The server not answering reads the same everywhere. 'error: the server did
+16. Where a hint is printed. At a shell, every 'hint:' line goes to stderr,
+   whichever stream the rest went to: after an error, after status, after
+   doctor's count. The case pages show the hint beneath the text it follows,
+   for reading; a case marked stdout means its lines other than the hint. In
+   an MCP tool's text block the hint is the last line.
+
+17. The server not answering reads the same everywhere. 'error: the server did
    not answer: tls://host:4222' and 'hint: mash doctor' (or mashctl doctor),
    exit 1. Two more server failures have fixed words: 'the server's
    certificate is not trusted: &lt;address&gt;' and 'the server did not offer
    TLS: &lt;address&gt;'.
 
-17. Having no endpoint reads the same in every mash command. Three wordings,
+18. Having no endpoint reads the same in every mash command. Three wordings,
    by where it is asked. At a shell with none installed: 'error: no endpoint
    is installed here' and 'hint: mash join &lt;file&gt;', exit 2. At a shell
    with several installed and none chosen: 'error: more than one endpoint is
@@ -98,45 +104,56 @@ The rules every mash command and tool follows.
    session with none named: 'No endpoint is chosen for this session.' and
    'hint: start the session with MASH_ENDPOINT=&lt;address&gt;'.
 
-18. --json when a command fails. Prints {"error": ..., "hint": ...} on stdout
+19. --json when a command fails. Prints {"error": ..., "hint": ...} on stdout
    and nothing on stderr, with the same exit code.
 
-19. Every command that changes the mesh or this machine's setup takes
+20. Every command that changes the mesh or this machine's setup takes
    --dry-run. It prints the usual line with 'Would' in front and changes
    nothing; with --json the object is the one the real run would print, plus
    "dry_run": true. That is mashctl's changing commands and mash join. Sending
    a message is not such a change and has no --dry-run.
 
-20. help is also a command. 'mash help' and 'mash help send' print exactly
+21. help is also a command. 'mash help' and 'mash help send' print exactly
    what 'mash --help' and 'mash send --help' print, as git, kubectl and gh do.
    The same for mashctl.
 
-21. Every setting three ways. A flag, then an environment variable, then
+22. Every setting three ways. A flag, then an environment variable, then
    config.json. The flag wins.
 
-22. One spelling. An address is owner.group.name everywhere. NATS's and SAP's
+23. One spelling. An address is owner.group.name everywhere. NATS's and SAP's
    things keep NATS's and SAP's names. The same thing has the same column
    heading and the same field name in every command.
 
-23. A prefix selects, the way a domain name does. Where a command takes a
+24. A prefix selects, the way a domain name does. Where a command takes a
    prefix, acme means everything under acme, acme.demo everything under
    acme.demo, and a full address that one endpoint. acme.\* is accepted and
    means acme. There is no other pattern matching.
 
-24. Options go anywhere after the tool's name. Every option, global or the
+25. Options go anywhere after the tool's name. Every option, global or the
    command's own, is accepted before or after the command and its arguments,
    as with kubectl and gh. Help and documentation always write them last: mash
    status --endpoint acme.demo.alice.
 
-25. A sender's words are always marked as the sender's. Wherever mash prints a
+26. A sender's words are always marked as the sender's. Wherever mash prints a
    message's text in full, every line starts with '&gt; ' and control
    characters are escaped, at a shell and in an MCP tool alike. It reads as
    quoted mail does to a person, and it shows an agent where data from someone
    else begins and ends. A table's MESSAGE column holds the sender's words
    too.
 
-26. Only a destructive command asks. It asks you to type the address, and
+27. Encryption can be turned off in one way only, and it says so every time.
+   Both tools talk to the server over TLS. The one way to turn that off is the
+   environment variable MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1. There is no
+   flag and no configuration-file key for it: this is the one setting that
+   cannot be given three ways, so that it cannot be left on in a file and
+   forgotten. While it is set, every command of both tools first prints, on
+   stderr: 'warning: encryption to the server is OFF
+   (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set)'. The older names,
+   MASH_INSECURE_PLAINTEXT and the key insecure_plaintext, are refused with an
+   error naming the new one.
+
+28. Only a destructive command asks. It asks you to type the address, and
    --yes skips the question.
 
-27. Eighty columns, and color only on a terminal. --wide may be wider.
+29. Eighty columns, and color only on a terminal. --wide may be wider.
    NO_COLOR is honored.

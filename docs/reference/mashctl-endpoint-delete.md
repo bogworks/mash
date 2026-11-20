@@ -77,6 +77,7 @@ Stream: stderr. Exit code: 2.
 
 ```text
 error: deleting needs a terminal to confirm, or --yes
+hint: mashctl endpoint delete --help
 ```
 
 ### A server did not confirm the key was cancelled: nothing is deleted

@@ -78,6 +78,7 @@ Stream: stderr. Exit code: 2.
 
 ```text
 error: --public-key needs --out, the join file to write
+hint: mashctl endpoint create --help
 ```
 
 ### The address exists
