@@ -32,7 +32,7 @@ func (a *Admin) issuedKV(ctx context.Context) (jetstream.KeyValue, error) {
 		if down := bucketDown(store.IssuedBucket, err); down != nil {
 			return nil, down
 		}
-		return nil, fmt.Errorf("mash: issue record bucket (run `mash admin init`): %w", err)
+		return nil, fmt.Errorf("mash: issue record bucket (run `mashctl init`): %w", err)
 	}
 	if err := store.VerifyIssuedBucket(ctx, a.js); err != nil {
 		return nil, err
@@ -375,7 +375,7 @@ func (a *Admin) IssuedHistoryByKey(ctx context.Context, publicKey string) (t Iss
 	}
 	limit := store.IssuedHistory
 	if h := int(info.Config.MaxMsgsPerSubject); h > 0 && h < limit {
-		limit = h // a bucket from before `mash admin init` raised it keeps fewer
+		limit = h // a bucket from before `mashctl init` raised it keeps fewer
 	}
 	seqs := make([]uint64, 0, len(hist))
 	for _, e := range hist {
