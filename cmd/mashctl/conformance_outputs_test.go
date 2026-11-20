@@ -47,7 +47,7 @@ var confUnchecked = map[string]string{
 	"endpoint delete Cancelled everywhere, then a later step failed": "needs a server fault injected between the cancelling of the key and the removal of the inbox",
 	"endpoint inbox Messages":                                        "the rows hold times relative to now ('2m ago', '1m ago') and the trust of messages signed by two senders, one of them an endpoint not on this server",
 	"endpoint permissions Permissions":                               "the text describes the output ('the same JSON as --json'); it is not the output",
-	"endpoint reissue With --detail":                                "'servers acknowledged: 2' needs a cluster of two servers",
+	"endpoint reissue With --detail":                                 "'servers acknowledged: 2' needs a cluster of two servers",
 }
 
 // confOutCase is one x-output case.
