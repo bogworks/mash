@@ -12,7 +12,22 @@ import (
 	"testing"
 )
 
-const fixturePath = "github.com/bogworks/mash/internal/natsfixture"
+// fixturePath is this package's import path, derived from the module line of go.mod so that a renamed module cannot
+// leave the checks comparing against an old path.
+func fixturePath(t *testing.T) string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(moduleRoot(t), "go.mod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range strings.Split(string(b), "\n") {
+		if f := strings.Fields(l); len(f) == 2 && f[0] == "module" {
+			return strings.Trim(f[1], `"`) + "/internal/natsfixture"
+		}
+	}
+	t.Fatal("go.mod has no module line")
+	return ""
+}
 
 func moduleRoot(t *testing.T) string {
 	t.Helper()
@@ -35,6 +50,7 @@ func moduleRoot(t *testing.T) string {
 // TestNoReleaseCodeImportsFixture: only _test.go files may import this package.
 func TestNoReleaseCodeImportsFixture(t *testing.T) {
 	root := moduleRoot(t)
+	fixturePath := fixturePath(t)
 	own := filepath.Join(root, "internal", "natsfixture")
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -72,6 +88,7 @@ func TestReleaseBinariesDoNotDependOnFixture(t *testing.T) {
 		t.Skip("go tool not available")
 	}
 	root := moduleRoot(t)
+	fixturePath := fixturePath(t)
 	for _, pkg := range []string{"./cmd/mash", "./cmd/mashctl"} {
 		cmd := exec.Command(goBin, "list", "-deps", pkg)
 		cmd.Dir = root
