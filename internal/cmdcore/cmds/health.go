@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 
 	"github.com/bogworks/mash/internal/cliframe"
@@ -26,11 +25,14 @@ const (
 const ReasonNoSessionEndpoint = "no endpoint is chosen for this session"
 
 // SessionEndpointFix is what to do about a session that names no endpoint.
-const SessionEndpointFix = "start the session with MASH_ENDPOINT=<address>"
+const SessionEndpointFix = cmdcore.SessionNoEndpointHint
+
+// ReasonMailHeld is status's reason when the session holds mail because the spool it requires cannot be written.
+const ReasonMailHeld = "mail is held: the spool cannot be written"
 
 // ErrNoEndpointInstalled is what Health returns at a shell where no endpoint is chosen and none is installed. The
 // command turns it into the usage error "no endpoint is installed here" (hint "mash join <file>"), exit 2.
-var ErrNoEndpointInstalled = errors.New("no endpoint is installed here")
+var ErrNoEndpointInstalled = errors.New(cmdcore.NoEndpoint(cmdcore.NoneInstalled, "", nil).Msg)
 
 // The checks of doctor, in the order it reports them.
 const (
@@ -59,6 +61,9 @@ type HealthReport struct {
 	Endpoint string
 	Online   bool
 	Checks   []HealthCheck
+	// MailHeld is true in a session that holds mail because the spool it requires (MASH_SPOOL_REQUIRED) cannot be
+	// written: the rows are fine and mail does not work. Status says so; doctor shows no row for it.
+	MailHeld bool
 }
 
 // Health is the service status and doctor need from Env.Svc. It returns config.SeveralEndpointsError (wrapped or not)
@@ -79,12 +84,10 @@ func healthOf(ctx context.Context, env *cmdcore.Env, name string) (HealthReport,
 	r, err := svc.Health(ctx)
 	var se *config.SeveralEndpointsError
 	if errors.As(err, &se) && len(se.Addresses) > 0 {
-		// the hint names the first installed address in alphabetical order
-		first := slices.Min(se.Addresses)
-		return HealthReport{}, cliframe.Usagef("%s", se.Error()).WithHint("mash " + name + " --endpoint " + first)
+		return HealthReport{}, cmdcore.NoEndpoint(cmdcore.SeveralInstalled, name, se.Addresses)
 	}
 	if errors.Is(err, ErrNoEndpointInstalled) {
-		return HealthReport{}, cliframe.Usagef("%s", ErrNoEndpointInstalled.Error()).WithHint("mash join <file>")
+		return HealthReport{}, cmdcore.NoEndpoint(cmdcore.NoneInstalled, name, nil)
 	}
 	return r, err
 }
@@ -117,7 +120,7 @@ func (r StatusResult) noSessionEndpoint() bool {
 // endpoint chosen the name is "mash". A session that names no endpoint says "No endpoint is chosen for this session."
 func (r StatusResult) Text(cmdcore.Opts) string {
 	if r.noSessionEndpoint() {
-		return "No endpoint is chosen for this session."
+		return cmdcore.NoEndpoint(cmdcore.NoneForSession, "", nil).Msg
 	}
 	name := "mash"
 	if r.Endpoint != nil {
@@ -187,6 +190,10 @@ var Status = cmdcore.Command[StatusParams, StatusResult]{
 				break
 			}
 		}
+		if r.Ready && rep.MailHeld {
+			reason := ReasonMailHeld
+			r.Ready, r.Reason = false, &reason
+		}
 		r.Online = r.Ready && rep.Online
 		return r, nil
 	},
@@ -218,7 +225,7 @@ type DoctorResult struct {
 func (r DoctorResult) Text(cmdcore.Opts) string {
 	if r.Endpoint == nil && len(r.Checks) > 0 && r.Checks[0].Name == CheckConfig && r.Checks[0].State == CheckFail &&
 		r.Checks[0].Detail != nil && *r.Checks[0].Detail == ReasonNoSessionEndpoint {
-		return "No endpoint is chosen for this session."
+		return cmdcore.NoEndpoint(cmdcore.NoneForSession, "", nil).Msg
 	}
 	var b strings.Builder
 	for _, c := range r.Checks {

@@ -331,7 +331,7 @@ func TestDoctorServerNotAnsweringAndCredsProblems(t *testing.T) {
 	w := tlsWorld(t, "a")
 	env := strictEnv(w, "a", map[string]string{"MASH_SERVER": "tls://127.0.0.1:1", "MASH_OPEN_TIMEOUT": "2s"})
 	r := runMash(env, "doctor")
-	want := "config    ok\ncreds     ok\nserver    FAIL  the server did not answer: tls://127.0.0.1:1\nsign-in   skip  needs the server\nrefused   skip  needs the server\n\n1 problem.\n"
+	want := "config    ok\ncreds     ok\nserver    FAIL  the server did not answer: tls://127.0.0.1:1\nsign-in   skip  needs the server\nrefused   ok    no unverified mail was refused\n\n1 problem.\n"
 	if r.code != 1 || r.out != want || r.errs != "" { // no command mends it: no hint
 		t.Fatalf("doctor:\n%+v", r)
 	}
@@ -378,7 +378,7 @@ func TestDoctorPlainURL(t *testing.T) {
 	delete(env, "MASH_INSECURE_PLAINTEXT")
 	r = runMash(env, "doctor")
 	if r.code != 1 || !strings.Contains(r.out, "server    FAIL  ") || !strings.Contains(r.out, "insecure_plaintext") ||
-		!strings.Contains(r.out, "sign-in   skip  needs the server\nrefused   skip  needs the server\n") ||
+		!strings.Contains(r.out, "sign-in   skip  needs the server\nrefused   ok    no unverified mail was refused\n") ||
 		!strings.HasPrefix(r.errs, "hint: use a tls:// server address") {
 		t.Fatalf("doctor without it: %+v", r)
 	}
@@ -545,7 +545,7 @@ func TestStatusAndDoctorUntrustedCertificate(t *testing.T) {
 	}
 	const fix = `set "ca" or MASH_CA to the PEM file of the CA that signed it`
 	d := runMash(env, "doctor")
-	want := "config    ok\ncreds     ok\nserver    FAIL  " + text + "\nsign-in   skip  needs the server\nrefused   skip  needs the server\n\n1 problem.\n"
+	want := "config    ok\ncreds     ok\nserver    FAIL  " + text + "\nsign-in   skip  needs the server\nrefused   ok    no unverified mail was refused\n\n1 problem.\n"
 	if d.code != 1 || d.out != want || d.errs != "hint: "+fix+"\n" || strings.Contains(d.out, "did not answer") {
 		t.Fatalf("doctor:\n%+v\nwant %q", d, want)
 	}
@@ -560,7 +560,7 @@ func TestStatusAndDoctorNotATLSServer(t *testing.T) {
 	w := newWorld(t, "a") // a plain server
 	url := "tls://" + strings.TrimPrefix(w.e.URL, "nats://")
 	env := strictEnv(w, "a", map[string]string{"MASH_SERVER": url, "MASH_OPEN_TIMEOUT": "5s"})
-	text := "the server did not answer a TLS handshake (not a TLS server): " + url
+	text := "the server did not offer TLS: " + url
 	r := runMash(env, "status")
 	if r.code != 1 || r.out != tTo("a")+": not ready: "+text+"\n" || r.errs != "hint: mash doctor\n" {
 		t.Fatalf("status: %+v", r)
@@ -571,7 +571,7 @@ func TestStatusAndDoctorNotATLSServer(t *testing.T) {
 	}
 	const fix = `use the server's plain address with insecure_plaintext set, or ask whoever runs your mesh for its tls:// address`
 	d := runMash(env, "doctor")
-	want := "config    ok\ncreds     ok\nserver    FAIL  " + text + "\nsign-in   skip  needs the server\nrefused   skip  needs the server\n\n1 problem.\n"
+	want := "config    ok\ncreds     ok\nserver    FAIL  " + text + "\nsign-in   skip  needs the server\nrefused   ok    no unverified mail was refused\n\n1 problem.\n"
 	if d.code != 1 || d.out != want || d.errs != "hint: "+fix+"\n" || strings.Contains(d.out, "did not answer:") {
 		t.Fatalf("doctor:\n%+v\nwant %q", d, want)
 	}

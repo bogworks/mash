@@ -24,7 +24,7 @@ func cli(cfg config.Config, args []string, stdin io.Reader, stdout, stderr io.Wr
 		}
 	}
 	if cfg.Inert() {
-		return fail(fmt.Errorf("mash: no endpoint: set MASH_ENDPOINT (owner.group.name), --endpoint, or install credentials for one endpoint"))
+		return cliframe.Report(stdout, stderr, cmdcore.NoEndpoint(cmdcore.NoneInstalled, args[0], nil), false)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), cliDeadline(cfg))
 	defer cancel()

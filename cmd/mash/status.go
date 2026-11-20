@@ -27,6 +27,19 @@ type statusSource struct {
 	state      *atomic.Pointer[sessionState]
 }
 
+// mailHeld is whether the session holds mail because the spool it requires (MASH_SPOOL_REQUIRED) is failing now.
+func (s *statusSource) mailHeld() bool {
+	if s.state == nil {
+		return false
+	}
+	st := s.state.Load()
+	if st == nil || st.ep == nil {
+		return false
+	}
+	_, failing := st.ep.SpoolFaultLine()
+	return failing
+}
+
 // sessionSvc is the service the tools every serve mode has run against: the build (version) and the endpoint's checks
 // (status and doctor), neither of which needs an endpoint start to have worked. The configuration is read from the
 // source at each call, so a failure serve found after it began (a policy file it cannot read) is in the answer.
@@ -36,7 +49,7 @@ type sessionSvc struct {
 }
 
 func (s sessionSvc) Health(ctx context.Context) (cmds.HealthReport, error) {
-	return (&healthSvc{cfg: s.src.cfg, cfgErr: s.src.cfgErr, session: true}).Health(ctx)
+	return (&healthSvc{cfg: s.src.cfg, cfgErr: s.src.cfgErr, session: true, mailHeld: s.src.mailHeld}).Health(ctx)
 }
 
 // infoTools are the tools every serve mode has, because they need no endpoint: version, status and doctor. They are

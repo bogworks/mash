@@ -23,6 +23,8 @@ type healthSvc struct {
 	cfg     config.Config
 	cfgErr  error
 	session bool
+	// mailHeld says, in a session, whether it holds mail because the spool it requires cannot be written. nil at a shell.
+	mailHeld func() bool
 }
 
 // credsPath is the creds file the endpoint signs in with: MASH_CREDS or "creds", else the endpoint's default; "" with no name.
@@ -139,7 +141,7 @@ func (h *healthSvc) serverCheck(ctx context.Context) cmds.HealthCheck {
 			c.Detail = "the server's certificate is not trusted: " + url
 			c.Fix = `set "ca" or MASH_CA to the PEM file of the CA that signed it`
 		case errors.Is(err, endpoint.ErrServerNotTLS):
-			c.Detail = "the server did not answer a TLS handshake (not a TLS server): " + url
+			c.Detail = "the server did not offer TLS: " + url
 			c.Fix = `use the server's plain address with insecure_plaintext set, or ask whoever runs your mesh for its tls:// address`
 		case errors.Is(err, endpoint.ErrServerRefusedClientCert):
 			c.Detail = "the server refused the client certificate: " + url
@@ -211,7 +213,7 @@ func skipped(name, needs string) cmds.HealthCheck {
 
 // Health runs the checks in order: config, creds, server, sign-in, refused, and always returns all five rows. A row
 // that an earlier failure means it cannot run is skipped: a failed config skips all four after it; sign-in needs creds
-// and server; refused needs server. The creds row and the server row do not wait on each other (the server is probed
+// and server; refused needs nothing but the configuration. The creds row and the server row do not wait on each other (the server is probed
 // with no credentials). At a shell with no endpoint chosen and none installed it returns cmds.ErrNoEndpointInstalled.
 func (h *healthSvc) Health(ctx context.Context) (cmds.HealthReport, error) {
 	var se *config.SeveralEndpointsError
@@ -252,11 +254,8 @@ func (h *healthSvc) Health(ctx context.Context) (cmds.HealthReport, error) {
 		rep.Checks = append(rep.Checks, sign)
 		rep.Online = online
 	}
-	if server.State == cmds.CheckFail {
-		rep.Checks = append(rep.Checks, skipped(cmds.CheckRefused, "server"))
-	} else {
-		rep.Checks = append(rep.Checks, h.refusedCheck())
-	}
+	rep.Checks = append(rep.Checks, h.refusedCheck()) // the count is kept on this machine: it shows with the server down
+	rep.MailHeld = h.mailHeld != nil && h.mailHeld()
 	if err := parent.Err(); err != nil { // the caller gave up (an MCP call was cancelled): there is no report to give
 		return cmds.HealthReport{}, err
 	}

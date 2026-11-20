@@ -319,6 +319,10 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 	if args[0] == "hook" { // never fails the session: a bad config is a silent no-op
 		return hook(cfg, err, adapter, env, stdin, stdout, stderr)
 	}
+	var several *config.SeveralEndpointsError
+	if errors.As(err, &several) && slices.Contains([]string{"send", "who", "inbox", "read", "prompt"}, args[0]) {
+		return cliframe.Report(stdout, stderr, cmdcore.NoEndpoint(cmdcore.SeveralInstalled, args[0], several.Addresses), jsonOut)
+	}
 	if err != nil && args[0] != "serve" && !report {
 		return cliframe.Report(stdout, stderr, cliframe.Failf("%s", strings.TrimPrefix(err.Error(), "mash: ")).WithHint("mash doctor"), jsonOut)
 	}

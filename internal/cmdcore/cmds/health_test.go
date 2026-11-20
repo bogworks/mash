@@ -44,7 +44,7 @@ func refusedSignIn() *fakeHealth {
 func skippedAfterServer() *fakeHealth {
 	return report("acme.demo.bob", false, ok("config", ""), ok("creds", ""),
 		cmds.HealthCheck{Name: "server", State: cmds.CheckFail, Detail: "the server did not answer: tls://myserver:4222"},
-		skip("sign-in", "server"), skip("refused", "server"))
+		skip("sign-in", "server"), ok("refused", "no unverified mail was refused"))
 }
 
 func healthEnv(svc any) cmdcore.EnvFunc {
@@ -278,6 +278,15 @@ func TestDoctorMatchesSpec(t *testing.T) {
 			f = refusedSignIn()
 		case "A check that could not run":
 			f = skippedAfterServer()
+		case "The server's certificate is not trusted", "The server does not offer encryption":
+			// the spec gives the server row alone: the row of a report with that detail is word for word the spec's
+			row := strings.TrimPrefix(oc["text"].(string), "server    FAIL  ")
+			_, out, _ := runDoctor(report("acme.demo.bob", false, ok("config", ""), ok("creds", ""),
+				cmds.HealthCheck{Name: "server", State: cmds.CheckFail, Detail: row}), cliframe.Global{})
+			if !strings.Contains(out, oc["text"].(string)+"\n") {
+				t.Errorf("%s: %q lacks %q", oc["case"], out, oc["text"])
+			}
+			continue
 		default:
 			t.Errorf("unknown spec case %v", oc["case"])
 			continue
@@ -312,7 +321,7 @@ func TestDoctorMatchesSpec(t *testing.T) {
 	// skipped rows are in the object with state skip and the detail, and are neither a problem nor a warning
 	_, sk, _ := runDoctor(skippedAfterServer(), cliframe.Global{JSON: true})
 	if !strings.Contains(sk, `"problems":1,"warnings":0`) || !strings.Contains(sk, `{"name":"sign-in","state":"skip","detail":"needs the server","fix":null}`) ||
-		!strings.Contains(sk, `{"name":"refused","state":"skip","detail":"needs the server","fix":null}`) {
+		!strings.Contains(sk, `{"name":"refused","state":"ok","detail":"no unverified mail was refused","fix":null}`) {
 		t.Errorf("skipped rows: %s", sk)
 	}
 	if !sameJSON(t, string(mustJSON(meta["x-json"])), string(mustJSON(specTool(t, "doctor")["structured"]))) {

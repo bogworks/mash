@@ -208,7 +208,7 @@ func TestStandaloneEnvOnlyConfig(t *testing.T) {
 	}
 	// Without the environment and with no config.json, mash says what is missing, rather than reaching for a tool.
 	bare := scrubbedEnv(t, nil)
-	if out, code := mashRun(t, bin, bare, "", "who"); code == 0 || !strings.Contains(out, "MASH_ENDPOINT") {
+	if out, code := mashRun(t, bin, bare, "", "who"); code != 2 || !strings.Contains(out, "no endpoint is installed here") || strings.Contains(out, "MASH_ENDPOINT") {
 		t.Fatalf("who with no configuration: exit %d, %s", code, out)
 	}
 }
