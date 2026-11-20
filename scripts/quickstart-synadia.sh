@@ -350,9 +350,11 @@ mkdir -p "$CONFIG_DIR"
 chmod 700 "$CONFIG_DIR" 2>/dev/null || true
 # ---- config.json (before the admin commands: they read the servers from it) -------------------
 tmpcfg=$(mktemp "$CONFIG_DIR/.config.json.XXXXXX")
-CFG_PENDING=1
 jq -n --arg u "$NATS_URL" '{servers: [$u]}' >"$tmpcfg"
-mv "$tmpcfg" "$CONFIG"
+# Install without replacing: a config.json that appeared since the early check is another run's, never overwritten or removed.
+if ! ln "$tmpcfg" "$CONFIG" 2>/dev/null; then rm -f "$tmpcfg"; die "$CONFIG appeared while the script ran; it was not changed. Use a fresh MASH_CONFIG_DIR (or --config-dir)"; fi
+rm -f "$tmpcfg"
+CFG_PENDING=1
 say "Wrote $CONFIG."
 
 # ---- mash admin init and provision -------------------------------------------------------------------
