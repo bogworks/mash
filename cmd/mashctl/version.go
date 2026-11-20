@@ -53,14 +53,18 @@ func runVersion(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	bi, _ := readBuildInfo()
-	version, rev := endpoint.CurrentVersion(), shortCommit(endpoint.BuildRevision(commit, bi))
+	version, full := endpoint.CurrentVersion(), endpoint.BuildRevision(commit, bi)
 	if asJSON {
+		if full == "" {
+			full = "unknown"
+		}
+		// The JSON carries the whole commit (a pin for a tool that needs it exactly); the text shows seven characters.
 		writeJSON(stdout, struct {
 			Version string `json:"version"`
 			Commit  string `json:"commit"`
-		}{version, rev})
+		}{version, full})
 		return 0
 	}
-	fmt.Fprintf(stdout, "mashctl v%s (%s)\n", version, rev)
+	fmt.Fprintf(stdout, "mashctl v%s (%s)\n", version, shortCommit(full))
 	return 0
 }

@@ -209,7 +209,7 @@ func TestVersionOutput(t *testing.T) {
 	}
 	out, errb, code = h.run("version", "--json")
 	var j struct{ Version, Commit string }
-	if code != 0 || errb != "" || json.Unmarshal([]byte(out), &j) != nil || j.Commit != "3f9a41c" || j.Version == "" || strings.HasPrefix(j.Version, "v") {
+	if code != 0 || errb != "" || json.Unmarshal([]byte(out), &j) != nil || j.Commit != "3f9a41c8d2e07b6a5c4d3e2f1a0b9c8d7e6f5a4b" || j.Version == "" || strings.HasPrefix(j.Version, "v") {
 		t.Fatalf("--json: %d %q %q", code, out, errb)
 	}
 	// a build with nothing stamped
@@ -219,6 +219,9 @@ func TestVersionOutput(t *testing.T) {
 	t.Cleanup(func() { readBuildInfo = old })
 	if out, errb, code := h.run("version"); code != 0 || errb != "" || out != "mashctl v0.0.0-dev (unknown)\n" {
 		t.Errorf("unstamped: %d %q %q", code, out, errb)
+	}
+	if out, errb, code := h.run("version", "--json"); code != 0 || errb != "" || !strings.Contains(out, `"commit": "unknown"`) {
+		t.Errorf("unstamped --json: %d %q %q", code, out, errb)
 	}
 	if shortCommit("") != "unknown" || shortCommit("abc") != "abc" || shortCommit("3f9a41c8d2e0+dirty") != "3f9a41c+dirty" {
 		t.Error("shortCommit")
