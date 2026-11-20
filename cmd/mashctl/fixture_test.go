@@ -70,6 +70,14 @@ func newFleetEnv(t *testing.T) *fleetEnv {
 	return h
 }
 
+// writeConfig writes raw as the config.json of the test's config folder.
+func (h *fleetEnv) writeConfig(raw string) {
+	h.t.Helper()
+	if err := os.WriteFile(filepath.Join(h.dir, "config.json"), []byte(raw), 0o600); err != nil {
+		h.t.Fatal(err)
+	}
+}
+
 func (h *fleetEnv) run(args ...string) (string, string, int) {
 	h.t.Helper()
 	var out, errb bytes.Buffer

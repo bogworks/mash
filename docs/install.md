@@ -136,11 +136,11 @@ On a machine that runs `mashctl`, `mashctl init --config FILE` writes `servers`,
 
 The environment wins over the file.
 
-**Global flags.** `mash` and `mashctl` accept `--endpoint ADDR`, `--creds`, `--server` (repeatable), `--ca`, `--config-dir`, `--verbose`/`-v`, `--json` and `--no-color` anywhere in the command line. A setting comes from the flag first, then the environment, then `config.json`. (`mashctl adopt --server URL` keeps its own meaning, and `--servers N` and `--sys-creds` are unchanged.)
+**Global flags.** `mash` and `mashctl` accept `--endpoint ADDR`, `--creds`, `--server` (repeatable), `--ca`, `--config-dir`, `--verbose`/`-v`, `--json` and `--no-color` anywhere in the command line. A setting comes from the flag first, then the environment, then `config.json`.
 
 **Which endpoint.** `MASH_ENDPOINT` (or `endpoint` in `config.json`, or `--endpoint`) holds the full address `owner.group.name`, for example `alice.dev.design`. If none is set, mash uses the one endpoint whose creds file `<owner>.<group>.<name>.creds` (mode 0600, owned by you) sits directly in the config directory. If several are installed it stops with `more than one endpoint is installed here: a, b` and you name one. A value that is not three dotted parts is a configuration error naming `MASH_ENDPOINT`. `mashctl` never takes its owner from an installed creds file. Its owner is the owner part of an endpoint you set (`--endpoint`, `MASH_ENDPOINT` or `endpoint` in `config.json`; any group and name will do), else the `owner` key of `config.json` (`mashctl init --local` and `mashctl adopt` write it). `mash` ignores the `owner` key.
 
-Credentials files must be mode 0600; they hold the endpoint's private key, and mash refuses to use a credentials file that other users can read (fix it with `chmod 600`). `mashctl` applies the same check to the admin credentials and to the system account credentials (`--sys-creds`, `MASH_SYS_CREDS`, or `sys.creds` in the server directory). A symlink is followed and the file it points to is checked.
+Credentials files must be mode 0600; they hold the endpoint's private key, and mash refuses to use a credentials file that other users can read (fix it with `chmod 600`). `mashctl` applies the same check to the admin credentials and to the system account credentials (`system_creds` in `config.json`). A symlink is followed and the file it points to is checked.
 
 Optional: the session instruction file `~/.config/mash/policy.md` is appended to every session's instructions. By default, mail from a verified mash endpoint is treated as a delegated request from the fleet's operator; use `policy.md` to carve out what still needs a human, for example "Ask me before spending money or touching production."
 

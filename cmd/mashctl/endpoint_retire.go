@@ -63,12 +63,10 @@ func plainMsg(m string) string {
 	return strings.TrimPrefix(strings.TrimPrefix(m, "mash: "), "mashctl: ")
 }
 
-// retireAddress removes the endpoint at addr as opts says. Its failures are *cliframe.Error values: exit 2 for a bad
-// server list or a missing terminal, exit 1 for the rest. A removal that did part of its work says so, and running the
+// retireAddress removes the endpoint at addr as opts says. Its failures are *cliframe.Error values: exit 2 for a missing terminal, exit 1 for the rest. A removal that did part of its work says so, and running the
 // same command again finishes it.
 func retireAddress(addr sap.Address, opts retireOpts, env func(string) string, lookup config.Lookup, stderr io.Writer) (retireResult, error) {
 	name := addr.String()
-	helpHint := "mashctl endpoint delete --help"
 	fail := func(format string, a ...any) *cliframe.Error {
 		return cliframe.Failf("%s", plainMsg(admin.RewordUnavailable(fmt.Sprintf(format, a...))))
 	}
@@ -76,14 +74,11 @@ func retireAddress(addr sap.Address, opts retireOpts, env func(string) string, l
 	partial := func(format string, a ...any) *cliframe.Error {
 		return cliframe.Failf("deleted %s, but %s", name, plainMsg(admin.RewordUnavailable(fmt.Sprintf(format, a...)))).WithHint(opts.again)
 	}
-	servers, err := parseServers(env)
-	if err != nil {
-		return retireResult{}, cliframe.Usagef("%v", err).WithHint(helpHint)
-	}
 	cfg, err := loadCtlConfig(env, lookup, true)
 	if err != nil {
 		return retireResult{}, failErr(err)
 	}
+	servers := serverCount(cfg)
 	credsPath, credsErr := credsFileFor(cfg, addr)
 	if credsErr != nil {
 		credsPath = ""

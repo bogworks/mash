@@ -33,7 +33,6 @@ const endpointReissueUsage = `usage: mashctl endpoint reissue <address> [--out P
   With no option the key pair is made here and <address>.creds in the config folder is replaced.
   The old key is cancelled on every server before anything is removed. A run that was stopped is finished by
   running the same command again. Only one reissue of an address runs at a time.
-  --servers N and --sys-creds FILE override MASH_SERVERS and MASH_SYS_CREDS.
 Example:
   mashctl endpoint reissue acme.demo.bob
   mashctl endpoint reissue acme.demo.bob --out acme.demo.bob.join
@@ -94,15 +93,12 @@ func runEndpointReissue(args []string, g cliframe.Global, env func(string) strin
 // epReissue gives the endpoint new credentials, or with --dry-run checks that it could.
 func epReissue(in *epInput, env func(string) string, lookup config.Lookup, stderr io.Writer) (epTarget, epResult, error) {
 	addr, dry := in.addr, in.flags["--dry-run"]
-	servers, err := parseServers(env)
-	if err != nil {
-		return epTarget{addr: addr}, epResult{}, cliframe.Usagef("%v", err).WithHint("mashctl endpoint reissue --help")
-	}
 	t, err := epLoadTarget("reissue", in, env, lookup)
 	if err != nil {
 		return t, epResult{}, err
 	}
 	cfg, outPath, pub := t.cfg, t.outPath, t.pub
+	servers := serverCount(cfg)
 	refuse := func(r *epRefusal) (epTarget, epResult, error) { return t, epResult{}, r.err(addr) }
 	if t.join {
 		// A join file is never written over a file. The one exception is the staged key of a killed run (below).

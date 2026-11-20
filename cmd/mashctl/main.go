@@ -56,7 +56,6 @@ func runVerbs(args []string, env func(string) string, lookup config.Lookup, stdo
 		return 2
 	}
 	// The global options are taken out of the arguments wherever they stand; a flag shadows its environment variable.
-	// mashctl's own --sys-creds and --servers stay as they are (extractServerFlags below).
 	spec := cliframe.Spec{Tool: "mashctl", CredsEnv: "MASH_ADMIN_CREDS", CredsKey: "admin_creds"}
 	global, rest0, gerr := cliframe.ExtractOwning(spec, args, map[string][]string{"endpoint": {"--json"}, "audit": {"--json"}, "issued": {"--json"}, "version": {"--json"}, "init": {"--json"}, "status": {"--json"}, "limits": {"--json"}}) // these parse their own
 	if gerr != nil {
@@ -69,14 +68,6 @@ func runVerbs(args []string, env func(string) string, lookup config.Lookup, stdo
 	}
 	args = rest0
 	env, lookup = global.Shadow(spec, env, lookup)
-	if serverFlagVerbs[args[0]] {
-		rest, env2, err := extractServerFlags(args[1:], env)
-		if err != nil {
-			fmt.Fprintf(stderr, "mashctl: %s: %v\n", args[0], err)
-			return 2
-		}
-		args, env = append([]string{args[0]}, rest...), env2
-	}
 	switch args[0] {
 	case "version":
 		return runVersion(args[1:], stdout, stderr)

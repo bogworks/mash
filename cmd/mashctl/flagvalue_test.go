@@ -6,19 +6,14 @@ import (
 )
 
 func TestFlagValueDash(t *testing.T) {
-	envf := func(string) string { return "" }
 	cases := []struct {
 		name   string
 		args   []string
 		parse  func([]string) error
 		errHas string // empty: accepted
 	}{
-		{"servers --sys-creds", []string{"--servers", "--sys-creds", "f"}, func(a []string) error { _, _, err := extractServerFlags(a, envf); return err }, `--servers needs a value; "--sys-creds" looks like a flag`},
-		{"sys-creds -", []string{"--sys-creds", "-"}, func(a []string) error { _, _, err := extractServerFlags(a, envf); return err }, ""},
-		{"servers=-1 inline passes the helper", []string{"--sys-creds=-x"}, func(a []string) error { _, _, err := extractServerFlags(a, envf); return err }, ""},
 		{"audit --compare --json", []string{"--compare", "--json"}, func(a []string) error { _, err := parseAuditArgs(a); return err }, `--compare needs a value; "--json" looks like a flag`},
 		{"audit --compare -", []string{"--compare", "-"}, func(a []string) error { _, err := parseAuditArgs(a); return err }, ""},
-		{"issued check --servers --json", []string{"--servers", "--json"}, func(a []string) error { _, err := parseIssuedArgs("check", a); return err }, `--servers needs a value`},
 		{"endpoint inbox --after -3", []string{"x.y.z", "--after", "-3"}, func(a []string) error { _, err := parseEpInput(endpointInboxSpec, a); return err }, `looks like a flag`},
 		{"init --config --dry-run", []string{"--config", "--dry-run"}, func(a []string) error { _, err := parseEpInput(initSpec, a); return err }, `--config needs a value`},
 	}

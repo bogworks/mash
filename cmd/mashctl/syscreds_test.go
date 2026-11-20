@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +17,7 @@ import (
 
 	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/bootstrap"
+	"github.com/bogworks/mash/internal/cliframe"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/ctlkeys"
 	"github.com/bogworks/mash/internal/mint"
@@ -26,15 +29,16 @@ import (
 // applyEnv is a local operator-mode server (bootstrap's configuration, run in process) and the environment mashctl
 // needs to reach it.
 type applyEnv struct {
-	t       *testing.T
-	root    string
-	keyDir  string
-	srv     *server.Server
-	pl      *bootstrap.Plan
-	env     map[string]string
-	ks      *ctlkeys.Authority
-	acctPub string
-	tlsCA   string // the CA of a TLS server (empty for a plain one): the helpers that connect directly trust it
+	t        *testing.T
+	root     string
+	keyDir   string
+	srv      *server.Server
+	pl       *bootstrap.Plan
+	env      map[string]string
+	ks       *ctlkeys.Authority
+	acctPub  string
+	sysCreds string // the system account creds file, set as config.json "system_creds"
+	tlsCA    string // the CA of a TLS server (empty for a plain one): the helpers that connect directly trust it
 }
 
 func newApplyEnv(t *testing.T) *applyEnv {
@@ -94,9 +98,11 @@ func newApplyEnvOpts(t *testing.T, tweak func(e *applyEnv), optsHook func(o *ser
 	}
 	t.Cleanup(func() { srv.Shutdown(); srv.WaitForShutdown() })
 	e.srv = srv
+	e.sysCreds = filepath.Join(pl.Dir, bootstrap.SysCreds)
+	e.writeConfig(`{"system_creds":"` + e.sysCreds + `"}`)
 	e.env = map[string]string{
 		"HOME": root, "MASH_CONFIG_DIR": filepath.Join(root, "cfg"), "MASH_SERVER": srv.ClientURL(), "MASH_INSECURE_PLAINTEXT": "1", "MASH_ENDPOINT": "alice.dev.x",
-		"MASH_KEYS_DIR": e.keyDir, "MASH_SYS_CREDS": filepath.Join(pl.Dir, bootstrap.SysCreds),
+		"MASH_KEYS_DIR": e.keyDir,
 		// the admin credentials, for the commands that read the directory.
 		"MASH_ADMIN_CREDS": pl.Creds,
 	}
@@ -111,6 +117,28 @@ func (e *applyEnv) withDirectory() *applyEnv {
 	return e
 }
 
+// writeConfig writes raw as config.json in the env's config folder.
+func (e *applyEnv) writeConfig(raw string) {
+	e.t.Helper()
+	dir := filepath.Join(e.root, "cfg")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		e.t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(raw), 0o600); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
+// servers makes n servers of the configuration: the real one and n-1 that do not answer.
+func (e *applyEnv) servers(n int) {
+	e.t.Helper()
+	list := e.srv.ClientURL()
+	for i := 1; i < n; i++ {
+		list += fmt.Sprintf(",nats://127.0.0.1:%d", i)
+	}
+	e.env["MASH_SERVER"] = list
+}
+
 func (e *applyEnv) run(args ...string) (string, string, int) {
 	e.t.Helper()
 	var out, errb bytes.Buffer
@@ -121,7 +149,7 @@ func (e *applyEnv) run(args ...string) (string, string, int) {
 // accountJWT reads the MASH account's JWT from the resolver through the system account.
 func (e *applyEnv) accountJWT() string {
 	e.t.Helper()
-	nc, err := nats.Connect(e.srv.ClientURL(), append(natsauth.TLSOptions(e.tlsCA, "", ""), natsauth.UserCredentials(e.env["MASH_SYS_CREDS"]))...)
+	nc, err := nats.Connect(e.srv.ClientURL(), append(natsauth.TLSOptions(e.tlsCA, "", ""), natsauth.UserCredentials(e.sysCreds))...)
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -167,24 +195,20 @@ func (e *applyEnv) noSeeds(s string) {
 	}
 }
 
-func TestSysCredsDefaultsFromTheInitServerDir(t *testing.T) {
+func TestSysCredsPathIsConfigJSONOnly(t *testing.T) {
 	e := newApplyEnv(t).withDirectory()
-	want := filepath.Join(e.pl.Dir, bootstrap.SysCreds)
-	cfg := config.Config{AdminCreds: e.pl.Creds}
-	// admin_creds points into the server directory: sys.creds is found next to it.
-	if got, err := sysCredsPath("", func(string) string { return "" }, cfg); err != nil || got != want {
-		t.Fatalf("default: %q %v, want %q", got, err, want)
+	noEnv := func(string) string { return "" }
+	if got, err := sysCredsPath("", noEnv, config.Config{SysCreds: e.sysCreds}); err != nil || got != e.sysCreds {
+		t.Fatalf("configured: %q %v", got, err)
 	}
-	// the flag, then MASH_SYS_CREDS, win
-	if got, _ := sysCredsPath("flag.creds", func(string) string { return "env.creds" }, cfg); got != "flag.creds" {
-		t.Errorf("flag: %q", got)
+	// a sys.creds next to the admin creds, or in the config folder's server directory, is no longer looked for
+	if _, err := sysCredsPath("", noEnv, config.Config{AdminCreds: e.pl.Creds, Dir: e.root}); err == nil {
+		t.Error("found creds without config.json system_creds")
 	}
-	if got, _ := sysCredsPath("", func(k string) string { return map[string]string{"MASH_SYS_CREDS": "env.creds"}[k] }, cfg); got != "env.creds" {
-		t.Errorf("env: %q", got)
-	}
-	// none anywhere: the error says how to give them
-	if _, err := sysCredsPath("", func(string) string { return "" }, config.Config{}); err == nil || !strings.Contains(err.Error(), "--sys-creds FILE or set MASH_SYS_CREDS") {
-		t.Errorf("no creds: %v", err)
+	_, err := sysCredsPath("", noEnv, config.Config{})
+	var ce *cliframe.Error
+	if !errors.As(err, &ce) || ce.Msg != "no system account credentials" || ce.Hint != "mashctl init --config <file>" {
+		t.Errorf("no creds: %#v", err)
 	}
 }
 

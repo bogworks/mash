@@ -22,7 +22,6 @@ const endpointDeleteUsage = `usage: mashctl endpoint delete <address> [--yes] [-
   --json     print the result as JSON
   Deletes the endpoint, its inbox and its credentials. The address can never be used again.
   Without --yes it asks you to type the address, and needs a terminal for that.
-  --servers N and --sys-creds FILE override MASH_SERVERS and MASH_SYS_CREDS.
 Example:
   mashctl endpoint delete acme.demo.bob
 `

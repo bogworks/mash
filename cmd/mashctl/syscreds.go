@@ -4,12 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats.go"
 
+	"github.com/bogworks/mash/internal/cliframe"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/ctlkeys"
 	"github.com/bogworks/mash/internal/natsauth"
@@ -21,33 +21,16 @@ const (
 	applyDeadline  = 25 * time.Second
 )
 
-// sysCredsPath is --sys-creds, else MASH_SYS_CREDS, else config.json "system_creds", else a sys.creds next to the
-// admin credentials (or in the default server directory under the config directory).
-func sysCredsPath(flagVal string, env func(string) string, cfg config.Config) (string, error) {
-	switch {
-	case flagVal != "":
-		return flagVal, nil
-	case env("MASH_SYS_CREDS") != "":
-		return env("MASH_SYS_CREDS"), nil
-	case cfg.SysCreds != "":
+// sysCredsPath is config.json "system_creds" (the flag and environment parameters are kept for the callers and
+// are not read). With none set it refuses and points at `mashctl init --config`.
+func sysCredsPath(_ string, _ func(string) string, cfg config.Config) (string, error) {
+	if cfg.SysCreds != "" {
 		return cfg.SysCreds, nil
 	}
-	var cands []string
-	if cfg.AdminCreds != "" {
-		cands = append(cands, filepath.Join(filepath.Dir(cfg.AdminCreds), sysCredsFile))
-	}
-	if cfg.Dir != "" {
-		cands = append(cands, filepath.Join(cfg.Dir, "server", sysCredsFile))
-	}
-	for _, c := range cands {
-		if _, err := os.Stat(c); err == nil {
-			return c, nil
-		}
-	}
-	return "", errors.New("no system account credentials: pass --sys-creds FILE or set MASH_SYS_CREDS (`mashctl init --config` keeps them in <config folder>/server/sys.creds)")
+	return "", cliframe.Failf("no system account credentials").WithHint("mashctl init --config <file>")
 }
 
-// connectSys connects with the system account credentials (flagVal, MASH_SYS_CREDS or the init server's).
+// connectSys connects with the system account credentials (config.json "system_creds").
 func connectSys(cfg config.Config, flagVal string, env func(string) string) (*nats.Conn, error) {
 	credsPath, err := sysCredsPath(flagVal, env, cfg)
 	if err != nil {

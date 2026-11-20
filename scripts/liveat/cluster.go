@@ -143,9 +143,9 @@ func (s *At5) env(h Host, extra ...string) []string {
 	return BuildEnv(h.Home(), []string{filepath.Dir(h.Bin("nats-server"))}, extra...)
 }
 
-// ctl runs mashctl on h with its config.json and MASH_SERVERS=3.
+// ctl runs mashctl on h with its config.json, which lists all three servers.
 func (s *At5) ctl(h Host, label string, extra []string, args ...string) Result {
-	return h.Exec(label, append([]string{h.Bin("mashctl")}, args...), s.env(h, append([]string{"MASH_SERVERS=3"}, extra...)...))
+	return h.Exec(label, append([]string{h.Bin("mashctl")}, args...), s.env(h, extra...))
 }
 
 // mash runs the mash command line on h.
@@ -408,14 +408,14 @@ func errText(err error) string {
 	return err.Error()
 }
 
-// ClusterCheck runs `mashctl issued check --servers 3` on h and checks the summary line.
+// ClusterCheck runs `mashctl issued check` on h and checks the summary line.
 func (s *At5) ClusterCheck(h Host, name string) bool {
 	r := retry(40*time.Second, 2*time.Second, func() (Result, bool) {
-		r := s.ctl(h, "issued-check", nil, "issued", "check", "--servers", "3")
+		r := s.ctl(h, "issued-check", nil, "issued", "check")
 		return r, r.Code == 0
 	})
 	sum := grepLine(r.Stdout, "servers answered")
-	return s.check(name+": mashctl issued check --servers 3 reports all three servers answered", r.Code == 0 && strings.Contains(r.Stdout, "3 of 3 servers answered"), "exit "+strconv.Itoa(r.Code)+"; "+redact(sum))
+	return s.check(name+": mashctl issued check reports all three servers answered", r.Code == 0 && strings.Contains(r.Stdout, "3 of 3 servers answered"), "exit "+strconv.Itoa(r.Code)+"; "+redact(sum))
 }
 
 func lastLine(s string) string {

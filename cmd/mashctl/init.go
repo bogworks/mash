@@ -352,7 +352,7 @@ func doInit(setupPath string, dry, jsonOut, verbose bool, env func(string) strin
 		warns = append(warns, fmt.Sprintf("the account has %s of disk; one endpoint needs about %s (inbox cap plus the two buckets); see docs/operations.md, Account limits", config.FormatSize(lim.DiskStorage), config.FormatSize(needDisk)))
 	}
 	if set.Cluster != "" || set.Gateways {
-		warns = append(warns, "the server is part of a cluster: pass --servers N (or set MASH_SERVERS) to `mashctl endpoint delete` so it can confirm every server took the update")
+		warns = append(warns, "the server is part of a cluster: list every server under `servers` in the setup file and run `mashctl init --config` again, so a revocation is confirmed on every server")
 	}
 
 	// (4) the admin creds must connect, and the server must answer for the account's JetStream, before anything is

@@ -30,7 +30,6 @@ const endpointCreateUsage = `usage: mashctl endpoint create <address> [--out PAT
   --dry-run          print what would change, and change nothing
   --json             print the result as JSON
   With no option the key pair is made here and <address>.creds is written to the config folder.
-  --servers N and --sys-creds FILE override MASH_SERVERS and MASH_SYS_CREDS.
 Example:
   mashctl endpoint create acme.demo.bob
   mashctl endpoint create acme.demo.bob --out acme.demo.bob.join
@@ -328,10 +327,7 @@ func epCreate(in *epInput, env func(string) string, lookup config.Lookup, stderr
 		return fail("server", admin.RewordUnavailable(err.Error())+"; nothing was changed")
 	}
 	defer closeAdmin()
-	servers, serr := parseServers(env)
-	if serr != nil {
-		return t, epResult{}, cliframe.Usagef("%v", serr).WithHint("mashctl endpoint create --help")
-	}
+	servers := serverCount(cfg)
 
 	// A creds file in the config folder for an address that is taken or deleted is that address's own: say so, rather
 	// than that the file exists. This needs the server, so it is checked here and not before.

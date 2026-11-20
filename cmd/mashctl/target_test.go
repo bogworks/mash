@@ -175,12 +175,9 @@ func TestAnnounceMasksURLPasswordAndNeverPrintsCreds(t *testing.T) {
 }
 
 func TestAnnounceSysCredsPathWhenKnown(t *testing.T) {
-	cfg, env := loadCfg(t, "", map[string]string{"MASH_SERVER": "tls://h:1", "MASH_ENDPOINT": "o.dev.x", "MASH_SYS_CREDS": "/s/sys.creds"})
-	if got := announced(cfg, env, &sysTarget{}); !strings.Contains(got, ", system creds /s/sys.creds (from MASH_SYS_CREDS)\n") {
-		t.Errorf("env:\n%s", got)
-	}
-	if got := announced(cfg, env, &sysTarget{flagVal: "/x/s.creds"}); !strings.Contains(got, ", system creds /x/s.creds (from --sys-creds)\n") {
-		t.Errorf("flag:\n%s", got)
+	cfg, env := loadCfg(t, `{"system_creds":"/s/sys.creds"}`, map[string]string{"MASH_SERVER": "tls://h:1", "MASH_ENDPOINT": "o.dev.x"})
+	if got := announced(cfg, env, &sysTarget{}); !strings.Contains(got, ", system creds /s/sys.creds (from config.json)\n") {
+		t.Errorf("config:\n%s", got)
 	}
 	if got := announced(cfg, env, nil); strings.Contains(got, "system creds") {
 		t.Errorf("no sys target asked:\n%s", got)

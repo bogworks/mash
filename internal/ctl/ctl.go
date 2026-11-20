@@ -53,15 +53,15 @@ func Usage(prog string) string {
 
 func issuedLines(line func(left, right string)) {
 	line("issued list [--json]", "the issue record: every user JWT mashctl issued (public key, address, kind, tags, time, purpose, revoked time)")
-	line("issued check [--json] [--sys-creds FILE] [--servers N]", "compare the user keys connected to every server with the record and report any key mash did not issue and any revoked key still connected; exit 1 on one, 2 when the check could not complete")
+	line("issued check [--json]", "compare the user keys connected to every server with the record and report any key mash did not issue and any revoked key still connected; exit 1 on one, 2 when the check could not complete")
 }
 
 func endpointLines(line func(left, right string)) {
 	line("endpoint list [prefix] [--wide]", "the endpoints in the directory")
 	line("endpoint show ADDRESS", "one endpoint: its state, labels and public key")
-	line("endpoint create ADDRESS [--out PATH] [--public-key PATH] [--servers N] [--sys-creds FILE] [--dry-run] [--json]", "make an endpoint and its credentials, for example acme.demo.bob")
-	line("endpoint reissue ADDRESS [--out PATH] [--public-key PATH] [--servers N] [--sys-creds FILE] [--dry-run] [--json]", "give an endpoint new credentials and cancel the old ones")
-	line("endpoint delete ADDRESS [--yes] [--dry-run] [--json] [--servers N] [--sys-creds FILE]", "revoke the endpoint's user key, remove its record and inbox, burn the address, rename its creds file")
+	line("endpoint create ADDRESS [--out PATH] [--public-key PATH] [--dry-run] [--json]", "make an endpoint and its credentials, for example acme.demo.bob")
+	line("endpoint reissue ADDRESS [--out PATH] [--public-key PATH] [--dry-run] [--json]", "give an endpoint new credentials and cancel the old ones")
+	line("endpoint delete ADDRESS [--yes] [--dry-run] [--json]", "revoke the endpoint's user key, remove its record and inbox, burn the address, rename its creds file")
 	line("endpoint set ADDRESS key=value... [--dry-run]", "set role, description, host, capability or label.NAME")
 	line("endpoint unset ADDRESS key... [--dry-run]", "remove those values")
 	line("endpoint suspend ADDRESS [--dry-run]", "refuse new mail to an endpoint; its stored mail and credentials stay")

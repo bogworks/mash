@@ -204,12 +204,11 @@ Open the client port (4222) to the machines that run `mashctl` and endpoints, an
 ### What `mashctl` needs
 
 - `servers` lists every server: `"servers": ["tls://n1.example.com:4222", "tls://n2.example.com:4222", "tls://n3.example.com:4222"]`. The code takes a comma-separated list in `MASH_SERVER`, a repeated `--server`, or an array in `servers`, and each entry must be reachable by the name its certificate lists. A connection succeeds if any one listed server is up. mash dials only the listed servers; it ignores the servers a server advertises.
-- `--servers 3` or `MASH_SERVERS=3`: how many servers the cluster has. A revocation (`endpoint delete`, `endpoint reissue`) then waits for every server to acknowledge the account update, and refuses when fewer answer. `endpoint create` takes the flag too. `mashctl init` warns to set it when the server is in a cluster.
-- `--sys-creds FILE` or `MASH_SYS_CREDS`: the system account credentials. Without either, `mashctl` uses `system_creds` from `config.json`, which is the `sys.creds` that `init` put in `<config dir>/server/`.
+- The number of servers in `servers` is how many servers the cluster has. A revocation (`endpoint delete`, `endpoint reissue`) waits for every listed server to acknowledge the account update, and refuses when fewer answer. `endpoint create` does the same. `mashctl init` warns when the server is in a cluster, so list every server.
+- `system_creds` in `config.json` is the system account credentials: the `sys.creds` that `init` put in `<config dir>/server/`. There is no flag or environment variable for it.
 
 ```sh
-export MASH_SERVERS=3
-mashctl endpoint delete acme/dev/design --sys-creds /secure/sys.creds
+mashctl endpoint delete acme.dev.design
 ```
 
 A successful revocation prints `servers acknowledged the revocation: 3`. `mashctl issued check` ends with `3 of 3 servers answered` when the cluster formed.
@@ -240,7 +239,7 @@ Also give the second machine an admin creds file of its own: a user of the accou
 mashctl init --config setup.yaml
 ```
 
-`init` imports the two seeds into the second machine's key store, copies `sys.creds` to `<config dir>/server/`, finds that the buckets exist already, and writes `config.json`. Delete the copies of the seed files when it finishes. Then edit `config.json` so `servers` lists all three servers (or list them in the setup file), and set `MASH_SERVERS=3`.
+`init` imports the two seeds into the second machine's key store, copies `sys.creds` to `<config dir>/server/`, finds that the buckets exist already, and writes `config.json`. Delete the copies of the seed files when it finishes. Then edit `config.json` so `servers` lists all three servers (or list them in the setup file).
 
 ### What must not be copied
 
@@ -266,7 +265,7 @@ mash key create --out design.seed
 # copy design.pub to a mashctl machine
 
 # on a mashctl machine (M1 or M2)
-mashctl endpoint create acme/dev/design --public-key design.pub --servers 3
+mashctl endpoint create acme/dev/design --public-key design.pub
 # copy acme.dev.design.jwt back to M3
 
 # on the endpoint's machine (M3)
@@ -283,8 +282,8 @@ While this page was written, these steps were also run on one host, on loopback,
 
 - One operator-mode server, with the `tls` block above added: `mashctl` over `tls://localhost` failed without `ca` and worked with it.
 - The same server with `verify: true`: a connection without a client certificate failed with the message above, and one with `tls_cert` and `tls_key` worked.
-- `mashctl` set up with a `tls://` URL and its own admin user in a second, empty config directory, then `endpoint create --public-key` from it, `mash key create` and `mash credential create` in a third, and `endpoint delete --servers 1 --sys-creds FILE`.
-- Three servers in one cluster with the `cluster` TLS block and `verify: true`, one shared certificate for all three, listing `localhost` and `127.0.0.1`: the setup step reported `3 server(s) replied`, then bucket creation, `issued check` (`3 of 3 servers answered`), `endpoint create --servers 3` and `endpoint delete --servers 3` (`3 server(s) acknowledged`) worked with a three-entry `url`.
+- `mashctl` set up with a `tls://` URL and its own admin user in a second, empty config directory, then `endpoint create --public-key` from it, `mash key create` and `mash credential create` in a third, and `endpoint delete` with `system_creds` in `config.json`.
+- Three servers in one cluster with the `cluster` TLS block and `verify: true`, one shared certificate for all three, listing `localhost` and `127.0.0.1`: the setup step reported `3 server(s) replied`, then bucket creation, `issued check` (`3 of 3 servers answered`), `endpoint create` and `endpoint delete` (`3 server(s) acknowledged`) worked with a three-entry `url`.
 
 What was not run, by AT-005 or by these steps:
 

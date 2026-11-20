@@ -175,11 +175,17 @@ stderr:
 error: --public-key needs --out, the join file to write
 hint: mashctl endpoint reissue --help
 stdout:
-== reissue_servers_invalid
+== delete_servers_option_gone
 exit 2
 stderr:
-error: MASH_SERVERS must be a whole number of servers, 1 or more, got "0"
-hint: mashctl endpoint reissue --help
+error: unknown option --servers
+hint: mashctl endpoint delete --help
+stdout:
+== delete_sys_creds_option_gone
+exit 2
+stderr:
+error: unknown option --sys-creds
+hint: mashctl endpoint delete --help
 stdout:
 == reissue_config
 exit 1

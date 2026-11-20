@@ -7,7 +7,6 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -18,9 +17,6 @@ import (
 	"github.com/bogworks/mash/internal/ctl"
 	"github.com/bogworks/mash/internal/ctlkeys"
 )
-
-// noSysCredsMsg is the refusal when no system account credentials are configured.
-const noSysCredsMsg = "no system account credentials: pass --sys-creds FILE or set MASH_SYS_CREDS to a file of system account user creds (`mashctl init --config` keeps them in <config folder>/server/sys.creds)"
 
 // revokeUsers revokes user keys in the account JWT and returns how many servers took the update; a test replaces it.
 var revokeUsers = revokeUserKeys
@@ -38,7 +34,7 @@ func revokeUserKeys(ctx context.Context, cfg config.Config, env func(string) str
 		return 0, err
 	}
 	if _, err := sysCredsPath("", env, cfg); err != nil {
-		return 0, errors.New(noSysCredsMsg)
+		return 0, err
 	}
 	nc, err := connectSys(cfg, "", env)
 	if err != nil {
@@ -87,7 +83,7 @@ func readAccount(ctx context.Context, cfg config.Config, env func(string) string
 		return false, err
 	}
 	if _, err := sysCredsPath("", env, cfg); err != nil {
-		return false, errors.New(noSysCredsMsg)
+		return false, err
 	}
 	nc, err := connectSys(cfg, "", env)
 	if err != nil {
@@ -99,17 +95,16 @@ func readAccount(ctx context.Context, cfg config.Config, env func(string) string
 	return read(ctx, apply.RevokeParams{Keys: ks, Resolver: apply.NATS{Conn: nc, Inventory: servers}, Servers: servers})
 }
 
-// parseServers reads MASH_SERVERS, the server count the revocation check waits for; 0 is none given.
-func parseServers(env func(string) string) (int, error) {
-	sv := env("MASH_SERVERS")
-	if sv == "" {
-		return 0, nil
+// serverCount is the number of servers a revocation must be confirmed on: the servers in the configuration (the
+// comma list config.json "servers" gives), and at least 1.
+func serverCount(cfg config.Config) int {
+	n := 0
+	for _, p := range strings.Split(cfg.URL, ",") {
+		if strings.TrimSpace(p) != "" {
+			n++
+		}
 	}
-	n, err := strconv.Atoi(strings.TrimSpace(sv))
-	if err != nil || n < 1 {
-		return 0, fmt.Errorf("MASH_SERVERS must be a whole number of servers, 1 or more, got %q", sv)
-	}
-	return n, nil
+	return max(n, 1)
 }
 
 // refuseFutureIssued refuses to revoke a user whose current JWT claims it was issued after now, the time the

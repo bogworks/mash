@@ -12,7 +12,7 @@ Minting a user needs the account's identity key (`account.nk` in the key directo
 
 ## Connections and trust
 
-`mashctl` refuses admin creds and system account creds (`--sys-creds`, `MASH_SYS_CREDS`, or `sys.creds` in the server directory) that other users can read, as mash does for endpoint creds: the file must be a regular file with no group or other permission bits (`chmod 600 FILE`). A symlink is followed and the file it points to is checked; a missing file keeps its own error.
+`mashctl` refuses admin creds and system account creds (`system_creds` in `config.json`) that other users can read, as mash does for endpoint creds: the file must be a regular file with no group or other permission bits (`chmod 600 FILE`). A symlink is followed and the file it points to is checked; a missing file keeps its own error.
 
 Every connection requires TLS, to any host, loopback included: every verb that connects with the admin or system creds (and `init`) refuses a plain `nats://` URL with exit code 2, naming `insecure_plaintext` (`MASH_INSECURE_PLAINTEXT=1`), which allows plain text and prints a warning; use it only for a throwaway server in a test. A `tls://` connection fails when the server does not offer TLS. `issued check`, `endpoint delete`, `endpoint reissue` and `init` verify the account JWT's signature, subject and issuer (the operator key, or a key declared by `<key dir>/operator.jwt`). Admin and system connections never add servers the server advertises. See [operations](operations.md#writing-the-account-jwt-revocation).
 
@@ -44,14 +44,14 @@ mashctl limits apply [prefix] [--dry-run]
 
 ```sh
 mashctl issued list  [--json]
-mashctl issued check [--json] [--sys-creds FILE] [--servers N]
+mashctl issued check [--json]
 ```
 
 Every user JWT `mashctl` issues is written to the issue record, the `mash-issued` bucket, under the user's public key: a user minted with the account key (a kept key adds a revision under the same key, a rotated key adds an entry for the new key and leaves the old key's), and the admin user that `mashctl init` connects with (kind `admin`; `mashctl init --config` records it). The entry is written before the creds file or the directory record, so a user that can connect is always in the record, and a record that cannot be written stops the issue. An entry holds the public key, the address (the endpoint name), the owner, the kind (`endpoint` or `admin`), the tags, the generation (always 0: mash has no policy generation yet) the issue time (RFC 3339, UTC), the purpose and, once mash has revoked the key, the revocation time. The purpose is one of `issue` (a user minted with the account key, the admin user at `init`), `rotation` (the new key of a credential that rotates the user key) and `probe` (reserved for the policy gate's probe credentials; `mashctl` does not write it); a record from before the field reads as `issue`. `revoked_at` (RFC 3339, UTC) is left out until set: `endpoint delete` and `endpoint reissue` set it after the revocation succeeds, once and never cleared, and a key mash never recorded is skipped. A failure to set it prints `warning: user key U... is revoked, but the issue record was not updated with it: ...` on stderr and never fails or undoes the revocation. Nothing is removed from the record when an endpoint is deleted or its key is revoked: revocation is the account JWT's, and the record is the history of what was issued. `mashctl init --config` creates the bucket; a deployment from before the record gets it, hardened, the first time a user is minted and written. Users issued before the record existed are not in it until a credential is reissued under the same key.
 
 `issued list` prints the latest entry of each key, with its purpose and, when set, `revoked TIME` (`--json`: `present`, `count`, `issued`, each entry with `purpose` and, when set, `revoked_at`).
 
-`issued check` asks every server, through the system account (`--sys-creds FILE`, else `MASH_SYS_CREDS`, else `system_creds` in `config.json`, else the `sys.creds` next to `admin_creds`), which user public keys are connected in the MASH account, and compares them with the record. It reports, per server, any connected key mash did not issue (the key, the server, the account, the client's connection name, the key that signed the JWT and its tags), the recorded keys that are not connected (informational) and a count summary. No key is exempt, not even the admin user this command connects with: it must be in the record (`mashctl init` and `adopt --mint-admin` record it). The system account's users never appear in the MASH account's connection list. A connected key that the record holds as revoked is reported apart, as `REVOKED key K still connected`: the revocation did not take effect (revoke it again, and look at the account JWT). A recorded key of any purpose counts as issued by mash. Exit codes: 0 when no unrecorded key and no revoked key is connected and the scan was complete; 1 when a finding was found, even if the scan was incomplete; 2 when nothing was found but the scan was incomplete or failed: bad arguments, a connection failure, a server that did not answer, a server whose connection list changed while it was read and could not be read whole (a list that fits one page is one snapshot; a list of several pages is accepted only when two consecutive complete scans collect the same connections, and each server is scanned up to 3 times), or a server set that cannot be shown to be complete (a cluster needs `--servers N` or `MASH_SERVERS`, as `endpoint delete` does). Whenever the scan was incomplete the text says `INCOMPLETE` and names why, and the JSON has `complete: false` and `incomplete` with the reason, with or without a finding. `--json` prints `clean`, `complete`, `incomplete`, `account`, `record_present`, `servers` (`answered`, `missing`, `expected`), `unrecorded`, `revoked_connected`, `recorded_not_connected` and `summary`. Only public keys are printed. See [operations.md](operations.md#the-issue-record-and-the-drift-check) for what it can and cannot see.
+`issued check` asks every server, through the system account (`system_creds` in `config.json`), which user public keys are connected in the MASH account, and compares them with the record. It reports, per server, any connected key mash did not issue (the key, the server, the account, the client's connection name, the key that signed the JWT and its tags), the recorded keys that are not connected (informational) and a count summary. No key is exempt, not even the admin user this command connects with: it must be in the record (`mashctl init` and `adopt --mint-admin` record it). The system account's users never appear in the MASH account's connection list. A connected key that the record holds as revoked is reported apart, as `REVOKED key K still connected`: the revocation did not take effect (revoke it again, and look at the account JWT). A recorded key of any purpose counts as issued by mash. Exit codes: 0 when no unrecorded key and no revoked key is connected and the scan was complete; 1 when a finding was found, even if the scan was incomplete; 2 when nothing was found but the scan was incomplete or failed: bad arguments, a connection failure, a server that did not answer, a server whose connection list changed while it was read and could not be read whole (a list that fits one page is one snapshot; a list of several pages is accepted only when two consecutive complete scans collect the same connections, and each server is scanned up to 3 times), or a server set that cannot be shown to be complete (the number of servers is the count under `servers` in `config.json`, as for `endpoint delete`). Whenever the scan was incomplete the text says `INCOMPLETE` and names why, and the JSON has `complete: false` and `incomplete` with the reason, with or without a finding. `--json` prints `clean`, `complete`, `incomplete`, `account`, `record_present`, `servers` (`answered`, `missing`, `expected`), `unrecorded`, `revoked_connected`, `recorded_not_connected` and `summary`. Only public keys are printed. See [operations.md](operations.md#the-issue-record-and-the-drift-check) for what it can and cannot see.
 
 ## Setting and removing values on an endpoint
 
@@ -129,7 +129,7 @@ See also [audit.md](audit.md) for the consumer fields (`delivered`, `ack_floor`,
 ## mashctl endpoint create
 
 ```sh
-mashctl endpoint create ADDRESS [--out PATH] [--public-key PATH] [--servers N] [--sys-creds FILE] [--dry-run] [--json]
+mashctl endpoint create ADDRESS [--out PATH] [--public-key PATH] [--dry-run] [--json]
 ```
 
 Creates an endpoint: it signs the endpoint's user key with the account signing key, writes the directory record and the inbox, and records the key in the issue record. The record, the inbox and the issue record are written before the creds file or join file, so a user that can connect is always on record.
@@ -155,7 +155,7 @@ A key is used at one address, once. A key that was issued before, or revoked, is
 | `creds` | the whole text of the NATS creds file, user JWT and seed (without `--public-key`) |
 | `user_jwt` | the user JWT alone (with `--public-key`) |
 
-**Other options.** `--servers N` and `--sys-creds FILE` name the server count and the system account creds for a cluster, as the other verbs do. `--dry-run` connects, checks everything, says what it would do and changes nothing. `--json` prints one JSON object.
+**Other options.** `--dry-run` connects, checks everything, says what it would do and changes nothing. `--json` prints one JSON object.
 
 **What it prints.** On success:
 
@@ -192,7 +192,7 @@ hint: mashctl endpoint create --help
 ## mashctl endpoint reissue
 
 ```sh
-mashctl endpoint reissue ADDRESS [--out PATH] [--public-key PATH] [--servers N] [--sys-creds FILE] [--dry-run] [--json]
+mashctl endpoint reissue ADDRESS [--out PATH] [--public-key PATH] [--dry-run] [--json]
 ```
 
 Gives an existing endpoint new credentials and cancels the old ones. It revokes the old key on every server, then makes the directory record name the new key. The inbox and its unread mail stay. A session that runs as the endpoint must restart to read the new creds. The options work as for `create`.
@@ -212,7 +212,7 @@ Two `mashctl` machines must not reissue the same endpoint at the same moment. Th
 ## mashctl endpoint delete
 
 ```sh
-mashctl endpoint delete ADDRESS [--yes] [--dry-run] [--json] [--servers N] [--sys-creds FILE]
+mashctl endpoint delete ADDRESS [--yes] [--dry-run] [--json]
 ```
 
 Deletes an endpoint, its inbox and its credentials. The address can never be used again. Without `--yes` it prints `This deletes <address> and the <N> messages in its inbox. It cannot be undone.` and asks you to type the address; any other text deletes nothing and exits 1. That needs a terminal: with no terminal and no `--yes` it prints `error: deleting needs a terminal to confirm, or --yes` and exits 2. The question comes after the endpoint is found and its messages counted, and before anything changes. In order, it:
@@ -320,7 +320,7 @@ Endpoints made by 0.5.0 do not work with 0.5.5. Make new ones with `endpoint cre
 
 `endpoint delete` and `endpoint reissue` revoke the endpoint's NATS user in the same command (`mashctl endpoint suspend` does not). The revocation is an entry in the account JWT, by user public key and time: NATS refuses a user JWT for that key issued at or before the revocation time, and a connected user is closed when the server takes the account update, so credentials stop working everywhere the update reached. mashctl signs the update with the operator key, pushes it through the system account to every known server, requires every one to acknowledge it, and reads it back; if that cannot be shown it exits non-zero with `not confirmed` and running the command again is safe. An existing revocation is never lowered or removed.
 
-`endpoint delete ADDRESS` revokes the user of ADDRESS's directory record. With no record there is nothing to revoke. There is no option to skip the revocation. The system credentials and server count come from `MASH_SYS_CREDS` and `MASH_SERVERS`.
+`endpoint delete ADDRESS` revokes the user of ADDRESS's directory record. With no record there is nothing to revoke. There is no option to skip the revocation. The system account credentials come from `system_creds` in `config.json`, and the number of servers a revocation must be confirmed on is the number listed under `servers`.
 
 Before a revocation is written, `endpoint delete` reads the issue record of each key and refuses, changing nothing, when any retained revision of it has an issue time after the revocation time: NATS honours a revocation only for credentials issued at or before it, so a credential dated in the future would stay valid. Every revision counts, not only the latest, because a credential reissued under the same key writes a new revision and, after a clock rollback, the newer revision can carry an earlier time than an older credential that is still held. The record keeps 64 revisions of a key; a key at that cap may have lost its oldest ones, so it is refused too (`the key has been re-recorded 64 times or more; its oldest issue times are no longer kept; cannot show that no earlier credential is dated in the future`) unless a retained revision is already future-dated, which gets the usual refusal. To proceed, fix the clock, or run again later once the clock is known to be right. A key with no record warns and the revocation goes on; a record that cannot be read, or has a revision whose `issued_at` is missing or malformed, refuses.
 

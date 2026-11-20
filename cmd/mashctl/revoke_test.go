@@ -13,6 +13,7 @@ import (
 
 	"github.com/nats-io/nats.go/jetstream"
 
+	"github.com/bogworks/mash/internal/cliframe"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/ctl"
 	"github.com/bogworks/mash/internal/store"
@@ -29,11 +30,11 @@ type revokeStub struct {
 	seen  [][]string
 }
 
-func (s *revokeStub) fn(_ context.Context, _ config.Config, env func(string) string, servers int, users []string, out io.Writer, _ func() time.Time) (int, error) {
+func (s *revokeStub) fn(_ context.Context, cfg config.Config, _ func(string) string, servers int, users []string, out io.Writer, _ func() time.Time) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.calls = append(s.calls, users...)
-	s.creds = append(s.creds, env("MASH_SYS_CREDS"))
+	s.creds = append(s.creds, cfg.SysCreds)
 	s.srv = append(s.srv, servers)
 	if s.probe != nil {
 		s.seen = append(s.seen, s.probe())
@@ -65,7 +66,8 @@ func TestRetireRevokesBeforeDeleting(t *testing.T) {
 	u := h.provisionDeclared("a")
 	s := stubRevoke(t)
 	s.probe = h.records
-	h.env["MASH_SYS_CREDS"], h.env["MASH_SERVERS"] = "/x/sys.creds", "3"
+	h.writeConfig(`{"system_creds":"/x/sys.creds"}`)
+	h.env["MASH_SERVER"] = h.e.URL + ",nats://127.0.0.1:1,nats://127.0.0.1:2" // three servers in the configuration
 	out, errb, code := h.run("endpoint", "delete", "o.g.a", "--yes")
 	if code != 0 {
 		t.Fatalf("%d %q %q", code, out, errb)
@@ -124,39 +126,48 @@ func TestRetireNoRecordRevokesNothing(t *testing.T) {
 	}
 }
 
-func TestRetireBadServersAndUsage(t *testing.T) {
-	h := newFleetEnv(t)
-	h.env["MASH_SERVERS"] = "zero"
-	if _, errb, code := h.run("endpoint", "delete", "o.g.a", "--yes"); code != 2 || !strings.Contains(errb, "MASH_SERVERS must be") {
-		t.Fatalf("%d %q", code, errb)
-	}
-	delete(h.env, "MASH_SERVERS")
-	if _, errb, code := h.run("endpoint", "delete", "o.g.a", "--yes", "--bogus"); code != 2 || !strings.Contains(errb, "unknown option") || !strings.Contains(errb, "endpoint delete --help") {
-		t.Fatalf("%d %q", code, errb)
-	}
-}
-
-func TestEndpointDeleteAcceptsServersAndSysCredsFlags(t *testing.T) {
+func TestRetireUnknownOptionsAndSingleServerCount(t *testing.T) {
 	h := newFleetEnv(t)
 	h.provisionDeclared("a")
 	s := stubRevoke(t)
-	if _, errb, code := h.run("endpoint", "delete", "o.g.a", "--yes", "--sys-creds=/s.creds", "--servers=2"); code != 0 || len(s.calls) != 1 || s.srv[0] != 2 || s.creds[0] != "/s.creds" || len(h.records()) != 0 {
-		t.Fatalf("%d %q %v %v", code, errb, s.srv, s.creds)
+	if _, errb, code := h.run("endpoint", "delete", "o.g.a", "--yes", "--bogus"); code != 2 || !strings.Contains(errb, "unknown option") || !strings.Contains(errb, "endpoint delete --help") {
+		t.Fatalf("%d %q", code, errb)
+	}
+	// --servers and --sys-creds are gone: each is an unknown option, and nothing is attempted.
+	for _, args := range [][]string{{"--servers", "2"}, {"--servers=2"}, {"--sys-creds", "/s.creds"}, {"--sys-creds=/s.creds"}} {
+		out, errb, code := h.run(append([]string{"endpoint", "delete", "o.g.a", "--yes"}, args...)...)
+		want := "error: unknown option " + strings.SplitN(args[0], "=", 2)[0] + "\nhint: mashctl endpoint delete --help\n"
+		if code != 2 || out != "" || errb != want {
+			t.Errorf("%v: %d %q %q", args, code, out, errb)
+		}
+	}
+	if len(s.calls) != 0 || len(h.records()) != 1 {
+		t.Fatalf("something ran: calls %v records %v", s.calls, h.records())
+	}
+	// one server in the configuration: the count is 1.
+	if _, errb, code := h.run("endpoint", "delete", "o.g.a", "--yes"); code != 0 || len(s.srv) != 1 || s.srv[0] != 1 {
+		t.Fatalf("%d %q %v", code, errb, s.srv)
 	}
 }
 
-func TestRevokeUserKeysNoSysCredsSaysMashSysCreds(t *testing.T) {
-	_, err := revokeUserKeys(context.Background(), config.Config{Dir: t.TempDir()}, func(string) string { return "" }, 0, nil, io.Discard, nil)
-	if err == nil {
-		t.Fatal("no error")
+func TestServerCountIsTheConfiguredServers(t *testing.T) {
+	for url, want := range map[string]int{"": 1, "tls://a:4222": 1, "tls://a:4222,tls://b:4222": 2, "tls://a:4222, tls://b:4222,tls://c:4222": 3, "tls://a:4222,": 1} {
+		if got := serverCount(config.Config{URL: url}); got != want {
+			t.Errorf("%q: %d, want %d", url, got, want)
+		}
 	}
-	if !strings.Contains(err.Error(), "pass --sys-creds FILE or set MASH_SYS_CREDS") {
-		t.Errorf("%v", err)
+}
+
+func TestRevokeUserKeysNoSysCredsSaysInitConfig(t *testing.T) {
+	_, err := revokeUserKeys(context.Background(), config.Config{Dir: t.TempDir()}, func(string) string { return "" }, 1, nil, io.Discard, nil)
+	var ce *cliframe.Error
+	if !errors.As(err, &ce) || ce.Msg != "no system account credentials" || ce.Hint != "mashctl init --config <file>" {
+		t.Errorf("%#v", err)
 	}
 }
 
 func TestUsageTexts(t *testing.T) {
-	if !strings.Contains(endpointDeleteUsage, "[--yes] [--dry-run]") || strings.Contains(endpointDeleteUsage, "--force") || strings.Contains(endpointDeleteUsage, "--no-revoke") || strings.Contains(endpointDeleteUsage, "--delete-creds") || !strings.Contains(endpointDeleteUsage, "--sys-creds FILE") || !strings.Contains(endpointDeleteUsage, "--servers N") {
+	if !strings.Contains(endpointDeleteUsage, "[--yes] [--dry-run]") || strings.Contains(endpointDeleteUsage, "--force") || strings.Contains(endpointDeleteUsage, "--no-revoke") || strings.Contains(endpointDeleteUsage, "--delete-creds") || strings.Contains(endpointDeleteUsage, "--sys-creds") || strings.Contains(endpointDeleteUsage, "--servers") {
 		t.Errorf("endpointDeleteUsage %q", endpointDeleteUsage)
 	}
 }
