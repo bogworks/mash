@@ -1,0 +1,237 @@
+{
+ "rules": [
+  {
+   "rule": "A command reports what it did, in a line or a few",
+   "detail": "Like gh, git and aws. Explanation lives in the guide, the walkthrough, --help and the glossary, never in output."
+  },
+  {
+   "rule": "An action prints one line",
+   "detail": "Past tense, naming the thing: 'Created endpoint acme.demo.bob', 'Mail sent.' It does not print what another command already shows."
+  },
+  {
+   "rule": "--verbose adds detail, --wide adds columns",
+   "detail": "Neither is the default. --verbose (-v) follows an action's line with 'label: value' lines. --wide adds columns to a table and may pass 80 columns. Every table's --wide form is written out in this specification."
+  },
+  {
+   "rule": "A list is a plain table",
+   "detail": "A header row in capitals, two spaces between columns, no borders. A repeated leading value may be left blank. --wide adds columns. An empty list is one sentence."
+  },
+  {
+   "rule": "One thing is a list of 'label: value' lines",
+   "detail": "The labels are the JSON field names."
+  },
+  {
+   "rule": "Status is one line",
+   "detail": "'<what>: <state>'. Everything behind it is in doctor."
+  },
+  {
+   "rule": "An error is one line on stderr, and at most one hint",
+   "detail": "'error: <what failed>', then 'hint: <a command to run>' when there is one. No hint on success, and no 'next step' lines."
+  },
+  {
+   "rule": "--json prints one object",
+   "detail": "Always an object, never a bare array: a list is {\"endpoints\": [...]}. It is the same object the matching MCP tool returns as its structured result. Field names are the glossary's words. Both are produced by one implementation."
+  },
+  {
+   "rule": "A wrong command line gets one error line in a fixed form, and one hint",
+   "detail": "A missing argument: 'error: mash send needs <address>'. A bad value: 'error: --kind must be one of blocker, question, task, result, fyi' or 'error: --reply-to must be a whole number'. Two things that cannot go together: 'error: mash send takes the message text or --file, not both'. An option that does not exist: 'error: unknown option --x'. The hint is always the command's own help: 'hint: mash send --help'. Exit 2, and nothing is attempted."
+  },
+  {
+   "rule": "--help has one layout, generated from this specification",
+   "detail": "In this order: the one-line description; 'Usage:' and the synopsis; 'Examples:'; 'Arguments:'; 'Options:'; 'Global options:'. Nothing else, 80 columns. A tool's own --help lists its commands by group with their one-line descriptions. Help is never written by hand beside the specification."
+  },
+  {
+   "rule": "Times read the way a person says them",
+   "detail": "'10s ago', '2m ago', '1h 12m'. Anything under a second, or in the future because two clocks disagree, is 'just now'. --json carries the exact time."
+  },
+  {
+   "rule": "Text read from a file or standard input loses one trailing newline",
+   "detail": "As the shell's own $(...) does. Nothing else in the text is changed."
+  },
+  {
+   "rule": "Three exit codes",
+   "detail": "0 it worked, 1 it failed, 2 the command line was wrong. Today the same failure exits 2, 3 or 6 depending on the command. A command that did part of its work exits 1, says what is left, and is safe to run again."
+  },
+  {
+   "rule": "status and doctor report, they do not fail",
+   "detail": "Their lines go to stdout whatever they find, and they exit 1 when they found a problem. Any hint still goes to stderr."
+  },
+  {
+   "rule": "The server not answering reads the same everywhere",
+   "detail": "'error: the server did not answer: tls://host:4222' and 'hint: mash doctor' (or mashctl doctor), exit 1."
+  },
+  {
+   "rule": "--json when a command fails",
+   "detail": "Prints {\"error\": ..., \"hint\": ...} on stdout and nothing on stderr, with the same exit code."
+  },
+  {
+   "rule": "Every changing command takes --dry-run",
+   "detail": "It prints the usual line with 'Would' in front and changes nothing."
+  },
+  {
+   "rule": "Every setting three ways",
+   "detail": "A flag, then an environment variable, then config.json. The flag wins."
+  },
+  {
+   "rule": "One spelling",
+   "detail": "An address is owner.group.name everywhere. NATS's and SAP's things keep NATS's and SAP's names. The same thing has the same column heading and the same field name in every command."
+  },
+  {
+   "rule": "A prefix selects, the way a domain name does",
+   "detail": "Where a command takes a prefix, acme means everything under acme, acme.demo everything under acme.demo, and a full address that one endpoint. acme.* is accepted and means acme. There is no other pattern matching."
+  },
+  {
+   "rule": "Options go anywhere after the tool's name",
+   "detail": "Every option, global or the command's own, is accepted before or after the command and its arguments, as with kubectl and gh. Help and documentation always write them last: mash status --endpoint acme.demo.alice."
+  },
+  {
+   "rule": "Only a destructive command asks",
+   "detail": "It asks you to type the address, and --yes skips the question."
+  },
+  {
+   "rule": "Eighty columns, and color only on a terminal",
+   "detail": "--wide may be wider. NO_COLOR is honored."
+  }
+ ],
+ "words": [
+  {
+   "word": "mesh",
+   "from": "mash",
+   "meaning": "The whole: every endpoint and all their mail."
+  },
+  {
+   "word": "endpoint",
+   "from": "mash",
+   "meaning": "One mailbox on the mesh, used by one agent, tool or person."
+  },
+  {
+   "word": "owner",
+   "from": "mash",
+   "meaning": "The first part of an address: a namespace. A mesh has many."
+  },
+  {
+   "word": "group",
+   "from": "mash",
+   "meaning": "The second part: endpoints an owner keeps together."
+  },
+  {
+   "word": "name",
+   "from": "mash",
+   "meaning": "The third part: this one endpoint."
+  },
+  {
+   "word": "address",
+   "from": "mash",
+   "meaning": "owner.group.name, for example acme.demo.bob."
+  },
+  {
+   "word": "message",
+   "from": "mash",
+   "meaning": "One item of mail."
+  },
+  {
+   "word": "inbox",
+   "from": "mash",
+   "meaning": "The messages an endpoint has received."
+  },
+  {
+   "word": "online / offline",
+   "from": "mash",
+   "meaning": "Whether something is holding the endpoint open right now."
+  },
+  {
+   "word": "verified",
+   "from": "mash",
+   "meaning": "Proven to come from the address it names."
+  },
+  {
+   "word": "kind, urgent",
+   "from": "mash",
+   "meaning": "What sort of message it is, and whether it should interrupt."
+  },
+  {
+   "word": "join file",
+   "from": "mash",
+   "meaning": "One text file that lets a machine use an endpoint: server address, certificate authority, creds."
+  },
+  {
+   "word": "server",
+   "from": "NATS",
+   "meaning": "A NATS server: a way in to the mesh."
+  },
+  {
+   "word": "account",
+   "from": "NATS",
+   "meaning": "The NATS unit users belong to, and which signs them."
+  },
+  {
+   "word": "seed",
+   "from": "NATS",
+   "meaning": "The private half of a key pair."
+  },
+  {
+   "word": "public key",
+   "from": "NATS",
+   "meaning": "The half that can be shared."
+  },
+  {
+   "word": "user JWT",
+   "from": "NATS",
+   "meaning": "A statement signed by the account that a public key is a given user."
+  },
+  {
+   "word": "creds file",
+   "from": "NATS",
+   "meaning": "One text file, in the style of a PEM file, holding a user JWT and its seed."
+  },
+  {
+   "word": "agent, prompt, status, heartbeat",
+   "from": "SAP",
+   "meaning": "An endpoint as SAP sees it, and SAP's live operations."
+  },
+  {
+   "word": "sender identity",
+   "from": "SAP",
+   "meaning": "SAP's optional signature on a message, which mash requires."
+  }
+ ],
+ "coming_in_0_6_0": [
+  {
+   "change": "mash prompt becomes mash sap prompt",
+   "meaning": "And the MCP tool reply moves with it. 0.5.6 prints a note on every use."
+  },
+  {
+   "change": "A mesh holds many owners",
+   "meaning": "mashctl owner create, list and delete arrive. Mail between owners becomes a designed case, under policy."
+  },
+  {
+   "change": "Policy",
+   "meaning": "Who may send to whom. mash ships open; narrowing is a choice."
+  },
+  {
+   "change": "Asking to join",
+   "meaning": "An endpoint can ask to join and be approved by an administrator or by policy (board card 210)."
+  },
+  {
+   "change": "The MCP revision and how a session is woken",
+   "meaning": "A spike in the 0.6.0 sprint on the MCP Events extension (board card 213). Channels stay until then."
+  }
+ ],
+ "setup": [
+  {
+   "name": "install.sh",
+   "command": "curl -fsSL https://github.com/bogworks/mash/releases/latest/download/install.sh | bash",
+   "what": "Finds the machine's type, downloads mash and mashctl from the same release, checks each against the release's checksums, puts them in ~/.local/bin, and prints one line for each: 'Installed mash v0.5.6 (3f9a41c)'. It asks nothing and needs no sudo. If ~/.local/bin is not on the PATH it says so in one line."
+  },
+  {
+   "name": "mash-local-nats-setup.sh",
+   "command": "curl -fsSL https://github.com/bogworks/mash/releases/latest/download/mash-local-nats-setup.sh | bash",
+   "what": "For a NATS server on this machine. First install nats-server with your package manager (version 2.10.7 or newer) and the nats command: Homebrew has it, and on Debian and Ubuntu, where there is no package for it, it comes from its GitHub release. The script also needs openssl, to make the server's certificate. It names anything missing, says where to get it, and stops. It does not need nsc. If port 4222 is already taken, as it is where a packaged nats-server runs as a system service, the script leaves that service alone, uses the next free port and says which. It asks one question, the owner's name, reading it from the terminal. It makes a server that only this machine can reach, with encryption on, starts it as your own user, and writes the setup file. Its last line is the next command: mashctl init --config ~/mash-nats/mash-setup.yaml. Run again with --stop or --remove to stop or remove it."
+  },
+  {
+   "name": "For an agent",
+   "command": "(the setup skill)",
+   "what": "The setup skill does not pipe a download into a shell. It downloads each script, checks it against the release's checksums, shows the person what it is about to run, and runs it after a yes."
+  }
+ ]
+}
