@@ -13,7 +13,7 @@ import (
 // command of 0.5.5.
 var SelfCheck = Scenario{
 	ID: "selfcheck",
-	Scenario: "The harness proves its own parts: build; scratch home; mashctl init --local --start and its recorded PID; mashctl list and audit; " +
+	Scenario: "The harness proves its own parts: build; scratch home; mashctl init --local --start and its recorded PID; mashctl endpoint list and audit; " +
 		"a state snapshot that is stable when nothing changes; a child environment with no inherited variable; a deliberate leak that the scanner flags; " +
 		"a process started and stopped by its PID; the record; the server stopped by its PID.",
 	Body: func(a *AT) {
@@ -51,8 +51,8 @@ var SelfCheck = Scenario{
 			return
 		}
 		a.C.Check("the server's PID is recorded and alive", a.srvPID > 0 && alive(a.srvPID), "")
-		r := a.Ctl("list", h, a.Conn(), "list")
-		a.C.Check("mashctl list runs against the server", r.Code == 0, exitDetail(r))
+		r := a.Ctl("list", h, a.Conn(), "endpoint", "list")
+		a.C.Check("mashctl endpoint list runs against the server", r.Code == 0, exitDetail(r))
 		r = a.Ctl("audit", h, a.Conn(), "audit", "--json")
 		a.C.Check("mashctl audit --json runs against the server", r.Code == 0 && strings.HasPrefix(strings.TrimSpace(r.Stdout), "{"), exitDetail(r))
 		s1 := a.Snapshot("one", h, h)

@@ -15,8 +15,8 @@ import (
 // helpVerbs is every verb run dispatches; each takes -h and --help, prints its usage and changes nothing.
 var helpVerbs = [][]string{
 	{"adopt"}, {"audit"}, {"inbox"}, {"inbox", "inspect"}, {"issued"}, {"issued", "list"}, {"issued", "check"}, {"version"}, {"label"}, {"unlabel"},
-	{"endpoint"}, {"init"}, {"limits"}, {"permissions"}, {"provision"},
-	{"set-meta"}, {"suspend"}, {"resume"}, {"suspended"}, {"deprovision"}, {"list"},
+	{"endpoint"}, {"init"}, {"limits"}, {"permissions"},
+	{"set-meta"}, {"suspend"}, {"resume"}, {"suspended"},
 }
 
 func TestVerbHelpPrintsUsageAndChangesNothing(t *testing.T) {
@@ -124,7 +124,7 @@ func TestHelpRequestedOnlyFirstArgument(t *testing.T) {
 }
 
 func TestVerbUsageFallsBackToFull(t *testing.T) {
-	if got := verbUsage([]string{"init"}); !strings.Contains(got, "mashctl init") || strings.Contains(got, "mashctl list") {
+	if got := verbUsage([]string{"init"}); !strings.Contains(got, "mashctl init") || strings.Contains(got, "mashctl limits") {
 		t.Errorf("init usage = %q", got)
 	}
 	if got := verbUsage([]string{"nosuchverb"}); got != ctl.Usage("mashctl") {

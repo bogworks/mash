@@ -21,11 +21,7 @@ import (
 // provisionDeclared makes a directory record for a declared endpoint and returns its user key.
 func (h *fleetEnv) provisionDeclared(instance string) string {
 	h.t.Helper()
-	_, u := h.e.Mint(h.t, ad(instance))
-	if _, errb, code := h.run("provision", ad(instance).String(), "--user", u, "--account", h.e.Account); code != 0 {
-		h.t.Fatal(errb)
-	}
-	return u
+	return provisionAs(h.t, h.e, instance, admin.Meta{})
 }
 
 func TestRetireRemovesRecordAndInboxAndSetsTheCredsAside(t *testing.T) {
@@ -85,7 +81,7 @@ func TestRetireNoCredsFileIsFine(t *testing.T) {
 func TestRetireWithNoRecordSaysSo(t *testing.T) {
 	h := newFleetEnv(t)
 	_, errb, code := h.run("endpoint", "delete", "o.g.nothing-here")
-	if code != 1 || !strings.Contains(errb, "no directory record on the server") || !strings.Contains(errb, "mashctl deprovision o.g.nothing-here") {
+	if code != 1 || !strings.Contains(errb, "no directory record on the server") || !strings.Contains(errb, "mashctl endpoint delete o.g.nothing-here") {
 		t.Fatalf("%d %q", code, errb)
 	}
 }
@@ -108,8 +104,8 @@ func TestRetireDeleteCredsAndSymlink(t *testing.T) {
 
 	// a symlink is not removed, and its target is left as it was
 	targetPath, u := h.e.Mint(t, ad("b"))
-	if _, errb, code := h.run("provision", "o.g.b", "--user", u, "--account", h.e.Account); code != 0 {
-		t.Fatal(errb)
+	if _, err := h.adminOf().Provision(context.Background(), ad("b"), u, h.e.Account, "", admin.Meta{}); err != nil {
+		t.Fatal(err)
 	}
 	target := filepath.Join(t.TempDir(), "precious")
 	want, err := os.ReadFile(targetPath)
@@ -244,7 +240,7 @@ func TestRetirePartialFailureIsNotReportedAsUnchanged(t *testing.T) {
 	if code != 5 || strings.Contains(out, "deleted") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
-	for _, w := range []string{"PARTIAL", "mashctl deprovision o.g.b", "lease fence: connection lost"} {
+	for _, w := range []string{"PARTIAL", "mashctl endpoint delete o.g.b", "lease fence: connection lost"} {
 		if !strings.Contains(errb, w) {
 			t.Errorf("stderr lacks %q: %q", w, errb)
 		}
@@ -261,10 +257,6 @@ func TestRetirePartialFailureIsNotReportedAsUnchanged(t *testing.T) {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
 
-	// the stand-in removed everything, so deprovision has nothing left to finish and says so
-	if _, errb, code := h.run("deprovision", "o.g.b"); code != 1 || !strings.Contains(errb, "no endpoint named o.g.b") {
-		t.Fatal(code, errb)
-	}
 	out, errb, code = h.run("endpoint", "delete", "o.g.b", "--force")
 	if code != 0 || !strings.HasPrefix(out, "deleted o/g/b (o.g.b)\n") {
 		t.Fatalf("%d %q %q", code, out, errb)

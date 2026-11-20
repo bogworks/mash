@@ -112,7 +112,7 @@ func (e *lockBusyError) Error() string {
 }
 
 // leaseKV returns the lease bucket, creating it with the configured limits if a deployment from before the lock has
-// not been re-initialised (`mash admin init` creates it). The bucket it returns refuses rollup: a new one is created refusing
+// not been re-initialised (`mashctl init` creates it). The bucket it returns refuses rollup: a new one is created refusing
 // rollup, an existing one is verified and hardened, and one that cannot be is an error.
 func (a *Admin) leaseKV(ctx context.Context) (jetstream.KeyValue, error) {
 	kv, err := a.js.KeyValue(ctx, store.LeaseBucket)
@@ -128,7 +128,7 @@ func (a *Admin) leaseKV(ctx context.Context) (jetstream.KeyValue, error) {
 		if down := bucketDown(store.LeaseBucket, err); down != nil {
 			return nil, down
 		}
-		return nil, fmt.Errorf("mash: lease bucket (run `mash admin init`): %w", err)
+		return nil, fmt.Errorf("mash: lease bucket (run `mashctl init`): %w", err)
 	}
 	if err := store.HardenLeaseBucket(ctx, a.js); err != nil {
 		return nil, fmt.Errorf("mash: %w", err)

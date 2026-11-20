@@ -38,7 +38,7 @@ func TestAuditLeaseBucketThatAllowsRollupIsAProblemUntilInit(t *testing.T) {
 	}
 	r, errb, code := f.retiredAudit(t, "--strict")
 	lp := leaseProblems(r)
-	if code != 1 || len(lp) != 1 || !strings.Contains(lp[0], `lease bucket allows rollup writes; run "mash admin init" to harden it`) ||
+	if code != 1 || len(lp) != 1 || !strings.Contains(lp[0], `lease bucket allows rollup writes; run "mashctl init" to harden it`) ||
 		!strings.Contains(errb, "--strict") {
 		t.Fatalf("un-hardened bucket: exit %d %v err=%q", code, lp, errb)
 	}

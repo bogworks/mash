@@ -1,5 +1,5 @@
 // Command mash is a messaging mesh for agents: a Claude Code channel server
-// (mash serve), a CLI for people and scripts, and admin tooling.
+// (mash serve), and a CLI for people and scripts.
 package main
 
 import (
@@ -57,7 +57,7 @@ var helpGroups = []string{"Everyday", "Setup", "Integration", "Raw SAP"}
 // listed from the table (its synopsis and description are generated); one that is not yet is listed from handCommands.
 var helpLayout = map[string][]string{
 	"Everyday":    {"send", "inbox", "read", "who", "status", "doctor", "version"},
-	"Setup":       {"key", "credential", "admin"},
+	"Setup":       {"key", "credential"},
 	"Integration": {"serve", "hook", "plugin"},
 	"Raw SAP":     {"prompt"},
 }
@@ -68,7 +68,6 @@ var handCommands = map[string][2]string{
 	"read":       {"mash read <seq>", "Print one message from your inbox"},
 	"key":        {"mash key create --out FILE [options]", "Make a user key pair: seed to FILE (0600), public key to FILE.pub; needs no config"},
 	"credential": {"mash credential create --seed FILE --jwt FILE [options]", "Join a seed and its user JWT into a credentials file; needs no config"},
-	"admin":      {"mash admin <verb> ...", "Deprecated; use mashctl"},
 	"serve":      {"mash serve", "The Claude Code channel server (started by the plugin)"},
 	"hook":       {"mash hook", "The plugin's hook: shows the session its spooled mail"},
 	"plugin":     {"mash plugin export <dir>", "Write this build's Claude Code plugin and a marketplace for it into <dir>"},
@@ -187,7 +186,7 @@ var verbUsage = map[string]string{
 var helpTopic = map[string]bool{"serve": true, "hook": true, "plugin": true, "key": true, "credential": true, "read": true, "inbox": true, "prompt": true}
 
 // noJSONForm is the verbs that have no --json form: a --json given to one is a usage error. key and credential
-// parse --json themselves, and send, version and who are commands of the table; admin is deprecated and left as it was.
+// parse --json themselves, and send, version and who are commands of the table.
 var noJSONForm = map[string]bool{"read": true, "inbox": true, "prompt": true, "serve": true, "hook": true, "plugin": true}
 
 // stdinWait is how long a message read from standard input has to arrive: 15 minutes, as the send help says. It is its
@@ -328,7 +327,7 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 	}
 	// A plain URL with no insecure_plaintext is refused before anything is connected (REQ-014): serve stops at session
 	// start and the commands that connect stop, exit 2, with the refusal on stderr.
-	if err == nil && !cfg.Inert() && args[0] != "admin" {
+	if err == nil && !cfg.Inert() {
 		if _, perr := endpoint.EndpointTLS(cfg); perr != nil && !report { // a report says it as a row
 			return cliframe.Report(stdout, stderr, cliframe.Usagef("%s", strings.TrimPrefix(perr.Error(), "mash: ")).WithHint("mash doctor"), jsonOut)
 		}
@@ -353,8 +352,6 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 		return newCommands(mk).RunCLI(args[0], args[1:], stdin, stdout, stderr, global)
 	case "read", "inbox", "prompt":
 		return cli(cfg, args, stdin, stdout, stderr)
-	case "admin":
-		return adminCmd(cfg, args[1:], stdout, stderr)
 	}
 	return cliframe.Report(stdout, stderr, cliframe.Usagef("mash has no command %s", args[0]).WithHint("mash --help"), global.JSON)
 }

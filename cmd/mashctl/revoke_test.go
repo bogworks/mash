@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -17,7 +16,6 @@ import (
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/ctl"
 	"github.com/bogworks/mash/internal/store"
-	"github.com/bogworks/mash/internal/testenv"
 )
 
 // revokeStub records the keys revoked and whether the endpoint's record still existed at that moment.
@@ -136,11 +134,11 @@ func TestRetireBadServersAndUsage(t *testing.T) {
 	}
 }
 
-func TestDeprovisionAcceptsServersAndSysCredsFlags(t *testing.T) {
+func TestEndpointDeleteAcceptsServersAndSysCredsFlags(t *testing.T) {
 	h := newFleetEnv(t)
 	h.provisionDeclared("a")
 	s := stubRevoke(t)
-	if _, errb, code := h.run("deprovision", "o.g.a", "--sys-creds=/s.creds", "--servers=2"); code != 0 || len(s.calls) != 1 || s.srv[0] != 2 || s.creds[0] != "/s.creds" || len(h.records()) != 0 {
+	if _, errb, code := h.run("endpoint", "delete", "o.g.a", "--sys-creds=/s.creds", "--servers=2"); code != 0 || len(s.calls) != 1 || s.srv[0] != 2 || s.creds[0] != "/s.creds" || len(h.records()) != 0 {
 		t.Fatalf("%d %q %v %v", code, errb, s.srv, s.creds)
 	}
 }
@@ -152,114 +150,6 @@ func TestRevokeUserKeysNoSysCredsSaysMashSysCreds(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "pass --sys-creds FILE or set MASH_SYS_CREDS") {
 		t.Errorf("%v", err)
-	}
-}
-
-func TestDeprovisionRevokesBeforeRemoving(t *testing.T) {
-	h := newFleetEnv(t)
-	u := h.provisionDeclared("a")
-	s := stubRevoke(t)
-	s.probe = h.records
-	h.env["MASH_SYS_CREDS"], h.env["MASH_SERVERS"] = "/s.creds", "2"
-	out, errb, code := h.run("deprovision", "o.g.a")
-	if code != 0 || s.srv[0] != 2 || len(s.calls) != 1 || s.calls[0] != u || s.creds[0] != "/s.creds" || len(s.seen[0]) != 1 || len(h.records()) != 0 {
-		t.Fatalf("%d %v %v %q %q", code, s.calls, s.seen, out, errb)
-	}
-	if !strings.Contains(out, "revoked in the account JWT") || strings.Contains(out, "operator tooling") {
-		t.Errorf("out %q", out)
-	}
-}
-
-func TestDeprovisionRefusedWhenRevokeFailsAndNoRevoke(t *testing.T) {
-	h := newFleetEnv(t)
-	u := h.provisionDeclared("a")
-	s := stubRevoke(t)
-	s.err = errors.New("not confirmed")
-	_, errb, code := h.run("deprovision", "o.g.a")
-	if code != 1 || !strings.Contains(errb, "not confirmed") || !strings.Contains(errb, "--no-revoke") || len(h.records()) != 1 {
-		t.Fatalf("%d %q", code, errb)
-	}
-	// --user form refuses the same way
-	if _, errb, code = h.run("deprovision", "o.g.a", "--user", u); code != 1 || len(h.records()) != 1 {
-		t.Fatalf("--user: %d %q", code, errb)
-	}
-	s.calls = nil
-	out, errb, code := h.run("deprovision", "o.g.a", "--no-revoke")
-	if code != 0 || len(s.calls) != 0 || !strings.Contains(out, "not revoked") || len(h.records()) != 0 {
-		t.Fatalf("%d %v %q %q", code, s.calls, out, errb)
-	}
-	if n := strings.Count(errb, "WARNING: --no-revoke: o.g.a's NATS user key "+u+" is NOT revoked and can still connect"); n != 2 {
-		t.Errorf("warning count %d: %q", n, errb)
-	}
-}
-
-func TestDeprovisionUserFormAndMismatch(t *testing.T) {
-	h := newFleetEnv(t)
-	u := h.provisionDeclared("a")
-	_, other := h.e.Mint(t, ad("other"))
-	s := stubRevoke(t)
-	// the record names another user: the guard refuses and nothing is revoked
-	if _, _, code := h.run("deprovision", "o.g.a", "--user", other); code == 0 || len(s.calls) != 0 || len(h.records()) != 1 {
-		t.Fatalf("mismatch: %d %v", code, s.calls)
-	}
-	out, errb, code := h.run("deprovision", "o.g.a", "--user", u)
-	if code != 0 || len(s.calls) != 1 || s.calls[0] != u || !strings.Contains(out, "revoked in the account JWT") {
-		t.Fatalf("%d %v %q %q", code, s.calls, out, errb)
-	}
-}
-
-func TestDeprovisionUserFormWithoutRecordRevokesNothing(t *testing.T) {
-	e := testenv.Start(t)
-	ctlRun(t, e, "init")
-	_, u := e.Mint(t, ad("ghost"))
-	s := stubRevoke(t)
-	if _, errb, code := ctlRun(t, e, "deprovision", "o.g.ghost", "--user", u); code == 0 || len(s.calls) != 0 || !strings.Contains(errb, "no directory record") {
-		t.Fatalf("%d %v %q", code, s.calls, errb)
-	}
-}
-
-func TestDeprovisionWithoutRecordRevokesNothing(t *testing.T) {
-	e := testenv.Start(t)
-	ctlRun(t, e, "init")
-	s := stubRevoke(t)
-	if _, errb, code := ctlRun(t, e, "deprovision", "o.g.ghost"); code != 1 || len(s.calls) != 0 || !strings.Contains(errb, "no endpoint named o.g.ghost") {
-		t.Fatalf("%d %v %q", code, s.calls, errb)
-	}
-}
-
-func TestDeprovisionDrainedRevokesOnlyWhenGuardPasses(t *testing.T) {
-	e := testenv.Start(t)
-	ctlRun(t, e, "init")
-	_, u := e.Mint(t, ad("c"))
-	if _, errb, code := ctlRun(t, e, "provision", "o.g.c", "--user", u, "--account", e.Account); code != 0 {
-		t.Fatal(errb)
-	}
-	s := stubRevoke(t)
-	out, _, _ := ctlRun(t, e, "suspend", "o.g.c")
-	if !strings.Contains(out, "new mail parked; the endpoint's credentials are still valid") || len(s.calls) != 0 {
-		t.Fatalf("suspend: %q %v", out, s.calls)
-	}
-	id := regexp.MustCompile(`id ([0-9a-f]{32}),`).FindStringSubmatch(out)[1]
-	if _, _, code := ctlRun(t, e, "deprovision", "o.g.c", "--drained-to", "7", "--suspension", id); code == 0 || len(s.calls) != 0 {
-		t.Fatalf("wrong seq: %d %v", code, s.calls)
-	}
-	out, errb, code := ctlRun(t, e, "deprovision", "o.g.c", "--suspension", id, "--drained-to", "0", "--no-revoke")
-	if code != 0 || len(s.calls) != 0 || strings.Count(errb, "WARNING: --no-revoke: o.g.c's NATS user key "+u+" is NOT revoked") != 2 {
-		t.Fatalf("%d %v %q %q", code, s.calls, out, errb)
-	}
-}
-
-func TestDeprovisionDrainedRevokes(t *testing.T) {
-	e := testenv.Start(t)
-	ctlRun(t, e, "init")
-	_, u := e.Mint(t, ad("c"))
-	ctlRun(t, e, "provision", "o.g.c", "--user", u, "--account", e.Account)
-	s := stubRevoke(t)
-	out, _, _ := ctlRun(t, e, "suspend", "o.g.c")
-	id := regexp.MustCompile(`id ([0-9a-f]{32}),`).FindStringSubmatch(out)[1]
-	out, errb, code := ctlRun(t, e, "deprovision", "o.g.c", "--suspension", id, "--drained-to", "0")
-	if code != 0 || len(s.calls) != 1 || s.calls[0] != u || !strings.Contains(out, "revoked in the account JWT") {
-		t.Fatalf("%d %v %q %q", code, s.calls, out, errb)
 	}
 }
 
@@ -290,23 +180,6 @@ func (h *fleetEnv) shortUser(instance, user string) {
 	b, _ := json.Marshal(rec)
 	if _, err := kv.Put(ctx, name, b); err != nil {
 		h.t.Fatal(err)
-	}
-}
-
-func TestDeprovisionWithAShortUserValueDoesNotPanic(t *testing.T) {
-	h := newFleetEnv(t)
-	h.provisionDeclared("w")
-	h.shortUser("w", "abc")
-	s := stubRevoke(t)
-	s.err = errors.New("resolver down")
-	_, errb, code := h.run("deprovision", "o.g.w")
-	if code != 1 || !strings.Contains(errb, "user key abc...: resolver down") || len(h.records()) != 1 {
-		t.Fatalf("%d %q", code, errb)
-	}
-	s.err = nil
-	out, errb, code := h.run("deprovision", "o.g.w")
-	if code != 0 || !strings.Contains(out, "user key abc... revoked in the account JWT") || len(h.records()) != 0 {
-		t.Fatalf("%d %q %q", code, out, errb)
 	}
 }
 

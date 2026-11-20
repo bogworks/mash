@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/testenv"
 )
 
@@ -13,10 +14,7 @@ var seedShaped = "SU" + strings.Repeat("ABCDEFGH234567", 4)[:54]
 func TestUsageErrorsExit2(t *testing.T) {
 	e := testenv.Start(t)
 	ctlRun(t, e, "init")
-	_, u := e.Mint(t, ad("c"))
-	if _, errb, code := ctlRun(t, e, "provision", "o.g.c", "--user", u, "--account", e.Account); code != 0 {
-		t.Fatalf("provision: %d %q", code, errb)
-	}
+	provisionAs(t, e, "c", admin.Meta{})
 	cases := []struct {
 		args []string
 		want string
@@ -24,20 +22,12 @@ func TestUsageErrorsExit2(t *testing.T) {
 		{[]string{"suspend"}, "usage: mashctl suspend <owner.group.instance>"},
 		{[]string{"resume"}, "usage: mashctl resume <owner.group.instance>"},
 		{[]string{"suspended", "o.g.c", "extra"}, "usage: mashctl suspended <owner.group.instance>"},
-		{[]string{"deprovision"}, "usage: mashctl deprovision"},
-		{[]string{"deprovision", "o.g.c", "--bogus"}, "usage: mashctl deprovision"},
-		{[]string{"provision"}, "usage: mashctl provision"},
-		{[]string{"provision", "o.g.d", "--user", u, "--account", e.Account, "--bogus", "x"}, "usage: mashctl provision"},
-		{[]string{"provision", "o.g.d", "--user", u, "--account", e.Account, "stray"}, "usage: mashctl provision"},
-		{[]string{"provision", "o.g.d", "--user", u, "--account", e.Account, "--role"}, "usage: mashctl provision"},
 		{[]string{"permissions"}, "usage: mashctl permissions"},
 		{[]string{"permissions", "o.g.c", "--bogus"}, "usage: mashctl permissions"},
 		{[]string{"permissions", "o.g.c", "--nsc", "x"}, "usage: mashctl permissions"},
 		{[]string{"set-meta", "o.g.c"}, "usage: mashctl set-meta"},
 		{[]string{"limits", "--bogus"}, "usage: mashctl limits"},
 		{[]string{"limits", "--show", "x"}, "usage: mashctl limits"},
-		{[]string{"list", "--bogus"}, "usage: mashctl list"},
-		{[]string{"list", "extra"}, "usage: mashctl list"},
 		{[]string{"init", "--bogus"}, "usage: mashctl init"},
 		{[]string{"init", "extra"}, "usage: mashctl init"},
 	}
@@ -48,26 +38,8 @@ func TestUsageErrorsExit2(t *testing.T) {
 		}
 	}
 	// the endpoint was not touched by any of them
-	if out, _, code := ctlRun(t, e, "list"); code != 0 || !strings.HasPrefix(out, "o.g.c\t") {
-		t.Fatalf("list: %d %q", code, out)
-	}
-}
-
-func TestDeprovisionMissingNameIsAnError(t *testing.T) {
-	e := testenv.Start(t)
-	ctlRun(t, e, "init")
-	out, errb, code := ctlRun(t, e, "deprovision", "o.g.nonexist")
-	if code != 1 || out != "" || errb != "no endpoint named o.g.nonexist\n" {
-		t.Fatalf("%d %q %q", code, out, errb)
-	}
-	_, u := e.Mint(t, ad("real"))
-	ctlRun(t, e, "provision", "o.g.real", "--user", u, "--account", e.Account)
-	if out, _, code := ctlRun(t, e, "deprovision", "o.g.real"); code != 0 || !strings.Contains(out, "deprovisioned o.g.real") {
-		t.Fatalf("real: %d %q", code, out)
-	}
-	// gone now: the second one is the error
-	if _, errb, code := ctlRun(t, e, "deprovision", "o.g.real"); code != 1 || !strings.Contains(errb, "no endpoint named o.g.real") {
-		t.Fatalf("again: %d %q", code, errb)
+	if out, _, code := ctlRun(t, e, "endpoint", "list"); code != 0 || !strings.Contains(out, "o/g/c") {
+		t.Fatalf("endpoint list: %d %q", code, out)
 	}
 }
 
@@ -87,31 +59,17 @@ func TestPermissionsNoteIsOnStderr(t *testing.T) {
 func TestInvalidArgumentsAreNotEchoed(t *testing.T) {
 	e := testenv.Start(t)
 	ctlRun(t, e, "init")
-	_, u := e.Mint(t, ad("c"))
-	ctlRun(t, e, "provision", "o.g.c", "--user", u, "--account", e.Account)
+	provisionAs(t, e, "c", admin.Meta{})
 	for _, args := range [][]string{
-		{"provision", seedShaped, "--user", u, "--account", e.Account},
-		{"provision", "o.g.d", "--user", seedShaped, "--account", e.Account},
-		{"provision", "o.g.d", "--user", u, "--account", seedShaped},
-		{"provision", "o.g.d", "--user", u, "--account", e.Account, "--label", seedShaped + "=x"},
-		{"provision", "o.g.d", "--user", u, "--account", e.Account, "--cap", seedShaped},
-		{"provision", "o.g.d", "--user", u, "--account", e.Account, "--" + seedShaped},
 		{"set-meta", "o.g.c", "--label", seedShaped + "=x"},
 		{"suspend", seedShaped},
-		{"deprovision", seedShaped},
-		{"deprovision", "o.g.c", "--user", seedShaped},
 		{"permissions", seedShaped},
 		{"limits", seedShaped},
-		{"list", seedShaped},
 	} {
 		out, errb, code := ctlRun(t, e, args...)
 		if code == 0 || strings.Contains(out+errb, seedShaped) || errb == "" {
 			t.Errorf("%v: code %d out %q err %q", args[:2], code, out, errb)
 		}
-	}
-	// the message says which argument
-	if _, errb, _ := ctlRun(t, e, "provision", "o.g.d", "--user", seedShaped, "--account", e.Account); !strings.Contains(errb, "--user is not a NATS user public key") {
-		t.Errorf("which argument: %q", errb)
 	}
 }
 

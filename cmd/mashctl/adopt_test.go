@@ -199,8 +199,8 @@ func TestAdoptDryRunThenRealRunThenAdd(t *testing.T) {
 	sameTree(t, snap, tree(t, a.root))
 
 	// the adopted key dir works against the same server: the directory is there to read.
-	if out, errb, code = a.run("list"); code != 0 {
-		t.Fatalf("list after adopt: %d\n%s\n%s", code, out, errb)
+	if out, errb, code = a.run("endpoint", "list"); code != 0 {
+		t.Fatalf("endpoint list after adopt: %d\n%s\n%s", code, out, errb)
 	}
 	if n := len(scopedSigners(e.claims())); n != 0 {
 		t.Fatalf("want no scoped signer after adopt, got %d", n)

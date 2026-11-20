@@ -144,7 +144,7 @@ func retireAddress(addr sap.Address, opts retireOpts, env func(string) string, l
 			if opts.listHint != "" {
 				hint = opts.listHint + "; "
 			}
-			return stop("refused", "not_found", []string{"mashctl endpoint list shows the endpoints that exist"}, "no directory record on the server (%s--force handles the creds file anyway); if the endpoint was partly removed, finish with mashctl deprovision %s", hint, name)
+			return stop("refused", "not_found", []string{"mashctl endpoint list shows the endpoints that exist"}, "no directory record on the server (%s--force handles the creds file anyway); if the endpoint was partly removed, finish with mashctl endpoint delete %s", hint, name)
 		}
 		if burned && !opts.dryRun {
 			left, eerr := adm.Exists(ctx, addr)
@@ -254,7 +254,7 @@ func retireAddress(addr sap.Address, opts retireOpts, env func(string) string, l
 				return retireResult{kind: "error", detail: err.Error(), user: user, nextSteps: []string{"run the command again once the cause is fixed"}}
 			}
 			partialNote()
-			return stop("partial", "", []string{"finish with: mashctl deprovision " + name}, "PARTIAL: the directory record may already be removed but the lease fence or the inbox delete did not complete: %v. Finish with: mashctl deprovision %s (it removes what is left)", err, name)
+			return stop("partial", "", []string{"finish with: mashctl endpoint delete " + name}, "PARTIAL: the directory record may already be removed but the lease fence or the inbox delete did not complete: %v. Finish with: mashctl endpoint delete %s (it removes what is left)", err, name)
 		}
 	} else {
 		fmt.Fprintf(stderr, "mashctl: %s %s: no directory record on the server, so no user key is known and nothing was revoked; only the creds file is handled\n", opts.verb, label)

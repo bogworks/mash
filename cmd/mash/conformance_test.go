@@ -80,7 +80,6 @@ const confUnknownOption = "the build appends ' for mash <command>' to the unknow
 
 // confRemoved are the commands the build lists that the specification does not have, because they are being removed.
 var confRemoved = map[string]string{
-	"admin":      "deprecated, use mashctl",
 	"plugin":     "being removed from the command list",
 	"credential": "replaced by join",
 }
