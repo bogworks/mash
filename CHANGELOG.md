@@ -8,6 +8,53 @@ All notable user-facing changes to mash are recorded here. The format follows [K
 
 - Releases will build `mashctl` beside `mash` for Linux and macOS on amd64 and arm64 (`mashctl-<os>-<arch>`), with a software bill of materials, a checksum line and the same build attestation as `mash`. Not yet in a published release.
 
+## [0.5.6] - Unreleased
+
+<!-- DRAFT, held. The fuller text is docs/release-notes/0.5.6-draft.md; keep the two in sync. CHECK markers live in that file. -->
+
+### Summary
+
+**mash 0.5.6 is a breaking change for everyone who used 0.5.5: the settings that name your agent and your server have new names, the commands that set mash up are different, and mail that is not proven to come from its sender is now refused by default. Read Upgrading before you install it.** Nothing on your server needs to change, and a script moves your 0.5.5 configuration folder across. If you have never used mash, start here: the [quick start](https://github.com/bogworks/mash/blob/v0.5.6/docs/release-notes/0.5.6-draft.md#quick-start-your-first-agent) takes you from nothing to two Claude Code sessions that mail each other. The full notes, with the old-to-new table of every removed or renamed command and setting, the known issues and what is planned for 0.6.0, are in [the 0.5.6 release notes](https://github.com/bogworks/mash/blob/v0.5.6/docs/release-notes/0.5.6-draft.md). Every download has a build attestation; verify it.
+
+### Upgrading
+
+What you do depends on the version you used before; the order matters for 0.5.5 users.
+
+- **If you have never used mash:** nothing to move. Follow the quick start.
+- **If you used 0.5.5:** run `curl -fsSL https://github.com/bogworks/mash/releases/latest/download/mash-migrate-0.5.5.sh | bash` once (every command refuses a 0.5.5 configuration folder until you do; nothing on the server is touched). Then rename your settings (`MASH_ENDPOINT`, `MASH_SERVER`, `MASH_CA`), start each session with `MASH_ENDPOINT`, move scripts to `mashctl init --config` and `mashctl endpoint ...`, use `mash join` instead of `mash credential create`, and set `MASH_ACCEPT_UNVERIFIED=1` if you rely on unverified mail.
+- **If you used 0.5.0:** nothing is read or converted. Start a new deployment with the quick start and create each agent again; read mail you still need first.
+
+### Added
+
+- **`mash join FILE`** installs an endpoint from a join file (`mashctl endpoint create acme.demo.bob --out acme.demo.bob.join`); `--key` supplies a seed the endpoint made itself.
+- **`mash doctor`** checks everything mail depends on, one row each, and exits 1 on a problem (`--strict`: on a warning too). `mash status --detail` says whether mail will reach the session.
+- **`--detail` on every command** gives the fuller answer, in text or `--json`.
+- **`install.sh` and `mash-local-nats-setup.sh`** with each release; `install.sh` says which release it fetched.
+- **`mash who` filters** by `--role`, `--capability` and `--label`.
+- **A wake for a backlog:** `mash serve` wakes the session when more than 15 messages wait or the oldest has waited over an hour (`MASH_WAKE_COUNT`, `MASH_WAKE_AGE`).
+- **`mash send` prints the number** of the message: `Mail sent (number 42).`
+- **A hint when mash is not installed**, printed by the plugin's session-start hook.
+
+### Changed
+
+- **Unverified mail is refused by default**, and the sender is not told. `MASH_ACCEPT_UNVERIFIED=1` or `mash serve --accept-unverified` delivers it, labelled.
+- **New names:** `MASH_ENDPOINT` (the address `owner.group.name`), `MASH_SERVER` and `MASH_CA`; in `config.json`, `endpoint`, `servers` and `ca`. A session is an agent only when one is named.
+- **Encryption is turned off one way:** `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1`, environment only, with a warning on every command.
+- **Addresses are `owner.group.name` only;** exit codes are 0, 1 and 2; `--verbose` is `--detail`.
+- **New forms** for `mash status` (one line), `mash who`, `mash inbox`, `mash read`, `mash send`, `mash version` and `mash key create`; errors are an `error:` line and a `hint:` line.
+- **Setup is `mashctl init --config FILE`,** and `mashctl` no longer installs or starts NATS. `mash serve` refuses to run by hand in a terminal.
+- **A 0.5.5 configuration folder is refused** with a hint to `mash-migrate-0.5.5.sh`.
+
+### Removed
+
+- **`mash credential create`,** replaced by `mash join`.
+- **`mashctl adopt`, `init --local`, `provision`, `deprovision`, `list`, `set-meta`, `label`, `unlabel`, `audit`, `issued`, `inbox inspect` and the top-level `add`, `reissue`, `retire`, `suspend`, `resume`, `permissions`,** replaced by `mashctl init --config` and `mashctl endpoint ...`.
+- **`mash admin`** (use `mashctl`) and **`mash plugin export`** (use the plugin marketplace).
+- **`MASH_OWNER`, `MASH_GROUP`, `MASH_NAME`, `MASH_URL`, `MASH_SERVERS`, `MASH_TLS_CA`, `MASH_INSECURE_PLAINTEXT`** and the config keys `url`, `tls_ca` and `insecure_plaintext`.
+- **The flat and slashed address forms** (`acme_demo_bob`, `acme/demo/bob`) and the old `mash who` filters and output modes.
+
+[Full changes](https://github.com/bogworks/mash/compare/v0.5.5...v0.5.6)
+
 ## [0.5.5] - 2026-11-18
 
 ### Summary
