@@ -9,7 +9,9 @@ import (
 	"crypto/x509/pkix"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
+	"io/fs"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -908,5 +910,55 @@ func TestVersionJSONCarriesTheWholeCommit(t *testing.T) {
 	out.Reset()
 	if code := run([]string{"version"}, envFrom(nil), strings.NewReader(""), &out, &errb); code != 0 || !strings.HasSuffix(out.String(), " (3f9a41c)\n") {
 		t.Errorf("version: %d %q", code, out.String())
+	}
+}
+
+// failJoinSteps makes the rename or remove fail for the paths that end in the given suffixes, for the test's length.
+func failJoinSteps(t *testing.T, renameSuffix, removeSuffix string) {
+	t.Helper()
+	oldRename, oldRemove := joinRename, joinRemove
+	t.Cleanup(func() { joinRename, joinRemove = oldRename, oldRemove })
+	joinRename = func(from, to string) error {
+		if renameSuffix != "" && strings.HasSuffix(to, renameSuffix) {
+			return &os.LinkError{Op: "rename", Old: from, New: to, Err: errors.New("injected failure")}
+		}
+		return oldRename(from, to)
+	}
+	joinRemove = func(p string) error {
+		if removeSuffix != "" && strings.HasSuffix(p, removeSuffix) {
+			return &os.PathError{Op: "remove", Path: p, Err: errors.New("injected failure")}
+		}
+		return oldRemove(p)
+	}
+}
+
+func TestJoinRollsBackWhenCAOrConfigRenameFails(t *testing.T) {
+	for _, suffix := range []string{"ca.pem", "config.json"} {
+		t.Run(suffix, func(t *testing.T) {
+			w := newJoinWorld(t)
+			failJoinSteps(t, suffix, "")
+			r := w.run("join", "acme.demo.bob.join")
+			if r.code != 1 || !strings.HasPrefix(r.errs, "error: cannot write into ") || !strings.Contains(r.errs, "nothing was installed") {
+				t.Errorf("%+v", r)
+			}
+			if _, err := os.Lstat(w.credsFile()); !errors.Is(err, fs.ErrNotExist) {
+				t.Errorf("creds were left installed: %v", err)
+			}
+			if ents, _ := os.ReadDir(w.cfg); len(ents) != 0 {
+				t.Errorf("left behind: %v", ents)
+			}
+		})
+	}
+}
+
+func TestJoinNamesWhatARollbackCouldNotUndo(t *testing.T) {
+	w := newJoinWorld(t)
+	failJoinSteps(t, "config.json", "acme.demo.bob.creds")
+	r := w.run("join", "acme.demo.bob.join")
+	if r.code != 1 || !strings.HasPrefix(r.errs, "error: could not finish and could not undo: ") || !strings.Contains(r.errs, "~/.config/mash/acme.demo.bob.creds was left") {
+		t.Errorf("%+v", r)
+	}
+	if strings.Contains(r.errs, "BEGIN") || strings.Contains(r.errs, string(w.m.seed)) {
+		t.Errorf("secret on stderr: %q", r.errs)
 	}
 }
