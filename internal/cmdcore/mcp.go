@@ -117,10 +117,16 @@ func MCPTool[P any, R Result](c Command[P, R], env EnvFunc) Tool {
 			if err != nil {
 				return "", nil, toolError(err)
 			}
-			if len(b) == 0 || b[0] != '{' {
-				return text, nil, nil
+			var structured any
+			if len(b) > 0 && b[0] == '{' {
+				structured = r
 			}
-			return text, r, nil
+			// A result that exits nonzero (a problem found by status or doctor, a warning under doctor's strict) is
+			// marked an error here as it exits nonzero at a shell; its report and structured result are the same.
+			if x, ok := any(r).(ExitCoder); ok && x.ExitCode() != 0 {
+				return "", nil, &resultErr{text: text, structured: structured}
+			}
+			return text, structured, nil
 		},
 	}
 }
@@ -223,6 +229,18 @@ func wholeNumber(f field, v json.RawMessage) (json.RawMessage, error) {
 	}
 	return json.RawMessage(strconv.FormatInt(n, 10)), nil
 }
+
+// resultErr carries a report whose exit code is nonzero to the MCP server, which sends it as an error result: the text
+// is the report as it is (no "error:" prefix) and Structured is the result object.
+type resultErr struct {
+	text       string
+	structured any
+}
+
+func (e *resultErr) Error() string { return e.text }
+
+// Structured implements mcp.StructuredError.
+func (e *resultErr) Structured() any { return e.structured }
 
 // toolErr is the error MCPTool returns to the MCP server: the text is the CLI's "error: MSG" plus "\nhint: HINT", and
 // Structured is {"error": MSG, "hint": HINT} (no hint key when there is none).

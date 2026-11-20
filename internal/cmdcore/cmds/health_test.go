@@ -157,14 +157,16 @@ func TestStatusMatchesSpec(t *testing.T) {
 			}
 			continue
 		case "As an MCP tool in a session with no endpoint named":
-			// a normal answer: the text block is the line, then the hint on the next line
+			// exit 1, so an error result: the text block is the line, then the hint on the next line
 			rep := noSessionEndpoint()
 			reg := cmdcore.NewRegistry(healthEnv(rep), cmdcore.Register(cmds.Status))
 			e, _ := reg.Lookup("status")
-			got, structured, err := e.Tool(reg.Env).CallStructured(context.Background(), nil)
-			if err != nil || got != text {
-				t.Errorf("%s: %q %v, spec %q", oc["case"], got, err, text)
+			_, _, err := e.Tool(reg.Env).CallStructured(context.Background(), nil)
+			se, isRes := err.(interface{ Structured() any })
+			if err == nil || !isRes || err.Error() != text {
+				t.Fatalf("%s: %v, spec %q", oc["case"], err, text)
 			}
+			structured := se.Structured()
 			if b, _ := json.Marshal(structured); string(b) != `{"endpoint":null,"ready":false,"online":false,"reason":"no endpoint is chosen for this session"}` {
 				t.Errorf("%s: structured %s", oc["case"], b)
 			}
@@ -278,8 +280,10 @@ func TestDoctorMatchesSpec(t *testing.T) {
 	if cmds.Doctor.Group != meta["x-group"] {
 		t.Errorf("group %q, spec %v", cmds.Doctor.Group, meta["x-group"])
 	}
-	if props := cmdcore.Schema[cmds.DoctorParams]()["properties"].(map[string]any); len(props) != 0 || len(specTool(t, "doctor")["params"].([]any)) != 0 {
-		t.Errorf("doctor takes no parameters: %v", props)
+	props := cmdcore.Schema[cmds.DoctorParams]()["properties"].(map[string]any)
+	sp := specTool(t, "doctor")["params"].([]any)
+	if len(props) != 1 || len(sp) != 1 || props["strict"] == nil || sp[0].(map[string]any)["name"] != "strict" || sp[0].(map[string]any)["type"] != "boolean" {
+		t.Errorf("doctor takes only strict: %v", props)
 	}
 	for _, x := range meta["x-output"].([]any) {
 		oc := x.(map[string]any)
@@ -497,8 +501,16 @@ func TestStatusAndDoctorDoorsAgree(t *testing.T) {
 			}
 			e, _ := reg.Lookup(tc.cmd)
 			text, structured, err := e.Tool(reg.Env).CallStructured(context.Background(), nil)
-			if err != nil { // a problem is a report, never an error
-				t.Fatalf("tool error %v", err)
+			// a result that exits nonzero is a report marked an error: its text and structured result are the same
+			if (err != nil) != (tcode != 0) {
+				t.Fatalf("tool error %v, exit %d", err, tcode)
+			}
+			if err != nil {
+				se, ok := err.(interface{ Structured() any })
+				if !ok {
+					t.Fatalf("tool error %v is not a report", err)
+				}
+				text, structured = err.Error(), se.Structured()
 			}
 			b, _ := json.Marshal(structured)
 			if !sameJSON(t, string(b), jo.String()) {
@@ -546,5 +558,49 @@ func TestStatusAndDoctorCouldNotTake(t *testing.T) {
 		{Name: "delivery", State: cmds.CheckFail, Detail: cmds.ReasonCouldNotTake + ": the server did not answer: tls://myserver:4222"}}}}, cliframe.Global{})
 	if !strings.Contains(out, "delivery  FAIL  this session could not take this endpoint:\n                the server did not answer: tls://myserver:4222\n") {
 		t.Errorf("doctor: %q", out)
+	}
+}
+
+func TestDoctorStrict(t *testing.T) {
+	warn := cmds.HealthCheck{Name: "refused", State: cmds.CheckWarn, Detail: "2 unverified messages were refused"}
+	for _, tc := range []struct {
+		args []string
+		code int
+	}{{nil, 0}, {[]string{"--strict"}, 1}} {
+		code, out, _ := runDoctor(report("a.b.c", false, ok("config", ""), warn), cliframe.Global{}, tc.args...)
+		if code != tc.code || !strings.HasSuffix(out, "\n\n1 warning.\n") {
+			t.Errorf("%v: %d %q", tc.args, code, out)
+		}
+	}
+	if code, _, _ := runDoctor(report("a.b.c", false, ok("config", "")), cliframe.Global{}, "--strict"); code != 0 {
+		t.Errorf("--strict with nothing wrong: %d", code)
+	}
+}
+
+// A strict doctor with only a warning is an error result in a tool, with the report and the structured result kept; without
+// strict the same report is a normal result.
+func TestDoctorToolStrictMarksTheResultAnError(t *testing.T) {
+	warn := cmds.HealthCheck{Name: "refused", State: cmds.CheckWarn, Detail: "2 unverified messages were refused", Fix: "mashctl endpoint reissue a.b.c"}
+	reg := cmdcore.NewRegistry(healthEnv(report("a.b.c", false, ok("config", ""), warn)), cmdcore.Register(cmds.Doctor))
+	e, _ := reg.Lookup("doctor")
+	tool := e.Tool(reg.Env)
+	text, structured, err := tool.CallStructured(context.Background(), json.RawMessage(`{}`))
+	if err != nil || structured == nil || !strings.Contains(text, "1 warning.") {
+		t.Fatalf("without strict: %q %v %v", text, structured, err)
+	}
+	_, _, err = tool.CallStructured(context.Background(), json.RawMessage(`{"strict":true}`))
+	se, ok := err.(interface{ Structured() any })
+	if err == nil || !ok {
+		t.Fatalf("strict with a warning is an error result, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "1 warning.\nhint: ") || strings.HasPrefix(err.Error(), "error:") {
+		t.Errorf("the report is kept as it is: %q", err.Error())
+	}
+	b, _ := json.Marshal(se.Structured())
+	if !strings.Contains(string(b), `"warnings":1`) {
+		t.Errorf("structured %s", b)
+	}
+	if _, _, err := tool.CallStructured(context.Background(), json.RawMessage(`{"strict":false}`)); err != nil {
+		t.Errorf("strict false: %v", err)
 	}
 }
