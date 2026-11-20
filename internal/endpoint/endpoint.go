@@ -55,9 +55,9 @@ type Endpoint struct {
 	// duplicateWindow overrides store.InboxDuplicateWindow for the seen set (tests that shorten the stream's window).
 	duplicateWindow time.Duration
 
-	// wakeStart is when serve took the spool; backlogAt when the backlog last woke the session (zero: never). Neither
+	// wakeStart is when serve took the spool; lastWake when any wake (idle, urgent or backlog) last woke the session (zero: never). Neither
 	// survives a restart (hook.go, wakeBacklog).
-	wakeStart, backlogAt time.Time
+	wakeStart, lastWake time.Time
 
 	heldN  atomic.Int32 // held count as of the last settle pass; read by tests
 	headMu sync.Mutex   // guards the stream-headroom cache (streamHasHeadroom)

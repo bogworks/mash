@@ -12,13 +12,17 @@ Mail waits unseen in an idle session when it is of a kind that does not wake (re
 and never opened: [ADR 0046](0046-a-digest-lists-mail-it-does-not-ack-it.md) says listed mail
 never wakes, and the idle wake of ADR 0028 follows only the kinds that wake. A person can come back to an agent that has held
 mail for hours. The maintainer ruled (2026-11-19) that a backlog wakes the session, and that the limits are settings:
-`--wake-count` (default 15) and `--wake-age` (default 1 hour), each `0` for off.
+`--wake-count` (default 15) and `--wake-age` (default 1 hour), each `0` for off. The count is any whole number, 0 or more; the age
+is `0` or any positive length, written as a whole number with `m`, `h` or `d` or as a Go duration such as `90s`. There is no upper
+or lower range, and `mash serve` refuses a value that is neither (exit 2), the same rule as `MASH_WAKE_COUNT`, `MASH_WAKE_AGE` and the
+config file.
 
 ## Decision Drivers
 
 * Mail that is waiting must not wait for ever because of its kind or because a digest listed it.
 * The wake must not become a storm: a bounded rate, and quiet while a session starts.
 * One meaning of "waiting": not yet acknowledged by the session.
+* A busy session is never woken (ADR 0028), and neither is one in which no hook runs, however many messages wait.
 
 ## Considered Options
 
@@ -30,9 +34,14 @@ mail for hours. The maintainer ruled (2026-11-19) that a backlog wakes the sessi
 Chosen: wake on a backlog. `mash serve` wakes the idle session when more than `--wake-count` messages are waiting, or the oldest
 waiting message is older than `--wake-age`, whatever the kinds of the messages. Waiting means held and not yet acknowledged by the
 session: mail the hook showed in full, or the agent read, is acknowledged and does not count; **mail listed by a digest counts**,
-because a digest does not acknowledge it. A backlog wake happens at most once every 10 minutes, measured from the last backlog
-wake, and not in the first 10 minutes after the server starts; a restart keeps no cooldown. The wake carries the summary of all
-waiting mail, with the number already listed. The existing wakes (idle, urgent, near capacity) are unchanged.
+because a digest does not acknowledge it. The specification says only that a waiting message "has not yet reached the session";
+counting listed mail is a ruling made while building, by the project maintainer, on what that phrase covers: a digest names a message
+but the session has not read it. A backlog wake happens at most once every 10 minutes, measured from the last wake of any kind (idle,
+urgent or backlog share one last-wake time), and not in the first 10 minutes after the server starts; a restart keeps no cooldown.
+It is not sent while a hook has run in the last 10 minutes, because the session is then busy and ADR 0028 says a busy session is
+never woken; nor when the session is suspected to run no hook (three wakes and no hook run), as the idle wake stops then too. The wake
+carries the summary of all waiting mail, with the number already listed. The existing wakes (idle, urgent, near capacity) are
+unchanged.
 
 This amends ADR 0046 only where it says listed mail never wakes: listed mail still does not wake by itself, but counts toward the
 backlog. It adds to ADR 0028's wake timing and leaves its rules as they are.
@@ -41,12 +50,15 @@ backlog. It adds to ADR 0028's wake timing and leaves its rules as they are.
 
 * Good: a held message is always eventually offered to the person or agent.
 * Good: two settings, each with `0` for off, as the spec says.
-* Bad: a session with a long backlog is woken once every 10 minutes until the mail is read or acknowledged.
+* Bad: a session with a long backlog is woken once every 10 minutes until the mail is read or acknowledged, unless a hook runs in
+  that time (then the hook is already showing it).
 
 ### Confirmation
 
 Clock-driven tests of the endpoint's backlog wake: over the count, over the age, each off, the cooldown, the start hold, listed mail
-counted, result and fyi mail counted, acknowledged mail not counted, no cooldown across a restart.
+counted, result and fyi mail counted, acknowledged mail not counted, refused mail not counted, no wake in a channel-only session, no
+cooldown across a restart; through the settle pass: no wake after an idle wake within the cooldown, none while a hook has run within
+it, none in a session suspected hookless.
 
 ## Pros and Cons of the Options
 

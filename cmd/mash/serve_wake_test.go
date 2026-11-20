@@ -47,22 +47,20 @@ func TestServeWakeFlagsBothFormsAndTheFlagBeatsTheEnvironment(t *testing.T) {
 
 func TestServeWakeFlagValuesAreValidated(t *testing.T) {
 	env, lookup := wakeEnv(nil)
-	count := "--wake-count must be a whole number from 0 to 1000"
-	age := "--wake-age must be a whole number with m, h or d, such as 30m or 1h, or 0"
+	count := "--wake-count must be a whole number, 0 or more"
+	age := "--wake-age must be 0 or a duration such as 30m, 1h, 2d or 90s"
 	for _, c := range []struct {
 		args []string
 		msg  string
 	}{
-		{[]string{"serve", "--wake-count", "1001"}, count},
 		{[]string{"serve", "--wake-count=-1"}, count},
 		{[]string{"serve", "--wake-count", "x"}, count},
 		{[]string{"serve", "--wake-count", "1.5"}, count},
 		{[]string{"serve", "--wake-count"}, count},
 		{[]string{"serve", "--wake-count="}, count},
-		{[]string{"serve", "--wake-age", "30s"}, age},
-		{[]string{"serve", "--wake-age=31d"}, age},
+		{[]string{"serve", "--wake-age=-5m"}, age},
+		{[]string{"serve", "--wake-age", "0s"}, age},
 		{[]string{"serve", "--wake-age", "1"}, age},
-		{[]string{"serve", "--wake-age", "1.5h"}, age},
 		{[]string{"serve", "--wake-age"}, age},
 	} {
 		_, _, _, err := serveFlags(c.args, env, lookup)
@@ -70,7 +68,7 @@ func TestServeWakeFlagValuesAreValidated(t *testing.T) {
 			t.Fatalf("%v: %v", c.args, err)
 		}
 	}
-	for _, ok := range [][]string{{"serve", "--wake-count", "1000"}, {"serve", "--wake-age", "30d"}, {"serve", "--wake-age=1m"}, {"serve", "--wake-age", "2d"}} {
+	for _, ok := range [][]string{{"serve", "--wake-count", "1000"}, {"serve", "--wake-count=5000"}, {"serve", "--wake-age", "30d"}, {"serve", "--wake-age=31d"}, {"serve", "--wake-age", "30s"}, {"serve", "--wake-age=1m"}, {"serve", "--wake-age", "90d"}, {"serve", "--wake-age=1h30m"}, {"serve", "--wake-age", "1.5h"}, {"serve", "--wake-age", "0"}} {
 		if _, _, _, err := serveFlags(ok, env, lookup); err != nil {
 			t.Fatalf("%v: %v", ok, err)
 		}
@@ -80,8 +78,8 @@ func TestServeWakeFlagValuesAreValidated(t *testing.T) {
 // The usage error is exit 2 with one line on stderr and nothing attempted.
 func TestServeBadWakeFlagExitsTwo(t *testing.T) {
 	var out, errb bytes.Buffer
-	code := run([]string{"serve", "--wake-count", "1001"}, func(string) string { return "" }, strings.NewReader(""), &out, &errb)
-	if code != 2 || !strings.Contains(errb.String(), "--wake-count must be a whole number from 0 to 1000") || out.Len() != 0 {
+	code := run([]string{"serve", "--wake-count", "-1"}, func(string) string { return "" }, strings.NewReader(""), &out, &errb)
+	if code != 2 || !strings.Contains(errb.String(), "--wake-count must be a whole number, 0 or more") || out.Len() != 0 {
 		t.Fatalf("%d %q %q", code, out.String(), errb.String())
 	}
 }

@@ -26,6 +26,7 @@ import (
 	"github.com/bogworks/mash/internal/endpoint"
 	"github.com/bogworks/mash/internal/host"
 	"github.com/bogworks/mash/internal/mcp"
+	"github.com/bogworks/mash/internal/render"
 	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/spool"
 )
@@ -203,9 +204,9 @@ func serveFlags(args []string, env func(string) string, lookup config.Lookup) ([
 // serveFlagError is the usage error of a serve flag whose value is missing or wrong.
 func serveFlagError(name string) error {
 	if name == wakeCountFlag {
-		return cliframe.Usagef("--wake-count must be a whole number from 0 to 1000").WithHint("mash serve --help")
+		return cliframe.Usagef("--wake-count must be a whole number, 0 or more").WithHint("mash serve --help")
 	}
-	return cliframe.Usagef("--wake-age must be a whole number with m, h or d, such as 30m or 1h, or 0").WithHint("mash serve --help")
+	return cliframe.Usagef("--wake-age must be 0 or a duration such as 30m, 1h, 2d or 90s").WithHint("mash serve --help")
 }
 
 func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host.Adapter, pluginRoot string, stdin io.Reader, stdout, stderr io.Writer) int {
@@ -715,8 +716,9 @@ func promptNotice(p endpoint.PromptEvent) (string, bool) {
 	if len(body) > promptNoticeMax {
 		return "", false
 	}
+	// Quoted like a mail body, so no line of the sender's can read as one of mash's own.
 	return fmt.Sprintf("mash: live prompt from %s [%s] (request_id %s). The caller is waiting: answer with the reply tool.\n\n%s",
-		config.Clean(sap.Display(p.From)), config.Clean(string(p.Trust)), config.Clean(p.RequestID), body), true
+		config.Clean(sap.Display(p.From)), config.Clean(string(p.Trust)), config.Clean(p.RequestID), render.Quote([]byte(body))), true
 }
 
 // transient reports whether err is a failure that may fix itself (the broker is slow, restarting or briefly

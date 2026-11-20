@@ -144,6 +144,7 @@ type held struct {
 	alive      time.Time          // the last keep-alive
 	wakeAt     time.Time          // when the session was last woken; zero once a hook has drained since
 	wakes      int                // wakes since a hook last drained: the backoff exponent
+	hookSeen   time.Time          // hookAt on the backlog clock (tests move it)
 	hookAt     time.Time          // when a hook last drained: the idle spell is measured from here, and a crowded backlog stops waking at once
 	hookHeld   int                // the held count right after the last drain: a backlog above it has grown since
 	hookStored int                // the held stored size right after the last drain
@@ -272,6 +273,7 @@ func (e *Endpoint) settleHeld(deliver Deliverer, h *held) {
 			h.full = false
 			h.wakeAt, h.wakes = time.Time{}, 0 // a hook ran: the session is not idle, and the next idle spell may wake it again
 			h.hookAt = time.Now()
+			h.hookSeen = backlogClock()
 		}
 	}
 	e.heldN.Store(int32(len(h.msgs)))
@@ -406,6 +408,7 @@ func (e *Endpoint) wakeIfIdle(deliver Deliverer, h *held, hl Hookless) bool {
 		return false
 	}
 	e.hl.woke(hl == HooklessProven)
+	e.lastWake = backlogClock()
 	if due || urgent {
 		h.wakeAt = time.Now()
 		h.wakes++
@@ -437,15 +440,24 @@ func (h *held) arrived(seq spool.Ref, p pending) time.Time {
 // count, mail only listed in a digest is still waiting and counts. The wake is the summary line of all waiting mail
 // (listed included, so the line says how many wait), at most once every wakeCooldown from the previous backlog wake and
 // not until wakeCooldown after serve started: a restart keeps nothing, so a backlog already over at start wakes once at
-// 10 minutes. A drain does not reset the cooldown. It is independent of the idle wake and its backoff, and a wake the
-// idle rules sent in the same pass stands for it.
+// 10 minutes. A drain does not reset the cooldown. The cooldown runs from the last wake of any kind (idle, urgent or
+// backlog: one time, e.lastWake), so a backlog wake never follows another wake within it, and it is not sent while a
+// hook has run within it (the session is busy) or when no hook runs in the session (HooklessSuspected).
 func (e *Endpoint) wakeBacklog(deliver Deliverer, h *held, hl Hookless) {
 	if e.cfg.WakeCount <= 0 && e.cfg.WakeAge <= 0 {
 		return
 	}
+	// No hook is running in this session (hookless.go): a repeated wake cannot get the mail shown, as for the idle wake.
+	if hl == HooklessSuspected {
+		return
+	}
 	now := backlogClock()
 	if e.wakeStart.IsZero() || now.Sub(e.wakeStart) < wakeCooldown ||
-		(!e.backlogAt.IsZero() && now.Sub(e.backlogAt) < wakeCooldown) {
+		(!e.lastWake.IsZero() && now.Sub(e.lastWake) < wakeCooldown) {
+		return
+	}
+	// A hook ran within the spacing window: the session is busy, and a busy session is never woken (ADR 0028).
+	if !h.hookSeen.IsZero() && now.Sub(h.hookSeen) < wakeCooldown {
 		return
 	}
 	seqs := make([]spool.Ref, 0, len(h.msgs))
@@ -491,7 +503,7 @@ func (e *Endpoint) wakeBacklog(deliver Deliverer, h *held, hl Hookless) {
 		return
 	}
 	e.hl.woke(hl == HooklessProven)
-	e.backlogAt = now
+	e.lastWake = now
 }
 
 // headroomTTL is how long a stream-info reading stands; headroomTimeout bounds one read.

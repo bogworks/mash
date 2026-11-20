@@ -50,7 +50,7 @@ var seqN uint64
 func (r *backlogRig) add(k kind.Kind, ago time.Duration) spool.Ref {
 	seqN++
 	ref := spool.Ref{Seq: seqN}
-	r.h.msgs[ref] = pending{mail: render.Mail{Seq: seqN, From: "alice", Kind: k, At: r.now.Add(-ago), Body: []byte("x")}}
+	r.h.msgs[ref] = pending{msg: &dblAck{}, mail: render.Mail{Seq: seqN, From: "alice", Kind: k, At: r.now.Add(-ago), Body: []byte("x")}}
 	return ref
 }
 
@@ -161,7 +161,7 @@ func TestBacklogDrainDoesNotResetTheCooldownAndUnderLimitDoesNotWake(t *testing.
 	}
 	r.tick(time.Hour).want(1) // nothing waits
 	r.addN(3, kind.Task, 0)   // a new backlog right after a drain
-	r.e.backlogAt = r.now.Add(-time.Minute)
+	r.e.lastWake = r.now.Add(-time.Minute)
 	r.tick(0).want(1) // 1 minute after the last wake: held back
 	r.tick(10 * time.Minute).want(2)
 }
