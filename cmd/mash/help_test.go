@@ -80,7 +80,7 @@ func TestVerbHelpPrintsUsageAndChangesNothing(t *testing.T) {
 func TestHelpUsageOnlyFirstArgument(t *testing.T) {
 	yes := [][]string{
 		{"prompt", "--help"}, {"prompt", "-h"},
-		{"read", "-h"}, {"inbox", "--help"}, {"serve", "-h"}, {"hook", "--help"},
+		{"serve", "-h"}, {"hook", "--help"},
 		{"plugin", "--help"}, {"plugin", "export", "-h"},
 	}
 	for _, a := range yes {
@@ -91,7 +91,6 @@ func TestHelpUsageOnlyFirstArgument(t *testing.T) {
 	no := [][]string{
 		{"send", tTo("y"), "--help"}, {"send", tTo("y"), "-h"}, // send is on the command table: its help is cmdcore's
 		{"prompt", tTo("y"), "what", "does", "-h", "do"}, {"prompt", tTo("y"), "--help"}, {"prompt", tTo("y"), "-h"},
-		{"read", "3", "--help"}, {"read", "--json", "-h"}, {"inbox", "5", "-h"}, {"inbox", "--limit", "--help"},
 		{"plugin", "export", "--help-me"}, {"plugin", "export", "dir", "-h"},
 		{"nosuch", "--help"},
 	}

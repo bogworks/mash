@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"testing"
@@ -13,10 +14,14 @@ func inboxCount(t *testing.T, w *world, as string) int {
 	if code != 0 {
 		t.Fatalf("inbox: %d %s", code, out)
 	}
-	if strings.TrimSpace(out) == "inbox empty" {
+	if strings.HasPrefix(out, "No messages for ") {
 		return 0
 	}
-	return len(strings.Split(strings.TrimSpace(out), "\n"))
+	var n int // "N messages for ADDRESS, ..."
+	if _, err := fmt.Sscanf(out, "%d message", &n); err != nil {
+		t.Fatalf("inbox: no count in %q", out)
+	}
+	return n
 }
 
 // A CLI send re-run with the same --id lands once and the second run succeeds, naming the original message.

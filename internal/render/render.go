@@ -271,3 +271,17 @@ func Sender(owner string, m Mail) string {
 	}
 	return m.Owner + "/" + m.From
 }
+
+// Plain is a message body safe to print as it is: valid UTF-8, every kind of line break as "\n", and every other control
+// character shown as a visible \xNN escape.
+func Plain(b []byte) string { return text(b) }
+
+// Preview is the first line of a body that is not blank, trimmed, safe to print (see Plain), whole: the caller cuts it.
+func Preview(b []byte) string {
+	for _, l := range strings.Split(text(b), "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			return l
+		}
+	}
+	return ""
+}

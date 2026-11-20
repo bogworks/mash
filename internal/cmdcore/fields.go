@@ -22,6 +22,7 @@ type field struct {
 	repeat   bool
 	value    string // CLI value placeholder in help, "number"
 	min      *int   // smallest accepted whole number
+	max      *int   // largest accepted whole number
 	typ      reflect.Type
 }
 
@@ -98,6 +99,13 @@ func paramFields(t reflect.Type) []field {
 			}
 			f.min = &n
 		}
+		if v := sf.Tag.Get("max"); v != "" {
+			n, err := strconv.Atoi(v)
+			if err != nil || typ != "integer" {
+				bad("has max:%q: want a whole number on an integer field", v)
+			}
+			f.max = &n
+		}
 		if len(f.enum) > 0 && typ != "string" {
 			bad("has an enum tag but is not a string")
 		}
@@ -140,4 +148,19 @@ func schemaType(t reflect.Type) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// rangeError is the error for a whole number n outside the field's min and max, worded to follow the field's name:
+// "must be a whole number of 1 or more" with only a minimum, "must be a whole number from 1 to 100" with both, "must be
+// a whole number of 100 or less" with only a maximum.
+func (f field) rangeError(n int64) error {
+	switch {
+	case f.min != nil && f.max != nil && (n < int64(*f.min) || n > int64(*f.max)):
+		return fmt.Errorf("must be a whole number from %d to %d", *f.min, *f.max)
+	case f.min != nil && n < int64(*f.min):
+		return fmt.Errorf("must be a whole number of %d or more", *f.min)
+	case f.max != nil && n > int64(*f.max):
+		return fmt.Errorf("must be a whole number of %d or less", *f.max)
+	}
+	return nil
 }

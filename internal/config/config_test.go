@@ -830,3 +830,72 @@ func TestConfigDirChoice(t *testing.T) {
 		})
 	}
 }
+
+func TestWakeSettings(t *testing.T) {
+	base := map[string]string{"MASH_ENDPOINT": "o.g.a"}
+	loadWith := func(file string, env map[string]string) (Config, error) {
+		home := t.TempDir()
+		writeFile(t, home, `{"servers":"tls://x:4222"`+file+`}`)
+		e := map[string]string{}
+		for k, v := range base {
+			e[k] = v
+		}
+		for k, v := range env {
+			e[k] = v
+		}
+		return load(envOf(e), home)
+	}
+	c, err := loadWith("", nil)
+	if err != nil || c.WakeCount != 15 || c.WakeAge != time.Hour || c.WakeAgeText != "1h" {
+		t.Fatalf("defaults: %+v %v", c, err)
+	}
+	for _, tc := range []struct {
+		name, file string
+		env        map[string]string
+		count      int
+		age        time.Duration
+		text       string
+	}{
+		{"file", `,"wake_count":3,"wake_age":"2d"`, nil, 3, 48 * time.Hour, "2d"},
+		{"env beats file", `,"wake_count":3,"wake_age":"2d"`, map[string]string{"MASH_WAKE_COUNT": "40", "MASH_WAKE_AGE": "30m"}, 40, 30 * time.Minute, "30m"},
+		{"off in env", "", map[string]string{"MASH_WAKE_COUNT": "0", "MASH_WAKE_AGE": "0"}, 0, 0, "0"},
+		{"off in file", `,"wake_count":0,"wake_age":0`, nil, 0, 0, "0"},
+		{"large", "", map[string]string{"MASH_WAKE_COUNT": "5000", "MASH_WAKE_AGE": "90d"}, 5000, 90 * 24 * time.Hour, "90d"},
+		{"go duration", "", map[string]string{"MASH_WAKE_AGE": "90s"}, 15, 90 * time.Second, "90s"},
+		{"one minute", "", map[string]string{"MASH_WAKE_AGE": "1m"}, 15, time.Minute, "1m"},
+		{"bad file value under a good env", `,"wake_count":-1,"wake_age":"5s"`, map[string]string{"MASH_WAKE_COUNT": "2", "MASH_WAKE_AGE": "1h"}, 2, time.Hour, "1h"},
+	} {
+		c, err := loadWith(tc.file, tc.env)
+		if err != nil || c.WakeCount != tc.count || c.WakeAge != tc.age || c.WakeAgeText != tc.text {
+			t.Errorf("%s: %+v %v", tc.name, c, err)
+		}
+	}
+	for _, tc := range []struct {
+		name, file string
+		env        map[string]string
+		want       string
+	}{
+		{"count negative", "", map[string]string{"MASH_WAKE_COUNT": "-1"}, `MASH_WAKE_COUNT "-1" is not a whole number of messages`},
+		{"count text", "", map[string]string{"MASH_WAKE_COUNT": "many"}, `MASH_WAKE_COUNT "many"`},
+		{"count file string", `,"wake_count":"15"`, nil, `config.json "wake_count" "15" is not a whole number`},
+		{"count file fraction", `,"wake_count":1.5`, nil, `config.json "wake_count" "1.5"`},
+		{"age text", "", map[string]string{"MASH_WAKE_AGE": "bogus"}, `MASH_WAKE_AGE "bogus" is not a duration`},
+		{"age negative", "", map[string]string{"MASH_WAKE_AGE": "-5m"}, `MASH_WAKE_AGE "-5m"`},
+		{"age fraction", "", map[string]string{"MASH_WAKE_AGE": "1.5d"}, `MASH_WAKE_AGE "1.5d"`},
+		{"age bare number", "", map[string]string{"MASH_WAKE_AGE": "60"}, `MASH_WAKE_AGE "60"`},
+		{"age file number", `,"wake_age":5`, nil, `config.json "wake_age" 5`},
+		{"age file bad", `,"wake_age":"0m"`, nil, `config.json "wake_age" "0m"`},
+	} {
+		c, lerr := loadWith(tc.file, tc.env)
+		if lerr != nil {
+			t.Errorf("%s: a bad wake setting must not fail the load: %v", tc.name, lerr)
+		}
+		err := c.WakeErr
+		if c.WakeCount != 15 || c.WakeAge != time.Hour {
+			t.Errorf("%s: a bad setting leaves the defaults, got %d %v", tc.name, c.WakeCount, c.WakeAge)
+		}
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: want error containing %q, got %v", tc.name, tc.want, err)
+		}
+	}
+}

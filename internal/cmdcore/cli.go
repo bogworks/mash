@@ -130,7 +130,7 @@ func parseArgs(name string, fields []field, args []string, pv reflect.Value) err
 		return nil
 	}
 	unknown := func(a string) error {
-		return cliframe.Usagef("unknown option %s for mash %s", a, name).WithHint("mash " + name + " --help")
+		return cliframe.Usagef("unknown option %s", a).WithHint("mash " + name + " --help")
 	}
 	usage := func(format string, a ...any) error {
 		return cliframe.Usagef(format, a...).WithHint("mash " + name + " --help")
@@ -234,8 +234,8 @@ func set(v reflect.Value, f field, s string) error {
 		if err != nil {
 			return fmt.Errorf("must be a whole number")
 		}
-		if f.min != nil && n < *f.min {
-			return fmt.Errorf("must be a whole number of %d or more", *f.min)
+		if err := f.rangeError(int64(n)); err != nil {
+			return err
 		}
 		v.SetInt(int64(n))
 	case reflect.Slice:

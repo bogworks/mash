@@ -175,8 +175,8 @@ func TestWhoUsageErrors(t *testing.T) {
 		{[]string{"acme..demo"}, "error: acme..demo is not an owner, an owner.group or an address\n"},
 		{[]string{"acme", "demo"}, "error: unexpected argument \"demo\" for mash who\n"},
 		{[]string{"--online", "--offline"}, "error: mash who takes --online or --offline, not both\n"},
-		{[]string{"--match", "x"}, "error: unknown option --match for mash who\n"},
-		{[]string{"--long"}, "error: unknown option --long for mash who\n"},
+		{[]string{"--match", "x"}, "error: unknown option --match\n"},
+		{[]string{"--long"}, "error: unknown option --long\n"},
 		{[]string{"--wide=maybe"}, "error: --wide must be true or false\n"},
 	} {
 		f := directory()

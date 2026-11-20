@@ -64,8 +64,6 @@ var helpLayout = map[string][]string{
 
 // handCommands are the synopsis and one-line description of the commands that are not on the command table yet.
 var handCommands = map[string][2]string{
-	"inbox":      {"mash inbox [--limit N] [--after SEQ]", "Recent messages, or the N after SEQ (oldest first)"},
-	"read":       {"mash read <seq>", "Print one message from your inbox"},
 	"key":        {"mash key create --out FILE [options]", "Make a user key pair: seed to FILE (0600), public key to FILE.pub; needs no config"},
 	"credential": {"mash credential create --seed FILE --jwt FILE [options]", "Join a seed and its user JWT into a credentials file; needs no config"},
 	"serve":      {"mash serve", "The Claude Code channel server (started by the plugin)"},
@@ -161,18 +159,16 @@ func buildRevision(ldflags string, bi *debug.BuildInfo) string {
 
 // verbUsage is the usage line of each endpoint verb that is not on the command table, printed for `mash VERB --help`.
 var verbUsage = map[string]string{
-	"read":   "usage: mash read <seq>",
-	"inbox":  "usage: mash inbox [--limit N] [--after SEQ]",
 	"prompt": "usage: mash prompt <to> <text...>",
 }
 
 // helpTopic is the verbs that are not on the table and have help of their own: `mash help VERB` prints their
 // `mash VERB --help`.
-var helpTopic = map[string]bool{"serve": true, "hook": true, "plugin": true, "key": true, "credential": true, "read": true, "inbox": true, "prompt": true}
+var helpTopic = map[string]bool{"serve": true, "hook": true, "plugin": true, "key": true, "credential": true, "prompt": true}
 
 // noJSONForm is the verbs that have no --json form: a --json given to one is a usage error. key and credential
 // parse --json themselves, and send, version and who are commands of the table.
-var noJSONForm = map[string]bool{"read": true, "inbox": true, "prompt": true, "serve": true, "hook": true, "plugin": true}
+var noJSONForm = map[string]bool{"prompt": true, "serve": true, "hook": true, "plugin": true}
 
 // stdinWait is how long a message read from standard input has to arrive: 15 minutes, as the send help says. It is its
 // own limit, not cli_timeout: a run can take up to twice cli_timeout (this wait, then the command's own deadline).
@@ -306,12 +302,22 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 	if args[0] == "hook" { // never fails the session: a bad config is a silent no-op
 		return hook(cfg, err, adapter, env, stdin, stdout, stderr)
 	}
+	// A command of the table parses its arguments before it needs the endpoint, so a bad option is a usage error, with
+	// no endpoint chosen or installed, and not the configuration's error: the error waits in the environment.
+	var cfgFail error
 	var several *config.SeveralEndpointsError
-	if errors.As(err, &several) && slices.Contains([]string{"send", "who", "inbox", "read", "prompt"}, args[0]) {
-		return cliframe.Report(stdout, stderr, cmdcore.NoEndpoint(cmdcore.SeveralInstalled, args[0], several.Addresses), jsonOut)
+	switch {
+	case errors.As(err, &several) && slices.Contains([]string{"send", "who", "inbox", "read", "prompt"}, args[0]):
+		cfgFail = cmdcore.NoEndpoint(cmdcore.SeveralInstalled, args[0], several.Addresses)
+	case err != nil && args[0] != "serve" && !report:
+		cfgFail = cliframe.Failf("%s", strings.TrimPrefix(err.Error(), "mash: ")).WithHint("mash doctor")
 	}
-	if err != nil && args[0] != "serve" && !report {
-		return cliframe.Report(stdout, stderr, cliframe.Failf("%s", strings.TrimPrefix(err.Error(), "mash: ")).WithHint("mash doctor"), jsonOut)
+	if cfgFail != nil {
+		if slices.Contains([]string{"send", "who", "inbox", "read"}, args[0]) {
+			mk := func(context.Context) (*cmdcore.Env, error) { return nil, cfgFail }
+			return newCommands(mk).RunCLI(args[0], args[1:], stdin, stdout, stderr, global)
+		}
+		return cliframe.Report(stdout, stderr, cfgFail, jsonOut)
 	}
 	// A plain URL with no insecure_plaintext is refused before anything is connected (REQ-014): serve stops at session
 	// start and the commands that connect stop, exit 2, with the refusal on stderr.
@@ -326,6 +332,9 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 	}
 	switch args[0] {
 	case "serve":
+		if cfg.WakeErr != nil && err == nil { // the wake settings are serve's: a bad one stops it, no other command minds
+			return cliframe.Report(stdout, stderr, cliframe.Usagef("%s", strings.TrimPrefix(cfg.WakeErr.Error(), "mash: ")).WithHint("mash --help serve"), jsonOut)
+		}
 		return serve(ctx, cfg, err, adapter, env("MASH_PLUGIN_ROOT"), stdin, stdout, stderr)
 	case "send":
 		mk := func(context.Context) (*cmdcore.Env, error) {
@@ -333,12 +342,12 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 			return &cmdcore.Env{Svc: &cliSvc{cfg: cfg, stderr: stderr}, StdinTimeout: stdinLimit}, nil
 		}
 		return newCommands(mk).RunCLI("send", args[1:], stdin, stdout, stderr, global)
-	case "who", "status", "doctor":
+	case "inbox", "read", "who", "status", "doctor":
 		mk := func(context.Context) (*cmdcore.Env, error) {
 			return &cmdcore.Env{Svc: &cliSvc{cfg: cfg, cfgErr: err, stderr: stderr}}, nil
 		}
 		return newCommands(mk).RunCLI(args[0], args[1:], stdin, stdout, stderr, global)
-	case "read", "inbox", "prompt":
+	case "prompt":
 		return cli(cfg, args, stdin, stdout, stderr)
 	}
 	return cliframe.Report(stdout, stderr, cliframe.Usagef("mash has no command %s", args[0]).WithHint("mash --help"), global.JSON)

@@ -181,3 +181,38 @@ func Plural(n int, noun string) string {
 	}
 	return fmt.Sprintf("%d %ss", n, noun)
 }
+
+const day = 24 * time.Hour
+
+// Age renders how long something has waited, for a line of text and a JSON value: "10s", "5m", "1h 12m", "2d 3h". It
+// shows the two largest units that are not zero (seconds under a minute, minutes under an hour, hours and minutes under
+// a day, days and hours after), and rounds down. A negative d reads "0s".
+func Age(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	two := func(big int, bigU string, small int, smallU string) string {
+		if small == 0 {
+			return fmt.Sprintf("%d%s", big, bigU)
+		}
+		return fmt.Sprintf("%d%s %d%s", big, bigU, small, smallU)
+	}
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%ds", int(d/time.Second))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d/time.Minute))
+	case d < day:
+		return two(int(d/time.Hour), "h", int(d%time.Hour/time.Minute), "m")
+	}
+	return two(int(d/day), "d", int(d%day/time.Hour), "h")
+}
+
+// Cut shortens s to at most cols display columns, ending in "…" when it was cut (the ellipsis is within cols). A cols
+// below 1 returns s whole.
+func Cut(s string, cols int) string {
+	if cols < 1 || DisplayWidth(s) <= cols {
+		return s
+	}
+	return cut(s, cols-1) + "…"
+}

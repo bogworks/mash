@@ -15,10 +15,10 @@ func TestSendKindFromTheCLI(t *testing.T) {
 	if out, code := w.cli(t, "b", "send", tTo("a"), "--urgent", "--kind=blocker", "stuck"); code != 0 {
 		t.Fatalf("send: %d %s", code, out)
 	}
-	if out, _ := w.cli(t, "a", "read", "1"); !strings.Contains(out, "\nkind: question\n> which one") {
+	if out, _ := w.cli(t, "a", "read", "1"); !strings.Contains(out, "\nkind:     question\n") {
 		t.Fatalf("read #1: %s", out)
 	}
-	if out, _ := w.cli(t, "a", "read", "2"); !strings.Contains(out, "\nkind: blocker\n> stuck") {
+	if out, _ := w.cli(t, "a", "read", "2"); !strings.Contains(out, "\nkind:     blocker\n") || !strings.Contains(out, "\nurgent:   yes\n") || !strings.HasSuffix(out, "\n\n> stuck\n") {
 		t.Fatalf("read #2: %s", out)
 	}
 	out, code := w.cli(t, "b", "send", tTo("a"), "--kind", "urgent", "x")
@@ -28,7 +28,7 @@ func TestSendKindFromTheCLI(t *testing.T) {
 	if out, code := w.cli(t, "b", "send", tTo("a"), "--kind"); code != 2 {
 		t.Fatalf("--kind without a value: %d %s", code, out)
 	}
-	if out, _ := w.cli(t, "a", "inbox"); strings.Count(out, "\n") > 2 || strings.Contains(out, "\tx\t") {
+	if out, _ := w.cli(t, "a", "inbox"); !strings.HasPrefix(out, "2 messages for ") || strings.Contains(out, " x\n") {
 		t.Fatalf("a refused send was delivered:\n%s", out)
 	}
 }
@@ -72,11 +72,11 @@ func TestSendKindFromTheMCPTool(t *testing.T) {
 		t.Fatalf("unknown kind: %v %s", bad, txt)
 	}
 	for seq, want := range map[string]string{"1": "task", "2": "fyi", "3": "question", "4": "blocker"} {
-		if out, _ := w.cli(t, "a", "read", seq); !strings.Contains(out, "\nkind: "+want+"\n") {
+		if out, _ := w.cli(t, "a", "read", seq); !strings.Contains(out, "\nkind:     "+want+"\n") {
 			t.Fatalf("#%s is not %s:\n%s", seq, want, out)
 		}
 	}
-	if out, _ := w.cli(t, "a", "inbox"); strings.Contains(out, "B\thi\t") { // the text column; a bare "hi" matches inside a random instance id
+	if out, _ := w.cli(t, "a", "inbox"); !strings.HasPrefix(out, "4 messages for ") || strings.HasSuffix(strings.TrimRight(out, "\n"), " hi") { // the text column
 		t.Fatalf("a refused send was delivered:\n%s", out)
 	}
 }
@@ -90,7 +90,7 @@ func TestUnkindedCLISendIsTask(t *testing.T) {
 		}
 	}
 	for seq, want := range map[string]string{"1": "task", "2": "fyi"} {
-		if out, _ := w.cli(t, "a", "read", seq); !strings.Contains(out, "\nkind: "+want+"\n") {
+		if out, _ := w.cli(t, "a", "read", seq); !strings.Contains(out, "\nkind:     "+want+"\n") {
 			t.Fatalf("#%s is not %s:\n%s", seq, want, out)
 		}
 	}
@@ -107,7 +107,7 @@ func TestUnkindedMCPSendIsTask(t *testing.T) {
 		}
 	}
 	for _, seq := range []string{"1", "2"} {
-		if out, _ := w.cli(t, "a", "read", seq); !strings.Contains(out, "\nkind: task\n") {
+		if out, _ := w.cli(t, "a", "read", seq); !strings.Contains(out, "\nkind:     task\n") {
 			t.Fatalf("#%s is not task:\n%s", seq, out)
 		}
 	}
@@ -143,7 +143,7 @@ func TestSendViaFromTheMCPTool(t *testing.T) {
 		t.Fatalf("send: %v", resultText(r))
 	}
 	out, _ := w.cli(t, "a", "read", "1")
-	if !strings.Contains(out, "[verified] at") || !strings.Contains(out, "\nanswers #9\nrelayed from o.dev.c #1\n") || !strings.Contains(out, "> fwd") {
+	if !strings.Contains(out, "\ntrust:    verified\n") || !strings.Contains(out, "\nreply to: 9\nrelay:    o.dev.c #1\n") || !strings.HasSuffix(out, "\n\n> fwd\n") {
 		t.Fatalf("read #1:\n%s", out)
 	}
 	for i, args := range []string{`{"address":"o.dev.a","message":"x","relay":7}`, `{"address":"o.dev.a","message":"x","relay":-1}`, `{"address":"o.dev.a","message":"x","relay":"L1"}`, `{"address":"o.dev.a","message":"x","relay":1.5}`} {
@@ -151,7 +151,7 @@ func TestSendViaFromTheMCPTool(t *testing.T) {
 			t.Fatalf("%s: not an error: %v", args, resultText(r))
 		}
 	}
-	if out, _ := w.cli(t, "a", "read", "2"); strings.Contains(out, "> x") {
+	if out, _ := w.cli(t, "a", "read", "2"); strings.Contains(out, "\n\nx") {
 		t.Fatalf("a refused send was delivered:\n%s", out)
 	}
 }

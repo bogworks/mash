@@ -132,6 +132,8 @@ On a machine that runs `mashctl`, `mashctl init --config FILE` writes `servers`,
 | `transient_budget` | `MASH_TRANSIENT_BUDGET` | serve: how long transient failures (timeouts, no responders, a dropped connection) may repeat while waiting for the lease before the wait ends. A Go duration above zero. Default `15m`. |
 | `transient_max` | `MASH_TRANSIENT_MAX` | serve: the retry backoff after transient failures doubles from `lease_retry` up to this. A Go duration above zero. Default `2m`. |
 | `cli_timeout` | `MASH_CLI_TIMEOUT` | The total deadline of one command (`send`, `inbox`, `who` and the rest), open included. A Go duration above zero. Default `15m`. |
+| `wake_count` | `MASH_WAKE_COUNT` | How many waiting messages are too many: above it `mash inbox` says "More than N are waiting." Any whole number, 0 or more. Default `15`; `0` turns it off. `mash serve` refuses a value that is not one (exit 2); other commands ignore it and use the default. |
+| `wake_age` | `MASH_WAKE_AGE` | How long the oldest waiting message may wait: `mash inbox` says "The oldest has waited ..." past it. A whole number and `m`, `h` or `d` (for example `30m`, `1h`, `2d`), or a Go duration such as `90s`; any positive length. Default `1h`; `0` turns it off. `mash serve` refuses a value that is not one (exit 2); other commands ignore it and use the default. |
 | `admin_timeout` | `MASH_ADMIN_TIMEOUT` | The total deadline of one `mashctl` command. A Go duration above zero, for a large fleet or a slow link. Default `30s`. |
 
 The environment wins over the file.
@@ -161,7 +163,7 @@ MASH_ENDPOINT=alice.dev.design mash who
 MASH_ENDPOINT=alice.dev.design mash send <owner>.dev.review "Spec is at docs/specs/x.md; please review section 4."
 MASH_ENDPOINT=alice.dev.design mash send <owner>.dev.review --id spec-review-1 "Spec is at docs/specs/x.md."   # safe to re-run: stored once
 MASH_ENDPOINT=alice.dev.design mash prompt <owner>.dev.review "Are you still on the auth bug?"
-MASH_ENDPOINT=alice.dev.design mash inbox --after 120 --limit 50   # the 50 messages after #120, oldest first
+MASH_ENDPOINT=alice.dev.design mash inbox --after 120 --limit 50   # the 50 messages after number 120, oldest first
 ```
 
 A live prompt is at most 32768 bytes; a longer one is refused with an error, so send the longer text as mail.
