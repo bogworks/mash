@@ -717,12 +717,16 @@ case10() { # --remove
     ptyrun "$d" bash -c 'cat "$0" | bash -s -- --remove' "$SCRIPT"
     chk "--remove, right path, piped route: exit 0" rc_is 0
     chk "--remove: says removed" has "$W/out" "removed $d"
+    chk "--remove: says mashctl's folder still points at the server" has "$W/out" "/.config/mash still points at this server."
+    chk "--remove: says how to set up again" has "$W/out" "mashctl init --config <file> --config-dir <new folder>"
+    chk "--remove: the note lines fit 80 columns" bash -c '! grep -E "^(note|To set up|or move).{81,}" "$1"' _ "$W/out"
     chk "--remove: the dir is gone" absent "$d"
     chk "--remove: the server is gone" gone "$pid"
     # file route, second dir
     run --owner acme --dir "$H/d10"; pid=$(pid_of "$H/d10")
-    ptyrun "$H/d10" bash "$SCRIPT" --remove --dir "$H/d10"
+    ptyrun "$H/d10" env XDG_CONFIG_HOME=/xdg/cfg bash "$SCRIPT" --remove --dir "$H/d10"
     chk "--remove --dir, right path, file route: exit 0" rc_is 0
+    chk "--remove: with an absolute XDG_CONFIG_HOME it names that folder" has "$W/out" "folder /xdg/cfg/mash still points"
     chk "--remove --dir: dir gone and server gone" absent "$H/d10"
     chk "--remove --dir: server gone" gone "$pid"
     chk "--remove did not touch \$HOME itself" [ -d "$H" ]
