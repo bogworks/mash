@@ -41,8 +41,23 @@ func TestServeRefusesUnverifiedMailAndDoctorCountsIt(t *testing.T) {
 	if !strings.Contains(out, "1 message for") || strings.Contains(out, "unsigned") {
 		t.Fatalf("inbox:\n%s", out)
 	}
-	if out, code := w.cli(t, "a", "read", "1"); code == 0 || strings.Contains(out, "unsigned body") {
+	const refusedText = "error: message 1 was refused: it was not verified\nhint: mash doctor\n"
+	if out, code := w.cli(t, "a", "read", "1"); code != 1 || out != refusedText {
 		t.Fatalf("read of refused mail: %d %q", code, out)
+	}
+	if out, code := w.cli(t, "a", "read", "1", "--json"); code != 1 || out != "{\"error\":\"message 1 was refused: it was not verified\",\"hint\":\"mash doctor\"}\n" {
+		t.Fatalf("read of refused mail, json: %d %q", code, out)
+	}
+	if r := s.call(t, 90, "read", `{"number":1}`); r["isError"] != true || resultText(r) != strings.TrimSuffix(refusedText, "\n") {
+		t.Fatalf("read tool on refused mail: %v", r)
+	}
+	if out, code := w.cli(t, "a", "read", "99"); code != 1 || out != "error: o.dev.a has no message 99\nhint: mash inbox\n" {
+		t.Fatalf("read of a number that never existed: %d %q", code, out)
+	}
+	for _, args := range [][]string{{"inbox", "--after", "0"}, {"inbox", "--new"}, {"inbox", "--limit", "10"}} {
+		if out, _ := w.cli(t, "a", args...); !strings.Contains(out, "1 message for") || strings.Contains(out, "unsigned") {
+			t.Fatalf("%v:\n%s", args, out)
+		}
 	}
 	if out, _ := w.cli(t, "b", "inbox"); strings.Contains(out, "message for") && !strings.Contains(out, "0 messages") && !strings.Contains(out, "No messages") {
 		t.Fatalf("the sender has mail:\n%s", out)
