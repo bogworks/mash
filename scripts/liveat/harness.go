@@ -35,9 +35,12 @@ type Run struct {
 	Mashctl  string
 	NatsBin  string // nats-server, built from the go.mod pin into <run>/bin
 	NatsVer  string
-	Runner   *Runner
-	Out      string
-	LogFile  *os.File
+	// SetupScript is the policy script that makes a local NATS server (bash path). Empty: scripts/mash-local-nats-setup.sh
+	// under Repo; the environment variable LIVEAT_SETUP_SCRIPT overrides it.
+	SetupScript string
+	Runner      *Runner
+	Out         string
+	LogFile     *os.File
 
 	mu    sync.Mutex
 	procs []*Proc
@@ -96,7 +99,7 @@ func NewRun(repo string, port int, keep bool) (*Run, error) {
 	if err != nil {
 		return nil, err
 	}
-	r := &Run{Dir: dir, Repo: repo, Port: port, Keep: keep, ID: newRunID(time.Now()), pids: map[int]string{}}
+	r := &Run{Dir: dir, Repo: repo, Port: port, Keep: keep, ID: newRunID(time.Now()), SetupScript: os.Getenv("LIVEAT_SETUP_SCRIPT"), pids: map[int]string{}}
 	fail := func(err error) (*Run, error) { _ = os.RemoveAll(dir); return nil, err }
 	if err := os.Chmod(dir, 0o700); err != nil {
 		return fail(err)

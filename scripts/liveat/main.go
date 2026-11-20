@@ -4,7 +4,7 @@
 //	go run ./scripts/liveat at001|at002|at003|all|selfcheck --port P [--keep]
 //
 // It builds mash and mashctl into a private run directory (mode 0700), starts one local NATS server per scenario with
-// `mashctl init --local ... --start` on the port P that the operator reserved (there is no default), runs the scenario
+// scripts/mash-local-nats-setup.sh and `mashctl init --config` (the script picks port 4222 or the next free one; P is only checked free before it starts: there is no default), runs the scenario
 // with a scratch home and an environment built from scratch values, keeps the output of every command under
 // <run>/out, fails the run if any of it holds a seed or a JWT (INV-001), prints the run record of contract section 8
 // (and keeps it as <run>/record-<at>.md), stops every process it started by its recorded PID, and removes the run

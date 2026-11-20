@@ -91,6 +91,7 @@ func (a *AT) provision(ctl, keyHome Home, owner, group, name, creds string, noCr
 	if noCreds || !ok {
 		return e, ok
 	}
+	// T1b-b: the `mash credential create` flow below waits for core's `mash join`; it is left as it is until then.
 	args := []string{"credential", "create", "--seed", e.seed, "--jwt", e.jwt}
 	if creds != "" {
 		args = append(args, "--out", creds)
@@ -328,7 +329,7 @@ var authRE = regexp.MustCompile(`(?i)authori[sz]ation|not authori[sz]ed|revoked`
 // AT001 is the solo developer, standalone.
 var AT001 = Scenario{
 	ID: "at001",
-	Scenario: "AT-001, the solo developer, standalone: a fresh scratch home; mashctl init --local --owner alice --start; for design and review, " +
+	Scenario: "AT-001, the solo developer, standalone: a fresh scratch home; the setup script (--owner alice) and mashctl init --config; for design and review, " +
 		"mash key create, mashctl endpoint create alice.dev.<name> --out --public-key, mash credential create; two sessions started through the plugin launcher " +
 		"and hooks, as Claude Code starts the plugin (sh plugin/scripts/mash serve with the env of plugin/.mcp.json, MASH_BIN set to the built binary, no download; " +
 		"MASH_ENDPOINT=alice.dev.design|review); mail each way through the sessions' MCP send tool, delivered by the hook commands of plugin/hooks/hooks.json " +

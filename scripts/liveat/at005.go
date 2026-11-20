@@ -86,7 +86,7 @@ func at005Main(args []string, stdout, stderr io.Writer) int {
 	scenario := at005Scenario
 	if *dry {
 		id = "at005-dry-setup"
-		scenario = "At005 --dry-setup: certificates; M1 by init --local; the three-node TLS cluster; the buckets; M2 by adopt; mashctl endpoint list from both; everything stopped by PID and cleaned up."
+		scenario = "At005 --dry-setup: certificates; M1 by the setup script; the three-node TLS cluster; the buckets (mashctl init --config); M2 by init --config; mashctl endpoint list from both; everything stopped by PID and cleaned up."
 	}
 	func() {
 		defer func() {
@@ -199,15 +199,15 @@ func runLine(hs Hosts, runBy, label string) string {
 
 const at005Scenario = "AT-005, across machines, over TLS, on a cluster, from two mashctl machines: three NATS servers on three machines " +
 	"(M1, M2, M3) of one cluster, TLS on client and route connections under a CA the harness made, one account, scratch homes. " +
-	"M1 is set up by mashctl init --local (then the config is edited for TLS and cluster and copied to M2 and M3); M2 by mashctl adopt " +
-	"with the same operator signing seed, account identity seed and sys.creds (DEC-004); both with config.json listing three servers. " +
+	"M1's operator, account, keys and server.conf template come from the setup script (the config is then edited for TLS and cluster and copied to M2 and M3); M1 and M2 run mashctl init --config " +
+	"with the same operator signing seed, account identity seed, sys.creds and admin creds (DEC-004); both with a setup file and config.json listing three servers. " +
 	"endpoint create alice.dev.design from M1 (key made by mash key create on M3, session on M3 connecting to the server of M2) and " +
 	"alice/dev/review from M2 (key made on M1, session on M1 connecting to the server on M3); mail each way; endpoint list --json on M1 and M2; " +
 	"a second owner's endpoint bob/dev/x (key and creds on M3) forging and replaying answers into alice's discovery while her mash who runs on M1, with alice/dev/ghost offline; " +
 	"endpoint reissue of design from M2 with a new key made on M3 (old session dropped, old key refused on each of the three servers); " +
 	"endpoint delete of review from M1 (session dropped, a reconnect refused on each server, mash status says why); " +
 	"a plain nats:// URL to a non-loopback address refused by an endpoint and by mashctl with no override (REQ-014, ADR 0146); " +
-	"the same address created from M1 and M2 at the same moment (one succeeds, the other is refused address_taken); a revocation made on M1 shown by endpoint show and issued check on M2; a search of all captured output for any endpoint seed and any JWT, and of the homes on M1 and M2 for any endpoint seed."
+	"the same address created from M1 and M2 at the same moment (one succeeds, the other is refused address_taken); a revocation made on M1 shown by endpoint show and mashctl doctor on M2; a search of all captured output for any endpoint seed and any JWT, and of the homes on M1 and M2 for any endpoint seed."
 
 // EnvLines is the environment section of the record: each machine by role, the NATS server version, and the TLS and
 // cluster setup, without any key or certificate private part.
@@ -223,12 +223,12 @@ func (s *At5) EnvLines() []string {
 		out = append(out, fmt.Sprintf("%s: %s, address %s, own HOME, config dir, keys dir and server dir; NATS client port %d, route port %d%s", h.Role(), h.Facts(), h.Addr(), p.Client, p.Route, mon))
 	}
 	out = append(out, "host: "+hostLine(), "go: "+goVersion(), "nats-server: "+r.NatsVer+" (the same binary on all three machines)")
-	out = append(out, "cluster: name mashc, server_name mash-n1..mash-n3, routes between all three, JetStream with a store directory per node, operator mode with the full resolver (interval 5s) and the same resolver_preload on every node; node 1 made by mashctl init --local (without --start) and its config edited and copied")
+	out = append(out, "cluster: name mashc, server_name mash-n1..mash-n3, routes between all three, JetStream with a store directory per node, operator mode with the full resolver (interval 5s) and the same resolver_preload on every node; the template server.conf made by the setup script (its server stopped again), edited and copied")
 	out = append(out, "TLS on client connections (tls block) and on routes (cluster tls block, verify on), ca_file, cert_file and key_file per node")
 	if s.CA != nil {
 		out = append(out, TLSDescribe(s.CA, s.Leaves)...)
 	}
-	out = append(out, "mashctl on M1 (init) and M2 (adopt, DEC-004), config.json with all three tls:// URLs and ca")
+	out = append(out, "mashctl on M1 and M2 (init --config, DEC-004), config.json with all three tls:// URLs and ca")
 	for _, n := range s.skipped {
 		out = append(out, "not run: "+n)
 	}
@@ -433,6 +433,7 @@ func (s *At5) provision(ctl Host, verb string, e *ep5, credsPath string) bool {
 		return false
 	}
 	e.creds = credsPath
+	// T1b-b: the `mash credential create` flow below waits for core's `mash join`; it is left as it is until then.
 	r = s.mash(e.host, "credential-create-"+e.name+"-"+verb, nil, "credential", "create", "--seed", e.seed, "--jwt", e.jwt, "--out", credsPath, "--force")
 	ok = s.check(e.host.Role()+": mash credential create assembles the creds of "+e.name+" from its own seed and the carried JWT", r.Code == 0, exitSnip(r))
 	s.watch(e.host, "jwt", e.name+verb, credsPath)
@@ -766,141 +767,49 @@ func showRefusal(code int, stdout string) (bool, string) {
 	return true, "exit 1, no endpoint"
 }
 
-// issuedCheckClean asserts `mashctl issued check --json` after the revocation: exit 0 (clean and complete, per
-// cmd/mashctl/issued.go), clean, complete, the issue record present and no revoked key connected anywhere.
-func issuedCheckClean(code int, stdout string) (bool, string) {
+// doctorKeysOK asserts `mashctl doctor --json` after the revocation: exit 0, no problem, and the `keys` check in state ok
+// (no connected key that mash did not issue, no revoked key still connected).
+func doctorKeysOK(code int, stdout string) (bool, string) {
 	if code != 0 {
-		return false, fmt.Sprintf("exit %d, want 0 (clean and complete)", code)
+		return false, fmt.Sprintf("exit %d, want 0 (no problem)", code)
 	}
 	var doc struct {
-		Clean         *bool             `json:"clean"`
-		Complete      *bool             `json:"complete"`
-		RecordPresent *bool             `json:"record_present"`
-		RevokedConn   []json.RawMessage `json:"revoked_connected"`
+		Problems *int `json:"problems"`
+		Checks   []struct {
+			Name  string `json:"name"`
+			State string `json:"state"`
+		} `json:"checks"`
 	}
 	if err := json.Unmarshal([]byte(strings.TrimSpace(stdout)), &doc); err != nil {
 		return false, "stdout is not the --json document"
 	}
-	var bad []string
-	for _, f := range []struct {
-		n string
-		v *bool
-	}{{"clean", doc.Clean}, {"complete", doc.Complete}, {"record_present", doc.RecordPresent}} {
-		if f.v == nil || !*f.v {
-			bad = append(bad, f.n+" is not true")
-		}
+	if doc.Problems == nil || *doc.Problems != 0 {
+		return false, "the report does not say 0 problems"
 	}
-	if len(doc.RevokedConn) != 0 {
-		bad = append(bad, fmt.Sprintf("%d revoked key(s) connected", len(doc.RevokedConn)))
-	}
-	if len(bad) > 0 {
-		return false, strings.Join(bad, "; ")
-	}
-	return true, "exit 0, clean, complete, record present, no revoked key connected"
-}
-
-// issuedListRevoked asserts that `issued list --json` has an entry for address with a non-empty revoked_at. An absent
-// entry fails.
-func issuedListRevoked(code int, stdout, address string) (bool, string) {
-	if code != 0 {
-		return false, fmt.Sprintf("exit %d, want 0", code)
-	}
-	v, err := parseJSON(stdout)
-	if err != nil {
-		return false, "stdout is not JSON"
-	}
-	found := false
-	for _, o := range findObjects(v, "address", "revoked_at") {
-		if a, _ := o["address"].(string); a != address {
-			continue
-		}
-		found = true
-		if at, _ := o["revoked_at"].(string); at != "" {
-			return true, address + " revoked_at is set"
-		}
-	}
-	if !found {
-		return false, "no entry for " + address
-	}
-	return false, address + " has an empty revoked_at"
-}
-
-// issuedRevocationAccounted is the AT-005 assertion that M2's issued commands account for address's revoked key.
-// `issued check --json` has no per-key revoked flag for a key that is not connected (a revoked key that is connected is
-// revoked_connected, and fails the check): it lists such a key under recorded_not_connected with no revoked_at. So the
-// revoked state comes from `issued list --json` (an entry for address with revoked_at set), the check must be clean and
-// complete (issuedCheckClean), and the check's recorded_not_connected must carry that same public key, so that the
-// clean report is shown to have accounted for the target's key and not merely to be empty.
-func issuedRevocationAccounted(listCode int, listOut string, checkCode int, checkOut, address string) (bool, string) {
-	if ok, d := issuedListRevoked(listCode, listOut, address); !ok {
-		return false, "issued list: " + d
-	}
-	if ok, d := issuedCheckClean(checkCode, checkOut); !ok {
-		return false, "issued check: " + d
-	}
-	lv, _ := parseJSON(listOut)
-	// every revoked record for the address must be accounted for: a newer, unrevoked record (a reissue) must not
-	// stand in for the revoked key.
-	var keys []string
-	for _, o := range findObjects(lv, "address", "revoked_at") {
-		if a, _ := o["address"].(string); a != address {
-			continue
-		}
-		if at, _ := o["revoked_at"].(string); at == "" {
-			continue
-		}
-		key, _ := o["public_key"].(string)
-		if key == "" {
-			return false, "issued list has a revoked record without a public_key for " + address
-		}
-		keys = append(keys, key)
-	}
-	if len(keys) == 0 {
-		return false, "issued list has no revoked record for " + address
-	}
-	var doc struct {
-		NotConnected []struct {
-			PublicKey string `json:"public_key"`
-			Address   string `json:"address"`
-		} `json:"recorded_not_connected"`
-	}
-	if err := json.Unmarshal([]byte(strings.TrimSpace(checkOut)), &doc); err != nil {
-		return false, "issued check stdout is not the --json document"
-	}
-	for _, key := range keys {
-		found := false
-		for _, n := range doc.NotConnected {
-			if n.PublicKey == key && n.Address == address {
-				found = true
-				break
+	for _, c := range doc.Checks {
+		if c.Name == "keys" {
+			if c.State != "ok" {
+				return false, "the keys check is " + c.State + ", want ok"
 			}
-		}
-		if !found {
-			return false, "issued check does not account for " + address + "'s revoked key " + key + " (not in recorded_not_connected)"
+			return true, "exit 0, 0 problems, keys ok"
 		}
 	}
-	return true, address + " revoked_at is set in issued list; issued check is clean and complete and accounts for every revoked key (recorded, not connected)"
+	return false, "the report has no keys check"
 }
 
-// revocationSeen: the delete of review was made from M1; M2 shows it with endpoint show, issued list and issued check.
+// revocationSeen: the delete of review was made from M1; M2 shows it with endpoint show and mashctl doctor.
 func (s *At5) revocationSeen() {
 	m2 := s.M(2)
 	r := s.ctl(m2, "show-review", nil, "endpoint", "show", "alice.dev.review", "--json")
 	ok, d := showRefusal(r.Code, r.Stdout)
 	s.check("M2: endpoint show alice.dev.review --json refuses (no endpoint) for the endpoint M1 deleted", ok, d)
-	// T1b: `mashctl issued list` and `issued check` were removed (the check is now `mashctl doctor`); these calls are rewritten in a later slice.
-	il := s.ctl(m2, "issued-list", nil, "issued", "list", "--json")
-	ok, d = issuedListRevoked(il.Code, il.Stdout, "alice.dev.review")
-	s.check("M2: mashctl issued list shows alice.dev.review's key revoked (its entry has revoked_at)", ok, d)
-	ic := retry(30*time.Second, 2*time.Second, func() (Result, bool) {
-		r := s.ctl(m2, "issued-check-json", nil, "issued", "check", "--json")
-		ok, _ := issuedCheckClean(r.Code, r.Stdout)
+	dc := retry(30*time.Second, 2*time.Second, func() (Result, bool) {
+		r := s.ctl(m2, "doctor-json", nil, "doctor", "--json")
+		ok, _ := doctorKeysOK(r.Code, r.Stdout)
 		return r, ok
 	})
-	ok, d = issuedCheckClean(ic.Code, ic.Stdout)
-	s.check("M2: mashctl issued check --json after the revocation: clean, complete, record present, no revoked key connected", ok, d)
-	ok, d = issuedRevocationAccounted(il.Code, il.Stdout, ic.Code, ic.Stdout, "alice.dev.review")
-	s.check("M2: issued list shows alice.dev.review revoked; issued check is clean and complete and lists its key", ok, d)
+	ok, d = doctorKeysOK(dc.Code, dc.Stdout)
+	s.check("M2: mashctl doctor --json after the revocation: exit 0, no problem, keys ok (no revoked key connected, every connected key issued by mash)", ok, d)
 	s.ClusterCheck(m2, "M2 after the revocation")
 }
 

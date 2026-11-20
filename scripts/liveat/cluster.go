@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -28,13 +29,13 @@ type NodeSpec struct {
 	ClusterName string
 }
 
-// RenderServerConf writes one node's server.conf: the template of `mashctl init --local` (operator, system account,
+// RenderServerConf writes one node's server.conf: the template of the setup script's server.conf (operator, system account,
 // full resolver with the same resolver_preload, JetStream) plus what docs/operations.md says a cluster adds, plus TLS
 // on client and route connections (written by the harness, not by mash). It holds no key: only paths.
 func RenderServerConf(n NodeSpec, systemAccount, preload string) string {
 	var b strings.Builder
 	q := strconv.Quote
-	fmt.Fprintf(&b, "# AT-005 node %s, written by the test harness from the `mashctl init --local` template.\n", n.Name)
+	fmt.Fprintf(&b, "# AT-005 node %s, written by the test harness from the setup script's template.\n", n.Name)
 	fmt.Fprintf(&b, "server_name: %s\n", n.Name)
 	fmt.Fprintf(&b, "listen: %s:%d\n", n.Addr, n.Client)
 	if n.Monitor > 0 {
@@ -57,7 +58,7 @@ func RenderServerConf(n NodeSpec, systemAccount, preload string) string {
 
 var sysAcctRE = regexp.MustCompile(`(?m)^system_account:\s*(\S+)\s*$`)
 
-// templateParts takes the system account and the resolver_preload block (verbatim) out of an init --local server.conf.
+// templateParts takes the system account and the resolver_preload block (verbatim) out of the setup script's server.conf.
 func templateParts(conf string) (sysAcct, preload string, err error) {
 	m := sysAcctRE.FindStringSubmatch(conf)
 	if m == nil {
@@ -122,6 +123,7 @@ type At5 struct {
 	leaks      []Leak
 	srv        []*Proc // the three nats-server processes, by recorded PID
 	lastCreate string
+	stage      string // the directory the setup script made on the test host (a template, stopped), source of M1's and M2's files
 	dry        bool
 	runLine    string
 }
@@ -151,27 +153,6 @@ func (s *At5) ctl(h Host, label string, extra []string, args ...string) Result {
 // mash runs the mash command line on h.
 func (s *At5) mash(h Host, label string, extra []string, args ...string) Result {
 	return h.Exec(label, append([]string{h.Bin("mash")}, args...), s.env(h, extra...))
-}
-
-// patchConfig sets keys in h's config.json (mode 0600) and removes others.
-func (s *At5) patchConfig(h Host, set map[string]any, drop ...string) error {
-	p := filepath.Join(h.Home().Config, "config.json")
-	b, err := h.Get(p)
-	if err != nil {
-		return err
-	}
-	var m map[string]any
-	if err := json.Unmarshal(b, &m); err != nil {
-		return err
-	}
-	for k, v := range set {
-		m[k] = v
-	}
-	for _, k := range drop {
-		delete(m, k)
-	}
-	out, _ := json.MarshalIndent(m, "", "  ")
-	return h.Put(p, append(out, '\n'), 0o600)
 }
 
 func (s *At5) check(name string, cond bool, detail string) bool { return s.C.Check(name, cond, detail) }
@@ -214,37 +195,71 @@ func (s *At5) BuildCerts(now time.Time) error {
 	return nil
 }
 
-// InitM1 runs `mashctl init --local` on M1 without --start, then renders the three server.conf files from its output:
-// the operator JWT is copied to M2 and M3, each node gets its own names, ports and directories.
-func (s *At5) InitM1() bool {
-	m1 := s.M(1)
-	// T1b: `mashctl init --local` is removed. The live setup is rewritten later; until then the setup is a failed
-	// check and nothing is run. (The code after this check is the part the rewrite keeps.)
-	if !s.check("setup rewrite pending", false, "") {
+// stageSetup runs the setup script on the test host (not on a node: the podman image has no bash, openssl or nats
+// command) into a new directory <run>/at005-setup, and stops the server it starts: the cluster runs its own three
+// servers, and this one only supplies the operator, the account, the keys, the creds and the server.conf template.
+// The script picks its own port (4222 or the next free); the cluster does not use it.
+func (s *At5) stageSetup() bool {
+	r := s.R
+	s.stage = filepath.Join(r.Dir, "at005-setup")
+	home, err := NewHome(filepath.Join(r.Dir, "at005-setup-home"))
+	if err != nil {
+		s.check("the scratch home of the setup script is made", false, err.Error())
 		return false
 	}
-	b, err := m1.Get(filepath.Join(m1.ServerDir(), "server.conf"))
+	env := BuildEnv(home, []string{filepath.Dir(r.NatsBin)})
+	res := r.Runner.RunIn(home.Dir, "setup-script", r.setupArgs(s.stage, "--owner", "alice"), env, "")
+	_, perr := parseSetupPort(res.Stdout)
+	ok := s.check("the setup script makes the operator, the account, the keys, the creds and the server.conf template", res.Code == 0 && perr == nil, exitDetail(res)+"; "+errText(perr))
+	s.mu.Lock()
+	for _, k := range secretFiles {
+		if kb, err := os.ReadFile(filepath.Join(s.stage, k.file)); err == nil {
+			registerKeyLines(s.secrets, "setup "+k.label, kb)
+		}
+	}
+	s.mu.Unlock()
+	pid := 0
+	if b, err := os.ReadFile(filepath.Join(s.stage, fileServerPID)); err == nil {
+		pid, _ = parsePIDFile(b)
+	}
+	if pid > 0 {
+		r.record(pid, s.stage)
+		st := r.Runner.RunIn(home.Dir, "setup-stop", r.setupArgs(s.stage, "--stop"), env, "")
+		if st.Code != 0 || alive(pid) {
+			stopPID(pid, s.stage, r.Runner.logf)
+		}
+		r.forget(pid)
+		s.check("the setup script's own server is stopped again (the cluster runs its own three)", !alive(pid), exitDetail(st))
+	}
+	return ok && pid > 0
+}
+
+// InitM1 runs the setup script (stageSetup), then renders the three server.conf files from its server.conf: the
+// operator JWT is copied to every node, each node gets its own names, ports and directories.
+func (s *At5) InitM1() bool {
+	if !s.stageSetup() {
+		return false
+	}
+	b, err := os.ReadFile(filepath.Join(s.stage, fileServerConf))
 	if err != nil {
-		s.check("M1: the template server.conf is readable", false, err.Error())
+		s.check("the template server.conf is readable", false, err.Error())
 		return false
 	}
 	sys, preload, err := templateParts(string(b))
 	if err != nil {
-		s.check("M1: the template has a system account and a resolver_preload", false, err.Error())
+		s.check("the template has a system account and a resolver_preload", false, err.Error())
 		return false
 	}
-	opJWT, err := m1.Get(filepath.Join(m1.ServerDir(), "operator.jwt"))
+	opJWT, err := os.ReadFile(filepath.Join(s.stage, fileOperator))
 	if err != nil {
-		s.check("M1: operator.jwt is readable", false, err.Error())
+		s.check("operator.jwt is readable", false, err.Error())
 		return false
 	}
 	nodes := Nodes(s.Hosts, s.TLS)
 	for i, h := range s.Hosts {
-		if i > 0 {
-			if err := h.Put(nodes[i].Operator, opJWT, 0o600); err != nil {
-				s.check("operator.jwt is copied to "+h.Role(), false, err.Error())
-				return false
-			}
+		if err := h.Put(nodes[i].Operator, opJWT, 0o600); err != nil {
+			s.check("operator.jwt is copied to "+h.Role(), false, err.Error())
+			return false
 		}
 		conf := RenderServerConf(nodes[i], sys, preload)
 		if err := h.Put(filepath.Join(h.ServerDir(), "server.conf"), []byte(conf), 0o600); err != nil {
@@ -253,7 +268,7 @@ func (s *At5) InitM1() bool {
 		}
 		s.Confs = append(s.Confs, conf)
 	}
-	return s.check("the template is edited for TLS, cluster and server_name and copied to M2 and M3 with their own ports and directories", true, "")
+	return s.check("the template is edited for TLS, cluster and server_name and written to M1, M2 and M3 with their own ports and directories", true, "")
 }
 
 // StartServers starts the three NATS servers, each by `nats-server -c server.conf`, and waits until they have formed a
@@ -332,71 +347,105 @@ func retry(d time.Duration, every time.Duration, fn func() (Result, bool)) Resul
 	}
 }
 
-// InitBuckets points M1 at the cluster (config.json: every server's URL and ca) and runs
-// `mashctl init` there, which creates the directory and lease buckets over the cluster. JetStream may need a few
-// seconds to elect its meta group, so the command is retried.
-func (s *At5) InitBuckets() bool {
-	m1 := s.M(1)
-	err := s.patchConfig(m1, map[string]any{"servers": s.urlList(), "ca": s.TLS[0].CA})
-	if !s.check("M1: config.json names all three servers and ca", err == nil, errText(err)) {
-		return false
+// urlSlice is the three servers' URLs.
+func (s *At5) urlSlice() []string {
+	var u []string
+	for _, h := range s.Hosts {
+		u = append(u, s.urlOf(h))
 	}
-	// T1b: `mashctl init` with no setup file is removed (`mashctl init --config FILE` replaces it). The live setup is
-	// rewritten later; until then the setup is a failed check and nothing is run.
-	return s.check("setup rewrite pending", false, "")
+	return u
 }
 
-// AdoptM2 sets M2 up as DEC-004 records: the operator signing seed, the account identity seed and sys.creds are copied
-// from M1 by the harness (mode 0600) to a private directory on M2, `mashctl adopt ... --mint-admin` runs there against
-// the server of M2, and the copies are removed by their exact paths afterwards.
-func (s *At5) AdoptM2() bool {
-	m1, m2 := s.M(1), s.M(2)
-	in := filepath.Join(m2.Home().Dir, "adopt-in")
-	files := map[string]string{
-		"operator.nk": filepath.Join(m1.Home().Keys, "operator.nk"),
-		"account.nk":  filepath.Join(m1.Home().Keys, "account.nk"),
-		"sys.creds":   filepath.Join(m1.ServerDir(), "sys.creds"),
+// initFromSetup runs `mashctl init --config` on h against the whole cluster. The operator signing seed, the account
+// identity seed and the system creds are copied from the setup script's directory (mode 0600) to a private directory on
+// h, and so are the admin creds, which config.json keeps pointing at (they stay at h's <server dir>/creds). The setup file lists
+// all three servers and h's own CA copy. JetStream may need a few seconds to elect its meta group, so the command is
+// retried. The seed and sys.creds copies are removed by their exact paths afterwards. It returns the last result and whether the
+// copies are gone.
+func (s *At5) initFromSetup(h Host) (res Result, gone bool, err error) {
+	in := filepath.Join(h.ServerDir(), "init-in")
+	admin := filepath.Join(h.ServerDir(), fileAdminCreds)
+	files := []struct{ src, dst string }{
+		{fileOperatorNK, filepath.Join(in, "operator.nk")},
+		{fileAccountNK, filepath.Join(in, "account.nk")},
+		{fileSysCreds, filepath.Join(in, "sys.creds")},
+		{fileAdminCreds, admin},
 	}
-	var copies []string
+	var temp []string
 	cleanup := func() {
-		for _, p := range copies {
-			_ = m2.Remove(p)
+		for _, p := range temp {
+			_ = h.Remove(p)
 		}
-		_ = m2.Remove(in) // the directory this harness made, now empty
+		_ = h.Remove(in) // the directory this harness made, now empty
 	}
-	for name, src := range files {
-		b, err := m1.Get(src)
-		if err != nil {
-			s.check("M1's "+name+" is readable for the copy", false, err.Error())
+	for _, f := range files {
+		b, rerr := os.ReadFile(filepath.Join(s.stage, f.src))
+		if rerr != nil {
 			cleanup()
-			return false
+			return res, true, fmt.Errorf("%s is not readable for the copy: %v", f.src, rerr)
 		}
-		dst := filepath.Join(in, name)
-		if err := m2.Put(dst, b, 0o600); err != nil {
-			s.check("the copy of "+name+" is made on M2", false, err.Error())
+		if perr := h.Put(f.dst, b, 0o600); perr != nil {
 			cleanup()
-			return false
+			return res, true, fmt.Errorf("the copy of %s is not made on %s: %v", f.src, h.Role(), perr)
 		}
 		clear(b)
-		copies = append(copies, dst)
+		if f.dst != admin {
+			temp = append(temp, f.dst)
+		}
 	}
-	// T1b: `mashctl adopt` is removed (`mashctl init --config FILE` replaces it). The live setup is rewritten later;
-	// until then the setup is a failed check and nothing is run.
-	res := Result{Code: 1}
+	ca := s.TLS[0].CA
+	for i, o := range s.Hosts {
+		if o.Role() == h.Role() {
+			ca = s.TLS[i].CA
+		}
+	}
+	setup := SetupFile{
+		Servers: s.urlSlice(), CA: ca, Owner: "alice", AdminCreds: admin,
+		SystemCreds: filepath.Join(in, "sys.creds"), OperatorKey: filepath.Join(in, "operator.nk"), AccountKey: filepath.Join(in, "account.nk"),
+	}
+	file := filepath.Join(h.ServerDir(), fileSetupYAML)
+	if perr := h.Put(file, []byte(setup.Render()), 0o600); perr != nil {
+		cleanup()
+		return res, true, perr
+	}
+	res = retry(40*time.Second, 2*time.Second, func() (Result, bool) {
+		r := s.ctl(h, "init-config", nil, "init", "--config", file)
+		return r, r.Code == 0
+	})
 	cleanup()
-	gone := true
-	for _, p := range copies {
-		if m2.Exists(p) {
+	gone = true
+	for _, p := range temp {
+		if h.Exists(p) {
 			gone = false
 		}
 	}
-	ok := s.check("setup rewrite pending", res.Code == 0, "")
-	s.check("the copies of the seeds and sys.creds that the harness made on M2 are deleted by exact path", gone, "")
-	if !ok {
+	return res, gone, nil
+}
+
+// InitBuckets runs `mashctl init --config` on M1 with a setup file that lists all three servers and the cluster's CA,
+// which makes the directory, lease and issue-record buckets over the cluster and writes M1's config.json.
+func (s *At5) InitBuckets() bool {
+	res, gone, err := s.initFromSetup(s.M(1))
+	if err != nil {
+		s.check("M1: the setup file for mashctl init --config is made", false, err.Error())
 		return false
 	}
-	m2cfg := s.patchConfig(m2, map[string]any{"servers": s.urlList(), "ca": s.TLS[1].CA})
-	return s.check("M2: config.json names all three servers and ca", m2cfg == nil, errText(m2cfg))
+	s.check("the copies of the seeds and sys.creds that the harness made on M1 are deleted by exact path", gone, "")
+	return s.check("M1: mashctl init --config with all three servers and ca makes mash's buckets over the cluster", res.Code == 0, exitDetail(res))
+}
+
+// AdoptM2 sets M2 up as DEC-004 records, with the same authority: the operator signing seed, the account identity seed,
+// sys.creds and the admin creds are copied by the harness (mode 0600) to M2, `mashctl init --config` runs there against
+// the cluster (it does not mint an admin: M2 uses M1's admin creds), and the seed and sys.creds copies are removed by their exact paths afterwards.
+func (s *At5) AdoptM2() bool {
+	res, gone, err := s.initFromSetup(s.M(2))
+	if err != nil {
+		s.check("M2: the setup file for mashctl init --config is made", false, err.Error())
+		return false
+	}
+	ok := s.check("M2: mashctl init --config with all three servers and ca, with the same keys and creds", res.Code == 0, exitDetail(res))
+	s.check("the copies of the seeds and sys.creds that the harness made on M2 are deleted by exact path", gone, "")
+	return ok
 }
 
 func files2(dir, name string) string { return filepath.Join(dir, name) }
@@ -408,15 +457,38 @@ func errText(err error) string {
 	return err.Error()
 }
 
-// ClusterCheck runs `mashctl issued check` on h and checks the summary line.
+var doctorKeysOKRE = regexp.MustCompile(`(?m)^keys\s+ok\b`)
+
+// doctorClean asserts `mashctl doctor` output: exit 0, the keys line ok, no FAIL and "No problems.".
+func doctorClean(code int, out string) (bool, string) {
+	var bad []string
+	if code != 0 {
+		bad = append(bad, "exit "+strconv.Itoa(code))
+	}
+	if !doctorKeysOKRE.MatchString(out) {
+		bad = append(bad, "no `keys ok` line")
+	}
+	if strings.Contains(out, "FAIL") {
+		bad = append(bad, "a FAIL line")
+	}
+	if !strings.Contains(out, "No problems.") {
+		bad = append(bad, "no `No problems.` line")
+	}
+	if len(bad) > 0 {
+		return false, strings.Join(bad, "; ")
+	}
+	return true, "exit 0, keys ok, No problems."
+}
+
+// ClusterCheck runs `mashctl doctor` on h (it connects to all three servers) and checks that it reports no problem.
 func (s *At5) ClusterCheck(h Host, name string) bool {
 	r := retry(40*time.Second, 2*time.Second, func() (Result, bool) {
-		// T1b: `mashctl issued check` was removed (replaced by `mashctl doctor`); this call is rewritten in a later slice.
-		r := s.ctl(h, "issued-check", nil, "issued", "check")
-		return r, r.Code == 0
+		r := s.ctl(h, "doctor", nil, "doctor")
+		ok, _ := doctorClean(r.Code, r.Stdout)
+		return r, ok
 	})
-	sum := grepLine(r.Stdout, "servers answered")
-	return s.check(name+": mashctl issued check reports all three servers answered", r.Code == 0 && strings.Contains(r.Stdout, "3 of 3 servers answered"), "exit "+strconv.Itoa(r.Code)+"; "+redact(sum))
+	ok, d := doctorClean(r.Code, r.Stdout)
+	return s.check(name+": mashctl doctor reports no problems (keys ok)", ok, redact(d))
 }
 
 func lastLine(s string) string {
@@ -427,7 +499,7 @@ func lastLine(s string) string {
 	return s
 }
 
-// Setup is everything before the scenario: certificates, M1 by init, the cluster, the buckets, M2 by adopt, and the
+// Setup is everything before the scenario: certificates, M1 by the setup script, the cluster, the buckets (init --config), M2 by init --config, and the
 // first look from both machines.
 func (s *At5) Setup(now time.Time) bool {
 	if err := s.BuildCerts(now); err != nil {
