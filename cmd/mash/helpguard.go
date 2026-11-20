@@ -39,6 +39,12 @@ func helpUsage(args []string) (string, bool) {
 const serveOptionsHelp = `
 
 Options:
+  --wake-count n         Wake the session when more than this many messages are waiting.
+                         Default 15; 0 turns it off.
+                         Also MASH_WAKE_COUNT, or "wake_count".
+  --wake-age duration    Wake the session when the oldest waiting message is older than this.
+                         Default 1h; 0 turns it off.
+                         Also MASH_WAKE_AGE, or "wake_age".
   --accept-unverified    Deliver mail that is not verified, with its trust label.
                          Default: off; such mail is refused.
                          Also MASH_ACCEPT_UNVERIFIED, or "accept_unverified".`

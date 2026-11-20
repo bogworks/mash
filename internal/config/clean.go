@@ -22,7 +22,7 @@ func Clean(s string) string { return clean(s, CleanMax) }
 func Escape(s string) string { return clean(s, 0) }
 
 // EscapeText is Escape for text whose layout matters (a mail body, a live prompt): "\n" and "\t" pass through, every
-// other control character (C0, DEL and C1) and every invalid UTF-8 byte becomes a visible \xNN escape. It is the one
+// other control character (C0, DEL and C1), U+2028 and U+2029 (as \u2028, \u2029) and every invalid UTF-8 byte becomes a visible \xNN escape. It is the one
 // rule the mail renderer and the live-prompt notice share.
 func EscapeText(s string) string {
 	var b strings.Builder
@@ -33,6 +33,8 @@ func EscapeText(s string) string {
 			fmt.Fprintf(&b, `\x%02x`, s[i])
 		case r != '\n' && r != '\t' && (r < 0x20 || (r >= 0x7f && r <= 0x9f)):
 			fmt.Fprintf(&b, `\x%02x`, r)
+		case r == '\u2028' || r == '\u2029': // line and paragraph separators: some terminals break a line at them
+			fmt.Fprintf(&b, `\u%04x`, r)
 		default:
 			b.WriteRune(r)
 		}
