@@ -41,7 +41,7 @@ BASE=https://github.com/bogworks/mash/releases/download/v0.5.6   # use the tag o
 curl -fsSLO $BASE/install.sh -O $BASE/SHA256SUMS -O $BASE/mash.intoto.jsonl
 gh attestation verify SHA256SUMS -R bogworks/mash --bundle mash.intoto.jsonl \
   --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/v0.5.6
-grep ' install.sh$' SHA256SUMS | sha256sum -c -            # macOS: shasum -a 256 -c -
+grep ' install.sh$' SHA256SUMS | sha256sum -c - &&           # macOS: shasum -a 256 -c -
 less install.sh && bash install.sh
 ```
 
@@ -202,7 +202,7 @@ script, check it against the release's `SHA256SUMS`, read it, then run it
 ```sh
 BASE=https://github.com/bogworks/mash/releases/latest/download
 curl -fsSLO $BASE/mash-migrate-0.5.5.sh -O $BASE/SHA256SUMS
-grep ' mash-migrate-0.5.5.sh$' SHA256SUMS | sha256sum -c -
+grep ' mash-migrate-0.5.5.sh$' SHA256SUMS | sha256sum -c - &&
 less mash-migrate-0.5.5.sh && bash mash-migrate-0.5.5.sh
 ```
 
