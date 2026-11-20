@@ -126,3 +126,4 @@
 | [0146](0146-every-mash-and-mashctl-connection-requires-tls-loopback-included-and-one-override-insecure-plaintext-allows-plain-text.md) | Every mash and mashctl connection requires TLS, loopback included, and one override, insecure_plaintext, allows plain text | accepted | 2026-11-18 |
 | [0147](0147-the-0-5-6-command-line-and-mcp-surface-is-built-from-a-specification-that-supersedes-contract-revision-26.md) | The 0.5.6 command-line and MCP surface is built from a specification that supersedes contract revision 26 | accepted | 2026-11-20 |
 | [0148](0148-releases-build-mashctl-beside-mash-with-the-same-supply-chain-checks.md) | Releases build mashctl beside mash with the same supply-chain checks | accepted | 2026-11-20 |
+| [0149](0149-further-departures-of-the-0-5-6-specification-by-the-maintainers-word.md) | Further departures of the 0.5.6 specification, by the maintainer's word (ADR 0147) | accepted | 2026-11-20 |
