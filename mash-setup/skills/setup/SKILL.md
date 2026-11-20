@@ -83,20 +83,14 @@ Say yes to go ahead. I will ask again before each step.
 
 ## 2. The server's programs
 
-On macOS (`uname` says Darwin) the NATS script does not run: it is Linux
-only in 0.5.6. Skip the rest of this step, step 3's NATS script and the
-server part of step 4. Ask the person whether they have a NATS server they
-can use. If so, they make mash's setup file for it (see `mashctl init
---help`) and run `mashctl init --config <that file>`, or the server's
-administrator sends them a join file and they run `mash join <file>`. If not,
-stop: they can run this setup on a Linux machine.
-
 The NATS script needs `nats-server` (2.10.7 or newer), the `nats` command and
 `openssl`. If any is missing, tell the person where it comes from, and ask for
 a yes before installing it. You never run `sudo` yourself: if the install needs
 it, give the person the exact command as a `sh person` block.
 
-- Homebrew (macOS and Linux): `brew install nats-server nats`
+- Homebrew (macOS, and Linux): `brew install nats-server nats openssl`. On
+  a Mac this is the way: the script runs there too, with the `openssl` that
+  macOS ships or Homebrew's.
 - Debian and Ubuntu: `nats-server` is in apt (`sudo apt install nats-server
   openssl`). There is no apt package for the `nats` command: the person
   downloads the linux zip for their machine from
