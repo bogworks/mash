@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -73,6 +74,9 @@ func newFixture(t *testing.T) *fixture {
 	write(t, repo, "plugin/.claude-plugin/plugin.json", "{\"name\": \"mash\", \"version\": \"0.1.0\"}\n")
 	write(t, repo, release.PluginHooks, hardenedHooks)
 	write(t, repo, renderContractPath, "contract v1\n")
+	for _, n := range release.ScriptNames() {
+		write(t, repo, "scripts/"+n, scriptBody(n))
+	}
 	write(t, repo, release.PluginMCP, "{\"mcpServers\": {\"mash\": {\"command\": \"mash\", \"args\": [\"serve\"]}}}\n")
 	gitT(t, repo, "add", "-A")
 	gitT(t, repo, "commit", "-q", "-m", "candidate")
@@ -90,7 +94,7 @@ case "$1" in
   api) case "$2" in *page=2*) cat "ROOT/ci-2.json" ;; *) cat "ROOT/ci-1.json" ;; esac ;;
   release) case "$2" in list) cat "ROOT/releases.json" ;;
     download) n=; p=; for a in "$@"; do [ "$p" = --pattern ] && n=$a; p=$a; done
-      case "$n" in *.cdx.json|*.jsonl) ;; mash-*|mashctl-*) echo "bin-$n"; exit 0 ;; esac
+      case "$n" in *.cdx.json|*.jsonl|*.sh) ;; mash-*|mashctl-*) echo "bin-$n"; exit 0 ;; esac
       if [ -f "ROOT/files/$n" ]; then cat "ROOT/files/$n"; else echo "no assets match the file pattern" >&2; exit 1; fi ;;
     upload) mkdir -p "ROOT/files"; cp "$4" "ROOT/files/$(basename "$4")" ;;
     *) cat "ROOT/assets.json" ;; esac ;;
@@ -237,9 +241,15 @@ func bareDSSELine(statement string) string {
 	return `{"payloadType":"application/vnd.in-toto+json","payload":"` + base64.StdEncoding.EncodeToString([]byte(statement)) + `","signatures":[]}` + "\n"
 }
 
+// scriptBody is what the fixture's repository holds as scripts/<name> at X, and what a correct release attaches.
+func scriptBody(name string) string { return "#!/bin/sh\n# " + name + "\nexit 0\n" }
+
 // goodCIAsset is the content the fixture gives an SBOM (a CycloneDX 1.5 document) or the provenance (a Sigstore-bundle
 // line naming release.yml).
 func goodCIAsset(name string) string {
+	if slices.Contains(release.ScriptNames(), name) {
+		return scriptBody(name)
+	}
 	if name == release.ProvenanceName {
 		return dsseLine(`{"predicate":{"buildDefinition":{"externalParameters":{"workflow":{"path":".github/workflows/release.yml"}}}}}`)
 	}

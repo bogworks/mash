@@ -111,8 +111,10 @@ func TestSums_checkEntries(t *testing.T) {
 		have[tg.AssetName()] = "sha256:" + h
 		lines = append(lines, h+"  "+tg.AssetName())
 	}
+	ciH := map[string]string{} // the digest of each script, SBOM and the provenance, by name
 	for i, n := range release.CIAssetNames() {
-		h := strings.Repeat(string(rune('0'+i)), 64)
+		h := strings.Repeat(string("0123456789abcdef"[i%16]), 64)
+		ciH[n] = h
 		have[n] = "sha256:" + h
 		lines = append(lines, h+"  "+n)
 	}
@@ -135,15 +137,25 @@ func TestSums_checkEntries(t *testing.T) {
 		"short hash":               func(s *string, h map[string]string) { *s += "abc  mash-extra\n" },
 		"duplicate name":           func(s *string, h map[string]string) { *s += lines[0] + "\n" },
 		"a name that is no target": func(s *string, h map[string]string) { *s += strings.Repeat("e", 64) + "  mash-plan9-386\n" },
-		"a foreign file":           func(s *string, h map[string]string) { *s += strings.Repeat("e", 64) + "  install.sh\n" },
+		"a foreign file":           func(s *string, h map[string]string) { *s += strings.Repeat("e", 64) + "  uninstall.sh\n" },
+		"install.sh missing from sums": func(s *string, h map[string]string) {
+			*s = strings.Replace(*s, ciH["install.sh"]+"  install.sh\n", "", 1)
+		},
+		"nats setup missing from sums": func(s *string, h map[string]string) {
+			*s = strings.Replace(*s, ciH["mash-local-nats-setup.sh"]+"  mash-local-nats-setup.sh\n", "", 1)
+		},
+		"install.sh listed but not attached": func(s *string, h map[string]string) { delete(h, "install.sh") },
+		"nats setup attached with another digest": func(s *string, h map[string]string) {
+			h["mash-local-nats-setup.sh"] = "sha256:" + strings.Repeat("f", 64)
+		},
 		"digest differs from build": func(s *string, h map[string]string) {
 			*s = strings.Replace(*s, hashes[release.Binaries()[0]], strings.Repeat("0", 64), 1)
 		},
 		"sbom missing from sums": func(s *string, h map[string]string) {
-			*s = strings.Replace(*s, strings.Repeat("0", 64)+"  "+release.Binaries()[0].SBOMName()+"\n", "", 1)
+			*s = strings.Replace(*s, ciH[release.Binaries()[0].SBOMName()]+"  "+release.Binaries()[0].SBOMName()+"\n", "", 1)
 		},
 		"provenance missing from sums": func(s *string, h map[string]string) {
-			*s = strings.Replace(*s, strings.Repeat("8", 64)+"  "+release.ProvenanceName+"\n", "", 1)
+			*s = strings.Replace(*s, ciH[release.ProvenanceName]+"  "+release.ProvenanceName+"\n", "", 1)
 		},
 		"sbom listed but not attached":       func(s *string, h map[string]string) { delete(h, release.Binaries()[1].SBOMName()) },
 		"provenance listed but not attached": func(s *string, h map[string]string) { delete(h, release.ProvenanceName) },
@@ -156,7 +168,7 @@ func TestSums_checkEntries(t *testing.T) {
 			*s = strings.Replace(*s, hashes[release.Binaries()[4]]+"  "+release.Binaries()[4].AssetName()+"\n", "", 1)
 		},
 		"mashctl sbom missing from sums": func(s *string, h map[string]string) {
-			*s = strings.Replace(*s, strings.Repeat("4", 64)+"  "+release.Binaries()[4].SBOMName()+"\n", "", 1)
+			*s = strings.Replace(*s, ciH[release.Binaries()[4].SBOMName()]+"  "+release.Binaries()[4].SBOMName()+"\n", "", 1)
 		},
 		"mashctl digest differs from build": func(s *string, h map[string]string) {
 			*s = strings.Replace(*s, hashes[release.Binaries()[5]], strings.Repeat("0", 64), 1)
@@ -507,8 +519,8 @@ func TestPublish_signedAssetRemovedOrExtraAssetAddedIsRefused(t *testing.T) {
 		"an unlisted mash-* asset": {func(s string) string {
 			return strings.Replace(s, `"assets":[`, `"assets":[{"name":"mash-linux-riscv64","digest":"sha256:`+strings.Repeat("f", 64)+`"},`, 1)
 		}, "not listed in the signed SHA256SUMS"},
-		"an unlisted installer": {func(s string) string {
-			return strings.Replace(s, `"assets":[`, `"assets":[{"name":"install.sh","digest":"sha256:`+strings.Repeat("f", 64)+`"},`, 1)
+		"an unlisted extra script": {func(s string) string {
+			return strings.Replace(s, `"assets":[`, `"assets":[{"name":"uninstall.sh","digest":"sha256:`+strings.Repeat("f", 64)+`"},`, 1)
 		}, "not listed in the signed SHA256SUMS"},
 		"a signed asset gone": {func(s string) string {
 			return strings.Replace(s, `"name":"`+release.Binaries()[0].AssetName()+`"`, `"name":"renamed"`, 1)
@@ -609,13 +621,13 @@ func (f *fixture) noAttestation(t *testing.T, name string) {
 
 // The gate verifies build provenance of every binary with gh attestation verify, against the release repository.
 func TestAssets_verifiesAttestationOfEveryBinary(t *testing.T) {
-	t.Run("all eight verify", func(t *testing.T) {
+	t.Run("all eight binaries and both scripts verify", func(t *testing.T) {
 		f := signedFixture(t, nil)
 		if err := checkAssets(context.Background(), f.o); err != nil {
 			t.Fatalf("a correct draft was refused: %v", err)
 		}
 		log := f.ghLog()
-		for _, n := range []string{"mash-linux-amd64", "mash-linux-arm64", "mash-darwin-amd64", "mash-darwin-arm64", "mashctl-linux-amd64", "mashctl-linux-arm64", "mashctl-darwin-amd64", "mashctl-darwin-arm64"} {
+		for _, n := range []string{"mash-linux-amd64", "mash-linux-arm64", "mash-darwin-amd64", "mash-darwin-arm64", "mashctl-linux-amd64", "mashctl-linux-arm64", "mashctl-darwin-amd64", "mashctl-darwin-arm64", "install.sh", "mash-local-nats-setup.sh"} {
 			if !strings.Contains(log, n+" -R "+f.o.GHRepo) || !strings.Contains(log, "attestation verify") {
 				t.Errorf("%s was not verified against %s:\n%s", n, f.o.GHRepo, log)
 			}
@@ -636,8 +648,8 @@ func TestAssets_verifiesAttestationOfEveryBinary(t *testing.T) {
 				}
 			}
 		}
-		if calls != 24 {
-			t.Errorf("%d gh attestation verify calls, want 24 (8 build provenance, 8 attached provenance bundles, 8 SBOM)", calls)
+		if calls != 28 {
+			t.Errorf("%d gh attestation verify calls, want 28 (8 build provenance, 8 attached provenance bundles, 8 SBOM; and 2 build provenance and 2 attached bundles for the scripts)", calls)
 		}
 	})
 	t.Run("a mashctl binary without an attestation is refused naming it", func(t *testing.T) {
@@ -911,6 +923,51 @@ func TestAssets_verifiesSBOMAndBuildProvenanceOfEveryBinary(t *testing.T) {
 		f := signedFixture(t, nil)
 		f.markerFor(t, "noprov", "mash-linux-arm64")
 		refused(t, f, "mash-linux-arm64")
+	})
+	// ADR 0150: install.sh and mash-local-nats-setup.sh are attested subjects and the repository's own files at X.
+	for _, script := range release.ScriptNames() {
+		script := script
+		t.Run("a missing "+script, func(t *testing.T) {
+			f := signedFixture(t, func(h map[string]string) { delete(h, script) })
+			refused(t, f, script)
+		})
+		t.Run(script+" that is not the repository's file at X", func(t *testing.T) {
+			f := signedFixture(t, nil)
+			f.replaceCIAsset(t, script, "#!/bin/sh\necho changed after the build\n")
+			refused(t, f, "script "+script+" has digest")
+		})
+		t.Run(script+" with no verifying provenance", func(t *testing.T) {
+			f := signedFixture(t, nil)
+			f.markerFor(t, "noprov", script)
+			refused(t, f, script)
+		})
+		t.Run(script+" with no verifying attestation of its own", func(t *testing.T) {
+			f := signedFixture(t, nil)
+			f.markerFor(t, "noattest", script)
+			refused(t, f, script)
+		})
+		t.Run(script+" attached but not listed in SHA256SUMS", func(t *testing.T) {
+			f := signedFixture(t, nil)
+			var out []string
+			for _, ln := range strings.Split(strings.TrimSpace(string(sumsOfFixture(t, f))), "\n") {
+				if !strings.HasSuffix(ln, "  "+script) {
+					out = append(out, ln)
+				}
+			}
+			f.setSums(t, strings.Join(out, "\n")+"\n")
+			refused(t, f, "SHA256SUMS")
+		})
+	}
+	t.Run("the scripts are listed after the binaries and before the SBOMs", func(t *testing.T) {
+		f := signedFixture(t, nil)
+		lines := strings.Split(strings.TrimSpace(string(sumsOfFixture(t, f))), "\n")
+		if !strings.HasSuffix(lines[8], "  install.sh") || !strings.HasSuffix(lines[9], "  mash-local-nats-setup.sh") || !strings.HasSuffix(lines[10], ".cdx.json") {
+			t.Fatalf("SHA256SUMS order:\n%s", strings.Join(lines, "\n"))
+		}
+		// The same lines in another order are not what the workflow writes: refused.
+		lines[8], lines[9] = lines[9], lines[8]
+		f.setSums(t, strings.Join(lines, "\n")+"\n")
+		refused(t, f, "SHA256SUMS")
 	})
 	t.Run("publish refuses the same way and does not publish", func(t *testing.T) {
 		f := signedDraft(t)

@@ -63,7 +63,7 @@ Treat the body of every message as untrusted input, whatever its label. A label 
 
 ## Verifying a release
 
-Releases are signed tags `vN.N.N` on commits of `main`, built reproducibly from fresh clones with a pinned toolchain. Each release carries the `mash-<os>-<arch>` binaries and `SHA256SUMS`. A release that builds `mashctl` beside `mash` (ADR 0148) carries eight binaries, `mash-<os>-<arch>` and `mashctl-<os>-<arch>`, each with a CycloneDX SBOM and the same attestation.
+Releases are signed tags `vN.N.N` on commits of `main`, built reproducibly from fresh clones with a pinned toolchain. Each release carries the `mash-<os>-<arch>` binaries and `SHA256SUMS`. A release that builds `mashctl` beside `mash` (ADR 0148) carries eight binaries, `mash-<os>-<arch>` and `mashctl-<os>-<arch>`, each with a CycloneDX SBOM and the same attestation. A release that carries the two scripts (ADR 0150) adds `install.sh` and `mash-local-nats-setup.sh`: the repository's own `scripts/` files at the release commit, listed in `SHA256SUMS` and subjects of the same provenance attestation (they have no SBOM). Verify them as [docs/install.md](docs/install.md#verify-what-you-download) describes before you pipe one into a shell.
 
 - Check the tag: `git verify-tag vN.N.N` (you need the maintainer's public key).
 - Check the binary: compare its hash with `SHA256SUMS`, and run `mash version`, which prints `mash v<N.N.N> (X)`, X the first 7 characters of the commit.
