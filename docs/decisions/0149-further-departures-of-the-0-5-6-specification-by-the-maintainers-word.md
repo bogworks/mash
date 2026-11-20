@@ -32,6 +32,11 @@ specification:
   lines.
 * **ADR 0049:** `--json` always prints an object, so `mash who --json` is `{"endpoints":[...]}`, not an array, and the empty
   result is `{"endpoints":[]}`.
+* **Decision 264:** `mash serve` and `mash hook` never auto-pick an endpoint: they act only for the endpoint named by
+  `--endpoint`, `MASH_ENDPOINT` or the `endpoint` key. With none named, `serve` offers only `status`, `doctor` and `version`,
+  which answer "no endpoint is chosen for this session", and `hook` prints nothing. Choosing the only installed endpoint
+  stays for the commands a person types. This narrows decision 264's auto-pick (the planner's call, flagged to the
+  maintainer).
 
 Departures found later are added here until this record is merged.
 
