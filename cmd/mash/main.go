@@ -167,6 +167,7 @@ var verbUsage = map[string]string{
 var helpTopic = map[string]bool{"serve": true, "hook": true, "plugin": true, "key": true, "prompt": true}
 
 // noJSONForm is the verbs that have no --json form: a --json given to one is a usage error.
+var noJSONForm = map[string]bool{"prompt": true, "serve": true, "hook": true, "plugin": true}
 
 // stdinWait is how long a message read from standard input has to arrive: 15 minutes, as the send help says. It is its
 // own limit, not cli_timeout: a run can take up to twice cli_timeout (this wait, then the command's own deadline).
