@@ -73,6 +73,8 @@ Then say this to the person, filled in, and wait for a yes:
 I will:
   download mash and mashctl         from the latest release, checked against its checksums
   make a NATS server                in ~/mash-nats, this machine only, run as you
+                                    (a program you run: after a reboot it is
+                                     stopped; start it again with --start)
   use the owner name                acme
   install the mash plugin           from the bogworks/mash marketplace
   make two agent mailboxes          acme.demo.bob and acme.demo.alice
