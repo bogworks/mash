@@ -99,7 +99,13 @@ const containerEnvFile = "/run/.containerenv"
 // insideContainer reports whether this process runs in a podman container. Tests replace it.
 var insideContainer = func() bool {
 	_, err := os.Stat(containerEnvFile)
-	return err == nil
+	return inContainerSignals(err == nil, os.Getenv(envInsideRevision))
+}
+
+// inContainerSignals: /run/.containerenv is also in toolbox and distrobox, so the sandbox's own variable (the revision
+// it starts the run with) is required too.
+func inContainerSignals(containerEnv bool, revision string) bool {
+	return containerEnv && revision != ""
 }
 
 // scriptPath is the setup script: the Run's SetupScript, or the default under the checkout.

@@ -35,7 +35,7 @@ import (
 
 func main() { os.Exit(realMain(os.Args[1:], os.Stdout, os.Stderr)) }
 
-func realMain(args []string, stdout, stderr io.Writer) int {
+func realMain(args []string, stdout, stderr io.Writer) (code int) {
 	usage := "usage: liveat at001|at002|at003|all|selfcheck --port P [--keep] [--inside: only inside a container; the default runs in a sandbox container] | liveat at005 [--dry-setup] [--hosts podman --run-by manual|ci --host-label LABEL [--subnet-base A.B] | --hosts local] [--keep] [--record-out FILE] | liveat at005-cleanup [--run RUNID]"
 	if len(args) == 0 {
 		fmt.Fprintln(stderr, usage)
@@ -97,6 +97,7 @@ func realMain(args []string, stdout, stderr io.Writer) int {
 	defer func() { // after the records are written, before Close: what the host copies out
 		if err := exportRun(r, sandboxExport); err != nil {
 			fmt.Fprintln(stderr, "liveat: export:", err)
+			code = exportFailCode(code)
 		}
 	}()
 	if err := r.PrepareInside(os.Getenv); err != nil {
@@ -164,4 +165,13 @@ func repoRoot() (string, error) {
 		return "", errors.New("liveat: run it from inside the mash checkout")
 	}
 	return strings.TrimSpace(string(b)), nil
+}
+
+// exportFailCode is the exit code of a run inside whose export failed: the host cannot get the records, so the run
+// cannot pass; a code that was already non-zero stays.
+func exportFailCode(code int) int {
+	if code == 0 {
+		return 1
+	}
+	return code
 }

@@ -40,7 +40,7 @@ func TestBuildContextHoldsTheBinariesTheNatsCommandAndTheScript(t *testing.T) {
 	if st, _ := os.Stat(filepath.Join(ctx, "nats")); st == nil || st.Mode().Perm()&0o111 == 0 {
 		t.Error("the nats command is not executable")
 	}
-	if len(r.ImageLines) != 2 || !strings.HasPrefix(r.ImageLines[0], "base image: "+baseImage+", digest ") || !strings.HasPrefix(r.ImageLines[1], "nats command: natscli "+natsCLIVersion) {
+	if len(r.ImageLines) != 3 || !strings.HasPrefix(r.ImageLines[2], "setup script: setup.sh sha256:") || !strings.HasPrefix(r.ImageLines[0], "base image: "+baseImage+", digest ") || !strings.HasPrefix(r.ImageLines[1], "nats command: natscli "+natsCLIVersion) {
 		t.Errorf("record lines: %v", r.ImageLines)
 	}
 	if got := strings.Join(r.EnvLines(nil), "\n"); !strings.Contains(got, "base image: ") || !strings.Contains(got, "nats command: ") {

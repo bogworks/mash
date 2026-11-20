@@ -117,6 +117,12 @@ func sandboxMain(cmd string, port int, keep bool, stdout, stderr io.Writer, p *P
 			code = 4
 		}
 	} else {
+		if !hasRecord(back) {
+			fmt.Fprintln(stderr, "liveat: the export copied out of the sandbox holds no record-*.md: the run inside did not write its records")
+			if code == 0 {
+				code = 1
+			}
+		}
 		found, err := scanDir(back)
 		if err != nil || len(found) > 0 || len(r.Runner.Leaks()) > 0 {
 			fmt.Fprintln(stdout, "INV-001: the output copied out of the sandbox holds a seed or a JWT (or could not be scanned): "+leakNames(found)+" "+errText(err))
@@ -203,4 +209,15 @@ func exportRun(r *Run, dst string) error {
 func shownOutput(res Result) (stdout, stderr string, leaked bool) {
 	stdout, stderr = redact(res.Stdout), redact(res.Stderr)
 	return stdout, stderr, stdout != res.Stdout || stderr != res.Stderr
+}
+
+// hasRecord reports whether dir (the export copied out of the sandbox) holds at least one record-*.md file.
+func hasRecord(dir string) bool {
+	m, _ := filepath.Glob(filepath.Join(dir, "record-*.md"))
+	for _, f := range m {
+		if fi, err := os.Stat(f); err == nil && fi.Mode().IsRegular() {
+			return true
+		}
+	}
+	return false
 }

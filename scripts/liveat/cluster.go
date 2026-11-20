@@ -517,7 +517,49 @@ func doctorClean(code int, out string) (bool, string) {
 	return true, "exit 0, keys ok, No problems."
 }
 
-// ClusterCheck runs `mashctl doctor` on h (it connects to all three servers) and checks that it reports no problem.
+// statusAllOK asserts `mashctl status --json` on a host whose config lists the cluster: exit 0 and one entry per
+// server (want entries, each a different server), every one ok. A node that is down is a row that is not ok.
+func statusAllOK(code int, stdout string, want int) (bool, string) {
+	var doc struct {
+		Servers []struct {
+			Server string  `json:"server"`
+			OK     bool    `json:"ok"`
+			Reason *string `json:"reason"`
+		} `json:"servers"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(stdout)), &doc); err != nil {
+		return false, fmt.Sprintf("exit %d, stdout is not the status --json document", code)
+	}
+	if len(doc.Servers) != want {
+		return false, fmt.Sprintf("%d server entries, want %d", len(doc.Servers), want)
+	}
+	var bad []string
+	seen := map[string]bool{}
+	for _, r := range doc.Servers {
+		if seen[r.Server] {
+			bad = append(bad, "server "+r.Server+" listed twice")
+		}
+		seen[r.Server] = true
+		if !r.OK {
+			why := ""
+			if r.Reason != nil {
+				why = ": " + *r.Reason
+			}
+			bad = append(bad, r.Server+" not ok"+why)
+		}
+	}
+	if code != 0 {
+		bad = append(bad, "exit "+strconv.Itoa(code))
+	}
+	if len(bad) > 0 {
+		return false, strings.Join(bad, "; ")
+	}
+	return true, fmt.Sprintf("exit 0, %d of %d servers ok", want, want)
+}
+
+// ClusterCheck runs `mashctl doctor` on h and checks that it reports no problem, then `mashctl status --json` (one
+// call, one entry per server of the config) and requires every one of the three servers to answer: doctor talks to
+// one URL and passes with a node down, status does not.
 func (s *At5) ClusterCheck(h Host, name string) bool {
 	r := retry(40*time.Second, 2*time.Second, func() (Result, bool) {
 		r := s.ctl(h, "doctor", nil, "doctor")
@@ -525,7 +567,15 @@ func (s *At5) ClusterCheck(h Host, name string) bool {
 		return r, ok
 	})
 	ok, d := doctorClean(r.Code, r.Stdout)
-	return s.check(name+": mashctl doctor reports no problems (keys ok)", ok, redact(d))
+	a := s.check(name+": mashctl doctor reports no problems (keys ok)", ok, redact(d))
+	st := retry(40*time.Second, 2*time.Second, func() (Result, bool) {
+		r := s.ctl(h, "status-all", nil, "status", "--json")
+		ok, _ := statusAllOK(r.Code, r.Stdout, len(s.Hosts))
+		return r, ok
+	})
+	ok, d = statusAllOK(st.Code, st.Stdout, len(s.Hosts))
+	b := s.check(name+": mashctl status --json shows every one of the three servers answering", ok, redact(d))
+	return a && b
 }
 
 func lastLine(s string) string {

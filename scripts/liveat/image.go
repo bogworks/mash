@@ -152,6 +152,18 @@ func natsCLILine() string {
 	return fmt.Sprintf("nats command: natscli %s linux/%s, zip sha256 %s (verified before use)", natsCLIVersion, runtime.GOARCH, a.SHA256)
 }
 
+// setupScriptLine is the record line for the setup script that runs in the image: its path (relative to the repo when
+// it is inside it, else its base name) and the sha256 of the bytes that go into the image. It contains no "|" or newline,
+// because the sandbox passes the lines inside separated by "|".
+func setupScriptLine(repo, path string, content []byte) string {
+	name := filepath.Base(path)
+	if rel, err := filepath.Rel(repo, path); err == nil && repo != "" && !strings.HasPrefix(rel, "..") {
+		name = rel
+	}
+	name = strings.NewReplacer("|", "_", "\n", "_", "\r", "_").Replace(name)
+	return fmt.Sprintf("setup script: %s sha256:%x", name, sha256.Sum256(content))
+}
+
 // baseImageLine is the record line for the base image; digest is what `podman image inspect` said.
 func baseImageLine(digest string) string {
 	digest = strings.TrimSpace(digest)

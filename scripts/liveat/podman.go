@@ -329,7 +329,7 @@ func (p *Podman) buildImage(c *podCtx, ctx string) error {
 		return err
 	}
 	dg, _ := c.do("image", "inspect", "--format", "{{.Digest}}", baseImage)
-	r.ImageLines = []string{baseImageLine(dg), natsCLILine()}
+	r.ImageLines = []string{baseImageLine(dg), natsCLILine(), setupScriptLine(r.Repo, r.scriptPath(), sb)}
 	return nil
 }
 
