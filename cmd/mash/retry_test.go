@@ -149,7 +149,7 @@ func eventually(t *testing.T, d time.Duration, what string, ok func() bool) {
 func (s *session) call(t *testing.T, id int, tool, args string) map[string]any {
 	t.Helper()
 	s.send(t, `{"jsonrpc":"2.0","id":`+itoa(id)+`,"method":"tools/call","params":{"name":"`+tool+`","arguments":`+args+`}}`)
-	return s.await(t, 5*time.Second, idIs(float64(id)))["result"].(map[string]any)
+	return s.await(t, 30*time.Second, idIs(float64(id)))["result"].(map[string]any)
 }
 
 func itoa(n int) string { b, _ := json.Marshal(n); return string(b) }

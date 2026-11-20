@@ -125,6 +125,10 @@ func TestListedNeverWakes(t *testing.T) {
 // New mail wakes as usual, and the wake's summary does not announce the listed mail again.
 func TestListedMailDoesNotHideOrRepeatInANewWake(t *testing.T) {
 	listedKnobs(t)
+	// The first wake of held mail comes IdleWake after it is spooled; the digest below must land before it. At 300 ms a
+	// loaded runner can take longer than that between the spool and the listing, so the first wake fires for mail
+	// that was not yet listed. A long idle wake gives the listing a wide margin; the waits are bounded by it.
+	IdleWake = 2 * time.Second
 	f := newFixture(t, "a", "b")
 	_, ev, sp := f.runSpooled(t, "a")
 	if err := sp.Touch(); err != nil {
@@ -133,12 +137,12 @@ func TestListedMailDoesNotHideOrRepeatInANewWake(t *testing.T) {
 	sendQuestions(t, f, 2)
 	until(t, "spooled", func() bool { return len(waiting(t, sp)) == 2 })
 	listAll(t, sp)
-	time.Sleep(3 * IdleWake)
+	time.Sleep(IdleWake + IdleWake/2) // past the first wake it would have rung, were the mail not listed
 	if got := ev.all(); len(got) != 0 {
 		t.Fatalf("woke for listed mail: %q", got)
 	}
 	sendQuestions(t, f, 1)
-	if got := ev.waitFor(t, 1, 5*time.Second); got[0] != "1 message from "+tdot("b")+" (question)" {
+	if got := ev.waitFor(t, 1, 30*time.Second); got[0] != "1 message from "+tdot("b")+" (question)" {
 		t.Fatalf("the wake %q, want the new message alone", got[0])
 	}
 }

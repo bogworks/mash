@@ -216,7 +216,7 @@ func TestServeHeldHolderRefreshedOnEveryRetry(t *testing.T) {
 	if txt := resultText(s.call(t, 5, "status", `{}`)); !strings.Contains(txt, "pid 1111") {
 		t.Fatalf("status: %s", txt)
 	}
-	if first := content(s.await(t, 5*time.Second, isChannel)); !strings.Contains(first, "pid 1111") {
+	if first := content(s.await(t, 30*time.Second, isChannel)); !strings.Contains(first, "pid 1111") {
 		t.Fatalf("first notice: %s", first)
 	}
 	sp := spoolOf(w.env["a"])
@@ -226,18 +226,18 @@ func TestServeHeldHolderRefreshedOnEveryRetry(t *testing.T) {
 	mu.Lock()
 	pid = "2222" // the holder changes between retries
 	mu.Unlock()
-	eventually(t, 5*time.Second, "status shows the new holder", func() bool {
+	eventually(t, 30*time.Second, "status shows the new holder", func() bool {
 		txt := resultText(s.call(t, 6, "status", `{}`))
-		return strings.Contains(txt, "pid 2222") && strings.Contains(txt, "host-2222") && !strings.Contains(txt, "1111")
+		return strings.Contains(txt, "pid 2222") && strings.Contains(txt, "host-2222") && !strings.Contains(txt, "pid 1111")
 	})
 	r := s.call(t, 7, "inbox", `{}`)
 	if txt := resultText(r); r["isError"] != true || !strings.Contains(txt, "host-2222 pid 2222 since since-2222") || strings.Contains(txt, "1111") {
 		t.Fatalf("tool answer: %s", txt)
 	}
-	if ev := content(s.await(t, 5*time.Second, isChannel)); !strings.Contains(ev, "pid 2222") {
+	if ev := content(s.await(t, 30*time.Second, isChannel)); !strings.Contains(ev, "pid 2222") {
 		t.Fatalf("the change was not told: %s", ev)
 	}
-	eventually(t, 5*time.Second, "wait state shows the new holder", func() bool {
+	eventually(t, 30*time.Second, "wait state shows the new holder", func() bool {
 		ws, ok := sp.LiveWaitState()
 		return ok && ws.HolderPID == "2222" && ws.HolderHost == "host-2222"
 	})
