@@ -13,10 +13,12 @@
 #
 # Environment:
 #   MLNT_IMAGES   space-separated image tags (default: debian:stable ubuntu:24.04 ubuntu:26.04)
-#   MLNT_CASES    space-separated case numbers (default: 1 2 ... 14)
-#   MLNT_REPORT   receipt file (markdown; default: <scratch>/receipt-<run id>.md)
-#   MLNT_SCRATCH  scratch directory (default: the p1t folder of the session scratchpad)
-#   MLNT_NATSCLI  natscli version (default 0.5.2)
+#   MLNT_CASES    space-separated case numbers (default: 1 2 ... 22)
+#   MLNT_REPORT   receipt file (markdown; default: receipt-<run id>.md in the scratch
+#                 directory, or in ${TMPDIR:-/tmp} when the scratch directory is made here)
+#   MLNT_SCRATCH  scratch directory (default: a new mktemp -d under ${TMPDIR:-/tmp},
+#                 removed at the end only when the test made it and nothing failed)
+#   MLNT_NATSCLI  natscli version (default 0.5.2; any other version needs MLNT_NATSCLI_SHA256)
 #   MLNT_SCRIPT   test another copy of the script (default: scripts/mash-local-nats-setup.sh)
 #
 # Every assertion prints "ok: ..." or "FAIL: ..."; the totals come last and the
@@ -51,6 +53,8 @@ has() { grep -Fq -- "$2" "$1"; }
 hasx() { grep -Fxq -- "$2" "$1"; }
 hasre() { grep -Eq -- "$2" "$1"; }
 lacks() { ! grep -Fq -- "$2" "$1"; }
+err_is() { [ "$RC" = 1 ] && [ "$(cat "$W/err")" = "$1" ]; }
+quiet_ok() { [ "$RC" = 0 ] && [ ! -s "$W/out" ] && [ ! -s "$W/err" ]; }
 abs_exists() { case $1 in /*) [ -e "$1" ] ;; *) return 1 ;; esac; }
 alive() {
     [ -d "/proc/$1" ] && ! grep -q '^State:[[:space:]]*Z' "/proc/$1/status" 2>/dev/null
@@ -60,6 +64,12 @@ gone() { ! alive "$1"; }
 pid_of() { head -n 1 "$1/server.pid" 2>/dev/null; }
 port_of() { sed -n 's/^ *"port": *\([0-9]*\),*$/\1/p' "$1/mash-setup.json"; }
 listening() { ss -ltn | awk 'NR>1 {print $4}' | grep -Fxq "127.0.0.1:$1"; }
+# only_listener PID PORT: every listening socket of PID is 127.0.0.1:PORT, and there is one
+only_listener() {
+    local l
+    l=$(ss -ltnp | awk -v pat="pid=$1," 'index($0, pat) {print $4}' | sort -u)
+    [ "$l" = "127.0.0.1:$2" ]
+}
 waitlisten() {
     local i=0
     while ! listening "$1" && [ "$i" -lt 40 ]; do sleep 0.25; i=$((i + 1)); done
@@ -314,7 +324,7 @@ case5() { # no seed or creds content leaks
 }
 
 case6() { # the server works
-    local d=$H/mash-nats p
+    local d=$H/mash-nats p pid
     run --owner acme
     chk "setup ran" rc_is 0
     p=$(port_of "$d")
@@ -357,6 +367,46 @@ case6() { # the server works
         --creds "$d/creds/mashadmin.creds" pub x y >"$W/notls" 2>&1
     RC=$?
     chk "no CA given: refused" [ "$RC" != 0 ]
+    XDG_CONFIG_HOME="$W/xdgc" nats --server "tls://127.0.0.1:$p" \
+        --creds "$d/creds/mashadmin.creds" --timeout 3s pub x y >"$W/noca" 2>&1
+    RC=$?
+    chk "tls without the CA: refused" [ "$RC" != 0 ]
+    chk "tls without the CA: the message names certificate verification (unknown authority)" \
+        hasre "$W/noca" 'certificate signed by unknown authority|failed to verify certificate'
+    pid=$(pid_of "$d")
+    chk "the server pid's only listener is 127.0.0.1:$p" only_listener "$pid" "$p"
+    # what openssl generated: SANs, key types, the CA's limits
+    openssl x509 -in "$d/server.pem" -noout -ext subjectAltName >"$W/san" 2>&1 </dev/null
+    chk "server cert SAN: DNS:localhost" has "$W/san" 'DNS:localhost'
+    chk "server cert SAN: IP 127.0.0.1" has "$W/san" 'IP Address:127.0.0.1'
+    chk "server cert SAN: IP ::1" has "$W/san" 'IP Address:0:0:0:0:0:0:0:1'
+    chk "server cert SAN: exactly these three" \
+        [ "$(tr ',' '\n' <"$W/san" | grep -Ec 'DNS:|IP Address:')" = 3 ]
+    openssl x509 -in "$d/server.pem" -noout -text >"$W/stext" 2>&1 </dev/null
+    openssl x509 -in "$d/ca.pem" -noout -text >"$W/catext" 2>&1 </dev/null
+    chk "server key is EC (id-ecPublicKey)" hasre "$W/stext" 'Public Key Algorithm: id-ecPublicKey'
+    chk "server key curve is P-256 (prime256v1)" hasre "$W/stext" 'ASN1 OID: prime256v1'
+    chk "CA key is EC P-256" hasre "$W/catext" 'ASN1 OID: prime256v1'
+    chk "CA: basic constraints are critical" hasre "$W/catext" 'Basic Constraints: critical'
+    chk "CA: CA:TRUE, pathlen:0" hasre "$W/catext" 'CA:TRUE, pathlen:0'
+    chk "CA: name constraints present and critical" hasre "$W/catext" 'Name Constraints: critical'
+    chk "CA: permitted DNS:localhost" hasre "$W/catext" 'DNS:localhost'
+    chk "CA: permitted IP 127.0.0.1/255.255.255.255" has "$W/catext" 'IP:127.0.0.1/255.255.255.255'
+    chk "CA: permitted IP ::1/ffff...ffff" \
+        hasre "$W/catext" 'IP:0:0:0:0:0:0:0:1/FFFF:FFFF:FFFF:FFFF:FFFF:FFFF:FFFF:FFFF'
+    chk "CA: nothing excluded" lacks "$W/catext" 'Excluded'
+    chk "ca.key mode is 600" [ "$(stat -c %a "$d/ca.key")" = 600 ]
+    chk "openssl verifies the server cert against the CA" openssl verify -CAfile "$d/ca.pem" "$d/server.pem"
+    # the CA must not vouch for anything else: sign a cert for another name with its key
+    openssl req -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -subj "/CN=evil.example.com" \
+        -keyout "$W/evil.key" -out "$W/evil.csr" 2>/dev/null </dev/null
+    printf 'subjectAltName=DNS:evil.example.com\n' >"$W/evil.ext"
+    openssl x509 -req -in "$W/evil.csr" -CA "$d/ca.pem" -CAkey "$d/ca.key" -CAserial "$W/evil.srl" \
+        -CAcreateserial -days 30 -extfile "$W/evil.ext" -out "$W/evil.pem" 2>/dev/null </dev/null
+    openssl verify -CAfile "$d/ca.pem" "$W/evil.pem" >"$W/evilv" 2>&1 </dev/null
+    RC=$?
+    chk "a cert for evil.example.com signed by the CA does not verify" [ "$RC" != 0 ]
+    chk "... because of the name constraint" hasre "$W/evilv" 'permitted subtree violation'
     python3 "$W/rawplain.py" "$p" >"$W/raw" 2>&1
     chk "plain-text (non-TLS) client gets no PONG" has "$W/raw" 'no-pong'
     stopdir "$d"
@@ -449,9 +499,9 @@ case8() { # argument and path checking
     run --help
     chk "--help: exit 0" rc_is 0
     chk "--help: usage text" has "$W/out" 'usage: mash-local-nats-setup.sh'
-    run --dir /tmp/mlnt-out --owner acme
-    chk "--dir outside \$HOME: exit 1" rc_is 1
-    chk "--dir outside \$HOME: nothing made" absent /tmp/mlnt-out
+    run --dir / --owner acme
+    chk "--dir /: exit 1" rc_is 1
+    chk "--dir /: says absolute path, not /" has "$W/err" 'absolute path, and not /'
     run --dir "$H" --owner acme
     chk "--dir \$HOME itself: exit 1" rc_is 1
     run --dir relative/dir --owner acme
@@ -708,10 +758,308 @@ case14() { # two dirs at once, different ports
     stopdir "$a"; stopdir "$b"
 }
 
+case15() { # macOS refusal (faked with MLNT_UNAME) and a missing ss
+    local P=$W/p before after want
+    want='error: this script sets up NATS on Linux only; on macOS, run it on a Linux machine or use a NATS server you already have'
+    # PATH without nats, nats-server, openssl and ss: the macOS line must come before any tool check
+    mkpath "$P" nats nats-server openssl ss
+    before=$(find "$H" -mindepth 0 2>/dev/null | sort | cksum)
+    for ROUTE in pipe file; do
+        PRE=(env MLNT_UNAME=Darwin "PATH=$P")
+        run --owner acme
+        chk "darwin, $ROUTE route, tools missing: exit 1" rc_is 1
+        chk "darwin, $ROUTE route: stderr is exactly the one line" [ "$(cat "$W/err")" = "$want" ]
+        chk "darwin, $ROUTE route: stderr is one line" [ "$(wc -l <"$W/err")" = 1 ]
+        chk "darwin, $ROUTE route: stdout is empty" [ ! -s "$W/out" ]
+        run --stop
+        chk "darwin --stop: exit 1 with the same line" err_is "$want"
+        run --remove --dir "$H/zz"
+        chk "darwin --remove: exit 1 with the same line" err_is "$want"
+    done
+    PRE=(env MLNT_UNAME=Darwin)
+    run --owner acme
+    chk "darwin, all tools present: still refused, exit 1" rc_is 1
+    chk "darwin, all tools present: the one line" [ "$(cat "$W/err")" = "$want" ]
+    after=$(find "$H" -mindepth 0 2>/dev/null | sort | cksum)
+    chk "darwin: nothing created in \$HOME" [ "$before" = "$after" ]
+    chk "darwin: no mash-nats dir" absent "$H/mash-nats"
+    PRE=(env MLNT_UNAME=Linux)
+    run --owner acme --dir "$H/lx"
+    chk "MLNT_UNAME=Linux: works as usual" rc_is 0
+    stopdir "$H/lx"
+    # a missing ss
+    rm -rf "$P"; mkpath "$P" ss
+    PRE=(env "PATH=$P"); run --owner acme --dir "$H/noss"
+    chk "no ss: exit 1" rc_is 1
+    chk "no ss: error: missing: ss" hasx "$W/err" 'error: missing: ss'
+    chk "no ss: says ss is needed (Linux only in 0.5.6)" has "$W/err" 'ss is needed (Linux only in 0.5.6)'
+    chk "no ss: nothing created" absent "$H/noss"
+}
+
+case16() { # a truncated download (curl | bash) runs nothing
+    local n cut pct before after pid d=$H/mash-nats
+    n=$(wc -c <"$SCRIPT")
+    chk "the script's last line is main \"\$@\"" [ "$(tail -n 1 "$SCRIPT")" = 'main "$@"' ]
+    before=$(find "$H" -mindepth 0 2>/dev/null | sort | cksum)
+    for pct in 10 30 60 80 95 99; do
+        cut=$((n * pct / 100))
+        head -c "$cut" "$SCRIPT" | cat | bash -s -- --owner acme >"$W/out" 2>"$W/err"
+        RC=$?
+        after=$(find "$H" -mindepth 0 2>/dev/null | sort | cksum)
+        chk "first $pct% ($cut of $n bytes): nothing created in \$HOME" [ "$before" = "$after" ]
+        chk "first $pct%: no mash-nats dir" absent "$d"
+        chk "first $pct%: no mode ran (stdout empty)" [ ! -s "$W/out" ]
+        chk "first $pct%: nothing listens on 4222" bash -c '! ss -ltn | grep -q ":4222"'
+    done
+    head -n -1 "$SCRIPT" | cat | bash -s -- --owner acme >"$W/out" 2>"$W/err"
+    RC=$?
+    chk "everything but the last line: runs nothing (exit 0, no output)" quiet_ok
+    chk "...: no mash-nats dir" absent "$d"
+    # the same on a made server: a truncated --stop and --remove touch nothing
+    ROUTE="file"; run --owner acme
+    chk "setup ran" rc_is 0
+    pid=$(pid_of "$d")
+    cut=$((n * 60 / 100))
+    head -c "$cut" "$SCRIPT" | cat | bash -s -- --stop >"$W/out" 2>"$W/err"
+    chk "truncated --stop: the server is still alive" alive "$pid"
+    head -c "$cut" "$SCRIPT" | cat | bash -s -- --remove >"$W/out" 2>"$W/err"
+    chk "truncated --remove: the dir and the server are still there" bash -c '[ -d "$1" ]' _ "$d"
+    chk "truncated --remove: the server is still alive" alive "$pid"
+    stopdir "$d"
+}
+
+case17() { # a parent folder others can write to is refused unless sticky
+    local par=$H/par m h0
+    ROUTE="file"
+    mkdir "$par"
+    for m in 775 770 777 757 2775; do
+        chmod "$m" "$par"
+        run --owner acme --dir "$par/x$m"
+        chk "parent mode $m (writable by group or others, no sticky): exit 1" rc_is 1
+        chk "parent mode $m: error says writable by others" hasre "$W/err" '^error: .*writable by others: '"$par"
+        chk "parent mode $m: hint says chmod go-w" hasre "$W/err" "^hint: .*chmod go-w $par"
+        chk "parent mode $m: nothing made" absent "$par/x$m"
+    done
+    for m in 1777 1775 755; do
+        chmod "$m" "$par"
+        run --owner acme --dir "$par/y$m"
+        chk "parent mode $m: accepted (exit 0)" rc_is 0
+        chk "parent mode $m: the dir is made" [ -d "$par/y$m" ]
+        stopdir "$par/y$m"
+    done
+    mkdir -p "$H/gp/q"; chmod 775 "$H/gp"
+    run --owner acme --dir "$H/gp/q/z"
+    chk "group-writable grandparent under \$HOME: exit 1" rc_is 1
+    chk "grandparent: the error names it" has "$W/err" "writable by others: $H/gp"
+    chk "grandparent: nothing made" absent "$H/gp/q/z"
+    h0=$(stat -c %a "$H")
+    chmod 775 "$H"
+    run --owner acme
+    chk "group-writable \$HOME (the immediate parent of the default dir): exit 1" rc_is 1
+    chk "\$HOME: the error names it" has "$W/err" "writable by others: $H"
+    chk "\$HOME: nothing made" absent "$H/mash-nats"
+    run --start --dir "$par/y755"
+    chk "--start under a group-writable \$HOME: refused too" rc_is 1
+    chmod "$h0" "$H"
+    run --owner acme --dir "$H/after"
+    chk "\$HOME back to mode $h0: accepted" rc_is 0
+    stopdir "$H/after"
+}
+
+case22() { # --dir anywhere: outside $HOME, ancestors owned by you or root, symlinks
+    local t d pid
+    ROUTE="file"
+    # (1) a parent you own, outside $HOME: the full life cycle
+    t=$(mktemp -d /tmp/mlnt.XXXXXX); d=$t/mash-nats
+    chk "control: the parent is outside \$HOME, mode 700" [ "$(stat -c %a "$t")" = 700 ]
+    run --owner acme --dir "$d"
+    check_success "$d" acme
+    pid=$(pid_of "$d")
+    chk "outside \$HOME: the dir is mode 700" [ "$(stat -c %a "$d")" = 700 ]
+    run --stop --dir "$d"
+    chk "outside \$HOME: --stop: exit 0" rc_is 0
+    chk "outside \$HOME: --stop: server gone" gone "$pid"
+    run --start --dir "$d"
+    chk "outside \$HOME: --start: exit 0" rc_is 0
+    chk "outside \$HOME: --start: a live pid" alive "$(pid_of "$d")"
+    pid=$(pid_of "$d")
+    ptyrun "$d" bash "$SCRIPT" --remove --dir "$d"
+    chk "outside \$HOME: --remove on a terminal: exit 0" rc_is 0
+    chk "outside \$HOME: --remove: dir gone" absent "$d"
+    chk "outside \$HOME: --remove: server gone" gone "$pid"
+    rmdir "$t"
+    # (2) a parent owned by root that you cannot write to
+    for d in /opt/mlnt-x /usr/local/share/mlnt-x; do
+        run --owner acme --dir "$d"
+        chk "root-owned parent $d: exit 1" rc_is 1
+        chk "root-owned parent $d: says cannot write to ${d%/*}" hasx "$W/err" "error: cannot write to ${d%/*}"
+        chk "root-owned parent $d: hint says pick a folder you own" has "$W/err" 'hint: pick a folder you own'
+        chk "root-owned parent $d: nothing made" absent "$d"
+    done
+    # (3) an ancestor owned by another user
+    run --owner acme --dir /home/other/sub/n
+    chk "ancestor owned by another user: exit 1" rc_is 1
+    chk "other user's ancestor: says not owned by you or root" has "$W/err" 'not owned by you or root: /home/other'
+    chk "other user's ancestor: nothing made" absent /home/other/sub/n
+    # (4) symlink ancestors
+    t=$(mktemp -d /tmp/mlnt.XXXXXX); mkdir "$t/real"; ln -s "$t/real" "$t/mine"
+    run --owner acme --dir "$t/mine/n"
+    chk "symlink ancestor owned by you: exit 1" rc_is 1
+    chk "symlink ancestor: says symlink" has "$W/err" "refusing a symlink in the path: $t/mine"
+    chk "symlink ancestor: target untouched" [ -z "$(ls -A "$t/real")" ]
+    rm "$t/mine"; rmdir "$t/real" "$t"
+    run --owner acme --dir /mlnt-rootlink/n
+    chk "root-owned symlink ancestor: exit 0" rc_is 0
+    chk "root-owned symlink ancestor: the dir is made behind the link" [ -d /home/tester/linkdst/n ]
+    stopdir /mlnt-rootlink/n
+    # (5) / and a top-level folder in a root-owned /
+    run --owner acme --dir /
+    chk "--dir /: exit 1" rc_is 1
+    run --owner acme --dir /mlnt-top
+    chk "--dir /mlnt-top: cannot write to /" hasx "$W/err" 'error: cannot write to /'
+}
+
+case18() { # the owner name "system" is reserved
+    local e
+    ROUTE="file"
+    run --owner system --dir "$H/s1"
+    chk "owner system: exit 1" rc_is 1
+    chk "owner system: says invalid owner name" has "$W/err" 'error: invalid owner name: system'
+    chk "owner system: says it is reserved" has "$W/err" 'reserved'
+    chk "owner system: nothing made" absent "$H/s1"
+    ROUTE=pipe
+    run --owner system --dir "$H/s1"
+    chk "owner system, piped route: exit 1" rc_is 1
+    ptyrun system bash "$SCRIPT" --dir "$H/s2"
+    chk "owner system typed at the prompt: exit 1" rc_is 1
+    chk "owner system typed: invalid owner name, reserved" hasre "$W/out" 'invalid owner name: system is reserved'
+    chk "owner system typed: nothing made" absent "$H/s2"
+    run --owner SYSTEM --dir "$H/s3"
+    chk "owner SYSTEM (upper case): exit 1" rc_is 1
+    e=systems
+    run --owner "$e" --dir "$H/s4"
+    chk "owner $e (only the exact name is reserved): exit 0" rc_is 0
+    stopdir "$H/s4"
+}
+
+case19() { # the port is probed again right before the server starts
+    local d=$H/mash-nats real p
+    real=$(command -v ss)
+    mkdir -p "$W/shim"
+    # real ss on its first -ltn listing, then it claims MLNT_FAKEPORT is listening
+    cat >"$W/shim/ss" <<SH
+#!/bin/sh
+case "\$*" in *-ltn*) ;; *) exec $real "\$@" ;; esac
+n=\$(cat "$W/ss.count" 2>/dev/null || echo 0)
+n=\$((n + 1))
+echo "\$n" >"$W/ss.count"
+$real "\$@"
+[ "\$n" -le 1 ] || echo "LISTEN 0 128 127.0.0.1:\${MLNT_FAKEPORT:-4222} 0.0.0.0:*"
+SH
+    chmod 755 "$W/shim/ss"
+    rm -f "$W/ss.count"
+    ROUTE=pipe
+    PRE=(env "PATH=$W/shim:$PATH" MLNT_FAKEPORT=4222)
+    run --owner acme
+    chk "port taken between the first look and the start: exit 1" rc_is 1
+    chk "...: the message names the port" hasx "$W/err" 'error: port 4222 was taken just now by another program'
+    chk "...: the hint says to run again" hasre "$W/err" '^hint: .*run mash-local-nats-setup.sh again'
+    chk "...: not the generic 'a step failed'" lacks "$W/err" 'a step failed'
+    chk "...: nothing left behind" absent "$d"
+    chk "...: no server was started" bash -c '! ss -ltn | grep -q ":4222"'
+    chk "...: ss was asked twice or more" [ "$(cat "$W/ss.count")" -ge 2 ]
+    # --start: same probe
+    PRE=()
+    ROUTE="file"; run --owner acme
+    chk "setup ran" rc_is 0
+    p=$(port_of "$d")
+    stopdir "$d"
+    rm -f "$W/ss.count"
+    PRE=(env "PATH=$W/shim:$PATH" "MLNT_FAKEPORT=$p")
+    run --start
+    chk "--start, port taken just now: exit 1" rc_is 1
+    chk "--start: the message names the port" hasx "$W/err" "error: port $p was taken just now by another program"
+    chk "--start: the hint says --start again" hasre "$W/err" '^hint: .*--start again'
+    chk "--start: no server.pid left" absent "$d/server.pid"
+    chk "--start: no server was started" bash -c '! ss -ltn | grep -q ":'"$p"'"'
+    PRE=()
+    run --start
+    chk "--start again without the clash: exit 0" rc_is 0
+    stopdir "$d"
+}
+
+case20() { # --remove refuses while something still listens on the recorded port
+    local d=$H/mash-nats p DP s0 s1
+    ROUTE="file"
+    run --owner acme
+    chk "setup ran" rc_is 0
+    p=$(port_of "$d")
+    stopdir "$d"
+    chk "the server is stopped" bash -c '! ss -ltn | grep -q "127.0.0.1:'"$p"'"'
+    python3 -m http.server "$p" --bind 127.0.0.1 >"$W/dummy.log" 2>&1 &
+    DP=$!
+    chk "control: a dummy listener (a wrapper's server) is up on $p" waitlisten "$p"
+    s0=$(snap "$d")
+    ptyrun "$d" bash "$SCRIPT" --remove
+    chk "--remove with a listener on the port: exit 1" rc_is 1
+    chk "--remove: says something still listens, nothing removed" \
+        has "$W/out" "error: something still listens on 127.0.0.1:$p; nothing was removed"
+    chk "--remove: hint says to stop it" hasre "$W/out" 'hint: stop the program'
+    chk "--remove: not reported as removed" lacks "$W/out" "removed $d"
+    chk "--remove: the dir is still there" [ -d "$d" ]
+    s1=$(snap "$d")
+    chk "--remove: every file unchanged" [ "$s0" = "$s1" ]
+    chk "--remove: the other listener is untouched" alive "$DP"
+    kill "$DP"; wait "$DP" 2>/dev/null
+    chk "the dummy is stopped by its recorded pid" gone "$DP"
+    ptyrun "$d" bash "$SCRIPT" --remove
+    chk "--remove with the port free: exit 0" rc_is 0
+    chk "--remove with the port free: the dir is gone" absent "$d"
+}
+
+# guard_check LABEL PID NAME: a made dir whose server.pid names a process that is not
+# our nats-server must leave that process alone on --stop and on --remove
+guard_check() {
+    local label=$1 victim=$2 d=$H/g-$3
+    ROUTE="file"
+    run --owner acme --dir "$d"
+    chk "[$label] setup ran" rc_is 0
+    stopdir "$d"
+    printf '%s\n' "$victim" >"$d/server.pid"
+    run --stop --dir "$d"
+    chk "[$label] --stop: exit 0" rc_is 0
+    chk "[$label] --stop: says the pid was left alone" hasre "$W/out" "pid $victim is not our nats-server; left alone"
+    chk "[$label] --stop: the process is still alive" alive "$victim"
+    chk "[$label] --stop: the stale server.pid is removed" absent "$d/server.pid"
+    printf '%s\n' "$victim" >"$d/server.pid"
+    ptyrun "$d" bash "$SCRIPT" --remove --dir "$d"
+    chk "[$label] --remove: exit 0" rc_is 0
+    chk "[$label] --remove: says the pid was left alone" has "$W/out" 'left alone'
+    chk "[$label] --remove: the process is still alive" alive "$victim"
+    chk "[$label] --remove: the dir is gone" absent "$d"
+}
+
+case21() { # the pid-reuse guard
+    local SP NS
+    sleep 300 &
+    SP=$!
+    guard_check "sleep 300" "$SP" sleep
+    printf 'listen: 127.0.0.1:4290\n' >"$W/other.conf"
+    nats-server -c "$W/other.conf" >"$W/other.log" 2>&1 &
+    NS=$!
+    chk "control: a nats-server with another config is up on 4290" waitlisten 4290
+    guard_check "nats-server from another config" "$NS" other
+    chk "the other nats-server still listens on 4290" listening 4290
+    kill "$SP" "$NS"; wait "$SP" "$NS" 2>/dev/null
+    chk "the test's sleep is stopped by its recorded pid" gone "$SP"
+    chk "the test's nats-server is stopped by its recorded pid" gone "$NS"
+}
+
 run_case() {
     case $CASE in
+    15) case15 ;; 16) case16 ;; 17) case17 ;; 18) case18 ;; 19) case19 ;; 20) case20 ;; 21) case21 ;;
     1) case1 ;; 2) case2 ;; 3) case3 ;; 4) case4 ;; 5) case5 ;; 6) case6 ;; 7) case7 ;;
-    8) case8 ;; 9) case9 ;; 10) case10 ;; 11) case11 ;; 12) case12 ;; 13) case13 ;; 14) case14 ;;
+    8) case8 ;; 9) case9 ;; 10) case10 ;; 11) case11 ;; 12) case12 ;; 13) case13 ;; 14) case14 ;; 22) case22 ;;
     *) echo "FAIL: c$CASE: no such case" ;;
     esac
 }
@@ -736,20 +1084,34 @@ for t in podman curl sha256sum df awk timeout; do
     command -v "$t" >/dev/null 2>&1 || { echo "needs $t" >&2; exit 2; }
 done
 
-SCR_DEFAULT=/tmp/claude-1000/-home-randyb-code-mash-wt-policy-mash
-SCR_DEFAULT=$SCR_DEFAULT/a96abb56-309c-4e6b-bf1f-73e29107fede/scratchpad/p1t
-SCRATCH=${MLNT_SCRATCH:-$SCR_DEFAULT}
+MADE_SCRATCH=0
+if [ -n "${MLNT_SCRATCH:-}" ]; then
+    SCRATCH=$MLNT_SCRATCH
+    mkdir -p "$SCRATCH" || exit 2
+else
+    SCRATCH=$(mktemp -d "${TMPDIR:-/tmp}/mlnt.XXXXXX") || exit 2
+    MADE_SCRATCH=1
+fi
 IMAGES=${MLNT_IMAGES:-"debian:stable ubuntu:24.04 ubuntu:26.04"}
-CASES=${MLNT_CASES:-"1 2 3 4 5 6 7 8 9 10 11 12 13 14"}
+CASES=${MLNT_CASES:-"1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22"}
 NCV=${MLNT_NATSCLI:-0.5.2}
+# sha256 of https://github.com/nats-io/natscli/releases/download/v0.5.2/nats-0.5.2-linux-amd64.zip,
+# computed once on 2026-11-20; the test fails if the download differs
+NATPIN=9dddf92072bba154c11a08165718fb6ee42af1f25ce4f1bb284d2fc141abcff2
+[ "$NCV" = 0.5.2 ] || NATPIN=${MLNT_NATSCLI_SHA256:-}
+[ -n "$NATPIN" ] || { echo "natscli v$NCV has no pinned sha256; set MLNT_NATSCLI_SHA256" >&2; exit 2; }
 RUN=$(date +%m%d%H%M%S)-$$
-mkdir -p "$SCRATCH" || exit 2
-REPORT=${MLNT_REPORT:-$SCRATCH/receipt-$RUN.md}
+if [ "$MADE_SCRATCH" = 1 ]; then
+    REPORT=${MLNT_REPORT:-${TMPDIR:-/tmp}/mlnt-receipt-$RUN.md}
+else
+    REPORT=${MLNT_REPORT:-$SCRATCH/receipt-$RUN.md}
+fi
 CTX=$SCRATCH/build-$RUN
 LOGS=$SCRATCH/logs-$RUN
 MY_CONTAINERS=()
 MY_IMAGE_IDS=()
 CLEANED='not run'
+SCRATCH_NOTE=''
 
 free_gb() { df -P -k "$1" | awk 'NR==2 {printf "%d", $4 / 1048576}'; }
 free_mb() { df -P -k "$1" | awk 'NR==2 {printf "%d", $4 / 1024}'; }
@@ -760,6 +1122,17 @@ cleanup() {
     for n in "${MY_CONTAINERS[@]+"${MY_CONTAINERS[@]}"}"; do podman rm -f "$n" >/dev/null 2>&1; done
     for i in "${MY_IMAGE_IDS[@]+"${MY_IMAGE_IDS[@]}"}"; do podman rmi -f "$i" >/dev/null 2>&1; done
     case $CTX in "$SCRATCH"/build-*) rm -rf -- "$CTX" ;; esac
+    # the scratch directory goes only when this run made it, and only if all passed
+    SCRATCH_NOTE='scratch dir given by MLNT_SCRATCH: kept'
+    if [ "$MADE_SCRATCH" = 1 ]; then
+        if [ "$FAIL" = 0 ] && [ "$PASS" -gt 0 ]; then
+            rm -rf -- "$LOGS"
+            rmdir -- "$SCRATCH" 2>/dev/null && SCRATCH_NOTE="made by this run ($SCRATCH): removed" ||
+                SCRATCH_NOTE="made by this run ($SCRATCH): NOT empty, kept"
+        else
+            SCRATCH_NOTE="made by this run ($SCRATCH): kept for inspection (logs in $LOGS)"
+        fi
+    fi
     left=0
     for n in "${MY_CONTAINERS[@]+"${MY_CONTAINERS[@]}"}"; do
         podman container exists "$n" 2>/dev/null && left=$((left + 1))
@@ -795,7 +1168,7 @@ write_receipt() {
         echo "- date (UTC): $(date -u +%Y-%m-%dT%H:%M:%SZ)"
         echo "- test: scripts/mash-local-nats-setup_test.sh, sha256 $(sha256sum "$SELF_TEST" | awk '{print $1}')"
         echo "- script under test: scripts/mash-local-nats-setup.sh, sha256 $SCRIPTSHA"
-        echo "- natscli v$NCV linux-amd64 zip, sha256 $NATSHA"
+        echo "- natscli v$NCV linux-amd64 zip, sha256 $NATSHA (pinned: $NATPIN)"
         echo "- podman: $(podman --version 2>/dev/null)"
         echo
         echo "## Images"
@@ -806,8 +1179,9 @@ write_receipt() {
         echo
         echo "- ok: $PASS"
         echo "- FAIL: $FAIL"
-        echo "- host free disk before: ${DISK0:-?} MB, after: $(free_mb "$SCRATCH") MB"
+        echo "- host free disk before: ${DISK0:-?} MB, after: $(free_mb "$(dirname -- "$SCRATCH")") MB"
         echo "- cleanup: $CLEANED"
+        echo "- scratch: $SCRATCH_NOTE"
         echo
         echo "## Cases"
         echo
@@ -838,6 +1212,13 @@ curl -fsSL -o "$CTX/nats.zip" \
     echo "cannot download natscli v$NCV" >&2; exit 2; }
 NATSHA=$(sha256sum "$CTX/nats.zip" | awk '{print $1}')
 echo "natscli sha256 $NATSHA"
+if [ "$NATSHA" != "$NATPIN" ]; then
+    echo "FAIL: natscli v$NCV zip sha256 is $NATSHA, pinned $NATPIN" >&2
+    FAIL=$((FAIL + 1)); RESULTS="$RESULTS
+- FAIL natscli zip sha256 differs from the pin"
+    exit 2
+fi
+echo "natscli sha256 matches the pin"
 cat >"$CTX/Containerfile" <<'CF'
 ARG BASE
 FROM ${BASE}
@@ -846,7 +1227,10 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     && rm -rf /var/lib/apt/lists/*
 COPY nats.zip /tmp/nats.zip
 RUN unzip -j -o /tmp/nats.zip '*/nats' -d /usr/local/bin && chmod 755 /usr/local/bin/nats && rm /tmp/nats.zip
-RUN useradd -m -s /bin/bash tester
+RUN useradd -m -s /bin/bash tester && useradd -m -s /bin/bash other \
+    && chmod 755 /home/other && mkdir /home/other/sub && chown other /home/other/sub \
+    && mkdir /home/tester/linkdst && chown tester /home/tester/linkdst \
+    && ln -s /home/tester/linkdst /mlnt-rootlink
 CF
 
 for tag in $IMAGES; do
