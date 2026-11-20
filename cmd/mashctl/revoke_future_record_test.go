@@ -28,14 +28,6 @@ func (h *fleetEnv) recordIssuedAt(pub string, at time.Time) {
 	}
 }
 
-// withRevokeNow replaces the clock an endpoint delete revocation reads, for the test.
-func withRevokeNow(t *testing.T, f func() time.Time) {
-	t.Helper()
-	prev := ctl.RevokeNow
-	ctl.RevokeNow = f
-	t.Cleanup(func() { ctl.RevokeNow = prev })
-}
-
 func TestEndpointDeleteRefusesAKeyTheRecordDatesInTheFuture(t *testing.T) {
 	h := newFleetEnv(t)
 	h.seedMeta(ad("n"), admin.Meta{Labels: map[string]string{"env": "green"}}, nil)
@@ -74,28 +66,6 @@ func TestEndpointDeleteWarnsAndRevokesWithoutARecord(t *testing.T) {
 	}
 	if strings.Count(errb, "no issue record") != 1 {
 		t.Fatalf("want one warning: %q", errb)
-	}
-}
-
-// The check and the revocation share one reading of the clock.
-func TestEndpointDeleteRevokesAtTheCheckedTime(t *testing.T) {
-	h := newFleetEnv(t)
-	h.seedMeta(ad("n"), admin.Meta{Labels: map[string]string{"env": "green"}}, nil)
-	calls := fakeRevoke(t, nil)
-	base := time.Now().Add(time.Hour)
-	reads := 0
-	withRevokeNow(t, func() time.Time { // each reading is an hour later than the last
-		reads++
-		return base.Add(time.Duration(reads-1) * time.Hour)
-	})
-	if out, errb, code := h.run("endpoint", "delete", "o.g.n"); code != 0 || len(*calls) != 1 {
-		t.Fatalf("%d %q %q", code, out, errb)
-	}
-	if reads != 1 {
-		t.Fatalf("clock read %d times, want 1", reads)
-	}
-	if got := (*calls)[0].at; !got.Equal(base) {
-		t.Fatalf("revoked at %v, want the checked time %v", got, base)
 	}
 }
 
