@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// The sandbox of AT-001 to AT-003 (and selfcheck): tests run only in containers or VMs that the test makes and
+// The sandbox of AT-001 to AT-003, AT-4 (and selfcheck): tests run only in containers or VMs that the test makes and
 // destroys, never on the machine that runs the harness. So `liveat at001` on a developer machine builds the node image,
 // starts one throwaway rootless container of it (no network but loopback, no published port, the non-root user mash),
 // puts a static `liveat` in it and runs `liveat <the same arguments> --inside` there: inside, the harness does what it
@@ -30,8 +30,12 @@ const (
 const errInsideOutside = "liveat: --inside is refused outside a container (there is no " + containerEnvFile + "): it starts a NATS server, and tests never run on the machine that runs the harness; leave the flag out and the run goes into a sandbox container"
 
 // sandboxArgs is the command line of the run inside the container: the same verb and port, plus --inside.
-func sandboxArgs(cmd string, port int) []string {
-	return []string{sandboxLiveat, cmd, "--port", strconv.Itoa(port), "--inside"}
+func sandboxArgs(cmd string, port int, strict bool) []string {
+	args := []string{sandboxLiveat, cmd, "--port", strconv.Itoa(port), "--inside"}
+	if strict {
+		args = append(args, "--strict")
+	}
+	return args
 }
 
 // sandboxEnv is the whole environment of the run inside: scratch paths and what the host knows (the revision, the
@@ -48,10 +52,10 @@ func sandboxEnv(r *Run) []string {
 	}
 }
 
-// sandboxMain is `liveat at001|at002|at003|all|selfcheck --port P [--keep]` on the host. Exit codes are the run
-// inside's (0, 1, 2, 4); 4 also when the sandbox could not be made, 1 when the host's scan of what came back finds a
+// sandboxMain is `liveat at001|at002|at003|at004|all|selfcheck --port P [--keep]` on the host. Exit codes are the run
+// inside's (0, 1, 2, 3, 4); 4 also when the sandbox could not be made, 1 when the host's scan of what came back finds a
 // seed or a JWT.
-func sandboxMain(cmd string, port int, keep bool, stdout, stderr io.Writer, p *Podman) int {
+func sandboxMain(cmd string, port int, keep, strict bool, stdout, stderr io.Writer, p *Podman) int {
 	if err := p.Preflight(); err != nil {
 		fmt.Fprintln(stderr, "liveat:", err)
 		return 4
@@ -94,7 +98,7 @@ func sandboxMain(cmd string, port int, keep bool, stdout, stderr io.Writer, p *P
 		fmt.Fprintln(stderr, "liveat:", err)
 		return code
 	}
-	res := h.Exec("inside", sandboxArgs(cmd, port), sandboxEnv(r))
+	res := h.Exec("inside", sandboxArgs(cmd, port, strict), sandboxEnv(r))
 	// What the container printed is redacted before it reaches this terminal or a CI log: a seed or a JWT in it is a
 	// failure, and it is never shown.
 	outText, errText2, printedSecret := shownOutput(res)

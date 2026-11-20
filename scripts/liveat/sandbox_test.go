@@ -222,9 +222,12 @@ func TestLocalHostsRefuseTheSetupScript(t *testing.T) {
 }
 
 func TestSandboxArgvAndEnv(t *testing.T) {
-	got := strings.Join(sandboxArgs("at002", 4222), " ")
+	got := strings.Join(sandboxArgs("at002", 4222, false), " ")
 	if got != "/node/bin/liveat at002 --port 4222 --inside" {
 		t.Errorf("%s", got)
+	}
+	if got := strings.Join(sandboxArgs("at004", 4222, true), " "); got != "/node/bin/liveat at004 --port 4222 --inside --strict" {
+		t.Errorf("strict does not reach the run inside: %s", got)
 	}
 	r := &Run{Repo: "../..", Revision: "abc123 (clean)", ImageLines: []string{"a: 1", "b: 2"}}
 	env := strings.Join(sandboxEnv(r), "\n")

@@ -98,6 +98,27 @@ type Runner struct {
 	seq     int
 	leaks   []Leak
 	capErrs []string
+	argvs   []Argv
+}
+
+// Argv is the command line of one command the runner ran or started: the label of its output files and every argument
+// (the binary included). A secret in it would be visible to every user of the machine in ps.
+type Argv struct {
+	Label string
+	Args  []string
+}
+
+func (r *Runner) recordArgv(label string, args []string) {
+	r.mu.Lock()
+	r.argvs = append(r.argvs, Argv{Label: label, Args: append([]string(nil), args...)})
+	r.mu.Unlock()
+}
+
+// Argvs is the command line of every command so far, in order.
+func (r *Runner) Argvs() []Argv {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]Argv(nil), r.argvs...)
 }
 
 // capErr records a failure to save or read back a command's output. A scenario with one fails (INV-001): the secret scan
@@ -213,6 +234,7 @@ func (r *Runner) Run(name string, args []string, env []string, stdin string) Res
 // RunIn is Run in directory dir.
 func (r *Runner) RunIn(dir, name string, args []string, env []string, stdin string) Result {
 	seq, base := r.next(name)
+	r.recordArgv(base, args)
 	res := Result{Code: -1, Seq: seq}
 	if len(args) == 0 {
 		res.Stderr = "liveat: no command"
@@ -304,6 +326,7 @@ type Proc struct {
 // Start starts args[0] with args[1:] and stdin held open. Its output is kept in memory and in files under Out.
 func (r *Runner) Start(name string, args []string, env []string) (*Proc, error) {
 	_, base := r.next(name)
+	r.recordArgv(base, args)
 	cmd := exec.Command(args[0], args[1:]...)
 	cmd.Env = env
 	cmd.Dir = r.Cwd

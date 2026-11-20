@@ -1,7 +1,7 @@
-// Command liveat runs the live acceptance tests AT-001 to AT-003 of the 0.5.5 endpoint-model contract against a build
+// Command liveat runs the live acceptance tests AT-001 to AT-003 and AT-4 (the security boundaries, at004) of the 0.5.5 endpoint-model contract against a build
 // of this checkout.
 //
-//	go run ./scripts/liveat at001|at002|at003|all|selfcheck --port P [--keep] [--inside]
+//	go run ./scripts/liveat at001|at002|at003|at004|all|selfcheck --port P [--keep] [--strict] [--inside]
 //
 // On the machine you run it on it starts nothing: it builds a node image (podman.go, Containerfile.at005), starts ONE
 // throwaway rootless container of it, copies itself in and runs `liveat <the same arguments> --inside` there as a
@@ -14,7 +14,7 @@
 // with a scratch home and an environment built from scratch values, keeps the output of every command under
 // <run>/out, fails the run if any of it holds a seed or a JWT (INV-001), prints the run record of contract section 8
 // (and keeps it as <run>/record-<at>.md), stops every process it started by its recorded PID, and removes the run
-// directory unless --keep is given. Exit 0: every assertion held; 1: one did not; 2: usage; 4: the run could not be set up.
+// directory unless --keep is given. Exit 0: every assertion held (with pending checks, the result line says PASS WITH PENDING, not a clean pass); 1: one did not; 2: usage; 3: --strict and a check is pending; 4: the run could not be set up.
 //
 // The CLI forms of contract 0.5.5 (mashctl endpoint ..., mash key create, mash credential create) are coded as the
 // contract writes them; a build without them fails the scenario with that fact.
@@ -36,7 +36,7 @@ import (
 func main() { os.Exit(realMain(os.Args[1:], os.Stdout, os.Stderr)) }
 
 func realMain(args []string, stdout, stderr io.Writer) (code int) {
-	usage := "usage: liveat at001|at002|at003|all|selfcheck --port P [--keep] [--inside: only inside a container; the default runs in a sandbox container] | liveat at005 [--dry-setup] [--hosts podman --run-by manual|ci --host-label LABEL [--subnet-base A.B] | --hosts local] [--keep] [--record-out FILE] | liveat at005-cleanup [--run RUNID]"
+	usage := "usage: liveat at001|at002|at003|at004|all|selfcheck --port P [--keep] [--strict: a pending check fails the run, exit 3] [--inside: only inside a container; the default runs in a sandbox container] | liveat at005 [--dry-setup] [--hosts podman --run-by manual|ci --host-label LABEL [--subnet-base A.B] | --hosts local] [--keep] [--record-out FILE] | liveat at005-cleanup [--run RUNID]"
 	if len(args) == 0 {
 		fmt.Fprintln(stderr, usage)
 		return 2
@@ -53,6 +53,7 @@ func realMain(args []string, stdout, stderr io.Writer) (code int) {
 	port := fs.Int("port", 0, "")
 	keep := fs.Bool("keep", false, "")
 	inside := fs.Bool("inside", false, "")
+	strict := fs.Bool("strict", false, "")
 	if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 {
 		fmt.Fprintln(stderr, usage)
 		return 2
@@ -65,8 +66,10 @@ func realMain(args []string, stdout, stderr io.Writer) (code int) {
 		scs = []Scenario{AT002}
 	case "at003":
 		scs = []Scenario{AT003}
+	case "at004":
+		scs = []Scenario{AT004}
 	case "all":
-		scs = []Scenario{AT001, AT002, AT003}
+		scs = []Scenario{AT001, AT002, AT003, AT004}
 	case "selfcheck":
 		scs = []Scenario{SelfCheck}
 	default:
@@ -82,7 +85,7 @@ func realMain(args []string, stdout, stderr io.Writer) (code int) {
 		return 2
 	}
 	if !*inside { // the default: nothing starts on this machine, the run goes into a sandbox container
-		return sandboxMain(cmd, *port, *keep, stdout, stderr, &Podman{})
+		return sandboxMain(cmd, *port, *keep, *strict, stdout, stderr, &Podman{})
 	}
 	r, err := NewRun("", *port, *keep)
 	if err != nil {
@@ -106,6 +109,7 @@ func realMain(args []string, stdout, stderr io.Writer) (code int) {
 	}
 	fmt.Fprintf(stdout, "run %s, revision %s\n", r.ID, r.Revision)
 	failed := 0
+	var pending []string
 	for _, sc := range scs {
 		fmt.Fprintf(stdout, "\n== %s\n", sc.ID)
 		rec, err := runScenario(r, sc)
@@ -118,6 +122,7 @@ func realMain(args []string, stdout, stderr io.Writer) (code int) {
 		if !rec.passed {
 			failed++
 		}
+		pending = append(pending, rec.pending...)
 	}
 	if *keep {
 		fmt.Fprintf(stdout, "kept: %s (records, output and scratch homes)\n", r.Dir)
@@ -126,12 +131,23 @@ func realMain(args []string, stdout, stderr io.Writer) (code int) {
 		fmt.Fprintf(stdout, "%d scenario(s) FAILED\n", failed)
 		return 1
 	}
+	return strictExit(*strict, pending, stdout)
+}
+
+// strictExit is the exit code of a run with no failed assertion: 0, or 3 under --strict when any check is pending (a
+// pending check is not a pass: the final release gate runs `liveat all --strict`).
+func strictExit(strict bool, pending []string, stdout io.Writer) int {
+	if strict && len(pending) > 0 {
+		fmt.Fprintf(stdout, "pending checks fail under --strict: %s\n", strings.Join(pending, "; "))
+		return 3
+	}
 	return 0
 }
 
 type scenarioResult struct {
 	table, markdown string
 	passed          bool
+	pending         []string // the names of the pending checks
 }
 
 // runScenario runs one scenario with a fresh server, writes its record and returns what to print. A panic in a
@@ -153,7 +169,7 @@ func runScenario(r *Run, sc Scenario) (res scenarioResult, err error) {
 	if err := WriteRecord(filepath.Join(r.Dir, "record-"+sc.ID+".md"), rec); err != nil {
 		return res, err
 	}
-	return scenarioResult{table: a.C.Table(), markdown: rec.Markdown(), passed: rec.Passed()}, nil
+	return scenarioResult{table: a.C.Table(), markdown: rec.Markdown(), passed: rec.Passed(), pending: pendingNames(a.C)}, nil
 }
 
 // repoRoot is the top of the checkout the harness is run in.
