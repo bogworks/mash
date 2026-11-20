@@ -247,7 +247,7 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 		if !strings.HasPrefix(args[1], "-") {
 			msg = "serve takes no argument " + args[1]
 		}
-		return cliframe.Report(stdout, stderr, cliframe.Usagef("%s", msg).WithHint("mash serve --help"), jsonRequested(global, args))
+		return cliframe.Report(stdout, stderr, cliframe.Usagef("%s", msg).WithHint("mash serve --help"), global.JSON)
 	}
 	if args[0] == "version" { // needs no endpoint, so before config
 		mk := func(context.Context) (*cmdcore.Env, error) {
