@@ -27,18 +27,25 @@ const NotRevoked = "nothing was revoked; the key is still valid"
 // directory record may be short or malformed, and slicing it must never panic.
 func ShortKey(k string) string { return config.Clean(fmt.Sprintf("%.8s", k)) }
 
-// Usage is the full verb listing for prog.
+// usageWidth is the widest line of the help: eighty columns.
+const usageWidth = 80
+
+// Usage is the full verb listing for prog. Each command takes a line, wrapped with a hanging indent when it is long,
+// and its description follows indented under it, wrapped; no line passes eighty columns.
 func Usage(prog string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "usage: %s <verb> [args]\n\n", prog)
 	line := func(left, right string) {
-		if right == "" {
-			fmt.Fprintf(&b, "  %s\n", prog+" "+left)
-			return
+		for _, l := range wrapUsageLeft("  "+prog+" "+left, "          ") {
+			b.WriteString(l + "\n")
 		}
-		fmt.Fprintf(&b, "  %-44s %s\n", prog+" "+left, right)
+		if right != "" {
+			for _, l := range wrapWords("      "+right, "      ") {
+				b.WriteString(l + "\n")
+			}
+		}
 	}
-	line("init --config FILE [--dry-run] [--json]", "set mash up on a NATS server you already have, from a setup file; safe to run again")
+	line("init --config path [--dry-run] [--json]", "set mash up on a NATS server you already have, from a setup file; safe to run again")
 	line("status [--json]", "one line per server: whether it works, how many endpoints it has, how many are online")
 	line("limits show [--json]", "print the limits in force")
 	line("doctor [--strict] [--json]", "check the server, mash's storage on it and every endpoint's records, and say how to fix what is wrong; changes nothing")
@@ -48,6 +55,53 @@ func Usage(prog string) string {
 		line("version [--json]", "print the version and the commit")
 	}
 	return b.String()
+}
+
+// wrapUsageLeft breaks a command line before a word or a [bracketed option] so that no line passes usageWidth; a
+// continuation starts with indent. A bracketed option is never split.
+func wrapUsageLeft(s, indent string) []string {
+	var toks []string
+	for i := 0; i < len(s); {
+		if s[i] == ' ' {
+			i++
+			continue
+		}
+		j := i
+		if s[i] == '[' {
+			if k := strings.IndexByte(s[i:], ']'); k >= 0 {
+				j = i + k + 1
+			}
+		}
+		for j < len(s) && s[j] != ' ' {
+			j++
+		}
+		toks = append(toks, s[i:j])
+		i = j
+	}
+	return wrapTokens(toks, "  ", indent)
+}
+
+// wrapWords breaks text (which starts with its first line's indent) at spaces so that no line passes usageWidth.
+func wrapWords(s, indent string) []string {
+	return wrapTokens(strings.Fields(s), indent, indent)
+}
+
+func wrapTokens(toks []string, first, indent string) []string {
+	var lines []string
+	cur := first
+	empty := true
+	for _, t := range toks {
+		if !empty && len([]rune(cur))+1+len([]rune(t)) > usageWidth {
+			lines = append(lines, cur)
+			cur, empty = indent, true
+		}
+		if !empty {
+			cur += " "
+		}
+		cur += t
+		empty = false
+	}
+	return append(lines, cur)
 }
 
 func endpointLines(line func(left, right string)) {

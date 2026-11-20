@@ -22,14 +22,17 @@ import (
 	"github.com/bogworks/mash/internal/sap"
 )
 
-const endpointCreateUsage = `usage: mashctl endpoint create <address> [--out PATH] [--public-key PATH] [--dry-run] [--json]
+const endpointCreateUsage = `usage: mashctl endpoint create <address> [--out PATH] [--public-key PATH]
+       [--dry-run] [--json]
   address            the endpoint, as owner.group.name
-  --out PATH         write a join file for another machine and install nothing here
-  --public-key PATH  sign this public key and make no seed; needs --out. For an endpoint that made its own key
-                     with mash key create
+  --out PATH         write a join file for another machine and install
+                     nothing here
+  --public-key PATH  sign this public key and make no seed; needs --out. For
+                     an endpoint that made its own key with mash key create
   --dry-run          print what would change, and change nothing
   --json             print the result as JSON
-  With no option the key pair is made here and <address>.creds is written to the config folder.
+  With no option the key pair is made here and <address>.creds is written to
+  the config folder.
 Example:
   mashctl endpoint create acme.demo.bob
   mashctl endpoint create acme.demo.bob --out acme.demo.bob.join

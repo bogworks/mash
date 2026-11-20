@@ -46,27 +46,11 @@ var confGaps = map[string]string{
 
 // confDrift: key is "<check> <name>"; the value says what differs and what closes it.
 var confDrift = map[string]string{
-	"commands init":            "init --help names the option's argument FILE; spec/mashctl.json names it path (internal/ctl Usage or the spec; one of them changes)",
 	"toplevel-unlisted audit":  "audit is still a verb and in mashctl --help; the specification removed it (doctor takes it over); closes with doctor",
 	"toplevel-unlisted issued": "issued is still a verb and in mashctl --help; the specification removed it (doctor takes it over, endpoint show has the record); closes with doctor",
 	"removed audit":            "audit still runs (read-only listing, exit 1 with no owner); the specification removed it; closes with doctor",
 	"removed issued":           "issued still runs and prints its own usage; the specification removed it; closes with doctor",
-	"width mashctl":            confWide + ": mashctl --help puts the verb's description on the same line (internal/ctl Usage), up to 402 columns",
-	"width init":               confWide,
-	"width status":             confWide,
-	"width limits":             confWide,
-	"width limits apply":       confWide,
-	"width endpoint create":    confWide + ": usage line, --out, --public-key and the notes run past 80",
-	"width endpoint delete":    confWide + ": the note under the options runs past 80",
-	"width endpoint reissue":   confWide + ": usage line, --out and the notes run past 80",
-	"bad-option endpoint":      confParentOption,
-	"bad-option-json endpoint": confParentOption,
 }
-
-const confWide = "a line of the --help output is longer than 80 columns (rules.json: eighty columns); the help is hand-written text, not wrapped"
-
-// confParentOption: 'mashctl endpoint --bogus' reads the option as a sub-command name (cmd/mashctl/endpoint_cmd.go); the rule is 'unknown option'.
-const confParentOption = "a parent command takes an unknown option as an unknown sub-command: 'error: unknown command \"--bogus\"' (cmd/mashctl/endpoint_cmd.go), rules.json says 'error: unknown option --bogus'"
 
 // confCheck applies the rule of the two tables to the problems of one check.
 func confCheck(t *testing.T, key string, problems []string) {

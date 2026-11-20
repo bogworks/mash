@@ -20,7 +20,8 @@ const endpointDeleteUsage = `usage: mashctl endpoint delete <address> [--yes] [-
   --yes      do not ask
   --dry-run  print what would change, and change nothing
   --json     print the result as JSON
-  Deletes the endpoint, its inbox and its credentials. The address can never be used again.
+  Deletes the endpoint, its inbox and its credentials. The address can never be
+  used again.
   Without --yes it asks you to type the address, and needs a terminal for that.
 Example:
   mashctl endpoint delete acme.demo.bob
