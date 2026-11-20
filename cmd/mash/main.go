@@ -250,6 +250,9 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 			return 0
 		}
 	}
+	if args[0] == "serve" && stdinIsTerminal(stdin) { // run by hand: nothing is attempted, no config, no connection
+		return cliframe.Report(stdout, stderr, cliframe.Usagef("mash serve is started by an agent host, not by hand").WithHint("mash serve --help"), global.JSON)
+	}
 	if args[0] == "version" { // needs no endpoint, so before config
 		mk := func(context.Context) (*cmdcore.Env, error) {
 			return &cmdcore.Env{Svc: buildVersion{pluginRoot: env("MASH_PLUGIN_ROOT")}}, nil
@@ -339,4 +342,15 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 		return cli(cfg, args, stdin, stdout, stderr)
 	}
 	return cliframe.Report(stdout, stderr, cliframe.Usagef("mash has no command %s", args[0]).WithHint("mash --help"), global.JSON)
+}
+
+// stdinIsTerminal reports whether r is a terminal: a file whose mode is a character device. An agent host gives serve
+// a pipe; a person at a keyboard gives it a terminal. A variable so a test can force either answer.
+var stdinIsTerminal = func(r io.Reader) bool {
+	f, ok := r.(*os.File)
+	if !ok {
+		return false
+	}
+	fi, err := f.Stat()
+	return err == nil && fi.Mode()&os.ModeCharDevice != 0
 }
