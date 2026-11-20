@@ -52,17 +52,17 @@ func checkVersion(t *testing.T, r map[string]any, plugin string) {
 	if r["isError"] == true {
 		t.Fatalf("version tool errored: %v", r)
 	}
-	version, commit := endpoint.CurrentVersion(), shortCommit(endpoint.CurrentCommit())
+	version, full := endpoint.CurrentVersion(), endpoint.CurrentCommit()
+	if full == "" {
+		full = "unknown"
+	}
+	commit := shortCommit(full)
 	if want := "mash v" + version + " (" + commit + ")"; resultText(r) != want {
 		t.Errorf("text %q, want %q", resultText(r), want)
 	}
 	sc, _ := r["structuredContent"].(map[string]any)
 	if sc == nil {
 		t.Fatalf("no structuredContent in %v", r)
-	}
-	full := endpoint.CurrentCommit()
-	if full == "" {
-		full = "unknown"
 	}
 	if sc["version"] != version || sc["commit"] != full || sc["plugin"] != plugin || len(sc) != 3 {
 		t.Errorf("structuredContent %v, want version %q commit %q plugin %q", sc, version, full, plugin)
