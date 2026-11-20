@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 
+	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/sap"
 )
 
@@ -36,13 +38,53 @@ func (e *Endpoint) refuses(t sap.Trust) bool {
 
 // refuse records one refused message: the count (RefusedFile, replaced whole), the sequence and one line on the log
 // without the body. A failure to write is logged; it never stops the mail from being dropped.
-func (e *Endpoint) refuse(seq uint64, from string, trust sap.Trust) {
-	n, err := e.recordRefusal(seq)
-	if err != nil {
-		e.log.Printf("refused unverified mail #%d from %s (%s); the count could not be kept: %v", seq, from, trust, err)
-		return
+func (e *Endpoint) refuse(seq uint64, claimed string, trust sap.Trust) {
+	line := fmt.Sprintf("refused message %d from %s: not verified (%s)", seq, refusedSender(claimed), trust)
+	if _, err := e.recordRefusal(seq); err != nil {
+		line += fmt.Sprintf("; the count could not be kept: %v", err)
 	}
-	e.log.Printf("refused unverified mail #%d from %s (%s); %d refused in all", seq, from, trust, n)
+	e.log.Print(line)
+}
+
+// unknownSender stands in the log line for a message that claims no sender at all.
+const unknownSender = "(unknown sender)"
+
+// refusedSender is the address a refused message claims, for the log line: control characters (newline and tab too)
+// shown as visible \xNN escapes, so a sender cannot forge a log line. A message that claims nothing is unknownSender.
+func refusedSender(claimed string) string {
+	if claimed == "" || claimed == "?" {
+		return unknownSender
+	}
+	return strings.NewReplacer("\n", `\x0a`, "\t", `\x09`).Replace(config.EscapeText(claimed))
+}
+
+// claimedAddress is the address a message claims to come from: the name its sender header gives, else what classify
+// resolved, which is empty when nothing was claimed.
+func claimedAddress(h sap.SenderHeader, from string) string {
+	if h.Name != "" {
+		return h.Name
+	}
+	return from
+}
+
+// refusedSeq reports whether serve refused the inbox message with this sequence (accept_unverified off and the
+// sequence in the sidecar).
+func (e *Endpoint) refusedSeq(seq uint64) bool {
+	if e.cfg.AcceptUnverified {
+		return false
+	}
+	dir, err := SpoolDir(e.cfg)
+	if err != nil {
+		return false
+	}
+	return slices.Contains(readRefusedSeqs(filepath.Join(dir, refusedSeqsFile)), seq)
+}
+
+// RefusedMessageError is the error of a read of a message serve refused because it was not verified.
+type RefusedMessageError struct{ Seq uint64 }
+
+func (e *RefusedMessageError) Error() string {
+	return fmt.Sprintf("mash: message #%d was refused: it was not verified", e.Seq)
 }
 
 func (e *Endpoint) recordRefusal(seq uint64) (int, error) {

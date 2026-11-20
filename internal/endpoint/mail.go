@@ -372,7 +372,7 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 			// Dropped and counted, never delivered: acked so it is not redelivered for ever. The sender is told nothing.
 			// Without the lease the new holder gets it (and counts it), so it is nak'd, not counted.
 			if e.mayAck(pending{}) {
-				e.refuse(ref.Seq, from, trust)
+				e.refuse(ref.Seq, claimedAddress(h, from), trust)
 				_ = m.Ack()
 			} else {
 				_ = m.Nak()
@@ -1086,6 +1086,9 @@ func (e *Endpoint) ReadRef(ctx context.Context, r MsgRef) (render.Mail, error) {
 	if r.Stream != "" {
 		return render.Mail{}, fmt.Errorf("mash: no stream %q on this endpoint", r.Stream)
 	}
+	if e.refusedSeq(r.Seq) {
+		return render.Mail{}, &RefusedMessageError{Seq: r.Seq} // refused mail is not there to read
+	}
 	s, err := e.inbox(ctx)
 	if err != nil {
 		return render.Mail{}, err
@@ -1102,7 +1105,7 @@ func (e *Endpoint) ReadRef(ctx context.Context, r MsgRef) (render.Mail, error) {
 	}
 	m, ok := e.toMail(raw)
 	if !ok && e.refuses(m.Trust) && m.Trust != sap.TrustForged && m.Trust != sap.TrustMalformed {
-		return render.Mail{}, &NoMessageError{Seq: r.Seq, Endpoint: e.Display()} // refused mail is not there to read
+		return render.Mail{}, &RefusedMessageError{Seq: r.Seq}
 	}
 	if !ok {
 		return m, fmt.Errorf("mash: message #%s has a %s sender header and is not shown", FormatMsgRef(r), m.Trust)

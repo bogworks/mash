@@ -3,6 +3,7 @@ package endpoint
 import (
 	"context"
 	"errors"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -118,14 +119,18 @@ func TestUnverifiedMailIsRefusedByDefault(t *testing.T) {
 	}
 	for n := uint64(1); n <= 5; n++ {
 		m, err := c.Read(context.Background(), n)
-		var nm *NoMessageError
+		var rf *RefusedMessageError
 		if n == seq {
 			if err != nil || m.Trust != sap.TrustVerified {
 				t.Fatalf("read #%d: %+v %v", n, m, err)
 			}
-		} else if !errors.As(err, &nm) {
+		} else if !errors.As(err, &rf) || rf.Seq != n {
 			t.Fatalf("read #%d of refused mail: %+v %v", n, m, err)
 		}
+	}
+	var nm *NoMessageError
+	if _, err := c.Read(context.Background(), 99); !errors.As(err, &nm) {
+		t.Fatalf("read of a number that never existed: %v", err)
 	}
 
 	// The count persists across a restart, and mail refused before it is not counted again.
@@ -216,5 +221,65 @@ func TestRefusalNeedsAStateDir(t *testing.T) {
 	e := &Endpoint{cfg: config.Config{Owner: "acme", Group: "demo", Name: "bob"}}
 	if _, err := e.recordRefusal(1); err == nil {
 		t.Fatal("recorded with no state directory")
+	}
+}
+
+// The log line of a refusal is exactly "refused message <seq> from <claimed address>: not verified (<label>)".
+func TestRefusalLogLine(t *testing.T) {
+	f := newFixture(t, "a", "b")
+	cfg := f.cfgState("a", t.TempDir(), false)
+	f.publishUnverified(t, "a")
+	ctx, cancel := context.WithCancel(context.Background())
+	ep, err := Open(ctx, cfg)
+	if err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	var buf lockedLog
+	ep.log = log.New(&buf, "", 0)
+	done := make(chan struct{})
+	go func() { _ = ep.Run(ctx, (&events{}).deliver); close(done) }()
+	t.Cleanup(func() { cancel(); <-done; ep.Close() })
+	waitRefused(t, cfg, 4)
+	got := buf.String()
+	for _, want := range []string{
+		"refused message 1 from (unknown sender): not verified (absent)\n",
+		"refused message 3 from " + tkey("b") + ": not verified (claimed)\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("no %q in\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "in all") || strings.Contains(got, "unverified mail") {
+		t.Errorf("old wording in\n%s", got)
+	}
+	if n := strings.Count(got, "not verified ("); n != 4 {
+		t.Errorf("%d refusal lines, want 4:\n%s", n, got)
+	}
+}
+
+type lockedLog struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (l *lockedLog) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+func (l *lockedLog) String() string { l.mu.Lock(); defer l.mu.Unlock(); return l.b.String() }
+
+func TestRefusedSenderEscapes(t *testing.T) {
+	for in, want := range map[string]string{
+		"":                     "(unknown sender)",
+		"?":                    "(unknown sender)",
+		"acme.demo.x":          "acme.demo.x",
+		"a\nrefused message 9": `a\x0arefused message 9`,
+		"a\tb\x1b[31m":         `a\x09b\x1b[31m`,
+	} {
+		if got := refusedSender(in); got != want {
+			t.Errorf("%q: got %q, want %q", in, got, want)
+		}
 	}
 }
