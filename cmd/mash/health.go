@@ -170,7 +170,7 @@ func (h *healthSvc) serverCheck(ctx context.Context) cmds.HealthCheck {
 		case errors.Is(err, endpoint.ErrServerRefusedClientCert):
 			c.Detail = "the server refused the client certificate: " + url
 			c.Fix = "set tls_cert and tls_key, or MASH_TLS_CERT and MASH_TLS_KEY, to a certificate the server's CA signed"
-			c.Code = cmds.CodeServerUntrusted
+			c.Code = cmds.CodeCredsRefused
 		}
 		c.Reason = c.Detail
 		return c
@@ -203,10 +203,13 @@ func (h *healthSvc) signInCheck(ctx context.Context) (c cmds.HealthCheck, online
 		case errors.Is(err, endpoint.ErrCredsMismatch):
 			c.Detail = "the creds file belongs to another endpoint than " + addr
 			c.Fix, c.Code = "mashctl endpoint reissue "+addr, cmds.CodeCredsRefused
+		case strings.Contains(msg, "the server refused the client certificate"):
+			c.Detail = "the server refused the client certificate: " + config.RedactURL(h.cfg.URL)
+			c.Fix, c.Code = "set tls_cert and tls_key, or MASH_TLS_CERT and MASH_TLS_KEY, to a certificate the server's CA signed", cmds.CodeCredsRefused
 		case errors.Is(err, endpoint.ErrNotProvisioned):
 			c.Detail, c.Code = redactText(strings.TrimPrefix(msg, "mash: ")), cmds.CodeEndpointDeleted
 		default:
-			c.Detail, c.Code = redactText(strings.TrimPrefix(msg, "mash: ")), cmds.CodeConfigUnreadable
+			c.Detail, c.Code = redactText(strings.TrimPrefix(msg, "mash: ")), cmds.CodeUnknown
 		}
 		if c.Reason == "" {
 			c.Reason = c.Detail

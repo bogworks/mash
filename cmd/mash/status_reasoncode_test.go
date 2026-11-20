@@ -16,6 +16,7 @@ import (
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/endpoint"
 	"github.com/bogworks/mash/internal/spool"
+	"github.com/bogworks/mash/internal/testenv"
 )
 
 // detailOf is what `mash status --detail --json` says for env: the exit code, reason_code ("" when null) and the raw
@@ -77,7 +78,13 @@ func TestStatusReasonCodeEveryValue(t *testing.T) {
 	untrusted := strictEnv(w, "a", nil)
 	delete(untrusted, "MASH_CA")
 
+	// an identity the name rule refuses fails sign-in with an error that fits no other code
+	_, retired := provisionNewForm(t, w.e, "acme", "retired", "me")
+	retired["MASH_NAME_RULE_FILE"] = configARuleFile(t, t.TempDir(), "name-rule.json", configAMashRule)
+	refusedByRule := strictEnv(w, "a", retired)
+
 	shell := map[string]map[string]string{
+		"unknown":             refusedByRule,
 		"config_unreadable":   {"HOME": badHome, "MASH_ENDPOINT": tTo("a"), "MASH_SERVER": "tls://127.0.0.1:1"},
 		"creds_missing":       strictEnv(w, "a", map[string]string{"MASH_CREDS": filepath.Join(t.TempDir(), "none.creds")}),
 		"creds_refused":       strictEnv(w, "a", map[string]string{"MASH_CREDS": otherCreds}),
@@ -117,7 +124,7 @@ func TestStatusReasonCodeEveryValue(t *testing.T) {
 
 	all := []string{"no_endpoint", "endpoints_ambiguous", "config_unreadable", "creds_missing", "creds_refused", "endpoint_deleted",
 		"server_unreachable", "server_untrusted", "server_no_tls", "endpoint_held_elsewhere", "endpoint_lost", "endpoint_not_taken",
-		"storage_unwritable"} // the specification's list, in its order
+		"storage_unwritable", "unknown"} // the specification's list, in its order
 	var missing []string
 	for _, c := range all {
 		if !got[c] {
@@ -284,5 +291,20 @@ func TestStatusSessionStorageFailingAtShell(t *testing.T) {
 	}
 	if got, _ := shellSession(t, w); !strings.Contains(got, `"storage":"ok"`) {
 		t.Errorf("writable again: %s", got)
+	}
+}
+
+// A server that refuses our client certificate refuses who we are: creds_refused, not server_untrusted. A server we
+// do not trust is server_untrusted.
+func TestStatusReasonCodeClientCertRefused(t *testing.T) {
+	w := newWorldWith(t, testenv.Options{TLS: true, RequireClientCert: true}, "a")
+	env := strictEnv(w, "a", map[string]string{"MASH_CA": w.e.CAFile})
+	code, rc, _, ready := detailOf(t, env)
+	if code != 1 || ready || rc != "creds_refused" {
+		t.Errorf("no client certificate: exit %d ready %v reason_code %q, want creds_refused", code, ready, rc)
+	}
+	delete(env, "MASH_CA")
+	if code, rc, _, _ = detailOf(t, env); code != 1 || rc != "server_untrusted" {
+		t.Errorf("untrusted server: exit %d reason_code %q, want server_untrusted", code, rc)
 	}
 }

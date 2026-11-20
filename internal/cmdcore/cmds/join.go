@@ -17,11 +17,12 @@ type JoinRequest struct {
 }
 
 // JoinOutcome is what joining did, or with DryRun would do. Creds is the creds file's path as it is shown (a path under
-// the home folder starts with ~).
+// the home folder starts with ~); CredsPath is the same file's absolute path.
 type JoinOutcome struct {
-	Endpoint string // owner.group.name
-	Servers  []string
-	Creds    string
+	Endpoint  string // owner.group.name
+	Servers   []string
+	Creds     string
+	CredsPath string
 }
 
 // Joiner is the service Join needs from Env.Svc: it installs the join file into the configuration folder.
@@ -37,26 +38,41 @@ type JoinParams struct {
 	DryRun  bool   `json:"dry_run,omitempty" flag:"--dry-run" desc:"Print what would change, and change nothing."`
 }
 
-// JoinResult is the endpoint joined as, the servers and the creds file's path. DryRun is true, and only then present,
-// for a run that changed nothing.
+// JoinResult is the endpoint joined as. DryRun is true, and only then present, for a run that changed nothing. The
+// servers and the creds file are the fuller answer (--detail).
 type JoinResult struct {
+	Endpoint string `json:"endpoint"`
+	DryRun   bool   `json:"dry_run,omitempty"`
+
+	servers   []string
+	creds     string // as shown, for the text
+	credsPath string // absolute, for --detail --json
+}
+
+// JoinDetail is join's fuller object: the endpoint, the servers and the creds file's absolute path.
+type JoinDetail struct {
 	Endpoint string   `json:"endpoint"`
 	Servers  []string `json:"servers"`
 	Creds    string   `json:"creds"`
 	DryRun   bool     `json:"dry_run,omitempty"`
 }
 
-// Text is "Joined as <address>." or, for --dry-run, "Would join as <address>."; with --verbose the servers and the creds
-// path follow as 'label: value' lines.
-func (r JoinResult) Text(o cmdcore.Opts) string {
-	s := "Joined as " + r.Endpoint + "."
+// Text is "Joined as <address>." or, for --dry-run, "Would join as <address>."
+func (r JoinResult) Text(cmdcore.Opts) string {
 	if r.DryRun {
-		s = "Would join as " + r.Endpoint + "."
+		return "Would join as " + r.Endpoint + "."
 	}
-	if o.Detail {
-		s += "\nservers: " + strings.Join(r.Servers, ", ") + "\ncreds: " + r.Creds
-	}
-	return s
+	return "Joined as " + r.Endpoint + "."
+}
+
+// DetailValue is the fuller object, which contains the usual one.
+func (r JoinResult) DetailValue() any {
+	return JoinDetail{Endpoint: r.Endpoint, Servers: append([]string{}, r.servers...), Creds: r.credsPath, DryRun: r.DryRun}
+}
+
+// DetailText is the 'servers:' and 'creds:' lines.
+func (r JoinResult) DetailText(cmdcore.Opts) string {
+	return "servers: " + strings.Join(r.servers, ", ") + "\ncreds:   " + r.creds
 }
 
 // Join is the join command.
@@ -79,6 +95,6 @@ var Join = cmdcore.Command[JoinParams, JoinResult]{
 		if err != nil {
 			return JoinResult{}, err
 		}
-		return JoinResult{Endpoint: o.Endpoint, Servers: append([]string{}, o.Servers...), Creds: o.Creds, DryRun: p.DryRun}, nil
+		return JoinResult{Endpoint: o.Endpoint, DryRun: p.DryRun, servers: append([]string{}, o.Servers...), creds: o.Creds, credsPath: o.CredsPath}, nil
 	},
 }

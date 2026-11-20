@@ -196,6 +196,14 @@ func sameServers(a, b []string) bool {
 }
 
 // shown is path as it is shown: a path under the home folder starts with ~.
+// absPath is p made absolute (p itself when that cannot be done).
+func absPath(p string) string {
+	if a, err := filepath.Abs(p); err == nil {
+		return a
+	}
+	return p
+}
+
 func (s joinSvc) shown(path string) string {
 	return config.TildeIn(path, strings.TrimRight(s.home, "/"))
 }
@@ -285,7 +293,7 @@ func (s joinSvc) Join(_ context.Context, req cmds.JoinRequest) (cmds.JoinOutcome
 
 	address := j.Address
 	credsPath := filepath.Join(dir, address+".creds")
-	out := cmds.JoinOutcome{Endpoint: address, Servers: slices.Clone(j.Servers), Creds: s.shown(credsPath)}
+	out := cmds.JoinOutcome{Endpoint: address, Servers: slices.Clone(j.Servers), Creds: s.shown(credsPath), CredsPath: absPath(credsPath)}
 	if _, err := os.Lstat(credsPath); err == nil && !req.Replace {
 		return cmds.JoinOutcome{}, cliframe.Failf("%s is already installed here", address).WithHint("mash join " + req.File + " --replace")
 	}

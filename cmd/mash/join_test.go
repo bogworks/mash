@@ -190,6 +190,9 @@ func TestJoinMatchesSpec(t *testing.T) {
 			t.Error("--dry-run made the configuration folder")
 		}
 	})
+	do("With --detail", func(w *joinWorld, c specCase) {
+		c.check(t, w.run("join", "acme.demo.bob.join", "--detail"))
+	})
 	do("The join file needs your seed", func(w *joinWorld, c specCase) {
 		writeJoin(t, "acme.demo.bob.join", joinfile.File{MashJoin: 1, Address: "acme.demo.bob", Servers: []string{"tls://myserver:4222"}, UserJWT: w.m.token})
 		c.check(t, w.run("join", "acme.demo.bob.join"))
@@ -284,13 +287,14 @@ func TestJoinThenTheEndpointIsInstalled(t *testing.T) {
 
 func TestJoinJSON(t *testing.T) {
 	w := newJoinWorld(t)
+	// the usual --json is the address and nothing else
 	r := w.run("join", "acme.demo.bob.join", "--json", "--dry-run")
-	want := `{"endpoint":"acme.demo.bob","servers":["tls://myserver:4222"],"creds":"~/.config/mash/acme.demo.bob.creds","dry_run":true}` + "\n"
+	want := `{"endpoint":"acme.demo.bob","dry_run":true}` + "\n"
 	if r.code != 0 || r.out != want || r.errs != "" {
 		t.Errorf("--dry-run --json: %+v", r)
 	}
 	r = w.run("join", "acme.demo.bob.join", "--json")
-	want = `{"endpoint":"acme.demo.bob","servers":["tls://myserver:4222"],"creds":"~/.config/mash/acme.demo.bob.creds"}` + "\n"
+	want = `{"endpoint":"acme.demo.bob"}` + "\n"
 	if r.code != 0 || r.out != want || r.errs != "" {
 		t.Errorf("--json: %+v", r)
 	}
@@ -299,9 +303,18 @@ func TestJoinJSON(t *testing.T) {
 	if r.code != 1 || r.errs != "" || r.out != `{"error":"acme.demo.bob is already installed here","hint":"mash join acme.demo.bob.join --replace"}`+"\n" {
 		t.Errorf("--json failure: %+v", r)
 	}
-	// a path outside the home folder is shown as it is
+}
+
+func TestJoinDetailJSON(t *testing.T) {
+	w := newJoinWorld(t)
+	// --detail --json adds the servers and the creds file's absolute path, not abbreviated with ~
+	r := w.run("join", "acme.demo.bob.join", "--detail", "--json")
+	want := `{"endpoint":"acme.demo.bob","servers":["tls://myserver:4222"],"creds":"` + filepath.Join(w.cfg, "acme.demo.bob.creds") + `"}` + "\n"
+	if r.code != 0 || r.out != want || r.errs != "" || !filepath.IsAbs(w.cfg) {
+		t.Errorf("--detail --json: %+v\nwant %s", r, want)
+	}
 	other := t.TempDir()
-	r = w.run("join", "acme.demo.bob.join", "--json", "--config-dir", other)
+	r = w.run("join", "acme.demo.bob.join", "--detail", "--json", "--config-dir", other)
 	if !strings.Contains(r.out, `"creds":"`+filepath.Join(other, "acme.demo.bob.creds")+`"`) {
 		t.Errorf("creds outside home: %+v", r)
 	}
@@ -310,7 +323,7 @@ func TestJoinJSON(t *testing.T) {
 func TestJoinVerbose(t *testing.T) {
 	w := newJoinWorld(t)
 	r := w.run("join", "acme.demo.bob.join", "--detail")
-	if r.code != 0 || r.out != "Joined as acme.demo.bob.\nservers: tls://myserver:4222\ncreds: ~/.config/mash/acme.demo.bob.creds\n" {
+	if r.code != 0 || r.out != "Joined as acme.demo.bob.\nservers: tls://myserver:4222\ncreds:   ~/.config/mash/acme.demo.bob.creds\n" {
 		t.Errorf("%+v", r)
 	}
 }

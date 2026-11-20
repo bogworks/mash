@@ -97,15 +97,16 @@ const (
 	CodeEndpointsAmbiguous    = "endpoints_ambiguous"     // no endpoint is named and several are installed
 	CodeConfigUnreadable      = "config_unreadable"       // the configuration cannot be read or is incomplete
 	CodeCredsMissing          = "creds_missing"           // the creds file is missing or unusable
-	CodeCredsRefused          = "creds_refused"           // the server refused the creds, or they are another endpoint's
+	CodeCredsRefused          = "creds_refused"           // the server refused who we are: the creds or our client certificate, or the creds are another endpoint's
 	CodeEndpointDeleted       = "endpoint_deleted"        // the endpoint's directory record is gone
 	CodeServerUnreachable     = "server_unreachable"      // no server answered
-	CodeServerUntrusted       = "server_untrusted"        // the server's certificate is not trusted, or it refused ours
+	CodeServerUntrusted       = "server_untrusted"        // the server's certificate is not trusted
 	CodeServerNoTLS           = "server_no_tls"           // a plain address, or a server that offers no TLS
 	CodeEndpointHeldElsewhere = "endpoint_held_elsewhere" // another session holds the endpoint
 	CodeEndpointLost          = "endpoint_lost"           // a newer session took it from this one
 	CodeEndpointNotTaken      = "endpoint_not_taken"      // this session could not take it
 	CodeStorageUnwritable     = "storage_unwritable"      // the mail folder cannot be written
+	CodeUnknown               = "unknown"                 // a failure that fits none of the others; the reason says what was seen
 )
 
 // HealthCheck is one row the service found. Detail is what the row says after its state ("" says nothing). Fix is the
