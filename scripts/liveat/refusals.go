@@ -1,9 +1,12 @@
 package main
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -179,13 +182,32 @@ var AT003 = Scenario{
 			a.refusal(ha, trees, c)
 		}
 
-		// A session whose endpoint has no group.
+		// A session whose endpoint is not an address (no group): it does not exit. An MCP server that dies shows the agent
+		// nothing; a degraded one lets status and doctor say what is wrong.
 		before := a.Snapshot("no-group-session-before", ha, trees...)
-		gextra := append(a.Conn(), "MASH_ENDPOINT=alice.ghost", "MASH_STATE_DIR="+filepath.Join(he.State, "ghost"))
-		r = a.Mash("session-no-group", he, gextra, "serve")
+		const ghost = "alice.ghost"
+		gp, err := a.R.StartProc("serve-no-group", []string{a.R.Mash, "serve"},
+			a.Env(he, append(a.Conn(), "MASH_ENDPOINT="+ghost, "MASH_STATE_DIR="+filepath.Join(he.State, "ghost"))...))
+		hs := errors.New("not started: " + errDetail(err))
+		if err == nil {
+			hs = gp.Handshake(20 * time.Second)
+		}
+		a.C.Check("a session whose endpoint has no group: serve completes the MCP handshake", hs == nil, errDetail(hs))
+		if err == nil {
+			time.Sleep(time.Second)
+			a.C.Check("a session whose endpoint has no group: serve stays up (it does not exit)", !gp.Exited(), "serve exited: "+snip(gp.Stderr()))
+			names := toolNamesIn(gp.Stdout(), 2)
+			a.C.Check("a session whose endpoint has no group: tools/list offers only status, doctor and version", degradedToolSet(names), "offered: "+orNone(strings.Join(names, ", ")))
+			for _, tool := range []string{"status", "doctor"} {
+				text, _, cerr := gp.Call(tool, map[string]any{}, 20*time.Second)
+				a.C.Check("a session whose endpoint has no group: the "+tool+" tool names the bad address "+ghost+" and why", cerr == nil && namesBadAddress(text, ghost), errDetail(cerr)+" "+snip(text))
+				if tool == "status" {
+					a.C.Check("a session whose endpoint has no group: the status tool says it is not ready", strings.Contains(text, "not ready"), snip(text))
+				}
+			}
+			gp.Stop()
+		}
 		after := a.Snapshot("no-group-session-after", ha, trees...)
-		a.C.Check("a session whose endpoint has no group: exit code 1", r.Code == 1, exitDetail(r)+": "+snip(r.Stderr))
-		a.C.Check("a session whose endpoint has no group: standard error names MASH_ENDPOINT", strings.Contains(r.Stderr, "MASH_ENDPOINT"), "")
 		a.C.Check("a session whose endpoint has no group: no directory record, stream, consumer, lease or service was made for it",
 			len(before.Diff(after)) == 0 && !strings.Contains(after.Raw["doctor"], "ghost") && !strings.Contains(after.Raw["list"], "ghost"), "changed: "+orNone(strings.Join(before.Diff(after), ", ")))
 
@@ -315,4 +337,41 @@ func errDetail(err error) string {
 		return ""
 	}
 	return redact(err.Error())
+}
+
+// toolNamesIn is the sorted tool names in the tools/list reply with the id in an MCP stdout stream (nil when there is none).
+func toolNamesIn(stdout string, id int) []string {
+	for _, l := range strings.Split(stdout, "\n") {
+		var m struct {
+			ID     *float64 `json:"id"`
+			Result *struct {
+				Tools []struct {
+					Name string `json:"name"`
+				} `json:"tools"`
+			} `json:"result"`
+		}
+		if json.Unmarshal([]byte(strings.TrimSpace(l)), &m) != nil || m.ID == nil || int(*m.ID) != id || m.Result == nil {
+			continue
+		}
+		var out []string
+		for _, t := range m.Result.Tools {
+			out = append(out, t.Name)
+		}
+		sort.Strings(out)
+		return out
+	}
+	return nil
+}
+
+// degradedToolSet is true only for exactly the tools a session with no usable endpoint offers: doctor, status, version.
+func degradedToolSet(names []string) bool {
+	got := append([]string(nil), names...)
+	sort.Strings(got)
+	return strings.Join(got, ",") == "doctor,status,version"
+}
+
+// namesBadAddress is true when a status or doctor answer names the bad address and says why it is bad (it does not
+// have the three owner.group.name parts), not only that something is wrong.
+func namesBadAddress(text, addr string) bool {
+	return strings.Contains(text, addr) && strings.Contains(text, "dot-separated parts")
 }
