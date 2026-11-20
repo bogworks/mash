@@ -70,8 +70,11 @@ func httpFetch(url string) ([]byte, error) { return httpFetchDefault(url) }
 // httpFetchDefault is the real download; the unit tests replace it so that none touches the network.
 var httpFetchDefault = realFetch
 
+// natscliFetchTimeout bounds the download of the nats CLI into the build context.
+const natscliFetchTimeout = 180 * time.Second
+
 func realFetch(url string) ([]byte, error) {
-	resp, err := (&http.Client{Timeout: 3 * time.Minute}).Get(url)
+	resp, err := (&http.Client{Timeout: natscliFetchTimeout}).Get(url)
 	if err != nil {
 		return nil, err
 	}
