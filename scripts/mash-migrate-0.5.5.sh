@@ -14,7 +14,9 @@
 #
 # It refuses (exit 1, "error:" and "hint:" lines on stderr, nothing changed)
 # when there is nothing to migrate, when the file already has "servers" or "ca"
-# next to an old key, when "url" is not a string, or when the backup exists.
+# next to an old key, when "url" is not a string or holds no address, when the file is not valid JSON
+# (a mismatched or trailing bracket, a comma before a closer, a control character
+# inside a string, an unterminated structure), or when the backup exists.
 # Exit codes: 0 done, 1 refused, 2 usage.
 #
 # Plain bash, awk and the usual tools only (bash 3.2 and BSD awk are enough).
@@ -61,6 +63,7 @@ function emit_list(raw,   n, parts, i, p, s, o) {
         if (p == "") continue
         o = o (o == "" ? "" : ", ") "\"" p "\""
     }
+    if (o == "") fail("url is empty")
     return "[" o "]"
 }
 BEGIN { depth = 0; instr = 0; esc = 0; last = ""; mode = 0; top = ""; nurl = 0; nca = 0 }
@@ -70,6 +73,7 @@ BEGIN { depth = 0; instr = 0; esc = 0; last = ""; mode = 0; top = ""; nurl = 0; 
     for (i = 1; i <= n; i++) {
         c = substr(line, i, 1)
         if (instr) {
+            if (c < " ") fail("a control character inside a string")
             if (esc) { esc = 0; tok = tok c; continue }
             if (c == "\\") { esc = 1; tok = tok c; continue }
             if (c != "\"") { tok = tok c; continue }
@@ -118,8 +122,15 @@ BEGIN { depth = 0; instr = 0; esc = 0; last = ""; mode = 0; top = ""; nurl = 0; 
         }
         if (c == " " || c == "\t" || c == "\n" || c == "\r") { out = out c; continue }
         if (top == "") top = c
-        if (c == "{" || c == "[") depth++
-        else if (c == "}" || c == "]") depth--
+        if (c == "{" || c == "[") {
+            depth++
+            stk[depth] = c
+        } else if (c == "}" || c == "]") {
+            want = (c == "}") ? "{" : "["
+            if (depth < 1 || stk[depth] != want) fail("a closing " c " does not match what it closes")
+            if (last == ",") fail("a comma directly before " c)
+            depth--
+        }
         out = out c
         last = c
     }
@@ -172,11 +183,12 @@ main() {
     umask 077
     local rc=0
     (set -C; : >"$TMP") 2>/dev/null || { TMP=''; refuse "cannot write in $dir" "check the folder's permissions"; }
-    : >"$STAT" 2>/dev/null || { STAT=''; refuse "cannot write in $dir" "check the folder's permissions"; }
+    (set -C; : >"$STAT") 2>/dev/null || { STAT=''; refuse "cannot write in $dir" "check the folder's permissions"; }
     LC_ALL=C awk -v st="$STAT" -v nonl="$nonl" "$AWK_PROG" "$file" >"$TMP" || rc=$?
     if [ "$rc" != 0 ]; then
         local why
         why=$(sed -n 's/^err //p' "$STAT" 2>/dev/null | head -n 1)
+        [ "$why" != "url is empty" ] || refuse "url is empty: nothing to migrate" "set servers by hand"
         refuse "cannot migrate $file: ${why:-the scanner failed}" \
             "fix config.json by hand: rename url to servers (a list) and tls_ca to ca"
     fi
@@ -206,9 +218,16 @@ main() {
             "move it aside, or remove it if you no longer need it, and run again"
     BACKUP_MADE=$backup
     cp -p "$file" "$backup" || refuse "cannot write the backup $backup" "check the folder's permissions"
-    mv -f "$TMP" "$file" || refuse "cannot replace $file" "check the folder's permissions"
+    # From here the new file and the backup are no longer cleanup's to remove: an
+    # interrupt after the replace must not delete the backup.  If the replace
+    # itself fails, remove both by their recorded paths.
+    local newfile=$TMP
     TMP=''
     BACKUP_MADE=''
+    if ! mv -f "$newfile" "$file"; then
+        rm -f -- "$newfile" "$backup"
+        refuse "cannot replace $file" "check the folder's permissions"
+    fi
 
     local what=''
     [ "$has_url" = 0 ] || what='url -> servers'

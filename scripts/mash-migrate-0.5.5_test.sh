@@ -11,17 +11,18 @@
 # directory.
 #
 # Environment:
-#   MMIG_CASES        space-separated case numbers (default: 1 ... 10, and 11 when MMIG_SERVER_TEST=1)
+#   MMIG_CASES        space-separated case numbers (default: 1 ... 10 and 12, and 11 when MMIG_SERVER_TEST=1)
 #   MMIG_REPORT       receipt file (markdown; default: mmig-receipt-<run id>.md under ${TMPDIR:-/tmp})
 #   MMIG_SCRATCH      scratch directory (default: a new mktemp -d, removed at the end when
 #                     the test made it and nothing failed)
 #   MMIG_SCRIPT       test another copy of the script (default: scripts/mash-migrate-0.5.5.sh)
 #   MMIG_MASH         a LINUX amd64 static `mash` binary (0.5.6 or newer); case 10 runs it on the
-#                     migrated and the unmigrated file (default unset: case 10 prints "skipped")
-#                     build one:  CGO_ENABLED=0 go build -trimpath -o <dir>/mash ./cmd/mash
+#                     migrated and the unmigrated file.  Default unset: the test builds one from
+#                     this checkout on the host before the containers start (needs go):
+#                       CGO_ENABLED=0 go build -trimpath -o <run dir>/mash ./cmd/mash
+#                     and removes it, by that exact path, at the end.  A failed build fails the run.
 #   MMIG_SERVER_TEST  1: also run case 11, a live local NATS server made by
-#                     scripts/mash-local-nats-setup.sh inside the container; needs MMIG_MASH and
-#                     MMIG_MASHCTL (a linux amd64 static mashctl with `init --config`), the network
+#                     scripts/mash-local-nats-setup.sh inside the container; needs MMIG_MASHCTL (a linux amd64 static mashctl with `init --config`), the network
 #                     for the image build (apt, natscli download) and takes a few minutes
 #   MMIG_MASHCTL      the mashctl binary for case 11
 #   MMIG_NATSCLI      natscli version for case 11 (default 0.5.2; others need MMIG_NATSCLI_SHA256)
@@ -126,11 +127,6 @@ case2() { # commas
     mig HOME="$H"
     printf '{"servers": ["tls://a:1", "tls://b:2", "tls://c:3"]}\n' >"$W/exp"
     chk "spaces trimmed, empties dropped, three addresses" same "$CFG/config.json" "$W/exp"
-    printf '{"url": ""}\n' | put "$CFG/config.json"
-    rm -f "$CFG/config.json.0.5.5"
-    mig HOME="$H"
-    printf '{"servers": []}\n' >"$W/exp"
-    chk "an empty url becomes an empty list" same "$CFG/config.json" "$W/exp"
 }
 
 case3() { # one old key only
@@ -366,7 +362,7 @@ case10() { # the real mash accepts the migrated file
 case11() {
     local d=$H/srv cfg=$H/live ep=acme.dev.migrator out
     if [ ! -x /t/mash ] || [ ! -x /t/mashctl ]; then
-        bad "case 11 needs MMIG_MASH and MMIG_MASHCTL"
+        bad "case 11 needs the mash and mashctl binaries"
         return
     fi
     cat /t/mash-local-nats-setup.sh >"$W/setup.sh"
@@ -423,10 +419,73 @@ PY
     printf '  --- mash status after the migration\n%s\n' "$out"
 }
 
+# refuse_case LABEL BODY [ERRTEXT HINTTEXT]: BODY goes through printf %b into config.json
+refuse_case() {
+    rm -f "$CFG/config.json.0.5.5"
+    printf '%b' "$2" | put "$CFG/config.json"
+    cp -p "$CFG/config.json" "$W/orig"
+    mig HOME="$H"
+    chk "$1: refused (exit 1, one error: and one hint: line)" refused
+    chk "$1: config.json byte-identical" same "$CFG/config.json" "$W/orig"
+    chk "$1: no backup and no temp file left" bash -c '[ "$(ls -A "$1")" = config.json ]' _ "$CFG"
+    [ -z "${3:-}" ] || chk "$1: error text" has "$W/err" "error: $3"
+    [ -z "${4:-}" ] || chk "$1: hint text" has "$W/err" "hint: $4"
+}
+
+case12() { # invalid JSON and empty url are refusals, not invalid output; temp names are not followed
+    mkdir -p "$CFG"
+    refuse_case "trailing comma before }" '{"url":"a",}\n'
+    refuse_case "mismatched closer ]" '{"url":"a"]\n'
+    refuse_case "[}" '[}\n'
+    refuse_case "}" '}\n'
+    refuse_case "nested mismatch" '{"a":[1},"url":"x"}\n'
+    refuse_case "trailing comma before ]" '{"a":[1,],"url":"x"}\n'
+    refuse_case "raw tab inside the url value" '{"url":"a\tb"}\n'
+    refuse_case "raw tab inside another string" '{"owner":"a\tb","url":"x"}\n'
+    refuse_case "raw newline inside a string" '{"url":"a\nb"}\n'
+    refuse_case "raw carriage return inside a string" '{"url":"a\rb"}\n'
+    refuse_case "raw tab after a backslash inside a string" '{"url":"a\\\tb"}\n'
+    refuse_case "unterminated object" '{"url":"a"\n'
+    refuse_case "unterminated array" '{"url":"a","l":[1,2\n'
+    refuse_case "unterminated string" '{"url":"a\n'
+    refuse_case "empty url" '{"url":""}\n' "url is empty: nothing to migrate" "set servers by hand"
+    refuse_case "blank url" '{"url":"   "}\n' "url is empty: nothing to migrate" "set servers by hand"
+    refuse_case "commas-only url" '{"url":" , ,"}\n' "url is empty: nothing to migrate" "set servers by hand"
+    refuse_case "empty url next to tls_ca" '{"url":"","tls_ca":"/c"}\n' "url is empty: nothing to migrate" "set servers by hand"
+    # tabs, newlines and CRs OUTSIDE strings are whitespace
+    rm -f "$CFG/config.json.0.5.5"
+    printf '{\t"url":\t"tls://a:1"\r\n,\t"n":[1,\n2]\n}\n' | put "$CFG/config.json"
+    mig HOME="$H"
+    chk "tabs and newlines outside strings: exit 0" rc_is 0
+    chk "tabs and newlines outside strings: kept as written" same "$CFG/config.json" <(printf '{\t"servers":\t["tls://a:1"]\r\n,\t"n":[1,\n2]\n}\n')
+    # the temp and stat names are predictable ($$), so each is created without following
+    # anything already there.  exec keeps the pid, so the planted name is the one the script uses.
+    local kind pre planted
+    for kind in tmp stat; do
+        rm -f "$CFG/config.json.0.5.5"
+        printf '{"url":"tls://a:1"}\n' | put "$CFG/config.json"
+        cp -p "$CFG/config.json" "$W/orig"
+        printf 'victim\n' >"$W/victim"
+        cp -p "$W/victim" "$W/victim.orig"
+        pre=.config.json.migrate.PID
+        [ "$kind" = tmp ] || pre=.config.json.migrate.PID.st
+        env -u MASH_CONFIG_DIR -u XDG_CONFIG_HOME HOME="$H" bash -c \
+            'ln -s "$1" "$2/$(printf %s "$4" | sed "s/PID/$$/")"; exec bash "$3"' _ "$W/victim" "$CFG" "$SCRIPT" "$pre" \
+            >"$W/out" 2>"$W/err" </dev/null
+        RC=$?
+        chk "planted $kind name (symlink to a file): refused" refused
+        chk "planted $kind name: the file it pointed at is untouched" same "$W/victim" "$W/victim.orig"
+        chk "planted $kind name: config.json byte-identical" same "$CFG/config.json" "$W/orig"
+        chk "planted $kind name: nothing else left (config.json and the planted link only)" bash -c '[ "$(ls -A "$1" | wc -l)" = 2 ]' _ "$CFG"
+        planted=$(find "$CFG" -maxdepth 1 -type l)
+        [ -z "$planted" ] || rm -f -- "$planted"
+    done
+}
+
 run_case() {
     case $CASE in
     1) case1 ;; 2) case2 ;; 3) case3 ;; 4) case4 ;; 5) case5 ;; 6) case6 ;; 7) case7 ;;
-    8) case8 ;; 9) case9 ;; 10) case10 ;; 11) case11 ;;
+    8) case8 ;; 9) case9 ;; 10) case10 ;; 11) case11 ;; 12) case12 ;;
     *) echo "FAIL: c$CASE: no such case" ;;
     esac
 }
@@ -456,13 +515,11 @@ done
 SERVER=${MMIG_SERVER_TEST:-0}
 if [ "$SERVER" = 1 ]; then
     command -v curl >/dev/null 2>&1 || { echo "needs curl" >&2; exit 2; }
-    for v in MMIG_MASH MMIG_MASHCTL; do
-        [ -n "${!v:-}" ] && [ -f "${!v}" ] || { echo "MMIG_SERVER_TEST=1 needs $v (a linux amd64 static binary)" >&2; exit 2; }
-    done
+    [ -n "${MMIG_MASHCTL:-}" ] && [ -f "$MMIG_MASHCTL" ] || { echo "MMIG_SERVER_TEST=1 needs MMIG_MASHCTL (a linux amd64 static binary)" >&2; exit 2; }
     [ -f "$SETUP_SRC" ] || { echo "no $SETUP_SRC" >&2; exit 2; }
 fi
 if [ -n "${MMIG_MASH:-}" ] && [ ! -f "$MMIG_MASH" ]; then echo "no $MMIG_MASH (MMIG_MASH)" >&2; exit 2; fi
-CASES=${MMIG_CASES:-"1 2 3 4 5 6 7 8 9 10"}
+CASES=${MMIG_CASES:-"1 2 3 4 5 6 7 8 9 10 12"}
 [ -n "${MMIG_CASES:-}" ] || [ "$SERVER" != 1 ] || CASES="$CASES 11"
 NCV=${MMIG_NATSCLI:-0.5.2}
 # sha256 of the natscli v0.5.2 linux-amd64 zip, the same pin as mash-local-nats-setup_test.sh
@@ -485,6 +542,7 @@ LOGS=$SCRATCH/logs-$RUN
 MY_CONTAINERS=()
 MY_IMAGE_IDS=()
 CLEANED='not run'
+BUILT_NOTE=''
 SCRATCH_NOTE=''
 PASS=0; FAIL=0
 RESULTS=''
@@ -492,7 +550,9 @@ IMGLINES=''
 NATSHA=''
 START=$(date +%s)
 MASHSHA=''
-[ -z "${MMIG_MASH:-}" ] || MASHSHA="sha256 $(sha256sum "$MMIG_MASH" | awk '{print $1}')"
+MASH_BIN=${MMIG_MASH:-}   # the binary mounted at /t/mash
+MASH_BUILT=''             # recorded path of the binary this run built, if any
+BIN_DIR=''                # recorded path of the directory it was built in
 SCRIPTSHA=$(sha256sum "$SCRIPT_SRC" | awk '{print $1}')
 
 write_receipt() {
@@ -533,6 +593,10 @@ cleanup() {
     for n in "${MY_CONTAINERS[@]+"${MY_CONTAINERS[@]}"}"; do podman rm -f "$n" >/dev/null 2>&1; done
     for i in "${MY_IMAGE_IDS[@]+"${MY_IMAGE_IDS[@]}"}"; do podman rmi -f "$i" >/dev/null 2>&1; done
     case $CTX in "$SCRATCH"/build-*) rm -rf -- "$CTX" ;; esac
+    [ -z "$MASH_BUILT" ] || rm -f -- "$MASH_BUILT"
+    [ -z "$BIN_DIR" ] || rmdir -- "$BIN_DIR" 2>/dev/null
+    BUILT_NOTE=''
+    [ -z "$MASH_BUILT" ] || { [ ! -e "$MASH_BUILT" ] && BUILT_NOTE="; built mash $MASH_BUILT removed" || BUILT_NOTE="; built mash $MASH_BUILT NOT removed"; }
     SCRATCH_NOTE='scratch dir given by MMIG_SCRATCH: kept'
     if [ "$MADE_SCRATCH" = 1 ]; then
         if [ "$FAIL" = 0 ] && [ "$PASS" -gt 0 ]; then
@@ -550,7 +614,7 @@ cleanup() {
         ! podman image exists "$i" 2>/dev/null || left=$((left + 1))
     done
     if [ "$left" = 0 ]; then
-        CLEANED="done: ${#MY_CONTAINERS[@]} containers removed by name, ${#MY_IMAGE_IDS[@]} images by id, build dir removed; none left"
+        CLEANED="done: ${#MY_CONTAINERS[@]} containers removed by name, ${#MY_IMAGE_IDS[@]} images by id, build dir removed${BUILT_NOTE}; none left"
     else
         CLEANED="INCOMPLETE: $left of this run's objects still exist"
     fi
@@ -562,6 +626,24 @@ trap cleanup EXIT
 trap 'exit 130' INT TERM
 
 mkdir -p "$CTX" "$LOGS" || exit 2
+# cases 10 and 11 need a 0.5.6-era mash: unless MMIG_MASH is given, build one from this checkout
+case " $CASES " in
+*" 10 "* | *" 11 "*)
+    if [ -z "$MASH_BIN" ]; then
+        command -v go >/dev/null 2>&1 || { echo "FAIL: case 10 builds mash and needs go (or set MMIG_MASH)"; FAIL=$((FAIL + 1)); exit 1; }
+        BIN_DIR=$SCRATCH/bin-$RUN
+        mkdir -p "$BIN_DIR" || exit 2
+        MASH_BUILT=$BIN_DIR/mash
+        echo "== building mash from this checkout: $MASH_BUILT"
+        (cd "$HERE/.." && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o "$MASH_BUILT" ./cmd/mash) \
+            >"$LOGS/build-mash.log" 2>&1 || {
+            echo "FAIL: go build of ./cmd/mash failed; see $LOGS/build-mash.log"; sed 's/^/  > /' "$LOGS/build-mash.log" | head -n 12
+            FAIL=$((FAIL + 1)); exit 1; }
+        MASH_BIN=$MASH_BUILT
+    fi
+    ;;
+esac
+[ -z "$MASH_BIN" ] || MASHSHA="sha256 $(sha256sum "$MASH_BIN" | awk '{print $1}')"
 echo "== run $RUN: cases: $CASES"
 TAG=debian:stable
 cat >"$CTX/Containerfile" <<'CF'
@@ -620,7 +702,7 @@ for n in $CASES; do
         --security-opt no-new-privileges --cap-drop=all --pids-limit 1024 \
         -e MMIG_INSIDE=1 \
         -v "$SELF_TEST:/t/test.sh:ro" -v "$SCRIPT_SRC:/t/mash-migrate-0.5.5.sh:ro" \
-        ${MMIG_MASH:+-v "$MMIG_MASH:/t/mash:ro"} \
+        ${MASH_BIN:+-v "$MASH_BIN:/t/mash:ro"} \
         ${MMIG_MASHCTL:+-v "$MMIG_MASHCTL:/t/mashctl:ro"} \
         ${SETUPMNT[@]+"${SETUPMNT[@]}"} \
         "$img" bash /t/test.sh "$n" >"$lg" 2>&1
