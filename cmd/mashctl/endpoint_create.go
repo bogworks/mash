@@ -195,6 +195,7 @@ type epResult struct {
 type createJSON struct {
 	Address       string  `json:"address"`
 	InstalledHere bool    `json:"installed_here"`
+	Creds         *string `json:"creds"` // the credentials file installed here; null when a join file was written
 	JoinFile      *string `json:"join_file"`
 	DryRun        bool    `json:"dry_run,omitempty"`
 }
@@ -210,13 +211,15 @@ type reissueJSON struct {
 // label: value lines. Neither the seed nor a JWT is ever printed.
 func epPrint(w io.Writer, verb string, t epTarget, res epResult, verbose, jsonOut bool) {
 	name := t.addr.String()
-	var join *string
+	var join, creds *string
 	if t.join {
 		join = &t.outPath
+	} else {
+		creds = &t.outPath
 	}
 	if jsonOut {
 		if verb == "create" {
-			writeJSON(w, createJSON{Address: name, InstalledHere: !t.join, JoinFile: join, DryRun: res.planned})
+			writeJSON(w, createJSON{Address: name, InstalledHere: !t.join, Creds: creds, JoinFile: join, DryRun: res.planned})
 		} else {
 			writeJSON(w, reissueJSON{Address: name, JoinFile: join, DryRun: res.planned})
 		}
