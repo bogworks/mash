@@ -62,7 +62,7 @@ type SendParams struct {
 	ReplyTo *int   `json:"reply_to,omitempty" flag:"--reply-to" value:"number" min:"1" desc:"The number of the message in your inbox that this answers. Signed, so the recipient can trust the link."`
 	Relay   *int   `json:"relay,omitempty" flag:"--relay" value:"number" min:"1" desc:"The number of a message in your inbox that this passes on. Signed, so the recipient can trust the link."`
 	ID      string `json:"id,omitempty" flag:"--id" value:"key" desc:"A key of your own. A second send with the same key to the same address within two minutes stores nothing new, so a retry cannot deliver twice."`
-	File    string `json:"-" flag:"--file" value:"path" desc:"Read the message text from a file. Use - for standard input."`
+	File    string `json:"-" flag:"--file" value:"path" desc:"Read the message text from a file. Use - for standard input; if nothing arrives there within 15 minutes the command gives up."`
 }
 
 // SendResult is the receipt of a send.
@@ -211,7 +211,7 @@ func messageText(env *cmdcore.Env, p SendParams) (string, error) {
 		b, err = readStdin(env)
 		if errors.Is(err, errStdinTimeout) {
 			// A failure, exit 1: the command was well formed and nothing arrived in time.
-			return "", cliframe.Failf("no message text arrived on standard input").WithHint("mash send --help")
+			return "", cliframe.Failf("no message text arrived on standard input")
 		}
 	case env.ReadFile != nil:
 		b, err = env.ReadFile(p.File)
@@ -231,7 +231,7 @@ func messageText(env *cmdcore.Env, p SendParams) (string, error) {
 	return text, nil
 }
 
-// errStdinTimeout says the standard input gave no end of text within the command's deadline.
+// errStdinTimeout says the standard input gave no end of text within the limit the caller set (env.StdinTimeout).
 var errStdinTimeout = errors.New("standard input timed out")
 
 // readStdin reads all of env.Stdin, giving up after env.StdinTimeout (when set). The read runs in a goroutine: one

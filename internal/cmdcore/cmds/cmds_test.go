@@ -849,10 +849,10 @@ func TestImplicitStdinHasADeadline(t *testing.T) {
 		if time.Since(start) > 5*time.Second || code != 1 || f.calls != 0 {
 			t.Fatalf("json=%v: code %d calls %d after %v", asJSON, code, f.calls, time.Since(start))
 		}
-		if asJSON && (e.String() != "" || o.String() != `{"error":"no message text arrived on standard input","hint":"mash send --help"}`+"\n") {
+		if asJSON && (e.String() != "" || o.String() != `{"error":"no message text arrived on standard input"}`+"\n") {
 			t.Errorf("json: %q %q", o.String(), e.String())
 		}
-		if !asJSON && (o.String() != "" || e.String() != "error: no message text arrived on standard input\nhint: mash send --help\n") {
+		if !asJSON && (o.String() != "" || e.String() != "error: no message text arrived on standard input\n") {
 			t.Errorf("text: %q %q", o.String(), e.String())
 		}
 	}

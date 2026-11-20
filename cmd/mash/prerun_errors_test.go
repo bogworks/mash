@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -80,7 +81,7 @@ func TestStatusStrayArgumentIsFramed(t *testing.T) {
 
 func writeFile(path, s string) error { return os.WriteFile(path, []byte(s), 0o600) }
 
-// mash send with no message reads standard input; a pipe that never writes ends at the command's deadline (cli_timeout)
+// mash send with no message reads standard input; a pipe that never writes ends at the stdin limit (stdinLimit, 15 minutes)
 // with exit 1, before any endpoint is opened.
 func TestSendImplicitStdinDeadline(t *testing.T) {
 	r, w, err := os.Pipe()
@@ -89,17 +90,43 @@ func TestSendImplicitStdinDeadline(t *testing.T) {
 	}
 	defer r.Close()
 	defer w.Close() // held open, never written
-	env := envFrom(map[string]string{"HOME": t.TempDir(), "MASH_ENDPOINT": "o.dev.a", "MASH_SERVER": "tls://127.0.0.1:1", "MASH_CLI_TIMEOUT": "300ms"})
+	env := envFrom(map[string]string{"HOME": t.TempDir(), "MASH_ENDPOINT": "o.dev.a", "MASH_SERVER": "tls://127.0.0.1:1"})
+	defer func(old time.Duration) { stdinLimit = old }(stdinLimit)
+	stdinLimit = 300 * time.Millisecond
 	var o, e strings.Builder
 	start := time.Now()
 	code := run([]string{"send", "o.dev.b"}, env, r, &o, &e)
-	if code != 1 || o.String() != "" || e.String() != "error: no message text arrived on standard input\nhint: mash send --help\n" || time.Since(start) > 10*time.Second {
+	if code != 1 || o.String() != "" || e.String() != "error: no message text arrived on standard input\n" || time.Since(start) > 10*time.Second {
 		t.Fatalf("%d %q %q after %v", code, o.String(), e.String(), time.Since(start))
 	}
 	o.Reset()
 	e.Reset()
 	code = run([]string{"send", "o.dev.b", "--json"}, env, r, &o, &e)
-	if code != 1 || e.String() != "" || o.String() != `{"error":"no message text arrived on standard input","hint":"mash send --help"}`+"\n" {
+	if code != 1 || e.String() != "" || o.String() != `{"error":"no message text arrived on standard input"}`+"\n" {
 		t.Fatalf("json: %d %q %q", code, o.String(), e.String())
+	}
+}
+
+// who parses --json itself, so the errors before it runs are still framed as JSON: on stdout, nothing on stderr, and
+// the same exit code as the text form.
+func TestWhoJSONFramesPreVerbErrors(t *testing.T) {
+	home := t.TempDir()
+	cfgDir := filepath.Join(home, ".config", "mash")
+	if err := os.MkdirAll(cfgDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.json"), []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for name, env := range map[string]map[string]string{
+		"broken config": {"HOME": home, "XDG_CONFIG_HOME": filepath.Join(home, ".config")},
+		"plain url":     plainEnv(t, "nats://127.0.0.1:1"),
+	} {
+		var o, e, o2, e2 strings.Builder
+		codeText := run([]string{"who"}, envStrict(env), strings.NewReader(""), &o2, &e2)
+		code := run([]string{"who", "--json"}, envStrict(env), strings.NewReader(""), &o, &e)
+		if code == 0 || code != codeText || e.String() != "" || !strings.HasPrefix(o.String(), `{"error":`) || e2.String() == "" {
+			t.Fatalf("%s: %d/%d out=%q err=%q text-err=%q", name, code, codeText, o.String(), e.String(), e2.String())
+		}
 	}
 }

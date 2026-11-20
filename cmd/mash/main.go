@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/bogworks/mash/internal/cliframe"
 	"github.com/bogworks/mash/internal/cmdcore"
@@ -156,6 +157,26 @@ var helpTopic = map[string]bool{"serve": true, "hook": true, "plugin": true, "ke
 // parse --json themselves, and send and version are commands of the table; admin is deprecated and left as it was.
 var noJSONForm = map[string]bool{"status": true, "read": true, "inbox": true, "prompt": true, "serve": true, "hook": true, "plugin": true}
 
+// stdinWait is how long a message read from standard input has to arrive: 15 minutes, as the send help says. It is its
+// own limit, not cli_timeout: a run can take up to twice cli_timeout (this wait, then the command's own deadline).
+const stdinWait = 15 * time.Minute
+
+// stdinLimit is stdinWait; a variable only so a test can shorten it.
+var stdinLimit = stdinWait
+
+// jsonRequested is whether the errors before a verb runs are framed as JSON: --json as a global option, or --json given
+// to a verb that parses it itself (who, key, credential), which the global parse leaves in the arguments.
+func jsonRequested(global cliframe.Global, args []string) bool {
+	if global.JSON {
+		return true
+	}
+	switch args[0] {
+	case "who", "key", "credential":
+		return slices.Contains(args[1:], "--json")
+	}
+	return false
+}
+
 // runLookup is main with its environment injected. lookup must agree with env; it is what config.Load reads.
 func runLookup(ctx context.Context, args []string, env func(string) string, lookup config.Lookup, stdin io.Reader, stdout, stderr io.Writer) int {
 	// Resolved before anything dispatches, so `version`, the MCP server and the SAP service all report one string.
@@ -231,6 +252,7 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 	if args[0] == "key" || args[0] == "credential" { // before config: these need no endpoint, config file or account key
 		return keycredCmd(args, env, stdout, stderr)
 	}
+	jsonOut := jsonRequested(global, args)
 	home := env("HOME")
 	if home == "" {
 		home, _ = os.UserHomeDir()
@@ -248,7 +270,7 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 			fmt.Fprintf(stderr, "mash hook: %s: %v\n", config.CodeGroupMissing, err)
 			return 0
 		}
-		return cliframe.Report(stdout, stderr, cliframe.Usagef("%s: %s", config.CodeGroupMissing, strings.TrimPrefix(err.Error(), "mash: ")).WithHint("mash status"), global.JSON)
+		return cliframe.Report(stdout, stderr, cliframe.Usagef("%s: %s", config.CodeGroupMissing, strings.TrimPrefix(err.Error(), "mash: ")).WithHint("mash status"), jsonOut)
 	}
 	var adapter host.Adapter
 	if args[0] == "hook" || args[0] == "serve" {
@@ -260,7 +282,7 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 				fmt.Fprintln(stderr, herr)
 				return 1
 			}
-			return cliframe.Report(stdout, stderr, cliframe.Failf("%s", strings.TrimPrefix(herr.Error(), "mash: ")).WithHint("mash status"), global.JSON)
+			return cliframe.Report(stdout, stderr, cliframe.Failf("%s", strings.TrimPrefix(herr.Error(), "mash: ")).WithHint("mash status"), jsonOut)
 		}
 	}
 	if args[0] == "hook" { // never fails the session: a bad config is a silent no-op
@@ -270,13 +292,13 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 		return statusCmd(cfg, err, env, stdout, stderr)
 	}
 	if err != nil && args[0] != "serve" {
-		return cliframe.Report(stdout, stderr, cliframe.Failf("%s", strings.TrimPrefix(err.Error(), "mash: ")).WithHint("mash status"), global.JSON)
+		return cliframe.Report(stdout, stderr, cliframe.Failf("%s", strings.TrimPrefix(err.Error(), "mash: ")).WithHint("mash status"), jsonOut)
 	}
 	// A plain URL with no insecure_plaintext is refused before anything is connected (REQ-014): serve stops at session
 	// start and the commands that connect stop, exit 2, with the refusal on stderr.
 	if err == nil && !cfg.Inert() && args[0] != "admin" {
 		if _, perr := endpoint.EndpointTLS(cfg); perr != nil {
-			return cliframe.Report(stdout, stderr, cliframe.Usagef("%s", strings.TrimPrefix(perr.Error(), "mash: ")).WithHint("mash status"), global.JSON)
+			return cliframe.Report(stdout, stderr, cliframe.Usagef("%s", strings.TrimPrefix(perr.Error(), "mash: ")).WithHint("mash status"), jsonOut)
 		}
 		// serve says it once at start (reportSettings); a command says it here, once, before it connects.
 		if w := endpoint.PlainWarning(cfg); w != "" && args[0] != "serve" {
@@ -288,8 +310,8 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 		return serve(ctx, cfg, err, adapter, env("MASH_PLUGIN_ROOT"), stdin, stdout, stderr)
 	case "send":
 		mk := func(context.Context) (*cmdcore.Env, error) {
-			// A message read from standard input has the command's whole deadline to arrive.
-			return &cmdcore.Env{Svc: &cliSvc{cfg: cfg, stderr: stderr}, StdinTimeout: cliDeadline(cfg)}, nil
+			// A message read from standard input has stdinLimit to arrive, whatever cli_timeout is.
+			return &cmdcore.Env{Svc: &cliSvc{cfg: cfg, stderr: stderr}, StdinTimeout: stdinLimit}, nil
 		}
 		return newCommands(mk).RunCLI("send", args[1:], stdin, stdout, stderr, global)
 	case "read", "inbox", "who", "prompt":
