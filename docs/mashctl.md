@@ -55,13 +55,13 @@ Labels do not change a minted user: the permissions of an endpoint do not depend
 
 - `mashctl suspend ADDRESS` refuses all inbound mail to ADDRESS's inbox and prints `suspended ADDRESS: id ID, last_seq N, msgs M (new mail parked; the endpoint's credentials are still valid)`. Suspend does not revoke: it is reversible, and the endpoint can still connect with its creds. The id is a random token naming this one suspension. Stored mail stays readable; the sequence is final while the suspension holds.
 - `mashctl resume ADDRESS` restores delivery and prints `resumed ADDRESS`.
-- `mashctl suspended ADDRESS` prints `suspended ADDRESS since T: id ID, last_seq N, msgs M` and exits 0, or `ADDRESS is not suspended` and exits 3. Any error exits 1.
+- `mashctl suspended ADDRESS` prints `suspended ADDRESS since T: id ID, last_seq N, msgs M` and exits 0, or `ADDRESS is not suspended` and exits 1. Any error exits 1.
 
 See [operations.md](operations.md#suspend-an-endpoints-inbound-mail).
 
 ## Auditing the population
 
-`mashctl audit [--json] [--strict] [--creds-dir DIR] [--compare EARLIER.json]` lists what the server and the creds directories hold, changes nothing, and reports state, not use: it cannot see publishes, connections or endpoints with no stream. `--compare` adds what moved since an earlier `--json` report. Exit codes: 0 clean (or findings without `--strict`), 1 findings under `--strict` (orphans, unreadable items, movement found by `--compare`), 2 usage, 3 the audit could not complete (server unreachable, unreadable required input, bad `--compare` file). See [audit.md](audit.md).
+`mashctl audit [--json] [--strict] [--creds-dir DIR] [--compare EARLIER.json]` lists what the server and the creds directories hold, changes nothing, and reports state, not use: it cannot see publishes, connections or endpoints with no stream. `--compare` adds what moved since an earlier `--json` report. Exit codes: 0 clean (or findings without `--strict`), 1 findings under `--strict` (orphans, unreadable items, movement found by `--compare`), 2 usage. A server that cannot be reached, unreadable required input and a bad `--compare` file also exit 1. See [audit.md](audit.md).
 
 ## mashctl inbox inspect
 
@@ -73,7 +73,7 @@ Shows one endpoint's stored messages and where its `deliver` consumer stands, so
 
 - `address` is `owner.group.instance` or the flat key `owner_group_instance`. It is read from the directory record, one key; an address that names no record is refused (exit 1).
 - The default is the last 20 messages, oldest first. `--limit N` caps the count. `--from SEQ` and `--to SEQ` are an inclusive stream-sequence range, clamped to the stream's first and last sequence; with `--from` the first N messages from it are shown.
-- Exit codes: 0 success, 1 a refusal (an unknown endpoint, no inbox stream), 2 a usage error, 3 it could not complete (no server, no credentials).
+- Exit codes: 0 success, 1 a refusal (an unknown endpoint, no inbox stream) or it could not complete (no server, no credentials), 2 a usage error.
 
 The text form prints the stream and consumer totals, a table of messages and a `note:` line for each limit. `--json` prints one object. The schema string and the field names are a stable contract; they change only when a field is removed or changes meaning.
 
@@ -138,7 +138,7 @@ next: on the endpoint's machine, run: mash credential create --seed design.seed 
 
 With `--make-key` the third line is `  creds    <config dir>/alice.dev.design.creds` and the last line is `next: start a session as this endpoint: MASH_ENDPOINT=alice.dev.design`. Progress, warnings and errors go to standard error.
 
-**Exit codes.** 0 done or planned, 1 refused, 2 usage error, 6 error (a server or a file failed). A refusal and an error name a code in the message, for example `refused (address_taken)`, and the [table below](#refusal-codes) lists them.
+**Exit codes.** 0 done or planned, 1 refused, 2 usage error. An error (a server or a file failed) also exits 1; the JSON `outcome` says `error`. A refusal and an error name a code in the message, for example `refused (address_taken)`, and the [table below](#refusal-codes) lists them.
 
 **A killed run.** Run the same command again. With `--make-key` the key waits in `<creds file>.pending`, so the second run finishes with the same key. With `--public-key` the second run writes the JWT again (if you removed the first, or it was never written). A creds file or inbox left by a run that never completed shows as an orphan in `mashctl audit`.
 
@@ -160,7 +160,7 @@ Before it revokes, `reissue` refuses when the old key's issue record shows a JWT
 
 Two `mashctl` machines must not reissue the same endpoint at the same moment. The command checks the directory key after it writes and reports `superseded` if another run replaced it; it cannot stop the race, and the older key stays revoked either way.
 
-**Exit codes.** 0 done, planned or unchanged, 1 refused, 2 usage error, 5 partial (a bulk run in which some endpoints were not reissued), 6 error. A killed run is finished by running the same command again; with `--make-key` the new key waits in `<creds file>.pending`. With `--make-key`, a reissue that stopped after the new credentials were written, or could not read the directory record back to confirm them, is finished by running the same command again: it keeps the new key, confirms it and removes `<creds file>.pending`, and does not revoke the new key.
+**Exit codes.** 0 done, planned or unchanged, 1 refused, partial (a bulk run in which some endpoints were not reissued) or error, 2 usage error. A killed run is finished by running the same command again; with `--make-key` the new key waits in `<creds file>.pending`. With `--make-key`, a reissue that stopped after the new credentials were written, or could not read the directory record back to confirm them, is finished by running the same command again: it keeps the new key, confirms it and removes `<creds file>.pending`, and does not revoke the new key.
 
 ## mashctl endpoint delete
 
@@ -176,7 +176,7 @@ Removes an endpoint. In order, it:
 3. burns the address: it is never assigned again, to any key;
 4. renames the creds file, if one is in the config directories, to `<address>.creds.retired-<UTC time>`, or removes it with `--delete-creds`.
 
-`--force` also handles the creds file when the server has no record. `--no-revoke` skips the revocation, and the user can still connect; the command warns. `--dry-run` says what would happen and changes nothing. `--json` uses schema `mashctl-endpoint@1`. A killed run finishes when you run the same command again. Exit codes: 0 deleted or unchanged, 1 refused, 2 usage error, 5 partial, 6 error.
+`--force` also handles the creds file when the server has no record. `--no-revoke` skips the revocation, and the user can still connect; the command warns. `--dry-run` says what would happen and changes nothing. `--json` uses schema `mashctl-endpoint@1`. A killed run finishes when you run the same command again. Exit codes: 0 deleted or unchanged, 1 refused, partial or error, 2 usage error. After a partial delete, the message says what is left; running the same command again is safe and finishes it.
 
 ## mashctl endpoint list and show
 
@@ -202,7 +202,7 @@ mash credential create --seed FILE --jwt FILE [--out CREDS] [--force] [--json] [
 
 ## Refusal codes
 
-A refusal exits 1, a usage error exits 2 and an error exits 6. The message names the code. Every code below is tested.
+A refusal exits 1, a usage error exits 2 and an error exits 1. The message names the code. Every code below is tested.
 
 | Code | Exit | Command | Meaning |
 | --- | --- | --- | --- |
@@ -235,12 +235,12 @@ A refusal exits 1, a usage error exits 2 and an error exits 6. The message names
 | `future_issued` | 1 | reissue, bulk | The old key's JWT was issued after now: fix the clock. Nothing was changed. |
 | `creds_mismatch` | 1 | reissue, bulk | The creds file at the creds path is not this endpoint's current creds. Move it aside. |
 | `reissue_busy` | 1 | reissue, bulk | Another reissue of the endpoint holds the lock on its creds file's `.lock` file; the detail names its pid and host when readable. The operating system releases the lock when that run ends or is killed, so a killed run needs nothing removed: run again later. The lock works on one host (a local filesystem), not across hosts or on a network filesystem that does not honour `flock`. A `.lock` directory made by an earlier mash is reported the same way; if no reissue is running, remove it once by hand. |
-| `server` | 6 | create, reissue, bulk | The server could not be reached or answered with an error. Nothing was changed. |
-| `superseded` | 6 | reissue, bulk | Another reissue changed the endpoint's key while this one ran, so the file this run wrote was removed. Run the command again. |
-| `servers` | 6 | reissue, bulk | Fewer servers answered than the count says. Nothing was revoked. |
-| `write` | 6 | create, reissue | A directory is writable by every user or cannot be used. Nothing was changed. |
+| `server` | 1 | create, reissue, bulk | The server could not be reached or answered with an error. Nothing was changed. |
+| `superseded` | 1 | reissue, bulk | Another reissue changed the endpoint's key while this one ran, so the file this run wrote was removed. Run the command again. |
+| `servers` | 1 | reissue, bulk | Fewer servers answered than the count says. Nothing was revoked. |
+| `write` | 1 | create, reissue | A directory is writable by every user or cannot be used. Nothing was changed. |
 | `creds_unreadable` | 1 (6 in bulk) | reissue, bulk | A creds file on this host cannot be read or parsed. |
-| `revocation_unknown` | 6 | create, reissue, bulk | Whether a key is revoked could not be checked (a server did not answer). Nothing was changed. |
+| `revocation_unknown` | 1 | create, reissue, bulk | Whether a key is revoked could not be checked (a server did not answer). Nothing was changed. |
 | `no_local_creds` | 0 | bulk | Skipped: no creds file on this host. |
 
 `endpoint show` exits 1 when there is no such endpoint. `endpoint delete` refuses with a plain message and exit 1 when there is no directory record on the server (`--force` still handles the creds file), too few servers answered the account lookup, the user key's issue time is in the future (fix the clock), the revocation could not be confirmed, or the record belongs to another user key. Nothing is changed in any of these cases.
@@ -271,7 +271,7 @@ Because revocation is by key and time, a new credential for an endpoint needs a 
 
 ## Exit codes and arguments
 
-The `endpoint` verbs also use 5 (partial) and 6 (error), as described above. Every other verb exits 0 on success, 2 for a usage error (a wrong or missing argument, an unknown flag, a stray argument, an argument that fails validation) and 1 for any failure; `suspended` also uses 3 for "not suspended"; `audit` uses 1 only for `--strict` findings and 3 when it could not complete (see [audit.md](audit.md#exit-codes)). An argument that fails validation is named in the message but never printed back, so a secret pasted into the wrong place is not echoed. `mashctl permissions ADDRESS` prints the permission set of the endpoint's NATS user (stdout stays the JSON or the `--nsc` flags).
+mashctl exits with 0, 1 or 2 only: 0 it worked, 1 it failed (one line on standard error says why), 2 the command line was wrong or the command cannot run here, and nothing was attempted. Every verb exits 0 on success, 2 for a usage error (a wrong or missing argument, an unknown flag, a stray argument, an argument that fails validation) and 1 for any failure; `suspended` exits 1 for "not suspended"; `audit` exits 1 for `--strict` findings and when it could not complete (see [audit.md](audit.md#exit-codes)). An argument that fails validation is named in the message but never printed back, so a secret pasted into the wrong place is not echoed. `mashctl permissions ADDRESS` prints the permission set of the endpoint's NATS user (stdout stays the JSON or the `--nsc` flags).
 
 ## Before you push with nsc
 

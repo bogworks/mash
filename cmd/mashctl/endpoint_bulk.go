@@ -275,11 +275,11 @@ func runEndpointBulk(a bulkArgs, env func(string) string, lookup config.Lookup, 
 	case n.Reissued == 0 && n.Planned == 0:
 		doc.Outcome, code = "refused", 1
 		if n.Error > 0 {
-			doc.Outcome, code = "error", 6
+			doc.Outcome, code = "error", 1
 		}
 		doc.Refusal = firstFail
 	default:
-		doc.Outcome, code = "partial", 5
+		doc.Outcome, code = "partial", 1
 	}
 	if n.Reissued > 0 {
 		doc.NextSteps = append(doc.NextSteps, epStep{Sender: "endpoint", Step: "session",

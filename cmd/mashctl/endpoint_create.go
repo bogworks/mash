@@ -35,7 +35,7 @@ const endpointCreateUsage = `usage: mashctl endpoint create [ADDRESS] [--owner O
                      finishes with the same key. A staged key the account revokes is refused (staged_key_revoked); when
                      the address is taken or retired the file is removed, since that key can never be used for it
   A group cannot be changed later: make a new endpoint and delete the old one. The environment does not give a group.
-  exit codes: 0 done or planned, 1 refused, 2 usage, 6 error
+  exit codes: 0 done or planned, 1 refused or error, 2 usage
 Example:
   mashctl endpoint create alice/dev/design --public-key design.pub
 `
@@ -578,7 +578,7 @@ func runEndpointCreate(args []string, env func(string) string, lookup config.Loo
 		fmt.Fprintln(stderr, cfgErr)
 		doc.Outcome = "error"
 		doc.Refusal = &epRefusal{"config", "the configuration did not load; fix it and run the same command again"}
-		return epReport("create", doc, nil, 6, stdout, io.Discard, c.jsonOut)
+		return epReport("create", doc, nil, 1, stdout, io.Discard, c.jsonOut)
 	}
 
 	// Everything that does not write: the key file, the output path, the account key.
@@ -815,11 +815,11 @@ func runEndpointCreate(args []string, env func(string) string, lookup config.Loo
 	}, 0, stdout, stderr, c.jsonOut)
 }
 
-// epErr reports an error outcome (exit 6).
+// epErr reports an error outcome (exit 1).
 func epErr(doc epDoc, verb, code, detail string, jsonOut bool, stdout, stderr io.Writer) int {
 	doc.Outcome = "error"
 	doc.Refusal = &epRefusal{code, detail}
-	return epReport(verb, doc, nil, 6, stdout, stderr, jsonOut)
+	return epReport(verb, doc, nil, 1, stdout, stderr, jsonOut)
 }
 
 // epCredsUser is the user public key a creds file names, once the file is shown to be usable: it holds a user JWT

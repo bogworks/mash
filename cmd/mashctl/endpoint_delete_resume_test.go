@@ -133,7 +133,7 @@ func TestEndpointDeleteCleanupFailureIsServerError(t *testing.T) {
 		t.Fatal(err)
 	}
 	so, se, code := h.run("endpoint", "delete", slashForm(a), "--json")
-	if code != 6 || !strings.Contains(so, `"server"`) {
+	if code != 1 || !strings.Contains(so, `"server"`) {
 		t.Fatalf("%d %q %q", code, so, se)
 	}
 	if _, err := os.Lstat(h.creds(a)); err != nil {

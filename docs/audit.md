@@ -13,7 +13,7 @@ mashctl audit [--json] [--strict] [--creds-dir DIR] [--compare EARLIER.json]
 - `--json` prints the report as JSON; without it, the same facts as tab-separated text lines.
 - `--creds-dir DIR` scans DIR for creds files instead of the config directory, where creds files are written.
 - `--compare EARLIER.json` reads the JSON of an earlier `audit --json` and adds a comparison with it (see
-  [`--compare`](#compare)). A file that is not JSON, or is another report version, is refused with exit 3.
+  [`--compare`](#compare)). A file that is not JSON, or is another report version, is refused with exit 1.
 - `--strict` exits 1 when there is a finding (see [Exit codes](#exit-codes)).
 
 The output is the evidence for an audit, so it is deterministic: records, orphans and problems are sorted
@@ -130,14 +130,14 @@ Counts: `records`, `running`, `orphan_streams`, `orphan_leases`,
 
 `mashctl audit --compare EARLIER.json` reads the JSON an earlier `audit --json` wrote and adds a `compare` object to
 the report (and `compare` lines to the text form). It reads nothing else from disk and changes nothing. The earlier file's `version` must be
-the one this mashctl writes; a file that is not JSON, is another version, or cannot be read exits 3.
+the one this mashctl writes; a file that is not JSON, is another version, or cannot be read exits 1.
 
 The earlier file must also be a complete audit of this deployment, or a stub such as `{"version":1}` would pass for a
 baseline with no inboxes. It needs a non-empty `generated` and `owner`, the `records` array (empty
 is fine, absent or `null` is not) and, for each record's inbox, every field in the table below. A field counts
 as present when its key is there and not `null`, so `"msgs": 0` is present and a missing `msgs` is not (a missing
 count would otherwise read as 0 and make an inbox that later vanished look drained). Its `owner` must equal the current owner and,
-when it has an `account`, that must equal the current account. Anything else is refused with exit 3, a message on
+when it has an `account`, that must equal the current account. Anything else is refused with exit 1, a message on
 standard error naming what is wrong, and nothing on standard output. An earlier audit made before `account` existed
 is accepted but cannot be tied to this deployment: `compare.account_unverified` is `true` and the text form says
 `account not verified`. Without `--strict` it is only shown. With `--strict` it fails (exit 1) and standard error says
@@ -197,7 +197,7 @@ The `retired` set of the two reports is compared too (ADR 0088: a `final` marker
 - `retired_added`: a marker present now and not before. Fine; shown only.
 - `retired_final_lost`: a marker that was `final` before and is absent now (or the whole bucket is gone), or is no longer `final`. Markers are never deleted, so this fails `--strict` (exit 1) and standard error counts it.
 - `retired_pending_gone`: a marker that was `pending` before and is absent now, with no marker at its key. Shown only: `deprovision` deletes a pending marker when the retirement did not happen. A pending marker that became `final` is in none of the lists.
-- `retired_compared` is `false` and `retired_unverified` is `true` when the earlier report has no `retired` section (made before it existed, or `null`): it cannot show that no final marker was deleted since, so nothing is compared and the three lists are empty. Without `--strict` the comparison stays readable and the text form prints `WARNING retired comparison unverified: the earlier report has no retired section`. With `--strict` the file is refused like one that lacks a required field: exit 3, `retired comparison unverified: the earlier report has no retired section` on standard error and nothing on standard output; regenerate the earlier audit with this mashctl. This applies whatever the current report holds (an absent bucket now may be a deleted one). `retired_unverified` is `false` otherwise. The earlier-report fields table below is about legacy inboxes and does not change. A `retired` section that is present must be whole: `present`, a `markers` array and a `key` and `state` in each marker, or the file is refused with exit 3 naming the missing path (a stripped section would hide a deleted final marker). A marker whose `state` is not exactly `final` or `pending` (for example `Final` or `done`), or whose `key` repeats an earlier marker's, is refused the same way (exit 3, naming the path): the comparison knows only those two states, and with a duplicate the last entry would win and could hide a lost `final` marker.
+- `retired_compared` is `false` and `retired_unverified` is `true` when the earlier report has no `retired` section (made before it existed, or `null`): it cannot show that no final marker was deleted since, so nothing is compared and the three lists are empty. Without `--strict` the comparison stays readable and the text form prints `WARNING retired comparison unverified: the earlier report has no retired section`. With `--strict` the file is refused like one that lacks a required field: exit 1, `retired comparison unverified: the earlier report has no retired section` on standard error and nothing on standard output; regenerate the earlier audit with this mashctl. This applies whatever the current report holds (an absent bucket now may be a deleted one). `retired_unverified` is `false` otherwise. The earlier-report fields table below is about legacy inboxes and does not change. A `retired` section that is present must be whole: `present`, a `markers` array and a `key` and `state` in each marker, or the file is refused with exit 1 naming the missing path (a stripped section would hide a deleted final marker). A marker whose `state` is not exactly `final` or `pending` (for example `Final` or `done`), or whose `key` repeats an earlier marker's, is refused the same way (exit 1, naming the path): the comparison knows only those two states, and with a duplicate the last entry would win and could hide a lost `final` marker.
 
 ### Recreated streams
 
@@ -211,7 +211,7 @@ When a stream is present in both audits and its `created`, or its `deliver` cons
 `deliver_created_now` shown), `compare.recreated` counts it, the text form prints `RECREATED`, and `--strict --compare`
 exits 1 whatever the sequences say.
 
-An earlier audit made before these fields existed cannot prove anything, so it is refused (exit 3) with the path of
+An earlier audit made before these fields existed cannot prove anything, so it is refused (exit 1) with the path of
 the missing field and a note to regenerate it: run `mashctl audit --json` again with this mashctl, and compare a later
 audit against that file. When the server gives no creation time in the current audit for a stream present in both, the
 entry has `creation_unknown: true`, `compare.creation_unknown` counts it and the text form prints `UNKNOWN`; without
@@ -246,4 +246,4 @@ cannot see.
 | 0 | the audit completed and is clean, or it has findings and `--strict` was not given |
 | 1 | `--strict` and a finding: an orphan of any kind, a problem (an item the audit could not read, which it cannot call clean) or, with `--compare`, a stream whose `last_seq`, `delivered` or `delivered_consumer_seq` moved, an inbox that vanished, a stream or its `deliver` consumer that was recreated, a final retired marker that is gone since the earlier audit, a retired-bucket finding (the 50% alarm, a pending marker, a bucket or marker that cannot be read), or an earlier audit that lacks the account, or a current audit with no creation time for a stream present in both. Standard error says what was counted |
 | 2 | a usage error |
-| 3 | the audit could not complete: no server or no credentials, an unreadable required creds directory (`--creds-dir`), or a `--compare` file that is unreadable, not JSON, another version, incomplete (including one without creation times), or from another owner or account, or, with `--strict`, one with no `retired` section. Nothing is printed on standard output |
+| 1 | the audit could not complete: no server or no credentials, an unreadable required creds directory (`--creds-dir`), or a `--compare` file that is unreadable, not JSON, another version, incomplete (including one without creation times), or from another owner or account, or, with `--strict`, one with no `retired` section. Nothing is printed on standard output |

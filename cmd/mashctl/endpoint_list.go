@@ -14,7 +14,7 @@ import (
 const endpointListUsage = `usage: mashctl endpoint list [--json]
   Prints the endpoints in the directory, one per line: owner/group/instance, owner.group.instance and what is on record.
   --json   print the endpoints as JSON (schema mashctl-endpoint-list@1)
-  exit: 0 listed (also when there are none), 2 usage, 6 error
+  exit: 0 listed (also when there are none), 1 error, 2 usage
 Example:
   mashctl endpoint list
 `
@@ -120,12 +120,12 @@ func runEndpointList(args []string, env func(string) string, lookup config.Looku
 	}
 	fail := func(err error) int {
 		fmt.Fprintf(stderr, "mashctl: endpoint list: %v\n", err)
-		return 6
+		return 1
 	}
 	cfg, err := loadCtlConfig(env, lookup, true)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
-		return 6
+		return 1
 	}
 	announceTarget(cfg, env, stderr, nil)
 	adm, ctx, closeAdmin, err := ctl.OpenAdmin("mashctl", cfg)

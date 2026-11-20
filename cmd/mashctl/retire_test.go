@@ -119,7 +119,7 @@ func TestRetireDeleteCredsAndSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 	out, errb, code = h.run("endpoint", "delete", "o.g.b", "--delete-creds")
-	if code != 5 || !strings.Contains(errb, "not a regular file") || !strings.HasPrefix(out, "deleted o/g/b (o.g.b)\n") {
+	if code != 1 || !strings.Contains(errb, "not a regular file") || !strings.HasPrefix(out, "deleted o/g/b (o.g.b)\n") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
 	if b, err := os.ReadFile(target); err != nil || !bytes.Equal(b, want) {
@@ -196,7 +196,7 @@ func TestRetireServerFailureChangesNothing(t *testing.T) {
 	h.provisionDeclared("b")
 	h.env["MASH_SERVER"] = "nats://127.0.0.1:1" // nothing listens
 	out, errb, code := h.run("endpoint", "delete", "o.g.b", "--delete-creds")
-	if code != 6 || strings.Contains(out, "deleted") {
+	if code != 1 || strings.Contains(out, "deleted") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
 }
@@ -237,7 +237,7 @@ func TestRetirePartialFailureIsNotReportedAsUnchanged(t *testing.T) {
 	h.provisionDeclared("b")
 	failAfterPurge(t)
 	out, errb, code := h.run("endpoint", "delete", "o.g.b")
-	if code != 5 || strings.Contains(out, "deleted") {
+	if code != 1 || strings.Contains(out, "deleted") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
 	for _, w := range []string{"PARTIAL", "mashctl endpoint delete o.g.b", "lease fence: connection lost"} {
@@ -408,7 +408,7 @@ func TestRetireDirectoryReadFailureSaysNothingWasRevoked(t *testing.T) {
 		t.Fatal(err)
 	}
 	out, errb, code := h.run("endpoint", "delete", "o.g.b")
-	if code != 6 || out != "" {
+	if code != 1 || out != "" {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
 	if !strings.HasSuffix(strings.TrimSpace(errb), "nothing was revoked; the key is still valid") {

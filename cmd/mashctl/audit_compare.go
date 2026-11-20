@@ -73,7 +73,7 @@ type auditCompare struct {
 	// be in neither list): shown only, since deprovision deletes a pending marker when the retirement did not happen.
 	RetiredCompared bool `json:"retired_compared"`
 	// RetiredUnverified: the earlier report has no (or a null) `retired` section, so it cannot show that no final
-	// marker was deleted since. Shown always; with --strict it refuses the comparison (exit 3, nothing on stdout).
+	// marker was deleted since. Shown always; with --strict it refuses the comparison (exit 1, nothing on stdout).
 	RetiredUnverified  bool     `json:"retired_unverified"`
 	RetiredAdded       []string `json:"retired_added"`
 	RetiredFinalLost   []string `json:"retired_final_lost"`

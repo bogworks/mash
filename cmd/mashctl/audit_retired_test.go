@@ -56,7 +56,7 @@ func (f *auditFixture) retiredAudit(t *testing.T, args ...string) (retiredOut, s
 	t.Helper()
 	out, errb, code := f.run(t, append([]string{"--json"}, args...)...)
 	var r retiredOut
-	if code == 3 || json.Unmarshal([]byte(out), &r) != nil {
+	if json.Unmarshal([]byte(out), &r) != nil {
 		t.Fatalf("audit: %d %q\n%s", code, errb, out)
 	}
 	return r, errb, code
@@ -388,7 +388,7 @@ func TestAuditCompareEarlierWithoutRetiredSection(t *testing.T) {
 	const msg = "retired comparison unverified: the earlier report has no retired section"
 
 	out, errb, code := f.run(t, "--strict", "--compare", old)
-	if code != 3 || out != "" || !strings.Contains(errb, msg) {
+	if code != 1 || out != "" || !strings.Contains(errb, msg) {
 		t.Fatalf("strict: exit %d out=%q err=%q", code, out, errb)
 	}
 
@@ -415,7 +415,7 @@ func TestAuditCompareEarlierWithoutRetiredSectionStrictEmptyNow(t *testing.T) {
 	f := newAuditEnv(t)
 	old := writeEdited(t, f.auditTo(t, "first.json"), func(m map[string]any) { delete(m, "retired") })
 	out, errb, code := f.run(t, "--strict", "--compare", old)
-	if code != 3 || out != "" || !strings.Contains(errb, "retired comparison unverified") {
+	if code != 1 || out != "" || !strings.Contains(errb, "retired comparison unverified") {
 		t.Fatalf("exit %d out=%q err=%q", code, out, errb)
 	}
 }
@@ -440,13 +440,13 @@ func TestAuditCompareEarlierIncompleteRetiredSectionIsRefused(t *testing.T) {
 	}
 	for name, tc := range cases {
 		out, errb, code := f.run(t, "--strict", "--compare", writeEdited(t, first, tc.edit))
-		if code != 3 || out != "" || !strings.Contains(errb, "lacks "+tc.want) {
+		if code != 1 || out != "" || !strings.Contains(errb, "lacks "+tc.want) {
 			t.Errorf("%s: exit %d out=%q err=%q", name, code, out, errb)
 		}
 	}
 	// a null section is no section: unverified, exit 3 under --strict, readable without it
 	null := writeEdited(t, first, func(m map[string]any) { m["retired"] = nil })
-	if out, errb, code := f.run(t, "--strict", "--compare", null); code != 3 || out != "" || !strings.Contains(errb, "retired comparison unverified") {
+	if out, errb, code := f.run(t, "--strict", "--compare", null); code != 1 || out != "" || !strings.Contains(errb, "retired comparison unverified") {
 		t.Errorf("null retired strict: exit %d out=%q err=%q", code, out, errb)
 	}
 	if txt, errb, code := f.run(t, "--compare", null); code != 0 || !strings.Contains(txt, "WARNING retired comparison unverified") {
@@ -484,7 +484,7 @@ func TestAuditCompareEarlierBadRetiredMarkersAreRefused(t *testing.T) {
 	}
 	for name, tc := range cases {
 		out, errb, code := f.run(t, "--strict", "--compare", writeEdited(t, first, tc.edit))
-		if code != 3 || out != "" || !strings.Contains(errb, tc.want) {
+		if code != 1 || out != "" || !strings.Contains(errb, tc.want) {
 			t.Errorf("%s: exit %d out=%q err=%q", name, code, out, errb)
 		}
 	}

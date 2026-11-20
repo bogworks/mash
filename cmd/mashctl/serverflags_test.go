@@ -149,7 +149,7 @@ func TestRetirePartialListsWhatWasRevokedAndWhatIsPending(t *testing.T) {
 	stubRevoke(t)
 	failAfterPurge(t)
 	out, errb, code := h.run("endpoint", "delete", "o.g.b")
-	if code != 5 {
+	if code != 1 {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
 	all := out + errb
@@ -168,7 +168,7 @@ func TestRetireFailureBeforeAnyRevokeSaysKeyStillValid(t *testing.T) {
 	}
 	t.Cleanup(func() { deprovisionIfUser = (*admin.Admin).DeprovisionIfUser })
 	_, errb, code := h.run("endpoint", "delete", "o.g.b")
-	if code != 6 || strings.Contains(errb, "PARTIAL") || !strings.Contains(errb, "nothing was revoked; the key is still valid") {
+	if code != 1 || strings.Contains(errb, "PARTIAL") || !strings.Contains(errb, "nothing was revoked; the key is still valid") {
 		t.Fatalf("%d %q", code, errb)
 	}
 }

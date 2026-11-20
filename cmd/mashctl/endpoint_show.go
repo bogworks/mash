@@ -16,7 +16,7 @@ const endpointShowUsage = `usage: mashctl endpoint show ADDRESS [--json]
   Prints the endpoint's whole directory record, the creds file for it in the config directories (its path only), and
   its issue record, if there is one. Changes nothing.
   --json   print the result as JSON (schema mashctl-endpoint@1)
-  exit: 0 shown, 1 refused (no such endpoint), 2 usage, 6 error
+  exit: 0 shown, 1 refused (no such endpoint) or error, 2 usage
 Example:
   mashctl endpoint show alice/dev/design
 `
@@ -98,12 +98,12 @@ func runEndpointShow(args []string, env func(string) string, lookup config.Looku
 	short := slashForm(addr)
 	fail := func(err error) int {
 		fmt.Fprintf(stderr, "mashctl: endpoint show %s: %v\n", short, err)
-		return 6
+		return 1
 	}
 	cfg, err := loadCtlConfig(env, lookup, true)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
-		return 6
+		return 1
 	}
 	announceTarget(cfg, env, stderr, nil)
 	adm, ctx, closeAdmin, err := ctl.OpenAdmin("mashctl", cfg)
