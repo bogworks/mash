@@ -2,6 +2,8 @@
 # mash-local-nats-setup.sh: make, start, stop or remove a local NATS server
 # for mash (operator mode, TLS, JetStream, 127.0.0.1 only) using nats-server,
 # the nats command and openssl. It does not need nsc and installs nothing.
+# It runs on Linux and on macOS (bash 3.2 and the BSD tools that ship with
+# macOS are enough; Homebrew's nats-server and nats are found on PATH).
 #
 # Safety, in short: refuses root; DIR (default ~/mash-nats, or any absolute
 # --dir) must be a new folder in a parent you can write to, with every folder
@@ -10,13 +12,21 @@
 # the failure trap removes only the DIR this run made, and only before the
 # marker file (mash-setup.json) exists; --remove needs the path typed on a
 # terminal; stop signals only the pid in server.pid after /proc confirms it
-# is a nats-server started with this DIR's server.conf. Seeds and creds are
+# is a nats-server started with this DIR's server.conf (read from /proc on
+# Linux, from ps on macOS). Seeds and creds are
 # never printed. No globs are used for any delete. Everything that does
 # anything runs from main(), the last line of the file, so a truncated download
 # piped into bash defines functions and runs nothing.
 #
+# Portability: file owner and mode come from GNU stat (-c) or BSD stat (-f),
+# found by trying `stat -c %u /` once; process checks use /proc on Linux and
+# kill -0 plus ps on macOS; listeners are read with ss (Linux) or lsof (macOS).
+# The openssl commands avoid -addext and -noenc so that LibreSSL (macOS) and
+# OpenSSL 3 both work.
+#
 # Test hook (not in --help): MLNT_UNAME, when set, replaces the output of
-# `uname -s`, so a test can pretend to be macOS.
+# `uname -s`; "Darwin" makes the script take the macOS branches (BSD stat
+# flags, ps and lsof instead of /proc and ss), so a test can exercise them.
 set -eu
 umask 077
 
@@ -31,6 +41,9 @@ usage: mash-local-nats-setup.sh [--dir DIR] [--owner NAME] [--stop | --start | -
   --start      start an existing server again (after a reboot)
   --remove     stop the server and delete DIR (you type the path)
   --help       this text
+
+Works on Linux and macOS. Needs nats-server (2.10.7 or newer), nats and
+openssl on PATH, and ss (Linux) or lsof (macOS) to look at ports.
 EOF
 }
 
@@ -103,17 +116,40 @@ set_paths() {
     UID_NOW=$(id -u)
 }
 
-fileowner() { stat -c %u "$1" 2>/dev/null || stat -f %u "$1"; }
+# Platform layer. BSD=1 means BSD userland (macOS): BSD stat flags, ps and lsof.
+# MLNT_UNAME=Darwin forces it (test hook); otherwise it is chosen by whether
+# GNU `stat -c` works here.
+init_platform() {
+    BSD=0
+    if [ "${MLNT_UNAME:-$(uname -s 2>/dev/null || true)}" = Darwin ]; then
+        BSD=1
+    elif ! stat -c %u / >/dev/null 2>&1; then
+        BSD=1
+    fi
+}
+
+# fileowner PATH: numeric owner (of the link itself for a symlink);
+# fileowner_l, filemode_l: the same but following a symlink; mode in octal
+fileowner() {
+    if [ "$BSD" = 1 ]; then stat -f %u "$1" 2>/dev/null; else stat -c %u "$1" 2>/dev/null; fi
+}
+fileowner_l() {
+    if [ "$BSD" = 1 ]; then stat -L -f %u "$1" 2>/dev/null; else stat -L -c %u "$1" 2>/dev/null; fi
+}
+filemode_l() {
+    if [ "$BSD" = 1 ]; then stat -L -f %Lp "$1" 2>/dev/null; else stat -L -c %a "$1" 2>/dev/null; fi
+}
 
 # check_parent_mode DIR: refuse a folder that group or others can write to,
 # unless it has the sticky bit (like /tmp), since they could swap what is under it
 check_parent_mode() {
-    _m=$(stat -L -c %a "$1" 2>/dev/null) || die 1 "cannot read the mode of $1" "check the folder and retry"
+    _m=$(filemode_l "$1") || die 1 "cannot read the mode of $1" "check the folder and retry"
     case $_m in '' | *[!0-7]*) die 1 "cannot read the mode of $1" "check the folder and retry" ;; esac
     _s=0
     [ "${#_m}" -lt 4 ] || _s=${_m%???}
-    _g=${_m: -2:1}
-    _o=${_m: -1}
+    _o=${_m#"${_m%?}"} # last digit (others)
+    _g=${_m%?}
+    _g=${_g#"${_g%?}"} # the digit before it (group)
     if [ $(((${_g:-0} | ${_o:-0}) & 2)) -ne 0 ] && [ $((_s & 1)) -eq 0 ]; then
         die 1 "a parent folder is writable by others: $1 (mode $_m, no sticky bit)" \
             "run: chmod go-w $1 (or pick another --dir)"
@@ -170,7 +206,7 @@ check_ancestor() {
     if [ -n "$2" ] && [ -L "$1" ] && [ "$(fileowner "$1")" != 0 ]; then
         die 1 "refusing a symlink in the path: $1" "pass a real folder with --dir"
     fi
-    _o=$(stat -L -c %u "$1" 2>/dev/null) || die 1 "cannot read $1" "check the folder and retry"
+    _o=$(fileowner_l "$1") || die 1 "cannot read $1" "check the folder and retry"
     if [ "$_o" != "$UID_NOW" ] && [ "$_o" != 0 ]; then
         die 1 "not owned by you or root: $1" "pick a folder you own with --dir"
     fi
@@ -181,17 +217,30 @@ check_ancestor() {
 tty_ok() { ( exec </dev/tty ) 2>/dev/null; }
 
 marker_get() { # KEY: string value from mash-setup.json (one key per line)
-    sed -n 's/^ *"'"$1"'": *"\{0,1\}\([^",]*\)"\{0,1\},\{0,1\} *$/\1/p' \
-        "$DIR/mash-setup.json" | head -n 1
+    sed -n 's/^ *"'"$1"'": *\(.*\)$/\1/p' "$DIR/mash-setup.json" | head -n 1 |
+        sed 's/[ ,]*$//; s/^"//; s/"$//'
 }
 
+# proc_alive PID: the process exists and is not a zombie
 proc_alive() {
+    if [ "$BSD" = 1 ]; then
+        kill -0 "$1" 2>/dev/null || return 1
+        _st=$(ps -p "$1" -o stat= 2>/dev/null | head -n 1 | tr -d ' ')
+        case $_st in '' | Z* | X*) return 1 ;; esac
+        return 0
+    fi
     _st=$(sed -n 's/^State:[[:space:]]*\(.\).*/\1/p' "/proc/$1/status" 2>/dev/null)
     [ -n "$_st" ] && [ "$_st" != Z ] && [ "$_st" != X ]
 }
 # proc_ours PID: running nats-server whose arguments name this DIR's server.conf
 proc_ours() {
     proc_alive "$1" || return 1
+    if [ "$BSD" = 1 ]; then
+        _exe=$(ps -p "$1" -o comm= 2>/dev/null | head -n 1 | sed 's/^ *//; s/ *$//')
+        [ "${_exe##*/}" = nats-server ] || return 1
+        ps -ww -p "$1" -o args= 2>/dev/null | head -n 1 | tr ' ' '\n' | grep -Fxq -- "$DIR/server.conf"
+        return
+    fi
     _exe=$(readlink "/proc/$1/exe" 2>/dev/null || true)
     if [ -z "$_exe" ]; then _exe=$(cat "/proc/$1/comm" 2>/dev/null || true); fi
     _exe=${_exe% (deleted)}
@@ -205,12 +254,34 @@ recorded_pid() {
     printf '%s' "$_pid"
 }
 
+# need_port_tool: ss (Linux) or lsof (macOS), whichever this platform prefers
+need_port_tool() {
+    PORT_TOOL=''
+    if [ "$BSD" = 1 ]; then
+        if command -v lsof >/dev/null 2>&1; then PORT_TOOL=lsof
+        elif command -v ss >/dev/null 2>&1; then PORT_TOOL=ss; fi
+    else
+        if command -v ss >/dev/null 2>&1; then PORT_TOOL=ss
+        elif command -v lsof >/dev/null 2>&1; then PORT_TOOL=lsof; fi
+    fi
+    [ -n "$PORT_TOOL" ] ||
+        die 1 "need ss (Linux) or lsof (macOS)" "install it (Linux: apt install iproute2); nothing was changed"
+}
+# listen_addrs [PORT]: the local addresses (ADDR:PORT, one per line) of TCP listeners
+listen_addrs() {
+    if [ "$PORT_TOOL" = lsof ]; then
+        lsof -nP "-iTCP${1:+:$1}" -sTCP:LISTEN -Fn 2>/dev/null </dev/null | sed -n 's/^n//p'
+    else
+        ss -ltn 2>/dev/null | awk 'NR>1 {print $4}'
+    fi
+}
+
 listening() { # is 127.0.0.1:$PORT accepting
-    ss -ltn 2>/dev/null | awk 'NR>1 {print $4}' | grep -Fxq "127.0.0.1:$PORT"
+    listen_addrs "$PORT" | grep -Fxq "127.0.0.1:$PORT"
 }
 
 port_taken() { # PORT
-    ss -ltn 2>/dev/null | awk 'NR>1 {print $4}' | grep -Eq "[:.]$1\$"
+    listen_addrs "$1" | grep -Eq "[:.]$1\$"
 }
 
 # existing-dir checks shared by --start, --stop, --remove
@@ -318,12 +389,9 @@ mode_start() {
         echo "already running: pid $_p on 127.0.0.1:$PORT"; return 0
     fi
     miss=''
-    for t in nats-server nats ss; do command -v "$t" >/dev/null 2>&1 || miss="$miss $t"; done
-    if [ -n "$miss" ]; then
-        _h="install it; see --help in the docs for where to get it"
-        case " $miss " in *" ss "*) _h="ss is needed (Linux only in 0.5.6); $_h" ;; esac
-        die 1 "missing:$miss" "$_h"
-    fi
+    for t in nats-server nats; do command -v "$t" >/dev/null 2>&1 || miss="$miss $t"; done
+    [ -z "$miss" ] || die 1 "missing:$miss" "install it: brew install nats-server nats (macOS), or see the docs"
+    need_port_tool
     if port_taken "$PORT"; then
         die 1 "port $PORT is now used by another program" \
             "stop that program, then run $SELF --start again"
@@ -334,8 +402,7 @@ mode_start() {
 
 mode_remove() {
     require_made_dir
-    command -v ss >/dev/null 2>&1 ||
-        die 1 "ss is needed (Linux only in 0.5.6)" "install it: apt install iproute2; nothing was removed"
+    need_port_tool
     tty_ok || die 4 "--remove needs a terminal to confirm" \
         "run it from a terminal; nothing was changed"
     printf 'type the folder to remove (%s): ' "$DIR" >/dev/tty
@@ -390,12 +457,11 @@ or brew install nats-server"
 from https://github.com/nats-io/natscli/releases"
     command -v openssl >/dev/null 2>&1 ||
         add_miss openssl "install openssl: apt install openssl or brew install openssl"
-    command -v ss >/dev/null 2>&1 ||
-        add_miss ss "ss is needed (Linux only in 0.5.6); install it: apt install iproute2"
     [ -z "$miss" ] || die 1 "missing: $miss" "$hints"
+    need_port_tool
 
     NSV=$(nats-server --version 2>/dev/null </dev/null |
-        sed -n 's/.*v\{0,1\}\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' | head -n 1)
+        sed -n 's/^[^0-9]*\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' | head -n 1)
     [ -n "$NSV" ] || die 1 "cannot read the nats-server version" "need nats-server 2.10.7 or newer"
     IFS=. read -r v1 v2 v3 <<EOF
 $NSV
@@ -452,18 +518,38 @@ https://github.com/nats-io/natscli/releases"
     mkdir -m 700 keys creds jetstream resolver nats-store nats-store/config
 
     # --- TLS: a private CA that may only vouch for localhost, 127.0.0.1 and ::1
-    openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 3650 \
-        -subj "/CN=mash-local-ca" -keyout ca.key -out ca.pem \
-        -addext "basicConstraints=critical,CA:TRUE,pathlen:0" \
-        -addext "keyUsage=keyCertSign,cRLSign" \
-        -addext "nameConstraints=critical,permitted;DNS:localhost,permitted;IP:127.0.0.1/255.255.255.255,permitted;IP:::1/ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff" \
-        2>/dev/null </dev/null
-    openssl req -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -subj "/CN=localhost" \
-        -keyout server.key -out server.csr 2>/dev/null </dev/null
-    printf 'subjectAltName=DNS:localhost,IP:127.0.0.1,IP:::1\nextendedKeyUsage=serverAuth\n' >server.ext
-    openssl x509 -req -in server.csr -CA ca.pem -CAkey ca.key -CAserial ca.srl -CAcreateserial \
-        -days 3650 -extfile server.ext -out server.pem 2>/dev/null </dev/null
-    rm -f server.csr server.ext ca.srl
+    # (config files, not -addext or -noenc, so LibreSSL on macOS works too;
+    # -sha256 because LibreSSL's x509 -req signs with SHA-1 otherwise, which Go refuses)
+    cat >ca.cnf <<'CNF'
+[req]
+distinguished_name = dn
+prompt = no
+x509_extensions = v3ca
+[dn]
+CN = mash-local-ca
+[v3ca]
+basicConstraints = critical,CA:TRUE,pathlen:0
+keyUsage = keyCertSign,cRLSign
+nameConstraints = critical,permitted;DNS:localhost,permitted;IP:127.0.0.1/255.255.255.255,permitted;IP:::1/ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff
+CNF
+    cat >server.cnf <<'CNF'
+[req]
+distinguished_name = dn
+prompt = no
+[dn]
+CN = localhost
+[v3srv]
+subjectAltName = DNS:localhost,IP:127.0.0.1,IP:::1
+extendedKeyUsage = serverAuth
+CNF
+    openssl ecparam -genkey -name prime256v1 -noout -out ca.key 2>/dev/null </dev/null
+    openssl req -new -x509 -sha256 -key ca.key -days 3650 -config ca.cnf -extensions v3ca \
+        -out ca.pem 2>/dev/null </dev/null
+    openssl ecparam -genkey -name prime256v1 -noout -out server.key 2>/dev/null </dev/null
+    openssl req -new -sha256 -key server.key -config server.cnf -out server.csr 2>/dev/null </dev/null
+    openssl x509 -req -sha256 -in server.csr -CA ca.pem -CAkey ca.key -CAserial ca.srl -CAcreateserial \
+        -days 3650 -extfile server.cnf -extensions v3srv -out server.pem 2>/dev/null </dev/null
+    rm -f server.csr ca.cnf server.cnf ca.srl
     chmod 600 ca.key server.key
     chmod 644 ca.pem server.pem
 
@@ -558,12 +644,8 @@ JSON
 
 # ---------------------------------------------------------------- main
 main() {
-    # --help is harmless anywhere; everything else stops first on macOS
-    case ${1:-} in --help | -h) usage; exit 0 ;; esac
-    _os=${MLNT_UNAME:-$(uname -s 2>/dev/null || true)}
-    [ "$_os" != Darwin ] ||
-        die 1 "this script sets up NATS on Linux only; on macOS, run it on a Linux machine or use a NATS server you already have"
     parse_args "$@"
+    init_platform
     [ "$(id -u)" -ne 0 ] ||
         die 1 "do not run as root" "run as your own user; nothing was changed"
     if [ -n "$OWNER" ]; then check_owner "$OWNER"; fi
