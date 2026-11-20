@@ -131,3 +131,37 @@ func TestExitCodeIsNotDecidedByOutputText(t *testing.T) {
 		}
 	}
 }
+
+// Every invocation warns or refuses, even one that fails before a command is chosen: bare `mashctl`, a removed
+// command, a bad global flag.
+func TestSkipEncryptionMashctlWarnsBeforeArgumentHandling(t *testing.T) {
+	keepSkipWarning = true
+	t.Cleanup(func() { keepSkipWarning = false })
+	e := newApplyEnv(t).withDirectory()
+	e.env[skipVar] = "1"
+	var removed string
+	for name := range removedCommands {
+		removed = name
+		break
+	}
+	for _, args := range [][]string{{}, {removed}, {"--no-such-flag"}, {"--endpoint"}} {
+		_, errb, code := e.run(args...)
+		if code == 0 || strings.Count(errb, skipWarning) != 1 {
+			t.Errorf("%v: exit %d, stderr %q: want a failure with one warning", args, code, errb)
+		}
+	}
+	for _, tc := range []struct{ key, val, hint string }{
+		{"MASH_INSECURE_PLAINTEXT", "1", "hint: unset MASH_INSECURE_PLAINTEXT; use " + skipVar + "=1\n"},
+		{skipVar, "yes", "hint: set " + skipVar + "=1 or unset it\n"},
+	} {
+		e.env[skipVar] = ""
+		e.env[tc.key] = tc.val
+		for _, args := range [][]string{{}, {removed}, {"--no-such-flag"}} {
+			_, errb, code := e.run(args...)
+			if code != 2 || !strings.HasSuffix(errb, tc.hint) || strings.Contains(errb, "mash doctor") {
+				t.Errorf("%s=%s %v: exit %d, stderr %q, want 2 ending %q", tc.key, tc.val, args, code, errb, tc.hint)
+			}
+		}
+		delete(e.env, tc.key)
+	}
+}

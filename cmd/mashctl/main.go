@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/bogworks/mash/internal/cliframe"
@@ -51,6 +52,13 @@ func run(args []string, env func(string) string, lookup config.Lookup, stdout, s
 }
 
 func runVerbs(args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
+	// The encryption override is the very first thing checked, before any argument is read (bare `mashctl`, a removed
+	// command, a bad flag): a removed name or a bad value is refused (exit 2), and while the override is on every
+	// invocation prints the warning on stderr, once.
+	if skipErr := config.CheckSkipEncryption(lookup, env("HOME")); skipErr != nil {
+		return cliframe.Report(stdout, stderr, cliframe.Usagef("%s", skipErr.Msg()).WithHint(skipErr.Hint()), slices.Contains(args, "--json"))
+	}
+	config.WarnSkipEncryption(lookup, stderr)
 	if len(args) == 0 {
 		fmt.Fprint(stderr, ctl.Usage("mashctl"))
 		return 2
@@ -72,10 +80,9 @@ func runVerbs(args []string, env func(string) string, lookup config.Lookup, stdo
 	}
 	args = rest0
 	env, lookup = global.Shadow(spec, env, lookup)
-	if skipErr := config.CheckSkipEncryption(lookup, env("HOME")); skipErr != nil { // the single entry point, before any dispatch
-		return cliframe.Report(stdout, stderr, cliframe.Usagef("%s", skipErr.Msg()), jsonRequested(args[1:]) || global.JSON)
+	if skipErr := config.CheckSkipEncryption(lookup, env("HOME")); skipErr != nil { // a --config-dir flag may point at a file with the removed key: refusal only, the warning is out
+		return cliframe.Report(stdout, stderr, cliframe.Usagef("%s", skipErr.Msg()).WithHint(skipErr.Hint()), jsonRequested(args[1:]) || global.JSON)
 	}
-	config.WarnSkipEncryption(lookup, stderr)
 	switch args[0] {
 	case "version":
 		return runVersion(args[1:], stdout, stderr)

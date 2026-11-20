@@ -218,3 +218,38 @@ func (l *lockedBuf) String() string {
 	defer l.mu.Unlock()
 	return l.b.String()
 }
+
+// Every invocation warns or refuses, even one that fails before a command is chosen: bare `mash`, a bad global flag.
+func TestSkipEncryptionWarnsBeforeArgumentHandling(t *testing.T) {
+	env := plainEnv(t, "tls://127.0.0.1:1")
+	env[skipVar] = "1"
+	for _, args := range [][]string{{}, {"--no-such-flag"}, {"--json"}, {"--endpoint"}} {
+		_, errb, code := runCapture(env, args...)
+		if code == 0 || strings.Count(errb, skipWarning) != 1 {
+			t.Errorf("%v: exit %d, stderr %q: want a failure with one warning", args, code, errb)
+		}
+	}
+	for _, tc := range []struct{ key, val, hint string }{
+		{"MASH_INSECURE_PLAINTEXT", "1", "hint: unset MASH_INSECURE_PLAINTEXT; use " + skipVar + "=1\n"},
+		{skipVar, "yes", "hint: set " + skipVar + "=1 or unset it\n"},
+	} {
+		e := plainEnv(t, "tls://127.0.0.1:1")
+		e[tc.key] = tc.val
+		for _, args := range [][]string{{}, {"--no-such-flag"}, {"version"}} {
+			_, errb, code := runCapture(e, args...)
+			if code != 2 || !strings.HasSuffix(errb, tc.hint) || strings.Contains(errb, "mash doctor") {
+				t.Errorf("%s=%s %v: exit %d, stderr %q, want 2 ending %q", tc.key, tc.val, args, code, errb, tc.hint)
+			}
+		}
+	}
+	e := plainEnv(t, "tls://127.0.0.1:1")
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"insecure_plaintext":true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e["MASH_CONFIG_DIR"] = dir
+	want := "hint: remove insecure_plaintext from config.json; use " + skipVar + "=1\n"
+	if _, errb, code := runCapture(e); code != 2 || !strings.HasSuffix(errb, want) {
+		t.Errorf("old config key, bare: exit %d, stderr %q, want hint %q", code, errb, want)
+	}
+}

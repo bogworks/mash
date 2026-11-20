@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"regexp"
 	"slices"
 	"sort"
@@ -14,6 +15,9 @@ import (
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nkeys"
+
+	"github.com/bogworks/mash/internal/config"
+	"github.com/bogworks/mash/internal/natsauth"
 )
 
 // GroupSigner signs a user JWT with the scoped signing key of an owner group (the group is "range.owner", the role
@@ -131,8 +135,8 @@ const (
 
 // connectTo opens one connection to one server and no other: no reconnect, no server discovery, no randomizing. It
 // refuses a connection that landed on a server of another name. The URLs are built from the configured server list
-// (policyserve.ResolveURLs, the first configured scheme), which the caller passed through natsauth.RequireTLS; extra
-// carries the result, so no plain URL gets here unless MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1 allowed it.
+// (policyserve.ResolveURLs, the first configured scheme, nats:// when the configured URL has none). connectTo itself
+// runs natsauth.RequireTLS on the URL, so a plain or scheme-less URL is refused unless MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1.
 func connectTo(ctx context.Context, server, url string, creds []byte, timeout time.Duration, extra ...nats.Option) (*nats.Conn, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -140,11 +144,20 @@ func connectTo(ctx context.Context, server, url string, creds []byte, timeout ti
 	if url == "" {
 		return nil, fmt.Errorf("no client URL for server %s", server)
 	}
-	opts := append([]nats.Option{
+	skip, serr := config.SkipEncryptionFrom(os.LookupEnv)
+	if serr != nil {
+		return nil, serr
+	}
+	tlsOpts, _, terr := natsauth.RequireTLS(url, skip)
+	if terr != nil {
+		return nil, terr
+	}
+	opts := append(tlsOpts, []nats.Option{
 		nats.UserCredentialBytes(creds),
 		nats.NoReconnect(), nats.DontRandomize(), nats.IgnoreDiscoveredServers(),
 		nats.Timeout(timeout), nats.Name("mash-policyapply"),
-	}, extra...)
+	}...)
+	opts = append(opts, extra...)
 	nc, err := nats.Connect(url, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("connect to %s: %w", server, err)

@@ -256,18 +256,21 @@ const SkipEncryptionWarning = "warning: encryption to the server is OFF (" + Ski
 
 // SkipEncryptionError is a refusal about the encryption override (a removed name, a bad value). It is a command-line
 // or configuration error: the commands exit 2 on it.
-type SkipEncryptionError struct{ msg string }
+type SkipEncryptionError struct{ msg, hint string }
 
 func (e *SkipEncryptionError) Error() string { return "mash: " + e.msg }
 
 // Msg is the error without its "mash: " prefix.
 func (e *SkipEncryptionError) Msg() string { return e.msg }
 
+// Hint is the one-line fix for the refusal. It never points at a command, since every command refuses until the fix is made.
+func (e *SkipEncryptionError) Hint() string { return e.hint }
+
 // SkipEncryptionFrom reads SkipEncryptionEnv: "" and "0" are off, "1" is on, anything else is an error naming it. The
 // removed name MASH_INSECURE_PLAINTEXT is refused when it is set at all.
 func SkipEncryptionFrom(lookup Lookup) (bool, error) {
 	if old, _ := lookup("MASH_INSECURE_PLAINTEXT"); old != "" {
-		return false, &SkipEncryptionError{msg: "MASH_INSECURE_PLAINTEXT is no longer read; set " + SkipEncryptionEnv + "=1 instead"}
+		return false, &SkipEncryptionError{msg: "MASH_INSECURE_PLAINTEXT is no longer read; set " + SkipEncryptionEnv + "=1 instead", hint: "unset MASH_INSECURE_PLAINTEXT; use " + SkipEncryptionEnv + "=1"}
 	}
 	v, _ := lookup(SkipEncryptionEnv)
 	switch v {
@@ -276,7 +279,7 @@ func SkipEncryptionFrom(lookup Lookup) (bool, error) {
 	case "1":
 		return true, nil
 	}
-	return false, &SkipEncryptionError{msg: fmt.Sprintf("%s=%q is not 1 (set it to 1 to turn encryption off, or unset it)", SkipEncryptionEnv, v)}
+	return false, &SkipEncryptionError{msg: fmt.Sprintf("%s=%q is not 1 (set it to 1 to turn encryption off, or unset it)", SkipEncryptionEnv, v), hint: "set " + SkipEncryptionEnv + "=1 or unset it"}
 }
 
 // WarnSkipEncryption prints SkipEncryptionWarning to stderr when SkipEncryptionEnv is on. A command calls it once,
@@ -311,7 +314,7 @@ func CheckSkipEncryption(lookup Lookup, home string) *SkipEncryptionError {
 // refuseOldKey refuses the removed config.json key insecure_plaintext.
 func refuseOldKey(f file) error {
 	if f.OldInsecurePlaintext != nil {
-		return &SkipEncryptionError{msg: "insecure_plaintext in config.json is no longer read; set " + SkipEncryptionEnv + "=1 instead"}
+		return &SkipEncryptionError{msg: "insecure_plaintext in config.json is no longer read; set " + SkipEncryptionEnv + "=1 instead", hint: "remove insecure_plaintext from config.json; use " + SkipEncryptionEnv + "=1"}
 	}
 	return nil
 }
