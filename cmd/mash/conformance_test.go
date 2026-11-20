@@ -55,11 +55,6 @@ var knownDrift = map[string]string{
 // help option before the command as the tool's own help (cmd/mash/main.go, cli.go).
 const confHelpFirst = "a help option before the command prints the tool's own help; rules.json: 'mash -h version' is 'mash version --help'"
 
-// confRemoved are the commands the build lists that the specification does not have, because they are being removed.
-var confRemoved = map[string]string{
-	"plugin": "being removed from the command list",
-}
-
 // confCheck applies the rule of the two tables to the problems of one check.
 func confCheck(t *testing.T, table map[string]string, tableName, key string, problems []string) {
 	t.Helper()
@@ -197,16 +192,7 @@ func TestConformance(t *testing.T) {
 				if _, inSpec := specTop[n]; inSpec {
 					continue
 				}
-				if why, ok := confRemoved[n]; ok {
-					t.Logf("%s is in the build's help and not in the specification: %s", n, why)
-					continue
-				}
-				t.Errorf("mash --help lists %q, which spec/mash.json does not have (and it is not being removed)", n)
-			}
-			for n, why := range confRemoved {
-				if !listed[n] {
-					t.Errorf("%s (%s) is no longer in mash --help: remove it from confRemoved", n, why)
-				}
+				t.Errorf("mash --help lists %q, which spec/mash.json does not have", n)
 			}
 		})
 	})

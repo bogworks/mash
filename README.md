@@ -100,8 +100,7 @@ mashctl endpoint create alice/dev/review --make-key
 Then install the plugin and start two sessions:
 
 ```sh
-mash plugin export ~/.mash-plugin
-claude plugin marketplace add ~/.mash-plugin
+claude plugin marketplace add bogworks/mash
 claude plugin install mash@mash
 MASH_ENDPOINT=alice.dev.design claude --dangerously-load-development-channels plugin:mash@mash   # terminal 1
 MASH_ENDPOINT=alice.dev.review claude --dangerously-load-development-channels plugin:mash@mash   # terminal 2
@@ -171,11 +170,10 @@ claude plugin install mash@mash
 MASH_ENDPOINT=alice.dev.my-session claude --channels plugin:mash@mash
 ```
 
-To install the plugin of exactly the mash you have (a pinned release, no GitHub fetch), export it and add the directory as the marketplace:
+The plugin is installed from its marketplace only (`mash plugin export` is removed):
 
 ```sh
-mash plugin export ~/.mash-plugin        # writes marketplace + plugin; needs no config or NATS
-claude plugin marketplace add ~/.mash-plugin
+claude plugin marketplace add bogworks/mash
 claude plugin install mash@mash
 ```
 

@@ -33,7 +33,7 @@ bob                                                         alice
 
 ## How it was made
 
-- mash 0.3.0 built from this repository; the plugin installed from `mash plugin export`.
+- mash 0.3.0 built from this repository; the plugin installed from its marketplace (`claude plugin marketplace add bogworks/mash`, then `claude plugin install mash@mash`).
 - The endpoints were `alice` and `bob`, created before the script was retired.
 - `MASH_IDLE_WAKE=5s` was set for both sessions so the wake arrives within seconds. The default is 45 seconds
   (a blocker, question or task wakes an idle session after that; see [operations](../operations.md)).

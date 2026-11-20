@@ -14,7 +14,6 @@ import (
 // helpVerbs is every verb and sub-verb of mash; each takes -h and --help, prints its usage and changes nothing.
 var helpVerbs = [][]string{
 	{"serve"}, {"hook"}, {"send"}, {"read"}, {"inbox"}, {"who"}, {"prompt"}, {"status"}, {"doctor"}, {"version"},
-	{"plugin"}, {"plugin", "export"},
 	{"key"}, {"key", "create"}, {"join"},
 }
 
@@ -81,7 +80,6 @@ func TestHelpUsageOnlyFirstArgument(t *testing.T) {
 	yes := [][]string{
 		{"prompt", "--help"}, {"prompt", "-h"},
 		{"serve", "-h"}, {"hook", "--help"},
-		{"plugin", "--help"}, {"plugin", "export", "-h"},
 	}
 	for _, a := range yes {
 		if _, ok := helpUsage(a); !ok {
@@ -91,7 +89,6 @@ func TestHelpUsageOnlyFirstArgument(t *testing.T) {
 	no := [][]string{
 		{"send", tTo("y"), "--help"}, {"send", tTo("y"), "-h"}, // send is on the command table: its help is cmdcore's
 		{"prompt", tTo("y"), "what", "does", "-h", "do"}, {"prompt", tTo("y"), "--help"}, {"prompt", tTo("y"), "-h"},
-		{"plugin", "export", "--help-me"}, {"plugin", "export", "dir", "-h"},
 		{"nosuch", "--help"},
 	}
 	for _, a := range no {

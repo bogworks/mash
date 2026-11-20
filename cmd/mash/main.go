@@ -59,7 +59,7 @@ var helpGroups = []string{"Everyday", "Setup", "Integration", "Raw SAP"}
 var helpLayout = map[string][]string{
 	"Everyday":    {"send", "inbox", "read", "who", "status", "doctor", "version"},
 	"Setup":       {"join", "key"},
-	"Integration": {"serve", "hook", "plugin"},
+	"Integration": {"serve", "hook"},
 	"Raw SAP":     {"prompt"},
 }
 
@@ -68,7 +68,6 @@ var handCommands = map[string][2]string{
 	"key":    {"mash key create [options]", cmds.KeyParent},
 	"serve":  {"mash serve", "The Claude Code channel server (started by the plugin)"},
 	"hook":   {"mash hook", "The plugin's hook: shows the session its spooled mail"},
-	"plugin": {"mash plugin export <dir>", "Write this build's Claude Code plugin and a marketplace for it into <dir>"},
 	"prompt": {"mash prompt <to> <text...>", "A live, signed SAP prompt; prints the reply"},
 }
 
@@ -164,10 +163,10 @@ var verbUsage = map[string]string{
 
 // helpTopic is the verbs that are not on the table and have help of their own: `mash help VERB` prints their
 // `mash VERB --help`.
-var helpTopic = map[string]bool{"serve": true, "hook": true, "plugin": true, "key": true, "prompt": true}
+var helpTopic = map[string]bool{"serve": true, "hook": true, "key": true, "prompt": true}
 
 // noJSONForm is the verbs that have no --json form: a --json given to one is a usage error.
-var noJSONForm = map[string]bool{"prompt": true, "serve": true, "hook": true, "plugin": true}
+var noJSONForm = map[string]bool{"prompt": true, "serve": true, "hook": true}
 
 // stdinWait is how long a message read from standard input has to arrive: 15 minutes, as the send help says. It is its
 // own limit, not cli_timeout: a run can take up to twice cli_timeout (this wait, then the command's own deadline).
@@ -269,9 +268,6 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 	if args[0] == "help" || args[0] == "-h" || args[0] == "--help" {
 		fmt.Fprint(stdout, usage)
 		return 0
-	}
-	if args[0] == "plugin" { // before config: an install runs it with no endpoint and no environment
-		return pluginCmd(args[1:], stdout, stderr)
 	}
 	if args[0] == "key" { // before config: it needs no endpoint, config file or account key
 		return keyCmd(args, stdin, stdout, stderr, global)
