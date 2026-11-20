@@ -34,8 +34,9 @@ const refusedSeqsFile = "refused-unverified.seqs"
 // stream's identity is stale: its sequences and the count beside it are discarded, never applied to the new stream.
 const refusedSeqsHeader = "stream "
 
-// refusedSeqsKeep is how many sequences the file keeps: past twice that it is rewritten to the newest.
-const refusedSeqsKeep = 4096
+// refusedSeqsKeep is the size at which the file is pruned: past twice that, the sequences below the inbox stream's
+// first sequence (gone from the stream) are dropped. A sequence the stream still holds is never dropped.
+var refusedSeqsKeep = 4096
 
 // refusedMu serialises the writers of the count and the sequence list, so concurrent arrivals lose no count.
 var refusedMu sync.Mutex
@@ -46,16 +47,16 @@ func (e *Endpoint) refuses(t sap.Trust) bool {
 }
 
 // refuse records one refused message: the count (RefusedFile, replaced whole), the sequence and one line on the log
-// without the body. A failure to write is logged; it never stops the mail from being dropped. It reports whether the
-// refusal was recorded.
-func (e *Endpoint) refuse(seq uint64, claimed string, trust sap.Trust) bool {
+// without the body. A failure to write is logged and reported: the message is then not acknowledged. It reports whether the
+// refusal is recorded and whether this call added it.
+func (e *Endpoint) refuse(seq uint64, claimed string, trust sap.Trust) (recorded, added bool) {
 	line := fmt.Sprintf("refused message %d from %s: not verified (%s)", seq, refusedSender(claimed), trust)
-	_, err := e.recordRefusal(seq)
+	_, added, err := e.recordRefusalNew(seq)
 	if err != nil {
-		line += fmt.Sprintf("; the count could not be kept: %v", err)
+		line += fmt.Sprintf("; the refusal could not be recorded: %v", err)
 	}
 	e.log.Print(line)
-	return err == nil
+	return err == nil, added
 }
 
 // unknownSender stands in the log line for a message that claims no sender at all.
@@ -145,50 +146,110 @@ func (e *RefusedMessageError) Error() string {
 	return fmt.Sprintf("mash: message #%d was refused: it was not verified", e.Seq)
 }
 
-// recordRefusal records the refusal of seq. An error means nothing was recorded.
+// recordRefusal records the refusal of seq. An error means nothing was counted. The sequence is written first, the
+// count after: a count that fails after the sequence was recorded is retried by the redelivery, which finds the
+// sequence and does not count it twice.
 func (e *Endpoint) recordRefusal(seq uint64) (int, error) {
+	n, _, err := e.recordRefusalNew(seq)
+	return n, err
+}
+
+// refusedFirstSeq is the first sequence the inbox stream still holds.
+func (e *Endpoint) refusedFirstSeq(ctx context.Context) (uint64, error) {
+	if e.firstSeqFn != nil {
+		return e.firstSeqFn(ctx)
+	}
+	if e.js == nil {
+		return 0, errors.New("no stream")
+	}
+	st, err := e.js.Stream(ctx, e.ident.InboxStream())
+	if err != nil {
+		return 0, err
+	}
+	info, err := st.Info(ctx)
+	if err != nil {
+		return 0, err
+	}
+	return info.State.FirstSeq, nil
+}
+
+// writeRefusedSeqs replaces the sequences file with the stream identity id and seqs.
+func writeRefusedSeqs(p, id string, seqs []uint64) error {
+	var b strings.Builder
+	b.WriteString(refusedSeqsHeader + id + "\n")
+	for _, s := range seqs {
+		b.WriteString(strconv.FormatUint(s, 10) + "\n")
+	}
+	return replaceFile(p, []byte(b.String()))
+}
+
+// recordRefusalNew is recordRefusal; added reports whether seq was new (counted now), false when it was already
+// recorded and the count is returned as it stands.
+func (e *Endpoint) recordRefusalNew(seq uint64) (n int, added bool, err error) {
 	if e.cfg.StateDir == "" {
-		return 0, errors.New("no state directory")
+		return 0, false, errors.New("no state directory")
 	}
 	dir, err := SpoolDir(e.cfg)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	id, err := e.bindRefusals(ctx)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	refusedMu.Lock()
 	defer refusedMu.Unlock()
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return 0, err
+		return 0, false, err
 	}
-	n := RefusedCount(e.cfg) + 1
-	if err := replaceFile(filepath.Join(dir, RefusedFile), []byte(strconv.Itoa(n)+"\n")); err != nil {
-		return 0, err
-	}
-	// The sequence list is best effort: the count is the record.
 	p := filepath.Join(dir, refusedSeqsFile)
-	_, seqs := readRefusedSeqs(p)
-	seqs = append(seqs, seq)
+	fid, seqs := readRefusedSeqs(p)
+	if fid == id && slices.Contains(seqs, seq) {
+		return RefusedCount(e.cfg), false, nil
+	}
 	if _, err := os.Stat(p); err != nil { // a new file starts with its stream's identity
-		_ = replaceFile(p, []byte(refusedSeqsHeader+id+"\n"))
-	}
-	if len(seqs) > 2*refusedSeqsKeep {
-		seqs = seqs[len(seqs)-refusedSeqsKeep:]
-		var b strings.Builder
-		b.WriteString(refusedSeqsHeader + id + "\n")
-		for _, s := range seqs {
-			b.WriteString(strconv.FormatUint(s, 10) + "\n")
+		if err := replaceFile(p, []byte(refusedSeqsHeader+id+"\n")); err != nil {
+			return 0, false, err
 		}
-		_ = replaceFile(p, []byte(b.String()))
-	} else if f, err := os.OpenFile(p, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
-		_, _ = fmt.Fprintf(f, "%d\n", seq)
-		_ = f.Close()
 	}
-	return n, nil
+	wrote := false
+	if len(seqs) >= 2*refusedSeqsKeep {
+		// Only sequences the stream no longer holds are dropped: every one it still holds stays refused.
+		if first, err := e.refusedFirstSeq(ctx); err == nil {
+			kept := make([]uint64, 0, len(seqs)+1)
+			for _, s := range seqs {
+				if s >= first {
+					kept = append(kept, s)
+				}
+			}
+			if len(kept) < len(seqs) {
+				if err := writeRefusedSeqs(p, id, append(kept, seq)); err != nil {
+					return 0, false, err
+				}
+				wrote = true // written whole, seq included
+			}
+		}
+	}
+	if !wrote {
+		f, err := os.OpenFile(p, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+		if err != nil {
+			return 0, false, err
+		}
+		_, werr := fmt.Fprintf(f, "%d\n", seq)
+		if cerr := f.Close(); werr == nil {
+			werr = cerr
+		}
+		if werr != nil {
+			return 0, false, werr
+		}
+	}
+	n = RefusedCount(e.cfg) + 1
+	if err := replaceFile(filepath.Join(dir, RefusedFile), []byte(strconv.Itoa(n)+"\n")); err != nil {
+		return 0, false, err
+	}
+	return n, true, nil
 }
 
 // replaceFile writes data to a temporary file beside path and renames it over path, so a reader never sees half of it.

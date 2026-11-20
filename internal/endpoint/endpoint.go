@@ -91,6 +91,8 @@ type Endpoint struct {
 	inboxID atomic.Pointer[string]
 	// refusedHook, when set (tests), runs in serve's handler after a refusal is recorded and before it is acknowledged.
 	refusedHook func()
+	// firstSeqFn, when set, stands for the inbox stream's first sequence (tests); nil reads it from the stream.
+	firstSeqFn func(context.Context) (uint64, error)
 	// failedLookups remembers, until the time it holds, a sender lookup (name, key) that found no matching record, so a
 	// flood of mail from one unknown signer costs one directory read per poll interval (reloadSender). Guarded by mu.
 	failedLookups map[string]time.Time
