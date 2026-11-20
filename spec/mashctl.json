@@ -354,7 +354,7 @@
        },
        {
         "case": "A problem",
-        "text": "endpoints  FAIL  1 inbox has no endpoint record: acme.demo.dave\n\n1 problem.\nhint: mashctl endpoint show acme.demo.dave",
+        "text": "config     ok\nserver     ok    tls://localhost:4222\nsign-in    ok\nstorage    ok\nendpoints  FAIL  1 inbox has no endpoint record: acme.demo.dave\nkeys       ok    every connected key was issued here\n\n1 problem.\nhint: mashctl endpoint show acme.demo.dave",
         "stream": "stdout",
         "exit": 1
        }
@@ -683,7 +683,7 @@
          },
          {
           "case": "--public-key without --out",
-          "text": "error: --public-key needs --out, the join file to write",
+          "text": "error: --public-key needs --out, the join file to write\nhint: mashctl endpoint create --help",
           "stream": "stderr",
           "exit": 2
          },
@@ -799,7 +799,7 @@
          },
          {
           "case": "No terminal and no --yes",
-          "text": "error: deleting needs a terminal to confirm, or --yes",
+          "text": "error: deleting needs a terminal to confirm, or --yes\nhint: mashctl endpoint delete --help",
           "stream": "stderr",
           "exit": 2
          },
