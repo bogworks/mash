@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -127,10 +128,22 @@ func BuildFlags(version, commit string) []string {
 	}
 }
 
+// Programs are the commands a release builds, one binary each per target: cmd/<name> becomes <name>-<os>-<arch>.
+var Programs = []string{"mash", "mashctl"}
+
 // Build compiles cmd/mash from srcDir into out for goos/goarch ("" means the host's) with the release flags,
 // CGO off and the pinned toolchain, and returns the binary's SHA-256. The same source built in any directory
-// gives the same hash.
+// gives the same hash. It is BuildCmd for the mash program.
 func Build(ctx context.Context, srcDir, out, goos, goarch, version, commit string) (string, error) {
+	return BuildCmd(ctx, srcDir, out, goos, goarch, version, commit, "mash")
+}
+
+// BuildCmd is Build for one of the Programs (cmd/<program>). The flags are the same for every program: the version
+// is stamped into internal/endpoint, which both programs link, and a -X for a variable a program lacks is a no-op.
+func BuildCmd(ctx context.Context, srcDir, out, goos, goarch, version, commit, program string) (string, error) {
+	if !slices.Contains(Programs, program) {
+		return "", fmt.Errorf("program %q is not one of %s", program, strings.Join(Programs, ", "))
+	}
 	abs, err := resolvedAbs(out) // the same resolution CheckSource judged: the filesystem's, not a lexical clean
 	if err != nil {
 		return "", err
@@ -149,7 +162,7 @@ func Build(ctx context.Context, srcDir, out, goos, goarch, version, commit strin
 		}
 	}
 	args := append([]string{"build"}, BuildFlags(version, commit)...)
-	args = append(args, "-o", abs, "./cmd/mash")
+	args = append(args, "-o", abs, "./cmd/"+program)
 	cmd := exec.CommandContext(ctx, "go", args...)
 	cmd.Dir = srcDir
 	cmd.Env = buildEnv(os.Environ(), goos, goarch)

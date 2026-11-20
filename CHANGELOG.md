@@ -4,6 +4,10 @@ All notable user-facing changes to mash are recorded here. The format follows [K
 
 ## [Unreleased]
 
+### Added
+
+- Releases will build `mashctl` beside `mash` for Linux and macOS on amd64 and arm64 (`mashctl-<os>-<arch>`), with a software bill of materials, a checksum line and the same build attestation as `mash`. Not yet in a published release.
+
 ## [0.5.5] - 2026-11-18
 
 ### Summary

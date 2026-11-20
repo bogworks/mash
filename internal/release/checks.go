@@ -81,7 +81,8 @@ func CheckCI(runs []CheckRun, x string) error {
 	return joined(problems)
 }
 
-// Targets are the four binaries a release carries, in the order SHA256SUMS lists them (sha256sum's glob order).
+// Targets are the four platforms a release builds for, in the order SHA256SUMS lists them (sha256sum's glob order).
+// Each platform carries two binaries, mash and mashctl (see Binaries).
 var Targets = []Target{
 	{"darwin", "amd64"}, {"darwin", "arm64"}, {"linux", "amd64"}, {"linux", "arm64"},
 }
@@ -92,18 +93,45 @@ type Target struct{ GOOS, GOARCH string }
 // AssetName is the release asset's name for the target.
 func (t Target) AssetName() string { return "mash-" + t.GOOS + "-" + t.GOARCH }
 
-// SBOMName is the CycloneDX SBOM asset of the target's binary.
+// CtlAssetName is the release asset's name of mashctl for the target.
+func (t Target) CtlAssetName() string { return "mashctl-" + t.GOOS + "-" + t.GOARCH }
+
+// SBOMName is the CycloneDX SBOM asset of the target's mash binary.
 func (t Target) SBOMName() string { return t.AssetName() + ".cdx.json" }
 
-// ProvenanceName is the SLSA Build L3 provenance asset covering the four binaries.
+// Binary is one release binary: a program (one of Programs) built for a target.
+type Binary struct {
+	Program string
+	Target
+}
+
+// AssetName is the release asset's name of the binary: <program>-<os>-<arch>.
+func (b Binary) AssetName() string { return b.Program + "-" + b.GOOS + "-" + b.GOARCH }
+
+// SBOMName is the CycloneDX SBOM asset of the binary.
+func (b Binary) SBOMName() string { return b.AssetName() + ".cdx.json" }
+
+// Binaries are the eight binaries a release carries: mash for every target, then mashctl for every target, in the
+// order SHA256SUMS lists them.
+func Binaries() []Binary {
+	var out []Binary
+	for _, p := range Programs {
+		for _, t := range Targets {
+			out = append(out, Binary{p, t})
+		}
+	}
+	return out
+}
+
+// ProvenanceName is the SLSA Build L3 provenance asset covering the eight binaries.
 const ProvenanceName = "mash.intoto.jsonl"
 
-// CIAssetNames are the assets release.yml makes that the gate cannot rebuild: each target's SBOM, in target order,
+// CIAssetNames are the assets release.yml makes that the gate cannot rebuild: each binary's SBOM, in Binaries order,
 // then the SLSA provenance. They are attached by name and listed in SHA256SUMS; the gate verifies their contents.
 func CIAssetNames() []string {
 	var n []string
-	for _, t := range Targets {
-		n = append(n, t.SBOMName())
+	for _, b := range Binaries() {
+		n = append(n, b.SBOMName())
 	}
 	return append(n, ProvenanceName)
 }
@@ -133,15 +161,15 @@ const SumsSigName = "SHA256SUMS.sig"
 // signature this key makes for any other purpose cannot be replayed as a mash release signature.
 const SumsNamespace = "mash-release"
 
-// ExpectedSums is the exact SHA256SUMS content for the given per-target hashes (hex SHA-256 of each binary), the
+// ExpectedSums is the exact SHA256SUMS content for the given per-binary hashes (hex SHA-256 of each binary), the
 // quickstart script's hash and the hex SHA-256 of each CIAssetNames file (ci, by name): the binaries, the script, the
 // SBOMs and the provenance, in that order, as release.yml's draft job lists them. A name missing from ci is left out.
 // A keyless release (at or above the cutover) lists the same names except the provenance bundle: it cannot list itself,
 // as release.yml makes the sums before the job that attests.
-func ExpectedSums(hashes map[Target]string, scriptHash string, ci map[string]string, keyless bool) string {
+func ExpectedSums(hashes map[Binary]string, scriptHash string, ci map[string]string, keyless bool) string {
 	var b strings.Builder
-	for _, t := range Targets {
-		fmt.Fprintf(&b, "%s  %s\n", hashes[t], t.AssetName())
+	for _, bin := range Binaries() {
+		fmt.Fprintf(&b, "%s  %s\n", hashes[bin], bin.AssetName())
 	}
 	fmt.Fprintf(&b, "%s  %s\n", scriptHash, ScriptName)
 	for _, n := range SumsCINames(keyless) {
@@ -158,13 +186,13 @@ func sha(b []byte) string {
 }
 
 // CheckAssets judges a draft release's assets (name -> GitHub's "sha256:<hex>" digest) against our own fresh builds
-// of the candidate: exactly the four binaries, their four SBOMs, the SLSA provenance, the quickstart script and
+// of the candidate: exactly the eight binaries (mash and mashctl for each target), their eight SBOMs, the SLSA provenance, the quickstart script and
 // SHA256SUMS, nothing else; each binary's digest is the hash of our build for that target, the script's is scriptHash
 // (the tagged source's); the SBOMs and the provenance must be attached (their contents are verified separately, as
 // they cannot be rebuilt); and SHA256SUMS is exactly the file those hashes and the attached digests produce. It names
 // every problem. For a keyless release (at or above the cutover) SHA256SUMS omits the provenance bundle (which stays
 // required to be attached), and a SHA256SUMS.sig is not allowed.
-func CheckAssets(have map[string]string, hashes map[Target]string, scriptHash string, keyless bool) error {
+func CheckAssets(have map[string]string, hashes map[Binary]string, scriptHash string, keyless bool) error {
 	var problems []string
 	add := func(f string, a ...any) { problems = append(problems, fmt.Sprintf(f, a...)) }
 	want := map[string]string{}
@@ -188,10 +216,10 @@ func CheckAssets(have map[string]string, hashes map[Target]string, scriptHash st
 	} else {
 		want[ScriptName] = "sha256:" + scriptHash
 	}
-	for _, t := range Targets {
+	for _, t := range Binaries() {
 		h, ok := hashes[t]
 		if !ok || len(h) != 64 {
-			add("no usable build hash for %s/%s", t.GOOS, t.GOARCH)
+			add("no usable build hash for %s (%s/%s)", t.Program, t.GOOS, t.GOARCH)
 			continue
 		}
 		want[t.AssetName()] = "sha256:" + h

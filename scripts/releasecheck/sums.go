@@ -28,11 +28,11 @@ import (
 // so a draft whose assets were replaced after the gate, even by another validly signed set, is never published.
 type gateRecord struct {
 	sums       []byte
-	hashes     map[release.Target]string
+	hashes     map[release.Binary]string
 	scriptHash string // sha256 of scripts/quickstart-synadia.sh at X
 }
 
-func (g *gateRecord) set(sums []byte, hashes map[release.Target]string, scriptHash string) {
+func (g *gateRecord) set(sums []byte, hashes map[release.Binary]string, scriptHash string) {
 	if g == nil {
 		return
 	}
@@ -54,15 +54,15 @@ const signerPrincipal = "release"
 var sumsLine = regexp.MustCompile(`^([0-9a-f]{64}) [ *]([^ ]+)$`)
 
 // checkSumEntries holds every line of SHA256SUMS to the hash of our own fresh build of X for that target (hashes, made
-// by buildFresh from the tagged commit) and the quickstart-synadia.sh line to scriptHash (the script at X). A malformed line, a duplicate name, a name that is not mash-<os>-<arch> of a
+// by buildFresh from the tagged commit) and the quickstart-synadia.sh line to scriptHash (the script at X). A malformed line, a duplicate name, a name that is not mash-<os>-<arch> or mashctl-<os>-<arch> of a
 // release target, a digest that differs from our build, a listed name that is not attached (or is attached with
 // another digest) and an attached mash-* asset that is not listed are each refused; so is a target the sums omit.
 // The SBOMs and the SLSA provenance (release.CIAssetNames) must be listed too; their digests are the attached ones.
 // For a keyless release the provenance bundle is not listed (it cannot list itself) and a line for it is refused; it
 // is verified by its attestation instead.
-func checkSumEntries(sums []byte, have map[string]string, hashes map[release.Target]string, scriptHash string, keyless bool) error {
-	byName := map[string]release.Target{}
-	for _, t := range release.Targets {
+func checkSumEntries(sums []byte, have map[string]string, hashes map[release.Binary]string, scriptHash string, keyless bool) error {
+	byName := map[string]release.Binary{}
+	for _, t := range release.Binaries() {
 		byName[t.AssetName()] = t
 	}
 	ciNames := release.SumsCINames(keyless)
@@ -95,7 +95,7 @@ func checkSumEntries(sums []byte, have map[string]string, hashes map[release.Tar
 		}
 		t, ok := byName[name]
 		if !ok {
-			return fmt.Errorf("SHA256SUMS lists %s, which is neither mash-<os>-<arch> of a release target, nor %s, nor an SBOM or the provenance of the release", name, release.ScriptName)
+			return fmt.Errorf("SHA256SUMS lists %s, which is neither mash-<os>-<arch> nor mashctl-<os>-<arch> of a release target, nor %s, nor an SBOM or the provenance of the release", name, release.ScriptName)
 		}
 		if want := hashes[t]; hash != want {
 			return fmt.Errorf("SHA256SUMS lists %s as sha256:%s, a fresh reproducible build of X gives sha256:%s", name, hash, want)
@@ -322,7 +322,7 @@ func verifyPublishable(o Options, tag, x string, rec *gateRecord) error {
 			return fmt.Errorf("%s changed after it was verified: the release reports %q, the bytes verified are %s", name, got, want)
 		}
 	}
-	for _, t := range release.Targets {
+	for _, t := range release.Binaries() {
 		n := t.AssetName()
 		if want := "sha256:" + rec.hashes[t]; have[n] != want {
 			if _, ok := have[n]; !ok {
@@ -417,7 +417,7 @@ func gitBytes(dir string, args ...string) ([]byte, error) {
 //   - none attached on a published release is refused: a published release is never amended;
 //   - none attached on a draft is made with the release key (RELEASE_SIGNING_KEY), verified against the signers file at X, uploaded and
 //     read back.
-func signedSums(o Options, tag, x string, draft, kl bool, have map[string]string, hashes map[release.Target]string, scriptHash string, rec *gateRecord) error {
+func signedSums(o Options, tag, x string, draft, kl bool, have map[string]string, hashes map[release.Binary]string, scriptHash string, rec *gateRecord) error {
 	if kl {
 		return keylessSums(o, tag, x, have, hashes, scriptHash, rec)
 	}
@@ -475,7 +475,7 @@ func signedSums(o Options, tag, x string, draft, kl bool, have map[string]string
 
 // keylessSums is signedSums for a release at or above the cutover: the same line-by-line check of SHA256SUMS against
 // our fresh builds, then the attestation of SHA256SUMS itself instead of a signature.
-func keylessSums(o Options, tag, x string, have map[string]string, hashes map[release.Target]string, scriptHash string, rec *gateRecord) error {
+func keylessSums(o Options, tag, x string, have map[string]string, hashes map[release.Binary]string, scriptHash string, rec *gateRecord) error {
 	if _, ok := have[release.SumsSigName]; ok {
 		return fmt.Errorf("a keyless release carries no %s", release.SumsSigName)
 	}
@@ -496,7 +496,7 @@ func keylessSums(o Options, tag, x string, have map[string]string, hashes map[re
 	return nil
 }
 
-// verifyAttestations downloads each of the four binaries from the release into a temporary directory and runs
+// verifyAttestations downloads each of the eight binaries (mash and mashctl) from the release into a temporary directory and runs
 // `gh attestation verify <file>` on it, pinned to the release repository o.GHRepo, its release.yml and the tag (attestFlags: the repository, the workflow, the tag and the commit x). A binary
 // with no attestation, or one that does not verify, is refused naming it (exit 3); a download that fails is the
 // gate's (could not decide). It keeps a draft that release.yml's attest job never saw (an older one, or one made by
@@ -508,8 +508,8 @@ func verifyAttestations(o Options, tag, x string) error {
 	}
 	defer os.RemoveAll(dir)
 	var bad []string
-	for _, t := range release.Targets {
-		name := "mash-" + t.GOOS + "-" + t.GOARCH
+	for _, t := range release.Binaries() {
+		name := t.AssetName()
 		b, err := downloadAsset(o, tag, name)
 		if err != nil {
 			return err

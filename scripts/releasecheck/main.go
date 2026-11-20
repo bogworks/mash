@@ -9,7 +9,7 @@
 // It verifies the candidate is on main of the release repository; CI's check runs on X succeeded; X builds, from
 // fresh clones in different directories, to identical bytes whose `version` line is exactly "mash <version> (commit X)".
 // With --assets it verifies the remote tag v<version> is annotated, signed by a key this machine trusts and points at
-// X, and that the draft release carries exactly the four binaries and SHA256SUMS, each equal to our own build of X.
+// X, and that the draft release carries exactly the eight binaries (mash and mashctl) and SHA256SUMS, each equal to our own build of X.
 // It then signs SHA256SUMS (ssh-keygen -Y sign, namespace mash-release) after checking every line against those builds, verifies
 // the signature against ci/release.allowed_signers at X and uploads SHA256SUMS.sig; RELEASE_SIGNING_KEY names the key (the one that signs the tag).
 // With --consumer (maintainers only: needs a downstream consumer's checkout) it also runs that checkout's own check of mash against X, as its .mash-consumer-check manifest directs (docs/release.md): opt-in, as it can take 30+ minutes.
@@ -67,7 +67,7 @@ type Options struct {
 
 	prevFetched *string // the tag already fetched into prevTagRef, so the plugin and render-contract steps fetch it once; nil: always fetch
 
-	build           func(ctx context.Context, src, out, goos, goarch, version, commit string) (string, error) // test seam: default release.Build
+	build           func(ctx context.Context, src, out, goos, goarch, version, commit string) (string, error) // test seam: default release.BuildCmd (for every program)
 	afterAssets     func()                                                                                    // test seam: called after the release assets were read
 	afterTagList    func()                                                                                    // test seam: called between listing the tag and fetching it
 	prevBinary      func(ctx context.Context, tag, dir string) (string, error)                                // test seam: the previous release's binary for this host, in dir; default gh release download
@@ -440,13 +440,13 @@ func freshClone(repo, x string) (src, work string, err error) {
 
 // buildFresh builds x for the target from a fresh clone and returns the binary's hash (and keeps the binary at
 // keep when it is not empty).
-func buildFresh(ctx context.Context, o Options, x, goos, goarch, keep string) (string, error) {
+func buildFresh(ctx context.Context, o Options, x, program, goos, goarch, keep string) (string, error) {
 	src, work, err := freshClone(o.Repo, x)
 	if err != nil {
 		return "", err
 	}
 	defer os.RemoveAll(work)
-	bin := filepath.Join(work, "out", "mash")
+	bin := filepath.Join(work, "out", program)
 	if err := release.CheckSource(src, x, bin); err != nil {
 		var te *release.ToolError
 		if errors.As(err, &te) {
@@ -456,7 +456,9 @@ func buildFresh(ctx context.Context, o Options, x, goos, goarch, keep string) (s
 	}
 	build := o.build
 	if build == nil {
-		build = release.Build
+		build = func(ctx context.Context, src, out, goos, goarch, version, commit string) (string, error) {
+			return release.BuildCmd(ctx, src, out, goos, goarch, version, commit, program)
+		}
 	}
 	sum, err := build(ctx, src, bin, goos, goarch, o.Version, x)
 	if err != nil {
@@ -490,11 +492,11 @@ func reproducible(ctx context.Context, o Options, x string) error {
 	}
 	kf.Close()
 	defer os.Remove(keep)
-	a, err := buildFresh(ctx, o, x, "", "", keep)
+	a, err := buildFresh(ctx, o, x, "mash", "", "", keep)
 	if err != nil {
 		return err
 	}
-	b, err := buildFresh(ctx, o, x, "", "", "")
+	b, err := buildFresh(ctx, o, x, "mash", "", "", "")
 	if err != nil {
 		return err
 	}
@@ -638,7 +640,7 @@ func verifyTag(o Options, tag, object, x string, keyless bool) error {
 }
 
 // checkAssets verifies the draft release for v<version> belongs to X: the tag is annotated, signed by a trusted key and
-// points at X (and still does after the assets were read), and the release carries exactly the four binaries and
+// points at X (and still does after the assets were read), and the release carries exactly the eight binaries and
 // SHA256SUMS, each equal to our own fresh build of X for that target.
 func checkAssets(ctx context.Context, o Options) error { return checkAssetsRecord(ctx, o, nil) }
 
@@ -680,12 +682,12 @@ func checkAssetsRecord(ctx context.Context, o Options, rec *gateRecord) error {
 	}
 
 	// Our own build of X for every target.
-	hashes := map[release.Target]string{}
+	hashes := map[release.Binary]string{}
 	var berrs []error
-	for _, t := range release.Targets {
-		h, err := buildFresh(ctx, o, x, t.GOOS, t.GOARCH, "")
+	for _, t := range release.Binaries() {
+		h, err := buildFresh(ctx, o, x, t.Program, t.GOOS, t.GOARCH, "")
 		if err != nil {
-			berrs = append(berrs, fmt.Errorf("%s/%s: %w", t.GOOS, t.GOARCH, err))
+			berrs = append(berrs, fmt.Errorf("%s %s/%s: %w", t.Program, t.GOOS, t.GOARCH, err))
 			continue
 		}
 		hashes[t] = h
@@ -1037,7 +1039,7 @@ func pluginCompat(ctx context.Context, o Options, x string, b *binaries) error {
 		cgot, err = o.candBinary(ctx, cdir)
 	} else {
 		cgot = filepath.Join(cdir, "built")
-		_, err = buildFresh(ctx, o, x, "", "", cgot)
+		_, err = buildFresh(ctx, o, x, "mash", "", "", cgot)
 	}
 	if err != nil {
 		return err // a build failure is reported as reproducible() reports it

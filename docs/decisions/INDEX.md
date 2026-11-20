@@ -124,3 +124,4 @@
 | [0131](0131-mash-stands-alone-everything-works-without-homerange-or-any-upward-dependency-first.md) | mash stands alone: everything works without homerange or any upward dependency, first | proposed | 2026-11-15 |
 | [0145](0145-an-endpoint-address-is-owner-group-instance-and-0-5-5-is-a-hard-cut-with-no-migration-in-mash.md) | An endpoint address is owner, group, instance, and 0.5.5 is a hard cut with no migration in mash | proposed | 2026-11-17 |
 | [0146](0146-every-mash-and-mashctl-connection-requires-tls-loopback-included-and-one-override-insecure-plaintext-allows-plain-text.md) | Every mash and mashctl connection requires TLS, loopback included, and one override, insecure_plaintext, allows plain text | accepted | 2026-11-18 |
+| [0148](0148-releases-build-mashctl-beside-mash-with-the-same-supply-chain-checks.md) | Releases build mashctl beside mash with the same supply-chain checks | accepted | 2026-11-20 |

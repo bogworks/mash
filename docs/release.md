@@ -34,7 +34,7 @@ The tag is annotated and unsigned. It is pushed by the minting service with a de
 refuses, and the maintainer asks for the tag. There is no `SHA256SUMS.sig` and no SSH tag signature. `SHA256SUMS` is an
 attested subject instead. Every attestation check pins four facts: `-R <repo>`, `--signer-workflow
 <repo>/.github/workflows/release.yml`, `--source-ref refs/tags/v<version>` and `--source-digest <X>` (X is the release
-commit). `release-check --assets` verifies the four binaries and `SHA256SUMS` that way and rebuilds the binaries. After
+commit). `release-check --assets` verifies the eight binaries (`mash` and `mashctl`, see [ADR 0148](decisions/0148-releases-build-mashctl-beside-mash-with-the-same-supply-chain-checks.md)) and `SHA256SUMS` that way and rebuilds the binaries. After
 `--assets` passes, publication is `scripts/release-check publish <version> <X>` (for 0.5.5: `scripts/release-check publish --not-latest 0.5.5 <X>`, see below): once the service's tag exists at X it
 runs the pre-tag gate, `--assets` and the final checks (the sums and every attestation again) immediately before
 `gh release edit v<version> --draft=false`, so the publish step is bound to what was just verified. It makes no tag and
@@ -77,8 +77,8 @@ This section applies to releases below the cutover version. From the cutover not
 The `--assets` gate signs `SHA256SUMS`, and `publish` always runs it. There is no flag to skip it. The signature is made
 last: the build provenance attestations, the SBOMs and the attached build provenance are verified first, and if any of them fails
 nothing is signed or uploaded (a draft that already carries a `SHA256SUMS.sig` still has them verified). Then it checks
-every line of `SHA256SUMS`. Each `mash-<os>-<arch>` line must equal a fresh, reproducible build of X made on the maintainer's
-machine with the release recipe, and the `quickstart-synadia.sh` line must equal the script at X, so the signature covers the script too. A malformed line, a duplicate, a name that is not attached, or an attached `mash-*`
+every line of `SHA256SUMS`. Each `mash-<os>-<arch>` and `mashctl-<os>-<arch>` line must equal a fresh, reproducible build of X made on the maintainer's
+machine with the release recipe, and the `quickstart-synadia.sh` line must equal the script at X, so the signature covers the script too. A malformed line, a duplicate, a name that is not attached, or an attached `mash*`
 asset that is not listed is refused. Then it signs with `ssh-keygen -Y sign -n mash-release` and uploads
 `SHA256SUMS.sig` to the draft. It verifies the signature against `ci/release.allowed_signers` as it stands at X, before
 the upload and again on the draft read back. The key is the maintainer's release key, the one that signs the tag, named the one way the tag's is: `RELEASE_SIGNING_KEY`
@@ -172,11 +172,12 @@ The numbered steps are what the command does in each state, and the manual path 
    It also refuses while any earlier `vN.N.N` tag has a release that is a draft or missing, unless `docs/skipped-releases.txt` at X lists that tag with a reason (a bare tag line without one does not count; publish it with `gh release edit <tag> --draft=false`); pre-release tags are ignored.
 4. **Tag** (state: no tag). Below the cutover: `git tag -s v<version> X && git push origin v<version>` (annotated and signed; the maintainer's key). At or above it: the maintainer asks the minting service to push the annotated, unsigned tag at X with its deploy key; nobody signs it, and `release-check publish` refuses when no tag exists.
 5. **CI** (state: tag at X, no release): `release.yml` guards the tag (name `vN.N.N`, annotated, signature present, X on main), builds the four
-   targets (`mash-{linux,darwin}-{amd64,arm64}`) twice each in fresh clones and fails on any mismatch, and an `attest` job
-   attests build provenance for the four binaries (see "Build provenance"). From 0.3.2 the workflow also generates a
+   targets of both programs (`mash-{linux,darwin}-{amd64,arm64}` and `mashctl-{linux,darwin}-{amd64,arm64}`) twice each in
+   fresh clones and fails on any mismatch, and an `attest` job
+   attests build provenance for the eight binaries (see "Build provenance"). From 0.3.2 the workflow also generates a
    CycloneDX SBOM per binary and attests it, and keeps the Sigstore bundle of its build provenance attestation as `mash.intoto.jsonl` (see "SBOM and
-   build provenance"). Only after all of these succeed does it create a **draft** release with the four binaries, the four
-   `mash-<os>-<arch>.cdx.json` SBOMs, `mash.intoto.jsonl`, `quickstart-synadia.sh` (the tagged `scripts/quickstart-synadia.sh`),
+   build provenance"). Only after all of these succeed does it create a **draft** release with the eight binaries, the eight
+   `<program>-<os>-<arch>.cdx.json` SBOMs, `mash.intoto.jsonl`, `quickstart-synadia.sh` (the tagged `scripts/quickstart-synadia.sh`),
    `SHA256SUMS` (which lists the binaries, the SBOMs, `mash.intoto.jsonl` and the script) and the release notes. The notes are
    the change-log section of the released version (`go run ./scripts/changelog section --version X.Y.Z`) with one final
    paragraph, `Full changes: [v<previous>...v<tag>](https://github.com/<repository>/compare/v<previous>...v<tag>)`, where the
@@ -186,9 +187,9 @@ The numbered steps are what the command does in each state, and the manual path 
    A failed attestation leaves no draft; fix the cause and rerun the workflow.
 6. **Gate, before publishing** (states: draft, then published, where it only verifies): `scripts/release-check --assets <version> <X>`: the remote tag exists, is annotated,
    verifies against `docs/allowed_signers` (the release key; never this machine's own git config), peels to X and is still that object after the assets were read; the release
-   carries exactly the four binaries, the four `mash-<os>-<arch>.cdx.json` SBOMs, `mash.intoto.jsonl`, `quickstart-synadia.sh` and `SHA256SUMS`: each binary equal to a fresh build of X made here, the script byte-equal to `scripts/quickstart-synadia.sh` at X, and `SHA256SUMS` listing the binaries, the SBOMs, `mash.intoto.jsonl` and the script; and, for each of the four binaries, `gh attestation verify <binary> -R bogworks/mash --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/v<version>` (build provenance) and the same with `--predicate-type https://cyclonedx.org/bom` (SBOM; the attached `<binary>.cdx.json` must equal the attested predicate) pass on the files downloaded from the release, and the same with `--bundle mash.intoto.jsonl` passes on each binary (and `mash.intoto.jsonl` must name `.github/workflows/release.yml` as its workflow entry point) (a missing or failing check is refused, exit 3, naming the file; there is no skip flag; this covers an older or hand-made draft that the workflow never saw, and runs only after the tag, asset and build checks passed); the release body must also pass the same opening test (a Summary and an Upgrading section, as above), hold a link containing `compare/v<previous>...v<version>` (the previous release is the highest earlier published `vN.N.N`; with none, any `/compare/v` link ending `...v<version>`), have no line ending in a parenthesized commit hash of 7 to 40 hex digits, and not contain `REPLACE THIS`. The body is judged only for a version strictly above the cutover: the cutover release itself (v0.4.0) was published before this rule and is not re-judged, and earlier ones never are. Only when all of these pass is `SHA256SUMS.sig` made, verified and uploaded (see Signing), so a draft that fails any of them is never signed. Then publish the draft: `gh release edit v<version> --draft=false`.
+   carries exactly the eight binaries (`mash-<os>-<arch>` and `mashctl-<os>-<arch>`), the eight `<program>-<os>-<arch>.cdx.json` SBOMs, `mash.intoto.jsonl`, `quickstart-synadia.sh` and `SHA256SUMS`: each binary equal to a fresh build of X made here, the script byte-equal to `scripts/quickstart-synadia.sh` at X, and `SHA256SUMS` listing the binaries, the SBOMs, `mash.intoto.jsonl` and the script; and, for each of the eight binaries, `gh attestation verify <binary> -R bogworks/mash --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/v<version>` (build provenance) and the same with `--predicate-type https://cyclonedx.org/bom` (SBOM; the attached `<binary>.cdx.json` must equal the attested predicate) pass on the files downloaded from the release, and the same with `--bundle mash.intoto.jsonl` passes on each binary (and `mash.intoto.jsonl` must name `.github/workflows/release.yml` as its workflow entry point) (a missing or failing check is refused, exit 3, naming the file; there is no skip flag; this covers an older or hand-made draft that the workflow never saw, and runs only after the tag, asset and build checks passed); the release body must also pass the same opening test (a Summary and an Upgrading section, as above), hold a link containing `compare/v<previous>...v<version>` (the previous release is the highest earlier published `vN.N.N`; with none, any `/compare/v` link ending `...v<version>`), have no line ending in a parenthesized commit hash of 7 to 40 hex digits, and not contain `REPLACE THIS`. The body is judged only for a version strictly above the cutover: the cutover release itself (v0.4.0) was published before this rule and is not re-judged, and earlier ones never are. Only when all of these pass is `SHA256SUMS.sig` made, verified and uploaded (see Signing), so a draft that fails any of them is never signed. Then publish the draft: `gh release edit v<version> --draft=false`.
    Anyone can check a tag below the cutover the same way: `git -c gpg.ssh.allowedSignersFile=docs/allowed_signers verify-tag v<version>`.
-   At or above the cutover (keyless), the checks are the remote tag (annotated, peels to X, unchanged after the assets were read) and, for the four binaries **and** `SHA256SUMS`, `gh attestation verify <file> -R bogworks/mash --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/v<version> --source-digest <X>`; no `SHA256SUMS.sig` is made. Then the maintainer or the lead publishes the draft: `gh release edit v<version> --draft=false`.
+   At or above the cutover (keyless), the checks are the remote tag (annotated, peels to X, unchanged after the assets were read) and, for the eight binaries **and** `SHA256SUMS`, `gh attestation verify <file> -R bogworks/mash --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/v<version> --source-digest <X>`; no `SHA256SUMS.sig` is made. Then the maintainer or the lead publishes the draft: `gh release edit v<version> --draft=false`.
 7. **Record the version and commit (optional):** anyone who tracks mash releases can copy the `version: <version> commit: <X>` line the gate printed into their own records; mash prescribes no format.
 
 ## Optional: check a downstream consumer
@@ -317,7 +318,7 @@ The gate's mechanical checks (above) do not change.
 The launcher `plugin/scripts/mash` downloads a binary only when `plugin/scripts/mash.pins` names a version and the
 sha256 of each platform binary. After the release is published:
 
-For a keyless release (at or above the cutover), `--attested` is the documented path: download the four binaries into
+For a keyless release (at or above the cutover), `--attested` is the documented path: download the four `mash` binaries (the launcher pins only `mash`; the `mashctl` binaries are not pinned) into
 one directory and run `plugin/scripts/pin-plugin <version> --attested <dir> [--repo owner/name --remote <url>]`. It reads X from
 `git ls-remote <origin URL> refs/tags/v<version>^{}` (the configured origin itself, or `--remote <url>`; `--repo` requires
 `--remote`, since the name alone does not say where the tag lives) and refuses (exit 1, nothing written) when the
@@ -370,17 +371,17 @@ or outlive a failed attestation, and a failed attestation leaves no draft (rerun
 ## SBOM and build provenance
 
 From 0.3.2 each release adds, beside build provenance, a CycloneDX 1.5 SBOM per binary and the provenance bundle. The SBOM
-(`mash-<os>-<arch>.cdx.json`) is generated from the built binary by `cyclonedx-gomod bin`, which reads the module build
+(`<program>-<os>-<arch>.cdx.json`, one for each of the eight binaries) is generated from the built binary by `cyclonedx-gomod bin`, which reads the module build
 information embedded in the binary, so it lists what is inside the artifact. It is attached, listed in the signed
 `SHA256SUMS`, and attested with `actions/attest-sbom` (predicate type `https://cyclonedx.org/bom`). The provenance
 (`mash.intoto.jsonl`) is the Sigstore bundle of the one `actions/attest-build-provenance` attestation the `attest` job
-makes in-job, on the self-hosted runner, with the four binaries as its subjects; the job uploads it as the `provenance`
+makes in-job, on the self-hosted runner, with the eight binaries as its subjects; the job uploads it as the `provenance`
 artifact and the draft job attaches it. No reusable workflow of another repository runs: a test fails on any job-level
 `uses:` outside this repository, because such a job would run on a runner this repository does not pick
 ([ADR 0079](decisions/0079-ci-and-release-jobs-run-on-self-hosted-runners-only.md)). mash meets SLSA v1.0 Build L2, not L3: the
 attestation is made by a step inside mash's own workflow, with the signer identity of `release.yml`. The `attest` job holds
 `id-token: write`, `attestations: write` and `contents: read`, and no other job but `attest-sbom` holds the signing
-permissions. The release assets from 0.3.2 are the four binaries, the four `.cdx.json` files, `mash.intoto.jsonl`,
+permissions. The release assets from 0.3.2 are the four binaries, the four `.cdx.json` files (from the release that adds `mashctl`: eight and eight, ADR 0148), `mash.intoto.jsonl`,
 `quickstart-synadia.sh`, `SHA256SUMS` and `SHA256SUMS.sig`. The reasoning, and what is not yet true, is in
 [decision 0051](decisions/0051-releases-carry-an-sbom-per-binary-and-slsa-provenance.md) (whose isolated generator ADR 0079 replaces
 with the in-job attestation).
@@ -437,7 +438,7 @@ The SBOM and attestation jobs only run for a real release, so a change to the pi
     gh workflow run release.yml --ref main
     gh run watch
 
-A `workflow_dispatch` run on `main` builds the four binaries twice and compares them, makes the SBOMs, attests the binaries and
+A `workflow_dispatch` run on `main` builds the eight binaries twice and compares them, makes the SBOMs, attests the binaries and
 the SBOMs, and keeps the provenance bundle, with version `0.0.0-dryrun` at the dispatched HEAD. The `dry-run-verify` job then runs
 a check that the provenance's workflow entry point is `release.yml`, `gh attestation verify` (with
 `--signer-workflow` and `--source-ref refs/heads/main`) for the attached bundle (`--bundle mash.intoto.jsonl`), for build provenance and for the CycloneDX SBOM, and checks that the attested SBOM predicate equals the `.cdx.json`, as
@@ -465,7 +466,7 @@ commit) to every `gh attestation verify` below, as item 1 shows.
 
 **1. The checksums.**
 
-For a keyless release (at or above the cutover), verify the attestation of each of the four binaries and of `SHA256SUMS`, with X the release commit (`git ls-remote <remote-url> 'refs/tags/v<version>^{}'`; for mash `<owner>/<repo>` is `bogworks/mash` and `<remote-url>` is `https://github.com/bogworks/mash.git`):
+For a keyless release (at or above the cutover), verify the attestation of each of the binaries (`mash-*` and, from the release that adds it, `mashctl-*`) and of `SHA256SUMS`, with X the release commit (`git ls-remote <remote-url> 'refs/tags/v<version>^{}'`; for mash `<owner>/<repo>` is `bogworks/mash` and `<remote-url>` is `https://github.com/bogworks/mash.git`):
 
     gh attestation verify <file> -R <owner>/<repo> --signer-workflow <owner>/<repo>/.github/workflows/release.yml \
       --source-ref refs/tags/v<version> --source-digest <X>

@@ -1,6 +1,8 @@
 package release
 
 import (
+	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -88,10 +90,10 @@ func TestCheckCI_conflictingDuplicatesOfOneIDAreRefusedWhateverTheOrder(t *testi
 	}
 }
 
-func hashes() map[Target]string {
-	m := map[Target]string{}
-	for i, t := range Targets {
-		m[t] = strings.Repeat(string(rune('a'+i)), 64)
+func hashes() map[Binary]string {
+	m := map[Binary]string{}
+	for i, t := range Binaries() {
+		m[t] = strings.Repeat(string("abcdef97"[i]), 64)
 	}
 	return m
 }
@@ -113,7 +115,7 @@ func goodSums() string { return ExpectedSums(hashes(), scriptHash, ciHashes(), f
 func goodAssets() map[string]string {
 	h := hashes()
 	have := map[string]string{SumsName: "sha256:" + sha([]byte(goodSums())), ScriptName: "sha256:" + scriptHash}
-	for _, t := range Targets {
+	for _, t := range Binaries() {
 		have[t.AssetName()] = "sha256:" + h[t]
 	}
 	for n, d := range ciHashes() {
@@ -125,9 +127,11 @@ func goodAssets() map[string]string {
 func TestExpectedSums_isSha256sumOutput(t *testing.T) {
 	got := goodSums()
 	lines := strings.Split(strings.TrimSuffix(got, "\n"), "\n")
-	want := []string{"mash-darwin-amd64", "mash-darwin-arm64", "mash-linux-amd64", "mash-linux-arm64", ScriptName,
-		"mash-darwin-amd64.cdx.json", "mash-darwin-arm64.cdx.json", "mash-linux-amd64.cdx.json", "mash-linux-arm64.cdx.json", ProvenanceName}
-	if len(lines) != 10 {
+	want := []string{"mash-darwin-amd64", "mash-darwin-arm64", "mash-linux-amd64", "mash-linux-arm64",
+		"mashctl-darwin-amd64", "mashctl-darwin-arm64", "mashctl-linux-amd64", "mashctl-linux-arm64", ScriptName,
+		"mash-darwin-amd64.cdx.json", "mash-darwin-arm64.cdx.json", "mash-linux-amd64.cdx.json", "mash-linux-arm64.cdx.json",
+		"mashctl-darwin-amd64.cdx.json", "mashctl-darwin-arm64.cdx.json", "mashctl-linux-amd64.cdx.json", "mashctl-linux-arm64.cdx.json", ProvenanceName}
+	if len(lines) != 18 {
 		t.Fatalf("%q", got)
 	}
 	for i, ln := range lines {
@@ -165,7 +169,15 @@ func TestCheckAssets(t *testing.T) {
 			delete(m, "mash-linux-amd64")
 		}), "mash-linux-amd64 is missing"},
 		"sums without script": {mutate(func(m map[string]string) {
-			m[SumsName] = "sha256:" + sha([]byte(goodSums()[:4*(64+2)+4*len("mash-linux-amd64")]))
+			m[SumsName] = "sha256:" + sha([]byte(goodSums()[:8*(64+2)+4*len("mash-linux-amd64")+4*len("mashctl-linux-amd64")]))
+		}), "SHA256SUMS has digest"},
+		"missing mashctl binary": {mutate(func(m map[string]string) { delete(m, "mashctl-linux-arm64") }), "mashctl-linux-arm64 is missing"},
+		"substituted mashctl":    {mutate(func(m map[string]string) { m["mashctl-darwin-arm64"] = "sha256:" + strings.Repeat("0", 64) }), "mashctl-darwin-arm64 has digest"},
+		"missing mashctl sbom":   {mutate(func(m map[string]string) { delete(m, "mashctl-darwin-amd64.cdx.json") }), "mashctl-darwin-amd64.cdx.json is missing"},
+		"mashctl missing from the sums": {mutate(func(m map[string]string) {
+			h := hashes()
+			delete(h, Binary{"mashctl", Target{"linux", "amd64"}})
+			m[SumsName] = "sha256:" + sha([]byte(ExpectedSums(h, scriptHash, ciHashes(), false)))
 		}), "SHA256SUMS has digest"},
 		"missing sbom":        {mutate(func(m map[string]string) { delete(m, "mash-linux-arm64.cdx.json") }), "mash-linux-arm64.cdx.json is missing"},
 		"missing provenance":  {mutate(func(m map[string]string) { delete(m, ProvenanceName) }), "mash.intoto.jsonl is missing"},
@@ -174,7 +186,7 @@ func TestCheckAssets(t *testing.T) {
 			m["mash-linux-arm64.cdx.json"] = "sha256:" + strings.Repeat("e", 64)
 		}), "SHA256SUMS has digest"},
 		"bad sums":            {mutate(func(m map[string]string) { m[SumsName] = "sha256:" + strings.Repeat("1", 64) }), "SHA256SUMS has digest"},
-		"digest without algo": {mutate(func(m map[string]string) { m["mash-linux-amd64"] = hashes()[Target{"linux", "amd64"}] }), "mash-linux-amd64 has digest"},
+		"digest without algo": {mutate(func(m map[string]string) { m["mash-linux-amd64"] = hashes()[Binary{"mash", Target{"linux", "amd64"}}] }), "mash-linux-amd64 has digest"},
 	}
 	for name, c := range cases {
 		if err := CheckAssets(c.have, hashes(), scriptHash, false); err == nil || !strings.Contains(err.Error(), c.want) {
@@ -183,7 +195,7 @@ func TestCheckAssets(t *testing.T) {
 	}
 	// An unusable build hash is a problem of its own, not a silent pass.
 	h := hashes()
-	h[Target{"linux", "amd64"}] = ""
+	h[Binary{"mashctl", Target{"linux", "amd64"}}] = ""
 	if err := CheckAssets(goodAssets(), h, scriptHash, false); err == nil || !strings.Contains(err.Error(), "no usable build hash") {
 		t.Fatalf("%v", err)
 	}
@@ -242,11 +254,11 @@ func keylessAssets() map[string]string {
 func TestExpectedSums_keylessOmitsTheProvenance(t *testing.T) {
 	got := ExpectedSums(hashes(), scriptHash, ciHashes(), true)
 	lines := strings.Split(strings.TrimSuffix(got, "\n"), "\n")
-	if len(lines) != 9 || strings.Contains(got, ProvenanceName) {
+	if len(lines) != 17 || strings.Contains(got, ProvenanceName) {
 		t.Fatalf("keyless sums:\n%s", got)
 	}
-	if want := strings.TrimSuffix(goodSums(), strings.Split(goodSums(), "\n")[9]+"\n"); got != want {
-		t.Errorf("keyless sums are not the others' first nine lines:\n%s", got)
+	if want := strings.TrimSuffix(goodSums(), strings.Split(goodSums(), "\n")[17]+"\n"); got != want {
+		t.Errorf("keyless sums are not the others' first seventeen lines:\n%s", got)
 	}
 }
 
@@ -278,5 +290,31 @@ func TestCheckAssets_keyless(t *testing.T) {
 	g[SumsSigName] = "sha256:" + strings.Repeat("a", 64)
 	if err := CheckAssets(g, hashes(), scriptHash, false); err != nil {
 		t.Errorf("sig before the cutover refused: %v", err)
+	}
+}
+
+// A release carries mash and mashctl for every target (ADR 0148): eight binaries and eight SBOMs.
+func TestBinaries_areMashAndMashctlForEveryTarget(t *testing.T) {
+	var got []string
+	for _, b := range Binaries() {
+		got = append(got, b.AssetName())
+	}
+	want := []string{"mash-darwin-amd64", "mash-darwin-arm64", "mash-linux-amd64", "mash-linux-arm64",
+		"mashctl-darwin-amd64", "mashctl-darwin-arm64", "mashctl-linux-amd64", "mashctl-linux-arm64"}
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Fatalf("binaries %v, want %v", got, want)
+	}
+	if n := Targets[0].CtlAssetName(); n != "mashctl-darwin-amd64" {
+		t.Errorf("CtlAssetName %q", n)
+	}
+	if n := len(CIAssetNames()); n != 9 { // eight SBOMs and the provenance
+		t.Errorf("%d CI assets", n)
+	}
+}
+
+func TestBuildCmd_refusesAProgramThatIsNotReleased(t *testing.T) {
+	_, err := BuildCmd(context.Background(), t.TempDir(), filepath.Join(t.TempDir(), "x"), "", "", "0.1.0", "abc123", "mashd")
+	if err == nil || !strings.Contains(err.Error(), "not one of") {
+		t.Fatalf("%v", err)
 	}
 }

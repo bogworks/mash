@@ -69,6 +69,7 @@ func newFixture(t *testing.T) *fixture {
 	write(t, repo, "go.mod", "module github.com/bogworks/mash\n\ngo 1.27\n")
 	write(t, repo, "internal/endpoint/v.go", "package endpoint\n\nvar Version = \"0.0.0-dev\"\n")
 	write(t, repo, "cmd/mash/main.go", "package main\n\nimport (\n\t\"fmt\"\n\n\t\"github.com/bogworks/mash/internal/endpoint\"\n)\n\nvar commit string\n\nfunc main() { fmt.Printf(\"mash %s (commit %s)\\n\", endpoint.Version, commit) }\n")
+	write(t, repo, "cmd/mashctl/main.go", "package main\n\nimport (\n\t\"fmt\"\n\n\t\"github.com/bogworks/mash/internal/endpoint\"\n)\n\nfunc main() { fmt.Printf(\"mashctl %s\\n\", endpoint.Version) }\n")
 	write(t, repo, "plugin/.claude-plugin/plugin.json", "{\"name\": \"mash\", \"version\": \"0.1.0\"}\n")
 	write(t, repo, release.PluginHooks, hardenedHooks)
 	write(t, repo, renderContractPath, "contract v1\n")
@@ -90,7 +91,7 @@ case "$1" in
   api) case "$2" in *page=2*) cat "ROOT/ci-2.json" ;; *) cat "ROOT/ci-1.json" ;; esac ;;
   release) case "$2" in list) cat "ROOT/releases.json" ;;
     download) n=; p=; for a in "$@"; do [ "$p" = --pattern ] && n=$a; p=$a; done
-      case "$n" in *.cdx.json|*.jsonl) ;; mash-*) echo "bin-$n"; exit 0 ;; esac
+      case "$n" in *.cdx.json|*.jsonl) ;; mash-*|mashctl-*) echo "bin-$n"; exit 0 ;; esac
       if [ -f "ROOT/files/$n" ]; then cat "ROOT/files/$n"; else echo "no assets match the file pattern" >&2; exit 1; fi ;;
     upload) mkdir -p "ROOT/files"; cp "$4" "ROOT/files/$(basename "$4")" ;;
     *) cat "ROOT/assets.json" ;; esac ;;
@@ -211,13 +212,13 @@ func (f *fixture) setCI(names ...string) {
 func (f *fixture) check() error { return check(context.Background(), f.o) }
 
 // ourBuilds is the hash of X built for each target, the way the gate builds it.
-func (f *fixture) ourBuilds() map[release.Target]string {
+func (f *fixture) ourBuilds() map[release.Binary]string {
 	f.t.Helper()
-	h := map[release.Target]string{}
-	for _, tg := range release.Targets {
+	h := map[release.Binary]string{}
+	for _, tg := range release.Binaries() {
 		src := filepath.Join(f.t.TempDir(), "src")
 		gitT(f.t, filepath.Dir(f.repo), "clone", "-q", f.repo, src)
-		sum, err := release.Build(context.Background(), src, filepath.Join(f.t.TempDir(), "mash"), tg.GOOS, tg.GOARCH, f.o.Version, f.x)
+		sum, err := release.BuildCmd(context.Background(), src, filepath.Join(f.t.TempDir(), tg.Program), tg.GOOS, tg.GOARCH, f.o.Version, f.x, tg.Program)
 		if err != nil {
 			f.t.Fatal(err)
 		}
@@ -251,7 +252,7 @@ func setAssets(t *testing.T, f *fixture, mutate func(map[string]string)) {
 	t.Helper()
 	h := f.ourBuilds()
 	have := map[string]string{}
-	for _, tg := range release.Targets {
+	for _, tg := range release.Binaries() {
 		have[tg.AssetName()] = "sha256:" + h[tg]
 	}
 	filesDir := filepath.Join(filepath.Dir(f.o.GH), "files")
