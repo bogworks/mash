@@ -291,12 +291,12 @@ func TestWhoMCPTool(t *testing.T) {
 		want []string
 	}{
 		{`{"role":"REVIEW"}`, []string{"--role", "REVIEW"}, []string{tTo("a")}},
-		{`{"capability":"review"}`, []string{"--capability", "review"}, []string{tTo("a")}},
+		{`{"capability":["review"]}`, []string{"--capability", "review"}, []string{tTo("a")}},
 		{`{"capability":["review","x"]}`, []string{"--capability", "review", "--capability", "x"}, nil},
-		{`{"label":"team=blue","online":false}`, []string{"--label", "team=blue"}, []string{tTo("a")}},
+		{`{"label":["team=blue"],"online":false}`, []string{"--label", "team=blue"}, []string{tTo("a")}},
 		{`{"label":["team","team=blue"],"capability":["review"]}`, []string{"--label", "team", "--label", "team=blue", "--capability", "review"}, []string{tTo("a")}},
-		{`{"label":"team=red"}`, []string{"--label", "team=red"}, nil},
-		{`{"capability":"review","online":true}`, []string{"--capability", "review", "--online"}, nil},
+		{`{"label":["team=red"]}`, []string{"--label", "team=red"}, nil},
+		{`{"capability":["review"],"online":true}`, []string{"--capability", "review", "--online"}, nil},
 	} {
 		r := s.call(t, 60, "who", c.args)
 		cli, code := w.cli(t, "a", append([]string{"who", "--json"}, c.argv...)...)
@@ -321,7 +321,7 @@ func TestWhoMCPTool(t *testing.T) {
 		}
 	}
 	// errors: {error, hint}, and the old parameters are not accepted
-	for _, args := range []string{`{"prefix":"o_dev_b"}`, `{"online":true,"offline":true}`, `{"match":"x"}`, `{"format":"json"}`, `{"label":[3]}`, `{"label":"a="}`, `{"online":"yes"}`} {
+	for _, args := range []string{`{"prefix":"o_dev_b"}`, `{"online":true,"offline":true}`, `{"match":"x"}`, `{"format":"json"}`, `{"label":[3]}`, `{"label":"a="}`, `{"capability":"review"}`, `{"online":"yes"}`} {
 		r := s.call(t, 45, "who", args)
 		sc, _ := r["structuredContent"].(map[string]any)
 		if r["isError"] != true || sc["error"] == nil {

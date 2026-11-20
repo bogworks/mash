@@ -231,10 +231,10 @@ func TestWhoDoorsAgree(t *testing.T) {
 		{"nothing", []string{"acme.zzz"}, `{"prefix":"acme.zzz"}`},
 		{"empty prefix", nil, `{"prefix":""}`},
 		{"role", []string{"--role", "REVIEW"}, `{"role":"REVIEW"}`},
-		{"capability", []string{"--capability", "review"}, `{"capability":"review"}`},
+		{"capability", []string{"--capability", "review"}, `{"capability":["review"]}`},
 		{"capability twice", []string{"--capability", "review", "--capability", "x"}, `{"capability":["review","x"]}`},
 		{"label", []string{"--label", "team=blue", "--label", "team"}, `{"label":["team=blue","team"]}`},
-		{"all", []string{"--online", "--role", "rev", "--capability", "review", "--label", "team=blue", "acme"}, `{"online":true,"role":"rev","capability":["review"],"label":"team=blue","prefix":"acme"}`},
+		{"all", []string{"--online", "--role", "rev", "--capability", "review", "--label", "team=blue", "acme"}, `{"online":true,"role":"rev","capability":["review"],"label":["team=blue"],"prefix":"acme"}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := directory()
@@ -348,11 +348,7 @@ func TestWhoMatchesSpec(t *testing.T) {
 		pm := p.(map[string]any)
 		specNames = append(specNames, pm["name"].(string))
 		got, ok := props[pm["name"].(string)].(map[string]any)
-		wantType := map[string]string{"string": "string", "boolean": "boolean"}[pm["type"].(string)]
-		if strings.Contains(pm["description"].(string), "May be given more than once") {
-			// the spec types these string; the tool takes a string or an array of strings, and the schema says array
-			wantType = "array"
-		}
+		wantType := map[string]string{"string": "string", "boolean": "boolean", "array of string": "array"}[pm["type"].(string)]
 		if !ok || got["description"] != pm["description"] || got["type"] != wantType {
 			t.Errorf("param %v: schema %v", pm["name"], got)
 		}
@@ -494,10 +490,10 @@ func TestWhoFilters(t *testing.T) {
 	if out != "No online endpoints under acme.lab\n" {
 		t.Errorf("empty: %q", out)
 	}
-	// the tool: a string or an array for the repeatable ones, the same endpoints
+	// the tool: an array for the repeatable ones; a bare string is refused
 	tool := cmdcore.MCPTool(cmds.Who, whoEnv(d))
 	for args, want := range map[string]string{
-		`{"capability":"review","label":"team=blue"}`:            "acme.demo.alice",
+		`{"capability":["review"],"label":["team=blue"]}`:        "acme.demo.alice",
 		`{"capability":["review","test"],"label":["team=blue"]}`: "acme.demo.alice",
 		`{"role":"WRITER"}`: "acme.demo.bob",
 	} {
@@ -510,8 +506,13 @@ func TestWhoFilters(t *testing.T) {
 			t.Errorf("%s: %+v", args, r.Endpoints)
 		}
 	}
+	for _, args := range []string{`{"capability":"review"}`, `{"label":"team=blue"}`} {
+		if _, _, err := tool.CallStructured(context.Background(), json.RawMessage(args)); err == nil || !strings.Contains(err.Error(), "must be an array of strings") {
+			t.Errorf("%s: %v", args, err)
+		}
+	}
 	// bad filters are usage errors
-	for _, argv := range [][]string{{"--label", "="}, {"--label", "a="}, {"--label", "=b"}, {"--capability", " "}} {
+	for _, argv := range [][]string{{"--role", " "}, {"--label", "="}, {"--label", "a="}, {"--label", "=b"}, {"--capability", " "}} {
 		if code, _, errs := runWho(d, cliframe.Global{}, argv...); code != 2 || !strings.Contains(errs, "hint: mash who --help") {
 			t.Errorf("%v: %d %q", argv, code, errs)
 		}

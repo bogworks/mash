@@ -124,7 +124,7 @@ func (s *sessionState) usable(name string) (*endpoint.Endpoint, error) {
 	case s.superseded != nil:
 		return nil, errors.New(supersededText(name, s.superseded))
 	case s.lost != nil:
-		return nil, fmt.Errorf("mash lost endpoint %s to another session; mail is off for this session", name)
+		return nil, fmt.Errorf("mash: this session lost this endpoint (%s) to a newer one; mail is off for this session", name)
 	default:
 		return nil, fmt.Errorf("mash is waiting for endpoint %s (held by %s pid %s since %s); mail is off until it is free",
 			name, s.waiting.Host, s.waiting.PID, s.waiting.Since)

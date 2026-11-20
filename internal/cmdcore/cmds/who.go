@@ -189,6 +189,9 @@ var Who = cmdcore.Command[WhoParams, WhoResult]{
 			}
 		}
 		role := strings.ToLower(strings.TrimSpace(p.Role))
+		if p.Role != "" && role == "" {
+			return WhoResult{}, cliframe.Usagef("--role needs some text").WithHint("mash who --help")
+		}
 		if env == nil {
 			return WhoResult{}, cliframe.Failf("internal: mash who has no environment to run in")
 		}

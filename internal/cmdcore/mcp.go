@@ -162,9 +162,7 @@ func decodeArgs[P any](fields []field, args json.RawMessage, p *P) error {
 			continue
 		}
 		if f.repeat && strings.HasPrefix(strings.TrimSpace(string(v)), `"`) {
-			// a repeatable option is an array of strings; one string is accepted as an array of one
-			raw[f.json] = json.RawMessage("[" + strings.TrimSpace(string(v)) + "]")
-			v = raw[f.json]
+			return cliframe.Usagef("%s must be an array of strings, not a string", f.json)
 		}
 		if typ, _ := schemaType(f.typ); typ == "integer" {
 			n, err := wholeNumber(f, v)
