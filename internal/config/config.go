@@ -358,6 +358,15 @@ func inDir(dir, p string) string {
 	return filepath.Join(dir, p)
 }
 
+// HomeDir is the home directory: $HOME as env gives it, else the one the system names, else "" when neither is known.
+func HomeDir(env func(string) string) string {
+	if h := env("HOME"); h != "" {
+		return h
+	}
+	h, _ := os.UserHomeDir()
+	return h
+}
+
 // Tilde writes the home directory at the start of p as "~", the inverse of ExpandHome. p is returned as it is when it
 // is not under the home directory or the home is unknown.
 func Tilde(p string) string {

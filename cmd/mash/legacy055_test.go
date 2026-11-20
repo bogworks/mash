@@ -73,3 +73,64 @@ func TestLegacy055CleanFolderNotRefused(t *testing.T) {
 	}
 	check()
 }
+
+func legacy055Folder(t *testing.T) (home, dir string) {
+	home = t.TempDir()
+	dir = filepath.Join(home, "cfg")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"url":"nats://x:4222"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return home, dir
+}
+
+const legacy055Two = "error: ~/cfg holds a mash 0.5.5 configuration\n" +
+	"hint: https://github.com/bogworks/mash/releases/latest/download/mash-migrate-0.5.5.sh\n"
+
+// A hook never blocks a session: the two lines on stderr, exit 0, stdout empty, stdin not read, no spool.
+func TestLegacy055HookExitsZero(t *testing.T) {
+	home, dir := legacy055Folder(t)
+	state := filepath.Join(home, "state")
+	env := map[string]string{"HOME": home, "MASH_CONFIG_DIR": dir, "MASH_STATE_DIR": state}
+	var out, errb bytes.Buffer
+	code := run([]string{"hook"}, func(k string) string { return env[k] }, strings.NewReader(`{"hook_event_name":"PostToolUse"}`), &out, &errb)
+	if code != 0 || errb.String() != legacy055Two || out.Len() != 0 {
+		t.Fatalf("%d %q %q", code, errb.String(), out.String())
+	}
+	if _, err := os.Stat(state); err == nil {
+		t.Fatal("the spool was touched")
+	}
+}
+
+// serve stops (exit 1) with the same two lines; --help is refused too.
+func TestLegacy055ServeAndHelpRefused(t *testing.T) {
+	for _, args := range [][]string{{"serve"}, {"--help"}, {"send", "--help"}} {
+		home, dir := legacy055Folder(t)
+		env := map[string]string{"HOME": home, "MASH_CONFIG_DIR": dir}
+		var out, errb bytes.Buffer
+		code := run(args, func(k string) string { return env[k] }, strings.NewReader(""), &out, &errb)
+		if code != 1 || errb.String() != legacy055Two || out.Len() != 0 {
+			t.Fatalf("%v: %d %q %q", args, code, errb.String(), out.String())
+		}
+	}
+}
+
+// A default folder is named ~/.config/mash.
+func TestLegacy055DefaultFolderShown(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(home, ".config", "mash")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"tls_ca":"/c"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env := map[string]string{"HOME": home}
+	var out, errb bytes.Buffer
+	code := run([]string{"version"}, func(k string) string { return env[k] }, strings.NewReader(""), &out, &errb)
+	if code != 1 || !strings.HasPrefix(errb.String(), "error: ~/.config/mash holds a mash 0.5.5 configuration\n") {
+		t.Fatalf("%d %q", code, errb.String())
+	}
+}

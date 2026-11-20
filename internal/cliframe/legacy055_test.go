@@ -77,3 +77,62 @@ func TestRefuseLegacy055(t *testing.T) {
 		}
 	})
 }
+
+// The hint is written from ReleaseBase, which a release build may set.
+func TestLegacy055HintUsesReleaseBase(t *testing.T) {
+	old := ReleaseBase
+	t.Cleanup(func() { ReleaseBase = old })
+	ReleaseBase = "https://example.test/fork/dl"
+	home := t.TempDir()
+	dir := filepath.Join(home, "cfg")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"url":"x"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env := func(k string) string { return map[string]string{"MASH_CONFIG_DIR": dir, "HOME": home}[k] }
+	var out, errb bytes.Buffer
+	if code, ok := RefuseLegacy055(&out, &errb, env, home, false); !ok || code != 1 ||
+		!strings.Contains(errb.String(), "hint: https://example.test/fork/dl/mash-migrate-0.5.5.sh\n") {
+		t.Fatalf("%d %v %q", code, ok, errb.String())
+	}
+}
+
+// The folder is shown as ~/... when it is under the home directory (the default and an XDG_CONFIG_HOME one alike), and
+// as the real path when it is not.
+func TestLegacy055FolderShown(t *testing.T) {
+	mk := func(t *testing.T, dir string) {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"url":"x"}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Run("default", func(t *testing.T) {
+		home := t.TempDir()
+		mk(t, filepath.Join(home, ".config", "mash"))
+		got, ok := Legacy055(func(k string) string { return map[string]string{"HOME": home}[k] }, home)
+		if !ok || got != "~/.config/mash" {
+			t.Fatalf("%q %v", got, ok)
+		}
+	})
+	t.Run("xdg under home", func(t *testing.T) {
+		home := t.TempDir()
+		x := filepath.Join(home, "xdg")
+		mk(t, filepath.Join(x, "mash"))
+		got, ok := Legacy055(func(k string) string { return map[string]string{"HOME": home, "XDG_CONFIG_HOME": x}[k] }, home)
+		if !ok || got != "~/xdg/mash" {
+			t.Fatalf("%q %v", got, ok)
+		}
+	})
+	t.Run("xdg outside home", func(t *testing.T) {
+		home, x := t.TempDir(), t.TempDir()
+		mk(t, filepath.Join(x, "mash"))
+		got, ok := Legacy055(func(k string) string { return map[string]string{"HOME": home, "XDG_CONFIG_HOME": x}[k] }, home)
+		if !ok || got != filepath.Join(x, "mash") {
+			t.Fatalf("%q %v", got, ok)
+		}
+	})
+}

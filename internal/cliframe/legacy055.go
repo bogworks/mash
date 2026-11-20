@@ -10,8 +10,10 @@ import (
 )
 
 // ReleaseBase is where a release's files are published: the address the 0.5.5 migration hint is written from. The
-// project's own releases are the default; scripts/install.sh takes a fork's from MASH_REPO, which a binary does not see.
-const ReleaseBase = "https://github.com/bogworks/mash/releases/latest/download"
+// project's own releases are the default; a release build may set it with
+// -ldflags "-X github.com/bogworks/mash/internal/cliframe.ReleaseBase=<base>" (a fork sets its own), and
+// scripts/install.sh takes a fork's from MASH_REPO, which a binary does not see.
+var ReleaseBase = "https://github.com/bogworks/mash/releases/latest/download"
 
 // Legacy055 is the folder (as the tools name it, the home directory written as ~) when the configuration folder's
 // config.json holds a mash 0.5.5 setting: the key url or tls_ca. Only the names of the keys are looked at, never their

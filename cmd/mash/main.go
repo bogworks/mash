@@ -205,12 +205,12 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 		return cliframe.Report(stdout, stderr, cliframe.Usagef("mash needs a command").WithHint("mash --help"), global.JSON)
 	}
 	env, lookup = global.Shadow(cliframe.Spec{Tool: "mash", CredsEnv: "MASH_CREDS", CredsKey: "creds"}, env, lookup)
-	home := env("HOME")
-	if home == "" {
-		home, _ = os.UserHomeDir()
-	}
+	home := config.HomeDir(env)
 	// A folder mash 0.5.5 left is named for what it is, before any command (help included) runs.
-	if code, refused := cliframe.RefuseLegacy055(stdout, stderr, env, home, global.JSON); refused {
+	if code, refused := cliframe.RefuseLegacy055(stdout, stderr, env, home, global.JSON && args[0] != "hook"); refused {
+		if args[0] == "hook" { // a hook never blocks a session: the two lines on stderr, exit 0, no stdin, no spool
+			return 0
+		}
 		return code
 	}
 	var serr error
