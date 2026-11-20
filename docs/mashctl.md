@@ -91,10 +91,10 @@ The text form prints a line with the count, then a table:
 
 NUMBER  FROM             WHEN    TRUST     DELIVERED  KIND  SIZE
 7       alice            2m ago  verified  no         task  48 B
-8       acme.lab.mallet  1m ago  absent    refused    task  61 B
+8       acme.lab.mallet  1m ago  absent    yes        task  61 B
 ```
 
-TRUST says whether the claimed sender was proven: `verified`, `unknown-signer`, `claimed`, `absent`, `stale` or `forged` (malformed mail shows as `forged`); `-` when there is no label. DELIVERED is `yes`, `no` or `refused`: `refused` is mail the endpoint never shows (forged), which an administrator still sees here.
+TRUST says whether the claimed sender was proven: `verified`, `unknown-signer`, `claimed`, `absent`, `stale` or `forged` (malformed mail shows as `forged`); `-` when there is no label. DELIVERED is `yes` or `no`, and means only that the endpoint took the message off the server. Whether the endpoint then showed it or refused it is decided on the endpoint's own machine and mashctl cannot see it: by default an endpoint refuses everything that is not verified, so a `yes` beside any other trust label most likely means it was refused.
 
 FROM is the sender's name when the sender is in the endpoint's owner and group, else its whole address, and `?` when the message names none. `--json` prints one object:
 
@@ -106,7 +106,7 @@ FROM is the sender's name when the sender is in the endpoint's owner and group, 
 | `messages[].number` | the stream sequence |
 | `messages[].from` | the sender's address |
 | `messages[].trust` | the trust label, as in the text form |
-| `messages[].delivered` | `true` when the sequence is at or below the consumer's last delivered sequence and the message was not refused |
+| `messages[].delivered` | `true` when the sequence is at or below the consumer's last delivered sequence |
 | `messages[].kind` | the `Mash-Kind` header |
 | `messages[].size` | payload size in bytes |
 

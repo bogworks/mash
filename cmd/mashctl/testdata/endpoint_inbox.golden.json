@@ -23,7 +23,7 @@
       "number": 3,
       "from": "acme.team1.bob",
       "trust": "forged",
-      "delivered": false,
+      "delivered": true,
       "kind": "message",
       "size": 30
     },

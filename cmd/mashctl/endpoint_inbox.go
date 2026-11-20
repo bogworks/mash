@@ -81,9 +81,6 @@ func inboxTrust(t string) string {
 	return t
 }
 
-// inboxRefused is true for mail the endpoint never shows: forged or malformed.
-func inboxRefused(trust string) bool { return trust == "forged" }
-
 // senderAddress is a message's sender as an address: the stored flat name read as owner.group.name, else as stored.
 func senderAddress(sender string) string {
 	if a, err := sap.AddressFromFlat(sender); err == nil {
@@ -128,7 +125,7 @@ func buildInboxJSON(addr sap.Address, in *admin.InboxInspection) inboxJSON {
 		rep.Undelivered = in.Consumer.NumPending
 	}
 	for _, m := range in.Messages {
-		rep.Messages = append(rep.Messages, inboxMessageJSON{Number: m.Seq, From: senderAddress(m.Sender), Trust: inboxTrust(m.Trust), Delivered: m.State != admin.StateUndelivered && !inboxRefused(inboxTrust(m.Trust)), Kind: m.Kind, Size: m.Size})
+		rep.Messages = append(rep.Messages, inboxMessageJSON{Number: m.Seq, From: senderAddress(m.Sender), Trust: inboxTrust(m.Trust), Delivered: m.State != admin.StateUndelivered, Kind: m.Kind, Size: m.Size})
 	}
 	return rep
 }
@@ -179,8 +176,6 @@ func writeInboxTable(stdout io.Writer, addr sap.Address, msgs []inboxMessageJSON
 		}
 		delivered := "no"
 		switch {
-		case inboxRefused(m.Trust):
-			delivered = "refused"
 		case m.Delivered:
 			delivered = "yes"
 		}

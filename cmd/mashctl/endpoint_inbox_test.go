@@ -118,7 +118,7 @@ func TestEndpointInboxJSONGolden(t *testing.T) {
 	}
 }
 
-// TestEndpointInboxTable pins the text table: the TRUST column, malformed shown as forged, and refused mail.
+// TestEndpointInboxTable pins the text table: the TRUST column, malformed shown as forged, with DELIVERED yes or no only.
 func TestEndpointInboxTable(t *testing.T) {
 	addr := sap.Address{Owner: "acme", Group: "demo", Instance: "bob"}
 	now := time.Date(2026, 11, 19, 12, 0, 0, 0, time.UTC)
@@ -140,8 +140,8 @@ func TestEndpointInboxTable(t *testing.T) {
 	want := "\n" +
 		"NUMBER  FROM             WHEN    TRUST     DELIVERED  KIND  SIZE\n" +
 		"1       alice            2m ago  verified  no         task  48 B\n" +
-		"2       acme.lab.mallet  1m ago  forged    refused    task  61 B\n" +
-		"3       acme.lab.mallet  1m ago  forged    refused    task  5 B\n" +
+		"2       acme.lab.mallet  1m ago  forged    no         task  61 B\n" +
+		"3       acme.lab.mallet  1m ago  forged    no         task  5 B\n" +
 		"4       alice            1m ago  -         yes        task  5 B\n"
 	if buf.String() != want {
 		t.Errorf("table:\n%s\nwant:\n%s", buf.String(), want)
@@ -399,7 +399,7 @@ func TestEndpointInboxLive(t *testing.T) {
 	if r.Address != "o.g.box" || r.Total != 6 || r.Undelivered != 2 || len(r.Messages) != 6 {
 		t.Fatalf("header: %+v", r)
 	}
-	wantDelivered := []bool{true, true, false, true, false, false} // 3 is the tampered message: refused
+	wantDelivered := []bool{true, true, true, true, false, false}
 	wantSize := []int{3, 4, 5, 4, 4, 3}
 	wantKind := []string{"message", "reply", "message", "message", "message", ""}
 	wantFrom := []string{"o.g.snd", "o.g.snd", "o.g.snd", "someone", "o.g.snd", "?"}
@@ -435,8 +435,8 @@ func TestEndpointInboxLive(t *testing.T) {
 		}
 	}
 
-	if !strings.Contains(txt, "TRUST") || !strings.Contains(txt, "verified") || !strings.Contains(txt, "refused") {
-		t.Errorf("the text lacks the TRUST column or the refused state:\n%s", txt)
+	if !strings.Contains(txt, "TRUST") || !strings.Contains(txt, "verified") {
+		t.Errorf("the text lacks the TRUST column:\n%s", txt)
 	}
 
 	// after and limit
