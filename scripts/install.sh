@@ -11,15 +11,23 @@
 #
 # Environment:
 #   MASH_INSTALL_DIR   the folder to install into (default ~/.local/bin)
-#   MASH_VERSION       pin a release, for example v0.5.6 (default: the latest)
-#   MASH_RELEASE_BASE  where the release files are (https:// or, for tests,
-#                      file://); overrides MASH_VERSION for the download
+#   MASH_VERSION       pin a release, for example v0.5.6 (default: the latest,
+#                      which is resolved to its tag first, so the attestation
+#                      is always checked against that tag)
+#   MASH_REPO          the GitHub repository (default bogworks/mash): used for
+#                      the download address, the tag lookup and the attestation
+#                      check (-R and the release workflow's signer)
+#   MASH_RELEASE_BASE  where the release files are (an https:// address, a
+#                      mirror); needs MASH_VERSION, which names the tag the
+#                      attestation is checked against
+#   MASH_INSTALL_ALLOW_FILE=1  tests only: accept a file:// MASH_RELEASE_BASE
 #
 # Everything is inside main, called on the last line: a download cut short
 # runs nothing.
 set -euo pipefail
 
-REPO="bogworks/mash"
+REPO="${MASH_REPO:-bogworks/mash}"
+PROTO="=https"
 WORKDIR=""
 BASE=""
 STAGED=()  # temporary files made in the install folder
@@ -57,7 +65,7 @@ sha256_of() {
 # fetch NAME: download NAME from the release into WORKDIR.
 fetch() {
     FETCHED+=("$WORKDIR/$1")
-    curl -fsSL --proto '=https,file' --tlsv1.2 -o "$WORKDIR/$1" "$BASE/$1" ||
+    curl -fsSL --proto "$PROTO" --proto-redir '=https' --tlsv1.2 -o "$WORKDIR/$1" "$BASE/$1" ||
         die "could not download $BASE/$1"
 }
 
@@ -70,24 +78,41 @@ tilde() {
     esac
 }
 
-# unsafe_dir DIR: say why DIR may not be installed into (a symlink, or
-# writable by group or others), or print nothing.
-unsafe_dir() {
-    local d=$1 perms
-    if [ -L "$d" ]; then
-        echo "$d is a symbolic link"
-        return
-    fi
-    # shellcheck disable=SC2012 # ls -ld is the portable way to read a mode
-    perms=$(ls -ld -- "$d" | awk '{print $1}')
-    case "${perms:5:1}${perms:8:1}" in
-    *w*) echo "$d is writable by its group or other users" ;;
-    esac
+# unsafe_path DIR: DIR is a real path (no symlinks). Say why it may not be
+# installed into, or print nothing: DIR owned by someone other than this user
+# or root, or DIR or any folder above it writable by group or others (except a
+# sticky folder owned by root above DIR, such as /tmp).
+unsafe_path() {
+    local target=$1 c perms owner me
+    me=$(id -u)
+    c=$target
+    while :; do
+        # shellcheck disable=SC2012 # ls -ld is the portable way to read a mode
+        perms=$(ls -ld -- "$c" | awk '{print $1}')
+        # shellcheck disable=SC2012
+        owner=$(ls -ldn -- "$c" | awk '{print $3}')
+        if [ "$c" = "$target" ] && [ "$owner" != "$me" ] && [ "$owner" != 0 ]; then
+            echo "$c is owned by another user"
+            return
+        fi
+        case "${perms:5:1}${perms:8:1}" in
+        *w*)
+            if [ "$c" = "$target" ] || [ "${perms:9:1}" != t ] || [ "$owner" != 0 ]; then
+                echo "$c is writable by its group or other users"
+                return
+            fi
+            ;;
+        esac
+        [ "$c" = / ] && return
+        c=$(dirname -- "$c")
+    done
 }
 
 main() {
-    local os arch uname_s uname_m dir tag sumsname name want got tmp line shown
-    local -a names
+    local os arch uname_s uname_m dir real tag sumsname name want got tmp line shown resolved
+    local -a names staged_new
+
+    [[ $REPO =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || die "MASH_REPO $REPO is not owner/name"
 
     # The machine's type.
     uname_s=$(uname -s | tr '[:upper:]' '[:lower:]')
@@ -103,31 +128,44 @@ main() {
     *) die "$os/$arch is not a platform mash is built for" ;;
     esac
 
-    # Where the release is, and which tag it is (for the attestation check).
+    # Which release: always a tag, so the attestation can be tied to it.
+    local semver='^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$'
     tag=""
     if [ -n "${MASH_VERSION:-}" ]; then
         tag=$MASH_VERSION
         case "$tag" in v*) ;; *) tag="v$tag" ;; esac
-        [[ $tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]] ||
+        [[ $tag =~ $semver ]] ||
             die "MASH_VERSION $MASH_VERSION is not a version such as v0.5.6"
     fi
     if [ -n "${MASH_RELEASE_BASE:-}" ]; then
+        [ -n "$tag" ] || die "set MASH_VERSION with MASH_RELEASE_BASE"
         BASE=${MASH_RELEASE_BASE%/}
-    elif [ -n "$tag" ]; then
-        BASE="https://github.com/$REPO/releases/download/$tag"
     else
-        BASE="https://github.com/$REPO/releases/latest/download"
+        if [ -z "$tag" ]; then
+            resolved=$(curl -fsSLI --proto '=https' --proto-redir '=https' --tlsv1.2 -o /dev/null -w '%{url_effective}' \
+                "https://github.com/$REPO/releases/latest") ||
+                die "could not find the latest release of $REPO"
+            case "$resolved" in
+            */releases/tag/*) ;;
+            *) die "the latest release of $REPO did not resolve to a release tag: $resolved" ;;
+            esac
+            tag=${resolved##*/}
+            [[ $tag =~ $semver ]] || die "the latest release's tag $tag is not a version such as v0.5.6"
+        fi
+        BASE="https://github.com/$REPO/releases/download/$tag"
     fi
     case "$BASE" in
-    https://* | file://*) ;;
+    https://*) ;;
+    file://*)
+        [ "${MASH_INSTALL_ALLOW_FILE:-}" = 1 ] || die "the release location must be an https:// address: $BASE"
+        PROTO="=https,file"
+        ;;
     *) die "the release location must be an https:// address: $BASE" ;;
     esac
-    if [ -z "$tag" ] && [[ ${BASE##*/} =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
-        tag=${BASE##*/}
-    fi
-    echo "Fetching mash and mashctl from the ${tag:-latest} release: $BASE"
+    echo "Fetching mash and mashctl from the $tag release: $BASE"
 
-    # The folder, and whether it is safe to write into.
+    # The folder, and whether it is safe to write into. A symbolic link to it
+    # is followed; the real folder and every folder above it are checked.
     [ -n "${HOME:-}" ] || die "HOME is not set"
     dir=${MASH_INSTALL_DIR:-$HOME/.local/bin}
     dir=${dir%/}
@@ -137,9 +175,11 @@ main() {
         (umask 022 && mkdir -p -- "$dir") || die "could not make $dir"
     fi
     [ -d "$dir" ] || die "$dir is not a folder"
-    for line in "$dir" "$(dirname -- "$dir")"; do
-        tmp=$(unsafe_dir "$line")
-        [ -z "$tmp" ] || die "$tmp: not installing there"
+    real=$(cd -P -- "$dir" && pwd -P) || die "could not enter $dir"
+    tmp=$(unsafe_path "$real")
+    [ -z "$tmp" ] || die "$tmp: not installing there"
+    for name in mash mashctl; do
+        [ ! -d "$real/$name" ] || die "$real/$name is a folder: not installing there"
     done
 
     # A private place to download to, removed on exit.
@@ -150,15 +190,16 @@ main() {
     sumsname=SHA256SUMS
     fetch "$sumsname"
 
-    # The attestation of SHA256SUMS, when gh is there to check it.
-    if command -v gh >/dev/null 2>&1; then
-        fetch mash.intoto.jsonl
-        local -a flags=(-R "$REPO" --bundle mash.intoto.jsonl --signer-workflow "$REPO/.github/workflows/release.yml")
-        [ -z "$tag" ] || flags+=(--source-ref "refs/tags/$tag")
-        (cd "$WORKDIR" && gh attestation verify "$sumsname" "${flags[@]}" >/dev/null) ||
-            die "the attestation of the release's SHA256SUMS did not verify: nothing was installed"
+    # The attestation of SHA256SUMS, when gh is there and new enough to check it.
+    if ! command -v gh >/dev/null 2>&1; then
+        echo "gh not found: the checksums come from the same download, so this trusts github.com's TLS; see docs/install.md to verify the attestation"
+    elif ! gh attestation verify --help >/dev/null 2>&1; then
+        echo "gh is too old to verify attestations: the checksums come from the same download, so this trusts github.com's TLS; see docs/install.md to verify the attestation"
     else
-        echo "gh not found: checked the checksums only (see docs/install.md to verify the attestation)"
+        fetch mash.intoto.jsonl
+        (cd "$WORKDIR" && gh attestation verify "$sumsname" -R "$REPO" --bundle mash.intoto.jsonl \
+            --signer-workflow "$REPO/.github/workflows/release.yml" --source-ref "refs/tags/$tag" >/dev/null) ||
+            die "the attestation of the release's SHA256SUMS did not verify: nothing was installed"
     fi
 
     # Download each binary and hold it to the release's checksums.
@@ -171,19 +212,33 @@ main() {
         [ "$got" = "$want" ] || die "$name does not match SHA256SUMS: nothing was installed"
     done
 
-    # Install: a temporary file in the folder, then an atomic rename.
+    # Stage both binaries (and a copy of what they replace) in the folder, then
+    # rename them back to back; if the second rename fails the first is undone.
+    staged_new=()
     for name in "${names[@]}"; do
-        tmp=$(mktemp "$dir/.${name%%-*}.XXXXXX") || die "could not write in $dir"
+        tmp=$(mktemp "$real/.${name%%-*}.XXXXXX") || die "could not write in $real"
         STAGED+=("$tmp")
         cp -- "$WORKDIR/$name" "$tmp"
         chmod 0755 "$tmp"
-        mv -f -- "$tmp" "$dir/${name%%-*}"
+        staged_new+=("$tmp")
     done
+    local backup=""
+    if [ -f "$real/mash" ]; then
+        backup=$(mktemp "$real/.mash-old.XXXXXX") || die "could not write in $real"
+        STAGED+=("$backup")
+        cp -p -- "$real/mash" "$backup"
+    fi
+    mv -f -- "${staged_new[0]}" "$real/mash" || die "could not install mash: nothing was installed"
+    if ! mv -f -- "${staged_new[1]}" "$real/mashctl"; then
+        if [ -n "$backup" ]; then mv -f -- "$backup" "$real/mash"; else rm -f -- "$real/mash"; fi
+        die "could not install mashctl: nothing was installed"
+    fi
     STAGED=()
+    [ -z "$backup" ] || rm -f -- "$backup"
 
     shown=$(tilde "$dir")
     for name in mash mashctl; do
-        line=$("$dir/$name" version 2>/dev/null | head -n 1) || true
+        line=$("$real/$name" version 2>/dev/null | head -n 1) || true
         [ -n "$line" ] || die "the installed $name did not report its version"
         echo "Installed $line in $shown"
     done

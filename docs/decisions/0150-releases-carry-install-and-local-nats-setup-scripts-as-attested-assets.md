@@ -56,12 +56,16 @@ same supply-chain checks as the binaries.
 5. **The gate.** `release-check --assets` and `publish` refuse a release that lacks either script, its `SHA256SUMS`
    line or its attestation, and one whose script differs from the repository's at the release commit.
 6. **What `install.sh` does.** It takes `mash-<os>-<arch>`, `mashctl-<os>-<arch>` and `SHA256SUMS` from one release
-   (`releases/latest/download`, or `MASH_VERSION`, or `MASH_RELEASE_BASE`), refuses a platform mash is not built for,
-   checks each binary against `SHA256SUMS`, and installs into `~/.local/bin` or `MASH_INSTALL_DIR` only when the folder and
-   its parent are not symbolic links and not writable by group or others. Each binary is written to a temporary file in
-   the folder and renamed into place. If `gh` is installed it first verifies `SHA256SUMS` against the attestation
-   (`--bundle mash.intoto.jsonl`, the release workflow, and the release tag when it is known) and refuses on failure; if
-   not, it says in one line that only the checksums were checked. The whole script is one function called on its last
+   (`MASH_VERSION` names a tag; without it the script first resolves `releases/latest` to its tag, and a `MASH_RELEASE_BASE`
+   mirror needs `MASH_VERSION`), refuses a platform mash is not built for, checks each binary against `SHA256SUMS`, and
+   installs into `~/.local/bin` or `MASH_INSTALL_DIR` (a symbolic link to a folder is followed) only when the real folder
+   is owned by the user or root and neither it nor any folder above it is writable by group or others (a root-owned
+   sticky folder such as `/tmp` above it is allowed). `MASH_REPO` (default `bogworks/mash`) names the repository for the
+   download, the tag lookup and the attestation check. Both binaries are staged in the folder before either is renamed
+   into place, and the first rename is undone if the second fails. If a `gh` new enough to verify attestations is
+   installed it first verifies `SHA256SUMS` against the attestation (`-R` the repository, `--bundle mash.intoto.jsonl`,
+   the release workflow as signer, and always `--source-ref refs/tags/<tag>`) and refuses on failure; if not, it says in
+   one line that the checksums come from the same download and so trust github.com's TLS. The whole script is one function called on its last
    line, so a truncated download runs nothing.
 7. **Agents.** An agent does not pipe a download into a shell. It downloads the script, checks it against `SHA256SUMS`,
    shows the person what it will run and runs it after a yes.
@@ -74,8 +78,9 @@ same supply-chain checks as the binaries.
 * Good, because a failed check leaves nothing installed.
 * Bad, because a release has twenty assets (eight binaries, two scripts, eight SBOMs, `SHA256SUMS` and the provenance bundle), besides the signature file.
 * Bad, because a change to either script reaches people only with the next release.
-* Neutral: a pinned release (`MASH_VERSION`) is verified against its tag; for `latest` the tag is not known before the
-  download, so the attestation is checked without the tag pin (the signer workflow and repository still are).
+* Good, because the tag is always known before the download (a pinned `MASH_VERSION`, or `latest` resolved first), so the
+  attestation is always tied to that tag: a dispatch dry run of an unreviewed commit, or another release, does not verify.
+* Neutral: without a new enough `gh` the install trusts github.com's TLS for the checksums, and says so.
 
 ### Confirmation
 
