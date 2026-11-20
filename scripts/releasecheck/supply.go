@@ -67,7 +67,7 @@ func verifySupplyChain(o Options, tag, x string) error {
 		return err
 	}
 	var bad []string
-	for _, t := range release.Targets {
+	for _, t := range release.Binaries() {
 		name := t.AssetName()
 		bin, binBytes, err := fetch(name)
 		if err != nil {

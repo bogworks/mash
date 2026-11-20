@@ -292,7 +292,7 @@ func consumerStep(ctx context.Context, o Options, x string, b *binaries) error {
 	bin := b.cand
 	if hostOS != "linux" {
 		bin = filepath.Join(work, "linux-mash")
-		if _, err := buildFresh(ctx, o, x, "linux", runtime.GOARCH, bin); err != nil {
+		if _, err := buildFresh(ctx, o, x, "mash", "linux", runtime.GOARCH, bin); err != nil {
 			return err
 		}
 	}

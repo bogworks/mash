@@ -1,6 +1,6 @@
-// Command buildrelease builds mash exactly as a release does and prints "<sha256>  <path>".
+// Command buildrelease builds mash (or mashctl, with -cmd) exactly as a release does and prints "<sha256>  <path>".
 //
-//	buildrelease -src <clone> -out <file> -goos linux -goarch arm64 -version 0.1.0 -commit <X>
+//	buildrelease -src <clone> -out <file> -goos linux -goarch arm64 -version 0.1.0 -commit <X> [-cmd mashctl]
 package main
 
 import (
@@ -26,6 +26,7 @@ func run(args []string, stdout io.Writer) error {
 	out := fs.String("out", "", "output file (required)")
 	goos := fs.String("goos", "", "target GOOS (default: the host's)")
 	goarch := fs.String("goarch", "", "target GOARCH (default: the host's)")
+	program := fs.String("cmd", "mash", "program to build: mash or mashctl")
 	version := fs.String("version", "", "release version, without the leading v (required)")
 	commit := fs.String("commit", "", "candidate commit (required)")
 	if err := fs.Parse(args); err != nil {
@@ -37,7 +38,7 @@ func run(args []string, stdout io.Writer) error {
 	if err := release.CheckSource(*src, *commit, *out); err != nil {
 		return err
 	}
-	sum, err := release.Build(context.Background(), *src, *out, *goos, *goarch, *version, *commit)
+	sum, err := release.BuildCmd(context.Background(), *src, *out, *goos, *goarch, *version, *commit, *program)
 	if err != nil {
 		return err
 	}

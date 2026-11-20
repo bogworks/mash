@@ -208,19 +208,26 @@ func TestRelease_buildsExactlyTheFourTargetsTwiceInFreshClones(t *testing.T) {
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("matrix targets %v, want %v", got, want)
 	}
-	var run string
+	runs := map[string]string{} // program -> its build-twice step
 	for _, st := range b.Steps {
 		if strings.Contains(st.Run, "build-twice") {
-			run = st.Run
+			for _, p := range Programs {
+				if strings.Contains(st.Run, `"dist/$name" `+p+"\n") {
+					runs[p] = st.Run
+				}
+			}
 		}
 	}
-	for _, must := range []string{`scripts/build-twice "$GOOS_T" "$GOARCH_T" "$version" "$commit"`, "mash-${GOOS_T}-${GOARCH_T}"} {
-		if !strings.Contains(run, must) {
-			t.Errorf("the build step lacks %q:\n%s", must, run)
+	for _, p := range Programs {
+		run := runs[p]
+		for _, must := range []string{`scripts/build-twice "$GOOS_T" "$GOARCH_T" "$version" "$commit"`, p + "-${GOOS_T}-${GOARCH_T}"} {
+			if !strings.Contains(run, must) {
+				t.Errorf("the %s build step lacks %q:\n%s", p, must, run)
+			}
 		}
-	}
-	if strings.Contains(run, "-tags") {
-		t.Error("the release build passes build tags")
+		if strings.Contains(run, "-tags") {
+			t.Error("the release build passes build tags")
+		}
 	}
 }
 
@@ -879,9 +886,10 @@ echo '[{"tagName":"v0.1.0","isDraft":false,"isPrerelease":false}]'
 }
 
 // releaseCIAssets are the SBOMs and the build provenance the draft job attaches besides the binaries and the script.
-var releaseCIAssets = []string{"mash-darwin-amd64.cdx.json", "mash-darwin-arm64.cdx.json", "mash-linux-amd64.cdx.json", "mash-linux-arm64.cdx.json", "mash.intoto.jsonl"}
+var releaseCIAssets = []string{"mash-darwin-amd64.cdx.json", "mash-darwin-arm64.cdx.json", "mash-linux-amd64.cdx.json", "mash-linux-arm64.cdx.json",
+	"mashctl-darwin-amd64.cdx.json", "mashctl-darwin-arm64.cdx.json", "mashctl-linux-amd64.cdx.json", "mashctl-linux-arm64.cdx.json", "mash.intoto.jsonl"}
 
-// The attest job, and only it, holds the signing permissions (and no contents); it attests the four binaries.
+// The attest job, and only it, holds the signing permissions (and no contents); it attests the eight binaries.
 // jobNeeds normalises a job's `needs`, which YAML allows as a string or a list.
 func jobNeeds(v any) []string {
 	switch n := v.(type) {
@@ -917,9 +925,9 @@ func TestRelease_attestJobAttestsBuildProvenance(t *testing.T) {
 	for _, st := range j.Steps {
 		if attest.MatchString(st.Uses) {
 			found = true
-			// SHA256SUMS is a subject beside the four binaries; the provenance bundle (made by this step) cannot be one.
-			if got := strings.Fields(fmt.Sprint(st.With["subject-path"])); strings.Join(got, " ") != "dist/mash-linux-amd64 dist/mash-linux-arm64 dist/mash-darwin-amd64 dist/mash-darwin-arm64 dist/SHA256SUMS" {
-				t.Errorf("attest subject-path = %q, want the four binaries by name and dist/SHA256SUMS", st.With["subject-path"])
+			// SHA256SUMS is a subject beside the eight binaries; the provenance bundle (made by this step) cannot be one.
+			if got := strings.Fields(fmt.Sprint(st.With["subject-path"])); strings.Join(got, " ") != "dist/mash-linux-amd64 dist/mash-linux-arm64 dist/mash-darwin-amd64 dist/mash-darwin-arm64 dist/mashctl-linux-amd64 dist/mashctl-linux-arm64 dist/mashctl-darwin-amd64 dist/mashctl-darwin-arm64 dist/SHA256SUMS" {
+				t.Errorf("attest subject-path = %q, want the eight binaries by name and dist/SHA256SUMS", st.With["subject-path"])
 			}
 			if strings.Contains(fmt.Sprint(st.With["subject-path"]), "*") {
 				t.Errorf("attest subject-path must not glob (a stale file in dist would be attested): %q", st.With["subject-path"])
@@ -1092,6 +1100,28 @@ func TestBuildTwice_buildsReproduciblyAndTheBinarySaysWhatItIs(t *testing.T) {
 	line, err := exec.Command(out, "version").Output()
 	if err != nil || strings.TrimSpace(string(line)) != "mash 0.1.0 (commit "+x+")" {
 		t.Fatalf("%q %v", line, err)
+	}
+}
+
+// The optional sixth argument names the program: mashctl is built from cmd/mashctl with the same recipe, reproducibly, and
+// carries the stamped version (ADR 0148).
+func TestBuildTwice_buildsMashctlWhenAsked(t *testing.T) {
+	root := repoRoot(t)
+	x := headOf(t, root)
+	out := filepath.Join(t.TempDir(), "out", "mashctl-linux-amd64")
+	got, err := buildTwice(t, root, "", "-", "-", "0.1.0", x, out, "mashctl")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, got)
+	}
+	if !regexp.MustCompile(`^[0-9a-f]{64}  `).MatchString(got) {
+		t.Fatalf("output %q", got)
+	}
+	line, err := exec.Command(out, "version").Output()
+	if err != nil || strings.TrimSpace(string(line)) != "mashctl 0.1.0" {
+		t.Fatalf("%q %v", line, err)
+	}
+	if _, err := buildTwice(t, root, "", "-", "-", "0.1.0", x, out, "mashd"); err == nil {
+		t.Error("a program that is not released was built")
 	}
 }
 
@@ -1631,11 +1661,12 @@ func TestRelease_sbomJobMakesAPinnedCycloneDXSBOMPerBinary(t *testing.T) {
 	if got := matrixTargets(t, j); strings.Join(got, ",") != strings.Join(allTargets(), ",") {
 		t.Errorf("sbom matrix %v, want the four targets", got)
 	}
-	var run, uploads string
+	var run string
+	var uploads []string
 	for _, st := range j.Steps {
 		run += st.Run + "\n"
 		if strings.HasPrefix(st.Uses, "actions/upload-artifact@") {
-			uploads = fmt.Sprint(st.With["name"], " ", st.With["path"])
+			uploads = append(uploads, fmt.Sprint(st.With["name"], " ", st.With["path"]))
 		}
 	}
 	if strings.Count(run, "cyclonedx-gomod/cmd/cyclonedx-gomod@") != 1 || !strings.Contains(run, "go install "+cyclonedxGomod) {
@@ -1646,8 +1677,9 @@ func TestRelease_sbomJobMakesAPinnedCycloneDXSBOMPerBinary(t *testing.T) {
 			t.Errorf("the SBOM step lacks %q:\n%s", must, run)
 		}
 	}
-	if uploads != "sbom-${{ matrix.goos }}-${{ matrix.goarch }} dist/mash-${{ matrix.goos }}-${{ matrix.goarch }}.cdx.json" {
-		t.Errorf("sbom upload: %s", uploads)
+	if want := "sbom-${{ matrix.goos }}-${{ matrix.goarch }} dist/mash-${{ matrix.goos }}-${{ matrix.goarch }}.cdx.json," +
+		"sbom-mashctl-${{ matrix.goos }}-${{ matrix.goarch }} dist/mashctl-${{ matrix.goos }}-${{ matrix.goarch }}.cdx.json"; strings.Join(uploads, ",") != want {
+		t.Errorf("sbom uploads: %v, want %s", uploads, want)
 	}
 }
 
@@ -1661,24 +1693,28 @@ func TestRelease_attestSBOMJobAttestsEachBinarysSBOM(t *testing.T) {
 		t.Errorf("attest-sbom matrix %v, want the four targets", got)
 	}
 	pin := regexp.MustCompile(`^actions/attest-sbom@[0-9a-f]{40}$`)
-	found := false
+	found := 0
 	for _, st := range j.Steps {
 		if pin.MatchString(st.Uses) {
-			found = true
-			if st.With["subject-path"] != "dist/mash-${{ matrix.goos }}-${{ matrix.goarch }}" ||
-				st.With["sbom-path"] != "dist/mash-${{ matrix.goos }}-${{ matrix.goarch }}.cdx.json" {
+			found++
+			if found > len(Programs) {
+				break
+			}
+			p := Programs[found-1] // mash first, then mashctl
+			if st.With["subject-path"] != "dist/"+p+"-${{ matrix.goos }}-${{ matrix.goarch }}" ||
+				st.With["sbom-path"] != "dist/"+p+"-${{ matrix.goos }}-${{ matrix.goarch }}.cdx.json" {
 				t.Errorf("attest-sbom with: %v", st.With)
 			}
 		}
 	}
-	if !found {
-		t.Error("attest-sbom has no actions/attest-sbom step pinned to a full commit")
+	if found != len(Programs) {
+		t.Errorf("attest-sbom has %d actions/attest-sbom steps pinned to a full commit, want %d (mash and mashctl)", found, len(Programs))
 	}
 }
 
 // The provenance is made in-job on the self-hosted runner: the attest job downloads the build artifacts only (mash-*, never
-// an SBOM or provenance artifact), attests the four binaries, and keeps the Sigstore bundle as mash.intoto.jsonl in a
-// `provenance` artifact the draft and dry-run jobs download. The keep step, run for real, refuses anything but four binaries.
+// an SBOM or provenance artifact), attests the eight binaries, and keeps the Sigstore bundle as mash.intoto.jsonl in a
+// `provenance` artifact the draft and dry-run jobs download. The keep step, run for real, refuses anything but eight binaries.
 func TestRelease_attestJobKeepsTheBundleAsTheProvenanceAsset(t *testing.T) {
 	w := load(t, "release.yml")
 	j := w.Jobs["attest"]
@@ -1692,8 +1728,8 @@ func TestRelease_attestJobKeepsTheBundleAsTheProvenanceAsset(t *testing.T) {
 		}
 		if st.With["name"] == "sums" {
 			gotSums = true
-		} else if st.With["pattern"] != "mash-*" {
-			t.Errorf("attest downloads %v, not just the binaries (pattern mash-*) and the sums artifact", st.With)
+		} else if st.With["pattern"] != "mash-*" && st.With["pattern"] != "mashctl-*" {
+			t.Errorf("attest downloads %v, not just the binaries (patterns mash-* and mashctl-*) and the sums artifact", st.With)
 		}
 	}
 	if !gotSums {
@@ -1734,19 +1770,19 @@ func TestRelease_attestJobKeepsTheBundleAsTheProvenanceAsset(t *testing.T) {
 	if err := os.WriteFile(bundle, []byte("{}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	for _, n := range []string{"mash-darwin-amd64", "mash-darwin-arm64", "mash-linux-amd64", "SHA256SUMS"} {
+	for _, n := range []string{"mash-darwin-amd64", "mash-darwin-arm64", "mash-linux-amd64", "mashctl-darwin-amd64", "mashctl-darwin-arm64", "mashctl-linux-amd64", "mashctl-linux-arm64", "SHA256SUMS"} {
 		if err := os.WriteFile(filepath.Join(dir, "dist", n), []byte(n), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if run() == nil {
-		t.Error("three binaries and SHA256SUMS were attested")
+		t.Error("seven binaries and SHA256SUMS were attested")
 	}
 	if err := os.WriteFile(filepath.Join(dir, "dist", "mash-linux-arm64"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := run(); err != nil {
-		t.Fatalf("four binaries, SHA256SUMS and a bundle: %v", err)
+		t.Fatalf("eight binaries, SHA256SUMS and a bundle: %v", err)
 	}
 	if b, err := os.ReadFile(filepath.Join(dir, "provenance", "mash.intoto.jsonl")); err != nil || string(b) != "{}\n" {
 		t.Errorf("provenance/mash.intoto.jsonl = %q, %v", b, err)
@@ -1760,7 +1796,7 @@ func TestRelease_attestJobKeepsTheBundleAsTheProvenanceAsset(t *testing.T) {
 	os.Remove(filepath.Join(dir, "dist", "mash-linux-arm64.cdx.json"))
 	os.Remove(filepath.Join(dir, "dist", "SHA256SUMS"))
 	if run() == nil {
-		t.Error("four binaries without SHA256SUMS were attested")
+		t.Error("eight binaries without SHA256SUMS were attested")
 	}
 	if err := os.WriteFile(filepath.Join(dir, "dist", "SHA256SUMS"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
@@ -1811,7 +1847,8 @@ func TestRelease_draftCarriesAndSumsTheSBOMsAndProvenance(t *testing.T) {
 			t.Errorf("the draft step %q makes SHA256SUMS: it must attach the attested one unchanged", st.Name)
 		}
 	}
-	names := append([]string{"mash-darwin-amd64", "mash-darwin-arm64", "mash-linux-amd64", "mash-linux-arm64", "quickstart-synadia.sh"}, releaseCIAssets...)
+	names := append([]string{"mash-darwin-amd64", "mash-darwin-arm64", "mash-linux-amd64", "mash-linux-arm64",
+		"mashctl-darwin-amd64", "mashctl-darwin-arm64", "mashctl-linux-amd64", "mashctl-linux-arm64", "quickstart-synadia.sh"}, releaseCIAssets...)
 	for _, n := range names {
 		if !strings.Contains(create, "dist/"+n) {
 			t.Errorf("the draft does not attach %s:\n%s", n, create)
@@ -1837,7 +1874,7 @@ func TestRelease_draftCarriesAndSumsTheSBOMsAndProvenance(t *testing.T) {
 	}
 }
 
-// The sums job, run for real: it downloads the four binaries and the four SBOMs, copies the quickstart script and writes
+// The sums job, run for real: it downloads the eight binaries and the eight SBOMs, copies the quickstart script and writes
 // SHA256SUMS in the documented order without the provenance bundle, and uploads it as the `sums` artifact.
 func TestRelease_sumsJobListsEveryAssetButTheBundleAndUploadsIt(t *testing.T) {
 	w := load(t, "release.yml")
@@ -1861,7 +1898,7 @@ func TestRelease_sumsJobListsEveryAssetButTheBundleAndUploadsIt(t *testing.T) {
 			script = st.Run
 		}
 	}
-	if !checkout || !patterns["mash-*"] || !patterns["sbom-*"] || !uploaded || len(patterns) != 2 {
+	if !checkout || !patterns["mash-*"] || !patterns["mashctl-*"] || !patterns["sbom-*"] || !uploaded || len(patterns) != 3 {
 		t.Errorf("sums job: checkout=%v downloads=%v uploaded=%v", checkout, patterns, uploaded)
 	}
 	if script == "" {
@@ -1874,7 +1911,8 @@ func TestRelease_sumsJobListsEveryAssetButTheBundleAndUploadsIt(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, "scripts"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	bins := []string{"mash-darwin-amd64", "mash-darwin-arm64", "mash-linux-amd64", "mash-linux-arm64"}
+	bins := []string{"mash-darwin-amd64", "mash-darwin-arm64", "mash-linux-amd64", "mash-linux-arm64",
+		"mashctl-darwin-amd64", "mashctl-darwin-arm64", "mashctl-linux-amd64", "mashctl-linux-arm64"}
 	for _, n := range append(append([]string{}, bins...), releaseCIAssets...) {
 		if err := os.WriteFile(filepath.Join(dir, "dist", n), []byte(n), 0o644); err != nil {
 			t.Fatal(err)
@@ -1905,7 +1943,7 @@ func TestRelease_sumsJobListsEveryAssetButTheBundleAndUploadsIt(t *testing.T) {
 	}
 	sums, _ := os.ReadFile(filepath.Join(dir, "dist", "SHA256SUMS"))
 	sl := strings.Split(strings.TrimSpace(string(sums)), "\n")
-	want := append(append(append([]string{}, bins...), "quickstart-synadia.sh"), releaseCIAssets[:4]...)
+	want := append(append(append([]string{}, bins...), "quickstart-synadia.sh"), releaseCIAssets[:8]...)
 	if len(sl) != len(want) {
 		t.Fatalf("SHA256SUMS:\n%s", sums)
 	}
@@ -1921,11 +1959,13 @@ func TestRelease_sumsJobListsEveryAssetButTheBundleAndUploadsIt(t *testing.T) {
 		t.Errorf("the script was not copied with its mode: %v", err)
 	}
 	// Whatever is missing, the sums are not made.
-	if err := os.Remove(filepath.Join(dir, "dist", "mash-linux-arm64.cdx.json")); err != nil {
-		t.Fatal(err)
-	}
-	if out, err := run(); err == nil {
-		t.Errorf("the sums were made without an SBOM:\n%s", out)
+	for _, missing := range []string{"mash-linux-arm64.cdx.json", "mashctl-linux-arm64.cdx.json", "mashctl-darwin-amd64"} {
+		if err := os.Remove(filepath.Join(dir, "dist", missing)); err != nil {
+			t.Fatal(err)
+		}
+		if out, err := run(); err == nil {
+			t.Errorf("the sums were made without %s:\n%s", missing, out)
+		}
 	}
 }
 
@@ -1990,7 +2030,7 @@ func TestRelease_dryRunVerifiesAndNeverReleases(t *testing.T) {
 		`".github/workflows/release.yml"`,
 		"--predicate-type https://cyclonedx.org/bom --format json",
 		"jq -S",
-		"mash-linux-amd64 mash-linux-arm64 mash-darwin-amd64 mash-darwin-arm64",
+		"mash-linux-amd64 mash-linux-arm64 mash-darwin-amd64 mash-darwin-arm64 mashctl-linux-amd64 mashctl-linux-arm64 mashctl-darwin-amd64 mashctl-darwin-arm64",
 	} {
 		if !strings.Contains(run, must) {
 			t.Errorf("dry-run-verify lacks %q:\n%s", must, run)
@@ -2369,5 +2409,42 @@ func TestCI_ephShadowJobGatesNothing(t *testing.T) {
 	tj, ej := w.Jobs["test"], w.Jobs["test-eph"]
 	if ej.If != tj.If || ej.TimeoutMinutes != tj.TimeoutMinutes || fmt.Sprint(ej.Needs) != fmt.Sprint(tj.Needs) || ej.ContinueOnError != nil {
 		t.Errorf("test-eph must match test in if, timeout and needs, and never use continue-on-error: %+v", ej)
+	}
+}
+
+// ADR 0148: a release builds mashctl beside mash. Every job that handles the binaries names mashctl: the build builds it
+// twice and uploads it, the sbom job makes its SBOM, the attest jobs attest the binary and its SBOM, the sums job lists
+// both, and the verify job loops over all eight names.
+func TestRelease_mashctlIsBuiltAndCarriedThroughEveryJob(t *testing.T) {
+	w := load(t, "release.yml")
+	text := func(jn string) string {
+		var b strings.Builder
+		for _, st := range w.Jobs[jn].Steps {
+			b.WriteString(st.Run + "\n")
+			for k, v := range st.With {
+				b.WriteString(fmt.Sprintf("%s=%v\n", k, v))
+			}
+		}
+		return b.String()
+	}
+	for jn, wants := range map[string][]string{
+		"build":          {"build-twice", "mashctl-${GOOS_T}-${GOARCH_T}", "name=mashctl-${{ matrix.goos }}-${{ matrix.goarch }}"},
+		"sbom":           {"mashctl", "name=sbom-mashctl-${{ matrix.goos }}-${{ matrix.goarch }}"},
+		"attest":         {"pattern=mashctl-*", "dist/mashctl-linux-amd64", "dist/mashctl-darwin-arm64"},
+		"attest-sbom":    {"subject-path=dist/mashctl-${{ matrix.goos }}-${{ matrix.goarch }}", "sbom-path=dist/mashctl-${{ matrix.goos }}-${{ matrix.goarch }}.cdx.json"},
+		"sums":           {"mashctl-linux-amd64", "mashctl-darwin-arm64.cdx.json"},
+		"draft":          {"dist/mashctl-linux-arm64", "dist/mashctl-linux-arm64.cdx.json"},
+		"dry-run-verify": {"mashctl-linux-amd64", "mashctl-darwin-arm64"},
+	} {
+		got := text(jn)
+		for _, want := range wants {
+			if !strings.Contains(got, want) {
+				t.Errorf("job %s does not mention %q:\n%s", jn, want, got)
+			}
+		}
+	}
+	// scripts/build-twice names the program it builds, and the workflow asks for mashctl by name.
+	if !strings.Contains(text("build"), `"dist/$name" mashctl`) {
+		t.Error("the build job does not pass mashctl to scripts/build-twice")
 	}
 }

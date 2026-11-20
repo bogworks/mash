@@ -102,11 +102,11 @@ func mustSign(t *testing.T, k sumsKey, data string) []byte {
 }
 
 func TestSums_checkEntries(t *testing.T) {
-	hashes := map[release.Target]string{}
+	hashes := map[release.Binary]string{}
 	have := map[string]string{}
 	var lines []string
-	for i, tg := range release.Targets {
-		h := strings.Repeat(string(rune('a'+i)), 64)
+	for i, tg := range release.Binaries() {
+		h := strings.Repeat(string("abcdef97"[i]), 64)
 		hashes[tg] = h
 		have[tg.AssetName()] = "sha256:" + h
 		lines = append(lines, h+"  "+tg.AssetName())
@@ -132,7 +132,7 @@ func TestSums_checkEntries(t *testing.T) {
 	if err := checkSumEntries([]byte(good), have, hashes, script, false); err != nil {
 		t.Fatalf("good sums refused: %v", err)
 	}
-	first := release.Targets[0].AssetName()
+	first := release.Binaries()[0].AssetName()
 	cases := map[string]func(*string, map[string]string){
 		"malformed line":           func(s *string, h map[string]string) { *s += "not a checksum line\n" },
 		"short hash":               func(s *string, h map[string]string) { *s += "abc  mash-extra\n" },
@@ -140,7 +140,7 @@ func TestSums_checkEntries(t *testing.T) {
 		"a name that is no target": func(s *string, h map[string]string) { *s += strings.Repeat("e", 64) + "  mash-plan9-386\n" },
 		"a foreign file":           func(s *string, h map[string]string) { *s += strings.Repeat("e", 64) + "  install.sh\n" },
 		"digest differs from build": func(s *string, h map[string]string) {
-			*s = strings.Replace(*s, hashes[release.Targets[0]], strings.Repeat("0", 64), 1)
+			*s = strings.Replace(*s, hashes[release.Binaries()[0]], strings.Repeat("0", 64), 1)
 		},
 		"script digest differs from the script at X": func(s *string, h map[string]string) {
 			*s = strings.Replace(*s, script, strings.Repeat("0", 64), 1)
@@ -150,22 +150,31 @@ func TestSums_checkEntries(t *testing.T) {
 		"script listed but not attached":      func(s *string, h map[string]string) { delete(h, release.ScriptName) },
 		"script attached with another digest": func(s *string, h map[string]string) { h[release.ScriptName] = "sha256:" + strings.Repeat("0", 64) },
 		"sbom missing from sums": func(s *string, h map[string]string) {
-			*s = strings.Replace(*s, strings.Repeat("0", 64)+"  "+release.Targets[0].SBOMName()+"\n", "", 1)
+			*s = strings.Replace(*s, strings.Repeat("0", 64)+"  "+release.Binaries()[0].SBOMName()+"\n", "", 1)
 		},
 		"provenance missing from sums": func(s *string, h map[string]string) {
-			*s = strings.Replace(*s, strings.Repeat("4", 64)+"  "+release.ProvenanceName+"\n", "", 1)
+			*s = strings.Replace(*s, strings.Repeat("8", 64)+"  "+release.ProvenanceName+"\n", "", 1)
 		},
-		"sbom listed but not attached":       func(s *string, h map[string]string) { delete(h, release.Targets[1].SBOMName()) },
+		"sbom listed but not attached":       func(s *string, h map[string]string) { delete(h, release.Binaries()[1].SBOMName()) },
 		"provenance listed but not attached": func(s *string, h map[string]string) { delete(h, release.ProvenanceName) },
 		"sbom attached with another digest": func(s *string, h map[string]string) {
-			h[release.Targets[0].SBOMName()] = "sha256:" + strings.Repeat("f", 64)
+			h[release.Binaries()[0].SBOMName()] = "sha256:" + strings.Repeat("f", 64)
 		},
 		"provenance attached with other digest": func(s *string, h map[string]string) { h[release.ProvenanceName] = "sha256:" + strings.Repeat("f", 64) },
 		"attached provenance twin not listed":   func(s *string, h map[string]string) { h["mash.other.jsonl"] = "sha256:" + strings.Repeat("f", 64) },
-		"target missing from sums":              func(s *string, h map[string]string) { *s = strings.Join(lines[1:], "\n") + "\n" },
-		"listed but not attached":               func(s *string, h map[string]string) { delete(h, first) },
-		"attached digest differs":               func(s *string, h map[string]string) { h[first] = "sha256:" + strings.Repeat("0", 64) },
-		"attached but not listed":               func(s *string, h map[string]string) { h["mash-linux-riscv64"] = "sha256:" + strings.Repeat("f", 64) },
+		"mashctl missing from sums": func(s *string, h map[string]string) {
+			*s = strings.Replace(*s, hashes[release.Binaries()[4]]+"  "+release.Binaries()[4].AssetName()+"\n", "", 1)
+		},
+		"mashctl sbom missing from sums": func(s *string, h map[string]string) {
+			*s = strings.Replace(*s, strings.Repeat("4", 64)+"  "+release.Binaries()[4].SBOMName()+"\n", "", 1)
+		},
+		"mashctl digest differs from build": func(s *string, h map[string]string) {
+			*s = strings.Replace(*s, hashes[release.Binaries()[5]], strings.Repeat("0", 64), 1)
+		},
+		"target missing from sums": func(s *string, h map[string]string) { *s = strings.Join(lines[1:], "\n") + "\n" },
+		"listed but not attached":  func(s *string, h map[string]string) { delete(h, first) },
+		"attached digest differs":  func(s *string, h map[string]string) { h[first] = "sha256:" + strings.Repeat("0", 64) },
+		"attached but not listed":  func(s *string, h map[string]string) { h["mash-linux-riscv64"] = "sha256:" + strings.Repeat("f", 64) },
 	}
 	for name, f := range cases {
 		s, h := mod(f)
@@ -474,7 +483,7 @@ func TestPublish_signedDraftIsPublished(t *testing.T) {
 
 func TestPublish_assetChangedAfterTheGateIsRefused(t *testing.T) {
 	f := signedDraft(t)
-	name := release.Targets[0].AssetName()
+	name := release.Binaries()[0].AssetName()
 	f.editAssets(t, func(s string) string {
 		var v struct {
 			IsDraft bool                `json:"isDraft"`
@@ -515,7 +524,7 @@ func TestPublish_signedAssetRemovedOrExtraAssetAddedIsRefused(t *testing.T) {
 			return strings.Replace(s, "sha256:"+shaOf("#!/bin/sh\necho quickstart\n"), "sha256:"+strings.Repeat("0", 64), 1)
 		}, "not the script at X"},
 		"a signed asset gone": {func(s string) string {
-			return strings.Replace(s, `"name":"`+release.Targets[0].AssetName()+`"`, `"name":"renamed"`, 1)
+			return strings.Replace(s, `"name":"`+release.Binaries()[0].AssetName()+`"`, `"name":"renamed"`, 1)
 		}, "no longer attached"},
 	}
 	for name, c := range cases {
@@ -567,10 +576,10 @@ func TestPublish_sumsOrSignatureMissingOrChangedInTheFinalListingIsRefused(t *te
 // after the --assets gate. Publishing is bound to the gate's fresh builds of X, so it is refused.
 func TestPublish_wholeAssetSetReplacedAfterTheGateIsRefused(t *testing.T) {
 	f := signedDraft(t)
-	other := map[release.Target]string{}
+	other := map[release.Binary]string{}
 	var assets []map[string]string
-	for i, tg := range release.Targets {
-		other[tg] = strings.Repeat(string(rune('a'+i)), 64) // binaries that were never built from X
+	for i, tg := range release.Binaries() {
+		other[tg] = strings.Repeat(string("abcdef97"[i]), 64) // binaries that were never built from X
 		assets = append(assets, map[string]string{"name": tg.AssetName(), "digest": "sha256:" + other[tg]})
 	}
 	sums := release.ExpectedSums(other, shaOf("#!/bin/sh\necho quickstart\n"), nil, false)
@@ -613,13 +622,13 @@ func (f *fixture) noAttestation(t *testing.T, name string) {
 
 // The gate verifies build provenance of every binary with gh attestation verify, against the release repository.
 func TestAssets_verifiesAttestationOfEveryBinary(t *testing.T) {
-	t.Run("all four verify", func(t *testing.T) {
+	t.Run("all eight verify", func(t *testing.T) {
 		f := signedFixture(t, nil)
 		if err := checkAssets(context.Background(), f.o); err != nil {
 			t.Fatalf("a correct draft was refused: %v", err)
 		}
 		log := f.ghLog()
-		for _, n := range []string{"mash-linux-amd64", "mash-linux-arm64", "mash-darwin-amd64", "mash-darwin-arm64"} {
+		for _, n := range []string{"mash-linux-amd64", "mash-linux-arm64", "mash-darwin-amd64", "mash-darwin-arm64", "mashctl-linux-amd64", "mashctl-linux-arm64", "mashctl-darwin-amd64", "mashctl-darwin-arm64"} {
 			if !strings.Contains(log, n+" -R "+f.o.GHRepo) || !strings.Contains(log, "attestation verify") {
 				t.Errorf("%s was not verified against %s:\n%s", n, f.o.GHRepo, log)
 			}
@@ -640,8 +649,19 @@ func TestAssets_verifiesAttestationOfEveryBinary(t *testing.T) {
 				}
 			}
 		}
-		if calls != 12 {
-			t.Errorf("%d gh attestation verify calls, want 12 (4 build provenance, 4 attached provenance bundles, 4 SBOM)", calls)
+		if calls != 24 {
+			t.Errorf("%d gh attestation verify calls, want 24 (8 build provenance, 8 attached provenance bundles, 8 SBOM)", calls)
+		}
+	})
+	t.Run("a mashctl binary without an attestation is refused naming it", func(t *testing.T) {
+		f := signedDraft(t)
+		f.noAttestation(t, "mashctl-linux-arm64")
+		err := f.publish()
+		if err == nil || exitCode(err) != 3 || !strings.Contains(err.Error(), "mashctl-linux-arm64") {
+			t.Fatalf("err = %v (exit %d)", err, exitCode(err))
+		}
+		if strings.Contains(f.ghLog(), "release edit") {
+			t.Error("the release was published without provenance for mashctl")
 		}
 	})
 	t.Run("one missing is refused naming it, and publishing does not happen", func(t *testing.T) {
@@ -742,7 +762,7 @@ func TestAssets_verifiesSBOMAndBuildProvenanceOfEveryBinary(t *testing.T) {
 			t.Fatalf("a correct draft was refused: %v", err)
 		}
 		log := f.ghLog()
-		for _, tg := range release.Targets {
+		for _, tg := range release.Binaries() {
 			n := tg.AssetName()
 			if !strings.Contains(log, "/"+n+" -R bogworks/mash ") || !strings.Contains(log, "--predicate-type https://cyclonedx.org/bom") {
 				t.Errorf("the SBOM attestation of %s was not verified:\n%s", n, log)

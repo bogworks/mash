@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# build-twice <goos|-> <goarch|-> <version> <commit> <outfile>
+# build-twice <goos|-> <goarch|-> <version> <commit> <outfile> [program]
 #
 # Builds the candidate <commit> twice, each time from a fresh clone in a different directory, with the release recipe
 # (scripts/buildrelease), and publishes <outfile> only if both builds print a valid SHA-256 and the two are equal.
 # Used by release.yml and ci.yml, so the CI signal and the release build are the same check. "-" for goos and goarch
-# builds for the host. WORKSPACE (default: this repository) is where the commit lives; BUILDRELEASE (default: built
+# builds for the host. program is mash (default) or mashctl; the caller names <outfile>. WORKSPACE (default: this repository) is where the commit lives; BUILDRELEASE (default: built
 # from WORKSPACE) overrides the build tool, for tests.
 set -euo pipefail
-goos=${1:?goos}; goarch=${2:?goarch}; version=${3:?version}; commit=${4:?commit}; out=${5:?outfile}
+goos=${1:?goos}; goarch=${2:?goarch}; version=${3:?version}; commit=${4:?commit}; out=${5:?outfile}; program=${6:-mash}
 ws=${WORKSPACE:-$(cd "$(dirname "$0")/.." && pwd)}
 tmp=$(mktemp -d)
 ref="refs/ci/candidate-$$"
@@ -28,7 +28,7 @@ for n in a b; do
   git init -q "$src"
   git -C "$src" fetch -q --no-tags --update-shallow "$ws" "+$ref:refs/ci/candidate"
   git -C "$src" checkout -q --detach refs/ci/candidate
-  flags=(-src "$src" -out "$tmp/out-$n/mash" -version "$version" -commit "$commit")
+  flags=(-src "$src" -out "$tmp/out-$n/$program" -cmd "$program" -version "$version" -commit "$commit")
   if [ "$goos" != "-" ]; then flags+=(-goos "$goos" -goarch "$goarch"); fi
   "$tool" "${flags[@]}" > "$tmp/sum-$n"
   sum=$(cut -d' ' -f1 "$tmp/sum-$n")
@@ -43,5 +43,5 @@ if [ "${sums[0]}" != "${sums[1]}" ]; then
   exit 1
 fi
 mkdir -p "$(dirname "$out")"
-cp "$tmp/out-a/mash" "$out"
+cp "$tmp/out-a/$program" "$out"
 echo "${sums[0]}  $out"
