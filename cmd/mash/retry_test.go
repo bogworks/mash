@@ -191,7 +191,7 @@ func TestServeRetriesHeldLease(t *testing.T) {
 	}
 	// The registered tools now work on the recovered endpoint, as endpoint a.
 	r := s.call(t, 10, "send", `{"address":"o.dev.b","message":"thanks"}`)
-	if txt := resultText(r); txt != "Mail sent." || r["isError"] == true {
+	if txt := resultText(r); !isReceipt(txt, "Mail sent") || r["isError"] == true {
 		t.Fatalf("send tool after recovery: %v", r)
 	}
 	if txt := resultText(s.call(t, 11, "inbox", `{}`)); !strings.Contains(txt, "sent while held") || !strings.Contains(txt, "hello after recovery") {

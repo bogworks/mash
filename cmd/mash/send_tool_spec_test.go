@@ -55,7 +55,7 @@ func TestSendToolServedAsSpecified(t *testing.T) {
 	sb.initialize(t)
 	rr := sb.call(t, 33, "send", `{"address":"o.dev.a","message":"ok","kind":"question","reply_to":1}`)
 	sc, _ = rr["structuredContent"].(map[string]any)
-	if rr["isError"] == true || sc["retagged"] != true || sc["kind"] != "fyi" || resultText(rr) != "Mail sent as fyi: a reply marked question that asks nothing." {
+	if rr["isError"] == true || sc["retagged"] != true || sc["kind"] != "fyi" || !isReceipt(resultText(rr), "Mail sent as fyi", ": a reply marked question that asks nothing.") {
 		t.Fatalf("retagged: %v", rr)
 	}
 }

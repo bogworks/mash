@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -26,7 +27,7 @@ func TestSendCommandBothForms(t *testing.T) {
 		t.Fatalf("--json: %d %q %q", code, out, errb)
 	}
 	out, _, code = runSplit(t, w, "b", "send", tTo("a"), "--kind", "fyi", "--urgent", "second", "-v")
-	if code != 0 || out != "Urgent fyi mail sent.\nto:      o.dev.a\nnumber:  2\nkind:    fyi\nurgent:  yes\n" {
+	if code != 0 || out != "Urgent fyi mail sent (number 2).\nto:      o.dev.a\nkind:    fyi\nurgent:  yes\n" {
 		t.Fatalf("-v: %d %q", code, out)
 	}
 	// reply-to and relay go out signed, and a short question reply is tagged fyi (the receipt says the kind sent)
@@ -138,7 +139,7 @@ func TestSendRetaggedIsReported(t *testing.T) {
 		t.Fatal(code)
 	}
 	out, errb, code := runSplit(t, w, "a", "send", tTo("b"), "--reply-to", "1", "--kind", "question", "ok")
-	if code != 0 || errb != "" || out != "Mail sent as fyi: a reply marked question that asks nothing.\n" {
+	if code != 0 || errb != "" || out != "Mail sent as fyi (number 1): a reply marked question that asks nothing.\n" {
 		t.Fatalf("retagged: %d %q %q", code, out, errb)
 	}
 	out, _, code = runSplit(t, w, "a", "send", tTo("b"), "--reply-to", "1", "--kind", "question", "which one?", "--json")
@@ -199,4 +200,13 @@ func TestHelpCommandMatchesHelpFlag(t *testing.T) {
 			t.Errorf("mash help lacks %q:\n%s", want, o.String())
 		}
 	}
+}
+
+// isReceipt says s is a send receipt: lead, then " (number N)", then tail ("." unless given), and an optional newline.
+func isReceipt(s, lead string, tail ...string) bool {
+	t := "\\."
+	if len(tail) > 0 {
+		t = regexp.QuoteMeta(tail[0])
+	}
+	return regexp.MustCompile(`^` + regexp.QuoteMeta(lead) + ` \(number [0-9]+\)` + t + `\n?$`).MatchString(s)
 }

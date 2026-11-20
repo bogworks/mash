@@ -116,7 +116,7 @@ func TestSendTextWithHelpWordsIsSent(t *testing.T) {
 	w := newWorld(t, "x", "y")
 	for i, text := range [][]string{{"see the --help flag"}, {"--", "-h"}, {"--", "--help"}, {"what does -h do"}} {
 		out, code := w.cli(t, "x", append([]string{"send", tTo("y")}, text...)...)
-		if code != 0 || strings.HasPrefix(out, "Send a message") || !strings.Contains(out, "Mail sent.") {
+		if code != 0 || strings.HasPrefix(out, "Send a message") || !strings.Contains(out, "Mail sent (number ") {
 			t.Fatalf("send %v: %d %q", text, code, out)
 		}
 		out, code = w.cli(t, "y", "read", strconv.Itoa(i+1))

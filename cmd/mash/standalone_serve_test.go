@@ -178,7 +178,7 @@ func TestStandaloneServeWithoutAHost(t *testing.T) {
 	if !strings.Contains(content, "from o.dev.alpha [verified]") || !strings.Contains(content, "hello serving beta") {
 		t.Fatalf("channel event: %q", content)
 	}
-	if out := s.call(t, 3, "send", `{"address":"o.dev.alpha","message":"hello back"}`); out != "Mail sent." {
+	if out := s.call(t, 3, "send", `{"address":"o.dev.alpha","message":"hello back"}`); !isReceipt(out, "Mail sent") {
 		t.Fatalf("send tool: %q", out)
 	}
 	if out := mustRun(t, bin, envs["alpha"], "read", "1"); !strings.Contains(out, "hello back") || !strings.Contains(out, "[verified]") {

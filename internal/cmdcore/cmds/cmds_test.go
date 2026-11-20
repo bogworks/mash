@@ -84,7 +84,7 @@ func TestSendArgv(t *testing.T) {
 			if code != 0 || errs != "" {
 				t.Fatalf("code %d stderr %q", code, errs)
 			}
-			if out != "Mail sent.\n" && !strings.HasSuffix(out, "mail sent.\n") {
+			if out != "Mail sent (number 42).\n" && !strings.HasSuffix(out, "mail sent (number 42).\n") {
 				t.Errorf("stdout %q", out)
 			}
 			if f.to != tc.to || f.text != tc.text || f.o != tc.o {
@@ -196,21 +196,21 @@ func TestSendText(t *testing.T) {
 		verbose bool
 		want    string
 	}{
-		{"sent", cmds.SendResult{To: "acme.demo.alice", Number: 42, Kind: "task"}, false, "Mail sent."},
-		{"no kind", cmds.SendResult{}, false, "Mail sent."},
-		{"urgent task", cmds.SendResult{Kind: "task", Urgent: true}, false, "Urgent mail sent."},
-		{"question", cmds.SendResult{Kind: "question"}, false, "Question mail sent."},
-		{"urgent question", cmds.SendResult{Kind: "question", Urgent: true}, false, "Urgent question mail sent."},
-		{"duplicate", cmds.SendResult{Kind: "task", Duplicate: true}, false, "Mail already sent; nothing new stored."},
-		{"retagged", cmds.SendResult{Kind: "fyi", Retagged: true}, false, "Mail sent as fyi: a reply marked question that asks nothing."},
-		{"retagged urgent", cmds.SendResult{Kind: "fyi", Urgent: true, Retagged: true}, false, "Urgent mail sent as fyi: a reply marked question that asks nothing."},
+		{"sent", cmds.SendResult{To: "acme.demo.alice", Number: 42, Kind: "task"}, false, "Mail sent (number 42)."},
+		{"no kind", cmds.SendResult{Number: 3}, false, "Mail sent (number 3)."},
+		{"urgent task", cmds.SendResult{Kind: "task", Urgent: true, Number: 5}, false, "Urgent mail sent (number 5)."},
+		{"question", cmds.SendResult{Kind: "question", Number: 6}, false, "Question mail sent (number 6)."},
+		{"urgent question", cmds.SendResult{Kind: "question", Urgent: true, Number: 43}, false, "Urgent question mail sent (number 43)."},
+		{"duplicate", cmds.SendResult{Kind: "task", Duplicate: true, Number: 42}, false, "Mail already sent; nothing new stored."},
+		{"retagged", cmds.SendResult{Kind: "fyi", Retagged: true, Number: 44}, false, "Mail sent as fyi (number 44): a reply marked question that asks nothing."},
+		{"retagged urgent", cmds.SendResult{Kind: "fyi", Urgent: true, Retagged: true, Number: 45}, false, "Urgent mail sent as fyi (number 45): a reply marked question that asks nothing."},
 		{"retagged verbose", cmds.SendResult{To: "acme.demo.alice", Number: 9, Kind: "fyi", Retagged: true}, true,
-			"Mail sent as fyi: a reply marked question that asks nothing.\nto:      acme.demo.alice\nnumber:  9\nkind:    fyi\nurgent:  no"},
+			"Mail sent as fyi (number 9): a reply marked question that asks nothing.\nto:      acme.demo.alice\nkind:    fyi\nurgent:  no"},
 		{"duplicate beats retagged", cmds.SendResult{Kind: "fyi", Duplicate: true, Retagged: true}, false, "Mail already sent; nothing new stored."},
 		{"verbose", cmds.SendResult{To: "acme.demo.alice", Number: 42, Kind: "task"}, true,
-			"Mail sent.\nto:      acme.demo.alice\nnumber:  42\nkind:    task\nurgent:  no"},
+			"Mail sent (number 42).\nto:      acme.demo.alice\nkind:    task\nurgent:  no"},
 		{"verbose urgent", cmds.SendResult{To: "acme.demo.alice", Number: 7, Kind: "fyi", Urgent: true}, true,
-			"Urgent fyi mail sent.\nto:      acme.demo.alice\nnumber:  7\nkind:    fyi\nurgent:  yes"},
+			"Urgent fyi mail sent (number 7).\nto:      acme.demo.alice\nkind:    fyi\nurgent:  yes"},
 	} {
 		if got := tc.r.Text(cmdcore.Opts{Verbose: tc.verbose}); got != tc.want {
 			t.Errorf("%s: %q, want %q", tc.name, got, tc.want)
@@ -317,7 +317,7 @@ func TestSendTool(t *testing.T) {
 	f.err = nil
 	f.rc.Number = 5
 	got, _, err := tool.MCP().CallStructured(context.Background(), json.RawMessage(`{"address":"a.b.c","message":"m"}`))
-	if err != nil || got != "Mail sent." {
+	if err != nil || got != "Mail sent (number 5)." {
 		t.Errorf("MCP().CallStructured = %q, %v", got, err)
 	}
 }
@@ -685,6 +685,39 @@ func TestMatchesSpec(t *testing.T) {
 		if !reflect.DeepEqual(xk, specKeys) {
 			t.Errorf("%s: spec/mash.json x-json and spec/mash-mcp.json structured differ", tc.name)
 		}
+	}
+	// the receipt texts: every x-output case of send, word for word
+	_, smeta := specCommand(t, "send")
+	for _, x := range smeta["x-output"].([]any) {
+		c := x.(map[string]any)
+		var r cmds.SendResult
+		verbose := false
+		switch c["case"] {
+		case "Sent":
+			r = cmds.SendResult{To: "acme.demo.alice", Number: 42, Kind: "task"}
+		case "Sent, urgent, with a kind":
+			r = cmds.SendResult{To: "acme.demo.alice", Number: 43, Kind: "question", Urgent: true}
+		case "With --verbose":
+			r = cmds.SendResult{To: "acme.demo.alice", Number: 42, Kind: "task"}
+			verbose = true
+		case "A reply marked question that asks nothing":
+			r = cmds.SendResult{To: "acme.demo.alice", Number: 44, Kind: "fyi", Retagged: true}
+		case "Repeated --id":
+			r = cmds.SendResult{To: "acme.demo.alice", Number: 42, Kind: "task", Duplicate: true}
+		default:
+			continue
+		}
+		if got := r.Text(cmdcore.Opts{Verbose: verbose}); got != c["text"] {
+			t.Errorf("send output %q: %q, spec %q", c["case"], got, c["text"])
+		}
+	}
+	var mt struct {
+		Text []struct{ Text string }
+	}
+	mb, _ := json.Marshal(specTool(t, "send"))
+	_ = json.Unmarshal(mb, &mt)
+	if len(mt.Text) == 0 || mt.Text[0].Text != (cmds.SendResult{Number: 42, Kind: "task"}).Text(cmdcore.Opts{}) {
+		t.Errorf("mcp send text %v differs from the receipt", mt.Text)
 	}
 	// the MCP parameters
 	props := cmdcore.Schema[cmds.SendParams]()["properties"].(map[string]any)

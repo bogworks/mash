@@ -239,7 +239,7 @@ func TestServeEndToEnd(t *testing.T) {
 		}
 	}
 	out, code := w.cli(t, "b", "send", tTo("a"), "hi from the cli")
-	if code != 0 || !strings.Contains(out, "Mail sent.") {
+	if code != 0 || !strings.Contains(out, "Mail sent (number ") {
 		t.Fatalf("cli send: %d %s", code, out)
 	}
 	ev := s.await(t, 5*time.Second, isChannel)
@@ -249,7 +249,7 @@ func TestServeEndToEnd(t *testing.T) {
 	}
 	s.send(t, `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"send","arguments":{"address":"o.dev.b","message":"thanks b"}}}`)
 	r := s.await(t, 5*time.Second, idIs(3))["result"].(map[string]any)
-	if txt := r["content"].([]any)[0].(map[string]any)["text"].(string); txt != "Mail sent." || r["isError"] == true {
+	if txt := r["content"].([]any)[0].(map[string]any)["text"].(string); !isReceipt(txt, "Mail sent") || r["isError"] == true {
 		t.Fatalf("tool send: %v", r)
 	}
 	out, code = w.cli(t, "b", "inbox")
@@ -687,7 +687,7 @@ func requireSentUnderOwnInstance(t *testing.T, w *world, out string, code int, r
 	if !strings.Contains(out, reason) || !strings.Contains(out, "sending under this command's own instance") {
 		t.Fatalf("want a warning naming %q and the fallback: %s", reason, out)
 	}
-	if !strings.Contains(out, "Mail sent.") {
+	if !strings.Contains(out, "Mail sent (number ") {
 		t.Fatalf("want the send reported: %s", out)
 	}
 	rd, rcode := w.cli(t, "b", "read", "1")
@@ -747,7 +747,7 @@ func TestCLISendWithANewTokenAgainstTheOldLease(t *testing.T) {
 // Without a token and without a serve a send works as it always did.
 func TestCLISendWithoutATokenOrServeStillWorks(t *testing.T) {
 	w := newWorld(t, "a", "b")
-	if out, code := w.cli(t, "a", "send", tTo("b"), "plain"); code != 0 || !strings.Contains(out, "Mail sent.") {
+	if out, code := w.cli(t, "a", "send", tTo("b"), "plain"); code != 0 || !strings.Contains(out, "Mail sent (number ") {
 		t.Fatalf("plain send: %d %s", code, out)
 	}
 	if out, code := w.cli(t, "b", "read", "1"); code != 0 || !strings.Contains(out, "plain") {
