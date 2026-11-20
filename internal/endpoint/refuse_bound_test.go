@@ -3,6 +3,8 @@ package endpoint
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -113,6 +115,41 @@ func TestRefusalRechecksLeaseBeforeAck(t *testing.T) {
 	}
 	if ep.refusedSeq(1, *ep.refusedStream.Load()) {
 		t.Fatal("the sequence stayed recorded")
+	}
+	cons, err := ep.js.Consumer(ctx, ep.ident.InboxStream(), store.Consumer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ci, err := cons.Info(ctx); err != nil || ci.AckFloor.Stream != 0 {
+		t.Fatalf("the message was acknowledged: %+v %v", ci, err)
+	}
+}
+
+// A refusal whose sequence cannot be recorded is not acknowledged (it is retried) and not counted.
+func TestRefusalNotAckedWhenSequenceUnrecordable(t *testing.T) {
+	f := newFixture(t, "a", "b")
+	cfg := f.cfgState("a", t.TempDir(), false)
+	dir, err := SpoolDir(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, refusedSeqsFile), 0o700); err != nil { // a directory where the file goes
+		t.Fatal(err)
+	}
+	subj := taddr("a").Subjects().Mail
+	ctx, cancel := context.WithCancel(context.Background())
+	ep, err := Open(ctx, cfg)
+	if err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() { _ = ep.Run(ctx, (&events{}).deliver); close(done) }()
+	defer func() { cancel(); <-done; ep.Close() }()
+	publishRaw(t, f.e.ConnAs(t, f.creds["b"], tkey("b")), subj, "", "absent body")
+	time.Sleep(1500 * time.Millisecond)
+	if n := RefusedCount(cfg); n != 0 {
+		t.Fatalf("count %d, want 0", n)
 	}
 	cons, err := ep.js.Consumer(ctx, ep.ident.InboxStream(), store.Consumer)
 	if err != nil {

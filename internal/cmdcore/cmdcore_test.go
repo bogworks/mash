@@ -225,3 +225,10 @@ func TestUnsupportedFieldPanics(t *testing.T) {
 		F float64 `json:"f"`
 	}]()
 }
+
+// A read of a refused sequence says "message 12 was refused".
+func TestRefusedMessageText(t *testing.T) {
+	if got := cmdcore.RefusedMessage(12).Error(); got != "message 12 was refused: it was not verified" {
+		t.Fatalf("got %q", got)
+	}
+}

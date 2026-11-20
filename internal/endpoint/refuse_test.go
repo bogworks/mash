@@ -367,3 +367,82 @@ func TestRefusalFilesAreTiedToTheStream(t *testing.T) {
 		t.Fatalf("the old stream's count survives: %d, want 4", n)
 	}
 }
+
+// A record is kept for every sequence the stream still holds; only those below its first sequence are pruned.
+func TestRefusedSeqsKeptWhileStreamHoldsThem(t *testing.T) {
+	old := refusedSeqsKeep
+	refusedSeqsKeep = 10
+	t.Cleanup(func() { refusedSeqsKeep = old })
+	cfg := config.Config{Owner: "acme", Group: "demo", Name: "bob", StateDir: t.TempDir()}
+	e := &Endpoint{cfg: cfg}
+	id := "inbox@now"
+	e.refusedStream.Store(&id)
+	first := uint64(1)
+	e.firstSeqFn = func(context.Context) (uint64, error) { return first, nil }
+	const n = 3 * 10
+	for i := uint64(1); i <= n; i++ {
+		if _, err := e.recordRefusal(i); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := RefusedCount(cfg); got != n {
+		t.Fatalf("count %d", got)
+	}
+	for i := uint64(1); i <= n; i++ {
+		if !e.refusedSeq(i, id) {
+			t.Fatalf("sequence %d no longer reads as refused", i)
+		}
+	}
+	first = 25 // the stream dropped everything below 25
+	for i := uint64(n + 1); i <= n+2; i++ {
+		if _, err := e.recordRefusal(i); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := uint64(1); i <= n+2; i++ {
+		if want := i >= 25; e.refusedSeq(i, id) != want {
+			t.Fatalf("sequence %d refused=%v, want %v", i, !want, want)
+		}
+	}
+}
+
+// Recording is idempotent by sequence: a redelivery after a lost ack does not count twice.
+func TestRecordRefusalIdempotent(t *testing.T) {
+	cfg := config.Config{Owner: "acme", Group: "demo", Name: "bob", StateDir: t.TempDir()}
+	e := &Endpoint{cfg: cfg}
+	id := "inbox@now"
+	e.refusedStream.Store(&id)
+	for i := 0; i < 3; i++ {
+		if n, err := e.recordRefusal(7); err != nil || n != 1 {
+			t.Fatalf("record %d: %d %v", i, n, err)
+		}
+	}
+	if n, _ := e.recordRefusal(8); n != 2 {
+		t.Fatalf("count %d", n)
+	}
+}
+
+// A sequence that cannot be recorded is an error, and nothing is counted.
+func TestRecordRefusalFailsWhenSequenceUnwritable(t *testing.T) {
+	cfg := config.Config{Owner: "acme", Group: "demo", Name: "bob", StateDir: t.TempDir()}
+	e := &Endpoint{cfg: cfg}
+	id := "inbox@now"
+	e.refusedStream.Store(&id)
+	if _, err := e.recordRefusal(1); err != nil {
+		t.Fatal(err)
+	}
+	dir, _ := SpoolDir(cfg)
+	p := filepath.Join(dir, refusedSeqsFile)
+	if err := os.Remove(p); err != nil { // a directory in its place: neither append nor replace can work
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(p, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.recordRefusal(2); err == nil {
+		t.Fatal("recorded with an unwritable sequence file")
+	}
+	if got := RefusedCount(cfg); got != 1 {
+		t.Fatalf("count %d, want 1", got)
+	}
+}

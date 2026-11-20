@@ -393,16 +393,19 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 			// Dropped and counted, never delivered: acked so it is not redelivered for ever. The sender is told nothing.
 			// Without the lease the new holder gets it (and counts it), so it is nak'd, not counted.
 			if e.mayAck(pending{}) {
-				recorded := e.refuse(ref.Seq, claimedAddress(h, from), trust)
+				recorded, added := e.refuse(ref.Seq, claimedAddress(h, from), trust)
 				if e.refusedHook != nil {
 					e.refusedHook()
 				}
 				// Recording can take seconds: the lease is checked again right before the ack, and on a loss the
 				// count is taken back (the holder that acknowledges the message counts it) and the message nak'd.
-				if e.mayAck(pending{}) {
+				if !recorded {
+					// Not recorded: acking would let the message read as mail later. Retried.
+					_ = m.NakWithDelay(time.Second)
+				} else if e.mayAck(pending{}) {
 					_ = m.Ack()
 				} else {
-					if recorded { // only what was recorded is taken back
+					if added { // only what this call recorded is taken back
 						e.unrecordRefusal(ref.Seq)
 					}
 					_ = m.Nak()
