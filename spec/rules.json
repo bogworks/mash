@@ -65,8 +65,12 @@
    "detail": "Prints {\"error\": ..., \"hint\": ...} on stdout and nothing on stderr, with the same exit code."
   },
   {
-   "rule": "Every changing command takes --dry-run",
-   "detail": "It prints the usual line with 'Would' in front and changes nothing."
+   "rule": "Every command that changes the mesh or this machine's setup takes --dry-run",
+   "detail": "It prints the usual line with 'Would' in front and changes nothing. That is mashctl's changing commands and mash join. Sending a message is not such a change and has no --dry-run."
+  },
+  {
+   "rule": "help is also a command",
+   "detail": "'mash help' and 'mash help send' print exactly what 'mash --help' and 'mash send --help' print, as git, kubectl and gh do. The same for mashctl."
   },
   {
    "rule": "Every setting three ways",
