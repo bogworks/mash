@@ -439,9 +439,6 @@ func MarkRevoked(ctx context.Context, a *madmin.Admin, user string, at time.Time
 	fmt.Fprintf(stderr, "warning: user key %s... is revoked, but the issue record was not updated with it: %v\n", ShortKey(user), err)
 }
 
-// RevokeNow is the clock a revocation takes its time from; a test replaces it.
-var RevokeNow = time.Now
-
 // RevokeTarget is a user key about to be revoked and the name to show for it in messages ("" shows the short key).
 type RevokeTarget struct {
 	Name, Key string
