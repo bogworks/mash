@@ -3,6 +3,7 @@ package cmdcore
 import (
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 )
 
@@ -19,6 +20,8 @@ type field struct {
 	enum     []string
 	required bool // required in the MCP schema
 	repeat   bool
+	value    string // CLI value placeholder in help, "number"
+	min      *int   // smallest accepted whole number
 	typ      reflect.Type
 }
 
@@ -77,12 +80,23 @@ func paramFields(t reflect.Type) []field {
 			}
 			f.repeat = true
 		}
+		f.value = sf.Tag.Get("value")
+		if f.value != "" && f.flag == "" {
+			bad("has a value tag without a flag tag")
+		}
 		typ, ok := schemaType(sf.Type)
 		if !ok {
 			bad("has unsupported type %s", sf.Type)
 		}
 		if f.repeat && typ != "array" {
 			bad("has a repeat tag but is not a []string")
+		}
+		if v := sf.Tag.Get("min"); v != "" {
+			n, err := strconv.Atoi(v)
+			if err != nil || typ != "integer" {
+				bad("has min:%q: want a whole number on an integer field", v)
+			}
+			f.min = &n
 		}
 		if len(f.enum) > 0 && typ != "string" {
 			bad("has an enum tag but is not a string")

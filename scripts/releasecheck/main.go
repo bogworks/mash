@@ -7,7 +7,7 @@
 //	release-check publish [--wait <d>] [--not-latest] <version> <X>     the whole path, resumable: gate, signed tag, draft, --assets gate, publish, verify
 //
 // It verifies the candidate is on main of the release repository; CI's check runs on X succeeded; X builds, from
-// fresh clones in different directories, to identical bytes whose `version` line is exactly "mash <version> (commit X)".
+// fresh clones in different directories, to identical bytes whose `version` line is exactly "mash v<version> (<first 7 characters of X>)".
 // With --assets it verifies the remote tag v<version> is annotated, signed by a key this machine trusts and points at
 // X, and that the draft release carries exactly the eight binaries (mash and mashctl) and SHA256SUMS, each equal to our own build of X.
 // It then signs SHA256SUMS (ssh-keygen -Y sign, namespace mash-release) after checking every line against those builds, verifies
@@ -475,7 +475,7 @@ func buildFresh(ctx context.Context, o Options, x, program, goos, goarch, keep s
 }
 
 // reproducible builds x twice for the host in two different fresh clones: the hashes must match, and the binary's
-// `version` must print exactly "mash <version> (commit x)".
+// `version` must print exactly "mash v<version> (<first 7 characters of x>)".
 func reproducible(ctx context.Context, o Options, x string) error {
 	// A name nobody can predict, created exclusively (0600): a planted symlink at a guessable path would otherwise be
 	// written through, and the file could be swapped between the write and the run.
@@ -520,7 +520,7 @@ func reproducible(ctx context.Context, o Options, x string) error {
 			return op(fmt.Errorf("starting the built binary: %w", err)) // could not run it: says nothing about it
 		}
 	}
-	if want := fmt.Sprintf("mash %s (commit %s)\n", o.Version, x); string(got) != want {
+	if want := fmt.Sprintf("mash v%s (%s)\n", o.Version, shortCommit(x)); string(got) != want {
 		return fmt.Errorf("the binary prints %q, want exactly %q", got, want)
 	}
 	return nil
@@ -1505,4 +1505,12 @@ func materializePlugin(repo, rev, dir string) (string, error) {
 		return "", op(err)
 	}
 	return root, nil
+}
+
+// shortCommit is the commit as `mash version` prints it: its first 7 characters.
+func shortCommit(c string) string {
+	if len(c) > 7 {
+		return c[:7]
+	}
+	return c
 }

@@ -152,6 +152,17 @@ func TestMCPDecode(t *testing.T) {
 	}
 }
 
+// Unknown keys are reported before missing ones, with the valid names as the hint.
+func TestMCPUnknownBeforeRequired(t *testing.T) {
+	c := cmdcore.Command[demoParams, demoResult]{Name: "demo", Run: func(context.Context, *cmdcore.Env, demoParams) (demoResult, error) {
+		return demoResult{}, nil
+	}}
+	_, _, err := cmdcore.MCPTool(c, env).CallStructured(context.Background(), json.RawMessage(`{"to":"x","text":"y"}`))
+	if err == nil || !strings.HasPrefix(err.Error(), "error: unknown argument text\nhint: the arguments are name, ") {
+		t.Fatalf("%v", err)
+	}
+}
+
 func TestErrors(t *testing.T) {
 	for _, tc := range []struct {
 		err        *cliframe.Error

@@ -23,11 +23,11 @@ func inboxCount(t *testing.T, w *world, as string) int {
 func TestCLISendIDRerunLandsOnce(t *testing.T) {
 	w := newWorld(t, "a", "b")
 	out, code := w.cli(t, "b", "send", tTo("a"), "--id", "job-7", "ship it")
-	if code != 0 || !strings.Contains(out, "sent #1 from o.dev.b to o.dev.a") || strings.Contains(out, "duplicate") {
+	if code != 0 || out != "Mail sent.\n" {
 		t.Fatalf("first send: %d %q", code, out)
 	}
 	out, code = w.cli(t, "b", "send", tTo("a"), "--id=job-7", "ship it")
-	if code != 0 || !strings.Contains(out, "#1") || !strings.Contains(out, "duplicate") {
+	if code != 0 || out != "Mail already sent; nothing new stored.\n" {
 		t.Fatalf("second send: %d %q, want success naming #1 as a duplicate", code, out)
 	}
 	if n := inboxCount(t, w, "a"); n != 1 {
@@ -38,7 +38,7 @@ func TestCLISendIDRerunLandsOnce(t *testing.T) {
 		t.Fatalf("send job-8: %d %q", code, out)
 	}
 	out, code = w.cli(t, "b", "send", tTo("a"), "ship it")
-	if code != 0 || out != "sent #3 from o.dev.b to o.dev.a\n" {
+	if code != 0 || out != "Mail sent.\n" {
 		t.Fatalf("plain send: %d %q", code, out)
 	}
 }
@@ -78,7 +78,7 @@ func TestServeSendToolID(t *testing.T) {
 		}
 	}
 	id, ok := props["id"].(map[string]any)
-	if !ok || id["type"] != "string" || !strings.Contains(id["description"].(string), "once") {
+	if !ok || id["type"] != "string" || !strings.Contains(id["description"].(string), "same key") {
 		t.Fatalf("send tool schema has no documented id: %v", props)
 	}
 	call := func(n float64, args string) (string, bool) {
@@ -86,15 +86,15 @@ func TestServeSendToolID(t *testing.T) {
 		r := s.await(t, 5*time.Second, idIs(n))["result"].(map[string]any)
 		return r["content"].([]any)[0].(map[string]any)["text"].(string), r["isError"] == true
 	}
-	first, bad := call(10, `{"to":"o.dev.b","text":"hi","id":"mcp-1"}`)
-	if bad || !strings.HasPrefix(first, "sent #1 to o.dev.b") {
+	first, bad := call(10, `{"address":"o.dev.b","message":"hi","id":"mcp-1"}`)
+	if bad || first != "Mail sent." {
 		t.Fatalf("first: %q %v", first, bad)
 	}
-	second, bad := call(11, `{"to":"o.dev.b","text":"hi","id":"mcp-1"}`)
-	if bad || !strings.Contains(second, "#1") || !strings.Contains(second, "duplicate") {
+	second, bad := call(11, `{"address":"o.dev.b","message":"hi","id":"mcp-1"}`)
+	if bad || second != "Mail already sent; nothing new stored." {
 		t.Fatalf("second: %q %v", second, bad)
 	}
-	if bad, isErr := call(12, `{"to":"o.dev.b","text":"hi","id":"has space"}`); !isErr || !strings.Contains(bad, "id") {
+	if bad, isErr := call(12, `{"address":"o.dev.b","message":"hi","id":"has space"}`); !isErr || !strings.Contains(bad, "id") {
 		t.Fatalf("bad id: %q %v", bad, isErr)
 	}
 	if n := inboxCount(t, w, "b"); n != 1 {

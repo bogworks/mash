@@ -32,15 +32,17 @@ func (e *SignInError) Is(target error) bool { return target == ErrNotSignedIn }
 
 // SendOptions are the optional parts of a send.
 type SendOptions struct {
-	ReplyTo, Relay int
+	ReplyTo, Relay int // message numbers, 1 or more; 0 is none
 	Urgent         bool
 	Kind, ID       string
 }
 
-// SendReceipt is what the service stored.
+// SendReceipt is what the service stored. To and Kind are set when the service changed what was asked: the address in
+// its canonical dotted form, and the kind a short reply was tagged with.
 type SendReceipt struct {
 	Number    int
 	Duplicate bool
+	To, Kind  string
 }
 
 // Sender is the service Send needs from Env.Svc.
@@ -52,12 +54,12 @@ type Sender interface {
 type SendParams struct {
 	Address string `json:"address" arg:"address" required:"true" desc:"Who to send to, as owner.group.name."`
 	Message string `json:"message" arg:"message,optional" required:"true" desc:"The text. Leave it out to read the text from --file or from standard input." mcpdesc:"The text."`
-	Kind    string `json:"kind,omitempty" flag:"--kind" enum:"blocker,question,task,result,fyi" desc:"What sort of message this is. blocker, question and task wake an idle recipient; result and fyi wait for its next turn. Default: task."`
+	Kind    string `json:"kind,omitempty" flag:"--kind" value:"kind" enum:"blocker,question,task,result,fyi" desc:"What sort of message this is. blocker, question and task wake an idle recipient; result and fyi wait for its next turn. Default: task."`
 	Urgent  bool   `json:"urgent,omitempty" flag:"--urgent" desc:"Deliver at once, into a running turn where the agent host allows it."`
-	ReplyTo *int   `json:"reply_to,omitempty" flag:"--reply-to" desc:"The number of the message in your inbox that this answers. Signed, so the recipient can trust the link."`
-	Relay   *int   `json:"relay,omitempty" flag:"--relay" desc:"The number of a message in your inbox that this passes on. Signed. (Today the MCP tool calls this 'via'.)"`
-	ID      string `json:"id,omitempty" flag:"--id" desc:"A key of your own. A second send with the same key to the same address within two minutes stores nothing new, so a retry cannot deliver twice."`
-	File    string `json:"-" flag:"--file" desc:"Read the message text from a file. Use - for standard input."`
+	ReplyTo *int   `json:"reply_to,omitempty" flag:"--reply-to" value:"number" min:"1" desc:"The number of the message in your inbox that this answers. Signed, so the recipient can trust the link."`
+	Relay   *int   `json:"relay,omitempty" flag:"--relay" value:"number" min:"1" desc:"The number of a message in your inbox that this passes on. Signed. (Today the MCP tool calls this 'via'.)"`
+	ID      string `json:"id,omitempty" flag:"--id" value:"key" desc:"A key of your own. A second send with the same key to the same address within two minutes stores nothing new, so a retry cannot deliver twice."`
+	File    string `json:"-" flag:"--file" value:"path" desc:"Read the message text from a file. Use - for standard input."`
 }
 
 // SendResult is the receipt of a send.
@@ -97,9 +99,16 @@ func (r SendResult) Text(o cmdcore.Opts) string {
 
 // Send is the send command.
 var Send = cmdcore.Command[SendParams, SendResult]{
-	Name:    "send",
-	Summary: "Send a message to an endpoint.",
-	Run:     runSend,
+	Name:        "send",
+	Summary:     "Send a message to an endpoint.",
+	Description: "Send a message to an endpoint.",
+	Examples: []string{
+		`mash send acme.demo.alice "lunch at noon?"`,
+		`mash send acme.demo.alice --urgent --kind question "ready?"`,
+		`mash send acme.demo.alice --reply-to 2 "yes"`,
+		`git log -1 | mash send acme.demo.alice --kind fyi --file -`,
+	},
+	Run: runSend,
 }
 
 func usageNeedsText() error {
@@ -107,9 +116,12 @@ func usageNeedsText() error {
 }
 
 func runSend(ctx context.Context, env *cmdcore.Env, p SendParams) (SendResult, error) {
+	if env == nil {
+		return SendResult{}, cliframe.Failf("internal: mash send has no environment to run in")
+	}
 	svc, ok := env.Svc.(Sender)
-	if !ok {
-		return SendResult{}, cliframe.Failf("mash send has no service to send with")
+	if !ok || svc == nil {
+		return SendResult{}, cliframe.Failf("internal: mash send has no service to send with")
 	}
 	text, err := messageText(env, p)
 	if err != nil {
@@ -141,15 +153,33 @@ func runSend(ctx context.Context, env *cmdcore.Env, p SendParams) (SendResult, e
 		}
 		return SendResult{}, err
 	}
-	return SendResult{To: p.Address, Number: rc.Number, Kind: kind, Urgent: p.Urgent, Duplicate: rc.Duplicate}, nil
+	to := p.Address
+	if rc.To != "" {
+		to = rc.To
+	}
+	if rc.Kind != "" {
+		kind = rc.Kind
+	}
+	return SendResult{To: to, Number: rc.Number, Kind: kind, Urgent: p.Urgent, Duplicate: rc.Duplicate}, nil
 }
 
 // messageText picks the text: the argument, or --file, or standard input when it is piped.
 func messageText(env *cmdcore.Env, p SendParams) (string, error) {
+	if p.Message == "-" && env.Stdin != nil { // a bare "-" is standard input, as it is for --file
+		p.Message = ""
+		if p.File == "" {
+			p.File = "-"
+		} else {
+			p.Message = "-" // both given: refused below
+		}
+	}
 	switch {
 	case p.Message != "" && p.File != "":
 		return "", cliframe.Usagef("mash send takes the message text or --file, not both").WithHint("mash send --help")
 	case p.Message != "":
+		if strings.TrimSpace(p.Message) == "" {
+			return "", usageNeedsText()
+		}
 		return p.Message, nil
 	case p.File == "" && !(env.Stdin != nil && env.StdinPiped):
 		return "", usageNeedsText()
@@ -170,7 +200,10 @@ func messageText(env *cmdcore.Env, p SendParams) (string, error) {
 	if err != nil {
 		return "", cliframe.Failf("cannot read the message: %v", err)
 	}
-	text := strings.TrimSuffix(string(b), "\n")
+	text := string(b)
+	if t, ok := strings.CutSuffix(text, "\n"); ok { // one trailing newline goes, as $(...) drops it; CRLF is one newline
+		text = strings.TrimSuffix(t, "\r")
+	}
 	if strings.TrimSpace(text) == "" {
 		return "", usageNeedsText()
 	}

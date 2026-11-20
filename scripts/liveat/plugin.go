@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -170,16 +171,38 @@ func init() { callSeq.Store(100) }
 
 // Call sends tools/call and waits for its reply: the text of the first content item and whether the call is an error.
 func (p *Proc) Call(tool string, args map[string]any, d time.Duration) (string, bool, error) {
+	text, isErr, _, err := p.CallStructured(tool, args, d)
+	return text, isErr, err
+}
+
+// CallStructured is Call that also returns the reply's structuredContent (nil when it has none).
+func (p *Proc) CallStructured(tool string, args map[string]any, d time.Duration) (string, bool, json.RawMessage, error) {
 	id := int(callSeq.Add(1))
 	b, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": map[string]any{"name": tool, "arguments": args}})
 	if err := p.Send(string(b)); err != nil {
-		return "", false, err
+		return "", false, nil, err
 	}
 	if !p.WaitFor(d, func(o, _ string) bool { _, _, ok := toolReply(o, id); return ok }) {
-		return "", false, fmt.Errorf("no reply to tools/call %s", tool)
+		return "", false, nil, fmt.Errorf("no reply to tools/call %s", tool)
 	}
 	text, isErr, _ := toolReply(p.Stdout(), id)
-	return text, isErr, nil
+	return text, isErr, toolStructured(p.Stdout(), id), nil
+}
+
+// toolStructured is the structuredContent of the reply with the id in an MCP stdout stream, nil when there is none.
+func toolStructured(stdout string, id int) json.RawMessage {
+	for _, l := range strings.Split(stdout, "\n") {
+		var m struct {
+			ID     *float64 `json:"id"`
+			Result *struct {
+				Structured json.RawMessage `json:"structuredContent"`
+			} `json:"result"`
+		}
+		if json.Unmarshal([]byte(strings.TrimSpace(l)), &m) == nil && m.ID != nil && int(*m.ID) == id && m.Result != nil {
+			return m.Result.Structured
+		}
+	}
+	return nil
 }
 
 // toolReply finds the reply with the id in an MCP stdout stream (one JSON document per line).
@@ -261,13 +284,16 @@ func (a *AT) runHook(pl pluginLaunch, label string, h Home, s *plugSession, even
 func (a *AT) pluginMail(pl pluginLaunch, name string, h Home, from, to *plugSession, event, text string) {
 	toAddr := "alice.dev." + to.Name
 	fromAddr := "alice.dev." + from.Name
-	out, isErr, err := from.P.Call("send", map[string]any{"to": toAddr, "text": text}, 20*time.Second)
-	a.C.Check("mail "+name+": the "+from.Name+" session's MCP send tool succeeds", err == nil && !isErr && strings.HasPrefix(out, "sent #"), redact(out)+errSuffix(err))
-	m := sentRE.FindStringSubmatch(out)
-	if m == nil {
-		a.C.Check("mail "+name+": the send receipt names the message number", false, "no '#N' in the receipt")
+	out, isErr, structured, err := from.P.CallStructured("send", map[string]any{"address": toAddr, "message": text}, 20*time.Second)
+	a.C.Check("mail "+name+": the "+from.Name+" session's MCP send tool succeeds", err == nil && !isErr && out == "Mail sent.", redact(out)+errSuffix(err))
+	var receipt struct {
+		Number int `json:"number"`
+	}
+	if json.Unmarshal(structured, &receipt) != nil || receipt.Number < 1 {
+		a.C.Check("mail "+name+": the send receipt names the message number", false, "no number in the receipt's structured content")
 		return
 	}
+	m := []string{"", strconv.Itoa(receipt.Number)}
 	deadline := time.Now().Add(20 * time.Second)
 	var ctx string
 	var herr error

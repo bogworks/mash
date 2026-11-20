@@ -66,7 +66,7 @@ func TestGlobalFlagErrorIsUsageExit2(t *testing.T) {
 // --verbose, --json and --no-color are accepted anywhere and stripped, so a verb that takes no arguments is not refused.
 func TestGlobalVerboseAndNoColorAreStripped(t *testing.T) {
 	env := map[string]string{"HOME": t.TempDir()}
-	for _, args := range [][]string{{"--verbose", "status"}, {"status", "-v", "--no-color"}, {"status", "--json"}} {
+	for _, args := range [][]string{{"--verbose", "status"}, {"status", "-v", "--no-color"}} {
 		if out, errb, code := statusOut(t, env, args...); code != 0 || !strings.Contains(out, "name: MISSING") {
 			t.Errorf("%v: %d %s %s", args, code, out, errb)
 		}

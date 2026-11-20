@@ -476,12 +476,13 @@ func (s *At5) waitOnline(h Host, env []string, ids ...string) bool {
 	}
 }
 
-var sent5RE = regexp.MustCompile(`sent #(\d+)`)
+// sent5RE finds the message number in `mash send --json`'s receipt.
+var sent5RE = regexp.MustCompile(`"number":(\d+)`)
 
 // mail sends from one endpoint to another with the CLI and reads it back with the recipient's own credentials: it must
 // arrive with the text and be labelled verified.
 func (s *At5) mail(name string, fromH Host, from []string, toH Host, to []string, toAddr, text string) {
-	r := s.mash(fromH, "send-"+name, from, "send", toAddr, text)
+	r := s.mash(fromH, "send-"+name, from, "send", toAddr, text, "--json")
 	s.check("mail "+name+": mash send succeeds", r.Code == 0, exitSnip(r))
 	m := sent5RE.FindStringSubmatch(r.Stdout)
 	if m == nil {

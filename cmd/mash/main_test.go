@@ -238,8 +238,8 @@ func TestServeEndToEnd(t *testing.T) {
 			t.Fatalf("missing tool %s in %v", n, names)
 		}
 	}
-	out, code := w.cli(t, "b", "send", tTo("a"), "hi", "from", "the", "cli")
-	if code != 0 || !strings.Contains(out, "sent #1 from o.dev.b to o.dev.a") {
+	out, code := w.cli(t, "b", "send", tTo("a"), "hi from the cli")
+	if code != 0 || !strings.Contains(out, "Mail sent.") {
 		t.Fatalf("cli send: %d %s", code, out)
 	}
 	ev := s.await(t, 5*time.Second, isChannel)
@@ -247,9 +247,9 @@ func TestServeEndToEnd(t *testing.T) {
 	if !strings.Contains(content, "from o.dev.b [verified]") || !strings.Contains(content, "hi from the cli") {
 		t.Fatalf("channel event: %s", content)
 	}
-	s.send(t, `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"send","arguments":{"to":"o.dev.b","text":"thanks b"}}}`)
+	s.send(t, `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"send","arguments":{"address":"o.dev.b","message":"thanks b"}}}`)
 	r := s.await(t, 5*time.Second, idIs(3))["result"].(map[string]any)
-	if txt := r["content"].([]any)[0].(map[string]any)["text"].(string); !strings.HasPrefix(txt, "sent #") || r["isError"] == true {
+	if txt := r["content"].([]any)[0].(map[string]any)["text"].(string); txt != "Mail sent." || r["isError"] == true {
 		t.Fatalf("tool send: %v", r)
 	}
 	out, code = w.cli(t, "b", "inbox")
@@ -559,7 +559,7 @@ func TestBuiltBinaryPrintsTheReleaseVersion(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	out, err := exec.Command(bin, "version").Output()
-	if err != nil || strings.TrimSpace(string(out)) != "mash 7.8.9 (commit abc1234)" {
+	if err != nil || strings.TrimSpace(string(out)) != "mash v7.8.9 (abc1234)" {
 		t.Fatalf("%q %v", out, err)
 	}
 	// An unstamped build says dev, never a number that is not the source's.
@@ -567,7 +567,7 @@ func TestBuiltBinaryPrintsTheReleaseVersion(t *testing.T) {
 	if out, err := exec.Command("go", "build", "-o", plain, ".").CombinedOutput(); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	if out, _ := exec.Command(plain, "version").Output(); !strings.HasPrefix(string(out), "mash 0.0.0-dev (commit ") {
+	if out, _ := exec.Command(plain, "version").Output(); !strings.HasPrefix(string(out), "mash v0.0.0-dev (") {
 		t.Fatalf("%q", out)
 	}
 }
@@ -581,7 +581,7 @@ func TestVersionCommandSetsTheServiceVersion(t *testing.T) {
 		t.Fatal(out.String())
 	}
 	line := out.String()
-	if !strings.HasPrefix(line, "mash "+endpoint.CurrentVersion()+" (commit ") {
+	if !strings.HasPrefix(line, "mash v"+endpoint.CurrentVersion()+" (") {
 		t.Fatalf("printed %q but the service version is %q", line, endpoint.CurrentVersion())
 	}
 }
@@ -599,7 +599,7 @@ func TestVersionIsResolvedBeforeDispatch(t *testing.T) {
 	if code := run([]string{"version"}, envFrom(nil), strings.NewReader(""), &out, &out); code != 0 {
 		t.Fatal(out.String())
 	}
-	if !strings.HasPrefix(out.String(), "mash 1.2.3 (commit ") || endpoint.CurrentVersion() != "1.2.3" {
+	if !strings.HasPrefix(out.String(), "mash v1.2.3 (") || endpoint.CurrentVersion() != "1.2.3" {
 		t.Fatalf("printed %q, service version %q", out.String(), endpoint.CurrentVersion())
 	}
 	// And the MCP server (an inert session answers initialize) announces the same version.
@@ -635,7 +635,7 @@ func TestCLISendAdoptsTheLaunchInstance(t *testing.T) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	if out, code := w.cli(t, "a", "send", tTo("b"), "from", "the", "shell"); code != 0 {
+	if out, code := w.cli(t, "a", "send", tTo("b"), "from the shell"); code != 0 {
 		t.Fatalf("cli send: %d %s", code, out)
 	}
 	out, code := w.cli(t, "b", "read", "1")
@@ -687,7 +687,7 @@ func requireSentUnderOwnInstance(t *testing.T, w *world, out string, code int, r
 	if !strings.Contains(out, reason) || !strings.Contains(out, "sending under this command's own instance") {
 		t.Fatalf("want a warning naming %q and the fallback: %s", reason, out)
 	}
-	if !strings.Contains(out, "sent #1 from o.dev.a to o.dev.b") {
+	if !strings.Contains(out, "Mail sent.") {
 		t.Fatalf("want the send reported: %s", out)
 	}
 	rd, rcode := w.cli(t, "b", "read", "1")
@@ -710,7 +710,7 @@ func TestCLISendWithAnotherLaunchTokenFallsBackToItsOwnInstance(t *testing.T) {
 	s.tools(t)
 	lease := waitLeaseInstance(t, w)
 	otherLaunchShell(w, "tok-2")
-	out, code := w.cli(t, "a-other", "send", tTo("b"), "mismatch", "body")
+	out, code := w.cli(t, "a-other", "send", tTo("b"), "mismatch body")
 	requireSentUnderOwnInstance(t, w, out, code, "does not match the launch holding", lease)
 }
 
@@ -718,7 +718,7 @@ func TestCLISendWithAnotherLaunchTokenFallsBackToItsOwnInstance(t *testing.T) {
 func TestCLISendWithATokenAndNoServeFallsBackToItsOwnInstance(t *testing.T) {
 	w := newWorld(t, "a", "b")
 	w.env["a"]["MASH_LAUNCH_TOKEN"] = "tok-1"
-	out, code := w.cli(t, "a", "send", tTo("b"), "no", "serve")
+	out, code := w.cli(t, "a", "send", tTo("b"), "no serve")
 	requireSentUnderOwnInstance(t, w, out, code, "lease can't be read", "")
 }
 
@@ -726,7 +726,7 @@ func TestCLISendWithATokenAndNoServeFallsBackToItsOwnInstance(t *testing.T) {
 func TestCLISendWithANewTokenBeforeTheNewServeTakesTheLease(t *testing.T) {
 	w := newWorld(t, "a", "b")
 	w.env["a"]["MASH_LAUNCH_TOKEN"] = "tok-2"
-	out, code := w.cli(t, "a", "send", tTo("b"), "before", "the", "lease")
+	out, code := w.cli(t, "a", "send", tTo("b"), "before the lease")
 	requireSentUnderOwnInstance(t, w, out, code, "lease can't be read", "")
 }
 
@@ -740,14 +740,14 @@ func TestCLISendWithANewTokenAgainstTheOldLease(t *testing.T) {
 	s.tools(t)
 	lease := waitLeaseInstance(t, w)
 	otherLaunchShell(w, "tok-2")
-	out, code := w.cli(t, "a-other", "send", tTo("b"), "after", "the", "kill")
+	out, code := w.cli(t, "a-other", "send", tTo("b"), "after the kill")
 	requireSentUnderOwnInstance(t, w, out, code, "does not match the launch holding", lease)
 }
 
 // Without a token and without a serve a send works as it always did.
 func TestCLISendWithoutATokenOrServeStillWorks(t *testing.T) {
 	w := newWorld(t, "a", "b")
-	if out, code := w.cli(t, "a", "send", tTo("b"), "plain"); code != 0 || !strings.Contains(out, "sent #1 from o.dev.a to o.dev.b") {
+	if out, code := w.cli(t, "a", "send", tTo("b"), "plain"); code != 0 || !strings.Contains(out, "Mail sent.") {
 		t.Fatalf("plain send: %d %s", code, out)
 	}
 	if out, code := w.cli(t, "b", "read", "1"); code != 0 || !strings.Contains(out, "plain") {

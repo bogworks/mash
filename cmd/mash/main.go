@@ -15,6 +15,7 @@ import (
 	"syscall"
 
 	"github.com/bogworks/mash/internal/cliframe"
+	"github.com/bogworks/mash/internal/cmdcore"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/endpoint"
 	"github.com/bogworks/mash/internal/host"
@@ -24,12 +25,11 @@ const usage = `mash: a messaging mesh for agents (SAP 0.3 + mail, on NATS JetStr
 
   mash serve                                   the Claude Code channel server (started by the plugin)
   mash hook                                    the plugin's hook: shows the session its spooled mail
-  mash send <to> [--urgent] [--kind K] [--id KEY] [text... | --file F | -]   mail an endpoint (<to> is owner.group.instance or its flat key
-                                               owner_group_instance; as MASH_ENDPOINT); --urgent
-                                               wakes it at once; K is blocker|question|task (wake an idle recipient)
-                                               or result|fyi (opt-in; wait for its next turn); default task;
-                                               --id KEY makes the send at-most-once: re-running it with the same KEY
-                                               within 2 minutes stores nothing new (a timed-out send prints its key); after 2 minutes it is a new message
+  mash send <address> [<message>] [--kind K] [--urgent] [--reply-to N] [--relay N] [--id KEY] [--file F]   mail an endpoint
+                                               (<address> is owner.group.name; the text comes from the arguments, --file F or
+                                               standard input); K is blocker|question|task (wake an idle recipient) or
+                                               result|fyi (wait for its next turn); default task; --urgent wakes it at once;
+                                               --id KEY makes the send at-most-once for 2 minutes (see mash send --help)
   mash read <seq>                              print one message from your inbox
   mash inbox [--limit N] [--after SEQ]         recent messages, or the N after SEQ (oldest first)
   mash who [--long] [--json] [--names] [--match TEXT] [--name SUB] [--owner O] [--role SUB] [--label K[=V]]... [--online|--offline]
@@ -44,7 +44,7 @@ const usage = `mash: a messaging mesh for agents (SAP 0.3 + mail, on NATS JetStr
   mash credential create --seed FILE --jwt FILE [--out CREDS] [--force] [--json] [--dry-run]
                                                join a seed and its user JWT into a credentials file; needs no config
   mash plugin export <dir>                     write this build's Claude Code plugin and a marketplace for it into <dir>
-  mash version
+  mash version                                 print the version and commit
 
 An endpoint is addressed owner.group.name: MASH_ENDPOINT (or config.json "endpoint", or --endpoint). With none set, the one
 endpoint whose creds file (owner.group.name.creds, mode 0600) is in the config directory is used; with several, name one.
@@ -132,19 +132,18 @@ func buildRevision(ldflags string, bi *debug.BuildInfo) string {
 	return rev
 }
 
-// sendUsage is `mash send`'s usage line.
-const sendUsage = "usage: mash send <to> [--urgent] [--kind blocker|question|task|result|fyi] [--id KEY] [text... | --file F | -]"
-
-// verbUsage is the usage line of each endpoint verb, printed for `mash VERB --help`.
+// verbUsage is the usage line of each endpoint verb that is not on the command table, printed for `mash VERB --help`.
 var verbUsage = map[string]string{
-	"status":  "usage: mash status",
-	"version": "usage: mash version",
-	"send":    sendUsage,
-	"read":    "usage: mash read <seq>",
-	"inbox":   "usage: mash inbox [--limit N] [--after SEQ]",
-	"who":     whoUsage,
-	"prompt":  "usage: mash prompt <to> <text...>",
+	"status": "usage: mash status",
+	"read":   "usage: mash read <seq>",
+	"inbox":  "usage: mash inbox [--limit N] [--after SEQ]",
+	"who":    whoUsage,
+	"prompt": "usage: mash prompt <to> <text...>",
 }
+
+// noJSONForm is the verbs that have no --json form: a --json given to one is a usage error. who, key and credential
+// parse --json themselves, and send and version are commands of the table; admin is deprecated and left as it was.
+var noJSONForm = map[string]bool{"status": true, "read": true, "inbox": true, "prompt": true, "serve": true, "hook": true, "plugin": true}
 
 // runLookup is main with its environment injected. lookup must agree with env; it is what config.Load reads.
 func runLookup(ctx context.Context, args []string, env func(string) string, lookup config.Lookup, stdin io.Reader, stdout, stderr io.Writer) int {
@@ -174,24 +173,33 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 		return 2
 	}
 	env, lookup = global.Shadow(cliframe.Spec{Tool: "mash", CredsEnv: "MASH_CREDS", CredsKey: "creds"}, env, lookup)
+	if u, ok := newCommands(nil).HelpFor(args[0], args[1:]); ok { // the generated help of the commands on the table
+		fmt.Fprint(stdout, u)
+		return 0
+	}
 	if u, ok := helpUsage(args); ok { // before any dispatch, config load or write: help changes nothing
 		fmt.Fprint(stdout, u)
 		return 0
+	}
+	if global.JSON && noJSONForm[args[0]] { // nothing is attempted
+		// With --json every error is {"error","hint"} on stdout and nothing on stderr (rules.json).
+		return cliframe.Report(stdout, stderr, cliframe.Usagef("mash %s has no --json form", args[0]).WithHint("mash "+args[0]+" --help"), true)
 	}
 	if u, ok := verbUsage[args[0]]; ok && len(args) > 1 {
 		if args[1] == "--help" || args[1] == "-h" { // the verb's usage line, and the verb does not run
 			fmt.Fprintln(stdout, u)
 			return 0
 		}
-		if args[0] == "status" || args[0] == "version" { // these take no arguments: refuse rather than ignore
+		if args[0] == "status" { // this takes no arguments: refuse rather than ignore
 			fmt.Fprintf(stderr, "mash %s: unexpected %s\n%s\n", args[0], config.RejectedArg(args[1]), u)
 			return 2
 		}
 	}
-	if args[0] == "version" {
-		bi, _ := readBuildInfo()
-		fmt.Fprintln(stdout, versionLine(endpoint.CurrentVersion(), commit, bi))
-		return 0
+	if args[0] == "version" { // needs no endpoint, so before config
+		mk := func(context.Context) (*cmdcore.Env, error) {
+			return &cmdcore.Env{Svc: buildVersion{pluginRoot: env("MASH_PLUGIN_ROOT")}}, nil
+		}
+		return newCommands(mk).RunCLI("version", args[1:], stdin, stdout, stderr, global)
 	}
 	if args[0] == "help" || args[0] == "-h" || args[0] == "--help" {
 		fmt.Fprint(stdout, usage)
@@ -258,7 +266,12 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 	switch args[0] {
 	case "serve":
 		return serve(ctx, cfg, err, adapter, env("MASH_PLUGIN_ROOT"), stdin, stdout, stderr)
-	case "send", "read", "inbox", "who", "prompt":
+	case "send":
+		mk := func(context.Context) (*cmdcore.Env, error) {
+			return &cmdcore.Env{Svc: &cliSvc{cfg: cfg, stderr: stderr}}, nil
+		}
+		return newCommands(mk).RunCLI("send", args[1:], stdin, stdout, stderr, global)
+	case "read", "inbox", "who", "prompt":
 		return cli(cfg, args, stdin, stdout, stderr)
 	case "admin":
 		return adminCmd(cfg, args[1:], stdout, stderr)

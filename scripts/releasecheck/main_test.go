@@ -68,7 +68,7 @@ func newFixture(t *testing.T) *fixture {
 	write(t, repo, signersPath, "release "+sumsKey.pub+"\n")
 	write(t, repo, "go.mod", "module github.com/bogworks/mash\n\ngo 1.27\n")
 	write(t, repo, "internal/endpoint/v.go", "package endpoint\n\nvar Version = \"0.0.0-dev\"\n")
-	write(t, repo, "cmd/mash/main.go", "package main\n\nimport (\n\t\"fmt\"\n\n\t\"github.com/bogworks/mash/internal/endpoint\"\n)\n\nvar commit string\n\nfunc main() { fmt.Printf(\"mash %s (commit %s)\\n\", endpoint.Version, commit) }\n")
+	write(t, repo, "cmd/mash/main.go", "package main\n\nimport (\n\t\"fmt\"\n\n\t\"github.com/bogworks/mash/internal/endpoint\"\n)\n\nvar commit string\n\nfunc main() { fmt.Printf(\"mash v%s (%s)\\n\", endpoint.Version, commit[:7]) }\n")
 	write(t, repo, "cmd/mashctl/main.go", "package main\n\nimport (\n\t\"fmt\"\n\n\t\"github.com/bogworks/mash/internal/endpoint\"\n)\n\nfunc main() { fmt.Printf(\"mashctl %s\\n\", endpoint.Version) }\n")
 	write(t, repo, "plugin/.claude-plugin/plugin.json", "{\"name\": \"mash\", \"version\": \"0.1.0\"}\n")
 	write(t, repo, release.PluginHooks, hardenedHooks)
@@ -657,14 +657,14 @@ func TestCheck_exitCodesOfEmptyAndUnreadableResponses(t *testing.T) {
 	}
 }
 
-// The binary's line must be exactly "mash <version> (commit X)" and one newline: surrounding whitespace is refused.
+// The binary's line must be exactly "mash v<version> (<short commit>)" and one newline: surrounding whitespace is refused.
 func TestCheck_versionLineMustBeExact(t *testing.T) {
 	f := newFixture(t)
 	f.o.build = func(ctx context.Context, src, out, goos, goarch, version, commit string) (string, error) {
 		if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
 			return "", err
 		}
-		line := "mash " + version + " (commit " + commit + ")"
+		line := "mash v" + version + " (" + shortCommit(commit) + ")"
 		if err := os.WriteFile(out, []byte("#!/bin/sh\nprintf '\\n  "+line+"\\n\\n'\n"), 0o755); err != nil {
 			return "", err
 		}

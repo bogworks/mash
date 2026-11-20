@@ -1,6 +1,7 @@
 package render
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -97,5 +98,26 @@ func TestPlural(t *testing.T) {
 		if got := Plural(n, "message"); got != want {
 			t.Errorf("Plural(%d) = %q, want %q", n, got, want)
 		}
+	}
+}
+
+func TestDisplayWidth(t *testing.T) {
+	for s, want := range map[string]int{"abc": 3, "": 0, "日本語": 6, "a日b": 4, "é": 1, "\U0001F600": 2, "한국": 4} {
+		if got := DisplayWidth(s); got != want {
+			t.Errorf("DisplayWidth(%q) = %d, want %d", s, got, want)
+		}
+	}
+}
+
+func TestTableMeasuresDisplayWidth(t *testing.T) {
+	got := Table([]string{"name", "note"}, [][]string{{"日本", "x"}, {"ab", "y"}}, 80, false)
+	want := "NAME  NOTE\n日本  x\nab    y"
+	if got != want {
+		t.Errorf("wide cells misaligned:\n%q\nwant\n%q", got, want)
+	}
+	// A last column of wide characters is cut by columns, not runes: 6 columns of prefix leaves 4, so 3 columns and "…".
+	got = Table([]string{"a", "b"}, [][]string{{"x", "日本語日本語"}}, 10, true)
+	if l := strings.Split(got, "\n")[1]; DisplayWidth(l) > 10 || !strings.HasSuffix(l, "…") {
+		t.Errorf("truncated line %q is %d columns wide", l, DisplayWidth(l))
 	}
 }

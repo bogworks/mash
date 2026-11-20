@@ -82,7 +82,7 @@ func TestVerbHelpPrintsUsageAndChangesNothing(t *testing.T) {
 // -h or --help, anywhere further along, are never help.
 func TestHelpUsageOnlyFirstArgument(t *testing.T) {
 	yes := [][]string{
-		{"send", "--help"}, {"send", "-h"}, {"prompt", "--help"}, {"prompt", "-h"},
+		{"prompt", "--help"}, {"prompt", "-h"},
 		{"read", "-h"}, {"inbox", "--help"}, {"who", "-h"}, {"serve", "-h"}, {"hook", "--help"},
 		{"plugin", "--help"}, {"plugin", "export", "-h"},
 		{"admin", "-h"}, {"admin", "--help"}, {"admin", "set-meta", "-h"}, {"admin", "suspend", "--help"},
@@ -93,8 +93,7 @@ func TestHelpUsageOnlyFirstArgument(t *testing.T) {
 		}
 	}
 	no := [][]string{
-		{"send", tTo("y"), "see", "the", "--help", "flag"}, {"send", tTo("y"), "-h"}, {"send", tTo("y"), "--help"},
-		{"send", tTo("y"), "--", "--help"}, {"send", tTo("y"), "--urgent", "-h"}, {"send", tTo("y"), "--kind", "--help", "x"},
+		{"send", tTo("y"), "--help"}, {"send", tTo("y"), "-h"}, // send is on the command table: its help is cmdcore's
 		{"prompt", tTo("y"), "what", "does", "-h", "do"}, {"prompt", tTo("y"), "--help"}, {"prompt", tTo("y"), "-h"},
 		{"read", "3", "--help"}, {"read", "--json", "-h"}, {"inbox", "5", "-h"}, {"inbox", "--limit", "--help"},
 		{"who", "--owner", "-h"}, {"who", "x", "--help"},
@@ -111,23 +110,24 @@ func TestHelpUsageOnlyFirstArgument(t *testing.T) {
 	}
 }
 
-// A message that contains the words is sent whole; help as the first argument prints usage and sends nothing.
+// A message that contains the words is sent whole when it is one argument, or follows "--"; --help or -h as an option
+// anywhere before "--" prints the help and sends nothing.
 func TestSendTextWithHelpWordsIsSent(t *testing.T) {
 	w := newWorld(t, "x", "y")
-	for i, text := range [][]string{{"see", "the", "--help", "flag"}, {"-h"}, {"--help"}, {"what", "does", "-h", "do"}} {
+	for i, text := range [][]string{{"see the --help flag"}, {"--", "-h"}, {"--", "--help"}, {"what does -h do"}} {
 		out, code := w.cli(t, "x", append([]string{"send", tTo("y")}, text...)...)
-		if code != 0 || strings.HasPrefix(out, "usage:") || !strings.Contains(out, "sent #") {
+		if code != 0 || strings.HasPrefix(out, "Send a message") || !strings.Contains(out, "Mail sent.") {
 			t.Fatalf("send %v: %d %q", text, code, out)
 		}
 		out, code = w.cli(t, "y", "read", strconv.Itoa(i+1))
-		if want := strings.Join(text, " "); code != 0 || !strings.Contains(out, want) {
+		if want := text[len(text)-1]; code != 0 || !strings.Contains(out, want) {
 			t.Fatalf("read #%d: %d %q, want text %q", i+1, code, out, want)
 		}
 	}
-	for _, h := range []string{"--help", "-h"} {
-		out, code := w.cli(t, "x", "send", h)
-		if code != 0 || !strings.HasPrefix(out, "usage: mash send") {
-			t.Fatalf("send %s: %d %q", h, code, out)
+	for _, args := range [][]string{{"--help"}, {"-h"}, {tTo("y"), "--help"}, {tTo("y"), "words", "-h"}, {tTo("y"), "--kind", "fyi", "-h"}} {
+		out, code := w.cli(t, "x", append([]string{"send"}, args...)...)
+		if code != 0 || !strings.HasPrefix(out, "Send a message to an endpoint.\n\nUsage:\n  mash send ") {
+			t.Fatalf("send %v: %d %q", args, code, out)
 		}
 	}
 	if n := inboxCount(t, w, "y"); n != 4 {

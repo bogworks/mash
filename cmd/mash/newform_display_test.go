@@ -26,12 +26,12 @@ func TestCLIShowsAndAcceptsTheCanonicalForm(t *testing.T) {
 		t.Fatalf("flat %q", sid.Flat())
 	}
 
-	out := cliAs(t, sendEnv, "send", "acme.team1.recv", "by the canonical form")
-	if !strings.Contains(out, "sent #1 from acme.team1.sender to acme.team1.recv") {
+	out := cliAs(t, sendEnv, "send", "acme.team1.recv", "by the canonical form", "-v")
+	if !strings.Contains(out, "Mail sent.") || !strings.Contains(out, "to:      acme.team1.recv\n") || !strings.Contains(out, "number:  1\n") {
 		t.Fatalf("receipt: %q", out)
 	}
-	out = cliAs(t, sendEnv, "send", "acme_team1_recv", "by the flat key")
-	if !strings.Contains(out, "sent #2 from acme.team1.sender to acme.team1.recv") {
+	out = cliAs(t, sendEnv, "send", "acme_team1_recv", "by the flat key", "-v")
+	if !strings.Contains(out, "Mail sent.") || !strings.Contains(out, "to:      acme.team1.recv\n") || !strings.Contains(out, "number:  2\n") {
 		t.Fatalf("flat receipt: %q", out)
 	}
 
@@ -57,10 +57,10 @@ func TestCLIShowsAndAcceptsTheCanonicalForm(t *testing.T) {
 		t.Fatalf("status:\n%s", got)
 	}
 
-	// A canonical form that names nothing is refused as an unknown endpoint, in the form it was typed.
+	// A canonical form that names nothing is refused as an unknown endpoint, in the form it was typed (exit 1).
 	var o, eb strings.Builder
 	if code := run([]string{"send", "acme.team1.nobody", "x"}, envFrom(sendEnv), strings.NewReader(""), &o, &eb); code == 0 ||
-		!strings.Contains(eb.String(), "no endpoint named") {
+		!strings.Contains(eb.String(), "no endpoint has the address acme.team1.nobody") {
 		t.Fatalf("unknown: code %d %s", code, eb.String())
 	}
 }

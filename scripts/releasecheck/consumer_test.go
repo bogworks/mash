@@ -402,7 +402,7 @@ func TestCheck_consumerOnANonLinuxHostBuildsTheCandidateForLinux(t *testing.T) {
 		if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
 			return "", err
 		}
-		body := "#!/bin/sh\necho 'mash " + version + " (commit " + commit + ")'\n" // the host build must run: reproducible() runs it
+		body := "#!/bin/sh\necho 'mash v" + version + " (" + shortCommit(commit) + ")'\n" // the host build must run: reproducible() runs it
 		if goos == "linux" {
 			body = "linux build " + goos + "/" + goarch
 		}

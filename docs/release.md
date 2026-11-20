@@ -2,7 +2,7 @@
 
 A release is a **tag `vN.N.N` at a candidate commit X on main** (SSH-signed below the cutover version in `docs/release-cutover`; annotated and unsigned, pushed by the minting service, at or above it). X is built from fresh clones in different
 directories with a pinned toolchain; the build is byte-reproducible and `mash version` prints
-`mash <N.N.N> (commit X)`. The tag is made (see below); CI builds and drafts; the maintainer publishes after the gate.
+`mash v<N.N.N> (<first 7 characters of X>)`. The tag is made (see below); CI builds and drafts; the maintainer publishes after the gate.
 
 ## Publishing: one command
 
@@ -136,7 +136,7 @@ The numbered steps are what the command does in each state, and the manual path 
 3. **Gate, before tagging:** `scripts/release-check <X> <version>` (for example `… 3f2a… 0.3.0`). It fetches main from
    the release repository (never a configured origin), checks X is an ancestor, reads X's check runs through `gh`
    (every page, latest run per name, from `github-actions` only), builds X twice in fresh clones, and runs the binary to
-   compare `mash <version> (commit X)` exactly. It prints the version and commit in a neutral form, `version: <version> commit: <X>`, that any consumer can copy. Exit 0 passed, 3 refused,
+   compare `mash v<version> (<first 7 characters of X>)` exactly. It prints the version and commit in a neutral form, `version: <version> commit: <X>`, that any consumer can copy. Exit 0 passed, 3 refused,
    4 could not decide (gh, the network), 2 usage.
    The release repository (owner/name) is `$RELEASE_CHECK_REPO` if set, else taken from the checkout's `origin` when that
    is a github.com URL (https, `git@github.com:` or `ssh://git@github.com/`), else `bogworks/mash`. Main and the tag

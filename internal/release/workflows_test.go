@@ -1075,7 +1075,7 @@ func TestBuildTwice_buildsReproduciblyAndTheBinarySaysWhatItIs(t *testing.T) {
 		t.Fatalf("output %q", got)
 	}
 	line, err := exec.Command(out, "version").Output()
-	if err != nil || strings.TrimSpace(string(line)) != "mash 0.1.0 (commit "+x+")" {
+	if err != nil || strings.TrimSpace(string(line)) != "mash v0.1.0 ("+x[:7]+")" {
 		t.Fatalf("%q %v", line, err)
 	}
 }

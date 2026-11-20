@@ -837,9 +837,19 @@ func (e *Endpoint) lookup(ctx context.Context, name string) (store.Record, error
 	}
 	rec, err := store.GetRecord(ctx, e.dirKV, name)
 	if err != nil {
-		return store.Record{}, fmt.Errorf("mash: no endpoint named %q (see who)", sap.Display(name))
+		if errors.Is(err, jetstream.ErrKeyNotFound) {
+			return store.Record{}, &NoEndpointError{Name: sap.Display(name)}
+		}
+		return store.Record{}, fmt.Errorf("mash: looking up %q: %w", sap.Display(name), err)
 	}
 	return rec, nil
+}
+
+// NoEndpointError is the error for a recipient that is not in the directory.
+type NoEndpointError struct{ Name string }
+
+func (e *NoEndpointError) Error() string {
+	return fmt.Sprintf("mash: no endpoint named %q (see who)", e.Name)
 }
 
 // inbox is this endpoint's inbox stream with its info as of now: the one the first wave of a one-shot client read, else

@@ -173,12 +173,12 @@ func TestStandaloneServeWithoutAHost(t *testing.T) {
 	}
 	waitOnline(t, bin, envs["alpha"], "beta")
 
-	mustRun(t, bin, envs["alpha"], "send", tTo("beta"), "hello", "serving", "beta")
+	mustRun(t, bin, envs["alpha"], "send", tTo("beta"), "hello serving beta")
 	content, _ := channelOf(s.await(t, isChannel))
 	if !strings.Contains(content, "from o.dev.alpha [verified]") || !strings.Contains(content, "hello serving beta") {
 		t.Fatalf("channel event: %q", content)
 	}
-	if out := s.call(t, 3, "send", `{"to":"o.dev.alpha","text":"hello back"}`); !strings.HasPrefix(out, "sent #") {
+	if out := s.call(t, 3, "send", `{"address":"o.dev.alpha","message":"hello back"}`); out != "Mail sent." {
 		t.Fatalf("send tool: %q", out)
 	}
 	if out := mustRun(t, bin, envs["alpha"], "read", "1"); !strings.Contains(out, "hello back") || !strings.Contains(out, "[verified]") {
@@ -241,7 +241,7 @@ func TestStandaloneHookDelivery(t *testing.T) {
 	if got := hook(); strings.TrimSpace(got) != "" {
 		t.Fatalf("an empty spool printed %q", got)
 	}
-	mustRun(t, bin, envs["alpha"], "send", tTo("beta"), "--kind", "question", "hello", "through", "the", "hook")
+	mustRun(t, bin, envs["alpha"], "send", tTo("beta"), "--kind", "question", "hello through the hook")
 	var got string
 	eventually(t, 15*time.Second, "the hook shows the mail", func() bool {
 		got = hook()

@@ -29,12 +29,17 @@ func (r VersionResult) Text(cmdcore.Opts) string {
 
 // Version is the version command.
 var Version = cmdcore.Command[VersionParams, VersionResult]{
-	Name:    "version",
-	Summary: "Print the version.",
+	Name:        "version",
+	Summary:     "Print the version.",
+	Description: "Print the version.",
+	Examples:    []string{"mash version"},
 	Run: func(_ context.Context, env *cmdcore.Env, _ VersionParams) (VersionResult, error) {
+		if env == nil {
+			return VersionResult{}, cliframe.Failf("internal: mash version has no environment to run in")
+		}
 		svc, ok := env.Svc.(VersionInfo)
-		if !ok {
-			return VersionResult{}, cliframe.Failf("mash version has no build information")
+		if !ok || svc == nil {
+			return VersionResult{}, cliframe.Failf("internal: mash version has no build information")
 		}
 		v, c, p := svc.Version()
 		return VersionResult{Version: v, Commit: c, Plugin: p}, nil

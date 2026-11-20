@@ -30,7 +30,7 @@ func TestStatusRelayTraceLine(t *testing.T) {
 		id++
 		return strings.Contains(statusOf(t, s, id), "channel notifications sent: 1")
 	})
-	if r := s.call(t, 30, "send", `{"to":"o.dev.a","text":"fwd","via":1}`); r["isError"] == true {
+	if r := s.call(t, 30, "send", `{"address":"o.dev.a","message":"fwd","relay":1}`); r["isError"] == true {
 		t.Fatalf("send: %v", resultText(r))
 	}
 	want := "relay trace: inbound with via 0, sends within 60s of another sender's mail 1, declared relays 1"
