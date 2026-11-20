@@ -467,8 +467,8 @@ func (s *At5) waitOnline(h Host, env []string, ids ...string) bool {
 		r := s.mash(h, "who", env, "who", "--json")
 		n := 0
 		if v, err := parseJSON(r.Stdout); err == nil {
-			for _, o := range findObjects(v, "identity") {
-				id, _ := o["identity"].(string)
+			for _, o := range findObjects(v, "address") {
+				id, _ := o["address"].(string)
 				on, _ := o["online"].(bool)
 				if on && slices.Contains(ids, id) {
 					n++
@@ -715,8 +715,8 @@ func (s *At5) secondOwner(m1, m2, m3 Host, aliceEnv []string) {
 	r := s.mash(m1, "who-forged", aliceEnv, "who", "--json")
 	online, listed := "", false
 	if v, err := parseJSON(r.Stdout); err == nil {
-		for _, o := range findObjects(v, "identity") {
-			id, _ := o["identity"].(string)
+		for _, o := range findObjects(v, "address") {
+			id, _ := o["address"].(string)
 			if id == "alice.dev.ghost" {
 				listed = true
 				if on, _ := o["online"].(bool); on {

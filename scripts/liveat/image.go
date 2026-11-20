@@ -27,7 +27,8 @@ const baseImage = "docker.io/library/debian:bookworm-slim"
 const (
 	nodeBin       = "/usr/local/bin"
 	nodeSetupPath = nodeBin + "/mash-local-nats-setup.sh"
-	nodeUID       = "1000:1000" // the image user mash: nodes never run as root
+	nodeRepo      = "/opt/mash-repo" // in the image: the checkout's plugin/ directory only
+	nodeUID       = "1000:1000"      // the image user mash: nodes never run as root
 	nodePath      = nodeBin + ":/usr/bin:/bin"
 )
 

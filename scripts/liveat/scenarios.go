@@ -397,14 +397,14 @@ var AT001 = Scenario{
 				addr, _ := o["address"].(string)
 				ow, _ := o["owner"].(string)
 				g, _ := o["group"].(string)
-				inst, _ := o["instance"].(string)
+				inst, _ := o["name"].(string)
 				seen[addr] = listed{ow, g, inst}
 			}
 		}
 		a.C.Check("endpoint list --json shows design and review, each with group dev", seen["alice.dev.design"].group == "dev" && seen["alice.dev.review"].group == "dev", fmt.Sprintf("seen: %v", seen))
 
 		// The agent field is not in the new who, nor in `mashctl endpoint list --json` (its record has owner, group,
-		// instance and address, no agent), so REQ-006's agent check is dropped; owner, group and instance stay.
+		// name and address, no agent), so REQ-006's agent check is dropped; owner, group and instance stay.
 		for _, n := range []string{"design", "review"} {
 			got, ok := seen["alice.dev."+n]
 			a.C.Check("REQ-006: the directory record of "+n+" shows its owner, group and instance", ok && got.owner == "alice" && got.group == "dev" && got.instance == n, fmt.Sprintf("%+v", got))

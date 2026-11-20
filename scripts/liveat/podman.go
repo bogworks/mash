@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"math/rand/v2"
 	"net"
 	"os"
@@ -318,6 +319,9 @@ func (p *Podman) buildImage(c *podCtx, ctx string) error {
 	if err := os.WriteFile(filepath.Join(ctx, "mash-local-nats-setup.sh"), sb, 0o755); err != nil {
 		return err
 	}
+	if err := copyTree(filepath.Join(r.Repo, "plugin"), filepath.Join(ctx, "plugin")); err != nil {
+		return fmt.Errorf("the plugin directory for the node image: %w", err)
+	}
 	if err := os.WriteFile(filepath.Join(ctx, "Containerfile"), []byte(containerfile), 0o644); err != nil {
 		return err
 	}
@@ -327,6 +331,52 @@ func (p *Podman) buildImage(c *podCtx, ctx string) error {
 	dg, _ := c.do("image", "inspect", "--format", "{{.Digest}}", baseImage)
 	r.ImageLines = []string{baseImageLine(dg), natsCLILine()}
 	return nil
+}
+
+// copyTree copies the directory src to dst, every file and directory, keeping file modes. A symbolic link whose
+// target is a file inside src is copied as that file; any other link (out of the tree, or to a directory) is refused.
+func copyTree(src, dst string) error {
+	root, err := filepath.EvalSymlinks(src)
+	if err != nil {
+		return err
+	}
+	return filepath.WalkDir(src, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, p)
+		if err != nil {
+			return err
+		}
+		out := filepath.Join(dst, rel)
+		if d.IsDir() {
+			return os.MkdirAll(out, 0o755)
+		}
+		real := p
+		if d.Type()&fs.ModeSymlink != 0 {
+			if real, err = filepath.EvalSymlinks(p); err != nil {
+				return err
+			}
+			if r, err := filepath.Rel(root, real); err != nil || r == ".." || strings.HasPrefix(r, ".."+string(filepath.Separator)) {
+				return fmt.Errorf("%s is a symbolic link that leaves %s", p, src)
+			}
+		}
+		st, err := os.Stat(real)
+		if err != nil {
+			return err
+		}
+		if !st.Mode().IsRegular() {
+			return fmt.Errorf("%s is not a regular file or directory", p)
+		}
+		b, err := os.ReadFile(real)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(out, b, st.Mode().Perm()); err != nil {
+			return err
+		}
+		return os.Chmod(out, st.Mode().Perm())
+	})
 }
 
 // checkStatic fails unless the binary can run in any image: an ELF file for this machine's architecture

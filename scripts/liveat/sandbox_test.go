@@ -17,7 +17,7 @@ func TestContainerfileIsAPinnedDebianWithTheScriptsTools(t *testing.T) {
 		t.Errorf("base image: %q", baseImage)
 	}
 	for _, want := range []string{"--no-install-recommends", "bash", "openssl", "iproute2", "ca-certificates", "coreutils", "grep", "sed", "gawk",
-		"COPY mash mashctl nats-server nodeinit nats mash-local-nats-setup.sh /usr/local/bin/", "USER mash", "--uid 1000", "WORKDIR /node"} {
+		"COPY mash mashctl nats-server nodeinit nats mash-local-nats-setup.sh /usr/local/bin/", "COPY plugin /opt/mash-repo/plugin", "USER mash", "--uid 1000", "WORKDIR /node"} {
 		if !strings.Contains(containerfile, want) {
 			t.Errorf("the Containerfile lacks %q", want)
 		}
@@ -264,5 +264,18 @@ func TestPrepareInsideNeedsWhatTheSandboxHands(t *testing.T) {
 	r := &Run{Runner: &Runner{}}
 	if err := r.PrepareInside(func(string) string { return "" }); err == nil || !strings.Contains(err.Error(), "--inside is for the run the sandbox starts") {
 		t.Errorf("%v", err)
+	}
+}
+
+func TestPrepareInsideSetsTheRepoToThePluginCopy(t *testing.T) {
+	r := &Run{Runner: &Runner{}, Dir: t.TempDir()}
+	_ = r.PrepareInside(func(k string) string {
+		if k == envInsideRevision || k == envInsideNatsPin {
+			return "x"
+		}
+		return ""
+	})
+	if r.Repo != nodeRepo || nodeRepo != "/opt/mash-repo" {
+		t.Errorf("Repo %q", r.Repo)
 	}
 }

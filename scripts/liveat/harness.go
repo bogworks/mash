@@ -271,6 +271,7 @@ func (r *Run) PrepareInside(getenv func(string) string) error {
 	}
 	r.Mash, r.Mashctl, r.NatsBin = nodeBin+"/mash", nodeBin+"/mashctl", nodeBin+"/nats-server"
 	r.SetupScript = nodeSetupPath
+	r.Repo = nodeRepo
 	if l := getenv(envInsideImage); l != "" {
 		r.ImageLines = strings.Split(l, "|")
 	}

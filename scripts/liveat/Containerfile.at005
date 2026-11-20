@@ -10,6 +10,9 @@ RUN DEBIAN_FRONTEND=noninteractive apt-get update \
  && useradd --uid 1000 --user-group --no-create-home --home-dir /node --shell /bin/bash mash \
  && install -d -m 0700 -o mash -g mash /node
 COPY mash mashctl nats-server nodeinit nats mash-local-nats-setup.sh /usr/local/bin/
+# The plugin directory of the checkout: AT-001 reads its .mcp.json and hooks and starts `sh <plugin>/scripts/mash serve`.
+COPY plugin /opt/mash-repo/plugin
+RUN chmod -R a+rX /opt/mash-repo
 USER mash
 WORKDIR /node
 ENTRYPOINT []

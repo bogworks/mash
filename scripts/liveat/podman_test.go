@@ -113,7 +113,16 @@ func newPodRun(t *testing.T) *Run {
 	if err := os.WriteFile(script, []byte("#!/usr/bin/env bash\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	return &Run{Dir: d, Repo: "/repo", ID: testRunID, NatsBin: staticElf(t), SetupScript: script, Runner: &Runner{Out: d, Cwd: d}, pids: map[int]string{}}
+	repo := filepath.Join(d, "repo")
+	for f, m := range map[string]os.FileMode{"plugin/.mcp.json": 0o644, "plugin/hooks/hooks.json": 0o644, "plugin/scripts/mash": 0o755} {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(repo, f)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(repo, f), []byte("x "+f), m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return &Run{Dir: d, Repo: repo, ID: testRunID, NatsBin: staticElf(t), SetupScript: script, Runner: &Runner{Out: d, Cwd: d}, pids: map[int]string{}}
 }
 
 func podmanFake(reply func(Cmd) (string, string, int, bool)) *fakeRT {
@@ -183,7 +192,7 @@ func TestPodmanOpenCommandLines(t *testing.T) {
 	for _, c := range f.calls {
 		if len(c.Argv) > 1 && c.Argv[0] == "go" && c.Argv[1] == "build" {
 			builds++
-			if c.Dir != "/repo" || !strings.Contains(strings.Join(c.Env, " "), "CGO_ENABLED=0") {
+			if c.Dir != r.Repo || !strings.Contains(strings.Join(c.Env, " "), "CGO_ENABLED=0") {
 				t.Errorf("go build %v: dir %q env", c.Argv, c.Dir)
 			}
 		}
@@ -882,5 +891,44 @@ func linuxOnly(t *testing.T) {
 	t.Helper()
 	if runtime.GOOS != "linux" {
 		t.Skip("the podman host of AT-005 is Linux-only (rootless podman, ELF binaries)")
+	}
+}
+
+func TestBuildContextCopiesThePluginDirectory(t *testing.T) {
+	linuxOnly(t)
+	r := newPodRun(t)
+	openPodman(t, podmanFake(nil), r)
+	ctx := filepath.Join(r.Dir, "podman-ctx")
+	for f, perm := range map[string]os.FileMode{"plugin/.mcp.json": 0o644, "plugin/hooks/hooks.json": 0o644, "plugin/scripts/mash": 0o755} {
+		st, err := os.Stat(filepath.Join(ctx, f))
+		if err != nil || st.Mode().Perm() != perm {
+			t.Errorf("%s in the build context: %v %v", f, st, err)
+		}
+	}
+	for _, want := range []string{"COPY plugin /opt/mash-repo/plugin", "chmod -R a+rX /opt/mash-repo"} {
+		if !strings.Contains(containerfile, want) {
+			t.Errorf("the Containerfile lacks %q", want)
+		}
+	}
+}
+
+func TestCopyTreeRefusesALinkOutOfTheTree(t *testing.T) {
+	d := t.TempDir()
+	src := filepath.Join(d, "src")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(d, "outside"), []byte("o"), 0o644)
+	os.WriteFile(filepath.Join(src, "in"), []byte("i"), 0o644)
+	os.Symlink("in", filepath.Join(src, "okln"))
+	if err := copyTree(src, filepath.Join(d, "dst1")); err != nil {
+		t.Fatalf("a link inside the tree: %v", err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(d, "dst1", "okln")); string(b) != "i" {
+		t.Errorf("link copied as %q", b)
+	}
+	os.Symlink("../outside", filepath.Join(src, "bad"))
+	if err := copyTree(src, filepath.Join(d, "dst2")); err == nil || !strings.Contains(err.Error(), "leaves") {
+		t.Errorf("a link out of the tree: %v", err)
 	}
 }
