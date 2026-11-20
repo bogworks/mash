@@ -661,7 +661,11 @@ func tools(state *atomic.Pointer[sessionState], src *statusSource) []mcp.Tool {
 			}
 			ctx, cancel := context.WithTimeout(ctx, callTimeout)
 			defer cancel()
-			return f(ctx, ep, args)
+			out, err := f(ctx, ep, args)
+			if f := framed(ep.Address().String(), err); f != err {
+				return out, cmdcore.ToolError(f)
+			}
+			return out, err
 		}
 	}
 	svc := &mcpSvc{buildVersion: buildVersion{pluginRoot: src.pluginRoot}, state: state, name: name, callTimeout: callTimeout, wake: wakeOf(src.cfg)}
