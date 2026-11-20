@@ -34,7 +34,7 @@
 # in the Synadia console, see docs/synadia.md).
 #
 # Usage: quickstart-synadia.sh --group G [--team T] [--account A] [--owner O] [--endpoint N]...
-#          [--dry-run] [--mash PATH] [--config-dir DIR] [--force] [--token-stdin] [--no-test]
+#          [--dry-run] [--mash PATH] [--config-dir DIR] [--token-stdin] [--no-test]
 #   --group is required: an endpoint's group has no default. Owner, group and each instance (--endpoint) are
 #   1-32 lower-case letters, digits and single hyphens, starting with a letter. A session as an endpoint needs
 #   MASH_ENDPOINT, the address owner.group.instance (or the one installed endpoint, when only one creds file is installed).
@@ -56,7 +56,7 @@ case "$API" in
     || die "SYNADIA_API_URL '$API' refused: plain http is only allowed to 127.0.0.1 or localhost" ;;
   *) die "SYNADIA_API_URL '$API' refused: it must be an https URL (or http://127.0.0.1 / http://localhost)" ;;
 esac
-TEAM="" ACCOUNT="" OWNER="" GROUP="" MASH="mash" CONFIG_DIR="" DRY=0 FORCE=0 TOKEN_STDIN=0 NO_TEST=0
+TEAM="" ACCOUNT="" OWNER="" GROUP="" MASH="mash" CONFIG_DIR="" DRY=0 TOKEN_STDIN=0 NO_TEST=0
 ENDPOINTS=()
 ADMIN_ID="" TMP="" LOCK_DIR="" LOCK_HELD=0 PROVISIONING="" PROVISIONING_KEY="" # PROVISIONING: the endpoint whose `mash admin provision` is running or failed
 CREATED_IDS=() CREATED_NAMES=() CREATED_CREDS=() PROVISIONED=() # endpoint users this run created (id, name, whether it wrote their creds file), endpoints provisioned
@@ -76,7 +76,6 @@ while [ $# -gt 0 ]; do
     --mash) MASH="${2:?--mash needs a value}"; shift 2 ;;
     --config-dir) CONFIG_DIR="${2:?--config-dir needs a value}"; shift 2 ;;
     --dry-run) DRY=1; shift ;;
-    --force) FORCE=1; shift ;;
     --token-stdin) TOKEN_STDIN=1; shift ;;
     --no-test) NO_TEST=1; shift ;;
     -h|--help) usage; exit 0 ;;

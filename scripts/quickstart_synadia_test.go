@@ -428,7 +428,7 @@ func TestQuickstartRefusals(t *testing.T) {
 		})
 	})
 	t.Run("existing config refused", func(t *testing.T) {
-		for _, extra := range [][]string{nil, {"--force"}} {
+		for _, extra := range [][]string{nil} {
 			f := newFake(t, e, 5)
 			home := t.TempDir()
 			dir := filepath.Join(home, ".config", "mash")
