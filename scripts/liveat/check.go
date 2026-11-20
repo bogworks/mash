@@ -13,6 +13,9 @@ type Assertion struct {
 	Detail string
 	// NA marks a check that does not apply (and so is neither a pass nor a failure): the record says "n/a", not "pass".
 	NA bool
+	// Pending marks a check written against the specification whose protection is not built yet: it is neither a pass
+	// nor a failure, the record says "pending" with the reason, and it never counts as a pass.
+	Pending bool
 }
 
 // Checks collects the assertions of one scenario.
@@ -38,6 +41,25 @@ func (c *Checks) NotApplicable(name, reason string) {
 	c.list = append(c.list, Assertion{Name: name, Pass: true, NA: true, Detail: reason})
 }
 
+// Pending records a check whose protection is not built yet (the reason says what it waits for). It is not counted as a
+// pass (the record says pending) and never fails the run; the table at4Pending keeps the list from growing stale.
+func (c *Checks) Pending(name, reason string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.list = append(c.list, Assertion{Name: name, Pass: true, Pending: true, Detail: reason})
+}
+
+// PendingCount is the number of pending checks.
+func (c *Checks) PendingCount() int {
+	n := 0
+	for _, a := range c.All() {
+		if a.Pending {
+			n++
+		}
+	}
+	return n
+}
+
 // All returns a copy of the assertions in the order they were made.
 func (c *Checks) All() []Assertion {
 	c.mu.Lock()
@@ -61,7 +83,9 @@ func (c *Checks) Table() string {
 	var b strings.Builder
 	for _, a := range c.All() {
 		res := "PASS"
-		if a.NA {
+		if a.Pending {
+			res = "PEND"
+		} else if a.NA {
 			res = "N/A "
 		} else if !a.Pass {
 			res = "FAIL"

@@ -42,6 +42,16 @@ func (r Record) Passed() bool {
 	return true
 }
 
+func (r Record) pendingCount() int {
+	n := 0
+	for _, a := range r.Observed {
+		if a.Pending {
+			n++
+		}
+	}
+	return n
+}
+
 // Markdown renders the record. Everything goes through redact, so no seed or JWT can reach it.
 func (r Record) Markdown() string {
 	var b strings.Builder
@@ -58,7 +68,9 @@ func (r Record) Markdown() string {
 	b.WriteString("\n## Observed\n\n")
 	for _, a := range r.Observed {
 		res := "pass"
-		if a.NA {
+		if a.Pending {
+			res = "pending"
+		} else if a.NA {
 			res = "n/a"
 		} else if !a.Pass {
 			res = "FAIL"
@@ -75,6 +87,9 @@ func (r Record) Markdown() string {
 	res := "PASS"
 	if !r.Passed() {
 		res = "FAIL"
+	}
+	if n := r.pendingCount(); n > 0 && res == "PASS" {
+		res = fmt.Sprintf("PASS, with %d check(s) pending (a pending check is not a pass: its protection is not built yet)", n)
 	}
 	if r.LocalSubstrate {
 		res = "local substrate: not AT-005 evidence (checks: " + res + ")"

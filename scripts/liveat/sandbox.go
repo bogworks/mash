@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// The sandbox of AT-001 to AT-003 (and selfcheck): tests run only in containers or VMs that the test makes and
+// The sandbox of AT-001 to AT-003, AT-4 (and selfcheck): tests run only in containers or VMs that the test makes and
 // destroys, never on the machine that runs the harness. So `liveat at001` on a developer machine builds the node image,
 // starts one throwaway rootless container of it (no network but loopback, no published port, the non-root user mash),
 // puts a static `liveat` in it and runs `liveat <the same arguments> --inside` there: inside, the harness does what it
@@ -48,7 +48,7 @@ func sandboxEnv(r *Run) []string {
 	}
 }
 
-// sandboxMain is `liveat at001|at002|at003|all|selfcheck --port P [--keep]` on the host. Exit codes are the run
+// sandboxMain is `liveat at001|at002|at003|at004|all|selfcheck --port P [--keep]` on the host. Exit codes are the run
 // inside's (0, 1, 2, 4); 4 also when the sandbox could not be made, 1 when the host's scan of what came back finds a
 // seed or a JWT.
 func sandboxMain(cmd string, port int, keep bool, stdout, stderr io.Writer, p *Podman) int {

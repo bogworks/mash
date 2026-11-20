@@ -1,6 +1,6 @@
 # liveat: the live acceptance tests
 
-`go run ./scripts/liveat at001|at002|at003|all|selfcheck --port P` runs AT-001 to AT-003 of the 0.5.5 endpoint-model
+`go run ./scripts/liveat at001|at002|at003|at004|all|selfcheck --port P` runs AT-001 to AT-003, and AT-4 (the security boundaries), of the 0.5.5 endpoint-model
 contract against a build of this checkout, on one local NATS server, in scratch homes, **inside a throwaway container**.
 
 Tests never run on the machine that runs the harness. On that machine `liveat at001` builds the node image
@@ -23,6 +23,30 @@ Every command of AT-001 to AT-003 connects to `tls://127.0.0.1:<the chosen port>
 that `ca.pem` and no `MASH_INSECURE_PLAINTEXT` (REQ-014); AT-001 asserts that and that `mash doctor` says the server row is ok on tls://.
 Only AT-003's plain-URL case sets the override, per command, against a counting listener. The server key's text is
 searched for in all captured output like a seed.
+
+## AT-4: the security boundaries (`at004`)
+
+`liveat at004 --port P` runs in the same sandbox container as `at001` (the host starts nothing), and is part of `all`. Every
+check is a negative test: it fails when its protection is removed.
+
+1. No secret in argv or output. Every secret the scenario makes is registered (seeds, creds files, user JWTs, join files, the operator and
+   account keys, the CA and server keys, the admin and system creds). About a hundred `mash` and `mashctl` commands run with `--json`, `--verbose`
+   and failure paths, including a seed, a join file, a creds file or a key fed to an option that expects something else. All output, every
+   recorded argv of the run (`Runner.Argvs`) and the command line of every process in the container (`/proc/*/cmdline`) are scanned.
+2. Secret files are refused over an existing file, a symlink and a dangling symlink, and left byte-identical: the creds file in the config
+   folder, the join file of `endpoint create` and `reissue --out`, `mash key create` (seed, `.pub`, `--pub-out`), the key pending file,
+   `mash credential create --out` (and `--force` replaces a link, never writes through it).
+3. Unverified mail: absent, claimed, unknown-signer and stale mail is published with the sender's own creds (headers crafted with `sap`),
+   the recipient's session, `mash inbox` and `mash read` are checked, a signed control message is delivered, and `mashctl endpoint inbox`
+   shows each stored message with its trust label.
+4. Plain text: a plain `nats://` URL to a non-loopback address with no override is refused before connecting.
+5. A deleted endpoint's credential is accepted before the delete and refused after it on the one server. The all-three-servers form is
+   AT-005's `refusedOn` / `acceptedOn` on the deleted review key.
+
+A check whose protection is not built is **pending**: the table line says `PEND`, the record says `pending`, it is not counted as a pass,
+and the result reads `PASS, with N check(s) pending`. `at4Pending` in `at004.go` lists them with a reason; a listed check that starts to
+pass fails the run until its entry is removed, so the list only shrinks. Pending today: the `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION`
+behaviour (core's R1-2), the refusal of unverified mail by `mash serve`, `mash inbox` and `mash read`, and the `mash join` checks.
 
 ## AT-005: three machines, TLS, a cluster, two mashctl machines
 

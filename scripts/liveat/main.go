@@ -1,7 +1,7 @@
-// Command liveat runs the live acceptance tests AT-001 to AT-003 of the 0.5.5 endpoint-model contract against a build
+// Command liveat runs the live acceptance tests AT-001 to AT-003 and AT-4 (the security boundaries, at004) of the 0.5.5 endpoint-model contract against a build
 // of this checkout.
 //
-//	go run ./scripts/liveat at001|at002|at003|all|selfcheck --port P [--keep] [--inside]
+//	go run ./scripts/liveat at001|at002|at003|at004|all|selfcheck --port P [--keep] [--inside]
 //
 // On the machine you run it on it starts nothing: it builds a node image (podman.go, Containerfile.at005), starts ONE
 // throwaway rootless container of it, copies itself in and runs `liveat <the same arguments> --inside` there as a
@@ -36,7 +36,7 @@ import (
 func main() { os.Exit(realMain(os.Args[1:], os.Stdout, os.Stderr)) }
 
 func realMain(args []string, stdout, stderr io.Writer) (code int) {
-	usage := "usage: liveat at001|at002|at003|all|selfcheck --port P [--keep] [--inside: only inside a container; the default runs in a sandbox container] | liveat at005 [--dry-setup] [--hosts podman --run-by manual|ci --host-label LABEL [--subnet-base A.B] | --hosts local] [--keep] [--record-out FILE] | liveat at005-cleanup [--run RUNID]"
+	usage := "usage: liveat at001|at002|at003|at004|all|selfcheck --port P [--keep] [--inside: only inside a container; the default runs in a sandbox container] | liveat at005 [--dry-setup] [--hosts podman --run-by manual|ci --host-label LABEL [--subnet-base A.B] | --hosts local] [--keep] [--record-out FILE] | liveat at005-cleanup [--run RUNID]"
 	if len(args) == 0 {
 		fmt.Fprintln(stderr, usage)
 		return 2
@@ -65,8 +65,10 @@ func realMain(args []string, stdout, stderr io.Writer) (code int) {
 		scs = []Scenario{AT002}
 	case "at003":
 		scs = []Scenario{AT003}
+	case "at004":
+		scs = []Scenario{AT004}
 	case "all":
-		scs = []Scenario{AT001, AT002, AT003}
+		scs = []Scenario{AT001, AT002, AT003, AT004}
 	case "selfcheck":
 		scs = []Scenario{SelfCheck}
 	default:
