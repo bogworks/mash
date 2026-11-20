@@ -7,7 +7,7 @@ larger value is now a usage error). It says `More than 15 are waiting.` when mor
 and `The oldest has waited 1h 12m.` when the oldest has waited longer than `wake_age`; both settings are new
 (`MASH_WAKE_COUNT` or `wake_count`, default 15, 0 turns it off; `MASH_WAKE_AGE` or `wake_age`, default `1h`, such as `30m`
 or `2d`, 0 turns it off). `mash read NUMBER` prints labelled lines (number, from, sent, trust, kind, urgent, and reply to
-when the message answers one) and then the whole text, unquoted; a number the inbox does not hold is
-`error: acme.demo.alice has no message 9`. Both take `--json`, which prints the same object as the MCP tool. The read
+when the message answers one) and then the whole text with `> ` before every line (control characters escaped), the same in the tool; a number the inbox does not hold is
+`error: acme.demo.alice has no message 9`. Both take `--json`, which prints the same object as the MCP tool, with the text unquoted in `body`. The read
 tool's argument is now `number` (it was `seq`) and only a whole number is accepted. The old one-line `#seq` listing and
 the quoted `--- #5 from ...` form of `read` are gone; the hook still delivers mail in its own form.

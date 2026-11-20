@@ -142,7 +142,7 @@ func TestCLIRoundTrips(t *testing.T) {
 			}
 		}},
 		{"read", "", []string{"read", "7"}, func(t *testing.T, out string) {
-			if !strings.Contains(out, "number:   7\n") || !strings.Contains(out, "\n\nmessage 7 from sender") || !strings.Contains(out, "verified") {
+			if !strings.Contains(out, "number:   7\n") || !strings.Contains(out, "\n\n> message 7 from sender") || !strings.Contains(out, "verified") {
 				t.Fatalf("read: %q", out)
 			}
 		}},

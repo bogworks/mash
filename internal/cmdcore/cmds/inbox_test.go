@@ -305,17 +305,17 @@ func readBox() *fakeBox {
 
 func TestReadText(t *testing.T) {
 	code, out, errs := runRead(readBox(), cliframe.Global{}, "2")
-	want := "number:   2\nfrom:     acme.demo.bob\nsent:     8s ago\ntrust:    verified\nkind:     question\nurgent:   yes\n\nready?\n"
+	want := "number:   2\nfrom:     acme.demo.bob\nsent:     8s ago\ntrust:    verified\nkind:     question\nurgent:   yes\n\n> ready?\n"
 	if code != 0 || out != want || errs != "" {
 		t.Errorf("message: %d %q %q", code, out, errs)
 	}
 	_, out, _ = runRead(readBox(), cliframe.Global{}, "5")
-	want = "number:   5\nfrom:     acme.demo.alice\nsent:     1m ago\ntrust:    verified\nkind:     result\nurgent:   no\nreply to: 42\n\nyes\n"
+	want = "number:   5\nfrom:     acme.demo.alice\nsent:     1m ago\ntrust:    verified\nkind:     result\nurgent:   no\nreply to: 42\n\n> yes\n"
 	if out != want {
 		t.Errorf("reply: %q", out)
 	}
 	_, out, _ = runRead(readBox(), cliframe.Global{}, "6")
-	want = "number:   6\nfrom:     acme.demo.bob\nsent:     1h ago\ntrust:    claimed\nkind:     fyi\nurgent:   no\nrelay:    acme.demo.carol #3\n\nline one\nline two\n"
+	want = "number:   6\nfrom:     acme.demo.bob\nsent:     1h ago\ntrust:    claimed\nkind:     fyi\nurgent:   no\nrelay:    acme.demo.carol #3\n\n> line one\n> line two\n"
 	if out != want {
 		t.Errorf("relay and lines: %q", out)
 	}
@@ -547,5 +547,12 @@ func TestReadServiceFailure(t *testing.T) {
 	code, _, errs := runRead(&fakeBox{err: errors.New("boom")}, cliframe.Global{}, "1")
 	if code != 1 || errs != "error: boom\n" {
 		t.Errorf("%d %q", code, errs)
+	}
+}
+
+func TestReadQuotesEveryLineEmptyOnesToo(t *testing.T) {
+	r := cmds.ReadResult{Number: 1, From: "a.b.c", Trust: "verified", Kind: "fyi", Body: "one\n\nthree\n"}
+	if got := r.Text(cmdcore.Opts{}); !strings.HasSuffix(got, "\n\n> one\n>\n> three") {
+		t.Errorf("text: %q", got)
 	}
 }

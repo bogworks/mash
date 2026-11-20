@@ -157,7 +157,7 @@ func TestStrangerHooksDisabled(t *testing.T) {
 	time.Sleep(12 * time.Second)
 	c.call(t, "who", `{}`)
 	// read delivers the message and acks it. The seq is the first message's.
-	if got := c.call(t, "read", `{"number":1}`); !strings.Contains(got, "\n\nhooks are off") {
+	if got := c.call(t, "read", `{"number":1}`); !strings.Contains(got, "\n\n> hooks are off") {
 		t.Fatalf("read:\n%s", got)
 	}
 	eventually(t, 5*time.Second, "read acked the message", func() bool { return unreadOf(t, w, "a") == 0 })
