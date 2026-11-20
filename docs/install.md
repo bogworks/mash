@@ -45,7 +45,7 @@ grep ' install.sh$' SHA256SUMS | sha256sum -c -            # macOS: shasum -a 25
 less install.sh && bash install.sh
 ```
 
-An agent does not pipe a download into a shell: the setup skill downloads each script, checks it against `SHA256SUMS`, shows you what it is about to run and runs it after a yes. All three scripts are also the repository's own `scripts/` files at the release commit, byte for byte; the release check compares them ([ADR 0150](decisions/0150-releases-carry-install-and-local-nats-setup-scripts-as-attested-assets.md), [ADR 0151](decisions/0151-the-release-carries-a-one-time-0-5-5-migration-script.md)).
+An agent does not pipe a download into a shell: the setup skill downloads each script, checks it against `SHA256SUMS`, shows you what it is about to run and runs it after a yes. All three scripts are also the repository's own `scripts/` files at the release commit, byte for byte; the release check compares them ([ADR 0150](decisions/0150-releases-carry-install-and-local-nats-setup-scripts-as-attested-assets.md), [ADR 0152](decisions/0152-the-release-carries-a-one-time-0-5-5-migration-script.md)).
 
 To build from source instead, `go install github.com/bogworks/mash/cmd/mash@latest` and `.../cmd/mashctl@latest` need Go 1.27.4 or newer; the result is not the attested build.
 
@@ -222,7 +222,7 @@ What it changes:
 If you skip it, nothing is lost: when 0.5.6 finds the old settings it
 changes nothing and stops with a message that names this script. It is a
 script you run once, not a `mash` or `mashctl` command
-([ADR 0151](decisions/0151-the-release-carries-a-one-time-0-5-5-migration-script.md)).
+([ADR 0152](decisions/0152-the-release-carries-a-one-time-0-5-5-migration-script.md)).
 
 ## Synadia Cloud
 

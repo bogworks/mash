@@ -924,7 +924,7 @@ func TestAssets_verifiesSBOMAndBuildProvenanceOfEveryBinary(t *testing.T) {
 		f.markerFor(t, "noprov", "mash-linux-arm64")
 		refused(t, f, "mash-linux-arm64")
 	})
-	// ADR 0150, 0151: the three scripts are attested subjects and the repository's own files at X.
+	// ADR 0150, 0152: the three scripts are attested subjects and the repository's own files at X.
 	for _, script := range release.ScriptNames() {
 		script := script
 		t.Run("a missing "+script, func(t *testing.T) {
