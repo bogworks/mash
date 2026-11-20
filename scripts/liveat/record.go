@@ -89,7 +89,7 @@ func (r Record) Markdown() string {
 		res = "FAIL"
 	}
 	if n := r.pendingCount(); n > 0 && res == "PASS" {
-		res = fmt.Sprintf("PASS, with %d check(s) pending (a pending check is not a pass: its protection is not built yet)", n)
+		res = fmt.Sprintf("PASS WITH PENDING (not a clean pass): %d check(s) pending, their protection is not built yet; `liveat all --strict` fails on them", n)
 	}
 	if r.LocalSubstrate {
 		res = "local substrate: not AT-005 evidence (checks: " + res + ")"

@@ -104,14 +104,22 @@ func scanArgvs(argvs []Argv, secrets map[string][]byte) []Leak {
 // scanProcCmdlines is scanArgvs over the live processes: the command line of every process under procRoot (/proc),
 // read only. A hit names the pid.
 func scanProcCmdlines(procRoot string, secrets map[string][]byte) ([]Leak, int, error) {
+	l, n, _, err := scanProcCmdlinesPIDs(procRoot, secrets)
+	return l, n, err
+}
+
+// scanProcCmdlinesPIDs is scanProcCmdlines that also returns the PIDs whose command line it read.
+func scanProcCmdlinesPIDs(procRoot string, secrets map[string][]byte) ([]Leak, int, []int, error) {
 	ents, err := os.ReadDir(procRoot)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
 	}
+	var pids []int
 	var leaks []Leak
 	n := 0
 	for _, e := range ents {
-		if _, err := strconv.Atoi(e.Name()); err != nil {
+		pid, err := strconv.Atoi(e.Name())
+		if err != nil {
 			continue
 		}
 		b, err := os.ReadFile(filepath.Join(procRoot, e.Name(), "cmdline"))
@@ -119,11 +127,85 @@ func scanProcCmdlines(procRoot string, secrets map[string][]byte) ([]Leak, int, 
 			continue // the process ended, or is not ours to read
 		}
 		n++
+		pids = append(pids, pid)
 		for _, kind := range secretKinds(strings.ReplaceAll(string(b), "\x00", "\x01"), secrets) {
 			leaks = append(leaks, Leak{File: "process " + e.Name() + " (cmdline)", Kind: kind})
 		}
 	}
-	return leaks, n, nil
+	return leaks, n, pids, nil
+}
+
+// procScanHolds judges a scan of the processes: it is only worth anything if it read at least two command lines and the
+// server's own (srvPID) was among them; a scan that read nothing proves nothing.
+func procScanHolds(leaks []Leak, n int, pids []int, srvPID int, err error) (bool, string) {
+	var bad []string
+	if err != nil {
+		bad = append(bad, "the scan failed: "+err.Error())
+	}
+	if n < 2 {
+		bad = append(bad, "only "+strconv.Itoa(n)+" process command line(s) were read: the scan proves nothing")
+	}
+	if srvPID <= 0 || !slices.Contains(pids, srvPID) {
+		bad = append(bad, "the server's own process ("+strconv.Itoa(srvPID)+") was not among those read: the scan proves nothing")
+	}
+	if len(leaks) > 0 {
+		bad = append(bad, leakList(leaks))
+	}
+	if len(bad) > 0 {
+		return false, strings.Join(bad, "; ")
+	}
+	return true, ""
+}
+
+// procCheck scans /proc now and records the check; when is "while a mash serve session is live" or "at the end".
+func (a *AT) procCheck(when string) {
+	pl, n, pids, err := scanProcCmdlinesPIDs("/proc", a.secrets)
+	ok, d := procScanHolds(pl, n, pids, a.srvPID, err)
+	a.C.Check("argv: none of the "+strconv.Itoa(n)+" processes in the container ("+when+"; nats-server and the sessions included) has a registered secret or a seed- or JWT-shaped string in its command line", ok, d)
+}
+
+// controlEverywhere judges that the signed control message reached all three places the unverified ones are looked for
+// in: the session output, mash inbox and mash read, with mash inbox and mash read exiting 0. Without it a check that
+// the unverified mail is absent proves nothing.
+func controlEverywhere(marker, serveOut, inboxOut string, inboxCodes []int, readOut string, readCode int) (bool, string) {
+	var bad []string
+	for _, c := range inboxCodes {
+		if c != 0 {
+			bad = append(bad, "mash inbox exit "+strconv.Itoa(c))
+		}
+	}
+	if len(inboxCodes) == 0 {
+		bad = append(bad, "mash inbox was not run")
+	}
+	if readCode != 0 {
+		bad = append(bad, "mash read exit "+strconv.Itoa(readCode))
+	}
+	for _, p := range []struct{ name, text string }{{"the session", serveOut}, {"mash inbox", inboxOut}, {"mash read", readOut}} {
+		if !strings.Contains(p.text, marker) {
+			bad = append(bad, "absent from "+p.name)
+		}
+	}
+	if len(bad) > 0 {
+		return false, "control not delivered: the check proves nothing (" + strings.Join(bad, "; ") + ")"
+	}
+	return true, "shown in the session, mash inbox and mash read"
+}
+
+// recreateRefusalRE is mashctl's own text for an address that was deleted or is taken (cmd/mashctl/endpoint_create.go).
+var recreateRefusalRE = regexp.MustCompile(`(?i)was revoked|was deleted and its address cannot be used again|never reassigned|already exists`)
+
+// recreateRefused judges the creation of a deleted address again: a refusal that gives that reason, not any failure.
+func recreateRefused(r Result) (bool, string) {
+	switch {
+	case r.Code <= 0 || crashed(r):
+		return false, "exit " + strconv.Itoa(r.Code) + " is not a refusal"
+	case connErrRE.MatchString(r.Text()):
+		return false, "the failure reads like a lost connection, not a refusal: " + exitDetail(r)
+	case !recreateRefusalRE.MatchString(r.Text()):
+		first, _, _ := strings.Cut(strings.TrimSpace(r.Text()), "\n")
+		return false, "the failure does not say the address was deleted or exists: " + exitDetail(r) + "; it said: " + redact(first)
+	}
+	return true, exitDetail(r)
 }
 
 // labelled is the output of one command, for the scan of everything the commands said.
@@ -223,6 +305,8 @@ func refusalHolds(r Result, before, after []fileGuard, want *regexp.Regexp, secr
 	}
 	if strings.TrimSpace(r.Text()) == "" {
 		bad = append(bad, "no message")
+	} else if connErrRE.MatchString(r.Text()) {
+		bad = append(bad, "the message reads like a failed connection, not a refusal")
 	} else if !want.MatchString(r.Text()) {
 		bad = append(bad, "the message does not say what was refused ("+want.String()+")")
 	}
@@ -453,7 +537,7 @@ var AT004 = Scenario{
 		"(3) Unverified mail is refused: absent, claimed, unknown-signer and stale mail is published with the sender's own creds (headers crafted with the sap package), the recipient's session, mash inbox and mash read are checked, a properly signed control message is delivered, and mashctl endpoint inbox shows each stored message with its trust label. " +
 		"(4) Plain text without the override is refused before connecting (a plain nats:// URL to a non-loopback address; mash and mashctl); the MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION behaviour is pending core's R1-2. " +
 		"(5) A deleted endpoint's credential is accepted before the delete and refused after it, on this one server; the form on all three servers is AT-005's check (refusedOn and acceptedOn on the deleted review key). " +
-		"Checks whose protection is not built are recorded pending, never as passes (at4Pending).",
+		"Checks whose protection is not built are recorded pending, never as passes (at4Pending); `liveat all --strict` (the release gate) exits 3 while any is pending.",
 	Body: func(a *AT) { a.at004() },
 }
 
@@ -763,7 +847,6 @@ func (s *at4) files() {
 				r.Code == 0 && tg.Diff(after) == "" && now.Kind == "file", exitDetail(r)+"; target: "+orNone(tg.Diff(after))+"; path is now a "+now.Kind)
 		}
 	}
-	a.C.Check("files: the existing-file tests left every secret out of the captured output (scanned with the rest at the end)", true, "")
 }
 
 // join probes for core's `mash join`. Its secret files (the join file it reads, the creds it writes) are not tested
@@ -1017,16 +1100,21 @@ func (s *at4) mail() {
 	a.C.Check("mail: the properly signed control message is delivered to the recipient's session (it proves the crafted headers are well formed)", got, "")
 	time.Sleep(2 * time.Second) // anything the session would still show for the others
 	serveOut := p.Stdout()
+	s.a.procCheck("while the recipient's mash serve session is live")
 	p.Stop() // the CLI reads below are the same endpoint: they must not take its lease from a live session
 	listText := ""
+	var inboxCodes []int
 	for _, args := range [][]string{{"inbox"}, {"inbox", "--limit", "100"}} {
 		r := s.mash("review-"+strings.Join(args, "-"), s.he, s.reviewEnv, args...)
 		listText += r.Stdout + "\n" + r.Stderr + "\n"
+		inboxCodes = append(inboxCodes, r.Code)
 	}
 	readText := map[string]string{}
+	readCodes := map[string]int{}
 	for _, m := range sent {
 		r := s.mash("review-read-"+m.Name, s.he, s.reviewEnv, "read", strconv.FormatUint(m.Seq, 10))
 		readText[m.Name] = r.Stdout + "\n" + r.Stderr
+		readCodes[m.Name] = r.Code
 	}
 	ir := s.ctl("ctl-inbox-review", s.ha, nil, "endpoint", "inbox", "alice.dev.review", "--json", "--limit", "100")
 	a.C.Check("mail: mashctl endpoint inbox alice.dev.review --json succeeds", ir.Code == 0, exitDetail(ir))
@@ -1058,13 +1146,13 @@ func (s *at4) mail() {
 	}
 	tr, found := storedTrust(ir.Stdout, ctrl.Seq)
 	a.C.Check("mail: mashctl endpoint inbox shows the control message with trust verified", found && tr == "verified", "trust "+orNone(tr))
-	cs, _ := shownAnywhere(ctrl)
-	a.C.Check("mail: the control message is shown to the recipient (session, mash inbox or mash read)", cs, "")
+	cs, cd := controlEverywhere(ctrl.Marker, serveOut, listText, inboxCodes, readText[ctrl.Name], readCodes[ctrl.Name])
+	a.C.Check("mail: the control message is shown to the recipient in all three places (the session, mash inbox and mash read, both commands exiting 0)", cs, cd)
 	// What the specification adds: unverified mail is not shown at all (and is counted by doctor).
 	dr := s.mash("review-doctor", s.he, s.reviewEnv, "doctor")
 	counted := regexp.MustCompile(`refused\s+warn\s+\d+ unverified message`).MatchString(dr.Stdout)
 	a.pend("unverified-refused", "mail: absent, claimed, unknown-signer and stale mail never reaches the recipient's session, mash inbox or mash read, and mash doctor counts what was refused",
-		allDropped && counted, orNone(strings.Join(shownDetail, "; "))+"; doctor counts the refusals: "+strconv.FormatBool(counted))
+		cs && allDropped && counted, orNone(strings.Join(shownDetail, "; "))+"; doctor counts the refusals: "+strconv.FormatBool(counted))
 }
 
 // ---- check 4: plain text ----------------------------------------------------------------------------------------
@@ -1180,7 +1268,8 @@ func (s *at4) deleted() {
 	a.C.Check("deleted: after the delete a direct NATS connection with the credential is refused with an authorization violation", derr != nil && strings.Contains(strings.ToLower(derr.Error()), "authorization"), errDetail(derr))
 	// the same credential still names an address that cannot be made again
 	r = s.ctl("deleted-recreate", s.ha, nil, "endpoint", "create", "alice.dev.temp", "--public-key", strings.TrimSuffix(tmp.seed, ".seed")+".pub", "--out", filepath.Join(s.work, "temp-again.join"))
-	a.C.Check("deleted: the deleted address cannot be made again with the same key", r.Code != 0, exitDetail(r))
+	ok, d := recreateRefused(r)
+	a.C.Check("deleted: the deleted address cannot be made again with the same key (refused because it was deleted or exists, not for another reason)", ok, d)
 }
 
 // ---- the scans of everything ------------------------------------------------------------------------------------
@@ -1193,8 +1282,7 @@ func (s *at4) finalScans() {
 	argvs := all[min(s.runStart, len(all)):]
 	al := scanArgvs(argvs, a.secrets)
 	a.C.Check("argv: none of the "+strconv.Itoa(len(argvs))+" command lines of the run holds a registered secret or a seed- or JWT-shaped string (a secret on the command line shows in ps)", len(al) == 0, leakList(al))
-	pl, n, err := scanProcCmdlines("/proc", a.secrets)
-	a.C.Check("argv: none of the "+strconv.Itoa(n)+" processes in the container (nats-server and the sessions included) has a registered secret or a seed- or JWT-shaped string in its command line", err == nil && len(pl) == 0, leakList(pl)+errDetail(err))
+	s.a.procCheck("at the end of the run")
 	seeds := map[string][]byte{} // the seeds that live on the endpoint machine only
 	for k, v := range a.secrets {
 		if strings.HasPrefix(k, "design seed") || strings.HasPrefix(k, "review seed") || strings.HasPrefix(k, "seed ") {

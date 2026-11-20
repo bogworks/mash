@@ -60,6 +60,17 @@ func (c *Checks) PendingCount() int {
 	return n
 }
 
+// pendingNames are the names of the pending checks, in order.
+func pendingNames(c *Checks) []string {
+	var out []string
+	for _, a := range c.All() {
+		if a.Pending {
+			out = append(out, a.Name)
+		}
+	}
+	return out
+}
+
 // All returns a copy of the assertions in the order they were made.
 func (c *Checks) All() []Assertion {
 	c.mu.Lock()

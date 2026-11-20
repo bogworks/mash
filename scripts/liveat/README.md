@@ -32,19 +32,20 @@ check is a negative test: it fails when its protection is removed.
 1. No secret in argv or output. Every secret the scenario makes is registered (seeds, creds files, user JWTs, join files, the operator and
    account keys, the CA and server keys, the admin and system creds). About a hundred `mash` and `mashctl` commands run with `--json`, `--verbose`
    and failure paths, including a seed, a join file, a creds file or a key fed to an option that expects something else. All output, every
-   recorded argv of the run (`Runner.Argvs`) and the command line of every process in the container (`/proc/*/cmdline`) are scanned.
+   recorded argv of the run (`Runner.Argvs`) and the command line of every process in the container (`/proc/*/cmdline`) are scanned, once while a `mash serve` session is live and once at the end; a scan that read fewer than two processes, or not the server's own, fails.
 2. Secret files are refused over an existing file, a symlink and a dangling symlink, and left byte-identical: the creds file in the config
    folder, the join file of `endpoint create` and `reissue --out`, `mash key create` (seed, `.pub`, `--pub-out`), the key pending file,
    `mash credential create --out` (and `--force` replaces a link, never writes through it).
 3. Unverified mail: absent, claimed, unknown-signer and stale mail is published with the sender's own creds (headers crafted with `sap`),
-   the recipient's session, `mash inbox` and `mash read` are checked, a signed control message is delivered, and `mashctl endpoint inbox`
+   the recipient's session, `mash inbox` and `mash read` are checked, a signed control message must be present in all three places (a missing control, or `mash inbox` or `mash read` exiting non-zero, fails the check: it would prove nothing), and `mashctl endpoint inbox`
    shows each stored message with its trust label.
-4. Plain text: a plain `nats://` URL to a non-loopback address with no override is refused before connecting.
-5. A deleted endpoint's credential is accepted before the delete and refused after it on the one server. The all-three-servers form is
+4. A refusal is not a lost connection: output that reads like a connection error is never accepted as a refusal, and the re-creation of a deleted address must fail with the deleted/exists reason.
+5. Plain text: a plain `nats://` URL to a non-loopback address with no override is refused before connecting.
+6. A deleted endpoint's credential is accepted before the delete and refused after it on the one server. The all-three-servers form is
    AT-005's `refusedOn` / `acceptedOn` on the deleted review key.
 
 A check whose protection is not built is **pending**: the table line says `PEND`, the record says `pending`, it is not counted as a pass,
-and the result reads `PASS, with N check(s) pending`. `at4Pending` in `at004.go` lists them with a reason; a listed check that starts to
+and the result reads `PASS WITH PENDING (not a clean pass)`. Without `--strict` such a run still exits 0; with `--strict` (accepted by `at001`..`at004` and `all`) it prints `pending checks fail under --strict: <names>` and exits 3 (1 fail, 2 usage, 3 pending under --strict, 4 setup). The final release gate runs `liveat all --strict`; AT-005 has no pending check today. `at4Pending` in `at004.go` lists them with a reason; a listed check that starts to
 pass fails the run until its entry is removed, so the list only shrinks. Pending today: the `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION`
 behaviour (core's R1-2), the refusal of unverified mail by `mash serve`, `mash inbox` and `mash read`, and the `mash join` checks.
 

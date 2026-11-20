@@ -381,7 +381,7 @@ func TestPendingIsNotAPassAndTheTableOnlyShrinks(t *testing.T) {
 	c.Pending("later", "waits")
 	rec := Record{RunID: "x", Revision: "y", AT: "at004", Scenario: "s", Observed: c.All()}
 	md := rec.Markdown()
-	if !strings.Contains(md, "- pending: later (waits)") || strings.Contains(md, "- pass: later") || !strings.Contains(md, "PASS, with 1 check(s) pending") {
+	if !strings.Contains(md, "- pending: later (waits)") || strings.Contains(md, "- pass: later") || !strings.Contains(md, "PASS WITH PENDING (not a clean pass): 1 check(s) pending") {
 		t.Errorf("record:\n%s", md)
 	}
 	if !rec.Passed() {
@@ -431,5 +431,108 @@ func TestAT004IsListed(t *testing.T) {
 	realMain(nil, &so, &usage)
 	if !strings.Contains(usage.String(), "at004") {
 		t.Error("usage does not list at004")
+	}
+}
+
+func TestStrictExitMapping(t *testing.T) {
+	var b strings.Builder
+	if c := strictExit(false, []string{"x"}, &b); c != 0 || b.Len() != 0 {
+		t.Errorf("without --strict pending exits 0 silently: %d %q", c, b.String())
+	}
+	if c := strictExit(true, nil, &b); c != 0 {
+		t.Errorf("--strict with nothing pending exits 0: %d", c)
+	}
+	if c := strictExit(true, []string{"a", "b"}, &b); c != 3 || !strings.Contains(b.String(), "pending checks fail under --strict: a; b") {
+		t.Errorf("--strict with pending must exit 3: %d %q", c, b.String())
+	}
+}
+
+func TestPendingResultLineIsNotACleanPass(t *testing.T) {
+	r := Record{AT: "AT-4", RunID: "x", Observed: []Assertion{{Name: "a", Pass: true, Pending: true, Detail: "d"}}}
+	m := r.Markdown()
+	if !strings.Contains(m, "PASS WITH PENDING (not a clean pass)") || !strings.Contains(m, "- pending: a") {
+		t.Errorf("%s", m)
+	}
+	c := &Checks{}
+	c.Pending("p", "r")
+	c.Check("q", true, "")
+	if n := pendingNames(c); len(n) != 1 || n[0] != "p" {
+		t.Errorf("%v", n)
+	}
+}
+
+func TestControlEverywhereFailsWhenAPlaceLacksIt(t *testing.T) {
+	const m = "at4-control-1"
+	if ok, d := controlEverywhere(m, m, m, []int{0, 0}, m, 0); !ok {
+		t.Fatal(d)
+	}
+	for name, c := range map[string]struct {
+		s, i string
+		ic   []int
+		r    string
+		rc   int
+	}{
+		"not in the session": {"", m, []int{0}, m, 0},
+		"not in inbox":       {m, "", []int{0}, m, 0},
+		"not in read":        {m, m, []int{0}, "", 0},
+		"inbox exit 1":       {m, m, []int{0, 1}, m, 0},
+		"read exit 1":        {m, m, []int{0}, m, 1},
+		"inbox not run":      {m, m, nil, m, 0},
+	} {
+		if ok, d := controlEverywhere(m, c.s, c.i, c.ic, c.r, c.rc); ok || !strings.Contains(d, "control not delivered: the check proves nothing") {
+			t.Errorf("%s: %v %q", name, ok, d)
+		}
+	}
+}
+
+func TestProcScanHoldsFailsOnAVacuousScan(t *testing.T) {
+	if ok, d := procScanHolds(nil, 5, []int{1, 77, 9}, 77, nil); !ok {
+		t.Fatal(d)
+	}
+	if ok, _ := procScanHolds(nil, 0, nil, 77, nil); ok {
+		t.Error("n == 0 passed")
+	}
+	if ok, _ := procScanHolds(nil, 1, []int{9}, 9, nil); ok {
+		t.Error("n == 1 passed")
+	}
+	if ok, _ := procScanHolds(nil, 5, []int{1, 2, 3}, 77, nil); ok {
+		t.Error("a scan without the server's pid passed")
+	}
+	root := t.TempDir()
+	for _, p := range []string{"1", "12"} {
+		os.Mkdir(filepath.Join(root, p), 0o755)
+		os.WriteFile(filepath.Join(root, p, "cmdline"), []byte("x\x00y"), 0o644)
+	}
+	l, n, pids, err := scanProcCmdlinesPIDs(root, nil)
+	if ok, _ := procScanHolds(l, n, pids, 12, err); !ok {
+		t.Error("fake /proc with the server should pass")
+	}
+	if ok, _ := procScanHolds(l, n, pids, 13, err); ok {
+		t.Error("fake /proc without the server pid passed")
+	}
+}
+
+func TestConnectionRefusedIsNotARefusal(t *testing.T) {
+	for _, txt := range []string{"error: dial tcp 127.0.0.1:4222: connection refused\n", "nats: no servers available for connection, refused"} {
+		if ok, _ := refusalHolds(Result{Code: 1, Stderr: txt}, nil, nil, refusedWordsRE, nil); ok {
+			t.Errorf("%q accepted as a refusal", txt)
+		}
+	}
+	if ok, d := refusalHolds(Result{Code: 1, Stderr: "x already exists\n"}, nil, nil, refusedWordsRE, nil); !ok {
+		t.Error(d)
+	}
+}
+
+func TestRecreateRefusedNeedsTheReason(t *testing.T) {
+	if ok, d := recreateRefused(Result{Code: 1, Stderr: "alice.dev.temp was deleted and its address cannot be used again"}); !ok {
+		t.Error(d)
+	}
+	if ok, d := recreateRefused(Result{Code: 1, Stderr: "error: the public key UA4U75BH... was revoked"}); !ok {
+		t.Error(d)
+	}
+	for _, r := range []Result{{Code: 1, Stderr: "boom: disk full"}, {Code: 1, Stderr: "connection refused"}, {Code: 0, Stdout: "already exists"}, {Code: 1, Stderr: "panic: already exists\ngoroutine 1"}} {
+		if ok, _ := recreateRefused(r); ok {
+			t.Errorf("%+v accepted", r)
+		}
 	}
 }
