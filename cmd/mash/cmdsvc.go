@@ -41,7 +41,7 @@ var helpFrame = cmdcore.Frame{Tool: "mash", Globals: []cmdcore.HelpOption{
 	{Flag: "--server", Value: "url", Desc: "The server address. May be given more than once."},
 	{Flag: "--ca", Value: "path", Desc: "The certificate authority's certificate, when the server uses its own."},
 	{Flag: "--config-dir", Value: "path", Desc: "The configuration folder. Default: ~/.config/mash."},
-	{Flag: "--verbose", Short: "-v", Desc: "After the usual output, print more about what was done, as 'label: value' lines."},
+	{Flag: cliframe.DetailFlag, Desc: "Print the fuller answer: after the usual line, more as 'label: value' lines; with --json, the fuller object."},
 	{Flag: "--json", Desc: "Print the result as JSON: the same object the matching MCP tool returns."},
 	{Flag: "--no-color", Desc: "Never use color. Color is used only on a terminal, and NO_COLOR is honored."},
 	{Flag: "--help", Short: "-h", Desc: "Show help for the command."},
@@ -78,7 +78,12 @@ func shortCommit(c string) string {
 type buildVersion struct{ pluginRoot string }
 
 func (b buildVersion) Version() (version, commit, plugin string) {
-	return endpoint.CurrentVersion(), shortCommit(endpoint.CurrentCommit()), pluginVersion(b.pluginRoot)
+	// the whole revision: --json and the tool carry it; the text form shortens it (cmds.VersionResult.Text)
+	commit = endpoint.CurrentCommit()
+	if commit == "" {
+		commit = "unknown"
+	}
+	return endpoint.CurrentVersion(), commit, pluginVersion(b.pluginRoot)
 }
 
 // sendOn sends as ep: the checks the send tool and the command line share (the numbers name messages of ep's own

@@ -155,7 +155,7 @@ func runEp(s epSpec, g cliframe.Global, args []string, env func(string) string, 
 	if err != nil {
 		return cliframe.Report(stdout, stderr, failErr(err), in.json)
 	}
-	announceTarget(cfg, env, stderr, nil, g.Verbose)
+	announceTarget(cfg, env, stderr, nil, g.Detail)
 	adm, ctx, closeAdmin, err := ctl.OpenAdmin("mashctl", cfg)
 	if err != nil {
 		return cliframe.Report(stdout, stderr, failErr(err), in.json)

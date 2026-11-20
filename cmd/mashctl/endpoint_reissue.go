@@ -86,12 +86,12 @@ func runEndpointReissue(args []string, g cliframe.Global, env func(string) strin
 	if err != nil {
 		return cliframe.Report(stdout, stderr, err, jsonRequested(args, "--out", "--public-key"))
 	}
-	in.verbose = g.Verbose
+	in.verbose = g.Detail
 	t, res, err := epReissue(&in, env, lookup, stderr)
 	if err != nil {
 		return cliframe.Report(stdout, stderr, err, in.json)
 	}
-	epPrint(stdout, "reissue", t, res, g.Verbose, in.json)
+	epPrint(stdout, "reissue", t, res, g.Detail, in.json)
 	return 0
 }
 

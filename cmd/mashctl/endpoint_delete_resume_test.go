@@ -78,7 +78,7 @@ func TestEndpointDeleteFinishesAfterKilledPurge(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				so, se, code := h.run("endpoint", "delete", a.String(), "--yes", "--verbose")
+				so, se, code := h.run("endpoint", "delete", a.String(), "--yes", "--detail")
 				if code != 0 {
 					t.Fatalf("%d %q %q", code, so, se)
 				}

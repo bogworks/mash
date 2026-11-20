@@ -206,6 +206,11 @@ var credsFileRE = regexp.MustCompile(`^([a-z0-9-]{1,63})\.([a-z0-9-]{1,63})\.([a
 // installedEndpoints lists, sorted, the addresses of the regular files directly in dir named owner.group.name.creds that
 // are owned by the current user and have mode 0600; any other file does not count.
 func installedEndpoints(dir string) []string {
+	return InstalledEndpoints(dir)
+}
+
+// InstalledEndpoints is installedEndpoints for callers outside the package (mash join).
+func InstalledEndpoints(dir string) []string {
 	if dir == "" {
 		return nil
 	}

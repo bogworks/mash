@@ -41,6 +41,9 @@ func Schema[P any]() map[string]any {
 	return schemaOf(paramFields(reflect.TypeOf((*P)(nil)).Elem()))
 }
 
+// DetailParamDescription is the description of the MCP param that asks for the fuller object.
+const DetailParamDescription = "Return the fuller object. Default false: the usual, minimal one."
+
 func schemaOf(fields []field) map[string]any {
 	props := map[string]any{}
 	required := []string{}
@@ -81,6 +84,7 @@ func schemaOf(fields []field) map[string]any {
 // JSON names after the required fields and enums are checked.
 func MCPTool[P any, R Result](c Command[P, R], env EnvFunc) Tool {
 	fields := paramFields(reflect.TypeOf((*P)(nil)).Elem())
+	_, hasDetail := any(*new(R)).(Detailer)
 	desc := c.MCPDescription
 	if desc == "" {
 		desc = c.Summary
@@ -88,9 +92,16 @@ func MCPTool[P any, R Result](c Command[P, R], env EnvFunc) Tool {
 	return Tool{
 		Name:        c.Name,
 		Description: desc,
-		Schema:      schemaOf(fields),
+		Schema:      withDetail(schemaOf(fields), hasDetail),
 		CallStructured: func(ctx context.Context, args json.RawMessage) (string, any, error) {
 			var p P
+			detail := false
+			if hasDetail {
+				var err error
+				if detail, args, err = takeDetail(args); err != nil {
+					return "", nil, toolError(err)
+				}
+			}
 			if err := decodeArgs(fields, args, &p); err != nil {
 				return "", nil, toolError(err)
 			}
@@ -104,22 +115,29 @@ func MCPTool[P any, R Result](c Command[P, R], env EnvFunc) Tool {
 			if e == nil {
 				return "", nil, toolError(errNoEnv(c.Name))
 			}
-			e.Opts = Opts{NoColor: true, Width: 80}
+			e.Opts = Opts{NoColor: true, Width: 80, Detail: detail}
 			r, err := c.Run(ctx, e, p)
 			if err != nil {
 				return "", nil, toolError(err)
 			}
 			text := r.Text(e.Opts)
+			var out any = r
+			if d, ok := any(r).(Detailer); ok && detail {
+				if more := d.DetailText(e.Opts); more != "" {
+					text += "\n" + more
+				}
+				out = d.DetailValue()
+			}
 			if h, ok := any(r).(Hinter); ok && h.Hint() != "" {
 				text += "\nhint: " + h.Hint()
 			}
-			b, err := marshal(r)
+			b, err := marshal(out)
 			if err != nil {
 				return "", nil, toolError(err)
 			}
 			var structured any
 			if len(b) > 0 && b[0] == '{' {
-				structured = r
+				structured = out
 			}
 			// A result that exits nonzero (a problem found by status or doctor, a warning under doctor's strict) is
 			// marked an error here as it exits nonzero at a shell; its report and structured result are the same.
@@ -129,6 +147,36 @@ func MCPTool[P any, R Result](c Command[P, R], env EnvFunc) Tool {
 			return text, structured, nil
 		},
 	}
+}
+
+// withDetail adds the boolean detail param to a schema when the command has a fuller answer.
+func withDetail(s map[string]any, on bool) map[string]any {
+	if on {
+		s["properties"].(map[string]any)[cliframe.DetailParam] = map[string]any{"type": "boolean", "description": DetailParamDescription}
+	}
+	return s
+}
+
+// takeDetail removes the detail param from the arguments and returns it. It must be a boolean.
+func takeDetail(args json.RawMessage) (bool, json.RawMessage, error) {
+	if s := strings.TrimSpace(string(args)); s == "" || s == "null" {
+		return false, args, nil
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(args, &raw); err != nil {
+		return false, args, nil // decodeArgs says the arguments must be an object
+	}
+	v, ok := raw[cliframe.DetailParam]
+	if !ok {
+		return false, args, nil
+	}
+	var d bool
+	if err := json.Unmarshal(v, &d); err != nil {
+		return false, nil, cliframe.Usagef("%s must be true or false", cliframe.DetailParam)
+	}
+	delete(raw, cliframe.DetailParam)
+	b, _ := json.Marshal(raw)
+	return d, b, nil
 }
 
 func decodeArgs[P any](fields []field, args json.RawMessage, p *P) error {

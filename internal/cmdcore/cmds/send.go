@@ -79,7 +79,7 @@ type SendResult struct {
 // Text is "Mail sent (number 42)." with the words Urgent and the kind put in front when they are not the defaults ("Urgent
 // question mail sent (number 43)."), "Mail sent as fyi (number 44): a reply marked question that asks nothing." when the
 // kind was changed (with "Urgent" in front for an urgent one), or "Mail already sent; nothing new stored." for a repeated
-// --id. The number is printed because the sender can get it nowhere else. With Verbose it adds the to, kind and urgent
+// --id. The number is printed because the sender can get it nowhere else. With Detail it adds the to, kind and urgent
 // lines, aligned and labelled.
 func (r SendResult) Text(o cmdcore.Opts) string {
 	var s string
@@ -102,7 +102,7 @@ func (r SendResult) Text(o cmdcore.Opts) string {
 		s = strings.Join(words, " ")
 		s = strings.ToUpper(s[:1]) + s[1:]
 	}
-	if !o.Verbose {
+	if !o.Detail {
 		return s
 	}
 	yn := map[bool]string{true: "yes", false: "no"}

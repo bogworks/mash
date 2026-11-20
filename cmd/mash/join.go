@@ -152,6 +152,15 @@ func credsText(j joinfile.File, req cmds.JoinRequest) ([]byte, error) {
 }
 
 // serversIn is the servers a config.json value names: a JSON array of strings, or one string that is a comma list.
+// stringIn is the JSON string raw holds, "" when it is absent or not a string.
+func stringIn(raw json.RawMessage) string {
+	var v string
+	if json.Unmarshal(raw, &v) != nil {
+		return ""
+	}
+	return v
+}
+
 func serversIn(raw json.RawMessage) []string {
 	if len(raw) == 0 {
 		return nil
@@ -187,6 +196,14 @@ func sameServers(a, b []string) bool {
 }
 
 // shown is path as it is shown: a path under the home folder starts with ~.
+// absPath is p made absolute (p itself when that cannot be done).
+func absPath(p string) string {
+	if a, err := filepath.Abs(p); err == nil {
+		return a
+	}
+	return p
+}
+
 func (s joinSvc) shown(path string) string {
 	return config.TildeIn(path, strings.TrimRight(s.home, "/"))
 }
@@ -211,8 +228,9 @@ func (s joinSvc) Join(_ context.Context, req cmds.JoinRequest) (cmds.JoinOutcome
 	if dir == "" {
 		return cmds.JoinOutcome{}, cliframe.Usagef("there is no configuration folder: HOME is not set").WithHint("mash join " + req.File + " --config-dir <folder>")
 	}
-	otherFolder := func(servers []string) error {
-		return cliframe.Failf("this configuration folder is set up for %s", config.Clean(strings.Join(servers, ", "))).
+	// one folder serves one mesh: a different server or certificate authority is refused, with or without --replace
+	otherFolder := func(what string) error {
+		return cliframe.Failf("%s was set up with a different %s;\n       nothing was changed", s.shown(dir), what).
 			WithHint("mash join " + req.File + " --config-dir <another folder>")
 	}
 
@@ -234,36 +252,50 @@ func (s joinSvc) Join(_ context.Context, req cmds.JoinRequest) (cmds.JoinOutcome
 	}
 	have := serversIn(cfg["servers"])
 	if len(have) > 0 && !sameServers(have, j.Servers) {
-		return cmds.JoinOutcome{}, otherFolder(have)
+		return cmds.JoinOutcome{}, otherFolder("server")
 	}
 
-	address := j.Address
-	credsPath := filepath.Join(dir, address+".creds")
-	out := cmds.JoinOutcome{Endpoint: address, Servers: slices.Clone(j.Servers), Creds: s.shown(credsPath)}
-	if _, err := os.Lstat(credsPath); err == nil && !req.Replace {
-		return cmds.JoinOutcome{}, cliframe.Failf("%s is already installed here", address).WithHint("mash join " + req.File + " --replace")
+	// The certificate authority: the folder's ca.pem is every endpoint's trust, so a join file that brings a different
+	// one, or none where the folder has one, is refused.
+	// The folder's certificate authority is the file config.json's "ca" names (a relative path is read against the
+	// folder, a ~ against the home), else ca.pem.
+	caPath, caSet := filepath.Join(dir, joinCAFile), false
+	if named := stringIn(cfg["ca"]); named != "" {
+		caSet = true
+		if caPath = config.ExpandHome(named, s.home); !filepath.IsAbs(caPath) {
+			caPath = filepath.Join(dir, caPath)
+		}
 	}
-
-	// The certificate authority.
-	caPath := filepath.Join(dir, joinCAFile)
 	var caText []byte
 	writeCA := false
+	old, caErr := os.ReadFile(caPath)
+	if caErr != nil && !errors.Is(caErr, fs.ErrNotExist) {
+		return cmds.JoinOutcome{}, cliframe.Failf("cannot read %s: %v", s.shown(caPath), errors.Unwrap(caErr))
+	}
 	if j.CA != nil {
 		caText = []byte(*j.CA)
 		if !bytes.HasSuffix(caText, []byte("\n")) {
 			caText = append(caText, '\n')
 		}
-		old, err := os.ReadFile(caPath)
-		switch {
-		case err == nil && bytes.Equal(old, caText):
-		case err == nil && !req.Replace:
-			return cmds.JoinOutcome{}, cliframe.Failf("%s here is a different certificate authority than this join file's", s.shown(caPath)).
-				WithHint("mash join " + req.File + " --replace")
-		case err == nil || errors.Is(err, fs.ErrNotExist):
-			writeCA = true
-		default:
-			return cmds.JoinOutcome{}, cliframe.Failf("cannot read %s: %v", s.shown(caPath), errors.Unwrap(err))
-		}
+	}
+	switch {
+	case caErr != nil && caSet && j.CA != nil: // config.json names a certificate authority file that is not there: nothing to compare with
+		return cmds.JoinOutcome{}, cliframe.Failf("cannot read %s: it is missing", s.shown(caPath)).WithHint("mash doctor")
+	case caErr == nil && !bytes.Equal(old, caText):
+		return cmds.JoinOutcome{}, otherFolder("ca")
+	case caErr != nil && j.CA != nil && len(config.InstalledEndpoints(dir)) > 0:
+		// the folder has no certificate authority and already holds an endpoint: that endpoint trusts the system's
+		// roots, and one that brings a ca would change what it trusts. The first join into an empty folder sets it.
+		return cmds.JoinOutcome{}, otherFolder("ca")
+	case caErr != nil && j.CA != nil:
+		writeCA = true
+	}
+
+	address := j.Address
+	credsPath := filepath.Join(dir, address+".creds")
+	out := cmds.JoinOutcome{Endpoint: address, Servers: slices.Clone(j.Servers), Creds: s.shown(credsPath), CredsPath: absPath(credsPath)}
+	if _, err := os.Lstat(credsPath); err == nil && !req.Replace {
+		return cmds.JoinOutcome{}, cliframe.Failf("%s is already installed here", address).WithHint("mash join " + req.File + " --replace")
 	}
 
 	// What config.json will say: the servers, and ca when none is set.

@@ -139,7 +139,7 @@ Without a channel, mail still arrives at the next prompt or tool call, but nothi
 
 ## Mail is waiting but never shown (hooks not firing)
 
-A session's mail delivery is in one of these states (no command prints it; `hook.log` shows the symptoms):
+A session's mail delivery is in one of these states. `mash status --detail` (and the `status` tool with `detail`) prints it as `hooks:` (`not_run`, `suspected`, `degraded`, `refused`, or `ran`), and `mash doctor` shows it on the `delivery` row: `warn  hooks have not run in this session yet; they run with the first prompt or tool call` (no hint: no command fixes it), or `FAIL  hooks are not delivering mail to this session; restart the session after reinstalling` for the last three, with the hint `claude plugin install mash@mash`. A session that has just started warns until its first prompt or tool call, so `mash doctor --strict` exits 1 until then: a program that waits for a session to be ready repeats the check. A host that has no hooks warns for as long as it runs (known issue #993). `hook.log` shows the symptoms:
 - Hooks have not run yet in this session: normal until the first prompt or tool call.
 - Suspected: three wakes and no hook; re-waking stopped. A session that makes no tool calls stays here. Mail is read with the `read` tool.
 - Degraded: no mash hook has run although this session has made tool calls. Hooks are not running. Read each message with the `read` tool (by its number).

@@ -409,7 +409,7 @@ func TestInitJSONAndVerbose(t *testing.T) {
 
 	// --verbose follows the line with label: value lines for what was written, paths only.
 	b := newIniter(t, e)
-	out, errb, code = b.init("--verbose")
+	out, errb, code = b.init("--detail")
 	if code != 0 || errb != "" || !strings.HasPrefix(out, "Initialized mash on "+url+" for owner alice\n") {
 		t.Fatalf("verbose: %d %q %q", code, out, errb)
 	}

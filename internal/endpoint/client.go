@@ -352,12 +352,12 @@ func (e *Endpoint) init(ctx context.Context, opts ClientOptions) error {
 	}
 	selfRes := got[e.key]
 	if selfRes.err != nil {
-		return fmt.Errorf("mash: endpoint %s is not provisioned: %w", e.Display(), selfRes.err)
+		return &sentinelError{kind: ErrNotProvisioned, err: fmt.Errorf("mash: endpoint %s is not provisioned: %w", e.Display(), selfRes.err)}
 	}
 	self := selfRes.rec
 	if self.User != e.id.User {
-		return fmt.Errorf("mash: the credentials in %s (user %s) do not match endpoint %s (user %s)",
-			e.cfg.Creds, e.id.User, e.Display(), self.User)
+		return &sentinelError{kind: ErrCredsMismatch, err: fmt.Errorf("mash: the credentials in %s (user %s) do not match endpoint %s (user %s)",
+			e.cfg.Creds, e.id.User, e.Display(), self.User)}
 	}
 	e.self = self
 	if opts.FullDirectory {
@@ -566,3 +566,19 @@ func validDirectoryKey(name string) bool {
 	_, err := sap.AddressFromFlat(name)
 	return err == nil
 }
+
+// The two ways signing in finds the endpoint wrong once the server has accepted the connection, for errors.Is: the
+// endpoint's directory record is gone (absent, deleted or unusable), and the creds are another endpoint's.
+var (
+	ErrNotProvisioned = errors.New("the endpoint has no directory record")
+	ErrCredsMismatch  = errors.New("the creds belong to another endpoint")
+)
+
+// sentinelError is err, which also is kind to errors.Is; its text is err's.
+type sentinelError struct {
+	kind error
+	err  error
+}
+
+func (e *sentinelError) Error() string   { return e.err.Error() }
+func (e *sentinelError) Unwrap() []error { return []error{e.kind, e.err} }

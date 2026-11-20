@@ -33,7 +33,7 @@ const helpTail = `An endpoint is addressed owner.group.name: MASH_ENDPOINT (or c
 (owner.group.name.creds, mode 0600) is in the config directory is used; with
 several, name one.
 Global options, anywhere in the command: --endpoint ADDR, --creds PATH, --server
-URL (repeatable), --ca PATH, --config-dir PATH, --verbose, --json, --no-color. A
+URL (repeatable), --ca PATH, --config-dir PATH, --detail, --json, --no-color. A
 flag beats its environment variable, which beats config.json.
 Configuration: config.json {"servers","endpoint","ca"} in $MASH_CONFIG_DIR
 (default ~/.config/mash, or $XDG_CONFIG_HOME/mash), overridden by MASH_SERVER
@@ -193,7 +193,7 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 	if len(args) == 0 {
 		return cliframe.Report(stdout, stderr, cliframe.Usagef("mash needs a command").WithHint("mash --help"), false)
 	}
-	// The global options (--endpoint, --creds, --server, --ca, --config-dir, --verbose, --json, --no-color) are taken out
+	// The global options (--endpoint, --creds, --server, --ca, --config-dir, --detail, --json, --no-color) are taken out
 	// of the arguments wherever they stand, before any verb runs; a flag shadows its environment variable.
 	rawArgs := args
 	global, args, gerr := cliframe.ExtractOwning(cliframe.Spec{Tool: "mash", CredsEnv: "MASH_CREDS", CredsKey: "creds"}, args, nil)

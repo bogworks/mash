@@ -2,6 +2,7 @@ package cmds
 
 import (
 	"context"
+	"strings"
 
 	"github.com/bogworks/mash/internal/cliframe"
 	"github.com/bogworks/mash/internal/cmdcore"
@@ -22,9 +23,17 @@ type VersionResult struct {
 	Plugin  string `json:"plugin"`
 }
 
-// Text is "mash v<version> (<commit>)".
+// Text is "mash v<version> (<commit>)", the commit shortened to its first seven characters ("+dirty" kept); --json and the
+// tool carry the whole revision.
 func (r VersionResult) Text(cmdcore.Opts) string {
-	return "mash v" + r.Version + " (" + r.Commit + ")"
+	rev, dirty := strings.CutSuffix(r.Commit, "+dirty")
+	if len(rev) > 7 {
+		rev = rev[:7]
+	}
+	if dirty {
+		rev += "+dirty"
+	}
+	return "mash v" + r.Version + " (" + rev + ")"
 }
 
 // Version is the version command.

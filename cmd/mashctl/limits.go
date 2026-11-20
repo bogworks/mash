@@ -219,7 +219,7 @@ func runLimitsApply(args []string, g cliframe.Global, env func(string) string, l
 		default:
 			fmt.Fprintf(rt.stdout, "Raised %s\n", count(n, "inbox"))
 		}
-		if verbose := g.Verbose; verbose && !rt.in.json {
+		if verbose := g.Detail; verbose && !rt.in.json {
 			for _, l := range changed {
 				name, what, _ := strings.Cut(l, ": ")
 				if a, err := sap.AddressFromFlat(name); err == nil {

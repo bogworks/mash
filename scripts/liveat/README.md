@@ -30,7 +30,7 @@ searched for in all captured output like a seed.
 check is a negative test: it fails when its protection is removed.
 
 1. No secret in argv or output. Every secret the scenario makes is registered (seeds, creds files, user JWTs, join files, the operator and
-   account keys, the CA and server keys, the admin and system creds). About a hundred `mash` and `mashctl` commands run with `--json`, `--verbose`
+   account keys, the CA and server keys, the admin and system creds). About a hundred `mash` and `mashctl` commands run with `--json`, `--detail`
    and failure paths, including a seed, a join file, a creds file or a key fed to an option that expects something else. All output, every
    recorded argv of the run (`Runner.Argvs`) and the command line of every process in the container (`/proc/*/cmdline`) are scanned, once while a `mash serve` session is live and once at the end; a scan that read fewer than two processes, or not the server's own, fails.
 2. Secret files are refused over an existing file, a symlink and a dangling symlink, and left byte-identical: the creds file in the config

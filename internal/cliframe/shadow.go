@@ -76,7 +76,7 @@ func ExtractOwning(spec Spec, args []string, own map[string][]string) (Global, [
 		a := args[vi]
 		name, _, hasInline := strings.Cut(a, "=")
 		switch {
-		case a == "-v" || a == "--verbose" || a == "--json" || a == "--no-color":
+		case a == DetailFlag || a == "--json" || a == "--no-color":
 		case name == "--endpoint" || name == "--creds" || name == "--server" || name == "--ca" || name == "--config-dir" || spec.hasExtra(name):
 			if !hasInline {
 				vi++

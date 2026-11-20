@@ -301,6 +301,7 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 	srv.OnToolCall = func(string) {
 		if st := state.Load(); st != nil && st.ep != nil {
 			st.ep.ToolCalled(time.Now())
+			st.ep.RecordHookState()
 		}
 	}
 

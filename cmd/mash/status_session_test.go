@@ -73,6 +73,7 @@ func TestSessionStatusAnotherSessionHolds(t *testing.T) {
 	if text != tTo("a")+": ready, online" || sc["ready"] != true || sc["online"] != true || sc["reason"] != nil {
 		t.Fatalf("status after taking it: %q %v", text, sc)
 	}
+	hookRan(t, w, s, "a")
 	text, sc = toolObject(t, s, 13, "doctor")
 	if !strings.Contains(text, "\ndelivery  ok\n") || !strings.HasSuffix(text, "No problems.") || sc["problems"] != float64(0) {
 		t.Fatalf("doctor after taking it: %q", text)
@@ -118,7 +119,7 @@ func TestSessionStatusLostToANewerOne(t *testing.T) {
 		return text == tTo("a")+": ready, online"
 	})
 	text, _ = toolObject(t, fresh, 42, "doctor")
-	if !strings.Contains(text, "\ndelivery  ok\n") {
+	if !strings.Contains(text, "\ndelivery  warn  hooks have not run in this session yet; they run with\n                the first prompt or tool call\n") {
 		t.Fatalf("new doctor: %q", text)
 	}
 }
