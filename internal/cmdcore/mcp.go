@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"reflect"
 	"strings"
 
@@ -150,17 +149,33 @@ func decodeArgs[P any](fields []field, args json.RawMessage, p *P) error {
 	return nil
 }
 
-// toolError renders err the way the CLI reports it, as one error: "error: MSG" and "\nhint: HINT".
+// toolErr is the error MCPTool returns to the MCP server: the text is the CLI's "error: MSG" plus "\nhint: HINT", and
+// Structured is {"error": MSG, "hint": HINT} (no hint key when there is none).
+type toolErr struct{ msg, hint string }
+
+func (e *toolErr) Error() string {
+	s := "error: " + e.msg
+	if e.hint != "" {
+		s += "\nhint: " + e.hint
+	}
+	return s
+}
+
+// Structured implements mcp.StructuredError.
+func (e *toolErr) Structured() any {
+	m := map[string]any{"error": e.msg}
+	if e.hint != "" {
+		m["hint"] = e.hint
+	}
+	return m
+}
+
+// toolError renders err the way the CLI reports it, as one error with a structured form.
 func toolError(err error) error {
 	msg, hint := err.Error(), ""
 	var e *cliframe.Error
 	if errors.As(err, &e) && e != nil {
 		msg, hint = e.Msg, e.Hint
 	}
-	msg = strings.TrimPrefix(msg, "error: ")
-	s := fmt.Sprintf("error: %s", msg)
-	if hint != "" {
-		s += "\nhint: " + hint
-	}
-	return errors.New(s)
+	return &toolErr{msg: strings.TrimPrefix(msg, "error: "), hint: hint}
 }

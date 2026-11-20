@@ -2,6 +2,7 @@ package cmdcore
 
 import (
 	"io"
+	"reflect"
 	"sort"
 
 	"github.com/bogworks/mash/internal/cliframe"
@@ -19,7 +20,11 @@ type Entry interface {
 type entry[P any, R Result] struct{ c Command[P, R] }
 
 // Register wraps c as an Entry.
-func Register[P any, R Result](c Command[P, R]) Entry { return entry[P, R]{c} }
+// It panics when the tags of the params type P are inconsistent (see paramFields).
+func Register[P any, R Result](c Command[P, R]) Entry {
+	paramFields(reflect.TypeOf((*P)(nil)).Elem())
+	return entry[P, R]{c}
+}
 
 func (e entry[P, R]) CLIName() string { return e.c.Name }
 func (e entry[P, R]) Summary() string { return e.c.Summary }
