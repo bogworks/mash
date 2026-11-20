@@ -11,7 +11,7 @@ func TestRelTime(t *testing.T) {
 		ago  time.Duration
 		want string
 	}{
-		{-time.Hour, "0s ago"}, {0, "0s ago"}, {8 * time.Second, "8s ago"}, {10 * time.Second, "10s ago"},
+		{-time.Hour, "just now"}, {0, "0s ago"}, {8 * time.Second, "8s ago"}, {10 * time.Second, "10s ago"},
 		{59 * time.Second, "59s ago"}, {time.Minute, "1m ago"}, {90 * time.Second, "1m ago"},
 		{59 * time.Minute, "59m ago"}, {3 * time.Hour, "3h ago"}, {23 * time.Hour, "23h ago"},
 		{24 * time.Hour, "1d ago"}, {2*24*time.Hour + time.Hour, "2d ago"}, {30 * 24 * time.Hour, "30d ago"},

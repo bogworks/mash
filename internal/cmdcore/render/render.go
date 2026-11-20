@@ -26,14 +26,19 @@ func RelTime(now, t time.Time) string {
 		d = 0
 	}
 	switch {
+	case d < time.Second:
+		return "just now"
 	case d < time.Minute:
 		return fmt.Sprintf("%ds ago", int(d/time.Second))
-	case d < time.Hour:
+	}
+	hours := int(d / time.Hour)
+	switch {
+	case hours < 1:
 		return fmt.Sprintf("%dm ago", int(d/time.Minute))
-	case d < 24*time.Hour:
-		return fmt.Sprintf("%dh ago", int(d/time.Hour))
-	case d <= 30*24*time.Hour:
-		return fmt.Sprintf("%dd ago", int(d/(24*time.Hour)))
+	case hours < 24:
+		return fmt.Sprintf("%dh ago", hours)
+	case hours/24 <= 30:
+		return fmt.Sprintf("%dd ago", hours/24)
 	}
 	return t.Format("2006-01-02")
 }
