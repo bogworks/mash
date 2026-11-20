@@ -958,7 +958,18 @@ func TestJoinNamesWhatARollbackCouldNotUndo(t *testing.T) {
 	if r.code != 1 || !strings.HasPrefix(r.errs, "error: could not finish and could not undo: ") || !strings.Contains(r.errs, "~/.config/mash/acme.demo.bob.creds was left") {
 		t.Errorf("%+v", r)
 	}
+	if strings.Contains(r.errs, "old creds kept") {
+		t.Errorf("no backup exists, yet: %q", r.errs)
+	}
 	if strings.Contains(r.errs, "BEGIN") || strings.Contains(r.errs, string(w.m.seed)) {
 		t.Errorf("secret on stderr: %q", r.errs)
+	}
+	if _, err := os.Lstat(w.credsFile()); err != nil {
+		t.Errorf("the creds could not be removed and must still be there: %v", err)
+	}
+	for _, name := range []string{"config.json", "ca.pem"} {
+		if _, err := os.Lstat(filepath.Join(w.cfg, name)); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("%s was left: %v", name, err)
+		}
 	}
 }
