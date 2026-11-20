@@ -424,3 +424,68 @@ func TestRealReferenceHasNoMarkdownHazards(t *testing.T) {
 		}
 	}
 }
+
+func TestRunRefusesHandwrittenAndSymlink(t *testing.T) {
+	pages, err := Generate(fixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := sortedNames(pages)
+	first, last := names[0], names[len(names)-1]
+
+	out := t.TempDir()
+	mine := filepath.Join(out, filepath.FromSlash(last))
+	if err := os.MkdirAll(filepath.Dir(mine), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(mine, []byte("# Hand written\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err = Run(fixture, out)
+	if err == nil || !strings.Contains(err.Error(), mine) || !strings.Contains(err.Error(), "not generated") {
+		t.Fatalf("err = %v", err)
+	}
+	if b, _ := os.ReadFile(mine); string(b) != "# Hand written\n" {
+		t.Error("hand-written file changed")
+	}
+	if _, err := os.Stat(filepath.Join(out, filepath.FromSlash(first))); first != last && !os.IsNotExist(err) {
+		t.Error("a page was written before the refusal")
+	}
+
+	out2 := t.TempDir()
+	target := filepath.Join(t.TempDir(), "target.md")
+	if err := os.WriteFile(target, []byte(banner+"\n\n# x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(out2, filepath.FromSlash(first))
+	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Skip("no symlinks")
+	}
+	if err := Run(fixture, out2); err == nil || !strings.Contains(err.Error(), link) {
+		t.Fatalf("symlink err = %v", err)
+	}
+	if b, _ := os.ReadFile(target); string(b) != banner+"\n\n# x\n" {
+		t.Error("symlink target changed")
+	}
+}
+
+func TestRunRegeneratesOverBannerPages(t *testing.T) {
+	out := t.TempDir()
+	if err := Run(fixture, out); err != nil {
+		t.Fatal(err)
+	}
+	pages, _ := Generate(fixture)
+	n := sortedNames(pages)[0]
+	if err := os.WriteFile(filepath.Join(out, filepath.FromSlash(n)), []byte(banner+"\n\nchanged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Run(fixture, out); err != nil {
+		t.Fatal(err)
+	}
+	if got := CheckDir(fixture, out); len(got) != 0 {
+		t.Fatalf("CheckDir = %v", got)
+	}
+}

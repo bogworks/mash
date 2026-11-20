@@ -1,6 +1,7 @@
 package refgen
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -24,10 +25,16 @@ func Run(specDir, outDir string) error {
 	if err != nil {
 		return err
 	}
+	names := sortedNames(pages)
+	for _, n := range names {
+		if err := checkTarget(filepath.Join(outDir, filepath.FromSlash(n))); err != nil {
+			return err
+		}
+	}
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return err
 	}
-	for _, n := range sortedNames(pages) {
+	for _, n := range names {
 		dst := filepath.Join(outDir, filepath.FromSlash(n))
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 			return err
@@ -54,6 +61,30 @@ func Run(specDir, outDir string) error {
 	return nil
 }
 
+// checkTarget refuses a path that Run must not write: a symlink or other
+// non-regular file, or a regular file that does not carry the banner. A path
+// that does not exist, or a file with the banner, is fine.
+func checkTarget(p string) error {
+	fi, err := os.Lstat(p)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !fi.Mode().IsRegular() {
+		return fmt.Errorf("refusing to overwrite %s: it is not a regular file, so it is not generated", p)
+	}
+	b, err := os.ReadFile(p)
+	if err != nil {
+		return err
+	}
+	if !strings.HasPrefix(string(b), banner+"\n") {
+		return fmt.Errorf("refusing to overwrite %s: the file is not generated (no banner)", p)
+	}
+	return nil
+}
+
 // listFiles lists, slash-separated and sorted, the files under dir. With
 // bannerOnly it keeps only those whose first line is the generated-file banner.
 func listFiles(dir string, bannerOnly bool) ([]string, error) {
@@ -63,6 +94,9 @@ func listFiles(dir string, bannerOnly bool) ([]string, error) {
 			return err
 		}
 		if bannerOnly {
+			if !d.Type().IsRegular() {
+				return nil
+			}
 			b, err := os.ReadFile(p)
 			if err != nil {
 				return err
