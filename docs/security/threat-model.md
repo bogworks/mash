@@ -280,7 +280,7 @@ its next tool call. No signature covers plugin content. Rating M.
 ## 10. Who holds which key
 
 This section says, for each key and credential mash uses, where it lives, who holds it, what a holder can do and what to
-do if it leaks. It describes what the code does today (`internal/ctlkeys`, `internal/bootstrap`, `internal/mint`,
+do if it leaks. It describes what the code does today (`internal/ctlkeys`, `internal/mint`,
 `internal/admin/permissions.go`) and [docs/operations.md](../operations.md). A seed is never printed by mash, and no
 seed appears in the issue record. "The operator host" is the machine that runs `mashctl`; the control plane is the
 account that holds the key store.

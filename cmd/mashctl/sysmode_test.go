@@ -8,15 +8,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/bogworks/mash/internal/bootstrap"
 	"github.com/bogworks/mash/internal/config"
+	"github.com/bogworks/mash/internal/natsfixture"
 )
 
 // TestSysCredsModeIsChecked: system account credentials are held to the same mode check as admin and endpoint
 // credentials (no group or other bits, a symlink is followed), and a missing file keeps its own error.
 func TestSysCredsModeIsChecked(t *testing.T) {
 	e := newApplyEnv(t)
-	src, err := os.ReadFile(filepath.Join(e.pl.Dir, bootstrap.SysCreds))
+	src, err := os.ReadFile(filepath.Join(e.pl.Dir, natsfixture.SysCreds))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestSysCredsModeIsChecked(t *testing.T) {
 // TestReadCredsRefusesLooseModes: the reader the audit and reissue paths use (credsUserKey) refuses a loose file.
 func TestReadCredsRefusesLooseModes(t *testing.T) {
 	e := newApplyEnv(t)
-	src, err := os.ReadFile(filepath.Join(e.pl.Dir, bootstrap.SysCreds))
+	src, err := os.ReadFile(filepath.Join(e.pl.Dir, natsfixture.SysCreds))
 	if err != nil {
 		t.Fatal(err)
 	}

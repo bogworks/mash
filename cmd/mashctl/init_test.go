@@ -18,8 +18,8 @@ import (
 	"github.com/nats-io/nats-server/v2/server"
 	"github.com/nats-io/nkeys"
 
-	"github.com/bogworks/mash/internal/bootstrap"
 	"github.com/bogworks/mash/internal/ctlkeys"
+	"github.com/bogworks/mash/internal/natsfixture"
 )
 
 // initer is a second, empty key dir and config dir: the machine that sets mash up on the server of an applyEnv, from a
@@ -61,7 +61,7 @@ func newIniter(t *testing.T, src *applyEnv) *initer {
 	}
 	a.opSeed = copyFile(filepath.Join(src.keyDir, "operator.nk"), "op.seed")
 	a.acSeed = copyFile(filepath.Join(src.keyDir, "account.nk"), "acct.seed")
-	a.sys = copyFile(filepath.Join(src.pl.Dir, bootstrap.SysCreds), "sys.creds")
+	a.sys = copyFile(filepath.Join(src.pl.Dir, natsfixture.SysCreds), "sys.creds")
 	a.admin = copyFile(src.pl.AdminCredsPath(), "admin.creds")
 	a.vals = map[string]any{
 		"servers": []string{src.srv.ClientURL()}, "owner": "alice", "admin_creds": a.admin, "system_creds": a.sys,
@@ -220,7 +220,7 @@ func TestJSLimits(t *testing.T) {
 // strictEnv is a server whose operator has strict signing key usage and whose account has one signing key. In strict
 // mode the operator identity key may not sign accounts, so the operator JWT also declares an operator signing key,
 // and the system and MASH account JWTs are re-signed by it (the MASH one also gains the account signing key). The
-// operator.jwt and the preloaded JWTs in server.conf are rewritten on disk (the server config is bootstrap's own)
+// operator.jwt and the preloaded JWTs in server.conf are rewritten on disk (the server config is natsfixture's own)
 // before the server starts. The system user in sys.creds is re-minted under a system account signing key. It returns the env, the account signing key, and the operator signing key, whose seed
 // is what adopt must be given as --operator-key.
 func strictEnv(t *testing.T) (*applyEnv, nkeys.KeyPair, nkeys.KeyPair) {
@@ -245,7 +245,7 @@ func strictEnv(t *testing.T) (*applyEnv, nkeys.KeyPair, nkeys.KeyPair) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		oc, err := jwt.DecodeOperatorClaims(strings.TrimSpace(string(mustRead(t, filepath.Join(e.pl.Dir, bootstrap.OperatorJWT)))))
+		oc, err := jwt.DecodeOperatorClaims(strings.TrimSpace(string(mustRead(t, filepath.Join(e.pl.Dir, natsfixture.OperatorJWT)))))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -255,7 +255,7 @@ func strictEnv(t *testing.T) (*applyEnv, nkeys.KeyPair, nkeys.KeyPair) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(e.pl.Dir, bootstrap.OperatorJWT), []byte(otok+"\n"), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(e.pl.Dir, natsfixture.OperatorJWT), []byte(otok+"\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		conf := e.pl.ConfPath()
@@ -280,7 +280,7 @@ func strictEnv(t *testing.T) (*applyEnv, nkeys.KeyPair, nkeys.KeyPair) {
 		}
 		resign(e.pl.System, sskPub)
 		resign(e.acctPub, skPub)
-		signingKeyCreds(t, e.pl.System, ssk, filepath.Join(e.pl.Dir, bootstrap.SysCreds))
+		signingKeyCreds(t, e.pl.System, ssk, filepath.Join(e.pl.Dir, natsfixture.SysCreds))
 		if err := os.WriteFile(conf, []byte(cb), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -606,7 +606,7 @@ func TestInitRefusals(t *testing.T) {
 	t.Run("system creds that cannot connect", func(t *testing.T) {
 		a.t = t
 		kp, _ := nkeys.CreateAccount()
-		raw, err := bootstrap.MintAdminCreds(kp)
+		raw, err := natsfixture.MintAdminCreds(kp)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -631,7 +631,7 @@ func TestInitRefusals(t *testing.T) {
 	t.Run("admin creds the server rejects", func(t *testing.T) {
 		a.t = t
 		kp, _ := nkeys.CreateAccount()
-		raw, err := bootstrap.MintAdminCreds(kp)
+		raw, err := natsfixture.MintAdminCreds(kp)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -763,7 +763,7 @@ func TestInitStrictSigningKeyUsage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, err := bootstrap.MintAdminCreds(acctKP)
+	raw, err := natsfixture.MintAdminCreds(acctKP)
 	if err != nil {
 		t.Fatal(err)
 	}

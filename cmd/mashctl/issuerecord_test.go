@@ -16,9 +16,9 @@ import (
 
 	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/apply"
-	"github.com/bogworks/mash/internal/bootstrap"
 	"github.com/bogworks/mash/internal/ctl"
 	"github.com/bogworks/mash/internal/natsauth"
+	"github.com/bogworks/mash/internal/natsfixture"
 	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/store"
 )
@@ -227,7 +227,7 @@ func mintUnrecordedAdmin(t *testing.T, e *applyEnv) (string, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, err := bootstrap.MintAdminCreds(akp)
+	raw, err := natsfixture.MintAdminCreds(akp)
 	if err != nil {
 		t.Fatal(err)
 	}
