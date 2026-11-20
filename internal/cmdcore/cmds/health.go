@@ -243,8 +243,10 @@ var Status = cmdcore.Command[StatusParams, StatusResult]{
 	},
 }
 
-// DoctorParams has no arguments.
-type DoctorParams struct{}
+// DoctorParams: Strict makes a warning exit 1 too (on the MCP tool, mark the result an error); it changes nothing else.
+type DoctorParams struct {
+	Strict bool `json:"strict,omitempty" flag:"--strict" desc:"Exit 1 on a warning too."`
+}
 
 // DoctorCheck is one row of the report. Detail and Fix are null when there is none.
 type DoctorCheck struct {
@@ -261,6 +263,8 @@ type DoctorResult struct {
 	Problems int           `json:"problems"`
 	Warnings int           `json:"warnings"`
 	Checks   []DoctorCheck `json:"checks"`
+
+	strict bool
 }
 
 // Text is a row per check (the name in 10 columns, the state in 6, then the detail), a blank line, and the count:
@@ -316,9 +320,9 @@ func plural(n int, word string) string {
 	return fmt.Sprintf("%d %ss", n, word)
 }
 
-// ExitCode is 1 when a check failed. A warning alone is 0.
+// ExitCode is 1 when a check failed. A warning alone is 0, or 1 with --strict.
 func (r DoctorResult) ExitCode() int {
-	if r.Problems > 0 {
+	if r.Problems > 0 || (r.strict && r.Warnings > 0) {
 		return 1
 	}
 	return 0
@@ -354,13 +358,13 @@ var Doctor = cmdcore.Command[DoctorParams, DoctorResult]{
 	Group:       "Everyday",
 	Summary:     "Check everything mail depends on for this endpoint, and say how to fix what is wrong. Changes nothing.",
 	Description: "Check everything mail depends on for this endpoint, and say how to fix what is wrong. Changes nothing.",
-	Examples:    []string{"mash doctor"},
-	Run: func(ctx context.Context, env *cmdcore.Env, _ DoctorParams) (DoctorResult, error) {
+	Examples:    []string{"mash doctor", "mash doctor --strict"},
+	Run: func(ctx context.Context, env *cmdcore.Env, p DoctorParams) (DoctorResult, error) {
 		rep, err := healthOf(ctx, env, "doctor")
 		if err != nil {
 			return DoctorResult{}, err
 		}
-		r := DoctorResult{Endpoint: strPtr(rep.Endpoint), Checks: []DoctorCheck{}}
+		r := DoctorResult{Endpoint: strPtr(rep.Endpoint), Checks: []DoctorCheck{}, strict: p.Strict}
 		for _, c := range rep.Checks {
 			switch c.State {
 			case CheckFail:

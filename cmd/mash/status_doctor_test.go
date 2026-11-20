@@ -42,6 +42,13 @@ func toolText(t *testing.T, s *session, id int, name string) string {
 	return resultText(r)
 }
 
+// reportText calls the MCP tool name and returns its text whether or not the result is marked an error: a report that
+// exits nonzero (a problem, not ready) is an error result carrying the report.
+func reportText(t *testing.T, s *session, id int, name string) string {
+	t.Helper()
+	return resultText(s.call(t, id, name, `{}`))
+}
+
 func wantAll(t *testing.T, what, out string, subs ...string) {
 	t.Helper()
 	for _, sub := range subs {
@@ -446,8 +453,9 @@ func TestStatusAndDoctorDoorsAgree(t *testing.T) {
 			cli := runMash(env, tool)
 			cj := runMash(env, tool, "--json")
 			r := s.call(t, id, tool, `{}`)
-			if r["isError"] == true {
-				t.Fatalf("%s/%s: %v", name, tool, r)
+			// a report that exits nonzero is marked an error, with its text and structured result kept
+			if (r["isError"] == true) != (cli.code != 0) {
+				t.Fatalf("%s/%s: isError %v, exit %d", name, tool, r["isError"], cli.code)
 			}
 			wantText := strings.TrimSuffix(cli.out, "\n")
 			if strings.HasPrefix(cli.errs, "hint: ") {
@@ -493,13 +501,12 @@ func TestDegradedServeAnswersStatusAndDoctor(t *testing.T) {
 	if names := toolNames(t, s); len(names) != 3 || !names["version"] || !names["status"] || !names["doctor"] {
 		t.Fatalf("tools %v", names)
 	}
-	// a normal answer (not an error): the line, then the hint on the next line
+	// exit 1 at a shell, so an error result here: the line, then the hint on the next line, the structured result kept
 	const want = "No endpoint is chosen for this session.\nhint: start the session with MASH_ENDPOINT=<address>"
-	if got := toolText(t, s, 10, "status"); got != want {
-		t.Fatalf("status: %q", got)
-	}
-	if got := toolText(t, s, 11, "doctor"); got != want {
-		t.Fatalf("doctor: %q", got)
+	for id, tool := range map[int]string{10: "status", 11: "doctor"} {
+		if r := s.call(t, id, tool, `{}`); r["isError"] != true || resultText(r) != want {
+			t.Fatalf("%s: %v", tool, r)
+		}
 	}
 	r := s.call(t, 12, "status", `{}`)
 	if sc, _ := r["structuredContent"].(map[string]any); !reflect.DeepEqual(sc, map[string]any{"endpoint": nil, "ready": false, "online": false, "reason": "no endpoint is chosen for this session"}) {
@@ -623,5 +630,28 @@ func TestHealthStopsWhenItsContextIsCancelled(t *testing.T) {
 	}
 	if d := time.Since(start); d > 5*time.Second {
 		t.Fatalf("took %v after the cancel", d)
+	}
+}
+
+// At a shell every hint goes to stderr and none to stdout, with or without --json.
+func TestStatusAndDoctorHintsAreOnStderr(t *testing.T) {
+	w := tlsWorld(t, "a")
+	other := testenv.Start(t)
+	creds, _ := other.Mint(t, tAddr("a"))
+	env := strictEnv(w, "a", map[string]string{"MASH_CREDS": creds}) // refused: both commands have a fix to hint
+	for _, cmd := range []string{"status", "doctor"} {
+		r := runMash(env, cmd)
+		if r.code != 1 || !strings.HasPrefix(r.errs, "hint: ") || strings.HasSuffix(strings.TrimSuffix(r.errs, "\n"), "\n") {
+			t.Errorf("%s: %+v", cmd, r)
+		}
+		for _, l := range strings.Split(r.out, "\n") {
+			if strings.HasPrefix(l, "hint:") {
+				t.Errorf("%s: a hint line on stdout: %q", cmd, r.out)
+			}
+		}
+		j := runMash(env, cmd, "--json")
+		if j.code != 1 || strings.Contains(j.out, "\nhint:") || strings.HasPrefix(j.out, "hint:") || strings.Contains(j.errs, "hint") && !strings.HasPrefix(j.errs, "hint: ") {
+			t.Errorf("%s --json: %+v", cmd, j)
+		}
 	}
 }

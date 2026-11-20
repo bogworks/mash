@@ -915,6 +915,15 @@ var wakeUnits = map[byte]time.Duration{'m': time.Minute, 'h': time.Hour, 'd': 24
 // loadWake reads wake_count and wake_age: the environment wins over config.json, and the effective value is validated
 // once, so an invalid file value under a valid environment value loads and an invalid effective one names its source.
 func (c *Config) loadWake(f file, env func(string) string) error {
+	// Both are read: a bad wake_count does not stop a valid wake_age from being kept; the first error is reported.
+	cerr := c.loadWakeCount(f, env)
+	if aerr := c.loadWakeAge(f, env); cerr == nil {
+		return aerr
+	}
+	return cerr
+}
+
+func (c *Config) loadWakeCount(f file, env func(string) string) error {
 	count, from := env("MASH_WAKE_COUNT"), "MASH_WAKE_COUNT"
 	if count == "" && len(f.WakeCount) > 0 {
 		count, from = strings.TrimSpace(string(f.WakeCount)), `config.json "wake_count"`
@@ -929,6 +938,10 @@ func (c *Config) loadWake(f file, env func(string) string) error {
 		}
 		c.WakeCount = n
 	}
+	return nil
+}
+
+func (c *Config) loadWakeAge(f file, env func(string) string) error {
 	age, from := env("MASH_WAKE_AGE"), "MASH_WAKE_AGE"
 	if age == "" && len(f.WakeAge) > 0 {
 		from = `config.json "wake_age"`

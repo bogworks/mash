@@ -342,7 +342,7 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 	switch args[0] {
 	case "serve":
 		if cfg.WakeErr != nil && err == nil { // the wake settings are serve's: a bad one stops it, no other command minds
-			return cliframe.Report(stdout, stderr, cliframe.Usagef("%s", strings.TrimPrefix(cfg.WakeErr.Error(), "mash: ")).WithHint("mash --help serve"), jsonOut)
+			return cliframe.Report(stdout, stderr, cliframe.Usagef("%s", strings.TrimPrefix(cfg.WakeErr.Error(), "mash: ")).WithHint("mash serve --help"), jsonOut)
 		}
 		return serve(ctx, cfg, err, adapter, env("MASH_PLUGIN_ROOT"), stdin, stdout, stderr)
 	case "send":

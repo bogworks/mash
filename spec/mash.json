@@ -942,8 +942,15 @@
    {
     "name": "doctor",
     "description": "Check everything mail depends on for this endpoint, and say how to fix what is wrong. Changes nothing.",
+    "options": [
+     {
+      "name": "--strict",
+      "description": "Exit 1 on a warning too."
+     }
+    ],
     "examples": [
-     "mash doctor"
+     "mash doctor",
+     "mash doctor --strict"
     ],
     "exitCodes": [
      {

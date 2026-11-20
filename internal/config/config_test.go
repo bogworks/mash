@@ -937,3 +937,17 @@ func TestWakeSettings(t *testing.T) {
 		}
 	}
 }
+
+// A bad wake_count does not stop a valid wake_age from being read: the bad one is reported, the good one kept.
+func TestBadWakeCountKeepsAValidWakeAge(t *testing.T) {
+	c, err := loadWith(t, idFile+`,"wake_count":"x","wake_age":"30m"}`, map[string]string{"MASH_ENDPOINT": "o.g.a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.WakeErr == nil || !strings.Contains(c.WakeErr.Error(), `config.json "wake_count"`) {
+		t.Errorf("WakeErr %v", c.WakeErr)
+	}
+	if c.WakeAge != 30*time.Minute || c.WakeAgeText != "30m" || c.WakeCount != 15 {
+		t.Errorf("age %v %q count %d", c.WakeAge, c.WakeAgeText, c.WakeCount)
+	}
+}

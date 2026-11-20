@@ -375,7 +375,14 @@
    "description": "Check everything mail depends on for this endpoint, and say how to fix what is wrong. Changes nothing.",
    "command": "mash doctor",
    "release": "0.5.6",
-   "params": [],
+   "params": [
+    {
+     "name": "strict",
+     "type": "boolean",
+     "required": false,
+     "description": "Exit 1 on a warning too."
+    }
+   ],
    "structured": {
     "endpoint": "acme.demo.bob",
     "problems": 1,
