@@ -83,10 +83,13 @@ func TestDoctorAProblemShowsTheFailureAndTheFix(t *testing.T) {
 	if _, err := js.CreateStream(context.Background(), store.InboxConfigFor(ghost, store.DefaultLimits())); err != nil {
 		t.Fatal(err)
 	}
-	out, _, code := e.run("doctor")
-	want := "config     ok\nserver     ok    tls://localhost:4222\nsign-in    ok\nstorage    ok\nendpoints  FAIL  1 inbox has no endpoint record: alice.g.ghost\nkeys       ok    every connected key was issued here\n\n1 problem.\nhint: mashctl endpoint show alice.g.ghost\n"
-	if code != 1 || cleanText(e, out) != want {
-		t.Fatalf("exit %d\n%q\nwant\n%q", code, cleanText(e, out), want)
+	out, errb, code := e.run("doctor")
+	want := "config     ok\nserver     ok    tls://localhost:4222\nsign-in    ok\nstorage    ok\nendpoints  FAIL  1 inbox has no endpoint record: alice.g.ghost\nkeys       ok    every connected key was issued here\n\n1 problem.\n"
+	if code != 1 || cleanText(e, out) != want || errb != "hint: mashctl endpoint show alice.g.ghost\n" {
+		t.Fatalf("exit %d\n%q\nstderr %q\nwant\n%q", code, cleanText(e, out), errb, want)
+	}
+	if strings.Contains(out, "hint:") {
+		t.Errorf("a hint on stdout: %q", out)
 	}
 	rep, by, code := doctorJSON(t, e.run)
 	c := by["endpoints"]
@@ -103,12 +106,13 @@ func TestDoctorWarningAndStrict(t *testing.T) {
 	f := newAuditEnv(t)
 	f.endpoint(t, ad("a"))
 	out, errb, code := ctlRun(t, f.e, "doctor")
-	want := "config     ok\nserver     ok    " + f.e.URL + "\nsign-in    ok\nstorage    ok\nendpoints  ok    1 record, 1 inbox\nkeys       warn  no system_creds in the configuration; connected keys were not checked\n\nNo problems, 1 warning.\nhint: mashctl init --config <file>\n"
-	if code != 0 || out != want {
+	want := "config     ok\nserver     ok    " + f.e.URL + "\nsign-in    ok\nstorage    ok\nendpoints  ok    1 record, 1 inbox\nkeys       warn  no system_creds in the configuration; connected keys were not checked\n\nNo problems, 1 warning.\n"
+	const wantHint = "hint: mashctl init --config <file>\n"
+	if code != 0 || out != want || errb != wantHint {
 		t.Fatalf("exit %d stderr %q\n%q\nwant\n%q", code, errb, out, want)
 	}
-	if out, _, code := ctlRun(t, f.e, "doctor", "--strict"); code != 1 || out != want {
-		t.Fatalf("--strict: exit %d\n%q", code, out)
+	if out, errb, code := ctlRun(t, f.e, "doctor", "--strict"); code != 1 || out != want || errb != wantHint {
+		t.Fatalf("--strict: exit %d\n%q\nstderr %q", code, out, errb)
 	}
 	rep, by, code := doctorJSON(t, f.run(t), "--strict")
 	if code != 1 || rep.Problems != 0 || rep.Warnings != 1 || by["keys"].State != "warn" || by["endpoints"].Detail != "1 record, 1 inbox" {
@@ -165,9 +169,9 @@ func TestDoctorStopsAtTheFirstFailedCheck(t *testing.T) {
 	}
 	out.Reset()
 	code = runEnv([]string{"doctor"}, func(k string) string { return env[k] }, &out, &errb)
-	if code != 1 || !strings.HasPrefix(out.String(), "config     FAIL  ") || !strings.HasSuffix(out.String(), "\n\n1 problem.\nhint: mashctl init --config <file>\n") ||
-		strings.Count(out.String(), "\n") != 9 {
-		t.Fatalf("%d %q", code, out.String())
+	if code != 1 || !strings.HasPrefix(out.String(), "config     FAIL  ") || !strings.HasSuffix(out.String(), "\n\n1 problem.\n") ||
+		strings.Count(out.String(), "\n") != 8 || strings.Contains(out.String(), "hint:") || !strings.HasSuffix(errb.String(), "hint: mashctl init --config <file>\n") {
+		t.Fatalf("%d %q stderr %q", code, out.String(), errb.String())
 	}
 }
 
@@ -399,10 +403,10 @@ func TestDoctorKeysReportsAKeyMashDidNotIssue(t *testing.T) {
 	if !rogue.IsConnected() {
 		t.Fatal("the rogue did not connect")
 	}
-	out, _, code := e.run("doctor")
-	want := "config     ok\nserver     ok    tls://localhost:4222\nsign-in    ok\nstorage    ok\nendpoints  ok    2 records, 2 inboxes\nkeys       FAIL  1 connected key was not issued here\n\n1 problem.\nhint: mashctl endpoint list\n"
-	if code != 1 || cleanText(e, out) != want {
-		t.Fatalf("exit %d\n%q\nwant\n%q", code, cleanText(e, out), want)
+	out, errb, code := e.run("doctor")
+	want := "config     ok\nserver     ok    tls://localhost:4222\nsign-in    ok\nstorage    ok\nendpoints  ok    2 records, 2 inboxes\nkeys       FAIL  1 connected key was not issued here\n\n1 problem.\n"
+	if code != 1 || cleanText(e, out) != want || errb != "hint: mashctl endpoint list\n" {
+		t.Fatalf("exit %d\n%q\nstderr %q\nwant\n%q", code, cleanText(e, out), errb, want)
 	}
 	rogue.Close()
 	time.Sleep(200 * time.Millisecond)
@@ -484,10 +488,10 @@ func TestDoctorNoHintWhenTheFirstProblemHasNoFix(t *testing.T) {
 	if rep.Checks[1].Fix != nil || rep.hint() != "" {
 		t.Fatalf("hint %q for %+v", rep.hint(), rep.Checks)
 	}
-	var out bytes.Buffer
-	rep.writeText(&out)
-	if strings.Contains(out.String(), "hint:") || !strings.HasSuffix(out.String(), "\n\n2 problems.\n") {
-		t.Errorf("%q", out.String())
+	var out, hw bytes.Buffer
+	rep.writeText(&out, &hw)
+	if strings.Contains(out.String(), "hint:") || !strings.HasSuffix(out.String(), "\n\n2 problems.\n") || hw.Len() != 0 {
+		t.Errorf("%q stderr %q", out.String(), hw.String())
 	}
 	// and a warnings-only run whose first warning has no fix
 	w := doctorReport{Checks: []doctorCheck{}}

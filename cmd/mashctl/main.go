@@ -113,7 +113,7 @@ func helpRequested(verb string, args []string) bool {
 	return false
 }
 
-// verbUsage is the lines of the mashctl usage for the verb in args: those that begin with its first two words
+// verbUsage is the lines of the mashctl usage for the verb in args (with the wrapped lines under them): those that begin with its first two words
 // when some do (`limits show`), else with its first word; the whole usage when none does (a verb
 // whose usage lives in its own file).
 func verbUsage(args []string) string {
@@ -124,8 +124,15 @@ func verbUsage(args []string) string {
 	for n := len(words); n > 0; n-- {
 		prefix := "  mashctl " + strings.Join(words[:n], " ")
 		var b strings.Builder
+		own := false // the lines under a command line (a wrapped option list, the description) belong to it
 		for _, l := range strings.SplitAfter(ctl.Usage("mashctl"), "\n") {
-			if rest, ok := strings.CutPrefix(l, prefix); ok && (rest == "" || rest[0] == ' ' || rest[0] == '\n') {
+			if strings.HasPrefix(l, "  mashctl ") {
+				rest, ok := strings.CutPrefix(l, prefix)
+				own = ok && (rest == "" || rest[0] == ' ' || rest[0] == '\n')
+			} else if !strings.HasPrefix(l, "    ") {
+				own = false
+			}
+			if own {
 				b.WriteString(l)
 			}
 		}

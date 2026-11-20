@@ -63,3 +63,54 @@ func TestErrorString(t *testing.T) {
 		t.Errorf("Error() = %q", got)
 	}
 }
+
+func TestReportWrap(t *testing.T) {
+	long := "~/.config/mash was set up with a different operator key; nothing was changed"
+	for _, tc := range []struct {
+		name, msg, want string
+		wrap            bool
+	}{
+		{"semicolon", long, "error: ~/.config/mash was set up with a different operator key;\n       nothing was changed\n", true},
+		{"short stays one line", "~/cfg was set up with a different owner; nothing was changed", "error: ~/cfg was set up with a different owner; nothing was changed\n", true},
+		{"no semicolon wraps at the last space that fits", "aaaa bbbb cccc dddd eeee ffff gggg hhhh iiii jjjj kkkk llll mmmm nnnn oooo pppp qqqq rrrr", "error: aaaa bbbb cccc dddd eeee ffff gggg hhhh iiii jjjj kkkk llll mmmm nnnn\n       oooo pppp qqqq rrrr\n", true},
+		{"not asked, not wrapped", long, "error: " + long + "\n", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := Failf("%s", tc.msg)
+			e.Wrap = tc.wrap
+			var out, errb bytes.Buffer
+			Report(&out, &errb, e, false)
+			if errb.String() != tc.want {
+				t.Errorf("stderr = %q, want %q", errb.String(), tc.want)
+			}
+			out.Reset()
+			errb.Reset()
+			Report(&out, &errb, e, true)
+			if out.String() != `{"error":"`+tc.msg+`"}`+"\n" {
+				t.Errorf("json = %q", out.String())
+			}
+		})
+	}
+}
+
+func TestReportWrapAt(t *testing.T) {
+	msg := "acme.demo.bob was not deleted: 1 of 2 servers did not confirm its key was cancelled"
+	e := Failf("%s", msg).WithWrapAt(68).WithHint("mashctl endpoint delete acme.demo.bob")
+	var out, errb bytes.Buffer
+	if code := Report(&out, &errb, e, false); code != 1 {
+		t.Errorf("code %d", code)
+	}
+	want := "error: acme.demo.bob was not deleted: 1 of 2 servers did not confirm\n       its key was cancelled\nhint: mashctl endpoint delete acme.demo.bob\n"
+	if errb.String() != want || out.Len() != 0 {
+		t.Errorf("stderr = %q stdout = %q", errb.String(), out.String())
+	}
+	out.Reset()
+	errb.Reset()
+	Report(&out, &errb, e, true)
+	if out.String() != `{"error":"`+msg+`","hint":"mashctl endpoint delete acme.demo.bob"}`+"\n" || errb.Len() != 0 {
+		t.Errorf("json = %q", out.String())
+	}
+	if d := Failf("%s", msg).WithWrap(); d.WrapAt != 0 || e.WrapAt != 68 {
+		t.Errorf("WrapAt %d %d", d.WrapAt, e.WrapAt)
+	}
+}

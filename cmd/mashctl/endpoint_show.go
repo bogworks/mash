@@ -37,7 +37,7 @@ type showJSON struct {
 
 // runEndpointShow is `mashctl endpoint show`.
 func runEndpointShow(args []string, g cliframe.Global, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
-	return runEp(endpointShowSpec, args, env, lookup, stdout, stderr, func(rt *epRuntime) error {
+	return runEp(endpointShowSpec, g, args, env, lookup, stdout, stderr, func(rt *epRuntime) error {
 		rec, err := rt.loadRecord(rt.in.addr)
 		if err != nil {
 			return err

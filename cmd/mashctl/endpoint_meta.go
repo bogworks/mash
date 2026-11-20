@@ -257,7 +257,7 @@ type unsetResultJSON struct {
 
 // runEndpointSet is `mashctl endpoint set`.
 func runEndpointSet(args []string, g cliframe.Global, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
-	return runEp(endpointSetSpec, args, env, lookup, stdout, stderr, func(rt *epRuntime) error {
+	return runEp(endpointSetSpec, g, args, env, lookup, stdout, stderr, func(rt *epRuntime) error {
 		set := map[string]any{}
 		for _, p := range rt.in.edit.set {
 			if p.key == "capability" {
@@ -272,7 +272,7 @@ func runEndpointSet(args []string, g cliframe.Global, env func(string) string, l
 
 // runEndpointUnset is `mashctl endpoint unset`.
 func runEndpointUnset(args []string, g cliframe.Global, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
-	return runEp(endpointUnsetSpec, args, env, lookup, stdout, stderr, func(rt *epRuntime) error {
+	return runEp(endpointUnsetSpec, g, args, env, lookup, stdout, stderr, func(rt *epRuntime) error {
 		return applyMetaEdit(rt, unsetResultJSON{Address: rt.in.addr.String(), Unset: rt.in.edit.unset})
 	})
 }

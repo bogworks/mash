@@ -112,29 +112,18 @@ func TestEndpointShowSuspended(t *testing.T) {
 	}
 }
 
-func TestEndpointSuspendDryRunChangesNothing(t *testing.T) {
+func TestEndpointSuspendTakesNoDryRun(t *testing.T) {
 	h := newFleetEnv(t)
 	h.seed(ad("c"))
-	out, errb, code := h.run("endpoint", "suspend", "o.g.c", "--dry-run")
-	if code != 0 || out != "Would suspend endpoint o.g.c\nNothing was changed.\n" || errb != "" {
-		t.Fatalf("%d %q %q", code, out, errb)
+	for _, verb := range []string{"suspend", "resume"} {
+		out, errb, code := h.run("endpoint", verb, "o.g.c", "--dry-run")
+		want := "error: unknown option --dry-run\nhint: mashctl endpoint " + verb + " --help\n"
+		if code != 2 || out != "" || errb != want {
+			t.Errorf("%s: %d %q %q", verb, code, out, errb)
+		}
 	}
-	if st, err := h.adminOf().Suspended(context.Background(), ad("c")); err != nil || st.Suspended {
-		t.Fatalf("dry run parked the inbox: %+v %v", st, err)
-	}
-	if _, _, code := h.run("endpoint", "suspend", "o.g.c"); code != 0 {
-		t.Fatal(code)
-	}
-	out, _, code = h.run("endpoint", "resume", "o.g.c", "--dry-run")
-	if code != 0 || out != "Would resume endpoint o.g.c\nNothing was changed.\n" {
-		t.Fatalf("%d %q", code, out)
-	}
-	if h.stateOf("c") != "suspended" {
-		t.Fatal("dry run resumed the endpoint")
-	}
-	out, _, code = h.run("endpoint", "resume", "o.g.c", "--dry-run", "--json")
-	if code != 0 || out != "{\n  \"address\": \"o.g.c\",\n  \"state\": \"suspended\",\n  \"dry_run\": true\n}\n" {
-		t.Fatalf("%d %q", code, out)
+	if h.stateOf("c") == "suspended" {
+		t.Fatal("a refused run suspended the endpoint")
 	}
 }
 

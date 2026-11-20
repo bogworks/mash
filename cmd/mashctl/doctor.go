@@ -25,7 +25,8 @@ import (
 // doctorUsage is the text of `mashctl doctor --help`.
 const doctorUsage = `usage: mashctl doctor [--strict] [--json]
 
-Check the server, mash's storage on it and every endpoint's records, and say how to fix what is wrong.
+Check the server, mash's storage on it and every endpoint's records,
+and say how to fix what is wrong.
 It changes nothing.
 
 options:
@@ -145,14 +146,15 @@ func (r doctorReport) hint() string {
 	return ""
 }
 
-// writeText prints every row, then a blank line, the count and the one hint.
-func (r doctorReport) writeText(w io.Writer) {
+// writeText prints every row, then a blank line and the count, on w; the one hint goes to hintW (stderr at a shell:
+// every hint line does, whatever stream the rest uses).
+func (r doctorReport) writeText(w, hintW io.Writer) {
 	for _, c := range r.Checks {
 		fmt.Fprintln(w, strings.TrimRight(fmt.Sprintf("%-11s%-6s%s", c.Name, doctorWord(c.State), c.Detail), " "))
 	}
 	fmt.Fprintf(w, "\n%s\n", r.summary())
 	if h := r.hint(); h != "" {
-		fmt.Fprintf(w, "hint: %s\n", h)
+		fmt.Fprintf(hintW, "hint: %s\n", h)
 	}
 }
 
@@ -170,7 +172,7 @@ func runDoctor(args []string, g cliframe.Global, env func(string) string, lookup
 	if jsonOut {
 		writeJSON(stdout, rep)
 	} else {
-		rep.writeText(stdout)
+		rep.writeText(stdout, stderr)
 	}
 	if rep.Problems > 0 || (in.flags["--strict"] && rep.Warnings > 0) {
 		return 1

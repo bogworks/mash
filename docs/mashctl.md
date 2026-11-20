@@ -69,7 +69,7 @@ Labels do not change a minted user: the permissions of an endpoint do not depend
 - `mashctl endpoint suspend ADDRESS` refuses all inbound mail to ADDRESS's inbox and prints `Suspended endpoint ADDRESS`. Suspend does not revoke: it is reversible, and the endpoint can still connect with its creds. Stored mail stays readable and is not purged.
 - `mashctl endpoint resume ADDRESS` restores delivery and prints `Resumed endpoint ADDRESS`.
 - `mashctl endpoint show ADDRESS` shows `state: suspended` for a suspended endpoint, and `endpoint list` shows `suspended` in its STATE column.
-- Both take `--dry-run` (print `Would suspend endpoint ADDRESS` or `Would resume endpoint ADDRESS` and `Nothing was changed.`) and `--json` (`{"address": ..., "state": ...}`). An endpoint with no inbox stream exits 1.
+- Both take `--json` (`{"address": ..., "state": ...}`). An endpoint with no inbox stream exits 1.
 
 See [operations.md](operations.md#suspend-an-endpoints-inbound-mail).
 

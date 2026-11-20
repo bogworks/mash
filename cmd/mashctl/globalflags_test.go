@@ -11,12 +11,11 @@ import (
 
 func TestGlobalFlagsShadowEnvironmentAndNameTheFlagAsSource(t *testing.T) {
 	h := newFleetEnv(t)
-	showTarget(t)
 	good := h.env["MASH_SERVER"]
 	h.env["MASH_SERVER"] = "nats://127.0.0.1:1" // wrong: only the flag reaches the server
 	for _, args := range [][]string{
-		{"--server", good, "limits", "apply"},
-		{"limits", "apply", "--server=" + good},
+		{"--verbose", "--server", good, "limits", "apply"},
+		{"limits", "apply", "--verbose", "--server=" + good},
 		{"--verbose", "limits", "apply", "--no-color"},
 	} {
 		_, errb, code := h.run(args...)
@@ -32,14 +31,13 @@ func TestGlobalFlagsShadowEnvironmentAndNameTheFlagAsSource(t *testing.T) {
 
 func TestGlobalEndpointAndCredsFlagsSupplyOwnerAndAdminCreds(t *testing.T) {
 	h := newFleetEnv(t)
-	showTarget(t)
 	admin := h.env["MASH_ADMIN_CREDS"]
 	delete(h.env, "MASH_ENDPOINT")
 	delete(h.env, "MASH_ADMIN_CREDS")
 	if _, errb, code := h.run("limits", "apply"); code == 0 || !strings.Contains(errb, "no owner") {
 		t.Fatalf("no owner: %d %q", code, errb)
 	}
-	_, errb, code := h.run("--endpoint", h.e.Owner+".dev.x", "--creds", admin, "limits", "apply")
+	_, errb, code := h.run("--verbose", "--endpoint", h.e.Owner+".dev.x", "--creds", admin, "limits", "apply")
 	if code != 0 || !strings.Contains(errb, "owner "+h.e.Owner+" (from flag:--endpoint)") || !strings.Contains(errb, "admin creds "+admin+" (from flag:--creds)") {
 		t.Fatalf("%d %q", code, errb)
 	}

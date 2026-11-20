@@ -456,7 +456,7 @@ func TestInitExistingConfigJSON(t *testing.T) {
 	}
 	before := tree(t, a.root)
 	_, errb, code := a.init()
-	if code != 1 || !strings.Contains(errb, "already holds different settings (servers, owner, admin_creds, system_creds)") || !strings.HasPrefix(errb, "error: ") {
+	if code != 1 || errb != "error: ~/cfg was set up with a different server; nothing was changed\nhint: mashctl init --config <file> --config-dir <a new folder>\n" {
 		t.Fatalf("%d %q", code, errb)
 	}
 	sameTree(t, before, tree(t, a.root))
@@ -648,12 +648,12 @@ func TestInitRefusals(t *testing.T) {
 		if _, _, err := ks.InitOperator(); err != nil {
 			t.Fatal(err)
 		}
-		a.refuses(1, []string{"already holds a different operator key"}, nil)
+		a.refuses(1, []string{"error: ~/cfg was set up with a different operator key; nothing was changed\nhint: mashctl init --config <file> --config-dir <a new folder>\n"}, nil)
 		os.Remove(filepath.Join(a.env["MASH_KEYS_DIR"], "operator.nk"))
 		if _, _, err := ks.InitAccount(); err != nil {
 			t.Fatal(err)
 		}
-		a.refuses(1, []string{"already holds a different account key"}, nil)
+		a.refuses(1, []string{"error: ~/cfg was set up with a different account key; nothing was changed\nhint: mashctl init --config <file> --config-dir <a new folder>\n"}, nil)
 	})
 	t.Run("different sys.creds already in place", func(t *testing.T) {
 		a.t = t
@@ -661,7 +661,7 @@ func TestInitRefusals(t *testing.T) {
 		sd := filepath.Join(a.env["MASH_CONFIG_DIR"], "server")
 		os.MkdirAll(sd, 0o700)
 		os.WriteFile(filepath.Join(sd, "sys.creds"), []byte("other"), 0o600)
-		a.refuses(1, []string{"different system creds"}, nil)
+		a.refuses(1, []string{"error: ~/cfg was set up with a different system creds; nothing was changed\nhint: mashctl init --config <file> --config-dir <a new folder>\n"}, nil)
 	})
 }
 
@@ -779,5 +779,18 @@ func TestInitStrictSigningKeyUsage(t *testing.T) {
 	a.vals["admin_creds"] = sc
 	if out, errb, code := a.init(); code != 0 {
 		t.Fatalf("init with a signing key user: %d\n%s\n%s", code, out, errb)
+	}
+}
+
+func TestShownFolder(t *testing.T) {
+	for _, c := range []struct{ dir, home, want string }{
+		{"/home/a/.config/mash", "/home/a", "~/.config/mash"},
+		{"/home/a", "/home/a", "~"},
+		{"/srv/mash", "/home/a", "/srv/mash"},
+		{"/home/ab/x", "/home/a", "/home/ab/x"},
+	} {
+		if got := shownFolder(c.dir, c.home); got != c.want {
+			t.Errorf("shownFolder(%q, %q) = %q, want %q", c.dir, c.home, got, c.want)
+		}
 	}
 }

@@ -193,6 +193,12 @@
         "exit": 0
        },
        {
+        "case": "This folder was set up for a different server",
+        "text": "error: ~/.config/mash was set up with a different operator key;\n       nothing was changed\nhint: mashctl init --config <file> --config-dir <a new folder>",
+        "stream": "stderr",
+        "exit": 1
+       },
+       {
         "case": "Cannot reach the server",
         "text": "error: cannot reach tls://localhost:4222\nhint: mashctl doctor",
         "stream": "stderr",
@@ -223,7 +229,7 @@
      },
      {
       "name": "x-notes",
-      "value": "Safe to run again. THE SETUP FILE is YAML, and holds paths, never secrets: 'servers' (a list of addresses), 'ca' (the certificate authority's certificate, if the server uses its own), 'owner' (the first owner), 'admin_creds' (the administrator's creds file), 'system_creds' (the system account's creds file), 'operator_key' (the operator's signing key) and 'account_key' (the account's signing key). The last three are what cancelling a deleted endpoint's key needs. A hosted NATS where you do not hold the operator key, such as Synadia Cloud, is not supported by mashctl in 0.5.6; mash itself works against any conforming server."
+      "value": "Safe to run again with the same settings. It never replaces what a folder already holds: if the folder was set up with a different operator key, account key, server, system creds, admin creds or owner, it refuses and changes nothing, in one line of the same form naming which ('... was set up with a different owner; nothing was changed'), and the way on is a new configuration folder (--config-dir) or moving the old folder aside yourself. Someone who removes a script-made server and sets one up again meets this every time; it is a known issue for 0.5.6 with that workaround. THE SETUP FILE is YAML, and holds paths, never secrets: 'servers' (a list of addresses), 'ca' (the certificate authority's certificate, if the server uses its own), 'owner' (the first owner), 'admin_creds' (the administrator's creds file), 'system_creds' (the system account's creds file), 'operator_key' (the operator key that signs the account: its identity key when the server was set up with the nats command, or a signing key if your operator uses one) and 'account_key' (the account's signing key). The last three are what cancelling a deleted endpoint's key needs. Know what this means: with a server set up by the script, mashctl's folder holds the operator's identity key, the strongest key there is, with which the operator itself can be re-issued. It is protected only as your own files are. A hosted NATS where you do not hold the operator key, such as Synadia Cloud, is not supported by mashctl in 0.5.6; mash itself works against any conforming server."
      }
     ]
    },
@@ -348,7 +354,7 @@
        },
        {
         "case": "A problem",
-        "text": "endpoints  FAIL  1 inbox has no endpoint record: acme.demo.dave\n\n1 problem.\nhint: mashctl endpoint show acme.demo.dave",
+        "text": "config     ok\nserver     ok    tls://localhost:4222\nsign-in    ok\nstorage    ok\nendpoints  FAIL  1 inbox has no endpoint record: acme.demo.dave\nkeys       ok    every connected key was issued here\n\n1 problem.\nhint: mashctl endpoint show acme.demo.dave",
         "stream": "stdout",
         "exit": 1
        }
@@ -677,7 +683,7 @@
          },
          {
           "case": "--public-key without --out",
-          "text": "error: --public-key needs --out, the join file to write",
+          "text": "error: --public-key needs --out, the join file to write\nhint: mashctl endpoint create --help",
           "stream": "stderr",
           "exit": 2
          },
@@ -793,7 +799,7 @@
          },
          {
           "case": "No terminal and no --yes",
-          "text": "error: deleting needs a terminal to confirm, or --yes",
+          "text": "error: deleting needs a terminal to confirm, or --yes\nhint: mashctl endpoint delete --help",
           "stream": "stderr",
           "exit": 2
          },

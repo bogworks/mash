@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/bogworks/mash/internal/cliframe"
 	"github.com/bogworks/mash/internal/config"
@@ -65,6 +66,9 @@ func runEndpoint(args []string, g cliframe.Global, env func(string) string, look
 		if v.name == args[0] {
 			return v.run(rest, g, env, lookup, stdout, stderr)
 		}
+	}
+	if args[0] != "-" && strings.HasPrefix(args[0], "-") { // an option the parent does not have is not a sub-command name
+		return cliframe.Report(stdout, stderr, cliframe.Usagef("unknown %s", config.RejectedOption(args[0])).WithHint("mashctl endpoint --help"), jsonRequested(args))
 	}
 	return cliframe.Report(stdout, stderr, cliframe.Usagef("unknown command %q", config.Clean(args[0])).WithHint("mashctl endpoint --help"), jsonRequested(rest))
 }

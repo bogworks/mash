@@ -7,10 +7,6 @@ import (
 	"github.com/bogworks/mash/internal/config"
 )
 
-// announceSink, when set, receives the target lines instead of stderr: the tests that compare a verb's whole stderr set
-// it to io.Discard (see TestMain); production leaves it nil.
-var announceSink io.Writer
-
 // sysTarget asks announceTarget to name the system account credentials too: its path, from config.json.
 type sysTarget struct{}
 
@@ -30,15 +26,13 @@ func sourceText(cfg config.Config, key string) string {
 	}
 }
 
-// announceTarget prints, to stderr and before a verb connects to a server or changes anything, which server mashctl is
-// about to act on and where each setting came from; then a warning when an environment variable overrode a different
+// announceTarget acts before a verb connects to a server or changes anything. With verbose (--verbose) it prints, to
+// stderr, which server mashctl is about to act on and where each setting came from: the default output of a verb is the
+// specification's and holds no such line. Whatever verbose says, it prints a warning when an environment variable overrode a different
 // config.json value, and one more when the shell looks like it is inside an endpoint session whose own server that is.
 // It only informs: it never refuses, and it never prints the contents of a credentials file. sys, when set, adds the
 // system account credentials' path. Interim until the redesign gives the target an explicit flag or context (#183).
-func announceTarget(cfg config.Config, env func(string) string, stderr io.Writer, sys *sysTarget) {
-	if announceSink != nil {
-		stderr = announceSink
-	}
+func announceTarget(cfg config.Config, env func(string) string, stderr io.Writer, sys *sysTarget, verbose bool) {
 	line := "mashctl: target server " + maskURL(cfg.URL) + " (from " + sourceText(cfg, "servers") + ")"
 	if cfg.URL == "" {
 		line = "mashctl: target server unset"
@@ -62,7 +56,9 @@ func announceTarget(cfg config.Config, env func(string) string, stderr io.Writer
 			line += ", system creds " + p + " (from config.json)"
 		}
 	}
-	fmt.Fprintln(stderr, line)
+	if verbose {
+		fmt.Fprintln(stderr, line)
+	}
 
 	// The override warning names the endpoint session the shell may be inside, so it is given when an endpoint launch
 	// token is set, or when MASH_ENDPOINT comes from the environment while config.json names servers (the shell's

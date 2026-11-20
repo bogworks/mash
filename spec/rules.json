@@ -61,6 +61,10 @@
    "detail": "Their lines go to stdout whatever they find, and they exit 1 when they found a problem. Any hint still goes to stderr."
   },
   {
+   "rule": "Where a hint is printed",
+   "detail": "At a shell, every 'hint:' line goes to stderr, whichever stream the rest went to: after an error, after status, after doctor's count. The case pages show the hint beneath the text it follows, for reading; a case marked stdout means its lines other than the hint. In an MCP tool's text block the hint is the last line."
+  },
+  {
    "rule": "The server not answering reads the same everywhere",
    "detail": "'error: the server did not answer: tls://host:4222' and 'hint: mash doctor' (or mashctl doctor), exit 1. Two more server failures have fixed words: 'the server's certificate is not trusted: <address>' and 'the server did not offer TLS: <address>'."
   },
@@ -99,6 +103,10 @@
   {
    "rule": "A sender's words are always marked as the sender's",
    "detail": "Wherever mash prints a message's text in full, every line starts with '> ' and control characters are escaped, at a shell and in an MCP tool alike. It reads as quoted mail does to a person, and it shows an agent where data from someone else begins and ends. A table's MESSAGE column holds the sender's words too."
+  },
+  {
+   "rule": "Encryption can be turned off in one way only, and it says so every time",
+   "detail": "Both tools talk to the server over TLS. The one way to turn that off is the environment variable MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1. There is no flag and no configuration-file key for it: this is the one setting that cannot be given three ways, so that it cannot be left on in a file and forgotten. While it is set, every command of both tools first prints, on stderr: 'warning: encryption to the server is OFF (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set)'. The older names, MASH_INSECURE_PLAINTEXT and the key insecure_plaintext, are refused with an error naming the new one."
   },
   {
    "rule": "Only a destructive command asks",
@@ -237,12 +245,12 @@
   {
    "name": "install.sh",
    "command": "curl -fsSL https://github.com/bogworks/mash/releases/latest/download/install.sh | bash",
-   "what": "Finds the machine's type, downloads mash and mashctl from the same release, checks each against the release's checksums, puts them in ~/.local/bin unless MASH_INSTALL_DIR names another folder, and prints one line for each, with the path it actually used: 'Installed mash v0.5.6 (3f9a41c) in ~/.local/bin'. It asks nothing and needs no sudo. If that folder is not on the PATH it says so in one line."
+   "what": "Finds the machine's type, downloads mash and mashctl from the same release, checks each against the release's checksums, and against the release's signed record too when the gh command is there to do it (without gh it says in one line that it checked checksums only), puts them in ~/.local/bin unless MASH_INSTALL_DIR names another folder, and prints one line for each, with the path it actually used: 'Installed mash v0.5.6 (3f9a41c) in ~/.local/bin'. It asks nothing and needs no sudo. If that folder is not on the PATH it says so in one line."
   },
   {
    "name": "mash-local-nats-setup.sh",
    "command": "curl -fsSL https://github.com/bogworks/mash/releases/latest/download/mash-local-nats-setup.sh | bash",
-   "what": "For a NATS server on this machine. It works on Linux and on macOS, where many developers will first try mash. First install nats-server with your package manager (version 2.10.7 or newer) and the nats command: Homebrew has it, and on Debian and Ubuntu, where there is no package for it, it comes from its GitHub release. The script also needs openssl, to make the server's certificate. It names anything missing, says where to get it, and stops. It does not need nsc. If port 4222 is already taken, as it is where a packaged nats-server runs as a system service, the script leaves that service alone, uses the next free port and says which. It asks one question, the owner's name, reading it from the terminal. It makes a server that only this machine can reach, with encryption on, starts it as your own user, and writes the setup file. Everything goes in ~/mash-nats unless --dir names another folder. Its last line is the next command, with the path it actually wrote: 'mashctl init --config ~/mash-nats/mash-setup.yaml' by default. Guides and skills take that path from the script's output, never from memory. The NATS account it makes is named after the owner; the system account keeps NATS's own name, SYSTEM. The server runs as your own user's process, not as a system service, so it does not come back after a reboot: run the script again with --start to start it (it never creates anything then), --stop to stop it, or --remove to remove it."
+   "what": "For a NATS server on this machine. It works on Linux and on macOS, where many developers will first try mash. First install nats-server with your package manager (version 2.10.7 or newer) and the nats command: Homebrew has it, and on Debian and Ubuntu, where there is no package for it, it comes from its GitHub release. The script also needs openssl, to make the server's certificate. It names anything missing, says where to get it, and stops. It does not need nsc. If port 4222 is already taken, as it is where a packaged nats-server runs as a system service, the script leaves that service alone, uses the next free port and says which. It asks one question, the owner's name, reading it from the terminal. It makes a server that only this machine can reach, with encryption on, starts it as your own user, and writes the setup file. Everything goes in ~/mash-nats unless --dir names another folder. Its last line is the next command, with the path it actually wrote: 'mashctl init --config ~/mash-nats/mash-setup.yaml' by default. Guides and skills take that path from the script's output, never from memory. The NATS account it makes is named after the owner; the system account keeps NATS's own name, SYSTEM. The server runs as your own user's process, not as a system service, so it does not come back after a reboot: run the script again with --start to start it (it never creates anything then), --stop to stop it, or --remove to remove it. After --remove it prints two lines: that mashctl's folder still points at the server just removed, and how to set up again (a new configuration folder, or moving the old one aside)."
   },
   {
    "name": "For an agent",

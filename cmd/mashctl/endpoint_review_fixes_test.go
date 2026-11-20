@@ -109,7 +109,7 @@ func TestEndpointDeleteCountsServersThatDidNotConfirm(t *testing.T) {
 	s := stubRevoke(t)
 	s.err = &apply.ConfirmError{Confirmed: 1, Listed: 2, Msg: "revoke: the revocation was pushed but not confirmed: one server"}
 	_, errb, code := h.run("endpoint", "delete", "o.g.a", "--yes")
-	want := "error: o.g.a was not deleted: 1 of 2 servers did not confirm its key was cancelled\nhint: mashctl endpoint delete o.g.a\n"
+	want := "error: o.g.a was not deleted: 1 of 2 servers did not confirm its key\n       was cancelled\nhint: mashctl endpoint delete o.g.a\n"
 	if code != 1 || !strings.HasSuffix(errb, want) {
 		t.Errorf("%d %q", code, errb)
 	}

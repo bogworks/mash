@@ -20,7 +20,8 @@ const endpointDeleteUsage = `usage: mashctl endpoint delete <address> [--yes] [-
   --yes      do not ask
   --dry-run  print what would change, and change nothing
   --json     print the result as JSON
-  Deletes the endpoint, its inbox and its credentials. The address can never be used again.
+  Deletes the endpoint, its inbox and its credentials. The address can never be
+  used again.
   Without --yes it asks you to type the address, and needs a terminal for that.
 Example:
   mashctl endpoint delete acme.demo.bob
@@ -76,7 +77,7 @@ type deletePlanJSON struct {
 // before anything changes. The question goes to prompt (stderr with --json, so stdout stays one object).
 func confirmDelete(prompt io.Writer, addr sap.Address, messages uint64) error {
 	if !stdinIsTerminal() {
-		return cliframe.Usagef("deleting needs a terminal to confirm, or --yes")
+		return cliframe.Usagef("deleting needs a terminal to confirm, or --yes").WithHint("mashctl endpoint delete --help")
 	}
 	fmt.Fprintf(prompt, "This deletes %s and %s. It cannot be undone.\nType the address to confirm: ", addr, inboxWords(messages))
 	line, err := bufio.NewReader(confirmStdin()).ReadString('\n')
@@ -100,7 +101,7 @@ func runEndpointDelete(args []string, g cliframe.Global, env func(string) string
 	if err != nil {
 		return cliframe.Report(stdout, stderr, err, jsonRequested(args))
 	}
-	opts := retireOpts{dryRun: in.flags["--dry-run"], yes: in.flags["--yes"], again: "mashctl endpoint delete " + in.addr.String()}
+	opts := retireOpts{verbose: g.Verbose, dryRun: in.flags["--dry-run"], yes: in.flags["--yes"], again: "mashctl endpoint delete " + in.addr.String()}
 	prompt := stdout
 	if in.json {
 		prompt = stderr

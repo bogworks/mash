@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,19 +11,10 @@ import (
 	"github.com/bogworks/mash/internal/config"
 )
 
-// TestMain sends the target lines to nowhere, so the tests that compare a verb's whole stderr need not know them; the
-// tests of the lines themselves read them through showTarget.
+// TestMain sets the umask the folder check needs.
 func TestMain(m *testing.M) {
-	announceSink = io.Discard
 	syscall.Umask(0o022) // the folder check refuses a group-writable folder; a 002 umask would make every test folder one
 	os.Exit(m.Run())
-}
-
-// showTarget lets the target lines reach the stderr the test captures.
-func showTarget(t *testing.T) {
-	t.Helper()
-	announceSink = nil
-	t.Cleanup(func() { announceSink = io.Discard })
 }
 
 // loadCfg is config.Load over a config dir holding the config.json body (none when ""), with env on top.
@@ -50,9 +40,7 @@ func loadCfg(t *testing.T, fileBody string, env map[string]string) (config.Confi
 
 func announced(cfg config.Config, env func(string) string, sys *sysTarget) string {
 	var b bytes.Buffer
-	announceSink = nil
-	defer func() { announceSink = io.Discard }()
-	announceTarget(cfg, env, &b, sys)
+	announceTarget(cfg, env, &b, sys, true)
 	return b.String()
 }
 
@@ -188,7 +176,6 @@ func TestAnnounceSysCredsPathWhenKnown(t *testing.T) {
 
 func TestTargetLineComesBeforeAWriteAndOfflineVerbsPrintNone(t *testing.T) {
 	h := newFleetEnv(t)
-	showTarget(t)
 	h.env["MASH_LAUNCH_TOKEN"] = "sessionagent"
 
 	out, errb, code := h.run("limits", "show")
@@ -205,7 +192,13 @@ func TestTargetLineComesBeforeAWriteAndOfflineVerbsPrintNone(t *testing.T) {
 		t.Errorf("init --help: %q", errb)
 	}
 
+	// the specification's output of a verb holds no target line: it comes with --verbose only
 	for _, args := range [][]string{{"limits", "apply"}, {"endpoint", "delete", "o.g.zz", "--yes"}} {
+		if _, errb, _ := h.run(args...); strings.Contains(errb, "target server") {
+			t.Errorf("%v: a target line without --verbose: %q", args, errb)
+		}
+	}
+	for _, args := range [][]string{{"--verbose", "limits", "apply"}, {"endpoint", "delete", "o.g.zz", "--yes", "--verbose"}} {
 		_, errb, _ := h.run(args...)
 		want := "mashctl: target server " + h.e.URL + " (from MASH_SERVER), owner " + h.e.Owner + " (from MASH_ENDPOINT), admin creds " + h.e.AdminCreds + " (from MASH_ADMIN_CREDS)\n"
 		if !strings.HasPrefix(errb, want) {
@@ -219,7 +212,6 @@ func TestTargetLineComesBeforeAWriteAndOfflineVerbsPrintNone(t *testing.T) {
 
 func TestTargetWarnsWhenEnvOverridesConfigJSON(t *testing.T) {
 	h := newFleetEnv(t)
-	showTarget(t)
 	h.env["MASH_LAUNCH_TOKEN"] = "sessionagent" // the warning is given inside an endpoint session only
 	if err := os.WriteFile(filepath.Join(h.dir, "config.json"), []byte(`{"servers":"tls://scratch.example:4222"}`), 0o600); err != nil {
 		t.Fatal(err)

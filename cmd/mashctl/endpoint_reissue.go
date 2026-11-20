@@ -24,15 +24,19 @@ import (
 	"github.com/bogworks/mash/internal/sap"
 )
 
-const endpointReissueUsage = `usage: mashctl endpoint reissue <address> [--out PATH] [--public-key PATH] [--dry-run] [--json]
+const endpointReissueUsage = `usage: mashctl endpoint reissue <address> [--out PATH] [--public-key PATH]
+       [--dry-run] [--json]
   address            the endpoint, as owner.group.name
-  --out PATH         write a join file for another machine and install nothing here
+  --out PATH         write a join file for another machine and install
+                     nothing here
   --public-key PATH  sign this public key; needs --out
   --dry-run          print what would change, and change nothing
   --json             print the result as JSON
-  With no option the key pair is made here and <address>.creds in the config folder is replaced.
-  The old key is cancelled on every server before anything is removed. A run that was stopped is finished by
-  running the same command again. Only one reissue of an address runs at a time.
+  With no option the key pair is made here and <address>.creds in the config
+  folder is replaced.
+  The old key is cancelled on every server before anything is removed. A run
+  that was stopped is finished by running the same command again. Only one
+  reissue of an address runs at a time.
 Example:
   mashctl endpoint reissue acme.demo.bob
   mashctl endpoint reissue acme.demo.bob --out acme.demo.bob.join
@@ -82,6 +86,7 @@ func runEndpointReissue(args []string, g cliframe.Global, env func(string) strin
 	if err != nil {
 		return cliframe.Report(stdout, stderr, err, jsonRequested(args, "--out", "--public-key"))
 	}
+	in.verbose = g.Verbose
 	t, res, err := epReissue(&in, env, lookup, stderr)
 	if err != nil {
 		return cliframe.Report(stdout, stderr, err, in.json)
@@ -112,7 +117,7 @@ func epReissue(in *epInput, env func(string) string, lookup config.Lookup, stder
 	if err != nil {
 		return refuse(&epRefusal{"no_account_key", err.Error()})
 	}
-	announceTarget(cfg, env, stderr, nil)
+	announceTarget(cfg, env, stderr, nil, in.verbose)
 	adm, ctx, closeAdmin, err := ctl.OpenAdmin("mashctl", cfg)
 	if err != nil {
 		return t, epResult{}, epErrOf(addr, "server", admin.RewordUnavailable(err.Error())+"; nothing was changed")
