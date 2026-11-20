@@ -12,6 +12,11 @@ func NoSuchEndpoint(addr string) *cliframe.Error {
 	return cliframe.Failf("no endpoint has the address %s", addr).WithHint("mash who")
 }
 
+// RefusedMessage is the failure for the number of a message serve refused because it was not verified (exit 1).
+func RefusedMessage(n int) *cliframe.Error {
+	return cliframe.Failf("message %d was refused: it was not verified", n).WithHint("mash doctor")
+}
+
 // NotSignedIn is the failure for an endpoint whose credentials the server refused (exit 1).
 func NotSignedIn(addr string) *cliframe.Error {
 	return cliframe.Failf("%s cannot sign in: the server refused its credentials", addr).WithHint("mash doctor")

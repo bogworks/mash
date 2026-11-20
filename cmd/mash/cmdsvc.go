@@ -284,6 +284,10 @@ func messageOn(ctx context.Context, ep *endpoint.Endpoint, number int) (cmds.Rea
 	if errors.As(err, &nm) {
 		return cmds.ReadView{Endpoint: ep.Display()}, nil
 	}
+	var rf *endpoint.RefusedMessageError
+	if errors.As(err, &rf) {
+		return cmds.ReadView{}, cmdcore.RefusedMessage(int(rf.Seq))
+	}
 	if err != nil {
 		return cmds.ReadView{}, plainFail(err)
 	}

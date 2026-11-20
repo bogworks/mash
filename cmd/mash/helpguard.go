@@ -13,6 +13,9 @@ func helpUsage(args []string) (string, bool) {
 	switch args[0] {
 	case "serve", "hook":
 		u, known = commandLines(usage, "  mash "+args[0]), true
+		if args[0] == "serve" {
+			u += serveOptionsHelp
+		}
 	case "plugin":
 		u, known = pluginUsage, true
 	}
@@ -30,6 +33,15 @@ func helpUsage(args []string) (string, bool) {
 	}
 	return "", false
 }
+
+// serveOptionsHelp is the options of mash serve, hand-written until serve is on the command table; the text is the
+// specification's.
+const serveOptionsHelp = `
+
+Options:
+  --accept-unverified    Deliver mail that is not verified, with its trust label.
+                         Default: off; such mail is refused.
+                         Also MASH_ACCEPT_UNVERIFIED, or "accept_unverified".`
 
 // linesOf is the lines of text that begin with prefix followed by a space or the end of the line.
 func linesOf(text, prefix string) string {

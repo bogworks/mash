@@ -103,6 +103,15 @@ func (e *Endpoint) classify(subject string, hdr nats.Header, data []byte, stored
 	name := e.byUser[h.User]
 	e.mu.RUnlock()
 	if name == "" || (h.Name != "" && h.Name != name) {
+		// The directory cache may predate the sender (it is re-read every DirectoryPoll): read that one record now,
+		// once, before the message is called unknown-signer and, by default, dropped for good.
+		if e.reloadSender(h) {
+			e.mu.RLock()
+			name = e.byUser[h.User]
+			e.mu.RUnlock()
+		}
+	}
+	if name == "" || (h.Name != "" && h.Name != name) {
 		return shownName(h), sap.TrustUnknownSigner, h, true
 	}
 	if signed, err := time.Parse(time.RFC3339Nano, h.TS); err == nil {
@@ -330,6 +339,11 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 		return func() {}, nil
 	}
 	stream := e.ident.InboxStream()
+	// The refusal state is tied to the stream's identity before the first message is handled, whatever SetSpool did: a
+	// redelivery of mail already refused is found refused. A failure is a startup error, nothing is consumed.
+	if _, err := e.bindRefusals(ctx); err != nil {
+		return nil, fmt.Errorf("mash: refused-mail state not tied to the inbox stream: %w", err)
+	}
 	cons, err := e.js.Consumer(ctx, stream, store.Consumer)
 	if err != nil {
 		return nil, fmt.Errorf("mash: inbox consumer: %w", err)
@@ -352,6 +366,18 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 			return
 		}
 		ref := MsgRef{Seq: meta.Sequence.Stream}
+		if meta.NumDelivered > 1 {
+			// A redelivery of mail already refused (its ack was lost): still refused, whatever the directory or the
+			// setting says now. Acknowledged without a second count.
+			if id := e.refusedStream.Load(); id != nil && e.refusedSeq(ref.Seq, *id) {
+				if e.mayAck(pending{}) {
+					_ = m.Ack()
+				} else {
+					_ = m.Nak()
+				}
+				return
+			}
+		}
 		if e.leaseGone.Load() {
 			_ = m.NakWithDelay(time.Second) // the lease is gone: not queued, not acked; redelivered after a second, not in a loop
 			return
@@ -365,6 +391,30 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 			e.log.Printf("dropped #%s: %s sender header (claimed user %s)", FormatMsgRef(ref), trust, h.User)
 			if e.verdict() == verdictHeld {
 				_ = m.Ack()
+			}
+			return
+		}
+		if e.refuses(trust) {
+			// Dropped and counted, never delivered: acked so it is not redelivered for ever. The sender is told nothing.
+			// Without the lease the new holder gets it (and counts it), so it is nak'd, not counted.
+			if e.mayAck(pending{}) {
+				recorded, _ := e.refuse(ref.Seq, claimedAddress(h, from), trust)
+				if e.refusedHook != nil {
+					e.refusedHook()
+				}
+				// Recording can take seconds: the lease is checked again right before the ack, and on a loss the
+				// record stays (never taken back) and the message is nak'd: the new holder finds it refused on the
+				// redelivery and acks it without counting again. A handover can overcount by one.
+				if !recorded {
+					// Not recorded: acking would let the message read as mail later. Retried.
+					_ = m.NakWithDelay(time.Second)
+				} else if e.mayAck(pending{}) {
+					_ = m.Ack()
+				} else {
+					_ = m.Nak()
+				}
+			} else {
+				_ = m.Nak()
 			}
 			return
 		}
@@ -862,6 +912,8 @@ func (e *Endpoint) inbox(ctx context.Context) (jetstream.Stream, error) {
 	if err != nil {
 		return nil, fmt.Errorf("mash: inbox: %w", err)
 	}
+	id := streamIdentity(s.CachedInfo())
+	e.inboxID.Store(&id)
 	return s, nil
 }
 
@@ -869,6 +921,12 @@ func (e *Endpoint) toMail(raw *jetstream.RawStreamMsg) (render.Mail, bool) {
 	from, trust, h, ok := e.classify(raw.Subject, raw.Header, raw.Data, raw.Time)
 	if !ok {
 		return render.Mail{Seq: raw.Sequence, From: "?", Trust: trust, At: raw.Time}, false
+	}
+	if id := e.inboxID.Load(); id != nil && e.refusedSeq(raw.Sequence, *id) { // refused earlier: stays refused
+		return render.Mail{Seq: raw.Sequence, From: from, Trust: trust, At: raw.Time}, false
+	}
+	if e.refuses(trust) { // stored, but not shown: serve counted and dropped it (refuse.go)
+		return render.Mail{Seq: raw.Sequence, From: from, Trust: trust, At: raw.Time}, false
 	}
 	replyTo, via := senderMarks(raw.Header, trust, h)
 	via, _ = e.viaAllowed(via) // dropped here too; the serve path logs it
@@ -929,7 +987,9 @@ func (e *Endpoint) ReadInbox(ctx context.Context, q InboxQuery) (InboxRead, erro
 	}
 	info := s.CachedInfo()
 	first, last := info.State.FirstSeq, info.State.LastSeq
-	st := InboxState{Total: int(info.State.Msgs), Waiting: int(info.State.Msgs)}
+	// The stream keeps the refused mail it stored; the counts are of what the inbox shows.
+	shown := max(int(info.State.Msgs)-e.refusedStored(first, last, streamIdentity(info)), 0)
+	st := InboxState{Total: shown, Waiting: shown}
 	cons, err, ok := e.pre.takeConsumer()
 	if !ok {
 		cons, err = e.js.Consumer(ctx, e.ident.InboxStream(), store.Consumer)
@@ -1074,6 +1134,9 @@ func (e *Endpoint) ReadRef(ctx context.Context, r MsgRef) (render.Mail, error) {
 	if err != nil {
 		return render.Mail{}, err
 	}
+	if e.refusedSeq(r.Seq, streamIdentity(s.CachedInfo())) {
+		return render.Mail{}, &RefusedMessageError{Seq: r.Seq} // refused mail is not there to read
+	}
 	raw, err := s.GetMsg(ctx, r.Seq)
 	if errors.Is(err, jetstream.ErrMsgNotFound) {
 		return render.Mail{}, &NoMessageError{Seq: r.Seq, Endpoint: e.Display()}
@@ -1085,6 +1148,9 @@ func (e *Endpoint) ReadRef(ctx context.Context, r MsgRef) (render.Mail, error) {
 		return render.Mail{}, err
 	}
 	m, ok := e.toMail(raw)
+	if !ok && e.refuses(m.Trust) && m.Trust != sap.TrustForged && m.Trust != sap.TrustMalformed {
+		return render.Mail{}, &RefusedMessageError{Seq: r.Seq}
+	}
 	if !ok {
 		return m, fmt.Errorf("mash: message #%s has a %s sender header and is not shown", FormatMsgRef(r), m.Trust)
 	}

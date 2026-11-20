@@ -327,6 +327,16 @@ func TestReadText(t *testing.T) {
 	if code != 1 || out != "{\"error\":\"acme.demo.alice has no message 9\",\"hint\":\"mash inbox\"}\n" {
 		t.Errorf("no such message, json: %d %q", code, out)
 	}
+	rb := readBox()
+	rb.err = cmdcore.RefusedMessage(12)
+	code, out, errs = runRead(rb, cliframe.Global{}, "12")
+	if code != 1 || out != "" || errs != "error: message 12 was refused: it was not verified\nhint: mash doctor\n" {
+		t.Errorf("refused message: %d %q %q", code, out, errs)
+	}
+	code, out, _ = runRead(rb, cliframe.Global{JSON: true}, "12")
+	if code != 1 || out != "{\"error\":\"message 12 was refused: it was not verified\",\"hint\":\"mash doctor\"}\n" {
+		t.Errorf("refused message, json: %d %q", code, out)
+	}
 	for _, bad := range [][]string{{}, {"0"}, {"x"}, {"#2"}, {"2", "3"}} {
 		if code, out, errs := runRead(readBox(), cliframe.Global{}, bad...); code != 2 || out != "" || !strings.HasPrefix(errs, "error: ") || !strings.HasSuffix(errs, "hint: mash read --help\n") {
 			t.Errorf("%v: %d %q %q", bad, code, out, errs)
@@ -530,7 +540,9 @@ func TestInboxAndReadMatchesSpec(t *testing.T) {
 		case "No such message":
 			code, out, errs = runRead(readBox(), cliframe.Global{}, "9")
 		case "A message that was refused":
-			continue // the refusal of unverified mail is slice S7: its tests compare this case
+			rb := readBox()
+			rb.err = cmdcore.RefusedMessage(12)
+			code, out, errs = runRead(rb, cliframe.Global{}, "12")
 		default:
 			t.Errorf("unknown spec case %v", oc["case"])
 			continue

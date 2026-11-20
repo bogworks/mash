@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"net"
 	"os"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -137,6 +138,32 @@ const retryingLine = "\n\nmash could not reach its server yet and is retrying; m
 	"mash retries on its own and will tell you when mail is on."
 
 // serve runs the endpoint manager for one Claude session until stdin closes.
+// acceptUnverifiedFlag is serve's one flag (the specification's --accept-unverified): the boolean form of
+// MASH_ACCEPT_UNVERIFIED and "accept_unverified". Like the global options it is taken out of the arguments wherever it
+// stands and shadows the environment and the file.
+const acceptUnverifiedFlag = "--accept-unverified"
+
+// serveFlags takes --accept-unverified out of the arguments of `mash serve` and, when it was there, makes the
+// environment and the lookup config.Load reads say MASH_ACCEPT_UNVERIFIED=1. Other commands pass through unchanged.
+func serveFlags(args []string, env func(string) string, lookup config.Lookup) ([]string, func(string) string, config.Lookup) {
+	if args[0] != "serve" || !slices.Contains(args[1:], acceptUnverifiedFlag) {
+		return args, env, lookup
+	}
+	rest := slices.DeleteFunc(slices.Clone(args), func(a string) bool { return a == acceptUnverifiedFlag })
+	const key = "MASH_ACCEPT_UNVERIFIED"
+	return rest, func(k string) string {
+			if k == key {
+				return "1"
+			}
+			return env(k)
+		}, func(k string) (string, bool) {
+			if k == key {
+				return "1", true
+			}
+			return lookup(k)
+		}
+}
+
 func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host.Adapter, pluginRoot string, stdin io.Reader, stdout, stderr io.Writer) int {
 	applyRetryTiming(cfg)
 	ctx, cancel := context.WithCancel(parent)
