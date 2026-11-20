@@ -124,12 +124,13 @@ same for the other), say in one sentence what each does, and ask for the yes.
 bash "$HOME/mash-setup-dl/install.sh"
 ```
 
-Expected: `Installed mash v0.5.6 (<commit>) in <folder>` and the same for
+Expected: `Installed mash v<version> (<commit>) in <folder>` and the same for
 `mashctl`. If it says the folder is not on the PATH, tell the person to add it
 (do not edit their shell files): for this session use the full path the line
 printed. The folder is the one in the output; take it from there. A line
 saying `gh not found` is normal: it says the checksums come from the same
-download (see `docs/install.md` to verify the attestation).
+download. If `gh` is installed, step 3 can also verify the attestation (see
+`docs/install.md`); if it fails, stop and ask.
 
 Check, read-only: `mash version` and `mashctl version` print the same version.
 
@@ -187,9 +188,8 @@ the two agents:
 mashctl endpoint create acme.demo.bob
 ```
 
-Expected: `Created endpoint acme.demo.bob`, perhaps after a line starting
-`mashctl: target server ...`: that line only says which server it used. Then
-the same for the second agent.
+Expected: `Created endpoint acme.demo.bob`. Then the same for the second
+agent.
 Check:
 
 ```sh
@@ -210,9 +210,9 @@ MASH_ENDPOINT=acme.demo.bob mash send acme.demo.alice "lunch at noon?"
 MASH_ENDPOINT=acme.demo.alice mash inbox
 ```
 
-Expected: `Mail sent.`, then `1 message for acme.demo.alice, 1 new, 0 urgent.`
-and a one-row table with `lunch at noon?`. `mash read 1` shows the message
-in full, with `trust: verified`.
+Expected: `Mail sent (number 1).`, then `1 message for acme.demo.alice, 1 new,
+0 urgent.` and a one-row table with `lunch at noon?`. `mash read 1` shows the
+message in full, with `trust: verified`.
 
 ## 8. Use it from Claude Code
 

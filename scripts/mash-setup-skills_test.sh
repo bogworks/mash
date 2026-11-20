@@ -388,6 +388,61 @@ echo "== 7 scripted-person dry check (informational)"
   printf '  line %d  %-12s %s\n' "$((10#$n))" "$kind" "$txt"
 done
 
+# ---------------------------------------------------------------- check 8
+echo "== 8 expected output quoted in the skills appears in the spec"
+# spec_texts <tool> <command words...>: the output texts (x-output) of that spec command.
+spec_texts() {
+  local tool="$1"; shift
+  jq -r --arg path "$*" '
+    reduce ($path | split(" ")[]) as $w (.command;
+      (.commands // [] | map(select(.name == $w)) | .[0]) // {})
+    | ((.metadata // []) | map(select(.name == "x-output")) | .[0].value // [])[]
+    | .text' "${SPEC[$tool]}"
+}
+# skill_pattern <text>: an ERE matching the quoted text, with the placeholders
+# <n>, <N>, a lone N or M or any digits (a number), <server> (anything) and acme.demo.<name>.
+skill_pattern() {
+  # shellcheck disable=SC2016
+  printf '%s' "$1" | sed -E -e 's/[0-9]+/@D@/g' -e 's/[][\.*^$(){}?+|\\/]/\\&/g' \
+    -e 's/acme\\\.demo\\\.[a-z]+/acme\\.demo\\.[a-z]+/g' \
+    -e 's/<[nN]>/[0-9]+/g' -e 's/<server>/.+/g' \
+    -e 's/(^|[^A-Za-z])[NM]([^A-Za-z]|$)/\1[0-9]+\2/g' \
+    -e 's/(^|[^A-Za-z])[NM]([^A-Za-z]|$)/\1[0-9]+\2/g' -e 's/@D@/[0-9]+/g'
+}
+# expect <skill> <line-key> <span-number> <tool> <command words...>
+expect() {
+  local skill="$1" key="$2" nth="$3" tool="$4" line text pat texts
+  shift 4
+  local f; f="$(skillfile "$skill")"
+  line="$(grep -nF -e "$key" "$f" | head -n1)"
+  if [ -z "$line" ]; then
+    fail "$f: no line with '$key' (needed for the spec check of '$tool $*')"
+    return
+  fi
+  text="$(printf '%s\n' "${line#*:}" | awk -F'`' -v n="$nth" '{print $(2*n)}')"
+  texts="$(spec_texts "$tool" "$@")"
+  if [ -z "$texts" ]; then
+    fail "spec has no x-output for '$tool $*'"
+    return
+  fi
+  if [ -z "$text" ]; then
+    fail "$f:${line%%:*}: no quoted text (span $nth) on the line for '$tool $*'"
+    return
+  fi
+  pat="$(skill_pattern "$text")"
+  if printf '%s\n' "$texts" | grep -Eq -e "$pat"; then
+    ok "$f:${line%%:*}: '$text' appears in the spec output of '$tool $*'"
+  else
+    fail "$f:${line%%:*}: '$text' is not in the spec output of '$tool $*' (spec says: $(printf '%s\n' "$texts" | head -n1))"
+  fi
+}
+expect setup 'Expected: `Created endpoint' 1 mashctl endpoint create
+expect setup 'Expected: `acme.demo.bob: ready' 1 mash status
+expect setup 'Expected: `Mail sent' 1 mash send
+expect day-2 'Expected: `Created endpoint' 1 mashctl endpoint create
+# shellcheck disable=SC2016
+expect day-2 '`mashctl status` is one line' 2 mashctl status
+
 echo
 echo "total: $PASS ok, $NFAIL FAIL"
 [ "$NFAIL" = 0 ]

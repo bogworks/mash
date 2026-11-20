@@ -12,20 +12,31 @@ import (
 // PluginManifest is the path of the Claude Code plugin manifest, relative to the repository root.
 const PluginManifest = "plugin/.claude-plugin/plugin.json"
 
+// SetupPluginManifest is the path of the skills-only mash-setup plugin's manifest. It carries the release version too.
+const SetupPluginManifest = "mash-setup/.claude-plugin/plugin.json"
+
+// PluginManifests lists every plugin manifest that must name the release version.
+var PluginManifests = []string{PluginManifest, SetupPluginManifest}
+
 // CheckPluginVersion refuses a plugin manifest whose version is not the release version (N.N.N, no leading v).
 // Claude Code updates an installed plugin only when its manifest version changes.
 func CheckPluginVersion(manifest []byte, version string) error {
+	return CheckManifestVersion(PluginManifest, manifest, version)
+}
+
+// CheckManifestVersion is CheckPluginVersion for the manifest at path (named in the error).
+func CheckManifestVersion(path string, manifest []byte, version string) error {
 	var m struct {
 		Version string `json:"version"`
 	}
 	if err := json.Unmarshal(manifest, &m); err != nil {
-		return fmt.Errorf("%s is unreadable: %w", PluginManifest, err)
+		return fmt.Errorf("%s is unreadable: %w", path, err)
 	}
 	if m.Version == "" {
-		return fmt.Errorf("%s has no version, the release is %s", PluginManifest, version)
+		return fmt.Errorf("%s has no version, the release is %s", path, version)
 	}
 	if m.Version != version {
-		return fmt.Errorf("%s says %s, the release is %s", PluginManifest, m.Version, version)
+		return fmt.Errorf("%s says %s, the release is %s", path, m.Version, version)
 	}
 	return nil
 }

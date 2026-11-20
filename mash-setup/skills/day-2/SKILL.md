@@ -30,13 +30,14 @@ the blocks below it is written `~/mash-nats`: use theirs.
 ## Is it working
 
 ```sh
-mashctl status; MASH_ENDPOINT=acme.demo.bob mash doctor
+mashctl status; mashctl doctor; MASH_ENDPOINT=acme.demo.bob mash doctor
 ```
 
 `mashctl status` is one line: `<server>: ok, N endpoints, M online`.
-`mash doctor` checks, for one endpoint, its configuration, credentials, the
-server and sign-in, says how to fix what is wrong, and changes nothing (there
-is no `mashctl doctor`, even where a hint names it). `mash status --endpoint
+`mashctl doctor` checks the server side (storage, endpoint records, keys) and
+changes nothing. `mash doctor` checks, for one endpoint, its configuration,
+credentials, the server and sign-in, says how to fix what is wrong, and changes
+nothing. `mash status --endpoint
 acme.demo.bob` says `acme.demo.bob: ready, offline` (or `online` while a
 session holds it open). Read the `hint:` line of any error and run the command
 it names.
@@ -44,7 +45,8 @@ it names.
 ## The server does not answer (after a reboot, say)
 
 The server is a program running as the person. It does not come back after a
-reboot. Check, then start it:
+reboot. Check (`mashctl doctor` names what is wrong on the server side), then
+start it:
 
 ```sh
 bash "$HOME/mash-setup-dl/mash-local-nats-setup.sh" --dir "$HOME/mash-nats" --start
