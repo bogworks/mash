@@ -78,9 +78,13 @@ func schemaOf(fields []field) map[string]any {
 // JSON names after the required fields and enums are checked.
 func MCPTool[P any, R Result](c Command[P, R], env EnvFunc) Tool {
 	fields := paramFields(reflect.TypeOf((*P)(nil)).Elem())
+	desc := c.MCPDescription
+	if desc == "" {
+		desc = c.Summary
+	}
 	return Tool{
 		Name:        c.Name,
-		Description: c.Summary,
+		Description: desc,
 		Schema:      schemaOf(fields),
 		CallStructured: func(ctx context.Context, args json.RawMessage) (string, any, error) {
 			var p P

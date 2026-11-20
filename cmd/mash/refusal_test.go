@@ -64,7 +64,7 @@ func TestCLISendRefusedByPolicy(t *testing.T) {
 			t.Fatalf("output mentions %q: %q", bad, out)
 		}
 	}
-	if out, code := w.cli(t, "s", "send", tTo("ok"), "hello"); code != 0 || !strings.Contains(out, "Mail sent.") {
+	if out, code := w.cli(t, "s", "send", tTo("ok"), "hello"); code != 0 || !strings.Contains(out, "Mail sent (number ") {
 		t.Fatalf("allowed send: %d %q", code, out)
 	}
 }
@@ -80,7 +80,7 @@ func TestServeSendToolRefusedByPolicy(t *testing.T) {
 		t.Fatalf("result %v, want an error with the single line %q", r, refusal)
 	}
 	r = s.call(t, 8, "send", `{"address":"o.dev.ok","message":"hello"}`)
-	if r["isError"] == true || resultText(r) != "Mail sent." {
+	if r["isError"] == true || !isReceipt(resultText(r), "Mail sent") {
 		t.Fatalf("allowed send: %v", r)
 	}
 }

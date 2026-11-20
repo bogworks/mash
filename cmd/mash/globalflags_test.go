@@ -52,14 +52,14 @@ func TestGlobalServerAndConfigDirFlags(t *testing.T) {
 
 func TestGlobalFlagErrorIsUsageExit2(t *testing.T) {
 	env := map[string]string{"HOME": t.TempDir()}
-	for _, args := range [][]string{{"status", "--endpoint"}, {"--server"}, {"who", "--ca", "--json"}} {
+	for _, args := range [][]string{{"status", "--endpoint"}, {"--server"}, {"who", "--ca"}} {
 		out, errb, code := statusOut(t, env, args...)
-		if code != 2 || out != "" || !strings.HasPrefix(errb, "mash: --") || !strings.Contains(errb, "needs a value") {
+		if code != 2 || out != "" || !strings.HasPrefix(errb, "error: --") || !strings.Contains(errb, "needs a value") || !strings.HasSuffix(errb, "hint: mash --help\n") {
 			t.Errorf("%v: %d %q %q", args, code, out, errb)
 		}
 	}
-	if _, errb, code := statusOut(t, env, "--json"); code != 2 || !strings.Contains(errb, "usage") && !strings.Contains(errb, "mash ") {
-		t.Errorf("only a global flag: %d %q", code, errb)
+	if out, errb, code := statusOut(t, env, "--json"); code != 2 || errb != "" || out != `{"error":"mash needs a command","hint":"mash --help"}`+"\n" {
+		t.Errorf("only a global flag: %d %q %q", code, out, errb)
 	}
 }
 

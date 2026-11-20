@@ -29,7 +29,7 @@ mkrelease() { # dir version
   for a in $ASSETS; do
     cat > "$1/v$2/$a" <<BIN
 #!/bin/sh
-if [ "\$1" = version ]; then echo "mash $2 (commit x)"; exit 0; fi
+if [ "\$1" = version ]; then echo "mash v$2 (abcdef0)"; exit 0; fi
 echo "fake-mash ran: \$*"
 BIN
     printf '%s  %s\n' "$(sha "$1/v$2/$a")" "$a" >> "$1/SHA256SUMS"
@@ -130,12 +130,12 @@ check "shared data: v1 launcher runs v1" eq "$(cat "$T/out")" "fake-mash ran: on
 MASH_RELEASE_BASE="file://$REL3" CLAUDE_PLUGIN_DATA="$DS" PATH="$BASEPATH" sh "$PV2/scripts/mash" two > "$T/out" 2> "$T/err"
 check "shared data: v2 launcher runs" eq "$(cat "$T/out")" "fake-mash ran: two"
 check "shared data: both versions installed" test -x "$DS/bin/mash-$VER" -a -x "$DS/bin/mash-$VER2"
-check "shared data: v1 binary reports v1" contains "$("$DS/bin/mash-$VER" version)" "mash $VER "
-check "shared data: v2 binary reports v2" contains "$("$DS/bin/mash-$VER2" version)" "mash $VER2 "
+check "shared data: v1 binary reports v1" contains "$("$DS/bin/mash-$VER" version)" "mash v$VER "
+check "shared data: v2 binary reports v2" contains "$("$DS/bin/mash-$VER2" version)" "mash v$VER2 "
 MASH_RELEASE_BASE="file://$T/nope" run "$DS" one-again
 check "shared data: v1 still its own binary, no download" eq "$(cat "$T/out")" "fake-mash ran: one-again"
 MASH_RELEASE_BASE="file://$T/nope" CLAUDE_PLUGIN_DATA="$DS" PATH="$BASEPATH" sh "$PV2/scripts/mash" version > "$T/out" 2> "$T/err"
-check "shared data: v2 launcher executes v2" contains "$(cat "$T/out")" "mash $VER2 "
+check "shared data: v2 launcher executes v2" contains "$(cat "$T/out")" "mash v$VER2 "
 
 # --- sha mismatch refused, nothing installed
 REL2="$T/release2"; mkrelease "$REL2" "$VER"

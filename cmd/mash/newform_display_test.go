@@ -27,12 +27,12 @@ func TestCLIShowsAndAcceptsTheCanonicalForm(t *testing.T) {
 	}
 
 	out := cliAs(t, sendEnv, "send", "acme.team1.recv", "by the canonical form", "-v")
-	if !strings.Contains(out, "Mail sent.") || !strings.Contains(out, "to:      acme.team1.recv\n") || !strings.Contains(out, "number:  1\n") {
+	if !strings.Contains(out, "Mail sent (number ") || !strings.Contains(out, "to:      acme.team1.recv\n") || !strings.Contains(out, "kind:    task\n") {
 		t.Fatalf("receipt: %q", out)
 	}
-	out = cliAs(t, sendEnv, "send", "acme_team1_recv", "by the flat key", "-v")
-	if !strings.Contains(out, "Mail sent.") || !strings.Contains(out, "to:      acme.team1.recv\n") || !strings.Contains(out, "number:  2\n") {
-		t.Fatalf("flat receipt: %q", out)
+	out = cliAs(t, sendEnv, "send", "acme.team1.recv", "by the canonical form again", "-v")
+	if !strings.Contains(out, "Mail sent (number ") || !strings.Contains(out, "to:      acme.team1.recv\n") || !strings.Contains(out, "kind:    task\n") {
+		t.Fatalf("second receipt: %q", out)
 	}
 
 	for name, out := range map[string]string{

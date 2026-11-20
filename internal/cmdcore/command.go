@@ -36,6 +36,9 @@ type Env struct {
 	// terminal.
 	Stdin      io.Reader
 	StdinPiped bool
+	// StdinTimeout bounds a read of Stdin: a pipe that never writes would otherwise block the command for ever. Zero
+	// means no bound.
+	StdinTimeout time.Duration
 	// ReadFile reads a file for --file style options; nil means os.ReadFile.
 	ReadFile func(path string) ([]byte, error)
 }
@@ -43,12 +46,14 @@ type Env struct {
 // EnvFunc makes the Env for one run.
 type EnvFunc func(ctx context.Context) (*Env, error)
 
-// Command is one command: its CLI name (the verb, also the MCP tool name), a one-line summary (the MCP tool's
-// description), the one-line description and the examples that --help prints, and its Run.
+// Command is one command: its CLI name (the verb, also the MCP tool name), a one-line summary, the one-line description
+// and the examples that --help prints, and its Run. MCPDescription is the MCP tool's description, written for the model;
+// when empty the tool's description is the Summary.
 type Command[P any, R Result] struct {
-	Name        string
-	Summary     string
-	Description string
-	Examples    []string
-	Run         func(ctx context.Context, env *Env, p P) (R, error)
+	Name           string
+	Summary        string
+	MCPDescription string
+	Description    string
+	Examples       []string
+	Run            func(ctx context.Context, env *Env, p P) (R, error)
 }

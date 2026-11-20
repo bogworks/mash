@@ -23,7 +23,7 @@ func inboxCount(t *testing.T, w *world, as string) int {
 func TestCLISendIDRerunLandsOnce(t *testing.T) {
 	w := newWorld(t, "a", "b")
 	out, code := w.cli(t, "b", "send", tTo("a"), "--id", "job-7", "ship it")
-	if code != 0 || out != "Mail sent.\n" {
+	if code != 0 || !isReceipt(out, "Mail sent") {
 		t.Fatalf("first send: %d %q", code, out)
 	}
 	out, code = w.cli(t, "b", "send", tTo("a"), "--id=job-7", "ship it")
@@ -38,7 +38,7 @@ func TestCLISendIDRerunLandsOnce(t *testing.T) {
 		t.Fatalf("send job-8: %d %q", code, out)
 	}
 	out, code = w.cli(t, "b", "send", tTo("a"), "ship it")
-	if code != 0 || out != "Mail sent.\n" {
+	if code != 0 || !isReceipt(out, "Mail sent") {
 		t.Fatalf("plain send: %d %q", code, out)
 	}
 }
@@ -87,7 +87,7 @@ func TestServeSendToolID(t *testing.T) {
 		return r["content"].([]any)[0].(map[string]any)["text"].(string), r["isError"] == true
 	}
 	first, bad := call(10, `{"address":"o.dev.b","message":"hi","id":"mcp-1"}`)
-	if bad || first != "Mail sent." {
+	if bad || !isReceipt(first, "Mail sent") {
 		t.Fatalf("first: %q %v", first, bad)
 	}
 	second, bad := call(11, `{"address":"o.dev.b","message":"hi","id":"mcp-1"}`)

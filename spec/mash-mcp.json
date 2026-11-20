@@ -2,7 +2,7 @@
  "tools": [
   {
    "name": "send",
-   "description": "Send a message to an endpoint.",
+   "description": "Send mail to another endpoint by its address, owner.group.name. Choose the kind for what you need from the recipient: blocker (you cannot continue without them), question (you need an answer) and task (you are asking them to do something; the default) wake an idle recipient; result (the outcome of something they asked for) and fyi (information, no answer needed) wait for their next turn. Use urgent only for what cannot wait: it interrupts. When you answer a message, set reply_to to its number so the recipient sees which one. When you pass a message on, set relay to its number. Do not send a reply that only acknowledges. A reply marked question that asks nothing is sent as fyi. Use id when you retry after a timeout, so the message is not delivered twice.",
    "command": "mash send",
    "release": "0.5.6",
    "params": [
@@ -22,7 +22,7 @@
      "name": "kind",
      "type": "string",
      "required": false,
-     "description": "What sort of message this is. blocker, question and task wake an idle recipient; result and fyi wait for its next turn. Default: task.",
+     "description": "What sort of message this is. blocker, question and task wake an idle recipient; result and fyi wait for its next turn. Default: task. One exception: a reply (--reply-to) marked question whose text has no question mark and is at most 280 characters asks nothing, so it is sent as fyi and the output says so.",
      "enum": [
       "blocker",
       "question",
@@ -47,7 +47,7 @@
      "name": "relay",
      "type": "integer",
      "required": false,
-     "description": "The number of a message in your inbox that this passes on. Signed. (Today the MCP tool calls this 'via'.)"
+     "description": "The number of a message in your inbox that this passes on. Signed, so the recipient can trust the link."
     },
     {
      "name": "id",
@@ -61,17 +61,30 @@
     "number": 42,
     "kind": "task",
     "urgent": false,
-    "duplicate": false
+    "duplicate": false,
+    "retagged": false
    },
    "text": [
     {
      "case": "Sent",
-     "text": "Mail sent.",
+     "text": "Mail sent (number 42).",
      "stream": "stdout",
      "exit": 0
     }
    ],
    "errors": [
+    {
+     "case": "An address in another form",
+     "text": "error: acme_demo_alice is not an address; write it as acme.demo.alice\nhint: mash send --help",
+     "stream": "stderr",
+     "exit": 2
+    },
+    {
+     "case": "Nothing arrives on standard input",
+     "text": "error: no message text arrived on standard input",
+     "stream": "stderr",
+     "exit": 1
+    },
     {
      "case": "No such endpoint",
      "text": "error: no endpoint has the address acme.demo.alise\nhint: mash who",
@@ -390,6 +403,10 @@
   [
    "Setup skills",
    "The marketplace carries two plugins: 'mash' (this server and its hooks) and 'mash-setup' (two skills, one to set mash up and one to run it day to day). A person installs mash-setup first and asks their agent to set mash up; the skill installs mash, the NATS server if wanted, and the mash plugin, asking before each step. A skill cannot install the plugin it ships in, which is why there are two."
+  ],
+  [
+   "A tool's description is written for the agent",
+   "It may be longer than the command's one line: it tells the model when to use the tool and how to choose its parameters. It is part of this specification and is the text the server sends."
   ],
   [
    "One tool, one command",

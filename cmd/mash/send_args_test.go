@@ -22,7 +22,7 @@ func TestVerbHelpAndStrayArguments(t *testing.T) {
 		}
 	}
 	var out, errb bytes.Buffer
-	if code := run([]string{"status", "--bogus"}, env, strings.NewReader(""), &out, &errb); code != 2 || out.Len() != 0 || !strings.Contains(errb.String(), "usage: mash status") {
+	if code := run([]string{"status", "--bogus"}, env, strings.NewReader(""), &out, &errb); code != 2 || out.Len() != 0 || errb.String() != "error: mash status: unexpected option \"--bogus\"\nhint: mash status --help\n" {
 		t.Errorf("status --bogus: %d %q %q", code, out.String(), errb.String())
 	}
 	out.Reset()

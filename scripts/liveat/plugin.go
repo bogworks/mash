@@ -285,14 +285,15 @@ func (a *AT) pluginMail(pl pluginLaunch, name string, h Home, from, to *plugSess
 	toAddr := "alice.dev." + to.Name
 	fromAddr := "alice.dev." + from.Name
 	out, isErr, structured, err := from.P.CallStructured("send", map[string]any{"address": toAddr, "message": text}, 20*time.Second)
-	a.C.Check("mail "+name+": the "+from.Name+" session's MCP send tool succeeds", err == nil && !isErr && out == "Mail sent.", redact(out)+errSuffix(err))
 	var receipt struct {
 		Number int `json:"number"`
 	}
 	if json.Unmarshal(structured, &receipt) != nil || receipt.Number < 1 {
+		a.C.Check("mail "+name+": the "+from.Name+" session's MCP send tool succeeds", false, redact(out)+errSuffix(err))
 		a.C.Check("mail "+name+": the send receipt names the message number", false, "no number in the receipt's structured content")
 		return
 	}
+	a.C.Check("mail "+name+": the "+from.Name+" session's MCP send tool succeeds", err == nil && !isErr && out == fmt.Sprintf("Mail sent (number %d).", receipt.Number), redact(out)+errSuffix(err))
 	m := []string{"", strconv.Itoa(receipt.Number)}
 	deadline := time.Now().Add(20 * time.Second)
 	var ctx string

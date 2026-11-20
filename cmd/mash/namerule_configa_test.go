@@ -83,7 +83,7 @@ func TestConfigAMashStart(t *testing.T) {
 		{"instance mash", w.mashSender, "no-mash"},
 		{"control: ordinary address", w.control, ""},
 	} {
-		for _, args := range [][]string{{"inbox"}, {"who"}, {"read", "1"}, {"send", "acme_team1_peer", "hi"}, {"prompt", "acme_team1_peer", "hi"}} {
+		for _, args := range [][]string{{"inbox"}, {"who"}, {"read", "1"}, {"send", "acme.team1.peer", "hi"}, {"prompt", "acme.team1.peer", "hi"}} {
 			t.Run(c.name+"/"+args[0], func(t *testing.T) {
 				out, code := configARun(c.env, args...)
 				if c.want == "" {
@@ -149,15 +149,15 @@ func TestConfigAMashServeStart(t *testing.T) {
 func TestConfigAMashSendAndPrompt(t *testing.T) {
 	w := newConfigAMashWorld(t)
 	forms := []struct {
-		name, key, want string // want: "no-retired", "no-mash", "addr" (not an endpoint address) or ""
+		name, key, want string // want: "no-retired", "no-mash", "addr" (not an address), "flat" (the flat form, refused) or ""
 	}{
 		{"group retired, no record", "acme.retired.gone", "no-retired"},
-		{"group retired, flat key", "acme_retired_gone", "no-retired"},
-		{"group retired, record exists", "acme_retired_peer", "no-retired"},
-		{"instance mash, record exists", "acme_team1_mash", "no-mash"},
+		{"group retired, flat key", "acme_retired_gone", "flat"},
+		{"group retired, record exists", "acme.retired.peer", "no-retired"},
+		{"instance mash, record exists", "acme.team1.mash", "no-mash"},
 		{"bare name, no record", "gone", "addr"},
 		{"bare name, record exists", "a", "addr"},
-		{"control: ordinary address", "acme_team1_peer", ""},
+		{"control: ordinary address", "acme.team1.peer", ""},
 	}
 	for _, verb := range []string{"send", "prompt"} {
 		for _, f := range forms {
@@ -167,8 +167,12 @@ func TestConfigAMashSendAndPrompt(t *testing.T) {
 			t.Run(verb+"/"+f.name, func(t *testing.T) {
 				out, code := configARun(w.control, verb, f.key, "hi")
 				switch f.want {
-				case "addr":
-					if code == 0 || strings.Contains(out, "name rule") || !strings.Contains(out, "is not an endpoint address") {
+				case "addr", "flat": // refused as not an address, exit 2, before the rule or the directory is looked at
+					want := "error: " + f.key + " is not an address; write it as owner.group.name"
+					if f.want == "flat" {
+						want = "error: acme_retired_gone is not an address; write it as acme.retired.gone"
+					}
+					if code != 2 || strings.Contains(out, "name rule") || !strings.Contains(out, want) {
 						t.Fatalf("%d %s", code, out)
 					}
 				case "":
@@ -264,7 +268,7 @@ func TestConfigAMashRequiredWithoutFileRefusesToStart(t *testing.T) {
 			return m
 		}
 		const want = "a name rule is required"
-		for _, args := range [][]string{{"inbox"}, {"who"}, {"read", "1"}, {"send", "acme_team1_peer", "hi"}, {"prompt", "acme_team1_peer", "hi"},
+		for _, args := range [][]string{{"inbox"}, {"who"}, {"read", "1"}, {"send", "acme.team1.peer", "hi"}, {"prompt", "acme.team1.peer", "hi"},
 			{"admin", "provision", "o.dev.x", "--user", "U", "--account", "A"}} {
 			t.Run(how+"/"+strings.Join(args[:min(2, len(args))], " "), func(t *testing.T) {
 				e := env()

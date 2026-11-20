@@ -67,17 +67,7 @@ func helpText[P any, R Result](c Command[P, R], fields []field, fr Frame) string
 			opts = append(opts, f)
 		}
 	}
-	use := tool + " " + c.Name
-	for _, a := range args {
-		if a.optional {
-			use += " [<" + a.arg + ">]"
-		} else {
-			use += " <" + a.arg + ">"
-		}
-	}
-	if len(opts) > 0 {
-		use += " [options]"
-	}
+	use := synopsis(tool, c.Name, args, len(opts) > 0)
 	sections := []string{strings.Join(wrap(desc, helpWidth), "\n"), "Usage:\n  " + use}
 	if len(c.Examples) > 0 {
 		sections = append(sections, "Examples:\n  "+strings.Join(c.Examples, "\n  "))
@@ -108,6 +98,22 @@ func helpText[P any, R Result](c Command[P, R], fields []field, fr Frame) string
 		sections = append(sections, "Global options:\n"+table(rows))
 	}
 	return strings.Join(sections, "\n\n") + "\n"
+}
+
+// synopsis is the Usage line: the tool, the command, its positionals and [options] when it has any.
+func synopsis(tool, name string, args []field, hasOpts bool) string {
+	use := tool + " " + name
+	for _, a := range args {
+		if a.optional {
+			use += " [<" + a.arg + ">]"
+		} else {
+			use += " <" + a.arg + ">"
+		}
+	}
+	if hasOpts {
+		use += " [options]"
+	}
+	return use
 }
 
 func optionLabel(short, flag, value string) string {

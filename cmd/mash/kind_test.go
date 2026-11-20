@@ -9,7 +9,7 @@ import (
 // error (exit 2) and sends nothing.
 func TestSendKindFromTheCLI(t *testing.T) {
 	w := newWorld(t, "a", "b")
-	if out, code := w.cli(t, "b", "send", tTo("a"), "--kind", "Question", "which one"); code != 0 || !strings.Contains(out, "Question mail sent.") {
+	if out, code := w.cli(t, "b", "send", tTo("a"), "--kind", "Question", "which one"); code != 0 || !strings.Contains(out, "Question mail sent (number ") {
 		t.Fatalf("send: %d %s", code, out)
 	}
 	if out, code := w.cli(t, "b", "send", tTo("a"), "--urgent", "--kind=blocker", "stuck"); code != 0 {
@@ -56,16 +56,16 @@ func TestSendKindFromTheMCPTool(t *testing.T) {
 		r := s.call(t, id, "send", args)
 		return resultText(r), r["isError"] == true
 	}
-	if txt, bad := send(10, `{"address":"o.dev.a","message":"do it","kind":"task"}`); bad || txt != "Mail sent." {
+	if txt, bad := send(10, `{"address":"o.dev.a","message":"do it","kind":"task"}`); bad || !isReceipt(txt, "Mail sent") {
 		t.Fatalf("task: %v %s", bad, txt)
 	}
-	if txt, bad := send(11, `{"address":"o.dev.a","message":"ok, done","reply_to":1,"kind":"question"}`); bad || txt != "Fyi mail sent." {
+	if txt, bad := send(11, `{"address":"o.dev.a","message":"ok, done","reply_to":1,"kind":"question"}`); bad || !isReceipt(txt, "Mail sent as fyi", ": a reply marked question that asks nothing.") {
 		t.Fatalf("tagged: %v %s", bad, txt)
 	}
-	if txt, bad := send(12, `{"address":"o.dev.a","message":"ok?","reply_to":1,"kind":"question"}`); bad || txt != "Question mail sent." {
+	if txt, bad := send(12, `{"address":"o.dev.a","message":"ok?","reply_to":1,"kind":"question"}`); bad || !isReceipt(txt, "Question mail sent") {
 		t.Fatalf("question mark: %v %s", bad, txt)
 	}
-	if txt, bad := send(13, `{"address":"o.dev.a","message":"stuck","reply_to":1,"kind":"blocker"}`); bad || txt != "Blocker mail sent." {
+	if txt, bad := send(13, `{"address":"o.dev.a","message":"stuck","reply_to":1,"kind":"blocker"}`); bad || !isReceipt(txt, "Blocker mail sent") {
 		t.Fatalf("blocker: %v %s", bad, txt)
 	}
 	if txt, bad := send(14, `{"address":"o.dev.a","message":"hi","kind":"loud"}`); !bad || !strings.Contains(txt, "blocker, question, task, result, fyi") {
@@ -102,7 +102,7 @@ func TestUnkindedMCPSendIsTask(t *testing.T) {
 	s := startServe(t, w.env["b"])
 	s.initialize(t)
 	for id, args := range []string{`{"address":"o.dev.a","message":"plain"}`, `{"address":"o.dev.a","message":"ok, done","reply_to":1}`} {
-		if r := s.call(t, 20+id, "send", args); r["isError"] == true || resultText(r) != "Mail sent." {
+		if r := s.call(t, 20+id, "send", args); r["isError"] == true || !isReceipt(resultText(r), "Mail sent") {
 			t.Fatalf("%s: %v", args, resultText(r))
 		}
 	}
@@ -139,7 +139,7 @@ func TestSendViaFromTheMCPTool(t *testing.T) {
 	if via == nil || via["type"] != "integer" || !strings.Contains(via["description"].(string), "passes on") {
 		t.Fatalf("send schema via: %v", via)
 	}
-	if r := s.call(t, 30, "send", `{"address":"o.dev.a","message":"fwd","relay":1,"reply_to":9}`); r["isError"] == true || resultText(r) != "Mail sent." {
+	if r := s.call(t, 30, "send", `{"address":"o.dev.a","message":"fwd","relay":1,"reply_to":9}`); r["isError"] == true || !isReceipt(resultText(r), "Mail sent") {
 		t.Fatalf("send: %v", resultText(r))
 	}
 	out, _ := w.cli(t, "a", "read", "1")

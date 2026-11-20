@@ -147,12 +147,12 @@ func TestCLIRoundTrips(t *testing.T) {
 			}
 		}},
 		{"send", "", []string{"send", tTo("peer1"), "hello there"}, func(t *testing.T, out string) {
-			if !strings.HasPrefix(out, "Mail sent.") {
+			if !strings.HasPrefix(out, "Mail sent (number ") {
 				t.Fatalf("send: %q", out)
 			}
 		}},
 		{"send-launch-token", rttToken, []string{"send", tTo("peer1"), "hello there"}, func(t *testing.T, out string) {
-			if !strings.HasPrefix(out, "Mail sent.") || strings.Contains(out, "MASH_LAUNCH_TOKEN") {
+			if !strings.HasPrefix(out, "Mail sent (number ") || strings.Contains(out, "MASH_LAUNCH_TOKEN") {
 				t.Fatalf("send with the launch token: %q", out)
 			}
 		}},

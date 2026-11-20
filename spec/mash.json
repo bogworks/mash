@@ -175,7 +175,7 @@
     "options": [
      {
       "name": "--kind",
-      "description": "What sort of message this is. blocker, question and task wake an idle recipient; result and fyi wait for its next turn. Default: task.",
+      "description": "What sort of message this is. blocker, question and task wake an idle recipient; result and fyi wait for its next turn. Default: task. One exception: a reply (--reply-to) marked question whose text has no question mark and is at most 280 characters asks nothing, so it is sent as fyi and the output says so.",
       "arguments": [
        {
         "name": "kind",
@@ -214,7 +214,7 @@
      },
      {
       "name": "--relay",
-      "description": "The number of a message in your inbox that this passes on. Signed. (Today the MCP tool calls this 'via'.)",
+      "description": "The number of a message in your inbox that this passes on. Signed, so the recipient can trust the link.",
       "arguments": [
        {
         "name": "number",
@@ -242,7 +242,7 @@
      },
      {
       "name": "--file",
-      "description": "Read the message text from a file. Use - for standard input.",
+      "description": "Read the message text from a file. Use - for standard input; if nothing arrives there within 15 minutes the command gives up.",
       "arguments": [
        {
         "name": "path",
@@ -289,19 +289,25 @@
       "value": [
        {
         "case": "Sent",
-        "text": "Mail sent.",
+        "text": "Mail sent (number 42).",
         "stream": "stdout",
         "exit": 0
        },
        {
         "case": "Sent, urgent, with a kind",
-        "text": "Urgent question mail sent.",
+        "text": "Urgent question mail sent (number 43).",
         "stream": "stdout",
         "exit": 0
        },
        {
         "case": "With --verbose",
-        "text": "Mail sent.\nto:      acme.demo.alice\nnumber:  42\nkind:    task\nurgent:  no",
+        "text": "Mail sent (number 42).\nto:      acme.demo.alice\nkind:    task\nurgent:  no",
+        "stream": "stdout",
+        "exit": 0
+       },
+       {
+        "case": "A reply marked question that asks nothing",
+        "text": "Mail sent as fyi (number 44): a reply marked question that asks nothing.",
         "stream": "stdout",
         "exit": 0
        },
@@ -310,6 +316,18 @@
         "text": "Mail already sent; nothing new stored.",
         "stream": "stdout",
         "exit": 0
+       },
+       {
+        "case": "An address in another form",
+        "text": "error: acme_demo_alice is not an address; write it as acme.demo.alice\nhint: mash send --help",
+        "stream": "stderr",
+        "exit": 2
+       },
+       {
+        "case": "Nothing arrives on standard input",
+        "text": "error: no message text arrived on standard input",
+        "stream": "stderr",
+        "exit": 1
        },
        {
         "case": "No such endpoint",
@@ -332,19 +350,25 @@
        "number": 42,
        "kind": "task",
        "urgent": false,
-       "duplicate": false
+       "duplicate": false,
+       "retagged": false
       }
      },
      {
       "name": "x-mcp",
       "value": {
        "tool": "send",
-       "note": "Same options, same object."
+       "note": "Same options, same object.",
+       "guidance": "Send mail to another endpoint by its address, owner.group.name. Choose the kind for what you need from the recipient: blocker (you cannot continue without them), question (you need an answer) and task (you are asking them to do something; the default) wake an idle recipient; result (the outcome of something they asked for) and fyi (information, no answer needed) wait for their next turn. Use urgent only for what cannot wait: it interrupts. When you answer a message, set reply_to to its number so the recipient sees which one. When you pass a message on, set relay to its number. Do not send a reply that only acknowledges. A reply marked question that asks nothing is sent as fyi. Use id when you retry after a timeout, so the message is not delivered twice."
       }
      },
      {
       "name": "x-today",
-      "value": "CLI and MCP differ today: only the MCP tool has reply-to, relay and id; only the CLI has --file. The receipt wording differs between them."
+      "value": "CLI and MCP differ today: only the MCP tool has reply-to, relay and id; only the CLI has --file. The receipt wording differs between them. The underscore form of an address is accepted today and is refused from 0.5.6."
+     },
+     {
+      "name": "x-notes",
+      "value": "send has no --dry-run: sending is the act itself, not a change to the mesh. The number is the message's number in the recipient's inbox. It is printed because the sender can find it nowhere else, and needs it: an answer arrives marked 'reply to: 42'."
      }
     ]
    },
