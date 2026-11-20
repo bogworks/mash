@@ -300,3 +300,31 @@ func TestCheckParentDirRefusesGroupWritableUnlessSticky(t *testing.T) {
 		t.Fatal("other-writable not refused")
 	}
 }
+
+func TestReadOwnedFileRefusals(t *testing.T) {
+	dir := t.TempDir()
+	good := filepath.Join(dir, "good")
+	if err := os.WriteFile(good, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if b, err := ReadOwnedFile(good, "system_creds"); err != nil || string(b) != "x" {
+		t.Fatalf("%q %v", b, err)
+	}
+	link := filepath.Join(dir, "link")
+	if err := os.Symlink(good, link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadOwnedFile(link, "system_creds"); err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("symlink: %v", err)
+	}
+	wide := filepath.Join(dir, "wide")
+	if err := os.WriteFile(wide, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadOwnedFile(wide, "system_creds"); err == nil || !strings.Contains(err.Error(), "readable by other users") {
+		t.Fatalf("mode: %v", err)
+	}
+	if _, err := ReadOwnedFile(dir, "system_creds"); err == nil {
+		t.Fatal("a directory was read")
+	}
+}

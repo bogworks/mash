@@ -52,7 +52,7 @@ func TestAddPingReplyIsolatedClusterMember(t *testing.T) {
 	if set.Complete(0) {
 		t.Fatal("a clustered server with no routes and no inventory must not be complete")
 	}
-	if w := set.Why(0); !strings.Contains(w, "c1") || !strings.Contains(w, "--servers") {
+	if w := set.Why(0); !strings.Contains(w, "c1") || !strings.Contains(w, "init --config") {
 		t.Fatalf("why = %q", w)
 	}
 	if !set.Complete(1) {

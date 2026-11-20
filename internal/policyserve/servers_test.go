@@ -57,7 +57,7 @@ func TestParseVarzHostWildcard(t *testing.T) {
 }
 
 func TestReadServersNeedsADeclaredCount(t *testing.T) {
-	if _, err := ReadServers(t.Context(), nil, 0); err == nil || !strings.Contains(err.Error(), "--servers") {
+	if _, err := ReadServers(t.Context(), nil, 0); err == nil || !strings.Contains(err.Error(), "init --config") {
 		t.Errorf("err = %v", err)
 	}
 }

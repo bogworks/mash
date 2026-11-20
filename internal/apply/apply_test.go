@@ -111,11 +111,12 @@ func TestServerSetNeedsInventoryOrStandalone(t *testing.T) {
 		{"two of three replied", ServerSet{Names: []string{"s1", "s2"}, Expected: 3}, 0, false, "2 server(s) replied but the cluster reports 3"},
 		{"gateways", ServerSet{Names: []string{"s1"}, Expected: 1, Gateways: true}, 0, false, "gateways"},
 		{"ping found nobody", ServerSet{}, 0, false, "answered by no server"},
-		{"cluster named, no inventory", ServerSet{Names: []string{"s1"}, Expected: 1, Cluster: "C"}, 0, false, "this server is part of cluster C and the number of servers cannot be verified from here; pass --servers N"},
+		{"cluster named, no inventory", ServerSet{Names: []string{"s1"}, Expected: 1, Cluster: "C"}, 0, false, "this server is part of cluster C and the configuration lists one server: list every server under `servers` in the setup file and run mashctl init --config"},
+		{"one listed, cluster reports three, three replied", ServerSet{Names: []string{"s1", "s2", "s3"}, Expected: 3, Cluster: "C"}, 1, false, "the configuration lists 1 servers but the cluster reports 3"},
 		{"one with a cluster name", ServerSet{Names: []string{"s1"}, Expected: 1, Cluster: "C"}, 1, true, ""},
-		{"two of three by inventory", ServerSet{Names: []string{"s1", "s2"}, Expected: 2, Cluster: "C"}, 3, false, "2 server(s) replied but --servers says 3"},
-		{"routes say more than the inventory", ServerSet{Names: []string{"s1"}, Expected: 3, Cluster: "C"}, 1, false, "the cluster reports 3"},
-		{"inventory with a standalone reply", ServerSet{Names: []string{"s1"}, Expected: 1}, 2, false, "--servers says 2"},
+		{"two of three by inventory", ServerSet{Names: []string{"s1", "s2"}, Expected: 2, Cluster: "C"}, 3, false, "2 server(s) replied but the configuration lists 3 servers"},
+		{"routes say more than the inventory", ServerSet{Names: []string{"s1"}, Expected: 3, Cluster: "C"}, 1, false, "the configuration lists 1 servers but the cluster reports 3"},
+		{"inventory with a standalone reply", ServerSet{Names: []string{"s1"}, Expected: 1}, 2, false, "the configuration lists 2 servers"},
 		{"clusters conflict", ServerSet{Names: []string{"s1", "s2"}, Expected: 2, Cluster: "C", ClusterConflict: true}, 2, false, "different clusters"},
 	}
 	for _, tc := range cases {

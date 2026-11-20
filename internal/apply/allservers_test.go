@@ -62,7 +62,7 @@ func TestDriftAsksEveryServer(t *testing.T) {
 	fk.all = nil
 	fk.servers = ServerSet{Names: []string{"s1"}, Expected: 1, Cluster: "c"}
 	fs, err = AccountFindings(context.Background(), fk, ks, 0)
-	if err != nil || !strings.Contains(kinds(fs)[KindServersUnverified], "pass --servers N") {
+	if err != nil || !strings.Contains(kinds(fs)[KindServersUnverified], "init --config") {
 		t.Fatalf("unverified: %v %v", err, fs)
 	}
 }

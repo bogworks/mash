@@ -50,7 +50,7 @@ type Applier struct {
 	Record IssueRecord
 	// KV is the account's policy bucket; the provisioning markers of an apply are kept in it.
 	KV jetstream.KeyValue
-	// Servers is the declared server count (--servers, 1 or more).
+	// Servers is the declared server count (the configuration's servers, 1 or more).
 	Servers int
 	// URL is the configured server URL, a comma-separated list when the deployment has several; the client URL of a
 	// server that reports no host of its own comes from it (see ResolveURLs).

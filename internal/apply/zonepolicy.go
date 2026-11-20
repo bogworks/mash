@@ -14,7 +14,7 @@ import (
 type ShortAnswerError struct{ Answered, Expected int }
 
 func (e *ShortAnswerError) Error() string {
-	return fmt.Sprintf("only %d of %d servers answered: a server may be down (bring it back and run the command again), or the server count is wrong (pass --servers N or set MASH_SERVERS)", e.Answered, e.Expected)
+	return fmt.Sprintf("only %d of %d servers answered: a server may be down (bring it back and run the command again), or the server count is wrong (list every server under `servers` in the setup file and run mashctl init --config)", e.Answered, e.Expected)
 }
 
 // AppliedZonePolicy reports whether the account JWT the servers hold carries a zone policy (ADR 0091): any scoped

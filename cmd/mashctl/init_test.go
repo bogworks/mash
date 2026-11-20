@@ -626,7 +626,7 @@ func TestInitRefusals(t *testing.T) {
 		otherPub, _ := other.PublicKey()
 		p := filepath.Join(in, "other-admin.creds")
 		signingKeyCreds(t, otherPub, other, p)
-		a.refuses(1, []string{"admin_creds", "belong to account " + otherPub}, map[string]any{"admin_creds": p})
+		a.refuses(1, []string{"admin_creds", "belong to another account (" + otherPub + ")"}, map[string]any{"admin_creds": p})
 	})
 	t.Run("admin creds the server rejects", func(t *testing.T) {
 		a.t = t
@@ -637,7 +637,7 @@ func TestInitRefusals(t *testing.T) {
 		}
 		p := filepath.Join(in, "stranger-admin.creds")
 		os.WriteFile(p, raw, 0o600)
-		a.refuses(1, []string{"admin_creds", "cannot connect"}, map[string]any{"admin_creds": p})
+		a.refuses(1, []string{"admin_creds", "belong to another account"}, map[string]any{"admin_creds": p})
 	})
 	t.Run("key store holds another key", func(t *testing.T) {
 		a.t = t

@@ -96,7 +96,8 @@ func readAccount(ctx context.Context, cfg config.Config, env func(string) string
 }
 
 // serverCount is the number of servers a revocation must be confirmed on: the servers in the configuration (the
-// comma list config.json "servers" gives), and at least 1.
+// comma list config.json "servers" gives) when it lists two or more. One listed server is 0 (none declared), so the
+// ping decides: a reply that names a cluster is refused (apply.ServerSet.Complete), never confirmed by one server.
 func serverCount(cfg config.Config) int {
 	n := 0
 	for _, p := range strings.Split(cfg.URL, ",") {
@@ -104,7 +105,10 @@ func serverCount(cfg config.Config) int {
 			n++
 		}
 	}
-	return max(n, 1)
+	if n < 2 {
+		return 0
+	}
+	return n
 }
 
 // refuseFutureIssued refuses to revoke a user whose current JWT claims it was issued after now, the time the

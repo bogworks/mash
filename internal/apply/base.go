@@ -126,13 +126,13 @@ func chooseBase(toks []string, acct string, trust Trust, expect int) (baseJWT, e
 // shortRefusal is the refusal of a write whose lookup was not answered by every known server: the silent one may hold a
 // newer copy than the one a write would build from.
 func shortRefusal(short string) string {
-	return short + "; mashctl will not write from a copy that may be older than the newest one a silent server holds. Bring the silent server back and run it again. The lookup does not say which server was silent. If the count is wrong, pass --servers N or set MASH_SERVERS"
+	return short + "; mashctl will not write from a copy that may be older than the newest one a silent server holds. Bring the silent server back and run it again. The lookup does not say which server was silent. If the count is wrong, list every server under `servers` in the setup file and run mashctl init --config"
 }
 
 // notCompleteRefusal is the refusal of a write whose server set could not be confirmed complete before anything is
 // created or pushed.
 func notCompleteRefusal(why string) string {
-	return fmt.Sprintf("the server set could not be verified (%s); a write needs a complete, confirmed server set. Fix the cause (or pass --servers N) and run it again", why)
+	return fmt.Sprintf("the server set could not be verified (%s); a write needs a complete, confirmed server set. Fix the cause (or list every server under `servers` in the setup file and run mashctl init --config) and run it again", why)
 }
 
 // readBack asks every server for the account JWT until each one that answers holds want, at least need of them
@@ -196,7 +196,7 @@ func readBack(ctx context.Context, r Resolver, acct string, trust Trust, need in
 }
 
 // CurrentAccountClaims is the account's newest JWT, verified against trust, for a reader that acts on it (the issue
-// service checks a signing key's scope with it). servers is the declared server count (--servers, MASH_SERVERS; 0 none
+// service checks a signing key's scope with it). servers is the declared server count (the configuration's servers; 0 none
 // given). It returns an error unless the server set is complete (ServerSet.Complete) and every
 // expected server answered the lookup: a silent server may hold a newer JWT that removed or narrowed a key, so the
 // answers of the others do not decide. A lookup error on any answering server is an error, not a skipped reply. Only a
@@ -208,7 +208,7 @@ func CurrentAccountClaims(ctx context.Context, r Resolver, acct string, trust Tr
 		return nil, fmt.Errorf("server set: %w", err)
 	}
 	if !set.Complete(servers) {
-		return nil, fmt.Errorf("the server set is not complete (%s): the account JWT must be read from every expected server, so declare the servers with --servers N or MASH_SERVERS (a named cluster needs it)", set.Why(servers))
+		return nil, fmt.Errorf("the server set is not complete (%s): the account JWT must be read from every expected server, so list every server under `servers` in the setup file and run mashctl init --config (a named cluster needs it)", set.Why(servers))
 	}
 	need := serverExpect(set, servers)
 	toks, err := r.LookupAll(ctx, acct, need)

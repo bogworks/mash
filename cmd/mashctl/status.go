@@ -4,6 +4,10 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
+	"time"
+
+	"github.com/nats-io/nats.go"
 
 	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/cliframe"
@@ -23,6 +27,9 @@ type statusRow struct {
 	Reason    *string `json:"reason"`
 }
 
+// statusDeadline bounds the connection and the questions to one server.
+const statusDeadline = 3 * time.Second
+
 const serverSilent = "the server did not answer"
 
 // serverStatus asks one server: the directory records it holds and how many of their endpoints hold a live lease. A
@@ -35,7 +42,8 @@ func serverStatus(cfg config.Config, server string) statusRow {
 		return row
 	}
 	cfg.URL = server
-	adm, ctx, closeAdmin, err := ctl.OpenAdmin("mashctl", cfg)
+	cfg.AdminTimeout = statusDeadline // one silent server must not hold the others' rows
+	adm, ctx, closeAdmin, err := ctl.OpenAdminWith("mashctl", cfg, nats.NoReconnect(), nats.IgnoreDiscoveredServers(), nats.Timeout(statusDeadline))
 	if err != nil {
 		switch msg := err.Error(); {
 		case isUnreachable(err), strings.Contains(msg, "no servers available"):
@@ -77,6 +85,21 @@ func count(n int, noun string) string {
 	return fmt.Sprintf("%d %ss", n, noun)
 }
 
+// statusRows asks every server at the same time and returns the rows in the order of servers.
+func statusRows(cfg config.Config, servers []string, ask func(config.Config, string) statusRow) []statusRow {
+	rows := make([]statusRow, len(servers))
+	var wg sync.WaitGroup
+	for i, s := range servers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			rows[i] = ask(cfg, s)
+		}()
+	}
+	wg.Wait()
+	return rows
+}
+
 // runStatus is `mashctl status`: one line per configured server. It reports and does not fail: the lines go to
 // stdout whatever it finds, and it exits 1 when a server is not ok.
 func runStatus(args []string, g cliframe.Global, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
@@ -100,10 +123,7 @@ func runStatus(args []string, g cliframe.Global, env func(string) string, lookup
 			return cliframe.Report(stdout, stderr, cliframe.Failf("%s", strings.TrimPrefix(err.Error(), "mash: ")), jsonOut)
 		}
 	}
-	var rows []statusRow
-	for _, s := range servers {
-		rows = append(rows, serverStatus(cfg, s))
-	}
+	rows := statusRows(cfg, servers, serverStatus)
 	bad := false
 	for _, r := range rows {
 		bad = bad || !r.OK

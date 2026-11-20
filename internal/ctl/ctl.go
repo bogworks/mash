@@ -74,6 +74,11 @@ func endpointLines(line func(left, right string)) {
 // command's deadline (admin_timeout, else 30 seconds) and a func that releases both. prog is the command prefix of
 // error text. The caller must call the func when done.
 func OpenAdmin(prog string, cfg config.Config) (*madmin.Admin, context.Context, func(), error) {
+	return OpenAdminWith(prog, cfg)
+}
+
+// OpenAdminWith is OpenAdmin with extra connection options, applied after the standard ones.
+func OpenAdminWith(prog string, cfg config.Config, extra ...nats.Option) (*madmin.Admin, context.Context, func(), error) {
 	pfx, _, _ := strings.Cut(prog, " ")
 	if cfg.Limits == (store.Limits{}) { // a Config not made by Load
 		cfg.Limits = store.DefaultLimits()
@@ -100,7 +105,7 @@ func OpenAdmin(prog string, cfg config.Config) (*madmin.Admin, context.Context, 
 	if warning != "" {
 		fmt.Fprintln(os.Stderr, warning)
 	}
-	nc, err := nats.Connect(cfg.URL, append(append(natsauth.TLSOptions(cfg.TLSCA, cfg.TLSCert, cfg.TLSKey), tlsReq...), natsauth.UserCredentials(cfg.AdminCreds), nats.Name(prog))...)
+	nc, err := nats.Connect(cfg.URL, append(append(append(natsauth.TLSOptions(cfg.TLSCA, cfg.TLSCert, cfg.TLSKey), tlsReq...), natsauth.UserCredentials(cfg.AdminCreds), nats.Name(prog)), extra...)...)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf(pfx+": connect %s: %w", config.RedactURL(cfg.URL), config.RedactErr(natsauth.NoServersHint(natsauth.TLSHint(err)), cfg.URL))
 	}

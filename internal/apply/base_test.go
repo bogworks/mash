@@ -169,7 +169,7 @@ func TestRevokeDoesNotResurrectFromAStaleServer(t *testing.T) {
 
 func TestShortRefusalSaysHowToFixTheCount(t *testing.T) {
 	s := shortRefusal("only 2 of 3 servers answered the account lookup")
-	for _, w := range []string{"only 2 of 3", "pass --servers N or set MASH_SERVERS"} {
+	for _, w := range []string{"only 2 of 3", "run mashctl init --config"} {
 		if !strings.Contains(s, w) {
 			t.Errorf("%q lacks %q", s, w)
 		}

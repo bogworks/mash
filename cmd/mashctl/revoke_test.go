@@ -144,14 +144,14 @@ func TestRetireUnknownOptionsAndSingleServerCount(t *testing.T) {
 	if len(s.calls) != 0 || len(h.records()) != 1 {
 		t.Fatalf("something ran: calls %v records %v", s.calls, h.records())
 	}
-	// one server in the configuration: the count is 1.
-	if _, errb, code := h.run("endpoint", "delete", "o.g.a", "--yes"); code != 0 || len(s.srv) != 1 || s.srv[0] != 1 {
+	// one server in the configuration: the count is 0 (the ping decides).
+	if _, errb, code := h.run("endpoint", "delete", "o.g.a", "--yes"); code != 0 || len(s.srv) != 1 || s.srv[0] != 0 {
 		t.Fatalf("%d %q %v", code, errb, s.srv)
 	}
 }
 
 func TestServerCountIsTheConfiguredServers(t *testing.T) {
-	for url, want := range map[string]int{"": 1, "tls://a:4222": 1, "tls://a:4222,tls://b:4222": 2, "tls://a:4222, tls://b:4222,tls://c:4222": 3, "tls://a:4222,": 1} {
+	for url, want := range map[string]int{"": 0, "tls://a:4222": 0, "tls://a:4222,tls://b:4222": 2, "tls://a:4222, tls://b:4222,tls://c:4222": 3, "tls://a:4222,": 0} {
 		if got := serverCount(config.Config{URL: url}); got != want {
 			t.Errorf("%q: %d, want %d", url, got, want)
 		}

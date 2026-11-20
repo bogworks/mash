@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -70,6 +71,15 @@ type setupFile struct {
 	adminCreds, systemCreds, operatorKey, accountKey string
 }
 
+// secretSeed matches an nkey seed: S, then O, A or U, then base32 letters, 20 characters or more in all.
+var secretSeed = regexp.MustCompile(`^S[OAU][A-Z2-7]{18,}$`)
+
+// looksLikeSecret reports whether a setup file value that should be a path is a key: an nkey seed or PEM text. It is
+// checked before the value is used in any message, so no secret is ever echoed.
+func looksLikeSecret(v string) bool {
+	return secretSeed.MatchString(v) || strings.Contains(v, "-----BEGIN")
+}
+
 // loadSetup reads and checks the setup file at path. Its errors name the file and the key, never a value.
 func loadSetup(path, home string) (setupFile, error) {
 	var sf setupFile
@@ -116,6 +126,9 @@ func loadSetup(path, home string) (setupFile, error) {
 		s, err := text(k)
 		if err != nil || s == "" {
 			return "", err
+		}
+		if looksLikeSecret(s) {
+			return "", cliframe.Failf("%s: %s holds a key, not a path", shown, k)
 		}
 		s = config.ExpandHome(s, home)
 		if !filepath.IsAbs(s) {
@@ -351,8 +364,8 @@ func doInit(setupPath string, dry, jsonOut, verbose bool, env func(string) strin
 	if lim.DiskStorage > 0 && lim.DiskStorage < needDisk {
 		warns = append(warns, fmt.Sprintf("the account has %s of disk; one endpoint needs about %s (inbox cap plus the two buckets); see docs/operations.md, Account limits", config.FormatSize(lim.DiskStorage), config.FormatSize(needDisk)))
 	}
-	if set.Cluster != "" || set.Gateways {
-		warns = append(warns, "the server is part of a cluster: list every server under `servers` in the setup file and run `mashctl init --config` again, so a revocation is confirmed on every server")
+	if err := checkClusterListed(set, len(sf.servers), setupPath); err != nil {
+		return err
 	}
 
 	// (4) the admin creds must connect, and the server must answer for the account's JetStream, before anything is
@@ -403,20 +416,24 @@ func doInit(setupPath string, dry, jsonOut, verbose bool, env func(string) strin
 		return finishInit(stdout, jsonOut, verbose, true, changed, sf, first, steps)
 	}
 	if needOp {
-		if _, _, err := ks.ImportOperator(sf.operatorKey); err != nil {
+		if pub, _, err := ks.ImportOperator(sf.operatorKey); err != nil {
 			return cliframe.Failf("%v\n  nothing else was written; running init again is safe", err)
+		} else if pub != st.opPub {
+			return cliframe.Failf("operator_key changed while init ran: the key imported is not the one that was checked (nothing else was written)")
 		}
 	}
 	if needAcct {
-		if _, _, err := ks.ImportAccount(sf.accountKey); err != nil {
+		if pub, _, err := ks.ImportAccount(sf.accountKey); err != nil {
 			return cliframe.Failf("%v\n  the operator key was imported; running init again is safe", err)
+		} else if pub != st.acctPub {
+			return cliframe.Failf("account_key changed while init ran: the key imported is not the one that was checked; running init again is safe")
 		}
 	}
 	if needSys {
 		if err := ensureDir(st.serverDir); err != nil {
 			return failErr(err)
 		}
-		if _, err := ctlkeys.InstallFile(st.sysDst, st.sysCredsRaw); err != nil {
+		if err := installSysCreds(st); err != nil {
 			return failErr(err)
 		}
 	}
@@ -436,6 +453,52 @@ func doInit(setupPath string, dry, jsonOut, verbose bool, env func(string) strin
 		}
 	}
 	return finishInit(stdout, jsonOut, verbose, false, changed, sf, first, steps)
+}
+
+// checkClusterListed refuses a setup file that lists too few servers for the cluster the ping saw: a revocation must be
+// confirmed on every server, and one listed server cannot say what the others hold.
+func checkClusterListed(set apply.ServerSet, listed int, setupPath string) error {
+	if set.Cluster == "" && !set.Gateways {
+		return nil
+	}
+	reported := max(set.Expected, len(set.Names))
+	if listed >= max(reported, 2) {
+		return nil
+	}
+	of := fmt.Sprintf("%d of %d servers", listed, reported)
+	if reported < 2 {
+		of = fmt.Sprintf("%d server but a cluster has more than one", listed)
+	}
+	return cliframe.Failf("the server is part of a cluster but the setup file lists %s", of).WithHint("mashctl init --config " + setupPath)
+}
+
+// installSysCreds puts the system creds in the server directory (which must be owned by the effective uid). A file that
+// is already there is left alone and must hold the same bytes: the same content is a rerun, different content is a
+// refusal.
+func installSysCreds(st *initState) error {
+	fi, err := os.Lstat(st.serverDir)
+	if err != nil {
+		return err
+	}
+	if err := ctlkeys.CheckOwned(fi, st.serverDir, "directory"); err != nil {
+		return err
+	}
+	created, err := ctlkeys.InstallFile(st.sysDst, st.sysCredsRaw)
+	if err != nil {
+		return err
+	}
+	if created {
+		return nil
+	}
+	have, err := ctlkeys.ReadOwnedFile(st.sysDst, "system creds")
+	if err != nil {
+		return err
+	}
+	defer clear(have)
+	if !bytes.Equal(have, st.sysCredsRaw) {
+		return fmt.Errorf("%s already holds different system creds: refusing to replace them. Move it aside, or point system_creds at it", st.sysDst)
+	}
+	return nil
 }
 
 // finishInit prints the one line of init (and, with verbose, the steps), or the JSON object.
@@ -473,17 +536,12 @@ func finishInit(stdout io.Writer, jsonOut, verbose, dry, changed bool, sf setupF
 	return nil
 }
 
-// initSettings are the settings config.json gets: the setup file's, and the connection settings the run itself used.
+// initSettings are the settings config.json gets: the setup file's only. A one-off setting of this run (MASH_CA,
+// MASH_INSECURE_PLAINTEXT, MASH_TLS_*) or an old config.json's tls_cert is never written.
 func initSettings(cfg config.Config, sf setupFile, st *initState) map[string]any {
 	m := map[string]any{"servers": sf.servers, "owner": sf.owner, "admin_creds": sf.adminCreds, "system_creds": st.sysDst}
-	if cfg.TLSCA != "" {
-		m["ca"] = cfg.TLSCA
-	}
-	if cfg.InsecurePlaintext {
-		m["insecure_plaintext"] = true
-	}
-	if cfg.TLSCert != "" && cfg.TLSKey != "" {
-		m["tls_cert"], m["tls_key"] = cfg.TLSCert, cfg.TLSKey
+	if sf.ca != "" {
+		m["ca"] = sf.ca // the setup file's own ca only: never an environment setting or an old config.json's
 	}
 	return m
 }
@@ -582,7 +640,7 @@ func verifyAccount(claims *jwt.AccountClaims, acctPub string, now int64) (warns 
 
 // readCreds reads a user creds file (0600, operator-mode JWT creds).
 func readUserCreds(path string) ([]byte, error) {
-	raw, err := config.ReadCredsFile(path)
+	raw, err := ctlkeys.ReadOwnedFile(path, "creds file")
 	if err != nil {
 		return nil, err
 	}
@@ -655,10 +713,10 @@ func checkAdminCreds(cfg config.Config, url string, st *initState) (string, erro
 	}
 	warn := ""
 	if uc.IssuerAccount != "" && uc.IssuerAccount != st.acctPub {
-		return "", fmt.Errorf("the creds belong to account %s, not %s", uc.IssuerAccount, st.acctPub)
+		return "", fmt.Errorf("admin_creds belong to another account (%s), not %s", uc.IssuerAccount, st.acctPub)
 	}
 	if uc.IssuerAccount == "" && uc.Issuer != st.acctPub {
-		warn = fmt.Sprintf("the admin creds were signed by %s, not the account identity key; init could not tell they belong to this account, only that they connect", uc.Issuer)
+		return "", fmt.Errorf("admin_creds belong to another account (%s), not %s", uc.Issuer, st.acctPub)
 	}
 	if err := connectAdmin(cfg, url, st.adminRaw); err != nil {
 		return "", fmt.Errorf("the creds cannot connect to %s: %v", url, err)
