@@ -32,15 +32,15 @@ func TestVerbHelpAndStrayArguments(t *testing.T) {
 	}
 }
 
-// --json on a verb with no JSON form is a usage error, and nothing is attempted.
+// --json on a verb with no JSON form is a usage error, and nothing is attempted: {"error","hint"} on stdout, exit 2.
 func TestNoJSONFormIsRefused(t *testing.T) {
 	env := func(string) string { return "" }
 	for _, verb := range []string{"status", "read", "inbox", "prompt", "serve", "hook", "plugin"} {
 		for _, args := range [][]string{{verb, "--json"}, {"--json", verb}, {verb, "x", "--json"}} {
 			var out, errb bytes.Buffer
-			want := "error: mash " + verb + " has no --json form\nhint: mash " + verb + " --help\n"
-			if code := run(args, env, strings.NewReader(""), &out, &errb); code != 2 || out.Len() != 0 || errb.String() != want {
-				t.Errorf("%v: %d %q %q, want stderr %q", args, code, out.String(), errb.String(), want)
+			want := "{\"error\":\"mash " + verb + " has no --json form\",\"hint\":\"mash " + verb + " --help\"}\n"
+			if code := run(args, env, strings.NewReader(""), &out, &errb); code != 2 || errb.Len() != 0 || out.String() != want {
+				t.Errorf("%v: %d %q %q, want stdout %q and nothing on stderr", args, code, out.String(), errb.String(), want)
 			}
 		}
 	}
@@ -53,7 +53,7 @@ func TestNoJSONFormIsRefused(t *testing.T) {
 		out.Reset()
 		errb.Reset()
 		run(args, env, strings.NewReader(""), &out, &errb)
-		if strings.Contains(errb.String(), "has no --json form") {
+		if strings.Contains(errb.String()+out.String(), "has no --json form") {
 			t.Errorf("%v refused: %q", args, errb.String())
 		}
 	}

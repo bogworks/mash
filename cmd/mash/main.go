@@ -182,8 +182,8 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 		return 0
 	}
 	if global.JSON && noJSONForm[args[0]] { // nothing is attempted
-		fmt.Fprintf(stderr, "error: mash %s has no --json form\nhint: mash %s --help\n", args[0], args[0])
-		return 2
+		// With --json every error is {"error","hint"} on stdout and nothing on stderr (rules.json).
+		return cliframe.Report(stdout, stderr, cliframe.Usagef("mash %s has no --json form", args[0]).WithHint("mash "+args[0]+" --help"), true)
 	}
 	if u, ok := verbUsage[args[0]]; ok && len(args) > 1 {
 		if args[1] == "--help" || args[1] == "-h" { // the verb's usage line, and the verb does not run
