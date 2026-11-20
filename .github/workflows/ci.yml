@@ -175,7 +175,7 @@ jobs:
         run: |
           set -euo pipefail
           got="$("$RUNNER_TEMP/out/mash-linux-amd64" version)"
-          want="mash 0.0.0-ci (commit $GITHUB_SHA)"
+          want="mash v0.0.0-ci (${GITHUB_SHA:0:7})"
           if [ "$got" != "$want" ]; then echo "mash version printed '$got', expected '$want'" >&2; exit 1; fi
   # conformance: the fast static slice (build, vet, gofmt, tidy, staticcheck) that the review watcher waits for before it
   # starts a Codex review, so review rounds do not wait for the test matrix (every step here is also covered by the

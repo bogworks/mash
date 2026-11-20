@@ -66,11 +66,17 @@ func TestCheckDeclaredRefusesMissingPieces(t *testing.T) {
 func TestToolReply(t *testing.T) {
 	out := `{"jsonrpc":"2.0","id":1,"result":{}}` + "\n" +
 		`{"jsonrpc":"2.0","method":"notifications/claude/channel","params":{"content":"x"}}` + "\n" +
-		`{"jsonrpc":"2.0","id":101,"result":{"content":[{"type":"text","text":"sent #4 to a.b.c"}]}}` + "\n" +
+		`{"jsonrpc":"2.0","id":101,"result":{"content":[{"type":"text","text":"Mail sent."}],"structuredContent":{"to":"a.b.c","number":4,"kind":"task","urgent":false,"duplicate":false}}}` + "\n" +
 		`{"jsonrpc":"2.0","id":102,"result":{"content":[{"type":"text","text":"nope"}],"isError":true}}` + "\n" +
 		`{"jsonrpc":"2.0","id":103,"error":{"code":-32601,"message":"x"}}` + "\n"
-	if txt, isErr, ok := toolReply(out, 101); !ok || isErr || txt != "sent #4 to a.b.c" {
+	if txt, isErr, ok := toolReply(out, 101); !ok || isErr || txt != "Mail sent." {
 		t.Errorf("101: %q %v %v", txt, isErr, ok)
+	}
+	if got := string(toolStructured(out, 101)); !strings.Contains(got, `"number":4`) {
+		t.Errorf("structuredContent of 101: %q", got)
+	}
+	if got := toolStructured(out, 102); got != nil {
+		t.Errorf("102 has no structuredContent: %q", got)
 	}
 	if _, isErr, ok := toolReply(out, 102); !ok || !isErr {
 		t.Errorf("102: isErr %v ok %v", isErr, ok)

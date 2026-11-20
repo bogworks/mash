@@ -118,10 +118,10 @@ func (s *slowReader) Read(p []byte) (int, error) {
 	return copy(p, s.body), nil
 }
 
-// codex on #121: the lease adoption in `mash send` is bounded by the configured call timeout, not a fixed five
-// seconds. When stdin outlasts the prefetched lease's freshness the adoption makes a fresh lease request over the
-// link; with a call timeout shorter than the link's round trip that request must fail with the deadline (a fixed
-// 5 s would have let it succeed), and with the default it must adopt the lease's instance.
+// codex on #121, as the command table has it: the message is read before the endpoint is opened, so the lease the open
+// prefetches is never stale however slow standard input is, and the send adopts its instance with no second request.
+// What the configured call timeout bounds is the send itself: a call timeout shorter than the link's round trip ends it
+// with the deadline, reported as a timeout that names the --id to retry with.
 func TestSendAdoptionUsesTheCallTimeout(t *testing.T) {
 	r := newRTTWorld(t, 6)
 	send := func(callTimeout string) (string, int) {
@@ -136,17 +136,17 @@ func TestSendAdoptionUsesTheCallTimeout(t *testing.T) {
 		}
 		var out, errb bytes.Buffer
 		in := &slowReader{delay: 2500 * time.Millisecond, body: "late body"} // past the 2 s prefetch freshness
-		code := run([]string{"send", tTo("peer1"), "-"}, envFrom(env), in, &out, &errb)
+		code := run([]string{"send", tTo("peer1"), "--file", "-"}, envFrom(env), in, &out, &errb)
 		return out.String() + errb.String(), code
 	}
 	const warn = "sending under this command's own instance"
 	out, code := send("")
 	if code != 0 || strings.Contains(out, warn) {
-		t.Fatalf("default call timeout: exit %d, the stale prefetch must be refreshed and adopted: %s", code, out)
+		t.Fatalf("default call timeout: exit %d, the lease must be adopted: %s", code, out)
 	}
-	out, _ = send("10ms")
-	if !strings.Contains(out, "deadline exceeded") || !strings.Contains(out, warn) {
-		t.Fatalf("a 10 ms call timeout must bound the adoption's fresh lease request: %s", out)
+	out, code = send("10ms")
+	if code != 1 || !strings.Contains(out, "deadline exceeded") || !strings.Contains(out, "--id") {
+		t.Fatalf("a 10 ms call timeout must bound the send: exit %d %s", code, out)
 	}
 }
 

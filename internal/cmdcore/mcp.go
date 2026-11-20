@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math/big"
 	"reflect"
+	"strconv"
 	"strings"
 
 	"github.com/bogworks/mash/internal/cliframe"
@@ -57,6 +59,9 @@ func schemaOf(fields []field) map[string]any {
 		if d != "" {
 			pr["description"] = d
 		}
+		if f.min != nil {
+			pr["minimum"] = *f.min
+		}
 		if len(f.enum) > 0 {
 			pr["enum"] = append([]string(nil), f.enum...)
 		}
@@ -81,9 +86,15 @@ func MCPTool[P any, R Result](c Command[P, R], env EnvFunc) Tool {
 			if err := decodeArgs(fields, args, &p); err != nil {
 				return "", nil, toolError(err)
 			}
+			if env == nil {
+				return "", nil, toolError(errNoEnv(c.Name))
+			}
 			e, err := env(ctx)
 			if err != nil {
 				return "", nil, toolError(err)
+			}
+			if e == nil {
+				return "", nil, toolError(errNoEnv(c.Name))
 			}
 			e.Opts = Opts{NoColor: true, Width: 80}
 			r, err := c.Run(ctx, e, p)
@@ -111,34 +122,50 @@ func decodeArgs[P any](fields []field, args json.RawMessage, p *P) error {
 	if err := json.Unmarshal(args, &raw); err != nil {
 		return cliframe.Usagef("the arguments must be a JSON object")
 	}
+	known := map[string]bool{}
 	for _, f := range fields {
 		if f.json == "" || f.json == "-" {
 			continue
 		}
+		known[f.json] = true
 		v, ok := raw[f.json]
 		if !ok || string(v) == "null" {
 			if f.required {
 				return cliframe.Usagef("%s is required", f.json)
 			}
+			delete(raw, f.json)
 			continue
 		}
-		delete(raw, f.json)
+		if typ, _ := schemaType(f.typ); typ == "integer" {
+			n, err := wholeNumber(f, v)
+			if err != nil {
+				return err
+			}
+			raw[f.json] = n
+		}
+		if f.required {
+			var s string
+			if json.Unmarshal(v, &s) == nil && strings.TrimSpace(s) == "" {
+				return cliframe.Usagef("%s is required", f.json)
+			}
+		}
 		if len(f.enum) > 0 {
 			var s string
 			if json.Unmarshal(v, &s) == nil {
-				ok := false
-				for _, e := range f.enum {
-					ok = ok || e == s
-				}
+				c, ok := enumValue(f.enum, s)
 				if !ok {
 					return cliframe.Usagef("%s must be one of %s", f.json, strings.Join(f.enum, ", "))
 				}
+				raw[f.json], _ = json.Marshal(c)
 			}
 		}
 	}
 	for k := range raw {
-		return cliframe.Usagef("unknown argument %s", k)
+		if !known[k] {
+			return cliframe.Usagef("unknown argument %s", k)
+		}
 	}
+	args, _ = json.Marshal(raw)
 	if err := json.Unmarshal(args, p); err != nil {
 		var ute *json.UnmarshalTypeError
 		if errors.As(err, &ute) && ute.Field != "" {
@@ -147,6 +174,28 @@ func decodeArgs[P any](fields []field, args json.RawMessage, p *P) error {
 		return cliframe.Usagef("bad arguments: %v", err)
 	}
 	return nil
+}
+
+// wholeNumber checks the JSON value v of an integer field: a number with no fraction (2 and 2.0 pass, 2.5 does not)
+// that is at least the field's minimum. It returns the value written as a plain integer. A value that is not a JSON
+// number is returned as it is, for the decoder's wrong-type error.
+func wholeNumber(f field, v json.RawMessage) (json.RawMessage, error) {
+	t := strings.TrimSpace(string(v))
+	if t == "" || (t[0] != '-' && (t[0] < '0' || t[0] > '9')) {
+		return v, nil
+	}
+	x, ok := new(big.Rat), len(t) <= 40
+	if ok {
+		_, ok = x.SetString(t)
+	}
+	if !ok || !x.IsInt() || !x.Num().IsInt64() {
+		return nil, cliframe.Usagef("%s must be a whole number", f.json)
+	}
+	n := x.Num().Int64()
+	if f.min != nil && n < int64(*f.min) {
+		return nil, cliframe.Usagef("%s must be a whole number of %d or more", f.json, *f.min)
+	}
+	return json.RawMessage(strconv.FormatInt(n, 10)), nil
 }
 
 // toolErr is the error MCPTool returns to the MCP server: the text is the CLI's "error: MSG" plus "\nhint: HINT", and

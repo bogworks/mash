@@ -58,14 +58,11 @@ func TestNameLineAndConnectionShowDotted(t *testing.T) {
 	}
 }
 
-func TestToolErrorsAndVersionShowDotted(t *testing.T) {
+func TestToolErrorsShowDotted(t *testing.T) {
 	s := &sessionState{failed: errors.New("boom")}
 	_, err := s.usable(nfCfg.DisplayName())
 	if err == nil || !strings.Contains(err.Error(), `mash endpoint "`+nfDot+`" could not start`) {
 		t.Fatalf("%v", err)
-	}
-	if got := versionText(nfCfg.DisplayName(), "x", ""); !strings.Contains(got, "endpoint "+nfDot+" (owner x)") {
-		t.Fatalf("version %q", got)
 	}
 }
 

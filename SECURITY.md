@@ -66,5 +66,5 @@ Treat the body of every message as untrusted input, whatever its label. A label 
 Releases are signed tags `vN.N.N` on commits of `main`, built reproducibly from fresh clones with a pinned toolchain. Each release carries the `mash-<os>-<arch>` binaries and `SHA256SUMS`. A release that builds `mashctl` beside `mash` (ADR 0148) carries eight binaries, `mash-<os>-<arch>` and `mashctl-<os>-<arch>`, each with a CycloneDX SBOM and the same attestation.
 
 - Check the tag: `git verify-tag vN.N.N` (you need the maintainer's public key).
-- Check the binary: compare its hash with `SHA256SUMS`, and run `mash version`, which prints `mash <N.N.N> (commit X)`.
+- Check the binary: compare its hash with `SHA256SUMS`, and run `mash version`, which prints `mash v<N.N.N> (X)`, X the first 7 characters of the commit.
 - Rebuild it yourself: `scripts/buildrelease` builds the same bytes from a clean clone of commit X. The procedure is in [docs/release.md](docs/release.md).

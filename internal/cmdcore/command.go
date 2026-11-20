@@ -5,8 +5,9 @@
 //
 // Param tags: json:"name" (MCP), flag:"--name" and optional short:"-n" (CLI option), arg:"name" or arg:"name,optional"
 // (CLI positional, in field order), desc:"...", mcpdesc:"..." (replaces desc in the MCP schema), enum:"a,b",
-// required:"true" (required in the MCP schema), repeat:"true" (a []string given by repeating the flag). Field types are
-// string, bool, int, *int and []string.
+// required:"true" (required in the MCP schema), repeat:"true" (a []string given by repeating the flag), value:"number"
+// (the placeholder for a flag's value in --help), min:"1" (the smallest whole number an integer field takes). Field types
+// are string, bool, int, *int and []string.
 package cmdcore
 
 import (
@@ -42,9 +43,12 @@ type Env struct {
 // EnvFunc makes the Env for one run.
 type EnvFunc func(ctx context.Context) (*Env, error)
 
-// Command is one command: its CLI name (the verb, also the MCP tool name), a one-line summary, and its Run.
+// Command is one command: its CLI name (the verb, also the MCP tool name), a one-line summary (the MCP tool's
+// description), the one-line description and the examples that --help prints, and its Run.
 type Command[P any, R Result] struct {
-	Name    string
-	Summary string
-	Run     func(ctx context.Context, env *Env, p P) (R, error)
+	Name        string
+	Summary     string
+	Description string
+	Examples    []string
+	Run         func(ctx context.Context, env *Env, p P) (R, error)
 }

@@ -11,7 +11,6 @@ import (
 	"io/fs"
 	"net"
 	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,43 +22,15 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
+	"github.com/bogworks/mash/internal/cmdcore"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/endpoint"
 	"github.com/bogworks/mash/internal/host"
-	"github.com/bogworks/mash/internal/kind"
 	"github.com/bogworks/mash/internal/mcp"
 	"github.com/bogworks/mash/internal/render"
 	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/spool"
 )
-
-// sendArgsError explains a send call that has no text: it names the parameter and lists the argument keys
-// received that the tool does not know, so a model that guessed `body` or `message` can correct itself.
-// It returns nil when text is present.
-func sendArgsError(raw json.RawMessage) error {
-	var args map[string]json.RawMessage
-	_ = json.Unmarshal(raw, &args)
-	if t, ok := args["text"]; ok {
-		var s string
-		if json.Unmarshal(t, &s) == nil && s != "" {
-			return nil
-		}
-	}
-	var unknown []string
-	for k := range args {
-		switch k {
-		case "to", "text", "in_reply_to", "via", "urgent", "kind", "id":
-		default:
-			unknown = append(unknown, k)
-		}
-	}
-	sort.Strings(unknown)
-	got := "no text"
-	if len(unknown) > 0 {
-		got = strings.Join(unknown, ", ")
-	}
-	return fmt.Errorf("send needs `text` (the message body); got: %s", got)
-}
 
 // Retry timing for a session that starts while its endpoint's lease is held. Variables so tests can shorten
 // them; the hooks are test barriers and nil in production.
@@ -626,16 +597,6 @@ func str(desc string) map[string]any  { return map[string]any{"type": "string", 
 func num(desc string) map[string]any  { return map[string]any{"type": "integer", "description": desc} }
 func flag(desc string) map[string]any { return map[string]any{"type": "boolean", "description": desc} }
 
-// kindProp is the send tool's `kind` parameter: a string enum of the kinds.
-func kindProp() map[string]any {
-	names := make([]string, len(kind.All))
-	for i, k := range kind.All {
-		names[i] = string(k)
-	}
-	return map[string]any{"type": "string", "enum": names,
-		"description": "optional, default task: blocker|question|task wake an idle recipient; result|fyi (opt-in) wait for its next turn"}
-}
-
 func tools(state *atomic.Pointer[sessionState], src *statusSource) []mcp.Tool {
 	name := src.cfg.DisplayName()
 	callTimeout := src.cfg.CallTimeout
@@ -652,59 +613,11 @@ func tools(state *atomic.Pointer[sessionState], src *statusSource) []mcp.Tool {
 			return f(ctx, ep, args)
 		}
 	}
+	svc := &mcpSvc{buildVersion: buildVersion{pluginRoot: src.pluginRoot}, state: state, name: name, callTimeout: callTimeout}
+	table := newCommands(func(context.Context) (*cmdcore.Env, error) { return &cmdcore.Env{Svc: svc}, nil })
+	send, _ := table.Lookup("send")
 	return append([]mcp.Tool{
-		{Name: "send", Description: "Mail another mash endpoint by address (owner.group.instance, or the flat key owner_group_instance; a bare name is refused). Returns the delivery receipt (#seq in their inbox). `in_reply_to` and `via` are signed declarations recipients see only when they verify.",
-			Schema: schema(map[string]any{"to": str("recipient endpoint address: owner.group.instance or owner_group_instance"), "text": str("message body (markdown)"),
-				"in_reply_to": num("optional #seq of the message this answers; sent signed, so recipients see 'answers #N' when it verifies"),
-				"via": num("optional #seq of a message in your own inbox: declare that this message relays or quotes message #N of your inbox; " +
-					"recipients see 'relayed from <sender> #N' when the declaration verifies; omit it for ordinary mail"),
-				"urgent": flag("optional: wake the recipient at once instead of after its idle wait; for what cannot wait"),
-				"kind":   kindProp(),
-				"id": str("optional idempotency key (1-128 printable ASCII characters, no spaces). A send repeated with the same id to the same " +
-					"recipient within the stream's duplicate window (2 minutes) is stored once and reports a duplicate, so a retry after a timeout cannot deliver twice; " +
-					"after the window a repeated id is a new message")}, "to", "text"),
-			Call: call(func(ctx context.Context, ep *endpoint.Endpoint, raw json.RawMessage) (string, error) {
-				var a struct {
-					To        string    `json:"to"`
-					Text      string    `json:"text"`
-					InReplyTo msgNumber `json:"in_reply_to"`
-					Via       msgNumber `json:"via"`
-					Urgent    bool      `json:"urgent"`
-					Kind      string    `json:"kind"`
-					ID        string    `json:"id"`
-				}
-				if err := json.Unmarshal(raw, &a); err != nil {
-					return "", err
-				}
-				if a.Text == "" {
-					return "", sendArgsError(raw)
-				}
-				inReplyTo, err := declaredSeq(ep, "in_reply_to", a.InReplyTo)
-				if err != nil {
-					return "", err
-				}
-				via, err := declaredSeq(ep, "via", a.Via)
-				if err != nil {
-					return "", err
-				}
-				k, err := kind.Parse(a.Kind)
-				if err != nil {
-					return "", err
-				}
-				k, tagged := kind.Tag(k, inReplyTo, a.Text)
-				res, err := ep.SendDetailed(ctx, a.To, a.Text, endpoint.SendOptions{InReplyTo: inReplyTo, Via: via, Urgent: a.Urgent, Kind: k, ID: a.ID})
-				if err != nil {
-					return "", err
-				}
-				seq := res.Seq
-				if res.Duplicate {
-					return fmt.Sprintf("sent #%d to %s (duplicate of id %q: already delivered, nothing new stored)", seq, sap.Display(sap.KeyOf(a.To)), a.ID), nil
-				}
-				if tagged {
-					return fmt.Sprintf("sent #%d to %s %s", seq, sap.Display(sap.KeyOf(a.To)), kind.TaggedNote), nil
-				}
-				return fmt.Sprintf("sent #%d to %s", seq, sap.Display(sap.KeyOf(a.To))), nil
-			})},
+		send.Tool(table.Env).MCP(),
 		{Name: "read", Description: "Read one message from your inbox by #seq.",
 			// Only after the result is written to the client has the model the body. That counts as seen, so serve
 			// acks the message, for one a hook listed in a digest (any mode, ADR 0046) and for one waiting in a
@@ -819,47 +732,6 @@ func tools(state *atomic.Pointer[sessionState], src *statusSource) []mcp.Tool {
 	}, infoTools(src)...)
 }
 
-// versionText is the version tool's output: the binary line (the one `mash version` prints), the plugin's version and
-// the endpoint. It needs no endpoint, so it answers while the name is held, and it never fails: a plugin version it
-// cannot find is "unknown" with the reason.
-func versionText(name, owner, pluginRoot string) string {
-	ep := fmt.Sprintf("endpoint %s (owner %s)", name, owner)
-	if name == "" {
-		ep = "endpoint not set (no MASH_ENDPOINT)"
-	}
-	return strings.Join([]string{
-		versionLine(endpoint.CurrentVersion(), endpoint.CurrentCommit(), nil),
-		pluginLine(pluginRoot),
-		ep,
-	}, "\n")
-}
-
-// pluginLine is "plugin <version> (<root>)" from <root>/.claude-plugin/plugin.json, or "plugin unknown (<reason>)".
-// root is $MASH_PLUGIN_ROOT, which the plugin's .mcp.json sets to ${CLAUDE_PLUGIN_ROOT}.
-func pluginLine(root string) string {
-	unknown := func(format string, a ...any) string { return "plugin unknown (" + fmt.Sprintf(format, a...) + ")" }
-	if root == "" {
-		return unknown("MASH_PLUGIN_ROOT is not set: an older plugin, or serve run by hand")
-	}
-	if strings.Contains(root, "${") {
-		return unknown("MASH_PLUGIN_ROOT is not expanded: %s", root)
-	}
-	b, err := os.ReadFile(filepath.Join(root, ".claude-plugin", "plugin.json"))
-	if err != nil {
-		return unknown("%v", err)
-	}
-	var m struct {
-		Version string `json:"version"`
-	}
-	if err := json.Unmarshal(b, &m); err != nil {
-		return unknown("plugin.json is not valid JSON: %v", err)
-	}
-	if strings.TrimSpace(m.Version) == "" {
-		return unknown("plugin.json has no version")
-	}
-	return fmt.Sprintf("plugin %s (%s)", m.Version, root)
-}
-
 // msgNumber is a message number as the read tool takes it: a JSON integer (5) or a string ("5", "#5"),
 // kept as text for Endpoint.ResolveRef.
 type msgNumber string
@@ -876,18 +748,6 @@ func (n *msgNumber) UnmarshalJSON(b []byte) error {
 	}
 	*n = msgNumber(strconv.FormatUint(u, 10))
 	return nil
-}
-
-// declaredSeq resolves a send argument to the bare number a signed declaration carries.
-func declaredSeq(ep *endpoint.Endpoint, field string, n msgNumber) (uint64, error) {
-	if n == "" {
-		return 0, nil
-	}
-	ref, err := ep.ResolveRef(string(n))
-	if err != nil {
-		return 0, err
-	}
-	return ref.Seq, nil
 }
 
 func clampLimit(n int) int {

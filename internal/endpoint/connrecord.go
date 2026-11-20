@@ -87,6 +87,9 @@ func (e *Endpoint) SetConnectionHook(f func(error)) {
 	}
 }
 
+// IsAuthFailure reports whether err is the server refusing, expiring or revoking the endpoint's credentials.
+func IsAuthFailure(err error) bool { return isAuthFailure(err) }
+
 func isAuthFailure(err error) bool {
 	if errors.Is(err, nats.ErrAuthorization) || errors.Is(err, nats.ErrAuthExpired) || errors.Is(err, nats.ErrAuthRevoked) ||
 		errors.Is(err, nats.ErrAccountAuthExpired) {

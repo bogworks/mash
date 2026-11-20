@@ -45,7 +45,7 @@ const refusalBase = "refused by policy: you may not mail o.dev.denied." +
 	" ask the admin to check them."
 
 // refusal is the CLI's text for a send with --id k1; the retry sentence names that key.
-var refusal = refusalBase + " If you retry, use --id k1 (the send tool's id): it sends at most once within " + endpoint.DuplicateWindowText() + "."
+var refusal = "error: " + refusalBase + " If you retry, use --id k1 (the send tool's id): it sends at most once within " + endpoint.DuplicateWindowText() + "."
 
 // The CLI prints a refusal verbatim, fast, exits 1, and says nothing about a message that may have been delivered.
 func TestCLISendRefusedByPolicy(t *testing.T) {
@@ -64,7 +64,7 @@ func TestCLISendRefusedByPolicy(t *testing.T) {
 			t.Fatalf("output mentions %q: %q", bad, out)
 		}
 	}
-	if out, code := w.cli(t, "s", "send", tTo("ok"), "hello"); code != 0 || !strings.Contains(out, "sent #1 from o.dev.s to o.dev.ok") {
+	if out, code := w.cli(t, "s", "send", tTo("ok"), "hello"); code != 0 || !strings.Contains(out, "Mail sent.") {
 		t.Fatalf("allowed send: %d %q", code, out)
 	}
 }
@@ -75,12 +75,12 @@ func TestServeSendToolRefusedByPolicy(t *testing.T) {
 	addRestricted(t, w, "ok")
 	s := startServe(t, w.env["s"])
 	s.initialize(t)
-	r := s.call(t, 7, "send", `{"to":"o.dev.denied","text":"hello","id":"k1"}`)
+	r := s.call(t, 7, "send", `{"address":"o.dev.denied","message":"hello","id":"k1"}`)
 	if r["isError"] != true || strings.TrimSpace(resultText(r)) != refusal {
 		t.Fatalf("result %v, want an error with the single line %q", r, refusal)
 	}
-	r = s.call(t, 8, "send", `{"to":"o.dev.ok","text":"hello"}`)
-	if r["isError"] == true || !strings.Contains(resultText(r), "sent #1 to o.dev.ok") {
+	r = s.call(t, 8, "send", `{"address":"o.dev.ok","message":"hello"}`)
+	if r["isError"] == true || resultText(r) != "Mail sent." {
 		t.Fatalf("allowed send: %v", r)
 	}
 }

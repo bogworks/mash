@@ -14,7 +14,9 @@ type Entry interface {
 	CLIName() string
 	Summary() string
 	Tool(env EnvFunc) Tool
-	RunCLI(env EnvFunc, args []string, stdin io.Reader, stdout, stderr io.Writer, g cliframe.Global) int
+	RunCLI(env EnvFunc, fr Frame, args []string, stdin io.Reader, stdout, stderr io.Writer, g cliframe.Global) int
+	// HelpFor is the --help text when args ask for it, and whether they do: it reads nothing and runs nothing.
+	HelpFor(fr Frame, args []string) (string, bool)
 }
 
 type entry[P any, R Result] struct{ c Command[P, R] }
@@ -31,19 +33,42 @@ func (e entry[P, R]) Summary() string { return e.c.Summary }
 func (e entry[P, R]) Tool(env EnvFunc) Tool {
 	return MCPTool(e.c, env)
 }
-func (e entry[P, R]) RunCLI(env EnvFunc, args []string, stdin io.Reader, stdout, stderr io.Writer, g cliframe.Global) int {
-	return CLI(e.c, env)(args, stdin, stdout, stderr, g)
+func (e entry[P, R]) RunCLI(env EnvFunc, fr Frame, args []string, stdin io.Reader, stdout, stderr io.Writer, g cliframe.Global) int {
+	return CLIWith(e.c, env, fr)(args, stdin, stdout, stderr, g)
+}
+func (e entry[P, R]) HelpFor(fr Frame, args []string) (string, bool) {
+	fields := paramFields(reflect.TypeOf((*P)(nil)).Elem())
+	if !wantsHelp(fields, args) {
+		return "", false
+	}
+	return helpText(e.c, fields, fr), true
 }
 
 // Registry is one table of commands that both doors range over.
 type Registry struct {
 	Entries []Entry
 	Env     EnvFunc
+	Frame   Frame // what --help prints around each command
 }
 
 // NewRegistry returns a Registry of entries that make their Env with env.
 func NewRegistry(env EnvFunc, entries ...Entry) *Registry {
 	return &Registry{Entries: entries, Env: env}
+}
+
+// WithFrame sets what --help prints around each command, and returns r.
+func (r *Registry) WithFrame(fr Frame) *Registry {
+	r.Frame = fr
+	return r
+}
+
+// HelpFor is the --help text of the command named name when args ask for it.
+func (r *Registry) HelpFor(name string, args []string) (string, bool) {
+	e, ok := r.Lookup(name)
+	if !ok {
+		return "", false
+	}
+	return e.HelpFor(r.Frame, args)
 }
 
 // Lookup returns the entry for a CLI verb.
@@ -90,5 +115,5 @@ func (r *Registry) RunCLI(name string, args []string, stdin io.Reader, stdout, s
 	if !ok {
 		return cliframe.Report(stdout, stderr, cliframe.Usagef("unknown command %s", name).WithHint("mash --help"), g.JSON)
 	}
-	return e.RunCLI(r.Env, args, stdin, stdout, stderr, g)
+	return e.RunCLI(r.Env, r.Frame, args, stdin, stdout, stderr, g)
 }

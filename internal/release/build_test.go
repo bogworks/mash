@@ -66,7 +66,7 @@ func TestBuild_versionChangesWhatTheBinaryPrints(t *testing.T) {
 			t.Fatal(err)
 		}
 		got, err := exec.Command(out, "version").Output()
-		if err != nil || strings.TrimSpace(string(got)) != "mash "+v+" (commit "+x+")" {
+		if err != nil || strings.TrimSpace(string(got)) != "mash v"+v+" ("+x[:7]+")" {
 			t.Fatalf("version %s: %q %v", v, got, err)
 		}
 	}
@@ -323,7 +323,7 @@ func TestBuild_binaryPrintsTheVersionAndCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := exec.Command(out, "version").Output()
-	if err != nil || strings.TrimSpace(string(got)) != "mash 0.1.0 (commit "+x+")" {
+	if err != nil || strings.TrimSpace(string(got)) != "mash v0.1.0 ("+x[:7]+")" {
 		t.Fatalf("%q %v", got, err)
 	}
 }

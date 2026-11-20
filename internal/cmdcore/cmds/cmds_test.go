@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -13,6 +15,7 @@ import (
 	"github.com/bogworks/mash/internal/cliframe"
 	"github.com/bogworks/mash/internal/cmdcore"
 	"github.com/bogworks/mash/internal/cmdcore/cmds"
+	"github.com/bogworks/mash/internal/cmdcore/render"
 )
 
 type fakeSvc struct {
@@ -99,10 +102,18 @@ func TestSendUsageErrors(t *testing.T) {
 		{"no address", nil, "error: mash send needs <address>\n" + hint},
 		{"flag without value", []string{"a", "hi", "--kind"}, "error: --kind needs a value\n" + hint},
 		{"bad enum", []string{"a", "hi", "--kind", "loud"}, "error: --kind must be one of blocker, question, task, result, fyi\n" + hint},
-		{"bad number", []string{"a", "hi", "--reply-to", "x"}, "error: --reply-to must be a whole number, not \"x\"\n" + hint},
-		{"bad bool", []string{"a", "hi", "--urgent=maybe"}, "error: --urgent takes yes or no, not \"maybe\"\n" + hint},
+		{"bad number", []string{"a", "hi", "--reply-to", "x"}, "error: --reply-to must be a whole number\n" + hint},
+		{"bad bool", []string{"a", "hi", "--urgent=maybe"}, "error: --urgent must be true or false\n" + hint},
 		{"extra positional", []string{"a", "hi", "more"}, "error: unexpected argument \"more\" for mash send\n" + hint},
 		{"both message and file", []string{"a", "hi", "--file", "/m"}, "error: mash send takes the message text or --file, not both\n" + hint},
+		{"reply-to zero", []string{"a", "hi", "--reply-to", "0"}, "error: --reply-to must be a whole number of 1 or more\n" + hint},
+		{"relay negative", []string{"a", "hi", "--relay=-3"}, "error: --relay must be a whole number of 1 or more\n" + hint},
+		{"reply-to fraction", []string{"a", "hi", "--reply-to", "2.5"}, "error: --reply-to must be a whole number\n" + hint},
+		{"empty address", []string{"", "hi"}, "error: mash send needs <address>\n" + hint},
+		{"blank address", []string{"  ", "hi"}, "error: mash send needs <address>\n" + hint},
+		{"kind twice", []string{"a", "hi", "--kind", "fyi", "--kind=task"}, "error: --kind was given twice\n" + hint},
+		{"urgent twice", []string{"a", "hi", "--urgent", "--urgent"}, "error: --urgent was given twice\n" + hint},
+		{"id twice", []string{"a", "hi", "--id", "x", "--id", "y"}, "error: --id was given twice\n" + hint},
 		{"positional flag name", []string{"a", "--address", "x"}, "error: unknown option --address for mash send\n" + hint},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -244,7 +255,9 @@ func TestDoorsAgree(t *testing.T) {
 				t.Fatal(err)
 			}
 			var textOut bytes.Buffer
-			reg.RunCLI(tc.cmd, tc.argv, strings.NewReader(""), &textOut, &errs, cliframe.Global{})
+			if code := reg.RunCLI(tc.cmd, tc.argv, strings.NewReader(""), &textOut, &errs, cliframe.Global{}); code != 0 {
+				t.Fatalf("cli text run: exit %d %s", code, errs.String())
+			}
 
 			e, _ := reg.Lookup(tc.cmd)
 			text, structured, err := e.Tool(reg.Env).CallStructured(context.Background(), json.RawMessage(tc.args))
@@ -302,8 +315,8 @@ func TestSendSchema(t *testing.T) {
 		`"id":{"description":"A key of your own. A second send with the same key to the same address within two minutes stores nothing new, so a retry cannot deliver twice.","type":"string"},` +
 		`"kind":{"description":"What sort of message this is. blocker, question and task wake an idle recipient; result and fyi wait for its next turn. Default: task.","enum":["blocker","question","task","result","fyi"],"type":"string"},` +
 		`"message":{"description":"The text.","type":"string"},` +
-		`"relay":{"description":"The number of a message in your inbox that this passes on. Signed. (Today the MCP tool calls this 'via'.)","type":"integer"},` +
-		`"reply_to":{"description":"The number of the message in your inbox that this answers. Signed, so the recipient can trust the link.","type":"integer"},` +
+		`"relay":{"description":"The number of a message in your inbox that this passes on. Signed. (Today the MCP tool calls this 'via'.)","minimum":1,"type":"integer"},` +
+		`"reply_to":{"description":"The number of the message in your inbox that this answers. Signed, so the recipient can trust the link.","minimum":1,"type":"integer"},` +
 		`"urgent":{"description":"Deliver at once, into a running turn where the agent host allows it.","type":"boolean"}},` +
 		`"required":["address","message"],"type":"object"}`
 	if string(b) != want {
@@ -313,5 +326,244 @@ func TestSendSchema(t *testing.T) {
 	vb, _ := json.Marshal(v)
 	if string(vb) != `{"additionalProperties":false,"properties":{},"required":[],"type":"object"}` {
 		t.Errorf("version schema %s", vb)
+	}
+}
+
+func TestBoolFlagValues(t *testing.T) {
+	for v, want := range map[string]bool{"true": true, "false": false, "yes": true, "no": false, "TRUE": true, "No": false} {
+		f := &fakeSvc{}
+		code, _, errs := runSend(f, "", nil, cliframe.Global{}, "a", "hi", "--urgent="+v)
+		if code != 0 || f.o.Urgent != want {
+			t.Errorf("--urgent=%s: code %d urgent %v stderr %q", v, code, f.o.Urgent, errs)
+		}
+	}
+	for _, v := range []string{"1", "maybe", "", "y"} {
+		code, _, errs := runSend(&fakeSvc{}, "", nil, cliframe.Global{}, "a", "hi", "--urgent="+v)
+		if code != 2 || errs != "error: --urgent must be true or false\nhint: mash send --help\n" {
+			t.Errorf("--urgent=%q: code %d stderr %q", v, code, errs)
+		}
+	}
+}
+
+func TestReplyToNumbers(t *testing.T) {
+	f := &fakeSvc{}
+	if code, _, errs := runSend(f, "", nil, cliframe.Global{}, "a", "hi", "--reply-to", "1"); code != 0 || f.o.ReplyTo != 1 {
+		t.Fatalf("code %d %q %+v", code, errs, f.o)
+	}
+	tool := cmdcore.MCPTool(cmds.Send, envOf(f, false, nil))
+	call := func(args string) error {
+		_, _, err := tool.CallStructured(context.Background(), json.RawMessage(args))
+		return err
+	}
+	f.o = cmds.SendOptions{}
+	if err := call(`{"address":"a","message":"m","reply_to":2.0,"relay":3e0}`); err != nil || f.o.ReplyTo != 2 || f.o.Relay != 3 {
+		t.Errorf("2.0 and 3e0 are integers: %v %+v", err, f.o)
+	}
+	for args, want := range map[string]string{
+		`{"address":"a","message":"m","reply_to":2.5}`: "error: reply_to must be a whole number",
+		`{"address":"a","message":"m","reply_to":0}`:   "error: reply_to must be a whole number of 1 or more",
+		`{"address":"a","message":"m","relay":-1}`:     "error: relay must be a whole number of 1 or more",
+		`{"address":"a","message":"m","relay":1e400}`:  "error: relay must be a whole number",
+		`{"address":"a","message":"m","reply_to":"2"}`: "error: reply_to has the wrong type",
+		`{"address":"","message":"m"}`:                 "error: address is required",
+		`{"address":"a","message":"  "}`:               "error: message is required",
+	} {
+		if err := call(args); err == nil || !strings.HasPrefix(err.Error(), want) {
+			t.Errorf("%s: err = %v, want %q", args, err, want)
+		}
+	}
+}
+
+func TestNilEnvAndService(t *testing.T) {
+	var o, e bytes.Buffer
+	run := func(env cmdcore.EnvFunc) int {
+		o.Reset()
+		e.Reset()
+		return cmdcore.CLI(cmds.Send, env)([]string{"a", "hi"}, nil, &o, &e, cliframe.Global{})
+	}
+	for name, env := range map[string]cmdcore.EnvFunc{
+		"nil func":    nil,
+		"nil env":     func(context.Context) (*cmdcore.Env, error) { return nil, nil },
+		"nil service": func(context.Context) (*cmdcore.Env, error) { return &cmdcore.Env{}, nil },
+	} {
+		if code := run(env); code != 1 || !strings.HasPrefix(e.String(), "error: internal: ") || o.Len() != 0 {
+			t.Errorf("%s: code %d stdout %q stderr %q", name, code, o.String(), e.String())
+		}
+	}
+	tool := cmdcore.MCPTool(cmds.Send, nil)
+	if _, _, err := tool.CallStructured(context.Background(), json.RawMessage(`{"address":"a","message":"m"}`)); err == nil || !strings.HasPrefix(err.Error(), "error: internal: ") {
+		t.Errorf("mcp nil env func: %v", err)
+	}
+	tool = cmdcore.MCPTool(cmds.Send, func(context.Context) (*cmdcore.Env, error) { return nil, nil })
+	if _, _, err := tool.CallStructured(context.Background(), json.RawMessage(`{"address":"a","message":"m"}`)); err == nil || !strings.HasPrefix(err.Error(), "error: internal: ") {
+		t.Errorf("mcp nil env: %v", err)
+	}
+	if _, err := cmds.Send.Run(context.Background(), nil, cmds.SendParams{Address: "a", Message: "m"}); err == nil {
+		t.Error("Run with a nil env must fail")
+	}
+	if _, err := cmds.Version.Run(context.Background(), nil, cmds.VersionParams{}); err == nil {
+		t.Error("Version.Run with a nil env must fail")
+	}
+}
+
+func TestImplicitStdinOnlyWhenPiped(t *testing.T) {
+	// /dev/null is not a terminal but has nothing to send: it is not read as the text.
+	null, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Skip(err)
+	}
+	defer null.Close()
+	var o, e bytes.Buffer
+	f := &fakeSvc{}
+	env := func(context.Context) (*cmdcore.Env, error) { return &cmdcore.Env{Svc: f}, nil }
+	code := cmdcore.CLI(cmds.Send, env)([]string{"a"}, null, &o, &e, cliframe.Global{})
+	if code != 2 || f.calls != 0 || !strings.HasPrefix(e.String(), "error: mash send needs the message text") {
+		t.Errorf("/dev/null: code %d calls %d stderr %q", code, f.calls, e.String())
+	}
+	// a pipe and a regular file are read
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.WriteString("from a pipe\n")
+	w.Close()
+	e.Reset()
+	if code := cmdcore.CLI(cmds.Send, env)([]string{"a"}, r, &o, &e, cliframe.Global{}); code != 0 || f.text != "from a pipe" {
+		t.Errorf("pipe: code %d text %q stderr %q", code, f.text, e.String())
+	}
+	file := filepath.Join(t.TempDir(), "in.txt")
+	if err := os.WriteFile(file, []byte("from a file\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	in, _ := os.Open(file)
+	defer in.Close()
+	if code := cmdcore.CLI(cmds.Send, env)([]string{"a"}, in, &o, &e, cliframe.Global{}); code != 0 || f.text != "from a file" {
+		t.Errorf("file: code %d text %q", code, f.text)
+	}
+}
+
+func TestOneTrailingNewlineDropped(t *testing.T) {
+	for in, want := range map[string]string{
+		"a\n": "a", "a\r\n": "a", "a\n\n": "a\n", "a\r\n\r\n": "a\r\n", "a": "a", "a\r": "a\r", "a b\nc\n": "a b\nc",
+	} {
+		f := &fakeSvc{}
+		if code, _, errs := runSend(f, in, nil, cliframe.Global{}, "a", "--file", "-"); code != 0 || f.text != want {
+			t.Errorf("%q: code %d text %q, want %q (%s)", in, code, f.text, want, errs)
+		}
+	}
+}
+
+// TestJSONErrorsBothDoors: a failure is {error, hint} on stdout with the exit code (CLI --json) and an error result with
+// the same object as structuredContent (MCP).
+func TestJSONErrorsBothDoors(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		argv     []string
+		args     string
+		err      error
+		code     int
+		wantJSON string
+	}{
+		{"no such endpoint", []string{"acme.demo.alise", "hi"}, `{"address":"acme.demo.alise","message":"hi"}`, cmds.ErrNoSuchEndpoint, 1,
+			`{"error":"no endpoint has the address acme.demo.alise","hint":"mash who"}`},
+		{"not signed in", []string{"a", "hi"}, `{"address":"a","message":"hi"}`, &cmds.SignInError{Addr: "acme.demo.bob"}, 1,
+			`{"error":"acme.demo.bob cannot sign in: the server refused its credentials","hint":"mash doctor"}`},
+		{"server not answering", []string{"a", "hi"}, `{"address":"a","message":"hi"}`, cmdcore.ServerNotAnswering("tls://h:4222"), 1,
+			`{"error":"the server did not answer: tls://h:4222","hint":"mash doctor"}`},
+		{"no hint", []string{"a", "hi"}, `{"address":"a","message":"hi"}`, errors.New("boom"), 1, `{"error":"boom"}`},
+		{"usage", []string{"a", "hi", "--reply-to", "0"}, `{"address":"a","message":"hi","reply_to":0}`, nil, 2,
+			`{"error":"--reply-to must be a whole number of 1 or more","hint":"mash send --help"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &fakeSvc{err: tc.err}
+			code, out, errs := runSend(f, "", nil, cliframe.Global{JSON: true}, tc.argv...)
+			if code != tc.code || out != tc.wantJSON+"\n" || errs != "" {
+				t.Errorf("cli: code %d stdout %q stderr %q", code, out, errs)
+			}
+			// the MCP door: a usage error carries no hint (there is no command line to point at), the rest are the same object
+			_, _, merr := cmdcore.MCPTool(cmds.Send, envOf(f, false, nil)).MCP().CallStructured(context.Background(), json.RawMessage(tc.args))
+			if merr == nil {
+				t.Fatal("mcp: no error")
+			}
+			var se interface{ Structured() any }
+			if !errors.As(merr, &se) {
+				t.Fatalf("mcp error %T has no structured form", merr)
+			}
+			b, _ := json.Marshal(se.Structured())
+			want := tc.wantJSON
+			if tc.code == 2 {
+				want = `{"error":"reply_to must be a whole number of 1 or more"}`
+			}
+			if string(b) != want {
+				t.Errorf("mcp structured %s, want %s", b, want)
+			}
+		})
+	}
+}
+
+func TestSendHelp(t *testing.T) {
+	var o, e bytes.Buffer
+	fr := cmdcore.Frame{Tool: "mash", Globals: []cmdcore.HelpOption{
+		{Flag: "--endpoint", Value: "address", Desc: "Which endpoint to act as, as owner.group.name. Not needed when only one is installed here."},
+		{Flag: "--verbose", Short: "-v", Desc: "Print more."},
+		{Flag: "--help", Short: "-h", Desc: "Show help for the command."},
+	}}
+	var first string
+	for _, args := range [][]string{{"--help"}, {"-h"}, {"acme.demo.alice", "--kind", "fyi", "-h"}, {"--bogus", "--help"}} {
+		o.Reset()
+		code := cmdcore.CLIWith(cmds.Send, envOf(&fakeSvc{}, true, nil), fr)(args, nil, &o, &e, cliframe.Global{})
+		if code != 0 || e.Len() != 0 {
+			t.Fatalf("%v: code %d stderr %q", args, code, e.String())
+		}
+		got := o.String()
+		first = got
+		for _, l := range strings.Split(strings.TrimSuffix(got, "\n"), "\n") {
+			if render.DisplayWidth(l) > 80 || l != strings.TrimRight(l, " ") {
+				t.Errorf("line %q is wider than 80 columns or has trailing spaces", l)
+			}
+		}
+		at := -1
+		for _, h := range []string{"Send a message to an endpoint.\n\nUsage:\n  mash send <address> [<message>] [options]\n\nExamples:\n  mash send acme.demo.alice \"lunch at noon?\"\n",
+			"\n\nArguments:\n  address  Who to send to, as owner.group.name.\n  message  The text. Leave it out to read the text from --file or from standard\n",
+			"\n\nOptions:\n  --kind <kind>", "\n  --urgent", "\n  --reply-to <number>", "\n  --relay <number>", "\n  --id <key>", "\n  --file <path>",
+			"\n\nGlobal options:\n  --endpoint <address>", "\n  -v, --verbose", "\n  -h, --help <"} {
+			i := strings.Index(got, h)
+			if h == "\n  -h, --help <" {
+				h, i = "\n  -h, --help ", strings.Index(got, "\n  -h, --help ")
+			}
+			if i < at || i < 0 {
+				t.Fatalf("%v: section %q missing or out of order in\n%s", args, h, got)
+			}
+			at = i
+		}
+		if !strings.HasSuffix(got, "\n") || strings.HasSuffix(got, "\n\n") {
+			t.Errorf("help must end in one newline: %q", got[len(got)-3:])
+		}
+	}
+	// wrapped descriptions line up under the first
+	if !strings.Contains(first, "\n  --kind <kind>        What sort of message this is. blocker, question and task\n"+"                       wake an idle recipient;") {
+		t.Errorf("--kind not aligned and wrapped:\n%s", first)
+	}
+	// no help after "--": it is the message
+	f := &fakeSvc{}
+	if code := cmdcore.CLIWith(cmds.Send, envOf(f, true, nil), fr)([]string{"a", "--", "--help"}, nil, &o, &e, cliframe.Global{}); code != 0 || f.text != "--help" {
+		t.Errorf("after --: code %d text %q", code, f.text)
+	}
+	// the version help has no Arguments or Options section
+	o.Reset()
+	cmdcore.CLIWith(cmds.Version, envOf(&fakeSvc{}, true, nil), fr)([]string{"--help"}, nil, &o, &e, cliframe.Global{})
+	if strings.Contains(o.String(), "Arguments:") || strings.Contains(o.String(), "\nOptions:") || !strings.HasPrefix(o.String(), "Print the version.\n\nUsage:\n  mash version\n\nExamples:\n  mash version\n\nGlobal options:\n") {
+		t.Errorf("version help:\n%s", o.String())
+	}
+}
+
+// An enum value is matched without regard to case, as kind.Parse always has, and reaches the service spelled as allowed.
+func TestEnumIgnoresCase(t *testing.T) {
+	f := &fakeSvc{}
+	if code, _, errs := runSend(f, "", nil, cliframe.Global{}, "a", "hi", "--kind", "Question"); code != 0 || f.o.Kind != "question" {
+		t.Errorf("cli: code %d kind %q %s", code, f.o.Kind, errs)
+	}
+	if _, _, err := cmdcore.MCPTool(cmds.Send, envOf(f, false, nil)).CallStructured(context.Background(), json.RawMessage(`{"address":"a","message":"m","kind":"FYI"}`)); err != nil || f.o.Kind != "fyi" {
+		t.Errorf("mcp: %v kind %q", err, f.o.Kind)
 	}
 }

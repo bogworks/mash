@@ -148,8 +148,8 @@ func TestStandaloneOnlyNATS(t *testing.T) {
 		assertToolsAbsent(t, envs[n])
 	}
 
-	out := mustRun(t, bin, envs["alpha"], "send", tTo("beta"), "hello", "from", "alpha")
-	if !strings.Contains(out, "sent #1 from o.dev.alpha to o.dev.beta") {
+	out := mustRun(t, bin, envs["alpha"], "send", tTo("beta"), "hello from alpha")
+	if !strings.Contains(out, "Mail sent.") {
 		t.Fatalf("send: %s", out)
 	}
 	inbox := mustRun(t, bin, envs["beta"], "inbox")
@@ -169,8 +169,8 @@ func TestStandaloneOnlyNATS(t *testing.T) {
 	}
 
 	// The reply round trip: beta answers, alpha reads it, verified.
-	out = mustRun(t, bin, envs["beta"], "send", tTo("alpha"), "reply", "from", "beta")
-	if !strings.Contains(out, "sent #1 from o.dev.beta to o.dev.alpha") {
+	out = mustRun(t, bin, envs["beta"], "send", tTo("alpha"), "reply from beta")
+	if !strings.Contains(out, "Mail sent.") {
 		t.Fatalf("reply send: %s", out)
 	}
 	read = mustRun(t, bin, envs["alpha"], "read", "1")
@@ -200,7 +200,7 @@ func TestStandaloneEnvOnlyConfig(t *testing.T) {
 			}
 		}
 	}
-	if out := mustRun(t, bin, env, "send", tTo("solo"), "note", "to", "self"); !strings.Contains(out, "sent #1 from o.dev.solo to o.dev.solo") {
+	if out := mustRun(t, bin, env, "send", tTo("solo"), "note to self"); !strings.Contains(out, "Mail sent.") {
 		t.Fatalf("send: %s", out)
 	}
 	if out := mustRun(t, bin, env, "who"); !strings.Contains(out, "solo") {

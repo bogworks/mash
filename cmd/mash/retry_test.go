@@ -190,8 +190,8 @@ func TestServeRetriesHeldLease(t *testing.T) {
 		t.Fatalf("expected the mail, got %s", ev)
 	}
 	// The registered tools now work on the recovered endpoint, as endpoint a.
-	r := s.call(t, 10, "send", `{"to":"o.dev.b","text":"thanks"}`)
-	if txt := resultText(r); !strings.HasPrefix(txt, "sent #") || r["isError"] == true {
+	r := s.call(t, 10, "send", `{"address":"o.dev.b","message":"thanks"}`)
+	if txt := resultText(r); txt != "Mail sent." || r["isError"] == true {
 		t.Fatalf("send tool after recovery: %v", r)
 	}
 	if txt := resultText(s.call(t, 11, "inbox", `{}`)); !strings.Contains(txt, "sent while held") || !strings.Contains(txt, "hello after recovery") {
@@ -282,7 +282,7 @@ func TestServeWaitingToolsAreSafe(t *testing.T) {
 	s := startServe(t, w.env["a"])
 	s.initialize(t)
 	calls := map[string]string{
-		"send": `{"to":"o.dev.x","text":"y"}`, "read": `{"seq":1}`, "inbox": `{}`, "who": `{}`,
+		"send": `{"address":"o.dev.x","message":"y"}`, "read": `{"seq":1}`, "inbox": `{}`, "who": `{}`,
 		"reply": `{"request_id":"r","text":"t"}`,
 	}
 	id := 20

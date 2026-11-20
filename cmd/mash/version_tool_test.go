@@ -10,8 +10,8 @@ import (
 	"github.com/bogworks/mash/internal/endpoint"
 )
 
-// versionOut runs the `version` tool in a serve whose env has MASH_PLUGIN_ROOT set to root (unset when root is nil).
-func versionOut(t *testing.T, w *world, root *string) string {
+// versionReply runs the `version` tool in a serve whose env has MASH_PLUGIN_ROOT set to root (unset when root is nil).
+func versionReply(t *testing.T, w *world, root *string) map[string]any {
 	t.Helper()
 	env := map[string]string{}
 	for k, v := range w.env["a"] {
@@ -31,11 +31,7 @@ func versionOut(t *testing.T, w *world, root *string) string {
 	if !found {
 		t.Fatal("version is not in tools/list")
 	}
-	r := s.call(t, 30, "version", `{}`)
-	if r["isError"] == true {
-		t.Fatalf("version tool errored: %v", r)
-	}
-	return resultText(r)
+	return s.call(t, 30, "version", `{}`)
 }
 
 func pluginRoot(t *testing.T, manifest string) string {
@@ -50,24 +46,23 @@ func pluginRoot(t *testing.T, manifest string) string {
 	return root
 }
 
-func checkVersionLines(t *testing.T, w *world, out, plugin string) {
+// checkVersion checks the version tool's reply: the one line `mash version` prints, and the object that is its structured
+// result, with the plugin's version when there is one.
+func checkVersion(t *testing.T, r map[string]any, plugin string) {
 	t.Helper()
-	lines := strings.Split(strings.TrimSpace(out), "\n")
-	// binary, plugin, endpoint, client, then a drift warning when the plugin and binary differ.
-	if len(lines) < 4 || len(lines) > 5 {
-		t.Fatalf("want 4 or 5 lines, got %q", out)
+	if r["isError"] == true {
+		t.Fatalf("version tool errored: %v", r)
 	}
-	if lines[3] != "client: unknown (no initialize seen)" {
-		t.Errorf("client line %q", lines[3])
+	version, commit := endpoint.CurrentVersion(), shortCommit(endpoint.CurrentCommit())
+	if want := "mash v" + version + " (" + commit + ")"; resultText(r) != want {
+		t.Errorf("text %q, want %q", resultText(r), want)
 	}
-	if want := versionLine(endpoint.CurrentVersion(), endpoint.CurrentCommit(), nil); lines[0] != want {
-		t.Errorf("binary line %q, want %q", lines[0], want)
+	sc, _ := r["structuredContent"].(map[string]any)
+	if sc == nil {
+		t.Fatalf("no structuredContent in %v", r)
 	}
-	if !strings.HasPrefix(lines[1], plugin) {
-		t.Errorf("plugin line %q, want prefix %q", lines[1], plugin)
-	}
-	if want := "endpoint " + tTo("a") + " (owner " + w.e.Owner + ")"; lines[2] != want {
-		t.Errorf("endpoint line %q, want %q", lines[2], want)
+	if sc["version"] != version || sc["commit"] != commit || sc["plugin"] != plugin || len(sc) != 3 {
+		t.Errorf("structuredContent %v, want version %q commit %q plugin %q", sc, version, commit, plugin)
 	}
 }
 
@@ -82,31 +77,41 @@ func TestVersionTool(t *testing.T) {
 	for _, c := range []struct {
 		name   string
 		root   *string
-		prefix string
+		plugin string
 	}{
-		{"good", &good, "plugin 9.9.9 (" + good + ")"},
-		{"unset", nil, "plugin unknown (MASH_PLUGIN_ROOT is not set"},
-		{"empty", &empty, "plugin unknown (MASH_PLUGIN_ROOT is not set"},
-		{"literal", &literal, "plugin unknown (MASH_PLUGIN_ROOT is not expanded"},
-		{"bad json", &bad, "plugin unknown ("},
-		{"no version", &noVer, "plugin unknown ("},
-		{"missing file", &missing, "plugin unknown ("},
+		{"good", &good, "9.9.9"},
+		{"unset", nil, ""},
+		{"empty", &empty, ""},
+		{"literal", &literal, ""},
+		{"bad json", &bad, ""},
+		{"no version", &noVer, ""},
+		{"missing file", &missing, ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			checkVersionLines(t, w, versionOut(t, w, c.root), c.prefix)
+			checkVersion(t, versionReply(t, w, c.root), c.plugin)
 		})
 	}
 }
 
-func TestClientInfoShownByVersionAndStatus(t *testing.T) {
+// The version tool takes no arguments, and answers with no endpoint (an inert session) too.
+func TestVersionToolTakesNoArgumentsAndNeedsNoEndpoint(t *testing.T) {
+	s := startServe(t, map[string]string{"HOME": t.TempDir()})
+	s.initialize(t)
+	checkVersion(t, s.call(t, 30, "version", `{}`), "")
+	if r := s.call(t, 31, "version", `{"x":1}`); r["isError"] != true || !strings.Contains(resultText(r), "unknown argument x") {
+		t.Errorf("an argument: %v", r)
+	}
+}
+
+func TestClientInfoShownByStatus(t *testing.T) {
 	w := newWorld(t, "a")
 	for _, c := range []struct {
-		name, info, version, status string
+		name, info, status string
 	}{
-		{"claude code", `{"name":"claude-code","version":"2.1.316"}`, "client: Claude Code 2.1.316", "client: Claude Code 2.1.316"},
-		{"old claude code", `{"name":"claude-code","version":"2.1.311"}`, "client: Claude Code 2.1.311", "client: WARN - Claude Code 2.1.311 is older than 2.1.312, the oldest version mash has a passing live receipt on. mash does not refuse it. Next: update Claude Code"},
-		{"other client", `{"name":"pi","version":"0.1"}`, "client: pi 0.1", "client: pi 0.1"},
-		{"none", ``, "client: unknown (no initialize seen)", "client: unknown (no initialize seen)"},
+		{"claude code", `{"name":"claude-code","version":"2.1.316"}`, "client: Claude Code 2.1.316"},
+		{"old claude code", `{"name":"claude-code","version":"2.1.311"}`, "client: WARN - Claude Code 2.1.311 is older than 2.1.312, the oldest version mash has a passing live receipt on. mash does not refuse it. Next: update Claude Code"},
+		{"other client", `{"name":"pi","version":"0.1"}`, "client: pi 0.1"},
+		{"none", ``, "client: unknown (no initialize seen)"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			s := startServe(t, w.env["a"])
@@ -117,9 +122,6 @@ func TestClientInfoShownByVersionAndStatus(t *testing.T) {
 			s.send(t, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{`+params+`}}`)
 			s.await(t, 5*time.Second, idIs(1))
 			s.send(t, `{"jsonrpc":"2.0","method":"notifications/initialized"}`)
-			if out := resultText(s.call(t, 3, "version", `{}`)); !strings.Contains(out, "\n"+c.version+"\n") && !strings.HasSuffix(out, "\n"+c.version) {
-				t.Errorf("version tool: want line %q in:\n%s", c.version, out)
-			}
 			if out := statusOf(t, s, 4); !strings.Contains(out, "\n"+c.status) {
 				t.Errorf("status tool: want line %q in:\n%s", c.status, out)
 			}

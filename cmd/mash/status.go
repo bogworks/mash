@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/bogworks/mash/internal/claudesettings"
+	"github.com/bogworks/mash/internal/cmdcore"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/endpoint"
 	"github.com/bogworks/mash/internal/host"
@@ -83,16 +84,13 @@ func infoTools(src *statusSource) []mcp.Tool {
 	return []mcp.Tool{versionTool(src), statusTool(src)}
 }
 
+// versionTool is the version command of the table as an MCP tool. It needs no endpoint, so it answers while the name is held.
 func versionTool(src *statusSource) mcp.Tool {
-	return mcp.Tool{Name: "version", Description: "Show which mash this is: the mash binary's version and commit, the plugin's version, and this endpoint's address (owner.group.instance).",
-		Schema: schema(map[string]any{}),
-		Call: func(_ context.Context, _ json.RawMessage) (string, error) {
-			out := versionText(src.cfg.DisplayName(), src.cfg.Owner, src.pluginRoot) + "\n" + clientLine(src.clientInfo())
-			if l := driftLine(pluginVersion(src.pluginRoot), endpoint.CurrentVersion()); l != "" {
-				out += "\n" + l
-			}
-			return out, nil
-		}}
+	table := newCommands(func(context.Context) (*cmdcore.Env, error) {
+		return &cmdcore.Env{Svc: buildVersion{pluginRoot: src.pluginRoot}}, nil
+	})
+	e, _ := table.Lookup("version")
+	return e.Tool(table.Env).MCP()
 }
 
 func statusTool(src *statusSource) mcp.Tool {

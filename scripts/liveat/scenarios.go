@@ -134,8 +134,6 @@ func (a *AT) waitOnline(h Home, extra []string, ids ...string) bool {
 	}
 }
 
-var sentRE = regexp.MustCompile(`sent #(\d+)`)
-
 // permissions asserts that `mash admin permissions O.G.I` prints REQ-005's set.
 func (a *AT) permissions(h Home, owner, group, name string) {
 	addr := owner + "." + group + "." + name

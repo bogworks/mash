@@ -95,7 +95,7 @@ Shown as `mash: endpoint X stopped: ... Mail is off for this session.` The lease
 
 ## `send` timed out
 
-`mash: send to X timed out; the message may or may not have been delivered. Retry with --id KEY ... within 2 minutes to send it at most once; after that a retry may store a second copy.` Re-run the same send with the key it printed: `mash send <to> --id <key> ...` (the `send` tool takes `id`). Within the window a duplicate reports `sent #N ... (duplicate of --id KEY: already delivered, nothing new stored)`. Past 2 minutes, check the recipient's inbox before retrying.
+`mash: send to X timed out; the message may or may not have been delivered. Retry with --id KEY ... within 2 minutes to send it at most once; after that a retry may store a second copy.` Re-run the same send with the key it printed: `mash send <to> --id <key> ...` (the `send` tool takes `id`). Within the window a duplicate reports `Mail already sent; nothing new stored.`. Past 2 minutes, check the recipient's inbox before retrying.
 
 ## A peer shows `offline` in `who`
 

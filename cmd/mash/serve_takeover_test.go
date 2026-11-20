@@ -93,7 +93,7 @@ func TestServeSameSessionTakesOverAndSupersedesOld(t *testing.T) {
 	if txt := resultText(old.call(t, 21, "status", `{}`)); !strings.Contains(txt, "pid "+pid) || !strings.Contains(txt, "inactive") {
 		t.Fatalf("the old serve's status: %s", txt)
 	}
-	r := old.call(t, 22, "send", `{"to":"o.dev.b","text":"x"}`)
+	r := old.call(t, 22, "send", `{"address":"o.dev.b","message":"x"}`)
 	if txt := resultText(r); r["isError"] != true || !strings.Contains(txt, "superseded by a newer mash serve of the same session") ||
 		!strings.Contains(txt, "pid "+pid) || !strings.Contains(txt, "handled there") {
 		t.Fatalf("the old serve's tool answer: %v", r)
