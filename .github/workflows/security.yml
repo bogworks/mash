@@ -88,9 +88,9 @@ jobs:
       - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v3
         with:
           languages: go
-          # Pinned to the CodeQL CLI seeded in the runners' toolcache. Ops must
-          # seed a new version there before this pin moves.
-          tools: https://github.com/github/codeql-action/releases/download/codeql-bundle-v2.27.5/codeql-bundle-linux64.tar.gz
+          # Uses the CodeQL CLI ops seeded in the runners' toolcache (2.27.5 as of
+          # 2026-11-20); ops seeds a new version deliberately.
+          tools: toolcache
       - uses: github/codeql-action/autobuild@33d7b85da1a04171e211befe2c739303b9a4c066 # v3
       - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v3
         with:
