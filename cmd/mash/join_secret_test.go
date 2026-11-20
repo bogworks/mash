@@ -159,3 +159,30 @@ func TestJoinRefusesACAIntoAFolderWithEndpointsAndNone(t *testing.T) {
 		t.Errorf("no endpoint yet: %+v", r)
 	}
 }
+
+// Only an installed endpoint (owner.group.name.creds, mode 0600) makes a folder one that was set up without a CA. An
+// admin.creds, or a creds file that is not 0600, is not one, so the first join still brings its CA.
+func TestJoinTakesACAIntoAFolderWithoutAnInstalledEndpoint(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		mode os.FileMode
+	}{
+		{"admin.creds", 0o600},
+		{"acme.demo.carol.creds", 0o644},
+	} {
+		w := newJoinWorld(t)
+		os.MkdirAll(w.cfg, 0o700)
+		p := filepath.Join(w.cfg, c.name)
+		if err := os.WriteFile(p, w.m.creds, c.mode); err != nil {
+			t.Fatal(err)
+		}
+		os.Chmod(p, c.mode)
+		r := w.run("join", "acme.demo.bob.join")
+		if r.code != 0 {
+			t.Errorf("%s %v: %+v", c.name, c.mode, r)
+		}
+		if _, err := os.Stat(filepath.Join(w.cfg, "ca.pem")); err != nil {
+			t.Errorf("%s %v: the join did not write ca.pem", c.name, c.mode)
+		}
+	}
+}
