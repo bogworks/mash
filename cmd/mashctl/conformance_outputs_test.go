@@ -12,13 +12,11 @@ package main
 // server's own), and the version and commit. Two shapes vary by nature and match as patterns: a date and time
 // (2026-11-19 09:40) and a public key.
 //
-// How the specification's stream is read: stream is where the whole text goes, except that a case that says so in its name
-// ("the line on stdout, the hint on stderr") has its last line, the hint, on stderr. (rules.json says that the hint of
-// status and doctor always goes to stderr; the x-output of doctor puts it in the stdout text, and the build follows the
-// x-output: reported as a contradiction.) A usage
-// error (exit 2) may carry the rule's hint, `hint: mashctl <command> --help`, which the specification's texts leave out.
-// A case whose text is an excerpt (doctor's "A problem" shows the failing row, not all six) is matched as an ordered
-// subsequence of lines.
+// How the specification's stream is read (rules.json, "Where a hint is printed"): at a shell every `hint:` line goes to
+// stderr, whatever stream the rest uses. So the text of a case is split into its hint lines and the rest; the rest is
+// compared exactly with the case's stream, the hint lines exactly with stderr (when the case's stream is stderr the
+// hint is simply the tail of the same text). A usage error (exit 2) carries the rule's hint, `hint: mashctl <command>
+// --help`, which the specification's texts may leave out. A case's text is the whole output.
 
 import (
 	"context"
@@ -159,11 +157,10 @@ func (w *confWorld) messages(addr string, n int) {
 func inTmp(t *testing.T) { t.Helper(); t.Chdir(t.TempDir()) }
 
 // confOutRun is what a case runner returns: what was run, which substitutions turn the specification's text into the
-// test's (old, new pairs), and whether the specification's text is an excerpt.
+// test's (old, new pairs).
 type confOutRun struct {
-	ran     confRan
-	subs    []string
-	excerpt bool
+	ran  confRan
+	subs []string
 }
 
 // confOutputRunners: key is "<command> <case>". A case not here and not in confUnchecked fails.
@@ -222,7 +219,7 @@ func init() {
 		if _, err := w.adm.EnsureInbox(w.ctx, a); err != nil { // an inbox with no endpoint record
 			t.Fatal(err)
 		}
-		return confOutRun{ran: w.run("doctor"), subs: urlSub(w), excerpt: true}
+		return confOutRun{ran: w.run("doctor"), subs: urlSub(w)}
 	})
 
 	reg("limits show Limits", func(t *testing.T) confOutRun {
@@ -412,22 +409,6 @@ func confPattern(text string) string {
 	return b.String()
 }
 
-// confSubsequence reports whether every line of want is in got, in order.
-func confSubsequence(got, want string) bool {
-	g := strings.Split(strings.TrimSuffix(got, "\n"), "\n")
-	i := 0
-	for _, w := range strings.Split(strings.TrimSuffix(want, "\n"), "\n") {
-		for i < len(g) && !regexp.MustCompile("^"+confPattern(w)+"$").MatchString(g[i]) {
-			i++
-		}
-		if i == len(g) {
-			return false
-		}
-		i++
-	}
-	return true
-}
-
 // confOutputProblems compares a case's run with the specification: exact text on its stream, and on the other stream
 // only what the rules above allow, and the exit code.
 func confOutputProblems(path string, oc confOutCase, r confOutRun) []string {
@@ -439,11 +420,15 @@ func confOutputProblems(path string, oc confOutCase, r confOutRun) []string {
 	if oc.Stream == "stderr" {
 		wantErr = text
 	} else {
-		lines := strings.Split(text, "\n")
-		if n := len(lines); n > 0 && strings.HasPrefix(lines[n-1], "hint: ") && strings.Contains(oc.Case, "the hint on stderr") {
-			wantErr, lines = lines[n-1], lines[:n-1]
+		var rest, hints []string
+		for _, l := range strings.Split(text, "\n") {
+			if strings.HasPrefix(l, "hint: ") {
+				hints = append(hints, l)
+			} else {
+				rest = append(rest, l)
+			}
 		}
-		wantOut = strings.Join(lines, "\n")
+		wantOut, wantErr = strings.Join(rest, "\n"), strings.Join(hints, "\n")
 	}
 	var p []string
 	if r.ran.code != oc.Exit {
@@ -456,18 +441,12 @@ func confOutputProblems(path string, oc confOutCase, r confOutRun) []string {
 			}
 			return
 		}
-		if r.excerpt {
-			if !confSubsequence(got, want) {
-				p = append(p, fmt.Sprintf("%s: want the lines %q in order, got %q", stream, want, got))
-			}
-			return
-		}
 		if !regexp.MustCompile("^" + confPattern(want) + "\n$").MatchString(got) {
 			p = append(p, fmt.Sprintf("%s: want %q, got %q", stream, want+"\n", got))
 		}
 	}
 	gotErr := r.ran.errs
-	if oc.Exit == 2 && oc.Stream == "stderr" && !strings.Contains(wantErr, "\nhint: ") {
+	if oc.Exit == 2 && !strings.Contains(wantErr, "hint: ") {
 		// a usage error carries the hint of its command's help (rules.json), which the case's text leaves out
 		gotErr = strings.TrimSuffix(gotErr, "hint: mashctl "+path+" --help\n")
 	}

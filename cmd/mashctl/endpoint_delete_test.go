@@ -85,9 +85,9 @@ func TestEndpointDeleteNoTerminalAndNoYesIsUsage(t *testing.T) {
 	noTerminal(t)
 	for _, extra := range [][]string{nil, {"--json"}} {
 		out, errb, code := h.run(append([]string{"endpoint", "delete", "o.g.q"}, extra...)...)
-		wantOut, wantErr := "", "error: deleting needs a terminal to confirm, or --yes\n"
+		wantOut, wantErr := "", "error: deleting needs a terminal to confirm, or --yes\nhint: mashctl endpoint delete --help\n"
 		if len(extra) > 0 {
-			wantOut, wantErr = `{"error":"deleting needs a terminal to confirm, or --yes"}`+"\n", ""
+			wantOut, wantErr = `{"error":"deleting needs a terminal to confirm, or --yes","hint":"mashctl endpoint delete --help"}`+"\n", ""
 		}
 		if code != 2 || out != wantOut || errb != wantErr {
 			t.Errorf("%v: %d %q %q", extra, code, out, errb)

@@ -77,7 +77,7 @@ type deletePlanJSON struct {
 // before anything changes. The question goes to prompt (stderr with --json, so stdout stays one object).
 func confirmDelete(prompt io.Writer, addr sap.Address, messages uint64) error {
 	if !stdinIsTerminal() {
-		return cliframe.Usagef("deleting needs a terminal to confirm, or --yes")
+		return cliframe.Usagef("deleting needs a terminal to confirm, or --yes").WithHint("mashctl endpoint delete --help")
 	}
 	fmt.Fprintf(prompt, "This deletes %s and %s. It cannot be undone.\nType the address to confirm: ", addr, inboxWords(messages))
 	line, err := bufio.NewReader(confirmStdin()).ReadString('\n')
