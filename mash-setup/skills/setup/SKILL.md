@@ -257,5 +257,6 @@ its own copies in `~/.config/mash`.
 | `sha256sum: ... FAILED` | the download is not the release's file | stop; do not run it; ask |
 | the script used port 4223 | 4222 is taken, often by a packaged nats-server service | fine; leave that service alone |
 | `error: the server did not answer` | the server is not running | `mash-local-nats-setup.sh --start` (day-2 skill) |
+| `error: the server did not come up` on a Mac | another user may hold the port: macOS shows you only your own listeners | ask the person to try another folder or free the port; do not stop it |
 | `mash: command not found` after install | the install folder is not on the PATH | use the full path from the install line; the person adds it |
 | mail does not arrive in a session | the session started before the plugin was installed | restart that session |
