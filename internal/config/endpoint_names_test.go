@@ -284,3 +284,55 @@ func TestFlagProvenance(t *testing.T) {
 		t.Errorf("Source %v", c.Source)
 	}
 }
+
+// An explicitly set creds path (MASH_CREDS or config.json "creds") stops the auto-pick: the address must not come from
+// one installed file while the creds are another's.
+func TestExplicitCredsPathSkipsTheAutoPick(t *testing.T) {
+	home := t.TempDir()
+	installCreds(t, home, "bob.dev.design.creds", 0o600)
+	for name, tc := range map[string]struct {
+		file string
+		env  map[string]string
+	}{
+		"env":  {`{"servers":"tls://x:1"}`, map[string]string{"MASH_CREDS": "/elsewhere/alice.creds"}},
+		"file": {`{"servers":"tls://x:1","creds":"/elsewhere/alice.creds"}`, nil},
+	} {
+		writeFile(t, home, tc.file)
+		c, err := load(envOf(tc.env), home)
+		if err != nil || c.Name != "" || c.Owner != "" || !c.Inert() || c.Source["endpoint"] != "unset" || c.Creds != "/elsewhere/alice.creds" {
+			t.Errorf("%s: %+v %v", name, c, err)
+		}
+	}
+	// Several installed endpoints with an explicit creds path are no error either.
+	installCreds(t, home, "carol.dev.review.creds", 0o600)
+	writeFile(t, home, `{"servers":"tls://x:1"}`)
+	if c, err := load(envOf(map[string]string{"MASH_CREDS": "/e/a.creds"}), home); err != nil || !c.Inert() {
+		t.Errorf("several: %+v %v", c, err)
+	}
+	// An explicit endpoint still wins and is not changed by the creds path.
+	if c, err := load(envOf(map[string]string{"MASH_CREDS": "/e/a.creds", "MASH_ENDPOINT": "alice.dev.x"}), home); err != nil || c.Name != "x" || c.Creds != "/e/a.creds" {
+		t.Errorf("explicit endpoint: %+v %v", c, err)
+	}
+}
+
+// ExplicitOwner is the owner of a set endpoint, else config.json "owner", and never an installed endpoint's.
+func TestExplicitOwnerNeverComesFromInstalledCreds(t *testing.T) {
+	home := t.TempDir()
+	installCreds(t, home, "bob.dev.design.creds", 0o600)
+	writeFile(t, home, `{"servers":"tls://x:1"}`)
+	c, err := load(envOf(nil), home)
+	if err != nil || c.Owner != "bob" || c.ExplicitOwner != "" {
+		t.Fatalf("auto-pick: %+v %v", c, err)
+	}
+	writeFile(t, home, `{"servers":"tls://x:1","owner":"acme"}`)
+	if c, err = load(envOf(nil), home); err != nil || c.Owner != "bob" || c.ExplicitOwner != "acme" {
+		t.Fatalf("owner key: %+v %v", c, err)
+	}
+	writeFile(t, home, `{"servers":"tls://x:1","owner":"acme","endpoint":"carol.dev.x"}`)
+	if c, err = load(envOf(nil), home); err != nil || c.Owner != "carol" || c.ExplicitOwner != "carol" {
+		t.Fatalf("file endpoint beats the owner key: %+v %v", c, err)
+	}
+	if c, err = load(envOf(map[string]string{"MASH_ENDPOINT": "dave.dev.x"}), home); err != nil || c.ExplicitOwner != "dave" {
+		t.Fatalf("env endpoint: %+v %v", c, err)
+	}
+}

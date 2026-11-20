@@ -139,7 +139,7 @@ func runAdopt(args []string, env func(string) string, lookup config.Lookup, stdo
 		owner = cfg.Owner
 	}
 	if owner == "" {
-		return fail("no owner: pass --owner O (or set MASH_ENDPOINT)")
+		return fail("no owner: pass --owner O (or set \"owner\" in config.json, or MASH_ENDPOINT)")
 	}
 	if !config.ValidName(owner) {
 		return fail("owner %q is not a valid name: use lower-case letters, digits and single hyphens, starting with a letter, up to 48 characters", owner)
@@ -402,7 +402,7 @@ func runAdopt(args []string, env func(string) string, lookup config.Lookup, stdo
 		step("minted the mashadmin user and wrote %s (0600)", st.adminDst)
 	}
 
-	settings := map[string]string{"servers": o.server}
+	settings := map[string]string{"servers": o.server, "owner": owner}
 	if adminPath != "" {
 		settings["admin_creds"] = adminPath
 	}
@@ -467,7 +467,7 @@ func already(have bool) string {
 
 func settingsText(m map[string]string) string {
 	var parts []string
-	for _, k := range []string{"servers", "admin_creds", "insecure_plaintext", "ca", "tls_cert", "tls_key"} {
+	for _, k := range []string{"servers", "owner", "admin_creds", "insecure_plaintext", "ca", "tls_cert", "tls_key"} {
 		if v, ok := m[k]; ok {
 			parts = append(parts, fmt.Sprintf("%q: %s", k, jsonValue(k, v)))
 		}
@@ -479,7 +479,7 @@ func configJSON(m map[string]string) []byte {
 	var b bytes.Buffer
 	b.WriteString("{\n")
 	var parts []string
-	for _, k := range []string{"servers", "admin_creds", "insecure_plaintext", "ca", "tls_cert", "tls_key"} {
+	for _, k := range []string{"servers", "owner", "admin_creds", "insecure_plaintext", "ca", "tls_cert", "tls_key"} {
 		if v, ok := m[k]; ok {
 			parts = append(parts, fmt.Sprintf("  %q: %s", k, jsonValue(k, v)))
 		}

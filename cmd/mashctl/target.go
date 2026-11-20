@@ -44,7 +44,11 @@ func announceTarget(cfg config.Config, env func(string) string, stderr io.Writer
 		line = "mashctl: target server unset"
 	}
 	if cfg.Owner != "" {
-		line += ", owner " + cfg.Owner + " (from " + sourceText(cfg, "endpoint") + ")"
+		ownerSrc := sourceText(cfg, "endpoint")
+		if src := cfg.Source["endpoint"]; src == "unset" || src == "installed creds" {
+			ownerSrc = `config.json "owner"` // no endpoint is set: the owner key gave it
+		}
+		line += ", owner " + cfg.Owner + " (from " + ownerSrc + ")"
 	} else {
 		line += ", owner unset"
 	}
@@ -67,10 +71,10 @@ func announceTarget(cfg config.Config, env func(string) string, stderr io.Writer
 	}
 	fmt.Fprintln(stderr, line)
 
-	// The override warning names the endpoint session the shell may be inside, so it is given only when an endpoint
-	// launch token is set (MASH_ENDPOINT cannot tell: mashctl takes its owner from it too). A central host sets none, and
-	// its MASH_SERVER list is meant.
-	inSession := env("MASH_LAUNCH_TOKEN") != ""
+	// The override warning names the endpoint session the shell may be inside, so it is given when an endpoint launch
+	// token is set, or when MASH_ENDPOINT comes from the environment while config.json names servers (the shell's
+	// endpoint is not the one config.json describes). A central host sets neither, and its MASH_SERVER list is meant.
+	inSession := env("MASH_LAUNCH_TOKEN") != "" || (cfg.Source["endpoint"] == config.SourceKeys["endpoint"] && cfg.FileValues["servers"] != "")
 	for _, key := range []string{"servers", "endpoint", "admin_creds", "ca"} {
 		if !inSession {
 			break

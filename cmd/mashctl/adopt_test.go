@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
@@ -163,7 +164,7 @@ func TestAdoptDryRunThenRealRunThenAdd(t *testing.T) {
 		}
 	}
 	cj, _ := os.ReadFile(filepath.Join(a.env["MASH_CONFIG_DIR"], "config.json"))
-	for _, want := range []string{e.srv.ClientURL(), `"servers": [`, filepath.Join(srvDir, "mashadmin.creds")} {
+	for _, want := range []string{e.srv.ClientURL(), `"servers": [`, `"owner": "alice"`, filepath.Join(srvDir, "mashadmin.creds")} {
 		if !strings.Contains(string(cj), want) {
 			t.Errorf("config.json lacks %q:\n%s", want, cj)
 		}
@@ -181,7 +182,6 @@ func TestAdoptDryRunThenRealRunThenAdd(t *testing.T) {
 		t.Fatalf("mashadmin creds do not connect: %v", err)
 	}
 	nc.Close()
-	a.env["MASH_ENDPOINT"] = "alice.dev.x" // adopt writes no owner: mashctl takes it from the endpoint
 	out, errb, code = a.run("init")
 	if code != 0 {
 		t.Fatalf("mashctl init from the adopted config: %d\n%s\n%s", code, out, errb)
@@ -616,4 +616,28 @@ func TestAdoptFailsWhenTheServerCouldNotEnableJetStream(t *testing.T) {
 		}
 	}
 	sameTree(t, before, tree(t, a.root))
+}
+
+// adopt's --server is its own target, not the global server option, and a global --endpoint on the same line works with it.
+func TestAdoptTakesItsOwnServerNextToGlobalFlags(t *testing.T) {
+	e := newApplyEnv(t)
+	a := newAdopter(t, e)
+	out, errb, code := a.run("adopt", "--endpoint", "carol.dev.x", "--server", e.srv.ClientURL(), "--account", "MASH",
+		"--operator-key", a.opSeed, "--account-key", a.acSeed, "--sys-creds", a.sys, "--mint-admin")
+	if code != 0 {
+		t.Fatalf("adopt: %d\n%s\n%s", code, out, errb)
+	}
+	var cfg struct {
+		Servers []string `json:"servers"`
+		Owner   string   `json:"owner"`
+	}
+	if err := json.Unmarshal(mustRead(t, filepath.Join(a.env["MASH_CONFIG_DIR"], "config.json")), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Servers) != 1 || cfg.Servers[0] != e.srv.ClientURL() {
+		t.Errorf("config.json servers %v, want [%s] (the adopt --server value)", cfg.Servers, e.srv.ClientURL())
+	}
+	if cfg.Owner != "carol" {
+		t.Errorf("config.json owner %q, want carol (from the global --endpoint)", cfg.Owner)
+	}
 }

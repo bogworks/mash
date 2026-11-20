@@ -81,13 +81,13 @@ func TestAnnounceEnvOverFileWarnsWithBothValues(t *testing.T) {
 	}
 }
 
-// A central host sets no launch token: its MASH_SERVER over config.json is meant, and the warning about the endpoint
-// session does not apply.
+// A central host sets no launch token and no MASH_ENDPOINT: its MASH_SERVER over config.json is meant, and the warning
+// about the endpoint session does not apply.
 func TestAnnounceEnvOverFileNoWarningWithoutALaunchToken(t *testing.T) {
 	cfg, env := loadCfg(t, `{"servers":"tls://file:4222","endpoint":"fo.dev.x"}`,
-		map[string]string{"MASH_SERVER": "tls://a:4222,tls://b:4222", "MASH_ENDPOINT": "eo.dev.x"})
+		map[string]string{"MASH_SERVER": "tls://a:4222,tls://b:4222"})
 	got := announced(cfg, env, nil)
-	if strings.Contains(got, "warning") || strings.Contains(got, "endpoint session") {
+	if strings.Contains(got, "endpoint session") {
 		t.Errorf("warned on a central host:\n%s", got)
 	}
 	if !strings.Contains(got, "target server tls://a:4222,tls://b:4222 (from MASH_SERVER)") {
@@ -123,6 +123,33 @@ func TestAnnounceSessionVariablesAddTheWarning(t *testing.T) {
 	cfg, env := loadCfg(t, `{"servers":"tls://file:4222","endpoint":"o.dev.x"}`, map[string]string{"MASH_ENDPOINT": "o.dev.x"})
 	if got := announced(cfg, env, nil); strings.Contains(got, "warning") {
 		t.Errorf("url from the file:\n%s", got)
+	}
+}
+
+// MASH_ENDPOINT (from the environment or the --endpoint flag) is not a sign of a mash session: only the launch token is.
+// The session warning fires on a launch token, and when MASH_ENDPOINT comes from the environment while config.json
+// names servers; it stays quiet for a central host (no token, no endpoint in the environment, or none in config.json).
+func TestAnnounceSessionWarningKeysOnTheLaunchTokenOrAnEnvEndpointOverAFileWithServers(t *testing.T) {
+	const file = `{"servers":"tls://file:4222","endpoint":"fo.dev.x"}`
+	warned := func(got string) bool {
+		return strings.Contains(got, "inside a mash session") || strings.Contains(got, "belong to the endpoint session")
+	}
+	for name, c := range map[string]struct {
+		file string
+		env  map[string]string
+		want bool
+	}{
+		"endpoint env, servers in file":    {file, map[string]string{"MASH_ENDPOINT": "eo.dev.x"}, true},
+		"endpoint env and server env":      {file, map[string]string{"MASH_ENDPOINT": "eo.dev.x", "MASH_SERVER": "tls://env:4222"}, true},
+		"launch token":                     {file, map[string]string{"MASH_LAUNCH_TOKEN": "t", "MASH_SERVER": "tls://env:4222"}, true},
+		"endpoint env, no servers in file": {`{"endpoint":"fo.dev.x"}`, map[string]string{"MASH_ENDPOINT": "eo.dev.x", "MASH_SERVER": "tls://env:4222"}, false},
+		"central host: server env only":    {file, map[string]string{"MASH_SERVER": "tls://env:4222"}, false},
+		"endpoint only in file, no env":    {file, map[string]string{}, false},
+	} {
+		cfg, getenv := loadCfg(t, c.file, c.env)
+		if got := announced(cfg, getenv, nil); warned(got) != c.want {
+			t.Errorf("%s: warned=%v, want %v:\n%s", name, warned(got), c.want, got)
+		}
 	}
 }
 

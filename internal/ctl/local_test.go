@@ -121,7 +121,7 @@ func TestInitLocalLeavesExistingConfig(t *testing.T) {
 	if b, _ := os.ReadFile(cfgPath); string(b) != "{}\n" {
 		t.Fatal("config.json was touched")
 	}
-	for _, want := range []string{"not touched", `"servers": ["tls://127.0.0.1:4222"]`, `MASH_ENDPOINT=carol.<group>.<name>`, "admin_creds", `"ca"`} {
+	for _, want := range []string{"not touched", `"servers": ["tls://127.0.0.1:4222"]`, `"owner": "carol"`, "admin_creds", `"ca"`} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}
@@ -188,7 +188,7 @@ func TestInitLocalStartWithoutServerBinary(t *testing.T) {
 func TestPlainInitIsUnchanged(t *testing.T) {
 	e := newLocalEnv(t)
 	code, _, errs := e.run("init")
-	if code != 1 || !strings.Contains(errs, "no endpoint") {
+	if code != 1 || !strings.Contains(errs, "no owner") {
 		t.Fatalf("plain init: %d %s", code, errs)
 	}
 	e.cfg.Owner = "alice"
@@ -232,7 +232,7 @@ func TestInitLocalStartConfigElsewhere(t *testing.T) {
 			if code != 0 {
 				t.Fatalf("exit %d: %s", code, errs)
 			}
-			for _, want := range []string{"points elsewhere", `"servers": ["tls://127.0.0.1:4222"]`, `MASH_ENDPOINT=alice.<group>.<name>`, "admin_creds", `"ca"`, "MASH_SERVER"} {
+			for _, want := range []string{"points elsewhere", `"servers": ["tls://127.0.0.1:4222"]`, `"owner": "alice"`, "admin_creds", `"ca"`, "MASH_SERVER"} {
 				if !strings.Contains(out, want) {
 					t.Errorf("output lacks %q:\n%s", want, out)
 				}

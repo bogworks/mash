@@ -36,8 +36,11 @@ const (
 
 // Config is the resolved configuration for one process.
 type Config struct {
-	URL             string        // the server address, or the comma-joined list of them (MASH_SERVER / "servers")
-	Owner           string        // SAP owner token: the owner part of the endpoint address
+	URL   string // the server address, or the comma-joined list of them (MASH_SERVER / "servers")
+	Owner string // SAP owner token: the owner part of the endpoint address (from the one installed endpoint too)
+	// ExplicitOwner is the owner mashctl acts for: the owner part of an endpoint that was set (--endpoint, MASH_ENDPOINT,
+	// config.json "endpoint"), else config.json "owner". It is never taken from an installed endpoint's creds file.
+	ExplicitOwner   string
 	StateDir        string        // $MASH_STATE_DIR, else $XDG_STATE_HOME/mash, else ~/.local/state/mash: holds spool/ and hook.log
 	Name            string        // the endpoint's instance token: the name part of the endpoint address; empty = inert
 	Group           string        // the endpoint's group token: the group part of the endpoint address; no default
@@ -95,6 +98,7 @@ const FlagSourcePrefix = "\x00flag:"
 
 type file struct {
 	Endpoint   string          `json:"endpoint"` // owner.group.name
+	Owner      string          `json:"owner"`    // read by mashctl only (until init --config lands): the owner it acts for
 	Servers    json.RawMessage `json:"servers"`  // a JSON array of strings, or one string (a comma list)
 	Creds      string          `json:"creds"`
 	SettleMS   *int            `json:"settle_ms"`
@@ -450,6 +454,9 @@ func Load(lookup Lookup, home string) (Config, error) {
 	if l := splitServers(env("MASH_SERVER")); len(l) > 0 {
 		c.URL = strings.Join(l, ",")
 	}
+	str(&c.Creds, "MASH_CREDS")
+	str(&c.AdminCreds, "MASH_ADMIN_CREDS")
+	c.Creds, c.AdminCreds = ExpandHome(c.Creds, home), ExpandHome(c.AdminCreds, home)
 	// The endpoint: MASH_ENDPOINT, else config.json "endpoint", else the one installed endpoint (the creds file named for
 	// it in the config directory). An address that does not parse fails Load after the rest is resolved.
 	endpoint, endpointSetting := env("MASH_ENDPOINT"), "MASH_ENDPOINT"
@@ -458,30 +465,32 @@ func Load(lookup Lookup, home string) (Config, error) {
 	}
 	var endpointErr error
 	autoPicked := false
+	c.ExplicitOwner = f.Owner
 	switch {
 	case endpoint != "":
 		if a, err := sap.ParseAddress(endpoint); err != nil {
 			endpointErr = fmt.Errorf("mash: %s: %w", endpointSetting, err)
 		} else {
 			c.Owner, c.Group, c.Name = a.Owner, a.Group, a.Instance
+			c.ExplicitOwner = a.Owner
 		}
+	case c.Creds != "":
+		// A creds path was set (--creds, MASH_CREDS, "creds"): installed creds must not pick the address, or one
+		// endpoint's address would be signed with another's creds.
 	default:
 		switch found := installedEndpoints(dir); len(found) {
 		case 0:
 		case 1:
+			autoPicked = true
 			if a, err := sap.ParseAddress(found[0]); err != nil {
 				endpointErr = fmt.Errorf("mash: the installed endpoint %s: %w", found[0], err)
 			} else {
 				c.Owner, c.Group, c.Name = a.Owner, a.Group, a.Instance
-				autoPicked = true
 			}
 		default:
 			endpointErr = &SeveralEndpointsError{Addresses: found}
 		}
 	}
-	str(&c.Creds, "MASH_CREDS")
-	str(&c.AdminCreds, "MASH_ADMIN_CREDS")
-	c.Creds, c.AdminCreds = ExpandHome(c.Creds, home), ExpandHome(c.AdminCreds, home)
 	c.recordSources(f, fileServers, lookup, home, autoPicked)
 	str(&c.LaunchToken, "MASH_LAUNCH_TOKEN")
 	str(&c.Host, "MASH_HOST")

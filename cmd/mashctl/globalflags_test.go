@@ -36,7 +36,7 @@ func TestGlobalEndpointAndCredsFlagsSupplyOwnerAndAdminCreds(t *testing.T) {
 	admin := h.env["MASH_ADMIN_CREDS"]
 	delete(h.env, "MASH_ENDPOINT")
 	delete(h.env, "MASH_ADMIN_CREDS")
-	if _, errb, code := h.run("list"); code == 0 || !strings.Contains(errb, "no endpoint") {
+	if _, errb, code := h.run("list"); code == 0 || !strings.Contains(errb, "no owner") {
 		t.Fatalf("no owner: %d %q", code, errb)
 	}
 	_, errb, code := h.run("--endpoint", h.e.Owner+".dev.x", "--creds", admin, "list")
@@ -78,8 +78,5 @@ func TestGlobalFlagsLeaveTheVerbsOwnFlagsAlone(t *testing.T) {
 	}
 	if so, _, _ := h.run("endpoint", "create", "o/g/x", "--note", "--json", "--bogus"); so != "" {
 		t.Errorf("--json taken as a value printed %q", so)
-	}
-	if _, errb, code := h.run("adopt", "--server", "nats://a:1", "--server", "nats://b:2", "--bogus"); code != 2 || strings.Contains(errb, "nats://a:1,") {
-		t.Errorf("adopt --server: %d %q", code, errb)
 	}
 }

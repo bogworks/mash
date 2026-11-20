@@ -12,11 +12,23 @@ import (
 // config.Load. There is no stored group; an endpoint's address is given on the command line. lookup is what
 // config.Load reads; main passes os.LookupEnv.
 //
-// mashctl acts as no endpoint (its owner comes from the owner part of MASH_ENDPOINT, nothing else of it is used), so
+// mashctl acts as no endpoint (its owner is the owner part of an explicit endpoint, else config.json "owner"; never an installed endpoint's), so
 // a group-less address, several installed endpoints (mashctl never picks one) and a missing config directory for the
 // endpoint's default creds path are not errors here, and the config is returned as loaded.
 func loadConfig(env func(string) string, lookup config.Lookup) (config.Config, error) {
 	cfg, err := config.Load(lookup, env("HOME"))
+	if errors.Is(err, config.ErrNoURL) || errors.Is(err, config.ErrNoOwner) {
+		err = nil // mashctl acts as no endpoint: the verbs that need a server say so themselves (adopt has its own --server)
+	}
+	if cfg.Source["endpoint"] == "installed creds" {
+		// An installed endpoint's creds file is the endpoint tool's business: mashctl neither takes its owner from it nor
+		// fails because of it.
+		if errors.Is(err, config.ErrNoConfigDir) {
+			err = nil
+		}
+		cfg.Owner, cfg.Group, cfg.Name = "", "", ""
+	}
+	cfg.Owner = cfg.ExplicitOwner // mashctl's owner: an explicit endpoint's, else config.json "owner"
 	if errors.Is(err, config.ErrGroupMissing) || errors.Is(err, config.ErrSeveralEndpoints) {
 		err = nil // mashctl acts as no endpoint: several installed endpoints do not stop it
 	}

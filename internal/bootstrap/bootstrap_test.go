@@ -238,7 +238,7 @@ func TestConfigIsWritten(t *testing.T) {
 		t.Fatal("a policy file was written: the policy file is gone")
 	}
 	cfg, err := os.ReadFile(s.cfgPath)
-	if err != nil || !strings.Contains(string(cfg), `"tls://127.0.0.1:4222"`) || !strings.Contains(string(cfg), s.pl.Creds) || !strings.Contains(string(cfg), `"ca": "`+filepath.Join(s.serverDir, "ca.pem")+`"`) || strings.Contains(string(cfg), "insecure_loopback") {
+	if err != nil || !strings.Contains(string(cfg), `"tls://127.0.0.1:4222"`) || !strings.Contains(string(cfg), `"owner": "alice"`) || !strings.Contains(string(cfg), s.pl.Creds) || !strings.Contains(string(cfg), `"ca": "`+filepath.Join(s.serverDir, "ca.pem")+`"`) || strings.Contains(string(cfg), "insecure_loopback") {
 		t.Fatalf("config.json: %s %v", cfg, err)
 	}
 	// The written config.json is one mash loads.

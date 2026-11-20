@@ -65,7 +65,7 @@ func runInitLocal(prog string, cfg config.Config, args []string, stdout, stderr 
 		owner = cfg.Owner
 	}
 	if owner == "" {
-		return fail(errors.New(pfx + ": init --local needs an owner: pass --owner O (or set MASH_ENDPOINT)"))
+		return fail(errors.New(pfx + ": init --local needs an owner: pass --owner O (or set \"owner\" in config.json, or MASH_ENDPOINT)"))
 	}
 	if !config.ValidName(owner) {
 		return fail(fmt.Errorf("%s: owner %q is not a valid name: use lower-case letters, digits and single hyphens, starting with a letter, up to 48 characters", pfx, owner))
@@ -113,7 +113,7 @@ func runInitLocal(prog string, cfg config.Config, args []string, stdout, stderr 
 		fmt.Fprintf(stdout, "  config          %s\n", pl.Config.Path)
 	} else {
 		fmt.Fprintf(stdout, "  config          %s exists and was not touched; add to it:\n", orNone(p.ConfigPath))
-		fmt.Fprintf(stdout, "    \"servers\": [%q], \"admin_creds\": %q, \"ca\": %q, and MASH_ENDPOINT=%s.<group>.<name>\n", pl.URL, pl.Creds, pl.CA, owner)
+		fmt.Fprintf(stdout, "    \"servers\": [%q], \"owner\": %q, \"admin_creds\": %q, \"ca\": %q\n", pl.URL, owner, pl.Creds, pl.CA)
 	}
 
 	// Later commands use the loaded configuration (or, when this run wrote config.json, what that file now says,
@@ -143,8 +143,8 @@ func runInitLocal(prog string, cfg config.Config, args []string, stdout, stderr 
 	if elsewhere {
 		fmt.Fprintf(stdout, "\nthe local server is running, but your configuration points elsewhere\n")
 		fmt.Fprintf(stdout, "  %s commands use servers %q, admin_creds %q, owner %q (from config.json or MASH_* variables),\n  not this server, and will keep using that other server until you set these:\n", prog, config.RedactURL(cfg.URL), cfg.AdminCreds, cfg.Owner)
-		fmt.Fprintf(stdout, "    \"servers\": [%q], \"admin_creds\": %q, \"ca\": %q, and MASH_ENDPOINT=%s.<group>.<name>\n", pl.URL, pl.Creds, pl.CA, owner)
-		fmt.Fprintf(stdout, "  (or MASH_SERVER, MASH_ADMIN_CREDS, MASH_CA)\n")
+		fmt.Fprintf(stdout, "    \"servers\": [%q], \"owner\": %q, \"admin_creds\": %q, \"ca\": %q\n", pl.URL, owner, pl.Creds, pl.CA)
+		fmt.Fprintf(stdout, "  (or MASH_SERVER, MASH_ENDPOINT, MASH_ADMIN_CREDS, MASH_CA)\n")
 		return 0
 	}
 	fmt.Fprintf(stdout, "\nReady: the local server is up at %s. Create an endpoint with: mashctl endpoint create %s/dev/design --make-key   (it writes the creds file; to make the key on the endpoint's machine instead, see: mashctl endpoint create --help)\n", pl.URL, owner)
