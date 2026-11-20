@@ -215,7 +215,7 @@ case1() { # root refused
     chk "root with --dir: exit 1" rc_is 1
     run --stop
     chk "root --stop: exit 1" rc_is 1
-    ROUTE=file; run --owner acme
+    ROUTE="file"; run --owner acme
     chk "root, file route: exit 1" rc_is 1
     after=$(find "$H" -mindepth 0 2>/dev/null | sort | cksum)
     chk "root: nothing created ($H unchanged)" [ "$before" = "$after" ]
@@ -253,7 +253,7 @@ case2() { # missing tools, hidden by PATH
     chk "none: hints mention brew" hasre "$W/err" '^hint: .*brew.*brew.*brew'
     chk "none: hint names the natscli GitHub releases URL" \
         has "$W/err" 'https://github.com/nats-io/natscli/releases'
-    ROUTE=file
+    ROUTE="file"
     PRE=(env "PATH=$P"); run --owner acme
     chk "none, file route: exit 1" rc_is 1
     chk "none, file route: same error line" hasx "$W/err" 'error: missing: nats-server, nats, openssl'
@@ -287,7 +287,7 @@ case4() { # success, both routes
     homelist "$d" >"$W/home.after"
     chk "nothing created in \$HOME beyond the dir" cmp -s "$W/home.before" "$W/home.after"
     chk "the default dir is \$HOME/mash-nats and made" [ -d "$d" ]
-    ROUTE=file; run --owner acme --dir "$d2"
+    ROUTE="file"; run --owner acme --dir "$d2"
     check_success "$d2" acme
     chk "the second server took another port" [ "$(port_of "$d")" != "$(port_of "$d2")" ]
     stopdir "$d"; stopdir "$d2"
@@ -364,7 +364,7 @@ case6() { # the server works
 
 case7() { # --stop / --start
     local d=$H/mash-nats p0 p1 p2
-    ROUTE=file
+    ROUTE="file"
     run --owner acme
     chk "setup ran" rc_is 0
     p=$(port_of "$d"); p0=$(pid_of "$d")
@@ -410,7 +410,7 @@ snap() { # DIR: names and checksums of the files a failed command must not touch
 
 case8() { # argument and path checking
     local d=$H/mash-nats o n s0 s1 pid
-    ROUTE=file
+    ROUTE="file"
     run --start
     chk "--start on a missing dir: exit 1" rc_is 1
     chk "--start missing: error: no setup found" has "$W/err" "error: no setup found at $d"
@@ -494,7 +494,7 @@ case9() { # owner prompt, tty and no tty
     chk "no tty: error says no terminal" has "$W/err" 'no terminal to ask for the owner name'
     chk "no tty: hint says pass --owner" has "$W/err" 'pass --owner NAME'
     chk "no tty: nothing made" absent "$a"
-    ROUTE=file
+    ROUTE="file"
     run --dir "$a"
     chk "no --owner, no tty (file route): exit 4" rc_is 4
     chk "no tty: nothing made" absent "$a"
@@ -521,7 +521,7 @@ case9() { # owner prompt, tty and no tty
 
 case10() { # --remove
     local d=$H/mash-nats pid
-    ROUTE=file
+    ROUTE="file"
     run --owner acme
     chk "setup ran" rc_is 0
     pid=$(pid_of "$d")
@@ -576,7 +576,7 @@ case11() { # port already taken
     python3 -m http.server 4223 --bind 127.0.0.1 >"$W/dummy2.log" 2>&1 &
     NP=$!
     chk "control: a dummy on 4223 is up" waitlisten 4223
-    ROUTE=file
+    ROUTE="file"
     run --start
     chk "--start with the port taken: exit 1" rc_is 1
     chk "--start with the port taken: says port 4223 is used" has "$W/err" 'port 4223 is now used by another program'
@@ -864,6 +864,7 @@ for tag in $IMAGES; do
     MY_IMAGE_IDS+=("$id")
     bdig=$(podman image inspect --format '{{.Digest}}' "$tag" 2>/dev/null)
     brd=$(podman image inspect --format '{{index .RepoDigests 0}}' "$tag" 2>/dev/null)
+    # shellcheck disable=SC2034
     DIG[$tag]=$bdig
     IMGLINES="$IMGLINES
 - $tag: digest ${bdig:-?} (${brd:-no repo digest}); built image $img id $id"
