@@ -21,6 +21,8 @@
 # One exclusive lifecycle lock (the file DIR/.lock, holding the pid) is held
 # across the whole of create, --start, --stop and --remove, so they cannot
 # overlap; a lock whose pid is gone is taken over.
+# Two runs that take over the same stale lock at the same instant can both
+# win; that is accepted for a same-user script.
 #
 # Portability: file owner and mode come from GNU stat (-c) or BSD stat (-f),
 # found by trying `stat -c %u /` once; process checks use /proc on Linux and
@@ -375,11 +377,23 @@ start_server() { # needs PORT
     done
     if proc_alive "$SPID" && listening && verify; then return 0; fi
     echo "error: the server did not come up; last log lines:" >&2
-    tail -n 5 "$DIR/server.log" 2>/dev/null |
-        tr -d '\000' | grep -Eva 'S[OANUCX][A-Z2-7]{50,}|eyJ[A-Za-z0-9_-]{20,}|-----' |
+    _tl=$(tail -n 5 "$DIR/server.log" 2>/dev/null | tr -d '\000' || true)
+    printf '%s\n' "$_tl" |
+        grep -Eva 'S[OANUCX][A-Z2-7]{50,}|eyJ[A-Za-z0-9_-]{20,}|-----' |
         cut -c1-200 | sed 's/^/  /' >&2 || true
+    _foreign=0
+    if printf '%s\n' "$_tl" | grep -Fq 'address already in use' && ! { proc_alive "$SPID" && listening; }; then
+        _foreign=1
+    fi
     if proc_ours "$SPID"; then kill -TERM "$SPID" 2>/dev/null || true; rm -f "$DIR/server.pid"; fi
     SAID=1
+    if [ "$_foreign" = 1 ]; then
+        echo "error: port $PORT may be in use by another user (this system shows only your own listeners)" >&2
+        # the folder is kept (it has its marker), so the next step is --start in both modes
+        printf 'hint: free port %s or ask who holds it, then run %s --start again (or %s --remove to start over)\n' \
+            "$PORT" "$SELF" "$SELF" >&2
+        exit 1
+    fi
     printf 'hint: fix the cause and run %s --start, or %s --remove to start over\n' \
         "$SELF" "$SELF" >&2
     exit 1
