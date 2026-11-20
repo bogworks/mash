@@ -5,15 +5,23 @@
 #
 # Venue rules: rootless podman on this host only; one image per distro, built
 # from an official tag (debian:stable, ubuntu:24.04, ubuntu:26.04); one
-# container per case, named after the run id, no ports published, network
-# none (the loopback inside the container is all the script needs), a non-root
-# user (tester) except for the root-refusal case; nothing is installed on the
-# host.  On exit (also on failure) it removes only this run's containers, by
-# name, this run's images, by recorded id, and its build directory.
+# container per case and mode, named after the run id, no ports published,
+# network none (the loopback inside the container is all the script needs), a
+# non-root user (tester) except for the root-refusal case; nothing is installed
+# on the host.  On exit (also on failure) it removes only this run's containers,
+# by name, this run's images, by recorded id, and its build directory.
+#
+# Two modes per image: "linux" (the script as it runs on Linux) and "darwin"
+# (MLNT_UNAME=Darwin, so the script takes its macOS branches, with shims on PATH
+# that behave like the BSD tools: a stat that rejects -c and takes -f, no ss and
+# a lsof on top of it, a ps and a readlink that reject GNU-only flags, shasum
+# instead of sha256sum).  That proves the BSD branches run and use no GNU-only
+# flag; it does not prove they work with the real macOS tools.
 #
 # Environment:
 #   MLNT_IMAGES   space-separated image tags (default: debian:stable ubuntu:24.04 ubuntu:26.04)
-#   MLNT_CASES    space-separated case numbers (default: 1 2 ... 22)
+#   MLNT_CASES    space-separated case numbers (default: 1 2 ... 25)
+#   MLNT_MODES    space-separated modes (default: linux darwin)
 #   MLNT_REPORT   receipt file (markdown; default: receipt-<run id>.md in the scratch
 #                 directory, or in ${TMPDIR:-/tmp} when the scratch directory is made here)
 #   MLNT_SCRATCH  scratch directory (default: a new mktemp -d under ${TMPDIR:-/tmp},
@@ -32,10 +40,19 @@ set -u
 SCRIPT=/t/mash-local-nats-setup.sh
 CASE=$1
 H=${HOME:?}
-W=$(mktemp -d /tmp/w.XXXXXX)
+W=$(mktemp -d "${TMPDIR:-/tmp}/w.XXXXXX")
 ROUTE=pipe
 PRE=()
 RC=0
+SIM=${MLNT_SIM:-}          # "darwin": the shimmed, BSD-like PATH is set up below
+REALSS=$(command -v ss)
+REALSTAT=$(command -v stat)
+REALPS=$(command -v ps)
+REALREADLINK=$(command -v readlink)
+REALSHA=$(command -v sha256sum || true)
+export REALSS REALSTAT
+SHIMS=''
+SHIMLOG=$W/shim.log
 
 ok() { printf 'ok: c%s: %s\n' "$CASE" "$1"; }
 dump() {
@@ -63,11 +80,15 @@ differs() { [ -n "$1" ] && [ "$1" != "$2" ]; }
 gone() { ! alive "$1"; }
 pid_of() { head -n 1 "$1/server.pid" 2>/dev/null; }
 port_of() { sed -n 's/^ *"port": *\([0-9]*\),*$/\1/p' "$1/mash-setup.json"; }
-listening() { ss -ltn | awk 'NR>1 {print $4}' | grep -Fxq "127.0.0.1:$1"; }
+listening() { "$REALSS" -ltn | awk 'NR>1 {print $4}' | grep -Fxq "127.0.0.1:$1"; }
 # only_listener PID PORT: every listening socket of PID is 127.0.0.1:PORT, and there is one
 only_listener() {
     local l
-    l=$(ss -ltnp | awk -v pat="pid=$1," 'index($0, pat) {print $4}' | sort -u)
+    if [ "$SIM" = darwin ]; then # through the BSD-style lsof, as on a Mac
+        l=$(lsof -a -p "$1" -iTCP -sTCP:LISTEN -nP -Fn | sed -n 's/^n//p' | sort -u)
+    else
+        l=$("$REALSS" -ltnp | awk -v pat="pid=$1," 'index($0, pat) {print $4}' | sort -u)
+    fi
     [ "$l" = "127.0.0.1:$2" ]
 }
 waitlisten() {
@@ -81,9 +102,9 @@ absent() { [ ! -e "$1" ] && [ ! -L "$1" ]; }
 
 run() { # ARGS...: the script, by the current ROUTE and PRE, with no terminal
     if [ "$ROUTE" = pipe ]; then
-        cat "$SCRIPT" | "${PRE[@]}" bash -s -- "$@" >"$W/out" 2>"$W/err"
+        cat "$SCRIPT" | "${PRE[@]+"${PRE[@]}"}" bash -s -- "$@" >"$W/out" 2>"$W/err"
     else
-        "${PRE[@]}" bash "$SCRIPT" "$@" >"$W/out" 2>"$W/err" </dev/null
+        "${PRE[@]+"${PRE[@]}"}" bash "$SCRIPT" "$@" >"$W/out" 2>"$W/err" </dev/null
     fi
     RC=$?
 }
@@ -151,14 +172,16 @@ ptyrun() { # RESP cmd...: with a terminal; RC is the command's exit status
 }
 
 # mkpath DIR EXCLUDED...: a PATH directory with symlinks to everything but EXCLUDED
+# (in the darwin mode: the BSD-like shims first, and never ss or sha256sum)
 mkpath() {
-    local d=$1 src f b x skip
+    local d=$1 src f b x skip hide=''
     shift
+    [ -z "$SHIMS" ] || hide='ss sha256sum'
     mkdir -p "$d"
-    for src in /usr/local/bin /usr/bin /usr/sbin; do
+    for src in ${SHIMS:+"$SHIMS"} /usr/local/bin /usr/bin /usr/sbin /bin /sbin; do
         for f in "$src"/*; do
             b=${f##*/}; skip=0
-            for x in "$@"; do [ "$b" = "$x" ] && skip=1; done
+            for x in "$@" $hide; do [ "$b" = "$x" ] && skip=1; done
             { [ "$skip" = 1 ] || [ -e "$d/$b" ]; } || ln -s "$f" "$d/$b"
         done
     done
@@ -212,6 +235,100 @@ homelist() { find "$H" -mindepth 1 -not -path "$1" -not -path "$1/*" | sort; }
 
 SEEDRE='(^|[^A-Z2-7])S[OANUCX][A-Z2-7]{54,}'
 JWTRE='-----BEGIN NATS USER JWT'
+
+
+# sim_setup: the darwin mode.  Shims that behave like the macOS tools, on top of
+# the real GNU ones by absolute path; every call is logged to $SHIMLOG ("OK" or
+# "REJECT"), so a case can show which flags the script used.
+sim_setup() {
+    SHIMS=$W/sims
+    mkdir -p "$SHIMS"
+    : >"$SHIMLOG"
+    cat >"$SHIMS/stat" <<SH
+#!/bin/sh
+# BSD stat: -L, -f FORMAT (%u %Lp %p); -c is an error, as on macOS
+fol=''; fmt=''
+while [ \$# -gt 0 ]; do
+    case \$1 in
+    -L) fol=-L; shift ;;
+    -f) [ \$# -ge 2 ] || break; fmt=\$2; shift 2 ;;
+    *) break ;;
+    esac
+done
+if [ -z "\$fmt" ] || [ \$# -ne 1 ]; then
+    echo "stat REJECT \$*" >>"$SHIMLOG"
+    echo "stat: illegal option or usage: \$*" >&2
+    exit 1
+fi
+echo "stat OK \$fol -f \$fmt \$1" >>"$SHIMLOG"
+case \$fmt in
+%u) exec $REALSTAT \$fol -c %u "\$1" ;;
+%Lp) exec $REALSTAT \$fol -c %a "\$1" ;;
+%p) h=\$($REALSTAT \$fol -c %f "\$1") || exit 1; printf '%o\n' "\$((0x\$h))" ;;
+*) echo "stat REJECT format \$fmt" >>"$SHIMLOG"; echo "stat: bad format" >&2; exit 1 ;;
+esac
+SH
+    cat >"$SHIMS/ps" <<SH
+#!/bin/sh
+# BSD ps: only the forms a Mac accepts and the script uses
+case "\$*" in
+"-p "[0-9]*" -o stat="|"-p "[0-9]*" -o comm="|"-ww -p "[0-9]*" -o args="|"-p "[0-9]*" -o comm=,args=")
+    echo "ps OK \$*" >>"$SHIMLOG"; exec $REALPS "\$@" ;;
+*) echo "ps REJECT \$*" >>"$SHIMLOG"; echo "ps: illegal option" >&2; exit 1 ;;
+esac
+SH
+    cat >"$SHIMS/readlink" <<SH
+#!/bin/sh
+# BSD readlink: no -f (macOS before 12.3 has none)
+case \${1:-} in -*) echo "readlink REJECT \$*" >>"$SHIMLOG"; echo "readlink: illegal option" >&2; exit 1 ;; esac
+echo "readlink OK \$*" >>"$SHIMLOG"
+exec $REALREADLINK "\$@"
+SH
+    cat >"$SHIMS/shasum" <<SH
+#!/bin/sh
+[ "\${1:-}" = -a ] && [ "\${2:-}" = 256 ] || { echo "shasum REJECT \$*" >>"$SHIMLOG"; exit 1; }
+shift 2
+exec ${REALSHA:-/usr/bin/sha256sum} "\$@"
+SH
+    cat >"$SHIMS/lsof" <<SH
+#!/bin/sh
+# BSD-ish lsof on top of ss: -n -P -iTCP[:PORT] -sTCP:LISTEN [-a -p PID] [-Fn]
+port=''; pid=''; fn=0; and=0; tcp=0; lis=0
+while [ \$# -gt 0 ]; do
+    case \$1 in
+    -n | -P | -nP | -Pn) ;;
+    -a) and=1 ;;
+    -iTCP) tcp=1 ;;
+    -iTCP:*) tcp=1; port=\${1#-iTCP:} ;;
+    -sTCP:LISTEN) lis=1 ;;
+    -Fn) fn=1 ;;
+    -p) [ \$# -ge 2 ] || exit 1; pid=\$2; shift ;;
+    *) echo "lsof REJECT \$*" >>"$SHIMLOG"; echo "lsof: unknown option \$1" >&2; exit 1 ;;
+    esac
+    shift
+done
+if [ \$tcp = 0 ] || [ \$lis = 0 ] || { [ -n "\$pid" ] && [ \$and = 0 ]; }; then
+    echo "lsof REJECT (needs -iTCP -sTCP:LISTEN, and -a with -p)" >>"$SHIMLOG"; exit 1
+fi
+echo "lsof OK port=\$port pid=\$pid F=\$fn" >>"$SHIMLOG"
+$REALSS -ltnpH 2>/dev/null | awk -v port="\$port" -v pid="\$pid" -v fn="\$fn" '
+{
+    addr = \$4; n = split(addr, a, ":"); p = a[n]; host = substr(addr, 1, length(addr) - length(p) - 1)
+    if (port != "" && p != port) next
+    pv = 0; if (match(\$0, /pid=[0-9]+/)) pv = substr(\$0, RSTART + 4, RLENGTH - 4)
+    if (pid != "" && pv != pid) next
+    if (host == "0.0.0.0" || host == "[::]") host = "*"
+    found = 1
+    if (fn) printf "p%s\nf0\nn%s:%s\n", pv, host, p
+    else printf "x %s u 0u IPv4 0 0t0 TCP %s:%s (LISTEN)\n", pv, host, p
+}
+END { exit(found ? 0 : 1) }'
+SH
+    chmod 755 "$SHIMS"/*
+    mkpath "$W/dbin"
+    export PATH="$W/dbin"
+    hash -r
+}
 
 # ---------------------------------------------------------------- cases
 case1() { # root refused
@@ -395,7 +512,10 @@ case6() { # the server works
     chk "CA: permitted IP ::1/ffff...ffff" \
         hasre "$W/catext" 'IP:0:0:0:0:0:0:0:1/FFFF:FFFF:FFFF:FFFF:FFFF:FFFF:FFFF:FFFF'
     chk "CA: nothing excluded" lacks "$W/catext" 'Excluded'
-    chk "ca.key mode is 600" [ "$(stat -c %a "$d/ca.key")" = 600 ]
+    chk "CA cert is signed with SHA-256" hasre "$W/catext" 'Signature Algorithm: ecdsa-with-SHA256'
+    chk "server cert is signed with SHA-256 (not SHA-1, which Go refuses)" \
+        hasre "$W/stext" 'Signature Algorithm: ecdsa-with-SHA256'
+    chk "ca.key mode is 600" [ "$("$REALSTAT" -c %a "$d/ca.key")" = 600 ]
     chk "openssl verifies the server cert against the CA" openssl verify -CAfile "$d/ca.pem" "$d/server.pem"
     # the CA must not vouch for anything else: sign a cert for another name with its key
     openssl req -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -subj "/CN=evil.example.com" \
@@ -622,7 +742,7 @@ case11() { # port already taken
         [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:4222/)" = 200 ]
     run --stop
     chk "dummy on 4222: our --stop leaves the dummy alone" alive "$DP"
-    chk "dummy on 4222: our server is stopped" bash -c '! ss -ltn | grep -q 127.0.0.1:4223'
+    chk "dummy on 4222: our server is stopped" bash -c '! "$REALSS" -ltn | grep -q 127.0.0.1:4223'
     python3 -m http.server 4223 --bind 127.0.0.1 >"$W/dummy2.log" 2>&1 &
     NP=$!
     chk "control: a dummy on 4223 is up" waitlisten 4223
@@ -633,7 +753,7 @@ case11() { # port already taken
     chk "--start with the port taken: no server.pid left" absent "$d/server.pid"
     chk "--start with the port taken: dummy untouched" alive "$NP"
     kill "$DP" "$NP"; wait "$DP" "$NP" 2>/dev/null
-    chk "dummies stopped by recorded pid" bash -c '! ss -ltn | grep -Eq "127.0.0.1:422[23]"'
+    chk "dummies stopped by recorded pid" bash -c '! "$REALSS" -ltn | grep -Eq "127.0.0.1:422[23]"'
     ROUTE=pipe
     nats-server -a 127.0.0.1 -p 4222 >"$W/ns.log" 2>&1 &
     NP=$!
@@ -734,7 +854,7 @@ case14() { # two dirs at once, different ports
     run --owner beta --dir "$b"; check_success "$b" beta
     pa=$(port_of "$a"); pb=$(port_of "$b")
     chk "different ports ($pa, $pb)" [ "$pa" != "$pb" ]
-    chk "both listen" bash -c "ss -ltn | grep -q 127.0.0.1:$pa && ss -ltn | grep -q 127.0.0.1:$pb"
+    chk "both listen" bash -c "\"\$REALSS\" -ltn | grep -q 127.0.0.1:$pa && \"\$REALSS\" -ltn | grep -q 127.0.0.1:$pb"
     chk "both pids differ" differs "$(pid_of "$a")" "$(pid_of "$b")"
     chk "both pids alive" alive "$(pid_of "$a")"
     chk "both pids alive (B)" alive "$(pid_of "$b")"
@@ -758,42 +878,76 @@ case14() { # two dirs at once, different ports
     stopdir "$a"; stopdir "$b"
 }
 
-case15() { # macOS refusal (faked with MLNT_UNAME) and a missing ss
-    local P=$W/p before after want
-    want='error: this script sets up NATS on Linux only; on macOS, run it on a Linux machine or use a NATS server you already have'
-    # PATH without nats, nats-server, openssl and ss: the macOS line must come before any tool check
-    mkpath "$P" nats nats-server openssl ss
-    before=$(find "$H" -mindepth 0 2>/dev/null | sort | cksum)
-    for ROUTE in pipe file; do
-        PRE=(env MLNT_UNAME=Darwin "PATH=$P")
-        run --owner acme
-        chk "darwin, $ROUTE route, tools missing: exit 1" rc_is 1
-        chk "darwin, $ROUTE route: stderr is exactly the one line" [ "$(cat "$W/err")" = "$want" ]
-        chk "darwin, $ROUTE route: stderr is one line" [ "$(wc -l <"$W/err")" = 1 ]
-        chk "darwin, $ROUTE route: stdout is empty" [ ! -s "$W/out" ]
-        run --stop
-        chk "darwin --stop: exit 1 with the same line" err_is "$want"
-        run --remove --dir "$H/zz"
-        chk "darwin --remove: exit 1 with the same line" err_is "$want"
-    done
-    PRE=(env MLNT_UNAME=Darwin)
-    run --owner acme
-    chk "darwin, all tools present: still refused, exit 1" rc_is 1
-    chk "darwin, all tools present: the one line" [ "$(cat "$W/err")" = "$want" ]
-    after=$(find "$H" -mindepth 0 2>/dev/null | sort | cksum)
-    chk "darwin: nothing created in \$HOME" [ "$before" = "$after" ]
-    chk "darwin: no mash-nats dir" absent "$H/mash-nats"
+case15() { # macOS support: no refusal, the BSD branches (darwin mode), neither ss nor lsof
+    local P=$W/p d=$H/dw n p
+    ROUTE="file"
+    # (a) neither ss nor lsof: a clear error, nothing made
+    mkpath "$P" ss lsof
+    PRE=(env "PATH=$P"); run --owner acme --dir "$H/nop"
+    chk "no ss and no lsof: exit 1" rc_is 1
+    chk "no ss and no lsof: the error line" hasx "$W/err" 'error: need ss (Linux) or lsof (macOS)'
+    chk "no ss and no lsof: nothing created" absent "$H/nop"
+    chk "no ss and no lsof: no Linux-only refusal text" bash -c '! grep -Eq "Linux only|Linux machine" "$1"' _ "$W/err"
+    PRE=(); run --owner acme --dir "$d"
+    chk "a made dir to try the other modes on: exit 0" rc_is 0
+    p=$(port_of "$d")
+    stopdir "$d"
+    PRE=(env "PATH=$P"); run --start --dir "$d"
+    chk "--start without ss and lsof: exit 1" rc_is 1
+    chk "--start without ss and lsof: the error line" hasx "$W/err" 'error: need ss (Linux) or lsof (macOS)'
+    chk "--start without ss and lsof: no server.pid" absent "$d/server.pid"
+    ptyrun "$d" env "PATH=$P" bash "$SCRIPT" --remove --dir "$d"
+    chk "--remove without ss and lsof: exit 1" rc_is 1
+    chk "--remove without ss and lsof: the error line" has "$W/out" 'error: need ss (Linux) or lsof (macOS)'
+    chk "--remove without ss and lsof: the dir is kept" [ -d "$d" ]
+    PRE=(); ptyrun "$d" bash "$SCRIPT" --remove --dir "$d"
+    chk "cleanup: --remove with the tools: exit 0" rc_is 0
+    # (b) MLNT_UNAME does not make the script refuse anything
     PRE=(env MLNT_UNAME=Linux)
     run --owner acme --dir "$H/lx"
     chk "MLNT_UNAME=Linux: works as usual" rc_is 0
     stopdir "$H/lx"
-    # a missing ss
-    rm -rf "$P"; mkpath "$P" ss
-    PRE=(env "PATH=$P"); run --owner acme --dir "$H/noss"
-    chk "no ss: exit 1" rc_is 1
-    chk "no ss: error: missing: ss" hasx "$W/err" 'error: missing: ss'
-    chk "no ss: says ss is needed (Linux only in 0.5.6)" has "$W/err" 'ss is needed (Linux only in 0.5.6)'
-    chk "no ss: nothing created" absent "$H/noss"
+    if [ "$SIM" != darwin ]; then
+        chk "linux mode: no shims on PATH" [ -z "$SHIMS" ]
+        return 0
+    fi
+    # (c) darwin mode: the same life cycle through the BSD branches
+    chk "darwin mode: MLNT_UNAME is Darwin" [ "${MLNT_UNAME:-}" = Darwin ]
+    chk "darwin mode: ss is not on PATH" bash -c '! command -v ss'
+    chk "darwin mode: sha256sum is not on PATH" bash -c '! command -v sha256sum'
+    chk "darwin mode: the stat shim rejects -c" bash -c '! stat -c %u / 2>/dev/null'
+    chk "darwin mode: the stat shim takes -f %u" stat -f %u /
+    chk "darwin mode: the readlink shim rejects -f" bash -c '! readlink -f / 2>/dev/null'
+    chk "darwin mode: shasum -a 256 works" bash -c 'echo x | shasum -a 256 >/dev/null'
+    : >"$SHIMLOG"
+    PRE=(); run --owner acme --dir "$d"
+    check_success "$d" acme
+    chk "darwin: the create line says the port" has "$W/out" 'port: 4222'
+    chk "darwin: the script asked stat -L -f %u" has "$SHIMLOG" 'stat OK -L -f %u /'
+    chk "darwin: the script asked stat -L -f %Lp" has "$SHIMLOG" 'stat OK -L -f %Lp /'
+    chk "darwin: the script asked lsof -iTCP:PORT" hasre "$SHIMLOG" '^lsof OK port=4222 pid= F=1$'
+    chk "darwin: the script asked ps for the state (the start loop)" hasre "$SHIMLOG" '^ps OK -p [0-9]+ -o stat=$'
+    run --stop --dir "$d"
+    chk "darwin --stop: exit 0" rc_is 0
+    chk "darwin --stop: the script asked stat -f %u (no -L)" has "$SHIMLOG" 'stat OK  -f %u /'
+    chk "darwin --stop: says stopped" hasre "$W/out" '^stopped pid [0-9]+$'
+    chk "darwin --stop: ps was asked for comm and args" \
+        bash -c 'grep -Eq "^ps OK -p [0-9]+ -o comm=$" "$1" && grep -Eq "^ps OK -ww -p [0-9]+ -o args=$" "$1"' _ "$SHIMLOG"
+    run --start --dir "$d"
+    chk "darwin --start: exit 0" rc_is 0
+    run --start --dir "$d"
+    chk "darwin --start when running: already running (the ps comm/args check)" has "$W/out" 'already running'
+    ptyrun "$d" bash "$SCRIPT" --remove --dir "$d"
+    chk "darwin --remove on a terminal: exit 0" rc_is 0
+    chk "darwin --remove: dir gone" absent "$d"
+    chk "darwin: no stat call was rejected" bash -c '! grep -q "^stat REJECT" "$1"' _ "$SHIMLOG"
+    chk "darwin: no ps call was rejected" bash -c '! grep -q "^ps REJECT" "$1"' _ "$SHIMLOG"
+    chk "darwin: no lsof call was rejected" bash -c '! grep -q "^lsof REJECT" "$1"' _ "$SHIMLOG"
+    chk "darwin: no readlink call was rejected" bash -c '! grep -q "^readlink REJECT" "$1"' _ "$SHIMLOG"
+    chk "darwin: no shasum call was rejected" bash -c '! grep -q "^shasum REJECT" "$1"' _ "$SHIMLOG"
+    chk "darwin: readlink was never used by the script" bash -c '! grep -q "^readlink" "$1"' _ "$SHIMLOG"
+    n=$(grep -c '^ps OK' "$SHIMLOG")
+    chk "darwin: ps was used ($n calls)" [ "$n" -gt 0 ]
 }
 
 case16() { # a truncated download (curl | bash) runs nothing
@@ -809,7 +963,7 @@ case16() { # a truncated download (curl | bash) runs nothing
         chk "first $pct% ($cut of $n bytes): nothing created in \$HOME" [ "$before" = "$after" ]
         chk "first $pct%: no mash-nats dir" absent "$d"
         chk "first $pct%: no mode ran (stdout empty)" [ ! -s "$W/out" ]
-        chk "first $pct%: nothing listens on 4222" bash -c '! ss -ltn | grep -q ":4222"'
+        chk "first $pct%: nothing listens on 4222" bash -c '! "$REALSS" -ltn | grep -q ":4222"'
     done
     head -n -1 "$SCRIPT" | cat | bash -s -- --owner acme >"$W/out" 2>"$W/err"
     RC=$?
@@ -852,7 +1006,7 @@ case17() { # a parent folder others can write to is refused unless sticky
     chk "group-writable grandparent under \$HOME: exit 1" rc_is 1
     chk "grandparent: the error names it" has "$W/err" "writable by others: $H/gp"
     chk "grandparent: nothing made" absent "$H/gp/q/z"
-    h0=$(stat -c %a "$H")
+    h0=$("$REALSTAT" -c %a "$H")
     chmod 775 "$H"
     run --owner acme
     chk "group-writable \$HOME (the immediate parent of the default dir): exit 1" rc_is 1
@@ -870,12 +1024,12 @@ case22() { # --dir anywhere: outside $HOME, ancestors owned by you or root, syml
     local t d pid
     ROUTE="file"
     # (1) a parent you own, outside $HOME: the full life cycle
-    t=$(mktemp -d /tmp/mlnt.XXXXXX); d=$t/mash-nats
-    chk "control: the parent is outside \$HOME, mode 700" [ "$(stat -c %a "$t")" = 700 ]
+    t=$(mktemp -d "${TMPDIR:-/tmp}/mlnt.XXXXXX"); d=$t/mash-nats
+    chk "control: the parent is outside \$HOME, mode 700" [ "$("$REALSTAT" -c %a "$t")" = 700 ]
     run --owner acme --dir "$d"
     check_success "$d" acme
     pid=$(pid_of "$d")
-    chk "outside \$HOME: the dir is mode 700" [ "$(stat -c %a "$d")" = 700 ]
+    chk "outside \$HOME: the dir is mode 700" [ "$("$REALSTAT" -c %a "$d")" = 700 ]
     run --stop --dir "$d"
     chk "outside \$HOME: --stop: exit 0" rc_is 0
     chk "outside \$HOME: --stop: server gone" gone "$pid"
@@ -902,7 +1056,7 @@ case22() { # --dir anywhere: outside $HOME, ancestors owned by you or root, syml
     chk "other user's ancestor: says not owned by you or root" has "$W/err" 'not owned by you or root: /home/other'
     chk "other user's ancestor: nothing made" absent /home/other/sub/n
     # (4) symlink ancestors
-    t=$(mktemp -d /tmp/mlnt.XXXXXX); mkdir "$t/real"; ln -s "$t/real" "$t/mine"
+    t=$(mktemp -d "${TMPDIR:-/tmp}/mlnt.XXXXXX"); mkdir "$t/real"; ln -s "$t/real" "$t/mine"
     run --owner acme --dir "$t/mine/n"
     chk "symlink ancestor owned by you: exit 1" rc_is 1
     chk "symlink ancestor: says symlink" has "$W/err" "refusing a symlink in the path: $t/mine"
@@ -944,7 +1098,7 @@ case18() { # the owner name "system" is reserved
 
 case19() { # the port is probed again right before the server starts
     local d=$H/mash-nats real p
-    real=$(command -v ss)
+    real=$REALSS
     mkdir -p "$W/shim"
     # real ss on its first -ltn listing, then it claims MLNT_FAKEPORT is listening
     cat >"$W/shim/ss" <<SH
@@ -957,6 +1111,18 @@ $real "\$@"
 [ "\$n" -le 1 ] || echo "LISTEN 0 128 127.0.0.1:\${MLNT_FAKEPORT:-4222} 0.0.0.0:*"
 SH
     chmod 755 "$W/shim/ss"
+    if [ "$SIM" = darwin ]; then # the script asks lsof here: the same trick on the lsof shim
+        cat >"$W/shim/lsof" <<SH
+#!/bin/sh
+n=\$(cat "$W/ss.count" 2>/dev/null || echo 0)
+n=\$((n + 1))
+echo "\$n" >"$W/ss.count"
+$SHIMS/lsof "\$@"
+[ "\$n" -le 1 ] || printf 'p1\nf0\nn127.0.0.1:%s\n' "\${MLNT_FAKEPORT:-4222}"
+exit 0
+SH
+        chmod 755 "$W/shim/lsof"
+    fi
     rm -f "$W/ss.count"
     ROUTE=pipe
     PRE=(env "PATH=$W/shim:$PATH" MLNT_FAKEPORT=4222)
@@ -966,8 +1132,8 @@ SH
     chk "...: the hint says to run again" hasre "$W/err" '^hint: .*run mash-local-nats-setup.sh again'
     chk "...: not the generic 'a step failed'" lacks "$W/err" 'a step failed'
     chk "...: nothing left behind" absent "$d"
-    chk "...: no server was started" bash -c '! ss -ltn | grep -q ":4222"'
-    chk "...: ss was asked twice or more" [ "$(cat "$W/ss.count")" -ge 2 ]
+    chk "...: no server was started" bash -c '! "$REALSS" -ltn | grep -q ":4222"'
+    chk "...: the port tool was asked twice or more" [ "$(cat "$W/ss.count")" -ge 2 ]
     # --start: same probe
     PRE=()
     ROUTE="file"; run --owner acme
@@ -981,7 +1147,7 @@ SH
     chk "--start: the message names the port" hasx "$W/err" "error: port $p was taken just now by another program"
     chk "--start: the hint says --start again" hasre "$W/err" '^hint: .*--start again'
     chk "--start: no server.pid left" absent "$d/server.pid"
-    chk "--start: no server was started" bash -c '! ss -ltn | grep -q ":'"$p"'"'
+    chk "--start: no server was started" bash -c '! "$REALSS" -ltn | grep -q ":'"$p"'"'
     PRE=()
     run --start
     chk "--start again without the clash: exit 0" rc_is 0
@@ -995,7 +1161,7 @@ case20() { # --remove refuses while something still listens on the recorded port
     chk "setup ran" rc_is 0
     p=$(port_of "$d")
     stopdir "$d"
-    chk "the server is stopped" bash -c '! ss -ltn | grep -q "127.0.0.1:'"$p"'"'
+    chk "the server is stopped" bash -c '! "$REALSS" -ltn | grep -q "127.0.0.1:'"$p"'"'
     python3 -m http.server "$p" --bind 127.0.0.1 >"$W/dummy.log" 2>&1 &
     DP=$!
     chk "control: a dummy listener (a wrapper's server) is up on $p" waitlisten "$p"
@@ -1055,14 +1221,181 @@ case21() { # the pid-reuse guard
     chk "the test's nats-server is stopped by its recorded pid" gone "$NS"
 }
 
+case23() { # HOME is needed only for the default folder; --dir works without it
+    local d=$W/nohome pid pt h
+    ROUTE="file"
+    PRE=(env -u HOME)
+    # (1) no --dir: HOME unset, empty or relative is refused
+    run --owner acme
+    chk "no --dir, HOME unset: exit 1" rc_is 1
+    chk "no --dir, HOME unset: says HOME is not an absolute path" hasx "$W/err" 'error: HOME is not set to an absolute path'
+    chk "no --dir, HOME unset: hint says set HOME or pass --dir" has "$W/err" 'hint: set HOME and retry, or pass --dir'
+    for h in '' relative/path; do
+        PRE=(env "HOME=$h")
+        run --owner acme
+        chk "no --dir, HOME='$h': exit 1" rc_is 1
+        chk "no --dir, HOME='$h': says HOME is not an absolute path" hasx "$W/err" 'error: HOME is not set to an absolute path'
+        chk "no --dir, HOME='$h': hint says set HOME or pass --dir" has "$W/err" 'hint: set HOME and retry, or pass --dir'
+    done
+    PRE=(env -u HOME)
+    # (2) an absolute --dir with HOME unset: the whole life cycle
+    run --owner acme --dir "$d"
+    check_success "$d" acme
+    chk "create, HOME unset: no mention of HOME" bash -c '! cat "$0" "$1" | grep -q HOME' "$W/out" "$W/err"
+    pid=$(pid_of "$d"); pt=$(port_of "$d")
+    chk "create, HOME unset: the server answers TLS with the admin creds" nn "$d" "$pt" account info
+    run --stop --dir "$d"
+    chk "--stop, HOME unset: exit 0" rc_is 0
+    chk "--stop, HOME unset: no mention of HOME" bash -c '! cat "$0" "$1" | grep -q HOME' "$W/out" "$W/err"
+    chk "--stop, HOME unset: server gone" gone "$pid"
+    run --start --dir "$d"
+    chk "--start, HOME unset: exit 0" rc_is 0
+    chk "--start, HOME unset: no mention of HOME" bash -c '! cat "$0" "$1" | grep -q HOME' "$W/out" "$W/err"
+    chk "--start, HOME unset: a live pid" alive "$(pid_of "$d")"
+    pid=$(pid_of "$d"); pt=$(port_of "$d")
+    chk "--start, HOME unset: the server answers TLS with the admin creds" nn "$d" "$pt" account info
+    ptyrun "$d" env -u HOME bash "$SCRIPT" --remove --dir "$d"
+    chk "--remove on a terminal, HOME unset: exit 0" rc_is 0
+    chk "--remove, HOME unset: no mention of HOME" bash -c '! grep -q HOME "$0"' "$W/out"
+    chk "--remove, HOME unset: dir gone" absent "$d"
+    chk "--remove, HOME unset: server gone" gone "$pid"
+    # (3) a relative --dir with HOME unset: refused cleanly
+    run --owner acme --dir rel/dir
+    chk "relative --dir, HOME unset: exit 1" rc_is 1
+    chk "relative --dir, HOME unset: says --dir must be absolute" has "$W/err" 'error: --dir must be an absolute path'
+    chk "relative --dir, HOME unset: no unbound variable" lacks "$W/err" 'unbound'
+    chk "relative --dir, HOME unset: nothing made" absent rel/dir
+    PRE=()
+}
+
+case24() { # the nats store layout is checked before any file is read
+    local d=$H/mash-nats real n
+    real=$(command -v nats)
+    ROUTE=pipe
+    mkdir -p "$W/shim"
+    cat >"$W/shim/nats" <<SH
+#!/bin/sh
+$real "\$@" || exit \$?
+case "\$*" in
+*"auth user add sys"*) rm -f "\$XDG_DATA_HOME/nats/nsc/stores/mash/accounts/SYSTEM/SYSTEM.jwt" ;;
+esac
+SH
+    chmod 755 "$W/shim/nats"
+    PRE=(env "PATH=$W/shim:$PATH"); run --owner acme
+    chk "moved store file: exit 1" rc_is 1
+    chk "moved store file: the exact message, then the hint" \
+        bash -c '[ "$(sed -n 1p "$0")" = "error: the nats command stored its keys somewhere unexpected (tested with nats v0.5.2)" ] && [ "$(sed -n 2p "$0")" = "hint: use nats v0.5.2, or report this; nothing was left behind" ]' "$W/err"
+    n=$(grep -c 'stored its keys' "$W/err")
+    chk "moved store file: the message is printed once (got $n)" [ "$n" = 1 ]
+    chk "moved store file: nothing but those two lines" [ "$(wc -l <"$W/err")" -eq 2 ]
+    chk "moved store file: the dir is gone" absent "$d"
+    chk "moved store file: no server on 4222" bash -c '! "$REALSS" -ltn | grep -q 127.0.0.1:4222'
+    rm -f "$W/shim/nats"
+    PRE=()
+    run --owner acme
+    check_success "$d" acme
+    chk "a normal run afterwards: no lock left" absent "$d/.lock"
+    stopdir "$d"
+}
+
+case25() { # one lifecycle lock: create, --start, --stop, --remove do not overlap
+    local d=$H/lk pid pt SP DP i rca rcb rc1 rc2 e2 w
+    ROUTE="file"
+    # (a) two creates at once on the same --dir: exactly one wins
+    bash "$SCRIPT" --owner acme --dir "$d" >"$W/o1" 2>"$W/e1" </dev/null & rca=$!
+    bash "$SCRIPT" --owner acme --dir "$d" >"$W/o2" 2>"$W/e2" </dev/null & rcb=$!
+    wait "$rca"; rc1=$?
+    wait "$rcb"; rc2=$?
+    chk "two creates: exactly one succeeds (rc $rc1, $rc2)" \
+        bash -c '{ [ "$1" = 0 ] && [ "$2" != 0 ]; } || { [ "$1" != 0 ] && [ "$2" = 0 ]; }' _ "$rc1" "$rc2"
+    if [ "$rc1" = 0 ]; then cp "$W/o1" "$W/out"; cp "$W/e1" "$W/err"; e2=$W/e2
+    else cp "$W/o2" "$W/out"; cp "$W/e2" "$W/err"; e2=$W/e1; fi
+    RC=0
+    chk "two creates: the loser says an error" hasre "$e2" '^error: '
+    check_success "$d" acme
+    pid=$(pid_of "$d"); pt=$(port_of "$d")
+    chk "two creates: the first one's server answers" nn "$d" "$pt" account info
+    chk "two creates: no lock left" absent "$d/.lock"
+    # (b) a lock held by a live pid: nothing runs, nothing changes
+    sleep 300 & SP=$!
+    echo "$SP" >"$d/.lock"
+    run --stop --dir "$d"
+    chk "live lock, --stop: exit 1" rc_is 1
+    chk "live lock, --stop: says another run is using it" has "$W/err" "error: another run is using $d (pid $SP)"
+    chk "live lock, --stop: the server is untouched" alive "$pid"
+    chk "live lock, --stop: the lock is still the sleeper's" [ "$(cat "$d/.lock")" = "$SP" ]
+    rm -f "$d/.lock"
+    run --stop --dir "$d"
+    chk "no lock, --stop: exit 0" rc_is 0
+    chk "no lock, --stop: server gone" gone "$pid"
+    chk "no lock, --stop: no lock left" absent "$d/.lock"
+    echo "$SP" >"$d/.lock"
+    run --start --dir "$d"
+    chk "live lock, --start: exit 1" rc_is 1
+    chk "live lock, --start: says another run is using it" has "$W/err" "error: another run is using $d (pid $SP)"
+    chk "live lock, --start: no server started" bash -c '! "$REALSS" -ltn | grep -q 127.0.0.1:'"$pt"
+    ptyrun "$d" bash "$SCRIPT" --remove --dir "$d"
+    chk "live lock, --remove: exit 1" rc_is 1
+    chk "live lock, --remove: says another run is using it" has "$W/out" "error: another run is using $d (pid $SP)"
+    chk "live lock, --remove: the dir is intact" [ -f "$d/mash-setup.json" ]
+    chk "live lock, --remove: the sleeper still holds the lock" [ "$(cat "$d/.lock")" = "$SP" ]
+    kill "$SP"; wait "$SP" 2>/dev/null
+    chk "the test's sleep is stopped by its recorded pid" gone "$SP"
+    # (c) a lock holding a dead pid is taken over
+    true & DP=$!
+    wait "$DP"
+    chk "control: the pid in the stale lock is dead" gone "$DP"
+    rm -f "$d/.lock"; echo "$DP" >"$d/.lock"
+    run --start --dir "$d"
+    chk "stale lock, --start: exit 0" rc_is 0
+    chk "stale lock, --start: no lock left" absent "$d/.lock"
+    chk "stale lock, --start: the server answers" nn "$d" "$pt" account info
+    echo "$DP" >"$d/.lock"
+    run --stop --dir "$d"
+    chk "stale lock, --stop: exit 0" rc_is 0
+    chk "stale lock, --stop: no lock left" absent "$d/.lock"
+    chk "stale lock, --stop: server gone" bash -c '! "$REALSS" -ltn | grep -q 127.0.0.1:'"$pt"
+    mkdir "$d/.lock"
+    run --start --dir "$d"
+    chk "empty lock, --start: exit 0 (taken over)" rc_is 0
+    chk "empty lock, --start: no lock left" absent "$d/.lock"
+    stopdir "$d"
+    # (d) --start and --remove at once: never a server on a deleted store
+    for i in 1 2 3; do
+        w=$H/race$i
+        run --owner acme --dir "$w"
+        chk "race $i: control, create ok" rc_is 0
+        pt=$(port_of "$w")
+        stopdir "$w"
+        bash "$SCRIPT" --start --dir "$w" >"$W/o1" 2>"$W/e1" </dev/null & rca=$!
+        ptyrun "$w" bash "$SCRIPT" --remove --dir "$w"
+        rc2=$RC
+        wait "$rca"; rc1=$?
+        sleep 1
+        if [ -d "$w" ]; then
+            chk "race $i: dir kept, so --remove failed (rc $rc2)" [ "$rc2" != 0 ]
+            chk "race $i: dir kept, so --start succeeded (rc $rc1)" [ "$rc1" = 0 ]
+            chk "race $i: dir kept, the server answers" nn "$w" "$pt" account info
+            chk "race $i: dir kept, no lock left" absent "$w/.lock"
+            stopdir "$w"
+            ptyrun "$w" bash "$SCRIPT" --remove --dir "$w"
+        else
+            chk "race $i: dir gone, so --remove succeeded (rc $rc2)" [ "$rc2" = 0 ]
+            chk "race $i: dir gone, no server listens" bash -c '! "$REALSS" -ltn | grep -q 127.0.0.1:'"$pt"
+        fi
+        chk "race $i: finally the dir is gone" absent "$w"
+    done
+}
+
 run_case() {
     case $CASE in
     15) case15 ;; 16) case16 ;; 17) case17 ;; 18) case18 ;; 19) case19 ;; 20) case20 ;; 21) case21 ;;
     1) case1 ;; 2) case2 ;; 3) case3 ;; 4) case4 ;; 5) case5 ;; 6) case6 ;; 7) case7 ;;
-    8) case8 ;; 9) case9 ;; 10) case10 ;; 11) case11 ;; 12) case12 ;; 13) case13 ;; 14) case14 ;; 22) case22 ;;
+    8) case8 ;; 9) case9 ;; 10) case10 ;; 11) case11 ;; 12) case12 ;; 13) case13 ;; 14) case14 ;; 22) case22 ;; 23) case23 ;; 24) case24 ;; 25) case25 ;;
     *) echo "FAIL: c$CASE: no such case" ;;
     esac
 }
+[ "$SIM" != darwin ] || sim_setup
 run_case
 printf 'done: c%s\n' "$CASE"
 }
@@ -1093,7 +1426,8 @@ else
     MADE_SCRATCH=1
 fi
 IMAGES=${MLNT_IMAGES:-"debian:stable ubuntu:24.04 ubuntu:26.04"}
-CASES=${MLNT_CASES:-"1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22"}
+CASES=${MLNT_CASES:-"1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25"}
+MODES=${MLNT_MODES:-"linux darwin"}
 NCV=${MLNT_NATSCLI:-0.5.2}
 # sha256 of https://github.com/nats-io/natscli/releases/download/v0.5.2/nats-0.5.2-linux-amd64.zip,
 # computed once on 2026-11-20; the test fails if the download differs
@@ -1165,11 +1499,23 @@ write_receipt() {
         echo "# mash-local-nats-setup.sh container test receipt"
         echo
         echo "- run id: $RUN"
+        echo "- modes: $MODES"
         echo "- date (UTC): $(date -u +%Y-%m-%dT%H:%M:%SZ)"
         echo "- test: scripts/mash-local-nats-setup_test.sh, sha256 $(sha256sum "$SELF_TEST" | awk '{print $1}')"
         echo "- script under test: scripts/mash-local-nats-setup.sh, sha256 $SCRIPTSHA"
         echo "- natscli v$NCV linux-amd64 zip, sha256 $NATSHA (pinned: $NATPIN)"
         echo "- podman: $(podman --version 2>/dev/null)"
+        echo
+        echo "## What the two modes prove"
+        echo
+        echo "- linux: the script as it runs on Linux (GNU stat, /proc, ss), the whole case list, unshimmed."
+        echo "- darwin: MLNT_UNAME=Darwin, so the script takes its macOS branches (BSD stat -f, ps and"
+        echo "  lsof instead of /proc and ss), the same whole case list, on a PATH with shims that behave"
+        echo "  like the BSD tools (stat rejects -c; no ss or sha256sum; lsof built on ss; ps and readlink"
+        echo "  reject GNU-only flags; each shim call is logged and case 15 checks no call was rejected)."
+        echo "  This shows the BSD branches run end to end and use no GNU-only flag. It does NOT show they"
+        echo "  work with the real macOS tools (real BSD stat, ps, lsof, sed, date, bash 3.2 as /bin/bash,"
+        echo "  LibreSSL, Homebrew paths, launchd or terminal behaviour)."
         echo
         echo "## Images"
         echo
@@ -1223,7 +1569,7 @@ cat >"$CTX/Containerfile" <<'CF'
 ARG BASE
 FROM ${BASE}
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    nats-server openssl iproute2 curl unzip ca-certificates util-linux python3 \
+    nats-server openssl iproute2 procps curl unzip ca-certificates util-linux python3 \
     && rm -rf /var/lib/apt/lists/*
 COPY nats.zip /tmp/nats.zip
 RUN unzip -j -o /tmp/nats.zip '*/nats' -d /usr/local/bin && chmod 755 /usr/local/bin/nats && rm /tmp/nats.zip
@@ -1261,31 +1607,39 @@ for tag in $IMAGES; do
     RESULTS="$RESULTS
 
 ### $tag"
+    for mode in $MODES; do
+    RESULTS="$RESULTS
+
+#### $tag, mode $mode"
+    envs=()
+    [ "$mode" = darwin ] && envs=(-e MLNT_UNAME=Darwin -e MLNT_SIM=darwin)
     for n in $CASES; do
-        name=mlnt-$RUN-$short-c$n
+        name=mlnt-$RUN-$short-$mode-c$n
+        lg=$LOGS/$short-$mode-c$n.log
         user=tester
         [ "$n" = 1 ] && user=root
         MY_CONTAINERS+=("$name")
-        echo "== [$tag] case $n"
+        echo "== [$tag, $mode] case $n"
         timeout 600 podman run --rm --name "$name" --user "$user" --network none \
             --security-opt no-new-privileges --cap-drop=all --pids-limit 2048 \
-            -e MLNT_INSIDE=1 \
+            -e MLNT_INSIDE=1 "${envs[@]+"${envs[@]}"}" \
             -v "$SELF_TEST:/t/test.sh:ro" -v "$SCRIPT_SRC:/t/mash-local-nats-setup.sh:ro" \
-            "$img" bash /t/test.sh "$n" >"$LOGS/$short-c$n.log" 2>&1
+            "$img" bash /t/test.sh "$n" >"$lg" 2>&1
         rc=$?
         podman rm -f "$name" >/dev/null 2>&1
-        po=$(grep -c '^ok: ' "$LOGS/$short-c$n.log")
-        pf=$(grep -c '^FAIL: ' "$LOGS/$short-c$n.log")
-        if ! grep -q "^done: c$n\$" "$LOGS/$short-c$n.log"; then
+        po=$(grep -c '^ok: ' "$lg")
+        pf=$(grep -c '^FAIL: ' "$lg")
+        if ! grep -q "^done: c$n\$" "$lg"; then
             pf=$((pf + 1))
-            echo "FAIL: [$tag] c$n did not finish (podman rc $rc)"
+            echo "FAIL: [$tag, $mode] c$n did not finish (podman rc $rc)"
             RESULTS="$RESULTS
-- FAIL [$tag] c$n did not finish (podman rc $rc); log $LOGS/$short-c$n.log"
+- FAIL [$tag, $mode] c$n did not finish (podman rc $rc); log $lg"
         fi
         PASS=$((PASS + po)); FAIL=$((FAIL + pf))
-        grep -E '^(FAIL|  )' "$LOGS/$short-c$n.log" | sed "s/^/[$tag] /"
+        grep -E '^(FAIL|  )' "$lg" | sed "s/^/[$tag, $mode] /"
         RESULTS="$RESULTS
-$(grep -E '^(ok|FAIL): ' "$LOGS/$short-c$n.log" | sed "s/^/- [$tag] /")"
+$(grep -E '^(ok|FAIL): ' "$lg" | sed "s/^/- [$tag, $mode] /")"
+    done
     done
 done
 
