@@ -91,10 +91,10 @@ None. Administration. There are no MCP tools for mashctl.
 
 What is a warning and what is a problem. Warnings: a lease with no endpoint, a
 retired name seen in use, and a missing record store (issued, adoption or
-retired); the fix for a missing store is to run mashctl init --config <file>
-again, which is safe. A problem: an endpoint whose credentials were being
-cancelled and never finished; the fix is to run that mashctl endpoint delete
-again.
+retired); the fix for a missing store is to run mashctl init --config
+&lt;file&gt; again, which is safe. A problem: an endpoint whose credentials
+were being cancelled and never finished; the fix is to run that mashctl
+endpoint delete again.
 
 ## What it replaces
 
