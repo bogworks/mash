@@ -209,6 +209,31 @@ func TestJoinMatchesSpec(t *testing.T) {
 			t.Error("the configuration folder was made")
 		}
 	})
+	do("The folder cannot be written", func(w *joinWorld, c specCase) {
+		if os.Geteuid() == 0 {
+			t.Skip("root can write into a read-only folder")
+		}
+		os.MkdirAll(w.cfg, 0o700)
+		if err := os.Chmod(w.cfg, 0o500); err != nil {
+			t.Fatal(err)
+		}
+		defer os.Chmod(w.cfg, 0o700)
+		c.check(t, w.run("join", "acme.demo.bob.join"))
+	})
+	do("Could not finish and could not undo", func(w *joinWorld, c specCase) {
+		// A --replace run never has a later step that can fail, so the rollback is driven directly: the backup of the old
+		// creds cannot be put back, and the message is the one the run would print.
+		creds := w.credsFile()
+		backup := filepath.Join(w.cfg, ".join-backup-x")
+		os.MkdirAll(w.cfg, 0o700)
+		os.WriteFile(creds, []byte("new"), 0o600)
+		os.WriteFile(backup, []byte("old"), 0o600)
+		failJoinSteps(t, "acme.demo.bob.creds", "")
+		left, kept := joinUndo(nil, backup, creds)
+		e := joinSvc{home: w.home}.undoFailure(left, kept)
+		got := ran{code: e.Code, errs: "error: " + e.Msg + "\nhint: " + e.Hint + "\n"}
+		c.check(t, got)
+	})
 	for name := range cases {
 		if !seen[name] {
 			t.Errorf("spec/mash.json has the join case %q and this test does not run it", name)
@@ -955,7 +980,7 @@ func TestJoinNamesWhatARollbackCouldNotUndo(t *testing.T) {
 	w := newJoinWorld(t)
 	failJoinSteps(t, "config.json", "acme.demo.bob.creds")
 	r := w.run("join", "acme.demo.bob.join")
-	if r.code != 1 || !strings.HasPrefix(r.errs, "error: could not finish and could not undo: ") || !strings.Contains(r.errs, "~/.config/mash/acme.demo.bob.creds was left") {
+	if r.code != 1 || !strings.HasPrefix(r.errs, "error: could not finish and could not undo: ") || !strings.Contains(r.errs, "~/.config/mash/acme.demo.bob.creds left") {
 		t.Errorf("%+v", r)
 	}
 	if strings.Contains(r.errs, "old creds kept") {
@@ -972,4 +997,57 @@ func TestJoinNamesWhatARollbackCouldNotUndo(t *testing.T) {
 			t.Errorf("%s was left: %v", name, err)
 		}
 	}
+}
+
+func TestJoinUndoKeepsTheOldCredsAsDotOld(t *testing.T) {
+	setup := func(t *testing.T) (w *joinWorld, creds, backup string) {
+		w = newJoinWorld(t)
+		creds = w.credsFile()
+		backup = filepath.Join(w.cfg, ".join-backup-x")
+		os.MkdirAll(w.cfg, 0o700)
+		os.WriteFile(creds, []byte("NEW"), 0o600)
+		os.WriteFile(backup, []byte("OLD"), 0o600)
+		failJoinSteps(t, "acme.demo.bob.creds", "")
+		return
+	}
+	read := func(p string) string { b, _ := os.ReadFile(p); return string(b) }
+	t.Run("renamed to .old", func(t *testing.T) {
+		w, creds, backup := setup(t)
+		left, kept := joinUndo(nil, backup, creds)
+		if len(left) != 1 || left[0] != creds || kept != creds+".old" {
+			t.Fatalf("left %v, kept %q", left, kept)
+		}
+		if read(kept) != "OLD" || read(creds) != "NEW" {
+			t.Errorf(".old %q, creds %q", read(kept), read(creds))
+		}
+		if _, err := os.Lstat(backup); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("the backup name is still there: %v", err)
+		}
+		msg := joinSvc{home: w.home}.undoFailure(left, kept).Msg
+		if strings.Contains(msg, "OLD") || strings.Contains(msg, "NEW") || !strings.Contains(msg, "~/.config/mash/acme.demo.bob.creds left; old creds kept at ~/.config/mash/acme.demo.bob.creds.old") {
+			t.Errorf("%q", msg)
+		}
+	})
+	t.Run("an existing .old is never overwritten", func(t *testing.T) {
+		w, creds, backup := setup(t)
+		os.WriteFile(creds+".old", []byte("EARLIER"), 0o600)
+		left, kept := joinUndo(nil, backup, creds)
+		if len(left) != 1 || kept != backup {
+			t.Fatalf("left %v, kept %q", left, kept)
+		}
+		if read(creds+".old") != "EARLIER" || read(backup) != "OLD" {
+			t.Errorf(".old %q, backup %q", read(creds+".old"), read(backup))
+		}
+		msg := joinSvc{home: w.home}.undoFailure(left, kept).Msg
+		if !strings.Contains(msg, "old creds kept at ~/.config/mash/.join-backup-x") || strings.Contains(msg, "OLD") {
+			t.Errorf("%q", msg)
+		}
+	})
+	t.Run("several leftovers", func(t *testing.T) {
+		w := newJoinWorld(t)
+		msg := joinSvc{home: w.home}.undoFailure([]string{filepath.Join(w.cfg, "ca.pem"), w.credsFile()}, "").Msg
+		if msg != "could not finish and could not undo: ~/.config/mash/ca.pem, ~/.config/mash/acme.demo.bob.creds left" {
+			t.Errorf("%q", msg)
+		}
+	})
 }

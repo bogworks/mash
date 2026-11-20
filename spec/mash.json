@@ -116,11 +116,8 @@
     "recursive": true
    },
    {
-    "name": "--verbose",
-    "description": "After the usual output, print more about what was done, as 'label: value' lines.",
-    "aliases": [
-     "-v"
-    ],
+    "name": "--detail",
+    "description": "Print the fuller answer: after the usual line, more as 'label: value' lines; with --json, the fuller object.",
     "recursive": true
    },
    {
@@ -300,7 +297,7 @@
         "exit": 0
        },
        {
-        "case": "With --verbose",
+        "case": "With --detail",
         "text": "Mail sent (number 42).\nto:      acme.demo.alice\nkind:    task\nurgent:  no",
         "stream": "stdout",
         "exit": 0
@@ -808,7 +805,7 @@
      },
      {
       "name": "x-notes",
-      "value": "A prefix follows the address the way a domain name does: acme is everything under acme, acme.demo is everything under acme.demo, and acme.demo.bob is that one endpoint, never acme.demo.bobby. There is no other pattern matching: capitals are refused, acme.demo.bob.* is refused, and an empty prefix means none. The filters by role, capability and label stay, as --role, --capability and --label, in the command and the tool: an agent uses them to find a peer by what it does. Only the free-text match and the alternative output modes are gone. The JSON and the MCP tool's structured result carry role, host, description, capability and labels for every endpoint."
+      "value": "A prefix follows the address the way a domain name does: acme is everything under acme, acme.demo is everything under acme.demo, and acme.demo.bob is that one endpoint, never acme.demo.bobby. There is no other pattern matching: capitals are refused, acme.demo.bob.* is refused, and an empty prefix means none. The filters by role, capability and label stay, as --role, --capability and --label, in the command and the tool: an agent uses them to find a peer by what it does. Only the free-text match and the alternative output modes are gone. The JSON and the MCP tool's structured result carry role, host, description, capability and labels for every endpoint. An address is always owner.group.name, with dots. who says whether an endpoint is online, not whether mail is reaching its session: that is known only to the session itself, and is in its own status ('session'). A per-endpoint delivery claim visible to peers would be new data that mash 0.5.5 never had; it is left for a later release."
      }
     ]
    },
@@ -854,6 +851,18 @@
        {
         "case": "Working, an agent session is holding it open",
         "text": "acme.demo.bob: ready, online",
+        "stream": "stdout",
+        "exit": 0
+       },
+       {
+        "case": "With --detail, inside a session",
+        "text": "acme.demo.bob: ready, online\nholds endpoint: yes\nhooks:          ran\nstorage:        ok",
+        "stream": "stdout",
+        "exit": 0
+       },
+       {
+        "case": "With --detail, at a shell with no session",
+        "text": "acme.demo.bob: ready, offline\nsession:        none",
         "stream": "stdout",
         "exit": 0
        },
@@ -918,8 +927,23 @@
       "value": {
        "endpoint": "acme.demo.bob",
        "ready": true,
-       "online": false,
+       "online": true,
        "reason": null
+      }
+     },
+     {
+      "name": "x-json-detail",
+      "value": {
+       "endpoint": "acme.demo.bob",
+       "ready": true,
+       "online": true,
+       "reason": null,
+       "reason_code": null,
+       "session": {
+        "holds_endpoint": true,
+        "hooks": "ran",
+        "storage": "ok"
+       }
       }
      },
      {
@@ -935,7 +959,7 @@
      },
      {
       "name": "x-notes",
-      "value": "'ready' means: the configuration is readable, the server answers, and it accepts this endpoint's credentials. Inside a session, when the configuration, the creds, the server or sign-in fails, that failure is what status reports, even if the session also does not hold its endpoint: the root cause comes first, and a session and a shell then name the same cause. Asked inside a session (the MCP tool), status and doctor report on that session itself, not on a fresh connection: 'ready, online' there means this session holds the endpoint and its mail will reach it. A hint names the first installed address in alphabetical order. At a shell every 'hint:' line goes to stderr; an MCP tool's text block puts the hint on the line after the result."
+      "value": "The usual answer is one line, and --json is the same four things as an object. --detail gives the fuller answer, for a person who wants it and for a program that watches a session; with --json it adds reason_code and session. 'reason_code' is a fixed word beside the free-text reason, null when ready: no_endpoint, endpoints_ambiguous, config_unreadable, creds_missing, creds_refused, endpoint_deleted, server_unreachable, server_untrusted, server_no_tls, endpoint_held_elsewhere, endpoint_lost, endpoint_not_taken, storage_unwritable, unknown. creds_refused covers every way the server refuses who we are, a client certificate included; server_untrusted is only for a server we do not trust; unknown is for a failure that fits none, and its free-text reason then carries what was seen. 'session' is null at a shell and, inside a session, says three things about that session: holds_endpoint (true or false); hooks, whether the agent host's hooks have delivered mail in this session: ran, not_run, suspected, degraded or refused, with the meanings 0.5.5's delivery line had; and storage, ok or failing. A program proving that a newly started session can receive mail reads holds_endpoint true and hooks ran. At a shell on the session's own machine, status reads the same state from what serve has recorded on disk, so the command and the tool agree. These names, in the usual and the fuller object alike, are part of what 0.5.6 promises not to change. 'ready' means: the configuration is readable, the server answers, and it accepts this endpoint's credentials. Inside a session, when the configuration, the creds, the server or sign-in fails, that failure is what status reports, even if the session also does not hold its endpoint: the root cause comes first, and a session and a shell then name the same cause. Asked inside a session (the MCP tool), status and doctor report on that session itself, not on a fresh connection: 'ready, online' there means this session holds the endpoint and its mail will reach it. A hint names the first installed address in alphabetical order. At a shell every 'hint:' line goes to stderr; an MCP tool's text block puts the hint on the line after the result."
      }
     ]
    },
@@ -1013,6 +1037,18 @@
         "text": "delivery  FAIL  another session holds this endpoint",
         "stream": "stdout",
         "exit": 0
+       },
+       {
+        "case": "In a session whose hooks have not delivered yet",
+        "text": "delivery  warn  hooks have not run in this session yet; they run with\n                the first prompt or tool call",
+        "stream": "stdout",
+        "exit": 0
+       },
+       {
+        "case": "In a session whose hooks are failing",
+        "text": "delivery  FAIL  hooks are not delivering mail to this session;\n                restart the session after reinstalling\n\n1 problem.\nhint: claude plugin install mash@mash",
+        "stream": "stdout",
+        "exit": 1
        },
        {
         "case": "In a session that a newer session replaced",
@@ -1093,7 +1129,7 @@
      },
      {
       "name": "x-notes",
-      "value": "doctor is the one everyday command that prints many lines, as brew doctor and flutter doctor do. It reports on stdout and exits 1 when it found a problem. Every row is always printed, and 'checks' in the JSON always lists every row, each with a state of ok, warn, fail or skip; a row is skipped when an earlier failure means it cannot be run. The delivery row says whether mail that arrives can be stored on this machine for the session; it is checked only inside a session and skipped at a shell. The refused count is kept on this machine, so its row shows even when the server is down. The 'refused' row counts unverified mail that was refused (see mash serve)."
+      "value": "doctor is the one everyday command that prints many lines, as brew doctor and flutter doctor do. It reports on stdout and exits 1 when it found a problem. Every row is always printed, and 'checks' in the JSON always lists every row, each with a state of ok, warn, fail or skip; a row is skipped when an earlier failure means it cannot be run. The delivery row says whether mail that arrives can be stored on this machine for the session; it is checked only inside a session and skipped at a shell. In a session that has just started, the row is 'warn' until the first prompt or tool call, so 'doctor --strict' exits 1 until then: a program that waits for a session to be ready repeats the check. The 'hooks not run yet' warning has no hint, because no command fixes it. Whether storage is failing is decided by whoever asks, by trying the folder, not from a record kept in it. An agent host that has no hooks would warn for as long as it runs; only Claude Code is in scope for 0.5.6. The refused count is kept on this machine, so its row shows even when the server is down. The 'refused' row counts unverified mail that was refused (see mash serve)."
      }
     ]
    },
@@ -1243,6 +1279,12 @@
         "exit": 0
        },
        {
+        "case": "With --detail",
+        "text": "Joined as acme.demo.bob.\nservers: tls://myserver:4222\ncreds:   ~/.config/mash/acme.demo.bob.creds",
+        "stream": "stdout",
+        "exit": 0
+       },
+       {
         "case": "Already installed",
         "text": "error: acme.demo.bob is already installed here\nhint: mash join acme.demo.bob.join --replace",
         "stream": "stderr",
@@ -1271,17 +1313,35 @@
         "text": "error: this join file holds no seed; it was made for your own key\nhint: mash join acme.demo.bob.join --key <your seed file>",
         "stream": "stderr",
         "exit": 2
+       },
+       {
+        "case": "The folder cannot be written",
+        "text": "error: cannot write into ~/.config/mash: permission denied; nothing was installed\nhint: mash doctor",
+        "stream": "stderr",
+        "exit": 1
+       },
+       {
+        "case": "Could not finish and could not undo",
+        "text": "error: could not finish and could not undo: ~/.config/mash/acme.demo.bob.creds left; old creds kept at ~/.config/mash/acme.demo.bob.creds.old\nhint: mash doctor",
+        "stream": "stderr",
+        "exit": 1
        }
       ]
      },
      {
       "name": "x-json",
       "value": {
+       "endpoint": "acme.demo.bob"
+      }
+     },
+     {
+      "name": "x-json-detail",
+      "value": {
        "endpoint": "acme.demo.bob",
        "servers": [
         "tls://myserver:4222"
        ],
-       "creds": "~/.config/mash/acme.demo.bob.creds"
+       "creds": "/home/ada/.config/mash/acme.demo.bob.creds"
       }
      },
      {
@@ -1297,7 +1357,7 @@
      },
      {
       "name": "x-notes",
-      "value": "It asks nothing: the file came from whoever runs your mesh. How it works. Whoever runs the mesh runs 'mashctl endpoint create acme.demo.bob --out acme.demo.bob.join' and gets one text file. They get that file to the other machine by any route they trust. There, 'mash join acme.demo.bob.join' copies its three parts into the configuration folder: the server address or addresses, the certificate authority's certificate if the server uses its own, and a NATS creds file (a user JWT and its seed). After that, mash status works. When the endpoint made its own key, the join file holds no seed and --key supplies it. In 0.6.0, mash join also gains a way to ask to join and wait for approval (board card 210). THE JOIN FILE is JSON, written with mode 600, with these fields: \"mash_join\": 1 (the format's version); \"address\"; \"servers\": a list of addresses; \"ca\": the certificate authority's certificate as PEM text, or null; and either \"creds\": the whole text of a NATS creds file, or, when the endpoint made its own key, \"user_jwt\": the user JWT alone. One configuration folder serves one mesh; a join file for another mesh needs another folder. The certificate authority's certificate is kept in the folder as ca.pem, and every endpoint in the folder trusts it; a join file that brings a different one, or none where the folder has one, is refused, with or without --replace."
+      "value": "It asks nothing: the file came from whoever runs your mesh. How it works. Whoever runs the mesh runs 'mashctl endpoint create acme.demo.bob --out acme.demo.bob.join' and gets one text file. They get that file to the other machine by any route they trust. There, 'mash join acme.demo.bob.join' copies its three parts into the configuration folder: the server address or addresses, the certificate authority's certificate if the server uses its own, and a NATS creds file (a user JWT and its seed). After that, mash status works. When the endpoint made its own key, the join file holds no seed and --key supplies it. In 0.6.0, mash join also gains a way to ask to join and wait for approval (board card 210). THE JOIN FILE is JSON, written with mode 600, with these fields: \"mash_join\": 1 (the format's version); \"address\"; \"servers\": a list of addresses; \"ca\": the certificate authority's certificate as PEM text, or null; and either \"creds\": the whole text of a NATS creds file, or, when the endpoint made its own key, \"user_jwt\": the user JWT alone. One configuration folder serves one mesh; a join file for another mesh needs another folder. The certificate authority's certificate is kept in the folder as ca.pem, and every endpoint in the folder trusts it; a join file that brings a different one, or none where the folder has one, or one where the folder has none and already holds an endpoint, is refused, with or without --replace. The first join into an empty folder sets it."
      }
     ]
    },
@@ -1528,7 +1588,7 @@
      },
      {
       "name": "x-notes",
-      "value": "Which endpoint. serve never picks an endpoint by itself, even when only one is installed: it acts as the one named by --endpoint, MASH_ENDPOINT or the configuration file, and with none named it offers only status, doctor and version, whose answer is 'no endpoint is chosen for this session' with the hint 'start the session with MASH_ENDPOINT=<address>'. Otherwise every agent session on a machine with one endpoint installed would become that endpoint by accident, and two sessions would fight over it. Waking for a backlog. Whatever the kinds of the messages, serve wakes the session when more than --wake-count are waiting or the oldest has waited longer than --wake-age, at most once every 10 minutes and not in the first 10 minutes after it starts. mash inbox says so on its second line. Refusing unverified mail. Only mail whose trust is 'verified' reaches the session, the inbox listing and mash read. Mail that is unsigned, signed by an unknown key, claimed but unproven, or stale is dropped and counted; mash doctor shows the count. The sender is not told. --accept-unverified delivers it instead, labelled. A refused message is invisible at a shell too: it is not in mash inbox's count or listing, and mash read on its number says it was refused. When serve refuses a message it writes one line to its log: 'refused message 12 from acme.demo.x: not verified (absent)', where the address is the one the message claims, with control characters escaped, and the word in brackets is the trust label. What 'waiting' means for the wake: a message that has arrived and has not yet reached the session. In a session that takes delivery by channel alone, a message reaches it on arrival, so nothing waits and the wake never fires; the wake exists for sessions where mail can pile up."
+      "value": "Which endpoint. serve never picks an endpoint by itself, even when only one is installed: it acts as the one named by --endpoint, MASH_ENDPOINT or the configuration file, and with none named, or one that is not a valid address, it still starts and offers only status, doctor and version, whose answer is 'no endpoint is chosen for this session' with the hint 'start the session with MASH_ENDPOINT=<address>'. Otherwise every agent session on a machine with one endpoint installed would become that endpoint by accident, and two sessions would fight over it. Waking for a backlog. Whatever the kinds of the messages, serve wakes the session when more than --wake-count are waiting or the oldest has waited longer than --wake-age, at most once every 10 minutes and not in the first 10 minutes after it starts. mash inbox says so on its second line. Refusing unverified mail. Only mail whose trust is 'verified' reaches the session, the inbox listing and mash read. Mail that is unsigned, signed by an unknown key, claimed but unproven, or stale is dropped and counted; mash doctor shows the count. The sender is not told. --accept-unverified delivers it instead, labelled. A refused message is invisible at a shell too: it is not in mash inbox's count or listing, and mash read on its number says it was refused. When serve refuses a message it writes one line to its log: 'refused message 12 from acme.demo.x: not verified (absent)', where the address is the one the message claims, with control characters escaped, and the word in brackets is the trust label. What 'waiting' means for the wake: a message that has arrived and has not yet reached the session. In a session that takes delivery by channel alone, a message reaches it on arrival, so nothing waits and the wake never fires; the wake exists for sessions where mail can pile up."
      },
      {
       "name": "x-long",

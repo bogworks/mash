@@ -388,7 +388,7 @@ func (s joinSvc) Join(_ context.Context, req cmds.JoinRequest) (cmds.JoinOutcome
 		case errors.As(err, &le):
 			reason = le.Err
 		}
-		return cmds.JoinOutcome{}, cliframe.Failf("cannot write into %s: %v; nothing was installed", s.shown(dir), reason).WithHint("mash join " + req.File)
+		return cmds.JoinOutcome{}, cliframe.Failf("cannot write into %s: %v; nothing was installed", s.shown(dir), reason).WithHint("mash doctor")
 	}
 	var caTmp, cfgTmp string
 	if writeCA {
@@ -429,20 +429,9 @@ func (s joinSvc) Join(_ context.Context, req cmds.JoinRequest) (cmds.JoinOutcome
 	var made []string // what this run created, by exact path, removed if a later step fails
 	// undo puts the folder back as it was and returns what it could not: the exact paths a rollback step failed on.
 	undo := func() (left []string, kept string) {
-		for _, m := range made {
-			if err := joinRemove(m); err != nil && !errors.Is(err, fs.ErrNotExist) {
-				left = append(left, m)
-			}
-		}
-		if backup != "" {
-			if err := joinRename(backup, credsPath); err != nil {
-				// the new creds are still in place; the old ones stay under the backup name, so keep them
-				left = append(left, credsPath, backup)
-				kept = backup
-				temps = slices.DeleteFunc(temps, func(t string) bool { return t == backup })
-			}
-		} else if err := joinRemove(credsPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			left = append(left, credsPath)
+		left, kept = joinUndo(made, backup, credsPath)
+		if kept != "" && kept == backup {
+			temps = slices.DeleteFunc(temps, func(t string) bool { return t == backup })
 		}
 		return left, kept
 	}
@@ -452,19 +441,7 @@ func (s joinSvc) Join(_ context.Context, req cmds.JoinRequest) (cmds.JoinOutcome
 		if len(left) == 0 {
 			return fail(err)
 		}
-		shown := make([]string, len(left))
-		for i, l := range left {
-			shown[i] = s.shown(l)
-		}
-		verb := " was left"
-		if len(shown) > 1 {
-			verb = " were left"
-		}
-		note := ""
-		if kept != "" {
-			note = "; old creds kept at " + s.shown(kept)
-		}
-		return cmds.JoinOutcome{}, cliframe.Failf("could not finish and could not undo: %s%s%s", strings.Join(shown, ", "), verb, note).WithHint("mash doctor")
+		return cmds.JoinOutcome{}, s.undoFailure(left, kept)
 	}
 	if caTmp != "" {
 		if err := joinRename(caTmp, caPath); err != nil {
@@ -486,4 +463,45 @@ func cloneConfig(m map[string]json.RawMessage) map[string]json.RawMessage {
 		c[k] = v
 	}
 	return c
+}
+
+// joinUndo removes what a join run made (by exact path) and puts a replaced creds file back from its backup. It returns
+// the paths it could not clean up. When the backup cannot be restored the new creds stay in place and the old ones are
+// kept: the backup is linked to <creds>.old (never over an existing file), and kept is that path; if that cannot be
+// done the backup keeps its own name and kept is that.
+func joinUndo(made []string, backup, credsPath string) (left []string, kept string) {
+	for _, m := range made {
+		if err := joinRemove(m); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			left = append(left, m)
+		}
+	}
+	if backup == "" {
+		if err := joinRemove(credsPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			left = append(left, credsPath)
+		}
+		return left, ""
+	}
+	if err := joinRename(backup, credsPath); err != nil {
+		left = append(left, credsPath)
+		kept = backup
+		if old := credsPath + ".old"; os.Link(backup, old) == nil {
+			os.Remove(backup)
+			kept = old
+		}
+	}
+	return left, kept
+}
+
+// undoFailure is the failure for a rollback that left paths behind: it names each by exact path and, when a replaced
+// creds file could not be put back, where the old creds are kept.
+func (s joinSvc) undoFailure(left []string, kept string) *cliframe.Error {
+	shown := make([]string, len(left))
+	for i, l := range left {
+		shown[i] = s.shown(l)
+	}
+	note := ""
+	if kept != "" {
+		note = "; old creds kept at " + s.shown(kept)
+	}
+	return cliframe.Failf("could not finish and could not undo: %s left%s", strings.Join(shown, ", "), note).WithHint("mash doctor")
 }
