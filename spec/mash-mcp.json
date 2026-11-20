@@ -75,9 +75,15 @@
    "errors": [
     {
      "case": "An address in another form",
-     "text": "error: acme_demo_alice is not an address; write it as acme.demo.alice",
+     "text": "error: acme_demo_alice is not an address; write it as acme.demo.alice\nhint: mash send --help",
      "stream": "stderr",
      "exit": 2
+    },
+    {
+     "case": "Nothing arrives on standard input",
+     "text": "error: no message text arrived on standard input",
+     "stream": "stderr",
+     "exit": 1
     },
     {
      "case": "No such endpoint",
