@@ -33,7 +33,7 @@ type Joiner interface {
 type JoinParams struct {
 	File    string `json:"file" arg:"file" desc:"The join file whoever runs the mesh gave you."`
 	Key     string `json:"key,omitempty" flag:"--key" value:"path" desc:"Your own seed file, when the join file was made for a public key you supplied."`
-	Replace bool   `json:"replace,omitempty" flag:"--replace" desc:"Replace credentials already installed here for the same address."`
+	Replace bool   `json:"replace,omitempty" flag:"--replace" desc:"Replace the creds already installed here for the same address. It replaces nothing else: not the server, not the certificate authority."`
 	DryRun  bool   `json:"dry_run,omitempty" flag:"--dry-run" desc:"Print what would change, and change nothing."`
 }
 

@@ -43,6 +43,13 @@ const (
 	ReasonCouldNotTake   = "this session could not take this endpoint"
 )
 
+// The delivery row's words for a session whose hooks have not delivered mail yet (a warning) and for one whose hooks
+// are suspected, degraded or refused (a failure).
+const (
+	ReasonHooksNotRun  = "hooks have not run in this session yet"
+	ReasonHooksFailing = "hooks are not delivering mail to this session"
+)
+
 // leaseReason is the words for a session that does not hold its endpoint ("" when it does): the cause of one that
 // could not take it follows after ": ".
 func leaseReason(lease, cause string) string {

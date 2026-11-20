@@ -40,6 +40,16 @@ func (s *statusSource) mailHeld() bool {
 	return failing
 }
 
+// hookState is the session's hook state (endpoint.HookRan and the others): not_run until a spool is bound.
+func (s *statusSource) hookState() string {
+	if s.state != nil {
+		if st := s.state.Load(); st != nil && st.ep != nil {
+			return st.ep.HookState()
+		}
+	}
+	return endpoint.HookNotRun
+}
+
 // lease is the session's own lease state for status and doctor: "" when it holds its endpoint (or has not tried
 // yet, or hands over from an earlier serve of its own session, which is not a loss), cmds.LeaseOther while another
 // session holds the endpoint, cmds.LeaseLost once a newer session took it, and cmds.LeaseFailed, with the cause, when
@@ -84,17 +94,16 @@ type sessionSvc struct {
 }
 
 func (s sessionSvc) Health(ctx context.Context) (cmds.HealthReport, error) {
-	rep, err := (&healthSvc{cfg: s.src.cfg, cfgErr: s.src.cfgErr, session: true, mailHeld: s.src.mailHeld, lease: s.src.lease}).Health(ctx)
+	rep, err := (&healthSvc{cfg: s.src.cfg, cfgErr: s.src.cfgErr, session: true, mailHeld: s.src.mailHeld, lease: s.src.lease, hooks: s.src.hookState}).Health(ctx)
 	if err == nil {
 		rep.Session = s.src.sessionNow(rep.Lease == "")
 	}
 	return rep, err
 }
 
-// sessionNow is what status --detail says about this session: whether it holds its endpoint, what the hook detector
-// has seen (ran when no hook is known to have failed to run), and whether its mail folder works.
+// sessionNow is what status --detail says about this session: whether it holds its endpoint, whether the agent host's hooks have delivered mail in it, and whether its mail folder works.
 func (s *statusSource) sessionNow(noLease bool) *cmds.SessionState {
-	st := &cmds.SessionState{HoldsEndpoint: false, Hooks: cmds.HooksRan, Storage: cmds.StorageOK}
+	st := &cmds.SessionState{HoldsEndpoint: false, Hooks: cmds.HooksNotRun, Storage: cmds.StorageOK}
 	if s.state == nil {
 		return st
 	}
@@ -103,12 +112,7 @@ func (s *statusSource) sessionNow(noLease bool) *cmds.SessionState {
 		return st
 	}
 	st.HoldsEndpoint = noLease
-	switch h, _ := cur.ep.Hookless(); h {
-	case endpoint.HooklessProven:
-		st.Hooks = cmds.HooksNotRun
-	case endpoint.HooklessSuspected:
-		st.Hooks = cmds.HooksSuspected
-	}
+	st.Hooks = cur.ep.HookState()
 	if s.mailHeld() {
 		st.Storage = cmds.StorageFailing
 	}

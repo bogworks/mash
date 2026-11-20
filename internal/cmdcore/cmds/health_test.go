@@ -343,6 +343,18 @@ func TestDoctorMatchesSpec(t *testing.T) {
 				t.Errorf("%s: %q lacks %q", oc["case"], out, oc["text"])
 			}
 			continue
+		case "In a session whose hooks have not delivered yet", "In a session whose hooks are failing":
+			// the spec gives the delivery row alone: warn for hooks that have not run, FAIL for hooks that are failing
+			state, detail := cmds.CheckWarn, cmds.ReasonHooksNotRun
+			if oc["case"] == "In a session whose hooks are failing" {
+				state, detail = cmds.CheckFail, cmds.ReasonHooksFailing
+			}
+			_, out, _ := runDoctor(report("acme.demo.bob", false, ok("config", ""),
+				cmds.HealthCheck{Name: "delivery", State: state, Detail: detail}), cliframe.Global{})
+			if !strings.Contains(out, oc["text"].(string)+"\n") {
+				t.Errorf("%s: %q lacks %q", oc["case"], out, oc["text"])
+			}
+			continue
 		case "The server's certificate is not trusted", "The server does not offer encryption":
 			// the spec gives the server row alone: the row of a report with that detail is word for word the spec's
 			row := strings.TrimPrefix(oc["text"].(string), "server    FAIL  ")

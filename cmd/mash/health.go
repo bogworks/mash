@@ -13,6 +13,7 @@ import (
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/endpoint"
 	"github.com/bogworks/mash/internal/natsauth"
+	"github.com/bogworks/mash/internal/spool"
 )
 
 // healthSvc is cmds.Health: the checks behind status and doctor, one implementation for the command line and the MCP
@@ -28,6 +29,9 @@ type healthSvc struct {
 	// lease says, in a session, whether it holds its endpoint now: "" when it does (or at a shell, where it is nil),
 	// else cmds.LeaseOther, LeaseLost or LeaseFailed with the cause of the last.
 	lease func() (state, cause string)
+	// hooks says, in a session, whether the agent host's hooks have delivered mail in it: endpoint.HookRan, HookNotRun,
+	// HookSuspected, HookDegraded or HookRefused. nil at a shell.
+	hooks func() string
 }
 
 // leaseNow is the session's lease state, "" when it holds the endpoint or there is no session.
@@ -236,14 +240,36 @@ func (h *healthSvc) deliveryCheck() cmds.HealthCheck {
 		}
 		return cmds.HealthCheck{Name: cmds.CheckDelivery, State: cmds.CheckFail, Detail: d}
 	}
-	if h.mailHeld == nil || !h.mailHeld() {
-		return cmds.HealthCheck{Name: cmds.CheckDelivery, State: cmds.CheckOK}
+	if h.mailHeld != nil && h.mailHeld() {
+		detail := cmds.ReasonMailHeld
+		if dir, err := endpoint.SpoolDir(h.cfg); err == nil {
+			detail += ": " + config.Tilde(dir)
+		}
+		return cmds.HealthCheck{Name: cmds.CheckDelivery, State: cmds.CheckFail, Detail: detail}
 	}
-	detail := cmds.ReasonMailHeld
-	if dir, err := endpoint.SpoolDir(h.cfg); err == nil {
-		detail += ": " + config.Tilde(dir)
+	if h.hooks != nil {
+		switch h.hooks() {
+		case endpoint.HookNotRun:
+			return cmds.HealthCheck{Name: cmds.CheckDelivery, State: cmds.CheckWarn, Detail: cmds.ReasonHooksNotRun}
+		case endpoint.HookSuspected, endpoint.HookDegraded, endpoint.HookRefused:
+			return cmds.HealthCheck{Name: cmds.CheckDelivery, State: cmds.CheckFail, Detail: cmds.ReasonHooksFailing}
+		}
 	}
-	return cmds.HealthCheck{Name: cmds.CheckDelivery, State: cmds.CheckFail, Detail: detail}
+	return cmds.HealthCheck{Name: cmds.CheckDelivery, State: cmds.CheckOK}
+}
+
+// sessionOnDisk is what status says at a shell about the session on this machine, from what its serve recorded in the
+// spool: nil when there is none (no session, or its serve is gone).
+func (h *healthSvc) sessionOnDisk() *cmds.SessionState {
+	dir, err := endpoint.SpoolDir(h.cfg)
+	if err != nil {
+		return nil
+	}
+	hooks, storage, ok := endpoint.SessionOnDisk(spool.Spool{Dir: dir})
+	if !ok {
+		return nil
+	}
+	return &cmds.SessionState{HoldsEndpoint: true, Hooks: hooks, Storage: storage}
 }
 
 // Health runs the checks in order: config, creds, server, sign-in, delivery, refused, and always returns all six rows. A
@@ -303,6 +329,11 @@ func (h *healthSvc) Health(ctx context.Context) (cmds.HealthReport, error) {
 	}
 	rep.Checks = append(rep.Checks, h.refusedCheck()) // the count is kept on this machine: it shows with the server down
 	rep.MailHeld = h.mailHeld != nil && h.mailHeld()
+	if !h.session && rep.Online { // a shell on the session's machine reads what its serve recorded, as the tool would say it
+		if rep.Session = h.sessionOnDisk(); rep.Session != nil && rep.Session.Storage == cmds.StorageFailing {
+			rep.MailHeld = true
+		}
+	}
 	if rep.Lease, rep.LeaseCause = h.leaseNow(); rep.Lease != "" {
 		rep.Online = false // this session does not hold the endpoint: its mail does not reach it
 	}

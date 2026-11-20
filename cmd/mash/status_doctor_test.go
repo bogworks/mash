@@ -450,6 +450,9 @@ func TestStatusAndDoctorDoorsAgree(t *testing.T) {
 		s.initialize(t)
 		for _, tool := range []string{"status", "doctor"} {
 			id++
+			if name == "ready" { // a hook has run in the session, so its delivery row is ok (the shell skips it, see below)
+				hookRan(t, w, s, "a")
+			}
 			cli := runMash(env, tool)
 			cj := runMash(env, tool, "--json")
 			r := s.call(t, id, tool, `{}`)

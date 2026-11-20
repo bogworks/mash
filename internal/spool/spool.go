@@ -124,6 +124,7 @@ const (
 	ownerFile   = ".owner"
 	refusedFile = ".refused"
 	toldFile    = ".told"
+	hookState   = ".hookstate"
 	aliveFile   = ".alive"
 	waiterPref  = ".waiting."
 
@@ -560,6 +561,10 @@ func (s Spool) Own(record string) error {
 	if err := os.Remove(filepath.Join(s.Dir, toldFile)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
+	// So is the hook state the previous holder's serve recorded (NoteHookState).
+	if err := os.Remove(filepath.Join(s.Dir, hookState)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
 	// The new holder's own waiting record (a serve that waited, then bound) is done; so is any other for its pid.
 	var rec struct {
 		PID int `json:"pid"`
@@ -653,6 +658,16 @@ func (s Spool) Refused() (at time.Time, why string, ok bool) {
 		_ = json.Unmarshal(b, &r)
 	}
 	return fi.ModTime(), r.Why, true
+}
+
+// NoteHookState records the state of the hook detectors that the serve holding this spool keeps (JSON, atomic write).
+// It holds no mail and no secret. Own removes it, so it is always the current holder's.
+func (s Spool) NoteHookState(b []byte) error { return s.writeOrRemove(hookState, string(b)) }
+
+// HookState is what NoteHookState recorded, and whether there is one.
+func (s Spool) HookState() ([]byte, bool) {
+	b, err := os.ReadFile(filepath.Join(s.Dir, hookState))
+	return b, err == nil
 }
 
 // Lock takes the spool's exclusive advisory lock (the file .lock, blocking) and returns the function that releases

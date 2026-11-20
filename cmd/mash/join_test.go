@@ -175,6 +175,15 @@ func TestJoinMatchesSpec(t *testing.T) {
 			t.Error("creds were written into another mesh's folder")
 		}
 	})
+	do("This folder trusts a different certificate authority", func(w *joinWorld, c specCase) {
+		if r := w.run("join", "acme.demo.bob.join"); r.code != 0 {
+			t.Fatal(r)
+		}
+		m := newJoinMaterial(t, "acme.demo.carol")
+		ca := strings.Replace(testCAPEM, "MIIBhTCC", "MIIBhTCD", 1)
+		writeJoin(t, "acme.demo.bob.join", joinfile.File{MashJoin: 1, Address: "acme.demo.carol", Servers: []string{"tls://myserver:4222"}, CA: &ca, Creds: string(m.creds)})
+		c.check(t, w.run("join", "acme.demo.bob.join"))
+	})
 	do("With --dry-run", func(w *joinWorld, c specCase) {
 		c.check(t, w.run("join", "acme.demo.bob.join", "--dry-run"))
 		if _, err := os.Stat(w.cfg); err == nil {
@@ -377,7 +386,7 @@ func TestJoinSecondEndpointOfTheSameMesh(t *testing.T) {
 	before := treeSnapshot(t, w.cfg)
 	writeJoin(t, "dave.join", joinfile.File{MashJoin: 1, Address: "acme.demo.dave", Servers: []string{"tls://elsewhere:4222"}, Creds: string(m.creds)})
 	r := w.run("join", "dave.join")
-	if r.code != 1 || r.out != "" || r.errs != "error: this configuration folder is set up for tls://myserver:4222\nhint: mash join dave.join --config-dir <another folder>\n" {
+	if r.code != 1 || r.out != "" || !strings.HasSuffix(r.errs, " was set up with a different server;\n       nothing was changed\nhint: mash join dave.join --config-dir <another folder>\n") {
 		t.Errorf("another mesh: %+v", r)
 	}
 	if after := treeSnapshot(t, w.cfg); after != before {
@@ -535,7 +544,7 @@ func TestJoinFailedWriteLeavesNoPartialState(t *testing.T) {
 	}
 }
 
-func TestJoinCARotationNeedsReplace(t *testing.T) {
+func TestJoinDifferentCAIsRefusedEvenWithReplace(t *testing.T) {
 	w := newJoinWorld(t)
 	if r := w.run("join", "acme.demo.bob.join"); r.code != 0 {
 		t.Fatal(r)
@@ -544,11 +553,19 @@ func TestJoinCARotationNeedsReplace(t *testing.T) {
 	ca := strings.Replace(testCAPEM, "MIIBhTCC", "MIIBhTCD", 1)
 	writeJoin(t, "carol.join", joinfile.File{MashJoin: 1, Address: "acme.demo.carol", Servers: []string{"tls://myserver:4222"}, CA: &ca, Creds: string(m.creds)})
 	r := w.run("join", "carol.join")
-	if r.code != 1 || !strings.Contains(r.errs, "is a different certificate authority") || !strings.HasSuffix(r.errs, "hint: mash join carol.join --replace\n") {
+	if r.code != 1 || !strings.Contains(r.errs, " was set up with a different ca;\n") || !strings.HasSuffix(r.errs, "hint: mash join carol.join --config-dir <another folder>\n") {
 		t.Errorf("%+v", r)
 	}
+	if r := w.run("join", "carol.join", "--replace"); r.code != 1 || !strings.Contains(r.errs, " was set up with a different ca;") {
+		t.Errorf("--replace: %+v", r)
+	}
 	if got, _ := os.ReadFile(filepath.Join(w.cfg, "ca.pem")); string(got) != testCAPEM {
-		t.Error("ca.pem was replaced without --replace")
+		t.Error("ca.pem was replaced")
+	}
+	// a join file with no certificate authority, where the folder has one, is refused too
+	writeJoin(t, "dan.join", joinfile.File{MashJoin: 1, Address: "acme.demo.dan", Servers: []string{"tls://myserver:4222"}, Creds: string(m.creds)})
+	if r := w.run("join", "dan.join"); r.code != 1 || !strings.Contains(r.errs, " was set up with a different ca;") {
+		t.Errorf("no ca: %+v", r)
 	}
 }
 

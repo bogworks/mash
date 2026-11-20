@@ -140,6 +140,8 @@ type Endpoint struct {
 	// hl is the hookless detector's state (hookless.go), guarded by its own mutex: tool calls and the read tool reach
 	// it from other goroutines than Run's.
 	hl hookless
+	// hookRecorded is what RecordHookState last wrote (hookstate.go), without its time.
+	hookRecorded atomic.Pointer[string]
 
 	// The test-only before-ack failpoint (hook.go): nil outside the crash tests.
 	failBeforeAck func(seq uint64)
@@ -761,6 +763,9 @@ func (e *Endpoint) Run(ctx context.Context, deliver Deliverer) error {
 	every := DirectoryPoll
 	go func() { e.pollDirectory(ctx, every); close(polled) }()
 	defer func() { cancel(); <-polled }()
+	recorded := make(chan struct{})
+	go func() { e.recordHookStates(ctx); close(recorded) }()
+	defer func() { cancel(); <-recorded }()
 	stop, err := e.consume(ctx, deliver)
 	if err != nil {
 		return err
