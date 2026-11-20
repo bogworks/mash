@@ -396,8 +396,8 @@
    "Each tool is one everyday mash command with the same name, the same parameters (an option --reply-to is the parameter reply_to) and the same result. Setup, integration and raw SAP commands have no tool."
   ],
   [
-   "With no endpoint, or a broken configuration",
-   "Only status, doctor and version are offered, so the agent can find out what is wrong."
+   "With no endpoint named, or a broken configuration",
+   "Only status, doctor and version are offered, so the agent can find out what is wrong. The server never picks an endpoint by itself: a session is an endpoint only when MASH_ENDPOINT, --endpoint or the configuration file says which."
   ],
   [
    "Waking an idle session",
