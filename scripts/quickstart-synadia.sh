@@ -60,7 +60,7 @@ TEAM="" ACCOUNT="" OWNER="" GROUP="" MASH="mash" CONFIG_DIR="" DRY=0 FORCE=0 TOK
 ENDPOINTS=()
 ADMIN_ID="" TMP="" LOCK_DIR="" LOCK_HELD=0 PROVISIONING="" PROVISIONING_KEY="" # PROVISIONING: the endpoint whose `mash admin provision` is running or failed
 CREATED_IDS=() CREATED_NAMES=() CREATED_CREDS=() PROVISIONED=() # endpoint users this run created (id, name, whether it wrote their creds file), endpoints provisioned
-CFG_BACKUP="" CFG_CREATED=0 CFG_PENDING=0 # config.json: its backup, whether this run created it, whether a failure must undo the write
+CFG_PENDING=0 # config.json: this run wrote it, and a failure must remove it (an existing config.json is refused, so it is always this run's)
 
 say() { echo "$*"; }
 
@@ -118,6 +118,11 @@ if [ -z "$CONFIG_DIR" ]; then
 fi
 case "$CONFIG_DIR" in /*) ;; *) die "the config directory '$CONFIG_DIR' must be an absolute path" ;; esac
 CONFIG="$CONFIG_DIR/config.json"
+# An existing config.json is refused, before anything is created: its owner, endpoint and other settings would not match the
+# endpoints this run creates, and merging only the servers would leave them wrong.
+if [ -e "$CONFIG" ] || [ -L "$CONFIG" ]; then
+  die "$CONFIG already exists, and this script writes a new one rather than change it. Nothing was created; use a fresh MASH_CONFIG_DIR (or --config-dir)"
+fi
 
 # mash reads these in every later session and they beat config.json: do not let them skew this run.
 for v in MASH_SERVER MASH_ENDPOINT MASH_CREDS MASH_ADMIN_CREDS MASH_LAUNCH_TOKEN; do
@@ -205,10 +210,7 @@ cleanup() {
     [ "${#failed[@]}" -eq 0 ] || echo "quickstart-synadia: COULD NOT delete the NATS user(s) ${failed[*]}: delete them in the Synadia console." >&2
   fi
   if [ "$rc" -ne 0 ] && [ "$CFG_PENDING" -eq 1 ]; then # setup failed before any endpoint was provisioned: undo the config.json write
-    if [ -n "$CFG_BACKUP" ] && [ -f "$CFG_BACKUP" ]; then
-      if mv -f "$CFG_BACKUP" "$CONFIG"; then say "Setup failed: restored the previous $CONFIG."
-      else echo "quickstart-synadia: COULD NOT restore the previous $CONFIG; a copy is at $CFG_BACKUP" >&2; TMP=""; fi
-    elif [ "$CFG_CREATED" -eq 1 ]; then rm -f "$CONFIG" && say "Setup failed: removed the $CONFIG this run created."; fi
+    rm -f "$CONFIG" && say "Setup failed: removed the $CONFIG this run created."
   fi
   [ -z "$TMP" ] || rm -rf "$TMP"
   if [ "$LOCK_HELD" -eq 1 ]; then rm -f "$LOCK_DIR/pid"; rmdir "$LOCK_DIR" 2>/dev/null || true; fi
@@ -277,16 +279,6 @@ if [ "$DRY" -ne 1 ]; then
   mkdir "$LOCK_DIR" 2>/dev/null || die "another quickstart run is using $CONFIG_DIR, or remove the stale lock if none is running (only then; it holds a pid file): rm $LOCK_DIR/pid && rmdir $LOCK_DIR"
   LOCK_HELD=1
   echo "$$" >"$LOCK_DIR/pid"
-fi
-
-# Config conflict, before anything is created.
-if [ -e "$CONFIG" ]; then
-  jq -e 'type == "object"' "$CONFIG" >/dev/null 2>&1 || die "$CONFIG is not a JSON object; fix it first"
-  [ "$(jq -r '.creds // "" | tostring' "$CONFIG")" = "" ] || die "$CONFIG has a \"creds\" key, which would beat the new <address>.creds files; remove it"
-  if [ "$FORCE" -ne 1 ]; then
-    cur=$(jq -r '.servers // "" | if type == "array" then join(",") else tostring end' "$CONFIG")
-    [ -z "$cur" ] || [ "$cur" = "$NATS_URL" ] || die "$CONFIG already has servers '$cur', not '$NATS_URL'; use --force to overwrite it"
-  fi
 fi
 
 # An existing <address>.creds may be the only local copy of another account's (or a removed user's) creds.
@@ -359,12 +351,8 @@ mkdir -p "$CONFIG_DIR"
 chmod 700 "$CONFIG_DIR" 2>/dev/null || true
 # ---- config.json (before the admin commands: they read the servers from it) -------------------
 tmpcfg=$(mktemp "$CONFIG_DIR/.config.json.XXXXXX")
-if [ -e "$CONFIG" ]; then
-  CFG_BACKUP="$TMP/config.json.bak"; cp -p "$CONFIG" "$CFG_BACKUP" || die "cannot back up $CONFIG"
-else CFG_CREATED=1; fi
 CFG_PENDING=1
-if [ -e "$CONFIG" ]; then jq --arg u "$NATS_URL" '. + {servers: [$u]}' "$CONFIG" >"$tmpcfg"
-else jq -n --arg u "$NATS_URL" '{servers: [$u]}' >"$tmpcfg"; fi
+jq -n --arg u "$NATS_URL" '{servers: [$u]}' >"$tmpcfg"
 mv "$tmpcfg" "$CONFIG"
 say "Wrote $CONFIG."
 

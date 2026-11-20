@@ -392,6 +392,7 @@ func TestQuickstartRefusals(t *testing.T) {
 		if first.code != 0 {
 			t.Fatalf("setup run: exit %d:\n%s", first.code, first.out)
 		}
+		_ = os.Remove(filepath.Join(home, ".config", "mash", "config.json")) // an existing config.json is refused; the directory still holds the endpoints
 		f := newFake(t, e, 5)
 		r := runScript(t, f, home, nil, "--group", "eng", "--owner", "alice", "--endpoint", "new-a", "--endpoint", "new-b")
 		if r.code == 0 || !strings.Contains(r.out, "allows 5 streams") || !strings.Contains(r.out, qa("old-a")) ||
@@ -414,24 +415,6 @@ func TestQuickstartRefusals(t *testing.T) {
 		}
 		cfgPath := func(home string) string { return filepath.Join(home, ".config", "mash", "config.json") }
 		// Same directory, so the plan does not fit (2 shared + 2 held + 2 planned > 5), after init.
-		t.Run("existing config with force", func(t *testing.T) {
-			f := newFake(t, e2, 5)
-			home := t.TempDir()
-			if err := os.MkdirAll(filepath.Dir(cfgPath(home)), 0o700); err != nil {
-				t.Fatal(err)
-			}
-			old := []byte("{ \"servers\": [\"nats://other:4222\"],\n  \"settle_ms\": 50 }\n")
-			if err := os.WriteFile(cfgPath(home), old, 0o600); err != nil {
-				t.Fatal(err)
-			}
-			r := runScript(t, f, home, nil, "--force", "--group", "eng", "--owner", "alice", "--endpoint", "new-a", "--endpoint", "new-b")
-			if r.code == 0 || !strings.Contains(r.out, "allows 5 streams") || !strings.Contains(r.out, "restored the previous") {
-				t.Fatalf("want a refusal that restores the config, exit %d:\n%s", r.code, r.out)
-			}
-			if got, err := os.ReadFile(cfgPath(home)); err != nil || !bytes.Equal(got, old) {
-				t.Errorf("config.json = %q, %v; want the old bytes %q", got, err, old)
-			}
-		})
 		t.Run("fresh run", func(t *testing.T) {
 			f := newFake(t, e2, 5)
 			home := t.TempDir()
@@ -444,19 +427,26 @@ func TestQuickstartRefusals(t *testing.T) {
 			}
 		})
 	})
-	t.Run("different config without force", func(t *testing.T) {
-		f := newFake(t, e, 5)
-		home := t.TempDir()
-		dir := filepath.Join(home, ".config", "mash")
-		if err := os.MkdirAll(dir, 0o700); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"servers":["nats://other:4222"]}`), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		r := runScript(t, f, home, nil, "--group", "eng", "--owner", "alice", "--endpoint", "a")
-		if r.code == 0 || !strings.Contains(r.out, "--force") || f.postCount() != 0 {
-			t.Errorf("exit %d, posts %d:\n%s", r.code, f.postCount(), r.out)
+	t.Run("existing config refused", func(t *testing.T) {
+		for _, extra := range [][]string{nil, {"--force"}} {
+			f := newFake(t, e, 5)
+			home := t.TempDir()
+			dir := filepath.Join(home, ".config", "mash")
+			if err := os.MkdirAll(dir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			old := []byte("{\"servers\":[\"nats://other:4222\"],\"owner\":\"bob\"}\n")
+			if err := os.WriteFile(filepath.Join(dir, "config.json"), old, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			args := append(slices.Clone(extra), "--group", "eng", "--owner", "alice", "--endpoint", "a")
+			r := runScript(t, f, home, nil, args...)
+			if r.code == 0 || !strings.Contains(r.out, "fresh MASH_CONFIG_DIR") || f.postCount() != 0 || len(f.names()) != 0 {
+				t.Errorf("args %v: exit %d, posts %d, users %v:\n%s", extra, r.code, f.postCount(), f.names(), r.out)
+			}
+			if got, err := os.ReadFile(filepath.Join(dir, "config.json")); err != nil || !bytes.Equal(got, old) {
+				t.Errorf("args %v: config.json = %q, %v; want unchanged %q", extra, got, err, old)
+			}
 		}
 	})
 	t.Run("existing creds file", func(t *testing.T) {
@@ -555,7 +545,8 @@ func TestQuickstartRefusesStaleDirectoryRecord(t *testing.T) {
 	if first := runScript(t, newFake(t, e, 6), home, nil, "--group", "eng", "--owner", "alice", "--endpoint", "old-a", "--no-test"); first.code != 0 {
 		t.Fatalf("setup run: exit %d:\n%s", first.code, first.out)
 	}
-	_ = os.Remove(credsPath(home, qa("old-a"))) // the user and its creds are gone; only the directory record is left
+	_ = os.Remove(credsPath(home, qa("old-a")))                          // the user and its creds are gone; only the directory record is left
+	_ = os.Remove(filepath.Join(home, ".config", "mash", "config.json")) // an existing config.json is refused
 	// A new fake has no NATS users: old-a's directory record is stale.
 	f := newFake(t, e, 6)
 	r := runScript(t, f, home, nil, "--group", "eng", "--owner", "alice", "--endpoint", "old-a2", "--endpoint", "old-a")
