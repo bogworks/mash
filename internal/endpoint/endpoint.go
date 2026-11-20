@@ -404,6 +404,7 @@ func OpenClientWith(ctx context.Context, cfg config.Config, opts ClientOptions) 
 		return nil, fmt.Errorf("mash: connect %s: %w", config.RedactURL(cfg.URL), config.RedactErr(natsauth.TLSHint(err), cfg.URL))
 	}
 	refs.flush = nc.FlushWithContext
+	refs.publish = func(_ context.Context, subject string) error { return nc.Publish(subject, nil) }
 	e := &Endpoint{cfg: cfg, ident: ident, key: key, nc: nc, id: id, subj: subj,
 		log: log.New(os.Stderr, "mash["+cfg.DisplayName()+"]: ", 0), instance: nuid.Next(), waking: newWakingTracker(), relay: newRelayTracker(cfg.RelayWindow), refusals: refs, connHook: hook,
 		failBeforeAck: failpointBeforeAck(os.Getenv("MASH_SERVE_FAILPOINT")), spoolReq: make(chan spoolBind),

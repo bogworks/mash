@@ -2,6 +2,8 @@ package endpoint
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"strings"
 	"sync"
@@ -64,18 +66,26 @@ func (e *RefusedError) Is(target error) bool {
 // unsettled could arrive after the next send registers. So such a send marks its subject dirty, and the next send on
 // a dirty subject first runs a barrier before registering. The connection is an ordered stream: the server's -ERR for
 // a publish is written before the PONG for a PING sent after it, so once the flush returns the violation has reached
-// the client. nats.go hands it to the error handler on a separate goroutine, so the barrier then settles: it waits
-// (at most settleCap) until the count of connection errors seen has not changed for two ticks. Violations delivered
-// meanwhile find no waiter and are dropped. The barrier is per subject: while one runs, other sends on that subject
-// wait for it (bounded by their contexts) and register only when it is done, and the dirty mark is cleared only after
-// the flush returns. If the flush fails the send registers unattributable (blind): it never reports a definite
-// refusal and keeps timeout semantics. A send that ended by ack or by a definite refusal leaves nothing in flight and
-// does not mark the subject, so the barrier costs only after a timeout.
+// the client. nats.go hands it to the error handler on a separate goroutine, in order, so the barrier then settles
+// with a sentinel: it publishes to a subject no endpoint may publish to (sentinelPrefix) and flushes again. The
+// server denies it, and its violation is written after every earlier one and before that flush's PONG; the handler
+// goroutine delivers errors in order, so when note sees the sentinel's violation every earlier violation has been
+// delivered. note swallows the sentinel's violation: it never refuses or taints a waiter. Violations delivered
+// meanwhile find no waiter and are dropped. The wait is bounded by the caller's context and sentinelCap. The barrier is
+// per subject: while one runs, other sends on that subject wait for it (bounded by their contexts) and register only
+// when it is done, and the dirty mark is cleared only after the flush returns. If the flush fails the send registers
+// unattributable (blind): it never reports a definite refusal and keeps timeout semantics. A send that ended by ack or
+// by a definite refusal leaves nothing in flight and does not mark the subject, so the barrier costs only after a
+// timeout.
 //
-// Residual limit: the settle narrows the asynchronous window, it does not close it. nats.go exposes no way to learn
-// that the error handler's queue has drained, so a violation still queued behind a slow handler for longer than the
-// settle can be taken for a later send's. The refusal error carries the send's idempotency key, so acting on such a
-// false refusal by retrying with that key is harmless: it sends at most once within the duplicate window.
+// Residual limit: the sentinel closes the window only for an account that denies it. Every permission set mash issues
+// allows publishing only to agents.*, $SRV, $JS, $KV and _INBOX.<owner> subjects, so _MASH.settle.* is denied. For
+// credentials that do not deny it (a broad admin user), or when the sentinel cannot be sent, no violation comes
+// back: the wait ends at sentinelCap and falls back to the older timer-bounded settle (the count of connection errors
+// seen unchanged for two ticks, at most settleCap), which narrows the window and does not close it: a violation still
+// queued behind a slow handler for longer than that can be taken for a later send's. The refusal error carries the
+// send's idempotency key, so acting on such a false refusal by retrying with that key is harmless: it sends at most
+// once within the duplicate window.
 type refusals struct {
 	mu      sync.Mutex
 	waiters map[string]*waiterSet
@@ -84,12 +94,17 @@ type refusals struct {
 	seen    atomic.Uint64            // every connection error handed to note, counted before it is parsed
 	// flush is the ordering barrier; a test replaces it. It is called with a deadline-bearing context.
 	flush func(ctx context.Context) error
+	// publish sends a message with no payload to subject, unflushed; nil means no sentinel (timer-bounded settle only).
+	publish func(ctx context.Context, subject string) error
+	// sentinelWait overrides sentinelCap when set (tests).
+	sentinelWait time.Duration
+	sentinels    map[string]chan struct{} // sentinel subject -> closed by note when its violation arrives; guarded by mu
 	// parse extracts the denied subject from a connection error; a test replaces it.
 	parse func(error) (string, bool)
 }
 
 func newRefusals() *refusals {
-	return &refusals{waiters: map[string]*waiterSet{}, dirty: map[string]int{}, gates: map[string]chan struct{}{}, parse: parseViolation}
+	return &refusals{waiters: map[string]*waiterSet{}, dirty: map[string]int{}, gates: map[string]chan struct{}{}, sentinels: map[string]chan struct{}{}, parse: parseViolation}
 }
 
 // waiterSet is the sends waiting on one subject, and whether no violation may be taken as a definite refusal for
@@ -103,7 +118,11 @@ type waiterSet struct {
 const (
 	// barrierCap bounds the flush barrier regardless of the caller's deadline.
 	barrierCap = 2 * time.Second
-	// settleCap bounds the wait for the error handler's goroutine after the flush; settleTick is its polling step.
+	// sentinelCap bounds the wait for the sentinel's violation; sentinelPrefix is a subject space no mash permission
+	// set allows publishing to.
+	sentinelCap    = 2 * time.Second
+	sentinelPrefix = "_MASH.settle."
+	// settleCap bounds the timer-bounded fallback wait for the error handler's goroutine; settleTick is its polling step.
 	settleCap  = 25 * time.Millisecond
 	settleTick = 5 * time.Millisecond
 )
@@ -116,9 +135,49 @@ func (r *refusals) markDirty(subject string) {
 	r.mu.Unlock()
 }
 
-// settle waits for the connection's error handler to catch up after a flush: until the number of errors seen has
-// not changed for two ticks, at most settleCap. It reports false when ctx ended first.
+// settle waits until every violation the server wrote before the flush has reached note, and reports false when ctx
+// ended first. With a publish seam it sends a sentinel and waits for its violation (see refusals); without one, or
+// when none arrives within sentinelCap, it falls back to settleQuiet.
 func (r *refusals) settle(ctx context.Context) bool {
+	if r.publish == nil {
+		return r.settleQuiet(ctx)
+	}
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return r.settleQuiet(ctx)
+	}
+	subj := sentinelPrefix + hex.EncodeToString(b[:])
+	ch := make(chan struct{})
+	r.mu.Lock()
+	r.sentinels[subj] = ch
+	r.mu.Unlock()
+	defer func() {
+		r.mu.Lock()
+		delete(r.sentinels, subj)
+		r.mu.Unlock()
+	}()
+	if r.publish(ctx, subj) != nil || r.flush(ctx) != nil {
+		return r.settleQuiet(ctx)
+	}
+	wait := sentinelCap
+	if r.sentinelWait > 0 {
+		wait = r.sentinelWait
+	}
+	limit := time.NewTimer(wait)
+	defer limit.Stop()
+	select {
+	case <-ch:
+		return true
+	case <-ctx.Done():
+		return false
+	case <-limit.C:
+		return r.settleQuiet(ctx)
+	}
+}
+
+// settleQuiet is the timer-bounded settle: until the number of errors seen has not changed for two ticks, at most
+// settleCap. It reports false when ctx ended first.
+func (r *refusals) settleQuiet(ctx context.Context) bool {
 	limit := time.NewTimer(settleCap)
 	defer limit.Stop()
 	tick := time.NewTicker(settleTick)
@@ -246,6 +305,13 @@ func (r *refusals) note(err error) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if strings.HasPrefix(subject, sentinelPrefix) { // a barrier's own probe: never a refusal, never ambiguity
+		if ch := r.sentinels[subject]; ch != nil {
+			delete(r.sentinels, subject)
+			close(ch)
+		}
+		return
+	}
 	set := r.waiters[subject]
 	if set == nil {
 		return
