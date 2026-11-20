@@ -1357,7 +1357,7 @@
      },
      {
       "name": "x-notes",
-      "value": "When mash is not installed. The plugin's launcher, run at session start, prints one line on stdout, so the agent sees it and can tell the person: 'mash is not installed: the mash plugin found no mash program. Install it: curl -fsSL https://github.com/bogworks/mash/releases/latest/download/install.sh | bash'. Today nothing is said and the agent simply has no mash tools."
+      "value": "When mash is not installed. The plugin's launcher, run at session start, prints one line on stdout, so the agent sees it and can tell the person: 'mash is not installed: the mash plugin found no mash program. Install it: curl -fsSL <release base>/install.sh | bash'. <release base> is filled in from the plugin's own release setting, the one its launcher already uses to find the program, so a fork or a mirror points at itself; in the project's own plugin it is https://github.com/bogworks/mash/releases/latest/download. Today nothing is said and the agent simply has no mash tools."
      },
      {
       "name": "x-long",

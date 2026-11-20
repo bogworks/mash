@@ -32,13 +32,9 @@ single source and are kept in the repository unchanged from the planner's copy; 
 nothing else goes in `spec/`. Where a file is wrong or silent the builder reports the command and the problem and does not
 improvise.
 
-It supersedes, from contract revision 26 and the target-output pages:
+It reverses, from contract revision 26, by the maintainer's word: the removal of an executing install script, the ban on an agent installing the plugin, the ban on pipe-to-shell installation, and `mashctl endpoint delete` always asking for a confirmation at a terminal (it takes `--yes`). It also supersedes:
 
-* the executing install script;
-* an agent installing the plugin;
 * the three-value confirmation of `mash credential install`;
-* `mashctl endpoint delete` asking for a confirmation at a terminal (it takes `--yes`);
-* pipe-to-shell installation;
 * `mash endpoint status` and `mash server status`, and the six-row `mash status` (it is one line; `mash doctor` owns the checks);
 * the exit codes 4 and 6 in `mash` (the codes are 0, 1 and 2).
 
