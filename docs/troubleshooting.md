@@ -27,6 +27,14 @@ Fix: start Claude Code as `MASH_ENDPOINT=alice.dev.design claude --channels plug
 
 If several endpoints are installed and none is named, mash stops with `error: more than one endpoint is installed here: a, b` and `hint: mash status --endpoint a` (the first installed address in alphabetical order): name one with `MASH_ENDPOINT` or `--endpoint`. If it says to fix `MASH_ENDPOINT`, the value is not three dotted parts `owner.group.name`, each 1-32 lower-case letters, digits and single hyphens, starting with a letter.
 
+## `<folder> holds a mash 0.5.5 configuration`
+
+Message: `error: ~/.config/mash holds a mash 0.5.5 configuration`, then `hint: https://github.com/bogworks/mash/releases/latest/download/mash-migrate-0.5.5.sh` (exit 1), from every command of `mash` and `mashctl`, `mashctl init` included.
+
+Cause: the folder's `config.json` still has 0.5.5's keys `url` or `tls_ca`. mash does not read them and does not guess; it changes nothing.
+
+Fix: run the script once, `curl -fsSL <hint address> | bash`. It renames the keys (`url` to `servers`, `tls_ca` to `ca`) and keeps the old file beside it as a backup. Nothing on the server needs migrating. See [Upgrading from 0.5.5](install.md#upgrading-from-055).
+
 ## `mash: no binary found`
 
 Full text: `mash: no binary found. Install: go install github.com/bogworks/mash/cmd/mash@latest  (or see docs/install.md)`, preceded by `mash launcher:` lines on stderr, and exit status 127. The MCP server does not start.

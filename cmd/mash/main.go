@@ -205,6 +205,14 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 		return cliframe.Report(stdout, stderr, cliframe.Usagef("mash needs a command").WithHint("mash --help"), global.JSON)
 	}
 	env, lookup = global.Shadow(cliframe.Spec{Tool: "mash", CredsEnv: "MASH_CREDS", CredsKey: "creds"}, env, lookup)
+	home := env("HOME")
+	if home == "" {
+		home, _ = os.UserHomeDir()
+	}
+	// A folder mash 0.5.5 left is named for what it is, before any command (help included) runs.
+	if code, refused := cliframe.RefuseLegacy055(stdout, stderr, env, home, global.JSON); refused {
+		return code
+	}
 	var serr error
 	if args, env, lookup, serr = serveFlags(args, env, lookup); serr != nil {
 		return cliframe.Report(stdout, stderr, serr, global.JSON)
@@ -267,10 +275,6 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 	}
 	if args[0] == "key" { // before config: it needs no endpoint, config file or account key
 		return keyCmd(args, stdin, stdout, stderr, global)
-	}
-	home := env("HOME")
-	if home == "" {
-		home, _ = os.UserHomeDir()
 	}
 	if args[0] == "join" { // before config: it makes the configuration, so it reads none
 		mk := func(context.Context) (*cmdcore.Env, error) {
