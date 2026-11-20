@@ -63,6 +63,9 @@ func schemaOf(fields []field) map[string]any {
 		if f.min != nil {
 			pr["minimum"] = *f.min
 		}
+		if f.max != nil {
+			pr["maximum"] = *f.max
+		}
 		if len(f.enum) > 0 {
 			pr["enum"] = append([]string(nil), f.enum...)
 		}
@@ -215,8 +218,8 @@ func wholeNumber(f field, v json.RawMessage) (json.RawMessage, error) {
 		return nil, cliframe.Usagef("%s must be a whole number", f.json)
 	}
 	n := x.Num().Int64()
-	if f.min != nil && n < int64(*f.min) {
-		return nil, cliframe.Usagef("%s must be a whole number of %d or more", f.json, *f.min)
+	if err := f.rangeError(n); err != nil {
+		return nil, cliframe.Usagef("%s %s", f.json, err.Error())
 	}
 	return json.RawMessage(strconv.FormatInt(n, 10)), nil
 }

@@ -36,10 +36,10 @@ func TestCLIShowsAndAcceptsTheCanonicalForm(t *testing.T) {
 	}
 
 	for name, out := range map[string]string{
-		"inbox": cliAs(t, recvEnv, "inbox"),
+		"inbox": cliAs(t, recvEnv, "inbox", "--wide"),
 		"read":  cliAs(t, recvEnv, "read", "1"),
 	} {
-		if !strings.Contains(out, "from acme.team1.sender [verified]") || strings.Contains(out, "acme_team1_sender") {
+		if !strings.Contains(out, "acme.team1.sender") || !strings.Contains(out, "verified") || strings.Contains(out, "acme_team1_sender") {
 			t.Fatalf("%s:\n%s", name, out)
 		}
 	}

@@ -168,7 +168,7 @@ func TestStandaloneOnlyNATS(t *testing.T) {
 		t.Fatalf("inbox: %s", inbox)
 	}
 	read := mustRun(t, bin, envs["beta"], "read", "1")
-	if !strings.Contains(read, "[verified]") || !strings.Contains(read, "alpha") || !strings.Contains(read, "hello from alpha") {
+	if !strings.Contains(read, "trust:    verified") || !strings.Contains(read, "alpha") || !strings.Contains(read, "hello from alpha") {
 		t.Fatalf("read lacks a verified sender: %s", read)
 	}
 
@@ -185,7 +185,7 @@ func TestStandaloneOnlyNATS(t *testing.T) {
 		t.Fatalf("reply send: %s", out)
 	}
 	read = mustRun(t, bin, envs["alpha"], "read", "1")
-	if !strings.Contains(read, "[verified]") || !strings.Contains(read, "beta") || !strings.Contains(read, "reply from beta") {
+	if !strings.Contains(read, "trust:    verified") || !strings.Contains(read, "beta") || !strings.Contains(read, "reply from beta") {
 		t.Fatalf("reply read: %s", read)
 	}
 }

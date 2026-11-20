@@ -35,7 +35,7 @@ func TestSendCommandBothForms(t *testing.T) {
 	if code != 0 || !strings.Contains(out, `"kind":"fyi"`) || !strings.Contains(out, `"retagged":true`) {
 		t.Fatalf("reply-to: %d %q", code, out)
 	}
-	if rd, _ := w.cli(t, "b", "read", "1"); !strings.Contains(rd, "answers #1") || !strings.Contains(rd, "kind: fyi") {
+	if rd, _ := w.cli(t, "b", "read", "1"); !strings.Contains(rd, "\nreply to: 1\n") || !strings.Contains(rd, "\nkind:     fyi\n") {
 		t.Fatalf("read: %s", rd)
 	}
 	// the text from --file and from standard input, one trailing newline dropped
@@ -46,14 +46,14 @@ func TestSendCommandBothForms(t *testing.T) {
 	if _, _, code = runSplit(t, w, "b", "send", tTo("a"), "--file", file); code != 0 {
 		t.Fatalf("--file: %d", code)
 	}
-	if rd, _ := w.cli(t, "a", "read", "3"); !strings.Contains(rd, "> from a file\n") || strings.Contains(rd, "\r") {
+	if rd, _ := w.cli(t, "a", "read", "3"); !strings.Contains(rd, "\n\nfrom a file\n") || strings.Contains(rd, "\r") {
 		t.Fatalf("read #3: %q", rd)
 	}
 	var o, e bytes.Buffer
 	if code := run([]string{"send", tTo("a"), "--file", "-"}, envFrom(w.env["b"]), strings.NewReader("piped\n"), &o, &e); code != 0 {
 		t.Fatalf("--file -: %d %s", code, e.String())
 	}
-	if rd, _ := w.cli(t, "a", "read", "4"); !strings.Contains(rd, "> piped\n") {
+	if rd, _ := w.cli(t, "a", "read", "4"); !strings.Contains(rd, "\n\npiped\n") {
 		t.Fatalf("read #4: %q", rd)
 	}
 

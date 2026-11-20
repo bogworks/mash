@@ -873,12 +873,196 @@ func (e *Endpoint) toMail(raw *jetstream.RawStreamMsg) (render.Mail, bool) {
 	replyTo, via := senderMarks(raw.Header, trust, h)
 	via, _ = e.viaAllowed(via) // dropped here too; the serve path logs it
 	return render.Mail{Seq: raw.Sequence, From: from, Trust: trust, At: raw.Time, Body: raw.Data, ReplyTo: replyTo, Via: via,
-		Instance: senderInstance(raw.Header, trust, h), Kind: kind.Of(raw.Header.Get(KindHeader))}, true
+		Instance: senderInstance(raw.Header, trust, h), Owner: e.ownerOf(from),
+		Urgent: trust == sap.TrustVerified && sap.VerifyUrgent(raw.Header.Get(UrgentHeader), h),
+		Kind:   kind.Of(raw.Header.Get(KindHeader))}, true
+}
+
+// InboxState is what the server holds for this endpoint's inbox as of now: how many messages, how many of them have
+// not reached the session, and how long the oldest of those has waited.
+type InboxState struct {
+	// Total is every message the inbox holds.
+	Total int
+	// Waiting is the messages the session has not been told of: the inbox consumer's pending and unacknowledged.
+	Waiting int
+	// AckFloor is the stream sequence up to which every message is acknowledged. A message above it is new (a message
+	// acknowledged out of order above it, such as one read by the tool while an earlier one is still held, shows as new
+	// until the floor passes it: the server does not list which messages it has acknowledged).
+	AckFloor uint64
+	// OldestWaiting is when the oldest waiting message was stored; zero when none is waiting.
+	OldestWaiting time.Time
+}
+
+// InboxQuery selects the messages ReadInbox lists: those above After (the first Limit of them, oldest first) or, with
+// After zero, the newest Limit; with OnlyNew only those the session has not been told of.
+type InboxQuery struct {
+	OnlyNew bool
+	After   uint64
+	Limit   int
+}
+
+// InboxRead is one reading of the inbox: the server's counts, the messages the query lists (oldest first) and how many
+// of the waiting messages are urgent.
+type InboxRead struct {
+	State InboxState
+	Mail  []render.Mail
+	// NewUrgent is how many waiting messages are urgent, among the newest UrgentLook of them (the whole count when
+	// fewer are waiting).
+	NewUrgent int
+}
+
+// UrgentLook is how many of the newest waiting messages ReadInbox reads to count the urgent ones; a body can be a
+// mebibyte, and a long backlog is not read whole for a count.
+const UrgentLook = 200
+
+// oldestLookups bounds how many sequences are tried for the oldest waiting message: a message that is gone (expired or
+// deleted) is skipped, and a long run of them is not worth reading for.
+const oldestLookups = 20
+
+// ReadInbox reads the inbox consumer and stream, and the messages the query lists, the newest waiting ones and the
+// oldest waiting one, all in one wave of requests. An endpoint with no consumer yet has acknowledged nothing: every
+// message is waiting.
+func (e *Endpoint) ReadInbox(ctx context.Context, q InboxQuery) (InboxRead, error) {
+	s, err := e.inbox(ctx)
+	if err != nil {
+		return InboxRead{}, err
+	}
+	info := s.CachedInfo()
+	first, last := info.State.FirstSeq, info.State.LastSeq
+	st := InboxState{Total: int(info.State.Msgs), Waiting: int(info.State.Msgs)}
+	cons, err, ok := e.pre.takeConsumer()
+	if !ok {
+		cons, err = e.js.Consumer(ctx, e.ident.InboxStream(), store.Consumer)
+	}
+	switch {
+	case errors.Is(err, jetstream.ErrConsumerNotFound):
+	case err != nil:
+		return InboxRead{}, fmt.Errorf("mash: inbox consumer: %w", err)
+	default:
+		ci := cons.CachedInfo()
+		st.Waiting = int(ci.NumPending) + ci.NumAckPending
+		st.AckFloor = ci.AckFloor.Stream
+	}
+	if st.Waiting < 0 {
+		st.Waiting = 0
+	}
+	out := InboxRead{State: st}
+
+	// The sequences to read: what the query lists (in the order it takes them), the newest waiting ones, and the oldest.
+	var listSeqs []uint64
+	floor := uint64(0)
+	if q.OnlyNew {
+		floor = st.AckFloor
+	}
+	if q.After > 0 {
+		listSeqs = seqsUp(max(q.After+1, floor+1, first), last)
+	} else {
+		listSeqs = seqsDown(last, max(first, floor+1))
+	}
+	lower := max(st.AckFloor+1, first) // the oldest sequence that can be waiting
+	var waitSeqs []uint64
+	if st.Waiting > 0 && lower <= last {
+		waitSeqs = seqsUp(max(lower, last+1-min(last+1-lower, UrgentLook)), last)
+	}
+	want := map[uint64]bool{}
+	var seqs []uint64
+	add := func(n uint64) {
+		if !want[n] {
+			want[n] = true
+			seqs = append(seqs, n)
+		}
+	}
+	firstBatch := listSeqs[:min(len(listSeqs), q.Limit)]
+	for _, n := range firstBatch {
+		add(n)
+	}
+	for _, n := range waitSeqs {
+		add(n)
+	}
+	if st.Waiting > 0 && lower <= last {
+		add(lower)
+	}
+	raws := make([]*jetstream.RawStreamMsg, len(seqs))
+	errs := make([]error, len(seqs))
+	parallel(len(seqs), fetchConcurrency, func(i int) { raws[i], errs[i] = s.GetMsg(ctx, seqs[i]) })
+	got := map[uint64]*jetstream.RawStreamMsg{}
+	var read []*jetstream.RawStreamMsg
+	for i, n := range seqs {
+		switch {
+		case errs[i] == nil:
+			got[n] = raws[i]
+			read = append(read, raws[i])
+		case errors.Is(errs[i], jetstream.ErrMsgNotFound):
+		default:
+			return InboxRead{}, fmt.Errorf("mash: inbox: read #%s: %w", FormatMsgRef(MsgRef{Seq: n}), errs[i])
+		}
+	}
+	if err := e.loadSenders(ctx, read); err != nil {
+		return InboxRead{}, fmt.Errorf("mash: inbox: %w", err)
+	}
+	mails := map[uint64]render.Mail{}
+	for n, raw := range got {
+		if m, ok := e.toMail(raw); ok {
+			mails[n] = m
+		}
+	}
+	for _, n := range firstBatch {
+		if m, ok := mails[n]; ok {
+			out.Mail = append(out.Mail, m)
+		}
+	}
+	if len(out.Mail) < q.Limit && len(listSeqs) > len(firstBatch) { // gone or forged ones in the way: read on
+		more, err := e.collect(ctx, s.GetMsg, listSeqs[len(firstBatch):], q.Limit-len(out.Mail))
+		if err != nil {
+			return InboxRead{}, err
+		}
+		out.Mail = append(out.Mail, more...)
+	}
+	if q.After == 0 {
+		sortMail(out.Mail)
+	}
+	if st.Waiting > 0 {
+		for n, m := range mails {
+			if n > st.AckFloor && m.Urgent {
+				out.NewUrgent++
+			}
+		}
+		oldest := time.Time{}
+		for n, tries := lower, 0; n <= last && tries < oldestLookups; n, tries = n+1, tries+1 {
+			raw := got[n]
+			if raw == nil && !want[n] { // the first was gone: look at the next
+				r, err := s.GetMsg(ctx, n)
+				if errors.Is(err, jetstream.ErrMsgNotFound) {
+					continue
+				}
+				if err != nil {
+					return InboxRead{}, fmt.Errorf("mash: inbox: read #%d: %w", n, err)
+				}
+				raw = r
+			}
+			if raw != nil {
+				oldest = raw.Time
+				break
+			}
+		}
+		out.State.OldestWaiting = oldest
+	}
+	return out, nil
 }
 
 // Read returns message seq from this endpoint's inbox.
 func (e *Endpoint) Read(ctx context.Context, seq uint64) (render.Mail, error) {
 	return e.ReadRef(ctx, MsgRef{Seq: seq})
+}
+
+// NoMessageError is the error of a read of a message the inbox does not hold (never stored, expired or dropped).
+type NoMessageError struct {
+	Seq      uint64
+	Endpoint string
+}
+
+func (e *NoMessageError) Error() string {
+	return fmt.Sprintf("mash: no message #%d in %s's inbox", e.Seq, e.Endpoint)
 }
 
 // ReadRef returns the message r names, of the endpoint's inbox.
@@ -891,8 +1075,11 @@ func (e *Endpoint) ReadRef(ctx context.Context, r MsgRef) (render.Mail, error) {
 		return render.Mail{}, err
 	}
 	raw, err := s.GetMsg(ctx, r.Seq)
+	if errors.Is(err, jetstream.ErrMsgNotFound) {
+		return render.Mail{}, &NoMessageError{Seq: r.Seq, Endpoint: e.Display()}
+	}
 	if err != nil {
-		return render.Mail{}, fmt.Errorf("mash: no message #%d in %s's inbox", r.Seq, e.Display())
+		return render.Mail{}, fmt.Errorf("mash: read #%d: %w", r.Seq, err)
 	}
 	if err := e.loadSenders(ctx, []*jetstream.RawStreamMsg{raw}); err != nil {
 		return render.Mail{}, err
@@ -907,12 +1094,17 @@ func (e *Endpoint) ReadRef(ctx context.Context, r MsgRef) (render.Mail, error) {
 // Inbox returns up to limit of the most recent messages in this endpoint's
 // inbox, oldest first. Forged mail is skipped.
 func (e *Endpoint) Inbox(ctx context.Context, limit int) ([]render.Mail, error) {
+	return e.InboxAbove(ctx, 0, limit)
+}
+
+// InboxAbove is Inbox for the messages above stream sequence floor only: up to limit of the most recent, oldest first.
+func (e *Endpoint) InboxAbove(ctx context.Context, floor uint64, limit int) ([]render.Mail, error) {
 	s, err := e.inbox(ctx)
 	if err != nil {
 		return nil, err
 	}
 	info := s.CachedInfo()
-	out, err := e.collect(ctx, s.GetMsg, seqsDown(info.State.LastSeq, info.State.FirstSeq), limit)
+	out, err := e.collect(ctx, s.GetMsg, seqsDown(info.State.LastSeq, max(info.State.FirstSeq, floor+1)), limit)
 	sortMail(out)
 	if len(out) > limit {
 		out = out[len(out)-limit:]

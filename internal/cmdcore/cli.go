@@ -234,8 +234,8 @@ func set(v reflect.Value, f field, s string) error {
 		if err != nil {
 			return fmt.Errorf("must be a whole number")
 		}
-		if f.min != nil && n < *f.min {
-			return fmt.Errorf("must be a whole number of %d or more", *f.min)
+		if err := f.rangeError(int64(n)); err != nil {
+			return err
 		}
 		v.SetInt(int64(n))
 	case reflect.Slice:

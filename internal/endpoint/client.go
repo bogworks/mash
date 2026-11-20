@@ -61,6 +61,9 @@ type prefetched struct {
 	inbox    jetstream.Stream
 	inboxErr error
 	inboxSet bool
+	cons     jetstream.Consumer
+	consErr  error
+	consSet  bool
 	lease    []byte
 	leaseErr error
 	leaseAt  time.Time
@@ -77,6 +80,17 @@ func (p *prefetched) takeInbox() (jetstream.Stream, error, bool) {
 	s, err := p.inbox, p.inboxErr
 	p.inbox, p.inboxErr, p.inboxSet = nil, nil, false
 	return s, err, true
+}
+
+func (p *prefetched) takeConsumer() (jetstream.Consumer, error, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.consSet {
+		return nil, nil, false
+	}
+	c, err := p.cons, p.consErr
+	p.cons, p.consErr, p.consSet = nil, nil, false
+	return c, err, true
 }
 
 func (p *prefetched) takeLease() ([]byte, error, bool) {
@@ -311,6 +325,9 @@ func (e *Endpoint) init(ctx context.Context, opts ClientOptions) error {
 		tasks = append(tasks, func() {
 			e.pre.inbox, e.pre.inboxErr = js.Stream(ctx, e.ident.InboxStream())
 			e.pre.inboxSet = true
+		}, func() { // the consumer says what has not reached the session: ReadInbox reads it with the stream
+			e.pre.cons, e.pre.consErr = js.Consumer(ctx, e.ident.InboxStream(), store.Consumer)
+			e.pre.consSet = true
 		})
 	}
 	if opts.holding {

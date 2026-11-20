@@ -121,3 +121,32 @@ func TestTableMeasuresDisplayWidth(t *testing.T) {
 		t.Errorf("truncated line %q is %d columns wide", l, DisplayWidth(l))
 	}
 }
+
+func TestAge(t *testing.T) {
+	for _, tc := range []struct {
+		d    time.Duration
+		want string
+	}{
+		{-time.Second, "0s"}, {0, "0s"}, {10 * time.Second, "10s"}, {59 * time.Second, "59s"}, {time.Minute, "1m"},
+		{90 * time.Second, "1m"}, {59*time.Minute + 59*time.Second, "59m"}, {time.Hour, "1h"}, {72 * time.Minute, "1h 12m"},
+		{23*time.Hour + 59*time.Minute, "23h 59m"}, {24 * time.Hour, "1d"}, {51 * time.Hour, "2d 3h"},
+	} {
+		if got := Age(tc.d); got != tc.want {
+			t.Errorf("Age(%v) = %q, want %q", tc.d, got, tc.want)
+		}
+	}
+}
+
+func TestCut(t *testing.T) {
+	for _, tc := range []struct {
+		s    string
+		n    int
+		want string
+	}{
+		{"hello", 5, "hello"}, {"hello", 4, "hel…"}, {"hello", 1, "…"}, {"hello", 0, "hello"}, {"日本語", 4, "日…"}, {"日本語", 6, "日本語"},
+	} {
+		if got := Cut(tc.s, tc.n); got != tc.want {
+			t.Errorf("Cut(%q, %d) = %q, want %q", tc.s, tc.n, got, tc.want)
+		}
+	}
+}

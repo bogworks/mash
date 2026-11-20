@@ -184,7 +184,7 @@ func TestStandaloneServeWithoutAHost(t *testing.T) {
 	if out := s.call(t, 3, "send", `{"address":"o.dev.alpha","message":"hello back"}`); !isReceipt(out, "Mail sent") {
 		t.Fatalf("send tool: %q", out)
 	}
-	if out := mustRun(t, bin, envs["alpha"], "read", "1"); !strings.Contains(out, "hello back") || !strings.Contains(out, "[verified]") {
+	if out := mustRun(t, bin, envs["alpha"], "read", "1"); !strings.Contains(out, "hello back") || !strings.Contains(out, "trust:    verified") {
 		t.Fatalf("alpha read: %s", out)
 	}
 }
