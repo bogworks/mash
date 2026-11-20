@@ -108,7 +108,7 @@ func (a *Admin) IssuedBucketProof(ctx context.Context) (ok bool, why string, err
 	case perr != nil:
 		return false, perr.Error(), nil
 	case m.Kind == "":
-		return false, "the issue record's stream has no " + store.IssuedMarkerKey + " marker (run `mash admin init`)", nil
+		return false, "the issue record's stream has no " + store.IssuedMarkerKey + " marker (run `mashctl init`)", nil
 	}
 	return true, "", nil
 }

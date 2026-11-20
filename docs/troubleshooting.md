@@ -161,7 +161,7 @@ A batch of more than 10 messages or 16 KiB is shown as a digest: one line per me
 
 ## `mashctl limits` refuses
 
-`mash: inbox of X has max_bytes ..., above the configured ...; mash never lowers a limit, because that could discard stored mail; to lower it, run mashctl endpoint delete X and create it again`. Limits only go up. Deleting the endpoint removes the mail in that inbox. The same applies to `max_age` ([operations.md](operations.md#changing-limits-later)). Run `mashctl limits` from one admin at a time.
+`mash: inbox of X has max_bytes ..., above the configured ...; mash never lowers a limit, because that could discard stored mail; to lower it, run mashctl endpoint delete X and create an endpoint under a new name (a deleted address cannot be used again)`. Limits only go up. Deleting the endpoint removes the mail in that inbox, and its address cannot be used again. The same applies to `max_age` ([operations.md](operations.md#changing-limits-later)). Run `mashctl limits` from one admin at a time.
 
 ## Account full or `maximum number of streams`
 
