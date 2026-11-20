@@ -88,6 +88,9 @@ jobs:
       - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v3
         with:
           languages: go
+          # Uses the CodeQL CLI ops seeded in the runners' toolcache (2.27.5 as of
+          # 2026-11-20); ops seeds a new version deliberately.
+          tools: toolcache
       - uses: github/codeql-action/autobuild@33d7b85da1a04171e211befe2c739303b9a4c066 # v3
       - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v3
         with:
