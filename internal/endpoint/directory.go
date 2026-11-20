@@ -210,16 +210,46 @@ func (e *Endpoint) installDirectory(got map[string]recordResult) (failed int) {
 	return failed
 }
 
+// maxFailedLookups bounds the remembered failed sender lookups.
+const maxFailedLookups = 1024
+
 // reloadSender reads the directory record of the endpoint a message's sender header names, bypassing the cached
 // directory, and installs it when it is the record of the header's key. It reports whether the cache changed.
 func (e *Endpoint) reloadSender(h sap.SenderHeader) bool {
 	if h.Name == "" || h.User == "" || !recordKey(h.Name) {
 		return false
 	}
+	// A lookup that found nothing for this (name, key) is not repeated for one directory poll interval, and the memory
+	// of them is bounded: a full table of unexpired entries refuses further lookups until some expire.
+	fail := h.Name + "\x00" + h.User
+	e.mu.Lock()
+	if until, ok := e.failedLookups[fail]; ok && time.Now().Before(until) {
+		e.mu.Unlock()
+		return false
+	}
+	if len(e.failedLookups) >= maxFailedLookups {
+		now := time.Now()
+		for k, until := range e.failedLookups {
+			if !now.Before(until) {
+				delete(e.failedLookups, k)
+			}
+		}
+		if len(e.failedLookups) >= maxFailedLookups {
+			e.mu.Unlock()
+			return false
+		}
+	}
+	e.mu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	r := e.fetchRecord(ctx, h.Name)
 	if r.err != nil || r.rec.User != h.User {
+		e.mu.Lock()
+		if e.failedLookups == nil {
+			e.failedLookups = map[string]time.Time{}
+		}
+		e.failedLookups[fail] = time.Now().Add(DirectoryPoll)
+		e.mu.Unlock()
 		return false
 	}
 	e.mu.Lock()
