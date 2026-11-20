@@ -5,172 +5,138 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"text/tabwriter"
 
+	"github.com/bogworks/mash/internal/cliframe"
 	"github.com/bogworks/mash/internal/config"
-	"github.com/bogworks/mash/internal/ctl"
+	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/store"
 )
 
-const endpointListUsage = `usage: mashctl endpoint list [--json]
-  Prints the endpoints in the directory, one per line: owner/group/instance, owner.group.instance and what is on record.
-  --json   print the endpoints as JSON (schema mashctl-endpoint-list@1)
-  exit: 0 listed (also when there are none), 1 error, 2 usage
+const endpointListUsage = `usage: mashctl endpoint list [prefix] [--wide] [--json]
+  prefix   only endpoints under this owner (acme) or owner.group (acme.demo)
+  --wide   add the columns CREATED, WAITING and LABELS
+  --json   print the endpoints as JSON
 Example:
-  mashctl endpoint list
+  mashctl endpoint list acme.demo
 `
 
-// endpointRecordJSON is one directory record as the list prints it.
-type endpointRecordJSON struct {
-	Owner         string            `json:"owner"`
-	Group         string            `json:"group"`
-	Instance      string            `json:"instance"`
-	Address       string            `json:"address"`
-	Key           string            `json:"key"`
-	UserPublicKey string            `json:"user_public_key"`
-	Created       string            `json:"created"`
-	Note          string            `json:"note"`
-	Labels        map[string]string `json:"labels"`
-	Caps          []string          `json:"caps"`
-	Description   string            `json:"description"`
-	Role          string            `json:"role"`
-	Host          string            `json:"host"`
+var endpointListSpec = epSpec{
+	name: "list", usage: endpointListUsage, flags: []string{"--wide"}, min: 0, max: 1, need: "prefix",
+	check: func(in *epInput) error {
+		if len(in.pos) == 0 {
+			return nil
+		}
+		parts := strings.Split(in.pos[0], ".")
+		if len(parts) > 2 {
+			return cliframe.Usagef("not an owner or owner.group prefix (the value is not shown): write acme or acme.demo").WithHint("mashctl endpoint list --help")
+		}
+		for i, p := range parts {
+			var err error
+			if i == 0 {
+				_, err = sap.NewAddress(p, "g", "n")
+			} else {
+				_, err = sap.NewAddress(parts[0], p, "n")
+			}
+			if err != nil {
+				return cliframe.Usagef("not an owner or owner.group prefix (the value is not shown): write acme or acme.demo").WithHint("mashctl endpoint list --help")
+			}
+		}
+		in.prefix = parts
+		return nil
+	},
 }
 
-func recordJSON(r store.Record) endpointRecordJSON {
-	labels := r.Labels
-	if labels == nil {
-		labels = map[string]string{}
-	}
-	caps := r.Caps
-	if caps == nil {
-		caps = []string{}
-	}
-	addr := r.Owner + "." + r.Group + "." + r.Instance
+// listRow is one endpoint of the list.
+type listRow struct {
+	addr    sap.Address
+	state   string
+	created string
+	waiting uint64
+	labels  map[string]string
+}
+
+// listEntryJSON is one endpoint of the JSON list.
+type listEntryJSON struct {
+	Address string `json:"address"`
+	Owner   string `json:"owner"`
+	Group   string `json:"group"`
+	Name    string `json:"name"`
+	State   string `json:"state"`
+}
+
+// recordAddress is the address of a directory record; a record that does not name a valid one is shown by its parts.
+func recordAddress(r store.Record) sap.Address {
 	if a, err := r.Address(); err == nil {
-		addr = a.String()
+		return a
 	}
-	return endpointRecordJSON{
-		Owner: r.Owner, Group: r.Group, Instance: r.Instance, Address: addr, Key: strings.ReplaceAll(addr, ".", "_"), UserPublicKey: r.User,
-		Created: r.Created, Note: r.Note, Labels: labels, Caps: caps, Description: r.Description, Role: r.Role, Host: r.Host,
-	}
-}
-
-// recordSuffix is what is on record for the endpoint beyond its address and key, empty when nothing is.
-func recordSuffix(r store.Record) string {
-	var parts []string
-	if r.Created != "" {
-		parts = append(parts, "created "+config.Clean(r.Created))
-	}
-	if r.Note != "" {
-		parts = append(parts, fmt.Sprintf("note %q", config.Clean(r.Note)))
-	}
-	if r.Role != "" {
-		parts = append(parts, fmt.Sprintf("role %q", config.Clean(r.Role)))
-	}
-	if r.Host != "" {
-		parts = append(parts, fmt.Sprintf("host %q", config.Clean(r.Host)))
-	}
-	if len(r.Labels) > 0 {
-		keys := make([]string, 0, len(r.Labels))
-		for k := range r.Labels {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for i, k := range keys {
-			keys[i] = config.Clean(k) + "=" + config.Clean(r.Labels[k])
-		}
-		parts = append(parts, "labels "+strings.Join(keys, ","))
-	}
-	if len(r.Caps) > 0 {
-		parts = append(parts, "caps "+config.Clean(strings.Join(r.Caps, ",")))
-	}
-	if r.Description != "" {
-		parts = append(parts, fmt.Sprintf("description %q", config.Clean(r.Description)))
-	}
-	return strings.Join(parts, ", ")
+	return sap.Address{Owner: r.Owner, Group: r.Group, Instance: r.Instance}
 }
 
 // runEndpointList is `mashctl endpoint list`.
 func runEndpointList(args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
-	asJSON := jsonRequested(args)
-	// usageErr answers a usage error: the sentence on stderr, and with --json the document on stdout.
-	usageErr := func(code, msg string) int {
-		fmt.Fprintf(stderr, "mashctl: endpoint list: %s\n", msg)
-		if asJSON {
+	return runEp(endpointListSpec, args, env, lookup, stdout, stderr, func(rt *epRuntime) error {
+		recs, bad, err := rt.adm.List(rt.ctx)
+		if err != nil {
+			return failErr(err)
+		}
+		for _, b := range bad {
+			b.Warn(stderr, "mashctl")
+		}
+		wide := rt.in.flags["--wide"]
+		var rows []listRow
+		for _, r := range recs {
+			a := recordAddress(r)
+			if p := rt.in.prefix; len(p) > 0 && (a.Owner != p[0] || (len(p) > 1 && a.Group != p[1])) {
+				continue
+			}
+			st, err := rt.adm.EndpointState(rt.ctx, a, wide)
+			if err != nil {
+				return failErr(err)
+			}
+			rows = append(rows, listRow{addr: a, state: stateWord(st), created: r.Created, waiting: st.Waiting, labels: r.Labels})
+		}
+		sort.Slice(rows, func(i, j int) bool { return rows[i].addr.String() < rows[j].addr.String() })
+		if rt.in.json {
+			items := make([]listEntryJSON, 0, len(rows))
+			for _, r := range rows {
+				items = append(items, listEntryJSON{Address: r.addr.String(), Owner: r.addr.Owner, Group: r.addr.Group, Name: r.addr.Instance, State: r.state})
+			}
 			writeJSON(stdout, struct {
-				Schema    string               `json:"schema"`
-				Outcome   string               `json:"outcome"`
-				Endpoints []endpointRecordJSON `json:"endpoints"`
-				Refusal   *refusalJSON         `json:"refusal"`
-			}{"mashctl-endpoint-list@1", "error", []endpointRecordJSON{}, &refusalJSON{Code: code, Detail: msg}})
+				Endpoints []listEntryJSON `json:"endpoints"`
+			}{items})
+			return nil
 		}
-		return 2
-	}
-	for _, a := range args {
-		switch {
-		case a == "--help" || a == "-h":
-			fmt.Fprint(stdout, endpointListUsage)
-			return 0
-		case a == "--json":
-		case strings.HasPrefix(a, "-"):
-			return usageErr("unknown_flag", fmt.Sprintf("unknown %s; try: mashctl endpoint list --help", config.RejectedArg(a)))
-		default:
-			return usageErr("usage", "takes no argument; try: mashctl endpoint show ADDRESS for one endpoint, or mashctl endpoint list --help")
+		if len(rows) == 0 {
+			fmt.Fprintln(stdout, "No endpoints.")
+			return nil
 		}
-	}
-	fail := func(err error) int {
-		fmt.Fprintf(stderr, "mashctl: endpoint list: %v\n", err)
-		return 1
-	}
-	cfg, err := loadCtlConfig(env, lookup, true)
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	announceTarget(cfg, env, stderr, nil)
-	adm, ctx, closeAdmin, err := ctl.OpenAdmin("mashctl", cfg)
-	if err != nil {
-		return fail(err)
-	}
-	defer closeAdmin()
-	recs, bad, err := adm.List(ctx)
-	if err != nil {
-		return fail(err)
-	}
-	for _, b := range bad {
-		b.Warn(stderr, "mashctl")
-	}
-	items := make([]endpointRecordJSON, 0, len(recs))
-	suffix := map[string]string{}
-	for _, r := range recs {
-		j := recordJSON(r)
-		items = append(items, j)
-		suffix[j.Address] = recordSuffix(r)
-	}
-	sort.Slice(items, func(a, b int) bool { return items[a].Address < items[b].Address })
-	if asJSON {
-		writeJSON(stdout, struct {
-			Schema    string               `json:"schema"`
-			Endpoints []endpointRecordJSON `json:"endpoints"`
-		}{"mashctl-endpoint-list@1", items})
-		return 0
-	}
-	if len(items) == 0 {
-		fmt.Fprintln(stdout, "no endpoints")
-		fmt.Fprintln(stdout, "make one with: mashctl endpoint create --help")
-		return 0
-	}
-	for _, j := range items {
-		line := fmt.Sprintf("%s/%s/%s  %s  %s", config.Clean(j.Owner), config.Clean(j.Group), config.Clean(j.Instance), config.Clean(j.Address), config.Clean(j.Key))
-		if s := suffix[j.Address]; s != "" {
-			line += "  " + s
+		tw := tabwriter.NewWriter(stdout, 0, 4, 2, ' ', 0)
+		head := "OWNER\tGROUP\tNAME\tSTATE"
+		if wide {
+			head += "\tCREATED\tWAITING\tLABELS"
 		}
-		fmt.Fprintln(stdout, line)
-	}
-	noun := "endpoints"
-	if len(items) == 1 {
-		noun = "endpoint"
-	}
-	fmt.Fprintf(stderr, "%d %s\n", len(items), noun)
-	return 0
+		fmt.Fprintln(tw, head)
+		var prev sap.Address
+		for i, r := range rows {
+			owner, group := config.Clean(r.addr.Owner), config.Clean(r.addr.Group)
+			if i > 0 && r.addr.Owner == prev.Owner {
+				owner = ""
+				if r.addr.Group == prev.Group {
+					group = ""
+				}
+			}
+			prev = r.addr
+			line := fmt.Sprintf("%s\t%s\t%s\t%s", owner, group, config.Clean(r.addr.Instance), r.state)
+			if wide {
+				created := "-"
+				if r.created != "" {
+					created = utcMinute(r.created)
+				}
+				line += fmt.Sprintf("\t%s\t%d\t%s", created, r.waiting, labelPairs(r.labels))
+			}
+			fmt.Fprintln(tw, line)
+		}
+		return failErr(tw.Flush())
+	})
 }

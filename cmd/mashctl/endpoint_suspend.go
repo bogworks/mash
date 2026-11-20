@@ -1,0 +1,126 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+
+	"github.com/bogworks/mash/internal/admin"
+	"github.com/bogworks/mash/internal/config"
+)
+
+const endpointSuspendUsage = `usage: mashctl endpoint suspend <address> [--dry-run] [--json]
+  address    the endpoint, as owner.group.name
+  --dry-run  print what would change, and change nothing
+  --json     print the result as JSON
+  Refuses new mail to the endpoint. Its stored mail and its credentials stay.
+Example:
+  mashctl endpoint suspend acme.demo.bob
+`
+
+const endpointResumeUsage = `usage: mashctl endpoint resume <address> [--dry-run] [--json]
+  address    the endpoint, as owner.group.name
+  --dry-run  print what would change, and change nothing
+  --json     print the result as JSON
+  Undoes suspend: the endpoint takes new mail again.
+Example:
+  mashctl endpoint resume acme.demo.bob
+`
+
+const endpointPermissionsUsage = `usage: mashctl endpoint permissions <address> [--json]
+  address  the endpoint, as owner.group.name
+  --json   accepted; the output is JSON either way
+  Prints the NATS permissions the endpoint's user needs, as JSON, for someone
+  who runs their own NATS. It reads no server.
+Example:
+  mashctl endpoint permissions acme.demo.bob
+`
+
+var endpointSuspendSpec = epSpec{
+	name: "suspend", usage: endpointSuspendUsage, flags: []string{"--dry-run"}, min: 1, max: 1,
+	need: "the endpoint address (owner.group.name)", check: checkAddress,
+}
+
+var endpointResumeSpec = epSpec{
+	name: "resume", usage: endpointResumeUsage, flags: []string{"--dry-run"}, min: 1, max: 1,
+	need: "the endpoint address (owner.group.name)", check: checkAddress,
+}
+
+var endpointPermissionsSpec = epSpec{
+	name: "permissions", usage: endpointPermissionsUsage, min: 1, max: 1, offline: true,
+	need: "the endpoint address (owner.group.name)", check: checkAddress,
+}
+
+// stateResultJSON is the JSON of suspend and resume.
+type stateResultJSON struct {
+	Address string `json:"address"`
+	State   string `json:"state"`
+	DryRun  bool   `json:"dry_run,omitempty"`
+}
+
+// runEndpointSuspend is `mashctl endpoint suspend` (ADR 0057: the inbox stream's subjects are parked).
+func runEndpointSuspend(args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
+	return runEp(endpointSuspendSpec, args, env, lookup, stdout, stderr, func(rt *epRuntime) error {
+		return changeSuspension(rt, true)
+	})
+}
+
+// runEndpointResume is `mashctl endpoint resume`.
+func runEndpointResume(args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
+	return runEp(endpointResumeSpec, args, env, lookup, stdout, stderr, func(rt *epRuntime) error {
+		return changeSuspension(rt, false)
+	})
+}
+
+// changeSuspension is the body of suspend and resume. With --dry-run it only checks that the endpoint has an inbox.
+func changeSuspension(rt *epRuntime, suspend bool) error {
+	addr := rt.in.addr
+	verb, done := "suspend", "Suspended"
+	if !suspend {
+		verb, done = "resume", "Resumed"
+	}
+	if rt.in.flags["--dry-run"] {
+		if _, err := rt.adm.Suspended(rt.ctx, addr); err != nil {
+			return failErr(err)
+		}
+		st, err := rt.adm.EndpointState(rt.ctx, addr, false)
+		if err != nil {
+			return failErr(err)
+		}
+		if rt.in.json {
+			writeJSON(rt.stdout, stateResultJSON{Address: addr.String(), State: stateWord(st), DryRun: true})
+			return nil
+		}
+		fmt.Fprintf(rt.stdout, "Would %s endpoint %s\nNothing was changed.\n", verb, addr)
+		return nil
+	}
+	if suspend {
+		if _, err := rt.adm.Suspend(rt.ctx, addr); err != nil {
+			return failErr(err)
+		}
+	} else if err := rt.adm.Resume(rt.ctx, addr); err != nil {
+		return failErr(err)
+	}
+	st, err := rt.adm.EndpointState(rt.ctx, addr, false)
+	if err != nil {
+		return failErr(err)
+	}
+	if rt.in.json {
+		writeJSON(rt.stdout, stateResultJSON{Address: addr.String(), State: stateWord(st)})
+		return nil
+	}
+	fmt.Fprintf(rt.stdout, "%s endpoint %s\n", done, addr)
+	return nil
+}
+
+// runEndpointPermissions is `mashctl endpoint permissions`: the permission set as JSON on stdout, nothing else.
+func runEndpointPermissions(args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
+	return runEp(endpointPermissionsSpec, args, env, lookup, stdout, stderr, func(rt *epRuntime) error {
+		b, err := json.MarshalIndent(admin.Permissions(rt.in.addr), "", "  ")
+		if err != nil {
+			return failErr(err)
+		}
+		fmt.Fprintln(rt.stdout, string(b))
+		return nil
+	})
+}

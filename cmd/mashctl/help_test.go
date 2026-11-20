@@ -14,9 +14,10 @@ import (
 
 // helpVerbs is every verb run dispatches; each takes -h and --help, prints its usage and changes nothing.
 var helpVerbs = [][]string{
-	{"adopt"}, {"audit"}, {"inbox"}, {"inbox", "inspect"}, {"issued"}, {"issued", "list"}, {"issued", "check"}, {"version"}, {"label"}, {"unlabel"},
-	{"endpoint"}, {"init"}, {"limits"}, {"permissions"},
-	{"set-meta"}, {"suspend"}, {"resume"}, {"suspended"},
+	{"adopt"}, {"audit"}, {"issued"}, {"issued", "list"}, {"issued", "check"}, {"version"},
+	{"endpoint"}, {"init"}, {"limits"},
+	{"endpoint", "list"}, {"endpoint", "show"}, {"endpoint", "set"}, {"endpoint", "unset"}, {"endpoint", "suspend"}, {"endpoint", "resume"},
+	{"endpoint", "inbox"}, {"endpoint", "permissions"}, {"endpoint", "create"}, {"endpoint", "reissue"}, {"endpoint", "delete"},
 }
 
 func TestVerbHelpPrintsUsageAndChangesNothing(t *testing.T) {
@@ -70,9 +71,6 @@ func TestVerbUsagePicksOwnLines(t *testing.T) {
 	}{
 		{[]string{"issued", "check"}, "mashctl issued check", "mashctl issued list"},
 		{[]string{"issued", "list"}, "mashctl issued list", "mashctl issued check"},
-		{[]string{"inbox", "inspect"}, "mashctl inbox inspect", ""},
-		{[]string{"unlabel"}, "mashctl unlabel", "mashctl label"},
-		{[]string{"label"}, "mashctl label", "mashctl unlabel"},
 		{[]string{"version"}, "usage: mashctl version", ""},
 	}
 	for _, c := range cases {
@@ -89,17 +87,16 @@ func TestVerbUsagePicksOwnLines(t *testing.T) {
 	}
 }
 
-// Help is only the first argument after the verb (after the sub-verb for issued and inbox): a value, a note or a
+// Help is only the first argument after the verb (after the sub-verb for issued): a value, a note or a
 // label that contains the words is never help.
 func TestHelpRequestedOnlyFirstArgument(t *testing.T) {
 	yes := []struct {
 		verb string
 		args []string
 	}{
-		{"label", []string{"--help"}}, {"set-meta", []string{"-h"}},
-		{"endpoint", []string{"-h"}}, {"suspend", []string{"-h"}},
+		{"endpoint", []string{"-h"}}, {"limits", []string{"-h"}},
 		{"issued", []string{"check", "--help"}}, {"issued", []string{"list", "-h"}}, {"issued", []string{"-h"}},
-		{"inbox", []string{"inspect", "-h"}}, {"version", []string{"--help"}},
+		{"version", []string{"--help"}},
 	}
 	for _, c := range yes {
 		if !helpRequested(c.verb, c.args) {
@@ -110,11 +107,8 @@ func TestHelpRequestedOnlyFirstArgument(t *testing.T) {
 		verb string
 		args []string
 	}{
-		{"label", []string{"n", "--label", "help"}},
-		{"label", []string{"n", "role=-h"}}, {"label", []string{"n", "k=--help"}}, {"label", []string{"n", "k", "--help"}},
-		{"set-meta", []string{"n", "note", "--help"}}, {"set-meta", []string{"n", "--help"}},
-		{"endpoint", []string{"n", "-h"}}, {"suspend", []string{"n", "--help"}},
-		{"unlabel", []string{"n", "-h"}}, {"issued", []string{"check", "n", "--help"}}, {"inbox", []string{"inspect", "n", "-h"}},
+		{"endpoint", []string{"n", "-h"}}, {"limits", []string{"n", "--help"}},
+		{"issued", []string{"check", "n", "--help"}},
 	}
 	for _, c := range no {
 		if helpRequested(c.verb, c.args) {
@@ -143,5 +137,44 @@ func TestInitHelpCreatesNoConfigDir(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(home, "cfg")); !os.IsNotExist(err) {
 		t.Errorf("config dir exists after init --help: %v", err)
+	}
+}
+
+// Each command of the endpoint noun that takes its arguments through epSpec has a help of lines under 80 columns that
+// starts with its usage line, and the noun's help lists it.
+func TestEndpointSubcommandHelp(t *testing.T) {
+	specs := []epSpec{endpointListSpec, endpointShowSpec, endpointSetSpec, endpointUnsetSpec, endpointSuspendSpec, endpointResumeSpec, endpointInboxSpec, endpointPermissionsSpec}
+	env := func(string) string { return "" }
+	var noun bytes.Buffer
+	if rc := runEnv([]string{"endpoint", "--help"}, env, &noun, &noun); rc != 0 {
+		t.Fatalf("endpoint --help: rc %d", rc)
+	}
+	for _, l := range strings.Split(noun.String(), "\n") {
+		if len(l) >= 80 {
+			t.Errorf("endpoint --help: line of %d columns: %q", len(l), l)
+		}
+	}
+	for _, s := range specs {
+		var out, errb bytes.Buffer
+		if rc := runEnv([]string{"endpoint", s.name, "--help"}, env, &out, &errb); rc != 0 || errb.Len() != 0 {
+			t.Fatalf("endpoint %s --help: rc %d stderr %q", s.name, rc, errb.String())
+		}
+		if !strings.HasPrefix(out.String(), "usage: mashctl endpoint "+s.name) || !strings.Contains(out.String(), "\nExample:\n") {
+			t.Errorf("endpoint %s --help: %q", s.name, out.String())
+		}
+		for _, l := range strings.Split(out.String(), "\n") {
+			if len(l) >= 80 {
+				t.Errorf("endpoint %s --help: line of %d columns: %q", s.name, len(l), l)
+			}
+		}
+		if !strings.Contains(noun.String(), "\n  "+s.name+" ") {
+			t.Errorf("endpoint --help does not list %s", s.name)
+		}
+		// every option the command takes is in its help
+		for _, f := range append(append([]string{"--json"}, s.flags...), s.values...) {
+			if !strings.Contains(out.String(), f) {
+				t.Errorf("endpoint %s --help does not show %s", s.name, f)
+			}
+		}
 	}
 }

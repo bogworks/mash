@@ -130,14 +130,14 @@ func (a *AT) waitOnline(h Home, extra []string, ids ...string) bool {
 	}
 }
 
-// permissions asserts that `mashctl permissions O.G.I` prints REQ-005's set.
+// permissions asserts that `mashctl endpoint permissions O.G.I` prints REQ-005's set.
 func (a *AT) permissions(h Home, owner, group, name string) {
 	addr := owner + "." + group + "." + name
-	r := a.Ctl("permissions-"+name, h, a.Conn(), "permissions", addr)
-	a.C.Check("mashctl permissions "+addr+" succeeds", r.Code == 0, exitDetail(r))
+	r := a.Ctl("permissions-"+name, h, a.Conn(), "endpoint", "permissions", addr)
+	a.C.Check("mashctl endpoint permissions "+addr+" succeeds", r.Code == 0, exitDetail(r))
 	v, err := parseJSON(r.Stdout)
 	if err != nil {
-		a.C.Check("mashctl permissions prints the permission set as JSON", false, err.Error())
+		a.C.Check("mashctl endpoint permissions prints the permission set as JSON", false, err.Error())
 		return
 	}
 	pub, sub, deny := permissionLists(v)
@@ -308,7 +308,7 @@ var AT001 = Scenario{
 		"and hooks, as Claude Code starts the plugin (sh plugin/scripts/mash serve with the env of plugin/.mcp.json, MASH_BIN set to the built binary, no download; " +
 		"MASH_ENDPOINT=alice.dev.design|review); mail each way through the sessions' MCP send tool, delivered by the hook commands of plugin/hooks/hooks.json " +
 		"(UserPromptSubmit and PostToolUse, run under sh -c with the hook JSON on stdin) with the sender's verified trust label, cross-checked with the MCP inbox and read tools; endpoint list --json; service metadata (mash who --json); " +
-		"mashctl permissions alice.dev.design; mashctl endpoint delete alice/dev/review, then the review session's connection, a reconnect and mash status, both through the plugin launcher. Not driven: a real Claude Code session (the harness plays Claude Code's two roles, starting the MCP server and running the hooks with their JSON, and no model is involved).",
+		"mashctl endpoint permissions alice.dev.design; mashctl endpoint delete alice/dev/review, then the review session's connection, a reconnect and mash status, both through the plugin launcher. Not driven: a real Claude Code session (the harness plays Claude Code's two roles, starting the MCP server and running the hooks with their JSON, and no model is involved).",
 	Body: func(a *AT) {
 		h, err := a.Home("home")
 		if !a.C.Check("a fresh scratch home is made", err == nil, "") || !a.StartServer(h) {
@@ -447,7 +447,7 @@ var AT002 = Scenario{
 		a.C.Check("B's design session is online", a.waitOnline(hb, env, "alice.dev.design"), "")
 		r := a.Mash("send-to-peer", hb, env, "send", "alice.dev.review", "mail from the endpoint on B")
 		a.C.Check("the endpoint on B mails its peer", r.Code == 0, exitDetail(r))
-		r = a.Ctl("inbox-inspect-peer", ha, a.Conn(), "inbox", "inspect", "alice.dev.review", "--json")
+		r = a.Ctl("inbox-inspect-peer", ha, a.Conn(), "endpoint", "inbox", "alice.dev.review", "--json")
 		a.C.Check("A sees the mail in the peer's inbox (sent by alice.dev.design)", r.Code == 0 && (strings.Contains(r.Stdout, "alice.dev.design") || strings.Contains(r.Stdout, "alice_dev_design")), exitDetail(r))
 		_ = p
 

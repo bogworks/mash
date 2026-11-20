@@ -1,0 +1,35 @@
+{
+  "address": "acme.team1.alpha",
+  "total": 4,
+  "undelivered": 1,
+  "messages": [
+    {
+      "number": 1,
+      "from": "acme.team1.bob",
+      "delivered": true,
+      "kind": "message",
+      "size": 10
+    },
+    {
+      "number": 2,
+      "from": "acme.team1.bob",
+      "delivered": true,
+      "kind": "message",
+      "size": 20
+    },
+    {
+      "number": 3,
+      "from": "acme.team1.bob",
+      "delivered": true,
+      "kind": "message",
+      "size": 30
+    },
+    {
+      "number": 4,
+      "from": "acme.team1.bob",
+      "delivered": false,
+      "kind": "message",
+      "size": 40
+    }
+  ]
+}

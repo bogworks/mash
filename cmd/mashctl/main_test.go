@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/bogworks/mash/internal/admin"
-	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/testenv"
 )
 
@@ -41,11 +40,11 @@ func TestMashctlVerbs(t *testing.T) {
 		t.Fatalf("init: %d %q %q", code, out, errb)
 	}
 	provisionAs(t, e, "c", admin.Meta{Role: "r"})
-	if out, _, code := ctlRun(t, e, "endpoint", "list"); code != 0 || !strings.Contains(out, "o/g/c") {
+	if out, _, code := ctlRun(t, e, "endpoint", "list"); code != 0 || out != "OWNER  GROUP  NAME  STATE\no      g      c     offline\n" {
 		t.Fatalf("endpoint list: %d %q", code, out)
 	}
-	if out, errb, code := ctlRun(t, e, "set-meta", "o.g.c", "--host", "h1"); code != 0 || !strings.Contains(out, `host "h1"`) {
-		t.Fatalf("set-meta: %d %q %q", code, out, errb)
+	if out, errb, code := ctlRun(t, e, "endpoint", "set", "o.g.c", "host=h1"); code != 0 || out != "Updated endpoint o.g.c\n" {
+		t.Fatalf("endpoint set: %d %q %q", code, out, errb)
 	}
 	if out, _, code := ctlRun(t, e, "limits", "--show"); code != 0 || !strings.Contains(out, "inbox_max_bytes") {
 		t.Fatalf("limits --show: %d %q", code, out)
@@ -53,8 +52,8 @@ func TestMashctlVerbs(t *testing.T) {
 	if out, _, code := ctlRun(t, e, "limits", "o.g.c"); code != 0 {
 		t.Fatalf("limits: %d %q", code, out)
 	}
-	if out, _, code := ctlRun(t, e, "permissions", "o.g.c", "--nsc"); code != 0 || out == "" {
-		t.Fatalf("permissions: %d %q", code, out)
+	if out, errb, code := ctlRun(t, e, "endpoint", "permissions", "o.g.c"); code != 0 || !strings.HasPrefix(out, "{") || errb != "" {
+		t.Fatalf("permissions: %d %q %q", code, out, errb)
 	}
 }
 
@@ -64,12 +63,12 @@ func TestMashctlUsageAndErrors(t *testing.T) {
 		t.Fatalf("no args: %d %q %q", code, out, errb)
 	}
 	for _, h := range []string{"help", "-h", "--help"} {
-		if out, errb, code := ctlRun(t, e, h); code != 0 || errb != "" || !strings.Contains(out, "mashctl set-meta <owner.group.instance>") {
+		if out, errb, code := ctlRun(t, e, h); code != 0 || errb != "" || !strings.Contains(out, "mashctl endpoint set ADDRESS key=value...") || strings.Contains(out, "set-meta") {
 			t.Fatalf("%s: %d %q %q", h, code, out, errb)
 		}
 	}
 	// the removed verbs are unknown commands, like any other
-	for _, verb := range []string{"provision", "deprovision", "list"} {
+	for _, verb := range []string{"provision", "deprovision", "list", "show", "set-meta", "label", "unlabel", "suspend", "resume", "suspended", "permissions", "inbox"} {
 		for _, args := range [][]string{{verb}, {verb, "o.g.c"}, {verb, "--help"}} {
 			if out, errb, code := ctlRun(t, e, args...); code != 2 || out != "" || !strings.Contains(errb, `mashctl: unknown command "`+verb+`"`) || !strings.Contains(errb, "mashctl init") {
 				t.Errorf("%v: %d %q %q", args, code, out, errb)
@@ -79,13 +78,13 @@ func TestMashctlUsageAndErrors(t *testing.T) {
 	if out, errb, code := ctlRun(t, e, "frob"); code != 2 || out != "" || !strings.Contains(errb, `mashctl: unknown command "frob"`) || !strings.Contains(errb, "mashctl init") {
 		t.Fatalf("unknown: %d %q %q", code, out, errb)
 	}
-	if out, _, code := ctlRun(t, e, "version"); code != 0 || !strings.HasPrefix(out, "mashctl ") {
+	if out, _, code := ctlRun(t, e, "version"); code != 0 || !regexp.MustCompile(`^mashctl v\S+ \(\S+\)\n$`).MatchString(out) {
 		t.Fatalf("version: %d %q", code, out)
 	}
 	// config errors fail the verbs that need config
 	var out, errb bytes.Buffer
 	env := map[string]string{"HOME": t.TempDir(), "MASH_SERVER": e.URL} // no owner
-	if code := runEnv([]string{"suspended", "o.g.c"}, func(k string) string { return env[k] }, &out, &errb); code != 1 || !strings.Contains(errb.String(), "mashctl: no owner") {
+	if code := runEnv([]string{"endpoint", "suspend", "o.g.c"}, func(k string) string { return env[k] }, &out, &errb); code != 1 || !strings.HasPrefix(errb.String(), "error: no owner") {
 		t.Fatalf("no owner: %d %q", code, errb.String())
 	}
 }
@@ -99,11 +98,11 @@ func TestMashctlAddressOnly(t *testing.T) {
 	}
 	provisionAs(t, e, "leg", admin.Meta{})
 	for _, args := range [][]string{
-		{"set-meta", "leg", "--role", "r"},
-		{"suspend", "leg"}, {"resume", "leg"}, {"suspended", "leg"}, {"permissions", "leg"},
-		{"label", "leg", "k=v"}, {"unlabel", "leg", "k"}, {"inbox", "inspect", "leg"},
+		{"endpoint", "set", "leg", "role=r"}, {"endpoint", "unset", "leg", "role"},
+		{"endpoint", "suspend", "leg"}, {"endpoint", "resume", "leg"}, {"endpoint", "permissions", "leg"},
+		{"endpoint", "inbox", "leg"}, {"endpoint", "show", "leg"},
 	} {
-		if _, errb, code := ctlRun(t, e, args...); code == 0 || !strings.Contains(errb, "give owner.group.instance") {
+		if _, errb, code := ctlRun(t, e, args...); code != 2 || !strings.Contains(errb, "write owner.group.name") {
 			t.Errorf("%v: %d %q", args, code, errb)
 		}
 	}
@@ -121,64 +120,5 @@ func TestMashctlAddressOnly(t *testing.T) {
 		if strings.Contains(strings.ToLower(h.String()), gone) {
 			t.Errorf("help mentions %q:\n%s", gone, h.String())
 		}
-	}
-}
-
-func TestMashctlSuspendVerbs(t *testing.T) {
-	e := testenv.Start(t)
-	ctlRun(t, e, "init")
-	provisionAs(t, e, "c", admin.Meta{})
-	if out, _, code := ctlRun(t, e, "suspended", "o.g.c"); code != 1 || !strings.Contains(out, "o.g.c is not suspended") {
-		t.Fatalf("suspended before: %d %q", code, out)
-	}
-	out, errb, code := ctlRun(t, e, "suspend", "o.g.c")
-	if code != 0 || !regexp.MustCompile(`^suspended o\.g\.c: id [0-9a-f]{32}, last_seq 0, msgs 0 \(new mail parked; the endpoint's credentials are still valid\)\n$`).MatchString(out) {
-		t.Fatalf("suspend: %d %q %q", code, out, errb)
-	}
-	if out, _, code := ctlRun(t, e, "suspended", "o.g.c"); code != 0 || !strings.HasPrefix(out, "suspended o.g.c since ") || !regexp.MustCompile(`: id [0-9a-f]{32}, last_seq 0, msgs 0\n$`).MatchString(out) {
-		t.Fatalf("suspended: %d %q", code, out)
-	}
-	if out, errb, code := ctlRun(t, e, "resume", "o.g.c"); code != 0 || out != "resumed o.g.c\n" {
-		t.Fatalf("resume: %d %q %q", code, out, errb)
-	}
-	if _, _, code := ctlRun(t, e, "suspended", "o.g.c"); code != 1 {
-		t.Fatalf("suspended after resume: %d", code)
-	}
-	// Any error is 1, never 3.
-	if _, errb, code := ctlRun(t, e, "suspended", "o.g.ghost"); code != 1 || !strings.Contains(errb, "no inbox stream") {
-		t.Fatalf("suspended ghost: %d %q", code, errb)
-	}
-	if _, errb, code := ctlRun(t, e, "suspend"); code == 0 || !strings.Contains(errb, "usage: mashctl suspend <owner.group.instance>") {
-		t.Fatalf("usage: %d %q", code, errb)
-	}
-}
-
-// The suspend verbs take a new-form flat key end to end, and still refuse a malformed one.
-func TestMashctlSuspendFlatKey(t *testing.T) {
-	e := testenv.Start(t)
-	ctlRun(t, e, "init")
-	a, err := admin.New(e.Conn(t, e.AdminCreds), e.Owner)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ident, err := sap.NewAddress("o", "team1", "ops1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, u := e.Mint(t, ident)
-	if _, err := a.Provision(context.Background(), ident, u, e.Account, "", admin.Meta{}); err != nil {
-		t.Fatal(err)
-	}
-	key := ident.Flat()
-	out, errb, code := ctlRun(t, e, "suspend", key)
-	m := regexp.MustCompile(`id ([0-9a-f]{32}), last_seq (\d+),`).FindStringSubmatch(out)
-	if code != 0 || m == nil {
-		t.Fatalf("suspend: %d %q %q", code, out, errb)
-	}
-	if out, _, code := ctlRun(t, e, "suspended", key); code != 0 || !strings.HasPrefix(out, "suspended "+ident.String()+" since ") {
-		t.Fatalf("suspended: %d %q", code, out)
-	}
-	if _, errb, code := ctlRun(t, e, "suspend", "O_team1_ops1"); code == 0 || !strings.Contains(errb, "usage: mashctl suspend <owner.group.instance>") {
-		t.Fatalf("a malformed key must be refused: %d %q", code, errb)
 	}
 }

@@ -205,7 +205,7 @@ func TestEndpointBadAddressExits2WithoutEcho(t *testing.T) {
 func TestEndpointListZeroAndTwo(t *testing.T) {
 	h := newFleetEnv(t)
 	out, errb, code := h.run("endpoint", "list")
-	if code != 0 || !strings.HasPrefix(out, "no endpoints\n") || !strings.Contains(out, "mashctl endpoint create --help") {
+	if code != 0 || out != "No endpoints.\n" || errb != "" {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
 	out, _, code = h.run("endpoint", "list", "--json")
@@ -219,12 +219,8 @@ func TestEndpointListZeroAndTwo(t *testing.T) {
 	h.seed(ad("b"))
 	h.seed(ad("a"))
 	out, errb, code = h.run("endpoint", "list")
-	lines := strings.Split(strings.TrimSpace(out), "\n")
-	if code != 0 || len(lines) != 2 || !strings.HasPrefix(lines[0], "o/g/a  o.g.a  ") || !strings.HasPrefix(lines[1], "o/g/b  o.g.b  ") {
+	if code != 0 || out != "OWNER  GROUP  NAME  STATE\no      g      a     offline\n              b     offline\n" || errb != "" {
 		t.Fatalf("%d %q %q", code, out, errb)
-	}
-	if !strings.Contains(errb, "2 endpoints") {
-		t.Errorf("count line: %q", errb)
 	}
 	noSecrets(t, out, errb)
 }
@@ -232,20 +228,18 @@ func TestEndpointListZeroAndTwo(t *testing.T) {
 func TestEndpointShowFoundAndNotFound(t *testing.T) {
 	h := newFleetEnv(t)
 	h.seed(ad("c"))
-	for _, ref := range []string{"o/g/c", "o.g.c"} {
-		out, errb, code := h.run("endpoint", "show", ref)
-		if code != 0 || !strings.HasPrefix(out, "o/g/c  o.g.c\n") || !strings.Contains(out, h.creds(ad("c"))) {
-			t.Fatalf("%s: %d %q %q", ref, code, out, errb)
-		}
-		noSecrets(t, out, errb)
-	}
-	out, errb, code := h.run("endpoint", "show", "o/g/nope")
-	if code != 1 || out != "" || !strings.Contains(errb, "mashctl endpoint list") {
+	out, errb, code := h.run("endpoint", "show", "o.g.c")
+	if code != 0 || !strings.HasPrefix(out, "address:    o.g.c\nstate:      offline\n") || errb != "" {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
-	out, _, code = h.run("endpoint", "show", "o/g/nope", "--json")
-	if code != 1 || !strings.Contains(out, `"code": "not_found"`) || !strings.Contains(out, `"outcome": "refused"`) {
-		t.Fatalf("%d %q", code, out)
+	noSecrets(t, out, errb)
+	out, errb, code = h.run("endpoint", "show", "o.g.nope")
+	if code != 1 || out != "" || !strings.Contains(errb, "hint: mashctl endpoint list") {
+		t.Fatalf("%d %q %q", code, out, errb)
+	}
+	// the slash form is not an address of this command
+	if out, _, code = h.run("endpoint", "show", "o/g/c"); code != 2 || out != "" {
+		t.Fatalf("slash form: %d %q", code, out)
 	}
 }
 
@@ -262,7 +256,7 @@ func TestEndpointGoldens(t *testing.T) {
 	}
 	checkGolden(t, "endpoint_list.golden.json", h.scrub(out))
 
-	out, errb, code = h.run("endpoint", "show", "o/g/a", "--json")
+	out, errb, code = h.run("endpoint", "show", "o.g.a", "--json")
 	if code != 0 {
 		t.Fatalf("show: %d %q", code, errb)
 	}

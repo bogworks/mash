@@ -7,7 +7,12 @@ import "testing"
 func TestEndpointUnreachableServerExitsOne(t *testing.T) {
 	for _, args := range [][]string{
 		{"endpoint", "list"},
-		{"endpoint", "show", "o/g/a"},
+		{"endpoint", "show", "o.g.a"},
+		{"endpoint", "set", "o.g.a", "role=r"},
+		{"endpoint", "unset", "o.g.a", "role"},
+		{"endpoint", "suspend", "o.g.a"},
+		{"endpoint", "resume", "o.g.a"},
+		{"endpoint", "inbox", "o.g.a"},
 		{"endpoint", "delete", "o/g/a"},
 		{"endpoint", "delete", "o/g/a", "--json"},
 	} {

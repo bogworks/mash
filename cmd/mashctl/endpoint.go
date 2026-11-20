@@ -5,12 +5,13 @@ import (
 	"io"
 	"strings"
 
+	"github.com/bogworks/mash/internal/cliframe"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/sap"
 )
 
 // endpointVerbs are the verbs of `mashctl endpoint`.
-const endpointVerbs = "create, reissue, delete, list, show"
+const endpointVerbs = "create, reissue, delete, list, show, set, unset, suspend, resume, inbox, permissions"
 
 // endpointVerbTable is every verb of `mashctl endpoint`, in the order endpointVerbs lists them. runEndpoint dispatches
 // through it and the command-tree test walks it, so a verb added here is dispatched and tested from one entry.
@@ -27,15 +28,38 @@ var endpointVerbTable = []struct {
 	{name: "delete", run: runEndpointDelete, changes: true},
 	{name: "list", run: runEndpointList, read: true},
 	{name: "show", run: runEndpointShow, read: true},
+	{name: "set", run: runEndpointSet, changes: true},
+	{name: "unset", run: runEndpointUnset, changes: true},
+	{name: "suspend", run: runEndpointSuspend, changes: true},
+	{name: "resume", run: runEndpointResume, changes: true},
+	{name: "inbox", run: runEndpointInbox, read: true},
+	{name: "permissions", run: runEndpointPermissions, read: true},
 }
+
+// endpointHelp is the text of `mashctl endpoint --help`.
+const endpointHelp = `usage: mashctl endpoint <command> [args]
+commands:
+  list [prefix] [--wide]      list the endpoints
+  show <address>              show one endpoint
+  create [address] ...        make an endpoint
+  reissue <address> ...       give an endpoint a new key
+  delete <address> ...        remove an endpoint
+  set <address> key=value...  set role, description, host, capability, labels
+  unset <address> key...      remove those values
+  suspend <address>           refuse new mail to an endpoint
+  resume <address>            take new mail again
+  inbox <address>             list what is in an inbox, without the text
+  permissions <address>       print the NATS permissions an endpoint needs
+Run mashctl endpoint <command> --help for a command's options.
+`
 
 // runEndpoint is `mashctl endpoint <verb>`. Each verb has the signature of the run functions of this package.
 func runEndpoint(args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
-	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" {
-		fmt.Fprintf(stdout, "usage: mashctl endpoint <verb> [args]\n  verbs: %s\n  try: mashctl endpoint create --help\n", endpointVerbs)
-		if len(args) == 0 {
-			return 2
-		}
+	if len(args) == 0 {
+		return cliframe.Report(stdout, stderr, cliframe.Usagef("missing command").WithHint("mashctl endpoint --help"), false)
+	}
+	if args[0] == "-h" || args[0] == "--help" {
+		fmt.Fprint(stdout, endpointHelp)
 		return 0
 	}
 	rest := args[1:]
@@ -44,8 +68,7 @@ func runEndpoint(args []string, env func(string) string, lookup config.Lookup, s
 			return v.run(rest, env, lookup, stdout, stderr)
 		}
 	}
-	fmt.Fprintf(stderr, "mashctl: endpoint: unknown verb %q (the verbs are %s; try: mashctl endpoint --help)\n", args[0], endpointVerbs)
-	return 2
+	return cliframe.Report(stdout, stderr, cliframe.Usagef("unknown command %q", config.Clean(args[0])).WithHint("mashctl endpoint --help"), jsonRequested(rest))
 }
 
 // parseEndpointRef reads an endpoint reference: the shortcut owner/group/instance or the dotted owner.group.instance.

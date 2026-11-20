@@ -35,7 +35,7 @@ func writeRule(t *testing.T, dir, name, body string) string {
 // provisionOf runs `endpoint create` for the address (owner.group.instance), with a key made for it.
 func (h *fleetEnv) provisionOf(addr string) (string, string, int) {
 	h.t.Helper()
-	if _, err := parseAddr(addr); err != nil {
+	if _, err := parseEpAddress(addr); err != nil {
 		h.t.Fatal(err)
 	}
 	return h.run("endpoint", "create", strings.ReplaceAll(addr, ".", "/"), "--make-key")
@@ -87,7 +87,7 @@ func TestConfigAMashctlEndpointCreate(t *testing.T) {
 func TestConfigAMashctlRequiredWithoutFileRefusesToStart(t *testing.T) {
 	verbs := [][]string{
 		{"endpoint", "list"}, {"init"}, {"limits"}, {"endpoint", "create", "o/g/x", "--make-key"},
-		{"label", "o.g.x", "k=v"}, {"endpoint", "delete", "o.g.x"},
+		{"endpoint", "set", "o.g.x", "label.k=v"}, {"endpoint", "delete", "o.g.x"},
 		{"adopt", "--server", "nats://127.0.0.1:1", "--operator-key", "/x", "--account-key", "/x", "--sys-creds", "/x", "--admin-creds", "/x"},
 	}
 	for _, how := range []string{"environment", "config.json"} {

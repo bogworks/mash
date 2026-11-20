@@ -196,8 +196,8 @@ func TestTargetLineComesBeforeAWriteAndOfflineVerbsPrintNone(t *testing.T) {
 	if code != 0 || strings.Contains(errb, "target server") || !strings.Contains(out, "inbox_max_bytes") {
 		t.Errorf("limits --show: %d %q", code, errb)
 	}
-	if _, errb, _ := h.run("permissions", "o.g.a", "--nsc"); strings.Contains(errb, "target server") {
-		t.Errorf("permissions: %q", errb)
+	if _, errb, _ := h.run("endpoint", "permissions", "o.g.a"); strings.Contains(errb, "target server") {
+		t.Errorf("endpoint permissions: %q", errb)
 	}
 	if _, errb, _ := h.run("policy"); strings.Contains(errb, "target server") {
 		t.Errorf("policy: %q", errb)

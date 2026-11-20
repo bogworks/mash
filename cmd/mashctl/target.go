@@ -103,11 +103,9 @@ func announceTarget(cfg config.Config, env func(string) string, stderr io.Writer
 }
 
 // announcesVerb reports whether the verb of the common admin path (ctl.Run) connects to a server: every one but
-// permissions, `limits --show` and `init --local`, which are offline.
+// `limits --show` and `init --local`, which are offline.
 func announcesVerb(args []string) bool {
 	switch args[0] {
-	case "permissions":
-		return false
 	case "limits":
 		return !(len(args) == 2 && args[1] == "--show")
 	case "init":

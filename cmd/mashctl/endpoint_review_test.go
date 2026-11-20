@@ -149,9 +149,9 @@ func TestEndpointCreateFlatJSON(t *testing.T) {
 func TestEndpointShowDeleteFlatJSON(t *testing.T) {
 	h := newFleetEnv(t)
 	h.seed(ad("s"))
-	so, _, _ := h.run("endpoint", "show", "o/g/s", "--json")
+	so, _, _ := h.run("endpoint", "show", "o.g.s", "--json")
 	m := jsonObject(t, so)
-	if m["owner"] != "o" || m["address"] != "o.g.s" || m["key"] != "o_g_s" || m["outcome"] != "shown" || m["endpoint"] != nil {
+	if m["address"] != "o.g.s" || m["state"] != "offline" || m["public_key"] == "" || m["endpoint"] != nil || m["labels"] == nil {
 		t.Errorf("show %v", m)
 	}
 	so, _, _ = h.run("endpoint", "delete", "o/g/s", "--json")
@@ -162,6 +162,34 @@ func TestEndpointShowDeleteFlatJSON(t *testing.T) {
 }
 
 // TestEndpointUsageErrorsInJSON: with --json a usage error also prints the refusal document on stdout.
+// TestEndpointReadUsageErrorsInJSON: with --json the commands of the new form print one {"error","hint"} line on stdout
+// and nothing on stderr.
+func TestEndpointReadUsageErrorsInJSON(t *testing.T) {
+	h := newFleetEnv(t)
+	cases := []struct {
+		args []string
+		want string
+	}{
+		{[]string{"show", "o.g.x", "--bogus", "--json"}, `{"error":"unknown option \"--bogus\"","hint":"mashctl endpoint show --help"}`},
+		{[]string{"show", "--json"}, `{"error":"missing the endpoint address (owner.group.name)","hint":"mashctl endpoint show --help"}`},
+		{[]string{"show", "Not A Valid!", "--json"}, `{"error":"not an endpoint address (the value is not shown): write owner.group.name, for example acme.demo.bob"}`},
+		{[]string{"list", "--bogus", "--json"}, `{"error":"unknown option \"--bogus\"","hint":"mashctl endpoint list --help"}`},
+		{[]string{"list", "a.b.c", "--json"}, `{"error":"not an owner or owner.group prefix (the value is not shown): write acme or acme.demo","hint":"mashctl endpoint list --help"}`},
+		{[]string{"list", "a", "b", "--json"}, `{"error":"too many arguments","hint":"mashctl endpoint list --help"}`},
+		{[]string{"show", "o.g.none", "--json"}, `{"error":"no endpoint o.g.none","hint":"mashctl endpoint list"}`},
+	}
+	for _, c := range cases {
+		so, se, code := h.run(append([]string{"endpoint"}, c.args...)...)
+		wantCode := 2
+		if strings.Contains(c.want, "no endpoint") {
+			wantCode = 1
+		}
+		if code != wantCode || se != "" || strings.TrimSpace(so) != c.want {
+			t.Errorf("%v: %d %q %q, want %d %q", c.args, code, so, se, wantCode, c.want)
+		}
+	}
+}
+
 func TestEndpointUsageErrorsInJSON(t *testing.T) {
 	h := newFleetEnv(t)
 	_, pubFile, _ := epKey(t, t.TempDir(), "k")
@@ -183,11 +211,6 @@ func TestEndpointUsageErrorsInJSON(t *testing.T) {
 		{"delete unknown flag", []string{"delete", "o/g/x", "--bogus", "--json"}, "unknown_flag"},
 		{"delete no address", []string{"delete", "--json"}, "address_missing"},
 		{"delete bad address", []string{"delete", "Not A Valid!", "--json"}, "address_invalid"},
-		{"show unknown flag", []string{"show", "o/g/x", "--bogus", "--json"}, "unknown_flag"},
-		{"show no address", []string{"show", "--json"}, "address_missing"},
-		{"show bad address", []string{"show", "Not A Valid!", "--json"}, "address_invalid"},
-		{"list unknown flag", []string{"list", "--bogus", "--json"}, "unknown_flag"},
-		{"list argument", []string{"list", "o/g/x", "--json"}, "usage"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -206,7 +229,7 @@ func TestEndpointUsageErrorsInJSON(t *testing.T) {
 		})
 	}
 	// without --json nothing goes to stdout
-	if so, _, code := h.run("endpoint", "show", "--bogus"); code != 2 || so != "" {
+	if so, _, code := h.run("endpoint", "show", "--bogus"); code != 2 || so != "" { // a show error is the new form: see TestEndpointReadUsageErrorsInJSON
 		t.Errorf("plain usage error: %d %q", code, so)
 	}
 	// a value that looks like --json is a value, not the flag

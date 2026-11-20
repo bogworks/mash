@@ -613,7 +613,7 @@ func (s *At5) Scenario() {
 		groups := map[string]string{}
 		if v, err := parseJSON(r.Stdout); err == nil {
 			for _, o := range findObjects(v, "group") {
-				inst, _ := o["instance"].(string)
+				inst, _ := o["name"].(string)
 				g, _ := o["group"].(string)
 				groups[inst] = g
 			}
@@ -744,21 +744,18 @@ func showRefusal(code int, stdout string) (bool, string) {
 		return false, fmt.Sprintf("exit %d, want 1", code)
 	}
 	var doc struct {
-		Outcome string `json:"outcome"`
-		Refusal *struct {
-			Code string `json:"code"`
-		} `json:"refusal"`
+		Error string `json:"error"`
 	}
 	if err := json.Unmarshal([]byte(strings.TrimSpace(stdout)), &doc); err != nil {
 		return false, "exit 1 but stdout is not the --json document"
 	}
-	if doc.Outcome != "refused" || doc.Refusal == nil {
-		return false, fmt.Sprintf("outcome %q with no refusal, want refused", doc.Outcome)
+	if doc.Error == "" {
+		return false, "exit 1 but the --json document has no error"
 	}
-	if doc.Refusal.Code != "not_found" {
-		return false, fmt.Sprintf("refusal code %q, want not_found", doc.Refusal.Code)
+	if !strings.HasPrefix(doc.Error, "no endpoint ") {
+		return false, fmt.Sprintf("error %q, want no endpoint ...", doc.Error)
 	}
-	return true, "exit 1, refusal not_found"
+	return true, "exit 1, no endpoint"
 }
 
 // issuedCheckClean asserts `mashctl issued check --json` after the revocation: exit 0 (clean and complete, per
@@ -880,9 +877,9 @@ func issuedRevocationAccounted(listCode int, listOut string, checkCode int, chec
 // revocationSeen: the delete of review was made from M1; M2 shows it with endpoint show, issued list and issued check.
 func (s *At5) revocationSeen() {
 	m2 := s.M(2)
-	r := s.ctl(m2, "show-review", nil, "endpoint", "show", "alice/dev/review", "--json")
+	r := s.ctl(m2, "show-review", nil, "endpoint", "show", "alice.dev.review", "--json")
 	ok, d := showRefusal(r.Code, r.Stdout)
-	s.check("M2: endpoint show alice/dev/review --json refuses with code not_found for the endpoint M1 deleted", ok, d)
+	s.check("M2: endpoint show alice.dev.review --json refuses (no endpoint) for the endpoint M1 deleted", ok, d)
 	il := s.ctl(m2, "issued-list", nil, "issued", "list", "--json")
 	ok, d = issuedListRevoked(il.Code, il.Stdout, "alice.dev.review")
 	s.check("M2: mashctl issued list shows alice.dev.review's key revoked (its entry has revoked_at)", ok, d)
@@ -981,8 +978,8 @@ func (s *At5) race(addr string) {
 	r := s.ctl(m1, "list-after-"+addr, nil, "endpoint", "list", "--json")
 	n := 0
 	if v, err := parseJSON(r.Stdout); err == nil {
-		for _, o := range findObjects(v, "instance") {
-			if i, _ := o["instance"].(string); i == addr {
+		for _, o := range findObjects(v, "name") {
+			if i, _ := o["name"].(string); i == addr {
 				n++
 			}
 		}

@@ -314,7 +314,11 @@ func (a *Admin) createStreamLocked(ctx context.Context, lk *streamLock, key stri
 		existing = nil
 	} else {
 		if _, ok := suspendedSubjects(key, existing.CachedInfo().Config); ok {
-			return nil, fmt.Errorf("mash: inbox of %s is suspended; run `mashctl resume %s` first", key, key)
+			shown := key
+			if a, err := sap.AddressFromFlat(key); err == nil {
+				shown = a.String()
+			}
+			return nil, fmt.Errorf("mash: inbox of %s is suspended; run `mashctl endpoint resume %s` first", key, shown)
 		}
 		if err := refuseLowering(key, existing.CachedInfo().Config, a.limits); err != nil {
 			return nil, err
@@ -793,7 +797,7 @@ func (a *Admin) SetMeta(ctx context.Context, addr sap.Address, u MetaUpdate) (st
 		}
 		return store.ParseRecord(name, val)
 	}
-	return store.Record{}, fmt.Errorf("mash: directory %s kept changing under set-meta; try again", name)
+	return store.Record{}, fmt.Errorf("mash: directory %s kept changing under the update; try again", name)
 }
 
 // NameLock is a held name lock (ADR 0048, ADR 0058), handed to the func WithNameLock runs. It is valid only inside that

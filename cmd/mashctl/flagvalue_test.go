@@ -19,7 +19,7 @@ func TestFlagValueDash(t *testing.T) {
 		{"audit --compare --json", []string{"--compare", "--json"}, func(a []string) error { _, err := parseAuditArgs(a); return err }, `--compare needs a value; "--json" looks like a flag`},
 		{"audit --compare -", []string{"--compare", "-"}, func(a []string) error { _, err := parseAuditArgs(a); return err }, ""},
 		{"issued check --servers --json", []string{"--servers", "--json"}, func(a []string) error { _, err := parseIssuedArgs("check", a); return err }, `--servers needs a value`},
-		{"inbox --from -3", []string{"--from", "-3"}, func(a []string) error { _, err := parseInboxInspectArgs(a); return err }, `looks like a flag`},
+		{"endpoint inbox --from -3", []string{"x.y.z", "--from", "-3"}, func(a []string) error { _, err := parseEpInput(endpointInboxSpec, a); return err }, `looks like a flag`},
 		{"adopt --owner --mint-admin", []string{"--owner", "--mint-admin"}, func(a []string) error { _, err := parseAdoptArgs(a); return err }, `--owner needs a value`},
 	}
 	for _, c := range cases {

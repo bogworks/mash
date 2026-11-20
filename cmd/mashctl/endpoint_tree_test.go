@@ -19,7 +19,8 @@ var treeExceptions = map[string]string{}
 // test: add one to treeSamples.
 type treeSample struct {
 	usage      string
-	positional int // most positional arguments it takes
+	positional int    // most positional arguments it takes
+	arg        string // what its usage line names as the positional argument, "" when it takes none
 	// readArgs are the arguments after the verb of a read command that succeed on the seeded endpoint
 	readArgs func(a sap.Address) []string
 	// dryArgs are the arguments after the verb of a changing command, with --dry-run added by the test, that succeed
@@ -29,16 +30,28 @@ type treeSample struct {
 }
 
 var treeSamples = map[string]treeSample{
-	"create": {usage: endpointCreateUsage, positional: 1, needsKey: true,
+	"create": {usage: endpointCreateUsage, positional: 1, arg: "ADDRESS", needsKey: true,
 		dryArgs: func(_ sap.Address, pub string) []string { return []string{ad("treenew").String(), "--public-key", pub} }},
-	"reissue": {usage: endpointReissueUsage, positional: 1, needsKey: true,
+	"reissue": {usage: endpointReissueUsage, positional: 1, arg: "ADDRESS", needsKey: true,
 		dryArgs: func(a sap.Address, pub string) []string { return []string{a.String(), "--public-key", pub} }},
-	"delete": {usage: endpointDeleteUsage, positional: 1,
+	"delete": {usage: endpointDeleteUsage, positional: 1, arg: "ADDRESS",
 		dryArgs: func(a sap.Address, _ string) []string { return []string{a.String()} }},
-	"list": {usage: endpointListUsage, positional: 0,
+	"list": {usage: endpointListUsage, positional: 1, arg: "[prefix]",
 		readArgs: func(sap.Address) []string { return nil }},
-	"show": {usage: endpointShowUsage, positional: 1,
-		readArgs: func(a sap.Address) []string { return []string{slashForm(a)} }},
+	"show": {usage: endpointShowUsage, positional: 1, arg: "<address>",
+		readArgs: func(a sap.Address) []string { return []string{a.String()} }},
+	"set": {usage: endpointSetUsage, positional: -1, arg: "<address>",
+		dryArgs: func(a sap.Address, _ string) []string { return []string{a.String(), "label.tree=1", "role=x"} }},
+	"unset": {usage: endpointUnsetUsage, positional: -1, arg: "<address>",
+		dryArgs: func(a sap.Address, _ string) []string { return []string{a.String(), "label.tree", "role"} }},
+	"suspend": {usage: endpointSuspendUsage, positional: 1, arg: "<address>",
+		dryArgs: func(a sap.Address, _ string) []string { return []string{a.String()} }},
+	"resume": {usage: endpointResumeUsage, positional: 1, arg: "<address>",
+		dryArgs: func(a sap.Address, _ string) []string { return []string{a.String()} }},
+	"inbox": {usage: endpointInboxUsage, positional: 1, arg: "<address>",
+		readArgs: func(a sap.Address) []string { return []string{a.String()} }},
+	"permissions": {usage: endpointPermissionsUsage, positional: 1, arg: "<address>",
+		readArgs: func(a sap.Address) []string { return []string{a.String()} }},
 }
 
 func treeExcused(verb, check string) bool {
@@ -59,6 +72,19 @@ func TestEndpointCommandTree(t *testing.T) {
 	_, pubFile, _ := epKey(t, pubDir, "tree")
 	addr := ad("tree")
 	h.seed(addr)
+
+	// the noun's own help names every verb of the table, one line each, under 80 columns
+	help, _, _ := h.run("endpoint", "--help")
+	for _, v := range endpointVerbTable {
+		if !strings.Contains(help, "\n  "+v.name+" ") {
+			t.Errorf("endpoint --help does not list %s:\n%s", v.name, help)
+		}
+	}
+	for _, l := range strings.Split(help, "\n") {
+		if len(l) >= 80 {
+			t.Errorf("endpoint --help has a line of %d columns: %q", len(l), l)
+		}
+	}
 
 	// the verb list in the noun's own help names exactly the table's verbs
 	listed := strings.Split(endpointVerbs, ", ")
@@ -95,21 +121,20 @@ func TestEndpointCommandTree(t *testing.T) {
 			// at most one positional argument, and the usage line names it
 			if !treeExcused(c.name, "positional") {
 				first := usageLine(smp.usage)
-				if smp.positional == 1 && !strings.Contains(first, "ADDRESS") {
-					t.Errorf("usage line %q does not name ADDRESS", first)
+				if smp.arg == "" || !strings.Contains(first, smp.arg) {
+					t.Errorf("usage line %q does not name %q", first, smp.arg)
 				}
-				if smp.positional == 0 && strings.Contains(first, "ADDRESS") {
-					t.Errorf("usage line %q names a positional the command does not take", first)
-				}
-				args := []string{"endpoint", c.name}
-				for i := 0; i <= smp.positional; i++ {
-					args = append(args, "x"+string(rune('a'+i))+"/dev/y")
-				}
-				if smp.needsKey {
-					args = append(args, "--public-key", pubFile)
-				}
-				if _, _, code := h.run(args...); code != 2 {
-					t.Errorf("%d positional arguments: exit %d, want 2", smp.positional+1, code)
+				if smp.positional >= 0 {
+					args := []string{"endpoint", c.name}
+					for i := 0; i <= smp.positional; i++ {
+						args = append(args, "x"+string(rune('a'+i))+"/dev/y")
+					}
+					if smp.needsKey {
+						args = append(args, "--public-key", pubFile)
+					}
+					if _, _, code := h.run(args...); code != 2 {
+						t.Errorf("%d positional arguments: exit %d, want 2", smp.positional+1, code)
+					}
 				}
 			}
 			// --help first: exit 0, with an example
