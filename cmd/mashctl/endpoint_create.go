@@ -263,6 +263,7 @@ func runEndpointCreate(args []string, g cliframe.Global, env func(string) string
 	if err != nil {
 		return cliframe.Report(stdout, stderr, err, jsonRequested(args, "--out", "--public-key"))
 	}
+	in.verbose = g.Verbose
 	t, res, err := epCreate(&in, env, lookup, stderr)
 	if err != nil {
 		return cliframe.Report(stdout, stderr, err, in.json)
@@ -324,7 +325,7 @@ func epCreate(in *epInput, env func(string) string, lookup config.Lookup, stderr
 		return refuse(&epRefusal{"no_account_key", err.Error()})
 	}
 
-	announceTarget(cfg, env, stderr, nil)
+	announceTarget(cfg, env, stderr, nil, in.verbose)
 	adm, ctx, closeAdmin, err := ctl.OpenAdmin("mashctl", cfg)
 	if err != nil {
 		return fail("server", admin.RewordUnavailable(err.Error())+"; nothing was changed")

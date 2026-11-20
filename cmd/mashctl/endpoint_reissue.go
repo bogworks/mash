@@ -86,6 +86,7 @@ func runEndpointReissue(args []string, g cliframe.Global, env func(string) strin
 	if err != nil {
 		return cliframe.Report(stdout, stderr, err, jsonRequested(args, "--out", "--public-key"))
 	}
+	in.verbose = g.Verbose
 	t, res, err := epReissue(&in, env, lookup, stderr)
 	if err != nil {
 		return cliframe.Report(stdout, stderr, err, in.json)
@@ -116,7 +117,7 @@ func epReissue(in *epInput, env func(string) string, lookup config.Lookup, stder
 	if err != nil {
 		return refuse(&epRefusal{"no_account_key", err.Error()})
 	}
-	announceTarget(cfg, env, stderr, nil)
+	announceTarget(cfg, env, stderr, nil, in.verbose)
 	adm, ctx, closeAdmin, err := ctl.OpenAdmin("mashctl", cfg)
 	if err != nil {
 		return t, epResult{}, epErrOf(addr, "server", admin.RewordUnavailable(err.Error())+"; nothing was changed")

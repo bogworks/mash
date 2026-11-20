@@ -101,7 +101,7 @@ func runEndpointDelete(args []string, g cliframe.Global, env func(string) string
 	if err != nil {
 		return cliframe.Report(stdout, stderr, err, jsonRequested(args))
 	}
-	opts := retireOpts{dryRun: in.flags["--dry-run"], yes: in.flags["--yes"], again: "mashctl endpoint delete " + in.addr.String()}
+	opts := retireOpts{verbose: g.Verbose, dryRun: in.flags["--dry-run"], yes: in.flags["--yes"], again: "mashctl endpoint delete " + in.addr.String()}
 	prompt := stdout
 	if in.json {
 		prompt = stderr

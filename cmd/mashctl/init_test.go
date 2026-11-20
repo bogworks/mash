@@ -456,7 +456,7 @@ func TestInitExistingConfigJSON(t *testing.T) {
 	}
 	before := tree(t, a.root)
 	_, errb, code := a.init()
-	if code != 1 || errb != "error: ~/cfg was set up with a different server;\n       nothing was changed\nhint: mashctl init --config <file> --config-dir <a new folder>\n" {
+	if code != 1 || errb != "error: ~/cfg was set up with a different server; nothing was changed\nhint: mashctl init --config <file> --config-dir <a new folder>\n" {
 		t.Fatalf("%d %q", code, errb)
 	}
 	sameTree(t, before, tree(t, a.root))
@@ -648,12 +648,12 @@ func TestInitRefusals(t *testing.T) {
 		if _, _, err := ks.InitOperator(); err != nil {
 			t.Fatal(err)
 		}
-		a.refuses(1, []string{"error: ~/cfg was set up with a different operator key;\n       nothing was changed\nhint: mashctl init --config <file> --config-dir <a new folder>\n"}, nil)
+		a.refuses(1, []string{"error: ~/cfg was set up with a different operator key; nothing was changed\nhint: mashctl init --config <file> --config-dir <a new folder>\n"}, nil)
 		os.Remove(filepath.Join(a.env["MASH_KEYS_DIR"], "operator.nk"))
 		if _, _, err := ks.InitAccount(); err != nil {
 			t.Fatal(err)
 		}
-		a.refuses(1, []string{"error: ~/cfg was set up with a different account key;\n       nothing was changed\nhint: mashctl init --config <file> --config-dir <a new folder>\n"}, nil)
+		a.refuses(1, []string{"error: ~/cfg was set up with a different account key; nothing was changed\nhint: mashctl init --config <file> --config-dir <a new folder>\n"}, nil)
 	})
 	t.Run("different sys.creds already in place", func(t *testing.T) {
 		a.t = t
@@ -661,7 +661,7 @@ func TestInitRefusals(t *testing.T) {
 		sd := filepath.Join(a.env["MASH_CONFIG_DIR"], "server")
 		os.MkdirAll(sd, 0o700)
 		os.WriteFile(filepath.Join(sd, "sys.creds"), []byte("other"), 0o600)
-		a.refuses(1, []string{"error: ~/cfg was set up with a different system creds;\n       nothing was changed\nhint: mashctl init --config <file> --config-dir <a new folder>\n"}, nil)
+		a.refuses(1, []string{"error: ~/cfg was set up with a different system creds; nothing was changed\nhint: mashctl init --config <file> --config-dir <a new folder>\n"}, nil)
 	})
 }
 

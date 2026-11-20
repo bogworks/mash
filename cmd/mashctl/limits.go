@@ -165,7 +165,7 @@ func runLimitsShow(args []string, g cliframe.Global, env func(string) string, lo
 // runLimitsApply is `mashctl limits apply [prefix]`: it raises existing inboxes to the configured limits and never
 // lowers one.
 func runLimitsApply(args []string, g cliframe.Global, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
-	return runEp(limitsApplySpec, args, env, lookup, stdout, stderr, func(rt *epRuntime) error {
+	return runEp(limitsApplySpec, g, args, env, lookup, stdout, stderr, func(rt *epRuntime) error {
 		recs, bad, err := rt.adm.List(rt.ctx)
 		if err != nil {
 			return failErr(err)

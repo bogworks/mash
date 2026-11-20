@@ -23,6 +23,11 @@ package main
 //	bad-option/<path>    an unknown option exits 2: 'error: unknown option --bogus', then 'hint: mashctl <path> --help'
 //	bad-option-json/...  the same with --json: {error, hint} on stdout, nothing on stderr
 //	usage-exit/<path>    a missing required argument exits 2, and no usage error gives a code other than 2
+//	extra-option/...     an option a --help lists that the specification lacks for the command (its own and the global ones)
+//	extra-command/...    a subcommand a --help lists that the specification lacks for the command, and the other way round
+//	outputs/<path> <case>  every x-output case of the specification (text, stream, exit code) run against the build and
+//	                     compared exactly (conformance_outputs_test.go); confUnchecked names each case that cannot be run
+//	                     here, with the reason, and fails when a listed case is checked after all
 
 import (
 	"bytes"
@@ -40,7 +45,10 @@ import (
 var confGaps = map[string]string{}
 
 // confDrift: key is "<check> <name>"; the value says what differs and what closes it.
-var confDrift = map[string]string{}
+var confDrift = map[string]string{
+	"extra-option endpoint suspend --dry-run": "the build takes --dry-run (its help lists it, endpoint_suspend_test.go uses it) and the specification lists no option for suspend; to be ruled: add the option to the specification or remove it from the build",
+	"extra-option endpoint resume --dry-run":  "as endpoint suspend --dry-run",
+}
 
 // confCheck applies the rule of the two tables to the problems of one check.
 func confCheck(t *testing.T, key string, problems []string) {
@@ -71,6 +79,7 @@ type confOpt struct {
 	Name      string
 	Aliases   []string
 	Arguments []confArg
+	Recursive bool
 }
 
 type confExit struct{ Code int }
@@ -128,6 +137,43 @@ func confWalk(root confCmd, f func(path string, c confCmd)) {
 	}
 }
 
+// confEffectiveOptions is, for each command path, the options that apply to it: its own and the recursive ones of every
+// command above it (the root's are the global options).
+func confEffectiveOptions(root confCmd) map[string][]confOpt {
+	out := map[string][]confOpt{}
+	var rec func(prefix string, c confCmd, inherited []confOpt)
+	rec = func(prefix string, c confCmd, inherited []confOpt) {
+		path := strings.TrimSpace(prefix + " " + c.Name)
+		all := append(append([]confOpt{}, inherited...), c.Options...)
+		out[path] = all
+		var pass []confOpt
+		for _, o := range all {
+			if o.Recursive {
+				pass = append(pass, o)
+			}
+		}
+		for _, s := range c.Commands {
+			rec(path, s, pass)
+		}
+	}
+	var global []confOpt
+	for _, o := range root.Options {
+		if o.Recursive {
+			global = append(global, o)
+		}
+	}
+	for _, c := range root.Commands {
+		rec("", c, global)
+	}
+	return out
+}
+
+// specCommand is a command of the specification and its path.
+type specCommand struct {
+	path string
+	c    confCmd
+}
+
 // confTrack names the release the build is held to.
 func confTrack(c confCmd) bool { return c.meta("x-release") == "0.5.6" }
 
@@ -162,8 +208,102 @@ func confPositional(c confCmd) []string {
 	return p
 }
 
-func confOptionRE(name string) *regexp.Regexp {
-	return regexp.MustCompile(`(^|[\s\[,])` + regexp.QuoteMeta(name) + `($|[\s\],=])`)
+// confHelp is what a command's --help lists: each option with the argument text of every place it is listed, and each
+// subcommand.
+type confHelp struct {
+	opts map[string][]string
+	subs map[string]bool
+}
+
+var confWordRE = regexp.MustCompile(`^[a-z][a-z-]*$`)
+
+// confScanOptions adds the options of one stretch of help text (a synopsis line or the head of an option line):
+// a token that starts with - names an option, and the token after it is its argument unless that is another option or
+// a bracketed group.
+func confScanOptions(h confHelp, text string) {
+	toks := strings.Fields(text)
+	for i, tok := range toks {
+		c := strings.Trim(tok, "[],")
+		if len(c) < 2 || c[0] != '-' || c == "--" {
+			continue
+		}
+		name, _, _ := strings.Cut(c, "=")
+		arg := ""
+		if i+1 < len(toks) {
+			n := toks[i+1]
+			if !strings.HasPrefix(n, "[") && !strings.HasPrefix(strings.Trim(n, "[],"), "-") {
+				arg = strings.Trim(n, "[],")
+			}
+		}
+		h.opts[name] = append(h.opts[name], arg)
+	}
+}
+
+// confParseHelp reads the --help of the command at path. An option is listed where a line of the help starts with it
+// (after its indentation), as '  --out PATH  write ...' does, or inside a synopsis line ('mashctl endpoint create
+// <address> [--out PATH]' and its wrapped continuation lines): never where prose mentions it. Of a command that has
+// subcommands, the synopsis lines of the subcommands are not its own. A subcommand is a lowercase word after
+// 'mashctl <path> ' in a synopsis line, or the first word of a line under 'commands:'.
+func confParseHelp(path, help string) confHelp {
+	h := confHelp{opts: map[string][]string{}, subs: map[string]bool{}}
+	lines := strings.Split(help, "\n")
+	inSyn, skip, inCommands := false, false, false
+	for _, line := range lines {
+		t := strings.TrimSpace(line)
+		if t == "" {
+			inSyn, inCommands = false, false
+			continue
+		}
+		if t == "commands:" {
+			inCommands, inSyn = true, false
+			continue
+		}
+		if inCommands {
+			if line[0] != ' ' {
+				inCommands = false
+			} else if w := strings.Fields(t)[0]; confWordRE.MatchString(w) {
+				h.subs[w] = true
+				continue
+			}
+		}
+		syn := strings.HasPrefix(t, "usage: mashctl") || strings.HasPrefix(t, "mashctl ") || strings.HasPrefix(t, "Example: mashctl")
+		if syn {
+			inSyn, skip = true, false
+			if rest, ok := strings.CutPrefix(t[strings.Index(t, "mashctl"):], "mashctl "+path+" "); ok {
+				if w := strings.Fields(rest); len(w) > 0 && confWordRE.MatchString(w[0]) {
+					h.subs[w[0]] = true
+					skip = true // the subcommand's own synopsis, not this command's
+				}
+			}
+			if !skip && !strings.HasPrefix(t, "Example:") {
+				confScanOptions(h, t)
+			}
+			continue
+		}
+		switch {
+		case inSyn && strings.HasPrefix(t, "["): // the wrapped rest of a synopsis line
+			if !skip {
+				confScanOptions(h, t)
+			}
+		case t[0] == '-':
+			inSyn = false
+			head, _, _ := strings.Cut(t, "  ")
+			confScanOptions(h, head)
+		default:
+			inSyn = false
+		}
+	}
+	return h
+}
+
+// confArgListed reports whether some listing of the option names the argument.
+func confArgListed(listings []string, arg string) bool {
+	for _, l := range listings {
+		if strings.Contains(strings.ToLower(l), strings.ToLower(arg)) {
+			return true
+		}
+	}
+	return false
 }
 
 // confBuildVerbs are the first words after "mashctl" of the lines of mashctl --help.
@@ -185,11 +325,8 @@ func confBuildVerbs(help string) []string {
 
 func TestConformance(t *testing.T) {
 	root := loadConfSpec(t)
-	type specCommand struct {
-		path string
-		c    confCmd
-	}
 	var tracked []specCommand
+	confEffective := confEffectiveOptions(root)
 	specTop := map[string]confCmd{}
 	removedVerbs := map[string]bool{}
 	confWalk(root, func(path string, c confCmd) {
@@ -217,26 +354,19 @@ func TestConformance(t *testing.T) {
 				if r.code != 0 {
 					p = append(p, fmt.Sprintf("exit: want 0, got %d (stderr %q)", r.code, r.errs))
 				}
-				lines := strings.Split(r.out, "\n")
 				if !strings.Contains(r.out, "mashctl "+sc.path) {
 					p = append(p, fmt.Sprintf("usage: want it to name %q", "mashctl "+sc.path))
 				}
+				listed := confParseHelp(sc.path, r.out).opts
 				for _, o := range sc.c.Options {
-					re := confOptionRE(o.Name)
-					var line string
-					for _, l := range lines {
-						if re.MatchString(l) && (line == "" || !strings.HasPrefix(strings.TrimSpace(line), o.Name)) {
-							line = l
-						}
-					}
+					args, found := listed[o.Name]
 					switch {
-					case line == "":
-						p = append(p, fmt.Sprintf("option %s: want it listed, not found", o.Name))
+					case !found:
+						p = append(p, fmt.Sprintf("option %s: want a help line that starts with it, or a synopsis that has it; not found", o.Name))
 					default:
 						for _, a := range o.Arguments {
-							after := line[strings.Index(line, o.Name)+len(o.Name):]
-							if !strings.Contains(strings.ToLower(after), strings.ToLower(a.Name)) {
-								p = append(p, fmt.Sprintf("option %s: want its argument named %q, line is %q", o.Name, a.Name, strings.TrimSpace(line)))
+							if !confArgListed(args, a.Name) {
+								p = append(p, fmt.Sprintf("option %s: want its argument named %q, listed as %q", o.Name, a.Name, args))
 							}
 						}
 					}
@@ -250,6 +380,70 @@ func TestConformance(t *testing.T) {
 			})
 		}
 	})
+
+	// both ways: what a --help lists must be in the specification for that command (its own options, the recursive ones
+	// of the commands above it and the global ones), and its subcommands must be the specification's
+	t.Run("extras", func(t *testing.T) {
+		for _, sc := range tracked {
+			sc := sc
+			r := confRun(t, append(strings.Fields(sc.path), "--help")...)
+			if r.code != 0 {
+				continue // the commands check says so
+			}
+			h := confParseHelp(sc.path, r.out)
+			known := map[string]bool{}
+			for _, o := range confEffective[sc.path] {
+				known[o.Name] = true
+				for _, al := range o.Aliases {
+					known[al] = true
+				}
+			}
+			var opts []string
+			for o := range h.opts {
+				opts = append(opts, o)
+			}
+			sort.Strings(opts)
+			for _, o := range opts {
+				o := o
+				t.Run(sc.path+" "+o, func(t *testing.T) {
+					var p []string
+					if !known[o] {
+						p = append(p, fmt.Sprintf("mashctl %s --help lists option %s, which spec/mashctl.json does not have for the command", sc.path, o))
+					}
+					confCheck(t, "extra-option "+sc.path+" "+o, p)
+				})
+			}
+			specSubs := map[string]bool{}
+			for _, c := range sc.c.Commands {
+				specSubs[c.Name] = true
+				c := c
+				t.Run(sc.path+" "+c.Name+" listed", func(t *testing.T) {
+					var p []string
+					if !h.subs[c.Name] {
+						p = append(p, fmt.Sprintf("mashctl %s --help: want subcommand %s listed, not found", sc.path, c.Name))
+					}
+					confCheck(t, "missing-command "+sc.path+" "+c.Name, p)
+				})
+			}
+			var subs []string
+			for c := range h.subs {
+				subs = append(subs, c)
+			}
+			sort.Strings(subs)
+			for _, c := range subs {
+				c := c
+				t.Run(sc.path+" "+c, func(t *testing.T) {
+					var p []string
+					if !specSubs[c] {
+						p = append(p, fmt.Sprintf("mashctl %s --help lists subcommand %s, which spec/mashctl.json does not have for the command", sc.path, c))
+					}
+					confCheck(t, "extra-command "+sc.path+" "+c, p)
+				})
+			}
+		}
+	})
+
+	t.Run("outputs", func(t *testing.T) { confOutputs(t, tracked) })
 
 	t.Run("toplevel", func(t *testing.T) {
 		listed := map[string]bool{}

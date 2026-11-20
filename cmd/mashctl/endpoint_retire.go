@@ -45,6 +45,7 @@ var retireRevokeNow = time.Now
 // retireOpts are the choices of one removal.
 type retireOpts struct {
 	dryRun, yes bool
+	verbose     bool                        // --verbose: name the target server first
 	again       string                      // the command that finishes a partial removal
 	confirm     func(messages uint64) error // asks the person; called when neither --yes nor --dry-run was given
 }
@@ -86,7 +87,7 @@ func retireAddress(addr sap.Address, opts retireOpts, env func(string) string, l
 
 	// (1) the guarded server removal. The user key comes from the directory record, so a record someone replaced
 	// meanwhile is never deleted.
-	announceTarget(cfg, env, stderr, nil)
+	announceTarget(cfg, env, stderr, nil, opts.verbose)
 	adm, ctx, closeAdmin, err := ctl.OpenAdmin("mashctl", cfg)
 	if err != nil {
 		return retireResult{}, failErr(err)

@@ -33,10 +33,11 @@ type epSpec struct {
 
 // epInput is what the command line of an endpoint command holds.
 type epInput struct {
-	pos    []string
-	flags  map[string]bool
-	values map[string]string
-	json   bool
+	pos     []string
+	flags   map[string]bool
+	values  map[string]string
+	json    bool
+	verbose bool // --verbose, set by the command that runs it
 
 	// set by a command's check
 	addr     sap.Address
@@ -137,7 +138,7 @@ func helpAsked(args []string) bool {
 }
 
 // runEp is the frame of an endpoint command: help, the arguments, the connection, the body, and the report of its error.
-func runEp(s epSpec, args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer, body func(rt *epRuntime) error) int {
+func runEp(s epSpec, g cliframe.Global, args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer, body func(rt *epRuntime) error) int {
 	if helpAsked(args) {
 		fmt.Fprint(stdout, s.usage)
 		return 0
@@ -154,7 +155,7 @@ func runEp(s epSpec, args []string, env func(string) string, lookup config.Looku
 	if err != nil {
 		return cliframe.Report(stdout, stderr, failErr(err), in.json)
 	}
-	announceTarget(cfg, env, stderr, nil)
+	announceTarget(cfg, env, stderr, nil, g.Verbose)
 	adm, ctx, closeAdmin, err := ctl.OpenAdmin("mashctl", cfg)
 	if err != nil {
 		return cliframe.Report(stdout, stderr, failErr(err), in.json)

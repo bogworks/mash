@@ -516,7 +516,7 @@ func shownFolder(dir, home string) string {
 // differentSetup is the refusal when the configuration folder holds a different what than the setup file gives: init
 // never replaces what the folder holds.
 func differentSetup(st *initState, what string) error {
-	return cliframe.Failf("%s was set up with a different %s;\n       nothing was changed", st.folder, what).
+	return cliframe.Failf("%s was set up with a different %s; nothing was changed", st.folder, what).WithWrap().
 		WithHint("mashctl init --config <file> --config-dir <a new folder>")
 }
 

@@ -65,8 +65,7 @@ func TestForeignInstalledEndpointDoesNotChangeMashctlsOwner(t *testing.T) {
 	if strings.Contains(out+errb, "zed") {
 		t.Errorf("acted as the installed endpoint's owner:\n%s\n%s", out, errb)
 	}
-	showTarget(t)
-	if _, errb, _ = h.run("limits", "apply"); !strings.Contains(errb, "owner "+h.e.Owner+" (from config.json \"owner\")") {
+	if _, errb, _ = h.run("limits", "apply", "--verbose"); !strings.Contains(errb, "owner "+h.e.Owner+" (from config.json \"owner\")") {
 		t.Errorf("target line: %q", errb)
 	}
 }
