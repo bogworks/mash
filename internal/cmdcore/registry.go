@@ -4,6 +4,7 @@ import (
 	"io"
 	"reflect"
 	"sort"
+	"strings"
 
 	"github.com/bogworks/mash/internal/cliframe"
 	"github.com/bogworks/mash/internal/mcp"
@@ -17,6 +18,8 @@ type Entry interface {
 	RunCLI(env EnvFunc, fr Frame, args []string, stdin io.Reader, stdout, stderr io.Writer, g cliframe.Global) int
 	// HelpFor is the --help text when args ask for it, and whether they do: it reads nothing and runs nothing.
 	HelpFor(fr Frame, args []string) (string, bool)
+	// Usage is the synopsis, "mash send <address> [<message>] [options]", and the one-line description.
+	Usage(tool string) (synopsis, description string)
 }
 
 type entry[P any, R Result] struct{ c Command[P, R] }
@@ -35,6 +38,26 @@ func (e entry[P, R]) Tool(env EnvFunc) Tool {
 }
 func (e entry[P, R]) RunCLI(env EnvFunc, fr Frame, args []string, stdin io.Reader, stdout, stderr io.Writer, g cliframe.Global) int {
 	return CLIWith(e.c, env, fr)(args, stdin, stdout, stderr, g)
+}
+func (e entry[P, R]) Usage(tool string) (string, string) {
+	var args []field
+	hasOpts := false
+	for _, f := range paramFields(reflect.TypeOf((*P)(nil)).Elem()) {
+		switch {
+		case f.positional():
+			args = append(args, f)
+		case f.flag != "":
+			hasOpts = true
+		}
+	}
+	if tool == "" {
+		tool = "mash"
+	}
+	d := e.c.Description
+	if d == "" {
+		d = e.c.Summary
+	}
+	return synopsis(tool, e.c.Name, args, hasOpts), d
 }
 func (e entry[P, R]) HelpFor(fr Frame, args []string) (string, bool) {
 	fields := paramFields(reflect.TypeOf((*P)(nil)).Elem())
@@ -69,6 +92,23 @@ func (r *Registry) HelpFor(name string, args []string) (string, bool) {
 		return "", false
 	}
 	return e.HelpFor(r.Frame, args)
+}
+
+// ListLine is the line the tool's own help gives the command named name: two spaces, its synopsis, and its one-line
+// description starting at column col (on a line of its own, indented to col, when the synopsis is too long). It is "" when
+// there is no such command.
+func (r *Registry) ListLine(name string, col int) string {
+	e, ok := r.Lookup(name)
+	if !ok {
+		return ""
+	}
+	tool := r.Frame.Tool
+	use, desc := e.Usage(tool)
+	line := "  " + use
+	if len(line)+1 > col {
+		return line + "\n" + strings.Repeat(" ", col) + desc
+	}
+	return line + strings.Repeat(" ", col-len(line)) + desc
 }
 
 // Lookup returns the entry for a CLI verb.

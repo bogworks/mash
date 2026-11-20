@@ -21,15 +21,13 @@ import (
 	"github.com/bogworks/mash/internal/host"
 )
 
-const usage = `mash: a messaging mesh for agents (SAP 0.3 + mail, on NATS JetStream)
+// usageText is the tool's own help, `mash --help` and `mash help`. The commands on the command table are lines generated
+// from it (their synopsis and one-line description); the rest is written by hand until they are on the table too.
+const usageText = `mash: a messaging mesh for agents (SAP 0.3 + mail, on NATS JetStream)
 
   mash serve                                   the Claude Code channel server (started by the plugin)
   mash hook                                    the plugin's hook: shows the session its spooled mail
-  mash send <address> [<message>] [--kind K] [--urgent] [--reply-to N] [--relay N] [--id KEY] [--file F]   mail an endpoint
-                                               (<address> is owner.group.name; the text comes from the arguments, --file F or
-                                               standard input); K is blocker|question|task (wake an idle recipient) or
-                                               result|fyi (wait for its next turn); default task; --urgent wakes it at once;
-                                               --id KEY makes the send at-most-once for 2 minutes (see mash send --help)
+{{send}}
   mash read <seq>                              print one message from your inbox
   mash inbox [--limit N] [--after SEQ]         recent messages, or the N after SEQ (oldest first)
   mash who [--long] [--json] [--names] [--match TEXT] [--name SUB] [--owner O] [--role SUB] [--label K[=V]]... [--online|--offline]
@@ -44,7 +42,7 @@ const usage = `mash: a messaging mesh for agents (SAP 0.3 + mail, on NATS JetStr
   mash credential create --seed FILE --jwt FILE [--out CREDS] [--force] [--json] [--dry-run]
                                                join a seed and its user JWT into a credentials file; needs no config
   mash plugin export <dir>                     write this build's Claude Code plugin and a marketplace for it into <dir>
-  mash version                                 print the version and commit
+{{version}}
 
 An endpoint is addressed owner.group.name: MASH_ENDPOINT (or config.json "endpoint", or --endpoint). With none set, the one
 endpoint whose creds file (owner.group.name.creds, mode 0600) is in the config directory is used; with several, name one.
@@ -56,6 +54,17 @@ State (spool, hook.log): $MASH_STATE_DIR (default $XDG_STATE_HOME/mash, else ~/.
 Slow link: "open_timeout" (default 20s) and "call_timeout" (default 15s), or MASH_OPEN_TIMEOUT and MASH_CALL_TIMEOUT.
 Also tunable: lease_retry, transient_budget, transient_max, cli_timeout, admin_timeout (MASH_LEASE_RETRY, MASH_TRANSIENT_BUDGET, MASH_TRANSIENT_MAX, MASH_CLI_TIMEOUT, MASH_ADMIN_TIMEOUT).
 `
+
+// usage is usageText with the lines of the commands on the table filled in.
+var usage = func() string {
+	r := newCommands(nil)
+	const col = 47 // where the descriptions of the hand-written lines start
+	u := usageText
+	for _, name := range []string{"send", "version"} {
+		u = strings.Replace(u, "{{"+name+"}}", r.ListLine(name, col), 1)
+	}
+	return u
+}()
 
 func main() {
 	// A session that is killed (Claude Code exiting, a closed terminal) shuts
@@ -141,6 +150,10 @@ var verbUsage = map[string]string{
 	"prompt": "usage: mash prompt <to> <text...>",
 }
 
+// helpTopic is the verbs that are not on the table and have help of their own: `mash help VERB` prints their
+// `mash VERB --help`.
+var helpTopic = map[string]bool{"serve": true, "hook": true, "plugin": true, "key": true, "credential": true, "status": true, "read": true, "inbox": true, "who": true, "prompt": true}
+
 // noJSONForm is the verbs that have no --json form: a --json given to one is a usage error. who, key and credential
 // parse --json themselves, and send and version are commands of the table; admin is deprecated and left as it was.
 var noJSONForm = map[string]bool{"status": true, "read": true, "inbox": true, "prompt": true, "serve": true, "hook": true, "plugin": true}
@@ -173,6 +186,15 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 		return 2
 	}
 	env, lookup = global.Shadow(cliframe.Spec{Tool: "mash", CredsEnv: "MASH_CREDS", CredsKey: "creds"}, env, lookup)
+	if args[0] == "help" { // `mash help` prints what `mash --help` does; `mash help send` what `mash send --help` does
+		if len(args) == 1 {
+			args = []string{"--help"}
+		} else if _, known := helpTopic[args[1]]; !known && !commandVerb(args[1]) {
+			return cliframe.Report(stdout, stderr, cliframe.Usagef("mash has no command %s", args[1]).WithHint("mash help"), global.JSON)
+		} else {
+			args = []string{args[1], "--help"}
+		}
+	}
 	if u, ok := newCommands(nil).HelpFor(args[0], args[1:]); ok { // the generated help of the commands on the table
 		fmt.Fprint(stdout, u)
 		return 0

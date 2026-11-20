@@ -83,7 +83,7 @@ func sendOn(ctx context.Context, ep *endpoint.Endpoint, to, text string, o cmds.
 		return cmds.SendReceipt{}, err
 	}
 	inReplyTo, via := uint64(o.ReplyTo), uint64(o.Relay)
-	k, _ = kind.Tag(k, inReplyTo, text)
+	k, retagged := kind.Tag(k, inReplyTo, text)
 	res, err := ep.SendDetailed(ctx, to, text, endpoint.SendOptions{InReplyTo: inReplyTo, Via: via, Urgent: o.Urgent, Kind: k, ID: o.ID})
 	if err != nil {
 		var ne *endpoint.NoEndpointError
@@ -92,7 +92,7 @@ func sendOn(ctx context.Context, ep *endpoint.Endpoint, to, text string, o cmds.
 		}
 		return cmds.SendReceipt{}, err
 	}
-	return cmds.SendReceipt{Number: int(res.Seq), Duplicate: res.Duplicate, To: sap.Display(sap.KeyOf(to)), Kind: string(k)}, nil
+	return cmds.SendReceipt{Number: int(res.Seq), Duplicate: res.Duplicate, Retagged: retagged, To: sap.Display(sap.KeyOf(to)), Kind: string(k)}, nil
 }
 
 // checkSend refuses what no endpoint would accept, as a usage error.

@@ -139,7 +139,7 @@ func TestHookNextToEndpointOfTheSameInstanceInAnotherGroup(t *testing.T) {
 
 	const aMsg, bMsg = "TEAM-ONE-ONLY payload alpha", "TEAM-TWO-ONLY payload beta"
 	cliAs(t, aSender, "send", "acme.team1.ops1", aMsg)
-	cliAs(t, bSender, "send", "acme_team2_ops1", bMsg)
+	cliAs(t, bSender, "send", "acme.team2.ops1", bMsg)
 
 	if ev := content(as.await(t, 15*time.Second, isChannel)); ev != "1 message from acme.team1.asender (task)" {
 		t.Fatalf("team1 wake %q", ev)

@@ -22,7 +22,7 @@ func runSplit(t *testing.T, w *world, as string, args ...string) (out, errb stri
 func TestSendCommandBothForms(t *testing.T) {
 	w := newWorld(t, "a", "b")
 	out, errb, code := runSplit(t, w, "b", "send", tTo("a"), "hello", "--json")
-	if code != 0 || errb != "" || out != `{"to":"o.dev.a","number":1,"kind":"task","urgent":false,"duplicate":false}`+"\n" {
+	if code != 0 || errb != "" || out != `{"to":"o.dev.a","number":1,"kind":"task","urgent":false,"duplicate":false,"retagged":false}`+"\n" {
 		t.Fatalf("--json: %d %q %q", code, out, errb)
 	}
 	out, _, code = runSplit(t, w, "b", "send", tTo("a"), "--kind", "fyi", "--urgent", "second", "-v")
@@ -31,7 +31,7 @@ func TestSendCommandBothForms(t *testing.T) {
 	}
 	// reply-to and relay go out signed, and a short question reply is tagged fyi (the receipt says the kind sent)
 	out, _, code = runSplit(t, w, "a", "send", tTo("b"), "--reply-to", "1", "--kind", "question", "ok", "--json")
-	if code != 0 || !strings.Contains(out, `"kind":"fyi"`) {
+	if code != 0 || !strings.Contains(out, `"kind":"fyi"`) || !strings.Contains(out, `"retagged":true`) {
 		t.Fatalf("reply-to: %d %q", code, out)
 	}
 	if rd, _ := w.cli(t, "b", "read", "1"); !strings.Contains(rd, "answers #1") || !strings.Contains(rd, "kind: fyi") {
@@ -126,6 +126,77 @@ func TestGeneratedHelpLayout(t *testing.T) {
 			if utf8.RuneCountInString(l) > 80 {
 				t.Errorf("%s help line over 80 columns: %q", verb, l)
 			}
+		}
+	}
+}
+
+// The auto-tag is said: a reply marked question that asks nothing is sent as fyi and the text and --json say so; a reply
+// that asks is not touched.
+func TestSendRetaggedIsReported(t *testing.T) {
+	w := newWorld(t, "a", "b")
+	if _, _, code := runSplit(t, w, "b", "send", tTo("a"), "first?"); code != 0 {
+		t.Fatal(code)
+	}
+	out, errb, code := runSplit(t, w, "a", "send", tTo("b"), "--reply-to", "1", "--kind", "question", "ok")
+	if code != 0 || errb != "" || out != "Mail sent as fyi: a reply marked question that asks nothing.\n" {
+		t.Fatalf("retagged: %d %q %q", code, out, errb)
+	}
+	out, _, code = runSplit(t, w, "a", "send", tTo("b"), "--reply-to", "1", "--kind", "question", "which one?", "--json")
+	if code != 0 || out != `{"to":"o.dev.b","number":2,"kind":"question","urgent":false,"duplicate":false,"retagged":false}`+"\n" {
+		t.Fatalf("asks: %d %q", code, out)
+	}
+}
+
+// A flat or slashed address is refused with exit 2 before anything is opened or sent.
+func TestSendRefusesOtherAddressForms(t *testing.T) {
+	w := newWorld(t, "a", "b")
+	flat := strings.ReplaceAll(tTo("a"), ".", "_")
+	out, errb, code := runSplit(t, w, "b", "send", flat, "hi")
+	if code != 2 || out != "" || errb != "error: "+flat+" is not an address; write it as "+tTo("a")+"\nhint: mash send --help\n" {
+		t.Fatalf("flat: %d %q %q", code, out, errb)
+	}
+	slash := strings.ReplaceAll(tTo("a"), ".", "/")
+	out, errb, code = runSplit(t, w, "b", "send", slash, "hi", "--json")
+	if code != 2 || errb != "" || out != `{"error":"`+slash+` is not an address; write it as `+tTo("a")+`","hint":"mash send --help"}`+"\n" {
+		t.Fatalf("slash --json: %d %q %q", code, out, errb)
+	}
+	if n := inboxCount(t, w, "a"); n != 0 {
+		t.Fatalf("a has %d messages: a refused address sent something", n)
+	}
+	// the other verb that takes an address argument says the same
+	out, errb, code = runSplit(t, w, "b", "prompt", flat, "hi")
+	if code != 2 || out != "" || !strings.HasPrefix(errb, "error: "+flat+" is not an address; write it as "+tTo("a")+"\nhint: mash prompt --help\n") {
+		t.Fatalf("prompt flat: %d %q %q", code, out, errb)
+	}
+}
+
+// `mash help` prints what `mash --help` does, and `mash help VERB` what `mash VERB --help` does: on stdout, exit 0.
+func TestHelpCommandMatchesHelpFlag(t *testing.T) {
+	for _, tc := range []struct{ a, b []string }{
+		{[]string{"help"}, []string{"--help"}},
+		{[]string{"help", "send"}, []string{"send", "--help"}},
+		{[]string{"help", "version"}, []string{"version", "--help"}},
+		{[]string{"help", "who"}, []string{"who", "--help"}},
+		{[]string{"help", "serve"}, []string{"serve", "--help"}},
+	} {
+		var o1, e1, o2, e2 bytes.Buffer
+		c1 := run(tc.a, envFrom(nil), strings.NewReader(""), &o1, &e1)
+		c2 := run(tc.b, envFrom(nil), strings.NewReader(""), &o2, &e2)
+		if c1 != 0 || c2 != 0 || e1.Len() != 0 || e2.Len() != 0 || o1.Len() == 0 || o1.String() != o2.String() {
+			t.Errorf("%v: %d %q %q; %v: %d %q", tc.a, c1, o1.String(), e1.String(), tc.b, c2, o2.String())
+		}
+	}
+	var o, e bytes.Buffer
+	if code := run([]string{"help", "nosuch"}, envFrom(nil), strings.NewReader(""), &o, &e); code != 2 || o.Len() != 0 ||
+		e.String() != "error: mash has no command nosuch\nhint: mash help\n" {
+		t.Errorf("help nosuch: %d %q %q", code, o.String(), e.String())
+	}
+	// the tool's own help has the table's commands generated from it
+	o.Reset()
+	run([]string{"help"}, envFrom(nil), strings.NewReader(""), &o, &e)
+	for _, want := range []string{"  mash send <address> [<message>] [options]", "Send a message to an endpoint.", "  mash version  ", "Print the version."} {
+		if !strings.Contains(o.String(), want) {
+			t.Errorf("mash help lacks %q:\n%s", want, o.String())
 		}
 	}
 }
