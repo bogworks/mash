@@ -92,3 +92,25 @@ func TestReportWrap(t *testing.T) {
 		})
 	}
 }
+
+func TestReportWrapAt(t *testing.T) {
+	msg := "acme.demo.bob was not deleted: 1 of 2 servers did not confirm its key was cancelled"
+	e := Failf("%s", msg).WithWrapAt(68).WithHint("mashctl endpoint delete acme.demo.bob")
+	var out, errb bytes.Buffer
+	if code := Report(&out, &errb, e, false); code != 1 {
+		t.Errorf("code %d", code)
+	}
+	want := "error: acme.demo.bob was not deleted: 1 of 2 servers did not confirm\n       its key was cancelled\nhint: mashctl endpoint delete acme.demo.bob\n"
+	if errb.String() != want || out.Len() != 0 {
+		t.Errorf("stderr = %q stdout = %q", errb.String(), out.String())
+	}
+	out.Reset()
+	errb.Reset()
+	Report(&out, &errb, e, true)
+	if out.String() != `{"error":"`+msg+`","hint":"mashctl endpoint delete acme.demo.bob"}`+"\n" || errb.Len() != 0 {
+		t.Errorf("json = %q", out.String())
+	}
+	if d := Failf("%s", msg).WithWrap(); d.WrapAt != 0 || e.WrapAt != 68 {
+		t.Errorf("WrapAt %d %d", d.WrapAt, e.WrapAt)
+	}
+}

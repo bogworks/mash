@@ -35,6 +35,7 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/bogworks/mash/internal/admin"
+	"github.com/bogworks/mash/internal/apply"
 	"github.com/bogworks/mash/internal/ctlkeys"
 	"github.com/bogworks/mash/internal/endpoint"
 	"github.com/bogworks/mash/internal/sap"
@@ -44,12 +45,11 @@ import (
 // confUnchecked: key is "<command> <case>" as the specification names them; the value is why the case cannot be run
 // here.
 var confUnchecked = map[string]string{
-	"status Several servers: one line each":                                              "the first line must say '3 endpoints, 1 online' of a second, working server at a.example; one test server answers under one address",
-	"endpoint delete A server did not confirm the key was cancelled: nothing is deleted": "needs a cluster of two servers, one of which does not confirm the cancelling of the key",
-	"endpoint delete Cancelled everywhere, then a later step failed":                     "needs a server fault injected between the cancelling of the key and the removal of the inbox",
-	"endpoint inbox Messages":                                                            "the rows hold times relative to now ('2m ago', '1m ago') and the trust of messages signed by two senders, one of them an endpoint not on this server",
-	"endpoint permissions Permissions":                                                   "the text describes the output ('the same JSON as --json'); it is not the output",
-	"endpoint reissue With --verbose":                                                    "'servers acknowledged: 2' needs a cluster of two servers",
+	"status Several servers: one line each":                          "the first line must say '3 endpoints, 1 online' of a second, working server at a.example; one test server answers under one address",
+	"endpoint delete Cancelled everywhere, then a later step failed": "needs a server fault injected between the cancelling of the key and the removal of the inbox",
+	"endpoint inbox Messages":                                        "the rows hold times relative to now ('2m ago', '1m ago') and the trust of messages signed by two senders, one of them an endpoint not on this server",
+	"endpoint permissions Permissions":                               "the text describes the output ('the same JSON as --json'); it is not the output",
+	"endpoint reissue With --verbose":                                "'servers acknowledged: 2' needs a cluster of two servers",
 }
 
 // confOutCase is one x-output case.
@@ -292,6 +292,13 @@ func init() {
 		r := w.run("endpoint", "delete", "acme.demo.bob")
 		r.out = strings.Replace(r.out, "confirm: ", "confirm: acme.demo.bob\n", 1)
 		return confOutRun{ran: r}
+	})
+	reg("endpoint delete A server did not confirm the key was cancelled: nothing is deleted", func(t *testing.T) confOutRun {
+		w := newConfWorld(t, true)
+		w.do("endpoint", "create", "acme.demo.bob")
+		s := stubRevoke(t)
+		s.err = &apply.ConfirmError{Confirmed: 1, Listed: 2, Msg: "revoke: the revocation was pushed but not confirmed: one server"}
+		return confOutRun{ran: w.run("endpoint", "delete", "acme.demo.bob", "--yes")}
 	})
 	reg("endpoint delete With --yes", func(t *testing.T) confOutRun {
 		w := newConfWorld(t, true)

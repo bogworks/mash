@@ -45,10 +45,7 @@ import (
 var confGaps = map[string]string{}
 
 // confDrift: key is "<check> <name>"; the value says what differs and what closes it.
-var confDrift = map[string]string{
-	"extra-option endpoint suspend --dry-run": "the build takes --dry-run (its help lists it, endpoint_suspend_test.go uses it) and the specification lists no option for suspend; to be ruled: add the option to the specification or remove it from the build",
-	"extra-option endpoint resume --dry-run":  "as endpoint suspend --dry-run",
-}
+var confDrift = map[string]string{}
 
 // confCheck applies the rule of the two tables to the problems of one check.
 func confCheck(t *testing.T, key string, problems []string) {

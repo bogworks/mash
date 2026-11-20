@@ -14,7 +14,9 @@ type Error struct {
 	Msg  string // what went wrong, without a leading "error:"
 	Hint string // an optional next step
 	Code int    // 1 failure, 2 usage
-	Wrap bool   // the text rendering wraps a long message at WrapWidth columns; the JSON message stays one line
+	Wrap bool   // the text rendering wraps a long message at WrapWidth columns (WrapAt when set); the JSON message stays one line
+	// WrapAt is the width of a wrapped line for this error; 0 means WrapWidth.
+	WrapAt int
 }
 
 // Error returns the message.
@@ -50,16 +52,27 @@ func (e *Error) WithWrap() *Error {
 	return &c
 }
 
-// wrapError lays out "error: MSG" in lines of at most WrapWidth columns, a continuation indented by WrapIndent. A line
+// WithWrapAt returns a copy of e that the text rendering wraps at n columns instead of WrapWidth.
+func (e *Error) WithWrapAt(n int) *Error {
+	c := *e
+	c.Wrap = true
+	c.WrapAt = n
+	return &c
+}
+
+// wrapError lays out "error: MSG" in lines of at most width columns (WrapWidth when width is 0), a continuation indented by WrapIndent. A line
 // breaks at a space, after a semicolon when one lies within the width, else at the last space that fits; a word too
 // long for a line keeps one to itself.
-func wrapError(msg string) string {
+func wrapError(msg string, width int) string {
+	if width <= 0 {
+		width = WrapWidth
+	}
 	line := "error: " + msg
 	var out []string
-	for len([]rune(line)) > WrapWidth {
+	for len([]rune(line)) > width {
 		r := []rune(line)
 		cut, semi := -1, -1
-		for i := 1; i < len(r) && i <= WrapWidth; i++ {
+		for i := 1; i < len(r) && i <= width; i++ {
 			if r[i] == ' ' && r[i-1] != ' ' {
 				cut = i
 				if r[i-1] == ';' {
@@ -71,7 +84,7 @@ func wrapError(msg string) string {
 			cut = semi
 		}
 		if cut < 0 { // no space within the width: break at the first one after it
-			for i := WrapWidth; i < len(r); i++ {
+			for i := width; i < len(r); i++ {
 				if r[i] == ' ' {
 					cut = i
 					break
@@ -97,10 +110,10 @@ func Report(stdout, stderr io.Writer, err error, jsonOut bool) int {
 	if err == nil {
 		return 0
 	}
-	msg, hint, code, wrap := err.Error(), "", 1, false
+	msg, hint, code, wrap, width := err.Error(), "", 1, false, 0
 	var e *Error
 	if errors.As(err, &e) && e != nil {
-		wrap = e.Wrap
+		wrap, width = e.Wrap, e.WrapAt
 		msg, hint = e.Msg, e.Hint
 		if e.Code == 2 {
 			code = 2
@@ -118,7 +131,7 @@ func Report(stdout, stderr io.Writer, err error, jsonOut bool) int {
 		return code
 	}
 	if wrap {
-		fmt.Fprintf(stderr, "%s\n", wrapError(msg))
+		fmt.Fprintf(stderr, "%s\n", wrapError(msg, width))
 	} else {
 		fmt.Fprintf(stderr, "error: %s\n", msg)
 	}

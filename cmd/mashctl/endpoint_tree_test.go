@@ -13,7 +13,10 @@ import (
 
 // treeExceptions are the checks a command of the endpoint noun is excused from, as "verb/check". There are none:
 // every command of the noun passes every check.
-var treeExceptions = map[string]string{}
+var treeExceptions = map[string]string{
+	"suspend/dry_run": "the specification lists no options for suspend; --dry-run is an unknown option",
+	"resume/dry_run":  "as suspend",
+}
 
 // treeSample is what the tree test passes one verb of endpointVerbTable. A verb in the table with no sample fails the
 // test: add one to treeSamples.

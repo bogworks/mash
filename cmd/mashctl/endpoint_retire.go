@@ -204,7 +204,7 @@ func retireAddress(addr sap.Address, opts retireOpts, env func(string) string, l
 					if errors.Is(revokeErr, apply.ErrNotConfirmed) {
 						if k, n, ok := apply.ConfirmCounts(revokeErr); ok {
 							if miss := n - k; miss > 0 {
-								return retireResult{}, cliframe.Failf("%s was not deleted: %d of %d servers did not confirm its key was cancelled", name, miss, n).WithHint(opts.again)
+								return retireResult{}, cliframe.Failf("%s was not deleted: %d of %d servers did not confirm its key was cancelled", name, miss, n).WithWrapAt(68).WithHint(opts.again)
 							}
 							return retireResult{}, cliframe.Failf("%s was not deleted: %d servers took the cancellation but it could not be read back", name, n).WithHint(opts.again)
 						}

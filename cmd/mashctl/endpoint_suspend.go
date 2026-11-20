@@ -12,19 +12,17 @@ import (
 	"github.com/bogworks/mash/internal/config"
 )
 
-const endpointSuspendUsage = `usage: mashctl endpoint suspend <address> [--dry-run] [--json]
-  address    the endpoint, as owner.group.name
-  --dry-run  print what would change, and change nothing
-  --json     print the result as JSON
+const endpointSuspendUsage = `usage: mashctl endpoint suspend <address> [--json]
+  address  the endpoint, as owner.group.name
+  --json   print the result as JSON
   Refuses new mail to the endpoint. Its stored mail and its credentials stay.
 Example:
   mashctl endpoint suspend acme.demo.bob
 `
 
-const endpointResumeUsage = `usage: mashctl endpoint resume <address> [--dry-run] [--json]
-  address    the endpoint, as owner.group.name
-  --dry-run  print what would change, and change nothing
-  --json     print the result as JSON
+const endpointResumeUsage = `usage: mashctl endpoint resume <address> [--json]
+  address  the endpoint, as owner.group.name
+  --json   print the result as JSON
   Undoes suspend: the endpoint takes new mail again.
 Example:
   mashctl endpoint resume acme.demo.bob
@@ -40,12 +38,12 @@ Example:
 `
 
 var endpointSuspendSpec = epSpec{
-	name: "suspend", usage: endpointSuspendUsage, flags: []string{"--dry-run"}, min: 1, max: 1,
+	name: "suspend", usage: endpointSuspendUsage, min: 1, max: 1,
 	need: "the endpoint address (owner.group.name)", check: checkAddress,
 }
 
 var endpointResumeSpec = epSpec{
-	name: "resume", usage: endpointResumeUsage, flags: []string{"--dry-run"}, min: 1, max: 1,
+	name: "resume", usage: endpointResumeUsage, min: 1, max: 1,
 	need: "the endpoint address (owner.group.name)", check: checkAddress,
 }
 
@@ -58,7 +56,6 @@ var endpointPermissionsSpec = epSpec{
 type stateResultJSON struct {
 	Address string `json:"address"`
 	State   string `json:"state"`
-	DryRun  bool   `json:"dry_run,omitempty"`
 }
 
 // runEndpointSuspend is `mashctl endpoint suspend` (ADR 0057: the inbox stream's subjects are parked).
@@ -75,27 +72,12 @@ func runEndpointResume(args []string, g cliframe.Global, env func(string) string
 	})
 }
 
-// changeSuspension is the body of suspend and resume. With --dry-run it only checks that the endpoint has an inbox.
+// changeSuspension is the body of suspend and resume.
 func changeSuspension(rt *epRuntime, suspend bool) error {
 	addr := rt.in.addr
-	verb, done := "suspend", "Suspended"
+	done := "Suspended"
 	if !suspend {
-		verb, done = "resume", "Resumed"
-	}
-	if rt.in.flags["--dry-run"] {
-		if _, err := rt.adm.Suspended(rt.ctx, addr); err != nil {
-			return failErr(err)
-		}
-		st, err := rt.adm.EndpointState(rt.ctx, addr, false)
-		if err != nil {
-			return failErr(err)
-		}
-		if rt.in.json {
-			writeJSON(rt.stdout, stateResultJSON{Address: addr.String(), State: stateWord(st), DryRun: true})
-			return nil
-		}
-		fmt.Fprintf(rt.stdout, "Would %s endpoint %s\nNothing was changed.\n", verb, addr)
-		return nil
+		done = "Resumed"
 	}
 	if suspend {
 		if _, err := rt.adm.Suspend(rt.ctx, addr); err != nil {
