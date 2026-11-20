@@ -91,7 +91,7 @@ func TestRecordedRefusalSurvivesSettingAndDirectoryChange(t *testing.T) {
 	}
 }
 
-// A serve that loses its lease while recording a refusal does not acknowledge the message and does not keep its count.
+// A serve that loses its lease while recording a refusal does not acknowledge the message; the record stays (never taken back), so the new holder finds it refused.
 func TestRefusalRechecksLeaseBeforeAck(t *testing.T) {
 	f := newFixture(t, "a", "b")
 	cfg := f.cfgState("a", t.TempDir(), false)
@@ -110,11 +110,11 @@ func TestRefusalRechecksLeaseBeforeAck(t *testing.T) {
 	publishRaw(t, f.e.ConnAs(t, f.creds["b"], tkey("b")), subj, "", "absent body")
 	until(t, "the refusal is recorded", hooked.Load)
 	time.Sleep(500 * time.Millisecond)
-	if n := RefusedCount(cfg); n != 0 {
-		t.Fatalf("count %d after the lease was lost while recording, want 0", n)
+	if n := RefusedCount(cfg); n != 1 {
+		t.Fatalf("count %d after the lease was lost while recording, want 1 (kept)", n)
 	}
-	if ep.refusedSeq(1, *ep.refusedStream.Load()) {
-		t.Fatal("the sequence stayed recorded")
+	if !ep.refusedSeq(1, *ep.refusedStream.Load()) {
+		t.Fatal("the sequence record was lost")
 	}
 	cons, err := ep.js.Consumer(ctx, ep.ident.InboxStream(), store.Consumer)
 	if err != nil {

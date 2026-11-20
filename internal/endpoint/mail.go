@@ -339,6 +339,11 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 		return func() {}, nil
 	}
 	stream := e.ident.InboxStream()
+	// The refusal state is tied to the stream's identity before the first message is handled, whatever SetSpool did: a
+	// redelivery of mail already refused is found refused. A failure is a startup error, nothing is consumed.
+	if _, err := e.bindRefusals(ctx); err != nil {
+		return nil, fmt.Errorf("mash: refused-mail state not tied to the inbox stream: %w", err)
+	}
 	cons, err := e.js.Consumer(ctx, stream, store.Consumer)
 	if err != nil {
 		return nil, fmt.Errorf("mash: inbox consumer: %w", err)
@@ -393,21 +398,19 @@ func (e *Endpoint) consume(ctx context.Context, deliver Deliverer) (func(), erro
 			// Dropped and counted, never delivered: acked so it is not redelivered for ever. The sender is told nothing.
 			// Without the lease the new holder gets it (and counts it), so it is nak'd, not counted.
 			if e.mayAck(pending{}) {
-				recorded, added := e.refuse(ref.Seq, claimedAddress(h, from), trust)
+				recorded, _ := e.refuse(ref.Seq, claimedAddress(h, from), trust)
 				if e.refusedHook != nil {
 					e.refusedHook()
 				}
 				// Recording can take seconds: the lease is checked again right before the ack, and on a loss the
-				// count is taken back (the holder that acknowledges the message counts it) and the message nak'd.
+				// record stays (never taken back) and the message is nak'd: the new holder finds it refused on the
+				// redelivery and acks it without counting again. A handover can overcount by one.
 				if !recorded {
 					// Not recorded: acking would let the message read as mail later. Retried.
 					_ = m.NakWithDelay(time.Second)
 				} else if e.mayAck(pending{}) {
 					_ = m.Ack()
 				} else {
-					if added { // only what this call recorded is taken back
-						e.unrecordRefusal(ref.Seq)
-					}
 					_ = m.Nak()
 				}
 			} else {
