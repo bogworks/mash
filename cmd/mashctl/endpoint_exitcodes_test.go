@@ -13,8 +13,7 @@ func TestEndpointUnreachableServerExitsOne(t *testing.T) {
 		{"endpoint", "suspend", "o.g.a"},
 		{"endpoint", "resume", "o.g.a"},
 		{"endpoint", "inbox", "o.g.a"},
-		{"endpoint", "delete", "o/g/a"},
-		{"endpoint", "delete", "o/g/a", "--json"},
+		{"endpoint", "delete", "o/g/a", "--yes"},
 	} {
 		h := newFleetEnv(t)
 		h.env["MASH_SERVER"] = "nats://127.0.0.1:1"

@@ -206,7 +206,7 @@ func TestTargetLineComesBeforeAWriteAndOfflineVerbsPrintNone(t *testing.T) {
 		t.Errorf("init --local: %q", errb)
 	}
 
-	for _, args := range [][]string{{"init"}, {"limits"}, {"endpoint", "delete", "o.g.zz"}} {
+	for _, args := range [][]string{{"init"}, {"limits"}, {"endpoint", "delete", "o.g.zz", "--yes"}} {
 		_, errb, _ := h.run(args...)
 		want := "mashctl: target server " + h.e.URL + " (from MASH_SERVER), owner " + h.e.Owner + " (from MASH_ENDPOINT), admin creds " + h.e.AdminCreds + " (from MASH_ADMIN_CREDS)\n"
 		if !strings.HasPrefix(errb, want) {

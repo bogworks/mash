@@ -34,7 +34,7 @@ var treeSamples = map[string]treeSample{
 		dryArgs: func(_ sap.Address, pub string) []string { return []string{ad("treenew").String(), "--public-key", pub} }},
 	"reissue": {usage: endpointReissueUsage, positional: 1, arg: "ADDRESS", needsKey: true,
 		dryArgs: func(a sap.Address, pub string) []string { return []string{a.String(), "--public-key", pub} }},
-	"delete": {usage: endpointDeleteUsage, positional: 1, arg: "ADDRESS",
+	"delete": {usage: endpointDeleteUsage, positional: 1, arg: "<address>",
 		dryArgs: func(a sap.Address, _ string) []string { return []string{a.String()} }},
 	"list": {usage: endpointListUsage, positional: 1, arg: "[prefix]",
 		readArgs: func(sap.Address) []string { return nil }},

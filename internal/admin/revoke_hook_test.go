@@ -271,7 +271,7 @@ func TestDeprovisionUnparseableRecordWithRevokerFailsClosed(t *testing.T) {
 	corruptRecord(t, js, "w")
 	h := &hookRec{}
 	err := a.WithRevoker(h.hook(t, js, "w")).Deprovision(context.Background(), ep(t, "w"))
-	if err == nil || !admin.IsRefusal(err) || !strings.Contains(err.Error(), "its record cannot be read, so its user key is unknown; --no-revoke removes it without revoking") {
+	if err == nil || !admin.IsRefusal(err) || !strings.Contains(err.Error(), "its record cannot be read, so its user key is unknown (nothing was removed)") {
 		t.Fatalf("%v", err)
 	}
 	if len(h.users) != 0 {

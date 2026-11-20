@@ -175,18 +175,17 @@ Two `mashctl` machines must not reissue the same endpoint at the same moment. Th
 ## mashctl endpoint delete
 
 ```sh
-mashctl endpoint delete ADDRESS [--delete-creds] [--force] [--no-revoke] [--dry-run] [--json]
-                        [--servers N] [--sys-creds FILE]
+mashctl endpoint delete ADDRESS [--yes] [--dry-run] [--json] [--servers N] [--sys-creds FILE]
 ```
 
-Removes an endpoint. In order, it:
+Deletes an endpoint, its inbox and its credentials. The address can never be used again. Without `--yes` it prints `This deletes <address> and the <N> messages in its inbox. It cannot be undone.` and asks you to type the address; any other text deletes nothing and exits 1. That needs a terminal: with no terminal and no `--yes` it prints `error: deleting needs a terminal to confirm, or --yes` and exits 2. The question comes after the endpoint is found and its messages counted, and before anything changes. In order, it:
 
 1. revokes the endpoint's user key in the account JWT, on every server (see [Revocation](#revocation)); a revocation that cannot be confirmed stops the command with nothing removed;
 2. removes the directory record and the inbox, so unread mail is lost;
 3. burns the address: it is never assigned again, to any key;
-4. renames the creds file, if one is in the config directories, to `<address>.creds.retired-<UTC time>`, or removes it with `--delete-creds`.
+4. renames the creds file, if one is in the config directories, to `<address>.creds.retired-<UTC time>`.
 
-`--force` also handles the creds file when the server has no record. `--no-revoke` skips the revocation, and the user can still connect; the command warns. `--dry-run` says what would happen and changes nothing. `--json` uses schema `mashctl-endpoint@1`. A killed run finishes when you run the same command again. Exit codes: 0 deleted or unchanged, 1 refused, partial or error, 2 usage error. After a partial delete, the message says what is left; running the same command again is safe and finishes it.
+On success it prints `Deleted endpoint <address>`; `--verbose` adds `retired marker: written`, `servers acknowledged: N` and `credentials file: renamed to <path>`. `--dry-run` prints `Would delete endpoint <address> and the N messages in its inbox` and `Nothing was changed.`, asks nothing and changes nothing. `--json` prints `{"address", "deleted", "messages_deleted"}`; a failure prints `{"error", "hint"}`. An address that does not exist is `error: <address> does not exist`, exit 1. A killed run finishes when you run the same command again. Exit codes: 0 deleted, 1 refused, partial or error, 2 usage error. After a partial delete the message is `error: deleted <address>, but <what is left>` with `hint: mashctl endpoint delete <address>`; running the same command again is safe and finishes it. The options `--force`, `--delete-creds` and `--no-revoke` no longer exist.
 
 ## mashctl endpoint list and show
 
@@ -279,7 +278,7 @@ A refusal exits 1, a usage error exits 2 and an error exits 1. The message names
 | `revocation_unknown` | 1 | create, reissue, bulk | Whether a key is revoked could not be checked (a server did not answer). Nothing was changed. |
 | `no_local_creds` | 0 | bulk | Skipped: no creds file on this host. |
 
-`endpoint show` exits 1 when there is no such endpoint. `endpoint delete` refuses with a plain message and exit 1 when there is no directory record on the server (`--force` still handles the creds file), too few servers answered the account lookup, the user key's issue time is in the future (fix the clock), the revocation could not be confirmed, or the record belongs to another user key. Nothing is changed in any of these cases.
+`endpoint show` exits 1 when there is no such endpoint. `endpoint delete` refuses with a plain message and exit 1 when the address does not exist, too few servers answered the account lookup, the user key's issue time is in the future (fix the clock), the revocation could not be confirmed, or the record belongs to another user key. Nothing is changed in any of these cases.
 
 ## Removed commands
 
@@ -297,7 +296,7 @@ Endpoints made by 0.5.0 do not work with 0.5.5. Make new ones with `endpoint cre
 
 `endpoint delete` and `endpoint reissue` revoke the endpoint's NATS user in the same command (`mashctl endpoint suspend` does not). The revocation is an entry in the account JWT, by user public key and time: NATS refuses a user JWT for that key issued at or before the revocation time, and a connected user is closed when the server takes the account update, so credentials stop working everywhere the update reached. mashctl signs the update with the operator key, pushes it through the system account to every known server, requires every one to acknowledge it, and reads it back; if that cannot be shown it exits non-zero with `not confirmed` and running the command again is safe. An existing revocation is never lowered or removed.
 
-`endpoint delete ADDRESS` revokes the user of ADDRESS's directory record. With no record there is nothing to revoke. `--no-revoke` (same warning, same temporary name) is the one mashctl option for it, and the system credentials and server count come from `MASH_SYS_CREDS` and `MASH_SERVERS`.
+`endpoint delete ADDRESS` revokes the user of ADDRESS's directory record. With no record there is nothing to revoke. There is no option to skip the revocation. The system credentials and server count come from `MASH_SYS_CREDS` and `MASH_SERVERS`.
 
 Before a revocation is written, `endpoint delete` reads the issue record of each key and refuses, changing nothing, when any retained revision of it has an issue time after the revocation time: NATS honours a revocation only for credentials issued at or before it, so a credential dated in the future would stay valid. Every revision counts, not only the latest, because a credential reissued under the same key writes a new revision and, after a clock rollback, the newer revision can carry an earlier time than an older credential that is still held. The record keeps 64 revisions of a key; a key at that cap may have lost its oldest ones, so it is refused too (`the key has been re-recorded 64 times or more; its oldest issue times are no longer kept; cannot show that no earlier credential is dated in the future`) unless a retained revision is already future-dated, which gets the usual refusal. To proceed, fix the clock, or run again later once the clock is known to be right. A key with no record warns and the revocation goes on; a record that cannot be read, or has a revision whose `issued_at` is missing or malformed, refuses.
 

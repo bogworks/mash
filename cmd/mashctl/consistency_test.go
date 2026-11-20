@@ -82,7 +82,7 @@ func TestSetAndPolicyDoNotEchoInvalidArguments(t *testing.T) {
 		{"endpoint", "unset", "o.g.a", seedShaped + "=x"},
 		{"endpoint", "show", seedShaped},
 		{"endpoint", "inbox", seedShaped},
-		{"endpoint", "delete", seedShaped},
+		{"endpoint", "delete", seedShaped, "--yes"},
 		{"policy", seedShaped},
 		{"policy", "--" + seedShaped + "=1"},
 	} {

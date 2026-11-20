@@ -527,7 +527,7 @@ func TestEndpointDeleteFinishesAfterKill(t *testing.T) {
 	retireNow = func() time.Time { return time.Date(2026, 11, 2, 3, 4, 5, 0, time.UTC) }
 	t.Cleanup(func() { retireNow = time.Now })
 	creds, _ := os.ReadFile(h.creds(a))
-	if _, se, code := h.run("endpoint", "delete", "o/g/d1"); code != 0 {
+	if _, se, code := h.run("endpoint", "delete", "o/g/d1", "--yes"); code != 0 {
 		t.Fatalf("delete %q", se)
 	}
 	// the state of a kill before the creds step: the record is gone, the address burned, the creds file in place
@@ -535,12 +535,12 @@ func TestEndpointDeleteFinishesAfterKill(t *testing.T) {
 	if err := os.Rename(retired, h.creds(a)); err != nil {
 		t.Fatal(err)
 	}
-	so, se, code := h.run("endpoint", "delete", "o/g/d1", "--json")
+	so, se, code := h.run("endpoint", "delete", "o/g/d1", "--yes", "--json")
 	if code != 0 {
 		t.Fatalf("rerun %d %q %q", code, so, se)
 	}
 	var d deleteJSON
-	if err := json.Unmarshal([]byte(so), &d); err != nil || d.Outcome != "deleted" || d.Creds.Action != "renamed" {
+	if err := json.Unmarshal([]byte(so), &d); err != nil || !d.Deleted || d.Address != a.String() {
 		t.Fatalf("doc %q %v", so, err)
 	}
 	if got, err := os.ReadFile(retired); err != nil || string(got) != string(creds) {
@@ -548,16 +548,6 @@ func TestEndpointDeleteFinishesAfterKill(t *testing.T) {
 	}
 	if _, err := os.Lstat(h.creds(a)); !os.IsNotExist(err) {
 		t.Error("creds file still in place")
-	}
-	// --delete-creds finishes it as well
-	if err := os.WriteFile(h.creds(a), creds, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, se, code := h.run("endpoint", "delete", "o/g/d1", "--delete-creds"); code != 0 {
-		t.Fatalf("delete-creds %d %q", code, se)
-	}
-	if _, err := os.Lstat(h.creds(a)); !os.IsNotExist(err) {
-		t.Error("creds file not removed")
 	}
 }
 
@@ -567,9 +557,8 @@ func TestEndpointDeleteNoRecordNotBurnedStillRefuses(t *testing.T) {
 	if err := os.WriteFile(h.creds(a), []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	so, _, code := h.run("endpoint", "delete", "o/g/d2", "--json")
-	var d deleteJSON
-	if err := json.Unmarshal([]byte(so), &d); err != nil || code != 1 || d.Refusal == nil || d.Refusal.Code != "not_found" {
+	so, _, code := h.run("endpoint", "delete", "o/g/d2", "--yes", "--json")
+	if code != 1 || !strings.Contains(so, `"error": "`) && !strings.Contains(so, `"error":"`) || !strings.Contains(so, "o.g.d2 does not exist") {
 		t.Fatalf("%d %q", code, so)
 	}
 	if _, err := os.Lstat(h.creds(a)); err != nil {

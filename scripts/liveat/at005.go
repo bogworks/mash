@@ -409,7 +409,7 @@ func (s *At5) provision(ctl Host, verb string, e *ep5, credsPath string) bool {
 			"not applicable: create makes no account update, so there is nothing to acknowledge; known issue #766")
 	} else {
 		s.check(ctl.Role()+": endpoint "+verb+" reports that all three servers took the account update",
-			strings.Contains(r.Stdout, "3 server(s) acknowledged") || strings.Contains(r.Stdout, "servers acknowledged the account update: 3"),
+			strings.Contains(r.Stdout, "servers acknowledged: 3") || strings.Contains(r.Stdout, "servers acknowledged the account update: 3"),
 			snip(grepLine(r.Stdout, "acknowledged")))
 	}
 	s.watch(ctl, "jwt", e.name+verb, jwtCarry)
@@ -643,9 +643,9 @@ func (s *At5) Scenario() {
 	oldReview := filepath.Join(m1.Home().Dir, "review-old.creds")
 	s.check("M1: the review creds are copied to a private path before the delete", s.copyPrivate(m1, reviewCreds, oldReview, "review-old"), "")
 	s.acceptedOn("review key before the delete (control)", m1, "review", oldReview)
-	r := s.ctl(m1, "endpoint-delete-review", nil, "endpoint", "delete", "alice/dev/review")
+	r := s.ctl(m1, "endpoint-delete-review", nil, "endpoint", "delete", "alice/dev/review", "--yes", "--verbose")
 	s.check("M1: mashctl endpoint delete alice/dev/review succeeds", r.Code == 0, exitSnip(r))
-	s.check("M1: endpoint delete reports that all three servers acknowledged the revocation", strings.Contains(r.Stdout, "3 server(s) acknowledged"), snip(grepLine(r.Stdout, "acknowledged")))
+	s.check("M1: endpoint delete reports that all three servers acknowledged the revocation", strings.Contains(r.Stdout, "servers acknowledged: 3"), snip(grepLine(r.Stdout, "acknowledged")))
 	s.check("REQ-011: the review session is dropped (its serve exits or reports the authorization failure)", s.closed(rp), "")
 	s.refusedOn("the deleted review key", m1, "review", oldReview)
 	st := s.mash(m1, "status-review", s.epEnv(m1, m3, "review", oldReview), "status")

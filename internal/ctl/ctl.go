@@ -25,11 +25,6 @@ import (
 // NotRevoked is the line printed when a command stopped before it revoked anything.
 const NotRevoked = "nothing was revoked; the key is still valid"
 
-// NoRevokeWarning is the stderr block for a removal with --no-revoke: the user key keeps working.
-func NoRevokeWarning(name, user string) string {
-	return "WARNING: --no-revoke: " + name + "'s NATS user key " + config.Clean(user) + " is NOT revoked and can still connect, publish and receive until it is revoked in the account JWT; credentials issued to it stay valid. (--no-revoke is a temporary flag name: it will be renamed with the CLI redesign.)\n"
-}
-
 // ShortKey is the first 8 characters of a key for messages, or all of it when it is shorter: a user key read from a
 // directory record may be short or malformed, and slicing it must never panic.
 func ShortKey(k string) string { return config.Clean(fmt.Sprintf("%.8s", k)) }
@@ -94,7 +89,7 @@ func endpointLines(line func(left, right string)) {
 	line("endpoint show ADDRESS", "one endpoint: its state, labels and public key")
 	line("endpoint create [ADDRESS] [--owner O] [--group G] [--name N] (--public-key FILE | --make-key) [--jwt-out FILE] [--label k=v]... [--tool] [--note N] [--describe T] [--cap C]... [--servers N] [--sys-creds FILE] [--dry-run] [--json]", "sign the endpoint's key and write its directory record, for example acme.demo.bob")
 	line("endpoint reissue ADDRESS (--public-key FILE | --make-key) [--jwt-out FILE] [--servers N] [--sys-creds FILE] [--dry-run] [--json]", "revoke the old key on every server and name a new one")
-	line("endpoint delete ADDRESS [--delete-creds] [--force] [--no-revoke] [--dry-run] [--json] [--servers N] [--sys-creds FILE]", "revoke the endpoint's user key, remove its record and inbox, burn the address, rename its creds file")
+	line("endpoint delete ADDRESS [--yes] [--dry-run] [--json] [--servers N] [--sys-creds FILE]", "revoke the endpoint's user key, remove its record and inbox, burn the address, rename its creds file")
 	line("endpoint set ADDRESS key=value... [--dry-run]", "set role, description, host, capability or label.NAME")
 	line("endpoint unset ADDRESS key... [--dry-run]", "remove those values")
 	line("endpoint suspend ADDRESS [--dry-run]", "refuse new mail to an endpoint; its stored mail and credentials stay")

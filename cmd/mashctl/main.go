@@ -69,6 +69,15 @@ func runVerbs(args []string, env func(string) string, lookup config.Lookup, stdo
 	}
 	args = rest0
 	env, lookup = global.Shadow(spec, env, lookup)
+	if global.Verbose {
+		plain := env
+		env = func(k string) string {
+			if k == verboseEnv {
+				return "1"
+			}
+			return plain(k)
+		}
+	}
 	if serverFlagVerbs[args[0]] {
 		rest, env2, err := extractServerFlags(args[1:], env)
 		if err != nil {

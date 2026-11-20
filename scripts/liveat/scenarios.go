@@ -397,7 +397,7 @@ var AT001 = Scenario{
 		}
 		a.C.Check("review's creds file is copied to a private path before the delete", kept, "")
 		revEnv := append(slices.Clone(envs["review"]), "MASH_CREDS="+revokedCreds)
-		r = a.Ctl("endpoint-delete-review", h, a.Conn(), "endpoint", "delete", "alice/dev/review")
+		r = a.Ctl("endpoint-delete-review", h, a.Conn(), "endpoint", "delete", "alice/dev/review", "--yes")
 		a.C.Check("mashctl endpoint delete alice/dev/review succeeds", r.Code == 0, exitDetail(r))
 		deadline := time.Now().Add(30 * time.Second)
 		closed := false

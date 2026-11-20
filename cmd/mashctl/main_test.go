@@ -106,7 +106,7 @@ func TestMashctlAddressOnly(t *testing.T) {
 			t.Errorf("%v: %d %q", args, code, errb)
 		}
 	}
-	if _, errb, code := ctlRun(t, e, "endpoint", "delete", "leg"); code != 2 || !strings.Contains(errb, "write owner/group/instance") {
+	if _, errb, code := ctlRun(t, e, "endpoint", "delete", "leg", "--yes"); code != 2 || !strings.Contains(errb, "write owner/group/instance") {
 		t.Errorf("endpoint delete leg: %d %q", code, errb)
 	}
 	for _, verb := range []string{"unzone", "set-zone"} {

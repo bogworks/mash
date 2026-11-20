@@ -104,7 +104,7 @@ var AT003 = Scenario{
 		if _, ok = a.provision(ha, he, "alice", "dev", "gone", "", true); !ok {
 			return
 		}
-		r := a.Ctl("endpoint-delete-gone", ha, a.Conn(), "endpoint", "delete", "alice/dev/gone")
+		r := a.Ctl("endpoint-delete-gone", ha, a.Conn(), "endpoint", "delete", "alice/dev/gone", "--yes")
 		if !a.C.Check("setup: mashctl endpoint delete alice/dev/gone burns the address", r.Code == 0, exitDetail(r)) {
 			return
 		}

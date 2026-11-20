@@ -113,7 +113,7 @@ Check:
 
 ## Mail arrives labelled `[unknown-signer]`, `[claimed]`, `[absent]` or `[stale]`
 
-- `[unknown-signer]`: the sender's key is not in the directory. It was deprovisioned (and its NATS user not revoked: `--no-revoke` leaves that to you), or it is not a mash endpoint. Run `mashctl endpoint list`.
+- `[unknown-signer]`: the sender's key is not in the directory. It was deprovisioned (`mash admin deprovision` does not revoke its NATS user), or it is not a mash endpoint. Run `mashctl endpoint list`.
 - `[stale]`: the signature was made more than 5 minutes before the message was stored, or more than 30 seconds after. A replay looks like this. Another cause is a skewed clock on the sender or the receiver (tracked in #36).
 - `[claimed]` and `[absent]`: the sender named itself without proof, or sent no signature.
 

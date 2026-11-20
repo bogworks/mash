@@ -27,12 +27,9 @@ func (h *fleetEnv) provisionDeclared(instance string) string {
 func TestRetireRemovesRecordAndInboxAndSetsTheCredsAside(t *testing.T) {
 	h := newFleetEnv(t)
 	h.seedMeta(ad("c"), admin.Meta{Labels: map[string]string{"net": "red"}}, nil)
-	out, errb, code := h.run("endpoint", "delete", "o.g.c")
-	if code != 0 || !strings.HasPrefix(out, "deleted o/g/c (o.g.c)\n") {
+	out, errb, code := h.run("endpoint", "delete", "o.g.c", "--yes")
+	if code != 0 || out != "Deleted endpoint o.g.c\n" || errb != "" {
 		t.Fatalf("%d %q %q", code, out, errb)
-	}
-	if !strings.Contains(out, "revoked in the account JWT") {
-		t.Errorf("revocation note: %q", out)
 	}
 	noSecrets(t, out, errb)
 	if r := h.records(); len(r) != 0 {
@@ -49,12 +46,12 @@ func TestRetireRenamesCredsByDefault(t *testing.T) {
 	want, _ := os.ReadFile(h.creds(ad("c")))
 	retireNow = func() time.Time { return time.Date(2026, 11, 2, 3, 4, 5, 0, time.UTC) }
 	t.Cleanup(func() { retireNow = time.Now })
-	out, errb, code := h.run("endpoint", "delete", "o.g.c")
+	out, errb, code := h.run("endpoint", "delete", "o.g.c", "--yes", "--verbose")
 	if code != 0 {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
 	moved := h.creds(ad("c")) + ".retired-20261102T030405Z"
-	if !strings.Contains(out, "creds file renamed to "+moved) {
+	if !strings.Contains(out, "credentials file: renamed to "+moved+"\n") || !strings.Contains(out, "retired marker: written\n") {
 		t.Errorf("report: %q", out)
 	}
 	got, err := os.ReadFile(moved)
@@ -72,37 +69,29 @@ func TestRetireRenamesCredsByDefault(t *testing.T) {
 func TestRetireNoCredsFileIsFine(t *testing.T) {
 	h := newFleetEnv(t)
 	h.provisionDeclared("a")
-	out, errb, code := h.run("endpoint", "delete", "o.g.a")
-	if code != 0 || strings.Contains(out, "renamed") {
+	out, errb, code := h.run("endpoint", "delete", "o.g.a", "--yes")
+	if code != 0 || strings.Contains(out, "renamed") || out != "Deleted endpoint o.g.a\n" {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
 }
 
 func TestRetireWithNoRecordSaysSo(t *testing.T) {
 	h := newFleetEnv(t)
-	_, errb, code := h.run("endpoint", "delete", "o.g.nothing-here")
-	if code != 1 || !strings.Contains(errb, "no directory record on the server") || !strings.Contains(errb, "mashctl endpoint delete o.g.nothing-here") {
+	_, errb, code := h.run("endpoint", "delete", "o.g.nothing-here", "--yes")
+	if code != 1 || errb != "error: o.g.nothing-here does not exist\nhint: mashctl endpoint list\n" {
 		t.Fatalf("%d %q", code, errb)
 	}
 }
 
-func TestRetireDeleteCredsAndSymlink(t *testing.T) {
+func TestRetireMissingCredsFileIsFineAndSymlinkIsLeft(t *testing.T) {
 	h := newFleetEnv(t)
-	h.seed(ad("c"))
-	out, errb, code := h.run("endpoint", "delete", "o.g.c", "--delete-creds")
-	if code != 0 {
-		t.Fatalf("%d %q %q", code, out, errb)
-	}
-	if _, err := os.Lstat(h.creds(ad("c"))); !os.IsNotExist(err) {
-		t.Error("creds left")
-	}
 	// a missing creds file is fine
 	h.provisionDeclared("a")
-	if _, errb, code := h.run("endpoint", "delete", "o.g.a", "--delete-creds"); code != 0 {
+	if _, errb, code := h.run("endpoint", "delete", "o.g.a", "--yes"); code != 0 {
 		t.Fatalf("missing creds: %q", errb)
 	}
 
-	// a symlink is not removed, and its target is left as it was
+	// a symlink is not touched, and its target is left as it was; the endpoint is deleted and the command says what is left
 	targetPath, u := h.e.Mint(t, ad("b"))
 	if _, err := h.adminOf().Provision(context.Background(), ad("b"), u, h.e.Account, "", admin.Meta{}); err != nil {
 		t.Fatal(err)
@@ -118,8 +107,8 @@ func TestRetireDeleteCredsAndSymlink(t *testing.T) {
 	if err := os.Symlink(target, h.creds(ad("b"))); err != nil {
 		t.Fatal(err)
 	}
-	out, errb, code = h.run("endpoint", "delete", "o.g.b", "--delete-creds")
-	if code != 1 || !strings.Contains(errb, "not a regular file") || !strings.HasPrefix(out, "deleted o/g/b (o.g.b)\n") {
+	out, errb, code := h.run("endpoint", "delete", "o.g.b", "--yes")
+	if code != 1 || out != "" || !strings.Contains(errb, "\nerror: deleted o.g.b, but ") || !strings.Contains(errb, "is not a regular file and was left in place\nhint: mashctl endpoint delete o.g.b\n") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
 	if b, err := os.ReadFile(target); err != nil || !bytes.Equal(b, want) {
@@ -130,24 +119,17 @@ func TestRetireDeleteCredsAndSymlink(t *testing.T) {
 	}
 }
 
-// With no directory record, --force handles the creds file only: nothing is revoked, and it says so.
-func TestRetireForceWithNoRecordHandlesCredsOnly(t *testing.T) {
+// With no directory record and no retirement, a creds file alone is not handled: the address does not exist and the file stays.
+func TestRetireNoRecordLeavesCredsFile(t *testing.T) {
 	h := newFleetEnv(t)
 	if err := os.WriteFile(h.creds(ad("zz")), []byte("old"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, errb, code := h.run("endpoint", "delete", "o.g.zz"); code != 1 || !strings.Contains(errb, "no directory record") {
+	if _, errb, code := h.run("endpoint", "delete", "o.g.zz", "--yes"); code != 1 || !strings.Contains(errb, "o.g.zz does not exist") {
 		t.Fatalf("%d %q", code, errb)
 	}
 	if _, err := os.Lstat(h.creds(ad("zz"))); err != nil {
 		t.Error("a refusal moved the creds file")
-	}
-	out, errb, code := h.run("endpoint", "delete", "o.g.zz", "--force", "--delete-creds")
-	if code != 0 || !strings.Contains(errb, "no directory record on the server") || !strings.HasPrefix(out, "deleted o/g/zz (o.g.zz)\n") {
-		t.Fatalf("%d %q %q", code, out, errb)
-	}
-	if _, err := os.Lstat(h.creds(ad("zz"))); !os.IsNotExist(err) {
-		t.Error("creds left")
 	}
 }
 
@@ -156,8 +138,8 @@ func TestRetireRemovesOnlyThatRecord(t *testing.T) {
 	h := newFleetEnv(t)
 	h.provisionDeclared("a")
 	h.provisionDeclared("zz")
-	out, errb, code := h.run("endpoint", "delete", "o.g.zz")
-	if code != 0 || !strings.HasPrefix(out, "deleted o/g/zz (o.g.zz)\n") {
+	out, errb, code := h.run("endpoint", "delete", "o.g.zz", "--yes")
+	if code != 0 || out != "Deleted endpoint o.g.zz\n" {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
 	if r := h.records(); len(r) != 1 || !strings.HasPrefix(r[0], "o.g.a//") {
@@ -179,8 +161,8 @@ func TestRetireLeavesAReplacedRecord(t *testing.T) {
 		}
 	}
 	t.Cleanup(func() { afterRetireRead = nil })
-	out, errb, code := h.run("endpoint", "delete", "o.g.b")
-	if code != 1 || !strings.Contains(errb, "nothing was changed") {
+	out, errb, code := h.run("endpoint", "delete", "o.g.b", "--yes")
+	if code != 1 || !strings.Contains(errb, "error: ") || !strings.Contains(errb, "nothing was changed") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
 	if len(rs.calls) != 0 {
@@ -195,8 +177,8 @@ func TestRetireServerFailureChangesNothing(t *testing.T) {
 	h := newFleetEnv(t)
 	h.provisionDeclared("b")
 	h.env["MASH_SERVER"] = "nats://127.0.0.1:1" // nothing listens
-	out, errb, code := h.run("endpoint", "delete", "o.g.b", "--delete-creds")
-	if code != 1 || strings.Contains(out, "deleted") {
+	out, errb, code := h.run("endpoint", "delete", "o.g.b", "--yes")
+	if code != 1 || strings.Contains(out, "Deleted") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
 }
@@ -204,13 +186,14 @@ func TestRetireServerFailureChangesNothing(t *testing.T) {
 func TestRetireConsequencesAndUsage(t *testing.T) {
 	h := newFleetEnv(t)
 	h.provisionDeclared("b")
-	out, errb, code := h.run("endpoint", "delete", "o.g.b")
+	out, errb, code := h.run("endpoint", "delete", "o.g.b", "--yes")
 	if code != 0 || strings.Contains(out, "needed") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
-	for _, args := range [][]string{{"endpoint", "delete"}, {"endpoint", "delete", "o.g.a", "b"}, {"endpoint", "delete", "o.g.a", "--bogus"}, {"endpoint", "delete", "o.g.a", "--policy", "p.yaml"}} {
-		if _, _, code := h.run(args...); code != 2 {
-			t.Errorf("%v: %d", args, code)
+	for _, args := range [][]string{{"endpoint", "delete"}, {"endpoint", "delete", "o.g.a", "--yes", "b"}, {"endpoint", "delete", "o.g.a", "--yes", "--bogus"}, {"endpoint", "delete", "o.g.a", "--yes", "--policy", "p.yaml"}} {
+		_, errb, code := h.run(args...)
+		if code != 2 || !strings.HasPrefix(errb, "error: ") || !strings.HasSuffix(errb, "\nhint: mashctl endpoint delete --help\n") {
+			t.Errorf("%v: %d %q", args, code, errb)
 		}
 	}
 	u, _, _ := h.run("help")
@@ -236,29 +219,22 @@ func TestRetirePartialFailureIsNotReportedAsUnchanged(t *testing.T) {
 	h := newFleetEnv(t)
 	h.provisionDeclared("b")
 	failAfterPurge(t)
-	out, errb, code := h.run("endpoint", "delete", "o.g.b")
-	if code != 1 || strings.Contains(out, "deleted") {
+	out, errb, code := h.run("endpoint", "delete", "o.g.b", "--yes")
+	if code != 1 || out != "" {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
-	for _, w := range []string{"PARTIAL", "mashctl endpoint delete o.g.b", "lease fence: connection lost"} {
-		if !strings.Contains(errb, w) {
-			t.Errorf("stderr lacks %q: %q", w, errb)
-		}
+	if !strings.Contains(errb, "\nerror: deleted o.g.b, but ") || !strings.HasSuffix(errb, "\nhint: mashctl endpoint delete o.g.b\n") || !strings.Contains(errb, "lease fence: connection lost") {
+		t.Errorf("stderr: %q", errb)
 	}
 	if strings.Contains(errb, "nothing was changed") {
 		t.Errorf("a partial failure said nothing was changed: %q", errb)
 	}
 
 	// the record is gone and the stand-in finished everything else: a retry finds the final marker and nothing left,
-	// so it changes nothing and succeeds
+	// so the address does not exist
 	deprovisionIfUser = (*admin.Admin).DeprovisionIfUser
-	out, errb, code = h.run("endpoint", "delete", "o.g.b")
-	if code != 0 || !strings.Contains(out, "already retired") {
-		t.Fatalf("%d %q %q", code, out, errb)
-	}
-
-	out, errb, code = h.run("endpoint", "delete", "o.g.b", "--force")
-	if code != 0 || !strings.HasPrefix(out, "deleted o/g/b (o.g.b)\n") {
+	out, errb, code = h.run("endpoint", "delete", "o.g.b", "--yes")
+	if code != 1 || out != "" || !strings.Contains(errb, "o.g.b does not exist") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
 }
@@ -272,8 +248,8 @@ func TestRetireRefusalStillSaysNothingWasChanged(t *testing.T) {
 		adm.SetUser(context.Background(), ad("b"), h.e.Account, first, other)
 	}
 	t.Cleanup(func() { afterRetireRead = nil })
-	_, errb, code := h.run("endpoint", "delete", "o.g.b")
-	if code != 1 || !strings.Contains(errb, "nothing was changed") || strings.Contains(errb, "PARTIAL") {
+	_, errb, code := h.run("endpoint", "delete", "o.g.b", "--yes")
+	if code != 1 || !strings.Contains(errb, "nothing was changed") || strings.Contains(errb, "deleted o.g.b") {
 		t.Fatalf("%d %q", code, errb)
 	}
 }
@@ -292,7 +268,7 @@ func TestRetireTwiceSameSecondKeepsBothSeeds(t *testing.T) {
 		}
 		b, _ := os.ReadFile(h.creds(ad("c")))
 		seeds = append(seeds, string(b))
-		if out, errb, code := h.run("endpoint", "delete", "o.g.c", "--force"); code != 0 {
+		if out, errb, code := h.run("endpoint", "delete", "o.g.c", "--yes"); code != 0 {
 			t.Fatalf("%d %q %q", code, out, errb)
 		}
 	}
@@ -407,7 +383,7 @@ func TestRetireDirectoryReadFailureSaysNothingWasRevoked(t *testing.T) {
 	if err := js.DeleteKeyValue(context.Background(), store.DirectoryBucket); err != nil {
 		t.Fatal(err)
 	}
-	out, errb, code := h.run("endpoint", "delete", "o.g.b")
+	out, errb, code := h.run("endpoint", "delete", "o.g.b", "--yes")
 	if code != 1 || out != "" {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}

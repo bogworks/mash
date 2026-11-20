@@ -25,7 +25,7 @@ func TestRetireRefusesFutureIssuedCreds(t *testing.T) {
 
 	prev := retireRevokeNow
 	retireRevokeNow = func() time.Time { return time.Now().Add(-clockBehind) } // the JWT was minted "an hour from now"
-	out, errb, code := h.run("endpoint", "delete", "o.g.c")
+	out, errb, code := h.run("endpoint", "delete", "o.g.c", "--yes")
 	retireRevokeNow = prev
 	if code != 1 || out != "" || !strings.Contains(errb, "c's current creds JWT claims it was issued in the future (") || !strings.Contains(errb, "fix this machine's clock") || !strings.Contains(errb, "nothing was changed") {
 		t.Fatalf("%d %q %q", code, out, errb)
@@ -42,8 +42,8 @@ func TestRetireRefusesFutureIssuedCreds(t *testing.T) {
 	}
 
 	// Control: a JWT issued in the past is revoked as before.
-	out, errb, code = h.run("endpoint", "delete", "o.g.c")
-	if code != 0 || !strings.Contains(out, "revoked in the account JWT") || len(*calls) != 1 {
+	out, errb, code = h.run("endpoint", "delete", "o.g.c", "--yes")
+	if code != 0 || !strings.HasPrefix(out, "Deleted endpoint o.g.") || len(*calls) != 1 {
 		t.Fatalf("%d %q %q calls %+v", code, out, errb, *calls)
 	}
 }
@@ -62,7 +62,7 @@ func TestRetireRevokesAtTheCheckedTime(t *testing.T) {
 		reads++
 		return base.Add(time.Duration(reads-1) * time.Hour)
 	}
-	out, errb, code := h.run("endpoint", "delete", "o.g.c")
+	out, errb, code := h.run("endpoint", "delete", "o.g.c", "--yes")
 	retireRevokeNow = prev
 	if code != 0 || len(*calls) != 1 {
 		t.Fatalf("%d %q %q calls %+v", code, out, errb, *calls)
@@ -122,7 +122,7 @@ func TestRetireCredsCheckFailsClosed(t *testing.T) {
 			fiBefore, _ := os.Stat(h.creds(ad("c")))
 			recs := h.records()
 			calls := fakeRevoke(t, nil)
-			out, errb, code := h.run("endpoint", "delete", "o.g.c")
+			out, errb, code := h.run("endpoint", "delete", "o.g.c", "--yes")
 			if code != 1 || out != "" || !strings.Contains(errb, tc.want) || !strings.Contains(errb, "nothing was changed") {
 				t.Fatalf("%d %q %q", code, out, errb)
 			}
@@ -151,7 +151,7 @@ func TestRetireCredsCheckFailsClosed(t *testing.T) {
 			t.Fatal(err)
 		}
 		calls := fakeRevoke(t, nil)
-		out, errb, code := h.run("endpoint", "delete", "o.g.c")
+		out, errb, code := h.run("endpoint", "delete", "o.g.c", "--yes")
 		if code != 0 || len(*calls) != 1 {
 			t.Fatalf("%d %q %q calls %+v", code, out, errb, *calls)
 		}
@@ -174,7 +174,7 @@ func TestRetireCredsCheckRunsInsideLock(t *testing.T) {
 		}
 	}
 	t.Cleanup(func() { beforeRetireRevoke = nil })
-	out, errb, code := h.run("endpoint", "delete", "o.g.c")
+	out, errb, code := h.run("endpoint", "delete", "o.g.c", "--yes")
 	if swapped != 1 {
 		t.Fatalf("seam ran %d times", swapped)
 	}
@@ -214,7 +214,7 @@ func TestRetireChecksSymlinkedCredsTarget(t *testing.T) {
 
 		prev := retireRevokeNow
 		retireRevokeNow = func() time.Time { return time.Now().Add(-clockBehind) }
-		out, errb, code := h.run("endpoint", "delete", "o.g.c")
+		out, errb, code := h.run("endpoint", "delete", "o.g.c", "--yes")
 		retireRevokeNow = prev
 		if code != 1 || out != "" || !strings.Contains(errb, "claims it was issued in the future (") || !strings.Contains(errb, "nothing was changed") {
 			t.Fatalf("%d %q %q", code, out, errb)
@@ -244,9 +244,9 @@ func TestRetireChecksSymlinkedCredsTarget(t *testing.T) {
 			t.Fatal(err)
 		}
 		calls := fakeRevoke(t, nil)
-		out, errb, code := h.run("endpoint", "delete", "o.g.c")
+		out, errb, code := h.run("endpoint", "delete", "o.g.c", "--yes")
 		// as for any symlinked creds, the retire completes and reports that the link was left in place
-		if code != 1 || !strings.HasPrefix(out, "deleted o/g/c (o.g.c)\n") || !strings.Contains(errb, "not a regular file") || len(*calls) != 1 {
+		if code != 1 || out != "" || !strings.Contains(errb, "error: deleted o.g.c, but ") || !strings.Contains(errb, "not a regular file") || len(*calls) != 1 {
 			t.Fatalf("%d %q %q calls %+v", code, out, errb, *calls)
 		}
 		if _, err := os.Lstat(h.creds(ad("c"))); err != nil {

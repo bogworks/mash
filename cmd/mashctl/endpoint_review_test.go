@@ -154,9 +154,9 @@ func TestEndpointShowDeleteFlatJSON(t *testing.T) {
 	if m["address"] != "o.g.s" || m["state"] != "offline" || m["public_key"] == "" || m["endpoint"] != nil || m["labels"] == nil {
 		t.Errorf("show %v", m)
 	}
-	so, _, _ = h.run("endpoint", "delete", "o/g/s", "--json")
+	so, _, _ = h.run("endpoint", "delete", "o/g/s", "--yes", "--json")
 	m = jsonObject(t, so)
-	if m["group"] != "g" || m["instance"] != "s" || m["key"] != "o_g_s" || m["outcome"] != "deleted" || m["endpoint"] != nil {
+	if m["address"] != "o.g.s" || m["deleted"] != true || m["messages_deleted"] != float64(0) || len(m) != 3 {
 		t.Errorf("delete %v", m)
 	}
 }
@@ -208,9 +208,6 @@ func TestEndpointUsageErrorsInJSON(t *testing.T) {
 		{"reissue no address", []string{"reissue", "--public-key", pubFile, "--json"}, "address_missing"},
 		{"reissue bad address", []string{"reissue", "Not A Valid!", "--public-key", pubFile, "--json"}, "address_invalid"},
 		{"reissue no key", []string{"reissue", "o/g/x", "--json"}, "key_missing"},
-		{"delete unknown flag", []string{"delete", "o/g/x", "--bogus", "--json"}, "unknown_flag"},
-		{"delete no address", []string{"delete", "--json"}, "address_missing"},
-		{"delete bad address", []string{"delete", "Not A Valid!", "--json"}, "address_invalid"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -268,7 +265,7 @@ func TestEndpointDryRunRefusals(t *testing.T) {
 		t.Errorf("own key: %d %q %q", code, so, se)
 	}
 	// a deleted endpoint's address is burned
-	if _, se, code := h.run("endpoint", "delete", ad("b").String()); code != 0 {
+	if _, se, code := h.run("endpoint", "delete", ad("b").String(), "--yes"); code != 0 {
 		t.Fatalf("delete: %q", se)
 	}
 	refused("key_retired", "endpoint", "create", ad("b").String(), "--public-key", pubB, "--jwt-out", filepath.Join(out, "c.jwt"))

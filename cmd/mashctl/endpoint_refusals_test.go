@@ -13,7 +13,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bogworks/mash/internal/apply"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/enroll"
 	"github.com/bogworks/mash/internal/sap"
@@ -145,7 +144,7 @@ func lockHeld(instance string) func(t *testing.T, r *refEnv) {
 func burned(instance string) func(t *testing.T, r *refEnv) {
 	return func(t *testing.T, r *refEnv) {
 		r.must(t, "endpoint", "create", ad(instance).String(), "--public-key", r.pub, "--jwt-out", filepath.Join(r.aux, "first.jwt"))
-		r.must(t, "endpoint", "delete", ad(instance).String())
+		r.must(t, "endpoint", "delete", ad(instance).String(), "--yes")
 	}
 }
 
@@ -325,42 +324,6 @@ var refusalCases = []refCase{
 	{"bulk_future_issued", []string{"endpoint", "reissue", "--all", "--make-key", "--yes"}, futureIssued("a"), "future_issued", 1},
 	{"bulk_creds_mismatch", []string{"endpoint", "reissue", "--all", "--make-key", "--yes"}, otherCreds, "creds_mismatch", 1},
 	{"bulk_revocation_unknown", []string{"endpoint", "reissue", "--changed", "--make-key", "--yes"}, revocationUnknown, "revocation_unknown", 1},
-
-	// delete
-	{"delete_usage", []string{"endpoint", "delete", "o/g/a", "o/g/b"}, nil, "usage", 2},
-	{"delete_unknown_flag", []string{"endpoint", "delete", "--bogus"}, nil, "unknown_flag", 2},
-	{"delete_address_missing", []string{"endpoint", "delete"}, nil, "address_missing", 2},
-	{"delete_address_invalid", []string{"endpoint", "delete", "bad address"}, nil, "address_invalid", 2},
-	{"delete_servers_invalid", []string{"endpoint", "delete", "o/g/a"}, setEnv("MASH_SERVERS", "0"), "servers_invalid", 2},
-	{"delete_not_found", []string{"endpoint", "delete", "o/g/none"}, nil, "not_found", 1},
-	{"delete_no_creds_file", []string{"endpoint", "delete", "o/g/a", "--delete-creds"}, seq(seeded("a"), noConfigDir), "no_creds_file", 1},
-	{"delete_server_set", []string{"endpoint", "delete", "o/g/a"}, seq(seeded("a"), shortServerSet), "server_set", 1},
-	{"delete_future_issued", []string{"endpoint", "delete", "o/g/a"}, func(t *testing.T, r *refEnv) {
-		r.h.seed(ad("a"))
-		_, pub := r.h.credsClaims(ad("a"))
-		r.h.recordIssuedAt(pub, time.Now().Add(48*time.Hour))
-	}, "future_issued", 1},
-	{"delete_revoke_failed", []string{"endpoint", "delete", "o/g/a"}, func(t *testing.T, r *refEnv) {
-		r.h.seed(ad("a"))
-		fakeRevoke(t, errors.New("no system account answered"))
-	}, "revoke_failed", 1},
-	{"delete_revoke_not_confirmed", []string{"endpoint", "delete", "o/g/a"}, func(t *testing.T, r *refEnv) {
-		r.h.seed(ad("a"))
-		fakeRevoke(t, fmt.Errorf("the revocation was not confirmed: %w", apply.ErrNotConfirmed))
-	}, "revoke_not_confirmed", 1},
-	{"delete_refused", []string{"endpoint", "delete", "o/g/a"}, func(t *testing.T, r *refEnv) {
-		r.h.seed(ad("a"))
-		first, _ := r.h.record(ad("a"))
-		afterRetireRead = func() {
-			// someone gives the record another user key between the read and the guarded removal
-			adm := r.h.adminOf()
-			_, other := r.h.e.Mint(t, ad("a2"))
-			if _, err := adm.SetUser(context.Background(), ad("a"), r.h.e.Account, first.User, other); err != nil {
-				t.Error(err)
-			}
-		}
-		t.Cleanup(func() { afterRetireRead = nil })
-	}, "refused", 1},
 }
 
 var (

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"errors"
 	"os"
 	"strings"
@@ -96,7 +95,7 @@ func TestEndpointCreateMakeKeyShortcutNeedsMatchingRecord(t *testing.T) {
 	}
 	oldCreds, _ = os.ReadFile(h.creds(c))
 	oldSeed = credsSeed(t, h.creds(c))
-	if _, se, code := h.run("endpoint", "delete", c.String()); code != 0 {
+	if _, se, code := h.run("endpoint", "delete", c.String(), "--yes"); code != 0 {
 		t.Fatalf("delete %q", se)
 	}
 	if err := os.WriteFile(h.creds(c), oldCreds, 0o600); err != nil {
@@ -191,7 +190,7 @@ func TestEndpointCreateRefusalRemovesPending(t *testing.T) {
 
 	burned := ad("t2")
 	h.seed(burned)
-	if _, se, code := h.run("endpoint", "delete", burned.String()); code != 0 {
+	if _, se, code := h.run("endpoint", "delete", burned.String(), "--yes"); code != 0 {
 		t.Fatalf("delete %q", se)
 	}
 	if err := os.WriteFile(h.creds(burned)+".pending", seed, 0o600); err != nil {
@@ -233,27 +232,6 @@ func TestEndpointBulkPartialNamesChanged(t *testing.T) {
 	}
 	if !strings.Contains(endpointReissueUsage, "--changed") || strings.Contains(strings.ToLower(endpointReissueUsage), "rerun with --all") {
 		t.Error("usage")
-	}
-}
-
-func TestEndpointDeleteReportsZeroAcknowledged(t *testing.T) {
-	h := newFleetEnv(t)
-	fakeRevoke(t, nil)
-	a := ad("z1")
-	h.seed(a)
-	so, _, code := h.run("endpoint", "delete", a.String(), "--no-revoke", "--json")
-	var m map[string]any
-	if err := json.Unmarshal([]byte(so), &m); err != nil || code != 0 || m["outcome"] != "deleted" {
-		t.Fatalf("%d %q", code, so)
-	}
-	if v, ok := m["servers_acknowledged"]; !ok || v.(float64) != 0 {
-		t.Errorf("servers_acknowledged %v in %q", v, so)
-	}
-	b := ad("z2")
-	h.seed(b)
-	so, _, code = h.run("endpoint", "delete", b.String(), "--no-revoke")
-	if code != 0 || !strings.Contains(so, "servers acknowledged the revocation: 0") {
-		t.Fatalf("text %d %q", code, so)
 	}
 }
 

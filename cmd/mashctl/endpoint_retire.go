@@ -8,11 +8,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/apply"
+	"github.com/bogworks/mash/internal/cliframe"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/ctl"
 	"github.com/bogworks/mash/internal/sap"
@@ -43,66 +45,49 @@ var retireNow = time.Now
 // retireRevokeNow is the clock for the revocation time the future-dated creds check compares against; a test replaces it.
 var retireRevokeNow = time.Now
 
-// noRevokeNote is printed after a delete with --no-revoke: the user can still connect.
-const noRevokeNote = "its user key is not revoked (--no-revoke): its creds still authenticate until the key is revoked in the account JWT (nsc, or your operator tooling) or the signing key is rotated"
-
-// retireOpts are the choices of one removal and the words its messages use. `mashctl endpoint delete` words them.
+// retireOpts are the choices of one removal.
 type retireOpts struct {
-	deleteCreds, force, noRevoke, dryRun bool
-	verb                                 string // the command as messages name it: "endpoint delete"
-	label                                string // how messages name the endpoint
-	full                                 string // the first line of the report names the endpoint this way
-	again                                string // the command that finishes a partial removal
-	done                                 string // the report's first word: "deleted"
-	listHint                             string // added to the missing-record refusal, when set
-	usage                                string
+	dryRun, yes bool
+	again       string                      // the command that finishes a partial removal
+	confirm     func(messages uint64) error // asks the person; called when neither --yes nor --dry-run was given
 }
 
-// retireResult is what one removal did. kind is deleted, unchanged, refused, partial, error or planned.
+// retireResult is what one removal did.
 type retireResult struct {
-	kind         string
-	refusalCode  string
-	detail       string
-	user         string
-	credsPath    string
-	credsAction  string // renamed, removed or none
-	renamedTo    string
-	nextSteps    []string
-	acked        int // servers that took the revocation of the user key; set when this run revoked it
-	pendingUsage bool
+	planned   bool   // --dry-run: nothing was changed
+	messages  uint64 // the messages the inbox held when the removal began
+	acked     int    // servers that took the revocation of the user key; set when this run revoked it
+	renamedTo string // where the creds file was put aside, when it was
+	marker    string // "written" or "finished": this run wrote or finished the retired-name marker
 }
 
-// ok is true for the kinds that end without a problem.
-func (r retireResult) ok() bool {
-	return r.kind == "deleted" || r.kind == "unchanged" || r.kind == "planned"
+// plainMsg drops the program prefix the libraries put on a message.
+func plainMsg(m string) string {
+	return strings.TrimPrefix(strings.TrimPrefix(m, "mash: "), "mashctl: ")
 }
 
-// retireAddress removes the endpoint at addr as opts says and reports on stdout and stderr. A bad server list is a
-// usage error (pendingUsage).
-func retireAddress(addr sap.Address, opts retireOpts, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) retireResult {
+// retireAddress removes the endpoint at addr as opts says. Its failures are *cliframe.Error values: exit 2 for a bad
+// server list or a missing terminal, exit 1 for the rest. A removal that did part of its work says so, and running the
+// same command again finishes it.
+func retireAddress(addr sap.Address, opts retireOpts, env func(string) string, lookup config.Lookup, stderr io.Writer) (retireResult, error) {
 	name := addr.String()
-	label := opts.label
-	deleteCreds, force, noRevoke := opts.deleteCreds, opts.force, opts.noRevoke
+	helpHint := "mashctl endpoint delete --help"
+	fail := func(format string, a ...any) *cliframe.Error {
+		return cliframe.Failf("%s", plainMsg(admin.RewordUnavailable(fmt.Sprintf(format, a...))))
+	}
+	// partial is a removal that did part of its work.
+	partial := func(format string, a ...any) *cliframe.Error {
+		return cliframe.Failf("deleted %s, but %s", name, plainMsg(admin.RewordUnavailable(fmt.Sprintf(format, a...)))).WithHint(opts.again)
+	}
 	servers, err := parseServers(env)
 	if err != nil {
-		fmt.Fprintf(stderr, "mashctl: %s: %v\n%s", opts.verb, err, opts.usage)
-		return retireResult{kind: "error", detail: err.Error(), pendingUsage: true}
-	}
-	var user string
-	stop := func(kind, code string, next []string, format string, a ...any) retireResult {
-		msg := admin.RewordUnavailable(fmt.Sprintf(format, a...))
-		fmt.Fprintf(stderr, "mashctl: %s %s: %s\n", opts.verb, label, msg)
-		return retireResult{kind: kind, refusalCode: code, detail: msg, user: user, nextSteps: next}
+		return retireResult{}, cliframe.Usagef("%v", err).WithHint(helpHint)
 	}
 	cfg, err := loadCtlConfig(env, lookup, true)
 	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return retireResult{kind: "error", detail: err.Error()}
+		return retireResult{}, failErr(err)
 	}
 	credsPath, credsErr := credsFileFor(cfg, addr)
-	if credsErr != nil && deleteCreds {
-		return stop("refused", "no_creds_file", []string{"run again without --delete-creds"}, "%v", credsErr)
-	}
 	if credsErr != nil {
 		credsPath = ""
 	}
@@ -112,243 +97,163 @@ func retireAddress(addr sap.Address, opts retireOpts, env func(string) string, l
 	announceTarget(cfg, env, stderr, nil)
 	adm, ctx, closeAdmin, err := ctl.OpenAdmin("mashctl", cfg)
 	if err != nil {
-		return stop("error", "", nil, "%v", err)
+		return retireResult{}, failErr(err)
 	}
 	defer closeAdmin()
 	recs, bad, err := adm.List(ctx)
 	if err != nil {
-		if !noRevoke {
-			return stop("error", "", nil, "%v\n%s", err, ctl.NotRevoked)
-		}
-		return stop("error", "", nil, "%v", err)
+		return retireResult{}, fail("%v; %s", err, ctl.NotRevoked)
 	}
 	for _, b := range bad {
 		b.Warn(stderr, "mashctl")
 	}
+	var user string
 	if r, ok := findRecord(recs, addr); ok {
 		user = r.User
 	}
-	burnedAlready := false
-	cleaned := false // the server-side cleanup of an interrupted retirement did work
+	notFound := cliframe.Failf("%s does not exist", name).WithHint("mashctl endpoint list")
+	cleanup := false // the server holds the leftovers of an interrupted removal that this run finishes
 	if user == "" {
 		// No record. A run killed after the record was purged leaves the retirement marker pending, and maybe the lease
 		// and the inbox stream. The same command finishes it (ADR 0088), with or without a creds file.
 		state, serr := adm.RetireState(ctx, addr)
 		if serr != nil {
-			return stop("error", "server", nil, "%v", serr)
+			return retireResult{}, fail("%v", serr)
 		}
-		burned := state != ""
-		burnedAlready = burned
-		if !burned && !force {
-			hint := ""
-			if opts.listHint != "" {
-				hint = opts.listHint + "; "
-			}
-			return stop("refused", "not_found", []string{"mashctl endpoint list shows the endpoints that exist"}, "no directory record on the server (%s--force handles the creds file anyway); if the endpoint was partly removed, finish with mashctl endpoint delete %s", hint, name)
+		if state == "" {
+			return retireResult{}, notFound
 		}
-		if burned && !opts.dryRun {
-			left, eerr := adm.Exists(ctx, addr)
-			if eerr != nil {
-				return stop("error", "server", nil, "%v", eerr)
-			}
-			if state == "pending" || left {
-				fmt.Fprintf(stderr, "mashctl: %s %s: the address is already retired; finishing the retirement on the server\n", opts.verb, label)
-				if derr := adm.Deprovision(ctx, addr); derr != nil {
-					return stop("error", "server", []string{"run " + opts.again + " again once the cause is fixed"}, "finishing the retirement failed: %v", derr)
-				}
-				cleaned = true
-			}
+		left, eerr := adm.Exists(ctx, addr)
+		if eerr != nil {
+			return retireResult{}, fail("%v", eerr)
+		}
+		cleanup = state == "pending" || left
+		if !cleanup && credsPath == "" {
+			return retireResult{}, notFound
 		}
 	}
+	res := retireResult{}
+	if res.messages, err = adm.InboxMessages(ctx, addr); err != nil {
+		return retireResult{}, fail("%v", err)
+	}
 	if opts.dryRun {
-		return planRetire(opts, user, credsPath, stdout)
+		res.planned = true
+		return res, nil
+	}
+	if !opts.yes {
+		if err := opts.confirm(res.messages); err != nil {
+			return retireResult{}, err
+		}
+	}
+	if cleanup {
+		if derr := adm.Deprovision(ctx, addr); derr != nil {
+			return retireResult{}, partial("finishing the removal on the server failed: %v", derr)
+		}
+		res.marker = "finished"
 	}
 	var revokeOut bytes.Buffer
 	revokedOK := false // the revocation completed on every server
-	revokeAcked := 0   // the servers that took it
 	if user != "" {
 		// The user key is revoked inside the guarded removal, under the name's lock and only for the record it accepts:
 		// a failed revocation removes nothing, a refused removal revokes nothing.
 		var revokeErr, checkErr error
-		if noRevoke {
-			fmt.Fprint(stderr, ctl.NoRevokeWarning(name, user))
-		} else {
-			recorder := adm
-			adm = adm.WithRevoker(func(ctx context.Context, u string) error {
-				if beforeRetireRevoke != nil {
-					beforeRetireRevoke()
+		recorder := adm
+		adm = adm.WithRevoker(func(ctx context.Context, u string) error {
+			if beforeRetireRevoke != nil {
+				beforeRetireRevoke()
+			}
+			// Inside the guarded removal, under the name's lock, just before the revoke: the creds file is an
+			// optional source of the user's JWT. A JWT dated after the revocation time, or a creds file that exists
+			// but cannot be checked, refuses the removal, so nothing is removed or revoked.
+			revokeAt := retireRevokeNow() // one reading: the check and the revocation use the same time
+			// The issue record is read first: a key whose recorded history is future-dated, or cannot be shown to be
+			// complete, refuses the removal in the same way.
+			if err := ctl.CheckNotFutureIssued(ctx, recorder, []ctl.RevokeTarget{{Name: name, Key: u}}, revokeAt, stderr); err != nil {
+				checkErr = err
+				return err
+			}
+			if credsPath != "" {
+				claims, err := credsIssuedClaims(credsPath, u)
+				if err == nil {
+					err = refuseFutureIssued(name, claims, revokeAt)
+				} else {
+					err = fmt.Errorf("%w; nothing was changed", err)
 				}
-				// Inside the guarded removal, under the name's lock, just before the revoke: the creds file is an
-				// optional source of the user's JWT. A JWT dated after the revocation time, or a creds file that exists
-				// but cannot be checked, refuses the removal, so nothing is removed or revoked.
-				revokeAt := retireRevokeNow() // one reading: the check and the revocation use the same time
-				// The issue record is read first: a key whose recorded history is future-dated, or cannot be shown to be
-				// complete, refuses the removal in the same way.
-				if err := ctl.CheckNotFutureIssued(ctx, recorder, []ctl.RevokeTarget{{Name: name, Key: u}}, revokeAt, stderr); err != nil {
-					checkErr = err
-					return err
-				}
-				if credsPath != "" {
-					claims, err := credsIssuedClaims(credsPath, u)
-					if err == nil {
-						err = refuseFutureIssued(name, claims, revokeAt)
-					} else {
-						err = fmt.Errorf("%w; nothing was changed", err)
-					}
-					if err != nil {
-						checkErr = err
-						return fmt.Errorf("creds check: %w", err)
-					}
-				}
-				n, err := revokeUsers(ctx, cfg, env, servers, []string{u}, &revokeOut, func() time.Time { return revokeAt })
 				if err != nil {
-					revokeErr = err
-					return fmt.Errorf("user key %s...: %w", ctl.ShortKey(u), err)
+					checkErr = err
+					return fmt.Errorf("creds check: %w", err)
 				}
-				revokedOK = true
-				revokeAcked = n
-				ctl.MarkRevoked(ctx, recorder, u, revokeAt, stderr)
-				return nil
-			})
-		}
+			}
+			n, err := revokeUsers(ctx, cfg, env, servers, []string{u}, &revokeOut, func() time.Time { return revokeAt })
+			if err != nil {
+				revokeErr = err
+				return fmt.Errorf("user key %s...: %w", ctl.ShortKey(u), err)
+			}
+			revokedOK = true
+			res.acked = n
+			ctl.MarkRevoked(ctx, recorder, u, revokeAt, stderr)
+			return nil
+		})
 		if afterRetireRead != nil {
 			afterRetireRead()
 		}
 		// The server set is checked before the directory record, the lease or the inbox is touched: a short set
 		// changes nothing.
-		if !noRevoke {
-			if err := checkServerSet(ctx, cfg, env, servers); err != nil {
-				fmt.Fprintf(stderr, "mashctl: %s %s: %v\n%s\n", opts.verb, label, err, ctl.NotRevoked)
-				return retireResult{kind: "refused", refusalCode: "server_set", detail: err.Error(), user: user,
-					nextSteps: []string{"start the missing servers or name them with --servers, then run " + opts.again}}
-			}
+		if err := checkServerSet(ctx, cfg, env, servers); err != nil {
+			return retireResult{}, fail("%v; %s", err, ctl.NotRevoked)
 		}
-		// partialNote says what a revocation that completed left behind, when the removal then did not finish.
-		partialNote := func() {
-			if !revokedOK {
-				return
-			}
-			io.WriteString(stdout, revokeOut.String())
-			fmt.Fprintf(stderr, "mashctl: %s %s: PARTIAL: revoked: user key %s... (the acknowledgement line above gives the server count); still pending: the removal of the directory record, the lease fence and the inbox; running it again finishes it\n", opts.verb, label, ctl.ShortKey(user))
-		}
-		again := []string{"run " + opts.again}
 		if err := deprovisionIfUser(adm, ctx, addr, user); err != nil {
 			if admin.IsRefusal(err) {
 				if checkErr != nil && errors.Is(err, checkErr) {
-					return stop("refused", "future_issued", nil, "%v", checkErr)
+					return retireResult{}, fail("%v", checkErr)
 				}
 				if revokeErr != nil && errors.Is(err, revokeErr) {
 					if errors.Is(revokeErr, apply.ErrNotConfirmed) {
-						return stop("refused", "revoke_not_confirmed", []string{"run " + opts.again + " --no-revoke to remove without revoking"}, "%v: the revocation may already be in force on some servers; the directory record was not changed (--no-revoke retires without revoking)", err)
+						return retireResult{}, fail("%v", err).WithHint(opts.again)
 					}
-					return stop("refused", "revoke_failed", []string{"run " + opts.again + " --no-revoke to remove without revoking"}, "%v: %s; the directory record was not changed (--no-revoke retires without revoking)", err, ctl.NotRevoked)
+					return retireResult{}, fail("%v; %s", err, ctl.NotRevoked)
 				}
-				return stop("refused", "refused", nil, "%v: nothing was changed", err)
+				return retireResult{}, fail("%v: nothing was changed", err)
 			}
 			if admin.IsPartial(err) {
-				partialNote()
-				return stop("partial", "", again, "%v; run %s again", err, opts.again)
+				return retireResult{}, partial("%v", err)
 			}
-			if !noRevoke && !revokedOK {
-				fmt.Fprintf(stderr, "mashctl: %s %s: %v\n%s; run the command again once the cause is fixed\n", opts.verb, label, err, ctl.NotRevoked)
-				return retireResult{kind: "error", detail: err.Error(), user: user, nextSteps: []string{"run the command again once the cause is fixed"}}
+			if !revokedOK {
+				return retireResult{}, fail("%v; %s", err, ctl.NotRevoked).WithHint(opts.again)
 			}
-			partialNote()
-			return stop("partial", "", []string{"finish with: mashctl endpoint delete " + name}, "PARTIAL: the directory record may already be removed but the lease fence or the inbox delete did not complete: %v. Finish with: mashctl endpoint delete %s (it removes what is left)", err, name)
+			return retireResult{}, partial("the lease fence or the inbox was not removed: %v", err)
 		}
-	} else {
-		fmt.Fprintf(stderr, "mashctl: %s %s: no directory record on the server, so no user key is known and nothing was revoked; only the creds file is handled\n", opts.verb, label)
+		res.marker = "written"
+		// A warning from the revocation is kept; the rest of its lines are the acknowledgement counts.
+		for _, l := range strings.Split(revokeOut.String(), "\n") {
+			if strings.HasPrefix(l, "warning: ") {
+				fmt.Fprintln(stderr, l)
+			}
+		}
 	}
 
-	// (2) the creds file, last; a symlink or anything but a regular file is left alone. By default it is renamed
-	// aside; --delete-creds removes it.
-	res := retireResult{kind: "deleted", user: user, credsPath: credsPath, credsAction: "none"}
-	credsFail := func(format string, a ...any) {
-		fmt.Fprintf(stderr, "mashctl: %s %s: "+format+"\n", append([]any{opts.verb, label}, a...)...)
-		res.kind = "partial"
-		res.nextSteps = append(res.nextSteps, "handle the creds file by hand")
-	}
+	// (2) the creds file, last, renamed aside; a symlink or anything but a regular file is left alone.
 	if credsPath != "" {
 		fi, err := os.Lstat(credsPath)
 		switch {
 		case errors.Is(err, os.ErrNotExist):
 		case err != nil:
-			credsFail("%v", err)
+			return retireResult{}, partial("the credentials file was not set aside: %v", err)
 		case !fi.Mode().IsRegular():
-			credsFail("%s is not a regular file: left in place", credsPath)
-		case deleteCreds:
-			if err := os.Remove(credsPath); err != nil {
-				credsFail("%v", err)
-			} else {
-				res.credsAction = "removed"
-			}
+			return retireResult{}, partial("%s is not a regular file and was left in place", credsPath)
 		default:
 			dest := credsPath + ".retired-" + retireNow().UTC().Format("20060102T150405Z")
 			final, err := archiveNoReplace(credsPath, dest)
 			if err != nil {
-				credsFail("%v", err)
-			} else {
-				res.credsAction = "renamed"
-				res.renamedTo = final
+				return retireResult{}, partial("the credentials file was not set aside: %v", err)
 			}
+			res.renamedTo = final
 		}
 	}
-	if user == "" && !cleaned && res.kind == "deleted" && res.credsAction == "none" {
-		res.kind = "unchanged"
+	if user == "" && !cleanup && res.renamedTo == "" {
+		return retireResult{}, notFound
 	}
-
-	// (3) report.
-	fmt.Fprintf(stdout, "%s %s\n", opts.done, opts.full)
-	if res.renamedTo != "" {
-		fmt.Fprintf(stdout, "creds file renamed to %s (--delete-creds removes it instead)\n", res.renamedTo)
-	}
-	switch {
-	case user == "" && cleaned:
-		fmt.Fprintln(stdout, "finished the retirement on the server: the marker is final and the lease fence and the inbox are removed")
-	case user == "" && burnedAlready:
-		fmt.Fprintln(stdout, "the address was already retired and nothing was left on the server")
-	case user == "":
-	case noRevoke:
-		fmt.Fprintf(stdout, "%s: %s\n", label, noRevokeNote)
-		fmt.Fprint(stderr, ctl.NoRevokeWarning(name, user))
-	default:
-		res.acked = revokeAcked
-		io.WriteString(stdout, revokeOut.String())
-		fmt.Fprintf(stdout, "user key %s... revoked in the account JWT: its creds stop working when the server takes the update; the creds file is separate\n", ctl.ShortKey(user))
-	}
-	return res
-}
-
-// planRetire prints what a removal would do and changes nothing.
-func planRetire(opts retireOpts, user, credsPath string, stdout io.Writer) retireResult {
-	res := retireResult{kind: "planned", user: user, credsPath: credsPath, credsAction: "none"}
-	fmt.Fprintf(stdout, "would delete %s (nothing was changed)\n", opts.full)
-	switch {
-	case user == "":
-		fmt.Fprintln(stdout, "no directory record: no user key is known and none would be revoked")
-	case opts.noRevoke:
-		fmt.Fprintf(stdout, "would not revoke user key %s... (--no-revoke)\n", ctl.ShortKey(user))
-	default:
-		fmt.Fprintf(stdout, "would revoke user key %s...\n", ctl.ShortKey(user))
-	}
-	if user != "" {
-		fmt.Fprintln(stdout, "would remove the directory record and the inbox, and burn the address")
-	}
-	if credsPath != "" {
-		if fi, err := os.Lstat(credsPath); err == nil && fi.Mode().IsRegular() {
-			if opts.deleteCreds {
-				res.credsAction = "removed"
-				fmt.Fprintf(stdout, "would remove creds file %s\n", credsPath)
-			} else {
-				res.credsAction = "renamed"
-				fmt.Fprintf(stdout, "would rename creds file %s to %s.retired-<time>\n", credsPath, credsPath)
-			}
-		}
-	}
-	if res.credsAction == "none" {
-		fmt.Fprintln(stdout, "no creds file would be changed")
-	}
-	return res
+	return res, nil
 }
 
 // archiveNoReplace moves src to dest without ever replacing an existing file. If dest exists it tries dest.1,
