@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -15,6 +16,7 @@ import (
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/endpoint"
 	"github.com/bogworks/mash/internal/kind"
+	"github.com/bogworks/mash/internal/render"
 	"github.com/bogworks/mash/internal/sap"
 )
 
@@ -23,6 +25,8 @@ import (
 var commandEntries = []cmdcore.Entry{
 	cmdcore.Register(cmds.Send),
 	cmdcore.Register(cmds.Version),
+	cmdcore.Register(cmds.Inbox),
+	cmdcore.Register(cmds.Read),
 	cmdcore.Register(cmds.Who),
 	cmdcore.Register(cmds.Status),
 	cmdcore.Register(cmds.Doctor),
@@ -224,12 +228,159 @@ func refreshFailure(cfg config.Config, err error) error {
 	return cliframe.Failf("the directory could not be read: the endpoints did not answer in time").WithHint("mash doctor")
 }
 
+// wakeSettings are the wake settings mash inbox reports against: wake_count (0 = off) and wake_age (zero = off; the text
+// is as it was written).
+type wakeSettings struct {
+	count int
+	age   time.Duration
+	text  string
+}
+
+func wakeOf(cfg config.Config) wakeSettings {
+	return wakeSettings{count: cfg.WakeCount, age: cfg.WakeAge, text: cfg.WakeAgeText}
+}
+
+// plainFail is err as one failure line: the "mash: " the endpoint package puts in front of its messages is the tool's
+// name, which "error:" already stands for.
+func plainFail(err error) error {
+	var ce *cliframe.Error
+	if errors.As(err, &ce) {
+		return err
+	}
+	return cliframe.Failf("%s", strings.TrimPrefix(err.Error(), "mash: "))
+}
+
+// mailItem is a message as the commands read it: the sender's full address, the body safe to print.
+func mailItem(m render.Mail, floor uint64, waiting bool) cmds.MailItem {
+	it := cmds.MailItem{Number: int(m.Seq), From: sap.Display(m.From), Sent: m.At, New: waiting && m.Seq > floor, Urgent: m.Urgent,
+		Kind: m.Kind.String(), Trust: string(m.Trust), Size: len(m.Body), ReplyTo: int(m.ReplyTo), Body: render.Plain(m.Body)}
+	if origin, seq, ok := strings.Cut(m.Via, " #"); ok {
+		it.Relay = sap.Display(origin) + " #" + seq
+	}
+	return it
+}
+
+// inboxOn is the inbox command's read of ep. The counts come from the server's consumer (what has not reached the
+// session), not from the messages listed: a listing is only a window. A message is new when it is above the consumer's
+// acknowledged floor. How many waiting messages are urgent is counted over the newest endpoint.UrgentLook of them.
+func inboxOn(ctx context.Context, ep *endpoint.Endpoint, q cmds.InboxQuery, w wakeSettings) (cmds.InboxView, error) {
+	r, err := ep.ReadInbox(ctx, endpoint.InboxQuery{OnlyNew: q.OnlyNew, After: uint64(q.After), Limit: q.Limit})
+	if err != nil {
+		return cmds.InboxView{}, plainFail(err)
+	}
+	st := r.State
+	v := cmds.InboxView{Endpoint: ep.Display(), Total: st.Total, Waiting: st.Waiting, NewUrgent: r.NewUrgent, OldestWaiting: st.OldestWaiting,
+		WakeCount: w.count, WakeAge: w.age, WakeAgeText: w.text, Messages: make([]cmds.MailItem, 0, len(r.Mail))}
+	for _, m := range r.Mail {
+		v.Messages = append(v.Messages, mailItem(m, st.AckFloor, st.Waiting > 0))
+	}
+	return v, nil
+}
+
+// messageOn is the read command's read of ep: the message, or none when the inbox has no such one.
+func messageOn(ctx context.Context, ep *endpoint.Endpoint, number int) (cmds.ReadView, error) {
+	m, err := ep.ReadRef(ctx, endpoint.MsgRef{Seq: uint64(number)})
+	var nm *endpoint.NoMessageError
+	if errors.As(err, &nm) {
+		return cmds.ReadView{Endpoint: ep.Display()}, nil
+	}
+	if err != nil {
+		return cmds.ReadView{}, plainFail(err)
+	}
+	it := mailItem(m, 0, false)
+	return cmds.ReadView{Endpoint: ep.Display(), Message: &it}, nil
+}
+
+// openMailbox opens the endpoint for a command that reads its inbox, within the command's deadline, and words a refusal
+// the way the rules do. The caller closes the endpoint and cancels the returned context.
+func (s *cliSvc) openMailbox(ctx context.Context) (context.Context, *endpoint.Endpoint, func(), error) {
+	cfg := s.cfg
+	if cfg.Inert() {
+		return nil, nil, nil, cmdcore.NoEndpoint(cmdcore.NoneInstalled, "inbox", nil)
+	}
+	ctx, cancel := context.WithTimeout(ctx, cliDeadline(cfg))
+	openCtx, openCancel := context.WithTimeout(ctx, cfg.OpenTimeout)
+	ep, err := endpoint.OpenClientWith(openCtx, cfg, endpoint.ClientOptions{Inbox: true})
+	openCancel()
+	if err != nil {
+		cancel()
+		var se *cmds.SignInError
+		if f := openFailure(cfg, err); errors.As(f, &se) {
+			return nil, nil, nil, cmdcore.NotSignedIn(se.Addr)
+		} else {
+			return nil, nil, nil, f
+		}
+	}
+	return ctx, ep, func() { ep.Close(); cancel() }, nil
+}
+
+// Inbox lists the inbox of the endpoint, in one open: the first wave of reads also fetches the inbox stream.
+func (s *cliSvc) Inbox(ctx context.Context, q cmds.InboxQuery) (cmds.InboxView, error) {
+	ctx, ep, done, err := s.openMailbox(ctx)
+	if err != nil {
+		return cmds.InboxView{}, err
+	}
+	defer done()
+	c, cc := context.WithTimeout(ctx, s.cfg.CallTimeout)
+	defer cc()
+	return inboxOn(c, ep, q, wakeOf(s.cfg))
+}
+
+// Message reads one message. With no session online nothing can mark it read: at a shell it stays new (see mcpSvc).
+func (s *cliSvc) Message(ctx context.Context, number int) (cmds.ReadView, error) {
+	ctx, ep, done, err := s.openMailbox(ctx)
+	if err != nil {
+		return cmds.ReadView{}, err
+	}
+	defer done()
+	c, cc := context.WithTimeout(ctx, s.cfg.CallTimeout)
+	defer cc()
+	return messageOn(c, ep, number)
+}
+
 // mcpSvc is the service the MCP tools run against: the session's endpoint, which may not be usable yet.
 type mcpSvc struct {
 	buildVersion
 	state       *atomic.Pointer[sessionState]
 	name        string
 	callTimeout time.Duration
+	wake        wakeSettings
+}
+
+func (s *mcpSvc) Inbox(ctx context.Context, q cmds.InboxQuery) (cmds.InboxView, error) {
+	ep, err := s.state.Load().usable(s.name)
+	if err != nil {
+		return cmds.InboxView{}, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, s.callTimeout)
+	defer cancel()
+	return inboxOn(ctx, ep, q, s.wake)
+}
+
+// Message reads one message. The tool's AfterWrite (see readAck) acknowledges it once the result is written.
+func (s *mcpSvc) Message(ctx context.Context, number int) (cmds.ReadView, error) {
+	ep, err := s.state.Load().usable(s.name)
+	if err != nil {
+		return cmds.ReadView{}, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, s.callTimeout)
+	defer cancel()
+	return messageOn(ctx, ep, number)
+}
+
+// readAck is the read tool's AfterWrite: only after the result is written to the client does the model have the body,
+// and that counts as seen, so serve acks the message, for one a hook listed in a digest (any mode, ADR 0046) and for one
+// waiting in a session proven hookless (no hook will show it). Everywhere else the message stays held for a hook.
+func (s *mcpSvc) readAck(raw json.RawMessage) {
+	var a struct {
+		Number int `json:"number"`
+	}
+	if json.Unmarshal(raw, &a) != nil || a.Number < 1 {
+		return
+	}
+	if ep, err := s.state.Load().usable(s.name); err == nil {
+		ep.MarkRead(endpoint.MsgRef{Seq: uint64(a.Number)})
+	}
 }
 
 func (s *mcpSvc) Send(ctx context.Context, to, text string, o cmds.SendOptions) (cmds.SendReceipt, error) {

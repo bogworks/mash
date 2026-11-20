@@ -341,3 +341,9 @@ func TestAnswersAndRelayedFromLines(t *testing.T) {
 		t.Fatalf("digest %q", d)
 	}
 }
+
+func TestQuoteGivesAnEmptyLineTheSpaceToo(t *testing.T) {
+	if got, want := quote([]byte("a\n\nb\n")), "> a\n> \n> b"; got != want {
+		t.Fatalf("%q, want %q", got, want)
+	}
+}

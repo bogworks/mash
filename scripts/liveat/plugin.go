@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -294,7 +293,6 @@ func (a *AT) pluginMail(pl pluginLaunch, name string, h Home, from, to *plugSess
 		return
 	}
 	a.C.Check("mail "+name+": the "+from.Name+" session's MCP send tool succeeds", err == nil && !isErr && out == fmt.Sprintf("Mail sent (number %d).", receipt.Number), redact(out)+errSuffix(err))
-	m := []string{"", strconv.Itoa(receipt.Number)}
 	deadline := time.Now().Add(20 * time.Second)
 	var ctx string
 	var herr error
@@ -309,10 +307,10 @@ func (a *AT) pluginMail(pl pluginLaunch, name string, h Home, from, to *plugSess
 	a.C.Check("mail "+name+": the "+event+" hook command from hooks.json exits 0", hr.Code == 0 && herr == nil, exitDetail(hr)+errSuffix(herr))
 	a.C.Check("mail "+name+": the "+event+" hook shows it as mash mail context with the text", strings.Contains(ctx, "mash mail for ") && strings.Contains(ctx, text), "")
 	a.C.Check("mail "+name+": the hook shows the sender's verified trust label ("+fromAddr+" [verified])", strings.Contains(ctx, "from "+fromAddr+" [verified]"), "")
-	inbox, isErr, err := to.P.Call("inbox", map[string]any{}, 20*time.Second)
-	a.C.Check("mail "+name+": cross-check, the recipient's MCP inbox tool lists it from "+fromAddr+" as verified", err == nil && !isErr && strings.Contains(inbox, fromAddr) && strings.Contains(inbox, "verified"), errSuffix(err))
-	rd, isErr, err := to.P.Call("read", map[string]any{"seq": m[1]}, 20*time.Second)
-	a.C.Check("mail "+name+": cross-check, the recipient's MCP read tool shows the text, verified", err == nil && !isErr && strings.Contains(rd, text) && strings.Contains(rd, "[verified]"), errSuffix(err))
+	inbox, isErr, err := to.P.Call("inbox", map[string]any{"wide": true}, 20*time.Second)
+	a.C.Check("mail "+name+": cross-check, the recipient's MCP inbox tool lists it (wide) from "+fromAddr+" as verified", err == nil && !isErr && strings.Contains(inbox, fromAddr) && strings.Contains(inbox, "verified"), errSuffix(err))
+	rd, isErr, err := to.P.Call("read", map[string]any{"number": receipt.Number}, 20*time.Second)
+	a.C.Check("mail "+name+": cross-check, the recipient's MCP read tool shows the text, verified", err == nil && !isErr && strings.Contains(rd, text) && strings.Contains(rd, "trust:    verified"), errSuffix(err))
 }
 
 func errSuffix(err error) string {

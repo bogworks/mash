@@ -19,7 +19,9 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/bogworks/mash/internal/admin"
+	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/endpoint"
+	"github.com/bogworks/mash/internal/render"
 	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/store"
 	"github.com/bogworks/mash/internal/testenv"
@@ -218,6 +220,29 @@ func (w *world) cli(t *testing.T, as string, args ...string) (string, int) {
 	return out.String() + withoutPlainWarning(errb.String()), code
 }
 
+// held reads message n of endpoint as's inbox as the endpoint package returns it (render.Mail), for what the commands
+// do not show: the sender's instance and the stored body.
+func (w *world) held(t *testing.T, as string, n uint64) render.Mail {
+	t.Helper()
+	env := envFrom(w.env[as])
+	cfg, err := config.Load(config.LookupFromFunc(env), env("HOME"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	ep, err := endpoint.OpenClientWith(ctx, cfg, endpoint.ClientOptions{Inbox: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ep.Close()
+	m, err := ep.Read(ctx, n)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return m
+}
+
 // plainWarningLine is the line a command prints on standard error when insecure_plaintext lets a plain URL through.
 // REQ-014: these tests are not about TLS; the override is explicit, and the helpers that merge the two streams leave
 // that one line out. The line itself is asserted in plaintext_refusal_test.go.
@@ -252,8 +277,8 @@ func TestServeEndToEnd(t *testing.T) {
 	if txt := r["content"].([]any)[0].(map[string]any)["text"].(string); !isReceipt(txt, "Mail sent") || r["isError"] == true {
 		t.Fatalf("tool send: %v", r)
 	}
-	out, code = w.cli(t, "b", "inbox")
-	if code != 0 || !strings.Contains(out, "from o.dev.a [verified]") || !strings.Contains(out, "thanks b") {
+	out, code = w.cli(t, "b", "inbox", "--wide")
+	if code != 0 || !strings.Contains(out, "o.dev.a") || !strings.Contains(out, "verified") || !strings.Contains(out, "thanks b") {
 		t.Fatalf("cli inbox: %d %s", code, out)
 	}
 	out, code = w.cli(t, "b", "read", "1")
@@ -593,8 +618,8 @@ func TestCLISendAdoptsTheLaunchInstance(t *testing.T) {
 		t.Fatalf("cli send: %d %s", code, out)
 	}
 	out, code := w.cli(t, "b", "read", "1")
-	if code != 0 || !strings.Contains(out, "from o.dev.a [verified]") || !strings.Contains(out, "instance: "+lease+"\n") {
-		t.Fatalf("want a verified mail naming the lease instance %q: %d %s", lease, code, out)
+	if m := w.held(t, "b", 1); code != 0 || !strings.Contains(out, "from:     o.dev.a\n") || !strings.Contains(out, "trust:    verified\n") || m.Instance != lease {
+		t.Fatalf("want a verified mail naming the lease instance %q: %d %s (instance %q)", lease, code, out, m.Instance)
 	}
 }
 
@@ -645,10 +670,11 @@ func requireSentUnderOwnInstance(t *testing.T, w *world, out string, code int, r
 		t.Fatalf("want the send reported: %s", out)
 	}
 	rd, rcode := w.cli(t, "b", "read", "1")
-	if rcode != 0 || !strings.Contains(rd, "from o.dev.a") || !strings.Contains(rd, "instance: ") {
-		t.Fatalf("b must hold the mail from a: %d %s", rcode, rd)
+	inst := w.held(t, "b", 1).Instance
+	if rcode != 0 || !strings.Contains(rd, "from:     o.dev.a\n") || inst == "" {
+		t.Fatalf("b must hold the mail from a: %d %s (instance %q)", rcode, rd, inst)
 	}
-	if notLease != "" && strings.Contains(rd, "instance: "+notLease+"\n") {
+	if notLease != "" && inst == notLease {
 		t.Fatalf("the mail must not name the lease's instance %q: %s", notLease, rd)
 	}
 }
@@ -709,7 +735,7 @@ func TestCLISendWithoutATokenOrServeStillWorks(t *testing.T) {
 	}
 }
 
-// mash inbox --after SEQ pages forward past the newest-N window; a malformed inbox argument is a usage error, not a
+// mash inbox --after NUMBER pages forward past the newest-N window; a malformed inbox argument is a usage error, not a
 // silent default.
 func TestCLIInboxAfter(t *testing.T) {
 	w := newWorld(t, "a", "b")
@@ -718,43 +744,55 @@ func TestCLIInboxAfter(t *testing.T) {
 			t.Fatalf("send: %d %s", code, out)
 		}
 	}
+	nums := func(out string) []string {
+		var ns []string
+		for i, l := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+			if f := strings.Fields(l); i > 1 && len(f) > 0 { // the summary line, a blank line, then the header
+				ns = append(ns, f[0])
+			}
+		}
+		return ns
+	}
 	out, code := w.cli(t, "a", "inbox", "--after", "1", "--limit", "2")
-	if code != 0 || !strings.HasPrefix(out, "#2\t") || !strings.Contains(out, "\n#3\t") || strings.Contains(out, "#4\t") || strings.Contains(out, "#1\t") {
+	if got := strings.Join(nums(out), ","); code != 0 || got != "NUMBER,2,3" {
 		t.Fatalf("inbox --after 1 --limit 2: %d %q", code, out)
 	}
 	out, code = w.cli(t, "a", "inbox", "--limit", "2", "--after", "3")
-	if code != 0 || !strings.HasPrefix(out, "#4\t") || strings.Contains(out, "#3\t") {
+	if got := strings.Join(nums(out), ","); code != 0 || got != "NUMBER,4" {
 		t.Fatalf("inbox --limit 2 --after 3: %d %q", code, out)
 	}
 	out, code = w.cli(t, "a", "inbox", "--after", "4")
-	if code != 0 || strings.TrimSpace(out) != "inbox empty" {
+	if !strings.HasPrefix(out, "4 messages for ") || strings.Contains(out, "NUMBER") || code != 0 {
 		t.Fatalf("inbox --after 4: %d %q", code, out)
 	}
 	for _, bad := range [][]string{{"inbox", "--after", "x"}, {"inbox", "--limit"}, {"inbox", "--bogus", "1"}, {"inbox", "--limit", "two"}} {
-		if out, code := w.cli(t, "a", bad...); code == 0 || !strings.Contains(out, "usage") {
+		if out, code := w.cli(t, "a", bad...); code != 2 || !strings.HasPrefix(out, "error: ") || !strings.Contains(out, "hint: mash inbox --help") {
 			t.Fatalf("%v: want a usage error, got %d %q", bad, code, out)
 		}
 	}
 }
 
-// The CLI's --limit reaches past the MCP tool's 100: a poller's widened look (a launcher asks limit*10 after a gap)
-// must see what it asked for, not a silent 100.
-func TestCLIInboxLimitPast100(t *testing.T) {
+// --limit is 1 to 100 in both doors (the command line allowed 1000 before 0.5.6); more is a usage error, not a silent
+// cut.
+func TestCLIInboxLimitBounds(t *testing.T) {
 	w := newWorld(t, "a", "b")
 	for i := 1; i <= 120; i++ {
 		if out, code := w.cli(t, "b", "send", tTo("a"), fmt.Sprintf("m%d", i)); code != 0 {
 			t.Fatalf("send: %d %s", code, out)
 		}
 	}
-	out, code := w.cli(t, "a", "inbox", "--limit", "500")
-	rows := strings.Split(strings.TrimRight(out, "\n"), "\n")
-	if code != 0 || len(rows) != 120 || !strings.HasPrefix(rows[0], "#1\t") {
-		t.Fatalf("inbox --limit 500: %d, %d rows, starts %q", code, len(rows), rows[0])
+	out, code := w.cli(t, "a", "inbox", "--limit", "100")
+	if rows := strings.Split(strings.TrimRight(out, "\n"), "\n"); code != 0 || len(rows) != 100+4 {
+		t.Fatalf("inbox --limit 100: %d, %d lines", code, len(rows))
 	}
-	if got := cliLimit(5000); got != cliMaxLimit {
-		t.Fatalf("cliLimit(5000) = %d, want %d", got, cliMaxLimit)
+	for _, bad := range []string{"101", "500", "0", "-1"} {
+		out, code := w.cli(t, "a", "inbox", "--limit", bad)
+		if code != 2 || !strings.HasPrefix(out, "error: --limit must be a whole number from 1 to 100\nhint: mash inbox --help") {
+			t.Fatalf("--limit %s: %d %q", bad, code, out)
+		}
 	}
-	if got := clampLimit(500); got != 100 {
-		t.Fatalf("the MCP tool's clampLimit(500) = %d, want 100", got)
+	out, code = w.cli(t, "a", "inbox")
+	if rows := strings.Split(strings.TrimRight(out, "\n"), "\n"); code != 0 || len(rows) != 20+4 {
+		t.Fatalf("inbox default: %d, %d lines", code, len(rows))
 	}
 }

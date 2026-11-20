@@ -138,9 +138,14 @@ func TestNaming21_TokensShownByteIdentical(t *testing.T) {
 	}
 
 	// inbox: the sender and its trust label.
-	inbox := cliAs(t, meEnv, "inbox")
+	inbox := cliAs(t, meEnv, "inbox", "--wide")
 	assertShows(t, "inbox", inbox, peer)
-	if !strings.Contains(inbox, "[verified]") {
-		t.Fatalf("inbox lacks [verified]:\n%s", inbox)
+	if !strings.Contains(inbox, "verified") {
+		t.Fatalf("inbox lacks verified:\n%s", inbox)
+	}
+	read := cliAs(t, meEnv, "read", "1")
+	assertShows(t, "read", read, peer)
+	if !strings.Contains(read, "trust:    verified\n") {
+		t.Fatalf("read lacks the trust:\n%s", read)
 	}
 }

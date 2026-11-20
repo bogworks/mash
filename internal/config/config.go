@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -56,12 +57,22 @@ type Config struct {
 	TransientBudget time.Duration // serve: transient failures in a row for longer than this end the wait (zero = 15m)
 	TransientMax    time.Duration // serve: the retry backoff doubles up to this (zero = 2m)
 	CLITimeout      time.Duration // total deadline of one CLI command (zero = 15m)
-	AdminTimeout    time.Duration // total deadline of one `mashctl` command (zero = 30s)
-	AdminCreds      string        // admin credentials for `mashctl`
-	SysCreds        string        // config.json "system_creds": the system account's creds file, for `mashctl` (empty = none set)
-	TLSCA           string        // MASH_CA / "ca": PEM file of the CA that signed the server's certificate (empty = system roots)
-	TLSCert         string        // MASH_TLS_CERT / "tls_cert": PEM client certificate, for a server that requires one; set with TLSKey
-	TLSKey          string        // MASH_TLS_KEY / "tls_key": PEM private key of TLSCert
+	// WakeCount is how many waiting messages are more than the session is left with (MASH_WAKE_COUNT / "wake_count": a
+	// whole number, default 15, 0 = off). WakeAge is how long the oldest waiting message may wait
+	// (MASH_WAKE_AGE / "wake_age": a whole number and m, h or d, or a Go duration, default 1h; 0 = off, WakeAge zero).
+	// WakeAgeText is the age as it was written ("1h", "0"). The wake itself is serve's; mash inbox reports against them.
+	WakeCount int
+	WakeAge   time.Duration
+	// WakeErr is why wake_count or wake_age is not valid (nil when both are); the setting is then at its default.
+	// Only mash serve refuses it, every other command ignores it.
+	WakeErr      error
+	WakeAgeText  string
+	AdminTimeout time.Duration // total deadline of one `mashctl` command (zero = 30s)
+	AdminCreds   string        // admin credentials for `mashctl`
+	SysCreds     string        // config.json "system_creds": the system account's creds file, for `mashctl` (empty = none set)
+	TLSCA        string        // MASH_CA / "ca": PEM file of the CA that signed the server's certificate (empty = system roots)
+	TLSCert      string        // MASH_TLS_CERT / "tls_cert": PEM client certificate, for a server that requires one; set with TLSKey
+	TLSKey       string        // MASH_TLS_KEY / "tls_key": PEM private key of TLSCert
 	// InsecurePlaintext is the one override of the TLS requirement (REQ-014): every connection mash and mashctl make
 	// uses tls:// or wss://, to any host (loopback included), unless it is set. Then a plain nats:// or ws:// URL is
 	// connected and a warning goes to standard error. It is a setting, not a command-line flag.
@@ -117,6 +128,9 @@ type file struct {
 	TransientMax    string `json:"transient_max"`
 	CLITimeout      string `json:"cli_timeout"`
 	AdminTimeout    string `json:"admin_timeout"`
+
+	WakeCount json.RawMessage `json:"wake_count"` // kept raw: a whole number only
+	WakeAge   json.RawMessage `json:"wake_age"`   // kept raw: a string such as "1h", or the number 0
 
 	AdminCreds string `json:"admin_creds"`
 	SysCreds   string `json:"system_creds"`
@@ -414,7 +428,7 @@ func loadPicking(lookup Lookup, home string, autoPick bool) (Config, error) {
 		}
 	}
 	dir := ConfigDir(env, home)
-	c := Config{SettleMS: 100, BatchMsgs: 10, BatchBytes: 16384, IdleWake: 45 * time.Second, RelayWindow: DefaultRelayWindow, OpenTimeout: DefaultOpenTimeout, CallTimeout: DefaultCallTimeout, Dir: dir, StateDir: state, Limits: store.DefaultLimits()}
+	c := Config{WakeCount: DefaultWakeCount, WakeAge: DefaultWakeAge, WakeAgeText: DefaultWakeAgeText, SettleMS: 100, BatchMsgs: 10, BatchBytes: 16384, IdleWake: 45 * time.Second, RelayWindow: DefaultRelayWindow, OpenTimeout: DefaultOpenTimeout, CallTimeout: DefaultCallTimeout, Dir: dir, StateDir: state, Limits: store.DefaultLimits()}
 
 	var f file
 	var raw []byte
@@ -619,6 +633,9 @@ func loadPicking(lookup Lookup, home string, autoPick bool) (Config, error) {
 		}
 		*p.dst = d
 	}
+
+	// The wake settings are serve's: a bad one is kept in WakeErr (the defaults stay), so only serve refuses it.
+	c.WakeErr = c.loadWake(f, env)
 
 	if (c.TLSCert == "") != (c.TLSKey == "") {
 		return c, errors.New("mash: tls_cert and tls_key (MASH_TLS_CERT and MASH_TLS_KEY) must be set together")
@@ -864,4 +881,87 @@ func (c *Config) loadNameRule(lookup Lookup, f file, dir, home string) error {
 	}
 	c.NameRule, c.NameRulePath = r, abs
 	return nil
+}
+
+// The defaults of the wake settings.
+const (
+	DefaultWakeCount   = 15
+	DefaultWakeAge     = time.Hour
+	DefaultWakeAgeText = "1h"
+)
+
+// wakeUnits are the units of wake_age.
+var wakeUnits = map[byte]time.Duration{'m': time.Minute, 'h': time.Hour, 'd': 24 * time.Hour}
+
+// loadWake reads wake_count and wake_age: the environment wins over config.json, and the effective value is validated
+// once, so an invalid file value under a valid environment value loads and an invalid effective one names its source.
+func (c *Config) loadWake(f file, env func(string) string) error {
+	count, from := env("MASH_WAKE_COUNT"), "MASH_WAKE_COUNT"
+	if count == "" && len(f.WakeCount) > 0 {
+		count, from = strings.TrimSpace(string(f.WakeCount)), `config.json "wake_count"`
+		if count == "" {
+			count = "null"
+		}
+	}
+	if count != "" {
+		n, err := strconv.Atoi(strings.TrimSpace(count))
+		if err != nil || n < 0 || strings.TrimSpace(count) != strconv.Itoa(n) {
+			return fmt.Errorf("mash: %s %s is not a whole number of messages, 0 or more (0 turns the wake off)", from, quoteSetting(count))
+		}
+		c.WakeCount = n
+	}
+	age, from := env("MASH_WAKE_AGE"), "MASH_WAKE_AGE"
+	if age == "" && len(f.WakeAge) > 0 {
+		from = `config.json "wake_age"`
+		raw := strings.TrimSpace(string(f.WakeAge))
+		var s string
+		switch {
+		case json.Unmarshal(f.WakeAge, &s) == nil:
+			age = s
+			if age == "" {
+				age = `""`
+			}
+		case raw == "0":
+			age = "0"
+		default:
+			return fmt.Errorf("mash: %s %s is not a duration (for example \"30m\", \"1h\" or \"2d\") or 0", from, raw)
+		}
+	}
+	if age != "" {
+		d, err := wakeAge(age)
+		if err != nil {
+			return fmt.Errorf("mash: %s %w", from, err)
+		}
+		c.WakeAge, c.WakeAgeText = d, strings.TrimSpace(age)
+	}
+	return nil
+}
+
+func quoteSetting(v string) string {
+	if strings.HasPrefix(strings.TrimSpace(v), `"`) {
+		return strings.TrimSpace(v)
+	}
+	return strconv.Quote(strings.TrimSpace(v))
+}
+
+// wakeAge parses the wake age: 0 (off), a whole number and m, h or d (minutes, hours, days), or a Go duration such as
+// 90s or 1h30m; any positive length.
+func wakeAge(v string) (time.Duration, error) {
+	bad := fmt.Errorf("%q is not a duration (for example \"30m\", \"1h\" or \"2d\") or 0", v)
+	t := strings.TrimSpace(v)
+	if t == "0" {
+		return 0, nil
+	}
+	if len(t) >= 2 {
+		if unit := wakeUnits[t[len(t)-1]]; unit != 0 {
+			digits := t[:len(t)-1]
+			if n, err := strconv.Atoi(digits); err == nil && n >= 1 && strconv.Itoa(n) == digits && time.Duration(n) <= math.MaxInt64/unit {
+				return time.Duration(n) * unit, nil
+			}
+		}
+	}
+	if d, err := time.ParseDuration(t); err == nil && d > 0 {
+		return d, nil
+	}
+	return 0, bad
 }
