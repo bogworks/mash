@@ -2,6 +2,8 @@ package endpoint
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -208,4 +210,22 @@ func TestBacklogHonoursTheProvenHooklessStop(t *testing.T) {
 	r.now = r.now.Add(wakeCooldown + time.Second)
 	r.e.wakeBacklog(func(string, map[string]string) error { r.wakes = append(r.wakes, "x"); return nil }, r.h, HooklessProven)
 	r.want(0)
+}
+
+// A hook run that listed and drained nothing new still means a busy session: the spool's marker time counts.
+func TestBacklogIsNotSentRightAfterAnyHookRun(t *testing.T) {
+	r := newBacklogRig(t, 3, 0)
+	r.addN(5, kind.Result, 0)
+	r.settle(wakeCooldown + 30*time.Second).want(1) // past the start hold: the first backlog wake
+	r.wakes = nil
+	r.e.lastWake = time.Time{}
+	marker := filepath.Join(r.sp.Dir, ".hooked")
+	if err := os.WriteFile(marker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(marker, r.now.Add(-5*time.Second), r.now.Add(-5*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	r.settle(time.Second).want(0)
+	r.settle(wakeCooldown).want(1)
 }

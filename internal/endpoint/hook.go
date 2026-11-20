@@ -469,6 +469,12 @@ func (e *Endpoint) wakeBacklog(deliver Deliverer, h *held, hl Hookless) {
 	if !h.hookSeen.IsZero() && now.Sub(h.hookSeen) < wakeCooldown {
 		return
 	}
+	// Any hook run counts, not only one that listed or drained something new: the spool's marker is the last run.
+	if t, ok := e.spool.LastHook(); ok {
+		if d := now.Sub(t); d >= 0 && d < wakeCooldown {
+			return
+		}
+	}
 	seqs := make([]spool.Ref, 0, len(h.msgs))
 	oldest := time.Time{}
 	for seq, p := range h.msgs {
