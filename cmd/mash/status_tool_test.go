@@ -120,7 +120,7 @@ func TestStatusToolConfigError(t *testing.T) {
 		"name: OK",
 		"config: MISSING",
 		"url",
-		"~/.config/mash/config.json",
+		filepath.Join(home, ".config", "mash", "config.json"),
 		"MASH_SERVER",
 		"creds: OK",
 		creds,

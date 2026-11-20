@@ -157,9 +157,13 @@ func nameLine(cfg config.Config) string {
 }
 
 func configLine(cfg config.Config, cfgErr error) string {
+	file := "config.json in the mash config folder"
+	if cfg.Dir != "" {
+		file = filepath.Join(cfg.Dir, "config.json")
+	}
 	if cfgErr != nil && !errors.Is(cfgErr, config.ErrNoURL) && !errors.Is(cfgErr, config.ErrNoOwner) {
 		// The error stopped loading before the environment applied, so an empty field is unresolved, not missing.
-		line := fmt.Sprintf("config: FAILED - %s. Next: fix it in ~/.config/mash/config.json or the environment", redactText(cfgErr.Error()))
+		line := fmt.Sprintf("config: FAILED - %s. Next: fix it in %s or the environment", redactText(cfgErr.Error()), file)
 		if errors.Is(cfgErr, config.ErrGroupMissing) {
 			line = fmt.Sprintf("config: FAILED - %s: %s. Next: set MASH_ENDPOINT to owner.group.name", config.CodeGroupMissing, redactText(cfgErr.Error()))
 		}
@@ -177,10 +181,10 @@ func configLine(cfg config.Config, cfgErr error) string {
 	}
 	var missing []string
 	if cfg.URL == "" {
-		missing = append(missing, `server is not set. Next: set "servers" in ~/.config/mash/config.json or the MASH_SERVER environment variable`)
+		missing = append(missing, `server is not set. Next: set "servers" in `+file+` or the MASH_SERVER environment variable`)
 	}
 	if cfg.Owner == "" {
-		missing = append(missing, `endpoint is not set. Next: set "endpoint" in ~/.config/mash/config.json or the MASH_ENDPOINT environment variable, or install credentials for one endpoint`)
+		missing = append(missing, `endpoint is not set. Next: set "endpoint" in `+file+` or the MASH_ENDPOINT environment variable, or install credentials for one endpoint`)
 	}
 	if len(missing) > 0 {
 		return "config: MISSING - " + strings.Join(missing, "; ")
