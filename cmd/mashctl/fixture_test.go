@@ -59,9 +59,7 @@ func newFleetEnv(t *testing.T) *fleetEnv {
 		"HOME": t.TempDir(), "MASH_SERVER": e.URL, "MASH_ENDPOINT": e.Owner + ".dev." + "x", "MASH_ADMIN_CREDS": e.AdminCreds, "MASH_INSECURE_PLAINTEXT": "1",
 		"MASH_CONFIG_DIR": dir, "MASH_KEYS_DIR": filepath.Join(dir, "keys"),
 	}}
-	if _, _, code := h.run("init"); code != 0 {
-		t.Fatal("init")
-	}
+	makeStorageFor(t, e)
 	ka, err := ctlkeys.Open(h.env["MASH_KEYS_DIR"])
 	if err != nil {
 		t.Fatal(err)
@@ -70,6 +68,14 @@ func newFleetEnv(t *testing.T) *fleetEnv {
 		t.Fatal(err)
 	}
 	return h
+}
+
+// writeConfig writes raw as the config.json of the test's config folder.
+func (h *fleetEnv) writeConfig(raw string) {
+	h.t.Helper()
+	if err := os.WriteFile(filepath.Join(h.dir, "config.json"), []byte(raw), 0o600); err != nil {
+		h.t.Fatal(err)
+	}
 }
 
 func (h *fleetEnv) run(args ...string) (string, string, int) {

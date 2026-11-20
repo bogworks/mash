@@ -175,12 +175,9 @@ func TestAnnounceMasksURLPasswordAndNeverPrintsCreds(t *testing.T) {
 }
 
 func TestAnnounceSysCredsPathWhenKnown(t *testing.T) {
-	cfg, env := loadCfg(t, "", map[string]string{"MASH_SERVER": "tls://h:1", "MASH_ENDPOINT": "o.dev.x", "MASH_SYS_CREDS": "/s/sys.creds"})
-	if got := announced(cfg, env, &sysTarget{}); !strings.Contains(got, ", system creds /s/sys.creds (from MASH_SYS_CREDS)\n") {
-		t.Errorf("env:\n%s", got)
-	}
-	if got := announced(cfg, env, &sysTarget{flagVal: "/x/s.creds"}); !strings.Contains(got, ", system creds /x/s.creds (from --sys-creds)\n") {
-		t.Errorf("flag:\n%s", got)
+	cfg, env := loadCfg(t, `{"system_creds":"/s/sys.creds"}`, map[string]string{"MASH_SERVER": "tls://h:1", "MASH_ENDPOINT": "o.dev.x"})
+	if got := announced(cfg, env, &sysTarget{}); !strings.Contains(got, ", system creds /s/sys.creds (from config.json)\n") {
+		t.Errorf("config:\n%s", got)
 	}
 	if got := announced(cfg, env, nil); strings.Contains(got, "system creds") {
 		t.Errorf("no sys target asked:\n%s", got)
@@ -194,9 +191,9 @@ func TestTargetLineComesBeforeAWriteAndOfflineVerbsPrintNone(t *testing.T) {
 	showTarget(t)
 	h.env["MASH_LAUNCH_TOKEN"] = "sessionagent"
 
-	out, errb, code := h.run("limits", "--show")
-	if code != 0 || strings.Contains(errb, "target server") || !strings.Contains(out, "inbox_max_bytes") {
-		t.Errorf("limits --show: %d %q", code, errb)
+	out, errb, code := h.run("limits", "show")
+	if code != 0 || strings.Contains(errb, "target server") || !strings.Contains(out, "inbox size:") {
+		t.Errorf("limits show: %d %q", code, errb)
 	}
 	if _, errb, _ := h.run("endpoint", "permissions", "o.g.a"); strings.Contains(errb, "target server") {
 		t.Errorf("endpoint permissions: %q", errb)
@@ -204,11 +201,11 @@ func TestTargetLineComesBeforeAWriteAndOfflineVerbsPrintNone(t *testing.T) {
 	if _, errb, _ := h.run("policy"); strings.Contains(errb, "target server") {
 		t.Errorf("policy: %q", errb)
 	}
-	if _, errb, _ := h.run("init", "--local", "--dir", filepath.Join(h.dir, "nope"), "--help"); strings.Contains(errb, "target server") {
-		t.Errorf("init --local: %q", errb)
+	if _, errb, _ := h.run("init", "--help"); strings.Contains(errb, "target server") {
+		t.Errorf("init --help: %q", errb)
 	}
 
-	for _, args := range [][]string{{"init"}, {"limits"}, {"endpoint", "delete", "o.g.zz", "--yes"}} {
+	for _, args := range [][]string{{"limits", "apply"}, {"endpoint", "delete", "o.g.zz", "--yes"}} {
 		_, errb, _ := h.run(args...)
 		want := "mashctl: target server " + h.e.URL + " (from MASH_SERVER), owner " + h.e.Owner + " (from MASH_ENDPOINT), admin creds " + h.e.AdminCreds + " (from MASH_ADMIN_CREDS)\n"
 		if !strings.HasPrefix(errb, want) {
@@ -227,7 +224,7 @@ func TestTargetWarnsWhenEnvOverridesConfigJSON(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(h.dir, "config.json"), []byte(`{"servers":"tls://scratch.example:4222"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, errb, code := h.run("limits")
+	_, errb, code := h.run("limits", "apply")
 	if code != 0 {
 		t.Fatalf("limits: %d %q", code, errb)
 	}
@@ -240,7 +237,7 @@ func TestTargetWarnsWhenEnvOverridesConfigJSON(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(h.dir, "config.json"), []byte(`{"servers":"`+h.e.URL+`"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, errb, _ := h.run("limits"); strings.Contains(errb, "warning") {
+	if _, errb, _ := h.run("limits", "apply"); strings.Contains(errb, "warning") {
 		t.Errorf("agreeing: %q", errb)
 	}
 }

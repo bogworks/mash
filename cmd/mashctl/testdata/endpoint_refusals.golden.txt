@@ -7,13 +7,13 @@ stdout:
 == create_unknown_option
 exit 2
 stderr:
-error: unknown option "--bogus"
+error: unknown option --bogus
 hint: mashctl endpoint create --help
 stdout:
 == create_removed_option
 exit 2
 stderr:
-error: unknown option "--make-key"
+error: unknown option --make-key
 hint: mashctl endpoint create --help
 stdout:
 == create_slash_form
@@ -93,7 +93,7 @@ stdout:
 exit 1
 stderr:
 error: no account signing key
-hint: mashctl init
+hint: mashctl init --help
 stdout:
 == create_server
 exit 1
@@ -142,19 +142,19 @@ stdout:
 == reissue_unknown_option
 exit 2
 stderr:
-error: unknown option "--bogus"
+error: unknown option --bogus
 hint: mashctl endpoint reissue --help
 stdout:
 == reissue_removed_all
 exit 2
 stderr:
-error: unknown option "--all"
+error: unknown option --all
 hint: mashctl endpoint reissue --help
 stdout:
 == reissue_removed_make_key
 exit 2
 stderr:
-error: unknown option "--make-key"
+error: unknown option --make-key
 hint: mashctl endpoint reissue --help
 stdout:
 == reissue_address_missing
@@ -175,11 +175,17 @@ stderr:
 error: --public-key needs --out, the join file to write
 hint: mashctl endpoint reissue --help
 stdout:
-== reissue_servers_invalid
+== delete_servers_option_gone
 exit 2
 stderr:
-error: MASH_SERVERS must be a whole number of servers, 1 or more, got "0"
-hint: mashctl endpoint reissue --help
+error: unknown option --servers
+hint: mashctl endpoint delete --help
+stdout:
+== delete_sys_creds_option_gone
+exit 2
+stderr:
+error: unknown option --sys-creds
+hint: mashctl endpoint delete --help
 stdout:
 == reissue_config
 exit 1
@@ -211,7 +217,7 @@ stdout:
 exit 1
 stderr:
 error: no account signing key
-hint: mashctl init
+hint: mashctl init --help
 stdout:
 == reissue_server
 exit 1

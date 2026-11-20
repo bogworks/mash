@@ -67,9 +67,9 @@ func writeTestPKI(t *testing.T, dir string) (caPath, certPath, keyPath string) {
 	return write("ca.pem", "CERTIFICATE", caDER), write("server.pem", "CERTIFICATE", srvDER), write("server.key", "EC PRIVATE KEY", keyDER)
 }
 
-// newTLSAdopter is an adopter whose source server (operator mode, full resolver) listens with TLS. The adopter's
+// newTLSIniter is an initer whose source server (operator mode, full resolver) listens with TLS. The initer's
 // environment has no MASH_INSECURE_PLAINTEXT. url is the tls:// URL of the server.
-func newTLSAdopter(t *testing.T) (a *adopter, url, caPath string) {
+func newTLSIniter(t *testing.T) (a *initer, url, caPath string) {
 	t.Helper()
 	caPath, certPath, keyPath := writeTestPKI(t, t.TempDir())
 	e := newApplyEnvOpts(t, nil, func(o *server.Options) {
@@ -79,37 +79,43 @@ func newTLSAdopter(t *testing.T) (a *adopter, url, caPath string) {
 		}
 		o.TLSConfig, o.TLS, o.TLSTimeout = cfg, true, 5
 	})
-	a = newAdopter(t, e)
+	a = newIniter(t, e)
 	delete(a.env, "MASH_INSECURE_PLAINTEXT")
-	return a, fmt.Sprintf("tls://127.0.0.1:%d", e.srv.Addr().(*net.TCPAddr).Port), caPath
+	url = fmt.Sprintf("tls://127.0.0.1:%d", e.srv.Addr().(*net.TCPAddr).Port)
+	a.vals["servers"] = []string{url}
+	return a, url, caPath
 }
 
-func TestAdoptTLSTrustedCADryRun(t *testing.T) {
-	a, url, ca := newTLSAdopter(t)
-	a.env["MASH_CA"] = ca
+func TestInitTLSTrustedCADryRun(t *testing.T) {
+	a, url, ca := newTLSIniter(t)
+	a.vals["ca"] = ca
 	before := tree(t, a.root)
-	out, errb, code := a.run("adopt", "--server", url, "--owner", "alice", "--account", "MASH",
-		"--operator-key", a.opSeed, "--account-key", a.acSeed, "--sys-creds", a.sys, "--dry-run")
-	if code != 0 || errb != "" {
-		t.Fatalf("dry run over TLS: %d\n%s\n%s", code, out, errb)
-	}
-	for _, want := range []string{"All checks passed", "nothing is written"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("output lacks %q:\n%s", want, out)
-		}
+	out, errb, code := a.init("--dry-run")
+	if want := "Would initialize mash on " + url + " for owner alice\nNothing was changed.\n"; code != 0 || errb != "" || out != want {
+		t.Fatalf("dry run over TLS: %d\n%q\n%q", code, out, errb)
 	}
 	sameTree(t, before, tree(t, a.root))
+	// and for real: config.json records the CA
+	if out, errb, code = a.init(); code != 0 {
+		t.Fatalf("init over TLS: %d\n%s\n%s", code, out, errb)
+	}
+	if cj := mustRead(t, filepath.Join(a.env["MASH_CONFIG_DIR"], "config.json")); !strings.Contains(string(cj), `"ca": "`+ca+`"`) {
+		t.Errorf("config.json lacks the ca:\n%s", cj)
+	}
 }
 
-func TestAdoptTLSUntrustedCARefused(t *testing.T) {
-	a, url, _ := newTLSAdopter(t) // no CA: system roots do not trust the test CA
-	a.refuses(1, []string{"not trusted", "MASH_CA"}, "--server", url, "--dry-run")
+func TestInitTLSUntrustedCARefused(t *testing.T) {
+	a, _, _ := newTLSIniter(t) // no ca in the setup file: system roots do not trust the test CA
+	a.refuses(1, []string{"not trusted", "\"ca\""}, nil)
+	// a CA that did not sign the server's certificate is refused the same way
+	otherCA, _, _ := writeTestPKI(t, t.TempDir())
+	a.refuses(1, []string{"not trusted"}, map[string]any{"ca": otherCA})
 }
 
-func TestAdoptPlainWithoutInsecurePlaintextRefused(t *testing.T) {
+func TestInitPlainWithoutInsecurePlaintextRefused(t *testing.T) {
 	// A plain nats:// URL to a non-loopback host is refused by RequireTLS before any connection is made. (A plain URL
 	// to the loopback address of a TLS server is not refused: nats.Secure upgrades it to TLS.)
-	a, _, ca := newTLSAdopter(t)
-	a.env["MASH_CA"] = ca
-	a.refuses(2, []string{"refusing a plain nats://", "MASH_CA", "nothing was changed"}, "--server", "nats://example.invalid:4222", "--dry-run")
+	a, _, ca := newTLSIniter(t)
+	a.vals["ca"] = ca
+	a.refuses(2, []string{"refusing a plain nats://", "MASH_CA", "nothing was changed"}, map[string]any{"servers": []string{"nats://example.invalid:4222"}})
 }

@@ -1,6 +1,6 @@
 # TLS, clusters and a second mashctl machine
 
-This page sets up mash over TLS, on a cluster of three NATS servers, and with a second machine that runs `mashctl`. It adds to [operations.md](operations.md) and does not replace it. Read [Adopting an existing server](operations.md#adopting-an-existing-server) and [Several servers](operations.md#several-servers) first.
+This page sets up mash over TLS, on a cluster of three NATS servers, and with a second machine that runs `mashctl`. It adds to [operations.md](operations.md) and does not replace it. Read [Setting mash up with `mashctl init --config`](operations.md#setting-mash-up-with-mashctl-init---config) and [Several servers](operations.md#several-servers) first.
 
 Everything here uses settings that exist in mash 0.5.5. Nothing is a new feature. What was run and what was not is in [Not tested in 0.5.5](#not-tested-in-055) at the end.
 
@@ -21,7 +21,7 @@ tls: {
 }
 ```
 
-`mashctl init --local` writes a TLS-only server on `listen: 127.0.0.1:...`. It makes a local certificate authority (`ca.pem`, `ca.key`) and a server certificate (`server.pem`, `server.key`) in the server directory, and the `tls` block in `server.conf` names the certificate and key. The certificate is valid for `localhost`, `127.0.0.1` and `::1` only. For clients on other hosts, replace the certificate and key with ones that name the address the clients use, and set `listen` to an address they can reach. An existing operator-mode server needs only the block.
+`mashctl` does not make certificates or write server files. Make a certificate authority (`ca.pem`, `ca.key`) and a server certificate (`server.pem`, `server.key`) with your own tools; the commands under [Certificates](#certificates) show one way. The certificate must name the address the clients use, and `listen` must be an address they can reach. An existing operator-mode server needs only the block.
 
 For mutual TLS (the server also checks a certificate from each client) add the CA and `verify`:
 
@@ -70,12 +70,12 @@ Copy `ca.pem` (not `ca.key`) to every machine that connects. In `config.json`:
 {
   "servers": ["tls://nats.example.com:4222"],
   "endpoint": "acme.dev.design",
-  "admin_creds": "/home/me/.config/mash/server/mashadmin.creds",
+  "admin_creds": "/home/me/.config/mash/admin.creds",
   "ca": "/home/me/.config/mash/ca.pem"
 }
 ```
 
-If `init --local` made the file, it already has a `tls://` URL and `ca` naming its `ca.pem`.
+`mashctl init --config` writes `servers`, `ca`, `owner`, `admin_creds` and `system_creds` to `config.json` from its setup file.
 
 | Setting | Variable | Use |
 |---|---|---|
@@ -121,17 +121,22 @@ Use it only for a throwaway server in a test. Never use it on a network you do n
 - `server    warn  ... is plain text: insecure_plaintext is set` when the override is set and the URL is plain.
 - `server    FAIL  ...` when the override is not set and the URL is plain; the connection is refused before it is made.
 
-### `mashctl adopt` with a `tls://` URL
+### `mashctl init` with a `tls://` URL
 
-On the machine that will run `mashctl`, with `ca.pem` copied to it:
+On the machine that will run `mashctl`, with `ca.pem` copied to it, write the setup file:
 
-```sh
-MASH_CA=/home/me/ca.pem mashctl adopt --server tls://nats.example.com:4222 \
-  --owner acme --account MASH \
-  --operator-key operator.nk --account-key account.nk --sys-creds sys.creds --mint-admin
+```yaml
+servers:
+  - tls://nats.example.com:4222
+ca: /home/me/ca.pem
+owner: acme
+admin_creds: admin.creds
+system_creds: sys.creds
+operator_key: operator.nk
+account_key: account.nk
 ```
 
-Adopt uses the TLS settings of the loaded configuration (`ca`, `tls_cert`, `tls_key`, from the variables or from an existing `config.json`). When it writes `config.json` it records `servers`, `admin_creds` and the TLS settings that were set. Then run `mashctl init` once to create the directory and lease buckets. The seed files must be mode 0600, and `--account` must be the account's name (`MASH` unless you chose another).
+and run `mashctl init --config setup.yaml`. `init` uses the `ca` of the setup file for its own connections, and `tls_cert` and `tls_key` from the loaded configuration (the variables or an existing `config.json`) when the servers use `verify: true`. It writes `config.json` with `servers`, `ca`, `owner`, `admin_creds` and `system_creds`, and makes the directory, lease and other buckets once. A server whose certificate the `ca` does not vouch for is refused with a message that names the `ca` key. The seed and creds files must be mode 0600.
 
 ## 2. A cluster of three servers
 
@@ -154,13 +159,13 @@ done
 
 ### The server file of node 1
 
-This is the template from operations.md with the client `tls` block and a `tls` block inside `cluster`. Each node changes `server_name`, `listen`, the two directories, the cluster `listen`, `routes`, and its certificate files.
+This is the node file from operations.md with the client `tls` block and a `tls` block inside `cluster`. Each node changes `server_name`, `listen`, the two directories, the cluster `listen`, `routes`, and its certificate files.
 
 ```
 server_name: mash-n1
 listen: 0.0.0.0:4222
 operator: "/etc/nats/operator.jwt"
-system_account: <the system account key from init --local's server.conf>
+system_account: <the system account key of your server>
 resolver: {
   type: full
   dir: "/var/lib/mash/n1/resolver"
@@ -168,7 +173,7 @@ resolver: {
   interval: "5s"
 }
 resolver_preload: {
-  <copy this block from the server.conf that init --local wrote>
+  <the system and account JWTs of your server>
 }
 jetstream: {
   store_dir: "/var/lib/mash/n1/jetstream"
@@ -199,12 +204,11 @@ Open the client port (4222) to the machines that run `mashctl` and endpoints, an
 ### What `mashctl` needs
 
 - `servers` lists every server: `"servers": ["tls://n1.example.com:4222", "tls://n2.example.com:4222", "tls://n3.example.com:4222"]`. The code takes a comma-separated list in `MASH_SERVER`, a repeated `--server`, or an array in `servers`, and each entry must be reachable by the name its certificate lists. A connection succeeds if any one listed server is up. mash dials only the listed servers; it ignores the servers a server advertises.
-- `--servers 3` or `MASH_SERVERS=3`: how many servers the cluster has. A revocation (`endpoint delete`, `endpoint reissue`) then waits for every server to acknowledge the account update, and refuses when fewer answer. `endpoint create` takes the flag too. `adopt` prints `3 server(s) replied` and a warning to set it.
-- `--sys-creds FILE` or `MASH_SYS_CREDS`: the system account credentials. Without either, `mashctl` uses the `sys.creds` that `adopt` put in `<config dir>/server/`.
+- The number of servers in `servers` is how many servers the cluster has. A revocation (`endpoint delete`, `endpoint reissue`) waits for every listed server to acknowledge the account update, and refuses when fewer answer. `endpoint create` does the same. `mashctl init` warns when the server is in a cluster, so list every server.
+- `system_creds` in `config.json` is the system account credentials: the `sys.creds` that `init` put in `<config dir>/server/`. There is no flag or environment variable for it.
 
 ```sh
-export MASH_SERVERS=3
-mashctl endpoint delete acme/dev/design --sys-creds /secure/sys.creds
+mashctl endpoint delete acme.dev.design
 ```
 
 A successful revocation prints `servers acknowledged the revocation: 3`. `mashctl issued check` ends with `3 of 3 servers answered` when the cluster formed.
@@ -217,7 +221,7 @@ An endpoint's `servers` may list the servers the same way. An inbox lives on one
 
 The second machine signs as the first does. It holds the same operator signing seed and the same account identity seed. It does not get its own signing key: mashctl refuses a signing key in the account JWT that it did not make ([ADR 0059](decisions/0059-mashctl-checks-who-issued-the-account-jwt-carries-only-its-own-signing-keys-and-requires-tls-for-admin-connections.md)), so a machine with a key of its own is not supported in 0.5.5.
 
-A person sets it up with `mashctl adopt`, the same command that adopts a server, run on the second machine.
+A person sets it up with `mashctl init --config`, the same command that sets up the first machine, run on the second machine.
 
 ### What to copy
 
@@ -229,20 +233,19 @@ Copy these three files from the first machine, over a channel you trust (not mai
 
 Also copy `ca.pem`, and the client certificate and key if the servers use `verify: true`.
 
-Then run `adopt` on the second machine:
+Also give the second machine an admin creds file of its own: a user of the account, made with `nsc` and signed by an account signing key if the operator uses strict signing key usage. Then write a setup file on the second machine that names the three files and the admin creds, and run `init`:
 
 ```sh
-mashctl adopt --server tls://n1.example.com:4222 --owner acme --account MASH \
-  --operator-key operator.nk --account-key account.nk --sys-creds sys.creds --mint-admin
+mashctl init --config setup.yaml
 ```
 
-Adopt imports the two seeds into the second machine's key store, copies `sys.creds` to `<config dir>/server/` and, with `--mint-admin`, makes an admin credential of its own there. Delete the copies of the seed files when it finishes. Then edit `config.json` so `servers` lists all three servers, set `MASH_SERVERS=3`, and do not run `mashctl init --local` or `mashctl init` there: the buckets exist already.
+`init` imports the two seeds into the second machine's key store, copies `sys.creds` to `<config dir>/server/`, finds that the buckets exist already, and writes `config.json`. Delete the copies of the seed files when it finishes. Then edit `config.json` so `servers` lists all three servers (or list them in the setup file).
 
 ### What must not be copied
 
-- `mashadmin.creds`. The second machine makes its own with `--mint-admin`. Each admin credential is then its own user in the issue record.
-- The key store directory as a whole. Copy the two seeds; adopt writes the store.
-- `system.nk`. The commands in this page do not need it, and adopt does not import it.
+- The first machine's admin creds. The second machine gets its own, so each admin credential is its own user in the issue record.
+- The key store directory as a whole. Copy the two seeds; `init` writes the store.
+- `system.nk`. The commands in this page do not need it, and `init` does not import it.
 - An endpoint's `.seed` file. It never leaves the endpoint's machine.
 - Anything from `server/` of the first machine other than `sys.creds`, such as `server.conf` or the resolver and JetStream directories.
 
@@ -262,7 +265,7 @@ mash key create --out design.seed
 # copy design.pub to a mashctl machine
 
 # on a mashctl machine (M1 or M2)
-mashctl endpoint create acme/dev/design --public-key design.pub --servers 3
+mashctl endpoint create acme/dev/design --public-key design.pub
 # copy acme.dev.design.jwt back to M3
 
 # on the endpoint's machine (M3)
@@ -275,12 +278,12 @@ Only `design.pub` and the JWT file travel. M3 also needs `ca.pem` and the settin
 
 > The 0.5.5 acceptance run (AT-005) tested TLS, a three-server cluster and two `mashctl` machines by hand, in rootless containers on one host: three NATS servers of one cluster with TLS on the client and route connections, endpoints on separate nodes (a session on one node connecting to another node's server, mail each way), and two `mashctl` machines on one account (the same address created from both at the same moment: one succeeded, the other was refused `address_taken`). It did not test real separate hosts or a physical network, clock drift between hosts, or certificate expiry and renewal.
 
-While this page was written, these steps were also run on one host, on loopback, with `nats-server` 2.15.1 and OpenSSL 4.1.0:
+While this page was written, these steps were also run on one host, on loopback, with `nats-server` 2.15.1 and OpenSSL 4.1.0, using mash 0.5.5:
 
-- One operator-mode server made by `mashctl init --local`, with the `tls` block above added: `mashctl init` over `tls://localhost` failed without `ca` and worked with it.
+- One operator-mode server, with the `tls` block above added: `mashctl` over `tls://localhost` failed without `ca` and worked with it.
 - The same server with `verify: true`: a connection without a client certificate failed with the message above, and one with `tls_cert` and `tls_key` worked.
-- `mashctl adopt` with a `tls://` URL and `--mint-admin` into a second, empty config directory, then `endpoint create --public-key` from it, `mash key create` and `mash credential create` in a third, and `endpoint delete --servers 1 --sys-creds FILE`.
-- Three servers in one cluster with the `cluster` TLS block and `verify: true`, one shared certificate for all three, listing `localhost` and `127.0.0.1`: `adopt` reported `3 server(s) replied`, `mashctl init`, `issued check` (`3 of 3 servers answered`), `endpoint create --servers 3` and `endpoint delete --servers 3` (`3 server(s) acknowledged`) worked with a three-entry `url`.
+- `mashctl` set up with a `tls://` URL and its own admin user in a second, empty config directory, then `endpoint create --public-key` from it, `mash key create` and `mash credential create` in a third, and `endpoint delete` with `system_creds` in `config.json`.
+- Three servers in one cluster with the `cluster` TLS block and `verify: true`, one shared certificate for all three, listing `localhost` and `127.0.0.1`: the setup step reported `3 server(s) replied`, then bucket creation, `issued check` (`3 of 3 servers answered`), `endpoint create` and `endpoint delete` (`3 server(s) acknowledged`) worked with a three-entry `url`.
 
 What was not run, by AT-005 or by these steps:
 

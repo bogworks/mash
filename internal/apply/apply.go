@@ -50,11 +50,11 @@ type ServerSet struct {
 }
 
 // need is how many distinct replies make the set complete: what the routes say, or the operator's inventory
-// (--servers) when that is larger.
+// (the servers in the configuration) when that is larger.
 func (s ServerSet) need(inventory int) int { return max(s.Expected, inventory) }
 
 // Complete says the set is authoritative. It needs at least one reply, no gateways, and as many replies as the
-// routes report and as the operator's inventory says (--servers; 0 is none given). Without an inventory, a reply
+// routes report and as the operator's inventory says (the configuration's servers; 0 is none given). Without an inventory, a reply
 // that names a cluster is not enough, even with zero routes: an isolated cluster member sees no peers, so the
 // number of servers cannot be verified from here. A reply naming no cluster is a standalone server.
 func (s ServerSet) Complete(inventory int) bool {
@@ -63,6 +63,9 @@ func (s ServerSet) Complete(inventory int) bool {
 	}
 	if inventory <= 0 && s.Cluster != "" {
 		return false
+	}
+	if s.Cluster != "" && inventory < s.Expected {
+		return false // the configuration lists fewer servers than the routes report: one server cannot confirm for the cluster
 	}
 	return len(s.Names) >= s.need(inventory)
 }
@@ -77,11 +80,13 @@ func (s ServerSet) Why(inventory int) string {
 	case s.Gateways:
 		return fmt.Sprintf("%d server(s) replied, and a server reports gateways: a super-cluster's membership cannot be verified from here", len(s.Names))
 	case inventory <= 0 && s.Cluster != "" && len(s.Names) >= s.Expected:
-		return fmt.Sprintf("this server is part of cluster %s and the number of servers cannot be verified from here; pass --servers N", config.Clean(s.Cluster))
+		return fmt.Sprintf("this server is part of cluster %s and the configuration lists one server: list every server under `servers` in the setup file and run mashctl init --config", config.Clean(s.Cluster))
+	case s.Cluster != "" && inventory > 0 && inventory < s.Expected:
+		return fmt.Sprintf("the configuration lists %d servers but the cluster reports %d: list every server under `servers` in the setup file and run mashctl init --config", inventory, s.Expected)
 	case s.Expected >= inventory:
 		return fmt.Sprintf("%d server(s) replied but the cluster reports %d", len(s.Names), s.Expected)
 	}
-	return fmt.Sprintf("%d server(s) replied but --servers says %d", len(s.Names), inventory)
+	return fmt.Sprintf("%d server(s) replied but the configuration lists %d servers", len(s.Names), inventory)
 }
 
 // ServerAck is one server's answer to a claims update.

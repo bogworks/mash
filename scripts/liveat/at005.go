@@ -200,7 +200,7 @@ func runLine(hs Hosts, runBy, label string) string {
 const at005Scenario = "AT-005, across machines, over TLS, on a cluster, from two mashctl machines: three NATS servers on three machines " +
 	"(M1, M2, M3) of one cluster, TLS on client and route connections under a CA the harness made, one account, scratch homes. " +
 	"M1 is set up by mashctl init --local (then the config is edited for TLS and cluster and copied to M2 and M3); M2 by mashctl adopt " +
-	"with the same operator signing seed, account identity seed and sys.creds (DEC-004); both with --servers 3. " +
+	"with the same operator signing seed, account identity seed and sys.creds (DEC-004); both with config.json listing three servers. " +
 	"endpoint create alice.dev.design from M1 (key made by mash key create on M3, session on M3 connecting to the server of M2) and " +
 	"alice/dev/review from M2 (key made on M1, session on M1 connecting to the server on M3); mail each way; endpoint list --json on M1 and M2; " +
 	"a second owner's endpoint bob/dev/x (key and creds on M3) forging and replaying answers into alice's discovery while her mash who runs on M1, with alice/dev/ghost offline; " +
@@ -228,7 +228,7 @@ func (s *At5) EnvLines() []string {
 	if s.CA != nil {
 		out = append(out, TLSDescribe(s.CA, s.Leaves)...)
 	}
-	out = append(out, "mashctl on M1 (init) and M2 (adopt, DEC-004), config.json with all three tls:// URLs and ca, MASH_SERVERS=3")
+	out = append(out, "mashctl on M1 (init) and M2 (adopt, DEC-004), config.json with all three tls:// URLs and ca")
 	for _, n := range s.skipped {
 		out = append(out, "not run: "+n)
 	}
@@ -892,7 +892,7 @@ func (s *At5) revocationSeen() {
 	ok, d = issuedListRevoked(il.Code, il.Stdout, "alice.dev.review")
 	s.check("M2: mashctl issued list shows alice.dev.review's key revoked (its entry has revoked_at)", ok, d)
 	ic := retry(30*time.Second, 2*time.Second, func() (Result, bool) {
-		r := s.ctl(m2, "issued-check-json", nil, "issued", "check", "--json", "--servers", "3")
+		r := s.ctl(m2, "issued-check-json", nil, "issued", "check", "--json")
 		ok, _ := issuedCheckClean(r.Code, r.Stdout)
 		return r, ok
 	})

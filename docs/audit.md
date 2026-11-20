@@ -72,7 +72,7 @@ exists, `policy`, `start_seq`, `filter`, `ack_floor` (and `start_time` when set)
   (`limits-lock.*`) are not leases and are not listed.
 - `creds`: a `*.creds` file in the scanned directories whose user public key matches no record's `user`. Each has
   `file`, `user` and `staged`. Read it as: a leftover from an interrupted endpoint creation, a retired endpoint, or a rotation that never
-  finished. The admin's and the system account's creds files (`MASH_ADMIN_CREDS`, `MASH_SYS_CREDS`) are found by
+  finished. The admin's and the system account's creds files (`MASH_ADMIN_CREDS`, `system_creds` in `config.json`) are found by
   their user key and are not listed. Only the user public key of the JWT is read from a creds file; the seed and the
   token are never kept or printed. A staged `*.creds.next` file (the credentials of an interrupted
   rotation) is read the same way, only its public user key, and treated like a creds file: it is an orphan when its

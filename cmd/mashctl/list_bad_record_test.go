@@ -16,9 +16,7 @@ import (
 // the bad one is named by key on stderr, and the exit status is 0.
 func TestEndpointListSkipsBadRecordWithWarning(t *testing.T) {
 	e := testenv.Start(t)
-	if _, errb, code := ctlRun(t, e, "init"); code != 0 {
-		t.Fatalf("init: %d %q", code, errb)
-	}
+	makeStorageFor(t, e)
 	provisionAs(t, e, "c", admin.Meta{Role: "r"})
 	js, err := jetstream.New(e.Conn(t, e.AdminCreds))
 	if err != nil {

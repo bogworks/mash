@@ -71,7 +71,7 @@ func TestAppliedZonePolicyChecksEveryCopy(t *testing.T) {
 	if got, err := ask(&fake{servers: two, all: []string{clean, bad}}); err == nil || got {
 		t.Fatalf("an unverifiable copy: %v %v", got, err)
 	}
-	if got, err := ask(&fake{servers: two, all: []string{zoned}}); err == nil || got || !strings.Contains(err.Error(), "only 1 of 2 servers answered: a server may be down (bring it back and run the command again), or the server count is wrong (pass --servers N or set MASH_SERVERS)") {
+	if got, err := ask(&fake{servers: two, all: []string{zoned}}); err == nil || got || !strings.Contains(err.Error(), "only 1 of 2 servers answered: a server may be down (bring it back and run the command again), or the server count is wrong (list every server under `servers` in the setup file and run mashctl init --config)") {
 		t.Fatalf("fewer replies than servers: %v %v", got, err)
 	}
 	if err := RefuseZonePolicy(context.Background(), &fake{servers: two, all: []string{zoned}}, ks, 2, errors.New("applied")); err == nil || strings.Contains(err.Error(), "zone") || !strings.HasPrefix(err.Error(), "only 1 of 2 servers answered: ") {

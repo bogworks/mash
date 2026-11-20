@@ -54,13 +54,13 @@ type ServerInfo struct {
 var ErrFewerServers = errors.New("fewer servers answered than the deployment has")
 
 // ReadServers asks every server for its limits and client address with a $SYS.REQ.SERVER.PING.VARZ request and
-// returns what the answering servers reported, sorted by name. want is the declared number of servers (--servers, 1 or
-// more): the collection waits until that many have answered, or until the deadline. Fewer replies is an error wrapping
+// returns what the answering servers reported, sorted by name. want is the declared number of servers (the servers in the
+// configuration, 1 or more): the collection waits until that many have answered, or until the deadline. Fewer replies is an error wrapping
 // ErrFewerServers, with the servers collected so far, because a server that is silent may have limits that make a list
 // set unusable there: limits are never guessed, and a quiet interval never ends the wait early.
 func ReadServers(ctx context.Context, nc *nats.Conn, want int) ([]ServerInfo, error) {
 	if want < 1 {
-		return nil, errors.New("the number of servers in the deployment is not declared (--servers)")
+		return nil, errors.New("the number of servers in the deployment is not declared (list every server under `servers` in the setup file and run mashctl init --config)")
 	}
 	inbox := nc.NewRespInbox()
 	sub, err := nc.SubscribeSync(inbox)

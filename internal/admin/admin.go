@@ -165,6 +165,21 @@ func (a *Admin) Init(ctx context.Context) error {
 	return JetStreamNotEnabledHint(a.initBuckets(ctx), 0)
 }
 
+// MissingBuckets names the buckets Init makes that do not exist yet. It reads and changes nothing.
+func (a *Admin) MissingBuckets(ctx context.Context) ([]string, error) {
+	var missing []string
+	for _, b := range []string{store.DirectoryBucket, store.LeaseBucket, store.RetiredBucket, store.IssuedBucket, store.AdoptionBucket} {
+		_, err := a.js.KeyValue(ctx, b)
+		switch {
+		case errors.Is(err, jetstream.ErrBucketNotFound):
+			missing = append(missing, b)
+		case err != nil:
+			return nil, fmt.Errorf("mash: bucket %s: %w", b, err)
+		}
+	}
+	return missing, nil
+}
+
 func (a *Admin) initBuckets(ctx context.Context) error {
 	for _, cfg := range []jetstream.KeyValueConfig{store.DirectoryConfigFor(a.limits), store.LeaseConfigFor(a.limits), store.RetiredConfig()} {
 		if cfg.Bucket == store.LeaseBucket {
@@ -510,6 +525,12 @@ func checkInboxConsumer(name string, got, want jetstream.ConsumerConfig) error {
 // changes for that endpoint), because it could discard stored mail; the other endpoints are still processed and the
 // errors are joined. It returns one line per endpoint saying what changed.
 func (a *Admin) ApplyLimits(ctx context.Context, addrs ...sap.Address) ([]string, error) {
+	return a.ApplyLimitsDry(ctx, false, addrs...)
+}
+
+// ApplyLimitsDry is ApplyLimits; with dry set it reads the streams, changes none and returns the lines of what
+// would change.
+func (a *Admin) ApplyLimitsDry(ctx context.Context, dry bool, addrs ...sap.Address) ([]string, error) {
 	var skipped []string
 	if len(addrs) == 0 {
 		recs, bad, err := a.List(ctx)
@@ -530,7 +551,7 @@ func (a *Admin) ApplyLimits(ctx context.Context, addrs ...sap.Address) ([]string
 	lines := skipped
 	var errs []error
 	for _, addr := range addrs {
-		line, err := a.applyInboxLimits(ctx, addr)
+		line, err := a.applyInboxLimits(ctx, addr, dry)
 		if err != nil {
 			errs = append(errs, err)
 			continue
@@ -577,9 +598,12 @@ func refuseLowering(name string, cfg jetstream.StreamConfig, l store.Limits) err
 	return nil
 }
 
-func (a *Admin) applyInboxLimits(ctx context.Context, addr sap.Address) (msg string, err error) {
+func (a *Admin) applyInboxLimits(ctx context.Context, addr sap.Address, dry bool) (msg string, err error) {
 	if err := addr.Validate(); err != nil {
 		return "", fmt.Errorf("mash: limits: %w", err)
+	}
+	if dry { // reads only: no lock is needed
+		return a.applyInboxLimitsLocked(ctx, nil, addr.Flat(), true)
 	}
 	// The read, the check and the write run under the stream's limits lock.
 	lk, err := a.lockStream(ctx, addr.Flat())
@@ -589,11 +613,11 @@ func (a *Admin) applyInboxLimits(ctx context.Context, addr sap.Address) (msg str
 	defer lk.release(ctx)
 	ctx, end := lk.guard(ctx, "limits change", &err)
 	defer end()
-	return a.applyInboxLimitsLocked(ctx, lk, addr.Flat())
+	return a.applyInboxLimitsLocked(ctx, lk, addr.Flat(), false)
 }
 
 // applyInboxLimitsLocked is applyInboxLimits for a caller that holds name's lock.
-func (a *Admin) applyInboxLimitsLocked(ctx context.Context, lk *streamLock, name string) (string, error) {
+func (a *Admin) applyInboxLimitsLocked(ctx context.Context, lk *streamLock, name string, dry bool) (string, error) {
 	s, err := a.js.Stream(ctx, sap.InboxStream(name))
 	if err != nil {
 		return "", fmt.Errorf("mash: inbox stream of %s: %w", name, err)
@@ -618,6 +642,9 @@ func (a *Admin) applyInboxLimitsLocked(ctx context.Context, lk *streamLock, name
 	}
 	if len(changed) == 0 {
 		return name + ": unchanged", nil
+	}
+	if dry {
+		return name + ": " + strings.Join(changed, ", "), nil
 	}
 	if afterStreamRead != nil {
 		afterStreamRead(a.limits.InboxMaxBytes)

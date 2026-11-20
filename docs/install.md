@@ -6,7 +6,7 @@ This walks through one machine running Claude Code sessions with mash. Provision
 
 ## Requirements
 
-- `nats-server`, a current 2.x release with JetStream, on your `PATH`, for the one-machine path in section 4 (`mashctl init --local --start`). Get it from the [nats-server releases](https://github.com/nats-io/nats-server/releases); this repository builds and tests against 2.15. You do not need it if you use a server that already runs, such as Synadia Cloud.
+- `nats-server`, a current 2.x release with JetStream, on your `PATH`, to run the NATS server yourself. Get it from the [nats-server releases](https://github.com/nats-io/nats-server/releases); this repository builds and tests against 2.15. You do not need it on a machine where you only run endpoints, or if you use a server that already runs, such as Synadia Cloud. `mashctl` does not install or start NATS.
 - Claude Code 2.1.312 or newer (the oldest version a live receipt passed on; mash does not refuse older ones). The plugin and the `mash` binary should be the same release (major and minor).
 
 ## 1. The binary
@@ -98,7 +98,7 @@ Without this, `--channels plugin:mash@mash` is refused ("not on the approved cha
 
 ## 4. Configuration
 
-On one machine with no NATS server yet, `mashctl init --local --owner <name> --start` sets up a local operator-mode server with JetStream and writes this configuration for you (see [Local setup](operations.md#local-setup-with-mashctl-init---local)); then make each endpoint with `mashctl endpoint create` ([Adding an endpoint](operations.md#adding-an-endpoint)); the rest of this section is for an existing server.
+On a machine that runs `mashctl`, `mashctl init --config FILE` writes `servers`, `ca`, `owner`, `admin_creds` and `system_creds` to this file from a setup file (see [Setting mash up](operations.md#setting-mash-up-with-mashctl-init---config)); then make each endpoint with `mashctl endpoint create` ([Adding an endpoint](operations.md#adding-an-endpoint)). The rest of this section describes the file.
 
 `~/.config/mash/config.json`, or `$XDG_CONFIG_HOME/mash/config.json` when `XDG_CONFIG_HOME` is an absolute path and that file exists (an existing `~/.config/mash` install keeps working). With no `HOME` and no absolute `XDG_CONFIG_HOME`, mash stops with an error unless everything comes from the `MASH_*` variables. A leading `~/` in `creds` and `admin_creds` (and in `MASH_CREDS` and `MASH_ADMIN_CREDS`) is expanded to your home; `~user/` is not. `policy.md` and the default creds files live in the same directory; when the XDG directory has no copy of one, mash also finds it in `~/.config/mash` (the XDG copy wins when both exist). A relative `admin_creds`, `ca`, `tls_cert` or `tls_key` in `config.json` is resolved against the config directory, not the working directory. `config.json` that is writable by every user is refused; run `chmod go-w` on it.
 
@@ -112,7 +112,7 @@ On one machine with no NATS server yet, `mashctl init --local --owner <name> --s
 | `ca` | `MASH_CA`, `--ca` | PEM file of the CA that signed the server's certificate, for a private CA. Without it the system trust store is used. |
 | `tls_cert`, `tls_key` | `MASH_TLS_CERT`, `MASH_TLS_KEY` | PEM client certificate and its private key, for a server that requires client certificates (mutual TLS). Set both or neither. |
 | `endpoint` | `MASH_ENDPOINT`, `--endpoint` | The full address of the endpoint a session runs as, `owner.group.name`, for example `alice.dev.design`. Each token is lower-case letters, digits and single hyphens. The owner, the first token, is also the fence a credential reaches. See "Which endpoint" below. Apps started from a GUI or IDE usually do not inherit your shell's variables, so set it where Claude Code is launched (the IDE's own environment setting, or the launch command). `mash status` shows whether the endpoint is ready, before you launch. |
-| `owner` | (none) | `mashctl` only: the owner it acts for when no endpoint is set. Written by `mashctl init --local` and `mashctl adopt`. `mash` ignores it. |
+| `owner` | (none) | `mashctl` only: the owner it acts for when no endpoint is set. Written by `mashctl init --config`. `mash` ignores it. |
 | `creds` | `MASH_CREDS`, `--creds` | The endpoint's credentials file. Default `<owner>.<group>.<name>.creds` in the config directory (`~/.config/mash/` by default). Setting it turns off the pick of the one installed endpoint: with no endpoint set, the session stays inert. |
 | | `MASH_CONFIG_DIR`, `--config-dir` | The config directory (`config.json`, `policy.md`, default creds). An absolute path (a relative one is an error); it wins over `XDG_CONFIG_HOME` and `~/.config/mash`, which is not consulted. |
 | | `MASH_STATE_DIR` | The directory that holds `spool/` and `hook.log`. An absolute path (a relative one is an error). Default `$XDG_STATE_HOME/mash` if `XDG_STATE_HOME` is absolute, else `~/.local/state/mash`. |
@@ -136,11 +136,11 @@ On one machine with no NATS server yet, `mashctl init --local --owner <name> --s
 
 The environment wins over the file.
 
-**Global flags.** `mash` and `mashctl` accept `--endpoint ADDR`, `--creds`, `--server` (repeatable), `--ca`, `--config-dir`, `--verbose`/`-v`, `--json` and `--no-color` anywhere in the command line. A setting comes from the flag first, then the environment, then `config.json`. (`mashctl adopt --server URL` keeps its own meaning, and `--servers N` and `--sys-creds` are unchanged.)
+**Global flags.** `mash` and `mashctl` accept `--endpoint ADDR`, `--creds`, `--server` (repeatable), `--ca`, `--config-dir`, `--verbose`/`-v`, `--json` and `--no-color` anywhere in the command line. A setting comes from the flag first, then the environment, then `config.json`.
 
 **Which endpoint.** `MASH_ENDPOINT` (or `endpoint` in `config.json`, or `--endpoint`) holds the full address `owner.group.name`, for example `alice.dev.design`. If none is set, mash uses the one endpoint whose creds file `<owner>.<group>.<name>.creds` (mode 0600, owned by you) sits directly in the config directory. If several are installed it stops with `more than one endpoint is installed here: a, b` and you name one. A value that is not three dotted parts is a configuration error naming `MASH_ENDPOINT`. `mashctl` never takes its owner from an installed creds file. Its owner is the owner part of an endpoint you set (`--endpoint`, `MASH_ENDPOINT` or `endpoint` in `config.json`; any group and name will do), else the `owner` key of `config.json` (`mashctl init --local` and `mashctl adopt` write it). `mash` ignores the `owner` key.
 
-Credentials files must be mode 0600; they hold the endpoint's private key, and mash refuses to use a credentials file that other users can read (fix it with `chmod 600`). `mashctl` applies the same check to the admin credentials and to the system account credentials (`--sys-creds`, `MASH_SYS_CREDS`, or `sys.creds` in the server directory). A symlink is followed and the file it points to is checked.
+Credentials files must be mode 0600; they hold the endpoint's private key, and mash refuses to use a credentials file that other users can read (fix it with `chmod 600`). `mashctl` applies the same check to the admin credentials and to the system account credentials (`system_creds` in `config.json`). A symlink is followed and the file it points to is checked.
 
 Optional: the session instruction file `~/.config/mash/policy.md` is appended to every session's instructions. By default, mail from a verified mash endpoint is treated as a delegated request from the fleet's operator; use `policy.md` to carve out what still needs a human, for example "Ask me before spending money or touching production."
 

@@ -33,9 +33,9 @@ func TestSysCredsModeIsChecked(t *testing.T) {
 	}
 	// connectSys is what every verb that revokes or checks keys uses: it reports the credentials error, with nothing
 	// of their content, before it connects.
-	drift := func(flagVal string) (string, int) {
-		cfg := config.Config{URL: e.srv.ClientURL(), InsecurePlaintext: true}
-		nc, err := connectSys(cfg, flagVal, func(k string) string { return e.env[k] })
+	drift := func(creds string) (string, int) {
+		cfg := config.Config{URL: e.srv.ClientURL(), InsecurePlaintext: true, SysCreds: creds}
+		nc, err := connectSys(cfg, "", func(k string) string { return e.env[k] })
 		if err != nil {
 			return err.Error(), 1
 		}
@@ -44,23 +44,17 @@ func TestSysCredsModeIsChecked(t *testing.T) {
 	}
 	for _, mode := range []os.FileMode{0o644, 0o640} {
 		p := write("loose.creds", mode)
-		e.env["MASH_SYS_CREDS"] = p
-		all, code := drift("")
+		all, code := drift(p)
 		if code == 0 || !strings.Contains(all, "system account credentials") || !strings.Contains(all, "chmod 600 "+p) {
 			t.Fatalf("mode %04o: %d %q", mode, code, all)
 		}
 		if strings.Contains(all, string(src[:20])) {
 			t.Fatal("the refusal printed creds content")
 		}
-		// the flag form is checked too
-		if all, code := drift(p); code == 0 || !strings.Contains(all, "chmod 600 "+p) {
-			t.Fatalf("--sys-creds mode %04o: %d %q", mode, code, all)
-		}
 	}
 
 	ok := write("ok.creds", 0o600)
-	e.env["MASH_SYS_CREDS"] = ok
-	if all, _ := drift(""); strings.Contains(all, "chmod") || strings.Contains(all, "system account credentials") {
+	if all, _ := drift(ok); strings.Contains(all, "chmod") || strings.Contains(all, "system account credentials") {
 		t.Fatalf("0600: %q", all)
 	}
 
@@ -68,14 +62,12 @@ func TestSysCredsModeIsChecked(t *testing.T) {
 	if err := os.Symlink(ok, link); err != nil {
 		t.Fatal(err)
 	}
-	e.env["MASH_SYS_CREDS"] = link
-	if all, _ := drift(""); strings.Contains(all, "chmod") || strings.Contains(all, "system account credentials") {
+	if all, _ := drift(link); strings.Contains(all, "chmod") || strings.Contains(all, "system account credentials") {
 		t.Fatalf("symlink to 0600: %q", all)
 	}
 
 	missing := filepath.Join(dir, "nope.creds")
-	e.env["MASH_SYS_CREDS"] = missing
-	all, code := drift("")
+	all, code := drift(missing)
 	if code == 0 || !strings.Contains(all, "system account credentials") || !strings.Contains(all, "no such file") || strings.Contains(all, "chmod") {
 		t.Fatalf("missing: %d %q", code, all)
 	}

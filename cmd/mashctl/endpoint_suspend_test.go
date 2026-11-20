@@ -198,7 +198,7 @@ func TestEndpointPermissions(t *testing.T) {
 		t.Errorf("--json: %d %q", code, o2)
 	}
 	// the --nsc form is gone
-	if out, errb, code := h.run("endpoint", "permissions", "acme.demo.bob", "--nsc"); code != 2 || out != "" || !strings.Contains(errb, `unknown option "--nsc"`) {
+	if out, errb, code := h.run("endpoint", "permissions", "acme.demo.bob", "--nsc"); code != 2 || out != "" || !strings.Contains(errb, `unknown option --nsc`) {
 		t.Errorf("--nsc: %d %q %q", code, out, errb)
 	}
 	for _, arg := range []string{"bob", "acme_demo_bob", seedShaped} {

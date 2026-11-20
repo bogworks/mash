@@ -11,8 +11,8 @@ import (
 // it to io.Discard (see TestMain); production leaves it nil.
 var announceSink io.Writer
 
-// sysTarget asks announceTarget to name the system account credentials too: the --sys-creds value, if any.
-type sysTarget struct{ flagVal string }
+// sysTarget asks announceTarget to name the system account credentials too: its path, from config.json.
+type sysTarget struct{}
 
 // maskURL hides the userinfo of a server URL, so it is never printed.
 func maskURL(u string) string { return config.RedactURL(u) }
@@ -58,15 +58,8 @@ func announceTarget(cfg config.Config, env func(string) string, stderr io.Writer
 		line += ", admin creds unset"
 	}
 	if sys != nil {
-		if p, err := sysCredsPath(sys.flagVal, env, cfg); err == nil {
-			src := "the default location"
-			switch {
-			case sys.flagVal != "":
-				src = "--sys-creds"
-			case env("MASH_SYS_CREDS") != "":
-				src = "MASH_SYS_CREDS"
-			}
-			line += ", system creds " + p + " (from " + src + ")"
+		if p, err := sysCredsPath("", env, cfg); err == nil {
+			line += ", system creds " + p + " (from config.json)"
 		}
 	}
 	fmt.Fprintln(stderr, line)
@@ -100,20 +93,4 @@ func announceTarget(cfg config.Config, env func(string) string, stderr io.Writer
 	if cfg.Source["servers"] == "MASH_SERVER" && env("MASH_LAUNCH_TOKEN") != "" {
 		fmt.Fprintf(stderr, "warning: MASH_LAUNCH_TOKEN is set, so this shell looks like it is inside a mash session, and %s (MASH_SERVER) is that session's own server. To act on another server, run outside the session or with `env -u MASH_SERVER ...` (and the other MASH_* variables) and config.json.\n", maskURL(cfg.URL))
 	}
-}
-
-// announcesVerb reports whether the verb of the common admin path (ctl.Run) connects to a server: every one but
-// `limits --show` and `init --local`, which are offline.
-func announcesVerb(args []string) bool {
-	switch args[0] {
-	case "limits":
-		return !(len(args) == 2 && args[1] == "--show")
-	case "init":
-		for _, a := range args[1:] {
-			if a == "--local" {
-				return false
-			}
-		}
-	}
-	return true
 }

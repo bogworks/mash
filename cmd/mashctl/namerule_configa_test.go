@@ -86,9 +86,8 @@ func TestConfigAMashctlEndpointCreate(t *testing.T) {
 // to start, from the environment and from config.json alike.
 func TestConfigAMashctlRequiredWithoutFileRefusesToStart(t *testing.T) {
 	verbs := [][]string{
-		{"endpoint", "list"}, {"init"}, {"limits"}, {"endpoint", "create", "o.g.x"},
+		{"endpoint", "list"}, {"limits", "apply"}, {"status"}, {"endpoint", "create", "o.g.x"},
 		{"endpoint", "set", "o.g.x", "label.k=v"}, {"endpoint", "delete", "o.g.x", "--yes"},
-		{"adopt", "--server", "nats://127.0.0.1:1", "--operator-key", "/x", "--account-key", "/x", "--sys-creds", "/x", "--admin-creds", "/x"},
 	}
 	for _, how := range []string{"environment", "config.json"} {
 		for _, args := range verbs {
@@ -120,7 +119,7 @@ func TestConfigAMashctlRequiredWithoutFileRefusesToStart(t *testing.T) {
 			return env[k], env[k] != ""
 		}
 		var out, errb bytes.Buffer
-		code := run([]string{"limits"}, func(k string) string { return env[k] }, lookup, &out, &errb)
+		code := run([]string{"limits", "apply"}, func(k string) string { return env[k] }, lookup, &out, &errb)
 		if code == 0 || !strings.Contains(errb.String(), c.want) {
 			t.Errorf("%s rule file: %d %q %q", name, code, out.String(), errb.String())
 		}

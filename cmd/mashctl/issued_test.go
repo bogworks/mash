@@ -178,7 +178,7 @@ func (e *applyEnv) issuedCheck(extra ...string) (issuedCheck, string, int) {
 
 func connectedKeys(t *testing.T, e *applyEnv) []string {
 	t.Helper()
-	nc := e.connect(natsauth.UserCredentials(e.env["MASH_SYS_CREDS"]))
+	nc := e.connect(natsauth.UserCredentials(e.sysCreds))
 	conns, err := apply.NATS{Conn: nc}.Connz(context.Background(), e.acctPub, nil, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -269,24 +269,21 @@ func TestIssuedCheckReportsAKeyMashDidNotIssue(t *testing.T) {
 // Fewer servers answering than the operator says there are is not a clean answer.
 func TestIssuedCheckRefusesAnIncompleteServerSet(t *testing.T) {
 	e := newXYEnv(t)
-	r, _, code := e.issuedCheck("--servers", "2")
+	e.servers(2)
+	r, _, code := e.issuedCheck()
 	if code != 2 || r.Complete || r.Clean || !strings.Contains(r.Incomplete, "1 server(s) replied") {
 		t.Fatalf("%d %+v", code, r)
 	}
-	out, _, code := e.run("issued", "check", "--servers", "2")
+	out, _, code := e.run("issued", "check")
 	if code != 2 || !strings.Contains(out, "INCOMPLETE") {
 		t.Fatalf("%d %s", code, out)
 	}
-	e.env["MASH_SERVERS"] = "2"
-	if _, _, code := e.issuedCheck(); code != 2 {
-		t.Fatalf("MASH_SERVERS: %d", code)
-	}
-	e.env["MASH_SERVERS"] = "1"
+	e.servers(1)
 	if r, _, code := e.issuedCheck(); code != 0 || !r.Complete {
 		t.Fatalf("one server of one: %d %+v", code, r)
 	}
 	// a rogue is still reported when the set is incomplete: the finding is certain
-	e.env["MASH_SERVERS"] = "2"
+	e.servers(2)
 	e.connect(e.mintRogue("rogue"))
 	if r, _, code := e.issuedCheck(); code != 1 || len(r.Unrecorded) != 1 || r.Complete {
 		t.Fatalf("%d %+v", code, r)
@@ -295,14 +292,18 @@ func TestIssuedCheckRefusesAnIncompleteServerSet(t *testing.T) {
 
 func TestIssuedCheckUsageAndErrors(t *testing.T) {
 	e := newXYEnv(t)
-	for _, args := range [][]string{{"issued"}, {"issued", "bogus"}, {"issued", "check", "--servers", "0"}, {"issued", "check", "--servers"}, {"issued", "list", "--sys-creds", "x"}, {"issued", "check", "extra"}} {
+	for _, args := range [][]string{{"issued"}, {"issued", "bogus"}, {"issued", "check", "--servers", "2"}, {"issued", "check", "--sys-creds", "x"}, {"issued", "list", "--sys-creds", "x"}, {"issued", "check", "extra"}} {
 		if _, _, code := e.run(args...); code != 2 {
 			t.Errorf("%v: exit %d, want 2", args, code)
 		}
 	}
-	e.env["MASH_SYS_CREDS"] = "/nonexistent/sys.creds"
+	e.writeConfig(`{"system_creds":"/nonexistent/sys.creds"}`)
 	if _, errb, code := e.run("issued", "check"); code != 2 || !strings.Contains(errb, "system account credentials") {
 		t.Errorf("no sys creds: %d %q", code, errb)
+	}
+	e.writeConfig(`{}`)
+	if _, errb, code := e.run("issued", "check"); code != 2 || !strings.Contains(errb, "no system account credentials") {
+		t.Errorf("no system_creds: %d %q", code, errb)
 	}
 }
 
@@ -364,7 +365,7 @@ func TestConnzReadsEveryPage(t *testing.T) {
 	for i := 0; i < 4; i++ {
 		e.connect(e.mintRogue("p"))
 	}
-	nc := e.connect(natsauth.UserCredentials(e.env["MASH_SYS_CREDS"]))
+	nc := e.connect(natsauth.UserCredentials(e.sysCreds))
 	res := apply.NATS{Conn: nc}
 	all, err := res.Connz(context.Background(), e.acctPub, nil, 0)
 	if err != nil || len(all) != 1 {
@@ -526,7 +527,7 @@ func TestIssuedListShowsAMissingPurposeAsIssue(t *testing.T) {
 	}
 }
 
-// --- no exemption, adopt records the admin, incompleteness --------------------------------------------------------
+// --- no exemption, init records the admin, incompleteness --------------------------------------------------------
 
 // mintUnrecordedAdmin writes a new admin creds file for the account that mash never recorded and returns its path and key.
 func mintUnrecordedAdmin(t *testing.T, e *applyEnv) (string, string) {
@@ -568,7 +569,7 @@ func TestIssuedCheckHasNoExemptionForTheCommandsOwnAdmin(t *testing.T) {
 		t.Fatalf("text: %d %s", code, out)
 	}
 
-	// Record it (as init and adopt do) and the same connection is clean.
+	// Record it (as init does) and the same connection is clean.
 	adm, ctx, done := e.admin()
 	raw, err := readCreds(path)
 	if err != nil {
@@ -583,43 +584,35 @@ func TestIssuedCheckHasNoExemptionForTheCommandsOwnAdmin(t *testing.T) {
 	}
 }
 
-// `adopt --mint-admin` records the admin user it mints, before the creds file exists, and `init` afterwards still works.
-func TestAdoptMintAdminRecordsTheAdmin(t *testing.T) {
+// `init` records the admin user of the creds it is given, and running it again keeps the one record.
+func TestInitRecordsTheAdmin(t *testing.T) {
 	e := newApplyEnv(t)
-	a := newAdopter(t, e)
-	out, errb, code := a.adopt("--mint-admin")
-	if code != 0 || !strings.Contains(out, "recorded the admin user in the issue record") {
+	a := newIniter(t, e)
+	if out, errb, code := a.init(); code != 0 {
 		t.Fatalf("%d\n%s\n%s", code, out, errb)
 	}
-	path := filepath.Join(a.env["MASH_CONFIG_DIR"], "server", "mashadmin.creds")
-	pub, err := issuedCredsKey(path)
+	pub, err := issuedCredsKey(a.admin)
 	if err != nil {
 		t.Fatal(err)
 	}
-	adm, ctx, done := e.admin()
-	recs, present, err := adm.Issued(ctx)
-	done()
-	if err != nil || !present || len(recs) != 1 || recs[0].PublicKey != pub || recs[0].Kind != store.IssuedAdmin || recs[0].Purpose != store.PurposeIssue || recs[0].Owner != "alice" {
-		t.Fatalf("record after adopt: %+v %v %v", recs, present, err)
+	check := func(when string) {
+		t.Helper()
+		adm, ctx, done := e.admin()
+		recs, present, err := adm.Issued(ctx)
+		done()
+		if err != nil || !present || len(recs) != 1 || recs[0].PublicKey != pub || recs[0].Kind != store.IssuedAdmin || recs[0].Purpose != store.PurposeIssue || recs[0].Owner != "alice" {
+			t.Fatalf("record %s: %+v %v %v", when, recs, present, err)
+		}
 	}
-	// An adopt again keeps the file and records again (same key, one more revision); init after that is fine.
-	if out, errb, code := a.adopt("--mint-admin"); code != 0 {
-		t.Fatalf("second adopt %d\n%s\n%s", code, out, errb)
+	check("after init")
+	if out, errb, code := a.init(); code != 0 {
+		t.Fatalf("second init %d\n%s\n%s", code, out, errb)
 	}
-
-	if out, errb, code := a.run("init"); code != 0 {
-		t.Fatalf("init %d\n%s\n%s", code, out, errb)
-	}
-	adm, ctx, done = e.admin()
-	recs, _, err = adm.Issued(ctx)
-	done()
-	if err != nil || len(recs) != 1 || recs[0].PublicKey != pub {
-		t.Fatalf("record after init: %+v %v", recs, err)
-	}
+	check("after a second init")
 }
 
-// If the record cannot be written, adopt fails loudly, says the admin credentials were NOT recorded and leaves no creds file.
-func TestAdoptMintAdminFailsWhenTheRecordCannotBeWritten(t *testing.T) {
+// If the issue record cannot be made safely (its bucket allows rollup), init fails and says so.
+func TestInitFailsWhenTheRecordCannotBeWritten(t *testing.T) {
 	e := newApplyEnv(t)
 	nc := e.connect(natsauth.UserCredentials(e.pl.Creds))
 	js, err := jetstream.New(nc)
@@ -629,13 +622,10 @@ func TestAdoptMintAdminFailsWhenTheRecordCannotBeWritten(t *testing.T) {
 	if _, err := js.CreateKeyValue(context.Background(), store.IssuedConfig()); err != nil { // allows rollup: not hardened
 		t.Fatal(err)
 	}
-	a := newAdopter(t, e)
-	out, errb, code := a.adopt("--mint-admin")
-	if code == 0 || !strings.Contains(out+errb, "NOT recorded") || !strings.Contains(out+errb, "no credential was handed out") {
+	a := newIniter(t, e)
+	out, errb, code := a.init()
+	if code == 0 || !strings.Contains(out+errb, "not hardened") {
 		t.Fatalf("%d\n%s\n%s", code, out, errb)
-	}
-	if _, err := os.Stat(filepath.Join(a.env["MASH_CONFIG_DIR"], "server", "mashadmin.creds")); err == nil {
-		t.Error("the creds file was left behind")
 	}
 }
 
@@ -643,7 +633,7 @@ func TestAdoptMintAdminFailsWhenTheRecordCannotBeWritten(t *testing.T) {
 // was incomplete.
 func TestIssuedCheckSaysIncompleteAlongsideAFinding(t *testing.T) {
 	e := newXYEnv(t)
-	e.env["MASH_SERVERS"] = "2"
+	e.servers(2)
 	e.connect(e.mintRogue("rogue"))
 	r, _, code := e.issuedCheck()
 	if code != 1 || len(r.Unrecorded) != 1 || r.Complete || r.Clean || r.Incomplete == "" {
@@ -659,7 +649,7 @@ func TestIssuedCheckSaysIncompleteAlongsideAFinding(t *testing.T) {
 	}
 	// Nothing found and still incomplete is exit 2.
 	e2 := newXYEnv(t)
-	e2.env["MASH_SERVERS"] = "2"
+	e2.servers(2)
 	if r, _, code := e2.issuedCheck(); code != 2 || r.Incomplete == "" || r.Clean {
 		t.Fatalf("no finding: %d %+v", code, r)
 	}

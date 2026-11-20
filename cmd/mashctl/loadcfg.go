@@ -16,7 +16,7 @@ import (
 func loadConfig(env func(string) string, lookup config.Lookup) (config.Config, error) {
 	cfg, err := config.Load(lookup, env("HOME"))
 	if errors.Is(err, config.ErrNoURL) || errors.Is(err, config.ErrNoOwner) {
-		err = nil // mashctl acts as no endpoint: the verbs that need a server say so themselves (adopt has its own --server)
+		err = nil // mashctl acts as no endpoint: the verbs that need a server say so themselves
 	}
 	if cfg.Source["endpoint"] == "installed creds" {
 		// An installed endpoint's creds file is the endpoint tool's business: mashctl neither takes its owner from it nor

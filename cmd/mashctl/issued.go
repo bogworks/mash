@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/nats-io/nats.go"
@@ -20,7 +19,7 @@ import (
 )
 
 const issuedUsage = `usage: mashctl issued list [--json]
-       mashctl issued check [--json] [--sys-creds FILE] [--servers N]
+       mashctl issued check [--json]
 `
 
 // The exit codes of `mashctl issued check`: 0 no unrecorded key and no revoked key is connected and the scan was
@@ -73,34 +72,22 @@ func toIssuedOut(r store.Issued) issuedOut {
 }
 
 type issuedOpts struct {
-	json     bool
-	sysCreds string
-	servers  string
+	json bool
 }
 
 func parseIssuedArgs(verb string, args []string) (issuedOpts, error) {
 	var o issuedOpts
 	for i := 0; i < len(args); i++ {
 		a := args[i]
-		name, inline, hasInline := strings.Cut(a, "=")
+		name, _, hasInline := strings.Cut(a, "=")
 		switch {
 		case name == "--json":
 			if hasInline {
-				return o, fmt.Errorf("unexpected %s", config.RejectedArg(a))
+				return o, fmt.Errorf("unexpected %s", config.RejectedOption(a))
 			}
 			o.json = true
-		case verb == "check" && (name == "--sys-creds" || name == "--servers"):
-			v, err := flagValue(args, &i, name, inline, hasInline)
-			if err != nil {
-				return o, err
-			}
-			if name == "--sys-creds" {
-				o.sysCreds = v
-			} else {
-				o.servers = v
-			}
 		default:
-			return o, fmt.Errorf("unexpected %s", config.RejectedArg(a))
+			return o, fmt.Errorf("unexpected %s", config.RejectedOption(a))
 		}
 	}
 	return o, nil
@@ -125,19 +112,6 @@ func runIssued(args []string, env func(string) string, lookup config.Lookup, std
 		fmt.Fprintf(stderr, "mashctl: issued %s: %v\n%s", verb, err, issuedUsage)
 		return 2
 	}
-	servers := 0
-	if verb == "check" {
-		sv, src := o.servers, "--servers"
-		if sv == "" {
-			sv, src = env("MASH_SERVERS"), "MASH_SERVERS"
-		}
-		if sv != "" {
-			if servers, err = strconv.Atoi(strings.TrimSpace(sv)); err != nil || servers < 1 {
-				fmt.Fprintf(stderr, "mashctl: issued check: %s must be a whole number of servers, 1 or more, got %q\n%s", src, sv, issuedUsage)
-				return 2
-			}
-		}
-	}
 	cfg, err := loadCtlConfig(env, lookup, true)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
@@ -148,9 +122,10 @@ func runIssued(args []string, env func(string) string, lookup config.Lookup, std
 	}
 	var sys *sysTarget
 	if verb == "check" {
-		sys = &sysTarget{o.sysCreds}
+		sys = &sysTarget{}
 	}
 	announceTarget(cfg, env, stderr, sys)
+	servers := serverCount(cfg)
 	adm, ctx, closeAdmin, err := ctl.OpenAdmin("mashctl", cfg)
 	if err != nil {
 		return fail("%v", err)
@@ -191,7 +166,7 @@ func printIssuedList(recs []store.Issued, present, asJSON bool, stdout io.Writer
 		return 0
 	}
 	if !present {
-		fmt.Fprintf(stdout, "no issue record yet (bucket %s): run `mashctl init`; nothing has been recorded\n", store.IssuedBucket)
+		fmt.Fprintf(stdout, "no issue record yet (bucket %s): run `mashctl init --config FILE`; nothing has been recorded\n", store.IssuedBucket)
 		return 0
 	}
 	for _, r := range recs {
@@ -337,7 +312,7 @@ func runIssuedCheck(ctx context.Context, cfg config.Config, env func(string) str
 		return fail("%v", err)
 	}
 	akp.Wipe()
-	nc, err := connectSys(cfg, o.sysCreds, env)
+	nc, err := connectSys(cfg, "", env)
 	if err != nil {
 		return fail("%v", err)
 	}
@@ -361,7 +336,7 @@ func runIssuedCheck(ctx context.Context, cfg config.Config, env func(string) str
 	// No key is exempt: not the admin user this command connected with, not the system account user. A connected key is
 	// clean only if it is in the record. The query is for the mash account alone (acc in the CONNZ request), and the
 	// system account's users (the sys creds this command uses among them) are never in that account's connection list,
-	// so they need no exemption; the admin user is in the account, and `init` and `adopt --mint-admin` record it.
+	// so they need no exemption; the admin user is in the account, and `init` records it.
 	connected := map[string]bool{}
 	for _, s := range conns {
 		for _, c := range s.Conns {
@@ -425,7 +400,7 @@ func runIssuedCheck(ctx context.Context, cfg config.Config, env func(string) str
 
 func printIssuedCheck(rep issuedCheck, w io.Writer) {
 	if !rep.RecordPresent {
-		fmt.Fprintf(w, "note: there is no issue record yet (bucket %s): run `mashctl init`; every connected key is reported\n", store.IssuedBucket)
+		fmt.Fprintf(w, "note: there is no issue record yet (bucket %s): run `mashctl init --config FILE`; every connected key is reported\n", store.IssuedBucket)
 	}
 	for _, f := range rep.Unrecorded {
 		line := fmt.Sprintf("UNRECORDED key %s: connected to server %s in account %s", f.PublicKey, config.Clean(f.Server), config.Clean(f.Account))

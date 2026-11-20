@@ -402,9 +402,8 @@ queue, not as the work queue.
   NATS accounts, as in SAP, which leaves end-to-end encryption out of scope. The server operator, or a hosted provider,
   can read stored mail; see the threat model. For that case use SLIM or your own payload encryption (section 3).
 - **One NATS account.** Delivery between accounts is a non-goal. Setup is not one command: self-hosting needs NATS
-  operator mode, and the hosted path needs a Synadia account. mash also runs on hosted Synadia Cloud. On one machine,
-  `mashctl init --local --owner NAME --start` sets up and starts a loopback nats-server in one command, but needs a
-  `nats-server` binary on your `PATH`.
+  operator mode, and the hosted path needs a Synadia account. mash also runs on hosted Synadia Cloud. `mashctl init
+  --config FILE` sets mash up on a server you already run; it does not install or start NATS.
 - **No broadcast, no files.** One recipient per message; text up to 1 MiB, less on a smaller `max_payload`.
 - **Maturity.** v0.5.0 (released 2026-11-15), repository created 2026-11-01, one
   maintainer. Interfaces may change before the next major revision. SAP is a single-vendor 0.3 draft with no licence on

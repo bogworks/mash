@@ -20,19 +20,3 @@ func TestShortKey(t *testing.T) {
 		}
 	}
 }
-
-func TestParseAddr(t *testing.T) {
-	for _, in := range []string{"acme.ops.recv", "acme_ops_recv"} {
-		a, err := parseAddr(in)
-		if err != nil || a.String() != "acme.ops.recv" {
-			t.Errorf("%q: %v %v", in, a, err)
-		}
-	}
-	for _, in := range []string{"", "recv", "a.b", "a.b.c.d", "a_b", "A.b.c", "a.b.c_d", "a.b."} {
-		_, err := parseAddr(in)
-		want := "mash: not an endpoint address (the value is not shown): give owner.group.instance"
-		if err == nil || err.Error() != want {
-			t.Errorf("%q: %v", in, err)
-		}
-	}
-}

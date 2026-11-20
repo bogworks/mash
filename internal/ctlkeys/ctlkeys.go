@@ -662,3 +662,38 @@ func (a *Authority) OperatorJWT() (string, error) {
 	}
 	return strings.TrimSpace(string(b)), nil
 }
+
+// maxCredsFile bounds how much of a creds file ReadOwnedFile reads.
+const maxCredsFile = 1 << 20
+
+// ReadOwnedFile reads the credentials file at path under the key store's rules: it is opened once with O_NOFOLLOW (a
+// symlink is refused), every check runs on that descriptor (a regular file, owned by the effective uid, no wider than
+// mode 0600), and the bytes come from the same descriptor. what names the file in an error ("system_creds"). The error
+// carries the path, never content.
+func ReadOwnedFile(path, what string) ([]byte, error) {
+	f, err := config.OpenNoFollow(path, os.O_RDONLY, 0)
+	if err != nil {
+		if config.IsSymlinkRefusal(err) {
+			return nil, fmt.Errorf("%s %s is a symlink: refusing it (give the file itself)", what, path)
+		}
+		return nil, err
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("read %s %s: %w", what, path, err)
+	}
+	if !fi.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s %s is not a regular file", what, path)
+	}
+	if tooOpen(fi.Mode()) {
+		return nil, fmt.Errorf("%s %s has mode %04o: it is readable by other users. Run: chmod 600 %s", what, path, fi.Mode().Perm(), path)
+	}
+	if err := ownerErr(fi, path, what); err != nil {
+		return nil, err
+	}
+	if fi.Size() > maxCredsFile {
+		return nil, fmt.Errorf("%s %s is too large to be a creds file", what, path)
+	}
+	return io.ReadAll(io.LimitReader(f, maxCredsFile))
+}

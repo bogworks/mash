@@ -155,10 +155,10 @@ func TestEndpointReadUsageErrorsInJSON(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"show", "o.g.x", "--bogus", "--json"}, `{"error":"unknown option \"--bogus\"","hint":"mashctl endpoint show --help"}`},
+		{[]string{"show", "o.g.x", "--bogus", "--json"}, `{"error":"unknown option --bogus","hint":"mashctl endpoint show --help"}`},
 		{[]string{"show", "--json"}, `{"error":"missing the endpoint address (owner.group.name)","hint":"mashctl endpoint show --help"}`},
 		{[]string{"show", "Not A Valid!", "--json"}, `{"error":"not an endpoint address (the value is not shown): write owner.group.name, for example acme.demo.bob","hint":"mashctl endpoint show --help"}`},
-		{[]string{"list", "--bogus", "--json"}, `{"error":"unknown option \"--bogus\"","hint":"mashctl endpoint list --help"}`},
+		{[]string{"list", "--bogus", "--json"}, `{"error":"unknown option --bogus","hint":"mashctl endpoint list --help"}`},
 		{[]string{"list", "a.b.c", "--json"}, `{"error":"not an owner or owner.group prefix (the value is not shown): write acme or acme.demo","hint":"mashctl endpoint list --help"}`},
 		{[]string{"list", "a", "b", "--json"}, `{"error":"too many arguments","hint":"mashctl endpoint list --help"}`},
 		{[]string{"show", "o.g.none", "--json"}, `{"error":"no endpoint o.g.none","hint":"mashctl endpoint list"}`},
@@ -184,13 +184,13 @@ func TestEndpointUsageErrorsInJSON(t *testing.T) {
 		args []string
 		want string
 	}{
-		{"create unknown option", []string{"create", "o.g.x", "--bogus", "--json"}, `{"error":"unknown option \"--bogus\"","hint":"mashctl endpoint create --help"}`},
-		{"create unknown option, json first", []string{"create", "--json", "o.g.x", "--bogus"}, `{"error":"unknown option \"--bogus\"","hint":"mashctl endpoint create --help"}`},
-		{"create removed option", []string{"create", "o.g.x", "--label", "k=v", "--json"}, `{"error":"unknown option \"--label\"","hint":"mashctl endpoint create --help"}`},
+		{"create unknown option", []string{"create", "o.g.x", "--bogus", "--json"}, `{"error":"unknown option --bogus","hint":"mashctl endpoint create --help"}`},
+		{"create unknown option, json first", []string{"create", "--json", "o.g.x", "--bogus"}, `{"error":"unknown option --bogus","hint":"mashctl endpoint create --help"}`},
+		{"create removed option", []string{"create", "o.g.x", "--label", "k=v", "--json"}, `{"error":"unknown option --label","hint":"mashctl endpoint create --help"}`},
 		{"create no value", []string{"create", "o.g.x", "--json", "--out"}, `{"error":"--out needs a value","hint":"mashctl endpoint create --help"}`},
 		{"create two addresses", []string{"create", "o.g.x", "o.g.y", "--json"}, `{"error":"too many arguments","hint":"mashctl endpoint create --help"}`},
 		{"create public key without out", []string{"create", "o.g.x", "--public-key", pubFile, "--json"}, `{"error":"--public-key needs --out, the join file to write","hint":"mashctl endpoint create --help"}`},
-		{"reissue unknown option", []string{"reissue", "o.g.x", "--bogus", "--json"}, `{"error":"unknown option \"--bogus\"","hint":"mashctl endpoint reissue --help"}`},
+		{"reissue unknown option", []string{"reissue", "o.g.x", "--bogus", "--json"}, `{"error":"unknown option --bogus","hint":"mashctl endpoint reissue --help"}`},
 		{"reissue no address", []string{"reissue", "--json"}, `{"error":"missing the endpoint address (owner.group.name)","hint":"mashctl endpoint reissue --help"}`},
 		{"reissue bad address", []string{"reissue", "Not A Valid!", "--json"}, `{"error":"not an endpoint address (the value is not shown): write owner.group.name, for example acme.demo.bob","hint":"mashctl endpoint reissue --help"}`},
 		{"reissue public key without out", []string{"reissue", "o.g.x", "--public-key", pubFile, "--json"}, `{"error":"--public-key needs --out, the join file to write","hint":"mashctl endpoint reissue --help"}`},
