@@ -86,7 +86,7 @@ func at005Main(args []string, stdout, stderr io.Writer) int {
 	scenario := at005Scenario
 	if *dry {
 		id = "at005-dry-setup"
-		scenario = "At005 --dry-setup: certificates; M1 by init --local; the three-node TLS cluster; the buckets; M2 by adopt; mashctl list from both; everything stopped by PID and cleaned up."
+		scenario = "At005 --dry-setup: certificates; M1 by init --local; the three-node TLS cluster; the buckets; M2 by adopt; mashctl endpoint list from both; everything stopped by PID and cleaned up."
 	}
 	func() {
 		defer func() {
@@ -920,7 +920,7 @@ func (s *At5) plainRefusals(m1, m3 Host) {
 	dr := s.mash(m3, "plain-doctor", env, "doctor")
 	s.check("REQ-014: mash doctor says the server row FAILs for it", strings.Contains(dr.Stdout, "server    FAIL  "), snip(grepLine(dr.Text(), "server")))
 	s.check("REQ-014: mash status says it is not ready", st.Code == 1 && strings.Contains(st.Stdout, "not ready: "), exitSnip(st))
-	r = s.ctl(m1, "plain-admin", []string{"MASH_SERVER=" + url, "MASH_INSECURE_PLAINTEXT=0"}, "list")
+	r = s.ctl(m1, "plain-admin", []string{"MASH_SERVER=" + url, "MASH_INSECURE_PLAINTEXT=0"}, "endpoint", "list")
 	s.check("REQ-014: mashctl refuses an admin connection to a plain nats:// URL on a non-loopback address", r.Code != 0 && strings.Contains(strings.ToLower(r.Text()), "tls"), exitSnip(r))
 }
 

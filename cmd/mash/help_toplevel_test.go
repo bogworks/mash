@@ -35,7 +35,6 @@ Setup:
                                                Join a seed and its user JWT into
                                                a credentials file; needs no
                                                config
-  mash admin <verb> ...                        Deprecated; use mashctl
 
 Integration:
   mash serve                                   The Claude Code channel server

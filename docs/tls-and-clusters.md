@@ -199,7 +199,7 @@ Open the client port (4222) to the machines that run `mashctl` and endpoints, an
 ### What `mashctl` needs
 
 - `servers` lists every server: `"servers": ["tls://n1.example.com:4222", "tls://n2.example.com:4222", "tls://n3.example.com:4222"]`. The code takes a comma-separated list in `MASH_SERVER`, a repeated `--server`, or an array in `servers`, and each entry must be reachable by the name its certificate lists. A connection succeeds if any one listed server is up. mash dials only the listed servers; it ignores the servers a server advertises.
-- `--servers 3` or `MASH_SERVERS=3`: how many servers the cluster has. A revocation (`endpoint delete`, `endpoint reissue`, `deprovision`) then waits for every server to acknowledge the account update, and refuses when fewer answer. `endpoint create` takes the flag too. `adopt` prints `3 server(s) replied` and a warning to set it.
+- `--servers 3` or `MASH_SERVERS=3`: how many servers the cluster has. A revocation (`endpoint delete`, `endpoint reissue`) then waits for every server to acknowledge the account update, and refuses when fewer answer. `endpoint create` takes the flag too. `adopt` prints `3 server(s) replied` and a warning to set it.
 - `--sys-creds FILE` or `MASH_SYS_CREDS`: the system account credentials. Without either, `mashctl` uses the `sys.creds` that `adopt` put in `<config dir>/server/`.
 
 ```sh
@@ -250,7 +250,7 @@ Anyone who holds `operator.nk` and `account.nk` can mint any user, change any pe
 
 ### Do not write from both machines at once
 
-`mashctl` serializes account-changing commands with a lock file in its own key directory (`apply.lock`). Two machines do not share that file, so the lock does not coordinate them. Two hosts that hold copies of the keys are not coordinated: do not run `endpoint create`, `endpoint reissue`, `endpoint delete` or `deprovision` on both at once. Run one, wait for it to finish, then run the next. Keep both machines' clocks in sync (NTP).
+`mashctl` serializes account-changing commands with a lock file in its own key directory (`apply.lock`). Two machines do not share that file, so the lock does not coordinate them. Two hosts that hold copies of the keys are not coordinated: do not run `endpoint create`, `endpoint reissue` or `endpoint delete` on both at once. Run one, wait for it to finish, then run the next. Keep both machines' clocks in sync (NTP).
 
 ### An endpoint on a third machine
 

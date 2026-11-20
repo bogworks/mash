@@ -40,7 +40,7 @@ func TestLeaseRollupWarnsOnAnUnhardenedBucketAndTheOpenSucceeds(t *testing.T) {
 		t.Fatal("no warning for a bucket that allows rollup")
 	}
 	line, ok := ep.LeaseRollupLine(context.Background())
-	if !ok || line != "lease bucket: WARN - it allows rollup writes; run mash admin init" {
+	if !ok || line != "lease bucket: WARN - it allows rollup writes; run mashctl init" {
 		t.Fatalf("status line: %q %v", line, ok)
 	}
 }

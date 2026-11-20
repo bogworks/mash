@@ -243,9 +243,7 @@ func inspectFixture(t *testing.T) (*auditFixture, string) {
 	f.endpoint(t, ad("box"))
 	subject := ad("box").Subjects().Mail
 	sndCreds, sndUser := f.e.Mint(t, ad("snd"))
-	if _, errb, code := ctlRun(t, f.e, "provision", "o.g.snd", "--user", sndUser, "--account", f.e.Account); code != 0 {
-		t.Fatalf("provision snd: %d %q", code, errb)
-	}
+	f.provision(t, ad("snd"), sndUser)
 	snd := identityOf(t, sndCreds)
 	ghostCreds, _ := f.e.Mint(t, ad("ghostsender")) // signs, but is not in the directory
 	ghost := identityOf(t, ghostCreds)

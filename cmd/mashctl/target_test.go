@@ -206,7 +206,7 @@ func TestTargetLineComesBeforeAWriteAndOfflineVerbsPrintNone(t *testing.T) {
 		t.Errorf("init --local: %q", errb)
 	}
 
-	for _, args := range [][]string{{"list"}, {"init"}, {"limits"}, {"endpoint", "delete", "o.g.zz"}} {
+	for _, args := range [][]string{{"init"}, {"limits"}, {"endpoint", "delete", "o.g.zz"}} {
 		_, errb, _ := h.run(args...)
 		want := "mashctl: target server " + h.e.URL + " (from MASH_SERVER), owner " + h.e.Owner + " (from MASH_ENDPOINT), admin creds " + h.e.AdminCreds + " (from MASH_ADMIN_CREDS)\n"
 		if !strings.HasPrefix(errb, want) {
@@ -225,9 +225,9 @@ func TestTargetWarnsWhenEnvOverridesConfigJSON(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(h.dir, "config.json"), []byte(`{"servers":"tls://scratch.example:4222"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, errb, code := h.run("list")
+	_, errb, code := h.run("limits")
 	if code != 0 {
-		t.Fatalf("list: %d %q", code, errb)
+		t.Fatalf("limits: %d %q", code, errb)
 	}
 	want := "warning: MASH_SERVER (" + h.e.URL + ") overrides config.json's servers (tls://scratch.example:4222); mashctl is acting on " + h.e.URL + "."
 	if !strings.Contains(errb, want) || strings.Contains(errb, "overrides config.json's endpoint") {
@@ -238,7 +238,7 @@ func TestTargetWarnsWhenEnvOverridesConfigJSON(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(h.dir, "config.json"), []byte(`{"servers":"`+h.e.URL+`"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, errb, _ := h.run("list"); strings.Contains(errb, "warning") {
+	if _, errb, _ := h.run("limits"); strings.Contains(errb, "warning") {
 		t.Errorf("agreeing: %q", errb)
 	}
 }
