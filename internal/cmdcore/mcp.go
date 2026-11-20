@@ -6,6 +6,7 @@ import (
 	"errors"
 	"math/big"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -123,11 +124,28 @@ func decodeArgs[P any](fields []field, args json.RawMessage, p *P) error {
 		return cliframe.Usagef("the arguments must be a JSON object")
 	}
 	known := map[string]bool{}
+	var names []string
+	for _, f := range fields {
+		if f.json != "" && f.json != "-" {
+			known[f.json] = true
+			names = append(names, f.json)
+		}
+	}
+	// Unknown keys come first: an agent sending old names is told which, not that a required one is missing.
+	var unknown []string
+	for k := range raw {
+		if !known[k] {
+			unknown = append(unknown, k)
+		}
+	}
+	if len(unknown) > 0 {
+		sort.Strings(unknown)
+		return cliframe.Usagef("unknown argument %s", unknown[0]).WithHint("the arguments are " + strings.Join(names, ", "))
+	}
 	for _, f := range fields {
 		if f.json == "" || f.json == "-" {
 			continue
 		}
-		known[f.json] = true
 		v, ok := raw[f.json]
 		if !ok || string(v) == "null" {
 			if f.required {
@@ -158,11 +176,6 @@ func decodeArgs[P any](fields []field, args json.RawMessage, p *P) error {
 				}
 				raw[f.json], _ = json.Marshal(c)
 			}
-		}
-	}
-	for k := range raw {
-		if !known[k] {
-			return cliframe.Usagef("unknown argument %s", k)
 		}
 	}
 	args, _ = json.Marshal(raw)

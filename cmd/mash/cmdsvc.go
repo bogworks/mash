@@ -127,11 +127,11 @@ type cliSvc struct {
 
 func (s *cliSvc) Send(ctx context.Context, to, text string, o cmds.SendOptions) (cmds.SendReceipt, error) {
 	cfg := s.cfg
+	if err := checkSend(o); err != nil { // before the endpoint: a bad key is a usage error with or without one
+		return cmds.SendReceipt{}, err.WithHint("mash send --help")
+	}
 	if cfg.Inert() {
 		return cmds.SendReceipt{}, cliframe.Failf("no endpoint: set MASH_ENDPOINT (owner.group.name), --endpoint, or install credentials for one endpoint").WithHint("mash status")
-	}
-	if err := checkSend(o); err != nil {
-		return cmds.SendReceipt{}, err.WithHint("mash send --help") // nothing is connected for a bad key
 	}
 	ctx, cancel := context.WithTimeout(ctx, cliDeadline(cfg))
 	defer cancel()

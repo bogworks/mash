@@ -71,7 +71,10 @@ func TestSendArgv(t *testing.T) {
 		{"file stdin", []string{"a.b.c", "--kind", "fyi", "--file", "-"}, "piped text\n", nil, "a.b.c", "piped text", cmds.SendOptions{Kind: "fyi"}},
 		{"implicit stdin", []string{"a.b.c"}, "implicit", nil, "a.b.c", "implicit", cmds.SendOptions{Kind: "task"}},
 		{"dashdash", []string{"a.b.c", "--", "--not-a-flag"}, "", nil, "a.b.c", "--not-a-flag", cmds.SendOptions{Kind: "task"}},
-		{"lone dash is text", []string{"a.b.c", "-"}, "", nil, "a.b.c", "-", cmds.SendOptions{Kind: "task"}},
+		{"lone dash reads stdin", []string{"a.b.c", "-"}, "from stdin\n", nil, "a.b.c", "from stdin", cmds.SendOptions{Kind: "task"}},
+		{"lone dash after kind", []string{"a.b.c", "--kind", "fyi", "-"}, "x\r\n", nil, "a.b.c", "x", cmds.SendOptions{Kind: "fyi"}},
+		{"dash-led text after dashdash", []string{"a.b.c", "--", "-x"}, "ignored", nil, "a.b.c", "-x", cmds.SendOptions{Kind: "task"}},
+		{"lone dash after dashdash is stdin", []string{"a.b.c", "--", "-"}, "in\n", nil, "a.b.c", "in", cmds.SendOptions{Kind: "task"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := &fakeSvc{rc: cmds.SendReceipt{Number: 42}}
@@ -105,6 +108,8 @@ func TestSendUsageErrors(t *testing.T) {
 		{"bad number", []string{"a", "hi", "--reply-to", "x"}, "error: --reply-to must be a whole number\n" + hint},
 		{"bad bool", []string{"a", "hi", "--urgent=maybe"}, "error: --urgent must be true or false\n" + hint},
 		{"extra positional", []string{"a", "hi", "more"}, "error: unexpected argument \"more\" for mash send\n" + hint},
+		{"dash and file", []string{"a", "-", "--file", "-"}, "error: mash send takes the message text or --file, not both\n" + hint},
+		{"blank message", []string{"a", "   "}, "error: mash send needs the message text\n" + hint},
 		{"both message and file", []string{"a", "hi", "--file", "/m"}, "error: mash send takes the message text or --file, not both\n" + hint},
 		{"reply-to zero", []string{"a", "hi", "--reply-to", "0"}, "error: --reply-to must be a whole number of 1 or more\n" + hint},
 		{"relay negative", []string{"a", "hi", "--relay=-3"}, "error: --relay must be a whole number of 1 or more\n" + hint},

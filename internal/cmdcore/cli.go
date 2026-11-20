@@ -23,7 +23,7 @@ type CLIFunc func(args []string, stdin io.Reader, stdout, stderr io.Writer, g cl
 //
 // Arguments are parsed from the params tags: positionals in field order, --flag value, --flag=value, short flags, bool
 // flags, repeated flags for []string, and "--" to end the options. A bare "-" is a positional (standard input for
-// --file). An unknown option, a missing value, a bad enum value, number or boolean, an empty required positional, a
+// --file, and for send's message). An unknown option, a missing value, a bad enum value, number or boolean, an empty required positional, a
 // single-value option given twice and surplus positionals are usage errors (exit 2). On success the result's Text, or with --json its compact JSON, goes to stdout.
 func CLI[P any, R Result](c Command[P, R], env EnvFunc) CLIFunc {
 	return CLIWith(c, env, Frame{Tool: "mash"})

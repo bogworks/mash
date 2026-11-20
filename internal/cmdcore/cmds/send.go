@@ -165,10 +165,21 @@ func runSend(ctx context.Context, env *cmdcore.Env, p SendParams) (SendResult, e
 
 // messageText picks the text: the argument, or --file, or standard input when it is piped.
 func messageText(env *cmdcore.Env, p SendParams) (string, error) {
+	if p.Message == "-" && env.Stdin != nil { // a bare "-" is standard input, as it is for --file
+		p.Message = ""
+		if p.File == "" {
+			p.File = "-"
+		} else {
+			p.Message = "-" // both given: refused below
+		}
+	}
 	switch {
 	case p.Message != "" && p.File != "":
 		return "", cliframe.Usagef("mash send takes the message text or --file, not both").WithHint("mash send --help")
 	case p.Message != "":
+		if strings.TrimSpace(p.Message) == "" {
+			return "", usageNeedsText()
+		}
 		return p.Message, nil
 	case p.File == "" && !(env.Stdin != nil && env.StdinPiped):
 		return "", usageNeedsText()
