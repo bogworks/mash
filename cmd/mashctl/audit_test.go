@@ -18,6 +18,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
+	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/store"
 	"github.com/bogworks/mash/internal/testenv"
@@ -141,13 +142,35 @@ func newAuditEnv(t *testing.T) *auditFixture {
 	return f
 }
 
+// provision creates the directory record of a for user u through the admin API.
+func (f *auditFixture) provision(t *testing.T, a sap.Address, u string) {
+	t.Helper()
+	adm, err := admin.New(f.e.Conn(t, f.e.AdminCreds), f.e.Owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := adm.Provision(context.Background(), a, u, f.e.Account, "", admin.Meta{}); err != nil {
+		t.Fatalf("provision %s: %v", a, err)
+	}
+}
+
+// deprovision removes the record and inbox of a through the admin API (no revocation).
+func (f *auditFixture) deprovision(t *testing.T, a sap.Address) {
+	t.Helper()
+	adm, err := admin.New(f.e.Conn(t, f.e.AdminCreds), f.e.Owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := adm.Deprovision(context.Background(), a); err != nil {
+		t.Fatalf("deprovision %s: %v", a, err)
+	}
+}
+
 // endpoint provisions the endpoint at a and keeps its creds file in the creds directory as owner.group.instance.creds.
 func (f *auditFixture) endpoint(t *testing.T, a sap.Address) string {
 	t.Helper()
 	creds, u := f.e.Mint(t, a)
-	if _, errb, code := ctlRun(t, f.e, "provision", a.String(), "--user", u, "--account", f.e.Account); code != 0 {
-		t.Fatalf("provision %s: %d %q", a, code, errb)
-	}
+	f.provision(t, a, u)
 	f.users[u] = "USER-" + a.Instance
 	f.putCreds(t, creds, a.String())
 	return u
@@ -769,9 +792,7 @@ func TestAuditCompareIdentities(t *testing.T) {
 		t.Fatalf("added: %d %+v", code, c.Compare)
 	}
 	second := f.auditTo(t, "second.json")
-	if _, errb, code := ctlRun(t, f.e, "deprovision", "o.g.gamma"); code != 0 {
-		t.Fatalf("deprovision: %d %q", code, errb)
-	}
+	f.deprovision(t, ad("gamma"))
 	out, _, _ = f.run(t, "--json", "--compare", second)
 	c = cmpOut{}
 	_ = json.Unmarshal([]byte(out), &c)
@@ -962,9 +983,7 @@ func (f *auditFixture) dropStream(t *testing.T, a sap.Address) {
 
 func (f *auditFixture) deprovisionAndForget(t *testing.T, a sap.Address) {
 	t.Helper()
-	if _, errb, code := ctlRun(t, f.e, "deprovision", a.String()); code != 0 {
-		t.Fatalf("deprovision: %d %q", code, errb)
-	}
+	f.deprovision(t, a)
 	if err := os.Remove(filepath.Join(f.credsDir, a.String()+".creds")); err != nil {
 		t.Fatal(err)
 	}

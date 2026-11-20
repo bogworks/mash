@@ -19,13 +19,13 @@ const IssuedStreamName = "KV_" + IssuedBucket
 const IssuedHistory = 64
 
 // IssuedMinHistory is the smallest per-key history verification accepts. The first version of the record kept 8
-// revisions of a key; such a bucket is accepted and `mash admin init` raises it to IssuedHistory (a raise loses
+// revisions of a key; such a bucket is accepted and `mashctl init` raises it to IssuedHistory (a raise loses
 // nothing).
 const IssuedMinHistory = 8
 
 // IssuedMarkerKey is the key in the issue record stream's own metadata (the stream config's Metadata map, which no
 // data write can change) that says whether the retained history of a key can be trusted to be complete. A bucket made at
-// the full history IssuedHistory carries IssuedMarkerFull. When `mash admin init` raises an older bucket to
+// the full history IssuedHistory carries IssuedMarkerFull. When `mashctl init` raises an older bucket to
 // IssuedHistory it writes IssuedMarkerRaised(n, seq): n is the per-key history it had, seq the stream's last sequence
 // at that moment. A bucket with neither is a legacy or unknown one.
 const (
@@ -211,7 +211,7 @@ func VerifyIssuedBucket(ctx context.Context, js jetstream.JetStream) error {
 		bad = fmt.Sprintf("keeps fewer than %d revisions of a key", IssuedMinHistory)
 	}
 	if bad != "" {
-		return fmt.Errorf("mash: %s %s: %w; recreate it as `mash admin init` makes it, copying its records", IssuedBucket, bad, ErrIssuedBucket)
+		return fmt.Errorf("mash: %s %s: %w; recreate it as `mashctl init` makes it, copying its records", IssuedBucket, bad, ErrIssuedBucket)
 	}
 	return nil
 }

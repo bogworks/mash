@@ -7,15 +7,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/bogworks/mash/internal/admin"
-	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/testenv"
 )
 
 // Configuration A of the naming plan's negative tests, at the `mash` entry points of REQ-016: a rule file that refuses
 // the group "retired" and the instance "mash". These tests are permanent; none may be skipped or weakened.
 // The full table, for every entry point, is in internal/endpoint: this file proves that the mash commands (start
-// through serve and the CLI, send, prompt, provision through `mash admin`) reach it through the same configuration,
+// through serve and the CLI, send, prompt) reach it through the same configuration,
 // and that a deployment which requires a rule and supplies none does not start.
 //
 // Layers, as in the endpoint table: an address in the group retired is refused by the rule no-retired, one whose
@@ -198,55 +196,6 @@ func TestConfigAMashSendAndPrompt(t *testing.T) {
 	}
 }
 
-// provision through `mash admin`: the same configuration, the rule first, nothing created.
-func TestConfigAMashAdminProvision(t *testing.T) {
-	w := newConfigAMashWorld(t)
-	admEnv := func(extra map[string]string) map[string]string {
-		m := map[string]string{"HOME": t.TempDir(), "MASH_SERVER": w.e.URL, "MASH_ENDPOINT": w.e.Owner + ".dev." + "x", "MASH_ADMIN_CREDS": w.e.AdminCreds,
-			"MASH_INSECURE_PLAINTEXT": "1", "MASH_NAME_RULE_FILE": w.rule}
-		for k, v := range extra {
-			m[k] = v
-		}
-		return m
-	}
-	for _, c := range []struct{ addr, rule string }{
-		{w.e.Owner + ".retired.fresh", "no-retired"},
-		{w.e.Owner + ".dev.mash", "no-mash"},
-	} {
-		a, err := sap.ParseAddress(c.addr)
-		if err != nil {
-			t.Fatal(err)
-		}
-		_, user := w.e.Mint(t, a)
-		out, code := configARun(admEnv(nil), "admin", "provision", c.addr, "--user", user, "--account", w.e.Account)
-		if code == 0 || !strings.Contains(out, `name rule "`+c.rule+`"`) {
-			t.Errorf("admin provision %q: %d %s", c.addr, code, out)
-		}
-		if strings.Contains(out, "already") {
-			t.Errorf("the directory was read before the rule: %s", out)
-		}
-	}
-	// A bare name is not an address: refused, and not by the rule.
-	_, user := w.e.Mint(t, tAddr("fresh"))
-	out, code := configARun(admEnv(nil), "admin", "provision", "fresh", "--user", user, "--account", w.e.Account)
-	if code == 0 || strings.Contains(out, "name rule") {
-		t.Errorf("admin provision of a bare name: %d %s", code, out)
-	}
-	adm, err := admin.New(w.e.Conn(t, w.e.AdminCreds), w.e.Owner)
-	if err != nil {
-		t.Fatal(err)
-	}
-	recs, _, err := adm.List(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, r := range recs {
-		if r.Instance == "fresh" || r.Instance == "mash" && r.Owner == w.e.Owner {
-			t.Errorf("a refused provision wrote the record %s.%s.%s", r.Owner, r.Group, r.Instance)
-		}
-	}
-}
-
 // A deployment that sets name_rule_required but supplies no file does not start, at every mash entry point and from
 // the environment and from config.json alike.
 func TestConfigAMashRequiredWithoutFileRefusesToStart(t *testing.T) {
@@ -268,13 +217,9 @@ func TestConfigAMashRequiredWithoutFileRefusesToStart(t *testing.T) {
 			return m
 		}
 		const want = "a name rule is required"
-		for _, args := range [][]string{{"inbox"}, {"who"}, {"read", "1"}, {"send", "acme.team1.peer", "hi"}, {"prompt", "acme.team1.peer", "hi"},
-			{"admin", "provision", "o.dev.x", "--user", "U", "--account", "A"}} {
+		for _, args := range [][]string{{"inbox"}, {"who"}, {"read", "1"}, {"send", "acme.team1.peer", "hi"}, {"prompt", "acme.team1.peer", "hi"}} {
 			t.Run(how+"/"+strings.Join(args[:min(2, len(args))], " "), func(t *testing.T) {
 				e := env()
-				if args[0] == "admin" {
-					e["MASH_ADMIN_CREDS"] = w.e.AdminCreds
-				}
 				out, code := configARun(e, args...)
 				if code == 0 || !strings.Contains(out, want) {
 					t.Fatalf("%d %s", code, out)

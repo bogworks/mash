@@ -10,7 +10,7 @@ import (
 	"github.com/bogworks/mash/internal/config"
 )
 
-// lockName is the advisory lock file in the key directory that serializes the commands that write the account JWT (`mashctl revoke`, `retire`, `deprovision`, a rotating `reissue`).
+// lockName is the advisory lock file in the key directory that serializes the commands that write the account JWT (`mashctl endpoint delete`, a rotating `endpoint reissue`).
 const lockName = "apply.lock"
 
 // ErrLocked is the error of Lock when another holder keeps the lock past the wait.

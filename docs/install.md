@@ -132,7 +132,7 @@ On one machine with no NATS server yet, `mashctl init --local --owner <name> --s
 | `transient_budget` | `MASH_TRANSIENT_BUDGET` | serve: how long transient failures (timeouts, no responders, a dropped connection) may repeat while waiting for the lease before the wait ends. A Go duration above zero. Default `15m`. |
 | `transient_max` | `MASH_TRANSIENT_MAX` | serve: the retry backoff after transient failures doubles from `lease_retry` up to this. A Go duration above zero. Default `2m`. |
 | `cli_timeout` | `MASH_CLI_TIMEOUT` | The total deadline of one command (`send`, `inbox`, `who` and the rest), open included. A Go duration above zero. Default `15m`. |
-| `admin_timeout` | `MASH_ADMIN_TIMEOUT` | The total deadline of one `mash admin` command. A Go duration above zero, for a large fleet or a slow link. Default `30s`. |
+| `admin_timeout` | `MASH_ADMIN_TIMEOUT` | The total deadline of one `mashctl` command. A Go duration above zero, for a large fleet or a slow link. Default `30s`. |
 
 The environment wins over the file.
 

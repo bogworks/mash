@@ -30,19 +30,6 @@ func TestAdminMetaFlags(t *testing.T) {
 			t.Errorf("%v accepted", bad)
 		}
 	}
-	args := []string{"provision", "o.g.a", "--describe", "d", "--cap", "q", "--cap", "p", "--role", "r"}
-	opt := func(name string) string {
-		for i := 2; i+1 < len(args); i++ {
-			if args[i] == name {
-				return args[i+1]
-			}
-		}
-		return ""
-	}
-	m, err := provisionMeta("mashctl", args, opt)
-	if err != nil || m.Description != "d" || !reflect.DeepEqual(m.Caps, []string{"q", "p"}) || m.Role != "r" {
-		t.Fatalf("%+v %v", m, err)
-	}
 }
 
 func TestShortKey(t *testing.T) {
@@ -53,7 +40,7 @@ func TestShortKey(t *testing.T) {
 	}
 }
 
-func TestListFieldsAreEscaped(t *testing.T) {
+func TestMetaFieldsAreEscaped(t *testing.T) {
 	hostile := "x\x1b[2K\r\nREFUSED"
 	want := `x\x1b[2K\x0d\x0aREFUSED`
 	r := store.Record{Owner: "o", Group: "g", Instance: "a", Description: hostile, Caps: []string{hostile}}

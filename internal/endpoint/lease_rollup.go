@@ -12,7 +12,7 @@ import (
 const leaseRollupTimeout = 2 * time.Second
 
 // LeaseRollupWarning is the lease bucket line of status, and the reason serve warns at start. It reports true when
-// the lease bucket's stream allows rollup writes (a bucket `mash admin init` has not hardened). It never fails and
+// the lease bucket's stream allows rollup writes (a bucket `mashctl init` has not hardened). It never fails and
 // changes nothing: when the server denies or cannot answer the stream info read it reports false, so a missing
 // permission or a slow server stays silent.
 func (e *Endpoint) LeaseRollupWarning(ctx context.Context) bool {
@@ -31,8 +31,8 @@ func (e *Endpoint) LeaseRollupLine(ctx context.Context) (line string, ok bool) {
 	if !e.LeaseRollupWarning(ctx) {
 		return "", false
 	}
-	return "lease bucket: WARN - it allows rollup writes; run mash admin init", true
+	return "lease bucket: WARN - it allows rollup writes; run mashctl init", true
 }
 
 // LeaseRollupStartWarning is the stderr line serve prints once at start when the lease bucket allows rollup writes.
-const LeaseRollupStartWarning = "mash: warning: the lease bucket allows rollup writes; run `mash admin init` to harden it (an endpoint credential could purge every lease)"
+const LeaseRollupStartWarning = "mash: warning: the lease bucket allows rollup writes; run `mashctl init` to harden it (an endpoint credential could purge every lease)"

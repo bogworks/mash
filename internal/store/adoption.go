@@ -139,7 +139,7 @@ func VerifyAdoptionBucket(ctx context.Context, js jetstream.JetStream) error {
 		bad = fmt.Sprintf("keeps fewer than %d revisions of a key", AdoptionHistory)
 	}
 	if bad != "" {
-		return fmt.Errorf("mash: %s %s: %w; recreate it as `mash admin init` makes it, copying its revisions", AdoptionBucket, bad, ErrAdoptionBucket)
+		return fmt.Errorf("mash: %s %s: %w; recreate it as `mashctl init` makes it, copying its revisions", AdoptionBucket, bad, ErrAdoptionBucket)
 	}
 	return nil
 }

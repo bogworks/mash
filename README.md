@@ -179,7 +179,7 @@ claude plugin marketplace add ~/.mash-plugin
 claude plugin install mash@mash
 ```
 
-Operators set up the server with `mashctl init` (or `mashctl adopt` for a server you already run) and make endpoints with `mashctl endpoint create`; `mash admin` is deprecated. See [docs/mashctl.md](docs/mashctl.md) and [docs/operations.md](docs/operations.md). For TLS, a cluster of NATS servers and a second `mashctl` machine, see [docs/tls-and-clusters.md](docs/tls-and-clusters.md).
+Operators set up the server with `mashctl init` (or `mashctl adopt` for a server you already run) and make endpoints with `mashctl endpoint create`. See [docs/mashctl.md](docs/mashctl.md) and [docs/operations.md](docs/operations.md). For TLS, a cluster of NATS servers and a second `mashctl` machine, see [docs/tls-and-clusters.md](docs/tls-and-clusters.md).
 
 ## Status
 

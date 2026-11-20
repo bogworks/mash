@@ -114,19 +114,19 @@ func TestAdminAndSystemConnectionsRequireTLS(t *testing.T) {
 	e := newApplyEnv(t).withDirectory()
 	e.env["MASH_INSECURE_PLAINTEXT"] = ""
 	e.env["MASH_ADMIN_CREDS"] = e.pl.Creds
-	for _, args := range [][]string{{"issued", "check"}, {"list"}, {"init"}} {
+	for _, args := range [][]string{{"issued", "check"}, {"endpoint", "list"}, {"init"}} {
 		out, errb, code := e.run(args...)
 		refused(t, fmt.Sprint(args), code, out, errb)
 	}
 	// with the override the same server works, and stderr carries the warning
 	e.env["MASH_INSECURE_PLAINTEXT"] = "1"
-	if out, errb, code := runWithProcessStderr(e.t, e.run, "list"); code != 0 || !strings.Contains(errb, "mash: WARNING: plain-text connection to") {
+	if out, errb, code := runWithProcessStderr(e.t, e.run, "endpoint", "list"); code != 0 || !strings.Contains(errb, "mash: WARNING: plain-text connection to") {
 		t.Fatalf("with the override: %d\n%s\n%s", code, out, errb)
 	}
 	// a non-loopback plain URL is refused without the override, before any connection; with it, it is allowed (and
 	// warned about), so the failure is a connection failure, not a refusal
 	e.env["MASH_SERVER"] = "nats://192.0.2.1:4222"
-	for _, args := range [][]string{{"issued", "check"}, {"list"}} {
+	for _, args := range [][]string{{"issued", "check"}, {"endpoint", "list"}} {
 		e.env["MASH_INSECURE_PLAINTEXT"] = ""
 		out, errb, code := e.run(args...)
 		refused(t, fmt.Sprint(args)+" non-loopback", code, out, errb)
@@ -177,8 +177,8 @@ func TestAdminVerbsAcceptATLSServer(t *testing.T) {
 	env["MASH_INSECURE_PLAINTEXT"] = "1"
 	out.Reset()
 	errb.Reset()
-	if code := runEnv([]string{"list"}, func(k string) string { return env[k] }, &out, &errb); code != 0 {
-		t.Fatalf("list over TLS with the opt-in: %d\n%s\n%s", code, out.String(), errb.String())
+	if code := runEnv([]string{"endpoint", "list"}, func(k string) string { return env[k] }, &out, &errb); code != 0 {
+		t.Fatalf("endpoint list over TLS with the opt-in: %d\n%s\n%s", code, out.String(), errb.String())
 	}
 }
 
@@ -199,7 +199,7 @@ func TestPlainURLRefusalExitsTwoEverywhere(t *testing.T) {
 		{"endpoint", "delete", "o/g/a"},
 		{"issued", "check"},
 		{"audit"},
-		{"list"},
+
 		{"init"},
 	} {
 		out, errb, code := e.run(args...)
