@@ -39,9 +39,6 @@ var beforeRetireRevoke func()
 // deprovisionIfUser is the guarded server removal; a test replaces it to fail after the record is gone.
 var deprovisionIfUser = (*admin.Admin).DeprovisionIfUser
 
-// retireNow is the clock for the renamed creds file's suffix; a test replaces it.
-var retireNow = time.Now
-
 // retireRevokeNow is the clock for the revocation time the future-dated creds check compares against; a test replaces it.
 var retireRevokeNow = time.Now
 
@@ -209,6 +206,12 @@ func retireAddress(addr sap.Address, opts retireOpts, env func(string) string, l
 				}
 				if revokeErr != nil && errors.Is(err, revokeErr) {
 					if errors.Is(revokeErr, apply.ErrNotConfirmed) {
+						if k, n, ok := apply.ConfirmCounts(revokeErr); ok {
+							if miss := n - k; miss > 0 {
+								return retireResult{}, cliframe.Failf("%s was not deleted: %d of %d servers did not confirm its key was cancelled", name, miss, n).WithHint(opts.again)
+							}
+							return retireResult{}, cliframe.Failf("%s was not deleted: %d servers took the cancellation but it could not be read back", name, n).WithHint(opts.again)
+						}
 						return retireResult{}, fail("%v", err).WithHint(opts.again)
 					}
 					return retireResult{}, fail("%v; %s", err, ctl.NotRevoked)
@@ -242,7 +245,7 @@ func retireAddress(addr sap.Address, opts retireOpts, env func(string) string, l
 		case !fi.Mode().IsRegular():
 			return retireResult{}, partial("%s is not a regular file and was left in place", credsPath)
 		default:
-			dest := credsPath + ".retired-" + retireNow().UTC().Format("20060102T150405Z")
+			dest := credsPath + ".deleted"
 			final, err := archiveNoReplace(credsPath, dest)
 			if err != nil {
 				return retireResult{}, partial("the credentials file was not set aside: %v", err)

@@ -8,6 +8,8 @@ import (
 	"os"
 	"strings"
 
+	"golang.org/x/term"
+
 	"github.com/bogworks/mash/internal/cliframe"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/sap"
@@ -27,14 +29,7 @@ Example:
 
 // stdinIsTerminal says whether standard input is a terminal; a test replaces it.
 var stdinIsTerminal = func() bool {
-	fi, err := os.Stdin.Stat()
-	if err != nil || fi.Mode()&os.ModeCharDevice == 0 {
-		return false
-	}
-	if null, err := os.Stat(os.DevNull); err == nil && os.SameFile(fi, null) {
-		return false
-	}
-	return true
+	return term.IsTerminal(int(os.Stdin.Fd()))
 }
 
 // confirmStdin is where the typed confirmation is read from; a test replaces it.
@@ -72,10 +67,10 @@ type deleteJSON struct {
 
 // deletePlanJSON is the JSON of a delete with --dry-run.
 type deletePlanJSON struct {
-	Address          string `json:"address"`
-	Deleted          bool   `json:"deleted"`
-	DryRun           bool   `json:"dry_run"`
-	MessagesToDelete uint64 `json:"messages_to_delete"`
+	Address         string `json:"address"`
+	Deleted         bool   `json:"deleted"`
+	MessagesDeleted uint64 `json:"messages_deleted"`
+	DryRun          bool   `json:"dry_run"`
 }
 
 // confirmDelete asks the person to type the address. It runs after the endpoint is found and its messages counted, and
@@ -119,10 +114,10 @@ func runEndpointDelete(args []string, g cliframe.Global, env func(string) string
 	name := in.addr.String()
 	if res.planned {
 		if in.json {
-			writeJSON(stdout, deletePlanJSON{Address: name, DryRun: true, MessagesToDelete: res.messages})
+			writeJSON(stdout, deletePlanJSON{Address: name, Deleted: true, MessagesDeleted: res.messages, DryRun: true})
 			return 0
 		}
-		fmt.Fprintf(stdout, "Would delete endpoint %s and %s\nNothing was changed.\n", name, inboxWords(res.messages))
+		fmt.Fprintf(stdout, "Would delete endpoint %s and %s\n", name, inboxWords(res.messages))
 		return 0
 	}
 	if in.json {
@@ -138,7 +133,7 @@ func runEndpointDelete(args []string, g cliframe.Global, env func(string) string
 			fmt.Fprintf(stdout, "servers acknowledged: %d\n", res.acked)
 		}
 		if res.renamedTo != "" {
-			fmt.Fprintf(stdout, "credentials file: renamed to %s\n", res.renamedTo)
+			fmt.Fprintf(stdout, "credentials file: set aside as %s\n", res.renamedTo)
 		}
 	}
 	return 0

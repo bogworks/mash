@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats.go/jetstream"
@@ -283,14 +282,12 @@ func TestEndpointDeleteFinishesAfterKill(t *testing.T) {
 	h := newFleetEnv(t)
 	a := ad("d1")
 	h.seed(a)
-	retireNow = func() time.Time { return time.Date(2026, 11, 2, 3, 4, 5, 0, time.UTC) }
-	t.Cleanup(func() { retireNow = time.Now })
 	creds, _ := os.ReadFile(h.creds(a))
 	if _, se, code := h.run("endpoint", "delete", a.String(), "--yes"); code != 0 {
 		t.Fatalf("delete %q", se)
 	}
 	// the state of a kill before the creds step: the record is gone, the address burned, the creds file in place
-	retired := h.creds(a) + ".retired-20261102T030405Z"
+	retired := h.creds(a) + ".deleted"
 	if err := os.Rename(retired, h.creds(a)); err != nil {
 		t.Fatal(err)
 	}

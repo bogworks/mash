@@ -1,6 +1,6 @@
 {
   "address": "o.g.a",
-  "deleted": false,
-  "dry_run": true,
-  "messages_to_delete": 0
+  "deleted": true,
+  "messages_deleted": 0,
+  "dry_run": true
 }

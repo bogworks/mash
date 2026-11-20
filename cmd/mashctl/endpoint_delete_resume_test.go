@@ -83,14 +83,14 @@ func TestEndpointDeleteFinishesAfterKilledPurge(t *testing.T) {
 					t.Fatalf("%d %q %q", code, so, se)
 				}
 				h.assertCleaned(a)
-				m, _ := filepath.Glob(h.creds(a) + ".retired-*")
+				m, _ := filepath.Glob(h.creds(a) + ".deleted*")
 				if withCreds && len(m) != 1 {
 					t.Errorf("creds not renamed: %v", m)
 				}
 				if !strings.HasPrefix(so, "Deleted endpoint o.g.kd\nretired marker: finished\n") {
 					t.Errorf("text: %q", so)
 				}
-				if withCreds && !strings.Contains(so, "credentials file: renamed to ") {
+				if withCreds && !strings.Contains(so, "credentials file: set aside as ") {
 					t.Errorf("verbose lacks the renamed file: %q", so)
 				}
 			})

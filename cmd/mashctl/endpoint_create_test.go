@@ -529,7 +529,7 @@ func TestEndpointCreateDryRun(t *testing.T) {
 		{"endpoint", "create", ad("dry").String(), "--dry-run"},
 	} {
 		so, se, code := h.run(args...)
-		if code != 0 || so != "Would create endpoint "+ad("dry").String()+"\nNothing was changed.\n" {
+		if code != 0 || so != "Would create endpoint "+ad("dry").String()+"\n" {
 			t.Fatalf("%v: %d %q %q", args, code, so, se)
 		}
 	}

@@ -128,14 +128,14 @@ Creates an endpoint: it signs the endpoint's user key with the account signing k
 
 A key is used at one address, once. A key that was issued before, or revoked, is refused.
 
-**The join file** is JSON, mode 0600, written to a temporary file in the same folder and then renamed. A path that exists is refused. It has these fields and no others:
+**The join file** is JSON, mode 0600, written to a temporary file in the same folder and then renamed. A path that exists is refused, and so is a folder that other users can write in (this holds for `--out` on every form, and for the `<PATH>.pending` file beside it). The CA file may hold certificates only: only its `CERTIFICATE` blocks are copied, and a file with a private key or any other block in it is refused with `error: FILE must hold only certificates`. It has these fields and no others:
 
 | Field | Holds |
 | --- | --- |
 | `mash_join` | `1`, the version of the format |
 | `address` | the endpoint, as `owner.group.name` |
 | `servers` | the server addresses from the configuration |
-| `ca` | the certificate authority certificate as PEM text, read from the configured CA file, or `null` when none is configured |
+| `ca` | the certificate authority certificates as PEM text, read from the configured CA file, or `null` when none is configured (`mash join` then trusts the system roots) |
 | `creds` | the whole text of the NATS creds file, user JWT and seed (without `--public-key`) |
 | `user_jwt` | the user JWT alone (with `--public-key`) |
 
@@ -154,11 +154,10 @@ Created endpoint alice.dev.design
 Join file: alice.dev.design.join
 ```
 
-With `--verbose` the lines `servers: ...`, `credentials file: PATH` (or `join file: PATH`) and `public key: KEY` follow. With `--dry-run`:
+With `--verbose` the lines `servers: ...`, `credentials file: PATH` (or `join file: PATH`) and `public key: KEY` follow. With `--dry-run` it prints one line, and with `--json` the same object plus `"dry_run": true`:
 
 ```text
 Would create endpoint alice.dev.design
-Nothing was changed.
 ```
 
 With `--json`, `{"address": "alice.dev.design", "installed_here": true, "join_file": null}`. With `--out`, `installed_here` is `false` and `join_file` is the path. Neither the seed nor the JWT is printed.
@@ -184,7 +183,7 @@ Gives an existing endpoint new credentials and cancels the old ones. It revokes 
 
 With no option the new key pair is made on this host and `<config dir>/<address>.creds` is replaced. With `--out PATH` the command writes a join file for another machine and installs nothing here. With `--out PATH --public-key PATH` it signs the endpoint's new public key and the join file holds the user JWT. `--public-key` needs `--out`.
 
-On success it prints `Reissued credentials for alice.dev.design`, then `Join file: PATH` with `--out`. With `--verbose` it adds `servers`, `credentials file` or `join file`, `servers acknowledged` and `public key` lines. With `--json` it prints `{"address": "alice.dev.design", "join_file": null}`; with `--out` `join_file` is the path. There is no bulk form: reissue takes one address.
+On success it prints `Reissued credentials for alice.dev.design`, then `Join file: PATH` with `--out`. With `--verbose` it adds the line `servers acknowledged: N`. With `--dry-run` it prints `Would reissue credentials for alice.dev.design`, and with `--json` the same object plus `"dry_run": true`. If the join file cannot be written after the key changed, the hint is `remove PATH or choose another --out`. With `--json` it prints `{"address": "alice.dev.design", "join_file": null}`; with `--out` `join_file` is the path. There is no bulk form: reissue takes one address.
 
 `--public-key` naming the key the endpoint already has is refused: nothing would be rotated. Make a new key with `mash key create --out NAME.seed`. The one exception is a rerun after a killed `--public-key` reissue: the command leaves `<PATH>.pending` while the key changes, and a rerun with the same key and `--out` finishes the join file and removes the file.
 
@@ -202,12 +201,12 @@ mashctl endpoint delete ADDRESS [--yes] [--dry-run] [--json] [--servers N] [--sy
 
 Deletes an endpoint, its inbox and its credentials. The address can never be used again. Without `--yes` it prints `This deletes <address> and the <N> messages in its inbox. It cannot be undone.` and asks you to type the address; any other text deletes nothing and exits 1. That needs a terminal: with no terminal and no `--yes` it prints `error: deleting needs a terminal to confirm, or --yes` and exits 2. The question comes after the endpoint is found and its messages counted, and before anything changes. In order, it:
 
-1. revokes the endpoint's user key in the account JWT, on every server (see [Revocation](#revocation)); a revocation that cannot be confirmed stops the command with nothing removed;
+1. revokes the endpoint's user key in the account JWT, on every server (see [Revocation](#revocation)); a revocation that some server did not confirm stops the command with nothing removed (`error: ADDRESS was not deleted: K of N servers did not confirm its key was cancelled`, with the same command as the hint);
 2. removes the directory record and the inbox, so unread mail is lost;
 3. burns the address: it is never assigned again, to any key;
-4. renames the creds file, if one is in the config directories, to `<address>.creds.retired-<UTC time>`.
+4. renames the creds file, if one is in the config directories, to `<address>.creds.deleted` (`.deleted.1`, `.deleted.2` and so on if that name is taken; nothing is overwritten). The file is no longer counted as an installed endpoint.
 
-On success it prints `Deleted endpoint <address>`; `--verbose` adds `retired marker: written`, `servers acknowledged: N` and `credentials file: renamed to <path>`. `--dry-run` prints `Would delete endpoint <address> and the N messages in its inbox` and `Nothing was changed.`, asks nothing and changes nothing. `--json` prints `{"address", "deleted", "messages_deleted"}`; a failure prints `{"error", "hint"}`. An address that does not exist is `error: <address> does not exist`, exit 1. A killed run finishes when you run the same command again. Exit codes: 0 deleted, 1 refused, partial or error, 2 usage error. After a partial delete the message is `error: deleted <address>, but <what is left>` with `hint: mashctl endpoint delete <address>`; running the same command again is safe and finishes it. The options `--force`, `--delete-creds` and `--no-revoke` no longer exist.
+On success it prints `Deleted endpoint <address>`; `--verbose` adds `retired marker: written`, `servers acknowledged: N` and `credentials file: set aside as <path>`. `--dry-run` prints `Would delete endpoint <address> and the N messages in its inbox`, asks nothing and changes nothing. `--json` prints `{"address", "deleted", "messages_deleted"}`, and with `--dry-run` the same object plus `"dry_run": true`; a failure prints `{"error", "hint"}`. An address that does not exist is `error: <address> does not exist`, exit 1. A killed run finishes when you run the same command again. Exit codes: 0 deleted, 1 refused, partial or error, 2 usage error. After a partial delete the message is `error: deleted <address>, but <what is left>` with `hint: mashctl endpoint delete <address>`; running the same command again is safe and finishes it. The options `--force`, `--delete-creds` and `--no-revoke` no longer exist.
 
 ## mashctl endpoint list and show
 
@@ -272,6 +271,8 @@ Every failure is `error: WHAT` on standard error and at most one `hint: COMMAND`
 | `PATH already exists` | 1 | The join file path is taken; nothing is written over it. |
 | `no server is configured` | 1 | Set a server with `--server` or `MASH_SERVER`. Nothing was written. |
 | `cannot read the CA file` | 1 | The configured CA file cannot be read. |
+| `FILE must hold only certificates` | 1 | The configured CA file holds a private key, another block or text that is not PEM. Nothing is written. |
+| `the folder DIR is not usable` | 1 | The `--out` folder can be written by other users. Nothing is written. |
 | `no config folder to write the credentials file in` | 1 | Set `MASH_CONFIG_DIR`, or use `--out`. |
 | `no account signing key` | 1 | Run `mashctl init` first. |
 | `the public key ... was already issued to another address`, `... was revoked` | 1 | A key is used at one address, once: make a new key with `mash key create`. A supplied key is checked before it is signed. |

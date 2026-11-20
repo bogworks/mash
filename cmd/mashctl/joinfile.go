@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -33,6 +34,9 @@ type joinBase struct {
 	ca      *string
 }
 
+// errCAFile marks a CA file that is not certificates only.
+var errCAFile = errors.New("ca file")
+
 // joinBaseOf reads the servers and the CA certificate (PEM text, from the configured CA file) from the configuration.
 func joinBaseOf(cfg config.Config) (joinBase, error) {
 	var b joinBase
@@ -49,10 +53,39 @@ func joinBaseOf(cfg config.Config) (joinBase, error) {
 		if err != nil {
 			return b, fmt.Errorf("cannot read the CA file %s: %v", cfg.TLSCA, errors.Unwrap(err))
 		}
-		pem := string(raw)
-		b.ca = &pem
+		defer clear(raw)
+		certs, ok := onlyCertificates(raw)
+		if !ok {
+			return b, fmt.Errorf("%w: %s must hold only certificates", errCAFile, cfg.TLSCA)
+		}
+		b.ca = &certs
 	}
 	return b, nil
+}
+
+// onlyCertificates re-encodes the CERTIFICATE blocks of PEM text. It reports false for any other block (a private key
+// in the same file is never copied), for data that is not PEM, and for text with no certificate.
+func onlyCertificates(raw []byte) (string, bool) {
+	var out []byte
+	blocks := 0
+	rest := raw
+	for {
+		var blk *pem.Block
+		blk, rest = pem.Decode(rest)
+		if blk == nil {
+			break
+		}
+		if blk.Type != "CERTIFICATE" || len(blk.Headers) != 0 {
+			return "", false
+		}
+		out = append(out, pem.EncodeToMemory(blk)...)
+		blocks++
+	}
+	// A block that does not decode is skipped by pem.Decode; refuse it rather than drop it.
+	if blocks == 0 || bytes.Count(raw, []byte("-----BEGIN ")) != blocks || len(bytes.TrimSpace(rest)) != 0 {
+		return "", false
+	}
+	return string(out), true
 }
 
 // withCreds is the join file of addr that holds the whole creds file text.

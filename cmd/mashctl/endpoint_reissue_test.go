@@ -45,7 +45,7 @@ func TestEndpointReissue(t *testing.T) {
 	nj := filepath.Join(out, "new.join")
 	before := epSnapshot(t, h, out)
 	so, se, code := h.run("endpoint", "reissue", a.String(), "--out", nj, "--public-key", newFile, "--dry-run")
-	if code != 0 || so != "Would reissue credentials for "+a.String()+"\nNothing was changed.\n" {
+	if code != 0 || so != "Would reissue credentials for "+a.String()+"\n" {
 		t.Fatalf("dry-run: %d %q %q", code, so, se)
 	}
 	if epSnapshot(t, h, out) != before || len(*calls) != 0 {
@@ -116,11 +116,10 @@ func TestEndpointReissueInstalledHere(t *testing.T) {
 		t.Errorf("json %q", so)
 	}
 	so, _, _ = h.run("endpoint", "reissue", a.String(), "--verbose")
-	rec, _ := h.record(a)
-	if !strings.HasPrefix(so, "Reissued credentials for "+a.String()+"\nservers: ") || !strings.Contains(so, "\ncredentials file: "+p+"\nservers acknowledged: 3\npublic key: "+rec.User+"\n") {
+	if so != "Reissued credentials for "+a.String()+"\nservers acknowledged: 3\n" {
 		t.Errorf("verbose %q", so)
 	}
-	if so, _, code := h.run("endpoint", "reissue", a.String(), "--dry-run"); code != 0 || so != "Would reissue credentials for "+a.String()+"\nNothing was changed.\n" {
+	if so, _, code := h.run("endpoint", "reissue", a.String(), "--dry-run"); code != 0 || so != "Would reissue credentials for "+a.String()+"\n" {
 		t.Errorf("dry-run %d %q", code, so)
 	}
 }

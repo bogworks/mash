@@ -96,7 +96,7 @@ func epErrOf(addr sap.Address, code, detail string) *cliframe.Error {
 	return cliframe.Failf("%s", detail)
 }
 
-func (r *epRefusal) err(addr sap.Address) error        { return epErrOf(addr, r.Code, r.Detail) }
+func (r *epRefusal) err(addr sap.Address) error { return epErrOf(addr, r.Code, r.Detail) }
 func (f *epFail) err(addr sap.Address) *cliframe.Error {
 	e := epErrOf(addr, f.code, f.detail)
 	if f.hint != "" {
@@ -130,6 +130,9 @@ func epLoadTarget(verb string, in *epInput, env func(string) string, lookup conf
 	}
 	t.cfg = cfg
 	if t.base, err = joinBaseOf(cfg); err != nil {
+		if errors.Is(err, errCAFile) {
+			return t, cliframe.Failf("%s", strings.TrimPrefix(err.Error(), errCAFile.Error()+": "))
+		}
 		return t, cliframe.Failf("%v", err).WithHint("mashctl endpoint " + verb + " " + in.addr.String() + " --server URL")
 	}
 	out := in.values["--out"]
@@ -140,6 +143,14 @@ func epLoadTarget(verb string, in *epInput, env func(string) string, lookup conf
 	if t.join {
 		t.again += " --out " + out
 		t.outPath = out
+		// The folder of a join file, and of its .pending staging file, is one only the user can swap files in. A
+		// folder that is missing is made later, 0700.
+		dir := filepath.Dir(out)
+		if _, serr := os.Lstat(dir); serr == nil {
+			if derr := ctlkeys.CheckParentDir(dir); derr != nil {
+				return t, cliframe.Failf("the folder %s is not usable: %v; nothing was changed", dir, derr)
+			}
+		}
 	}
 	if pk != "" {
 		t.again += " --public-key " + pk
@@ -211,10 +222,10 @@ func epPrint(w io.Writer, verb string, t epTarget, res epResult, verbose, jsonOu
 	}
 	switch {
 	case res.planned && verb == "create":
-		fmt.Fprintf(w, "Would create endpoint %s\nNothing was changed.\n", name)
+		fmt.Fprintf(w, "Would create endpoint %s\n", name)
 		return
 	case res.planned:
-		fmt.Fprintf(w, "Would reissue credentials for %s\nNothing was changed.\n", name)
+		fmt.Fprintf(w, "Would reissue credentials for %s\n", name)
 		return
 	case verb == "create":
 		fmt.Fprintf(w, "Created endpoint %s\n", name)
@@ -227,14 +238,15 @@ func epPrint(w io.Writer, verb string, t epTarget, res epResult, verbose, jsonOu
 	if !verbose {
 		return
 	}
+	if verb == "reissue" {
+		fmt.Fprintf(w, "servers acknowledged: %d\n", res.acked)
+		return
+	}
 	fmt.Fprintf(w, "servers: %s\n", strings.Join(t.base.servers, ", "))
 	if t.join {
 		fmt.Fprintf(w, "join file: %s\n", t.outPath)
 	} else {
 		fmt.Fprintf(w, "credentials file: %s\n", t.outPath)
-	}
-	if verb == "reissue" {
-		fmt.Fprintf(w, "servers acknowledged: %d\n", res.acked)
 	}
 	fmt.Fprintf(w, "public key: %s\n", res.userPub)
 }

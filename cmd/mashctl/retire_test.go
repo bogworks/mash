@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/nats-io/nats.go/jetstream"
 
@@ -44,14 +43,12 @@ func TestRetireRenamesCredsByDefault(t *testing.T) {
 	h := newFleetEnv(t)
 	h.seed(ad("c"))
 	want, _ := os.ReadFile(h.creds(ad("c")))
-	retireNow = func() time.Time { return time.Date(2026, 11, 2, 3, 4, 5, 0, time.UTC) }
-	t.Cleanup(func() { retireNow = time.Now })
 	out, errb, code := h.run("endpoint", "delete", "o.g.c", "--yes", "--verbose")
 	if code != 0 {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
-	moved := h.creds(ad("c")) + ".retired-20261102T030405Z"
-	if !strings.Contains(out, "credentials file: renamed to "+moved+"\n") || !strings.Contains(out, "retired marker: written\n") {
+	moved := h.creds(ad("c")) + ".deleted"
+	if !strings.Contains(out, "credentials file: set aside as "+moved+"\n") || !strings.Contains(out, "retired marker: written\n") {
 		t.Errorf("report: %q", out)
 	}
 	got, err := os.ReadFile(moved)
@@ -256,8 +253,6 @@ func TestRetireRefusalStillSaysNothingWasChanged(t *testing.T) {
 
 func TestRetireTwiceSameSecondKeepsBothSeeds(t *testing.T) {
 	h := newFleetEnv(t)
-	retireNow = func() time.Time { return time.Date(2026, 11, 2, 3, 4, 5, 0, time.UTC) }
-	t.Cleanup(func() { retireNow = time.Now })
 	var seeds []string
 	h.seed(ad("c"))
 	for i := 0; i < 2; i++ {
@@ -272,7 +267,7 @@ func TestRetireTwiceSameSecondKeepsBothSeeds(t *testing.T) {
 			t.Fatalf("%d %q %q", code, out, errb)
 		}
 	}
-	first := h.creds(ad("c")) + ".retired-20261102T030405Z"
+	first := h.creds(ad("c")) + ".deleted"
 	for i, p := range []string{first, first + ".1"} {
 		got, err := os.ReadFile(p)
 		if err != nil || string(got) != seeds[i] {

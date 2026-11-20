@@ -130,7 +130,7 @@ func TestEndpointDeleteDryRunAsksNothingAndChangesNothing(t *testing.T) {
 	noTerminal(t)
 	for _, extra := range [][]string{nil, {"--yes"}} {
 		out, errb, code := h.run(append([]string{"endpoint", "delete", "o.g.q", "--dry-run"}, extra...)...)
-		if code != 0 || out != "Would delete endpoint o.g.q and the 3 messages in its inbox\nNothing was changed.\n" || errb != "" {
+		if code != 0 || out != "Would delete endpoint o.g.q and the 3 messages in its inbox\n" || errb != "" {
 			t.Errorf("%v: %d %q %q", extra, code, out, errb)
 		}
 	}

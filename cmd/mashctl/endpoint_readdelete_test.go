@@ -8,7 +8,6 @@ import (
 	"regexp"
 	"strings"
 	"testing"
-	"time"
 )
 
 var updateEndpointGolden = flag.Bool("update-endpoint", false, "rewrite the cmd/mashctl/testdata/endpoint_*.golden.json files")
@@ -47,13 +46,11 @@ func TestEndpointDeleteRemovesRecordRenamesCredsRevokesKey(t *testing.T) {
 	if so, _, code := h.run("endpoint", "delete", "o.g.d", "--yes", "--json", "--verbose"); code != 0 || !strings.Contains(so, `"deleted": true`) {
 		t.Errorf("delete json %d %q", code, so)
 	}
-	retireNow = func() time.Time { return time.Date(2026, 11, 2, 3, 4, 5, 0, time.UTC) }
-	t.Cleanup(func() { retireNow = time.Now })
 	out, errb, code := h.run("endpoint", "delete", "o.g.c", "--yes", "--verbose")
 	if code != 0 || !strings.HasPrefix(out, "Deleted endpoint o.g.c\n") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
-	if !strings.Contains(out, "servers acknowledged: 1\n") || !strings.Contains(out, "credentials file: renamed to ") || !strings.Contains(out, ".retired-20261102T030405Z") || !strings.Contains(out, "retired marker: written\n") {
+	if !strings.Contains(out, "servers acknowledged: 1\n") || !strings.Contains(out, "credentials file: set aside as ") || !strings.Contains(out, ".deleted") || !strings.Contains(out, "retired marker: written\n") {
 		t.Errorf("report: %q", out)
 	}
 	noSecrets(t, out, errb)
@@ -63,7 +60,7 @@ func TestEndpointDeleteRemovesRecordRenamesCredsRevokesKey(t *testing.T) {
 	if _, err := os.Lstat(h.creds(ad("c"))); !os.IsNotExist(err) {
 		t.Errorf("creds still at the old name: %v", err)
 	}
-	if _, err := os.Lstat(h.creds(ad("c")) + ".retired-20261102T030405Z"); err != nil {
+	if _, err := os.Lstat(h.creds(ad("c")) + ".deleted"); err != nil {
 		t.Errorf("renamed file: %v", err)
 	}
 	rec, found, err := h.adminOf().IssuedByKey(t.Context(), user)
@@ -94,7 +91,7 @@ func TestEndpointDeleteDryRunChangesNothing(t *testing.T) {
 	h.seed(ad("c"))
 	before, _ := os.ReadFile(h.creds(ad("c")))
 	out, errb, code := h.run("endpoint", "delete", "o.g.c", "--dry-run")
-	if code != 0 || out != "Would delete endpoint o.g.c and its empty inbox\nNothing was changed.\n" || errb != "" {
+	if code != 0 || out != "Would delete endpoint o.g.c and its empty inbox\n" || errb != "" {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
 	if r := h.records(); len(r) != 1 {
@@ -227,8 +224,6 @@ func TestEndpointGoldens(t *testing.T) {
 	h := newFleetEnv(t)
 	h.seed(ad("a"))
 	h.seed(ad("b"))
-	retireNow = func() time.Time { return time.Date(2026, 11, 2, 3, 4, 5, 0, time.UTC) }
-	t.Cleanup(func() { retireNow = time.Now })
 
 	out, errb, code := h.run("endpoint", "list", "--json")
 	if code != 0 {

@@ -127,7 +127,7 @@ func epReissue(in *epInput, env func(string) string, lookup config.Lookup, stder
 		base: t.base, join: t.join, again: t.again}
 	failed := func(f *epFail) (epTarget, epResult, error) {
 		e := f.err(addr)
-		if f.again {
+		if f.again && f.hint == "" {
 			e = e.WithHint(t.again)
 		}
 		return t, epResult{}, e
@@ -504,11 +504,15 @@ func (r epRun) reissue(addr sap.Address, makeKey bool, pub, outPath string, resu
 		return "", 0, &epFail{refused: true, code: "file_exists", detail: fmt.Sprintf("%s appeared while the command ran; endpoint %s was reissued but %s was not written", outPath, addr, outPath), again: true}
 	}
 	if werr != nil {
+		joinHint := ""
+		if r.join {
+			joinHint = fmt.Sprintf("remove %s or choose another --out", outPath)
+		}
 		kept := ""
 		if makeKey {
 			kept = fmt.Sprintf("; the new key is kept in %s", pending)
 		}
-		return "", 0, &epFail{code: "write", detail: fmt.Sprintf("endpoint %s was reissued but %s was not written (%v)%s", addr, outPath, werr, kept), again: true}
+		return "", 0, &epFail{code: "write", detail: fmt.Sprintf("endpoint %s was reissued but %s was not written (%v)%s", addr, outPath, werr, kept), again: true, hint: joinHint}
 	}
 	// enroll.Reissue released the server's name lock before the file was written, and the lock above is local to this
 	// host: a run on another host may have changed the key since. Read the record again and compare.
