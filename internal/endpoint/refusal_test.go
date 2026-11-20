@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -377,10 +378,10 @@ func TestDelayedViolationFromTimedOutSendDoesNotRefuseNext(t *testing.T) {
 	if _, err := timedSend(s, "ok"); err != nil {
 		t.Fatalf("send 2 was refused or failed: %v", err)
 	}
-	if *n != 1 {
-		t.Fatalf("flush called %d times, want 1", *n)
+	if *n != 2 { // the barrier's flush, and the one after its sentinel
+		t.Fatalf("flush called %d times, want 2", *n)
 	}
-	if _, err := timedSend(s, "ok"); err != nil || *n != 1 {
+	if _, err := timedSend(s, "ok"); err != nil || *n != 2 {
 		t.Fatalf("send 3: %v, flush calls %d (barrier must run once per dirty mark)", err, *n)
 	}
 	if s.refusals.pending() != 0 {
@@ -496,32 +497,125 @@ func TestBarrierWaitIsBoundedByContext(t *testing.T) {
 	}
 }
 
-// nats.go runs the error handler on its own goroutine: a violation can reach note a few ms after the flush returned.
-// The settle catches it before the next send registers, so that send is not refused.
+// fifoHandler models nats.go's error handler goroutine: errors are delivered to note one at a time, in order, each
+// after a delay, the way a slow handler would.
+type fifoHandler struct {
+	q    chan error
+	done chan struct{}
+}
+
+func newFifoHandler(r *refusals, delay time.Duration) *fifoHandler {
+	h := &fifoHandler{q: make(chan error, 16), done: make(chan struct{})}
+	go func() {
+		defer close(h.done)
+		for err := range h.q {
+			time.Sleep(delay)
+			r.note(err)
+		}
+	}()
+	return h
+}
+
+func (h *fifoHandler) stop() { close(h.q); <-h.done }
+
+// sentinelFake wires r like the real client against a server that denies the sentinel: the violation of a send from
+// before the barrier is delivered late (longer than the old timer), and the sentinel's violation follows it through
+// the same ordered handler.
+func sentinelFake(r *refusals, h *fifoHandler, subj string) {
+	var flushes atomic.Int32
+	r.flush = func(context.Context) error {
+		if flushes.Add(1) == 1 {
+			h.q <- violation(subj)
+		}
+		return nil
+	}
+	r.publish = func(_ context.Context, s string) error {
+		h.q <- violation(s)
+		return nil
+	}
+}
+
+// nats.go runs the error handler on its own goroutine: a violation can reach note well after the flush returned. The
+// sentinel travels the same ordered path, so settle returns only after it, and the earlier violation is dropped
+// before the next send registers. A timer could not wait that long (200 ms, against a 25 ms cap).
 func TestSettleCatchesAViolationDeliveredAfterTheFlush(t *testing.T) {
 	r := newRefusals()
 	const subj = "a.b"
-	r.flush = func(context.Context) error {
-		// The error handler's own goroutine, started as the flush returns. It carries no wall-clock delay: the settle's
-		// window is two 5 ms quiet ticks (25 ms cap), so any sleep here is a bet on how long a loaded runner takes to
-		// wake this goroutine (a 12 ms lag already fails the test; see the REAL RACE note on settle). With no sleep the
-		// test needs only the goroutine to run within that window, and still fails without the settle.
-		go r.note(violation(subj))
-		return nil
-	}
+	h := newFifoHandler(r, 100*time.Millisecond) // two deliveries: the old violation at 100 ms, the sentinel at 200 ms
+	sentinelFake(r, h, subj)
 	r.markDirty(subj)
 	ch, rel, err := r.begin(context.Background(), subj)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer rel(true)
-	time.Sleep(50 * time.Millisecond)
+	h.stop()
 	if signalled(ch) {
 		t.Fatal("a violation from before the barrier refused the next send")
+	}
+	if r.sawAmbiguous(subj) {
+		t.Fatal("the barrier left the subject ambiguous")
 	}
 	r.note(violation(subj))
 	if !signalled(ch) {
 		t.Fatal("a later violation no longer refuses the sole send")
+	}
+}
+
+// With a publish that succeeds and no violation coming back (an account that does not deny the sentinel), settle
+// still returns: at the sentinel cap, then the quiet check. It must not hang.
+func TestSettleWithoutASentinelViolationReturns(t *testing.T) {
+	r := newRefusals()
+	r.flush = func(context.Context) error { return nil }
+	r.publish = func(context.Context, string) error { return nil }
+	r.sentinelWait = 50 * time.Millisecond
+	r.markDirty("a.b")
+	start := time.Now()
+	ch, rel, err := r.begin(context.Background(), "a.b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rel(true)
+	if d := time.Since(start); d > time.Second {
+		t.Fatalf("settle took %v", d)
+	}
+	if signalled(ch) {
+		t.Fatal("signalled")
+	}
+	r.mu.Lock()
+	n := len(r.sentinels)
+	r.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("%d sentinels left registered", n)
+	}
+}
+
+// A settle that ends with its context still stops promptly.
+func TestSettleSentinelWaitIsBoundedByContext(t *testing.T) {
+	r := newRefusals()
+	r.flush = func(context.Context) error { return nil }
+	r.publish = func(context.Context, string) error { return nil }
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	if r.settle(ctx) {
+		t.Fatal("settle reported success after its context ended")
+	}
+}
+
+// The sentinel's violation is never a refusal and never taints a waiter, whether or not a barrier is waiting for it.
+func TestSentinelViolationNeverRefusesAWaiter(t *testing.T) {
+	r := newRefusals()
+	c1, rel1 := r.register("a.b", false)
+	defer rel1(true)
+	r.note(violation(sentinelPrefix + "deadbeef")) // unknown sentinel too
+	if signalled(c1) || r.sawAmbiguous("a.b") {
+		t.Fatal("sentinel violation affected a waiter")
+	}
+	c2, rel2 := r.register(sentinelPrefix+"cafe", false) // even a waiter on the sentinel subject
+	defer rel2(true)
+	r.note(violation(sentinelPrefix + "cafe"))
+	if signalled(c2) {
+		t.Fatal("sentinel violation signalled a waiter")
 	}
 }
 
