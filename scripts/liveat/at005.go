@@ -348,9 +348,12 @@ type ep5 struct {
 	host  Host // the endpoint's machine
 	seed  string
 	pub   string
-	jwt   string // on the endpoint's machine
-	creds string
+	join  string // the join file on the endpoint's machine
+	creds string // the creds file mash join installs in the config folder of the endpoint's machine
 }
+
+// credsOn is where mash join installs the creds of e: <address>.creds in the config folder of its machine.
+func (e ep5) credsOn() string { return credsIn(e.host.Home(), e.jwtBase()) }
 
 // jwtBase is the owner.group.instance part of the names of an endpoint's JWT files, so endpoints of different owners with the same
 // instance never share a file in the harness workspace (an empty owner is alice).
@@ -364,8 +367,9 @@ func (e ep5) jwtBase() string {
 
 // makeKey runs `mash key create` on h.
 func (s *At5) makeKey(h Host, name, tag string) (ep5, bool) {
-	e := ep5{name: name, host: h, seed: filepath.Join(h.Home().Dir, name+tag+".seed"), pub: filepath.Join(h.Home().Dir, name+tag+".pub")}
-	r := s.mash(h, "key-create-"+name+tag, nil, "key", "create", "--out", e.seed, "--pub-out", e.pub)
+	e := ep5{name: name, host: h, seed: filepath.Join(h.Home().Dir, name+tag+".seed")}
+	e.pub = pubOf(e.seed)
+	r := s.mash(h, "key-create-"+name+tag, nil, "key", "create", "--out", e.seed)
 	ok := s.check(h.Role()+": mash key create makes the key of "+name+tag, r.Code == 0, exitSnip(r))
 	s.watch(h, "seed", name+tag, e.seed)
 	return e, ok
@@ -382,9 +386,10 @@ func (s *At5) carryPub(from Host, path string, to Host) (string, error) {
 }
 
 // createFrom runs `mashctl endpoint create|reissue` on ctl for e (whose key was made on e.host): the public key is
-// carried to ctl, the JWT goes to the courier directory and from there to the endpoint's machine, where `mash credential
-// create` assembles the creds. verb is "create" or "reissue".
-func (s *At5) provision(ctl Host, verb string, e *ep5, credsPath string) bool {
+// carried to ctl, the join file (it holds the user JWT and no seed) goes to the courier directory and from there to the
+// endpoint's machine, where `mash join FILE --key SEED` installs the creds in the config folder (--replace for a reissue,
+// which replaces the creds of the old key). verb is "create" or "reissue".
+func (s *At5) provision(ctl Host, verb string, e *ep5) bool {
 	owner := e.owner
 	if owner == "" {
 		owner = "alice"
@@ -421,23 +426,34 @@ func (s *At5) provision(ctl Host, verb string, e *ep5, credsPath string) bool {
 		s.check("the join file is written by endpoint "+verb, false, err.Error())
 		return false
 	}
-	if tok, terr := joinUserJWT(jb); terr != nil {
+	if _, terr := joinUserJWT(jb); terr != nil {
 		s.check("the join file written by endpoint "+verb+" holds a user_jwt", false, terr.Error())
 		return false
-	} else {
-		jb = append(tok, '\n')
 	}
-	// the courier carries the JWT file to the endpoint's machine
-	e.jwt = filepath.Join(e.host.Home().Dir, e.jwtBase()+"."+verb+".jwt")
-	if err := e.host.Put(e.jwt, jb, 0o600); err != nil {
-		s.check("the JWT file is carried to "+e.host.Role(), false, err.Error())
+	// the courier carries the join file (no seed in it) to the endpoint's machine
+	e.join = filepath.Join(e.host.Home().Dir, e.jwtBase()+"."+verb+".join")
+	if err := e.host.Put(e.join, jb, 0o600); err != nil {
+		s.check("the join file is carried to "+e.host.Role(), false, err.Error())
 		return false
 	}
-	e.creds = credsPath
-	// T1b-b: the `mash credential create` flow below waits for core's `mash join`; it is left as it is until then.
-	r = s.mash(e.host, "credential-create-"+e.name+"-"+verb, nil, "credential", "create", "--seed", e.seed, "--jwt", e.jwt, "--out", credsPath, "--force")
-	ok = s.check(e.host.Role()+": mash credential create assembles the creds of "+e.name+" from its own seed and the carried JWT", r.Code == 0, exitSnip(r))
-	s.watch(e.host, "jwt", e.name+verb, credsPath)
+	e.creds = e.credsOn()
+	args2 := []string{"join", e.join, "--key", e.seed, "--json"}
+	if verb == "reissue" {
+		args2 = append(args2, "--replace")
+	}
+	r = s.mash(e.host, "join-"+e.name+"-"+verb, nil, args2...)
+	ok = s.check(e.host.Role()+": mash join installs the creds of "+e.name+" from the carried join file and its own seed", r.Code == 0, exitSnip(r))
+	if r.Code == 0 {
+		rep, jerr := parseJoinJSON(r.Stdout)
+		d := ""
+		if jerr != nil {
+			d = jerr.Error()
+		} else if expandHome(rep.Creds, e.host.Home().Dir) != e.creds || rep.Endpoint != e.jwtBase() {
+			jerr, d = fmt.Errorf("mismatch"), "reported "+rep.Endpoint+" "+rep.Creds
+		}
+		ok = s.check(e.host.Role()+": mash join --json reports the address and the creds file in the config folder", jerr == nil, d) && ok
+	}
+	s.watch(e.host, "jwt", e.name+verb, e.creds)
 	return ok
 }
 
@@ -592,19 +608,19 @@ func (s *At5) Scenario() {
 	if !ok {
 		return
 	}
-	designCreds := filepath.Join(m3.Home().Config, "design.creds")
-	if !s.provision(m1, "create", &design, designCreds) {
+	if !s.provision(m1, "create", &design) {
 		return
 	}
+	designCreds := design.creds
 	// 2. review from M2, key on M1; session on M1 connects to the server on M3.
 	review, ok := s.makeKey(m1, "review", "")
 	if !ok {
 		return
 	}
-	reviewCreds := filepath.Join(m1.Home().Config, "review.creds")
-	if !s.provision(m2, "create", &review, reviewCreds) {
+	if !s.provision(m2, "create", &review) {
 		return
 	}
+	reviewCreds := review.creds
 	dp, denv, err := s.startSession(m3, m2, "design", designCreds)
 	if !s.check("the design session on M3 connects to the server on M2 (TLS) and completes the MCP handshake", err == nil, errText(err)) {
 		return
@@ -642,7 +658,7 @@ func (s *At5) Scenario() {
 	if !ok {
 		return
 	}
-	if !s.provision(m2, "reissue", &design2, designCreds) {
+	if !s.provision(m2, "reissue", &design2) {
 		return
 	}
 	s.check("REQ-011: the old design session is dropped (its serve exits or reports the authorization failure)", s.closed(dp), "")
@@ -691,15 +707,15 @@ func (s *At5) secondOwner(m1, m2, m3 Host, aliceEnv []string) {
 		return
 	}
 	bob.owner, bob.name = "bob", "x"
-	bobCreds := filepath.Join(m3.Home().Config, "bob.creds")
-	if !s.provision(m1, "create", &bob, bobCreds) {
+	if !s.provision(m1, "create", &bob) {
 		return
 	}
+	bobCreds := bob.creds
 	ghost, ok := s.makeKey(m3, "ghost", "")
 	if !ok {
 		return
 	}
-	if !s.provision(m1, "create", &ghost, filepath.Join(m3.Home().Config, "ghost.creds")) {
+	if !s.provision(m1, "create", &ghost) {
 		return
 	}
 	p, err := m3.Spawn("forge", []string{m3.Bin("nodeinit"), "forge", "--url", s.urlOf(m2), "--ca", s.tlsOf(m3).CA, "--creds", bobCreds, "--seconds", strconv.Itoa(forgeSeconds)}, s.env(m3))
@@ -828,7 +844,7 @@ func (s *At5) plainRefusals(m1, m3 Host) {
 		return
 	}
 	url := "nats://" + ip + ":" + strconv.Itoa(DefaultPorts[0].Client)
-	env := s.epEnv(m3, m1, "design", filepath.Join(m3.Home().Config, "design.creds"), "MASH_SERVER="+url, "MASH_INSECURE_PLAINTEXT=0")
+	env := s.epEnv(m3, m1, "design", credsIn(m3.Home(), "alice.dev.design"), "MASH_SERVER="+url, "MASH_INSECURE_PLAINTEXT=0")
 	r := s.mash(m3, "plain-endpoint", env, "inbox")
 	txt := r.Text()
 	s.check("REQ-014: with no override an endpoint refuses to connect to a plain nats:// URL on a non-loopback address (refused before any connection; no plain server started)", r.Code != 0 && strings.Contains(strings.ToLower(txt), "tls"), exitSnip(r))

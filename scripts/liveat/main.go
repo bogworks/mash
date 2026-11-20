@@ -16,7 +16,7 @@
 // (and keeps it as <run>/record-<at>.md), stops every process it started by its recorded PID, and removes the run
 // directory unless --keep is given. Exit 0: every assertion held (with pending checks, the result line says PASS WITH PENDING, not a clean pass); 1: one did not; 2: usage; 3: --strict and a check is pending; 4: the run could not be set up.
 //
-// The CLI forms of contract 0.5.5 (mashctl endpoint ..., mash key create, mash credential create) are coded as the
+// The CLI forms of contract 0.5.5 (mashctl endpoint ..., mash key create, mash join) are coded as the
 // contract writes them; a build without them fails the scenario with that fact.
 package main
 

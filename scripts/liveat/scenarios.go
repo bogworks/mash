@@ -14,13 +14,52 @@ import (
 
 // The CLI forms these scenarios use that this build may not have yet (contract 0.5.5, REQ-003, REQ-004, REQ-010):
 //
-//	mash key create --out FILE                      (writes FILE, mode 0600, and FILE with .seed replaced by .pub)
-//	mashctl endpoint create O.G.N --out FILE --public-key FILE [--json]   (FILE is a join file; its user_jwt is the JWT)
+//	mash key create --out FILE                      (writes FILE, mode 0600, and FILE.pub: bob.seed and bob.seed.pub)
+//	mashctl endpoint create O.G.N --out FILE --public-key FILE.pub [--json]   (FILE is a join file; its user_jwt is the JWT, no seed)
+//	mashctl endpoint create O.G.N --out FILE         (the key is made there: the join file holds the whole creds text)
+//	mashctl endpoint create O.G.N                    (same machine: the creds are installed in the config folder, no join)
 //	mashctl endpoint list --json
 //	mashctl endpoint delete O.G.N
-//	mash credential create --seed FILE --jwt FILE [--out CREDS]
+//	mash join FILE [--key SEED] [--replace] [--dry-run] [--json]   (installs <O.G.N>.creds in the config folder)
 //
 // A command that is unknown fails its assertion with that fact; nothing is stubbed.
+
+// pubOf is the public key file mash key create writes beside a seed: the whole seed path with .pub added.
+func pubOf(seed string) string { return seed + ".pub" }
+
+// joinReport is the document `mash join --json` prints: the endpoint, the servers and the creds path as shown (a path
+// under the home folder starts with ~).
+type joinReport struct {
+	Endpoint string   `json:"endpoint"`
+	Servers  []string `json:"servers"`
+	Creds    string   `json:"creds"`
+}
+
+// parseJoinJSON reads the document of `mash join --json`. It fails on a document with no endpoint or no creds path.
+func parseJoinJSON(stdout string) (joinReport, error) {
+	var j joinReport
+	if err := json.Unmarshal([]byte(strings.TrimSpace(stdout)), &j); err != nil {
+		return j, fmt.Errorf("the output of mash join --json is not JSON")
+	}
+	if j.Endpoint == "" || j.Creds == "" || len(j.Servers) == 0 {
+		return j, fmt.Errorf("the document of mash join --json lacks endpoint, servers or creds")
+	}
+	return j, nil
+}
+
+// expandHome turns a path shown with a leading ~ into the path under home.
+func expandHome(shown, home string) string {
+	if shown == "~" {
+		return home
+	}
+	if rest, ok := strings.CutPrefix(shown, "~"+string(os.PathSeparator)); ok {
+		return filepath.Join(home, rest)
+	}
+	return shown
+}
+
+// credsIn is the creds file mash join installs for who in h's configuration folder.
+func credsIn(h Home, who string) string { return filepath.Join(h.Config, who+".creds") }
 
 // joinUserJWT is the user_jwt field of the text of a join file.
 func joinUserJWT(b []byte) ([]byte, error) {
@@ -36,32 +75,33 @@ func joinUserJWT(b []byte) ([]byte, error) {
 	return []byte(j.UserJWT), nil
 }
 
-// ep is the files of one endpoint made the contract's way.
-type ep struct{ seed, pub, jwt, creds string }
+// ep is the files of one endpoint made the contract's way. join is the join file on the endpoint's machine; jwt is the
+// user JWT alone, extracted by the harness for the scans and the permission checks (never given to mash).
+type ep struct{ seed, pub, jwt, creds, join string }
 
-// provision makes an endpoint the way JRN-001 does: the key on the endpoint's machine (keyHome), the JWT signed on
-// the mashctl host (ctl), carried by copying the JWT file only, and the creds file assembled on keyHome. creds "" is
-// the default path; noCreds skips the assembly.
-func (a *AT) provision(ctl, keyHome Home, owner, group, name, creds string, noCreds bool) (ep, bool) {
+// provision makes an endpoint the way JRN-001 does for another machine: the key on the endpoint's machine (keyHome), the
+// join file signed on the mashctl host (ctl) for the public key, carried by copying the join file only (it holds no seed),
+// and `mash join FILE --key SEED` on keyHome, which installs <address>.creds in its config folder. noCreds skips the join.
+func (a *AT) provision(ctl, keyHome Home, owner, group, name string, noCreds bool) (ep, bool) {
 	who := owner + "." + group + "." + name
 	e := ep{seed: filepath.Join(keyHome.Dir, name+".seed")}
-	e.pub = strings.TrimSuffix(e.seed, ".seed") + ".pub"
-	ctlJWT := filepath.Join(ctl.Dir, owner+"."+group+"."+name+".jwt")
+	e.pub = pubOf(e.seed)
+	ctlJWT := filepath.Join(ctl.Dir, who+".jwt")
 	e.jwt = ctlJWT
 	if ctl.Dir != keyHome.Dir {
-		e.jwt = filepath.Join(keyHome.Dir, owner+"."+group+"."+name+".jwt")
+		e.jwt = filepath.Join(keyHome.Dir, who+".jwt")
 	}
-	e.creds = creds
+	e.creds = credsIn(keyHome, who)
 	ok := true
 	r := a.Mash("key-create-"+name, keyHome, a.Conn(), "key", "create", "--out", e.seed)
-	ok = a.C.Check("mash key create makes "+name+"'s key on its own machine", r.Code == 0, exitDetail(r)) && ok
+	ok = a.C.Check("mash key create makes "+name+"'s key on its own machine", r.Code == 0 && strings.Contains(r.Stdout, "Created "), exitDetail(r)) && ok
 	a.Watch("seed "+name, e.seed)
 	a.checkMode(name+" seed file is mode 0600", e.seed)
 	pubForCtl := e.pub
 	if ctl.Dir != keyHome.Dir {
 		// separate machines: the operator carries the public key file to the mashctl host; mashctl never reads the
 		// endpoint machine's home.
-		pubForCtl = filepath.Join(ctl.Dir, name+".pub")
+		pubForCtl = filepath.Join(ctl.Dir, name+".seed.pub")
 		pb, err := os.ReadFile(e.pub)
 		if err == nil {
 			err = os.WriteFile(pubForCtl, pb, 0o644)
@@ -73,12 +113,17 @@ func (a *AT) provision(ctl, keyHome Home, owner, group, name, creds string, noCr
 	ok = a.C.Check("mashctl endpoint create "+who+" --out --public-key signs for the endpoint's own key", r.Code == 0, exitDetail(r)) && ok
 	a.Watch("join file "+name, ctlJoin)
 	a.checkMode(name+" join file is mode 0600", ctlJoin)
+	e.join = ctlJoin
 	if jb, err := os.ReadFile(ctlJoin); err == nil {
-		// the join file holds the user JWT alone; mash credential create takes it as a JWT file
+		// the join file made for a public key holds the user JWT alone and no seed
 		if tok, err := joinUserJWT(jb); err == nil {
 			_ = os.WriteFile(ctlJWT, append(tok, '\n'), 0o600)
 		} else {
 			ok = a.C.Check("the join file of "+name+" holds a user_jwt", false, err.Error()) && ok
+		}
+		if ctl.Dir != keyHome.Dir {
+			e.join = filepath.Join(keyHome.Dir, who+".join")
+			ok = a.C.Check("the join file is carried to the endpoint's machine (the file alone; the seed never moves)", os.WriteFile(e.join, jb, 0o600) == nil, "") && ok
 		}
 	}
 	a.Watch("jwt "+name, ctlJWT)
@@ -91,13 +136,32 @@ func (a *AT) provision(ctl, keyHome Home, owner, group, name, creds string, noCr
 	if noCreds || !ok {
 		return e, ok
 	}
-	// T1b-b: the `mash credential create` flow below waits for core's `mash join`; it is left as it is until then.
-	args := []string{"credential", "create", "--seed", e.seed, "--jwt", e.jwt}
-	if creds != "" {
-		args = append(args, "--out", creds)
+	r = a.Mash("join-"+name, keyHome, a.Conn(), "join", e.join, "--key", e.seed, "--json")
+	ok = a.C.Check("mash join installs "+name+"'s creds file on its machine from the join file and its own seed", r.Code == 0, exitDetail(r)) && ok
+	rep, err := parseJoinJSON(r.Stdout)
+	if r.Code == 0 {
+		d := ""
+		if err != nil {
+			d = err.Error()
+		} else if got := expandHome(rep.Creds, keyHome.Dir); rep.Endpoint != who || got != e.creds {
+			err, d = fmt.Errorf("mismatch"), "reported endpoint "+rep.Endpoint+", creds "+rep.Creds
+		}
+		ok = a.C.Check("mash join --json reports the address and the creds file in the config folder", err == nil, d) && ok
 	}
-	r = a.Mash("credential-create-"+name, keyHome, a.Conn(), args...)
-	ok = a.C.Check("mash credential create assembles "+name+"'s creds file on its machine", r.Code == 0, exitDetail(r)) && ok
+	a.checkMode(name+" creds file is mode 0600", e.creds)
+	return e, ok
+}
+
+// provisionHere is the same-machine shortcut: `mashctl endpoint create ADDR` makes the key and installs the creds file in
+// the config folder itself, with no join file and no mash join.
+func (a *AT) provisionHere(h Home, owner, group, name string) (ep, bool) {
+	who := owner + "." + group + "." + name
+	e := ep{creds: credsIn(h, who)}
+	r := a.Ctl("endpoint-create-"+name, h, a.Conn(), "endpoint", "create", who)
+	ok := a.C.Check("mashctl endpoint create "+who+" (same machine) installs the creds file in the config folder", r.Code == 0, exitDetail(r))
+	a.checkMode(name+" creds file is mode 0600", e.creds)
+	a.Watch("jwt "+name, e.creds)
+	a.Watch("seed "+name, e.creds)
 	return e, ok
 }
 
@@ -330,7 +394,7 @@ var authRE = regexp.MustCompile(`(?i)authori[sz]ation|not authori[sz]ed|revoked`
 var AT001 = Scenario{
 	ID: "at001",
 	Scenario: "AT-001, the solo developer, standalone: a fresh scratch home; the setup script (--owner alice) and mashctl init --config; for design and review, " +
-		"mash key create, mashctl endpoint create alice.dev.<name> --out --public-key, mash credential create; two sessions started through the plugin launcher " +
+		"for design, mash key create, mashctl endpoint create alice.dev.design --out --public-key, mash join --key (the join flow); for review, mashctl endpoint create alice.dev.review alone (the same-machine shortcut: it installs the creds file, no join); two sessions started through the plugin launcher " +
 		"and hooks, as Claude Code starts the plugin (sh plugin/scripts/mash serve with the env of plugin/.mcp.json, MASH_BIN set to the built binary, no download; " +
 		"MASH_ENDPOINT=alice.dev.design|review); mail each way through the sessions' MCP send tool, delivered by the hook commands of plugin/hooks/hooks.json " +
 		"(UserPromptSubmit and PostToolUse, run under sh -c with the hook JSON on stdin) with the sender's verified trust label, cross-checked with the MCP inbox and read tools; endpoint list --json; service metadata (mash who --json); " +
@@ -348,10 +412,13 @@ var AT001 = Scenario{
 		}
 		a.C.Check("REQ-014: the quick start runs with no override: the environment of init, serve and the ctl commands holds no MASH_INSECURE_PLAINTEXT, and the URL is tls://",
 			!envHasOverride && strings.Contains(strings.Join(a.Conn(), " "), "MASH_SERVER=tls://"), "")
-		for _, n := range []string{"design", "review"} {
-			if _, ok := a.provision(h, h, "alice", "dev", n, "", false); !ok {
-				return
-			}
+		// design: the join flow (key, join file for the public key, mash join --key); review: the same-machine shortcut,
+		// mashctl endpoint create installs the creds file in the config folder with no join.
+		if _, ok := a.provision(h, h, "alice", "dev", "design", false); !ok {
+			return
+		}
+		if _, ok := a.provisionHere(h, "alice", "dev", "review"); !ok {
+			return
 		}
 		pl, err := loadPluginLaunch(filepath.Join(a.R.Repo, "plugin"))
 		detail := ""
@@ -447,19 +514,20 @@ var AT001 = Scenario{
 var AT002 = Scenario{
 	ID: "at002",
 	Scenario: "AT-002, the key crosses no machine: two scratch homes, A (mashctl host) and B (endpoint). B runs mash key create; A runs " +
-		"mashctl endpoint create alice.dev.design --out --public-key with B's public key file; B runs mash credential create and connects; the endpoint " +
-		"mails a peer. All captured output and A's home are searched for B's seed, and all captured output for the JWT.",
+		"mashctl endpoint create alice.dev.design --out --public-key with B's public key file (bob.seed.pub form); the join file alone is carried to B, which runs mash join --key and connects; the endpoint " +
+		"mails a peer. A join file that holds a seed (mashctl endpoint create --out, no --public-key) is carried to B and installed by mash join with no --key. " +
+		"All captured output and A's home are searched for B's seed, and all captured output for the JWT.",
 	Body: func(a *AT) {
 		ha, err1 := a.Home("home-a")
 		hb, err2 := a.Home("home-b")
 		if !a.C.Check("two scratch homes are made", err1 == nil && err2 == nil, "") || !a.StartServer(ha) {
 			return
 		}
-		e, ok := a.provision(ha, hb, "alice", "dev", "design", "", false)
+		e, ok := a.provision(ha, hb, "alice", "dev", "design", false)
 		if !ok {
 			return
 		}
-		if _, ok := a.provision(ha, hb, "alice", "dev", "review", "", true); !ok { // the peer: a record and an inbox, no session
+		if _, ok := a.provision(ha, hb, "alice", "dev", "review", true); !ok { // the peer: a record and an inbox, no session
 			return
 		}
 		p, env, err := a.StartSession(hb, "dev", "design")
@@ -488,7 +556,36 @@ var AT002 = Scenario{
 		hits, err = scanFor(a.R.Out, map[string][]byte{"B's JWT": jwtText})
 		a.C.Check("no captured output contains the JWT", err == nil && len(a.ownLeaks(hits)) == 0, hitFiles(hits))
 		_ = e
+
+		// A join file that holds a seed: the key was made on A, the file is the whole credential, and mash join needs no --key.
+		a.joinWithSeed(ha, hb, "solo")
 	},
+}
+
+// joinWithSeed makes alice.dev.<name> on ha with no public key (the key is made there, so the join file holds the creds
+// text), carries the file to hb and runs `mash join FILE` there with no --key.
+func (a *AT) joinWithSeed(ha, hb Home, name string) {
+	who := "alice.dev." + name
+	jf := filepath.Join(ha.Dir, who+".join")
+	r := a.Ctl("endpoint-create-"+name, ha, a.Conn(), "endpoint", "create", who, "--out", jf)
+	if !a.C.Check("mashctl endpoint create "+who+" --out (no --public-key) writes a join file that holds the key", r.Code == 0, exitDetail(r)) {
+		return
+	}
+	a.Watch("seed "+name+" join", jf)
+	a.Watch("jwt "+name+" join", jf)
+	b, err := os.ReadFile(jf)
+	carried := filepath.Join(hb.Dir, who+".join")
+	if err == nil {
+		err = os.WriteFile(carried, b, 0o600)
+	}
+	if !a.C.Check("the seed-holding join file is carried to B", err == nil, errDetail(err)) {
+		return
+	}
+	r = a.Mash("join-"+name, hb, a.Conn(), "join", carried)
+	a.C.Check("mash join FILE with no --key installs the creds of a join file that holds its seed and prints Joined as "+who+".", r.Code == 0 && strings.TrimSpace(r.Stdout) == "Joined as "+who+".", exitDetail(r)+": "+snip(r.Stdout))
+	creds := credsIn(hb, who)
+	a.checkMode(name+" creds file installed by mash join is mode 0600", creds)
+	a.issuedPermissions(creds, "alice", "dev", name)
 }
 
 func hitFiles(h []Leak) string {

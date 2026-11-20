@@ -33,7 +33,7 @@ func TestScanArgvsCatchesAPlantedSecret(t *testing.T) {
 		"a registered secret":        "--creds=a-registered-secret-text-that-is-long",
 		"a seed inside a longer arg": "--seed=" + testSeed,
 	} {
-		planted := append(append([]Argv(nil), clean...), Argv{"03-bad", []string{"/bin/mash", "credential", "create", arg}})
+		planted := append(append([]Argv(nil), clean...), Argv{"03-bad", []string{"/bin/mash", "join", arg}})
 		l := scanArgvs(planted, secrets)
 		if len(l) == 0 || !strings.HasPrefix(l[0].File, "03-bad") {
 			t.Errorf("%s in argv was not caught: %v", name, l)
