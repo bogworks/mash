@@ -84,7 +84,7 @@ func Usage(prog string) string {
 	line("set-meta <owner.group.instance> [--role R] [--host H] [--label k=v]... [--describe TEXT] [--cap C]... [--uncap C]...", "(a value of - clears the field; --label k=- clears that label; --cap C adds a capability, --uncap C removes one, --cap - clears them all)")
 	line("suspend <owner.group.instance>", "refuse all inbound mail to an endpoint (its stored mail stays readable); prints the last sequence; the endpoint's credentials stay valid")
 	line("resume <owner.group.instance>", "undo suspend")
-	line("suspended <owner.group.instance>", "print whether an endpoint is suspended and its last sequence; exit 0 if suspended, 3 if not, 1 on error")
+	line("suspended <owner.group.instance>", "print whether an endpoint is suspended and its last sequence; exit 0 if suspended, 1 if not or on error")
 	if prog == "mashctl" {
 		line("audit [--json] [--strict] [--creds-dir DIR]", "read only: list every directory record, inbox stream, lease and creds file with their state, the orphans; --strict exits 1 on an orphan, an unreadable item, or unread mail lost to eviction (a lower bound from consumer sequences: mail fetched but never shown, or redelivered, can make it undercount, so a clean audit does not prove nothing was lost)")
 		line("inbox inspect <owner.group.instance> [--json] [--from SEQ] [--to SEQ] [--limit N]", "read only: one inbox's stored messages (default the last 20) with sender, trust, store time, size, kind and delivery state derived from the deliver consumer's cursors, and the consumer's totals; never creates, fetches from or acknowledges a consumer")
@@ -287,7 +287,7 @@ func Run(prog string, cfg config.Config, args []string, stdout, stderr io.Writer
 			}
 			if !st.Suspended {
 				fmt.Fprintf(stdout, "%s is not suspended\n", addr)
-				return 3
+				return 1
 			}
 			fmt.Fprintf(stdout, "suspended %s since %s: id %s, last_seq %d, msgs %d\n", addr, config.Clean(st.Since), config.Clean(st.ID), st.LastSeq, st.Msgs)
 		}

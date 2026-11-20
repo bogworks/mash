@@ -17,7 +17,7 @@ func quorumErr() error {
 
 func TestAuditFailedRewordsUnavailable(t *testing.T) {
 	var buf bytes.Buffer
-	if rc := auditFailed(&buf, quorumErr()); rc != 3 {
+	if rc := auditFailed(&buf, quorumErr()); rc != 1 {
 		t.Fatalf("exit %d, want 3", rc)
 	}
 	if !strings.Contains(buf.String(), quorumHint) || !strings.Contains(buf.String(), "temporarily unavailable") {
@@ -44,7 +44,7 @@ const offlineRaw = "issue record bucket: nats: API error: code=500 err_code=1011
 
 func TestAuditFailedRewordsStreamOffline(t *testing.T) {
 	var buf bytes.Buffer
-	if rc := auditFailed(&buf, fmt.Errorf("%s", offlineRaw)); rc != 3 {
+	if rc := auditFailed(&buf, fmt.Errorf("%s", offlineRaw)); rc != 1 {
 		t.Fatalf("exit %d, want 3", rc)
 	}
 	if !strings.Contains(buf.String(), "the server holding a stream or bucket is down: bring it back and run the command again") || !strings.Contains(buf.String(), "stream is offline") {

@@ -212,7 +212,7 @@ func TestPlainURLRefusalExitsTwoEverywhere(t *testing.T) {
 	e.env["MASH_INSECURE_PLAINTEXT"] = "1"
 	e.env["MASH_SERVER"] = "nats://127.0.0.1:1"
 	out, errb, code := e.run("endpoint", "list")
-	if code != 6 || strings.Contains(out+errb, "refusing a plain") {
+	if code != 1 || strings.Contains(out+errb, "refusing a plain") {
 		t.Fatalf("unreachable server with the override: exit %d, want its ordinary 6\n%s\n%s", code, out, errb)
 	}
 	t.Logf("endpoint list against a down server with the override exits %d", code)

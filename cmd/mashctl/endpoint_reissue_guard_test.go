@@ -112,7 +112,7 @@ func TestEndpointBulkRefusesFutureIssued(t *testing.T) {
 	h.recordIssuedAt(rec.User, time.Now().Add(time.Hour))
 	so, _, code := h.run("endpoint", "reissue", "--all", "--make-key", "--yes", "--json")
 	d := bulkDoc(t, so)
-	if code != 5 || d.Counts.Reissued != 1 || d.Counts.Refused != 1 || d.Endpoints[0].Reason == nil || *d.Endpoints[0].Reason != "future_issued" {
+	if code != 1 || d.Counts.Reissued != 1 || d.Counts.Refused != 1 || d.Endpoints[0].Reason == nil || *d.Endpoints[0].Reason != "future_issued" {
 		t.Fatalf("%d %q", code, so)
 	}
 	if len(*calls) != 1 {
@@ -224,7 +224,7 @@ func TestEndpointReissueMakeKeyChecksCreds(t *testing.T) {
 	}
 	bo, _, code := h.run("endpoint", "reissue", "--all", "--make-key", "--yes", "--json")
 	bd := bulkDoc(t, bo)
-	if code != 5 || bd.Counts.Refused != 2 || bd.Counts.Reissued != 2 {
+	if code != 1 || bd.Counts.Refused != 2 || bd.Counts.Reissued != 2 {
 		t.Fatalf("bulk: %d %q", code, bo)
 	}
 }
@@ -256,7 +256,7 @@ func TestEndpointReissueSupersededRemovesOutput(t *testing.T) {
 			}
 			t.Cleanup(func() { epBeforeVerify = nil })
 			_, se, code := h.run(args...)
-			if code != 6 || !strings.Contains(se, "superseded") {
+			if code != 1 || !strings.Contains(se, "superseded") {
 				t.Fatalf("%d %q", code, se)
 			}
 			if _, err := os.Lstat(target); !os.IsNotExist(err) {

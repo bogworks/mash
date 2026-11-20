@@ -20,7 +20,7 @@ const endpointDeleteUsage = `usage: mashctl endpoint delete ADDRESS [--delete-cr
   --dry-run        say what would happen and change nothing
   --json           print the result as JSON (schema mashctl-endpoint@1)
   --servers N and --sys-creds FILE override MASH_SERVERS and MASH_SYS_CREDS
-  exit: 0 deleted or unchanged, 1 refused, 2 usage, 5 partial, 6 error
+  exit: 0 deleted or unchanged, 1 refused, partial or error, 2 usage
 Example:
   mashctl endpoint delete alice/dev/design --dry-run
 `
@@ -162,7 +162,7 @@ func runEndpointDelete(args []string, env func(string) string, lookup config.Loo
 	case "refused":
 		return 1
 	case "partial":
-		return 5
+		return 1
 	}
-	return 6
+	return 1
 }

@@ -19,9 +19,9 @@ import (
 const inboxUsage = "usage: mashctl inbox inspect <owner.group.instance> [--json] [--from SEQ] [--to SEQ] [--limit N]\n" +
 	"  address: owner.group.instance, or its flat key owner_group_instance\n"
 
-// exitInspectIncomplete is the exit code of an inspection that could not complete (no server, no config); 1 is a
-// refusal (an unknown endpoint, no inbox stream) and 2 is usage, as for audit.
-const exitInspectIncomplete = 3
+// exitInspectIncomplete is the exit code of an inspection that could not complete (no server, no config), as is a
+// refusal (an unknown endpoint, no inbox stream); 2 is usage, as for audit.
+const exitInspectIncomplete = 1
 
 // inspectStateText is how the text form words a state; the JSON form carries the state itself.
 var inspectStateText = map[string]string{admin.StateAckUnsure: "delivered, ack not confirmed"}

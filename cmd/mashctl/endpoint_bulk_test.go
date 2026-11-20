@@ -262,7 +262,7 @@ func TestEndpointBulkRefusalDoesNotStopOthers(t *testing.T) {
 	epLockWait = 20 * time.Millisecond
 	t.Cleanup(func() { epLockWait = prev })
 	so, _, code := h.run("endpoint", "reissue", "--all", "--make-key", "--yes", "--json")
-	if code != 5 {
+	if code != 1 {
 		t.Fatalf("code %d: %q", code, so)
 	}
 	d := bulkDoc(t, so)

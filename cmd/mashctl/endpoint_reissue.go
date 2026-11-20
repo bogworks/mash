@@ -59,7 +59,7 @@ const endpointReissueUsage = `usage: mashctl endpoint reissue ADDRESS (--public-
   ends or is killed, so a killed run needs nothing removed. The lock works on one host (a local filesystem), not across
   hosts or on a network filesystem that does not honour flock. A .lock directory made by an earlier mash is reported
   and removed once by hand.
-  exit codes: 0 done, planned or unchanged, 1 refused, 2 usage, 5 partial (bulk), 6 error
+  exit codes: 0 done, planned or unchanged, 1 refused, partial (bulk) or error, 2 usage
 Example:
   mashctl endpoint reissue alice/dev/design --public-key design.pub
   mashctl endpoint reissue --changed --make-key --yes
@@ -427,7 +427,7 @@ type epFutureIssuedError struct{ err error }
 func (e *epFutureIssuedError) Error() string { return e.err.Error() }
 func (e *epFutureIssuedError) Unwrap() error { return e.err }
 
-// epFail is a refusal (refused, exit 1) or an error (exit 6) of one endpoint, by its code.
+// epFail is a refusal (refused, exit 1) or an error (also exit 1) of one endpoint, by its code.
 type epFail struct {
 	refused      bool
 	code, detail string

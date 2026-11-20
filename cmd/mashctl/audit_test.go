@@ -482,7 +482,7 @@ func TestAuditUsageAndErrors(t *testing.T) {
 	// no server: exit 3 (could not complete)
 	env := map[string]string{"HOME": t.TempDir(), "MASH_SERVER": "nats://127.0.0.1:1", "MASH_ENDPOINT": "o.dev.x", "MASH_ADMIN_CREDS": e.AdminCreds, "MASH_INSECURE_PLAINTEXT": "1"}
 	var out, errb bytes.Buffer
-	if code := runEnv([]string{"audit"}, func(k string) string { return env[k] }, &out, &errb); code != 3 {
+	if code := runEnv([]string{"audit"}, func(k string) string { return env[k] }, &out, &errb); code != 1 {
 		t.Errorf("unreachable server: %d %q", code, errb.String())
 	}
 	// an empty account audits cleanly
@@ -829,7 +829,7 @@ func TestAuditCompareBadFile(t *testing.T) {
 		"missing":   filepath.Join(dir, "nope.json"),
 	} {
 		out, errb, code := f.run(t, "--compare", p)
-		if code != 3 || errb == "" || out != "" {
+		if code != 1 || errb == "" || out != "" {
 			t.Errorf("%s: exit %d out=%q err=%q, want 3 and nothing on stdout", name, code, out, errb)
 		}
 	}
@@ -957,7 +957,7 @@ func TestAuditStagedCreds(t *testing.T) {
 
 func TestAuditExitCodeThreeCouldNotComplete(t *testing.T) {
 	f := cleanAccount(t)
-	if _, errb, code := ctlRun(t, f.e, "audit", "--creds-dir", filepath.Join(f.credsDir, "nope")); code != 3 {
+	if _, errb, code := ctlRun(t, f.e, "audit", "--creds-dir", filepath.Join(f.credsDir, "nope")); code != 1 {
 		t.Errorf("unreadable required creds directory: %d %q, want 3", code, errb)
 	}
 }
@@ -993,7 +993,7 @@ func (f *auditFixture) compareJSON(t *testing.T, earlier string) (cmpOut, int) {
 	t.Helper()
 	out, errb, code := f.run(t, "--strict", "--json", "--compare", earlier)
 	var c cmpOut
-	if code == 3 || json.Unmarshal([]byte(out), &c) != nil || c.Compare == nil {
+	if json.Unmarshal([]byte(out), &c) != nil || c.Compare == nil {
 		t.Fatalf("compare: %d %q\n%s", code, errb, out)
 	}
 	return c, code
@@ -1090,7 +1090,7 @@ func (f *auditFixture) recreatedJSON(t *testing.T, earlier string) (recreatedOut
 	t.Helper()
 	out, errb, code := f.run(t, "--strict", "--json", "--compare", earlier)
 	var c recreatedOut
-	if code == 3 || json.Unmarshal([]byte(out), &c) != nil || c.Compare == nil || len(c.Compare.Streams) != 1 {
+	if json.Unmarshal([]byte(out), &c) != nil || c.Compare == nil || len(c.Compare.Streams) != 1 {
 		t.Fatalf("compare: %d %q\n%s", code, errb, out)
 	}
 	return c, errb, code
@@ -1152,7 +1152,7 @@ func TestAuditCompareEarlierMissingAnyTableFieldIsRefused(t *testing.T) {
 		})
 		out, errb, code := f.run(t, "--strict", "--compare", p)
 		want := "records[0].inbox." + fld.Path
-		if code != 3 || out != "" || !strings.Contains(errb, "--compare") || !strings.Contains(errb, "lacks "+want) {
+		if code != 1 || out != "" || !strings.Contains(errb, "--compare") || !strings.Contains(errb, "lacks "+want) {
 			t.Errorf("without %s: exit %d out=%q err=%q, want 3, nothing on stdout and %q named", fld.Path, code, out, errb, want)
 		}
 	}
@@ -1164,7 +1164,7 @@ func TestAuditCompareEarlierNullFieldIsRefused(t *testing.T) {
 	p := writeEdited(t, first, func(m map[string]any) {
 		m["records"].([]any)[0].(map[string]any)["inbox"].(map[string]any)["msgs"] = nil
 	})
-	if out, errb, code := f.run(t, "--strict", "--compare", p); code != 3 || out != "" || !strings.Contains(errb, "records[0].inbox.msgs") {
+	if out, errb, code := f.run(t, "--strict", "--compare", p); code != 1 || out != "" || !strings.Contains(errb, "records[0].inbox.msgs") {
 		t.Errorf("null msgs: %d %q %q", code, out, errb)
 	}
 }
@@ -1192,14 +1192,14 @@ func TestAuditCompareEarlierAbsentInboxNeedsOnlyStreamAndPresent(t *testing.T) {
 		clear(in)
 		in["stream"], in["present"] = stream, false
 	})
-	if out, errb, code := f.run(t, "--strict", "--compare", p); code == 3 {
+	if out, errb, code := f.run(t, "--strict", "--compare", p); out == "" {
 		t.Errorf("absent earlier inbox with only stream and present: %d %q %q", code, out, errb)
 	}
 	p = writeEdited(t, first, func(m map[string]any) {
 		in := m["records"].([]any)[0].(map[string]any)["inbox"].(map[string]any)
 		in["deliver"] = map[string]any{"present": false}
 	})
-	if out, errb, code := f.run(t, "--strict", "--compare", p); code == 3 {
+	if out, errb, code := f.run(t, "--strict", "--compare", p); out == "" {
 		t.Errorf("earlier inbox without a consumer: %d %q %q", code, out, errb)
 	}
 }
@@ -1213,7 +1213,7 @@ func TestAuditCompareVanishedWithMsgsAbsentIsRefused(t *testing.T) {
 	})
 	f.deprovisionAndForget(t, ad("alpha"))
 	out, errb, code := f.run(t, "--strict", "--json", "--compare", p)
-	if code != 3 || out != "" || !strings.Contains(errb, "records[0].inbox.msgs") || strings.Contains(out, "retired") {
+	if code != 1 || out != "" || !strings.Contains(errb, "records[0].inbox.msgs") || strings.Contains(out, "retired") {
 		t.Fatalf("msgs absent, inbox and record gone: exit %d out=%q err=%q", code, out, errb)
 	}
 }
@@ -1252,7 +1252,7 @@ func TestAuditCompareEarlierWithoutCreationTimesIsRefused(t *testing.T) {
 	})
 	for _, args := range [][]string{{"--compare", p}, {"--strict", "--json", "--compare", p}} {
 		out, errb, code := f.run(t, args...)
-		if code != 3 || out != "" || !strings.Contains(errb, "created") || !strings.Contains(errb, "regenerate") {
+		if code != 1 || out != "" || !strings.Contains(errb, "created") || !strings.Contains(errb, "regenerate") {
 			t.Errorf("%v: exit %d out=%q err=%q", args, code, out, errb)
 		}
 	}
@@ -1353,7 +1353,7 @@ func TestAuditCompareRefusesReportThatIsNotThisDeployments(t *testing.T) {
 	}
 	for name, tc := range cases {
 		out, errb, code := f.run(t, "--strict", "--compare", tc.path)
-		if code != 3 || out != "" || !strings.Contains(errb, "--compare") || !strings.Contains(errb, tc.want) {
+		if code != 1 || out != "" || !strings.Contains(errb, "--compare") || !strings.Contains(errb, tc.want) {
 			t.Errorf("%s: exit %d out=%q err=%q, want 3, nothing on stdout and %q named", name, code, out, errb, tc.want)
 		}
 	}
@@ -1466,7 +1466,7 @@ func TestAuditCompareEarlierNullConsumerSeqIsRefused(t *testing.T) {
 	p := writeEdited(t, first, func(m map[string]any) {
 		m["records"].([]any)[0].(map[string]any)["inbox"].(map[string]any)["deliver"].(map[string]any)["delivered_consumer_seq"] = nil
 	})
-	if out, errb, code := f.run(t, "--strict", "--compare", p); code != 3 || out != "" || !strings.Contains(errb, "deliver.delivered_consumer_seq") {
+	if out, errb, code := f.run(t, "--strict", "--compare", p); code != 1 || out != "" || !strings.Contains(errb, "deliver.delivered_consumer_seq") {
 		t.Errorf("null delivered_consumer_seq: %d %q %q", code, out, errb)
 	}
 }

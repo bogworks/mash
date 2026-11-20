@@ -128,7 +128,7 @@ func TestMashctlSuspendVerbs(t *testing.T) {
 	e := testenv.Start(t)
 	ctlRun(t, e, "init")
 	provisionAs(t, e, "c", admin.Meta{})
-	if out, _, code := ctlRun(t, e, "suspended", "o.g.c"); code != 3 || !strings.Contains(out, "o.g.c is not suspended") {
+	if out, _, code := ctlRun(t, e, "suspended", "o.g.c"); code != 1 || !strings.Contains(out, "o.g.c is not suspended") {
 		t.Fatalf("suspended before: %d %q", code, out)
 	}
 	out, errb, code := ctlRun(t, e, "suspend", "o.g.c")
@@ -141,7 +141,7 @@ func TestMashctlSuspendVerbs(t *testing.T) {
 	if out, errb, code := ctlRun(t, e, "resume", "o.g.c"); code != 0 || out != "resumed o.g.c\n" {
 		t.Fatalf("resume: %d %q %q", code, out, errb)
 	}
-	if _, _, code := ctlRun(t, e, "suspended", "o.g.c"); code != 3 {
+	if _, _, code := ctlRun(t, e, "suspended", "o.g.c"); code != 1 {
 		t.Fatalf("suspended after resume: %d", code)
 	}
 	// Any error is 1, never 3.

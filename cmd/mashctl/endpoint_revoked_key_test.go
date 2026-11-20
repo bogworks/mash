@@ -33,7 +33,7 @@ func TestEndpointCreatePublicKeyRefusesRevokedKey(t *testing.T) {
 		}
 		fakeKeyRevoked(t, func(string) (bool, error) { return false, errors.New("no answer") })
 		so, se, code = h.run(args...)
-		if code != 6 || refusalCode(t, so) != "revocation_unknown" {
+		if code != 1 || refusalCode(t, so) != "revocation_unknown" {
 			t.Fatalf("dry=%v unknown: %d %q %q", dry, code, so, se)
 		}
 	}
@@ -72,7 +72,7 @@ func TestEndpointReissuePublicKeyRefusesRevokedKey(t *testing.T) {
 		}
 		fakeKeyRevoked(t, func(string) (bool, error) { return false, errors.New("no answer") })
 		so, se, code = h.run(args...)
-		if code != 6 || refusalCode(t, so) != "revocation_unknown" {
+		if code != 1 || refusalCode(t, so) != "revocation_unknown" {
 			t.Fatalf("dry=%v unknown: %d %q %q", dry, code, so, se)
 		}
 	}
@@ -112,7 +112,7 @@ func TestEndpointReissueNeverResignsRevokedCurrentKey(t *testing.T) {
 	}
 	fakeKeyRevoked(t, func(string) (bool, error) { return false, errors.New("no answer") })
 	so, se, code = h.run(args...)
-	if code != 6 || refusalCode(t, so) != "revocation_unknown" {
+	if code != 1 || refusalCode(t, so) != "revocation_unknown" {
 		t.Fatalf("resume unknown: %d %q %q", code, so, se)
 	}
 	if _, err := os.Lstat(marker); err != nil {
@@ -141,7 +141,7 @@ func TestEndpointReissueNeverResignsRevokedCurrentKey(t *testing.T) {
 	}
 	fakeKeyRevoked(t, func(string) (bool, error) { return false, errors.New("no answer") })
 	so, se, code = h.run(rargs...)
-	if code != 6 || refusalCode(t, so) != "revocation_unknown" {
+	if code != 1 || refusalCode(t, so) != "revocation_unknown" {
 		t.Fatalf("restore unknown: %d %q %q", code, so, se)
 	}
 	if _, err := os.Lstat(rj); !os.IsNotExist(err) {

@@ -135,7 +135,7 @@ func TestEndpointCreateStagedKeyRevoked(t *testing.T) {
 	}
 	fakeKeyRevoked(t, func(string) (bool, error) { return false, errors.New("no answer") })
 	so, _, code = h.run(args...)
-	if code != 6 || refusalCode(t, so) != "revocation_unknown" || epSnapshot(t, h, h.dir) != before {
+	if code != 1 || refusalCode(t, so) != "revocation_unknown" || epSnapshot(t, h, h.dir) != before {
 		t.Fatalf("unknown: %d %q", code, so)
 	}
 }
@@ -159,7 +159,7 @@ func TestEndpointReissueStagedKeyRevoked(t *testing.T) {
 	}
 	fakeKeyRevoked(t, func(string) (bool, error) { return false, errors.New("no answer") })
 	so, _, code = h.run(args...)
-	if code != 6 || refusalCode(t, so) != "revocation_unknown" {
+	if code != 1 || refusalCode(t, so) != "revocation_unknown" {
 		t.Fatalf("unknown: %d %q", code, so)
 	}
 	if epSnapshot(t, h, h.dir) != before {
@@ -214,7 +214,7 @@ func TestEndpointBulkPartialNamesChanged(t *testing.T) {
 	epLockWait = 20 * time.Millisecond
 	t.Cleanup(func() { epLockWait = prev })
 	so, _, code := h.run("endpoint", "reissue", "--all", "--make-key", "--yes")
-	if code != 5 || !strings.Contains(so, "rerun with --changed, not --all") {
+	if code != 1 || !strings.Contains(so, "rerun with --changed, not --all") {
 		t.Fatalf("text: %d %q", code, so)
 	}
 	so, _, code = h.run("endpoint", "reissue", "--all", "--make-key", "--yes", "--json")
@@ -228,7 +228,7 @@ func TestEndpointBulkPartialNamesChanged(t *testing.T) {
 			t.Errorf("next step names --all: %+v", s)
 		}
 	}
-	if code != 5 || !found {
+	if code != 1 || !found {
 		t.Fatalf("json: %d %q", code, so)
 	}
 	if !strings.Contains(endpointReissueUsage, "--changed") || strings.Contains(strings.ToLower(endpointReissueUsage), "rerun with --all") {

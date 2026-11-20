@@ -21,8 +21,8 @@ import (
 )
 
 // exitAuditIncomplete is the exit code of an audit that could not complete: no server, unreadable required input, a
-// bad --compare file. 1 is --strict findings and 2 is usage.
-const exitAuditIncomplete = 3
+// bad --compare file. It is the same code as --strict findings; 2 is usage.
+const exitAuditIncomplete = 1
 
 const auditUsage = "usage: mashctl audit [--json] [--strict] [--creds-dir DIR] [--compare EARLIER.json]\n"
 
