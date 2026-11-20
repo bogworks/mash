@@ -46,13 +46,16 @@ func (e *Endpoint) refuses(t sap.Trust) bool {
 }
 
 // refuse records one refused message: the count (RefusedFile, replaced whole), the sequence and one line on the log
-// without the body. A failure to write is logged; it never stops the mail from being dropped.
-func (e *Endpoint) refuse(seq uint64, claimed string, trust sap.Trust) {
+// without the body. A failure to write is logged; it never stops the mail from being dropped. It reports whether the
+// refusal was recorded.
+func (e *Endpoint) refuse(seq uint64, claimed string, trust sap.Trust) bool {
 	line := fmt.Sprintf("refused message %d from %s: not verified (%s)", seq, refusedSender(claimed), trust)
-	if _, err := e.recordRefusal(seq); err != nil {
+	_, err := e.recordRefusal(seq)
+	if err != nil {
 		line += fmt.Sprintf("; the count could not be kept: %v", err)
 	}
 	e.log.Print(line)
+	return err == nil
 }
 
 // unknownSender stands in the log line for a message that claims no sender at all.
@@ -142,6 +145,7 @@ func (e *RefusedMessageError) Error() string {
 	return fmt.Sprintf("mash: message #%d was refused: it was not verified", e.Seq)
 }
 
+// recordRefusal records the refusal of seq. An error means nothing was recorded.
 func (e *Endpoint) recordRefusal(seq uint64) (int, error) {
 	if e.cfg.StateDir == "" {
 		return 0, errors.New("no state directory")
