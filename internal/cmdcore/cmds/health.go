@@ -324,18 +324,28 @@ func (r DoctorResult) ExitCode() int {
 	return 0
 }
 
-// Hint is the fix of the first failing check that has one. A mashctl command is for whoever runs the mesh: "ask whoever
-// runs your mesh to run: mashctl ...". Any other fix is given as it is.
+// Hint is the fix of the first problem or, with no problem, of the first warning; none when that row has no fix. A mashctl
+// command is for whoever runs the mesh: "ask whoever runs your mesh to run: mashctl ...". Any other fix is given as it is.
 func (r DoctorResult) Hint() string {
-	for _, c := range r.Checks {
-		if c.State == CheckFail && c.Fix != nil {
-			if strings.HasPrefix(*c.Fix, "mashctl ") {
-				return "ask whoever runs your mesh to run: " + config.Clean(*c.Fix)
+	var first *DoctorCheck
+	for _, state := range []string{CheckFail, CheckWarn} {
+		for i := range r.Checks {
+			if r.Checks[i].State == state {
+				first = &r.Checks[i]
+				break
 			}
-			return config.Clean(*c.Fix)
+		}
+		if first != nil {
+			break
 		}
 	}
-	return ""
+	if first == nil || first.Fix == nil {
+		return ""
+	}
+	if strings.HasPrefix(*first.Fix, "mashctl ") {
+		return "ask whoever runs your mesh to run: " + config.Clean(*first.Fix)
+	}
+	return config.Clean(*first.Fix)
 }
 
 // Doctor is the doctor command.

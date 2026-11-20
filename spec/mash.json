@@ -935,7 +935,7 @@
      },
      {
       "name": "x-notes",
-      "value": "'ready' means: the configuration is readable, the server answers, and it accepts this endpoint's credentials. Asked inside a session (the MCP tool), status and doctor report on that session itself, not on a fresh connection: 'ready, online' there means this session holds the endpoint and its mail will reach it. A hint names the first installed address in alphabetical order. At a shell every 'hint:' line goes to stderr; an MCP tool's text block puts the hint on the line after the result."
+      "value": "'ready' means: the configuration is readable, the server answers, and it accepts this endpoint's credentials. Inside a session, when the configuration, the creds, the server or sign-in fails, that failure is what status reports, even if the session also does not hold its endpoint: the root cause comes first, and a session and a shell then name the same cause. Asked inside a session (the MCP tool), status and doctor report on that session itself, not on a fresh connection: 'ready, online' there means this session holds the endpoint and its mail will reach it. A hint names the first installed address in alphabetical order. At a shell every 'hint:' line goes to stderr; an MCP tool's text block puts the hint on the line after the result."
      }
     ]
    },

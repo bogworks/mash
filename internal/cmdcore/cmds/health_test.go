@@ -441,9 +441,10 @@ func TestDoctorSummaryAndHint(t *testing.T) {
 		{"two problems and warnings", []cmds.HealthCheck{fail(""), fail(""), warn, warn}, "2 problems, 2 warnings.", 1, ""},
 		{"mashctl fix", []cmds.HealthCheck{fail("mashctl endpoint reissue a.b.c")}, "1 problem.", 1, "ask whoever runs your mesh to run: mashctl endpoint reissue a.b.c"},
 		{"other fix", []cmds.HealthCheck{fail("chmod 600 /x")}, "1 problem.", 1, "chmod 600 /x"},
-		{"first fixable only", []cmds.HealthCheck{fail(""), fail("chmod 600 /x"), fail("mashctl x")}, "3 problems.", 1, "chmod 600 /x"},
+		{"the first problem only", []cmds.HealthCheck{fail(""), fail("chmod 600 /x"), fail("mashctl x")}, "3 problems.", 1, ""},
 		{"a skip is neither a problem nor a warning", []cmds.HealthCheck{fail("mashctl x"), skip("sign-in", "creds"), skip("refused", "creds")}, "1 problem.", 1, "ask whoever runs your mesh to run: mashctl x"},
-		{"a warn's fix is no hint", []cmds.HealthCheck{{Name: "refused", State: cmds.CheckWarn, Detail: "w", Fix: "mashctl y"}}, "1 warning.", 0, ""},
+		{"with no problem the first warning's fix", []cmds.HealthCheck{{Name: "refused", State: cmds.CheckWarn, Detail: "w", Fix: "mashctl y"}}, "1 warning.", 0, "ask whoever runs your mesh to run: mashctl y"},
+		{"a problem outranks an earlier warning", []cmds.HealthCheck{{Name: "refused", State: cmds.CheckWarn, Detail: "w", Fix: "mashctl y"}, fail("chmod 600 /x")}, "1 problem, 1 warning.", 1, "chmod 600 /x"},
 	} {
 		code, out, errs := runDoctor(report("a.b.c", false, tc.checks...), cliframe.Global{})
 		if !strings.HasSuffix(out, "\n\n"+tc.summary+"\n") || code != tc.code {

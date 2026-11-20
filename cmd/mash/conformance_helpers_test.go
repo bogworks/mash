@@ -314,11 +314,12 @@ func confToolProblems(want confTool, got map[string]any) []string {
 			p = append(p, fmt.Sprintf("param %s: want it (%s), not offered; offered %v", w.Name, w.Type, confKeys(props)))
 			continue
 		}
-		// A parameter the spec types `string` but describes as repeatable ("May be given more than once") is offered as an
-		// array of strings that also accepts one string (the planner is asked to say array in the spec).
-		repeatable := w.Type == "string" && g["type"] == "array" && strings.Contains(w.Description, "May be given more than once")
-		if g["type"] != w.Type && !repeatable {
-			p = append(p, fmt.Sprintf("param %s type: want %q, got %v", w.Name, w.Type, g["type"]))
+		gotType := fmt.Sprint(g["type"])
+		if items, ok := g["items"].(map[string]any); ok && g["type"] == "array" {
+			gotType = "array of " + fmt.Sprint(items["type"])
+		}
+		if gotType != w.Type {
+			p = append(p, fmt.Sprintf("param %s type: want %q, got %v", w.Name, w.Type, gotType))
 		}
 		if req[w.Name] != w.Required {
 			p = append(p, fmt.Sprintf("param %s required: want %v, got %v", w.Name, w.Required, req[w.Name]))

@@ -242,13 +242,13 @@
     },
     {
      "name": "capability",
-     "type": "string",
+     "type": "array of string",
      "required": false,
      "description": "Only endpoints that have this capability. May be given more than once; all must be present."
     },
     {
      "name": "label",
-     "type": "string",
+     "type": "array of string",
      "required": false,
      "description": "Only endpoints with this label, as name or name=value. May be given more than once; all must match."
     },
