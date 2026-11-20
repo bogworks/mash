@@ -1,0 +1,24 @@
+{"info":{"title":"mash","version":"1.0.0-spec.1"},
+ "command":{"name":"mash","description":"The tool.",
+  "options":[{"name":"--json","description":"Print JSON.","recursive":true}],
+  "exitCodes":[{"code":0,"description":"It worked."}],
+  "commands":[
+   {"name":"zed","description":"Zed does a thing.",
+    "arguments":[{"name":"item","required":true,"description":"What.","arity":{"minimum":1,"maximum":1}}],
+    "options":[{"name":"--kind","description":"A | kind.","arguments":[{"name":"kind","required":true,"acceptedValues":["a","b"]}]}],
+    "examples":["mash zed x"],
+    "exitCodes":[{"code":0,"description":"It worked."}],
+    "metadata":[{"name":"x-group","value":"Everyday"},{"name":"x-release","value":"1.0.0"},
+     {"name":"x-output","value":[
+      {"case":"Done","text":"  two  spaces\nand ```fences``` kept","stream":"stdout","exit":0},
+      {"case":"Bad","text":"error: no","stream":"stderr","exit":2}]},
+     {"name":"x-json","value":{"b":1,"a":[]}},
+     {"name":"x-mcp","value":{"tool":"zed","why":"Same job."}},
+     {"name":"x-notes","value":"A note."},
+     {"name":"x-today","value":"Replaces old."}]},
+   {"name":"alpha","description":"Alpha.",
+    "metadata":[{"name":"x-group","value":"Everyday"},{"name":"x-release","value":"1.0.0"},
+     {"name":"x-mcp","value":{"tool":null,"why":"Not for agents."}}]},
+   {"name":"future","description":"Comes later.",
+    "metadata":[{"name":"x-release","value":"0.6.0"}]}
+  ]}}

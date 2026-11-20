@@ -1,0 +1,29 @@
+Generated from spec/*.json by scripts/refgen. Do not edit.
+
+# mash key
+
+Make your own key pair, for when the seed must never leave this machine.
+
+Release: 0.5.6. Group: Setup.
+
+## Usage
+
+```text
+mash key <command> [options]
+```
+
+The global options of `mash` also apply: see [mash](mash.md#global-options).
+
+## Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| 0 | It worked. |
+| 1 | It failed; one line on stderr says why. |
+| 2 | The command line was wrong; nothing was attempted. |
+
+## Commands
+
+| Command | Description |
+| --- | --- |
+| [`mash key create`](mash-key-create.md) | Make a seed and its public key. |
