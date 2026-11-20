@@ -157,10 +157,10 @@ See it working first: [two Claude Code sessions exchanging mail, one woken by it
 4. Start a session as an endpoint, and mail the other one:
 
    ```sh
-   MASH_ENDPOINT=<owner>.. claude --channels plugin:mash@mash
+   MASH_ENDPOINT=<owner>.<group>.<name> claude --channels plugin:mash@mash
    ```
 
-   Ask Claude to send "hello" to `<owner>.<group>.bob`. In a second terminal, `MASH_ENDPOINT=<owner>.. claude --channels plugin:mash@mash` receives it; Claude can answer with the `reply` or `send` tool, and `MASH_ENDPOINT=<owner>.. mash inbox` shows the mailbox from a shell.
+   Ask Claude to send "hello" to `<owner>.<group>.bob`. In a second terminal, `MASH_ENDPOINT=<owner>.<group>.<name> claude --channels plugin:mash@mash` receives it; Claude can answer with the `reply` or `send` tool, and `MASH_ENDPOINT=<owner>.. mash inbox` shows the mailbox from a shell.
 
 The free tier allows 5 streams (mash uses 2 shared, plus 1 per endpoint, so 3 endpoints), 5 connections (one per live session), a 512 KiB message payload (mash caps sends to the server's `max_payload`), and R1 only (no replication, so no HA). Limits, and what to do when the script fails, are in [docs/synadia.md](docs/synadia.md).
 
