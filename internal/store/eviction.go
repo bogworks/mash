@@ -1,6 +1,6 @@
 package store
 
-// InboxNearFullPercent is the share of an inbox's byte cap at which mashctl audit and mash status call it near full.
+// InboxNearFullPercent is the share of an inbox's byte cap at which mashctl doctor and mash status call it near full.
 const InboxNearFullPercent = 90
 
 // InboxState is what the server shows of one inbox stream and its consumer, the inputs of Eviction.

@@ -57,7 +57,7 @@ func runVerbs(args []string, env func(string) string, lookup config.Lookup, stdo
 	}
 	// The global options are taken out of the arguments wherever they stand; a flag shadows its environment variable.
 	spec := cliframe.Spec{Tool: "mashctl", CredsEnv: "MASH_ADMIN_CREDS", CredsKey: "admin_creds"}
-	global, rest0, gerr := cliframe.ExtractOwning(spec, args, map[string][]string{"endpoint": {"--json"}, "audit": {"--json"}, "issued": {"--json"}, "version": {"--json"}, "init": {"--json"}, "status": {"--json"}, "limits": {"--json"}}) // these parse their own
+	global, rest0, gerr := cliframe.ExtractOwning(spec, args, map[string][]string{"endpoint": {"--json"}, "doctor": {"--json"}, "version": {"--json"}, "init": {"--json"}, "status": {"--json"}, "limits": {"--json"}}) // these parse their own
 	if gerr != nil {
 		fmt.Fprintf(stderr, "mashctl: %s\n", gerr)
 		return 2
@@ -75,6 +75,10 @@ func runVerbs(args []string, env func(string) string, lookup config.Lookup, stdo
 		fmt.Fprint(stdout, ctl.Usage("mashctl"))
 		return 0
 	}
+	if args[0] == "doctor" && helpRequested(args[0], args[1:]) { // its usage is its own text
+		fmt.Fprint(stdout, doctorUsage)
+		return 0
+	}
 	if isVerb(args[0]) && args[0] != "endpoint" && helpRequested(args[0], args[1:]) { // before any dispatch or config load: help changes nothing
 		fmt.Fprint(stdout, verbUsage(args))
 		return 0
@@ -86,10 +90,8 @@ func runVerbs(args []string, env func(string) string, lookup config.Lookup, stdo
 		return runStatus(args[1:], global, env, lookup, stdout, stderr)
 	case "limits":
 		return runLimits(args[1:], global, env, lookup, stdout, stderr)
-	case "audit": // read-only: lists what the server and the creds directories hold; writes nothing
-		return runAudit(args[1:], env, lookup, stdout, stderr)
-	case "issued": // read-only: the issue record and the check of it against the connected keys
-		return runIssued(args[1:], env, lookup, stdout, stderr)
+	case "doctor": // read-only: checks the server, the storage, the records and the connected keys; changes nothing
+		return runDoctor(args[1:], global, env, lookup, stdout, stderr)
 	case "endpoint":
 		return runEndpoint(args[1:], global, env, lookup, stdout, stderr)
 	default:
@@ -98,21 +100,21 @@ func runVerbs(args []string, env func(string) string, lookup config.Lookup, stdo
 }
 
 // helpRequested reports whether -h or --help is the first argument after the verb, or, for a verb with sub-verbs
-// (`issued check`), the first argument after the sub-verb. Text further along is never read for help:
+// (`limits show`), the first argument after the sub-verb. Text further along is never read for help:
 // a value, a note or a message may contain the words.
 func helpRequested(verb string, args []string) bool {
 	isHelp := func(a string) bool { return a == "-h" || a == "--help" }
 	if len(args) > 0 && isHelp(args[0]) {
 		return true
 	}
-	if (verb == "issued" || verb == "limits") && len(args) > 1 && !strings.HasPrefix(args[0], "-") && isHelp(args[1]) {
+	if verb == "limits" && len(args) > 1 && !strings.HasPrefix(args[0], "-") && isHelp(args[1]) {
 		return true
 	}
 	return false
 }
 
 // verbUsage is the lines of the mashctl usage for the verb in args: those that begin with its first two words
-// when some do (`issued check`), else with its first word; the whole usage when none does (a verb
+// when some do (`limits show`), else with its first word; the whole usage when none does (a verb
 // whose usage lives in its own file).
 func verbUsage(args []string) string {
 	words := []string{args[0]}
@@ -137,7 +139,7 @@ func verbUsage(args []string) string {
 // isVerb reports whether name is a verb run dispatches.
 func isVerb(name string) bool {
 	switch name {
-	case "audit", "endpoint", "issued", "init", "limits", "status":
+	case "doctor", "endpoint", "init", "limits", "status":
 		return true
 	}
 	return false

@@ -1,30 +1,19 @@
 package main
 
 import (
-	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
-	"io/fs"
 	"math"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/bogworks/mash/internal/admin"
-	"github.com/bogworks/mash/internal/config"
-	"github.com/bogworks/mash/internal/ctl"
 	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/store"
 )
 
-// exitAuditIncomplete is the exit code of an audit that could not complete: no server, unreadable required input, a
-// bad --compare file. It is the same code as --strict findings; 2 is usage.
-const exitAuditIncomplete = 1
-
-const auditUsage = "usage: mashctl audit [--json] [--strict] [--creds-dir DIR] [--compare EARLIER.json]\n"
+// This file sorts the server snapshot into what `mashctl doctor` judges: the directory records against the inbox
+// streams, the mail an inbox lost unread, and the retired-name bucket. It reads and changes nothing.
 
 // auditVersion is the version field of the JSON report. It changes only when a field is removed or changes meaning.
 const auditVersion = 2
@@ -98,16 +87,9 @@ type auditOrphanLease struct {
 	Key string `json:"key"`
 }
 
-type auditOrphanCreds struct {
-	File   string `json:"file"`
-	User   string `json:"user"`
-	Staged bool   `json:"staged"` // a *.creds.next file: credentials staged by an interrupted rotation
-}
-
 type auditOrphans struct {
 	Streams []auditOrphanStream `json:"streams"`
 	Leases  []auditOrphanLease  `json:"leases"`
-	Creds   []auditOrphanCreds  `json:"creds"`
 }
 
 // auditRetiredMarker is one retired-identity marker. It carries the retired user public key (the audit shows the other
@@ -164,10 +146,6 @@ func buildRetired(snap admin.AuditRetired) (auditRetired, []auditProblem) {
 	if snap.ConfigError != "" {
 		probs = append(probs, auditProblem{What: "retired", Item: store.RetiredBucket, Error: snap.ConfigError})
 	}
-	if ar.Alarm {
-		probs = append(probs, auditProblem{What: "retired", Item: store.RetiredBucket,
-			Error: fmt.Sprintf("ALARM: the bucket stores %d of %d bytes (%.2f%%), at or over %d%% of its cap: a full bucket makes provisioning refuse new identities for good, and mash never changes an existing bucket, so recreate it with a larger cap and its markers copied before it fills (ADR 0088)", ar.Bytes, ar.MaxBytes, ar.PercentUsed, retiredAlarmPercent)})
-	}
 	for _, m := range snap.Markers {
 		if m.Error != "" {
 			probs = append(probs, auditProblem{What: "retired", Item: m.Key, Error: m.Error})
@@ -208,50 +186,6 @@ type auditProblem struct {
 	Error string `json:"error"`
 }
 
-type auditSummary struct {
-	Records       int `json:"records"`
-	Running       int `json:"running"`
-	OrphanStreams int `json:"orphan_streams"`
-	OrphanLeases  int `json:"orphan_leases"`
-	OrphanCreds   int `json:"orphan_creds"`
-	Problems      int `json:"problems"`
-	// RetiredFinal and RetiredPending count the retired-identity markers by state. Both are in `problems` only as far as
-	// a pending marker, the alarm or an unreadable bucket is a finding there.
-	RetiredFinal   int `json:"retired_final"`
-	RetiredPending int `json:"retired_pending"`
-}
-
-// auditReport is what `mashctl audit --json` prints.
-type auditReport struct {
-	Version     int            `json:"version"`
-	Generated   string         `json:"generated"`
-	Owner       string         `json:"owner"`
-	Account     string         `json:"account"` // the account's public key (never a seed or a token); binds --compare to one deployment
-	CredsDirs   []string       `json:"creds_dirs"`
-	Records     []auditRecord  `json:"records"`
-	Orphans     auditOrphans   `json:"orphans"`
-	FencedLease []string       `json:"fenced_leases"` // lease keys holding a deprovision tombstone and no record: expected, they expire
-	Retired     *auditRetired  `json:"retired"`       // always set in a report this mashctl writes; nil in an earlier report from before it
-	Problems    []auditProblem `json:"problems"`
-	Notes       []string       `json:"notes"` // sorted; things skipped or absent that are not findings
-	Summary     auditSummary   `json:"summary"`
-	Compare     *auditCompare  `json:"compare,omitempty"` // only with --compare
-}
-
-// findings is how many things --strict counts: every orphan, every item the audit could not read (it cannot call
-// what it did not read clean) and, with --compare, every inbox that vanished or was recreated.
-func (r auditReport) findings() int {
-	s := r.Summary
-	n := s.OrphanStreams + s.OrphanLeases + s.OrphanCreds + s.Problems
-	if r.Compare != nil {
-		n += r.Compare.Vanished + r.Compare.Recreated + r.Compare.CreationUnknown + len(r.Compare.RetiredFinalLost)
-		if r.Compare.AccountUnverified {
-			n++
-		}
-	}
-	return n
-}
-
 func toAuditInbox(name string, st *admin.AuditStream) auditInbox {
 	in := auditInbox{Stream: sap.InboxStream(name), Subjects: []string{}}
 	if st == nil {
@@ -286,36 +220,6 @@ func auditTime(t *time.Time) string {
 	return t.UTC().Format(time.RFC3339Nano)
 }
 
-// drained reports whether an inbox can be cut off: it is gone, or it holds no message, or every message it holds has been
-// delivered and acknowledged. Otherwise its `deliver` consumer must have nothing pending and nothing unacknowledged, and must be
-// configured to have delivered every stored message: deliver policy all (or a start sequence at or below the first
-// stored sequence), no filter at all, and an ack floor that reaches the last stored sequence. The counts alone are
-// not enough: a consumer recreated to skip stored messages shows zero for both. Any filter disqualifies it, even one
-// equal to the stream's current subjects: the stream may have captured other subjects earlier, whose stored messages
-// the filter skips. mash creates `deliver` unfiltered, so a filter means it was recreated by hand.
-func (in auditInbox) drained() bool {
-	if !in.Present || in.Msgs == 0 {
-		return true
-	}
-	d := in.Deliver
-	if !d.Present || d.Pending != 0 || d.AckPending != 0 {
-		return false
-	}
-	switch d.DeliverPolicy {
-	case "all":
-	case "by_start_sequence":
-		if d.StartSeq > in.FirstSeq {
-			return false
-		}
-	default: // new, last, last_per_subject, by_start_time (a time cannot be compared with the stored messages), unknown
-		return false
-	}
-	if len(d.FilterSubjects) > 0 {
-		return false
-	}
-	return d.AckFloor >= in.LastSeq
-}
-
 // inboxProblems is the problems of one endpoint's inbox: mail lost unread. A message dropped after it was delivered is
 // ordinary turnover (the oldest mail goes when the cap or the age limit is reached), so it is not a problem. An inbox
 // near its byte cap is operational state, not a misconfiguration: inboxNote reports it, and --strict does not count it.
@@ -343,12 +247,20 @@ func inboxNote(key string, in auditInbox) string {
 	return fmt.Sprintf("inbox %s is %.0f%% full (%d of %d bytes); the oldest mail is evicted at 100%%", key, in.FillPercent, in.Bytes, in.MaxBytes)
 }
 
-// buildAudit combines the server snapshot with the creds files' public user keys. credsUsers maps a creds file to its
-// user public key (or to an error); skipUsers are keys that are not endpoints' (the admin's).
-func buildAudit(owner string, snap admin.AuditSnapshot, dirs []string, creds []credsFile, skipUsers map[string]bool) auditReport {
-	rep := auditReport{Version: auditVersion, Owner: owner, CredsDirs: dirs,
-		Records: []auditRecord{}, FencedLease: []string{}, Problems: []auditProblem{}, Notes: []string{},
-		Orphans: auditOrphans{Streams: []auditOrphanStream{}, Leases: []auditOrphanLease{}, Creds: []auditOrphanCreds{}}}
+// auditReport is the snapshot sorted into what doctor judges.
+type auditReport struct {
+	Records     []auditRecord
+	Orphans     auditOrphans
+	FencedLease []string // lease keys holding a deprovision tombstone and no record: expected, they expire
+	Retired     *auditRetired
+	Problems    []auditProblem
+	Notes       []string // sorted; inboxes near full
+}
+
+// buildAudit sorts the server snapshot into records with their inboxes, orphans, retired-name findings and problems.
+func buildAudit(snap admin.AuditSnapshot) auditReport {
+	rep := auditReport{Records: []auditRecord{}, FencedLease: []string{}, Problems: []auditProblem{}, Notes: []string{},
+		Orphans: auditOrphans{Streams: []auditOrphanStream{}, Leases: []auditOrphanLease{}}}
 	streams := map[string]*admin.AuditStream{}
 	for i := range snap.Streams {
 		streams[snap.Streams[i].Name] = &snap.Streams[i]
@@ -359,15 +271,12 @@ func buildAudit(owner string, snap admin.AuditSnapshot, dirs []string, creds []c
 			live[l.Key] = true
 		}
 	}
-	claimedStream, claimedLease, users := map[string]bool{}, map[string]bool{}, map[string]bool{}
+	claimedStream, claimedLease := map[string]bool{}, map[string]bool{}
 
 	for _, b := range snap.BadRecords {
 		rep.Problems = append(rep.Problems, auditProblem{What: "record", Item: b.Key, Error: b.Error})
 		// the entry still exists: what it names is not an orphan, though the entry itself is not trusted
 		claimedStream[sap.InboxStream(b.Key)], claimedLease[b.Key] = true, true
-		if b.User != "" {
-			users[b.User] = true
-		}
 	}
 	for _, r := range snap.Records {
 		addr, err := r.Address()
@@ -377,7 +286,7 @@ func buildAudit(owner string, snap admin.AuditSnapshot, dirs []string, creds []c
 			continue
 		}
 		key := addr.Flat()
-		claimedStream[sap.InboxStream(key)], claimedLease[key], users[r.User] = true, true, true
+		claimedStream[sap.InboxStream(key)], claimedLease[key] = true, true
 		ar := auditRecord{Key: key, Address: addr.String(), Owner: addr.Owner, Group: addr.Group, Instance: addr.Instance,
 			User: r.User, Running: live[key], Inbox: toAuditInbox(key, streams[sap.InboxStream(key)])}
 		rep.Records = append(rep.Records, ar)
@@ -403,326 +312,12 @@ func buildAudit(owner string, snap admin.AuditSnapshot, dirs []string, creds []c
 			rep.Orphans.Leases = append(rep.Orphans.Leases, auditOrphanLease{Key: l.Key})
 		}
 	}
-	for _, c := range creds {
-		switch {
-		case c.err != nil:
-			rep.Problems = append(rep.Problems, auditProblem{What: "creds", Item: c.path, Error: c.err.Error()})
-		case users[c.user] || skipUsers[c.user]:
-		default:
-			rep.Orphans.Creds = append(rep.Orphans.Creds, auditOrphanCreds{File: c.path, User: c.user, Staged: c.staged})
-		}
-	}
-	slices.SortFunc(rep.Orphans.Creds, func(a, b auditOrphanCreds) int { return strings.Compare(a.File, b.File) })
 	retired, retiredProbs := buildRetired(snap.Retired)
 	rep.Retired = &retired
 	rep.Problems = append(rep.Problems, retiredProbs...)
-	if snap.LeaseRollup {
-		rep.Problems = append(rep.Problems, auditProblem{What: "lease", Item: store.LeaseBucket,
-			Error: `lease bucket allows rollup writes; run "mashctl init --config FILE" to harden it`})
-	}
-	if snap.LeaseError != "" {
-		rep.Problems = append(rep.Problems, auditProblem{What: "lease", Item: store.LeaseBucket,
-			Error: "the lease bucket's configuration could not be read: " + snap.LeaseError})
-	}
 	slices.SortFunc(rep.Problems, func(a, b auditProblem) int {
 		return strings.Compare(a.What+"\x00"+a.Item+"\x00"+a.Error, b.What+"\x00"+b.Item+"\x00"+b.Error)
 	})
-
-	s := &rep.Summary
-	s.Records = len(rep.Records)
-	for _, r := range rep.Records {
-		if r.Running {
-			s.Running++
-		}
-	}
-	s.RetiredFinal, s.RetiredPending = retired.Final, retired.Pending
-	s.OrphanStreams, s.OrphanLeases, s.OrphanCreds, s.Problems = len(rep.Orphans.Streams), len(rep.Orphans.Leases), len(rep.Orphans.Creds), len(rep.Problems)
-	return rep
-}
-
-// credsFile is one creds file found in a managed directory: its public user key, or why it could not be read.
-// staged is a *.creds.next file.
-type credsFile struct {
-	path   string
-	user   string
-	err    error
-	staged bool
-}
-
-// scanCreds reads the user public key of every regular *.creds and *.creds.next (staged) file in dirs. Only the JWT's
-// subject is read: the seed and the token are never kept or shown, so a staged file is as safe to read as a creds
-// file. A symbolic link is skipped, and so is a directory that does not exist when optional (else an error); each
-// skip is returned as a note.
-func scanCreds(dirs []string, optional bool) ([]credsFile, []string, error) {
-	var out []credsFile
-	var notes []string
-	for _, d := range dirs {
-		ents, err := os.ReadDir(d)
-		if errors.Is(err, fs.ErrNotExist) && optional {
-			notes = append(notes, fmt.Sprintf("creds directory %s does not exist: nothing scanned there", config.Clean(d)))
-			continue
-		}
-		if err != nil {
-			return nil, nil, fmt.Errorf("mashctl: audit: creds directory: %w", err)
-		}
-		for _, e := range ents {
-			staged := strings.HasSuffix(e.Name(), ".creds.next")
-			if !staged && !strings.HasSuffix(e.Name(), ".creds") {
-				continue
-			}
-			p := filepath.Join(d, e.Name())
-			if e.Type()&fs.ModeSymlink != 0 {
-				notes = append(notes, fmt.Sprintf("creds file %s is a symbolic link: skipped, so its user key is not matched", config.Clean(p)))
-				continue
-			}
-			if !e.Type().IsRegular() {
-				continue
-			}
-			u, err := credsUserKey(p)
-			if err != nil {
-				// the error may name a path and a parse failure, never the file's content
-				out = append(out, credsFile{path: p, staged: staged, err: errors.New(config.Clean(strings.TrimPrefix(err.Error(), p+": ")))})
-				continue
-			}
-			out = append(out, credsFile{path: p, user: u, staged: staged})
-		}
-	}
-	slices.Sort(notes)
-	return out, notes, nil
-}
-
-type auditOpts struct {
-	json, strict bool
-	credsDir     string
-	compare      string
-}
-
-func parseAuditArgs(args []string) (auditOpts, error) {
-	var o auditOpts
-	for i := 0; i < len(args); i++ {
-		a := args[i]
-		name, inline, hasInline := strings.Cut(a, "=")
-		switch name {
-		case "--json", "--strict":
-			if hasInline {
-				return o, fmt.Errorf("unexpected %s", config.RejectedOption(a))
-			}
-			if name == "--json" {
-				o.json = true
-			} else {
-				o.strict = true
-			}
-		case "--creds-dir", "--compare":
-			v, err := flagValue(args, &i, name, inline, hasInline)
-			if err != nil {
-				return o, err
-			}
-			if name == "--creds-dir" {
-				o.credsDir = v
-			} else {
-				o.compare = v
-			}
-		default:
-			return o, fmt.Errorf("unexpected %s", config.RejectedOption(a))
-		}
-	}
-	return o, nil
-}
-
-// runAudit is `mashctl audit`: a read-only listing of mash's side of the population. It never writes to the server or
-// to disk.
-// auditFailed prints an error that kept audit from completing, with the lost-quorum hint when JetStream is
-// unavailable, and returns the could-not-complete exit code.
-func auditFailed(stderr io.Writer, err error) int {
-	fmt.Fprintln(stderr, admin.RewordUnavailable(err.Error()))
-	return exitAuditIncomplete
-}
-
-func runAudit(args []string, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) int {
-	o, err := parseAuditArgs(args)
-	if err != nil {
-		fmt.Fprintf(stderr, "mashctl: audit: %v\n%s", err, auditUsage)
-		return 2
-	}
-	var earlier *auditReport
-	if o.compare != "" {
-		earlier, err = readEarlierAudit(o.compare)
-		if err != nil {
-			return auditFailed(stderr, err)
-		}
-	}
-	cfg, err := loadConfig(env, lookup)
-	if err != nil {
-		return auditFailed(stderr, err)
-	}
-	adm, ctx, closeAdmin, err := ctl.OpenAdmin("mashctl", cfg)
-	if err != nil {
-		return auditFailed(stderr, err)
-	}
-	defer closeAdmin()
-	snap, err := adm.Audit(ctx)
-	if err != nil {
-		return auditFailed(stderr, err)
-	}
-
-	dirs, optional := []string{}, true
-	if o.credsDir != "" {
-		dirs, optional = []string{filepath.Clean(o.credsDir)}, false
-	} else {
-		if cfg.Dir != "" {
-			dirs = append(dirs, filepath.Clean(cfg.Dir))
-		}
-	}
-	creds, notes, err := scanCreds(dirs, optional)
-	if err != nil {
-		return auditFailed(stderr, err)
-	}
-	skip := map[string]bool{} // the admin's and the system account's creds are in the same directory but are no endpoint's
-	for _, p := range []string{cfg.AdminCreds, env("MASH_SYS_CREDS")} {
-		if p == "" {
-			continue
-		}
-		if u, err := credsUserKey(p); err == nil {
-			skip[u] = true
-		}
-	}
-	rep := buildAudit(cfg.Owner, snap, dirs, creds, skip)
-	if rep.Account, err = credsAccountKey(cfg.AdminCreds); err != nil {
-		return auditFailed(stderr, err)
-	}
-	if earlier != nil {
-		if err := bindEarlierAudit(earlier, rep); err != nil {
-			return auditFailed(stderr, err)
-		}
-	}
-	rep.Generated = auditNow().UTC().Format(time.RFC3339)
-	rep.Notes = append(rep.Notes, notes...)
 	slices.Sort(rep.Notes)
-	if earlier != nil {
-		rep.Compare = compareAudits(*earlier, rep)
-		rep.Compare.AccountUnverified = earlier.Account == ""
-		if o.strict && rep.Compare.RetiredUnverified {
-			// Like a report that lacks a required field: it cannot prove no final marker was deleted. Nothing on stdout.
-			fmt.Fprintf(stderr, "mashctl: audit: --compare: %s: regenerate it with this mashctl and compare again\n", retiredUnverifiedMsg)
-			return exitAuditIncomplete
-		}
-	}
-
-	if o.json {
-		b, err := json.MarshalIndent(rep, "", "  ")
-		if err != nil {
-			return auditFailed(stderr, err)
-		}
-		fmt.Fprintf(stdout, "%s\n", b)
-	} else {
-		writeAuditText(stdout, rep)
-	}
-	if o.strict && rep.findings() > 0 {
-		s := rep.Summary
-		vanished, recreated, unknown, lost := 0, 0, 0, 0
-		if rep.Compare != nil {
-			vanished, recreated, unknown, lost = rep.Compare.Vanished, rep.Compare.Recreated, rep.Compare.CreationUnknown, len(rep.Compare.RetiredFinalLost)
-		}
-		fmt.Fprintf(stderr, "mashctl: audit --strict: %d finding(s): %d orphan stream(s), %d orphan lease(s), %d orphan creds file(s), %d item(s) not readable or retired-marker finding(s), %d inbox(es) vanished and %d recreated since the earlier audit, %d final retired marker(s) lost since the earlier audit\n",
-			rep.findings(), s.OrphanStreams, s.OrphanLeases, s.OrphanCreds, s.Problems, vanished, recreated, lost)
-		if unknown > 0 {
-			fmt.Fprintf(stderr, "mashctl: audit --strict: the earlier audit lacks creation times for %d inbox stream(s), so it cannot show they were not deleted and recreated: regenerate it with this mashctl and compare again\n", unknown)
-		}
-		if rep.Compare != nil && rep.Compare.AccountUnverified {
-			fmt.Fprintln(stderr, "mashctl: audit --strict: the earlier audit lacks the account field, so it cannot be tied to this deployment: regenerate it with this mashctl and compare again")
-		}
-		return 1
-	}
-	return 0
-}
-
-func inboxText(in auditInbox) string {
-	if !in.Present {
-		return fmt.Sprintf("stream %s\tabsent", config.Clean(in.Stream))
-	}
-	d := in.Deliver
-	consumer := "deliver false"
-	if d.Present {
-		filter := "none"
-		if len(d.FilterSubjects) > 0 {
-			filter = strings.Join(d.FilterSubjects, ",")
-		}
-		consumer = fmt.Sprintf("deliver true\tpolicy %s\tstart_seq %d\tfilter %s\tack_floor %d", config.Clean(d.DeliverPolicy), d.StartSeq, config.Clean(filter), d.AckFloor)
-		if d.StartTime != "" {
-			consumer += "\tstart_time " + config.Clean(d.StartTime)
-		}
-		consumer += fmt.Sprintf("\tdelivered %d\tnum_redelivered %d", d.Delivered, d.NumRedelivered)
-	}
-	return fmt.Sprintf("stream %s\tmsgs %d\tfirst %d\tlast %d\tsuspended %t\tpending %d\tack_pending %d\t%s\tsubjects %s", config.Clean(in.Stream), in.Msgs, in.FirstSeq, in.LastSeq,
-		in.Suspended, d.Pending, d.AckPending, consumer, config.Clean(strings.Join(in.Subjects, ",")))
-}
-
-// writeAuditText is the human form: the same facts as the JSON, one tab-separated line each.
-func writeAuditText(w io.Writer, r auditReport) {
-	c := config.Clean
-	fmt.Fprintf(w, "mashctl audit version %d generated %s owner %s\n", r.Version, r.Generated, c(r.Owner))
-	fmt.Fprintf(w, "creds directories: %s\n", c(strings.Join(r.CredsDirs, ", ")))
-	fmt.Fprintf(w, "records %d, running %d\n", r.Summary.Records, r.Summary.Running)
-	for _, x := range r.Records {
-		state := "stopped"
-		if x.Running {
-			state = "running"
-		}
-		fmt.Fprintf(w, "record %s\t%s\taddress %s\tuser %s\t%s\n", c(x.Key), state, c(x.Address), c(x.User), inboxText(x.Inbox))
-	}
-	fmt.Fprintf(w, "orphans: %d stream(s), %d lease(s), %d creds file(s)\n", r.Summary.OrphanStreams, r.Summary.OrphanLeases, r.Summary.OrphanCreds)
-	for _, x := range r.Orphans.Streams {
-		fmt.Fprintf(w, "orphan stream %s\tmsgs %d\tfirst %d\tlast %d\tsuspended %t\tsubjects %s\n", c(x.Stream), x.Msgs, x.FirstSeq, x.LastSeq, x.Suspended, c(strings.Join(x.Subjects, ",")))
-	}
-	for _, x := range r.Orphans.Leases {
-		fmt.Fprintf(w, "orphan lease %s\n", c(x.Key))
-	}
-	for _, x := range r.Orphans.Creds {
-		staged := ""
-		if x.Staged {
-			staged = "\tstaged"
-		}
-		fmt.Fprintf(w, "orphan creds %s\tuser %s%s\n", c(x.File), c(x.User), staged)
-	}
-	for _, k := range r.FencedLease {
-		fmt.Fprintf(w, "fenced lease %s (a deprovision tombstone; it expires)\n", c(k))
-	}
-	for _, p := range r.Problems {
-		if p.What == "inbox" { // a report about readable data, not a read failure
-			fmt.Fprintf(w, "inbox %s: %s\n", c(p.Item), c(p.Error))
-			continue
-		}
-		fmt.Fprintf(w, "not readable %s %s: %s\n", p.What, c(p.Item), c(p.Error))
-	}
-	if rt := r.Retired; rt != nil {
-		if !rt.Present {
-			fmt.Fprintf(w, "no retired bucket (%s): no retirement has been recorded\n", store.RetiredBucket)
-		} else {
-			if rt.MaxBytes <= 0 {
-				fmt.Fprintf(w, "retired markers %d (final %d, pending %d)\tbucket %s\tbytes %d, no cap\n", rt.Final+rt.Pending, rt.Final, rt.Pending, store.RetiredBucket, rt.Bytes)
-			} else {
-				fmt.Fprintf(w, "retired markers %d (final %d, pending %d)\tbucket %s\tbytes %d of %d\tused %.2f%%\n", rt.Final+rt.Pending, rt.Final, rt.Pending, store.RetiredBucket, rt.Bytes, rt.MaxBytes, rt.PercentUsed)
-			}
-			if rt.Alarm {
-				fmt.Fprintf(w, "retired bucket ALARM: at or over %d%% of its cap\n", retiredAlarmPercent)
-			}
-			for _, m := range rt.Markers {
-				state := m.State
-				if m.State == store.RetiredPending {
-					state = "PENDING"
-				}
-				user := ""
-				if m.User != "" {
-					user = "\tuser " + c(m.User)
-				}
-				fmt.Fprintf(w, "retired marker %s\t%s\tretired_at %s%s\n", c(m.Key), state, c(m.RetiredAt), user)
-			}
-		}
-	}
-	for _, n := range r.Notes {
-		fmt.Fprintf(w, "note: %s\n", c(n))
-	}
-	if r.Compare != nil {
-		writeCompareText(w, r.Compare)
-	}
+	return rep
 }

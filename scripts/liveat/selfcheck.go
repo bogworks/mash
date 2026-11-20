@@ -53,6 +53,7 @@ var SelfCheck = Scenario{
 		a.C.Check("the server's PID is recorded and alive", a.srvPID > 0 && alive(a.srvPID), "")
 		r := a.Ctl("list", h, a.Conn(), "endpoint", "list")
 		a.C.Check("mashctl endpoint list runs against the server", r.Code == 0, exitDetail(r))
+		// T1b: `mashctl audit` was removed (replaced by `mashctl doctor`); this call is rewritten in a later slice.
 		r = a.Ctl("audit", h, a.Conn(), "audit", "--json")
 		a.C.Check("mashctl audit --json runs against the server", r.Code == 0 && strings.HasPrefix(strings.TrimSpace(r.Stdout), "{"), exitDetail(r))
 		s1 := a.Snapshot("one", h, h)

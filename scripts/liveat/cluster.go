@@ -411,6 +411,7 @@ func errText(err error) string {
 // ClusterCheck runs `mashctl issued check` on h and checks the summary line.
 func (s *At5) ClusterCheck(h Host, name string) bool {
 	r := retry(40*time.Second, 2*time.Second, func() (Result, bool) {
+		// T1b: `mashctl issued check` was removed (replaced by `mashctl doctor`); this call is rewritten in a later slice.
 		r := s.ctl(h, "issued-check", nil, "issued", "check")
 		return r, r.Code == 0
 	})

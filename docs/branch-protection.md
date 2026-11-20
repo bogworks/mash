@@ -116,7 +116,7 @@ is a setting only if that section says so. Settings > Branches > Add branch rule
   heavy job only when `changes` succeeded and said `code=false`. Docs-only means every changed path is under `docs/` or is
   a `*.md` file and is not one a build or test reads; `scripts/ci-changes` is the definition. Code, and so the full set,
   is everything else: Go sources and module files, `.github/`, `.mergify.yml`, `scripts/`, `plugin/`, `cmd/`, `internal/`
-  and `ci/` (their Markdown included), test data, `CHANGELOG.md`, `changelog.d/`, `docs/audit.md`,
+  and `ci/` (their Markdown included), test data, `CHANGELOG.md`, `changelog.d/`,
   `docs/branch-protection.md`, `docs/review/`, `docs/allowed_signers`, `docs/skipped-releases.txt` and binary assets under
   `docs/`. A push, a merge group and a Mergify queue draft (head ref `mergify/merge-queue/`) always run the full set, so
   the combined commit and `main` are always tested.

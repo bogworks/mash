@@ -47,7 +47,7 @@ func TestInboxEvictionLineOnAFloodedInbox(t *testing.T) {
 	ep := f.client(t, "a")
 	line, ok := ep.InboxEvictionLine(context.Background())
 	if !ok || !strings.HasPrefix(line, "inbox: WARN - ") || !strings.Contains(line, "unread message(s) lost to eviction") ||
-		!strings.Contains(line, "mashctl audit") || !strings.Contains(line, "docs/operations.md") {
+		!strings.Contains(line, "mashctl doctor") || !strings.Contains(line, "docs/operations.md") {
 		t.Fatalf("flooded inbox: %q %v", line, ok)
 	}
 }

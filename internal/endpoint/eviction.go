@@ -46,7 +46,7 @@ func (e *Endpoint) evictionLine(ctx context.Context, label, stream string) (line
 func EvictionLine(ev store.InboxEviction) (line string, ok bool) { return evictionLine("inbox", ev) }
 
 func evictionLine(label string, ev store.InboxEviction) (line string, ok bool) {
-	const next = "Next: read mail sooner; an operator can run `mashctl audit` to see inboxes that fill (docs/operations.md)"
+	const next = "Next: read mail sooner; an operator can run `mashctl doctor` to see inboxes that fill (docs/operations.md)"
 	switch {
 	case ev.Unread > 0 && ev.NearFull():
 		return fmt.Sprintf("%s: WARN - at least %d unread message(s) lost to eviction (%d evicted in all) and the inbox is %.0f%% full. %s", label, ev.Unread, ev.Dropped, ev.Fill, next), true

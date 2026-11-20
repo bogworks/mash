@@ -888,6 +888,7 @@ func (s *At5) revocationSeen() {
 	r := s.ctl(m2, "show-review", nil, "endpoint", "show", "alice.dev.review", "--json")
 	ok, d := showRefusal(r.Code, r.Stdout)
 	s.check("M2: endpoint show alice.dev.review --json refuses (no endpoint) for the endpoint M1 deleted", ok, d)
+	// T1b: `mashctl issued list` and `issued check` were removed (the check is now `mashctl doctor`); these calls are rewritten in a later slice.
 	il := s.ctl(m2, "issued-list", nil, "issued", "list", "--json")
 	ok, d = issuedListRevoked(il.Code, il.Stdout, "alice.dev.review")
 	s.check("M2: mashctl issued list shows alice.dev.review's key revoked (its entry has revoked_at)", ok, d)

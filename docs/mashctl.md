@@ -14,7 +14,7 @@ Minting a user needs the account's identity key (`account.nk` in the key directo
 
 `mashctl` refuses admin creds and system account creds (`system_creds` in `config.json`) that other users can read, as mash does for endpoint creds: the file must be a regular file with no group or other permission bits (`chmod 600 FILE`). A symlink is followed and the file it points to is checked; a missing file keeps its own error.
 
-Every connection requires TLS, to any host, loopback included: every verb that connects with the admin or system creds (and `init`) refuses a plain `nats://` URL with exit code 2, naming `insecure_plaintext` (`MASH_INSECURE_PLAINTEXT=1`), which allows plain text and prints a warning; use it only for a throwaway server in a test. A `tls://` connection fails when the server does not offer TLS. `issued check`, `endpoint delete`, `endpoint reissue` and `init` verify the account JWT's signature, subject and issuer (the operator key, or a key declared by `<key dir>/operator.jwt`). Admin and system connections never add servers the server advertises. See [operations](operations.md#writing-the-account-jwt-revocation).
+Every connection requires TLS, to any host, loopback included: every verb that connects with the admin or system creds (and `init`) refuses a plain `nats://` URL with exit code 2, naming `insecure_plaintext` (`MASH_INSECURE_PLAINTEXT=1`), which allows plain text and prints a warning; use it only for a throwaway server in a test. A `tls://` connection fails when the server does not offer TLS. `doctor`, `endpoint delete`, `endpoint reissue` and `init` verify the account JWT's signature, subject and issuer (the operator key, or a key declared by `<key dir>/operator.jwt`). Admin and system connections never add servers the server advertises. See [operations](operations.md#writing-the-account-jwt-revocation).
 
 ## Which server does mashctl change?
 
@@ -42,16 +42,9 @@ mashctl limits apply [prefix] [--dry-run]
 
 ## The issue record
 
-```sh
-mashctl issued list  [--json]
-mashctl issued check [--json]
-```
-
 Every user JWT `mashctl` issues is written to the issue record, the `mash-issued` bucket, under the user's public key: a user minted with the account key (a kept key adds a revision under the same key, a rotated key adds an entry for the new key and leaves the old key's), and the admin user that `mashctl init` connects with (kind `admin`; `mashctl init --config` records it). The entry is written before the creds file or the directory record, so a user that can connect is always in the record, and a record that cannot be written stops the issue. An entry holds the public key, the address (the endpoint name), the owner, the kind (`endpoint` or `admin`), the tags, the generation (always 0: mash has no policy generation yet) the issue time (RFC 3339, UTC), the purpose and, once mash has revoked the key, the revocation time. The purpose is one of `issue` (a user minted with the account key, the admin user at `init`), `rotation` (the new key of a credential that rotates the user key) and `probe` (reserved for the policy gate's probe credentials; `mashctl` does not write it); a record from before the field reads as `issue`. `revoked_at` (RFC 3339, UTC) is left out until set: `endpoint delete` and `endpoint reissue` set it after the revocation succeeds, once and never cleared, and a key mash never recorded is skipped. A failure to set it prints `warning: user key U... is revoked, but the issue record was not updated with it: ...` on stderr and never fails or undoes the revocation. Nothing is removed from the record when an endpoint is deleted or its key is revoked: revocation is the account JWT's, and the record is the history of what was issued. `mashctl init --config` creates the bucket; a deployment from before the record gets it, hardened, the first time a user is minted and written. Users issued before the record existed are not in it until a credential is reissued under the same key.
 
-`issued list` prints the latest entry of each key, with its purpose and, when set, `revoked TIME` (`--json`: `present`, `count`, `issued`, each entry with `purpose` and, when set, `revoked_at`).
-
-`issued check` asks every server, through the system account (`system_creds` in `config.json`), which user public keys are connected in the MASH account, and compares them with the record. It reports, per server, any connected key mash did not issue (the key, the server, the account, the client's connection name, the key that signed the JWT and its tags), the recorded keys that are not connected (informational) and a count summary. No key is exempt, not even the admin user this command connects with: it must be in the record (`mashctl init` and `adopt --mint-admin` record it). The system account's users never appear in the MASH account's connection list. A connected key that the record holds as revoked is reported apart, as `REVOKED key K still connected`: the revocation did not take effect (revoke it again, and look at the account JWT). A recorded key of any purpose counts as issued by mash. Exit codes: 0 when no unrecorded key and no revoked key is connected and the scan was complete; 1 when a finding was found, even if the scan was incomplete; 2 when nothing was found but the scan was incomplete or failed: bad arguments, a connection failure, a server that did not answer, a server whose connection list changed while it was read and could not be read whole (a list that fits one page is one snapshot; a list of several pages is accepted only when two consecutive complete scans collect the same connections, and each server is scanned up to 3 times), or a server set that cannot be shown to be complete (the number of servers is the count under `servers` in `config.json`, as for `endpoint delete`). Whenever the scan was incomplete the text says `INCOMPLETE` and names why, and the JSON has `complete: false` and `incomplete` with the reason, with or without a finding. `--json` prints `clean`, `complete`, `incomplete`, `account`, `record_present`, `servers` (`answered`, `missing`, `expected`), `unrecorded`, `revoked_connected`, `recorded_not_connected` and `summary`. Only public keys are printed. See [operations.md](operations.md#the-issue-record-and-the-drift-check) for what it can and cannot see.
+`mashctl doctor` compares the user keys connected to every server with this record (its `keys` check, see [doctor.md](doctor.md#keys)): a connected key that mash did not issue, or a key recorded as revoked that is still connected, is a problem. No key is exempt, not even the admin user the command connects with: `mashctl init` records it. The check needs `system_creds` in `config.json` and the number of servers is the count under `servers`, as for `endpoint delete`. There is no command that lists the record; one endpoint's own records are `mashctl endpoint show ADDRESS`. See [operations.md](operations.md#the-issue-record-and-the-drift-check) for what it can and cannot see.
 
 ## Setting and removing values on an endpoint
 
@@ -80,9 +73,9 @@ Labels do not change a minted user: the permissions of an endpoint do not depend
 
 See [operations.md](operations.md#suspend-an-endpoints-inbound-mail).
 
-## Auditing the population
+## Checking the deployment
 
-`mashctl audit [--json] [--strict] [--creds-dir DIR] [--compare EARLIER.json]` lists what the server and the creds directories hold, changes nothing, and reports state, not use: it cannot see publishes, connections or endpoints with no stream. `--compare` adds what moved since an earlier `--json` report. Exit codes: 0 clean (or findings without `--strict`), 1 findings under `--strict` (orphans, unreadable items, movement found by `--compare`), 2 usage. A server that cannot be reached, unreadable required input and a bad `--compare` file also exit 1. See [audit.md](audit.md).
+`mashctl doctor [--strict] [--json]` checks the server, mash's storage on it and every endpoint's records, changes nothing, and says how to fix what is wrong. It reports state, not use: it cannot see publishes, connections or endpoints with no stream. Exit codes: 0 no problem (and no warning with `--strict`), 1 a problem, 2 usage. See [doctor.md](doctor.md).
 
 ## mashctl endpoint inbox
 
@@ -90,7 +83,7 @@ See [operations.md](operations.md#suspend-an-endpoints-inbound-mail).
 mashctl endpoint inbox ADDRESS [--after NUMBER] [--limit n] [--json]
 ```
 
-Lists the messages stored in one endpoint's inbox and whether each was delivered, so a test can prove what the transport kept and delivered. It never shows a message's text. It is read only: it uses stream info, a direct get of a message by sequence and consumer info of the existing `deliver` consumer, and nothing else. It never creates, updates, binds or fetches from a consumer, never acknowledges, and writes nothing to the directory, a bucket or a file. It runs with the same admin credentials as `audit`.
+Lists the messages stored in one endpoint's inbox and whether each was delivered, so a test can prove what the transport kept and delivered. It never shows a message's text. It is read only: it uses stream info, a direct get of a message by sequence and consumer info of the existing `deliver` consumer, and nothing else. It never creates, updates, binds or fetches from a consumer, never acknowledges, and writes nothing to the directory, a bucket or a file. It runs with the same admin credentials as `doctor`.
 
 - ADDRESS is read from the directory record, one key; an address that names no record is refused (exit 1).
 - The default is the last 20 messages, oldest first. `--limit n` caps the count. `--after NUMBER` shows only the messages after that message number, as `mash inbox --after` does; with it the first n messages after the number are shown. A value that is not a whole number exits 2 with `error: --after must be a whole number`.
@@ -124,7 +117,7 @@ FROM is the sender's name when the sender is in the endpoint's owner and group, 
 
 Delivered comes from the consumer's cursors alone. NATS does not report acknowledgements above the ack floor, so a delivered message may be unacknowledged or acknowledged out of order, and the server does not say which. A per-message delivery count and ack time are not kept by JetStream or mash.
 
-See also [audit.md](audit.md) for the consumer fields (`delivered`, `ack_floor`, `num_redelivered`, `pending`, `ack_pending`) the audit reports per inbox.
+See also [doctor.md](doctor.md) for what `mashctl doctor` says about an inbox that lost mail unread or is nearly full.
 
 ## mashctl endpoint create
 
@@ -187,7 +180,7 @@ error: --public-key needs --out, the join file to write
 hint: mashctl endpoint create --help
 ```
 
-**A killed run.** Run the same command again. The key waits in `<creds file>.pending` (or `<PATH>.pending` with `--out`), so the second run finishes with the same key and removes the file. With `--public-key` the second run signs again and writes the join file. A creds file or inbox left by a run that never completed shows as an orphan in `mashctl audit`.
+**A killed run.** Run the same command again. The key waits in `<creds file>.pending` (or `<PATH>.pending` with `--out`), so the second run finishes with the same key and removes the file. With `--public-key` the second run signs again and writes the join file. A creds file or inbox left by a run that never completed shows in `mashctl doctor` as an inbox with no endpoint record.
 
 ## mashctl endpoint reissue
 
@@ -330,13 +323,13 @@ Because revocation is by key and time, a new credential for an endpoint needs a 
 
 ## Exit codes and arguments
 
-mashctl exits with 0, 1 or 2 only: 0 it worked, 1 it failed (one line on standard error says why), 2 the command line was wrong or the command cannot run here, and nothing was attempted. Every verb exits 0 on success, 2 for a usage error (a wrong or missing argument, an unknown flag, a stray argument, an argument that fails validation) and 1 for any failure; `audit` exits 1 for `--strict` findings and when it could not complete (see [audit.md](audit.md#exit-codes)). An argument that fails validation is named in the message but never printed back, so a secret pasted into the wrong place is not echoed. `mashctl endpoint permissions ADDRESS` prints the permission set of the endpoint's NATS user as JSON, and nothing else, on stdout; it reads no server. The keys are `pub` and `sub`, each with `allow` and `deny`; `deny` is always printed, as `[]` when it is empty. Errors are `error: WHAT` on standard error, then an optional `hint: COMMAND`; with `--json` the commands of this form print `{"error": ..., "hint": ...}` on standard output instead.
+mashctl exits with 0, 1 or 2 only: 0 it worked, 1 it failed (one line on standard error says why), 2 the command line was wrong or the command cannot run here, and nothing was attempted. Every verb exits 0 on success, 2 for a usage error (a wrong or missing argument, an unknown flag, a stray argument, an argument that fails validation) and 1 for any failure; `doctor` exits 1 for a problem, and for a warning too with `--strict` (see [doctor.md](doctor.md#exit-codes)). An argument that fails validation is named in the message but never printed back, so a secret pasted into the wrong place is not echoed. `mashctl endpoint permissions ADDRESS` prints the permission set of the endpoint's NATS user as JSON, and nothing else, on stdout; it reads no server. The keys are `pub` and `sub`, each with `allow` and `deny`; `deny` is always printed, as `[]` when it is empty. Errors are `error: WHAT` on standard error, then an optional `hint: COMMAND`; with `--json` the commands of this form print `{"error": ..., "hint": ...}` on standard output instead.
 
 ## Before you push with nsc
 
 If you also edit the account with `nsc`, these steps keep it from undoing mashctl.
 
-- Run `nsc pull -A` before any `nsc push`, so a push from a stale local copy does not overwrite a revocation mashctl made. `mashctl issued check` shows keys connected to a server that mash did not issue.
+- Run `nsc pull -A` before any `nsc push`, so a push from a stale local copy does not overwrite a revocation mashctl made. `mashctl doctor` shows keys connected to a server that mash did not issue.
 - `nsc push` rejects an account server URL that starts with `tls://`; give nsc a `nats://` URL. For a server with a private CA, nsc needs `SSL_CERT_FILE` set to the CA's PEM file (mashctl takes `ca` instead).
 - `nsc revocations add-user` followed by an `nsc push` revokes a user; `mashctl endpoint delete` revokes the user of an endpoint itself.
 - To cut off old creds and keep the endpoint, run `mashctl endpoint reissue ADDRESS` (or `--out PATH --public-key FILE`): it revokes the old key and names a new one. `mashctl endpoint delete ADDRESS` revokes the user and removes the endpoint for good.

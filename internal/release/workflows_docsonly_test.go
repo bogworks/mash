@@ -163,7 +163,6 @@ func TestDocsOnly_classifier(t *testing.T) {
 		{"a conformance vector", pr, "f/x", []string{"docs/contracts/conformance-vectors.json", "docs/conformance.md"}, "true"},
 		{"a change-log fragment", pr, "f/x", []string{"changelog.d/a.fixed.md"}, "true"},
 		{"the change log", pr, "f/x", []string{"CHANGELOG.md"}, "true"},
-		{"the audit golden doc", pr, "f/x", []string{"docs/audit.md"}, "true"},
 		{"the branch-protection doc", pr, "f/x", []string{"docs/branch-protection.md"}, "true"},
 		{"the review policy", pr, "f/x", []string{"docs/review/policy.json"}, "true"},
 		{"review docs beside the policy", pr, "f/x", []string{"docs/review/in-session-loop.md"}, "true"},
@@ -195,7 +194,6 @@ func TestDocsOnly_classifier(t *testing.T) {
 // that exist, so a rename of one of them does not silently turn it docs-only.
 func TestDocsOnly_filesReadByTestsAreCode(t *testing.T) {
 	for _, p := range []string{
-		"docs/audit.md",                // cmd/mashctl audit tests
 		"docs/branch-protection.md",    // internal/release mergify_test.go
 		"docs/review/policy.json",      // scripts/reviewgate tests, scripts/gate
 		"docs/allowed_signers",         // scripts/releasecheck (release signing)
