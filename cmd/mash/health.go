@@ -23,7 +23,7 @@ type healthSvc struct {
 	cfg     config.Config
 	cfgErr  error
 	session bool
-	// mailHeld says, in a session, whether it holds mail because the spool it requires cannot be written. nil at a shell.
+	// mailHeld says, in a session, whether it holds mail because the folder it requires cannot be written. nil at a shell.
 	mailHeld func() bool
 }
 
@@ -211,9 +211,23 @@ func skipped(name, needs string) cmds.HealthCheck {
 	return cmds.HealthCheck{Name: name, State: cmds.CheckSkip, Detail: "needs the " + needs}
 }
 
-// Health runs the checks in order: config, creds, server, sign-in, refused, and always returns all five rows. A row
-// that an earlier failure means it cannot run is skipped: a failed config skips all four after it; sign-in needs creds
-// and server; refused needs nothing but the configuration. The creds row and the server row do not wait on each other (the server is probed
+// deliveryCheck is the delivery row, run only inside a session once sign-in worked: whether mail that arrives can be
+// stored on this machine. It reads the session's own state (the same source status uses) and writes nothing. A held
+// session fails with the folder, shown with ~ for the home directory, after a colon.
+func (h *healthSvc) deliveryCheck() cmds.HealthCheck {
+	if h.mailHeld == nil || !h.mailHeld() {
+		return cmds.HealthCheck{Name: cmds.CheckDelivery, State: cmds.CheckOK}
+	}
+	detail := cmds.ReasonMailHeld
+	if dir, err := endpoint.SpoolDir(h.cfg); err == nil {
+		detail += ": " + config.Tilde(dir)
+	}
+	return cmds.HealthCheck{Name: cmds.CheckDelivery, State: cmds.CheckFail, Detail: detail}
+}
+
+// Health runs the checks in order: config, creds, server, sign-in, delivery, refused, and always returns all six rows. A
+// row that an earlier failure means it cannot run is skipped: a failed config skips all five after it; sign-in needs
+// creds and server; delivery needs the server and sign-in, and a session (at a shell it is always skipped); refused needs nothing but the configuration. The creds row and the server row do not wait on each other (the server is probed
 // with no credentials). At a shell with no endpoint chosen and none installed it returns cmds.ErrNoEndpointInstalled.
 func (h *healthSvc) Health(ctx context.Context) (cmds.HealthReport, error) {
 	var se *config.SeveralEndpointsError
@@ -230,7 +244,7 @@ func (h *healthSvc) Health(ctx context.Context) (cmds.HealthReport, error) {
 	cfgc := h.configCheck()
 	rep.Checks = append(rep.Checks, cfgc)
 	if cfgc.State == cmds.CheckFail {
-		for _, n := range []string{cmds.CheckCreds, cmds.CheckServer, cmds.CheckSignIn, cmds.CheckRefused} {
+		for _, n := range []string{cmds.CheckCreds, cmds.CheckServer, cmds.CheckSignIn, cmds.CheckDelivery, cmds.CheckRefused} {
 			rep.Checks = append(rep.Checks, skipped(n, "config"))
 		}
 		return rep, nil
@@ -244,6 +258,7 @@ func (h *healthSvc) Health(ctx context.Context) (cmds.HealthReport, error) {
 	creds := h.credsCheck()
 	server := h.serverCheck(ctx)
 	rep.Checks = append(rep.Checks, creds, server)
+	signedIn := false
 	switch {
 	case creds.State == cmds.CheckFail:
 		rep.Checks = append(rep.Checks, skipped(cmds.CheckSignIn, "creds"))
@@ -253,6 +268,17 @@ func (h *healthSvc) Health(ctx context.Context) (cmds.HealthReport, error) {
 		sign, online := h.signInCheck(ctx)
 		rep.Checks = append(rep.Checks, sign)
 		rep.Online = online
+		signedIn = sign.State == cmds.CheckOK
+	}
+	switch {
+	case server.State == cmds.CheckFail:
+		rep.Checks = append(rep.Checks, skipped(cmds.CheckDelivery, "server"))
+	case !signedIn:
+		rep.Checks = append(rep.Checks, cmds.HealthCheck{Name: cmds.CheckDelivery, State: cmds.CheckSkip, Detail: "needs sign-in"})
+	case !h.session: // a shell has no session to deliver to
+		rep.Checks = append(rep.Checks, cmds.HealthCheck{Name: cmds.CheckDelivery, State: cmds.CheckSkip, Detail: "needs a session"})
+	default:
+		rep.Checks = append(rep.Checks, h.deliveryCheck())
 	}
 	rep.Checks = append(rep.Checks, h.refusedCheck()) // the count is kept on this machine: it shows with the server down
 	rep.MailHeld = h.mailHeld != nil && h.mailHeld()

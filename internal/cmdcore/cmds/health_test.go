@@ -29,7 +29,7 @@ func ok(name, detail string) cmds.HealthCheck {
 // allWell is the report of the specification's "All well" case.
 func allWell() *fakeHealth {
 	return &fakeHealth{rep: cmds.HealthReport{Endpoint: "acme.demo.bob", Checks: []cmds.HealthCheck{
-		ok("config", ""), ok("creds", ""), ok("server", "tls://myserver:4222"), ok("sign-in", ""), ok("refused", "no unverified mail was refused")}}}
+		ok("config", ""), ok("creds", ""), ok("server", "tls://myserver:4222"), ok("sign-in", ""), ok("delivery", ""), ok("refused", "no unverified mail was refused")}}}
 }
 
 // refusedSignIn is the report of the specification's "A problem and a warning" case.
@@ -37,6 +37,7 @@ func refusedSignIn() *fakeHealth {
 	return &fakeHealth{rep: cmds.HealthReport{Endpoint: "acme.demo.bob", Checks: []cmds.HealthCheck{
 		ok("config", ""), ok("creds", ""), ok("server", "tls://myserver:4222"),
 		{Name: "sign-in", State: cmds.CheckFail, Detail: "the server refused these credentials", Reason: "the server refused its credentials", Fix: "mashctl endpoint reissue acme.demo.bob"},
+		{Name: "delivery", State: cmds.CheckSkip, Detail: "needs sign-in"},
 		{Name: "refused", State: cmds.CheckWarn, Detail: "3 unverified messages were refused"}}}}
 }
 
@@ -44,7 +45,7 @@ func refusedSignIn() *fakeHealth {
 func skippedAfterServer() *fakeHealth {
 	return report("acme.demo.bob", false, ok("config", ""), ok("creds", ""),
 		cmds.HealthCheck{Name: "server", State: cmds.CheckFail, Detail: "the server did not answer: tls://myserver:4222"},
-		skip("sign-in", "server"), ok("refused", "no unverified mail was refused"))
+		skip("sign-in", "server"), skip("delivery", "server"), ok("refused", "no unverified mail was refused"))
 }
 
 func healthEnv(svc any) cmdcore.EnvFunc {
@@ -66,7 +67,7 @@ func runDoctor(svc any, g cliframe.Global, args ...string) (code int, out, errs 
 // noSessionEndpoint is what a session that names no endpoint reports: the config row fails and the rest cannot run.
 func noSessionEndpoint() *fakeHealth {
 	return report("", false, cmds.HealthCheck{Name: "config", State: cmds.CheckFail, Detail: cmds.ReasonNoSessionEndpoint, Fix: cmds.SessionEndpointFix},
-		skip("creds", "config"), skip("server", "config"), skip("sign-in", "config"), skip("refused", "config"))
+		skip("creds", "config"), skip("server", "config"), skip("sign-in", "config"), skip("delivery", "config"), skip("refused", "config"))
 }
 
 func skip(name, needs string) cmds.HealthCheck {
@@ -122,6 +123,9 @@ func TestStatusMatchesSpec(t *testing.T) {
 			code, out, errs = runStatus(report("acme.demo.bob", false, ok("config", ""), ok("sign-in", "")), cliframe.Global{})
 		case "Working, an agent session is holding it open":
 			code, out, errs = runStatus(report("acme.demo.bob", true, ok("config", ""), ok("sign-in", "")), cliframe.Global{})
+		case "In a session that cannot store arriving mail on this machine":
+			held := &fakeHealth{rep: cmds.HealthReport{Endpoint: "acme.demo.bob", MailHeld: true, Checks: []cmds.HealthCheck{ok("config", ""), ok("sign-in", "")}}}
+			code, out, errs = runStatus(held, cliframe.Global{})
 		case "No endpoint chosen and several installed":
 			// the specification's own text, then the hint when the addresses come in no particular order
 			code, out, errs = runStatus(&fakeHealth{err: &config.SeveralEndpointsError{Addresses: []string{"acme.demo.bob", "acme.demo.alice"}}}, cliframe.Global{})
@@ -278,6 +282,26 @@ func TestDoctorMatchesSpec(t *testing.T) {
 			f = refusedSignIn()
 		case "A check that could not run":
 			f = skippedAfterServer()
+		case "Arriving mail cannot be stored on this machine":
+			// the spec gives the delivery row alone, with the path under the detail column
+			path := strings.TrimSpace(strings.SplitN(oc["text"].(string), "\n", 2)[1])
+			_, out, _ := runDoctor(report("acme.demo.bob", false, ok("config", ""),
+				cmds.HealthCheck{Name: "delivery", State: cmds.CheckFail, Detail: cmds.ReasonMailHeld + ": " + path}), cliframe.Global{})
+			if !strings.Contains(out, oc["text"].(string)+"\n") {
+				t.Errorf("%s: %q lacks %q", oc["case"], out, oc["text"])
+			}
+			_, js, _ := runDoctor(report("acme.demo.bob", false, cmds.HealthCheck{Name: "delivery", State: cmds.CheckFail, Detail: cmds.ReasonMailHeld + ": " + path}), cliframe.Global{JSON: true})
+			if !strings.Contains(js, `"detail":"mail is held: its folder cannot be written: `+path+`","fix":null`) {
+				t.Errorf("%s: json %s", oc["case"], js)
+			}
+			continue
+		case "At a shell, where there is no session to deliver to":
+			_, out, _ := runDoctor(report("acme.demo.bob", false, ok("config", ""),
+				cmds.HealthCheck{Name: "delivery", State: cmds.CheckSkip, Detail: "needs a session"}), cliframe.Global{})
+			if !strings.Contains(out, oc["text"].(string)+"\n") {
+				t.Errorf("%s: %q lacks %q", oc["case"], out, oc["text"])
+			}
+			continue
 		case "The server's certificate is not trusted", "The server does not offer encryption":
 			// the spec gives the server row alone: the row of a report with that detail is word for word the spec's
 			row := strings.TrimPrefix(oc["text"].(string), "server    FAIL  ")
@@ -343,7 +367,7 @@ func TestDoctorNoSessionEndpoint(t *testing.T) {
 		t.Errorf("%d %q %q", code, out, errs)
 	}
 	_, out, _ = runDoctor(noSessionEndpoint(), cliframe.Global{JSON: true})
-	if !strings.HasPrefix(out, `{"endpoint":null,"problems":1,"warnings":0,"checks":[{"name":"config","state":"fail",`) || strings.Count(out, `"name"`) != 5 {
+	if !strings.HasPrefix(out, `{"endpoint":null,"problems":1,"warnings":0,"checks":[{"name":"config","state":"fail",`) || strings.Count(out, `"name"`) != 6 {
 		t.Errorf("object %s", out)
 	}
 	if code, out, errs := runDoctor(&fakeHealth{err: cmds.ErrNoEndpointInstalled}, cliframe.Global{}); code != 2 || out != "" ||
@@ -441,6 +465,8 @@ func TestStatusAndDoctorDoorsAgree(t *testing.T) {
 		{"doctor no endpoint", "doctor", noSessionEndpoint()},
 		{"status no endpoint", "status", noSessionEndpoint()},
 		{"doctor skipped rows", "doctor", skippedAfterServer()},
+		{"doctor delivery fail", "doctor", report("a.b.c", false, ok("config", ""), cmds.HealthCheck{Name: "delivery", State: cmds.CheckFail, Detail: cmds.ReasonMailHeld + ": ~/.local/state/mash/a.b.c"})},
+		{"status mail held", "status", &fakeHealth{rep: cmds.HealthReport{Endpoint: "a.b.c", MailHeld: true, Checks: allWell().rep.Checks}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			reg := cmdcore.NewRegistry(healthEnv(tc.f), cmdcore.Register(cmds.Status), cmdcore.Register(cmds.Doctor))
@@ -467,5 +493,19 @@ func TestStatusAndDoctorDoorsAgree(t *testing.T) {
 				t.Errorf("mcp text %q, cli %q", text, want)
 			}
 		})
+	}
+}
+
+// A held folder: the delivery row is a problem with the path under the detail column; status says not ready, in the spec's words.
+func TestDoctorDeliveryFailIsAProblem(t *testing.T) {
+	f := report("acme.demo.bob", false, ok("sign-in", ""),
+		cmds.HealthCheck{Name: "delivery", State: cmds.CheckFail, Detail: cmds.ReasonMailHeld + ": ~/.local/state/mash/acme.demo.bob"})
+	code, out, errs := runDoctor(f, cliframe.Global{})
+	want := "sign-in   ok\ndelivery  FAIL  mail is held: its folder cannot be written:\n                ~/.local/state/mash/acme.demo.bob\n\n1 problem.\n"
+	if code != 1 || out != want || errs != "" {
+		t.Errorf("%d %q %q", code, out, errs)
+	}
+	if strings.Contains(out, "spool") {
+		t.Errorf("the word spool in %q", out)
 	}
 }

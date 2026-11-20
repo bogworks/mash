@@ -73,7 +73,7 @@ func TestEveryCommandWordsSeveralEndpointsInstalledTheSame(t *testing.T) {
 }
 
 // In a session with MASH_SPOOL_REQUIRED and a spool that cannot be written mail is held, so status does not say ready;
-// a healthy session says ready. Doctor has no row for it.
+// a healthy session says ready. Doctor's delivery row fails with the folder.
 func TestStatusToolSaysNotReadyWhileTheRequiredSpoolFails(t *testing.T) {
 	w := newWorld(t, "a")
 	w.env["a"]["MASH_SPOOL_REQUIRED"] = "1"
@@ -85,15 +85,16 @@ func TestStatusToolSaysNotReadyWhileTheRequiredSpoolFails(t *testing.T) {
 	s := startServe(t, w.env["a"])
 	s.initialize(t)
 	s.tools(t)
-	want := tTo("a") + ": not ready: mail is held: the spool cannot be written\nhint: mash doctor"
+	want := tTo("a") + ": not ready: mail is held: its folder cannot be written\nhint: mash doctor"
 	id := 10
 	eventually(t, 15*time.Second, "status says mail is held", func() bool {
 		id++
 		return toolText(t, s, id, "status") == want
 	})
 	id++
-	if got := toolText(t, s, id, "doctor"); strings.Contains(got, "spool") {
-		t.Errorf("doctor shows the spool: %q", got)
+	wantRow := "delivery  FAIL  mail is held: its folder cannot be written:\n                "
+	if got := toolText(t, s, id, "doctor"); !strings.Contains(got, wantRow) || strings.Contains(strings.SplitN(got, "\n                ", 2)[0], "spool") || !strings.Contains(got, "1 problem") {
+		t.Errorf("doctor does not show the held folder: %q", got)
 	}
 	// the spool can be made again: the retry binds it and status is ready
 	if err := os.Remove(state); err != nil {

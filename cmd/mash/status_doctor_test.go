@@ -253,6 +253,7 @@ func TestDoctorAllWell(t *testing.T) {
 		"creds     ok\n" +
 		"server    ok    " + w.e.URL + "\n" +
 		"sign-in   ok\n" +
+		"delivery  skip  needs a session\n" +
 		"refused   ok    no unverified mail was refused\n" +
 		"\n" +
 		"No problems.\n"
@@ -272,17 +273,17 @@ func TestDoctorAllWell(t *testing.T) {
 	if err := json.Unmarshal([]byte(j.out), &o); err != nil || j.code != 0 || j.errs != "" {
 		t.Fatalf("doctor --json: %+v %v", j, err)
 	}
-	if o.Endpoint != tTo("a") || o.Problems != 0 || o.Warnings != 0 || len(o.Checks) != 5 {
+	if o.Endpoint != tTo("a") || o.Problems != 0 || o.Warnings != 0 || len(o.Checks) != 6 {
 		t.Fatalf("object %+v", o)
 	}
 	var names []string
 	for _, c := range o.Checks {
 		names = append(names, c.Name)
-		if c.State != "ok" || c.Fix != nil {
+		if (c.State != "ok" && c.Name != "delivery") || (c.Name == "delivery" && (c.State != "skip" || *c.Detail != "needs a session")) || c.Fix != nil {
 			t.Errorf("check %+v", c)
 		}
 	}
-	if !reflect.DeepEqual(names, []string{"config", "creds", "server", "sign-in", "refused"}) {
+	if !reflect.DeepEqual(names, []string{"config", "creds", "server", "sign-in", "delivery", "refused"}) {
 		t.Fatalf("rows %v", names)
 	}
 }
@@ -299,6 +300,7 @@ func TestDoctorAProblemAndAWarning(t *testing.T) {
 		"creds     ok\n" +
 		"server    ok    " + w.e.URL + "\n" +
 		"sign-in   FAIL  the server refused these credentials\n" +
+		"delivery  skip  needs sign-in\n" +
 		"refused   warn  3 unverified messages were refused\n" +
 		"\n" +
 		"1 problem, 1 warning.\n"
@@ -331,7 +333,7 @@ func TestDoctorServerNotAnsweringAndCredsProblems(t *testing.T) {
 	w := tlsWorld(t, "a")
 	env := strictEnv(w, "a", map[string]string{"MASH_SERVER": "tls://127.0.0.1:1", "MASH_OPEN_TIMEOUT": "2s"})
 	r := runMash(env, "doctor")
-	want := "config    ok\ncreds     ok\nserver    FAIL  the server did not answer: tls://127.0.0.1:1\nsign-in   skip  needs the server\nrefused   ok    no unverified mail was refused\n\n1 problem.\n"
+	want := "config    ok\ncreds     ok\nserver    FAIL  the server did not answer: tls://127.0.0.1:1\nsign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no unverified mail was refused\n\n1 problem.\n"
 	if r.code != 1 || r.out != want || r.errs != "" { // no command mends it: no hint
 		t.Fatalf("doctor:\n%+v", r)
 	}
@@ -342,7 +344,7 @@ func TestDoctorServerNotAnsweringAndCredsProblems(t *testing.T) {
 	p := w.env["a"]["MASH_CREDS"]
 	r = runMash(w.env["a"], "doctor")
 	if r.code != 1 || !strings.Contains(r.out, "creds     FAIL  the creds file can be read by other users: "+p+"\n") ||
-		!strings.Contains(r.out, "sign-in   skip  needs the creds\n") || !strings.Contains(r.out, "refused   ok    ") || r.errs != "hint: chmod 600 "+p+"\n" {
+		!strings.Contains(r.out, "sign-in   skip  needs the creds\ndelivery  skip  needs sign-in\n") || !strings.Contains(r.out, "refused   ok    ") || r.errs != "hint: chmod 600 "+p+"\n" {
 		t.Fatalf("doctor, creds mode: %+v", r)
 	}
 	// not a creds file: its content is never printed
@@ -378,7 +380,7 @@ func TestDoctorPlainURL(t *testing.T) {
 	delete(env, "MASH_INSECURE_PLAINTEXT")
 	r = runMash(env, "doctor")
 	if r.code != 1 || !strings.Contains(r.out, "server    FAIL  ") || !strings.Contains(r.out, "insecure_plaintext") ||
-		!strings.Contains(r.out, "sign-in   skip  needs the server\nrefused   ok    no unverified mail was refused\n") ||
+		!strings.Contains(r.out, "sign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no unverified mail was refused\n") ||
 		!strings.HasPrefix(r.errs, "hint: use a tls:// server address") {
 		t.Fatalf("doctor without it: %+v", r)
 	}
@@ -451,6 +453,8 @@ func TestStatusAndDoctorDoorsAgree(t *testing.T) {
 			if strings.HasPrefix(cli.errs, "hint: ") {
 				wantText += "\n" + strings.TrimSuffix(cli.errs, "\n")
 			}
+			// the one difference between the doors: a session checks delivery, a shell skips it ("needs a session")
+			wantText = strings.Replace(wantText, "delivery  skip  needs a session", "delivery  ok", 1)
 			if got := resultText(r); got != wantText {
 				t.Errorf("%s/%s: MCP text %q, CLI %q", name, tool, got, wantText)
 			}
@@ -463,6 +467,13 @@ func TestStatusAndDoctorDoorsAgree(t *testing.T) {
 			if tool == "status" {
 				delete(cliObj, "online")
 				delete(sc, "online")
+			}
+			if rows, _ := cliObj["checks"].([]any); tool == "doctor" {
+				for _, row := range rows {
+					if m := row.(map[string]any); m["name"] == "delivery" && m["detail"] == "needs a session" {
+						m["state"], m["detail"] = "ok", nil
+					}
+				}
 			}
 			if !reflect.DeepEqual(cliObj, sc) {
 				t.Errorf("%s/%s: structured %v, CLI --json %v", name, tool, sc, cliObj)
@@ -497,7 +508,7 @@ func TestDegradedServeAnswersStatusAndDoctor(t *testing.T) {
 	r = s.call(t, 13, "doctor", `{}`)
 	sc, _ := r["structuredContent"].(map[string]any)
 	rows, _ := sc["checks"].([]any)
-	if sc == nil || sc["endpoint"] != nil || sc["problems"] != float64(1) || sc["warnings"] != float64(0) || len(rows) != 5 {
+	if sc == nil || sc["endpoint"] != nil || sc["problems"] != float64(1) || sc["warnings"] != float64(0) || len(rows) != 6 {
 		t.Fatalf("structured %v", r)
 	}
 	if rows[1].(map[string]any)["state"] != "skip" || rows[1].(map[string]any)["detail"] != "needs the config" {
@@ -545,7 +556,7 @@ func TestStatusAndDoctorUntrustedCertificate(t *testing.T) {
 	}
 	const fix = `set "ca" or MASH_CA to the PEM file of the CA that signed it`
 	d := runMash(env, "doctor")
-	want := "config    ok\ncreds     ok\nserver    FAIL  " + text + "\nsign-in   skip  needs the server\nrefused   ok    no unverified mail was refused\n\n1 problem.\n"
+	want := "config    ok\ncreds     ok\nserver    FAIL  " + text + "\nsign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no unverified mail was refused\n\n1 problem.\n"
 	if d.code != 1 || d.out != want || d.errs != "hint: "+fix+"\n" || strings.Contains(d.out, "did not answer") {
 		t.Fatalf("doctor:\n%+v\nwant %q", d, want)
 	}
@@ -571,7 +582,7 @@ func TestStatusAndDoctorNotATLSServer(t *testing.T) {
 	}
 	const fix = `use the server's plain address with insecure_plaintext set, or ask whoever runs your mesh for its tls:// address`
 	d := runMash(env, "doctor")
-	want := "config    ok\ncreds     ok\nserver    FAIL  " + text + "\nsign-in   skip  needs the server\nrefused   ok    no unverified mail was refused\n\n1 problem.\n"
+	want := "config    ok\ncreds     ok\nserver    FAIL  " + text + "\nsign-in   skip  needs the server\ndelivery  skip  needs the server\nrefused   ok    no unverified mail was refused\n\n1 problem.\n"
 	if d.code != 1 || d.out != want || d.errs != "hint: "+fix+"\n" || strings.Contains(d.out, "did not answer:") {
 		t.Fatalf("doctor:\n%+v\nwant %q", d, want)
 	}

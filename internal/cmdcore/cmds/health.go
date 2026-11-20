@@ -27,8 +27,9 @@ const ReasonNoSessionEndpoint = "no endpoint is chosen for this session"
 // SessionEndpointFix is what to do about a session that names no endpoint.
 const SessionEndpointFix = cmdcore.SessionNoEndpointHint
 
-// ReasonMailHeld is status's reason when the session holds mail because the spool it requires cannot be written.
-const ReasonMailHeld = "mail is held: the spool cannot be written"
+// ReasonMailHeld is status's reason, and the start of the delivery row's detail, when the session holds mail because
+// the folder it requires for arriving mail cannot be written.
+const ReasonMailHeld = "mail is held: its folder cannot be written"
 
 // ErrNoEndpointInstalled is what Health returns at a shell where no endpoint is chosen and none is installed. The
 // command turns it into the usage error "no endpoint is installed here" (hint "mash join <file>"), exit 2.
@@ -36,11 +37,13 @@ var ErrNoEndpointInstalled = errors.New(cmdcore.NoEndpoint(cmdcore.NoneInstalled
 
 // The checks of doctor, in the order it reports them.
 const (
-	CheckConfig  = "config"
-	CheckCreds   = "creds"
-	CheckServer  = "server"
-	CheckSignIn  = "sign-in"
-	CheckRefused = "refused"
+	CheckConfig = "config"
+	CheckCreds  = "creds"
+	CheckServer = "server"
+	CheckSignIn = "sign-in"
+	// CheckDelivery is whether mail that arrives can be stored on this machine. It is checked only inside a session.
+	CheckDelivery = "delivery"
+	CheckRefused  = "refused"
 )
 
 // HealthCheck is one row the service found. Detail is what the row says after its state ("" says nothing). Fix is the
@@ -61,8 +64,8 @@ type HealthReport struct {
 	Endpoint string
 	Online   bool
 	Checks   []HealthCheck
-	// MailHeld is true in a session that holds mail because the spool it requires (MASH_SPOOL_REQUIRED) cannot be
-	// written: the rows are fine and mail does not work. Status says so; doctor shows no row for it.
+	// MailHeld is true in a session that holds mail because the folder it requires (MASH_SPOOL_REQUIRED) cannot be
+	// written: the rows are fine and mail does not work. Status says so; doctor shows it as the delivery row.
 	MailHeld bool
 }
 
@@ -234,10 +237,18 @@ func (r DoctorResult) Text(cmdcore.Opts) string {
 			state = "FAIL"
 		}
 		line := fmt.Sprintf("%-10s%-6s", c.Name, state)
+		extra := ""
 		if c.Detail != nil {
-			line += config.Clean(*c.Detail)
+			detail := config.Clean(*c.Detail)
+			// a held folder's path goes on the next line, under the detail column
+			if c.Name == CheckDelivery && c.State == CheckFail {
+				if path, ok := strings.CutPrefix(detail, ReasonMailHeld+": "); ok {
+					detail, extra = ReasonMailHeld+":", "\n"+strings.Repeat(" ", 16)+path
+				}
+			}
+			line += detail
 		}
-		b.WriteString(strings.TrimRight(line, " ") + "\n")
+		b.WriteString(strings.TrimRight(line, " ") + extra + "\n")
 	}
 	b.WriteString("\n")
 	var parts []string
