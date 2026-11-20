@@ -20,109 +20,170 @@ A2A at the edge, mash inside. See [how mash compares](docs/comparison.md), inclu
 Two paths, one bus: live traffic (presence, status, live prompts) rides plain NATS and is not stored; mail rides
 JetStream (the NATS feature that stores messages on the server) and is kept up to 30 days. ([details](docs/comparison.md#4-two-paths-live-and-durable))
 
-Status: v0.5.5, one host adapter (Claude Code). Known limits are listed in
+Status: v0.5.6, one host adapter (Claude Code). Known limits are listed in
 [the comparison](docs/comparison.md#9-known-limits).
 
 Supported platforms: Linux and macOS (amd64, arm64). Native Windows is not supported. WSL 2 with the Linux binary is expected to work but has not been tested.
 
 ## Install mash
 
-**Download a release (recommended).** A release binary is the build that the project's release workflow made from a tag, and you can check that. Download the binary for your platform and `SHA256SUMS` from the [v0.5.5 release](https://github.com/bogworks/mash/releases/tag/v0.5.5). The four binaries are:
-
-- `mash-linux-amd64`
-- `mash-linux-arm64`
-- `mash-darwin-amd64`
-- `mash-darwin-arm64`
+One command installs `mash` and `mashctl` (the tool that sets up the server and makes endpoints) from the latest release into `~/.local/bin`, after checking each against the release's checksums (and the attestation too, when `gh`, the [GitHub CLI](https://cli.github.com/), is installed):
 
 ```sh
-BASE=https://github.com/bogworks/mash/releases/download/v0.5.5
-curl -fsSLO $BASE/mash-linux-amd64
-curl -fsSLO $BASE/SHA256SUMS
-grep ' mash-linux-amd64$' SHA256SUMS | sha256sum -c - &&   # macOS: shasum -a 256 -c -
-gh attestation verify mash-linux-amd64 -R bogworks/mash \
-  --signer-workflow bogworks/mash/.github/workflows/release.yml \
-  --source-ref refs/tags/v0.5.5 &&
-chmod +x mash-linux-amd64 &&
-BIN=~/.local/bin &&                                         # any directory; it must be on your PATH
-mkdir -p "$BIN" && mv mash-linux-amd64 "$BIN/mash"
-case ":$PATH:" in *":$BIN:"*) ;; *) echo "add $BIN to your PATH" ;; esac
-mash version
+curl -fsSL https://github.com/bogworks/mash/releases/latest/download/install.sh | bash
 ```
 
-The checksum shows the file arrived whole. The attestation, a record signed by GitHub, shows that this binary was built from the `v0.5.5` tag by the release workflow ([more](docs/release.md)). `gh` is the [GitHub CLI](https://cli.github.com/).
+Output:
 
-**One command (from the release that carries `install.sh`).** `curl -fsSL https://github.com/bogworks/mash/releases/latest/download/install.sh | bash` installs `mash` and `mashctl` from the same release into `~/.local/bin`, after checking each against the release's checksums (and the attestation too, when `gh` is installed). [docs/install.md](docs/install.md#1-the-binary) says what it does and how to check the script first.
+```
+[built output: to fill from the release build]
+```
 
-**`go install` (builds from source).** `go install github.com/bogworks/mash/cmd/mash@v0.5.5` needs Go 1.27.4 or newer. It compiles the source on your machine, so the result is not the attested build, and `mash version` prints `unknown` as the commit.
+Check that both programs are there and are the same version:
 
-**`mashctl`** (the tool that sets up servers and administers endpoints) is not among the release assets: v0.5.5 carries only the four `mash-<os>-<arch>` binaries. For now install it with `go install github.com/bogworks/mash/cmd/mashctl@v0.5.5`; `mashctl version` prints `0.0.0-dev` from a go install.
+```sh
+mash version
+mashctl version
+```
+
+[docs/install.md](docs/install.md#1-the-binary) says what the script does and how to read and check it before you run it. A release binary is the build that the project's release workflow made from a tag, and the release also carries the four `mash-<os>-<arch>` and four `mashctl-<os>-<arch>` files, `SHA256SUMS` and the attestation, if you would rather download and check them by hand ([how](docs/release.md)).
+
+**`go install` (builds from source).** `go install github.com/bogworks/mash/cmd/mash@v0.5.6` and `go install github.com/bogworks/mash/cmd/mashctl@v0.5.6` need Go 1.27.4 or newer. They compile the source on your machine, so the result is not the attested build, and `mash version` prints `unknown` as the commit.
 
 ## Quick start: one machine, no account
 
-This path needs no Synadia account and no server you run by hand. You need:
+This path needs no Synadia account and no server you run by hand. You build two agents, Alice and Bob, that send each other mail. An agent is a Claude Code session; its mailbox is an endpoint, with an address of three parts, `owner.group.name`. Here the owner is `acme`, the group is `demo` and the names are `alice` and `bob`, so the addresses are `acme.demo.alice` and `acme.demo.bob`. A group has no default: you always name it. The owner name goes into the server in step 1 and cannot change later without starting over.
 
-- `mash` installed as above, and a Go 1.27.4 or newer toolchain for `mashctl`, with the directory `go install` writes to on your `PATH` (`go env GOBIN`, or `$(go env GOPATH)/bin` when `GOBIN` is empty; `~/go/bin` by default).
-- `nats-server`, a current 2.x release with JetStream, on your `PATH`. Get it from the [nats-server releases](https://github.com/nats-io/nats-server/releases) (this repository builds and tests against 2.15).
+You need:
+
+- `mash` and `mashctl` installed as above.
+- `nats-server`, 2.10.7 or newer with JetStream, and the `nats` command, on your `PATH`. Get them from the [nats-server releases](https://github.com/nats-io/nats-server/releases) and the [natscli releases](https://github.com/nats-io/natscli/releases). Also `openssl`, `curl`, and `ss` (Linux; on a minimal Debian or Ubuntu image it is in `iproute2`) or `lsof` (macOS).
 - Claude Code with channels (a claude.ai or Console sign-in, not Bedrock, Agent Platform or Foundry). A channel is how a plugin pushes a message into a running session.
-
-Start the server. `mashctl` is the tool that runs the server and makes endpoints; `mash` is what each session runs.
 
 If `MASH_SERVER`, `MASH_ENDPOINT` or other `MASH_*` variables are set from another setup, clear them first (`unset $(env | sed -n 's/^\(MASH_[A-Z_]*\)=.*/\1/p')`). They override the config files, and the commands below would go to that other server.
 
+**1. Make a NATS server on this machine.** `mash-local-nats-setup.sh` is a script of the release. It makes a local NATS server for mash (TLS, JetStream, sign-in with credentials, listening on this machine only, run as you) in a new folder, `~/mash-nats` unless you pass `--dir`. Download it and check it against `SHA256SUMS` before you run it:
+
 ```sh
-go install github.com/bogworks/mash/cmd/mashctl@v0.5.5   # mashctl is not in the release assets
-mashctl init --local --owner alice --start                # a TLS-only NATS server that only this machine can reach, plus a local CA, keys and credentials
+BASE=https://github.com/bogworks/mash/releases/latest/download
+curl -fsSLO $BASE/mash-local-nats-setup.sh -O $BASE/SHA256SUMS
+grep ' mash-local-nats-setup.sh$' SHA256SUMS | sha256sum -c -     # macOS: shasum -a 256 -c -
+bash mash-local-nats-setup.sh --owner acme
 ```
 
-An agent is an endpoint with an address of three tokens, `owner.group.instance`. Here the owner is `alice`, the group is `dev` and the instances are `design` and `review`, so the addresses are `alice.dev.design` and `alice.dev.review`. A group has no default: you always name it.
+`--owner` names the owner; without it the script asks once on the terminal. Output:
 
-Make each endpoint in three commands. The endpoint makes its own key, `mashctl` signs the public half into a join file, and the endpoint joins with it. The seed never leaves the endpoint's machine.
-
-```sh
-mash key create --out design.seed                                                   # writes design.seed and design.seed.pub
-mashctl endpoint create alice.dev.design --out alice.dev.design.join --public-key design.seed.pub
-mash join alice.dev.design.join --key design.seed                                   # installs alice.dev.design in the config directory
-
-mash key create --out review.seed
-mashctl endpoint create alice.dev.review --out alice.dev.review.join --public-key review.seed.pub
-mash join alice.dev.review.join --key review.seed
+```
+[built output: to fill from the release build]
 ```
 
-When the endpoint and `mashctl` are on the same machine, one command does all three:
+The last line the script prints is the command for the next step. It reads `mash-setup.yaml`, which the script wrote in the server folder.
+
+Then have `mashctl` set mash up on that server from the setup file:
 
 ```sh
-mashctl endpoint create alice/dev/design --make-key
-mashctl endpoint create alice/dev/review --make-key
+mashctl init --config ~/mash-nats/mash-setup.yaml
 ```
 
-`--make-key` has one limit: the host that runs `mashctl` makes the key and holds it while the command runs, so it is the wrong form when the endpoint is on another machine. Use the three-command form there ([an endpoint on another machine](docs/operations.md#an-endpoint-on-another-machine)).
+Output:
 
-Then install the plugin and start two sessions:
+```
+Initialized mash on tls://localhost:4222 for owner acme
+```
+
+`mashctl init` keeps its own copy of the keys in the config directory, `~/.config/mash` by default or `$MASH_CONFIG_DIR`. It is safe to run again: a second run says `Already initialized on tls://localhost:4222; nothing changed`.
+
+**2. Make the two endpoints.** `mashctl` makes each endpoint, with its credentials, and writes a join file. The endpoint then joins with that file:
 
 ```sh
-mash plugin export ~/.mash-plugin
-claude plugin marketplace add ~/.mash-plugin
+mashctl endpoint create acme.demo.bob --out acme.demo.bob.join
+mash join acme.demo.bob.join
+
+mashctl endpoint create acme.demo.alice --out acme.demo.alice.join
+mash join acme.demo.alice.join
+```
+
+Output of the first `create`, then of the first `join`:
+
+```
+Created endpoint acme.demo.bob
+Join file: acme.demo.bob.join
+```
+
+```
+Joined as acme.demo.bob.
+```
+
+`mash join` installs `<address>.creds` and the server's address in the config directory. Whoever holds a creds file is that endpoint.
+
+If the endpoint is on another machine and its private key must never leave it, the endpoint makes its own key and `mashctl` signs only the public half:
+
+```sh
+mash key create --out bob.seed                                                     # writes bob.seed and bob.seed.pub
+mashctl endpoint create acme.demo.bob --out acme.demo.bob.join --public-key bob.seed.pub
+mash join acme.demo.bob.join --key bob.seed
+```
+
+`mash key create` prints `Created bob.seed and bob.seed.pub.` See [an endpoint on another machine](docs/operations.md#an-endpoint-on-another-machine).
+
+**3. Check them.** `MASH_ENDPOINT` names which endpoint `mash` acts as; it is how one machine plays two agents:
+
+```sh
+MASH_ENDPOINT=acme.demo.bob mash status
+MASH_ENDPOINT=acme.demo.alice mash status
+```
+
+```
+acme.demo.bob: ready, offline
+```
+
+Ready means the server is there and reachable and the credentials are valid. Offline is normal here: no session holds the endpoint open yet.
+
+**4. Install the Claude Code plugins.** The mash repository is its own Claude Code marketplace. `mash` is the plugin that gives a session its inbox; `mash-setup` is two skills that set mash up and look after it (you can skip it):
+
+```sh
+claude plugin marketplace add bogworks/mash
 claude plugin install mash@mash
-MASH_ENDPOINT=alice.dev.design claude --dangerously-load-development-channels plugin:mash@mash   # terminal 1
-MASH_ENDPOINT=alice.dev.review claude --dangerously-load-development-channels plugin:mash@mash   # terminal 2
+claude plugin install mash-setup@mash
 ```
 
-Send mail from a shell and read it:
+In Claude Code itself the same steps are `/plugin marketplace add bogworks/mash`, `/plugin install mash@mash` and `/plugin install mash-setup@mash`.
+
+Start two sessions, each as its own endpoint:
 
 ```sh
-MASH_ENDPOINT=alice.dev.design mash send alice.dev.review "hello"
-MASH_ENDPOINT=alice.dev.review mash inbox
+MASH_ENDPOINT=acme.demo.bob claude --dangerously-load-development-channels plugin:mash@mash     # terminal 1
+MASH_ENDPOINT=acme.demo.alice claude --dangerously-load-development-channels plugin:mash@mash   # terminal 2
 ```
 
-When you are done, stop the local server: `D=<the server directory that mashctl init --local printed>; kill "$(cat "$D/server.pid")"`. The directory is `server` inside the config directory, which depends on `MASH_CONFIG_DIR` and `XDG_CONFIG_HOME`, so use the one `init --local` printed.
+**5. Send mail.** From a shell, Bob mails Alice, and Alice reads it:
 
-`MASH_ENDPOINT` (or `endpoint` in `config.json`, or `--endpoint`), the full address `owner.group.name`, names the endpoint a session runs as. With none set, mash uses the one endpoint whose creds file sits directly in the config directory; if several are installed it stops and you name one. Each endpoint has a directory record and a credentials ("creds") file named `<owner>.<group>.<instance>.creds` that proves who it is; `mashctl endpoint create` makes both. Recipients in `mash send` are written `owner.group.instance` or the flat key `owner_group_instance`; a bare name is refused.
+```sh
+MASH_ENDPOINT=acme.demo.bob mash send acme.demo.alice "lunch at noon?"
+MASH_ENDPOINT=acme.demo.alice mash inbox
+```
 
-`mashctl init --local` makes a server on port 4222 by default; if something else uses 4222, pass `--port N` to pick another. The server uses TLS with a certificate from a local certificate authority that `init --local` makes (`ca.pem` in the server directory); `servers` in `config.json` is `tls://127.0.0.1:4222` and `ca` names `ca.pem`, so `mashctl` and endpoints on this host need no extra setting.
+Output:
 
-`--channels` and `--dangerously-load-development-channels` are Claude Code research-preview flags. They are not shown in `claude --help`, but they work.
+```
+[built output: to fill from the release build]
+```
 
-The config and the credentials land in the config directory, `~/.config/mash` by default or `$MASH_CONFIG_DIR`; `init --local` prints it. The development flag lets the plugin wake an idle session without the channel allowlist (a list of channel plugins that Claude Code lets run without asking), and Claude Code asks you to confirm it at each launch; that is expected. Without the flag, mail still arrives at a session's next prompt or tool call. The steps are explained in [docs/install.md](docs/install.md), and [docs/operations.md](docs/operations.md#local-setup-with-mashctl-init---local) covers the local server, including how to stop it and start it again.
+Normally the agent does this through the plugin's tools, and you never type it. In Bob's session, ask: "Send acme.demo.alice a note: lunch at noon?". The mail reaches Alice's session with her next prompt, or at once if she was idle, labelled `[verified]`.
+
+**6. Stop, start and remove the server.** The server is a program you run as yourself. After a reboot, start it again. Removing it deletes every mailbox and message on it.
+
+```sh
+bash mash-local-nats-setup.sh --stop
+bash mash-local-nats-setup.sh --start
+bash mash-local-nats-setup.sh --remove      # you type the folder's path to confirm
+```
+
+Pass the same `--dir` as in step 1 if you did not use the default.
+
+`MASH_ENDPOINT` (or `endpoint` in `config.json`, or `--endpoint`), the full address `owner.group.name`, names the endpoint a session runs as. With none set, mash uses the one endpoint whose creds file sits directly in the config directory; if several are installed, as here, it stops and you name one. Each endpoint has a directory record and a credentials ("creds") file named `<owner>.<group>.<name>.creds` that proves who it is; `mashctl endpoint create` makes both. Recipients in `mash send` are written `owner.group.name`; a bare name is refused.
+
+`--channels` and `--dangerously-load-development-channels` are Claude Code research-preview flags. They are not shown in `claude --help`, but they work. The development flag lets the plugin wake an idle session without the channel allowlist (a list of channel plugins that Claude Code lets run without asking), and Claude Code asks you to confirm it at each launch; that is expected. Without the flag, mail still arrives at a session's next prompt or tool call. The steps are explained in [docs/install.md](docs/install.md), and [docs/operations.md](docs/operations.md#setting-mash-up-with-mashctl-init---config) covers setting mash up on a server.
 
 ## Synadia Cloud
 
@@ -163,27 +224,19 @@ Requirements: Claude Code 2.1.312 or newer (the oldest version a live receipt pa
 You need a NATS server in operator mode with JetStream (TLS recommended: use a `tls://` url, and for a private CA or mutual TLS set `ca`, `tls_cert` and `tls_key`; see [docs/install.md](docs/install.md#4-configuration)), an account for mash, and Claude Code with channels (a claude.ai or Console sign-in, not Bedrock, Agent Platform or Foundry; organisations need an Owner to allow mash; the channel wakes an idle session, and hooks deliver the mail). [docs/install.md](docs/install.md) covers it end to end. The short version:
 
 ```sh
-go install github.com/bogworks/mash/cmd/mash@v0.5.5      # Go 1.27.4 or newer; or use the release binary above. `mash version` prints the tag and `unknown` as the commit
+curl -fsSL https://github.com/bogworks/mash/releases/latest/download/install.sh | bash   # mash and mashctl; to build from source see above
 claude plugin marketplace add bogworks/mash
 claude plugin install mash@mash
 # allowlist the channel once per machine (managed settings are the admin-controlled settings file of Claude Code): write /etc/claude-code/managed-settings.json (Linux)
 # or /Library/Application Support/ClaudeCode/managed-settings.json (macOS), see docs/install.md section 3, then:
-MASH_ENDPOINT=alice.dev.my-session claude --channels plugin:mash@mash
+MASH_ENDPOINT=acme.demo.alice claude --channels plugin:mash@mash
 ```
 
-To install the plugin of exactly the mash you have (a pinned release, no GitHub fetch), export it and add the directory as the marketplace:
-
-```sh
-mash plugin export ~/.mash-plugin        # writes marketplace + plugin; needs no config or NATS
-claude plugin marketplace add ~/.mash-plugin
-claude plugin install mash@mash
-```
-
-Operators set up the server with `mashctl init` (or `mashctl adopt` for a server you already run) and make endpoints with `mashctl endpoint create`. See [docs/mashctl.md](docs/mashctl.md) and [docs/operations.md](docs/operations.md). For TLS, a cluster of NATS servers and a second `mashctl` machine, see [docs/tls-and-clusters.md](docs/tls-and-clusters.md).
+Operators set up the server with `mashctl init --config` and make endpoints with `mashctl endpoint create`. See [docs/mashctl.md](docs/mashctl.md) and [docs/operations.md](docs/operations.md). For TLS, a cluster of NATS servers and a second `mashctl` machine, see [docs/tls-and-clusters.md](docs/tls-and-clusters.md).
 
 ## Status
 
-mash is v0.5.5. Use the same version of `mash` and `mashctl` (the quick start needs `mash key create` and `mash join`, which 0.5.0 does not have); 0.5.0 (released 2026-11-16) stays the version for running deployments until they are moved (see the release notes). It supports Claude Code sessions as endpoints: durable, signed mail with trust labels, delivered by the plugin's hooks with a channel wake for idle sessions, on a NATS server you run (see [docs/install.md](docs/install.md)). The spec is in docs/specs, and an integration suite runs against an in-process NATS server carrying the production permissions. Mail survives process restarts. To survive a host crash on a self-hosted server set `sync_interval: always` ([docs/operations.md](docs/operations.md#durability-and-sync_interval)). "Durable" means stored on the NATS server until read, for up to 30 days and 16 MiB per inbox, on one replica. Past those limits the oldest messages go first, read or not, and an inbox on a clustered server is unavailable while its node is down; see [inbox limits](docs/operations.md#inbox-limits) and [durability](docs/operations.md#durability-and-sync_interval). Upgrading to 0.5.5 is a clean break from 0.5.0: make new endpoints with `mashctl endpoint create` and remove the old ones with `mashctl endpoint delete`. Mail unread in an old endpoint is not carried over. Interfaces may still change before the next major revision. Later phases (an archive leaf node, monitoring, approvals) are listed in the spec.
+mash is v0.5.6. Use the same version of `mash` and `mashctl` (the quick start needs `mash key create` and `mash join`, which 0.5.0 does not have); 0.5.0 (released 2026-11-16) stays the version for running deployments until they are moved (see the release notes). It supports Claude Code sessions as endpoints: durable, signed mail with trust labels, delivered by the plugin's hooks with a channel wake for idle sessions, on a NATS server you run (see [docs/install.md](docs/install.md)). The spec is in docs/specs, and an integration suite runs against an in-process NATS server carrying the production permissions. Mail survives process restarts. To survive a host crash on a self-hosted server set `sync_interval: always` ([docs/operations.md](docs/operations.md#durability-and-sync_interval)). "Durable" means stored on the NATS server until read, for up to 30 days and 16 MiB per inbox, on one replica. Past those limits the oldest messages go first, read or not, and an inbox on a clustered server is unavailable while its node is down; see [inbox limits](docs/operations.md#inbox-limits) and [durability](docs/operations.md#durability-and-sync_interval). Upgrading to 0.5.5 is a clean break from 0.5.0: make new endpoints with `mashctl endpoint create` and remove the old ones with `mashctl endpoint delete`. Mail unread in an old endpoint is not carried over. Interfaces may still change before the next major revision. Later phases (an archive leaf node, monitoring, approvals) are listed in the spec.
 
 ## Releases
 
