@@ -578,7 +578,7 @@ func TestEndpointInboxAddressesAreDistinct(t *testing.T) {
 
 func TestEndpointInboxCannotComplete(t *testing.T) {
 	f := newAuditEnv(t)
-	env := map[string]string{"HOME": t.TempDir(), "MASH_SERVER": "nats://127.0.0.1:1", "MASH_ENDPOINT": f.e.Owner + ".dev." + "x", "MASH_ADMIN_CREDS": f.e.AdminCreds, "MASH_INSECURE_PLAINTEXT": "1"}
+	env := map[string]string{"HOME": t.TempDir(), "MASH_SERVER": "nats://127.0.0.1:1", "MASH_ENDPOINT": f.e.Owner + ".dev." + "x", "MASH_ADMIN_CREDS": f.e.AdminCreds, "MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION": "1"}
 	var out, errb strings.Builder
 	if code := runEnv([]string{"endpoint", "inbox", "o.g.x"}, func(k string) string { return env[k] }, &out, &errb); code != 1 || out.String() != "" || !strings.HasPrefix(errb.String(), "error: ") {
 		t.Fatalf("exit %d, want 1: %q %q", code, out.String(), errb.String())

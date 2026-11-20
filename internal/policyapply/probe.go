@@ -130,7 +130,9 @@ const (
 )
 
 // connectTo opens one connection to one server and no other: no reconnect, no server discovery, no randomizing. It
-// refuses a connection that landed on a server of another name.
+// refuses a connection that landed on a server of another name. The URLs are built from the configured server list
+// (policyserve.ResolveURLs, the first configured scheme), which the caller passed through natsauth.RequireTLS; extra
+// carries the result, so no plain URL gets here unless MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1 allowed it.
 func connectTo(ctx context.Context, server, url string, creds []byte, timeout time.Duration, extra ...nats.Option) (*nats.Conn, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

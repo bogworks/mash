@@ -104,7 +104,7 @@ func TestCheckAdminCredsRefusesAnotherAccount(t *testing.T) {
 }
 
 func TestInitSettingsComeFromTheSetupFileOnly(t *testing.T) {
-	cfg := config.Config{TLSCA: "/env/ca.pem", TLSCert: "/old/c.pem", TLSKey: "/old/k.pem", InsecurePlaintext: true}
+	cfg := config.Config{TLSCA: "/env/ca.pem", TLSCert: "/old/c.pem", TLSKey: "/old/k.pem", SkipEncryption: true}
 	sf := setupFile{servers: []string{"tls://a:4222"}, owner: "alice", adminCreds: "/a.creds"}
 	m := initSettings(cfg, sf, &initState{sysDst: "/s/sys.creds"})
 	for _, k := range []string{"ca", "insecure_plaintext", "tls_cert", "tls_key"} {

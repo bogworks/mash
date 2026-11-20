@@ -662,7 +662,8 @@ func TestMashConfigDirHasNoFallback(t *testing.T) {
 	}
 }
 
-func TestLoadInsecurePlaintext(t *testing.T) {
+func TestLoadSkipEncryption(t *testing.T) {
+	const name = "MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION"
 	load := func(file string, env map[string]string) (Config, error) {
 		home := t.TempDir()
 		writeFile(t, home, file)
@@ -671,28 +672,41 @@ func TestLoadInsecurePlaintext(t *testing.T) {
 	}
 	base := `"servers":"tls://127.0.0.1:4222"`
 	for _, tc := range []struct {
-		name, file string
-		env        map[string]string
-		want       bool
-		source     string
+		name string
+		env  map[string]string
+		want bool
 	}{
-		{"default off", `{` + base + `}`, map[string]string{}, false, "default"},
-		{"file key", `{` + base + `,"insecure_plaintext":true}`, map[string]string{}, true, "config.json"},
-		{"file false", `{` + base + `,"insecure_plaintext":false}`, map[string]string{}, false, "config.json"},
-		{"env 1", `{` + base + `}`, map[string]string{"MASH_INSECURE_PLAINTEXT": "1"}, true, "MASH_INSECURE_PLAINTEXT"},
-		{"env true", `{` + base + `}`, map[string]string{"MASH_INSECURE_PLAINTEXT": "true"}, true, "MASH_INSECURE_PLAINTEXT"},
-		{"env 0 beats the file", `{` + base + `,"insecure_plaintext":true}`, map[string]string{"MASH_INSECURE_PLAINTEXT": "0"}, false, "MASH_INSECURE_PLAINTEXT"},
-		{"env false beats the file", `{` + base + `,"insecure_plaintext":true}`, map[string]string{"MASH_INSECURE_PLAINTEXT": "false"}, false, "MASH_INSECURE_PLAINTEXT"},
-		{"env 1 beats the file", `{` + base + `,"insecure_plaintext":false}`, map[string]string{"MASH_INSECURE_PLAINTEXT": "1"}, true, "MASH_INSECURE_PLAINTEXT"},
+		{"default off", map[string]string{}, false},
+		{"empty is off", map[string]string{name: ""}, false},
+		{"0 is off", map[string]string{name: "0"}, false},
+		{"1 is on", map[string]string{name: "1"}, true},
 	} {
-		c, err := load(tc.file, tc.env)
-		if err != nil || c.InsecurePlaintext != tc.want || c.Source["insecure_plaintext"] != tc.source {
-			t.Fatalf("%s: %v, %v, source %q; want %v, %q", tc.name, c.InsecurePlaintext, err, c.Source["insecure_plaintext"], tc.want, tc.source)
+		c, err := load(`{`+base+`}`, tc.env)
+		if err != nil || c.SkipEncryption != tc.want {
+			t.Fatalf("%s: %v, %v; want %v", tc.name, c.SkipEncryption, err, tc.want)
 		}
 	}
-	for _, v := range []string{"yes", "on", "TRUE", "2"} {
-		if _, err := load(`{`+base+`}`, map[string]string{"MASH_INSECURE_PLAINTEXT": v}); err == nil || !strings.Contains(err.Error(), "MASH_INSECURE_PLAINTEXT") {
+	// Only 1 turns it on: true, yes, on and anything else are errors naming the variable.
+	for _, v := range []string{"yes", "on", "TRUE", "true", "false", "2"} {
+		_, err := load(`{`+base+`}`, map[string]string{name: v})
+		var se *SkipEncryptionError
+		if err == nil || !errors.As(err, &se) || !strings.Contains(err.Error(), name) {
 			t.Fatalf("a bad value %q: %v", v, err)
+		}
+	}
+	// The old names are refused, not aliased: the error names the new variable.
+	_, err := load(`{`+base+`}`, map[string]string{"MASH_INSECURE_PLAINTEXT": "1"})
+	var se *SkipEncryptionError
+	if err == nil || !errors.As(err, &se) || !strings.Contains(err.Error(), "MASH_INSECURE_PLAINTEXT is no longer read; set "+name+"=1 instead") {
+		t.Fatalf("the old variable: %v", err)
+	}
+	for _, v := range []string{`true`, `false`, `null`} {
+		_, err := load(`{`+base+`,"insecure_plaintext":`+v+`}`, map[string]string{})
+		if err == nil || !errors.As(err, &se) || !strings.Contains(err.Error(), "insecure_plaintext in config.json is no longer read; set "+name+"=1 instead") {
+			t.Fatalf("the old key %s: %v", v, err)
+		}
+		if err := ValidateFile([]byte(`{` + base + `,"insecure_plaintext":` + v + `}`)); err == nil {
+			t.Fatalf("ValidateFile accepted the old key %s", v)
 		}
 	}
 }
@@ -701,8 +715,8 @@ func TestOldTLSKeysAreUnknownKeys(t *testing.T) {
 	home := t.TempDir()
 	writeFile(t, home, `{"servers":"tls://127.0.0.1:4222","insecure_loopback":true,"require_tls":true}`)
 	c, err := load(envOf(map[string]string{"MASH_ENDPOINT": "o.g.a", "MASH_INSECURE_LOOPBACK": "1", "MASH_REQUIRE_TLS": "1"}), home)
-	if err != nil || c.InsecurePlaintext {
-		t.Fatalf("old names must be ignored: %v, %v", c.InsecurePlaintext, err)
+	if err != nil || c.SkipEncryption {
+		t.Fatalf("old names must be ignored: %v, %v", c.SkipEncryption, err)
 	}
 	if _, ok := c.Source["insecure_loopback"]; ok {
 		t.Fatal("old key has a source")
@@ -717,7 +731,7 @@ func TestSourcesRecordWhereEachSettingCameFrom(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]string{"servers": "MASH_SERVER", "endpoint": "config.json", "admin_creds": "config.json", "ca": "config.json",
-		"tls_cert": "MASH_TLS_CERT", "tls_key": "MASH_TLS_KEY", "insecure_plaintext": "default"}
+		"tls_cert": "MASH_TLS_CERT", "tls_key": "MASH_TLS_KEY"}
 	for k, v := range want {
 		if c.Source[k] != v {
 			t.Errorf("Source[%s] = %q, want %q", k, c.Source[k], v)
@@ -740,14 +754,14 @@ func TestSourcesRecordWhereEachSettingCameFrom(t *testing.T) {
 
 func TestSourcesWithoutFileAreEnvOrUnset(t *testing.T) {
 	home := t.TempDir()
-	c, err := load(envOf(map[string]string{"MASH_SERVER": "tls://e:1", "MASH_ENDPOINT": "o.dev.x", "MASH_INSECURE_PLAINTEXT": "1"}), home)
+	c, err := load(envOf(map[string]string{"MASH_SERVER": "tls://e:1", "MASH_ENDPOINT": "o.dev.x", "MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION": "1"}), home)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if c.File != "" || len(c.FileValues) != 0 {
 		t.Errorf("File %q FileValues %v", c.File, c.FileValues)
 	}
-	for k, v := range map[string]string{"servers": "MASH_SERVER", "endpoint": "MASH_ENDPOINT", "admin_creds": "unset", "insecure_plaintext": "MASH_INSECURE_PLAINTEXT"} {
+	for k, v := range map[string]string{"servers": "MASH_SERVER", "endpoint": "MASH_ENDPOINT", "admin_creds": "unset"} {
 		if c.Source[k] != v {
 			t.Errorf("Source[%s] = %q, want %q", k, c.Source[k], v)
 		}
@@ -756,15 +770,12 @@ func TestSourcesWithoutFileAreEnvOrUnset(t *testing.T) {
 
 func TestSourcesAgreeingEnvStillNamesEnv(t *testing.T) {
 	home := t.TempDir()
-	writeFile(t, home, `{"servers":"tls://same:4222","insecure_plaintext":false}`)
+	writeFile(t, home, `{"servers":"tls://same:4222"}`)
 	c, err := load(envOf(map[string]string{"MASH_SERVER": "tls://same:4222"}), home)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if c.Source["servers"] != "MASH_SERVER" || c.FileValues["servers"] != c.URL {
-		t.Errorf("%v %v", c.Source, c.FileValues)
-	}
-	if c.FileValues["insecure_plaintext"] != "false" || c.Source["insecure_plaintext"] != "config.json" {
 		t.Errorf("%v %v", c.Source, c.FileValues)
 	}
 }

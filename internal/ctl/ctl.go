@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"os"
 	"strings"
 	"time"
 
@@ -146,12 +145,9 @@ func OpenAdminWith(prog string, cfg config.Config, extra ...nats.Option) (*madmi
 	} else if err := natsauth.CheckCreds(cfg.AdminCreds, raw); err != nil {
 		return nil, nil, nil, err
 	}
-	tlsReq, warning, err := natsauth.RequireTLS(cfg.URL, cfg.InsecurePlaintext)
+	tlsReq, _, err := natsauth.RequireTLS(cfg.URL, cfg.SkipEncryption)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("%s: %w", pfx, err)
-	}
-	if warning != "" {
-		fmt.Fprintln(os.Stderr, warning)
 	}
 	nc, err := nats.Connect(cfg.URL, append(append(append(natsauth.TLSOptions(cfg.TLSCA, cfg.TLSCert, cfg.TLSKey), tlsReq...), natsauth.UserCredentials(cfg.AdminCreds), nats.Name(prog)), extra...)...)
 	if err != nil {

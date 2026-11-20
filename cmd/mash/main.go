@@ -223,6 +223,17 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 		return cliframe.Report(stdout, stderr, cliframe.Usagef("mash needs a command").WithHint("mash --help"), global.JSON)
 	}
 	env, lookup = global.Shadow(cliframe.Spec{Tool: "mash", CredsEnv: "MASH_CREDS", CredsKey: "creds"}, env, lookup)
+	// The encryption override is checked here, once, before any command dispatches (help and version included): a removed
+	// name or a bad value is refused (exit 2), and while the override is on every command prints the warning on stderr.
+	// A hook never blocks the session: it says the refusal on stderr, exits 0, and reads and writes nothing.
+	if skipErr := config.CheckSkipEncryption(lookup, env("HOME")); skipErr != nil {
+		if args[0] == "hook" {
+			fmt.Fprintf(stderr, "mash hook: %s\n", skipErr.Msg())
+			return 0
+		}
+		return cliframe.Report(stdout, stderr, cliframe.Usagef("%s", skipErr.Msg()).WithHint("mash doctor"), global.JSON)
+	}
+	config.WarnSkipEncryption(lookup, stderr)
 	if args[0] == "help" { // `mash help` prints what `mash --help` does; `mash help send` what `mash send --help` does
 		if len(args) == 1 {
 			args = []string{"--help"}
@@ -310,18 +321,18 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 	if errors.As(err, &several) && slices.Contains([]string{"send", "who", "inbox", "read", "prompt"}, args[0]) {
 		return cliframe.Report(stdout, stderr, cmdcore.NoEndpoint(cmdcore.SeveralInstalled, args[0], several.Addresses), jsonOut)
 	}
+	var skipErr *config.SkipEncryptionError
+	if errors.As(err, &skipErr) && args[0] != "hook" && !report { // the removed names or a bad value: a configuration error, exit 2
+		return cliframe.Report(stdout, stderr, cliframe.Usagef("%s", skipErr.Msg()).WithHint("mash doctor"), jsonOut)
+	}
 	if err != nil && args[0] != "serve" && !report {
 		return cliframe.Report(stdout, stderr, cliframe.Failf("%s", strings.TrimPrefix(err.Error(), "mash: ")).WithHint("mash doctor"), jsonOut)
 	}
-	// A plain URL with no insecure_plaintext is refused before anything is connected (REQ-014): serve stops at session
+	// A plain URL with no MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1 is refused before anything is connected (REQ-014): serve stops at session
 	// start and the commands that connect stop, exit 2, with the refusal on stderr.
 	if err == nil && !cfg.Inert() {
 		if _, perr := endpoint.EndpointTLS(cfg); perr != nil && !report { // a report says it as a row
 			return cliframe.Report(stdout, stderr, cliframe.Usagef("%s", strings.TrimPrefix(perr.Error(), "mash: ")).WithHint("mash doctor"), jsonOut)
-		}
-		// serve says it once at start (reportSettings); a command says it here, once, before it connects.
-		if w := endpoint.PlainWarning(cfg); w != "" && args[0] != "serve" {
-			fmt.Fprintln(stderr, w)
 		}
 	}
 	switch args[0] {

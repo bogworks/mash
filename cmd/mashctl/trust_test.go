@@ -102,47 +102,49 @@ func TestInitRefusesForeignIssuerAndInstallsNoOperatorJWT(t *testing.T) {
 }
 
 func TestAdminAndSystemConnectionsRequireTLS(t *testing.T) {
+	keepSkipWarning = true
+	t.Cleanup(func() { keepSkipWarning = false })
 	refused := func(t *testing.T, label string, code int, out, errb string) {
 		t.Helper()
 		all := out + errb
-		if code != 2 || !strings.Contains(all, "refusing a plain nats://") || !strings.Contains(all, "insecure_plaintext") || !strings.Contains(all, "MASH_INSECURE_PLAINTEXT=1") || !strings.Contains(all, "tls://") {
+		if code != 2 || !strings.Contains(all, "refusing a plain nats://") || !strings.Contains(all, "MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1") || !strings.Contains(all, "tls://") {
 			t.Fatalf("%s: exit %d, want 2 naming the override and tls://\n%s\n%s", label, code, out, errb)
 		}
 	}
 	// a plain loopback server without the override: every admin verb and the system connection are refused
 	e := newApplyEnv(t).withDirectory()
-	e.env["MASH_INSECURE_PLAINTEXT"] = ""
+	e.env["MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION"] = ""
 	e.env["MASH_ADMIN_CREDS"] = e.pl.Creds
 	for _, args := range [][]string{{"doctor"}, {"endpoint", "list"}, {"limits", "apply"}, {"status"}} {
 		out, errb, code := e.run(args...)
 		refused(t, fmt.Sprint(args), code, out, errb)
 	}
 	// with the override the same server works, and stderr carries the warning
-	e.env["MASH_INSECURE_PLAINTEXT"] = "1"
-	if out, errb, code := runWithProcessStderr(e.t, e.run, "endpoint", "list"); code != 0 || !strings.Contains(errb, "mash: WARNING: plain-text connection to") {
+	e.env["MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION"] = "1"
+	if out, errb, code := runWithProcessStderr(e.t, e.run, "endpoint", "list"); code != 0 || !strings.Contains(errb, skipWarning) {
 		t.Fatalf("with the override: %d\n%s\n%s", code, out, errb)
 	}
 	// a non-loopback plain URL is refused without the override, before any connection; with it, it is allowed (and
 	// warned about), so the failure is a connection failure, not a refusal
 	e.env["MASH_SERVER"] = "nats://192.0.2.1:4222"
 	for _, args := range [][]string{{"doctor"}, {"endpoint", "list"}} {
-		e.env["MASH_INSECURE_PLAINTEXT"] = ""
+		e.env["MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION"] = ""
 		out, errb, code := e.run(args...)
 		refused(t, fmt.Sprint(args)+" non-loopback", code, out, errb)
-		e.env["MASH_INSECURE_PLAINTEXT"] = "1"
+		e.env["MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION"] = "1"
 		out, errb, code = runWithProcessStderr(e.t, e.run, args...)
-		if code == 0 || strings.Contains(out+errb, "refusing a plain") || !strings.Contains(errb, "mash: WARNING: plain-text connection to 192.0.2.1") {
+		if code == 0 || strings.Contains(out+errb, "refusing a plain") || !strings.Contains(errb, skipWarning) {
 			t.Fatalf("%v non-loopback with the override: %d\n%s\n%s", args, code, out, errb)
 		}
 	}
 	// the same for init, which names its servers in the setup file
 	a := newIniter(t, newApplyEnv(t))
-	a.env["MASH_INSECURE_PLAINTEXT"] = ""
-	a.refuses(2, []string{"refusing a plain nats://", "insecure_plaintext", "MASH_INSECURE_PLAINTEXT=1", "tls://"}, nil)
-	a.refuses(2, []string{"refusing a plain nats://", "MASH_INSECURE_PLAINTEXT=1"}, map[string]any{"servers": []string{"nats://192.0.2.1:4222"}})
-	a.env["MASH_INSECURE_PLAINTEXT"] = "1"
+	a.env["MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION"] = ""
+	a.refuses(2, []string{"refusing a plain nats://", "MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1", "tls://"}, nil)
+	a.refuses(2, []string{"refusing a plain nats://", "MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1"}, map[string]any{"servers": []string{"nats://192.0.2.1:4222"}})
+	a.env["MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION"] = "1"
 	a.vals["servers"] = []string{"nats://192.0.2.1:4222"}
-	if out, errb, code := runWithProcessStderr(a.t, a.init, "--dry-run"); code == 0 || !strings.Contains(errb, "mash: WARNING: plain-text connection to 192.0.2.1") {
+	if out, errb, code := runWithProcessStderr(a.t, a.init, "--dry-run"); code == 0 || !strings.Contains(errb, skipWarning) {
 		t.Fatalf("init non-loopback with the override: %d\n%s\n%s", code, out, errb)
 	}
 }
@@ -172,10 +174,10 @@ func TestAdminVerbsAcceptATLSServer(t *testing.T) {
 	makeStorageFor(t, e)
 	var out, errb bytes.Buffer
 	if code := runEnv([]string{"limits", "apply"}, func(k string) string { return env[k] }, &out, &errb); code != 0 {
-		t.Fatalf("limits apply over TLS without insecure_plaintext: %d\n%s\n%s", code, out.String(), errb.String())
+		t.Fatalf("limits apply over TLS without the override: %d\n%s\n%s", code, out.String(), errb.String())
 	}
 	// the override does not turn a TLS connection off
-	env["MASH_INSECURE_PLAINTEXT"] = "1"
+	env["MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION"] = "1"
 	out.Reset()
 	errb.Reset()
 	if code := runEnv([]string{"endpoint", "list"}, func(k string) string { return env[k] }, &out, &errb); code != 0 {
@@ -188,7 +190,7 @@ func TestAdminVerbsAcceptATLSServer(t *testing.T) {
 // ordinary connection failure with the override keeps its own exit code.
 func TestPlainURLRefusalExitsTwoEverywhere(t *testing.T) {
 	e := newApplyEnv(t).withDirectory()
-	e.env["MASH_INSECURE_PLAINTEXT"] = ""
+	e.env["MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION"] = ""
 	for _, args := range [][]string{
 		{"endpoint", "list"},
 		{"endpoint", "list", "--json"},
@@ -203,12 +205,12 @@ func TestPlainURLRefusalExitsTwoEverywhere(t *testing.T) {
 	} {
 		out, errb, code := e.run(args...)
 		all := out + errb
-		if code != 2 || !strings.Contains(all, "insecure_plaintext") || !strings.Contains(all, "tls://") {
-			t.Errorf("%v: exit %d, want 2 naming insecure_plaintext and tls://\n%s\n%s", args, code, out, errb)
+		if code != 2 || !strings.Contains(all, "MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1") || !strings.Contains(all, "tls://") {
+			t.Errorf("%v: exit %d, want 2 naming the override and tls://\n%s\n%s", args, code, out, errb)
 		}
 	}
 	// with the override and an address nothing listens on, the failure is an ordinary one, not a refusal
-	e.env["MASH_INSECURE_PLAINTEXT"] = "1"
+	e.env["MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION"] = "1"
 	e.env["MASH_SERVER"] = "nats://127.0.0.1:1"
 	out, errb, code := e.run("endpoint", "list")
 	if code != 1 || strings.Contains(out+errb, "refusing a plain") {
