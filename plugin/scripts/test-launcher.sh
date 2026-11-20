@@ -201,7 +201,7 @@ check "on, download fails: PATH mash not run, stdout empty" empty_file "$T/out"
 check "on, download fails: error names the setting" contains "$(cat "$T/err")" "MASH_PLUGIN_REQUIRE_VERIFIED is on"
 check "on, download fails: error names the failure" contains "$(cat "$T/err")" "(download failed)"
 check "on, download fails: error says how to turn it off" contains "$(cat "$T/err")" "MASH_PLUGIN_REQUIRE_VERIFIED=0"
-check "on, download fails: no install hint" eq "$(grep -c 'go install' "$T/err")" 0
+check "on, download fails: no install hint" eq "$(grep -c 'no binary found' "$T/err")" 0
 check "on, download fails: nothing installed" absent "$T/sd4/bin/mash-$VER"
 rv_run "$T/sd5" "file://$REL2" 1 serve
 check "on, sha mismatch: exit 127" eq "$RC" 127

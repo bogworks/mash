@@ -27,7 +27,11 @@ if [ -f "$PINS" ]; then
 fi
 
 REPO_URL="https://github.com/bogworks/mash"
-HINT="mash: no binary found. Install it: curl -fsSL $REPO_URL/releases/latest/download/install.sh | bash"
+if [ -n "${MASH_RELEASE_BASE:-}" ]; then
+  HINT="mash: no binary found. Install it with install.sh from your release source ($MASH_RELEASE_BASE): curl -fsSL <that release's install.sh> | bash"
+else
+  HINT="mash: no binary found. Install it: curl -fsSL $REPO_URL/releases/latest/download/install.sh | bash"
+fi
 
 log() { printf '%s\n' "mash launcher: $*" >&2; }
 
