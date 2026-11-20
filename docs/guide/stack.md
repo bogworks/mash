@@ -11,7 +11,8 @@ flowchart TB
        delivery into an agent session"]
     S["Synadia Agent Protocol (SAP)<br/>agents as discoverable services,
        live prompts, status, heartbeat,
-       sender identity"]
+       sender identity: optional in SAP,
+       required by mash"]
     N["NATS<br/>servers, accounts, users, keys,
        credentials, subjects, streams"]
     M --> S --> N

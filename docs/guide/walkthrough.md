@@ -32,7 +32,7 @@ Agent Protocol (SAP) is in [mash-vs-sap.md](mash-vs-sap.md).
 What this does: lists what must be on the machine before step 1.
 
 - A machine with Linux or macOS and Claude Code installed.
-- `curl`, `tar`, `unzip`, `openssl`, `jq` (step 7 only), `nats-server`
+- `curl`, `tar`, `unzip`, `openssl`, `jq` (step 8 only), `nats-server`
   2.10.7 or newer and the `nats` command. On Debian or Ubuntu a minimal image
   also needs `iproute2` (the setup script uses `ss`).
 - About 2 GB free and nothing listening on 127.0.0.1:4222, or the next free
@@ -129,7 +129,21 @@ credentials are valid; offline means no session holds the endpoint open
 yet (an agent's MCP server does that in normal use). One endpoint is one
 credential.
 
-## Step 5: send mail
+## Step 5: see who is there
+
+What this does: lists the endpoints you can see and which are online. It is
+the directory: unlike a list of live agents, it includes endpoints that are
+offline, because their mail waits for them.
+
+What is created: nothing.
+
+```
+MASH_ENDPOINT=acme.demo.bob mash who
+```
+
+Output: `[built output]`
+
+## Step 6: send mail
 
 What this does: shows the mail flow by hand on the command line. Normally
 the agent talks to mash through MCP and you never type this.
@@ -188,9 +202,9 @@ receipt.
 
 `kind` says what the mail is: `task`, `question`, `result`, `fyi`. Mail
 waits in the inbox. A running agent is shown it at its next prompt or tool
-call; `--urgent` is what asks an idle agent to wake (step 6).
+call; `--urgent` is what asks an idle agent to wake (step 7).
 
-## Step 6: use it from Claude Code
+## Step 7: use it from Claude Code
 
 What this does: two Claude Code sessions, one as Bob and one as Alice, mail
 each other through the mash plugin. The plugin gives each session the mash
@@ -249,11 +263,11 @@ Add "urgent" to wake Alice's session if it is idle. In Alice's
 session the mail arrives with her next prompt, or at once if she was idle,
 and Claude shows it as mail from `acme.demo.bob`, labelled `[verified]`.
 Alice's session answers with `send`, and Bob's session sees the answer.
-Mail you sent in step 5 is waiting too: it arrives the same way.
+Mail you sent in step 6 is waiting too: it arrives the same way.
 
 Output: `[built output]` (a transcript of the two sessions)
 
-## Step 7: JSON, for scripts (optional)
+## Step 8: JSON, for scripts (optional)
 
 What this does: for a script or tool that is not an agent. Every command takes
 `--json` and prints the same object the matching MCP tool returns, so a script
@@ -349,7 +363,7 @@ Output: `ping`
 (The JSON above is the spec's example, shown with Alice and Bob. The
 built-output pass replaces it with the real run's.)
 
-## Step 8: take an endpoint away
+## Step 9: take an endpoint away
 
 What this does: close Bob's session first. It deletes Bob's endpoint and shows
 that its credential is refused afterwards.
@@ -359,12 +373,12 @@ confirm), then `mash status` as Bob.
 
 Output: `[built output]`
 
-## Step 9: join a mesh someone else runs
+## Step 10: join a mesh someone else runs
 
 What this does: an endpoint on another machine joins your server from a
 join file.
 
-## Step 10: stop, start, remove the server
+## Step 11: stop, start, remove the server
 
 What this does: day-2 care of the local server. Removing it deletes every
 mailbox and message on it, so it is the last step.
