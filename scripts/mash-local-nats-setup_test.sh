@@ -40,7 +40,7 @@ set -u
 SCRIPT=/t/mash-local-nats-setup.sh
 CASE=$1
 H=${HOME:?}
-W=$(mktemp -d /tmp/w.XXXXXX)
+W=$(mktemp -d "${TMPDIR:-/tmp}/w.XXXXXX")
 ROUTE=pipe
 PRE=()
 RC=0
@@ -1024,7 +1024,7 @@ case22() { # --dir anywhere: outside $HOME, ancestors owned by you or root, syml
     local t d pid
     ROUTE="file"
     # (1) a parent you own, outside $HOME: the full life cycle
-    t=$(mktemp -d /tmp/mlnt.XXXXXX); d=$t/mash-nats
+    t=$(mktemp -d "${TMPDIR:-/tmp}/mlnt.XXXXXX"); d=$t/mash-nats
     chk "control: the parent is outside \$HOME, mode 700" [ "$("$REALSTAT" -c %a "$t")" = 700 ]
     run --owner acme --dir "$d"
     check_success "$d" acme
@@ -1056,7 +1056,7 @@ case22() { # --dir anywhere: outside $HOME, ancestors owned by you or root, syml
     chk "other user's ancestor: says not owned by you or root" has "$W/err" 'not owned by you or root: /home/other'
     chk "other user's ancestor: nothing made" absent /home/other/sub/n
     # (4) symlink ancestors
-    t=$(mktemp -d /tmp/mlnt.XXXXXX); mkdir "$t/real"; ln -s "$t/real" "$t/mine"
+    t=$(mktemp -d "${TMPDIR:-/tmp}/mlnt.XXXXXX"); mkdir "$t/real"; ln -s "$t/real" "$t/mine"
     run --owner acme --dir "$t/mine/n"
     chk "symlink ancestor owned by you: exit 1" rc_is 1
     chk "symlink ancestor: says symlink" has "$W/err" "refusing a symlink in the path: $t/mine"
