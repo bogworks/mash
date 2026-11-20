@@ -481,6 +481,9 @@ mode_remove() {
     fi
     rm -rf "$DIR"
     echo "removed $DIR"
+    # mashctl keeps its own folder; this script never touches it
+    echo "note: mashctl's folder ~/.config/mash still points at this server."
+    echo "To set up again: mashctl init --config-dir <new folder>, or move it aside."
 }
 
 # ---------------------------------------------------------------- create

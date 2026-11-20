@@ -717,6 +717,9 @@ case10() { # --remove
     ptyrun "$d" bash -c 'cat "$0" | bash -s -- --remove' "$SCRIPT"
     chk "--remove, right path, piped route: exit 0" rc_is 0
     chk "--remove: says removed" has "$W/out" "removed $d"
+    chk "--remove: says mashctl's folder still points at the server" has "$W/out" "mashctl's folder ~/.config/mash still points at this server"
+    chk "--remove: says how to set up again" has "$W/out" "mashctl init --config-dir <new folder>, or move it aside"
+    chk "--remove: the note lines fit 80 columns" bash -c '! grep -E "^(note|To set up).{81,}" "$1"' _ "$W/out"
     chk "--remove: the dir is gone" absent "$d"
     chk "--remove: the server is gone" gone "$pid"
     # file route, second dir
