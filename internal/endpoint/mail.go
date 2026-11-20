@@ -103,6 +103,15 @@ func (e *Endpoint) classify(subject string, hdr nats.Header, data []byte, stored
 	name := e.byUser[h.User]
 	e.mu.RUnlock()
 	if name == "" || (h.Name != "" && h.Name != name) {
+		// The directory cache may predate the sender (it is re-read every DirectoryPoll): read that one record now,
+		// once, before the message is called unknown-signer and, by default, dropped for good.
+		if e.reloadSender(h) {
+			e.mu.RLock()
+			name = e.byUser[h.User]
+			e.mu.RUnlock()
+		}
+	}
+	if name == "" || (h.Name != "" && h.Name != name) {
 		return shownName(h), sap.TrustUnknownSigner, h, true
 	}
 	if signed, err := time.Parse(time.RFC3339Nano, h.TS); err == nil {
@@ -944,7 +953,7 @@ func (e *Endpoint) ReadInbox(ctx context.Context, q InboxQuery) (InboxRead, erro
 	info := s.CachedInfo()
 	first, last := info.State.FirstSeq, info.State.LastSeq
 	// The stream keeps the refused mail it stored; the counts are of what the inbox shows.
-	shown := max(int(info.State.Msgs)-e.refusedStored(first, last), 0)
+	shown := max(int(info.State.Msgs)-e.refusedStored(first, last, streamIdentity(info)), 0)
 	st := InboxState{Total: shown, Waiting: shown}
 	cons, err, ok := e.pre.takeConsumer()
 	if !ok {
@@ -1086,12 +1095,12 @@ func (e *Endpoint) ReadRef(ctx context.Context, r MsgRef) (render.Mail, error) {
 	if r.Stream != "" {
 		return render.Mail{}, fmt.Errorf("mash: no stream %q on this endpoint", r.Stream)
 	}
-	if e.refusedSeq(r.Seq) {
-		return render.Mail{}, &RefusedMessageError{Seq: r.Seq} // refused mail is not there to read
-	}
 	s, err := e.inbox(ctx)
 	if err != nil {
 		return render.Mail{}, err
+	}
+	if e.refusedSeq(r.Seq, streamIdentity(s.CachedInfo())) {
+		return render.Mail{}, &RefusedMessageError{Seq: r.Seq} // refused mail is not there to read
 	}
 	raw, err := s.GetMsg(ctx, r.Seq)
 	if errors.Is(err, jetstream.ErrMsgNotFound) {

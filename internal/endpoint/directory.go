@@ -209,3 +209,34 @@ func (e *Endpoint) installDirectory(got map[string]recordResult) (failed int) {
 	e.fullDir = true
 	return failed
 }
+
+// reloadSender reads the directory record of the endpoint a message's sender header names, bypassing the cached
+// directory, and installs it when it is the record of the header's key. It reports whether the cache changed.
+func (e *Endpoint) reloadSender(h sap.SenderHeader) bool {
+	if h.Name == "" || h.User == "" || !recordKey(h.Name) {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	r := e.fetchRecord(ctx, h.Name)
+	if r.err != nil || r.rec.User != h.User {
+		return false
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.dir == nil {
+		e.dir = map[string]store.Record{}
+	}
+	if old, ok := e.dir[h.Name]; ok && old.User == r.rec.User {
+		return false
+	}
+	if old, ok := e.dir[h.Name]; ok && e.byUser[old.User] == h.Name {
+		delete(e.byUser, old.User)
+	}
+	e.dir[h.Name] = r.rec
+	if e.byUser == nil {
+		e.byUser = map[string]string{}
+	}
+	e.byUser[r.rec.User] = h.Name
+	return true
+}

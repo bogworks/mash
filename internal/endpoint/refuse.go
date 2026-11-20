@@ -2,6 +2,7 @@ package endpoint
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -10,6 +11,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
+
+	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/sap"
@@ -24,6 +28,11 @@ import (
 // everything the server stored, so the counts mash inbox reports leave these out: the file says which they are. It is a
 // help for the counts only; a missing or damaged file means the counts include the refused mail still stored.
 const refusedSeqsFile = "refused-unverified.seqs"
+
+// refusedSeqsHeader opens the sequences file: the identity of the inbox stream the sequences belong to (its name and
+// creation time, as the spool binds to). Stream sequences restart when a stream is recreated, so a file of another
+// stream's identity is stale: its sequences and the count beside it are discarded, never applied to the new stream.
+const refusedSeqsHeader = "stream "
 
 // refusedSeqsKeep is how many sequences the file keeps: past twice that it is rewritten to the newest.
 const refusedSeqsKeep = 4096
@@ -69,7 +78,7 @@ func claimedAddress(h sap.SenderHeader, from string) string {
 
 // refusedSeq reports whether serve refused the inbox message with this sequence (accept_unverified off and the
 // sequence in the sidecar).
-func (e *Endpoint) refusedSeq(seq uint64) bool {
+func (e *Endpoint) refusedSeq(seq uint64, stream string) bool {
 	if e.cfg.AcceptUnverified {
 		return false
 	}
@@ -77,7 +86,55 @@ func (e *Endpoint) refusedSeq(seq uint64) bool {
 	if err != nil {
 		return false
 	}
-	return slices.Contains(readRefusedSeqs(filepath.Join(dir, refusedSeqsFile)), seq)
+	id, seqs := readRefusedSeqs(filepath.Join(dir, refusedSeqsFile))
+	return id == stream && slices.Contains(seqs, seq)
+}
+
+// streamIdentity is the identity of the inbox stream described by info.
+func streamIdentity(info *jetstream.StreamInfo) string {
+	return info.Config.Name + "@" + info.Created.UTC().Format(time.RFC3339Nano)
+}
+
+// bindRefusals ties the count and the sequences to the inbox stream's identity: when the files belong to another
+// stream (it was recreated) they are discarded, the count with them. It returns the identity.
+func (e *Endpoint) bindRefusals(ctx context.Context) (string, error) {
+	if id := e.refusedStream.Load(); id != nil {
+		return *id, nil
+	}
+	st, err := e.js.Stream(ctx, e.ident.InboxStream())
+	if err != nil {
+		return "", err
+	}
+	return e.bindRefusalsTo(streamIdentity(st.CachedInfo()))
+}
+
+// bindRefusalsTo is bindRefusals for the stream identity id, already read.
+func (e *Endpoint) bindRefusalsTo(id string) (string, error) {
+	if e.cfg.StateDir != "" {
+		dir, err := SpoolDir(e.cfg)
+		if err != nil {
+			return "", err
+		}
+		refusedMu.Lock()
+		defer refusedMu.Unlock()
+		p := filepath.Join(dir, refusedSeqsFile)
+		if have, _ := readRefusedSeqs(p); have != id {
+			_, seenFile := os.Stat(p)
+			if seenFile == nil || RefusedCount(e.cfg) > 0 {
+				if err := os.MkdirAll(dir, 0o700); err != nil {
+					return "", err
+				}
+				if err := replaceFile(filepath.Join(dir, RefusedFile), []byte("0\n")); err != nil {
+					return "", err
+				}
+				if err := replaceFile(p, []byte(refusedSeqsHeader+id+"\n")); err != nil {
+					return "", err
+				}
+			}
+		}
+	}
+	e.refusedStream.Store(&id)
+	return id, nil
 }
 
 // RefusedMessageError is the error of a read of a message serve refused because it was not verified.
@@ -95,6 +152,12 @@ func (e *Endpoint) recordRefusal(seq uint64) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	id, err := e.bindRefusals(ctx)
+	if err != nil {
+		return 0, err
+	}
 	refusedMu.Lock()
 	defer refusedMu.Unlock()
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -106,11 +169,15 @@ func (e *Endpoint) recordRefusal(seq uint64) (int, error) {
 	}
 	// The sequence list is best effort: the count is the record.
 	p := filepath.Join(dir, refusedSeqsFile)
-	seqs := readRefusedSeqs(p)
+	_, seqs := readRefusedSeqs(p)
 	seqs = append(seqs, seq)
+	if _, err := os.Stat(p); err != nil { // a new file starts with its stream's identity
+		_ = replaceFile(p, []byte(refusedSeqsHeader+id+"\n"))
+	}
 	if len(seqs) > 2*refusedSeqsKeep {
 		seqs = seqs[len(seqs)-refusedSeqsKeep:]
 		var b strings.Builder
+		b.WriteString(refusedSeqsHeader + id + "\n")
 		for _, s := range seqs {
 			b.WriteString(strconv.FormatUint(s, 10) + "\n")
 		}
@@ -146,25 +213,32 @@ func replaceFile(path string, data []byte) error {
 	return werr
 }
 
-func readRefusedSeqs(path string) []uint64 {
+// readRefusedSeqs reads the sequences file: the stream identity of its header line ("" when there is none) and the
+// sequences.
+func readRefusedSeqs(path string) (string, []uint64) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil
+		return "", nil
 	}
 	defer f.Close()
 	var out []uint64
+	id := ""
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
+		if rest, ok := strings.CutPrefix(sc.Text(), refusedSeqsHeader); ok {
+			id = strings.TrimSpace(rest)
+			continue
+		}
 		if n, err := strconv.ParseUint(strings.TrimSpace(sc.Text()), 10, 64); err == nil {
 			out = append(out, n)
 		}
 	}
-	return out
+	return id, out
 }
 
 // refusedStored is how many of the refused messages the inbox stream, whose sequences run from first to last, may still
 // hold. Zero when accept_unverified is set.
-func (e *Endpoint) refusedStored(first, last uint64) (stored int) {
+func (e *Endpoint) refusedStored(first, last uint64, stream string) (stored int) {
 	if e.cfg.AcceptUnverified {
 		return 0
 	}
@@ -173,7 +247,11 @@ func (e *Endpoint) refusedStored(first, last uint64) (stored int) {
 		return 0
 	}
 	seen := map[uint64]bool{}
-	for _, s := range readRefusedSeqs(filepath.Join(dir, refusedSeqsFile)) {
+	id, seqs := readRefusedSeqs(filepath.Join(dir, refusedSeqsFile))
+	if id != stream {
+		return 0
+	}
+	for _, s := range seqs {
 		if s >= first && s <= last && !seen[s] {
 			seen[s] = true
 		}

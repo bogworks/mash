@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -113,5 +114,21 @@ func TestServeFlagsShadowTheEnvironment(t *testing.T) {
 	args, env4, _ := serveFlags([]string{"inbox", "--accept-unverified"}, env, lookup)
 	if len(args) != 2 || env4("MASH_ACCEPT_UNVERIFIED") != "0" {
 		t.Fatal("only serve takes the flag")
+	}
+}
+
+// serve takes no argument but --accept-unverified (and the global options): a wrong command line is a usage error.
+func TestServeRefusesUnknownArguments(t *testing.T) {
+	for args, want := range map[string]string{"--x": "error: unknown option --x\n", "-q": "error: unknown option -q\n"} {
+		var out, errb bytes.Buffer
+		if code := run([]string{"serve", args}, func(string) string { return "" }, strings.NewReader(""), &out, &errb); code != 2 ||
+			!strings.HasPrefix(errb.String(), want) || out.Len() != 0 {
+			t.Errorf("serve %s: %d %q %q", args, code, out.String(), errb.String())
+		}
+	}
+	var out, errb bytes.Buffer
+	if code := run([]string{"serve", "stray"}, func(string) string { return "" }, strings.NewReader(""), &out, &errb); code != 2 ||
+		!strings.HasPrefix(errb.String(), "error: serve takes no argument stray") {
+		t.Errorf("serve stray: %d %q", code, errb.String())
 	}
 }

@@ -85,7 +85,9 @@ type Endpoint struct {
 	// leaseGone: this endpoint's own lease is lost (a failed refresh, or the watch saw another holder). From then on no
 	// message of any stream is delivered or acknowledged by it (mayAck, dropUnleased, dropHeld): JetStream redelivers
 	// it all to the new holder.
-	leaseGone atomic.Bool
+	// refusedStream is the identity of the inbox stream the refusal files are tied to (refuse.go); nil until bound.
+	refusedStream atomic.Pointer[string]
+	leaseGone     atomic.Bool
 	// loseOwn marks the own lease lost, as the watch or a failed refresh does (set by keepLease).
 	loseOwn func(error)
 	// live is the cache of the ack-time lease check (lease_fence.go).
