@@ -47,3 +47,24 @@ func TestGuideRunSelftest(t *testing.T) {
 		t.Fatalf("selftest: %v\n%s", err, out)
 	}
 }
+
+// The egress proxy of published mode (scripts/guide-run/egressproxy) has its own unit tests: the address vetting
+// (loopback, private, link-local, the tailnet's CGNAT range, ULA, multicast, rebinding answers) and the allowlist,
+// with no network. They run here too, so one `go test ./scripts/` covers the harness.
+func TestGuideRunEgressProxy(t *testing.T) {
+	goBin, err := exec.LookPath("go")
+	if err != nil {
+		t.Skip("go not found")
+	}
+	if out, err := exec.Command(goBin, "vet", "./guide-run/egressproxy").CombinedOutput(); err != nil {
+		t.Fatalf("go vet: %v\n%s", err, out)
+	}
+	if out, err := exec.Command(goBin, "test", "-count=1", "./guide-run/egressproxy").CombinedOutput(); err != nil {
+		t.Fatalf("egressproxy tests: %v\n%s", err, out)
+	}
+	if gofmt, err := exec.LookPath("gofmt"); err == nil {
+		if out, err := exec.Command(gofmt, "-l", "guide-run/egressproxy").CombinedOutput(); err != nil || len(out) > 0 {
+			t.Fatalf("gofmt -l: %v\n%s", err, out)
+		}
+	}
+}

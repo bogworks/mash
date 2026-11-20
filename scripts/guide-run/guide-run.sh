@@ -7,7 +7,10 @@
 #       build a rehearsal release folder from this checkout (static
 #       linux/amd64 mash and mashctl, the two scripts, SHA256SUMS)
 #   guide-run.sh --release-dir DIR [--version V] [--scratch DIR] [--report FILE]
-#       the run: one container, the guide's steps in order, asserts
+#       the rehearsal run: one container, the guide's steps in order, asserts
+#   guide-run.sh --published --version V [--only-install] [--scratch DIR] [--report FILE]
+#       the published run: the container downloads the release from GitHub
+#       through a host-side allowlist proxy (egressproxy), nothing else
 #   guide-run.sh fill RUN_DIR [--guide FILE]
 #       put the run's recorded outputs into the guide's blocks
 #   guide-run.sh selftest
@@ -18,7 +21,10 @@
 # image per run id, both removed by recorded name and id on exit; a non-root
 # user (tester) inside; no ports published; --network none; nothing aimed at
 # the LAN or the tailnet; more than 20 GB free before the run. Build time may
-# use the distro mirror and the pinned natscli download.
+# use the distro mirror and the pinned natscli download. Published mode adds
+# one thing: a UNIX socket to a host-side proxy that allows github.com and
+# objects.githubusercontent.com and release-assets.githubusercontent.com on port
+# 443 and nothing else.
 set -u
 
 if [ "${BASH_VERSINFO[0]}" -lt 4 ]; then
@@ -36,6 +42,8 @@ STEP_IDS=(install server endpoints status who send inbox read json-send json-rea
     json-inbox json-jq delete refused lifecycle)
 # Ids the guide has that this harness cannot record (a model is needed).
 MANUAL_IDS=(claude-code)
+# Steps this harness records that are not in the guide and are never filled.
+STRUCT_IDS=(egress claude-code-structure)
 
 BASE_IMAGE=${GUIDE_RUN_BASE:-debian:stable}
 NCV=${GUIDE_RUN_NATSCLI:-0.5.2}
@@ -49,6 +57,11 @@ RELEASE_FILES=(SHA256SUMS install.sh mash-local-nats-setup.sh mash-linux-amd64
 DEFAULT_VERSION=v0.0.0-rehearsal
 OWNER=acme
 CHOME=/home/tester
+GH_REPO=bogworks/mash
+GH_BASE=https://github.com/$GH_REPO/releases/download
+ALLOWLIST='github.com:443 objects.githubusercontent.com:443 release-assets.githubusercontent.com:443'
+PROXY_URL=http://127.0.0.1:3128
+EGRESS_CTR_DIR=/run/egress
 
 die() {
     echo "error: $*" >&2
@@ -56,7 +69,7 @@ die() {
 }
 
 usage() {
-    sed -n '2,15p' "$SELF" | sed 's/^# \{0,1\}//'
+    sed -n '2,18p' "$SELF" | sed 's/^# \{0,1\}//'
 }
 
 # ----------------------------------------------------------------------
@@ -243,6 +256,33 @@ selftest() {
     n=$(guide_ids "$guide" | wc -l)
     [ "$n" -gt 0 ] || st_bad "no ids found in the guide"
 
+    # the structural ids are the harness's own: never a guide block, never filled
+    n=0
+    for id in "${STRUCT_IDS[@]}"; do
+        if printf '%s\n' "${STEP_IDS[@]}" "${MANUAL_IDS[@]}" | grep -Fxq -- "$id"; then n=1; st_bad "structural id $id is also a fill id"; fi
+        if grep -Fq "output: $id " "$guide"; then n=1; st_bad "structural id $id has a block in the guide"; fi
+    done
+    [ "$n" = 0 ] && st_ok "the structural ids (${STRUCT_IDS[*]}) are not fill targets"
+    if printf '%s\n' "${STRUCT_IDS[@]}" | grep -Fxq claude-code-structure; then st_ok "the claude-code-structure step exists"; else st_bad "no claude-code-structure step"; fi
+    # the delete step types the address at a prompt; no --yes anywhere in the guide
+    if grep -Fq -e '--yes' "$guide"; then st_bad "the guide still mentions --yes"; else st_ok "the guide does not mention --yes (the person types the address)"; fi
+    if awk '/^step_delete\(\)/,/^}/' "$SELF" | grep -Fq -e '--yes'; then st_bad "the delete step still uses --yes"; else st_ok "the delete step does not use --yes"; fi
+    # the egress proxy: its source is there, gofmt-clean, and its own tests are run by scripts/guide_run_test.go
+    if [ -f "$HERE/egressproxy/main.go" ] && [ -f "$HERE/egressproxy/main_test.go" ]; then
+        st_ok "the egress proxy source and its test are in guide-run/egressproxy"
+    else
+        st_bad "guide-run/egressproxy/main.go or main_test.go is missing"
+    fi
+    if command -v gofmt >/dev/null 2>&1; then
+        if [ -z "$(gofmt -l "$HERE/egressproxy")" ]; then st_ok "egressproxy is gofmt-clean"; else st_bad "egressproxy is not gofmt-clean"; fi
+    fi
+    # published mode never gives the install step the file:// escape hatches
+    if awk '/^step_install_published\(\)/,/^}/' "$SELF" | grep -Eq 'MASH_RELEASE_BASE|MASH_INSTALL_ALLOW_FILE'; then
+        st_bad "the published install step uses MASH_RELEASE_BASE or MASH_INSTALL_ALLOW_FILE"
+    else
+        st_ok "the published install step uses neither MASH_RELEASE_BASE nor MASH_INSTALL_ALLOW_FILE"
+    fi
+
     # 2. fill on a fixture run folder
     local run=$tmp/run guidecopy=$tmp/guide.md
     mkdir -p "$run/out"
@@ -311,6 +351,14 @@ ok() { PASS=$((PASS + 1)); echo "ok: $*"; RESULTS+=("- ok: $*"); }
 bad() { FAIL=$((FAIL + 1)); echo "FAIL: $*"; RESULTS+=("- FAIL: $*"); }
 
 RELDIR=''
+MODE=rehearsal
+VERSION_SET=0
+ONLY_INSTALL=0
+PROXY_PID=''
+SOCAT_PID=''
+EGRESS_DIR=''
+EGRESS_SOCK=''
+EGRESS_LOG=''
 VERSION=$DEFAULT_VERSION
 SCRATCH=''
 REPORT=''
@@ -330,6 +378,9 @@ NATSHA=''
 DISK0=''
 STEP=''
 STEP_BAD=0
+RELEASE_MISSING=0
+EG1=''
+EG3=''
 LAST=''
 USE_LOCALBIN=0
 START=0
@@ -337,6 +388,16 @@ ABORT=0
 
 free_gb() { df -P -k "$1" | awk 'NR==2 {printf "%d", $4 / 1048576}'; }
 free_mb() { df -P -k "$1" | awk 'NR==2 {printf "%d", $4 / 1024}'; }
+
+# egress_summary: one line, counts and hosts from the proxy's log
+egress_summary() {
+    local a r h
+    [ -f "$EGRESS_LOG" ] || { echo "no log"; return; }
+    a=$(grep -c ' allowed ' "$EGRESS_LOG")
+    r=$(grep -c ' refused ' "$EGRESS_LOG")
+    h=$(awk '{print $2 ":" $3}' "$EGRESS_LOG" | sort | uniq -c | awk '{printf "%s%s x%s", sep, $2, $1; sep = ", "}')
+    echo "$a allowed, $r refused ($h)"
+}
 
 write_receipt() {
     local elapsed=$((SECONDS - START)) l
@@ -347,10 +408,22 @@ write_receipt() {
         echo "- date (UTC): $(date -u +%Y-%m-%dT%H:%M:%SZ)"
         echo "- harness: scripts/guide-run/guide-run.sh, sha256 $(sha256sum "$SELF" | awk '{print $1}')"
         echo "- guide: docs/guide/walkthrough.md, sha256 $(sha256sum "$GUIDE_DEFAULT" | awk '{print $1}')"
-        echo "- mode: rehearsal (a local release folder, file:// base); not the published release"
-        echo "- version: $VERSION"
-        echo "- release folder files (SHA256SUMS):"
-        if [ -f "${RELDIR:-/nonexistent}/SHA256SUMS" ]; then sed 's/^/    /' "$RELDIR/SHA256SUMS"; fi
+        if [ "$MODE" = published ]; then
+            echo "- mode=published"
+            [ "$ONLY_INSTALL" = 1 ] && echo "- --only-install: stops after the install step and the egress checks; not a full run"
+            echo "- version: $VERSION (downloaded by the container from $GH_BASE/$VERSION/, through the allowlist proxy)"
+            echo "- egress allowlist: $ALLOWLIST (exact names, no wildcard; only public unicast addresses, dialed by address)"
+            echo "- egress log summary: $(egress_summary)"
+            echo "- egress log: $EGRESS_LOG"
+            echo "- egress log lines (host and verdict only):"
+            if [ -f "$EGRESS_LOG" ]; then awk '{print "    " $2, $3}' "$EGRESS_LOG"; fi
+        else
+            echo "- mode=rehearsal (a local release folder, file:// base); not the published release"
+            echo "- version: $VERSION"
+            echo "- release folder files (SHA256SUMS):"
+            if [ -f "${RELDIR:-/nonexistent}/SHA256SUMS" ]; then sed 's/^/    /' "$RELDIR/SHA256SUMS"; fi
+        fi
+        echo "- Claude Code step: structural check only, no model API"
         echo "- natscli v$NCV linux-amd64 zip, sha256 $NATSHA (pinned: $NATPIN)"
         echo "- podman: $(podman --version 2>/dev/null)"
         echo "- wall time: ${elapsed} s"
@@ -363,6 +436,9 @@ write_receipt() {
         echo "## Container"
         echo
         echo "- name $CNAME; user tester; --network none; no ports published; no-new-privileges; cap-drop all"
+        if [ "$MODE" = published ]; then
+            echo "- egress: only the proxy's UNIX socket, bind-mounted read-only at $EGRESS_CTR_DIR; socat in the container listens on 127.0.0.1:3128 as tester; https_proxy is set only on the download commands"
+        fi
         echo
         echo "## Steps"
         echo
@@ -381,22 +457,42 @@ write_receipt() {
         echo
         echo "## What this does not prove"
         echo
-        echo "- The Claude Code steps (6): no model here. Not filled."
+        echo "- The Claude Code steps (7): structural check only, no model API. Not filled."
         echo "- A real macOS machine."
-        echo "- The published release: the binaries are built from this checkout and installed from a local folder."
+        if [ "$MODE" = published ]; then
+            echo "- The attestation: the container has no gh, so install.sh says the checksums come from the same download."
+            echo "- The plugin tree: not in the release assets, so it is checked in rehearsal mode."
+        else
+            echo "- The published release: the binaries are built from this checkout and installed from a local folder."
+        fi
     } >"$REPORT" 2>/dev/null
 }
 
 cleanup() {
     local left=0
     trap - EXIT INT TERM
+    # the socat of this run, by its recorded pid inside the container, then the container
+    if [ "$CONTAINER_MADE" = 1 ] && [ -n "$SOCAT_PID" ]; then
+        podman exec --user tester "$CNAME" kill "$SOCAT_PID" >/dev/null 2>&1
+    fi
     if [ "$CONTAINER_MADE" = 1 ]; then podman rm -f "$CNAME" >/dev/null 2>&1; fi
+    # the proxy of this run, by its recorded pid, and its socket by exact path
+    if [ -n "$PROXY_PID" ]; then
+        kill "$PROXY_PID" >/dev/null 2>&1
+        wait "$PROXY_PID" >/dev/null 2>&1
+        if kill -0 "$PROXY_PID" 2>/dev/null; then left=$((left + 1)); fi
+    fi
+    if [ -n "$EGRESS_SOCK" ]; then
+        rm -f -- "$EGRESS_SOCK"
+        if [ -e "$EGRESS_SOCK" ]; then left=$((left + 1)); fi
+        rmdir -- "$EGRESS_DIR" 2>/dev/null
+    fi
     if [ -n "$IMG_ID" ]; then podman rmi -f "$IMG_ID" >/dev/null 2>&1; fi
     case $CTX in "$SCRATCH"/*/build) rm -rf -- "$CTX" ;; esac
     if [ "$CONTAINER_MADE" = 1 ] && podman container exists "$CNAME" 2>/dev/null; then left=$((left + 1)); fi
     if [ -n "$IMG_ID" ] && podman image exists "$IMG_ID" 2>/dev/null; then left=$((left + 1)); fi
     if [ "$left" = 0 ]; then
-        CLEANED="done: container $CNAME removed by name, image ${IMG_ID:-none} by id, build dir removed; none left"
+        CLEANED="done: container $CNAME removed by name, image ${IMG_ID:-none} by id, build dir removed${PROXY_PID:+, proxy pid $PROXY_PID stopped, socket removed}; none left"
     else
         CLEANED="INCOMPLETE: $left of this run's objects still exist"
     fi
@@ -472,7 +568,32 @@ wait_inbox() {
 
 REL=$CHOME/release
 
+# The published route, as docs/install.md and the setup skill give it: curl the
+# files from the release, check install.sh against SHA256SUMS, run install.sh
+# with neither MASH_RELEASE_BASE nor MASH_INSTALL_ALLOW_FILE. https_proxy is set
+# on the commands that download, and nowhere else.
+step_install_published() {
+    local px="https_proxy=$PROXY_URL"
+    step_begin install
+    if ! step_cmd zero "$REL" "$px curl -fsSLO $GH_BASE/$VERSION/SHA256SUMS"; then
+        RELEASE_MISSING=1
+        step_end
+        return 1
+    fi
+    step_cmd zero "$REL" "$px curl -fsSLO $GH_BASE/$VERSION/install.sh" || { step_end; return 1; }
+    step_cmd zero "$REL" "grep ' install.sh\$' SHA256SUMS | sha256sum -c -" || { step_end; return 1; }
+    step_cmd zero "$REL" "MASH_VERSION=$VERSION $px bash install.sh" || { step_end; return 1; }
+    USE_LOCALBIN=1
+    step_cmd zero "$CHOME" "mash version"
+    step_cmd zero "$CHOME" "mashctl version"
+    step_end
+}
+
 step_install() {
+    if [ "$MODE" = published ]; then
+        step_install_published
+        return
+    fi
     step_begin install
     step_cmd zero "$REL" "grep ' install.sh\$' SHA256SUMS | sha256sum -c -"
     step_cmd zero "$REL" "MASH_VERSION=$VERSION MASH_RELEASE_BASE=file://$REL MASH_INSTALL_ALLOW_FILE=1 bash install.sh"
@@ -485,6 +606,10 @@ step_install() {
 step_server() {
     local line
     step_begin server
+    if [ "$MODE" = published ]; then
+        step_cmd zero "$REL" "https_proxy=$PROXY_URL curl -fsSLO $GH_BASE/$VERSION/mash-local-nats-setup.sh" ||
+            { step_end; return 1; }
+    fi
     step_cmd zero "$REL" "grep ' mash-local-nats-setup.sh\$' SHA256SUMS | sha256sum -c -"
     step_cmd zero "$REL" "bash mash-local-nats-setup.sh --owner $OWNER"
     # the line the script printed last, taken from its output, never typed
@@ -571,9 +696,9 @@ step_json_jq() {
 
 step_delete() {
     step_begin delete
-    # the spec (spec/mashctl.json, endpoint delete) offers --yes in place of
-    # typing the address on a terminal
-    step_cmd zero "$CHOME" "mashctl endpoint delete $OWNER.demo.bob --yes"
+    # as the guide shows: a terminal, and the person types the address to
+    # confirm. podman exec -t, and the pty helper types it at the prompt.
+    EXEC_EXTRA=-t step_cmd zero "$CHOME" "python3 /usr/local/lib/guide-run-ptyhelper.py '$OWNER.demo.bob' mashctl endpoint delete $OWNER.demo.bob"
     step_end
 }
 
@@ -593,10 +718,51 @@ step_lifecycle() {
     step_end
 }
 
+# egress: negative checks inside the container (published mode only)
+step_egress() {
+    local px="https_proxy=$PROXY_URL"
+    step_begin egress
+    # 1. a host that is not on the allowlist is refused by the proxy (403)
+    step_cmd nonzero "$CHOME" "$px curl -sS --max-time 10 https://example.com"
+    EG1=$(cat "$LAST")
+    # 2. no proxy: no network at all
+    step_cmd nonzero "$CHOME" "curl -sS --noproxy '*' --max-time 5 https://github.com"
+    # 3. a release that does not exist: the 404 text, a clean failure
+    step_cmd nonzero "$CHOME" "$px curl -fsS --max-time 20 $GH_BASE/v0.0.0-doesnotexist/SHA256SUMS"
+    EG3=$(cat "$LAST")
+    step_end
+}
+
+# claude-code-structure: not a model run. claude --version only if there is a
+# claude; the plugin tree checked statically (rehearsal mode: this checkout's).
+step_claude_structure() {
+    local t=$CHOME/plugin-tree/plugin
+    step_begin claude-code-structure
+    step_cmd zero "$CHOME" 'if command -v claude >/dev/null 2>&1; then claude --version; else echo "not run: no Claude Code in the container"; fi'
+    if [ "$MODE" = published ]; then
+        echo "not run: plugin tree is checked in rehearsal mode" >>"$OUT/$STEP.txt"
+        step_end
+        return
+    fi
+    step_cmd zero "$CHOME" "set -e
+for f in .claude-plugin/plugin.json .mcp.json hooks/hooks.json; do
+    test -f $t/\$f
+    jq -e . $t/\$f >/dev/null
+    echo \"ok: plugin/\$f exists and parses as JSON\"
+done
+jq -e '.mcpServers | length == 1' $t/.mcp.json >/dev/null
+echo \"ok: exactly one MCP server: \$(jq -r '.mcpServers | keys[0]' $t/.mcp.json)\"
+jq -e '(.hooks | keys | sort) == [\"PostToolUse\",\"SessionStart\",\"UserPromptSubmit\"]' $t/hooks/hooks.json >/dev/null
+echo \"ok: exactly the three hooks: \$(jq -r '.hooks | keys | join(\", \")' $t/hooks/hooks.json)\""
+    step_end
+}
+
 # asserts: hard facts, from the recorded outputs
 run_asserts() {
     local f n
     echo "== asserts"
+    if [ "$MODE" = published ]; then run_egress_asserts; fi
+    if [ "$ONLY_INSTALL" = 1 ]; then run_install_asserts; return; fi
     f=$OUT/read.txt
     # the guide's form is a "trust: verified" line; the 0.5.x form is "[verified]" in the header
     if [ -f "$f" ] && grep -Eq '^trust: +verified$|^--- #2 from [^ ]+ \[verified\]' "$f"; then ok "mail 2 read as alice: trust verified"; else bad "mail 2 read as alice: not shown as trust verified"; fi
@@ -615,14 +781,119 @@ run_asserts() {
     else
         bad "the call after delete did not exit non-zero"
     fi
-    f=$OUT/install.txt
+    run_install_asserts
+    f=$OUT/delete.txt
+    if [ -f "$f" ] && grep -Eq 'Type the address to confirm: *'"$OWNER"'\.demo\.bob' "$f" && grep -Fq "Deleted endpoint $OWNER.demo.bob" "$f"; then
+        ok "delete: the address was typed at the prompt on a terminal and the endpoint was deleted"
+    else
+        bad "delete: no typed confirmation and deletion in the screen output"
+    fi
+    f=$OUT/claude-code-structure.txt
+    if [ -f "$OUT/claude-code-structure.ok" ] && grep -Fq 'not run: no Claude Code in the container' "$f"; then
+        ok "claude-code-structure: structural check only, no model API"
+    else
+        bad "claude-code-structure did not pass"
+    fi
+    run_secret_assert
+}
+
+run_install_asserts() {
+    local f=$OUT/install.txt
     if [ -f "$f" ] && grep -Eq "^mash v?${VERSION#v}( |\$)" "$f" && grep -Eq "^mashctl v?${VERSION#v}( |\$)" "$f"; then
         ok "mash version and mashctl version both say ${VERSION#v}"
     else
         bad "mash version and mashctl version do not both say ${VERSION#v}"
     fi
+    [ "$ONLY_INSTALL" = 1 ] && run_secret_assert
+}
+
+run_egress_asserts() {
+    [ -f "$OUT/egress.rc" ] || return 0
+    if grep -Fq 'response 403' <<<"$EG1" || grep -Fq ' 403' <<<"$EG1"; then
+        ok "egress: https://example.com through the proxy is refused (403)"
+    else
+        bad "egress: https://example.com was not refused with 403"
+    fi
+    if [ "$(sed -n 2p "$OUT/egress.rc")" != 0 ] && [ -n "$(sed -n 2p "$OUT/egress.rc")" ]; then
+        ok "egress: a direct curl to github.com with no proxy fails (no network)"
+    else
+        bad "egress: a direct curl to github.com did not fail"
+    fi
+    if grep -Fq '404' <<<"$EG3"; then
+        ok "egress: a release that does not exist fails with the 404 text"
+    else
+        bad "egress: the nonexistent release did not fail with 404"
+    fi
+    if grep -Eq ' host=example\.com refused ' "$EGRESS_LOG" 2>/dev/null; then
+        ok "egress.log records the refused example.com request"
+    else
+        bad "egress.log has no refused example.com line"
+    fi
+    if grep -Eq ' host=github\.com allowed ' "$EGRESS_LOG" 2>/dev/null; then
+        ok "egress.log records allowed github.com"
+    else
+        bad "egress.log has no allowed github.com line"
+    fi
+    if grep -Evq ' host=(github\.com|objects\.githubusercontent\.com|release-assets\.githubusercontent\.com|example\.com) ' "$EGRESS_LOG" 2>/dev/null; then
+        bad "egress.log has a host other than the allowlist and the example.com probe"
+    else
+        ok "egress.log has no host outside the allowlist and the example.com probe"
+    fi
+}
+
+run_secret_assert() {
     # no seed or credential content in any captured output
     if scan_secrets "$OUT"/*.txt; then ok "no seed, credential or JWT content in any captured output"; else bad "secret-shaped content in a captured output (not filling)"; fi
+}
+
+# start_proxy: build the egress proxy with the host's go into the run folder,
+# start it in the background (pid recorded), wait for its socket
+start_proxy() {
+    local i=0
+    # a UNIX socket path is limited to about 107 bytes, which a run folder under
+    # a long scratch path exceeds: the socket's own folder is short (0700)
+    EGRESS_DIR=${XDG_RUNTIME_DIR:-/tmp}/gr-$RUN
+    EGRESS_SOCK=$EGRESS_DIR/egress.sock
+    EGRESS_LOG=$RUN_DIR/egress.log
+    mkdir -p "$EGRESS_DIR" && chmod 700 "$EGRESS_DIR" || return 1
+    echo "== building the egress proxy"
+    (cd "$ROOT" && CGO_ENABLED=0 go build -trimpath -o "$RUN_DIR/egressproxy" ./scripts/guide-run/egressproxy) \
+        >"$RUN_DIR/egressproxy-build.log" 2>&1 || {
+        bad "the egress proxy did not build; see $RUN_DIR/egressproxy-build.log"
+        return 1
+    }
+    : >"$EGRESS_LOG"
+    "$RUN_DIR/egressproxy" -sock "$EGRESS_SOCK" -log "$EGRESS_LOG" >"$RUN_DIR/egressproxy.stderr" 2>&1 </dev/null &
+    PROXY_PID=$!
+    while [ ! -S "$EGRESS_SOCK" ] && [ "$i" -lt 50 ]; do
+        sleep 0.1
+        i=$((i + 1))
+    done
+    if [ ! -S "$EGRESS_SOCK" ]; then
+        bad "the egress proxy did not start; see $RUN_DIR/egressproxy.stderr"
+        return 1
+    fi
+    echo "egress proxy pid $PROXY_PID on $EGRESS_SOCK (mode $(stat -c %a "$EGRESS_SOCK")), allowing $ALLOWLIST"
+}
+
+# start_socat: inside the container, as tester, 127.0.0.1:3128 to the proxy's
+# socket; the pid is recorded and killed by pid at the end
+start_socat() {
+    local i=0 comm
+    SOCAT_PID=$(cx "$CHOME" "setsid socat TCP-LISTEN:3128,bind=127.0.0.1,fork,reuseaddr UNIX-CONNECT:$EGRESS_CTR_DIR/egress.sock </dev/null >/dev/null 2>&1 & echo \$!") ||
+        { bad "socat did not start in the container"; SOCAT_PID=''; return 1; }
+    case $SOCAT_PID in '' | *[!0-9]*) bad "socat gave no pid: $SOCAT_PID"; SOCAT_PID=''; return 1 ;; esac
+    while [ "$i" -lt 20 ]; do
+        comm=$(cx "$CHOME" "cat /proc/$SOCAT_PID/comm" 2>/dev/null </dev/null)
+        if [ "$comm" = socat ] && cx "$CHOME" "exec 3<>/dev/tcp/127.0.0.1/3128" >/dev/null 2>&1 </dev/null; then
+            echo "socat pid $SOCAT_PID in $CNAME, 127.0.0.1:3128 to $EGRESS_CTR_DIR/egress.sock"
+            return 0
+        fi
+        sleep 0.25
+        i=$((i + 1))
+    done
+    bad "socat is not listening on 127.0.0.1:3128 in the container"
+    return 1
 }
 
 do_run() {
@@ -631,10 +902,20 @@ do_run() {
         command -v "$t" >/dev/null 2>&1 || die "needs $t"
     done
     [ "$(id -u)" -ne 0 ] || die "run as an ordinary user (rootless podman)"
-    [ -n "$RELDIR" ] || die "needs --release-dir DIR (or --make-release-dir DIR to build one)"
     [ -n "$NATPIN" ] || die "natscli v$NCV has no pinned sha256; set GUIDE_RUN_NATSCLI_SHA256"
-    RELDIR=$(cd "$RELDIR" 2>/dev/null && pwd -P) || die "release folder does not exist"
-    check_release_dir "$RELDIR"
+    if [ "$MODE" = published ]; then
+        # the latest release is not resolved here: the version is required, so
+        # a run names exactly what it follows
+        [ "$VERSION_SET" = 1 ] || die "--published needs --version vX.Y.Z"
+        [ -z "$RELDIR" ] || die "--published reads the release from GitHub: do not give --release-dir"
+        case $VERSION in v[0-9]*) ;; *) die "--version $VERSION is not a version such as v0.5.6" ;; esac
+        command -v go >/dev/null 2>&1 || die "--published needs go on the host to build the egress proxy"
+    else
+        [ "$ONLY_INSTALL" = 0 ] || die "--only-install belongs to --published"
+        [ -n "$RELDIR" ] || die "needs --release-dir DIR (or --make-release-dir DIR to build one), or --published --version V"
+        RELDIR=$(cd "$RELDIR" 2>/dev/null && pwd -P) || die "release folder does not exist"
+        check_release_dir "$RELDIR"
+    fi
 
     RUN=$(date +%m%d%H%M%S)-$$
     if [ -z "$SCRATCH" ]; then
@@ -665,7 +946,7 @@ do_run() {
     done
     DISK0=$(free_mb "$SCRATCH")
 
-    echo "== run $RUN: release $RELDIR ($VERSION); run folder $RUN_DIR"
+    echo "== run $RUN: ${RELDIR:-$GH_BASE} ($VERSION), mode $MODE; run folder $RUN_DIR"
     echo "== downloading natscli v$NCV"
     curl -fsSL -o "$CTX/nats.zip" \
         "https://github.com/nats-io/natscli/releases/download/v$NCV/nats-$NCV-linux-amd64.zip" ||
@@ -679,9 +960,10 @@ do_run() {
 
     cat >"$CTX/ptyhelper.py" <<'PYEOF'
 # ptyhelper.py RESP CMD...: run CMD on a pseudo-terminal. When the output ends
-# with a prompt ("type the folder ...: ") send RESP and a newline. Prints the
+# with a prompt ("type the folder ...: " or "Type the address to confirm: ") send
+# RESP and a newline, as a person typing it would. Prints the
 # terminal output and exits with the real exit status of CMD.
-import os, pty, select, signal, sys, time
+import os, pty, re, select, signal, sys, time
 resp, cmd = sys.argv[1], sys.argv[2:]
 pid, fd = pty.fork()
 if pid == 0:
@@ -703,7 +985,7 @@ while time.time() < end:
         timed_out = False
         break
     out += d
-    if not sent and out.endswith(b': ') and b'type the folder' in out.lower():
+    if not sent and out.endswith(b': ') and re.search(rb'type the (folder|address)', out.lower()):
         sent = True
         os.write(fd, resp.encode() + b'\n')
 if timed_out:
@@ -717,7 +999,7 @@ PYEOF
 ARG BASE
 FROM ${BASE}
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    nats-server openssl iproute2 procps curl unzip ca-certificates util-linux python3 jq \
+    nats-server openssl iproute2 procps curl unzip ca-certificates util-linux python3 jq socat \
     && rm -rf /var/lib/apt/lists/*
 COPY nats.zip /tmp/nats.zip
 RUN unzip -j -o /tmp/nats.zip '*/nats' -d /usr/local/bin && chmod 755 /usr/local/bin/nats && rm /tmp/nats.zip
@@ -739,29 +1021,61 @@ CF
     IMGLINES="- $BASE_IMAGE: digest ${bdig:-?} (${brd:-no repo digest}); built image $IMG id $IMG_ID"
     echo "$IMGLINES"
 
-    # stage the release folder world-readable, then copy it in
-    mkdir -p "$CTX/release"
-    for f in "${RELEASE_FILES[@]}"; do cp -- "$RELDIR/$f" "$CTX/release/$f"; done
-    chmod 755 "$CTX/release" "$CTX/release"/*
+    local runflags=()
+    if [ "$MODE" = published ]; then
+        start_proxy || exit 1
+        # the host user is the container's tester (uid 1000), so the 0600 socket
+        # is reachable by socat running as tester
+        runflags=("--userns=keep-id:uid=1000,gid=1000" -v "$EGRESS_DIR:$EGRESS_CTR_DIR:ro")
+    else
+        # stage the release folder world-readable, then copy it in
+        mkdir -p "$CTX/release"
+        for f in "${RELEASE_FILES[@]}"; do cp -- "$RELDIR/$f" "$CTX/release/$f"; done
+        chmod 755 "$CTX/release" "$CTX/release"/*
+        # and this checkout's plugin tree, three files, for the structural check
+        mkdir -p "$CTX/plugin-tree/plugin/.claude-plugin" "$CTX/plugin-tree/plugin/hooks"
+        cp -- "$ROOT/plugin/.claude-plugin/plugin.json" "$CTX/plugin-tree/plugin/.claude-plugin/plugin.json"
+        cp -- "$ROOT/plugin/.mcp.json" "$CTX/plugin-tree/plugin/.mcp.json"
+        cp -- "$ROOT/plugin/hooks/hooks.json" "$CTX/plugin-tree/plugin/hooks/hooks.json"
+        chmod -R a+rX "$CTX/plugin-tree"
+    fi
 
     echo "== starting $CNAME"
     CONTAINER_MADE=1
     podman run -d --name "$CNAME" --user tester --network none \
         --security-opt no-new-privileges --cap-drop=all --pids-limit 2048 \
-        -e "HOME=$CHOME" "$IMG" sleep 7200 >/dev/null || {
+        "${runflags[@]}" -e "HOME=$CHOME" "$IMG" sleep 7200 >/dev/null || {
         bad "the container did not start"
         exit 1
     }
-    podman cp "$CTX/release" "$CNAME:$REL" || {
-        bad "podman cp of the release folder failed"
-        exit 1
-    }
-    cx "$CHOME" "ls -l release" >"$RUN_DIR/release-listing.txt" 2>&1
+    if [ "$MODE" = published ]; then
+        cx "$CHOME" "mkdir -p release" || { bad "cannot make the release folder in the container"; exit 1; }
+        start_socat || exit 1
+    else
+        podman cp "$CTX/release" "$CNAME:$REL" || {
+            bad "podman cp of the release folder failed"
+            exit 1
+        }
+        podman cp "$CTX/plugin-tree" "$CNAME:$CHOME/plugin-tree" || {
+            bad "podman cp of the plugin tree failed"
+            exit 1
+        }
+        cx "$CHOME" "ls -l release" >"$RUN_DIR/release-listing.txt" 2>&1
+    fi
 
     SETUP_DIR=''
     step_install
     [ -f "$OUT/install.ok" ] || ABORT=1
+    if [ "$MODE" = published ] && [ "$RELEASE_MISSING" = 0 ]; then
+        # the allowlist's negative checks, and the release that does not exist
+        step_egress
+    fi
+    if [ "$ABORT" = 0 ] && [ "$ONLY_INSTALL" = 1 ]; then
+        echo "== --only-install: stopping after the install step"
+        ABORT=2
+    fi
     if [ "$ABORT" = 0 ]; then
+        step_claude_structure
         step_server
         [ -f "$OUT/server.ok" ] || ABORT=1
     fi
@@ -782,12 +1096,16 @@ CF
         step_delete
         step_refused
         step_lifecycle
-    else
+    elif [ "$ABORT" = 1 ]; then
         bad "the run stopped after a step that everything else needs"
     fi
-    run_asserts
+    if [ "$RELEASE_MISSING" = 1 ]; then
+        echo "== the release $VERSION was not found: nothing else was run"
+    else
+        run_asserts
+    fi
     echo "== totals: ok=$PASS FAIL=$FAIL ($((SECONDS - START)) s)"
-    if [ "$FAIL" = 0 ] && [ "$PASS" -gt 0 ]; then
+    if [ "$FAIL" = 0 ] && [ "$PASS" -gt 0 ] && [ "$ONLY_INSTALL" = 0 ]; then
         : >"$RUN_DIR/assert.ok"
         return 0
     fi
@@ -805,7 +1123,9 @@ while [ $# -gt 0 ]; do
     case $1 in
     --release-dir) RELDIR=${2:?--release-dir needs a folder}; shift 2 ;;
     --make-release-dir) MAKE_DIR=${2:?--make-release-dir needs a folder}; shift 2 ;;
-    --version) VERSION=${2:?--version needs a value}; shift 2 ;;
+    --version) VERSION=${2:?--version needs a value}; VERSION_SET=1; shift 2 ;;
+    --published) MODE=published; shift ;;
+    --only-install) ONLY_INSTALL=1; shift ;;
     --scratch) SCRATCH=${2:?--scratch needs a folder}; shift 2 ;;
     --report) REPORT=${2:?--report needs a file}; shift 2 ;;
     --guide) FILL_GUIDE=${2:?--guide needs a file}; shift 2 ;;
