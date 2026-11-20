@@ -198,7 +198,7 @@ func TestRetireLeavesAReplacedRecord(t *testing.T) {
 func TestRetireServerFailureChangesNothing(t *testing.T) {
 	h := newFleetEnv(t)
 	h.provisionDeclared("b")
-	h.env["MASH_URL"] = "nats://127.0.0.1:1" // nothing listens
+	h.env["MASH_SERVER"] = "nats://127.0.0.1:1" // nothing listens
 	out, errb, code := h.run("endpoint", "delete", "o.g.b", "--delete-creds")
 	if code != 6 || strings.Contains(out, "deleted") {
 		t.Fatalf("%d %q %q", code, out, errb)

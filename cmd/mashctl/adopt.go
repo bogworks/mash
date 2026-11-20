@@ -139,7 +139,7 @@ func runAdopt(args []string, env func(string) string, lookup config.Lookup, stdo
 		owner = cfg.Owner
 	}
 	if owner == "" {
-		return fail("no owner: pass --owner O (or set \"owner\" in config.json or MASH_OWNER)")
+		return fail("no owner: pass --owner O (or set MASH_ENDPOINT)")
 	}
 	if !config.ValidName(owner) {
 		return fail("owner %q is not a valid name: use lower-case letters, digits and single hyphens, starting with a letter, up to 48 characters", owner)
@@ -223,7 +223,7 @@ func runAdopt(args []string, env func(string) string, lookup config.Lookup, stdo
 	nc, err := nats.Connect(o.server, append(append(natsauth.TLSOptions(cfg.TLSCA, cfg.TLSCert, cfg.TLSKey), tlsReq...),
 		natsauth.UserCredentialBytes(st.sysCredsRaw), nats.Name("mashctl-adopt"), nats.Timeout(connectTimeout), nats.MaxReconnects(0))...)
 	if err != nil {
-		return fail("connect %s with the system creds: %v (a refused connection can mean the server is unreachable or a TLS problem: check the URL, the port and the tls_ca, tls_cert and tls_key settings; nothing was changed)", o.server, natsauth.TLSHint(err))
+		return fail("connect %s with the system creds: %v (a refused connection can mean the server is unreachable or a TLS problem: check the URL, the port and the ca, tls_cert and tls_key settings; nothing was changed)", o.server, natsauth.TLSHint(err))
 	}
 	defer nc.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), applyDeadline)
@@ -402,7 +402,7 @@ func runAdopt(args []string, env func(string) string, lookup config.Lookup, stdo
 		step("minted the mashadmin user and wrote %s (0600)", st.adminDst)
 	}
 
-	settings := map[string]string{"url": o.server, "owner": owner}
+	settings := map[string]string{"servers": o.server}
 	if adminPath != "" {
 		settings["admin_creds"] = adminPath
 	}
@@ -410,7 +410,7 @@ func runAdopt(args []string, env func(string) string, lookup config.Lookup, stdo
 		settings["insecure_plaintext"] = "true"
 	}
 	if cfg.TLSCA != "" {
-		settings["tls_ca"] = cfg.TLSCA
+		settings["ca"] = cfg.TLSCA
 	}
 	if cfg.TLSCert != "" && cfg.TLSKey != "" {
 		settings["tls_cert"], settings["tls_key"] = cfg.TLSCert, cfg.TLSKey
@@ -467,7 +467,7 @@ func already(have bool) string {
 
 func settingsText(m map[string]string) string {
 	var parts []string
-	for _, k := range []string{"url", "owner", "admin_creds", "insecure_plaintext", "tls_ca", "tls_cert", "tls_key"} {
+	for _, k := range []string{"servers", "admin_creds", "insecure_plaintext", "ca", "tls_cert", "tls_key"} {
 		if v, ok := m[k]; ok {
 			parts = append(parts, fmt.Sprintf("%q: %s", k, jsonValue(k, v)))
 		}
@@ -479,7 +479,7 @@ func configJSON(m map[string]string) []byte {
 	var b bytes.Buffer
 	b.WriteString("{\n")
 	var parts []string
-	for _, k := range []string{"url", "owner", "admin_creds", "insecure_plaintext", "tls_ca", "tls_cert", "tls_key"} {
+	for _, k := range []string{"servers", "admin_creds", "insecure_plaintext", "ca", "tls_cert", "tls_key"} {
 		if v, ok := m[k]; ok {
 			parts = append(parts, fmt.Sprintf("  %q: %s", k, jsonValue(k, v)))
 		}
@@ -704,8 +704,11 @@ func ensureDir(d string) error {
 
 // jsonValue is v as a config.json value: insecure_plaintext is a boolean, everything else a string.
 func jsonValue(key, v string) string {
-	if key == "insecure_plaintext" {
+	switch key {
+	case "insecure_plaintext":
 		return v
+	case "servers":
+		return "[" + strconv.Quote(v) + "]"
 	}
 	return strconv.Quote(v)
 }

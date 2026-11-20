@@ -370,8 +370,8 @@ func TestPodmanFreeOctetAvoidsExistingNetworks(t *testing.T) {
 
 func TestPodmanExecAndSpawnArgs(t *testing.T) {
 	linuxOnly(t)
-	a := execArgs("c1", []string{"/bin/mash", "status"}, []string{"MASH_URL=tls://10.89.1.11:14222", "HOME=/node"}, false)
-	want := "podman exec --workdir /node -e MASH_URL=tls://10.89.1.11:14222 -e HOME=/node c1 /bin/mash status"
+	a := execArgs("c1", []string{"/bin/mash", "status"}, []string{"MASH_SERVER=tls://10.89.1.11:14222", "HOME=/node"}, false)
+	want := "podman exec --workdir /node -e MASH_SERVER=tls://10.89.1.11:14222 -e HOME=/node c1 /bin/mash status"
 	if strings.Join(a, " ") != want {
 		t.Fatalf("%v", a)
 	}

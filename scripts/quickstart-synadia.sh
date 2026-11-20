@@ -10,7 +10,7 @@
 #   1. finds your team, system and account, and checks the free-tier stream limit
 #      (2 shared streams + 1 per endpoint must fit); after `mash admin init` it also counts the
 #      endpoints the mash directory already holds and stops if the account cannot take the plan;
-#   2. creates ONE temporary admin NATS user, writes <config dir>/config.json (url, owner) and
+#   2. creates ONE temporary admin NATS user, writes <config dir>/config.json (servers) and
 #      runs `mash admin init` with the admin creds, then (if the plan fits) creates, for each
 #      endpoint, a NATS user named by the endpoint's address, OWNER.GROUP.INSTANCE (--endpoint gives
 #      the instance), with the permissions `mash admin permissions <address>` prints (creds go
@@ -37,7 +37,7 @@
 #          [--dry-run] [--mash PATH] [--config-dir DIR] [--force] [--token-stdin] [--no-test]
 #   --group is required: an endpoint's group has no default. Owner, group and each instance (--endpoint) are
 #   1-32 lower-case letters, digits and single hyphens, starting with a letter. A session as an endpoint needs
-#   MASH_OWNER (or the owner in config.json), MASH_GROUP and MASH_NAME (the instance).
+#   MASH_ENDPOINT, the address owner.group.instance (or the one installed endpoint, when only one creds file is installed).
 #   --config-dir must be an absolute path; mash is run with MASH_CONFIG_DIR set to it, so any directory works. The default is
 #   $MASH_CONFIG_DIR, else $XDG_CONFIG_HOME/mash (when XDG_CONFIG_HOME is absolute and that holds a config.json, or
 #   ~/.config/mash holds none), else ~/.config/mash.
@@ -120,11 +120,13 @@ case "$CONFIG_DIR" in /*) ;; *) die "the config directory '$CONFIG_DIR' must be 
 CONFIG="$CONFIG_DIR/config.json"
 
 # mash reads these in every later session and they beat config.json: do not let them skew this run.
-for v in MASH_URL MASH_OWNER MASH_GROUP MASH_CREDS MASH_NAME MASH_ADMIN_CREDS MASH_LAUNCH_TOKEN; do
+for v in MASH_SERVER MASH_ENDPOINT MASH_CREDS MASH_ADMIN_CREDS MASH_LAUNCH_TOKEN; do
   if [ -n "${!v:-}" ]; then say "note: ignoring $v from the environment for this run (set, it also overrides config.json in later sessions)"; fi
   unset "$v"
 done
-mash() { MASH_CONFIG_DIR="$CONFIG_DIR" MASH_GROUP="$GROUP" "$MASH" "$@"; }
+# Several creds files are installed in the config directory, so the endpoint is always named: by default the first one
+# (the admin commands need only its owner part).
+mash() { MASH_CONFIG_DIR="$CONFIG_DIR" MASH_ENDPOINT="${MASH_ENDPOINT:-$OWNER.$GROUP.${ENDPOINTS[0]}}" "$MASH" "$@"; }
 
 # ---- token (never argv, never stored, never echoed) -------------------------------------------
 TOKEN="${SYNADIA_API_TOKEN:-}"
@@ -282,10 +284,8 @@ if [ -e "$CONFIG" ]; then
   jq -e 'type == "object"' "$CONFIG" >/dev/null 2>&1 || die "$CONFIG is not a JSON object; fix it first"
   [ "$(jq -r '.creds // "" | tostring' "$CONFIG")" = "" ] || die "$CONFIG has a \"creds\" key, which would beat the new <address>.creds files; remove it"
   if [ "$FORCE" -ne 1 ]; then
-    for kv in "url:$NATS_URL" "owner:$OWNER"; do
-      cur=$(jq -r --arg k "${kv%%:*}" '.[$k] // "" | tostring' "$CONFIG")
-      [ -z "$cur" ] || [ "$cur" = "${kv#*:}" ] || die "$CONFIG already has ${kv%%:*} '$cur', not '${kv#*:}'; use --force to overwrite it"
-    done
+    cur=$(jq -r '.servers // "" | if type == "array" then join(",") else tostring end' "$CONFIG")
+    [ -z "$cur" ] || [ "$cur" = "$NATS_URL" ] || die "$CONFIG already has servers '$cur', not '$NATS_URL'; use --force to overwrite it"
   fi
 fi
 
@@ -302,7 +302,7 @@ if [ "$DRY" -eq 1 ]; then
   say "Dry run: nothing is created. A real run would:"
   say "  - create a temporary admin user, and delete it at the end"
   for n in "${ENDPOINTS[@]}"; do say "  - create NATS user '$(addr "$n")' (creds in $CONFIG_DIR/$(addr "$n").creds), then provision it"; done
-  say "  - write $CONFIG (url $NATS_URL, owner $OWNER) and run 'mash admin init'"
+  say "  - write $CONFIG (servers $NATS_URL) and run 'mash admin init'"
   [ "${#ENDPOINTS[@]}" -lt 2 ] || [ "$NO_TEST" -eq 1 ] || say "  - send a test message from $(addr "${ENDPOINTS[0]}") to $(addr "${ENDPOINTS[1]}")"
   exit 0
 fi
@@ -357,14 +357,14 @@ say "Created the temporary admin user $admin_name (deleted before this script en
 
 mkdir -p "$CONFIG_DIR"
 chmod 700 "$CONFIG_DIR" 2>/dev/null || true
-# ---- config.json (before the admin commands: they read url and owner from it) -------------------
+# ---- config.json (before the admin commands: they read the servers from it) -------------------
 tmpcfg=$(mktemp "$CONFIG_DIR/.config.json.XXXXXX")
 if [ -e "$CONFIG" ]; then
   CFG_BACKUP="$TMP/config.json.bak"; cp -p "$CONFIG" "$CFG_BACKUP" || die "cannot back up $CONFIG"
 else CFG_CREATED=1; fi
 CFG_PENDING=1
-if [ -e "$CONFIG" ]; then jq --arg u "$NATS_URL" --arg o "$OWNER" '. + {url: $u, owner: $o}' "$CONFIG" >"$tmpcfg"
-else jq -n --arg u "$NATS_URL" --arg o "$OWNER" '{url: $u, owner: $o}' >"$tmpcfg"; fi
+if [ -e "$CONFIG" ]; then jq --arg u "$NATS_URL" '. + {servers: [$u]}' "$CONFIG" >"$tmpcfg"
+else jq -n --arg u "$NATS_URL" '{servers: [$u]}' >"$tmpcfg"; fi
 mv "$tmpcfg" "$CONFIG"
 say "Wrote $CONFIG."
 
@@ -411,7 +411,7 @@ fi
 # ---- endpoint users (after the capacity check, so a refused plan leaves none behind) ------------
 for inst in "${ENDPOINTS[@]}"; do
   n=$(addr "$inst") # the address: the NATS user's name, the creds file's name and the directory key
-  perms=$(MASH_OWNER="$OWNER" mash admin permissions "$n" | jq -c '{pub: .pub.allow, sub: .sub.allow}') \
+  perms=$(mash admin permissions "$n" | jq -c '{pub: .pub.allow, sub: .sub.allow}') \
     || die "could not read the permissions from 'mash admin permissions $n'"
   u=$(create_user "$n" "$(jq -c .pub <<<"$perms")" "$(jq -c .sub <<<"$perms")")
   uid=$(jq -r '.id // empty' <<<"$u"); ukey=$(jq -r '.user_public_key // empty' <<<"$u")
@@ -434,14 +434,14 @@ if api DELETE "/nats-users/$ADMIN_ID" >/dev/null; then ADMIN_ID=""; say "Deleted
 if [ "$NO_TEST" -eq 1 ]; then say "Test mail: skipped (--no-test)."
 elif [ "${#ENDPOINTS[@]}" -lt 2 ]; then say "Test mail: skipped, it needs two endpoints; add a second --endpoint."
 else
-  a="${ENDPOINTS[0]}" b="${ENDPOINTS[1]}" # instances; the group is MASH_GROUP (set by mash())
+  a="${ENDPOINTS[0]}" b="${ENDPOINTS[1]}" # instances; the address is owner.group.instance
   token="qs-$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')" # unique: an older [verified] message in the inbox must not pass
-  MASH_NAME="$a" mash send "$(addr "$b")" "quickstart-synadia.sh test $token" >/dev/null || die "everything was created, but sending the test message failed"
-  inbox=$(MASH_NAME="$b" mash inbox) || die "everything was created, but reading $(addr "$b")'s inbox failed"
+  MASH_ENDPOINT="$(addr "$a")" mash send "$(addr "$b")" "quickstart-synadia.sh test $token" >/dev/null || die "everything was created, but sending the test message failed"
+  inbox=$(MASH_ENDPOINT="$(addr "$b")" mash inbox) || die "everything was created, but reading $(addr "$b")'s inbox failed"
   grep -F "$token" <<<"$inbox" | grep -qF "[verified]" || die "the test message did not arrive as [verified] in $(addr "$b")'s inbox"
   say "Test mail: $(addr "$a") sent a message to $(addr "$b"), which read it as [verified]."
 fi
 
 say ""
 say "Done. Start a session as an endpoint, for example:"
-say "  MASH_GROUP=$GROUP MASH_NAME=${ENDPOINTS[0]} claude --channels plugin:mash@mash"
+say "  MASH_ENDPOINT=$(addr "${ENDPOINTS[0]}") claude --channels plugin:mash@mash"

@@ -55,24 +55,24 @@ func announced(cfg config.Config, env func(string) string, sys *sysTarget) strin
 }
 
 func TestAnnounceNamesTargetAndSources(t *testing.T) {
-	cfg, env := loadCfg(t, `{"owner":"fileowner","admin_creds":"/f/admin.creds"}`,
-		map[string]string{"MASH_URL": "tls://scratch:4222"})
+	cfg, env := loadCfg(t, `{"endpoint":"fileowner.dev.x","admin_creds":"/f/admin.creds"}`,
+		map[string]string{"MASH_SERVER": "tls://scratch:4222"})
 	got := announced(cfg, env, nil)
-	want := "mashctl: target server tls://scratch:4222 (from MASH_URL), owner fileowner (from " + cfg.File + "), admin creds /f/admin.creds (from " + cfg.File + ")\n"
+	want := "mashctl: target server tls://scratch:4222 (from MASH_SERVER), owner fileowner (from " + cfg.File + "), admin creds /f/admin.creds (from " + cfg.File + ")\n"
 	if got != want {
 		t.Fatalf("got %q\nwant %q", got, want)
 	}
 }
 
 func TestAnnounceEnvOverFileWarnsWithBothValues(t *testing.T) {
-	cfg, env := loadCfg(t, `{"url":"tls://file:4222","owner":"fo","admin_creds":"/f/a.creds","tls_ca":"/f/ca.pem"}`,
-		map[string]string{"MASH_URL": "tls://env:4222", "MASH_OWNER": "eo", "MASH_ADMIN_CREDS": "/e/a.creds", "MASH_TLS_CA": "/e/ca.pem", "MASH_NAME": "x"})
+	cfg, env := loadCfg(t, `{"servers":"tls://file:4222","endpoint":"fo.dev.x","admin_creds":"/f/a.creds","ca":"/f/ca.pem"}`,
+		map[string]string{"MASH_SERVER": "tls://env:4222", "MASH_ENDPOINT": "eo.dev.x", "MASH_ADMIN_CREDS": "/e/a.creds", "MASH_CA": "/e/ca.pem", "MASH_LAUNCH_TOKEN": "x"})
 	got := announced(cfg, env, nil)
 	for _, w := range []string{
-		"warning: MASH_URL (tls://env:4222) overrides config.json's url (tls://file:4222); mashctl is acting on tls://env:4222.",
-		"warning: MASH_OWNER (eo) overrides config.json's owner (fo)",
+		"warning: MASH_SERVER (tls://env:4222) overrides config.json's servers (tls://file:4222); mashctl is acting on tls://env:4222.",
+		"warning: MASH_ENDPOINT (eo.dev.x) overrides config.json's endpoint (fo.dev.x)",
 		"warning: MASH_ADMIN_CREDS (/e/a.creds) overrides config.json's admin_creds (/f/a.creds)",
-		"warning: MASH_TLS_CA (/e/ca.pem) overrides config.json's tls_ca (/f/ca.pem)",
+		"warning: MASH_CA (/e/ca.pem) overrides config.json's ca (/f/ca.pem)",
 		"unset them to use config.json.",
 	} {
 		if !strings.Contains(got, w) {
@@ -81,46 +81,46 @@ func TestAnnounceEnvOverFileWarnsWithBothValues(t *testing.T) {
 	}
 }
 
-// A central host sets no endpoint name: its MASH_URL over config.json is meant, and the warning about the endpoint
+// A central host sets no launch token: its MASH_SERVER over config.json is meant, and the warning about the endpoint
 // session does not apply.
-func TestAnnounceEnvOverFileNoWarningWithoutAnEndpointName(t *testing.T) {
-	cfg, env := loadCfg(t, `{"url":"tls://file:4222","owner":"fo"}`,
-		map[string]string{"MASH_URL": "tls://a:4222,tls://b:4222", "MASH_OWNER": "eo"})
+func TestAnnounceEnvOverFileNoWarningWithoutALaunchToken(t *testing.T) {
+	cfg, env := loadCfg(t, `{"servers":"tls://file:4222","endpoint":"fo.dev.x"}`,
+		map[string]string{"MASH_SERVER": "tls://a:4222,tls://b:4222", "MASH_ENDPOINT": "eo.dev.x"})
 	got := announced(cfg, env, nil)
 	if strings.Contains(got, "warning") || strings.Contains(got, "endpoint session") {
 		t.Errorf("warned on a central host:\n%s", got)
 	}
-	if !strings.Contains(got, "target server tls://a:4222,tls://b:4222 (from MASH_URL)") {
+	if !strings.Contains(got, "target server tls://a:4222,tls://b:4222 (from MASH_SERVER)") {
 		t.Errorf("the target line lacks the url:\n%s", got)
 	}
 }
 
 func TestAnnounceAgreeingOrNoFileNoWarning(t *testing.T) {
-	cfg, env := loadCfg(t, `{"url":"tls://same:4222","owner":"o"}`, map[string]string{"MASH_URL": "tls://same:4222", "MASH_OWNER": "o"})
+	cfg, env := loadCfg(t, `{"servers":"tls://same:4222","endpoint":"o.dev.x"}`, map[string]string{"MASH_SERVER": "tls://same:4222", "MASH_ENDPOINT": "o.dev.x"})
 	if got := announced(cfg, env, nil); strings.Contains(got, "warning") || strings.Count(got, "\n") != 1 {
 		t.Errorf("agreeing values warned:\n%s", got)
 	}
-	cfg, env = loadCfg(t, "", map[string]string{"MASH_URL": "tls://e:4222", "MASH_OWNER": "o"})
+	cfg, env = loadCfg(t, "", map[string]string{"MASH_SERVER": "tls://e:4222", "MASH_ENDPOINT": "o.dev.x"})
 	if got := announced(cfg, env, nil); strings.Contains(got, "warning") || !strings.Contains(got, "admin creds unset") {
 		t.Errorf("no file:\n%s", got)
 	}
 	// A value only in the file is not an override.
-	cfg, env = loadCfg(t, `{"url":"tls://file:4222","owner":"o"}`, nil)
+	cfg, env = loadCfg(t, `{"servers":"tls://file:4222","endpoint":"o.dev.x"}`, nil)
 	if got := announced(cfg, env, nil); strings.Contains(got, "warning") || !strings.Contains(got, "tls://file:4222 (from "+cfg.File+")") {
 		t.Errorf("file only:\n%s", got)
 	}
 }
 
 func TestAnnounceSessionVariablesAddTheWarning(t *testing.T) {
-	for _, v := range []string{"MASH_NAME", "MASH_LAUNCH_TOKEN"} {
-		cfg, env := loadCfg(t, "", map[string]string{"MASH_URL": "tls://session:4222", "MASH_OWNER": "o", v: "x"})
+	for _, v := range []string{"MASH_LAUNCH_TOKEN"} {
+		cfg, env := loadCfg(t, "", map[string]string{"MASH_SERVER": "tls://session:4222", "MASH_ENDPOINT": "o.dev.x", v: "x"})
 		got := announced(cfg, env, nil)
-		if !strings.Contains(got, "inside a mash session, and tls://session:4222 (MASH_URL) is that session's own server") {
+		if !strings.Contains(got, "inside a mash session, and tls://session:4222 (MASH_SERVER) is that session's own server") {
 			t.Errorf("%s: no session warning:\n%s", v, got)
 		}
 	}
 	// The session variables alone, with the url from config.json, add nothing.
-	cfg, env := loadCfg(t, `{"url":"tls://file:4222","owner":"o"}`, map[string]string{"MASH_NAME": "x"})
+	cfg, env := loadCfg(t, `{"servers":"tls://file:4222","endpoint":"o.dev.x"}`, map[string]string{"MASH_ENDPOINT": "o.dev.x"})
 	if got := announced(cfg, env, nil); strings.Contains(got, "warning") {
 		t.Errorf("url from the file:\n%s", got)
 	}
@@ -133,7 +133,7 @@ func TestAnnounceMasksURLPasswordAndNeverPrintsCreds(t *testing.T) {
 	if err := os.WriteFile(creds, []byte("-----BEGIN NATS USER JWT-----\neyJhbGciOi\n------END NATS USER JWT-----\n"+secret), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cfg, env := loadCfg(t, `{"url":"tls://u:filepass@file:4222"}`, map[string]string{"MASH_URL": "tls://bob:hunter2@h:4222,tls://h2:4222", "MASH_OWNER": "o", "MASH_ADMIN_CREDS": creds, "MASH_NAME": "n"})
+	cfg, env := loadCfg(t, `{"servers":"tls://u:filepass@file:4222"}`, map[string]string{"MASH_SERVER": "tls://bob:hunter2@h:4222,tls://h2:4222", "MASH_ENDPOINT": "o.dev.n", "MASH_ADMIN_CREDS": creds, "MASH_LAUNCH_TOKEN": "t"})
 	got := announced(cfg, env, nil)
 	for _, bad := range []string{"hunter2", "filepass", secret, "eyJ", "BEGIN"} {
 		if strings.Contains(got, bad) {
@@ -146,7 +146,7 @@ func TestAnnounceMasksURLPasswordAndNeverPrintsCreds(t *testing.T) {
 }
 
 func TestAnnounceSysCredsPathWhenKnown(t *testing.T) {
-	cfg, env := loadCfg(t, "", map[string]string{"MASH_URL": "tls://h:1", "MASH_OWNER": "o", "MASH_SYS_CREDS": "/s/sys.creds"})
+	cfg, env := loadCfg(t, "", map[string]string{"MASH_SERVER": "tls://h:1", "MASH_ENDPOINT": "o.dev.x", "MASH_SYS_CREDS": "/s/sys.creds"})
 	if got := announced(cfg, env, &sysTarget{}); !strings.Contains(got, ", system creds /s/sys.creds (from MASH_SYS_CREDS)\n") {
 		t.Errorf("env:\n%s", got)
 	}
@@ -163,7 +163,7 @@ func TestAnnounceSysCredsPathWhenKnown(t *testing.T) {
 func TestTargetLineComesBeforeAWriteAndOfflineVerbsPrintNone(t *testing.T) {
 	h := newFleetEnv(t)
 	showTarget(t)
-	h.env["MASH_NAME"] = "sessionagent"
+	h.env["MASH_LAUNCH_TOKEN"] = "sessionagent"
 
 	out, errb, code := h.run("limits", "--show")
 	if code != 0 || strings.Contains(errb, "target server") || !strings.Contains(out, "inbox_max_bytes") {
@@ -181,7 +181,7 @@ func TestTargetLineComesBeforeAWriteAndOfflineVerbsPrintNone(t *testing.T) {
 
 	for _, args := range [][]string{{"list"}, {"init"}, {"limits"}, {"endpoint", "delete", "o.g.zz"}} {
 		_, errb, _ := h.run(args...)
-		want := "mashctl: target server " + h.e.URL + " (from MASH_URL), owner " + h.e.Owner + " (from MASH_OWNER), admin creds " + h.e.AdminCreds + " (from MASH_ADMIN_CREDS)\n"
+		want := "mashctl: target server " + h.e.URL + " (from MASH_SERVER), owner " + h.e.Owner + " (from MASH_ENDPOINT), admin creds " + h.e.AdminCreds + " (from MASH_ADMIN_CREDS)\n"
 		if !strings.HasPrefix(errb, want) {
 			t.Errorf("%v: stderr %q\nwant prefix %q", args, errb, want)
 		}
@@ -194,21 +194,21 @@ func TestTargetLineComesBeforeAWriteAndOfflineVerbsPrintNone(t *testing.T) {
 func TestTargetWarnsWhenEnvOverridesConfigJSON(t *testing.T) {
 	h := newFleetEnv(t)
 	showTarget(t)
-	h.env["MASH_NAME"] = "sessionagent" // the warning is given inside an endpoint session only
-	if err := os.WriteFile(filepath.Join(h.dir, "config.json"), []byte(`{"url":"tls://scratch.example:4222","owner":"`+h.e.Owner+`"}`), 0o600); err != nil {
+	h.env["MASH_LAUNCH_TOKEN"] = "sessionagent" // the warning is given inside an endpoint session only
+	if err := os.WriteFile(filepath.Join(h.dir, "config.json"), []byte(`{"servers":"tls://scratch.example:4222"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	_, errb, code := h.run("list")
 	if code != 0 {
 		t.Fatalf("list: %d %q", code, errb)
 	}
-	want := "warning: MASH_URL (" + h.e.URL + ") overrides config.json's url (tls://scratch.example:4222); mashctl is acting on " + h.e.URL + "."
-	if !strings.Contains(errb, want) || strings.Contains(errb, "overrides config.json's owner") {
+	want := "warning: MASH_SERVER (" + h.e.URL + ") overrides config.json's servers (tls://scratch.example:4222); mashctl is acting on " + h.e.URL + "."
+	if !strings.Contains(errb, want) || strings.Contains(errb, "overrides config.json's endpoint") {
 		t.Errorf("stderr:\n%s\nwant %q", errb, want)
 	}
 	// With the file and the environment agreeing there is no warning.
-	delete(h.env, "MASH_NAME")
-	if err := os.WriteFile(filepath.Join(h.dir, "config.json"), []byte(`{"url":"`+h.e.URL+`"}`), 0o600); err != nil {
+	delete(h.env, "MASH_LAUNCH_TOKEN")
+	if err := os.WriteFile(filepath.Join(h.dir, "config.json"), []byte(`{"servers":"`+h.e.URL+`"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, errb, _ := h.run("list"); strings.Contains(errb, "warning") {

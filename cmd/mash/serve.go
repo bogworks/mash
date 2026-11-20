@@ -825,7 +825,7 @@ func tools(state *atomic.Pointer[sessionState], src *statusSource) []mcp.Tool {
 func versionText(name, owner, pluginRoot string) string {
 	ep := fmt.Sprintf("endpoint %s (owner %s)", name, owner)
 	if name == "" {
-		ep = "endpoint not set (no MASH_NAME)"
+		ep = "endpoint not set (no MASH_ENDPOINT)"
 	}
 	return strings.Join([]string{
 		versionLine(endpoint.CurrentVersion(), endpoint.CurrentCommit(), nil),

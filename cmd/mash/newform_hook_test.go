@@ -49,8 +49,8 @@ func provisionNewForm(t *testing.T, e *testenv.Env, owner, group, instance strin
 	if _, err := kv.Create(ctx, id.Flat(), val); err != nil {
 		t.Fatal(err)
 	}
-	return id, map[string]string{"HOME": t.TempDir(), "MASH_NAME": id.Instance, "MASH_OWNER": id.Owner, "MASH_GROUP": id.Group,
-		"MASH_URL": e.URL, "MASH_CREDS": creds, "MASH_SETTLE_MS": "20",
+	return id, map[string]string{"HOME": t.TempDir(), "MASH_ENDPOINT": id.Owner + "." + id.Group + "." + id.Instance,
+		"MASH_SERVER": e.URL, "MASH_CREDS": creds, "MASH_SETTLE_MS": "20",
 		"MASH_INSECURE_PLAINTEXT": "1"} // REQ-014: these tests are not about TLS; the override is explicit
 }
 
@@ -106,8 +106,8 @@ func TestHookNextToEndpointOfTheSameInstanceInAnotherGroup(t *testing.T) {
 		env["MASH_STATE_DIR"] = state // one shared state directory: a collision would show
 		env["MASH_IDLE_WAKE"] = "5s"
 	}
-	if aID.Flat() != "acme_team1_ops1" || bID.Flat() != "acme_team2_ops1" || aEnv["MASH_NAME"] != bEnv["MASH_NAME"] {
-		t.Fatalf("setup: flat %q %q names %q %q", aID.Flat(), bID.Flat(), aEnv["MASH_NAME"], bEnv["MASH_NAME"])
+	if aID.Flat() != "acme_team1_ops1" || bID.Flat() != "acme_team2_ops1" || endpointPart(aEnv, 2) != endpointPart(bEnv, 2) {
+		t.Fatalf("setup: flat %q %q names %q %q", aID.Flat(), bID.Flat(), endpointPart(aEnv, 2), endpointPart(bEnv, 2))
 	}
 
 	aSpool := filepath.Join(state, "spool", "acme", "acme_team1_ops1")

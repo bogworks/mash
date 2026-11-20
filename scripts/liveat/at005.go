@@ -228,7 +228,7 @@ func (s *At5) EnvLines() []string {
 	if s.CA != nil {
 		out = append(out, TLSDescribe(s.CA, s.Leaves)...)
 	}
-	out = append(out, "mashctl on M1 (init) and M2 (adopt, DEC-004), config.json with all three tls:// URLs and tls_ca, MASH_SERVERS=3")
+	out = append(out, "mashctl on M1 (init) and M2 (adopt, DEC-004), config.json with all three tls:// URLs and ca, MASH_SERVERS=3")
 	for _, n := range s.skipped {
 		out = append(out, "not run: "+n)
 	}
@@ -335,7 +335,7 @@ func exitSnip(r Result) string {
 // epEnv is the environment of an endpoint session or command on host h, connecting to the server on srv, with creds.
 func (s *At5) epEnv(h, srv Host, name, creds string, extra ...string) []string {
 	return append([]string{
-		"MASH_URL=" + s.urlOf(srv), "MASH_TLS_CA=" + s.tlsOf(h).CA, "MASH_OWNER=alice", "MASH_GROUP=dev", "MASH_NAME=" + name,
+		"MASH_SERVER=" + s.urlOf(srv), "MASH_CA=" + s.tlsOf(h).CA, "MASH_ENDPOINT=alice.dev." + name,
 		"MASH_CREDS=" + creds, "MASH_STATE_DIR=" + filepath.Join(h.Home().State, name),
 	}, extra...)
 }
@@ -669,7 +669,7 @@ const forgeSeconds = 40
 // created with no session (offline). `nodeinit forge` on M3 connects as bob to the server on M2, answers each of
 // alice's discovery requests with a forged and a replay-shaped payload into her reply subject, and counts the
 // permissions violations; meanwhile alice's `mash who` runs on M1 (renv: her review endpoint, server on M3). mashctl
-// takes the owner from the address, so no MASH_OWNER override is needed.
+// takes the owner from the address, so no owner override is needed.
 func (s *At5) secondOwner(m1, m2, m3 Host, aliceEnv []string) {
 	if _, ok := m3.(*localHost); ok {
 		s.skip("REQ-005: second-owner forged and replayed answers (the forging runs inside a node: podman hosts only)")
@@ -911,13 +911,13 @@ func (s *At5) plainRefusals(m1, m3 Host) {
 		return
 	}
 	url := "nats://" + ip + ":" + strconv.Itoa(DefaultPorts[0].Client)
-	env := s.epEnv(m3, m1, "design", filepath.Join(m3.Home().Config, "design.creds"), "MASH_URL="+url, "MASH_INSECURE_PLAINTEXT=0")
+	env := s.epEnv(m3, m1, "design", filepath.Join(m3.Home().Config, "design.creds"), "MASH_SERVER="+url, "MASH_INSECURE_PLAINTEXT=0")
 	r := s.mash(m3, "plain-endpoint", env, "inbox")
 	txt := r.Text()
 	s.check("REQ-014: with no override an endpoint refuses to connect to a plain nats:// URL on a non-loopback address (refused before any connection; no plain server started)", r.Code != 0 && strings.Contains(strings.ToLower(txt), "tls"), exitSnip(r))
 	st := s.mash(m3, "plain-status", env, "status")
 	s.check("REQ-014: mash status says tls: FAILED for it", strings.Contains(st.Text(), "tls: FAILED"), snip(grepLine(st.Text(), "tls:")))
-	r = s.ctl(m1, "plain-admin", []string{"MASH_URL=" + url, "MASH_INSECURE_PLAINTEXT=0"}, "list")
+	r = s.ctl(m1, "plain-admin", []string{"MASH_SERVER=" + url, "MASH_INSECURE_PLAINTEXT=0"}, "list")
 	s.check("REQ-014: mashctl refuses an admin connection to a plain nats:// URL on a non-loopback address", r.Code != 0 && strings.Contains(strings.ToLower(r.Text()), "tls"), exitSnip(r))
 }
 

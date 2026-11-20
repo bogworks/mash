@@ -21,7 +21,7 @@ import (
 func standaloneWorld(t *testing.T, bin string, names ...string) map[string][]string {
 	t.Helper()
 	e := testenv.Start(t)
-	adminEnv := scrubbedEnv(t, map[string]string{"MASH_URL": e.URL, "MASH_OWNER": e.Owner, "MASH_ADMIN_CREDS": e.AdminCreds, "MASH_INSECURE_PLAINTEXT": "1"})
+	adminEnv := scrubbedEnv(t, map[string]string{"MASH_SERVER": e.URL, "MASH_ENDPOINT": e.Owner + ".dev." + "x", "MASH_ADMIN_CREDS": e.AdminCreds, "MASH_INSECURE_PLAINTEXT": "1"})
 	mustRun(t, bin, adminEnv, "admin", "init")
 	envs := map[string][]string{}
 	for _, n := range names {
@@ -30,7 +30,7 @@ func standaloneWorld(t *testing.T, bin string, names ...string) map[string][]str
 			t.Fatal(err)
 		}
 		mustRun(t, bin, adminEnv, "admin", "provision", tTo(n), "--user", user, "--account", e.Account)
-		envs[n] = scrubbedEnv(t, map[string]string{"MASH_URL": e.URL, "MASH_OWNER": e.Owner, "MASH_GROUP": testGroup, "MASH_NAME": n,
+		envs[n] = scrubbedEnv(t, map[string]string{"MASH_SERVER": e.URL, "MASH_ENDPOINT": e.Owner + "." + testGroup + "." + n,
 			"MASH_CREDS": creds, "MASH_SETTLE_MS": "20"})
 		assertToolsAbsent(t, envs[n])
 	}

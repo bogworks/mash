@@ -163,7 +163,7 @@ func TestAdoptDryRunThenRealRunThenAdd(t *testing.T) {
 		}
 	}
 	cj, _ := os.ReadFile(filepath.Join(a.env["MASH_CONFIG_DIR"], "config.json"))
-	for _, want := range []string{e.srv.ClientURL(), `"owner": "alice"`, filepath.Join(srvDir, "mashadmin.creds")} {
+	for _, want := range []string{e.srv.ClientURL(), `"servers": [`, filepath.Join(srvDir, "mashadmin.creds")} {
 		if !strings.Contains(string(cj), want) {
 			t.Errorf("config.json lacks %q:\n%s", want, cj)
 		}
@@ -181,6 +181,7 @@ func TestAdoptDryRunThenRealRunThenAdd(t *testing.T) {
 		t.Fatalf("mashadmin creds do not connect: %v", err)
 	}
 	nc.Close()
+	a.env["MASH_ENDPOINT"] = "alice.dev.x" // adopt writes no owner: mashctl takes it from the endpoint
 	out, errb, code = a.run("init")
 	if code != 0 {
 		t.Fatalf("mashctl init from the adopted config: %d\n%s\n%s", code, out, errb)

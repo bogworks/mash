@@ -29,7 +29,7 @@ var SelfCheck = Scenario{
 		a.C.Check("the revision is recorded", strings.TrimSpace(a.R.Revision) != "", "")
 
 		// The environment: nothing from the caller reaches a child.
-		os.Setenv("MASH_URL", "nats://caller.invalid:1")
+		os.Setenv("MASH_SERVER", "nats://caller.invalid:1")
 		os.Setenv("NATS_URL", "nats://caller.invalid:2")
 		tools := map[string]string{}
 		for _, n := range []string{"env", "echo", "cat"} {
@@ -41,10 +41,10 @@ var SelfCheck = Scenario{
 			tools[n] = p
 		}
 		env := a.R.Runner.Run("env", []string{tools["env"]}, a.Env(h), "")
-		os.Unsetenv("MASH_URL")
+		os.Unsetenv("MASH_SERVER")
 		os.Unsetenv("NATS_URL")
 		a.C.Check("a child sees HOME and MASH_CONFIG_DIR from the scratch home", strings.Contains(env.Stdout, "HOME="+h.Dir+"\n") && strings.Contains(env.Stdout, "MASH_CONFIG_DIR="+h.Config+"\n"), exitDetail(env))
-		a.C.Check("a child sees no MASH_URL or NATS_URL of the caller", !strings.Contains(env.Stdout, "MASH_URL") && !strings.Contains(env.Stdout, "NATS_"), "")
+		a.C.Check("a child sees no MASH_SERVER or NATS_URL of the caller", !strings.Contains(env.Stdout, "MASH_SERVER") && !strings.Contains(env.Stdout, "NATS_"), "")
 
 		// The server.
 		if !a.StartServer(h) {

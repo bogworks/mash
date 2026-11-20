@@ -35,8 +35,8 @@ func addRestricted(t *testing.T, w *world, allowed ...string) {
 	if _, err := adm.Provision(context.Background(), tAddr("s"), u, w.e.Account, "", admin.Meta{}); err != nil {
 		t.Fatal(err)
 	}
-	w.env["s"] = map[string]string{"HOME": t.TempDir(), "MASH_NAME": "s", "MASH_GROUP": testGroup, "MASH_URL": w.e.URL,
-		"MASH_OWNER": w.e.Owner, "MASH_CREDS": c, "MASH_SETTLE_MS": "20",
+	w.env["s"] = map[string]string{"HOME": t.TempDir(), "MASH_ENDPOINT": w.e.Owner + "." + testGroup + ".s", "MASH_SERVER": w.e.URL,
+		"MASH_CREDS": c, "MASH_SETTLE_MS": "20",
 		"MASH_INSECURE_PLAINTEXT": "1"} // REQ-014: these tests are not about TLS; the override is explicit
 }
 
@@ -85,25 +85,25 @@ func TestServeSendToolRefusedByPolicy(t *testing.T) {
 	}
 }
 
-// A session started without MASH_GROUP stops at once, exit 2, naming MASH_GROUP and the code group_missing, at every
-// entry that runs an endpoint; a hook never fails the session, so it says so on stderr and exits 0; status reports it.
-func TestMissingGroupStopsTheSession(t *testing.T) {
-	env := map[string]string{"HOME": t.TempDir(), "MASH_URL": "nats://127.0.0.1:1", "MASH_OWNER": "o", "MASH_NAME": "a", "MASH_CREDS": "/nonexistent"}
+// An endpoint with no group (MASH_ENDPOINT is not owner.group.name) is a config error naming MASH_ENDPOINT at every
+// entry that runs an endpoint (serve stays up with its status tool); a hook never fails the session; status reports it.
+func TestMalformedEndpointStopsTheSession(t *testing.T) {
+	env := map[string]string{"HOME": t.TempDir(), "MASH_SERVER": "nats://127.0.0.1:1", "MASH_ENDPOINT": "o.a", "MASH_CREDS": "/nonexistent"}
 	for _, args := range [][]string{{"serve"}, {"send", "o.dev.b", "x"}, {"inbox"}, {"who"}, {"read", "1"}, {"prompt", "o.dev.b", "x"}} {
 		var out, errb strings.Builder
-		if code := run(args, envFrom(env), strings.NewReader(""), &out, &errb); code != 2 ||
-			!strings.Contains(errb.String(), "MASH_GROUP") || !strings.Contains(errb.String(), "group_missing") {
+		code := run(args, envFrom(env), strings.NewReader(""), &out, &errb)
+		// serve, like for any config error, stays up with status and version only and says why on stderr.
+		if (code == 0 && args[0] != "serve") || !strings.Contains(errb.String(), "MASH_ENDPOINT") || !strings.Contains(errb.String(), "three") {
 			t.Errorf("%v: exit %d, stdout %q, stderr %q", args, code, out.String(), errb.String())
 		}
 	}
 	var out, errb strings.Builder
-	if code := run([]string{"hook"}, envFrom(env), strings.NewReader("{}"), &out, &errb); code != 0 || out.String() != "" ||
-		!strings.Contains(errb.String(), "MASH_GROUP") {
+	if code := run([]string{"hook"}, envFrom(env), strings.NewReader("{}"), &out, &errb); code != 0 || out.String() != "" {
 		t.Errorf("hook: exit %d, stdout %q, stderr %q", code, out.String(), errb.String())
 	}
 	out.Reset()
 	if code := run([]string{"status"}, envFrom(env), strings.NewReader(""), &out, &errb); code != 0 ||
-		!strings.Contains(out.String(), "group_missing") || !strings.Contains(out.String(), "MASH_GROUP") {
+		!strings.Contains(out.String(), "MASH_ENDPOINT") {
 		t.Errorf("status: exit %d, %q", code, out.String())
 	}
 }

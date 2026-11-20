@@ -58,7 +58,7 @@ func TestTLSOptions(t *testing.T) {
 
 func TestTLSHint(t *testing.T) {
 	for _, c := range []struct{ err, want string }{
-		{"tls: failed to verify certificate: x509: certificate signed by unknown authority", "tls_ca"},
+		{"tls: failed to verify certificate: x509: certificate signed by unknown authority", `"ca"`},
 		{"remote error: tls: bad certificate", "tls_cert and tls_key"},
 		{"remote error: tls: certificate required", "tls_cert and tls_key"},
 	} {
@@ -211,7 +211,7 @@ func TestRequireTLS(t *testing.T) {
 			if err != nil && !strings.Contains(tc.wantErr, "unsupported") && !strings.Contains(err.Error(), "insecure_plaintext") {
 				t.Errorf("%s: refusal does not name insecure_plaintext: %v", tc.url, err)
 			}
-			if err != nil && !strings.Contains(err.Error(), "tls_ca") {
+			if err != nil && !strings.Contains(err.Error(), `"ca"`) {
 				t.Errorf("%s: refusal does not name the fix: %v", tc.url, err)
 			}
 			continue
@@ -258,7 +258,7 @@ func TestRequireTLSNeverPrintsUserinfo(t *testing.T) {
 func TestNoServersHint(t *testing.T) {
 	for _, err := range []error{nats.ErrNoServers, fmt.Errorf("wrapped: %w", nats.ErrNoServers), errors.New("nats: no servers available for connection")} {
 		got := natsauth.NoServersHint(err).Error()
-		if !strings.Contains(got, "no servers available for connection") || !strings.HasSuffix(got, "(check MASH_URL and that at least one listed server is up)") {
+		if !strings.Contains(got, "no servers available for connection") || !strings.HasSuffix(got, "(check MASH_SERVER and that at least one listed server is up)") {
 			t.Errorf("hint = %q", got)
 		}
 		if again := natsauth.NoServersHint(natsauth.NoServersHint(err)).Error(); again != got {

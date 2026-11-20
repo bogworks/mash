@@ -19,7 +19,7 @@ import (
 )
 
 // D1 of the live tier (opt-in: MASH_LIVE_CLAUDE=1): what happens when two live claude processes run on the SAME
-// session id, with the same MASH_NAME, credentials and XDG_STATE_HOME, and the plugin installed. Process A starts a
+// session id, with the same MASH_ENDPOINT, credentials and XDG_STATE_HOME, and the plugin installed. Process A starts a
 // fresh session; process B is started with `--resume <A's session id>` (no --fork-session). The experiment observes and
 // RECORDS (ls.info) how the second process's MCP server connects, which process receives mail, how the session
 // transcript looks after both wrote to it, and what happens to B when the lease holder A is killed. Only harness
@@ -313,7 +313,7 @@ func liveDualResume(t *testing.T, id string, tokens bool) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), lsDualTO)
 	t.Cleanup(cancel)
-	sp := spool.Spool{Dir: spool.Dir(filepath.Join(sc.state, "mash"), w.env["a"]["MASH_OWNER"], tAddr("a").Flat())}
+	sp := spool.Spool{Dir: spool.Dir(filepath.Join(sc.state, "mash"), endpointPart(w.env["a"], 0), tAddr("a").Flat())}
 	spoolState := func() string {
 		var names []string
 		ents, _ := os.ReadDir(sp.Dir)

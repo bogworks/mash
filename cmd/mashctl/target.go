@@ -39,12 +39,12 @@ func announceTarget(cfg config.Config, env func(string) string, stderr io.Writer
 	if announceSink != nil {
 		stderr = announceSink
 	}
-	line := "mashctl: target server " + maskURL(cfg.URL) + " (from " + sourceText(cfg, "url") + ")"
+	line := "mashctl: target server " + maskURL(cfg.URL) + " (from " + sourceText(cfg, "servers") + ")"
 	if cfg.URL == "" {
 		line = "mashctl: target server unset"
 	}
 	if cfg.Owner != "" {
-		line += ", owner " + cfg.Owner + " (from " + sourceText(cfg, "owner") + ")"
+		line += ", owner " + cfg.Owner + " (from " + sourceText(cfg, "endpoint") + ")"
 	} else {
 		line += ", owner unset"
 	}
@@ -68,9 +68,10 @@ func announceTarget(cfg config.Config, env func(string) string, stderr io.Writer
 	fmt.Fprintln(stderr, line)
 
 	// The override warning names the endpoint session the shell may be inside, so it is given only when an endpoint
-	// name or launch token is set. A central host sets none, and its MASH_URL list is meant.
-	inSession := cfg.Name != "" || env("MASH_NAME") != "" || env("MASH_LAUNCH_TOKEN") != ""
-	for _, key := range []string{"url", "owner", "admin_creds", "tls_ca"} {
+	// launch token is set (MASH_ENDPOINT cannot tell: mashctl takes its owner from it too). A central host sets none, and
+	// its MASH_SERVER list is meant.
+	inSession := env("MASH_LAUNCH_TOKEN") != ""
+	for _, key := range []string{"servers", "endpoint", "admin_creds", "ca"} {
 		if !inSession {
 			break
 		}
@@ -78,18 +79,22 @@ func announceTarget(cfg config.Config, env func(string) string, stderr io.Writer
 		if src != config.SourceKeys[key] || fileVal == "" {
 			continue
 		}
-		cur := map[string]string{"url": cfg.URL, "owner": cfg.Owner, "admin_creds": cfg.AdminCreds, "tls_ca": cfg.TLSCA}[key]
+		endpoint := ""
+		if cfg.Name != "" {
+			endpoint = cfg.Owner + "." + cfg.Group + "." + cfg.Name
+		}
+		cur := map[string]string{"servers": cfg.URL, "endpoint": endpoint, "admin_creds": cfg.AdminCreds, "ca": cfg.TLSCA}[key]
 		if cur == fileVal {
 			continue
 		}
-		if key == "url" {
+		if key == "servers" {
 			cur, fileVal = maskURL(cur), maskURL(fileVal)
 		}
 		fmt.Fprintf(stderr, "warning: %s (%s) overrides config.json's %s (%s); mashctl is acting on %s. These MASH_* variables belong to the endpoint session you may be inside; unset them to use config.json.\n",
 			src, cur, key, fileVal, cur)
 	}
-	if cfg.Source["url"] == "MASH_URL" && (env("MASH_NAME") != "" || env("MASH_LAUNCH_TOKEN") != "") {
-		fmt.Fprintf(stderr, "warning: MASH_NAME or MASH_LAUNCH_TOKEN is set, so this shell looks like it is inside a mash session, and %s (MASH_URL) is that session's own server. To act on another server, run outside the session or with `env -u MASH_URL ...` (and the other MASH_* variables) and config.json.\n", maskURL(cfg.URL))
+	if cfg.Source["servers"] == "MASH_SERVER" && env("MASH_LAUNCH_TOKEN") != "" {
+		fmt.Fprintf(stderr, "warning: MASH_LAUNCH_TOKEN is set, so this shell looks like it is inside a mash session, and %s (MASH_SERVER) is that session's own server. To act on another server, run outside the session or with `env -u MASH_SERVER ...` (and the other MASH_* variables) and config.json.\n", maskURL(cfg.URL))
 	}
 }
 

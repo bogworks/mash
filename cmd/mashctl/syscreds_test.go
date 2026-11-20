@@ -95,7 +95,7 @@ func newApplyEnvOpts(t *testing.T, tweak func(e *applyEnv), optsHook func(o *ser
 	t.Cleanup(func() { srv.Shutdown(); srv.WaitForShutdown() })
 	e.srv = srv
 	e.env = map[string]string{
-		"HOME": root, "MASH_CONFIG_DIR": filepath.Join(root, "cfg"), "MASH_URL": srv.ClientURL(), "MASH_INSECURE_PLAINTEXT": "1", "MASH_OWNER": "alice",
+		"HOME": root, "MASH_CONFIG_DIR": filepath.Join(root, "cfg"), "MASH_SERVER": srv.ClientURL(), "MASH_INSECURE_PLAINTEXT": "1", "MASH_ENDPOINT": "alice.dev.x",
 		"MASH_KEYS_DIR": e.keyDir, "MASH_SYS_CREDS": filepath.Join(pl.Dir, bootstrap.SysCreds),
 		// the admin credentials, for the commands that read the directory.
 		"MASH_ADMIN_CREDS": pl.Creds,

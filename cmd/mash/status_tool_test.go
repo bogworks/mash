@@ -78,10 +78,10 @@ func TestStatusToolInert(t *testing.T) {
 	wantAll(t, "inert", out,
 		"name: MISSING",
 		"not set",
-		"start Claude Code with MASH_NAME=<endpoint>",
+		"start Claude Code with MASH_ENDPOINT=<owner.group.name>",
 		"config: MISSING",
-		"url",
-		"MASH_URL",
+		"server",
+		"MASH_SERVER",
 		"config.json",
 		"connection:",
 		"channel notifications sent: 0 (Claude Code delivers them only if this plugin is on its channel allowlist and the session was started with --channels; the allowlist line is mash's reading of the settings files, /status in Claude Code is the authority)",
@@ -112,7 +112,7 @@ func TestStatusToolConfigError(t *testing.T) {
 	if err := os.WriteFile(creds, []byte("-----BEGIN NATS USER JWT-----\n"+credsSecret+"\n------END NATS USER JWT------\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	s := startServe(t, map[string]string{"HOME": home, "MASH_NAME": "a", "MASH_GROUP": testGroup, "MASH_OWNER": "o", "MASH_CREDS": creds})
+	s := startServe(t, map[string]string{"HOME": home, "MASH_ENDPOINT": "o." + testGroup + ".a", "MASH_CREDS": creds})
 	s.initialize(t)
 	wantInfoTools(t, s)
 	out := statusOf(t, s, 10)
@@ -121,7 +121,7 @@ func TestStatusToolConfigError(t *testing.T) {
 		"config: MISSING",
 		"url",
 		"~/.config/mash/config.json",
-		"MASH_URL",
+		"MASH_SERVER",
 		"creds: OK",
 		creds,
 		"connection: FAILED",
@@ -134,11 +134,11 @@ func TestStatusToolConfigError(t *testing.T) {
 	}
 }
 
-func TestStatusToolMissingOwner(t *testing.T) {
-	s := startServe(t, map[string]string{"HOME": t.TempDir(), "MASH_NAME": "a", "MASH_GROUP": testGroup, "MASH_URL": "nats://u:pw@127.0.0.1:1"})
+func TestStatusToolMissingEndpoint(t *testing.T) {
+	s := startServe(t, map[string]string{"HOME": t.TempDir(), "MASH_SERVER": "nats://u:pw@127.0.0.1:1"})
 	s.initialize(t)
 	out := statusOf(t, s, 10)
-	wantAll(t, "missing owner", out, "config: MISSING", "owner", "MASH_OWNER")
+	wantAll(t, "missing owner", out, "config: MISSING", "endpoint", "MASH_ENDPOINT")
 	if strings.Contains(out, "pw@") {
 		t.Fatalf("status printed a url password:\n%s", out)
 	}
@@ -146,7 +146,7 @@ func TestStatusToolMissingOwner(t *testing.T) {
 
 func TestStatusToolCredsMissingThenPresent(t *testing.T) {
 	home := t.TempDir()
-	env := map[string]string{"HOME": home, "MASH_NAME": "a", "MASH_GROUP": testGroup, "MASH_OWNER": "o"} // no url: a cheap config-error serve
+	env := map[string]string{"HOME": home, "MASH_ENDPOINT": "o." + testGroup + ".a"} // no url: a cheap config-error serve
 	def := filepath.Join(home, ".config", "mash", "o.dev.a.creds")
 
 	s := startServe(t, env)
@@ -339,7 +339,7 @@ func TestStatusToolRedactsRealConnectError(t *testing.T) {
 	for k, v := range w.env["a"] {
 		env[k] = v
 	}
-	env["MASH_URL"] = "nats://alice:" + pwSecret + "@127.0.0.1:1"
+	env["MASH_SERVER"] = "nats://alice:" + pwSecret + "@127.0.0.1:1"
 	s := startServe(t, env)
 	s.initialize(t)
 	var out string
@@ -356,7 +356,7 @@ func TestStatusToolRedactsRealConnectError(t *testing.T) {
 
 func TestStatusToolMalformedURLRedacted(t *testing.T) {
 	const bad = "nats://alice:" + pwSecret + "@127.0.0.1:1/%zz"
-	s := startServe(t, map[string]string{"HOME": t.TempDir(), "MASH_NAME": "a", "MASH_GROUP": testGroup, "MASH_OWNER": "o", "MASH_URL": bad})
+	s := startServe(t, map[string]string{"HOME": t.TempDir(), "MASH_ENDPOINT": "o." + testGroup + ".a", "MASH_SERVER": bad})
 	s.initialize(t)
 	out := statusOf(t, s, 10)
 	if strings.Contains(out, pwSecret) {
@@ -377,7 +377,7 @@ func TestStatusToolConfigParseErrorFirst(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte("{ not json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	s := startServe(t, map[string]string{"HOME": home, "MASH_NAME": "a", "MASH_GROUP": testGroup, "MASH_URL": "nats://alice:" + pwSecret + "@127.0.0.1:1"})
+	s := startServe(t, map[string]string{"HOME": home, "MASH_ENDPOINT": "o." + testGroup + ".a", "MASH_SERVER": "nats://alice:" + pwSecret + "@127.0.0.1:1"})
 	s.initialize(t)
 	out := statusOf(t, s, 10)
 	l := statusLine(t, out, "config:")
@@ -548,7 +548,7 @@ func TestStatusCLIInert(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d, want 0:\n%s", code, out)
 	}
-	wantAll(t, "cli inert", out, "name: MISSING - not set. Next: start Claude Code with MASH_NAME=<endpoint>",
+	wantAll(t, "cli inert", out, "name: MISSING - not set. Next: start Claude Code with MASH_ENDPOINT=<owner.group.name>, or install credentials for one endpoint",
 		"config: MISSING", "connection: not checked from the CLI", "delivery: not checked from the CLI", "channel allowlist: ")
 }
 
@@ -558,8 +558,8 @@ func TestStatusCLINoSecrets(t *testing.T) {
 	if err := os.WriteFile(creds, []byte("-----BEGIN NATS USER JWT-----\n"+credsSecret+"\n------END NATS USER JWT------\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	out, code := runStatusCLI(t, map[string]string{"HOME": home, "MASH_NAME": "a", "MASH_GROUP": testGroup, "MASH_OWNER": "o", "MASH_CREDS": creds,
-		"MASH_URL": "nats://user:hunter2pw@127.0.0.1:1"})
+	out, code := runStatusCLI(t, map[string]string{"HOME": home, "MASH_ENDPOINT": "o." + testGroup + ".a", "MASH_CREDS": creds,
+		"MASH_SERVER": "nats://user:hunter2pw@127.0.0.1:1"})
 	if code != 0 {
 		t.Fatalf("exit %d:\n%s", code, out)
 	}
@@ -578,7 +578,7 @@ func TestStatusCLIMatchesTool(t *testing.T) {
 	if err := os.WriteFile(creds, []byte("x\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	env := map[string]string{"HOME": home, "MASH_NAME": "a", "MASH_GROUP": testGroup, "MASH_OWNER": "o", "MASH_CREDS": creds, "MASH_URL": "nats://127.0.0.1:1"}
+	env := map[string]string{"HOME": home, "MASH_ENDPOINT": "o." + testGroup + ".a", "MASH_CREDS": creds, "MASH_SERVER": "nats://127.0.0.1:1"}
 	cliOut, _ := runStatusCLI(t, env)
 	cfg, err := config.Load(config.LookupFromFunc(envFrom(env)), home)
 	if err != nil {
@@ -628,7 +628,7 @@ func TestStatusTLSLine(t *testing.T) {
 				t.Errorf("url %s cli=%v: line %q, want prefix %q", url, cli, l, want)
 			}
 			if strings.HasPrefix(l, "tls: FAILED - mash: refusing") {
-				wantAll(t, url, l, "insecure_plaintext", "MASH_INSECURE_PLAINTEXT=1", "tls://", "tls_ca")
+				wantAll(t, url, l, "insecure_plaintext", "MASH_INSECURE_PLAINTEXT=1", "tls://", "MASH_CA")
 			}
 		}
 	}
@@ -748,7 +748,7 @@ func TestNameLineValidatesTheThreeTokens(t *testing.T) {
 		t.Fatalf("got %q", l)
 	}
 	cfg.Group = ""
-	if l := nameLine(cfg); !strings.HasPrefix(l, "name: FAILED") || !strings.Contains(l, "group_missing") || !strings.Contains(l, "MASH_GROUP") {
+	if l := nameLine(cfg); !strings.HasPrefix(l, "name: FAILED") || !strings.Contains(l, "group_missing") || !strings.Contains(l, "MASH_ENDPOINT") {
 		t.Fatalf("a missing group: %q", l)
 	}
 }

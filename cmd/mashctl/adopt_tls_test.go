@@ -86,7 +86,7 @@ func newTLSAdopter(t *testing.T) (a *adopter, url, caPath string) {
 
 func TestAdoptTLSTrustedCADryRun(t *testing.T) {
 	a, url, ca := newTLSAdopter(t)
-	a.env["MASH_TLS_CA"] = ca
+	a.env["MASH_CA"] = ca
 	before := tree(t, a.root)
 	out, errb, code := a.run("adopt", "--server", url, "--owner", "alice", "--account", "MASH",
 		"--operator-key", a.opSeed, "--account-key", a.acSeed, "--sys-creds", a.sys, "--dry-run")
@@ -102,14 +102,14 @@ func TestAdoptTLSTrustedCADryRun(t *testing.T) {
 }
 
 func TestAdoptTLSUntrustedCARefused(t *testing.T) {
-	a, url, _ := newTLSAdopter(t) // no tls_ca: system roots do not trust the test CA
-	a.refuses(1, []string{"not trusted", "tls_ca"}, "--server", url, "--dry-run")
+	a, url, _ := newTLSAdopter(t) // no CA: system roots do not trust the test CA
+	a.refuses(1, []string{"not trusted", "MASH_CA"}, "--server", url, "--dry-run")
 }
 
 func TestAdoptPlainWithoutInsecurePlaintextRefused(t *testing.T) {
 	// A plain nats:// URL to a non-loopback host is refused by RequireTLS before any connection is made. (A plain URL
 	// to the loopback address of a TLS server is not refused: nats.Secure upgrades it to TLS.)
 	a, _, ca := newTLSAdopter(t)
-	a.env["MASH_TLS_CA"] = ca
-	a.refuses(2, []string{"refusing a plain nats://", "tls_ca", "nothing was changed"}, "--server", "nats://example.invalid:4222", "--dry-run")
+	a.env["MASH_CA"] = ca
+	a.refuses(2, []string{"refusing a plain nats://", "MASH_CA", "nothing was changed"}, "--server", "nats://example.invalid:4222", "--dry-run")
 }

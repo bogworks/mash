@@ -65,7 +65,7 @@ This path needs no Synadia account and no server you run by hand. You need:
 
 Start the server. `mashctl` is the tool that runs the server and makes endpoints; `mash` is what each session runs.
 
-If `MASH_URL`, `MASH_OWNER` or other `MASH_*` variables are set from another setup, clear them first (`unset $(env | sed -n 's/^\(MASH_[A-Z_]*\)=.*/\1/p')`). They override the config files, and the commands below would go to that other server.
+If `MASH_SERVER`, `MASH_ENDPOINT` or other `MASH_*` variables are set from another setup, clear them first (`unset $(env | sed -n 's/^\(MASH_[A-Z_]*\)=.*/\1/p')`). They override the config files, and the commands below would go to that other server.
 
 ```sh
 go install github.com/bogworks/mash/cmd/mashctl@v0.5.5   # mashctl is not in the release assets
@@ -101,22 +101,22 @@ Then install the plugin and start two sessions:
 mash plugin export ~/.mash-plugin
 claude plugin marketplace add ~/.mash-plugin
 claude plugin install mash@mash
-MASH_OWNER=alice MASH_GROUP=dev MASH_NAME=design claude --dangerously-load-development-channels plugin:mash@mash   # terminal 1
-MASH_OWNER=alice MASH_GROUP=dev MASH_NAME=review claude --dangerously-load-development-channels plugin:mash@mash   # terminal 2
+MASH_ENDPOINT=alice.dev.design claude --dangerously-load-development-channels plugin:mash@mash   # terminal 1
+MASH_ENDPOINT=alice.dev.review claude --dangerously-load-development-channels plugin:mash@mash   # terminal 2
 ```
 
 Send mail from a shell and read it:
 
 ```sh
-MASH_OWNER=alice MASH_GROUP=dev MASH_NAME=design mash send alice.dev.review "hello"
-MASH_OWNER=alice MASH_GROUP=dev MASH_NAME=review mash inbox
+MASH_ENDPOINT=alice.dev.design mash send alice.dev.review "hello"
+MASH_ENDPOINT=alice.dev.review mash inbox
 ```
 
 When you are done, stop the local server: `D=<the server directory that mashctl init --local printed>; kill "$(cat "$D/server.pid")"`. The directory is `server` inside the config directory, which depends on `MASH_CONFIG_DIR` and `XDG_CONFIG_HOME`, so use the one `init --local` printed.
 
-`MASH_OWNER` (or `owner` in `config.json`), `MASH_GROUP` (no default and no config key; a session without it stops with `group_missing`, exit 2) and `MASH_NAME`, the instance, name the endpoint a session runs as. Each endpoint has a directory record and a credentials ("creds") file named `<owner>.<group>.<instance>.creds` that proves who it is; `mashctl endpoint create` makes both. Recipients in `mash send` are written `owner.group.instance` or the flat key `owner_group_instance`; a bare name is refused.
+`MASH_ENDPOINT` (or `endpoint` in `config.json`, or `--endpoint`), the full address `owner.group.name`, names the endpoint a session runs as. With none set, mash uses the one endpoint whose creds file sits directly in the config directory; if several are installed it stops and you name one. Each endpoint has a directory record and a credentials ("creds") file named `<owner>.<group>.<instance>.creds` that proves who it is; `mashctl endpoint create` makes both. Recipients in `mash send` are written `owner.group.instance` or the flat key `owner_group_instance`; a bare name is refused.
 
-`mashctl init --local` makes a server on port 4222 by default; if something else uses 4222, pass `--port N` to pick another. The server uses TLS with a certificate from a local certificate authority that `init --local` makes (`ca.pem` in the server directory); the `url` in `config.json` is `tls://127.0.0.1:4222` and `tls_ca` names `ca.pem`, so `mashctl` and endpoints on this host need no extra setting.
+`mashctl init --local` makes a server on port 4222 by default; if something else uses 4222, pass `--port N` to pick another. The server uses TLS with a certificate from a local certificate authority that `init --local` makes (`ca.pem` in the server directory); `servers` in `config.json` is `tls://127.0.0.1:4222` and `ca` names `ca.pem`, so `mashctl` and endpoints on this host need no extra setting.
 
 `--channels` and `--dangerously-load-development-channels` are Claude Code research-preview flags. They are not shown in `claude --help`, but they work.
 
@@ -157,10 +157,10 @@ See it working first: [two Claude Code sessions exchanging mail, one woken by it
 4. Start a session as an endpoint, and mail the other one:
 
    ```sh
-   MASH_GROUP=<group> MASH_NAME=alice claude --channels plugin:mash@mash
+   MASH_ENDPOINT=<owner>.. claude --channels plugin:mash@mash
    ```
 
-   Ask Claude to send "hello" to `<owner>.<group>.bob`. In a second terminal, `MASH_GROUP=<group> MASH_NAME=bob claude --channels plugin:mash@mash` receives it; Claude can answer with the `reply` or `send` tool, and `MASH_GROUP=<group> MASH_NAME=alice mash inbox` shows the mailbox from a shell.
+   Ask Claude to send "hello" to `<owner>.<group>.bob`. In a second terminal, `MASH_ENDPOINT=<owner>.. claude --channels plugin:mash@mash` receives it; Claude can answer with the `reply` or `send` tool, and `MASH_ENDPOINT=<owner>.. mash inbox` shows the mailbox from a shell.
 
 The free tier allows 5 streams (mash uses 2 shared, plus 1 per endpoint, so 3 endpoints), 5 connections (one per live session), a 512 KiB message payload (mash caps sends to the server's `max_payload`), and R1 only (no replication, so no HA). Limits, and what to do when the script fails, are in [docs/synadia.md](docs/synadia.md).
 
@@ -196,7 +196,7 @@ mash needs a NATS server in operator mode (the NATS setup where an operator key 
 
 Requirements: Claude Code 2.1.312 or newer (the oldest version a live receipt passed on; mash does not refuse older ones, `status` warns).
 
-You need a NATS server in operator mode with JetStream (TLS recommended: use a `tls://` url, and for a private CA or mutual TLS set `tls_ca`, `tls_cert` and `tls_key`; see [docs/install.md](docs/install.md#4-configuration)), an account for mash, and Claude Code with channels (a claude.ai or Console sign-in, not Bedrock, Agent Platform or Foundry; organisations need an Owner to allow mash; the channel wakes an idle session, and hooks deliver the mail). [docs/install.md](docs/install.md) covers it end to end. The short version:
+You need a NATS server in operator mode with JetStream (TLS recommended: use a `tls://` url, and for a private CA or mutual TLS set `ca`, `tls_cert` and `tls_key`; see [docs/install.md](docs/install.md#4-configuration)), an account for mash, and Claude Code with channels (a claude.ai or Console sign-in, not Bedrock, Agent Platform or Foundry; organisations need an Owner to allow mash; the channel wakes an idle session, and hooks deliver the mail). [docs/install.md](docs/install.md) covers it end to end. The short version:
 
 ```sh
 go install github.com/bogworks/mash/cmd/mash@v0.5.5      # Go 1.27.4 or newer; or use the release binary above. `mash version` prints the tag and `commit unknown`
@@ -204,7 +204,7 @@ claude plugin marketplace add bogworks/mash
 claude plugin install mash@mash
 # allowlist the channel once per machine (managed settings are the admin-controlled settings file of Claude Code): write /etc/claude-code/managed-settings.json (Linux)
 # or /Library/Application Support/ClaudeCode/managed-settings.json (macOS), see docs/install.md section 3, then:
-MASH_GROUP=dev MASH_NAME=my-session claude --channels plugin:mash@mash
+MASH_ENDPOINT=alice.dev.my-session claude --channels plugin:mash@mash
 ```
 
 To install the plugin of exactly the mash you have (a pinned release, no GitHub fetch), export it and add the directory as the marketplace:

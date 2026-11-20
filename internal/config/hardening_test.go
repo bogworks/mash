@@ -70,7 +70,7 @@ func TestRedactURL(t *testing.T) {
 
 func TestRelativePathsResolveAgainstConfigDir(t *testing.T) {
 	home := t.TempDir()
-	writeFile(t, home, `{"url":"tls://x:4222","owner":"o","admin_creds":"admin.creds","tls_ca":"ca.pem","tls_cert":"c.pem","tls_key":"k.pem"}`)
+	writeFile(t, home, `{"servers":"tls://x:4222","admin_creds":"admin.creds","ca":"ca.pem","tls_cert":"c.pem","tls_key":"k.pem"}`)
 	t.Chdir(t.TempDir())
 	c, err := load(envOf(nil), home)
 	if err != nil {
@@ -85,7 +85,7 @@ func TestRelativePathsResolveAgainstConfigDir(t *testing.T) {
 
 func TestAbsolutePathsKept(t *testing.T) {
 	home := t.TempDir()
-	writeFile(t, home, `{"url":"tls://x:4222","owner":"o","admin_creds":"/etc/a.creds","tls_ca":"/etc/ca.pem"}`)
+	writeFile(t, home, `{"servers":"tls://x:4222","admin_creds":"/etc/a.creds","ca":"/etc/ca.pem"}`)
 	c, err := load(envOf(nil), home)
 	if err != nil {
 		t.Fatal(err)
@@ -104,7 +104,7 @@ func TestWorldWritableConfigRefused(t *testing.T) {
 		refused bool
 	}{{0o600, false}, {0o644, false}, {0o664, false}, {0o666, true}, {0o602, true}} {
 		home := t.TempDir()
-		writeFile(t, home, `{"url":"tls://x:4222","owner":"o"}`)
+		writeFile(t, home, `{"servers":"tls://x:4222"}`)
 		p := filepath.Join(home, ".config", "mash", "config.json")
 		if err := os.Chmod(p, c.mode); err != nil {
 			t.Fatal(err)

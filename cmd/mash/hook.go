@@ -90,7 +90,7 @@ func hook(cfg config.Config, cfgErr error, adapter host.Adapter, env func(string
 			sum := sha256.Sum256([]byte(id.SessionID + "\x00" + who))
 			key := hex.EncodeToString(sum[:])[:16]
 			if !sp.Told(key) {
-				text := fmt.Sprintf("mash: this copy of the session is not receiving mail. Another Claude process of this same session (pid %d) holds the endpoint %s; mail goes to that process. End one of the two, or run this one under a different MASH_NAME.",
+				text := fmt.Sprintf("mash: this copy of the session is not receiving mail. Another Claude process of this same session (pid %d) holds the endpoint %s; mail goes to that process. End one of the two, or run this one under a different endpoint (MASH_ENDPOINT).",
 					host.OwnerPID(sp.Owner()), cfg.DisplayName())
 				if _, err := stdout.Write(host.Notice(trig.Event, text)); err == nil {
 					told = true

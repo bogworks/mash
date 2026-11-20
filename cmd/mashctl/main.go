@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bogworks/mash/internal/cliframe"
 	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/ctl"
 	"github.com/bogworks/mash/internal/endpoint"
@@ -57,6 +58,20 @@ func runVerbs(args []string, env func(string) string, lookup config.Lookup, stdo
 		fmt.Fprintln(stderr, msg)
 		return 2
 	}
+	// The global options are taken out of the arguments wherever they stand; a flag shadows its environment variable.
+	// mashctl's own --sys-creds and --servers stay as they are (extractServerFlags below).
+	spec := cliframe.Spec{Tool: "mashctl", CredsEnv: "MASH_ADMIN_CREDS", CredsKey: "admin_creds"}
+	global, rest0, gerr := cliframe.ExtractOwning(spec, args, map[string][]string{"endpoint": {"--json"}, "audit": {"--json"}, "issued": {"--json"}, "inbox": {"--json"}, "adopt": {"--server"}}) // these parse their own
+	if gerr != nil {
+		fmt.Fprintf(stderr, "mashctl: %s\n", gerr)
+		return 2
+	}
+	if len(rest0) == 0 {
+		fmt.Fprint(stderr, ctl.Usage("mashctl"))
+		return 2
+	}
+	args = rest0
+	env, lookup = global.Shadow(spec, env, lookup)
 	if serverFlagVerbs[args[0]] {
 		rest, env2, err := extractServerFlags(args[1:], env)
 		if err != nil {

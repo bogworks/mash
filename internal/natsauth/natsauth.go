@@ -122,7 +122,7 @@ func TLSOptions(ca, cert, key string) []nats.Option {
 }
 
 // TLSHint appends the setting to change to a connect error that is a TLS failure: a server certificate the client
-// does not trust points at tls_ca, a server that refuses the client's certificate (or wants one) at tls_cert and tls_key.
+// does not trust points at "ca" (MASH_CA), a server that refuses the client's certificate (or wants one) at tls_cert and tls_key.
 // Any other error is returned unchanged.
 func TLSHint(err error) error {
 	if err == nil {
@@ -134,14 +134,14 @@ func TLSHint(err error) error {
 	msg := err.Error()
 	switch {
 	case errors.As(err, &unknown), errors.As(err, &invalid), errors.As(err, &host), strings.Contains(msg, "x509:"):
-		return fmt.Errorf("%w (the server's certificate is not trusted: set tls_ca or MASH_TLS_CA to the PEM file of the CA that signed it)", err)
+		return fmt.Errorf("%w (the server's certificate is not trusted: set \"ca\" or MASH_CA to the PEM file of the CA that signed it)", err)
 	case strings.Contains(msg, "remote error: tls:"), strings.Contains(msg, "closed by remote after TLS handshake"):
 		return fmt.Errorf("%w (the server refused the client certificate or requires one: set tls_cert and tls_key, or MASH_TLS_CERT and MASH_TLS_KEY, to a certificate the server's CA signed)", err)
 	}
 	return err
 }
 
-const noServersHint = "(check MASH_URL and that at least one listed server is up)"
+const noServersHint = "(check MASH_SERVER and that at least one listed server is up)"
 
 // NoServersHint appends what to check to a "no servers available for connection" error: the URL list, and that one
 // listed server is up. Any other error is returned unchanged.
@@ -174,7 +174,7 @@ func serverParts(entry string) (scheme, host string) {
 }
 
 // plainHint is the tail of every refusal of a plain connection: the setting that allows it and the fix.
-const plainHint = "set insecure_plaintext (MASH_INSECURE_PLAINTEXT=1) to allow plain text; the fix is to use a tls:// URL with the server's certificate (tls_ca for a private CA)"
+const plainHint = "set insecure_plaintext (MASH_INSECURE_PLAINTEXT=1) to allow plain text; the fix is to use a tls:// URL with the server's certificate (MASH_CA or \"ca\" for a private CA)"
 
 // plainRefusal is the error for a plain scheme (every one but tls and wss) to host, with no override. It names the
 // scheme and the host, never userinfo.
@@ -219,7 +219,7 @@ func RequireTLS(url string, insecurePlaintext bool) (opts []nats.Option, warning
 			}
 			plain = true
 		default:
-			return nil, "", fmt.Errorf("mash: unsupported scheme %q for %q (use tls://, or wss://): the client would dial it as plain text; the fix is to use a tls:// URL with the server's certificate (tls_ca for a private CA)", scheme, host)
+			return nil, "", fmt.Errorf("mash: unsupported scheme %q for %q (use tls://, or wss://): the client would dial it as plain text; the fix is to use a tls:// URL with the server's certificate (MASH_CA or \"ca\" for a private CA)", scheme, host)
 		}
 	}
 	opts = []nats.Option{nats.IgnoreDiscoveredServers()}

@@ -3,8 +3,8 @@
 `mashctl audit` lists mash's side of the population as the server and the creds directories hold it (its state, not its use, see [What it cannot see](#what-it-cannot-see)): every directory
 record and every inbox stream in the account, which are running, the state of each inbox, and the orphans.
 It is read only: it writes nothing to the server and nothing to disk, and it can be run at any time, on any number of
-machines. It needs the same admin credentials and settings as the other `mashctl` verbs (`MASH_URL`,
-`MASH_ADMIN_CREDS`, `MASH_OWNER`).
+machines. It needs the same admin credentials and settings as the other `mashctl` verbs (`MASH_SERVER`,
+`MASH_ADMIN_CREDS`, `MASH_ENDPOINT`).
 
 ```text
 mashctl audit [--json] [--strict] [--creds-dir DIR] [--compare EARLIER.json]

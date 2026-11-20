@@ -266,8 +266,8 @@ func TestQuickstartCreatesEndpointsAndDeletesAdmin(t *testing.T) {
 		t.Errorf("output leaks a secret:\n%s", r.out)
 	}
 	cfg := readConfig(t, home)
-	if cfg["url"] != e.URL || cfg["owner"] != "alice" {
-		t.Errorf("config = %v, want url %s owner alice", cfg, e.URL)
+	if servers, _ := cfg["servers"].([]any); len(servers) != 1 || servers[0] != e.URL || cfg["owner"] != nil || cfg["url"] != nil {
+		t.Errorf("config = %v, want servers [%s]", cfg, e.URL)
 	}
 	for _, n := range []string{qa("alice-a"), qa("alice-b")} {
 		fi, err := os.Stat(filepath.Join(home, ".config", "mash", n+".creds"))
@@ -405,7 +405,7 @@ func TestQuickstartRefusals(t *testing.T) {
 			t.Errorf("users left = %v, want none (the admin user must be deleted)", n)
 		}
 	})
-	// A refusal after config.json was written (mash admin init has run) must not leave the new url and owner behind.
+	// A refusal after config.json was written (mash admin init has run) must not leave the new servers behind.
 	t.Run("failed run restores or removes the config", func(t *testing.T) {
 		e2 := testenv.Start(t) // its own directory, so this subtest does not depend on the others
 		first := runScript(t, newFake(t, e2, 5), t.TempDir(), nil, "--group", "eng", "--owner", "alice", "--endpoint", "old-a", "--endpoint", "old-b", "--no-test")
@@ -420,7 +420,7 @@ func TestQuickstartRefusals(t *testing.T) {
 			if err := os.MkdirAll(filepath.Dir(cfgPath(home)), 0o700); err != nil {
 				t.Fatal(err)
 			}
-			old := []byte("{ \"url\": \"nats://other:4222\",\n  \"owner\": \"alice\" }\n")
+			old := []byte("{ \"servers\": [\"nats://other:4222\"],\n  \"settle_ms\": 50 }\n")
 			if err := os.WriteFile(cfgPath(home), old, 0o600); err != nil {
 				t.Fatal(err)
 			}
@@ -451,7 +451,7 @@ func TestQuickstartRefusals(t *testing.T) {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"url":"nats://other:4222","owner":"alice"}`), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"servers":["nats://other:4222"]}`), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		r := runScript(t, f, home, nil, "--group", "eng", "--owner", "alice", "--endpoint", "a")
@@ -541,7 +541,7 @@ func TestQuickstartPartialFailureKeepsWhatSucceeded(t *testing.T) {
 	if _, err := os.Stat(credsPath(home, qa("alice-b"))); err == nil {
 		t.Errorf("alice-b creds exist")
 	}
-	if cfg := readConfig(t, home); cfg["owner"] != "alice" {
+	if cfg := readConfig(t, home); cfg["servers"] == nil {
 		t.Errorf("config = %v", cfg)
 	}
 	if !strings.Contains(r.out, "removed the unprovisioned NATS user(s): "+qa("alice-b")) || !strings.Contains(r.out, "Remaining, provisioned and working: "+qa("alice-a")) {

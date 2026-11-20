@@ -23,7 +23,7 @@ func TestServeStartupRoundTrips(t *testing.T) {
 			for k, v := range r.env["peer1"] { // an endpoint no session is serving
 				env[k] = v
 			}
-			env["MASH_URL"] = r.px.URL()
+			env["MASH_SERVER"] = r.px.URL()
 			r.px.Reset()
 			s := startServe(t, env)
 			s.initialize(t)

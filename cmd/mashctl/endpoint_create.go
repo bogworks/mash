@@ -374,7 +374,7 @@ func epNextCredential(a sap.Address, jwtPath string) epStep {
 func epNextSession(a sap.Address) epStep {
 	return epStep{Sender: "endpoint", Step: "session", Action: "start a session as this endpoint",
 		Address: a.String(), Purpose: "use",
-		Detail: fmt.Sprintf("MASH_OWNER=%s MASH_GROUP=%s MASH_NAME=%s", a.Owner, a.Group, a.Instance)}
+		Detail: fmt.Sprintf("MASH_ENDPOINT=%s", a.String())}
 }
 
 // epIssuedRefusal is the refusal enroll.Create would make for publicKey from the issue record, or nil. It is the same
@@ -542,7 +542,7 @@ func runEndpointCreate(args []string, env func(string) string, lookup config.Loo
 		owner = cfg.Owner
 	}
 	if owner == "" {
-		return refuse(2, &epRefusal{"owner_missing", `no owner: write --owner, alice/dev/design, or set MASH_OWNER (config.json "owner")`})
+		return refuse(2, &epRefusal{"owner_missing", `no owner: write --owner, alice/dev/design, or set MASH_ENDPOINT`})
 	}
 	if name == "" {
 		return refuse(2, &epRefusal{"name_missing", "no endpoint name: write alice/dev/design or --name design"})
