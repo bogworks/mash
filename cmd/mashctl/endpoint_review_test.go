@@ -122,12 +122,12 @@ func TestEndpointCreateFlatJSON(t *testing.T) {
 		t.Fatalf("%d %q %q", code, so, se)
 	}
 	m := jsonObject(t, so)
-	if len(m) != 3 || m["address"] != a.String() || m["installed_here"] != false || m["join_file"] != filepath.Join(out, "f.join") {
+	if len(m) != 4 || m["address"] != a.String() || m["installed_here"] != false || m["creds"] != nil || m["join_file"] != filepath.Join(out, "f.join") {
 		t.Errorf("out doc %v", m)
 	}
 	so, _, _ = h.run("endpoint", "create", ad("flat2").String(), "--json")
 	m = jsonObject(t, so)
-	if len(m) != 3 || m["address"] != ad("flat2").String() || m["installed_here"] != true || m["join_file"] != nil {
+	if len(m) != 4 || m["address"] != ad("flat2").String() || m["installed_here"] != true || m["creds"] != h.creds(ad("flat2")) || m["join_file"] != nil {
 		t.Errorf("installed doc %v", m)
 	}
 }

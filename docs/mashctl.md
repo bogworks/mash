@@ -169,7 +169,7 @@ With `--detail` the lines `servers: ...`, `credentials file: PATH` (or `join fil
 Would create endpoint alice.dev.design
 ```
 
-With `--json`, `{"address": "alice.dev.design", "installed_here": true, "join_file": null}`. With `--out`, `installed_here` is `false` and `join_file` is the path. Neither the seed nor the JWT is printed.
+With `--json`, `{"address": "alice.dev.design", "installed_here": true, "creds": "~/.config/mash/alice.dev.design.creds", "join_file": null}`, where `creds` is the installed credentials file. With `--out`, `installed_here` is `false`, `creds` is `null` and `join_file` is the path. With `--dry-run` the same keys report the planned paths, plus `"dry_run": true`. Neither the seed nor the JWT is printed.
 
 **Errors** are one line on standard error, `error: WHAT`, and at most one line `hint: COMMAND`; with `--json` they are `{"error": ..., "hint": ...}` on standard output. Exit codes: 0 done or planned, 1 failed, 2 the command line was wrong. For example:
 
