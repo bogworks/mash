@@ -1,0 +1,10 @@
+{
+  "name": "mash-setup",
+  "version": "0.5.6",
+  "description": "Skills to set mash up on this machine and to run it day to day. Install this first, then ask your agent to set mash up.",
+  "author": { "name": "Bogworks", "url": "https://github.com/bogworks" },
+  "homepage": "https://github.com/bogworks/mash",
+  "repository": "https://github.com/bogworks/mash",
+  "license": "Apache-2.0",
+  "keywords": ["mash", "setup", "nats", "skills"]
+}

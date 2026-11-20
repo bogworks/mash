@@ -26,7 +26,8 @@ func TestPluginManifests(t *testing.T) {
 		} `json:"plugins"`
 	}
 	readJSON(t, "../../.claude-plugin/marketplace.json", &mkt)
-	if mkt.Name != "mash" || len(mkt.Plugins) != 1 || mkt.Plugins[0].Name != "mash" || mkt.Plugins[0].Source != "./plugin" {
+	if mkt.Name != "mash" || len(mkt.Plugins) != 2 || mkt.Plugins[0].Name != "mash" || mkt.Plugins[0].Source != "./plugin" ||
+		mkt.Plugins[1].Name != "mash-setup" || mkt.Plugins[1].Source != "./mash-setup" {
 		t.Fatalf("marketplace %+v", mkt)
 	}
 	var pl struct {
