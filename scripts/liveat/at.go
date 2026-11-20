@@ -299,6 +299,7 @@ func (a *AT) Snapshot(label string, ctlHome Home, trees ...Home) Snapshot {
 		args []string
 	}{
 		{"list", []string{"endpoint", "list"}},
+		// T1b: audit and issued were removed from mashctl (replaced by doctor); these two calls now exit 2 and are rewritten in a later slice.
 		{"audit", []string{"audit", "--json"}},
 		{"issued", []string{"issued", "list", "--json"}},
 	} {

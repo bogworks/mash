@@ -14,7 +14,7 @@ import (
 
 // helpVerbs is every verb run dispatches; each takes -h and --help, prints its usage and changes nothing.
 var helpVerbs = [][]string{
-	{"audit"}, {"issued"}, {"issued", "list"}, {"issued", "check"}, {"version"},
+	{"doctor"}, {"version"},
 	{"endpoint"}, {"init"}, {"status"}, {"limits"}, {"limits", "show"}, {"limits", "apply"},
 	{"endpoint", "list"}, {"endpoint", "show"}, {"endpoint", "set"}, {"endpoint", "unset"}, {"endpoint", "suspend"}, {"endpoint", "resume"},
 	{"endpoint", "inbox"}, {"endpoint", "permissions"}, {"endpoint", "create"}, {"endpoint", "reissue"}, {"endpoint", "delete"},
@@ -69,8 +69,6 @@ func TestVerbUsagePicksOwnLines(t *testing.T) {
 		args      []string
 		want, not string
 	}{
-		{[]string{"issued", "check"}, "mashctl issued check", "mashctl issued list"},
-		{[]string{"issued", "list"}, "mashctl issued list", "mashctl issued check"},
 		{[]string{"version"}, "usage: mashctl version", ""},
 		{[]string{"limits", "show"}, "mashctl limits show", "mashctl limits apply"},
 		{[]string{"limits", "apply"}, "mashctl limits apply", "mashctl limits show"},
@@ -89,7 +87,7 @@ func TestVerbUsagePicksOwnLines(t *testing.T) {
 	}
 }
 
-// Help is only the first argument after the verb (after the sub-verb for issued): a value, a note or a
+// Help is only the first argument after the verb (after the sub-verb for limits): a value, a note or a
 // label that contains the words is never help.
 func TestHelpRequestedOnlyFirstArgument(t *testing.T) {
 	yes := []struct {
@@ -97,7 +95,7 @@ func TestHelpRequestedOnlyFirstArgument(t *testing.T) {
 		args []string
 	}{
 		{"endpoint", []string{"-h"}}, {"limits", []string{"-h"}},
-		{"issued", []string{"check", "--help"}}, {"issued", []string{"list", "-h"}}, {"issued", []string{"-h"}},
+		{"doctor", []string{"--help"}},
 		{"limits", []string{"apply", "--help"}}, {"limits", []string{"show", "-h"}},
 		{"version", []string{"--help"}},
 	}
@@ -111,7 +109,7 @@ func TestHelpRequestedOnlyFirstArgument(t *testing.T) {
 		args []string
 	}{
 		{"endpoint", []string{"n", "-h"}}, {"limits", []string{"-x", "--help"}}, {"init", []string{"n", "--help"}},
-		{"issued", []string{"check", "n", "--help"}},
+		{"limits", []string{"apply", "n", "--help"}}, {"doctor", []string{"--strict", "--help"}},
 	}
 	for _, c := range no {
 		if helpRequested(c.verb, c.args) {

@@ -84,6 +84,10 @@ Shown as `mash: endpoint X stopped: ... Mail is off for this session.` The lease
 - After a network blip, clients can take 30 to 60 seconds to reconnect because the server rate-limits new connections per source address ([operations.md](operations.md) Troubleshooting).
 - Synadia Cloud's free tier allows 5 connections, one per live session ([synadia.md](synadia.md)).
 
+## An administrator's check: `mashctl doctor`
+
+On the machine that runs `mashctl`, `mashctl doctor` checks the server, mash's storage on it and every endpoint's records in one run, changes nothing, and prints the command that fixes the first thing that is wrong (`hint:`). It exits 1 on a problem. See [doctor.md](doctor.md) for the checks.
+
 ## `send` fails: message too large
 
 `mash: message is N bytes with headers; this server accepts at most M (its max_payload). Send a smaller message or put the content in a file and send the path.` Or, when the server allows more than mash does: `mash: message is N bytes with headers; the limit is 1048576`. Nothing was published. Mash's cap is 1 MiB including headers, or the server's `max_payload` if smaller (512 KiB on Synadia's free tier). Send a file path instead of the content.

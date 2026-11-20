@@ -41,19 +41,13 @@ func Usage(prog string) string {
 	line("init --config FILE [--dry-run] [--json]", "set mash up on a NATS server you already have, from a setup file; safe to run again")
 	line("status [--json]", "one line per server: whether it works, how many endpoints it has, how many are online")
 	line("limits show [--json]", "print the limits in force")
+	line("doctor [--strict] [--json]", "check the server, mash's storage on it and every endpoint's records, and say how to fix what is wrong; changes nothing")
 	line("limits apply [prefix] [--dry-run] [--json]", "raise existing inboxes to the configured limits (never lowers); prefix is an owner, owner.group or one address")
 	if prog == "mashctl" {
-		line("audit [--json] [--strict] [--creds-dir DIR]", "read only: list every directory record, inbox stream, lease and creds file with their state, the orphans; --strict exits 1 on an orphan, an unreadable item, or unread mail lost to eviction (a lower bound from consumer sequences: mail fetched but never shown, or redelivered, can make it undercount, so a clean audit does not prove nothing was lost)")
-		issuedLines(line)
 		endpointLines(line)
 		line("version [--json]", "print the version and the commit")
 	}
 	return b.String()
-}
-
-func issuedLines(line func(left, right string)) {
-	line("issued list [--json]", "the issue record: every user JWT mashctl issued (public key, address, kind, tags, time, purpose, revoked time)")
-	line("issued check [--json]", "compare the user keys connected to every server with the record and report any key mash did not issue and any revoked key still connected; exit 1 on one, 2 when the check could not complete")
 }
 
 func endpointLines(line func(left, right string)) {

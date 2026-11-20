@@ -71,8 +71,8 @@ func TestIssuedCheckRefusesForeignIssuer(t *testing.T) {
 	if _, err := ks.InstallOperatorJWT(tok); err != nil {
 		t.Fatal(err)
 	}
-	if out, errb, code := e.run("issued", "check"); code == 1 && strings.Contains(out+errb, "not an accepted issuer") {
-		t.Fatalf("issued check with operator.jwt: %d\n%s\n%s", code, out, errb)
+	if out, errb, code := e.run("doctor"); code == 1 && strings.Contains(out+errb, "not an accepted issuer") {
+		t.Fatalf("doctor with operator.jwt: %d\n%s\n%s", code, out, errb)
 	}
 }
 
@@ -113,7 +113,7 @@ func TestAdminAndSystemConnectionsRequireTLS(t *testing.T) {
 	e := newApplyEnv(t).withDirectory()
 	e.env["MASH_INSECURE_PLAINTEXT"] = ""
 	e.env["MASH_ADMIN_CREDS"] = e.pl.Creds
-	for _, args := range [][]string{{"issued", "check"}, {"endpoint", "list"}, {"limits", "apply"}, {"status"}} {
+	for _, args := range [][]string{{"doctor"}, {"endpoint", "list"}, {"limits", "apply"}, {"status"}} {
 		out, errb, code := e.run(args...)
 		refused(t, fmt.Sprint(args), code, out, errb)
 	}
@@ -125,7 +125,7 @@ func TestAdminAndSystemConnectionsRequireTLS(t *testing.T) {
 	// a non-loopback plain URL is refused without the override, before any connection; with it, it is allowed (and
 	// warned about), so the failure is a connection failure, not a refusal
 	e.env["MASH_SERVER"] = "nats://192.0.2.1:4222"
-	for _, args := range [][]string{{"issued", "check"}, {"endpoint", "list"}} {
+	for _, args := range [][]string{{"doctor"}, {"endpoint", "list"}} {
 		e.env["MASH_INSECURE_PLAINTEXT"] = ""
 		out, errb, code := e.run(args...)
 		refused(t, fmt.Sprint(args)+" non-loopback", code, out, errb)
@@ -197,8 +197,7 @@ func TestPlainURLRefusalExitsTwoEverywhere(t *testing.T) {
 		{"endpoint", "create", "o.g.a"},
 		{"endpoint", "reissue", "o.g.a"},
 		{"endpoint", "delete", "o.g.a", "--yes"},
-		{"issued", "check"},
-		{"audit"},
+		{"doctor"},
 		{"limits", "apply"},
 		{"status"},
 	} {

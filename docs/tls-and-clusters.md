@@ -211,7 +211,7 @@ Open the client port (4222) to the machines that run `mashctl` and endpoints, an
 mashctl endpoint delete acme.dev.design
 ```
 
-A successful revocation prints `servers acknowledged the revocation: 3`. `mashctl issued check` ends with `3 of 3 servers answered` when the cluster formed.
+A successful revocation prints `servers acknowledged the revocation: 3`. `mashctl doctor` shows `keys       ok` when the cluster formed and every one of the three servers answered; with fewer it fails the `keys` check and says why.
 
 An endpoint's `servers` may list the servers the same way. An inbox lives on one server (one replica), so an inbox is unavailable while that server is down; see [One server down](operations.md#one-server-down).
 
@@ -283,7 +283,7 @@ While this page was written, these steps were also run on one host, on loopback,
 - One operator-mode server, with the `tls` block above added: `mashctl` over `tls://localhost` failed without `ca` and worked with it.
 - The same server with `verify: true`: a connection without a client certificate failed with the message above, and one with `tls_cert` and `tls_key` worked.
 - `mashctl` set up with a `tls://` URL and its own admin user in a second, empty config directory, then `endpoint create --public-key` from it, `mash key create` and `mash credential create` in a third, and `endpoint delete` with `system_creds` in `config.json`.
-- Three servers in one cluster with the `cluster` TLS block and `verify: true`, one shared certificate for all three, listing `localhost` and `127.0.0.1`: the setup step reported `3 server(s) replied`, then bucket creation, `issued check` (`3 of 3 servers answered`), `endpoint create` and `endpoint delete` (`3 server(s) acknowledged`) worked with a three-entry `url`.
+- Three servers in one cluster with the `cluster` TLS block and `verify: true`, one shared certificate for all three, listing `localhost` and `127.0.0.1`: the setup step reported `3 server(s) replied`, then bucket creation, `mashctl doctor` (the `keys` check, with all three servers answering), `endpoint create` and `endpoint delete` (`3 server(s) acknowledged`) worked with a three-entry `url`.
 
 What was not run, by AT-005 or by these steps:
 
