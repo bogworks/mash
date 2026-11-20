@@ -13,7 +13,7 @@
 #
 # Environment:
 #   MLNT_IMAGES   space-separated image tags (default: debian:stable ubuntu:24.04 ubuntu:26.04)
-#   MLNT_CASES    space-separated case numbers (default: 1 2 ... 21)
+#   MLNT_CASES    space-separated case numbers (default: 1 2 ... 22)
 #   MLNT_REPORT   receipt file (markdown; default: receipt-<run id>.md in the scratch
 #                 directory, or in ${TMPDIR:-/tmp} when the scratch directory is made here)
 #   MLNT_SCRATCH  scratch directory (default: a new mktemp -d under ${TMPDIR:-/tmp},
@@ -499,9 +499,9 @@ case8() { # argument and path checking
     run --help
     chk "--help: exit 0" rc_is 0
     chk "--help: usage text" has "$W/out" 'usage: mash-local-nats-setup.sh'
-    run --dir /tmp/mlnt-out --owner acme
-    chk "--dir outside \$HOME: exit 1" rc_is 1
-    chk "--dir outside \$HOME: nothing made" absent /tmp/mlnt-out
+    run --dir / --owner acme
+    chk "--dir /: exit 1" rc_is 1
+    chk "--dir /: says absolute path, not /" has "$W/err" 'absolute path, and not /'
     run --dir "$H" --owner acme
     chk "--dir \$HOME itself: exit 1" rc_is 1
     run --dir relative/dir --owner acme
@@ -866,6 +866,59 @@ case17() { # a parent folder others can write to is refused unless sticky
     stopdir "$H/after"
 }
 
+case22() { # --dir anywhere: outside $HOME, ancestors owned by you or root, symlinks
+    local t d pid
+    ROUTE="file"
+    # (1) a parent you own, outside $HOME: the full life cycle
+    t=$(mktemp -d /tmp/mlnt.XXXXXX); d=$t/mash-nats
+    chk "control: the parent is outside \$HOME, mode 700" [ "$(stat -c %a "$t")" = 700 ]
+    run --owner acme --dir "$d"
+    check_success "$d" acme
+    pid=$(pid_of "$d")
+    chk "outside \$HOME: the dir is mode 700" [ "$(stat -c %a "$d")" = 700 ]
+    run --stop --dir "$d"
+    chk "outside \$HOME: --stop: exit 0" rc_is 0
+    chk "outside \$HOME: --stop: server gone" gone "$pid"
+    run --start --dir "$d"
+    chk "outside \$HOME: --start: exit 0" rc_is 0
+    chk "outside \$HOME: --start: a live pid" alive "$(pid_of "$d")"
+    pid=$(pid_of "$d")
+    ptyrun "$d" bash "$SCRIPT" --remove --dir "$d"
+    chk "outside \$HOME: --remove on a terminal: exit 0" rc_is 0
+    chk "outside \$HOME: --remove: dir gone" absent "$d"
+    chk "outside \$HOME: --remove: server gone" gone "$pid"
+    rmdir "$t"
+    # (2) a parent owned by root that you cannot write to
+    for d in /opt/mlnt-x /usr/local/share/mlnt-x; do
+        run --owner acme --dir "$d"
+        chk "root-owned parent $d: exit 1" rc_is 1
+        chk "root-owned parent $d: says cannot write to ${d%/*}" hasx "$W/err" "error: cannot write to ${d%/*}"
+        chk "root-owned parent $d: hint says pick a folder you own" has "$W/err" 'hint: pick a folder you own'
+        chk "root-owned parent $d: nothing made" absent "$d"
+    done
+    # (3) an ancestor owned by another user
+    run --owner acme --dir /home/other/sub/n
+    chk "ancestor owned by another user: exit 1" rc_is 1
+    chk "other user's ancestor: says not owned by you or root" has "$W/err" 'not owned by you or root: /home/other'
+    chk "other user's ancestor: nothing made" absent /home/other/sub/n
+    # (4) symlink ancestors
+    t=$(mktemp -d /tmp/mlnt.XXXXXX); mkdir "$t/real"; ln -s "$t/real" "$t/mine"
+    run --owner acme --dir "$t/mine/n"
+    chk "symlink ancestor owned by you: exit 1" rc_is 1
+    chk "symlink ancestor: says symlink" has "$W/err" "refusing a symlink in the path: $t/mine"
+    chk "symlink ancestor: target untouched" [ -z "$(ls -A "$t/real")" ]
+    rm "$t/mine"; rmdir "$t/real" "$t"
+    run --owner acme --dir /mlnt-rootlink/n
+    chk "root-owned symlink ancestor: exit 0" rc_is 0
+    chk "root-owned symlink ancestor: the dir is made behind the link" [ -d /home/tester/linkdst/n ]
+    stopdir /mlnt-rootlink/n
+    # (5) / and a top-level folder in a root-owned /
+    run --owner acme --dir /
+    chk "--dir /: exit 1" rc_is 1
+    run --owner acme --dir /mlnt-top
+    chk "--dir /mlnt-top: cannot write to /" hasx "$W/err" 'error: cannot write to /'
+}
+
 case18() { # the owner name "system" is reserved
     local e
     ROUTE="file"
@@ -1006,7 +1059,7 @@ run_case() {
     case $CASE in
     15) case15 ;; 16) case16 ;; 17) case17 ;; 18) case18 ;; 19) case19 ;; 20) case20 ;; 21) case21 ;;
     1) case1 ;; 2) case2 ;; 3) case3 ;; 4) case4 ;; 5) case5 ;; 6) case6 ;; 7) case7 ;;
-    8) case8 ;; 9) case9 ;; 10) case10 ;; 11) case11 ;; 12) case12 ;; 13) case13 ;; 14) case14 ;;
+    8) case8 ;; 9) case9 ;; 10) case10 ;; 11) case11 ;; 12) case12 ;; 13) case13 ;; 14) case14 ;; 22) case22 ;;
     *) echo "FAIL: c$CASE: no such case" ;;
     esac
 }
@@ -1040,7 +1093,7 @@ else
     MADE_SCRATCH=1
 fi
 IMAGES=${MLNT_IMAGES:-"debian:stable ubuntu:24.04 ubuntu:26.04"}
-CASES=${MLNT_CASES:-"1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21"}
+CASES=${MLNT_CASES:-"1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22"}
 NCV=${MLNT_NATSCLI:-0.5.2}
 # sha256 of https://github.com/nats-io/natscli/releases/download/v0.5.2/nats-0.5.2-linux-amd64.zip,
 # computed once on 2026-11-20; the test fails if the download differs
@@ -1174,7 +1227,10 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     && rm -rf /var/lib/apt/lists/*
 COPY nats.zip /tmp/nats.zip
 RUN unzip -j -o /tmp/nats.zip '*/nats' -d /usr/local/bin && chmod 755 /usr/local/bin/nats && rm /tmp/nats.zip
-RUN useradd -m -s /bin/bash tester
+RUN useradd -m -s /bin/bash tester && useradd -m -s /bin/bash other \
+    && chmod 755 /home/other && mkdir /home/other/sub && chown other /home/other/sub \
+    && mkdir /home/tester/linkdst && chown tester /home/tester/linkdst \
+    && ln -s /home/tester/linkdst /mlnt-rootlink
 CF
 
 for tag in $IMAGES; do

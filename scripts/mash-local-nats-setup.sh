@@ -3,8 +3,10 @@
 # for mash (operator mode, TLS, JetStream, 127.0.0.1 only) using nats-server,
 # the nats command and openssl. It does not need nsc and installs nothing.
 #
-# Safety, in short: refuses root; DIR must be absolute, under $HOME, with no
-# symlink and only components you own; DIR is made exclusively (mode 0700);
+# Safety, in short: refuses root; DIR (default ~/mash-nats, or any absolute
+# --dir) must be a new folder in a parent you can write to, with every folder
+# above it owned by you or root and not writable by others, and no symlink
+# unless root owns it; DIR is made exclusively (mode 0700);
 # the failure trap removes only the DIR this run made, and only before the
 # marker file (mash-setup.json) exists; --remove needs the path typed on a
 # terminal; stop signals only the pid in server.pid after /proc confirms it
@@ -23,7 +25,7 @@ usage() {
 usage: mash-local-nats-setup.sh [--dir DIR] [--owner NAME] [--stop | --start | --remove]
 
   (default)    make a local NATS server and start it
-  --dir DIR    absolute path under $HOME (default $HOME/mash-nats)
+  --dir DIR    a new folder to use, absolute path (default $HOME/mash-nats)
   --owner NAME owner name; asked once on the terminal if not given
   --stop       stop the server
   --start      start an existing server again (after a reboot)
@@ -95,7 +97,8 @@ set_paths() {
     *) die 1 "HOME is not set to an absolute path" "set HOME and retry" ;;
     esac
     HOME_DIR=${HOME_DIR%/}
-    [ -n "$DIR" ] || DIR=$HOME_DIR/mash-nats
+    DEFAULT_DIR=0
+    if [ -z "$DIR" ]; then DIR=$HOME_DIR/mash-nats; DEFAULT_DIR=1; fi
     DIR=${DIR%/}
     UID_NOW=$(id -u)
 }
@@ -105,7 +108,7 @@ fileowner() { stat -c %u "$1" 2>/dev/null || stat -f %u "$1"; }
 # check_parent_mode DIR: refuse a folder that group or others can write to,
 # unless it has the sticky bit (like /tmp), since they could swap what is under it
 check_parent_mode() {
-    _m=$(stat -c %a "$1" 2>/dev/null) || die 1 "cannot read the mode of $1" "check the folder and retry"
+    _m=$(stat -L -c %a "$1" 2>/dev/null) || die 1 "cannot read the mode of $1" "check the folder and retry"
     case $_m in '' | *[!0-7]*) die 1 "cannot read the mode of $1" "check the folder and retry" ;; esac
     _s=0
     [ "${#_m}" -lt 4 ] || _s=${_m%???}
@@ -119,8 +122,8 @@ check_parent_mode() {
 
 check_dir_path() {
     case $DIR in
-    "$HOME_DIR"/?*) ;;
-    *) die 1 "--dir must be an absolute path under $HOME_DIR: $DIR" \
+    /?*) ;;
+    *) die 1 "--dir must be an absolute path, and not /: ${DIR:-/}" \
         "for example $HOME_DIR/mash-nats" ;;
     esac
     case $DIR in
@@ -131,26 +134,47 @@ check_dir_path() {
     *//* | */./* | */../*)
         die 1 "--dir must not contain //, . or .. parts: $DIR" "give a plain path" ;;
     esac
-    [ -d "$HOME_DIR" ] || die 1 "HOME is not a directory: $HOME_DIR" "set HOME and retry"
-    [ "$(fileowner "$HOME_DIR")" = "$UID_NOW" ] ||
-        die 1 "HOME is not owned by you: $HOME_DIR" "run as the owner of your home folder"
-    _p=$HOME_DIR
-    _rest=${DIR#"$HOME_DIR"/}
-    while [ -n "$_rest" ]; do
-        check_parent_mode "$_p"
+    if [ "$DEFAULT_DIR" = 1 ]; then
+        [ -d "$HOME_DIR" ] || die 1 "HOME is not a directory: $HOME_DIR" "set HOME and retry"
+        [ "$(fileowner "$HOME_DIR")" = "$UID_NOW" ] ||
+            die 1 "HOME is not owned by you: $HOME_DIR" "run as the owner of your home folder, or pass --dir"
+    fi
+    # walk from / over every ancestor of DIR (DIR itself is not one)
+    _p=''
+    _rest=${DIR#/}
+    check_ancestor / ''
+    while :; do
         _comp=${_rest%%/*}
-        case $_rest in */*) _rest=${_rest#*/} ;; *) _rest='' ;; esac
+        case $_rest in */*) _rest=${_rest#*/} ;; *) break ;; esac
         _p=$_p/$_comp
-        if [ -L "$_p" ]; then
-            die 1 "refusing a symlink in the path: $_p" "pass a real folder with --dir"
-        fi
-        if [ -e "$_p" ]; then
-            [ "$(fileowner "$_p")" = "$UID_NOW" ] ||
-                die 1 "not owned by you: $_p" "pass a folder you own with --dir"
-        elif [ -n "$_rest" ]; then
+        if [ ! -e "$_p" ]; then
             die 1 "parent folder does not exist: $_p" "make it first, or pick another --dir"
         fi
+        check_ancestor "$_p" "$_p"
     done
+    if [ -L "$DIR" ]; then
+        die 1 "refusing a symlink in the path: $DIR" "pass a real folder with --dir"
+    fi
+    _par=${DIR%/*}
+    [ -n "$_par" ] || _par=/
+    # a DIR that exists is reported by the create step ("already exists")
+    if [ "$MODE" = create ] && [ ! -e "$DIR" ] && [ ! -w "$_par" ]; then
+        die 1 "cannot write to $_par" "pick a folder you own with --dir"
+    fi
+}
+
+# check_ancestor PATH [LINKCHECK]: an ancestor of DIR must not be a symlink
+# unless root owns the link (system links such as /home), must be owned by you
+# or root, and must not be writable by others (see check_parent_mode)
+check_ancestor() {
+    if [ -n "$2" ] && [ -L "$1" ] && [ "$(fileowner "$1")" != 0 ]; then
+        die 1 "refusing a symlink in the path: $1" "pass a real folder with --dir"
+    fi
+    _o=$(stat -L -c %u "$1" 2>/dev/null) || die 1 "cannot read $1" "check the folder and retry"
+    if [ "$_o" != "$UID_NOW" ] && [ "$_o" != 0 ]; then
+        die 1 "not owned by you or root: $1" "pick a folder you own with --dir"
+    fi
+    check_parent_mode "$1"
 }
 
 # ---------------------------------------------------------------- helpers
