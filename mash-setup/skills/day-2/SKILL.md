@@ -30,12 +30,13 @@ the blocks below it is written `~/mash-nats`: use theirs.
 ## Is it working
 
 ```sh
-mashctl status; mashctl doctor
+mashctl status; MASH_ENDPOINT=acme.demo.bob mash doctor
 ```
 
 `mashctl status` is one line: `<server>: ok, N endpoints, M online`.
-`mashctl doctor` checks the server, mash's storage and every endpoint, says
-how to fix what is wrong, and changes nothing. `mash status --endpoint
+`mash doctor` checks, for one endpoint, its configuration, credentials, the
+server and sign-in, says how to fix what is wrong, and changes nothing (there
+is no `mashctl doctor`, even where a hint names it). `mash status --endpoint
 acme.demo.bob` says `acme.demo.bob: ready, offline` (or `online` while a
 session holds it open). Read the `hint:` line of any error and run the command
 it names.
@@ -112,13 +113,20 @@ bash "$HOME/mash-setup-dl/mash-local-nats-setup.sh" --dir "$HOME/mash-nats" --re
 ```
 
 mash keeps its own copies of the keys in `~/.config/mash`; they open nothing
-once the server is gone. To start again, the person removes
-`$HOME/mash-setup-dl` too if they want a fresh download, then follows the
-setup skill from step 1.
+once the server is gone. To start again, the person first moves that folder
+aside, or `mashctl init` refuses the new server's operator key:
+
+```sh person
+mv "$HOME/.config/mash" "$HOME/.config/mash.old"
+```
+
+They may remove `$HOME/mash-setup-dl` too for a fresh download. Then follow
+the setup skill from step 1.
 
 ## Mail does not arrive
 
-1. `mashctl doctor`. Fix what it names.
+1. `MASH_ENDPOINT=<address> mash doctor`, for the receiver. Fix what it
+   names.
 2. `mash status --endpoint <address>` for the receiver. `not ready: the server
    did not answer` means start the server (above).
 3. A session started before the plugin was installed has no mash tools:

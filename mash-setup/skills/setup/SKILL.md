@@ -92,8 +92,9 @@ it, give the person the exact command as a `sh person` block.
   a Mac this is the way: the script runs there too, with the `openssl` that
   macOS ships or Homebrew's.
 - Debian and Ubuntu: `nats-server` is in apt (`sudo apt install nats-server
-  openssl`). There is no apt package for the `nats` command: the person
-  downloads the linux zip for their machine from
+  openssl`; on a minimal image also `curl unzip ca-certificates iproute2`:
+  the script needs `ss`). There is no apt package for the `nats` command: the
+  person downloads the linux zip for their machine from
   https://github.com/nats-io/natscli/releases and puts `nats` on the PATH.
 
 A packaged `nats-server` may already run as a system service on port 4222.
@@ -126,7 +127,9 @@ bash "$HOME/mash-setup-dl/install.sh"
 Expected: `Installed mash v0.5.6 (<commit>) in <folder>` and the same for
 `mashctl`. If it says the folder is not on the PATH, tell the person to add it
 (do not edit their shell files): for this session use the full path the line
-printed. The folder is the one in the output; take it from there.
+printed. The folder is the one in the output; take it from there. A line
+saying `gh not found` is normal: it says the checksums come from the same
+download (see `docs/install.md` to verify the attestation).
 
 Check, read-only: `mash version` and `mashctl version` print the same version.
 
@@ -170,7 +173,8 @@ claude plugin list 2>&1 | grep -A4 'mash@mash'
 Expected: `mash@mash` enabled at the version of step 4. Then read the installed
 plugin's `.mcp.json` and `hooks/hooks.json` (the folder is in the plugin's
 list entry): exactly one server running the plugin's own launcher with
-`serve`, and exactly the three hooks, each running only the launcher. Any
+`serve`, and exactly the three hooks. Each hook runs the launcher; the two
+`hook` ones also make mash's state folder and write `hook.log` in it. Any
 other component: stop, tell the person, and hand them
 `claude plugin uninstall mash@mash` as a `sh person` block.
 
@@ -183,7 +187,9 @@ the two agents:
 mashctl endpoint create acme.demo.bob
 ```
 
-Expected: `Created endpoint acme.demo.bob`. Then the same for the second agent.
+Expected: `Created endpoint acme.demo.bob`, perhaps after a line starting
+`mashctl: target server ...`: that line only says which server it used. Then
+the same for the second agent.
 Check:
 
 ```sh
