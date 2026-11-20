@@ -143,7 +143,7 @@ func runEndpointBulk(a bulkArgs, env func(string) string, lookup config.Lookup, 
 	cfg, err := loadCtlConfig(env, lookup, true)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
-		return fail(6, "error", "config", "the configuration did not load; fix it and run the same command again")
+		return fail(1, "error", "config", "the configuration did not load; fix it and run the same command again")
 	}
 	keys, acct, err := epAccountOf(cfg, env)
 	if err != nil {
@@ -152,12 +152,12 @@ func runEndpointBulk(a bulkArgs, env func(string) string, lookup config.Lookup, 
 	announceTarget(cfg, env, stderr, nil)
 	adm, ctx, closeAdmin, err := ctl.OpenAdmin("mashctl", cfg)
 	if err != nil {
-		return fail(6, "error", "server", admin.RewordUnavailable(err.Error())+"; nothing was changed")
+		return fail(1, "error", "server", admin.RewordUnavailable(err.Error())+"; nothing was changed")
 	}
 	defer closeAdmin()
 	recs, badRecs, err := adm.List(ctx)
 	if err != nil {
-		return fail(6, "error", "server", admin.RewordUnavailable(err.Error()))
+		return fail(1, "error", "server", admin.RewordUnavailable(err.Error()))
 	}
 	for _, b := range badRecs {
 		b.Warn(stderr, "mashctl")
@@ -176,7 +176,7 @@ func runEndpointBulk(a bulkArgs, env func(string) string, lookup config.Lookup, 
 	doit := a.yes && !c.dryRun
 	if doit && len(addrs) > 0 {
 		if err := checkServerSet(ctx, cfg, env, servers); err != nil {
-			return fail(6, "error", "servers", fmt.Sprintf("%v; %s", err, ctl.NotRevoked))
+			return fail(1, "error", "servers", fmt.Sprintf("%v; %s", err, ctl.NotRevoked))
 		}
 	}
 	var firstFail *epRefusal

@@ -14,7 +14,7 @@ usage: mashctl endpoint create [ADDRESS] [--owner O] [--group G] [--name N] (--p
                      finishes with the same key. A staged key the account revokes is refused (staged_key_revoked); when
                      the address is taken or retired the file is removed, since that key can never be used for it
   A group cannot be changed later: make a new endpoint and delete the old one. The environment does not give a group.
-  exit codes: 0 done or planned, 1 refused, 2 usage, 6 error
+  exit codes: 0 done or planned, 1 refused or error, 2 usage
 Example:
   mashctl endpoint create alice/dev/design --public-key design.pub
 stdout:
@@ -52,7 +52,7 @@ usage: mashctl endpoint create [ADDRESS] [--owner O] [--group G] [--name N] (--p
                      finishes with the same key. A staged key the account revokes is refused (staged_key_revoked); when
                      the address is taken or retired the file is removed, since that key can never be used for it
   A group cannot be changed later: make a new endpoint and delete the old one. The environment does not give a group.
-  exit codes: 0 done or planned, 1 refused, 2 usage, 6 error
+  exit codes: 0 done or planned, 1 refused or error, 2 usage
 Example:
   mashctl endpoint create alice/dev/design --public-key design.pub
 stdout:
@@ -305,7 +305,7 @@ stdout:
   }
 }
 == create_config
-exit 6
+exit 1
 stderr:
 mash: name rule file <TMP>/no-such-rule.json: cannot be read: open <TMP>/no-such-rule.json: no such file or directory
 stdout:
@@ -523,7 +523,7 @@ stdout:
   }
 }
 == create_server
-exit 6
+exit 1
 stderr:
 mashctl: endpoint create: error (server): mashctl: connect nats://127.0.0.1:1: nats: no servers available for connection (check MASH_SERVER and that at least one listed server is up); nothing was changed, run the same command again once the server is reachable
 stdout:
@@ -548,7 +548,7 @@ stdout:
   }
 }
 == create_enroll_server
-exit 6
+exit 1
 stderr:
 mashctl: endpoint create: error (server): the server stopped answering; run the same command again to finish it
 stdout:
@@ -573,7 +573,7 @@ stdout:
   }
 }
 == create_write
-exit 6
+exit 1
 stderr:
 mashctl: endpoint create: error (write): the creds directory is not usable: directory <TMP> has mode 0707: it is writable by every user. Run: chmod o-w <TMP>; nothing was changed
 stdout:
@@ -755,7 +755,7 @@ usage: mashctl endpoint reissue ADDRESS (--public-key FILE | --make-key) [--jwt-
   ends or is killed, so a killed run needs nothing removed. The lock works on one host (a local filesystem), not across
   hosts or on a network filesystem that does not honour flock. A .lock directory made by an earlier mash is reported
   and removed once by hand.
-  exit codes: 0 done, planned or unchanged, 1 refused, 2 usage, 5 partial (bulk), 6 error
+  exit codes: 0 done, planned or unchanged, 1 refused, partial (bulk) or error, 2 usage
 Example:
   mashctl endpoint reissue alice/dev/design --public-key design.pub
   mashctl endpoint reissue --changed --make-key --yes
@@ -818,7 +818,7 @@ usage: mashctl endpoint reissue ADDRESS (--public-key FILE | --make-key) [--jwt-
   ends or is killed, so a killed run needs nothing removed. The lock works on one host (a local filesystem), not across
   hosts or on a network filesystem that does not honour flock. A .lock directory made by an earlier mash is reported
   and removed once by hand.
-  exit codes: 0 done, planned or unchanged, 1 refused, 2 usage, 5 partial (bulk), 6 error
+  exit codes: 0 done, planned or unchanged, 1 refused, partial (bulk) or error, 2 usage
 Example:
   mashctl endpoint reissue alice/dev/design --public-key design.pub
   mashctl endpoint reissue --changed --make-key --yes
@@ -957,7 +957,7 @@ stdout:
   }
 }
 == reissue_config
-exit 6
+exit 1
 stderr:
 mashctl: endpoint reissue: error (config): mash: name rule file <TMP>/no-such-rule.json: cannot be read: open <TMP>/no-such-rule.json: no such file or directory
 stdout:
@@ -1074,7 +1074,7 @@ stdout:
   }
 }
 == reissue_server
-exit 6
+exit 1
 stderr:
 mashctl: endpoint reissue: error (server): mashctl: connect nats://127.0.0.1:1: nats: no servers available for connection (check MASH_SERVER and that at least one listed server is up); nothing was changed
 stdout:
@@ -1099,7 +1099,7 @@ stdout:
   }
 }
 == reissue_enroll_server
-exit 6
+exit 1
 stderr:
 mashctl: endpoint reissue: error (server): the server stopped answering; run the same command again to finish it
 stdout:
@@ -1199,7 +1199,7 @@ stdout:
   }
 }
 == reissue_write
-exit 6
+exit 1
 stderr:
 mashctl: endpoint reissue: error (write): the directory for the lock is not usable: directory <TMP> has mode 0707: it is writable by every user. Run: chmod o-w <TMP>; nothing was changed
 stdout:
@@ -1224,7 +1224,7 @@ stdout:
   }
 }
 == reissue_superseded
-exit 6
+exit 1
 stderr:
 revoked user key <KEY>: 1 server(s) acknowledged
 mashctl: endpoint reissue: error (superseded): another reissue changed o.g.a's key while this one ran, so the credentials this run wrote are for a key that is no longer the endpoint's; they were removed; run the command again
@@ -1432,7 +1432,7 @@ usage: mashctl endpoint reissue ADDRESS (--public-key FILE | --make-key) [--jwt-
   ends or is killed, so a killed run needs nothing removed. The lock works on one host (a local filesystem), not across
   hosts or on a network filesystem that does not honour flock. A .lock directory made by an earlier mash is reported
   and removed once by hand.
-  exit codes: 0 done, planned or unchanged, 1 refused, 2 usage, 5 partial (bulk), 6 error
+  exit codes: 0 done, planned or unchanged, 1 refused, partial (bulk) or error, 2 usage
 Example:
   mashctl endpoint reissue alice/dev/design --public-key design.pub
   mashctl endpoint reissue --changed --make-key --yes
@@ -1494,7 +1494,7 @@ usage: mashctl endpoint reissue ADDRESS (--public-key FILE | --make-key) [--jwt-
   ends or is killed, so a killed run needs nothing removed. The lock works on one host (a local filesystem), not across
   hosts or on a network filesystem that does not honour flock. A .lock directory made by an earlier mash is reported
   and removed once by hand.
-  exit codes: 0 done, planned or unchanged, 1 refused, 2 usage, 5 partial (bulk), 6 error
+  exit codes: 0 done, planned or unchanged, 1 refused, partial (bulk) or error, 2 usage
 Example:
   mashctl endpoint reissue alice/dev/design --public-key design.pub
   mashctl endpoint reissue --changed --make-key --yes
@@ -1556,7 +1556,7 @@ usage: mashctl endpoint reissue ADDRESS (--public-key FILE | --make-key) [--jwt-
   ends or is killed, so a killed run needs nothing removed. The lock works on one host (a local filesystem), not across
   hosts or on a network filesystem that does not honour flock. A .lock directory made by an earlier mash is reported
   and removed once by hand.
-  exit codes: 0 done, planned or unchanged, 1 refused, 2 usage, 5 partial (bulk), 6 error
+  exit codes: 0 done, planned or unchanged, 1 refused, partial (bulk) or error, 2 usage
 Example:
   mashctl endpoint reissue alice/dev/design --public-key design.pub
   mashctl endpoint reissue --changed --make-key --yes
@@ -1579,7 +1579,7 @@ stdout:
   }
 }
 == bulk_config
-exit 6
+exit 1
 stderr:
 mash: name rule file <TMP>/no-such-rule.json: cannot be read: open <TMP>/no-such-rule.json: no such file or directory
 mashctl: endpoint reissue: error (config): the configuration did not load; fix it and run the same command again
@@ -1624,7 +1624,7 @@ stdout:
   }
 }
 == bulk_server
-exit 6
+exit 1
 stderr:
 mashctl: endpoint reissue: error (server): mashctl: connect nats://127.0.0.1:1: nats: no servers available for connection (check MASH_SERVER and that at least one listed server is up); nothing was changed
 stdout:
@@ -1646,7 +1646,7 @@ stdout:
   }
 }
 == bulk_servers
-exit 6
+exit 1
 stderr:
 mashctl: endpoint reissue: error (servers): only 2 of 3 servers answered the account lookup; nothing was revoked; the key is still valid
 stdout:
@@ -1668,7 +1668,7 @@ stdout:
   }
 }
 == bulk_no_config_dir
-exit 6
+exit 1
 stderr:
 mashctl: endpoint reissue: error (no_config_dir): no config directory to write the creds file in; set MASH_CONFIG_DIR
 stdout:
@@ -1730,7 +1730,7 @@ stdout:
   "refusal": null
 }
 == bulk_creds_unreadable
-exit 6
+exit 1
 stderr:
 mashctl: endpoint reissue o/g/a: creds_unreadable: <TMP>/o.g.a.creds: expected 3 chunks
 mashctl: endpoint reissue: error (creds_unreadable): <TMP>/o.g.a.creds: expected 3 chunks
@@ -1832,7 +1832,7 @@ stdout:
   }
 }
 == bulk_creds_mismatch
-exit 5
+exit 1
 stderr:
 mashctl: endpoint reissue o/g/a: creds_mismatch: the creds file <TMP>/o.g.a.creds is not this endpoint's current creds: its JWT is named "o.g.b", not o.g.a; nothing was changed: move the file aside (mv <TMP>/o.g.a.creds <TMP>/o.g.a.creds.old) and run again, or use --public-key
 revoked user key <KEY>: 1 server(s) acknowledged
@@ -1891,7 +1891,7 @@ stdout:
   "refusal": null
 }
 == bulk_revocation_unknown
-exit 6
+exit 1
 stderr:
 mashctl: endpoint reissue o/g/a: revocation_unknown: cannot tell whether the current key of o.g.a is revoked: no system account answered
 mashctl: endpoint reissue: error (revocation_unknown): cannot tell whether the current key of o.g.a is revoked: no system account answered
@@ -2030,7 +2030,7 @@ usage: mashctl endpoint delete ADDRESS [--delete-creds] [--force] [--no-revoke] 
   --dry-run        say what would happen and change nothing
   --json           print the result as JSON (schema mashctl-endpoint@1)
   --servers N and --sys-creds FILE override MASH_SERVERS and MASH_SYS_CREDS
-  exit: 0 deleted or unchanged, 1 refused, 2 usage, 5 partial, 6 error
+  exit: 0 deleted or unchanged, 1 refused, partial or error, 2 usage
 Example:
   mashctl endpoint delete alice/dev/design --dry-run
 stdout:
