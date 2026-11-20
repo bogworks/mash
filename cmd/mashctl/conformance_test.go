@@ -37,20 +37,10 @@ import (
 )
 
 // confGaps: key is "<check> <name>" as the subtest names it. The value is why it is not built yet.
-var confGaps = map[string]string{
-	"commands doctor":        "doctor does not exist: it takes over audit and issued check (spec x-today); the pull request that adds the command closes these",
-	"toplevel doctor":        "doctor does not exist: it takes over audit and issued check (spec x-today); the pull request that adds the command closes these",
-	"bad-option doctor":      "doctor does not exist (see commands doctor)",
-	"bad-option-json doctor": "doctor does not exist (see commands doctor)",
-}
+var confGaps = map[string]string{}
 
 // confDrift: key is "<check> <name>"; the value says what differs and what closes it.
-var confDrift = map[string]string{
-	"toplevel-unlisted audit":  "audit is still a verb and in mashctl --help; the specification removed it (doctor takes it over); closes with doctor",
-	"toplevel-unlisted issued": "issued is still a verb and in mashctl --help; the specification removed it (doctor takes it over, endpoint show has the record); closes with doctor",
-	"removed audit":            "audit still runs (read-only listing, exit 1 with no owner); the specification removed it; closes with doctor",
-	"removed issued":           "issued still runs and prints its own usage; the specification removed it; closes with doctor",
-}
+var confDrift = map[string]string{}
 
 // confCheck applies the rule of the two tables to the problems of one check.
 func confCheck(t *testing.T, key string, problems []string) {

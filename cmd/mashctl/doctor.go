@@ -25,7 +25,8 @@ import (
 // doctorUsage is the text of `mashctl doctor --help`.
 const doctorUsage = `usage: mashctl doctor [--strict] [--json]
 
-Check the server, mash's storage on it and every endpoint's records, and say how to fix what is wrong.
+Check the server, mash's storage on it and every endpoint's records,
+and say how to fix what is wrong.
 It changes nothing.
 
 options:
