@@ -299,9 +299,9 @@ func TestShowRefusalAssertsTheCode(t *testing.T) {
 	}
 }
 
-func TestIssuedCheckCleanAssertsTheFields(t *testing.T) {
-	doc := func(clean, complete, rec, revoked string) string {
-		return `{"clean":` + clean + `,"complete":` + complete + `,"record_present":` + rec + `,"revoked_connected":` + revoked + `}`
+func TestDoctorKeysOKAssertsTheFields(t *testing.T) {
+	doc := func(problems, keys string) string {
+		return `{"problems":` + problems + `,"warnings":0,"checks":[{"name":"server","state":"ok"},{"name":"keys","state":"` + keys + `"}]}`
 	}
 	for _, c := range []struct {
 		name   string
@@ -309,89 +309,38 @@ func TestIssuedCheckCleanAssertsTheFields(t *testing.T) {
 		out    string
 		wantOK bool
 	}{
-		{"clean", 0, doc("true", "true", "true", "[]"), true},
-		{"exit 1 finding", 1, doc("false", "true", "true", `[{"address":"alice.dev.review"}]`), false},
-		{"exit 2 incomplete", 2, doc("false", "false", "true", "[]"), false},
-		{"exit 0 but revoked connected", 0, doc("true", "true", "true", `[{"address":"a"}]`), false},
-		{"not clean", 0, doc("false", "true", "true", "[]"), false},
-		{"not complete", 0, doc("true", "false", "true", "[]"), false},
-		{"no record", 0, doc("true", "true", "false", "[]"), false},
-		{"field missing", 0, `{"clean":true,"complete":true,"revoked_connected":[]}`, false},
-		{"no JSON", 0, "all clean", false},
+		{"clean", 0, doc("0", "ok"), true},
+		{"keys fail", 1, doc("1", "fail"), false},
+		{"exit 0 but keys not ok", 0, doc("0", "warn"), false},
+		{"exit 0 but a problem counted", 0, doc("1", "ok"), false},
+		{"exit 2", 2, doc("0", "ok"), false},
+		{"no keys check", 0, `{"problems":0,"warnings":0,"checks":[{"name":"server","state":"ok"}]}`, false},
+		{"no problems field", 0, `{"checks":[{"name":"keys","state":"ok"}]}`, false},
+		{"no JSON", 0, "No problems.", false},
 	} {
-		if ok, d := issuedCheckClean(c.code, c.out); ok != c.wantOK {
+		if ok, d := doctorKeysOK(c.code, c.out); ok != c.wantOK {
 			t.Errorf("%s: got %v (%s), want %v", c.name, ok, d, c.wantOK)
 		}
 	}
 }
 
-func TestIssuedListRevokedNeedsTheEntry(t *testing.T) {
-	list := func(addr, at string) string {
-		return `[{"address":"` + addr + `","revoked_at":"` + at + `"}]`
-	}
+func TestDoctorCleanReadsTheTextReport(t *testing.T) {
+	good := "config     ok\nserver     ok    tls://127.0.0.1:14222\nkeys       ok    every connected key was issued here\n\nNo problems.\n"
 	for _, c := range []struct {
 		name   string
 		code   int
 		out    string
 		wantOK bool
 	}{
-		{"revoked", 0, list("alice.dev.review", "2026-11-18T10:00:00Z"), true},
-		{"entry absent", 0, list("alice.dev.design", "2026-11-18T10:00:00Z"), false},
-		{"empty list", 0, "[]", false},
-		{"not revoked", 0, list("alice.dev.review", ""), false},
-		{"only another entry revoked", 0, `[{"address":"alice.dev.review","revoked_at":""},{"address":"alice.dev.x","revoked_at":"t"}]`, false},
-		{"exit 1", 1, list("alice.dev.review", "t"), false},
-		{"not JSON", 0, "nothing", false},
+		{"clean", 0, good, true},
+		{"exit 1", 1, good, false},
+		{"a FAIL line", 0, strings.Replace(good, "server     ok", "server     FAIL", 1), false},
+		{"keys not ok", 0, strings.Replace(good, "keys       ok", "keys       warn", 1), false},
+		{"no summary", 0, "keys       ok\n", false},
+		{"problems", 1, "keys       FAIL  1 key\n\n1 problem.\n", false},
 	} {
-		if ok, d := issuedListRevoked(c.code, c.out, "alice.dev.review"); ok != c.wantOK {
+		if ok, d := doctorClean(c.code, c.out); ok != c.wantOK {
 			t.Errorf("%s: got %v (%s), want %v", c.name, ok, d, c.wantOK)
 		}
-	}
-}
-
-func TestIssuedRevocationAccountedNeedsTheTarget(t *testing.T) {
-	const addr = "alice.dev.review"
-	list := func(a, key, at string) string {
-		return `[{"address":"` + a + `","public_key":"` + key + `","revoked_at":"` + at + `"}]`
-	}
-	check := func(entries string) string {
-		return `{"clean":true,"complete":true,"record_present":true,"revoked_connected":[],"recorded_not_connected":` + entries + `}`
-	}
-	entry := func(a, key string) string { return `[{"address":"` + a + `","public_key":"` + key + `"}]` }
-	rec := func(key, at string) string {
-		return `{"address":"` + addr + `","public_key":"` + key + `","revoked_at":"` + at + `"}`
-	}
-	entries := func(keys ...string) string {
-		var parts []string
-		for _, k := range keys {
-			parts = append(parts, `{"address":"`+addr+`","public_key":"`+k+`"}`)
-		}
-		return "[" + strings.Join(parts, ",") + "]"
-	}
-	for _, c := range []struct {
-		name      string
-		list, chk string
-		wantOK    bool
-	}{
-		{"reissue: old revoked, new unrevoked, only the new key listed", "[" + rec("OLD", "t") + "," + rec("NEW", "") + "]", check(entries("NEW")), false},
-		{"reissue: the revoked key listed", "[" + rec("OLD", "t") + "," + rec("NEW", "") + "]", check(entries("OLD")), true},
-		{"reissue: new unrevoked first in the list, only new key listed", "[" + rec("NEW", "") + "," + rec("OLD", "t") + "]", check(entries("NEW")), false},
-		{"two revoked, only one listed", "[" + rec("A", "t") + "," + rec("B", "t") + "]", check(entries("A")), false},
-		{"two revoked, both listed", "[" + rec("A", "t") + "," + rec("B", "t") + "]", check(entries("A", "B")), true},
-		{"no revoked record", "[" + rec("A", "") + "]", check(entries("A")), false},
-		{"present and revoked", list(addr, "AK1", "2026-11-18T10:00:00Z"), check(entry(addr, "AK1")), true},
-		{"target missing from the check report", list(addr, "AK1", "t"), check("[]"), false},
-		{"check lists another key for the address", list(addr, "AK1", "t"), check(entry(addr, "AK2")), false},
-		{"check lists only another address", list(addr, "AK1", "t"), check(entry("alice.dev.design", "AK1")), false},
-		{"present but not revoked", list(addr, "AK1", ""), check(entry(addr, "AK1")), false},
-		{"target missing from the list", list("alice.dev.design", "AK9", "t"), check(entry(addr, "AK1")), false},
-		{"list without a key", `[{"address":"` + addr + `","revoked_at":"t"}]`, check(entry(addr, "AK1")), false},
-	} {
-		if ok, d := issuedRevocationAccounted(0, c.list, 0, c.chk, addr); ok != c.wantOK {
-			t.Errorf("%s: got %v (%s), want %v", c.name, ok, d, c.wantOK)
-		}
-	}
-	if ok, _ := issuedRevocationAccounted(0, list(addr, "AK1", "t"), 1, check(entry(addr, "AK1")), addr); ok {
-		t.Error("a failing issued check passed")
 	}
 }

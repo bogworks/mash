@@ -1,6 +1,20 @@
-# The image of an AT-005 node. The test builds it from this checkout (podman.go writes this file into a build context
-# next to the four static binaries); nothing is pulled, there is no base image, no shell and no package manager.
-# Certificates and keys are not in the image: the test copies them into each node when it starts.
-FROM scratch
-COPY mash mashctl nats-server nodeinit /bin/
+# The image of an AT-005 node and of the AT-001 to AT-003 sandbox. The test builds it from this checkout (podman.go
+# writes this file into a build context next to the static binaries, the pinned nats CLI and the setup script).
+# The base is pinned by the digest of its multi-arch index (amd64 and arm64), so what the build starts from is fixed before
+# anything runs in it; the tag is only the readable name (docker.io/library/debian:bookworm-slim). The run record names the
+# digest that was requested and the run fails when the pulled base reports another. Certificates and keys are not in the image:
+# the test copies them into each node when it starts. Nodes run as the non-root user mash (uid 1000), whose home and
+# only writable tree is /node.
+FROM docker.io/library/debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc
+RUN DEBIAN_FRONTEND=noninteractive apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends bash openssl iproute2 ca-certificates coreutils grep sed gawk \
+ && rm -rf /var/lib/apt/lists/* \
+ && useradd --uid 1000 --user-group --no-create-home --home-dir /node --shell /bin/bash mash \
+ && install -d -m 0700 -o mash -g mash /node
+COPY mash mashctl nats-server nodeinit nats mash-local-nats-setup.sh /usr/local/bin/
+# The plugin directory of the checkout: AT-001 reads its .mcp.json and hooks and starts `sh <plugin>/scripts/mash serve`.
+COPY plugin /opt/mash-repo/plugin
+RUN chmod -R a+rX /opt/mash-repo
+USER mash
+WORKDIR /node
 ENTRYPOINT []

@@ -12,8 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/bogworks/mash/internal/bootstrap"
 )
 
 // Scenario is one acceptance test of contract section 6 (or the selfcheck).
@@ -59,14 +57,15 @@ func (a *AT) Home(name string) (Home, error) {
 	return h, err
 }
 
-// tlsURL is the URL of the one local server: TLS, as mashctl init --local writes it to config.json (REQ-014).
+// tlsURL is the URL of the one local server: TLS, as the setup script writes it to mash-setup.yaml and `mashctl init
+// --config` to config.json (REQ-014). The port is the one the script chose, which StartServer copies into a.R.Port.
 func (a *AT) tlsURL() string { return "tls://127.0.0.1:" + strconv.Itoa(a.R.Port) }
 
-// caPath is the CA certificate (public) that mashctl init --local writes into the server directory.
-func (a *AT) caPath() string { return filepath.Join(a.srvDir, bootstrap.CACert) }
+// caPath is the CA certificate (public) that the setup script writes into the server directory.
+func (a *AT) caPath() string { return filepath.Join(a.srvDir, fileCACert) }
 
 // Conn is the connection settings of every endpoint and mashctl command of the scenario: the one local server over
-// TLS, trusting the CA init --local made, with no insecure_plaintext override (REQ-014, AT-001). The endpoint is a
+// TLS, trusting the CA the setup script made, with no insecure_plaintext override (REQ-014, AT-001). The endpoint is a
 // placeholder that gives the commands their owner, alice; a session names its own (SessionEnv), which comes later and wins.
 func (a *AT) Conn() []string {
 	return []string{"MASH_SERVER=" + a.tlsURL(), "MASH_CA=" + a.caPath(), "MASH_ENDPOINT=alice.dev.ctl"}
@@ -111,43 +110,57 @@ func (a *AT) StartSession(h Home, group, name string, more ...string) (*Proc, []
 	return p, extra, nil
 }
 
-// StartServer used to run `mashctl init --local --owner alice --dir <srv> --port P --start` in home h, record the
-// server's PID (mashctl writes it to server.pid) and check the first run.
+// StartServer (only inside a container: it refuses on the test host) makes and starts the scenario's one local server with the policy script (`--dir <srv> --owner alice`; the
+// script picks port 4222 or the next free one, and a.R.Port becomes that port), records the server's PID (the script
+// writes it to server.pid), then runs `mashctl init --config <srv>/mash-setup.yaml` in home h, which makes mash's
+// buckets and writes h's config.json. The script is run with the scenario's environment (a.Env(h)), and the srv
+// directory must not exist before the call: the script makes it.
 func (a *AT) StartServer(h Home) bool {
+	if !insideContainer() {
+		a.C.Check("the setup script runs inside a container", false, errSetupOnHost)
+		return false
+	}
 	if err := waitPortFree(a.R.Port, 5*time.Second); err != nil {
 		a.C.Check("the port is free before the server starts", false, err.Error())
 		return false
 	}
-	// T1b: `mashctl init --local --start` is removed. The live setup is rewritten later; until then the setup is a failed
-	// check and nothing is run. (h is kept for the rewrite.)
-	_ = h
-	ok := a.C.Check("setup rewrite pending", false, "")
-	// The CA key and the server key are private: every line of each is searched for in all captured output.
-	for _, k := range []struct{ label, file string }{{"ca key", bootstrap.CAKey}, {"server key", bootstrap.ServerKey}} {
+	res := a.R.Runner.RunIn(h.Dir, "setup-script", a.R.setupArgs(a.srvDir, "--owner", "alice"), a.Env(h), "")
+	port, perr := parseSetupPort(res.Stdout)
+	ok := a.C.Check("the setup script makes and starts one local server", res.Code == 0 && perr == nil, exitDetail(res)+"; "+errText(perr))
+	// Every private file is searched for in all captured output, whatever the outcome.
+	for _, k := range secretFiles {
 		if kb, err := os.ReadFile(filepath.Join(a.srvDir, k.file)); err == nil {
 			registerKeyLines(a.secrets, k.label, kb)
 		}
 	}
-	b, err := os.ReadFile(filepath.Join(a.srvDir, bootstrap.ServerPID))
-	if err == nil {
-		if pid, perr := strconv.Atoi(strings.TrimSpace(string(b))); perr == nil {
+	if b, err := os.ReadFile(filepath.Join(a.srvDir, fileServerPID)); err == nil {
+		if pid, perr := parsePIDFile(b); perr == nil {
 			a.srvPID = pid
 			a.R.record(pid, a.srvDir)
 		}
 	}
-	if ok && a.srvPID == 0 {
+	if !ok {
+		return false
+	}
+	a.R.Port = port
+	if a.srvPID == 0 {
 		a.C.Check("the server's PID is recorded in server.pid", false, "")
 		return false
 	}
-	return ok
+	res = a.Ctl("init-config", h, nil, "init", "--config", filepath.Join(a.srvDir, fileSetupYAML))
+	return a.C.Check("mashctl init --config makes mash's storage on the server", res.Code == 0, exitDetail(res))
 }
 
-// StopServer stops the server by its recorded PID and waits for the port.
+// StopServer stops the server with the script's --stop (which checks /proc that the pid is this directory's
+// nats-server), falls back to the recorded PID when the script fails, and waits for the port.
 func (a *AT) StopServer() {
 	if a.srvPID == 0 {
 		return
 	}
-	stopPID(a.srvPID, a.srvDir, a.R.Runner.logf)
+	res := a.R.Runner.RunIn(a.Dir, "setup-stop", a.R.setupArgs(a.srvDir, "--stop"), BuildEnv(Home{Dir: a.Dir, Tmp: a.Dir}, []string{filepath.Dir(a.R.NatsBin)}), "")
+	if res.Code != 0 || alive(a.srvPID) {
+		stopPID(a.srvPID, a.srvDir, a.R.Runner.logf)
+	}
 	a.R.forget(a.srvPID)
 	a.srvPID = 0
 	_ = waitPortFree(a.R.Port, 10*time.Second)
@@ -283,7 +296,8 @@ func parseJSON(s string) (any, error) {
 }
 
 // Snapshot is the state of the server and the files, as far as the harness can see without a NATS client of its own:
-// the directory (mashctl endpoint list), the audit (directory, streams, consumers, leases, creds files), the issue record, and a
+// the directory (mashctl endpoint list --wide), each endpoint's record and issue state (endpoint show) and stored mail (endpoint inbox), the doctor report (`doctor --json`: the server, storage, endpoints and keys checks; it has no
+// timestamp, so two reports of an unchanged server are byte-identical), and a
 // digest of each home's file tree (all of it, except snapshotExclusions).
 type Snapshot struct {
 	Hash map[string]string
@@ -298,21 +312,41 @@ func (a *AT) Snapshot(label string, ctlHome Home, trees ...Home) Snapshot {
 		name string
 		args []string
 	}{
-		{"list", []string{"endpoint", "list"}},
-		// T1b: audit and issued were removed from mashctl (replaced by doctor); these two calls now exit 2 and are rewritten in a later slice.
-		{"audit", []string{"audit", "--json"}},
-		{"issued", []string{"issued", "list", "--json"}},
+		{"list", []string{"endpoint", "list", "--wide", "--json"}},
+		{"doctor", []string{"doctor", "--json"}},
 	} {
 		r := a.Ctl("snap-"+label+"-"+c.name, ctlHome, a.Conn(), c.args...)
 		if r.Code != 0 {
 			s.Bad = append(s.Bad, fmt.Sprintf("%s exit %d", strings.Join(c.args, " "), r.Code))
 		}
 		s.Raw[c.name] = r.Stdout
-		hashed := r.Stdout
-		if c.name == "audit" {
-			hashed = withoutGenerated(r.Stdout)
+		s.Hash[c.name] = digest(r.Stdout)
+	}
+	// doctor is a health summary: a refusal that wrote a record would not change it. The records themselves are read
+	// per endpoint (the directory record and issue state with `endpoint show`, the stored mail with `endpoint inbox`).
+	if v, err := parseJSON(s.Raw["list"]); err == nil {
+		for _, o := range findObjects(v, "address") {
+			addr, _ := o["address"].(string)
+			if addr == "" {
+				continue
+			}
+			for _, c := range []struct {
+				name string
+				args []string
+			}{
+				{"show " + addr, []string{"endpoint", "show", addr, "--json"}},
+				{"inbox " + addr, []string{"endpoint", "inbox", addr, "--json", "--limit", "10000"}},
+			} {
+				r := a.Ctl("snap-"+label+"-"+strings.ReplaceAll(c.name, " ", "-"), ctlHome, a.Conn(), c.args...)
+				if r.Code != 0 {
+					s.Bad = append(s.Bad, fmt.Sprintf("%s exit %d", strings.Join(c.args, " "), r.Code))
+				}
+				s.Raw[c.name] = r.Stdout
+				s.Hash[c.name] = digest(r.Stdout)
+			}
 		}
-		s.Hash[c.name] = digest(hashed)
+	} else {
+		s.Bad = append(s.Bad, "endpoint list --json is not JSON: "+err.Error())
 	}
 	hashes, bad := treeHashes(trees, snapshotExclusions)
 	for k, v := range hashes {
@@ -362,20 +396,4 @@ func (s Snapshot) Diff(o Snapshot) []string {
 	}
 	sort.Strings(d)
 	return d
-}
-
-// withoutGenerated is the audit JSON without its top-level "generated" timestamp, re-encoded with sorted keys: two audits of
-// an unchanged server are equal even when the calls fall in different seconds. Text that is not a JSON object is returned
-// as it is.
-func withoutGenerated(raw string) string {
-	var m map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(raw), &m); err != nil {
-		return raw
-	}
-	delete(m, "generated")
-	b, err := json.Marshal(m)
-	if err != nil {
-		return raw
-	}
-	return string(b)
 }

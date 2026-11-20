@@ -1,10 +1,16 @@
 // Command liveat runs the live acceptance tests AT-001 to AT-003 of the 0.5.5 endpoint-model contract against a build
 // of this checkout.
 //
-//	go run ./scripts/liveat at001|at002|at003|all|selfcheck --port P [--keep]
+//	go run ./scripts/liveat at001|at002|at003|all|selfcheck --port P [--keep] [--inside]
+//
+// On the machine you run it on it starts nothing: it builds a node image (podman.go, Containerfile.at005), starts ONE
+// throwaway rootless container of it, copies itself in and runs `liveat <the same arguments> --inside` there as a
+// non-root user, copies the records and captured output back, scans them, and destroys the container and the image
+// (sandbox.go). --inside, which is what actually starts a server, is refused outside a container. The rest of this
+// comment describes the run inside the container.
 //
 // It builds mash and mashctl into a private run directory (mode 0700), starts one local NATS server per scenario with
-// `mashctl init --local ... --start` on the port P that the operator reserved (there is no default), runs the scenario
+// scripts/mash-local-nats-setup.sh and `mashctl init --config` (the script picks port 4222 or the next free one; P is only checked free before it starts: there is no default), runs the scenario
 // with a scratch home and an environment built from scratch values, keeps the output of every command under
 // <run>/out, fails the run if any of it holds a seed or a JWT (INV-001), prints the run record of contract section 8
 // (and keeps it as <run>/record-<at>.md), stops every process it started by its recorded PID, and removes the run
@@ -29,8 +35,8 @@ import (
 
 func main() { os.Exit(realMain(os.Args[1:], os.Stdout, os.Stderr)) }
 
-func realMain(args []string, stdout, stderr io.Writer) int {
-	usage := "usage: liveat at001|at002|at003|all|selfcheck --port P [--keep] | liveat at005 [--dry-setup] [--hosts podman --run-by manual|ci --host-label LABEL [--subnet-base A.B] | --hosts local] [--keep] [--record-out FILE] | liveat at005-cleanup [--run RUNID]"
+func realMain(args []string, stdout, stderr io.Writer) (code int) {
+	usage := "usage: liveat at001|at002|at003|all|selfcheck --port P [--keep] [--inside: only inside a container; the default runs in a sandbox container] | liveat at005 [--dry-setup] [--hosts podman --run-by manual|ci --host-label LABEL [--subnet-base A.B] | --hosts local] [--keep] [--record-out FILE] | liveat at005-cleanup [--run RUNID]"
 	if len(args) == 0 {
 		fmt.Fprintln(stderr, usage)
 		return 2
@@ -46,6 +52,7 @@ func realMain(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(io.Discard)
 	port := fs.Int("port", 0, "")
 	keep := fs.Bool("keep", false, "")
+	inside := fs.Bool("inside", false, "")
 	if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 {
 		fmt.Fprintln(stderr, usage)
 		return 2
@@ -70,12 +77,14 @@ func realMain(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "liveat: --port is required (the port the operator reserved for this run; there is no default)")
 		return 2
 	}
-	repo, err := repoRoot()
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 4
+	if *inside && !insideContainer() {
+		fmt.Fprintln(stderr, errInsideOutside)
+		return 2
 	}
-	r, err := NewRun(repo, *port, *keep)
+	if !*inside { // the default: nothing starts on this machine, the run goes into a sandbox container
+		return sandboxMain(cmd, *port, *keep, stdout, stderr, &Podman{})
+	}
+	r, err := NewRun("", *port, *keep)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 4
@@ -85,7 +94,13 @@ func realMain(args []string, stdout, stderr io.Writer) int {
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	go func() { <-sig; r.Close(); os.Exit(130) }()
 	defer r.Close()
-	if err := r.Prepare(); err != nil {
+	defer func() { // after the records are written, before Close: what the host copies out
+		if err := exportRun(r, sandboxExport); err != nil {
+			fmt.Fprintln(stderr, "liveat: export:", err)
+			code = exportFailCode(code)
+		}
+	}()
+	if err := r.PrepareInside(os.Getenv); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 4
 	}
@@ -150,4 +165,13 @@ func repoRoot() (string, error) {
 		return "", errors.New("liveat: run it from inside the mash checkout")
 	}
 	return strings.TrimSpace(string(b)), nil
+}
+
+// exportFailCode is the exit code of a run inside whose export failed: the host cannot get the records, so the run
+// cannot pass; a code that was already non-zero stays.
+func exportFailCode(code int) int {
+	if code == 0 {
+		return 1
+	}
+	return code
 }

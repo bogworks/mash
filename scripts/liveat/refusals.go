@@ -78,7 +78,7 @@ func writeFile(path, text string) error { return os.WriteFile(path, []byte(text)
 var AT003 = Scenario{
 	ID: "at003",
 	Scenario: "AT-003, every refusal can fail: one local server; endpoints alice/dev/design, alice/dev/review, a deleted alice/dev/gone and bob/dev/build. " +
-		"Each refusal of the contract's list that has a CLI form is run between two snapshots (mashctl list, audit --json, issued list --json, " +
+		"Each refusal of the contract's list that has a CLI form is run between two snapshots (mashctl endpoint list, doctor --json, " +
 		"and a digest of each home's files): exit code, refusal code in --json, a message that names what to type, nothing written. " +
 		"A plain nats:// URL to loopback is refused by mash (session start and a command) and by mashctl, exit 2, and no connection is made; with the override the connection is made and the warning is printed (REQ-014). " +
 		"Then bob's credentials publish to alice's mail subject and request her prompt subject.",
@@ -90,7 +90,7 @@ var AT003 = Scenario{
 			return
 		}
 		trees := []Home{ha, he, hn}
-		adminCreds := filepath.Join(a.srvDir, "mashadmin.creds")
+		adminCreds := filepath.Join(a.srvDir, fileAdminCreds)
 
 		// Setup: four endpoints made the contract's way, one of them deleted so that its address is burned.
 		design, ok := a.provision(ha, he, "alice", "dev", "design", filepath.Join(he.Dir, "design.creds"), false)
@@ -163,7 +163,8 @@ var AT003 = Scenario{
 			{Name: "a join file path that exists", Label: "file-exists", Home: ha, Args: create("alice.dev.other", "--public-key", fresh, "--out", taken), Exit: 1, NoJSON: true,
 				Hint: [][]string{{"already exists"}}},
 			{Name: "no account key on the mashctl host", Label: "no-account-key", Home: hn, Extra: []string{"MASH_ADMIN_CREDS=" + adminCreds}, Args: create("alice.dev.other", pk...), Exit: 1, NoJSON: true,
-				Hint: [][]string{{"mashctl init", "mashctl adopt", "MASH_KEYS_DIR", "account key"}}},
+				Hint: [][]string{{"mashctl init", "MASH_KEYS_DIR", "account key"}}},
+			// T1b-b: the `mash credential create` flow below waits for core's `mash join`; it is left as it is until then.
 			{Name: "mash credential create with a seed and a JWT for different keys", Label: "creds-mismatch", Home: he, Mash: true, NoJSON: true, Exit: 1,
 				Args: []string{"credential", "create", "--seed", design.seed, "--jwt", review.jwt, "--out", filepath.Join(he.Dir, "mismatch.creds")},
 				Hint: [][]string{{"mash key create", "--seed", "--jwt", "same key", "different", "belong together"}}},
@@ -180,7 +181,7 @@ var AT003 = Scenario{
 		a.C.Check("a session whose endpoint has no group: exit code 1", r.Code == 1, exitDetail(r))
 		a.C.Check("a session whose endpoint has no group: standard error names MASH_ENDPOINT", strings.Contains(r.Stderr, "MASH_ENDPOINT"), "")
 		a.C.Check("a session whose endpoint has no group: no directory record, stream, consumer, lease or service was made for it",
-			len(before.Diff(after)) == 0 && !strings.Contains(after.Raw["audit"], "ghost") && !strings.Contains(after.Raw["list"], "ghost"), "changed: "+orNone(strings.Join(before.Diff(after), ", ")))
+			len(before.Diff(after)) == 0 && !strings.Contains(after.Raw["doctor"], "ghost") && !strings.Contains(after.Raw["list"], "ghost"), "changed: "+orNone(strings.Join(before.Diff(after), ", ")))
 
 		// The three removed commands.
 		for _, c := range []refusalCase{

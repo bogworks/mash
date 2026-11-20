@@ -1,6 +1,10 @@
 package main
 
 import (
+	"archive/zip"
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"net"
 	"os"
@@ -83,10 +87,42 @@ func staticElf(t *testing.T) string {
 
 const testRunID = "20261117T010203Z-0a1b2c3d"
 
+// TestMain stands in for the download of the nats command: the pinned asset of this architecture is replaced by a
+// small zip made here, so no unit test touches the network.
+func TestMain(m *testing.M) {
+	zb := fakeNatsZip()
+	sum := sha256.Sum256(zb)
+	natsCLIAssets[runtime.GOARCH] = natsCLIAsset{URL: "https://example.invalid/nats.zip", SHA256: hex.EncodeToString(sum[:])}
+	httpFetchDefault = func(url string) ([]byte, error) { return zb, nil }
+	os.Exit(m.Run())
+}
+
+func fakeNatsZip() []byte {
+	var b bytes.Buffer
+	zw := zip.NewWriter(&b)
+	w, _ := zw.Create("nats-0.0.0-linux/nats")
+	_, _ = w.Write([]byte("#!/bin/sh\n"))
+	_ = zw.Close()
+	return b.Bytes()
+}
+
 func newPodRun(t *testing.T) *Run {
 	t.Helper()
 	d := t.TempDir()
-	return &Run{Dir: d, Repo: "/repo", ID: testRunID, NatsBin: staticElf(t), Runner: &Runner{Out: d, Cwd: d}, pids: map[int]string{}}
+	script := filepath.Join(d, "setup.sh")
+	if err := os.WriteFile(script, []byte("#!/usr/bin/env bash\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	repo := filepath.Join(d, "repo")
+	for f, m := range map[string]os.FileMode{"plugin/.mcp.json": 0o644, "plugin/hooks/hooks.json": 0o644, "plugin/scripts/mash": 0o755} {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(repo, f)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(repo, f), []byte("x "+f), m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return &Run{Dir: d, Repo: repo, ID: testRunID, NatsBin: staticElf(t), SetupScript: script, Runner: &Runner{Out: d, Cwd: d}, pids: map[int]string{}}
 }
 
 func podmanFake(reply func(Cmd) (string, string, int, bool)) *fakeRT {
@@ -103,7 +139,12 @@ func podmanFake(reply func(Cmd) (string, string, int, bool)) *fakeRT {
 			return "10.89.5.0/24 \n", "", 0, true
 		}
 		if reply != nil {
-			return reply(c)
+			if o, e, code, ok := reply(c); ok {
+				return o, e, code, ok
+			}
+		}
+		if strings.HasPrefix(l, "podman image inspect --format {{.Digest}} "+baseImage) {
+			return baseImageDigest + "\n", "", 0, true
 		}
 		return "", "", 0, false
 	}
@@ -134,11 +175,11 @@ func TestPodmanOpenCommandLines(t *testing.T) {
 		"podman info --format {{.Host.Security.Rootless}}",
 		"podman build --label " + lbl + " -t mash-at005:" + id + " " + ctx,
 		"podman network create --subnet 10.89.10.0/24 --label " + lbl + " mash-at005-" + id,
-		"podman run -d --name mash-at005-" + id + "-m1 --network mash-at005-" + id + " --ip 10.89.10.11 --label " + lbl + " --read-only=false mash-at005:" + id + " /bin/nodeinit serve",
-		"podman run -d --name mash-at005-" + id + "-m2 --network mash-at005-" + id + " --ip 10.89.10.12 --label " + lbl,
-		"podman run -d --name mash-at005-" + id + "-m3 --network mash-at005-" + id + " --ip 10.89.10.13 --label " + lbl,
-		"podman exec mash-at005-" + id + "-m3 /bin/nodeinit mkdir /node/tls",
-		"podman exec mash-at005-" + id + "-m3 /bin/nodeinit mkdir /node/run",
+		"podman run -d --name mash-at005-" + id + "-m1 --network mash-at005-" + id + " --ip 10.89.10.11 --user 1000:1000 --label " + lbl + " --read-only=false mash-at005:" + id + " /usr/local/bin/nodeinit serve",
+		"podman run -d --name mash-at005-" + id + "-m2 --network mash-at005-" + id + " --ip 10.89.10.12 --user 1000:1000 --label " + lbl,
+		"podman run -d --name mash-at005-" + id + "-m3 --network mash-at005-" + id + " --ip 10.89.10.13 --user 1000:1000 --label " + lbl,
+		"podman exec mash-at005-" + id + "-m3 /usr/local/bin/nodeinit mkdir /node/tls",
+		"podman exec mash-at005-" + id + "-m3 /usr/local/bin/nodeinit mkdir /node/run",
 	} {
 		if !f.has(want) {
 			t.Errorf("missing command %q in:\n%s", want, strings.Join(f.lines(), "\n"))
@@ -156,7 +197,7 @@ func TestPodmanOpenCommandLines(t *testing.T) {
 	for _, c := range f.calls {
 		if len(c.Argv) > 1 && c.Argv[0] == "go" && c.Argv[1] == "build" {
 			builds++
-			if c.Dir != "/repo" || !strings.Contains(strings.Join(c.Env, " "), "CGO_ENABLED=0") {
+			if c.Dir != r.Repo || !strings.Contains(strings.Join(c.Env, " "), "CGO_ENABLED=0") {
 				t.Errorf("go build %v: dir %q env", c.Argv, c.Dir)
 			}
 		}
@@ -165,7 +206,7 @@ func TestPodmanOpenCommandLines(t *testing.T) {
 		t.Errorf("%d go builds", builds)
 	}
 	if b, err := os.ReadFile(filepath.Join(ctx, "Containerfile")); err != nil || string(b) != containerfile ||
-		!strings.Contains(containerfile, "FROM scratch") || !strings.Contains(containerfile, "ENTRYPOINT []") {
+		!strings.Contains(containerfile, "\nFROM "+baseImage+"\n") || !strings.Contains(containerfile, "\nUSER mash\n") || !strings.Contains(containerfile, "ENTRYPOINT []") {
 		t.Errorf("Containerfile: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(ctx, "nats-server")); err != nil {
@@ -178,7 +219,7 @@ func TestPodmanOpenCommandLines(t *testing.T) {
 	seen := map[string]bool{}
 	for i, h := range hs {
 		n := string(rune('1' + i))
-		if h.Role() != "M"+n || h.Addr() != "10.89.10.1"+n || h.Home().Dir != "/node" || h.Bin("mash") != "/bin/mash" ||
+		if h.Role() != "M"+n || h.Addr() != "10.89.10.1"+n || h.Home().Dir != "/node" || h.Bin("mash") != "/usr/local/bin/mash" ||
 			h.ServerDir() != "/node/server" || h.TLSDir() != "/node/tls" || h.Ports() != DefaultPorts[i] {
 			t.Errorf("node %d: %s %s %+v", i, h.Role(), h.Addr(), h.Ports())
 		}
@@ -330,7 +371,7 @@ func TestPodmanDynamicNatsServerFails(t *testing.T) {
 	f := podmanFake(nil)
 	p := &Podman{Runner: f, LookPath: func(string) (string, error) { return "/usr/bin/podman", nil }, Pick: func(int) int { return 0 }}
 	_, err = p.Open(r)
-	if err == nil || !strings.Contains(err.Error(), "dynamically linked") || !strings.Contains(err.Error(), "FROM scratch") {
+	if err == nil || !strings.Contains(err.Error(), "dynamically linked") || !strings.Contains(err.Error(), "static binary") {
 		t.Fatalf("%v", err)
 	}
 	if f.has("podman build") {
@@ -370,12 +411,12 @@ func TestPodmanFreeOctetAvoidsExistingNetworks(t *testing.T) {
 
 func TestPodmanExecAndSpawnArgs(t *testing.T) {
 	linuxOnly(t)
-	a := execArgs("c1", []string{"/bin/mash", "status"}, []string{"MASH_SERVER=tls://10.89.1.11:14222", "HOME=/node"}, false)
-	want := "podman exec --workdir /node -e MASH_SERVER=tls://10.89.1.11:14222 -e HOME=/node c1 /bin/mash status"
+	a := execArgs("c1", []string{"/usr/local/bin/mash", "status"}, []string{"MASH_SERVER=tls://10.89.1.11:14222", "HOME=/node"}, false)
+	want := "podman exec --workdir /node -e PATH=/usr/local/bin:/usr/bin:/bin -e MASH_SERVER=tls://10.89.1.11:14222 -e HOME=/node c1 /usr/local/bin/mash status"
 	if strings.Join(a, " ") != want {
 		t.Fatalf("%v", a)
 	}
-	if b := execArgs("c1", []string{"/bin/mash", "serve"}, nil, true); b[2] != "-i" {
+	if b := execArgs("c1", []string{"/usr/local/bin/mash", "serve"}, nil, true); b[2] != "-i" {
 		t.Fatalf("spawn keeps stdin open: %v", b)
 	}
 	r := newPodRun(t)
@@ -383,8 +424,8 @@ func TestPodmanExecAndSpawnArgs(t *testing.T) {
 	hs := openPodman(t, f, r)
 	var got []string
 	hs[0].(*podHost).c.execFn = func(name string, argv []string) Result { got = append([]string{name}, argv...); return Result{Code: 7} }
-	res := hs[0].Exec("x", []string{"/bin/mashctl", "endpoint", "list"}, []string{"K=V"})
-	if res.Code != 7 || got[0] != "M1-x" || !strings.Contains(strings.Join(got, " "), "-e K=V mash-at005-"+testRunID+"-m1 /bin/mashctl endpoint list") {
+	res := hs[0].Exec("x", []string{"/usr/local/bin/mashctl", "endpoint", "list"}, []string{"K=V"})
+	if res.Code != 7 || got[0] != "M1-x" || !strings.Contains(strings.Join(got, " "), "-e K=V mash-at005-"+testRunID+"-m1 /usr/local/bin/mashctl endpoint list") {
 		t.Fatalf("%v %+v", got, res)
 	}
 }
@@ -399,8 +440,8 @@ func TestPodmanSpawnRunsUnderNodeinitAndStopsByPidfile(t *testing.T) {
 	if pf1 == pf2 || !strings.HasPrefix(pf1, "/node/run/serve_a_b-") || !strings.HasSuffix(pf1, ".pid") {
 		t.Fatalf("%q %q", pf1, pf2)
 	}
-	got := strings.Join(spawnArgs("c1", pf1, []string{"/bin/mash", "serve"}, []string{"K=V"}), " ")
-	want := "podman exec -i --workdir /node -e K=V c1 /bin/nodeinit run --pidfile " + pf1 + " -- /bin/mash serve"
+	got := strings.Join(spawnArgs("c1", pf1, []string{"/usr/local/bin/mash", "serve"}, []string{"K=V"}), " ")
+	want := "podman exec -i --workdir /node -e PATH=/usr/local/bin:/usr/bin:/bin -e K=V c1 /usr/local/bin/nodeinit run --pidfile " + pf1 + " -- /usr/local/bin/mash serve"
 	if got != want {
 		t.Fatalf("%s", got)
 	}
@@ -408,7 +449,7 @@ func TestPodmanSpawnRunsUnderNodeinitAndStopsByPidfile(t *testing.T) {
 	if err := h.stopInNode(pf1); err != nil {
 		t.Fatal(err)
 	}
-	if !f.has("podman exec mash-at005-" + testRunID + "-m1 /bin/nodeinit stop --pidfile " + pf1 + " --grace 5s") {
+	if !f.has("podman exec mash-at005-" + testRunID + "-m1 /usr/local/bin/nodeinit stop --pidfile " + pf1 + " --grace 5s") {
 		t.Fatalf("%s", strings.Join(f.lines(), "\n"))
 	}
 }
@@ -450,7 +491,7 @@ func TestPodmanCopyInAndOut(t *testing.T) {
 		t.Fatalf("%q %v", b, err)
 	}
 	c2 := "mash-at005-" + testRunID + "-m2"
-	for _, want := range []string{"podman exec " + c2 + " /bin/nodeinit mkdir /node/keys", "podman cp ", c2 + ":/node/keys/s.seed", "/bin/nodeinit chmod 600 /node/keys/s.seed", "podman cp " + c2 + ":/node/x "} {
+	for _, want := range []string{"podman exec " + c2 + " /usr/local/bin/nodeinit mkdir /node/keys", "podman cp ", c2 + ":/node/keys/s.seed", "/usr/local/bin/nodeinit chmod 600 /node/keys/s.seed", "podman cp " + c2 + ":/node/x "} {
 		if !f.has(want) {
 			t.Errorf("missing %q in\n%s", want, strings.Join(f.lines(), "\n"))
 		}
@@ -471,13 +512,13 @@ func TestPodmanCopyInAndOut(t *testing.T) {
 		t.Error("Remove took a relative path")
 	}
 	f.calls = nil
-	if err := m2.Remove("/node/adopt-in/sys.creds"); err != nil || !f.has("/bin/nodeinit rm /node/adopt-in/sys.creds") {
+	if err := m2.Remove("/node/adopt-in/sys.creds"); err != nil || !f.has("/usr/local/bin/nodeinit rm /node/adopt-in/sys.creds") {
 		t.Errorf("remove: %v %v", err, f.lines())
 	}
-	if !m2.Exists("/x") || !f.has("/bin/nodeinit stat /x") {
+	if !m2.Exists("/x") || !f.has("/usr/local/bin/nodeinit stat /x") {
 		t.Error("exists")
 	}
-	if _, err := m2.HTTPGet("http://10.89.10.11:18222/routez"); err != nil || !f.has("/bin/nodeinit get http://10.89.10.11:18222/routez") {
+	if _, err := m2.HTTPGet("http://10.89.10.11:18222/routez"); err != nil || !f.has("/usr/local/bin/nodeinit get http://10.89.10.11:18222/routez") {
 		t.Error("http get is done from inside the node")
 	}
 }
@@ -507,7 +548,7 @@ func TestPodmanSnapshotAndPortFree(t *testing.T) {
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
 		t.Error("the copy is left")
 	}
-	if err := hs[2].WaitPortFree(14224, 0); err != nil || !f.has("/bin/nodeinit dial 10.89.10.13:14224") {
+	if err := hs[2].WaitPortFree(14224, 0); err != nil || !f.has("/usr/local/bin/nodeinit dial 10.89.10.13:14224") {
 		t.Errorf("port free: %v", err)
 	}
 }
@@ -855,5 +896,44 @@ func linuxOnly(t *testing.T) {
 	t.Helper()
 	if runtime.GOOS != "linux" {
 		t.Skip("the podman host of AT-005 is Linux-only (rootless podman, ELF binaries)")
+	}
+}
+
+func TestBuildContextCopiesThePluginDirectory(t *testing.T) {
+	linuxOnly(t)
+	r := newPodRun(t)
+	openPodman(t, podmanFake(nil), r)
+	ctx := filepath.Join(r.Dir, "podman-ctx")
+	for f, perm := range map[string]os.FileMode{"plugin/.mcp.json": 0o644, "plugin/hooks/hooks.json": 0o644, "plugin/scripts/mash": 0o755} {
+		st, err := os.Stat(filepath.Join(ctx, f))
+		if err != nil || st.Mode().Perm() != perm {
+			t.Errorf("%s in the build context: %v %v", f, st, err)
+		}
+	}
+	for _, want := range []string{"COPY plugin /opt/mash-repo/plugin", "chmod -R a+rX /opt/mash-repo"} {
+		if !strings.Contains(containerfile, want) {
+			t.Errorf("the Containerfile lacks %q", want)
+		}
+	}
+}
+
+func TestCopyTreeRefusesALinkOutOfTheTree(t *testing.T) {
+	d := t.TempDir()
+	src := filepath.Join(d, "src")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(d, "outside"), []byte("o"), 0o644)
+	os.WriteFile(filepath.Join(src, "in"), []byte("i"), 0o644)
+	os.Symlink("in", filepath.Join(src, "okln"))
+	if err := copyTree(src, filepath.Join(d, "dst1")); err != nil {
+		t.Fatalf("a link inside the tree: %v", err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(d, "dst1", "okln")); string(b) != "i" {
+		t.Errorf("link copied as %q", b)
+	}
+	os.Symlink("../outside", filepath.Join(src, "bad"))
+	if err := copyTree(src, filepath.Join(d, "dst2")); err == nil || !strings.Contains(err.Error(), "leaves") {
+		t.Errorf("a link out of the tree: %v", err)
 	}
 }

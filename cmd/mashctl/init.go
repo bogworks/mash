@@ -266,7 +266,7 @@ func doInit(setupPath string, dry, jsonOut, verbose bool, env func(string) strin
 
 	// (1) the files.
 	if st.opKP, st.opPub, err = ctlkeys.ParseOperatorSeed(sf.operatorKey); err != nil {
-		return cliframe.Failf("operator_key: %v\n  it must be a 0600 file holding the operator SIGNING seed (it starts with SO)", err)
+		return cliframe.Failf("operator_key: %v\n  it must be a 0600 file holding the operator key that signs the account (it starts with SO): its identity key when the server was set up with the nats command, or a signing key if your operator uses one", err)
 	}
 	if st.acctKP, st.acctPub, err = ctlkeys.ParseAccountSeed(sf.accountKey); err != nil {
 		return cliframe.Failf("account_key: %v\n  it must be a 0600 file holding the IDENTITY seed of the mash account (it starts with SA; its public key is the account JWT's subject)", err)

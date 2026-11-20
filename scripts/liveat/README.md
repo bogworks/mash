@@ -1,10 +1,25 @@
 # liveat: the live acceptance tests
 
 `go run ./scripts/liveat at001|at002|at003|all|selfcheck --port P` runs AT-001 to AT-003 of the 0.5.5 endpoint-model
-contract against a build of this checkout, on one local NATS server, in scratch homes.
+contract against a build of this checkout, on one local NATS server, in scratch homes, **inside a throwaway container**.
 
-The local server is the one `mashctl init --local` makes: TLS only, with its own CA (`ca.pem`, `server.pem`, `server.key`
-in the server directory). Every command of AT-001 to AT-003 connects to `tls://127.0.0.1:P` with `MASH_CA` set to
+Tests never run on the machine that runs the harness. On that machine `liveat at001` builds the node image
+(`Containerfile.at005`: a pinned Debian with bash, openssl, iproute2, the static `mash`, `mashctl`, `nats-server` and
+`nodeinit`, the pinned `nats` command and the setup script), starts ONE rootless container of it (label
+`mash-at005=<run id>`, name `mash-at005-<run id>-sbx`, `--network none`, no published port, the non-root user `mash`, uid
+1000), puts a static `liveat` in it and runs `liveat <the same arguments> --inside` there. Only `--inside` starts a
+server; it is refused when `/run/.containerenv` does not exist (not a container, exit 2). Afterwards the host copies
+`out/`, the records and `run.log` back with `podman cp` (the homes, keys and server directories stay in the container),
+scans them for seeds and JWTs, prints the run's output, and destroys the container and the image by label. The exit
+code is the run inside's (1 also when the host's scan finds a seed or a JWT; 4: the sandbox could not be made). Needs
+rootless podman and network to pull `docker.io/library/debian:bookworm-slim` (the digest is recorded in the record's
+environment) and to download the pinned natscli release (`natscli v0.5.1`, sha256 verified before use; see image.go).
+
+Inside the container, the local server is the one `scripts/mash-local-nats-setup.sh --dir <new dir> --owner alice` makes and starts (the image
+carries the checkout's copy; `LIVEAT_SETUP_SCRIPT` names the file to put in the image), followed by `mashctl init --config <dir>/mash-setup.yaml`: TLS only, with its own CA
+(`ca.pem`, `server.pem`, `server.key` in the server directory). The script chooses its own port (4222, or the next free one
+up to 4272); `P` is only checked free before it starts. It needs `nats`, `nats-server`, `openssl` and `ss`, all in the image, and refuses root (the container user is not root).
+Every command of AT-001 to AT-003 connects to `tls://127.0.0.1:<the chosen port>` with `MASH_CA` set to
 that `ca.pem` and no `MASH_INSECURE_PLAINTEXT` (REQ-014); AT-001 asserts that and that `mash doctor` says the server row is ok on tls://.
 Only AT-003's plain-URL case sets the override, per command, against a counting listener. The server key's text is
 searched for in all captured output like a seed.
@@ -13,8 +28,7 @@ searched for in all captured output like a seed.
 
 ```
 go run ./scripts/liveat at005 --hosts podman --run-by manual --host-label dev-box --record-out at005-record.md
-go run ./scripts/liveat at005 --hosts local      # the harness's own selfcheck on a developer machine (the default)
-go run ./scripts/liveat at005 --hosts local --dry-setup
+go run ./scripts/liveat at005 --hosts local      # refused unless run inside a container: the setup script runs only inside a node container
 go run ./scripts/liveat at005-cleanup --run RUNID
 ```
 
@@ -49,15 +63,13 @@ production host: nothing is installed, no account or key is made, no directory i
 
 What `--hosts podman` makes (all of it labelled `mash-at005=<run id>`, all of it removed when the run ends, pass or fail):
 
-- an image `mash-at005:<run id>`, built from the checkout: `mash`, `mashctl`, `nodeinit` (`scripts/liveat/nodeinit`) and
-  the `nats-server` built from the `go.mod` pin, as static binaries in `/bin`, on `FROM scratch`. Nothing is pulled. The Containerfile is
-  `scripts/liveat/Containerfile.at005`:
-
-  ```
-  FROM scratch
-  COPY mash mashctl nats-server nodeinit /bin/
-  ENTRYPOINT []
-  ```
+- an image `mash-at005:<run id>`, built from the checkout on `docker.io/library/debian:bookworm-slim` (pulled by tag; the
+  digest goes in the run record) with bash, openssl, iproute2, coreutils, grep, sed and gawk, the setup script, `mash`,
+  `mashctl`, `nodeinit` (`scripts/liveat/nodeinit`), the `nats-server` built from the `go.mod` pin (static) and the pinned
+  `nats` command, in `/usr/local/bin`. The nodes run as the non-root user `mash` (uid 1000). The Containerfile is
+  `scripts/liveat/Containerfile.at005`. M1 runs the setup script inside itself (`bash /usr/local/bin/mash-local-nats-setup.sh
+  --dir /node/setup --owner alice`, then `--stop`) and the harness copies what it makes to M2 and M3 with `podman cp`;
+  nothing is run on the host;
 
 - a network `mash-at005-<run id>` on `10.89.<r>.0/24` (or `<A.B>.<r>.0/24` with `--subnet-base A.B`, a private /16 such as `10.x`, `172.16-31.x` or `192.168`), `r` random and overlapping no podman network, no host route (`ip -4 route show`) and no host interface address;
 - three containers `mash-at005-<run id>-m1` to `-m3` at `10.89.<r>.11` to `.13`. Each has its own filesystem
@@ -65,7 +77,8 @@ What `--hosts podman` makes (all of it labelled `mash-at005=<run id>`, all of it
   16222-16224 (routes) and 18222 (the monitor of M1) are inside each node's own network namespace, and the certificates
   carry the node address as an IP SAN.
 
-Files go in and out of a node with `podman cp` through a temporary file in the run directory that is removed by its exact
+The base image stays in podman's storage after the run (it is not the run's, and another run may use it); the run's own image,
+containers and network are removed. Files go in and out of a node with `podman cp` through a temporary file in the run directory that is removed by its exact
 path right after, so a seed or a JWT is never on a command line. Long-running processes (`nats-server`, `mash serve`) are
 `podman exec -i` client processes of the harness; the harness records each PID and stops it by that PID. Ending the run
 removes the containers, so nothing inside outlives it. No process is found or killed by pattern.

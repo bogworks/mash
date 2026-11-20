@@ -11,10 +11,10 @@ import (
 	"strings"
 )
 
-// seedRE matches an NKey seed of any kind (S then O, A, N, C, U, P or X, then base32); jwtRE a JWT.
+// seedRE matches an NKey seed of any kind, not the tail of a public key (a word boundary first; S then O, A, N, C, U, P or X, then base32); jwtRE a JWT.
 // A hit in captured output breaks INV-001.
 var (
-	seedRE = regexp.MustCompile(`S[OANCUPX][A-Z2-7]{50,}`)
+	seedRE = regexp.MustCompile(`\bS[OANCUPX][A-Z2-7]{50,}`)
 	jwtRE  = regexp.MustCompile(`eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*`)
 )
 
