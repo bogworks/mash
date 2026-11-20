@@ -33,11 +33,15 @@ func TestServeNeverAutoPicksAnEndpoint(t *testing.T) {
 	env, _ := nopickFixture(t)
 	s := startServe(t, env)
 	s.initialize(t)
-	if names := toolNames(t, s); len(names) != 2 || !names["status"] || !names["version"] {
-		t.Fatalf("serve with no endpoint named exposes %v, want status and version", names)
+	if names := toolNames(t, s); len(names) != 3 || !names["status"] || !names["doctor"] || !names["version"] {
+		t.Fatalf("serve with no endpoint named exposes %v, want version, status and doctor", names)
 	}
-	out := statusOf(t, s, 10)
-	wantAll(t, "no endpoint named", out, "no endpoint is chosen for this session", "MASH_ENDPOINT=<address>")
+	const want = "No endpoint is chosen for this session.\nhint: start the session with MASH_ENDPOINT=<address>"
+	for i, tool := range []string{"status", "doctor"} {
+		if got := toolText(t, s, 10+i, tool); got != want {
+			t.Errorf("%s, no endpoint named: %q, want %q", tool, got, want)
+		}
+	}
 }
 
 func TestServeTakesTheNamedEndpoint(t *testing.T) {
@@ -46,7 +50,7 @@ func TestServeTakesTheNamedEndpoint(t *testing.T) {
 	s := startServe(t, env)
 	s.initialize(t)
 	names := toolNames(t, s)
-	for _, n := range []string{"send", "inbox", "read", "who", "status", "version"} {
+	for _, n := range []string{"send", "inbox", "read", "who", "status", "doctor", "version"} {
 		if !names[n] {
 			t.Fatalf("missing tool %s in %v", n, names)
 		}
@@ -71,7 +75,7 @@ func TestOneShotCommandsStillAutoPick(t *testing.T) {
 	out.Reset()
 	errb.Reset()
 	run([]string{"status"}, envFrom(env), strings.NewReader(""), &out, &errb)
-	if !strings.Contains(out.String()+errb.String(), address) {
+	if !strings.HasPrefix(out.String(), address+": ") {
 		t.Fatalf("status does not show the auto-picked endpoint %s:\n%s%s", address, out.String(), errb.String())
 	}
 }

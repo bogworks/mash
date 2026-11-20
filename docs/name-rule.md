@@ -75,14 +75,6 @@ mash refuses to start, naming the file and the problem, when any of these holds:
 - a pattern is not valid RE2;
 - `name_rule_required` is `true` and no file was loaded, or its value is not a boolean.
 
-## Status
-
-`mash status` shows the rule in force on one line:
-
-- `name rule: <path> sha256:<12 hex> (<N> rules)`: the path as configured, the first 12 hex digits of the SHA-256 of the
-  file's bytes, and the number of rules. The digest lets a check confirm every endpoint loaded the expected file.
-- `name rule: none set`: no file was named.
-
 ## Compatibility
 
 `version` is an integer. mash reads version n and n-1 of the rule file for one compatibility window. The window is the

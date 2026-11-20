@@ -26,6 +26,19 @@ type Result interface {
 	Text(o Opts) string
 }
 
+// ExitCoder is implemented by a result that carries the exit code of a report: status and doctor report on stdout and
+// exit 1 when they found a problem, so a problem is a result, not an error. A result without it exits 0.
+type ExitCoder interface {
+	ExitCode() int
+}
+
+// Hinter is implemented by a result that carries a hint for a person: the command line prints it as "hint: HINT" on
+// standard error (never with --json, whose object is the whole answer), and an MCP tool, which has no standard error,
+// ends its text with the same line. An empty hint is no hint.
+type Hinter interface {
+	Hint() string
+}
+
 // Env is what a command runs against. Svc is the command package's own service, asserted to the interface it needs, so
 // tests can fake it.
 type Env struct {

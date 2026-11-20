@@ -165,8 +165,8 @@ func TestServeRetriesHeldLease(t *testing.T) {
 	holdLease(t, kv, tAddr("a").Flat())
 	s := startServe(t, w.env["a"])
 	s.initialize(t)
-	if n := len(s.tools(t)); n != 7 {
-		t.Fatalf("waiting session exposes %d tools, want 7", n)
+	if n := len(s.tools(t)); n != 8 {
+		t.Fatalf("waiting session exposes %d tools, want 8", n)
 	}
 	held := content(s.await(t, 5*time.Second, isChannel))
 	for _, want := range []string{"already in use", "deadhost", "4242", "retrying"} {
@@ -349,8 +349,8 @@ func TestServeUnreadablePolicyIsConfigError(t *testing.T) {
 	if strings.Contains(instr, "LEGACY-POLICY-SENTINEL") || !strings.Contains(instr, "reading "+pol) {
 		t.Fatalf("unreadable policy not reported: %q", instr)
 	}
-	if st := resultText(s.call(t, 90, "status", "{}")); !strings.Contains(st, "config: FAILED") || !strings.Contains(st, "reading "+pol) {
-		t.Fatalf("status does not report it: %s", st)
+	if st := resultText(s.call(t, 90, "doctor", "{}")); !strings.Contains(st, "config    FAIL  ") || !strings.Contains(st, "reading "+pol) {
+		t.Fatalf("doctor does not report it: %s", st)
 	}
 
 	// A dangling symlink is present, not absent: ReadFile says ErrNotExist but it is still a configuration error.
@@ -365,8 +365,8 @@ func TestServeUnreadablePolicyIsConfigError(t *testing.T) {
 	if strings.Contains(instr, "LEGACY-POLICY-SENTINEL") || !strings.Contains(instr, "reading "+pol) {
 		t.Fatalf("dangling policy symlink not reported: %q", instr)
 	}
-	if st := resultText(sd.call(t, 90, "status", "{}")); !strings.Contains(st, "config: FAILED") || !strings.Contains(st, "reading "+pol) {
-		t.Fatalf("status does not report dangling symlink: %s", st)
+	if st := resultText(sd.call(t, 90, "doctor", "{}")); !strings.Contains(st, "config    FAIL  ") || !strings.Contains(st, "reading "+pol) {
+		t.Fatalf("doctor does not report dangling symlink: %s", st)
 	}
 	if err := os.Remove(pol); err != nil {
 		t.Fatal(err)

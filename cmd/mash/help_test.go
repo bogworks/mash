@@ -13,7 +13,7 @@ import (
 
 // helpVerbs is every verb and sub-verb of mash; each takes -h and --help, prints its usage and changes nothing.
 var helpVerbs = [][]string{
-	{"serve"}, {"hook"}, {"send"}, {"read"}, {"inbox"}, {"who"}, {"prompt"}, {"status"}, {"version"},
+	{"serve"}, {"hook"}, {"send"}, {"read"}, {"inbox"}, {"who"}, {"prompt"}, {"status"}, {"doctor"}, {"version"},
 	{"plugin"}, {"plugin", "export"},
 	{"key"}, {"key", "create"}, {"credential"}, {"credential", "create"},
 	{"admin"}, {"admin", "init"}, {"admin", "limits"}, {"admin", "permissions"}, {"admin", "provision"},

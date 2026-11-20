@@ -24,6 +24,8 @@ var commandEntries = []cmdcore.Entry{
 	cmdcore.Register(cmds.Send),
 	cmdcore.Register(cmds.Version),
 	cmdcore.Register(cmds.Who),
+	cmdcore.Register(cmds.Status),
+	cmdcore.Register(cmds.Doctor),
 }
 
 // helpFrame is what --help prints after a command's own options. The descriptions are the specification's.
@@ -123,7 +125,13 @@ func openFailure(cfg config.Config, err error) error {
 type cliSvc struct {
 	buildVersion
 	cfg    config.Config
+	cfgErr error // what loading the configuration failed with: status and doctor report it
 	stderr io.Writer
+}
+
+// Health is the checks of status and doctor. They report a configuration that did not load, so they run with it.
+func (s *cliSvc) Health(ctx context.Context) (cmds.HealthReport, error) {
+	return (&healthSvc{cfg: s.cfg, cfgErr: s.cfgErr}).Health(ctx)
 }
 
 func (s *cliSvc) Send(ctx context.Context, to, text string, o cmds.SendOptions) (cmds.SendReceipt, error) {
@@ -132,7 +140,7 @@ func (s *cliSvc) Send(ctx context.Context, to, text string, o cmds.SendOptions) 
 		return cmds.SendReceipt{}, err.WithHint("mash send --help")
 	}
 	if cfg.Inert() {
-		return cmds.SendReceipt{}, cliframe.Failf("no endpoint: set MASH_ENDPOINT (owner.group.name), --endpoint, or install credentials for one endpoint").WithHint("mash status")
+		return cmds.SendReceipt{}, cmdcore.NoEndpoint(cmdcore.NoneInstalled, "send", nil)
 	}
 	ctx, cancel := context.WithTimeout(ctx, cliDeadline(cfg))
 	defer cancel()
@@ -182,7 +190,7 @@ func whoEntries(ps []endpoint.Presence, owner string) []cmds.WhoEntry {
 func (s *cliSvc) Who(ctx context.Context) ([]cmds.WhoEntry, error) {
 	cfg := s.cfg
 	if cfg.Inert() {
-		return nil, cliframe.Failf("no endpoint: set MASH_ENDPOINT (owner.group.name), --endpoint, or install credentials for one endpoint").WithHint("mash status")
+		return nil, cmdcore.NoEndpoint(cmdcore.NoneInstalled, "who", nil)
 	}
 	ctx, cancel := context.WithTimeout(ctx, cliDeadline(cfg))
 	defer cancel()

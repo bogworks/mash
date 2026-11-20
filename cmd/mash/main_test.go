@@ -156,8 +156,8 @@ func TestServeInertWithoutName(t *testing.T) {
 	if instr := r["result"].(map[string]any)["instructions"].(string); !strings.Contains(instr, "MASH_ENDPOINT") {
 		t.Fatalf("instructions %q", instr)
 	}
-	if names := toolNames(t, s); len(names) != 2 || !names["status"] || !names["version"] {
-		t.Fatalf("inert serve exposes %v, want status and version", names)
+	if names := toolNames(t, s); len(names) != 3 || !names["status"] || !names["doctor"] || !names["version"] {
+		t.Fatalf("inert serve exposes %v, want version, status and doctor", names)
 	}
 }
 
@@ -319,8 +319,8 @@ func TestServeLeaseConflict(t *testing.T) {
 	if instr := r["result"].(map[string]any)["instructions"].(string); !strings.Contains(instr, "waiting") {
 		t.Fatalf("instructions %q", instr)
 	}
-	if n := len(second.tools(t)); n != 7 {
-		t.Fatalf("a waiting session exposes %d tools, want 7", n)
+	if n := len(second.tools(t)); n != 8 {
+		t.Fatalf("a waiting session exposes %d tools, want 8", n)
 	}
 	ev := second.await(t, 5*time.Second, isChannel)
 	if !strings.Contains(ev["params"].(map[string]any)["content"].(string), "already in use") {

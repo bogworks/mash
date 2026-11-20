@@ -99,7 +99,7 @@ The same settings serve `mashctl`, `mash serve`, `mash hook` and the other `mash
 
 ### Plain text and `MASH_INSECURE_PLAINTEXT`
 
-Every mash connection requires TLS, to any host, loopback included: `mashctl`, `mash serve`, `mash hook` and the commands `send`, `read`, `inbox`, `who`, `prompt` and `status`. A plain `nats://` or `ws://` URL is refused before any connection is made, and so is any other scheme that is not `tls://` or `wss://`. `mashctl init --local` makes a certificate authority and a server certificate, so the quick start runs over TLS with no extra setting. The one override is `insecure_plaintext` (`MASH_INSECURE_PLAINTEXT`): `1`/`true` or `0`/`false`, anything else is an error, and the variable beats `config.json`. 
+Every mash connection requires TLS, to any host, loopback included: `mashctl`, `mash serve`, `mash hook` and the commands `send`, `read`, `inbox`, `who`, `prompt`, `status` and `doctor`. A plain `nats://` or `ws://` URL is refused before any connection is made, and so is any other scheme that is not `tls://` or `wss://`. `mashctl init --local` makes a certificate authority and a server certificate, so the quick start runs over TLS with no extra setting. The one override is `insecure_plaintext` (`MASH_INSECURE_PLAINTEXT`): `1`/`true` or `0`/`false`, anything else is an error, and the variable beats `config.json`. 
 
 A plain URL without the override fails with exit code 2 and this text:
 
@@ -115,11 +115,11 @@ mash: WARNING: plain-text connection to HOST (insecure_plaintext is set); anyone
 
 Use it only for a throwaway server in a test. Never use it on a network you do not control: plain text lets anyone on the network read mail and obtain signatures. It does not turn a `tls://` connection off.
 
-`mash status` shows the result:
+`mash doctor` shows the result on its `server` row:
 
-- `tls: OK - tls:// connection`
-- `tls: WARN - URL is plain text and insecure_plaintext (MASH_INSECURE_PLAINTEXT) is set: ...` when the override is set and the URL is plain.
-- `tls: FAILED - mash: refusing a plain nats:// connection to "HOST" ...` when the override is not set and the URL is plain.
+- `server    ok    tls://myserver:4222` for a `tls://` URL that a server answers.
+- `server    warn  ... is plain text: insecure_plaintext is set` when the override is set and the URL is plain.
+- `server    FAIL  ...` when the override is not set and the URL is plain; the connection is refused before it is made.
 
 ### `mashctl adopt` with a `tls://` URL
 
@@ -281,7 +281,6 @@ While this page was written, these steps were also run on one host, on loopback,
 - The same server with `verify: true`: a connection without a client certificate failed with the message above, and one with `tls_cert` and `tls_key` worked.
 - `mashctl adopt` with a `tls://` URL and `--mint-admin` into a second, empty config directory, then `endpoint create --public-key` from it, `mash key create` and `mash credential create` in a third, and `endpoint delete --servers 1 --sys-creds FILE`.
 - Three servers in one cluster with the `cluster` TLS block and `verify: true`, one shared certificate for all three, listing `localhost` and `127.0.0.1`: `adopt` reported `3 server(s) replied`, `mashctl init`, `issued check` (`3 of 3 servers answered`), `endpoint create --servers 3` and `endpoint delete --servers 3` (`3 server(s) acknowledged`) worked with a three-entry `url`.
-- `mash status` with `MASH_INSECURE_PLAINTEXT` on and off, against a plain URL to a non-loopback address that was not contacted.
 
 What was not run, by AT-005 or by these steps:
 

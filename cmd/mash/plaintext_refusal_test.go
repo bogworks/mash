@@ -7,7 +7,6 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/testenv"
 )
 
@@ -198,9 +197,10 @@ func TestServeWithTheOverrideWarnsOnStderrNotStdout(t *testing.T) {
 	env["MASH_INSECURE_PLAINTEXT"] = "1"
 	s := startServe(t, env)
 	s.initialize(t)
-	status := resultText(s.call(t, 7, "status", `{}`))
-	if l := statusLine(t, status, "tls: "); !strings.HasPrefix(l, "tls: WARN - ") || !strings.Contains(l, "insecure_plaintext") {
-		t.Errorf("status tool tls line %q", l)
+	doctor := resultText(s.call(t, 7, "doctor", `{}`))
+	// the listener is not a server: the URL was let through (no refusal), and nothing answered
+	if !strings.Contains(doctor, "server    FAIL  the server did not answer: nats://127.0.0.1:") || strings.Contains(doctor, "refusing") {
+		t.Errorf("doctor tool server row: %q", doctor)
 	}
 	if c.n.Load() == 0 {
 		t.Error("no connection was made with the override set")
@@ -210,66 +210,32 @@ func TestServeWithTheOverrideWarnsOnStderrNotStdout(t *testing.T) {
 	}
 }
 
-// `mash status` keeps the whole report, `tls: WARN` included, on stdout, and also says the plain-text warning on
-// standard error once (REQ-014). A tls:// URL, and a plain URL with no override, print no warning on stderr.
-func TestStatusCommandPlainWarningOnStderr(t *testing.T) {
+// `mash doctor` keeps the whole report, the server row's warning included, on stdout, and also says the plain-text
+// warning on standard error once (REQ-014). A tls:// URL, and a plain URL with no override, print no warning on stderr.
+func TestDoctorCommandPlainWarningOnStderr(t *testing.T) {
 	const warning = "WARNING: plain-text connection to 127.0.0.1"
-	statusRun := func(url string, override bool) (string, string) {
+	doctorRun := func(url string, override bool) (string, string) {
 		env := plainEnv(t, url)
 		if override {
 			env["MASH_INSECURE_PLAINTEXT"] = "1"
 		}
+		env["MASH_OPEN_TIMEOUT"] = "300ms"
 		var out, errb bytes.Buffer
-		if code := run([]string{"status"}, envStrict(env), strings.NewReader(""), &out, &errb); code != 0 {
-			t.Fatalf("mash status exit %d: %s", code, errb.String())
-		}
+		run([]string{"doctor"}, envStrict(env), strings.NewReader(""), &out, &errb)
 		return out.String(), errb.String()
 	}
-	out, errs := statusRun("nats://127.0.0.1:4222", true)
-	if !strings.Contains(out, "tls: WARN") {
-		t.Errorf("stdout lacks tls: WARN:\n%s", out)
-	}
-	if strings.Contains(out, "\nmash: WARNING") {
-		t.Errorf("the standalone warning is on stdout:\n%s", out)
-	}
+	_, errs := doctorRun("nats://127.0.0.1:4222", true)
 	if n := strings.Count(errs, warning); n != 1 {
 		t.Errorf("%d warnings on stderr, want 1: %q", n, errs)
 	}
-	out, errs = statusRun("tls://127.0.0.1:4222", false)
-	if !strings.Contains(out, "tls: OK") || strings.Contains(errs, "WARNING") {
-		t.Errorf("tls:// status: stdout tls line missing or stderr warned: %q / %q", out, errs)
+	for _, url := range []string{"tls://127.0.0.1:4222", "nats://127.0.0.1:4222"} {
+		out, errs := doctorRun(url, false)
+		if strings.Contains(errs, "WARNING") || strings.Contains(out, "WARNING") {
+			t.Errorf("%s: warned: %q / %q", url, out, errs)
+		}
 	}
-	out, errs = statusRun("nats://127.0.0.1:4222", false)
-	if !strings.Contains(out, "tls: FAILED") || strings.Contains(errs, "WARNING") {
-		t.Errorf("plain, no override: stdout %q, stderr %q", out, errs)
-	}
-}
-
-// The stderr warning follows the report's own tls line, not the config error: a plain URL with the override and an
-// unrelated config error (no group) still says `tls: WARN` on stdout and so must warn on stderr, once. A config that
-// did not load at all has no URL: no warning, no panic.
-func TestStatusCommandPlainWarningDespiteConfigError(t *testing.T) {
-	const warning = "WARNING: plain-text connection to 127.0.0.1"
-	env := plainEnv(t, "nats://127.0.0.1:4222")
-	env["MASH_INSECURE_PLAINTEXT"] = "1"
-	env["MASH_ENDPOINT"] = "o.a" // no group: not an address
-	var out, errb bytes.Buffer
-	if code := run([]string{"status"}, envStrict(env), strings.NewReader(""), &out, &errb); code != 0 {
-		t.Fatalf("mash status exit %d: %s", code, errb.String())
-	}
-	if !strings.Contains(out.String(), "tls: WARN") {
-		t.Errorf("stdout lacks tls: WARN:\n%s", out.String())
-	}
-	if n := strings.Count(errb.String(), warning); n != 1 {
-		t.Errorf("%d warnings on stderr, want 1: %q", n, errb.String())
-	}
-
-	out.Reset()
-	errb.Reset()
-	if code := statusCmd(config.Config{}, config.ErrGroupMissing, func(k string) string { return "" }, &out, &errb); code != 0 {
-		t.Fatalf("statusCmd exit %d", code)
-	}
-	if strings.Contains(out.String(), "tls: WARN") || strings.Contains(errb.String(), "WARNING") {
-		t.Errorf("zero config warned: %q / %q", out.String(), errb.String())
+	out, _ := doctorRun("nats://127.0.0.1:4222", false)
+	if !strings.Contains(out, "server    FAIL  ") || !strings.Contains(out, "insecure_plaintext") {
+		t.Errorf("plain, no override: stdout %q", out)
 	}
 }

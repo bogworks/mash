@@ -336,6 +336,22 @@ func inDir(dir, p string) string {
 	return filepath.Join(dir, p)
 }
 
+// Tilde writes the home directory at the start of p as "~", the inverse of ExpandHome. p is returned as it is when it
+// is not under the home directory or the home is unknown.
+func Tilde(p string) string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return p
+	}
+	if p == home {
+		return "~"
+	}
+	if rest, ok := strings.CutPrefix(p, home+string(filepath.Separator)); ok {
+		return "~" + string(filepath.Separator) + rest
+	}
+	return p
+}
+
 // ExpandHome expands an initial "~" or "~/" in p to home. "~user/" is left alone, and so is p when home is unknown.
 func ExpandHome(p, home string) string {
 	if home == "" {

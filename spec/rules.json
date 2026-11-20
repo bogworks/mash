@@ -58,7 +58,11 @@
   },
   {
    "rule": "The server not answering reads the same everywhere",
-   "detail": "'error: the server did not answer: tls://host:4222' and 'hint: mash doctor' (or mashctl doctor), exit 1."
+   "detail": "'error: the server did not answer: tls://host:4222' and 'hint: mash doctor' (or mashctl doctor), exit 1. Two more server failures have fixed words: 'the server's certificate is not trusted: <address>' and 'the server did not offer TLS: <address>'."
+  },
+  {
+   "rule": "Having no endpoint reads the same in every mash command",
+   "detail": "Three wordings, by where it is asked. At a shell with none installed: 'error: no endpoint is installed here' and 'hint: mash join <file>', exit 2. At a shell with several installed and none chosen: 'error: more than one endpoint is installed here: <addresses>' and 'hint: mash <command> --endpoint <the first, alphabetically>', exit 2. As an MCP tool in a session with none named: 'No endpoint is chosen for this session.' and 'hint: start the session with MASH_ENDPOINT=<address>'."
   },
   {
    "rule": "--json when a command fails",
@@ -66,7 +70,7 @@
   },
   {
    "rule": "Every command that changes the mesh or this machine's setup takes --dry-run",
-   "detail": "It prints the usual line with 'Would' in front and changes nothing. That is mashctl's changing commands and mash join. Sending a message is not such a change and has no --dry-run."
+   "detail": "It prints the usual line with 'Would' in front and changes nothing; with --json the object is the one the real run would print, plus \"dry_run\": true. That is mashctl's changing commands and mash join. Sending a message is not such a change and has no --dry-run."
   },
   {
    "rule": "help is also a command",
@@ -87,6 +91,10 @@
   {
    "rule": "Options go anywhere after the tool's name",
    "detail": "Every option, global or the command's own, is accepted before or after the command and its arguments, as with kubectl and gh. Help and documentation always write them last: mash status --endpoint acme.demo.alice."
+  },
+  {
+   "rule": "A sender's words are always marked as the sender's",
+   "detail": "Wherever mash prints a message's text in full, every line starts with '> ' and control characters are escaped, at a shell and in an MCP tool alike. It reads as quoted mail does to a person, and it shows an agent where data from someone else begins and ends. A table's MESSAGE column holds the sender's words too."
   },
   {
    "rule": "Only a destructive command asks",
@@ -230,7 +238,7 @@
   {
    "name": "mash-local-nats-setup.sh",
    "command": "curl -fsSL https://github.com/bogworks/mash/releases/latest/download/mash-local-nats-setup.sh | bash",
-   "what": "For a NATS server on this machine. Linux only in 0.5.6; on macOS it says so and stops (mash and mashctl themselves run on both). First install nats-server with your package manager (version 2.10.7 or newer) and the nats command: Homebrew has it, and on Debian and Ubuntu, where there is no package for it, it comes from its GitHub release. The script also needs openssl, to make the server's certificate. It names anything missing, says where to get it, and stops. It does not need nsc. If port 4222 is already taken, as it is where a packaged nats-server runs as a system service, the script leaves that service alone, uses the next free port and says which. It asks one question, the owner's name, reading it from the terminal. It makes a server that only this machine can reach, with encryption on, starts it as your own user, and writes the setup file. Everything goes in ~/mash-nats unless --dir names another folder. Its last line is the next command, with the path it actually wrote: 'mashctl init --config ~/mash-nats/mash-setup.yaml' by default. Guides and skills take that path from the script's output, never from memory. The NATS account it makes is named after the owner; the system account keeps NATS's own name, SYSTEM. The server runs as your own user's process, not as a system service, so it does not come back after a reboot: run the script again with --start to start it (it never creates anything then), --stop to stop it, or --remove to remove it."
+   "what": "For a NATS server on this machine. It works on Linux and on macOS, where many developers will first try mash. First install nats-server with your package manager (version 2.10.7 or newer) and the nats command: Homebrew has it, and on Debian and Ubuntu, where there is no package for it, it comes from its GitHub release. The script also needs openssl, to make the server's certificate. It names anything missing, says where to get it, and stops. It does not need nsc. If port 4222 is already taken, as it is where a packaged nats-server runs as a system service, the script leaves that service alone, uses the next free port and says which. It asks one question, the owner's name, reading it from the terminal. It makes a server that only this machine can reach, with encryption on, starts it as your own user, and writes the setup file. Everything goes in ~/mash-nats unless --dir names another folder. Its last line is the next command, with the path it actually wrote: 'mashctl init --config ~/mash-nats/mash-setup.yaml' by default. Guides and skills take that path from the script's output, never from memory. The NATS account it makes is named after the owner; the system account keeps NATS's own name, SYSTEM. The server runs as your own user's process, not as a system service, so it does not come back after a reboot: run the script again with --start to start it (it never creates anything then), --stop to stop it, or --remove to remove it."
   },
   {
    "name": "For an agent",

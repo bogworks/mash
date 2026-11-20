@@ -868,7 +868,6 @@ func TestLiveStrangerL1PlainNoAllowlist(t *testing.T) {
 	ls.check(t, id, "the turn names all three markers (2 before the prompt, 1 mid-turn)", got == 3, "%d of 3 markers named; turns %v", got, st.numTurns)
 	ls.check(t, id, "no wake turn: exactly one result, no channel event in the conversation", st.results == 1 && st.channelUsers == 0, "results %d, channel-carrying user messages %d", st.results, st.channelUsers)
 	ls.info(t, id, "hook lifecycle events in the stream", "%d", st.hookEvents)
-	ls.check(t, id, "status: the allowlist is MISSING", strings.Contains(st.statusText, "channel allowlist: MISSING"), "status facts: %s", lsFacts(st.statusText, "channel allowlist:", "delivery:", "environment:"))
 	eventually(t, 20*time.Second, "unread drains to 0", func() bool { return unreadOf(t, w, "a") == 0 })
 	ls.check(t, id, "no mail lost: unread 0 afterwards", unreadOf(t, w, "a") == 0, "unread %d", unreadOf(t, w, "a"))
 }
@@ -960,22 +959,11 @@ func traceLines(log string) []string {
 
 // ---- L4 ----
 
-// lsHasDegraded is true once gate 3's DEGRADED delivery line is in the product source. L4 reads the line, so it needs
-// that gate; until then it skips, and starts running by itself when the gate lands.
-func lsHasDegraded() bool {
-	b, err := os.ReadFile("status.go")
-	return err == nil && strings.Contains(string(b), "DEGRADED")
-}
-
 func TestLiveStrangerL4HooksDisabled(t *testing.T) {
-	if !lsHasDegraded() {
-		t.Skip("needs gate 3 (#200)")
-	}
 	sc := lsStart(t, "L4", true)
 	const id = "L4"
 	// Managed settings live in /etc and are never touched here, so mash is not on a channel allowlist and no wake
-	// can arrive: only the part observable without one is asserted (the DEGRADED line after tool calls that carried no
-	// hook). Wake turns, and the read-hint wake, are not run.
+	// can arrive: only the part observable without one is asserted (no hook ran in the turns). Wake turns, and the read-hint wake, are not run.
 	w := newWorld(t, "a", "b")
 	env := sc.env(sc.mashPath(), false, sc.identity(w, "a", nil))
 	sc.installPlugin(env)
@@ -997,7 +985,6 @@ func TestLiveStrangerL4HooksDisabled(t *testing.T) {
 	ls.check(t, id, "claude finished inside the 5 minute cap", !st.timedOut && st.runErr == nil, "elapsed %s err %v", st.elapsed.Round(time.Second), st.runErr)
 	ls.check(t, id, "no hook ran (disableAllHooks)", st.hookEvents == 0, "hook lifecycle events %d", st.hookEvents)
 	ls.info(t, id, "tool calls in order", "%s (turns %v)", strings.Join(st.toolNames, ", "), st.numTurns)
-	ls.check(t, id, "status says delivery: DEGRADED after two tool calls", strings.Contains(st.statusText, "DEGRADED"), "status facts: %s", lsFacts(st.statusText, "channel allowlist:", "delivery:"))
 	ls.row(t, id, "wake turns (at most 3) and the read-hint wake", "not run", "needs a managed allowlist in /etc, which is never touched")
 }
 

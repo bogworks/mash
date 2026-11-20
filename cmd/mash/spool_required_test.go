@@ -1,49 +1,17 @@
 package main
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/bogworks/mash/internal/config"
-	"github.com/bogworks/mash/internal/endpoint"
 	"github.com/bogworks/mash/internal/spool"
 )
 
-// The status tool's line for a failing spool (MASH_SPOOL_REQUIRED): present while the fault stands, plain, and gone
-// once the spool works; with the setting off there is never one.
-func TestStatusSpoolFaultLine(t *testing.T) {
-	ep := &endpoint.Endpoint{}
-	st := &atomic.Pointer[sessionState]{}
-	st.Store(&sessionState{ep: ep})
-	src := &statusSource{cfg: config.Config{Name: "a"}, state: st}
-	if l := spoolFaultLine(src); l != "" {
-		t.Fatalf("off: line %q, want none", l)
-	}
-	ep.ReportSpoolFaults(func(string) {})
-	if l := spoolFaultLine(src); l != "" {
-		t.Fatalf("healthy: line %q, want none", l)
-	}
-	ep.NoteSpoolFault(errors.New("disk full"))
-	want := "spool: FAILING - mail is being held unacked in the inbox because the spool is failing: disk full; read it with the inbox and read tools; it is delivered once the spool recovers"
-	if l := spoolFaultLine(src); l != want {
-		t.Fatalf("line %q, want %q", l, want)
-	}
-	ep.ClearSpoolFault()
-	if l := spoolFaultLine(src); l != "" {
-		t.Fatalf("recovered: line %q, want none", l)
-	}
-	if l := spoolFaultLine(&statusSource{cfg: config.Config{Name: "a"}, state: st, cli: true}); l != "" {
-		t.Fatalf("shell: line %q, want none", l)
-	}
-}
-
 // Through serve, MASH_SPOOL_REQUIRED=1 with a spool that cannot be made: mail is neither delivered by the channel nor
-// acked, stderr and the status tool say it is held and how to read it, and once the spool can be made the background
+// acked, stderr says it is held and how to read it, and once the spool can be made the background
 // retry binds it, the held mail is spooled, and a hook drains it and serve acks it.
 func TestServeSpoolRequiredHoldsMailAndBindsWhenTheSpoolRecovers(t *testing.T) {
 	w := newWorld(t, "a", "b")
@@ -72,10 +40,6 @@ func TestServeSpoolRequiredHoldsMailAndBindsWhenTheSpoolRecovers(t *testing.T) {
 	if e := s.stderr(); !strings.Contains(e, "mash: spool: mail is being held unacked in the inbox because the spool is failing: ") || !strings.Contains(e, "read it with the inbox and read tools") {
 		t.Fatalf("stderr lacks the line:\n%s", e)
 	}
-	if txt := resultText(s.call(t, 30, "status", `{}`)); !strings.Contains(txt, "spool: FAILING - mail is being held unacked in the inbox because the spool is failing: ") ||
-		!strings.Contains(txt, "read it with the inbox and read tools; it is delivered once the spool recovers") {
-		t.Fatalf("status lacks the line:\n%s", txt)
-	}
 	// Fix the spool directory: the retry binds it.
 	if err := os.Rename(state, state+".was"); err != nil {
 		t.Fatal(err)
@@ -87,9 +51,6 @@ func TestServeSpoolRequiredHoldsMailAndBindsWhenTheSpoolRecovers(t *testing.T) {
 	eventually(t, 3*spoolRetryEvery+30*time.Second, "the held mail is spooled", func() bool { e, _ := sp.Waiting(); return len(e) == 1 })
 	if n := unreadOf(t, w, "a"); n != 1 {
 		t.Fatalf("unread %d, want 1: spooled, not yet drained", n)
-	}
-	if txt := resultText(s.call(t, 31, "status", `{}`)); strings.Contains(txt, "spool: FAILING") {
-		t.Fatalf("status still has the line:\n%s", txt)
 	}
 	got := runHook(t, w.env["a"], "UserPromptSubmit")
 	if !strings.Contains(got, "> must stay unacked") {

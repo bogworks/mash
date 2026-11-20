@@ -72,14 +72,17 @@ func TestServeSameSessionTakesOverAndSupersedesOld(t *testing.T) {
 	// serve then retries after sameSessionRetry, by design. Wait for the takeover rather than expect it at once.
 	var txt string
 	deadline := time.Now().Add(10 * time.Second)
-	for id := 5; !strings.Contains(txt, "connection: OK"); id++ {
+	for id := 5; ; id++ {
 		if time.Now().After(deadline) {
-			t.Fatalf("the new serve did not take the lease; its last status: %s", txt)
+			t.Fatalf("the new serve did not take the lease; its last inbox answer: %s", txt)
 		}
 		if id > 5 {
 			time.Sleep(50 * time.Millisecond)
 		}
-		txt = resultText(fresh.call(t, id, "status", `{}`))
+		r := fresh.call(t, id, "inbox", `{}`)
+		if txt = resultText(r); r["isError"] != true {
+			break
+		}
 	}
 	if got := acquireAttempts.Load() - attempts; got > int64(sameSessionTries) {
 		t.Fatalf("the new serve needed %d retries, more than the %d same-session tries", got, sameSessionTries)
@@ -88,10 +91,10 @@ func TestServeSameSessionTakesOverAndSupersedesOld(t *testing.T) {
 	// The old one steps down at its next refresh: tools say so and name the new holder.
 	pid := fmt.Sprint(os.Getpid())
 	eventually(t, 5*time.Second, "the old serve steps down", func() bool {
-		return strings.Contains(resultText(old.call(t, 20, "status", `{}`)), "SUPERSEDED")
+		return strings.Contains(resultText(old.call(t, 20, "inbox", `{}`)), "superseded by a newer mash serve")
 	})
-	if txt := resultText(old.call(t, 21, "status", `{}`)); !strings.Contains(txt, "pid "+pid) || !strings.Contains(txt, "inactive") {
-		t.Fatalf("the old serve's status: %s", txt)
+	if txt := resultText(old.call(t, 21, "inbox", `{}`)); !strings.Contains(txt, "pid "+pid) || !strings.Contains(txt, "inactive") {
+		t.Fatalf("the old serve's inbox answer: %s", txt)
 	}
 	r := old.call(t, 22, "send", `{"address":"o.dev.b","message":"x"}`)
 	if txt := resultText(r); r["isError"] != true || !strings.Contains(txt, "superseded by a newer mash serve of the same session") ||
@@ -145,7 +148,7 @@ func TestServeSupersededExitsWhenParentChanges(t *testing.T) {
 	fresh.initialize(t)
 	fresh.tools(t)
 	eventually(t, 5*time.Second, "the old serve steps down", func() bool {
-		return strings.Contains(resultText(old.call(t, 20, "status", `{}`)), "SUPERSEDED")
+		return strings.Contains(resultText(old.call(t, 20, "inbox", `{}`)), "superseded by a newer mash serve")
 	})
 	old.none(t, 300*time.Millisecond, func(map[string]any) bool { return false })
 	select {
@@ -213,8 +216,8 @@ func TestServeHeldHolderRefreshedOnEveryRetry(t *testing.T) {
 	s := startServe(t, w.env["a"])
 	s.initialize(t)
 	s.tools(t)
-	if txt := resultText(s.call(t, 5, "status", `{}`)); !strings.Contains(txt, "pid 1111") {
-		t.Fatalf("status: %s", txt)
+	if txt := resultText(s.call(t, 5, "inbox", `{}`)); !strings.Contains(txt, "pid 1111") {
+		t.Fatalf("inbox answer: %s", txt)
 	}
 	if first := content(s.await(t, 30*time.Second, isChannel)); !strings.Contains(first, "pid 1111") {
 		t.Fatalf("first notice: %s", first)
@@ -226,8 +229,8 @@ func TestServeHeldHolderRefreshedOnEveryRetry(t *testing.T) {
 	mu.Lock()
 	pid = "2222" // the holder changes between retries
 	mu.Unlock()
-	eventually(t, 30*time.Second, "status shows the new holder", func() bool {
-		txt := resultText(s.call(t, 6, "status", `{}`))
+	eventually(t, 30*time.Second, "the tools name the new holder", func() bool {
+		txt := resultText(s.call(t, 6, "inbox", `{}`))
 		return strings.Contains(txt, "pid 2222") && strings.Contains(txt, "host-2222") && !strings.Contains(txt, "pid 1111")
 	})
 	r := s.call(t, 7, "inbox", `{}`)

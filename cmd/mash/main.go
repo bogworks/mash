@@ -56,7 +56,7 @@ var helpGroups = []string{"Everyday", "Setup", "Integration", "Raw SAP"}
 // helpLayout is the commands under each heading in the order of the specification. A command on the command table is
 // listed from the table (its synopsis and description are generated); one that is not yet is listed from handCommands.
 var helpLayout = map[string][]string{
-	"Everyday":    {"send", "inbox", "read", "who", "status", "version"},
+	"Everyday":    {"send", "inbox", "read", "who", "status", "doctor", "version"},
 	"Setup":       {"key", "credential", "admin"},
 	"Integration": {"serve", "hook", "plugin"},
 	"Raw SAP":     {"prompt"},
@@ -66,7 +66,6 @@ var helpLayout = map[string][]string{
 var handCommands = map[string][2]string{
 	"inbox":      {"mash inbox [--limit N] [--after SEQ]", "Recent messages, or the N after SEQ (oldest first)"},
 	"read":       {"mash read <seq>", "Print one message from your inbox"},
-	"status":     {"mash status", "What a session would see (name, config, creds, channel allowlist), before launch; connects to nothing; the live parts say they need a running session"},
 	"key":        {"mash key create --out FILE [options]", "Make a user key pair: seed to FILE (0600), public key to FILE.pub; needs no config"},
 	"credential": {"mash credential create --seed FILE --jwt FILE [options]", "Join a seed and its user JWT into a credentials file; needs no config"},
 	"admin":      {"mash admin <verb> ...", "Deprecated; use mashctl"},
@@ -178,7 +177,6 @@ func buildRevision(ldflags string, bi *debug.BuildInfo) string {
 
 // verbUsage is the usage line of each endpoint verb that is not on the command table, printed for `mash VERB --help`.
 var verbUsage = map[string]string{
-	"status": "usage: mash status",
 	"read":   "usage: mash read <seq>",
 	"inbox":  "usage: mash inbox [--limit N] [--after SEQ]",
 	"prompt": "usage: mash prompt <to> <text...>",
@@ -186,11 +184,11 @@ var verbUsage = map[string]string{
 
 // helpTopic is the verbs that are not on the table and have help of their own: `mash help VERB` prints their
 // `mash VERB --help`.
-var helpTopic = map[string]bool{"serve": true, "hook": true, "plugin": true, "key": true, "credential": true, "status": true, "read": true, "inbox": true, "prompt": true}
+var helpTopic = map[string]bool{"serve": true, "hook": true, "plugin": true, "key": true, "credential": true, "read": true, "inbox": true, "prompt": true}
 
 // noJSONForm is the verbs that have no --json form: a --json given to one is a usage error. key and credential
 // parse --json themselves, and send, version and who are commands of the table; admin is deprecated and left as it was.
-var noJSONForm = map[string]bool{"status": true, "read": true, "inbox": true, "prompt": true, "serve": true, "hook": true, "plugin": true}
+var noJSONForm = map[string]bool{"read": true, "inbox": true, "prompt": true, "serve": true, "hook": true, "plugin": true}
 
 // stdinWait is how long a message read from standard input has to arrive: 15 minutes, as the send help says. It is its
 // own limit, not cli_timeout: a run can take up to twice cli_timeout (this wait, then the command's own deadline).
@@ -267,9 +265,6 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 			fmt.Fprintln(stdout, u)
 			return 0
 		}
-		if args[0] == "status" { // this takes no arguments: refuse rather than ignore
-			return cliframe.Report(stdout, stderr, cliframe.Usagef("mash %s: unexpected %s", args[0], config.RejectedArg(args[1])).WithHint("mash status --help"), false)
-		}
 	}
 	if args[0] == "version" { // needs no endpoint, so before config
 		mk := func(context.Context) (*cmdcore.Env, error) {
@@ -299,13 +294,14 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 	cfg, err := load(lookup, home)
 	// A session named without a group has no address and no default: it stops at once naming MASH_ENDPOINT.
 	// A hook never fails the session (REQ-002 applies to the session itself, which serve stops), so it says so on
-	// stderr and exits 0; status reports it as a line.
-	if errors.Is(err, config.ErrGroupMissing) && args[0] != "status" {
+	// stderr and exits 0; status and doctor report it.
+	report := args[0] == "status" || args[0] == "doctor" // they report what is wrong with the configuration, they do not fail on it
+	if errors.Is(err, config.ErrGroupMissing) && !report {
 		if args[0] == "hook" {
 			fmt.Fprintf(stderr, "mash hook: %s: %v\n", config.CodeGroupMissing, err)
 			return 0
 		}
-		return cliframe.Report(stdout, stderr, cliframe.Usagef("%s: %s", config.CodeGroupMissing, strings.TrimPrefix(err.Error(), "mash: ")).WithHint("mash status"), jsonOut)
+		return cliframe.Report(stdout, stderr, cliframe.Usagef("%s: %s", config.CodeGroupMissing, strings.TrimPrefix(err.Error(), "mash: ")).WithHint("mash doctor"), jsonOut)
 	}
 	var adapter host.Adapter
 	if args[0] == "hook" || args[0] == "serve" {
@@ -317,23 +313,24 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 				fmt.Fprintln(stderr, herr)
 				return 1
 			}
-			return cliframe.Report(stdout, stderr, cliframe.Failf("%s", strings.TrimPrefix(herr.Error(), "mash: ")).WithHint("mash status"), jsonOut)
+			return cliframe.Report(stdout, stderr, cliframe.Failf("%s", strings.TrimPrefix(herr.Error(), "mash: ")).WithHint("mash doctor"), jsonOut)
 		}
 	}
 	if args[0] == "hook" { // never fails the session: a bad config is a silent no-op
 		return hook(cfg, err, adapter, env, stdin, stdout, stderr)
 	}
-	if args[0] == "status" { // a report: a config error is a line of it
-		return statusCmd(cfg, err, env, stdout, stderr)
+	var several *config.SeveralEndpointsError
+	if errors.As(err, &several) && slices.Contains([]string{"send", "who", "inbox", "read", "prompt"}, args[0]) {
+		return cliframe.Report(stdout, stderr, cmdcore.NoEndpoint(cmdcore.SeveralInstalled, args[0], several.Addresses), jsonOut)
 	}
-	if err != nil && args[0] != "serve" {
-		return cliframe.Report(stdout, stderr, cliframe.Failf("%s", strings.TrimPrefix(err.Error(), "mash: ")).WithHint("mash status"), jsonOut)
+	if err != nil && args[0] != "serve" && !report {
+		return cliframe.Report(stdout, stderr, cliframe.Failf("%s", strings.TrimPrefix(err.Error(), "mash: ")).WithHint("mash doctor"), jsonOut)
 	}
 	// A plain URL with no insecure_plaintext is refused before anything is connected (REQ-014): serve stops at session
 	// start and the commands that connect stop, exit 2, with the refusal on stderr.
 	if err == nil && !cfg.Inert() && args[0] != "admin" {
-		if _, perr := endpoint.EndpointTLS(cfg); perr != nil {
-			return cliframe.Report(stdout, stderr, cliframe.Usagef("%s", strings.TrimPrefix(perr.Error(), "mash: ")).WithHint("mash status"), jsonOut)
+		if _, perr := endpoint.EndpointTLS(cfg); perr != nil && !report { // a report says it as a row
+			return cliframe.Report(stdout, stderr, cliframe.Usagef("%s", strings.TrimPrefix(perr.Error(), "mash: ")).WithHint("mash doctor"), jsonOut)
 		}
 		// serve says it once at start (reportSettings); a command says it here, once, before it connects.
 		if w := endpoint.PlainWarning(cfg); w != "" && args[0] != "serve" {
@@ -349,11 +346,11 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 			return &cmdcore.Env{Svc: &cliSvc{cfg: cfg, stderr: stderr}, StdinTimeout: stdinLimit}, nil
 		}
 		return newCommands(mk).RunCLI("send", args[1:], stdin, stdout, stderr, global)
-	case "who":
+	case "who", "status", "doctor":
 		mk := func(context.Context) (*cmdcore.Env, error) {
-			return &cmdcore.Env{Svc: &cliSvc{cfg: cfg, stderr: stderr}}, nil
+			return &cmdcore.Env{Svc: &cliSvc{cfg: cfg, cfgErr: err, stderr: stderr}}, nil
 		}
-		return newCommands(mk).RunCLI("who", args[1:], stdin, stdout, stderr, global)
+		return newCommands(mk).RunCLI(args[0], args[1:], stdin, stdout, stderr, global)
 	case "read", "inbox", "prompt":
 		return cli(cfg, args, stdin, stdout, stderr)
 	case "admin":

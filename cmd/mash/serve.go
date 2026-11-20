@@ -101,26 +101,6 @@ type sessionState struct {
 	superseded *endpoint.LeaseLostError
 }
 
-// recordConnection writes the session's terminal connection failure (err, redacted) to the endpoint's state
-// directory, where `mash status` run from a shell reads it (the CLI makes no connection). Best effort: a failed
-// write is ignored. It runs before serve exits on the failure.
-func recordConnection(cfg config.Config, err error) {
-	_ = endpoint.RecordConnection(cfg, "failed", redactText(err.Error()), time.Now())
-}
-
-// watchConnection records the endpoint as connected (clearing any recorded failure) and records an authorization
-// failure of its live connection (its key revoked or reissued) when one arrives; a reconnect clears it again.
-func watchConnection(cfg config.Config, ep *endpoint.Endpoint) {
-	_ = endpoint.RecordConnection(cfg, "ok", "", time.Now())
-	ep.SetConnectionHook(func(err error) {
-		if err != nil {
-			recordConnection(cfg, err)
-			return
-		}
-		_ = endpoint.RecordConnection(cfg, "ok", "", time.Now())
-	})
-}
-
 // supersededText is what a superseded serve says: the newer serve of the same session handles the mail.
 func supersededText(name string, l *endpoint.LeaseLostError) string {
 	return fmt.Sprintf("mash: this server was superseded by a newer mash serve of the same session (pid %s, host %s); "+
@@ -161,12 +141,11 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 	defer cancel()
 
 	// Without a usable identity, still answer MCP (the plugin may be enabled in every session) with only the
-	// tools that need no endpoint, version and status, and say why.
-	src := &statusSource{cfg: cfg, cfgErr: cfgErr, pluginRoot: pluginRoot, srv: &atomic.Pointer[mcp.Server]{}}
+	// tools that need no endpoint, version, status and doctor, and say why.
+	src := &statusSource{cfg: cfg, cfgErr: cfgErr, pluginRoot: pluginRoot}
 	reportSettings(src, stderr)
 	degraded := func(instr string, notify bool) int {
 		srv := mcp.New(stdin, stdout, "mash", endpoint.CurrentVersion(), instr, infoTools(src))
-		src.srv.Store(srv)
 		if notify {
 			go func() {
 				select {
@@ -223,7 +202,6 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 			fmt.Fprintln(stderr, err)
 			src.state = &atomic.Pointer[sessionState]{}
 			src.state.Store(&sessionState{failed: err})
-			recordConnection(cfg, err)
 			return degraded(endpoint.ErrorInstructions(cfg.DisplayName(), err), true)
 		}
 		startErr = err
@@ -235,7 +213,6 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 	switch {
 	case ep != nil:
 		state.Store(&sessionState{ep: ep})
-		watchConnection(cfg, ep)
 	case held != nil:
 		state.Store(&sessionState{waiting: held})
 		instr += waitingLine
@@ -245,7 +222,6 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 	}
 	src.state = &state
 	srv := mcp.New(stdin, stdout, "mash", endpoint.CurrentVersion(), instr, tools(&state, src))
-	src.srv.Store(srv)
 	// Each ended tool call is evidence for the hookless detector (endpoint/hookless.go): a hook runs after every
 	// successful tool call, so two calls well apart with no hook between them mean the hooks do not run.
 	srv.OnToolCall = func(string) {
@@ -301,7 +277,6 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 				notify("mash: spool: " + msg + ".")
 			})
 		}
-		boundAt := time.Now() // before the bind, so a hook run once this session owns the spool is never missed
 		sdir, err := endpoint.SpoolDir(cfg)
 		if err == nil {
 			err = ep.SetSpool(spool.Spool{Dir: sdir}, adapter.OwnerToken(os.Getenv))
@@ -312,7 +287,7 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 				go retrySpool(ctx, ep, func() (spool.Spool, error) {
 					d, err := endpoint.SpoolDir(cfg)
 					return spool.Spool{Dir: d}, err
-				}, adapter.OwnerToken(os.Getenv), &src.owned)
+				}, adapter.OwnerToken(os.Getenv))
 			} else if cfg.SpoolFromStart && !noChannel {
 				// Claude drops channel events before its first prompt, yet the channel acks: without a spool, hold
 				// the mail unacked and tell the model to use inbox/read (#16).
@@ -324,7 +299,7 @@ func serve(parent context.Context, cfg config.Config, cfgErr error, adapter host
 			} else {
 				fmt.Fprintf(stderr, "mash: spool: %v; mail stays on the channel\n", err)
 			}
-		} else if src.owned.Store(&boundAt); noChannel || cfg.SpoolFromStart || failClosed {
+		} else if noChannel || cfg.SpoolFromStart || failClosed {
 			// Claude Code drops channel events that arrive before its first user message, and its first hook runs
 			// with that message: only with a spool can early mail wait for a hook, so a failed SetSpool keeps the
 			// channel (#16).
@@ -490,7 +465,6 @@ func acquire(ctx context.Context, cfg config.Config, srv *mcp.Server, state *ato
 		case r.err == nil:
 			acquiredCount.Add(1)
 			state.Store(&sessionState{ep: r.ep})
-			watchConnection(cfg, r.ep)
 			return r.ep, true
 		case ctx.Err() != nil:
 			return nil, true // cancellation is never "held"
@@ -521,7 +495,6 @@ func acquire(ctx context.Context, cfg config.Config, srv *mcp.Server, state *ato
 			fmt.Fprintln(stderr, r.err)
 			failed = r.err
 			state.Store(&sessionState{failed: r.err})
-			recordConnection(cfg, r.err)
 			if ready == nil { // Claude is already listening: say so now
 				notify(endpoint.ErrorInstructions(cfg.DisplayName(), r.err))
 				return nil, true
@@ -841,7 +814,7 @@ const spoolRetryEvery = 5 * time.Second
 
 // retrySpool binds the spool in the background once it works, until ctx ends. The held mail was never acked, so the
 // inbox redelivers it and it is spooled from the first message.
-func retrySpool(ctx context.Context, ep *endpoint.Endpoint, mk func() (spool.Spool, error), owner string, owned *atomic.Pointer[time.Time]) {
+func retrySpool(ctx context.Context, ep *endpoint.Endpoint, mk func() (spool.Spool, error), owner string) {
 	t := time.NewTicker(spoolRetryEvery)
 	defer t.Stop()
 	for {
@@ -850,13 +823,11 @@ func retrySpool(ctx context.Context, ep *endpoint.Endpoint, mk func() (spool.Spo
 			return
 		case <-t.C:
 		}
-		boundAt := time.Now()
 		s, err := mk()
 		if err == nil {
 			err = ep.BindSpool(ctx, s, owner, true)
 		}
 		if err == nil {
-			owned.Store(&boundAt)
 			return
 		}
 		if ctx.Err() != nil {

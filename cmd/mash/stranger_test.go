@@ -16,11 +16,8 @@ import (
 // managed file, mash-on-PATH run never meets. A fake claude stands in for the host, so these tests prove what mash
 // does with such a layout, not what Claude Code does with it; the live receipts cover Claude Code itself.
 //
-// Seams. The fake claude's serve reads the real /etc/claude-code (the managed directory is an in-process field of
-// statusSource, with no environment override), so the allowlist and SHADOWED lines are asserted in-process through
-// statusText with a temp home and managed dir, as status_tool_test.go does; only the delivery lines are asserted
-// over MCP through the fake claude. MASH_SPOOL_FROM_START=1 is set where mail is sent before the first hook: without
-// it, mail sent before a session's first hook goes down the channel (which Claude Code drops before the first prompt).
+// MASH_SPOOL_FROM_START=1 is set where mail is sent before the first hook: without it, mail sent before a session's
+// first hook goes down the channel (which Claude Code drops before the first prompt).
 
 // strangerEnv is the endpoint a's environment for a stranger test: its own HOME and XDG_STATE_HOME, the config
 // minimum idle wake, and extra.
@@ -55,8 +52,7 @@ func strangerDelivery(t *testing.T, w *world, c *fakeClaude, sp spool.Spool, ses
 	}
 }
 
-// S1: plain claude, no managed settings and so no channel allowlist. Hooks still deliver, nothing is lost, and status
-// says the allowlist is missing.
+// S1: plain claude, no managed settings and so no channel allowlist. Hooks still deliver and nothing is lost.
 func TestStrangerPlainNoAllowlist(t *testing.T) {
 	skipOnWindows(t)
 	w := newWorld(t, "a", "b")
@@ -64,35 +60,6 @@ func TestStrangerPlainNoAllowlist(t *testing.T) {
 	c := startFakeClaude(t, env, true)
 	strangerDelivery(t, w, c, spoolOf(env), "S1")
 
-	if st := c.call(t, "status", `{}`); !strings.Contains(st, "delivery: hooks have run in this session") {
-		t.Fatalf("status over MCP after a hook:\n%s", st)
-	}
-	// No managed files at all: the temp home and managed dir are empty.
-	src := settingsSource(t, "a", nil)
-	l := statusLine(t, statusText(src), "channel allowlist: ")
-	if !strings.HasPrefix(l, "channel allowlist: MISSING - no managed source lists mash@mash") {
-		t.Fatalf("allowlist line %q", l)
-	}
-}
-
-// S2: team policy. Server-managed settings (the cache in the home) that do not list mash outrank the local managed
-// file that does: status says SHADOWED naming both files, and hook delivery is unaffected.
-func TestStrangerTeamPolicyShadowed(t *testing.T) {
-	skipOnWindows(t)
-	src := settingsSource(t, "a", map[string]string{
-		"home/.claude/remote-settings.json": `{"channelsEnabled": true, "allowedChannelPlugins": [{"marketplace":"other","plugin":"other"}]}`,
-		"managed/managed-settings.json":     mashAllowed,
-	})
-	l := statusLine(t, statusText(src), "channel allowlist: ")
-	wantAll(t, "shadowed", l, "channel allowlist: SHADOWED - ",
-		filepath.Join(src.home, ".claude", "remote-settings.json"),
-		filepath.Join(src.managedDir, "managed-settings.json"),
-		"Next: ask an organisation Owner")
-
-	w := newWorld(t, "a", "b")
-	env := strangerEnv(w, map[string]string{"MASH_SPOOL_FROM_START": "1"})
-	c := startFakeClaude(t, env, true)
-	strangerDelivery(t, w, c, spoolOf(env), "S2")
 }
 
 // S3a: an IDE-like launch with a minimal environment and PATH=/usr/bin:/bin, and no mash anywhere on it. The plugin's
@@ -140,7 +107,7 @@ func TestStrangerMinimalPathHookIsVisible(t *testing.T) {
 
 // S3b: serve started through a shell that does not exec it, so its parent is not claude. With the same
 // CLAUDE_CODE_SESSION_ID for serve and hooks the hook drains; a hook with another session id and no launch token is
-// refused, leaves the mail, and status says REFUSED.
+// refused and leaves the mail.
 func TestStrangerWrappedServeOwnsItsSpool(t *testing.T) {
 	skipOnWindows(t)
 	w := newWorld(t, "a", "b")
@@ -160,17 +127,11 @@ func TestStrangerWrappedServeOwnsItsSpool(t *testing.T) {
 	if e, _ := sp.Waiting(); len(e) != 1 {
 		t.Fatalf("a refused hook drained: %+v", e)
 	}
-	if st := c.call(t, "status", `{}`); !strings.Contains(st, "delivery: REFUSED") {
-		t.Fatalf("status after a refused hook:\n%s", st)
-	}
 
 	if got := c.hook(t, "s1"); !strings.Contains(got, "> through the wrapper") {
 		t.Fatalf("the owner's hook showed %q", got)
 	}
 	eventually(t, 5*time.Second, "serve acks what was shown", func() bool { return unreadOf(t, w, "a") == 0 })
-	if st := c.call(t, "status", `{}`); !strings.Contains(st, "delivery: hooks have run in this session") {
-		t.Fatalf("status after the owner's hook:\n%s", st)
-	}
 }
 
 // S4: hooks disabled; the fake claude never runs one. Needs gate 3 (#200), the degradation to "hooks do not run".
@@ -195,9 +156,6 @@ func TestStrangerHooksDisabled(t *testing.T) {
 	c.call(t, "who", `{}`)
 	time.Sleep(12 * time.Second)
 	c.call(t, "who", `{}`)
-	if st := c.call(t, "status", `{}`); !strings.Contains(st, "delivery: DEGRADED") {
-		t.Fatalf("status after two tool calls with no hook:\n%s", st)
-	}
 	// read delivers the message and acks it. The seq is the first message's.
 	if got := c.call(t, "read", `{"seq":1}`); !strings.Contains(got, "> hooks are off") {
 		t.Fatalf("read:\n%s", got)

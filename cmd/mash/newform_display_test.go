@@ -50,7 +50,7 @@ func TestCLIShowsAndAcceptsTheCanonicalForm(t *testing.T) {
 	if got := cliAs(t, sendEnv, "who", "--json"); !strings.Contains(got, `"address":"acme.team1.recv"`) || strings.Contains(got, "acme_team1") {
 		t.Fatalf("who --json:\n%s", got)
 	}
-	if got := cliAs(t, sendEnv, "status"); !strings.Contains(got, "name: OK - acme.team1.sender") {
+	if got := cliAs(t, sendEnv, "status"); !strings.HasPrefix(got, "acme.team1.sender: ready, ") {
 		t.Fatalf("status:\n%s", got)
 	}
 
