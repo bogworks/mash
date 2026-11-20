@@ -23,16 +23,14 @@ type Tool struct {
 	CallStructured func(ctx context.Context, args json.RawMessage) (text string, structured any, err error)
 }
 
-// MCP converts t to an mcp.Tool whose Call returns the text.
+// MCP converts t to an mcp.Tool whose CallStructured returns the text and the result object (the server sends the
+// object as structuredContent only when 2025-06-18 was negotiated).
 func (t Tool) MCP() mcp.Tool {
 	return mcp.Tool{
-		Name:        t.Name,
-		Description: t.Description,
-		Schema:      t.Schema,
-		Call: func(ctx context.Context, args json.RawMessage) (string, error) {
-			text, _, err := t.CallStructured(ctx, args)
-			return text, err
-		},
+		Name:           t.Name,
+		Description:    t.Description,
+		Schema:         t.Schema,
+		CallStructured: t.CallStructured,
 	}
 }
 

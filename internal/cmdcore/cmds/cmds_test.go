@@ -287,9 +287,9 @@ func TestSendTool(t *testing.T) {
 	// the text-only mcp.Tool
 	f.err = nil
 	f.rc.Number = 5
-	got, err := tool.MCP().Call(context.Background(), json.RawMessage(`{"address":"a","message":"m"}`))
+	got, _, err := tool.MCP().CallStructured(context.Background(), json.RawMessage(`{"address":"a","message":"m"}`))
 	if err != nil || got != "Mail sent." {
-		t.Errorf("MCP().Call = %q, %v", got, err)
+		t.Errorf("MCP().CallStructured = %q, %v", got, err)
 	}
 }
 
