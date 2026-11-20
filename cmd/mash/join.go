@@ -461,7 +461,7 @@ func (s joinSvc) Join(_ context.Context, req cmds.JoinRequest) (cmds.JoinOutcome
 	}
 	var made []string // what this run created, by exact path, removed if a later step fails
 	// undo puts the folder back as it was and returns what it could not: the exact paths a rollback step failed on.
-	undo := func() (left []string) {
+	undo := func() (left []string, kept string) {
 		for _, m := range made {
 			if err := joinRemove(m); err != nil && !errors.Is(err, fs.ErrNotExist) {
 				left = append(left, m)
@@ -471,16 +471,17 @@ func (s joinSvc) Join(_ context.Context, req cmds.JoinRequest) (cmds.JoinOutcome
 			if err := joinRename(backup, credsPath); err != nil {
 				// the new creds are still in place; the old ones stay under the backup name, so keep them
 				left = append(left, credsPath, backup)
+				kept = backup
 				temps = slices.DeleteFunc(temps, func(t string) bool { return t == backup })
 			}
 		} else if err := joinRemove(credsPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			left = append(left, credsPath)
 		}
-		return left
+		return left, kept
 	}
 	// rollback undoes the run after a failed step; if the undo itself fails it names what was left, by exact path.
 	rollback := func(err error) (cmds.JoinOutcome, error) {
-		left := undo()
+		left, kept := undo()
 		if len(left) == 0 {
 			return fail(err)
 		}
@@ -492,7 +493,11 @@ func (s joinSvc) Join(_ context.Context, req cmds.JoinRequest) (cmds.JoinOutcome
 		if len(shown) > 1 {
 			verb = " were left"
 		}
-		return cmds.JoinOutcome{}, cliframe.Failf("could not finish and could not undo: %s%s", strings.Join(shown, ", "), verb).WithHint("mash doctor")
+		note := ""
+		if kept != "" {
+			note = "; old creds kept at " + s.shown(kept)
+		}
+		return cmds.JoinOutcome{}, cliframe.Failf("could not finish and could not undo: %s%s%s", strings.Join(shown, ", "), verb, note).WithHint("mash doctor")
 	}
 	if caTmp != "" {
 		if err := joinRename(caTmp, caPath); err != nil {
