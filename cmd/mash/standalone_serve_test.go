@@ -152,7 +152,7 @@ func waitOnline(t *testing.T, bin string, env []string, name string) {
 	t.Helper()
 	eventually(t, 15*time.Second, name+" online", func() bool {
 		out, _ := mashRun(t, bin, env, "", "who")
-		return strings.Contains(out, name+"\tonline")
+		return whoShows(out, tTo(name), "online")
 	})
 }
 

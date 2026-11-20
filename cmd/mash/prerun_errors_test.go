@@ -107,7 +107,7 @@ func TestSendImplicitStdinDeadline(t *testing.T) {
 	}
 }
 
-// who parses --json itself, so the errors before it runs are still framed as JSON: on stdout, nothing on stderr, and
+// The errors before who runs are framed as JSON with --json: on stdout, nothing on stderr, and
 // the same exit code as the text form.
 func TestWhoJSONFramesPreVerbErrors(t *testing.T) {
 	home := t.TempDir()

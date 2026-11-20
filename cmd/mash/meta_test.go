@@ -36,22 +36,24 @@ func TestAdminProvisionAndSetMetaCLI(t *testing.T) {
 		"--role", "reviewer", "--host", "laptop", "--label", "tier=1", "--label", "team=acme"); code != 0 {
 		t.Fatalf("provision: %d %s", code, out)
 	}
-	// Default who: the exact line a launcher parses, with no new columns.
+	// Default who: address and state only.
 	out, _ := w.cli(t, "a", "who")
-	if got := whoLine(t, out, "c"); got != tTo("c")+"\toffline\tthe note" {
-		t.Fatalf("default who line changed: %q", got)
+	if !whoShows(out, tTo("c"), "offline") || strings.Contains(out, "reviewer") || strings.Contains(out, "the note") {
+		t.Fatalf("default who: %q", out)
 	}
 	// admin list: the existing columns, unchanged.
 	lout, code := w.admin(t, "list")
 	if code != 0 || len(strings.Split(whoLine(t, lout, "c"), "\t")) != 4 {
 		t.Fatalf("list: %d %q", code, lout)
 	}
-	out, _ = w.cli(t, "a", "who", "--long")
-	if got := whoLine(t, out, "c"); got != tTo("c")+"\toffline\tthe note\tagent claude-code\trole reviewer\thost laptop\tlabel.team=acme\tlabel.tier=1" {
-		t.Fatalf("who --long: %q", got)
+	out, _ = w.cli(t, "a", "who", "--wide")
+	for col, want := range map[string]string{"ROLE": "reviewer", "HOST": "laptop", "DESCRIPTION": "-"} {
+		if got := whoCell(t, out, tTo("c"), col); got != want {
+			t.Fatalf("who --wide %s of c = %q, want %q: %q", col, got, want, out)
+		}
 	}
-	if got := whoLine(t, out, "a"); got != tTo("a")+"\toffline\tagent claude-code" {
-		t.Fatalf("who --long without metadata: %q", got)
+	if got := whoCell(t, out, tTo("a"), "ROLE"); got != "-" {
+		t.Fatalf("who --wide without metadata: %q", out)
 	}
 
 	// set-meta: only the given fields change; - clears.
@@ -59,9 +61,9 @@ func TestAdminProvisionAndSetMetaCLI(t *testing.T) {
 	if code != 0 || !strings.Contains(out, `updated o.dev.c: role "builder", host "", labels env=prod team=acme`) {
 		t.Fatalf("set-meta: %d %s", code, out)
 	}
-	out, _ = w.cli(t, "a", "who", "--long")
-	if got := whoLine(t, out, "c"); got != tTo("c")+"\toffline\tthe note\tagent claude-code\trole builder\tlabel.env=prod\tlabel.team=acme" {
-		t.Fatalf("after set-meta: %q", got)
+	out, _ = w.cli(t, "a", "who", "--wide")
+	if r, h := whoCell(t, out, tTo("c"), "ROLE"), whoCell(t, out, tTo("c"), "HOST"); r != "builder" || h != "-" {
+		t.Fatalf("after set-meta: role %q host %q: %q", r, h, out)
 	}
 	for _, bad := range [][]string{{"set-meta", tTo("c")}, {"set-meta", tTo("c"), "--role"}, {"set-meta", tTo("c"), "--bogus", "x"}, {"set-meta", tTo("c"), "--label", "novalue"}, {"set-meta", tTo("c"), "--label", "Bad=x"},
 		{"set-meta", tTo("c"), "--label", "a=1", "--label", "a=2"}, {"provision", "d", "--label", "k=-"},
@@ -79,12 +81,12 @@ func TestAdminProvisionAndSetMetaCLI(t *testing.T) {
 	if out, code := w.admin(t, "deprovision", tTo("c")); code != 0 {
 		t.Fatalf("deprovision: %d %s", code, out)
 	}
-	if out, _ := w.cli(t, "a", "who"); strings.Contains(out, "c\t") {
+	if out, _ := w.cli(t, "a", "who"); strings.Contains(out, tTo("c")) {
 		t.Fatalf("c still listed: %s", out)
 	}
 }
 
-func TestWhoLongAndMCPWhoShowMetaAndLease(t *testing.T) {
+func TestWhoWideAndMCPWhoShowMeta(t *testing.T) {
 	w := newWorld(t, "a", "b")
 	if out, code := w.admin(t, "set-meta", tTo("a"), "--role", "chief", "--label", "team=h1", "--host", "elsewhere-box"); code != 0 {
 		t.Fatalf("set-meta: %d %s", code, out)
@@ -92,31 +94,19 @@ func TestWhoLongAndMCPWhoShowMetaAndLease(t *testing.T) {
 	s := startServe(t, w.env["a"])
 	s.initialize(t)
 	s.tools(t)
-	eventually(t, 5*time.Second, "a online", func() bool { out, _ := w.cli(t, "b", "who"); return strings.Contains(out, tTo("a")+"\tonline") })
+	eventually(t, 5*time.Second, "a online", func() bool { out, _ := w.cli(t, "b", "who"); return whoShows(out, tTo("a"), "online") })
 
-	// Default who from another endpoint: unchanged shape.
-	out, _ := w.cli(t, "b", "who")
-	if got := whoLine(t, out, "a"); !strings.HasPrefix(got, tTo("a")+"\tonline\tseen ") || strings.Contains(got, "role") {
-		t.Fatalf("default who: %q", got)
+	out, _ := w.cli(t, "b", "who", "--wide")
+	if !whoShows(out, tTo("a"), "online") || whoCell(t, out, tTo("a"), "ROLE") != "chief" || whoCell(t, out, tTo("a"), "HOST") != "elsewhere-box" || strings.Contains(out, "team") {
+		t.Fatalf("who --wide: %q", out)
 	}
-	// --long as a: directory metadata plus a's own live lease, which differs from the directory host.
-	out, _ = w.cli(t, "a", "who", "--long")
-	got := whoLine(t, out, "a")
-	for _, want := range []string{"\trole chief", "\tlabel.team=h1", "\thost elsewhere-box", "\tlease host ", "\tlease version ", "differs from directory host elsewhere-box"} {
-		if !strings.Contains(got, want) {
-			t.Errorf("who --long a lacks %q: %q", want, got)
-		}
+	// The MCP tool shows the same table.
+	txt := resultText(s.call(t, 20, "who", `{"wide":true}`))
+	if got := whoCell(t, txt, tTo("a"), "ROLE"); got != "chief" {
+		t.Errorf("mcp who a: %q", txt)
 	}
-	// The MCP tool shows the same.
-	txt := resultText(s.call(t, 20, "who", `{}`))
-	got = whoLine(t, txt, "a")
-	for _, want := range []string{tTo("a") + "\tonline", "\trole chief", "\tlabel.team=h1", "\thost elsewhere-box", "\tlease host "} {
-		if !strings.Contains(got, want) {
-			t.Errorf("mcp who a lacks %q: %q", want, got)
-		}
-	}
-	if got := whoLine(t, txt, "b"); !strings.HasPrefix(got, tTo("b")+"\toffline") {
-		t.Errorf("mcp who b: %q", got)
+	if !whoShows(txt, tTo("b"), "offline") {
+		t.Errorf("mcp who b: %q", txt)
 	}
 }
 

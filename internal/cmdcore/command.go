@@ -48,9 +48,12 @@ type EnvFunc func(ctx context.Context) (*Env, error)
 
 // Command is one command: its CLI name (the verb, also the MCP tool name), a one-line summary, the one-line description
 // and the examples that --help prints, and its Run. MCPDescription is the MCP tool's description, written for the model;
-// when empty the tool's description is the Summary.
+// when empty the tool's description is the Summary. Group is the heading the tool's own help lists the command under.
 type Command[P any, R Result] struct {
-	Name           string
+	Name string
+	// Group is the heading the tool's own help lists the command under (the specification's x-group): Everyday, Setup,
+	// Integration or Raw SAP.
+	Group          string
 	Summary        string
 	MCPDescription string
 	Description    string

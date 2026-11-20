@@ -48,7 +48,7 @@ mashctl label ADDRESS k=v [k=v]... [--dry-run]
 mashctl unlabel ADDRESS k [k]... [--dry-run]
 ```
 
-These set and clear labels on the endpoint's directory record (what `who --long` shows). They connect with the admin credentials and need no file and no creds: the endpoint must have a directory record, and keys and values are checked as the directory checks labels. `label` prints `labeled ADDRESS: k=v ...` and `unlabel` prints `unlabeled ADDRESS: -k ...`; a change that leaves the labels as they are prints `ADDRESS: nothing to change`. `unlabel` of a label that is not set warns and exits 0. `--dry-run` says what would change and writes nothing. There are no `--policy` and `--sync` flags (both are unknown options): the record is the only place a label lives.
+These set and clear labels on the endpoint's directory record (`mash who` no longer shows them). They connect with the admin credentials and need no file and no creds: the endpoint must have a directory record, and keys and values are checked as the directory checks labels. `label` prints `labeled ADDRESS: k=v ...` and `unlabel` prints `unlabeled ADDRESS: -k ...`; a change that leaves the labels as they are prints `ADDRESS: nothing to change`. `unlabel` of a label that is not set warns and exits 0. `--dry-run` says what would change and writes nothing. There are no `--policy` and `--sync` flags (both are unknown options): the record is the only place a label lives.
 
 Labels do not change a minted user: the permissions of an endpoint do not depend on them, so setting one leaves nothing to reissue.
 ## Suspending an endpoint's inbound mail

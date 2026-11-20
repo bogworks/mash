@@ -1,0 +1,154 @@
+package cmds
+
+import (
+	"context"
+	"sort"
+	"strings"
+
+	"github.com/bogworks/mash/internal/cliframe"
+	"github.com/bogworks/mash/internal/cmdcore"
+	"github.com/bogworks/mash/internal/cmdcore/render"
+	"github.com/bogworks/mash/internal/config"
+)
+
+// WhoEntry is one endpoint of the directory as the service knows it. Role, Host and Description are empty when nothing
+// is recorded.
+type WhoEntry struct {
+	Address     string // owner.group.name
+	Online      bool
+	Role        string
+	Host        string
+	Description string
+}
+
+// Directory is the service Who needs from Env.Svc: every endpoint the caller can see, and whether each is online.
+type Directory interface {
+	Who(ctx context.Context) ([]WhoEntry, error)
+}
+
+// WhoParams are the arguments of mash who and of the MCP tool who.
+type WhoParams struct {
+	Prefix  string `json:"prefix,omitempty" arg:"prefix,optional" desc:"Only endpoints under this owner (acme) or this owner and group (acme.demo), or the one endpoint with this full address. acme.* and acme.demo.* are accepted and mean the same as acme and acme.demo."`
+	Online  bool   `json:"online,omitempty" flag:"--online" desc:"Only endpoints that are online."`
+	Offline bool   `json:"offline,omitempty" flag:"--offline" desc:"Only endpoints that are offline."`
+	Wide    bool   `json:"wide,omitempty" flag:"--wide" desc:"More columns: role, host and description, where recorded. May pass 80 columns."`
+}
+
+// WhoEndpoint is one endpoint of the result. Role, Host and Description are null when nothing is recorded.
+type WhoEndpoint struct {
+	Address     string  `json:"address"`
+	Online      bool    `json:"online"`
+	Role        *string `json:"role"`
+	Host        *string `json:"host"`
+	Description *string `json:"description"`
+}
+
+// WhoResult is the endpoints that matched, sorted by address. The JSON form is always this object, never a bare array.
+// The three fields below it are what the text says when nothing matched and are not part of it.
+type WhoResult struct {
+	Endpoints []WhoEndpoint `json:"endpoints"`
+
+	prefix string
+	only   string // "online", "offline" or ""
+	wide   bool
+}
+
+// Text is the table: ADDRESS and STATE, and with --wide ROLE, HOST and DESCRIPTION ("-" where nothing is recorded), or
+// the sentence saying nothing matched.
+func (r WhoResult) Text(_ cmdcore.Opts) string {
+	if len(r.Endpoints) == 0 {
+		s := "No "
+		if r.only != "" {
+			s += r.only + " "
+		}
+		s += "endpoints"
+		if r.prefix != "" {
+			s += " under " + r.prefix
+		}
+		return s
+	}
+	cols := []string{"address", "state"}
+	if r.wide {
+		cols = append(cols, "role", "host", "description")
+	}
+	or := func(p *string) string {
+		if p == nil || *p == "" {
+			return "-"
+		}
+		return config.Clean(*p)
+	}
+	rows := make([][]string, 0, len(r.Endpoints))
+	for _, e := range r.Endpoints {
+		state := "offline"
+		if e.Online {
+			state = "online"
+		}
+		row := []string{config.Clean(e.Address), state}
+		if r.wide {
+			row = append(row, or(e.Role), or(e.Host), or(e.Description))
+		}
+		rows = append(rows, row)
+	}
+	return render.Table(cols, rows, 0, false)
+}
+
+// underPrefix reports whether address is the prefix itself or lies under it: acme.demo matches acme.demo.bob and not
+// acme.demobob, and acme.demo.bob does not match acme.demo.bobby.
+func underPrefix(address, prefix string) bool {
+	return prefix == "" || address == prefix || strings.HasPrefix(address, prefix+".")
+}
+
+func ptr(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
+// Who is the who command.
+var Who = cmdcore.Command[WhoParams, WhoResult]{
+	Name:        "who",
+	Group:       "Everyday",
+	Summary:     "List the endpoints you can see, and which are online.",
+	Description: "List the endpoints you can see, and which are online.",
+	Examples:    []string{"mash who", "mash who acme.demo --online"},
+	Run: func(ctx context.Context, env *cmdcore.Env, p WhoParams) (WhoResult, error) {
+		if p.Online && p.Offline {
+			return WhoResult{}, cliframe.Usagef("--online and --offline cannot go together").WithHint("mash who --help")
+		}
+		prefix := ""
+		if p.Prefix != "" {
+			var err error
+			if prefix, err = cmdcore.ParsePrefix(p.Prefix, "mash who --help"); err != nil {
+				return WhoResult{}, err
+			}
+		}
+		if env == nil {
+			return WhoResult{}, cliframe.Failf("internal: mash who has no environment to run in")
+		}
+		svc, ok := env.Svc.(Directory)
+		if !ok || svc == nil {
+			return WhoResult{}, cliframe.Failf("internal: mash who has no directory to read")
+		}
+		all, err := svc.Who(ctx)
+		if err != nil {
+			return WhoResult{}, err
+		}
+		r := WhoResult{Endpoints: []WhoEndpoint{}, prefix: prefix, wide: p.Wide}
+		switch {
+		case p.Online:
+			r.only = "online"
+		case p.Offline:
+			r.only = "offline"
+		}
+		for _, e := range all {
+			if !underPrefix(e.Address, prefix) || p.Online && !e.Online || p.Offline && e.Online {
+				continue
+			}
+			r.Endpoints = append(r.Endpoints, WhoEndpoint{Address: e.Address, Online: e.Online,
+				Role: ptr(e.Role), Host: ptr(e.Host), Description: ptr(e.Description)})
+		}
+		sort.Slice(r.Endpoints, func(i, j int) bool { return r.Endpoints[i].Address < r.Endpoints[j].Address })
+		return r, nil
+	},
+}

@@ -161,9 +161,9 @@ func TestCLIRoundTrips(t *testing.T) {
 				t.Fatalf("who: %q", out)
 			}
 		}},
-		{"who-long", "", []string{"who", "--long"}, func(t *testing.T, out string) {
+		{"who-wide", "", []string{"who", "--wide"}, func(t *testing.T, out string) {
 			if strings.Count(out, "\n") < 4 || !strings.Contains(out, "peer2") {
-				t.Fatalf("who --long: %q", out)
+				t.Fatalf("who --wide: %q", out)
 			}
 		}},
 	}
@@ -194,14 +194,19 @@ func TestCLIRoundTrips(t *testing.T) {
 	}
 }
 
-// whoText's default lines are parsed by other tools; the round-trip work must leave them as they were.
+// The who table is the header and one row of address and state per endpoint, columns separated by spaces; the
+// round-trip work must leave it so.
 func TestCLIWhoDefaultFormat(t *testing.T) {
 	r := newRTTWorld(t, 12)
 	out, _ := r.measure(t, "", "who")
-	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
-		f := strings.Split(line, "\t")
-		if len(f) < 2 || (f[1] != "online" && f[1] != "offline") {
-			t.Fatalf("who line %q is not <name>\\t<online|offline>...", line)
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if f := strings.Fields(lines[0]); len(f) != 2 || f[0] != "ADDRESS" || f[1] != "STATE" {
+		t.Fatalf("who header %q", lines[0])
+	}
+	for _, line := range lines[1:] {
+		f := strings.Fields(line)
+		if len(f) != 2 || strings.Count(f[0], ".") != 2 || (f[1] != "online" && f[1] != "offline") {
+			t.Fatalf("who line %q is not <address>  <online|offline>", line)
 		}
 	}
 }

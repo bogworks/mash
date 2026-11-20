@@ -161,7 +161,7 @@ func TestStandaloneOnlyNATS(t *testing.T) {
 		t.Fatalf("read lacks a verified sender: %s", read)
 	}
 
-	who := mustRun(t, bin, envs["alpha"], "who", "--long")
+	who := mustRun(t, bin, envs["alpha"], "who", "--wide")
 	for _, want := range []string{"alpha", "beta", "tester-alpha", "tester-beta"} {
 		if !strings.Contains(who, want) {
 			t.Fatalf("who lacks %q: %s", want, who)

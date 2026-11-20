@@ -123,7 +123,7 @@ func TestHookNextToEndpointOfTheSameInstanceInAnotherGroup(t *testing.T) {
 		eventually(t, 5*time.Second, "serve made the spool "+d, func() bool { _, err := os.Stat(d); return err == nil })
 	}
 	eventually(t, 5*time.Second, "both online", func() bool {
-		return strings.Contains(cliAsQuiet(aSender, "who"), "acme.team1.ops1\tonline") && strings.Contains(cliAsQuiet(bSender, "who"), "acme.team2.ops1\tonline")
+		return whoShows(cliAsQuiet(aSender, "who"), "acme.team1.ops1", "online") && whoShows(cliAsQuiet(bSender, "who"), "acme.team2.ops1", "online")
 	})
 	// Nothing else lives under the spool root: exactly the two distinct directories.
 	ents, err := os.ReadDir(filepath.Join(state, "spool", "acme"))

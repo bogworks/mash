@@ -83,7 +83,7 @@ func TestVerbHelpPrintsUsageAndChangesNothing(t *testing.T) {
 func TestHelpUsageOnlyFirstArgument(t *testing.T) {
 	yes := [][]string{
 		{"prompt", "--help"}, {"prompt", "-h"},
-		{"read", "-h"}, {"inbox", "--help"}, {"who", "-h"}, {"serve", "-h"}, {"hook", "--help"},
+		{"read", "-h"}, {"inbox", "--help"}, {"serve", "-h"}, {"hook", "--help"},
 		{"plugin", "--help"}, {"plugin", "export", "-h"},
 		{"admin", "-h"}, {"admin", "--help"}, {"admin", "set-meta", "-h"}, {"admin", "suspend", "--help"},
 	}
@@ -96,7 +96,6 @@ func TestHelpUsageOnlyFirstArgument(t *testing.T) {
 		{"send", tTo("y"), "--help"}, {"send", tTo("y"), "-h"}, // send is on the command table: its help is cmdcore's
 		{"prompt", tTo("y"), "what", "does", "-h", "do"}, {"prompt", tTo("y"), "--help"}, {"prompt", tTo("y"), "-h"},
 		{"read", "3", "--help"}, {"read", "--json", "-h"}, {"inbox", "5", "-h"}, {"inbox", "--limit", "--help"},
-		{"who", "--owner", "-h"}, {"who", "x", "--help"},
 		{"admin", "set-meta", "y", "--help"}, {"admin", "set-meta", "y", "note", "-h"},
 		{"admin", "suspend", "y", "--help"}, {"admin", "suspend", "y", "-h"},
 		{"admin", "provision", "y", "--help"}, {"admin", "deprovision", "y", "-h"},

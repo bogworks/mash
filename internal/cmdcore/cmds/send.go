@@ -112,6 +112,7 @@ func (r SendResult) Text(o cmdcore.Opts) string {
 // Send is the send command.
 var Send = cmdcore.Command[SendParams, SendResult]{
 	Name:           "send",
+	Group:          "Everyday",
 	Summary:        "Send a message to an endpoint.",
 	Description:    "Send a message to an endpoint.",
 	MCPDescription: "Send mail to another endpoint by its address, owner.group.name. Choose the kind for what you need from the recipient: blocker (you cannot continue without them), question (you need an answer) and task (you are asking them to do something; the default) wake an idle recipient; result (the outcome of something they asked for) and fyi (information, no answer needed) wait for their next turn. Use urgent only for what cannot wait: it interrupts. When you answer a message, set reply_to to its number so the recipient sees which one. When you pass a message on, set relay to its number. Do not send a reply that only acknowledges. A reply marked question that asks nothing is sent as fyi. Use id when you retry after a timeout, so the message is not delivered twice.",

@@ -261,7 +261,7 @@ func TestServeEndToEnd(t *testing.T) {
 		t.Fatalf("cli read: %d %s", code, out)
 	}
 	out, code = w.cli(t, "b", "who")
-	if code != 0 || !strings.Contains(out, tTo("a")+"\tonline") {
+	if code != 0 || !whoShows(out, tTo("a"), "online") {
 		t.Fatalf("cli who: %d %s", code, out)
 	}
 }
@@ -278,7 +278,7 @@ func TestServeLivePromptViaCLI(t *testing.T) {
 	// Prompt once a is registered (its SAP service starts when the channel is ready).
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		if out, _ := w.cli(t, "b", "who"); strings.Contains(out, tTo("a")+"\tonline") {
+		if out, _ := w.cli(t, "b", "who"); whoShows(out, tTo("a"), "online") {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -413,7 +413,7 @@ func TestServeExitsWhenLeaseLost(t *testing.T) {
 	s.tools(t)
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		if out, _ := w.cli(t, "a", "who"); strings.Contains(out, tTo("a")+"\tonline") {
+		if out, _ := w.cli(t, "a", "who"); whoShows(out, tTo("a"), "online") {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -469,7 +469,7 @@ func TestServeLeaseLossDoesNotHangOnStdout(t *testing.T) {
 	// From here on nobody reads stdout.
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		if out, _ := w.cli(t, "a", "who"); strings.Contains(out, tTo("a")+"\tonline") {
+		if out, _ := w.cli(t, "a", "who"); whoShows(out, tTo("a"), "online") {
 			break
 		}
 		if time.Now().After(deadline) {

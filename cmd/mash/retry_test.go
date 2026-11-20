@@ -200,13 +200,13 @@ func TestServeRetriesHeldLease(t *testing.T) {
 	if txt := resultText(s.call(t, 12, "read", `{"seq":1}`)); !strings.Contains(txt, "sent while held") {
 		t.Fatalf("read after recovery: %s", txt)
 	}
-	if txt := resultText(s.call(t, 13, "who", `{}`)); !strings.Contains(txt, tTo("a")+"\tonline") {
+	if txt := resultText(s.call(t, 13, "who", `{}`)); !whoShows(txt, tTo("a"), "online") {
 		t.Fatalf("who after recovery: %s", txt)
 	}
 	if out, _ := w.cli(t, "b", "inbox"); !strings.Contains(out, "from o.dev.a [verified]") || !strings.Contains(out, "thanks") {
 		t.Fatalf("b's inbox: %s", out)
 	}
-	if out, _ := w.cli(t, "b", "who"); !strings.Contains(out, tTo("a")+"\tonline") {
+	if out, _ := w.cli(t, "b", "who"); !whoShows(out, tTo("a"), "online") {
 		t.Fatalf("who: %s", out)
 	}
 }
@@ -246,7 +246,7 @@ func TestServeDoesNotDisplaceRenewingHolder(t *testing.T) {
 	holder := startServe(t, w.env["a"])
 	holder.initialize(t)
 	holder.tools(t)
-	eventually(t, 5*time.Second, "holder online", func() bool { out, _ := w.cli(t, "a", "who"); return strings.Contains(out, tTo("a")+"\tonline") })
+	eventually(t, 5*time.Second, "holder online", func() bool { out, _ := w.cli(t, "a", "who"); return whoShows(out, tTo("a"), "online") })
 	first, err := kv.Get(context.Background(), tAddr("a").Flat())
 	if err != nil {
 		t.Fatal(err)

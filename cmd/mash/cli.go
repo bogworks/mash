@@ -15,7 +15,7 @@ import (
 	"github.com/bogworks/mash/internal/render"
 )
 
-// cli runs the one-shot commands that are not on the command table (read, inbox, who, prompt) as the endpoint (MASH_ENDPOINT, owner.group.name), without taking its lease.
+// cli runs the one-shot commands that are not on the command table (read, inbox, prompt) as the endpoint (MASH_ENDPOINT, owner.group.name), without taking its lease.
 func cli(cfg config.Config, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	fail := func(err error) int { fmt.Fprintln(stderr, err); return 1 }
 	if args[0] == "prompt" && len(args) >= 3 { // an address is owner.group.name; the flat form is refused, nothing is attempted
@@ -25,15 +25,6 @@ func cli(cfg config.Config, args []string, stdin io.Reader, stdout, stderr io.Wr
 	}
 	if cfg.Inert() {
 		return fail(fmt.Errorf("mash: no endpoint: set MASH_ENDPOINT (owner.group.name), --endpoint, or install credentials for one endpoint"))
-	}
-	var whoF endpoint.WhoFilter
-	var whoO whoOutput
-	if args[0] == "who" {
-		var err error
-		if whoF, whoO, err = ParseWhoFlags(args[1:]); err != nil {
-			fmt.Fprintln(stderr, err)
-			return 2
-		}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), cliDeadline(cfg))
 	defer cancel()
@@ -79,19 +70,6 @@ func cli(cfg config.Config, args []string, stdin io.Reader, stdout, stderr io.Wr
 			return fail(err)
 		}
 		fmt.Fprintln(stdout, inboxText(ms))
-	case "who":
-		c, cc := short()
-		defer cc()
-		if err := ep.Refresh(c); err != nil {
-			return fail(err)
-		}
-		var live map[string]endpoint.LeaseInfo
-		if whoO.Long {
-			live = liveLeases(c, ep)
-		}
-		if out := whoRender(whoF.Apply(ep.Who()), whoO, !whoF.IsZero(), live); out != "" {
-			fmt.Fprintln(stdout, out)
-		}
 	case "prompt":
 		if len(args) < 3 {
 			return fail(fmt.Errorf("usage: mash prompt <to> <text...>"))
@@ -112,15 +90,12 @@ func cli(cfg config.Config, args []string, stdin io.Reader, stdout, stderr io.Wr
 
 // clientNeeds is what a command reads besides the endpoint's own record, so the open can ask for it all at once: over a
 // slow link every dependent request is a round trip, and reading the whole directory one key at a time cost a session 148 ms
-// from NATS ten seconds per command. who shows the directory, so it reads it; the rest read the records they use: the
-// recipient of a send, the senders of the mail shown.
+// from NATS ten seconds per command. They read the records they use: the senders
+// of the mail shown.
 func clientNeeds(cfg config.Config, args []string) endpoint.ClientOptions {
 	switch args[0] {
 	case "read", "inbox":
 		return endpoint.ClientOptions{Inbox: true}
-	case "who":
-		_, o, _ := ParseWhoFlags(args[1:])
-		return endpoint.ClientOptions{FullDirectory: true, Presence: true, Lease: o.Long}
 	}
 	return endpoint.ClientOptions{} // prompt finds its peer by service discovery
 }
