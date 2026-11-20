@@ -95,9 +95,16 @@ func sandboxMain(cmd string, port int, keep bool, stdout, stderr io.Writer, p *P
 		return code
 	}
 	res := h.Exec("inside", sandboxArgs(cmd, port), sandboxEnv(r))
-	fmt.Fprint(stdout, res.Stdout)
-	fmt.Fprint(stderr, res.Stderr)
+	// What the container printed is redacted before it reaches this terminal or a CI log: a seed or a JWT in it is a
+	// failure, and it is never shown.
+	outText, errText2, printedSecret := shownOutput(res)
+	fmt.Fprint(stdout, outText)
+	fmt.Fprint(stderr, errText2)
 	code := res.Code
+	if printedSecret {
+		fmt.Fprintln(stdout, "INV-001: the output of the run inside the sandbox held a seed or a JWT; it was removed from what is shown")
+		code = 1
+	}
 	if code < 0 {
 		fmt.Fprintln(stderr, "liveat: the run inside the sandbox did not finish")
 		code = 4
@@ -184,4 +191,10 @@ func exportRun(r *Run, dst string) error {
 		}
 	}
 	return nil
+}
+
+// shownOutput is what the container printed with any seed or JWT removed, and whether it held one.
+func shownOutput(res Result) (stdout, stderr string, leaked bool) {
+	stdout, stderr = redact(res.Stdout), redact(res.Stderr)
+	return stdout, stderr, stdout != res.Stdout || stderr != res.Stderr
 }
