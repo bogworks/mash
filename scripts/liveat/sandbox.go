@@ -117,6 +117,7 @@ func sandboxMain(cmd string, port int, keep bool, stdout, stderr io.Writer, p *P
 			code = 4
 		}
 	} else {
+		leaked := false
 		if !hasRecord(back) {
 			fmt.Fprintln(stderr, "liveat: the export copied out of the sandbox holds no record-*.md: the run inside did not write its records")
 			if code == 0 {
@@ -127,8 +128,20 @@ func sandboxMain(cmd string, port int, keep bool, stdout, stderr io.Writer, p *P
 		if err != nil || len(found) > 0 || len(r.Runner.Leaks()) > 0 {
 			fmt.Fprintln(stdout, "INV-001: the output copied out of the sandbox holds a seed or a JWT (or could not be scanned): "+leakNames(found)+" "+errText(err))
 			code = 1
+			// The raw output goes, even with --keep: the one export directory this run made and the exact captured files
+			// the runner flagged. Nothing else is touched.
+			paths := []string{back}
+			for _, l := range r.Runner.Leaks() {
+				paths = append(paths, filepath.Join(r.Out, filepath.Base(l.File)))
+			}
+			if cerr := cleanLeaked(paths...); cerr != nil {
+				fmt.Fprintln(stderr, "liveat: the raw output that held a secret could not be removed:", cerr)
+			} else {
+				fmt.Fprintln(stdout, "the raw output that held a secret was removed; only the names above are reported")
+			}
+			leaked = true
 		}
-		if keep {
+		if keep && !leaked {
 			fmt.Fprintf(stdout, "records and output copied out: %s\n", back)
 		}
 	}
@@ -220,4 +233,20 @@ func hasRecord(dir string) bool {
 		}
 	}
 	return false
+}
+
+// cleanLeaked removes, by exact path, each file or directory it is given (the export directory and the captured output
+// files a leak check flagged). It never expands a pattern; a path that is already gone is fine. It tries every path and
+// returns the first error.
+func cleanLeaked(paths ...string) error {
+	var first error
+	for _, p := range paths {
+		if p == "" || p == "/" || p == "." {
+			continue
+		}
+		if err := os.RemoveAll(p); err != nil && first == nil {
+			first = err
+		}
+	}
+	return first
 }

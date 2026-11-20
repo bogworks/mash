@@ -13,7 +13,7 @@ import (
 )
 
 func TestContainerfileIsAPinnedDebianWithTheScriptsTools(t *testing.T) {
-	if !strings.Contains(containerfile, "\nFROM "+baseImage+"\n") || baseImage != "docker.io/library/debian:bookworm-slim" {
+	if !strings.Contains(containerfile, "\nFROM "+baseImage+"\n") || baseImage != "docker.io/library/debian:bookworm-slim@"+baseImageDigest || !strings.Contains(containerfile, "\n# The base is pinned by the digest") {
 		t.Errorf("base image: %q", baseImage)
 	}
 	for _, want := range []string{"--no-install-recommends", "bash", "openssl", "iproute2", "ca-certificates", "coreutils", "grep", "sed", "gawk",
@@ -40,7 +40,7 @@ func TestBuildContextHoldsTheBinariesTheNatsCommandAndTheScript(t *testing.T) {
 	if st, _ := os.Stat(filepath.Join(ctx, "nats")); st == nil || st.Mode().Perm()&0o111 == 0 {
 		t.Error("the nats command is not executable")
 	}
-	if len(r.ImageLines) != 3 || !strings.HasPrefix(r.ImageLines[2], "setup script: setup.sh sha256:") || !strings.HasPrefix(r.ImageLines[0], "base image: "+baseImage+", digest ") || !strings.HasPrefix(r.ImageLines[1], "nats command: natscli "+natsCLIVersion) {
+	if len(r.ImageLines) != 3 || !strings.HasPrefix(r.ImageLines[2], "setup script: setup.sh sha256:") || !strings.HasPrefix(r.ImageLines[0], "base image: "+baseImage+", digest "+baseImageDigest) || !strings.HasPrefix(r.ImageLines[1], "nats command: natscli "+natsCLIVersion) {
 		t.Errorf("record lines: %v", r.ImageLines)
 	}
 	if got := strings.Join(r.EnvLines(nil), "\n"); !strings.Contains(got, "base image: ") || !strings.Contains(got, "nats command: ") {
@@ -48,21 +48,64 @@ func TestBuildContextHoldsTheBinariesTheNatsCommandAndTheScript(t *testing.T) {
 	}
 }
 
-func TestBaseImageDigestIsRecorded(t *testing.T) {
+func TestBaseImageDigestIsRequestedAndVerified(t *testing.T) {
 	linuxOnly(t)
 	r := newPodRun(t)
+	openPodman(t, podmanFake(nil), r)
+	want := "base image: " + baseImage + ", digest " + baseImageDigest + " (requested; verified after the build)"
+	if r.ImageLines[0] != want {
+		t.Errorf("%v", r.ImageLines)
+	}
+	if !strings.Contains(containerfile, "\nFROM "+baseImageTag+"@"+baseImageDigest+"\n") {
+		t.Error("the Containerfile does not pin the base by the digest in the Go constant")
+	}
+	// another digest after the build fails the run
+	r2 := newPodRun(t)
 	f := podmanFake(func(c Cmd) (string, string, int, bool) {
 		if strings.HasPrefix(strings.Join(c.Argv, " "), "podman image inspect --format {{.Digest}} "+baseImage) {
 			return "sha256:abc123\n", "", 0, true
 		}
 		return "", "", 0, false
 	})
-	openPodman(t, f, r)
-	if r.ImageLines[0] != "base image: "+baseImage+", digest sha256:abc123" {
-		t.Errorf("%v", r.ImageLines)
+	p := &Podman{Runner: f, LookPath: func(string) (string, error) { return "/usr/bin/podman", nil }, Pick: func(int) int { return 9 }}
+	if _, err := p.Open(r2); err == nil || !strings.Contains(err.Error(), "not the requested") {
+		t.Errorf("a base with another digest must fail the run: %v", err)
 	}
-	if baseImageLine("") != "base image: "+baseImage+", digest unknown" {
-		t.Error("an empty digest is recorded as unknown")
+	if verifyBaseImage(baseImageDigest+"\n") != nil || verifyBaseImage("") == nil {
+		t.Error("verifyBaseImage")
+	}
+}
+
+func TestCleanLeakedRemovesOnlyTheNamedPaths(t *testing.T) {
+	dir := t.TempDir()
+	export := filepath.Join(dir, "sandbox-export")
+	out := filepath.Join(dir, "out")
+	for _, d := range []string{filepath.Join(export, "out"), out} {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seed := "SUAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+	leaked := filepath.Join(out, "03-x.out")
+	other := filepath.Join(out, "04-y.out")
+	for _, f := range []string{filepath.Join(export, "out", "a.out"), leaked} {
+		if err := os.WriteFile(f, []byte(seed), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(other, []byte("fine"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := cleanLeaked(export, leaked, filepath.Join(dir, "gone")); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{export, leaked} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Errorf("%s was not removed", p)
+		}
+	}
+	if _, err := os.Stat(other); err != nil {
+		t.Errorf("a file that was not named was removed: %v", err)
 	}
 }
 

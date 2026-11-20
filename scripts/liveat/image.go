@@ -20,8 +20,14 @@ import (
 // What goes into the node image besides the checkout's own binaries: a pinned minimal Debian, the packages the setup
 // script needs (Containerfile.at005), and a pinned release of the nats command (the script needs `nats auth operator`).
 
-// baseImage is the image the node image is built on, pulled by tag; its digest is read after the build and recorded.
-const baseImage = "docker.io/library/debian:bookworm-slim"
+// baseImage is the image the node image is built on: the tag (the readable name) pinned by the digest of the multi-arch
+// index, so the same bytes are used on amd64 and arm64. baseImageDigest is that digest; the run fails when the pulled
+// base reports another. Containerfile.at005 carries the same reference.
+const (
+	baseImageTag    = "docker.io/library/debian:bookworm-slim"
+	baseImageDigest = "sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc"
+	baseImage       = baseImageTag + "@" + baseImageDigest
+)
 
 // nodeBin is where the node image keeps the binaries, the nats command and the setup script; it is on the node's PATH.
 const (
@@ -164,11 +170,15 @@ func setupScriptLine(repo, path string, content []byte) string {
 	return fmt.Sprintf("setup script: %s sha256:%x", name, sha256.Sum256(content))
 }
 
-// baseImageLine is the record line for the base image; digest is what `podman image inspect` said.
-func baseImageLine(digest string) string {
-	digest = strings.TrimSpace(digest)
-	if digest == "" || strings.ContainsAny(digest, " \t\n") {
-		digest = "unknown"
+// baseImageLine is the record line for the base image: the reference and the digest that was requested.
+func baseImageLine() string {
+	return "base image: " + baseImage + ", digest " + baseImageDigest + " (requested; verified after the build)"
+}
+
+// verifyBaseImage is nil when `podman image inspect` of the base reported the requested digest, else an error.
+func verifyBaseImage(reported string) error {
+	if got := strings.TrimSpace(reported); got != baseImageDigest {
+		return fmt.Errorf("the base image %s reports digest %q, not the requested %s", baseImageTag, got, baseImageDigest)
 	}
-	return "base image: " + baseImage + ", digest " + digest
+	return nil
 }

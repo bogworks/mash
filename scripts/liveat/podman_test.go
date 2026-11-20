@@ -139,7 +139,12 @@ func podmanFake(reply func(Cmd) (string, string, int, bool)) *fakeRT {
 			return "10.89.5.0/24 \n", "", 0, true
 		}
 		if reply != nil {
-			return reply(c)
+			if o, e, code, ok := reply(c); ok {
+				return o, e, code, ok
+			}
+		}
+		if strings.HasPrefix(l, "podman image inspect --format {{.Digest}} "+baseImage) {
+			return baseImageDigest + "\n", "", 0, true
 		}
 		return "", "", 0, false
 	}

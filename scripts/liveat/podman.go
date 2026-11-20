@@ -328,8 +328,14 @@ func (p *Podman) buildImage(c *podCtx, ctx string) error {
 	if _, err = c.do("build", "--label", labelKey+"="+r.ID, "-t", c.image, ctx); err != nil {
 		return err
 	}
-	dg, _ := c.do("image", "inspect", "--format", "{{.Digest}}", baseImage)
-	r.ImageLines = []string{baseImageLine(dg), natsCLILine(), setupScriptLine(r.Repo, r.scriptPath(), sb)}
+	dg, err := c.do("image", "inspect", "--format", "{{.Digest}}", baseImage)
+	if err != nil {
+		return fmt.Errorf("the base image digest could not be read: %w", err)
+	}
+	if err := verifyBaseImage(dg); err != nil {
+		return err
+	}
+	r.ImageLines = []string{baseImageLine(), natsCLILine(), setupScriptLine(r.Repo, r.scriptPath(), sb)}
 	return nil
 }
 
