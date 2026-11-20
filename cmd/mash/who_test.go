@@ -3,14 +3,19 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/bogworks/mash/internal/cliframe"
 	"github.com/bogworks/mash/internal/cmdcore"
 	"github.com/bogworks/mash/internal/cmdcore/cmds"
+	"github.com/bogworks/mash/internal/config"
 	"github.com/bogworks/mash/internal/endpoint"
+	"github.com/bogworks/mash/internal/store"
 )
 
 // whoShows reports whether the who table in out has a row for address with state in its second column.
@@ -55,7 +60,7 @@ func (d fixedDirectory) Who(context.Context) ([]cmds.WhoEntry, error) { return d
 // The text keeps every control character of a recorded role, host and description from reaching the terminal, and
 // leaves Unicode alone.
 func TestWhoTextEscapesRecordFields(t *testing.T) {
-	entries := whoEntries([]endpoint.Presence{{Record: hostileRecord()}})
+	entries := whoEntries([]endpoint.Presence{{Record: hostileRecord()}}, "acme")
 	entries[0].Description = "\U0001F600 日本"
 	env := &cmdcore.Env{Svc: fixedDirectory(entries)}
 	r, err := cmds.Who.Run(context.Background(), env, cmds.WhoParams{Wide: true})
@@ -80,7 +85,7 @@ func TestWhoTextEscapesRecordFields(t *testing.T) {
 // near miss, the dotted forms only, and the --json object.
 func TestWhoCLI(t *testing.T) {
 	w := newWorld(t, "a", "b", "bb")
-	if out, code := w.admin(t, "set-meta", tTo("a"), "--role", "reviewer", "--host", "myserver", "--describe", "reviews pull requests"); code != 0 {
+	if out, code := w.admin(t, "set-meta", tTo("a"), "--role", "reviewer", "--host", "myserver", "--describe", "reviews pull requests", "--cap", "review", "--label", "team=blue"); code != 0 {
 		t.Fatalf("set-meta: %d %s", code, out)
 	}
 	out, code := w.cli(t, "b", "who")
@@ -156,14 +161,14 @@ func TestWhoCLI(t *testing.T) {
 	// the dotted forms only, and nothing but the owner, group and address forms
 	for _, bad := range []string{"o_dev_b", "o/dev/b", "O.dev", "o.dev.b.x", "o.d*", "*", "o..dev", "o.dev.b.*"} {
 		out, code := w.cli(t, "b", "who", bad)
-		if code != 2 || !strings.HasPrefix(out, "error: "+bad+" is not an address; write it as ") || !strings.HasSuffix(out, "hint: mash who --help\n") {
+		if code != 2 || out != "error: "+bad+" is not an owner, an owner.group or an address\nhint: mash who --help\n" {
 			t.Errorf("who %s: %d %q", bad, code, out)
 		}
 	}
-	if out, _ := w.cli(t, "b", "who", "o_dev_b"); out != "error: o_dev_b is not an address; write it as o.dev.b\nhint: mash who --help\n" {
-		t.Errorf("flat: %q", out)
+	if out, _ := w.cli(t, "b", "who", "Acme.Demo"); out != "error: Acme.Demo is not an owner, an owner.group or an address\nhint: mash who --help\n" {
+		t.Errorf("capitals: %q", out)
 	}
-	if out, code := w.cli(t, "b", "who", "--online", "--offline"); code != 2 || out != "error: --online and --offline cannot go together\nhint: mash who --help\n" {
+	if out, code := w.cli(t, "b", "who", "--online", "--offline"); code != 2 || out != "error: mash who takes --online or --offline, not both\nhint: mash who --help\n" {
 		t.Errorf("conflict: %d %q", code, out)
 	}
 	if out, code := w.cli(t, "b", "who", "--match", "x"); code != 2 || !strings.HasPrefix(out, "error: unknown option --match for mash who\nhint: mash who --help") {
@@ -190,16 +195,22 @@ func TestWhoCLI(t *testing.T) {
 		t.Fatalf("--json: %d %q", code, out)
 	}
 	e := obj.Endpoints[0]
-	if len(e) != 5 || e["address"] != tTo("a") || e["role"] != "reviewer" || e["host"] != "myserver" || e["description"] != "reviews pull requests" {
+	if len(e) != 7 || e["address"] != tTo("a") || e["role"] != "reviewer" || e["host"] != "myserver" || e["description"] != "reviews pull requests" ||
+		!reflect.DeepEqual(e["capability"], []any{"review"}) || !reflect.DeepEqual(e["labels"], map[string]any{"team": "blue"}) {
 		t.Errorf("first endpoint %v", e)
 	}
-	if e := obj.Endpoints[1]; e["role"] != nil || e["host"] != nil || e["description"] != nil {
-		t.Errorf("unrecorded fields are null: %v", e)
+	if e := obj.Endpoints[1]; e["role"] != nil || e["host"] != nil || e["description"] != nil ||
+		!reflect.DeepEqual(e["capability"], []any{}) || !reflect.DeepEqual(e["labels"], map[string]any{}) {
+		t.Errorf("unrecorded fields are null, capability [] and labels {}: %v", e)
+	}
+	// without --wide the structured result is the same, byte for byte
+	if plain, code := w.cli(t, "b", "who", "--json"); code != 0 || plain != out {
+		t.Errorf("--json without --wide differs: %d %q vs %q", code, plain, out)
 	}
 	if out, code := w.cli(t, "b", "who", "o.lab", "--json"); code != 0 || out != `{"endpoints":[]}`+"\n" {
 		t.Errorf("empty --json: %d %q", code, out)
 	}
-	if out, code := w.cli(t, "b", "who", "o_dev_b", "--json"); code != 2 || out != `{"error":"o_dev_b is not an address; write it as o.dev.b","hint":"mash who --help"}`+"\n" {
+	if out, code := w.cli(t, "b", "who", "o_dev_b", "--json"); code != 2 || out != `{"error":"o_dev_b is not an owner, an owner.group or an address","hint":"mash who --help"}`+"\n" {
 		t.Errorf("bad prefix --json: %d %q", code, out)
 	}
 }
@@ -208,7 +219,7 @@ func TestWhoCLI(t *testing.T) {
 // parameters are refused.
 func TestWhoMCPTool(t *testing.T) {
 	w := newWorld(t, "a", "b")
-	if out, code := w.admin(t, "set-meta", tTo("a"), "--role", "reviewer", "--host", "myserver", "--describe", "reviews pull requests"); code != 0 {
+	if out, code := w.admin(t, "set-meta", tTo("a"), "--role", "reviewer", "--host", "myserver", "--describe", "reviews pull requests", "--cap", "review", "--label", "team=blue"); code != 0 {
 		t.Fatalf("set-meta: %d %s", code, out)
 	}
 	s := startServe(t, w.env["b"])
@@ -238,6 +249,22 @@ func TestWhoMCPTool(t *testing.T) {
 	if len(eps) != 2 || eps[0].(map[string]any)["address"] != tTo("a") || eps[1].(map[string]any)["online"] != true {
 		t.Fatalf("endpoints: %v", sc)
 	}
+	// the two doors give the same object, byte for byte (the tool's result is read back into the typed object, so
+	// the field order is the one the CLI writes)
+	cliJSON, _ := w.cli(t, "a", "who", "--json")
+	raw, _ := json.Marshal(sc)
+	var typed struct {
+		Endpoints []cmds.WhoEndpoint `json:"endpoints"`
+	}
+	if err := json.Unmarshal(raw, &typed); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := json.Marshal(typed); string(b)+"\n" != cliJSON {
+		t.Errorf("mcp %s != cli --json %s", b, cliJSON)
+	}
+	if e := eps[0].(map[string]any); !reflect.DeepEqual(e["capability"], []any{"review"}) || !reflect.DeepEqual(e["labels"], map[string]any{"team": "blue"}) {
+		t.Errorf("mcp endpoint a lacks capability or labels: %v", e)
+	}
 	if txt := resultText(r); !strings.HasPrefix(txt, "ADDRESS  STATE\n") || !whoShows(txt, tTo("b"), "online") || strings.Contains(txt, "\t") {
 		t.Fatalf("text: %q", txt)
 	}
@@ -264,7 +291,56 @@ func TestWhoMCPTool(t *testing.T) {
 		}
 	}
 	r = s.call(t, 46, "who", `{"prefix":"o_dev_b"}`)
-	if sc, _ := r["structuredContent"].(map[string]any); sc["error"] != "o_dev_b is not an address; write it as o.dev.b" || sc["hint"] != "mash who --help" {
+	if sc, _ := r["structuredContent"].(map[string]any); sc["error"] != "o_dev_b is not an owner, an owner.group or an address" || sc["hint"] != "mash who --help" {
 		t.Errorf("flat prefix: %v", r)
+	}
+}
+
+// who lists only the caller's own owner, whatever the directory holds: the filter is the endpoint's, not the account's.
+func TestWhoListsOnlyTheCallersOwner(t *testing.T) {
+	ps := []endpoint.Presence{
+		{Record: store.Record{Owner: "acme", Group: "demo", Instance: "alice"}, Online: true},
+		{Record: store.Record{Owner: "acme", Group: "demo", Instance: "bob"}},
+		{Record: store.Record{Owner: "other", Group: "demo", Instance: "carol"}, Online: true},
+		{Record: store.Record{Owner: "acmeco", Group: "demo", Instance: "dan"}},
+	}
+	env := &cmdcore.Env{Svc: fixedDirectory(whoEntries(ps, "acme"))}
+	for prefix, want := range map[string][]string{
+		"":                 {"acme.demo.alice", "acme.demo.bob"},
+		"acme":             {"acme.demo.alice", "acme.demo.bob"},
+		"other":            nil,
+		"other.demo":       nil,
+		"other.*":          nil,
+		"other.demo.carol": nil,
+		"acmeco":           nil,
+	} {
+		r, err := cmds.Who.Run(context.Background(), env, cmds.WhoParams{Prefix: prefix})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for _, e := range r.Endpoints {
+			got = append(got, e.Address)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("prefix %q: %v, want %v", prefix, got, want)
+		}
+	}
+}
+
+// A wait for who is online that ran out is not a failure to connect.
+func TestWhoRefreshFailureWording(t *testing.T) {
+	cfg := config.Config{URL: "tls://myserver:4222"}
+	err := refreshFailure(cfg, fmt.Errorf("wait: %w", context.DeadlineExceeded))
+	var ce *cliframe.Error
+	if !errors.As(err, &ce) || ce.Msg != "the directory could not be read: the endpoints did not answer in time" || ce.Hint != "mash doctor" || ce.Code != 1 {
+		t.Errorf("timeout: %#v", err)
+	}
+	if strings.Contains(err.Error(), "server did not answer") {
+		t.Errorf("reads like a connect failure: %v", err)
+	}
+	err = refreshFailure(cfg, errors.New("mash: presence probe: boom"))
+	if !errors.As(err, &ce) || ce.Msg != "the directory could not be read: mash: presence probe: boom" || ce.Code != 1 {
+		t.Errorf("other: %#v", err)
 	}
 }

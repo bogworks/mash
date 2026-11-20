@@ -27,7 +27,8 @@ func (f *fakeDir) Who(context.Context) ([]cmds.WhoEntry, error) { f.calls++; ret
 func directory() *fakeDir {
 	return &fakeDir{entries: []cmds.WhoEntry{
 		{Address: "acme.demo.bob", Online: false, Role: "writer", Host: "myserver"},
-		{Address: "acme.demo.alice", Online: true, Role: "reviewer", Host: "myserver", Description: "reviews pull requests"},
+		{Address: "acme.demo.alice", Online: true, Role: "reviewer", Host: "myserver", Description: "reviews pull requests",
+			Capabilities: []string{"review"}, Labels: map[string]string{"team": "blue"}},
 		{Address: "acme.demo.bobby", Online: true},
 		{Address: "acme.lab.carol", Online: true},
 		{Address: "acmeco.demo.dan", Online: false},
@@ -164,16 +165,16 @@ func TestWhoUsageErrors(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"acme_demo_bob"}, "error: acme_demo_bob is not an address; write it as acme.demo.bob\n"},
-		{[]string{"acme/demo"}, "error: acme/demo is not an address; write it as acme.demo\n"},
-		{[]string{"Acme.demo"}, "error: Acme.demo is not an address; write it as acme.demo\n"},
-		{[]string{"acme.demo.bob.x"}, "error: acme.demo.bob.x is not an address; write it as owner.group.name\n"},
-		{[]string{"acme.demo.bob.*"}, "error: acme.demo.bob.* is not an address; write it as owner.group.name\n"},
-		{[]string{"acme.d*"}, "error: acme.d* is not an address; write it as owner.group.name\n"},
-		{[]string{"*"}, "error: * is not an address; write it as owner.group.name\n"},
-		{[]string{"acme..demo"}, "error: acme..demo is not an address; write it as owner.group.name\n"},
+		{[]string{"acme_demo_bob"}, "error: acme_demo_bob is not an owner, an owner.group or an address\n"},
+		{[]string{"acme/demo"}, "error: acme/demo is not an owner, an owner.group or an address\n"},
+		{[]string{"Acme.demo"}, "error: Acme.demo is not an owner, an owner.group or an address\n"},
+		{[]string{"acme.demo.bob.x"}, "error: acme.demo.bob.x is not an owner, an owner.group or an address\n"},
+		{[]string{"acme.demo.bob.*"}, "error: acme.demo.bob.* is not an owner, an owner.group or an address\n"},
+		{[]string{"acme.d*"}, "error: acme.d* is not an owner, an owner.group or an address\n"},
+		{[]string{"*"}, "error: * is not an owner, an owner.group or an address\n"},
+		{[]string{"acme..demo"}, "error: acme..demo is not an owner, an owner.group or an address\n"},
 		{[]string{"acme", "demo"}, "error: unexpected argument \"demo\" for mash who\n"},
-		{[]string{"--online", "--offline"}, "error: --online and --offline cannot go together\n"},
+		{[]string{"--online", "--offline"}, "error: mash who takes --online or --offline, not both\n"},
 		{[]string{"--match", "x"}, "error: unknown option --match for mash who\n"},
 		{[]string{"--long"}, "error: unknown option --long for mash who\n"},
 		{[]string{"--wide=maybe"}, "error: --wide must be true or false\n"},
@@ -185,7 +186,7 @@ func TestWhoUsageErrors(t *testing.T) {
 		}
 	}
 	code, out, errs := runWho(directory(), cliframe.Global{JSON: true}, "acme_demo")
-	if code != 2 || errs != "" || out != `{"error":"acme_demo is not an address; write it as acme.demo","hint":"mash who --help"}`+"\n" {
+	if code != 2 || errs != "" || out != `{"error":"acme_demo is not an owner, an owner.group or an address","hint":"mash who --help"}`+"\n" {
 		t.Errorf("json: %d %q %q", code, out, errs)
 	}
 	// a failure of the service is exit 1 with its own words
@@ -208,7 +209,7 @@ func TestParsePrefix(t *testing.T) {
 	}
 	_, err := cmdcore.ParsePrefix("acme_demo", "mash who --help")
 	var ce *cliframe.Error
-	if !errors.As(err, &ce) || ce.Msg != "acme_demo is not an address; write it as acme.demo" || ce.Hint != "mash who --help" || ce.Code != 2 {
+	if !errors.As(err, &ce) || ce.Msg != "acme_demo is not an owner, an owner.group or an address" || ce.Hint != "mash who --help" || ce.Code != 2 {
 		t.Errorf("error %#v", err)
 	}
 }
@@ -249,7 +250,8 @@ func TestWhoDoorsAgree(t *testing.T) {
 				t.Fatalf("structured is %T, want the result object", structured)
 			}
 			b, _ := json.Marshal(structured)
-			if strings.TrimSpace(jout.String()) != string(b) || !strings.HasPrefix(string(b), `{"endpoints":[`) {
+			// byte for byte: the CLI's --json line is the marshaled structured result and a newline, nothing else
+			if jout.String() != string(b)+"\n" || !strings.HasPrefix(string(b), `{"endpoints":[`) {
 				t.Errorf("--json %s != structuredContent %s", jout.String(), b)
 			}
 			if mtext+"\n" != text.String() {
@@ -267,12 +269,47 @@ func TestWhoDoorsAgree(t *testing.T) {
 		}
 	}
 	_, _, err := tool.CallStructured(context.Background(), json.RawMessage(`{"online":true,"offline":true}`))
-	if err == nil || err.Error() != "error: --online and --offline cannot go together\nhint: mash who --help" {
+	if err == nil || err.Error() != "error: mash who takes --online or --offline, not both\nhint: mash who --help" {
 		t.Errorf("conflict: %v", err)
 	}
 }
 
 // The descriptions, examples, tool description, parameters, object and every output case are the specification's.
+// Every endpoint carries every field in both doors, whatever wide says: capability a list and labels an object (empty,
+// not null, when there are none), role, host and description null when absent. The doors are byte for byte the same.
+func TestWhoJSONCarriesEveryField(t *testing.T) {
+	want := `{"endpoints":[` +
+		`{"address":"acme.demo.alice","online":true,"role":"reviewer","host":"myserver","description":"reviews pull requests","capability":["review"],"labels":{"team":"blue"}},` +
+		`{"address":"acme.demo.bob","online":false,"role":"writer","host":"myserver","description":null,"capability":[],"labels":{}}]}`
+	f := &fakeDir{entries: directory().entries[:2]}
+	reg := cmdcore.NewRegistry(whoEnv(f), cmdcore.Register(cmds.Who))
+	e, _ := reg.Lookup("who")
+	for _, wide := range []bool{false, true} {
+		argv, args := []string(nil), `{}`
+		if wide {
+			argv, args = []string{"--wide"}, `{"wide":true}`
+		}
+		var jout, errs bytes.Buffer
+		if code := reg.RunCLI("who", argv, strings.NewReader(""), &jout, &errs, cliframe.Global{JSON: true}); code != 0 {
+			t.Fatalf("cli: %d %s", code, errs.String())
+		}
+		_, structured, err := e.Tool(reg.Env).CallStructured(context.Background(), json.RawMessage(args))
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := json.Marshal(structured)
+		if jout.String() != want+"\n" || string(b) != want || jout.String() != string(b)+"\n" {
+			t.Errorf("wide=%v: cli %q, tool %s, want %s", wide, jout.String(), b, want)
+		}
+	}
+	// the text alone changes with wide
+	_, plain, _ := runWho(f, cliframe.Global{})
+	_, wideText, _ := runWho(f, cliframe.Global{}, "--wide")
+	if strings.Contains(plain, "ROLE") || !strings.Contains(wideText, "ROLE") {
+		t.Errorf("wide changes the text only: %q %q", plain, wideText)
+	}
+}
+
 func TestWhoMatchesSpec(t *testing.T) {
 	norm := func(s string) string { return strings.Join(strings.Fields(s), " ") }
 	var o, e bytes.Buffer
@@ -299,10 +336,12 @@ func TestWhoMatchesSpec(t *testing.T) {
 	if cmds.Who.Group != meta["x-group"] {
 		t.Errorf("group %q, spec %v", cmds.Who.Group, meta["x-group"])
 	}
-	// the MCP parameters: the spec's three, with the spec's descriptions, and wide (the spec's x-mcp says same options)
+	// the MCP parameters: exactly the spec's, with the spec's descriptions and types (wide is the spec's like the rest)
 	props := cmdcore.Schema[cmds.WhoParams]()["properties"].(map[string]any)
+	var specNames []string
 	for _, p := range specTool(t, "who")["params"].([]any) {
 		pm := p.(map[string]any)
+		specNames = append(specNames, pm["name"].(string))
 		got, ok := props[pm["name"].(string)].(map[string]any)
 		if !ok || got["description"] != pm["description"] || got["type"] != map[string]string{"string": "string", "boolean": "boolean"}[pm["type"].(string)] {
 			t.Errorf("param %v: schema %v", pm["name"], got)
@@ -313,17 +352,16 @@ func TestWhoMatchesSpec(t *testing.T) {
 		names = append(names, n)
 	}
 	sort.Strings(names)
-	if !reflect.DeepEqual(names, []string{"offline", "online", "prefix", "wide"}) {
-		t.Errorf("schema properties %v", names)
+	sort.Strings(specNames)
+	if !reflect.DeepEqual(names, specNames) {
+		t.Errorf("schema properties %v, spec %v", names, specNames)
 	}
-	if w := props["wide"].(map[string]any)["description"]; w != anyOption(c, "--wide")["description"] {
-		t.Errorf("wide description %v", w)
-	}
-	// the object: one list of endpoints, each with the spec's five fields
-	r := cmds.WhoResult{Endpoints: []cmds.WhoEndpoint{{Address: "acme.demo.alice", Online: true}}}
-	got := string(mustJSON(r))
+	// the object: what the command returns for the spec's example endpoint is the spec's x-json, field for field
+	full := cmds.WhoEntry{Address: "acme.demo.alice", Online: true, Role: "reviewer", Host: "myserver", Description: "reviews pull requests",
+		Capabilities: []string{"review"}, Labels: map[string]string{"team": "blue"}}
 	x := string(mustJSON(meta["x-json"]))
-	if got != x && !sameJSON(t, got, x) {
+	_, got, _ := runWho(&fakeDir{entries: []cmds.WhoEntry{full}}, cliframe.Global{JSON: true})
+	if !sameJSON(t, got, x) {
 		t.Errorf("object %s, spec x-json %s", got, x)
 	}
 	if !sameJSON(t, string(mustJSON(specTool(t, "who")["structured"])), x) {
@@ -332,26 +370,37 @@ func TestWhoMatchesSpec(t *testing.T) {
 	// the output cases, word for word
 	alice := cmds.WhoEntry{Address: "acme.demo.alice", Online: true, Role: "reviewer", Host: "myserver", Description: "reviews pull requests"}
 	bob := cmds.WhoEntry{Address: "acme.demo.bob", Role: "writer", Host: "myserver"}
+	both := []cmds.WhoEntry{bob, alice}
 	for _, x := range meta["x-output"].([]any) {
 		oc := x.(map[string]any)
 		var argv []string
+		dir := both
 		switch oc["case"] {
 		case "Endpoints":
-			alice.Role, alice.Host, alice.Description = "", "", ""
-			bob.Role, bob.Host = "", ""
+			dir = []cmds.WhoEntry{{Address: bob.Address}, {Address: alice.Address, Online: true}}
 		case "With --wide":
 			argv = []string{"--wide"}
-			alice = cmds.WhoEntry{Address: "acme.demo.alice", Online: true, Role: "reviewer", Host: "myserver", Description: "reviews pull requests"}
-			bob = cmds.WhoEntry{Address: "acme.demo.bob", Role: "writer", Host: "myserver"}
 		case "Nothing under the prefix":
 			argv = []string{"acme.lab"}
+		case "None at all":
+			dir = nil
+		case "None online":
+			argv, dir = []string{"--online"}, both[:1]
+		case "None offline under the prefix":
+			argv = []string{"--offline", "acme.lab"}
+		case "A prefix that is not part of an address":
+			argv = []string{"Acme.Demo"}
 		default:
 			t.Errorf("unknown spec case %v", oc["case"])
 			continue
 		}
-		_, out, _ := runWho(&fakeDir{entries: []cmds.WhoEntry{bob, alice}}, cliframe.Global{}, argv...)
-		if out != oc["text"].(string)+"\n" {
-			t.Errorf("who output %q: %q, spec %q", oc["case"], out, oc["text"])
+		code, out, errs := runWho(&fakeDir{entries: dir}, cliframe.Global{}, argv...)
+		text := out
+		if oc["stream"] == "stderr" {
+			text = errs
+		}
+		if text != oc["text"].(string)+"\n" || code != int(oc["exit"].(float64)) {
+			t.Errorf("who output %q: exit %d %q, spec %q", oc["case"], code, text, oc["text"])
 		}
 	}
 	mt := specTool(t, "who")["text"].([]any)[0].(map[string]any)["text"]

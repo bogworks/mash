@@ -12,13 +12,15 @@ import (
 )
 
 // WhoEntry is one endpoint of the directory as the service knows it. Role, Host and Description are empty when nothing
-// is recorded.
+// is recorded; Capabilities and Labels are empty when it has none.
 type WhoEntry struct {
-	Address     string // owner.group.name
-	Online      bool
-	Role        string
-	Host        string
-	Description string
+	Address      string // owner.group.name
+	Online       bool
+	Role         string
+	Host         string
+	Description  string
+	Capabilities []string
+	Labels       map[string]string
 }
 
 // Directory is the service Who needs from Env.Svc: every endpoint the caller can see, and whether each is online.
@@ -34,13 +36,17 @@ type WhoParams struct {
 	Wide    bool   `json:"wide,omitempty" flag:"--wide" desc:"More columns: role, host and description, where recorded. May pass 80 columns."`
 }
 
-// WhoEndpoint is one endpoint of the result. Role, Host and Description are null when nothing is recorded.
+// WhoEndpoint is one endpoint of the result, always with every field, whatever --wide or the tool's wide says (that
+// changes only the text). Role, Host and Description are null when nothing is recorded; Capability is a list and Labels
+// an object, empty when there are none.
 type WhoEndpoint struct {
-	Address     string  `json:"address"`
-	Online      bool    `json:"online"`
-	Role        *string `json:"role"`
-	Host        *string `json:"host"`
-	Description *string `json:"description"`
+	Address     string            `json:"address"`
+	Online      bool              `json:"online"`
+	Role        *string           `json:"role"`
+	Host        *string           `json:"host"`
+	Description *string           `json:"description"`
+	Capability  []string          `json:"capability"`
+	Labels      map[string]string `json:"labels"`
 }
 
 // WhoResult is the endpoints that matched, sorted by address. The JSON form is always this object, never a bare array.
@@ -98,6 +104,14 @@ func underPrefix(address, prefix string) bool {
 	return prefix == "" || address == prefix || strings.HasPrefix(address, prefix+".")
 }
 
+func copyLabels(m map[string]string) map[string]string {
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
+
 func ptr(s string) *string {
 	if s == "" {
 		return nil
@@ -114,7 +128,7 @@ var Who = cmdcore.Command[WhoParams, WhoResult]{
 	Examples:    []string{"mash who", "mash who acme.demo --online"},
 	Run: func(ctx context.Context, env *cmdcore.Env, p WhoParams) (WhoResult, error) {
 		if p.Online && p.Offline {
-			return WhoResult{}, cliframe.Usagef("--online and --offline cannot go together").WithHint("mash who --help")
+			return WhoResult{}, cliframe.Usagef("mash who takes --online or --offline, not both").WithHint("mash who --help")
 		}
 		prefix := ""
 		if p.Prefix != "" {
@@ -146,7 +160,8 @@ var Who = cmdcore.Command[WhoParams, WhoResult]{
 				continue
 			}
 			r.Endpoints = append(r.Endpoints, WhoEndpoint{Address: e.Address, Online: e.Online,
-				Role: ptr(e.Role), Host: ptr(e.Host), Description: ptr(e.Description)})
+				Role: ptr(e.Role), Host: ptr(e.Host), Description: ptr(e.Description),
+				Capability: append([]string{}, e.Capabilities...), Labels: copyLabels(e.Labels)})
 		}
 		sort.Slice(r.Endpoints, func(i, j int) bool { return r.Endpoints[i].Address < r.Endpoints[j].Address })
 		return r, nil

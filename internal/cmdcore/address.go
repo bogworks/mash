@@ -32,17 +32,13 @@ func ParseAddress(s, hint string) (string, error) {
 // ParsePrefix is the check `mash who` makes of its prefix: an owner (acme), an owner and group (acme.demo) or a full
 // address (acme.demo.bob), each part lower-case letters, digits and single dashes. acme.* and acme.demo.* are accepted
 // and mean acme and acme.demo; there is no other pattern. It returns the prefix without the ".*". Anything else, the
-// flat acme_demo and the slashed acme/demo included, is a usage error (exit 2), worded as ParseAddress words it.
+// flat acme_demo and the slashed acme/demo included, is a usage error (exit 2): "<s> is not an owner, an owner.group or
+// an address", as the specification words it.
 func ParsePrefix(s, hint string) (string, error) {
 	if p, ok := validPrefix(s); ok {
 		return p, nil
 	}
-	want := "owner.group.name"
-	guess := strings.ToLower(strings.NewReplacer("_", ".", "/", ".").Replace(s))
-	if p, ok := validPrefix(guess); ok && p == strings.TrimSuffix(guess, ".*") {
-		want = p
-	}
-	e := cliframe.Usagef("%s is not an address; write it as %s", s, want)
+	e := cliframe.Usagef("%s is not an owner, an owner.group or an address", s)
 	if hint != "" {
 		e = e.WithHint(hint)
 	}
