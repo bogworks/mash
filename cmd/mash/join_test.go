@@ -196,6 +196,27 @@ func TestJoinMatchesSpec(t *testing.T) {
 		writeJoin(t, "acme.demo.bob.join", joinfile.File{MashJoin: 1, Address: "acme.demo.carol", Servers: []string{"tls://myserver:4222"}, CA: &ca, Creds: string(m.creds)})
 		c.check(t, w.run("join", "acme.demo.bob.join"))
 	})
+	do("The join file can be read by others", func(w *joinWorld, c specCase) {
+		if err := os.Chmod("acme.demo.bob.join", 0o644); err != nil {
+			t.Fatal(err)
+		}
+		c.check(t, w.run("join", "acme.demo.bob.join"))
+		if _, err := os.Stat(w.cfg); err == nil {
+			t.Error("the configuration folder was made")
+		}
+	})
+	do("The join file is not a plain file of your own", func(w *joinWorld, c specCase) {
+		if err := os.Rename("acme.demo.bob.join", "real.join"); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink("real.join", "acme.demo.bob.join"); err != nil {
+			t.Fatal(err)
+		}
+		c.check(t, w.run("join", "acme.demo.bob.join"))
+		if _, err := os.Stat(w.cfg); err == nil {
+			t.Error("the configuration folder was made")
+		}
+	})
 	do("With --dry-run", func(w *joinWorld, c specCase) {
 		c.check(t, w.run("join", "acme.demo.bob.join", "--dry-run"))
 		if _, err := os.Stat(w.cfg); err == nil {
@@ -850,6 +871,7 @@ func TestJoinRefusesACredsNameThatIsNotTheAddress(t *testing.T) {
 func TestJoinOverACredsSymlink(t *testing.T) {
 	w := newJoinWorld(t)
 	os.MkdirAll(w.cfg, 0o700)
+	w.joinFor("acme.demo.bob.join", w.m, "acme.demo.bob", nil) // the folder holds creds and no ca.pem: no CA may come in
 	target := filepath.Join(w.home, "elsewhere.creds")
 	os.WriteFile(target, []byte("precious\n"), 0o600)
 	if err := os.Symlink(target, w.credsFile()); err != nil {
