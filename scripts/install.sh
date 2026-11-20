@@ -125,6 +125,7 @@ main() {
     if [ -z "$tag" ] && [[ ${BASE##*/} =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
         tag=${BASE##*/}
     fi
+    echo "Fetching mash and mashctl from the ${tag:-latest} release: $BASE"
 
     # The folder, and whether it is safe to write into.
     [ -n "${HOME:-}" ] || die "HOME is not set"
