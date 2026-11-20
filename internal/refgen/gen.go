@@ -1,4 +1,4 @@
-package main
+package refgen
 
 import (
 	"bytes"
@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	banner      = "Generated from spec/*.json by scripts/refgen. Do not edit."
+	banner      = "Generated from spec/*.json by go run ./scripts/refgen. Do not edit."
 	nextRelease = "0.6.0"
 	comingPage  = "coming-in-0-6-0.md"
 	width       = 78
@@ -143,14 +143,17 @@ func (c *cmdSpec) meta(name string) (json.RawMessage, bool) {
 	return nil, false
 }
 
-func (c *cmdSpec) metaString(name string) string {
+// metaString returns the string value of a metadata entry, "" when absent.
+func (c *cmdSpec) metaString(name string) (string, error) {
 	raw, ok := c.meta(name)
 	if !ok {
-		return ""
+		return "", nil
 	}
 	var s string
-	_ = json.Unmarshal(raw, &s)
-	return s
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return "", fmt.Errorf("%s: %w", name, err)
+	}
+	return s, nil
 }
 
 // node is a command with its place in the tree.
@@ -165,15 +168,23 @@ type node struct {
 func (n *node) page() string { return strings.Join(n.path, "-") + ".md" }
 func (n *node) full() string { return strings.Join(n.path, " ") }
 
-func buildTree(c *cmdSpec, path []string, inherited string, root bool) *node {
+func buildTree(c *cmdSpec, path []string, inherited string, root bool) (*node, error) {
 	n := &node{cmdSpec: c, path: append(append([]string{}, path...), c.Name), release: inherited, root: root}
-	if r := c.metaString("x-release"); r != "" {
+	r, err := c.metaString("x-release")
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", n.full(), err)
+	}
+	if r != "" {
 		n.release = r
 	}
 	for _, s := range c.Commands {
-		n.subs = append(n.subs, buildTree(s, n.path, n.release, false))
+		sub, err := buildTree(s, n.path, n.release, false)
+		if err != nil {
+			return nil, err
+		}
+		n.subs = append(n.subs, sub)
 	}
-	return n
+	return n, nil
 }
 
 // Generate builds every reference page from the spec files in specDir. The
@@ -196,7 +207,11 @@ func Generate(specDir string) (map[string][]byte, error) {
 		} else if v != current {
 			return nil, fmt.Errorf("%s.json: version %s differs from %s", name, v, current)
 		}
-		tools = append(tools, buildTree(f.Command, nil, current, true))
+		root, err := buildTree(f.Command, nil, current, true)
+		if err != nil {
+			return nil, err
+		}
+		tools = append(tools, root)
 	}
 	var mcp mcpFile
 	if err := readJSON(filepath.Join(specDir, "mash-mcp.json"), &mcp); err != nil {
@@ -219,6 +234,24 @@ type gen struct {
 	mcpHas  map[string]bool
 	coming  []*node
 	comingT []mcpTool
+	err     error
+}
+
+// fail records the first problem found in the spec text of a command or tool;
+// Generate returns it instead of the pages.
+func (g *gen) fail(where, field string, err error) {
+	if g.err == nil {
+		g.err = fmt.Errorf("%s: %s: %w", where, field, err)
+	}
+}
+
+// metaStr is metaString that records an error.
+func (g *gen) metaStr(n *node, name string) string {
+	s, err := n.metaString(name)
+	if err != nil {
+		g.fail(n.full(), name, err)
+	}
+	return s
 }
 
 func (g *gen) put(name string, b *bld) {
@@ -249,6 +282,9 @@ func (g *gen) run() (map[string][]byte, error) {
 	g.setupPage()
 	g.comingPageOut()
 	g.readme()
+	if g.err != nil {
+		return nil, g.err
+	}
 	return g.pages, nil
 }
 
@@ -274,6 +310,10 @@ func (g *gen) tree(n *node) error {
 }
 
 // ---- markdown helpers ----
+
+// Text that comes from the spec is passed through esc before it goes into a
+// paragraph, a table cell or a heading; the generator's own markup (code
+// spans, links) is added around it. Fenced blocks take spec text verbatim.
 
 type bld struct{ strings.Builder }
 
@@ -311,9 +351,9 @@ func (b *bld) table(head []string, rows [][]string) {
 	for _, r := range rows {
 		cells := make([]string, len(r))
 		for i, c := range r {
-			c = strings.ReplaceAll(c, "|", `\|`)
 			c = strings.Join(strings.Fields(c), " ")
-			cells[i] = c
+			c = strings.ReplaceAll(c, "|", `\|`)
+			cells[i] = escLead(c)
 		}
 		b.WriteString("| " + strings.Join(cells, " | ") + " |\n")
 	}
@@ -325,14 +365,55 @@ func (b *bld) String() string {
 	return strings.TrimRight(b.Builder.String(), "\n") + "\n"
 }
 
+// lineHazard reports whether a word would change the meaning of the line if
+// it came first: a heading, quote, list item, fence or setext underline.
+func lineHazard(w string) bool {
+	switch {
+	case strings.HasPrefix(w, "#"), strings.HasPrefix(w, ">"),
+		strings.HasPrefix(w, "```"), strings.HasPrefix(w, "~~~"):
+		return true
+	case w == "-" || w == "+" || w == "*":
+		return true
+	case strings.Trim(w, "-") == "" || strings.Trim(w, "=") == "":
+		return true
+	}
+	n := len(w) - 1
+	if n < 1 || (w[n] != '.' && w[n] != ')') {
+		return false
+	}
+	for _, r := range w[:n] {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// escLead backslash-escapes a line-start hazard at the start of s.
+func escLead(s string) string {
+	w, _, _ := strings.Cut(s, " ")
+	if w == "" || !lineHazard(w) {
+		return s
+	}
+	if n := len(w) - 1; n >= 1 && (w[n] == '.' || w[n] == ')') && w[0] >= '0' && w[0] <= '9' {
+		return w[:n] + `\` + s[n:]
+	}
+	return `\` + s
+}
+
 // wrap breaks text at word boundaries so lines stay within w columns. The
-// first line starts with first, the others with rest.
+// first line starts with first, the others with rest. A word that would
+// start a continuation line as a heading, quote, list item or the like stays
+// on the previous line; at the start of the text it is backslash-escaped.
 func wrap(text string, w int, first, rest string) string {
 	var lines []string
 	cur := first
 	empty := true
-	for _, word := range strings.Fields(text) {
-		if !empty && len(cur)+1+len(word) > w {
+	for i, word := range strings.Fields(text) {
+		if i == 0 {
+			word = escLead(word)
+		}
+		if !empty && len(cur)+1+len(word) > w && !lineHazard(word) {
 			lines = append(lines, cur)
 			cur = rest
 			empty = true
@@ -347,7 +428,104 @@ func wrap(text string, w int, first, rest string) string {
 	return strings.Join(lines, "\n")
 }
 
-func code(s string) string { return "`" + s + "`" }
+// esc makes spec text safe to put in a paragraph, table cell or heading:
+// it escapes <, >, & and backslashes before punctuation, and * and _ where
+// they could open emphasis. Inline code spans in the text stay verbatim.
+func esc(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); {
+		c := s[i]
+		if c == '`' {
+			j := i
+			for j < len(s) && s[j] == '`' {
+				j++
+			}
+			run := s[i:j]
+			if k := indexRun(s[j:], len(run)); k >= 0 {
+				end := j + k + len(run)
+				b.WriteString(s[i:end])
+				i = end
+				continue
+			}
+			b.WriteString(strings.Repeat("\\`", len(run)))
+			i = j
+			continue
+		}
+		switch c {
+		case '<':
+			b.WriteString("&lt;")
+		case '>':
+			b.WriteString("&gt;")
+		case '&':
+			b.WriteString("&amp;")
+		case '*':
+			b.WriteString(`\*`)
+		case '_':
+			prev := i > 0 && isWordByte(s[i-1])
+			next := i+1 < len(s) && isWordByte(s[i+1])
+			if prev && next {
+				b.WriteByte(c)
+			} else {
+				b.WriteString(`\_`)
+			}
+		case '\\':
+			if i+1 < len(s) && s[i+1] < 0x80 && strings.IndexByte("!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~", s[i+1]) >= 0 {
+				b.WriteString(`\\`)
+			} else {
+				b.WriteByte(c)
+			}
+		default:
+			b.WriteByte(c)
+		}
+		i++
+	}
+	return b.String()
+}
+
+func isWordByte(c byte) bool {
+	return c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= 0x80
+}
+
+// indexRun finds the first run of exactly n backticks in s.
+func indexRun(s string, n int) int {
+	for i := 0; i < len(s); {
+		if s[i] != '`' {
+			i++
+			continue
+		}
+		j := i
+		for j < len(s) && s[j] == '`' {
+			j++
+		}
+		if j-i == n {
+			return i
+		}
+		i = j
+	}
+	return -1
+}
+
+// code renders s as an inline code span, with a fence of backticks longer
+// than the longest run inside s, and padding spaces when s starts or ends with
+// a backtick.
+func code(s string) string {
+	longest, run := 0, 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == '`' {
+			run++
+			if run > longest {
+				longest = run
+			}
+		} else {
+			run = 0
+		}
+	}
+	f := strings.Repeat("`", longest+1)
+	if strings.HasPrefix(s, "`") || strings.HasSuffix(s, "`") {
+		return f + " " + s + " " + f
+	}
+	return f + s + f
+}
 
 func jsonIndent(raw json.RawMessage) string {
 	var buf bytes.Buffer
@@ -386,7 +564,7 @@ func optArg(o optSpec) string {
 	for _, a := range o.Arguments {
 		s := code("<" + a.Name + ">")
 		if len(a.AcceptedValues) > 0 {
-			s += ": " + strings.Join(a.AcceptedValues, ", ")
+			s += ": " + esc(strings.Join(a.AcceptedValues, ", "))
 		}
 		parts = append(parts, s)
 	}
@@ -401,7 +579,7 @@ func optName(o optSpec) string {
 	return strings.Join(names, ", ")
 }
 
-func (g *gen) optionsTable(b *bld, opts []optSpec) {
+func (g *gen) optionsTable(b *bld, n *node, opts []optSpec) {
 	hasEnv := false
 	for _, o := range opts {
 		for _, m := range o.Metadata {
@@ -416,14 +594,16 @@ func (g *gen) optionsTable(b *bld, opts []optSpec) {
 	}
 	var rows [][]string
 	for _, o := range opts {
-		r := []string{optName(o), optArg(o), o.Description}
+		r := []string{optName(o), optArg(o), esc(o.Description)}
 		if hasEnv {
 			env := ""
 			for _, m := range o.Metadata {
 				if m.Name == "x-env" {
 					var s string
-					_ = json.Unmarshal(m.Value, &s)
-					env = s
+					if err := json.Unmarshal(m.Value, &s); err != nil {
+						g.fail(n.full(), "x-env of option "+o.Name, err)
+					}
+					env = esc(s)
 				}
 			}
 			r = append(r, env)
@@ -440,35 +620,35 @@ func (g *gen) argsTable(b *bld, args []argSpec) {
 		if a.Required {
 			req = "yes"
 		}
-		rows = append(rows, []string{code(a.Name), req, a.Description})
+		rows = append(rows, []string{code(a.Name), req, esc(a.Description)})
 	}
 	b.table([]string{"Argument", "Required", "Description"}, rows)
 }
 
 func (g *gen) cases(b *bld, lvl int, cs []outCase) {
 	for _, c := range cs {
-		b.heading(lvl, c.Case)
-		b.WriteString(fmt.Sprintf("Stream: %s. Exit code: %d.\n\n", c.Stream, c.Exit))
+		b.heading(lvl, esc(c.Case))
+		b.WriteString(fmt.Sprintf("Stream: %s. Exit code: %d.\n\n", esc(c.Stream), c.Exit))
 		b.fence("text", c.Text)
 	}
 }
 
 // body writes the sections of one command, with headings at level lvl.
 func (g *gen) body(b *bld, n *node, lvl int) {
-	b.para(n.Description)
-	meta := fmt.Sprintf("Release: %s.", n.release)
-	if grp := n.metaString("x-group"); grp != "" {
-		meta += " Group: " + grp + "."
+	b.para(esc(n.Description))
+	meta := fmt.Sprintf("Release: %s.", esc(n.release))
+	if grp := g.metaStr(n, "x-group"); grp != "" {
+		meta += " Group: " + esc(grp) + "."
 	}
 	b.para(meta)
-	if long := n.metaString("x-long"); long != "" {
-		b.para(long)
+	if long := g.metaStr(n, "x-long"); long != "" {
+		b.para(esc(long))
 	}
 	b.heading(lvl, "Usage")
 	b.fence("text", usage(n))
 	if len(n.Options) > 0 {
 		b.heading(lvl, "Options")
-		g.optionsTable(b, n.Options)
+		g.optionsTable(b, n, n.Options)
 	}
 	if !n.root {
 		b.para("The global options of " + code(n.path[0]) + " also apply: see [" + n.path[0] + "](" + n.path[0] + ".md#global-options).")
@@ -485,13 +665,15 @@ func (g *gen) body(b *bld, n *node, lvl int) {
 		b.heading(lvl, "Exit codes")
 		var rows [][]string
 		for _, e := range n.ExitCodes {
-			rows = append(rows, []string{fmt.Sprint(e.Code), e.Description})
+			rows = append(rows, []string{fmt.Sprint(e.Code), esc(e.Description)})
 		}
 		b.table([]string{"Code", "Meaning"}, rows)
 	}
 	if raw, ok := n.meta("x-output"); ok {
 		var cs []outCase
-		if json.Unmarshal(raw, &cs) == nil && len(cs) > 0 {
+		if err := json.Unmarshal(raw, &cs); err != nil {
+			g.fail(n.full(), "x-output", err)
+		} else if len(cs) > 0 {
 			b.heading(lvl, "Output")
 			g.cases(b, lvl+1, cs)
 		}
@@ -506,7 +688,9 @@ func (g *gen) body(b *bld, n *node, lvl int) {
 			Tool *string `json:"tool"`
 			Why  string  `json:"why"`
 		}
-		if json.Unmarshal(raw, &m) == nil {
+		if err := json.Unmarshal(raw, &m); err != nil {
+			g.fail(n.full(), "x-mcp", err)
+		} else {
 			b.heading(lvl, "MCP tool")
 			switch {
 			case m.Tool != nil && g.mcpHas[*m.Tool]:
@@ -514,25 +698,25 @@ func (g *gen) body(b *bld, n *node, lvl int) {
 			case m.Tool != nil:
 				b.para(code(*m.Tool))
 			default:
-				b.para("None. " + m.Why)
+				b.para("None. " + esc(m.Why))
 			}
 			if m.Tool != nil && m.Why != "" {
-				b.para(m.Why)
+				b.para(esc(m.Why))
 			}
 		}
 	}
-	if s := n.metaString("x-notes"); s != "" {
+	if s := g.metaStr(n, "x-notes"); s != "" {
 		b.heading(lvl, "Notes")
-		b.para(s)
+		b.para(esc(s))
 	}
-	if s := n.metaString("x-today"); s != "" {
+	if s := g.metaStr(n, "x-today"); s != "" {
 		b.heading(lvl, "What it replaces")
-		b.para(s)
+		b.para(esc(s))
 	}
 }
 
 func (g *gen) cmdPage(n *node) {
-	b := newPage(n.full())
+	b := newPage(esc(n.full()))
 	b.blank()
 	g.body(b, n, 2)
 	if len(n.subs) > 0 {
@@ -549,7 +733,7 @@ func (g *gen) subList(b *bld, n *node, rel string) {
 		if s.release != rel {
 			continue
 		}
-		rows = append(rows, []string{"[" + code(s.full()) + "](" + s.page() + ")", s.Description})
+		rows = append(rows, []string{"[" + code(s.full()) + "](" + s.page() + ")", esc(s.Description)})
 	}
 	b.table([]string{"Command", "Description"}, rows)
 }
@@ -560,9 +744,9 @@ type removed struct {
 }
 
 func (g *gen) toolIndex(n *node) {
-	b := newPage(n.full())
+	b := newPage(esc(n.full()))
 	b.blank()
-	b.para(n.Description)
+	b.para(esc(n.Description))
 	b.heading(2, "Usage")
 	b.fence("text", n.full()+" <command> [options]")
 	var global []optSpec
@@ -574,7 +758,7 @@ func (g *gen) toolIndex(n *node) {
 	if len(global) > 0 {
 		b.heading(2, "Global options")
 		b.para("These options work with every " + code(n.Name) + " command.")
-		g.optionsTable(b, global)
+		g.optionsTable(b, n, global)
 	}
 	var local []optSpec
 	for _, o := range n.Options {
@@ -584,7 +768,7 @@ func (g *gen) toolIndex(n *node) {
 	}
 	if len(local) > 0 {
 		b.heading(2, "Options")
-		g.optionsTable(b, local)
+		g.optionsTable(b, n, local)
 	}
 	b.heading(2, "Commands")
 	var groups []string
@@ -593,7 +777,7 @@ func (g *gen) toolIndex(n *node) {
 		if s.release != g.current {
 			continue
 		}
-		grp := s.metaString("x-group")
+		grp := g.metaStr(s, "x-group")
 		if _, ok := byGroup[grp]; !ok {
 			groups = append(groups, grp)
 		}
@@ -601,11 +785,11 @@ func (g *gen) toolIndex(n *node) {
 	}
 	for _, grp := range groups {
 		if grp != "" {
-			b.heading(3, grp)
+			b.heading(3, esc(grp))
 		}
 		var rows [][]string
 		for _, s := range byGroup[grp] {
-			rows = append(rows, []string{"[" + code(s.full()) + "](" + s.page() + ")", s.Description})
+			rows = append(rows, []string{"[" + code(s.full()) + "](" + s.page() + ")", esc(s.Description)})
 		}
 		b.table([]string{"Command", "Description"}, rows)
 	}
@@ -613,17 +797,19 @@ func (g *gen) toolIndex(n *node) {
 		b.heading(2, "Exit codes")
 		var rows [][]string
 		for _, e := range n.ExitCodes {
-			rows = append(rows, []string{fmt.Sprint(e.Code), e.Description})
+			rows = append(rows, []string{fmt.Sprint(e.Code), esc(e.Description)})
 		}
 		b.table([]string{"Code", "Meaning"}, rows)
 	}
 	if raw, ok := n.meta("x-removed"); ok {
 		var rs []removed
-		if json.Unmarshal(raw, &rs) == nil && len(rs) > 0 {
+		if err := json.Unmarshal(raw, &rs); err != nil {
+			g.fail(n.full(), "x-removed", err)
+		} else if len(rs) > 0 {
 			b.heading(2, "Removed in "+g.current)
 			var rows [][]string
 			for _, r := range rs {
-				rows = append(rows, []string{code(r.What), r.Why})
+				rows = append(rows, []string{code(r.What), esc(r.Why)})
 			}
 			b.table([]string{"Removed", "Why"}, rows)
 		}
@@ -658,7 +844,7 @@ func (g *gen) mcpPages() {
 	}
 	sort.SliceStable(tools, func(i, j int) bool { return tools[i].Name < tools[j].Name })
 	for _, t := range tools {
-		rows = append(rows, []string{"[" + code(t.Name) + "](mcp-" + t.Name + ".md)", firstSentence(t.Description)})
+		rows = append(rows, []string{"[" + code(t.Name) + "](mcp-" + t.Name + ".md)", esc(firstSentence(t.Description))})
 		g.mcpTool(t)
 	}
 	idx.table([]string{"Page", "Description"}, rows)
@@ -668,7 +854,7 @@ func (g *gen) mcpPages() {
 	s.blank()
 	var srows [][]string
 	for _, kv := range g.mcp.Server {
-		srows = append(srows, []string{kv[0], kv[1]})
+		srows = append(srows, []string{esc(kv[0]), esc(kv[1])})
 	}
 	s.table([]string{"Topic", "Detail"}, srows)
 	g.put("mcp-server.md", s)
@@ -682,15 +868,15 @@ func firstSentence(s string) string {
 }
 
 func (g *gen) mcpTool(t mcpTool) {
-	b := newPage("MCP tool " + t.Name)
+	b := newPage("MCP tool " + esc(t.Name))
 	b.blank()
 	g.mcpBody(b, t, 2)
 	g.put("mcp-"+t.Name+".md", b)
 }
 
 func (g *gen) mcpBody(b *bld, t mcpTool, lvl int) {
-	b.para(t.Description)
-	b.para(fmt.Sprintf("Release: %s. Command line equivalent: %s.", t.Release, code(t.Command)))
+	b.para(esc(t.Description))
+	b.para(fmt.Sprintf("Release: %s. Command line equivalent: %s.", esc(t.Release), code(t.Command)))
 	if len(t.Params) > 0 {
 		b.heading(lvl, "Parameters")
 		var rows [][]string
@@ -699,11 +885,11 @@ func (g *gen) mcpBody(b *bld, t mcpTool, lvl int) {
 			if p.Required {
 				req = "yes"
 			}
-			desc := p.Description
+			desc := esc(p.Description)
 			if len(p.Enum) > 0 {
-				desc += " One of: " + strings.Join(p.Enum, ", ") + "."
+				desc += " One of: " + esc(strings.Join(p.Enum, ", ")) + "."
 			}
-			rows = append(rows, []string{code(p.Name), p.Type, req, desc})
+			rows = append(rows, []string{code(p.Name), esc(p.Type), req, desc})
 		}
 		b.table([]string{"Name", "Type", "Required", "Description"}, rows)
 	}
@@ -722,7 +908,7 @@ func (g *gen) mcpBody(b *bld, t mcpTool, lvl int) {
 	}
 	if t.Note != "" {
 		b.heading(lvl, "Notes")
-		b.para(t.Note)
+		b.para(esc(t.Note))
 	}
 }
 
@@ -738,7 +924,7 @@ func (g *gen) glossary() {
 	})
 	var rows [][]string
 	for _, w := range ws {
-		rows = append(rows, []string{code(w.Word), w.From, w.Meaning})
+		rows = append(rows, []string{code(w.Word), esc(w.From), esc(w.Meaning)})
 	}
 	b.table([]string{"Word", "From", "Meaning"}, rows)
 	g.put("glossary.md", b)
@@ -749,7 +935,7 @@ func (g *gen) rulesPage() {
 	b.blank()
 	b.para("The rules every mash command and tool follows.")
 	for i, r := range g.rules.Rules {
-		b.WriteString(wrap(sentence(r.Rule)+" "+r.Detail, width, fmt.Sprintf("%d. ", i+1), "   ") + "\n\n")
+		b.WriteString(wrap(esc(sentence(r.Rule)+" "+r.Detail), width, fmt.Sprintf("%d. ", i+1), "   ") + "\n\n")
 	}
 	g.put("rules.md", b)
 }
@@ -759,8 +945,8 @@ func (g *gen) setupPage() {
 	b.blank()
 	b.para("The scripts that install mash and set up a local NATS server.")
 	for _, s := range g.rules.Setup {
-		b.heading(2, s.Name)
-		b.para(s.What)
+		b.heading(2, esc(s.Name))
+		b.para(esc(s.What))
 		b.fence("sh", s.Command)
 	}
 	g.put("setup.md", b)
@@ -775,7 +961,7 @@ func (g *gen) comingPageOut() {
 	if len(g.rules.Coming) > 0 {
 		b.heading(2, "Changes")
 		for _, c := range g.rules.Coming {
-			b.WriteString(wrap(sentence(c.Change)+" "+c.Meaning, width, "- ", "  ") + "\n")
+			b.WriteString(wrap(esc(sentence(c.Change)+" "+c.Meaning), width, "- ", "  ") + "\n")
 		}
 		b.blank()
 	}
@@ -812,7 +998,7 @@ func (g *gen) readme() {
 	b.para("Regenerate: " + code("go run ./scripts/refgen") + ". A test fails when these pages differ from the spec.")
 	b.heading(2, "Commands")
 	for _, t := range g.tools {
-		b.WriteString(wrap("["+code(t.full())+"]("+t.page()+"): "+t.Description, width, "- ", "  ") + "\n")
+		b.WriteString(wrap("["+code(t.full())+"]("+t.page()+"): "+esc(t.Description), width, "- ", "  ") + "\n")
 		g.readmeTree(b, t, 1)
 	}
 	b.blank()
@@ -839,7 +1025,7 @@ func (g *gen) readmeTree(b *bld, n *node, depth int) {
 			continue
 		}
 		ind := strings.Repeat("  ", depth)
-		b.WriteString(wrap("["+code(s.full())+"]("+s.page()+"): "+s.Description, width, ind+"- ", ind+"  ") + "\n")
+		b.WriteString(wrap("["+code(s.full())+"]("+s.page()+"): "+esc(s.Description), width, ind+"- ", ind+"  ") + "\n")
 		g.readmeTree(b, s, depth+1)
 	}
 }

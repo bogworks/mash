@@ -1,4 +1,4 @@
-Generated from spec/*.json by scripts/refgen. Do not edit.
+Generated from spec/*.json by go run ./scripts/refgen. Do not edit.
 
 # mash who
 
@@ -26,7 +26,7 @@ The global options of `mash` also apply: see [mash](mash.md#global-options).
 
 | Argument | Required | Description |
 | --- | --- | --- |
-| `prefix` | no | Only endpoints under this owner (acme) or this owner and group (acme.demo), or the one endpoint with this full address. acme.* and acme.demo.* are accepted and mean the same as acme and acme.demo. |
+| `prefix` | no | Only endpoints under this owner (acme) or this owner and group (acme.demo), or the one endpoint with this full address. acme.\* and acme.demo.\* are accepted and mean the same as acme and acme.demo. |
 
 ## Examples
 
@@ -139,7 +139,7 @@ With `--json` the result is this shape. The values are an example.
 A prefix follows the address the way a domain name does: acme is everything
 under acme, acme.demo is everything under acme.demo, and acme.demo.bob is that
 one endpoint, never acme.demo.bobby. There is no other pattern matching:
-capitals are refused, acme.demo.bob.* is refused, and an empty prefix means
+capitals are refused, acme.demo.bob.\* is refused, and an empty prefix means
 none. The filters by role, capability, label and free text that today's
 command and tool have are gone in 0.5.6; the JSON and the MCP tool's
 structured result carry role, host, description, capability and labels for

@@ -1,4 +1,4 @@
-Generated from spec/*.json by scripts/refgen. Do not edit.
+Generated from spec/*.json by go run ./scripts/refgen. Do not edit.
 
 # mash serve
 
@@ -69,17 +69,17 @@ Which endpoint. serve never picks an endpoint by itself, even when only one is
 installed: it acts as the one named by --endpoint, MASH_ENDPOINT or the
 configuration file, and with none named it offers only status, doctor and
 version, whose answer is 'no endpoint is chosen for this session' with the
-hint 'start the session with MASH_ENDPOINT=<address>'. Otherwise every agent
-session on a machine with one endpoint installed would become that endpoint by
-accident, and two sessions would fight over it. Waking for a backlog. Whatever
-the kinds of the messages, serve wakes the session when more than --wake-count
-are waiting or the oldest has waited longer than --wake-age, at most once
-every 10 minutes and not in the first 10 minutes after it starts. mash inbox
-says so on its second line. Refusing unverified mail. Only mail whose trust is
-'verified' reaches the session, the inbox listing and mash read. Mail that is
-unsigned, signed by an unknown key, claimed but unproven, or stale is dropped
-and counted; mash doctor shows the count. The sender is not told.
---accept-unverified delivers it instead, labelled.
+hint 'start the session with MASH_ENDPOINT=&lt;address&gt;'. Otherwise every
+agent session on a machine with one endpoint installed would become that
+endpoint by accident, and two sessions would fight over it. Waking for a
+backlog. Whatever the kinds of the messages, serve wakes the session when more
+than --wake-count are waiting or the oldest has waited longer than --wake-age,
+at most once every 10 minutes and not in the first 10 minutes after it starts.
+mash inbox says so on its second line. Refusing unverified mail. Only mail
+whose trust is 'verified' reaches the session, the inbox listing and mash
+read. Mail that is unsigned, signed by an unknown key, claimed but unproven,
+or stale is dropped and counted; mash doctor shows the count. The sender is
+not told. --accept-unverified delivers it instead, labelled.
 
 ## What it replaces
 

@@ -1,4 +1,4 @@
-Generated from spec/*.json by scripts/refgen. Do not edit.
+Generated from spec/*.json by go run ./scripts/refgen. Do not edit.
 
 # MCP tool who
 
@@ -10,7 +10,7 @@ Release: 0.5.6. Command line equivalent: `mash who`.
 
 | Name | Type | Required | Description |
 | --- | --- | --- | --- |
-| `prefix` | string | no | Only endpoints under this owner (acme) or this owner and group (acme.demo), or the one endpoint with this full address. acme.* and acme.demo.* are accepted and mean the same as acme and acme.demo. |
+| `prefix` | string | no | Only endpoints under this owner (acme) or this owner and group (acme.demo), or the one endpoint with this full address. acme.\* and acme.demo.\* are accepted and mean the same as acme and acme.demo. |
 | `online` | boolean | no | Only endpoints that are online. |
 | `offline` | boolean | no | Only endpoints that are offline. |
 | `wide` | boolean | no | More columns: role, host and description, where recorded. May pass 80 columns. |

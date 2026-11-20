@@ -198,8 +198,8 @@ func TestDocsOnly_filesReadByTestsAreCode(t *testing.T) {
 	for _, p := range []string{
 		"docs/branch-protection.md",    // internal/release mergify_test.go
 		"docs/review/policy.json",      // scripts/reviewgate tests, scripts/gate
-		"docs/reference/README.md",     // scripts/refgen TestReferenceIsCurrent
-		"spec/rules.json",              // scripts/refgen
+		"docs/reference/README.md",     // internal/refgen TestReferenceIsCurrent
+		"spec/rules.json",              // internal/refgen
 		"docs/allowed_signers",         // scripts/releasecheck (release signing)
 		"docs/skipped-releases.txt",    // scripts/releasecheck
 		"docs/release-cutover",         // scripts/releasecheck

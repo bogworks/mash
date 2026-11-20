@@ -1,4 +1,4 @@
-Generated from spec/*.json by scripts/refgen. Do not edit.
+Generated from spec/*.json by go run ./scripts/refgen. Do not edit.
 
 # mashctl endpoint set
 
@@ -26,7 +26,7 @@ The global options of `mashctl` also apply: see
 | Argument | Required | Description |
 | --- | --- | --- |
 | `address` | yes | The endpoint, as owner.group.name. |
-| `key=value` | yes | One or more. Keys: role, description, host, note, capability (a list, with commas: capability=review,deploy), label.<name>. |
+| `key=value` | yes | One or more. Keys: role, description, host, note, capability (a list, with commas: capability=review,deploy), label.&lt;name&gt;. |
 
 ## Examples
 

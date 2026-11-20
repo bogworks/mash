@@ -1,4 +1,4 @@
-Generated from spec/*.json by scripts/refgen. Do not edit.
+Generated from spec/*.json by go run ./scripts/refgen. Do not edit.
 
 # mashctl limits
 

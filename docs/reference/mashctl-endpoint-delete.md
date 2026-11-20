@@ -1,4 +1,4 @@
-Generated from spec/*.json by scripts/refgen. Do not edit.
+Generated from spec/*.json by go run ./scripts/refgen. Do not edit.
 
 # mashctl endpoint delete
 
@@ -119,8 +119,8 @@ None. Administration. There are no MCP tools for mashctl.
 Order. The endpoint's key is cancelled on every server first; only when every
 server confirms is anything removed, so a failure there leaves the endpoint
 whole. If this machine holds the endpoint's creds file, it is set aside as
-<address>.creds.deleted, so mash no longer counts it as installed; --verbose
-says so. Nothing else on any machine is touched.
+&lt;address&gt;.creds.deleted, so mash no longer counts it as installed;
+--verbose says so. Nothing else on any machine is touched.
 
 ## What it replaces
 

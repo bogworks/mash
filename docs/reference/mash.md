@@ -1,4 +1,4 @@
-Generated from spec/*.json by scripts/refgen. Do not edit.
+Generated from spec/*.json by go run ./scripts/refgen. Do not edit.
 
 # mash
 
@@ -17,7 +17,7 @@ These options work with every `mash` command.
 | Option | Argument | Description | Environment |
 | --- | --- | --- | --- |
 | `--endpoint` | `<address>` | Which endpoint to act as, as owner.group.name. Not needed for the everyday and setup commands when only one is installed here. mash serve and mash hook always need it said: a session becomes an endpoint only because someone chose that. | MASH_ENDPOINT, or "endpoint" in config.json |
-| `--creds` | `<path>` | The creds file to sign in with. Default: <config folder>/<address>.creds. | MASH_CREDS, or "creds" |
+| `--creds` | `<path>` | The creds file to sign in with. Default: &lt;config folder&gt;/&lt;address&gt;.creds. | MASH_CREDS, or "creds" |
 | `--server` | `<url>` | The server address. May be given more than once. | MASH_SERVER (commas between several), or "servers" |
 | `--ca` | `<path>` | The certificate authority's certificate, when the server uses its own. | MASH_CA, or "ca" |
 | `--config-dir` | `<path>` | The configuration folder. Default: ~/.config/mash. | MASH_CONFIG_DIR |
