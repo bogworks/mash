@@ -1,6 +1,6 @@
 # mash and the Synadia Agent Protocol
 
-mash registers each endpoint as a Synadia Agent Protocol (SAP) 0.3 agent. This page states where mash departs from SAP and what that means for finding mash endpoints. The decision is [ADR 0145](decisions/0145-an-endpoint-address-is-owner-group-instance-and-0-5-5-is-a-hard-cut-with-no-migration-in-mash.md).
+mash registers each endpoint as a Synadia Agent Protocol (SAP) 0.3 agent. This page states where mash departs from SAP and what that means for finding mash endpoints. For a shorter version, see [mash and SAP: the differences](guide/mash-vs-sap.md). The decision is [ADR 0145](decisions/0145-an-endpoint-address-is-owner-group-instance-and-0-5-5-is-a-hard-cut-with-no-migration-in-mash.md).
 
 ## The subject shape
 
@@ -16,7 +16,7 @@ The three slots after the verb are the endpoint's address:
 
 - `owner`: who the endpoint belongs to.
 - `group`: a set of endpoints under one owner. There is no default group.
-- `instance`: one endpoint in the group.
+- `instance`: one endpoint in the group. SAP calls this slot `instance`, and so do the subject and the service metadata below. Everywhere else mash's documents call the same token the endpoint's `name`, and an address is `owner.group.name`.
 
 For `alice.dev.design`, the mail subject is `agents.mail.alice.dev.design`.
 
@@ -27,7 +27,7 @@ Each of the three tokens follows one rule:
 - Does not end with a hyphen and has no `--`.
 - 1 to 32 characters.
 
-The whole address, `owner.group.instance` with its two dots, is at most 64 characters.
+The whole address, `owner.group.name` with its two dots, is at most 64 characters.
 
 The flat key joins the tokens with underscores: `alice_dev_design`. Tokens never contain an underscore, so the flat key maps back to one address. These are keyed by the flat key:
 
@@ -47,7 +47,7 @@ Consequence for discovery:
 
 - A wildcard on the first slot, such as `agents.mail.claude-code.>`, finds no mash endpoint.
 - Discovery by the SAP service name does. mash registers the service name `agents`, so `$SRV.INFO.agents` lists mash endpoints.
-- The service metadata carries `owner`, `group` and `instance`, so a caller reads who each endpoint is from the reply.
+- The service metadata carries `owner`, `group` and `instance` (the name), so a caller reads who each endpoint is from the reply.
 
 This is a documented change in what one slot means. The subject keeps its shape and its five tokens. SAP's protocol and the SAP Go SDK are not changed.
 
