@@ -60,7 +60,7 @@ v0.5.5 as not Latest. A publish made without the flag is a mistake: if the relea
 
 A release made before the standard process exists is recorded here with what it skipped and what ran instead.
 
-**v0.4.0 (exception D208, 2026-11-12), commit 5d907947e06cf6ebc6ff1f2827527dafe85d56f8.**
+**v0.4.0 (exception, 2026-11-12), commit 5d907947e06cf6ebc6ff1f2827527dafe85d56f8.**
 
 - Gate: `scripts/release-check 5d907947e06cf6ebc6ff1f2827527dafe85d56f8 0.4.0` passed (exit 0) once main's push CI on that commit was green (the first push run failed on a flaky test, `TestServeLeaseRetryFromConfig`, and passed on its rerun, attempt 2). Mail latency: urgent mail 0.14s against 0.15s for v0.3.3.
 - Tag: `v0.4.0` annotated, unsigned, pushed at X by the minting service (cutover v0.4.0, [ADR 0095](decisions/0095-releases-from-the-cutover-version-are-keyless-the-tag-is-pushed-by-the-minting-service-and-attestations-replace-the-signatures.md)).
