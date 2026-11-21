@@ -12,16 +12,53 @@ Two agents mailing each other from a shell, on one machine, in a few minutes.
 Every command below was run on the published v0.5.6 release. The steps after
 this section explain each one and show its output.
 
-You need Linux or macOS, Claude Code, `openssl`, and `nats-server` (2.10.7 or
-newer) with the `nats` command. The setup script names anything that is
-missing and says where to get it. On Debian and Ubuntu the `nats-server` package puts the program in `/usr/sbin`, which is not on a normal user's PATH: if the script says `nats-server` is missing after you installed it, run `export PATH="$PATH:/usr/sbin"` first. If you would rather have an agent do all
-of this, install the `mash-setup` plugin and ask your session to "set mash up
-on this machine" ([install.md](../install.md#2-the-plugin)).
+Everything is installed as you, in your home folder. Nothing here needs
+`sudo`, a system service or a package manager. You need Linux or macOS, Claude
+Code, and `curl`, `tar`, `unzip` and `openssl`.
 
-1. Install `mash` and `mashctl`:
+### The way to do it: let an agent set it up
+
+Install the `mash-setup` plugin and ask your session to set mash up. It asks
+before each step.
+
+```sh
+claude plugin marketplace add bogworks/mash
+claude plugin install mash-setup@mash
+```
+
+Then tell the session: "set mash up on this machine"
+([install.md](../install.md#2-the-plugin)).
+
+### By hand
+
+1. Install the programs. Work in an empty scratch folder (`cd "$(mktemp -d)"`):
+   the downloads land in the folder you are in. First `nats-server` and the
+   `nats` command, each from its GitHub release, checked against that
+   release's checksums and put in `~/.local/bin` (`nats-server` 2.10.7 or
+   newer; `unzip` is needed for the `nats` command):
 
    ```sh
-   curl -fsSL https://github.com/bogworks/mash/releases/latest/download/install.sh | bash
+   install -d -m 755 ~/.local/bin
+   OS=$(uname -s | tr A-Z a-z); ARCH=$(uname -m); case $ARCH in x86_64) ARCH=amd64;; aarch64|arm64) ARCH=arm64;; esac
+   V=v2.15.3; B=https://github.com/nats-io/nats-server/releases/download/$V
+   curl -fsSLO $B/nats-server-$V-$OS-$ARCH.tar.gz -O $B/SHA256SUMS
+   grep " nats-server-$V-$OS-$ARCH.tar.gz\$" SHA256SUMS | sha256sum -c -      # macOS: shasum -a 256 -c -
+   tar -xzf nats-server-$V-$OS-$ARCH.tar.gz --strip-components=1 -C ~/.local/bin nats-server-$V-$OS-$ARCH/nats-server
+   N=0.5.2; B=https://github.com/nats-io/natscli/releases/download/v$N
+   curl -fsSLO $B/nats-$N-$OS-$ARCH.zip -O $B/SHA256SUMS
+   grep " nats-$N-$OS-$ARCH.zip\$" SHA256SUMS | sha256sum -c -                # macOS: shasum -a 256 -c -
+   unzip -j -o nats-$N-$OS-$ARCH.zip '*/nats' -d ~/.local/bin
+   ```
+
+   (The second `SHA256SUMS` replaces the first, after the first has been
+   used.) Then `mash` and `mashctl`: download the installer and its
+   checksums, check, run:
+
+   ```sh
+   BASE=https://github.com/bogworks/mash/releases/latest/download
+   curl -fsSLO $BASE/install.sh -O $BASE/SHA256SUMS
+   grep ' install.sh$' SHA256SUMS | sha256sum -c -    # macOS: shasum -a 256 -c -
+   bash install.sh
    ```
 
    It prints `Installed mash v0.5.6 (dd696e9) in ~/.local/bin`, and the same
@@ -83,12 +120,39 @@ on this machine" ([install.md](../install.md#2-the-plugin)).
    ```sh
    claude plugin marketplace add bogworks/mash
    claude plugin install mash@mash
-   MASH_ENDPOINT=alice.dev.design claude --dangerously-load-development-channels plugin:mash@mash   # terminal 1
-   MASH_ENDPOINT=alice.dev.review claude --dangerously-load-development-channels plugin:mash@mash   # terminal 2
+   MASH_ENDPOINT=alice.dev.design claude   # terminal 1
+   MASH_ENDPOINT=alice.dev.review claude   # terminal 2
    ```
+
+   Mail arrives with the session's next prompt or tool call. An idle session
+   is not woken; see "Optional: wake an idle session" below.
 
    Not yet run on 0.5.6: the two live sessions. [Step 7](#step-7-use-it-from-claude-code)
    describes them.
+
+### Optional: wake an idle session
+
+You do not need this. It is a choice. Without it, a session that is sitting
+idle sees new mail the next time you type a prompt or it runs a tool. To wake
+an idle session as soon as mail arrives, start it with Claude Code's own
+research-preview flag, `--dangerously-load-development-channels`:
+
+```sh
+MASH_ENDPOINT=alice.dev.design claude --dangerously-load-development-channels plugin:mash@mash
+```
+
+The flag lets a development channel plugin push a message into a session
+without being on Claude Code's approved-channels list. Claude Code asks you to
+confirm it at each launch. It is Claude Code's flag, not mash's
+([more in install.md](../install.md#3-optional-wake-an-idle-session)).
+
+### Where things live and how to remove them
+
+- `~/.local/bin`: `mash`, `mashctl`, `nats-server` and `nats`.
+- `~/.config/mash`: each endpoint's key and config.
+- `~/mash-nats`: the local NATS server, its data and every message.
+
+[Uninstall](../install.md#uninstall) lists how to remove all of it.
 
 If something goes wrong, see [troubleshooting](../troubleshooting.md).
 
@@ -127,8 +191,9 @@ What this does: lists what must be on the machine before step 1.
 - A machine with Linux or macOS and Claude Code installed.
 - `curl`, `tar`, `unzip`, `openssl`, `jq` (step 8 only; it reads JSON and
   picks out a field), `nats-server` 2.10.7 or newer and the `nats`
-  command. On Debian or Ubuntu a minimal image also needs `iproute2` (the
-  setup script uses `ss`).
+  command (the Quick start downloads both into `~/.local/bin`, checked; no
+  `sudo` or package manager). On Debian or Ubuntu a minimal image also needs
+  `iproute2` (the setup script uses `ss`).
 - About 2 GB free and nothing listening on 127.0.0.1:4222, or the next free
   port is used.
 
@@ -162,11 +227,20 @@ script says so.
 What is created: two programs in `~/.local/bin`, the default;
 `MASH_INSTALL_DIR` names another folder.
 
-Command: `install.sh` from the release. [install.md](../install.md#1-the-binary)
-has the one install line, and [how to verify what you download](../install.md#verify-what-you-download):
-download it, check it against `SHA256SUMS`, read it, run it. With a current
-`gh` the installer also checks the release's attestation; without one it says
-so and trusts only github.com's TLS.
+Command: `install.sh` from the release: download it, check it against
+`SHA256SUMS`, run it. Nothing is piped into a shell.
+
+```sh
+BASE=https://github.com/bogworks/mash/releases/latest/download
+curl -fsSLO $BASE/install.sh -O $BASE/SHA256SUMS
+grep ' install.sh$' SHA256SUMS | sha256sum -c -    # macOS: shasum -a 256 -c -
+bash install.sh
+```
+
+[install.md](../install.md#1-the-binary) explains it, and
+[how to verify what you download](../install.md#verify-what-you-download)
+shows how to read it first. With a current `gh` the installer also checks the
+release's attestation; without one it says so and trusts only github.com's TLS.
 
 <!-- output: install -->
 Output:
@@ -418,20 +492,17 @@ Start each session as its own endpoint, in two terminals. The name is the
 session's address; it is the one thing you must set:
 
 ```
-MASH_ENDPOINT=acme.demo.bob claude \
-  --dangerously-load-development-channels plugin:mash@mash
+MASH_ENDPOINT=acme.demo.bob claude
 ```
 
 ```
-MASH_ENDPOINT=acme.demo.alice claude \
-  --dangerously-load-development-channels plugin:mash@mash
+MASH_ENDPOINT=acme.demo.alice claude
 ```
 
-Claude Code registers a plugin's channel only when it is launched with its
-own flag, `--dangerously-load-development-channels plugin:mash@mash`, and it
-asks the person to confirm at each launch. Without the flag nothing is lost
-but the wake: mail still arrives with the next prompt or tool call through
-`mash hook`. The flag is Claude Code's, not mash's.
+Mail arrives with the session's next prompt or tool call, through `mash hook`.
+An idle session is not woken. If you want that, see
+[Optional: wake an idle session](#optional-wake-an-idle-session): it uses
+Claude Code's own research-preview flag, and the choice is yours.
 
 The session's own status. In either session, ask: "Run the mash status
 tool." Claude calls it and reports what the tool says: whether mail works for
@@ -440,7 +511,8 @@ status` at a shell, but made from inside the session, so it is online:
 `acme.demo.bob: ready, online`.
 
 Now mail. In Bob's session: "Send acme.demo.alice a note: lunch at noon?".
-A note is kind `task`, which wakes Alice's session if it is idle; ask
+A note is kind `task`, which wakes Alice's session if it is idle and was
+started with the optional wake flag; ask
 for kind `result` or `fyi` instead and it waits for her next turn. Add
 "urgent" only for what cannot wait: it is delivered at once, into a running
 turn where the agent host allows it. In Alice's session the mail arrives

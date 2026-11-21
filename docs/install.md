@@ -13,7 +13,7 @@ This walks through one machine running Claude Code sessions with mash. Provision
 
 Supported platforms: Linux and macOS (amd64, arm64), the release targets (`mash-{linux,darwin}-{amd64,arm64}`, see [release.md](release.md)). Native Windows is not supported: the spool lock and the hooks need Unix file locking and a POSIX shell. WSL 2 with the Linux binary is expected to work but has not been tested.
 
-mash is one static Go binary, and `install.sh` is the one install line: it puts `mash` and `mashctl` on your machine, checked. **Install it first (below) until your plugin release is pinned**: the plugin fetches and verifies its own copy only once it carries a `mash.pins` file from a release (the post-release commit described next), and an unpinned plugin, which is what a checkout of the repository gives you, uses the `mash` on your `PATH` and does not start without one. With a pinned plugin there is nothing to install by hand: no `go install`, no `PATH` edit, no root.
+mash is one static Go binary, and `install.sh` is the install: it puts `mash` and `mashctl` on your machine, checked. **Install it first (below) until your plugin release is pinned**: the plugin fetches and verifies its own copy only once it carries a `mash.pins` file from a release (the post-release commit described next), and an unpinned plugin, which is what a checkout of the repository gives you, uses the `mash` on your `PATH` and does not start without one. With a pinned plugin there is nothing to install by hand: no `go install`, no `PATH` edit, no root.
 
 - A `SessionStart` hook prefetches the binary into the plugin's data directory (`${CLAUDE_PLUGIN_DATA}/bin`) on first use, so the MCP server starts without a download. The server launcher downloads it as a fallback.
 - Once pinned after a release (a post-release commit of `plugin/scripts/mash.pins`), the plugin carries a `mash.pins` file beside its launcher with the release version and the sha256 of each platform binary (linux and darwin, amd64 and arm64); without it the launcher is unpinned and uses `mash` from PATH. A download that does not match is refused and deleted, and the binary must report the pinned version before it is used. Pinning also bumps the plugin's version to `<version>-pin.1`, so installed plugins update and receive the pin. Updating the plugin updates the binary.
@@ -22,10 +22,13 @@ mash is one static Go binary, and `install.sh` is the one install line: it puts 
 - The MCP server runs `${CLAUDE_PLUGIN_ROOT}/scripts/mash` directly, so the launcher needs its exec bit: git-based marketplace installs (`claude plugin marketplace add bogworks/mash`, then `claude plugin install mash@mash`) preserve the mode. The hooks run it as `sh ${CLAUDE_PLUGIN_ROOT}/scripts/mash`, which needs no exec bit.
 - Offline, or on an unsupported platform, the plugin uses a `mash` already on the `PATH` or a copy it downloaded earlier; if there is neither, it says so on stderr and the server does not start.
 
-To install the binaries (required for an unpinned plugin; also for the CLI in section 5), run the install script of the release. This is the one install line:
+To install the binaries (required for an unpinned plugin; also for the CLI in section 5), run the install script of the release. This is the install, three lines and a run:
 
 ```sh
-curl -fsSL https://github.com/bogworks/mash/releases/latest/download/install.sh | bash
+BASE=https://github.com/bogworks/mash/releases/latest/download
+curl -fsSLO $BASE/install.sh -O $BASE/SHA256SUMS
+grep ' install.sh$' SHA256SUMS | sha256sum -c -    # macOS: shasum -a 256 -c -
+bash install.sh
 ```
 
 It finds the machine's type (Linux or macOS, amd64 or arm64), downloads `mash` and `mashctl` from the same release together with that release's `SHA256SUMS`, checks each binary against it, and puts both in `~/.local/bin` (`MASH_INSTALL_DIR` names another folder; `MASH_VERSION=v0.5.6` pins a release, and without it the script first looks up the latest release's tag and downloads from that tag; `MASH_REPO=owner/name` names another repository, default `bogworks/mash`, for the download, the tag lookup and the attestation check; a `MASH_RELEASE_BASE` mirror needs `MASH_VERSION`). It prints one line for each, with the path it used, for example `Installed mash v0.5.6 (3f9a41c) in ~/.local/bin`, asks nothing and needs no `sudo`. If the folder is not on your `PATH` it says so in one line. A symbolic link to the folder is followed. It refuses a folder that belongs to another user, or that, or any folder above it, other users can write to (a root-owned sticky folder such as `/tmp` above it is fine), and on any failed check nothing is installed; both binaries are staged before either is put in place.
@@ -74,17 +77,18 @@ The plugin declares an MCP server, `mash serve` (started through the plugin's la
 
 Mail needs those hooks to run. They do not run with `disableAllHooks: true` in any Claude Code settings file, or under a managed `allowManagedHooksOnly` unless an administrator force-enables `mash@mash` in managed `enabledPlugins`. Then mash stops waking the session after a few tries and mail waits for a read with the `read` tool; see [Hook delivery](operations.md).
 
-## 3. Allow the channel
+<a id="3-allow-the-channel"></a><a id="3-allow-the-channel-once-per-machine"></a>
+## 3. Optional: wake an idle session
 
-**This step is optional for one person on one machine.** Without it, mail still arrives at the session's next prompt or tool call. The idle wake, which rouses a session that is waiting for input, needs either a channel allowlist entry or the development flag. For a solo developer the development flag is fine and needs no root:
+**You can skip this section.** Without it, mail still arrives at the session's next prompt or tool call; start sessions plainly (section 5). The idle wake, which rouses a session that is waiting for input, needs either a channel allowlist entry or Claude Code's own research-preview flag, `--dangerously-load-development-channels`. The flag lets a development channel plugin push a message into a session without being on Claude Code's approved-channels list. It needs no root. Whether to use it is your choice:
 
 ```sh
 MASH_ENDPOINT=alice.dev.design claude --dangerously-load-development-channels plugin:mash@mash
 ```
 
-Claude Code asks you to confirm the flag at each launch; that is expected. A missing allowlist entry is not an error for a solo developer. The managed settings file below is for teams and managed machines, where an administrator allowlists mash once so that `--channels plugin:mash@mash` works without a confirmation.
+Claude Code asks you to confirm the flag at each launch; that is expected. A missing allowlist entry is not an error for a solo developer. The managed settings file below is optional and only for teams and managed machines, where an administrator allowlists mash once so that `--channels plugin:mash@mash` works without a confirmation.
 
-### Managed settings (teams and managed machines)
+### Managed settings (optional; teams and managed machines)
 
 Mail itself is delivered by the hooks (section 2); the channel carries a one-line summary of waiting mail, which wakes an idle session so its next prompt runs the hook. Claude Code runs only allowlisted channel plugins without a confirmation dialog. Allowlist mash in the managed settings file:
 
@@ -177,8 +181,10 @@ The old names are gone with no alias: `MASH_INSECURE_PLAINTEXT` in the environme
 ## 5. Launch a session
 
 ```sh
-MASH_ENDPOINT=alice.dev.design claude --channels plugin:mash@mash
+MASH_ENDPOINT=alice.dev.design claude
 ```
+
+To wake an idle session as well, see [section 3](#3-optional-wake-an-idle-session).
 
 The session registers as a SAP agent, takes the lease on its name, and starts receiving mail. If another live session already holds the name, this one starts without mail tools and says why.
 
