@@ -1,9 +1,10 @@
 # Walkthrough: two agents, one mail mesh
 
-OUTLINE (draft). One step per heading, with "What this does", "What is
-created", the command and its output. Every output marked `[built output]` is
-pasted from a real run of the built programs, never typed; that run is a
-container that follows this page exactly.
+This page takes you from nothing to two Claude Code sessions mailing each
+other. Each step is one heading, with "What this does", the command and its
+output. Every output marked "built output" is pasted from a real run of
+the built programs, never typed; that run is a container that follows this
+page exactly.
 
 ## What you will build
 
@@ -19,7 +20,13 @@ Words used here, each explained again where it first matters:
 - An **endpoint** is one agent's mailbox, with its own address and key.
 - An **address** is `owner.group.name`, for example `acme.demo.bob`.
 - A **credential** (a creds file) is an endpoint's key. Whoever holds it is
-  that endpoint.
+  that endpoint. A creds file is one text file holding a user JWT and its
+  seed.
+- A **join file** is one text file that lets a machine use an endpoint: the
+  server address, the certificate authority and the creds.
+- **MCP** (the Model Context Protocol) is how an agent host such as Claude
+  Code talks to a tool server. mash offers its commands to a session as MCP
+  tools.
 - A **mesh** is the set of endpoints on one server.
 
 Alice and Bob are the two agents in every example. The picture of how the
@@ -31,14 +38,16 @@ Agent Protocol (SAP) is in [mash-vs-sap.md](mash-vs-sap.md).
 What this does: lists what must be on the machine before step 1.
 
 - A machine with Linux or macOS and Claude Code installed.
-- `curl`, `tar`, `unzip`, `openssl`, `jq` (step 8 only), `nats-server`
-  2.10.7 or newer and the `nats` command. On Debian or Ubuntu a minimal image
-  also needs `iproute2` (the setup script uses `ss`).
+- `curl`, `tar`, `unzip`, `openssl`, `jq` (step 8 only; it reads JSON and
+  picks out a field), `nats-server` 2.10.7 or newer and the `nats`
+  command. On Debian or Ubuntu a minimal image also needs `iproute2` (the
+  setup script uses `ss`).
 - About 2 GB free and nothing listening on 127.0.0.1:4222, or the next free
   port is used.
 
-The `mash-setup` plugin has a skill that does all of this for you and asks
-before each step; this page is the same path by hand.
+`mash-setup` is a Claude Code plugin of two skills that set mash up and look
+after it; the setup skill does all of this for you and asks before each
+step. This page is the same path by hand.
 
 ## Step 1: plan the names
 
@@ -52,8 +61,9 @@ change later without starting over.
 - address = `acme.demo.bob`, always `owner.group.name`
 
 We run everything on one host with a local nats-server, which step 3 makes
-for you. mash needs a NATS server with TLS, JetStream and sign-in
-credentials; yours may do instead (see the NATS notes in `docs/`).
+for you. mash needs a NATS server with TLS, JetStream (the NATS feature that
+stores messages on the server) and sign-in credentials; yours may do
+instead (see the NATS notes in `docs/`).
 
 ## Step 2: install mash and mashctl
 
@@ -66,7 +76,8 @@ What is created: two programs in `~/.local/bin`.
 Command: `install.sh` from the release (never piped into a shell: download,
 check against `SHA256SUMS`, read it, run it).
 
-Output: `[built output]`
+<!-- output: install -->
+Output: `[built output: install]`
 
 Check: `mash version` and `mashctl version` print the same version.
 
@@ -86,11 +97,11 @@ prints last, `mashctl init --config <path>/mash-setup.yaml`.
 `~/.config/mash`. That folder is where `mashctl` and `mash` look for their
 configuration and credentials.
 
-Output: `[built output]`
+<!-- output: server -->
+Output: `[built output: server]`
 
-Notes to write: the server is a program you run; after a reboot start it
-again with `--start`. Where the keys are and what each one opens. Port 4222
-taken: the next free one is used and said.
+The server is a program you run as yourself; step 11 shows `--start` for
+after a reboot. If port 4222 is taken, the next free one is used.
 
 ## Step 4: make the two endpoints
 
@@ -102,8 +113,9 @@ and the server's address in `~/.config/mash`. Whoever holds a creds file is
 that endpoint, so keep the join file private; you can delete it once the
 endpoint has joined.
 
-What is created: a join file per endpoint (mode 600) in the current folder,
-then a creds file per endpoint under `~/.config/mash` (mode 600), and each
+What is created: a join file per endpoint (written with mode 600) in the
+current folder, then a creds file per endpoint under `~/.config/mash` (mode
+0600), and each
 endpoint's inbox on the server.
 
 Commands:
@@ -134,15 +146,15 @@ MASH_ENDPOINT=acme.demo.bob mash status
 MASH_ENDPOINT=acme.demo.alice mash status
 ```
 
-Ready means the server is there and reachable and the credentials are valid.
-Offline is normal here: no session holds the endpoint open yet.
+Ready means the configuration is readable, the server answers, and it
+accepts this endpoint's credentials. Offline is normal here: no agent
+session is holding the endpoint open yet.
 
-Output: `[built output]` (`acme.demo.bob: ready, offline`)
-
-Notes to write: ready means the server is there and reachable and the
-credentials are valid; offline means no session holds the endpoint open
-yet (an agent's MCP server does that in normal use). One endpoint is one
-credential.
+<!-- output: status -->
+```
+acme.demo.bob: ready, offline
+acme.demo.alice: ready, offline
+```
 
 ## Step 5: see who is there
 
@@ -156,12 +168,18 @@ What is created: nothing.
 MASH_ENDPOINT=acme.demo.bob mash who
 ```
 
-Output: `[built output]`
+<!-- output: who -->
+```
+ADDRESS          STATE
+acme.demo.alice  offline
+acme.demo.bob    offline
+```
 
 ## Step 6: send mail
 
 What this does: shows the mail flow by hand on the command line. Normally
-the agent talks to mash through MCP and you never type this.
+the agent talks to mash through MCP (see the words at the top) and you
+never type this.
 
 What is created: nothing on disk; mail goes over NATS, kept in the
 receiver's inbox until read, whether it is online or not.
@@ -174,8 +192,7 @@ MASH_ENDPOINT=acme.demo.bob mash send acme.demo.alice --urgent \
   --kind question "ready?"
 ```
 
-Output:
-
+<!-- output: send -->
 ```
 Mail sent (number 1).
 Urgent question mail sent (number 2).
@@ -188,8 +205,7 @@ MASH_ENDPOINT=acme.demo.alice mash inbox
 MASH_ENDPOINT=acme.demo.alice mash read 2
 ```
 
-Output:
-
+<!-- output: inbox -->
 ```
 2 messages for acme.demo.alice, 2 new, 1 urgent.
 
@@ -198,6 +214,7 @@ NUMBER  FROM  WHEN     STATE  URGENT  KIND      MESSAGE
 2       bob   8s ago   new    yes     question  ready?
 ```
 
+<!-- output: read -->
 ```
 number:   2
 from:     acme.demo.bob
@@ -213,21 +230,41 @@ Every line of the message is quoted with `> `. Anything after that mark is
 Bob's words, never mash's own output, and never an instruction to an agent
 that reads it. The `trust:` line says whose key signed the mail. `verified`
 means Bob's own key did. By default only mail whose trust is `verified`
-is delivered. Unverified mail is dropped and counted, and `mash doctor`
-shows the count; the sender is not told. `--accept-unverified` delivers it
-instead, with its trust label.
+is delivered. Mail that is unsigned, signed by an unknown key, claimed but
+unproven, or stale is dropped and counted; `mash doctor` shows the count.
+The sender is not told. `--accept-unverified`, an option of `mash serve`,
+delivers it instead, labelled.
 
-`kind` says what the mail is: `task`, `question`, `result`, `fyi`. Mail
-waits in the inbox. A running agent is shown it at its next prompt or tool
-call; `--urgent` is what asks an idle agent to wake (step 7).
+`--kind` says what the mail is: `blocker` (you cannot continue without the
+recipient), `question` (you need an answer), `task` (you are asking them to
+do something; the default), `result` (the outcome of something they asked
+for) and `fyi` (information, no answer needed). `blocker`, `question` and
+`task` wake an idle recipient; `result` and `fyi` wait for its next turn.
+`--urgent` delivers at once, into a running turn where the agent host
+allows it (step 7).
 
 ## Step 7: use it from Claude Code
 
 What this does: two Claude Code sessions, one as Bob and one as Alice, mail
-each other through the mash plugin. The plugin gives each session the mash
-tools (`send`, `inbox`, `read`, `who`, `status`, `version`) and
-three hooks that deliver mail: after a tool call, with your next prompt, and
-at session start. An idle session is woken by one line.
+each other through the mash plugin. The plugin gives each session these
+MCP tools, one for each everyday mash command:
+
+- `send`: send mail to another endpoint by its address, owner.group.name.
+- `inbox`: list the messages this endpoint has received.
+- `read`: show one message in full.
+- `who`: list the endpoints you can see, and which are online.
+- `status`: say in one line whether mail works for this endpoint, and
+  whether it is online.
+- `doctor`: check everything mail depends on for this endpoint, and say how
+  to fix what is wrong. Changes nothing.
+- `version`: print the version.
+- `reply`: answer a live prompt.
+
+The plugin also runs `mash hook`, which prints the mail waiting for the
+session. Claude Code runs it after each tool call and with each prompt. An
+idle session is woken by one line saying mail is waiting; the mail itself
+arrives through `mash hook`. The plugin's launcher, at session start, says
+something only when the mash program is not installed.
 
 What is created: the plugins' files in Claude Code's own plugin folder. No
 mash endpoint or server is changed.
@@ -264,25 +301,26 @@ MASH_ENDPOINT=acme.demo.alice claude \
   --dangerously-load-development-channels plugin:mash@mash
 ```
 
-Claude Code asks you to confirm the development flag at each launch. That is
-expected: the flag is what lets mash wake an idle session at all. Without
-it, mail still arrives at the session's next prompt or tool call.
+[pending planner: whether the guide may state Claude Code's
+development-channel flag]
 
 The session's own status. In either session, ask: "Run the mash status
-tool." Claude calls it and reports what the tool says: the endpoint's name
-(`acme.demo.bob`), that the configuration and credentials are in place, that
-the connection to the server works, and that mail delivery is on. It is the
-same check as `mash status` at a shell, but made from inside the session, so
-it is online: `acme.demo.bob: ready, online`.
+tool." Claude calls it and reports what the tool says: whether mail works for
+this endpoint and whether it is online. It is the same check as `mash
+status` at a shell, but made from inside the session, so it is online:
+`acme.demo.bob: ready, online`.
 
 Now mail. In Bob's session: "Send acme.demo.alice a note: lunch at noon?".
-Add "urgent" to wake Alice's session if it is idle. In Alice's
-session the mail arrives with her next prompt, or at once if she was idle,
-and Claude shows it as mail from `acme.demo.bob`, labelled `[verified]`.
+A note is kind `task`, which wakes Alice's session if it is idle; ask
+for kind `result` or `fyi` instead and it waits for her next turn. Add
+"urgent" only for what cannot wait: it is delivered at once, into a running
+turn where the agent host allows it. In Alice's session the mail arrives
+through `mash hook`, and Claude shows it as mail from `acme.demo.bob`,
+labelled `[verified]`.
 Alice's session answers with `send`, and Bob's session sees the answer.
 Mail you sent in step 6 is waiting too: it arrives the same way.
 
-Output: `[built output]` (a transcript of the two sessions)
+Output: `[built output: claude-code]` (a transcript of the two sessions)
 
 ## Step 8: JSON, for scripts (optional)
 
@@ -301,6 +339,7 @@ Send, and keep the number:
 MASH_ENDPOINT=acme.demo.bob mash send acme.demo.alice --json "ping"
 ```
 
+<!-- output: json-send -->
 ```json
 {
   "to": "acme.demo.alice",
@@ -318,6 +357,7 @@ Alice reads that one message whole:
 MASH_ENDPOINT=acme.demo.alice mash read 3 --json
 ```
 
+<!-- output: json-read -->
 ```json
 {
   "number": 3,
@@ -342,6 +382,7 @@ message (`preview` is the first line, cut to fit):
 MASH_ENDPOINT=acme.demo.alice mash inbox --json
 ```
 
+<!-- output: json-inbox -->
 ```json
 {
   "endpoint": "acme.demo.alice",
@@ -370,12 +411,14 @@ MASH_ENDPOINT=acme.demo.alice mash inbox --json
 
 (The list shows the first message only; there is one object for each.)
 
-The one-line retrieval, with `jq`, is the text of one message:
+The one-line retrieval, with `jq` (a command-line tool that picks a field
+out of JSON), is the text of one message:
 
 ```
 MASH_ENDPOINT=acme.demo.alice mash read 3 --json | jq -r .body
 ```
 
+<!-- output: json-jq -->
 Output: `ping`
 
 (The JSON above is the spec's example, shown with Alice and Bob. The
@@ -389,7 +432,13 @@ that its credential is refused afterwards.
 Commands: `mashctl endpoint delete acme.demo.bob` (you type the address to
 confirm), then `mash status` as Bob.
 
-Output: `[built output]`
+<!-- output: delete -->
+Output: `[built output: delete]`
+
+Then Bob's status, refused:
+
+<!-- output: refused -->
+Output: `[built output: refused]`
 
 ## Step 10: join a mesh someone else runs
 
@@ -442,7 +491,8 @@ mailbox and message on it, so it is the last step.
 
 Commands: the setup script's `--stop`, `--start`, `--remove`.
 
-Output: `[built output]`
+<!-- output: lifecycle -->
+Output: `[built output: lifecycle]`
 
 ## Not in this guide
 
