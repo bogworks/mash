@@ -90,7 +90,7 @@ func verifySupplyChain(o Options, tag, x string) error {
 		}
 	}
 	// The two scripts are subjects of the same provenance as the binaries (and have no SBOM).
-	for _, name := range release.ScriptNames() {
+	for _, name := range release.ScriptNamesFor(o.Version) {
 		p, _, err := fetch(name)
 		if err != nil {
 			return err

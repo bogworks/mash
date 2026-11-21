@@ -57,6 +57,10 @@ type fixture struct {
 	specs      []string    // for each measurement, "<binary dir>:<serve args joined by space>", in the same order
 }
 
+// fixtureVersion is the version the fixture releases: at or below 0.5.6, so its releases carry the three scripts (the
+// migration script too) that the published releases up to 0.5.6 still carry and are re-verified with.
+const fixtureVersion = "0.1.0"
+
 // newFixture: a repo whose main (pushed to a local "release repository") holds the candidate X with a buildable
 // cmd/mash that prints its version line, a signed tag v0.1.0 on X, and a fake gh serving CI runs and assets.
 func newFixture(t *testing.T) *fixture {
@@ -75,7 +79,7 @@ func newFixture(t *testing.T) *fixture {
 	write(t, repo, "mash-setup/.claude-plugin/plugin.json", "{\"name\": \"mash-setup\", \"version\": \"0.1.0\"}\n")
 	write(t, repo, release.PluginHooks, hardenedHooks)
 	write(t, repo, renderContractPath, "contract v1\n")
-	for _, n := range release.ScriptNames() {
+	for _, n := range release.ScriptNamesFor(fixtureVersion) {
 		write(t, repo, "scripts/"+n, scriptBody(n))
 	}
 	write(t, repo, release.PluginMCP, "{\"mcpServers\": {\"mash\": {\"command\": \"mash\", \"args\": [\"serve\"]}}}\n")
@@ -129,7 +133,7 @@ esac
 		t.Fatal(err)
 	}
 	write(t, root, "x", x)
-	f.o = Options{Repo: repo, X: x, Version: "0.1.0", GH: gh, GHRepo: "bogworks/mash", Remote: origin, Out: &bytes.Buffer{},
+	f.o = Options{Repo: repo, X: x, Version: fixtureVersion, GH: gh, GHRepo: "bogworks/mash", Remote: origin, Out: &bytes.Buffer{},
 		Signers: filepath.Join(root, "allowed_signers")}
 	t.Setenv("RELEASE_SIGNING_KEY", sumsKey.priv)
 	f.setCI(release.RequiredChecks...)
@@ -263,7 +267,7 @@ func scriptBody(name string) string { return "#!/bin/sh\n# " + name + "\nexit 0\
 // goodCIAsset is the content the fixture gives an SBOM (a CycloneDX 1.5 document) or the provenance (a Sigstore-bundle
 // line naming release.yml).
 func goodCIAsset(name string) string {
-	if slices.Contains(release.ScriptNames(), name) {
+	if slices.Contains(release.ScriptNamesFor(fixtureVersion), name) {
 		return scriptBody(name)
 	}
 	if name == release.ProvenanceName {
@@ -282,13 +286,13 @@ func setAssets(t *testing.T, f *fixture, mutate func(map[string]string)) {
 	}
 	filesDir := filepath.Join(filepath.Dir(f.o.GH), "files")
 	ci := map[string]string{}
-	for _, n := range release.CIAssetNames() {
+	for _, n := range release.CIAssetNames(fixtureVersion) {
 		body := goodCIAsset(n)
 		write(t, filesDir, n, body)
 		have[n] = "sha256:" + shaOf(body)
 		ci[n] = shaOf(body)
 	}
-	sums := release.ExpectedSums(h, ci, f.keyless)
+	sums := release.ExpectedSums(f.o.Version, h, ci, f.keyless)
 	have[release.SumsName] = "sha256:" + shaOf(sums)
 	if mutate != nil {
 		mutate(have)

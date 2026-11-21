@@ -772,7 +772,7 @@ func checkAssetsRecord(ctx context.Context, o Options, rec *gateRecord) error {
 	}
 	r.step("the two release scripts are the repository's own files at X, byte for byte", scriptsAtX(o, x, have))
 	if buildOK {
-		if r.step("the release carries exactly our build of X", release.CheckAssets(have, hashes, kl)) && terr == nil && r.ok() {
+		if r.step("the release carries exactly our build of X", release.CheckAssets(o.Version, have, hashes, kl)) && terr == nil && r.ok() {
 			// Not skippable: no flag reaches past it. Only a release whose tag, assets and builds all passed is signed.
 			// Attestations, SBOMs and the build provenance are verified first, so no maintainer signature is ever made over
 			// assets the gate rejected. They also cover a resumed or hand-made draft that release.yml's attest job never
@@ -795,15 +795,15 @@ func checkAssetsRecord(ctx context.Context, o Options, rec *gateRecord) error {
 	return r.result("release " + tag + " assets")
 }
 
-// scriptsAtX holds the release's two scripts to scripts/<name> as X carries it (release.CheckScripts).
+// scriptsAtX holds the release's scripts (two, or three up to 0.5.6) to scripts/<name> as X carries it (release.CheckScripts).
 func scriptsAtX(o Options, x string, have map[string]string) error {
 	content := map[string][]byte{}
-	for _, n := range release.ScriptNames() {
+	for _, n := range release.ScriptNamesFor(o.Version) {
 		if b, err := gitBytes(o.Repo, "show", x+":scripts/"+n); err == nil {
 			content[n] = b
 		}
 	}
-	return release.CheckScripts(have, content)
+	return release.CheckScripts(o.Version, have, content)
 }
 
 // downloadPrevious fetches the release's binary for this host into dir with gh; a failure is the gate's, not the candidate's.
