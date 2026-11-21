@@ -58,7 +58,7 @@ acme.demo.bob: ready, offline
 
 ## Errors
 
-### Not working (the first line on stdout, the hint on stderr)
+### Not working
 
 The call returns this text with `isError` set.
 
@@ -113,25 +113,7 @@ acme.demo.bob: not ready: mail is held: its folder cannot be written
 hint: mash doctor
 ```
 
-### No endpoint chosen and several installed
-
-The call returns this text with `isError` set.
-
-```text
-error: more than one endpoint is installed here: acme.demo.alice, acme.demo.bob
-hint: mash status --endpoint acme.demo.alice
-```
-
-### No endpoint installed
-
-The call returns this text with `isError` set.
-
-```text
-error: no endpoint is installed here
-hint: mash join <file>
-```
-
-### As an MCP tool in a session with no endpoint named
+### No endpoint chosen for this session
 
 The call returns this text with `isError` set.
 

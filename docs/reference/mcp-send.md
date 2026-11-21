@@ -63,14 +63,6 @@ error: acme_demo_alice is not an address; write it as acme.demo.alice
 hint: mash send --help
 ```
 
-### Nothing arrives on standard input
-
-The call returns this text with `isError` set.
-
-```text
-error: no message text arrived on standard input
-```
-
 ### No such endpoint
 
 The call returns this text with `isError` set.
