@@ -7,6 +7,17 @@
 # label-reset; qualifying with the app binds the condition to GitHub Actions. codex-review and lead-review stay plain:
 # they ARE commit statuses (scripts/review-pr, scripts/lead-approve), no app posts them as checks.
 
+# Commands in a comment (`@mergifyio requeue`): Mergify's default restriction is `sender-permission >= write`. The lanes comment as the miremanager GitHub App
+# (login miremanager[bot]), which Mergify sees with permission none, so a lane's `@mergifyio requeue` was refused (x-lead #1180, 2026-11-21). An App cannot be a
+# collaborator, so the one command the lanes need is allowed for that one sender; every other command and sender keeps the default. Requeue only puts a pull request
+# that already passed the merge protections back into the queue; it merges nothing itself.
+commands_restrictions:
+  requeue:
+    conditions:
+      - or:
+          - sender-permission >= write
+          - sender = miremanager[bot]
+
 # One ordered queue, one queue run at a time: fast-forward allows only serial mode
 # (https://docs.mergify.com/merge-queue/queue-modes/).
 merge_queue:
