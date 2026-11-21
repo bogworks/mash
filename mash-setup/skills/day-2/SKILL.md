@@ -16,7 +16,7 @@ setup skill: a NATS server in `~/mash-nats` (or the folder the person chose),
 run as the person's own user. If `mash` is not installed, say so, make nothing,
 and point to the setup skill. If `mashctl status` shows no server, tell a
 stopped server from an unconfigured one: if the server folder exists and holds
-its `mash-setup.json`, the server was set up and is stopped (after a reboot,
+its `mash-setup.yaml`, the server was set up and is stopped (after a reboot,
 say), so use "The server does not answer" below; only when there is no such
 folder, make nothing and point to the setup skill.
 

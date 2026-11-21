@@ -34,7 +34,8 @@ you never run those blocks yourself.
 
 ## Stop and ask the person when
 
-- a command prints `error:`, FAILED, or a line you do not understand
+- a command prints `error:`, `not ready:`, FAILED, or a line you do not
+  understand
 - a checksum does not match
 - a folder, port or program already exists and this guide did not make it
 - you are asked to use root, to skip a yes, or to turn off a check
@@ -307,7 +308,7 @@ its own copies in `~/.config/mash`.
 | `error: missing: ...` from the server script | a program is not installed | step 2 |
 | `sha256sum: ... FAILED` | the download is not the release's file | stop; do not run it; ask |
 | the script used port 4223 | 4222 is taken, often by a packaged nats-server service | fine; leave that service alone |
-| `error: the server did not answer` | the server is not running | `mash-local-nats-setup.sh --start` (day-2 skill) |
+| `not ready: the server did not answer: <url>` (from `mash status`) | the server is not running | `mash-local-nats-setup.sh --start` (day-2 skill) |
 | `error: the server did not come up` on a Mac | another user may hold the port: macOS shows you only your own listeners | ask the person to try another folder or free the port; do not stop it |
 | `mash: command not found` after install | the install folder is not on the PATH | use the full path from the install line; the person adds it |
 | mail does not arrive in a session | the session started before the plugin was installed | restart that session |
