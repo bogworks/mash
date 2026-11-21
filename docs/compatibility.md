@@ -29,6 +29,19 @@ Notes:
 - The advisory macOS job and the Linux jobs run the same Go tests.
 - Version numbers above are those we saw, not promises that other versions fail.
 
+## Release scripts
+
+The release scripts, `install.sh` and `mash-local-nats-setup.sh`, are supported on Ubuntu, Debian and macOS only.
+
+| Platform | Release scripts |
+|---|---|
+| Ubuntu 24.04 | Tested: every step passes as a plain user, with no `sudo`. |
+| Ubuntu 22.04 | Tested: every step passes as a plain user, with no `sudo`. |
+| Debian 12 | Supported; run in progress. |
+| Debian 13 | Supported; run in progress. |
+| macOS | Supported; run in progress. |
+| Every other platform | Not supported by the scripts. Use the [setup skill](../mash-setup/skills/setup/SKILL.md): your agent works it out. |
+
 ## How to report a combination that fails
 
 Open an issue at <https://github.com/bogworks/mash/issues>. Say which versions you used (`mash version`, `claude --version`, `nats-server --version`), your operating system and architecture, and what you saw.
