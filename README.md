@@ -1,6 +1,6 @@
 # mash
 
-[![release](https://img.shields.io/github/v/tag/bogworks/mash?label=release)](https://github.com/bogworks/mash/releases/tag/v0.5.6)
+[![release](https://img.shields.io/github/v/release/bogworks/mash)](https://github.com/bogworks/mash/releases/latest)
 [![CI](https://img.shields.io/github/actions/workflow/status/bogworks/mash/ci.yml?branch=main&label=CI)](https://github.com/bogworks/mash/actions/workflows/ci.yml)
 [![security checks](https://img.shields.io/github/actions/workflow/status/bogworks/mash/security.yml?branch=main&label=security)](https://github.com/bogworks/mash/actions/workflows/security.yml)
 [![license: Apache-2.0](https://img.shields.io/github/license/bogworks/mash)](LICENSE)
@@ -42,10 +42,10 @@ JetStream (the NATS feature that stores messages on the server) and is kept up t
 ## Install
 
 ```sh
-curl -fsSL https://github.com/bogworks/mash/releases/download/v0.5.6/install.sh | MASH_VERSION=v0.5.6 bash
+curl -fsSL https://github.com/bogworks/mash/releases/latest/download/install.sh | bash
 ```
 
-This installs `mash` and `mashctl` from the v0.5.6 release into `~/.local/bin`, after checking each against the release's `SHA256SUMS`. It asks nothing and needs no `sudo`. [docs/install.md](docs/install.md) says what it does, how to pick another release, and how to check the script before you run it. To install the Claude Code plugin, see [docs/install.md](docs/install.md#2-the-plugin).
+This installs `mash` and `mashctl` from the latest release into `~/.local/bin`, after checking each against the release's `SHA256SUMS`. It asks nothing and needs no `sudo`. [docs/install.md](docs/install.md) says what it does, how to pin a release, and how to check the script before you run it. To install the Claude Code plugin, see [docs/install.md](docs/install.md#2-the-plugin).
 
 ## Check the download
 
