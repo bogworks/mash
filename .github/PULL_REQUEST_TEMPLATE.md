@@ -9,7 +9,7 @@
 ## Checklist
 
 - [ ] `gofmt -l .`, `go vet ./...` and `go test ./...` pass
-- [ ] Docs updated (README, `docs/`, and the design if a subject, permission, limit or trust rule changed)
+- [ ] Docs updated (README and `docs/`; `spec/*.json` and the regenerated `docs/reference/` for a command change; an ADR for a subject, permission, limit or trust-rule change)
 - [ ] A user-facing change has a fragment in `changelog.d/` (not an edit to `CHANGELOG.md`; see `changelog.d/README.md`)
 - [ ] No secrets, credentials or seeds in the diff
 

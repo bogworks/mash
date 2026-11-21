@@ -1,8 +1,8 @@
-# Demo: two Claude Code sessions exchange mail
+# Demo recorded on 0.3.0 (historical): two Claude Code sessions exchange mail
 
 `two-sessions.cast` is a real recording (nothing scripted or edited except trimming the end and replacing the
 working-directory path in the banner): two Claude Code sessions, `alice` (right) and `bob` (left), on a free
-[Synadia Cloud](https://cloud.synadia.com) account. The script that set it up is retired (Synadia Cloud is not supported by mashctl in 0.5.6; see #876).
+[Synadia Cloud](https://cloud.synadia.com) account, with mash 0.3.0. It is kept as recorded: the commands and output below are 0.3.0's, not the current release's (see the [walkthrough](../guide/walkthrough.md) for 0.5.6). The script that set it up is retired (Synadia Cloud is not supported by mashctl in 0.5.6; see #876).
 
 Play it in a terminal (the recording has long waits; `-i 2` caps any pause at two seconds):
 
@@ -12,7 +12,7 @@ asciinema play -i 2 docs/demo/two-sessions.cast
 
 ## What happens
 
-1. Both sessions start as `MASH_ENDPOINT=<owner.group.name> claude --channels plugin:mash@mash`. `bob` sits idle: nothing is typed in it.
+1. Both sessions start as `MASH_NAME=<name> claude --channels plugin:mash@mash`. `bob` sits idle: nothing is typed in it.
 2. In `alice` the only prompt is: *Mail bob a task: run uname -sr and mail me the output. Then wait.*
    `alice` calls the `send` tool and says the task went out.
 3. `bob`, idle, **is woken by the mail**: a `← mash: 1 message from alice (task)` line starts a turn on its own. `bob`
