@@ -6,6 +6,92 @@ output. Every output marked "built output" is pasted from a real run of
 the built programs, never typed; that run is a container that follows this
 page exactly.
 
+## Quick start
+
+Two agents mailing each other from a shell, on one machine, in a few minutes.
+Every command below was run on the published v0.5.6 release. The steps after
+this section explain each one and show its output.
+
+You need Linux or macOS, Claude Code, `openssl`, and `nats-server` (2.10.7 or
+newer) with the `nats` command. The setup script names anything that is
+missing and says where to get it. On Debian and Ubuntu the `nats-server` package puts the program in `/usr/sbin`, which is not on a normal user's PATH: if the script says `nats-server` is missing after you installed it, run `export PATH="$PATH:/usr/sbin"` first. If you would rather have an agent do all
+of this, install the `mash-setup` plugin and ask your session to "set mash up
+on this machine" ([install.md](../install.md#2-the-plugin)).
+
+1. Install `mash` and `mashctl`:
+
+   ```sh
+   curl -fsSL https://github.com/bogworks/mash/releases/latest/download/install.sh | bash
+   ```
+
+   It prints `Installed mash v0.5.6 (dd696e9) in ~/.local/bin`, and the same
+   for `mashctl`. With a current `gh` installed it also checks the release's
+   attestation first and installs nothing if that fails; it says nothing when
+   the check passes ([how to check by hand](../install.md#verify-what-you-download)).
+   If it ends with `~/.local/bin is not on your PATH`, add the folder and open a
+   new terminal (on Debian a new login shell does it for you once the folder exists):
+
+   ```sh
+   echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.profile   # zsh: ~/.zshrc
+   ```
+
+   The mash plugin also needs `mash` on the PATH that Claude Code starts with.
+
+2. Make a NATS server that only this machine can reach (download, check, run):
+
+   ```sh
+   BASE=https://github.com/bogworks/mash/releases/latest/download
+   curl -fsSLO $BASE/mash-local-nats-setup.sh -O $BASE/SHA256SUMS
+   grep ' mash-local-nats-setup.sh$' SHA256SUMS | sha256sum -c -    # macOS: shasum -a 256 -c -
+   bash mash-local-nats-setup.sh --owner alice
+   mashctl init --config ~/mash-nats/mash-setup.yaml     # the last line the script printed
+   ```
+
+   `--owner alice` names the owner (the first part of every address). Without
+   it the script asks on a terminal, and stops with `no terminal to ask for the
+   owner name` when there is none. The server starts now; it does not start at
+   boot, so after a reboot run `bash mash-local-nats-setup.sh --start`.
+
+3. Make two agents. The group (`dev`) has no default: you always name it.
+
+   ```sh
+   mashctl endpoint create alice.dev.design
+   mashctl endpoint create alice.dev.review
+   ```
+
+   With no option this makes each agent's key on this machine and installs it
+   here, ready to use. To give an agent to another machine, write a join file
+   and install it there ([step 10](#step-10-join-a-mesh-someone-else-runs)).
+
+4. Send mail from a shell and read it:
+
+   ```sh
+   MASH_ENDPOINT=alice.dev.design mash send alice.dev.review "hello"     # Mail sent (number 1).
+   MASH_ENDPOINT=alice.dev.review mash inbox
+   MASH_ENDPOINT=alice.dev.review mash read 1
+   MASH_ENDPOINT=alice.dev.review mash status                            # alice.dev.review: ready, offline
+   ```
+
+   The message still shows as `new` in the inbox after `mash read` while no
+   session runs ([#866](https://github.com/bogworks/mash/issues/866)). With
+   two endpoints installed on one machine, say which one you mean:
+   `mash who --endpoint alice.dev.design`, `mash doctor --endpoint alice.dev.review`.
+   `mash status` says `ready, online` while a session holds the endpoint.
+
+5. Install the plugin and start two sessions:
+
+   ```sh
+   claude plugin marketplace add bogworks/mash
+   claude plugin install mash@mash
+   MASH_ENDPOINT=alice.dev.design claude --dangerously-load-development-channels plugin:mash@mash   # terminal 1
+   MASH_ENDPOINT=alice.dev.review claude --dangerously-load-development-channels plugin:mash@mash   # terminal 2
+   ```
+
+   Not yet run on 0.5.6: the two live sessions. [Step 7](#step-7-use-it-from-claude-code)
+   describes them.
+
+If something goes wrong, see [troubleshooting](../troubleshooting.md).
+
 ## What you will build
 
 By the end, two AI agents, Alice and Bob, send each other mail. Each agent
