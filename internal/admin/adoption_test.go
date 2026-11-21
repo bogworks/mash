@@ -83,7 +83,7 @@ func TestLiveEndpointCannotTouchAdoptionMarker(t *testing.T) {
 	}
 	creds, _ := e.Mint(t, ep(t, "alpha"))
 	violations := make(chan error, 64)
-	nc, err := nats.Connect(e.URL, natsauth.UserCredentials(creds), nats.ErrorHandler(func(_ *nats.Conn, _ *nats.Subscription, err error) {
+	nc, err := nats.Connect(e.URL, nats.Timeout(15*time.Second), natsauth.UserCredentials(creds), nats.ErrorHandler(func(_ *nats.Conn, _ *nats.Subscription, err error) {
 		select {
 		case violations <- err:
 		default:

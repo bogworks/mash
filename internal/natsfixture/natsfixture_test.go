@@ -121,7 +121,7 @@ func TestGeneratedServerWorks(t *testing.T) {
 	s.generate(t)
 	srv := startInProcess(t, s.pl.ConfPath())
 
-	nc, err := nats.Connect(srv.ClientURL(), natsauth.UserCredentials(s.pl.Creds), nats.RootCAs(s.pl.CA))
+	nc, err := nats.Connect(srv.ClientURL(), nats.Timeout(15*time.Second), natsauth.UserCredentials(s.pl.Creds), nats.RootCAs(s.pl.CA))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +163,7 @@ func TestGeneratedServerWorks(t *testing.T) {
 		t.Fatalf("pub/sub: %v", err)
 	}
 
-	sys, err := nats.Connect(srv.ClientURL(), natsauth.UserCredentials(filepath.Join(s.serverDir, SysCreds)), nats.RootCAs(s.pl.CA))
+	sys, err := nats.Connect(srv.ClientURL(), nats.Timeout(15*time.Second), natsauth.UserCredentials(filepath.Join(s.serverDir, SysCreds)), nats.RootCAs(s.pl.CA))
 	if err != nil {
 		t.Fatalf("the sys user cannot connect: %v", err)
 	}
@@ -303,7 +303,7 @@ func TestInitReportsJetStreamThatCouldNotBeEnabled(t *testing.T) {
 		t.Fatal("server did not start")
 	}
 	t.Cleanup(func() { srv.Shutdown(); srv.WaitForShutdown() })
-	nc, err := nats.Connect(srv.ClientURL(), natsauth.UserCredentials(s.pl.Creds), nats.RootCAs(s.pl.CA))
+	nc, err := nats.Connect(srv.ClientURL(), nats.Timeout(15*time.Second), natsauth.UserCredentials(s.pl.Creds), nats.RootCAs(s.pl.CA))
 	if err != nil {
 		t.Fatal(err)
 	}

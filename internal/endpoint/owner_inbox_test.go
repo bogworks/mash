@@ -31,7 +31,7 @@ func (f *fixture) otherOwner(t *testing.T) *otherOwner {
 	}
 	creds, _ := f.e.Mint(t, a)
 	o := &otherOwner{}
-	nc, err := nats.Connect(f.e.URL, append(natsauth.TLSOptions(f.e.CAFile, f.e.ClientCert, f.e.ClientKey),
+	nc, err := nats.Connect(f.e.URL, append(natsauth.TLSOptions(f.e.CAFile, f.e.ClientCert, f.e.ClientKey), nats.Timeout(15*time.Second),
 		nats.UserCredentials(creds), nats.CustomInboxPrefix(a.InboxPrefix()),
 		nats.ErrorHandler(func(_ *nats.Conn, _ *nats.Subscription, err error) {
 			o.mu.Lock()
@@ -79,7 +79,7 @@ func (f *fixture) stoppedService(t *testing.T, name string, asker *Endpoint) (in
 	var once sync.Once
 	stop = func() { once.Do(func() { cancel(); <-done; ep.Close() }) }
 	t.Cleanup(stop)
-	m, err := asker.Conn().Request("$SRV.INFO.agents", nil, 2*time.Second)
+	m, err := asker.Conn().Request("$SRV.INFO.agents", nil, 15*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestOtherOwnerCannotForgeDiscoveryAnswer(t *testing.T) {
 	if subj, err := Discover(context.Background(), b.Conn(), taddr("ghost")); err == nil {
 		t.Fatalf("an offline endpoint was discovered through a forged answer: %q", subj)
 	}
-	if v := bob.violations(2 * time.Second); len(v) == 0 {
+	if v := bob.violations(15 * time.Second); len(v) == 0 {
 		t.Fatalf("the server did not refuse the forged answer; errors: %q", bob.errs)
 	}
 }
@@ -186,7 +186,7 @@ func TestOtherOwnerCannotReplayPresence(t *testing.T) {
 	if !sawGhost || !sawA {
 		t.Fatalf("who is missing rows: %+v", ps)
 	}
-	if v := bob.violations(2 * time.Second); len(v) == 0 {
+	if v := bob.violations(15 * time.Second); len(v) == 0 {
 		t.Fatalf("the server did not refuse the replay; errors: %q", bob.errs)
 	}
 

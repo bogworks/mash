@@ -86,7 +86,7 @@ func TestAT019LivePromptGetsItsDirectAnswer(t *testing.T) {
 	if err := cve.nc.Flush(); err != nil {
 		t.Fatal(err)
 	}
-	if !cve.violation("Publish", back, 2*time.Second) {
+	if !cve.violation("Publish", back, violationWait) {
 		t.Errorf("%s publishing a new prompt to %s: no permissions violation", recipient, sender)
 	}
 }

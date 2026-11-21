@@ -97,7 +97,7 @@ func credsSubject(t *testing.T, path string) (*jwt.UserClaims, string) {
 
 func (e *applyEnv) connect(opts ...nats.Option) *nats.Conn {
 	e.t.Helper()
-	nc, err := nats.Connect(e.srv.ClientURL(), opts...)
+	nc, err := nats.Connect(e.srv.ClientURL(), append(opts, nats.Timeout(15*time.Second))...)
 	if err != nil {
 		e.t.Fatal(err)
 	}

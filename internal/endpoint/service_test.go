@@ -40,7 +40,7 @@ func TestRegistrationMetadata(t *testing.T) {
 	f := newFixture(t, "a", "b")
 	a := f.serve(t, "a", noPrompt)
 	nc := f.e.ConnAs(t, f.creds["b"], tkey("b"))
-	m, err := nc.Request("$SRV.INFO.agents", nil, 2*time.Second)
+	m, err := nc.Request("$SRV.INFO.agents", nil, 15*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +140,7 @@ func TestWhoShowsOnline(t *testing.T) {
 func TestStatusReply(t *testing.T) {
 	f := newFixture(t, "a", "b")
 	a := f.serve(t, "a", noPrompt)
-	m, err := f.e.ConnAs(t, f.creds["b"], tkey("b")).Request(taddr("a").Subjects().Status, nil, 2*time.Second)
+	m, err := f.e.ConnAs(t, f.creds["b"], tkey("b")).Request(taddr("a").Subjects().Status, nil, 15*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}

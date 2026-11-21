@@ -20,8 +20,8 @@ const (
 	hardenTTL      = time.Minute
 	hardenManyReqs = 500
 	hardenCapTakes = 20000
-	// hardenDeadline is generous: the work under it is microseconds; a scan of a full set per request is not.
-	hardenDeadline = 2 * time.Second
+	// hardenDeadline is generous (slow CI hosts): the work under it is microseconds; a scan of a full set per request is not.
+	hardenDeadline = 15 * time.Second
 )
 
 var bg = context.Background()

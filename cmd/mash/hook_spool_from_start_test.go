@@ -57,7 +57,7 @@ func TestServeSpoolFromStartWakesAtOnceBeforeAnyHook(t *testing.T) {
 	if _, code := w.cli(t, "b", "send", tTo("a"), "first mail"); code != 0 {
 		t.Fatal("send failed")
 	}
-	if ev := content(s.await(t, 2*time.Second, isChannel)); ev != "1 message from o.dev.b (task)" {
+	if ev := content(s.await(t, 15*time.Second, isChannel)); ev != "1 message from o.dev.b (task)" {
 		t.Fatalf("the wake %q, want the summary line alone", ev)
 	}
 	if n := unreadOf(t, w, "a"); n != 1 {

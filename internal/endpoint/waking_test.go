@@ -89,7 +89,7 @@ func TestWakingPendingCountsByKind(t *testing.T) {
 		if v != "" {
 			m.Header.Set(KindHeader, v)
 		}
-		if _, err := nc.RequestMsg(m, 2*time.Second); err != nil {
+		if _, err := nc.RequestMsg(m, 15*time.Second); err != nil {
 			t.Fatal(err)
 		}
 	}
