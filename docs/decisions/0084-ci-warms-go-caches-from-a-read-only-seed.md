@@ -46,7 +46,7 @@ user can write at any depth, or has any content the runner user owns. Otherwise 
 
 The seed is provisioned by operations, not by this change: its owner, location, refresh and the job that builds it are
 outside this repository. Without a seed the script is a no-op that logs `SHARED`, and the jobs build cold as they do now.
-[docs/ci-go-caches.md](../ci-go-caches.md) states what the seed must look like.
+[docs/ci-go-caches.md](https://github.com/bogworks/mash/blob/dd696e9ee8f688cef6fe1102410aa43d731f567b/docs/ci-go-caches.md) states what the seed must look like.
 
 These jobs never call the script: `release.yml`, `reproducible` and `publish-check` (a release is built from them, so
 they stay cold), `adr-lint` (it runs under `pull_request_target`), `codeql`, `adr-numbers` and `test (macos)` (a
@@ -117,5 +117,5 @@ The maintainer's operations owner ruled on cache isolation between jobs (mail #1
 
 ## More Information
 
-* Script: `scripts/ci-go-caches`. Operator page: [docs/ci-go-caches.md](../ci-go-caches.md).
+* Script: `scripts/ci-go-caches`. Operator page: [docs/ci-go-caches.md](https://github.com/bogworks/mash/blob/dd696e9ee8f688cef6fe1102410aa43d731f567b/docs/ci-go-caches.md).
 * Related: [ADR 0079](0079-ci-and-release-jobs-run-on-self-hosted-runners-only.md).
