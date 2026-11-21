@@ -92,7 +92,9 @@ func newFixture(t *testing.T) *fixture {
 	ghScript := `#!/bin/sh
 echo "$*" >> "ROOT/gh.log"
 case "$1" in
-  api) case "$2" in *page=2*) cat "ROOT/ci-2.json" ;; *) cat "ROOT/ci-1.json" ;; esac ;;
+  api) sha=$(printf '%s' "$2" | sed -n 's#.*/commits/\([0-9a-f]*\)/check-runs.*#\1#p')
+    if [ -n "$sha" ] && [ -f "ROOT/ci-$sha.json" ]; then cat "ROOT/ci-$sha.json"
+    else case "$2" in *page=2*) cat "ROOT/ci-2.json" ;; *) cat "ROOT/ci-1.json" ;; esac; fi ;;
   release) case "$2" in list) cat "ROOT/releases.json" ;;
     download) n=; p=; for a in "$@"; do [ "$p" = --pattern ] && n=$a; p=$a; done
       case "$n" in *.cdx.json|*.jsonl|*.sh) ;; mash-*|mashctl-*) echo "bin-$n"; exit 0 ;; esac
@@ -203,6 +205,19 @@ func (f *fixture) setCIPages(sha string, perPage int, runs []map[string]any) {
 			break
 		}
 	}
+}
+
+// setCIFor serves the check runs of one commit (the gate asks for each commit it walks back through); other commits keep the
+// default listing.
+func (f *fixture) setCIFor(sha string, runs []map[string]any) {
+	b, _ := json.Marshal(map[string]any{"total_count": len(runs), "check_runs": runs})
+	write(f.t, filepath.Dir(f.o.GH), "ci-"+sha+".json", string(b))
+}
+
+func skippedRun(id int, name, sha string) map[string]any {
+	r := ciRun(id, name, sha)
+	r["conclusion"] = "skipped"
+	return r
 }
 
 func (f *fixture) setCI(names ...string) {
@@ -1613,5 +1628,51 @@ func TestGHRepoDefaults(t *testing.T) {
 	}
 	if o := resolve(Options{Repo: repo, GHRepo: "opt/repo"}); o.GHRepo != "opt/repo" {
 		t.Errorf("option: %q", o.GHRepo)
+	}
+}
+
+// A docs-only candidate has its heavy jobs skipped: the gate walks back to the newest commit whose required checks passed and
+// accepts the candidate only if everything above it is docs-only (release.CheckCIWalk). A code commit with skipped checks is refused.
+func TestCheck_docsOnlyCandidateOverATestedCommit(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		path string
+		want string // empty: the CI step passes
+	}{
+		{"a docs-only head", "docs/faq.md", ""},
+		{"a head that touches .github is code", ".github/pull_request_template.md", "not docs-only"},
+		{"a head that touches scripts is code", "scripts/notes.md", "not docs-only"},
+	} {
+		f := newFixture(t)
+		tested := f.x
+		commitPlugin(t, f, c.path, "text\n")
+		x := f.o.X
+		f.setCIFor(x, []map[string]any{skippedRun(1, "test (linux)", x), skippedRun(2, "reproducible", x)})
+		f.setCIFor(tested, []map[string]any{ciRun(1, "test (linux)", tested), ciRun(2, "reproducible", tested)})
+		err := f.check()
+		out := f.o.Out.(*bytes.Buffer).String()
+		if c.want == "" {
+			if strings.Contains(out, "CI check runs succeeded") && strings.Contains(out, "refused") && strings.Contains(err.Error(), "CI check runs") {
+				t.Errorf("%s: the CI step refused a docs-only candidate: %v", c.name, err)
+			}
+			continue
+		}
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: want a refusal containing %q, got %v", c.name, c.want, err)
+		}
+	}
+}
+
+func TestCheck_docsOnlyCandidateFailedChecksAreNotWalkedPast(t *testing.T) {
+	f := newFixture(t)
+	tested := f.x
+	commitPlugin(t, f, "docs/faq.md", "text\n")
+	x := f.o.X
+	failed := ciRun(1, "test (linux)", x)
+	failed["conclusion"] = "failure"
+	f.setCIFor(x, []map[string]any{failed, skippedRun(2, "reproducible", x)})
+	f.setCIFor(tested, []map[string]any{ciRun(1, "test (linux)", tested), ciRun(2, "reproducible", tested)})
+	if err := f.check(); err == nil || !strings.Contains(err.Error(), "failure") {
+		t.Fatalf("a failed candidate must be refused, got %v", err)
 	}
 }
