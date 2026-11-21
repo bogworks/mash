@@ -56,7 +56,7 @@ Output of the script:
 checked: nats-server 2.10.27, nats 0.5.2, openssl
 port: 4222
 made: CA, certificate, operator, accounts, users
-started: nats-server pid 355 on 127.0.0.1:4222
+started: nats-server pid 350 on 127.0.0.1:4222
 checked: sign-in and system ping ok
 mashctl init --config /home/tester/mash-nats/mash-setup.yaml
 ```

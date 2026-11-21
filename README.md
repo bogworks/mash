@@ -38,8 +38,8 @@ Output:
 ```
 Fetching mash and mashctl from the v0.5.6 release: file:///home/tester/release
 gh not found: the checksums come from the same download, so this trusts github.com's TLS; see docs/install.md to verify the attestation
-Installed mash v0.5.6 (0f4e455) in ~/.local/bin
-Installed mashctl v0.5.6 (0f4e455) in ~/.local/bin
+Installed mash v0.5.6 (c27712e) in ~/.local/bin
+Installed mashctl v0.5.6 (c27712e) in ~/.local/bin
 ~/.local/bin is not on your PATH; add it to use mash
 ```
 
@@ -81,7 +81,7 @@ bash mash-local-nats-setup.sh --owner acme
 checked: nats-server 2.10.27, nats 0.5.2, openssl
 port: 4222
 made: CA, certificate, operator, accounts, users
-started: nats-server pid 355 on 127.0.0.1:4222
+started: nats-server pid 350 on 127.0.0.1:4222
 checked: sign-in and system ping ok
 mashctl init --config /home/tester/mash-nats/mash-setup.yaml
 ```
@@ -97,10 +97,10 @@ mashctl init --config ~/mash-nats/mash-setup.yaml
 Output:
 
 ```
-Initialized mash on tls://localhost:4222 for owner acme
+Initialized mash on tls://127.0.0.1:4222 for owner acme
 ```
 
-`mashctl init` keeps its own copy of the keys in the config directory, `~/.config/mash` by default or `$MASH_CONFIG_DIR`. It is safe to run again: a second run says `Already initialized on tls://localhost:4222; nothing changed`.
+`mashctl init` keeps its own copy of the keys in the config directory, `~/.config/mash` by default or `$MASH_CONFIG_DIR`. It is safe to run again: a second run says `Already initialized on tls://127.0.0.1:4222; nothing changed`.
 
 **2. Make the two endpoints.** `mashctl` makes each endpoint, with its credentials, and writes a join file. The endpoint then joins with that file:
 
