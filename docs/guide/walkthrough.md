@@ -452,31 +452,26 @@ Output: `[built output: refused]`
 
 ## Step 10: join a mesh someone else runs
 
-What this does: an endpoint on another machine joins a mesh that someone
-else runs, from a join file. Nothing here needs the server's own files.
-
-Read this first: the server from step 3 can be reached only from the machine
-it runs on (the setup script "makes a server that only this machine can
-reach, with encryption on"), and the join file carries that server's
-address. So a join file from the step 3 server works only on that machine.
-Joining from another machine needs a server that machine can reach, with a
-certificate that covers the address it uses. The specification does not
-describe how to change the step 3 server to do that. [to confirm with the
-planner]
+What this does: an endpoint joins a mesh from a join file, as in step 4. With
+the server from step 3 that is its whole scope: a join file made against it
+works only on this machine. Two machines need a server both can reach, with a
+certificate that covers its address; in 0.5.6 that is a NATS server you run
+yourself, which `mashctl init` takes from a setup file (see
+[docs/install.md](../install.md)). A script option for a reachable address and
+certificate is for 0.6.0.
 
 <!-- not run by the AT-3 harness -->
 
-What is created: on the joining machine, the creds file and the server's
-address in the configuration folder, as in step 4.
+What is created: on the joining side, the creds file and the server's address
+in the configuration folder, as in step 4.
 
-On the machine of the person who runs the server, make the endpoint and its
-join file:
+The person who runs the server makes the endpoint and its join file:
 
 ```
 mashctl endpoint create acme.demo.carol --out acme.demo.carol.join
 ```
 
-Send `acme.demo.carol.join` to the joining machine by a route you trust.
+Hand `acme.demo.carol.join` over by a route you trust.
 It holds the endpoint's credentials, so treat it like a password.
 
 If the private key must never leave the joining machine, make the key
