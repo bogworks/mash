@@ -75,7 +75,3 @@ With `--json` the result is this shape. The values are an example.
 ## MCP tool
 
 None. Administration. There are no MCP tools for mashctl.
-
-## What it replaces
-
-New in 0.5.6.

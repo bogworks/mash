@@ -69,10 +69,5 @@ None. Setup. An agent does not hold credentials-making commands.
 
 ## Notes
 
-Give the .pub file to whoever runs the mesh: mashctl endpoint create
-acme.demo.bob --public-key bob.seed.pub
-
-## What it replaces
-
-In 0.5.5, it worked the same way. 0.5.6 renames it to NATS's words. It
-produces the same pair as NATS's own nk tool.
+It produces the same pair as NATS's own nk tool. Give the .pub file to whoever
+runs the mesh: mashctl endpoint create acme.demo.bob --public-key bob.seed.pub

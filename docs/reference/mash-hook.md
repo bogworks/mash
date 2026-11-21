@@ -55,6 +55,7 @@ agent calls.
 
 ## Notes
 
+It never connects to the server; it reads what mash serve has stored on disk.
 Like mash serve, hook acts only for an endpoint that was named; with none
 named it prints nothing. When mash is not installed. The plugin's launcher,
 run at session start, prints one line on stdout, so the agent sees it and can
@@ -64,10 +65,4 @@ program. Install it: curl -fsSL &lt;release base&gt;/install.sh | bash'.
 https://github.com/bogworks/mash/releases/latest/download, written into the
 launcher; a fork or a mirror edits that line in its own launcher. It is not
 derived from the plugin's release setting, which names the versioned download
-base and has no install.sh under it. In 0.5.5, nothing was said and the agent
-simply had no mash tools.
-
-## What it replaces
-
-In 0.5.5, hook worked the same way. It never connects to the server; it reads
-what mash serve has stored on disk.
+base and has no install.sh under it.

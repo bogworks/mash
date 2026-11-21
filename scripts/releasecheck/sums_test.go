@@ -112,7 +112,7 @@ func TestSums_checkEntries(t *testing.T) {
 		lines = append(lines, h+"  "+tg.AssetName())
 	}
 	ciH := map[string]string{} // the digest of each script, SBOM and the provenance, by name
-	for i, n := range release.CIAssetNames() {
+	for i, n := range release.CIAssetNames(fixtureVersion) {
 		h := strings.Repeat(string("0123456789abcdef"[i%16]), 64)
 		ciH[n] = h
 		have[n] = "sha256:" + h
@@ -128,7 +128,7 @@ func TestSums_checkEntries(t *testing.T) {
 		f(&s, h)
 		return s, h
 	}
-	if err := checkSumEntries([]byte(good), have, hashes, false); err != nil {
+	if err := checkSumEntries(fixtureVersion, []byte(good), have, hashes, false); err != nil {
 		t.Fatalf("good sums refused: %v", err)
 	}
 	first := release.Binaries()[0].AssetName()
@@ -180,7 +180,7 @@ func TestSums_checkEntries(t *testing.T) {
 	}
 	for name, f := range cases {
 		s, h := mod(f)
-		if err := checkSumEntries([]byte(s), h, hashes, false); err == nil {
+		if err := checkSumEntries(fixtureVersion, []byte(s), h, hashes, false); err == nil {
 			t.Errorf("%s: passed", name)
 		}
 	}
@@ -581,7 +581,7 @@ func TestPublish_wholeAssetSetReplacedAfterTheGateIsRefused(t *testing.T) {
 		other[tg] = strings.Repeat(string("abcdef97"[i]), 64) // binaries that were never built from X
 		assets = append(assets, map[string]string{"name": tg.AssetName(), "digest": "sha256:" + other[tg]})
 	}
-	sums := release.ExpectedSums(other, nil, false)
+	sums := release.ExpectedSums(f.o.Version, other, nil, false)
 	sig := mustSign(t, keyOfFixture(t, f), sums) // validly signed by the release key
 	files := filepath.Join(f.ghDir(), "files")
 	write(t, files, release.SumsName, sums)
@@ -627,7 +627,7 @@ func TestAssets_verifiesAttestationOfEveryBinary(t *testing.T) {
 			t.Fatalf("a correct draft was refused: %v", err)
 		}
 		log := f.ghLog()
-		for _, n := range []string{"mash-linux-amd64", "mash-linux-arm64", "mash-darwin-amd64", "mash-darwin-arm64", "mashctl-linux-amd64", "mashctl-linux-arm64", "mashctl-darwin-amd64", "mashctl-darwin-arm64", "install.sh", "mash-local-nats-setup.sh"} {
+		for _, n := range []string{"mash-linux-amd64", "mash-linux-arm64", "mash-darwin-amd64", "mash-darwin-arm64", "mashctl-linux-amd64", "mashctl-linux-arm64", "mashctl-darwin-amd64", "mashctl-darwin-arm64", "install.sh", "mash-local-nats-setup.sh", "mash-migrate-0.5.5.sh"} {
 			if !strings.Contains(log, n+" -R "+f.o.GHRepo) || !strings.Contains(log, "attestation verify") {
 				t.Errorf("%s was not verified against %s:\n%s", n, f.o.GHRepo, log)
 			}
@@ -649,7 +649,7 @@ func TestAssets_verifiesAttestationOfEveryBinary(t *testing.T) {
 			}
 		}
 		if calls != 30 {
-			t.Errorf("%d gh attestation verify calls, want 30 (8 build provenance, 8 attached provenance bundles, 8 SBOM; and 3 build provenance and 3 attached bundles for the scripts)", calls)
+			t.Errorf("%d gh attestation verify calls, want 30 (8 build provenance, 8 attached provenance bundles, 8 SBOM; and 3 build provenance and 3 attached bundles for the scripts, a release up to 0.5.6 having three)", calls)
 		}
 	})
 	t.Run("a mashctl binary without an attestation is refused naming it", func(t *testing.T) {
@@ -924,8 +924,8 @@ func TestAssets_verifiesSBOMAndBuildProvenanceOfEveryBinary(t *testing.T) {
 		f.markerFor(t, "noprov", "mash-linux-arm64")
 		refused(t, f, "mash-linux-arm64")
 	})
-	// ADR 0150, 0152: the three scripts are attested subjects and the repository's own files at X.
-	for _, script := range release.ScriptNames() {
+	// ADR 0150, 0152: the two scripts are attested subjects and the repository's own files at X.
+	for _, script := range release.ScriptNamesFor(fixtureVersion) {
 		script := script
 		t.Run("a missing "+script, func(t *testing.T) {
 			f := signedFixture(t, func(h map[string]string) { delete(h, script) })
@@ -1040,4 +1040,44 @@ func TestAssets_neverSignsWhatVerificationRejected(t *testing.T) {
 			t.Fatalf("err = %v (exit %d)", err, exitCode(err))
 		}
 	})
+}
+
+// From 0.5.7 a release carries two scripts: the sums check lists them and refuses the 0.5.5 migration script, which only
+// the releases up to 0.5.6 carry.
+func TestSums_checkEntriesByVersion(t *testing.T) {
+	for _, c := range []struct {
+		version string
+		scripts int
+	}{{"0.5.6", 3}, {"0.5.7", 2}, {"", 2}} {
+		hashes := map[release.Binary]string{}
+		have := map[string]string{}
+		var lines []string
+		for i, tg := range release.Binaries() {
+			h := strings.Repeat(string("abcdef97"[i]), 64)
+			hashes[tg] = h
+			have[tg.AssetName()] = "sha256:" + h
+			lines = append(lines, h+"  "+tg.AssetName())
+		}
+		ci := release.SumsCINames(c.version, true)
+		if n := len(ci) - 8; n != c.scripts {
+			t.Fatalf("%q: %d scripts in %v", c.version, n, ci)
+		}
+		for _, n := range ci {
+			h := strings.Repeat("1", 64)
+			have[n] = "sha256:" + h
+			lines = append(lines, h+"  "+n)
+		}
+		good := strings.Join(lines, "\n") + "\n"
+		if err := checkSumEntries(c.version, []byte(good), have, hashes, true); err != nil {
+			t.Errorf("%q: good sums refused: %v", c.version, err)
+		}
+		// the other version's set is refused
+		other := "0.5.7"
+		if c.scripts == 2 {
+			other = "0.5.6"
+		}
+		if err := checkSumEntries(other, []byte(good), have, hashes, true); err == nil {
+			t.Errorf("%q sums accepted as %q", c.version, other)
+		}
+	}
 }

@@ -57,10 +57,6 @@ None. Administration. There are no MCP tools for mashctl.
 
 ## Notes
 
-These are the server's storage limits. When a session is woken for a backlog
-is an endpoint's own setting: see mash serve.
-
-## What it replaces
-
-In 0.5.5, this was mashctl limits --show. The numbers shown are examples; the
-defaults are the code's.
+The numbers shown are examples; the defaults are the code's. These are the
+server's storage limits. When a session is woken for a backlog is an
+endpoint's own setting: see mash serve.

@@ -99,7 +99,3 @@ None. Administration. There are no MCP tools for mashctl.
 ## Notes
 
 A repeated owner or group is left blank, so the eye finds where one ends.
-
-## What it replaces
-
-In 0.5.5, this was also reachable as mashctl list, which is removed.

@@ -122,8 +122,3 @@ seed must never leave that machine. When mashctl has no certificate authority
 file configured, the join file's "ca" is null, and mash then trusts the server
 only through the machine's own trusted certificate authorities, as a browser
 would.
-
-## What it replaces
-
-In 0.5.5, this took --make-key or --public-key, accepted three address forms,
-and printed about ten lines. provision did the same job and is removed.

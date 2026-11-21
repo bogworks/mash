@@ -202,34 +202,28 @@ server we do not trust; unknown is for a failure that fits none, and its
 free-text reason then carries what was seen. 'session' is null at a shell and,
 inside a session, says three things about that session: holds_endpoint (true
 or false); hooks, whether the agent host's hooks have delivered mail in this
-session: ran, not_run, suspected, degraded or refused, with the meanings
-0.5.5's delivery line had; and storage, ok or failing. A program proving that
-a newly started session can receive mail reads holds_endpoint true and hooks
-ran. At a shell on the session's own machine, status reads the same state from
-what serve has recorded on disk, so the command and the tool agree. These
-names, in the usual and the fuller object alike, are part of what 0.5.6
-promises not to change. 'ready' means: the configuration is readable, the
-server answers, and it accepts this endpoint's credentials. A DELETED
-ENDPOINT: on the machine where mashctl endpoint delete ran, the set-aside file
-&lt;address&gt;.creds.deleted is the evidence, and status names it with
-reason_code endpoint_deleted (the case above), as doctor does in its sign-in
-row; on another machine, where a creds file survives, the server's refusal is
-what is seen, and status and doctor both report it. In 0.5.6 the everyday
-commands (send, inbox, read, who) say the creds file is missing where the
-set-aside file is present, and the hint leads to doctor, which says deleted.
-Planned for 0.5.7: they read the same as status, 'this endpoint was deleted;
-its address cannot be used again' with hint 'mash doctor'. Inside a session,
-when the configuration, the creds, the server or sign-in fails, that failure
-is what status reports, even if the session also does not hold its endpoint:
-the root cause comes first, and a session and a shell then name the same
-cause. Asked inside a session (the MCP tool), status and doctor report on that
-session itself, not on a fresh connection: 'ready, online' there means this
-session holds the endpoint and its mail will reach it. A hint names the first
-installed address in alphabetical order. At a shell every 'hint:' line goes to
-stderr; an MCP tool's text block puts the hint on the line after the result.
-
-## What it replaces
-
-In 0.5.5, status printed a row for each of name, config, creds, connection and
-channel. In 0.5.6 those checks move to mash doctor, the version to mash
-version, and the mail count to mash inbox.
+session: ran, not_run, suspected, degraded or refused; and storage, ok or
+failing. A program proving that a newly started session can receive mail reads
+holds_endpoint true and hooks ran. At a shell on the session's own machine,
+status reads the same state from what serve has recorded on disk, so the
+command and the tool agree. These names, in the usual and the fuller object
+alike, are part of what 0.5.6 promises not to change. 'ready' means: the
+configuration is readable, the server answers, and it accepts this endpoint's
+credentials. A DELETED ENDPOINT: on the machine where mashctl endpoint delete
+ran, the set-aside file &lt;address&gt;.creds.deleted is the evidence, and
+status names it with reason_code endpoint_deleted (the case above), as doctor
+does in its sign-in row; on another machine, where a creds file survives, the
+server's refusal is what is seen, and status and doctor both report it. In
+0.5.6 the everyday commands (send, inbox, read, who) say the creds file is
+missing where the set-aside file is present, and the hint leads to doctor,
+which says deleted. Planned for 0.5.7: they read the same as status, 'this
+endpoint was deleted; its address cannot be used again' with hint 'mash
+doctor'. Inside a session, when the configuration, the creds, the server or
+sign-in fails, that failure is what status reports, even if the session also
+does not hold its endpoint: the root cause comes first, and a session and a
+shell then name the same cause. Asked inside a session (the MCP tool), status
+and doctor report on that session itself, not on a fresh connection: 'ready,
+online' there means this session holds the endpoint and its mail will reach
+it. A hint names the first installed address in alphabetical order. At a shell
+every 'hint:' line goes to stderr; an MCP tool's text block puts the hint on
+the line after the result.

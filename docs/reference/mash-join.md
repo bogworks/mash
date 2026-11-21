@@ -211,7 +211,3 @@ In 0.5.6 this is a known issue, with the workaround: move the configuration
 folder you joined into (~/.config/mash, or the folder MASH_CONFIG_DIR or
 --config-dir names) aside and join again. Planned for 0.6.0: a retry finishes
 a half-done join when the creds match the join file.
-
-## What it replaces
-
-New in 0.5.6. Replaces mash credential create from 0.5.5.

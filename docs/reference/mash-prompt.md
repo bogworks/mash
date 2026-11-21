@@ -43,7 +43,7 @@ mash prompt acme.demo.alice "are you there?"
 Stream: stdout. Exit code: 0.
 
 ```text
-(what it prints today; unchanged in 0.5.6)
+(the answer to a live prompt, as the other endpoint sends it)
 ```
 
 ### Added: every use, on stderr
@@ -58,7 +58,6 @@ note: 'mash prompt' moves to 'mash sap prompt' in 0.6.0
 
 [`reply`](mcp-reply.md)
 
-## What it replaces
+## Notes
 
-Unchanged from 0.5.5, except for the note on stderr about the move to mash sap
-prompt. Only a verified sender that is a known endpoint is accepted.
+Only a verified sender that is a known endpoint is accepted.

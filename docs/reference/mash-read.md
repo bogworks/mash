@@ -109,18 +109,14 @@ With `--json` the result is this shape. The values are an example.
 
 ## Notes
 
-What 'read' means. A message is 'new' until the server has been told it
-reached the endpoint's session: when the hook showed it to the agent, or the
-agent opened it with the read tool. Until then it is waiting. mash read at a
-shell shows a message but, with no session online, cannot mark it; it stays
-'new' until a session next comes online. That limit is tracked in mash's
-backlog. The message's text is printed with '&gt; ' before every line, as
-quoted mail is, and with control characters escaped: everything after '&gt; '
-is the sender's words, and nothing the sender writes can pass for mash's own
-output or for an instruction to an agent reading it. The command and the tool
-quote alike. --json carries the text unquoted in 'body'.
-
-## What it replaces
-
-In 0.5.5, read worked the same way, and 0.5.6 adds no new mechanism. The
-labels are the JSON field names.
+The labels are the JSON field names. What 'read' means. A message is 'new'
+until the server has been told it reached the endpoint's session: when the
+hook showed it to the agent, or the agent opened it with the read tool. Until
+then it is waiting. mash read at a shell shows a message but, with no session
+online, cannot mark it; it stays 'new' until a session next comes online. That
+limit is tracked in mash's backlog. The message's text is printed with '&gt; '
+before every line, as quoted mail is, and with control characters escaped:
+everything after '&gt; ' is the sender's words, and nothing the sender writes
+can pass for mash's own output or for an instruction to an agent reading it.
+The command and the tool quote alike. --json carries the text unquoted in
+'body'.

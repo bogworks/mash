@@ -172,10 +172,3 @@ send has no --dry-run: sending is the act itself, not a change to the mesh.
 The number is the message's number in the recipient's inbox. It is printed
 because the sender can find it nowhere else, and needs it: an answer arrives
 marked 'reply to: 42'.
-
-## What it replaces
-
-In 0.5.5, the CLI and the MCP tool differed: only the MCP tool had reply-to,
-relay and id; only the CLI had --file. The receipt wording differed between
-them. The underscore form of an address was accepted in 0.5.5 and is refused
-from 0.5.6.

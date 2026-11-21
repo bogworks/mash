@@ -43,17 +43,4 @@ These options work with every `mashctl` command.
 | --- | --- |
 | [`mashctl endpoint`](mashctl-endpoint.md) | Create, change and remove endpoints. |
 
-## Removed in 0.5.6
-
-| Removed | Why |
-| --- | --- |
-| `adopt, init --local, init --start` | One setup command: mashctl init --config. mashctl does not install or start NATS. |
-| `provision, deprovision, list` | Duplicates of endpoint create, endpoint delete and endpoint list. |
-| `set-meta, label, unlabel` | Replaced by endpoint set and endpoint unset. |
-| `suspend, resume, permissions (top level)` | Moved under endpoint, where every other endpoint command is. |
-| `suspended` | endpoint show says whether an endpoint is suspended. |
-| `audit, issued list, issued check` | The checks are mashctl doctor; the records are in endpoint show. |
-| `inbox inspect` | Now endpoint inbox. |
-| `add, reissue, retire (messages only)` | Left over from 0.5.5's renames; nobody uses 0.5.5. |
-
 Planned for 0.6.0: `mashctl owner`. See [coming in 0.6.0](coming-in-0-6-0.md).

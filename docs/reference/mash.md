@@ -60,14 +60,4 @@ These options work with every `mash` command.
 | --- | --- |
 | [`mash prompt`](mash-prompt.md) | Ask an endpoint a live question and wait for its answer. Not stored: if the recipient is not there, it fails. |
 
-## Removed in 0.5.6
-
-| Removed | Why |
-| --- | --- |
-| `mash admin (11 commands)` | Needs an administrator's credentials, so it belongs to mashctl. Already deprecated. |
-| `mash plugin export` | The plugin is installed from its marketplace: claude plugin marketplace add, then claude plugin install. |
-| `mash credential create` | Replaced by mash join. |
-| `mash server status, mash endpoint status (0.5.6 drafts)` | mash has no server point of view. Peers are mash who; the server is mashctl status. |
-| `MASH_OWNER, MASH_GROUP, MASH_NAME, MASH_URL, MASH_TLS_CA` | One name each: MASH_ENDPOINT, MASH_SERVER, MASH_CA. |
-
 Planned for 0.6.0: `mash sap`. See [coming in 0.6.0](coming-in-0-6-0.md).

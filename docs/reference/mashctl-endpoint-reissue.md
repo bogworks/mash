@@ -79,7 +79,6 @@ With `--json` the result is this shape. The values are an example.
 
 None. Administration. There are no MCP tools for mashctl.
 
-## What it replaces
+## Notes
 
-In 0.5.5, reissue already existed. In 0.5.6 it takes the same options as
-create.
+It takes the same options as create.

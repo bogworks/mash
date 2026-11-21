@@ -171,17 +171,7 @@ the scripts) and then only the installer of step 4, with `MASH_VERSION` set to
 that tag. It replaces `mash` and `mashctl`; the server and the mailboxes are
 kept. Never run the server-creation command: it refuses an existing folder.
 
-If the machine ran mash 0.5.5, its configuration folder must be migrated once
-before the new programs will read it (they refuse it and say so). Download the
-migration script, check it, show it to the person, and run it after a yes:
-
-```sh
-DL="$HOME/mash-setup-dl"; TAG=vX.Y.Z; cd "$DL" && U=https://github.com/bogworks/mash/releases/download/$TAG && curl -fsSL -O "$U/mash-migrate-0.5.5.sh" && grep ' mash-migrate-0.5.5.sh$' SHA256SUMS | sha256sum -c -
-bash "$DL/mash-migrate-0.5.5.sh"
-```
-
-(`TAG` is the tag from step 3; run the second line only after the yes.) Then
-run `claude plugin marketplace update mash` and
+Then run `claude plugin marketplace update mash` and
 `claude plugin update mash@mash`, and restart the sessions.
 
 ## Do not

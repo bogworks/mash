@@ -240,13 +240,6 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 	}
 	env, lookup = global.Shadow(cliframe.Spec{Tool: "mash", CredsEnv: "MASH_CREDS", CredsKey: "creds"}, env, lookup)
 	home := config.HomeDir(env)
-	// A folder mash 0.5.5 left is named for what it is, before any command (help included) runs.
-	if code, refused := cliframe.RefuseLegacy055(stdout, stderr, env, home, global.JSON && args[0] != "hook"); refused {
-		if args[0] == "hook" { // a hook never blocks a session: the two lines on stderr, exit 0, no stdin, no spool
-			return 0
-		}
-		return code
-	}
 	// The refusal was made (and the warning printed) before the arguments were read; a --config-dir flag can point at a
 	// file with the removed key, so that file is checked again here, refusal only.
 	if skipErr := config.CheckSkipEncryption(lookup, config.HomeDir(env)); skipErr != nil {

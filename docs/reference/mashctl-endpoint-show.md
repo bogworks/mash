@@ -78,9 +78,3 @@ role, host, description, capability and note each appear only when set.
 seconds after its holder stops; mash who reads the endpoint's own heartbeat
 over the same 90 seconds. The two answer the same question and can differ for
 up to that long.
-
-## What it replaces
-
-In 0.5.5, mashctl suspended and mashctl issued list did this job for one
-endpoint. It no longer prints the creds file's path, the issue record, the
-agent, the account or the mail subject.

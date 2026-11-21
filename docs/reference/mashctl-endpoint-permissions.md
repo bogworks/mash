@@ -78,7 +78,3 @@ None. Administration. There are no MCP tools for mashctl.
 The exact subjects are the code's; the example shows the shape, which is the
 permissions object of a NATS user JWT, with NATS's own key names: pub and sub,
 each with allow and deny.
-
-## What it replaces
-
-In 0.5.5, this was a top-level command, mashctl permissions.
