@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-mash is pre-1.0. Only the latest release is supported. Fixes go into the next release; older releases are not patched.
+mash is pre-1.0. Only the newest version is supported, currently v0.5.6. Fixes go into the next release; older releases are not patched.
 
 ## Reporting a vulnerability
 
@@ -13,7 +13,7 @@ Use GitHub private vulnerability reporting on this repository: open its **Securi
 Please include:
 
 - the mash version (`mash version`) and how you installed it;
-- what you found and which promise in the trust model it breaks (see Scope below);
+- what you found and which promise under Scope below it breaks;
 - steps to reproduce, ideally against a test NATS server, with a minimal proof of concept;
 - the impact as you see it, and anything you already know about a fix.
 
@@ -27,34 +27,33 @@ We follow coordinated disclosure. Please give us a reasonable chance to fix the 
 
 ## Scope
 
-The trust model is in [docs/specs/2026-10-21-mash-design.md](docs/specs/2026-10-21-mash-design.md), sections 4, 8 and 9. In short, mash aims to provide:
+In short, mash aims to provide:
 
-- **Signed messages.** Every message mash publishes carries a signed `Agent-Sender` header (SAP section 13, ed25519 over the sender's NATS user seed). A message with a failing signature is dropped, logged and counted; it is never shown as mail.
+- **Signed messages.** Every message mash publishes carries a signed `Agent-Sender` header (ed25519, made with the sender's NATS user key). A message with a failing signature is dropped and counted; it is never shown as mail.
 - **A directory.** A directory maps each NATS user to an endpoint name. A sender is only `verified` if the signature is valid and the directory agrees.
-- **Trust labels.** Every message shown to Claude is labelled `verified`, `unknown-signer`, `claimed`, `absent` or `stale`. Only `verified` mail is treated as a delegated request; the others are information, not instructions.
-- **Endpoint permissions.** Each endpoint's NATS user can send mail, read its own inbox and history, read (not write) the directory, and hold its own lease. It cannot read another endpoint's inbox, take another endpoint's name, write the directory, or delete or purge streams. The integration tests assert these denials against a real server.
+- **Trust labels.** Every message is labelled `verified`, `unknown-signer`, `claimed`, `absent` or `stale`. Only `verified` mail is treated as a delegated request; the others are information, not instructions.
+- **Only verified mail is delivered by default.** Mail with any other label is dropped and counted, and `mash doctor` shows the count. Setting `accept_unverified` delivers it with its label instead. See [Configuration](docs/install.md#4-configuration).
+- **Endpoint permissions.** Each endpoint's NATS user can send mail to endpoints of its own owner, read its own inbox, read (not write) the directory, and hold its own lease. It cannot read another endpoint's inbox, take another endpoint's name, write the directory, or delete or purge streams. The tests assert these denials against a real server.
 - **Leases.** A lease allows one live session per endpoint name.
-- **Control-plane keys.** `mashctl` is the control plane. It holds the operator, account and system signing keys and the admin and system creds, and it mints and revokes NATS users. mash protects them with a key store of `0600` files in a `0700` directory, and never prints a seed. That stops other users, not other processes of the same UID, so a session running as the same user can read the keys. Run control-plane key custody under a separate UID or on a separate host from agent sessions, as [docs/operations.md](docs/operations.md#where-the-key-store-lives) describes. [Who holds which key](docs/security/threat-model.md#10-who-holds-which-key) lists each key, where it lives, what a holder can do and what to do if it leaks.
-- **An issue record.** `mashctl` records every user it issues (public key, address, kind, tags, time, purpose, revocation time) in the `mash-issued` bucket, which only the control plane writes and no endpoint can read or write. `mashctl issued check` reports a connected key that is not in the record, or a revoked key that is still connected, such as a user signed outside `mashctl` with a copy of a signing key.
+- **Control-plane keys.** `mashctl` is the control plane. It holds the operator, account and system signing keys and the admin and system creds, and it mints and revokes NATS users. mash keeps them in a key store of `0600` files in a `0700` directory, and does not put seed text in errors or logs. That stops other users, not other processes of the same UID, so a session running as the same user can read the keys. Keep the key store under a separate UID or on a separate host from agent sessions, as [docs/operations.md](docs/operations.md#where-the-key-store-lives) describes.
+- **An issue record.** `mashctl` records every user it issues in the `mash-issued` bucket, which only the control plane writes and no endpoint can read or write. `mashctl doctor` compares it with the keys connected to your servers and reports a connected key that is not in the record, or a revoked key that is still connected. See [docs/doctor.md](docs/doctor.md).
 
 Reports that a promise above does not hold (forged or replayed mail shown as verified, an endpoint exceeding its permissions, a second live session taking a held name) are in scope. So are flaws in the release pipeline that let an unverified binary pass the gate.
 
 Out of scope, because mash does not try to defend against them:
 
-- A compromised NATS operator or account key. The `mash` endpoint binary (the data plane) holds only its own endpoint's creds, and never mints users or holds operator or account seeds. `mashctl` (the control plane) does: it can create or import those keys, store them in its key store, and mint users. Whoever holds those keys can issue any identity, so guard the key store as the Control-plane keys item above says.
+- A compromised NATS operator or account key. The `mash` endpoint binary holds only its own endpoint's creds and never holds operator or account seeds. `mashctl` does, and whoever holds those keys can issue any identity. Guard the key store as the Control-plane keys item above says.
 - A compromised host. Anyone who can read an endpoint's credentials file can act as that endpoint.
 - A malicious or misconfigured NATS server or deployment, including weak TLS or permissions set up outside mash.
 - What a `verified` sender, who is trusted by design, asks Claude to do. The delegation policy is allow-by-default for verified mail; operators can add rules in `~/.config/mash/policy.md`.
-- Cross-account delivery, file transfer and an approval UI, which are non-goals for v0.1.
 
 ## Known limits
 
-These are known and not yet fixed. They are not vulnerabilities to report privately.
+These are known and not yet fixed. They are not vulnerabilities to report privately. The full list for this release is the GitHub issues labelled [known-0.5.6](https://github.com/bogworks/mash/issues?q=label%3Aknown-0.5.6). The main ones:
 
-- **An endpoint of the same owner can fill another endpoint's inbox.** An endpoint's NATS user may send mail to any endpoint, and each inbox stream holds 16 MiB. The stream discards the oldest messages when full (`DiscardOld`), and deleting and purging are denied (`DenyDelete`, `DenyPurge`). So a flood evicts older mail, including mail not yet read, and no endpoint can purge the stream. Deprovisioning the inbox's endpoint, or the NATS account admin deleting the stream, is the only way to clear it. `mashctl audit` now reports evictions (`mashctl audit --strict` fails for mail lost unread) and a near-full inbox (a note in the audit, which does not fail `--strict`).
-- **`mash admin deprovision` does not revoke the NATS user.** It fences the name and removes the directory record and the inbox stream. The user's credentials still connect until you revoke the user in your NATS or Synadia account (see "Removing an endpoint" in [docs/operations.md](docs/operations.md)). Until then its mail still arrives, labelled `[unknown-signer]`. `mashctl endpoint delete` differs: it revokes the user key, and nothing skips that.
-- **A plain-text connection is possible only with an explicit override.** Every mash and mashctl connection requires TLS (`tls://` or `wss://`), loopback included, and refuses a plain URL before connecting. The environment variable `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1` (the only way: no flag, no `config.json` key) allows plain text knowingly: the connection is made, every command prints `warning: encryption to the server is OFF (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set)` on standard error and `mash doctor` shows the `server` row as `warn`, and anyone on the network can then read mail and obtain signatures. Server-to-server routes are not covered by this setting (see the 0.5.5 contract, REQ-014). See [docs/install.md](docs/install.md#4-configuration).
-- **A host crash can lose up to about 2 minutes of acknowledged mail.** Inbox streams are R1 and nats-server's default `sync_interval` (2 minutes) acknowledges writes before fsync, so a host crash or power cut can drop mail already reported as `sent #N`. Process restarts are safe. This is an availability and durability limit, not a confidentiality one. Set `sync_interval: always` on a self-hosted server; Synadia Cloud's policy is unknown. See [docs/operations.md](docs/operations.md#durability-and-sync_interval).
+- **An endpoint of the same owner can fill another endpoint's inbox.** An endpoint's NATS user may send mail to any endpoint of its owner, and each inbox stream holds 16 MiB. The stream discards the oldest messages when full, and deleting and purging are denied. So a flood evicts older mail, including mail not yet read, and no endpoint can purge the stream. `mashctl doctor` reports an inbox that lost mail unread as a problem and a nearly full inbox (90% or more) as a warning. `mashctl endpoint suspend` stops new mail to an inbox. `mashctl endpoint delete` removes the inbox and the name for good.
+- **A plain-text connection is possible only with an explicit override.** Every mash and mashctl connection requires TLS (`tls://` or `wss://`), loopback included, and refuses a plain URL before connecting. The environment variable `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1` (the only way: no flag, no `config.json` key) allows plain text. Then every command prints `warning: encryption to the server is OFF (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set)` on standard error, `mash doctor` shows the `server` row as `warn`, and anyone on the network can read mail and obtain signatures. The setting covers mash's own connections only. TLS between your NATS servers is set in nats-server, as [docs/tls-and-clusters.md](docs/tls-and-clusters.md) describes. See [Turning encryption off](docs/install.md#turning-encryption-off).
+- **A host crash can lose up to about 2 minutes of acknowledged mail.** Inbox streams are R1 and nats-server's default `sync_interval` (2 minutes) acknowledges writes before fsync, so a host crash or power cut can drop mail already reported as `sent #N`. Process restarts are safe. This is an availability and durability limit, not a confidentiality one. Set `sync_interval: always` on a self-hosted server. See [docs/operations.md](docs/operations.md#durability-and-sync_interval).
 - **A credentials file readable by other users is refused.** mash refuses a creds file readable by other users: keep it `0600`. The check covers the file's mode only, not who owns it or the directory it sits in.
 
 ## Mail bodies are untrusted data
@@ -63,8 +62,11 @@ Treat the body of every message as untrusted input, whatever its label. A label 
 
 ## Verifying a release
 
-Releases are signed tags `vN.N.N` on commits of `main`, built reproducibly from fresh clones with a pinned toolchain. Each release carries the `mash-<os>-<arch>` binaries and `SHA256SUMS`. A release that builds `mashctl` beside `mash` (ADR 0148) carries eight binaries, `mash-<os>-<arch>` and `mashctl-<os>-<arch>`, each with a CycloneDX SBOM and the same attestation. A release that carries the scripts (ADR 0150, ADR 0152) adds `install.sh`, `mash-local-nats-setup.sh` and `mash-migrate-0.5.5.sh`: the repository's own `scripts/` files at the release commit, listed in `SHA256SUMS` and subjects of the same provenance attestation (they have no SBOM). Verify them as [docs/install.md](docs/install.md#verify-what-you-download) describes before you pipe one into a shell.
+Release tags are annotated but not signed. A release is checked by its files instead:
 
-- Check the tag: `git verify-tag vN.N.N` (you need the maintainer's public key).
-- Check the binary: compare its hash with `SHA256SUMS`, and run `mash version`, which prints `mash v<N.N.N> (X)`, X the first 7 characters of the commit.
-- Rebuild it yourself: `scripts/buildrelease` builds the same bytes from a clean clone of commit X. The procedure is in [docs/release.md](docs/release.md).
+- `SHA256SUMS` lists every binary, script and SBOM in the release.
+- A GitHub build provenance attestation, made by this repository's release workflow at the release tag, covers the binaries, the three scripts and `SHA256SUMS`.
+- Each binary has a CycloneDX SBOM.
+- You can rebuild a binary from the tagged commit and compare it byte for byte.
+
+The steps are in [Verify your download](docs/security/verify-your-download.md). `install.sh` does the checksum check itself, and verifies the attestation of `SHA256SUMS` when the GitHub CLI (`gh`) is installed.
