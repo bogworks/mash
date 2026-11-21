@@ -19,6 +19,8 @@ import (
 var (
 	// ErrNoSuchEndpoint: the recipient address is not an endpoint.
 	ErrNoSuchEndpoint = errors.New("no such endpoint")
+	// ErrRecipientSuspended: the recipient is suspended, so its inbox takes no mail.
+	ErrRecipientSuspended = errors.New("recipient suspended")
 	// ErrNotSignedIn: the server refused the sender's credentials.
 	ErrNotSignedIn = errors.New("not signed in")
 )
@@ -163,6 +165,8 @@ func runSend(ctx context.Context, env *cmdcore.Env, p SendParams) (SendResult, e
 		switch {
 		case errors.Is(err, ErrNoSuchEndpoint):
 			return SendResult{}, cmdcore.NoSuchEndpoint(p.Address)
+		case errors.Is(err, ErrRecipientSuspended):
+			return SendResult{}, cmdcore.RecipientSuspended(p.Address)
 		case errors.Is(err, ErrNotSignedIn):
 			addr := "this endpoint"
 			if errors.As(err, &se) {

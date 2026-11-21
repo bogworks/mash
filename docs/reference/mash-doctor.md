@@ -138,6 +138,38 @@ Stream: stdout. Exit code: 0.
 delivery  FAIL  this session lost this endpoint to a newer one
 ```
 
+### The endpoint was deleted, seen from another machine
+
+Stream: stdout. Exit code: 1.
+
+```text
+config    ok
+creds     ok
+server    ok    tls://myserver:4222
+sign-in   FAIL  this endpoint was deleted; its address cannot be used again
+delivery  skip  needs sign-in
+refused   ok    no unverified mail was refused
+
+1 problem.
+hint: ask whoever runs your mesh for a join file to a new endpoint
+```
+
+### The endpoint was deleted, on the machine that deleted it
+
+Stream: stdout. Exit code: 1.
+
+```text
+config    ok
+creds     FAIL  this endpoint was deleted; its address cannot be used again
+server    ok    tls://myserver:4222
+sign-in   skip  needs the creds
+delivery  skip  needs sign-in
+refused   ok    no unverified mail was refused
+
+1 problem.
+hint: ask whoever runs your mesh for a join file to a new endpoint
+```
+
 ### The server's certificate is not trusted
 
 Stream: stdout. Exit code: 0.
@@ -224,8 +256,10 @@ it. Whether storage is failing is decided by whoever asks, by trying the
 folder, not from a record kept in it. An agent host that has no hooks would
 warn for as long as it runs; only Claude Code is in scope for 0.5.6. The
 refused count is kept on this machine, so its row shows even when the server
-is down. The 'refused' row counts unverified mail that was refused (see mash
-serve).
+is down. The 'refused' row counts unverified mail that was refused on arrival
+(see mash serve). Mail that was verified on arrival and whose sender was
+deleted afterwards is not counted: mash read shows it as refused, and that is
+where it is seen (settled 2026-11-21).
 
 ## What it replaces
 

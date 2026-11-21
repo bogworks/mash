@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -108,6 +109,12 @@ func (h *healthSvc) configCheck() cmds.HealthCheck {
 	return c
 }
 
+// setAsideDeleted is whether p's creds file was set aside by mashctl endpoint delete: <p>.deleted is a regular file.
+func setAsideDeleted(p string) bool {
+	fi, err := os.Lstat(p + ".deleted")
+	return err == nil && fi.Mode().IsRegular()
+}
+
 // credsCheck is the creds row: the file exists, is a regular file only this user can read, and holds a user JWT and
 // its seed. It reads the file to check its shape and prints none of it.
 func (h *healthSvc) credsCheck() cmds.HealthCheck {
@@ -121,6 +128,9 @@ func (h *healthSvc) credsCheck() cmds.HealthCheck {
 	}
 	raw, err := config.ReadCredsFile(p)
 	switch {
+	case errors.Is(err, fs.ErrNotExist) && setAsideDeleted(p):
+		// mashctl endpoint delete set the file aside: the endpoint is gone, and a new creds file would not bring it back
+		c.Detail, c.Fix, c.Code = cmds.ReasonEndpointDeleted, cmds.EndpointDeletedFix, cmds.CodeEndpointDeleted
 	case errors.Is(err, fs.ErrNotExist):
 		c.Detail = "the creds file is missing: " + p
 		c.Fix = "mashctl endpoint reissue " + addr
@@ -207,7 +217,7 @@ func (h *healthSvc) signInCheck(ctx context.Context) (c cmds.HealthCheck, online
 			c.Detail = "the server refused the client certificate: " + config.RedactURL(h.cfg.URL)
 			c.Fix, c.Code = "set tls_cert and tls_key, or MASH_TLS_CERT and MASH_TLS_KEY, to a certificate the server's CA signed", cmds.CodeCredsRefused
 		case errors.Is(err, endpoint.ErrNotProvisioned):
-			c.Detail, c.Code = redactText(strings.TrimPrefix(msg, "mash: ")), cmds.CodeEndpointDeleted
+			c.Detail, c.Fix, c.Code = cmds.ReasonEndpointDeleted, cmds.EndpointDeletedFix, cmds.CodeEndpointDeleted
 		default:
 			c.Detail, c.Code = redactText(strings.TrimPrefix(msg, "mash: ")), cmds.CodeUnknown
 		}

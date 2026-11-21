@@ -1,0 +1,157 @@
+package endpoint
+
+import (
+	"context"
+	"testing"
+)
+
+// strict is a client of name that refuses mail from a sender it cannot verify (accept_unverified off).
+func strict(t *testing.T, f *fixture, name string) *Endpoint {
+	t.Helper()
+	ep, err := OpenClient(context.Background(), f.cfgState(name, t.TempDir(), false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(ep.Close)
+	return ep
+}
+
+// A message whose sender was verified when it arrived but is no longer known when the inbox is read is not listed, so
+// it is not counted: the total, the new count, the urgent count and the oldest-waiting time are of the messages shown.
+func TestReadInboxCountsOnlyWhatTheListShows(t *testing.T) {
+	f := newFixture(t, "a", "b", "c")
+	ctx := context.Background()
+	if _, err := f.client(t, "b").Send(ctx, tdot("a"), "from b, soon gone", 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.client(t, "c").Send(ctx, tdot("a"), "from c, stays", 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.adm.Deprovision(ctx, taddr("b")); err != nil {
+		t.Fatal(err)
+	}
+	r, err := strict(t, f, "a").ReadInbox(ctx, InboxQuery{Limit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Mail) != 1 || r.Mail[0].Seq != 2 {
+		t.Fatalf("listed: %+v", r.Mail)
+	}
+	if r.State.Total != 1 || r.State.Waiting != 1 {
+		t.Fatalf("total %d, waiting %d: want 1 and 1", r.State.Total, r.State.Waiting)
+	}
+	if want := r.Mail[0].At; !r.State.OldestWaiting.Equal(want) && r.State.OldestWaiting.Before(want) {
+		t.Fatalf("oldest waiting %v is from the dropped message, not the listed one (%v)", r.State.OldestWaiting, want)
+	}
+}
+
+// With the only message dropped the inbox is empty: nothing total, nothing new, nothing urgent, no oldest.
+func TestReadInboxAllDroppedIsEmpty(t *testing.T) {
+	f := newFixture(t, "a", "b")
+	ctx := context.Background()
+	if _, err := f.client(t, "b").Send(ctx, tdot("a"), "from b, soon gone", 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.adm.Deprovision(ctx, taddr("b")); err != nil {
+		t.Fatal(err)
+	}
+	r, err := strict(t, f, "a").ReadInbox(ctx, InboxQuery{Limit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Mail) != 0 || r.State.Total != 0 || r.State.Waiting != 0 || r.NewUrgent != 0 || !r.State.OldestWaiting.IsZero() {
+		t.Fatalf("want an empty inbox, got %+v", r)
+	}
+}
+
+// Dropped messages found while topping up the list (the first batch had dropped mail, so the listing reads further
+// on) are not counted either.
+func TestReadInboxCountsDroppedFoundWhileToppingUp(t *testing.T) {
+	f := newFixture(t, "a", "b", "c")
+	ctx := context.Background()
+	for _, from := range []string{"c", "b", "b"} { // #1 stays, #2 and #3 go
+		if _, err := f.client(t, from).Send(ctx, tdot("a"), "from "+from, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// enough newer mail that #2 and #3 are outside what the read fetches up front (the newest UrgentLook)
+	cc := f.client(t, "c")
+	for i := 0; i < UrgentLook; i++ {
+		if _, err := cc.Send(ctx, tdot("a"), "filler", 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.adm.Deprovision(ctx, taddr("b")); err != nil {
+		t.Fatal(err)
+	}
+	// oldest first after #1, one wanted: #2 is dropped in the first batch, the top-up drops #3 and lists #4
+	r, err := strict(t, f, "a").ReadInbox(ctx, InboxQuery{After: 1, Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Mail) != 1 || r.Mail[0].Seq != 4 {
+		t.Fatalf("listed: %+v", r.Mail)
+	}
+	if want := UrgentLook + 1; r.State.Total != want || r.State.Waiting != want {
+		t.Fatalf("total %d, waiting %d: want %d and %d", r.State.Total, r.State.Waiting, want, want)
+	}
+}
+
+// The oldest-waiting scan looks past dropped messages, including one it has to fetch itself: the time is of the first
+// message that is shown.
+func TestReadInboxOldestWaitingSkipsADroppedMessageItFetches(t *testing.T) {
+	f := newFixture(t, "a", "b", "c")
+	ctx := context.Background()
+	for _, from := range []string{"b", "b", "c"} { // #1 and #2 go, #3 stays
+		if _, err := f.client(t, from).Send(ctx, tdot("a"), "from "+from, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// enough newer mail that #2 is outside what the read fetches for the urgent count (the newest UrgentLook)
+	cc := f.client(t, "c")
+	for i := 0; i < UrgentLook; i++ {
+		if _, err := cc.Send(ctx, tdot("a"), "filler", 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.adm.Deprovision(ctx, taddr("b")); err != nil {
+		t.Fatal(err)
+	}
+	a := strict(t, f, "a")
+	third, err := a.Read(ctx, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := a.ReadInbox(ctx, InboxQuery{Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.State.OldestWaiting.Equal(third.At) {
+		t.Fatalf("oldest waiting %v: want #3's time %v", r.State.OldestWaiting, third.At)
+	}
+}
+
+// A dropped message that both the up-front wave and the top-up reach (the newest ones, inside the urgent look) is
+// counted out once, not twice.
+func TestReadInboxCountsADroppedMessageOnceWhenToppingUp(t *testing.T) {
+	f := newFixture(t, "a", "b", "c")
+	ctx := context.Background()
+	for _, from := range []string{"c", "b", "b"} { // #1 stays; the newest two go
+		if _, err := f.client(t, from).Send(ctx, tdot("a"), "from "+from, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.adm.Deprovision(ctx, taddr("b")); err != nil {
+		t.Fatal(err)
+	}
+	r, err := strict(t, f, "a").ReadInbox(ctx, InboxQuery{Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Mail) != 1 || r.Mail[0].Seq != 1 {
+		t.Fatalf("listed: %+v", r.Mail)
+	}
+	if r.State.Total != 1 || r.State.Waiting != 1 {
+		t.Fatalf("total %d, waiting %d: want 1 and 1", r.State.Total, r.State.Waiting)
+	}
+}

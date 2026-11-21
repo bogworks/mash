@@ -72,6 +72,24 @@ error: no endpoint has the address acme.demo.alise
 hint: mash who
 ```
 
+### The recipient is suspended or was deleted
+
+The call returns this text with `isError` set.
+
+```text
+error: acme.demo.alice is suspended or was deleted; nothing was sent
+hint: mash who
+```
+
+### No credentials here
+
+The call returns this text with `isError` set.
+
+```text
+error: acme.demo.bob has no credentials here: ~/.config/mash/acme.demo.bob.creds is missing
+hint: mash doctor
+```
+
 ### Not signed in
 
 The call returns this text with `isError` set.
