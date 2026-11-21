@@ -29,7 +29,7 @@ If several endpoints are installed and none is named, mash stops with `error: mo
 
 ## `<folder> holds a mash 0.5.5 configuration`
 
-Message: `error: ~/.config/mash holds a mash 0.5.5 configuration`, then `hint: https://github.com/bogworks/mash/releases/latest/download/mash-migrate-0.5.5.sh` (exit 1), from every command of `mash` and `mashctl`, `mashctl init` included. That address works only when 0.5.6 is GitHub's Latest release; until then use `https://github.com/bogworks/mash/releases/download/v0.5.6/mash-migrate-0.5.5.sh`.
+Message: `error: ~/.config/mash holds a mash 0.5.5 configuration`, then `hint: https://github.com/bogworks/mash/releases/latest/download/mash-migrate-0.5.5.sh` (exit 1), from every command of `mash` and `mashctl`, `mashctl init` included.
 
 Cause: the folder's `config.json` still has 0.5.5's keys `url` or `tls_ca`. mash does not read them and does not guess; it changes nothing.
 
@@ -47,7 +47,7 @@ Fix, if you want the full check: install or update `gh` ([cli.github.com](https:
 
 ## `mash is not installed`
 
-Full text: `mash is not installed: the mash plugin found no mash program. Install it: curl -fsSL https://github.com/bogworks/mash/releases/latest/download/install.sh | bash`. The plugin's session-start hook prints it as one line on stdout, so the agent sees it and can tell you; the MCP launcher prints it on stderr after `mash launcher:` lines and exits 127, and the MCP server does not start. The line always names the project's own latest release, even when `MASH_RELEASE_BASE` is set. While 0.5.6 is not GitHub's Latest release, use the pinned line instead: `curl -fsSL https://github.com/bogworks/mash/releases/download/v0.5.6/install.sh | MASH_VERSION=v0.5.6 bash`.
+Full text: `mash is not installed: the mash plugin found no mash program. Install it: curl -fsSL https://github.com/bogworks/mash/releases/latest/download/install.sh | bash`. The plugin's session-start hook prints it as one line on stdout, so the agent sees it and can tell you; the MCP launcher prints it on stderr after `mash launcher:` lines and exits 127, and the MCP server does not start. The line always names the project's own latest release, even when `MASH_RELEASE_BASE` is set.
 
 Causes:
 - The plugin is unpinned (a repository checkout) and there is no `mash` on the `PATH` of the process that started it. An unpinned launcher never downloads.

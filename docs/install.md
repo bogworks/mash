@@ -25,10 +25,10 @@ mash is one static Go binary, and `install.sh` is the one install line: it puts 
 To install the binaries (required for an unpinned plugin; also for the CLI in section 5), run the install script of the release. This is the one install line:
 
 ```sh
-curl -fsSL https://github.com/bogworks/mash/releases/download/v0.5.6/install.sh | MASH_VERSION=v0.5.6 bash
+curl -fsSL https://github.com/bogworks/mash/releases/latest/download/install.sh | bash
 ```
 
-It finds the machine's type (Linux or macOS, amd64 or arm64), downloads `mash` and `mashctl` from the same release together with that release's `SHA256SUMS`, checks each binary against it, and puts both in `~/.local/bin` (`MASH_INSTALL_DIR` names another folder; `MASH_VERSION=v0.5.6` names the release (the line above sets it; GitHub's Latest release is not 0.5.6 for now, so do not leave it out: without it the script first looks up the latest release's tag and downloads from that tag); `MASH_REPO=owner/name` names another repository, default `bogworks/mash`, for the download, the tag lookup and the attestation check; a `MASH_RELEASE_BASE` mirror needs `MASH_VERSION`). It prints one line for each, with the path it used, for example `Installed mash v0.5.6 (3f9a41c) in ~/.local/bin`, asks nothing and needs no `sudo`. If the folder is not on your `PATH` it says so in one line. A symbolic link to the folder is followed. It refuses a folder that belongs to another user, or that, or any folder above it, other users can write to (a root-owned sticky folder such as `/tmp` above it is fine), and on any failed check nothing is installed; both binaries are staged before either is put in place.
+It finds the machine's type (Linux or macOS, amd64 or arm64), downloads `mash` and `mashctl` from the same release together with that release's `SHA256SUMS`, checks each binary against it, and puts both in `~/.local/bin` (`MASH_INSTALL_DIR` names another folder; `MASH_VERSION=v0.5.6` pins a release, and without it the script first looks up the latest release's tag and downloads from that tag; `MASH_REPO=owner/name` names another repository, default `bogworks/mash`, for the download, the tag lookup and the attestation check; a `MASH_RELEASE_BASE` mirror needs `MASH_VERSION`). It prints one line for each, with the path it used, for example `Installed mash v0.5.6 (3f9a41c) in ~/.local/bin`, asks nothing and needs no `sudo`. If the folder is not on your `PATH` it says so in one line. A symbolic link to the folder is followed. It refuses a folder that belongs to another user, or that, or any folder above it, other users can write to (a root-owned sticky folder such as `/tmp` above it is fine), and on any failed check nothing is installed; both binaries are staged before either is put in place.
 
 If you want a NATS server on this machine, `mash-local-nats-setup.sh` is the other script of the release; [the walkthrough, step 3](guide/walkthrough.md#step-3-make-a-nats-server-on-this-machine) uses it.
 
@@ -226,7 +226,7 @@ script, check it against the release's `SHA256SUMS`, read it, then run it
 `SHA256SUMS` itself against the attestation):
 
 ```sh
-BASE=https://github.com/bogworks/mash/releases/download/v0.5.6
+BASE=https://github.com/bogworks/mash/releases/latest/download
 curl -fsSLO $BASE/mash-migrate-0.5.5.sh -O $BASE/SHA256SUMS
 grep ' mash-migrate-0.5.5.sh$' SHA256SUMS | sha256sum -c - &&
 less mash-migrate-0.5.5.sh && bash mash-migrate-0.5.5.sh
@@ -236,7 +236,7 @@ If you accept trusting GitHub's TLS alone, the one-line form the release
 page gives also works. It runs what it downloads without a check:
 
 ```sh
-curl -fsSL https://github.com/bogworks/mash/releases/download/v0.5.6/mash-migrate-0.5.5.sh | bash
+curl -fsSL https://github.com/bogworks/mash/releases/latest/download/mash-migrate-0.5.5.sh | bash
 ```
 
 What it changes:
@@ -255,6 +255,7 @@ changes nothing and stops with a message that names this script. It is a
 script you run once, not a `mash` or `mashctl` command
 ([ADR 0152](decisions/0152-the-release-carries-a-one-time-0-5-5-migration-script.md)).
 
+<!-- TODO-PUBLISHED: every `releases/latest/download/...` line on this page (and in troubleshooting.md) resolves to the newest release only if v0.5.6 is GitHub's Latest. Check after publishing; if it is published with --not-latest, change them to the fixed `releases/download/v0.5.6/...` path. -->
 
 ## Versions that work together
 
