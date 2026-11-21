@@ -372,10 +372,21 @@ func check(ctx context.Context, o Options) error {
 	r.step("candidate is on main", onMain)
 
 	// CI.
+	// A docs-only candidate has its heavy jobs skipped: the gate then walks back along main's first parent to the newest
+	// commit whose required checks passed, and accepts only if every commit above it is docs-only (release.CheckCIWalk).
 	if runs, err := checkRuns(o, x); err != nil {
 		r.step("CI check runs", op(err))
-	} else {
+	} else if release.CheckCI(runs, x) == nil {
+		r.step("CI check runs succeeded", nil)
+	} else if chain, cerr := firstParentChain(o, x, release.MaxDocsWalk); cerr != nil {
 		r.step("CI check runs succeeded", release.CheckCI(runs, x))
+	} else {
+		r.step("CI check runs succeeded", release.CheckCIWalk(x, chain, func(sha string) ([]release.CheckRun, error) {
+			if sha == x {
+				return runs, nil
+			}
+			return checkRuns(o, sha)
+		}))
 	}
 
 	// No earlier release was left a draft or unreleased.
@@ -531,6 +542,32 @@ func reproducible(ctx context.Context, o Options, x string) error {
 		return fmt.Errorf("the binary prints %q, want exactly %q", got, want)
 	}
 	return nil
+}
+
+// firstParentChain lists x and up to max-1 of its first parents, newest first, each with the paths it changed against
+// its first parent (git diff --no-renames --name-only, as scripts/ci-changes reads them).
+func firstParentChain(o Options, x string, max int) ([]release.Commit, error) {
+	out, err := git(o.Repo, "rev-list", "--first-parent", fmt.Sprintf("--max-count=%d", max+1), x)
+	if err != nil {
+		return nil, err
+	}
+	var chain []release.Commit
+	for _, sha := range strings.Fields(out) {
+		paths, err := git(o.Repo, "diff", "--no-renames", "--name-only", sha+"^", sha)
+		if err != nil {
+			// a root commit has no parent: its paths are unknown, so it counts as code
+			chain = append(chain, release.Commit{SHA: sha, Paths: []string{"(unknown: no parent)"}})
+			continue
+		}
+		var ps []string
+		for _, l := range strings.Split(paths, "\n") {
+			if l = strings.TrimSpace(l); l != "" {
+				ps = append(ps, strings.Trim(l, `"`))
+			}
+		}
+		chain = append(chain, release.Commit{SHA: sha, Paths: ps})
+	}
+	return chain, nil
 }
 
 // checkRuns reads every page of the candidate's check runs. The response must be complete: it needs a

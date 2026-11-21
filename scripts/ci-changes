@@ -34,6 +34,23 @@ is_docs() {
 	CHANGELOG.md | changelog.d/*) return 1 ;;
 	docs/branch-protection.md | docs/review/* | docs/reference/* | spec/* | docs/allowed_signers | docs/skipped-releases.txt | docs/release-cutover) return 1 ;;
 	esac
+	# Agent instructions, wherever they sit and in any letter case (x-lead, ADR 0156): the named files, any *.tmpl, any path with
+	# a directory component named like the places agents read instructions, and mash-setup/ at any depth. README.md, docs/install.md,
+	# SECURITY.md and CONTRIBUTING.md stay docs.
+	local base="${lower##*/}" dirs c
+	case "$base" in
+	agents.md | claude.md | gemini.md | skill.md | .cursorrules | .windsurfrules | *.tmpl) return 1 ;;
+	esac
+	case "$lower" in mash-setup/* | */mash-setup/*) return 1 ;; esac
+	if [ "$lower" != "$base" ]; then
+		dirs="${lower%/*}"
+		local IFS=/
+		for c in $dirs; do
+			case "$c" in
+			skills | commands | agents | hooks | prompts | briefings | plugins | .claude-plugin) return 1 ;;
+			esac
+		done
+	fi
 	case "$lower" in
 	docs/*.png | docs/*.jpg | docs/*.jpeg | docs/*.gif | docs/*.ico | docs/*.pdf | docs/*.woff | docs/*.woff2) return 1 ;;
 	esac

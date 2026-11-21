@@ -114,7 +114,11 @@ release -n mash-release -s SHA256SUMS.sig < SHA256SUMS`. The reasoning is in
 The numbered steps are what the command does in each state, and the manual path when it cannot run.
 
 1. **Candidate.** X is a commit on `main` of the release repository with CI green: `test (linux)`
-   and `reproducible` (both from GitHub Actions, run on the maintainers' self-hosted runners) on X itself. `test (macos)` runs
+   and `reproducible` (both from GitHub Actions, run on the maintainers' self-hosted runners) on X itself. A docs-only
+   X, whose heavy jobs are skipped, is judged by the newest commit below it on `main`'s first parent whose required checks
+   ran and passed, and only when every commit between that commit and X changes documentation alone (the same definition as
+   `scripts/ci-changes`; at most 50 commits back; a failed, cancelled or spoofed run, or a code commit without passing
+   checks, is refused). `test (macos)` runs
    on every push to `main` but is advisory (ADR 0079): the gate neither requires it nor reads its conclusion.
 2. **Prepare the release commit** (a pull request like any other, before the gate). Release preparation is where the
    shared files are written ([ADR 0068](decisions/0068-a-change-log-entry-is-a-fragment-file-and-the-adr-index-is-generated.md)):
