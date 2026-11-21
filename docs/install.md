@@ -184,7 +184,7 @@ The session registers as a SAP agent, takes the lease on its name, and starts re
 
 Keep this machine's clock in sync (NTP): more than 30 s of skew from the server makes peers look offline and mail `[stale]`. See [Troubleshooting](troubleshooting.md#a-peer-shows-offline-in-who).
 
-In the session, Claude has eight tools: `send`, `read`, `inbox`, `who`, `reply`, `version`, `status` and `doctor`. `status` says in one line whether the endpoint is ready (`<endpoint>: ready, offline`, `ready, online` when an agent session holds the endpoint open now, or `not ready: <reason>`). `doctor` checks the config, the creds, the server, the sign-in and the delivery of mail one at a time and says what to fix. A session with no `MASH_ENDPOINT` gets only `version`, `status` and `doctor`. `version` shows the mash binary's version and commit, the plugin's version and this endpoint's address. `mash status --detail` also says `holds endpoint`, `hooks` (`ran` once the agent host's hooks have delivered mail in this session) and `storage`; `mash doctor`'s `delivery` row warns while the hooks have not run yet and fails when they are not delivering ([troubleshooting](troubleshooting.md#mail-is-waiting-but-never-shown-hooks-not-firing)). `mash status` and `mash doctor` from a shell give the same answers for the environment they run in, so a missing name or creds shows before you launch. `mash status` exits 1 when the endpoint is not ready, and `mash doctor` exits 1 when a check fails. From a shell, the same identity can use the CLI:
+In the session, Claude has eight tools: `send`, `read`, `inbox`, `who`, `reply`, `version`, `status` and `doctor`. `status` says in one line whether the endpoint is ready (`<endpoint>: ready, offline`, `ready, online` when an agent session holds the endpoint open now, or `not ready: <reason>`). `doctor` checks the config, the creds, the server, the sign-in and the delivery of mail one at a time and says what to fix. A session with no `MASH_ENDPOINT` gets only `version`, `status` and `doctor`. `version` shows the mash binary's version and commit, the plugin's version and this endpoint's address. `mash status --detail` also says `holds endpoint`, `hooks` (`ran` once the agent host's hooks have delivered mail in this session) and `storage`; outside a Claude Code session (a plain shell) it shows `session: none` instead; `mash doctor`'s `delivery` row warns while the hooks have not run yet and fails when they are not delivering ([troubleshooting](troubleshooting.md#mail-is-waiting-but-never-shown-hooks-not-firing)). `mash status` and `mash doctor` from a shell give the same answers for the environment they run in, so a missing name or creds shows before you launch. `mash status` exits 1 when the endpoint is not ready, and `mash doctor` exits 1 when a check fails. From a shell, the same identity can use the CLI:
 
 ```sh
 MASH_ENDPOINT=alice.dev.design mash who
@@ -255,8 +255,6 @@ changes nothing and stops with a message that names this script. It is a
 script you run once, not a `mash` or `mashctl` command
 ([ADR 0152](decisions/0152-the-release-carries-a-one-time-0-5-5-migration-script.md)).
 
-<!-- TODO-PUBLISHED: every `releases/latest/download/...` line on this page (and in troubleshooting.md) resolves to the newest release only if v0.5.6 is GitHub's Latest. Check after publishing; if it is published with --not-latest, change them to the fixed `releases/download/v0.5.6/...` path. -->
-
 ## Versions that work together
 
 | Part | Version |
@@ -274,6 +272,4 @@ Remove only what you made. Stop any Claude Code session that uses mash first.
 - The plugins: `claude plugin uninstall mash@mash`, and `claude plugin uninstall mash-setup@mash` if you installed it.
 - Your configuration and keys: the folder `~/.config/mash` (or the one `MASH_CONFIG_DIR` or `XDG_CONFIG_HOME` named). It holds each endpoint's creds file, so deleting it cannot be undone. Mail already stored on the server stays there.
 - Mail kept on this machine: the state folder (`~/.local/state/mash`, or `MASH_STATE_DIR`).
-- A server made by the local setup script: `bash mash-local-nats-setup.sh --remove` stops it and deletes its folder, every mailbox and every message ([walkthrough, step 11](guide/walkthrough.md#step-11-stop-start-remove-the-server)).
-
-<!-- TODO-PUBLISHED: run `claude plugin uninstall mash@mash` and the --remove line once on the published release and confirm the wording. -->
+- A server made by the local setup script: `bash mash-local-nats-setup.sh --remove` stops it and deletes its folder, every mailbox and every message ([walkthrough, step 11](guide/walkthrough.md#step-11-stop-start-remove-the-server)). Afterwards mashctl's config folder (`~/.config/mash`) stays and still points at the removed server: move it aside, or run `mashctl init --config <file> --config-dir <new folder>` to set up again (the script prints this note).

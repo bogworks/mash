@@ -83,7 +83,13 @@ download it, check it against `SHA256SUMS`, read it, run it. With a current
 so and trusts only github.com's TLS.
 
 <!-- output: install -->
-Output: `[built output: install]`
+Output:
+
+```
+Fetching mash and mashctl from the v0.5.6 release: https://github.com/bogworks/mash/releases/download/v0.5.6
+Installed mash v0.5.6 (dd696e9) in ~/.local/bin
+Installed mashctl v0.5.6 (dd696e9) in ~/.local/bin
+```
 
 Check: `mash version` and `mashctl version` print the same version.
 
@@ -114,7 +120,25 @@ protected only as your own files are. This is the accepted same-user custody
 risk ([#869](https://github.com/bogworks/mash/issues/869)).
 
 <!-- output: server -->
-Output: `[built output: server]`
+Output (the process id differs on your machine, and the path is where the script wrote its files):
+
+```
+mash-local-nats-setup.sh: OK
+checked: nats-server 2.10.27, nats 0.5.2, openssl
+port: 4222
+made: CA, certificate, operator, accounts, users
+started: nats-server pid 1523 on 127.0.0.1:4222
+checked: sign-in and system ping ok
+mashctl init --config /home/tester/mash-nats/mash-setup.yaml
+```
+
+The first line is the checksum check of the downloaded script. Run the last
+line it printed:
+
+```
+mashctl init --config /home/tester/mash-nats/mash-setup.yaml
+Initialized mash on tls://127.0.0.1:4222 for owner acme
+```
 
 The server is a program you run as yourself; step 11 shows `--start` for
 after a reboot. If port 4222 is taken, the next free one is used.
@@ -360,15 +384,11 @@ MASH_ENDPOINT=acme.demo.bob mash send acme.demo.alice --json "ping"
 
 <!-- output: json-send -->
 ```json
-{
-  "to": "acme.demo.alice",
-  "number": 3,
-  "kind": "task",
-  "urgent": false,
-  "duplicate": false,
-  "retagged": false
-}
+{"to":"acme.demo.alice","number":3,"kind":"task","urgent":false,"duplicate":false,"retagged":false}
 ```
+
+Each command prints its JSON on one line. Pipe it through `| jq` to
+pretty-print it.
 
 Alice reads that one message whole:
 
@@ -378,17 +398,7 @@ MASH_ENDPOINT=acme.demo.alice mash read 3 --json
 
 <!-- output: json-read -->
 ```json
-{
-  "number": 3,
-  "from": "acme.demo.bob",
-  "sent": "2026-11-19T09:44:04Z",
-  "trust": "verified",
-  "kind": "task",
-  "urgent": false,
-  "reply_to": null,
-  "relay": null,
-  "body": "ping"
-}
+{"number":3,"from":"acme.demo.bob","sent":"2026-11-21T14:33:54Z","trust":"verified","kind":"task","urgent":false,"reply_to":null,"relay":null,"body":"ping"}
 ```
 
 In JSON the text is plain, in `body`, with no `> ` marks: a program that
@@ -403,32 +413,8 @@ MASH_ENDPOINT=acme.demo.alice mash inbox --json
 
 <!-- output: json-inbox -->
 ```json
-{
-  "endpoint": "acme.demo.alice",
-  "total": 3,
-  "new": 3,
-  "urgent": 1,
-  "wake_count": 15,
-  "over_wake_count": false,
-  "wake_age": "1h",
-  "oldest_waiting": "10s",
-  "over_wake_age": false,
-  "messages": [
-    {
-      "number": 1,
-      "from": "acme.demo.bob",
-      "sent": "2026-11-19T09:44:02Z",
-      "state": "new",
-      "urgent": false,
-      "kind": "task",
-      "trust": "verified",
-      "preview": "lunch at noon?"
-    }
-  ]
-}
+{"endpoint":"acme.demo.alice","total":3,"new":3,"urgent":1,"wake_count":15,"over_wake_count":false,"wake_age":"1h","oldest_waiting":"0s","over_wake_age":false,"messages":[{"number":1,"from":"acme.demo.bob","sent":"2026-11-21T14:33:54Z","state":"new","urgent":false,"kind":"task","trust":"verified","preview":"lunch at noon?"},{"number":2,"from":"acme.demo.bob","sent":"2026-11-21T14:33:54Z","state":"new","urgent":true,"kind":"question","trust":"verified","preview":"ready?"},{"number":3,"from":"acme.demo.bob","sent":"2026-11-21T14:33:54Z","state":"new","urgent":false,"kind":"task","trust":"verified","preview":"ping"}]}
 ```
-
-(The list shows the first message only; there is one object for each.)
 
 The one-line retrieval, with `jq` (a command-line tool that picks a field
 out of JSON), is the text of one message:
@@ -439,8 +425,6 @@ MASH_ENDPOINT=acme.demo.alice mash read 3 --json | jq -r .body
 
 <!-- output: json-jq -->
 Output: `ping`
-
-<!-- TODO-PUBLISHED: the JSON blocks and the `ping` output in this step are the spec's examples, shown with Alice and Bob. Replace them with the published run's output. -->
 
 ## Step 9: take an endpoint away
 
@@ -453,13 +437,24 @@ Commands: `mashctl endpoint delete acme.demo.bob` (you type the address to
 confirm), then `mash status` as Bob.
 
 <!-- output: delete -->
-Output: `[built output: delete]`
+Output:
+
+```
+This deletes acme.demo.bob and its empty inbox. It cannot be undone.
+Type the address to confirm: acme.demo.bob
+Deleted endpoint acme.demo.bob
+```
 
 Then Bob's status. The endpoint is gone, and the command exits with a
 non-zero status:
 
 <!-- output: refused -->
-Output: `[built output: refused]`
+Output:
+
+```
+acme.demo.bob: not ready: this endpoint was deleted; its address cannot be used again
+hint: mash doctor
+```
 
 ## Step 10: join a mesh someone else runs
 
@@ -527,7 +522,18 @@ nothing. `--remove` asks you to type the folder's path before it deletes
 anything.
 
 <!-- output: lifecycle -->
-Output: `[built output: lifecycle]`
+Output (the process ids differ on your machine):
+
+```
+stopped pid 2336
+started: nats-server pid 2572 on 127.0.0.1:4222
+type the folder to remove (/home/tester/mash-nats): /home/tester/mash-nats
+stopped pid 2572
+removed /home/tester/mash-nats
+note: mashctl's folder /home/tester/.config/mash still points at this server.
+To set up again, run mashctl init --config <file> --config-dir <new folder>
+or move that folder aside.
+```
 
 ## Not in this guide
 
