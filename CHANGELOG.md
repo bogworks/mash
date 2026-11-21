@@ -8,23 +8,11 @@ All notable user-facing changes to mash are recorded here. The format follows [K
 
 ### Summary
 
-**mash 0.5.6 is a breaking release for everyone who used 0.5.5: the settings that name your agent and your server have new names, the commands that set mash up have changed, and mail that is not proven to come from its sender is now refused by default. Read Upgrading before you install it.** mash lets Claude Code sessions send each other mail; each session is an agent with an address of three parts, such as `alice.dev.design`. Nothing on your server needs to change, and a small script moves your 0.5.5 configuration folder across. If you are new to mash, this is the release to start with: the [quick start](docs/guide/walkthrough.md) takes you from nothing to two Claude Code sessions mailing each other. Every download has a build attestation; verify it.
+**mash 0.5.6 is the release to start with, and mail that is not proven to come from its sender is now refused by default. Read Upgrading before you install it.** mash lets Claude Code sessions send each other mail; each session is an agent with an address of three parts, such as `alice.dev.design`. The [quick start](docs/guide/walkthrough.md) takes you from nothing to two Claude Code sessions mailing each other. Every download has a build attestation; verify it.
 
 ### Upgrading
 
-Nothing on the server needs migrating. If you have never used mash, there is nothing to move. If you used 0.5.5, do these in order:
-
-1. Install 0.5.6: `mash` and `mashctl` from the same release.
-2. Run the 0.5.5 migration script once on each configuration folder; every command that reads the configuration refuses an unmigrated one (`--help` and `version` answer first).
-3. Rename settings: `MASH_ENDPOINT` replaces `MASH_OWNER`, `MASH_GROUP` and `MASH_NAME`; `MASH_SERVER` replaces `MASH_URL`; `MASH_CA` replaces `MASH_TLS_CA`.
-4. Start each session with `MASH_ENDPOINT` set; a session no longer picks an endpoint for itself.
-5. Update scripts that call `mashctl`: setup is `mashctl init --config FILE`, endpoints are `mashctl endpoint ...`.
-6. Update scripts that read output: exit codes are 0, 1 and 2, `--verbose` is `--detail`, and `mash who`, `inbox`, `read` and the MCP `send` and `read` tools changed.
-7. Mail that is not verified is now refused; set `MASH_ACCEPT_UNVERIFIED=1` if you depend on receiving it.
-8. `MASH_INSECURE_PLAINTEXT` is refused; turning encryption off is now `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1`.
-9. `mash credential create` is gone; install an endpoint on a machine with `mash join` and the file `mashctl endpoint create --out` writes.
-
-If you used 0.5.0, start a new deployment: 0.5.6 does not read its state. The steps in full, and the table of old and new names, are in the release notes.
+If you have never used mash, there is nothing to move: install `mash` and `mashctl` from the same release, then follow the quick start. Each session starts with `MASH_ENDPOINT` set to its address, and mail that is not verified is refused; set `MASH_ACCEPT_UNVERIFIED=1` if you depend on receiving it. If you used 0.5.0, start a new deployment: 0.5.6 does not read its state. The steps in full, and the table of old and new names, are in the release notes.
 
 ### Added
 
@@ -46,7 +34,6 @@ If you used 0.5.0, start a new deployment: 0.5.6 does not read its state. The st
 - `mash who` prints a headed table and `--json` is `{"endpoints": [...]}` ([#919](https://github.com/bogworks/mash/pull/919)).
 - `mash inbox` and `mash read` have a new form, mail is quoted, and deleted senders are not counted ([#951](https://github.com/bogworks/mash/pull/951)).
 - Every error is one `error:` line with a `hint:` line, and exit codes are 0, 1 and 2 ([#982](https://github.com/bogworks/mash/pull/982)).
-- A 0.5.5 configuration folder is refused and names the script that moves it ([#994](https://github.com/bogworks/mash/pull/994)).
 
 ### Removed
 
@@ -58,168 +45,12 @@ If you used 0.5.0, start a new deployment: 0.5.6 does not read its state. The st
 - Unverified mail is refused by default, and the sender is not told ([#952](https://github.com/bogworks/mash/pull/952)).
 - Turning encryption off is one environment variable with a long name, no flag, and a warning on every command ([#974](https://github.com/bogworks/mash/pull/974)).
 
-Known issues: 43 known issues, listed in the [release notes](https://github.com/bogworks/mash/blob/v0.5.6/docs/release-notes/0.5.6.md#known-issues)
+Known issues: 44 known issues, listed in the [release notes](https://github.com/bogworks/mash/blob/v0.5.6/docs/release-notes/0.5.6.md#known-issues)
 Links: [Release notes](https://github.com/bogworks/mash/blob/v0.5.6/docs/release-notes/0.5.6.md), [full changes](https://github.com/bogworks/mash/compare/v0.5.5...v0.5.6), [verify your download](https://github.com/bogworks/mash/blob/v0.5.6/docs/install.md#verify-what-you-download)
 
 ## [0.5.5] - 2026-11-18
 
-### Summary
-
-**mash 0.5.5 changes how every agent is named, and it does not work with anything made by 0.5.0. Read Upgrading before you
-install it.** An agent's address is now three parts, owner, group and instance (for example `alice.dev.design`), and every
-agent must name its group. Credentials files, directory records, inboxes and addresses from 0.5.0 are not read or converted,
-and mail still unread in old inboxes when you switch is not carried over. Start with a fresh deployment. If you have never
-used mash, this is the release to start with: the [quick start](docs/guide/walkthrough.md) takes you from nothing to two Claude Code sessions
-that mail each other. Every download has a build attestation; verify it.
-
-**mash 0.5.5 also requires TLS on every connection, loopback included. Every `mash` and `mashctl` connection now needs a `tls://` (or `wss://`) URL, and a plain `nats://` URL is refused unless you set `insecure_plaintext` (`MASH_INSECURE_PLAINTEXT=1`).** A 0.5.x deployment that connects in plain text sees that refusal on its first connection after the upgrade. `mashctl init --local` makes its own certificates, so the [quick start](docs/guide/walkthrough.md) needs no override.
-
-0.5.0 remains the version running deployments should keep using until they are moved. 0.5.5 reads no 0.5.0 state, so do not install it
-over a running endpoint, including by `go install ...@latest`.
-
-### Why a hard cut
-
-0.5.0 had two address forms: agents made with `mashctl add` carried a fixed `cc` token and had no group, and their
-credentials were made on the machine that runs `mashctl`, so a private key had to be copied by hand to any other machine.
-Keeping both forms working would have meant carrying the old one around indefinitely, for no one's benefit, so 0.5.5 has
-one form and nothing else. That also means the old way of doing things is gone rather than deprecated.
-
-### Upgrading
-
-If you have never used mash: nothing to move. Follow the [quick start](docs/guide/walkthrough.md).
-
-If you used 0.5.0: the order matters, and none of this is automatic.
-
-1. **Start a new deployment.** Run `mashctl init --local` for a local server, or set up a new account on your own servers.
-   Leave the old one untouched for as long as you want a way back to 0.5.0.
-2. **Choose a name for every agent in three parts.** Write each as `owner/group/instance`, for example `alice/dev/design`.
-   Each part is lower-case letters, digits and hyphens, starts with a letter, is at most 32 characters, with no `--` and no
-   trailing hyphen. There is no default group: a command or session without one is refused, and nothing guesses it. A group
-   cannot be changed later. To move an agent to another group, create a new one and delete the old one.
-3. **Create each agent again** with the [quick start](docs/guide/walkthrough.md). Old credentials files, directory records and inboxes are not
-   read.
-4. **Read mail you still need first.** Mail unread in an old inbox when you switch is not carried over.
-5. **Update scripts and settings.** `mashctl add`, the old `reissue` and `retire` are gone and print a message that names
-   the replacement (`mashctl endpoint create`, `endpoint reissue`, `endpoint delete`). `unzone` is gone too and is now an
-   unknown command (exit 2). `agent_token` and `MASH_AGENT_TOKEN` are
-   gone. Start each session with `MASH_GROUP` (and `MASH_OWNER` and `MASH_NAME` if they are not in your config).
-6. **Check where mash looks for its config.** If `XDG_CONFIG_HOME` is set, mash now reads `$XDG_CONFIG_HOME/mash` only; it no
-   longer falls back to `~/.config/mash`. To keep using that directory, set `MASH_CONFIG_DIR=$HOME/.config/mash` (an
-   absolute path), or move the files. (Checked against the code on main: `MASH_CONFIG_DIR`, then an absolute
-   `XDG_CONFIG_HOME/mash`, then `~/.config/mash`; a relative `XDG_CONFIG_HOME` is ignored.)
-7. **Update anything that reads mash output.** The audit report (`mashctl audit --json`) is version 2 with new field names,
-   and `--compare` refuses a version 1 file. `mash who --json` now reports `name` as the flat key `owner_group_instance`
-   and adds `identity` (`owner.group.instance`), `owner`, `group`, `instance` and `agent`. Spool folders and the owner shown
-   in hook and spool messages use the new address. (Checked against the code on main: `audit` records carry `address`, `owner`, `group`, `instance`; `who --json` carries `identity`, `owner`, `group`, `instance`, `agent`.)
-8. **Use TLS on every connection, or set the override knowingly.** A plain `nats://` URL (or one with no scheme, or `ws://`)
-   is refused, to any host and loopback included, with a message that names the setting and the fix, unless
-   `insecure_plaintext` (`MASH_INSECURE_PLAINTEXT=1`) is set; with it set, mash connects and prints a warning on standard error
-   (and `mash status` shows it). Do not set it on a network you do not control: plain text lets anyone on the network read
-   mail and obtain signatures.
-9. **`mashctl init --local` now makes a local certificate authority and certificates,** and runs its server with TLS only; the
-   configuration it writes has the `tls://` URL and `tls_ca`, so nothing else is needed. If you run your own server, give it
-   TLS and set `tls_ca` (or `MASH_TLS_CA`) to the PEM file of the authority that signed its certificate, or set the override.
-10. **Remove `insecure_loopback` and `require_tls` from your settings.** `insecure_loopback` (`MASH_INSECURE_LOOPBACK`) and
-    `require_tls` (`MASH_REQUIRE_TLS`) are gone and are not read: `insecure_plaintext` replaces both
-    ([ADR 0146](https://github.com/bogworks/mash/blob/v0.5.5/docs/decisions/0146-every-mash-and-mashctl-connection-requires-tls-loopback-included-and-one-override-insecure-plaintext-allows-plain-text.md),
-    which replaces the default and the loopback allowance of ADR 0108).
-
-Moving your existing agents is a one-time job. mash does not do it: it is done outside mash, once, by whoever runs the
-deployment, onto a fresh deployment, with a written map from each old name to its owner, group and instance.
-
-### One departure from the Synadia Agent Protocol
-
-The first subject slot now carries the owner, not the name of the harness. The protocol says that slot SHOULD name the
-harness; mash does not follow it. Finding mash agents with a wildcard on the harness slot therefore does not work. Finding
-them by the service name does, and the service metadata still says `claude-code` and adds `owner`, `group` and `instance`.
-
-### Security
-
-This release closes replies across owners: an endpoint of another owner can no longer answer, forge or replay a reply into your
-endpoints. Inside one owner, endpoints can still answer each other's reply subjects; that is the endpoint model's "wide open under
-the owner" until the policy release. An endpoint's reply inbox now lives under its owner (`_INBOX.<owner>.<flat key>`), and it can
-publish replies only to its own owner's inboxes. A credential made before this release is refused by this release's mash: reissue
-it (the hard cut already means starting fresh).
-
-### What was tested, and what was not
-
-- Tested on one machine, with one local server, from a fresh home, over TLS with no override: the steps of the [quick start](docs/guide/walkthrough.md), mail
-  both ways, reissue and delete, and every refusal listed here. What the test did, exactly: it built `mash` and `mashctl` from
-  the commit and ran the steps of the [quick start](docs/guide/walkthrough.md) with those binaries; it ran each session through the plugin's own launcher
-  (`plugin/scripts/mash serve`) and delivered mail through the plugin's hook commands, with the test itself playing the roles
-  of Claude Code's MCP client and hook caller. No Claude Code session ran, and the install steps of the README (a downloaded
-  binary, `go install`) were not part of it: the maintainer's own walk through the README, from a clean home to two mailing Claude Code
-  sessions (JRN-001), is done after the release; AT-001, the automated run, stands in for it until then. Run records are in the repository (`docs/evidence/2026-11-17-0-5-5-live-runs/`):
-  the steps of the [quick start](docs/guide/walkthrough.md), mail, the permission set and its isolation, revocation and every refusal passed. All of them ran on the code commit `e26332c` (AT-001 to AT-003 and AT-005 by the core worker; AT-004, the command contract, by the CLI team), and the records name it.
-- Across separate nodes: three NATS servers in one cluster over TLS, in three isolated containers the test builds and destroys
-  itself on one developer machine, with agents on nodes other than the server they connect to. Reissue and delete were checked
-  against every server, and a plain `nats://` URL is refused unless the override is set. This was a run by hand on one machine, not on three real hosts, and it passed on `e26332c`.
-- mash writes no server configuration beyond what `mashctl init --local` makes; TLS and a cluster are set up by the operator, as `docs/tls-and-clusters.md` describes, and the test builds the same configuration by hand.
-- Two `mashctl` machines share key material copied by hand (the three-server procedure in the operations guide); the run
-  above used two. A machine with its own signing key is not supported.
-- Load: the directory-polling and heartbeat-fan-out measurements of 2026-11-02 (`docs/evidence/2026-11-02-directory-polling/`
-  and `docs/evidence/2026-11-02-heartbeat-fanout/`) were made before the three-part address and before owner-scoped reply
-  subjects. No fresh measurement was made for 0.5.5; read those numbers as of 2026-11-02.
-- Not tested, and not offered: upgrading in place, moving old agents, carrying mail across, changing a group, and clock differences between machines beyond the few seconds the operations guide states (a unit test covers two
-  admins whose clocks differ by up to 45 seconds: the second create is refused, never both succeed).
-
-### Known issues
-
-- `mashctl endpoint reissue --changed` selects endpoints by the permission set in their local credentials file and by staged or
-  revoked keys; it does not check that a local credentials file belongs to the endpoint's current key. After a reissue on another
-  machine it can report nothing to reissue while the local file still holds the revoked old key. Workaround:
-  `reissue ADDRESS --make-key` for that endpoint (#764). The fix is planned for 0.5.6.
-- A same-host `endpoint create` that is killed part way leaves an unused entry in the issue record; nothing can connect with it
-  (#765). A create with the endpoint's own key (the default) is finished by running it again.
-- `endpoint create` prints no line saying the servers took an account update (#766); it makes none (nothing is revoked), and
-  `reissue` and `delete` do print how many servers acknowledged the revocation.
-- **`endpoint reissue` locks on one host only (#767).** A reissue takes a file lock (`<creds file>.lock`) that the operating
-  system drops when the run ends or is killed, so a killed run needs nothing removed. The lock works on one machine and a
-  local filesystem. It does not coordinate two machines, and it does nothing on a network filesystem that ignores file locks,
-  so do not run `endpoint reissue`, `create` or `delete` for one endpoint from two machines at once. A lock directory left by an
-  earlier mash is reported by the refusal and removed once by hand. Owner: the mashctl commands.
-- The advisory macOS test job fails in the Linux-only podman test harness's unit tests; follow-up #774.
-- The test `TestCrowdedBacklogOnAFullStreamWakesAtOnceAfterADrain` failed twice in CI before the release; the cause was in the
-  test, not in mash, and it is fixed (#745).
-
-### Also in this release, not part of the 0.5.5 contract
-
-These changes rode along with the release. They are deliberate and small, and none is a requirement of the endpoint model:
-
-- A flag that takes a value now refuses a value that starts with `-` unless it is written `--flag=VALUE` (a bare `-` is still a value).
-- The operations guide now states, and tests pin, that `mash serve` exits when its standard input closes and never renews its lease after that (within 5 seconds).
-- `mashctl init` and `adopt` ask the server whether JetStream is enabled and say what to do when it is not.
-- `mash status` says the last wake started a turn only after a wake was actually sent.
-
-### Details
-
-**Added**
-
-- **Make and manage endpoints with `mashctl endpoint`.** `mashctl endpoint create alice/dev/design --public-key design.pub` signs a key the endpoint made itself and writes its JWT to a file (`--make-key` makes the key on the mashctl host instead and writes the creds file). `endpoint reissue`, `endpoint delete`, `endpoint list` and `endpoint show` complete the set; each takes `--json`, and `create` and `delete` take `--dry-run`. There is no default group: write `--group dev` or the three-part address.
-- **Make a key and a credentials file with `mash`.** `mash key create --out FILE` writes a new user seed and its public key, and `mash credential create --seed FILE --jwt FILE` joins a seed and the user JWT issued for it into a credentials file. Neither needs a server, a config file or an account key. `credential create` checks that the JWT names the seed's key; it does not check the issuing account or the expiry.
-- `mash serve` exiting on stdin EOF is now a documented guarantee, pinned by tests: it releases the endpoint lease and exits within 5 s, an EOF during the first open is acted on once that open returns, and a superseded serve never renews its lease.
-
-**Changed**
-
-- **Every agent now has a three-part address, owner.group.instance, and 0.5.5 does not work with anything made by 0.5.0.** Every agent names its group (there is no default and it cannot be changed later), every credentials file is replaced, old records, addresses and credentials are not read or converted, mail unread in old inboxes is not carried over, `mashctl add`, the old `reissue`, `unzone`, `agent_token` and `MASH_AGENT_TOKEN` are gone, the audit report is version 2, and the first subject slot carries the owner, not the harness. Make agents with `mashctl endpoint create`, from a key each agent makes with `mash key create`; start from a fresh deployment.
-- **`mashctl add`, `mashctl reissue` and `mashctl retire` are removed.** Use `mashctl endpoint create`, `mashctl endpoint reissue` and `mashctl endpoint delete`. Endpoints made by 0.5.0 do not work with 0.5.5: make new ones and delete the old ones.
-- `mashctl init --local` now makes a server that speaks TLS only. It creates a local certificate authority and a server certificate for `localhost`, `127.0.0.1` and `::1` (ten years, keys mode 0600, in the server directory), and writes the `tls://` URL and `tls_ca` into `config.json`. The [quick start](docs/guide/walkthrough.md) runs over TLS with no setting.
-- An endpoint's replies can now only reach reply inboxes of its own owner (`_INBOX.<owner>.>`), and an endpoint listens only under its own `_INBOX.<owner>.<name>` prefix. An endpoint of another owner can no longer answer your discovery or presence probes, forge an answer into them, or replay a genuine one, so `mash who` and `mash prompt` cannot be told that an offline endpoint is online by someone outside your owner. Nothing to do for users: new credentials carry the narrower permissions, and the next `mashctl endpoint reissue` of an existing endpoint picks them up.
-- **Every `mash` and `mashctl` connection now requires TLS, loopback included.** A plain `nats://` URL (or one with no scheme, or `ws://`) is refused before any connection is made, unless `insecure_plaintext` (`MASH_INSECURE_PLAINTEXT=1`) is set; with it set, mash connects, prints a warning on standard error and shows it in `mash status`. Use a `tls://` URL, and `tls_ca` for a private certificate authority. `mashctl init --local` makes its own certificate authority and runs its server with TLS only, so the [quick start](docs/guide/walkthrough.md) needs no override. `insecure_loopback` and `require_tls` (`MASH_INSECURE_LOOPBACK`, `MASH_REQUIRE_TLS`) are removed and are not read ([ADR 0146](https://github.com/bogworks/mash/blob/v0.5.5/docs/decisions/0146-every-mash-and-mashctl-connection-requires-tls-loopback-included-and-one-override-insecure-plaintext-allows-plain-text.md)).
-
-**Removed**
-
-- The `~/.config/mash` fallback is gone: with `XDG_CONFIG_HOME` set to a directory, mash reads its config, `policy.md` and default credentials only from `$XDG_CONFIG_HOME/mash` (or from `MASH_CONFIG_DIR`). With `XDG_CONFIG_HOME` unset, `~/.config/mash` is still the one location. Move files from `~/.config/mash` if you set `XDG_CONFIG_HOME` before. A directory record that cannot be read is skipped with a warning naming its key, in every listing, instead of failing the command. The spool no longer reads the legacy `.session` file or the `pid:N` owner text, and message numbers carry no `L5` form.
-
-**Fixed**
-
-- A flag that takes a value now refuses a value that starts with `-` unless it is written `--flag=VALUE`, so `mashctl add n --note --help` no longer mints a note "--help". A bare `-` is still accepted as a value.
-- `mashctl adopt` no longer says JetStream is "enabled for the account" from the account JWT alone: step 3 reports what the JWT gives, and step 6 asks the server as the account's admin user. When the server could not enable JetStream (its store budget, 75% of the free disk by default, is under the account's disk limit), `adopt` and `mashctl init` now say so, with the two fixes, instead of printing a bare `jetstream not enabled` (err_code 10076).
-- `mashctl endpoint reissue` takes a file lock (`<creds file>.lock`, flock) that the operating system drops when the run ends or is killed, so a killed run needs nothing removed and the identical command succeeds. The lock works on one machine and a local filesystem; it does not coordinate two machines or a network filesystem that ignores file locks. A lock directory left by an earlier mash is reported by `reissue_busy` and removed once by hand.
-- `mashctl endpoint reissue --make-key` keeps the staged key in `<creds file>.pending` until it has read the directory record back and found the new key there. A run that stopped after the new creds file was written, or could not read the record back, is finished by running the same command again, which no longer stages another key and revokes the one the first run installed.
-- `status` no longer says "the last wake started a turn" when hooks have run but the server has never sent a channel notification.
-
-[Full changes](https://github.com/bogworks/mash/compare/v0.5.0...v0.5.5)
+Superseded by 0.5.6 three days later and not supported; use 0.5.6.
 
 ## [0.5.0] - 2026-11-15
 
