@@ -542,3 +542,22 @@ func TestDoctorPlainServerAfterReachableOneIsExit2(t *testing.T) {
 		t.Fatalf("exit %d, want 2: %q %q", code, out, errb)
 	}
 }
+
+// The same refusal when the first server cannot be reached: the result does not depend on which server answers.
+func TestDoctorPlainServerAfterUnreachableOneIsExit2(t *testing.T) {
+	ca, cert, key := writeTestPKI(t, t.TempDir())
+	e := newApplyEnvOpts(t, nil, func(o *server.Options) {
+		cfg, err := server.GenTLSConfig(&server.TLSConfigOpts{CertFile: cert, KeyFile: key})
+		if err != nil {
+			t.Fatal(err)
+		}
+		o.TLSConfig, o.TLS, o.TLSTimeout = cfg, true, 5
+	})
+	delete(e.env, "MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION")
+	e.env["MASH_CA"] = ca
+	e.env["MASH_SERVER"] = "tls://127.0.0.1:1,nats://127.0.0.1:2"
+	out, errb, code := e.run("doctor")
+	if code != 2 {
+		t.Fatalf("exit %d, want 2: %q %q", code, out, errb)
+	}
+}
