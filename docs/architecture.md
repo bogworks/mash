@@ -610,37 +610,14 @@ registered as a channel, or policy blocks it, Claude Code drops its events silen
 [`--channels`](https://code.claude.com/docs/en/cli-reference) flag naming the plugin: `claude --channels
 plugin:mash@mash`. This needs a claude.ai sign-in or a Console API key, not Bedrock, Agent Platform or Foundry.
 
-**The per-machine allowlist.**
-
-- *What it is.* A list of plugins, each named by marketplace and plugin, that may register as channels. Anthropic keeps
-  a default list: the plugins in its official marketplace, `claude-plugins-official`. mash is not on it.
-- *Who sets it.* Whoever controls the machine's [managed settings](https://code.claude.com/docs/en/managed-settings):
-  a policy file written by an administrator (`/etc/claude-code/managed-settings.json` on Linux,
-  `/Library/Application Support/ClaudeCode/managed-settings.json` on macOS), or settings pushed by device management or
-  the claude.ai console. The key `allowedChannelPlugins` replaces Anthropic's default list, and `channelsEnabled: true`
-  turns channels on for an organisation. A user cannot add to it from their own settings
-  ([settings](https://code.claude.com/docs/en/settings): "Nothing in your own settings files or `--settings` overrides
-  a managed key").
-- *Why it exists.* A channel puts outside text into the model's context. The reference says "An ungated channel is a
-  prompt injection vector." The allowlist leaves the choice of which plugins may do that to the administrator, not to
-  any plugin that happens to be installed.
-- *Which source is read.* Claude Code "uses the highest-ranked source that delivers at least one policy key and ignores
-  the rest rather than merging them" ([managed settings](https://code.claude.com/docs/en/managed-settings#how-claude-code-combines-managed-sources)).
-  Server-managed settings rank first, so where an organisation uses them the local file is ignored, unless the highest
-  source sets `managedSourcesBehavior: "merge"`. mash's `status` tool reads these files, read-only, and reports what it
-  finds ([ADR 0039](decisions/0039-mash-reads-claude-codes-managed-settings-read-only-for-diagnosis.md)).
-- *What happens without it.* Claude Code starts normally, the channel does not register, and a startup notice says why
-  ("not on the approved channels allowlist"). The MCP server still runs and its tools still work. On Team and
-  Enterprise plans channels stay off until an owner sets `channelsEnabled`. Personal Pro and Max accounts skip that
-  check, but not the allowlist.
-
-**What the allowlist means for someone installing mash.** On a personal machine, the user writes the managed settings
-file once with `sudo`, as mash's install guide shows. This worked on a Max account (2026-10-21) and in later runs.
-Because `allowedChannelPlugins` replaces Anthropic's list, any other channel plugins must be listed too. In an
-organisation, the administrator does it. A user with no admin rights has two choices: the development flag, which asks
-on every launch and does not work unattended, or no channel. Without a channel, mash still delivers mail through the
-hooks at the next prompt or tool call. What is lost is the idle wake and live SAP prompts. A plugin on Anthropic's
-default list would need none of this.
+**What the person does.** Nothing beyond the flag: `claude --channels plugin:mash@mash` loads the channel with no
+warning and no setting, and an idle session wakes (checked on 2026-11-21). The one thing that can stop it is a managed
+policy: an organisation that manages Claude Code can turn channels off (`channelsEnabled`) or restrict which plugins
+may register (`allowedChannelPlugins`), because a channel puts outside text into the model's context ([settings](https://code.claude.com/docs/en/managed-settings)).
+mash's `status` tool reads these files, read-only, and reports what it finds
+([ADR 0039](decisions/0039-mash-reads-claude-codes-managed-settings-read-only-for-diagnosis.md)). Without a channel,
+mash still delivers mail through the hooks at the next prompt or tool call; what is lost is the idle wake and live SAP
+prompts.
 
 **Hooks.** The [hooks reference](https://code.claude.com/docs/en/hooks) defines `PostToolUse` (after each successful
 tool call) and `UserPromptSubmit` (when a prompt starts a turn). A hook can return `additionalContext`, which Claude
