@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -413,6 +414,19 @@ func evalCondition(t *testing.T, c any, attrs map[string]string) bool {
 		}
 		return false
 	case string:
+		if cm := regexp.MustCompile(`^#files (>=|<) ([0-9]+)$`).FindStringSubmatch(v); cm != nil {
+			n, _ := strconv.Atoi(cm[2])
+			count := 0
+			for _, f := range strings.Split(attrs["files"], "\n") {
+				if f != "" {
+					count++
+				}
+			}
+			if cm[1] == ">=" {
+				return count >= n
+			}
+			return count < n
+		}
 		m := regexp.MustCompile(`^(-?)([a-z-]+) (~=|!=|=) (.+)$`).FindStringSubmatch(v)
 		if m == nil {
 			t.Fatalf("unsupported condition %q", v)
@@ -582,7 +596,7 @@ func TestMergify_docsQueue(t *testing.T) {
 		t.Errorf("the docs queue has or groups: %v (no approval or label)", ors)
 	}
 	re := docsQueueRegex(t, m)
-	want := []string{"base = main", "-draft", "-conflict", "label != hold", `#files >= 1`, "-files ~= " + re,
+	want := []string{"base = main", "-draft", "-conflict", "label != hold", `#files >= 1`, `#files < 300`, "-files ~= " + re,
 		"check-success = @github-actions/pr-check", "check-success = @github-actions/adr-lint"}
 	got := append([]string{}, plain...)
 	sort.Strings(got)
@@ -604,8 +618,14 @@ func TestMergify_docsQueue(t *testing.T) {
 	// One source: the merge_protections rule's `if` carries the same regex text as the docs queue.
 	var found bool
 	for _, c := range m.MergeProtections[0].If {
-		if s, ok := c.(string); ok && s == "files ~= "+re {
-			found = true
+		if mm, ok := c.(map[string]any); ok {
+			if list, ok := mm["or"].([]any); ok {
+				for _, e := range list {
+					if s, ok := e.(string); ok && s == "files ~= "+re {
+						found = true
+					}
+				}
+			}
 		}
 	}
 	if !found {
@@ -664,5 +684,38 @@ func TestMergify_docsOnlyPriorityIsHighest(t *testing.T) {
 		if o.Priority >= r.Priority {
 			t.Errorf("priority rule %q (%d) is not below docs-only (%d)", o.Name, o.Priority, r.Priority)
 		}
+	}
+}
+
+// A pull request with 300 or more changed files is never docs-only for the queue (GitHub returns at most 3000 files and Mergify
+// cannot see past that, codex H1 on the docs queue): the docs queue and the priority rule require fewer than 300, and the approval
+// rule stays active from 300 up.
+func TestMergify_aHugePullRequestIsNeverDocsOnly(t *testing.T) {
+	m := loadMergify(t)
+	var docs []string
+	for i := 0; i < 400; i++ {
+		docs = append(docs, "docs/guide/page"+strconv.Itoa(i)+".md")
+	}
+	attrs := map[string]string{"base": "main", "head": "pr/x/y", "author": "randybias", "files": strings.Join(docs, "\n")}
+	if !evalCondition(t, m.MergeProtections[0].If, attrs) {
+		t.Error("the approval rule must stay active for 400 docs files")
+	}
+	d := queueRule(t, m, "docs")
+	plain, _ := splitConditions(t, d.QueueConditions)
+	var fileConds []any // the conditions about the changed files (the rest are checks and labels, which this test does not model)
+	for _, c := range plain {
+		if strings.HasPrefix(c, "#files") || strings.HasPrefix(c, "-files") {
+			fileConds = append(fileConds, c)
+		}
+	}
+	if evalCondition(t, fileConds, map[string]string{"files": strings.Join(docs, "\n")}) {
+		t.Error("the docs queue must not admit 400 files")
+	}
+	if !evalCondition(t, fileConds, map[string]string{"files": "docs/a.md\ndocs/b.md"}) {
+		t.Error("the docs queue must admit two docs files")
+	}
+	small := map[string]string{"base": "main", "head": "pr/x/y", "author": "randybias", "files": "docs/a.md"}
+	if evalCondition(t, m.MergeProtections[0].If, small) {
+		t.Error("the approval rule must be inactive for one docs file")
 	}
 }
