@@ -129,9 +129,10 @@
 | [0149](0149-further-departures-of-the-0-5-6-specification-by-the-maintainers-word.md) | Further departures of the 0.5.6 specification, by the maintainer's word (ADR 0147) | accepted | 2026-11-20 |
 | [0150](0150-releases-carry-install-and-local-nats-setup-scripts-as-attested-assets.md) | Releases carry the install and local NATS setup scripts as attested assets | accepted | 2026-11-20 |
 | [0151](0151-a-backlog-over-the-wake-count-or-age-wakes-the-session-whatever-the-kinds.md) | A backlog over the wake count or the wake age wakes the session, whatever the kinds, and listed mail counts as waiting | accepted | 2026-11-20 |
-| [0152](0152-the-release-carries-a-one-time-0-5-5-migration-script.md) | The release carries a one-time 0.5.5 migration script | accepted | 2026-11-20 |
+| [0152](0152-the-release-carries-a-one-time-0-5-5-migration-script.md) | The release carries a one-time 0.5.5 migration script | superseded by ADR-0158 | 2026-11-20 |
 | [0153](0153-the-plugin-is-installed-from-its-marketplace-and-mash-plugin-export-is-removed.md) | The plugin is installed from its marketplace, and `mash plugin export` is removed | accepted | 2026-11-21 |
 | [0154](0154-the-launchers-session-start-prefetch-says-on-stdout-when-no-mash-program-is-installed.md) | The launcher's session-start prefetch says on stdout when no mash program is installed | accepted | 2026-11-21 |
 | [0155](0155-a-listset-endpoint-may-publish-replies-only-under-its-own-owner-inbox-prefix.md) | A listset endpoint may publish replies only under its own owner's inbox prefix | accepted | 2026-11-21 |
 | [0156](0156-a-release-has-a-one-screen-change-log-entry-and-release-notes-the-release-page-is-built-from-the-notes.md) | A release has a one-screen change-log entry and separate release notes, the release page is built from the notes, and the gate checks nine of the thirteen rubric questions | accepted | 2026-11-21 |
 | [0157](0157-a-docs-only-pull-request-has-its-own-queue-and-needs-only-the-docs-lint.md) | A docs-only pull request has its own merge queue and needs only the docs lint | accepted | 2026-11-21 |
+| [0158](0158-0-5-7-removes-the-0-5-5-migration-script-and-the-refusal-of-a-0-5-5-configuration-folder.md) | 0.5.7 removes the 0.5.5 migration script and the refusal of a 0.5.5 configuration folder | accepted | 2026-11-21 |

@@ -81,5 +81,4 @@ None. Administration. There are no MCP tools for mashctl.
 
 ## What it replaces
 
-In 0.5.5, reissue already existed. In 0.5.6 it takes the same options as
-create.
+It takes the same options as create.

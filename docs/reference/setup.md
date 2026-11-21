@@ -4,19 +4,6 @@ Generated from spec/*.json by go run ./scripts/refgen. Do not edit.
 
 The scripts that install mash and set up a local NATS server.
 
-## mash-migrate-0.5.5.sh
-
-For a machine that ran mash 0.5.5. Run once. It rewrites config.json's two
-renamed keys (url becomes servers, tls_ca becomes ca), keeps the old file
-beside it as a backup, prints one line saying what it changed, and touches
-nothing on the server. Addresses written with slashes and the old variable
-names are not its business: they are refused where they are used, each with
-its own error line.
-
-```sh
-curl -fsSL <release base>/mash-migrate-0.5.5.sh | bash
-```
-
 ## install.sh
 
 Finds the machine's type, downloads mash and mashctl from the same release,
@@ -72,10 +59,9 @@ curl -fsSL <release base>/mash-local-nats-setup.sh | bash
 
 Every address in these commands is written from the release's own setting, so
 a fork or a mirror points at itself; in the project's own releases it is the
-address shown here. Two printed lines carry an address: the hint for a folder
-left by mash 0.5.5, which is written from the release's own setting, and the
-plugin's 'mash is not installed' line, which carries the address shown here,
-written into the launcher (mash hook).
+address shown here. One printed line carries an address: the plugin's 'mash is
+not installed' line, which carries the address shown here, written into the
+launcher (mash hook).
 
 ```sh
 https://github.com/bogworks/mash/releases/latest/download

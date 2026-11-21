@@ -74,8 +74,7 @@ The rules every mash command and tool follows.
    shell's own $(...) does. Nothing else in the text is changed.
 
 13. Three exit codes. 0 it worked, 1 it failed, 2 the command line was wrong.
-   In 0.5.5 the same failure exited 2, 3 or 6 depending on the command. A
-   command that did part of its work exits 1, says what is left, and is safe
+   A command that did part of its work exits 1, says what is left, and is safe
    to run again.
 
 14. Both doctors work the same way. mash doctor and mashctl doctor print every
@@ -184,20 +183,8 @@ The rules every mash command and tool follows.
    MASH_INSECURE_PLAINTEXT and the key insecure_plaintext, are refused with an
    error naming the new one.
 
-30. A folder left by mash 0.5.5 is named for what it is. When the
-   configuration folder holds 0.5.5's settings (the keys url and tls_ca),
-   every command of both tools stops with 'error: &lt;folder&gt; holds a mash
-   0.5.5 configuration' and 'hint: &lt;release
-   base&gt;/mash-migrate-0.5.5.sh', exit 1, and changes nothing. It never
-   reads the old keys and never guesses. The migration is a script, run once
-   by the person or by whatever manages the machine: it rewrites the two keys
-   in place, keeps a backup beside the file, and touches nothing on the
-   server. Nothing on the server needs migrating: 0.5.6 reuses the stores and
-   endpoint records 0.5.5 made, and endpoints of the two versions can mail
-   each other on one server.
-
-31. Only a destructive command asks. It asks you to type the address, and
+30. Only a destructive command asks. It asks you to type the address, and
    --yes skips the question.
 
-32. Eighty columns, and color only on a terminal. --wide may be wider.
+31. Eighty columns, and color only on a terminal. --wide may be wider.
    NO_COLOR is honored.

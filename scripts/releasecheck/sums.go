@@ -55,7 +55,7 @@ var sumsLine = regexp.MustCompile(`^([0-9a-f]{64}) [ *]([^ ]+)$`)
 // by buildFresh from the tagged commit). A malformed line, a duplicate name, a name that is not mash-<os>-<arch> or mashctl-<os>-<arch> of a
 // release target, a digest that differs from our build, a listed name that is not attached (or is attached with
 // another digest) and an attached mash-* asset that is not listed are each refused; so is a target the sums omit.
-// The three scripts, the SBOMs and the SLSA provenance (release.CIAssetNames) must be listed too; their digests are the attached ones.
+// The two scripts, the SBOMs and the SLSA provenance (release.CIAssetNames) must be listed too; their digests are the attached ones.
 // For a keyless release the provenance bundle is not listed (it cannot list itself) and a line for it is refused; it
 // is verified by its attestation instead.
 func checkSumEntries(sums []byte, have map[string]string, hashes map[release.Binary]string, keyless bool) error {
@@ -475,7 +475,7 @@ func keylessSums(o Options, tag, x string, have map[string]string, hashes map[re
 	return nil
 }
 
-// verifyAttestations downloads each of the eight binaries (mash and mashctl) and the three scripts from the release into a temporary directory and runs
+// verifyAttestations downloads each of the eight binaries (mash and mashctl) and the two scripts from the release into a temporary directory and runs
 // `gh attestation verify <file>` on it, pinned to the release repository o.GHRepo, its release.yml and the tag (attestFlags: the repository, the workflow, the tag and the commit x). A binary
 // with no attestation, or one that does not verify, is refused naming it (exit 3); a download that fails is the
 // gate's (could not decide). It keeps a draft that release.yml's attest job never saw (an older one, or one made by

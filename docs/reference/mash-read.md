@@ -122,5 +122,4 @@ quote alike. --json carries the text unquoted in 'body'.
 
 ## What it replaces
 
-In 0.5.5, read worked the same way, and 0.5.6 adds no new mechanism. The
-labels are the JSON field names.
+The labels are the JSON field names.

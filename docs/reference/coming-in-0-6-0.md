@@ -58,8 +58,8 @@ None. To be decided with the 0.6.0 design.
 
 #### What it replaces
 
-In 0.5.5, this did not exist, and it does not exist in 0.5.6. Planned for
-0.6.0: mash prompt and the reply tool move here, which is a breaking change.
+It does not exist in 0.5.6. Planned for 0.6.0: mash prompt and the reply tool
+move here, which is a breaking change.
 
 ### `mashctl owner`
 
@@ -100,6 +100,5 @@ None. Administration. There are no MCP tools for mashctl.
 
 #### What it replaces
 
-In 0.5.5, this did not exist. In 0.5.6 a mesh has the one owner named at
-mashctl init, and nothing in the grammar assumes one. Several owners per mesh
-are planned for 0.6.0.
+A mesh has the one owner named at mashctl init, and nothing in the grammar
+assumes one. Several owners per mesh are planned for 0.6.0.

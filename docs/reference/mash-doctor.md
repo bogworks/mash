@@ -263,6 +263,5 @@ where it is seen.
 
 ## What it replaces
 
-New in 0.5.6. It takes over the rows mash status printed in 0.5.5. It has no
-plugin or channel row: neither can be checked truthfully from a shell, and the
-command and the tool must answer alike.
+It has no plugin or channel row: neither can be checked truthfully from a
+shell, and the command and the tool must answer alike.

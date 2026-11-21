@@ -227,9 +227,3 @@ session itself, not on a fresh connection: 'ready, online' there means this
 session holds the endpoint and its mail will reach it. A hint names the first
 installed address in alphabetical order. At a shell every 'hint:' line goes to
 stderr; an MCP tool's text block puts the hint on the line after the result.
-
-## What it replaces
-
-In 0.5.5, status printed a row for each of name, config, creds, connection and
-channel. In 0.5.6 those checks move to mash doctor, the version to mash
-version, and the mail count to mash inbox.

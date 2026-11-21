@@ -67,7 +67,3 @@ With `--json` the result is this shape. The values are an example.
 The short commit in brackets, seven characters, tells two builds of the same
 version apart. --json carries the whole commit, so a tool that pins a version
 can compare it exactly.
-
-## What it replaces
-
-In 0.5.5, mashctl printed no commit, and the MCP tool added three more lines.

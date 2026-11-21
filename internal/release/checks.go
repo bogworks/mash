@@ -123,18 +123,18 @@ func Binaries() []Binary {
 	return out
 }
 
-// ProvenanceName is the provenance asset (the Sigstore bundle) covering the eight binaries, the three scripts and SHA256SUMS.
+// ProvenanceName is the provenance asset (the Sigstore bundle) covering the eight binaries, the two scripts and SHA256SUMS.
 const ProvenanceName = "mash.intoto.jsonl"
 
-// ScriptNames are the three scripts a release carries beside the binaries (ADR 0150), named exactly as the repository's
+// ScriptNames are the two scripts a release carries beside the binaries (ADR 0150), named exactly as the repository's
 // scripts/ files are, in the order SHA256SUMS lists them (after the binaries, before the SBOMs). They are the repository's
 // own files at the release commit, copied unchanged, and are subjects of the provenance attestation like the binaries.
 // They have no SBOM.
 func ScriptNames() []string {
-	return []string{"install.sh", "mash-local-nats-setup.sh", "mash-migrate-0.5.5.sh"}
+	return []string{"install.sh", "mash-local-nats-setup.sh"}
 }
 
-// CIAssetNames are the assets release.yml makes that the gate cannot rebuild: the three scripts, each binary's SBOM in
+// CIAssetNames are the assets release.yml makes that the gate cannot rebuild: the two scripts, each binary's SBOM in
 // Binaries order, then the SLSA provenance. They are attached by name and listed in SHA256SUMS; the gate verifies their
 // contents (the scripts are compared with the repository's, `release-check`; the rest by their attestations).
 func CIAssetNames() []string {
@@ -168,7 +168,7 @@ const SumsSigName = "SHA256SUMS.sig"
 const SumsNamespace = "mash-release"
 
 // ExpectedSums is the exact SHA256SUMS content for the given per-binary hashes (hex SHA-256 of each binary) and the
-// hex SHA-256 of each CIAssetNames file (ci, by name): the binaries, the three scripts, the
+// hex SHA-256 of each CIAssetNames file (ci, by name): the binaries, the two scripts, the
 // SBOMs and the provenance, in that order, as release.yml's draft job lists them. A name missing from ci is left out.
 // A keyless release (at or above the cutover) lists the same names except the provenance bundle: it cannot list itself,
 // as release.yml makes the sums before the job that attests.
@@ -191,7 +191,7 @@ func sha(b []byte) string {
 }
 
 // CheckAssets judges a draft release's assets (name -> GitHub's "sha256:<hex>" digest) against our own fresh builds
-// of the candidate: exactly the eight binaries (mash and mashctl for each target), the three scripts, their eight SBOMs, the SLSA provenance and
+// of the candidate: exactly the eight binaries (mash and mashctl for each target), the two scripts, their eight SBOMs, the SLSA provenance and
 // SHA256SUMS, nothing else; each binary's digest is the hash of our build for that target; the SBOMs and the provenance must be attached (their contents are verified separately, as
 // they cannot be rebuilt); and SHA256SUMS is exactly the file those hashes and the attached digests produce. It names
 // every problem. For a keyless release (at or above the cutover) SHA256SUMS omits the provenance bundle (which stays
@@ -246,7 +246,7 @@ func CheckAssets(have map[string]string, hashes map[Binary]string, keyless bool)
 	return joined(problems)
 }
 
-// CheckScripts holds the two release scripts to the repository: each of ScriptNames must be attached with exactly the
+// CheckScripts holds the release scripts to the repository: each of ScriptNames must be attached with exactly the
 // digest of the bytes the repository holds at the release commit (content, by name; read with `git show <commit>:scripts/<name>`).
 // A script that differs, or that is missing from either side, is named.
 func CheckScripts(have map[string]string, content map[string][]byte) error {

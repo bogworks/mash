@@ -127,10 +127,10 @@ func TestExpectedSums_isSha256sumOutput(t *testing.T) {
 	lines := strings.Split(strings.TrimSuffix(got, "\n"), "\n")
 	want := []string{"mash-darwin-amd64", "mash-darwin-arm64", "mash-linux-amd64", "mash-linux-arm64",
 		"mashctl-darwin-amd64", "mashctl-darwin-arm64", "mashctl-linux-amd64", "mashctl-linux-arm64",
-		"install.sh", "mash-local-nats-setup.sh", "mash-migrate-0.5.5.sh",
+		"install.sh", "mash-local-nats-setup.sh",
 		"mash-darwin-amd64.cdx.json", "mash-darwin-arm64.cdx.json", "mash-linux-amd64.cdx.json", "mash-linux-arm64.cdx.json",
 		"mashctl-darwin-amd64.cdx.json", "mashctl-darwin-arm64.cdx.json", "mashctl-linux-amd64.cdx.json", "mashctl-linux-arm64.cdx.json", ProvenanceName}
-	if len(lines) != 20 {
+	if len(lines) != 19 {
 		t.Fatalf("%q", got)
 	}
 	for i, ln := range lines {
@@ -176,13 +176,12 @@ func TestCheckAssets(t *testing.T) {
 			delete(h, Binary{"mashctl", Target{"linux", "amd64"}})
 			m[SumsName] = "sha256:" + sha([]byte(ExpectedSums(h, ciHashes(), false)))
 		}), "SHA256SUMS has digest"},
-		"missing install.sh":       {mutate(func(m map[string]string) { delete(m, "install.sh") }), "install.sh is missing"},
-		"missing nats setup":       {mutate(func(m map[string]string) { delete(m, "mash-local-nats-setup.sh") }), "mash-local-nats-setup.sh is missing"},
-		"missing migration script": {mutate(func(m map[string]string) { delete(m, "mash-migrate-0.5.5.sh") }), "mash-migrate-0.5.5.sh is missing"},
-		"script with no digest":    {mutate(func(m map[string]string) { m["install.sh"] = "x" }), "not a sha256"},
-		"missing sbom":             {mutate(func(m map[string]string) { delete(m, "mash-linux-arm64.cdx.json") }), "mash-linux-arm64.cdx.json is missing"},
-		"missing provenance":       {mutate(func(m map[string]string) { delete(m, ProvenanceName) }), "mash.intoto.jsonl is missing"},
-		"sbom with no digest":      {mutate(func(m map[string]string) { m["mash-linux-arm64.cdx.json"] = "x" }), "not a sha256"},
+		"missing install.sh":    {mutate(func(m map[string]string) { delete(m, "install.sh") }), "install.sh is missing"},
+		"missing nats setup":    {mutate(func(m map[string]string) { delete(m, "mash-local-nats-setup.sh") }), "mash-local-nats-setup.sh is missing"},
+		"script with no digest": {mutate(func(m map[string]string) { m["install.sh"] = "x" }), "not a sha256"},
+		"missing sbom":          {mutate(func(m map[string]string) { delete(m, "mash-linux-arm64.cdx.json") }), "mash-linux-arm64.cdx.json is missing"},
+		"missing provenance":    {mutate(func(m map[string]string) { delete(m, ProvenanceName) }), "mash.intoto.jsonl is missing"},
+		"sbom with no digest":   {mutate(func(m map[string]string) { m["mash-linux-arm64.cdx.json"] = "x" }), "not a sha256"},
 		"sums not covering the attached sbom": {mutate(func(m map[string]string) {
 			m["mash-linux-arm64.cdx.json"] = "sha256:" + strings.Repeat("e", 64)
 		}), "SHA256SUMS has digest"},
@@ -255,11 +254,11 @@ func keylessAssets() map[string]string {
 func TestExpectedSums_keylessOmitsTheProvenance(t *testing.T) {
 	got := ExpectedSums(hashes(), ciHashes(), true)
 	lines := strings.Split(strings.TrimSuffix(got, "\n"), "\n")
-	if len(lines) != 19 || strings.Contains(got, ProvenanceName) {
+	if len(lines) != 18 || strings.Contains(got, ProvenanceName) {
 		t.Fatalf("keyless sums:\n%s", got)
 	}
-	if want := strings.TrimSuffix(goodSums(), strings.Split(goodSums(), "\n")[19]+"\n"); got != want {
-		t.Errorf("keyless sums are not the others' first nineteen lines:\n%s", got)
+	if want := strings.TrimSuffix(goodSums(), strings.Split(goodSums(), "\n")[18]+"\n"); got != want {
+		t.Errorf("keyless sums are not the others' first eighteen lines:\n%s", got)
 	}
 }
 
@@ -308,7 +307,7 @@ func TestBinaries_areMashAndMashctlForEveryTarget(t *testing.T) {
 	if n := Targets[0].CtlAssetName(); n != "mashctl-darwin-amd64" {
 		t.Errorf("CtlAssetName %q", n)
 	}
-	if n := len(CIAssetNames()); n != 12 { // three scripts, eight SBOMs and the provenance
+	if n := len(CIAssetNames()); n != 11 { // two scripts, eight SBOMs and the provenance
 		t.Errorf("%d CI assets", n)
 	}
 }
@@ -322,26 +321,26 @@ func TestBuildCmd_refusesAProgramThatIsNotReleased(t *testing.T) {
 
 // ADR 0150: SHA256SUMS lists the two scripts after the binaries and before the SBOMs, and the gate holds them to the repository.
 func TestScripts_areListedAfterTheBinariesAndHeldToTheRepository(t *testing.T) {
-	if got := strings.Join(ScriptNames(), " "); got != "install.sh mash-local-nats-setup.sh mash-migrate-0.5.5.sh" {
+	if got := strings.Join(ScriptNames(), " "); got != "install.sh mash-local-nats-setup.sh" {
 		t.Fatalf("scripts %q", got)
 	}
 	lines := strings.Split(goodSums(), "\n")
-	if !strings.HasSuffix(lines[8], "  install.sh") || !strings.HasSuffix(lines[9], "  mash-local-nats-setup.sh") || !strings.HasSuffix(lines[10], "  mash-migrate-0.5.5.sh") || !strings.HasSuffix(lines[11], "  mash-darwin-amd64.cdx.json") {
-		t.Errorf("the scripts are not lines 9, 10 and 11:\n%s", goodSums())
+	if !strings.HasSuffix(lines[8], "  install.sh") || !strings.HasSuffix(lines[9], "  mash-local-nats-setup.sh") || !strings.HasSuffix(lines[10], "  mash-darwin-amd64.cdx.json") {
+		t.Errorf("the scripts are not lines 9 and 10:\n%s", goodSums())
 	}
-	content := map[string][]byte{"install.sh": []byte("a\n"), "mash-local-nats-setup.sh": []byte("b\n"), "mash-migrate-0.5.5.sh": []byte("c\n")}
-	have := map[string]string{"install.sh": "sha256:" + sha(content["install.sh"]), "mash-local-nats-setup.sh": "sha256:" + sha(content["mash-local-nats-setup.sh"]), "mash-migrate-0.5.5.sh": "sha256:" + sha(content["mash-migrate-0.5.5.sh"])}
+	content := map[string][]byte{"install.sh": []byte("a\n"), "mash-local-nats-setup.sh": []byte("b\n")}
+	have := map[string]string{"install.sh": "sha256:" + sha(content["install.sh"]), "mash-local-nats-setup.sh": "sha256:" + sha(content["mash-local-nats-setup.sh"])}
 	if err := CheckScripts(have, content); err != nil {
 		t.Fatalf("identical scripts refused: %v", err)
 	}
-	changed := map[string]string{"install.sh": "sha256:" + sha([]byte("evil")), "mash-local-nats-setup.sh": have["mash-local-nats-setup.sh"], "mash-migrate-0.5.5.sh": have["mash-migrate-0.5.5.sh"]}
+	changed := map[string]string{"install.sh": "sha256:" + sha([]byte("evil")), "mash-local-nats-setup.sh": have["mash-local-nats-setup.sh"]}
 	if err := CheckScripts(changed, content); err == nil || !strings.Contains(err.Error(), "script install.sh has digest") {
 		t.Errorf("a changed install.sh: %v", err)
 	}
-	if err := CheckScripts(map[string]string{"install.sh": have["install.sh"], "mash-local-nats-setup.sh": have["mash-local-nats-setup.sh"]}, content); err == nil || !strings.Contains(err.Error(), "script mash-migrate-0.5.5.sh is missing") {
+	if err := CheckScripts(map[string]string{"install.sh": have["install.sh"]}, content); err == nil || !strings.Contains(err.Error(), "script mash-local-nats-setup.sh is missing") {
 		t.Errorf("a missing script: %v", err)
 	}
-	if err := CheckScripts(have, map[string][]byte{"install.sh": content["install.sh"], "mash-local-nats-setup.sh": content["mash-local-nats-setup.sh"]}); err == nil || !strings.Contains(err.Error(), "no copy of scripts/mash-migrate-0.5.5.sh") {
+	if err := CheckScripts(have, map[string][]byte{"install.sh": content["install.sh"]}); err == nil || !strings.Contains(err.Error(), "no copy of scripts/mash-local-nats-setup.sh") {
 		t.Errorf("no repository copy: %v", err)
 	}
 }

@@ -133,5 +133,4 @@ command again is safe.
 
 ## What it replaces
 
-In 0.5.5, this was also reachable as deprovision, which is removed. Typing the
-name to confirm is what gh repo delete does.
+Typing the name to confirm is what gh repo delete does.

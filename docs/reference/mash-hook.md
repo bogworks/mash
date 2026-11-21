@@ -69,5 +69,4 @@ simply had no mash tools.
 
 ## What it replaces
 
-In 0.5.5, hook worked the same way. It never connects to the server; it reads
-what mash serve has stored on disk.
+It never connects to the server; it reads what mash serve has stored on disk.

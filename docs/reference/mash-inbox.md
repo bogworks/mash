@@ -155,8 +155,3 @@ MESSAGE is the sender's words, as untrusted as the full text; it is not quoted
 because the column already marks it. It shows the first line of the text, cut
 to fit 80 columns and ending in … when there is more; mash read shows all of
 it. The JSON carries the same cut text as 'preview'.
-
-## What it replaces
-
-In 0.5.5, the CLI allowed 1000 and the MCP tool 100. In 0.5.6 both have the
-same limit.

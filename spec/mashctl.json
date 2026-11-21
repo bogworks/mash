@@ -222,7 +222,7 @@
      },
      {
       "name": "x-today",
-      "value": "In 0.5.5, this job was done by mashctl adopt, mashctl init and mashctl init --local. mashctl does not install or start NATS; the NATS quick-start script writes this file as its last step."
+      "value": "mashctl does not install or start NATS; the NATS quick-start script writes this file as its last step."
      },
      {
       "name": "x-notes",
@@ -381,7 +381,7 @@
      },
      {
       "name": "x-today",
-      "value": "In 0.5.5, these checks were mashctl audit and mashctl issued check. mashctl issued list has no command of its own any more: one endpoint's issue record is in mashctl endpoint show."
+      "value": "mashctl issued list has no command of its own any more: one endpoint's issue record is in mashctl endpoint show."
      },
      {
       "name": "x-notes",
@@ -449,7 +449,7 @@
        },
        {
         "name": "x-today",
-        "value": "In 0.5.5, this was mashctl limits --show. The numbers shown are examples; the defaults are the code's."
+        "value": "The numbers shown are examples; the defaults are the code's."
        },
        {
         "name": "x-notes",
@@ -533,10 +533,6 @@
          "tool": null,
          "why": "Administration. There are no MCP tools for mashctl."
         }
-       },
-       {
-        "name": "x-today",
-        "value": "In 0.5.5, this was mashctl limits."
        },
        {
         "name": "x-notes",
@@ -715,10 +711,6 @@
         }
        },
        {
-        "name": "x-today",
-        "value": "In 0.5.5, this took --make-key or --public-key, accepted three address forms, and printed about ten lines. provision did the same job and is removed."
-       },
-       {
         "name": "x-notes",
         "value": "With no option, the endpoint can be used on this machine at once: what a solo developer wants. --out is for another machine. --public-key is for when the seed must never leave that machine. When mashctl has no certificate authority file configured, the join file's \"ca\" is null, and mash then trusts the server only through the machine's own trusted certificate authorities, as a browser would."
        }
@@ -832,7 +824,7 @@
        },
        {
         "name": "x-today",
-        "value": "In 0.5.5, this was also reachable as deprovision, which is removed. Typing the name to confirm is what gh repo delete does."
+        "value": "Typing the name to confirm is what gh repo delete does."
        },
        {
         "name": "x-notes",
@@ -932,10 +924,6 @@
         }
        },
        {
-        "name": "x-today",
-        "value": "In 0.5.5, this was also reachable as mashctl list, which is removed."
-       },
-       {
         "name": "x-notes",
         "value": "A repeated owner or group is left blank, so the eye finds where one ends."
        }
@@ -1014,7 +1002,7 @@
        },
        {
         "name": "x-today",
-        "value": "In 0.5.5, mashctl suspended and mashctl issued list did this job for one endpoint. It no longer prints the creds file's path, the issue record, the agent, the account or the mail subject."
+        "value": "It does not print the creds file's path, the issue record, the agent, the account or the mail subject."
        },
        {
         "name": "x-notes",
@@ -1102,10 +1090,6 @@
          "tool": null,
          "why": "Administration. There are no MCP tools for mashctl."
         }
-       },
-       {
-        "name": "x-today",
-        "value": "In 0.5.5, this was set-meta and label."
        }
       ]
      },
@@ -1189,10 +1173,6 @@
          "tool": null,
          "why": "Administration. There are no MCP tools for mashctl."
         }
-       },
-       {
-        "name": "x-today",
-        "value": "In 0.5.5, this was set-meta with a '-' value, and unlabel."
        }
       ]
      },
@@ -1260,10 +1240,6 @@
          "tool": null,
          "why": "Administration. There are no MCP tools for mashctl."
         }
-       },
-       {
-        "name": "x-today",
-        "value": "In 0.5.5, this was a top-level command, mashctl suspend."
        }
       ]
      },
@@ -1331,10 +1307,6 @@
          "tool": null,
          "why": "Administration. There are no MCP tools for mashctl."
         }
-       },
-       {
-        "name": "x-today",
-        "value": "In 0.5.5, this was a top-level command, mashctl resume."
        }
       ]
      },
@@ -1445,7 +1417,7 @@
        },
        {
         "name": "x-today",
-        "value": "In 0.5.5, reissue already existed. In 0.5.6 it takes the same options as create."
+        "value": "It takes the same options as create."
        }
       ]
      },
@@ -1565,7 +1537,7 @@
        },
        {
         "name": "x-today",
-        "value": "In 0.5.5, this was mashctl inbox inspect, with --from and --to. Those are replaced by --after, the option mash inbox has."
+        "value": "It takes --after, the option mash inbox has."
        },
        {
         "name": "x-notes",
@@ -1648,10 +1620,6 @@
          "tool": null,
          "why": "Administration. There are no MCP tools for mashctl."
         }
-       },
-       {
-        "name": "x-today",
-        "value": "In 0.5.5, this was a top-level command, mashctl permissions."
        },
        {
         "name": "x-notes",
@@ -1738,7 +1706,7 @@
      },
      {
       "name": "x-today",
-      "value": "In 0.5.5, this did not exist. In 0.5.6 a mesh has the one owner named at mashctl init, and nothing in the grammar assumes one. Several owners per mesh are planned for 0.6.0."
+      "value": "A mesh has the one owner named at mashctl init, and nothing in the grammar assumes one. Several owners per mesh are planned for 0.6.0."
      }
     ]
    },
@@ -1801,10 +1769,6 @@
        "tool": null,
        "why": "Administration. There are no MCP tools for mashctl."
       }
-     },
-     {
-      "name": "x-today",
-      "value": "In 0.5.5, mashctl version printed no commit."
      }
     ]
    }

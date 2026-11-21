@@ -79,7 +79,3 @@ None. Administration. There are no MCP tools for mashctl.
 When it is needed. An inbox gets its limits when its endpoint is created. If
 you later raise the limits in config.json, inboxes that already exist keep the
 old ones until you run this.
-
-## What it replaces
-
-In 0.5.5, this was mashctl limits.

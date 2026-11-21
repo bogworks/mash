@@ -50,7 +50,7 @@
   },
   {
    "rule": "Three exit codes",
-   "detail": "0 it worked, 1 it failed, 2 the command line was wrong. In 0.5.5 the same failure exited 2, 3 or 6 depending on the command. A command that did part of its work exits 1, says what is left, and is safe to run again."
+   "detail": "0 it worked, 1 it failed, 2 the command line was wrong. A command that did part of its work exits 1, says what is left, and is safe to run again."
   },
   {
    "rule": "Both doctors work the same way",
@@ -115,10 +115,6 @@
   {
    "rule": "Encryption can be turned off in one way only, and it says so every time",
    "detail": "Both tools talk to the server over TLS. The one way to turn that off is the environment variable MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1. There is no flag and no configuration-file key for it: this is the one setting that cannot be given three ways, so that it cannot be left on in a file and forgotten. While it is set, every command of both tools first prints, on stderr: 'warning: encryption to the server is OFF (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set)'. The older names, MASH_INSECURE_PLAINTEXT and the key insecure_plaintext, are refused with an error naming the new one."
-  },
-  {
-   "rule": "A folder left by mash 0.5.5 is named for what it is",
-   "detail": "When the configuration folder holds 0.5.5's settings (the keys url and tls_ca), every command of both tools stops with 'error: <folder> holds a mash 0.5.5 configuration' and 'hint: <release base>/mash-migrate-0.5.5.sh', exit 1, and changes nothing. It never reads the old keys and never guesses. The migration is a script, run once by the person or by whatever manages the machine: it rewrites the two keys in place, keeps a backup beside the file, and touches nothing on the server. Nothing on the server needs migrating: 0.5.6 reuses the stores and endpoint records 0.5.5 made, and endpoints of the two versions can mail each other on one server."
   },
   {
    "rule": "Only a destructive command asks",
@@ -255,11 +251,6 @@
  ],
  "setup": [
   {
-   "name": "mash-migrate-0.5.5.sh",
-   "command": "curl -fsSL <release base>/mash-migrate-0.5.5.sh | bash",
-   "what": "For a machine that ran mash 0.5.5. Run once. It rewrites config.json's two renamed keys (url becomes servers, tls_ca becomes ca), keeps the old file beside it as a backup, prints one line saying what it changed, and touches nothing on the server. Addresses written with slashes and the old variable names are not its business: they are refused where they are used, each with its own error line."
-  },
-  {
    "name": "install.sh",
    "command": "curl -fsSL <release base>/install.sh | bash",
    "what": "Finds the machine's type, downloads mash and mashctl from the same release, checks each against the release's checksums, and against the release's signed record too when the gh command is there to do it (without gh it says in one line that it checked checksums only), puts them in ~/.local/bin unless MASH_INSTALL_DIR names another folder, and prints one line for each, with the path it actually used: 'Installed mash v0.5.6 (3f9a41c) in ~/.local/bin'. It asks nothing and needs no sudo. If that folder is not on the PATH it says so in one line."
@@ -272,7 +263,7 @@
   {
    "name": "<release base>",
    "command": "https://github.com/bogworks/mash/releases/latest/download",
-   "what": "Every address in these commands is written from the release's own setting, so a fork or a mirror points at itself; in the project's own releases it is the address shown here. Two printed lines carry an address: the hint for a folder left by mash 0.5.5, which is written from the release's own setting, and the plugin's 'mash is not installed' line, which carries the address shown here, written into the launcher (mash hook)."
+   "what": "Every address in these commands is written from the release's own setting, so a fork or a mirror points at itself; in the project's own releases it is the address shown here. One printed line carries an address: the plugin's 'mash is not installed' line, which carries the address shown here, written into the launcher (mash hook)."
   },
   {
    "name": "For an agent",

@@ -154,8 +154,3 @@ whether mail is reaching its session: that is known only to the session
 itself, and is in its own status ('session'). A per-endpoint delivery claim
 visible to peers would be new data that mash 0.5.5 never had; it is left for a
 later release.
-
-## What it replaces
-
-In 0.5.5, the MCP tool always returned the long form, the CLI had three output
-modes, and matching was by substring of several fields.

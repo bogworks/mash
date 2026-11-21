@@ -117,6 +117,5 @@ works against any conforming server.
 
 ## What it replaces
 
-In 0.5.5, this job was done by mashctl adopt, mashctl init and mashctl init
---local. mashctl does not install or start NATS; the NATS quick-start script
-writes this file as its last step.
+mashctl does not install or start NATS; the NATS quick-start script writes
+this file as its last step.
