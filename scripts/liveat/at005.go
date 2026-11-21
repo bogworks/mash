@@ -401,7 +401,7 @@ func (s *At5) provision(ctl Host, verb string, e *ep5) bool {
 	jwtCarry := filepath.Join(ctl.Home().Dir, e.jwtBase()+"."+verb+".out.join") // a join file written on ctl; the courier moves its JWT
 	args := []string{"endpoint", verb, owner + ".dev." + e.name, "--out", jwtCarry, "--public-key", pubOnCtl}
 	if verb == "reissue" {
-		args = append(args, "--verbose") // the count of servers that took the account update is a --verbose line
+		args = append(args, "--detail") // the count of servers that took the account update is a --detail line (the one form the spec writes out)
 	}
 	r := s.ctl(ctl, "endpoint-"+verb+"-"+e.name, nil, args...)
 	ok := s.check(ctl.Role()+": mashctl endpoint "+verb+" "+owner+".dev."+e.name+" --out --public-key succeeds", r.Code == 0, exitSnip(r))
@@ -669,9 +669,8 @@ func (s *At5) Scenario() {
 	oldReview := filepath.Join(m1.Home().Dir, "review-old.creds")
 	s.check("M1: the review creds are copied to a private path before the delete", s.copyPrivate(m1, reviewCreds, oldReview, "review-old"), "")
 	s.acceptedOn("review key before the delete (control)", m1, "review", oldReview)
-	r := s.ctl(m1, "endpoint-delete-review", nil, "endpoint", "delete", "alice.dev.review", "--yes", "--verbose")
+	r := s.ctl(m1, "endpoint-delete-review", nil, "endpoint", "delete", "alice.dev.review", "--yes")
 	s.check("M1: mashctl endpoint delete alice/dev/review succeeds", r.Code == 0, exitSnip(r))
-	s.check("M1: endpoint delete reports that all three servers acknowledged the revocation", strings.Contains(r.Stdout, "servers acknowledged: 3"), snip(grepLine(r.Stdout, "acknowledged")))
 	s.check("REQ-011: the review session is dropped (its serve exits or reports the authorization failure)", s.closed(rp), "")
 	s.refusedOn("the deleted review key", m1, "review", oldReview)
 	st := s.mash(m1, "status-review", s.epEnv(m1, m3, "review", oldReview), "status")

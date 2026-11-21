@@ -7,59 +7,13 @@ import (
 	"github.com/bogworks/mash/internal/config"
 )
 
-// sysTarget asks announceTarget to name the system account credentials too: its path, from config.json.
-type sysTarget struct{}
-
 // maskURL hides the userinfo of a server URL, so it is never printed.
 func maskURL(u string) string { return config.RedactURL(u) }
 
-// sourceText is where the setting key came from, as a person reads it: the environment variable, the path of
-// config.json, or "default"/"unset".
-func sourceText(cfg config.Config, key string) string {
-	switch s := cfg.Source[key]; {
-	case s == "config.json" && cfg.File != "":
-		return cfg.File
-	case s == "":
-		return "unset"
-	default:
-		return s
-	}
-}
-
-// announceTarget acts before a verb connects to a server or changes anything. With verbose (--verbose) it prints, to
-// stderr, which server mashctl is about to act on and where each setting came from: the default output of a verb is the
-// specification's and holds no such line. Whatever verbose says, it prints a warning when an environment variable overrode a different
-// config.json value, and one more when the shell looks like it is inside an endpoint session whose own server that is.
-// It only informs: it never refuses, and it never prints the contents of a credentials file. sys, when set, adds the
-// system account credentials' path. Interim until the redesign gives the target an explicit flag or context (#183).
-func announceTarget(cfg config.Config, env func(string) string, stderr io.Writer, sys *sysTarget, verbose bool) {
-	line := "mashctl: target server " + maskURL(cfg.URL) + " (from " + sourceText(cfg, "servers") + ")"
-	if cfg.URL == "" {
-		line = "mashctl: target server unset"
-	}
-	if cfg.Owner != "" {
-		ownerSrc := sourceText(cfg, "endpoint")
-		if src := cfg.Source["endpoint"]; src == "unset" || src == "installed creds" {
-			ownerSrc = `config.json "owner"` // no endpoint is set: the owner key gave it
-		}
-		line += ", owner " + cfg.Owner + " (from " + ownerSrc + ")"
-	} else {
-		line += ", owner unset"
-	}
-	if cfg.AdminCreds != "" {
-		line += ", admin creds " + cfg.AdminCreds + " (from " + sourceText(cfg, "admin_creds") + ")"
-	} else {
-		line += ", admin creds unset"
-	}
-	if sys != nil {
-		if p, err := sysCredsPath("", env, cfg); err == nil {
-			line += ", system creds " + p + " (from config.json)"
-		}
-	}
-	if verbose {
-		fmt.Fprintln(stderr, line)
-	}
-
+// announceTarget acts before a verb connects to a server or changes anything. It prints a warning to stderr when an
+// environment variable overrode a different config.json value, and one more when the shell looks like it is inside an
+// endpoint session whose own server that is. It only informs: it never refuses. --detail changes nothing here.
+func announceTarget(cfg config.Config, env func(string) string, stderr io.Writer) {
 	// The override warning names the endpoint session the shell may be inside, so it is given when an endpoint launch
 	// token is set, or when MASH_ENDPOINT comes from the environment while config.json names servers (the shell's
 	// endpoint is not the one config.json describes). A central host sets neither, and its MASH_SERVER list is meant.

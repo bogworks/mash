@@ -207,9 +207,16 @@ type reissueJSON struct {
 	DryRun   bool    `json:"dry_run,omitempty"`
 }
 
-// epPrint prints the result of create or reissue: the action line, the join file line, and with --verbose the
-// label: value lines. Neither the seed nor a JWT is ever printed.
-func epPrint(w io.Writer, verb string, t epTarget, res epResult, verbose, jsonOut bool) {
+// reissueDetailJSON is reissue's JSON with --detail.
+type reissueDetailJSON struct {
+	reissueJSON
+	ServersAcknowledged int `json:"servers_acknowledged"`
+}
+
+// epPrint prints the result of create or reissue: the action line and the join file line. Only reissue has a
+// --detail form (servers acknowledged, and with --json a servers_acknowledged key, neither on --dry-run). Neither the
+// seed nor a JWT is ever printed.
+func epPrint(w io.Writer, verb string, t epTarget, res epResult, detail, jsonOut bool) {
 	name := t.addr.String()
 	var join, creds *string
 	if t.join {
@@ -221,7 +228,12 @@ func epPrint(w io.Writer, verb string, t epTarget, res epResult, verbose, jsonOu
 		if verb == "create" {
 			writeJSON(w, createJSON{Address: name, InstalledHere: !t.join, Creds: creds, JoinFile: join, DryRun: res.planned})
 		} else {
-			writeJSON(w, reissueJSON{Address: name, JoinFile: join, DryRun: res.planned})
+			r := reissueJSON{Address: name, JoinFile: join, DryRun: res.planned}
+			if detail && !res.planned {
+				writeJSON(w, reissueDetailJSON{reissueJSON: r, ServersAcknowledged: res.acked})
+			} else {
+				writeJSON(w, r)
+			}
 		}
 		return
 	}
@@ -240,20 +252,9 @@ func epPrint(w io.Writer, verb string, t epTarget, res epResult, verbose, jsonOu
 	if t.join {
 		fmt.Fprintf(w, "Join file: %s\n", t.outPath)
 	}
-	if !verbose {
-		return
-	}
-	if verb == "reissue" {
+	if verb == "reissue" && detail {
 		fmt.Fprintf(w, "servers acknowledged: %d\n", res.acked)
-		return
 	}
-	fmt.Fprintf(w, "servers: %s\n", strings.Join(t.base.servers, ", "))
-	if t.join {
-		fmt.Fprintf(w, "join file: %s\n", t.outPath)
-	} else {
-		fmt.Fprintf(w, "credentials file: %s\n", t.outPath)
-	}
-	fmt.Fprintf(w, "public key: %s\n", res.userPub)
 }
 
 // runEndpointCreate is `mashctl endpoint create`.
@@ -266,12 +267,11 @@ func runEndpointCreate(args []string, g cliframe.Global, env func(string) string
 	if err != nil {
 		return cliframe.Report(stdout, stderr, err, jsonRequested(args, "--out", "--public-key"))
 	}
-	in.verbose = g.Detail
 	t, res, err := epCreate(&in, env, lookup, stderr)
 	if err != nil {
 		return cliframe.Report(stdout, stderr, err, in.json)
 	}
-	epPrint(stdout, "create", t, res, g.Detail, in.json)
+	epPrint(stdout, "create", t, res, false, in.json)
 	return 0
 }
 
@@ -328,7 +328,7 @@ func epCreate(in *epInput, env func(string) string, lookup config.Lookup, stderr
 		return refuse(&epRefusal{"no_account_key", err.Error()})
 	}
 
-	announceTarget(cfg, env, stderr, nil, in.verbose)
+	announceTarget(cfg, env, stderr)
 	adm, ctx, closeAdmin, err := ctl.OpenAdmin("mashctl", cfg)
 	if err != nil {
 		return fail("server", admin.RewordUnavailable(err.Error())+"; nothing was changed")

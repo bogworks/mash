@@ -101,7 +101,7 @@ func runEndpointDelete(args []string, g cliframe.Global, env func(string) string
 	if err != nil {
 		return cliframe.Report(stdout, stderr, err, jsonRequested(args))
 	}
-	opts := retireOpts{verbose: g.Detail, dryRun: in.flags["--dry-run"], yes: in.flags["--yes"], again: "mashctl endpoint delete " + in.addr.String()}
+	opts := retireOpts{dryRun: in.flags["--dry-run"], yes: in.flags["--yes"], again: "mashctl endpoint delete " + in.addr.String()}
 	prompt := stdout
 	if in.json {
 		prompt = stderr
@@ -125,16 +125,5 @@ func runEndpointDelete(args []string, g cliframe.Global, env func(string) string
 		return 0
 	}
 	fmt.Fprintf(stdout, "Deleted endpoint %s\n", name)
-	if g.Detail {
-		if res.marker != "" {
-			fmt.Fprintf(stdout, "retired marker: %s\n", res.marker)
-		}
-		if res.acked > 0 {
-			fmt.Fprintf(stdout, "servers acknowledged: %d\n", res.acked)
-		}
-		if res.renamedTo != "" {
-			fmt.Fprintf(stdout, "credentials file: set aside as %s\n", res.renamedTo)
-		}
-	}
 	return 0
 }
