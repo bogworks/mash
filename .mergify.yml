@@ -44,6 +44,11 @@ merge_protections:
       - or:
           - -head ~= ^mergify/merge-queue/
           - -author = mergify[bot]
+      # Inactive for a docs-only pull request (no changed file matches the code regex, the same text as the docs queue's):
+      # it needs no approval or label, only the docs lint (pr-check) and adr-lint, enforced by the docs queue.
+      - or:
+          - files ~= ^(?!(.*\.md$|docs/.*\.(txt|rst|adoc|csv|log)$))|^(\.github/|\.mergify\.yml$|\.claude-plugin/|plugin/|scripts/|cmd/|internal/|ci/|spec/|changelog\.d/)|(?i:(^|/)(agents|claude|gemini|skill)\.md$)|(?i:(^|/)\.(cursorrules|windsurfrules)$)|(?i:\.tmpl$)|(?i:(^|/)(skills|commands|agents|hooks|prompts|briefings|plugins|\.claude-plugin|mash-setup)/)|^CHANGELOG\.md$|^docs/(branch-protection\.md|review/|reference/|allowed_signers$|skipped-releases\.txt$|release-cutover$)|\.go$|(^|/)go\.(mod|sum)$|(^|/)testdata/|conformanc[e]|^docs/.*\.(?i:png|jpe?g|gif|ico|pdf|woff2?)$
+          - "#files >= 300"
     success_conditions:
       - or:
           # Mirrors the approver in queue_conditions; internal/release/mergify_test.go fails if they differ.
@@ -51,7 +56,35 @@ merge_protections:
           - label = lead-approved
       - label != hold
 
+# A docs-only pull request needs only the docs lint (Randy 2026-11-21: "linting docs is all that's required"): pr-check carries
+# docs-lint, adr-lint is the ADR syntax check, and there is no codex-review, no lead-review, no approval or label. It has its
+# own queue, first, so a docs-only pull request is never batched with a code one (a batch with one code pull request runs the
+# full set) and a batch of docs-only ones clears in about the lint's time. A pull request enters it only when NO changed file
+# matches the code regex below, which is scripts/ci-changes' definition of "not documentation" written as one regular
+# expression; internal/release/mergify_test.go fails if the two disagree on any path, and if this text differs from the one in
+# merge_protections (one source, written twice). Anything else, .github/, .mergify.yml, scripts/ and spec/ included, goes to the
+# default queue below.
 queue_rules:
+  - name: docs
+    queue_conditions:
+      - base = main
+      - -draft
+      - -conflict
+      - label != hold
+      - "#files >= 1"
+      # GitHub returns at most 3000 files of a pull request and Mergify cannot see past that (codex H1): a large pull request is never docs-only here.
+      - "#files < 300"
+      - -files ~= ^(?!(.*\.md$|docs/.*\.(txt|rst|adoc|csv|log)$))|^(\.github/|\.mergify\.yml$|\.claude-plugin/|plugin/|scripts/|cmd/|internal/|ci/|spec/|changelog\.d/)|(?i:(^|/)(agents|claude|gemini|skill)\.md$)|(?i:(^|/)\.(cursorrules|windsurfrules)$)|(?i:\.tmpl$)|(?i:(^|/)(skills|commands|agents|hooks|prompts|briefings|plugins|\.claude-plugin|mash-setup)/)|^CHANGELOG\.md$|^docs/(branch-protection\.md|review/|reference/|allowed_signers$|skipped-releases\.txt$|release-cutover$)|\.go$|(^|/)go\.(mod|sum)$|(^|/)testdata/|conformanc[e]|^docs/.*\.(?i:png|jpe?g|gif|ico|pdf|woff2?)$
+      - check-success = @github-actions/pr-check
+      - check-success = @github-actions/adr-lint
+    merge_conditions:
+      - check-success = @github-actions/pr-check
+    batch_size:
+      min: 1
+      max: 5
+    max_checks_retries: 1
+    checks_timeout: 30 min
+    merge_method: fast-forward
   - name: default
     # To enter the queue (evaluated on the pull request). codex-review is the commit status the orchestrator's review
     # watcher (scripts/review-pr) posts on the head; pr-check is ci.yml's aggregate of every required job.
@@ -115,8 +148,15 @@ queue_rules:
     # tested commit. Branch protection must let Mergify bypass the pull request requirement: it pushes main itself.
     merge_method: fast-forward
 
-# First matching rule wins; an unmatched pull request gets medium (2000). pipeline > critical > normal > docs.
+# First matching rule wins; an unmatched pull request gets medium (2000). docs-only > pipeline > critical > normal > docs label.
 priority_rules:
+  # A docs-only pull request (the docs queue's regex, same text) goes ahead of everything: its batch takes a couple of minutes.
+  - name: docs-only
+    conditions:
+      - "#files >= 1"
+      - "#files < 300"
+      - -files ~= ^(?!(.*\.md$|docs/.*\.(txt|rst|adoc|csv|log)$))|^(\.github/|\.mergify\.yml$|\.claude-plugin/|plugin/|scripts/|cmd/|internal/|ci/|spec/|changelog\.d/)|(?i:(^|/)(agents|claude|gemini|skill)\.md$)|(?i:(^|/)\.(cursorrules|windsurfrules)$)|(?i:\.tmpl$)|(?i:(^|/)(skills|commands|agents|hooks|prompts|briefings|plugins|\.claude-plugin|mash-setup)/)|^CHANGELOG\.md$|^docs/(branch-protection\.md|review/|reference/|allowed_signers$|skipped-releases\.txt$|release-cutover$)|\.go$|(^|/)go\.(mod|sum)$|(^|/)testdata/|conformanc[e]|^docs/.*\.(?i:png|jpe?g|gif|ico|pdf|woff2?)$
+    priority: 5000
   - name: pipeline
     conditions:
       - label = pipeline

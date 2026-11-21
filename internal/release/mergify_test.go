@@ -2,10 +2,12 @@ package release
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -19,6 +21,11 @@ type mergify struct {
 		MergeConditions []string `yaml:"merge_conditions"`
 		MergeMethod     string   `yaml:"merge_method"`
 	} `yaml:"queue_rules"`
+	PriorityRules []struct {
+		Name       string `yaml:"name"`
+		Conditions []any  `yaml:"conditions"`
+		Priority   int    `yaml:"priority"`
+	} `yaml:"priority_rules"`
 	PullRequestRules []struct {
 		Name       string                    `yaml:"name"`
 		Conditions []string                  `yaml:"conditions"`
@@ -66,6 +73,23 @@ func splitConditions(t *testing.T, conds []any) (plain []string, ors [][]string)
 	return
 }
 
+// queueRule returns the queue rule of that name (the docs queue is first, the default queue second).
+func queueRule(t *testing.T, m mergify, name string) (q struct {
+	Name            string   `yaml:"name"`
+	QueueConditions []any    `yaml:"queue_conditions"`
+	MergeConditions []string `yaml:"merge_conditions"`
+	MergeMethod     string   `yaml:"merge_method"`
+}) {
+	t.Helper()
+	for _, r := range m.QueueRules {
+		if r.Name == name {
+			return r
+		}
+	}
+	t.Fatalf("no queue rule named %q", name)
+	return
+}
+
 func loadMergify(t *testing.T) mergify {
 	t.Helper()
 	b, err := os.ReadFile("../../.mergify.yml")
@@ -99,10 +123,10 @@ func TestMergify_waitsOnlyForChecksThatExist(t *testing.T) {
 	}
 	check := regexp.MustCompile(`^check-success = (.+)$`)
 	m := loadMergify(t)
-	if len(m.QueueRules) != 1 {
-		t.Fatalf("want one queue rule, got %d", len(m.QueueRules))
+	if len(m.QueueRules) != 2 || m.QueueRules[0].Name != "docs" || m.QueueRules[1].Name != "default" {
+		t.Fatalf("want the docs queue first and the default queue second, got %d queue rules", len(m.QueueRules))
 	}
-	q := m.QueueRules[0]
+	q := queueRule(t, m, "default")
 	queuePlain, _ := splitConditions(t, q.QueueConditions)
 	for _, c := range append(append([]string{}, queuePlain...), q.MergeConditions...) {
 		mm := check.FindStringSubmatch(c)
@@ -143,7 +167,7 @@ func TestMergify_waitsOnlyForChecksThatExist(t *testing.T) {
 // stays the brake in both places.
 func TestMergify_entryNeedsApprovalOrLabel(t *testing.T) {
 	m := loadMergify(t)
-	plain, ors := splitConditions(t, m.QueueRules[0].QueueConditions)
+	plain, ors := splitConditions(t, queueRule(t, m, "default").QueueConditions)
 	if len(ors) != 1 {
 		t.Fatalf("want exactly one or group in queue_conditions, got %d", len(ors))
 	}
@@ -176,7 +200,7 @@ func TestMergify_entryNeedsApprovalOrLabel(t *testing.T) {
 // bare check inside an or is banned, ADR 0078). During the migration week it is required beside the approval gate.
 func TestMergify_queueNeedsLeadReviewStatus(t *testing.T) {
 	m := loadMergify(t)
-	plain, ors := splitConditions(t, m.QueueRules[0].QueueConditions)
+	plain, ors := splitConditions(t, queueRule(t, m, "default").QueueConditions)
 	if !contains(plain, "check-success = lead-review") {
 		t.Errorf("queue_conditions lack the plain entry `check-success = lead-review`: %v", plain)
 	}
@@ -266,7 +290,7 @@ func TestWorkflows_labelResetRemovesApprovalLabels(t *testing.T) {
 // every push by anyone but the maintainers the queue's or group names.
 func TestMergify_outsiderApprovalsDieOnPush(t *testing.T) {
 	m := loadMergify(t)
-	_, ors := splitConditions(t, m.QueueRules[0].QueueConditions)
+	_, ors := splitConditions(t, queueRule(t, m, "default").QueueConditions)
 	if len(ors) != 1 {
 		t.Fatalf("want exactly one or group in queue_conditions, got %d", len(ors))
 	}
@@ -318,7 +342,7 @@ func TestMergify_mergeProtectionsMirrorsQueueEntry(t *testing.T) {
 		t.Fatalf("want exactly one merge_protections rule, got %d", len(m.MergeProtections))
 	}
 	r := m.MergeProtections[0]
-	qPlain, qOrs := splitConditions(t, m.QueueRules[0].QueueConditions)
+	qPlain, qOrs := splitConditions(t, queueRule(t, m, "default").QueueConditions)
 	plain, ors := splitConditions(t, r.SuccessConditions)
 	// Only label conditions: Mergify applies these to the queue draft's commit as merge conditions, so a check-success
 	// condition (adr-lint is skipped on drafts) would deadlock the queue.
@@ -390,6 +414,19 @@ func evalCondition(t *testing.T, c any, attrs map[string]string) bool {
 		}
 		return false
 	case string:
+		if cm := regexp.MustCompile(`^#files (>=|<) ([0-9]+)$`).FindStringSubmatch(v); cm != nil {
+			n, _ := strconv.Atoi(cm[2])
+			count := 0
+			for _, f := range strings.Split(attrs["files"], "\n") {
+				if f != "" {
+					count++
+				}
+			}
+			if cm[1] == ">=" {
+				return count >= n
+			}
+			return count < n
+		}
 		m := regexp.MustCompile(`^(-?)([a-z-]+) (~=|!=|=) (.+)$`).FindStringSubmatch(v)
 		if m == nil {
 			t.Fatalf("unsupported condition %q", v)
@@ -397,6 +434,14 @@ func evalCondition(t *testing.T, c any, attrs map[string]string) bool {
 		var res bool
 		switch m[3] {
 		case "~=":
+			if m[2] == "files" { // a list attribute: true when ANY changed file matches (so `-files ~=` means none does)
+				for _, f := range strings.Split(attrs["files"], "\n") {
+					if f != "" && codeRegexMatches(t, m[4], f) {
+						res = true
+					}
+				}
+				break
+			}
 			res = regexp.MustCompile(m[4]).MatchString(attrs[m[2]])
 		case "=":
 			res = attrs[m[2]] == m[4]
@@ -422,7 +467,7 @@ func TestMergify_mergeProtectionsSkipsQueueDrafts(t *testing.T) {
 		{"pr/ctl/x", "mergify[bot]", true},
 		{"pr/ctl/x", "randybias", true},
 	} {
-		attrs := map[string]string{"base": "main", "head": c.head, "author": c.author}
+		attrs := map[string]string{"base": "main", "head": c.head, "author": c.author, "files": "internal/x.go"}
 		if got := evalCondition(t, r.If, attrs); got != c.active {
 			t.Errorf("head %q author %q: rule active = %v, want %v", c.head, c.author, got, c.active)
 		}
@@ -475,7 +520,7 @@ func TestMergify_actionsChecksAreAppQualified(t *testing.T) {
 			}
 		}
 	}
-	q := loadMergify(t).QueueRules[0]
+	q := queueRule(t, loadMergify(t), "default")
 	plain, _ := splitConditions(t, q.QueueConditions)
 	check := regexp.MustCompile(`^check-success = (.+)$`)
 	seen := map[string]bool{}
@@ -498,5 +543,179 @@ func TestMergify_actionsChecksAreAppQualified(t *testing.T) {
 		if !seen[s] {
 			t.Errorf("queue_conditions lack the plain `check-success = %s`", s)
 		}
+	}
+}
+
+// codeRegexMatches evaluates the code regex (the text of the docs queue's `-files ~=` condition) on one path. Mergify's regular
+// expressions are Python's; Go's RE2 has no lookahead, and the expression has exactly one, in its first alternative
+// (`^(?!(docs/|.*\.md$))`: not under docs/ and not a Markdown file), which is evaluated here as that sentence. Every other
+// alternative is plain RE2.
+func codeRegexMatches(t *testing.T, re, path string) bool {
+	t.Helper()
+	const lookahead = `^(?!(.*\.md$|docs/.*\.(txt|rst|adoc|csv|log)$))`
+	rest, ok := strings.CutPrefix(re, lookahead+"|")
+	if !ok {
+		t.Fatalf("the code regex must start with %s: %.60s", lookahead, re)
+	}
+	// the lookahead: not Markdown anywhere, and not a plain-text file under docs/
+	plainText := false
+	if strings.HasPrefix(path, "docs/") {
+		for _, e := range []string{".txt", ".rst", ".adoc", ".csv", ".log"} {
+			plainText = plainText || strings.HasSuffix(path, e)
+		}
+	}
+	if !strings.HasSuffix(path, ".md") && !plainText {
+		return true
+	}
+	return regexp.MustCompile(rest).MatchString(path)
+}
+
+// The docs queue's code regex, as written in .mergify.yml.
+func docsQueueRegex(t *testing.T, m mergify) string {
+	t.Helper()
+	plain, _ := splitConditions(t, queueRule(t, m, "docs").QueueConditions)
+	for _, c := range plain {
+		if re, ok := strings.CutPrefix(c, "-files ~= "); ok {
+			return re
+		}
+	}
+	t.Fatal("the docs queue has no `-files ~=` condition")
+	return ""
+}
+
+// The docs queue is first, holds exactly the conditions a docs-only pull request needs (the docs lint in pr-check, adr-lint,
+// and the usual blockers), none of the review or approval ones, and merges the same way as the default queue.
+func TestMergify_docsQueue(t *testing.T) {
+	m := loadMergify(t)
+	if len(m.QueueRules) != 2 || m.QueueRules[0].Name != "docs" {
+		t.Fatalf("the docs queue must be the first of two queue rules: %v", m.QueueRules)
+	}
+	d := queueRule(t, m, "docs")
+	plain, ors := splitConditions(t, d.QueueConditions)
+	if len(ors) != 0 {
+		t.Errorf("the docs queue has or groups: %v (no approval or label)", ors)
+	}
+	re := docsQueueRegex(t, m)
+	want := []string{"base = main", "-draft", "-conflict", "label != hold", `#files >= 1`, `#files < 300`, "-files ~= " + re,
+		"check-success = @github-actions/pr-check", "check-success = @github-actions/adr-lint"}
+	got := append([]string{}, plain...)
+	sort.Strings(got)
+	sort.Strings(want)
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("docs queue conditions:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	for _, c := range plain {
+		for _, banned := range []string{"codex-review", "lead-review", "approved-reviews-by", "lead-approved", "security-review", "opus-review"} {
+			if strings.Contains(c, banned) {
+				t.Errorf("the docs queue requires %q: a docs-only change needs only the docs lint", c)
+			}
+		}
+	}
+	def := queueRule(t, m, "default")
+	if strings.Join(d.MergeConditions, "|") != strings.Join(def.MergeConditions, "|") || d.MergeMethod != "fast-forward" {
+		t.Errorf("docs queue merge: conditions %v method %q, want the default queue's (%v) and fast-forward", d.MergeConditions, d.MergeMethod, def.MergeConditions)
+	}
+	// One source: the merge_protections rule's `if` carries the same regex text as the docs queue.
+	var found bool
+	for _, c := range m.MergeProtections[0].If {
+		if mm, ok := c.(map[string]any); ok {
+			if list, ok := mm["or"].([]any); ok {
+				for _, e := range list {
+					if s, ok := e.(string); ok && s == "files ~= "+re {
+						found = true
+					}
+				}
+			}
+		}
+	}
+	if !found {
+		t.Error("merge_protections' if has no `files ~=` condition with the docs queue's regex text")
+	}
+}
+
+// The code regex and scripts/ci-changes agree on every path: a pull request touching any path the classifier calls code never
+// matches the docs queue (and keeps the approval rule), and a docs-only one always does.
+func TestMergify_docsRegexAgreesWithTheClassifier(t *testing.T) {
+	re := docsQueueRegex(t, loadMergify(t))
+	paths := []string{
+		"docs/a.md", "docs/decisions/0099-x.md", "README.md", "docs/guide/x.md", "docs/images/a.svg", "docs/notes.txt", "docs/a/b/c.md",
+		"CHANGELOG.md", "changelog.d/a.fixed.md", "CONTRIBUTING.md", "AGENTS.md", ".github/workflows/ci.yml", ".github/PULL_REQUEST_TEMPLATE.md",
+		".mergify.yml", ".claude-plugin/plugin.json", "plugin/README.md", "scripts/gate", "scripts/doclint/main.go", "scripts/x/README.md",
+		"cmd/mash/main.go", "cmd/mash/NOTES.md", "internal/x.go", "internal/foo/README.md", "ci/x.md", "spec/rules.json", "spec/README.md",
+		"go.mod", "go.sum", "tools/go.mod", "main.go", "docs/x/main.go", "internal/policy/testdata/a.md", "docs/x/testdata/b.md", "testdata/z.md",
+		"docs/contracts/conformance-vectors.json", "docs/conformance.md", "docs/branch-protection.md", "docs/reference/mash-send.md",
+		"docs/review/policy.json", "docs/review/in-session-loop.md", "docs/allowed_signers", "docs/skipped-releases.txt", "docs/release-cutover",
+		"docs/images/a.PNG", "docs/images/a.png", "docs/images/b.JPEG", "docs/images/c.gif", "docs/images/d.pdf", "docs/fonts/e.WOFF2", "Makefile",
+		"LICENSE", "docs", "docs.md", "xdocs/a.md", "mash-setup/skills/setup/SKILL.md", "mash-setup/.claude-plugin/plugin.json", "AGENTS.md", "CLAUDE.md", "docs/guide/AGENTS.md", "docs/x/CLAUDE.md", "docs/agents.md", "docs/MYAGENTS.md", "docs/agents-notes.md",
+		"docs/x/GEMINI.md", "docs/x/claude.md", "docs/anywhere/SKILL.md", "docs/skills/notes.md", "docs/commands/x.md", "docs/agents/INSTALL.md", "docs/hooks/x.md",
+		"docs/prompts/a.md", "briefings/a.md", "plugins/x/README.md", "docs/.claude-plugin/a.md", "docs/x/briefing.tmpl", ".cursorrules", ".windsurfrules",
+		"Mash-Setup/x.md", "docs/Mash-Setup/y.md", "mash-setup/a.md", "docs/evidence/2026-11-02-heartbeat-fanout/run.sh", "docs/x/data.json", "docs/images/a.svg", "docs/demo/two-sessions.cast", "docs/a.txt", "docs/b.rst", "docs/evidence/x/timeline.log", "docs/x/Makefile", "README.md", "docs/install.md", "SECURITY.md", "CONTRIBUTING.md", "docs/Skills/Uppercase.md", "x/AGENTS.MD",
+		"docs/specs/2026-10-21-mash-design.md", "docs/security/threat-model.md", "a.txt",
+	}
+	if out, err := exec.Command("git", "-C", "../..", "ls-files").Output(); err == nil {
+		all := strings.Split(strings.TrimSpace(string(out)), "\n")
+		for i := 0; i < len(all); i += 13 {
+			paths = append(paths, all[i])
+		}
+	}
+	for _, p := range paths {
+		classifierDocs := ciChanges(t, "pull_request", "f/x", p) == "code=false"
+		regexDocs := !codeRegexMatches(t, re, p)
+		if classifierDocs != regexDocs {
+			t.Errorf("%q: scripts/ci-changes docs-only=%v, the docs queue regex docs-only=%v", p, classifierDocs, regexDocs)
+		}
+	}
+}
+
+// A docs-only pull request is served first: the first priority rule carries the docs queue's regex text and the highest
+// priority of all, so its couple-of-minutes batch never waits behind a code batch that is only queued.
+func TestMergify_docsOnlyPriorityIsHighest(t *testing.T) {
+	m := loadMergify(t)
+	re := docsQueueRegex(t, m)
+	if len(m.PriorityRules) == 0 || m.PriorityRules[0].Name != "docs-only" {
+		t.Fatalf("the first priority rule must be docs-only: %+v", m.PriorityRules)
+	}
+	r := m.PriorityRules[0]
+	plain, _ := splitConditions(t, r.Conditions)
+	if !contains(plain, "-files ~= "+re) {
+		t.Errorf("docs-only priority conditions %v lack the docs queue's regex text", plain)
+	}
+	for _, o := range m.PriorityRules[1:] {
+		if o.Priority >= r.Priority {
+			t.Errorf("priority rule %q (%d) is not below docs-only (%d)", o.Name, o.Priority, r.Priority)
+		}
+	}
+}
+
+// A pull request with 300 or more changed files is never docs-only for the queue (GitHub returns at most 3000 files and Mergify
+// cannot see past that, codex H1 on the docs queue): the docs queue and the priority rule require fewer than 300, and the approval
+// rule stays active from 300 up.
+func TestMergify_aHugePullRequestIsNeverDocsOnly(t *testing.T) {
+	m := loadMergify(t)
+	var docs []string
+	for i := 0; i < 400; i++ {
+		docs = append(docs, "docs/guide/page"+strconv.Itoa(i)+".md")
+	}
+	attrs := map[string]string{"base": "main", "head": "pr/x/y", "author": "randybias", "files": strings.Join(docs, "\n")}
+	if !evalCondition(t, m.MergeProtections[0].If, attrs) {
+		t.Error("the approval rule must stay active for 400 docs files")
+	}
+	d := queueRule(t, m, "docs")
+	plain, _ := splitConditions(t, d.QueueConditions)
+	var fileConds []any // the conditions about the changed files (the rest are checks and labels, which this test does not model)
+	for _, c := range plain {
+		if strings.HasPrefix(c, "#files") || strings.HasPrefix(c, "-files") {
+			fileConds = append(fileConds, c)
+		}
+	}
+	if evalCondition(t, fileConds, map[string]string{"files": strings.Join(docs, "\n")}) {
+		t.Error("the docs queue must not admit 400 files")
+	}
+	if !evalCondition(t, fileConds, map[string]string{"files": "docs/a.md\ndocs/b.md"}) {
+		t.Error("the docs queue must admit two docs files")
+	}
+	small := map[string]string{"base": "main", "head": "pr/x/y", "author": "randybias", "files": "docs/a.md"}
+	if evalCondition(t, m.MergeProtections[0].If, small) {
+		t.Error("the approval rule must be inactive for one docs file")
 	}
 }
