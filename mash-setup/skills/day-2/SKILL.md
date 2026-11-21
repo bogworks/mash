@@ -123,18 +123,6 @@ MASH_ENDPOINT=acme.demo.carol claude
 
 Mail arrives with that session's next prompt or tool call.
 
-### Wake an idle session (optional)
-
-`--dangerously-load-development-channels` is Claude Code's own flag. It lets a
-development plugin push a channel notification that wakes an idle session, and
-Claude Code asks the person to confirm it at each launch. It is the person's
-choice: never add it on your own word; explain it, ask, and only on a yes give
-them the line with it:
-
-```sh person
-MASH_ENDPOINT=acme.demo.carol claude --dangerously-load-development-channels plugin:mash@mash
-```
-
 An address that was deleted can never be used again; pick another name.
 
 ## See the endpoints
