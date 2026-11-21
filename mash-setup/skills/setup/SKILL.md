@@ -47,7 +47,8 @@ Say which of these it is, say the next command you would run, and wait.
 
 ## 1. Plan: ask, then read it back
 
-Ask in order. Each has a default; the person may take it.
+Ask in order, all in one message. Each has a default; the person may take
+it.
 
 1. Owner name. Default: the login name, if it is lower-case letters and
    digits. An owner is one namespace: the first part of every address
@@ -58,20 +59,36 @@ Ask in order. Each has a default; the person may take it.
 3. Two agent names. Default `bob` and `alice`. Each agent's address is
    `owner.group.name`, for example `acme.demo.bob`.
 
-Everything else is fixed here: the programs go in `~/.local/bin`, the server
-folder is `~/mash-nats`, the server listens on this machine only.
+4. Install folder for the two programs. Default `~/.local/bin`. It is the
+   installer's `MASH_INSTALL_DIR`.
+5. Server folder. Default `~/mash-nats`. It is the setup script's `--dir`; give
+   it as an absolute path (not `~`, not relative).
+6. Download folder for the two scripts. Default `~/mash-setup-dl`.
+
+Everything else is fixed here: the server listens on this machine only, and
+the repository is `bogworks/mash`.
+
+Carry the answers to every later command. Each block runs in a fresh shell, so
+start each block that needs them with the line that sets them, with the
+person's values (these are the defaults). Where a later block or sentence
+names `~/.local/bin`, `~/mash-nats` or `~/mash-setup-dl`, use their folder:
+
+```sh
+BIN="$HOME/.local/bin"; SRV="$HOME/mash-nats"; DL="$HOME/mash-setup-dl"
+```
 
 Read-only look at the machine, in one block. It changes nothing:
 
 ```sh
-uname -sm; command -v mash mashctl nats-server nats openssl claude; ls -d "$HOME/mash-nats" 2>&1; claude plugin list 2>&1 | head -20
+uname -sm; command -v mash mashctl nats-server nats openssl claude; ls -d "$HOME/mash-nats" "$HOME/.local/bin" "$HOME/mash-setup-dl" 2>&1; claude plugin list 2>&1 | head -20
 ```
 
 Then say this to the person, filled in, and wait for a yes:
 
 ```
 I will:
-  download mash and mashctl         from the latest release, checked against its checksums
+  download mash and mashctl         from the latest release (one tag, checked
+                                    against its checksums), into ~/.local/bin
   make a NATS server                in ~/mash-nats, this machine only, run as you
                                     (a program you run: after a reboot it is
                                      stopped; start it again with --start)
@@ -106,23 +123,33 @@ Needs a yes: downloading and running two scripts from the mash release. You
 never pipe a download into a shell. You download each file, check it against
 the release's checksums, show it to the person, and run it after a yes.
 
+Use the person's download folder for `DL` (the first assignment below).
+Resolve the release tag once, and use it for the downloads and for the
+installer, so all three agree even if a newer release appears in between:
+
 ```sh
-D="$HOME/mash-setup-dl"; mkdir -p "$D" && cd "$D" && U=https://github.com/bogworks/mash/releases/latest/download && curl -fsSL -O "$U/SHA256SUMS" -O "$U/install.sh" -O "$U/mash-local-nats-setup.sh" && grep -E ' (install.sh|mash-local-nats-setup.sh)$' SHA256SUMS | sha256sum -c -
+DL="$HOME/mash-setup-dl"; TAG=$(curl -fsSL -o /dev/null -w '%{url_effective}' https://github.com/bogworks/mash/releases/latest); TAG=${TAG##*/}; echo "$TAG" && mkdir -p "$DL" && cd "$DL" && U=https://github.com/bogworks/mash/releases/download/$TAG && curl -fsSL -O "$U/SHA256SUMS" -O "$U/install.sh" -O "$U/mash-local-nats-setup.sh" && grep -E ' (install.sh|mash-local-nats-setup.sh)$' SHA256SUMS | sha256sum -c -
 ```
+
+Say the tag back to the person (it looks like `v0.5.6`) and use that same
+value as `TAG` in step 4.
 
 Expected: `install.sh: OK` and `mash-local-nats-setup.sh: OK`. On macOS
 `sha256sum` may be missing: use `shasum -a 256 -c -`. Anything else, or a
 `404`: stop and ask. A mismatch means the file is not the release's file:
 do not run it.
 
-Show both files to the person (`cat "$HOME/mash-setup-dl/install.sh"`, then the
+Show both files to the person (`cat "$DL/install.sh"`, then the
 same for the other), say in one sentence what each does, and ask for the yes.
 
 ## 4. Install mash and mashctl, then make the server
 
 ```sh
-bash "$HOME/mash-setup-dl/install.sh"
+BIN="$HOME/.local/bin"; DL="$HOME/mash-setup-dl"; TAG=vX.Y.Z
+MASH_INSTALL_DIR="$BIN" MASH_VERSION="$TAG" bash "$DL/install.sh"
 ```
+
+Replace `vX.Y.Z` with the tag from step 3.
 
 Expected: `Installed mash v<version> (<commit>) in <folder>` and the same for
 `mashctl`. If it says the folder is not on the PATH, tell the person to add it
@@ -138,7 +165,8 @@ Make the server. Needs a yes: starting a NATS server on this machine, run as
 the person's own user:
 
 ```sh
-bash "$HOME/mash-setup-dl/mash-local-nats-setup.sh" --owner acme
+SRV="$HOME/mash-nats"; DL="$HOME/mash-setup-dl"
+bash "$DL/mash-local-nats-setup.sh" --dir "$SRV" --owner acme
 ```
 
 It prints a line for each step and ends with the next command, with the path

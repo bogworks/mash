@@ -13,8 +13,12 @@ description: >-
 
 For a person, or for an agent following it. This covers a mash set up by the
 setup skill: a NATS server in `~/mash-nats` (or the folder the person chose),
-run as the person's own user. If `mash` is not installed or `mashctl status`
-shows no server, say so, make nothing, and point to the setup skill.
+run as the person's own user. If `mash` is not installed, say so, make nothing,
+and point to the setup skill. If `mashctl status` shows no server, tell a
+stopped server from an unconfigured one: if the server folder exists and holds
+its `mash-setup.json`, the server was set up and is stopped (after a reboot,
+say), so use "The server does not answer" below; only when there is no such
+folder, make nothing and point to the setup skill.
 
 You may run every read-only command below. A command that changes something
 needs the person's yes first. Blocks marked `sh person` are for the person to
@@ -24,8 +28,10 @@ read-only commands. A typed confirmation cannot show a human is present, so
 you never run those yourself, and you never use `--yes` to skip one.
 
 Take every path from a command's output or from the person, never from memory.
-The server folder is the one the setup printed (`~/mash-nats` by default); in
-the blocks below it is written `~/mash-nats`: use theirs.
+The server folder is the one the setup printed (`~/mash-nats` by default) and
+the download folder is the one the person chose (`~/mash-setup-dl` by
+default). The blocks below set them as `SRV` and `DL` in their first line: use
+the person's absolute paths there.
 
 ## Is it working
 
@@ -49,7 +55,8 @@ reboot. Check (`mashctl doctor` names what is wrong on the server side), then
 start it:
 
 ```sh
-bash "$HOME/mash-setup-dl/mash-local-nats-setup.sh" --dir "$HOME/mash-nats" --start
+SRV="$HOME/mash-nats"; DL="$HOME/mash-setup-dl"
+bash "$DL/mash-local-nats-setup.sh" --dir "$SRV" --start
 ```
 
 `--start` never creates a server: if the folder is missing it says so and
@@ -61,7 +68,8 @@ download it again and check it as the setup skill's step 3 does.
 Needs a yes: stopping it ends mail delivery until it is started again.
 
 ```sh
-bash "$HOME/mash-setup-dl/mash-local-nats-setup.sh" --dir "$HOME/mash-nats" --stop
+SRV="$HOME/mash-nats"; DL="$HOME/mash-setup-dl"
+bash "$DL/mash-local-nats-setup.sh" --dir "$SRV" --stop
 ```
 
 It stops only the server it started, and says `not running` when there is
@@ -111,18 +119,28 @@ stored mail. The mailboxes stop working. The script asks the person to type
 the folder path and refuses without a terminal:
 
 ```sh person
-bash "$HOME/mash-setup-dl/mash-local-nats-setup.sh" --dir "$HOME/mash-nats" --remove
+SRV="$HOME/mash-nats"; DL="$HOME/mash-setup-dl"
+bash "$DL/mash-local-nats-setup.sh" --dir "$SRV" --remove
 ```
 
-mash keeps its own copies of the keys in `~/.config/mash`; they open nothing
-once the server is gone. To start again, the person first moves that folder
-aside, or `mashctl init` refuses the new server's operator key:
+mash keeps its own copies of the keys in its config folder; they open nothing
+once the server is gone. Find the active config folder first, read-only: an
+absolute `$MASH_CONFIG_DIR`, else an absolute `$XDG_CONFIG_HOME/mash`, else
+`$HOME/.config/mash`.
+
+```sh
+case "${MASH_CONFIG_DIR:-}" in /*) C=$MASH_CONFIG_DIR ;; *) case "${XDG_CONFIG_HOME:-}" in /*) C=$XDG_CONFIG_HOME/mash ;; *) C=$HOME/.config/mash ;; esac ;; esac; echo "$C"; ls -d "$C"
+```
+
+To start again, the person first moves that folder aside (the path the
+command printed), or `mashctl init` refuses the new server's operator key:
 
 ```sh person
-mv "$HOME/.config/mash" "$HOME/.config/mash.old"
+C=/path/printed/above
+mv "$C" "$C.old"
 ```
 
-They may remove `$HOME/mash-setup-dl` too for a fresh download. Then follow
+They may remove the download folder too for a fresh download. Then follow
 the setup skill from step 1.
 
 ## Mail does not arrive
@@ -138,10 +156,12 @@ the setup skill from step 1.
 
 ## Upgrade
 
-Needs a yes. Run the setup skill's steps 3 and 4 for the new release (they
-replace `mash` and `mashctl`; the server and the mailboxes are kept), then
-`claude plugin marketplace update mash` and `claude plugin update mash@mash`,
-and restart the sessions.
+Needs a yes. Run the setup skill's step 3 (resolve one tag, download and check
+the scripts) and then only the installer of step 4, with `MASH_VERSION` set to
+that tag. It replaces `mash` and `mashctl`; the server and the mailboxes are
+kept. Never run the server-creation command: it refuses an existing folder.
+Then run `claude plugin marketplace update mash` and
+`claude plugin update mash@mash`, and restart the sessions.
 
 ## Do not
 
@@ -149,4 +169,4 @@ and restart the sessions.
 - Do not print, paste or mail a seed, a credentials file or a key.
 - Do not stop, change or remove a NATS server this guide did not make.
 - Do not use `pkill`, `killall` or `pgrep -f`.
-- Do not delete files by hand in `~/mash-nats` or `~/.config/mash`.
+- Do not delete files by hand in the server folder or mash's config folder.

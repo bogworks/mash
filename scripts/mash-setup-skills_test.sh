@@ -78,7 +78,7 @@ if [ -z "$extra" ]; then
 else
   fail "mash-setup plugin.json declares: $extra"
 fi
-top="$(find mash-setup -mindepth 1 -maxdepth 1 -printf '%f\n' | sort | tr '\n' ' ')"
+top="$(find mash-setup -mindepth 1 -maxdepth 1 -exec basename {} \; | sort | tr '\n' ' ')"
 if [ "$top" = ".claude-plugin skills " ]; then
   ok "mash-setup holds only .claude-plugin and skills"
 else
@@ -90,7 +90,7 @@ if [ -z "$bad" ]; then
 else
   fail "mash-setup has non-skill parts: $bad"
 fi
-sk="$(find mash-setup/skills -mindepth 1 -maxdepth 1 -printf '%f\n' | sort | tr '\n' ' ')"
+sk="$(find mash-setup/skills -mindepth 1 -maxdepth 1 -exec basename {} \; | sort | tr '\n' ' ')"
 if [ "$sk" = "day-2 setup " ]; then
   ok "skills are exactly day-2 and setup"
 else
@@ -318,10 +318,10 @@ fi
 
 # ---------------------------------------------------------------- check 5
 echo "== 5 release asset names"
-WANT_BASE=https://github.com/bogworks/mash/releases/latest/download
-bases="$(cat "$SETUP" "$DAY2" | grep -oE 'https://github\.com/bogworks/mash/releases[^ "$]*' | sort -u | tr '\n' ' ')"
-if [ "$bases" = "$WANT_BASE " ]; then
-  ok "only the release base $WANT_BASE is referenced"
+WANT_BASE=https://github.com/bogworks/mash/releases/download/\$TAG
+bases="$(cat "$SETUP" "$DAY2" | grep -oE 'https://github\.com/bogworks/mash/releases[^ ";)]*' | sort -u | tr '\n' ' ')"
+if [ "$bases" = "https://github.com/bogworks/mash/releases/download/\$TAG https://github.com/bogworks/mash/releases/latest " ]; then
+  ok "only the tag-pinned download base and the latest redirect (for the tag) are referenced"
 else
   fail "release URLs referenced: $bases"
 fi
@@ -332,18 +332,19 @@ else
   fail "downloaded assets are: $assets"
 fi
 ubase="$(grep -oE 'U=[^ ;&]+' "$SETUP" | sort -u | tr '\n' ' ')"
-if [ "$ubase" = "U=$WANT_BASE " ]; then ok "U= points at the latest-download base"; else fail "U= is: $ubase"; fi
+if [ "$ubase" = "U=$WANT_BASE " ]; then ok "U= points at the tag-pinned download base"; else fail "U= is: $ubase"; fi
 gnames="$(grep -oE "grep -E '[^']*'" "$SETUP" | head -n1 | sed -E 's/.*\((.*)\).*/\1/' | tr '|' '\n' | sed 's/\\//g' | sort | tr '\n' ' ')"
 if [ "$gnames" = "install.sh mash-local-nats-setup.sh " ]; then
   ok "the checksum grep names install.sh and mash-local-nats-setup.sh"
 else
   fail "the checksum grep names: $gnames"
 fi
-if grep -Eq 'releases/download/|bogworks/mash[^ ]*\.(tar\.gz|tgz|zip|deb|rpm)' "$SETUP" "$DAY2"; then
-  fail "a skill names a release archive or a versioned download"
+if grep -Eq 'bogworks/mash[^ ]*\.(tar\.gz|tgz|zip|deb|rpm)' "$SETUP" "$DAY2"; then
+  fail "a skill names a release archive"
 else
-  ok "no archive or versioned release download is referenced"
+  ok "no release archive is referenced"
 fi
+if grep -q 'MASH_VERSION="\$TAG"' "$SETUP"; then ok "the installer is pinned to the resolved tag"; else fail "the installer is not run with MASH_VERSION=\$TAG"; fi
 
 # ---------------------------------------------------------------- check 6
 echo "== 6 required sections and plugin facts"
