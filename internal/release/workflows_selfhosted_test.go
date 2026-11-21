@@ -257,6 +257,7 @@ func TestGateJobsUseGateRunners(t *testing.T) {
 		"label-reset.yml/label-reset": true,
 		"adr-lint.yml/adr-lint":       true,
 		"ci.yml/changes":              true,
+		"ci.yml/docs-lint":            true,
 		"ci.yml/pr-check":             true,
 		"lint.yml/changes":            true,
 		"security.yml/changes":        true,

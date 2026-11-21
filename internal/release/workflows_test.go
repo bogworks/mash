@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -1251,7 +1252,7 @@ func TestBuildTwice_cleansUpEvenWhenTheRefIsAlreadyGone(t *testing.T) {
 // pr-check (the one check a pull request's merge waits for), and conformance (the fast static slice a pull request's
 // review starts on; it gates neither a merge nor a release).
 // test (macos) is advisory (ADR 0079, TODO(macos-gate) in ci.yml) and so is test (linux, eph) (ADR 0123): visible, but they gate neither a merge nor a release.
-var ciOnlyJobs = []string{"adr-numbers", "changes", "conformance", "pr-check", "test (linux, eph)", "test (macos)"}
+var ciOnlyJobs = []string{"adr-numbers", "changes", "conformance", "docs-lint", "pr-check", "test (linux, eph)", "test (macos)"}
 
 // pr-check is the single check scripts/review-pr waits for before a review: it must run on every pull request (a
 // docs-only one too, or its review waits forever), after every required job, and pass only if they did.
@@ -1287,6 +1288,30 @@ func TestCI_prCheckGatesOnEveryRequiredJob(t *testing.T) {
 	}
 	if tj := w.Jobs["test"]; !strings.Contains(tj.If, "github.event_name == 'push'") {
 		t.Errorf("the test job must always run on a push (the release gate reads main's check runs): if %q", tj.If)
+	}
+}
+
+// docs-lint is the one check a docs-only change needs: pr-check fails when it did not succeed, whatever the classifier said,
+// and a docs-only change (both heavy jobs skipped) passes with it alone.
+func TestCI_prCheckNeedsDocsLint(t *testing.T) {
+	var script string
+	for _, st := range load(t, "ci.yml").Jobs["pr-check"].Steps {
+		if st.Run != "" {
+			script = st.Run
+		}
+	}
+	for _, c := range []struct {
+		docs string
+		ok   bool
+	}{{"success", true}, {"failure", false}, {"cancelled", false}, {"skipped", false}, {"", false}} {
+		cmd := exec.Command("bash", "-c", script)
+		cmd.Env = append(os.Environ(), "CHANGES=success", "CODE=false", "TEST=skipped", "REPRO=skipped", "ADR=success", "DOCS="+c.docs)
+		if out, err := cmd.CombinedOutput(); (err == nil) != c.ok {
+			t.Errorf("docs-lint=%q: ok=%v, want %v (%s)", c.docs, err == nil, c.ok, out)
+		}
+	}
+	if !slices.Contains(jobNeeds(load(t, "ci.yml").Jobs["pr-check"].Needs), "docs-lint") {
+		t.Error("pr-check does not need docs-lint")
 	}
 }
 
@@ -1328,7 +1353,7 @@ func TestCI_prCheckVerdict(t *testing.T) {
 		{"true", "success", "success", "", false},
 	} {
 		cmd := exec.Command("bash", "-c", script)
-		cmd.Env = append(os.Environ(), "CHANGES=success", "CODE="+c.code, "TEST="+c.test, "REPRO="+c.repro, "ADR="+c.adr)
+		cmd.Env = append(os.Environ(), "CHANGES=success", "CODE="+c.code, "TEST="+c.test, "REPRO="+c.repro, "ADR="+c.adr, "DOCS=success")
 		out, err := cmd.CombinedOutput()
 		if (err == nil) != c.ok {
 			t.Errorf("code=%q test=%s reproducible=%s: ok=%v, want %v (%s)", c.code, c.test, c.repro, err == nil, c.ok, out)
@@ -1337,7 +1362,7 @@ func TestCI_prCheckVerdict(t *testing.T) {
 	// A changes job that did not succeed is no answer, whatever the other jobs did.
 	for _, changes := range []string{"failure", "cancelled", "skipped", ""} {
 		cmd := exec.Command("bash", "-c", script)
-		cmd.Env = append(os.Environ(), "CHANGES="+changes, "CODE=false", "TEST=skipped", "REPRO=skipped", "ADR=success")
+		cmd.Env = append(os.Environ(), "CHANGES="+changes, "CODE=false", "TEST=skipped", "REPRO=skipped", "ADR=success", "DOCS=success")
 		if out, err := cmd.CombinedOutput(); err == nil {
 			t.Errorf("changes=%q passed pr-check (%s)", changes, out)
 		}

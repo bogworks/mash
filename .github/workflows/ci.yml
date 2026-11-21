@@ -224,12 +224,47 @@ jobs:
           go-version-file: go.mod
           cache: false
       - run: go run ./scripts/adrlint docs
+  # The one check a docs-only change needs (Randy 2026-11-21: "as long as they properly conform to their syntax, I don't see why
+  # anything else needs to run"): every tracked Markdown file has closed code fences and relative links that resolve
+  # (scripts/doclint). It runs on every change and takes seconds. Pull requests, the merge queue's drafts and pushes to
+  # main all run it, and pr-check needs it.
+  docs-lint:
+    timeout-minutes: 5
+    # A gate job (ADR 0086): on the small gate runners, so a docs-only pull request never waits behind the test jobs for a runner.
+    # Gate runners also run label-reset with a label-edit token, so nothing from the pull request is built or run here: the linter is
+    # built from the BASE revision (a second checkout; main itself on a push) and the pull request's checkout is only its input.
+    # The pull request that adds scripts/doclint has no linter on its base: the step says so and passes (a later change to the
+    # linter is a change under scripts/, which is code and gets the full review).
+    runs-on: [self-hosted, rh-gate]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: pr
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha || github.sha }}
+          path: base
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: base/go.mod
+          cache: false
+      - name: Lint the Markdown with the base revision's linter
+        run: |
+          set -euo pipefail
+          if [ -d base/scripts/doclint ]; then
+            (cd base && go build -o "$RUNNER_TEMP/doclint" ./scripts/doclint)
+            "$RUNNER_TEMP/doclint" --root pr
+          else
+            echo "the base revision has no scripts/doclint (the pull request that adds it): nothing to run it with"
+          fi
   # The one check scripts/review-pr waits for before a Codex review: it passes only if every job above passed. A heavy job
   # (test, reproducible) may be skipped only when changes succeeded and said code=false (a docs-only pull request); a
   # skip with code=true or with no answer, a failure and a cancellation all fail it. always(), so a failed or skipped job
   # still gives a verdict.
   pr-check:
-    needs: [changes, test, reproducible, adr-numbers]
+    needs: [changes, test, reproducible, adr-numbers, docs-lint]
     if: always()
     timeout-minutes: 5
     runs-on: [self-hosted, rh-gate]
@@ -241,11 +276,13 @@ jobs:
           TEST: ${{ needs.test.result }}
           REPRO: ${{ needs.reproducible.result }}
           ADR: ${{ needs.adr-numbers.result }}
+          DOCS: ${{ needs.docs-lint.result }}
         run: |
           set -eu
-          echo "changes: $CHANGES, code=$CODE; test: $TEST; reproducible: $REPRO; adr-numbers: $ADR"
+          echo "changes: $CHANGES, code=$CODE; test: $TEST; reproducible: $REPRO; adr-numbers: $ADR; docs-lint: $DOCS"
           [ "$CHANGES" = success ] || { echo "changes: $CHANGES" >&2; exit 1; }
           [ "$ADR" = success ] || { echo "adr-numbers: $ADR" >&2; exit 1; }
+          [ "$DOCS" = success ] || { echo "docs-lint: $DOCS" >&2; exit 1; }
           # A heavy job passed when it succeeded, or when it was skipped on a docs-only pull request (code=false).
           for job in test:"$TEST" reproducible:"$REPRO"; do
             case "$CODE/${job#*:}" in
