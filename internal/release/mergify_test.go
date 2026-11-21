@@ -547,27 +547,16 @@ func TestMergify_actionsChecksAreAppQualified(t *testing.T) {
 }
 
 // codeRegexMatches evaluates the code regex (the text of the docs queue's `-files ~=` condition) on one path. Mergify's regular
-// expressions are Python's; Go's RE2 has no lookahead, and the expression has exactly one, in its first alternative
-// (`^(?!(docs/|.*\.md$))`: not under docs/ and not a Markdown file), which is evaluated here as that sentence. Every other
-// alternative is plain RE2.
+// expressions are Python's; Go's RE2 has no lookahead, and the expression is exactly one lookahead,
+// `^(?!(.*\.md$|docs/))`: a path is code unless it is a Markdown file or is under docs/ (rules 20 and 21: Markdown is documentation
+// wherever it sits, and everything under docs/ is documentation). It is evaluated here as that sentence.
 func codeRegexMatches(t *testing.T, re, path string) bool {
 	t.Helper()
-	const lookahead = `^(?!(.*\.md$|docs/.*\.(txt|rst|adoc|csv|log)$))`
-	rest, ok := strings.CutPrefix(re, lookahead+"|")
-	if !ok {
-		t.Fatalf("the code regex must start with %s: %.60s", lookahead, re)
+	const lookahead = `^(?!(.*\.md$|docs/))`
+	if re != lookahead {
+		t.Fatalf("the code regex must be exactly %s, got %.80s", lookahead, re)
 	}
-	// the lookahead: not Markdown anywhere, and not a plain-text file under docs/
-	plainText := false
-	if strings.HasPrefix(path, "docs/") {
-		for _, e := range []string{".txt", ".rst", ".adoc", ".csv", ".log"} {
-			plainText = plainText || strings.HasSuffix(path, e)
-		}
-	}
-	if !strings.HasSuffix(path, ".md") && !plainText {
-		return true
-	}
-	return regexp.MustCompile(rest).MatchString(path)
+	return !strings.HasSuffix(path, ".md") && !strings.HasPrefix(path, "docs/")
 }
 
 // The docs queue's code regex, as written in .mergify.yml.

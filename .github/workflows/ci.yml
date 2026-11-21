@@ -21,7 +21,7 @@ concurrency:
 jobs:
   # Does this change need the heavy jobs? scripts/ci-changes decides (it has the definition of code), run from the base
   # revision rather than the pull request's (hardening); a diff touching .github/ or scripts/ci-changes is always code. A pull request that
-  # touches only documentation no test or build reads is docs-only (code=false). A Mergify merge-queue draft
+  # touches only documentation (Markdown anywhere, anything under docs/) is docs-only (code=false). A Mergify merge-queue draft
   # is classified by its diff against main, which is the whole batch (docs-only only when every queued pull request is), and
   # a push by the paths it added. A merge group and a schedule always count as code. The heavy jobs skip on code=false at job level; the check names stay, a skipped job reports as skipped.
   changes:

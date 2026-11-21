@@ -134,7 +134,7 @@ func TestCheckCIWalk(t *testing.T) {
 		{"failed then skipped on an ancestor is refused on the way back", []step{{x, docs, runsFor(x, allSkipped())}, {p1, docs, append(runsFor(p1, failed), skippedAt(p1, 10)...)}, {p2, code, runsFor(p2, allOK())}}, "on the way back"},
 		{"an empty path list is code", []step{{x, nil, runsFor(x, allSkipped())}, {p1, code, runsFor(p1, allOK())}}, "no changed paths"},
 		{"a docs commit that touches .github is code", []step{{x, []string{"docs/a.md", ".github/workflows/ci.yml"}, runsFor(x, allSkipped())}, {p1, code, runsFor(p1, allOK())}}, "not docs-only"},
-		{"a docs commit that touches .mergify.yml or scripts is code", []step{{x, []string{"scripts/notes.md"}, runsFor(x, allSkipped())}, {p1, code, runsFor(p1, allOK())}}, "not docs-only"},
+		{"a docs commit that touches .mergify.yml or scripts is code", []step{{x, []string{"scripts/ci-changes", ".mergify.yml"}, runsFor(x, allSkipped())}, {p1, code, runsFor(p1, allOK())}}, "not docs-only"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
