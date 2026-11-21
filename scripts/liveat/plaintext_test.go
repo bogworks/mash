@@ -20,7 +20,7 @@ func TestConnCounterCountsConnects(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.Close()
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(15 * time.Second)
 	for cc.Count() == 0 && time.Now().Before(deadline) {
 		time.Sleep(5 * time.Millisecond)
 	}

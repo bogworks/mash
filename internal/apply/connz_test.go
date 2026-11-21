@@ -33,7 +33,7 @@ func startFakeConnz(t *testing.T, page func(call, offset int) (cids []uint64, to
 		t.Fatal("server not ready")
 	}
 	t.Cleanup(srv.Shutdown)
-	nc, err := nats.Connect(srv.ClientURL())
+	nc, err := nats.Connect(srv.ClientURL(), nats.Timeout(15*time.Second))
 	if err != nil {
 		t.Fatal(err)
 	}

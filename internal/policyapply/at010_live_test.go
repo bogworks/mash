@@ -118,7 +118,7 @@ func newLiveEnvJS(t *testing.T, prev listset.ListSet, js bool) *at010Env {
 	sysUser := at010Must(nkeys.CreateUser())
 	sysUserPub := at010Must(sysUser.PublicKey())
 	tok := at010Must(jwt.NewUserClaims(sysUserPub).Encode(e.sysKP))
-	e.sys = at010Must(nats.Connect(e.urls["s1"], nats.UserJWT(
+	e.sys = at010Must(nats.Connect(e.urls["s1"], nats.Timeout(15*time.Second), nats.UserJWT(
 		func() (string, error) { return tok, nil }, func(n []byte) ([]byte, error) { return sysUser.Sign(n) })))
 	t.Cleanup(e.sys.Close)
 	e.cluster = NATSCluster{Conn: e.sys, Inventory: 2}

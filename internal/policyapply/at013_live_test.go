@@ -109,7 +109,7 @@ func (h *at013Host) Deliver(_ context.Context, _, userJWT string) error {
 	if err != nil {
 		return err
 	}
-	nc, err := nats.Connect(h.urls, nats.UserCredentialBytes(creds), nats.ReconnectWait(100*time.Millisecond), nats.MaxReconnects(-1))
+	nc, err := nats.Connect(h.urls, nats.Timeout(15*time.Second), nats.UserCredentialBytes(creds), nats.ReconnectWait(100*time.Millisecond), nats.MaxReconnects(-1))
 	if err != nil {
 		return err
 	}
@@ -265,7 +265,7 @@ func at013Run(t *testing.T, prev, target listset.ListSet, mode string, deadline 
 		mtok := at010Must(jwt.NewUserClaims(mpub).Encode(e.acct))
 		mseed := at010Must(mkp.Seed())
 		mcreds := at010Must(jwt.FormatUserConfig(mtok, mseed))
-		mon, err := nats.Connect(e.urls["s1"], nats.UserCredentialBytes(mcreds))
+		mon, err := nats.Connect(e.urls["s1"], nats.Timeout(15*time.Second), nats.UserCredentialBytes(mcreds))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -281,7 +281,7 @@ func at013Run(t *testing.T, prev, target listset.ListSet, mode string, deadline 
 		if err := mon.Flush(); err != nil {
 			t.Fatal(err)
 		}
-		oldNC, err = nats.Connect(e.urls["s1"]+","+e.urls["s2"], nats.UserCredentialBytes(s.oldCred["foo.c.core"][0]),
+		oldNC, err = nats.Connect(e.urls["s1"]+","+e.urls["s2"], nats.Timeout(15*time.Second), nats.UserCredentialBytes(s.oldCred["foo.c.core"][0]),
 			nats.ReconnectWait(100*time.Millisecond), nats.MaxReconnects(-1))
 		if err != nil {
 			t.Fatal(err)

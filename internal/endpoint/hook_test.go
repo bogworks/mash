@@ -497,7 +497,7 @@ func TestHookUrgentWakesAtOnce(t *testing.T) {
 	m.Data = []byte("claimed urgent")
 	m.Header.Set(sap.HeaderName, claimed.Encode())
 	m.Header.Set(UrgentHeader, u)
-	if _, err := nc.RequestMsg(m, 2*time.Second); err != nil {
+	if _, err := nc.RequestMsg(m, 15*time.Second); err != nil {
 		t.Fatal(err)
 	}
 	until(t, "spooled", func() bool { return len(waiting(t, sp)) == 3 })

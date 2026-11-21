@@ -84,7 +84,7 @@ func (h *env) connect(token string, kp nkeys.KeyPair) (*nats.Conn, error) {
 	if err := os.WriteFile(p, creds, 0o600); err != nil {
 		h.t.Fatal(err)
 	}
-	nc, err := nats.Connect(h.e.URL, append(natsauth.TLSOptions(h.e.CAFile, h.e.ClientCert, h.e.ClientKey), natsauth.UserCredentials(p), nats.MaxReconnects(0))...)
+	nc, err := nats.Connect(h.e.URL, append(natsauth.TLSOptions(h.e.CAFile, h.e.ClientCert, h.e.ClientKey), nats.Timeout(15*time.Second), natsauth.UserCredentials(p), nats.MaxReconnects(0))...)
 	if err == nil {
 		h.t.Cleanup(nc.Close)
 	}

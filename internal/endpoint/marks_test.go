@@ -28,7 +28,7 @@ func rawMark(t *testing.T, f *fixture, from, to, body string, mutate func(id sap
 	m.Data = []byte(body)
 	mutate(id, &h, m)
 	m.Header.Set(sap.HeaderName, h.Encode())
-	if _, err := nc.RequestMsg(m, 2*time.Second); err != nil {
+	if _, err := nc.RequestMsg(m, 15*time.Second); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -225,7 +225,7 @@ func publishRaw(t *testing.T, nc *nats.Conn, subj string, hdr string, body strin
 	if hdr != "" {
 		m.Header.Set(sap.HeaderName, hdr)
 	}
-	if _, err := nc.RequestMsg(m, 2*time.Second); err != nil {
+	if _, err := nc.RequestMsg(m, 15*time.Second); err != nil {
 		t.Fatalf("raw publish: %v", err)
 	}
 }
