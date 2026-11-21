@@ -182,10 +182,18 @@ doing before each command, in one line. Guard rails:
   to that exact command.
 - Chain every checksum check to the step after it with `&&` or `set -e`, so a
   mismatch stops before unpack or install.
-- After a system package, check where it landed (`command -v nats-server`;
-  Debian's package puts it in `/usr/sbin`, which is often not on a user's
-  PATH) and whether it started a service (for example
-  `systemctl is-active nats-server` where systemd exists), and tell the person.
+- After a system package, find where it landed without relying on PATH
+  (`command -v` can fail after a good install: Debian's package puts
+  `nats-server` in `/usr/sbin`, which is often not on a user's PATH). On
+  Debian and Ubuntu use `dpkg -L nats-server | grep 'bin/nats-server$'` or
+  `ls /usr/sbin/nats-server`; for another package manager use its file
+  list (for example `rpm -ql` or `pacman -Ql`). Tell the person the folder,
+  and put it on PATH for the commands of this session
+  (`PATH="<folder>:$PATH"` in front of commands, as for `BIN`); do not edit
+  their shell files. The setup script, Verify and the day-2 `--start` use
+  that PATH too. Also check whether the package started a service (for
+  example `systemctl is-active nats-server` where systemd exists), and tell
+  the person.
 - The Debian and Ubuntu package starts an unauthenticated server on port 4222
   (a known example). Say so, and let the person decide whether to stop it.
 - Never disable or stop a service the person did not ask to stop.
@@ -262,7 +270,8 @@ put `PATH="$BIN:$PATH"` in front of a command. Both programs are explained at
 https://github.com/bogworks/mash/blob/main/docs/nats-server.md#getting-nats-server-and-the-nats-command
 
 Verify: `nats-server --version` is 2.10.7 or newer, and
-`command -v nats-server nats` finds both on the PATH. Only then go on.
+`command -v nats-server nats` finds both: on the PATH, or in the folder the
+package put them in, with that folder on this session's PATH. Only then go on.
 
 ## 3. Download and check the two scripts
 
@@ -489,19 +498,32 @@ last):
    If the person wants to keep the server folder, skip this step and say
    plainly that the folder and its keys stay on disk.
 3. The plugin: `claude plugin uninstall mash@mash`.
-4. The programs this setup installed, only the named files. Say which ones
-   you installed in step 2: you only install a missing `nats-server` or
-   `nats`, and a package or Homebrew install is not removed by this step.
-   Never remove a program that was there before. `mash` and `mashctl` come
-   from the install in step 1. Name only the installed files in `rm`, for
-   example when this setup installed all four:
+4. The programs this setup installed, only the named ones. Say which route
+   step 2 took and ask before removing any package or stopping any service.
+   Never remove a program or service that was there before. `mash` and
+   `mashctl` come from the install in step 1. Name only the installed files
+   in `rm`. `nats-server` and `nats` depend on the route:
 
-   ```sh
-   BIN="$HOME/.local/bin"
-   rm "$BIN/mash" "$BIN/mashctl" "$BIN/nats-server" "$BIN/nats"
-   ```
+   - (a) default: the installed files, for example when this setup installed
+     all four:
 
-   If the person chose another install folder in step 1, fill in that path.
+     ```sh
+     BIN="$HOME/.local/bin"
+     rm "$BIN/mash" "$BIN/mashctl" "$BIN/nats-server" "$BIN/nats"
+     ```
+
+     If the person chose another install folder in step 1, fill in that path.
+   - (b) Homebrew: `brew uninstall nats-server nats`
+   - (c) system package: the package manager's remove command for the
+     package step 2 installed. If the package started a service (step 2 told
+     the person), stopping and disabling it is a separate step, for this
+     package only. A system route may need `sudo`: show the exact command
+     and do not run it without a yes to that command.
+   - (d) source: the files the person says they built into.
+   - (e) other: ask.
+
+   For (b) and (c), each command is shown exactly and run only after the
+   person says yes to it. For (a), `mash` and `mashctl` use the same `rm`.
 5. The download folder, `~/mash-setup-dl`: only the files setup downloaded
    into it, by name, then the folder if it is empty. If the person chose
    another folder in step 1, fill in that path:
