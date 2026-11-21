@@ -98,7 +98,7 @@ The same settings serve `mashctl`, `mash serve`, `mash hook` and the other `mash
 
 ### Plain text and `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION`
 
-Every mash connection requires TLS, to any host, loopback included: `mashctl`, `mash serve`, `mash hook` and the commands `send`, `read`, `inbox`, `who`, `prompt`, `status` and `doctor`. A plain `nats://` or `ws://` URL is refused before any connection is made, and so is any other scheme that is not `tls://` or `wss://`. `mashctl init --local` makes a certificate authority and a server certificate, so the quick start runs over TLS with no extra setting.
+Every mash connection requires TLS, to any host, loopback included: `mashctl`, `mash serve`, `mash hook` and the commands `send`, `read`, `inbox`, `who`, `prompt`, `status` and `doctor`. A plain `nats://` or `ws://` URL is refused before any connection is made, and so is any other scheme that is not `tls://` or `wss://`. The release's local setup script, `mash-local-nats-setup.sh` (see the [setup script reference](reference/setup.md)), makes a private certificate authority and a server certificate for 127.0.0.1, so the local quick start runs over TLS with no extra setting. (`mashctl init --local`, which did this in earlier releases, is gone.)
 
 Encryption can be turned off in one way only: the environment variable `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1`, for `mash` and `mashctl` alike. It is not a setting in the table above: there is no flag and no `config.json` key. Its only value is `1`; empty or `0` is off, anything else is an error naming the variable. The old names, `MASH_INSECURE_PLAINTEXT` and the `insecure_plaintext` key, are refused with an error naming the new variable (exit 2).
 

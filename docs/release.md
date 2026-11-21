@@ -401,17 +401,17 @@ setting it turns back on). They need no network: the live tests start an in-proc
 
 In v0.5.0 these tests check the internal policy engine; no command line for it ships in this release ([ADR 0129](decisions/0129-the-policy-commands-are-not-part-of-v0-5-0-and-the-engine-stays-internal-until-it-works-standalone.md)).
 
-The list is `scripts/releasecheck/policytests.txt`, one row per test: a short name, package, test name, `required` or `pending`.
+The list is `scripts/releasecheck/policytests.txt`, one row per test: an AT id (`AT-NNN`, required in the first field), package, test name, `required` or `pending`. The table below keeps a short label beside each id.
 
-| Name | What | Status |
-| --- | --- | --- |
-| compile | the compile test over the corpus, and the zero-tag case (`TestAT004_Corpus`, `TestAT004_ZeroTags`) | required |
-| shape | the template for the shape names no peer (`TestAT001TemplateNamesNoPeer`), and the live run against a real server (`TestLiveMatchesCheck/AT-001_shape`) | required |
-| deny key | the live deny-key case (`TestLiveMatchesCheck/deny_key_(AT-003)`); closing mail drops the owner line, sharing restores it, and a deny holds with every user of the key carrying a deny tag (`TestAT003OwnerLineDroppedAndDenyHolds`) | required |
-| deny all | a deny-all sender, with no allow entry or with its tags removed by a new list set, is refused everywhere and still reaches its own inbox (`TestAT005DenyAllSenderIsRefused`) | required |
-| raw client | a raw client with tags-only credentials gets no more than its lists: the whole live run (`TestLiveMatchesCheck`), and the open reply and plumbing subjects pinned to a table (`TestAT020OpenReplyAndPlumbingSubjectsArePinned`, [threat model 5.3.1](security/threat-model.md)) | required |
-| template change | does a template change reach open connections, against the recorded result for the shipped server (`TestAT011TemplateChangeReachesOpenConnections`) | required |
-| cluster | the applied gate runs against a live two-server cluster, an in-process nats-server pair, with the policy applied and with a server held back (`TestAT010Live`, subtests `applied` and `held_back`) | required |
+| Label | AT id | What | Status |
+| --- | --- | --- | --- |
+| compile | AT-004 | the compile test over the corpus, and the zero-tag case (`TestAT004_Corpus`, `TestAT004_ZeroTags`) | required |
+| shape | AT-001 | the template for the shape names no peer (`TestAT001TemplateNamesNoPeer`), and the live run against a real server (`TestLiveMatchesCheck/AT-001_shape`) | required |
+| deny key | AT-003 | the live deny-key case (`TestLiveMatchesCheck/deny_key_(AT-003)`); closing mail drops the owner line, sharing restores it, and a deny holds with every user of the key carrying a deny tag (`TestAT003OwnerLineDroppedAndDenyHolds`) | required |
+| deny all | AT-005 | a deny-all sender, with no allow entry or with its tags removed by a new list set, is refused everywhere and still reaches its own inbox (`TestAT005DenyAllSenderIsRefused`) | required |
+| raw client | AT-020 | a raw client with tags-only credentials gets no more than its lists: the whole live run (`TestLiveMatchesCheck`), and the open reply and plumbing subjects pinned to a table (`TestAT020OpenReplyAndPlumbingSubjectsArePinned`, [threat model 5.3.1](security/threat-model.md)) | required |
+| template change | AT-011 | does a template change reach open connections, against the recorded result for the shipped server (`TestAT011TemplateChangeReachesOpenConnections`) | required |
+| cluster | AT-010 | the applied gate runs against a live two-server cluster, an in-process nats-server pair, with the policy applied and with a server held back (`TestAT010Live`, subtests `applied` and `held_back`) | required |
 
 Every row is `required` now. The step can still print `pending` for a row whose test does not exist yet: it
 prints a notice and does not fail, and it refuses once a test for that row exists in the tree, so the row must then be

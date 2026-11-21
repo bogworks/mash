@@ -36,9 +36,9 @@ What mash sets out to do:
 1. **Durable mail.** A message mash has accepted waits on the NATS server until the recipient's session has been
    shown it, for up to 30 days, across process restarts of either side. A host crash of the server can lose its last
    2 minutes unless `sync_interval: always` is set (Q1; [ADR-0009][0009], [ADR-0010][0010], [ADR-0025][0025]).
-2. **Proof of sender.** Every message is signed with the sender's own NATS key. By default only mail proven to come from its sender is delivered; with
+2. **Proof of sender.** Every message is signed with the sender's own NATS key. From 0.5.6, by default only mail proven to come from its sender is delivered; with
    `accept_unverified` set, the recipient sees a one-word trust label that says how far the sender is proven
-   ([ADR-0017][0017], [ADR-0019][0019]).
+   ([ADR-0017][0017], [ADR-0019][0019], amended by [ADR-0147][0147]).
 3. **Few model turns.** A busy session sees new mail with its next tool result. An idle session is woken only for mail
    that needs it, and urgent mail from a verified sender wakes it at once ([ADR-0024][0024], [ADR-0027][0027] to
    [ADR-0029][0029]).
@@ -759,6 +759,7 @@ All paths are in the mash repository (0.3.0 tree) unless marked otherwise.
 [0017]: decisions/0017-every-message-is-signed-per-sap-13.md
 [0018]: decisions/0018-mash-signed-marks-are-separate-headers.md
 [0019]: decisions/0019-five-trust-labels-forged-never-shown-stale-after-five-minutes.md
+[0147]: decisions/0147-the-0-5-6-command-line-and-mcp-surface-is-built-from-a-specification-that-supersedes-contract-revision-26.md
 [0020]: decisions/0020-verified-mail-is-a-delegated-request.md
 [0021]: decisions/0021-message-bodies-are-shown-quoted.md
 [0022]: decisions/0022-one-endpoint-manager-per-session.md

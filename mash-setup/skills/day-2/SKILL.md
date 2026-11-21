@@ -37,11 +37,12 @@ the person's absolute paths there.
 ## Is it working
 
 First take the endpoint's address from `mashctl endpoint list`; never make
-one up. Then put it in the variable, between quotes, as the blocks below do:
+one up. Then put it in the variable, between quotes, for `mash doctor` only;
+`mashctl status` and `mashctl doctor` run without it:
 
 ```sh
-MASH_ENDPOINT="$address"; export MASH_ENDPOINT
-mashctl status; mashctl doctor; mash doctor
+mashctl status; mashctl doctor
+MASH_ENDPOINT="$address" mash doctor
 ```
 
 Here `$address` stands for the address you took from the list, for example
