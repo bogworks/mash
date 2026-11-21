@@ -48,7 +48,7 @@ func isAgentInstruction(lower string) bool {
 	case "agents.md", "claude.md", "gemini.md", "skill.md", ".cursorrules", ".windsurfrules":
 		return true
 	}
-	if strings.HasSuffix(base, ".tmpl") || strings.HasPrefix(lower, "mash-setup/") {
+	if strings.HasSuffix(base, ".tmpl") || strings.HasPrefix(lower, "mash-setup/") || strings.Contains(lower, "/mash-setup/") {
 		return true
 	}
 	if i := strings.LastIndex(lower, "/"); i >= 0 {

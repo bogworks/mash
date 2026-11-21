@@ -22,7 +22,7 @@ func TestIsDocsPath_matchesTheClassifierScript(t *testing.T) {
 		"changelog.d/frag.md", "testdata/a.md", "internal/testdata/a.md", "docs/testdata/a.md", "docs/conformance.md", "docs/a/conformance/b.md",
 		"AGENTS.md", "docs/AGENTS.md", "x/y/CLAUDE.md", "CLAUDE.md", "mash-setup/skills/setup/SKILL.md", "mash-setup/README.md", "docs/x.go", "docs/NOTES.MD", "README.MD", "docs/guide.Md", "docs/a b.md", "GEMINI.md", "x/gemini.md", "docs/Gemini.MD", "SKILL.md", "docs/x/skill.md", "a/Skill.md", ".cursorrules", "docs/.CursorRules", ".windsurfrules", "x/.windsurfrules",
 		"docs/prompt.tmpl", "x.TMPL", "docs/skills/a.md", "docs/Skills/b.md", "docs/commands/c.md", "docs/agents/d.md", "docs/Agents/e.md", "docs/hooks/f.md", "docs/prompts/g.md",
-		"docs/briefings/h.md", "docs/plugins/i.md", "docs/.claude-plugin/j.md", "docs/a/skills/b/c.md", "Mash-Setup/x.md", "mash-setup/skills/y.md",
+		"docs/briefings/h.md", "docs/plugins/i.md", "docs/.claude-plugin/j.md", "docs/a/skills/b/c.md", "Mash-Setup/x.md", "MASH-SETUP/y.txt", "x/Mash-Setup/z.md", "docs/mash-setup/a.md", "docs/mash-setups.md", "mash-setup/skills/y.md",
 		"README.md", "docs/install.md", "SECURITY.md", "CONTRIBUTING.md", "docs/agents.md", "docs/MYAGENTS.md", "docs/agentsmd.md", "docs/skill-guide.md", "docs/skills.md",
 		"NEW-TOP-LEVEL.txt", "LICENSE", "Makefile", "docs/notes.txt", "notes/a.md", "docs/sub/dir/page.md",
 	}

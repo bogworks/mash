@@ -29,21 +29,19 @@ is_docs() {
 	lower="$(printf '%s' "$p" | tr '[:upper:]' '[:lower:]')"
 	case "$p" in
 	.github/* | .mergify.yml | .claude-plugin/* | plugin/* | scripts/* | cmd/* | internal/* | ci/*) return 1 ;;
-	# Agent instructions: a skill or a briefing an agent executes is code in effect (mash-lead, ADR 0156), wherever it sits.
-	mash-setup/* | AGENTS.md | */AGENTS.md | CLAUDE.md | */CLAUDE.md) return 1 ;;
 	go.mod | go.sum | */go.mod | */go.sum | *.go) return 1 ;;
 	testdata/* | */testdata/* | *conformance*) return 1 ;;
 	CHANGELOG.md | changelog.d/*) return 1 ;;
 	docs/branch-protection.md | docs/review/* | docs/reference/* | spec/* | docs/allowed_signers | docs/skipped-releases.txt | docs/release-cutover) return 1 ;;
 	esac
 	# Agent instructions, wherever they sit and in any letter case (x-lead, ADR 0156): the named files, any *.tmpl, any path with
-	# a directory component named like the places agents read instructions, and mash-setup/. README.md, docs/install.md,
+	# a directory component named like the places agents read instructions, and mash-setup/ at any depth. README.md, docs/install.md,
 	# SECURITY.md and CONTRIBUTING.md stay docs.
 	local base="${lower##*/}" dirs c
 	case "$base" in
 	agents.md | claude.md | gemini.md | skill.md | .cursorrules | .windsurfrules | *.tmpl) return 1 ;;
 	esac
-	case "$lower" in mash-setup/*) return 1 ;; esac
+	case "$lower" in mash-setup/* | */mash-setup/*) return 1 ;; esac
 	if [ "$lower" != "$base" ]; then
 		dirs="${lower%/*}"
 		local IFS=/

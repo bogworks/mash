@@ -1652,8 +1652,12 @@ func TestCheck_docsOnlyCandidateOverATestedCommit(t *testing.T) {
 		err := f.check()
 		out := f.o.Out.(*bytes.Buffer).String()
 		if c.want == "" {
-			if strings.Contains(out, "CI check runs succeeded") && strings.Contains(out, "refused") && strings.Contains(err.Error(), "CI check runs") {
-				t.Errorf("%s: the CI step refused a docs-only candidate: %v", c.name, err)
+			// The accept case: the gate itself must pass (nothing refused) and the CI step must report ok.
+			if err != nil {
+				t.Errorf("%s: want the docs-only candidate accepted, got %v", c.name, err)
+			}
+			if !strings.Contains(out, "ok    CI check runs succeeded") {
+				t.Errorf("%s: the CI step did not report ok:\n%s", c.name, out)
 			}
 			continue
 		}
