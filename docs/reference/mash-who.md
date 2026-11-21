@@ -152,5 +152,4 @@ description, capability and labels for every endpoint. An address is always
 owner.group.name, with dots. who says whether an endpoint is online, not
 whether mail is reaching its session: that is known only to the session
 itself, and is in its own status ('session'). A per-endpoint delivery claim
-visible to peers would be new data that mash 0.5.5 never had; it is left for a
-later release.
+visible to peers would be new data; it is left for a later release.

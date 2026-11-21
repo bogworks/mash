@@ -22,34 +22,39 @@ curl -fsSL <release base>/install.sh | bash
 ## mash-local-nats-setup.sh
 
 For a NATS server on this machine. It works on Linux and on macOS, where many
-developers will first try mash. First install nats-server (version 2.10.7 or
-newer) and the nats command. nats-server comes from your package manager. The
-nats command has no Debian or Ubuntu package: on those, get it from the
-natscli GitHub release. Homebrew has both. The script also needs openssl, to
-make the server's certificate. It names anything missing, says where to get
-it, and stops. It does not need nsc. If port 4222 is already taken, as it is
-where a packaged nats-server runs as a system service, the script leaves that
-service alone, uses the next free port and says which. It asks one question,
-the owner's name, reading it from the terminal; --owner NAME answers it on the
-command line and nothing is asked, which is the form an agent or a script
-uses, since it has no terminal. It makes a server that only this machine can
-reach, with encryption on, starts it as your own user, and writes the setup
-file. That is its whole scope: a join file made against it works only on this
-machine. Two machines need a server both can reach, with a certificate that
-covers its address; in 0.5.6 that is a NATS server you run yourself, which
-mashctl init takes from a setup file (docs/install.md). Planned for 0.6.0: a
-script option for a reachable address and certificate. Everything goes in
-~/mash-nats unless --dir names another folder. Its last line is the next
-command, with the path it actually wrote: 'mashctl init --config
-~/mash-nats/mash-setup.yaml' by default. Guides and skills take that path from
-the script's output, never from memory. The NATS account it makes is named
-after the owner; the system account keeps NATS's own name, SYSTEM. The server
-runs as your own user's process, not as a system service, so it does not come
-back after a reboot: run the script again with --start to start it (it never
-creates anything then), --stop to stop it, or --remove to remove it. After
---remove it prints two lines: that mashctl's folder still points at the server
-just removed, and how to set up again (a new configuration folder, or moving
-the old one aside).
+developers will first try mash. First get nats-server (version 2.10.7 or
+newer) and the nats command, as your own user: download each from its
+project's GitHub release (nats-io/nats-server and nats-io/natscli), check it
+against that release's checksums, and put it in ~/.local/bin, the folder mash
+and mashctl are installed in. Nothing here needs sudo, and nothing is
+installed system-wide. On macOS, Homebrew has both and is also a per-user
+install. A system package is not the route: on Debian and Ubuntu the
+nats-server package installs to /usr/sbin, which is not on a user's PATH, and
+starts a system service on port 4222 that nothing here uses. The script also
+needs openssl, to make the server's certificate. It names anything missing,
+says where to get it, and stops. It does not need nsc. If port 4222 is already
+taken, as it is where a packaged nats-server runs as a system service, the
+script leaves that service alone, uses the next free port and says which. It
+asks one question, the owner's name, reading it from the terminal; --owner
+NAME answers it on the command line and nothing is asked, which is the form an
+agent or a script uses, since it has no terminal. It makes a server that only
+this machine can reach, with encryption on, starts it as your own user, and
+writes the setup file. That is its whole scope: a join file made against it
+works only on this machine. Two machines need a server both can reach, with a
+certificate that covers its address; in 0.5.6 that is a NATS server you run
+yourself, which mashctl init takes from a setup file (docs/install.md).
+Planned for 0.6.0: a script option for a reachable address and certificate.
+Everything goes in ~/mash-nats unless --dir names another folder. Its last
+line is the next command, with the path it actually wrote: 'mashctl init
+--config ~/mash-nats/mash-setup.yaml' by default. Guides and skills take that
+path from the script's output, never from memory. The NATS account it makes is
+named after the owner; the system account keeps NATS's own name, SYSTEM. The
+server runs as your own user's process, not as a system service, so it does
+not come back after a reboot: run the script again with --start to start it
+(it never creates anything then), --stop to stop it, or --remove to remove it.
+After --remove it prints two lines: that mashctl's folder still points at the
+server just removed, and how to set up again (a new configuration folder, or
+moving the old one aside).
 
 ```sh
 curl -fsSL <release base>/mash-local-nats-setup.sh | bash

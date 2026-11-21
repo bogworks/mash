@@ -65,33 +65,29 @@ agent calls.
 
 ## Notes
 
-Which endpoint. serve never picks an endpoint by itself, even when only one is
-installed: it acts as the one named by --endpoint, MASH_ENDPOINT or the
-configuration file, and with none named, or one that is not a valid address,
-it still starts and offers only status, doctor and version, whose answer is
-'no endpoint is chosen for this session' with the hint 'start the session with
-MASH_ENDPOINT=&lt;address&gt;'. Otherwise every agent session on a machine
-with one endpoint installed would become that endpoint by accident, and two
-sessions would fight over it. Waking for a backlog. Whatever the kinds of the
-messages, serve wakes the session when more than --wake-count are waiting or
-the oldest has waited longer than --wake-age, at most once every 10 minutes
-and not in the first 10 minutes after it starts. mash inbox says so on its
-second line. Refusing unverified mail. Only mail whose trust is 'verified'
-reaches the session, the inbox listing and mash read. Mail that is unsigned,
-signed by an unknown key, claimed but unproven, or stale is dropped and
-counted; mash doctor shows the count. The sender is not told.
---accept-unverified delivers it instead, labelled. A refused message is
-invisible at a shell too: it is not in mash inbox's count or listing, and mash
-read on its number says it was refused. When serve refuses a message it writes
-one line to its log: 'refused message 12 from acme.demo.x: not verified
-(absent)', where the address is the one the message claims, with control
-characters escaped, and the word in brackets is the trust label. What
-'waiting' means for the wake: a message that has arrived and has not yet
-reached the session. In a session that takes delivery by channel alone, a
-message reaches it on arrival, so nothing waits and the wake never fires; the
-wake exists for sessions where mail can pile up.
-
-## What it replaces
-
 It holds the connection to the server, receives mail in the background, wakes
-an idle session and offers the MCP tools.
+an idle session and offers the MCP tools. Which endpoint. serve never picks an
+endpoint by itself, even when only one is installed: it acts as the one named
+by --endpoint, MASH_ENDPOINT or the configuration file, and with none named,
+or one that is not a valid address, it still starts and offers only status,
+doctor and version, whose answer is 'no endpoint is chosen for this session'
+with the hint 'start the session with MASH_ENDPOINT=&lt;address&gt;'.
+Otherwise every agent session on a machine with one endpoint installed would
+become that endpoint by accident, and two sessions would fight over it. Waking
+for a backlog. Whatever the kinds of the messages, serve wakes the session
+when more than --wake-count are waiting or the oldest has waited longer than
+--wake-age, at most once every 10 minutes and not in the first 10 minutes
+after it starts. mash inbox says so on its second line. Refusing unverified
+mail. Only mail whose trust is 'verified' reaches the session, the inbox
+listing and mash read. Mail that is unsigned, signed by an unknown key,
+claimed but unproven, or stale is dropped and counted; mash doctor shows the
+count. The sender is not told. --accept-unverified delivers it instead,
+labelled. A refused message is invisible at a shell too: it is not in mash
+inbox's count or listing, and mash read on its number says it was refused.
+When serve refuses a message it writes one line to its log: 'refused message
+12 from acme.demo.x: not verified (absent)', where the address is the one the
+message claims, with control characters escaped, and the word in brackets is
+the trust label. What 'waiting' means for the wake: a message that has arrived
+and has not yet reached the session. In a session that takes delivery by
+channel alone, a message reaches it on arrival, so nothing waits and the wake
+never fires; the wake exists for sessions where mail can pile up.

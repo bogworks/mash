@@ -100,8 +100,3 @@ retired); the fix for a missing store is to run mashctl init --config
 &lt;file&gt; again, which is safe. A problem: an endpoint whose credentials
 were being cancelled and never finished; the fix is to run that mashctl
 endpoint delete again.
-
-## What it replaces
-
-mashctl issued list has no command of its own any more: one endpoint's issue
-record is in mashctl endpoint show.

@@ -221,12 +221,8 @@
       }
      },
      {
-      "name": "x-today",
-      "value": "mashctl does not install or start NATS; the NATS quick-start script writes this file as its last step."
-     },
-     {
       "name": "x-notes",
-      "value": "Safe to run again with the same settings. It never replaces what a folder already holds: if the folder was set up with a different operator key, account key, server, system creds, admin creds or owner, it refuses and changes nothing, in one line of the same form naming which ('... was set up with a different owner; nothing was changed'), and the way on is a new configuration folder (--config-dir) or moving the old folder aside yourself. Someone who removes a script-made server and sets one up again meets this every time; it is a known issue for 0.5.6 with that workaround. THE SETUP FILE is YAML, and holds paths, never secrets: 'servers' (a list of addresses), 'ca' (the certificate authority's certificate, if the server uses its own), 'owner' (the first owner), 'admin_creds' (the administrator's creds file), 'system_creds' (the system account's creds file), 'operator_key' (the operator key that signs the account: its identity key when the server was set up with the nats command, or a signing key if your operator uses one) and 'account_key' (the account's signing key). The last three are what cancelling a deleted endpoint's key needs. Know what this means: with a server set up by the script, mashctl's folder holds the operator's identity key, the strongest key there is, with which the operator itself can be re-issued. It is protected only as your own files are. A hosted NATS where you do not hold the operator key, such as Synadia Cloud, is not supported by mashctl in 0.5.6; mash itself works against any conforming server."
+      "value": "mashctl does not install or start NATS; the NATS quick-start script writes this file as its last step. Safe to run again with the same settings. It never replaces what a folder already holds: if the folder was set up with a different operator key, account key, server, system creds, admin creds or owner, it refuses and changes nothing, in one line of the same form naming which ('... was set up with a different owner; nothing was changed'), and the way on is a new configuration folder (--config-dir) or moving the old folder aside yourself. Someone who removes a script-made server and sets one up again meets this every time; it is a known issue for 0.5.6 with that workaround. THE SETUP FILE is YAML, and holds paths, never secrets: 'servers' (a list of addresses), 'ca' (the certificate authority's certificate, if the server uses its own), 'owner' (the first owner), 'admin_creds' (the administrator's creds file), 'system_creds' (the system account's creds file), 'operator_key' (the operator key that signs the account: its identity key when the server was set up with the nats command, or a signing key if your operator uses one) and 'account_key' (the account's signing key). The last three are what cancelling a deleted endpoint's key needs. Know what this means: with a server set up by the script, mashctl's folder holds the operator's identity key, the strongest key there is, with which the operator itself can be re-issued. It is protected only as your own files are. A hosted NATS where you do not hold the operator key, such as Synadia Cloud, is not supported by mashctl in 0.5.6; mash itself works against any conforming server."
      }
     ]
    },
@@ -298,10 +294,6 @@
        "tool": null,
        "why": "Administration. There are no MCP tools for mashctl."
       }
-     },
-     {
-      "name": "x-today",
-      "value": "New in 0.5.6."
      }
     ]
    },
@@ -380,10 +372,6 @@
       }
      },
      {
-      "name": "x-today",
-      "value": "mashctl issued list has no command of its own any more: one endpoint's issue record is in mashctl endpoint show."
-     },
-     {
       "name": "x-notes",
       "value": "What is a warning and what is a problem. Warnings: a lease with no endpoint, a retired name seen in use, and a missing record store (issued, adoption or retired); the fix for a missing store is to run mashctl init --config <file> again, which is safe. A problem: an endpoint whose credentials were being cancelled and never finished; the fix is to run that mashctl endpoint delete again."
      }
@@ -448,12 +436,8 @@
         }
        },
        {
-        "name": "x-today",
-        "value": "The numbers shown are examples; the defaults are the code's."
-       },
-       {
         "name": "x-notes",
-        "value": "These are the server's storage limits. When a session is woken for a backlog is an endpoint's own setting: see mash serve."
+        "value": "The numbers shown are examples; the defaults are the code's. These are the server's storage limits. When a session is woken for a backlog is an endpoint's own setting: see mash serve."
        }
       ]
      },
@@ -823,12 +807,8 @@
         }
        },
        {
-        "name": "x-today",
-        "value": "Typing the name to confirm is what gh repo delete does."
-       },
-       {
         "name": "x-notes",
-        "value": "Order. The endpoint's key is cancelled on every server first; only when every server confirms is anything removed, so a failure there leaves the endpoint whole. If this machine holds the endpoint's creds file, it is set aside as <address>.creds.deleted, so mash no longer counts it as installed; the path is predictable and nothing prints it. Nothing else on any machine is touched. THE LATE-FAILURE LINE in 0.5.6 is not how it should read: it carries an internal word (PARTIAL), the flat name with underscores, a key id and the server's raw error. Two parts of it vary: the eight-character key id after 'user key', and the cause between 'did not complete: ' and '; run the same command again'. From 0.5.7 one line replaces it: 'error: deleted acme.demo.bob, but the removal did not finish: <cause in plain words>' with the same hint; its credentials already no longer work, and running the command again is safe."
+        "value": "Typing the name to confirm is what gh repo delete does. Order. The endpoint's key is cancelled on every server first; only when every server confirms is anything removed, so a failure there leaves the endpoint whole. If this machine holds the endpoint's creds file, it is set aside as <address>.creds.deleted, so mash no longer counts it as installed; the path is predictable and nothing prints it. Nothing else on any machine is touched. THE LATE-FAILURE LINE in 0.5.6 is not how it should read: it carries an internal word (PARTIAL), the flat name with underscores, a key id and the server's raw error. Two parts of it vary: the eight-character key id after 'user key', and the cause between 'did not complete: ' and '; run the same command again'. From 0.5.7 one line replaces it: 'error: deleted acme.demo.bob, but the removal did not finish: <cause in plain words>' with the same hint; its credentials already no longer work, and running the command again is safe."
        }
       ]
      },
@@ -999,10 +979,6 @@
          "tool": null,
          "why": "Administration. There are no MCP tools for mashctl."
         }
-       },
-       {
-        "name": "x-today",
-        "value": "It does not print the creds file's path, the issue record, the agent, the account or the mail subject."
        },
        {
         "name": "x-notes",
@@ -1416,7 +1392,7 @@
         }
        },
        {
-        "name": "x-today",
+        "name": "x-notes",
         "value": "It takes the same options as create."
        }
       ]
@@ -1534,10 +1510,6 @@
          "tool": null,
          "why": "Administration. There are no MCP tools for mashctl."
         }
-       },
-       {
-        "name": "x-today",
-        "value": "It takes --after, the option mash inbox has."
        },
        {
         "name": "x-notes",
@@ -1705,7 +1677,7 @@
       }
      },
      {
-      "name": "x-today",
+      "name": "x-notes",
       "value": "A mesh has the one owner named at mashctl init, and nothing in the grammar assumes one. Several owners per mesh are planned for 0.6.0."
      }
     ]
@@ -1769,45 +1741,6 @@
        "tool": null,
        "why": "Administration. There are no MCP tools for mashctl."
       }
-     }
-    ]
-   }
-  ],
-  "metadata": [
-   {
-    "name": "x-removed",
-    "value": [
-     {
-      "what": "adopt, init --local, init --start",
-      "why": "One setup command: mashctl init --config. mashctl does not install or start NATS."
-     },
-     {
-      "what": "provision, deprovision, list",
-      "why": "Duplicates of endpoint create, endpoint delete and endpoint list."
-     },
-     {
-      "what": "set-meta, label, unlabel",
-      "why": "Replaced by endpoint set and endpoint unset."
-     },
-     {
-      "what": "suspend, resume, permissions (top level)",
-      "why": "Moved under endpoint, where every other endpoint command is."
-     },
-     {
-      "what": "suspended",
-      "why": "endpoint show says whether an endpoint is suspended."
-     },
-     {
-      "what": "audit, issued list, issued check",
-      "why": "The checks are mashctl doctor; the records are in endpoint show."
-     },
-     {
-      "what": "inbox inspect",
-      "why": "Now endpoint inbox."
-     },
-     {
-      "what": "add, reissue, retire (messages only)",
-      "why": "Left over from 0.5.5's renames; nobody uses 0.5.5."
      }
     ]
    }

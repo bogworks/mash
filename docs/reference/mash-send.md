@@ -172,7 +172,3 @@ send has no --dry-run: sending is the act itself, not a change to the mesh.
 The number is the message's number in the recipient's inbox. It is printed
 because the sender can find it nowhere else, and needs it: an answer arrives
 marked 'reply to: 42'.
-
-## What it replaces
-
-The underscore form of an address is refused.

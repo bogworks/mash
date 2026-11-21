@@ -372,10 +372,6 @@
       }
      },
      {
-      "name": "x-today",
-      "value": "The underscore form of an address is refused."
-     },
-     {
       "name": "x-notes",
       "value": "send has no --dry-run: sending is the act itself, not a change to the mesh. The number is the message's number in the recipient's inbox. It is printed because the sender can find it nowhere else, and needs it: an answer arrives marked 'reply to: 42'."
      }
@@ -626,12 +622,8 @@
       }
      },
      {
-      "name": "x-today",
-      "value": "The labels are the JSON field names."
-     },
-     {
       "name": "x-notes",
-      "value": "What 'read' means. A message is 'new' until the server has been told it reached the endpoint's session: when the hook showed it to the agent, or the agent opened it with the read tool. Until then it is waiting. mash read at a shell shows a message but, with no session online, cannot mark it; it stays 'new' until a session next comes online. That limit is tracked in mash's backlog. The message's text is printed with '> ' before every line, as quoted mail is, and with control characters escaped: everything after '> ' is the sender's words, and nothing the sender writes can pass for mash's own output or for an instruction to an agent reading it. The command and the tool quote alike. --json carries the text unquoted in 'body'."
+      "value": "The labels are the JSON field names. What 'read' means. A message is 'new' until the server has been told it reached the endpoint's session: when the hook showed it to the agent, or the agent opened it with the read tool. Until then it is waiting. mash read at a shell shows a message but, with no session online, cannot mark it; it stays 'new' until a session next comes online. That limit is tracked in mash's backlog. The message's text is printed with '> ' before every line, as quoted mail is, and with control characters escaped: everything after '> ' is the sender's words, and nothing the sender writes can pass for mash's own output or for an instruction to an agent reading it. The command and the tool quote alike. --json carries the text unquoted in 'body'."
      }
     ]
    },
@@ -809,7 +801,7 @@
      },
      {
       "name": "x-notes",
-      "value": "A prefix follows the address the way a domain name does: acme is everything under acme, acme.demo is everything under acme.demo, and acme.demo.bob is that one endpoint, never acme.demo.bobby. There is no other pattern matching: capitals are refused, acme.demo.bob.* is refused, and an empty prefix means none. The filters by role, capability and label stay, as --role, --capability and --label, in the command and the tool: an agent uses them to find a peer by what it does. Only the free-text match and the alternative output modes are gone. The JSON and the MCP tool's structured result carry role, host, description, capability and labels for every endpoint. An address is always owner.group.name, with dots. who says whether an endpoint is online, not whether mail is reaching its session: that is known only to the session itself, and is in its own status ('session'). A per-endpoint delivery claim visible to peers would be new data that mash 0.5.5 never had; it is left for a later release."
+      "value": "A prefix follows the address the way a domain name does: acme is everything under acme, acme.demo is everything under acme.demo, and acme.demo.bob is that one endpoint, never acme.demo.bobby. There is no other pattern matching: capitals are refused, acme.demo.bob.* is refused, and an empty prefix means none. The filters by role, capability and label stay, as --role, --capability and --label, in the command and the tool: an agent uses them to find a peer by what it does. Only the free-text match and the alternative output modes are gone. The JSON and the MCP tool's structured result carry role, host, description, capability and labels for every endpoint. An address is always owner.group.name, with dots. who says whether an endpoint is online, not whether mail is reaching its session: that is known only to the session itself, and is in its own status ('session'). A per-endpoint delivery claim visible to peers would be new data; it is left for a later release."
      }
     ]
    },
@@ -959,7 +951,7 @@
      },
      {
       "name": "x-notes",
-      "value": "The usual answer is one line, and --json is the same four things as an object. --detail gives the fuller answer, for a person who wants it and for a program that watches a session; with --json it adds reason_code and session. 'reason_code' is a fixed word beside the free-text reason, null when ready: no_endpoint, endpoints_ambiguous, config_unreadable, creds_missing, creds_refused, endpoint_deleted, server_unreachable, server_untrusted, server_no_tls, endpoint_held_elsewhere, endpoint_lost, endpoint_not_taken, storage_unwritable, unknown. creds_refused covers every way the server refuses who we are, a client certificate included; server_untrusted is only for a server we do not trust; unknown is for a failure that fits none, and its free-text reason then carries what was seen. 'session' is null at a shell and, inside a session, says three things about that session: holds_endpoint (true or false); hooks, whether the agent host's hooks have delivered mail in this session: ran, not_run, suspected, degraded or refused, with the meanings 0.5.5's delivery line had; and storage, ok or failing. A program proving that a newly started session can receive mail reads holds_endpoint true and hooks ran. At a shell on the session's own machine, status reads the same state from what serve has recorded on disk, so the command and the tool agree. These names, in the usual and the fuller object alike, are part of what 0.5.6 promises not to change. 'ready' means: the configuration is readable, the server answers, and it accepts this endpoint's credentials. A DELETED ENDPOINT: on the machine where mashctl endpoint delete ran, the set-aside file <address>.creds.deleted is the evidence, and status names it with reason_code endpoint_deleted (the case above), as doctor does in its sign-in row; on another machine, where a creds file survives, the server's refusal is what is seen, and status and doctor both report it. In 0.5.6 the everyday commands (send, inbox, read, who) say the creds file is missing where the set-aside file is present, and the hint leads to doctor, which says deleted. Planned for 0.5.7: they read the same as status, 'this endpoint was deleted; its address cannot be used again' with hint 'mash doctor'. Inside a session, when the configuration, the creds, the server or sign-in fails, that failure is what status reports, even if the session also does not hold its endpoint: the root cause comes first, and a session and a shell then name the same cause. Asked inside a session (the MCP tool), status and doctor report on that session itself, not on a fresh connection: 'ready, online' there means this session holds the endpoint and its mail will reach it. A hint names the first installed address in alphabetical order. At a shell every 'hint:' line goes to stderr; an MCP tool's text block puts the hint on the line after the result."
+      "value": "The usual answer is one line, and --json is the same four things as an object. --detail gives the fuller answer, for a person who wants it and for a program that watches a session; with --json it adds reason_code and session. 'reason_code' is a fixed word beside the free-text reason, null when ready: no_endpoint, endpoints_ambiguous, config_unreadable, creds_missing, creds_refused, endpoint_deleted, server_unreachable, server_untrusted, server_no_tls, endpoint_held_elsewhere, endpoint_lost, endpoint_not_taken, storage_unwritable, unknown. creds_refused covers every way the server refuses who we are, a client certificate included; server_untrusted is only for a server we do not trust; unknown is for a failure that fits none, and its free-text reason then carries what was seen. 'session' is null at a shell and, inside a session, says three things about that session: holds_endpoint (true or false); hooks, whether the agent host's hooks have delivered mail in this session: ran, not_run, suspected, degraded or refused; and storage, ok or failing. A program proving that a newly started session can receive mail reads holds_endpoint true and hooks ran. At a shell on the session's own machine, status reads the same state from what serve has recorded on disk, so the command and the tool agree. These names, in the usual and the fuller object alike, are part of what 0.5.6 promises not to change. 'ready' means: the configuration is readable, the server answers, and it accepts this endpoint's credentials. A DELETED ENDPOINT: on the machine where mashctl endpoint delete ran, the set-aside file <address>.creds.deleted is the evidence, and status names it with reason_code endpoint_deleted (the case above), as doctor does in its sign-in row; on another machine, where a creds file survives, the server's refusal is what is seen, and status and doctor both report it. In 0.5.6 the everyday commands (send, inbox, read, who) say the creds file is missing where the set-aside file is present, and the hint leads to doctor, which says deleted. Planned for 0.5.7: they read the same as status, 'this endpoint was deleted; its address cannot be used again' with hint 'mash doctor'. Inside a session, when the configuration, the creds, the server or sign-in fails, that failure is what status reports, even if the session also does not hold its endpoint: the root cause comes first, and a session and a shell then name the same cause. Asked inside a session (the MCP tool), status and doctor report on that session itself, not on a fresh connection: 'ready, online' there means this session holds the endpoint and its mail will reach it. A hint names the first installed address in alphabetical order. At a shell every 'hint:' line goes to stderr; an MCP tool's text block puts the hint on the line after the result."
      }
     ]
    },
@@ -1136,12 +1128,8 @@
       }
      },
      {
-      "name": "x-today",
-      "value": "It has no plugin or channel row: neither can be checked truthfully from a shell, and the command and the tool must answer alike."
-     },
-     {
       "name": "x-notes",
-      "value": "doctor is the one everyday command that prints many lines, as brew doctor and flutter doctor do. It reports on stdout and exits 1 when it found a problem. Every row is always printed, and 'checks' in the JSON always lists every row, each with a state of ok, warn, fail or skip; a row is skipped when an earlier failure means it cannot be run. The delivery row says whether mail that arrives can be stored on this machine for the session; it is checked only inside a session and skipped at a shell. In a session that has just started, the row is 'warn' until the first prompt or tool call, so 'doctor --strict' exits 1 until then: a program that waits for a session to be ready repeats the check. The 'hooks not run yet' warning has no hint, because no command fixes it. Whether storage is failing is decided by whoever asks, by trying the folder, not from a record kept in it. An agent host that has no hooks would warn for as long as it runs; only Claude Code is in scope for 0.5.6. The refused count is kept on this machine, so its row shows even when the server is down. The 'refused' row counts unverified mail that was refused on arrival (see mash serve). Mail that was verified on arrival and whose sender was deleted afterwards is not counted: mash read shows it as refused, and that is where it is seen."
+      "value": "doctor is the one everyday command that prints many lines, as brew doctor and flutter doctor do. It reports on stdout and exits 1 when it found a problem. Every row is always printed, and 'checks' in the JSON always lists every row, each with a state of ok, warn, fail or skip; a row is skipped when an earlier failure means it cannot be run. The delivery row says whether mail that arrives can be stored on this machine for the session; it is checked only inside a session and skipped at a shell. In a session that has just started, the row is 'warn' until the first prompt or tool call, so 'doctor --strict' exits 1 until then: a program that waits for a session to be ready repeats the check. The 'hooks not run yet' warning has no hint, because no command fixes it. Whether storage is failing is decided by whoever asks, by trying the folder, not from a record kept in it. An agent host that has no hooks would warn for as long as it runs; only Claude Code is in scope for 0.5.6. The refused count is kept on this machine, so its row shows even when the server is down. The 'refused' row counts unverified mail that was refused on arrival (see mash serve). Mail that was verified on arrival and whose sender was deleted afterwards is not counted: mash read shows it as refused, and that is where it is seen. It has no plugin or channel row: neither can be checked truthfully from a shell, and the command and the tool must answer alike."
      }
     ]
    },
@@ -1458,12 +1446,8 @@
         }
        },
        {
-        "name": "x-today",
-        "value": "It produces the same pair as NATS's own nk tool."
-       },
-       {
         "name": "x-notes",
-        "value": "Give the .pub file to whoever runs the mesh: mashctl endpoint create acme.demo.bob --public-key bob.seed.pub"
+        "value": "It produces the same pair as NATS's own nk tool. Give the .pub file to whoever runs the mesh: mashctl endpoint create acme.demo.bob --public-key bob.seed.pub"
        }
       ]
      }
@@ -1599,12 +1583,8 @@
       }
      },
      {
-      "name": "x-today",
-      "value": "It holds the connection to the server, receives mail in the background, wakes an idle session and offers the MCP tools."
-     },
-     {
       "name": "x-notes",
-      "value": "Which endpoint. serve never picks an endpoint by itself, even when only one is installed: it acts as the one named by --endpoint, MASH_ENDPOINT or the configuration file, and with none named, or one that is not a valid address, it still starts and offers only status, doctor and version, whose answer is 'no endpoint is chosen for this session' with the hint 'start the session with MASH_ENDPOINT=<address>'. Otherwise every agent session on a machine with one endpoint installed would become that endpoint by accident, and two sessions would fight over it. Waking for a backlog. Whatever the kinds of the messages, serve wakes the session when more than --wake-count are waiting or the oldest has waited longer than --wake-age, at most once every 10 minutes and not in the first 10 minutes after it starts. mash inbox says so on its second line. Refusing unverified mail. Only mail whose trust is 'verified' reaches the session, the inbox listing and mash read. Mail that is unsigned, signed by an unknown key, claimed but unproven, or stale is dropped and counted; mash doctor shows the count. The sender is not told. --accept-unverified delivers it instead, labelled. A refused message is invisible at a shell too: it is not in mash inbox's count or listing, and mash read on its number says it was refused. When serve refuses a message it writes one line to its log: 'refused message 12 from acme.demo.x: not verified (absent)', where the address is the one the message claims, with control characters escaped, and the word in brackets is the trust label. What 'waiting' means for the wake: a message that has arrived and has not yet reached the session. In a session that takes delivery by channel alone, a message reaches it on arrival, so nothing waits and the wake never fires; the wake exists for sessions where mail can pile up."
+      "value": "It holds the connection to the server, receives mail in the background, wakes an idle session and offers the MCP tools. Which endpoint. serve never picks an endpoint by itself, even when only one is installed: it acts as the one named by --endpoint, MASH_ENDPOINT or the configuration file, and with none named, or one that is not a valid address, it still starts and offers only status, doctor and version, whose answer is 'no endpoint is chosen for this session' with the hint 'start the session with MASH_ENDPOINT=<address>'. Otherwise every agent session on a machine with one endpoint installed would become that endpoint by accident, and two sessions would fight over it. Waking for a backlog. Whatever the kinds of the messages, serve wakes the session when more than --wake-count are waiting or the oldest has waited longer than --wake-age, at most once every 10 minutes and not in the first 10 minutes after it starts. mash inbox says so on its second line. Refusing unverified mail. Only mail whose trust is 'verified' reaches the session, the inbox listing and mash read. Mail that is unsigned, signed by an unknown key, claimed but unproven, or stale is dropped and counted; mash doctor shows the count. The sender is not told. --accept-unverified delivers it instead, labelled. A refused message is invisible at a shell too: it is not in mash inbox's count or listing, and mash read on its number says it was refused. When serve refuses a message it writes one line to its log: 'refused message 12 from acme.demo.x: not verified (absent)', where the address is the one the message claims, with control characters escaped, and the word in brackets is the trust label. What 'waiting' means for the wake: a message that has arrived and has not yet reached the session. In a session that takes delivery by channel alone, a message reaches it on arrival, so nothing waits and the wake never fires; the wake exists for sessions where mail can pile up."
      },
      {
       "name": "x-long",
@@ -1658,12 +1638,8 @@
       }
      },
      {
-      "name": "x-today",
-      "value": "It never connects to the server; it reads what mash serve has stored on disk."
-     },
-     {
       "name": "x-notes",
-      "value": "Like mash serve, hook acts only for an endpoint that was named; with none named it prints nothing. When mash is not installed. The plugin's launcher, run at session start, prints one line on stdout, so the agent sees it and can tell the person: 'mash is not installed: the mash plugin found no mash program. Install it: curl -fsSL <release base>/install.sh | bash'. <release base> is https://github.com/bogworks/mash/releases/latest/download, written into the launcher; a fork or a mirror edits that line in its own launcher. It is not derived from the plugin's release setting, which names the versioned download base and has no install.sh under it. In 0.5.5, nothing was said and the agent simply had no mash tools."
+      "value": "It never connects to the server; it reads what mash serve has stored on disk. Like mash serve, hook acts only for an endpoint that was named; with none named it prints nothing. When mash is not installed. The plugin's launcher, run at session start, prints one line on stdout, so the agent sees it and can tell the person: 'mash is not installed: the mash plugin found no mash program. Install it: curl -fsSL <release base>/install.sh | bash'. <release base> is https://github.com/bogworks/mash/releases/latest/download, written into the launcher; a fork or a mirror edits that line in its own launcher. It is not derived from the plugin's release setting, which names the versioned download base and has no install.sh under it."
      },
      {
       "name": "x-long",
@@ -1725,7 +1701,7 @@
       "value": [
        {
         "case": "As built",
-        "text": "(what it prints today; unchanged in 0.5.6)",
+        "text": "(the answer to a live prompt, as the other endpoint sends it)",
         "stream": "stdout",
         "exit": 0
        },
@@ -1745,8 +1721,8 @@
       }
      },
      {
-      "name": "x-today",
-      "value": "It writes a note on stderr about the move to mash sap prompt. Only a verified sender that is a known endpoint is accepted."
+      "name": "x-notes",
+      "value": "Only a verified sender that is a known endpoint is accepted."
      }
     ]
    },
@@ -1795,35 +1771,8 @@
       }
      },
      {
-      "name": "x-today",
-      "value": "It does not exist in 0.5.6. Planned for 0.6.0: mash prompt and the reply tool move here, which is a breaking change."
-     }
-    ]
-   }
-  ],
-  "metadata": [
-   {
-    "name": "x-removed",
-    "value": [
-     {
-      "what": "mash admin (11 commands)",
-      "why": "Needs an administrator's credentials, so it belongs to mashctl. Already deprecated."
-     },
-     {
-      "what": "mash plugin export",
-      "why": "The plugin is installed from its marketplace: claude plugin marketplace add, then claude plugin install."
-     },
-     {
-      "what": "mash credential create",
-      "why": "Replaced by mash join."
-     },
-     {
-      "what": "mash server status, mash endpoint status (0.5.6 drafts)",
-      "why": "mash has no server point of view. Peers are mash who; the server is mashctl status."
-     },
-     {
-      "what": "MASH_OWNER, MASH_GROUP, MASH_NAME, MASH_URL, MASH_TLS_CA",
-      "why": "One name each: MASH_ENDPOINT, MASH_SERVER, MASH_CA."
+      "name": "x-notes",
+      "value": "Planned for 0.6.0: mash prompt and the reply tool move here, which is a breaking change."
      }
     ]
    }

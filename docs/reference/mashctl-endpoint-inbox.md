@@ -102,7 +102,3 @@ endpoint then showed it or refused it is decided on the endpoint's own machine
 and is not something mashctl can see: by default an endpoint refuses
 everything that is not verified, so a 'yes' beside any other trust label most
 likely means it was refused.
-
-## What it replaces
-
-It takes --after, the option mash inbox has.

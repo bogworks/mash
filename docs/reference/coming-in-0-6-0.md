@@ -56,10 +56,10 @@ Stream: stdout. Exit code: 0.
 
 None. To be decided with the 0.6.0 design.
 
-#### What it replaces
+#### Notes
 
-It does not exist in 0.5.6. Planned for 0.6.0: mash prompt and the reply tool
-move here, which is a breaking change.
+Planned for 0.6.0: mash prompt and the reply tool move here, which is a
+breaking change.
 
 ### `mashctl owner`
 
@@ -98,7 +98,7 @@ Stream: stdout. Exit code: 0.
 
 None. Administration. There are no MCP tools for mashctl.
 
-#### What it replaces
+#### Notes
 
 A mesh has the one owner named at mashctl init, and nothing in the grammar
 assumes one. Several owners per mesh are planned for 0.6.0.
