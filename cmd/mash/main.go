@@ -323,6 +323,11 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 		}
 		return newCommands(mk).RunCLI("join", args[1:], stdin, stdout, stderr, global)
 	}
+	// A name that is no command is refused before the configuration loads, so a broken or several-endpoint setup never
+	// answers for it.
+	if !commandVerb(args[0]) && !slices.Contains([]string{"serve", "hook", "send", "inbox", "read", "who", "status", "doctor", "prompt"}, args[0]) {
+		return cliframe.Report(stdout, stderr, cliframe.Usagef("mash has no command %s", args[0]).WithHint("mash --help"), global.JSON)
+	}
 	jsonOut := global.JSON
 	load := config.Load
 	if args[0] == "serve" || args[0] == "hook" {

@@ -121,3 +121,34 @@ func TestStatusToolReadyWithAHealthySpool(t *testing.T) {
 		t.Errorf("status: %q", got)
 	}
 }
+
+// A name that is no command is refused before any endpoint is looked for: the same unknown-command text and exit 2
+// whether none, one or several endpoints are installed.
+func TestUnknownCommandIsRefusedBeforeTheEndpointLookup(t *testing.T) {
+	w := tlsWorld(t, "a", "b")
+	for _, n := range []int{0, 1, 2} {
+		home := t.TempDir()
+		dir := filepath.Join(home, ".config", "mash")
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		for _, name := range []string{"a", "b"}[:n] {
+			b, err := os.ReadFile(w.env[name]["MASH_CREDS"])
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, tTo(name)+".creds"), b, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		env := map[string]string{"HOME": home, "MASH_SERVER": w.env["a"]["MASH_SERVER"], "MASH_CA": w.e.CAFile}
+		r := runMash(env, "nonsense")
+		if want := "error: mash has no command nonsense\nhint: mash --help\n"; r.code != 2 || r.out != "" || r.errs != want {
+			t.Errorf("%d endpoints: %+v, want %q", n, r, want)
+		}
+		j := runMash(env, "nonsense", "--json")
+		if want := `{"error":"mash has no command nonsense","hint":"mash --help"}` + "\n"; j.code != 2 || j.errs != "" || j.out != want {
+			t.Errorf("%d endpoints --json: %+v, want %q", n, j, want)
+		}
+	}
+}
