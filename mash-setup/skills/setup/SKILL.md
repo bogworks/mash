@@ -45,6 +45,12 @@ each step that runs one (step 3 downloads and checks them; step 4 runs
   output, and what you did instead). Do not patch the scripts for another
   distribution.
 
+One yes per step. The yes in step 1 is for the plan only. Before each step
+that changes something (steps 2 to 6; every step marked "Needs a yes"), say in
+one or two lines what it will do, show each script before you run it (every
+time, not just the first), and wait for that step's own yes. Never run two
+steps on one yes. "Defaults" or "yes" to step 1 is not a yes for a later step.
+
 Every command block runs on its own in a fresh shell. Blocks marked
 `sh person` are only for what the person must do themselves: a typed
 confirmation, and starting their own Claude Code sessions. Write the exact
@@ -72,6 +78,11 @@ Say which of these it is, say the next command you would run, and wait.
 
 Ask in order, all in one message. Each has a default; the person may take
 it.
+
+If the person's request already names an owner, a group, agent names or full
+addresses (for example `acme.demo.alice`), take them as the answers to
+questions 1 to 3, say so in the read-back, and ask only what is still open.
+The login-name default for the owner applies only when they gave none.
 
 1. Owner name. Default: the login name, if it is lower-case letters and
    digits. An owner is one namespace: the first part of every address
@@ -160,7 +171,8 @@ they want them installed, and list the choices:
 - (d) build from source
 - (e) something else they name
 
-Wait for the answer.
+Wait for the answer. That question is the ask for the install route; the yes
+covers the blocks of the chosen route, shown to the person before they run.
 
 Then do it. Install for this machine and this choice, and say what you are
 doing before each command, in one line. Guard rails:
@@ -259,6 +271,8 @@ You never pipe a download into a shell. You download each file and check it
 against the release's checksums here; step 4 shows each script to the person
 and runs it after a yes. On a platform outside Ubuntu, Debian and macOS,
 follow the Platforms rule first.
+
+Ask, and wait for the yes, before running the downloads below.
 
 Use the person's download folder for `DL` (the first assignment below).
 Resolve the release tag once, and use it for the downloads and for the
