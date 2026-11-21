@@ -122,8 +122,8 @@ the `nats` command and `openssl`. If `nats-server` or `nats` is missing, tell
 the person where it comes from and ask for a yes. Needs a yes: downloading
 each program from its project's GitHub release into the install folder `BIN`
 of step 1. You run these blocks yourself; they need no `sudo`. If `openssl`,
-`curl`, `tar`, `unzip` or `ss` is missing, say so in one line and stop and
-ask: the person decides how to get it.
+`curl`, `tar` or `ss`, or both `unzip` and `python3`, is missing, say so in
+one line and stop and ask: the person decides how to get it.
 
 On a Mac, Homebrew is an alternative: `brew install nats-server nats`. Then
 skip the two blocks below.
@@ -169,7 +169,8 @@ T=$(mktemp -d) && cd "$T"
 curl -fsSLO https://github.com/nats-io/natscli/releases/download/v$V/nats-$V-$OS-$ARCH.zip
 curl -fsSLO https://github.com/nats-io/natscli/releases/download/v$V/SHA256SUMS
 grep " nats-$V-$OS-$ARCH.zip\$" SHA256SUMS | $SUM
-unzip -q nats-$V-$OS-$ARCH.zip
+if command -v unzip >/dev/null; then unzip -q nats-$V-$OS-$ARCH.zip
+else python3 -m zipfile -e nats-$V-$OS-$ARCH.zip .; fi
 install -m 0755 nats-$V-$OS-$ARCH/nats "$BIN/nats"
 cd "$HOME" && rm -r "$T"
 "$BIN/nats" --version
