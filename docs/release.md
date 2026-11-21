@@ -345,9 +345,10 @@ and must never be used for a release.
 The plugin download (#135) must not ship in a release until signed `SHA256SUMS` (#156) or attestation (#158) is
 available: pins taken from an unauthenticated `SHA256SUMS` give integrity only, not authenticity.
 
-The pins live outside the embedded files on purpose. `plugin/scripts/mash` is embedded in the mash binary
-(`plugin/embed.go`), so pins written into it would change the binary and with it the checksums being pinned: a cycle.
-`mash.pins` is not embedded, so the plugin exported by `mash plugin export` is unpinned and uses `mash` from PATH.
+The pins live in their own file, `plugin/scripts/mash.pins`, beside the launcher, written by a post-release commit. The
+plugin is published to its marketplace directly from the repository's `.claude-plugin/marketplace.json` and `plugin/`
+directory (`claude plugin marketplace add bogworks/mash`, then `claude plugin install mash@mash`); a checkout without the
+pins file is unpinned and uses `mash` from PATH.
 
 ## What makes the build reproducible
 
