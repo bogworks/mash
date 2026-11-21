@@ -101,6 +101,11 @@ configuration and credentials. It is the default: `MASH_CONFIG_DIR` (an
 absolute path) names another folder, and so does an absolute
 `XDG_CONFIG_HOME`, as `docs/install.md` describes.
 
+That folder holds `mashctl`'s signing seeds (the account and operator keys),
+and any process that runs as your user, an agent session included, can read
+them. mash accepts that risk: use a separate user or a sandbox if you need
+more.
+
 <!-- output: server -->
 Output: `[built output: server]`
 
