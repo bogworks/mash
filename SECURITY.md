@@ -69,4 +69,4 @@ Release tags are annotated but not signed. A release is checked by its files ins
 - Each binary has a CycloneDX SBOM.
 - You can rebuild a binary from the tagged commit and compare it byte for byte.
 
-The steps are in [Verify your download](docs/security/verify-your-download.md). `install.sh` does the checksum check itself, and verifies the attestation of `SHA256SUMS` when the GitHub CLI (`gh`) is installed.
+The steps are in [Verify your download](docs/security/verify-your-download.md). `install.sh` does the checksum check itself, and verifies the attestation of `SHA256SUMS` when the GitHub CLI (`gh`) is installed. The attestation check needs gh 2.102.0 or newer ([what you need](docs/security/verify-your-download.md#what-you-need)).
