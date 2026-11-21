@@ -363,7 +363,7 @@ labelled `[verified]`.
 Alice's session answers with `send`, and Bob's session sees the answer.
 Mail you sent in step 6 is waiting too: it arrives the same way.
 
-Output: `[built output: claude-code]` (a transcript of the two sessions)
+Output: not yet run on 0.5.6. The two Claude Code sessions need a live model and a login, which the test container does not have; this transcript will be added once they have been run on the published release.
 
 ## Step 8: JSON, for scripts (optional)
 
