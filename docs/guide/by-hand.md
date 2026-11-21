@@ -33,7 +33,7 @@ Installed mashctl v0.5.6 (dd696e9) in ~/.local/bin
 ~/.local/bin is not on your PATH; add it to use mash
 ```
 
-If it says `~/.local/bin` is not on your PATH, add it and open a new terminal:
+If it says `~/.local/bin` is not on your PATH, add it and open a new terminal window (a script or an `ssh` command does not read `~/.zshrc`, so the line only takes effect in a new interactive terminal):
 
 ```sh
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.profile   # zsh: ~/.zshrc
