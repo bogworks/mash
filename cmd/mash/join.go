@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"syscall"
 
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nkeys"
@@ -32,6 +31,12 @@ const joinCAFile = "ca.pem"
 const maxJoinFile = 1 << 20
 
 // joinSvc installs a join file into the configuration folder. It reads no endpoint and connects to nothing.
+// The rename and remove the install steps and their rollback use; tests replace them to fail a step.
+var (
+	joinRename = os.Rename
+	joinRemove = os.Remove
+)
+
 type joinSvc struct {
 	env  func(string) string
 	home string
@@ -273,26 +278,6 @@ func (s joinSvc) folderCA(dir string, cfg map[string]json.RawMessage, wantCA boo
 	return true, ders, nil
 }
 
-// lockDir takes an exclusive advisory lock on the configuration folder itself, so two joins into one folder run one
-// after the other. The kernel drops it when the process ends, so there is no stale lock. unlock releases it.
-func lockDir(dir string) (unlock func(), err error) {
-	f, err := os.Open(dir)
-	if err != nil {
-		return nil, err
-	}
-	for {
-		err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX)
-		if !errors.Is(err, syscall.EINTR) {
-			break
-		}
-	}
-	if err != nil {
-		f.Close()
-		return nil, err
-	}
-	return func() { _ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN); f.Close() }, nil
-}
-
 // Join installs the join file into the configuration folder. Everything is checked before anything is written, under a
 // lock on the folder; the files are written whole to temporary files and renamed or linked into place, the creds file
 // first, then ca.pem, then config.json, so a run whose creds step fails has installed nothing, and a run that fails
@@ -436,7 +421,7 @@ func (s joinSvc) Join(_ context.Context, req cmds.JoinRequest) (cmds.JoinOutcome
 		case errors.As(err, &le):
 			reason = le.Err
 		}
-		return cmds.JoinOutcome{}, cliframe.Failf("cannot write into %s: %v; nothing was installed", s.shown(dir), reason).WithHint("mash join " + req.File)
+		return cmds.JoinOutcome{}, cliframe.Failf("cannot write into %s: %v; nothing was installed", s.shown(dir), reason).WithHint("mash doctor")
 	}
 	var caTmp, cfgTmp string
 	if writeCA {
@@ -475,27 +460,31 @@ func (s joinSvc) Join(_ context.Context, req cmds.JoinRequest) (cmds.JoinOutcome
 		return fail(err)
 	}
 	var made []string // what this run created, by exact path, removed if a later step fails
-	undo := func() {
-		for _, m := range made {
-			os.Remove(m)
+	// undo puts the folder back as it was and returns what it could not: the exact paths a rollback step failed on.
+	undo := func() (left []string, kept string) {
+		left, kept = joinUndo(made, backup, credsPath)
+		if kept != "" && kept == backup {
+			temps = slices.DeleteFunc(temps, func(t string) bool { return t == backup })
 		}
-		if backup != "" {
-			os.Rename(backup, credsPath)
-		} else {
-			os.Remove(credsPath)
+		return left, kept
+	}
+	// rollback undoes the run after a failed step; if the undo itself fails it names what was left, by exact path.
+	rollback := func(err error) (cmds.JoinOutcome, error) {
+		left, kept := undo()
+		if len(left) == 0 {
+			return fail(err)
 		}
+		return cmds.JoinOutcome{}, s.undoFailure(left, kept)
 	}
 	if caTmp != "" {
-		if err := os.Rename(caTmp, caPath); err != nil {
-			undo()
-			return fail(err)
+		if err := joinRename(caTmp, caPath); err != nil {
+			return rollback(err)
 		}
 		made = append(made, caPath)
 	}
 	if cfgTmp != "" {
-		if err := os.Rename(cfgTmp, cfgPath); err != nil {
-			undo()
-			return fail(err)
+		if err := joinRename(cfgTmp, cfgPath); err != nil {
+			return rollback(err)
 		}
 	}
 	return out, nil
@@ -507,4 +496,45 @@ func cloneConfig(m map[string]json.RawMessage) map[string]json.RawMessage {
 		c[k] = v
 	}
 	return c
+}
+
+// joinUndo removes what a join run made (by exact path) and puts a replaced creds file back from its backup. It returns
+// the paths it could not clean up. When the backup cannot be restored the new creds stay in place and the old ones are
+// kept: the backup is linked to <creds>.old (never over an existing file), and kept is that path; if that cannot be
+// done the backup keeps its own name and kept is that.
+func joinUndo(made []string, backup, credsPath string) (left []string, kept string) {
+	for _, m := range made {
+		if err := joinRemove(m); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			left = append(left, m)
+		}
+	}
+	if backup == "" {
+		if err := joinRemove(credsPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			left = append(left, credsPath)
+		}
+		return left, ""
+	}
+	if err := joinRename(backup, credsPath); err != nil {
+		left = append(left, credsPath)
+		kept = backup
+		if old := credsPath + ".old"; os.Link(backup, old) == nil {
+			os.Remove(backup)
+			kept = old
+		}
+	}
+	return left, kept
+}
+
+// undoFailure is the failure for a rollback that left paths behind: it names each by exact path and, when a replaced
+// creds file could not be put back, where the old creds are kept.
+func (s joinSvc) undoFailure(left []string, kept string) *cliframe.Error {
+	shown := make([]string, len(left))
+	for i, l := range left {
+		shown[i] = s.shown(l)
+	}
+	note := ""
+	if kept != "" {
+		note = "; old creds kept at " + s.shown(kept)
+	}
+	return cliframe.Failf("could not finish and could not undo: %s left%s", strings.Join(shown, ", "), note).WithHint("mash doctor")
 }
