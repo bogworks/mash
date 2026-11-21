@@ -13,7 +13,24 @@ func lk(env func(string) string) config.Lookup { return config.LookupFromFunc(en
 
 // runEnv is run with the lookup derived from env.
 func runEnv(args []string, env func(string) string, stdout, stderr io.Writer) int {
+	if !keepSkipWarning {
+		stderr = skipWarningFilter{stderr}
+	}
 	return run(args, env, config.LookupFromFunc(env), stdout, stderr)
+}
+
+// keepSkipWarning lets a test see the line every command prints while MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set.
+// The test servers here are plain, so every other test runs with the variable set and has the line filtered out of
+// its stderr; the tests of the line itself set this.
+var keepSkipWarning bool
+
+type skipWarningFilter struct{ w io.Writer }
+
+func (f skipWarningFilter) Write(b []byte) (int, error) {
+	if string(b) == config.SkipEncryptionWarning+"\n" {
+		return len(b), nil
+	}
+	return f.w.Write(b)
 }
 
 func TestParseEpAddress(t *testing.T) {

@@ -101,7 +101,7 @@ func newApplyEnvOpts(t *testing.T, tweak func(e *applyEnv), optsHook func(o *ser
 	e.sysCreds = filepath.Join(pl.Dir, natsfixture.SysCreds)
 	e.writeConfig(`{"system_creds":"` + e.sysCreds + `"}`)
 	e.env = map[string]string{
-		"HOME": root, "MASH_CONFIG_DIR": filepath.Join(root, "cfg"), "MASH_SERVER": srv.ClientURL(), "MASH_INSECURE_PLAINTEXT": "1", "MASH_ENDPOINT": "alice.dev.x",
+		"HOME": root, "MASH_CONFIG_DIR": filepath.Join(root, "cfg"), "MASH_SERVER": srv.ClientURL(), "MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION": "1", "MASH_ENDPOINT": "alice.dev.x",
 		"MASH_KEYS_DIR": e.keyDir,
 		// the admin credentials, for the commands that read the directory.
 		"MASH_ADMIN_CREDS": pl.Creds,
@@ -251,7 +251,7 @@ func newXYEnv(t *testing.T) *applyEnv {
 	t.Helper()
 	e := newApplyEnv(t)
 	e.env["MASH_ADMIN_CREDS"] = e.pl.Creds
-	e.env["MASH_INSECURE_PLAINTEXT"] = "1"
+	e.env["MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION"] = "1"
 	e.makeStorage(e.pl.Creds)
 	e.endpoint(xy("x"), map[string]string{"net": "a", "team": "red"})
 	e.endpoint(xy("y"), map[string]string{"net": "b"})

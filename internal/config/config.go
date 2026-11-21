@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"math"
 	"os"
@@ -73,10 +74,11 @@ type Config struct {
 	TLSCA        string        // MASH_CA / "ca": PEM file of the CA that signed the server's certificate (empty = system roots)
 	TLSCert      string        // MASH_TLS_CERT / "tls_cert": PEM client certificate, for a server that requires one; set with TLSKey
 	TLSKey       string        // MASH_TLS_KEY / "tls_key": PEM private key of TLSCert
-	// InsecurePlaintext is the one override of the TLS requirement (REQ-014): every connection mash and mashctl make
+	// SkipEncryption is the one override of the TLS requirement (REQ-014): every connection mash and mashctl make
 	// uses tls:// or wss://, to any host (loopback included), unless it is set. Then a plain nats:// or ws:// URL is
-	// connected and a warning goes to standard error. It is a setting, not a command-line flag.
-	InsecurePlaintext bool   // MASH_INSECURE_PLAINTEXT / "insecure_plaintext": allow plain-text connections to any host (default false)
+	// connected. It comes from the environment variable SkipEncryptionEnv only: no flag, no config.json key. Every
+	// command prints SkipEncryptionWarning on standard error while it is set (WarnSkipEncryption).
+	SkipEncryption    bool   // MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1: allow plain-text connections to any host (default false)
 	LaunchToken       string // MASH_LAUNCH_TOKEN: names the launch of the agent this process serves; recorded in the lease, optional
 	Host              string // MASH_HOST / "host": the agent host adapter ("" = claude)
 	SpoolFromStart    bool   // MASH_SPOOL_FROM_START / "spool_from_start": spool mail from the first message, before any hook has run
@@ -103,7 +105,7 @@ type Config struct {
 // SourceKeys are the keys of Config.Source and Config.FileValues, and the environment variable each one is read from.
 var SourceKeys = map[string]string{
 	"endpoint": "MASH_ENDPOINT", "servers": "MASH_SERVER", "admin_creds": "MASH_ADMIN_CREDS",
-	"ca": "MASH_CA", "tls_cert": "MASH_TLS_CERT", "tls_key": "MASH_TLS_KEY", "insecure_plaintext": "MASH_INSECURE_PLAINTEXT",
+	"ca": "MASH_CA", "tls_cert": "MASH_TLS_CERT", "tls_key": "MASH_TLS_KEY",
 }
 
 // FlagSourcePrefix is the prefix of the Lookup keys with which a Lookup that carries global flag values (see
@@ -149,7 +151,7 @@ type file struct {
 
 	AcceptUnverified *bool `json:"accept_unverified"`
 
-	InsecurePlaintext *bool `json:"insecure_plaintext"`
+	OldInsecurePlaintext json.RawMessage `json:"insecure_plaintext"` // read only to refuse it: the key is gone (SkipEncryptionEnv)
 
 	Limits json.RawMessage `json:"limits"`
 
@@ -269,12 +271,88 @@ func splitServers(s string) []string {
 	return out
 }
 
+// SkipEncryptionEnv is the one way to allow a plain-text (nats:// or ws://) connection, for mash and mashctl alike. Its
+// only value is 1 (empty and 0 are off). There is no flag and no config.json key.
+const SkipEncryptionEnv = "MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION"
+
+// SkipEncryptionWarning is the line every command of mash and mashctl prints on standard error, once, at start,
+// while SkipEncryptionEnv is on.
+const SkipEncryptionWarning = "warning: encryption to the server is OFF (" + SkipEncryptionEnv + " is set)"
+
+// SkipEncryptionError is a refusal about the encryption override (a removed name, a bad value). It is a command-line
+// or configuration error: the commands exit 2 on it.
+type SkipEncryptionError struct{ msg, hint string }
+
+func (e *SkipEncryptionError) Error() string { return "mash: " + e.msg }
+
+// Msg is the error without its "mash: " prefix.
+func (e *SkipEncryptionError) Msg() string { return e.msg }
+
+// Hint is the one-line fix for the refusal. It never points at a command, since every command refuses until the fix is made.
+func (e *SkipEncryptionError) Hint() string { return e.hint }
+
+// SkipEncryptionFrom reads SkipEncryptionEnv: "" and "0" are off, "1" is on, anything else is an error naming it. The
+// removed name MASH_INSECURE_PLAINTEXT is refused when it is set at all.
+func SkipEncryptionFrom(lookup Lookup) (bool, error) {
+	if old, _ := lookup("MASH_INSECURE_PLAINTEXT"); old != "" {
+		return false, &SkipEncryptionError{msg: "MASH_INSECURE_PLAINTEXT is no longer read; set " + SkipEncryptionEnv + "=1 instead", hint: "unset MASH_INSECURE_PLAINTEXT; use " + SkipEncryptionEnv + "=1"}
+	}
+	v, _ := lookup(SkipEncryptionEnv)
+	switch v {
+	case "", "0":
+		return false, nil
+	case "1":
+		return true, nil
+	}
+	return false, &SkipEncryptionError{msg: fmt.Sprintf("%s=%q is not 1 (set it to 1 to turn encryption off, or unset it)", SkipEncryptionEnv, v), hint: "set " + SkipEncryptionEnv + "=1 or unset it"}
+}
+
+// WarnSkipEncryption prints SkipEncryptionWarning to stderr when SkipEncryptionEnv is on. A command calls it once,
+// first, before it does anything else.
+func WarnSkipEncryption(lookup Lookup, stderr io.Writer) {
+	if on, _ := SkipEncryptionFrom(lookup); on {
+		fmt.Fprintln(stderr, SkipEncryptionWarning)
+	}
+}
+
+// CheckSkipEncryption is the one check of the encryption override, made by each tool at its entry point before any
+// command dispatches: the removed variable, a bad value, and the removed config.json key insecure_plaintext are
+// refused. The file is read only for that key (a missing, unreadable or malformed file is the commands' business); the
+// directory is the one Load uses. It returns nil when there is nothing to refuse.
+func CheckSkipEncryption(lookup Lookup, home string) *SkipEncryptionError {
+	var se *SkipEncryptionError
+	if _, err := SkipEncryptionFrom(lookup); errors.As(err, &se) {
+		return se
+	}
+	env := func(k string) string { v, _ := lookup(k); return v }
+	if dir := ConfigDir(env, home); dir != "" {
+		if raw, err := os.ReadFile(filepath.Join(dir, "config.json")); err == nil {
+			var f file
+			if json.Unmarshal(raw, &f) == nil && errors.As(refuseOldKey(f), &se) {
+				return se
+			}
+		}
+	}
+	return nil
+}
+
+// refuseOldKey refuses the removed config.json key insecure_plaintext.
+func refuseOldKey(f file) error {
+	if f.OldInsecurePlaintext != nil {
+		return &SkipEncryptionError{msg: "insecure_plaintext in config.json is no longer read; set " + SkipEncryptionEnv + "=1 instead", hint: "remove insecure_plaintext from config.json; use " + SkipEncryptionEnv + "=1"}
+	}
+	return nil
+}
+
 // ValidateFile reports whether raw is a config.json that Load would accept as far as the file itself goes: it must
 // parse into the known fields with the right types, and "idle_wake" must be a valid duration. The environment is not
 // consulted.
 func ValidateFile(raw []byte) error {
 	var f file
 	if err := json.Unmarshal(raw, &f); err != nil {
+		return err
+	}
+	if err := refuseOldKey(f); err != nil {
 		return err
 	}
 	if _, err := serverList(f.Servers); err != nil {
@@ -433,6 +511,10 @@ func LoadNamedOnly(lookup Lookup, home string) (Config, error) {
 
 func loadPicking(lookup Lookup, home string, autoPick bool) (Config, error) {
 	env := func(k string) string { v, _ := lookup(k); return v }
+	skip, err := SkipEncryptionFrom(lookup)
+	if err != nil {
+		return Config{}, err
+	}
 	if _, err := explicitDir(env, "MASH_CONFIG_DIR"); err != nil {
 		return Config{}, err
 	}
@@ -465,6 +547,9 @@ func loadPicking(lookup Lookup, home string, autoPick bool) (Config, error) {
 		if err := json.Unmarshal(raw, &f); err != nil {
 			return c, fmt.Errorf("mash: %s: %w", filepath.Join(dir, "config.json"), err)
 		}
+		if err := refuseOldKey(f); err != nil {
+			return c, err
+		}
 		c.File = filepath.Join(dir, "config.json")
 	case !errors.Is(err, os.ErrNotExist):
 		return c, fmt.Errorf("mash: reading config: %w", err)
@@ -484,9 +569,6 @@ func loadPicking(lookup Lookup, home string, autoPick bool) (Config, error) {
 	}
 	if f.SpoolRequired != nil {
 		c.SpoolRequired = *f.SpoolRequired
-	}
-	if f.InsecurePlaintext != nil {
-		c.InsecurePlaintext = *f.InsecurePlaintext
 	}
 	if f.AcceptUnverified != nil {
 		c.AcceptUnverified = *f.AcceptUnverified
@@ -617,15 +699,7 @@ func loadPicking(lookup Lookup, home string, autoPick bool) (Config, error) {
 		return c, fmt.Errorf("mash: MASH_ACCEPT_UNVERIFIED=%q is not 1, true, 0 or false", v)
 	}
 
-	switch v := env("MASH_INSECURE_PLAINTEXT"); v {
-	case "":
-	case "1", "true":
-		c.InsecurePlaintext = true
-	case "0", "false":
-		c.InsecurePlaintext = false
-	default:
-		return c, fmt.Errorf("mash: MASH_INSECURE_PLAINTEXT=%q is not 1, true, 0 or false", v)
-	}
+	c.SkipEncryption = skip
 
 	if v := env("MASH_IDLE_WAKE"); v != "" {
 		d, err := idleWake(v)
@@ -742,9 +816,6 @@ func (c *Config) recordSources(f file, fileServers []string, lookup Lookup, home
 	c.Source, c.FileValues = map[string]string{}, map[string]string{}
 	fileVals := map[string]string{"endpoint": f.Endpoint, "servers": strings.Join(fileServers, ","), "admin_creds": ExpandHome(f.AdminCreds, home),
 		"ca": f.CA, "tls_cert": f.TLSCert, "tls_key": f.TLSKey}
-	if f.InsecurePlaintext != nil {
-		fileVals["insecure_plaintext"] = strconv.FormatBool(*f.InsecurePlaintext)
-	}
 	for key, ev := range SourceKeys {
 		fv := fileVals[key]
 		if fv != "" {
@@ -760,8 +831,6 @@ func (c *Config) recordSources(f file, fileServers []string, lookup Lookup, home
 			c.Source[key] = "config.json"
 		case key == "endpoint" && autoPicked:
 			c.Source[key] = "installed creds"
-		case key == "insecure_plaintext":
-			c.Source[key] = "default"
 		default:
 			c.Source[key] = "unset"
 		}

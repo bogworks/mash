@@ -68,7 +68,7 @@ func writeTestPKI(t *testing.T, dir string) (caPath, certPath, keyPath string) {
 }
 
 // newTLSIniter is an initer whose source server (operator mode, full resolver) listens with TLS. The initer's
-// environment has no MASH_INSECURE_PLAINTEXT. url is the tls:// URL of the server.
+// environment has no MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION. url is the tls:// URL of the server.
 func newTLSIniter(t *testing.T) (a *initer, url, caPath string) {
 	t.Helper()
 	caPath, certPath, keyPath := writeTestPKI(t, t.TempDir())
@@ -80,7 +80,7 @@ func newTLSIniter(t *testing.T) (a *initer, url, caPath string) {
 		o.TLSConfig, o.TLS, o.TLSTimeout = cfg, true, 5
 	})
 	a = newIniter(t, e)
-	delete(a.env, "MASH_INSECURE_PLAINTEXT")
+	delete(a.env, "MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION")
 	url = fmt.Sprintf("tls://127.0.0.1:%d", e.srv.Addr().(*net.TCPAddr).Port)
 	a.vals["servers"] = []string{url}
 	return a, url, caPath
@@ -112,7 +112,7 @@ func TestInitTLSUntrustedCARefused(t *testing.T) {
 	a.refuses(1, []string{"not trusted"}, map[string]any{"ca": otherCA})
 }
 
-func TestInitPlainWithoutInsecurePlaintextRefused(t *testing.T) {
+func TestInitPlainWithoutSkipEncryptionRefused(t *testing.T) {
 	// A plain nats:// URL to a non-loopback host is refused by RequireTLS before any connection is made. (A plain URL
 	// to the loopback address of a TLS server is not refused: nats.Secure upgrades it to TLS.)
 	a, _, ca := newTLSIniter(t)

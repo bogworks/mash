@@ -296,12 +296,9 @@ func doInit(setupPath string, dry, jsonOut, verbose bool, env func(string) strin
 
 	// (2) the server: operator mode, system creds, the resolver. Admin and system connections require TLS, so a URL
 	// that is refused for that is refused before any connection is made.
-	tlsReq, warning, err := natsauth.RequireTLS(cfg.URL, cfg.InsecurePlaintext)
+	tlsReq, _, err := natsauth.RequireTLS(cfg.URL, cfg.SkipEncryption)
 	if err != nil {
-		return cliframe.Failf("%v (nothing was changed)", err)
-	}
-	if warning != "" {
-		fmt.Fprintln(os.Stderr, warning) // the process's stderr, where every admin connection puts it
+		return withPlainCode(cliframe.Failf("%v (nothing was changed)", err), err)
 	}
 	unreachable := func() error {
 		return cliframe.Failf("cannot reach %s", first).WithHint("mashctl doctor")
@@ -556,7 +553,7 @@ func finishInit(stdout io.Writer, jsonOut, verbose, dry, changed bool, sf setupF
 }
 
 // initSettings are the settings config.json gets: the setup file's only. A one-off setting of this run (MASH_CA,
-// MASH_INSECURE_PLAINTEXT, MASH_TLS_*) or an old config.json's tls_cert is never written.
+// MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION, MASH_TLS_*) or an old config.json's tls_cert is never written.
 func initSettings(cfg config.Config, sf setupFile, st *initState) map[string]any {
 	m := map[string]any{"servers": sf.servers, "owner": sf.owner, "admin_creds": sf.adminCreds, "system_creds": st.sysDst}
 	if sf.ca != "" {
@@ -570,7 +567,7 @@ func configJSON(m map[string]any) []byte {
 	var b bytes.Buffer
 	b.WriteString("{\n")
 	var parts []string
-	for _, k := range []string{"servers", "ca", "owner", "admin_creds", "system_creds", "insecure_plaintext", "tls_cert", "tls_key"} {
+	for _, k := range []string{"servers", "ca", "owner", "admin_creds", "system_creds", "tls_cert", "tls_key"} {
 		if v, ok := m[k]; ok {
 			enc, _ := json.Marshal(v)
 			parts = append(parts, fmt.Sprintf("  %q: %s", k, enc))
@@ -784,12 +781,9 @@ func askJetStream(cfg config.Config, url string, raw []byte, limit int64) (strin
 }
 
 func dialAdmin(cfg config.Config, url string, raw []byte) (*nats.Conn, error) {
-	tlsReq, warning, err := natsauth.RequireTLS(url, cfg.InsecurePlaintext)
+	tlsReq, _, err := natsauth.RequireTLS(url, cfg.SkipEncryption)
 	if err != nil {
 		return nil, err
-	}
-	if warning != "" {
-		fmt.Fprintln(os.Stderr, warning)
 	}
 	c, err := nats.Connect(url, append(append(natsauth.TLSOptions(cfg.TLSCA, cfg.TLSCert, cfg.TLSKey), tlsReq...),
 		natsauth.UserCredentialBytes(raw), nats.Name("mashctl-init-admin"), nats.Timeout(connectTimeout), nats.MaxReconnects(0))...)

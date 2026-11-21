@@ -406,11 +406,11 @@ var AT001 = Scenario{
 		}
 		envHasOverride := false
 		for _, kv := range a.Env(h, a.SessionEnv(h, "dev", "design")...) {
-			if strings.HasPrefix(kv, "MASH_INSECURE_PLAINTEXT") {
+			if strings.HasPrefix(kv, "MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION") {
 				envHasOverride = true
 			}
 		}
-		a.C.Check("REQ-014: the quick start runs with no override: the environment of init, serve and the ctl commands holds no MASH_INSECURE_PLAINTEXT, and the URL is tls://",
+		a.C.Check("REQ-014: the quick start runs with no override: the environment of init, serve and the ctl commands holds no MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION, and the URL is tls://",
 			!envHasOverride && strings.Contains(strings.Join(a.Conn(), " "), "MASH_SERVER=tls://"), "")
 		// design: the join flow (key, join file for the public key, mash join --key); review: the same-machine shortcut,
 		// mashctl endpoint create installs the creds file in the config folder with no join.

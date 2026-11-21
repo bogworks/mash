@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"slices"
 	"strings"
 
@@ -64,6 +63,8 @@ type doctorReport struct {
 	Problems int           `json:"problems"`
 	Warnings int           `json:"warnings"`
 	Checks   []doctorCheck `json:"checks"`
+
+	plainRefused bool // the server row failed on natsauth's refusal of a plain URL: exit 2
 }
 
 const initFix = "mashctl init --config <file>"
@@ -174,6 +175,9 @@ func runDoctor(args []string, g cliframe.Global, env func(string) string, lookup
 	} else {
 		rep.writeText(stdout, stderr)
 	}
+	if rep.plainRefused { // a plain URL without the override: a configuration error, whatever else failed
+		return 2
+	}
 	if rep.Problems > 0 || (in.flags["--strict"] && rep.Warnings > 0) {
 		return 1
 	}
@@ -218,6 +222,9 @@ func doctorChecks(rep *doctorReport, env func(string) string, lookup config.Look
 		}
 	}
 	if why := probeServer(cfg, servers[0]); why != "" {
+		var p *natsauth.PlainRefusalError
+		_, _, rerr := natsauth.RequireTLS(servers[0], cfg.SkipEncryption)
+		rep.plainRefused = errors.As(rerr, &p)
 		rep.add("server", stateFail, why, "mashctl status")
 		return
 	}
@@ -248,14 +255,11 @@ func doctorChecks(rep *doctorReport, env func(string) string, lookup config.Look
 // probeServer connects to one server, with the TLS settings of the configuration and no credentials. A server that
 // answers, or that refuses the connection for want of credentials, is up; the reason a server is not is returned.
 func probeServer(cfg config.Config, server string) string {
-	tlsReq, warning, err := natsauth.RequireTLS(server, cfg.InsecurePlaintext)
+	tlsReq, _, err := natsauth.RequireTLS(server, cfg.SkipEncryption)
 	if err != nil {
 		return oneLine(err.Error())
 	}
 	if why := probe(cfg, server, tlsReq); why != "" {
-		if warning != "" { // the sign-in step says it when the server answers
-			fmt.Fprintln(os.Stderr, warning)
-		}
 		return why
 	}
 	return ""

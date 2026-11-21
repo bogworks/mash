@@ -120,7 +120,7 @@ func epReissue(in *epInput, env func(string) string, lookup config.Lookup, stder
 	announceTarget(cfg, env, stderr, nil, in.verbose)
 	adm, ctx, closeAdmin, err := ctl.OpenAdmin("mashctl", cfg)
 	if err != nil {
-		return t, epResult{}, epErrOf(addr, "server", admin.RewordUnavailable(err.Error())+"; nothing was changed")
+		return t, epResult{}, withPlainCode(epErrOf(addr, "server", admin.RewordUnavailable(err.Error())+"; nothing was changed"), err)
 	}
 	defer closeAdmin()
 

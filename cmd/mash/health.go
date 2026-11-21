@@ -143,7 +143,7 @@ func (h *healthSvc) credsCheck() cmds.HealthCheck {
 	return c
 }
 
-// serverCheck is the server row: the address is allowed (tls, or plain with insecure_plaintext) and a server answers.
+// serverCheck is the server row: the address is allowed (tls, or plain with MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1) and a server answers.
 func (h *healthSvc) serverCheck(ctx context.Context) cmds.HealthCheck {
 	c := cmds.HealthCheck{Name: cmds.CheckServer, State: cmds.CheckFail}
 	url := config.RedactURL(h.cfg.URL)
@@ -165,7 +165,7 @@ func (h *healthSvc) serverCheck(ctx context.Context) cmds.HealthCheck {
 			c.Code = cmds.CodeServerUntrusted
 		case errors.Is(err, endpoint.ErrServerNotTLS):
 			c.Detail = "the server did not offer TLS: " + url
-			c.Fix = `use the server's plain address with insecure_plaintext set, or ask whoever runs your mesh for its tls:// address`
+			c.Fix = `use the server's plain address with MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1 set, or ask whoever runs your mesh for its tls:// address`
 			c.Code = cmds.CodeServerNoTLS
 		case errors.Is(err, endpoint.ErrServerRefusedClientCert):
 			c.Detail = "the server refused the client certificate: " + url
@@ -176,8 +176,8 @@ func (h *healthSvc) serverCheck(ctx context.Context) cmds.HealthCheck {
 		return c
 	}
 	c.State, c.Detail = cmds.CheckOK, url
-	if endpoint.PlainWarning(h.cfg) != "" {
-		c.State, c.Detail = cmds.CheckWarn, url+" is plain text: insecure_plaintext is set"
+	if endpoint.PlainURL(h.cfg) {
+		c.State, c.Detail = cmds.CheckWarn, url+" is plain text: MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set"
 	} else if w := urlSecretWarning(h.cfg); w != "" {
 		c.State, c.Detail = cmds.CheckWarn, w
 	}

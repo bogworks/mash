@@ -844,7 +844,7 @@ func (s *At5) plainRefusals(m1, m3 Host) {
 		return
 	}
 	url := "nats://" + ip + ":" + strconv.Itoa(DefaultPorts[0].Client)
-	env := s.epEnv(m3, m1, "design", credsIn(m3.Home(), "alice.dev.design"), "MASH_SERVER="+url, "MASH_INSECURE_PLAINTEXT=0")
+	env := s.epEnv(m3, m1, "design", credsIn(m3.Home(), "alice.dev.design"), "MASH_SERVER="+url, "MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=0")
 	r := s.mash(m3, "plain-endpoint", env, "inbox")
 	txt := r.Text()
 	s.check("REQ-014: with no override an endpoint refuses to connect to a plain nats:// URL on a non-loopback address (refused before any connection; no plain server started)", r.Code != 0 && strings.Contains(strings.ToLower(txt), "tls"), exitSnip(r))
@@ -852,7 +852,7 @@ func (s *At5) plainRefusals(m1, m3 Host) {
 	dr := s.mash(m3, "plain-doctor", env, "doctor")
 	s.check("REQ-014: mash doctor says the server row FAILs for it", strings.Contains(dr.Stdout, "server    FAIL  "), snip(grepLine(dr.Text(), "server")))
 	s.check("REQ-014: mash status says it is not ready", st.Code == 1 && strings.Contains(st.Stdout, "not ready: "), exitSnip(st))
-	r = s.ctl(m1, "plain-admin", []string{"MASH_SERVER=" + url, "MASH_INSECURE_PLAINTEXT=0"}, "endpoint", "list")
+	r = s.ctl(m1, "plain-admin", []string{"MASH_SERVER=" + url, "MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=0"}, "endpoint", "list")
 	s.check("REQ-014: mashctl refuses an admin connection to a plain nats:// URL on a non-loopback address", r.Code != 0 && strings.Contains(strings.ToLower(r.Text()), "tls"), exitSnip(r))
 }
 

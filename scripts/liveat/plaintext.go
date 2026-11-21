@@ -43,23 +43,23 @@ func (c *connCounter) Close()       { _ = c.ln.Close() }
 func plainRefusalOK(r Result, want int, connects int64) (bool, string) {
 	text := r.Text()
 	var miss []string
-	for _, s := range []string{"MASH_INSECURE_PLAINTEXT", "tls://"} {
+	for _, s := range []string{"MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION", "tls://"} {
 		if !strings.Contains(text, s) {
 			miss = append(miss, s)
 		}
-	}
-	if !strings.Contains(text, "insecure_plaintext") && !strings.Contains(text, "MASH_INSECURE_PLAINTEXT") {
-		miss = append(miss, "insecure_plaintext")
 	}
 	ok := r.Code == want && len(miss) == 0 && connects == 0
 	return ok, fmt.Sprintf("exit %d (want %d); message lacks: %s; %d connections reached the server; %s", r.Code, want, orNone(strings.Join(miss, ", ")), connects, exitDetail(r))
 }
 
+// skipWarning is the line every command prints on standard error while MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set.
+const skipWarning = "warning: encryption to the server is OFF (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set)"
+
 // plainWarnedOK judges one command run with the override: a connection was made (the listener counted one) and the
 // plain-text warning is on standard error, never on standard output.
 func plainWarnedOK(r Result, connects int64) (bool, string) {
-	warned := strings.Contains(strings.ToLower(r.Stderr), "plain-text") || strings.Contains(strings.ToLower(r.Stderr), "plain text")
-	onStdout := strings.Contains(strings.ToLower(r.Stdout), "warning: plain")
+	warned := strings.Contains(r.Stderr, skipWarning)
+	onStdout := strings.Contains(r.Stdout, skipWarning)
 	ok := connects > 0 && warned && !onStdout
 	return ok, fmt.Sprintf("%d connections reached the server; warning on stderr %v, on stdout %v; %s", connects, warned, onStdout, exitDetail(r))
 }
@@ -68,13 +68,8 @@ func plainWarnedOK(r Result, connects int64) (bool, string) {
 // error. The report itself is on stdout; the standalone warning line must not be. The exit code is not part of it: the
 // counting listener the harness stands in for the server does not answer, so the report finds a problem.
 func doctorWarnedOnStderr(r Result) (bool, string) {
-	warned := strings.Contains(strings.ToLower(r.Stderr), "warning: plain-text")
-	onStdout := false
-	for _, l := range strings.Split(r.Stdout, "\n") {
-		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(l)), "mash: warning: plain") {
-			onStdout = true
-		}
-	}
+	warned := strings.Contains(r.Stderr, skipWarning)
+	onStdout := strings.Contains(r.Stdout, skipWarning)
 	return warned && !onStdout, fmt.Sprintf("warning on stderr %v, standalone on stdout %v; %s", warned, onStdout, exitDetail(r))
 }
 
@@ -91,7 +86,7 @@ func (a *AT) plainText(ha, he Home, design ep) {
 	defer cc.Close()
 	url := "nats://" + cc.Addr()
 	base := func(over string, more ...string) []string {
-		return append(append(a.Conn(), "MASH_SERVER="+url, "MASH_INSECURE_PLAINTEXT="+over, // Conn() carries no override: it is set here, per command, and only here
+		return append(append(a.Conn(), "MASH_SERVER="+url, "MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION="+over, // Conn() carries no override: it is set here, per command, and only here
 			"MASH_OPEN_TIMEOUT=2s"), more...)
 	}
 	session := []string{"MASH_ENDPOINT=alice.dev.design", "MASH_CREDS=" + design.creds, "MASH_STATE_DIR=" + filepath.Join(he.State, "plain")}
@@ -114,12 +109,12 @@ func (a *AT) plainText(ha, he Home, design ep) {
 		before := cc.Count()
 		res := r.call(base("1"))
 		ok, detail := plainWarnedOK(res, cc.Count()-before)
-		a.C.Check("REQ-014: "+r.name+" with insecure_plaintext set connects and prints the plain-text warning on standard error", ok, detail)
+		a.C.Check("REQ-014: "+r.name+" with MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1 connects and prints the plain-text warning on standard error", ok, detail)
 	}
 	st := a.Mash("plain-doctor", he, append(base("1"), session...), "doctor")
 	ok, detail := doctorWarnedOnStderr(st)
 	a.C.Check("REQ-014: mash doctor with the override prints the plain-text warning on standard error, not standard output", ok, detail)
-	a.C.Check("REQ-014: mash doctor with the override does not report the plain URL as refused", !strings.Contains(st.Stdout, "insecure_plaintext"), snip(grepLine(st.Text(), "server")))
+	a.C.Check("REQ-014: mash doctor with the override does not report the plain URL as refused", !strings.Contains(st.Stdout, "refusing a plain"), snip(grepLine(st.Text(), "server")))
 	st = a.Mash("plain-doctor-refused", he, append(base("0"), session...), "doctor")
-	a.C.Check("REQ-014: mash doctor without it says the server row FAILs and names insecure_plaintext", strings.Contains(st.Stdout, "server    FAIL  ") && strings.Contains(st.Stdout, "insecure_plaintext"), snip(grepLine(st.Text(), "server")))
+	a.C.Check("REQ-014: mash doctor without it says the server row FAILs and names MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION", strings.Contains(st.Stdout, "server    FAIL  ") && strings.Contains(st.Stdout, "MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION"), snip(grepLine(st.Text(), "server")))
 }

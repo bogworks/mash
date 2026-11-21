@@ -118,7 +118,7 @@ func TestCheckServer(t *testing.T) {
 		t.Fatal("a closed port answered")
 	}
 	cfg.URL = "nats://" + addr
-	if err := CheckServer(ctx, cfg); err == nil || !strings.Contains(err.Error(), "insecure_plaintext") {
+	if err := CheckServer(ctx, cfg); err == nil || !strings.Contains(err.Error(), "MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION") {
 		t.Fatalf("a plain URL with no override: %v", err)
 	}
 }

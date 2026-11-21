@@ -174,32 +174,35 @@ func serverParts(entry string) (scheme, host string) {
 }
 
 // plainHint is the tail of every refusal of a plain connection: the setting that allows it and the fix.
-const plainHint = "set insecure_plaintext (MASH_INSECURE_PLAINTEXT=1) to allow plain text; the fix is to use a tls:// URL with the server's certificate (MASH_CA or \"ca\" for a private CA)"
+const plainHint = "set MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1 to allow plain text; the fix is to use a tls:// URL with the server's certificate (MASH_CA or \"ca\" for a private CA)"
 
 // plainRefusal is the error for a plain scheme (every one but tls and wss) to host, with no override. It names the
 // scheme and the host, never userinfo.
 func plainRefusal(scheme, host string) error {
-	return fmt.Errorf("mash: refusing a plain %s:// connection to %q: every mash connection requires TLS, to any host (loopback included); %s", scheme, host, plainHint)
+	return &PlainRefusalError{msg: fmt.Sprintf("mash: refusing a plain %s:// connection to %q: every mash connection requires TLS, to any host (loopback included); %s", scheme, host, plainHint)}
 }
 
-// PlainWarning is the line printed to standard error when a plain connection to host is made under insecure_plaintext.
-func PlainWarning(host string) string {
-	return fmt.Sprintf("mash: WARNING: plain-text connection to %s (insecure_plaintext is set); anyone on the network can read mail and obtain signatures", host)
-}
+// PlainRefusalError is RequireTLS's refusal of a plain URL. It is a configuration error: a command that reports it
+// exits 2 (ExitCode), found with errors.As, never by matching its text.
+type PlainRefusalError struct{ msg string }
+
+func (e *PlainRefusalError) Error() string { return e.msg }
+
+// ExitCode is 2, the code of a usage or configuration error (cliframe.Report reads it).
+func (e *PlainRefusalError) ExitCode() int { return 2 }
 
 // RequireTLS is the one rule for every connection mash and mashctl make (admin, system and endpoint), applied to url (a
 // comma-separated server list) before anything is connected. Every entry must be tls:// or wss://, to any host
 // (loopback included). An entry whose scheme is not nats, tls, ws or wss is refused as unsupported in every case (the
-// client would dial it as plain TCP). A plain entry (nats://, ws://, or no scheme) is refused unless insecurePlaintext
-// is set. The errors name the scheme and the host, never the URL's userinfo.
+// client would dial it as plain TCP). A plain entry (nats://, ws://, or no scheme) is refused unless skipEncryption
+// (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1) is set. The errors name the scheme and the host, never the URL's userinfo.
 //
-// With insecurePlaintext set, a plain entry is allowed to any host: no TLS is forced (a list may mix plain and TLS
-// entries, and each works as its scheme says), and warning names the first plain host ("" when no entry is plain); the
-// caller prints it to standard error. Otherwise the list is all TLS and nats.Secure() makes the connection fail when
+// With skipEncryption set, a plain entry is allowed to any host: no TLS is forced (a list may mix plain and TLS
+// entries, and each works as its scheme says), and plain says an entry was plain. Nothing is printed here: every
+// command prints the one warning at start (config.WarnSkipEncryption). Otherwise the list is all TLS and nats.Secure() makes the connection fail when
 // the server does not offer TLS. Servers a server advertises are never added to the client's pool.
-func RequireTLS(url string, insecurePlaintext bool) (opts []nats.Option, warning string, err error) {
-	var plainHost string
-	var plain, secure bool
+func RequireTLS(url string, skipEncryption bool) (opts []nats.Option, plain bool, err error) {
+	var secure bool
 	for _, e := range strings.Split(url, ",") {
 		if strings.TrimSpace(e) == "" {
 			continue
@@ -211,23 +214,20 @@ func RequireTLS(url string, insecurePlaintext bool) (opts []nats.Option, warning
 		case "tls", "wss":
 			secure = true
 		case "nats", "ws":
-			if !insecurePlaintext {
-				return nil, "", plainRefusal(scheme, host)
-			}
-			if !plain {
-				plainHost = host
+			if !skipEncryption {
+				return nil, false, plainRefusal(scheme, host)
 			}
 			plain = true
 		default:
-			return nil, "", fmt.Errorf("mash: unsupported scheme %q for %q (use tls://, or wss://): the client would dial it as plain text; the fix is to use a tls:// URL with the server's certificate (MASH_CA or \"ca\" for a private CA)", scheme, host)
+			return nil, false, fmt.Errorf("mash: unsupported scheme %q for %q (use tls://, or wss://): the client would dial it as plain text; the fix is to use a tls:// URL with the server's certificate (MASH_CA or \"ca\" for a private CA)", scheme, host)
 		}
 	}
 	opts = []nats.Option{nats.IgnoreDiscoveredServers()}
 	if plain {
-		return opts, PlainWarning(plainHost), nil
+		return opts, true, nil
 	}
 	if secure {
 		opts = append(opts, nats.Secure())
 	}
-	return opts, "", nil
+	return opts, false, nil
 }

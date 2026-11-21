@@ -392,7 +392,7 @@ func (l *lab) endpointEnv(ctx context.Context, name string, plugin bool) ([]stri
 	}
 	return append(env, "MASH_ENDPOINT="+l.ne.Owner+"."+labGroup+"."+name, "MASH_SERVER="+l.ne.URL, "MASH_CREDS="+creds,
 		// REQ-014: this check is not about TLS; the override is explicit.
-		"MASH_INSECURE_PLAINTEXT=1"), nil
+		"MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1"), nil
 }
 
 // sendMail sends the standard probe text from the sender to to, with the binary under test.
