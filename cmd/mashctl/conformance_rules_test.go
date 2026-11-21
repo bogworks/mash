@@ -44,6 +44,9 @@ func TestConfVaryingCauseCompare(t *testing.T) {
 	if p := run("error: deleted acme.demo.bob, but something else: the server did not answer" + tail); len(p) == 0 {
 		t.Error("a different prefix passed")
 	}
+	if p := run(pre + ": mash: inbox stream: connection lost" + tail); len(p) != 0 {
+		t.Errorf("a cause that contains \": \": %v", p)
+	}
 	if p := run(pre + ": " + tail); len(p) == 0 {
 		t.Error("an empty cause passed")
 	}
