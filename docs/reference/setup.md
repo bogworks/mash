@@ -70,9 +70,10 @@ curl -fsSL <release base>/mash-local-nats-setup.sh | bash
 
 Every address in these commands is written from the release's own setting, so
 a fork or a mirror points at itself; in the project's own releases it is the
-address shown here. The one line a tool prints with an address, the plugin's
-'mash is not installed' line, carries the address shown here, written into the
-launcher (mash hook).
+address shown here. Two printed lines carry an address: the hint for a folder
+left by mash 0.5.5, which is written from the release's own setting, and the
+plugin's 'mash is not installed' line, which carries the address shown here,
+written into the launcher (mash hook).
 
 ```sh
 https://github.com/bogworks/mash/releases/latest/download

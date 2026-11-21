@@ -1,15 +1,19 @@
 package main
 
 // The output half of the conformance test: every x-output case of every command of release 0.5.6 in spec/mashctl.json
-// (text, stream and exit code) is either run against the build and compared exactly, or listed in confUnchecked with
-// the reason it cannot be run here. A case that is neither fails; a listed case that is checked after all fails, so the
-// table only shrinks.
+// (text, stream and exit code) is run against the build and compared exactly, with two exceptions the specification's
+// rules make: a case whose whole text stands in round brackets is a description and is skipped (confIsDescription), and
+// a part of a case that the command's notes name as varying is matched as the notes say and nothing more loosely
+// (confMidCause). A case that cannot be run for another reason would be listed in confUnchecked with the reason (none now); a case that is
+// neither run nor listed fails, a listed case that is checked after all fails, so the table only shrinks.
 //
 // The cases run in process against the embedded server of the other tests (no binary, no outside network): a world is
 // a server set up by `mashctl init` for owner acme, with the endpoints a case needs, and the folder is ~/.config/mash
 // as in the specification. The addresses of the specification are used as they are. What cannot be the same is
 // substituted in the specification's text: the server address (the specification's tls://localhost:4222 is the test
-// server's own), and the version and commit. Two shapes vary by nature and match as patterns: a date and time
+// server's own; of the two servers of the status case with several, tls://a.example:4222 is the test server and
+// tls://b.example:4222 is an address nothing listens on, as the case says it did not answer), and the version and
+// commit. Two shapes vary by nature and match as patterns: a date and time
 // (2026-11-19 09:40) and a public key.
 //
 // How the specification's stream is read (rules.json, "Where a hint is printed"): at a shell every `hint:` line goes to
@@ -23,11 +27,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"regexp"
 	"runtime/debug"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
@@ -41,12 +47,71 @@ import (
 )
 
 // confUnchecked: key is "<command> <case>" as the specification names them; the value is why the case cannot be run
-// here.
-var confUnchecked = map[string]string{
-	"status Several servers: one line each":                          "the first line must say '3 endpoints, 1 online' of a second, working server at a.example; one test server answers under one address",
-	"endpoint delete Cancelled everywhere, then a later step failed": "needs a server fault injected between the cancelling of the key and the removal of the inbox",
-	"endpoint inbox Messages":                                        "the rows hold times relative to now ('2m ago', '1m ago') and the trust of messages signed by two senders, one of them an endpoint not on this server",
-	"endpoint permissions Permissions":                               "the text describes the output ('the same JSON as --json'); it is not the output",
+// here. It is empty: every case is run or skipped as a description.
+var confUnchecked = map[string]string{}
+
+// confMidCause: key is "<command> <case>". The cases listed here carry parts that vary from run to run, which the
+// command's x-notes in spec/mashctl.json name with the words before and after them (rules.json: "A part of a case that
+// varies from run to run ... is named in that command's notes"). For `endpoint delete` the notes say: the
+// eight-character key id after 'user key', and the cause between 'did not complete: ' and '; run the same command
+// again'. The comparison of the case is exact except those two parts: the key id is exactly eight characters
+// ([A-Z0-9]{8}) after "user key " and the cause is non-empty text between confMidFrom and confMidTo. Everything else,
+// the hint line included, stays exact. See confMidPattern.
+var confMidCause = map[string]bool{
+	"endpoint delete Cancelled everywhere, then a later step failed (0.5.6 as built)": true,
+}
+
+const (
+	confMidFrom = "did not complete: "
+	confMidTo   = "; run the same command again (revoking again is safe)"
+)
+
+var confMidKeyRE = regexp.MustCompile(`user key [A-Z0-9]{8} was revoked`)
+
+// confMidPattern turns the specification's text into a pattern for a case in confMidCause: the text is literal, except
+// the 8-character key id in "user key <id> was revoked" and the cause between confMidFrom and confMidTo. ok is false
+// when the text does not have those parts.
+func confMidPattern(text string) (string, bool) {
+	i := strings.Index(text, confMidFrom)
+	if i < 0 {
+		return "", false
+	}
+	i += len(confMidFrom)
+	j := strings.LastIndex(text, confMidTo)
+	if j < i {
+		return "", false
+	}
+	head, tail := text[:i], text[j:]
+	loc := confMidKeyRE.FindStringIndex(head)
+	if loc == nil {
+		return "", false
+	}
+	id := loc[0] + len("user key ")
+	return regexp.QuoteMeta(head[:id]) + `[A-Z0-9]{8}` + regexp.QuoteMeta(head[id+8:]) +
+		`[^\n]*\S[^\n]*` + regexp.QuoteMeta(tail), true
+}
+
+// confIsDescription: a case whose whole text stands in round brackets describes the output in words; it is not the
+// output, and the conformance test skips it (rules.json, "A case written in brackets is a description").
+func confIsDescription(text string) bool {
+	t := strings.TrimSpace(text)
+	if len(t) < 2 || t[0] != '(' || t[len(t)-1] != ')' {
+		return false
+	}
+	// the opening bracket must close at the very end: "(a) and (b)" is not one pair around the whole text
+	depth := 0
+	for i := 0; i < len(t); i++ {
+		switch t[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 && i != len(t)-1 {
+				return false
+			}
+		}
+	}
+	return depth == 0
 }
 
 // confOutCase is one x-output case.
@@ -152,6 +217,72 @@ func (w *confWorld) messages(addr string, n int) {
 	}
 }
 
+// confInboxMessagesRun builds the world of the case "Messages" of `endpoint inbox` and runs the command with args: two
+// messages, numbers 7 (signed by acme.demo.alice, 48 B, read and acknowledged) and 8 (no sender header, 61 B, not
+// delivered), the clock a minute and a second after message 8 was stored.
+func confInboxMessagesRun(t *testing.T, args ...string) confOutRun {
+	t.Helper()
+	w := newConfWorld(t, true)
+	w.do("endpoint", "create", "acme.demo.alice")
+	w.do("endpoint", "create", "acme.demo.bob")
+	bob, _ := sap.ParseAddress("acme.demo.bob")
+	subject := bob.Subjects().Mail
+	raw, err := os.ReadFile(filepath.Join(w.a.env["MASH_CONFIG_DIR"], "acme.demo.alice.creds"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	alice, err := sap.IdentityFromCredsAt("alice.creds", raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pad := func(n int) []byte { return []byte(strings.Repeat("x", n)) }
+	// An inbox denies delete and purge, so numbers 1 to 6 cannot be stored and removed. The case shows 7 and 8, so
+	// the test makes bob's inbox again, with the same configuration and consumer, starting at 7.
+	st, err := w.js.Stream(w.ctx, bob.InboxStream())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cons, err := w.js.Consumer(w.ctx, bob.InboxStream(), store.Consumer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scfg, ccfg := st.CachedInfo().Config, cons.CachedInfo().Config
+	if err := w.js.DeleteStream(w.ctx, bob.InboxStream()); err != nil {
+		t.Fatal(err)
+	}
+	scfg.FirstSeq = 7
+	if st, err = w.js.CreateStream(w.ctx, scfg); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = w.js.CreateConsumer(w.ctx, bob.InboxStream(), ccfg); err != nil {
+		t.Fatal(err)
+	}
+	body := pad(48)
+	sendSigned(t, w.js, subject, body, signedHdr(t, alice, subject, body, "acme_demo_alice", time.Now(), "msg-7", "task"))
+	sendSigned(t, w.js, subject, pad(61), nats.Header{"Nats-Msg-Id": {"msg-8"}, "Mash-Kind": {"task"}}) // no sender header
+	c, err := w.js.Consumer(w.ctx, bob.InboxStream(), store.Consumer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := c.Fetch(1, jetstream.FetchMaxWait(5*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for m := range b.Messages() {
+		if err := m.DoubleAck(w.ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	last, err := st.GetMsg(w.ctx, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prev := inboxNow
+	inboxNow = func() time.Time { return last.Time.Add(time.Minute + time.Second) }
+	t.Cleanup(func() { inboxNow = prev })
+	return confOutRun{ran: w.run(append([]string{"endpoint", "inbox", "acme.demo.bob"}, args...)...)}
+}
+
 // inTmp makes the working directory a fresh one for the test, for the cases whose output names a relative file.
 func inTmp(t *testing.T) { t.Helper(); t.Chdir(t.TempDir()) }
 
@@ -170,6 +301,7 @@ func init() {
 	urlSub := func(w *confWorld) []string { return []string{"tls://localhost:4222", w.url} }
 	dead := "nats://127.0.0.1:1"
 
+	reg("endpoint inbox Messages", func(t *testing.T) confOutRun { return confInboxMessagesRun(t) })
 	reg("init Set up", func(t *testing.T) confOutRun {
 		w := newConfWorld(t, false)
 		return confOutRun{ran: w.run("init", "--config", w.a.setupPath()), subs: urlSub(w)}
@@ -199,6 +331,12 @@ func init() {
 		w := newConfWorld(t, true)
 		w.fleet()
 		return confOutRun{ran: w.run("status"), subs: urlSub(w)}
+	})
+	reg("status Several servers: one line each", func(t *testing.T) confOutRun {
+		w := newConfWorld(t, true)
+		w.fleet()
+		w.a.env["MASH_SERVER"] = w.url + "," + dead
+		return confOutRun{ran: w.run("status"), subs: []string{"tls://a.example:4222", w.url, "tls://b.example:4222", dead}}
 	})
 	reg("status Not working (the line on stdout, the hint on stderr)", func(t *testing.T) confOutRun {
 		w := newConfWorld(t, true)
@@ -300,6 +438,35 @@ func init() {
 		w := newConfWorld(t, true)
 		w.do("endpoint", "create", "acme.demo.bob")
 		return confOutRun{ran: w.run("endpoint", "delete", "acme.demo.bob", "--yes")}
+	})
+	reg("endpoint delete Cancelled everywhere, then a later step failed (0.5.6 as built)", func(t *testing.T) confOutRun {
+		w := newConfWorld(t, true)
+		w.do("endpoint", "create", "acme.demo.bob")
+		// the real guarded removal runs; the lease bucket's stream is sealed after the key is cancelled, so the lease
+		// fence fails and the removal returns its own partial error. The wrapper only records that error.
+		var got error
+		prev := deprovisionIfUser
+		deprovisionIfUser = func(a *admin.Admin, ctx context.Context, addr sap.Address, user string) error {
+			got = prev(a, ctx, addr, user)
+			return got
+		}
+		beforeRetireRevoke = func() {
+			s, err := w.js.Stream(w.ctx, store.LeaseStreamName)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg := s.CachedInfo().Config
+			cfg.Sealed = true
+			if _, err := w.js.UpdateStream(w.ctx, cfg); err != nil {
+				t.Fatal(err)
+			}
+		}
+		t.Cleanup(func() { deprovisionIfUser = prev; beforeRetireRevoke = nil })
+		r := w.run("endpoint", "delete", "acme.demo.bob", "--yes")
+		if !admin.IsPartial(got) {
+			t.Fatalf("the removal did not return the partial error: %v", got)
+		}
+		return confOutRun{ran: r}
 	})
 	reg("endpoint delete Wrong text typed", func(t *testing.T) confOutRun {
 		w := newConfWorld(t, true)
@@ -423,6 +590,7 @@ func confOutputProblems(path string, oc confOutCase, r confOutRun) []string {
 	if len(r.subs) == 0 {
 		text = oc.Text
 	}
+	var p []string
 	wantOut, wantErr := "", ""
 	if oc.Stream == "stderr" {
 		wantErr = text
@@ -437,9 +605,15 @@ func confOutputProblems(path string, oc confOutCase, r confOutRun) []string {
 		}
 		wantOut, wantErr = strings.Join(rest, "\n"), strings.Join(hints, "\n")
 	}
-	var p []string
 	if r.ran.code != oc.Exit {
 		p = append(p, fmt.Sprintf("exit: want %d, got %d", oc.Exit, r.ran.code))
+	}
+	mid := ""
+	if confMidCause[path+" "+oc.Case] {
+		var ok bool
+		if mid, ok = confMidPattern(text); !ok {
+			p = append(p, "the specification's text lacks the key id or the cause the case varies in")
+		}
 	}
 	check := func(stream, want, got string) {
 		if want == "" {
@@ -448,7 +622,11 @@ func confOutputProblems(path string, oc confOutCase, r confOutRun) []string {
 			}
 			return
 		}
-		if !regexp.MustCompile("^" + confPattern(want) + "\n$").MatchString(got) {
+		pat := confPattern(want)
+		if mid != "" && stream == "stderr" {
+			pat = mid // a stderr case: the pattern covers the whole text, hint line included
+		}
+		if !regexp.MustCompile("^" + pat + "\n$").MatchString(got) {
 			p = append(p, fmt.Sprintf("%s: want %q, got %q", stream, want+"\n", got))
 		}
 	}
@@ -470,6 +648,12 @@ func confOutputs(t *testing.T, tracked []specCommand) {
 			sc, oc := sc, oc
 			key := sc.path + " " + oc.Case
 			t.Run(key, func(t *testing.T) {
+				if confIsDescription(oc.Text) {
+					if _, listed := confUnchecked[key]; listed || confOutputRunners[key] != nil {
+						t.Errorf("%s: a description is skipped, so it needs no runner and no confUnchecked entry", key)
+					}
+					t.Skipf("%s: the text is a description, not the output", key)
+				}
 				run, ok := confOutputRunners[key]
 				reason, listed := confUnchecked[key]
 				switch {

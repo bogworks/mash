@@ -90,12 +90,12 @@ error: acme.demo.bob was not deleted: 1 of 2 servers did not confirm
 hint: mashctl endpoint delete acme.demo.bob
 ```
 
-### Cancelled everywhere, then a later step failed
+### Cancelled everywhere, then a later step failed (0.5.6 as built)
 
 Stream: stderr. Exit code: 1.
 
 ```text
-error: deleted acme.demo.bob, but its inbox could not be removed
+error: deleted acme.demo.bob, but PARTIAL: acme_demo_bob's user key UBIDWPW3 was revoked in the account JWT, so its credentials no longer work, but the removal did not complete: mash: lease: nats: nats: API error: code=400 err_code=10109 description=invalid operation on sealed stream; run the same command again (revoking again is safe)
 hint: mashctl endpoint delete acme.demo.bob
 ```
 
@@ -122,7 +122,14 @@ server confirms is anything removed, so a failure there leaves the endpoint
 whole. If this machine holds the endpoint's creds file, it is set aside as
 &lt;address&gt;.creds.deleted, so mash no longer counts it as installed; the
 path is predictable and nothing prints it (settled 2026-11-20). Nothing else
-on any machine is touched.
+on any machine is touched. THE LATE-FAILURE LINE is 0.5.6 as built, and not
+how it should read: it carries an internal word (PARTIAL), the flat name with
+underscores, a key id and the server's raw error. Two parts of it vary: the
+eight-character key id after 'user key', and the cause between 'did not
+complete: ' and '; run the same command again'. From 0.5.7 one line replaces
+it: 'error: deleted acme.demo.bob, but the removal did not finish: &lt;cause
+in plain words&gt;' with the same hint; its credentials already no longer
+work, and running the command again is safe (settled 2026-11-21).
 
 ## What it replaces
 

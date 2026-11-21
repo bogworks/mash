@@ -51,9 +51,9 @@ Stream: stdout. Exit code: 0.
 ```text
 2 messages for acme.demo.bob, 1 not delivered.
 
-NUMBER  FROM            WHEN    TRUST     DELIVERED  KIND  SIZE
-7       alice           2m ago  verified  no         task  48 B
-8       acme.lab.mallet 1m ago  absent    yes        task  61 B
+NUMBER  FROM   WHEN    TRUST     DELIVERED  KIND  SIZE
+7       alice  1m ago  verified  yes        task  48 B
+8       ?      1m ago  absent    no         task  61 B
 ```
 
 ## JSON
@@ -70,15 +70,15 @@ With `--json` the result is this shape. The values are an example.
       "number": 7,
       "from": "acme.demo.alice",
       "trust": "verified",
-      "delivered": false,
+      "delivered": true,
       "kind": "task",
       "size": 48
     },
     {
       "number": 8,
-      "from": "acme.lab.mallet",
+      "from": "?",
       "trust": "absent",
-      "delivered": true,
+      "delivered": false,
       "kind": "task",
       "size": 61
     }
@@ -92,8 +92,10 @@ None. Administration. There are no MCP tools for mashctl.
 
 ## Notes
 
-An administrator sees everything stored. FROM is the address a message claims;
-TRUST says whether that claim was proven, in mash's own labels: verified,
+An administrator sees everything stored. FROM is the address a message claims,
+and '?' when it names no sender at all (the same '?' in the JSON); messages
+are delivered in order, so a delivered message never follows an undelivered
+one; TRUST says whether that claim was proven, in mash's own labels: verified,
 unknown-signer, claimed, absent, stale or forged. DELIVERED is yes or no, and
 means only that the endpoint took the message off the server. Whether the
 endpoint then showed it or refused it is decided on the endpoint's own machine
