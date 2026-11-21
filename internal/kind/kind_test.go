@@ -31,7 +31,7 @@ func TestWakes(t *testing.T) {
 	}
 }
 
-// TestKindInventoryIsTrue pins the behaviour docs/evidence/scrub/kinds.md describes: the five kinds, which wake, and
+// TestKindInventoryIsTrue pins the kind behaviour: the five kinds, which wake, and
 // that nothing outside the inventory is accepted on send or read as anything but task on receipt.
 func TestKindInventoryIsTrue(t *testing.T) {
 	wantAll := []Kind{Blocker, Question, Task, Result, FYI}
