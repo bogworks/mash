@@ -8,7 +8,7 @@ These are **repository settings, made by a repository admin in GitHub**. They ar
 
 - **`update` (restrict updates).** Nothing can move `main` except an actor on the ruleset's bypass list. The only bypass actor is the Mergify app (mode `always`). There is no user or role bypass: a user bypass would let every contributor push to `main`. Mergify's queue merges by fast-forward and pushes the tested queue commit to `main` itself (`.mergify.yml`), which is why it is the one actor that bypasses. The effect is that a direct merge (`gh pr merge`, or the merge button) is refused, and the queue is the only way into `main`.
 - **Deletion and non-fast-forward are blocked.**
-- **Required status checks**, listed below. `pr-check`, `label-reset` and `adr-lint` are pinned to GitHub Actions as their expected source (`integration_id`), so a check of that name posted by anything else does not satisfy the ruleset. `Mergify Merge Protections` is required too.
+- **Required status checks: four.** `pr-check`, `label-reset` and `adr-lint` are pinned to GitHub Actions as their expected source (`integration_id`), so a check of that name posted by anything else does not satisfy the ruleset. `Mergify Merge Protections` is required too. These four are the only checks the ruleset requires today. The longer list under "Required status checks" below is a recommendation, except where it says a check is one of these four.
 
 There is no required pull-request rule and no required-reviews rule, and classic branch protection is not used.
 
@@ -18,16 +18,16 @@ There is no required pull-request rule and no required-reviews rule, and classic
 
 ## Required status checks
 
-Require status checks to pass, with branches up to date:
+The ruleset requires only `pr-check`, `label-reset`, `adr-lint` and `Mergify Merge Protections` today (see "What is set"). The rest of this list is recommended, not applied: the release gate and the queue conditions already depend on several of these checks, but the ruleset does not require them. Recommended settings: require status checks to pass, with branches up to date, for:
 
 - `test (linux)` and `reproducible` (from `ci.yml`). The release gate in `scripts/release-check` requires exactly these names, so never rename them. `test (macos)` is advisory ([ADR 0079](decisions/0079-ci-and-release-jobs-run-on-self-hosted-runners-only.md)): do not require it until the macOS runner no longer pauses running jobs, then add it here, to `pr-check`'s needs and to `release.RequiredChecks`.
-- `pr-check` (from `ci.yml`), the aggregate of every required job. Pinned to GitHub Actions.
+- `pr-check` (from `ci.yml`), the aggregate of every required job. Required today, pinned to GitHub Actions.
 - `lint` (from `lint.yml`). It passes while staticcheck findings are tolerated (see `lint.yml`).
-- `adr-lint` (from `adr-lint.yml`). It checks the ADRs and the `Decision:` line in the pull request body, and is also a Mergify queue condition. Pinned to GitHub Actions.
-- `label-reset` (from `label-reset.yml`). It is also a Mergify queue condition. Pinned to GitHub Actions.
+- `adr-lint` (from `adr-lint.yml`). It checks the ADRs and the `Decision:` line in the pull request body, and is also a Mergify queue condition. Required today, pinned to GitHub Actions.
+- `label-reset` (from `label-reset.yml`). It is also a Mergify queue condition. Required today, pinned to GitHub Actions.
 - `govulncheck` and `codeql` (from `security.yml`). `codeql` runs on public repositories only, since code scanning is not available on a private one.
 - **Code scanning results** (the separate check GitHub adds once code scanning is on). The `codeql` job passing only proves the analysis finished, so also require code scanning results in the ruleset, with the alert threshold set to block high and above (Settings > Rules > the ruleset > Require code scanning results > CodeQL).
-- `Mergify Merge Protections`, see below.
+- `Mergify Merge Protections`, see below. Required today.
 
 A check can only be selected as required after it has run once, so add `lint`, `govulncheck` and `codeql` after their first runs on `main`.
 
