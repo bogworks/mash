@@ -68,7 +68,7 @@ curl -fsSL https://github.com/bogworks/mash/releases/latest/download/install.sh 
 
 This installs `mash` and `mashctl` from the latest release into `~/.local/bin`, after checking each against the release's `SHA256SUMS`. It asks nothing and needs no `sudo`. [docs/install.md](docs/install.md) says what it does, how to pin a release, and how to check the script before you run it. To install the Claude Code plugin, see [docs/install.md](docs/install.md#2-the-plugin).
 
-`mash-local-nats-setup.sh` from the release makes a TLS-only NATS server that only this machine can reach; [step 3 of the walkthrough](docs/guide/walkthrough.md#step-3-make-a-nats-server-on-this-machine) uses it. To use a NATS server you already run, see [Bring your own NATS server](docs/nats-server.md). If something goes wrong, see [docs/troubleshooting.md](docs/troubleshooting.md).
+`mash-local-nats-setup.sh` from the release makes a TLS-only NATS server that only this machine can reach; [step 3 of the walkthrough](docs/guide/walkthrough.md#step-3-make-a-nats-server-on-this-machine) uses it. If something goes wrong, see [docs/troubleshooting.md](docs/troubleshooting.md).
 
 ### When something is wrong
 
