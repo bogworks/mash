@@ -76,8 +76,24 @@ Say which of these it is, say the next command you would run, and wait.
 
 ## 1. Plan: ask, then read it back
 
-Ask in order, all in one message. Each has a default; the person may take
-it.
+First ask which setup the person wants, and wait for the answer:
+
+- Demo setup: the quickest way to try mash, with every choice made for them
+  (owner `acme`, group `demo`, agents `bob` and `alice`, the default folders,
+  the default download route for every program). Say exactly what will happen:
+  the names, the folders, and what gets installed and how (use the read-back
+  below, filled in with the defaults). Ask for one yes, then run steps 2 to 8 to
+  completion. That one yes covers every step, so the "one yes per step" rule
+  below does not apply; the stop-and-ask rules and the `sh person` blocks still
+  do.
+- General setup: the questions below, and a yes before each step, as written.
+
+Both end with the same closing example in step 8. In the demo setup, skip the
+questions below and use their defaults; the person may still change a name
+when they answer the first question.
+
+In the general setup, ask in order, all in one message. Each has a default;
+the person may take it.
 
 If the person's request already names an owner, a group, agent names or full
 addresses (for example `acme.demo.alice`), take them as the answers to
@@ -144,9 +160,10 @@ I will:
   use the owner name                acme
   install the mash plugin           from the bogworks/mash marketplace
   make two agent mailboxes          acme.demo.bob and acme.demo.alice
-  start sessions plainly            without the development flag; mail arrives
-                                    with the next prompt or tool call
-Say yes to go ahead. I will ask again before each step.
+  start sessions plainly            mail arrives with the next prompt or tool
+                                    call
+Say yes to go ahead. [General setup: I will ask again before each step.
+Demo setup: this one yes covers every step.]
 ```
 
 ## 2. The server's programs
@@ -454,25 +471,26 @@ MASH_ENDPOINT=acme.demo.bob claude
 MASH_ENDPOINT=acme.demo.alice claude
 ```
 
-Mail arrives at the session's next prompt or tool call. An idle session that
-nobody prompts is not woken: see the optional section below.
+Mail arrives at the session's next prompt or tool call.
 
 Say the setup is done only when one session has received mail from the other
 (`mash inbox` in the second terminal shows it as verified). Do not claim mail
 is broken because your own session started before the plugin was installed:
 the plugin loads in the next session.
 
-### Wake an idle session (optional)
+### Try it: a first job for the pair
 
-Claude Code has its own flag, `--dangerously-load-development-channels`. It
-lets a development plugin push a channel notification that wakes an idle
-session. Claude Code asks the person to confirm it at each launch. It is
-optional and it is the person's choice: you never add it on your own word.
-Explain it, ask whether they want it, and only if they say yes give them the
-line with it:
+In both setups, finish by giving the person this to paste into the first
+session (the one started with `MASH_ENDPOINT=acme.demo.bob`), with the
+person's own agent names in place of `bob` and `alice` (the first agent is the
+lead, the second the peer):
 
-```sh person
-MASH_ENDPOINT=acme.demo.bob claude --dangerously-load-development-channels plugin:mash@mash
+```
+Bob, you are the lead coordinator for this pair programming team and today we
+will be working on a basic Hello World in Rust. Alice is your peer and she'll
+be taking a look at your code and making suggestions. This Hello World needs
+solid code coverage. Maybe it's best if Alice writes the tests. Talk to Alice
+and come up with a plan.
 ```
 
 ## Remove it all
