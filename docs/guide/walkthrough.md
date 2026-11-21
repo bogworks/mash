@@ -74,15 +74,8 @@ script says so.
 What is created: two programs in `~/.local/bin`, the default;
 `MASH_INSTALL_DIR` names another folder.
 
-Command: `install.sh` from the release. Download it, check it against
-`SHA256SUMS`, read it, then run it:
-
-```
-BASE=https://github.com/bogworks/mash/releases/latest/download
-curl -fsSLO $BASE/install.sh -O $BASE/SHA256SUMS
-grep ' install.sh$' SHA256SUMS | sha256sum -c - &&  # macOS: shasum -a 256 -c -
-bash install.sh
-```
+Command: `install.sh` from the release (never piped into a shell: download,
+check against `SHA256SUMS`, read it, run it).
 
 <!-- output: install -->
 Output: `[built output: install]`
@@ -99,15 +92,8 @@ What is created: `~/mash-nats` (keys, certificates, the server's files) and
 and the last line the script prints has the path it actually wrote.
 
 Command: `mash-local-nats-setup.sh --owner acme`, downloaded from the same
-release and checked against `SHA256SUMS` like `install.sh`:
-
-```
-curl -fsSLO $BASE/mash-local-nats-setup.sh -O $BASE/SHA256SUMS
-grep ' mash-local-nats-setup.sh$' SHA256SUMS | sha256sum -c - &&
-bash mash-local-nats-setup.sh --owner acme
-```
-
-Then the line it prints last, `mashctl init --config <path>/mash-setup.yaml`.
+release and checked against `SHA256SUMS` like `install.sh`. Then the line it
+prints last, `mashctl init --config <path>/mash-setup.yaml`.
 
 `mashctl init` reads the setup file and keeps its own copy of the keys in
 `~/.config/mash`. That folder is where `mashctl` and `mash` look for their
