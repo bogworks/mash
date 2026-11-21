@@ -47,9 +47,8 @@ check is a negative test: it fails when its protection is removed.
    AT-005's `refusedOn` / `acceptedOn` on the deleted review key.
 
 A check whose protection is not built is **pending**: the table line says `PEND`, the record says `pending`, it is not counted as a pass,
-and the result reads `PASS WITH PENDING (not a clean pass)`. Without `--strict` such a run still exits 0; with `--strict` (accepted by `at001`..`at004` and `all`) it prints `pending checks fail under --strict: <names>` and exits 3 (1 fail, 2 usage, 3 pending under --strict, 4 setup). The final release gate runs `liveat all --strict`; AT-005 has no pending check today. `at4Pending` in `at004.go` lists them with a reason; a listed check that starts to
-pass fails the run until its entry is removed, so the list only shrinks. Pending today: the `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION`
-behaviour (core's R1-2) and the refusal of unverified mail by `mash serve`, `mash inbox` and `mash read`.
+and the result reads `PASS WITH PENDING (not a clean pass)`. Without `--strict` such a run still exits 0; with `--strict` (accepted by `at001`..`at004` and `all`) it prints `pending checks fail under --strict: <names>` and exits 3 (1 fail, 2 usage, 3 pending under --strict, 4 setup). The final release gate runs `liveat all --strict`. No check is pending today: `at4Pending` in `at004.go` is empty, and lists a check with a reason only while its protection is not built; a listed check that starts to
+pass fails the run until its entry is removed, so the list only shrinks.
 
 ## AT-005: three machines, TLS, a cluster, two mashctl machines
 
