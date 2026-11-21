@@ -81,12 +81,6 @@
      "exit": 2
     },
     {
-     "case": "Nothing arrives on standard input",
-     "text": "error: no message text arrived on standard input",
-     "stream": "stderr",
-     "exit": 1
-    },
-    {
      "case": "No such endpoint",
      "text": "error: no endpoint has the address acme.demo.alise\nhint: mash who",
      "stream": "stderr",
@@ -338,7 +332,7 @@
    ],
    "errors": [
     {
-     "case": "Not working (the first line on stdout, the hint on stderr)",
+     "case": "Not working",
      "text": "acme.demo.bob: not ready: the server refused its credentials\nhint: mash doctor",
      "stream": "stdout",
      "exit": 1
@@ -374,19 +368,7 @@
      "exit": 1
     },
     {
-     "case": "No endpoint chosen and several installed",
-     "text": "error: more than one endpoint is installed here: acme.demo.alice, acme.demo.bob\nhint: mash status --endpoint acme.demo.alice",
-     "stream": "stderr",
-     "exit": 2
-    },
-    {
-     "case": "No endpoint installed",
-     "text": "error: no endpoint is installed here\nhint: mash join <file>",
-     "stream": "stderr",
-     "exit": 2
-    },
-    {
-     "case": "As an MCP tool in a session with no endpoint named",
+     "case": "No endpoint chosen for this session",
      "text": "No endpoint is chosen for this session.\nhint: start the session with MASH_ENDPOINT=<address>",
      "stream": "stdout",
      "exit": 1
