@@ -3,6 +3,8 @@ acme.demo.bob --out acme.demo.bob.join`). It copies the server addresses and the
 configuration folder and writes the endpoint's creds file there (mode 0600), then prints `Joined as acme.demo.bob.` (`--detail` adds the `servers:` and `creds:` lines; `--json` is just
 `{"endpoint"}`, and `--detail --json` adds `servers` and `creds`, an absolute path), and
 `mash status` works. When the endpoint made its own key, the join file holds no seed and `--key bob.seed` supplies it. An endpoint
-already installed is refused unless you pass `--replace`; a join file for a different mesh is refused, because one configuration
-folder serves one mesh (`--config-dir` names another). `--dry-run` says what would happen and writes nothing. It writes nothing
+already installed is refused unless you pass `--replace`, which replaces that endpoint's creds and nothing else. A join file for a
+different mesh, or one with a different certificate authority (or none, where the folder has one), is refused with or without
+`--replace`, because one configuration folder serves one mesh and trusts one certificate authority (`--config-dir` names another).
+Two joins into one folder run one after the other. `--dry-run` says what would happen and writes nothing. It writes nothing
 unless it can write everything, and it never prints a seed or a token.
