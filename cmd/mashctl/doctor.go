@@ -233,6 +233,8 @@ func doctorChecks(rep *doctorReport, env func(string) string, lookup config.Look
 	// 3. sign-in: the admin credentials connect
 	adm, ctx, closeAdmin, err := ctl.OpenAdmin("mashctl", cfg)
 	if err != nil {
+		var p *natsauth.PlainRefusalError
+		rep.plainRefused = errors.As(err, &p) // a later server in the list is a plain URL: also a configuration error
 		msg := oneLine(err.Error())
 		if strings.Contains(msg, "uthorization violation") {
 			msg = "the server refused the admin credentials"

@@ -266,3 +266,22 @@ func TestSkipEncryptionHookConfigDirFlagRefusalExitsZero(t *testing.T) {
 		t.Fatalf("exit %d out %q err %q", code, out, errb)
 	}
 }
+
+// With HOME missing from the environment the home is the one the system names (config.HomeDir), so the removed
+// config.json key is still found by a command that reads no config.
+func TestSkipEncryptionRemovedKeyFoundWithoutHomeInEnv(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home) // os.UserHomeDir reads it; the env map given to run omits it
+	dir := filepath.Join(home, ".config", "mash")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"insecure_plaintext":true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"version"}, {"--help"}} {
+		if _, errb, code := runCapture(map[string]string{}, args...); code != 2 || !strings.Contains(errb, "insecure_plaintext in config.json is no longer read") {
+			t.Errorf("%v: exit %d: %q", args, code, errb)
+		}
+	}
+}

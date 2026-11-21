@@ -5,10 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/nats-io/nats-server/v2/server"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
@@ -517,5 +519,26 @@ func TestDoctorSkipRowsInText(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "\n\n1 problem.\n") {
 		t.Errorf("skip rows were counted:\n%s", out.String())
+	}
+}
+
+// A plain URL anywhere in the list is refused by the sign-in step, and that is a configuration error (exit 2), as it is
+// when the first server is the plain one.
+func TestDoctorPlainServerAfterReachableOneIsExit2(t *testing.T) {
+	ca, cert, key := writeTestPKI(t, t.TempDir())
+	e := newApplyEnvOpts(t, nil, func(o *server.Options) {
+		cfg, err := server.GenTLSConfig(&server.TLSConfigOpts{CertFile: cert, KeyFile: key})
+		if err != nil {
+			t.Fatal(err)
+		}
+		o.TLSConfig, o.TLS, o.TLSTimeout = cfg, true, 5
+	})
+	delete(e.env, "MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION")
+	e.env["MASH_CA"] = ca
+	live := fmt.Sprintf("tls://127.0.0.1:%d", e.srv.Addr().(*net.TCPAddr).Port)
+	e.env["MASH_SERVER"] = live + ",nats://127.0.0.1:1"
+	out, errb, code := e.run("doctor")
+	if code != 2 {
+		t.Fatalf("exit %d, want 2: %q %q", code, out, errb)
 	}
 }

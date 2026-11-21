@@ -55,7 +55,7 @@ func runVerbs(args []string, env func(string) string, lookup config.Lookup, stdo
 	// The encryption override is the very first thing checked, before any argument is read (bare `mashctl`, a removed
 	// command, a bad flag): a removed name or a bad value is refused (exit 2), and while the override is on every
 	// invocation prints the warning on stderr, once.
-	if skipErr := config.CheckSkipEncryption(lookup, env("HOME")); skipErr != nil {
+	if skipErr := config.CheckSkipEncryption(lookup, config.HomeDir(env)); skipErr != nil {
 		return cliframe.Report(stdout, stderr, cliframe.Usagef("%s", skipErr.Msg()).WithHint(skipErr.Hint()), slices.Contains(args, "--json"))
 	}
 	config.WarnSkipEncryption(lookup, stderr)
@@ -85,7 +85,7 @@ func runVerbs(args []string, env func(string) string, lookup config.Lookup, stdo
 	if code, refused := cliframe.RefuseLegacy055(stdout, stderr, env, home, global.JSON || jsonRequested(args[1:])); refused {
 		return code
 	}
-	if skipErr := config.CheckSkipEncryption(lookup, env("HOME")); skipErr != nil { // a --config-dir flag may point at a file with the removed key: refusal only, the warning is out
+	if skipErr := config.CheckSkipEncryption(lookup, config.HomeDir(env)); skipErr != nil { // a --config-dir flag may point at a file with the removed key: refusal only, the warning is out
 		return cliframe.Report(stdout, stderr, cliframe.Usagef("%s", skipErr.Msg()).WithHint(skipErr.Hint()), jsonRequested(args[1:]) || global.JSON)
 	}
 	switch args[0] {
