@@ -57,7 +57,7 @@ claude plugin marketplace add bogworks/mash
 claude plugin install mash-setup@mash
 ```
 
-Say: "Then ask a session to set mash up. It asks before each step."
+Say: "Then ask a session to set mash up. It downloads the NATS programs and each mash script from the release, checks each against its checksums, shows you the script, and asks before it runs it, as you, never piped into a shell."
 
 Type, in a Claude Code session:
 
@@ -65,8 +65,8 @@ Type, in a Claude Code session:
 > set mash up on this machine
 ```
 
-Result: `[recorded output]` (the session asks before each step; cut the waits in
-the edit).
+Result: `[recorded output]` (the session shows each checked script and asks
+before running it; cut the waits in the edit).
 
 Say: "If you want to see each step by hand, here it is. We never pipe a
 download into a shell. We download, check, then run. First the two NATS
