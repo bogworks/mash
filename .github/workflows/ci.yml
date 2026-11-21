@@ -152,7 +152,8 @@ jobs:
           git clean -ffdx || true
   # The release gate (scripts/release-check, release.RequiredChecks) requires a check run named exactly "reproducible"
   # on the candidate, so the name is explicit and the job is not matrixed. The candidate is a commit on main, which a push
-  # always runs, so the only skip is a docs-only pull request (job-level, as test): every release target
+  # Runs on a queue draft and on a push, not on an ordinary pull request push (Randy 2026-11-21: the queue tests the batch once; the release gate
+  # finds the draft's passed run on the commit main fast-forwards to). The skips: a docs-only change (job-level, as test) and an ordinary pull request push: every release target
   # built from two fresh clones in different directories must give identical bytes, so a change that breaks
   # reproducibility fails here, before a tag does.
   reproducible:
@@ -161,7 +162,7 @@ jobs:
     # A heavy job: skipped only when changes says docs-only (code=false). !cancelled() lets it run when changes itself
     # failed (the output is then empty, not false), so a broken classifier runs the work rather than skipping it; pr-check
     # fails on a changes job that did not succeed.
-    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' && (github.event_name != 'pull_request' || startsWith(github.head_ref, 'mergify/')) }}
     timeout-minutes: 30
     # Same runner as the other Linux jobs; a fork pull request runs on it too.
     # This is the release-facing check (codex H1 on #39).
@@ -288,6 +289,8 @@ jobs:
           REPRO: ${{ needs.reproducible.result }}
           ADR: ${{ needs.adr-numbers.result }}
           DOCS: ${{ needs.docs-lint.result }}
+          EVENT: ${{ github.event_name }}
+          DRAFT: ${{ startsWith(github.head_ref, 'mergify/') }}
         run: |
           set -eu
           echo "changes: $CHANGES, code=$CODE; test: $TEST; reproducible: $REPRO; adr-numbers: $ADR; docs-lint: $DOCS"
@@ -298,6 +301,8 @@ jobs:
           for job in test:"$TEST" reproducible:"$REPRO"; do
             case "$CODE/${job#*:}" in
               */success | false/skipped) ;;
+              # reproducible runs on a queue draft and a push, not on an ordinary pull request push: skipped there is a pass.
+              true/skipped) if [ "${job%%:*}" = reproducible ] && [ "${EVENT:-}" = pull_request ] && [ "${DRAFT:-}" = false ]; then :; else echo "${job%%:*}: ${job#*:} (code changed: $CODE)" >&2; exit 1; fi ;;
               *) echo "${job%%:*}: ${job#*:} (code changed: $CODE)" >&2; exit 1 ;;
             esac
           done

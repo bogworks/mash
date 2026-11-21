@@ -17,6 +17,9 @@ import (
 // when changes answered code=false, run when changes failed (an empty output), and never run after a cancellation.
 const heavyIf = "${{ !cancelled() && needs.changes.outputs.code != 'false' }}"
 
+// reproIf: heavyIf, and not on an ordinary pull request push: it runs on a queue draft and on a push (Randy 2026-11-21).
+const reproIf = "${{ !cancelled() && needs.changes.outputs.code != 'false' && (github.event_name != 'pull_request' || startsWith(github.head_ref, 'mergify/')) }}"
+
 // advisoryIf is the condition of the advisory test jobs (test-eph, test-macos): heavyIf, and only on a Mergify queue draft.
 const advisoryIf = "${{ !cancelled() && needs.changes.outputs.code != 'false' && startsWith(github.head_ref, 'mergify/') }}"
 
@@ -68,10 +71,11 @@ func TestDocsOnly_heavyJobsSkipOnTheChangesOutput(t *testing.T) {
 			}
 		}
 	}
-	for _, jn := range []string{"test", "reproducible"} {
-		if got := load(t, "ci.yml").Jobs[jn].If; got != heavyIf {
-			t.Errorf("ci.yml/%s if = %q, want %q", jn, got, heavyIf)
-		}
+	if got := load(t, "ci.yml").Jobs["test"].If; got != heavyIf {
+		t.Errorf("ci.yml/test if = %q, want %q", got, heavyIf)
+	}
+	if got := load(t, "ci.yml").Jobs["reproducible"].If; got != reproIf {
+		t.Errorf("ci.yml/reproducible if = %q, want %q", got, reproIf)
 	}
 	// The two advisory jobs run only on a queue draft (Randy 2026-11-21): the heavy condition and the draft's branch.
 	for _, jn := range []string{"test-eph", "test-macos"} {
