@@ -37,7 +37,6 @@ type epInput struct {
 	flags  map[string]bool
 	values map[string]string
 	json   bool
-	detail bool // --detail, set by the command that runs it
 
 	// set by a command's check
 	addr     sap.Address

@@ -65,7 +65,14 @@ func TestForeignInstalledEndpointDoesNotChangeMashctlsOwner(t *testing.T) {
 	if strings.Contains(out+errb, "zed") {
 		t.Errorf("acted as the installed endpoint's owner:\n%s\n%s", out, errb)
 	}
-	if _, errb, _ = h.run("limits", "apply", "--detail"); strings.Contains(errb, "target server") {
-		t.Errorf("a target line: %q", errb)
+	// it acts as h.e.Owner: that owner's endpoint is listed and shown, and no output names zed
+	h.provisionDeclared("b")
+	lo, le, lc := h.run("endpoint", "list")
+	if lc != 0 || !strings.Contains(lo, "b") || strings.Contains(lo+le, "zed") {
+		t.Errorf("endpoint list as the configured owner: %d %q %q", lc, lo, le)
+	}
+	so, se, sc := h.run("endpoint", "show", ad("b").String())
+	if sc != 0 || !strings.Contains(so, ad("b").String()) || strings.Contains(so+se, "zed") {
+		t.Errorf("endpoint show as the configured owner: %d %q %q", sc, so, se)
 	}
 }
