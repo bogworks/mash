@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -155,5 +156,48 @@ func TestInboxIgnoresMailFromADeletedSender(t *testing.T) {
 	r = runMash(strictEnv(w, "a", nil), "inbox", "--json")
 	if r.code != 0 || !strings.Contains(r.out, `"total":0`) || !strings.Contains(r.out, `"new":0`) || !strings.Contains(r.out, `"messages":[]`) {
 		t.Errorf("inbox --json: exit %d, stdout %q, stderr %q", r.code, r.out, r.errs)
+	}
+}
+
+// status on the machine that deleted the endpoint: mashctl set the creds file aside as <creds>.deleted, so the creds
+// row says the endpoint was deleted, in the specification's words. The endpoint is named, as it is no longer installed.
+func TestStatusDeletedEndpointMatchesSpec(t *testing.T) {
+	const name = "After the endpoint was deleted, on the machine that deleted it"
+	c, ok := specCases(t, "status")[name]
+	if !ok {
+		t.Fatalf("spec/mash.json no longer has the status case %q", name)
+	}
+	w := tlsWorld(t, "a")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := adminOf(t, w).Deprovision(ctx, tAddr("a")); err != nil {
+		t.Fatal(err)
+	}
+	creds := w.env["a"]["MASH_CREDS"]
+	if err := os.Rename(creds, creds+".deleted"); err != nil {
+		t.Fatal(err)
+	}
+	text := specText(c)
+	r := runMash(strictEnv(w, "a", nil), "status", "--endpoint", tTo("a"))
+	stdout, hint, _ := strings.Cut(text, "\nhint: ")
+	if r.code != c.Exit || r.out != stdout+"\n" || r.errs != "hint: "+hint+"\n" {
+		t.Errorf("status: want exit %d, stdout %q, stderr %q; got exit %d, stdout %q, stderr %q", c.Exit, stdout+"\n", "hint: "+hint+"\n", r.code, r.out, r.errs)
+	}
+	_, reason, _ := strings.Cut(stdout, "not ready: ")
+	r = runMash(strictEnv(w, "a", nil), "status", "--json")
+	want := `{"endpoint":"` + tTo("a") + `","ready":false,"online":false,"reason":"` + reason + `"}` + "\n"
+	if r.code != 1 || r.out != want {
+		t.Errorf("status --json: want exit 1, stdout %q; got exit %d, stdout %q, stderr %q", want, r.code, r.out, r.errs)
+	}
+	r = runMash(strictEnv(w, "a", nil), "status", "--json", "--detail")
+	if r.code != 1 || !strings.Contains(r.out, `"reason_code":"endpoint_deleted"`) {
+		t.Errorf("status --json --detail: exit %d, stdout %q, stderr %q", r.code, r.out, r.errs)
+	}
+
+	// the tool says the same
+	s := startServe(t, w.env["a"])
+	s.initialize(t)
+	if got := reportText(t, s, 91, "status"); got != text {
+		t.Errorf("status tool: %q, want %q", got, text)
 	}
 }

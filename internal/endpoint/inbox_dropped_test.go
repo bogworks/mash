@@ -63,3 +63,70 @@ func TestReadInboxAllDroppedIsEmpty(t *testing.T) {
 		t.Fatalf("want an empty inbox, got %+v", r)
 	}
 }
+
+// Dropped messages found while topping up the list (the first batch had dropped mail, so the listing reads further
+// on) are not counted either.
+func TestReadInboxCountsDroppedFoundWhileToppingUp(t *testing.T) {
+	f := newFixture(t, "a", "b", "c")
+	ctx := context.Background()
+	for _, from := range []string{"c", "b", "b"} { // #1 stays, #2 and #3 go
+		if _, err := f.client(t, from).Send(ctx, tdot("a"), "from "+from, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// enough newer mail that #2 and #3 are outside what the read fetches up front (the newest UrgentLook)
+	cc := f.client(t, "c")
+	for i := 0; i < UrgentLook; i++ {
+		if _, err := cc.Send(ctx, tdot("a"), "filler", 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.adm.Deprovision(ctx, taddr("b")); err != nil {
+		t.Fatal(err)
+	}
+	// oldest first after #1, one wanted: #2 is dropped in the first batch, the top-up drops #3 and lists #4
+	r, err := strict(t, f, "a").ReadInbox(ctx, InboxQuery{After: 1, Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Mail) != 1 || r.Mail[0].Seq != 4 {
+		t.Fatalf("listed: %+v", r.Mail)
+	}
+	if want := UrgentLook + 1; r.State.Total != want || r.State.Waiting != want {
+		t.Fatalf("total %d, waiting %d: want %d and %d", r.State.Total, r.State.Waiting, want, want)
+	}
+}
+
+// The oldest-waiting scan looks past dropped messages, including one it has to fetch itself: the time is of the first
+// message that is shown.
+func TestReadInboxOldestWaitingSkipsADroppedMessageItFetches(t *testing.T) {
+	f := newFixture(t, "a", "b", "c")
+	ctx := context.Background()
+	for _, from := range []string{"b", "b", "c"} { // #1 and #2 go, #3 stays
+		if _, err := f.client(t, from).Send(ctx, tdot("a"), "from "+from, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// enough newer mail that #2 is outside what the read fetches for the urgent count (the newest UrgentLook)
+	cc := f.client(t, "c")
+	for i := 0; i < UrgentLook; i++ {
+		if _, err := cc.Send(ctx, tdot("a"), "filler", 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.adm.Deprovision(ctx, taddr("b")); err != nil {
+		t.Fatal(err)
+	}
+	a := strict(t, f, "a")
+	third, err := a.Read(ctx, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := a.ReadInbox(ctx, InboxQuery{Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.State.OldestWaiting.Equal(third.At) {
+		t.Fatalf("oldest waiting %v: want #3's time %v", r.State.OldestWaiting, third.At)
+	}
+}

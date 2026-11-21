@@ -141,6 +141,8 @@ func TestStatusMatchesSpec(t *testing.T) {
 			cmds.HealthCheck{Name: "sign-in", State: cmds.CheckFail, Detail: "the server refused these credentials", Reason: "the server refused its credentials", Code: cmds.CodeCredsRefused}),
 		"The server does not answer": report("acme.demo.bob", false, ok("config", ""), ok("creds", ""),
 			cmds.HealthCheck{Name: "server", State: cmds.CheckFail, Detail: "the server did not answer: tls://myserver:4222"}),
+		"After the endpoint was deleted, on the machine that deleted it": report("acme.demo.bob", false, ok("config", ""),
+			cmds.HealthCheck{Name: "creds", State: cmds.CheckFail, Detail: cmds.ReasonEndpointDeleted, Fix: cmds.EndpointDeletedFix, Code: cmds.CodeEndpointDeleted}),
 		"In a session, when another session holds this endpoint": leaseReport(cmds.LeaseOther, ""),
 		"In a session that a newer session replaced":             leaseReport(cmds.LeaseLost, ""),
 		"In a session that could not take the endpoint":          leaseReport(cmds.LeaseFailed, "the server did not answer: tls://myserver:4222"),
