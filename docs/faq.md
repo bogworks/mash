@@ -14,17 +14,17 @@ Subagents and agent teams are helpers that one session starts and directs, on on
 
 ## What do I need to run it?
 
-- A NATS server in operator mode (JWT credentials) with JetStream, and one account for mash. You run it yourself; Synadia Cloud is not supported in 0.5.6 ([synadia.md](synadia.md)).
+- A NATS server that you run yourself and that meets the [requirements](nats-server.md#requirements). Synadia Cloud is not supported in 0.5.6 ([synadia.md](synadia.md)).
 - Claude Code with channels: a claude.ai or Console sign-in, not Bedrock, Agent Platform or Foundry. On a team or managed machine an organisation Owner must allow channels, and the channel needs an allowlist entry in managed settings. One person on one machine can use the development flag instead ([install.md](install.md#3-allow-the-channel)).
 - The `mash` binary and the plugin. A pinned plugin release fetches and verifies its own binary; an unpinned one uses `mash` from your `PATH` ([install.md](install.md) section 1).
 
 ## Does it work with a NATS server that uses a token, user and password, or a plain nkey?
 
-No. mash needs a NATS server in operator mode with JWT user credentials. In the code, an endpoint connects with a creds file only, and its sender identity is read from that file's user JWT and seed (`IdentityFromCreds` in `internal/sap/sender.go`). A creds file with no JWT or no seed fails with an error that says it is not operator-mode JWT credentials, and `mash doctor` warns on its `server` row when the server address carries a password or token, which mash never uses. `mashctl endpoint create` makes such a user for each endpoint; with your own operator tooling, `nsc` can create one.
+No. mash needs JWT user credentials, from a server in operator mode ([requirements](nats-server.md#requirements)). In the code, an endpoint connects with a creds file only, and its sender identity is read from that file's user JWT and seed (`IdentityFromCreds` in `internal/sap/sender.go`). A creds file with no JWT or no seed fails with an error that says it is not operator-mode JWT credentials, and `mash doctor` warns on its `server` row when the server address carries a password or token, which mash never uses. `mashctl endpoint create` makes such a user for each endpoint; with your own operator tooling, `nsc` can create one.
 
 ## Do I have to run a server?
 
-Yes. Run your own NATS server in operator mode. Synadia Cloud is not supported in 0.5.6 ([synadia.md](synadia.md)).
+Yes. Run your own NATS server that meets the [requirements](nats-server.md#requirements). Synadia Cloud is not supported in 0.5.6 ([synadia.md](synadia.md)).
 
 ## How durable is the mail?
 
@@ -82,7 +82,7 @@ No. When a batch is more than 10 messages or 16 KiB, the hook shows a digest, on
 
 ## Is the connection encrypted?
 
-Yes, always. Every mash connection requires TLS, to any host, loopback included. Use a `tls://` URL; for a private CA, set `ca`; for a server that requires client certificates, set `tls_cert` and `tls_key`. A plain `nats://` URL is refused unless `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1` is set, which is for a throwaway test and prints a warning ([Turning encryption off](install.md#turning-encryption-off)).
+Yes, always. Every mash connection requires TLS, to any host, loopback included, so use a `tls://` URL. A private CA is supported: set `ca` (or `MASH_CA`) to its PEM file. A server that requires client certificates needs `tls_cert` and `tls_key`. A plain `nats://` URL is refused unless `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1` is set, which is for a throwaway test and prints a warning. The rules are on [TLS](nats-server.md#tls) ([Turning encryption off](install.md#turning-encryption-off)).
 
 ## Are JetStream domains and leaf nodes supported?
 

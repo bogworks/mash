@@ -103,22 +103,31 @@ Say yes to go ahead. I will ask again before each step.
 
 ## 2. The server's programs
 
-The NATS script needs `nats-server` (2.10.7 or newer), the `nats` command and
-`openssl`. If any is missing, tell the person where it comes from, and ask for
-a yes before installing it. You never run `sudo` yourself: if the install needs
-it, give the person the exact command as a `sh person` block.
+The NATS script needs `nats-server` (2.10.7 or newer; the requirements are in
+https://github.com/bogworks/mash/blob/main/docs/nats-server.md#requirements),
+the `nats` command and `openssl`. If any is missing, tell the person where it
+comes from, and ask for a yes before installing it. You never run `sudo`
+yourself: if the install needs it, give the person the exact command as a
+`sh person` block.
 
 - Homebrew (macOS, and Linux): `brew install nats-server nats openssl`. On
   a Mac this is the way: the script runs there too, with the `openssl` that
   macOS ships or Homebrew's.
 - Debian and Ubuntu: `nats-server` is in apt (`sudo apt install nats-server
   openssl`; on a minimal image also `curl unzip ca-certificates iproute2`:
-  the script needs `ss`). There is no apt package for the `nats` command: the
-  person downloads the linux zip for their machine from
+  the script needs `ss`). The apt package installs the binary to
+  `/usr/sbin/nats-server`, which is not on a user's PATH, and the script looks
+  on PATH only: tell the person to run `export PATH="$PATH:/usr/sbin"` for the
+  session. There is no apt package for the `nats` command: the person
+  downloads the linux zip for their machine from
   https://github.com/nats-io/natscli/releases and puts `nats` on the PATH.
+  Both are explained at
+  https://github.com/bogworks/mash/blob/main/docs/nats-server.md#getting-nats-server-and-the-nats-command
 
-A packaged `nats-server` may already run as a system service on port 4222.
-Leave it alone; the script uses the next free port and says which.
+The apt package also starts its own `nats-server` system service at boot, on
+port 4222, not in operator mode. Leave it alone; the script uses the next free
+port and says which. (`sudo systemctl disable --now nats-server` stops it, if
+the person asks.)
 
 ## 3. Download and check the two scripts
 

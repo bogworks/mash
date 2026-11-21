@@ -62,7 +62,7 @@ mash reads `$MASH_CONFIG_DIR/config.json` when that variable is set (an absolute
 - `the creds file is missing: <path>` (`status`), or `creds  FAIL` in `doctor`: the file for this endpoint is not at `<owner>.<group>.<name>.creds` in the config directory (`~/.config/mash` unless `XDG_CONFIG_HOME` points at a mash config). Put it there or set `MASH_CREDS` (or `creds` in config.json).
 - `mash: credentials file <path> has mode 0644: it is readable by other users. Run: chmod 600 <path>`: run exactly that. Creds files hold the endpoint's private key and must not be readable by others.
 - A creds path that is a directory or is not readable: fix the path or ownership.
-- `mash: <path> is not operator-mode JWT credentials ...`: the file has no user JWT or no seed (a bare token, a `user:password` line, a plain nkey seed, an empty file, or a JWT without its seed). mash supports only operator-mode servers with JWT user credentials; token, user/password and plain-nkey servers are not supported. Next: make the endpoint again with `mashctl endpoint create` and `mash join` ([operations.md](operations.md#adding-an-endpoint)), or ask whoever runs the server for a creds file, and set `creds` (or `admin_creds`) to it.
+- `mash: <path> is not operator-mode JWT credentials ...`: the file has no user JWT or no seed (a bare token, a `user:password` line, a plain nkey seed, an empty file, or a JWT without its seed). mash supports only JWT user credentials from an operator-mode server ([requirements](nats-server.md#requirements)). Next: make the endpoint again with `mashctl endpoint create` and `mash join` ([operations.md](operations.md#adding-an-endpoint)), or ask whoever runs the server for a creds file, and set `creds` (or `admin_creds`) to it.
 - A server url that carries a password or token: mash ignores it. Remove it from the url and use a creds file.
 
 ## `mash: endpoint X is not provisioned`
@@ -192,13 +192,13 @@ A batch of more than 10 messages or 16 KiB is shown as a digest: one line per me
 
 ## Account full or `maximum number of streams`
 
-Each endpoint takes one stream, and the two shared buckets take two. Remove an endpoint with `mashctl endpoint delete <owner.group.name>` and an admin credential.
+Each endpoint takes one stream, and mash's shared buckets take more (see [Sizing](nats-server.md#sizing)). Remove an endpoint with `mashctl endpoint delete <owner.group.name>` and an admin credential.
 
 ## `jetstream not enabled` (code 503, err_code 10076) or `the server could not enable JetStream for the account`
 
 Symptom: `mashctl init --config` or any JetStream call fails with `nats: API error: code=503 err_code=10076 description=jetstream not enabled` (or `no responders available for request`), and mash adds "the server could not enable JetStream for the account: it could not reserve the account's disk limit (2 GiB). nats-server gives JetStream 75% of the free disk by default, so the free disk under the server's store directory is probably under about 2.7 GiB".
 
-Cause: nats-server gives JetStream a store budget of 75% of the free disk when it starts. The account JWT asks for a disk limit (for example 2 GiB). When the limit is more than what is left of that budget, the server silently leaves JetStream off for the account, and every JetStream call fails. The account JWT looks fine, because the limit is only a request: `mashctl init --config` asks the server for the account's JetStream info and is the check that catches it.
+Cause: the account's disk limit is more than the server's JetStream budget (75% of the free disk by default; see [Requirements](nats-server.md#requirements)), so the server silently leaves JetStream off for the account. The account JWT looks fine, because the limit is only a request: `mashctl init --config` asks the server for the account's JetStream info and is the check that catches it. What the account needs is on [Sizing](nats-server.md#sizing).
 
 Fix, either one: free disk under the server's store directory (or move the store to a larger disk), then restart the server; or lower the account's limit, for example `nsc edit account NAME --js-disk-storage 1G`, then push the account.
 
