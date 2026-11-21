@@ -1332,8 +1332,8 @@ func TestCI_prCheckGatesOnEveryRequiredJob(t *testing.T) {
 	if strings.Contains(needs, "test-macos") {
 		t.Errorf("pr-check needs test-macos, which is advisory (TODO(macos-gate) in ci.yml): %v", j.Needs)
 	}
-	if mj := w.Jobs["test-macos"]; mj.ContinueOnError != nil || mj.If != w.Jobs["test"].If || !strings.Contains(fmt.Sprint(mj.RunsOn), "rh-macos") {
-		t.Errorf("test-macos must run under the same condition as test, on rh-macos, and never with continue-on-error (it would hide a failure): %+v", mj)
+	if mj := w.Jobs["test-macos"]; mj.ContinueOnError != nil || mj.If != advisoryIf || !strings.Contains(fmt.Sprint(mj.RunsOn), "rh-macos") {
+		t.Errorf("test-macos must run under advisoryIf (queue drafts only), on rh-macos, and never with continue-on-error (it would hide a failure): %+v", mj)
 	}
 	// A push to main skips the heavy jobs exactly when changes says its added paths are docs-only (code=false): the release gate
 	// (internal/release/checks.go, CheckCIWalk) judges such a head by the newest tested commit under it.
@@ -2529,8 +2529,8 @@ func TestCI_ephShadowJobGatesNothing(t *testing.T) {
 		t.Error(".mergify.yml mentions the eph job: it must not be a queue condition")
 	}
 	tj, ej := w.Jobs["test"], w.Jobs["test-eph"]
-	if ej.If != tj.If || ej.TimeoutMinutes != tj.TimeoutMinutes || fmt.Sprint(ej.Needs) != fmt.Sprint(tj.Needs) || ej.ContinueOnError != nil {
-		t.Errorf("test-eph must match test in if, timeout and needs, and never use continue-on-error: %+v", ej)
+	if ej.If != advisoryIf || ej.TimeoutMinutes != tj.TimeoutMinutes || fmt.Sprint(ej.Needs) != fmt.Sprint(tj.Needs) || ej.ContinueOnError != nil {
+		t.Errorf("test-eph must use advisoryIf (queue drafts only) and match test in timeout and needs, and never use continue-on-error: %+v", ej)
 	}
 }
 
