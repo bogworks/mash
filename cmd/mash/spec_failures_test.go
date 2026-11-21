@@ -108,9 +108,9 @@ func TestMissingCredsMatchesSpec(t *testing.T) {
 
 // doctor after the endpoint was deleted says so in the specification's words, with the fix for a deleted endpoint.
 func TestDoctorDeletedEndpointMatchesSpec(t *testing.T) {
-	c, ok := specCases(t, "doctor")["The endpoint was deleted"]
+	c, ok := specCases(t, "doctor")["The endpoint was deleted, seen from another machine"]
 	if !ok {
-		t.Fatal("spec/mash.json no longer has the doctor case \"The endpoint was deleted\"")
+		t.Fatal("spec/mash.json no longer has the doctor case \"The endpoint was deleted, seen from another machine\"")
 	}
 	w := tlsWorld(t, "a")
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -129,6 +129,38 @@ func TestDoctorDeletedEndpointMatchesSpec(t *testing.T) {
 	s := startServe(t, w.env["a"])
 	s.initialize(t)
 	if got := reportText(t, s, 90, "doctor"); !strings.Contains(got, strings.SplitN(stdout, "\n", 5)[3]) || !strings.HasSuffix(got, "hint: "+hint) {
+		t.Errorf("doctor tool: %q", got)
+	}
+}
+
+// doctor on the machine that deleted the endpoint: mashctl set the creds file aside as <creds>.deleted, so the creds row
+// says the endpoint was deleted and the rows that need the creds are skipped, in the specification's words.
+func TestDoctorDeletedOnThisMachineMatchesSpec(t *testing.T) {
+	const name = "The endpoint was deleted, on the machine that deleted it"
+	c, ok := specCases(t, "doctor")[name]
+	if !ok {
+		t.Fatalf("spec/mash.json no longer has the doctor case %q", name)
+	}
+	w := tlsWorld(t, "a")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := adminOf(t, w).Deprovision(ctx, tAddr("a")); err != nil {
+		t.Fatal(err)
+	}
+	creds := w.env["a"]["MASH_CREDS"]
+	if err := os.Rename(creds, creds+".deleted"); err != nil {
+		t.Fatal(err)
+	}
+	text := strings.Replace(specText(c), "tls://myserver:4222", w.e.URL, 1)
+	stdout, hint, _ := strings.Cut(text, "\nhint: ")
+	r := runMash(strictEnv(w, "a", nil), "doctor", "--endpoint", tTo("a"))
+	if r.code != c.Exit || r.out != stdout+"\n" || r.errs != "hint: "+hint+"\n" {
+		t.Errorf("doctor: want exit %d, stdout %q, stderr %q; got exit %d, stdout %q, stderr %q", c.Exit, stdout+"\n", "hint: "+hint+"\n", r.code, r.out, r.errs)
+	}
+	// the tool says the same
+	s := startServe(t, w.env["a"])
+	s.initialize(t)
+	if got := reportText(t, s, 92, "doctor"); !strings.Contains(got, strings.SplitN(stdout, "\n", 5)[3]) || !strings.HasSuffix(got, "hint: "+hint) {
 		t.Errorf("doctor tool: %q", got)
 	}
 }

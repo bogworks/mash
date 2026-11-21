@@ -214,18 +214,21 @@ ENDPOINT: on the machine where mashctl endpoint delete ran, the set-aside file
 &lt;address&gt;.creds.deleted is the evidence, and status names it with
 reason_code endpoint_deleted (the case above), as doctor does in its sign-in
 row; on another machine, where a creds file survives, the server's refusal is
-what is seen, and that is what the acceptance test AT-3 shows. In 0.5.6
-candidate 1 the same-machine case says the creds file is missing instead; that
-is a known issue unless candidate 2 carries the one-file check (settled
-2026-11-21). Inside a session, when the configuration, the creds, the server
-or sign-in fails, that failure is what status reports, even if the session
-also does not hold its endpoint: the root cause comes first, and a session and
-a shell then name the same cause. Asked inside a session (the MCP tool),
-status and doctor report on that session itself, not on a fresh connection:
-'ready, online' there means this session holds the endpoint and its mail will
-reach it. A hint names the first installed address in alphabetical order. At a
-shell every 'hint:' line goes to stderr; an MCP tool's text block puts the
-hint on the line after the result.
+what is seen, and that is what the acceptance test AT-3 shows. Candidate 2
+carries that check in status and doctor. The everyday commands (send, inbox,
+read, who) ought to read the same, 'this endpoint was deleted; its address
+cannot be used again' with hint 'mash doctor', where the set-aside file is
+present; in 0.5.6 they say the creds file is missing, and the hint leads to
+doctor, which says deleted: a known issue for 0.5.7 (settled 2026-11-21).
+Inside a session, when the configuration, the creds, the server or sign-in
+fails, that failure is what status reports, even if the session also does not
+hold its endpoint: the root cause comes first, and a session and a shell then
+name the same cause. Asked inside a session (the MCP tool), status and doctor
+report on that session itself, not on a fresh connection: 'ready, online'
+there means this session holds the endpoint and its mail will reach it. A hint
+names the first installed address in alphabetical order. At a shell every
+'hint:' line goes to stderr; an MCP tool's text block puts the hint on the
+line after the result.
 
 ## What it replaces
 

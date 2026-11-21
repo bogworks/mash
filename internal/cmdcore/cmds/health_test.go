@@ -41,10 +41,19 @@ func refusedSignIn() *fakeHealth {
 		{Name: "refused", State: cmds.CheckWarn, Detail: "3 unverified messages were refused"}}}}
 }
 
-// deletedEndpoint is the report of the specification's "The endpoint was deleted" case.
+// deletedEndpoint is the report of the specification's "The endpoint was deleted, seen from another machine" case.
 func deletedEndpoint() *fakeHealth {
 	return report("acme.demo.bob", false, ok("config", ""), ok("creds", ""), ok("server", "tls://myserver:4222"),
 		cmds.HealthCheck{Name: "sign-in", State: cmds.CheckFail, Detail: cmds.ReasonEndpointDeleted, Fix: cmds.EndpointDeletedFix, Code: cmds.CodeEndpointDeleted},
+		cmds.HealthCheck{Name: "delivery", State: cmds.CheckSkip, Detail: "needs sign-in"},
+		cmds.HealthCheck{Name: "refused", State: cmds.CheckOK, Detail: "no unverified mail was refused"})
+}
+
+// deletedOnThisMachine is the report of the specification's "The endpoint was deleted, on the machine that deleted it" case.
+func deletedOnThisMachine() *fakeHealth {
+	return report("acme.demo.bob", false, ok("config", ""),
+		cmds.HealthCheck{Name: "creds", State: cmds.CheckFail, Detail: cmds.ReasonEndpointDeleted, Fix: cmds.EndpointDeletedFix, Code: cmds.CodeEndpointDeleted},
+		ok("server", "tls://myserver:4222"), skip("sign-in", "creds"),
 		cmds.HealthCheck{Name: "delivery", State: cmds.CheckSkip, Detail: "needs sign-in"},
 		cmds.HealthCheck{Name: "refused", State: cmds.CheckOK, Detail: "no unverified mail was refused"})
 }
@@ -369,8 +378,11 @@ func TestDoctorMatchesSpec(t *testing.T) {
 				t.Errorf("%s: %q lacks %q", oc["case"], out, oc["text"])
 			}
 			continue
-		case "The endpoint was deleted":
+		case "The endpoint was deleted, seen from another machine", "The endpoint was deleted, on the machine that deleted it":
 			f = deletedEndpoint()
+			if oc["case"] == "The endpoint was deleted, on the machine that deleted it" {
+				f = deletedOnThisMachine()
+			}
 			// the tool says the same words, as an error result carrying the report
 			mcp := ""
 			for _, m := range specTool(t, "doctor")["errors"].([]any) {

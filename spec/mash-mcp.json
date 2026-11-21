@@ -478,8 +478,14 @@
      "exit": 1
     },
     {
-     "case": "The endpoint was deleted",
+     "case": "The endpoint was deleted, seen from another machine",
      "text": "config    ok\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   FAIL  this endpoint was deleted; its address cannot be used again\ndelivery  skip  needs sign-in\nrefused   ok    no unverified mail was refused\n\n1 problem.\nhint: ask whoever runs your mesh for a join file to a new endpoint",
+     "stream": "stdout",
+     "exit": 1
+    },
+    {
+     "case": "The endpoint was deleted, on the machine that deleted it",
+     "text": "config    ok\ncreds     FAIL  this endpoint was deleted; its address cannot be used again\nserver    ok    tls://myserver:4222\nsign-in   skip  needs the creds\ndelivery  skip  needs sign-in\nrefused   ok    no unverified mail was refused\n\n1 problem.\nhint: ask whoever runs your mesh for a join file to a new endpoint",
      "stream": "stdout",
      "exit": 1
     }
