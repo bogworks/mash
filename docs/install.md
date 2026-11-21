@@ -102,6 +102,10 @@ On a machine that runs `mashctl`, `mashctl init --config FILE` writes `servers`,
 
 `~/.config/mash/config.json`, or `$XDG_CONFIG_HOME/mash/config.json` when `XDG_CONFIG_HOME` is an absolute path and that file exists (an existing `~/.config/mash` install keeps working). With no `HOME` and no absolute `XDG_CONFIG_HOME`, mash stops with an error unless everything comes from the `MASH_*` variables. A leading `~/` in `creds` and `admin_creds` (and in `MASH_CREDS` and `MASH_ADMIN_CREDS`) is expanded to your home; `~user/` is not. `policy.md` and the default creds files live in the same directory; when the XDG directory has no copy of one, mash also finds it in `~/.config/mash` (the XDG copy wins when both exist). A relative `admin_creds`, `ca`, `tls_cert` or `tls_key` in `config.json` is resolved against the config directory, not the working directory. `config.json` that is writable by every user is refused; run `chmod go-w` on it.
 
+### Upgrading from 0.5.5
+
+A configuration folder left by mash 0.5.5 holds the keys `url` and `tls_ca` in `config.json`. Every command of `mash` and `mashctl` then stops with `error: <folder> holds a mash 0.5.5 configuration` and `hint: <release base>/mash-migrate-0.5.5.sh` (exit 1), and changes nothing. Run the script once: `curl -fsSL https://github.com/bogworks/mash/releases/latest/download/mash-migrate-0.5.5.sh | bash`. It renames the two keys (`url` becomes `servers`, `tls_ca` becomes `ca`) and keeps the old file beside it as a backup. Nothing on the server needs migrating.
+
 ```json
 { "servers": ["tls://nats.example.com:4222"], "endpoint": "alice.dev.design" }
 ```

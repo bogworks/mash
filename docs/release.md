@@ -357,6 +357,11 @@ The pins live outside the embedded files on purpose. `plugin/scripts/mash` is em
 source tree whose HEAD is not X, that holds any untracked or ignored file, or that contains the output, and runs
 `go mod download` + `go mod verify` first, so the module cache is what `go.sum` names.
 
+The build may also set `-X github.com/bogworks/mash/internal/cliframe.ReleaseBase=<base>`: the release base the 0.5.5
+migration hint is written from (default `https://github.com/bogworks/mash/releases/latest/download`; a fork sets it to
+its own release base). The plugin launcher's own install hint uses `REPO_URL` in `plugin/scripts/mash`, a shell setting;
+the two are the same project default.
+
 ## Build provenance
 
 The `attest` job attests each `dist/mash-*` binary with `actions/attest-build-provenance` (pinned to a commit; the job,
