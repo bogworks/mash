@@ -314,7 +314,7 @@ the signed one.
 
 ### 8.2 Data stores
 
-![The admin creates inboxes and writes the directory and lease tombstones; endpoints mail inboxes and read the directory; serve writes its own lease; heartbeats are not stored.](images/017-data-stores.svg)
+![mashctl, run by the admin, creates inboxes and writes the directory and lease tombstones; endpoints mail inboxes and read the directory; serve writes its own lease; heartbeats are not stored.](images/017-data-stores.svg)
 
 *This diagram is drawn for the 0.3.0 tree. Its "admin" is `mash admin`, which 0.5.6 replaced with `mashctl`.*
 
@@ -369,7 +369,7 @@ maps names to keys. Each name's lease. Each session's model turns, which cost mo
 
 **Trust boundaries.**
 
-![Model session, agent host, mash serve and local files share one OS-user boundary; serve crosses a TLS boundary into the shared NATS account.](images/018-trust-labels.svg)
+![Model session, agent host, mash serve and local files share one OS-user boundary; serve crosses a TLS boundary into the shared NATS account; the admin's mashctl reaches the same account separately over TLS.](images/018-trust-labels.svg)
 
 *This diagram is drawn for the 0.3.0 tree. The Synadia setup script it shows is retired.*
 
