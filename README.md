@@ -73,7 +73,7 @@ bash install.sh
 
 This installs `mash` and `mashctl` from the release into `~/.local/bin`, after checking each against the release's `SHA256SUMS`. [docs/install.md](docs/install.md) says what it does and how to pin a release.
 
-The local NATS server and the rest of the by-hand route (`nats-server` and the `nats` command from their GitHub releases, `mash-local-nats-setup.sh`, two endpoints, the first mail) are in the [Quick start](docs/guide/walkthrough.md#quick-start), each command run on this release. To use a NATS server you already run, see [Bring your own NATS server](docs/nats-server.md).
+mash needs two programs from NATS on the `PATH` of the user who runs it: `nats-server` 2.10.7 or newer (tested with 2.15.1) and `nats` (tested with 0.5.2). Install them any way you like; the setup skill asks how you would like to, and the Quick start shows one way with no `sudo`. The local NATS server and the rest of the by-hand route (one way to get the two programs from their GitHub releases, `mash-local-nats-setup.sh`, two endpoints, the first mail) are in the [Quick start](docs/guide/walkthrough.md#quick-start), each command run on this release. To use a NATS server you already run, see [Bring your own NATS server](docs/nats-server.md).
 
 Where everything lives, by default: the programs in `~/.local/bin` (`MASH_INSTALL_DIR` names another folder), the configuration and keys in `~/.config/mash` (`$XDG_CONFIG_HOME/mash` or `MASH_CONFIG_DIR` if set), a local server in `~/mash-nats` (the folder the setup script printed, if you used `--dir`). Check yours before you remove anything. How to remove it all: [Uninstall](docs/install.md#uninstall).
 
