@@ -10,7 +10,7 @@
 
 `mashctl` signs each endpoint's NATS user itself, and it revokes a deleted or reissued endpoint's key by signing a new account JWT and pushing it to the server. For that it needs the operator key, the account key and the system account's credentials, all set in the file you give to `mashctl init --config` (see [Setting mash up with `mashctl init --config`](operations.md#setting-mash-up-with-mashctl-init---config)). On a hosted service the provider holds the operator key, so you cannot give it to `mashctl`.
 
-`mash` itself, the program a session runs, only needs a creds file for a user with the permissions `mashctl endpoint permissions` prints, and it connects to any conforming server over TLS. What is missing is the way to make and revoke those users and to set up the account's storage on a hosted service.
+`mash` itself, the program a session runs, connects to any conforming server over TLS with a creds file for a user with the permissions `mashctl endpoint permissions` prints. A creds file is not enough on its own: the account must also hold mash's storage and the endpoint's directory record and inbox, which `mashctl` creates. On an account `mashctl` has not set up, `mash` fails with "endpoint ... is not provisioned". What is missing is the way to make and revoke those users and to set up the account's storage on a hosted service.
 
 ## What to use instead
 

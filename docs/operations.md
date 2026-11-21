@@ -586,3 +586,5 @@ These timings are not configurable: peers and the server must agree on them, so 
 ## Troubleshooting
 
 Symptoms, causes and fixes are in [troubleshooting.md](troubleshooting.md).
+
+For `tls: bad certificate` or `certificate required` (set `tls_cert` and `tls_key`) and for `x509: certificate signed by unknown authority` (set `ca`), see [What fails, and what it says](tls-and-clusters.md#what-fails-and-what-it-says) in the TLS guide, and the connection settings in [Configuration](install.md#4-configuration).
