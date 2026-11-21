@@ -29,6 +29,9 @@
 #
 # shellcheck disable=SC2016,SC2329  # bash -c bodies are single-quoted on purpose; helpers are called through chk
 
+# On macOS (no podman) run the cases on the host with Apple bash 3.2 and BSD tools; each case then needs its own
+# HOME (and TMPDIR), because the cases share the folder $HOME/.config/mash and leave files in it.
+
 # Every assertion prints "ok: ..." or "FAIL: ..."; the totals come last and the
 # exit status is non-zero when any assertion failed.
 
@@ -165,11 +168,13 @@ case4() { # folder resolution
     mig HOME="$h"
     chk "HOME/.config/mash by default" [ "$(hit)" = "$h/.config/mash" ]
     mig HOME="$h" XDG_CONFIG_HOME="$x" MASH_CONFIG_DIR=rel/m
-    chk "a relative MASH_CONFIG_DIR is ignored (XDG wins)" [ "$(hit)" = "$x/mash" ]
+    chk "a relative MASH_CONFIG_DIR is refused (nothing in any folder changed)" bash -c '[ "$1" = 1 ] && [ -z "$2" ]' _ "$RC" "$(hit)"
+    chk "a relative MASH_CONFIG_DIR: an error line that names the variable and the value" has "$W/err" "error: MASH_CONFIG_DIR is not an absolute path: rel/m"
+    chk "a relative MASH_CONFIG_DIR: an error line and a hint line" refused
     mig HOME="$h" XDG_CONFIG_HOME=rel/x
     chk "a relative XDG_CONFIG_HOME is ignored (HOME wins)" [ "$(hit)" = "$h/.config/mash" ]
     mig HOME="$h" XDG_CONFIG_HOME=rel/x MASH_CONFIG_DIR=rel/m
-    chk "both relative: HOME wins" [ "$(hit)" = "$h/.config/mash" ]
+    chk "both relative: MASH_CONFIG_DIR is refused, nothing changed" bash -c '[ "$1" = 1 ] && [ -z "$2" ] && grep -q "^error: MASH_CONFIG_DIR is not" "$3"' _ "$RC" "$(hit)" "$W/err"
     mig HOME="$h" MASH_CONFIG_DIR="$m/"
     chk "a trailing slash on MASH_CONFIG_DIR is fine" [ "$(hit)" = "$m" ]
     env -u HOME -u MASH_CONFIG_DIR -u XDG_CONFIG_HOME bash "$SCRIPT" >"$W/out" 2>"$W/err" </dev/null
@@ -304,7 +309,11 @@ EOF
 
 case9() { # no network, no writes outside the folder
     printf '%s\n' "$REAL055" | put "$CFG/config.json"
-    chk "the container has only the loopback interface" bash -c '[ "$(ls /sys/class/net)" = lo ]'
+    if [ -d /sys/class/net ]; then
+        chk "the container has only the loopback interface" bash -c '[ "$(ls /sys/class/net)" = lo ]'
+    else
+        ok "skipped: no /sys/class/net (the loopback-only check needs Linux)"
+    fi
     find "$H" /tmp -mindepth 1 -path "$W" -prune -o -print 2>/dev/null | sort >"$W/before"
     snap "$H" >"$W/snap0"
     mig HOME="$H"
@@ -322,7 +331,7 @@ case9() { # no network, no writes outside the folder
     chmod 700 "$CFG"
     chk "a folder we cannot write in: refused" refused
     chk "a folder we cannot write in: nothing changed" [ "$(snap "$CFG")" = "$before" ]
-    chk "a folder we cannot write in: no stray files" bash -c '[ "$(ls -A "$1" | wc -l)" = 1 ]' _ "$CFG"
+    chk "a folder we cannot write in: no stray files" bash -c '[ "$(ls -A "$1" | wc -l | tr -d " ")" = 1 ]' _ "$CFG"
 }
 
 case10() { # the real mash accepts the migrated file
@@ -335,16 +344,13 @@ case10() { # the real mash accepts the migrated file
     cp -p "$CFG/config.json" "$W/orig"
     # the unmigrated file
     env MASH_ENDPOINT=acme.dev.alice MASH_CONFIG_DIR="$CFG" HOME="$H" timeout 60 /t/mash status >"$W/old.out" 2>"$W/old.err" </dev/null
-    if grep -aq 'holds a mash 0.5.5 configuration' /t/mash; then
-        if cat "$W/old.out" "$W/old.err" | grep -Fq 'holds a mash 0.5.5 configuration'; then
-            ok "unmigrated 0.5.5 file: mash says it holds a 0.5.5 configuration"
-        else
-            bad "unmigrated 0.5.5 file: mash says it holds a 0.5.5 configuration"
-            head -n 6 "$W/old.err" | sed 's/^/  > /'
-        fi
-    else
-        ok "skipped: this build has no 0.5.5 refusal"
-    fi
+    # the refusal is required: internal/cliframe/legacy055.go prints
+    #   error: <folder> holds a mash 0.5.5 configuration
+    #   hint: <release base>/mash-migrate-0.5.5.sh
+    # the folder is the configuration folder, with the home directory written as ~
+    cat "$W/old.out" "$W/old.err" >"$W/old.all"
+    chk "unmigrated 0.5.5 file: error: <folder> holds a mash 0.5.5 configuration" bash -c 'grep -Eq "^error: (~|/)[^ ]* holds a mash 0.5.5 configuration\$" "$1"' _ "$W/old.all"
+    chk "unmigrated 0.5.5 file: a hint line names mash-migrate-0.5.5.sh" bash -c 'grep -Eq "^hint: .*mash-migrate-0.5.5\.sh\$" "$1"' _ "$W/old.all"
     mig HOME="$H"
     chk "migration: exit 0" rc_is 0
     env MASH_ENDPOINT=acme.dev.alice MASH_CONFIG_DIR="$CFG" HOME="$H" timeout 60 /t/mash status >"$W/new.out" 2>"$W/new.err" </dev/null
@@ -436,6 +442,7 @@ refuse_case() {
 
 case12() { # invalid JSON and empty url are refusals, not invalid output; temp names are not followed
     mkdir -p "$CFG"
+    local je="$CFG/config.json is not valid JSON" jh="fix the file by hand, then run this again"
     refuse_case "trailing comma before }" '{"url":"a",}\n'
     refuse_case "mismatched closer ]" '{"url":"a"]\n'
     refuse_case "[}" '[}\n'
@@ -447,6 +454,12 @@ case12() { # invalid JSON and empty url are refusals, not invalid output; temp n
     refuse_case "raw newline inside a string" '{"url":"a\nb"}\n'
     refuse_case "raw carriage return inside a string" '{"url":"a\rb"}\n'
     refuse_case "raw tab after a backslash inside a string" '{"url":"a\\\tb"}\n'
+    refuse_case "bad escape \\q" '{"url":"a\\qb"}\n' "$je" "$jh"
+    refuse_case "bad escape \\q in another string" '{"owner":"a\\qb","url":"x"}\n' "$je" "$jh"
+    refuse_case "short unicode escape" '{"url":"a\\u12"}\n' "$je" "$jh"
+    refuse_case "non-hex unicode escape" '{"url":"a\\uZZZZ"}\n' "$je" "$jh"
+    # shellcheck disable=SC1003  # the backslash is the test input
+    refuse_case "a lone backslash at the end" '{"url":"a\\' "$je" "$jh"
     refuse_case "unterminated object" '{"url":"a"\n'
     refuse_case "unterminated array" '{"url":"a","l":[1,2\n'
     refuse_case "unterminated string" '{"url":"a\n'
@@ -460,8 +473,13 @@ case12() { # invalid JSON and empty url are refusals, not invalid output; temp n
     mig HOME="$H"
     chk "tabs and newlines outside strings: exit 0" rc_is 0
     chk "tabs and newlines outside strings: kept as written" same "$CFG/config.json" <(printf '{\t"servers":\t["tls://a:1"]\r\n,\t"n":[1,\n2]\n}\n')
+    # valid escapes and a raw UTF-8 letter stay accepted
+    rm -f "$CFG/config.json.0.5.5"
+    printf '{"note":"\\"q\\" \\\\ \\/ \\b\\f\\n\\r\\t \\u00e9 \\uD83D\\uDE00 \xc3\xa9","url":"tls://a:1"}\n' | put "$CFG/config.json"
+    mig HOME="$H"
+    chk "valid escapes (\\\" \\\\ \\/ \\b \\f \\n \\r \\t \\u00e9) and a raw UTF-8 letter: exit 0" rc_is 0
+    chk "valid escapes: kept as written" same "$CFG/config.json" <(printf '{"note":"\\"q\\" \\\\ \\/ \\b\\f\\n\\r\\t \\u00e9 \\uD83D\\uDE00 \xc3\xa9","servers":["tls://a:1"]}\n')
     # grammar: a missing comma or colon, extra values, trailing text, bad literals
-    local je="$CFG/config.json is not valid JSON" jh="fix the file by hand, then run this again"
     refuse_case "missing comma between members" '{"url":"a" "owner":"b"}\n' "$je" "$jh"
     refuse_case "missing colon" '{"owner" "b","url":"a"}\n' "$je" "$jh"
     refuse_case "missing colon after url" '{"url" "a"}\n'
@@ -542,7 +560,7 @@ config.json.0.5.5" ]' _ "$CFG"
     chk "planted old names: exit 0" rc_is 0
     chk "planted old names: the file they pointed at is untouched" same "$W/victim" "$W/victim.orig"
     chk "planted old names: migrated" same "$CFG/config.json" <(printf '{"servers":["tls://a:1"]}\n')
-    chk "planted old names: still four links, config.json and the backup, nothing else" bash -c '[ "$(ls -A "$1" | wc -l)" = 6 ]' _ "$CFG"
+    chk "planted old names: still four links, config.json and the backup, nothing else" bash -c '[ "$(ls -A "$1" | wc -l | tr -d " ")" = 6 ]' _ "$CFG"
     rm -f -- "$CFG/.config.json.migrate.$pid" "$CFG/.config.json.migrate.$pid.st" "$CFG/.config.json.$pid.tmp" "$CFG/.config.json.$pid.st"
 }
 

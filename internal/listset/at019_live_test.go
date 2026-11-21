@@ -36,7 +36,7 @@ func TestAT019LivePromptGetsItsDirectAnswer(t *testing.T) {
 	if _, err := cve.nc.ChanSubscribe(subj(recipient, Prompt), prompts); err != nil {
 		t.Fatal(err)
 	}
-	reply := "_INBOX." + flat(sender) + ".AT019"
+	reply := inbox(sender) + ".AT019"
 	answers, err := lead.nc.SubscribeSync(reply)
 	if err != nil {
 		t.Fatal(err)
@@ -80,7 +80,7 @@ func TestAT019LivePromptGetsItsDirectAnswer(t *testing.T) {
 
 	// One way: the recipient cannot start a new prompt to the sender.
 	back := subj(sender, Prompt)
-	if err := cve.nc.PublishRequest(back, "_INBOX."+flat(recipient)+".AT019", []byte("ping")); err != nil {
+	if err := cve.nc.PublishRequest(back, inbox(recipient)+".AT019", []byte("ping")); err != nil {
 		t.Fatal(err)
 	}
 	if err := cve.nc.Flush(); err != nil {

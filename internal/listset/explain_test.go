@@ -118,12 +118,12 @@ func TestExplainOpenSubjects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, s := range []string{"_INBOX.>", "$SRV.>", "$JS.API.INFO", "agents.policy.r"} {
+	for _, s := range []string{"_INBOX.r.>", "$SRV.>", "$JS.API.INFO", "agents.policy.r"} {
 		if !slices.Contains(e.OpenSubjects.Publish, s) {
 			t.Errorf("publish lacks %q: %v", s, e.OpenSubjects.Publish)
 		}
 	}
-	wantList(t, "subscribe", e.OpenSubjects.Subscribe, "$SRV.>", "_INBOX.r_o_b.>")
+	wantList(t, "subscribe", e.OpenSubjects.Subscribe, "$SRV.>", "_INBOX.r.r_o_b.>")
 	for _, s := range slices.Concat(e.OpenSubjects.Publish, e.OpenSubjects.Subscribe) {
 		if strings.HasPrefix(s, "agents.") && s != PolicySubject("r") {
 			t.Errorf("open subject %q is an address subject", s)

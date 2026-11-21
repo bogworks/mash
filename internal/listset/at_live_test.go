@@ -166,6 +166,9 @@ func subscribeReaches(t *testing.T, c *conn, obs *nats.Conn, filter, subject str
 
 func flat(addr string) string { return strings.ReplaceAll(addr, ".", "_") }
 
+// inbox is the reply prefix of addr: _INBOX.<range>.<flat>, as internal/sap InboxPrefix.
+func inbox(addr string) string { return "_INBOX." + strings.SplitN(addr, ".", 2)[0] + "." + flat(addr) }
+
 // ownSubjects is what every sender keeps whatever its lists say: the fixed lines of the template for its own address.
 // Each is published (or subscribed) and observed.
 func assertOwnSubjectsReach(t *testing.T, c *conn, admin *conn, obs *nats.Subscription, self string) {
@@ -173,7 +176,7 @@ func assertOwnSubjectsReach(t *testing.T, c *conn, admin *conn, obs *nats.Subscr
 	f := flat(self)
 	for _, s := range []string{
 		subj(self, Heartbeat),
-		"_INBOX." + f + ".reply",
+		inbox(self) + ".reply",
 		"$JS.API.STREAM.INFO.inbox-" + f,
 		"$JS.API.CONSUMER.MSG.NEXT.inbox-" + f + ".deliver",
 		"$SRV.INFO.agents",
@@ -187,7 +190,7 @@ func assertOwnSubjectsReach(t *testing.T, c *conn, admin *conn, obs *nats.Subscr
 			t.Errorf("%s does not receive its own %s subject", self, v)
 		}
 	}
-	if !subscribeReaches(t, c, admin.nc, "_INBOX."+f+".>", "_INBOX."+f+".answer") {
+	if !subscribeReaches(t, c, admin.nc, inbox(self)+".>", inbox(self)+".answer") {
 		t.Errorf("%s does not receive on its own reply prefix", self)
 	}
 }
@@ -403,11 +406,11 @@ type openRow struct {
 func pinnedOpenSubjects() []openRow {
 	const doc = "ADR 0007, 0009"
 	return []openRow{
-		{"_INBOX.foo_c_lead.nuid1", true, []string{"foo.c.lead"}, "replies may go to any caller's reply prefix: no response permission, an answer is a plain publish (ADR 0007); the receiver accepts only verified callers"},
-		{"_INBOX.foo_d_solo.nuid1", true, []string{"foo.d.solo"}, "the same in another owner group: the reply prefix is not part of an owner line"},
+		{"_INBOX.foo.foo_c_lead.nuid1", true, []string{"foo.c.lead"}, "replies may go to any caller's reply prefix: no response permission, an answer is a plain publish (ADR 0007); the receiver accepts only verified callers"},
+		{"_INBOX.foo.foo_d_solo.nuid1", true, []string{"foo.d.solo"}, "the same in another owner group: the reply prefix is not part of an owner line"},
 		{"$SRV.INFO.agents", true, []string{"foo.c.lead", "foo.d.solo"}, "service discovery and live-prompt requests go to every endpoint (ADR 0007)"},
 		{"$SRV.PING", true, []string{"foo.c.lead", "foo.d.solo"}, "the same: every sender subscribes to $SRV.> to answer discovery"},
-		{"_INBOX.foo_c_core.nuid1", true, nil, "its own reply prefix: no other address receives it"},
+		{"_INBOX.foo.foo_c_core.nuid1", true, nil, "its own reply prefix: no other address receives it"},
 		{subj("foo.c.core", Heartbeat), true, nil, "its own heartbeat, a fixed line; nobody here subscribed to it"},
 		{"$JS.API.INFO", true, nil, "JetStream account info: a server API call, reaches no address"},
 		{"$JS.API.STREAM.INFO.KV_mash-directory", true, nil, "reads the directory: it is public to the range by design (" + doc + ")"},
@@ -462,7 +465,7 @@ func TestAT020OpenReplyAndPlumbingSubjectsArePinned(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, filter := range []string{"_INBOX." + flat(p) + ".>", "$SRV.>"} {
+		for _, filter := range []string{inbox(p) + ".>", "$SRV.>"} {
 			if _, err := pc.nc.Subscribe(filter, func(m *nats.Msg) {
 				mu.Lock()
 				got[m.Subject] = append(got[m.Subject], p)
@@ -495,7 +498,7 @@ func TestAT020OpenReplyAndPlumbingSubjectsArePinned(t *testing.T) {
 		f := flat(peer)
 		for _, filter := range []string{
 			subj(peer, Mail), subj(peer, Prompt), subj(peer, Status),
-			"_INBOX." + f + ".>", "$JS.API.CONSUMER.MSG.NEXT.inbox-" + f + ".deliver",
+			inbox(peer) + ".>", "$JS.API.CONSUMER.MSG.NEXT.inbox-" + f + ".deliver",
 		} {
 			publish := strings.TrimSuffix(filter, ">") + "x"
 			if !strings.HasSuffix(filter, ">") {

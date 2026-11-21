@@ -9,15 +9,16 @@
 # config.json.0.5.5 beside it, prints one line saying what it changed, and
 # touches nothing on the server.  Every other byte of the file stays as it was.
 #
-# It finds the folder the way mash does: an absolute $MASH_CONFIG_DIR; else an
-# absolute $XDG_CONFIG_HOME/mash; else $HOME/.config/mash.
+# It finds the folder the way mash does: an absolute $MASH_CONFIG_DIR (a relative
+# one is refused, as mash refuses it); else an absolute $XDG_CONFIG_HOME/mash (a
+# relative XDG_CONFIG_HOME is ignored); else $HOME/.config/mash.
 #
 # It refuses (exit 1, "error:" and "hint:" lines on stderr, nothing changed)
 # when the folder is writable by group or other (unless sticky), when there is nothing to migrate, when the file already has "servers" or "ca"
 # next to an old key, when "url" is not a string or holds no address, when the file is not valid JSON
 # (any break in the JSON grammar: a missing comma or colon, a mismatched bracket,
-# a comma before a closer, a control character inside a string, trailing text, an
-# unterminated structure), when a top-level key uses an escape, or when the backup
+# a comma before a closer, a control character or a bad escape inside a string,
+# trailing text, an unterminated structure), when a top-level key uses an escape, or when the backup
 # exists.
 # Exit codes: 0 done, 1 refused, 2 usage.
 #
@@ -30,7 +31,8 @@ usage: mash-migrate-0.5.5.sh [-h|--help]
 Rewrites the config.json that mash 0.5.5 left behind: url -> servers (a list),
 tls_ca -> ca.  The old file is kept as config.json.0.5.5 beside it.  Nothing on
 the server is touched.  The folder is $MASH_CONFIG_DIR, else
-$XDG_CONFIG_HOME/mash, else $HOME/.config/mash (absolute paths only).
+$XDG_CONFIG_HOME/mash, else $HOME/.config/mash.  A relative MASH_CONFIG_DIR is
+refused; a relative XDG_CONFIG_HOME is ignored, as in mash.
 EOF
 }
 
@@ -84,15 +86,23 @@ function emit_list(raw,   n, parts, i, p, s, o) {
     if (o == "") fail("url is empty")
     return "[" o "]"
 }
-BEGIN { depth = 0; instr = 0; esc = 0; last = ""; mode = 0; nurl = 0; nca = 0; state = "V"; intok = 0 }
+BEGIN { depth = 0; instr = 0; esc = 0; last = ""; mode = 0; nurl = 0; nca = 0; state = "V"; intok = 0; uh = 0 }
 {
     line = $0 "\n"
     n = length(line)
     for (i = 1; i <= n; i++) {
         c = substr(line, i, 1)
         if (instr) {
-            if (c < " ") fail("a control character inside a string")
-            if (esc) { esc = 0; tok = tok c; continue }
+            if (c < " ") fail((esc || uh > 0) ? "invalid" : "a control character inside a string")
+            if (uh > 0) {
+                if (index("0123456789abcdefABCDEF", c) == 0) fail("invalid")
+                uh--; tok = tok c; continue
+            }
+            if (esc) {
+                if (index("\"\\/bfnrtu", c) == 0) fail("invalid")
+                if (c == "u") uh = 4
+                esc = 0; tok = tok c; continue
+            }
             if (c == "\\") { esc = 1; tok = tok c; continue }
             if (c != "\"") { tok = tok c; continue }
             # the string ends here
@@ -192,7 +202,10 @@ main() {
     esac
 
     local dir
-    if [ -n "${MASH_CONFIG_DIR:-}" ] && [ "${MASH_CONFIG_DIR#/}" != "$MASH_CONFIG_DIR" ]; then
+    if [ -n "${MASH_CONFIG_DIR:-}" ] && [ "${MASH_CONFIG_DIR#/}" = "$MASH_CONFIG_DIR" ]; then
+        refuse "MASH_CONFIG_DIR is not an absolute path: $MASH_CONFIG_DIR" \
+            "set MASH_CONFIG_DIR to an absolute folder, or unset it"
+    elif [ -n "${MASH_CONFIG_DIR:-}" ]; then
         dir=$MASH_CONFIG_DIR
     elif [ -n "${XDG_CONFIG_HOME:-}" ] && [ "${XDG_CONFIG_HOME#/}" != "$XDG_CONFIG_HOME" ]; then
         dir=${XDG_CONFIG_HOME%/}/mash
