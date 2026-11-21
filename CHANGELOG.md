@@ -44,6 +44,8 @@ What you do depends on the version you used before; the order matters for 0.5.5 
 - **New forms** for `mash status` (one line), `mash who`, `mash inbox`, `mash read`, `mash send`, `mash version` and `mash key create`; errors are an `error:` line and a `hint:` line.
 - **Setup is `mashctl init --config FILE`,** and `mashctl` no longer installs or starts NATS. `mash serve` refuses to run by hand in a terminal.
 - **A 0.5.5 configuration folder is refused** with a hint to `mash-migrate-0.5.5.sh`.
+- **A missing creds file, a suspended or deleted recipient and a deleted endpoint are named plainly** (`has no credentials here`, `is suspended or was deleted`, `this endpoint was deleted`), each with a hint, instead of the operating system's or the server's words.
+- **`mash inbox` counts what it lists:** mail from a since-deleted sender is no longer counted.
 
 ### Removed
 
@@ -52,6 +54,18 @@ What you do depends on the version you used before; the order matters for 0.5.5 
 - **`mash admin`** (use `mashctl`) and **`mash plugin export`** (use the plugin marketplace).
 - **`MASH_OWNER`, `MASH_GROUP`, `MASH_NAME`, `MASH_URL`, `MASH_SERVERS`, `MASH_TLS_CA`, `MASH_INSECURE_PLAINTEXT`** and the config keys `url`, `tls_ca` and `insecure_plaintext`.
 - **The flat and slashed address forms** (`acme_demo_bob`, `acme/demo/bob`) and the old `mash who` filters and output modes.
+
+### Not in 0.5.6
+
+Wake on a reply, a deadline or a peer ([#871](https://github.com/bogworks/mash/issues/871)); a trust record and `mash trust` ([#862](https://github.com/bogworks/mash/issues/862)); `mash plugin install` ([#863](https://github.com/bogworks/mash/issues/863)); stand-alone NATS setup guides ([#1037](https://github.com/bogworks/mash/issues/1037)); Synadia Cloud without the operator key in `mashctl` ([#876](https://github.com/bogworks/mash/issues/876)); a structured MCP list from `mash who` ([#877](https://github.com/bogworks/mash/issues/877)).
+
+### Planned for 0.6.0
+
+Breaking changes to plan for, with no dates: `mash prompt` and `reply` move to `mash sap` ([#881](https://github.com/bogworks/mash/issues/881)); the endpoint directory and NATS service subjects become owner-scoped ([#1035](https://github.com/bogworks/mash/issues/1035), [#1012](https://github.com/bogworks/mash/issues/1012)); a mesh with many owners, policy on who may send to whom, asking to join, and a different way to wake a session.
+
+### Known issues
+
+Listed with their issues in [the 0.5.6 release notes](https://github.com/bogworks/mash/blob/v0.5.6/docs/release-notes/0.5.6-draft.md#known-issues); the label is [`known-0.5.6`](https://github.com/bogworks/mash/issues?q=is%3Aissue+label%3Aknown-0.5.6).
 
 [Full changes](https://github.com/bogworks/mash/compare/v0.5.5...v0.5.6)
 
