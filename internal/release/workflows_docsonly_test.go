@@ -17,6 +17,9 @@ import (
 // when changes answered code=false, run when changes failed (an empty output), and never run after a cancellation.
 const heavyIf = "${{ !cancelled() && needs.changes.outputs.code != 'false' }}"
 
+// advisoryIf is the condition of the advisory test jobs (test-eph, test-macos): heavyIf, and only on a Mergify queue draft.
+const advisoryIf = "${{ !cancelled() && needs.changes.outputs.code != 'false' && startsWith(github.head_ref, 'mergify/') }}"
+
 // Every workflow may filter by branch or tag, but none by path: the checks pr-check, adr-lint, label-reset, test (linux),
 // reproducible, lint, govulncheck and codeql all come from these files, and a check a path filter keeps from running never
 // reports.
@@ -65,9 +68,15 @@ func TestDocsOnly_heavyJobsSkipOnTheChangesOutput(t *testing.T) {
 			}
 		}
 	}
-	for _, jn := range []string{"test", "test-eph", "test-macos", "reproducible"} {
+	for _, jn := range []string{"test", "reproducible"} {
 		if got := load(t, "ci.yml").Jobs[jn].If; got != heavyIf {
 			t.Errorf("ci.yml/%s if = %q, want %q", jn, got, heavyIf)
+		}
+	}
+	// The two advisory jobs run only on a queue draft (Randy 2026-11-21): the heavy condition and the draft's branch.
+	for _, jn := range []string{"test-eph", "test-macos"} {
+		if got := load(t, "ci.yml").Jobs[jn].If; got != advisoryIf {
+			t.Errorf("ci.yml/%s if = %q, want %q", jn, got, advisoryIf)
 		}
 	}
 	// The cheap and required jobs never mention the classifier's verdict: adr-numbers runs on every event, adr-lint and
