@@ -246,6 +246,10 @@ func TestRefusalLogLine(t *testing.T) {
 	go func() { _ = ep.Run(ctx, (&events{}).deliver); close(done) }()
 	t.Cleanup(func() { cancel(); <-done; ep.Close() })
 	waitRefused(t, cfg, 4)
+	// the refusal is recorded before its line is logged: wait for the fourth line rather than read the log at once
+	for deadline := time.Now().Add(10 * time.Second); strings.Count(buf.String(), "not verified (") < 4 && time.Now().Before(deadline); {
+		time.Sleep(10 * time.Millisecond)
+	}
 	got := buf.String()
 	for _, want := range []string{
 		"refused message 1 from (unknown sender): not verified (absent)\n",
