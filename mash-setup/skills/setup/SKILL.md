@@ -12,7 +12,8 @@ description: >-
 
 # Set mash up on this machine
 
-For a person, or for an agent following it. Linux or macOS. One machine, one
+For a person, or for an agent following it. Linux or macOS (see Platforms
+below for which are tested). One machine, one
 user, a server only this machine can reach. It follows the mash walkthrough:
 plan, install, make the server, make the endpoints, send mail.
 
@@ -30,6 +31,19 @@ Everything is installed as the local user: no `sudo` and no system service,
 except that the person may choose a system route for `nats-server` and `nats`
 in step 2 and say yes to its exact command. You run each step's commands
 yourself after that step's yes.
+
+Platforms. The release scripts are tested on Ubuntu, Debian and macOS. At
+each step that runs one (step 3 downloads and checks them; step 4 runs
+`install.sh` and `mash-local-nats-setup.sh`; the step 2 `nats-server` and
+`nats` blocks are a worked example and follow the same rule):
+
+- On Ubuntu, Debian or macOS: run the checked script, as written.
+- On anything else (step 1 shows it): (1) tell the person this platform is
+  outside what the scripts are tested on; (2) try the script only if they
+  agree; (3) if it fails, do the equivalent steps by hand, using the script
+  as the reference, and report exactly what differed (the command, its
+  output, and what you did instead). Do not patch the scripts for another
+  distribution.
 
 Every command block runs on its own in a fresh shell. Blocks marked
 `sh person` are only for what the person must do themselves: a typed
@@ -92,13 +106,20 @@ BIN="$HOME/.local/bin"; SRV="$HOME/mash-nats"; DL="$HOME/mash-setup-dl"
 Read-only look at the machine, in one block. It changes nothing:
 
 ```sh
-uname -sm; command -v mash mashctl nats-server nats openssl claude; ls -d "$HOME/mash-nats" "$HOME/.local/bin" "$HOME/mash-setup-dl" 2>&1; claude plugin list 2>&1 | head -20
+uname -sm; command -v mash mashctl nats-server nats openssl claude; ls -d "$HOME/mash-nats" "$HOME/.local/bin" "$HOME/mash-setup-dl" 2>&1; claude plugin list 2>&1 | head -20; (. /etc/os-release && echo "$ID $ID_LIKE") 2>/dev/null
 ```
+
+The last command prints the Linux distribution (`ubuntu`, `debian`, ...);
+on macOS it prints nothing and `uname -s` says `Darwin`. Use it for the
+Platforms rule.
 
 Then say this to the person, filled in, and wait for a yes:
 
 ```
 I will:
+  platform                          Ubuntu (tested)
+                                    [else: "<name>: not tested; I will ask
+                                     first"]
   download mash and mashctl         from the latest release (one tag, checked
                                     against its checksums), into ~/.local/bin
   nats-server and nats              you choose how: the default is a download
@@ -161,6 +182,8 @@ doing before each command, in one line. Guard rails:
 The default route (a), as a worked example. Adapt it for another machine type
 or choice; do not run it for a different choice. It needs a yes for
 downloading each program from its project's GitHub release into `BIN`.
+On a platform outside Ubuntu, Debian and macOS, follow the Platforms rule
+first.
 
 `BIN` may not exist yet. Debian's default umask is 002, so a folder made with
 `mkdir -p` is writable by its group, and `install.sh` refuses to install
@@ -234,7 +257,8 @@ Verify: `nats-server --version` is 2.10.7 or newer, and
 Needs a yes: downloading two scripts from the mash release and checking them.
 You never pipe a download into a shell. You download each file and check it
 against the release's checksums here; step 4 shows each script to the person
-and runs it after a yes.
+and runs it after a yes. On a platform outside Ubuntu, Debian and macOS,
+follow the Platforms rule first.
 
 Use the person's download folder for `DL` (the first assignment below).
 Resolve the release tag once, and use it for the downloads and for the
@@ -272,7 +296,8 @@ do not run it.
 ## 4. Install mash and mashctl, then make the server
 
 Each script has one section below: show it, ask, run it. If a later release
-changes how a script is run, change only its section.
+changes how a script is run, change only its section. On a platform outside
+Ubuntu, Debian and macOS, follow the Platforms rule first.
 
 ### Run install.sh
 
