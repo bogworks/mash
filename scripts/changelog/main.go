@@ -5,6 +5,8 @@
 //	changelog assemble --version X.Y.Z --date YYYY-MM-DD [--root r] [--dir changelog.d] [--changelog CHANGELOG.md] [--dry-run]
 //	changelog section --version X.Y.Z [--root r] [--changelog CHANGELOG.md]
 //	changelog check-notes FILE [--version X.Y.Z [--prev X.Y.Z]]
+//	changelog release-page --version X.Y.Z [--root r] [--changelog CHANGELOG.md] [--notes-dir docs/release-notes]
+//	changelog check-entry --version X.Y.Z [--root r] [--changelog CHANGELOG.md]
 //
 // check lints the fragments and prints one "file: message" line per violation. A fragment is named <slug>.<kind>.md,
 // the slug being lower-case letters, digits, hyphens and underscores and the kind one of added, changed, deprecated,
@@ -28,6 +30,15 @@
 // section prints the body of the "## [X.Y.Z] - date" section (everything under that heading up to the next "## "
 // heading, without the heading line) and exits 1 with a message when there is no such section. The release workflow's
 // draft job writes it as the release notes.
+//
+// release-page prints the text of the release page for X.Y.Z. Below releasenotes.Rule23From (0.5.7) that is the change-log
+// section, as section prints it (ADR 0105); from it, the contents of docs/release-notes/X.Y.Z.md (release standard rule
+// 23: the release page is built from the release notes file, not from the change log). It exits 1 with a message when
+// the section or the file is missing. The release workflow's draft job writes it as the release notes.
+//
+// check-entry judges the change-log section of X.Y.Z against the rubric of rule 23 (releasenotes.ChangelogEntry) and
+// prints one line per failure; exit 1 when there is one. It is the rule for 0.5.7 and later; the workflow runs it only
+// for those versions.
 //
 // check-notes judges a notes file with internal/releasenotes, the same test the release gate applies: it opens with a
 // Summary and an Upgrading section, holds no REPLACE THIS marker and no line ending in a parenthesized commit hash; with
@@ -91,12 +102,16 @@ func run(args []string, e env) int {
 		return runSection(args[1:], e)
 	case "check-notes":
 		return runCheckNotes(args[1:], e)
+	case "release-page":
+		return runReleasePage(args[1:], e)
+	case "check-entry":
+		return runCheckEntry(args[1:], e)
 	}
 	return usage(e, "unknown mode "+args[0])
 }
 
 func usage(e env, msg string) int {
-	fmt.Fprintf(e.stderr, "changelog: %s\nusage: changelog check [--root r] [--dir changelog.d]\n       changelog assemble --version X.Y.Z --date YYYY-MM-DD [--root r] [--dir changelog.d] [--changelog CHANGELOG.md] [--dry-run]\n       changelog section --version X.Y.Z [--root r] [--changelog CHANGELOG.md]\n       changelog check-notes FILE [--version X.Y.Z [--prev X.Y.Z]]\n", msg)
+	fmt.Fprintf(e.stderr, "changelog: %s\nusage: changelog check [--root r] [--dir changelog.d]\n       changelog assemble --version X.Y.Z --date YYYY-MM-DD [--root r] [--dir changelog.d] [--changelog CHANGELOG.md] [--dry-run]\n       changelog section --version X.Y.Z [--root r] [--changelog CHANGELOG.md]\n       changelog check-notes FILE [--version X.Y.Z [--prev X.Y.Z]]\n       changelog release-page --version X.Y.Z [--root r] [--changelog CHANGELOG.md] [--notes-dir docs/release-notes]\n       changelog check-entry --version X.Y.Z [--root r] [--changelog CHANGELOG.md]\n", msg)
 	return 2
 }
 
@@ -487,6 +502,72 @@ func runCheckNotes(args []string, e env) int {
 		}
 	}
 	if bad > 0 {
+		return 1
+	}
+	return 0
+}
+
+const defaultNotesDir = "docs/release-notes"
+
+func runReleasePage(args []string, e env) int {
+	fs := flag.NewFlagSet("release-page", flag.ContinueOnError)
+	fs.SetOutput(e.stderr)
+	version := fs.String("version", "", "the release version, X.Y.Z")
+	root := fs.String("root", ".", "the tree to read")
+	cl := fs.String("changelog", defaultChangelog, "the change log (under --root unless absolute)")
+	dir := fs.String("notes-dir", defaultNotesDir, "the release notes directory (under --root unless absolute)")
+	if err := fs.Parse(args); err != nil || fs.NArg() != 0 || *version == "" {
+		return usage(e, "release-page takes --version X.Y.Z [--root r] [--changelog CHANGELOG.md] [--notes-dir docs/release-notes]")
+	}
+	if !versionRE.MatchString(*version) {
+		fmt.Fprintf(e.stderr, "changelog: version %q must be X.Y.Z\n", *version)
+		return 1
+	}
+	if !releasenotes.AtLeast(*version, releasenotes.Rule23From) {
+		return runSection([]string{"--version", *version, "--root", *root, "--changelog", *cl}, e)
+	}
+	path := filepath.Join(resolve(*root, *dir), *version+".md")
+	b, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		fmt.Fprintf(e.stderr, "changelog: %s does not exist: the release notes for %s were not written (release standard rule 23)\n", path, *version)
+		return 1
+	}
+	if err != nil {
+		fmt.Fprintln(e.stderr, "changelog:", err)
+		return 2
+	}
+	fmt.Fprint(e.stdout, string(b))
+	return 0
+}
+
+func runCheckEntry(args []string, e env) int {
+	fs := flag.NewFlagSet("check-entry", flag.ContinueOnError)
+	fs.SetOutput(e.stderr)
+	version := fs.String("version", "", "the release version, X.Y.Z")
+	root := fs.String("root", ".", "the tree to read")
+	cl := fs.String("changelog", defaultChangelog, "the change log (under --root unless absolute)")
+	if err := fs.Parse(args); err != nil || fs.NArg() != 0 || *version == "" {
+		return usage(e, "check-entry takes --version X.Y.Z [--root r] [--changelog CHANGELOG.md]")
+	}
+	if !versionRE.MatchString(*version) {
+		fmt.Fprintf(e.stderr, "changelog: version %q must be X.Y.Z\n", *version)
+		return 1
+	}
+	path := resolve(*root, *cl)
+	b, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintln(e.stderr, "changelog:", err)
+		return 2
+	}
+	body, ok := releasenotes.SectionBody(string(b), *version)
+	if !ok {
+		fmt.Fprintf(e.stderr, "changelog: %s has no section \"## [%s] - date\": release preparation was not done for this version\n", path, *version)
+		return 1
+	}
+	if err := releasenotes.ChangelogEntry(body, *version); err != nil {
+		for _, ln := range strings.Split(err.Error(), "\n") {
+			fmt.Fprintf(e.stdout, "%s [%s]: %s\n", path, *version, ln)
+		}
 		return 1
 	}
 	return 0

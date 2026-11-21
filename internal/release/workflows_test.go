@@ -730,18 +730,30 @@ func TestRelease_candidateIsDerivedFromTheTagNotGITHUB_SHA(t *testing.T) {
 }
 
 // The notes step, run in a real repository with the tagged checkout's change log, writes the change log section of the
-// released version as the notes with the compare link last (ADR 0105), and refuses before any draft exists when the
-// section is missing, does not open with prose, or still holds the placeholder.
+// released version (below 0.5.7, ADR 0105) or its release notes file (0.5.7 and later, rule 23) as the notes with the
+// compare link last, and refuses before any draft exists when the section or file is missing, does not open with prose,
+// still holds the placeholder, or (0.5.7 and later) the change log entry fails the rubric.
 func TestRelease_notesAreTheChangeLogSectionWithTheCompareLink(t *testing.T) {
 	w := load(t, "release.yml")
 	var script string
 	for _, st := range w.Jobs["draft"].Steps {
-		if strings.Contains(st.Run, "scripts/changelog section") {
+		if strings.Contains(st.Run, "scripts/changelog release-page") {
 			script = st.Run
+		}
+		if strings.Contains(st.Run, "scripts/changelog section") {
+			t.Errorf("the notes step builds the release page from the change log section, not the release notes file (rule 23):\n%s", st.Run)
 		}
 	}
 	if script == "" {
 		t.Fatal("no notes step")
+	}
+	if !strings.Contains(script, "scripts/changelog check-entry") {
+		t.Errorf("the notes step does not hold the change log entry to the rubric (rule 23):\n%s", script)
+	}
+	for _, st := range w.Jobs["draft"].Steps {
+		if strings.Contains(st.Run, "gh release create") && !strings.Contains(st.Run, "--notes-file dist/RELEASE-NOTES.md") {
+			t.Errorf("the draft is not created from dist/RELEASE-NOTES.md:\n%s", st.Run)
+		}
 	}
 	for _, bad := range []string{"git log", "--format='- %s"} {
 		if strings.Contains(script, bad) {
@@ -857,7 +869,7 @@ echo '[{"tagName":"v0.1.0","isDraft":false,"isPrerelease":false}]'
 		}
 	}
 	notes := func() string {
-		b, _ := os.ReadFile(filepath.Join(dir, "dist", "CHANGELOG.md"))
+		b, _ := os.ReadFile(filepath.Join(dir, "dist", "RELEASE-NOTES.md"))
 		return string(b)
 	}
 	// No section for the version: the step fails before there is a draft.
@@ -887,6 +899,43 @@ echo '[{"tagName":"v0.1.0","isDraft":false,"isPrerelease":false}]'
 	}
 	if got, _ := os.ReadFile(filepath.Join(dir, "dist", "SHA256SUMS")); string(got) != listing {
 		t.Fatalf("the draft changed SHA256SUMS:\n%s", got)
+	}
+
+	// Rule 23: for 0.5.7 the page is docs/release-notes/0.5.7.md, not the change log section, and the entry is held to the
+	// rubric before the draft exists.
+	g("tag", "v0.5.7", "HEAD")
+	run23 := func() ([]byte, error) {
+		cmd := exec.Command("bash", "-e", "-c", script)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "PATH="+ghBin+":"+path, "RUNNER_TEMP="+t.TempDir(), "GITHUB_REF_NAME=v0.5.7", "GITHUB_REPOSITORY=bogworks/mash")
+		return cmd.CombinedOutput()
+	}
+	entry := "### Summary\n\n" + words + "\n\n### Upgrading\n\nNothing to do.\n\n### Added\n\n- Two. [#2](https://github.com/bogworks/mash/pull/2)\n\n" +
+		"Known issues: 1, [the list](https://github.com/bogworks/mash/issues/9)\n" +
+		"Links: [release notes](https://github.com/bogworks/mash/blob/v0.5.7/docs/release-notes/0.5.7.md), [compare](https://github.com/bogworks/mash/compare/v0.1.0...v0.5.7), [verify](https://github.com/bogworks/mash#verify-what-you-download)\n"
+	pageText := "### Summary\n\n" + words + "\n\n### Why\n\nBecause.\n\n### Upgrading\n\nNothing to do.\n"
+	if err := os.MkdirAll(filepath.Join(dir, "docs", "release-notes"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	notesPath := filepath.Join(dir, "docs", "release-notes", "0.5.7.md")
+	// A missing notes file stops the step even though the change log section is good.
+	setChangelog("## [0.5.7] - 2026-11-22\n\n" + entry + "\n")
+	if out, err := run23(); err == nil || !strings.Contains(string(out), "does not exist") {
+		t.Fatalf("a missing notes file passed: %v\n%s", err, out)
+	}
+	if err := os.WriteFile(notesPath, []byte(pageText), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := run23(); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if got := notes(); got != pageText+"\nFull changes: [v0.1.0...v0.5.7](https://github.com/bogworks/mash/compare/v0.1.0...v0.5.7)\n" || strings.Contains(got, "Known issues:") {
+		t.Fatalf("the page is not the notes file with the compare link:\n%s", got)
+	}
+	// An entry that fails the rubric (here, no Known issues line) stops the step.
+	setChangelog("## [0.5.7] - 2026-11-22\n\n" + strings.Replace(entry, "Known issues:", "Issues:", 1) + "\n")
+	if out, err := run23(); err == nil || !strings.Contains(string(out), "rubric 10") {
+		t.Fatalf("an entry that fails the rubric passed: %v\n%s", err, out)
 	}
 }
 
@@ -1020,7 +1069,7 @@ func TestRelease_draftScriptCreatesOnlyADraft(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, "dist"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for _, n := range []string{"mash-linux-amd64", "SHA256SUMS", "CHANGELOG.md"} {
+	for _, n := range []string{"mash-linux-amd64", "SHA256SUMS", "RELEASE-NOTES.md"} {
 		if err := os.WriteFile(filepath.Join(dir, "dist", n), []byte("x"), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -2103,8 +2152,8 @@ func TestRelease_dryRunVerifiesAndNeverReleases(t *testing.T) {
 	}
 }
 
-// The dry run also proves the release-notes path (ADR 0105): dry-run-notes runs the draft job's notes commands on the latest
-// released change log section, on a dispatch on main only, and can neither create a release nor affect one.
+// The dry run also proves the release-notes path (ADR 0105, rule 23): dry-run-notes runs the draft job's notes commands on the latest
+// released version (its release notes file from 0.5.7, its change log section before), on a dispatch on main only, and can neither create a release nor affect one.
 func TestRelease_dryRunNotesProvesTheNotesPathAndReleasesNothing(t *testing.T) {
 	w := load(t, "release.yml")
 	j, ok := w.Jobs["dry-run-notes"]
@@ -2143,7 +2192,7 @@ func TestRelease_dryRunNotesProvesTheNotesPathAndReleasesNothing(t *testing.T) {
 			t.Errorf("dry-run-notes runs %q:\n%s", bad, run)
 		}
 	}
-	for _, must := range []string{"set -euo pipefail", "scripts/changelog section", "scripts/changelog check-notes", "Full changes:", "compare/"} {
+	for _, must := range []string{"set -euo pipefail", "scripts/changelog release-page", "scripts/changelog check-entry", "scripts/changelog check-notes", "Full changes:", "compare/"} {
 		if !strings.Contains(run, must) {
 			t.Errorf("dry-run-notes lacks %q:\n%s", must, run)
 		}
@@ -2156,7 +2205,7 @@ func TestRelease_dryRunNotesProvesTheNotesPathAndReleasesNothing(t *testing.T) {
 	for _, st := range w.Jobs["draft"].Steps {
 		draft += st.Run + "\n"
 	}
-	for _, c := range []string{"scripts/changelog section", "scripts/changelog check-notes"} {
+	for _, c := range []string{"scripts/changelog release-page", "scripts/changelog check-entry", "scripts/changelog check-notes"} {
 		if !strings.Contains(draft, c) || !strings.Contains(run, c) {
 			t.Errorf("draft and dry-run-notes must both run %q", c)
 		}
@@ -2164,7 +2213,7 @@ func TestRelease_dryRunNotesProvesTheNotesPathAndReleasesNothing(t *testing.T) {
 
 	var script string
 	for _, st := range j.Steps {
-		if strings.Contains(st.Run, "scripts/changelog section") {
+		if strings.Contains(st.Run, "scripts/changelog release-page") {
 			script = st.Run
 		}
 	}
@@ -2228,6 +2277,28 @@ func TestRelease_dryRunNotesProvesTheNotesPathAndReleasesNothing(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(filepath.Join(runTemp, "notes.md")); strings.Contains(string(b), "Full changes:") {
 		t.Fatalf("a compare link without a previous tag:\n%s", b)
+	}
+	// From 0.5.7 the dry run builds the page from the release notes file and holds the entry to the rubric.
+	entry := body + "\n### Added\n\n- Two. [#2](https://github.com/bogworks/mash/pull/2)\n\n" +
+		"Known issues: 1, [the list](https://github.com/bogworks/mash/issues/9)\n" +
+		"Links: [notes](https://github.com/bogworks/mash/blob/v0.5.7/docs/release-notes/0.5.7.md), [compare](https://github.com/bogworks/mash/compare/v0.5.6...v0.5.7), [verify](https://github.com/bogworks/mash#verify-what-you-download)\n"
+	setChangelog("# Changelog\n\n## [Unreleased]\n\n## [0.5.7] - 2026-11-22\n\n" + entry)
+	if err := os.MkdirAll(filepath.Join(dir, "docs", "release-notes"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	page := body + "\n### Why\n\nPage only text.\n"
+	if err := os.WriteFile(filepath.Join(dir, "docs", "release-notes", "0.5.7.md"), []byte(page), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := runScript(); err != nil {
+		t.Fatalf("0.5.7: %v\n%s", err, out)
+	}
+	if b, _ := os.ReadFile(filepath.Join(runTemp, "notes.md")); !strings.HasPrefix(string(b), page) || strings.Contains(string(b), "Known issues:") {
+		t.Fatalf("the dry run's page is not the notes file:\n%s", b)
+	}
+	setChangelog("# Changelog\n\n## [Unreleased]\n\n## [0.5.7] - 2026-11-22\n\n" + body)
+	if out, err := runScript(); err == nil || !strings.Contains(string(out), "rubric") {
+		t.Fatalf("0.5.7 with an entry that fails the rubric passed: %v\n%s", err, out)
 	}
 }
 

@@ -92,6 +92,15 @@ func headingIs(l line, want string) bool {
 // "## [X.Y.Z] - date" heading, without that heading).
 func Opening(text string) error {
 	ls := classify(text)
+	first, err := openingSummary(ls)
+	if err != nil {
+		return err
+	}
+	return openingUpgrading(ls, first)
+}
+
+// openingSummary judges the Summary and returns the index of its heading.
+func openingSummary(ls []line) (int, error) {
 	first := -1
 	for i, l := range ls {
 		if l.kind == heading {
@@ -99,18 +108,23 @@ func Opening(text string) error {
 			break
 		}
 		if l.kind == list {
-			return fmt.Errorf("the notes start with a list before any heading: they must open with %q and prose", SummaryHeading)
+			return 0, fmt.Errorf("the notes start with a list before any heading: they must open with %q and prose", SummaryHeading)
 		}
 	}
 	if first < 0 {
-		return fmt.Errorf("the notes have no %q heading", SummaryHeading)
+		return 0, fmt.Errorf("the notes have no %q heading", SummaryHeading)
 	}
 	if !headingIs(ls[first], SummaryHeading) {
-		return fmt.Errorf("the first heading is %q, not %q: the notes must open with a summary", strings.TrimSpace(ls[first].text), SummaryHeading)
+		return 0, fmt.Errorf("the first heading is %q, not %q: the notes must open with a summary", strings.TrimSpace(ls[first].text), SummaryHeading)
 	}
 	if n := len(strings.Fields(prose(ls, first))); n < MinSummaryWords {
-		return fmt.Errorf("the Summary has %d words of paragraph text before its first list or heading, at least %d are required: say what the release is for, what changed for the user and how to verify it", n, MinSummaryWords)
+		return 0, fmt.Errorf("the Summary has %d words of paragraph text before its first list or heading, at least %d are required: say what the release is for, what changed for the user and how to verify it", n, MinSummaryWords)
 	}
+	return first, nil
+}
+
+// openingUpgrading judges the Upgrading section after the Summary heading at index first.
+func openingUpgrading(ls []line, first int) error {
 	up := -1
 	for i := first + 1; i < len(ls); i++ {
 		if headingIs(ls[i], UpgradingHeading) {
