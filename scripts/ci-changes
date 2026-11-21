@@ -31,13 +31,12 @@ is_docs() {
 	lower="$(printf '%s' "$p" | tr '[:upper:]' '[:lower:]')"
 	case "$p" in
 	.github/* | .mergify.yml | .claude-plugin/* | plugin/* | scripts/* | cmd/* | internal/* | ci/*) return 1 ;;
-	mash-setup/*) return 1 ;;
 	go.mod | go.sum | */go.mod | */go.sum | *.go) return 1 ;;
 	testdata/* | */testdata/* | *conformance*) return 1 ;;
 	CHANGELOG.md | changelog.d/*) return 1 ;;
 	docs/branch-protection.md | docs/review/* | docs/reference/* | spec/* | docs/allowed_signers | docs/skipped-releases.txt | docs/release-cutover) return 1 ;;
 	esac
-	# Agent instructions, wherever they sit and in any letter case (x-lead, ADR 0156): the named files, any *.tmpl, any path with
+	# Agent instructions, wherever they sit and in any letter case (x-lead, planner #2845, ADR 0157): the named files, any *.tmpl, any path with
 	# a directory component named like the places agents read instructions, and mash-setup/ at any depth. README.md, docs/install.md,
 	# SECURITY.md and CONTRIBUTING.md stay docs.
 	local base="${lower##*/}" dirs c
@@ -56,15 +55,6 @@ is_docs() {
 	fi
 	case "$lower" in
 	docs/*.png | docs/*.jpg | docs/*.jpeg | docs/*.gif | docs/*.ico | docs/*.pdf | docs/*.woff | docs/*.woff2) return 1 ;;
-	esac
-	# Agent instructions and what an agent or a tool executes are code in effect (mash-lead, planner #2845, ADR 0157), at any depth and
-	# whatever the case: instruction files, every SKILL.md, templates, and anything under a skills, commands, agents, hooks, prompts,
-	# briefings, plugins or .claude-plugin directory. README.md, docs/install.md, SECURITY.md and CONTRIBUTING.md stay documentation.
-	case "$lower" in
-	agents.md | */agents.md | claude.md | */claude.md | gemini.md | */gemini.md | skill.md | */skill.md) return 1 ;;
-	.cursorrules | */.cursorrules | .windsurfrules | */.windsurfrules | *.tmpl) return 1 ;;
-	skills/* | */skills/* | commands/* | */commands/* | agents/* | */agents/* | hooks/* | */hooks/*) return 1 ;;
-	prompts/* | */prompts/* | briefings/* | */briefings/* | plugins/* | */plugins/* | .claude-plugin/* | */.claude-plugin/*) return 1 ;;
 	esac
 	case "$p" in
 	docs/* | *.md) return 0 ;;
