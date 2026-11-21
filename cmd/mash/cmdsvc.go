@@ -124,9 +124,19 @@ func checkSend(o cmds.SendOptions) *cliframe.Error {
 func openFailure(cfg config.Config, err error) error {
 	switch {
 	case endpoint.IsAuthFailure(err):
-		return &cmds.SignInError{Addr: cfg.DisplayName()}
+		return framed(cfg.DisplayName(), err)
 	case transient(err) || strings.Contains(err.Error(), "no servers available"):
 		return cmdcore.ServerNotAnswering(config.RedactURL(cfg.URL))
+	}
+	return err
+}
+
+// framed words err the way the rules do when it is a refused sign-in: error ADDRESS cannot sign in, hint mash doctor.
+// It is the one helper every command and tool that talks to the server uses (open, read, inbox, who, send); any other
+// error is returned as it is. addr is the endpoint's own address.
+func framed(addr string, err error) error {
+	if err != nil && endpoint.IsAuthFailure(err) {
+		return cmdcore.NotSignedIn(addr)
 	}
 	return err
 }

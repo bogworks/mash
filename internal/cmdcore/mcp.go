@@ -311,6 +311,10 @@ func (e *toolErr) Structured() any {
 	return m
 }
 
+// ToolError renders err as an MCP tool's error does: "error: MSG" plus "\nhint: HINT" for a framed failure, for the tools
+// that are not commands of the table.
+func ToolError(err error) error { return toolError(err) }
+
 // toolError renders err the way the CLI reports it, as one error with a structured form.
 func toolError(err error) error {
 	msg, hint := err.Error(), ""
