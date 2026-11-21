@@ -237,7 +237,10 @@ What it changes:
 * Your old file stays beside the new one as `config.json.0.5.5`.
 * It prints one line saying what it changed.
 * It touches nothing on the server. Nothing there needs to change, and
-  0.5.5 and 0.5.6 can mail each other on one server.
+  0.5.5 and 0.5.6 can mail each other on one server, but only when each
+  keeps its own configuration folder: 0.5.5 tools cannot use a folder you
+  have migrated (they stop with `no NATS url`). To go back to 0.5.5, put
+  `config.json.0.5.5` back as `config.json`.
 
 If you skip it, nothing is lost: when 0.5.6 finds the old settings it
 changes nothing and stops with a message that names this script. It is a
