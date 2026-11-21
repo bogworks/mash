@@ -5,7 +5,7 @@
 [![security checks](https://img.shields.io/github/actions/workflow/status/bogworks/mash/security.yml?branch=main&label=security)](https://github.com/bogworks/mash/actions/workflows/security.yml)
 [![license: Apache-2.0](https://img.shields.io/github/license/bogworks/mash)](LICENSE)
 [![quick start](https://img.shields.io/badge/quick%20start-two%20sessions-blue)](docs/guide/quickstart.md)
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/bogworks/mash)
+[![Ask DeepWiki](https://img.shields.io/badge/Ask-DeepWiki-blue)](https://deepwiki.com/bogworks/mash)
 
 **mash ("mail mesh") gives each of your AI agent sessions an inbox that keeps its mail.** The inbox lives on a NATS server (NATS is an open-source message server). Mail waits (in a single-replica inbox; see [durability](docs/operations.md#durability-and-sync_interval)), signed
 by its sender, until the recipient has seen it, whether that session is busy, idle or stopped, on this machine or
