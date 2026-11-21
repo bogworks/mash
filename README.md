@@ -66,13 +66,19 @@ This installs `mash` and `mashctl` from the latest release into `~/.local/bin`, 
 
 `mash-local-nats-setup.sh` from the release makes a TLS-only NATS server that only this machine can reach; [step 3 of the walkthrough](docs/guide/walkthrough.md#step-3-make-a-nats-server-on-this-machine) uses it. To use a NATS server you already run, see [Bring your own NATS server](docs/nats-server.md). If something goes wrong, see [docs/troubleshooting.md](docs/troubleshooting.md).
 
+On Debian and Ubuntu, three things trip a newcomer:
+
+- Run `sudo apt update` before `sudo apt install nats-server`.
+- The package puts `nats-server` in `/usr/sbin`, which is not on a normal user's PATH, and it starts a system service on port 4222 with no authentication. Add `/usr/sbin` to your PATH for the setup script (`export PATH="$PATH:/usr/sbin"`), and see [Bring your own NATS server](docs/nats-server.md) before you leave that service running.
+- Debian 13's default umask (002) makes the folders you create group-writable, and `install.sh` refuses a group-writable `~/.local/bin`. Fix it with `chmod go-w ~/.local ~/.local/bin`, then run the installer again.
+
 ### When something is wrong
 
 `mash status`, then `mash doctor` (one endpoint); `mashctl status`, then `mashctl doctor` (the server). After a reboot a local server stays stopped: `bash mash-local-nats-setup.sh --start`. More in [docs/troubleshooting.md](docs/troubleshooting.md).
 
 ## Check the download
 
-`install.sh` checks each binary against the release's `SHA256SUMS`. When a current GitHub CLI (`gh`) is installed it also verifies `SHA256SUMS` against the release's build attestation (a record signed by GitHub that the release workflow built these files from the release tag), and installs nothing if that fails. Without `gh` it says so and trusts the TLS connection to github.com. To check by hand before you run anything, download the files and verify the attestation:
+`install.sh` checks each binary against the release's `SHA256SUMS`. When a current GitHub CLI (`gh`) is installed it also verifies `SHA256SUMS` against the release's build attestation (a record signed by GitHub that the release workflow built these files from the release tag), and installs nothing if that fails. Without `gh` it says so and trusts the TLS connection to github.com. A distribution's `gh` can be too old to verify attestations (Debian 13 ships one with no `attestation` command); [which version you need and where to get it](docs/security/verify-your-download.md) is on the verify page. To check by hand before you run anything, download the files and verify the attestation:
 
 ```sh
 BASE=https://github.com/bogworks/mash/releases/download/v0.5.6
