@@ -11,7 +11,7 @@ body:
     attributes:
       label: mash version
       description: The output of `mash version`.
-      placeholder: "mash v0.3.0 (abc1234)"
+      placeholder: "mash v0.5.6 (abc1234)"
     validations:
       required: true
   - type: input

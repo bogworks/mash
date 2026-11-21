@@ -3,23 +3,23 @@
 These are **repository settings, applied by the maintainer in GitHub**. They are not code, nothing in this repository
 enforces or applies them, and changing this file changes nothing until the settings are made.
 
-## What is set today (D195 and D204, applied 2026-11-11 and 2026-11-12)
+## What is set today (applied 2026-11-11 and 2026-11-12)
 
-The facts in this section are the maintainer's decisions as reported by the lead; they were not verified live while
+The facts in this section are the maintainer's decisions; they were not verified live while
 writing this file, except where a date and a test are named.
 
-**Ruleset 26308864 (`main-protection`) and the `update` rule (D204).** The ruleset has the `update` rule (restrict
+**Ruleset 26308864 (`main-protection`) and the `update` rule.** The ruleset has the `update` rule (restrict
 updates to `main`), so nothing can move `main` except an actor on the bypass list. Its **only** bypass actor is the
 Mergify app (integration 10562, mode `always`). There is **no user or role bypass**, because the contributors push as the
 org owner: a user bypass would let every contributor push to `main`. Mergify's queue merges by fast-forward and pushes the
-tested queue commit to `main` itself (`.mergify.yml`), which is why it is the one actor that bypasses. D204 was applied
+tested queue commit to `main` itself (`.mergify.yml`), which is why it is the one actor that bypasses. The `update` rule was applied
 on 2026-11-12 at about 00:30Z, and the HTTP 405 refusal of a direct merge was verified then, on a test pull request
 (mash #423): a direct `gh pr merge` is refused, so the queue is the only way into `main`.
 
 **Break-glass.** The org owner edits the ruleset (for example to add a temporary bypass) and restores it afterwards
 from the saved ruleset JSON. The ruleset's history and the org audit log record both changes.
 
-**Pinned checks (D195).** `pr-check` and `label-reset` were pinned in the ruleset with GitHub Actions as the expected
+**Pinned checks.** `pr-check` and `label-reset` were pinned in the ruleset with GitHub Actions as the expected
 source (`integration_id`) on 2026-11-11 at about 10:06Z, and `adr-lint` the same way at about 11:01Z, so a check of
 that name posted by anything else does not satisfy the ruleset. Also required: `Mergify Merge Protections`. A Mergify
 queue draft is skipped by a job-level `if` in `adr-lint.yml` that requires the head ref prefix
@@ -29,7 +29,7 @@ a setting.
 
 ## Snapshot verified 2026-11-10 (history)
 
-This is the state as read on 2026-11-10, before D195 and D204; it is kept as history and no longer describes the
+This is the state as read on 2026-11-10, before the `update` rule and the pinned checks; it is kept as history and no longer describes the
 ruleset. Read-only, with `gh api repos/{owner}/{repo}/rulesets/26308864`: the only branch rule on the default branch was
 the ruleset `main-protection` (enforcement active, no bypass actors) with exactly three rules: deletion blocked,
 non-fast-forward blocked, and one required status check, the context `Mergify Merge Protections`. There was **no
@@ -39,7 +39,7 @@ the ruleset was the fact.
 
 **The label gate then guarded the queue only.** The ruleset had no pull-request or review rule, so a direct
 `gh pr merge` (or the merge button) by an identity with write access skipped Mergify entirely, and with it every queue
-condition; D204's `update` rule above closed that. Also
+condition; the `update` rule above closed that. Also
 verified read-only (2026-11-10), and describing the state **before** the `merge_protections` rule below: the check
 `Mergify Merge Protections` did **not** go red without the label or while a protection was blocking. On PR #349
 (labelled `hold`) its conclusion was `success` while its summary said "1 of 2 protections blocking"; on pull requests
@@ -54,7 +54,7 @@ not enough, since any same-repository writer can name a branch that way. **It ho
 purpose.** Mergify applies a rule's conditions to the queue draft's commit as merge conditions too, and `adr-lint` is
 skipped on a draft, so a rule that waited for `adr-lint` (or `codex-review`) made the queue refuse every pull request
 ("failing checks: adr-lint"); this is what deadlocked the queue after #424. `codex-review` and `adr-lint` are enforced by
-the queue's `queue_conditions` at entry, and by the ruleset (`adr-lint`), and D204's `update` rule on `main` refuses any
+the queue's `queue_conditions` at entry, and by the ruleset (`adr-lint`), and the `update` rule on `main` refuses any
 merge that is not Mergify's, so no gate is lost. `internal/release/mergify_test.go` compares the rule's label conditions
 with the queue conditions and fails if the rule gains a check condition. Whether the check goes red on an unapproved
 pull request is **not verified live**. Read-only check: on a pull request without approval or label,
@@ -78,7 +78,7 @@ required for entry.
 repository-settings change for the maintainer; it is not part of any pull request.
 
 **No human approving review is required, by design.** The merge bypass is closed (only Mergify can update `main`), and
-the maintainer's model is the independent Codex review plus the lead's clearance (D204), not a human approving review
+the maintainer's model is the independent Codex review plus the maintainer's clearance, not a human approving review
 in the ruleset, so a required-reviews rule is not recommended. See
 [ADR 0078](decisions/0078-queue-entry-needs-an-approval-or-the-lead-approved-label-that-a-push-removes.md).
 
@@ -88,7 +88,7 @@ The ruleset's applied state is in "What is set today" above; the list below is t
 is a setting only if that section says so. Settings > Branches > Add branch ruleset (or classic branch protection) for
 `main`:
 
-- **No direct pushes to `main`.** Applied by D204 as the `update` rule, with the Mergify app as the only bypass actor
+- **No direct pushes to `main`.** Applied as the `update` rule, with the Mergify app as the only bypass actor
   and no user or role bypass (see above). The queue merges by fast-forward, so Mergify pushes the tested queue commit
   to `main` itself (`.mergify.yml`); without that one bypass every queued merge is rejected.
 - **Dismiss stale pull request approvals when new commits are pushed.** Without it an outside contributor can get
@@ -97,12 +97,12 @@ is a setting only if that section says so. Settings > Branches > Add branch rule
 - **Require status checks to pass**, with branches up to date:
   - `test (linux)`, `reproducible` (from `ci.yml`; the release gate in
     `scripts/release-check` requires exactly these names, so never rename them). `test (macos)` is advisory
-    (ADR 0079): do not require it until x-lead confirms the macOS runner no longer pauses running jobs,
+    (ADR 0079): do not require it until the maintainers confirm the macOS runner no longer pauses running jobs,
     then add it here, to `pr-check`'s needs and to `release.RequiredChecks`,
   - `lint` (from `lint.yml`),
   - `adr-lint` (from `adr-lint.yml`; it checks the ADRs and the `Decision:` line in the pull request body, and is also a Mergify
-    queue condition; the ruleset already requires it, pinned, per D195),
-  - `label-reset` (from `label-reset.yml`; it is also a Mergify queue condition; the ruleset already requires it, pinned, per D195),
+    queue condition; the ruleset already requires it, pinned),
+  - `label-reset` (from `label-reset.yml`; it is also a Mergify queue condition; the ruleset already requires it, pinned),
   - `govulncheck` and `codeql` (from `security.yml`; `codeql` runs on public repositories only, since code scanning is not
     available on a private one),
   - **Code scanning results** (the separate check GitHub adds once code scanning is on): the `codeql` job passing only
