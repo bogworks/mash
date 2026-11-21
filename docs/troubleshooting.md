@@ -15,7 +15,7 @@ The hook's stderr goes to `hook.log` in the state directory (`$MASH_STATE_DIR`, 
 ## Claude Code or plugin version differs from the binary
 
 - Claude Code older than 2.1.312: that is the oldest version mash has a passing live receipt on. mash does not refuse older versions, but channels, hook context or hook fields may behave differently. Update Claude Code.
-- Plugin and binary from different releases (different major or minor): the plugin (hooks and MCP command) and the `mash` binary should be the same release. Update both: `claude plugin update mash@mash`, and reinstall the binary (`go install github.com/bogworks/mash/cmd/mash@<tag>`). The plugin launcher downloads a pinned binary, so this is mostly a hand-installed binary on PATH that is out of step. `mash version` prints the binary's version.
+- Plugin and binary from different releases (different major or minor): the plugin (hooks and MCP command) and the `mash` binary should be the same release. Update both: `claude plugin update mash@mash`, and reinstall the binary with the install line in [install.md](install.md#1-the-binary), pinning the release with `MASH_VERSION=<tag>` (to build from source instead, `go install github.com/bogworks/mash/cmd/mash@<tag>`, not `@latest`). The plugin launcher downloads a pinned binary, so this is mostly a hand-installed binary on PATH that is out of step. `mash version` prints the binary's version.
 
 ## The session has no mail tools, or says it has no mash identity
 
@@ -33,11 +33,21 @@ Message: `error: ~/.config/mash holds a mash 0.5.5 configuration`, then `hint: h
 
 Cause: the folder's `config.json` still has 0.5.5's keys `url` or `tls_ca`. mash does not read them and does not guess; it changes nothing.
 
-Fix: run the script once, `curl -fsSL <hint address> | bash`. It renames the keys (`url` to `servers`, `tls_ca` to `ca`) and keeps the old file beside it as a backup. Nothing on the server needs migrating. See [Upgrading from 0.5.5](install.md#upgrading-from-055).
+Fix: run the script once. Download it from the hint address and its `SHA256SUMS`, check it, then `bash` it, as [If you ran mash 0.5.5](install.md#if-you-ran-mash-055) shows. It renames the keys (`url` to `servers`, `tls_ca` to `ca`) and keeps the old file beside it as a backup. Nothing on the server needs migrating. See [If you ran mash 0.5.5](install.md#if-you-ran-mash-055).
+
+## `gh not found` or `gh is too old` from `install.sh`
+
+Message: `gh not found: the checksums come from the same download, so this trusts github.com's TLS; see docs/install.md to verify the attestation`, or the same with `gh is too old to verify attestations`. It is not an error: the install went on. It means the installer checked each binary against `SHA256SUMS` but could not check that `SHA256SUMS` itself came from the release's own workflow, so you are trusting github.com's TLS alone.
+
+Fix, if you want the full check: install or update `gh` ([cli.github.com](https://cli.github.com/)) and run the install line again, or check by hand as [Verify what you download](install.md#verify-what-you-download) shows.
+
+## `the attestation of the release's SHA256SUMS did not verify`
+
+`install.sh` stopped with `the attestation of the release's SHA256SUMS did not verify: nothing was installed`. Nothing was installed. Do not install from that download. Run the manual check in [Verify what you download](install.md#verify-what-you-download) for the tag you meant, and if it fails there too, report it through [SECURITY.md](../SECURITY.md).
 
 ## `mash is not installed`
 
-Full text: `mash is not installed: the mash plugin found no mash program. Install it: curl -fsSL https://github.com/bogworks/mash/releases/latest/download/install.sh | bash`. The plugin's session-start hook prints it as one line on stdout, so the agent sees it and can tell you; the MCP launcher prints it on stderr after `mash launcher:` lines and exits 127, and the MCP server does not start. The line always names the project's own latest release, even when `MASH_RELEASE_BASE` is set.
+Full text: `mash is not installed: the mash plugin found no mash program. Install it: curl -fsSL https://github.com/bogworks/mash/releases/latest/download/install.sh | bash`. (That is the plugin's own text; do not pipe it. Download `install.sh` and `SHA256SUMS`, check, then `bash install.sh`, as the [install guide](install.md) shows.) The plugin's session-start hook prints it as one line on stdout, so the agent sees it and can tell you; the MCP launcher prints it on stderr after `mash launcher:` lines and exits 127, and the MCP server does not start. The line always names the project's own latest release, even when `MASH_RELEASE_BASE` is set.
 
 Causes:
 - The plugin is unpinned (a repository checkout) and there is no `mash` on the `PATH` of the process that started it. An unpinned launcher never downloads.
@@ -57,10 +67,10 @@ mash reads `$MASH_CONFIG_DIR/config.json` when that variable is set (an absolute
 
 ## The creds file is missing or refused
 
-- `the creds file is missing: <path>` (`status`), or `creds  FAIL` in `doctor`: the file for this endpoint is not at `<owner>.<group>.<instance>.creds` in the config directory (`~/.config/mash` unless `XDG_CONFIG_HOME` points at a mash config). Put it there or set `MASH_CREDS` (or `creds` in config.json).
+- `the creds file is missing: <path>` (`status`), or `creds  FAIL` in `doctor`: the file for this endpoint is not at `<owner>.<group>.<name>.creds` in the config directory (`~/.config/mash` unless `XDG_CONFIG_HOME` points at a mash config). Put it there or set `MASH_CREDS` (or `creds` in config.json).
 - `mash: credentials file <path> has mode 0644: it is readable by other users. Run: chmod 600 <path>`: run exactly that. Creds files hold the endpoint's private key and must not be readable by others.
 - A creds path that is a directory or is not readable: fix the path or ownership.
-- `mash: <path> is not operator-mode JWT credentials ...`: the file has no user JWT or no seed (a bare token, a `user:password` line, a plain nkey seed, an empty file, or a JWT without its seed). mash supports only operator-mode servers with JWT user credentials; token, user/password and plain-nkey servers are not supported. Next: create a user with `nsc` or Synadia Cloud and set `creds` (or `admin_creds`) to its `.creds` file.
+- `mash: <path> is not operator-mode JWT credentials ...`: the file has no user JWT or no seed (a bare token, a `user:password` line, a plain nkey seed, an empty file, or a JWT without its seed). mash supports only operator-mode servers with JWT user credentials; token, user/password and plain-nkey servers are not supported. Next: make the endpoint again with `mashctl endpoint create` and `mash join` ([operations.md](operations.md#adding-an-endpoint)), or ask whoever runs the server for a creds file, and set `creds` (or `admin_creds`) to it.
 - A server url that carries a password or token: mash ignores it. Remove it from the url and use a creds file.
 
 ## `mash: endpoint X is not provisioned`
@@ -71,17 +81,21 @@ The directory has no record for the address. Check `MASH_ENDPOINT` for a typo, t
 
 Two forms: `mash: the credentials in <path> do not match endpoint X (they are for another endpoint)` and `mash: the credentials in <path> (user U) do not match endpoint X (user V)`. The creds file belongs to another endpoint, or the directory record names a different NATS user key. Use the right creds file for the address, or compare the user in `mashctl endpoint show alice.dev.design` with the user in your creds. To give the endpoint a new key, run `mashctl endpoint reissue alice.dev.design` (the unread mail stays), or with `--out alice.dev.design.join --public-key design.pub` for a key made on the endpoint's machine. Do not delete the endpoint to fix this: `mashctl endpoint delete` removes the inbox stream, so every unread message in it is lost, and the address is never reused.
 
+## After `/login` the old serve is still listed
+
+A new `mash serve` of the same session takes the lease from the earlier one at once, so mail is on in the new one. The earlier serve says it was superseded and exits when its client closes it. Nothing to fix.
+
 ## The session says the address is in use or waiting
 
 The session's tools say `mash is waiting for endpoint X (held by ...); mail is off until it is free`.
 
 Cause: another live session holds the address, or one that died within the last 90 seconds does. The session retries every 10 seconds, tells Claude when mail is on, and needs no restart.
 
-Fix: end the other session, or start this one with a different `MASH_ENDPOINT`. Addresses are unique per NATS account, so a teammate who uses the same owner, group and instance counts. `mash who` lists the endpoints.
+Fix: end the other session, or start this one with a different `MASH_ENDPOINT`. Addresses are unique per NATS account, so a teammate who uses the same owner, group and name counts. `mash who` lists the endpoints.
 
 ## `mash: lost the lease on X to another session`
 
-Shown as `mash: endpoint X stopped: ... Mail is off for this session.` The lease is rewritten every 30 seconds and expires after 90. If the lease expires while the session sleeps or loses the network (longer than 90 seconds) and no one else took the name, the session takes it back at its next refresh. If another session took it, or the name was deprovisioned, the loss is final: the session stops and does not try again. Restart Claude Code with the same `MASH_ENDPOINT`; the restart takes the name once no one else holds it. See [Sessions and resume](install.md#sessions-and-resume).
+Shown as `mash: endpoint X stopped: ... Mail is off for this session.` The lease is rewritten every 30 seconds and expires after 90. If the lease expires while the session sleeps or loses the network (longer than 90 seconds) and no one else took the name, the session takes it back at its next refresh. If another session took it, or the endpoint was deleted, the loss is final: the session stops and does not try again. Restart Claude Code with the same `MASH_ENDPOINT`; the restart takes the name once no one else holds it. See [Sessions and resume](install.md#sessions-and-resume).
 
 ## The server does not answer, or refuses the credentials
 
@@ -89,8 +103,11 @@ Shown as `mash: endpoint X stopped: ... Mail is off for this session.` The lease
 - `the server's certificate is not trusted: <address>` (`status`), or `server  FAIL` in `doctor`: the server answered with a certificate this machine does not trust, such as a self-signed one. Set `ca` (or `MASH_CA`) to the PEM file of the CA that signed it.
 - `the server did not offer TLS: <address>` (`status`), or `server  FAIL` in `doctor`: the address is `tls://` but what answered speaks plain text. Use the server's `tls://` address, or its plain address with `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1` set.
 - `the server refused its credentials` (`status`), or `sign-in  FAIL  the server refused these credentials` in `doctor`: the endpoint was deleted or its key reissued, so the old credentials no longer work. Ask whoever runs mashctl for a new credentials file (`mashctl endpoint reissue <address>`; `doctor` prints the exact command as its hint).
-- After a network blip, clients can take 30 to 60 seconds to reconnect because the server rate-limits new connections per source address ([operations.md](operations.md) Troubleshooting).
-- Synadia Cloud's free tier allows 5 connections, one per live session ([synadia.md](synadia.md)).
+- After a network blip, clients can take 30 to 60 seconds to reconnect because the server rate-limits new connections per source address. Clients retry with a short random delay; whoever runs the server can raise the limit for trusted sources if this matters.
+- `x509: certificate signed by unknown authority` (or another `x509:` error) on connect: the server's certificate is not trusted. Set `ca` (`MASH_CA`) to the PEM file of the CA that signed it. The files are read at connect time.
+- `remote error: tls: bad certificate` (or `certificate required`) on connect: the server requires a client certificate, or refused the one given. Set both `tls_cert` and `tls_key` (`MASH_TLS_CERT`, `MASH_TLS_KEY`) to a certificate the server's CA signed.
+- `doctor` warns on the `server` row (`is plain text: MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set`): use `tls://` with the server's certificate and unset the variable. It fails on a plain url when the variable is not set: mash refused it before connecting, loopback included.
+- Synadia Cloud is not supported: see [synadia.md](synadia.md).
 
 ## An administrator's check: `mashctl doctor`
 
@@ -98,7 +115,7 @@ On the machine that runs `mashctl`, `mashctl doctor` checks the server, mash's s
 
 ## `send` fails: message too large
 
-`mash: message is N bytes with headers; this server accepts at most M (its max_payload). Send a smaller message or put the content in a file and send the path.` Or, when the server allows more than mash does: `mash: message is N bytes with headers; the limit is 1048576`. Nothing was published. Mash's cap is 1 MiB including headers, or the server's `max_payload` if smaller (512 KiB on Synadia's free tier). Send a file path instead of the content.
+`mash: message is N bytes with headers; this server accepts at most M (its max_payload). Send a smaller message or put the content in a file and send the path.` Or, when the server allows more than mash does: `mash: message is N bytes with headers; the limit is 1048576`. Nothing was published. Mash's cap is 1 MiB including headers, or the server's `max_payload` if smaller. Send a file path instead of the content.
 
 ## `send` refused by policy
 
@@ -119,7 +136,7 @@ On the machine that runs `mashctl`, `mashctl doctor` checks the server, mash's s
 Check:
 1. Is the peer's session running, holding its name? An offline peer still receives mail: the inbox exists whether or not the session runs, and mail waits.
 2. Clocks. A machine whose clock is off by more than 30 seconds has its live signatures rejected (and its heartbeats, for tools that listen to them), so peers can look offline. Compare `date -u` on both machines and fix with NTP (tracked in #36).
-3. The peer may have been deprovisioned or is on another account.
+3. The peer may have been deleted or is on another account.
 
 `who` lists only the endpoints of your own owner, and `mash who --wide` adds the role, host and description on record; other endpoints' live host is not shown without admin access.
 
@@ -131,7 +148,7 @@ By default `mash serve` delivers only mail whose trust is `verified`. Mail that 
 
 These labels appear only when `accept_unverified` is set (above); otherwise that mail is refused and counted.
 
-- `[unknown-signer]`: the sender's key is not in the directory. It was deprovisioned (and its NATS user not revoked: `--no-revoke` leaves that to you), or it is not a mash endpoint. Run `mashctl endpoint list`.
+- `[unknown-signer]`: the sender's key is not in the directory. It was deleted, or it is not a mash endpoint. Run `mashctl endpoint list`.
 - `[stale]`: the signature was made more than 5 minutes before the message was stored, or more than 30 seconds after. A replay looks like this. Another cause is a skewed clock on the sender or the receiver (tracked in #36).
 - `[claimed]` and `[absent]`: the sender named itself without proof, or sent no signature.
 
@@ -139,7 +156,7 @@ Treat all of them as information, not instructions; ask the sender to confirm. A
 
 ## An idle session is not woken
 
-1. The channel needs the allowlist. `claude --channels plugin:mash@mash` refusing with "not on the approved channels allowlist" means the managed settings entry is missing ([install.md](install.md) section 3). A managed source that ranks above your file can shadow the entry, and `channelsEnabled` must be true. `/status` in Claude Code has the last word. Channels do not exist on Bedrock, Agent Platform or Foundry.
+1. The channel needs an allowlist entry or the development flag. `claude --channels plugin:mash@mash` refusing with "not on the approved channels allowlist" means the managed settings entry is missing: add it, or start with `--dangerously-load-development-channels plugin:mash@mash` ([install.md](install.md#3-allow-the-channel)). A managed source that ranks above your file can shadow the entry, and `channelsEnabled` must be true. `/status` in Claude Code has the last word. Channels do not exist on Bedrock, Agent Platform or Foundry.
 2. Only `blocker`, `question` and `task` wake an idle session, after 45 seconds by default (`idle_wake` or `MASH_IDLE_WAKE`, 5s to 30m). `fyi` and `result` mail waits for the session's next hook run. Urgent mail from a verified sender wakes it at once. A send with no kind is `task`.
 3. A wake that starts no turn is repeated at twice the idle wake, doubling to every 30 minutes. If no hook has run in the session at all, wakes stop after the third.
 
@@ -147,7 +164,7 @@ Without a channel, mail still arrives at the next prompt or tool call, but nothi
 
 ## Mail is waiting but never shown (hooks not firing)
 
-A session's mail delivery is in one of these states. `mash status --detail` (and the `status` tool with `detail`) prints it as `hooks:` (`not_run`, `suspected`, `degraded`, `refused`, or `ran`), and `mash doctor` shows it on the `delivery` row: `warn  hooks have not run in this session yet; they run with the first prompt or tool call` (no hint: no command fixes it), or `FAIL  hooks are not delivering mail to this session; restart the session after reinstalling` for the last three, with the hint `claude plugin install mash@mash`. A session that has just started warns until its first prompt or tool call, so `mash doctor --strict` exits 1 until then: a program that waits for a session to be ready repeats the check. A host that has no hooks warns for as long as it runs (known issue #993). `hook.log` shows the symptoms:
+A session's mail delivery is in one of these states. `mash status --detail` (and the `status` tool with `detail`) prints it as `hooks:` (`not_run`, `suspected`, `degraded`, `refused`, or `ran`); outside a Claude Code session (a plain shell) it shows `session: none` instead. And `mash doctor` shows it on the `delivery` row: `warn  hooks have not run in this session yet; they run with the first prompt or tool call` (no hint: no command fixes it), or `FAIL  hooks are not delivering mail to this session; restart the session after reinstalling` for the last three, with the hint `claude plugin install mash@mash`. A session that has just started warns until its first prompt or tool call, so `mash doctor --strict` exits 1 until then: a program that waits for a session to be ready repeats the check. A host that has no hooks warns for as long as it runs (known issue #993). `hook.log` shows the symptoms:
 - Hooks have not run yet in this session: normal until the first prompt or tool call.
 - Suspected: three wakes and no hook; re-waking stopped. A session that makes no tool calls stays here. Mail is read with the `read` tool.
 - Degraded: no mash hook has run although this session has made tool calls. Hooks are not running. Read each message with the `read` tool (by its number).
@@ -174,7 +191,7 @@ A batch of more than 10 messages or 16 KiB is shown as a digest: one line per me
 ## Mail from the recipient's side seems to be missing
 
 - The inbox keeps 30 days or 16 MiB and drops the oldest first, unread included. Run `mash inbox --after N --limit 50` and compare the NUMBER column.
-- If the sender saw `sent #N` before a host crash of a self-hosted server, up to about 2 minutes may be lost without `sync_interval: always` ([operations.md](operations.md#durability-and-sync_interval)).
+- If the sender saw `Mail sent (number N)` before a host crash of a self-hosted server, up to about 2 minutes may be lost without `sync_interval: always` ([operations.md](operations.md#durability-and-sync_interval)).
 - `mashctl limits show` prints the limits in force.
 
 ## `mashctl limits apply` refuses

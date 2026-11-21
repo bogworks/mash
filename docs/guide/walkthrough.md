@@ -6,13 +6,166 @@ output. Every output marked "built output" is pasted from a real run of
 the built programs, never typed; that run is a container that follows this
 page exactly.
 
+## Quick start
+
+Two agents mailing each other from a shell, on one machine, in a few minutes.
+Every command below was run on the published v0.5.6 release. The steps after
+this section explain each one and show its output.
+
+Everything is installed as you, in your home folder. Nothing here needs
+`sudo`, a system service or a package manager. You need Linux or macOS, Claude
+Code, and `curl`, `tar` and `openssl`.
+
+### The way to do it: let an agent set it up
+
+Install the `mash-setup` plugin and ask your session to set mash up. It asks
+before each step.
+
+```sh
+claude plugin marketplace add bogworks/mash
+claude plugin install mash-setup@mash
+```
+
+Then tell the session: "set mash up on this machine"
+([install.md](../install.md#2-the-plugin)).
+
+### By hand
+
+1. Install the programs. Work in an empty scratch folder (`cd "$(mktemp -d)"`):
+   the downloads land in the folder you are in. First `nats-server` and the
+   `nats` command, each from its GitHub release, checked against that
+   release's checksums and put in `~/.local/bin` (`nats-server` 2.10.7 or
+   newer; the `nats` zip is opened with `unzip`, or with `python3` if there is no `unzip`):
+
+   ```sh
+   install -d -m 755 ~/.local ~/.local/bin
+   OS=$(uname -s | tr A-Z a-z); ARCH=$(uname -m); case $ARCH in x86_64) ARCH=amd64;; aarch64|arm64) ARCH=arm64;; esac
+   V=v2.15.1; B=https://github.com/nats-io/nats-server/releases/download/$V
+   curl -fsSLO $B/nats-server-$V-$OS-$ARCH.tar.gz -O $B/SHA256SUMS &&
+   grep " nats-server-$V-$OS-$ARCH.tar.gz\$" SHA256SUMS | sha256sum -c - &&      # macOS: shasum -a 256 -c -
+   tar -xzf nats-server-$V-$OS-$ARCH.tar.gz --strip-components=1 -C ~/.local/bin nats-server-$V-$OS-$ARCH/nats-server &&
+   N=0.5.2; B=https://github.com/nats-io/natscli/releases/download/v$N
+   curl -fsSLO $B/nats-$N-$OS-$ARCH.zip -O $B/SHA256SUMS &&
+   grep " nats-$N-$OS-$ARCH.zip\$" SHA256SUMS | sha256sum -c - &&                # macOS: shasum -a 256 -c -
+   if command -v unzip >/dev/null; then unzip -j -o nats-$N-$OS-$ARCH.zip '*/nats' -d ~/.local/bin
+   else python3 -m zipfile -e nats-$N-$OS-$ARCH.zip natsx && install -m 755 natsx/*/nats ~/.local/bin/nats; fi
+   ```
+
+   (Each check is joined to the next command with `&&`, so nothing is unpacked
+   or run unless the check passes. On macOS use `shasum -a 256 -c -` where the
+   comments say so. The second `SHA256SUMS` replaces the first, after the first
+   has been used.) Then `mash` and `mashctl`: download the installer and its
+   checksums, check, run:
+
+   ```sh
+   BASE=https://github.com/bogworks/mash/releases/latest/download
+   curl -fsSLO $BASE/install.sh -O $BASE/SHA256SUMS &&
+   grep ' install.sh$' SHA256SUMS | sha256sum -c - &&    # macOS: shasum -a 256 -c -
+   bash install.sh
+   ```
+
+   It prints `Installed mash v0.5.6 (dd696e9) in ~/.local/bin`, and the same
+   for `mashctl`. With a current `gh` installed it also checks the release's
+   attestation first and installs nothing if that fails; it says nothing when
+   the check passes ([how to check by hand](../install.md#verify-what-you-download)).
+   If it ends with `~/.local/bin is not on your PATH`, add the folder and open a
+   new terminal (on Debian a new login shell does it for you once the folder exists):
+
+   ```sh
+   echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.profile   # zsh: ~/.zshrc
+   ```
+
+   The mash plugin also needs `mash` on the PATH that Claude Code starts with.
+
+2. Make a NATS server that only this machine can reach (download, check, run):
+
+   ```sh
+   BASE=https://github.com/bogworks/mash/releases/latest/download
+   curl -fsSLO $BASE/mash-local-nats-setup.sh -O $BASE/SHA256SUMS &&
+   grep ' mash-local-nats-setup.sh$' SHA256SUMS | sha256sum -c - &&    # macOS: shasum -a 256 -c -
+   bash mash-local-nats-setup.sh --owner alice
+   mashctl init --config ~/mash-nats/mash-setup.yaml     # the last line the script printed
+   ```
+
+   `--owner alice` names the owner (the first part of every address). Without
+   it the script asks on a terminal, and stops with `no terminal to ask for the
+   owner name` when there is none. The server starts now; it does not start at
+   boot, so after a reboot run `bash mash-local-nats-setup.sh --start`.
+
+3. Make two agents. The group (`dev`) has no default: you always name it.
+
+   ```sh
+   mashctl endpoint create alice.dev.design
+   mashctl endpoint create alice.dev.review
+   ```
+
+   With no option this makes each agent's key on this machine and installs it
+   here, ready to use. To give an agent to another machine, write a join file
+   and install it there ([step 10](#step-10-join-a-mesh-someone-else-runs)).
+
+4. Send mail from a shell and read it:
+
+   ```sh
+   MASH_ENDPOINT=alice.dev.design mash send alice.dev.review "hello"     # Mail sent (number 1).
+   MASH_ENDPOINT=alice.dev.review mash inbox
+   MASH_ENDPOINT=alice.dev.review mash read 1
+   MASH_ENDPOINT=alice.dev.review mash status                            # alice.dev.review: ready, offline
+   ```
+
+   The message still shows as `new` in the inbox after `mash read` while no
+   session runs ([#866](https://github.com/bogworks/mash/issues/866)). With
+   two endpoints installed on one machine, say which one you mean:
+   `mash who --endpoint alice.dev.design`, `mash doctor --endpoint alice.dev.review`.
+   `mash status` says `ready, online` while a session holds the endpoint.
+
+5. Install the plugin and start two sessions:
+
+   ```sh
+   claude plugin marketplace add bogworks/mash
+   claude plugin install mash@mash
+   MASH_ENDPOINT=alice.dev.design claude   # terminal 1
+   MASH_ENDPOINT=alice.dev.review claude   # terminal 2
+   ```
+
+   Mail arrives with the session's next prompt or tool call. An idle session
+   is not woken; see "Optional: wake an idle session" below.
+
+   Not yet run on 0.5.6: the two live sessions. [Step 7](#step-7-use-it-from-claude-code)
+   describes them.
+
+### Optional: wake an idle session
+
+You do not need this. It is a choice. Without it, a session that is sitting
+idle sees new mail the next time you type a prompt or it runs a tool. To wake
+an idle session as soon as mail arrives, start it with Claude Code's own
+research-preview flag, `--dangerously-load-development-channels`:
+
+```sh
+MASH_ENDPOINT=alice.dev.design claude --dangerously-load-development-channels plugin:mash@mash
+```
+
+The flag lets a development channel plugin push a message into a session
+without being on Claude Code's approved-channels list. Claude Code asks you to
+confirm it at each launch. It is Claude Code's flag, not mash's
+([more in install.md](../install.md#3-optional-wake-an-idle-session)).
+
+### Where things live and how to remove them
+
+- `~/.local/bin`: `mash`, `mashctl`, `nats-server` and `nats`.
+- `~/.config/mash`: each endpoint's key and config.
+- `~/mash-nats`: the local NATS server, its data and every message.
+
+[Uninstall](../install.md#uninstall) lists how to remove all of it.
+
+If something goes wrong, see [troubleshooting](../troubleshooting.md).
+
 ## What you will build
 
 By the end, two AI agents, Alice and Bob, send each other mail. Each agent
 is a Claude Code session; each has an inbox on a message server that keeps
 its mail until it is read, even while the agent is off.
 
-Words used here, each explained again where it first matters:
+Words used here, each explained again where it first matters (the full list is the [glossary](../reference/glossary.md)):
 
 - **NATS** is an open-source message server. mash keeps the mail on one.
 - **mash** is the program one agent uses to send and read mail. **mashctl**
@@ -27,7 +180,8 @@ Words used here, each explained again where it first matters:
 - **MCP** (the Model Context Protocol) is how an agent host such as Claude
   Code talks to a tool server. mash offers its commands to a session as MCP
   tools.
-- A **mesh** is the set of endpoints on one server.
+- A **mesh** is every endpoint on one server, and all their mail. In 0.5.6
+  a mesh has one owner.
 
 Alice and Bob are the two agents in every example. The picture of how the
 parts fit is in [stack.md](stack.md); how mash differs from plain Synadia
@@ -38,10 +192,11 @@ Agent Protocol (SAP) is in [mash-vs-sap.md](mash-vs-sap.md).
 What this does: lists what must be on the machine before step 1.
 
 - A machine with Linux or macOS and Claude Code installed.
-- `curl`, `tar`, `unzip`, `openssl`, `jq` (step 8 only; it reads JSON and
+- `curl`, `tar`, `openssl`, `jq` (step 8 only; it reads JSON and
   picks out a field), `nats-server` 2.10.7 or newer and the `nats`
-  command. On Debian or Ubuntu a minimal image also needs `iproute2` (the
-  setup script uses `ss`).
+  command (the Quick start downloads both into `~/.local/bin`, checked; no
+  `sudo` or package manager). On Debian or Ubuntu a minimal image also needs
+  `iproute2` (the setup script uses `ss`).
 - About 2 GB free and nothing listening on 127.0.0.1:4222, or the next free
   port is used.
 
@@ -62,8 +217,9 @@ change later without starting over.
 
 We run everything on one host with a local nats-server, which step 3 makes
 for you. mash needs a NATS server with TLS, JetStream (the NATS feature that
-stores messages on the server) and sign-in credentials; yours may do
-instead (see the NATS notes in `docs/`).
+stores messages on the server) and sign-in credentials. A server you run
+yourself works too: [operations.md](../operations.md#setting-mash-up-with-mashctl-init---config)
+shows how `mashctl init` takes it from a setup file.
 
 ## Step 2: install mash and mashctl
 
@@ -74,11 +230,29 @@ script says so.
 What is created: two programs in `~/.local/bin`, the default;
 `MASH_INSTALL_DIR` names another folder.
 
-Command: `install.sh` from the release (never piped into a shell: download,
-check against `SHA256SUMS`, read it, run it).
+Command: `install.sh` from the release: download it, check it against
+`SHA256SUMS`, run it. Nothing is piped into a shell.
+
+```sh
+BASE=https://github.com/bogworks/mash/releases/latest/download
+curl -fsSLO $BASE/install.sh -O $BASE/SHA256SUMS &&
+grep ' install.sh$' SHA256SUMS | sha256sum -c - &&    # macOS: shasum -a 256 -c -
+bash install.sh
+```
+
+[install.md](../install.md#1-the-binary) explains it, and
+[how to verify what you download](../install.md#verify-what-you-download)
+shows how to read it first. With a current `gh` the installer also checks the
+release's attestation; without one it says so and trusts only github.com's TLS.
 
 <!-- output: install -->
-Output: `[built output: install]`
+Output:
+
+```
+Fetching mash and mashctl from the v0.5.6 release: https://github.com/bogworks/mash/releases/download/v0.5.6
+Installed mash v0.5.6 (dd696e9) in ~/.local/bin
+Installed mashctl v0.5.6 (dd696e9) in ~/.local/bin
+```
 
 Check: `mash version` and `mashctl version` print the same version.
 
@@ -91,24 +265,44 @@ What is created: `~/mash-nats` (keys, certificates, the server's files) and
 `mash-setup.yaml`. `~/mash-nats` is the default; `--dir` names another folder,
 and the last line the script prints has the path it actually wrote.
 
-Command: `mash-local-nats-setup.sh --owner acme`, downloaded from the same
-release and checked against `SHA256SUMS` like `install.sh`. Then the line it
+Command: `bash mash-local-nats-setup.sh --owner acme`, downloaded from the same
+release and checked against `SHA256SUMS` like `install.sh` (see
+[install.md](../install.md#verify-what-you-download)). Then the line it
 prints last, `mashctl init --config <path>/mash-setup.yaml`.
 
 `mashctl init` reads the setup file and keeps its own copy of the keys in
 `~/.config/mash`. That folder is where `mashctl` and `mash` look for their
 configuration and credentials. It is the default: `MASH_CONFIG_DIR` (an
 absolute path) names another folder, and so does an absolute
-`XDG_CONFIG_HOME`, as `docs/install.md` describes.
+`XDG_CONFIG_HOME`, as [install.md](../install.md#4-configuration) describes.
 
 With a server made by the setup script, that folder holds the operator's
 identity key (the `nats` command signs accounts only with it), with which the
 operator itself can be re-issued, and the account signing key. They are
 protected only as your own files are. This is the accepted same-user custody
-risk (#869, decision 264).
+risk ([#869](https://github.com/bogworks/mash/issues/869)).
 
 <!-- output: server -->
-Output: `[built output: server]`
+Output (the process id differs on your machine, and the path is where the script wrote its files):
+
+```
+mash-local-nats-setup.sh: OK
+checked: nats-server 2.10.27, nats 0.5.2, openssl
+port: 4222
+made: CA, certificate, operator, accounts, users
+started: nats-server pid 1523 on 127.0.0.1:4222
+checked: sign-in and system ping ok
+mashctl init --config ~/mash-nats/mash-setup.yaml
+```
+
+The first line is the checksum check of the downloaded script. Run the last
+line it printed (`~/mash-nats` is the default folder; use the folder the setup
+script printed, if you used `--dir`):
+
+```
+mashctl init --config ~/mash-nats/mash-setup.yaml
+Initialized mash on tls://127.0.0.1:4222 for owner acme
+```
 
 The server is a program you run as yourself; step 11 shows `--start` for
 after a reboot. If port 4222 is taken, the next free one is used.
@@ -126,7 +320,7 @@ endpoint has joined.
 What is created: a join file per endpoint (written with mode 600) in the
 current folder, then a creds file per endpoint under `~/.config/mash`, and
 each endpoint's inbox on the server. An endpoint's credentials file lives
-only on the endpoint's host, at mode 0600 (design, section 4).
+only on the endpoint's host, at mode 0600.
 
 Commands:
 
@@ -302,20 +496,17 @@ Start each session as its own endpoint, in two terminals. The name is the
 session's address; it is the one thing you must set:
 
 ```
-MASH_ENDPOINT=acme.demo.bob claude \
-  --dangerously-load-development-channels plugin:mash@mash
+MASH_ENDPOINT=acme.demo.bob claude
 ```
 
 ```
-MASH_ENDPOINT=acme.demo.alice claude \
-  --dangerously-load-development-channels plugin:mash@mash
+MASH_ENDPOINT=acme.demo.alice claude
 ```
 
-Claude Code registers a plugin's channel only when it is launched with its
-own flag, `--dangerously-load-development-channels plugin:mash@mash`, and it
-asks the person to confirm at each launch. Without the flag nothing is lost
-but the wake: mail still arrives with the next prompt or tool call through
-`mash hook`. The flag is Claude Code's, not mash's.
+Mail arrives with the session's next prompt or tool call, through `mash hook`.
+An idle session is not woken. If you want that, see
+[Optional: wake an idle session](#optional-wake-an-idle-session): it uses
+Claude Code's own research-preview flag, and the choice is yours.
 
 The session's own status. In either session, ask: "Run the mash status
 tool." Claude calls it and reports what the tool says: whether mail works for
@@ -324,7 +515,8 @@ status` at a shell, but made from inside the session, so it is online:
 `acme.demo.bob: ready, online`.
 
 Now mail. In Bob's session: "Send acme.demo.alice a note: lunch at noon?".
-A note is kind `task`, which wakes Alice's session if it is idle; ask
+A note is kind `task`, which wakes Alice's session if it is idle and was
+started with the optional wake flag; ask
 for kind `result` or `fyi` instead and it waits for her next turn. Add
 "urgent" only for what cannot wait: it is delivered at once, into a running
 turn where the agent host allows it. In Alice's session the mail arrives
@@ -333,7 +525,7 @@ labelled `[verified]`.
 Alice's session answers with `send`, and Bob's session sees the answer.
 Mail you sent in step 6 is waiting too: it arrives the same way.
 
-Output: `[built output: claude-code]` (a transcript of the two sessions)
+Output: not yet run on 0.5.6. The two Claude Code sessions need a live model and a login, which the test container does not have; this transcript will be added once they have been run on the published release.
 
 ## Step 8: JSON, for scripts (optional)
 
@@ -354,15 +546,11 @@ MASH_ENDPOINT=acme.demo.bob mash send acme.demo.alice --json "ping"
 
 <!-- output: json-send -->
 ```json
-{
-  "to": "acme.demo.alice",
-  "number": 3,
-  "kind": "task",
-  "urgent": false,
-  "duplicate": false,
-  "retagged": false
-}
+{"to":"acme.demo.alice","number":3,"kind":"task","urgent":false,"duplicate":false,"retagged":false}
 ```
+
+Each command prints its JSON on one line. Pipe it through `| jq` to
+pretty-print it.
 
 Alice reads that one message whole:
 
@@ -372,17 +560,7 @@ MASH_ENDPOINT=acme.demo.alice mash read 3 --json
 
 <!-- output: json-read -->
 ```json
-{
-  "number": 3,
-  "from": "acme.demo.bob",
-  "sent": "2026-11-19T09:44:04Z",
-  "trust": "verified",
-  "kind": "task",
-  "urgent": false,
-  "reply_to": null,
-  "relay": null,
-  "body": "ping"
-}
+{"number":3,"from":"acme.demo.bob","sent":"2026-11-21T14:33:54Z","trust":"verified","kind":"task","urgent":false,"reply_to":null,"relay":null,"body":"ping"}
 ```
 
 In JSON the text is plain, in `body`, with no `> ` marks: a program that
@@ -397,32 +575,8 @@ MASH_ENDPOINT=acme.demo.alice mash inbox --json
 
 <!-- output: json-inbox -->
 ```json
-{
-  "endpoint": "acme.demo.alice",
-  "total": 3,
-  "new": 3,
-  "urgent": 1,
-  "wake_count": 15,
-  "over_wake_count": false,
-  "wake_age": "1h",
-  "oldest_waiting": "10s",
-  "over_wake_age": false,
-  "messages": [
-    {
-      "number": 1,
-      "from": "acme.demo.bob",
-      "sent": "2026-11-19T09:44:02Z",
-      "state": "new",
-      "urgent": false,
-      "kind": "task",
-      "trust": "verified",
-      "preview": "lunch at noon?"
-    }
-  ]
-}
+{"endpoint":"acme.demo.alice","total":3,"new":3,"urgent":1,"wake_count":15,"over_wake_count":false,"wake_age":"1h","oldest_waiting":"0s","over_wake_age":false,"messages":[{"number":1,"from":"acme.demo.bob","sent":"2026-11-21T14:33:54Z","state":"new","urgent":false,"kind":"task","trust":"verified","preview":"lunch at noon?"},{"number":2,"from":"acme.demo.bob","sent":"2026-11-21T14:33:54Z","state":"new","urgent":true,"kind":"question","trust":"verified","preview":"ready?"},{"number":3,"from":"acme.demo.bob","sent":"2026-11-21T14:33:54Z","state":"new","urgent":false,"kind":"task","trust":"verified","preview":"ping"}]}
 ```
-
-(The list shows the first message only; there is one object for each.)
 
 The one-line retrieval, with `jq` (a command-line tool that picks a field
 out of JSON), is the text of one message:
@@ -433,9 +587,6 @@ MASH_ENDPOINT=acme.demo.alice mash read 3 --json | jq -r .body
 
 <!-- output: json-jq -->
 Output: `ping`
-
-(The JSON above is the spec's example, shown with Alice and Bob. The
-built-output pass replaces it with the real run's.)
 
 ## Step 9: take an endpoint away
 
@@ -448,13 +599,24 @@ Commands: `mashctl endpoint delete acme.demo.bob` (you type the address to
 confirm), then `mash status` as Bob.
 
 <!-- output: delete -->
-Output: `[built output: delete]`
+Output:
+
+```
+This deletes acme.demo.bob and its empty inbox. It cannot be undone.
+Type the address to confirm: acme.demo.bob
+Deleted endpoint acme.demo.bob
+```
 
 Then Bob's status. The endpoint is gone, and the command exits with a
 non-zero status:
 
 <!-- output: refused -->
-Output: `[built output: refused]`
+Output:
+
+```
+acme.demo.bob: not ready: this endpoint was deleted; its address cannot be used again
+hint: mash doctor
+```
 
 ## Step 10: join a mesh someone else runs
 
@@ -463,10 +625,10 @@ the server from step 3 that is its whole scope: a join file made against it
 works only on this machine. Two machines need a server both can reach, with a
 certificate that covers its address; in 0.5.6 that is a NATS server you run
 yourself, which `mashctl init` takes from a setup file (see
-[docs/install.md](../install.md)). A script option for a reachable address and
+[operations.md](../operations.md#setting-mash-up-with-mashctl-init---config)). A script option for a reachable address and
 certificate is for 0.6.0.
 
-<!-- not run by the AT-3 harness -->
+<!-- not run in the built-output pass -->
 
 What is created: on the joining side, the creds file and the server's address
 in the configuration folder, as in step 4.
@@ -509,12 +671,37 @@ as in step 4.
 What this does: day-2 care of the local server. Removing it deletes every
 mailbox and message on it, so it is the last step.
 
-Commands: the setup script's `--stop`, `--start`, `--remove`.
+Commands, from the folder that holds the downloaded script:
+
+```
+bash mash-local-nats-setup.sh --stop
+bash mash-local-nats-setup.sh --start
+bash mash-local-nats-setup.sh --remove
+```
+
+`--start` starts an existing server again (after a reboot) and creates
+nothing. `--remove` asks you to type the folder's path before it deletes
+anything.
 
 <!-- output: lifecycle -->
-Output: `[built output: lifecycle]`
+Output (the process ids differ on your machine):
+
+```
+stopped pid 2336
+started: nats-server pid 2572 on 127.0.0.1:4222
+type the folder to remove (/home/tester/mash-nats): /home/tester/mash-nats
+stopped pid 2572
+removed /home/tester/mash-nats
+note: mashctl's folder /home/tester/.config/mash still points at this server.
+To set up again, run mashctl init --config <file> --config-dir <new folder>
+or move that folder aside.
+```
 
 ## Not in this guide
 
 The per-command reference, the glossary, the rules and "coming in 0.6.0" are
-generated from the specification (`spec/*.json`), not written here.
+generated from the specification (`spec/*.json`), not written here. Start at
+the [reference index](../reference/README.md); the words used in this guide
+are in the [glossary](../reference/glossary.md), and what is planned for the
+next release is in [coming in 0.6.0](../reference/coming-in-0-6-0.md). To
+remove mash from a machine, see [Uninstall](../install.md#uninstall).
