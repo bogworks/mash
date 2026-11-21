@@ -244,15 +244,17 @@ its next tool call. No signature covers plugin content. Rating M.
 | 16 | Have the hook re-verify spooled mail, or sign spool entries with a per-session key held by `serve`. | 5.2 spool row | M | mash |
 | 17 | Check the inbox deployment requirement at run time: `mash doctor` (or `serve` at start) tries to subscribe to `_INBOX.>` and to another name's `_INBOX.<other>.>` and warns unless the server denies both. Catches users provisioned by hand outside mash's template. | 5.3 spoofed answer | S | mash |
 
-## 8. Open questions for Randy
+## 8. Open questions
 
-1. Is "act without asking first" for `[verified]` mail the default you want for a public product, or was it right only
-   for a single operator's own fleet? Mitigation 1 changes the product's feel.
-2. Should a hostile or compromised server stay out of scope (`SECURITY.md:44`) now that the quickstart starts on a
-   hosted service? If yes, the README should say what `[verified]` does not cover.
+1. Is "act without asking first" the right default for `[verified]` mail in a public product? Mitigation 1 changes the
+   product's feel.
+2. Should a hostile or compromised server stay out of scope ([SECURITY.md](../../SECURITY.md))? If yes, the README should
+   say what `[verified]` does not cover.
 3. Should mash refuse plaintext `nats://` outright, or warn? (Settled: every connection refuses it unless `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1` is set, [ADR 0146](../decisions/0146-every-mash-and-mashctl-connection-requires-tls-loopback-included-and-one-override-insecure-plaintext-allows-plain-text.md).)
 4. Release key: keep one key across projects and purposes, or create a mash-only key, ideally hardware-backed, with a
-   rotation plan?
+   rotation plan? (Settled: release tags are annotated and not signed, and no signing key is kept. A release is checked by
+   its checksums, its build provenance attestation and a rebuild, as [Verify your download](verify-your-download.md)
+   describes.)
 5. (Settled 2026-10-31: the two new findings were fixed before publication, [#178](https://github.com/bogworks/mash/pull/178)
    and [#180](https://github.com/bogworks/mash/pull/180).)
 6. Should one owner support trust tiers (for example a "trusted" endpoint whose mail delegates and "ordinary"
