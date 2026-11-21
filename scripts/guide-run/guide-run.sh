@@ -57,7 +57,7 @@ RELEASE_FILES=(SHA256SUMS install.sh mash-local-nats-setup.sh mash-linux-amd64
 DEFAULT_VERSION=v0.0.0-rehearsal
 OWNER=acme
 CHOME=/home/tester
-GH_REPO=bogworks/mash
+GH_REPO=${GUIDE_RUN_REPO:-bogworks/mash}
 GH_BASE=https://github.com/$GH_REPO/releases/download
 ALLOWLIST='github.com:443 objects.githubusercontent.com:443 release-assets.githubusercontent.com:443'
 PROXY_URL=http://127.0.0.1:3128
@@ -1138,7 +1138,7 @@ start_proxy() {
     local i=0
     # a UNIX socket path is limited to about 107 bytes, which a run folder under
     # a long scratch path exceeds: the socket's own folder is short (0700)
-    EGRESS_DIR=${XDG_RUNTIME_DIR:-/tmp}/gr-$RUN
+    EGRESS_DIR=$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/gr.XXXXXX") || return 1
     EGRESS_SOCK=$EGRESS_DIR/egress.sock
     EGRESS_LOG=$RUN_DIR/egress.log
     mkdir -p "$EGRESS_DIR" && chmod 700 "$EGRESS_DIR" || return 1
@@ -1209,7 +1209,10 @@ do_run() {
     fi
     mkdir -p "$SCRATCH" || exit 2
     SCRATCH=$(cd "$SCRATCH" && pwd -P)
-    RUN_DIR=$SCRATCH/run-$RUN
+    # a fresh, unpredictable folder only this user can enter: the build context
+    # lives in it, and nothing else may write there between the build and the run
+    RUN_DIR=$(mktemp -d "$SCRATCH/run-$RUN.XXXXXX") || exit 2
+    chmod 700 "$RUN_DIR" || exit 2
     OUT=$RUN_DIR/out
     CTX=$RUN_DIR/build
     CNAME=guide-run-$RUN
