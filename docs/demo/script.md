@@ -78,9 +78,9 @@ Type (one pasted block):
 
 ```
 cd "$(mktemp -d)"
-install -d -m 755 ~/.local/bin
+install -d -m 755 ~/.local ~/.local/bin
 OS=$(uname -s | tr A-Z a-z); ARCH=$(uname -m); case $ARCH in x86_64) ARCH=amd64;; aarch64|arm64) ARCH=arm64;; esac
-V=v2.15.3; B=https://github.com/nats-io/nats-server/releases/download/$V
+V=v2.15.1; B=https://github.com/nats-io/nats-server/releases/download/$V
 curl -fsSLO $B/nats-server-$V-$OS-$ARCH.tar.gz -O $B/SHA256SUMS
 grep " nats-server-$V-$OS-$ARCH.tar.gz\$" SHA256SUMS | sha256sum -c -
 tar -xzf nats-server-$V-$OS-$ARCH.tar.gz --strip-components=1 -C ~/.local/bin nats-server-$V-$OS-$ARCH/nats-server
