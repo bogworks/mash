@@ -56,18 +56,27 @@ nothing. `mash status --endpoint
 <address>` says `<address>: ready, offline` (or `online` while a
 session holds it open). For an endpoint called `acme.demo.bob`, that line
 is `acme.demo.bob: ready, offline`. Read the `hint:` line of any error and
-run the command it names.
+run the command it names (status, then doctor, then status again).
+
+| You see | Cause | Fix |
+|---|---|---|
+| `not ok: the server did not answer`, or `not ready` | after a reboot or a stopped server, the local server is not running | the `--start` step below |
 
 ## The server does not answer (after a reboot, say)
 
 The server is a program running as the person. It does not come back after a
 reboot. Check (`mashctl doctor` names what is wrong on the server side), then
-start it:
+start it. BIN, SRV and DL below are the defaults: use the folders the
+person chose in setup. Get them from the person, or from where
+`command -v mashctl` and the server folder show them. Never guess.
 
 ```sh
-SRV="$HOME/mash-nats"; DL="$HOME/mash-setup-dl"
-bash "$DL/mash-local-nats-setup.sh" --dir "$SRV" --start
+BIN="$HOME/.local/bin"; SRV="$HOME/mash-nats"; DL="$HOME/mash-setup-dl"
+PATH="$BIN:$PATH" bash "$DL/mash-local-nats-setup.sh" --dir "$SRV" --start
 ```
+
+The install folder goes first on the PATH so the script finds `nats-server`;
+without it the script may say `error: missing: nats-server`.
 
 `--start` never creates a server: if the folder is missing it says so and
 stops. Needs a yes: starting the server. If the script is no longer there,
@@ -76,6 +85,9 @@ download it again and check it as the setup skill's step 3 does.
 ## Stop the server
 
 Needs a yes: stopping it ends mail delivery until it is started again.
+
+SRV and DL below are the defaults: fill in the folders the person chose in
+setup (ask them; never guess).
 
 ```sh
 SRV="$HOME/mash-nats"; DL="$HOME/mash-setup-dl"
@@ -97,6 +109,20 @@ mashctl endpoint create acme.demo.carol
 Expected: `Created endpoint acme.demo.carol`. Check:
 `MASH_ENDPOINT=acme.demo.carol mash status` says `ready, offline`. The
 person then starts a session as that agent (`sh person`):
+
+```sh person
+MASH_ENDPOINT=acme.demo.carol claude
+```
+
+Mail arrives with that session's next prompt or tool call.
+
+### Wake an idle session (optional)
+
+`--dangerously-load-development-channels` is Claude Code's own flag. It lets a
+development plugin push a channel notification that wakes an idle session, and
+Claude Code asks the person to confirm it at each launch. It is the person's
+choice: never add it on your own word; explain it, ask, and only on a yes give
+them the line with it:
 
 ```sh person
 MASH_ENDPOINT=acme.demo.carol claude --dangerously-load-development-channels plugin:mash@mash
@@ -126,7 +152,8 @@ Then check `mashctl endpoint list` no longer shows it.
 
 This stops the server and deletes its folder, which holds every key and all
 stored mail. The mailboxes stop working. The script asks the person to type
-the folder path and refuses without a terminal:
+the folder path and refuses without a terminal. SRV and DL are the defaults:
+fill in the folders the person chose in setup (ask them; never guess):
 
 ```sh person
 SRV="$HOME/mash-nats"; DL="$HOME/mash-setup-dl"
@@ -186,7 +213,8 @@ run `claude plugin marketplace update mash` and
 
 ## Do not
 
-- Do not run a `sh person` block, `sudo`, or `--yes` yourself.
+- Do not use `sudo` or any system package; everything is installed as you.
+- Do not run a `sh person` block or use `--yes` yourself.
 - Do not print, paste or mail a seed, a credentials file or a key.
 - Do not stop, change or remove a NATS server this guide did not make.
 - Do not use `pkill`, `killall` or `pgrep -f`.

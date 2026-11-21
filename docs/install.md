@@ -2,16 +2,16 @@
 
 This walks through one machine running Claude Code sessions with mash. Provisioning the server side (the account, endpoint users and their inboxes) is in [operations.md](operations.md).
 
-**Requirement:** mash needs a NATS server in operator mode with JWT user credentials. Token, user/password and plain nkey authentication are not supported, because an endpoint's SAP signing identity is its NATS user key (the key in its creds file's user JWT; see [sap.md](sap.md)).
+**Requirement:** mash needs a NATS server that you run yourself, in operator mode with JWT user credentials. An endpoint's SAP signing identity is its NATS user key (the key in its creds file's user JWT; see [sap.md](sap.md)). Every server requirement is on [Bring your own NATS server](nats-server.md#requirements).
 
 ## Requirements
 
-- `nats-server`, 2.10.7 or newer (tested on 2.15) with JetStream, on your `PATH`, to run the NATS server yourself. Get it from the [nats-server releases](https://github.com/nats-io/nats-server/releases). You do not need it on a machine where you only run endpoints, or if you use a server that already runs. `mashctl` does not install or start NATS. Synadia Cloud is not supported: see [synadia.md](synadia.md).
+- A NATS server that meets the [requirements](nats-server.md#requirements). To run one on this machine, see [getting nats-server](nats-server.md#getting-nats-server-and-the-nats-command). You do not need `nats-server` on a machine where you only run endpoints, or if you already have a server. `mashctl` does not install or start NATS.
 - Claude Code 2.1.312 or newer (the oldest version a live receipt passed on; mash does not refuse older ones). The plugin and the `mash` binary should be the same release (major and minor).
 
 ## 1. The binary
 
-Supported platforms: Linux and macOS (amd64, arm64), the release targets (`mash-{linux,darwin}-{amd64,arm64}`, see [release.md](release.md)). Native Windows is not supported: the spool lock and the hooks need Unix file locking and a POSIX shell. WSL 2 with the Linux binary is expected to work but has not been tested.
+Supported platforms: Linux and macOS (amd64, arm64), the release targets (`mash-` and `mashctl-` for `{linux,darwin}-{amd64,arm64}`, each with a `.cdx.json`, next to `install.sh`, `mash-local-nats-setup.sh`, `mash-migrate-0.5.5.sh` and `SHA256SUMS`; see [release.md](release.md)). Native Windows is not supported: the spool lock and the hooks need Unix file locking and a POSIX shell. WSL 2 with the Linux binary is expected to work but has not been tested.
 
 mash is one static Go binary, and `install.sh` is the install: it puts `mash` and `mashctl` on your machine, checked. **Install it first (below) until your plugin release is pinned**: the plugin fetches and verifies its own copy only once it carries a `mash.pins` file from a release (the post-release commit described next), and an unpinned plugin, which is what a checkout of the repository gives you, uses the `mash` on your `PATH` and does not start without one. With a pinned plugin there is nothing to install by hand: no `go install`, no `PATH` edit, no root.
 
@@ -122,7 +122,7 @@ On a machine that runs `mashctl`, `mashctl init --config FILE` writes `servers`,
 
 | Key | Env | Meaning |
 |---|---|---|
-| `servers` | `MASH_SERVER`, `--server` | The NATS server or servers. In the environment a comma list; in `config.json` a JSON array of strings, or one string with commas; the flag repeats. Use `tls://`: SAP identity is only meaningful over a verified connection. A plain `nats://` url is refused, loopback included, unless the environment variable `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1` is set (see [Turning encryption off](#turning-encryption-off)). For a private CA or a server that requires client certificates, set `ca`, `tls_cert` and `tls_key` below. |
+| `servers` | `MASH_SERVER`, `--server` | The NATS server or servers. In the environment a comma list; in `config.json` a JSON array of strings, or one string with commas; the flag repeats. Use `tls://`; the rules (private CA, client certificates, the one override) are on [TLS](nats-server.md#tls), and [Turning encryption off](#turning-encryption-off) covers the override. |
 | `ca` | `MASH_CA`, `--ca` | PEM file of the CA that signed the server's certificate, for a private CA. Without it the system trust store is used. |
 | `tls_cert`, `tls_key` | `MASH_TLS_CERT`, `MASH_TLS_KEY` | PEM client certificate and its private key, for a server that requires client certificates (mutual TLS). Set both or neither. |
 | `endpoint` | `MASH_ENDPOINT`, `--endpoint` | The full address of the endpoint a session runs as, `owner.group.name`, for example `alice.dev.design`. Each token is lower-case letters, digits and single hyphens. The owner, the first token, is also the fence a credential reaches. See "Which endpoint" below. Apps started from a GUI or IDE usually do not inherit your shell's variables, so set it where Claude Code is launched (the IDE's own environment setting, or the launch command). `mash status` shows whether the endpoint is ready, before you launch. |
@@ -164,7 +164,7 @@ Optional: the session instruction file `~/.config/mash/policy.md` is appended to
 
 ### Turning encryption off
 
-Every mash connection requires TLS, to any host, loopback included: `mashctl`, `mash serve`, `mash hook` and the CLI commands. A plain URL (any scheme other than `tls` and `wss`) is refused before any connection is made, exit code 2, with the host, the variable below and the fix (`tls://` with the server's certificate, `ca` for a private CA).
+Every mash connection requires TLS (see [TLS](nats-server.md#tls)). A plain URL is refused before any connection is made, exit code 2, with the host, the variable below and the fix.
 
 There is one way to allow plain text, for `mash` and `mashctl` alike: set the environment variable `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1`. It is not a setting: there is no flag and no `config.json` key. Its only value is `1` (empty or `0` is off; anything else is an error). While it is set, every command of both tools first prints this line on stderr, and nothing extra on stdout (`--json` stays clean):
 
@@ -172,7 +172,7 @@ There is one way to allow plain text, for `mash` and `mashctl` alike: set the en
 warning: encryption to the server is OFF (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set)
 ```
 
-Use it for a throwaway server in a test, never on a network you do not control: plain text lets anyone on the network read mail and obtain signatures. The local setup script makes a certificate authority and does not need it.
+Use it for a throwaway server in a test, never on a network you do not control: plain text lets anyone on the network read mail and obtain signatures. The release's `mash-local-nats-setup.sh` makes a certificate authority for a local server and does not need it.
 
 The old names are gone with no alias: `MASH_INSECURE_PLAINTEXT` in the environment and `insecure_plaintext` in `config.json` are refused, exit 2, with an error that names `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1`.
 

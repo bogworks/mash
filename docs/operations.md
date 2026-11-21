@@ -1,10 +1,10 @@
 # Operating mash
 
-mash needs a NATS server in operator mode with JetStream, and one account for mash. The `mash` binary never mints NATS users and never holds an operator or account seed. `mashctl` holds the account signing key. It signs each endpoint's user from the endpoint's own public key (`mashctl endpoint create`), with the permissions `mashctl endpoint permissions` prints, and it writes the directory record and the inbox behind it.
+mash needs a NATS server that you run yourself, with one account for mash; every server requirement is on [Bring your own NATS server](nats-server.md#requirements). The `mash` binary never mints NATS users and never holds an operator or account seed. `mashctl` holds the account's identity key (the `account_key`, `account.nk`). It signs each endpoint's user from the endpoint's own public key (`mashctl endpoint create`), with the permissions `mashctl endpoint permissions` prints, and it writes the directory record and the inbox behind it.
 
 ## Setting mash up with `mashctl init --config`
 
-`mashctl init --config FILE` sets mash up on a NATS server you already run in operator mode with a full resolver and JetStream. `mashctl` does not install, configure or start NATS. A server address alone proves nothing about a server: not that it is in operator mode, nor that you hold authority over its account, system account and resolver. So `init` needs the authority to exist already, checks it, and refuses when a prerequisite is absent. It is safe to run again.
+`mashctl init --config FILE` sets mash up on a NATS server you already run that meets the [requirements](nats-server.md#requirements). `mashctl` does not install, configure or start NATS. A server address alone proves nothing about a server: not that it is in operator mode, nor that you hold authority over its account, system account and resolver. So `init` needs the authority to exist already, checks it, and refuses when a prerequisite is absent. It is safe to run again.
 
 ```sh
 mashctl init --config setup.yaml [--dry-run] [--json]
@@ -33,7 +33,7 @@ account_key: account.nk
 
 An unknown key is an error (`error: setup.yaml: unknown key colour`), and so is a missing one other than `ca` (`error: setup.yaml: missing key owner`). Seeds and creds are read from files only, never from arguments or environment values; the files must be mode 0600, and a seed is never printed. A hosted NATS where you do not hold the operator key, such as Synadia Cloud, is not supported in 0.5.6 ([synadia.md](synadia.md)).
 
-`init` first runs read-only checks and writes nothing until all pass: (1) the files parse and have the right seed prefixes; (2) the server refuses a connection without credentials (a server that accepts one, or whose system account answers nothing, is refused as not looking like an operator-mode server with a full resolver), the system creds connect, and the resolver has a JWT for the account key's public key whose subject is that key and which is not expired; (3) the account has JetStream file storage (disk limit other than 0), with a warning when its disk, stream and consumer limits are below what one endpoint needs (3 streams, 1 consumer, about 36 MiB; see [Account limits](#account-limits)); (4) the system account answers `$SYS.REQ.SERVER.PING` and the claims lookup; (5) the account JWT carries a valid signature by its issuer, and the issuer is the operator key you gave; any other issuer is refused (exit 1, nothing written), naming the issuer and the accepted keys; (6) the admin creds belong to the account, connect, and the server answers for the account's JetStream. The connections require TLS, or `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1` for a throwaway server. The check also refuses a configuration folder that was set up with a different operator key, account key, server, system creds, owner or admin creds (a key store, a `sys.creds` or a `config.json` that holds something else). init never replaces what the folder holds: it exits 1, changes nothing, and prints `error: ~/.config/mash was set up with a different operator key;` then `nothing was changed` and the hint `mashctl init --config <file> --config-dir <a new folder>`. The permission to push claims updates is not tested, because that would change the server: `mashctl endpoint delete` is the first to use it.
+`init` first runs read-only checks and writes nothing until all pass: (1) the files parse and have the right seed prefixes; (2) the server refuses a connection without credentials (a server that accepts one, or whose system account answers nothing, is refused as not looking like an operator-mode server with a full resolver), the system creds connect, and the resolver has a JWT for the account key's public key whose subject is that key and which is not expired; (3) the account has JetStream file storage (disk limit other than 0), with a warning when its disk, stream and consumer limits are below what mash needs (see [Sizing](nats-server.md#sizing)); (4) the system account answers `$SYS.REQ.SERVER.PING` and the claims lookup; (5) the account JWT carries a valid signature by its issuer, and the issuer is the operator key you gave; any other issuer is refused (exit 1, nothing written), naming the issuer and the accepted keys; (6) the admin creds belong to the account, connect, and the server answers for the account's JetStream. The connections require TLS, or `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1` for a throwaway server. The check also refuses a configuration folder that was set up with a different operator key, account key, server, system creds, owner or admin creds (a key store, a `sys.creds` or a `config.json` that holds something else). init never replaces what the folder holds: it exits 1, changes nothing, and prints `error: ~/.config/mash was set up with a different operator key;` then `nothing was changed` and the hint `mashctl init --config <file> --config-dir <a new folder>`. The permission to push claims updates is not tested, because that would change the server: `mashctl endpoint delete` is the first to use it.
 
 Then it writes, in this order: the two keys into the key store (`operator.nk`, `account.nk`; 0600, created without replacing anything; the same key already stored is fine, a different one is refused); the system creds as `<config dir>/server/sys.creds` (0600, where a revocation looks for them); mash's storage on the server (the directory, lease, retired-name, issue-record and adoption buckets, hardened); the admin user in the issue record; and `config.json` with `servers`, `ca`, `owner`, `admin_creds` (the path of the file you gave; it is not copied) and `system_creds`. It prints one line:
 
@@ -43,9 +43,9 @@ Initialized mash on tls://nats.example.com:4222 for owner acme
 
 Run again with the same file it changes nothing and says `Already initialized on tls://nats.example.com:4222; nothing changed`. `--dry-run` runs the checks, prints `Would initialize mash on ...` and `Nothing was changed.`, and writes nothing. `--json` prints `{"server": [...], "owner": "acme", "changed": true}`. A server that does not answer is `error: cannot reach tls://nats.example.com:4222` with the hint `mashctl doctor`, exit 1. `mashctl init` without `--config` is a usage error (exit 2).
 
-Every mash connection requires TLS, to any host, loopback included, so a plain `nats://` URL is refused for admin and system connections (`mashctl` with the admin or system creds) and for endpoint connections, with exit code 2. The one override is the environment variable `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1` (no flag, no `config.json` key), for a throwaway server in a test; with it set every command prints a warning on stderr, because plain text lets anyone on the network read mail and obtain signatures. Do not set it on a network you do not control. Admin and system connections never add servers the server advertises. See [TLS](tls-and-clusters.md#plain-text-and-mash_dangerously_skip_nats_encryption). The commands that read the account JWT (a revocation, `mashctl doctor`) accept the operator key you gave, or a signing key the operator JWT declares (see [Writing the account JWT](#writing-the-account-jwt-revocation)).
+Every mash connection requires TLS, admin, system and endpoint connections alike; the rules, the private CA and the one override are on [TLS](nats-server.md#tls). Admin and system connections never add servers the server advertises. See [TLS](tls-and-clusters.md#plain-text-and-mash_dangerously_skip_nats_encryption). The commands that read the account JWT (a revocation, `mashctl doctor`) accept the operator key you gave, or a signing key the operator JWT declares (see [Writing the account JWT](#writing-the-account-jwt-revocation)).
 
-On an operator with strict signing key usage (`strict_signing_key_usage: true`), the server accepts only users signed by an account signing key, and the account identity key cannot sign users. Give `admin_creds` a user signed by one of the account's signing keys; `init` refuses an admin user the server rejects, with the server's error text, and changes nothing.
+`mashctl` signs endpoint users with the account's identity key, so an operator that requires signing keys is not supported (see [Requirements](nats-server.md#requirements)). `init` refuses an admin user the server rejects, with the server's error text, and changes nothing.
 
 The `admin_creds` user carries no permission limits on the account when it is a full-access user: whoever holds the file can publish and subscribe on every subject of the account, read every inbox and change the directory. Keep the file at 0600 on the machine that runs `mashctl`, and give endpoints their own creds, never these.
 
@@ -72,7 +72,7 @@ What `mashctl` prints and reads follows from not trusting the server:
 
 ## The account
 
-Create an account with JetStream limits sized for your endpoints: one stream per endpoint plus two KV buckets, and one consumer per endpoint. The account name is yours to choose; `MASH` is only the default in these examples (set `ACCOUNT` to use another). The limits default to 2G of disk, 64 streams and 128 consumers; see [Limits](#limits) for the sizing rule.
+Create an account with JetStream limits sized for your endpoints (see [Sizing](nats-server.md#sizing)). The account name is yours to choose; `MASH` is only the default in these examples (set `ACCOUNT` to use another). The limits default to 2G of disk, 64 streams and 128 consumers.
 
 ```sh
 ACCOUNT=${ACCOUNT:-MASH}
@@ -108,7 +108,7 @@ After upgrading mash, re-run `mashctl init --config FILE`: it hardens the lease 
 
 An endpoint is one Claude Code session, addressed `owner.group.name` (for example `alice.dev.design`). Each token is lower-case letters, digits and single hyphens, starting with a letter, 1 to 32 characters, and the three with their two dots total at most 64. The whole address is set as `MASH_ENDPOINT` (for example `MASH_ENDPOINT=alice.dev.design`); a value that is not three dotted parts is a configuration error naming `MASH_ENDPOINT`, and with none set mash uses the one endpoint whose creds file sits directly in the config directory. An address is unique in the NATS account, and every endpoint in the account can read the whole directory, other owners' records included (see [ADR 0006](decisions/0006-one-shared-nats-account-one-owner-per-deployment.md), one owner per deployment).
 
-`mashctl endpoint create` makes an endpoint. It signs the endpoint's public key as a NATS user with the account signing key, writes the endpoint's directory record and inbox, and writes the credentials. The address is `owner.group.name`, dotted. With no option `mashctl` makes the key pair on its own host and writes `<config dir>/<address>.creds`, so the endpoint can run on that host at once:
+`mashctl endpoint create` makes an endpoint. It signs the endpoint's public key as a NATS user with the account's identity key, writes the endpoint's directory record and inbox, and writes the credentials. The address is `owner.group.name`, dotted. With no option `mashctl` makes the key pair on its own host and writes `<config dir>/<address>.creds`, so the endpoint can run on that host at once:
 
 ```sh
 mashctl endpoint create alice.dev.design
@@ -179,7 +179,7 @@ The first column of `mash who` is the endpoint's address `owner.group.name` (for
 
 ### Writing the account JWT: revocation
 
-There is no policy file: every endpoint's permission set is the owner-line set for its address and its user is signed by the account signing key, so nothing is pushed to the account to make an endpoint work. The one thing `mashctl` still writes to the account JWT is a revocation, by `endpoint delete` and `endpoint reissue`. They share one procedure.
+There is no policy file: every endpoint's permission set is the owner-line set for its address and its user is signed by the account's identity key, so nothing is pushed to the account to make an endpoint work. The one thing `mashctl` still writes to the account JWT is a revocation, by `endpoint delete` and `endpoint reissue`. They share one procedure.
 
 The base of an update is always the newest copy any server holds. The command asks every known server for the account JWT, the count coming from the system account ping and the number of servers in `config.json` (when the count is unknown it waits until no new reply arrives for a short while). Every reply must pass the issuer check (the operator key, or a key declared by `<key dir>/operator.jwt`); one that does not is refused, not skipped. The copy with the highest issued-at (`iat`) is the base, never "the first reply". If servers hold older copies, the command says `warning: N of M servers hold an older copy (iat ...); building from the newest`, and the push brings every server to the newest. If two different copies share the newest `iat`, which one is current cannot be told: the command refuses (exit 1) and names how many distinct copies there are; make the servers agree, then run it again. A signing key in the account JWT that mashctl did not create is not carried: the command refuses, naming it by public key and role, because `mashctl` signs the account JWT with the operator key; remove such a key with the tool that added it first.
 
@@ -431,16 +431,7 @@ New endpoints (`mashctl endpoint create`) get the configured limits at once. `ma
 
 ### Account limits
 
-The NATS account has limits of its own: streams, consumers and disk. Size them from the endpoint count: one stream per endpoint plus two for the buckets, and one consumer per endpoint. The disk must hold the sum of the stream caps (`inbox_max_bytes` per endpoint plus the two bucket caps), so raising the inbox cap raises the disk you need.
-
-```sh
-ENDPOINTS=20
-JS_STREAMS=$((ENDPOINTS + 2))
-JS_CONSUMERS=$ENDPOINTS
-JS_DISK_MIB=$((ENDPOINTS * 16 + 16 + 4))   # inbox_max_bytes in MiB per endpoint, plus the two buckets
-```
-
-The examples above default to `JS_DISK=2G`, `JS_STREAMS=64` and `JS_CONSUMERS=128`, which leave room to grow; change the values and re-run `nsc edit account "$ACCOUNT" ... --js-disk-storage "$JS_DISK" --js-streams "$JS_STREAMS" --js-consumer "$JS_CONSUMERS"` and `nsc push`. Leave `--js-mem-storage` unset.
+The NATS account has limits of its own: streams, consumers and disk. What mash creates and how to size them is on [Sizing](nats-server.md#sizing). Changing an inbox's caps is covered above (`mashctl limits show` and `mashctl limits apply`); to raise the account's own limits, change them with `nsc edit account ... --js-disk-storage ... --js-streams ... --js-consumer ...` and `nsc push`, and leave `--js-mem-storage` unset.
 
 ## Durability and sync_interval
 

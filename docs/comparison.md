@@ -139,7 +139,7 @@ numbered footnotes. IBM/BeeAI ACP merged into A2A (2025-08-29), so A2A's column 
 [^mat-ccx]: v2.1.224 and later; on by default.
 [^mat-sub]: Agent teams are experimental.
 [^mat-brk]: Kafka 4.3.1, RabbitMQ 4.4.0, Redis 8.10.3.
-[^run-mash]: One NATS server with JetStream in operator mode, which you run: `mashctl init --config FILE` sets mash up on it, and the release's `mash-local-nats-setup.sh` makes one that only the local machine can reach. Hosted Synadia Cloud is not supported (see [Synadia Cloud](synadia.md)). Identity: one NATS user, creds file and inbox stream per endpoint. Trust boundary: one NATS account; its key holder can impersonate any endpoint and read mail. Host integration: a Claude Code plugin, and for the idle wake a channels allowlist entry in managed settings or the development flag. Measured: `mash send` 511-540 ms; urgent wake 1.2-2.3 s.
+[^run-mash]: One NATS server that you run and that meets the [requirements](nats-server.md#requirements): `mashctl init --config FILE` sets mash up on it, and the release's `mash-local-nats-setup.sh` makes one that only the local machine can reach. Hosted Synadia Cloud is not supported (see [Synadia Cloud](synadia.md)). Identity: one NATS user, creds file and inbox stream per endpoint. Trust boundary: one NATS account; its key holder can impersonate any endpoint and read mail. Host integration: a Claude Code plugin, and for the idle wake a channels allowlist entry in managed settings or the development flag. Measured: `mash send` 511-540 ms; urgent wake 1.2-2.3 s.
 [^run-sap]: One NATS server. Identity: NATS users per agent. Trust boundary: whatever the NATS setup gives. Host integration: Synadia plugins, 12 hosts. Measured: not found.
 [^run-js]: One NATS server. Identity: NATS users. Trust boundary: accounts, with explicit export/import. Host integration: you build it. Measured: not applicable.
 [^run-a2a]: An HTTP(S) server per agent, or a gateway in front of several. Identity per agent: API keys, OAuth, OIDC or mTLS. Trust boundary: per agent. Host integration: SDKs; you write the executor. Measured: not found for setup.
@@ -413,8 +413,8 @@ its issue, under [Known issues](../CHANGELOG.md#known-issues) in the change log.
 - **No end-to-end encryption.** Mail is signed, not encrypted at the mail layer. Confidentiality is TLS in transit plus
   NATS accounts, as in SAP, which leaves end-to-end encryption out of scope. The server operator
   can read stored mail; see the threat model. For that case use SLIM or your own payload encryption (section 3).
-- **One NATS account.** Delivery between accounts is a non-goal. Setup is not one command: you run a NATS server in
-  operator mode with JetStream, and `mashctl init --config FILE` sets mash up on it; it does not install or start NATS.
+- **One NATS account.** Delivery between accounts is a non-goal. Setup is not one command: you run a NATS server that
+  meets the [requirements](nats-server.md#requirements), and `mashctl init --config FILE` sets mash up on it; it does not install or start NATS.
   For one machine, the release's `mash-local-nats-setup.sh` makes the server. Hosted Synadia Cloud is not supported (see
   [Synadia Cloud](synadia.md)).
 - **No broadcast, no files.** One recipient per message; text up to 1 MiB, less on a smaller `max_payload`.

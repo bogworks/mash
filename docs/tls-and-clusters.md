@@ -80,7 +80,7 @@ Copy `ca.pem` (not `ca.key`) to every machine that connects. In `config.json`:
 | Setting | Variable | Use |
 |---|---|---|
 | `servers` | `MASH_SERVER`, `--server` | `tls://host:port`; several separated by commas in the environment, or a JSON array in the file. |
-| `ca` | `MASH_CA`, `--ca` | The CA that signed the server's certificate. Without it the system trust store is used. |
+| `ca` | `MASH_CA`, `--ca` | The CA that signed the server's certificate (see [TLS](nats-server.md#tls)). |
 | `tls_cert`, `tls_key` | `MASH_TLS_CERT`, `MASH_TLS_KEY` | A client certificate and its key, for a server with `verify: true`. Set both or neither. |
 
 A variable overrides the same key in `config.json`. A relative path in `config.json` is resolved against the config directory. The files are read at connect time.
@@ -98,9 +98,7 @@ The same settings serve `mashctl`, `mash serve`, `mash hook` and the other `mash
 
 ### Plain text and `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION`
 
-Every mash connection requires TLS, to any host, loopback included: `mashctl`, `mash serve`, `mash hook` and the commands `send`, `read`, `inbox`, `who`, `prompt`, `status` and `doctor`. A plain `nats://` or `ws://` URL is refused before any connection is made, and so is any other scheme that is not `tls://` or `wss://`. The release's local setup script, `mash-local-nats-setup.sh` (see the [setup script reference](reference/setup.md)), makes a private certificate authority and a server certificate for 127.0.0.1, so the local quick start runs over TLS with no extra setting. (`mashctl init --local`, which did this in earlier releases, is gone.)
-
-Encryption can be turned off in one way only: the environment variable `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1`, for `mash` and `mashctl` alike. It is not a setting in the table above: there is no flag and no `config.json` key. Its only value is `1`; empty or `0` is off, anything else is an error naming the variable. The old names, `MASH_INSECURE_PLAINTEXT` and the `insecure_plaintext` key, are refused with an error naming the new variable (exit 2).
+Every mash connection requires TLS, and the one override is the environment variable `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1`; the rules are on [TLS](nats-server.md#tls). The release's local setup script, `mash-local-nats-setup.sh` (see the [setup script reference](reference/setup.md)), makes a private certificate authority and a server certificate for 127.0.0.1, so the local quick start runs over TLS with no extra setting.
 
 A plain URL without it fails with exit code 2 and this text:
 
@@ -114,7 +112,7 @@ With it set, every command of both tools prints this line on stderr, once, befor
 warning: encryption to the server is OFF (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set)
 ```
 
-Use it only for a throwaway server in a test. Never use it on a network you do not control: plain text lets anyone on the network read mail and obtain signatures. It does not turn a `tls://` connection off.
+Use it only for a throwaway server in a test: plain text lets anyone on the network read mail and obtain signatures. It does not turn a `tls://` connection off.
 
 `mash doctor` shows the result on its `server` row:
 
