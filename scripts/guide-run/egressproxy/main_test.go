@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -106,7 +107,14 @@ func start(t *testing.T, res resolver, dialed *[]string, upstream func() net.Con
 		}
 		return upstream(), nil
 	}}
-	sock = filepath.Join(t.TempDir(), "e.sock")
+	// a UNIX socket path may not pass about 104 bytes on macOS, and t.TempDir() on
+	// a runner is longer: use a short folder of our own, removed by its recorded path
+	sdir, err := os.MkdirTemp("/tmp", "ep")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(sdir) })
+	sock = filepath.Join(sdir, "e.sock")
 	ln, err := net.Listen("unix", sock)
 	if err != nil {
 		t.Fatal(err)
