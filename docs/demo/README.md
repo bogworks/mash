@@ -2,7 +2,7 @@
 
 `two-sessions.cast` is a real recording (nothing scripted or edited except trimming the end and replacing the
 working-directory path in the banner): two Claude Code sessions, `alice` (right) and `bob` (left), on a free
-[Synadia Cloud](https://cloud.synadia.com) account, with mash 0.3.0. It is kept as recorded: the commands and output below are 0.3.0's, not the current release's (see the [walkthrough](../guide/walkthrough.md) for 0.5.6). The script that set it up is retired (Synadia Cloud is not supported by mashctl in 0.5.6; see #876).
+[Synadia Cloud](https://cloud.synadia.com) account, with mash 0.3.0. It is kept as recorded: the commands and output below are 0.3.0's, not the current release's (see the [quick start](../guide/quickstart.md) for 0.5.6). The script that set it up is retired (Synadia Cloud is not supported by mashctl in 0.5.6; see #876).
 
 Play it in a terminal (the recording has long waits; `-i 2` caps any pause at two seconds):
 

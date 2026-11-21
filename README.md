@@ -4,7 +4,7 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/bogworks/mash/ci.yml?branch=main&label=CI)](https://github.com/bogworks/mash/actions/workflows/ci.yml)
 [![security checks](https://img.shields.io/github/actions/workflow/status/bogworks/mash/security.yml?branch=main&label=security)](https://github.com/bogworks/mash/actions/workflows/security.yml)
 [![license: Apache-2.0](https://img.shields.io/github/license/bogworks/mash)](LICENSE)
-[![quick start](https://img.shields.io/badge/quick%20start-walkthrough-blue)](docs/guide/walkthrough.md)
+[![quick start](https://img.shields.io/badge/quick%20start-two%20sessions-blue)](docs/guide/quickstart.md)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/bogworks/mash)
 
 **mash ("mail mesh") gives each of your AI agent sessions an inbox that keeps its mail.** The inbox lives on a NATS server (NATS is an open-source message server). Mail waits (in a single-replica inbox; see [durability](docs/operations.md#durability-and-sync_interval)), signed
@@ -47,39 +47,45 @@ JetStream (the NATS feature that stores messages on the server) and is kept up t
 
 **Status: v0.5.6, pre-1.0.** One host adapter (Claude Code). Linux and macOS, amd64 and arm64; Windows is not supported (WSL 2 with the Linux binary is expected to work but has not been tested). Interfaces may still change before 1.0. Known limits are listed in [the comparison](docs/comparison.md#9-known-limits).
 
-## Install
+## Get started
 
-Ask Claude Code to do it. Add the marketplace and install the `mash-setup` plugin:
+mash gives each Claude Code session an inbox. Here two sessions on one
+machine mail each other. You need Linux or macOS, git and Claude Code. Everything
+is installed in your home folder, with no sudo.
 
-```sh
-claude plugin marketplace add bogworks/mash
-claude plugin install mash-setup@mash
-```
+1. Add the setup skill:
 
-Then tell the session: "set mash up on this machine". The setup skill installs the programs, makes a NATS server for this machine, installs the mash plugin and makes the first endpoints, asking before each step.
+   ```sh
+   claude plugin marketplace add bogworks/mash
+   claude plugin install mash-setup@mash
+   ```
 
-The mash plugin needs the `mash` program on the PATH that Claude Code starts with. `install.sh` puts it in `~/.local/bin`; if that folder is not on the PATH, add it before starting Claude Code.
+2. In a Claude Code session, say:
 
-### Or by hand
+   > Set mash up on this machine, with two agents: acme.demo.alice and acme.demo.bob.
 
-Everything installs as you, in your home folder: no `sudo`, no package manager, no system service. Download the installer and its checksums, check, then run it; each step is joined to the next with `&&`, so a failed check stops everything:
+   It asks before each step: the programs it needs, a local NATS server, the
+   mash plugin, and the two agents.
 
-```sh
-BASE=https://github.com/bogworks/mash/releases/latest/download
-curl -fsSLO $BASE/install.sh -O $BASE/SHA256SUMS &&
-grep ' install.sh$' SHA256SUMS | sha256sum -c - &&    # macOS: shasum -a 256 -c -
-bash install.sh
-```
+3. Start a session as each agent, in two terminals:
 
-This installs `mash` and `mashctl` from the release into `~/.local/bin`, after checking each against the release's `SHA256SUMS`. [docs/install.md](docs/install.md) says what it does and how to pin a release.
+   ```sh
+   MASH_ENDPOINT=acme.demo.bob claude
+   MASH_ENDPOINT=acme.demo.alice claude
+   ```
 
-mash needs two programs from NATS on the `PATH` of the user who runs it: `nats-server` 2.10.7 or newer (tested with 2.15.1) and `nats` (tested with 0.5.2). Install them any way you like; the setup skill asks how you would like to, and the Quick start shows one way with no `sudo`. The local NATS server and the rest of the by-hand route (one way to get the two programs from their GitHub releases, `mash-local-nats-setup.sh`, two endpoints, the first mail) are in the [Quick start](docs/guide/walkthrough.md#quick-start), each command run on this release. To use a NATS server you already run, see [Bring your own NATS server](docs/nats-server.md).
+   Claude Code asks whether to trust the folder; choose yes.
 
-Where everything lives, by default: the programs in `~/.local/bin` (`MASH_INSTALL_DIR` names another folder), the configuration and keys in `~/.config/mash` (`$XDG_CONFIG_HOME/mash` or `MASH_CONFIG_DIR` if set), a local server in `~/mash-nats` (the folder the setup script printed, if you used `--dir`). Check yours before you remove anything. How to remove it all: [Uninstall](docs/install.md#uninstall).
+4. In Bob's session, say: "Send alice a note: lunch at noon?"
+   In Alice's, say: "Do I have mail?" She sees Bob's note, marked verified, after the setup's own test note.
 
-### When something is wrong
+Mail waits. Close Alice's session, send again from Bob's, reopen hers, and
+it is there.
 
-`mash status`, then `mash doctor` (one endpoint); `mashctl status`, then `mashctl doctor` (the server). After a reboot a local server stays stopped: run the setup script you downloaded (keep it; the setup skill says where it saved it) with `--start`, and with `--dir DIR` if you used one: `bash <folder>/mash-local-nats-setup.sh --start`. More in [docs/troubleshooting.md](docs/troubleshooting.md).
+- Something wrong: `mash doctor`, then [troubleshooting](docs/troubleshooting.md).
+- The same thing, typed yourself: [by hand](docs/guide/by-hand.md).
+- How mash, SAP and NATS fit together: [the stack](docs/guide/stack.md).
+- Remove everything: [uninstall](docs/install.md#uninstall).
 
 ## Check the download
 
@@ -94,10 +100,6 @@ gh attestation verify SHA256SUMS -R bogworks/mash --bundle mash.intoto.jsonl \
 
 
 The rest (checking `install.sh` itself against `SHA256SUMS`, and building from source) is in [docs/install.md](docs/install.md#verify-what-you-download).
-
-## Quick start
-
-The quick start is one guided walkthrough that takes you from nothing to two Claude Code sessions mailing each other, with the output of every command. The [Quick start](docs/guide/walkthrough.md#quick-start) is the short version; the rest of the walkthrough explains each step.
 
 ## Documentation
 
