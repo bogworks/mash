@@ -287,9 +287,6 @@ func (s joinSvc) folderCA(dir string, cfg map[string]json.RawMessage, wantCA boo
 	return true, ders, nil
 }
 
-// hasCreds is whether the folder holds an endpoint: an installed endpoint's creds file (the config package's rule).
-func hasCreds(dir string) bool { return len(config.InstalledEndpoints(dir)) > 0 }
-
 // Join installs the join file into the configuration folder. Everything is checked before anything is written, under a
 // lock on the folder; the files are written whole to temporary files and renamed or linked into place, the creds file
 // first, then ca.pem, then config.json, so a run whose creds step fails has installed nothing, and a run that fails

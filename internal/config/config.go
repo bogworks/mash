@@ -203,10 +203,6 @@ func (e *SeveralEndpointsError) Is(target error) bool { return target == ErrSeve
 // credsFileRE is an installed endpoint's creds file: owner.group.name.creds, each part 1-63 of [a-z0-9-].
 var credsFileRE = regexp.MustCompile(`^([a-z0-9-]{1,63})\.([a-z0-9-]{1,63})\.([a-z0-9-]{1,63})\.creds$`)
 
-// InstalledEndpoints is installedEndpoints for callers outside the package (mash join asks whether a folder holds an
-// endpoint).
-func InstalledEndpoints(dir string) []string { return installedEndpoints(dir) }
-
 // installedEndpoints lists, sorted, the addresses of the regular files directly in dir named owner.group.name.creds that
 // are owned by the current user and have mode 0600; any other file does not count.
 func installedEndpoints(dir string) []string {
