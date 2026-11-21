@@ -84,7 +84,7 @@ it is there.
 
 - Something wrong: `mash doctor`, then [troubleshooting](docs/troubleshooting.md).
 - The same thing, typed yourself: [by hand](docs/guide/by-hand.md).
-- How mash, SAP and NATS fit together: [the stack](docs/stack.md).
+- How mash, SAP and NATS fit together: [the stack](docs/guide/stack.md).
 - Remove everything: [uninstall](docs/install.md#uninstall).
 
 ## Check the download
