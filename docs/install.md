@@ -146,7 +146,7 @@ If the folder was left by mash 0.5.5, see [If you ran mash 0.5.5](#if-you-ran-ma
 | `cli_timeout` | `MASH_CLI_TIMEOUT` | The total deadline of one command (`send`, `inbox`, `who` and the rest), open included. A Go duration above zero. Default `15m`. |
 | `wake_count` | `MASH_WAKE_COUNT`, or the `mash serve` flag `--wake-count N` | How many waiting messages are too many: above it `mash serve` wakes the session and `mash inbox` says "More than N are waiting." Any whole number, 0 or more. Default `15`; `0` turns it off. `mash serve` refuses a value that is not one (exit 2); other commands ignore it and use the default. |
 | `wake_age` | `MASH_WAKE_AGE`, or the `mash serve` flag `--wake-age DURATION` | How long the oldest waiting message may wait: past it `mash serve` wakes the session and `mash inbox` says "The oldest has waited ..." past it. A whole number and `m`, `h` or `d` (for example `30m`, `1h`, `2d`), or a Go duration such as `90s`; any positive length. Default `1h`; `0` turns it off. `mash serve` refuses a value that is not one (exit 2); other commands ignore it and use the default. |
-| `admin_timeout` | `MASH_ADMIN_TIMEOUT` | The total deadline of one `mashctl` command. A Go duration above zero, for a large fleet or a slow link. Default `30s`. |
+| `admin_timeout` | `MASH_ADMIN_TIMEOUT` | The total deadline of one `mashctl` command. A Go duration above zero, for a large mesh or a slow link. Default `30s`. |
 
 The environment wins over the file.
 
@@ -158,7 +158,7 @@ The environment wins over the file.
 
 Credentials files must be mode 0600; they hold the endpoint's private key, and mash refuses to use a credentials file that other users can read (fix it with `chmod 600`). `mashctl` applies the same check to the admin credentials and to the system account credentials (`system_creds` in `config.json`). A symlink is followed and the file it points to is checked.
 
-Optional: the session instruction file `~/.config/mash/policy.md` is appended to every session's instructions. By default, mail from a verified mash endpoint is treated as a delegated request from the fleet's operator; use `policy.md` to carve out what still needs a human, for example "Ask me before spending money or touching production."
+Optional: the session instruction file `~/.config/mash/policy.md` is appended to every session's instructions. By default, mail from a verified mash endpoint is treated as a delegated request from the operator of this mash deployment; use `policy.md` to carve out what still needs a human, for example "Ask me before spending money or touching production."
 
 ### Turning encryption off
 
