@@ -3,6 +3,7 @@ package endpoint
 import (
 	"context"
 	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -215,6 +216,9 @@ func TestListedMailIsListedOnceAgainAfterARebind(t *testing.T) {
 	stop1()
 	_ = a1
 
+	var passes atomic.Int64 // settle passes begun: a pass runs its wake check after the seam, on the serve's one goroutine
+	testSettleSeam = func() { passes.Add(1) }
+	t.Cleanup(func() { testSettleSeam = nil }) // registered before the endpoint's stop, so it runs after the endpoint stops
 	a2, ev2, stop2 := open()
 	t.Cleanup(stop2)
 	until(t, "respooled", func() bool { return len(waiting(t, sp)) == 3 })
@@ -227,6 +231,11 @@ func TestListedMailIsListedOnceAgainAfterARebind(t *testing.T) {
 		t.Fatal(err)
 	}
 	listAll(t, sp)
+	// A wake the new serve decided on before the list landed (the mail was unlisted then, as it should be) may still be
+	// in flight. Two more settle passes mean the pass that read the list has finished, delivering or not: whatever rang
+	// after that is a loop.
+	begun := passes.Load()
+	until(t, "a settle pass after the list", func() bool { return passes.Load() >= begun+2 })
 	rung := len(ev2.all())
 	time.Sleep(IdleWake + IdleWake/2) // past the first wake it would have rung, were the mail not listed
 	if got := ev2.all(); len(got) != rung {
