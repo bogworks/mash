@@ -26,12 +26,25 @@ body:
     attributes:
       label: Install method
       options:
+        - install.sh from the release
+        - the mash-setup skill
+        - the plugin's own download
+        - release binary by hand
         - go install
-        - Release binary
-        - Built from source
-        - Other
+        - built from source
+        - other
     validations:
       required: true
+  - type: input
+    id: mashctl_version
+    attributes:
+      label: mashctl version
+      description: Output of `mashctl version`.
+  - type: input
+    id: claude_code_version
+    attributes:
+      label: Claude Code version
+      description: Output of `claude --version`.
   - type: textarea
     id: happened
     attributes:

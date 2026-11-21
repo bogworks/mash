@@ -1,6 +1,8 @@
 # The in-session review loop
 
-[ADR 0080](../decisions/0080-review-is-a-gate-in-the-implementers-loop-adopted-from-a-sibling-project.md): an author
+This page describes the maintainers' own pre-push review gate. Outside contributors do not need it: a pull request gets the checks in [CONTRIBUTING.md](../../CONTRIBUTING.md) and a maintainer's review.
+
+[ADR 0080](../decisions/0080-review-is-a-gate-in-the-implementers-loop-adopted-from-a-sibling-project.md): a maintainer
 reviews their own diff before pushing, so findings come back into the same session in minutes instead of through a pull
 request comment hours later. The process is adopted from ADR 0047 of a sibling project
 (`docs/decisions/0047-review-is-a-gate-in-the-implementers-loop.md`), whose gate this one is a port of; this page says what
@@ -97,7 +99,7 @@ which reviews each pull request head with Codex.
   from the fetched `origin/<base branch>` (`git show`, `git archive`), never from the pull request's own tree, so a
   pull request cannot verify its receipt with its own policy or verifier. A base without either skips verification, so
   nothing is verified until this change is on `main`.
-- **The tiers govern the push, not the status.** The tier table says when the author may stop and push. What
+- **The tiers govern the push, not the status.** The tier table says when the maintainer may stop and push. What
   `codex-review` posts, and when an open finding fails it, is the watcher's rule and is unchanged by this page.
 - **An outside pull request never trusts a receipt,** and a contributor session is not a security boundary
   (ADR 0020 of the source project): the binding is the patch-id, the evidence hashes, the manifest range and the

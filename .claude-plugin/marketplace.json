@@ -5,7 +5,7 @@
     "url": "https://github.com/bogworks"
   },
   "metadata": {
-    "description": "mash: a messaging mesh for Claude Code sessions"
+    "description": "mash: a mail mesh for Claude Code sessions"
   },
   "plugins": [
     {
