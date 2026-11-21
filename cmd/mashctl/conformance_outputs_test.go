@@ -56,13 +56,15 @@ var confUnchecked = map[string]string{
 // confVaryingCause: key is "<command> <case>". The cases listed here end their `error:` line in a cause that the
 // specification gives as one example and the build words as it finds it (rules.json, "A case written in brackets is a
 // description" and the rule on an error that names a cause): the text after the LAST ": " of the first `error:` line
-// is the cause as found. For such a case everything before that cut is compared exactly, in the specification's text
-// and in the build's, and the build's cause must be non-empty; the cause itself is not compared. See confCutCause.
+// is the cause as found in the specification's text. The stable prefix is derived from the specification's line only
+// (everything up to and including its last ": "). The build's first `error:` line must start with that prefix and have
+// a non-empty remainder, the cause, which is not compared and may itself contain ": " (as in "mash: inbox stream:
+// <err>"). The other lines are compared exactly. See confCutCause and confMatchCause.
 var confVaryingCause = map[string]bool{
 	"endpoint delete Cancelled everywhere, then a later step failed": true,
 }
 
-// confCutCause cuts the final ": <cause>" off the first line of text that starts with "error: ". It returns the text
+// confCutCause (used on the specification's text) cuts the final ": <cause>" off the first line of text that starts with "error: ". It returns the text
 // with that line shortened to what stands before the cut, and the cause. ok is false when there is no such line or the
 // line has no ": " after the "error:" word itself.
 func confCutCause(text string) (cut, cause string, ok bool) {
@@ -79,6 +81,36 @@ func confCutCause(text string) (cut, cause string, ok bool) {
 		return strings.Join(lines, "\n"), l[at+len(": "):], true
 	}
 	return text, "", false
+}
+
+// confMatchCause reads the actual text against the stable prefix of the specification's error line: want is the
+// specification's text as confCutCause returned it. The first `error: ` line of actual must start with the specification's
+// cut line plus ": " and leave a non-empty remainder; that remainder is the cause and may contain ": ". It returns actual
+// with that line shortened to the cut line, so the rest compares exactly. ok is false when there is no such line or it
+// does not start with the prefix.
+func confMatchCause(want, actual string) (cut, cause string, ok bool) {
+	var prefix string
+	for _, l := range strings.Split(want, "\n") {
+		if strings.HasPrefix(l, "error: ") {
+			prefix = l + ": "
+			break
+		}
+	}
+	if prefix == "" {
+		return actual, "", false
+	}
+	lines := strings.Split(actual, "\n")
+	for i, l := range lines {
+		if !strings.HasPrefix(l, "error: ") {
+			continue
+		}
+		if !strings.HasPrefix(l, prefix) {
+			return actual, "", false
+		}
+		lines[i] = strings.TrimSuffix(prefix, ": ")
+		return strings.Join(lines, "\n"), l[len(prefix):], true
+	}
+	return actual, "", false
 }
 
 // confIsDescription: a case whose whole text stands in round brackets describes the output in words; it is not the
@@ -561,7 +593,7 @@ func confOutputProblems(path string, oc confOutCase, r confOutRun) []string {
 		if text, _, ok = confCutCause(text); !ok {
 			p = append(p, "the specification's text has no error line with a cause")
 		}
-		cut, cause, ok := confCutCause(r.ran.errs)
+		cut, cause, ok := confMatchCause(text, r.ran.errs)
 		switch {
 		case !ok:
 			p = append(p, fmt.Sprintf("stderr: want an error line that ends in a cause, got %q", r.ran.errs))
