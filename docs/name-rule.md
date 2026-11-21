@@ -4,8 +4,8 @@ The format of mash's name-acceptance rule file, version 1. mash owns this schema
 deployment owns the content of the file. mash ships no default rule: with no file named, no rule applies. The decision
 is [ADR 0077](decisions/0077-the-name-rule-file-is-versioned-and-mash-reads-two-versions-for-one-window.md).
 
-A rule restricts which addresses mash will accept. An address is the three tokens `owner`, `group` and `instance`
-(`owner.group.instance`). mash applies the rules as given and gives no token a meaning of its own. A rule can
+A rule restricts which addresses mash will accept. An address is the three tokens `owner`, `group` and `name`
+(`owner.group.name`). In a rule's `match` the third token is called `instance`, because the file format names it that way. mash applies the rules as given and gives no token a meaning of its own. A rule can
 only refuse: it cannot grant what mash's own syntax forbids, and it is not a grant of any permission.
 
 ## Where the file comes from
@@ -39,7 +39,7 @@ only refuse: it cannot grant what mash's own syntax forbids, and it is not a gra
 - `rules`: an array. It may be empty. Required.
 - A rule has exactly the keys `id`, `match` and `message`. `id` is a short non-empty name, unique in the file.
   `message` is the non-empty refusal text.
-- `match` is an object over any of `owner`, `group` and `instance`. The keys `agent` and `name` of the earlier format
+- `match` is an object over any of `owner`, `group` and `instance` (the `name` token of the address). The keys `agent` and `name` of the earlier format
   are refused, and a file that uses them does not load. Each key present takes one object: `{"is": RE}` or
   `{"is_not": RE}`, where `RE` is a Go RE2 regular expression. `is` holds when the token matches; `is_not` holds when it
   does not.
@@ -88,7 +88,7 @@ token object is such a change, because unknown keys are errors.
 
 These show the format. They are content, not part of it; the deployment decides what its file holds.
 
-Refuse a group that is reserved, and any instance name that starts with `tmp-`:
+Refuse a group that is reserved, and any endpoint name that starts with `tmp-`:
 
 ```json
 {

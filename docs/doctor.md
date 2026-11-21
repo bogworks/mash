@@ -9,6 +9,8 @@ machines. It takes its server, owner and credentials from `config.json` like the
 mashctl doctor [--strict] [--json]
 ```
 
+The generated reference page, [mashctl doctor](reference/mashctl-doctor.md), has the exact output and exit codes; this page explains what each check means.
+
 - `--strict` exits 1 on a warning too.
 - `--json` prints the result as JSON.
 

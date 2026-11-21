@@ -1,6 +1,6 @@
 # Operating mash
 
-mash needs a NATS server in operator mode with JetStream, and one account for mash. the `mash` binary never mints NATS users and never holds an operator or account seed. `mashctl` holds the account signing key. It signs each endpoint's user from the endpoint's own public key (`mashctl endpoint create`), with the permissions `mashctl permissions` prints, and it writes the directory record and the inbox behind it.
+mash needs a NATS server in operator mode with JetStream, and one account for mash. The `mash` binary never mints NATS users and never holds an operator or account seed. `mashctl` holds the account signing key. It signs each endpoint's user from the endpoint's own public key (`mashctl endpoint create`), with the permissions `mashctl endpoint permissions` prints, and it writes the directory record and the inbox behind it.
 
 ## Setting mash up with `mashctl init --config`
 
@@ -31,7 +31,7 @@ account_key: account.nk
 - `operator_key`: the seed of the operator key that signs the account (starts with `SO`): the operator's identity key when the server was set up with the `nats` command, or a signing key if your operator uses one. Whoever holds it can sign any account for that operator, so keep it as you keep the operator's identity. A revocation (`endpoint delete`, `endpoint reissue`) signs the account JWT with it.
 - `account_key`: the **identity** seed of the mash account (starts with `SA`; its public key is the account JWT's subject).
 
-An unknown key is an error (`error: setup.yaml: unknown key colour`), and so is a missing one other than `ca` (`error: setup.yaml: missing key owner`). Seeds and creds are read from files only, never from arguments or environment values; the files must be mode 0600, and a seed is never printed. A hosted NATS where you do not hold the operator key, such as Synadia Cloud, is not supported by `mashctl` in 0.5.6; `mash` itself works against any conforming server.
+An unknown key is an error (`error: setup.yaml: unknown key colour`), and so is a missing one other than `ca` (`error: setup.yaml: missing key owner`). Seeds and creds are read from files only, never from arguments or environment values; the files must be mode 0600, and a seed is never printed. A hosted NATS where you do not hold the operator key, such as Synadia Cloud, is not supported in 0.5.6 ([synadia.md](synadia.md)).
 
 `init` first runs read-only checks and writes nothing until all pass: (1) the files parse and have the right seed prefixes; (2) the server refuses a connection without credentials (a server that accepts one, or whose system account answers nothing, is refused as not looking like an operator-mode server with a full resolver), the system creds connect, and the resolver has a JWT for the account key's public key whose subject is that key and which is not expired; (3) the account has JetStream file storage (disk limit other than 0), with a warning when its disk, stream and consumer limits are below what one endpoint needs (3 streams, 1 consumer, about 36 MiB; see [Account limits](#account-limits)); (4) the system account answers `$SYS.REQ.SERVER.PING` and the claims lookup; (5) the account JWT carries a valid signature by its issuer, and the issuer is the operator key you gave; any other issuer is refused (exit 1, nothing written), naming the issuer and the accepted keys; (6) the admin creds belong to the account, connect, and the server answers for the account's JetStream. The connections require TLS, or `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1` for a throwaway server. The check also refuses a configuration folder that was set up with a different operator key, account key, server, system creds, owner or admin creds (a key store, a `sys.creds` or a `config.json` that holds something else). init never replaces what the folder holds: it exits 1, changes nothing, and prints `error: ~/.config/mash was set up with a different operator key;` then `nothing was changed` and the hint `mashctl init --config <file> --config-dir <a new folder>`. The permission to push claims updates is not tested, because that would change the server: `mashctl endpoint delete` is the first to use it.
 
@@ -106,7 +106,7 @@ After upgrading mash, re-run `mashctl init --config FILE`: it hardens the lease 
 
 ## Adding an endpoint
 
-An endpoint is one Claude Code session, addressed `owner.group.instance` (for example `alice.dev.design`). Each token is lower-case letters, digits and single hyphens, starting with a letter, 1 to 32 characters, and the three with their two dots total at most 64. The whole address is set as `MASH_ENDPOINT` (for example `MASH_ENDPOINT=alice.dev.design`); a value that is not three dotted parts is a configuration error naming `MASH_ENDPOINT`, and with none set mash uses the one endpoint whose creds file sits directly in the config directory. An address is unique in the NATS account, and every endpoint in the account can read the whole directory, other owners' records included (see [ADR 0006](decisions/0006-one-shared-nats-account-one-owner-per-deployment.md), one owner per deployment).
+An endpoint is one Claude Code session, addressed `owner.group.name` (for example `alice.dev.design`). Each token is lower-case letters, digits and single hyphens, starting with a letter, 1 to 32 characters, and the three with their two dots total at most 64. The whole address is set as `MASH_ENDPOINT` (for example `MASH_ENDPOINT=alice.dev.design`); a value that is not three dotted parts is a configuration error naming `MASH_ENDPOINT`, and with none set mash uses the one endpoint whose creds file sits directly in the config directory. An address is unique in the NATS account, and every endpoint in the account can read the whole directory, other owners' records included (see [ADR 0006](decisions/0006-one-shared-nats-account-one-owner-per-deployment.md), one owner per deployment).
 
 `mashctl endpoint create` makes an endpoint. It signs the endpoint's public key as a NATS user with the account signing key, writes the endpoint's directory record and inbox, and writes the credentials. The address is `owner.group.name`, dotted. With no option `mashctl` makes the key pair on its own host and writes `<config dir>/<address>.creds`, so the endpoint can run on that host at once:
 
@@ -129,16 +129,16 @@ mashctl endpoint create alice.dev.design --out alice.dev.design.join --public-ke
 
 The options and the join file are described in [mashctl.md](mashctl.md#mashctl-endpoint-create).
 
-The creds file is named `<owner>.<group>.<instance>.creds`. It holds the seed. Keep it on the machine that runs the session, and nowhere else. The `--public-key` form never moves the seed: see [An endpoint on another machine](#an-endpoint-on-another-machine).
+The creds file is named `<owner>.<group>.<name>.creds`. It holds the seed. Keep it on the machine that runs the session, and nowhere else. The `--public-key` form never moves the seed: see [An endpoint on another machine](#an-endpoint-on-another-machine).
 
 Before a command changes anything, `--dry-run` says what it would do: `mashctl endpoint create alice.dev.design --dry-run`.
 
 `mashctl endpoint permissions <owner.group.name>` prints the permission set as JSON, and nothing else, on stdout; it reads no server. The keys are `pub` and `sub`, each with `allow` and `deny`. The set lets an endpoint:
 
 - publish mail, live SAP prompts and status probes to any endpoint of its owner: `agents.mail.<owner>.*.*`, `agents.prompt.<owner>.*.*` and `agents.status.<owner>.*.*`, so a credential is open to the whole owner by default and reaches no other owner;
-- publish its own heartbeat, `agents.hb.<owner>.<group>.<instance>`, and answer SAP discovery;
+- publish its own heartbeat, `agents.hb.<owner>.<group>.<name>`, and answer SAP discovery;
 - subscribe to its own `agents.prompt` and `agents.status` subjects, to `$SRV.>` and to the owner's heartbeats, `agents.hb.<owner>.*.*`;
-- read and acknowledge its own inbox, `inbox-<owner>_<group>_<instance>`, and read its own history;
+- read and acknowledge its own inbox, `inbox-<owner>_<group>_<name>`, and read its own history;
 - read (never write) the directory;
 - hold its own lease and nothing else.
 
@@ -175,7 +175,7 @@ mashctl endpoint unset alice.dev.design description capability      # clear the 
 
 `endpoint set` and `endpoint unset` need an address and at least one key, change only the fields given, and write with a compare-and-set, re-reading and retrying if another write lands first. The keys are `role`, `description`, `host`, `note`, `capability` and `label.NAME`. `capability=a,b` sets the whole list, and `unset capability` clears it; to remove one capability, set the list again without it. `--dry-run` prints what would change and changes nothing. The 8-label and 8-capability caps are checked after the merge. Fields a newer mash wrote to the record are kept. Older mash versions ignore the labels, so mixed versions are safe. 
 
-The first column of `mash who` is the endpoint's address `owner.group.instance` (for example `alice.dev.design`). `mash who --wide` (and the `who` tool a session's model sees, with `wide`) adds `ROLE`, `HOST` and `DESCRIPTION` columns, with `-` where nothing is recorded. The labels and capabilities are in the JSON, not the table. The directory metadata is only the record of intent; the live lease is not shown by `who`, because other endpoints' leases are not readable with an endpoint's permissions.
+The first column of `mash who` is the endpoint's address `owner.group.name` (for example `alice.dev.design`). `mash who --wide` (and the `who` tool a session's model sees, with `wide`) adds `ROLE`, `HOST` and `DESCRIPTION` columns, with `-` where nothing is recorded. The labels and capabilities are in the JSON, not the table. The directory metadata is only the record of intent; the live lease is not shown by `who`, because other endpoints' leases are not readable with an endpoint's permissions.
 
 ### Writing the account JWT: revocation
 
@@ -214,7 +214,7 @@ mash who acme.demo.alice --json             # one endpoint: its online state is 
 
 | Field | Type | Present |
 |---|---|---|
-| `address` | string | always: `owner.group.instance` |
+| `address` | string | always: `owner.group.name` |
 | `online` | boolean | always |
 | `role`, `host`, `description` | string | `null` when not recorded |
 | `capability` | array of strings | always; `[]` when there are none |
@@ -261,11 +261,11 @@ mashctl endpoint create alice.dev.recv
 mashctl endpoint delete alice.dev.recv
 ```
 
-A refusal (the name rule, an address already in the directory, a retired address) exits with the reason, nothing changed. A retired address is refused with `endpoint alice.dev.recv is retired ... never reassigned (INV-002)`. `set-meta`, `suspend`, `resume`, `suspended` and `label` take the address as `owner.group.instance` or the flat key `owner_group_instance`.
+A refusal (the name rule, an address already in the directory, a retired address) exits with the reason, nothing changed. A retired address is refused with `endpoint alice.dev.recv is retired ... never reassigned (INV-002)`. `set-meta`, `suspend`, `resume`, `suspended` and `label` take the address as `owner.group.name` or the flat key `owner_group_name`.
 
 ### A retired address is never reassigned
 
-Deleting an endpoint also burns a retired marker for its address: one key, the flat key `owner_group_instance`, in the `mash-retired` bucket. The marker has two states:
+Deleting an endpoint also burns a retired marker for its address: one key, the flat key `owner_group_name`, in the `mash-retired` bucket. The marker has two states:
 
 1. The marker is written as `pending` first, before the endpoint's user is revoked and before anything is purged. A bucket that is full or failing makes the command fail at this point, with nothing revoked and nothing removed.
 2. The user is revoked, the lease is fenced, the directory record is purged (with the record's revision, so a changed or replaced record is never removed).
@@ -444,7 +444,7 @@ The examples above default to `JS_DISK=2G`, `JS_STREAMS=64` and `JS_CONSUMERS=12
 
 ## Durability and sync_interval
 
-Every mash inbox is a JetStream stream with one replica (R1). nats-server's default `sync_interval` is 2 minutes: the server acknowledges a write before it has fsynced it. So a host crash or power cut can lose up to about 2 minutes of mail that mash already reported as `sent #N`. Restarting or killing mash, or the nats-server process, is fine: the data is in the operating system's page cache and survives. See [Jepsen's analysis of NATS 2.12.1](https://jepsen.io/analyses/nats-2.12.1) and [Synadia's response](https://synadia.com/blog/jepsen-nats-2-12-1), which recommends `sync_interval: always` for a single server.
+Every mash inbox is a JetStream stream with one replica (R1). nats-server's default `sync_interval` is 2 minutes: the server acknowledges a write before it has fsynced it. So a host crash or power cut can lose up to about 2 minutes of mail that mash already reported as sent (`Mail sent (number N).`). Restarting or killing mash, or the nats-server process, is fine: the data is in the operating system's page cache and survives. See [Jepsen's analysis of NATS 2.12.1](https://jepsen.io/analyses/nats-2.12.1) and [Synadia's response](https://synadia.com/blog/jepsen-nats-2-12-1), which recommends `sync_interval: always` for a single server.
 
 - **Self-hosted server:** set it in `nats-server.conf`, then restart the server:
 
@@ -533,7 +533,7 @@ mash's live receipts use persistent `claude -p` stream-json sessions. Other head
 
 - **Persistent stream-json works.** A `claude -p` process that stays open between turns, with the plugin's hooks, delivers mail as in an interactive session. The receipt is [2026-10-29-default-kind-live-v0.2.6](evidence/2026-10-29-default-kind-live-v0.2.6/RECEIPT.md) (Claude Code 2.1.312, hooks injected with `--settings`).
 - **A one-shot run holds the name only for its turn.** `mash serve` exits when its MCP input stream ends (`internal/mcp/server.go`, `Run`), which ends the session's lease. Mail that arrives while the run is in its turn is shown by the hooks at its next tool call. Mail sent between runs waits in the inbox, and the next run's hooks show it once its serve has received it. This one-shot behaviour follows from the code and is not covered by a live receipt.
-- **The development flag does nothing here, so the allowlist is required.** With `-p` or the Agent SDK, Claude Code ignores `--dangerously-load-development-channels` and the channel does not register ([Claude Code channels reference](https://code.claude.com/docs/en/channels-reference#test-during-the-research-preview)). Allowlist mash in managed settings as in [install.md](install.md#3-allow-the-channel-once-per-machine) for any channel wake; hooks deliver mail without a channel, but nothing wakes an idle session. A headless run that is already in a turn needs no wake.
+- **The development flag does nothing here, so the allowlist is required.** With `-p` or the Agent SDK, Claude Code ignores `--dangerously-load-development-channels` and the channel does not register ([Claude Code channels reference](https://code.claude.com/docs/en/channels-reference#test-during-the-research-preview)). Allowlist mash in managed settings as in [install.md](install.md#3-allow-the-channel) for any channel wake; hooks deliver mail without a channel, but nothing wakes an idle session. A headless run that is already in a turn needs no wake.
 - **An SDK host must load the plugin itself.** `claude -p` loads plugins you already installed, but an Agent SDK host takes plugins through the SDK's plugin option ([Load plugins in the Agent SDK](https://code.claude.com/docs/en/agent-sdk/plugins)). Mail needs the plugin's MCP server (`mash serve`) and both hooks, PostToolUse and UserPromptSubmit (`plugin/hooks/hooks.json`); a host that loads MCP servers or hooks its own way and omits either gets no delivery. Also set `MASH_ENDPOINT`. mash has not been run under an SDK host.
 
 ## Minimum Claude Code version
@@ -546,7 +546,7 @@ A live prompt carries at most 32768 bytes of text (`endpoint.MaxPromptBytes`). T
 
 ## Refused sends
 
-`mash send` (and the `send` tool) fails at once with `refused by policy: you may not mail <address>` when the server refuses the publish because the sender's NATS user has no permission to publish to that recipient's mail subject. Nothing was stored, and retrying with the same credentials cannot help. Mash's default permission set lets an endpoint mail every endpoint of its owner, so this only happens to a sender issued a set that omits the recipient, for example a hand-edited allow list of mail subjects. The fix is on the server side: issue the sender a permission set that includes the recipient's mail subject (`agents.mail.<owner>.<group>.<instance>` of the recipient).
+`mash send` (and the `send` tool) fails at once with `refused by policy: you may not mail <address>` when the server refuses the publish because the sender's NATS user has no permission to publish to that recipient's mail subject. Nothing was stored, and retrying with the same credentials cannot help. Mash's default permission set lets an endpoint mail every endpoint of its owner, so this only happens to a sender issued a set that omits the recipient, for example a hand-edited allow list of mail subjects. The fix is on the server side: issue the sender a permission set that includes the recipient's mail subject (`agents.mail.<owner>.<group>.<name>` of the recipient).
 
 The message adds a second sentence because the server's error does not say why the publish was denied: if the recipient is an endpoint of the sender's owner, the credentials may predate the permissions mash issues now or the permissions were narrowed, and the admin should check them.
 
@@ -585,20 +585,6 @@ These timings are not configurable: peers and the server must agree on them, so 
 
 ## Troubleshooting
 
-| Symptom | Likely cause |
-|---|---|
-| The session says it has no mash identity | `MASH_ENDPOINT` was not set when Claude Code started (and no single installed endpoint was found). |
-| The session stops with `error: more than one endpoint is installed here: a, b` | No `MASH_ENDPOINT` was set and several creds files are installed. Name one in the environment when Claude Code starts. |
-| The session says the address is already in use | Another live session holds the lease (it expires 90 s after that session dies). The session keeps retrying every 10 s and tells Claude when mail is on; no restart is needed. |
-| After `/login` (or any restart inside one session) the old serve is still listed | A new `mash serve` of the same session takes the lease from the earlier one at once, so mail is on in the new one; the earlier serve says it was superseded (pid of the new one) and exits when its client closes it or its parent changes. See [Same-session takeover](#same-session-takeover). |
-| `--channels` says "not on the approved channels allowlist" | The managed settings allowlist is missing (see install.md, step 3). |
-| Mail arrives labelled `[unknown-signer]`, or `mash doctor` counts refused messages | The sender's key is not in the directory: it was deprovisioned, or it is not a mash endpoint. Unverified mail is refused unless `accept_unverified` is set (see install.md). |
-| `mash: endpoint X is not provisioned` | Run `mashctl endpoint create`, or check `MASH_ENDPOINT` for a typo. |
-| `x509: certificate signed by unknown authority` (or another `x509:` error) on connect | The server's certificate is not trusted. Set `ca` (`MASH_CA`) to the PEM file of the CA that signed it. The files are read at connect time. |
-| `remote error: tls: bad certificate` (or `certificate required`) on connect | The server requires a client certificate, or refused the one given. Set both `tls_cert` and `tls_key` (`MASH_TLS_CERT`, `MASH_TLS_KEY`) to a certificate the server's CA signed. |
-| `mash doctor` shows `warn` on the `server` row (`is plain text: MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set`) | `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION` is set and the server URL is plain text. Use `tls://` with the server's certificate and unset it. |
-| `mash doctor` shows `FAIL` on the `server` row for a plain url | The url is plain text and `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION` is not set: mash refused it before connecting, loopback included. Use `tls://` with the server's certificate (`ca` for a private CA). |
-| `refused by policy: you may not mail X` on send | The sender's NATS permissions do not include X's mail subject (a hand-edited set, or credentials issued before the permissions changed). See "Refused sends". |
-| `do not match endpoint` | The credentials file belongs to a different address than `MASH_ENDPOINT` names. |
-| Peers look offline, or mail arrives labelled `[stale]` | Clock skew. Keep every machine's clock in sync (NTP, including laptops, containers and VMs after suspend): more than 30 s of skew (`sap.LiveSkew`) makes live requests and heartbeats fail and stored mail `[stale]`. |
-| Clients take 30-60 s to reconnect after a network blip | The server rate-limits new connections per source address. Clients retry with jitter; raise the limit for trusted sources if this matters. |
+Symptoms, causes and fixes are in [troubleshooting.md](troubleshooting.md).
+
+For `tls: bad certificate` or `certificate required` (set `tls_cert` and `tls_key`) and for `x509: certificate signed by unknown authority` (set `ca`), see [What fails, and what it says](tls-and-clusters.md#what-fails-and-what-it-says) in the TLS guide, and the connection settings in [Configuration](install.md#4-configuration).

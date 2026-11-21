@@ -1,10 +1,10 @@
 # mashctl: creating, labeling and deleting endpoints
 
-Endpoints are made by `mashctl endpoint create`, and every endpoint carries the same kind of permission set, the owner-line set for its address `owner.group.instance` (it may mail the endpoints of its own owner and read what it needs to; the owner is the fence). `mashctl endpoint permissions ADDRESS` prints that set. A NATS user is signed by the account signing key (`account.nk` in the key directory, `<config dir>/keys` or `MASH_KEYS_DIR`) and carries its permission set in its JWT; there is no policy file and no tag. See [ADR 0052](decisions/0052-mashctl-mints-nats-users-and-holds-the-account-signing-key.md).
+Endpoints are made by `mashctl endpoint create`, and every endpoint carries the same kind of permission set, the owner-line set for its address `owner.group.name` (it may mail the endpoints of its own owner and read what it needs to; the owner is the fence). `mashctl endpoint permissions ADDRESS` prints that set. A NATS user is signed by the account signing key (`account.nk` in the key directory, `<config dir>/keys` or `MASH_KEYS_DIR`) and carries its permission set in its JWT; there is no policy file and no tag. See [ADR 0052](decisions/0052-mashctl-mints-nats-users-and-holds-the-account-signing-key.md).
 
 `endpoint create`, `reissue`, `delete`, `list`, `show`, `set`, `unset`, `suspend`, `resume`, `inbox` and `permissions` take an endpoint as `owner.group.name`: dotted, three parts. A bare name, the flat key `owner_group_name` and the slash form are refused (exit 2).
 
-`mashctl endpoint create`, `reissue`, `delete`, `list` and `show` are described [below](#mashctl-endpoint-create); `mash key create` makes the endpoint's own key, and `mash join` installs its creds file from the join file.
+The syntax, output and exit codes of each command are in the [generated reference](reference/mashctl.md), which is tested against the program. This page explains how the commands fit together; `mashctl endpoint create`, `reissue`, `delete`, `list` and `show` are described [below](#mashctl-endpoint-create); `mash key create` makes the endpoint's own key, and `mash join` installs its creds file from the join file.
 
 ## Prerequisites
 
@@ -44,7 +44,7 @@ mashctl limits apply [prefix] [--dry-run]
 
 Every user JWT `mashctl` issues is written to the issue record, the `mash-issued` bucket, under the user's public key: a user minted with the account key (a kept key adds a revision under the same key, a rotated key adds an entry for the new key and leaves the old key's), and the admin user that `mashctl init` connects with (kind `admin`; `mashctl init --config` records it). The entry is written before the creds file or the directory record, so a user that can connect is always in the record, and a record that cannot be written stops the issue. An entry holds the public key, the address (the endpoint name), the owner, the kind (`endpoint` or `admin`), the tags, the generation (always 0: mash has no policy generation yet) the issue time (RFC 3339, UTC), the purpose and, once mash has revoked the key, the revocation time. The purpose is one of `issue` (a user minted with the account key, the admin user at `init`), `rotation` (the new key of a credential that rotates the user key) and `probe` (reserved for the policy gate's probe credentials; `mashctl` does not write it); a record from before the field reads as `issue`. `revoked_at` (RFC 3339, UTC) is left out until set: `endpoint delete` and `endpoint reissue` set it after the revocation succeeds, once and never cleared, and a key mash never recorded is skipped. A failure to set it prints `warning: user key U... is revoked, but the issue record was not updated with it: ...` on stderr and never fails or undoes the revocation. Nothing is removed from the record when an endpoint is deleted or its key is revoked: revocation is the account JWT's, and the record is the history of what was issued. `mashctl init --config` creates the bucket; a deployment from before the record gets it, hardened, the first time a user is minted and written. Users issued before the record existed are not in it until a credential is reissued under the same key.
 
-`mashctl doctor` compares the user keys connected to every server with this record (its `keys` check, see [doctor.md](doctor.md#keys)): a connected key that mash did not issue, or a key recorded as revoked that is still connected, is a problem. No key is exempt, not even the admin user the command connects with: `mashctl init` records it. The check needs `system_creds` in `config.json` and the number of servers is the count under `servers`, as for `endpoint delete`. There is no command that lists the record; one endpoint's own records are `mashctl endpoint show ADDRESS`. See [operations.md](operations.md#the-issue-record-and-the-drift-check) for what it can and cannot see.
+`mashctl doctor` compares the user keys connected to every server with this record (its `keys` check, see [doctor.md](doctor.md#keys)): a connected key that mash did not issue, or a key recorded as revoked that is still connected, is a problem. No key is exempt, not even the admin user the command connects with: `mashctl init` records it. The check needs `system_creds` in `config.json` and the number of servers is the count under `servers`, as for `endpoint delete`. There is no command that lists the record; one endpoint's own records are `mashctl endpoint show ADDRESS`. See [operations.md](operations.md#the-issue-record-and-the-check-of-it) for what it can and cannot see.
 
 ## Setting and removing values on an endpoint
 
@@ -53,7 +53,7 @@ mashctl endpoint set ADDRESS key=value... [--dry-run] [--json]
 mashctl endpoint unset ADDRESS key... [--dry-run] [--json]
 ```
 
-These change the endpoint's directory record (what `who --long` shows). They connect with the admin credentials and need no file and no creds: the endpoint must have a directory record. The keys are `role`, `description`, `host`, `note`, `capability` and `label.NAME`.
+These change the endpoint's directory record (what `who --wide` shows). They connect with the admin credentials and need no file and no creds: the endpoint must have a directory record. The keys are `role`, `description`, `host`, `note`, `capability` and `label.NAME`.
 
 - `set` gives each key its value and leaves every other field as it is. `capability=a,b` takes a list with commas and sets the whole list, replacing what was there. `label.team=blue` sets the label `team`. A label name is a letter, then up to 31 of `a-z 0-9 _ . -`; keys and values are checked as the directory checks them.
 - `unset` clears each key. `unset capability` removes every capability; to remove one, set the list again without it. `unset label.team` removes the label `team`; a label that is not set gives a warning and exit 0.
@@ -299,15 +299,9 @@ Every failure is `error: WHAT` on standard error and at most one `hint: COMMAND`
 
 ## Removed commands
 
-Three verbs from 0.5.0 are gone. Each exits 2 and prints its replacement.
+The commands and options 0.5.6 removed, and what replaces each, are in the table in the [0.5.6 changelog](../CHANGELOG.md#what-changed-old-to-new) and in the [generated reference](reference/mashctl.md).
 
-| Removed | Use |
-| --- | --- |
-| `mashctl add` | `mashctl endpoint create alice.dev.design` |
-| `mashctl reissue` | `mashctl endpoint reissue alice.dev.design` |
-| `mashctl retire` | `mashctl endpoint delete alice.dev.design` |
-
-Endpoints made by 0.5.0 do not work with 0.5.5. Make new ones with `endpoint create` and remove the old ones. Mail unread in an old endpoint is not carried over.
+Endpoints and mail made by 0.5.0 are not read by 0.5.6, and 0.5.5 and 0.5.6 do not convert them: if you are still on 0.5.0, start a fresh deployment (see [If you used 0.5.0](../CHANGELOG.md#upgrading)).
 
 ## Revocation
 
@@ -333,4 +327,4 @@ If you also edit the account with `nsc`, these steps keep it from undoing mashct
 - `nsc push` rejects an account server URL that starts with `tls://`; give nsc a `nats://` URL. For a server with a private CA, nsc needs `SSL_CERT_FILE` set to the CA's PEM file (mashctl takes `ca` instead).
 - `nsc revocations add-user` followed by an `nsc push` revokes a user; `mashctl endpoint delete` revokes the user of an endpoint itself.
 - To cut off old creds and keep the endpoint, run `mashctl endpoint reissue ADDRESS` (or `--out PATH --public-key FILE`): it revokes the old key and names a new one. `mashctl endpoint delete ADDRESS` revokes the user and removes the endpoint for good.
-- A suspended endpoint's stored mail stays readable. `mash send` to a suspended endpoint fails with "no response from stream" and does not say the endpoint is suspended; this is a known limitation.
+- A suspended endpoint's stored mail stays readable.

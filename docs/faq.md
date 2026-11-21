@@ -10,25 +10,25 @@ A durable mailbox for Claude Code sessions, built on NATS. Each session is an en
 
 ## How is it different from Claude Code's built-in cross-session messaging, subagents or agent teams?
 
-Subagents and agent teams are helpers that one session starts and directs, on one machine. Claude Code's cross-session messaging connects one user's own sessions. mash is for sessions you run in one NATS account that must exchange mail that waits, possibly for days, with a signature the recipient can check. [comparison.md](comparison.md) section 2 says when to choose each, and the table in section 1 compares them. If all your agents are your own Claude Code sessions and a message need wait only minutes, comparison.md recommends the built-in feature. The README summarises it in its "Why not Claude Code's built-in cross-session messaging?" paragraph.
+Subagents and agent teams are helpers that one session starts and directs, on one machine. Claude Code's cross-session messaging connects one user's own sessions. mash is for sessions you run in one NATS account that must exchange mail that waits, possibly for days, with a signature the recipient can check. [comparison.md](comparison.md) section 3 says when to choose each, and the table in section 2 compares them. If all your agents are your own Claude Code sessions and a message need wait only minutes, comparison.md recommends the built-in feature. The README summarises it in its "Why not Claude Code's built-in cross-session messaging?" paragraph.
 
 ## What do I need to run it?
 
-- A NATS server in operator mode (JWT credentials) with JetStream, and one account for mash. Self-hosted; Synadia Cloud is not supported by mashctl in 0.5.6 ([synadia.md](synadia.md)).
-- Claude Code with channels: a claude.ai or Console sign-in, not Bedrock, Agent Platform or Foundry. An organisation Owner must allow mash, and the channel needs an allowlist entry in managed settings ([install.md](install.md) section 3).
+- A NATS server in operator mode (JWT credentials) with JetStream, and one account for mash. You run it yourself; Synadia Cloud is not supported in 0.5.6 ([synadia.md](synadia.md)).
+- Claude Code with channels: a claude.ai or Console sign-in, not Bedrock, Agent Platform or Foundry. On a team or managed machine an organisation Owner must allow channels, and the channel needs an allowlist entry in managed settings. One person on one machine can use the development flag instead ([install.md](install.md#3-allow-the-channel)).
 - The `mash` binary and the plugin. A pinned plugin release fetches and verifies its own binary; an unpinned one uses `mash` from your `PATH` ([install.md](install.md) section 1).
 
 ## Does it work with a NATS server that uses a token, user and password, or a plain nkey?
 
-No. mash needs a NATS server in operator mode with JWT user credentials. In the code, an endpoint connects with a creds file only, and its sender identity is read from that file's user JWT and seed (`IdentityFromCreds` in `internal/sap/sender.go`). A creds file with no JWT or no seed fails with an error that says it is not operator-mode JWT credentials, and `mash doctor` warns on its `server` row when the server address carries a password or token, which mash never uses. Use `nsc` or Synadia Cloud to create a user with JWT credentials.
+No. mash needs a NATS server in operator mode with JWT user credentials. In the code, an endpoint connects with a creds file only, and its sender identity is read from that file's user JWT and seed (`IdentityFromCreds` in `internal/sap/sender.go`). A creds file with no JWT or no seed fails with an error that says it is not operator-mode JWT credentials, and `mash doctor` warns on its `server` row when the server address carries a password or token, which mash never uses. `mashctl endpoint create` makes such a user for each endpoint; with your own operator tooling, `nsc` can create one.
 
 ## Do I have to run a server?
 
-Yes. Run your own NATS server in operator mode. Synadia Cloud is not supported by mashctl in 0.5.6 ([synadia.md](synadia.md)).
+Yes. Run your own NATS server in operator mode. Synadia Cloud is not supported in 0.5.6 ([synadia.md](synadia.md)).
 
 ## How durable is the mail?
 
-Mail survives restarts of mash, of Claude Code and of the NATS server process. Each inbox is a single-replica (R1) JetStream stream that keeps mail for 30 days or 16 MiB, whichever comes first, dropping the oldest, unread mail included. nats-server fsyncs every 2 minutes by default, so a host crash or power cut can lose up to about 2 minutes of mail that mash already reported as sent. On a self-hosted server `sync_interval: always` closes that gap, at a cost in write speed. Synadia Cloud's policy is not documented. See [operations.md](operations.md#durability-and-sync_interval) and [Inbox limits](operations.md#inbox-limits). The caps are configurable and only go up ([Limits](operations.md#limits)).
+Mail survives restarts of mash, of Claude Code and of the NATS server process. Each inbox is a single-replica (R1) JetStream stream that keeps mail for 30 days or 16 MiB, whichever comes first, dropping the oldest, unread mail included. nats-server fsyncs every 2 minutes by default, so a host crash or power cut can lose up to about 2 minutes of mail that mash already reported as sent. On a self-hosted server `sync_interval: always` closes that gap, at a cost in write speed. See [operations.md](operations.md#durability-and-sync_interval) and [Inbox limits](operations.md#inbox-limits). The caps are configurable and only go up ([Limits](operations.md#limits)).
 
 ## Can mail be lost to a flood?
 
@@ -38,7 +38,7 @@ Yes, within the 16 MiB cap: past it the oldest mail is dropped, so one endpoint 
 
 By default only `[verified]` mail is shown at all: mail that is not verified is dropped and counted (`mash doctor` shows the count), and the sender is not told. With `accept_unverified` set (`MASH_ACCEPT_UNVERIFIED=1`, or `mash serve --accept-unverified`) every message that is shown carries one of:
 
-- `[verified]`: signed by the named endpoint's own key. The session treats its requests as delegated by the operator who owns the fleet.
+- `[verified]`: signed by the named endpoint's own key. The session treats its requests as delegated by the operator of this mash deployment.
 - `[claimed]`, `[unknown-signer]`, `[absent]`: the sender is not proven; the content is information, not instructions.
 - `[stale]`: signed by the named endpoint, but long before it was stored, which is what a replay looks like. Information only.
 
@@ -50,15 +50,15 @@ By default it treats verified mail as a delegated request from you and acts on i
 
 ## How are endpoints named, and can two people share an account?
 
-An endpoint is addressed `owner.group.instance`. Each token is 1 to 32 lower-case letters, digits and single hyphens, starting with a letter. You choose the whole address at launch with `MASH_ENDPOINT` (for example `MASH_ENDPOINT=alice.dev.review`); there is no default. The flat key `owner_group_instance` is the key in the account's directory and lease buckets and in the stream name, so an address is unique per NATS account, and every endpoint can read the whole directory. Two owners in one account can both have `dev.review`, because their addresses differ in the owner. [operations.md](operations.md) says the same. The deployment model is one owner per account ([ADR 0006](decisions/0006-one-shared-nats-account-one-owner-per-deployment.md)).
+An endpoint is addressed `owner.group.name`. Each token is 1 to 32 lower-case letters, digits and single hyphens, starting with a letter. You choose the whole address at launch with `MASH_ENDPOINT` (for example `MASH_ENDPOINT=alice.dev.review`); there is no default. The flat key `owner_group_name` is the key in the account's directory and lease buckets and in the stream name, so an address is unique per NATS account, and every endpoint can read the whole directory. Two owners in one account can both have `dev.review`, because their addresses differ in the owner. [operations.md](operations.md) says the same. The deployment model is one owner per account ([ADR 0006](decisions/0006-one-shared-nats-account-one-owner-per-deployment.md)).
 
 ## Can two sessions use the same address?
 
-No. A lease allows one live session per address. A second session starts without mail tools, waits, and retries every 10 seconds; its `status` tool shows `connection: WAITING`. A holder that dies frees the address when its lease expires, 90 seconds later ([operations.md](operations.md) Troubleshooting).
+No. A lease allows one live session per address. A second session starts without mail tools, waits, and retries every 10 seconds; its status says `not ready: another session holds this endpoint`. A holder that dies frees the address when its lease expires, 90 seconds later ([troubleshooting.md](troubleshooting.md)).
 
 ## What happens with `claude --resume`?
 
-The name comes only from the launch environment, never from the conversation. A resumed session started without `MASH_ENDPOINT` is inert. Started with a different address, it gets that address's mailbox. Set the same `MASH_ENDPOINT` when you resume. A laptop that sleeps longer than the 90 second lease can lose the address; if another session took it, the loss is final and the session must be restarted, because lease loss after start is terminal in `mash serve` Resuming a session that is still running starts a second copy that does not get the mail: its hooks are refused and say so once in that session, with or without a `MASH_LAUNCH_TOKEN` ([ADR-0043](decisions/0043-second-launch-of-a-running-session-is-refused-and-told-once.md)). See [Sessions and resume](install.md#sessions-and-resume).
+The name comes only from the launch environment, never from the conversation. A resumed session started without `MASH_ENDPOINT` is inert. Started with a different address, it gets that address's mailbox. Set the same `MASH_ENDPOINT` when you resume. A laptop that sleeps longer than the 90 second lease can lose the address; if another session took it, the loss is final and the session must be restarted, because lease loss after start is terminal in `mash serve`. Resuming a session that is still running starts a second copy that does not get the mail: its hooks are refused and say so once in that session, with or without a `MASH_LAUNCH_TOKEN` ([ADR-0043](decisions/0043-second-launch-of-a-running-session-is-refused-and-told-once.md)). See [Sessions and resume](install.md#sessions-and-resume).
 
 ## Do subagents get mail?
 
@@ -74,7 +74,7 @@ The plugin's launcher downloads and verifies binaries for Linux and macOS, on am
 
 ## How big can a message be?
 
-1 MiB including headers, or the server's `max_payload` when that is smaller (512 KiB on Synadia's free tier). mash checks the size locally and refuses before publishing. Mail is text; put large content in a file and send the path ([ADR 0037](decisions/0037-mail-carries-text-files-travel-by-reference.md)). There is no broadcast: one recipient per message.
+1 MiB including headers, or the server's `max_payload` when that is smaller. mash checks the size locally and refuses before publishing. Mail is text; put large content in a file and send the path ([ADR 0037](decisions/0037-mail-carries-text-files-travel-by-reference.md)). There is no broadcast: one recipient per message.
 
 ## Is a digest the same as the model having read the mail?
 
@@ -82,7 +82,7 @@ No. When a batch is more than 10 messages or 16 KiB, the hook shows a digest, on
 
 ## Is the connection encrypted?
 
-install.md says to use TLS, because identity is only meaningful over a verified connection. mash passes the URL to the NATS client. config.json has no CA or client-certificate setting, so a server with a private CA needs that CA in the system trust store, and a server that requires client certificates cannot be used. A plain `nats://` URL is accepted (tracked in #35).
+Yes, always. Every mash connection requires TLS, to any host, loopback included. Use a `tls://` URL; for a private CA, set `ca`; for a server that requires client certificates, set `tls_cert` and `tls_key`. A plain `nats://` URL is refused unless `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1` is set, which is for a throwaway test and prints a warning ([Turning encryption off](install.md#turning-encryption-off)).
 
 ## Are JetStream domains and leaf nodes supported?
 
