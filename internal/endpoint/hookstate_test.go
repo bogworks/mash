@@ -167,3 +167,57 @@ func TestClearHookStateRemovesOnlyItsOwn(t *testing.T) {
 		t.Error("another serve's record was removed")
 	}
 }
+
+// During a handoff the serve that lost the lease must not overwrite the record of the one that took over, forgets what it
+// wrote, and rewrites when it holds the lease again.
+func TestRecordHookStateOnlyWhileHoldingTheLease(t *testing.T) {
+	a, sp := boundEndpoint(t, time.Now().Add(-time.Minute))
+	a.RecordHookState()
+	if _, found := sp.HookState(); !found {
+		t.Fatal("A recorded nothing")
+	}
+	// B (another live process: the parent) takes over and records.
+	ppid := os.Getppid()
+	host, _ := os.Hostname()
+	b := HookRecord{Hooks: HookSuspected, Since: time.Now(), Host: host, PID: strconv.Itoa(ppid)}
+	b.Start, _ = procStart(ppid)
+	recordTo(t, sp, b)
+	want, _ := sp.HookState()
+	// A's lease is lost: it must not write, and drops its cache.
+	a.leaseGone.Store(true)
+	a.RecordHookState()
+	if got, _ := sp.HookState(); string(got) != string(want) {
+		t.Errorf("A overwrote B's record:\n%s\n%s", got, want)
+	}
+	if a.hookRecorded.Load() != nil {
+		t.Error("A kept its cache after losing the lease")
+	}
+	// A regains the lease: it rewrites, though its detector state is unchanged.
+	a.leaseGone.Store(false)
+	a.RecordHookState()
+	got, _ := sp.HookState()
+	var rec HookRecord
+	if err := json.Unmarshal(got, &rec); err != nil || rec.PID != strconv.Itoa(os.Getpid()) {
+		t.Errorf("A did not rewrite after regaining: %s", got)
+	}
+	// A foreign record that appears while A holds a cache is not hidden by it.
+	recordTo(t, sp, b)
+	a.RecordHookState()
+	got, _ = sp.HookState()
+	if err := json.Unmarshal(got, &rec); err != nil || rec.PID != strconv.Itoa(os.Getpid()) {
+		t.Errorf("a stale cache suppressed the rewrite: %s", got)
+	}
+}
+
+// The state shown (HookState) and the state recorded come from the detector read the same way.
+func TestHookStateAgreesWithTheRecord(t *testing.T) {
+	e, sp := boundEndpoint(t, time.Now().Add(-time.Minute))
+	e.ToolCalled(time.Now().Add(-HookGrace - time.Second))
+	if h := e.HookState(); h != HookNotRun {
+		t.Errorf("one real call shown as %q", h)
+	}
+	e.RecordHookState()
+	if h, _, ok := SessionOnDisk(sp); !ok || h != e.HookState() {
+		t.Errorf("recorded %q, shown %q (%v)", h, e.HookState(), ok)
+	}
+}

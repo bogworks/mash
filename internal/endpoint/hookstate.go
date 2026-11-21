@@ -68,7 +68,7 @@ func (e *Endpoint) HookState() string {
 	if !bound {
 		return HookNotRun
 	}
-	return hookStateOf(sp, since, e.hl.state(time.Now()))
+	return hookStateOf(sp, since, e.hl.state(time.Time{}))
 }
 
 // StorageState is StorageOK or StorageFailing for the folder this session spools to: failing when serve reports the
@@ -93,6 +93,32 @@ func (e *Endpoint) RecordHookState() {
 	if !bound {
 		return
 	}
+	// Only the serve that holds the endpoint writes, and under the spool's lock, so a serve losing the lease cannot
+	// overwrite the record of the one that took it over. A serve that does not hold it forgets what it wrote: if it
+	// regains the lease, the record is rewritten.
+	if !e.holdsLease() {
+		e.hookRecorded.Store(nil)
+		return
+	}
+	unlock, err := sp.Lock()
+	if err != nil {
+		return
+	}
+	defer unlock()
+	if !e.holdsLease() { // the lease may have been lost while waiting for the lock
+		e.hookRecorded.Store(nil)
+		return
+	}
+	// What is on disk must be this serve's own record, or the cache is stale (another serve's record, or none: removed
+	// by a clear).
+	own := false
+	if b, found := sp.HookState(); found {
+		var cur HookRecord
+		own = json.Unmarshal(b, &cur) == nil && cur.PID == strconv.Itoa(os.Getpid())
+	}
+	if !own {
+		e.hookRecorded.Store(nil)
+	}
 	rec := HookRecord{Since: since, PID: strconv.Itoa(os.Getpid())}
 	rec.Host, _ = os.Hostname()
 	rec.Start, _ = procStart(os.Getpid())
@@ -115,6 +141,10 @@ func (e *Endpoint) RecordHookState() {
 		e.hookRecorded.Store(&key)
 	}
 }
+
+// holdsLease is true while this serve holds the endpoint: always without a lease (tests, no-lease mode), otherwise until
+// the lease is reported lost (a flag, no round trip).
+func (e *Endpoint) holdsLease() bool { return !e.leaseGone.Load() }
 
 // recordEvery is how often serve looks for a change in what it records (a hook run is read from the spool itself).
 var recordEvery = 2 * time.Second
