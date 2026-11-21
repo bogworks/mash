@@ -123,7 +123,6 @@ MASH_ENDPOINT=acme.demo.carol claude
 
 Mail arrives with that session's next prompt or tool call.
 
-
 An address that was deleted can never be used again; pick another name.
 
 ## See the endpoints
