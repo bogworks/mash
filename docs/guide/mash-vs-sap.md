@@ -18,5 +18,5 @@ synadia-ai/synadia-agent-sdk-docs repository. Source for the mash side:
   online or not.
 - Addresses. SAP: agent names. mash: `owner.group.name`. Why: policy by
   owner and group.
-- Permissions. mash: one NATS user per endpoint. Anything its permission
-  set does not list is denied, including another endpoint's inbox.
+- Permissions. mash: one NATS user per endpoint. Anything not listed is
+  denied. That includes another endpoint's inbox (design, section 8).

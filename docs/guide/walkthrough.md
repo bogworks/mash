@@ -114,9 +114,9 @@ that endpoint, so keep the join file private; you can delete it once the
 endpoint has joined.
 
 What is created: a join file per endpoint (written with mode 600) in the
-current folder, then a creds file per endpoint under `~/.config/mash` (mode
-0600), and each
-endpoint's inbox on the server.
+current folder, then a creds file per endpoint under `~/.config/mash`, and
+each endpoint's inbox on the server. An endpoint's credentials file lives
+only on the endpoint's host, at mode 0600 (design, section 4).
 
 Commands:
 
@@ -301,8 +301,11 @@ MASH_ENDPOINT=acme.demo.alice claude \
   --dangerously-load-development-channels plugin:mash@mash
 ```
 
-[pending planner: whether the guide may state Claude Code's
-development-channel flag]
+Claude Code registers a plugin's channel only when it is launched with its
+own flag, `--dangerously-load-development-channels plugin:mash@mash`, and it
+asks the person to confirm at each launch. Without the flag nothing is lost
+but the wake: mail still arrives with the next prompt or tool call through
+`mash hook`. The flag is Claude Code's, not mash's.
 
 The session's own status. In either session, ask: "Run the mash status
 tool." Claude calls it and reports what the tool says: whether mail works for

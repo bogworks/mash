@@ -1,7 +1,7 @@
 # Internal video: outline
 
-OUTLINE (draft). It follows `walkthrough.md` step by step, recorded from
-built output after S5 (`mash join`) lands. Each scene is a step: say what it
+It follows `walkthrough.md` step by step, recorded from
+built output. Each scene is a step: say what it
 does, type the command, show the output. Alice and Bob only. Reviewed by a
 junior developer and by a CLI-UX reader before it is shown to anyone.
 
