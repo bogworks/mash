@@ -50,7 +50,7 @@ func TestEndpointDeleteRemovesRecordRenamesCredsRevokesKey(t *testing.T) {
 	if code != 0 || !strings.HasPrefix(out, "Deleted endpoint o.g.c\n") {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
-	if !strings.Contains(out, "servers acknowledged: 1\n") || !strings.Contains(out, "credentials file: set aside as ") || !strings.Contains(out, ".deleted") || !strings.Contains(out, "retired marker: written\n") {
+	if out != "Deleted endpoint o.g.c\n" {
 		t.Errorf("report: %q", out)
 	}
 	noSecrets(t, out, errb)

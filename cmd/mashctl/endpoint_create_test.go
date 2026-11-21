@@ -233,10 +233,7 @@ func TestEndpointCreateDefaultInstalls(t *testing.T) {
 	}
 	// --verbose
 	so, _, code = h.run("endpoint", "create", ad("same3").String(), "--detail")
-	lines := strings.Split(strings.TrimRight(so, "\n"), "\n")
-	rec, _ := h.record(ad("same3"))
-	if code != 0 || len(lines) != 4 || lines[0] != "Created endpoint "+ad("same3").String() || lines[1] != "servers: "+h.env["MASH_SERVER"] ||
-		lines[2] != "credentials file: "+h.creds(ad("same3")) || lines[3] != "public key: "+rec.User {
+	if code != 0 || so != "Created endpoint "+ad("same3").String()+"\n" { // --detail adds nothing to create
 		t.Errorf("verbose %d %q", code, so)
 	}
 }
@@ -307,7 +304,7 @@ func TestEndpointCreateOut(t *testing.T) {
 	}
 	jf3 := filepath.Join(out, "far4.join")
 	so, _, code = h.run("endpoint", "create", ad("far4").String(), "--out", jf3, "--detail")
-	if code != 0 || !strings.Contains(so, "\nservers: "+h.env["MASH_SERVER"]+"\njoin file: "+jf3+"\npublic key: U") {
+	if code != 0 || so != "Created endpoint "+ad("far4").String()+"\nJoin file: "+jf3+"\n" {
 		t.Errorf("verbose %d %q", code, so)
 	}
 }

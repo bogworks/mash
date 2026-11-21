@@ -529,7 +529,7 @@ var AT004 = Scenario{
 	ID: "at004",
 	Scenario: "AT-4, the security boundaries, every check a negative test that fails when its protection is removed: one local server; endpoints alice/dev/design and alice/dev/review made the contract's way on a separate endpoint machine. " +
 		"(1) No secret in argv or output: every secret the scenario makes is registered (seeds, creds files, user JWTs, join files, the operator and account keys, the CA and server keys, the admin and system creds), " +
-		"a wide set of mash and mashctl commands is run with --json, --verbose and failure paths (including a seed, a join file and a creds file fed to options that expect something else), " +
+		"a wide set of mash and mashctl commands is run with --json, --detail and failure paths (including a seed, a join file and a creds file fed to options that expect something else), " +
 		"and all output, every recorded argv of the run and the command line of every process in the container are scanned for them. " +
 		"(2) Secret files are refused over an existing file, a symlink and a dangling symlink, and left byte-identical (and the symlink target too): the creds file in the config folder, the join file of endpoint create and reissue --out, " +
 		"the key and public key files of mash key create (seed and seed.pub), the key pending file, and the creds file of mash join (refused over each without --replace; --replace replaces a symlink itself and writes through nothing; a seed of another key, a missing --key and --dry-run change nothing), and mash credential create is an unknown command. " +
@@ -971,7 +971,7 @@ func (s *at4) join() {
 		cfg, _ := freshCfg("join-json")
 		run("join-json", cfg, "join", jf, "--key", seed, "--json", "--detail")
 		bad := joinSecretFree(runs, a.secrets)
-		a.C.Check("files: no output of "+strconv.Itoa(len(runs))+" mash join runs (refusals, --replace, --dry-run, --json --verbose) holds a seed, a JWT or a creds text", len(bad) == 0, strings.Join(bad, "; "))
+		a.C.Check("files: no output of "+strconv.Itoa(len(runs))+" mash join runs (refusals, --replace, --dry-run, --json --detail) holds a seed, a JWT or a creds text", len(bad) == 0, strings.Join(bad, "; "))
 	}
 
 	// The removed command is an unknown command.
@@ -991,7 +991,7 @@ func (s *at4) wide() {
 	wseed := filepath.Join(s.work, "wide.seed")
 	wpub := pubOf(wseed)
 	r := s.mash("wide-key", he, a.Conn(), "key", "create", "--out", wseed, "--json", "--detail")
-	a.C.Check("wide: mash key create --json --verbose succeeds", r.Code == 0, exitDetail(r))
+	a.C.Check("wide: mash key create --json --detail succeeds", r.Code == 0, exitDetail(r))
 	a.Watch("seed wide", wseed)
 
 	type c struct {
@@ -1110,7 +1110,7 @@ func (s *at4) wide() {
 			crashes = append(crashes, l.Label+" exit "+strconv.Itoa(l.R.Code))
 		}
 	}
-	a.C.Check("wide: "+strconv.Itoa(n)+" mash and mashctl commands (--json, --verbose, failure paths, secrets fed to the wrong option) ran and none crashed, hung or panicked", len(crashes) == 0 && n >= 90, strings.Join(crashes, "; "))
+	a.C.Check("wide: "+strconv.Itoa(n)+" mash and mashctl commands (--json, --detail, failure paths, secrets fed to the wrong option) ran and none crashed, hung or panicked", len(crashes) == 0 && n >= 90, strings.Join(crashes, "; "))
 	s.a.C.Check("wide: the commands that must work did (status, doctor, who, inbox, send as design; create, reissue and delete by mashctl)",
 		s.exitOf("mash-status") == 0 && s.exitOf("mash-who-json") == 0 && s.exitOf("mash-send") == 0 && s.exitOf("mash-inbox") == 0 &&
 			s.exitOf("ctl-create-w1") == 0 && s.exitOf("ctl-reissue-w3-json") == 0 && s.exitOf("ctl-delete-w3") == 0 && s.exitOf("ctl-status-json") == 0 && s.exitOf("ctl-limits-json") == 0,

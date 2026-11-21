@@ -48,7 +48,7 @@ func TestRetireRenamesCredsByDefault(t *testing.T) {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
 	moved := h.creds(ad("c")) + ".deleted"
-	if !strings.Contains(out, "credentials file: set aside as "+moved+"\n") || !strings.Contains(out, "retired marker: written\n") {
+	if out != "Deleted endpoint o.g.c\n" {
 		t.Errorf("report: %q", out)
 	}
 	got, err := os.ReadFile(moved)

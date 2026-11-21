@@ -216,13 +216,13 @@ func runInit(args []string, g cliframe.Global, env func(string) string, lookup c
 		return cliframe.Report(stdout, stderr, err, jsonRequested(args, "--config"))
 	}
 	jsonOut := in.json || g.JSON
-	return cliframe.Report(stdout, stderr, doInit(in.values["--config"], in.flags["--dry-run"], jsonOut, g.Detail, env, lookup, stdout, stderr), jsonOut)
+	return cliframe.Report(stdout, stderr, doInit(in.values["--config"], in.flags["--dry-run"], jsonOut, env, lookup, stdout, stderr), jsonOut)
 }
 
-// step is one `label: value` line of --verbose.
+// step is one thing init would set up; any step means the run changes something.
 type step struct{ label, value string }
 
-func doInit(setupPath string, dry, jsonOut, verbose bool, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) error {
+func doInit(setupPath string, dry, jsonOut bool, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) error {
 	sf, err := loadSetup(setupPath, env("HOME"))
 	if err != nil {
 		return err
@@ -415,7 +415,7 @@ func doInit(setupPath string, dry, jsonOut, verbose bool, env func(string) strin
 	changed := len(steps) > 0
 
 	if dry {
-		return finishInit(stdout, jsonOut, verbose, true, changed, sf, first, steps)
+		return finishInit(stdout, jsonOut, true, changed, sf, first)
 	}
 	if needOp {
 		if pub, _, err := ks.ImportOperator(sf.operatorKey); err != nil {
@@ -454,7 +454,7 @@ func doInit(setupPath string, dry, jsonOut, verbose bool, env func(string) strin
 			return failErr(err)
 		}
 	}
-	return finishInit(stdout, jsonOut, verbose, false, changed, sf, first, steps)
+	return finishInit(stdout, jsonOut, false, changed, sf, first)
 }
 
 // checkClusterListed refuses a setup file that lists too few servers for the cluster the ping saw: a revocation must be
@@ -520,8 +520,8 @@ func differentSetup(st *initState, what string) error {
 		WithHint("mashctl init --config <file> --config-dir <a new folder>")
 }
 
-// finishInit prints the one line of init (and, with verbose, the steps), or the JSON object.
-func finishInit(stdout io.Writer, jsonOut, verbose, dry, changed bool, sf setupFile, first string, steps []step) error {
+// finishInit prints the one line of init or the JSON object.
+func finishInit(stdout io.Writer, jsonOut, dry, changed bool, sf setupFile, first string) error {
 	shown := make([]string, len(sf.servers))
 	for i, s := range sf.servers {
 		shown[i] = maskURL(s)
@@ -543,11 +543,6 @@ func finishInit(stdout io.Writer, jsonOut, verbose, dry, changed bool, sf setupF
 		fmt.Fprintf(stdout, "Would initialize mash on %s for owner %s\n", first, sf.owner)
 	default:
 		fmt.Fprintf(stdout, "Initialized mash on %s for owner %s\n", first, sf.owner)
-	}
-	if verbose {
-		for _, s := range steps {
-			fmt.Fprintf(stdout, "%s: %s\n", s.label, config.Clean(s.value))
-		}
 	}
 	if dry {
 		fmt.Fprintln(stdout, "Nothing was changed.")

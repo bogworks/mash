@@ -45,7 +45,6 @@ var retireRevokeNow = time.Now
 // retireOpts are the choices of one removal.
 type retireOpts struct {
 	dryRun, yes bool
-	verbose     bool                        // --verbose: name the target server first
 	again       string                      // the command that finishes a partial removal
 	confirm     func(messages uint64) error // asks the person; called when neither --yes nor --dry-run was given
 }
@@ -54,9 +53,7 @@ type retireOpts struct {
 type retireResult struct {
 	planned   bool   // --dry-run: nothing was changed
 	messages  uint64 // the messages the inbox held when the removal began
-	acked     int    // servers that took the revocation of the user key; set when this run revoked it
 	renamedTo string // where the creds file was put aside, when it was
-	marker    string // "written" or "finished": this run wrote or finished the retired-name marker
 }
 
 // plainMsg drops the program prefix the libraries put on a message.
@@ -87,7 +84,7 @@ func retireAddress(addr sap.Address, opts retireOpts, env func(string) string, l
 
 	// (1) the guarded server removal. The user key comes from the directory record, so a record someone replaced
 	// meanwhile is never deleted.
-	announceTarget(cfg, env, stderr, nil, opts.verbose)
+	announceTarget(cfg, env, stderr)
 	adm, ctx, closeAdmin, err := ctl.OpenAdmin("mashctl", cfg)
 	if err != nil {
 		return retireResult{}, failErr(err)
@@ -142,7 +139,6 @@ func retireAddress(addr sap.Address, opts retireOpts, env func(string) string, l
 		if derr := adm.Deprovision(ctx, addr); derr != nil {
 			return retireResult{}, partial("finishing the removal on the server failed: %v", derr)
 		}
-		res.marker = "finished"
 	}
 	var revokeOut bytes.Buffer
 	revokedOK := false // the revocation completed on every server
@@ -177,13 +173,12 @@ func retireAddress(addr sap.Address, opts retireOpts, env func(string) string, l
 					return fmt.Errorf("creds check: %w", err)
 				}
 			}
-			n, err := revokeUsers(ctx, cfg, env, servers, []string{u}, &revokeOut, func() time.Time { return revokeAt })
+			_, err := revokeUsers(ctx, cfg, env, servers, []string{u}, &revokeOut, func() time.Time { return revokeAt })
 			if err != nil {
 				revokeErr = err
 				return fmt.Errorf("user key %s...: %w", ctl.ShortKey(u), err)
 			}
 			revokedOK = true
-			res.acked = n
 			ctl.MarkRevoked(ctx, recorder, u, revokeAt, stderr)
 			return nil
 		})
@@ -222,7 +217,6 @@ func retireAddress(addr sap.Address, opts retireOpts, env func(string) string, l
 			}
 			return retireResult{}, partial("the lease fence or the inbox was not removed: %v", err)
 		}
-		res.marker = "written"
 		// A warning from the revocation is kept; the rest of its lines are the acknowledgement counts.
 		for _, l := range strings.Split(revokeOut.String(), "\n") {
 			if strings.HasPrefix(l, "warning: ") {
