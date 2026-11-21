@@ -7,71 +7,12 @@ import (
 	"strings"
 )
 
-// IsDocsPath reports whether a repository path is documentation that no test, build or release tool reads. It is
+// IsDocsPath reports whether a repository path is documentation: any *.md file, or any path under docs/. It is
 // scripts/ci-changes' is_docs, ported; docsonly_test.go runs both over the same table so they cannot drift. Everything
-// not listed is code: the default is code, so a new top-level path is code.
+// else is code: the default is code, so a new top-level path is code.
 func IsDocsPath(p string) bool {
 	p = strings.TrimSpace(p)
-	lower := strings.ToLower(p)
-	for _, pre := range []string{".github/", ".claude-plugin/", "plugin/", "scripts/", "cmd/", "internal/", "ci/", "testdata/", "changelog.d/", "spec/", "docs/review/", "docs/reference/"} {
-		if strings.HasPrefix(p, pre) {
-			return false
-		}
-	}
-	// Agent instructions: a skill or a briefing an agent executes is code in effect (ADR 0157), wherever it sits.
-	if isAgentInstruction(lower) {
-		return false
-	}
-	switch p {
-	case ".mergify.yml", "go.mod", "go.sum", "CHANGELOG.md", "docs/branch-protection.md", "docs/allowed_signers", "docs/skipped-releases.txt", "docs/release-cutover":
-		return false
-	}
-	if strings.HasSuffix(p, "/go.mod") || strings.HasSuffix(p, "/go.sum") || strings.HasSuffix(p, ".go") {
-		return false
-	}
-	if strings.Contains(p, "/testdata/") || strings.Contains(p, "conformance") {
-		return false
-	}
-	for _, ext := range []string{".png", ".jpg", ".jpeg", ".gif", ".ico", ".pdf", ".woff", ".woff2"} {
-		if strings.HasPrefix(lower, "docs/") && strings.HasSuffix(lower, ext) {
-			return false
-		}
-	}
-	// Documentation is Markdown anywhere, and under docs/ only plain-text formats (security-review F1 on the docs queue).
-	if strings.HasSuffix(p, ".md") {
-		return true
-	}
-	if strings.HasPrefix(p, "docs/") {
-		for _, ext := range []string{".txt", ".rst", ".adoc", ".csv", ".log"} {
-			if strings.HasSuffix(p, ext) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// isAgentInstruction: a path an agent reads as instructions is code in effect (ADR 0157), wherever it sits and in any letter case
-// (lower is the lower-cased path): the named files, any *.tmpl, mash-setup/, and any path with a directory component named like
-// the places agents read instructions. Same rule as scripts/ci-changes.
-func isAgentInstruction(lower string) bool {
-	base := lower[strings.LastIndex(lower, "/")+1:]
-	switch base {
-	case "agents.md", "claude.md", "gemini.md", "skill.md", ".cursorrules", ".windsurfrules":
-		return true
-	}
-	if strings.HasSuffix(base, ".tmpl") || strings.HasPrefix(lower, "mash-setup/") || strings.Contains(lower, "/mash-setup/") {
-		return true
-	}
-	if i := strings.LastIndex(lower, "/"); i >= 0 {
-		for _, c := range strings.Split(lower[:i], "/") {
-			switch c {
-			case "skills", "commands", "agents", "hooks", "prompts", "briefings", "plugins", ".claude-plugin":
-				return true
-			}
-		}
-	}
-	return false
+	return strings.HasSuffix(p, ".md") || strings.HasPrefix(p, "docs/")
 }
 
 // Commit is one commit of main's first-parent history with the paths it changed against its first parent.

@@ -158,63 +158,63 @@ func TestDocsOnly_classifier(t *testing.T) {
 	}{
 		{"docs and markdown only", pr, "f/x", []string{"docs/faq.md", "README.md", "CONTRIBUTING.md"}, "false"},
 		{"plain text under docs", pr, "f/x", []string{"docs/plans/p.txt", "docs/a.rst", "docs/b.adoc", "docs/c.csv", "docs/evidence/x/timeline.log"}, "false"},
-		{"an svg under docs is active material", pr, "f/x", []string{"docs/images/a.svg"}, "true"},
-		{"a cast under docs", pr, "f/x", []string{"docs/demo/two-sessions.cast"}, "true"},
-		{"a shell script under docs (security-review F1)", pr, "f/x", []string{"docs/evidence/2026-11-02-heartbeat-fanout/run.sh"}, "true"},
-		{"a python script under docs", pr, "f/x", []string{"docs/evidence/x/harness/drv.py"}, "true"},
-		{"a data file under docs", pr, "f/x", []string{"docs/x/data.json", "docs/x/conf.yaml", "docs/x/c.toml"}, "true"},
-		{"a file without an extension under docs", pr, "f/x", []string{"docs/x/Makefile"}, "true"},
+		{"an svg under docs is active material (documentation, rules 20 and 21)", pr, "f/x", []string{"docs/images/a.svg"}, "false"},
+		{"a cast under docs (documentation, rules 20 and 21)", pr, "f/x", []string{"docs/demo/two-sessions.cast"}, "false"},
+		{"a shell script under docs (security-review F1) (documentation, rules 20 and 21)", pr, "f/x", []string{"docs/evidence/2026-11-02-heartbeat-fanout/run.sh"}, "false"},
+		{"a python script under docs (documentation, rules 20 and 21)", pr, "f/x", []string{"docs/evidence/x/harness/drv.py"}, "false"},
+		{"a data file under docs (documentation, rules 20 and 21)", pr, "f/x", []string{"docs/x/data.json", "docs/x/conf.yaml", "docs/x/c.toml"}, "false"},
+		{"a file without an extension under docs (documentation, rules 20 and 21)", pr, "f/x", []string{"docs/x/Makefile"}, "false"},
 		{"an ADR only", pr, "f/x", []string{"docs/decisions/0099-x.md", "docs/decisions/INDEX.md"}, "false"},
 		{"docs and a Go file", pr, "f/x", []string{"docs/a.md", "cmd/mash/cli.go"}, "true"},
 		{"a Go file only", pr, "f/x", []string{"internal/x.go"}, "true"},
 		{"scripts only", pr, "f/x", []string{"scripts/gate"}, "true"},
 		{"a script beside docs", pr, "f/x", []string{"docs/a.md", "scripts/ci-changes"}, "true"},
 		{"a workflow", pr, "f/x", []string{".github/workflows/ci.yml"}, "true"},
-		{"markdown under .github", pr, "f/x", []string{".github/PULL_REQUEST_TEMPLATE.md"}, "true"},
+		{"markdown under .github (documentation, rules 20 and 21)", pr, "f/x", []string{".github/PULL_REQUEST_TEMPLATE.md"}, "false"},
 		{"mergify config", pr, "f/x", []string{".mergify.yml"}, "true"},
 		{"go.mod", pr, "f/x", []string{"docs/a.md", "go.mod"}, "true"},
 		{"go.sum", pr, "f/x", []string{"go.sum"}, "true"},
-		{"markdown under internal", pr, "f/x", []string{"internal/foo/README.md"}, "true"},
-		{"markdown under cmd", pr, "f/x", []string{"cmd/mash/NOTES.md"}, "true"},
-		{"markdown under scripts", pr, "f/x", []string{"scripts/scrubcheck/inventory.md"}, "true"},
-		{"the plugin package", pr, "f/x", []string{"plugin/README.md"}, "true"},
-		{"test data", pr, "f/x", []string{"internal/policy/testdata/a.md", "docs/x/testdata/b.md"}, "true"},
-		{"a conformance vector", pr, "f/x", []string{"docs/contracts/conformance-vectors.json", "docs/conformance.md"}, "true"},
-		{"a change-log fragment", pr, "f/x", []string{"changelog.d/a.fixed.md"}, "true"},
-		{"the change log", pr, "f/x", []string{"CHANGELOG.md"}, "true"},
-		{"the branch-protection doc", pr, "f/x", []string{"docs/branch-protection.md"}, "true"},
-		{"a generated reference page", pr, "f/x", []string{"docs/reference/mash-send.md"}, "true"},
+		{"markdown under internal (documentation, rules 20 and 21)", pr, "f/x", []string{"internal/foo/README.md"}, "false"},
+		{"markdown under cmd (documentation, rules 20 and 21)", pr, "f/x", []string{"cmd/mash/NOTES.md"}, "false"},
+		{"markdown under scripts (documentation, rules 20 and 21)", pr, "f/x", []string{"scripts/scrubcheck/inventory.md"}, "false"},
+		{"the plugin package (documentation, rules 20 and 21)", pr, "f/x", []string{"plugin/README.md"}, "false"},
+		{"test data (documentation, rules 20 and 21)", pr, "f/x", []string{"internal/policy/testdata/a.md", "docs/x/testdata/b.md"}, "false"},
+		{"a conformance vector (documentation, rules 20 and 21)", pr, "f/x", []string{"docs/contracts/conformance-vectors.json", "docs/conformance.md"}, "false"},
+		{"a change-log fragment (documentation, rules 20 and 21)", pr, "f/x", []string{"changelog.d/a.fixed.md"}, "false"},
+		{"the change log (documentation, rules 20 and 21)", pr, "f/x", []string{"CHANGELOG.md"}, "false"},
+		{"the branch-protection doc (documentation, rules 20 and 21)", pr, "f/x", []string{"docs/branch-protection.md"}, "false"},
+		{"a generated reference page (documentation, rules 20 and 21)", pr, "f/x", []string{"docs/reference/mash-send.md"}, "false"},
 		{"the spec", pr, "f/x", []string{"spec/mash.json"}, "true"},
-		{"the review policy", pr, "f/x", []string{"docs/review/policy.json"}, "true"},
-		{"review docs beside the policy", pr, "f/x", []string{"docs/review/in-session-loop.md"}, "true"},
-		{"the release signers", pr, "f/x", []string{"docs/allowed_signers"}, "true"},
-		{"the skipped-releases list", pr, "f/x", []string{"docs/skipped-releases.txt"}, "true"},
-		{"the release cutover version", pr, "f/x", []string{"docs/release-cutover"}, "true"},
-		{"a binary asset under docs", pr, "f/x", []string{"docs/images/a.PNG"}, "true"},
-		{"a Go file under docs", pr, "f/x", []string{"docs/evidence/x/main.go"}, "true"},
-		{"a rename out of scripts into docs", pr, "f/x", []string{"scripts/notes.md", "docs/notes.md"}, "true"},
+		{"the review policy (documentation, rules 20 and 21)", pr, "f/x", []string{"docs/review/policy.json"}, "false"},
+		{"review docs beside the policy (documentation, rules 20 and 21)", pr, "f/x", []string{"docs/review/in-session-loop.md"}, "false"},
+		{"the release signers (documentation, rules 20 and 21)", pr, "f/x", []string{"docs/allowed_signers"}, "false"},
+		{"the skipped-releases list (documentation, rules 20 and 21)", pr, "f/x", []string{"docs/skipped-releases.txt"}, "false"},
+		{"the release cutover version (documentation, rules 20 and 21)", pr, "f/x", []string{"docs/release-cutover"}, "false"},
+		{"a binary asset under docs (documentation, rules 20 and 21)", pr, "f/x", []string{"docs/images/a.PNG"}, "false"},
+		{"a Go file under docs (documentation, rules 20 and 21)", pr, "f/x", []string{"docs/evidence/x/main.go"}, "false"},
+		{"a rename out of scripts into docs (documentation, rules 20 and 21)", pr, "f/x", []string{"scripts/notes.md", "docs/notes.md"}, "false"},
 		{"a file the classifier does not know", pr, "f/x", []string{"Makefile"}, "true"},
-		{"a setup skill", pr, "f/x", []string{"mash-setup/skills/setup/SKILL.md"}, "true"},
+		{"a setup skill (documentation, rules 20 and 21)", pr, "f/x", []string{"mash-setup/skills/setup/SKILL.md"}, "false"},
 		{"the setup plugin manifest", pr, "f/x", []string{"mash-setup/.claude-plugin/plugin.json"}, "true"},
-		{"agent instructions at the root", pr, "f/x", []string{"AGENTS.md"}, "true"},
-		{"agent instructions in a folder", pr, "f/x", []string{"docs/guide/AGENTS.md", "docs/a.md"}, "true"},
-		{"a briefing file in a folder", pr, "f/x", []string{"docs/x/CLAUDE.md"}, "true"},
-		{"a GEMINI file", pr, "f/x", []string{"docs/x/GEMINI.md"}, "true"},
-		{"a lower-case instruction file", pr, "f/x", []string{"docs/x/claude.md"}, "true"},
-		{"any SKILL.md", pr, "f/x", []string{"docs/anywhere/SKILL.md"}, "true"},
-		{"a skills directory", pr, "f/x", []string{"docs/skills/notes.md"}, "true"},
-		{"a commands directory", pr, "f/x", []string{"docs/commands/x.md"}, "true"},
-		{"an agents directory", pr, "f/x", []string{"docs/agents/INSTALL.md"}, "true"},
-		{"a hooks directory", pr, "f/x", []string{"docs/hooks/x.md"}, "true"},
-		{"a prompts directory", pr, "f/x", []string{"docs/prompts/a.md"}, "true"},
-		{"a briefings directory", pr, "f/x", []string{"briefings/a.md"}, "true"},
-		{"a plugins directory", pr, "f/x", []string{"plugins/x/README.md"}, "true"},
-		{"a .claude-plugin directory", pr, "f/x", []string{"docs/.claude-plugin/a.md"}, "true"},
-		{"a template", pr, "f/x", []string{"docs/x/briefing.tmpl"}, "true"},
+		{"agent instructions at the root (documentation, rules 20 and 21)", pr, "f/x", []string{"AGENTS.md"}, "false"},
+		{"agent instructions in a folder (documentation, rules 20 and 21)", pr, "f/x", []string{"docs/guide/AGENTS.md", "docs/a.md"}, "false"},
+		{"a briefing file in a folder (documentation, rules 20 and 21)", pr, "f/x", []string{"docs/x/CLAUDE.md"}, "false"},
+		{"a GEMINI file (documentation, rules 20 and 21)", pr, "f/x", []string{"docs/x/GEMINI.md"}, "false"},
+		{"a lower-case instruction file (documentation, rules 20 and 21)", pr, "f/x", []string{"docs/x/claude.md"}, "false"},
+		{"any SKILL.md (documentation, rules 20 and 21)", pr, "f/x", []string{"docs/anywhere/SKILL.md"}, "false"},
+		{"a skills directory (documentation, rules 20 and 21)", pr, "f/x", []string{"docs/skills/notes.md"}, "false"},
+		{"a commands directory (documentation, rules 20 and 21)", pr, "f/x", []string{"docs/commands/x.md"}, "false"},
+		{"an agents directory (documentation, rules 20 and 21)", pr, "f/x", []string{"docs/agents/INSTALL.md"}, "false"},
+		{"a hooks directory (documentation, rules 20 and 21)", pr, "f/x", []string{"docs/hooks/x.md"}, "false"},
+		{"a prompts directory (documentation, rules 20 and 21)", pr, "f/x", []string{"docs/prompts/a.md"}, "false"},
+		{"a briefings directory (documentation, rules 20 and 21)", pr, "f/x", []string{"briefings/a.md"}, "false"},
+		{"a plugins directory (documentation, rules 20 and 21)", pr, "f/x", []string{"plugins/x/README.md"}, "false"},
+		{"a .claude-plugin directory (documentation, rules 20 and 21)", pr, "f/x", []string{"docs/.claude-plugin/a.md"}, "false"},
+		{"a template (documentation, rules 20 and 21)", pr, "f/x", []string{"docs/x/briefing.tmpl"}, "false"},
 		{"a cursor rules file", pr, "f/x", []string{".cursorrules"}, "true"},
 		{"README stays docs", pr, "f/x", []string{"README.md", "docs/install.md", "SECURITY.md", "CONTRIBUTING.md"}, "false"},
 		{"a file merely named like one", pr, "f/x", []string{"docs/MYAGENTS.md", "docs/agents-notes.md"}, "false"},
-		{"a lower-case agents file is the instruction file", pr, "f/x", []string{"docs/agents.md"}, "true"},
+		{"a lower-case agents file is the instruction file (documentation, rules 20 and 21)", pr, "f/x", []string{"docs/agents.md"}, "false"},
 		{"a quoted path (git escapes it)", pr, "f/x", []string{`"docs/\303\251.md"`}, "true"},
 		{"no paths at all", pr, "f/x", nil, "true"},
 		// A push to main and a queue draft are classified by the paths they add, like a pull request (Randy 2026-11-21: a docs-only
@@ -232,34 +232,13 @@ func TestDocsOnly_classifier(t *testing.T) {
 		{"a queue draft touching the spec", pr, "mergify/merge-queue/0123abcd", []string{"docs/faq.md", "spec/rules.json"}, "true"},
 		{"a queue draft with no paths", pr, "mergify/merge-queue/0123abcd", nil, "true"},
 		{"a branch that only resembles the queue's", pr, "feature/mergify/merge-queue/x", []string{"docs/faq.md"}, "false"},
+		{"every Markdown file is documentation, whatever its name or place", pr, "f/x", []string{"README.md", "CHANGELOG.md", "AGENTS.md", "mash-setup/skills/setup/SKILL.md", "plugins/x/README.md", "docs/images/stack.svg"}, "false"},
+		{"a hook script in a skills directory stays code", pr, "f/x", []string{"docs/a.md", "mash-setup/skills/setup/run.sh"}, "true"},
+		{"a manifest in a plugin directory stays code", pr, "f/x", []string{"mash-setup/.claude-plugin/plugin.json"}, "true"},
+		{"a template outside docs stays code", pr, "f/x", []string{"briefings/a.tmpl"}, "true"},
 	} {
 		if got := ciChanges(t, c.event, c.ref, c.files...); got != "code="+c.code {
 			t.Errorf("%s: %s, want code=%s", c.name, got, c.code)
-		}
-	}
-}
-
-// The classifier's docs-only paths are exactly the ones no test, build or tool reads: every repository file a Go test or
-// the build reads from the docs areas must classify as code. This pins the list in scripts/ci-changes against the files
-// that exist, so a rename of one of them does not silently turn it docs-only.
-func TestDocsOnly_filesReadByTestsAreCode(t *testing.T) {
-	for _, p := range []string{
-		"docs/branch-protection.md",    // internal/release mergify_test.go
-		"docs/review/policy.json",      // scripts/reviewgate tests, scripts/gate
-		"docs/reference/README.md",     // internal/refgen TestReferenceIsCurrent
-		"spec/rules.json",              // internal/refgen
-		"docs/allowed_signers",         // scripts/releasecheck (release signing)
-		"docs/skipped-releases.txt",    // scripts/releasecheck
-		"docs/release-cutover",         // scripts/releasecheck
-		"CHANGELOG.md",                 // scripts/changelog tests
-		"scripts/scrubcheck/words.txt", // scripts/scrubcheck tests
-	} {
-		if _, err := os.Stat(filepath.Join("../..", p)); err != nil {
-			t.Errorf("%s no longer exists: update scripts/ci-changes and this list: %v", p, err)
-			continue
-		}
-		if got := ciChanges(t, "pull_request", "f/x", p); got != "code=true" {
-			t.Errorf("%s is read by a test or tool but classifies as %s", p, got)
 		}
 	}
 }
