@@ -201,7 +201,7 @@ check "on, download fails: PATH mash not run, stdout empty" empty_file "$T/out"
 check "on, download fails: error names the setting" contains "$(cat "$T/err")" "MASH_PLUGIN_REQUIRE_VERIFIED is on"
 check "on, download fails: error names the failure" contains "$(cat "$T/err")" "(download failed)"
 check "on, download fails: error says how to turn it off" contains "$(cat "$T/err")" "MASH_PLUGIN_REQUIRE_VERIFIED=0"
-check "on, download fails: no install hint" eq "$(grep -c 'go install' "$T/err")" 0
+check "on, download fails: no install hint" eq "$(grep -c 'is not installed' "$T/err")" 0
 check "on, download fails: nothing installed" absent "$T/sd4/bin/mash-$VER"
 rv_run "$T/sd5" "file://$REL2" 1 serve
 check "on, sha mismatch: exit 127" eq "$RC" 127
@@ -359,10 +359,11 @@ D7="$T/data7"
 CLAUDE_PLUGIN_DATA="$D7" PATH="$BASEPATH" sh "$P3/scripts/mash" serve > "$T/out" 2> "$T/err"; RC=$?
 check "unpinned with nothing resolvable exits 127" eq "$RC" 127
 check "unpinned never downloads" absent "$D7"
-check "unpinned prints install hint on stderr" contains "$(cat "$T/err")" "go install github.com/bogworks/mash/cmd/mash@latest"
+check "unpinned prints install hint on stderr" contains "$(cat "$T/err")" "install.sh"
 check "unpinned wrote nothing to stdout" empty_file "$T/out"
 
 # --- prefetch
+SENTENCE="mash is not installed: the mash plugin found no mash program. Install it: curl -fsSL https://github.com/bogworks/mash/releases/latest/download/install.sh | bash"
 D8="$T/data8"
 run "$D8" __prefetch
 check "prefetch success exits 0" eq "$RC" 0
@@ -370,15 +371,30 @@ check "prefetch success silent on stdout" empty_file "$T/out"
 check "prefetch installed binary" test -x "$D8/bin/mash-$VER"
 MASH_RELEASE_BASE="file://$REL2" run "$T/data9" __prefetch
 check "prefetch on bad sha exits 0" eq "$RC" 0
-check "prefetch on bad sha silent on stdout" empty_file "$T/out"
+check "prefetch on bad sha: stdout is the not-installed line, naming the project base" eq "$(cat "$T/out")" "$SENTENCE"
 check "prefetch on bad sha installed nothing" absent "$T/data9/bin/mash-$VER"
 MASH_RELEASE_BASE="file://$T/nope" run "$T/data10" __prefetch
 check "prefetch offline exits 0" eq "$RC" 0
-check "prefetch offline silent on stdout" empty_file "$T/out"
+check "prefetch offline: stdout is the not-installed line, naming the project base" eq "$(cat "$T/out")" "$SENTENCE"
 CLAUDE_PLUGIN_DATA="$T/data11" PATH="$BASEPATH" sh "$P3/scripts/mash" __prefetch > "$T/out" 2> "$T/err"; RC=$?
 check "prefetch unpinned exits 0" eq "$RC" 0
-check "prefetch unpinned silent on stdout" empty_file "$T/out"
+check "prefetch unpinned, no mash: stdout is the not-installed line" eq "$(cat "$T/out")" "$SENTENCE"
 check "prefetch unpinned never downloads" absent "$T/data11"
+
+# the SessionStart line, exactly, with MASH_RELEASE_BASE unset and with it set (the line always names the project base)
+env -u MASH_RELEASE_BASE CLAUDE_PLUGIN_DATA="$T/data14" PATH="$BASEPATH" sh "$P3/scripts/mash" __prefetch > "$T/out" 2> "$T/err"; RC=$?
+check "no binary, default base: prefetch exits 0" eq "$RC" 0
+check "no binary, default base: stdout is exactly the spec sentence" eq "$(cat "$T/out")" "$SENTENCE"
+check "no binary, default base: stdout is one line" eq "$(wc -l < "$T/out" | tr -d ' ')" 1
+MASH_RELEASE_BASE=https://mirror.example/rel CLAUDE_PLUGIN_DATA="$T/data15" PATH="$BASEPATH" sh "$P3/scripts/mash" __prefetch > "$T/out" 2> "$T/err"; RC=$?
+check "no binary, MASH_RELEASE_BASE set: prefetch exits 0" eq "$RC" 0
+check "no binary, MASH_RELEASE_BASE set: the line still names the project base" eq "$(cat "$T/out")" "$SENTENCE"
+check "no binary, MASH_RELEASE_BASE set: no placeholder" eq "$(grep -c '<' "$T/out")" 0
+CLAUDE_PLUGIN_DATA="$T/data16" PATH="$PB:$BASEPATH" sh "$P3/scripts/mash" __prefetch > "$T/out" 2> "$T/err"; RC=$?
+check "PATH mash exists: prefetch exits 0, nothing on stdout" eq "$RC$(wc -c < "$T/out" | tr -d ' ')" 00
+MASH_BIN="$T/ovr" CLAUDE_PLUGIN_DATA="$T/data17" PATH="$BASEPATH" sh "$P3/scripts/mash" __prefetch > "$T/out" 2> "$T/err"; RC=$?
+check "MASH_BIN set: prefetch exits 0, nothing on stdout" eq "$RC$(wc -c < "$T/out" | tr -d ' ')" 00
+check "MCP launcher stderr uses the same sentence" contains "$(env -u MASH_RELEASE_BASE CLAUDE_PLUGIN_DATA="$T/data18" PATH="$BASEPATH" sh "$P3/scripts/mash" serve 2>&1 >/dev/null)" "$SENTENCE"
 
 # --- bare $0 (no slash) falls back to the current directory for mash.pins
 (cd "$P/scripts" && PATH="$BASEPATH" CLAUDE_PLUGIN_DATA="$T/data13" sh mash serve > "$T/out" 2> "$T/err")

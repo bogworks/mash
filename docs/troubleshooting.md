@@ -35,9 +35,9 @@ Cause: the folder's `config.json` still has 0.5.5's keys `url` or `tls_ca`. mash
 
 Fix: run the script once, `curl -fsSL <hint address> | bash`. It renames the keys (`url` to `servers`, `tls_ca` to `ca`) and keeps the old file beside it as a backup. Nothing on the server needs migrating. See [Upgrading from 0.5.5](install.md#upgrading-from-055).
 
-## `mash: no binary found`
+## `mash is not installed`
 
-Full text: `mash: no binary found. Install: go install github.com/bogworks/mash/cmd/mash@latest  (or see docs/install.md)`, preceded by `mash launcher:` lines on stderr, and exit status 127. The MCP server does not start.
+Full text: `mash is not installed: the mash plugin found no mash program. Install it: curl -fsSL https://github.com/bogworks/mash/releases/latest/download/install.sh | bash`. The plugin's session-start hook prints it as one line on stdout, so the agent sees it and can tell you; the MCP launcher prints it on stderr after `mash launcher:` lines and exits 127, and the MCP server does not start. The line always names the project's own latest release, even when `MASH_RELEASE_BASE` is set.
 
 Causes:
 - The plugin is unpinned (a repository checkout) and there is no `mash` on the `PATH` of the process that started it. An unpinned launcher never downloads.
@@ -45,7 +45,7 @@ Causes:
 
 Check: `command -v mash` and `mash version` in the shell Claude Code was launched from. Read the `mash launcher:` lines.
 
-Fix: `go install github.com/bogworks/mash/cmd/mash@latest`, and make sure its directory is on the `PATH` of the launching environment. Or set `MASH_BIN` to a binary path. Hooks never wait more than 5 seconds for a download, and after a failure skip downloading for 5 minutes ([install.md](install.md) section 1).
+Fix: run that line (it installs the attested release and says where), and make sure its directory is on the `PATH` of the launching environment. Or set `MASH_BIN` to a binary path. Hooks never wait more than 5 seconds for a download, and after a failure skip downloading for 5 minutes ([install.md](install.md) section 1).
 
 ## The `config` row fails, or `no server is set`
 
