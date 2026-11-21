@@ -164,6 +164,8 @@ func TestDocsOnly_classifier(t *testing.T) {
 		{"a change-log fragment", pr, "f/x", []string{"changelog.d/a.fixed.md"}, "true"},
 		{"the change log", pr, "f/x", []string{"CHANGELOG.md"}, "true"},
 		{"the branch-protection doc", pr, "f/x", []string{"docs/branch-protection.md"}, "true"},
+		{"a generated reference page", pr, "f/x", []string{"docs/reference/mash-send.md"}, "true"},
+		{"the spec", pr, "f/x", []string{"spec/mash.json"}, "true"},
 		{"the review policy", pr, "f/x", []string{"docs/review/policy.json"}, "true"},
 		{"review docs beside the policy", pr, "f/x", []string{"docs/review/in-session-loop.md"}, "true"},
 		{"the release signers", pr, "f/x", []string{"docs/allowed_signers"}, "true"},
@@ -196,6 +198,8 @@ func TestDocsOnly_filesReadByTestsAreCode(t *testing.T) {
 	for _, p := range []string{
 		"docs/branch-protection.md",    // internal/release mergify_test.go
 		"docs/review/policy.json",      // scripts/reviewgate tests, scripts/gate
+		"docs/reference/README.md",     // internal/refgen TestReferenceIsCurrent
+		"spec/rules.json",              // internal/refgen
 		"docs/allowed_signers",         // scripts/releasecheck (release signing)
 		"docs/skipped-releases.txt",    // scripts/releasecheck
 		"docs/release-cutover",         // scripts/releasecheck

@@ -1,0 +1,8 @@
+{"info":{"title":"mashctl","version":"1.0.0-spec.1"},
+ "command":{"name":"mashctl","description":"The admin tool.",
+  "metadata":[{"name":"x-removed","value":[{"what":"old","why":"Gone."}]}],
+  "commands":[
+   {"name":"grp","description":"A group.",
+    "metadata":[{"name":"x-release","value":"1.0.0"}],
+    "commands":[{"name":"leaf","description":"A leaf.","metadata":[{"name":"x-release","value":"1.0.0"}]}]}
+  ]}}

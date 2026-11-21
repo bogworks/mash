@@ -1,0 +1,103 @@
+Generated from spec/*.json by go run ./scripts/refgen. Do not edit.
+
+# Coming in 0.6.0
+
+What changes in 0.6.0. None of it is in 0.5.6.
+
+## Changes
+
+- mash prompt becomes mash sap prompt. And the MCP tool reply moves with it.
+  0.5.6 prints a note on every use.
+- A mesh holds many owners. mashctl owner create, list and delete arrive. Mail
+  between owners becomes a designed case, under policy.
+- Policy. Who may send to whom. mash ships open; narrowing is a choice.
+- Asking to join. An endpoint can ask to join and be approved by an
+  administrator or by policy (board card 210).
+- The MCP revision and how a session is woken. A spike in the 0.6.0 sprint on
+  the MCP Events extension (board card 213). Channels stay until then.
+
+## Commands
+
+### `mash sap`
+
+Plain Synadia Agent Protocol operations, for experts. Experimental.
+
+Release: 0.6.0. Group: Raw SAP.
+
+#### Usage
+
+```text
+mash sap [options]
+```
+
+The global options of `mash` also apply: see [mash](mash.md#global-options).
+
+#### Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| 0 | It worked. |
+| 1 | It failed; one line on stderr says why. |
+| 2 | The command line was wrong; nothing was attempted. |
+
+#### Output
+
+##### Planned
+
+Stream: stdout. Exit code: 0.
+
+```text
+(mash sap prompt, mash sap reply and what else SAP offers,
+ still subject to mash's policy)
+```
+
+#### MCP tool
+
+None. To be decided with the 0.6.0 design.
+
+#### What it replaces
+
+Does not exist. mash prompt and the reply tool move here in 0.6.0, which is a
+breaking change.
+
+### `mashctl owner`
+
+Create, list and remove owners.
+
+Release: 0.6.0. Group: Owners.
+
+#### Usage
+
+```text
+mashctl owner [options]
+```
+
+The global options of `mashctl` also apply: see
+[mashctl](mashctl.md#global-options).
+
+#### Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| 0 | It worked. |
+| 1 | It failed; one line on stderr says why. |
+| 2 | The command line was wrong; nothing was attempted. |
+
+#### Output
+
+##### Planned
+
+Stream: stdout. Exit code: 0.
+
+```text
+(mashctl owner create, list and delete)
+```
+
+#### MCP tool
+
+None. Administration. There are no MCP tools for mashctl.
+
+#### What it replaces
+
+Does not exist. In 0.5.6 a mesh has the one owner named at mashctl init;
+nothing in the grammar assumes one.
