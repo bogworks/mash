@@ -46,7 +46,7 @@ merge_protections:
           - -author = mergify[bot]
       # Inactive for a docs-only pull request (no changed file matches the code regex, the same text as the docs queue's):
       # it needs no approval or label, only the docs lint (pr-check) and adr-lint, enforced by the docs queue.
-      - files ~= ^(?!(docs/|.*\.md$))|^(\.github/|\.mergify\.yml$|\.claude-plugin/|plugin/|scripts/|cmd/|internal/|ci/|spec/|changelog\.d/)|(?i:(^|/)(agents|claude|gemini|skill)\.md$)|(?i:(^|/)\.(cursorrules|windsurfrules)$)|(?i:\.tmpl$)|(?i:(^|/)(skills|commands|agents|hooks|prompts|briefings|plugins|\.claude-plugin|mash-setup)/)|^CHANGELOG\.md$|^docs/(branch-protection\.md|review/|reference/|allowed_signers$|skipped-releases\.txt$|release-cutover$)|\.go$|(^|/)go\.(mod|sum)$|(^|/)testdata/|conformance|^docs/.*\.(?i:png|jpe?g|gif|ico|pdf|woff2?)$
+      - files ~= ^(?!(.*\.md$|docs/.*\.(txt|rst|adoc|csv|log)$))|^(\.github/|\.mergify\.yml$|\.claude-plugin/|plugin/|scripts/|cmd/|internal/|ci/|spec/|changelog\.d/)|(?i:(^|/)(agents|claude|gemini|skill)\.md$)|(?i:(^|/)\.(cursorrules|windsurfrules)$)|(?i:\.tmpl$)|(?i:(^|/)(skills|commands|agents|hooks|prompts|briefings|plugins|\.claude-plugin|mash-setup)/)|^CHANGELOG\.md$|^docs/(branch-protection\.md|review/|reference/|allowed_signers$|skipped-releases\.txt$|release-cutover$)|\.go$|(^|/)go\.(mod|sum)$|(^|/)testdata/|conformance|^docs/.*\.(?i:png|jpe?g|gif|ico|pdf|woff2?)$
     success_conditions:
       - or:
           # Mirrors the approver in queue_conditions; internal/release/mergify_test.go fails if they differ.
@@ -70,7 +70,7 @@ queue_rules:
       - -conflict
       - label != hold
       - "#files >= 1"
-      - -files ~= ^(?!(docs/|.*\.md$))|^(\.github/|\.mergify\.yml$|\.claude-plugin/|plugin/|scripts/|cmd/|internal/|ci/|spec/|changelog\.d/)|(?i:(^|/)(agents|claude|gemini|skill)\.md$)|(?i:(^|/)\.(cursorrules|windsurfrules)$)|(?i:\.tmpl$)|(?i:(^|/)(skills|commands|agents|hooks|prompts|briefings|plugins|\.claude-plugin|mash-setup)/)|^CHANGELOG\.md$|^docs/(branch-protection\.md|review/|reference/|allowed_signers$|skipped-releases\.txt$|release-cutover$)|\.go$|(^|/)go\.(mod|sum)$|(^|/)testdata/|conformance|^docs/.*\.(?i:png|jpe?g|gif|ico|pdf|woff2?)$
+      - -files ~= ^(?!(.*\.md$|docs/.*\.(txt|rst|adoc|csv|log)$))|^(\.github/|\.mergify\.yml$|\.claude-plugin/|plugin/|scripts/|cmd/|internal/|ci/|spec/|changelog\.d/)|(?i:(^|/)(agents|claude|gemini|skill)\.md$)|(?i:(^|/)\.(cursorrules|windsurfrules)$)|(?i:\.tmpl$)|(?i:(^|/)(skills|commands|agents|hooks|prompts|briefings|plugins|\.claude-plugin|mash-setup)/)|^CHANGELOG\.md$|^docs/(branch-protection\.md|review/|reference/|allowed_signers$|skipped-releases\.txt$|release-cutover$)|\.go$|(^|/)go\.(mod|sum)$|(^|/)testdata/|conformance|^docs/.*\.(?i:png|jpe?g|gif|ico|pdf|woff2?)$
       - check-success = @github-actions/pr-check
       - check-success = @github-actions/adr-lint
     merge_conditions:
@@ -150,7 +150,7 @@ priority_rules:
   - name: docs-only
     conditions:
       - "#files >= 1"
-      - -files ~= ^(?!(docs/|.*\.md$))|^(\.github/|\.mergify\.yml$|\.claude-plugin/|plugin/|scripts/|cmd/|internal/|ci/|spec/|changelog\.d/)|(?i:(^|/)(agents|claude|gemini|skill)\.md$)|(?i:(^|/)\.(cursorrules|windsurfrules)$)|(?i:\.tmpl$)|(?i:(^|/)(skills|commands|agents|hooks|prompts|briefings|plugins|\.claude-plugin|mash-setup)/)|^CHANGELOG\.md$|^docs/(branch-protection\.md|review/|reference/|allowed_signers$|skipped-releases\.txt$|release-cutover$)|\.go$|(^|/)go\.(mod|sum)$|(^|/)testdata/|conformance|^docs/.*\.(?i:png|jpe?g|gif|ico|pdf|woff2?)$
+      - -files ~= ^(?!(.*\.md$|docs/.*\.(txt|rst|adoc|csv|log)$))|^(\.github/|\.mergify\.yml$|\.claude-plugin/|plugin/|scripts/|cmd/|internal/|ci/|spec/|changelog\.d/)|(?i:(^|/)(agents|claude|gemini|skill)\.md$)|(?i:(^|/)\.(cursorrules|windsurfrules)$)|(?i:\.tmpl$)|(?i:(^|/)(skills|commands|agents|hooks|prompts|briefings|plugins|\.claude-plugin|mash-setup)/)|^CHANGELOG\.md$|^docs/(branch-protection\.md|review/|reference/|allowed_signers$|skipped-releases\.txt$|release-cutover$)|\.go$|(^|/)go\.(mod|sum)$|(^|/)testdata/|conformance|^docs/.*\.(?i:png|jpe?g|gif|ico|pdf|woff2?)$
     priority: 5000
   - name: pipeline
     conditions:

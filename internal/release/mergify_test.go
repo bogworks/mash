@@ -538,12 +538,19 @@ func TestMergify_actionsChecksAreAppQualified(t *testing.T) {
 // alternative is plain RE2.
 func codeRegexMatches(t *testing.T, re, path string) bool {
 	t.Helper()
-	const lookahead = `^(?!(docs/|.*\.md$))`
+	const lookahead = `^(?!(.*\.md$|docs/.*\.(txt|rst|adoc|csv|log)$))`
 	rest, ok := strings.CutPrefix(re, lookahead+"|")
 	if !ok {
 		t.Fatalf("the code regex must start with %s: %.60s", lookahead, re)
 	}
-	if !strings.HasPrefix(path, "docs/") && !strings.HasSuffix(path, ".md") {
+	// the lookahead: not Markdown anywhere, and not a plain-text file under docs/
+	plainText := false
+	if strings.HasPrefix(path, "docs/") {
+		for _, e := range []string{".txt", ".rst", ".adoc", ".csv", ".log"} {
+			plainText = plainText || strings.HasSuffix(path, e)
+		}
+	}
+	if !strings.HasSuffix(path, ".md") && !plainText {
 		return true
 	}
 	return regexp.MustCompile(rest).MatchString(path)
@@ -622,7 +629,7 @@ func TestMergify_docsRegexAgreesWithTheClassifier(t *testing.T) {
 		"LICENSE", "docs", "docs.md", "xdocs/a.md", "mash-setup/skills/setup/SKILL.md", "mash-setup/.claude-plugin/plugin.json", "AGENTS.md", "CLAUDE.md", "docs/guide/AGENTS.md", "docs/x/CLAUDE.md", "docs/agents.md", "docs/MYAGENTS.md", "docs/agents-notes.md",
 		"docs/x/GEMINI.md", "docs/x/claude.md", "docs/anywhere/SKILL.md", "docs/skills/notes.md", "docs/commands/x.md", "docs/agents/INSTALL.md", "docs/hooks/x.md",
 		"docs/prompts/a.md", "briefings/a.md", "plugins/x/README.md", "docs/.claude-plugin/a.md", "docs/x/briefing.tmpl", ".cursorrules", ".windsurfrules",
-		"Mash-Setup/x.md", "docs/Mash-Setup/y.md", "mash-setup/a.md", "README.md", "docs/install.md", "SECURITY.md", "CONTRIBUTING.md", "docs/Skills/Uppercase.md", "x/AGENTS.MD",
+		"Mash-Setup/x.md", "docs/Mash-Setup/y.md", "mash-setup/a.md", "docs/evidence/2026-11-02-heartbeat-fanout/run.sh", "docs/x/data.json", "docs/images/a.svg", "docs/demo/two-sessions.cast", "docs/a.txt", "docs/b.rst", "docs/evidence/x/timeline.log", "docs/x/Makefile", "README.md", "docs/install.md", "SECURITY.md", "CONTRIBUTING.md", "docs/Skills/Uppercase.md", "x/AGENTS.MD",
 		"docs/specs/2026-10-21-mash-design.md", "docs/security/threat-model.md", "a.txt",
 	}
 	if out, err := exec.Command("git", "-C", "../..", "ls-files").Output(); err == nil {

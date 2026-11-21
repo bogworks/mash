@@ -44,7 +44,7 @@ Chosen option: the second queue.
   `internal/release/mergify_test.go` fails if the three differ and fails if the expression and `scripts/ci-changes` disagree on any of
   about eighty paths and a sample of every tracked file. Agent instructions and what an agent or a tool executes are code, at any depth and in any case: `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`,
   every `SKILL.md`, `.cursorrules`, `*.tmpl`, and anything under a `skills`, `commands`, `agents`, `hooks`, `prompts`, `briefings`, `plugins`,
-  `.claude-plugin` or `mash-setup` directory (planner #2845). `README.md`, `docs/install.md`, `SECURITY.md` and `CONTRIBUTING.md` stay documentation.
+  `.claude-plugin` or `mash-setup` directory (planner #2845). `README.md`, `docs/install.md`, `SECURITY.md` and `CONTRIBUTING.md` stay documentation. Under `docs/` only plain-text formats are documentation (`.md`, `.txt`, `.rst`, `.adoc`, `.csv`, `.log`): a script, a data or configuration file, an `.svg` or a `.cast` there is runnable or active material and is code (security-review F1).
 * **This reverses an earlier rule.** `ci.yml`, `lint.yml` and `security.yml` said that a push to `main`, a merge group and a queue draft
   always run the full set, so that `main` is always tested and the release gate always finds the test runs on its candidate. A push
   and a queue draft are now classified like a pull request; a merge group and a schedule still always run the full set. The
