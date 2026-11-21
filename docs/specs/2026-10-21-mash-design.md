@@ -201,7 +201,7 @@ These permissions, applied to a user named `<name>`, are the whole security mode
 - `agents.mail.*.<owner>.*` and `agents.mail.*.<owner>.*.*`: send mail to any endpoint, with the legacy 5-token subject or the zoned 6-token subject (ADR 0054). The signature, not the subject, proves the sender.
 - `agents.prompt.*.<owner>.*` and `agents.status.*.<owner>.*`: live SAP prompts and status probes to peers (`mash prompt`).
 - `agents.hb.cc.<owner>.<name>`.
-- `_INBOX.>`: replies to callers (prompt chunks, `$SRV` answers).
+- `_INBOX.<owner>.>`: replies to callers of its own owner (prompt chunks, `$SRV` answers); it was `_INBOX.>` in this first design, narrowed by [ADR 0155](../decisions/0155-a-listset-endpoint-may-publish-replies-only-under-its-own-owner-inbox-prefix.md).
 - `$SRV.>`: micro-service replies.
 - `$JS.API.INFO`.
 - For its own inbox stream, `inbox-<name>`:
@@ -219,13 +219,13 @@ These permissions, applied to a user named `<name>`, are the whole security mode
   - `$JS.API.DIRECT.GET.KV_mash-leases.$KV.mash-leases.<name>`, to read its own lease (who holds a contested name).
 
 **Subscribe allow:**
-- `_INBOX.<name>.>`: the endpoint's own reply prefix. Its connections set the custom inbox prefix `_INBOX.<name>`, so replies meant for one endpoint (JetStream deliveries, KV reads, prompt answers) can't be read by another;
+- `_INBOX.<owner>.<name>.>` (ADR 0155; first written `_INBOX.<name>.>`): the endpoint's own reply prefix. Its connections set the custom inbox prefix `_INBOX.<name>`, so replies meant for one endpoint (JetStream deliveries, KV reads, prompt answers) can't be read by another;
 - `agents.prompt.cc.<owner>.<name>`;
 - `agents.status.cc.<owner>.<name>`;
 - `$SRV.>`;
 - `agents.hb.*.<owner>.*`: granted so a tool may listen to heartbeats; `mash serve` does not subscribe (ADR-0066: presence is asked for with `$SRV.INFO`).
 
-**No response permission.** `allow_responses` grants publishing to any reply subject the endpoint receives, so an endpoint could send itself a request whose reply subject is `$JS.API.STREAM.DELETE.<victim>` and answer it. Replies (SAP prompt chunks, `$SRV` answers) are allowed instead by `_INBOX.>` in the publish list, so a reply can only ever land in an inbox; callers must use `_INBOX.` reply subjects (every NATS client's default).
+**No response permission.** `allow_responses` grants publishing to any reply subject the endpoint receives, so an endpoint could send itself a request whose reply subject is `$JS.API.STREAM.DELETE.<victim>` and answer it. Replies (SAP prompt chunks, `$SRV` answers) are allowed instead by `_INBOX.<owner>.>` in the publish list (`_INBOX.>` before ADR 0155), so a reply can only ever land in an inbox; callers must use `_INBOX.` reply subjects (every NATS client's default).
 
 Anything not listed is denied. That includes another endpoint's inbox, its history and its lease, stream deletion and purging, and the admin API. The integration tests (section 12) assert each denial against a real server.
 
