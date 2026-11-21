@@ -15,7 +15,7 @@ are services that other teams or organisations call, and you need a shared task 
 web authentication, use A2A. The two can sit side by side: A2A at the edge, mash inside. mash ships no bridge between
 them today.
 
-mash was built for a swarm: agents on related, interconnected work, such as coding agents on one codebase. "Lightweight"
+mash is meant for agents on related, interconnected work, such as coding agents on one codebase. "Lightweight"
 holds in one countable sense: each agent runs one Go binary that opens one outbound connection to one NATS server, with
 no per-agent server, open port or certificate. It does not mean no setup (see "What you run" in section 2) and it is not
 a speed claim (a model turn takes seconds and dominates; see section 5). The line that matters is trust, not size: two
@@ -80,7 +80,7 @@ numbered footnotes. IBM/BeeAI ACP merged into A2A (2025-08-29), so A2A's column 
 [^h-slack]: Kind: chat for people. Identity: Slack account or bot token.
 [^h-mail]: Kind: mail for people. Identity: address, domain, key.
 [^wake]: "Wake" means starting a model turn in a session that is running but idle. None of these starts a stopped process.
-[^dur-mash]: Yes while retained: by default 30 days or 16 MiB per inbox, oldest dropped even if unread. Each inbox is a JetStream file stream: 30 days, 16 MiB, drop oldest (unread included), 1 MiB per message (or the server's `max_payload` if smaller), delete and purge denied, one replica. The two caps can be raised, never lowered (see [Limits](operations.md#limits)). A host crash can lose recent mail: default nats-server fsync runs every 2 minutes (see section 6).
+[^dur-mash]: Yes while retained: by default 30 days or 16 MiB per inbox, oldest dropped even if unread. Each inbox is a JetStream file stream: 30 days, 16 MiB, drop oldest (unread included), 1 MiB per message (or the server's `max_payload` if smaller), delete and purge denied, one replica. On an existing inbox the two caps can be raised, never lowered: `mashctl limits apply` refuses to lower them in place. A new inbox can start below these defaults, down to the minimums of 2 MiB and one hour (see [Limits](operations.md#limits)). A host crash can lose recent mail: default nats-server fsync runs every 2 minutes (see section 6).
 [^dur-sap]: Out of scope in 0.3.
 [^dur-js]: By configured limits.
 [^dur-a2a]: Tasks and artifacts are held by the serving agent; messages and stream updates may be lost. A2A 1.0 §3.7: "Messages MUST NOT be considered a reliable delivery mechanism for critical information." The same section says agents MAY persist important messages in task history, but clients "MUST NOT rely on this behavior unless negotiated out-of-band."
@@ -260,7 +260,7 @@ counts are measured by hand; no automated test counts turns.
 | Idle wake | Waking mail held 45 s with no tool call sends one one-line wake; retries back off from 90 s, doubling to 30 min | A `task` woke an idle session at 47 s (2026-10-29) |
 | Batching | Grouped after 100 ms of quiet; up to 10 messages and 16 KiB shown in full, larger batches as a digest | A burst of 12: 11 arrived as one digest turn, the slowest sender's in a second turn (2026-10-22) |
 | Urgent | A signed urgent mark from a `verified` sender wakes at once | 1.2 s (2026-10-29); 2.1-2.3 s (2026-10-30) |
-| Backlog wake | More than 15 waiting messages, or an oldest one over an hour old, wakes the session whatever the kinds (at most once every 10 minutes, and not in the first 10 minutes after `mash serve` starts; `MASH_WAKE_COUNT` and `MASH_WAKE_AGE` change the limits). Separately, 500 held messages or 4 MiB wake it to drain before the inbox limit drops mail | Unit tests only |
+| Backlog wake | More than 15 waiting messages, or an oldest one over an hour old, wakes the session whatever the kinds (at most once every 10 minutes, not in the first 10 minutes after `mash serve` starts, not within 10 minutes of a hook run, and not for a session suspected or known to run no hooks; `MASH_WAKE_COUNT` and `MASH_WAKE_AGE` change the limits; see [Backlog wake](operations.md#hook-delivery)). Separately, 500 held messages or 4 MiB wake it to drain before the inbox limit drops mail | Unit tests only |
 
 A kind is the sender's advisory claim: it only decides wake or wait and never changes the trust label. Mail with no kind
 is a `task`, so it wakes.
@@ -365,7 +365,7 @@ other machines), when mail must wait for days, when you need which-key-signed pr
 
 **Do I need a server per agent?** No. You need one NATS server that you run, and each agent dials out to it.
 
-**What exactly happens after `Mail sent (number N).`?** The message is in the recipient's JetStream inbox. It is shown to the
+**What exactly happens after `Mail sent (number N).`?** The message is in the recipient's JetStream inbox: the acknowledgement confirms storage, not that the session saw it. By default the recipient refuses unverified mail without telling the sender. Verified mail is shown to the
 session at least once while it is retained: up to 30 days by default, and until a full inbox (16 MiB by default) drops it as the oldest, read or
 not. A repeat after an interrupted hook is flagged. Retrying with the same key within 2 minutes stores nothing new; after
 that, a retry stores a second copy. Inboxes are single-replica, so a host crash or power loss can lose mail acknowledged
