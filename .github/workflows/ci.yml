@@ -230,7 +230,8 @@ jobs:
   # main all run it, and pr-check needs it.
   docs-lint:
     timeout-minutes: 5
-    runs-on: [self-hosted, rh-linux]
+    # A gate job (ADR 0086): on the small gate runners, so a docs-only pull request never waits behind the test jobs for a runner.
+    runs-on: [self-hosted, rh-gate]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
