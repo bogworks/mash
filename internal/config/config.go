@@ -78,11 +78,11 @@ type Config struct {
 	// uses tls:// or wss://, to any host (loopback included), unless it is set. Then a plain nats:// or ws:// URL is
 	// connected. It comes from the environment variable SkipEncryptionEnv only: no flag, no config.json key. Every
 	// command prints SkipEncryptionWarning on standard error while it is set (WarnSkipEncryption).
-	SkipEncryption    bool   // MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1: allow plain-text connections to any host (default false)
-	LaunchToken       string // MASH_LAUNCH_TOKEN: names the launch of the agent this process serves; recorded in the lease, optional
-	Host              string // MASH_HOST / "host": the agent host adapter ("" = claude)
-	SpoolFromStart    bool   // MASH_SPOOL_FROM_START / "spool_from_start": spool mail from the first message, before any hook has run
-	SpoolRequired     bool   // MASH_SPOOL_REQUIRED / "spool_required": fail closed: mail the spool cannot take is held unacked and reported, never delivered by the channel (default off)
+	SkipEncryption bool   // MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1: allow plain-text connections to any host (default false)
+	LaunchToken    string // MASH_LAUNCH_TOKEN: names the launch of the agent this process serves; recorded in the lease, optional
+	Host           string // MASH_HOST / "host": the agent host adapter ("" = claude)
+	SpoolFromStart bool   // MASH_SPOOL_FROM_START / "spool_from_start": spool mail from the first message, before any hook has run
+	SpoolRequired  bool   // MASH_SPOOL_REQUIRED / "spool_required": fail closed: mail the spool cannot take is held unacked and reported, never delivered by the channel (default off)
 	// AcceptUnverified delivers mail whose trust is not verified, with its label (MASH_ACCEPT_UNVERIFIED /
 	// "accept_unverified" / mash serve --accept-unverified). Default off: such mail is dropped and counted, and neither
 	// the session, the inbox listing nor mash read shows it.
