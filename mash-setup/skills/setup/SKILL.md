@@ -26,8 +26,10 @@ every question in step 1 before you change anything. Each step below that
 changes something says what it needs a yes for: ask for that yes, once, for
 that step. "Set mash up" alone is not a yes for all of them.
 
-Everything is installed as the local user: no `sudo`, no system package, no
-system service. You run each step's commands yourself after that step's yes.
+Everything is installed as the local user: no `sudo` and no system service,
+except that the person may choose a system route for `nats-server` and `nats`
+in step 2 and say yes to its exact command. You run each step's commands
+yourself after that step's yes.
 
 Every command block runs on its own in a fresh shell. Blocks marked
 `sh person` are only for what the person must do themselves: a typed
@@ -99,10 +101,11 @@ Then say this to the person, filled in, and wait for a yes:
 I will:
   download mash and mashctl         from the latest release (one tag, checked
                                     against its checksums), into ~/.local/bin
-  download nats-server and nats     from their GitHub releases (checked against
-                                    each release's SHA256SUMS), into ~/.local/bin
-  use no sudo                       everything is installed as you, nothing
-                                    system-wide
+  nats-server and nats              you choose how: the default is a download
+                                    from their GitHub releases, checked against
+                                    SHA256SUMS, into ~/.local/bin
+  use no sudo                       unless you choose a system route and say
+                                    yes to that exact command
   make a NATS server                in ~/mash-nats, this machine only, run as you
                                     (a program you run: after a reboot it is
                                      stopped; start it again with --start)
@@ -116,18 +119,48 @@ Say yes to go ahead. I will ask again before each step.
 
 ## 2. The server's programs
 
-The NATS script needs `nats-server` (2.10.7 or newer; the requirements are in
-https://github.com/bogworks/mash/blob/main/docs/nats-server.md#requirements),
-the `nats` command and `openssl`. If `nats-server` or `nats` is missing, tell
-the person where it comes from and ask for a yes. Needs a yes: downloading
-each program from its project's GitHub release into the install folder `BIN`
-of step 1. You run these blocks yourself; they need no `sudo`. If `openssl`,
-`curl`, `tar` or the port tool (`ss` on Linux, `lsof` on macOS), or both
-`unzip` and `python3`, is missing, say so in one line and stop and ask: the
-person decides how to get it.
+The NATS script needs `nats-server` 2.10.7 or newer (mash is tested with
+2.15.1; the requirements are in
+https://github.com/bogworks/mash/blob/main/docs/nats-server.md#requirements)
+and the `nats` command (natscli 0.5.2 is tested), both on the PATH of the user
+who will run mash. It also needs `openssl`, `curl`, `tar`, the port tool
+(`ss` on Linux, `lsof` on macOS), and `unzip` or `python3` for the nats
+zip. If one of those is missing, say so in one line
+and stop and ask: the person decides how to get it.
 
-On a Mac, Homebrew is an alternative: `brew install nats-server nats`. Then
-skip the two blocks below.
+Ask. If either program is missing or too old (check with
+`command -v nats-server nats` and `nats-server --version`), ask the person how
+they want them installed, and list the choices:
+
+- (a) download each from its GitHub release into their own folder `BIN` (the
+  default; recommended; no sudo)
+- (b) Homebrew or Linuxbrew: `brew install nats-server nats`
+- (c) the system's package manager
+- (d) build from source
+- (e) something else they name
+
+Wait for the answer.
+
+Then do it. Install for this machine and this choice, and say what you are
+doing before each command, in one line. Guard rails:
+
+- Prefer a per-user install.
+- Never use `sudo` unless the person chose a route that needs it and said yes
+  to that exact command.
+- Chain every checksum check to the step after it with `&&` or `set -e`, so a
+  mismatch stops before unpack or install.
+- After a system package, check where it landed (`command -v nats-server`;
+  Debian's package puts it in `/usr/sbin`, which is often not on a user's
+  PATH) and whether it started a service (for example
+  `systemctl is-active nats-server` where systemd exists), and tell the person.
+- The Debian and Ubuntu package starts an unauthenticated server on port 4222
+  (a known example). Say so, and let the person decide whether to stop it.
+- Never disable or stop a service the person did not ask to stop.
+- If the route fails, say what failed and ask. Do not switch routes silently.
+
+The default route (a), as a worked example. Adapt it for another machine type
+or choice; do not run it for a different choice. It needs a yes for
+downloading each program from its project's GitHub release into `BIN`.
 
 `BIN` may not exist yet. Debian's default umask is 002, so a folder made with
 `mkdir -p` is writable by its group, and `install.sh` refuses to install
@@ -188,11 +221,13 @@ Each block starts with `set -e`, so a checksum that does not match stops it
 before anything is unpacked or installed. Each checksum line should end in `OK`
 (a mismatch: stop, install nothing, ask).
 `nats-server --version` prints `nats-server: v2.15.1` and `nats --version`
-prints `0.5.2`. Then check `command -v nats-server nats`. `BIN` must be on the
-PATH: if it is not, tell the person to add it (do not edit their shell files);
-for this session use the full path, or put `PATH="$BIN:$PATH"` in front of a
-command. Both programs are explained at
+prints `0.5.2`. `BIN` must be on the PATH: if it is not, tell the person to
+add it (do not edit their shell files); for this session use the full path, or
+put `PATH="$BIN:$PATH"` in front of a command. Both programs are explained at
 https://github.com/bogworks/mash/blob/main/docs/nats-server.md#getting-nats-server-and-the-nats-command
+
+Verify: `nats-server --version` is 2.10.7 or newer, and
+`command -v nats-server nats` finds both on the PATH. Only then go on.
 
 ## 3. Download and check the two scripts
 
@@ -459,7 +494,8 @@ last):
 ## Do not
 
 - Do not pipe a download into a shell. Do not run a script you have not shown.
-- Do not use `sudo` or any system package; everything is installed as you.
+- Do not use `sudo` or a system package, except for the route the person chose
+  in step 2 and the exact command they said yes to.
   Do not run a typed confirmation or any `sh person` block yourself.
 - Do not print, paste or mail a seed, a credentials file or a key. Do not read
   files in `~/mash-nats` or `~/.config/mash` aloud.
