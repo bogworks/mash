@@ -43,7 +43,7 @@ Installed mashctl v0.5.6 (0f4e455) in ~/.local/bin
 ~/.local/bin is not on your PATH; add it to use mash
 ```
 
-Check that both programs are there and are the same version:
+If the output says `~/.local/bin` is not on your `PATH`, add it for this shell (and in your shell's startup file to keep it): `export PATH="$HOME/.local/bin:$PATH"`. Then check that both programs are there and are the same version:
 
 ```sh
 mash version
