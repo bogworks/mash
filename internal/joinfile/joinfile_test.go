@@ -49,6 +49,7 @@ func TestParseRefusesDuplicateKeysAndTrailingBytes(t *testing.T) {
 		"dup creds":        `{"mash_join":1,"address":"a.b.c","servers":["s"],"creds":"SECRET","creds":"x"}`,
 		"dup address":      `{"mash_join":1,"address":"a.b.c","address":"d.e.f","servers":["s"],"creds":"SECRET"}`,
 		"dup other case":   `{"mash_join":1,"address":"a.b.c","servers":["s"],"creds":"SECRET","Creds":"x"}`,
+		"dup unicode fold": `{"mash_join":1,"address":"a.b.c","servers":["s"],"user_jwt":"j","cred\u017f":"SECRET","creds":""}`,
 		"dup upper first":  `{"mash_join":1,"address":"a.b.c","servers":["s"],"CREDS":"SECRET","creds":"x"}`,
 		"trailing brace":   ok + `}`,
 		"trailing bracket": ok + `]`,

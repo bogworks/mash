@@ -71,14 +71,14 @@ func Parse(raw []byte) (File, error) {
 }
 
 // hasDuplicateKey reports whether the top-level object repeats a key. encoding/json matches field names without regard
-// to case, so keys that differ only in case are repeats too. Bytes that are not an object report false: the decode
+// to case (Unicode simple folding), so keys that differ only in case are repeats too. Bytes that are not an object report false: the decode
 // that follows refuses them.
 func hasDuplicateKey(raw []byte) bool {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	if t, err := dec.Token(); err != nil || t != json.Delim('{') {
 		return false
 	}
-	seen := map[string]bool{}
+	var seen []string
 	for dec.More() {
 		t, err := dec.Token()
 		if err != nil {
@@ -88,11 +88,12 @@ func hasDuplicateKey(raw []byte) bool {
 		if !ok {
 			return false
 		}
-		k = strings.ToLower(k)
-		if seen[k] {
-			return true
+		for _, o := range seen { // the decoder's own rule: Unicode simple folding ("credſ" is "creds")
+			if strings.EqualFold(o, k) {
+				return true
+			}
 		}
-		seen[k] = true
+		seen = append(seen, k)
 		var skip json.RawMessage
 		if err := dec.Decode(&skip); err != nil {
 			return false
