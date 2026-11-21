@@ -139,8 +139,7 @@ acme.demo.bob: ready, offline
 
 Ready means the server is there and reachable and the credentials are valid. Offline is normal here: no session holds the endpoint open yet.
 
-**4. Install the Claude Code plugins.** The mash repository is its own Claude Code marketplace. `mash` is the plugin that gives a session its inbox; `mash-setup` is two skills that set mash up and look after it (you can skip it):
- `#v0.5.6` pins the marketplace to the release tag, so the plugins you install match the `mash` you installed.
+**4. Install the Claude Code plugins.** The mash repository is its own Claude Code marketplace. `mash` is the plugin that gives a session its inbox; `mash-setup` is two skills that set mash up and look after it (you can skip it). `#v0.5.6` pins the marketplace to the release tag, so the plugins you install match the `mash` you installed:
 ```sh
 claude plugin marketplace add bogworks/mash#v0.5.6
 claude plugin install mash@mash

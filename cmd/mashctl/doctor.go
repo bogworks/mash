@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"slices"
 	"strings"
 
@@ -64,6 +63,8 @@ type doctorReport struct {
 	Problems int           `json:"problems"`
 	Warnings int           `json:"warnings"`
 	Checks   []doctorCheck `json:"checks"`
+
+	plainRefused bool // the server row failed on natsauth's refusal of a plain URL: exit 2
 }
 
 const initFix = "mashctl init --config <file>"
@@ -174,6 +175,9 @@ func runDoctor(args []string, g cliframe.Global, env func(string) string, lookup
 	} else {
 		rep.writeText(stdout, stderr)
 	}
+	if rep.plainRefused { // a plain URL without the override: a configuration error, whatever else failed
+		return 2
+	}
 	if rep.Problems > 0 || (in.flags["--strict"] && rep.Warnings > 0) {
 		return 1
 	}
@@ -218,6 +222,7 @@ func doctorChecks(rep *doctorReport, env func(string) string, lookup config.Look
 		}
 	}
 	if why := probeServer(cfg, servers[0]); why != "" {
+		rep.plainRefused = anyPlainRefused(servers, cfg.SkipEncryption)
 		rep.add("server", stateFail, why, "mashctl status")
 		return
 	}
@@ -226,6 +231,7 @@ func doctorChecks(rep *doctorReport, env func(string) string, lookup config.Look
 	// 3. sign-in: the admin credentials connect
 	adm, ctx, closeAdmin, err := ctl.OpenAdmin("mashctl", cfg)
 	if err != nil {
+		rep.plainRefused = rep.plainRefused || anyPlainRefused(servers, cfg.SkipEncryption) // a later server in the list is a plain URL: also a configuration error
 		msg := oneLine(err.Error())
 		if strings.Contains(msg, "uthorization violation") {
 			msg = "the server refused the admin credentials"
@@ -248,14 +254,11 @@ func doctorChecks(rep *doctorReport, env func(string) string, lookup config.Look
 // probeServer connects to one server, with the TLS settings of the configuration and no credentials. A server that
 // answers, or that refuses the connection for want of credentials, is up; the reason a server is not is returned.
 func probeServer(cfg config.Config, server string) string {
-	tlsReq, warning, err := natsauth.RequireTLS(server, cfg.InsecurePlaintext)
+	tlsReq, _, err := natsauth.RequireTLS(server, cfg.SkipEncryption)
 	if err != nil {
 		return oneLine(err.Error())
 	}
 	if why := probe(cfg, server, tlsReq); why != "" {
-		if warning != "" { // the sign-in step says it when the server answers
-			fmt.Fprintln(os.Stderr, warning)
-		}
 		return why
 	}
 	return ""
@@ -610,4 +613,16 @@ func doctorKeys(rep *doctorReport, ctx context.Context, adm *admin.Admin, cfg co
 		fails = append(fails, finding{oneLine(scan.Incomplete), initFix})
 	}
 	addFindings(rep, "keys", "every connected key was issued here", fails, nil)
+}
+
+// anyPlainRefused reports whether any server in the list is a plain URL the encryption rule refuses: a configuration
+// error, whichever server answers.
+func anyPlainRefused(servers []string, skip bool) bool {
+	for _, s := range servers {
+		var p *natsauth.PlainRefusalError
+		if _, _, err := natsauth.RequireTLS(s, skip); errors.As(err, &p) {
+			return true
+		}
+	}
+	return false
 }

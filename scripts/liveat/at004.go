@@ -29,7 +29,6 @@ import (
 var at4Pending = map[string]string{
 	"plain-text-override": "core's R1-2: plain text only with MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1 (spec/rules.json), the warning on stderr, and MASH_INSECURE_PLAINTEXT refused naming the new variable",
 	"unverified-refused":  "mash serve, mash inbox and mash read drop mail whose trust is not verified, and mash doctor counts it (spec/mash.json, 'Refusing unverified mail'); today the mail is delivered with its label",
-	"join-secrets":        "core's `mash join` (not in this build): its --out and credentials file are refused over a file and a symlink, with no secret in any output",
 }
 
 // at4Verdict is how a check that may be listed in at4Pending is recorded.
@@ -530,10 +529,10 @@ var AT004 = Scenario{
 	ID: "at004",
 	Scenario: "AT-4, the security boundaries, every check a negative test that fails when its protection is removed: one local server; endpoints alice/dev/design and alice/dev/review made the contract's way on a separate endpoint machine. " +
 		"(1) No secret in argv or output: every secret the scenario makes is registered (seeds, creds files, user JWTs, join files, the operator and account keys, the CA and server keys, the admin and system creds), " +
-		"a wide set of mash and mashctl commands is run with --json, --verbose and failure paths (including a seed, a join file and a creds file fed to options that expect something else), " +
+		"a wide set of mash and mashctl commands is run with --json, --detail and failure paths (including a seed, a join file and a creds file fed to options that expect something else), " +
 		"and all output, every recorded argv of the run and the command line of every process in the container are scanned for them. " +
 		"(2) Secret files are refused over an existing file, a symlink and a dangling symlink, and left byte-identical (and the symlink target too): the creds file in the config folder, the join file of endpoint create and reissue --out, " +
-		"the key and public key files of mash key create, the key pending file, and mash credential create --out. " +
+		"the key and public key files of mash key create (seed and seed.pub), the key pending file, and the creds file of mash join (refused over each without --replace; --replace replaces a symlink itself and writes through nothing; a seed of another key, a missing --key and --dry-run change nothing), and mash credential create is an unknown command. " +
 		"(3) Unverified mail is refused: absent, claimed, unknown-signer and stale mail is published with the sender's own creds (headers crafted with the sap package), the recipient's session, mash inbox and mash read are checked, a properly signed control message is delivered, and mashctl endpoint inbox shows each stored message with its trust label. " +
 		"(4) Plain text without the override is refused before connecting (a plain nats:// URL to a non-loopback address; mash and mashctl); the MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION behaviour is pending core's R1-2. " +
 		"(5) A deleted endpoint's credential is accepted before the delete and refused after it, on this one server; the form on all three servers is AT-005's check (refusedOn and acceptedOn on the deleted review key). " +
@@ -567,10 +566,10 @@ func (a *AT) at004() {
 		return
 	}
 	var ok bool
-	if s.design, ok = a.provision(ha, he, "alice", "dev", "design", filepath.Join(he.Dir, "design.creds"), false); !ok {
+	if s.design, ok = a.provision(ha, he, "alice", "dev", "design", false); !ok {
 		return
 	}
-	if s.review, ok = a.provision(ha, he, "alice", "dev", "review", filepath.Join(he.Dir, "review.creds"), false); !ok {
+	if s.review, ok = a.provision(ha, he, "alice", "dev", "review", false); !ok {
 		return
 	}
 	s.designEnv = a.SessionEnv(he, "dev", "design", "MASH_CREDS="+s.design.creds)
@@ -678,7 +677,7 @@ func (s *at4) files() {
 		r := s.mash("key-"+label, he, a.Conn(), "key", "create", "--out", seed)
 		a.C.Check("files setup: mash key create makes a key for "+label, r.Code == 0, exitDetail(r))
 		a.Watch("seed "+label, seed)
-		return strings.TrimSuffix(seed, ".seed") + ".pub"
+		return pubOf(seed)
 	}
 	absent := func(addr string) {
 		r := s.ctl("show-"+addr, ha, nil, "endpoint", "show", addr)
@@ -783,12 +782,12 @@ func (s *at4) files() {
 			continue
 		}
 		s.refuseOver("mash key create --out over "+string(st), func() Result { return s.mash("key-over", he, a.Conn(), "key", "create", "--out", seed) },
-			refusedWordsRE, g, filepath.Join(dir, "k.pub"))
+			refusedWordsRE, g, pubOf(seed))
 	}
 	for _, st := range []pathState{psFile, psSymlink} {
 		dir, tgt := s.dir("keypub")
 		seed := filepath.Join(dir, "k.seed")
-		pub := filepath.Join(dir, "k.pub")
+		pub := pubOf(seed)
 		g, err := plant(st, pub, tgt)
 		if !a.C.Check("files setup: "+string(st)+" at the public key path of mash key create", err == nil, errDetail(err)) {
 			continue
@@ -796,71 +795,191 @@ func (s *at4) files() {
 		s.refuseOver("mash key create --out with "+string(st)+" at the public key file: no seed is written either",
 			func() Result { return s.mash("key-over-pub", he, a.Conn(), "key", "create", "--out", seed) }, refusedWordsRE, g, seed)
 	}
-	{
-		dir, tgt := s.dir("keypubout")
-		seed := filepath.Join(dir, "k.seed")
-		pubOut := filepath.Join(dir, "elsewhere.pub")
-		g, err := plant(psSymlink, pubOut, tgt)
-		if a.C.Check("files setup: a symlink at the --pub-out path of mash key create", err == nil, errDetail(err)) {
-			s.refuseOver("mash key create --out --pub-out over a symlink: no seed is written either",
-				func() Result {
-					return s.mash("key-over-pubout", he, a.Conn(), "key", "create", "--out", seed, "--pub-out", pubOut)
-				}, refusedWordsRE, g, seed)
-		}
-	}
-
-	// mash credential create.
-	for _, st := range states {
-		dir, tgt := s.dir("cred")
-		out := filepath.Join(dir, "d.creds")
-		g, err := plant(st, out, tgt)
-		if !a.C.Check("files setup: "+string(st)+" at the creds path of mash credential create --out", err == nil, errDetail(err)) {
-			continue
-		}
-		s.refuseOver("mash credential create --out over "+string(st), func() Result {
-			return s.mash("cred-over", he, a.Conn(), "credential", "create", "--seed", s.design.seed, "--jwt", s.design.jwt, "--out", out)
-		}, refusedWordsRE, g)
-	}
-	for _, st := range []pathState{psFile, psSymlink} {
-		_, tgt := s.dir("cred-default")
-		path := filepath.Join(he.Config, "alice.dev.design.creds")
-		_ = os.MkdirAll(he.Config, 0o700)
-		g, err := plant(st, path, tgt)
-		if !a.C.Check("files setup: "+string(st)+" at the default creds path of mash credential create (the config folder)", err == nil, errDetail(err)) {
-			continue
-		}
-		s.refuseOver("mash credential create (no --out: the config folder) over "+string(st), func() Result {
-			return s.mash("cred-default-over", he, a.Conn(), "credential", "create", "--seed", s.design.seed, "--jwt", s.design.jwt)
-		}, refusedWordsRE, g)
-		_ = os.Remove(path)
-	}
-	{ // --force replaces a symlink itself: it never writes through it
-		dir, tgt := s.dir("cred-force")
-		out := filepath.Join(dir, "d.creds")
-		g, err := plant(psSymlink, out, tgt)
-		if a.C.Check("files setup: a symlink at the creds path for --force", err == nil, errDetail(err)) {
-			tg := takeGuard(g[1])
-			r := s.mash("cred-force", he, a.Conn(), "credential", "create", "--seed", s.design.seed, "--jwt", s.design.jwt, "--out", out, "--force")
-			after := takeGuard(g[1])
-			now := takeGuard(out)
-			a.C.Check("files: mash credential create --force over a symlink replaces the link and never writes through it (the target is byte-identical)",
-				r.Code == 0 && tg.Diff(after) == "" && now.Kind == "file", exitDetail(r)+"; target: "+orNone(tg.Diff(after))+"; path is now a "+now.Kind)
-		}
-	}
 }
 
-// join probes for core's `mash join`. Its secret files (the join file it reads, the creds it writes) are not tested
-// here until it exists: the check is pending, and when it exists the check fails until the real checks are written.
-func (s *at4) join() {
-	a := s.a
-	r := s.mash("probe-join", s.he, a.Conn(), "join", "--help")
-	exists := r.Code == 0
-	name := "files: mash join refuses to write its credentials over an existing file or a symlink, and prints no secret"
-	if exists {
-		a.C.Check(name, false, "mash join exists in this build and AT-4 has no checks for it: write them (file, symlink, dangling symlink; no secret in output), then remove join-secrets from at4Pending")
-		return
+// ---- check 2b: mash join ----------------------------------------------------------------------------------------
+
+// joinCAName is the name mash join gives the join file's certificate authority in the configuration folder.
+const joinCAName = "ca.pem"
+
+var (
+	installedRE = regexp.MustCompile(`already installed here`)
+	wrongKeyRE  = regexp.MustCompile(`is not the key this join file was made for`)
+	needsSeedRE = regexp.MustCompile(`this join file holds no seed`)
+)
+
+// joinSecretFree reports the labels of results whose text holds a registered secret or a seed- or JWT-shaped string.
+func joinSecretFree(rs []labelled, secrets map[string][]byte) []string {
+	var bad []string
+	for _, l := range rs {
+		if k := secretKinds(l.R.Text(), secrets); len(k) > 0 {
+			bad = append(bad, l.Label+" holds "+strings.Join(k, ", "))
+		}
 	}
-	a.pend("join-secrets", name, false, "mash join --help: "+exitDetail(r))
+	return bad
+}
+
+// noCommandRE is how mash says a command is not there: "mash has no command credential" (or an unknown-command wording).
+var noCommandRE = regexp.MustCompile(`(?i)has no command|unknown (command|verb|subcommand)`)
+
+// unknownCommandHolds judges `mash credential create`: it is gone, so it is an unknown command, exit 2, and nothing is
+// printed on standard output.
+func unknownCommandHolds(r Result) (bool, string) {
+	var bad []string
+	if r.Code != 2 {
+		bad = append(bad, "exit "+strconv.Itoa(r.Code)+", want 2")
+	}
+	if !noCommandRE.MatchString(r.Text()) {
+		bad = append(bad, "the message does not say the command is unknown")
+	}
+	if strings.TrimSpace(r.Stdout) != "" {
+		bad = append(bad, "standard output is not empty")
+	}
+	if len(bad) > 0 {
+		return false, strings.Join(bad, "; ")
+	}
+	return true, "exit 2"
+}
+
+// replaceHolds judges `mash join --replace` over what was at the creds path: it succeeded, the path is now a regular file
+// of mode 0600 with content (a symlink there was replaced itself, not written through), and the link target, when there
+// was one, is byte-identical.
+func replaceHolds(r Result, path fileGuard, targetBefore, targetAfter *fileGuard) (bool, string) {
+	var bad []string
+	if r.Code != 0 {
+		bad = append(bad, "exit "+strconv.Itoa(r.Code))
+	}
+	if path.Kind != "file" {
+		bad = append(bad, "the creds path is a "+path.Kind+", not a regular file")
+	} else {
+		if path.Mode.Perm() != 0o600 {
+			bad = append(bad, fmt.Sprintf("the creds file is mode %04o", path.Mode.Perm()))
+		}
+		if len(path.Data) == 0 {
+			bad = append(bad, "the creds file is empty")
+		}
+	}
+	if targetBefore != nil && targetAfter != nil {
+		if d := targetBefore.Diff(*targetAfter); d != "" {
+			bad = append(bad, "the link target was written through: "+d)
+		}
+	}
+	if len(bad) > 0 {
+		return false, strings.Join(bad, "; ")
+	}
+	return true, "exit 0"
+}
+
+// join is the checks of `mash join`: the creds file in the configuration folder is never written over an existing file or
+// a symlink without --replace, --replace replaces a symlink itself and never writes through it, a seed that does not
+// belong to the join file is refused, and no secret reaches the output (the command lines are scanned in finalScans).
+func (s *at4) join() {
+	a, he := s.a, s.he
+	who := "alice.dev.design"
+	jf, seed := s.design.join, s.design.seed
+	freshCfg := func(name string) (cfg, tgt string) {
+		dir, t := s.dir(name)
+		cfg = filepath.Join(dir, "cfg")
+		_ = os.MkdirAll(cfg, 0o700)
+		return cfg, t
+	}
+	var runs []labelled
+	run := func(label, cfg string, args ...string) Result {
+		r := s.mash(label, he, append(a.Conn(), "MASH_CONFIG_DIR="+cfg), args...)
+		runs = append(runs, labelled{label, r})
+		return r
+	}
+	notWritten := func(cfg string) []string {
+		return []string{filepath.Join(cfg, who+".creds"), filepath.Join(cfg, "config.json"), filepath.Join(cfg, joinCAName)}
+	}
+
+	// Refused over an existing creds file, a symlink and a dangling symlink, with nothing changed and nothing else written.
+	for _, st := range []pathState{psFile, psSymlink, psDangling} {
+		cfg, tgt := freshCfg("join-over-" + string(st))
+		path := filepath.Join(cfg, who+".creds")
+		g, err := plant(st, path, tgt)
+		if !a.C.Check("files setup: "+string(st)+" at the creds path of mash join ("+who+" in a fresh configuration folder)", err == nil, errDetail(err)) {
+			continue
+		}
+		s.refuseOver("mash join over "+string(st)+" at the creds file (no --replace)", func() Result {
+			return run("join-over-"+string(st), cfg, "join", jf, "--key", seed)
+		}, installedRE, g, notWritten(cfg)[1:]...)
+	}
+
+	// The refusal in the configuration folder that really holds the installed creds.
+	{
+		g := takeGuard(s.design.creds)
+		r := run("join-over-real", he.Config, "join", jf, "--key", seed)
+		ok, d := refusalHolds(r, []fileGuard{g}, []fileGuard{takeGuard(s.design.creds)}, installedRE, a.secrets)
+		a.C.Check("files: mash join over the creds file it installed (no --replace): refused, the installed file byte-identical, no secret in the output", ok && g.Kind == "file", d+"; kind "+g.Kind)
+		a.C.Check("files: that refusal says what to type: error: "+who+" is already installed here, hint: mash join FILE --replace",
+			strings.Contains(r.Stderr, "error: "+who+" is already installed here") && strings.Contains(r.Stderr, "hint: mash join "+jf+" --replace"), snip(r.Stderr))
+	}
+
+	// --replace over a symlink replaces the link itself, never the file it points at; over a file it replaces the file.
+	for _, st := range []pathState{psSymlink, psDangling, psFile} {
+		cfg, tgt := freshCfg("join-replace-" + string(st))
+		path := filepath.Join(cfg, who+".creds")
+		g, err := plant(st, path, tgt)
+		if !a.C.Check("files setup: "+string(st)+" at the creds path for mash join --replace", err == nil, errDetail(err)) {
+			continue
+		}
+		var before, after *fileGuard
+		if len(g) > 1 {
+			b := takeGuard(g[1])
+			before = &b
+		}
+		r := run("join-replace-"+string(st), cfg, "join", jf, "--key", seed, "--replace")
+		if len(g) > 1 {
+			af := takeGuard(g[1])
+			after = &af
+		}
+		ok, d := replaceHolds(r, takeGuard(path), before, after)
+		a.C.Check("files: mash join --replace over "+string(st)+" installs the creds as a regular file (mode 0600) and writes through nothing (the link target is byte-identical)", ok, d)
+	}
+
+	// A seed that does not belong to the join file, and a join file that needs a seed: refused, nothing written.
+	{
+		cfg, _ := freshCfg("join-wrong-seed")
+		s.refuseOver("mash join of design's join file with review's seed", func() Result {
+			return run("join-wrong-seed", cfg, "join", jf, "--key", s.review.seed)
+		}, wrongKeyRE, nil, notWritten(cfg)...)
+		var nokey Result
+		s.refuseOver("mash join of a join file made for a public key with no --key", func() Result {
+			nokey = run("join-no-key", cfg, "join", jf)
+			return nokey
+		}, needsSeedRE, nil, notWritten(cfg)...)
+		a.C.Check("files: the join file that needs a seed is a usage error, exit 2, with the hint mash join FILE --key <your seed file>",
+			nokey.Code == 2 && strings.Contains(nokey.Stderr, "hint: mash join "+jf+" --key <your seed file>"), exitDetail(nokey)+": "+snip(nokey.Stderr))
+		s.refuseOver("mash join with a join file given as the --key file", func() Result {
+			return run("join-key-is-join", cfg, "join", jf, "--key", jf)
+		}, regexp.MustCompile(`does not hold a user seed`), nil, notWritten(cfg)...)
+	}
+
+	// --dry-run says what would change and changes nothing.
+	{
+		cfg, _ := freshCfg("join-dry")
+		r := run("join-dry", cfg, "join", jf, "--key", seed, "--dry-run")
+		ents, _ := os.ReadDir(cfg)
+		a.C.Check("mash join --dry-run prints Would join as "+who+". and writes nothing",
+			r.Code == 0 && strings.TrimSpace(r.Stdout) == "Would join as "+who+"." && len(ents) == 0, exitDetail(r)+"; files written: "+strconv.Itoa(len(ents)))
+	}
+
+	// No secret in any output of these runs: the join file holds the user JWT, the seed file is read from --key, and none of
+	// it may be echoed, in a success, a refusal, --dry-run or --json --verbose. The command lines hold paths only.
+	{
+		cfg, _ := freshCfg("join-json")
+		run("join-json", cfg, "join", jf, "--key", seed, "--json", "--detail")
+		bad := joinSecretFree(runs, a.secrets)
+		a.C.Check("files: no output of "+strconv.Itoa(len(runs))+" mash join runs (refusals, --replace, --dry-run, --json --detail) holds a seed, a JWT or a creds text", len(bad) == 0, strings.Join(bad, "; "))
+	}
+
+	// The removed command is an unknown command.
+	{
+		r := s.mash("credential-create-removed", he, a.Conn(), "credential", "create", "--seed", seed, "--jwt", s.design.jwt)
+		ok, d := unknownCommandHolds(r)
+		a.C.Check("mash credential create is gone: an unknown command, exit 2, nothing attempted", ok, d)
+	}
 }
 
 // ---- check 1: the wide command set ------------------------------------------------------------------------------
@@ -869,12 +988,11 @@ func (s *at4) wide() {
 	a, ha, he, hn := s.a, s.ha, s.he, s.hn
 	join := filepath.Join(ha.Dir, "alice.dev.design.jwt.join")
 	setup := filepath.Join(a.srvDir, fileSetupYAML)
-	wpub := filepath.Join(s.work, "wide.pub")
 	wseed := filepath.Join(s.work, "wide.seed")
-	r := s.mash("wide-key", he, a.Conn(), "key", "create", "--out", wseed, "--json", "--verbose")
-	a.C.Check("wide: mash key create --json --verbose succeeds", r.Code == 0, exitDetail(r))
+	wpub := pubOf(wseed)
+	r := s.mash("wide-key", he, a.Conn(), "key", "create", "--out", wseed, "--json", "--detail")
+	a.C.Check("wide: mash key create --json --detail succeeds", r.Code == 0, exitDetail(r))
 	a.Watch("seed wide", wseed)
-	wpub = strings.TrimSuffix(wseed, ".seed") + ".pub"
 
 	type c struct {
 		label string
@@ -882,36 +1000,42 @@ func (s *at4) wide() {
 		env   []string
 		args  []string
 	}
+	wcfg := func(n string) []string { // a fresh configuration folder for a mash join of the wide set
+		d := filepath.Join(s.work, "wcfg-"+n)
+		_ = os.MkdirAll(d, 0o700)
+		return append(a.Conn(), "MASH_CONFIG_DIR="+d)
+	}
 	dEnv := s.designEnv
 	cmds := []c{
 		// mash, as design
-		{"mash-status", true, dEnv, []string{"status"}}, {"mash-status-json", true, dEnv, []string{"status", "--json"}}, {"mash-status-verbose", true, dEnv, []string{"status", "--verbose"}},
-		{"mash-doctor", true, dEnv, []string{"doctor"}}, {"mash-doctor-json", true, dEnv, []string{"doctor", "--json"}}, {"mash-doctor-verbose", true, dEnv, []string{"doctor", "--verbose"}},
-		{"mash-who", true, dEnv, []string{"who"}}, {"mash-who-json", true, dEnv, []string{"who", "--json"}}, {"mash-who-verbose", true, dEnv, []string{"who", "--verbose"}},
-		{"mash-send", true, dEnv, []string{"send", "alice.dev.review", "wide-set hello"}}, {"mash-send-json", true, dEnv, []string{"send", "alice.dev.review", "wide-set again", "--json", "--verbose"}},
-		{"mash-inbox", true, dEnv, []string{"inbox"}}, {"mash-inbox-verbose", true, dEnv, []string{"inbox", "--verbose"}},
-		{"mash-read-missing", true, dEnv, []string{"read", "9999"}}, {"mash-read-missing-json", true, dEnv, []string{"read", "9999", "--json", "--verbose"}},
+		{"mash-status", true, dEnv, []string{"status"}}, {"mash-status-json", true, dEnv, []string{"status", "--json"}}, {"mash-status-verbose", true, dEnv, []string{"status", "--detail"}},
+		{"mash-doctor", true, dEnv, []string{"doctor"}}, {"mash-doctor-json", true, dEnv, []string{"doctor", "--json"}}, {"mash-doctor-verbose", true, dEnv, []string{"doctor", "--detail"}},
+		{"mash-who", true, dEnv, []string{"who"}}, {"mash-who-json", true, dEnv, []string{"who", "--json"}}, {"mash-who-verbose", true, dEnv, []string{"who", "--detail"}},
+		{"mash-send", true, dEnv, []string{"send", "alice.dev.review", "wide-set hello"}}, {"mash-send-json", true, dEnv, []string{"send", "alice.dev.review", "wide-set again", "--json", "--detail"}},
+		{"mash-inbox", true, dEnv, []string{"inbox"}}, {"mash-inbox-verbose", true, dEnv, []string{"inbox", "--detail"}},
+		{"mash-read-missing", true, dEnv, []string{"read", "9999"}}, {"mash-read-missing-json", true, dEnv, []string{"read", "9999", "--json", "--detail"}},
 		{"mash-version-json", true, dEnv, []string{"version", "--json"}},
-		{"mash-key-dry", true, a.Conn(), []string{"key", "create", "--out", filepath.Join(s.work, "dry.seed"), "--dry-run", "--json", "--verbose"}},
-		{"mash-cred-json", true, a.Conn(), []string{"credential", "create", "--seed", s.design.seed, "--jwt", s.design.jwt, "--out", filepath.Join(s.work, "wide.creds"), "--json", "--verbose"}},
-		{"mash-cred-dry", true, a.Conn(), []string{"credential", "create", "--seed", s.design.seed, "--jwt", s.design.jwt, "--out", filepath.Join(s.work, "wide2.creds"), "--dry-run", "--json"}},
+		{"mash-key-dry", true, a.Conn(), []string{"key", "create", "--out", filepath.Join(s.work, "dry.seed"), "--dry-run", "--json", "--detail"}},
+		{"mash-join-json", true, wcfg("wj1"), []string{"join", s.design.join, "--key", s.design.seed, "--json", "--detail"}},
+		{"mash-join-dry", true, wcfg("wj2"), []string{"join", s.design.join, "--key", s.design.seed, "--dry-run", "--json"}},
 		// failure paths of mash: the wrong kind of file in an option
-		{"mash-cred-swapped", true, a.Conn(), []string{"credential", "create", "--seed", s.design.jwt, "--jwt", s.design.seed, "--out", filepath.Join(s.work, "x1.creds"), "--verbose"}},
-		{"mash-cred-swapped-json", true, a.Conn(), []string{"credential", "create", "--seed", s.design.jwt, "--jwt", s.design.seed, "--out", filepath.Join(s.work, "x2.creds"), "--json"}},
-		{"mash-cred-join-as-seed", true, a.Conn(), []string{"credential", "create", "--seed", join, "--jwt", s.design.jwt, "--out", filepath.Join(s.work, "x3.creds")}},
-		{"mash-cred-creds-as-jwt", true, a.Conn(), []string{"credential", "create", "--seed", s.design.seed, "--jwt", s.design.creds, "--out", filepath.Join(s.work, "x4.creds")}},
-		{"mash-cred-creds-as-seed", true, a.Conn(), []string{"credential", "create", "--seed", s.design.creds, "--jwt", s.design.creds, "--out", filepath.Join(s.work, "x5.creds"), "--verbose"}},
-		{"mash-cred-wrong-pair", true, a.Conn(), []string{"credential", "create", "--seed", s.design.seed, "--jwt", s.review.jwt, "--out", filepath.Join(s.work, "x6.creds"), "--verbose"}},
-		{"mash-cred-missing", true, a.Conn(), []string{"credential", "create", "--seed", filepath.Join(s.work, "no-such.seed"), "--jwt", s.design.jwt, "--out", filepath.Join(s.work, "x7.creds")}},
+		{"mash-join-swapped", true, wcfg("wj3"), []string{"join", s.design.seed, "--key", s.design.jwt, "--detail"}},
+		{"mash-join-swapped-json", true, wcfg("wj4"), []string{"join", s.design.seed, "--key", s.design.jwt, "--json"}},
+		{"mash-join-join-as-seed", true, wcfg("wj5"), []string{"join", s.design.join, "--key", join}},
+		{"mash-join-creds-as-join", true, wcfg("wj6"), []string{"join", s.design.creds, "--key", s.design.seed}},
+		{"mash-join-creds-as-seed", true, wcfg("wj7"), []string{"join", s.design.join, "--key", s.design.creds, "--detail"}},
+		{"mash-join-wrong-pair", true, wcfg("wj8"), []string{"join", s.design.join, "--key", s.review.seed, "--detail"}},
+		{"mash-join-missing", true, wcfg("wj9"), []string{"join", s.design.join, "--key", filepath.Join(s.work, "no-such.seed")}},
+		{"mash-join-missing-file", true, wcfg("wj10"), []string{"join", filepath.Join(s.work, "no-such.join"), "--key", s.design.seed}},
 		{"mash-key-missing-dir", true, a.Conn(), []string{"key", "create", "--out", filepath.Join(s.work, "no", "such", "dir", "k.seed"), "--json"}},
-		{"mash-key-existing", true, a.Conn(), []string{"key", "create", "--out", s.design.seed, "--verbose"}},
+		{"mash-key-existing", true, a.Conn(), []string{"key", "create", "--out", s.design.seed, "--detail"}},
 		{"mash-key-existing-json", true, a.Conn(), []string{"key", "create", "--out", s.design.seed, "--json"}},
-		{"mash-status-seed-as-creds", true, append(slices.Clone(dEnv), "MASH_CREDS="+s.design.seed), []string{"status", "--verbose"}},
-		{"mash-inbox-join-as-creds", true, append(slices.Clone(dEnv), "MASH_CREDS="+join), []string{"inbox", "--verbose"}},
-		{"mash-doctor-jwt-as-creds", true, append(slices.Clone(dEnv), "MASH_CREDS="+s.design.jwt), []string{"doctor", "--verbose"}},
-		{"mash-who-creds-flag-seed", true, dEnv, []string{"who", "--creds", s.design.seed, "--verbose"}},
-		{"mash-status-ca-is-creds", true, append(slices.Clone(dEnv), "MASH_CA="+s.design.creds), []string{"status", "--verbose"}},
-		{"mash-inbox-ca-is-seed", true, append(slices.Clone(dEnv), "MASH_CA="+s.design.seed), []string{"inbox", "--verbose"}},
+		{"mash-status-seed-as-creds", true, append(slices.Clone(dEnv), "MASH_CREDS="+s.design.seed), []string{"status", "--detail"}},
+		{"mash-inbox-join-as-creds", true, append(slices.Clone(dEnv), "MASH_CREDS="+join), []string{"inbox", "--detail"}},
+		{"mash-doctor-jwt-as-creds", true, append(slices.Clone(dEnv), "MASH_CREDS="+s.design.jwt), []string{"doctor", "--detail"}},
+		{"mash-who-creds-flag-seed", true, dEnv, []string{"who", "--creds", s.design.seed, "--detail"}},
+		{"mash-status-ca-is-creds", true, append(slices.Clone(dEnv), "MASH_CA="+s.design.creds), []string{"status", "--detail"}},
+		{"mash-inbox-ca-is-seed", true, append(slices.Clone(dEnv), "MASH_CA="+s.design.seed), []string{"inbox", "--detail"}},
 	}
 	for _, x := range cmds {
 		if x.mash {
@@ -924,59 +1048,59 @@ func (s *at4) wide() {
 	ctl := func(label string, args ...string) { s.ctl(label, ha, nil, args...) }
 	ctl("ctl-status", "status")
 	ctl("ctl-status-json", "status", "--json")
-	ctl("ctl-status-verbose", "status", "--verbose")
+	ctl("ctl-status-verbose", "status", "--detail")
 	ctl("ctl-doctor", "doctor")
 	ctl("ctl-doctor-json", "doctor", "--json")
-	ctl("ctl-doctor-verbose", "doctor", "--verbose")
+	ctl("ctl-doctor-verbose", "doctor", "--detail")
 	ctl("ctl-limits", "limits", "show")
 	ctl("ctl-limits-json", "limits", "show", "--json")
-	ctl("ctl-limits-verbose", "limits", "show", "--verbose")
+	ctl("ctl-limits-verbose", "limits", "show", "--detail")
 	ctl("ctl-init-dry", "init", "--config", setup, "--dry-run")
-	ctl("ctl-init-dry-json", "init", "--config", setup, "--dry-run", "--json", "--verbose")
+	ctl("ctl-init-dry-json", "init", "--config", setup, "--dry-run", "--json", "--detail")
 	ctl("ctl-list", "endpoint", "list")
 	ctl("ctl-list-wide-json", "endpoint", "list", "--wide", "--json")
-	ctl("ctl-list-verbose", "endpoint", "list", "--verbose")
+	ctl("ctl-list-verbose", "endpoint", "list", "--detail")
 	ctl("ctl-show", "endpoint", "show", "alice.dev.design")
 	ctl("ctl-show-json", "endpoint", "show", "alice.dev.design", "--json")
-	ctl("ctl-show-verbose", "endpoint", "show", "alice.dev.design", "--verbose")
+	ctl("ctl-show-verbose", "endpoint", "show", "alice.dev.design", "--detail")
 	ctl("ctl-inbox", "endpoint", "inbox", "alice.dev.review")
-	ctl("ctl-inbox-json", "endpoint", "inbox", "alice.dev.review", "--json", "--verbose")
+	ctl("ctl-inbox-json", "endpoint", "inbox", "alice.dev.review", "--json", "--detail")
 	ctl("ctl-permissions", "endpoint", "permissions", "alice.dev.design")
 	ctl("ctl-version-json", "version", "--json")
-	ctl("ctl-create-w1", "endpoint", "create", "alice.dev.w1", "--public-key", wpub, "--out", filepath.Join(s.work, "w1.join"), "--json", "--verbose")
+	ctl("ctl-create-w1", "endpoint", "create", "alice.dev.w1", "--public-key", wpub, "--out", filepath.Join(s.work, "w1.join"), "--json", "--detail")
 	a.watchFile("w1 join", filepath.Join(s.work, "w1.join"))
-	ctl("ctl-create-dry", "endpoint", "create", "alice.dev.w2", "--dry-run", "--json", "--verbose")
-	ctl("ctl-create-w3-installs-creds", "endpoint", "create", "alice.dev.w3", "--json", "--verbose")
+	ctl("ctl-create-dry", "endpoint", "create", "alice.dev.w2", "--dry-run", "--json", "--detail")
+	ctl("ctl-create-w3-installs-creds", "endpoint", "create", "alice.dev.w3", "--json", "--detail")
 	a.watchFile("w3 creds", filepath.Join(ha.Config, "alice.dev.w3.creds"))
-	ctl("ctl-reissue-w3-json", "endpoint", "reissue", "alice.dev.w3", "--json", "--verbose")
+	ctl("ctl-reissue-w3-json", "endpoint", "reissue", "alice.dev.w3", "--json", "--detail")
 	a.watchFile("w3 creds reissued", filepath.Join(ha.Config, "alice.dev.w3.creds"))
-	ctl("ctl-create-w4-out-keymade", "endpoint", "create", "alice.dev.w4", "--out", filepath.Join(s.work, "w4.join"), "--verbose")
+	ctl("ctl-create-w4-out-keymade", "endpoint", "create", "alice.dev.w4", "--out", filepath.Join(s.work, "w4.join"), "--detail")
 	a.watchFile("w4 join", filepath.Join(s.work, "w4.join"))
-	ctl("ctl-delete-w3", "endpoint", "delete", "alice.dev.w3", "--yes", "--json", "--verbose")
-	ctl("ctl-delete-w4", "endpoint", "delete", "alice.dev.w4", "--yes", "--verbose")
+	ctl("ctl-delete-w3", "endpoint", "delete", "alice.dev.w3", "--yes", "--json", "--detail")
+	ctl("ctl-delete-w4", "endpoint", "delete", "alice.dev.w4", "--yes", "--detail")
 	// failure paths of mashctl, including a secret where something else is expected
-	ctl("ctl-show-missing", "endpoint", "show", "alice.dev.nobody", "--json", "--verbose")
-	ctl("ctl-create-existing", "endpoint", "create", "alice.dev.design", "--verbose", "--json")
-	ctl("ctl-create-deleted", "endpoint", "create", "alice.dev.w3", "--verbose")
-	ctl("ctl-create-seed-as-pubkey", "endpoint", "create", "alice.dev.s1", "--public-key", s.design.seed, "--out", filepath.Join(s.work, "s1.join"), "--verbose")
+	ctl("ctl-show-missing", "endpoint", "show", "alice.dev.nobody", "--json", "--detail")
+	ctl("ctl-create-existing", "endpoint", "create", "alice.dev.design", "--detail", "--json")
+	ctl("ctl-create-deleted", "endpoint", "create", "alice.dev.w3", "--detail")
+	ctl("ctl-create-seed-as-pubkey", "endpoint", "create", "alice.dev.s1", "--public-key", s.design.seed, "--out", filepath.Join(s.work, "s1.join"), "--detail")
 	ctl("ctl-create-join-as-pubkey", "endpoint", "create", "alice.dev.s2", "--public-key", join, "--out", filepath.Join(s.work, "s2.join"), "--json")
 	ctl("ctl-create-creds-as-pubkey", "endpoint", "create", "alice.dev.s3", "--public-key", s.design.creds, "--out", filepath.Join(s.work, "s3.join"))
-	ctl("ctl-create-jwt-as-pubkey", "endpoint", "create", "alice.dev.s4", "--public-key", s.design.jwt, "--out", filepath.Join(s.work, "s4.join"), "--verbose")
-	ctl("ctl-reissue-seed-as-pubkey", "endpoint", "reissue", "alice.dev.design", "--public-key", s.design.seed, "--out", filepath.Join(s.work, "s5.join"), "--verbose")
-	ctl("ctl-init-key-as-config", "init", "--config", filepath.Join(a.srvDir, fileAccountNK), "--dry-run", "--verbose")
+	ctl("ctl-create-jwt-as-pubkey", "endpoint", "create", "alice.dev.s4", "--public-key", s.design.jwt, "--out", filepath.Join(s.work, "s4.join"), "--detail")
+	ctl("ctl-reissue-seed-as-pubkey", "endpoint", "reissue", "alice.dev.design", "--public-key", s.design.seed, "--out", filepath.Join(s.work, "s5.join"), "--detail")
+	ctl("ctl-init-key-as-config", "init", "--config", filepath.Join(a.srvDir, fileAccountNK), "--dry-run", "--detail")
 	ctl("ctl-init-opkey-as-config-json", "init", "--config", filepath.Join(a.srvDir, fileOperatorNK), "--dry-run", "--json")
-	ctl("ctl-init-creds-as-config", "init", "--config", filepath.Join(a.srvDir, fileAdminCreds), "--dry-run", "--verbose")
+	ctl("ctl-init-creds-as-config", "init", "--config", filepath.Join(a.srvDir, fileAdminCreds), "--dry-run", "--detail")
 	ctl("ctl-init-cakey-as-config", "init", "--config", filepath.Join(a.srvDir, fileCAKey), "--dry-run")
 	ctl("ctl-init-serverkey-as-config", "init", "--config", filepath.Join(a.srvDir, fileServerKey), "--dry-run", "--json")
-	ctl("ctl-init-seed-as-config", "init", "--config", s.design.seed, "--dry-run", "--verbose")
-	s.ctl("ctl-status-admin-creds-seed", ha, []string{"MASH_ADMIN_CREDS=" + s.design.seed}, "status", "--verbose")
-	s.ctl("ctl-doctor-admin-creds-join", ha, []string{"MASH_ADMIN_CREDS=" + join}, "doctor", "--verbose", "--json")
-	s.ctl("ctl-list-ca-is-key", ha, []string{"MASH_CA=" + filepath.Join(a.srvDir, fileCAKey)}, "endpoint", "list", "--verbose")
-	s.ctl("ctl-list-ca-is-seed-json", ha, []string{"MASH_CA=" + s.design.seed}, "endpoint", "list", "--json", "--verbose")
-	s.ctl("ctl-create-no-account-key", hn, []string{"MASH_ADMIN_CREDS=" + filepath.Join(a.srvDir, fileAdminCreds)}, "endpoint", "create", "alice.dev.nk", "--public-key", wpub, "--out", filepath.Join(s.work, "nk.join"), "--verbose")
-	s.ctl("ctl-keys-dir-is-creds", ha, []string{"MASH_KEYS_DIR=" + filepath.Join(a.srvDir, "creds")}, "endpoint", "create", "alice.dev.nk2", "--public-key", wpub, "--out", filepath.Join(s.work, "nk2.join"), "--verbose")
-	s.ctl("ctl-bad-server", ha, []string{"MASH_SERVER=tls://127.0.0.1:1", "MASH_OPEN_TIMEOUT=2s"}, "endpoint", "list", "--verbose", "--json")
-	s.ctl("ctl-wrong-ca", ha, []string{"MASH_CA=" + filepath.Join(a.srvDir, "server.pem")}, "status", "--verbose")
+	ctl("ctl-init-seed-as-config", "init", "--config", s.design.seed, "--dry-run", "--detail")
+	s.ctl("ctl-status-admin-creds-seed", ha, []string{"MASH_ADMIN_CREDS=" + s.design.seed}, "status", "--detail")
+	s.ctl("ctl-doctor-admin-creds-join", ha, []string{"MASH_ADMIN_CREDS=" + join}, "doctor", "--detail", "--json")
+	s.ctl("ctl-list-ca-is-key", ha, []string{"MASH_CA=" + filepath.Join(a.srvDir, fileCAKey)}, "endpoint", "list", "--detail")
+	s.ctl("ctl-list-ca-is-seed-json", ha, []string{"MASH_CA=" + s.design.seed}, "endpoint", "list", "--json", "--detail")
+	s.ctl("ctl-create-no-account-key", hn, []string{"MASH_ADMIN_CREDS=" + filepath.Join(a.srvDir, fileAdminCreds)}, "endpoint", "create", "alice.dev.nk", "--public-key", wpub, "--out", filepath.Join(s.work, "nk.join"), "--detail")
+	s.ctl("ctl-keys-dir-is-creds", ha, []string{"MASH_KEYS_DIR=" + filepath.Join(a.srvDir, "creds")}, "endpoint", "create", "alice.dev.nk2", "--public-key", wpub, "--out", filepath.Join(s.work, "nk2.join"), "--detail")
+	s.ctl("ctl-bad-server", ha, []string{"MASH_SERVER=tls://127.0.0.1:1", "MASH_OPEN_TIMEOUT=2s"}, "endpoint", "list", "--detail", "--json")
+	s.ctl("ctl-wrong-ca", ha, []string{"MASH_CA=" + filepath.Join(a.srvDir, "server.pem")}, "status", "--detail")
 
 	n := 0
 	var crashes []string
@@ -986,13 +1110,13 @@ func (s *at4) wide() {
 			crashes = append(crashes, l.Label+" exit "+strconv.Itoa(l.R.Code))
 		}
 	}
-	a.C.Check("wide: "+strconv.Itoa(n)+" mash and mashctl commands (--json, --verbose, failure paths, secrets fed to the wrong option) ran and none crashed, hung or panicked", len(crashes) == 0 && n >= 90, strings.Join(crashes, "; "))
+	a.C.Check("wide: "+strconv.Itoa(n)+" mash and mashctl commands (--json, --detail, failure paths, secrets fed to the wrong option) ran and none crashed, hung or panicked", len(crashes) == 0 && n >= 90, strings.Join(crashes, "; "))
 	s.a.C.Check("wide: the commands that must work did (status, doctor, who, inbox, send as design; create, reissue and delete by mashctl)",
 		s.exitOf("mash-status") == 0 && s.exitOf("mash-who-json") == 0 && s.exitOf("mash-send") == 0 && s.exitOf("mash-inbox") == 0 &&
 			s.exitOf("ctl-create-w1") == 0 && s.exitOf("ctl-reissue-w3-json") == 0 && s.exitOf("ctl-delete-w3") == 0 && s.exitOf("ctl-status-json") == 0 && s.exitOf("ctl-limits-json") == 0,
 		fmt.Sprintf("status %d who %d send %d inbox %d create %d reissue %d delete %d ctl-status %d limits %d", s.exitOf("mash-status"), s.exitOf("mash-who-json"), s.exitOf("mash-send"), s.exitOf("mash-inbox"),
 			s.exitOf("ctl-create-w1"), s.exitOf("ctl-reissue-w3-json"), s.exitOf("ctl-delete-w3"), s.exitOf("ctl-status-json"), s.exitOf("ctl-limits-json")))
-	for _, label := range []string{"mash-cred-swapped", "mash-cred-join-as-seed", "mash-cred-creds-as-jwt", "mash-status-seed-as-creds", "ctl-create-seed-as-pubkey", "ctl-init-key-as-config", "ctl-init-creds-as-config", "ctl-init-cakey-as-config"} {
+	for _, label := range []string{"mash-join-swapped", "mash-join-join-as-seed", "mash-join-creds-as-join", "mash-status-seed-as-creds", "ctl-create-seed-as-pubkey", "ctl-init-key-as-config", "ctl-init-creds-as-config", "ctl-init-cakey-as-config"} {
 		a.C.Check("wide: feeding a secret to an option that expects something else is refused: "+label, s.exitOf(label) > 0, "exit "+strconv.Itoa(s.exitOf(label)))
 	}
 }
@@ -1226,7 +1350,7 @@ func (s *at4) plain() {
 
 func (s *at4) deleted() {
 	a := s.a
-	tmp, ok := a.provision(s.ha, s.he, "alice", "dev", "temp", filepath.Join(s.he.Dir, "temp.creds"), false)
+	tmp, ok := a.provision(s.ha, s.he, "alice", "dev", "temp", false)
 	if !ok {
 		return
 	}
@@ -1267,7 +1391,7 @@ func (s *at4) deleted() {
 	derr := direct()
 	a.C.Check("deleted: after the delete a direct NATS connection with the credential is refused with an authorization violation", derr != nil && strings.Contains(strings.ToLower(derr.Error()), "authorization"), errDetail(derr))
 	// the same credential still names an address that cannot be made again
-	r = s.ctl("deleted-recreate", s.ha, nil, "endpoint", "create", "alice.dev.temp", "--public-key", strings.TrimSuffix(tmp.seed, ".seed")+".pub", "--out", filepath.Join(s.work, "temp-again.join"))
+	r = s.ctl("deleted-recreate", s.ha, nil, "endpoint", "create", "alice.dev.temp", "--public-key", pubOf(tmp.seed), "--out", filepath.Join(s.work, "temp-again.join"))
 	ok, d := recreateRefused(r)
 	a.C.Check("deleted: the deleted address cannot be made again with the same key (refused because it was deleted or exists, not for another reason)", ok, d)
 }

@@ -19,7 +19,7 @@ mash is one static Go binary. **Install it first (below) until your plugin relea
 - Once pinned after a release (a post-release commit of `plugin/scripts/mash.pins`), the plugin carries a `mash.pins` file beside its launcher with the release version and the sha256 of each platform binary (linux and darwin, amd64 and arm64); without it the launcher is unpinned and uses `mash` from PATH. A download that does not match is refused and deleted, and the binary must report the pinned version before it is used. Pinning also bumps the plugin's version to `<version>-pin.1`, so installed plugins update and receive the pin. Updating the plugin updates the binary.
 - Resolution order: `$MASH_BIN` (an explicit override), the downloaded copy for the pinned version, then (pinned) a fresh download of it, falling back to `mash` on the `PATH` only if that download fails, so an older install on the `PATH` never overrides the pin. Hooks never wait more than a few seconds for a download (a 5 s budget, then `PATH`, and no retry for 5 minutes after a failure). An unpinned plugin uses `mash` on the `PATH` only and never downloads.
 - Verification (provisional): the environment variable `MASH_PLUGIN_REQUIRE_VERIFIED` decides whether the launcher may ever run a binary it has not verified against `mash.pins`. It is off by default, which is today's behaviour: a failed pinned download falls back to `mash` on the `PATH` with a warning naming what failed, an unpinned plugin uses `mash` on the `PATH` with a warning naming the pins file, and a cached downloaded binary is used as it is. When it is on (`1`, `true`, `yes` or `on`; `0`, `false`, `no` and `off` are off), the launcher exits 127, with what failed and how to turn the setting off on stderr, when the plugin is unpinned (no `mash.pins`, or one that is empty, unreadable or has no valid `version=` line), when the cached downloaded binary's sha256 does not match `mash.pins` (it is checked on every run, which costs a hash of the binary, and it is neither re-fetched nor replaced by `mash` on the `PATH`), and when the pinned binary cannot be fetched or fails verification (a failed download, a sha256 mismatch, no pinned sha256 for your platform, an unsupported OS or architecture, no hashing tool, a downloaded binary that does not run or reports the wrong version, or a hook skipping a download that failed recently). It never runs a `mash` from the `PATH`. When it is on, a hook therefore keeps refusing for 300 s (5 minutes) after a failed download; that is by design. Any other value, including an empty one, is treated as on, with a note naming it. mash only reads this concrete setting: mash has no profile that groups settings: you set each one. The variable's name, its source and the default are provisional and may change; the launcher reads the setting in one place. `$MASH_BIN` is an explicit operator choice, trusted as given and never verified, whether the setting is on or off, and a successful verified download and the prefetch are not affected.
-- The MCP server runs `${CLAUDE_PLUGIN_ROOT}/scripts/mash` directly, so the launcher needs its exec bit: git-based marketplace installs preserve the mode. The hooks run it as `sh ${CLAUDE_PLUGIN_ROOT}/scripts/mash`, which needs no exec bit.
+- The MCP server runs `${CLAUDE_PLUGIN_ROOT}/scripts/mash` directly, so the launcher needs its exec bit: git-based marketplace installs (`claude plugin marketplace add bogworks/mash#v0.5.6`, then `claude plugin install mash@mash`) preserve the mode. The hooks run it as `sh ${CLAUDE_PLUGIN_ROOT}/scripts/mash`, which needs no exec bit.
 - Offline, or on an unsupported platform, the plugin uses a `mash` already on the `PATH` or a copy it downloaded earlier; if there is neither, it says so on stderr and the server does not start.
 
 To install the binaries yourself (required for an unpinned plugin; also for the CLI in section 5, or an air-gapped machine), run the install script of the release:
@@ -43,7 +43,7 @@ Output of the script: `[built output: to fill from the release build]`
 
 ### Verify what you download
 
-Every file of a release is covered by `SHA256SUMS`, and `SHA256SUMS` and the binaries and both scripts (`install.sh`, `mash-local-nats-setup.sh`) are subjects of the release's build provenance attestation. `install.sh` checks the binaries against `SHA256SUMS` itself. With `gh` (the [GitHub CLI](https://cli.github.com/)) installed it also verifies `SHA256SUMS` against the attestation, pinned to the release tag, before it installs anything, and refuses on failure. Without `gh`, or with one too old to have `gh attestation verify`, it says the checksums come from the same download, so it trusts github.com's TLS, and goes on. To check the script before you run it, and the attestation yourself:
+Every file of a release is covered by `SHA256SUMS`, and `SHA256SUMS` and the binaries and the three scripts (`install.sh`, `mash-local-nats-setup.sh`, `mash-migrate-0.5.5.sh`) are subjects of the release's build provenance attestation. `install.sh` checks the binaries against `SHA256SUMS` itself. With `gh` (the [GitHub CLI](https://cli.github.com/)) installed it also verifies `SHA256SUMS` against the attestation, pinned to the release tag, before it installs anything, and refuses on failure. Without `gh`, or with one too old to have `gh attestation verify`, it says the checksums come from the same download, so it trusts github.com's TLS, and goes on. To check the script before you run it, and the attestation yourself:
 
 ```sh
 BASE=https://github.com/bogworks/mash/releases/download/v0.5.6   # use the tag of the release you want; for another repository (MASH_REPO) change bogworks/mash here and in -R and --signer-workflow
@@ -54,7 +54,7 @@ grep ' install.sh$' SHA256SUMS | sha256sum -c - &&           # macOS: shasum -a 
 less install.sh && bash install.sh
 ```
 
-An agent does not pipe a download into a shell: the setup skill downloads each script, checks it against `SHA256SUMS`, shows you what it is about to run and runs it after a yes. Both scripts are also the repository's own `scripts/` files at the release commit, byte for byte; the release check compares them ([ADR 0150](decisions/0150-releases-carry-install-and-local-nats-setup-scripts-as-attested-assets.md)).
+An agent does not pipe a download into a shell: the setup skill downloads each script, checks it against `SHA256SUMS`, shows you what it is about to run and runs it after a yes. All three scripts are also the repository's own `scripts/` files at the release commit, byte for byte; the release check compares them ([ADR 0150](decisions/0150-releases-carry-install-and-local-nats-setup-scripts-as-attested-assets.md), [ADR 0152](decisions/0152-the-release-carries-a-one-time-0-5-5-migration-script.md)).
 
 To build from source instead, `go install github.com/bogworks/mash/cmd/mash@v0.5.6` and `.../cmd/mashctl@v0.5.6` need Go 1.27.4 or newer; the result is not the attested build.
 
@@ -111,13 +111,17 @@ On a machine that runs `mashctl`, `mashctl init --config FILE` writes `servers`,
 
 `~/.config/mash/config.json`, or `$XDG_CONFIG_HOME/mash/config.json` when `XDG_CONFIG_HOME` is an absolute path and that file exists (an existing `~/.config/mash` install keeps working). With no `HOME` and no absolute `XDG_CONFIG_HOME`, mash stops with an error unless everything comes from the `MASH_*` variables. A leading `~/` in `creds` and `admin_creds` (and in `MASH_CREDS` and `MASH_ADMIN_CREDS`) is expanded to your home; `~user/` is not. `policy.md` and the default creds files live in the same directory; when the XDG directory has no copy of one, mash also finds it in `~/.config/mash` (the XDG copy wins when both exist). A relative `admin_creds`, `ca`, `tls_cert` or `tls_key` in `config.json` is resolved against the config directory, not the working directory. `config.json` that is writable by every user is refused; run `chmod go-w` on it.
 
+### Upgrading from 0.5.5
+
+A configuration folder left by mash 0.5.5 holds the keys `url` and `tls_ca` in `config.json`. Every command of `mash` and `mashctl` then stops with `error: <folder> holds a mash 0.5.5 configuration` and `hint: <release base>/mash-migrate-0.5.5.sh` (exit 1), and changes nothing. Run the script once: `curl -fsSL https://github.com/bogworks/mash/releases/latest/download/mash-migrate-0.5.5.sh | bash`. It renames the two keys (`url` becomes `servers`, `tls_ca` becomes `ca`) and keeps the old file beside it as a backup. Nothing on the server needs migrating.
+
 ```json
 { "servers": ["tls://nats.example.com:4222"], "endpoint": "acme.demo.alice" }
 ```
 
 | Key | Env | Meaning |
 |---|---|---|
-| `servers` | `MASH_SERVER`, `--server` | The NATS server or servers. In the environment a comma list; in `config.json` a JSON array of strings, or one string with commas; the flag repeats. Use `tls://`: SAP identity is only meaningful over a verified connection. A plain `nats://` url is refused, loopback included, unless `insecure_plaintext` is set. For a private CA or a server that requires client certificates, set `ca`, `tls_cert` and `tls_key` below. |
+| `servers` | `MASH_SERVER`, `--server` | The NATS server or servers. In the environment a comma list; in `config.json` a JSON array of strings, or one string with commas; the flag repeats. Use `tls://`: SAP identity is only meaningful over a verified connection. A plain `nats://` url is refused, loopback included, unless the environment variable `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1` is set (see [Turning encryption off](#turning-encryption-off)). For a private CA or a server that requires client certificates, set `ca`, `tls_cert` and `tls_key` below. |
 | `ca` | `MASH_CA`, `--ca` | PEM file of the CA that signed the server's certificate, for a private CA. Without it the system trust store is used. |
 | `tls_cert`, `tls_key` | `MASH_TLS_CERT`, `MASH_TLS_KEY` | PEM client certificate and its private key, for a server that requires client certificates (mutual TLS). Set both or neither. |
 | `endpoint` | `MASH_ENDPOINT`, `--endpoint` | The full address of the endpoint a session runs as, `owner.group.name`, for example `acme.demo.alice`. Each token is lower-case letters, digits and single hyphens. The owner, the first token, is also the fence a credential reaches. See "Which endpoint" below. Apps started from a GUI or IDE usually do not inherit your shell's variables, so set it where Claude Code is launched (the IDE's own environment setting, or the launch command). `mash status` shows whether the endpoint is ready, before you launch. |
@@ -132,7 +136,7 @@ On a machine that runs `mashctl`, `mashctl init --config FILE` writes `servers`,
 | `batch_msgs`, `batch_bytes` | `MASH_BATCH_MSGS`, `MASH_BATCH_BYTES` | A batch up to 10 messages and 16 KiB is shown in full; more becomes a digest. |
 | `spool_from_start` | `MASH_SPOOL_FROM_START` | `1`/`true` (or `0`/`false`; anything else is an error). Spool mail from the first message, to be shown by the hooks, instead of delivering it by channel until a hook has run: Claude Code drops channel events that arrive before its first prompt. The plugin sets it. Mail that wakes (not fyi or result) wakes the session at once until the first hook has run. Without a usable spool, mail is held unacked in the inbox (read it with the inbox and read tools). |
 | `spool_required` | `MASH_SPOOL_REQUIRED` | `1`/`true` (or `0`/`false`; anything else is an error). Default off. Fail closed: mail is never delivered by the channel. It is spooled from the first message and acked only after a hook has drained it; mail the spool cannot take (no spool, or a failing one) is held unacked in the inbox, and the failure is reported on stderr, and in a channel notice. A spool that cannot be made at start is retried every 5 seconds. Held mail is read with the inbox and read tools, and is delivered once the spool recovers. |
-| `insecure_plaintext` | `MASH_INSECURE_PLAINTEXT` | `1`/`true` (or `0`/`false`; anything else is an error; the variable beats `config.json`). Default off. Every mash connection (`mashctl`, `mash serve`, `mash hook` and the CLI commands `send`, `read`, `inbox`, `who`, `prompt`, `status`, `doctor`) requires TLS to any host, loopback included, and a plain URL (any scheme other than `tls` and `wss`) is refused before any connection is made, exit code 2, with the host, this setting and the fix (`tls://` with the server's certificate, `ca` for a private CA). When set, plain text is allowed and each command prints a warning on stderr. Use it for a throwaway server in a test, never on a network you do not control: plain text lets anyone on the network read mail and obtain signatures. The local NATS server that `mash-local-nats-setup.sh` makes has a certificate authority of its own and does not need it. |
+| `accept_unverified` | `MASH_ACCEPT_UNVERIFIED`, or the `mash serve` flag `--accept-unverified` | `1`/`true` (or `0`/`false`; anything else is an error; in `config.json` a JSON `true` or `false`). Default off. By default only mail whose trust is `verified` reaches the session, `mash inbox` and `mash read`; mail that is unsigned (`absent`), signed by an unknown key (`unknown-signer`), `claimed` or `stale` is dropped and counted, `mash doctor` shows the count, and the sender is not told. When set, that mail is delivered instead, with its trust label, as it was before 0.5.6. The count is kept in `refused-unverified` in the endpoint's spool folder. |
 | `idle_wake` | `MASH_IDLE_WAKE` | Hook mode: how long spooled mail waits for a hook before serve wakes the idle session. A Go duration, 5s to 30m. Default `45s`; re-wakes double from there, to 30 minutes. |
 | `relay_window` | `MASH_RELAY_WINDOW` | serve: how soon after mail from one sender a send to another endpoint is traced as a relay candidate (see "Relay tracing" in operations.md). Nothing is blocked. A Go duration, 1s to 1h. Default `60s`. |
 | `open_timeout` | `MASH_OPEN_TIMEOUT` | How long a command or serve may spend opening: connecting to its data and checking its identity. A Go duration above zero (for example `"45s"`), for slow links. Default `20s`. |
@@ -141,21 +145,35 @@ On a machine that runs `mashctl`, `mashctl init --config FILE` writes `servers`,
 | `transient_budget` | `MASH_TRANSIENT_BUDGET` | serve: how long transient failures (timeouts, no responders, a dropped connection) may repeat while waiting for the lease before the wait ends. A Go duration above zero. Default `15m`. |
 | `transient_max` | `MASH_TRANSIENT_MAX` | serve: the retry backoff after transient failures doubles from `lease_retry` up to this. A Go duration above zero. Default `2m`. |
 | `cli_timeout` | `MASH_CLI_TIMEOUT` | The total deadline of one command (`send`, `inbox`, `who` and the rest), open included. A Go duration above zero. Default `15m`. |
-| `wake_count` | `MASH_WAKE_COUNT` | How many waiting messages are too many: above it `mash inbox` says "More than N are waiting." Any whole number, 0 or more. Default `15`; `0` turns it off. `mash serve` refuses a value that is not one (exit 2); other commands ignore it and use the default. |
-| `wake_age` | `MASH_WAKE_AGE` | How long the oldest waiting message may wait: `mash inbox` says "The oldest has waited ..." past it. A whole number and `m`, `h` or `d` (for example `30m`, `1h`, `2d`), or a Go duration such as `90s`; any positive length. Default `1h`; `0` turns it off. `mash serve` refuses a value that is not one (exit 2); other commands ignore it and use the default. |
+| `wake_count` | `MASH_WAKE_COUNT`, or the `mash serve` flag `--wake-count N` | How many waiting messages are too many: above it `mash serve` wakes the session and `mash inbox` says "More than N are waiting." Any whole number, 0 or more. Default `15`; `0` turns it off. `mash serve` refuses a value that is not one (exit 2); other commands ignore it and use the default. |
+| `wake_age` | `MASH_WAKE_AGE`, or the `mash serve` flag `--wake-age DURATION` | How long the oldest waiting message may wait: past it `mash serve` wakes the session and `mash inbox` says "The oldest has waited ..." past it. A whole number and `m`, `h` or `d` (for example `30m`, `1h`, `2d`), or a Go duration such as `90s`; any positive length. Default `1h`; `0` turns it off. `mash serve` refuses a value that is not one (exit 2); other commands ignore it and use the default. |
 | `admin_timeout` | `MASH_ADMIN_TIMEOUT` | The total deadline of one `mashctl` command. A Go duration above zero, for a large fleet or a slow link. Default `30s`. |
 
 The environment wins over the file.
 
-**Global flags.** `mash` and `mashctl` accept `--endpoint ADDR`, `--creds`, `--server` (repeatable), `--ca`, `--config-dir`, `--verbose`/`-v`, `--json` and `--no-color` anywhere in the command line. A setting comes from the flag first, then the environment, then `config.json`.
+**Global flags.** `mash` and `mashctl` accept `--endpoint ADDR`, `--creds`, `--server` (repeatable), `--ca`, `--config-dir`, `--detail`, `--json` and `--no-color` anywhere in the command line. A setting comes from the flag first, then the environment, then `config.json`.
 
-**Installing an endpoint.** `mash join FILE` installs the endpoint a join file describes. It writes `<address>.creds` (mode 0600) into the config directory, the server addresses into `servers` in `config.json`, and, when the server uses its own certificate authority, the certificate as `ca.pem` in the same directory with `ca` pointing at it. It needs no endpoint and no server. When the join file was made for a public key you supplied (`mash key create`), add `--key` with your seed file. One config directory serves one mesh: a join file for other servers is refused and `--config-dir` names another directory. `--replace` overwrites an installed endpoint, and `--dry-run` writes nothing.
+**Installing an endpoint.** `mash join FILE` installs the endpoint a join file describes. It writes `<address>.creds` (mode 0600) into the config directory, the server addresses into `servers` in `config.json`, and, when the server uses its own certificate authority, the certificate as `ca.pem` in the same directory with `ca` pointing at it. It needs no endpoint and no server. When the join file was made for a public key you supplied (`mash key create`), add `--key` with your seed file. One config directory serves one mesh: a join file for other servers, or for another certificate authority (compared with the file `ca` names in `config.json`, else `ca.pem`), or none where the folder has one, or one where the folder has none and already holds an endpoint, is refused, with or without `--replace`, and `--config-dir` names another directory. The certificate must be certificates only (a key or other text in it is refused before anything is written), and the join file's credentials must be for the address it names. The creds are installed first, then `ca.pem`, then `config.json`; a failure after the creds removes what the run made. Joins into one directory run one after the other. `--replace` replaces the creds of an installed endpoint, and nothing else (not the servers, the certificate authority or `config.json`), and `--dry-run` writes nothing. A join file that holds a seed, and the file `--key` names, must be plain files owned by you and readable by you alone (`chmod 600`); mash refuses them otherwise, before reading. A join file that holds only a user JWT is not checked.
 
 **Which endpoint.** `MASH_ENDPOINT` (or `endpoint` in `config.json`, or `--endpoint`) holds the full address `owner.group.name`, for example `acme.demo.alice`. If none is set, mash uses the one endpoint whose creds file `<owner>.<group>.<name>.creds` (mode 0600, owned by you) sits directly in the config directory. If several are installed it stops with `more than one endpoint is installed here: a, b` and you name one. A value that is not three dotted parts is a configuration error naming `MASH_ENDPOINT`. `mashctl` never takes its owner from an installed creds file. Its owner is the owner part of an endpoint you set (`--endpoint`, `MASH_ENDPOINT` or `endpoint` in `config.json`; any group and name will do), else the `owner` key of `config.json` (`mashctl init --config` writes it). `mash` ignores the `owner` key.
 
 Credentials files must be mode 0600; they hold the endpoint's private key, and mash refuses to use a credentials file that other users can read (fix it with `chmod 600`). `mashctl` applies the same check to the admin credentials and to the system account credentials (`system_creds` in `config.json`). A symlink is followed and the file it points to is checked.
 
 Optional: the session instruction file `~/.config/mash/policy.md` is appended to every session's instructions. By default, mail from a verified mash endpoint is treated as a delegated request from the fleet's operator; use `policy.md` to carve out what still needs a human, for example "Ask me before spending money or touching production."
+
+### Turning encryption off
+
+Every mash connection requires TLS, to any host, loopback included: `mashctl`, `mash serve`, `mash hook` and the CLI commands. A plain URL (any scheme other than `tls` and `wss`) is refused before any connection is made, exit code 2, with the host, the variable below and the fix (`tls://` with the server's certificate, `ca` for a private CA).
+
+There is one way to allow plain text, for `mash` and `mashctl` alike: set the environment variable `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1`. It is not a setting: there is no flag and no `config.json` key. Its only value is `1` (empty or `0` is off; anything else is an error). While it is set, every command of both tools first prints this line on stderr, and nothing extra on stdout (`--json` stays clean):
+
+```
+warning: encryption to the server is OFF (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set)
+```
+
+Use it for a throwaway server in a test, never on a network you do not control: plain text lets anyone on the network read mail and obtain signatures. `init --local` makes a certificate authority and does not need it.
+
+The old names are gone with no alias: `MASH_INSECURE_PLAINTEXT` in the environment and `insecure_plaintext` in `config.json` are refused, exit 2, with an error that names `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1`.
 
 ## 5. Launch a session
 
@@ -167,7 +185,7 @@ The session registers as a SAP agent, takes the lease on its name, and starts re
 
 Keep this machine's clock in sync (NTP): more than 30 s of skew from the server makes peers look offline and mail `[stale]`. See [Troubleshooting](operations.md).
 
-In the session, Claude has eight tools: `send`, `read`, `inbox`, `who`, `reply`, `version`, `status` and `doctor`. `status` says in one line whether the endpoint is ready (`<endpoint>: ready, offline`, `ready, online` when an agent session holds the endpoint open now, or `not ready: <reason>`). `doctor` checks the config, the creds, the server, the sign-in and the delivery of mail one at a time and says what to fix. A session with no `MASH_ENDPOINT` gets only `version`, `status` and `doctor`. `version` shows the mash binary's version and commit, the plugin's version and this endpoint's address. `mash status` and `mash doctor` from a shell give the same answers for the environment they run in, so a missing name or creds shows before you launch. `mash status` exits 1 when the endpoint is not ready, and `mash doctor` exits 1 when a check fails. From a shell, the same identity can use the CLI:
+In the session, Claude has eight tools: `send`, `read`, `inbox`, `who`, `reply`, `version`, `status` and `doctor`. `status` says in one line whether the endpoint is ready (`<endpoint>: ready, offline`, `ready, online` when an agent session holds the endpoint open now, or `not ready: <reason>`). `doctor` checks the config, the creds, the server, the sign-in and the delivery of mail one at a time and says what to fix. A session with no `MASH_ENDPOINT` gets only `version`, `status` and `doctor`. `version` shows the mash binary's version and commit, the plugin's version and this endpoint's address. `mash status --detail` also says `holds endpoint`, `hooks` (`ran` once the agent host's hooks have delivered mail in this session) and `storage`; `mash doctor`'s `delivery` row warns while the hooks have not run yet and fails when they are not delivering ([troubleshooting](troubleshooting.md#mail-is-waiting-but-never-shown-hooks-not-firing)). `mash status` and `mash doctor` from a shell give the same answers for the environment they run in, so a missing name or creds shows before you launch. `mash status` exits 1 when the endpoint is not ready, and `mash doctor` exits 1 when a check fails. From a shell, the same identity can use the CLI:
 
 ```sh
 MASH_ENDPOINT=acme.demo.alice mash who
@@ -199,6 +217,41 @@ A reader treats the count as fresh when `waking_pending_at` is within 90 s (the 
 The CLI never takes the lease, so it works alongside the running session.
 
 `send --id KEY` (the send tool's `id`) is an idempotency key, 1 to 128 printable ASCII characters. Re-running a send with the same key to the same recipient from the same endpoint, within the inbox stream's two-minute duplicate window, stores nothing new: it succeeds, reports the original `#seq` and says it was a duplicate. If a send times out waiting for the stream's acknowledgement, the message may or may not have landed; the error prints a key to retry with (`mash send <to> --id <key> ...`), which delivers it at most once, but only within that two-minute window: after it a retry may store a second copy, which the recipient shows as a new message. Without `--id` every send is a new message.
+
+## If you ran mash 0.5.5
+
+Mash 0.5.6 renamed two settings in `config.json`, in the mash
+configuration folder. If your machine ran 0.5.5, run this once. Download the
+script, check it against the release's `SHA256SUMS`, read it, then run it
+([Verify what you download](#verify-what-you-download) shows how to check
+`SHA256SUMS` itself against the attestation):
+
+```sh
+BASE=https://github.com/bogworks/mash/releases/latest/download
+curl -fsSLO $BASE/mash-migrate-0.5.5.sh -O $BASE/SHA256SUMS
+grep ' mash-migrate-0.5.5.sh$' SHA256SUMS | sha256sum -c - &&
+less mash-migrate-0.5.5.sh && bash mash-migrate-0.5.5.sh
+```
+
+If you accept trusting GitHub's TLS alone, the one-line form the release
+page gives also works. It runs what it downloads without a check:
+
+```sh
+curl -fsSL https://github.com/bogworks/mash/releases/latest/download/mash-migrate-0.5.5.sh | bash
+```
+
+What it changes:
+
+* In `config.json`, `url` becomes `servers` and `tls_ca` becomes `ca`.
+* Your old file stays beside the new one as `config.json.0.5.5`.
+* It prints one line saying what it changed.
+* It touches nothing on the server. Nothing there needs to change, and
+  0.5.5 and 0.5.6 can mail each other on one server.
+
+If you skip it, nothing is lost: when 0.5.6 finds the old settings it
+changes nothing and stops with a message that names this script. It is a
+script you run once, not a `mash` or `mashctl` command
+([ADR 0152](decisions/0152-the-release-carries-a-one-time-0-5-5-migration-script.md)).
 
 ## Synadia Cloud
 

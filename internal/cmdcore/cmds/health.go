@@ -43,6 +43,22 @@ const (
 	ReasonCouldNotTake   = "this session could not take this endpoint"
 )
 
+// The delivery row's words for a session whose hooks have not delivered mail yet (a warning) and for one whose hooks
+// are suspected, degraded or refused (a failure).
+const (
+	ReasonHooksNotRun  = "hooks have not run in this session yet; they run with the first prompt or tool call"
+	ReasonHooksFailing = "hooks are not delivering mail to this session; restart the session after reinstalling"
+	// HooksFailingFix is the delivery row's fix for failing hooks. The not-yet-run warning has none: no command fixes it.
+	HooksFailingFix = "claude plugin install mash@mash"
+)
+
+// hookRowWraps is where the text form breaks the delivery row's two hook details, as the specification's page shows them:
+// the line, and the rest under the detail column.
+var hookRowWraps = map[string][2]string{
+	ReasonHooksNotRun:  {"hooks have not run in this session yet; they run with", "the first prompt or tool call"},
+	ReasonHooksFailing: {"hooks are not delivering mail to this session;", "restart the session after reinstalling"},
+}
+
 // leaseReason is the words for a session that does not hold its endpoint ("" when it does): the cause of one that
 // could not take it follows after ": ".
 func leaseReason(lease, cause string) string {
@@ -75,6 +91,24 @@ const (
 	CheckRefused  = "refused"
 )
 
+// The reason codes of status --detail: a fixed word beside the free-text reason. Each names the failure that produces it.
+const (
+	CodeNoEndpoint            = "no_endpoint"             // a session names no endpoint
+	CodeEndpointsAmbiguous    = "endpoints_ambiguous"     // no endpoint is named and several are installed
+	CodeConfigUnreadable      = "config_unreadable"       // the configuration cannot be read or is incomplete
+	CodeCredsMissing          = "creds_missing"           // the creds file is missing or unusable
+	CodeCredsRefused          = "creds_refused"           // the server refused who we are: the creds or our client certificate, or the creds are another endpoint's
+	CodeEndpointDeleted       = "endpoint_deleted"        // the endpoint's directory record is gone
+	CodeServerUnreachable     = "server_unreachable"      // no server answered
+	CodeServerUntrusted       = "server_untrusted"        // the server's certificate is not trusted
+	CodeServerNoTLS           = "server_no_tls"           // a plain address, or a server that offers no TLS
+	CodeEndpointHeldElsewhere = "endpoint_held_elsewhere" // another session holds the endpoint
+	CodeEndpointLost          = "endpoint_lost"           // a newer session took it from this one
+	CodeEndpointNotTaken      = "endpoint_not_taken"      // this session could not take it
+	CodeStorageUnwritable     = "storage_unwritable"      // the mail folder cannot be written
+	CodeUnknown               = "unknown"                 // a failure that fits none of the others; the reason says what was seen
+)
+
 // HealthCheck is one row the service found. Detail is what the row says after its state ("" says nothing). Fix is the
 // command or step that mends a warn or fail row ("" when none is known). Reason is how status words a failing row when
 // that differs from Detail ("" means Detail).
@@ -84,6 +118,9 @@ type HealthCheck struct {
 	Detail string
 	Fix    string
 	Reason string
+	// Code is the reason_code status gives when this row fails (one of the Code constants), set where the failure is
+	// classified; "" on a row that did not fail.
+	Code string
 }
 
 // HealthReport is what status and doctor are both made from: the endpoint (empty when none is chosen), whether an
@@ -100,7 +137,29 @@ type HealthReport struct {
 	// (LeaseCause says why, for the last). A session that does not hold its endpoint is not online and not ready.
 	Lease      string
 	LeaseCause string
+	// Session is what a session says about itself for status's detail; nil at a shell.
+	Session *SessionState
 }
+
+// SessionState is what the session says about itself: whether it holds its endpoint, whether the agent host's hooks
+// have delivered mail in it (the Hooks words), and whether its mail folder works (Storage).
+type SessionState struct {
+	HoldsEndpoint bool   `json:"holds_endpoint"`
+	Hooks         string `json:"hooks"`
+	Storage       string `json:"storage"`
+}
+
+// The words of SessionState.Hooks and SessionState.Storage, and of status's reason_code.
+const (
+	HooksRan       = "ran"
+	HooksNotRun    = "not_run"
+	HooksSuspected = "suspected"
+	HooksDegraded  = "degraded"
+	HooksRefused   = "refused"
+
+	StorageOK      = "ok"
+	StorageFailing = "failing"
+)
 
 // Health is the service status and doctor need from Env.Svc. It returns config.SeveralEndpointsError (wrapped or not)
 // when no endpoint is chosen and several are installed, and ErrNoEndpointInstalled when none is chosen and none is
@@ -145,6 +204,35 @@ type StatusResult struct {
 	Ready    bool    `json:"ready"`
 	Online   bool    `json:"online"`
 	Reason   *string `json:"reason"`
+
+	// The fuller answer (DetailValue): not part of the usual object.
+	reasonCode string
+	session    *SessionState
+}
+
+// StatusDetail is status's fuller object: the usual four things, then reason_code and session. reason_code is a fixed
+// word beside the free-text reason, null when ready. session is null at a shell.
+type StatusDetail struct {
+	Endpoint   *string       `json:"endpoint"`
+	Ready      bool          `json:"ready"`
+	Online     bool          `json:"online"`
+	Reason     *string       `json:"reason"`
+	ReasonCode *string       `json:"reason_code"`
+	Session    *SessionState `json:"session"`
+}
+
+// DetailValue is the fuller object, which contains the usual one.
+func (r StatusResult) DetailValue() any {
+	return StatusDetail{r.Endpoint, r.Ready, r.Online, r.Reason, strPtr(r.reasonCode), r.session}
+}
+
+// DetailText is the session's state as 'label: value' lines, or "session: none" at a shell.
+func (r StatusResult) DetailText(cmdcore.Opts) string {
+	if r.session == nil {
+		return "session:        none"
+	}
+	yn := map[bool]string{true: "yes", false: "no"}
+	return fmt.Sprintf("holds endpoint: %s\nhooks:          %s\nstorage:        %s", yn[r.session.HoldsEndpoint], r.session.Hooks, r.session.Storage)
 }
 
 // noSessionEndpoint is the answer of a session that names no endpoint.
@@ -219,7 +307,7 @@ var Status = cmdcore.Command[StatusParams, StatusResult]{
 		if err != nil {
 			return StatusResult{}, err
 		}
-		r := StatusResult{Endpoint: strPtr(rep.Endpoint), Ready: true}
+		r := StatusResult{Endpoint: strPtr(rep.Endpoint), Ready: true, session: rep.Session}
 		for _, c := range rep.Checks {
 			if c.State == CheckFail && statusChecks(c.Name) {
 				reason := c.Reason
@@ -227,24 +315,28 @@ var Status = cmdcore.Command[StatusParams, StatusResult]{
 					reason = c.Detail
 				}
 				r.Ready, r.Reason = false, &reason
+				r.reasonCode = c.Code
 				break
 			}
 		}
 		// a row that fails is the first thing to mend and is what both doors say; the session's own state comes next
 		if reason := leaseReason(rep.Lease, rep.LeaseCause); r.Ready && reason != "" {
 			r.Ready, r.Reason = false, &reason
+			r.reasonCode = map[string]string{LeaseOther: CodeEndpointHeldElsewhere, LeaseLost: CodeEndpointLost, LeaseFailed: CodeEndpointNotTaken}[rep.Lease]
 		}
 		if r.Ready && rep.MailHeld {
 			reason := ReasonMailHeld
-			r.Ready, r.Reason = false, &reason
+			r.Ready, r.Reason, r.reasonCode = false, &reason, CodeStorageUnwritable
 		}
 		r.Online = r.Ready && rep.Online
 		return r, nil
 	},
 }
 
-// DoctorParams has no arguments.
-type DoctorParams struct{}
+// DoctorParams: Strict makes a warning exit 1 too (on the MCP tool, mark the result an error); it changes nothing else.
+type DoctorParams struct {
+	Strict bool `json:"strict,omitempty" flag:"--strict" desc:"Exit 1 on a warning too."`
+}
 
 // DoctorCheck is one row of the report. Detail and Fix are null when there is none.
 type DoctorCheck struct {
@@ -261,6 +353,8 @@ type DoctorResult struct {
 	Problems int           `json:"problems"`
 	Warnings int           `json:"warnings"`
 	Checks   []DoctorCheck `json:"checks"`
+
+	strict bool
 }
 
 // Text is a row per check (the name in 10 columns, the state in 6, then the detail), a blank line, and the count:
@@ -289,6 +383,9 @@ func (r DoctorResult) Text(cmdcore.Opts) string {
 					}
 				}
 			}
+			if w, ok := hookRowWraps[detail]; ok && c.Name == CheckDelivery {
+				detail, extra = w[0], "\n"+strings.Repeat(" ", 16)+w[1]
+			}
 			line += detail
 		}
 		b.WriteString(strings.TrimRight(line, " ") + extra + "\n")
@@ -316,9 +413,9 @@ func plural(n int, word string) string {
 	return fmt.Sprintf("%d %ss", n, word)
 }
 
-// ExitCode is 1 when a check failed. A warning alone is 0.
+// ExitCode is 1 when a check failed. A warning alone is 0, or 1 with --strict.
 func (r DoctorResult) ExitCode() int {
-	if r.Problems > 0 {
+	if r.Problems > 0 || (r.strict && r.Warnings > 0) {
 		return 1
 	}
 	return 0
@@ -354,13 +451,13 @@ var Doctor = cmdcore.Command[DoctorParams, DoctorResult]{
 	Group:       "Everyday",
 	Summary:     "Check everything mail depends on for this endpoint, and say how to fix what is wrong. Changes nothing.",
 	Description: "Check everything mail depends on for this endpoint, and say how to fix what is wrong. Changes nothing.",
-	Examples:    []string{"mash doctor"},
-	Run: func(ctx context.Context, env *cmdcore.Env, _ DoctorParams) (DoctorResult, error) {
+	Examples:    []string{"mash doctor", "mash doctor --strict"},
+	Run: func(ctx context.Context, env *cmdcore.Env, p DoctorParams) (DoctorResult, error) {
 		rep, err := healthOf(ctx, env, "doctor")
 		if err != nil {
 			return DoctorResult{}, err
 		}
-		r := DoctorResult{Endpoint: strPtr(rep.Endpoint), Checks: []DoctorCheck{}}
+		r := DoctorResult{Endpoint: strPtr(rep.Endpoint), Checks: []DoctorCheck{}, strict: p.Strict}
 		for _, c := range rep.Checks {
 			switch c.State {
 			case CheckFail:

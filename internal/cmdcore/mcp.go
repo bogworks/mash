@@ -41,6 +41,9 @@ func Schema[P any]() map[string]any {
 	return schemaOf(paramFields(reflect.TypeOf((*P)(nil)).Elem()))
 }
 
+// DetailParamDescription is the description of the MCP param that asks for the fuller object.
+const DetailParamDescription = "Return the fuller object. Default false: the usual, minimal one."
+
 func schemaOf(fields []field) map[string]any {
 	props := map[string]any{}
 	required := []string{}
@@ -81,6 +84,7 @@ func schemaOf(fields []field) map[string]any {
 // JSON names after the required fields and enums are checked.
 func MCPTool[P any, R Result](c Command[P, R], env EnvFunc) Tool {
 	fields := paramFields(reflect.TypeOf((*P)(nil)).Elem())
+	_, hasDetail := any(*new(R)).(Detailer)
 	desc := c.MCPDescription
 	if desc == "" {
 		desc = c.Summary
@@ -88,9 +92,16 @@ func MCPTool[P any, R Result](c Command[P, R], env EnvFunc) Tool {
 	return Tool{
 		Name:        c.Name,
 		Description: desc,
-		Schema:      schemaOf(fields),
+		Schema:      withDetail(schemaOf(fields), hasDetail),
 		CallStructured: func(ctx context.Context, args json.RawMessage) (string, any, error) {
 			var p P
+			detail := false
+			if hasDetail {
+				var err error
+				if detail, args, err = takeDetail(args); err != nil {
+					return "", nil, toolError(err)
+				}
+			}
 			if err := decodeArgs(fields, args, &p); err != nil {
 				return "", nil, toolError(err)
 			}
@@ -104,25 +115,68 @@ func MCPTool[P any, R Result](c Command[P, R], env EnvFunc) Tool {
 			if e == nil {
 				return "", nil, toolError(errNoEnv(c.Name))
 			}
-			e.Opts = Opts{NoColor: true, Width: 80}
+			e.Opts = Opts{NoColor: true, Width: 80, Detail: detail}
 			r, err := c.Run(ctx, e, p)
 			if err != nil {
 				return "", nil, toolError(err)
 			}
 			text := r.Text(e.Opts)
+			var out any = r
+			if d, ok := any(r).(Detailer); ok && detail {
+				if more := d.DetailText(e.Opts); more != "" {
+					text += "\n" + more
+				}
+				out = d.DetailValue()
+			}
 			if h, ok := any(r).(Hinter); ok && h.Hint() != "" {
 				text += "\nhint: " + h.Hint()
 			}
-			b, err := marshal(r)
+			b, err := marshal(out)
 			if err != nil {
 				return "", nil, toolError(err)
 			}
-			if len(b) == 0 || b[0] != '{' {
-				return text, nil, nil
+			var structured any
+			if len(b) > 0 && b[0] == '{' {
+				structured = out
 			}
-			return text, r, nil
+			// A result that exits nonzero (a problem found by status or doctor, a warning under doctor's strict) is
+			// marked an error here as it exits nonzero at a shell; its report and structured result are the same.
+			if x, ok := any(r).(ExitCoder); ok && x.ExitCode() != 0 {
+				return "", nil, &resultErr{text: text, structured: structured}
+			}
+			return text, structured, nil
 		},
 	}
+}
+
+// withDetail adds the boolean detail param to a schema when the command has a fuller answer.
+func withDetail(s map[string]any, on bool) map[string]any {
+	if on {
+		s["properties"].(map[string]any)[cliframe.DetailParam] = map[string]any{"type": "boolean", "description": DetailParamDescription}
+	}
+	return s
+}
+
+// takeDetail removes the detail param from the arguments and returns it. It must be a boolean.
+func takeDetail(args json.RawMessage) (bool, json.RawMessage, error) {
+	if s := strings.TrimSpace(string(args)); s == "" || s == "null" {
+		return false, args, nil
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(args, &raw); err != nil {
+		return false, args, nil // decodeArgs says the arguments must be an object
+	}
+	v, ok := raw[cliframe.DetailParam]
+	if !ok {
+		return false, args, nil
+	}
+	var d bool
+	if err := json.Unmarshal(v, &d); err != nil {
+		return false, nil, cliframe.Usagef("%s must be true or false", cliframe.DetailParam)
+	}
+	delete(raw, cliframe.DetailParam)
+	b, _ := json.Marshal(raw)
+	return d, b, nil
 }
 
 func decodeArgs[P any](fields []field, args json.RawMessage, p *P) error {
@@ -224,6 +278,18 @@ func wholeNumber(f field, v json.RawMessage) (json.RawMessage, error) {
 	return json.RawMessage(strconv.FormatInt(n, 10)), nil
 }
 
+// resultErr carries a report whose exit code is nonzero to the MCP server, which sends it as an error result: the text
+// is the report as it is (no "error:" prefix) and Structured is the result object.
+type resultErr struct {
+	text       string
+	structured any
+}
+
+func (e *resultErr) Error() string { return e.text }
+
+// Structured implements mcp.StructuredError.
+func (e *resultErr) Structured() any { return e.structured }
+
 // toolErr is the error MCPTool returns to the MCP server: the text is the CLI's "error: MSG" plus "\nhint: HINT", and
 // Structured is {"error": MSG, "hint": HINT} (no hint key when there is none).
 type toolErr struct{ msg, hint string }
@@ -244,6 +310,10 @@ func (e *toolErr) Structured() any {
 	}
 	return m
 }
+
+// ToolError renders err as an MCP tool's error does: "error: MSG" plus "\nhint: HINT" for a framed failure, for the tools
+// that are not commands of the table.
+func ToolError(err error) error { return toolError(err) }
 
 // toolError renders err the way the CLI reports it, as one error with a structured form.
 func toolError(err error) error {

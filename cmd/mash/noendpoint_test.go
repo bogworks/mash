@@ -89,11 +89,11 @@ func TestStatusToolSaysNotReadyWhileTheRequiredSpoolFails(t *testing.T) {
 	id := 10
 	eventually(t, 15*time.Second, "status says mail is held", func() bool {
 		id++
-		return toolText(t, s, id, "status") == want
+		return reportText(t, s, id, "status") == want
 	})
 	id++
 	wantRow := "delivery  FAIL  mail is held: its folder cannot be written:\n                "
-	if got := toolText(t, s, id, "doctor"); !strings.Contains(got, wantRow) || strings.Contains(strings.SplitN(got, "\n                ", 2)[0], "spool") || !strings.Contains(got, "1 problem") {
+	if got := reportText(t, s, id, "doctor"); !strings.Contains(got, wantRow) || strings.Contains(strings.SplitN(got, "\n                ", 2)[0], "spool") || !strings.Contains(got, "1 problem") {
 		t.Errorf("doctor does not show the held folder: %q", got)
 	}
 	// the spool can be made again: the retry binds it and status is ready
@@ -105,7 +105,7 @@ func TestStatusToolSaysNotReadyWhileTheRequiredSpoolFails(t *testing.T) {
 	}
 	eventually(t, 3*spoolRetryEvery+30*time.Second, "status says ready", func() bool {
 		id++
-		return strings.HasPrefix(toolText(t, s, id, "status"), tTo("a")+": ready")
+		return strings.HasPrefix(reportText(t, s, id, "status"), tTo("a")+": ready")
 	})
 }
 

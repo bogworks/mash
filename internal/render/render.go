@@ -102,6 +102,10 @@ func quote(b []byte) string {
 	return strings.Join(lines, "\n")
 }
 
+// Quote is the body quoting of a message, for other text of a sender's that mash shows: every line, an empty one too,
+// starts with "> ", and control characters are escaped.
+func Quote(b []byte) string { return quote(b) }
+
 // One renders a message in full; the body is quoted.
 func One(m Mail) string {
 	inst := ""

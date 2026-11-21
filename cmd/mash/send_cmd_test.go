@@ -26,7 +26,7 @@ func TestSendCommandBothForms(t *testing.T) {
 	if code != 0 || errb != "" || out != `{"to":"o.dev.a","number":1,"kind":"task","urgent":false,"duplicate":false,"retagged":false}`+"\n" {
 		t.Fatalf("--json: %d %q %q", code, out, errb)
 	}
-	out, _, code = runSplit(t, w, "b", "send", tTo("a"), "--kind", "fyi", "--urgent", "second", "-v")
+	out, _, code = runSplit(t, w, "b", "send", tTo("a"), "--kind", "fyi", "--urgent", "second", "--detail")
 	if code != 0 || out != "Urgent fyi mail sent (number 2).\nto:      o.dev.a\nkind:    fyi\nurgent:  yes\n" {
 		t.Fatalf("-v: %d %q", code, out)
 	}
@@ -94,7 +94,7 @@ func TestSendCommandBothForms(t *testing.T) {
 // `mash version` is one line, and the same object as the MCP tool in --json.
 func TestVersionCommand(t *testing.T) {
 	var out, errb bytes.Buffer
-	if code := run([]string{"version"}, envFrom(nil), strings.NewReader(""), &out, &errb); code != 0 || errb.Len() != 0 ||
+	if code := run([]string{"version"}, envFrom(nil), strings.NewReader(""), &out, quiet(&errb)); code != 0 || errb.Len() != 0 ||
 		!strings.HasPrefix(out.String(), "mash v") || strings.Count(out.String(), "\n") != 1 {
 		t.Fatalf("version: %d %q %q", code, out.String(), errb.String())
 	}
@@ -181,14 +181,14 @@ func TestHelpCommandMatchesHelpFlag(t *testing.T) {
 		{[]string{"help", "serve"}, []string{"serve", "--help"}},
 	} {
 		var o1, e1, o2, e2 bytes.Buffer
-		c1 := run(tc.a, envFrom(nil), strings.NewReader(""), &o1, &e1)
-		c2 := run(tc.b, envFrom(nil), strings.NewReader(""), &o2, &e2)
+		c1 := run(tc.a, envFrom(nil), strings.NewReader(""), &o1, quiet(&e1))
+		c2 := run(tc.b, envFrom(nil), strings.NewReader(""), &o2, quiet(&e2))
 		if c1 != 0 || c2 != 0 || e1.Len() != 0 || e2.Len() != 0 || o1.Len() == 0 || o1.String() != o2.String() {
 			t.Errorf("%v: %d %q %q; %v: %d %q", tc.a, c1, o1.String(), e1.String(), tc.b, c2, o2.String())
 		}
 	}
 	var o, e bytes.Buffer
-	if code := run([]string{"help", "nosuch"}, envFrom(nil), strings.NewReader(""), &o, &e); code != 2 || o.Len() != 0 ||
+	if code := run([]string{"help", "nosuch"}, envFrom(nil), strings.NewReader(""), &o, quiet(&e)); code != 2 || o.Len() != 0 ||
 		e.String() != "error: mash has no command nosuch\nhint: mash help\n" {
 		t.Errorf("help nosuch: %d %q %q", code, o.String(), e.String())
 	}

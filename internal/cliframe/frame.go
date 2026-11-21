@@ -2,7 +2,7 @@
 // the arguments, and the error report.
 //
 // The global options are --endpoint ADDR, --creds PATH, --server URL (repeatable), --ca PATH, --config-dir PATH,
-// --verbose or -v, --json and --no-color. Each takes the form --flag value or --flag=value, before or after the verb.
+// --detail (the name is DetailFlag), --json and --no-color. Each takes the form --flag value or --flag=value, before or after the verb.
 // Extract strips them from the arguments and Global.Resolve applies the precedence flag, then environment, then
 // config.json.
 //
@@ -22,6 +22,14 @@ type Spec struct {
 	Extra    []Setting // extra value-taking settings of this tool
 }
 
+// DetailFlag is the global option that gives the fuller answer, on every command of both tools: in text, 'label: value'
+// lines after the usual line; with --json, a fuller object that contains the usual one; an MCP tool takes the same
+// word, without the dashes, as a boolean param (DetailParam). It is the one place the name is written.
+const DetailFlag = "--detail"
+
+// DetailParam is the MCP param that asks for the fuller answer: DetailFlag without its dashes.
+var DetailParam = strings.TrimPrefix(DetailFlag, "--")
+
 // Setting is one extra value-taking setting: its flag, environment variable and config.json key.
 type Setting struct {
 	Flag string // like "--system-creds"
@@ -33,9 +41,9 @@ type Setting struct {
 type Global struct {
 	Endpoint, Creds, CA, ConfigDir string
 	Servers                        []string
-	Verbose, JSON, NoColor         bool
+	Detail, JSON, NoColor          bool
 	Extra                          map[string]string // by Setting.Flag, values given by flag
-	Set                            map[string]bool   // flags ("--endpoint", ...) that were given; -v is "--verbose"
+	Set                            map[string]bool   // flags ("--endpoint", ...) that were given; DetailFlag is the one that asks for the fuller answer
 }
 
 // Extract removes the global options from args wherever they appear and returns them with the remaining arguments in
@@ -56,8 +64,8 @@ func Extract(spec Spec, args []string) (Global, []string, error) {
 			break
 		}
 		switch a {
-		case "-v", "--verbose":
-			g.Verbose, g.Set["--verbose"] = true, true
+		case DetailFlag:
+			g.Detail, g.Set[DetailFlag] = true, true
 			continue
 		case "--json":
 			g.JSON, g.Set["--json"] = true, true
@@ -141,7 +149,7 @@ func splitList(s string) []string {
 type Resolved struct {
 	Endpoint, Creds, CA, ConfigDir string
 	Servers                        []string
-	Verbose, JSON, NoColor         bool
+	Detail, JSON, NoColor          bool
 	Extra                          map[string]string // by Setting.Flag
 	// Source says where each setting came from, keyed by flag ("--endpoint", "--server", an extra's flag): "flag", the
 	// environment variable name, "config.json", or "unset".
@@ -156,7 +164,7 @@ func (g Global) Resolve(spec Spec, env func(string) string, file map[string]any)
 		env = func(string) string { return "" }
 	}
 	r := Resolved{
-		Verbose: g.Verbose,
+		Detail:  g.Detail,
 		JSON:    g.JSON,
 		NoColor: g.NoColor || env("NO_COLOR") != "",
 		Extra:   map[string]string{},

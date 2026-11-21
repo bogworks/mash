@@ -31,7 +31,7 @@ type demoResult struct {
 }
 
 func (d demoResult) Text(o cmdcore.Opts) string {
-	return "got " + d.Got + map[bool]string{true: " (verbose)", false: ""}[o.Verbose]
+	return "got " + d.Got + map[bool]string{true: " (detail)", false: ""}[o.Detail]
 }
 
 func env(context.Context) (*cmdcore.Env, error) { return &cmdcore.Env{}, nil }
@@ -47,8 +47,8 @@ func TestParseAllForms(t *testing.T) {
 		code := cmdcore.CLI(c, env)(args, nil, &o, &e, g)
 		return code, o.String(), e.String()
 	}
-	code, out, _ := run(cliframe.Global{Verbose: true}, "x", "--tag", "a", "-t", "b", "--tag=c", "--count=3", "--n", "-4", "-l", "--skip", "s")
-	if code != 0 || out != "got x (verbose)\n" {
+	code, out, _ := run(cliframe.Global{Detail: true}, "x", "--tag", "a", "-t", "b", "--tag=c", "--count=3", "--n", "-4", "-l", "--skip", "s")
+	if code != 0 || out != "got x (detail)\n" {
 		t.Fatalf("%d %q", code, out)
 	}
 	if !reflect.DeepEqual(seen.Tags, []string{"a", "b", "c"}) || seen.Count == nil || *seen.Count != 3 || seen.N != -4 || !seen.Loud || seen.Skip != "s" {
@@ -224,4 +224,11 @@ func TestUnsupportedFieldPanics(t *testing.T) {
 	cmdcore.Schema[struct {
 		F float64 `json:"f"`
 	}]()
+}
+
+// A read of a refused sequence says "message 12 was refused".
+func TestRefusedMessageText(t *testing.T) {
+	if got := cmdcore.RefusedMessage(12).Error(); got != "message 12 was refused: it was not verified" {
+		t.Fatalf("got %q", got)
+	}
 }

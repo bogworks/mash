@@ -506,6 +506,10 @@ func TestConformance(t *testing.T) {
 			{[]string{"limits", "--show"}, "limits"},
 			{[]string{"endpoint", "inbox", "a.b.c", "--from", "x"}, "endpoint inbox"},
 			{[]string{"endpoint", "inbox", "a.b.c", "--to", "x"}, "endpoint inbox"},
+			{[]string{"status", "--verbose"}, "status"},
+			{[]string{"status", "-v"}, "status"},
+			{[]string{"endpoint", "reissue", "a.b.c", "--verbose"}, "endpoint reissue"},
+			{[]string{"endpoint", "delete", "a.b.c", "-v"}, "endpoint delete"},
 		} {
 			o := o
 			name := strings.Join(o.args, " ")

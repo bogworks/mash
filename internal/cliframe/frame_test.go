@@ -63,8 +63,7 @@ func TestExtractBooleans(t *testing.T) {
 		set  string
 		get  func(Global) bool
 	}{
-		{"--verbose", "--verbose", func(g Global) bool { return g.Verbose }},
-		{"-v", "--verbose", func(g Global) bool { return g.Verbose }},
+		{DetailFlag, DetailFlag, func(g Global) bool { return g.Detail }},
 		{"--json", "--json", func(g Global) bool { return g.JSON }},
 		{"--no-color", "--no-color", func(g Global) bool { return g.NoColor }},
 	} {
@@ -94,7 +93,7 @@ func TestExtractNoFlags(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(g.Set) != 0 || g.Endpoint != "" || g.Verbose {
+	if len(g.Set) != 0 || g.Endpoint != "" || g.Detail {
 		t.Errorf("unexpected globals: %+v", g)
 	}
 	if !reflect.DeepEqual(rest, []string{"send", "-x", "--other=1", "hi"}) {
@@ -148,7 +147,7 @@ func TestExtractDoubleDash(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !g.JSON || g.Endpoint != "" || g.Verbose || g.Creds != "" {
+	if !g.JSON || g.Endpoint != "" || g.Detail || g.Creds != "" {
 		t.Errorf("globals = %+v", g)
 	}
 	want := []string{"send", "--", "--endpoint", "x", "-v", "--creds=y"}
@@ -370,9 +369,22 @@ func TestResolveNoColor(t *testing.T) {
 }
 
 func TestResolveBooleansPassThrough(t *testing.T) {
-	g, _, _ := Extract(mashSpec, []string{"-v", "--json"})
+	g, _, _ := Extract(mashSpec, []string{DetailFlag, "--json"})
 	r := g.Resolve(mashSpec, nil, nil)
-	if !r.Verbose || !r.JSON {
+	if !r.Detail || !r.JSON {
 		t.Errorf("r = %+v", r)
+	}
+}
+
+// The old names of the option are not options any more: they stay in the arguments for the command to refuse.
+func TestOldVerboseIsNotAGlobalOption(t *testing.T) {
+	for _, old := range []string{"--verbose", "-v"} {
+		g, rest, err := Extract(mashSpec, []string{"who", old})
+		if err != nil || g.Detail || g.Set[DetailFlag] || !reflect.DeepEqual(rest, []string{"who", old}) {
+			t.Errorf("%s: %+v %q %v", old, g, rest, err)
+		}
+	}
+	if DetailParam != "detail" || DetailFlag != "--"+DetailParam {
+		t.Errorf("DetailFlag %q, DetailParam %q", DetailFlag, DetailParam)
 	}
 }

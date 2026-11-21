@@ -18,7 +18,7 @@ import (
 )
 
 // CheckServer says whether a server of cfg.URL answers, without signing in: it connects with no credentials under the
-// same TLS rules as an endpoint (a plain URL needs insecure_plaintext, the CA and client certificate apply). A server
+// same TLS rules as an endpoint (a plain URL needs MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1, the CA and client certificate apply). A server
 // that answers and refuses the missing credentials has answered, so that is no error; so is a connection that is made.
 // What it returns is the failure to reach a server, redacted. It opens nothing it leaves open.
 func CheckServer(ctx context.Context, cfg config.Config) error {

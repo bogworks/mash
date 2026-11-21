@@ -223,16 +223,17 @@ func TestEndpointCreateDefaultInstalls(t *testing.T) {
 	// --json
 	so, _, code = h.run("endpoint", "create", ad("same2").String(), "--json")
 	var doc map[string]any
-	if json.Unmarshal([]byte(so), &doc) != nil || code != 0 || !sameKeys(doc, []string{"address", "installed_here", "join_file"}) ||
-		doc["installed_here"] != true || doc["join_file"] != nil || doc["address"] != ad("same2").String() {
+	if json.Unmarshal([]byte(so), &doc) != nil || code != 0 || !sameKeys(doc, []string{"address", "installed_here", "creds", "join_file"}) ||
+		doc["installed_here"] != true || doc["join_file"] != nil || doc["address"] != ad("same2").String() ||
+		doc["creds"] != h.creds(ad("same2")) {
 		t.Errorf("json %d %q", code, so)
 	}
+	if _, err := os.Stat(h.creds(ad("same2"))); err != nil {
+		t.Errorf("the creds path in the json is not a file: %v", err)
+	}
 	// --verbose
-	so, _, code = h.run("endpoint", "create", ad("same3").String(), "--verbose")
-	lines := strings.Split(strings.TrimRight(so, "\n"), "\n")
-	rec, _ := h.record(ad("same3"))
-	if code != 0 || len(lines) != 4 || lines[0] != "Created endpoint "+ad("same3").String() || lines[1] != "servers: "+h.env["MASH_SERVER"] ||
-		lines[2] != "credentials file: "+h.creds(ad("same3")) || lines[3] != "public key: "+rec.User {
+	so, _, code = h.run("endpoint", "create", ad("same3").String(), "--detail")
+	if code != 0 || so != "Created endpoint "+ad("same3").String()+"\n" { // --detail adds nothing to create
 		t.Errorf("verbose %d %q", code, so)
 	}
 }
@@ -297,13 +298,13 @@ func TestEndpointCreateOut(t *testing.T) {
 	jf2 := filepath.Join(out, "far3.join")
 	so, _, code = h.run("endpoint", "create", ad("far3").String(), "--out", jf2, "--json")
 	var doc map[string]any
-	if json.Unmarshal([]byte(so), &doc) != nil || code != 0 || !sameKeys(doc, []string{"address", "installed_here", "join_file"}) ||
-		doc["installed_here"] != false || doc["join_file"] != jf2 {
+	if json.Unmarshal([]byte(so), &doc) != nil || code != 0 || !sameKeys(doc, []string{"address", "installed_here", "creds", "join_file"}) ||
+		doc["installed_here"] != false || doc["creds"] != nil || doc["join_file"] != jf2 {
 		t.Errorf("json %d %q", code, so)
 	}
 	jf3 := filepath.Join(out, "far4.join")
-	so, _, code = h.run("endpoint", "create", ad("far4").String(), "--out", jf3, "-v")
-	if code != 0 || !strings.Contains(so, "\nservers: "+h.env["MASH_SERVER"]+"\njoin file: "+jf3+"\npublic key: U") {
+	so, _, code = h.run("endpoint", "create", ad("far4").String(), "--out", jf3, "--detail")
+	if code != 0 || so != "Created endpoint "+ad("far4").String()+"\nJoin file: "+jf3+"\n" {
 		t.Errorf("verbose %d %q", code, so)
 	}
 }
@@ -535,8 +536,15 @@ func TestEndpointCreateDryRun(t *testing.T) {
 	}
 	so, _, _ := h.run("endpoint", "create", ad("dry").String(), "--dry-run", "--json")
 	var doc map[string]any
-	if json.Unmarshal([]byte(so), &doc) != nil || doc["dry_run"] != true || doc["installed_here"] != true {
+	if json.Unmarshal([]byte(so), &doc) != nil || doc["dry_run"] != true || doc["installed_here"] != true ||
+		doc["creds"] != h.creds(ad("dry")) || doc["join_file"] != nil {
 		t.Errorf("json %q", so)
+	}
+	so, _, _ = h.run("endpoint", "create", ad("dry").String(), "--out", filepath.Join(out, "dry3.join"), "--dry-run", "--json")
+	doc = nil
+	if json.Unmarshal([]byte(so), &doc) != nil || doc["dry_run"] != true || doc["installed_here"] != false ||
+		doc["creds"] != nil || doc["join_file"] != filepath.Join(out, "dry3.join") {
+		t.Errorf("json --out %q", so)
 	}
 	if after := epSnapshot(t, h, h.dir, out); after != before {
 		t.Errorf("dry-run changed state:\n%s\n---\n%s", before, after)
@@ -573,7 +581,8 @@ func TestEndpointCreateGolden(t *testing.T) {
 	jf := filepath.Join(out, "design.join")
 	norm := func(s string) string {
 		s = strings.ReplaceAll(s, pub, "UPUBLICKEY")
-		return strings.ReplaceAll(s, out, "OUT")
+		s = strings.ReplaceAll(s, out, "OUT")
+		return strings.ReplaceAll(s, h.dir, "CONFIG")
 	}
 	var b strings.Builder
 	step := func(label string, args ...string) {

@@ -1,9 +1,12 @@
 package main
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -93,22 +96,22 @@ var AT003 = Scenario{
 		adminCreds := filepath.Join(a.srvDir, fileAdminCreds)
 
 		// Setup: four endpoints made the contract's way, one of them deleted so that its address is burned.
-		design, ok := a.provision(ha, he, "alice", "dev", "design", filepath.Join(he.Dir, "design.creds"), false)
+		design, ok := a.provision(ha, he, "alice", "dev", "design", false)
 		if !ok {
 			return
 		}
-		review, ok := a.provision(ha, he, "alice", "dev", "review", filepath.Join(he.Dir, "review.creds"), false)
+		review, ok := a.provision(ha, he, "alice", "dev", "review", false)
 		if !ok {
 			return
 		}
-		if _, ok = a.provision(ha, he, "alice", "dev", "gone", "", true); !ok {
+		if _, ok = a.provision(ha, he, "alice", "dev", "gone", true); !ok {
 			return
 		}
 		r := a.Ctl("endpoint-delete-gone", ha, a.Conn(), "endpoint", "delete", "alice.dev.gone", "--yes")
 		if !a.C.Check("setup: mashctl endpoint delete alice/dev/gone burns the address", r.Code == 0, exitDetail(r)) {
 			return
 		}
-		bob, ok := a.provision(ha, he, "bob", "dev", "build", filepath.Join(he.Dir, "bob.creds"), false)
+		bob, ok := a.provision(ha, he, "bob", "dev", "build", false)
 		if !ok {
 			return
 		}
@@ -116,7 +119,7 @@ var AT003 = Scenario{
 		if !a.C.Check("setup: a key that has never been issued", r.Code == 0, exitDetail(r)) {
 			return
 		}
-		fresh := filepath.Join(he.Dir, "fresh.pub")
+		fresh := pubOf(filepath.Join(he.Dir, "fresh.seed"))
 		bad := filepath.Join(he.Dir, "bad.pub")
 		rule := filepath.Join(he.Dir, "rule.json")
 		taken := filepath.Join(he.Dir, "taken.join")
@@ -164,22 +167,47 @@ var AT003 = Scenario{
 				Hint: [][]string{{"already exists"}}},
 			{Name: "no account key on the mashctl host", Label: "no-account-key", Home: hn, Extra: []string{"MASH_ADMIN_CREDS=" + adminCreds}, Args: create("alice.dev.other", pk...), Exit: 1, NoJSON: true,
 				Hint: [][]string{{"mashctl init", "MASH_KEYS_DIR", "account key"}}},
-			// T1b-b: the `mash credential create` flow below waits for core's `mash join`; it is left as it is until then.
-			{Name: "mash credential create with a seed and a JWT for different keys", Label: "creds-mismatch", Home: he, Mash: true, NoJSON: true, Exit: 1,
-				Args: []string{"credential", "create", "--seed", design.seed, "--jwt", review.jwt, "--out", filepath.Join(he.Dir, "mismatch.creds")},
-				Hint: [][]string{{"mash key create", "--seed", "--jwt", "same key", "different", "belong together"}}},
+			// mash join: a join file made for a public key is installed only with the seed of that key.
+			{Name: "mash join of a join file made for design with the seed of review", Label: "join-wrong-seed", Home: he, Mash: true, NoJSON: true, Exit: 1,
+				Args: []string{"join", design.join, "--key", review.seed},
+				Hint: [][]string{{"is not the key this join file was made for"}}},
+			{Name: "mash join of an address that is already installed", Label: "join-installed", Home: he, Mash: true, NoJSON: true, Exit: 1,
+				Args: []string{"join", design.join, "--key", design.seed},
+				Hint: [][]string{{"alice.dev.design is already installed here"}, {"mash join " + design.join + " --replace"}}},
+			{Name: "mash join of a join file that needs a seed, with no --key", Label: "join-needs-seed", Home: he, Mash: true, NoJSON: true, Exit: 2,
+				Args: []string{"join", design.join},
+				Hint: [][]string{{"this join file holds no seed; it was made for your own key"}, {"mash join " + design.join + " --key <your seed file>"}}},
 		}
 		for _, c := range cases {
 			a.refusal(ha, trees, c)
 		}
 
-		// A session whose endpoint has no group.
+		// A session whose endpoint is not an address (no group): it does not exit. An MCP server that dies shows the agent
+		// nothing; a degraded one lets status and doctor say what is wrong.
 		before := a.Snapshot("no-group-session-before", ha, trees...)
-		gextra := append(a.Conn(), "MASH_ENDPOINT=alice.ghost", "MASH_STATE_DIR="+filepath.Join(he.State, "ghost"))
-		r = a.Mash("session-no-group", he, gextra, "serve")
+		const ghost = "alice.ghost"
+		gp, err := a.R.StartProc("serve-no-group", []string{a.R.Mash, "serve"},
+			a.Env(he, append(a.Conn(), "MASH_ENDPOINT="+ghost, "MASH_STATE_DIR="+filepath.Join(he.State, "ghost"))...))
+		hs := errors.New("not started: " + errDetail(err))
+		if err == nil {
+			hs = gp.Handshake(20 * time.Second)
+		}
+		a.C.Check("a session whose endpoint has no group: serve completes the MCP handshake", hs == nil, errDetail(hs))
+		if err == nil {
+			time.Sleep(time.Second)
+			a.C.Check("a session whose endpoint has no group: serve stays up (it does not exit)", !gp.Exited(), "serve exited: "+snip(gp.Stderr()))
+			names := toolNamesIn(gp.Stdout(), 2)
+			a.C.Check("a session whose endpoint has no group: tools/list offers only status, doctor and version", degradedToolSet(names), "offered: "+orNone(strings.Join(names, ", ")))
+			for _, tool := range []string{"status", "doctor"} {
+				text, _, cerr := gp.Call(tool, map[string]any{}, 20*time.Second)
+				a.C.Check("a session whose endpoint has no group: the "+tool+" tool names the bad address "+ghost+" and why", cerr == nil && namesBadAddress(text, ghost), errDetail(cerr)+" "+snip(text))
+				if tool == "status" {
+					a.C.Check("a session whose endpoint has no group: the status tool says it is not ready", strings.Contains(text, "not ready"), snip(text))
+				}
+			}
+			gp.Stop()
+		}
 		after := a.Snapshot("no-group-session-after", ha, trees...)
-		a.C.Check("a session whose endpoint has no group: exit code 1", r.Code == 1, exitDetail(r))
-		a.C.Check("a session whose endpoint has no group: standard error names MASH_ENDPOINT", strings.Contains(r.Stderr, "MASH_ENDPOINT"), "")
 		a.C.Check("a session whose endpoint has no group: no directory record, stream, consumer, lease or service was made for it",
 			len(before.Diff(after)) == 0 && !strings.Contains(after.Raw["doctor"], "ghost") && !strings.Contains(after.Raw["list"], "ghost"), "changed: "+orNone(strings.Join(before.Diff(after), ", ")))
 
@@ -309,4 +337,41 @@ func errDetail(err error) string {
 		return ""
 	}
 	return redact(err.Error())
+}
+
+// toolNamesIn is the sorted tool names in the tools/list reply with the id in an MCP stdout stream (nil when there is none).
+func toolNamesIn(stdout string, id int) []string {
+	for _, l := range strings.Split(stdout, "\n") {
+		var m struct {
+			ID     *float64 `json:"id"`
+			Result *struct {
+				Tools []struct {
+					Name string `json:"name"`
+				} `json:"tools"`
+			} `json:"result"`
+		}
+		if json.Unmarshal([]byte(strings.TrimSpace(l)), &m) != nil || m.ID == nil || int(*m.ID) != id || m.Result == nil {
+			continue
+		}
+		var out []string
+		for _, t := range m.Result.Tools {
+			out = append(out, t.Name)
+		}
+		sort.Strings(out)
+		return out
+	}
+	return nil
+}
+
+// degradedToolSet is true only for exactly the tools a session with no usable endpoint offers: doctor, status, version.
+func degradedToolSet(names []string) bool {
+	got := append([]string(nil), names...)
+	sort.Strings(got)
+	return strings.Join(got, ",") == "doctor,status,version"
+}
+
+// namesBadAddress is true when a status or doctor answer names the bad address and says why it is bad (it does not
+// have the three owner.group.name parts), not only that something is wrong.
+func namesBadAddress(text, addr string) bool {
+	return strings.Contains(text, addr) && strings.Contains(text, "dot-separated parts")
 }

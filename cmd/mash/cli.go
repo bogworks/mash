@@ -29,6 +29,13 @@ func cli(cfg config.Config, args []string, stdin io.Reader, stdout, stderr io.Wr
 	openCtx, openCancel := context.WithTimeout(ctx, cfg.OpenTimeout)
 	ep, err := endpoint.OpenClientWith(openCtx, cfg, endpoint.ClientOptions{})
 	openCancel()
+	fail = func(err error) int {
+		if f := framed(cfg.DisplayName(), err); f != err {
+			return cliframe.Report(stdout, stderr, f, false)
+		}
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
 	if err != nil {
 		return fail(err)
 	}

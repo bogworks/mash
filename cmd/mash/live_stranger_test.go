@@ -551,7 +551,7 @@ func (sc *lsScenario) identity(w *world, name string, extra map[string]string) m
 	ls.addSecret(src["MASH_CREDS"], src["MASH_SERVER"], endpointPart(src, 0), filepath.Dir(src["MASH_CREDS"]))
 	out := map[string]string{"MASH_ENDPOINT": endpointPart(src, 0) + "." + testGroup + "." + name, "MASH_SERVER": src["MASH_SERVER"],
 		"MASH_CREDS": src["MASH_CREDS"], "MASH_SPOOL_FROM_START": "1", "XDG_STATE_HOME": sc.state,
-		"MASH_INSECURE_PLAINTEXT": "1"} // REQ-014: these tests are not about TLS; the override is explicit
+		"MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION": "1"} // REQ-014: these tests are not about TLS; the override is explicit
 	for k, v := range extra {
 		out[k] = v
 	}
@@ -900,7 +900,7 @@ func TestLiveStrangerL3MinimalEnvironment(t *testing.T) {
 	ls.info(t, id, "no mash on PATH: MCP server state (init message)", "%s", strings.Join(st.mcp, ", "))
 	logb, _ := os.ReadFile(filepath.Join(sc.home, ".local", "state", "mash", "hook.log"))
 	hl := string(logb)
-	ls.check(t, id, "no mash on PATH: hook.log says so", strings.Contains(hl, "no binary found") || strings.Contains(hl, "not found"), "hook.log (%d bytes): %s", len(logb), firstLines(hl, 3))
+	ls.check(t, id, "no mash on PATH: hook.log says so", strings.Contains(hl, "is not installed") || strings.Contains(hl, "not found"), "hook.log (%d bytes): %s", len(logb), firstLines(hl, 3))
 
 	ls.info(t, id, "a failed plugin MCP server is cached per config dir", "%s", "a failed plugin MCP server is cached per config dir for ~15 min")
 	if sc.inPlace {

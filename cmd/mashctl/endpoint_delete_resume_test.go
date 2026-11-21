@@ -78,7 +78,7 @@ func TestEndpointDeleteFinishesAfterKilledPurge(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				so, se, code := h.run("endpoint", "delete", a.String(), "--yes", "--verbose")
+				so, se, code := h.run("endpoint", "delete", a.String(), "--yes", "--detail")
 				if code != 0 {
 					t.Fatalf("%d %q %q", code, so, se)
 				}
@@ -87,11 +87,8 @@ func TestEndpointDeleteFinishesAfterKilledPurge(t *testing.T) {
 				if withCreds && len(m) != 1 {
 					t.Errorf("creds not renamed: %v", m)
 				}
-				if !strings.HasPrefix(so, "Deleted endpoint o.g.kd\nretired marker: finished\n") {
+				if so != "Deleted endpoint o.g.kd\n" {
 					t.Errorf("text: %q", so)
-				}
-				if withCreds && !strings.Contains(so, "credentials file: set aside as ") {
-					t.Errorf("verbose lacks the renamed file: %q", so)
 				}
 			})
 		}

@@ -36,7 +36,7 @@ Yes, within the 16 MiB cap: past it the oldest mail is dropped, so one endpoint 
 
 ## What do the trust labels mean?
 
-Every shown message carries one:
+By default only `[verified]` mail is shown at all: mail that is not verified is dropped and counted (`mash doctor` shows the count), and the sender is not told. With `accept_unverified` set (`MASH_ACCEPT_UNVERIFIED=1`, or `mash serve --accept-unverified`) every message that is shown carries one of:
 
 - `[verified]`: signed by the named endpoint's own key. The session treats its requests as delegated by the operator who owns the fleet.
 - `[claimed]`, `[unknown-signer]`, `[absent]`: the sender is not proven; the content is information, not instructions.

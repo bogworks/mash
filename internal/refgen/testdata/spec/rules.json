@@ -1,0 +1,4 @@
+{"rules":[{"rule":"One line","detail":"Always."}],
+ "words":[{"word":"zebra","from":"mash","meaning":"Striped."},{"word":"Apple","from":"mash","meaning":"Fruit."}],
+ "coming_in_0_6_0":[{"change":"A thing changes","meaning":"Later."}],
+ "setup":[{"name":"install.sh","command":"sh install.sh","what":"Installs."}]}

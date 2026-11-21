@@ -41,7 +41,7 @@ var helpFrame = cmdcore.Frame{Tool: "mash", Globals: []cmdcore.HelpOption{
 	{Flag: "--server", Value: "url", Desc: "The server address. May be given more than once."},
 	{Flag: "--ca", Value: "path", Desc: "The certificate authority's certificate, when the server uses its own."},
 	{Flag: "--config-dir", Value: "path", Desc: "The configuration folder. Default: ~/.config/mash."},
-	{Flag: "--verbose", Short: "-v", Desc: "After the usual output, print more about what was done, as 'label: value' lines."},
+	{Flag: cliframe.DetailFlag, Desc: "Print the fuller answer: after the usual line, more as 'label: value' lines; with --json, the fuller object."},
 	{Flag: "--json", Desc: "Print the result as JSON: the same object the matching MCP tool returns."},
 	{Flag: "--no-color", Desc: "Never use color. Color is used only on a terminal, and NO_COLOR is honored."},
 	{Flag: "--help", Short: "-h", Desc: "Show help for the command."},
@@ -78,7 +78,12 @@ func shortCommit(c string) string {
 type buildVersion struct{ pluginRoot string }
 
 func (b buildVersion) Version() (version, commit, plugin string) {
-	return endpoint.CurrentVersion(), shortCommit(endpoint.CurrentCommit()), pluginVersion(b.pluginRoot)
+	// the whole revision: --json and the tool carry it; the text form shortens it (cmds.VersionResult.Text)
+	commit = endpoint.CurrentCommit()
+	if commit == "" {
+		commit = "unknown"
+	}
+	return endpoint.CurrentVersion(), commit, pluginVersion(b.pluginRoot)
 }
 
 // sendOn sends as ep: the checks the send tool and the command line share (the numbers name messages of ep's own
@@ -119,9 +124,19 @@ func checkSend(o cmds.SendOptions) *cliframe.Error {
 func openFailure(cfg config.Config, err error) error {
 	switch {
 	case endpoint.IsAuthFailure(err):
-		return &cmds.SignInError{Addr: cfg.DisplayName()}
+		return framed(cfg.DisplayName(), err)
 	case transient(err) || strings.Contains(err.Error(), "no servers available"):
 		return cmdcore.ServerNotAnswering(config.RedactURL(cfg.URL))
+	}
+	return err
+}
+
+// framed words err the way the rules do when it is a refused sign-in: error ADDRESS cannot sign in, hint mash doctor.
+// It is the one helper every command and tool that talks to the server uses (open, read, inbox, who, send); any other
+// error is returned as it is. addr is the endpoint's own address.
+func framed(addr string, err error) error {
+	if err != nil && endpoint.IsAuthFailure(err) {
+		return cmdcore.NotSignedIn(addr)
 	}
 	return err
 }
@@ -283,6 +298,10 @@ func messageOn(ctx context.Context, ep *endpoint.Endpoint, number int) (cmds.Rea
 	var nm *endpoint.NoMessageError
 	if errors.As(err, &nm) {
 		return cmds.ReadView{Endpoint: ep.Display()}, nil
+	}
+	var rf *endpoint.RefusedMessageError
+	if errors.As(err, &rf) {
+		return cmds.ReadView{}, cmdcore.RefusedMessage(int(rf.Seq))
 	}
 	if err != nil {
 		return cmds.ReadView{}, plainFail(err)

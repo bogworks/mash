@@ -22,7 +22,7 @@ Everyday:
   mash status                                  Say in one line whether mail
                                                works for this endpoint, and
                                                whether it is online.
-  mash doctor                                  Check everything mail depends on
+  mash doctor [options]                        Check everything mail depends on
                                                for this endpoint, and say how to
                                                fix what is wrong. Changes
                                                nothing.
@@ -40,9 +40,6 @@ Integration:
                                                (started by the plugin)
   mash hook                                    The plugin's hook: shows the
                                                session its spooled mail
-  mash plugin export <dir>                     Write this build's Claude Code
-                                               plugin and a marketplace for it
-                                               into <dir>
 
 Raw SAP:
   mash prompt <to> <text...>                   A live, signed SAP prompt; prints

@@ -2,11 +2,23 @@ package main
 
 import (
 	"bytes"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
+	"errors"
+	"fmt"
+	"io/fs"
+	"math/big"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nkeys"
@@ -175,11 +187,44 @@ func TestJoinMatchesSpec(t *testing.T) {
 			t.Error("creds were written into another mesh's folder")
 		}
 	})
+	do("This folder trusts a different certificate authority", func(w *joinWorld, c specCase) {
+		if r := w.run("join", "acme.demo.bob.join"); r.code != 0 {
+			t.Fatal(r)
+		}
+		m := newJoinMaterial(t, "acme.demo.carol")
+		ca := genCA(t, "Other CA")
+		writeJoin(t, "acme.demo.bob.join", joinfile.File{MashJoin: 1, Address: "acme.demo.carol", Servers: []string{"tls://myserver:4222"}, CA: &ca, Creds: string(m.creds)})
+		c.check(t, w.run("join", "acme.demo.bob.join"))
+	})
+	do("The join file can be read by others", func(w *joinWorld, c specCase) {
+		if err := os.Chmod("acme.demo.bob.join", 0o644); err != nil {
+			t.Fatal(err)
+		}
+		c.check(t, w.run("join", "acme.demo.bob.join"))
+		if _, err := os.Stat(w.cfg); err == nil {
+			t.Error("the configuration folder was made")
+		}
+	})
+	do("The join file is not a plain file of your own", func(w *joinWorld, c specCase) {
+		if err := os.Rename("acme.demo.bob.join", "real.join"); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink("real.join", "acme.demo.bob.join"); err != nil {
+			t.Fatal(err)
+		}
+		c.check(t, w.run("join", "acme.demo.bob.join"))
+		if _, err := os.Stat(w.cfg); err == nil {
+			t.Error("the configuration folder was made")
+		}
+	})
 	do("With --dry-run", func(w *joinWorld, c specCase) {
 		c.check(t, w.run("join", "acme.demo.bob.join", "--dry-run"))
 		if _, err := os.Stat(w.cfg); err == nil {
 			t.Error("--dry-run made the configuration folder")
 		}
+	})
+	do("With --detail", func(w *joinWorld, c specCase) {
+		c.check(t, w.run("join", "acme.demo.bob.join", "--detail"))
 	})
 	do("The join file needs your seed", func(w *joinWorld, c specCase) {
 		writeJoin(t, "acme.demo.bob.join", joinfile.File{MashJoin: 1, Address: "acme.demo.bob", Servers: []string{"tls://myserver:4222"}, UserJWT: w.m.token})
@@ -187,6 +232,31 @@ func TestJoinMatchesSpec(t *testing.T) {
 		if _, err := os.Stat(w.cfg); err == nil {
 			t.Error("the configuration folder was made")
 		}
+	})
+	do("The folder cannot be written", func(w *joinWorld, c specCase) {
+		if os.Geteuid() == 0 {
+			t.Skip("root can write into a read-only folder")
+		}
+		os.MkdirAll(w.cfg, 0o700)
+		if err := os.Chmod(w.cfg, 0o500); err != nil {
+			t.Fatal(err)
+		}
+		defer os.Chmod(w.cfg, 0o700)
+		c.check(t, w.run("join", "acme.demo.bob.join"))
+	})
+	do("Could not finish and could not undo", func(w *joinWorld, c specCase) {
+		// A --replace run never has a later step that can fail, so the rollback is driven directly: the backup of the old
+		// creds cannot be put back, and the message is the one the run would print.
+		creds := w.credsFile()
+		backup := filepath.Join(w.cfg, ".join-backup-x")
+		os.MkdirAll(w.cfg, 0o700)
+		os.WriteFile(creds, []byte("new"), 0o600)
+		os.WriteFile(backup, []byte("old"), 0o600)
+		failJoinSteps(t, "acme.demo.bob.creds", "")
+		left, kept := joinUndo(nil, backup, creds)
+		e := joinSvc{home: w.home}.undoFailure(left, kept)
+		got := ran{code: e.Code, errs: "error: " + e.Msg + "\nhint: " + e.Hint + "\n"}
+		c.check(t, got)
 	})
 	for name := range cases {
 		if !seen[name] {
@@ -275,13 +345,14 @@ func TestJoinThenTheEndpointIsInstalled(t *testing.T) {
 
 func TestJoinJSON(t *testing.T) {
 	w := newJoinWorld(t)
+	// the usual --json is the address and nothing else
 	r := w.run("join", "acme.demo.bob.join", "--json", "--dry-run")
-	want := `{"endpoint":"acme.demo.bob","servers":["tls://myserver:4222"],"creds":"~/.config/mash/acme.demo.bob.creds","dry_run":true}` + "\n"
+	want := `{"endpoint":"acme.demo.bob","dry_run":true}` + "\n"
 	if r.code != 0 || r.out != want || r.errs != "" {
 		t.Errorf("--dry-run --json: %+v", r)
 	}
 	r = w.run("join", "acme.demo.bob.join", "--json")
-	want = `{"endpoint":"acme.demo.bob","servers":["tls://myserver:4222"],"creds":"~/.config/mash/acme.demo.bob.creds"}` + "\n"
+	want = `{"endpoint":"acme.demo.bob"}` + "\n"
 	if r.code != 0 || r.out != want || r.errs != "" {
 		t.Errorf("--json: %+v", r)
 	}
@@ -290,9 +361,18 @@ func TestJoinJSON(t *testing.T) {
 	if r.code != 1 || r.errs != "" || r.out != `{"error":"acme.demo.bob is already installed here","hint":"mash join acme.demo.bob.join --replace"}`+"\n" {
 		t.Errorf("--json failure: %+v", r)
 	}
-	// a path outside the home folder is shown as it is
+}
+
+func TestJoinDetailJSON(t *testing.T) {
+	w := newJoinWorld(t)
+	// --detail --json adds the servers and the creds file's absolute path, not abbreviated with ~
+	r := w.run("join", "acme.demo.bob.join", "--detail", "--json")
+	want := `{"endpoint":"acme.demo.bob","servers":["tls://myserver:4222"],"creds":"` + filepath.Join(w.cfg, "acme.demo.bob.creds") + `"}` + "\n"
+	if r.code != 0 || r.out != want || r.errs != "" || !filepath.IsAbs(w.cfg) {
+		t.Errorf("--detail --json: %+v\nwant %s", r, want)
+	}
 	other := t.TempDir()
-	r = w.run("join", "acme.demo.bob.join", "--json", "--config-dir", other)
+	r = w.run("join", "acme.demo.bob.join", "--detail", "--json", "--config-dir", other)
 	if !strings.Contains(r.out, `"creds":"`+filepath.Join(other, "acme.demo.bob.creds")+`"`) {
 		t.Errorf("creds outside home: %+v", r)
 	}
@@ -300,8 +380,8 @@ func TestJoinJSON(t *testing.T) {
 
 func TestJoinVerbose(t *testing.T) {
 	w := newJoinWorld(t)
-	r := w.run("join", "acme.demo.bob.join", "--verbose")
-	if r.code != 0 || r.out != "Joined as acme.demo.bob.\nservers: tls://myserver:4222\ncreds: ~/.config/mash/acme.demo.bob.creds\n" {
+	r := w.run("join", "acme.demo.bob.join", "--detail")
+	if r.code != 0 || r.out != "Joined as acme.demo.bob.\nservers: tls://myserver:4222\ncreds:   ~/.config/mash/acme.demo.bob.creds\n" {
 		t.Errorf("%+v", r)
 	}
 }
@@ -375,9 +455,10 @@ func TestJoinSecondEndpointOfTheSameMesh(t *testing.T) {
 	}
 	// a join file for another mesh is refused and changes nothing
 	before := treeSnapshot(t, w.cfg)
-	writeJoin(t, "dave.join", joinfile.File{MashJoin: 1, Address: "acme.demo.dave", Servers: []string{"tls://elsewhere:4222"}, Creds: string(m.creds)})
+	dave := newJoinMaterial(t, "acme.demo.dave")
+	writeJoin(t, "dave.join", joinfile.File{MashJoin: 1, Address: "acme.demo.dave", Servers: []string{"tls://elsewhere:4222"}, Creds: string(dave.creds)})
 	r := w.run("join", "dave.join")
-	if r.code != 1 || r.out != "" || r.errs != "error: this configuration folder is set up for tls://myserver:4222\nhint: mash join dave.join --config-dir <another folder>\n" {
+	if r.code != 1 || r.out != "" || !strings.HasSuffix(r.errs, " was set up with a different server;\n       nothing was changed\nhint: mash join dave.join --config-dir <another folder>\n") {
 		t.Errorf("another mesh: %+v", r)
 	}
 	if after := treeSnapshot(t, w.cfg); after != before {
@@ -498,8 +579,8 @@ func TestJoinNeverPrintsSecrets(t *testing.T) {
 		{"join", "acme.demo.bob.join"},
 		{"join", "acme.demo.bob.join"},
 		{"join", "acme.demo.bob.join", "--json", "--replace"},
-		{"join", "acme.demo.bob.join", "--verbose", "--replace"},
-		{"join", "acme.demo.bob.join", "--dry-run", "--verbose", "--json"},
+		{"join", "acme.demo.bob.join", "--detail", "--replace"},
+		{"join", "acme.demo.bob.join", "--dry-run", "--detail", "--json"},
 		{"join", "acme.demo.bob.join", "--help"},
 	} {
 		r := w.run(args...)
@@ -535,20 +616,29 @@ func TestJoinFailedWriteLeavesNoPartialState(t *testing.T) {
 	}
 }
 
-func TestJoinCARotationNeedsReplace(t *testing.T) {
+func TestJoinDifferentCAIsRefusedEvenWithReplace(t *testing.T) {
 	w := newJoinWorld(t)
 	if r := w.run("join", "acme.demo.bob.join"); r.code != 0 {
 		t.Fatal(r)
 	}
 	m := newJoinMaterial(t, "acme.demo.carol")
-	ca := strings.Replace(testCAPEM, "MIIBhTCC", "MIIBhTCD", 1)
+	ca := genCA(t, "Rotated CA")
 	writeJoin(t, "carol.join", joinfile.File{MashJoin: 1, Address: "acme.demo.carol", Servers: []string{"tls://myserver:4222"}, CA: &ca, Creds: string(m.creds)})
 	r := w.run("join", "carol.join")
-	if r.code != 1 || !strings.Contains(r.errs, "is a different certificate authority") || !strings.HasSuffix(r.errs, "hint: mash join carol.join --replace\n") {
+	if r.code != 1 || !strings.Contains(r.errs, " was set up with a different ca;\n") || !strings.HasSuffix(r.errs, "hint: mash join carol.join --config-dir <another folder>\n") {
 		t.Errorf("%+v", r)
 	}
+	if r := w.run("join", "carol.join", "--replace"); r.code != 1 || !strings.Contains(r.errs, " was set up with a different ca;") {
+		t.Errorf("--replace: %+v", r)
+	}
 	if got, _ := os.ReadFile(filepath.Join(w.cfg, "ca.pem")); string(got) != testCAPEM {
-		t.Error("ca.pem was replaced without --replace")
+		t.Error("ca.pem was replaced")
+	}
+	// a join file with no certificate authority, where the folder has one, is refused too
+	dm := newJoinMaterial(t, "acme.demo.dan")
+	writeJoin(t, "dan.join", joinfile.File{MashJoin: 1, Address: "acme.demo.dan", Servers: []string{"tls://myserver:4222"}, Creds: string(dm.creds)})
+	if r := w.run("join", "dan.join"); r.code != 1 || !strings.Contains(r.errs, " was set up with a different ca;") {
+		t.Errorf("no ca: %+v", r)
 	}
 }
 
@@ -594,5 +684,541 @@ func TestJoinHelp(t *testing.T) {
 	}
 	if h := w.run("help", "join"); h != r {
 		t.Errorf("mash help join differs from mash join --help")
+	}
+}
+
+// join compares a join file's certificate authority with the one the folder is configured with, which config.json's "ca"
+// may name as a file other than ca.pem.
+func TestJoinComparesWithTheConfiguredCA(t *testing.T) {
+	w := newJoinWorld(t)
+	if err := os.MkdirAll(w.cfg, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(w.cfg, "mesh-ca.pem"), []byte(testCAPEM), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(w.cfg, "config.json"), []byte(`{"servers":["tls://myserver:4222"],"ca":"mesh-ca.pem"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// the same certificate authority: joined, and no second copy is written
+	if r := w.run("join", "acme.demo.bob.join"); r.code != 0 {
+		t.Fatalf("same ca: %+v", r)
+	}
+	if _, err := os.Stat(filepath.Join(w.cfg, "ca.pem")); err == nil {
+		t.Error("a ca.pem was written beside the configured file")
+	}
+	m := newJoinMaterial(t, "acme.demo.carol")
+	other := genCA(t, "Other CA")
+	writeJoin(t, "carol.join", joinfile.File{MashJoin: 1, Address: "acme.demo.carol", Servers: []string{"tls://myserver:4222"}, CA: &other, Creds: string(m.creds)})
+	for _, args := range [][]string{{"join", "carol.join"}, {"join", "carol.join", "--replace"}} {
+		if r := w.run(args...); r.code != 1 || !strings.Contains(r.errs, " was set up with a different ca;") {
+			t.Errorf("%v: %+v", args, r)
+		}
+	}
+	dm := newJoinMaterial(t, "acme.demo.dan")
+	writeJoin(t, "dan.join", joinfile.File{MashJoin: 1, Address: "acme.demo.dan", Servers: []string{"tls://myserver:4222"}, Creds: string(dm.creds)})
+	if r := w.run("join", "dan.join"); r.code != 1 || !strings.Contains(r.errs, " was set up with a different ca;") {
+		t.Errorf("no ca: %+v", r)
+	}
+	if got, _ := os.ReadFile(filepath.Join(w.cfg, "mesh-ca.pem")); string(got) != testCAPEM {
+		t.Error("the configured ca file was replaced")
+	}
+}
+
+// A folder that has no certificate authority and already holds an endpoint refuses a join file that brings one; the
+// first join into an empty folder sets it.
+func TestJoinCARefusedWhereTheFolderHasNoneAndAnEndpoint(t *testing.T) {
+	w := newJoinWorld(t)
+	m := newJoinMaterial(t, "acme.demo.carol")
+	writeJoin(t, "carol.join", joinfile.File{MashJoin: 1, Address: "acme.demo.carol", Servers: []string{"tls://myserver:4222"}, Creds: string(m.creds)})
+	if r := w.run("join", "carol.join"); r.code != 0 { // no ca into an empty folder
+		t.Fatalf("carol: %+v", r)
+	}
+	for _, args := range [][]string{{"join", "acme.demo.bob.join"}, {"join", "acme.demo.bob.join", "--replace"}} {
+		r := w.run(args...)
+		if r.code != 1 || !strings.Contains(r.errs, " was set up with a different ca;\n       nothing was changed\n") {
+			t.Errorf("%v: %+v", args, r)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(w.cfg, "ca.pem")); err == nil {
+		t.Error("ca.pem was written into a folder that holds an endpoint")
+	}
+}
+
+// genCA is a new self-signed certificate authority, as PEM.
+func genCA(t *testing.T, cn string) string {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serial, _ := rand.Int(rand.Reader, big.NewInt(1<<62))
+	tpl := &x509.Certificate{SerialNumber: serial, Subject: pkix.Name{CommonName: cn}, NotBefore: time.Now().Add(-time.Hour),
+		NotAfter: time.Now().Add(time.Hour), IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign}
+	der, err := x509.CreateCertificate(rand.Reader, tpl, tpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
+}
+
+// genKeyPEM is a private key block, which must never be installed as a CA.
+func genKeyPEM(t *testing.T) string {
+	t.Helper()
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	der, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: der}))
+}
+
+func (w *joinWorld) joinFor(file string, m joinMaterial, address string, ca *string) {
+	w.t.Helper()
+	writeJoin(w.t, file, joinfile.File{MashJoin: 1, Address: address, Servers: []string{"tls://myserver:4222"}, CA: ca, Creds: string(m.creds)})
+}
+
+// A join file as mashctl writes it (the shared joinfile package, mode 0600) installs, and the certificate is kept as
+// ca.pem, which x509 parses and config.json names.
+func TestJoinRoundTripFromTheSharedWriter(t *testing.T) {
+	w := newJoinWorld(t)
+	ca := genCA(t, "Round Trip CA")
+	data, err := joinfile.File{MashJoin: joinfile.Format, Address: "acme.demo.bob", Servers: []string{"tls://myserver:4222"}, CA: &ca, Creds: string(w.m.creds)}.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile("rt.join", data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if r := w.run("join", "rt.join"); r.code != 0 || r.out != "Joined as acme.demo.bob.\n" {
+		t.Fatal(r)
+	}
+	raw, err := os.ReadFile(filepath.Join(w.cfg, "ca.pem"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	blk, rest := pem.Decode(raw)
+	if blk == nil || len(bytes.TrimSpace(rest)) != 0 {
+		t.Fatalf("ca.pem: %q", raw)
+	}
+	cert, err := x509.ParseCertificate(blk.Bytes)
+	if err != nil || cert.Subject.CommonName != "Round Trip CA" {
+		t.Errorf("ca.pem certificate: %v, %v", cert, err)
+	}
+	if w.configJSON()["ca"] != "ca.pem" {
+		t.Errorf("config.json: %v", w.configJSON())
+	}
+	if got, _ := os.ReadFile(w.credsFile()); !bytes.Equal(got, w.m.creds) {
+		t.Error("creds differ")
+	}
+	// the test CA of the other tests is a certificate x509 reads too
+	if blk, _ := pem.Decode([]byte(testCAPEM)); blk == nil {
+		t.Fatal("testCAPEM")
+	} else if _, err := x509.ParseCertificate(blk.Bytes); err != nil {
+		t.Errorf("testCAPEM: %v", err)
+	}
+}
+
+// A CA that is anything but certificates is refused before any file is written.
+func TestJoinRefusesACAThatIsNotOnlyCertificates(t *testing.T) {
+	good := genCA(t, "Good CA")
+	for name, ca := range map[string]string{
+		"private key appended": good + genKeyPEM(t),
+		"key first":            genKeyPEM(t) + good,
+		"garbage":              "this is not a certificate\n",
+		"trailing garbage":     good + "trailing text\n",
+		"leading garbage":      "junk\n" + good,
+		"garbage between":      good + "junk\n" + good,
+		"bad certificate":      strings.Replace(good, "MII", "MIJ", 1),
+		"empty":                "",
+		"header":               strings.Replace(good, "-----BEGIN CERTIFICATE-----\n", "-----BEGIN CERTIFICATE-----\nProc-Type: 4,ENCRYPTED\n\n", 1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			w := newJoinWorld(t)
+			w.joinFor("bad.join", w.m, "acme.demo.bob", &ca)
+			r := w.run("join", "bad.join")
+			if r.code != 1 || r.out != "" || r.errs != "error: bad.join is not a join file this mash can read\n" {
+				t.Errorf("%+v", r)
+			}
+			if _, err := os.Stat(w.cfg); err == nil {
+				t.Error("a refused join made the configuration folder")
+			}
+		})
+	}
+}
+
+// The JWT's name is the endpoint it was issued for; a join file whose address differs is refused before anything is
+// written. The specification has no case for it, so it is the invalid-join-file error.
+func TestJoinRefusesACredsNameThatIsNotTheAddress(t *testing.T) {
+	w := newJoinWorld(t)
+	other := newJoinMaterial(t, "acme.demo.carol")
+	w.joinFor("mix.join", other, "acme.demo.bob", nil)
+	writeJoin(t, "mixjwt.join", joinfile.File{MashJoin: 1, Address: "acme.demo.bob", Servers: []string{"tls://myserver:4222"}, UserJWT: other.token})
+	os.WriteFile("carol.seed", other.seed, 0o600)
+	for _, args := range [][]string{{"join", "mix.join"}, {"join", "mixjwt.join", "--key", "carol.seed"}} {
+		r := w.run(args...)
+		if r.code != 1 || r.out != "" || r.errs != "error: "+args[1]+" is not a join file this mash can read\n" {
+			t.Errorf("%v: %+v", args, r)
+		}
+	}
+	if _, err := os.Stat(w.cfg); err == nil {
+		t.Error("a refused join made the configuration folder")
+	}
+}
+
+// A creds file that is a symlink in the folder is not written through: refused without --replace, and replaced (the link,
+// not its target) with it.
+func TestJoinOverACredsSymlink(t *testing.T) {
+	w := newJoinWorld(t)
+	os.MkdirAll(w.cfg, 0o700)
+	w.joinFor("acme.demo.bob.join", w.m, "acme.demo.bob", nil) // the folder holds creds and no ca.pem: no CA may come in
+	target := filepath.Join(w.home, "elsewhere.creds")
+	os.WriteFile(target, []byte("precious\n"), 0o600)
+	if err := os.Symlink(target, w.credsFile()); err != nil {
+		t.Fatal(err)
+	}
+	before := treeSnapshot(t, w.cfg)
+	r := w.run("join", "acme.demo.bob.join")
+	if r.code != 1 || r.errs != "error: acme.demo.bob is already installed here\nhint: mash join acme.demo.bob.join --replace\n" {
+		t.Errorf("%+v", r)
+	}
+	if treeSnapshot(t, w.cfg) != before {
+		t.Error("a refused join changed the folder")
+	}
+	if r := w.run("join", "acme.demo.bob.join", "--replace"); r.code != 0 {
+		t.Fatal(r)
+	}
+	if st, err := os.Lstat(w.credsFile()); err != nil || st.Mode()&os.ModeSymlink != 0 || st.Mode().Perm() != 0o600 {
+		t.Errorf("creds after --replace: %v, %v", st, err)
+	}
+	if got, _ := os.ReadFile(target); string(got) != "precious\n" {
+		t.Errorf("the symlink's target was written: %q", got)
+	}
+}
+
+// A different CA, or none where the folder has one, is refused with and without --replace, and changes nothing.
+func TestJoinRefusesAnotherCAWithOrWithoutReplace(t *testing.T) {
+	want := "error: ~/.config/mash was set up with a different ca;\n       nothing was changed\nhint: mash join %s --config-dir <another folder>\n"
+	for _, replace := range []bool{false, true} {
+		w := newJoinWorld(t)
+		if r := w.run("join", "acme.demo.bob.join"); r.code != 0 {
+			t.Fatal(r)
+		}
+		fresh := newJoinMaterial(t, "acme.demo.bob")
+		other := genCA(t, "Other CA")
+		w.joinFor("other.join", fresh, "acme.demo.bob", &other)
+		w.joinFor("none.join", fresh, "acme.demo.bob", nil)
+		for _, f := range []string{"other.join", "none.join"} {
+			before := treeSnapshot(t, w.cfg)
+			args := []string{"join", f}
+			if replace {
+				args = append(args, "--replace")
+			}
+			r := w.run(args...)
+			if r.code != 1 || r.out != "" || r.errs != fmt.Sprintf(want, f) {
+				t.Errorf("%v: %+v", args, r)
+			}
+			if treeSnapshot(t, w.cfg) != before {
+				t.Errorf("%v changed the folder", args)
+			}
+		}
+	}
+}
+
+// The folder's CA is the file config.json names, compared by certificate content, not by bytes.
+func TestJoinComparesTheConfiguredCAByContent(t *testing.T) {
+	w := newJoinWorld(t)
+	ca := genCA(t, "Mine")
+	os.MkdirAll(w.cfg, 0o700)
+	os.WriteFile(filepath.Join(w.cfg, "config.json"), []byte(`{"servers":["tls://myserver:4222"],"ca":"mine.pem"}`), 0o600)
+	os.WriteFile(filepath.Join(w.cfg, "mine.pem"), []byte("\n"+strings.ReplaceAll(ca, "\n", "\r\n")+"\n\n"), 0o644)
+	w.joinFor("a.join", w.m, "acme.demo.bob", &ca)
+	if r := w.run("join", "a.join"); r.code != 0 {
+		t.Fatalf("same certificate, other bytes: %+v", r)
+	}
+	if _, err := os.Stat(filepath.Join(w.cfg, "ca.pem")); err == nil {
+		t.Error("ca.pem was written beside the configured CA file")
+	}
+	// a different certificate than the configured file's is refused, though ca.pem would be free
+	other := genCA(t, "Other")
+	carol := newJoinMaterial(t, "acme.demo.carol")
+	w.joinFor("c.join", carol, "acme.demo.carol", &other)
+	r := w.run("join", "c.join")
+	if r.code != 1 || !strings.Contains(r.errs, "was set up with a different ca;") {
+		t.Errorf("%+v", r)
+	}
+	// and none where the folder has one
+	w.joinFor("n.join", carol, "acme.demo.carol", nil)
+	if r := w.run("join", "n.join"); r.code != 1 || !strings.Contains(r.errs, "was set up with a different ca;") {
+		t.Errorf("%+v", r)
+	}
+}
+
+// --replace replaces the creds for the same address and nothing else.
+func TestJoinReplaceChangesOnlyTheCreds(t *testing.T) {
+	w := newJoinWorld(t)
+	if r := w.run("join", "acme.demo.bob.join"); r.code != 0 {
+		t.Fatal(r)
+	}
+	caBefore, _ := os.ReadFile(filepath.Join(w.cfg, "ca.pem"))
+	cfgBefore, _ := os.ReadFile(filepath.Join(w.cfg, "config.json"))
+	fresh := newJoinMaterial(t, "acme.demo.bob")
+	ca := testCAPEM
+	w.joinFor("re.join", fresh, "acme.demo.bob", &ca)
+	if r := w.run("join", "re.join", "--replace"); r.code != 0 || r.out != "Joined as acme.demo.bob.\n" {
+		t.Fatal(r)
+	}
+	if got, _ := os.ReadFile(w.credsFile()); !bytes.Equal(got, fresh.creds) {
+		t.Error("creds were not replaced")
+	}
+	if got, _ := os.ReadFile(filepath.Join(w.cfg, "ca.pem")); !bytes.Equal(got, caBefore) {
+		t.Error("ca.pem changed")
+	}
+	if got, _ := os.ReadFile(filepath.Join(w.cfg, "config.json")); !bytes.Equal(got, cfgBefore) {
+		t.Error("config.json changed")
+	}
+	if ents, _ := os.ReadDir(w.cfg); len(ents) != 3 { // creds, ca.pem, config.json: no temporary or backup left
+		t.Errorf("folder: %v", ents)
+	}
+}
+
+// Joins into one folder run one after the other, and each checks the mesh and the CA under the lock: of two joins that
+// bring different servers or different CAs into an empty folder, exactly one wins.
+func TestJoinConcurrentJoinsOfDifferentMeshesLeaveOne(t *testing.T) {
+	for _, kind := range []string{"server", "ca"} {
+		w := newJoinWorld(t)
+		caA, caB := genCA(t, "A"), genCA(t, "B")
+		m1, m2 := newJoinMaterial(t, "acme.demo.one"), newJoinMaterial(t, "acme.demo.two")
+		serversB := []string{"tls://myserver:4222"}
+		if kind == "server" {
+			serversB = []string{"tls://elsewhere:4222"}
+			caB = caA
+		}
+		writeJoin(t, "one.join", joinfile.File{MashJoin: 1, Address: "acme.demo.one", Servers: []string{"tls://myserver:4222"}, CA: &caA, Creds: string(m1.creds)})
+		writeJoin(t, "two.join", joinfile.File{MashJoin: 1, Address: "acme.demo.two", Servers: serversB, CA: &caB, Creds: string(m2.creds)})
+		var wg sync.WaitGroup
+		codes := make([]int, 2)
+		for i, f := range []string{"one.join", "two.join"} {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				codes[i] = w.run("join", f).code
+			}()
+		}
+		wg.Wait()
+		if codes[0]+codes[1] != 1 {
+			t.Errorf("%s: exit codes %v, want exactly one success", kind, codes)
+		}
+		ents, _ := os.ReadDir(w.cfg)
+		creds := 0
+		for _, e := range ents {
+			if strings.HasSuffix(e.Name(), ".creds") {
+				creds++
+			}
+		}
+		if creds != 1 || len(ents) != 3 {
+			t.Errorf("%s: folder %v", kind, ents)
+		}
+	}
+}
+
+// `mash version --json` carries the whole commit; the text form shows seven.
+func TestVersionJSONCarriesTheWholeCommit(t *testing.T) {
+	full := "3f9a41c2e0b7d5a1c4e08b2d77f3a95e1b6c4098"
+	old := commit // the -ldflags value, which run reads
+	commit = full
+	defer func() { commit = old }()
+	var out, errb bytes.Buffer
+	if code := run([]string{"version", "--json"}, envFrom(nil), strings.NewReader(""), &out, &errb); code != 0 {
+		t.Fatal(code, errb.String())
+	}
+	var o map[string]string
+	if err := json.Unmarshal(out.Bytes(), &o); err != nil || o["commit"] != full || len(o["commit"]) != 40 {
+		t.Errorf("version --json: %q %v", out.String(), err)
+	}
+	out.Reset()
+	if code := run([]string{"version"}, envFrom(nil), strings.NewReader(""), &out, &errb); code != 0 || !strings.HasSuffix(out.String(), " (3f9a41c)\n") {
+		t.Errorf("version: %d %q", code, out.String())
+	}
+}
+
+// failJoinSteps makes the rename or remove fail for the paths that end in the given suffixes, for the test's length.
+func failJoinSteps(t *testing.T, renameSuffix, removeSuffix string) {
+	t.Helper()
+	oldRename, oldRemove := joinRename, joinRemove
+	t.Cleanup(func() { joinRename, joinRemove = oldRename, oldRemove })
+	joinRename = func(from, to string) error {
+		if renameSuffix != "" && strings.HasSuffix(to, renameSuffix) {
+			return &os.LinkError{Op: "rename", Old: from, New: to, Err: errors.New("injected failure")}
+		}
+		return oldRename(from, to)
+	}
+	joinRemove = func(p string) error {
+		if removeSuffix != "" && strings.HasSuffix(p, removeSuffix) {
+			return &os.PathError{Op: "remove", Path: p, Err: errors.New("injected failure")}
+		}
+		return oldRemove(p)
+	}
+}
+
+func TestJoinRollsBackWhenCAOrConfigRenameFails(t *testing.T) {
+	for _, suffix := range []string{"ca.pem", "config.json"} {
+		t.Run(suffix, func(t *testing.T) {
+			w := newJoinWorld(t)
+			failJoinSteps(t, suffix, "")
+			r := w.run("join", "acme.demo.bob.join")
+			if r.code != 1 || !strings.HasPrefix(r.errs, "error: cannot write into ") || !strings.Contains(r.errs, "nothing was installed") {
+				t.Errorf("%+v", r)
+			}
+			if _, err := os.Lstat(w.credsFile()); !errors.Is(err, fs.ErrNotExist) {
+				t.Errorf("creds were left installed: %v", err)
+			}
+			if ents, _ := os.ReadDir(w.cfg); len(ents) != 0 {
+				t.Errorf("left behind: %v", ents)
+			}
+		})
+	}
+}
+
+// Surrounding white space and several certificates are fine.
+func TestJoinAcceptsPaddedAndMultipleCertificates(t *testing.T) {
+	a, b := genCA(t, "A CA"), genCA(t, "B CA")
+	for name, ca := range map[string]string{"padded": "\n \t\r\n" + a + "\n\n  ", "two": a + "\n" + b} {
+		t.Run(name, func(t *testing.T) {
+			w := newJoinWorld(t)
+			w.joinFor("ok.join", w.m, "acme.demo.bob", &ca)
+			if r := w.run("join", "ok.join"); r.code != 0 {
+				t.Errorf("%+v", r)
+			}
+		})
+	}
+}
+
+func TestJoinNamesWhatARollbackCouldNotUndo(t *testing.T) {
+	w := newJoinWorld(t)
+	failJoinSteps(t, "config.json", "acme.demo.bob.creds")
+	r := w.run("join", "acme.demo.bob.join")
+	if r.code != 1 || !strings.HasPrefix(r.errs, "error: could not finish and could not undo: ") || !strings.Contains(r.errs, "~/.config/mash/acme.demo.bob.creds left") {
+		t.Errorf("%+v", r)
+	}
+	if strings.Contains(r.errs, "old creds kept") {
+		t.Errorf("no backup exists, yet: %q", r.errs)
+	}
+	if strings.Contains(r.errs, "BEGIN") || strings.Contains(r.errs, string(w.m.seed)) {
+		t.Errorf("secret on stderr: %q", r.errs)
+	}
+	if _, err := os.Lstat(w.credsFile()); err != nil {
+		t.Errorf("the creds could not be removed and must still be there: %v", err)
+	}
+	for _, name := range []string{"config.json", "ca.pem"} {
+		if _, err := os.Lstat(filepath.Join(w.cfg, name)); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("%s was left: %v", name, err)
+		}
+	}
+}
+
+func TestJoinUndoKeepsTheOldCredsAsDotOld(t *testing.T) {
+	setup := func(t *testing.T) (w *joinWorld, creds, backup string) {
+		w = newJoinWorld(t)
+		creds = w.credsFile()
+		backup = filepath.Join(w.cfg, ".join-backup-x")
+		os.MkdirAll(w.cfg, 0o700)
+		os.WriteFile(creds, []byte("NEW"), 0o600)
+		os.WriteFile(backup, []byte("OLD"), 0o600)
+		failJoinSteps(t, "acme.demo.bob.creds", "")
+		return
+	}
+	read := func(p string) string { b, _ := os.ReadFile(p); return string(b) }
+	t.Run("renamed to .old", func(t *testing.T) {
+		w, creds, backup := setup(t)
+		left, kept := joinUndo(nil, backup, creds)
+		if len(left) != 1 || left[0] != creds || kept != creds+".old" {
+			t.Fatalf("left %v, kept %q", left, kept)
+		}
+		if read(kept) != "OLD" || read(creds) != "NEW" {
+			t.Errorf(".old %q, creds %q", read(kept), read(creds))
+		}
+		if _, err := os.Lstat(backup); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("the backup name is still there: %v", err)
+		}
+		msg := joinSvc{home: w.home}.undoFailure(left, kept).Msg
+		if strings.Contains(msg, "OLD") || strings.Contains(msg, "NEW") || !strings.Contains(msg, "~/.config/mash/acme.demo.bob.creds left; old creds kept at ~/.config/mash/acme.demo.bob.creds.old") {
+			t.Errorf("%q", msg)
+		}
+	})
+	t.Run("an existing .old is never overwritten", func(t *testing.T) {
+		w, creds, backup := setup(t)
+		os.WriteFile(creds+".old", []byte("EARLIER"), 0o600)
+		left, kept := joinUndo(nil, backup, creds)
+		if len(left) != 1 || kept != backup {
+			t.Fatalf("left %v, kept %q", left, kept)
+		}
+		if read(creds+".old") != "EARLIER" || read(backup) != "OLD" {
+			t.Errorf(".old %q, backup %q", read(creds+".old"), read(backup))
+		}
+		msg := joinSvc{home: w.home}.undoFailure(left, kept).Msg
+		if !strings.Contains(msg, "old creds kept at ~/.config/mash/.join-backup-x") || strings.Contains(msg, "OLD") {
+			t.Errorf("%q", msg)
+		}
+	})
+	t.Run("several leftovers", func(t *testing.T) {
+		w := newJoinWorld(t)
+		msg := joinSvc{home: w.home}.undoFailure([]string{filepath.Join(w.cfg, "ca.pem"), w.credsFile()}, "").Msg
+		if msg != "could not finish and could not undo: ~/.config/mash/ca.pem, ~/.config/mash/acme.demo.bob.creds left" {
+			t.Errorf("%q", msg)
+		}
+	})
+}
+
+// --replace over a creds path that is not an installed endpoint (a symlink) is a first-style join: the creds path is
+// replaced, never written through, and ca.pem and config.json are written.
+func TestJoinReplaceOverANonEndpointWritesCAAndConfig(t *testing.T) {
+	w := newJoinWorld(t)
+	os.MkdirAll(w.cfg, 0o700)
+	target := filepath.Join(w.home, "elsewhere.creds")
+	os.WriteFile(target, []byte("precious\n"), 0o600)
+	if err := os.Symlink(target, w.credsFile()); err != nil {
+		t.Fatal(err)
+	}
+	if r := w.run("join", "acme.demo.bob.join", "--replace"); r.code != 0 {
+		t.Fatal(r)
+	}
+	if st, err := os.Lstat(w.credsFile()); err != nil || !st.Mode().IsRegular() || st.Mode().Perm() != 0o600 {
+		t.Errorf("creds: %v, %v", st, err)
+	}
+	if got, _ := os.ReadFile(target); string(got) != "precious\n" {
+		t.Errorf("target written: %q", got)
+	}
+	for _, f := range []string{"ca.pem", "config.json"} {
+		if _, err := os.Stat(filepath.Join(w.cfg, f)); err != nil {
+			t.Errorf("%s: %v", f, err)
+		}
+	}
+}
+
+// A seed hidden in a creds value that a later duplicate key overwrites, or a second object after the first, is not a
+// join file, whatever its mode: it is refused as malformed and nothing is installed.
+func TestJoinRefusesDuplicateKeysAndTrailingObjects(t *testing.T) {
+	w := newJoinWorld(t)
+	secret := string(w.m.seed)
+	seeded, _ := json.Marshal(string(w.m.creds))
+	head := `{"mash_join":1,"address":"acme.demo.bob","servers":["tls://myserver:4222"],`
+	for name, body := range map[string]string{
+		"duplicate creds": head + `"creds":` + string(seeded) + `,"creds":"x"}` + "\n",
+		"trailing object": head + `"creds":` + string(seeded) + "}\n{}",
+	} {
+		if err := os.WriteFile("dup.join", []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod("dup.join", 0o644); err != nil {
+			t.Fatal(err)
+		}
+		r := w.run("join", "dup.join")
+		if r.code != 1 || r.out != "" || !strings.HasPrefix(r.errs, "error: dup.join is ") || strings.Count(r.errs, "\n") != 1 || strings.Contains(r.errs, secret) {
+			t.Errorf("%s: %+v", name, r)
+		}
+	}
+	if _, err := os.Stat(w.cfg); err == nil {
+		t.Error("a refused join made the configuration folder")
 	}
 }

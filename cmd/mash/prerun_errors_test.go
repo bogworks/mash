@@ -95,13 +95,13 @@ func TestSendImplicitStdinDeadline(t *testing.T) {
 	stdinLimit = 300 * time.Millisecond
 	var o, e strings.Builder
 	start := time.Now()
-	code := run([]string{"send", "o.dev.b"}, env, r, &o, &e)
+	code := run([]string{"send", "o.dev.b"}, env, r, &o, quiet(&e))
 	if code != 1 || o.String() != "" || e.String() != "error: no message text arrived on standard input\n" || time.Since(start) > 10*time.Second {
 		t.Fatalf("%d %q %q after %v", code, o.String(), e.String(), time.Since(start))
 	}
 	o.Reset()
 	e.Reset()
-	code = run([]string{"send", "o.dev.b", "--json"}, env, r, &o, &e)
+	code = run([]string{"send", "o.dev.b", "--json"}, env, r, &o, quiet(&e))
 	if code != 1 || e.String() != "" || o.String() != `{"error":"no message text arrived on standard input"}`+"\n" {
 		t.Fatalf("json: %d %q %q", code, o.String(), e.String())
 	}

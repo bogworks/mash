@@ -1,0 +1,183 @@
+Generated from spec/*.json by go run ./scripts/refgen. Do not edit.
+
+# Rules
+
+The rules every mash command and tool follows.
+
+1. A command reports what it did, in a line or a few. Like gh, git and aws.
+   Explanation lives in the guide, the walkthrough, --help and the glossary,
+   never in output.
+
+2. An action prints one line. Past tense, naming the thing: 'Created endpoint
+   acme.demo.bob', 'Mail sent (number 42).' It does not print what another
+   command already shows; it does print an identifier the person can get
+   nowhere else.
+
+3. Minimal by default, in text and in JSON alike; --detail gives the fuller
+   answer in both. A command's usual answer is the least that answers the
+   question, and --json prints that same least as an object. --detail asks for
+   more: in text, 'label: value' lines after the usual line; with --json, a
+   fuller object that contains the usual one. The fuller object's extra keys
+   are the text's extra labels, in lower case with underscores ('holds
+   endpoint' is holds_endpoint), so the two can be checked against each other.
+   A program that needs the fuller object asks for it, as a person does. An
+   MCP tool takes detail the same way. --wide is the same idea for a table:
+   more columns, and it may pass 80 columns. --detail is one option with one
+   meaning on every command of both tools, so nobody has to learn which
+   commands have it: where a command has nothing more to say, --detail prints
+   what it prints without it. Every --detail and --wide form that does add
+   something is written out in this specification. (This is the command-line
+   standard's rule 24; an earlier pass of this specification called it
+   --verbose.)
+
+4. A list is a plain table. A header row in capitals, two spaces between
+   columns, no borders. A repeated leading value may be left blank. --wide
+   adds columns. An empty list is one sentence.
+
+5. One thing is a list of 'label: value' lines. The labels are the JSON field
+   names.
+
+6. Status is one line. '&lt;what&gt;: &lt;state&gt;'. Everything behind it is
+   in doctor.
+
+7. An error is one line on stderr, and at most one hint. 'error: &lt;what
+   failed&gt;', then 'hint: &lt;a command to run&gt;' when there is one. No
+   hint on success, and no 'next step' lines.
+
+8. --json prints one object. Always an object, never a bare array: a list is
+   {"endpoints": [...]}. It is the same object the matching MCP tool returns
+   as its structured result. Field names are the glossary's words. Both are
+   produced by one implementation.
+
+9. A wrong command line gets one error line in a fixed form, and one hint. A
+   missing argument: 'error: mash send needs &lt;address&gt;'. A bad value:
+   'error: --kind must be one of blocker, question, task, result, fyi' or
+   'error: --reply-to must be a whole number'. Two things that cannot go
+   together: 'error: mash send takes the message text or --file, not both'. An
+   option that does not exist: 'error: unknown option --x'. The hint is always
+   the command's own help: 'hint: mash send --help'. Exit 2, and nothing is
+   attempted.
+
+10. --help has one layout, generated from this specification. For a command,
+   in this order: the one-line description; 'Usage:' and the synopsis;
+   'Examples:'; 'Arguments:'; 'Options:'; 'Global options:'. Nothing else, 80
+   columns. For the tool itself: its one-line description, then one heading
+   per group in the specification's order ('Everyday:', 'Setup:',
+   'Integration:', 'Raw SAP:' for mash; 'Mesh:', 'Endpoints:', 'Owners:' for
+   mashctl) with each command and its one-line description indented beneath,
+   then 'Global options:'. Help is never written by hand beside the
+   specification.
+
+11. Times read the way a person says them. '10s ago', '2m ago', '1h 12m'.
+   Anything under a second, or in the future because two clocks disagree, is
+   'just now'. --json carries the exact time.
+
+12. Text read from a file or standard input loses one trailing newline. As the
+   shell's own $(...) does. Nothing else in the text is changed.
+
+13. Three exit codes. 0 it worked, 1 it failed, 2 the command line was wrong.
+   Today the same failure exits 2, 3 or 6 depending on the command. A command
+   that did part of its work exits 1, says what is left, and is safe to run
+   again.
+
+14. Both doctors work the same way. mash doctor and mashctl doctor print every
+   row every time, each marked ok, warn, FAIL or skip; a row that cannot run
+   because an earlier one failed is skip, with what it needs. 'checks' in
+   --json always lists every row, whatever failed. After the rows come one
+   blank line and a count ('No problems.', '1 problem, 1 warning.'). One hint
+   follows when the first problem, or with no problem the first warning, has a
+   command that fixes it; where no command does, there is no hint and the
+   row's own text says what is wrong. Exit 1 when there is a problem; warnings
+   alone exit 0, or 1 with --strict. A server row shows the address as
+   configured.
+
+15. status and doctor report, they do not fail. Their lines go to stdout
+   whatever they find, and they exit 1 when they found a problem. Any hint
+   still goes to stderr.
+
+16. Where a hint is printed. At a shell, every 'hint:' line goes to stderr,
+   whichever stream the rest went to: after an error, after status, after
+   doctor's count. The case pages show the hint beneath the text it follows,
+   for reading; a case marked stdout means its lines other than the hint. In
+   an MCP tool's text block the hint is the last line.
+
+17. The server not answering reads the same everywhere. 'error: the server did
+   not answer: tls://host:4222' and 'hint: mash doctor' (or mashctl doctor),
+   exit 1. Two more server failures have fixed words: 'the server's
+   certificate is not trusted: &lt;address&gt;' and 'the server did not offer
+   TLS: &lt;address&gt;'.
+
+18. Having no endpoint reads the same in every mash command. Three wordings,
+   by where it is asked. At a shell with none installed: 'error: no endpoint
+   is installed here' and 'hint: mash join &lt;file&gt;', exit 2. At a shell
+   with several installed and none chosen: 'error: more than one endpoint is
+   installed here: &lt;addresses&gt;' and 'hint: mash &lt;command&gt;
+   --endpoint &lt;the first, alphabetically&gt;', exit 2. As an MCP tool in a
+   session with none named: 'No endpoint is chosen for this session.' and
+   'hint: start the session with MASH_ENDPOINT=&lt;address&gt;'.
+
+19. --json when a command fails. Prints {"error": ..., "hint": ...} on stdout
+   and nothing on stderr, with the same exit code.
+
+20. Every command that changes the mesh or this machine's setup takes
+   --dry-run. It prints the usual line with 'Would' in front and changes
+   nothing; with --json the object is the one the real run would print, plus
+   "dry_run": true. That is mashctl's changing commands and mash join. Sending
+   a message is not such a change and has no --dry-run.
+
+21. help is also a command. 'mash help' and 'mash help send' print exactly
+   what 'mash --help' and 'mash send --help' print, as git, kubectl and gh do.
+   The same for mashctl.
+
+22. Every setting three ways. A flag, then an environment variable, then
+   config.json. The flag wins.
+
+23. One spelling. An address is owner.group.name everywhere. NATS's and SAP's
+   things keep NATS's and SAP's names. The same thing has the same column
+   heading and the same field name in every command.
+
+24. A prefix selects, the way a domain name does. Where a command takes a
+   prefix, acme means everything under acme, acme.demo everything under
+   acme.demo, and a full address that one endpoint. acme.\* is accepted and
+   means acme. There is no other pattern matching.
+
+25. Options go anywhere after the tool's name. Every option, global or the
+   command's own, is accepted before or after the command and its arguments,
+   as with kubectl and gh. Help and documentation always write them last: mash
+   status --endpoint acme.demo.alice.
+
+26. A sender's words are always marked as the sender's. Wherever mash prints a
+   message's text in full, every line starts with '&gt; ' and control
+   characters are escaped, at a shell and in an MCP tool alike. It reads as
+   quoted mail does to a person, and it shows an agent where data from someone
+   else begins and ends. A table's MESSAGE column holds the sender's words
+   too.
+
+27. Encryption can be turned off in one way only, and it says so every time.
+   Both tools talk to the server over TLS. The one way to turn that off is the
+   environment variable MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1. There is no
+   flag and no configuration-file key for it: this is the one setting that
+   cannot be given three ways, so that it cannot be left on in a file and
+   forgotten. While it is set, every command of both tools first prints, on
+   stderr: 'warning: encryption to the server is OFF
+   (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set)'. The older names,
+   MASH_INSECURE_PLAINTEXT and the key insecure_plaintext, are refused with an
+   error naming the new one.
+
+28. A folder left by mash 0.5.5 is named for what it is. When the
+   configuration folder holds 0.5.5's settings (the keys url and tls_ca),
+   every command of both tools stops with 'error: &lt;folder&gt; holds a mash
+   0.5.5 configuration' and 'hint: &lt;release
+   base&gt;/mash-migrate-0.5.5.sh', exit 1, and changes nothing. It never
+   reads the old keys and never guesses. The migration is a script, run once
+   by the person or by whatever manages the machine: it rewrites the two keys
+   in place, keeps a backup beside the file, and touches nothing on the
+   server. Nothing on the server needs migrating: 0.5.6 reuses the stores and
+   endpoint records 0.5.5 made, and endpoints of the two versions can mail
+   each other on one server (shown by a live run, 2026-11-20).
+
+29. Only a destructive command asks. It asks you to type the address, and
+   --yes skips the question.
+
+30. Eighty columns, and color only on a terminal. --wide may be wider.
+   NO_COLOR is honored.

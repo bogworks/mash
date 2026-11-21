@@ -209,3 +209,68 @@ func (e *Endpoint) installDirectory(got map[string]recordResult) (failed int) {
 	e.fullDir = true
 	return failed
 }
+
+// maxFailedLookups bounds the remembered failed sender lookups.
+const maxFailedLookups = 1024
+
+// reloadSender reads the directory record of the endpoint a message's sender header names, bypassing the cached
+// directory, and installs it when it is the record of the header's key. It reports whether the cache changed.
+func (e *Endpoint) reloadSender(h sap.SenderHeader) bool {
+	if h.Name == "" || h.User == "" || !recordKey(h.Name) {
+		return false
+	}
+	// A lookup that found nothing for this (name, key) is not repeated for one directory poll interval, and the memory
+	// of them is bounded: a full table evicts its oldest entry, never refusing a lookup.
+	fail := h.Name + "\x00" + h.User
+	e.mu.Lock()
+	if until, ok := e.failedLookups[fail]; ok && time.Now().Before(until) {
+		e.mu.Unlock()
+		return false
+	}
+	if len(e.failedLookups) >= maxFailedLookups {
+		// Full: expired entries go, and if none had expired the oldest (the earliest to expire) makes room, so a
+		// flood of fake keys never stops the lookup of a real new sender.
+		now := time.Now()
+		oldestK, oldest := "", time.Time{}
+		for k, until := range e.failedLookups {
+			if !now.Before(until) {
+				delete(e.failedLookups, k)
+			} else if oldestK == "" || until.Before(oldest) {
+				oldestK, oldest = k, until
+			}
+		}
+		if len(e.failedLookups) >= maxFailedLookups && oldestK != "" {
+			delete(e.failedLookups, oldestK)
+		}
+	}
+	e.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	r := e.fetchRecord(ctx, h.Name)
+	if r.err != nil || r.rec.User != h.User {
+		e.mu.Lock()
+		if e.failedLookups == nil {
+			e.failedLookups = map[string]time.Time{}
+		}
+		e.failedLookups[fail] = time.Now().Add(DirectoryPoll)
+		e.mu.Unlock()
+		return false
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.dir == nil {
+		e.dir = map[string]store.Record{}
+	}
+	if old, ok := e.dir[h.Name]; ok && old.User == r.rec.User {
+		return false
+	}
+	if old, ok := e.dir[h.Name]; ok && e.byUser[old.User] == h.Name {
+		delete(e.byUser, old.User)
+	}
+	e.dir[h.Name] = r.rec
+	if e.byUser == nil {
+		e.byUser = map[string]string{}
+	}
+	e.byUser[r.rec.User] = h.Name
+	return true
+}

@@ -13,7 +13,7 @@ import (
 
 // Opts are the output options a command's Text method receives.
 type Opts struct {
-	Verbose bool
+	Detail  bool
 	NoColor bool
 	Width   int  // terminal columns; 0 means 80
 	TTY     bool // stdout is a terminal

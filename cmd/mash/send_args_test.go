@@ -35,7 +35,7 @@ func TestVerbHelpAndStrayArguments(t *testing.T) {
 // --json on a verb with no JSON form is a usage error, and nothing is attempted: {"error","hint"} on stdout, exit 2.
 func TestNoJSONFormIsRefused(t *testing.T) {
 	env := func(string) string { return "" }
-	for _, verb := range []string{"prompt", "serve", "hook", "plugin"} {
+	for _, verb := range []string{"prompt", "serve", "hook"} {
 		for _, args := range [][]string{{verb, "--json"}, {"--json", verb}, {verb, "x", "--json"}} {
 			var out, errb bytes.Buffer
 			want := "{\"error\":\"mash " + verb + " has no --json form\",\"hint\":\"mash " + verb + " --help\"}\n"

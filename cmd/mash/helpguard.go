@@ -3,7 +3,7 @@ package main
 import "strings"
 
 // helpUsage reports the usage text for `mash VERB -h|--help`, and whether args asks for help at all. Only the first
-// argument after the verb (after the sub-verb for plugin) asks; the caller prints the text and runs nothing, so
+// argument after the verb asks; the caller prints the text and runs nothing, so
 // help never reads config, dials, spools, writes or waits.
 func helpUsage(args []string) (string, bool) {
 	if len(args) < 2 {
@@ -13,23 +13,35 @@ func helpUsage(args []string) (string, bool) {
 	switch args[0] {
 	case "serve", "hook":
 		u, known = commandLines(usage, "  mash "+args[0]), true
-	case "plugin":
-		u, known = pluginUsage, true
+		if args[0] == "serve" {
+			u += serveOptionsHelp
+		}
 	}
 	if !known {
 		return "", false
 	}
-	// Help is only the first argument after the verb (after the sub-verb for plugin): text further along, such as the
+	// Help is only the first argument after the verb: text further along, such as the
 	// words of a message, is never read for it.
-	first := 1
-	if args[0] == "plugin" && !strings.HasPrefix(args[1], "-") {
-		first = 2
-	}
-	if first < len(args) && (args[first] == "-h" || args[first] == "--help") {
+	if args[1] == "-h" || args[1] == "--help" {
 		return u + "\n", true
 	}
 	return "", false
 }
+
+// serveOptionsHelp is the options of mash serve, hand-written until serve is on the command table; the text is the
+// specification's.
+const serveOptionsHelp = `
+
+Options:
+  --wake-count n         Wake the session when more than this many messages are waiting.
+                         Default 15; 0 turns it off.
+                         Also MASH_WAKE_COUNT, or "wake_count".
+  --wake-age duration    Wake the session when the oldest waiting message is older than this.
+                         Default 1h; 0 turns it off.
+                         Also MASH_WAKE_AGE, or "wake_age".
+  --accept-unverified    Deliver mail that is not verified, with its trust label.
+                         Default: off; such mail is refused.
+                         Also MASH_ACCEPT_UNVERIFIED, or "accept_unverified".`
 
 // linesOf is the lines of text that begin with prefix followed by a space or the end of the line.
 func linesOf(text, prefix string) string {

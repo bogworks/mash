@@ -216,13 +216,13 @@ func runInit(args []string, g cliframe.Global, env func(string) string, lookup c
 		return cliframe.Report(stdout, stderr, err, jsonRequested(args, "--config"))
 	}
 	jsonOut := in.json || g.JSON
-	return cliframe.Report(stdout, stderr, doInit(in.values["--config"], in.flags["--dry-run"], jsonOut, g.Verbose, env, lookup, stdout, stderr), jsonOut)
+	return cliframe.Report(stdout, stderr, doInit(in.values["--config"], in.flags["--dry-run"], jsonOut, env, lookup, stdout, stderr), jsonOut)
 }
 
-// step is one `label: value` line of --verbose.
+// step is one thing init would set up; any step means the run changes something.
 type step struct{ label, value string }
 
-func doInit(setupPath string, dry, jsonOut, verbose bool, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) error {
+func doInit(setupPath string, dry, jsonOut bool, env func(string) string, lookup config.Lookup, stdout, stderr io.Writer) error {
 	sf, err := loadSetup(setupPath, env("HOME"))
 	if err != nil {
 		return err
@@ -296,12 +296,9 @@ func doInit(setupPath string, dry, jsonOut, verbose bool, env func(string) strin
 
 	// (2) the server: operator mode, system creds, the resolver. Admin and system connections require TLS, so a URL
 	// that is refused for that is refused before any connection is made.
-	tlsReq, warning, err := natsauth.RequireTLS(cfg.URL, cfg.InsecurePlaintext)
+	tlsReq, _, err := natsauth.RequireTLS(cfg.URL, cfg.SkipEncryption)
 	if err != nil {
-		return cliframe.Failf("%v (nothing was changed)", err)
-	}
-	if warning != "" {
-		fmt.Fprintln(os.Stderr, warning) // the process's stderr, where every admin connection puts it
+		return withPlainCode(cliframe.Failf("%v (nothing was changed)", err), err)
 	}
 	unreachable := func() error {
 		return cliframe.Failf("cannot reach %s", first).WithHint("mashctl doctor")
@@ -415,7 +412,7 @@ func doInit(setupPath string, dry, jsonOut, verbose bool, env func(string) strin
 	changed := len(steps) > 0
 
 	if dry {
-		return finishInit(stdout, jsonOut, verbose, true, changed, sf, first, steps)
+		return finishInit(stdout, jsonOut, true, changed, sf, first)
 	}
 	if needOp {
 		if pub, _, err := ks.ImportOperator(sf.operatorKey); err != nil {
@@ -454,7 +451,7 @@ func doInit(setupPath string, dry, jsonOut, verbose bool, env func(string) strin
 			return failErr(err)
 		}
 	}
-	return finishInit(stdout, jsonOut, verbose, false, changed, sf, first, steps)
+	return finishInit(stdout, jsonOut, false, changed, sf, first)
 }
 
 // checkClusterListed refuses a setup file that lists too few servers for the cluster the ping saw: a revocation must be
@@ -520,8 +517,8 @@ func differentSetup(st *initState, what string) error {
 		WithHint("mashctl init --config <file> --config-dir <a new folder>")
 }
 
-// finishInit prints the one line of init (and, with verbose, the steps), or the JSON object.
-func finishInit(stdout io.Writer, jsonOut, verbose, dry, changed bool, sf setupFile, first string, steps []step) error {
+// finishInit prints the one line of init or the JSON object.
+func finishInit(stdout io.Writer, jsonOut, dry, changed bool, sf setupFile, first string) error {
 	shown := make([]string, len(sf.servers))
 	for i, s := range sf.servers {
 		shown[i] = maskURL(s)
@@ -544,11 +541,6 @@ func finishInit(stdout io.Writer, jsonOut, verbose, dry, changed bool, sf setupF
 	default:
 		fmt.Fprintf(stdout, "Initialized mash on %s for owner %s\n", first, sf.owner)
 	}
-	if verbose {
-		for _, s := range steps {
-			fmt.Fprintf(stdout, "%s: %s\n", s.label, config.Clean(s.value))
-		}
-	}
 	if dry {
 		fmt.Fprintln(stdout, "Nothing was changed.")
 	}
@@ -556,7 +548,7 @@ func finishInit(stdout io.Writer, jsonOut, verbose, dry, changed bool, sf setupF
 }
 
 // initSettings are the settings config.json gets: the setup file's only. A one-off setting of this run (MASH_CA,
-// MASH_INSECURE_PLAINTEXT, MASH_TLS_*) or an old config.json's tls_cert is never written.
+// MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION, MASH_TLS_*) or an old config.json's tls_cert is never written.
 func initSettings(cfg config.Config, sf setupFile, st *initState) map[string]any {
 	m := map[string]any{"servers": sf.servers, "owner": sf.owner, "admin_creds": sf.adminCreds, "system_creds": st.sysDst}
 	if sf.ca != "" {
@@ -570,7 +562,7 @@ func configJSON(m map[string]any) []byte {
 	var b bytes.Buffer
 	b.WriteString("{\n")
 	var parts []string
-	for _, k := range []string{"servers", "ca", "owner", "admin_creds", "system_creds", "insecure_plaintext", "tls_cert", "tls_key"} {
+	for _, k := range []string{"servers", "ca", "owner", "admin_creds", "system_creds", "tls_cert", "tls_key"} {
 		if v, ok := m[k]; ok {
 			enc, _ := json.Marshal(v)
 			parts = append(parts, fmt.Sprintf("  %q: %s", k, enc))
@@ -784,12 +776,9 @@ func askJetStream(cfg config.Config, url string, raw []byte, limit int64) (strin
 }
 
 func dialAdmin(cfg config.Config, url string, raw []byte) (*nats.Conn, error) {
-	tlsReq, warning, err := natsauth.RequireTLS(url, cfg.InsecurePlaintext)
+	tlsReq, _, err := natsauth.RequireTLS(url, cfg.SkipEncryption)
 	if err != nil {
 		return nil, err
-	}
-	if warning != "" {
-		fmt.Fprintln(os.Stderr, warning)
 	}
 	c, err := nats.Connect(url, append(append(natsauth.TLSOptions(cfg.TLSCA, cfg.TLSCert, cfg.TLSKey), tlsReq...),
 		natsauth.UserCredentialBytes(raw), nats.Name("mashctl-init-admin"), nats.Timeout(connectTimeout), nats.MaxReconnects(0))...)

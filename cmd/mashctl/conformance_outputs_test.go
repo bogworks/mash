@@ -47,7 +47,6 @@ var confUnchecked = map[string]string{
 	"endpoint delete Cancelled everywhere, then a later step failed": "needs a server fault injected between the cancelling of the key and the removal of the inbox",
 	"endpoint inbox Messages":                                        "the rows hold times relative to now ('2m ago', '1m ago') and the trust of messages signed by two senders, one of them an endpoint not on this server",
 	"endpoint permissions Permissions":                               "the text describes the output ('the same JSON as --json'); it is not the output",
-	"endpoint reissue With --verbose":                                "'servers acknowledged: 2' needs a cluster of two servers",
 }
 
 // confOutCase is one x-output case.
@@ -365,6 +364,14 @@ func init() {
 		w.do("endpoint", "create", "acme.demo.bob")
 		inTmp(t)
 		return confOutRun{ran: w.run("endpoint", "reissue", "acme.demo.bob", "--out", "acme.demo.bob.join")}
+	})
+	reg("endpoint reissue With --detail", func(t *testing.T) confOutRun {
+		w := newConfWorld(t, true)
+		w.do("endpoint", "create", "acme.demo.bob")
+		inTmp(t)
+		// the specification's cluster of two servers acknowledges twice; the test server is one
+		ran := w.run("endpoint", "reissue", "acme.demo.bob", "--out", "acme.demo.bob.join", "--detail")
+		return confOutRun{ran: ran, subs: []string{"servers acknowledged: 2", "servers acknowledged: 1"}}
 	})
 
 	reg("version Version", func(t *testing.T) confOutRun {

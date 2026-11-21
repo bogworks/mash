@@ -212,7 +212,7 @@ func TestSendText(t *testing.T) {
 		{"verbose urgent", cmds.SendResult{To: "acme.demo.alice", Number: 7, Kind: "fyi", Urgent: true}, true,
 			"Urgent fyi mail sent (number 7).\nto:      acme.demo.alice\nkind:    fyi\nurgent:  yes"},
 	} {
-		if got := tc.r.Text(cmdcore.Opts{Verbose: tc.verbose}); got != tc.want {
+		if got := tc.r.Text(cmdcore.Opts{Detail: tc.verbose}); got != tc.want {
 			t.Errorf("%s: %q, want %q", tc.name, got, tc.want)
 		}
 	}
@@ -707,7 +707,7 @@ func TestMatchesSpec(t *testing.T) {
 		default:
 			continue
 		}
-		if got := r.Text(cmdcore.Opts{Verbose: verbose}); got != c["text"] {
+		if got := r.Text(cmdcore.Opts{Detail: verbose}); got != c["text"] {
 			t.Errorf("send output %q: %q, spec %q", c["case"], got, c["text"])
 		}
 	}

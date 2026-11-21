@@ -1,0 +1,6 @@
+{"tools":[{"name":"zed","description":"Zed tool. More.","command":"mash zed","release":"1.0.0",
+  "params":[{"name":"item","type":"string","required":true,"description":"What."}],
+  "structured":{"ok":true},
+  "text":[{"case":"Done","text":"ok","stream":"stdout","exit":0}],
+  "errors":[{"case":"Bad","text":"error: no","stream":"stderr","exit":1}]}],
+ "server":[["Started by","The host."]]}

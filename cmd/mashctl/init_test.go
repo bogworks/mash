@@ -42,7 +42,7 @@ func newIniter(t *testing.T, src *applyEnv) *initer {
 	t.Helper()
 	root := t.TempDir()
 	a := &initer{t: t, src: src, root: root, env: map[string]string{
-		"HOME": root, "MASH_INSECURE_PLAINTEXT": "1", "MASH_CONFIG_DIR": filepath.Join(root, "cfg"), "MASH_KEYS_DIR": filepath.Join(root, "keys"),
+		"HOME": root, "MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION": "1", "MASH_CONFIG_DIR": filepath.Join(root, "cfg"), "MASH_KEYS_DIR": filepath.Join(root, "keys"),
 	}}
 	in := filepath.Join(root, "in")
 	if err := os.Mkdir(in, 0o700); err != nil {
@@ -382,7 +382,7 @@ func TestInitDryRunThenRealRunThenAgain(t *testing.T) {
 	}
 }
 
-func TestInitJSONAndVerbose(t *testing.T) {
+func TestInitJSONAndDetail(t *testing.T) {
 	e := newApplyEnv(t)
 	a := newIniter(t, e)
 	url := e.srv.ClientURL()
@@ -407,20 +407,11 @@ func TestInitJSONAndVerbose(t *testing.T) {
 		t.Fatalf("json again: %d %v %q", code, err, out)
 	}
 
-	// --verbose follows the line with label: value lines for what was written, paths only.
+	// --detail changes nothing: the one line, and nothing else
 	b := newIniter(t, e)
-	out, errb, code = b.init("--verbose")
-	if code != 0 || errb != "" || !strings.HasPrefix(out, "Initialized mash on "+url+" for owner alice\n") {
-		t.Fatalf("verbose: %d %q %q", code, out, errb)
-	}
-	cfgDir, keyDir := b.env["MASH_CONFIG_DIR"], b.env["MASH_KEYS_DIR"]
-	for _, want := range []string{
-		"operator key: " + filepath.Join(keyDir, "operator.nk"), "account key: " + filepath.Join(keyDir, "account.nk"),
-		"system creds: " + filepath.Join(cfgDir, "server", "sys.creds"), "config: " + filepath.Join(cfgDir, "config.json"),
-	} {
-		if !strings.Contains(out, want+"\n") {
-			t.Errorf("verbose output lacks %q:\n%s", want, out)
-		}
+	out, errb, code = b.init("--detail")
+	if code != 0 || errb != "" || out != "Initialized mash on "+url+" for owner alice\n" {
+		t.Fatalf("detail: %d %q %q", code, out, errb)
 	}
 }
 

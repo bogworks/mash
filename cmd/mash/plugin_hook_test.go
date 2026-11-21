@@ -188,10 +188,12 @@ func TestPluginHook_neverBlocksAndLogsStderr(t *testing.T) {
 	}
 }
 
-// The prefetch hook never writes to stdout, never fails, and does not need an exec bit or a pinned release.
+// The prefetch hook never fails and does not need an exec bit or a pinned release. With no mash anywhere its only
+// stdout is the one not-installed line the agent sees.
 func TestPluginPrefetchHook_neverFails(t *testing.T) {
 	out, errOut, code := runShellHook(t, prefetchCmd, t.TempDir(), "XDG_STATE_HOME="+t.TempDir())
-	if code != 0 || out != "" {
+	want := "mash is not installed: the mash plugin found no mash program. Install it: curl -fsSL https://github.com/bogworks/mash/releases/latest/download/install.sh | bash\n"
+	if code != 0 || out != want {
 		t.Fatalf("exit %d stdout %q stderr %q", code, out, errOut)
 	}
 }

@@ -55,6 +55,10 @@ type Endpoint struct {
 	// duplicateWindow overrides store.InboxDuplicateWindow for the seen set (tests that shorten the stream's window).
 	duplicateWindow time.Duration
 
+	// wakeStart is when serve took the spool; lastWake when any wake (idle, urgent or backlog) last woke the session (zero: never). Neither
+	// survives a restart (hook.go, wakeBacklog).
+	wakeStart, lastWake time.Time
+
 	heldN  atomic.Int32 // held count as of the last settle pass; read by tests
 	headMu sync.Mutex   // guards the stream-headroom cache (streamHasHeadroom)
 	headAt time.Time
@@ -85,7 +89,18 @@ type Endpoint struct {
 	// leaseGone: this endpoint's own lease is lost (a failed refresh, or the watch saw another holder). From then on no
 	// message of any stream is delivered or acknowledged by it (mayAck, dropUnleased, dropHeld): JetStream redelivers
 	// it all to the new holder.
-	leaseGone atomic.Bool
+	// refusedStream is the identity of the inbox stream the refusal files are tied to (refuse.go); nil until bound.
+	refusedStream atomic.Pointer[string]
+	// inboxID is the identity of the inbox stream the last read of it saw (inbox); toMail checks recorded refusals against it.
+	inboxID atomic.Pointer[string]
+	// refusedHook, when set (tests), runs in serve's handler after a refusal is recorded and before it is acknowledged.
+	refusedHook func()
+	// firstSeqFn, when set, stands for the inbox stream's first sequence (tests); nil reads it from the stream.
+	firstSeqFn func(context.Context) (uint64, error)
+	// failedLookups remembers, until the time it holds, a sender lookup (name, key) that found no matching record, so a
+	// flood of mail from one unknown signer costs one directory read per poll interval (reloadSender). Guarded by mu.
+	failedLookups map[string]time.Time
+	leaseGone     atomic.Bool
 	// loseOwn marks the own lease lost, as the watch or a failed refresh does (set by keepLease).
 	loseOwn func(error)
 	// live is the cache of the ack-time lease check (lease_fence.go).
@@ -125,6 +140,8 @@ type Endpoint struct {
 	// hl is the hookless detector's state (hookless.go), guarded by its own mutex: tool calls and the read tool reach
 	// it from other goroutines than Run's.
 	hl hookless
+	// hookRecorded is what RecordHookState last wrote (hookstate.go), without its time.
+	hookRecorded atomic.Pointer[string]
 
 	// The test-only before-ack failpoint (hook.go): nil outside the crash tests.
 	failBeforeAck func(seq uint64)
@@ -249,7 +266,7 @@ func checkCredsFor(path, name string) error {
 	if addr, perr := sap.AddressFromFlat(name); perr == nil && allow.Contains(addr.InboxPrefix()+".>") {
 		return nil
 	}
-	return fmt.Errorf("mash: the credentials in %s do not match endpoint %s (they are for another endpoint)", path, sap.Display(name))
+	return &sentinelError{kind: ErrCredsMismatch, err: fmt.Errorf("mash: the credentials in %s do not match endpoint %s (they are for another endpoint)", path, sap.Display(name))}
 }
 
 func readIdentity(path string) (sap.Identity, error) {
@@ -323,20 +340,17 @@ func SpoolDir(cfg config.Config) (string, error) {
 }
 
 // EndpointTLS is the extra connection options an endpoint connection under cfg needs, or the refusal: a plain URL is
-// refused here, before anything is connected, unless insecure_plaintext is set (natsauth.RequireTLS, REQ-014). It prints
-// nothing. PlainWarning is the line to print to standard error when a plain URL was let through.
+// refused here, before anything is connected, unless MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1 is set (natsauth.RequireTLS, REQ-014). It prints
+// nothing; PlainURL says whether a plain URL was let through.
 func EndpointTLS(cfg config.Config) ([]nats.Option, error) {
-	opts, _, err := natsauth.RequireTLS(cfg.URL, cfg.InsecurePlaintext)
+	opts, _, err := natsauth.RequireTLS(cfg.URL, cfg.SkipEncryption)
 	return opts, err
 }
 
-// PlainWarning is the plain-text warning for cfg ("" when its URL is all TLS or is refused).
-func PlainWarning(cfg config.Config) string {
-	_, w, err := natsauth.RequireTLS(cfg.URL, cfg.InsecurePlaintext)
-	if err != nil {
-		return ""
-	}
-	return w
+// PlainURL reports whether cfg's URL has a plain entry that the override let through (false when it is all TLS or is refused).
+func PlainURL(cfg config.Config) bool {
+	_, plain, err := natsauth.RequireTLS(cfg.URL, cfg.SkipEncryption)
+	return err == nil && plain
 }
 
 // OpenClient connects as cfg.Name and checks the identity, without a lease. It loads the whole directory: serve and
@@ -746,6 +760,9 @@ func (e *Endpoint) Run(ctx context.Context, deliver Deliverer) error {
 	every := DirectoryPoll
 	go func() { e.pollDirectory(ctx, every); close(polled) }()
 	defer func() { cancel(); <-polled }()
+	recorded := make(chan struct{})
+	go func() { e.recordHookStates(ctx); close(recorded) }()
+	defer func() { cancel(); <-recorded }()
 	stop, err := e.consume(ctx, deliver)
 	if err != nil {
 		return err

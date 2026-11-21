@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sort"
@@ -33,11 +34,10 @@ type epSpec struct {
 
 // epInput is what the command line of an endpoint command holds.
 type epInput struct {
-	pos     []string
-	flags   map[string]bool
-	values  map[string]string
-	json    bool
-	verbose bool // --verbose, set by the command that runs it
+	pos    []string
+	flags  map[string]bool
+	values map[string]string
+	json   bool
 
 	// set by a command's check
 	addr     sap.Address
@@ -155,7 +155,7 @@ func runEp(s epSpec, g cliframe.Global, args []string, env func(string) string, 
 	if err != nil {
 		return cliframe.Report(stdout, stderr, failErr(err), in.json)
 	}
-	announceTarget(cfg, env, stderr, nil, g.Verbose)
+	announceTarget(cfg, env, stderr)
 	adm, ctx, closeAdmin, err := ctl.OpenAdmin("mashctl", cfg)
 	if err != nil {
 		return cliframe.Report(stdout, stderr, failErr(err), in.json)
@@ -177,7 +177,12 @@ func failErr(err error) error {
 	for _, p := range []string{"mash: ", "mashctl: "} {
 		msg = strings.TrimPrefix(msg, p)
 	}
-	return cliframe.Failf("%s", msg)
+	out := cliframe.Failf("%s", msg)
+	var xc interface{ ExitCode() int } // the error carries its own code (natsauth's refusal of a plain URL is 2)
+	if errors.As(err, &xc) && xc.ExitCode() == 2 {
+		out.Code = 2
+	}
+	return out
 }
 
 // parseEpAddress reads an endpoint address: owner.group.name, dotted, exactly three parts.

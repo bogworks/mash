@@ -43,12 +43,12 @@ func TestRetireRenamesCredsByDefault(t *testing.T) {
 	h := newFleetEnv(t)
 	h.seed(ad("c"))
 	want, _ := os.ReadFile(h.creds(ad("c")))
-	out, errb, code := h.run("endpoint", "delete", "o.g.c", "--yes", "--verbose")
+	out, errb, code := h.run("endpoint", "delete", "o.g.c", "--yes", "--detail")
 	if code != 0 {
 		t.Fatalf("%d %q %q", code, out, errb)
 	}
 	moved := h.creds(ad("c")) + ".deleted"
-	if !strings.Contains(out, "credentials file: set aside as "+moved+"\n") || !strings.Contains(out, "retired marker: written\n") {
+	if out != "Deleted endpoint o.g.c\n" {
 		t.Errorf("report: %q", out)
 	}
 	got, err := os.ReadFile(moved)

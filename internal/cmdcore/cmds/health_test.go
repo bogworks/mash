@@ -105,17 +105,32 @@ func TestStatusMatchesSpec(t *testing.T) {
 	if cmds.Status.Group != meta["x-group"] {
 		t.Errorf("group %q, spec %v", cmds.Status.Group, meta["x-group"])
 	}
-	if props := cmdcore.Schema[cmds.StatusParams]()["properties"].(map[string]any); len(props) != 0 || len(specTool(t, "status")["params"].([]any)) != 0 {
-		t.Errorf("status takes no parameters: %v", props)
+	// the one parameter is detail, which the tool takes because status has a fuller answer
+	sp := specTool(t, "status")["params"].([]any)
+	if len(sp) != 1 || sp[0].(map[string]any)["name"] != cliframe.DetailParam || sp[0].(map[string]any)["description"] != cmdcore.DetailParamDescription {
+		t.Errorf("spec params %v", sp)
+	}
+	tp := cmdcore.MCPTool(cmds.Status, nil).Schema["properties"].(map[string]any)
+	if d, _ := tp[cliframe.DetailParam].(map[string]any); len(tp) != 1 || d["type"] != "boolean" || d["description"] != sp[0].(map[string]any)["description"] {
+		t.Errorf("status tool params: %v", tp)
 	}
 	// the object
-	st := runStatusObject(t, report("acme.demo.bob", false, ok("config", ""), ok("creds", ""), ok("server", "tls://myserver:4222"), ok("sign-in", "")))
+	st := runStatusObject(t, report("acme.demo.bob", true, ok("config", ""), ok("creds", ""), ok("server", "tls://myserver:4222"), ok("sign-in", "")))
 	if !sameJSON(t, st, string(mustJSON(meta["x-json"]))) || !sameJSON(t, st, string(mustJSON(specTool(t, "status")["structured"]))) {
 		t.Errorf("object %s, spec %v", st, meta["x-json"])
 	}
+	// the fuller object contains the usual one, and is the specification's
+	inSession := func() *fakeHealth {
+		f := report("acme.demo.bob", true, ok("config", ""), ok("creds", ""), ok("server", "tls://myserver:4222"), ok("sign-in", ""))
+		f.rep.Session = &cmds.SessionState{HoldsEndpoint: true, Hooks: cmds.HooksRan, Storage: cmds.StorageOK}
+		return f
+	}
+	if _, js, _ := runStatus(inSession(), cliframe.Global{JSON: true, Detail: true}); !sameJSON(t, js+"\n", string(mustJSON(specTool(t, "status")["structured_detail"]))) || !sameJSON(t, js+"\n", string(mustJSON(meta["x-json-detail"]))) {
+		t.Errorf("fuller object %s", js)
+	}
 	fails := map[string]*fakeHealth{
 		"Not working (the first line on stdout, the hint on stderr)": report("acme.demo.bob", false, ok("config", ""), ok("creds", ""), ok("server", "tls://myserver:4222"),
-			cmds.HealthCheck{Name: "sign-in", State: cmds.CheckFail, Detail: "the server refused these credentials", Reason: "the server refused its credentials"}),
+			cmds.HealthCheck{Name: "sign-in", State: cmds.CheckFail, Detail: "the server refused these credentials", Reason: "the server refused its credentials", Code: cmds.CodeCredsRefused}),
 		"The server does not answer": report("acme.demo.bob", false, ok("config", ""), ok("creds", ""),
 			cmds.HealthCheck{Name: "server", State: cmds.CheckFail, Detail: "the server did not answer: tls://myserver:4222"}),
 		"In a session, when another session holds this endpoint": leaseReport(cmds.LeaseOther, ""),
@@ -132,6 +147,10 @@ func TestStatusMatchesSpec(t *testing.T) {
 			code, out, errs = runStatus(report("acme.demo.bob", false, ok("config", ""), ok("sign-in", "")), cliframe.Global{})
 		case "Working, an agent session is holding it open":
 			code, out, errs = runStatus(report("acme.demo.bob", true, ok("config", ""), ok("sign-in", "")), cliframe.Global{})
+		case "With --detail, inside a session":
+			code, out, errs = runStatus(inSession(), cliframe.Global{Detail: true})
+		case "With --detail, at a shell with no session":
+			code, out, errs = runStatus(report("acme.demo.bob", false, ok("config", ""), ok("sign-in", "")), cliframe.Global{Detail: true})
 		case "In a session that cannot store arriving mail on this machine":
 			held := &fakeHealth{rep: cmds.HealthReport{Endpoint: "acme.demo.bob", MailHeld: true, Checks: []cmds.HealthCheck{ok("config", ""), ok("sign-in", "")}}}
 			code, out, errs = runStatus(held, cliframe.Global{})
@@ -157,14 +176,16 @@ func TestStatusMatchesSpec(t *testing.T) {
 			}
 			continue
 		case "As an MCP tool in a session with no endpoint named":
-			// a normal answer: the text block is the line, then the hint on the next line
+			// exit 1, so an error result: the text block is the line, then the hint on the next line
 			rep := noSessionEndpoint()
 			reg := cmdcore.NewRegistry(healthEnv(rep), cmdcore.Register(cmds.Status))
 			e, _ := reg.Lookup("status")
-			got, structured, err := e.Tool(reg.Env).CallStructured(context.Background(), nil)
-			if err != nil || got != text {
-				t.Errorf("%s: %q %v, spec %q", oc["case"], got, err, text)
+			_, _, err := e.Tool(reg.Env).CallStructured(context.Background(), nil)
+			se, isRes := err.(interface{ Structured() any })
+			if err == nil || !isRes || err.Error() != text {
+				t.Fatalf("%s: %v, spec %q", oc["case"], err, text)
 			}
+			structured := se.Structured()
 			if b, _ := json.Marshal(structured); string(b) != `{"endpoint":null,"ready":false,"online":false,"reason":"no endpoint is chosen for this session"}` {
 				t.Errorf("%s: structured %s", oc["case"], b)
 			}
@@ -278,8 +299,10 @@ func TestDoctorMatchesSpec(t *testing.T) {
 	if cmds.Doctor.Group != meta["x-group"] {
 		t.Errorf("group %q, spec %v", cmds.Doctor.Group, meta["x-group"])
 	}
-	if props := cmdcore.Schema[cmds.DoctorParams]()["properties"].(map[string]any); len(props) != 0 || len(specTool(t, "doctor")["params"].([]any)) != 0 {
-		t.Errorf("doctor takes no parameters: %v", props)
+	props := cmdcore.Schema[cmds.DoctorParams]()["properties"].(map[string]any)
+	sp := specTool(t, "doctor")["params"].([]any)
+	if len(props) != 1 || len(sp) != 1 || props["strict"] == nil || sp[0].(map[string]any)["name"] != "strict" || sp[0].(map[string]any)["type"] != "boolean" {
+		t.Errorf("doctor takes only strict: %v", props)
 	}
 	for _, x := range meta["x-output"].([]any) {
 		oc := x.(map[string]any)
@@ -316,6 +339,22 @@ func TestDoctorMatchesSpec(t *testing.T) {
 			row := strings.TrimPrefix(oc["text"].(string), "delivery  FAIL  ")
 			_, out, _ := runDoctor(report("acme.demo.bob", false, ok("config", ""),
 				cmds.HealthCheck{Name: "delivery", State: cmds.CheckFail, Detail: row}), cliframe.Global{})
+			if !strings.Contains(out, oc["text"].(string)+"\n") {
+				t.Errorf("%s: %q lacks %q", oc["case"], out, oc["text"])
+			}
+			continue
+		case "In a session whose hooks have not delivered yet", "In a session whose hooks are failing":
+			// the spec gives the delivery row alone: warn for hooks that have not run, FAIL for hooks that are failing
+			state, detail, fix := cmds.CheckWarn, cmds.ReasonHooksNotRun, ""
+			if oc["case"] == "In a session whose hooks are failing" {
+				state, detail, fix = cmds.CheckFail, cmds.ReasonHooksFailing, cmds.HooksFailingFix
+			}
+			_, out, errs := runDoctor(report("acme.demo.bob", false, ok("config", ""),
+				cmds.HealthCheck{Name: "delivery", State: state, Detail: detail, Fix: fix}), cliframe.Global{})
+			// the spec's text carries the hint line, which the command line prints on standard error
+			if hint, _, _ := strings.Cut(errs, "\n"); hint != "" {
+				out += hint + "\n"
+			}
 			if !strings.Contains(out, oc["text"].(string)+"\n") {
 				t.Errorf("%s: %q lacks %q", oc["case"], out, oc["text"])
 			}
@@ -497,8 +536,16 @@ func TestStatusAndDoctorDoorsAgree(t *testing.T) {
 			}
 			e, _ := reg.Lookup(tc.cmd)
 			text, structured, err := e.Tool(reg.Env).CallStructured(context.Background(), nil)
-			if err != nil { // a problem is a report, never an error
-				t.Fatalf("tool error %v", err)
+			// a result that exits nonzero is a report marked an error: its text and structured result are the same
+			if (err != nil) != (tcode != 0) {
+				t.Fatalf("tool error %v, exit %d", err, tcode)
+			}
+			if err != nil {
+				se, ok := err.(interface{ Structured() any })
+				if !ok {
+					t.Fatalf("tool error %v is not a report", err)
+				}
+				text, structured = err.Error(), se.Structured()
 			}
 			b, _ := json.Marshal(structured)
 			if !sameJSON(t, string(b), jo.String()) {
@@ -546,5 +593,65 @@ func TestStatusAndDoctorCouldNotTake(t *testing.T) {
 		{Name: "delivery", State: cmds.CheckFail, Detail: cmds.ReasonCouldNotTake + ": the server did not answer: tls://myserver:4222"}}}}, cliframe.Global{})
 	if !strings.Contains(out, "delivery  FAIL  this session could not take this endpoint:\n                the server did not answer: tls://myserver:4222\n") {
 		t.Errorf("doctor: %q", out)
+	}
+}
+
+func TestDoctorStrict(t *testing.T) {
+	warn := cmds.HealthCheck{Name: "refused", State: cmds.CheckWarn, Detail: "2 unverified messages were refused"}
+	for _, tc := range []struct {
+		args []string
+		code int
+	}{{nil, 0}, {[]string{"--strict"}, 1}} {
+		code, out, _ := runDoctor(report("a.b.c", false, ok("config", ""), warn), cliframe.Global{}, tc.args...)
+		if code != tc.code || !strings.HasSuffix(out, "\n\n1 warning.\n") {
+			t.Errorf("%v: %d %q", tc.args, code, out)
+		}
+	}
+	if code, _, _ := runDoctor(report("a.b.c", false, ok("config", "")), cliframe.Global{}, "--strict"); code != 0 {
+		t.Errorf("--strict with nothing wrong: %d", code)
+	}
+}
+
+// A strict doctor with only a warning is an error result in a tool, with the report and the structured result kept; without
+// strict the same report is a normal result.
+func TestDoctorToolStrictMarksTheResultAnError(t *testing.T) {
+	warn := cmds.HealthCheck{Name: "refused", State: cmds.CheckWarn, Detail: "2 unverified messages were refused", Fix: "mashctl endpoint reissue a.b.c"}
+	reg := cmdcore.NewRegistry(healthEnv(report("a.b.c", false, ok("config", ""), warn)), cmdcore.Register(cmds.Doctor))
+	e, _ := reg.Lookup("doctor")
+	tool := e.Tool(reg.Env)
+	text, structured, err := tool.CallStructured(context.Background(), json.RawMessage(`{}`))
+	if err != nil || structured == nil || !strings.Contains(text, "1 warning.") {
+		t.Fatalf("without strict: %q %v %v", text, structured, err)
+	}
+	_, _, err = tool.CallStructured(context.Background(), json.RawMessage(`{"strict":true}`))
+	se, ok := err.(interface{ Structured() any })
+	if err == nil || !ok {
+		t.Fatalf("strict with a warning is an error result, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "1 warning.\nhint: ") || strings.HasPrefix(err.Error(), "error:") {
+		t.Errorf("the report is kept as it is: %q", err.Error())
+	}
+	b, _ := json.Marshal(se.Structured())
+	if !strings.Contains(string(b), `"warnings":1`) {
+		t.Errorf("structured %s", b)
+	}
+	if _, _, err := tool.CallStructured(context.Background(), json.RawMessage(`{"strict":false}`)); err != nil {
+		t.Errorf("strict false: %v", err)
+	}
+}
+
+func TestStatusDetailReasonCode(t *testing.T) {
+	f := report("acme.demo.bob", false, ok("config", ""), ok("creds", ""), ok("server", "tls://myserver:4222"),
+		cmds.HealthCheck{Name: "sign-in", State: cmds.CheckFail, Detail: "the server refused these credentials", Reason: "the server refused its credentials", Code: cmds.CodeCredsRefused})
+	_, js, _ := runStatus(f, cliframe.Global{JSON: true, Detail: true})
+	if !strings.Contains(js, `"reason_code":"creds_refused"`) || !strings.Contains(js, `"session":null`) {
+		t.Errorf("%s", js)
+	}
+	if _, usual, _ := runStatus(f, cliframe.Global{JSON: true}); strings.Contains(usual, "reason_code") {
+		t.Errorf("usual object has reason_code: %s", usual)
+	}
+	lr := leaseReport(cmds.LeaseLost, "")
+	if _, js, _ = runStatus(lr, cliframe.Global{JSON: true, Detail: true}); !strings.Contains(js, `"reason_code":"endpoint_lost"`) {
+		t.Errorf("%s", js)
 	}
 }

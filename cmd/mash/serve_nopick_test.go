@@ -26,7 +26,7 @@ func nopickFixture(t *testing.T) (env map[string]string, address string) {
 	if err := os.WriteFile(filepath.Join(dir, address+".creds"), b, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	return map[string]string{"HOME": home, "MASH_SERVER": src["MASH_SERVER"], "MASH_INSECURE_PLAINTEXT": "1", "MASH_SETTLE_MS": "20"}, address
+	return map[string]string{"HOME": home, "MASH_SERVER": src["MASH_SERVER"], "MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION": "1", "MASH_SETTLE_MS": "20"}, address
 }
 
 func TestServeNeverAutoPicksAnEndpoint(t *testing.T) {
@@ -38,7 +38,7 @@ func TestServeNeverAutoPicksAnEndpoint(t *testing.T) {
 	}
 	const want = "No endpoint is chosen for this session.\nhint: start the session with MASH_ENDPOINT=<address>"
 	for i, tool := range []string{"status", "doctor"} {
-		if got := toolText(t, s, 10+i, tool); got != want {
+		if got := reportText(t, s, 10+i, tool); got != want {
 			t.Errorf("%s, no endpoint named: %q, want %q", tool, got, want)
 		}
 	}

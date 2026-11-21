@@ -95,11 +95,8 @@
     "recursive": true
    },
    {
-    "name": "--verbose",
-    "description": "After the usual output, print more about what was done, as 'label: value' lines.",
-    "aliases": [
-     "-v"
-    ],
+    "name": "--detail",
+    "description": "Print the fuller answer: after the usual line, more as 'label: value' lines; with --json, the fuller object.",
     "recursive": true
    },
    {
@@ -706,6 +703,7 @@
         "value": {
          "address": "acme.demo.bob",
          "installed_here": true,
+         "creds": "/home/ada/.config/mash/acme.demo.bob.creds",
          "join_file": null
         }
        },
@@ -838,7 +836,7 @@
        },
        {
         "name": "x-notes",
-        "value": "Order. The endpoint's key is cancelled on every server first; only when every server confirms is anything removed, so a failure there leaves the endpoint whole. If this machine holds the endpoint's creds file, it is set aside as <address>.creds.deleted, so mash no longer counts it as installed; --verbose says so. Nothing else on any machine is touched."
+        "value": "Order. The endpoint's key is cancelled on every server first; only when every server confirms is anything removed, so a failure there leaves the endpoint whole. If this machine holds the endpoint's creds file, it is set aside as <address>.creds.deleted, so mash no longer counts it as installed; the path is predictable and nothing prints it (settled 2026-11-20). Nothing else on any machine is touched."
        }
       ]
      },
@@ -1424,7 +1422,7 @@
           "exit": 0
          },
          {
-          "case": "With --verbose",
+          "case": "With --detail",
           "text": "Reissued credentials for acme.demo.bob\nJoin file: acme.demo.bob.join\nservers acknowledged: 2",
           "stream": "stdout",
           "exit": 0
@@ -1794,7 +1792,7 @@
       "name": "x-json",
       "value": {
        "version": "0.5.6",
-       "commit": "3f9a41c"
+       "commit": "3f9a41c2e0b7d5a1c4e08b2d77f3a95e1b6c4098"
       }
      },
      {

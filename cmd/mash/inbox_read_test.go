@@ -157,7 +157,8 @@ func TestInboxWakeSettingsFromConfig(t *testing.T) {
 	}
 	var out2, err2 bytes.Buffer
 	if code := run([]string{"serve"}, envFrom(w.env["a"]), strings.NewReader(""), &out2, &err2); code != 2 ||
-		!strings.HasPrefix(err2.String(), "error: MASH_WAKE_COUNT \"many\" is not a whole number of messages") {
+		!strings.HasPrefix(plainWarningLine.ReplaceAllString(err2.String(), ""), "error: MASH_WAKE_COUNT \"many\" is not a whole number of messages") ||
+		!strings.HasSuffix(err2.String(), "\nhint: mash serve --help\n") {
 		t.Fatalf("serve with a bad setting: %d %q %q", code, out2.String(), err2.String())
 	}
 }

@@ -38,26 +38,25 @@ func loadCfg(t *testing.T, fileBody string, env map[string]string) (config.Confi
 	return cfg, get
 }
 
-func announced(cfg config.Config, env func(string) string, sys *sysTarget) string {
+func announced(cfg config.Config, env func(string) string) string {
 	var b bytes.Buffer
-	announceTarget(cfg, env, &b, sys, true)
+	announceTarget(cfg, env, &b)
 	return b.String()
 }
 
-func TestAnnounceNamesTargetAndSources(t *testing.T) {
+// The specification's output holds no target line, with or without --detail: with nothing overridden, nothing prints.
+func TestAnnounceSaysNothingWhenNothingIsOverridden(t *testing.T) {
 	cfg, env := loadCfg(t, `{"endpoint":"fileowner.dev.x","admin_creds":"/f/admin.creds"}`,
 		map[string]string{"MASH_SERVER": "tls://scratch:4222"})
-	got := announced(cfg, env, nil)
-	want := "mashctl: target server tls://scratch:4222 (from MASH_SERVER), owner fileowner (from " + cfg.File + "), admin creds /f/admin.creds (from " + cfg.File + ")\n"
-	if got != want {
-		t.Fatalf("got %q\nwant %q", got, want)
+	if got := announced(cfg, env); got != "" {
+		t.Fatalf("got %q, want nothing", got)
 	}
 }
 
 func TestAnnounceEnvOverFileWarnsWithBothValues(t *testing.T) {
 	cfg, env := loadCfg(t, `{"servers":"tls://file:4222","endpoint":"fo.dev.x","admin_creds":"/f/a.creds","ca":"/f/ca.pem"}`,
 		map[string]string{"MASH_SERVER": "tls://env:4222", "MASH_ENDPOINT": "eo.dev.x", "MASH_ADMIN_CREDS": "/e/a.creds", "MASH_CA": "/e/ca.pem", "MASH_LAUNCH_TOKEN": "x"})
-	got := announced(cfg, env, nil)
+	got := announced(cfg, env)
 	for _, w := range []string{
 		"warning: MASH_SERVER (tls://env:4222) overrides config.json's servers (tls://file:4222); mashctl is acting on tls://env:4222.",
 		"warning: MASH_ENDPOINT (eo.dev.x) overrides config.json's endpoint (fo.dev.x)",
@@ -76,27 +75,24 @@ func TestAnnounceEnvOverFileWarnsWithBothValues(t *testing.T) {
 func TestAnnounceEnvOverFileNoWarningWithoutALaunchToken(t *testing.T) {
 	cfg, env := loadCfg(t, `{"servers":"tls://file:4222","endpoint":"fo.dev.x"}`,
 		map[string]string{"MASH_SERVER": "tls://a:4222,tls://b:4222"})
-	got := announced(cfg, env, nil)
+	got := announced(cfg, env)
 	if strings.Contains(got, "endpoint session") {
 		t.Errorf("warned on a central host:\n%s", got)
-	}
-	if !strings.Contains(got, "target server tls://a:4222,tls://b:4222 (from MASH_SERVER)") {
-		t.Errorf("the target line lacks the url:\n%s", got)
 	}
 }
 
 func TestAnnounceAgreeingOrNoFileNoWarning(t *testing.T) {
 	cfg, env := loadCfg(t, `{"servers":"tls://same:4222","endpoint":"o.dev.x"}`, map[string]string{"MASH_SERVER": "tls://same:4222", "MASH_ENDPOINT": "o.dev.x"})
-	if got := announced(cfg, env, nil); strings.Contains(got, "warning") || strings.Count(got, "\n") != 1 {
+	if got := announced(cfg, env); got != "" {
 		t.Errorf("agreeing values warned:\n%s", got)
 	}
 	cfg, env = loadCfg(t, "", map[string]string{"MASH_SERVER": "tls://e:4222", "MASH_ENDPOINT": "o.dev.x"})
-	if got := announced(cfg, env, nil); strings.Contains(got, "warning") || !strings.Contains(got, "admin creds unset") {
+	if got := announced(cfg, env); got != "" {
 		t.Errorf("no file:\n%s", got)
 	}
 	// A value only in the file is not an override.
 	cfg, env = loadCfg(t, `{"servers":"tls://file:4222","endpoint":"o.dev.x"}`, nil)
-	if got := announced(cfg, env, nil); strings.Contains(got, "warning") || !strings.Contains(got, "tls://file:4222 (from "+cfg.File+")") {
+	if got := announced(cfg, env); got != "" {
 		t.Errorf("file only:\n%s", got)
 	}
 }
@@ -104,14 +100,14 @@ func TestAnnounceAgreeingOrNoFileNoWarning(t *testing.T) {
 func TestAnnounceSessionVariablesAddTheWarning(t *testing.T) {
 	for _, v := range []string{"MASH_LAUNCH_TOKEN"} {
 		cfg, env := loadCfg(t, "", map[string]string{"MASH_SERVER": "tls://session:4222", "MASH_ENDPOINT": "o.dev.x", v: "x"})
-		got := announced(cfg, env, nil)
+		got := announced(cfg, env)
 		if !strings.Contains(got, "inside a mash session, and tls://session:4222 (MASH_SERVER) is that session's own server") {
 			t.Errorf("%s: no session warning:\n%s", v, got)
 		}
 	}
 	// The session variables alone, with the url from config.json, add nothing.
 	cfg, env := loadCfg(t, `{"servers":"tls://file:4222","endpoint":"o.dev.x"}`, map[string]string{"MASH_ENDPOINT": "o.dev.x"})
-	if got := announced(cfg, env, nil); strings.Contains(got, "warning") {
+	if got := announced(cfg, env); strings.Contains(got, "warning") {
 		t.Errorf("url from the file:\n%s", got)
 	}
 }
@@ -137,7 +133,7 @@ func TestAnnounceSessionWarningKeysOnTheLaunchTokenOrAnEnvEndpointOverAFileWithS
 		"endpoint only in file, no env":    {file, map[string]string{}, false},
 	} {
 		cfg, getenv := loadCfg(t, c.file, c.env)
-		if got := announced(cfg, getenv, nil); warned(got) != c.want {
+		if got := announced(cfg, getenv); warned(got) != c.want {
 			t.Errorf("%s: warned=%v, want %v:\n%s", name, warned(got), c.want, got)
 		}
 	}
@@ -151,7 +147,7 @@ func TestAnnounceMasksURLPasswordAndNeverPrintsCreds(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg, env := loadCfg(t, `{"servers":"tls://u:filepass@file:4222"}`, map[string]string{"MASH_SERVER": "tls://bob:hunter2@h:4222,tls://h2:4222", "MASH_ENDPOINT": "o.dev.n", "MASH_ADMIN_CREDS": creds, "MASH_LAUNCH_TOKEN": "t"})
-	got := announced(cfg, env, nil)
+	got := announced(cfg, env)
 	for _, bad := range []string{"hunter2", "filepass", secret, "eyJ", "BEGIN"} {
 		if strings.Contains(got, bad) {
 			t.Errorf("printed %q:\n%s", bad, got)
@@ -162,19 +158,9 @@ func TestAnnounceMasksURLPasswordAndNeverPrintsCreds(t *testing.T) {
 	}
 }
 
-func TestAnnounceSysCredsPathWhenKnown(t *testing.T) {
-	cfg, env := loadCfg(t, `{"system_creds":"/s/sys.creds"}`, map[string]string{"MASH_SERVER": "tls://h:1", "MASH_ENDPOINT": "o.dev.x"})
-	if got := announced(cfg, env, &sysTarget{}); !strings.Contains(got, ", system creds /s/sys.creds (from config.json)\n") {
-		t.Errorf("config:\n%s", got)
-	}
-	if got := announced(cfg, env, nil); strings.Contains(got, "system creds") {
-		t.Errorf("no sys target asked:\n%s", got)
-	}
-}
-
 // The verbs, in process against a real server.
 
-func TestTargetLineComesBeforeAWriteAndOfflineVerbsPrintNone(t *testing.T) {
+func TestNoTargetLineEvenWithDetail(t *testing.T) {
 	h := newFleetEnv(t)
 	h.env["MASH_LAUNCH_TOKEN"] = "sessionagent"
 
@@ -182,27 +168,11 @@ func TestTargetLineComesBeforeAWriteAndOfflineVerbsPrintNone(t *testing.T) {
 	if code != 0 || strings.Contains(errb, "target server") || !strings.Contains(out, "inbox size:") {
 		t.Errorf("limits show: %d %q", code, errb)
 	}
-	if _, errb, _ := h.run("endpoint", "permissions", "o.g.a"); strings.Contains(errb, "target server") {
-		t.Errorf("endpoint permissions: %q", errb)
-	}
-	if _, errb, _ := h.run("policy"); strings.Contains(errb, "target server") {
-		t.Errorf("policy: %q", errb)
-	}
-	if _, errb, _ := h.run("init", "--help"); strings.Contains(errb, "target server") {
-		t.Errorf("init --help: %q", errb)
-	}
-
-	// the specification's output of a verb holds no target line: it comes with --verbose only
-	for _, args := range [][]string{{"limits", "apply"}, {"endpoint", "delete", "o.g.zz", "--yes"}} {
-		if _, errb, _ := h.run(args...); strings.Contains(errb, "target server") {
-			t.Errorf("%v: a target line without --verbose: %q", args, errb)
-		}
-	}
-	for _, args := range [][]string{{"--verbose", "limits", "apply"}, {"endpoint", "delete", "o.g.zz", "--yes", "--verbose"}} {
+	// the specification's output of a verb holds no target line, with --detail or without; the session warning stays
+	for _, args := range [][]string{{"limits", "apply"}, {"--detail", "limits", "apply"}, {"endpoint", "delete", "o.g.zz", "--yes"}, {"endpoint", "delete", "o.g.zz", "--yes", "--detail"}} {
 		_, errb, _ := h.run(args...)
-		want := "mashctl: target server " + h.e.URL + " (from MASH_SERVER), owner " + h.e.Owner + " (from MASH_ENDPOINT), admin creds " + h.e.AdminCreds + " (from MASH_ADMIN_CREDS)\n"
-		if !strings.HasPrefix(errb, want) {
-			t.Errorf("%v: stderr %q\nwant prefix %q", args, errb, want)
+		if strings.Contains(errb, "target server") {
+			t.Errorf("%v: a target line: %q", args, errb)
 		}
 		if !strings.Contains(errb, "inside a mash session") {
 			t.Errorf("%v: no session warning in %q", args, errb)

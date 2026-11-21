@@ -56,7 +56,7 @@ func TestServeMatchesSpec(t *testing.T) {
 				inR, inW := io.Pipe()
 				var out, errb lockedBuf
 				done := make(chan int, 1)
-				go func() { done <- run([]string{"serve"}, envFrom(env), inR, &out, &errb) }()
+				go func() { done <- run([]string{"serve"}, envFrom(env), inR, &out, quiet(&errb)) }()
 				if _, err := io.WriteString(inW, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}`+"\n"); err != nil {
 					t.Fatal(err)
 				}
@@ -85,7 +85,7 @@ func TestServeMatchesSpec(t *testing.T) {
 				}
 				defer force(true)()
 				var out, errb bytes.Buffer
-				code := run([]string{"serve"}, envFrom(env), strings.NewReader(""), &out, &errb)
+				code := run([]string{"serve"}, envFrom(env), strings.NewReader(""), &out, quiet(&errb))
 				if code != oc.Exit || out.Len() != 0 || errb.String() != oc.Text+"\n" {
 					t.Errorf("exit %d stdout %q stderr %q, spec exit %d stderr %q", code, out.String(), errb.String(), oc.Exit, oc.Text+"\n")
 				}

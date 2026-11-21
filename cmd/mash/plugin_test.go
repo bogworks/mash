@@ -3,10 +3,7 @@ package main
 import (
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"testing"
-
-	"github.com/bogworks/mash/plugin"
 )
 
 func readJSON(t *testing.T, path string, v any) {
@@ -58,28 +55,16 @@ func TestPluginManifests(t *testing.T) {
 	}
 }
 
+// The marketplace is published from the repository's own .claude-plugin/marketplace.json: its owner is the plugin's author.
 func TestMarketplaceOwnerFromAuthor(t *testing.T) {
-	dir := t.TempDir()
-	if err := exportPlugin(dir, plugin.Files); err != nil {
-		t.Fatal(err)
-	}
 	var m struct{ Owner map[string]string }
-	readJSON(t, filepath.Join(dir, ".claude-plugin", "marketplace.json"), &m)
-	if m.Owner["name"] != "Bogworks" || m.Owner["url"] != "https://github.com/bogworks" || len(m.Owner) != 2 {
-		t.Fatalf("owner = %v", m.Owner)
+	readJSON(t, "../../.claude-plugin/marketplace.json", &m)
+	var p struct{ Author map[string]string }
+	readJSON(t, "../../plugin/.claude-plugin/plugin.json", &p)
+	if len(p.Author) != 2 || p.Author["name"] == "" || p.Author["url"] == "" {
+		t.Fatalf("plugin author = %v, want a name and a url", p.Author)
 	}
-}
-
-func TestMarketplaceWithoutAuthor(t *testing.T) {
-	b, err := marketplaceJSON([]byte(`{"description":"d","version":"1"}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var m struct{ Owner map[string]string }
-	if err := json.Unmarshal(b, &m); err != nil {
-		t.Fatal(err)
-	}
-	if m.Owner["name"] != "mash" || len(m.Owner) != 1 {
-		t.Fatalf("owner = %v", m.Owner)
+	if len(m.Owner) != 2 || m.Owner["name"] != p.Author["name"] || m.Owner["url"] != p.Author["url"] {
+		t.Fatalf("marketplace owner = %v, plugin author = %v: they must be the same", m.Owner, p.Author)
 	}
 }
