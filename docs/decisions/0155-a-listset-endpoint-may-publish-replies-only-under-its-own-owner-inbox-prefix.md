@@ -46,6 +46,7 @@ and AT-020 check that cross-group replies still work.
 
 * Good, because an endpoint cannot publish into another range's inbox prefix, and the two permission sets agree.
 * Good, because replies across owner groups of one range still work.
+* Neutral, because the compiled output of every endpoint changes (the reply publish line and the reply subscribe prefix), so the signed digest of any list set compiled before this change no longer matches a recompile. No shipped program applies a list set: `go list -deps ./cmd/mash ./cmd/mashctl` on main lists none of `internal/listset`, `internal/policyapply`, `internal/policyserve` or `internal/reconcile` (v0.5.5's `cmd` imports none of them either), so no deployment holds a ledger signed over the old grant. The first release that applies a list set is the 0.6.0 policy work, which starts from the narrowed grant. Hence no upgrade path, migration or compatibility code is added (the hard-cut rule).
 * Neutral, because ADR 0007's publish line `_INBOX.>` is narrowed here for listset endpoints; the rest of ADR 0007 stands.
 
 ## Pros and Cons of the Options
