@@ -32,33 +32,59 @@ The requirements apply to mash 0.5.6. They are what mash checks or creates; wher
 
 ## Getting nats-server and the nats command
 
-**nats-server.** Any way of installing 2.10.7 or newer works. Two things to know about Debian and Ubuntu's package (`sudo apt install nats-server`; Debian 13 gives 2.10.27):
+Install both as your own user, from their GitHub releases, into `~/.local/bin`. You need no `sudo`. You need `curl`, `sha256sum` (on macOS, `shasum -a 256`) and `tar`. The commands below use nats-server 2.15.1 and natscli 0.5.2, the versions we tested, on Linux amd64.
 
-- The binary goes in `/usr/sbin/nats-server`, which is not on a normal user's `PATH`. Run it by that path, or add the folder for the session: `export PATH="$PATH:/usr/sbin"`. The setup script looks for `nats-server` on `PATH` only, so without this it reports nats-server as missing.
-- The package also starts a system nats-server at boot (`nats-server.service`, listening on `127.0.0.1:4222`), which is not in operator mode. mash does not use it. If you don't need it, stop it and keep it from starting again: `sudo systemctl disable --now nats-server`. If you leave it running, the setup script takes the next free port (for example 4223) instead.
+First make the folder:
 
-Or take a release from [nats-io/nats-server releases](https://github.com/nats-io/nats-server/releases), which also lists its checksums.
+```sh
+install -d -m 755 ~/.local/bin
+```
 
-**The `nats` command** (natscli). The setup script needs it; mash itself does not. On Linux amd64, with `curl`, `sha256sum` and `unzip` installed (`sudo apt install unzip`), this installs v0.5.2, the version we tested:
+**nats-server:**
+
+```sh
+V=2.15.1 OS=linux ARCH=amd64
+curl -fsSLO https://github.com/nats-io/nats-server/releases/download/v$V/nats-server-v$V-$OS-$ARCH.tar.gz
+curl -fsSL -o nats-server-SHA256SUMS https://github.com/nats-io/nats-server/releases/download/v$V/SHA256SUMS
+grep " nats-server-v$V-$OS-$ARCH.tar.gz\$" nats-server-SHA256SUMS | sha256sum -c -
+tar -xzf nats-server-v$V-$OS-$ARCH.tar.gz
+install -m 0755 nats-server-v$V-$OS-$ARCH/nats-server ~/.local/bin/nats-server
+```
+
+**The `nats` command** (natscli). The setup script needs it; mash itself does not. natscli ships as a zip file. If you have `unzip`, use `unzip -q` in place of the `python3` line.
 
 ```sh
 V=0.5.2 OS=linux ARCH=amd64
 curl -fsSLO https://github.com/nats-io/natscli/releases/download/v$V/nats-$V-$OS-$ARCH.zip
-curl -fsSLO https://github.com/nats-io/natscli/releases/download/v$V/SHA256SUMS
-grep " nats-$V-$OS-$ARCH.zip\$" SHA256SUMS | sha256sum -c -
-unzip -q nats-$V-$OS-$ARCH.zip
-mkdir -p ~/.local/bin && install -m 0755 nats-$V-$OS-$ARCH/nats ~/.local/bin/nats
+curl -fsSL -o nats-SHA256SUMS https://github.com/nats-io/natscli/releases/download/v$V/SHA256SUMS
+grep " nats-$V-$OS-$ARCH.zip\$" nats-SHA256SUMS | sha256sum -c -
+python3 -m zipfile -e nats-$V-$OS-$ARCH.zip .
+install -m 0755 nats-$V-$OS-$ARCH/nats ~/.local/bin/nats
+```
+
+Each checksum line must end in `OK`. If one doesn't, stop and don't install that file. Then make sure `~/.local/bin` is on your `PATH`, and check:
+
+```sh
+export PATH="$HOME/.local/bin:$PATH"
+nats-server --version
 nats --version
 ```
 
-The checksum line should end in `OK`, and `nats --version` prints `0.5.2`. Make sure `~/.local/bin` is on your `PATH`. natscli publishes the same files for `ARCH=arm64` and for `OS=darwin`; we tested only `linux` and `amd64`.
+They print `nats-server: v2.15.1` and `0.5.2`. Both projects publish the same files for `ARCH=arm64` and for `OS=darwin`. We tested only `linux` and `amd64`.
+
+### If you already have a packaged server
+
+Don't install nats-server from your system's packages for mash. If one is already installed (for example by `apt install nats-server` on Debian or Ubuntu), know two things about it:
+
+- **It runs a server with no authentication.** The package starts its own nats-server as a system service (`nats-server.service`, from `/etc/nats-server.conf`). It starts at boot and listens on `127.0.0.1:4222` with no authentication, so any process on the machine can use it. mash does not use it. Stop it and keep it from starting again (this needs an administrator): `sudo systemctl disable --now nats-server`.
+- **Its binary is in `/usr/sbin`.** That is `/usr/sbin/nats-server`, which is not on a normal user's `PATH`. The setup script looks for `nats-server` on `PATH` only, so it reports nats-server as missing. Install your own copy into `~/.local/bin` as above. The setup script picks a free port if 4222 is taken.
 
 ## TLS
 
 Every connection mash makes needs TLS, to any host, including `127.0.0.1`. That covers `mashctl`, the `mash` commands and a session's own connection.
 
 - The URL must start with `tls://` or `wss://`. A `nats://`, `ws://` or scheme-less URL is refused before any connection is made, with exit code 2.
-- The one override is the environment variable `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1`. There is no flag and no config key for it. Use it for a throwaway test server only.
+- For reference only: the environment variable `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1` turns this check off, and every command then warns that encryption is off. It exists for mash's own tests. Do not set it: anyone on the network could then read your mail.
 - **A private CA is supported.** Set `ca` in the setup file (or `MASH_CA`, or `--ca`) to the PEM file of the CA that signed the server's certificate. When you set it, it replaces the system trust store; it does not add to it. Without it, the server's certificate must chain to your system's trusted roots.
 - A server that requires client certificates: set `tls_cert` and `tls_key` (or `MASH_TLS_CERT` and `MASH_TLS_KEY`) together, in `config.json` or the environment. The setup file does not carry them.
 - The certificate must name the host you put in the URL. This page's example uses `127.0.0.1`.
