@@ -37,7 +37,18 @@ func IsDocsPath(p string) bool {
 			return false
 		}
 	}
-	return strings.HasPrefix(p, "docs/") || strings.HasSuffix(p, ".md")
+	// Documentation is Markdown anywhere, and under docs/ only plain-text formats (security-review F1 on the docs queue).
+	if strings.HasSuffix(p, ".md") {
+		return true
+	}
+	if strings.HasPrefix(p, "docs/") {
+		for _, ext := range []string{".txt", ".rst", ".adoc", ".csv", ".log"} {
+			if strings.HasSuffix(p, ext) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // isAgentInstruction: a path an agent reads as instructions is code in effect (ADR 0157), wherever it sits and in any letter case

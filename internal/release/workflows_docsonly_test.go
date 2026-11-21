@@ -144,7 +144,13 @@ func TestDocsOnly_classifier(t *testing.T) {
 		code             string
 	}{
 		{"docs and markdown only", pr, "f/x", []string{"docs/faq.md", "README.md", "CONTRIBUTING.md"}, "false"},
-		{"a non-markdown file under docs", pr, "f/x", []string{"docs/plans/p.txt", "docs/images/a.svg", "docs/demo/two-sessions.cast"}, "false"},
+		{"plain text under docs", pr, "f/x", []string{"docs/plans/p.txt", "docs/a.rst", "docs/b.adoc", "docs/c.csv", "docs/evidence/x/timeline.log"}, "false"},
+		{"an svg under docs is active material", pr, "f/x", []string{"docs/images/a.svg"}, "true"},
+		{"a cast under docs", pr, "f/x", []string{"docs/demo/two-sessions.cast"}, "true"},
+		{"a shell script under docs (security-review F1)", pr, "f/x", []string{"docs/evidence/2026-11-02-heartbeat-fanout/run.sh"}, "true"},
+		{"a python script under docs", pr, "f/x", []string{"docs/evidence/x/harness/drv.py"}, "true"},
+		{"a data file under docs", pr, "f/x", []string{"docs/x/data.json", "docs/x/conf.yaml", "docs/x/c.toml"}, "true"},
+		{"a file without an extension under docs", pr, "f/x", []string{"docs/x/Makefile"}, "true"},
 		{"an ADR only", pr, "f/x", []string{"docs/decisions/0099-x.md", "docs/decisions/INDEX.md"}, "false"},
 		{"docs and a Go file", pr, "f/x", []string{"docs/a.md", "cmd/mash/cli.go"}, "true"},
 		{"a Go file only", pr, "f/x", []string{"internal/x.go"}, "true"},

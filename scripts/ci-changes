@@ -56,8 +56,11 @@ is_docs() {
 	case "$lower" in
 	docs/*.png | docs/*.jpg | docs/*.jpeg | docs/*.gif | docs/*.ico | docs/*.pdf | docs/*.woff | docs/*.woff2) return 1 ;;
 	esac
+	# Documentation is Markdown anywhere, and under docs/ only plain-text formats (security-review F1 on the docs queue): a script, a data or
+	# config file, a .cast or an .svg under docs/ is runnable or active material and stays code.
 	case "$p" in
-	docs/* | *.md) return 0 ;;
+	*.md) return 0 ;;
+	docs/*.txt | docs/*.rst | docs/*.adoc | docs/*.csv | docs/*.log) return 0 ;;
 	esac
 	return 1
 }
