@@ -7,10 +7,10 @@ Release tags are annotated but not signed, so there is no tag signature to check
 ## What you need
 
 - `curl`, and `sha256sum` (on macOS, `shasum -a 256`).
-- The [GitHub CLI](https://cli.github.com/) (`gh`) **2.68.0 or newer**. The checks below pin the release tag with `--source-ref`, which first appeared in gh 2.68.0. Older versions either lack `gh attestation` entirely (Debian 13 ships 2.46, Ubuntu 24.04 ships 2.45) or reject `--source-ref`. Check yours with `gh --version`. Get a current gh from [cli.github.com](https://cli.github.com/) or its [releases page](https://github.com/cli/cli/releases).
+- The [GitHub CLI](https://cli.github.com/) (`gh`) **2.102.0 or newer**. The checks below pin the release tag with `--source-ref`, which first appeared in gh 2.68.0, and the release workflow with `--signer-workflow`, which gh 2.101.0 and older check only as a prefix, so an attestation from another workflow whose name starts the same way can pass ([GHSA-wjmr-j3rp-mh2g](https://github.com/cli/cli/security/advisories/GHSA-wjmr-j3rp-mh2g), fixed in 2.102.0). Older versions lack `gh attestation` entirely (Debian 13 ships 2.46, Ubuntu 24.04 ships 2.45). Check yours with `gh --version`. Get a current gh from [cli.github.com](https://cli.github.com/) or its [releases page](https://github.com/cli/cli/releases).
 - A network connection to GitHub. With the bundle from step 1, the checks need no GitHub login.
 
-`install.sh` runs the same check when it finds gh. With gh 2.48 to 2.67 it stops and installs nothing ([#1153](https://github.com/bogworks/mash/issues/1153)). Upgrade gh, or run `install.sh` with gh off your `PATH`, in which case it checks the checksums only.
+`install.sh` runs the same check when it finds gh. With gh 2.48 to 2.67 it stops and installs nothing ([#1153](https://github.com/bogworks/mash/issues/1153)). With gh 2.68 to 2.101 it runs the check but does not refuse the older gh. Upgrade gh, or run `install.sh` with gh off your `PATH`, in which case it checks the checksums only.
 
 ## 1. Download
 
