@@ -95,7 +95,23 @@ func confMidPattern(text string) (string, bool) {
 // output, and the conformance test skips it (rules.json, "A case written in brackets is a description").
 func confIsDescription(text string) bool {
 	t := strings.TrimSpace(text)
-	return len(t) >= 2 && strings.HasPrefix(t, "(") && strings.HasSuffix(t, ")")
+	if len(t) < 2 || t[0] != '(' || t[len(t)-1] != ')' {
+		return false
+	}
+	// the opening bracket must close at the very end: "(a) and (b)" is not one pair around the whole text
+	depth := 0
+	for i := 0; i < len(t); i++ {
+		switch t[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 && i != len(t)-1 {
+				return false
+			}
+		}
+	}
+	return depth == 0
 }
 
 // confOutCase is one x-output case.

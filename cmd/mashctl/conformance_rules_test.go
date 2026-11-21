@@ -55,15 +55,16 @@ func TestConfMidCauseCompare(t *testing.T) {
 func TestConfIsDescription(t *testing.T) {
 	for text, want := range map[string]bool{
 		"(the same JSON as --json: this command prints data,\n for pasting into a NATS configuration)": true,
-		"  (words)\n": true,
-		"()":          true,
-		"(a) and (b)": true, // starts and ends in brackets: a description
-		"(open":       false,
-		"close)":      false,
-		"x (words)":   false,
-		"(words) x":   false,
-		"":            false,
-		"(":           false,
+		"  (words)\n":    true,
+		"()":             true,
+		"(a) and (b)":    false, // the first bracket closes before the end: not one pair around the whole text
+		"(a (nested) b)": true,
+		"(open":          false,
+		"close)":         false,
+		"x (words)":      false,
+		"(words) x":      false,
+		"":               false,
+		"(":              false,
 	} {
 		if got := confIsDescription(text); got != want {
 			t.Errorf("%q: %v, want %v", text, got, want)
