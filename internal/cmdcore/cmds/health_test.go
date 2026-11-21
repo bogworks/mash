@@ -41,6 +41,14 @@ func refusedSignIn() *fakeHealth {
 		{Name: "refused", State: cmds.CheckWarn, Detail: "3 unverified messages were refused"}}}}
 }
 
+// deletedEndpoint is the report of the specification's "The endpoint was deleted" case.
+func deletedEndpoint() *fakeHealth {
+	return report("acme.demo.bob", false, ok("config", ""), ok("creds", ""), ok("server", "tls://myserver:4222"),
+		cmds.HealthCheck{Name: "sign-in", State: cmds.CheckFail, Detail: cmds.ReasonEndpointDeleted, Fix: cmds.EndpointDeletedFix, Code: cmds.CodeEndpointDeleted},
+		cmds.HealthCheck{Name: "delivery", State: cmds.CheckSkip, Detail: "needs sign-in"},
+		cmds.HealthCheck{Name: "refused", State: cmds.CheckOK, Detail: "no unverified mail was refused"})
+}
+
 // skippedAfterServer is the report of the specification's "A check that could not run" case.
 func skippedAfterServer() *fakeHealth {
 	return report("acme.demo.bob", false, ok("config", ""), ok("creds", ""),
@@ -359,6 +367,18 @@ func TestDoctorMatchesSpec(t *testing.T) {
 				t.Errorf("%s: %q lacks %q", oc["case"], out, oc["text"])
 			}
 			continue
+		case "The endpoint was deleted":
+			f = deletedEndpoint()
+			// the tool says the same words, as an error result carrying the report
+			mcp := ""
+			for _, m := range specTool(t, "doctor")["errors"].([]any) {
+				if m.(map[string]any)["case"] == oc["case"] {
+					mcp, _ = m.(map[string]any)["text"].(string)
+				}
+			}
+			if mcp != oc["text"] {
+				t.Errorf("%s: mcp spec text %q, cli spec text %q", oc["case"], mcp, oc["text"])
+			}
 		case "The server's certificate is not trusted", "The server does not offer encryption":
 			// the spec gives the server row alone: the row of a report with that detail is word for word the spec's
 			row := strings.TrimPrefix(oc["text"].(string), "server    FAIL  ")
@@ -523,6 +543,7 @@ func TestStatusAndDoctorDoorsAgree(t *testing.T) {
 		{"doctor no endpoint", "doctor", noSessionEndpoint()},
 		{"status no endpoint", "status", noSessionEndpoint()},
 		{"doctor skipped rows", "doctor", skippedAfterServer()},
+		{"doctor deleted", "doctor", deletedEndpoint()},
 		{"doctor delivery fail", "doctor", report("a.b.c", false, ok("config", ""), cmds.HealthCheck{Name: "delivery", State: cmds.CheckFail, Detail: cmds.ReasonMailHeld + ": ~/.local/state/mash/a.b.c"})},
 		{"status mail held", "status", &fakeHealth{rep: cmds.HealthReport{Endpoint: "a.b.c", MailHeld: true, Checks: allWell().rep.Checks}}},
 	} {

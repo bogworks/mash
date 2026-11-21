@@ -814,6 +814,11 @@ func (e *Endpoint) SendDetailed(ctx context.Context, to, text string, o SendOpti
 			e.refusals.markDirty(msg.Subject)
 			return SendResult{}, &SendTimeoutError{To: to, Key: key, Err: err, Ambiguous: e.refusals.sawAmbiguous(msg.Subject)}
 		}
+		// A suspended recipient's inbox stream takes no subject its senders can reach (ADR 0057), so no stream answers
+		// the publish. The sender can see nothing more of it than that.
+		if errors.Is(err, jetstream.ErrNoStreamResponse) || errors.Is(err, nats.ErrNoResponders) {
+			return SendResult{}, &RecipientSuspendedError{To: sap.Display(to), Err: err}
+		}
 		return SendResult{}, fmt.Errorf("mash: send to %s: %w", sap.Display(to), err)
 	}
 	if !ack.Duplicate {
@@ -894,6 +899,18 @@ func (e *Endpoint) lookup(ctx context.Context, name string) (store.Record, error
 	}
 	return rec, nil
 }
+
+// RecipientSuspendedError is the error for a send to an endpoint whose inbox takes no mail: no stream answered the
+// publish, which is how a suspended endpoint (mashctl endpoint suspend) looks to its senders.
+type RecipientSuspendedError struct {
+	To  string // the recipient's address
+	Err error  // what the publish returned
+}
+
+func (e *RecipientSuspendedError) Error() string {
+	return fmt.Sprintf("mash: send to %s: %v", e.To, e.Err)
+}
+func (e *RecipientSuspendedError) Unwrap() error { return e.Err }
 
 // NoEndpointError is the error for a recipient that is not in the directory.
 type NoEndpointError struct{ Name string }
@@ -1061,9 +1078,25 @@ func (e *Endpoint) ReadInbox(ctx context.Context, q InboxQuery) (InboxRead, erro
 		return InboxRead{}, fmt.Errorf("mash: inbox: %w", err)
 	}
 	mails := map[uint64]render.Mail{}
+	// A message read in this wave that toMail drops (its sender is no longer verified, say) is not shown, so it is not
+	// counted. One already recorded as refused is out of the total (refusedStored); any other is taken off here, and off
+	// the waiting count when it is above the acknowledged floor (the same approximation as "new"). Only the messages
+	// read in this wave are examined: the listed ones and the newest UrgentLook waiting; an older waiting message that
+	// would be dropped is still counted.
+	dropped := map[uint64]bool{}
+	id := e.inboxID.Load()
 	for n, raw := range got {
 		if m, ok := e.toMail(raw); ok {
 			mails[n] = m
+			continue
+		}
+		dropped[n] = true
+		if id != nil && e.refusedSeq(n, *id) {
+			continue
+		}
+		out.State.Total = max(out.State.Total-1, 0)
+		if n > st.AckFloor {
+			out.State.Waiting = max(out.State.Waiting-1, 0)
 		}
 	}
 	for _, n := range firstBatch {
@@ -1081,7 +1114,7 @@ func (e *Endpoint) ReadInbox(ctx context.Context, q InboxQuery) (InboxRead, erro
 	if q.After == 0 {
 		sortMail(out.Mail)
 	}
-	if st.Waiting > 0 {
+	if out.State.Waiting > 0 {
 		for n, m := range mails {
 			if n > st.AckFloor && m.Urgent {
 				out.NewUrgent++
@@ -1090,6 +1123,9 @@ func (e *Endpoint) ReadInbox(ctx context.Context, q InboxQuery) (InboxRead, erro
 		oldest := time.Time{}
 		for n, tries := lower, 0; n <= last && tries < oldestLookups; n, tries = n+1, tries+1 {
 			raw := got[n]
+			if dropped[n] { // not shown: not the oldest waiting
+				continue
+			}
 			if raw == nil && !want[n] { // the first was gone: look at the next
 				r, err := s.GetMsg(ctx, n)
 				if errors.Is(err, jetstream.ErrMsgNotFound) {

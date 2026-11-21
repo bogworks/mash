@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"sync"
@@ -246,7 +247,7 @@ func unixRFC3339(sec int64) string {
 func checkCredsFor(path, name string) error {
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("mash: credentials: %w", err)
+		return credsReadError(path, err)
 	}
 	if err := natsauth.CheckCreds(path, raw); err != nil {
 		return err
@@ -269,10 +270,28 @@ func checkCredsFor(path, name string) error {
 	return &sentinelError{kind: ErrCredsMismatch, err: fmt.Errorf("mash: the credentials in %s do not match endpoint %s (they are for another endpoint)", path, sap.Display(name))}
 }
 
+// CredsMissingError is the failure to open an endpoint whose creds file is not there. Path is the file as it was asked
+// for; the text is the usual one, and a caller words it for the person with Path.
+type CredsMissingError struct {
+	Path string
+	Err  error
+}
+
+func (e *CredsMissingError) Error() string { return "mash: credentials: " + e.Err.Error() }
+func (e *CredsMissingError) Unwrap() error { return e.Err }
+
+// credsReadError is the failure of reading the creds file at path: a CredsMissingError for a file that is not there.
+func credsReadError(path string, err error) error {
+	if errors.Is(err, fs.ErrNotExist) {
+		return &CredsMissingError{Path: path, Err: err}
+	}
+	return fmt.Errorf("mash: credentials: %w", err)
+}
+
 func readIdentity(path string) (sap.Identity, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return sap.Identity{}, fmt.Errorf("mash: credentials: %w", err)
+		return sap.Identity{}, credsReadError(path, err)
 	}
 	return sap.IdentityFromCredsAt(path, raw)
 }

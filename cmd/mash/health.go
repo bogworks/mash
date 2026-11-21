@@ -207,7 +207,7 @@ func (h *healthSvc) signInCheck(ctx context.Context) (c cmds.HealthCheck, online
 			c.Detail = "the server refused the client certificate: " + config.RedactURL(h.cfg.URL)
 			c.Fix, c.Code = "set tls_cert and tls_key, or MASH_TLS_CERT and MASH_TLS_KEY, to a certificate the server's CA signed", cmds.CodeCredsRefused
 		case errors.Is(err, endpoint.ErrNotProvisioned):
-			c.Detail, c.Code = redactText(strings.TrimPrefix(msg, "mash: ")), cmds.CodeEndpointDeleted
+			c.Detail, c.Fix, c.Code = cmds.ReasonEndpointDeleted, cmds.EndpointDeletedFix, cmds.CodeEndpointDeleted
 		default:
 			c.Detail, c.Code = redactText(strings.TrimPrefix(msg, "mash: ")), cmds.CodeUnknown
 		}

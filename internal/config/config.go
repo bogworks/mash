@@ -43,6 +43,7 @@ type Config struct {
 	// ExplicitOwner is the owner mashctl acts for: the owner part of an endpoint that was set (--endpoint, MASH_ENDPOINT,
 	// config.json "endpoint"), else config.json "owner". It is never taken from an installed endpoint's creds file.
 	ExplicitOwner   string
+	Home            string        // the home folder the configuration was loaded for ("" when unknown): paths are shown with ~ for it
 	StateDir        string        // $MASH_STATE_DIR, else $XDG_STATE_HOME/mash, else ~/.local/state/mash: holds spool/ and hook.log
 	Name            string        // the endpoint's instance token: the name part of the endpoint address; empty = inert
 	Group           string        // the endpoint's group token: the group part of the endpoint address; no default
@@ -530,7 +531,7 @@ func loadPicking(lookup Lookup, home string, autoPick bool) (Config, error) {
 		}
 	}
 	dir := ConfigDir(env, home)
-	c := Config{WakeCount: DefaultWakeCount, WakeAge: DefaultWakeAge, WakeAgeText: DefaultWakeAgeText, SettleMS: 100, BatchMsgs: 10, BatchBytes: 16384, IdleWake: 45 * time.Second, RelayWindow: DefaultRelayWindow, OpenTimeout: DefaultOpenTimeout, CallTimeout: DefaultCallTimeout, Dir: dir, StateDir: state, Limits: store.DefaultLimits()}
+	c := Config{WakeCount: DefaultWakeCount, WakeAge: DefaultWakeAge, WakeAgeText: DefaultWakeAgeText, SettleMS: 100, BatchMsgs: 10, BatchBytes: 16384, IdleWake: 45 * time.Second, RelayWindow: DefaultRelayWindow, OpenTimeout: DefaultOpenTimeout, CallTimeout: DefaultCallTimeout, Dir: dir, Home: home, StateDir: state, Limits: store.DefaultLimits()}
 
 	var f file
 	var raw []byte

@@ -104,6 +104,10 @@ func sendOn(ctx context.Context, ep *endpoint.Endpoint, to, text string, o cmds.
 		if errors.As(err, &ne) {
 			return cmds.SendReceipt{}, cmds.ErrNoSuchEndpoint
 		}
+		var rs *endpoint.RecipientSuspendedError
+		if errors.As(err, &rs) {
+			return cmds.SendReceipt{}, cmds.ErrRecipientSuspended
+		}
 		return cmds.SendReceipt{}, err
 	}
 	return cmds.SendReceipt{Number: int(res.Seq), Duplicate: res.Duplicate, Retagged: retagged, To: sap.Display(sap.KeyOf(to)), Kind: string(k)}, nil
@@ -122,7 +126,10 @@ func checkSend(o cmds.SendOptions) *cliframe.Error {
 // openFailure words a failure to open the endpoint the way the rules do: the server refusing the credentials, and the
 // server not answering, each in its own form. Any other error is returned as it is.
 func openFailure(cfg config.Config, err error) error {
+	var cm *endpoint.CredsMissingError
 	switch {
+	case errors.As(err, &cm):
+		return cmdcore.NoCredentials(cfg.DisplayName(), config.TildeIn(cm.Path, cfg.Home))
 	case endpoint.IsAuthFailure(err):
 		return framed(cfg.DisplayName(), err)
 	case transient(err) || strings.Contains(err.Error(), "no servers available"):

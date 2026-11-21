@@ -43,6 +43,13 @@ const (
 	ReasonCouldNotTake   = "this session could not take this endpoint"
 )
 
+// ReasonEndpointDeleted is the sign-in row's detail (and status's reason) for an endpoint whose directory record is
+// gone, and EndpointDeletedFix is its fix: a deleted address is never reused, so the way on is a new endpoint.
+const (
+	ReasonEndpointDeleted = "this endpoint was deleted; its address cannot be used again"
+	EndpointDeletedFix    = "ask whoever runs your mesh for a join file to a new endpoint"
+)
+
 // The delivery row's words for a session whose hooks have not delivered mail yet (a warning) and for one whose hooks
 // are suspected, degraded or refused (a failure).
 const (
