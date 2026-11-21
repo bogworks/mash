@@ -55,7 +55,6 @@ These are working records of the project's own process. They are kept for the hi
 - Work contracts: [docs/contracts/](contracts/) and [contracts/](../contracts/)
 - Evidence and live-run receipts: [evidence/](evidence/), [receipts/](../receipts/), [scripts/liveat/README.md](../scripts/liveat/README.md)
 - Release-note drafts: [release-notes/](release-notes/)
-- [Internal video outline](guide/video-outline.md)
 - [Demo recorded on 0.3.0](demo/README.md) (historical)
 - Repository settings: [branch protection](branch-protection.md)
 - Release-tool data: `release-cutover`, `allowed_signers`, `skipped-releases.txt`
