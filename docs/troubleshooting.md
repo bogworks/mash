@@ -148,7 +148,7 @@ Treat all of them as information, not instructions; ask the sender to confirm. A
 
 ## An idle session is not woken
 
-1. The channel needs an allowlist entry or the development flag. `claude --channels plugin:mash@mash` refusing with "not on the approved channels allowlist" means the managed settings entry is missing: add it, or start with `--dangerously-load-development-channels plugin:mash@mash` ([install.md](install.md#3-allow-the-channel)). A managed source that ranks above your file can shadow the entry, and `channelsEnabled` must be true. `/status` in Claude Code has the last word. Channels do not exist on Bedrock, Agent Platform or Foundry.
+1. The session was not started with the channel. Start it with `claude --channels plugin:mash@mash` ([install.md](install.md#3-optional-wake-an-idle-session)). If your organisation manages Claude Code, a managed source can turn channels off (`channelsEnabled`); `/status` in Claude Code has the last word. Channels do not exist on Bedrock, Agent Platform or Foundry.
 2. Only `blocker`, `question` and `task` wake an idle session, after 45 seconds by default (`idle_wake` or `MASH_IDLE_WAKE`, 5s to 30m). `fyi` and `result` mail waits for the session's next hook run. Urgent mail from a verified sender wakes it at once. A send with no kind is `task`.
 3. A wake that starts no turn is repeated at twice the idle wake, doubling to every 30 minutes. If no hook has run in the session at all, wakes stop after the third.
 
