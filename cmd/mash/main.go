@@ -273,10 +273,9 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 	}
 	// A help option before the command is the same as after it: `mash -h version` is `mash version --help`.
 	if (args[0] == "-h" || args[0] == "--help") && len(args) > 1 {
-		if _, hand := handHelp[args[1]]; hand {
+		_, hand := handHelp[args[1]]
+		if _, topic := helpTopic[args[1]]; hand || topic || commandVerb(args[1]) { // the help option goes right after the command, before any "--"
 			args = append([]string{args[1], "--help"}, args[2:]...)
-		} else if _, topic := helpTopic[args[1]]; topic || commandVerb(args[1]) {
-			args = append(slices.Clone(args[1:]), "--help")
 		}
 	}
 	if u, ok := newCommands(nil).HelpFor(args[0], args[1:]); ok { // the generated help of the commands on the table

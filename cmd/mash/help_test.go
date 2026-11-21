@@ -140,3 +140,12 @@ func TestPromptTextWithHelpWordsIsNotHelp(t *testing.T) {
 		}
 	}
 }
+
+// A help option before the command is moved to just after it, so a "--" later in the line cannot hide it.
+func TestHelpBeforeCommandWithTerminator(t *testing.T) {
+	want := runMash(nil, "version", "--help")
+	got := runMash(nil, "-h", "version", "--")
+	if got.code != 0 || got.out != want.out {
+		t.Fatalf("mash -h version --: exit %d, %q; want what mash version --help prints (%q)", got.code, got.out, want.out)
+	}
+}
