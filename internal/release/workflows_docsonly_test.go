@@ -372,3 +372,39 @@ func TestDocsOnly_diffStepHardening(t *testing.T) {
 		}
 	}
 }
+
+// A push to main that is the merge queue's fast-forward of a commit its draft already tested runs nothing again: the changes job
+// answers code=false when a Mergify draft's ci run on that SHA has a passed pr-check. It needs actions: read for the lookup, asks only
+// about runs of the same SHA from a mergify/ branch, and any failed lookup falls through to the path classifier.
+func TestDocsOnly_pushOfAQueueTestedCommitRunsNothingAgain(t *testing.T) {
+	j := load(t, "ci.yml").Jobs["changes"]
+	if j.Permissions["actions"] != "read" || j.Permissions["contents"] != "read" || len(j.Permissions) != 2 {
+		t.Errorf("changes permissions = %v, want contents: read and actions: read only", j.Permissions)
+	}
+	var run string
+	for _, st := range j.Steps {
+		if st.ID == "diff" {
+			run = st.Run
+		}
+	}
+	for _, want := range []string{
+		"head_sha=$GITHUB_SHA&event=pull_request",
+		`startswith("mergify/")`,
+		`.name == "pr-check" and .conclusion == "success"`,
+		"|| true",
+	} {
+		if !strings.Contains(run, want) {
+			t.Errorf("changes/diff step lacks %q", want)
+		}
+	}
+	// The release gate must still find the draft's passed runs behind this push's skipped ones (evaluate ignores skipped runs).
+	mk := func(id int64, name, conclusion string) CheckRun {
+		r := CheckRun{ID: id, Name: name, HeadSHA: "x", Status: "completed", Conclusion: conclusion}
+		r.App.Slug = CIApp
+		return r
+	}
+	runs := []CheckRun{mk(1, "test (linux)", "success"), mk(2, "reproducible", "success"), mk(3, "test (linux)", "skipped"), mk(4, "reproducible", "skipped")}
+	if st, err := evaluate(runs, "x"); err != nil || st != ciPassed {
+		t.Errorf("a draft's passed runs behind a push's skipped runs: state %v, err %v; want passed", st, err)
+	}
+}

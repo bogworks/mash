@@ -27,6 +27,9 @@ jobs:
   changes:
     timeout-minutes: 5
     runs-on: [self-hosted, rh-gate]
+    permissions:
+      contents: read
+      actions: read
     outputs:
       code: ${{ steps.diff.outputs.code }}
     steps:
@@ -39,9 +42,25 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD_REF: ${{ github.head_ref }}
           BEFORE: ${{ github.event.before }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           files=""
+          if [ "$EVENT" = push ] && [ -n "${REPO:-}" ] && [ -n "${GITHUB_SHA:-}" ] && command -v gh >/dev/null 2>&1; then
+            # The merge queue fast-forwards main to the exact commit its draft already tested: when a Mergify draft's ci run
+            # on this very SHA has a passed pr-check, the push runs nothing again (code=false). The release gate takes the newest
+            # run that tested per required check on the commit, so the draft's passed test (linux) and reproducible still stand
+            # and the push's skipped runs hide nothing (internal/release evaluate). Any API failure or doubt: code is decided as before.
+            runs="$(gh api "repos/$REPO/actions/runs?head_sha=$GITHUB_SHA&event=pull_request&per_page=100" --jq '[.workflow_runs[] | select(.name == "ci" and (.head_branch | startswith("mergify/"))) | .id] | .[]' 2>/dev/null || true)"
+            for id in $runs; do
+              if [ "$(gh api "repos/$REPO/actions/runs/$id/jobs?per_page=100" --jq '[.jobs[] | select(.name == "pr-check" and .conclusion == "success")] | length' 2>/dev/null || echo 0)" -gt 0 ]; then
+                echo "queue run $id already tested $GITHUB_SHA with a passed pr-check"
+                echo "code=false" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+            done
+          fi
           if [ "$EVENT" = pull_request ] || [ "$EVENT" = push ]; then
             if [ "$EVENT" = push ]; then
               # A push to main (the merge queue's fast-forward of a batch, or a direct push): what the push added. No usable
