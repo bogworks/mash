@@ -681,9 +681,9 @@ func tools(state *atomic.Pointer[sessionState], src *statusSource) []mcp.Tool {
 		inbox.Tool(table.Env).MCP(),
 		readTool,
 		who.Tool(table.Env).MCP(),
-		{Name: "reply", Description: "Answer a live prompt by its request_id. done=false streams a partial answer.",
-			Schema: schema(map[string]any{"request_id": str("from the prompt event"), "text": str("your answer"),
-				"done": flag("end the answer (default true)")}, "request_id", "text"),
+		{Name: "reply", Description: "Answer a live prompt.",
+			Schema: schema(map[string]any{"request_id": str("From the prompt event."), "text": str("Your answer."),
+				"done": flag("End the answer. Default true; false sends a partial answer.")}, "request_id", "text"),
 			Call: call(func(_ context.Context, ep *endpoint.Endpoint, raw json.RawMessage) (string, error) {
 				var a struct {
 					RequestID string `json:"request_id"`

@@ -6,16 +6,13 @@ import (
 	"testing"
 )
 
-// Help for the table's commands is generated (cmdcore); for the others it is the usage line.
+// Help for the table's commands is generated (cmdcore); prompt, serve and hook are rendered in the same layout from their specification entry.
 func TestVerbHelpAndStrayArguments(t *testing.T) {
 	env := func(string) string { return "" }
 	for _, verb := range []string{"status", "doctor", "version", "who", "read", "inbox", "send", "prompt"} {
 		for _, h := range []string{"--help", "-h"} {
 			var out, errb bytes.Buffer
-			want := "usage: mash " + verb
-			if commandVerb(verb) {
-				want = "Usage:\n  mash " + verb
-			}
+			want := "Usage:\n  mash " + verb
 			if code := run([]string{verb, h}, env, strings.NewReader(""), &out, &errb); code != 0 || !strings.Contains(out.String(), want) || errb.Len() != 0 {
 				t.Errorf("%s %s: %d %q %q", verb, h, code, out.String(), errb.String())
 			}

@@ -135,7 +135,7 @@ func TestPromptTextWithHelpWordsIsNotHelp(t *testing.T) {
 	}
 	for _, h := range []string{"--help", "-h"} {
 		out, code := w.cli(t, "x", "prompt", h)
-		if code != 0 || !strings.HasPrefix(out, "usage: mash prompt") {
+		if code != 0 || !strings.HasPrefix(out, "Ask an endpoint a live question") {
 			t.Errorf("prompt %s: %d %q", h, code, out)
 		}
 	}

@@ -37,19 +37,10 @@ import (
 )
 
 // knownGaps: key is "<check> <name>" as the subtest names it. The value is why it is not built yet.
-var knownGaps = map[string]string{
-	"help serve":      "serve is hand-written: its --help prints the top-level line, not the generated layout",
-	"help hook":       "hook is hand-written: its --help prints the top-level line, not the generated layout",
-	"help prompt":     "prompt is hand-written: one-line usage, not the generated layout",
-	"tools reply":     "reply is the old hand-written tool: description and parameter texts differ from the specification",
-	"toplevel layout": "the tool's own help is still hand-written: other description, own wording for each command, no Global options heading",
-}
+var knownGaps = map[string]string{}
 
 // knownDrift: key is "<rule> <command>"; the value says what differs and what closes it.
-var knownDrift = map[string]string{
-	"help-spelling -h version":     confHelpFirst,
-	"help-spelling --help version": confHelpFirst,
-}
+var knownDrift = map[string]string{}
 
 // confHelpFirst: rules.json says options go before or after the command, and help is also a command; the build takes a
 // help option before the command as the tool's own help (cmd/mash/main.go, cli.go).
