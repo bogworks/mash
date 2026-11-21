@@ -36,7 +36,11 @@ curl -fsSL https://github.com/bogworks/mash/releases/latest/download/install.sh 
 Output:
 
 ```
-[built output: to fill from the release build]
+Fetching mash and mashctl from the v0.5.6 release: file:///home/tester/release
+gh not found: the checksums come from the same download, so this trusts github.com's TLS; see docs/install.md to verify the attestation
+Installed mash v0.5.6 (0f4e455) in ~/.local/bin
+Installed mashctl v0.5.6 (0f4e455) in ~/.local/bin
+~/.local/bin is not on your PATH; add it to use mash
 ```
 
 Check that both programs are there and are the same version:
@@ -74,7 +78,12 @@ bash mash-local-nats-setup.sh --owner acme
 `--owner` names the owner; without it the script asks once on the terminal. Output:
 
 ```
-[built output: to fill from the release build]
+checked: nats-server 2.10.27, nats 0.5.2, openssl
+port: 4222
+made: CA, certificate, operator, accounts, users
+started: nats-server pid 355 on 127.0.0.1:4222
+checked: sign-in and system ping ok
+mashctl init --config /home/tester/mash-nats/mash-setup.yaml
 ```
 
 The last line the script prints is the command for the next step. It reads `mash-setup.yaml`, which the script wrote in the server folder.
@@ -165,7 +174,14 @@ MASH_ENDPOINT=acme.demo.alice mash inbox
 Output:
 
 ```
-[built output: to fill from the release build]
+Mail sent (number 1).
+Urgent question mail sent (number 2).
+
+2 messages for acme.demo.alice, 2 new, 1 urgent.
+
+NUMBER  FROM  WHEN      STATE  URGENT  KIND      MESSAGE
+1       bob   just now  new    no      task      lunch at noon?
+2       bob   just now  new    yes     question  ready?
 ```
 
 Normally the agent does this through the plugin's tools, and you never type it. In Bob's session, ask: "Send acme.demo.alice a note: lunch at noon?". The mail reaches Alice's session with her next prompt, or at once if she was idle, labelled `[verified]`.

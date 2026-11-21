@@ -50,7 +50,16 @@ mashctl init --config ~/mash-nats/mash-setup.yaml
 
 The script makes a new folder (`~/mash-nats`, or the absolute path of `--dir DIR`) with a TLS, JetStream NATS server that listens on this machine only, runs as you, and writes `mash-setup.yaml`; the last line it prints is the `mashctl init` command to run next. `--owner NAME` is asked once on the terminal if you leave it out, and the owner cannot change later without starting over. It needs `nats-server` (2.10.7 or newer), `nats` and `openssl` on your `PATH`, and `ss` (Linux) or `lsof` (macOS). It refuses to run as root. The server is a program you run: `--stop` stops it, `--start` starts it again (after a reboot), and `--remove` stops it and deletes the folder, with every mailbox and message on it, once you type the folder's path. Then make the endpoints (`mashctl endpoint create acme.demo.bob --out acme.demo.bob.join`, then `mash join acme.demo.bob.join`) as in the quick start in the [README](../README.md).
 
-Output of the script: `[built output: to fill from the release build]`
+Output of the script:
+
+```
+checked: nats-server 2.10.27, nats 0.5.2, openssl
+port: 4222
+made: CA, certificate, operator, accounts, users
+started: nats-server pid 355 on 127.0.0.1:4222
+checked: sign-in and system ping ok
+mashctl init --config /home/tester/mash-nats/mash-setup.yaml
+```
 
 ### Verify what you download
 
