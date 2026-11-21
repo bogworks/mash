@@ -16,16 +16,16 @@ This page says which versions of the things mash depends on have been tried with
 | Synadia Cloud | Not tested on 0.5.6. | Not stated. | `mash` is documented to work against any conforming server, but `mashctl` does not support Synadia Cloud in 0.5.6 ([#876](https://github.com/bogworks/mash/issues/876)). A test of an earlier release against Synadia Cloud was run on 2026-10-31. |
 | SAP protocol | 0.3, the version mash declares and the only one it implements. | 0.3. | Other SAP versions: not expected to work. |
 | Go toolchain (only to build from source) | 1.27.4, the version the automated checks use. | 1.27.4 (`go.mod`). | Later Go releases. |
-| Linux, amd64 | The release binary is built; the automated tests run on Linux (see the note below). | Not stated. | Any current Linux distribution. |
+| Linux, amd64 | The release binary is built, and the automated tests run on Linux amd64 machines. These tests gate every merge and release. | Not stated. | Any current Linux distribution. |
 | Linux, arm64 | The release binary is built and checked for a reproducible build. Tests are not run on it. | Not stated. | Works as on amd64. |
-| macOS, amd64 | The automated tests run on an Intel Mac runner. That check is advisory: it does not block a release. | Not stated. | Current macOS releases. |
-| macOS, arm64 | The release binary is built and checked for a reproducible build. Tests are not run on it. | Not stated. | Works as on amd64. |
+| macOS, amd64 (Intel) | The release binary is built and checked for a reproducible build. Tests are not run on it. | Not stated. | Works as on arm64. |
+| macOS, arm64 (Apple silicon) | The automated tests run on Apple silicon Macs. That check is advisory: it does not block a release. | Not stated. | Current macOS releases. |
 | Windows | Not tested. | Not supported. | Does not work natively. WSL 2 with the Linux binary is expected to work. |
 
 Notes:
 
 - Release binaries exist for Linux and macOS on amd64 and arm64 only.
-- The Linux tests run on our own runners. The page does not name the Linux distribution or architecture they use.
+- The tests run on the project's own machines: Linux amd64 and macOS arm64.
 - The advisory macOS job and the Linux jobs run the same Go tests.
 - Version numbers above are those we saw, not promises that other versions fail.
 
