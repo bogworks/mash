@@ -333,6 +333,18 @@
         "exit": 1
        },
        {
+        "case": "The recipient is suspended",
+        "text": "error: acme.demo.alice is suspended; nothing was sent\nhint: mash who",
+        "stream": "stderr",
+        "exit": 1
+       },
+       {
+        "case": "No credentials here",
+        "text": "error: acme.demo.bob has no credentials here: ~/.config/mash/acme.demo.bob.creds is missing\nhint: mash doctor",
+        "stream": "stderr",
+        "exit": 1
+       },
+       {
         "case": "Not signed in",
         "text": "error: acme.demo.bob cannot sign in: the server refused its credentials\nhint: mash doctor",
         "stream": "stderr",
@@ -1049,6 +1061,12 @@
         "text": "delivery  FAIL  this session lost this endpoint to a newer one",
         "stream": "stdout",
         "exit": 0
+       },
+       {
+        "case": "The endpoint was deleted",
+        "text": "config    ok\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   FAIL  this endpoint was deleted; its address cannot be used again\ndelivery  skip  needs sign-in\nrefused   ok    no unverified mail was refused\n\n1 problem.\nhint: ask whoever runs your mesh for a join file to a new endpoint",
+        "stream": "stdout",
+        "exit": 1
        },
        {
         "case": "The server's certificate is not trusted",

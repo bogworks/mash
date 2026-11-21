@@ -138,6 +138,22 @@ Stream: stdout. Exit code: 0.
 delivery  FAIL  this session lost this endpoint to a newer one
 ```
 
+### The endpoint was deleted
+
+Stream: stdout. Exit code: 1.
+
+```text
+config    ok
+creds     ok
+server    ok    tls://myserver:4222
+sign-in   FAIL  this endpoint was deleted; its address cannot be used again
+delivery  skip  needs sign-in
+refused   ok    no unverified mail was refused
+
+1 problem.
+hint: ask whoever runs your mesh for a join file to a new endpoint
+```
+
 ### The server's certificate is not trusted
 
 Stream: stdout. Exit code: 0.

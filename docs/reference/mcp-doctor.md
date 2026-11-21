@@ -124,3 +124,19 @@ delivery  FAIL  hooks are not delivering mail to this session;
 1 problem.
 hint: claude plugin install mash@mash
 ```
+
+### The endpoint was deleted
+
+The call returns this text with `isError` set.
+
+```text
+config    ok
+creds     ok
+server    ok    tls://myserver:4222
+sign-in   FAIL  this endpoint was deleted; its address cannot be used again
+delivery  skip  needs sign-in
+refused   ok    no unverified mail was refused
+
+1 problem.
+hint: ask whoever runs your mesh for a join file to a new endpoint
+```

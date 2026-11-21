@@ -120,6 +120,24 @@ error: no endpoint has the address acme.demo.alise
 hint: mash who
 ```
 
+### The recipient is suspended
+
+Stream: stderr. Exit code: 1.
+
+```text
+error: acme.demo.alice is suspended; nothing was sent
+hint: mash who
+```
+
+### No credentials here
+
+Stream: stderr. Exit code: 1.
+
+```text
+error: acme.demo.bob has no credentials here: ~/.config/mash/acme.demo.bob.creds is missing
+hint: mash doctor
+```
+
 ### Not signed in
 
 Stream: stderr. Exit code: 1.

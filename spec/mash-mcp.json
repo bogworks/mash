@@ -87,6 +87,18 @@
      "exit": 1
     },
     {
+     "case": "The recipient is suspended",
+     "text": "error: acme.demo.alice is suspended; nothing was sent\nhint: mash who",
+     "stream": "stderr",
+     "exit": 1
+    },
+    {
+     "case": "No credentials here",
+     "text": "error: acme.demo.bob has no credentials here: ~/.config/mash/acme.demo.bob.creds is missing\nhint: mash doctor",
+     "stream": "stderr",
+     "exit": 1
+    },
+    {
      "case": "Not signed in",
      "text": "error: acme.demo.bob cannot sign in: the server refused its credentials\nhint: mash doctor",
      "stream": "stderr",
@@ -458,6 +470,12 @@
      "text": "delivery  FAIL  hooks are not delivering mail to this session;\n                restart the session after reinstalling\n\n1 problem.\nhint: claude plugin install mash@mash",
      "stream": "stdout",
      "exit": 1
+    },
+    {
+     "case": "The endpoint was deleted",
+     "text": "config    ok\ncreds     ok\nserver    ok    tls://myserver:4222\nsign-in   FAIL  this endpoint was deleted; its address cannot be used again\ndelivery  skip  needs sign-in\nrefused   ok    no unverified mail was refused\n\n1 problem.\nhint: ask whoever runs your mesh for a join file to a new endpoint",
+     "stream": "stdout",
+     "exit": 1
     }
    ]
   },
@@ -563,7 +581,7 @@
   ],
   [
    "Waking an idle session",
-   "A Claude Code channel event: the capability 'claude/channel', declared as experimental, and the notification 'notifications/claude/channel' carrying one line that says mail is waiting. The mail itself arrives through mash hook. This is a Claude Code feature carried inside MCP, not part of MCP."
+   "A Claude Code channel event: the capability 'claude/channel', declared as experimental, and the notification 'notifications/claude/channel' carrying one line that says mail is waiting. The mail itself arrives through mash hook. This is a Claude Code feature carried inside MCP, not part of MCP. WHAT THE SESSION NEEDS: Claude Code registers a plugin's channel only when it is launched with its own flag, --dangerously-load-development-channels plugin:mash@mash, and it asks the person to confirm at each launch. Without the flag nothing is lost but the wake: mail still arrives with the next prompt or tool call through mash hook. The flag is Claude Code's, not mash's; the guides and the setup skill state it in these words, and this line is looked at again when Claude Code lets a channel be installed (settled 2026-11-21)."
   ],
   [
    "Instructions to the agent",
