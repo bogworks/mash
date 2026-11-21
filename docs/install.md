@@ -2,18 +2,18 @@
 
 This walks through one machine running Claude Code sessions with mash. Provisioning the server side (the account, endpoint users and their inboxes) is in [operations.md](operations.md).
 
-**Requirement:** mash needs a NATS server in operator mode with JWT user credentials. Token, user/password and plain nkey authentication are not supported, because an endpoint's SAP signing identity is its NATS user key (the key in its creds file's user JWT; see the [design](specs/2026-10-21-mash-design.md)).
+**Requirement:** mash needs a NATS server in operator mode with JWT user credentials. Token, user/password and plain nkey authentication are not supported, because an endpoint's SAP signing identity is its NATS user key (the key in its creds file's user JWT; see [sap.md](sap.md)).
 
 ## Requirements
 
-- `nats-server`, a current 2.x release with JetStream, on your `PATH`, to run the NATS server yourself. Get it from the [nats-server releases](https://github.com/nats-io/nats-server/releases); this repository builds and tests against 2.15. You do not need it on a machine where you only run endpoints, or if you use a server that already runs, such as Synadia Cloud. `mashctl` does not install or start NATS.
+- `nats-server`, 2.10.7 or newer (tested on 2.15) with JetStream, on your `PATH`, to run the NATS server yourself. Get it from the [nats-server releases](https://github.com/nats-io/nats-server/releases). You do not need it on a machine where you only run endpoints, or if you use a server that already runs. `mashctl` does not install or start NATS. Synadia Cloud is not supported: see [synadia.md](synadia.md).
 - Claude Code 2.1.312 or newer (the oldest version a live receipt passed on; mash does not refuse older ones). The plugin and the `mash` binary should be the same release (major and minor).
 
 ## 1. The binary
 
 Supported platforms: Linux and macOS (amd64, arm64), the release targets (`mash-{linux,darwin}-{amd64,arm64}`, see [release.md](release.md)). Native Windows is not supported: the spool lock and the hooks need Unix file locking and a POSIX shell. WSL 2 with the Linux binary is expected to work but has not been tested.
 
-mash is one static Go binary. **Install it first (below) until your plugin release is pinned**: the plugin fetches and verifies its own copy only once it carries a `mash.pins` file from a release (the post-release commit described next), and an unpinned plugin, which is what a checkout of the repository gives you, uses the `mash` on your `PATH` and does not start without one. With a pinned plugin there is nothing to install by hand: no `go install`, no `PATH` edit, no root.
+mash is one static Go binary, and `install.sh` is the one install line: it puts `mash` and `mashctl` on your machine, checked. **Install it first (below) until your plugin release is pinned**: the plugin fetches and verifies its own copy only once it carries a `mash.pins` file from a release (the post-release commit described next), and an unpinned plugin, which is what a checkout of the repository gives you, uses the `mash` on your `PATH` and does not start without one. With a pinned plugin there is nothing to install by hand: no `go install`, no `PATH` edit, no root.
 
 - A `SessionStart` hook prefetches the binary into the plugin's data directory (`${CLAUDE_PLUGIN_DATA}/bin`) on first use, so the MCP server starts without a download. The server launcher downloads it as a fallback.
 - Once pinned after a release (a post-release commit of `plugin/scripts/mash.pins`), the plugin carries a `mash.pins` file beside its launcher with the release version and the sha256 of each platform binary (linux and darwin, amd64 and arm64); without it the launcher is unpinned and uses `mash` from PATH. A download that does not match is refused and deleted, and the binary must report the pinned version before it is used. Pinning also bumps the plugin's version to `<version>-pin.1`, so installed plugins update and receive the pin. Updating the plugin updates the binary.
@@ -22,7 +22,7 @@ mash is one static Go binary. **Install it first (below) until your plugin relea
 - The MCP server runs `${CLAUDE_PLUGIN_ROOT}/scripts/mash` directly, so the launcher needs its exec bit: git-based marketplace installs (`claude plugin marketplace add bogworks/mash`, then `claude plugin install mash@mash`) preserve the mode. The hooks run it as `sh ${CLAUDE_PLUGIN_ROOT}/scripts/mash`, which needs no exec bit.
 - Offline, or on an unsupported platform, the plugin uses a `mash` already on the `PATH` or a copy it downloaded earlier; if there is neither, it says so on stderr and the server does not start.
 
-To install the binaries yourself (required for an unpinned plugin; also for the CLI in section 5, or an air-gapped machine), run the install script of the release:
+To install the binaries (required for an unpinned plugin; also for the CLI in section 5), run the install script of the release. This is the one install line:
 
 ```sh
 curl -fsSL https://github.com/bogworks/mash/releases/latest/download/install.sh | bash
@@ -30,11 +30,19 @@ curl -fsSL https://github.com/bogworks/mash/releases/latest/download/install.sh 
 
 It finds the machine's type (Linux or macOS, amd64 or arm64), downloads `mash` and `mashctl` from the same release together with that release's `SHA256SUMS`, checks each binary against it, and puts both in `~/.local/bin` (`MASH_INSTALL_DIR` names another folder; `MASH_VERSION=v0.5.6` pins a release, and without it the script first looks up the latest release's tag and downloads from that tag; `MASH_REPO=owner/name` names another repository, default `bogworks/mash`, for the download, the tag lookup and the attestation check; a `MASH_RELEASE_BASE` mirror needs `MASH_VERSION`). It prints one line for each, with the path it used, for example `Installed mash v0.5.6 (3f9a41c) in ~/.local/bin`, asks nothing and needs no `sudo`. If the folder is not on your `PATH` it says so in one line. A symbolic link to the folder is followed. It refuses a folder that belongs to another user, or that, or any folder above it, other users can write to (a root-owned sticky folder such as `/tmp` above it is fine), and on any failed check nothing is installed; both binaries are staged before either is put in place.
 
-If you want a NATS server on this machine, `mash-local-nats-setup.sh` is the other script of the release; see the quick start in the [README](../README.md).
+If you want a NATS server on this machine, `mash-local-nats-setup.sh` is the other script of the release; [the walkthrough, step 3](guide/walkthrough.md#step-3-make-a-nats-server-on-this-machine) uses it.
 
 ### Verify what you download
 
-Every file of a release is covered by `SHA256SUMS`, and `SHA256SUMS` and the binaries and the three scripts (`install.sh`, `mash-local-nats-setup.sh`, `mash-migrate-0.5.5.sh`) are subjects of the release's build provenance attestation. `install.sh` checks the binaries against `SHA256SUMS` itself. With `gh` (the [GitHub CLI](https://cli.github.com/)) installed it also verifies `SHA256SUMS` against the attestation, pinned to the release tag, before it installs anything, and refuses on failure. Without `gh`, or with one too old to have `gh attestation verify`, it says the checksums come from the same download, so it trusts github.com's TLS, and goes on. To check the script before you run it, and the attestation yourself:
+Every file of a release is covered by `SHA256SUMS`. `SHA256SUMS`, the binaries and the three scripts (`install.sh`, `mash-local-nats-setup.sh`, `mash-migrate-0.5.5.sh`) are also subjects of the release's build provenance attestation, which GitHub signs for the release's own workflow.
+
+What `install.sh` does on its own:
+
+- It always checks each binary against `SHA256SUMS`. Both come from the same download, so on their own they show the files are intact, not who made them.
+- With a current `gh` (the [GitHub CLI](https://cli.github.com/), new enough to have `gh attestation verify`) it also verifies `SHA256SUMS` against the attestation before it installs anything: signed by the workflow `bogworks/mash/.github/workflows/release.yml`, from the source ref `refs/tags/vX.Y.Z` of the release being installed. If that fails it installs nothing and says so.
+- With no `gh`, or one too old to have `gh attestation verify`, it says so in one line: the checksums come from the same download, so it trusts only github.com's TLS, and it goes on. The check below is the manual way to do the same, and you can run it before you run the script.
+
+To check the script and the attestation yourself, with a current `gh`:
 
 ```sh
 BASE=https://github.com/bogworks/mash/releases/download/v0.5.6   # use the tag of the release you want; for another repository (MASH_REPO) change bogworks/mash here and in -R and --signer-workflow
@@ -45,9 +53,11 @@ grep ' install.sh$' SHA256SUMS | sha256sum -c - &&           # macOS: shasum -a 
 less install.sh && bash install.sh
 ```
 
+If `gh` is missing or too old, skip the `gh attestation verify` lines: the `grep` line still shows the script is the release's own file, and the TLS caveat above applies. Any failure of a check: stop and run nothing.
+
 An agent does not pipe a download into a shell: the setup skill downloads each script, checks it against `SHA256SUMS`, shows you what it is about to run and runs it after a yes. All three scripts are also the repository's own `scripts/` files at the release commit, byte for byte; the release check compares them ([ADR 0150](decisions/0150-releases-carry-install-and-local-nats-setup-scripts-as-attested-assets.md), [ADR 0152](decisions/0152-the-release-carries-a-one-time-0-5-5-migration-script.md)).
 
-To build from source instead, `go install github.com/bogworks/mash/cmd/mash@latest` and `.../cmd/mashctl@latest` need Go 1.27.4 or newer; the result is not the attested build.
+To build from source instead, `go install github.com/bogworks/mash/cmd/mash@v0.5.6` and `go install github.com/bogworks/mash/cmd/mashctl@v0.5.6` need Go 1.27.4 or newer; the result is not the attested build. Use the tag of the release you want, not `@latest`.
 
 ## 2. The plugin
 
@@ -102,9 +112,7 @@ On a machine that runs `mashctl`, `mashctl init --config FILE` writes `servers`,
 
 `~/.config/mash/config.json`, or `$XDG_CONFIG_HOME/mash/config.json` when `XDG_CONFIG_HOME` is an absolute path and that file exists (an existing `~/.config/mash` install keeps working). With no `HOME` and no absolute `XDG_CONFIG_HOME`, mash stops with an error unless everything comes from the `MASH_*` variables. A leading `~/` in `creds` and `admin_creds` (and in `MASH_CREDS` and `MASH_ADMIN_CREDS`) is expanded to your home; `~user/` is not. `policy.md` and the default creds files live in the same directory; when the XDG directory has no copy of one, mash also finds it in `~/.config/mash` (the XDG copy wins when both exist). A relative `admin_creds`, `ca`, `tls_cert` or `tls_key` in `config.json` is resolved against the config directory, not the working directory. `config.json` that is writable by every user is refused; run `chmod go-w` on it.
 
-### Upgrading from 0.5.5
-
-A configuration folder left by mash 0.5.5 holds the keys `url` and `tls_ca` in `config.json`. Every command of `mash` and `mashctl` then stops with `error: <folder> holds a mash 0.5.5 configuration` and `hint: <release base>/mash-migrate-0.5.5.sh` (exit 1), and changes nothing. Run the script once: `curl -fsSL https://github.com/bogworks/mash/releases/latest/download/mash-migrate-0.5.5.sh | bash`. It renames the two keys (`url` becomes `servers`, `tls_ca` becomes `ca`) and keeps the old file beside it as a backup. Nothing on the server needs migrating.
+If the folder was left by mash 0.5.5, see [If you ran mash 0.5.5](#if-you-ran-mash-055).
 
 ```json
 { "servers": ["tls://nats.example.com:4222"], "endpoint": "alice.dev.design" }
@@ -146,7 +154,7 @@ The environment wins over the file.
 
 **Installing an endpoint.** `mash join FILE` installs the endpoint a join file describes. It writes `<address>.creds` (mode 0600) into the config directory, the server addresses into `servers` in `config.json`, and, when the server uses its own certificate authority, the certificate as `ca.pem` in the same directory with `ca` pointing at it. It needs no endpoint and no server. When the join file was made for a public key you supplied (`mash key create`), add `--key` with your seed file. One config directory serves one mesh: a join file for other servers, or for another certificate authority (compared with the file `ca` names in `config.json`, else `ca.pem`), or none where the folder has one, or one where the folder has none and already holds an endpoint, is refused, with or without `--replace`, and `--config-dir` names another directory. The certificate must be certificates only (a key or other text in it is refused before anything is written), and the join file's credentials must be for the address it names. The creds are installed first, then `ca.pem`, then `config.json`; a failure after the creds removes what the run made. Joins into one directory run one after the other. `--replace` replaces the creds of an installed endpoint, and nothing else (not the servers, the certificate authority or `config.json`), and `--dry-run` writes nothing. A join file that holds a seed, and the file `--key` names, must be plain files owned by you and readable by you alone (`chmod 600`); mash refuses them otherwise, before reading. A join file that holds only a user JWT is not checked.
 
-**Which endpoint.** `MASH_ENDPOINT` (or `endpoint` in `config.json`, or `--endpoint`) holds the full address `owner.group.name`, for example `alice.dev.design`. If none is set, mash uses the one endpoint whose creds file `<owner>.<group>.<name>.creds` (mode 0600, owned by you) sits directly in the config directory. If several are installed it stops with `more than one endpoint is installed here: a, b` and you name one. A value that is not three dotted parts is a configuration error naming `MASH_ENDPOINT`. `mashctl` never takes its owner from an installed creds file. Its owner is the owner part of an endpoint you set (`--endpoint`, `MASH_ENDPOINT` or `endpoint` in `config.json`; any group and name will do), else the `owner` key of `config.json` (`mashctl init --local` and `mashctl adopt` write it). `mash` ignores the `owner` key.
+**Which endpoint.** `MASH_ENDPOINT` (or `endpoint` in `config.json`, or `--endpoint`) holds the full address `owner.group.name`, for example `alice.dev.design`. If none is set, mash uses the one endpoint whose creds file `<owner>.<group>.<name>.creds` (mode 0600, owned by you) sits directly in the config directory. If several are installed it stops with `more than one endpoint is installed here: a, b` and you name one. A value that is not three dotted parts is a configuration error naming `MASH_ENDPOINT`. `mashctl` never takes its owner from an installed creds file. Its owner is the owner part of an endpoint you set (`--endpoint`, `MASH_ENDPOINT` or `endpoint` in `config.json`; any group and name will do), else the `owner` key of `config.json` (`mashctl init --config` writes it). `mash` ignores the `owner` key.
 
 Credentials files must be mode 0600; they hold the endpoint's private key, and mash refuses to use a credentials file that other users can read (fix it with `chmod 600`). `mashctl` applies the same check to the admin credentials and to the system account credentials (`system_creds` in `config.json`). A symlink is followed and the file it points to is checked.
 
@@ -162,7 +170,7 @@ There is one way to allow plain text, for `mash` and `mashctl` alike: set the en
 warning: encryption to the server is OFF (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set)
 ```
 
-Use it for a throwaway server in a test, never on a network you do not control: plain text lets anyone on the network read mail and obtain signatures. `init --local` makes a certificate authority and does not need it.
+Use it for a throwaway server in a test, never on a network you do not control: plain text lets anyone on the network read mail and obtain signatures. The local setup script makes a certificate authority and does not need it.
 
 The old names are gone with no alias: `MASH_INSECURE_PLAINTEXT` in the environment and `insecure_plaintext` in `config.json` are refused, exit 2, with an error that names `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1`.
 
@@ -174,7 +182,7 @@ MASH_ENDPOINT=alice.dev.design claude --channels plugin:mash@mash
 
 The session registers as a SAP agent, takes the lease on its name, and starts receiving mail. If another live session already holds the name, this one starts without mail tools and says why.
 
-Keep this machine's clock in sync (NTP): more than 30 s of skew from the server makes peers look offline and mail `[stale]`. See [Troubleshooting](operations.md).
+Keep this machine's clock in sync (NTP): more than 30 s of skew from the server makes peers look offline and mail `[stale]`. See [Troubleshooting](troubleshooting.md#a-peer-shows-offline-in-who).
 
 In the session, Claude has eight tools: `send`, `read`, `inbox`, `who`, `reply`, `version`, `status` and `doctor`. `status` says in one line whether the endpoint is ready (`<endpoint>: ready, offline`, `ready, online` when an agent session holds the endpoint open now, or `not ready: <reason>`). `doctor` checks the config, the creds, the server, the sign-in and the delivery of mail one at a time and says what to fix. A session with no `MASH_ENDPOINT` gets only `version`, `status` and `doctor`. `version` shows the mash binary's version and commit, the plugin's version and this endpoint's address. `mash status --detail` also says `holds endpoint`, `hooks` (`ran` once the agent host's hooks have delivered mail in this session) and `storage`; `mash doctor`'s `delivery` row warns while the hooks have not run yet and fails when they are not delivering ([troubleshooting](troubleshooting.md#mail-is-waiting-but-never-shown-hooks-not-firing)). `mash status` and `mash doctor` from a shell give the same answers for the environment they run in, so a missing name or creds shows before you launch. `mash status` exits 1 when the endpoint is not ready, and `mash doctor` exits 1 when a check fails. From a shell, the same identity can use the CLI:
 
@@ -207,7 +215,7 @@ A reader treats the count as fresh when `waking_pending_at` is within 90 s (the 
 
 The CLI never takes the lease, so it works alongside the running session.
 
-`send --id KEY` (the send tool's `id`) is an idempotency key, 1 to 128 printable ASCII characters. Re-running a send with the same key to the same recipient from the same endpoint, within the inbox stream's two-minute duplicate window, stores nothing new: it succeeds, reports the original `#seq` and says it was a duplicate. If a send times out waiting for the stream's acknowledgement, the message may or may not have landed; the error prints a key to retry with (`mash send <to> --id <key> ...`), which delivers it at most once, but only within that two-minute window: after it a retry may store a second copy, which the recipient shows as a new message. Without `--id` every send is a new message.
+`send --id KEY` (the send tool's `id`) is an idempotency key, 1 to 128 printable ASCII characters. Re-running a send with the same key to the same recipient from the same endpoint, within the inbox stream's two-minute duplicate window, stores nothing new: it succeeds, reports the original number and says it was a duplicate (`Mail already sent; nothing new stored.`). If a send times out waiting for the stream's acknowledgement, the message may or may not have landed; the error prints a key to retry with (`mash send <to> --id <key> ...`), which delivers it at most once, but only within that two-minute window: after it a retry may store a second copy, which the recipient shows as a new message. Without `--id` every send is a new message.
 
 ## If you ran mash 0.5.5
 
@@ -247,6 +255,25 @@ changes nothing and stops with a message that names this script. It is a
 script you run once, not a `mash` or `mashctl` command
 ([ADR 0152](decisions/0152-the-release-carries-a-one-time-0-5-5-migration-script.md)).
 
-## Synadia Cloud
+<!-- TODO-PUBLISHED: every `releases/latest/download/...` line on this page (and in troubleshooting.md) resolves to the newest release only if v0.5.6 is GitHub's Latest. Check after publishing; if it is published with --not-latest, change them to the fixed `releases/download/v0.5.6/...` path. -->
 
-Synadia Cloud is not supported by mashctl in 0.5.6; see [#876](https://github.com/bogworks/mash/issues/876).
+## Versions that work together
+
+| Part | Version |
+|---|---|
+| `nats-server` | 2.10.7 or newer (tested on 2.15), only where you run the server |
+| Claude Code | 2.1.312 or newer (older ones are not refused, but are not tested) |
+| `mash`, `mashctl` and the `mash` plugin | the same release (major and minor) |
+| Go, to build from source | 1.27.4 or newer |
+
+## Uninstall
+
+Remove only what you made. Stop any Claude Code session that uses mash first.
+
+- The programs: delete `mash` and `mashctl` from the folder `install.sh` named (`~/.local/bin`, or `MASH_INSTALL_DIR`).
+- The plugins: `claude plugin uninstall mash@mash`, and `claude plugin uninstall mash-setup@mash` if you installed it.
+- Your configuration and keys: the folder `~/.config/mash` (or the one `MASH_CONFIG_DIR` or `XDG_CONFIG_HOME` named). It holds each endpoint's creds file, so deleting it cannot be undone. Mail already stored on the server stays there.
+- Mail kept on this machine: the state folder (`~/.local/state/mash`, or `MASH_STATE_DIR`).
+- A server made by the local setup script: `bash mash-local-nats-setup.sh --remove` stops it and deletes its folder, every mailbox and every message ([walkthrough, step 11](guide/walkthrough.md#step-11-stop-start-remove-the-server)).
+
+<!-- TODO-PUBLISHED: run `claude plugin uninstall mash@mash` and the --remove line once on the published release and confirm the wording. -->

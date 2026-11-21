@@ -12,7 +12,7 @@ By the end, two AI agents, Alice and Bob, send each other mail. Each agent
 is a Claude Code session; each has an inbox on a message server that keeps
 its mail until it is read, even while the agent is off.
 
-Words used here, each explained again where it first matters:
+Words used here, each explained again where it first matters (the full list is the [glossary](../reference/glossary.md)):
 
 - **NATS** is an open-source message server. mash keeps the mail on one.
 - **mash** is the program one agent uses to send and read mail. **mashctl**
@@ -27,7 +27,8 @@ Words used here, each explained again where it first matters:
 - **MCP** (the Model Context Protocol) is how an agent host such as Claude
   Code talks to a tool server. mash offers its commands to a session as MCP
   tools.
-- A **mesh** is the set of endpoints on one server.
+- A **mesh** is every endpoint on one server, and all their mail. In 0.5.6
+  a mesh has one owner.
 
 Alice and Bob are the two agents in every example. The picture of how the
 parts fit is in [stack.md](stack.md); how mash differs from plain Synadia
@@ -62,8 +63,9 @@ change later without starting over.
 
 We run everything on one host with a local nats-server, which step 3 makes
 for you. mash needs a NATS server with TLS, JetStream (the NATS feature that
-stores messages on the server) and sign-in credentials; yours may do
-instead (see the NATS notes in `docs/`).
+stores messages on the server) and sign-in credentials. A server you run
+yourself works too: [operations.md](../operations.md#setting-mash-up-with-mashctl-init---config)
+shows how `mashctl init` takes it from a setup file.
 
 ## Step 2: install mash and mashctl
 
@@ -74,8 +76,11 @@ script says so.
 What is created: two programs in `~/.local/bin`, the default;
 `MASH_INSTALL_DIR` names another folder.
 
-Command: `install.sh` from the release (never piped into a shell: download,
-check against `SHA256SUMS`, read it, run it).
+Command: `install.sh` from the release. [install.md](../install.md#1-the-binary)
+has the one install line, and [how to verify what you download](../install.md#verify-what-you-download):
+download it, check it against `SHA256SUMS`, read it, run it. With a current
+`gh` the installer also checks the release's attestation; without one it says
+so and trusts only github.com's TLS.
 
 <!-- output: install -->
 Output: `[built output: install]`
@@ -91,21 +96,22 @@ What is created: `~/mash-nats` (keys, certificates, the server's files) and
 `mash-setup.yaml`. `~/mash-nats` is the default; `--dir` names another folder,
 and the last line the script prints has the path it actually wrote.
 
-Command: `mash-local-nats-setup.sh --owner acme`, downloaded from the same
-release and checked against `SHA256SUMS` like `install.sh`. Then the line it
+Command: `bash mash-local-nats-setup.sh --owner acme`, downloaded from the same
+release and checked against `SHA256SUMS` like `install.sh` (see
+[install.md](../install.md#verify-what-you-download)). Then the line it
 prints last, `mashctl init --config <path>/mash-setup.yaml`.
 
 `mashctl init` reads the setup file and keeps its own copy of the keys in
 `~/.config/mash`. That folder is where `mashctl` and `mash` look for their
 configuration and credentials. It is the default: `MASH_CONFIG_DIR` (an
 absolute path) names another folder, and so does an absolute
-`XDG_CONFIG_HOME`, as `docs/install.md` describes.
+`XDG_CONFIG_HOME`, as [install.md](../install.md#4-configuration) describes.
 
 With a server made by the setup script, that folder holds the operator's
 identity key (the `nats` command signs accounts only with it), with which the
 operator itself can be re-issued, and the account signing key. They are
 protected only as your own files are. This is the accepted same-user custody
-risk (#869, decision 264).
+risk ([#869](https://github.com/bogworks/mash/issues/869)).
 
 <!-- output: server -->
 Output: `[built output: server]`
@@ -126,7 +132,7 @@ endpoint has joined.
 What is created: a join file per endpoint (written with mode 600) in the
 current folder, then a creds file per endpoint under `~/.config/mash`, and
 each endpoint's inbox on the server. An endpoint's credentials file lives
-only on the endpoint's host, at mode 0600 (design, section 4).
+only on the endpoint's host, at mode 0600.
 
 Commands:
 
@@ -434,8 +440,7 @@ MASH_ENDPOINT=acme.demo.alice mash read 3 --json | jq -r .body
 <!-- output: json-jq -->
 Output: `ping`
 
-(The JSON above is the spec's example, shown with Alice and Bob. The
-built-output pass replaces it with the real run's.)
+<!-- TODO-PUBLISHED: the JSON blocks and the `ping` output in this step are the spec's examples, shown with Alice and Bob. Replace them with the published run's output. -->
 
 ## Step 9: take an endpoint away
 
@@ -463,10 +468,10 @@ the server from step 3 that is its whole scope: a join file made against it
 works only on this machine. Two machines need a server both can reach, with a
 certificate that covers its address; in 0.5.6 that is a NATS server you run
 yourself, which `mashctl init` takes from a setup file (see
-[docs/install.md](../install.md)). A script option for a reachable address and
+[operations.md](../operations.md#setting-mash-up-with-mashctl-init---config)). A script option for a reachable address and
 certificate is for 0.6.0.
 
-<!-- not run by the AT-3 harness -->
+<!-- not run in the built-output pass -->
 
 What is created: on the joining side, the creds file and the server's address
 in the configuration folder, as in step 4.
@@ -509,7 +514,17 @@ as in step 4.
 What this does: day-2 care of the local server. Removing it deletes every
 mailbox and message on it, so it is the last step.
 
-Commands: the setup script's `--stop`, `--start`, `--remove`.
+Commands, from the folder that holds the downloaded script:
+
+```
+bash mash-local-nats-setup.sh --stop
+bash mash-local-nats-setup.sh --start
+bash mash-local-nats-setup.sh --remove
+```
+
+`--start` starts an existing server again (after a reboot) and creates
+nothing. `--remove` asks you to type the folder's path before it deletes
+anything.
 
 <!-- output: lifecycle -->
 Output: `[built output: lifecycle]`
@@ -517,4 +532,8 @@ Output: `[built output: lifecycle]`
 ## Not in this guide
 
 The per-command reference, the glossary, the rules and "coming in 0.6.0" are
-generated from the specification (`spec/*.json`), not written here.
+generated from the specification (`spec/*.json`), not written here. Start at
+the [reference index](../reference/README.md); the words used in this guide
+are in the [glossary](../reference/glossary.md), and what is planned for the
+next release is in [coming in 0.6.0](../reference/coming-in-0-6-0.md). To
+remove mash from a machine, see [Uninstall](../install.md#uninstall).
