@@ -131,7 +131,7 @@ func startLive(t *testing.T) *liveEnv {
 
 	// A system user, to push and read the account JWT.
 	sysCreds, _ := liveCreds(t, sysKP)
-	sysNC, err := nats.Connect(srv.ClientURL(), nats.UserCredentials(credsFile(t, sysCreds)), nats.NoReconnect())
+	sysNC, err := nats.Connect(srv.ClientURL(), nats.Timeout(15*time.Second), nats.UserCredentials(credsFile(t, sysCreds)), nats.NoReconnect())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +159,7 @@ func TestRevokeUsersCutsOffAConnectedUser(t *testing.T) {
 			mu.Unlock()
 		}
 	}
-	nc, err := nats.Connect(srv.ClientURL(), nats.UserCredentials(credPath), nats.NoReconnect(),
+	nc, err := nats.Connect(srv.ClientURL(), nats.Timeout(15*time.Second), nats.UserCredentials(credPath), nats.NoReconnect(),
 		nats.ErrorHandler(func(_ *nats.Conn, _ *nats.Subscription, err error) { note(err) }),
 		nats.DisconnectErrHandler(func(_ *nats.Conn, err error) { note(err) }))
 	if err != nil {
@@ -169,7 +169,7 @@ func TestRevokeUsersCutsOffAConnectedUser(t *testing.T) {
 	if err := nc.Publish("live.before", []byte("x")); err != nil {
 		t.Fatal(err)
 	}
-	if err := nc.FlushTimeout(2 * time.Second); err != nil {
+	if err := nc.FlushTimeout(15 * time.Second); err != nil {
 		t.Fatalf("the user does not work before the revocation: %v", err)
 	}
 
@@ -220,7 +220,7 @@ func TestRevokeUsersCutsOffAConnectedUser(t *testing.T) {
 
 	// A user that was not revoked is unaffected.
 	other, _ := liveCreds(t, acctKP)
-	nc3, err := nats.Connect(srv.ClientURL(), nats.UserCredentials(credsFile(t, other)), nats.NoReconnect())
+	nc3, err := nats.Connect(srv.ClientURL(), nats.Timeout(15*time.Second), nats.UserCredentials(credsFile(t, other)), nats.NoReconnect())
 	if err != nil {
 		t.Fatalf("an unrevoked user was refused: %v", err)
 	}

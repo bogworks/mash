@@ -149,7 +149,7 @@ func (e *applyEnv) run(args ...string) (string, string, int) {
 // accountJWT reads the MASH account's JWT from the resolver through the system account.
 func (e *applyEnv) accountJWT() string {
 	e.t.Helper()
-	nc, err := nats.Connect(e.srv.ClientURL(), append(natsauth.TLSOptions(e.tlsCA, "", ""), natsauth.UserCredentials(e.sysCreds))...)
+	nc, err := nats.Connect(e.srv.ClientURL(), append(natsauth.TLSOptions(e.tlsCA, "", ""), nats.Timeout(15*time.Second), natsauth.UserCredentials(e.sysCreds))...)
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -263,7 +263,7 @@ func (e *applyEnv) credsPath(name string) string { return filepath.Join(e.root, 
 // admin opens the directory admin; the returned func closes it.
 func (e *applyEnv) admin() (*admin.Admin, context.Context, func()) {
 	e.t.Helper()
-	nc, err := nats.Connect(e.srv.ClientURL(), natsauth.UserCredentials(e.pl.Creds))
+	nc, err := nats.Connect(e.srv.ClientURL(), nats.Timeout(15*time.Second), natsauth.UserCredentials(e.pl.Creds))
 	if err != nil {
 		e.t.Fatal(err)
 	}

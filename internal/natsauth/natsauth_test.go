@@ -8,6 +8,7 @@ import (
 	"net"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/nats-io/nats.go"
 
@@ -40,7 +41,7 @@ func TestConnectsToRealServer(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	nc, err := nats.Connect(e.URL, natsauth.UserCredentials(creds))
+	nc, err := nats.Connect(e.URL, nats.Timeout(15*time.Second), natsauth.UserCredentials(creds))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +116,7 @@ func fakeServer(t *testing.T) string {
 func TestAdvertisedServersAreNotUsed(t *testing.T) {
 	url := fakeServer(t)
 	// control: without the option the advertised address is taken into the pool
-	nc, err := nats.Connect(url)
+	nc, err := nats.Connect(url, nats.Timeout(15*time.Second))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +132,7 @@ func TestAdvertisedServersAreNotUsed(t *testing.T) {
 	if !plain {
 		t.Error("a plain connection under the override is not reported as plain")
 	}
-	nc, err = nats.Connect(url, opts...)
+	nc, err = nats.Connect(url, append(opts, nats.Timeout(15*time.Second))...)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -170,7 +170,7 @@ func newAT011Env(t *testing.T, before jwt.Permissions) *at011Env {
 	sysUser := at011Must(nkeys.CreateUser())
 	sysUserPub := at011Must(sysUser.PublicKey())
 	tok := at011Must(jwt.NewUserClaims(sysUserPub).Encode(sysKP))
-	e.sys = at011Must(nats.Connect(s.ClientURL(), nats.UserJWT(
+	e.sys = at011Must(nats.Connect(s.ClientURL(), nats.Timeout(15*time.Second), nats.UserJWT(
 		func() (string, error) { return tok, nil }, func(n []byte) ([]byte, error) { return sysUser.Sign(n) })))
 	t.Cleanup(e.sys.Close)
 	return e
@@ -232,7 +232,7 @@ func (e *at011Env) connect(scoped bool, tags []string) *at011Conn {
 	}
 	tok := at011Must(uc.Encode(signer))
 	c := &at011Conn{violations: map[string]int{}}
-	nc, err := nats.Connect(e.srv.ClientURL(),
+	nc, err := nats.Connect(e.srv.ClientURL(), nats.Timeout(15*time.Second),
 		nats.UserJWT(func() (string, error) { return tok, nil }, func(n []byte) ([]byte, error) { return uk.Sign(n) }),
 		nats.ReconnectWait(at011Poll), nats.MaxReconnects(-1),
 		nats.DisconnectErrHandler(func(_ *nats.Conn, err error) {

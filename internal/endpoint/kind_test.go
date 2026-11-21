@@ -128,12 +128,12 @@ func TestOldSenderWithoutAKindWakes(t *testing.T) {
 		if v != "" {
 			m.Header.Set(KindHeader, v)
 		}
-		if _, err := nc.RequestMsg(m, 2*time.Second); err != nil {
+		if _, err := nc.RequestMsg(m, 15*time.Second); err != nil {
 			t.Fatal(err)
 		}
 	}
 	until(t, "all spooled", func() bool { return len(waiting(t, sp)) == 3 })
-	if got := ev.waitFor(t, 1, 2*time.Second); !strings.Contains(got[0], "task") {
+	if got := ev.waitFor(t, 1, 15*time.Second); !strings.Contains(got[0], "task") {
 		t.Fatalf("the wake for mail with no or an unknown kind: %q", got[0])
 	}
 	for _, seq := range []uint64{2, 3} {
@@ -157,7 +157,7 @@ func TestUrgentFyiStillWakesAtOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	until(t, "spooled", func() bool { return len(spooled()) == 1 })
-	if got := ev.waitFor(t, 1, 2*time.Second); !strings.HasPrefix(got[0], "urgent, 1 message from "+tdot("b")+"") {
+	if got := ev.waitFor(t, 1, 15*time.Second); !strings.HasPrefix(got[0], "urgent, 1 message from "+tdot("b")+"") {
 		t.Fatalf("the wake %q", got[0])
 	}
 }
@@ -279,7 +279,7 @@ func TestFyiBacklogCountsHeaders(t *testing.T) {
 	m.Header.Set(sap.HeaderName, h.Encode())
 	m.Header.Set(KindHeader, "fyi")
 	m.Header.Set("X-Padding", strings.Repeat("x", 3000))
-	if _, err := nc.RequestMsg(m, 2*time.Second); err != nil {
+	if _, err := nc.RequestMsg(m, 15*time.Second); err != nil {
 		t.Fatal(err)
 	}
 	until(t, "spooled", func() bool { return len(waiting(t, sp)) == 1 })

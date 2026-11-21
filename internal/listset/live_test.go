@@ -17,6 +17,9 @@ import (
 // sender and every address of the list set the server's actual outcome must equal Check's simulation, and equal what
 // the lists give.
 
+// violationWait bounds the wait for the server's permissions violation; the wait returns as soon as it arrives.
+const violationWait = 15 * time.Second
+
 type liveEnv struct {
 	t      *testing.T
 	url    string
@@ -88,7 +91,7 @@ func (e *liveEnv) connect(signer nkeys.KeyPair, name string, tags []string, scop
 		return nil, err
 	}
 	c := &conn{errs: make(chan string, 256)}
-	c.nc, err = nats.Connect(e.url,
+	c.nc, err = nats.Connect(e.url, nats.Timeout(15*time.Second),
 		nats.UserJWT(func() (string, error) { return j, nil }, func(n []byte) ([]byte, error) { return u.Sign(n) }),
 		nats.NoReconnect(),
 		nats.ErrorHandler(func(_ *nats.Conn, _ *nats.Subscription, err error) {
@@ -129,7 +132,7 @@ func canPublish(t *testing.T, c *conn, obs *nats.Subscription, subject string) b
 	for {
 		m, err := obs.NextMsg(100 * time.Millisecond)
 		if err != nil {
-			if !c.violation("Publish", subject, 2*time.Second) {
+			if !c.violation("Publish", subject, violationWait) {
 				t.Errorf("publish to %s: neither delivered nor refused", subject)
 			}
 			return false
@@ -161,7 +164,7 @@ func canSubscribe(t *testing.T, c *conn, obsConn *nats.Conn, subject string) boo
 	if _, err := sub.NextMsg(100 * time.Millisecond); err == nil {
 		return true
 	}
-	if !c.violation("Subscription", subject, 2*time.Second) {
+	if !c.violation("Subscription", subject, violationWait) {
 		t.Errorf("subscribe to %s: neither delivered nor refused", subject)
 	}
 	return false

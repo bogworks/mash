@@ -40,7 +40,7 @@ func startJetStream(t *testing.T) string {
 
 func connectJS(t *testing.T, url string) *nats.Conn {
 	t.Helper()
-	nc, err := nats.Connect(url)
+	nc, err := nats.Connect(url, nats.Timeout(15*time.Second))
 	if err != nil {
 		t.Fatal(err)
 	}

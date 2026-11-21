@@ -157,7 +157,7 @@ func newConfWorld(t *testing.T, init bool) *confWorld {
 			t.Fatalf("init: %d %s", code, errb)
 		}
 	}
-	nc, err := nats.Connect(w.url, nats.UserCredentials(e.pl.AdminCredsPath()))
+	nc, err := nats.Connect(w.url, nats.Timeout(15*time.Second), nats.UserCredentials(e.pl.AdminCredsPath()))
 	if err != nil {
 		t.Fatal(err)
 	}

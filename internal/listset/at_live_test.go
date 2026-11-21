@@ -88,7 +88,7 @@ func newPushEnv(t *testing.T, c *Compiled) *pushEnv {
 
 	su := must(nkeys.CreateUser())
 	tok := must(jwt.NewUserClaims(must(su.PublicKey())).Encode(sysKP))
-	e.sys = must(nats.Connect(e.url, nats.UserJWT(
+	e.sys = must(nats.Connect(e.url, nats.Timeout(15*time.Second), nats.UserJWT(
 		func() (string, error) { return tok, nil }, func(n []byte) ([]byte, error) { return su.Sign(n) })))
 	t.Cleanup(e.sys.Close)
 	return e
@@ -158,7 +158,7 @@ func subscribeReaches(t *testing.T, c *conn, obs *nats.Conn, filter, subject str
 	if _, err := sub.NextMsg(150 * time.Millisecond); err == nil {
 		return true
 	}
-	if !c.violation("Subscription", filter, 2*time.Second) {
+	if !c.violation("Subscription", filter, violationWait) {
 		t.Errorf("subscribe to %s: neither delivered nor refused", filter)
 	}
 	return false

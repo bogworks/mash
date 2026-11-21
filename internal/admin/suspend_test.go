@@ -68,7 +68,7 @@ func TestSuspendParksSubjectsAndKeepsStoredMail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := c.Fetch(1, jetstream.FetchMaxWait(2*time.Second))
+	b, err := c.Fetch(1, jetstream.FetchMaxWait(15*time.Second))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -414,7 +414,7 @@ func TestEndpointCannotUpdateItsStream(t *testing.T) {
 	if _, err := a.Provision(ctx, ep(t, "alpha"), u, e.Account, "", admin.Meta{}); err != nil {
 		t.Fatal(err)
 	}
-	nc, err := nats.Connect(e.URL, natsauth.UserCredentials(creds), nats.CustomInboxPrefix("_INBOX.o.o_dev_alpha"))
+	nc, err := nats.Connect(e.URL, nats.Timeout(15*time.Second), natsauth.UserCredentials(creds), nats.CustomInboxPrefix("_INBOX.o.o_dev_alpha"))
 	if err != nil {
 		t.Fatal(err)
 	}

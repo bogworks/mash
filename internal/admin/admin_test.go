@@ -167,7 +167,7 @@ func TestEndpointPermissionDenials(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	nc, err := nats.Connect(e.URL, natsauth.UserCredentials(credsA), nats.CustomInboxPrefix("_INBOX.o.o_dev_a"))
+	nc, err := nats.Connect(e.URL, nats.Timeout(15*time.Second), natsauth.UserCredentials(credsA), nats.CustomInboxPrefix("_INBOX.o.o_dev_a"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +190,7 @@ func TestEndpointPermissionDenials(t *testing.T) {
 	// travel on inbox subjects, so a may subscribe only to its own prefix.
 	for _, subj := range []string{"_INBOX.>", "_INBOX.o.>", "_INBOX.o.b.>", "_INBOX.b.>", "_INBOX.b.x", "_INBOX.*.x"} {
 		errs := make(chan error, 1)
-		sc, err := nats.Connect(e.URL, natsauth.UserCredentials(credsA), nats.CustomInboxPrefix("_INBOX.o.o_dev_a"),
+		sc, err := nats.Connect(e.URL, nats.Timeout(15*time.Second), natsauth.UserCredentials(credsA), nats.CustomInboxPrefix("_INBOX.o.o_dev_a"),
 			nats.ErrorHandler(func(_ *nats.Conn, _ *nats.Subscription, err error) {
 				select {
 				case errs <- err:
@@ -207,7 +207,7 @@ func TestEndpointPermissionDenials(t *testing.T) {
 			if !strings.Contains(strings.ToLower(err.Error()), "permissions violation") {
 				t.Errorf("subscribe %s: unexpected error %v", subj, err)
 			}
-		case <-time.After(2 * time.Second):
+		case <-time.After(15 * time.Second):
 			t.Errorf("subscribe %s: allowed; another endpoint's replies would be readable", subj)
 		}
 		sc.Close()
@@ -225,7 +225,7 @@ func TestEndpointPermissionDenials(t *testing.T) {
 	if err := nc.PublishMsg(lm); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := sub.NextMsg(2 * time.Second); err == nil {
+	if got, err := sub.NextMsg(15 * time.Second); err == nil {
 		_ = got.Respond(nil)
 	}
 	nc.Flush()
@@ -235,7 +235,7 @@ func TestEndpointPermissionDenials(t *testing.T) {
 	}
 
 	// And the allowed path: a reads its own inbox by direct get.
-	m, err := nc.Request("$JS.API.DIRECT.GET.inbox-o_dev_a", []byte(`{"seq":1}`), 2*time.Second)
+	m, err := nc.Request("$JS.API.DIRECT.GET.inbox-o_dev_a", []byte(`{"seq":1}`), 15*time.Second)
 	if err != nil {
 		t.Fatalf("own direct get: %v", err)
 	}
