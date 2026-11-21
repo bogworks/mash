@@ -41,24 +41,26 @@ Then tell the session: "set mash up on this machine"
    install -d -m 755 ~/.local ~/.local/bin
    OS=$(uname -s | tr A-Z a-z); ARCH=$(uname -m); case $ARCH in x86_64) ARCH=amd64;; aarch64|arm64) ARCH=arm64;; esac
    V=v2.15.1; B=https://github.com/nats-io/nats-server/releases/download/$V
-   curl -fsSLO $B/nats-server-$V-$OS-$ARCH.tar.gz -O $B/SHA256SUMS
-   grep " nats-server-$V-$OS-$ARCH.tar.gz\$" SHA256SUMS | sha256sum -c -      # macOS: shasum -a 256 -c -
-   tar -xzf nats-server-$V-$OS-$ARCH.tar.gz --strip-components=1 -C ~/.local/bin nats-server-$V-$OS-$ARCH/nats-server
+   curl -fsSLO $B/nats-server-$V-$OS-$ARCH.tar.gz -O $B/SHA256SUMS &&
+   grep " nats-server-$V-$OS-$ARCH.tar.gz\$" SHA256SUMS | sha256sum -c - &&      # macOS: shasum -a 256 -c -
+   tar -xzf nats-server-$V-$OS-$ARCH.tar.gz --strip-components=1 -C ~/.local/bin nats-server-$V-$OS-$ARCH/nats-server &&
    N=0.5.2; B=https://github.com/nats-io/natscli/releases/download/v$N
-   curl -fsSLO $B/nats-$N-$OS-$ARCH.zip -O $B/SHA256SUMS
-   grep " nats-$N-$OS-$ARCH.zip\$" SHA256SUMS | sha256sum -c -                # macOS: shasum -a 256 -c -
+   curl -fsSLO $B/nats-$N-$OS-$ARCH.zip -O $B/SHA256SUMS &&
+   grep " nats-$N-$OS-$ARCH.zip\$" SHA256SUMS | sha256sum -c - &&                # macOS: shasum -a 256 -c -
    if command -v unzip >/dev/null; then unzip -j -o nats-$N-$OS-$ARCH.zip '*/nats' -d ~/.local/bin
    else python3 -m zipfile -e nats-$N-$OS-$ARCH.zip natsx && install -m 755 natsx/*/nats ~/.local/bin/nats; fi
    ```
 
-   (The second `SHA256SUMS` replaces the first, after the first has been
-   used.) Then `mash` and `mashctl`: download the installer and its
+   (Each check is joined to the next command with `&&`, so nothing is unpacked
+   or run unless the check passes. On macOS use `shasum -a 256 -c -` where the
+   comments say so. The second `SHA256SUMS` replaces the first, after the first
+   has been used.) Then `mash` and `mashctl`: download the installer and its
    checksums, check, run:
 
    ```sh
    BASE=https://github.com/bogworks/mash/releases/latest/download
-   curl -fsSLO $BASE/install.sh -O $BASE/SHA256SUMS
-   grep ' install.sh$' SHA256SUMS | sha256sum -c -    # macOS: shasum -a 256 -c -
+   curl -fsSLO $BASE/install.sh -O $BASE/SHA256SUMS &&
+   grep ' install.sh$' SHA256SUMS | sha256sum -c - &&    # macOS: shasum -a 256 -c -
    bash install.sh
    ```
 
@@ -79,8 +81,8 @@ Then tell the session: "set mash up on this machine"
 
    ```sh
    BASE=https://github.com/bogworks/mash/releases/latest/download
-   curl -fsSLO $BASE/mash-local-nats-setup.sh -O $BASE/SHA256SUMS
-   grep ' mash-local-nats-setup.sh$' SHA256SUMS | sha256sum -c -    # macOS: shasum -a 256 -c -
+   curl -fsSLO $BASE/mash-local-nats-setup.sh -O $BASE/SHA256SUMS &&
+   grep ' mash-local-nats-setup.sh$' SHA256SUMS | sha256sum -c - &&    # macOS: shasum -a 256 -c -
    bash mash-local-nats-setup.sh --owner alice
    mashctl init --config ~/mash-nats/mash-setup.yaml     # the last line the script printed
    ```
@@ -233,8 +235,8 @@ Command: `install.sh` from the release: download it, check it against
 
 ```sh
 BASE=https://github.com/bogworks/mash/releases/latest/download
-curl -fsSLO $BASE/install.sh -O $BASE/SHA256SUMS
-grep ' install.sh$' SHA256SUMS | sha256sum -c -    # macOS: shasum -a 256 -c -
+curl -fsSLO $BASE/install.sh -O $BASE/SHA256SUMS &&
+grep ' install.sh$' SHA256SUMS | sha256sum -c - &&    # macOS: shasum -a 256 -c -
 bash install.sh
 ```
 
@@ -290,14 +292,15 @@ port: 4222
 made: CA, certificate, operator, accounts, users
 started: nats-server pid 1523 on 127.0.0.1:4222
 checked: sign-in and system ping ok
-mashctl init --config /home/tester/mash-nats/mash-setup.yaml
+mashctl init --config ~/mash-nats/mash-setup.yaml
 ```
 
 The first line is the checksum check of the downloaded script. Run the last
-line it printed:
+line it printed (`~/mash-nats` is the default folder; use the folder the setup
+script printed, if you used `--dir`):
 
 ```
-mashctl init --config /home/tester/mash-nats/mash-setup.yaml
+mashctl init --config ~/mash-nats/mash-setup.yaml
 Initialized mash on tls://127.0.0.1:4222 for owner acme
 ```
 

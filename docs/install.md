@@ -26,8 +26,8 @@ To install the binaries (required for an unpinned plugin; also for the CLI in se
 
 ```sh
 BASE=https://github.com/bogworks/mash/releases/latest/download
-curl -fsSLO $BASE/install.sh -O $BASE/SHA256SUMS
-grep ' install.sh$' SHA256SUMS | sha256sum -c -    # macOS: shasum -a 256 -c -
+curl -fsSLO $BASE/install.sh -O $BASE/SHA256SUMS &&
+grep ' install.sh$' SHA256SUMS | sha256sum -c - &&  # macOS: shasum -a 256 -c -
 bash install.sh
 ```
 
@@ -49,9 +49,9 @@ To check the script and the attestation yourself, with a current `gh`:
 
 ```sh
 BASE=https://github.com/bogworks/mash/releases/download/v0.5.6   # use the tag of the release you want; for another repository (MASH_REPO) change bogworks/mash here and in -R and --signer-workflow
-curl -fsSLO $BASE/install.sh -O $BASE/SHA256SUMS -O $BASE/mash.intoto.jsonl
+curl -fsSLO $BASE/install.sh -O $BASE/SHA256SUMS -O $BASE/mash.intoto.jsonl &&
 gh attestation verify SHA256SUMS -R bogworks/mash --bundle mash.intoto.jsonl \
-  --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/v0.5.6
+  --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/v0.5.6 &&
 grep ' install.sh$' SHA256SUMS | sha256sum -c - &&           # macOS: shasum -a 256 -c -
 less install.sh && bash install.sh
 ```
@@ -233,7 +233,7 @@ script, check it against the release's `SHA256SUMS`, read it, then run it
 
 ```sh
 BASE=https://github.com/bogworks/mash/releases/latest/download
-curl -fsSLO $BASE/mash-migrate-0.5.5.sh -O $BASE/SHA256SUMS
+curl -fsSLO $BASE/mash-migrate-0.5.5.sh -O $BASE/SHA256SUMS &&
 grep ' mash-migrate-0.5.5.sh$' SHA256SUMS | sha256sum -c - &&
 less mash-migrate-0.5.5.sh && bash mash-migrate-0.5.5.sh
 ```
@@ -269,6 +269,6 @@ Remove only what you made. Stop any Claude Code session that uses mash first.
 
 - The programs: delete `mash` and `mashctl` from the folder `install.sh` named (`~/.local/bin`, or `MASH_INSTALL_DIR`).
 - The plugins: `claude plugin uninstall mash@mash`, and `claude plugin uninstall mash-setup@mash` if you installed it.
-- Your configuration and keys: the folder `~/.config/mash` (or the one `MASH_CONFIG_DIR` or `XDG_CONFIG_HOME` named). It holds each endpoint's creds file, so deleting it cannot be undone. Mail already stored on the server stays there.
+- Your configuration and keys: the folder `~/.config/mash` (or the folder `MASH_CONFIG_DIR` named, or `$XDG_CONFIG_HOME/mash`; never `XDG_CONFIG_HOME` itself). It holds each endpoint's creds file, so deleting it cannot be undone. Mail already stored on the server stays there.
 - Mail kept on this machine: the state folder (`~/.local/state/mash`, or `MASH_STATE_DIR`).
 - A server made by the local setup script: `bash mash-local-nats-setup.sh --remove` stops it and deletes its folder, every mailbox and every message ([walkthrough, step 11](guide/walkthrough.md#step-11-stop-start-remove-the-server)). Afterwards mashctl's config folder (`~/.config/mash`) stays and still points at the removed server: move it aside, or run `mashctl init --config <file> --config-dir <new folder>` to set up again (the script prints this note).
