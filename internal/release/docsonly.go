@@ -18,7 +18,7 @@ func IsDocsPath(p string) bool {
 		}
 	}
 	// Agent instructions: a skill or a briefing an agent executes is code in effect (ADR 0156), wherever it sits.
-	if strings.HasPrefix(p, "mash-setup/") || p == "AGENTS.md" || strings.HasSuffix(p, "/AGENTS.md") || p == "CLAUDE.md" || strings.HasSuffix(p, "/CLAUDE.md") {
+	if isAgentInstruction(lower) {
 		return false
 	}
 	switch p {
@@ -37,6 +37,29 @@ func IsDocsPath(p string) bool {
 		}
 	}
 	return strings.HasPrefix(p, "docs/") || strings.HasSuffix(p, ".md")
+}
+
+// isAgentInstruction: a path an agent reads as instructions is code in effect (ADR 0156), wherever it sits and in any letter case
+// (lower is the lower-cased path): the named files, any *.tmpl, mash-setup/, and any path with a directory component named like
+// the places agents read instructions. Same rule as scripts/ci-changes.
+func isAgentInstruction(lower string) bool {
+	base := lower[strings.LastIndex(lower, "/")+1:]
+	switch base {
+	case "agents.md", "claude.md", "gemini.md", "skill.md", ".cursorrules", ".windsurfrules":
+		return true
+	}
+	if strings.HasSuffix(base, ".tmpl") || strings.HasPrefix(lower, "mash-setup/") {
+		return true
+	}
+	if i := strings.LastIndex(lower, "/"); i >= 0 {
+		for _, c := range strings.Split(lower[:i], "/") {
+			switch c {
+			case "skills", "commands", "agents", "hooks", "prompts", "briefings", "plugins", ".claude-plugin":
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // Commit is one commit of main's first-parent history with the paths it changed against its first parent.
