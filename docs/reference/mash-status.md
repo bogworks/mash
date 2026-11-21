@@ -163,6 +163,26 @@ With `--json` the result is this shape. The values are an example.
 }
 ```
 
+## JSON with --detail
+
+With `--json --detail` the result is this fuller shape, which contains the
+usual one. The values are an example.
+
+```json
+{
+  "endpoint": "acme.demo.bob",
+  "ready": true,
+  "online": true,
+  "reason": null,
+  "reason_code": null,
+  "session": {
+    "holds_endpoint": true,
+    "hooks": "ran",
+    "storage": "ok"
+  }
+}
+```
+
 ## MCP tool
 
 [`status`](mcp-status.md)

@@ -489,3 +489,61 @@ func TestRunRegeneratesOverBannerPages(t *testing.T) {
 		t.Fatalf("CheckDir = %v", got)
 	}
 }
+
+// realPages generates the pages of the real spec.
+func realPages(t *testing.T) map[string]string {
+	t.Helper()
+	pages, err := Generate(filepath.Join(repoRoot(t), "spec"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]string{}
+	for k, v := range pages {
+		out[k] = string(v)
+	}
+	return out
+}
+
+func TestCLIJSONDetailRendered(t *testing.T) {
+	p := realPages(t)
+	for f, key := range map[string]string{"mash-status.md": `"session"`, "mash-join.md": `"creds"`} {
+		page := p[f]
+		i := strings.Index(page, "## JSON with --detail\n")
+		if i < 0 {
+			t.Fatalf("%s lacks the JSON with --detail section", f)
+		}
+		if !strings.Contains(page[i:], "fuller shape") || !strings.Contains(page[i:], key) {
+			t.Errorf("%s detail section lacks its text or example:\n%s", f, page[i:])
+		}
+	}
+}
+
+func TestMCPCasesHaveNoStreamOrExit(t *testing.T) {
+	p := realPages(t)
+	for name, page := range p {
+		if !strings.HasPrefix(name, "mcp-") {
+			continue
+		}
+		if strings.Contains(page, "Exit code:") || strings.Contains(page, "Stream:") {
+			t.Errorf("%s mentions a stream or exit code:\n%s", name, page)
+		}
+	}
+	if s := p["mcp-send.md"]; !strings.Contains(s, "The call returns this text.") {
+		t.Errorf("mcp-send.md lacks the text-result statement:\n%s", s)
+	}
+	if !strings.Contains(p["mcp-reply.md"]+p["mcp-send.md"]+p["mcp-read.md"], "`isError` set") {
+		t.Errorf("no MCP page states isError for its errors")
+	}
+}
+
+func TestMCPStructuredDetailRendered(t *testing.T) {
+	p := realPages(t)
+	s := p["mcp-status.md"]
+	i := strings.Index(s, "## Structured result with --detail\n")
+	if i < 0 || !strings.Contains(s[i:], "\"session\"") {
+		t.Errorf("mcp-status.md lacks the detail section:\n%s", s)
+	}
+	if strings.Contains(p["mcp-send.md"], "with --detail") {
+		t.Errorf("mcp-send.md has a detail section though its structured_detail is null")
+	}
+}

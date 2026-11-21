@@ -29,7 +29,7 @@ The structured content of a successful result. The values are an example.
 
 ### Answered
 
-Stream: stdout. Exit code: 0.
+The call returns this text.
 
 ```text
 Answered.
