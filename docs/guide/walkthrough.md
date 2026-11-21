@@ -101,10 +101,11 @@ configuration and credentials. It is the default: `MASH_CONFIG_DIR` (an
 absolute path) names another folder, and so does an absolute
 `XDG_CONFIG_HOME`, as `docs/install.md` describes.
 
-That folder holds `mashctl`'s signing seeds (the account and operator keys),
-and any process that runs as your user, an agent session included, can read
-them. mash accepts that risk: use a separate user or a sandbox if you need
-more.
+With a server made by the setup script, that folder holds the operator's
+identity key (the `nats` command signs accounts only with it), with which the
+operator itself can be re-issued, and the account signing key. They are
+protected only as your own files are. This is the accepted same-user custody
+risk (#869, decision 264).
 
 <!-- output: server -->
 Output: `[built output: server]`
