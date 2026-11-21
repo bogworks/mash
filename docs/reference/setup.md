@@ -43,24 +43,26 @@ certificate. It names anything missing, says where to get it, and stops. It
 does not need nsc. If port 4222 is already taken, as it is where a packaged
 nats-server runs as a system service, the script leaves that service alone,
 uses the next free port and says which. It asks one question, the owner's
-name, reading it from the terminal. It makes a server that only this machine
-can reach, with encryption on, starts it as your own user, and writes the
-setup file. That is its whole scope: a join file made against it works only on
-this machine. Two machines need a server both can reach, with a certificate
-that covers its address; in 0.5.6 that is a NATS server you run yourself,
-which mashctl init takes from a setup file (docs/install.md). A script option
-for a reachable address and certificate is for 0.6.0 (settled 2026-11-21).
-Everything goes in ~/mash-nats unless --dir names another folder. Its last
-line is the next command, with the path it actually wrote: 'mashctl init
---config ~/mash-nats/mash-setup.yaml' by default. Guides and skills take that
-path from the script's output, never from memory. The NATS account it makes is
-named after the owner; the system account keeps NATS's own name, SYSTEM. The
-server runs as your own user's process, not as a system service, so it does
-not come back after a reboot: run the script again with --start to start it
-(it never creates anything then), --stop to stop it, or --remove to remove it.
-After --remove it prints two lines: that mashctl's folder still points at the
-server just removed, and how to set up again (a new configuration folder, or
-moving the old one aside).
+name, reading it from the terminal; --owner NAME answers it on the command
+line and nothing is asked, which is the form an agent or a script uses, since
+it has no terminal (settled 2026-11-21, from the final gate). It makes a
+server that only this machine can reach, with encryption on, starts it as your
+own user, and writes the setup file. That is its whole scope: a join file made
+against it works only on this machine. Two machines need a server both can
+reach, with a certificate that covers its address; in 0.5.6 that is a NATS
+server you run yourself, which mashctl init takes from a setup file
+(docs/install.md). A script option for a reachable address and certificate is
+for 0.6.0 (settled 2026-11-21). Everything goes in ~/mash-nats unless --dir
+names another folder. Its last line is the next command, with the path it
+actually wrote: 'mashctl init --config ~/mash-nats/mash-setup.yaml' by
+default. Guides and skills take that path from the script's output, never from
+memory. The NATS account it makes is named after the owner; the system account
+keeps NATS's own name, SYSTEM. The server runs as your own user's process, not
+as a system service, so it does not come back after a reboot: run the script
+again with --start to start it (it never creates anything then), --stop to
+stop it, or --remove to remove it. After --remove it prints two lines: that
+mashctl's folder still points at the server just removed, and how to set up
+again (a new configuration folder, or moving the old one aside).
 
 ```sh
 curl -fsSL <release base>/mash-local-nats-setup.sh | bash
