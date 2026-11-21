@@ -80,35 +80,15 @@ Mail needs those hooks to run. They do not run with `disableAllHooks: true` in a
 <a id="3-allow-the-channel"></a><a id="3-allow-the-channel-once-per-machine"></a>
 ## 3. Optional: wake an idle session
 
-**You can skip this section.** Without it, mail still arrives at the session's next prompt or tool call; start sessions plainly (section 5). The idle wake, which rouses a session that is waiting for input, needs either a channel allowlist entry or Claude Code's own research-preview flag, `--dangerously-load-development-channels`. The flag lets a development channel plugin push a message into a session without being on Claude Code's approved-channels list. It needs no root. Whether to use it is your choice:
+**You can skip this section.** Without it, mail still arrives at the session's next prompt or tool call. The idle wake, which rouses a session that is waiting for input, comes from the channel: start the session with `--channels plugin:mash@mash`. It needs no root and no setting, and Claude Code shows no warning:
 
 ```sh
-MASH_ENDPOINT=alice.dev.design claude --dangerously-load-development-channels plugin:mash@mash
+MASH_ENDPOINT=alice.dev.design claude --channels plugin:mash@mash --name alice.dev.design
 ```
 
-Claude Code asks you to confirm the flag at each launch; that is expected. A missing allowlist entry is not an error for a solo developer. The managed settings file below is optional and only for teams and managed machines, where an administrator allowlists mash once so that `--channels plugin:mash@mash` works without a confirmation.
+`--name` puts the address in the prompt box and the terminal title, so you can tell who you are talking to; `/rename alice.dev.design` does the same for a session already open.
 
-### Managed settings (optional; teams and managed machines)
-
-Mail itself is delivered by the hooks (section 2); the channel carries a one-line summary of waiting mail, which wakes an idle session so its next prompt runs the hook. Claude Code runs only allowlisted channel plugins without a confirmation dialog. Allowlist mash in the managed settings file:
-
-| OS | Path |
-|---|---|
-| macOS | `/Library/Application Support/ClaudeCode/managed-settings.json` |
-| Linux | `/etc/claude-code/managed-settings.json` |
-
-```json
-{
-  "channelsEnabled": true,
-  "allowedChannelPlugins": [{ "marketplace": "mash", "plugin": "mash" }]
-}
-```
-
-Managed settings are written by an administrator (`sudo`). If the file already exists, merge these keys into it. Note that `allowedChannelPlugins` replaces the default allowlist; list any other channel plugins you use as well.
-
-> **If your organisation manages Claude Code.** Claude Code uses the highest-ranked managed source that delivers at least one policy key and ignores the rest ([how sources combine](https://code.claude.com/docs/en/managed-settings#how-claude-code-combines-managed-sources)). Server-managed settings, pushed from the Claude.ai admin console, rank first, so when your organisation uses them the local file above is ignored. An organisation Owner must add `{ "marketplace": "mash", "plugin": "mash" }` to `allowedChannelPlugins` there and enable Channels (Organization settings > Claude Code > Channels). Bedrock, Agent Platform and Foundry have no channels. Without a channel, hooks still deliver mail at the next prompt or tool call, but the idle wake and live prompts are lost. If the policy sets `allowManagedHooksOnly`, the hooks need mash in the managed `enabledPlugins` as well (see [Hook delivery](operations.md)). `strictKnownMarketplaces` can also refuse `claude plugin marketplace add bogworks/mash`. Confirm what applies with `/status` ("Setting sources") and `claude doctor` ("Managed settings (remote)"); `/status` has the last word ([ADR 0039](decisions/0039-mash-reads-claude-codes-managed-settings-read-only-for-diagnosis.md)). The development flag below skips the allowlist but not `channelsEnabled`.
-
-Without this, `--channels plugin:mash@mash` is refused ("not on the approved channels allowlist") and the channel wake that rouses an idle session does not arrive. The development flag at the top of this section still works, and asks for confirmation on every launch.
+If your organisation manages Claude Code, it can turn channels off. Then the idle wake does not arrive and hooks still deliver mail at the next prompt or tool call (see [Hook delivery](operations.md)).
 
 ## 4. Configuration
 
@@ -179,10 +159,10 @@ The old names are gone with no alias: `MASH_INSECURE_PLAINTEXT` in the environme
 ## 5. Launch a session
 
 ```sh
-MASH_ENDPOINT=alice.dev.design claude
+MASH_ENDPOINT=alice.dev.design claude --channels plugin:mash@mash --name alice.dev.design
 ```
 
-To wake an idle session as well, see [section 3](#3-optional-wake-an-idle-session).
+`--channels` wakes an idle session ([section 3](#3-optional-wake-an-idle-session)); `--name` shows the address as the session's name.
 
 The session registers as a SAP agent, takes the lease on its name, and starts receiving mail. If another live session already holds the name, this one starts without mail tools and says why.
 
