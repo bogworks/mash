@@ -21,8 +21,8 @@ func TestRefusedCredentialsFramedOnEveryCommand(t *testing.T) {
 			t.Fatalf("mash %v: %+v", args, r)
 		}
 	}
-	// --json: send and who have the form; inbox and read have none, which is a usage error of its own.
-	for _, args := range [][]string{{"send", tTo("a"), "hi", "--json"}, {"who", "--json"}} {
+	// --json: the same error as one JSON object on stdout, on every command that connects.
+	for _, args := range [][]string{{"send", tTo("a"), "hi", "--json"}, {"inbox", "--json"}, {"read", "1", "--json"}, {"who", "--json"}} {
 		r := runMash(env, args...)
 		wantJSON := `{"error":"` + tTo("a") + ` cannot sign in: the server refused its credentials","hint":"mash doctor"}` + "\n"
 		if r.code != 1 || r.out != wantJSON || r.errs != "" {
