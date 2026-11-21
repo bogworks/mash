@@ -381,7 +381,7 @@ func TestCI_requiredJobsKeepTheirCheckNames(t *testing.T) {
 			}
 			// The only condition is the heavy-job one: a push always runs it (the candidate is a commit on main) and only a
 			// docs-only pull request skips it.
-			if j.If != heavyIf || len(j.Strategy.Matrix) != 0 || j.ContinueOnError != nil {
+			if j.If != reproIf || len(j.Strategy.Matrix) != 0 || j.ContinueOnError != nil {
 				t.Errorf("the reproducible job must run under the heavy-job condition only, unmatrixed and strictly: %+v", j)
 			}
 		}
@@ -1408,6 +1408,17 @@ func TestCI_prCheckVerdict(t *testing.T) {
 		out, err := cmd.CombinedOutput()
 		if (err == nil) != c.ok {
 			t.Errorf("code=%q test=%s reproducible=%s: ok=%v, want %v (%s)", c.code, c.test, c.repro, err == nil, c.ok, out)
+		}
+	}
+	// reproducible runs on a queue draft and a push only: skipped on an ordinary pull request push passes, anywhere else it fails.
+	for _, c := range []struct {
+		event, draft string
+		ok           bool
+	}{{"pull_request", "false", true}, {"pull_request", "true", false}, {"push", "false", false}, {"merge_group", "false", false}, {"", "", false}} {
+		cmd := exec.Command("bash", "-c", script)
+		cmd.Env = append(os.Environ(), "CHANGES=success", "CODE=true", "TEST=success", "REPRO=skipped", "ADR=success", "DOCS=success", "EVENT="+c.event, "DRAFT="+c.draft)
+		if out, err := cmd.CombinedOutput(); (err == nil) != c.ok {
+			t.Errorf("reproducible skipped, event=%q draft=%q: ok=%v, want %v (%s)", c.event, c.draft, err == nil, c.ok, out)
 		}
 	}
 	// A changes job that did not succeed is no answer, whatever the other jobs did.
