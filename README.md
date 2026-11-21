@@ -62,13 +62,20 @@ The mash plugin needs the `mash` program on the PATH that Claude Code starts wit
 
 ### Or by hand
 
+Everything installs as you, in your home folder: no `sudo`, no package manager, no system service. Download the installer and its checksums, check, then run it:
+
 ```sh
-curl -fsSL https://github.com/bogworks/mash/releases/latest/download/install.sh | bash
+BASE=https://github.com/bogworks/mash/releases/latest/download
+curl -fsSLO $BASE/install.sh -O $BASE/SHA256SUMS
+grep ' install.sh$' SHA256SUMS | sha256sum -c -    # macOS: shasum -a 256 -c -
+bash install.sh
 ```
 
-This installs `mash` and `mashctl` from the latest release into `~/.local/bin`, after checking each against the release's `SHA256SUMS`. It asks nothing and needs no `sudo`. [docs/install.md](docs/install.md) says what it does, how to pin a release, and how to check the script before you run it. To install the Claude Code plugin, see [docs/install.md](docs/install.md#2-the-plugin).
+This installs `mash` and `mashctl` from the release into `~/.local/bin`, after checking each against the release's `SHA256SUMS`. [docs/install.md](docs/install.md) says what it does and how to pin a release.
 
-`mash-local-nats-setup.sh` from the release makes a TLS-only NATS server that only this machine can reach; [step 3 of the walkthrough](docs/guide/walkthrough.md#step-3-make-a-nats-server-on-this-machine) uses it. To use a NATS server you already run, see [Bring your own NATS server](docs/nats-server.md). If something goes wrong, see [docs/troubleshooting.md](docs/troubleshooting.md).
+The local NATS server and the rest of the by-hand route (`nats-server` and the `nats` command from their GitHub releases, `mash-local-nats-setup.sh`, two endpoints, the first mail) are in the [Quick start](docs/guide/walkthrough.md#quick-start), each command run on this release. To use a NATS server you already run, see [Bring your own NATS server](docs/nats-server.md).
+
+Where everything lives: the programs in `~/.local/bin`, the configuration and keys in `~/.config/mash`, a local server in `~/mash-nats`. How to remove it all: [Uninstall](docs/install.md#uninstall).
 
 ### When something is wrong
 
@@ -76,7 +83,7 @@ This installs `mash` and `mashctl` from the latest release into `~/.local/bin`, 
 
 ## Check the download
 
-`install.sh` checks each binary against the release's `SHA256SUMS`. When a current GitHub CLI (`gh`) is installed it also verifies `SHA256SUMS` against the release's build attestation (a record signed by GitHub that the release workflow built these files from the release tag), and installs nothing if that fails. Without `gh` it says so and trusts the TLS connection to github.com. To check by hand before you run anything, download the files and verify the attestation:
+`install.sh` checks each binary against the release's `SHA256SUMS`. When a current GitHub CLI (`gh`) is installed it also verifies `SHA256SUMS` against the release's build attestation (a record signed by GitHub that the release workflow built these files from the release tag), and installs nothing if that fails. Without `gh` it says so and trusts the TLS connection to github.com. `gh attestation verify` needs a current `gh`; [which version, and where to get it](docs/security/verify-your-download.md#what-you-need). To check by hand before you run anything, download the files and verify the attestation:
 
 ```sh
 BASE=https://github.com/bogworks/mash/releases/download/v0.5.6
@@ -90,7 +97,7 @@ The rest (checking `install.sh` itself against `SHA256SUMS`, and building from s
 
 ## Quick start
 
-The quick start is one guided walkthrough that takes you from nothing to two Claude Code sessions mailing each other, with the output of every command. Start at the [walkthrough](docs/guide/walkthrough.md).
+The quick start is one guided walkthrough that takes you from nothing to two Claude Code sessions mailing each other, with the output of every command. The [Quick start](docs/guide/walkthrough.md#quick-start) is the short version; the rest of the walkthrough explains each step.
 
 ## Documentation
 
