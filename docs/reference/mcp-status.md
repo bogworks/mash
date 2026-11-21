@@ -113,6 +113,15 @@ acme.demo.bob: not ready: mail is held: its folder cannot be written
 hint: mash doctor
 ```
 
+### After the endpoint was deleted, on the machine that deleted it
+
+The call returns this text with `isError` set.
+
+```text
+acme.demo.bob: not ready: this endpoint was deleted; its address cannot be used again
+hint: mash doctor
+```
+
 ### No endpoint chosen for this session
 
 The call returns this text with `isError` set.
