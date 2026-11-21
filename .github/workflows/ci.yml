@@ -1,6 +1,7 @@
 name: ci
-# Every push to main runs the test jobs, docs-only too: the release gate reads main's test runs, and a docs-only
-# head would otherwise have none and be refused (v0.2.1 had to be tagged one commit back). Every job runs on a
+# A push to main skips the heavy jobs when the paths it added are docs-only (scripts/ci-changes; the merge queue's fast-forward of
+# a docs-only batch is one): the release gate (internal/release CheckCIWalkBack) judges such a head by the newest commit below
+# it whose tests ran, provided every commit between is docs-only. Every job runs on a
 # self-hosted runner picked by literal labels: [self-hosted, rh-linux] or [self-hosted, rh-macos] (ADR 0079). A pull
 # request from a fork runs on them too; the repository holds an outside contributor's run for a person's approval. Every pull request runs, so it always gets the pr-check that its review waits for (scripts/review-pr); a docs-only one skips the heavy jobs (test, test-macos, reproducible, conformance) at job level, so every check name still reports, and runs the cheap ones (changes, adr-numbers, pr-check). The review watcher waits only on pr-check, so conformance, which gates nothing, is skipped on docs-only too. What counts as docs-only is in scripts/ci-changes; docs/branch-protection.md states the rule. The macOS test job is advisory (ADR 0079).
 on:
@@ -20,9 +21,9 @@ concurrency:
 jobs:
   # Does this change need the heavy jobs? scripts/ci-changes decides (it has the definition of code), run from the base
   # revision rather than the pull request's (hardening); a diff touching .github/ or scripts/ci-changes is always code. A pull request that
-  # touches only documentation no test or build reads is docs-only (code=false). A push, a merge group and a Mergify
-  # merge-queue draft always count as code: the release gate reads main's test runs, and a draft builds the combined
-  # commit. The heavy jobs skip on code=false at job level; the check names stay, a skipped job reports as skipped.
+  # touches only documentation no test or build reads is docs-only (code=false). A Mergify merge-queue draft
+  # is classified by its diff against main, which is the whole batch (docs-only only when every queued pull request is), and
+  # a push by the paths it added. A merge group and a schedule always count as code. The heavy jobs skip on code=false at job level; the check names stay, a skipped job reports as skipped.
   changes:
     timeout-minutes: 5
     runs-on: [self-hosted, rh-gate]
@@ -37,10 +38,20 @@ jobs:
           EVENT: ${{ github.event_name }}
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD_REF: ${{ github.head_ref }}
+          BEFORE: ${{ github.event.before }}
         run: |
           set -euo pipefail
           files=""
-          if [ "$EVENT" = pull_request ]; then
+          if [ "$EVENT" = pull_request ] || [ "$EVENT" = push ]; then
+            if [ "$EVENT" = push ]; then
+              # A push to main (the merge queue's fast-forward of a batch, or a direct push): what the push added. No usable
+              # previous head (a new branch, a force push) is code.
+              BASE="$BEFORE"
+              if [ -z "$BASE" ] || [ -z "${BASE//0/}" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+                echo "code=true" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+            fi
             files="$(git diff --no-renames --name-only "$BASE" HEAD)"
             # Hardening: a diff touching .github/ or the classifier is always code, whatever the classifier says.
             if grep -qE '^"?(\.github/|scripts/ci-changes"?$)' <<<"$files"; then
@@ -64,7 +75,7 @@ jobs:
     # A heavy job: skipped only when changes says docs-only (code=false). !cancelled() lets it run when changes itself
     # failed (the output is then empty, not false), so a broken classifier runs the work rather than skipping it; pr-check
     # fails on a changes job that did not succeed.
-    if: ${{ !cancelled() && (github.event_name == 'push' || needs.changes.outputs.code != 'false') }}
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     timeout-minutes: 45
     runs-on: [self-hosted, rh-linux]
     steps:
@@ -79,7 +90,7 @@ jobs:
   test-eph:
     name: test (linux, eph)
     needs: changes
-    if: ${{ !cancelled() && (github.event_name == 'push' || needs.changes.outputs.code != 'false') }}
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     timeout-minutes: 45
     runs-on: [self-hosted, rh-linux-eph]
     steps:
@@ -98,7 +109,7 @@ jobs:
     # A heavy job: skipped only when changes says docs-only (code=false). !cancelled() lets it run when changes itself
     # failed (the output is then empty, not false), so a broken classifier runs the work rather than skipping it; pr-check
     # fails on a changes job that did not succeed.
-    if: ${{ !cancelled() && (github.event_name == 'push' || needs.changes.outputs.code != 'false') }}
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     timeout-minutes: 30
     runs-on: [self-hosted, rh-macos]
     steps:
@@ -150,7 +161,7 @@ jobs:
     # A heavy job: skipped only when changes says docs-only (code=false). !cancelled() lets it run when changes itself
     # failed (the output is then empty, not false), so a broken classifier runs the work rather than skipping it; pr-check
     # fails on a changes job that did not succeed.
-    if: ${{ !cancelled() && (github.event_name == 'push' || needs.changes.outputs.code != 'false') }}
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     timeout-minutes: 30
     # Same runner as the other Linux jobs; a fork pull request runs on it too.
     # This is the release-facing check (codex H1 on #39).

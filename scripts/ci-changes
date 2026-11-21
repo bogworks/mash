@@ -7,13 +7,13 @@
 #   EVENT     the workflow's github.event_name
 #   HEAD_REF  the pull request's head ref (github.head_ref; empty on other events)
 #
-# code=false only for a pull request that touches nothing but documentation: every path is under docs/ or is a *.md
-# file AND is not one a build, a test or the release tooling reads. Everything else is code:
-#   - a push, a merge group, a schedule or any other non-pull_request event (main's head always runs the full set: the
-#     release gate reads main's check runs);
-#   - a Mergify merge-queue draft (head ref mergify/merge-queue/...): it builds the combined commit, and its diff
-#     against main can look docs-only on its own. The prefix alone is enough here, unlike adr-lint's skip, because the
-#     mistake it allows is running more CI, never less;
+# code=false only for a pull request, a Mergify merge-queue draft or a push to main whose changed paths are nothing but
+# documentation: every path is under docs/ or is a *.md file AND is not one a build, a test or the release tooling reads.
+# The caller passes the paths the event adds: a pull request's diff against its base; a queue draft's diff against main is
+# the whole batch (so a docs-only batch is docs-only and a batch with one code pull request is code); a push's diff is
+# the range it added (the release gate walks back past docs-only heads to the newest commit whose tests ran, ADR in
+# internal/release/checks.go). Everything else is code:
+#   - a merge group, a schedule or any other event;
 #   - an empty path list (nothing to compare);
 #   - any path not listed as documentation below (the default is code, so a new top-level path is code).
 # Documentation that a test or the build reads stays code, so it is tested when it changes:
@@ -62,20 +62,17 @@ is_docs() {
 
 files="$(cat)"
 code=true
-if [ "${EVENT:-}" = pull_request ]; then
-	case "${HEAD_REF:-}" in
-	mergify/merge-queue/*) ;;
-	*)
-		if [ -n "$files" ]; then
-			code=false
-			while IFS= read -r f; do
-				if ! is_docs "$f"; then
-					code=true
-					break
-				fi
-			done <<<"$files"
-		fi
-		;;
-	esac
-fi
+case "${EVENT:-}" in
+pull_request | push)
+	if [ -n "$files" ]; then
+		code=false
+		while IFS= read -r f; do
+			if ! is_docs "$f"; then
+				code=true
+				break
+			fi
+		done <<<"$files"
+	fi
+	;;
+esac
 echo "code=$code"

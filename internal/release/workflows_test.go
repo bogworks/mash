@@ -1327,7 +1327,7 @@ func TestCI_prCheckGatesOnEveryRequiredJob(t *testing.T) {
 	}
 	push, _ := on["push"].(map[string]any)
 	if _, ignores := push["paths-ignore"]; ignores {
-		t.Error("push must not use paths-ignore: a docs-only head of main would have no test runs, and the release gate refuses it")
+		t.Error("push must not use paths-ignore: a workflow-level path filter can keep a required check from ever reporting (docs-only pushes skip at job level instead, and the release gate walks back to a tested commit)")
 	}
 	if strings.Contains(needs, "test-macos") {
 		t.Errorf("pr-check needs test-macos, which is advisory (TODO(macos-gate) in ci.yml): %v", j.Needs)
@@ -1335,8 +1335,10 @@ func TestCI_prCheckGatesOnEveryRequiredJob(t *testing.T) {
 	if mj := w.Jobs["test-macos"]; mj.ContinueOnError != nil || mj.If != w.Jobs["test"].If || !strings.Contains(fmt.Sprint(mj.RunsOn), "rh-macos") {
 		t.Errorf("test-macos must run under the same condition as test, on rh-macos, and never with continue-on-error (it would hide a failure): %+v", mj)
 	}
-	if tj := w.Jobs["test"]; !strings.Contains(tj.If, "github.event_name == 'push'") {
-		t.Errorf("the test job must always run on a push (the release gate reads main's check runs): if %q", tj.If)
+	// A push to main skips the heavy jobs exactly when changes says its added paths are docs-only (code=false): the release gate
+	// (internal/release/checks.go, CheckCIWalkBack) judges such a head by the newest tested commit under it.
+	if tj := w.Jobs["test"]; strings.Contains(tj.If, "github.event_name") || !strings.Contains(tj.If, "needs.changes.outputs.code != 'false'") {
+		t.Errorf("the test job must skip only on the changes output (code=false), on a push as on a pull request: if %q", tj.If)
 	}
 }
 
@@ -1419,8 +1421,8 @@ func TestCI_prCheckVerdict(t *testing.T) {
 }
 
 // The changes job, run as written in ci.yml against a stand-in git (whose `show` serves the real scripts/ci-changes as the base revision): a pull request
-// touches code unless every changed file is documentation (workflows_docsonly_test.go has the full table); a push always counts
-// as code.
+// touches code unless every changed file is documentation (workflows_docsonly_test.go has the full table); a push is classified by the
+// paths it added, and one with no usable previous head counts as code.
 func TestCI_changesClassifiesThePullRequest(t *testing.T) {
 	var script string
 	for _, st := range load(t, "ci.yml").Jobs["changes"].Steps {
@@ -1443,13 +1445,21 @@ func TestCI_changesClassifiesThePullRequest(t *testing.T) {
 		{"pull_request", "internal/x.go", "true"},
 		{"pull_request", ".github/workflows/ci.yml", "true"},
 		{"pull_request", "docs/plans/p.txt", "false"},
-		{"pull_request", "", "true"}, // nothing to compare: run the tests
-		{"push", "README.md", "true"},
+		{"pull_request", "", "true"},   // nothing to compare: run the tests
+		{"push", "README.md", "false"}, // a docs-only push to main skips the heavy jobs
+		{"push", "docs/a.md\ncmd/mash/cli.go", "true"},
+		{"push", ".github/workflows/ci.yml", "true"},
+		{"push", "", "true"},                    // nothing to compare
+		{"push:no-before", "README.md", "true"}, // no usable previous head (a new branch)
 	} {
 		out := filepath.Join(t.TempDir(), "out")
 		cmd := exec.Command("bash", "-c", script)
 		cmd.Dir = "../.." // the step runs scripts/ci-changes from the repository root
-		cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "EVENT="+c.event, "BASE=base", "HEAD_REF=feature/x", "FILES="+c.files, "GITHUB_OUTPUT="+out, "RUNNER_TEMP="+t.TempDir())
+		event, before := c.event, "1111111111111111111111111111111111111111"
+		if event == "push:no-before" {
+			event, before = "push", "0000000000000000000000000000000000000000"
+		}
+		cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "EVENT="+event, "BASE=base", "BEFORE="+before, "HEAD_REF=feature/x", "FILES="+c.files, "GITHUB_OUTPUT="+out, "RUNNER_TEMP="+t.TempDir())
 		if b, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("%s %q: %v %s", c.event, c.files, err, b)
 		}

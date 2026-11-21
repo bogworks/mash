@@ -34,10 +34,20 @@ jobs:
           EVENT: ${{ github.event_name }}
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD_REF: ${{ github.head_ref }}
+          BEFORE: ${{ github.event.before }}
         run: |
           set -euo pipefail
           files=""
-          if [ "$EVENT" = pull_request ]; then
+          if [ "$EVENT" = pull_request ] || [ "$EVENT" = push ]; then
+            if [ "$EVENT" = push ]; then
+              # A push to main (the merge queue's fast-forward of a batch, or a direct push): what the push added. No usable
+              # previous head (a new branch, a force push) is code.
+              BASE="$BEFORE"
+              if [ -z "$BASE" ] || [ -z "${BASE//0/}" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+                echo "code=true" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+            fi
             files="$(git diff --no-renames --name-only "$BASE" HEAD)"
             # Hardening: a diff touching .github/ or the classifier is always code, whatever the classifier says.
             if grep -qE '^"?(\.github/|scripts/ci-changes"?$)' <<<"$files"; then
