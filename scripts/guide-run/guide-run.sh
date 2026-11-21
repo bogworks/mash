@@ -84,6 +84,7 @@ make_release_dir() {
         die "$dir exists and is not empty"
     fi
     mkdir -p -- "$dir" || die "cannot make $dir"
+    dir=$(cd -- "$dir" && pwd) || die "cannot resolve $dir"
     commit=$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo 0000000000000000000000000000000000000000)
     local ld="-X github.com/bogworks/mash/internal/endpoint.Version=${ver#v} -X main.commit=$commit"
     echo "== building mash and mashctl $ver (linux/amd64, static)"
@@ -128,18 +129,41 @@ check_release_dir() {
 # secrets scan: seeds, creds and JWTs must never be in a recorded output
 # ----------------------------------------------------------------------
 # scan_secrets FILE...: prints each hit (file and kind, never the content)
-# and returns 1 on any
+# and returns 1 on any. It also returns 1 when it scanned no file at all: a
+# scan of nothing is not a pass.
 scan_secrets() {
-    local f hit=0
+    local f hit=0 n=0
     for f in "$@"; do
         [ -f "$f" ] || continue
+        n=$((n + 1))
         if grep -Eq 'SU[A-Z2-7]{50}' "$f"; then echo "secret: SU seed shape in $f"; hit=1; fi
         if grep -Eq '(^|[^A-Z0-9])S[AON][A-Z2-7]{50}' "$f"; then echo "secret: SA/SO/SN seed shape in $f"; hit=1; fi
         if grep -Fq -e '-----BEGIN NATS USER JWT' "$f"; then echo "secret: user JWT block in $f"; hit=1; fi
         if grep -Eq 'eyJ[A-Za-z0-9_=-]{8,}' "$f"; then echo "secret: JWT prefix eyJ in $f"; hit=1; fi
         if grep -Fq -e '-----BEGIN NATS USER NKEY SEED' "$f"; then echo "secret: seed block in $f"; hit=1; fi
     done
+    if [ "$n" = 0 ]; then echo "secret: no file was scanned"; hit=1; fi
     return "$hit"
+}
+
+# run_files RUN: prints every file a run keeps in its run folder that could
+# hold container output (the container's own seeds are never copied out): the
+# recorded outputs and command lines, the last output, the image build log,
+# the release listing, and the proxy's log and stderr (published mode). Only
+# files that exist are printed.
+run_files() {
+    local run=$1 f
+    for f in "$run"/out/*.txt "$run"/out/*.cmd "$run/last.txt" "$run/build-image.log" \
+        "$run/release-listing.txt" "$run/egress.log" "$run/egressproxy.stderr" "$run/egressproxy-build.log"; do
+        [ -f "$f" ] && printf '%s\n' "$f"
+    done
+}
+
+# scan_run RUN: scan_secrets over run_files
+scan_run() {
+    local files=() f
+    while IFS= read -r f; do files+=("$f"); done < <(run_files "$1")
+    scan_secrets "${files[@]+"${files[@]}"}"
 }
 
 # ----------------------------------------------------------------------
@@ -153,8 +177,7 @@ do_fill() {
         echo "refusing to fill: $run has no assert.ok (the run's asserts did not all pass)" >&2
         return 1
     fi
-    # shellcheck disable=SC2046
-    if ! scan_secrets "$run"/out/*.txt; then
+    if ! scan_run "$run"; then
         echo "refusing to fill: a recorded output holds secret-shaped content" >&2
         return 1
     fi
@@ -230,6 +253,194 @@ guide_ids() { # prints the ids in the guide, one per line
     } | sort -u
 }
 
+# Steps whose commands are not compared with a command block of the guide,
+# each with the reason. A step not named here must have a block in the guide
+# and its commands must equal the harness's (after joining line continuations
+# and squeezing blanks). A step named here that the guide now shows in a block
+# fails the selftest, so the list cannot go stale.
+#   install    the guide gives the command inline (`install.sh` from the
+#              release); the harness runs it from a file:// release folder
+#              with MASH_RELEASE_BASE and MASH_INSTALL_ALLOW_FILE (or, in
+#              published mode, curl through the proxy)
+#   server     inline in the guide; the harness adds the checksum check and
+#              takes the final `mashctl init` line from the script's output
+#   delete     inline in the guide; the harness types the address at the
+#              prompt through a pty helper
+#   refused    prose in the guide ("Then `mash status` as Bob"); same command
+#              as step status for bob, run once more
+#   lifecycle  inline in the guide (--stop, --start, --remove); --remove is
+#              typed at its prompt through the pty helper
+NO_BLOCK_STEPS=(install server delete refused lifecycle)
+# guide id=harness steps whose commands make up the guide's block (the guide
+# shows inbox and read in one block)
+CMD_MAP=(endpoints=endpoints status=status who=who send=send inbox=inbox+read
+    json-send=json-send json-read=json-read json-inbox=json-inbox json-jq=json-jq)
+
+# selftest_commands GUIDE TMP: record the commands each step function would
+# run (step_cmd replaced, no container), then compare with the guide's blocks
+selftest_commands() {
+    local guide=$1 tmp=$2 d=$2/dry line
+    mkdir -p "$d"
+    (
+        OUT=$d MODE=rehearsal SETUP_DIR=/x
+        LAST=$d/last.txt
+        echo 'mashctl init --config /x/mash-setup.yaml' >"$LAST"
+        step_begin() { STEP=$1; : >"$d/$1"; }
+        step_cmd() { printf '%s\n@@END@@\n' "$3" >>"$d/$STEP"; }
+        step_end() { :; }
+        wait_inbox() { return 0; }
+        bad() { :; }
+        step_install; step_server; step_endpoints; step_status; step_who; step_send
+        step_inbox; step_read; step_json_send; step_json_read; step_json_inbox
+        step_json_jq; step_delete; step_refused; step_lifecycle
+    ) >/dev/null 2>&1
+    python3 -I - "$guide" "$d" "$(IFS=,; echo "${NO_BLOCK_STEPS[*]}")" "${CMD_MAP[@]}" <<'PY' >"$tmp/cmpres.txt"
+import os, re, sys
+guide, d, allow = sys.argv[1], sys.argv[2], [a for a in sys.argv[3].split(',') if a]
+specs = [a.split('=', 1) for a in sys.argv[4:]]
+lines = open(guide, encoding='utf-8').read().split('\n')
+mark = re.compile(r'^<!-- output: ([a-z0-9-]+) -->$')
+built = re.compile(r'\[built output: ([a-z0-9-]+)\]')
+blocks, pending, i = {}, [], 0
+while i < len(lines):
+    l = lines[i]
+    if l.startswith('```'):
+        j = i + 1
+        while j < len(lines) and not lines[j].startswith('```'):
+            j += 1
+        # the block right after a mark is the step's output, not a command
+        if not (i > 0 and mark.match(lines[i - 1])):
+            pending.append('\n'.join(lines[i + 1:j]))
+        i = j + 1
+        continue
+    m = mark.match(l)
+    if m:
+        blocks[m.group(1)] = pending
+        pending = []
+    elif l.startswith('#'):
+        pending = []
+    else:
+        for b in built.findall(l):
+            if b not in blocks:
+                blocks[b] = pending
+                pending = []
+    i += 1
+
+def norm(text):
+    text = re.sub(r'\\\n[ \t]*', ' ', text)
+    return [re.sub(r'[ \t]+', ' ', c).strip() for c in text.split('\n') if c.strip()]
+
+def harness(step):
+    t = open(os.path.join(d, step), encoding='utf-8').read()
+    return [c for rec in t.split('@@END@@\n') if rec.strip() for c in norm(rec)]
+
+for gid, steps in specs:
+    want = [c for b in blocks.get(gid, []) for c in norm(b)]
+    got = [c for st in steps.split('+') for c in harness(st)]
+    if want == got:
+        print('ok: the commands of step %s equal the guide\'s block (%d)' % (steps, len(got)))
+    else:
+        print('FAIL: step %s commands differ from the guide block %s' % (steps, gid))
+        print('    harness: ' + ' || '.join(got))
+        print('    guide:   ' + ' || '.join(want))
+for gid in allow:
+    if any(norm(b) for b in blocks.get(gid, [])):
+        print('FAIL: step %s is on the no-block allow-list but the guide now has a command block for it' % gid)
+    else:
+        print('ok: step %s is allow-listed (no command block in the guide, see NO_BLOCK_STEPS)' % gid)
+PY
+    while IFS= read -r line; do
+        case $line in
+        ok:*) st_ok "${line#ok: }" ;;
+        FAIL:*) st_bad "${line#FAIL: }" ;;
+        *) echo "$line" ;;
+        esac
+    done <"$tmp/cmpres.txt"
+    [ -s "$tmp/cmpres.txt" ] || st_bad "the command comparison printed nothing"
+}
+
+# selftest_asserts TMP: run_content_asserts and scan_run on fixture outputs
+# shaped like a real run's (a passing set, then one defect at a time)
+selftest_asserts() {
+    local d=$1/ca id fails
+    mkdir -p "$d"
+    cat >"$d/status.txt" <<'EOF'
+acme.demo.bob: ready, offline
+acme.demo.alice: ready, offline
+EOF
+    cat >"$d/who.txt" <<'EOF'
+ADDRESS          STATE
+acme.demo.alice  offline
+acme.demo.bob    offline
+EOF
+    cat >"$d/inbox.txt" <<'EOF'
+2 messages for acme.demo.alice, 2 new, 1 urgent.
+
+NUMBER  FROM  WHEN      STATE  URGENT  KIND      MESSAGE
+1       bob   just now  new    no      task      lunch at noon?
+2       bob   just now  new    yes     question  ready?
+EOF
+    cat >"$d/read.txt" <<'EOF'
+number:   2
+from:     acme.demo.bob
+trust:    verified
+EOF
+    echo '{"number":3,"from":"acme.demo.bob","trust":"verified","kind":"task","urgent":false,"reply_to":null,"relay":null,"body":"ping"}' >"$d/json-read.txt"
+    echo '{"endpoint":"acme.demo.alice","total":3,"new":3,"urgent":1,"messages":[{"number":1},{"number":2},{"number":3}]}' >"$d/json-inbox.txt"
+    echo ping >"$d/json-jq.txt"
+    printf 'This deletes acme.demo.bob and its empty inbox. It cannot be undone.\nType the address to confirm: acme.demo.bob\nDeleted endpoint acme.demo.bob\n' >"$d/delete.txt"
+    echo 1 >"$d/refused.rc"
+    cat >"$d/lifecycle.txt" <<'EOF'
+stopped pid 355
+started: nats-server pid 709 on 127.0.0.1:4222
+type the folder to remove (/home/tester/mash-nats): /home/tester/mash-nats
+stopped pid 709
+removed /home/tester/mash-nats
+note: mashctl's folder /home/tester/.config/mash still points at this server.
+EOF
+    fails=$(content_fails "$d")
+    if [ "$fails" = 0 ]; then st_ok "the content asserts pass on outputs shaped like a real run's"; else st_bad "the content asserts failed $fails times on good fixture outputs"; fi
+    # one defect each: every one must be caught
+    mutate_check "$d" json-jq.txt 'null' "json-jq with a null body"
+    mutate_check "$d" json-read.txt '{"number":3,"trust":"verified","body":null}' "json-read with a null body"
+    mutate_check "$d" json-inbox.txt '{"total":2,"messages":[]}' "json-inbox with total 2"
+    mutate_check "$d" json-inbox.txt 'not json' "json-inbox that is not JSON"
+    mutate_check "$d" status.txt 'acme.demo.bob: ready, offline' "status with alice missing"
+    mutate_check "$d" who.txt 'ADDRESS STATE' "who with no rows"
+    mutate_check "$d" inbox.txt 'a note from bob about bob' "inbox with no mail rows from bob"
+    mutate_check "$d" lifecycle.txt 'stopped pid 355' "lifecycle with only a stop"
+    # a scan of nothing is a failure; a seed shape in any kept file is a failure
+    mkdir -p "$1/empty/out"
+    if scan_run "$1/empty" >/dev/null; then st_bad "the secret scan passed with no file to scan"; else st_ok "the secret scan fails when it scanned no file"; fi
+    for id in last.txt build-image.log release-listing.txt out/x.cmd; do
+        mkdir -p "$1/sec/out"
+        : >"$1/sec/out/y.txt"
+        printf 'SU%s\n' "$(printf 'A%.0s' $(seq 1 50))" >"$1/sec/$id"
+        if scan_run "$1/sec" >/dev/null; then st_bad "the secret scan missed a seed shape in $id"; else st_ok "the secret scan reads $id"; fi
+        rm -f "$1/sec/$id"
+    done
+}
+
+# content_fails DIR: how many content asserts fail on the outputs in DIR
+content_fails() {
+    (
+        OUT=$1 SETUP_DIR=/home/tester/mash-nats PASS=0 FAIL=0
+        run_content_asserts >/dev/null
+        echo "$FAIL"
+    )
+}
+
+# mutate_check DIR FILE TEXT WHAT: replace FILE's content with TEXT, expect the
+# content asserts to fail, then restore it
+mutate_check() {
+    local d=$1 f=$2 text=$3 what=$4 n
+    cp -- "$d/$f" "$d/$f.keep"
+    printf '%s\n' "$text" >"$d/$f"
+    n=$(content_fails "$d")
+    mv -- "$d/$f.keep" "$d/$f"
+    if [ "$n" -gt 0 ]; then st_ok "the content asserts catch $what"; else st_bad "the content asserts missed $what"; fi
+}
+
 selftest() {
     local guide=${1:-$GUIDE_DEFAULT} tmp id want got n a b
     [ -f "$guide" ] || die "no guide at $guide"
@@ -282,6 +493,11 @@ selftest() {
     else
         st_ok "the published install step uses neither MASH_RELEASE_BASE nor MASH_INSTALL_ALLOW_FILE"
     fi
+
+    # 1b. each step's commands against the guide's command blocks
+    selftest_commands "$guide" "$tmp"
+    # 1c. the content asserts, on fixture outputs shaped like a real run's
+    selftest_asserts "$tmp"
 
     # 2. fill on a fixture run folder
     local run=$tmp/run guidecopy=$tmp/guide.md
@@ -369,6 +585,7 @@ CTX=''
 CNAME=''
 IMG=''
 IMG_ID=''
+IMG_TAG_MADE=0
 CONTAINER_MADE=0
 CLEANED='not run'
 RESULTS=()
@@ -469,7 +686,7 @@ write_receipt() {
 }
 
 cleanup() {
-    local left=0
+    local left=0 imgdesc
     trap - EXIT INT TERM
     # the socat of this run, by its recorded pid inside the container, then the container
     if [ "$CONTAINER_MADE" = 1 ] && [ -n "$SOCAT_PID" ]; then
@@ -487,12 +704,19 @@ cleanup() {
         if [ -e "$EGRESS_SOCK" ]; then left=$((left + 1)); fi
         rmdir -- "$EGRESS_DIR" 2>/dev/null
     fi
-    if [ -n "$IMG_ID" ]; then podman rmi -f "$IMG_ID" >/dev/null 2>&1; fi
+    if [ -n "$IMG_ID" ]; then
+        podman rmi -f "$IMG_ID" >/dev/null 2>&1
+    elif [ "$IMG_TAG_MADE" = 1 ]; then
+        podman rmi -f "$IMG" >/dev/null 2>&1
+    fi
     case $CTX in "$SCRATCH"/*/build) rm -rf -- "$CTX" ;; esac
     if [ "$CONTAINER_MADE" = 1 ] && podman container exists "$CNAME" 2>/dev/null; then left=$((left + 1)); fi
     if [ -n "$IMG_ID" ] && podman image exists "$IMG_ID" 2>/dev/null; then left=$((left + 1)); fi
+    if [ -z "$IMG_ID" ] && [ "$IMG_TAG_MADE" = 1 ] && podman image exists "$IMG" 2>/dev/null; then left=$((left + 1)); fi
+    imgdesc=none
+    if [ -n "$IMG_ID" ]; then imgdesc="$IMG_ID by id"; elif [ "$IMG_TAG_MADE" = 1 ]; then imgdesc="$IMG by tag"; fi
     if [ "$left" = 0 ]; then
-        CLEANED="done: container $CNAME removed by name, image ${IMG_ID:-none} by id, build dir removed${PROXY_PID:+, proxy pid $PROXY_PID stopped, socket removed}; none left"
+        CLEANED="done: container $CNAME removed by name, image $imgdesc removed, build dir removed${PROXY_PID:+, proxy pid $PROXY_PID stopped, socket removed}; none left"
     else
         CLEANED="INCOMPLETE: $left of this run's objects still exist"
     fi
@@ -761,35 +985,90 @@ echo \"ok: exactly the three hooks: \$(jq -r '.hooks | keys | join(\", \")' $t/h
     step_end
 }
 
-# asserts: hard facts, from the recorded outputs
-run_asserts() {
+# jcheck FILE EXPR: FILE parses as one JSON value d, and the python expression
+# EXPR (written here, never from the container) is true of it
+jcheck() {
+    python3 -I -c 'import json, sys
+d = json.load(open(sys.argv[1], encoding="utf-8"))
+sys.exit(0 if eval(sys.argv[2]) else 1)' "$1" "$2" 2>/dev/null
+}
+
+# run_content_asserts: what each step's recorded output must show, from
+# $OUT/<id>.txt only (the selftest runs it on a real earlier run's outputs)
+run_content_asserts() {
     local f n
-    echo "== asserts"
-    if [ "$MODE" = published ]; then run_egress_asserts; fi
-    if [ "$ONLY_INSTALL" = 1 ]; then run_install_asserts; return; fi
+    f=$OUT/status.txt
+    if [ -f "$f" ] && grep -Eq "^$OWNER\.demo\.bob: ready" "$f" && grep -Eq "^$OWNER\.demo\.alice: ready" "$f"; then
+        ok "status shows $OWNER.demo.bob: ready and $OWNER.demo.alice: ready"
+    else
+        bad "status does not show both endpoints ready"
+    fi
+    f=$OUT/who.txt
+    if [ -f "$f" ] && grep -Eq "^$OWNER\.demo\.alice( |\$)" "$f" && grep -Eq "^$OWNER\.demo\.bob( |\$)" "$f"; then
+        ok "who lists $OWNER.demo.alice and $OWNER.demo.bob"
+    else
+        bad "who does not list both endpoints"
+    fi
     f=$OUT/read.txt
     # the guide's form is a "trust: verified" line; the 0.5.x form is "[verified]" in the header
     if [ -f "$f" ] && grep -Eq '^trust: +verified$|^--- #2 from [^ ]+ \[verified\]' "$f"; then ok "mail 2 read as alice: trust verified"; else bad "mail 2 read as alice: not shown as trust verified"; fi
     f=$OUT/json-read.txt
     if [ -f "$f" ] && grep -Eq '"trust": *"verified"' "$f"; then ok "mail 3 read as JSON: trust verified"; else bad "mail 3 read as JSON: no verified trust"; fi
+    if [ -f "$f" ] && jcheck "$f" 'd["body"] == "ping" and d["number"] == 3'; then
+        ok "mail 3 read as JSON: number 3, body is ping"
+    else
+        bad "mail 3 read as JSON: not valid JSON with number 3 and body ping"
+    fi
+    f=$OUT/json-inbox.txt
+    if [ -f "$f" ] && jcheck "$f" 'd["total"] == 3 and len(d["messages"]) == 3'; then
+        ok "inbox as JSON: valid, total 3, three messages"
+    else
+        bad "inbox as JSON: not valid JSON with total 3 and three messages"
+    fi
+    # the command is the guide's (jq -r .body): null would print "null", so the
+    # whole output must be the sent text
+    f=$OUT/json-jq.txt
+    if [ -f "$f" ] && [ "$(cat "$f")" = ping ]; then
+        ok "jq -r .body printed the sent text: ping"
+    else
+        bad "jq -r .body did not print exactly ping"
+    fi
     # the inbox table has no trust column; trust is asserted via read and read --json
     f=$OUT/inbox.txt
     n=0
-    [ -f "$f" ] && n=$(grep -c 'bob' "$f")
-    if [ "$n" -ge 2 ]; then ok "the inbox lists two mails from bob"; else bad "the inbox lists $n mails from bob, wanted 2"; fi
+    [ -f "$f" ] && n=$(grep -Ec '^[0-9]+ +bob( |$)' "$f")
+    if [ "$n" = 2 ]; then ok "the inbox lists two mail rows from bob"; else bad "the inbox lists $n mail rows from bob, wanted 2"; fi
     f=$OUT/refused.rc
     if [ -f "$f" ] && [ "$(tail -n 1 "$f")" != 0 ] && [ -n "$(cat "$f")" ]; then
         ok "the call after delete exited non-zero ($(tail -n 1 "$f"))"
     else
         bad "the call after delete did not exit non-zero"
     fi
-    run_install_asserts
     f=$OUT/delete.txt
     if [ -f "$f" ] && grep -Eq 'Type the address to confirm: *'"$OWNER"'\.demo\.bob' "$f" && grep -Fq "Deleted endpoint $OWNER.demo.bob" "$f"; then
         ok "delete: the address was typed at the prompt on a terminal and the endpoint was deleted"
     else
         bad "delete: no typed confirmation and deletion in the screen output"
     fi
+    f=$OUT/lifecycle.txt
+    n=0
+    [ -f "$f" ] && n=$(grep -Ec '^stopped pid [0-9]+$' "$f")
+    if [ -f "$f" ] && [ "$n" = 2 ] && grep -Eq '^started: nats-server pid [0-9]+ on ' "$f" &&
+        { if [ -n "${SETUP_DIR:-}" ]; then grep -Fxq "removed $SETUP_DIR" "$f"; else grep -Eq '^removed /' "$f"; fi; }; then
+        ok "lifecycle: stopped, started and removed (each said so)"
+    else
+        bad "lifecycle: the output does not show stop, start and remove"
+    fi
+}
+
+# asserts: hard facts, from the recorded outputs
+run_asserts() {
+    local f
+    echo "== asserts"
+    if [ "$MODE" = published ]; then run_egress_asserts; fi
+    if [ "$ONLY_INSTALL" = 1 ]; then run_install_asserts; return; fi
+    run_content_asserts
+    run_install_asserts
     f=$OUT/claude-code-structure.txt
     if [ -f "$OUT/claude-code-structure.ok" ] && grep -Fq 'not run: no Claude Code in the container' "$f"; then
         ok "claude-code-structure: structural check only, no model API"
@@ -811,7 +1090,8 @@ run_install_asserts() {
 
 run_egress_asserts() {
     [ -f "$OUT/egress.rc" ] || return 0
-    if grep -Fq 'response 403' <<<"$EG1" || grep -Fq ' 403' <<<"$EG1"; then
+    # curl's own line for a refused CONNECT (the proxy answers 403 to it)
+    if grep -Fq 'CONNECT tunnel failed, response 403' <<<"$EG1"; then
         ok "egress: https://example.com through the proxy is refused (403)"
     else
         bad "egress: https://example.com was not refused with 403"
@@ -826,7 +1106,7 @@ run_egress_asserts() {
     else
         bad "egress: the nonexistent release did not fail with 404"
     fi
-    if grep -Eq ' host=example\.com refused ' "$EGRESS_LOG" 2>/dev/null; then
+    if grep -Eq ' host=example\.com refused reason="host is not on the allowlist" ' "$EGRESS_LOG" 2>/dev/null; then
         ok "egress.log records the refused example.com request"
     else
         bad "egress.log has no refused example.com line"
@@ -845,7 +1125,11 @@ run_egress_asserts() {
 
 run_secret_assert() {
     # no seed or credential content in any captured output
-    if scan_secrets "$OUT"/*.txt; then ok "no seed, credential or JWT content in any captured output"; else bad "secret-shaped content in a captured output (not filling)"; fi
+    if scan_run "$RUN_DIR"; then
+        ok "no seed, credential or JWT content in any file the run keeps ($(run_files "$RUN_DIR" | wc -l) files scanned)"
+    else
+        bad "secret-shaped content in a file the run keeps, or nothing to scan (not filling)"
+    fi
 }
 
 # start_proxy: build the egress proxy with the host's go into the run folder,
@@ -1009,6 +1293,9 @@ COPY ptyhelper.py /usr/local/lib/guide-run-ptyhelper.py
 RUN chmod 644 /usr/local/lib/guide-run-ptyhelper.py && useradd -m -s /bin/bash tester
 CF
     echo "== building $IMG from $BASE_IMAGE"
+    # recorded before the build, so a failure anywhere after it still removes
+    # this run's image, by this exact tag
+    IMG_TAG_MADE=1
     if ! podman build -q --pull=missing --build-arg "BASE=$BASE_IMAGE" -t "$IMG" -f "$CTX/Containerfile" "$CTX" \
         >"$RUN_DIR/build-image.log" 2>&1; then
         echo "FAIL: the image build failed; see $RUN_DIR/build-image.log"
