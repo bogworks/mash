@@ -26,10 +26,12 @@ release, with exactly the files `install.sh` and the setup skill expect:
 `SHA256SUMS`, `install.sh`, `mash-local-nats-setup.sh`, `mash-linux-amd64`,
 `mashctl-linux-amd64`. The run copies it into the container and runs the
 published commands as a newcomer would:
-`MASH_VERSION=<v> MASH_RELEASE_BASE=file://<dir> MASH_INSTALL_ALLOW_FILE=1
-bash install.sh`, after the checksum check of `install.sh` against the
+`MASH_VERSION=<v> MASH_RELEASE_BASE=file://<dir> bash install.sh`, after the checksum check of `install.sh` against the
 folder's `SHA256SUMS` (`docs/install.md`). A folder that lacks a file is
-refused, naming what is missing. The Claude Code structural check uses the
+refused, naming what is missing. The `install.sh` in a rehearsal folder is a
+TEST COPY made by `scripts/install-testcopy.sh` (it accepts `file://`; the
+shipped `install.sh` refuses it), and `SHA256SUMS` covers that copy; the
+receipt says so. The Claude Code structural check uses the
 three plugin files of this checkout.
 
 **Published** (`--published --version vX.Y.Z [--only-install]`): the newcomer
@@ -37,7 +39,7 @@ follows the real route. The container downloads `SHA256SUMS`, `install.sh` and
 (for the server step) `mash-local-nats-setup.sh` from
 `https://github.com/bogworks/mash/releases/download/<version>/` with `curl`,
 checks them against `SHA256SUMS`, and runs `install.sh` with neither
-`MASH_RELEASE_BASE` nor `MASH_INSTALL_ALLOW_FILE`. `--version` is required (the
+`MASH_RELEASE_BASE` nor the test copy. `--version` is required (the
 run names exactly the release it follows; it does not resolve "latest", which
 is the simpler choice). `--release-dir` is refused. A release that does not
 exist (404) fails the install step with curl's 404 text, the run exits non-zero
@@ -88,8 +90,9 @@ bash scripts/guide-run/guide-run.sh selftest
 ```
 
 - `--make-release-dir` builds static linux/amd64 `mash` and `mashctl`
-  (`CGO_ENABLED=0`, `-trimpath`, the version stamped in), copies the two
-  scripts and writes `SHA256SUMS`. `--version` must match on the run.
+  (`CGO_ENABLED=0`, `-trimpath`, the version stamped in), makes the
+  `install.sh` test copy with `scripts/install-testcopy.sh`, copies the setup
+  script and writes `SHA256SUMS`. `--version` must match on the run.
 - The run prints `ok:` and `FAIL:` lines and their totals, writes the receipt
   (default `RUN_DIR/receipt.md`) and prints `run folder: ...`. It exits
   non-zero on any FAIL. Wall time is in the receipt. If every assert passes
@@ -110,7 +113,11 @@ The run's asserts, from the recorded outputs: status shows both endpoints
 ready; who lists both; the inbox table has exactly two mail rows from bob;
 read shows trust verified; `read 3 --json` and `inbox --json` parse, with body
 `ping`, number 3 and total 3; the jq line prints exactly `ping`; delete shows
-the typed address and the deletion; refused exits non-zero; lifecycle shows
+the typed address and the deletion; refused exits non-zero (the local diagnosis: not the only revocation
+evidence); `reverse`: alice mails bob "back at one" and bob's inbox and
+`read 1` show a row from alice, `from:     acme.demo.alice`, `trust:    verified`
+and the body; `creds-before` and `creds-after`: the server refuses the deleted
+endpoint's old credentials (below); lifecycle shows
 two stops, a start and the removal; in published mode curl's `CONNECT tunnel
 failed, response 403` and the proxy log's exact refusal line. The secrets scan
 reads every file the run keeps (`out/*.txt`, `out/*.cmd`, `last.txt`,
@@ -120,6 +127,21 @@ when it scanned none.
 The run folder keeps, for each id, `out/<id>.txt` (stdout and stderr
 together), `out/<id>.cmd` (the command lines), `out/<id>.rc` (the exit
 statuses) and `out/<id>.ok` when the step did what it should.
+
+Structural steps (not guide blocks, never filled): `reverse` (run right after
+`read`), `creds-before` (before `delete`) and `creds-after` (after it).
+`creds-before` copies Bob's creds file, inside the container, to
+`$HOME/saved-bob.creds` (found with `find` in `~/.config/mash`, where `mash join`
+puts it; the file is never recorded or printed) and signs in with the container's
+`nats` CLI, server URL and CA read with `jq` from `~/.config/mash/config.json`
+(`nats --server URL --tlsca CA --creds ... account info`; `nats rtt` exits 0 even
+when it cannot connect, so it is not used): it must exit 0, the positive
+control. `creds-after` runs the same command once Bob is deleted: it must exit
+non-zero and print the server's authorization refusal (`authorization
+violation` or `authentication`, case-insensitive); "no servers available", a
+timeout or a connection error does not count, since a down server is not a
+revocation. The `refused` step (`mash status` as Bob) stays as the local
+diagnosis.
 
 ## Block ids
 

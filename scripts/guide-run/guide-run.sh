@@ -5,7 +5,8 @@
 #
 #   guide-run.sh --make-release-dir DIR [--version V]
 #       build a rehearsal release folder from this checkout (static
-#       linux/amd64 mash and mashctl, the two scripts, SHA256SUMS)
+#       linux/amd64 mash and mashctl, the setup script, a test copy of
+#       install.sh made by scripts/install-testcopy.sh, SHA256SUMS)
 #   guide-run.sh --release-dir DIR [--version V] [--scratch DIR] [--report FILE]
 #       the rehearsal run: one container, the guide's steps in order, asserts
 #   guide-run.sh --published --version V [--only-install] [--scratch DIR] [--report FILE]
@@ -43,7 +44,7 @@ STEP_IDS=(install server endpoints status who send inbox read json-send json-rea
 # Ids the guide has that this harness cannot record (a model is needed).
 MANUAL_IDS=(claude-code)
 # Steps this harness records that are not in the guide and are never filled.
-STRUCT_IDS=(egress claude-code-structure)
+STRUCT_IDS=(egress claude-code-structure reverse creds-before creds-after)
 
 BASE_IMAGE=${GUIDE_RUN_BASE:-debian:stable}
 NCV=${GUIDE_RUN_NATSCLI:-0.5.2}
@@ -92,7 +93,10 @@ make_release_dir() {
         CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "$ld" -o "$dir/mash-linux-amd64" ./cmd/mash &&
         CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "$ld" -o "$dir/mashctl-linux-amd64" ./cmd/mashctl) ||
         die "go build failed"
-    cp -- "$ROOT/scripts/install.sh" "$ROOT/scripts/mash-local-nats-setup.sh" "$dir/" || die "cannot copy the scripts"
+    # the rehearsal folder ships a TEST COPY of install.sh (it accepts file://);
+    # the shipped install.sh refuses file://. SHA256SUMS below covers the copy.
+    bash "$ROOT/scripts/install-testcopy.sh" "$ROOT/scripts/install.sh" "$dir/install.sh" || die "cannot make the install.sh test copy"
+    cp -- "$ROOT/scripts/mash-local-nats-setup.sh" "$dir/" || die "cannot copy the setup script"
     chmod 755 "$dir/install.sh" "$dir/mash-local-nats-setup.sh" "$dir/mash-linux-amd64" "$dir/mashctl-linux-amd64"
     (cd "$dir" && sha256sum install.sh mash-local-nats-setup.sh mash-linux-amd64 mashctl-linux-amd64 >SHA256SUMS) ||
         die "cannot write SHA256SUMS"
@@ -260,7 +264,8 @@ guide_ids() { # prints the ids in the guide, one per line
 # fails the selftest, so the list cannot go stale.
 #   install    the guide gives the command inline (`install.sh` from the
 #              release); the harness runs it from a file:// release folder
-#              with MASH_RELEASE_BASE and MASH_INSTALL_ALLOW_FILE (or, in
+#              with MASH_RELEASE_BASE, from the folder's test copy of
+#              install.sh (scripts/install-testcopy.sh; it accepts file://) (or, in
 #              published mode, curl through the proxy)
 #   server     inline in the guide; the harness adds the checksum check and
 #              takes the final `mashctl init` line from the script's output
@@ -291,8 +296,8 @@ selftest_commands() {
         wait_inbox() { return 0; }
         bad() { :; }
         step_install; step_server; step_endpoints; step_status; step_who; step_send
-        step_inbox; step_read; step_json_send; step_json_read; step_json_inbox
-        step_json_jq; step_delete; step_refused; step_lifecycle
+        step_inbox; step_read; step_reverse; step_json_send; step_json_read; step_json_inbox
+        step_json_jq; step_creds_before; step_delete; step_creds_after; step_refused; step_lifecycle
     ) >/dev/null 2>&1
     python3 -I - "$guide" "$d" "$(IFS=,; echo "${NO_BLOCK_STEPS[*]}")" "${CMD_MAP[@]}" <<'PY' >"$tmp/cmpres.txt"
 import os, re, sys
@@ -389,6 +394,22 @@ EOF
     echo '{"endpoint":"acme.demo.alice","total":3,"new":3,"urgent":1,"messages":[{"number":1},{"number":2},{"number":3}]}' >"$d/json-inbox.txt"
     echo ping >"$d/json-jq.txt"
     printf 'This deletes acme.demo.bob and its empty inbox. It cannot be undone.\nType the address to confirm: acme.demo.bob\nDeleted endpoint acme.demo.bob\n' >"$d/delete.txt"
+    cat >"$d/reverse.txt" <<'EOF'
+sent to acme.demo.bob
+1 message for acme.demo.bob, 1 new, 0 urgent.
+
+NUMBER  FROM   WHEN      STATE  URGENT  KIND  MESSAGE
+1       alice  just now  new    no      task  back at one
+number:   1
+from:     acme.demo.alice
+trust:    verified
+
+back at one
+EOF
+    printf 'saved bob creds inside the container\nRTT: 1ms\n' >"$d/creds-before.txt"
+    : >"$d/creds-before.ok"
+    printf 'nats: error: nats: Authorization Violation\n' >"$d/creds-after.txt"
+    : >"$d/creds-after.ok"
     echo 1 >"$d/refused.rc"
     printf 'acme.demo.bob: not ready: this endpoint was deleted; its address cannot be used again\nhint: mash doctor\n' >"$d/refused.txt"
     cat >"$d/lifecycle.txt" <<'EOF'
@@ -410,6 +431,11 @@ EOF
     mutate_check "$d" who.txt 'ADDRESS STATE' "who with no rows"
     mutate_check "$d" inbox.txt 'a note from bob about bob' "inbox with no mail rows from bob"
     mutate_check "$d" lifecycle.txt 'stopped pid 355' "lifecycle with only a stop"
+    mutate_check "$d" reverse.txt 'sent to acme.demo.bob' "reverse with no row from alice"
+    mutate_check "$d" reverse.txt $'1       alice  now  new\nfrom:     acme.demo.alice\ntrust:    claimed\nback at one' "reverse read not verified"
+    mutate_check "$d" creds-after.txt 'nats: error: nats: no servers available for connection' "creds-after with a down server"
+    mutate_check "$d" creds-after.txt 'RTT: 1ms' "creds-after that signed in"
+    mutate_check "$d" creds-before.txt 'nats: error: nats: Authorization Violation' "creds-before that was refused"
     # a scan of nothing is a failure; a seed shape in any kept file is a failure
     mkdir -p "$1/empty/out"
     if scan_run "$1/empty" >/dev/null; then st_bad "the secret scan passed with no file to scan"; else st_ok "the secret scan fails when it scanned no file"; fi
@@ -489,11 +515,27 @@ selftest() {
         if [ -z "$(gofmt -l "$HERE/egressproxy")" ]; then st_ok "egressproxy is gofmt-clean"; else st_bad "egressproxy is not gofmt-clean"; fi
     fi
     # published mode never gives the install step the file:// escape hatches
-    if awk '/^step_install_published\(\)/,/^}/' "$SELF" | grep -Eq 'MASH_RELEASE_BASE|MASH_INSTALL_ALLOW_FILE'; then
-        st_bad "the published install step uses MASH_RELEASE_BASE or MASH_INSTALL_ALLOW_FILE"
+    if awk '/^step_install_published\(\)/,/^}/' "$SELF" | grep -Eq 'MASH_RELEASE_BASE|MASH_INSTALL_ALLOW_FILE|install-testcopy'; then
+        st_bad "the published install step uses MASH_RELEASE_BASE or the install.sh test copy"
     else
-        st_ok "the published install step uses neither MASH_RELEASE_BASE nor MASH_INSTALL_ALLOW_FILE"
+        st_ok "the published install step uses neither MASH_RELEASE_BASE nor the install.sh test copy"
     fi
+    # the rehearsal folder ships the test copy, and nothing sets the old escape hatch
+    if awk '/^make_release_dir\(\)/,/^}/' "$SELF" | grep -Fq 'install-testcopy.sh'; then
+        st_ok "make-release-dir makes install.sh with scripts/install-testcopy.sh"
+    else
+        st_bad "make-release-dir does not use scripts/install-testcopy.sh"
+    fi
+    if awk '/^step_install\(\)/,/^}/' "$SELF" | grep -Fq 'MASH_INSTALL_ALLOW_FILE'; then
+        st_bad "the rehearsal install step still sets MASH_INSTALL_ALLOW_FILE"
+    else
+        st_ok "the rehearsal install step does not set MASH_INSTALL_ALLOW_FILE"
+    fi
+    # the new structural steps are listed and asserted
+    for id in reverse creds-before creds-after; do
+        if printf '%s\n' "${STRUCT_IDS[@]}" | grep -Fxq -- "$id"; then st_ok "STRUCT_IDS has $id"; else st_bad "STRUCT_IDS lacks $id"; fi
+        if awk '/^run_content_asserts\(\)/,/^}/' "$SELF" | grep -Fq "\$OUT/$id."; then st_ok "run_content_asserts checks $id"; else st_bad "run_content_asserts has no assert for $id"; fi
+    done
 
     # 1b. each step's commands against the guide's command blocks
     selftest_commands "$guide" "$tmp"
@@ -638,6 +680,7 @@ write_receipt() {
         else
             echo "- mode=rehearsal (a local release folder, file:// base); not the published release"
             echo "- version: $VERSION"
+            echo "- install.sh in this folder is the test copy made by scripts/install-testcopy.sh (the shipped install.sh refuses file://)"
             echo "- release folder files (SHA256SUMS):"
             if [ -f "${RELDIR:-/nonexistent}/SHA256SUMS" ]; then sed 's/^/    /' "$RELDIR/SHA256SUMS"; fi
         fi
@@ -777,12 +820,12 @@ step_end() {
     fi
 }
 
-# wait_inbox TEXT: at most 30 tries, one second apart, until alice's inbox
-# lists a message with TEXT (a word of what was sent)
+# wait_inbox TEXT [WHO]: at most 30 tries, one second apart, until WHO's inbox
+# (default alice) lists a message with TEXT (a word of what was sent)
 wait_inbox() {
-    local i=0
+    local i=0 who=${2:-alice}
     while [ "$i" -lt 30 ]; do
-        if cx "$CHOME" "MASH_ENDPOINT=$OWNER.demo.alice mash inbox | grep -Fq -- '$1'" >/dev/null 2>&1 </dev/null; then
+        if cx "$CHOME" "MASH_ENDPOINT=$OWNER.demo.$who mash inbox | grep -Fq -- '$1'" >/dev/null 2>&1 </dev/null; then
             return 0
         fi
         sleep 1
@@ -795,7 +838,7 @@ REL=$CHOME/release
 
 # The published route, as docs/install.md and the setup skill give it: curl the
 # files from the release, check install.sh against SHA256SUMS, run install.sh
-# with neither MASH_RELEASE_BASE nor MASH_INSTALL_ALLOW_FILE. https_proxy is set
+# with neither MASH_RELEASE_BASE nor the test copy of install.sh. https_proxy is set
 # on the commands that download, and nowhere else.
 step_install_published() {
     local px="https_proxy=$PROXY_URL"
@@ -821,7 +864,7 @@ step_install() {
     fi
     step_begin install
     step_cmd zero "$REL" "grep ' install.sh\$' SHA256SUMS | sha256sum -c -"
-    step_cmd zero "$REL" "MASH_VERSION=$VERSION MASH_RELEASE_BASE=file://$REL MASH_INSTALL_ALLOW_FILE=1 bash install.sh"
+    step_cmd zero "$REL" "MASH_VERSION=$VERSION MASH_RELEASE_BASE=file://$REL bash install.sh"
     USE_LOCALBIN=1
     step_cmd zero "$CHOME" "mash version"
     step_cmd zero "$CHOME" "mashctl version"
@@ -895,6 +938,51 @@ step_inbox() {
 step_read() {
     step_begin read
     step_cmd zero "$CHOME" "MASH_ENDPOINT=$OWNER.demo.alice mash read 2"
+    step_end
+}
+
+# reverse: the other direction. alice sends bob a message; bob reads it.
+# Not a guide block, never filled.
+step_reverse() {
+    step_begin reverse
+    step_cmd zero "$CHOME" "MASH_ENDPOINT=$OWNER.demo.alice mash send $OWNER.demo.bob \"back at one\""
+    if ! wait_inbox "back at one" bob; then
+        STEP_BAD=1
+        echo "the message did not arrive in bob's inbox within 30 s" >>"$OUT/$STEP.txt"
+    fi
+    step_cmd zero "$CHOME" "MASH_ENDPOINT=$OWNER.demo.bob mash inbox"
+    step_cmd zero "$CHOME" "MASH_ENDPOINT=$OWNER.demo.bob mash read 1"
+    step_end
+}
+
+# nats_probe: the container-side sign-in attempt with Bob's saved creds. The
+# server URL and CA come from mash's config. Prints the nats CLI's own output
+# (never the creds file's content). `nats rtt` exits 0 even when it cannot
+# connect, so the probe is `nats account info`, which exits 1 on a failed sign-in.
+nats_probe() {
+    printf '%s' "cfg=\$HOME/.config/mash/config.json
+url=\$(jq -r '.servers | if type == \"array\" then .[0] else (tostring | split(\",\")[0]) end' \"\$cfg\")
+ca=\$(jq -r '.ca' \"\$cfg\")
+nats --server \"\$url\" --tlsca \"\$ca\" --creds \$HOME/saved-bob.creds account info"
+}
+
+# creds-before: copy Bob's creds file inside the container (it never leaves,
+# is never recorded or printed), then prove it signs in (positive control).
+step_creds_before() {
+    step_begin creds-before
+    # Bob's creds file, where mash join put it: in mash's config folder, named
+    # after the address (the endpoints step's output does not print the path)
+    step_cmd zero "$CHOME" "p=\$(find \$HOME/.config/mash -name '$OWNER.demo.bob*.creds' | head -n 1)
+test -n \"\$p\" && cp -- \"\$p\" \$HOME/saved-bob.creds && chmod 600 \$HOME/saved-bob.creds && echo 'saved bob creds inside the container'" || { step_end; return 1; }
+    step_cmd zero "$CHOME" "$(nats_probe)"
+    step_end
+}
+
+# creds-after: the same sign-in attempt after the delete must be refused by
+# the server (not a down server).
+step_creds_after() {
+    step_begin creds-after
+    step_cmd nonzero "$CHOME" "$(nats_probe)"
     step_end
 }
 
@@ -1039,6 +1127,33 @@ run_content_asserts() {
     n=0
     [ -f "$f" ] && n=$(grep -Ec '^[0-9]+ +bob( |$)' "$f")
     if [ "$n" = 2 ]; then ok "the inbox lists two mail rows from bob"; else bad "the inbox lists $n mail rows from bob, wanted 2"; fi
+    # reverse: alice -> bob, read as bob
+    f=$OUT/reverse.txt
+    if [ -f "$f" ] && grep -Eq '^[0-9]+ +alice( |$)' "$f"; then ok "reverse: bob's inbox shows a row from alice"; else bad "reverse: bob's inbox shows no row from alice"; fi
+    if [ -f "$f" ] && grep -Eq "^from: +$OWNER\.demo\.alice\$" "$f" && grep -Eq '^trust: +verified$' "$f" && grep -Fq 'back at one' "$f"; then
+        ok "reverse: bob read alice's mail: from $OWNER.demo.alice, trust verified, body back at one"
+    else
+        bad "reverse: bob's read does not show from alice, trust verified and body back at one"
+    fi
+    # revocation, the server's side: the saved credentials of bob worked before
+    # the delete (positive control) and the server refuses them after it. The
+    # refusal must be the server's authorization text; a connection error or
+    # timeout is a down server, not a revocation.
+    f=$OUT/creds-before.txt
+    if [ -f "$f" ] && [ -f "$OUT/creds-before.ok" ] && grep -Fq 'saved bob creds inside the container' "$f"; then
+        ok "creds-before: bob's saved credentials signed in to the server (positive control)"
+    else
+        bad "creds-before: bob's saved credentials did not sign in before the delete"
+    fi
+    f=$OUT/creds-after.txt
+    if [ -f "$f" ] && [ -f "$OUT/creds-after.ok" ] && grep -Eiq 'authorization violation|authentication' "$f" &&
+        ! grep -Eiq 'no servers available|timeout|connection refused' "$f"; then
+        ok "creds-after: the server refused bob's old credentials ($(grep -Eio 'authorization violation|authentication[a-z ]*' "$f" | head -n 1))"
+    else
+        bad "creds-after: no authorization refusal from the server for bob's old credentials"
+    fi
+    # the local diagnosis below (refused) is not the only revocation evidence:
+    # creds-after above is the server's own refusal
     f=$OUT/refused.rc
     if [ -f "$f" ] && [ "$(tail -n 1 "$f")" != 0 ] && [ -n "$(cat "$f")" ]; then
         ok "the call after delete exited non-zero ($(tail -n 1 "$f"))"
@@ -1392,11 +1507,14 @@ CF
         step_send
         step_inbox
         step_read
+        step_reverse
         step_json_send
         step_json_read
         step_json_inbox
         step_json_jq
+        step_creds_before
         step_delete
+        step_creds_after
         step_refused
         step_lifecycle
     elif [ "$ABORT" = 1 ]; then
