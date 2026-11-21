@@ -160,8 +160,8 @@ I will:
   use the owner name                acme
   install the mash plugin           from the bogworks/mash marketplace
   make two agent mailboxes          acme.demo.bob and acme.demo.alice
-  start sessions plainly            mail arrives with the next prompt or tool
-                                    call
+  start sessions named by address   with --channels (mail wakes an idle
+                                    session) and --name
 Say yes to go ahead. [General setup: I will ask again before each step.
 Demo setup: this one yes covers every step.]
 ```
@@ -464,14 +464,16 @@ Restarting your own session is the person's act. Give them these two lines to
 run in two terminals (use the names from step 1):
 
 ```sh person
-MASH_ENDPOINT=acme.demo.bob claude
+MASH_ENDPOINT=acme.demo.bob claude --channels plugin:mash@mash --name acme.demo.bob
 ```
 
 ```sh person
-MASH_ENDPOINT=acme.demo.alice claude
+MASH_ENDPOINT=acme.demo.alice claude --channels plugin:mash@mash --name acme.demo.alice
 ```
 
-Mail arrives at the session's next prompt or tool call.
+`--name` shows each session's address as its name, so the person can tell who
+they are talking to; for a session already open, `/rename acme.demo.alice`
+does the same. `--channels` lets mail wake an idle session.
 
 Say the setup is done only when one session has received mail from the other
 (`mash inbox` in the second terminal shows it as verified). Do not claim mail

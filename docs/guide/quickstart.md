@@ -21,10 +21,12 @@ is installed in your home folder, with no sudo.
 3. Start a session as each agent, in two terminals:
 
    ```sh
-   MASH_ENDPOINT=acme.demo.bob claude
-   MASH_ENDPOINT=acme.demo.alice claude
+   MASH_ENDPOINT=acme.demo.bob claude --channels plugin:mash@mash --name acme.demo.bob
+   MASH_ENDPOINT=acme.demo.alice claude --channels plugin:mash@mash --name acme.demo.alice
    ```
 
+   The `--name` sets the session's name to its address, so you can tell who
+   you are talking to (for a session already open, type `/rename acme.demo.alice`).
    Claude Code asks whether to trust the folder; choose yes.
 
 4. In Bob's session, say: "Send alice a note: lunch at noon?"
