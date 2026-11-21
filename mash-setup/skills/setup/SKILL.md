@@ -190,10 +190,11 @@ doing before each command, in one line. Guard rails:
   list (for example `rpm -ql` or `pacman -Ql`). Tell the person the folder,
   and put it on PATH for the commands of this session
   (`PATH="<folder>:$PATH"` in front of commands, as for `BIN`); do not edit
-  their shell files. The setup script, Verify and the day-2 `--start` use
-  that PATH too. Also check whether the package started a service (for
-  example `systemctl is-active nats-server` where systemd exists), and tell
-  the person.
+  their shell files. The setup script and Verify use that PATH too. Say
+  that a restart after a reboot needs the folder too (the day-2 skill finds
+  it again from the package). Also check whether the package started a
+  service (for example `systemctl is-active nats-server` where systemd
+  exists), and tell the person.
 - The Debian and Ubuntu package starts an unauthenticated server on port 4222
   (a known example). Say so, and let the person decide whether to stop it.
 - Never disable or stop a service the person did not ask to stop.
@@ -370,7 +371,9 @@ prints the server's address, `ok` and the endpoint count.
 
 The server is a program running as you. It does not come back after a reboot:
 after one, run the script again with `--start` (day-2 skill). Tell the person
-this now, before they reboot.
+this now, before they reboot. If `nats-server` came from a system package
+and its folder is not on their PATH, name that folder too: the restart
+command needs it in front of the PATH, as `PATH="<folder>:$BIN:$PATH"`.
 
 ## 5. Install the mash plugin
 
