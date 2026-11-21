@@ -93,6 +93,7 @@ wake exists for sessions where mail can pile up.
 
 ## What it replaces
 
-As built, plus the two wake settings (Randy, 2026-11-19) and the refusal of
-unverified mail. It holds the connection to the server, receives mail in the
-background, wakes an idle session and offers the MCP tools.
+In 0.5.5, serve worked the same way, without the two wake settings and the
+refusal of unverified mail, which are new in 0.5.6. It holds the connection to
+the server, receives mail in the background, wakes an idle session and offers
+the MCP tools.

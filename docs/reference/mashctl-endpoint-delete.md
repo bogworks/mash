@@ -121,17 +121,17 @@ Order. The endpoint's key is cancelled on every server first; only when every
 server confirms is anything removed, so a failure there leaves the endpoint
 whole. If this machine holds the endpoint's creds file, it is set aside as
 &lt;address&gt;.creds.deleted, so mash no longer counts it as installed; the
-path is predictable and nothing prints it (settled 2026-11-20). Nothing else
-on any machine is touched. THE LATE-FAILURE LINE is 0.5.6 as built, and not
-how it should read: it carries an internal word (PARTIAL), the flat name with
-underscores, a key id and the server's raw error. Two parts of it vary: the
-eight-character key id after 'user key', and the cause between 'did not
-complete: ' and '; run the same command again'. From 0.5.7 one line replaces
-it: 'error: deleted acme.demo.bob, but the removal did not finish: &lt;cause
-in plain words&gt;' with the same hint; its credentials already no longer
-work, and running the command again is safe (settled 2026-11-21).
+path is predictable and nothing prints it. Nothing else on any machine is
+touched. THE LATE-FAILURE LINE in 0.5.6 is not how it should read: it carries
+an internal word (PARTIAL), the flat name with underscores, a key id and the
+server's raw error. Two parts of it vary: the eight-character key id after
+'user key', and the cause between 'did not complete: ' and '; run the same
+command again'. From 0.5.7 one line replaces it: 'error: deleted
+acme.demo.bob, but the removal did not finish: &lt;cause in plain words&gt;'
+with the same hint; its credentials already no longer work, and running the
+command again is safe.
 
 ## What it replaces
 
-Today also reachable as deprovision, which is removed. Typing the name to
-confirm is what gh repo delete does.
+In 0.5.5, this was also reachable as deprovision, which is removed. Typing the
+name to confirm is what gh repo delete does.

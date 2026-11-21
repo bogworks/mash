@@ -60,5 +60,5 @@ note: 'mash prompt' moves to 'mash sap prompt' in 0.6.0
 
 ## What it replaces
 
-As built, kept unchanged in 0.5.6 at your word. Only a verified sender that is
-a known endpoint is accepted.
+Unchanged from 0.5.5, except for the note on stderr about the move to mash sap
+prompt. Only a verified sender that is a known endpoint is accepted.

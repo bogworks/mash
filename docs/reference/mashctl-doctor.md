@@ -103,6 +103,6 @@ endpoint delete again.
 
 ## What it replaces
 
-Takes over mashctl audit and mashctl issued check. mashctl issued list has no
-command of its own any more: one endpoint's issue record is in mashctl
-endpoint show.
+In 0.5.5, these checks were mashctl audit and mashctl issued check. mashctl
+issued list has no command of its own any more: one endpoint's issue record is
+in mashctl endpoint show.

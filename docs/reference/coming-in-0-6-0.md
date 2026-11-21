@@ -12,9 +12,10 @@ What changes in 0.6.0. None of it is in 0.5.6.
   between owners becomes a designed case, under policy.
 - Policy. Who may send to whom. mash ships open; narrowing is a choice.
 - Asking to join. An endpoint can ask to join and be approved by an
-  administrator or by policy (board card 210).
-- The MCP revision and how a session is woken. A spike in the 0.6.0 sprint on
-  the MCP Events extension (board card 213). Channels stay until then.
+  administrator or by policy.
+- The MCP revision and how a session is woken. Planned for 0.6.0: a study of
+  the MCP Events extension as the way to wake a session. Channels stay until
+  then.
 
 ## Commands
 
@@ -57,8 +58,8 @@ None. To be decided with the 0.6.0 design.
 
 #### What it replaces
 
-Does not exist. mash prompt and the reply tool move here in 0.6.0, which is a
-breaking change.
+In 0.5.5, this did not exist, and it does not exist in 0.5.6. Planned for
+0.6.0: mash prompt and the reply tool move here, which is a breaking change.
 
 ### `mashctl owner`
 
@@ -99,5 +100,6 @@ None. Administration. There are no MCP tools for mashctl.
 
 #### What it replaces
 
-Does not exist. In 0.5.6 a mesh has the one owner named at mashctl init;
-nothing in the grammar assumes one.
+In 0.5.5, this did not exist. In 0.5.6 a mesh has the one owner named at
+mashctl init, and nothing in the grammar assumes one. Several owners per mesh
+are planned for 0.6.0.

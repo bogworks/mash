@@ -125,5 +125,5 @@ would.
 
 ## What it replaces
 
-Today this takes --make-key or --public-key, accepts three address forms, and
-prints about ten lines. provision does the same job and is removed.
+In 0.5.5, this took --make-key or --public-key, accepted three address forms,
+and printed about ten lines. provision did the same job and is removed.

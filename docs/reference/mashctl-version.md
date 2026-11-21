@@ -64,4 +64,4 @@ None. Administration. There are no MCP tools for mashctl.
 
 ## What it replaces
 
-Today prints no commit.
+In 0.5.5, mashctl version printed no commit.

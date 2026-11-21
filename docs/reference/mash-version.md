@@ -70,4 +70,4 @@ can compare it exactly.
 
 ## What it replaces
 
-Today mashctl prints no commit, and the MCP tool adds three more lines.
+In 0.5.5, mashctl printed no commit, and the MCP tool added three more lines.

@@ -81,6 +81,6 @@ up to that long.
 
 ## What it replaces
 
-Takes over mashctl suspended and mashctl issued list for one endpoint. It no
-longer prints the creds file's path, the issue record, the agent, the account
-or the mail subject.
+In 0.5.5, mashctl suspended and mashctl issued list did this job for one
+endpoint. It no longer prints the creds file's path, the issue record, the
+agent, the account or the mail subject.

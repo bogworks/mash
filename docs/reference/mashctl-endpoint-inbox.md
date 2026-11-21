@@ -105,5 +105,5 @@ likely means it was refused.
 
 ## What it replaces
 
-Today mashctl inbox inspect, with --from and --to; those are replaced by
---after, the option mash inbox has.
+In 0.5.5, this was mashctl inbox inspect, with --from and --to. Those are
+replaced by --after, the option mash inbox has.
