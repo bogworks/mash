@@ -142,6 +142,7 @@ processor (`linux` or `darwin`; `amd64` or `arm64`), downloads the release
 and its `SHA256SUMS`, checks the archive against them and installs it:
 
 ```sh
+set -e
 BIN="$HOME/.local/bin"; V=2.15.1
 case "$(uname -s)" in Linux) OS=linux ;; Darwin) OS=darwin ;; esac
 case "$(uname -m)" in x86_64) ARCH=amd64 ;; aarch64 | arm64) ARCH=arm64 ;; esac
@@ -160,6 +161,7 @@ cd "$HOME" && rm -r "$T"
 The `nats` command (natscli v0.5.2), the same way:
 
 ```sh
+set -e
 BIN="$HOME/.local/bin"; V=0.5.2
 case "$(uname -s)" in Linux) OS=linux ;; Darwin) OS=darwin ;; esac
 case "$(uname -m)" in x86_64) ARCH=amd64 ;; aarch64 | arm64) ARCH=arm64 ;; esac
@@ -176,7 +178,9 @@ cd "$HOME" && rm -r "$T"
 "$BIN/nats" --version
 ```
 
-Each checksum line should end in `OK` (a mismatch: stop, install nothing, ask).
+Each block starts with `set -e`, so a checksum that does not match stops it
+before anything is unpacked or installed. Each checksum line should end in `OK`
+(a mismatch: stop, install nothing, ask).
 `nats-server --version` prints `nats-server: v2.15.1` and `nats --version`
 prints `0.5.2`. Then check `command -v nats-server nats`. `BIN` must be on the
 PATH: if it is not, tell the person to add it (do not edit their shell files);
