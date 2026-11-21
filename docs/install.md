@@ -28,14 +28,25 @@ To install the binaries yourself (required for an unpinned plugin; also for the 
 curl -fsSL https://github.com/bogworks/mash/releases/latest/download/install.sh | bash
 ```
 
-It finds the machine's type (Linux or macOS, amd64 or arm64), downloads `mash` and `mashctl` from the same release together with that release's `SHA256SUMS`, checks each binary against it, and puts both in `~/.local/bin` (`MASH_INSTALL_DIR` names another folder; `MASH_VERSION=v0.5.6` pins a release, and without it the script first looks up the latest release's tag and downloads from that tag; `MASH_REPO=owner/name` names another repository, default `bogworks/mash`, for the download, the tag lookup and the attestation check; a `MASH_RELEASE_BASE` mirror needs `MASH_VERSION`). It prints one line for each, with the path it used, for example `Installed mash v0.5.6 (3f9a41c) in ~/.local/bin`, asks nothing and needs no `sudo`. If the folder is not on your `PATH` it says so in one line. A symbolic link to the folder is followed. It refuses a folder that belongs to another user, or that, or any folder above it, other users can write to (a root-owned sticky folder such as `/tmp` above it is fine), and on any failed check nothing is installed; both binaries are staged before either is put in place.
+It finds the machine's type (Linux or macOS, amd64 or arm64), downloads `mash` and `mashctl` from the same release together with that release's `SHA256SUMS`, checks each binary against it, and puts both in `~/.local/bin` (`MASH_INSTALL_DIR` names another folder; `MASH_VERSION=v0.5.6` pins a release, and without it the script first looks up the latest release's tag and downloads from that tag; `MASH_REPO=owner/name` names another repository, default `bogworks/mash`, for the download, the tag lookup and the attestation check; a `MASH_RELEASE_BASE` mirror needs `MASH_VERSION`). It prints one line for each, with the path it used, for example `Installed mash v0.5.6 (3f9a41c) in ~/.local/bin`, asks nothing and needs no `sudo`. If the folder is not on your `PATH` it says so in one line. A symbolic link to the folder is followed. It refuses a folder that belongs to another user, or that, or any folder above it, other users can write to (a root-owned sticky folder such as `/tmp` above it is fine), and on any failed check nothing is installed; both binaries are staged before either is put in place. The one-line form runs the script before you have checked it, and it checks checksums only unless `gh` is installed ([#959](https://github.com/bogworks/mash/issues/959)); the checked form is under [Verify what you download](#verify-what-you-download).
 
-If you want a NATS server on this machine, `mash-local-nats-setup.sh` is the other script of the release. Download it and check it against `SHA256SUMS` like `install.sh` (below), then:
+**A NATS server on this machine, for a person without an agent.** `mash-local-nats-setup.sh` is the other script of the release. It makes a local NATS server for mash and writes the file `mashctl init --config` reads. The one-line form:
 
 ```sh
+curl -fsSL https://github.com/bogworks/mash/releases/latest/download/mash-local-nats-setup.sh | bash
+```
+
+That runs the script before you have checked it, and it trusts GitHub's TLS alone ([#959](https://github.com/bogworks/mash/issues/959)). The checked form downloads the script, checks it against the release's `SHA256SUMS`, and then runs it:
+
+```sh
+BASE=https://github.com/bogworks/mash/releases/latest/download
+curl -fsSLO $BASE/mash-local-nats-setup.sh -O $BASE/SHA256SUMS
+grep ' mash-local-nats-setup.sh$' SHA256SUMS | sha256sum -c - &&   # macOS: shasum -a 256 -c -
 bash mash-local-nats-setup.sh --owner acme
 mashctl init --config ~/mash-nats/mash-setup.yaml
 ```
+
+([Verify what you download](#verify-what-you-download) also shows how to check `SHA256SUMS` itself against the attestation.) There are no stand-alone NATS setup guides in 0.5.6; they come in 0.6.0 ([#1037](https://github.com/bogworks/mash/issues/1037)).
 
 The script makes a new folder (`~/mash-nats`, or the absolute path of `--dir DIR`) with a TLS, JetStream NATS server that listens on this machine only, runs as you, and writes `mash-setup.yaml`; the last line it prints is the `mashctl init` command to run next. `--owner NAME` is asked once on the terminal if you leave it out, and the owner cannot change later without starting over. It needs `nats-server` (2.10.7 or newer), `nats` and `openssl` on your `PATH`, and `ss` (Linux) or `lsof` (macOS). It refuses to run as root. The server is a program you run: `--stop` stops it, `--start` starts it again (after a reboot), and `--remove` stops it and deletes the folder, with every mailbox and message on it, once you type the folder's path. Then make the endpoints (`mashctl endpoint create acme.demo.bob --out acme.demo.bob.join`, then `mash join acme.demo.bob.join`) as in the quick start in the [README](../README.md).
 
