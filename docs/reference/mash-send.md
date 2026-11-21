@@ -120,12 +120,12 @@ error: no endpoint has the address acme.demo.alise
 hint: mash who
 ```
 
-### The recipient is suspended
+### The recipient is suspended or was deleted
 
 Stream: stderr. Exit code: 1.
 
 ```text
-error: acme.demo.alice is suspended; nothing was sent
+error: acme.demo.alice is suspended or was deleted; nothing was sent
 hint: mash who
 ```
 

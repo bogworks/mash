@@ -72,12 +72,12 @@ error: no endpoint has the address acme.demo.alise
 hint: mash who
 ```
 
-### The recipient is suspended
+### The recipient is suspended or was deleted
 
 The call returns this text with `isError` set.
 
 ```text
-error: acme.demo.alice is suspended; nothing was sent
+error: acme.demo.alice is suspended or was deleted; nothing was sent
 hint: mash who
 ```
 

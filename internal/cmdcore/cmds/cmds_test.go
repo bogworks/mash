@@ -158,7 +158,7 @@ func TestSendFailures(t *testing.T) {
 		want string
 	}{
 		{"no such endpoint", fmt.Errorf("lookup: %w", cmds.ErrNoSuchEndpoint), "error: no endpoint has the address acme.demo.alise\nhint: mash who\n"},
-		{"recipient suspended", fmt.Errorf("send: %w", cmds.ErrRecipientSuspended), "error: acme.demo.alise is suspended; nothing was sent\nhint: mash who\n"},
+		{"recipient suspended", fmt.Errorf("send: %w", cmds.ErrRecipientSuspended), "error: acme.demo.alise is suspended or was deleted; nothing was sent\nhint: mash who\n"},
 		{"not signed in", &cmds.SignInError{Addr: "acme.demo.bob"}, "error: acme.demo.bob cannot sign in: the server refused its credentials\nhint: mash doctor\n"},
 		{"not signed in, no name", cmds.ErrNotSignedIn, "error: this endpoint cannot sign in: the server refused its credentials\nhint: mash doctor\n"},
 		{"other", errors.New("boom"), "error: boom\n"},

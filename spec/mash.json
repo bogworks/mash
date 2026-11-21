@@ -333,8 +333,8 @@
         "exit": 1
        },
        {
-        "case": "The recipient is suspended",
-        "text": "error: acme.demo.alice is suspended; nothing was sent\nhint: mash who",
+        "case": "The recipient is suspended or was deleted",
+        "text": "error: acme.demo.alice is suspended or was deleted; nothing was sent\nhint: mash who",
         "stream": "stderr",
         "exit": 1
        },

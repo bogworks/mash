@@ -17,9 +17,9 @@ func RefusedMessage(n int) *cliframe.Error {
 	return cliframe.Failf("message %d was refused: it was not verified", n).WithHint("mash doctor")
 }
 
-// RecipientSuspended is the failure for a send to an endpoint that is suspended: its inbox takes no mail (exit 1).
+// RecipientSuspended is the failure for a send to an endpoint that is suspended or was deleted: its inbox takes no mail (exit 1).
 func RecipientSuspended(addr string) *cliframe.Error {
-	return cliframe.Failf("%s is suspended; nothing was sent", addr).WithHint("mash who")
+	return cliframe.Failf("%s is suspended or was deleted; nothing was sent", addr).WithHint("mash who")
 }
 
 // NoCredentials is the failure for an endpoint whose creds file is not there (exit 1). path is shown as the person

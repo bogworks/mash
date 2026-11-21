@@ -48,7 +48,7 @@ func checkCase(t *testing.T, c specCase, text string, code int, out, errs string
 
 // A send to a suspended endpoint says so, in the specification's words, from the command line and from the tool.
 func TestSendToSuspendedMatchesSpec(t *testing.T) {
-	c, ok := specCases(t, "send")["The recipient is suspended"]
+	c, ok := specCases(t, "send")["The recipient is suspended or was deleted"]
 	if !ok {
 		t.Fatal("spec/mash.json no longer has the send case \"The recipient is suspended\"")
 	}
