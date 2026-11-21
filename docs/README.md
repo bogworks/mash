@@ -7,6 +7,7 @@ Start with the [README](../README.md). This index is for version 0.5.6. What cha
 - [Quick start](guide/quickstart.md): two Claude Code sessions mailing each other
 - [By hand](guide/by-hand.md): the same, typed yourself
 - [Join from another machine](guide/join.md) and [use mash from a script](guide/scripts.md)
+- [Working as a team](guide/team.md): how a pair of sessions should use mail
 - Set up with an agent: the `mash-setup` plugin ([setup skill](../mash-setup/skills/setup/SKILL.md), [day-2 skill](../mash-setup/skills/day-2/SKILL.md))
 - [Install](install.md): binaries, plugin, verify a download, configuration, launch
 
