@@ -15,7 +15,7 @@ import (
 
 // heavyIf is the job-level condition of every heavy job in ci.yml that gates (test, test-macos, reproducible): skipped only
 // when changes answered code=false, run when changes failed (an empty output), and never run after a cancellation.
-const heavyIf = "${{ !cancelled() && (github.event_name == 'push' || needs.changes.outputs.code != 'false') }}"
+const heavyIf = "${{ !cancelled() && needs.changes.outputs.code != 'false' }}"
 
 // Every workflow may filter by branch or tag, but none by path: the checks pr-check, adr-lint, label-reset, test (linux),
 // reproducible, lint, govulncheck and codeql all come from these files, and a check a path filter keeps from running never
@@ -144,7 +144,13 @@ func TestDocsOnly_classifier(t *testing.T) {
 		code             string
 	}{
 		{"docs and markdown only", pr, "f/x", []string{"docs/faq.md", "README.md", "CONTRIBUTING.md"}, "false"},
-		{"a non-markdown file under docs", pr, "f/x", []string{"docs/plans/p.txt", "docs/images/a.svg", "docs/demo/two-sessions.cast"}, "false"},
+		{"plain text under docs", pr, "f/x", []string{"docs/plans/p.txt", "docs/a.rst", "docs/b.adoc", "docs/c.csv", "docs/evidence/x/timeline.log"}, "false"},
+		{"an svg under docs is active material", pr, "f/x", []string{"docs/images/a.svg"}, "true"},
+		{"a cast under docs", pr, "f/x", []string{"docs/demo/two-sessions.cast"}, "true"},
+		{"a shell script under docs (security-review F1)", pr, "f/x", []string{"docs/evidence/2026-11-02-heartbeat-fanout/run.sh"}, "true"},
+		{"a python script under docs", pr, "f/x", []string{"docs/evidence/x/harness/drv.py"}, "true"},
+		{"a data file under docs", pr, "f/x", []string{"docs/x/data.json", "docs/x/conf.yaml", "docs/x/c.toml"}, "true"},
+		{"a file without an extension under docs", pr, "f/x", []string{"docs/x/Makefile"}, "true"},
 		{"an ADR only", pr, "f/x", []string{"docs/decisions/0099-x.md", "docs/decisions/INDEX.md"}, "false"},
 		{"docs and a Go file", pr, "f/x", []string{"docs/a.md", "cmd/mash/cli.go"}, "true"},
 		{"a Go file only", pr, "f/x", []string{"internal/x.go"}, "true"},
@@ -175,14 +181,43 @@ func TestDocsOnly_classifier(t *testing.T) {
 		{"a Go file under docs", pr, "f/x", []string{"docs/evidence/x/main.go"}, "true"},
 		{"a rename out of scripts into docs", pr, "f/x", []string{"scripts/notes.md", "docs/notes.md"}, "true"},
 		{"a file the classifier does not know", pr, "f/x", []string{"Makefile"}, "true"},
+		{"a setup skill", pr, "f/x", []string{"mash-setup/skills/setup/SKILL.md"}, "true"},
+		{"the setup plugin manifest", pr, "f/x", []string{"mash-setup/.claude-plugin/plugin.json"}, "true"},
+		{"agent instructions at the root", pr, "f/x", []string{"AGENTS.md"}, "true"},
+		{"agent instructions in a folder", pr, "f/x", []string{"docs/guide/AGENTS.md", "docs/a.md"}, "true"},
+		{"a briefing file in a folder", pr, "f/x", []string{"docs/x/CLAUDE.md"}, "true"},
+		{"a GEMINI file", pr, "f/x", []string{"docs/x/GEMINI.md"}, "true"},
+		{"a lower-case instruction file", pr, "f/x", []string{"docs/x/claude.md"}, "true"},
+		{"any SKILL.md", pr, "f/x", []string{"docs/anywhere/SKILL.md"}, "true"},
+		{"a skills directory", pr, "f/x", []string{"docs/skills/notes.md"}, "true"},
+		{"a commands directory", pr, "f/x", []string{"docs/commands/x.md"}, "true"},
+		{"an agents directory", pr, "f/x", []string{"docs/agents/INSTALL.md"}, "true"},
+		{"a hooks directory", pr, "f/x", []string{"docs/hooks/x.md"}, "true"},
+		{"a prompts directory", pr, "f/x", []string{"docs/prompts/a.md"}, "true"},
+		{"a briefings directory", pr, "f/x", []string{"briefings/a.md"}, "true"},
+		{"a plugins directory", pr, "f/x", []string{"plugins/x/README.md"}, "true"},
+		{"a .claude-plugin directory", pr, "f/x", []string{"docs/.claude-plugin/a.md"}, "true"},
+		{"a template", pr, "f/x", []string{"docs/x/briefing.tmpl"}, "true"},
+		{"a cursor rules file", pr, "f/x", []string{".cursorrules"}, "true"},
+		{"README stays docs", pr, "f/x", []string{"README.md", "docs/install.md", "SECURITY.md", "CONTRIBUTING.md"}, "false"},
+		{"a file merely named like one", pr, "f/x", []string{"docs/MYAGENTS.md", "docs/agents-notes.md"}, "false"},
+		{"a lower-case agents file is the instruction file", pr, "f/x", []string{"docs/agents.md"}, "true"},
 		{"a quoted path (git escapes it)", pr, "f/x", []string{`"docs/\303\251.md"`}, "true"},
 		{"no paths at all", pr, "f/x", nil, "true"},
-		// Never docs-only: pushes, schedules, merge groups, and the merge queue's drafts.
-		{"a push to main, docs only", "push", "", []string{"docs/faq.md"}, "true"},
+		// A push to main and a queue draft are classified by the paths they add, like a pull request (Randy 2026-11-21: a docs-only
+		// change runs only the docs lint, on the pull request, in the queue and on main). A schedule and a merge group are code.
+		{"a push to main, docs only", "push", "", []string{"docs/faq.md"}, "false"},
+		{"a push to main with code", "push", "", []string{"docs/faq.md", "internal/x.go"}, "true"},
+		{"a push to main touching a workflow", "push", "", []string{".github/workflows/ci.yml"}, "true"},
+		{"a push to main with no paths", "push", "", nil, "true"},
 		{"a schedule", "schedule", "", nil, "true"},
 		{"a merge group, docs only", "merge_group", "", []string{"docs/faq.md"}, "true"},
-		{"a queue draft whose diff looks docs-only", pr, "mergify/merge-queue/0123abcd", []string{"docs/faq.md", "README.md"}, "true"},
-		{"a queue draft, ADRs only", pr, "mergify/merge-queue/0123abcd", []string{"docs/decisions/0099-x.md"}, "true"},
+		{"a queue draft whose batch is docs-only", pr, "mergify/merge-queue/0123abcd", []string{"docs/faq.md", "README.md"}, "false"},
+		{"a queue draft, ADRs only", pr, "mergify/merge-queue/0123abcd", []string{"docs/decisions/0099-x.md"}, "false"},
+		{"a queue draft whose batch has one code pull request", pr, "mergify/merge-queue/0123abcd", []string{"docs/faq.md", "internal/x.go"}, "true"},
+		{"a queue draft touching the mergify config", pr, "mergify/merge-queue/0123abcd", []string{"docs/faq.md", ".mergify.yml"}, "true"},
+		{"a queue draft touching the spec", pr, "mergify/merge-queue/0123abcd", []string{"docs/faq.md", "spec/rules.json"}, "true"},
+		{"a queue draft with no paths", pr, "mergify/merge-queue/0123abcd", nil, "true"},
 		{"a branch that only resembles the queue's", pr, "feature/mergify/merge-queue/x", []string{"docs/faq.md"}, "false"},
 	} {
 		if got := ciChanges(t, c.event, c.ref, c.files...); got != "code="+c.code {
@@ -292,7 +327,11 @@ func TestDocsOnly_diffStepHardening(t *testing.T) {
 		{"workflow change", "pull_request", true, []change{{".github/workflows/x.yml", "on: push\n"}}, "code=true"},
 		{"workflow change beside docs", "pull_request", true, []change{{".github/workflows/x.yml", "on: push\n"}, {"docs/a.md", "x\n"}}, "code=true"},
 		{"base without the classifier", "pull_request", false, []change{{"docs/a.md", "x\n"}}, "code=true"},
-		{"push uses the checkout's classifier", "push", true, []change{{"docs/a.md", "x\n"}}, "code=true"},
+		{"push, docs only", "push", true, []change{{"docs/a.md", "x\n"}}, "code=false"},
+		{"push rewriting the classifier", "push", true, []change{{"scripts/ci-changes", rewritten}, {"docs/a.md", "x\n"}}, "code=true"},
+		{"push touching a workflow", "push", true, []change{{".github/workflows/x.yml", "on: push\n"}, {"docs/a.md", "x\n"}}, "code=true"},
+		{"push with code", "push", true, []change{{"internal/x.go", "package x\n"}, {"docs/a.md", "x\n"}}, "code=true"},
+		{"push whose previous head is not in the checkout", "push-nobefore", true, []change{{"docs/a.md", "x\n"}}, "code=true"},
 	} {
 		for wf, script := range diffStepScripts(t) {
 			t.Run(c.name+"/"+wf, func(t *testing.T) {
@@ -310,15 +349,15 @@ func TestDocsOnly_diffStepHardening(t *testing.T) {
 				}
 				git(t, dir, "add", "-A")
 				git(t, dir, "commit", "-q", "-m", "pr")
-				if c.event == "push" {
-					// The checkout's classifier is the one that runs: give the push a distinguishable one.
-					writeRepoFile(t, dir, "scripts/ci-changes", string(real))
-				}
 				outFile := filepath.Join(t.TempDir(), "output")
 				runnerTemp := t.TempDir()
 				cmd := exec.Command("bash", "-c", script)
 				cmd.Dir = dir
-				cmd.Env = append(os.Environ(), "EVENT="+c.event, "BASE="+base, "HEAD_REF=x", "GITHUB_OUTPUT="+outFile, "RUNNER_TEMP="+runnerTemp)
+				event, before := c.event, base
+				if event == "push-nobefore" {
+					event, before = "push", "0000000000000000000000000000000000000000"
+				}
+				cmd.Env = append(os.Environ(), "EVENT="+event, "BASE="+base, "BEFORE="+before, "HEAD_REF=x", "GITHUB_OUTPUT="+outFile, "RUNNER_TEMP="+runnerTemp)
 				if out, err := cmd.CombinedOutput(); err != nil {
 					t.Fatalf("%v: %s", err, out)
 				}

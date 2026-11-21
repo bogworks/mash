@@ -7,15 +7,17 @@
 #   EVENT     the workflow's github.event_name
 #   HEAD_REF  the pull request's head ref (github.head_ref; empty on other events)
 #
-# code=false only for a pull request that touches nothing but documentation: every path is under docs/ or is a *.md
-# file AND is not one a build, a test or the release tooling reads. Everything else is code:
-#   - a push, a merge group, a schedule or any other non-pull_request event (main's head always runs the full set: the
-#     release gate reads main's check runs);
-#   - a Mergify merge-queue draft (head ref mergify/merge-queue/...): it builds the combined commit, and its diff
-#     against main can look docs-only on its own. The prefix alone is enough here, unlike adr-lint's skip, because the
-#     mistake it allows is running more CI, never less;
+# code=false only for a pull request, a Mergify merge-queue draft or a push to main whose changed paths are nothing but
+# documentation: every path is under docs/ or is a *.md file AND is not one a build, a test or the release tooling reads.
+# The caller passes the paths the event adds: a pull request's diff against its base; a queue draft's diff against main is
+# the whole batch (so a docs-only batch is docs-only and a batch with one code pull request is code); a push's diff is
+# the range it added (the release gate walks back past docs-only heads to the newest commit whose tests ran, ADR 0157 and
+# internal/release/checks.go). Everything else is code:
+#   - a merge group, a schedule or any other event;
 #   - an empty path list (nothing to compare);
 #   - any path not listed as documentation below (the default is code, so a new top-level path is code).
+# Agent instructions stay code too, at any depth: instruction files (AGENTS, CLAUDE, GEMINI, every SKILL.md), templates, and anything
+# under skills, commands, agents, hooks, prompts, briefings, plugins, .claude-plugin or mash-setup.
 # Documentation that a test or the build reads stays code, so it is tested when it changes:
 # docs/branch-protection.md (internal/release), docs/reference/ and spec/ (internal/refgen compares the generated reference with the spec), docs/review/ (scripts/reviewgate and scripts/gate read policy.json), docs/allowed_signers, docs/skipped-releases.txt and docs/release-cutover (the release tooling), CHANGELOG.md and changelog.d/
 # (scripts/changelog, lint.yml), every *.md under .github/, plugin/, scripts/, cmd/, internal/ and ci/ (the plugin package is
@@ -34,7 +36,7 @@ is_docs() {
 	CHANGELOG.md | changelog.d/*) return 1 ;;
 	docs/branch-protection.md | docs/review/* | docs/reference/* | spec/* | docs/allowed_signers | docs/skipped-releases.txt | docs/release-cutover) return 1 ;;
 	esac
-	# Agent instructions, wherever they sit and in any letter case (x-lead, ADR 0156): the named files, any *.tmpl, any path with
+	# Agent instructions, wherever they sit and in any letter case (x-lead, planner #2845, ADR 0157): the named files, any *.tmpl, any path with
 	# a directory component named like the places agents read instructions, and mash-setup/ at any depth. README.md, docs/install.md,
 	# SECURITY.md and CONTRIBUTING.md stay docs.
 	local base="${lower##*/}" dirs c
@@ -54,28 +56,28 @@ is_docs() {
 	case "$lower" in
 	docs/*.png | docs/*.jpg | docs/*.jpeg | docs/*.gif | docs/*.ico | docs/*.pdf | docs/*.woff | docs/*.woff2) return 1 ;;
 	esac
+	# Documentation is Markdown anywhere, and under docs/ only plain-text formats (security-review F1 on the docs queue): a script, a data or
+	# config file, a .cast or an .svg under docs/ is runnable or active material and stays code.
 	case "$p" in
-	docs/* | *.md) return 0 ;;
+	*.md) return 0 ;;
+	docs/*.txt | docs/*.rst | docs/*.adoc | docs/*.csv | docs/*.log) return 0 ;;
 	esac
 	return 1
 }
 
 files="$(cat)"
 code=true
-if [ "${EVENT:-}" = pull_request ]; then
-	case "${HEAD_REF:-}" in
-	mergify/merge-queue/*) ;;
-	*)
-		if [ -n "$files" ]; then
-			code=false
-			while IFS= read -r f; do
-				if ! is_docs "$f"; then
-					code=true
-					break
-				fi
-			done <<<"$files"
-		fi
-		;;
-	esac
-fi
+case "${EVENT:-}" in
+pull_request | push)
+	if [ -n "$files" ]; then
+		code=false
+		while IFS= read -r f; do
+			if ! is_docs "$f"; then
+				code=true
+				break
+			fi
+		done <<<"$files"
+	fi
+	;;
+esac
 echo "code=$code"

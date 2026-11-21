@@ -18,7 +18,7 @@ func IsDocsPath(p string) bool {
 			return false
 		}
 	}
-	// Agent instructions: a skill or a briefing an agent executes is code in effect (ADR 0156), wherever it sits.
+	// Agent instructions: a skill or a briefing an agent executes is code in effect (ADR 0157), wherever it sits.
 	if isAgentInstruction(lower) {
 		return false
 	}
@@ -37,10 +37,21 @@ func IsDocsPath(p string) bool {
 			return false
 		}
 	}
-	return strings.HasPrefix(p, "docs/") || strings.HasSuffix(p, ".md")
+	// Documentation is Markdown anywhere, and under docs/ only plain-text formats (security-review F1 on the docs queue).
+	if strings.HasSuffix(p, ".md") {
+		return true
+	}
+	if strings.HasPrefix(p, "docs/") {
+		for _, ext := range []string{".txt", ".rst", ".adoc", ".csv", ".log"} {
+			if strings.HasSuffix(p, ext) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
-// isAgentInstruction: a path an agent reads as instructions is code in effect (ADR 0156), wherever it sits and in any letter case
+// isAgentInstruction: a path an agent reads as instructions is code in effect (ADR 0157), wherever it sits and in any letter case
 // (lower is the lower-cased path): the named files, any *.tmpl, mash-setup/, and any path with a directory component named like
 // the places agents read instructions. Same rule as scripts/ci-changes.
 func isAgentInstruction(lower string) bool {
