@@ -118,10 +118,12 @@ Expected: `Created endpoint acme.demo.carol`. Check:
 person then starts a session as that agent (`sh person`):
 
 ```sh person
-MASH_ENDPOINT=acme.demo.carol claude
+MASH_ENDPOINT=acme.demo.carol claude --channels plugin:mash@mash --name acme.demo.carol
 ```
 
-Mail arrives with that session's next prompt or tool call.
+`--name` shows the address as the session's name, so you can tell who you are
+talking to (`/rename` does the same for a session already open); `--channels`
+lets mail wake an idle session.
 
 An address that was deleted can never be used again; pick another name.
 
