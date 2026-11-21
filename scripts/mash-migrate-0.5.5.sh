@@ -203,7 +203,7 @@ main() {
 
     local dir
     if [ -n "${MASH_CONFIG_DIR:-}" ] && [ "${MASH_CONFIG_DIR#/}" = "$MASH_CONFIG_DIR" ]; then
-        refuse "MASH_CONFIG_DIR is not an absolute path: $MASH_CONFIG_DIR" \
+        refuse "MASH_CONFIG_DIR is not an absolute path" \
             "set MASH_CONFIG_DIR to an absolute folder, or unset it"
     elif [ -n "${MASH_CONFIG_DIR:-}" ]; then
         dir=$MASH_CONFIG_DIR
