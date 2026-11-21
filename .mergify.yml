@@ -58,7 +58,7 @@ merge_protections:
       # Inactive for a docs-only pull request (no changed file matches the code regex, the same text as the docs queue's):
       # it needs no approval or label, only the docs lint (pr-check) and adr-lint, enforced by the docs queue.
       - or:
-          - files ~= ^(?!(.*\.md$|docs/))
+          - files ~= ^(?!(.*\.md$|docs/))|^docs/(allowed_signers|review/policy\.json|skipped-releases\.txt|release-cutover)$
           - "#files >= 300"
     success_conditions:
       - or:
@@ -85,7 +85,7 @@ queue_rules:
       - "#files >= 1"
       # GitHub returns at most 3000 files of a pull request and Mergify cannot see past that (codex H1): a large pull request is never docs-only here.
       - "#files < 300"
-      - -files ~= ^(?!(.*\.md$|docs/))
+      - -files ~= ^(?!(.*\.md$|docs/))|^docs/(allowed_signers|review/policy\.json|skipped-releases\.txt|release-cutover)$
       - check-success = @github-actions/pr-check
       - check-success = @github-actions/adr-lint
     merge_conditions:
@@ -166,7 +166,7 @@ priority_rules:
     conditions:
       - "#files >= 1"
       - "#files < 300"
-      - -files ~= ^(?!(.*\.md$|docs/))
+      - -files ~= ^(?!(.*\.md$|docs/))|^docs/(allowed_signers|review/policy\.json|skipped-releases\.txt|release-cutover)$
     priority: 5000
   - name: pipeline
     conditions:
