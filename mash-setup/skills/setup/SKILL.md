@@ -401,11 +401,21 @@ last):
    bash "$DL/mash-local-nats-setup.sh" --dir "$SRV" --stop
    ```
 
-   To delete the server folder too, which holds every key and all stored
-   mail, the person runs `--remove` (day-2 skill, "Remove the whole local
-   server"): it asks them to type the folder path.
-2. The plugin: `claude plugin uninstall mash@mash`.
-3. The programs this setup installed, only the named files. Say which ones
+2. The server folder, which holds every key and all stored mail. It comes
+   before the download folder is deleted, because `--remove` needs the
+   downloaded script. It cannot be undone, so the person runs it (day-2
+   skill, "Remove the whole local server"); it asks them to type the
+   folder path. Fill in the script path and the server folder:
+
+   ```sh person
+   SRV="$HOME/mash-nats"; DL="$HOME/mash-setup-dl"
+   bash "$DL/mash-local-nats-setup.sh" --dir "$SRV" --remove
+   ```
+
+   If the person wants to keep the server folder, skip this step and say
+   plainly that the folder and its keys stay on disk.
+3. The plugin: `claude plugin uninstall mash@mash`.
+4. The programs this setup installed, only the named files. Say which ones
    you installed in step 2: you only install a missing `nats-server` or
    `nats`, and a package or Homebrew install is not removed by this step.
    Never remove a program that was there before. `mash` and `mashctl` come
@@ -418,7 +428,7 @@ last):
    ```
 
    If the person chose another install folder in step 1, fill in that path.
-4. The download folder, `~/mash-setup-dl`: only the files setup downloaded
+5. The download folder, `~/mash-setup-dl`: only the files setup downloaded
    into it, by name, then the folder if it is empty. If the person chose
    another folder in step 1, fill in that path:
 
@@ -431,7 +441,7 @@ last):
    `rmdir` fails harmlessly if the folder is not empty: a folder that was
    already there with other files stays, with those files.
 
-5. mash's config and state folders. They hold credentials: deleting them
+6. mash's config and state folders. They hold credentials: deleting them
    cannot be undone, so the person runs it. First work out both active
    folders and show them. The config folder is `$MASH_CONFIG_DIR`, else
    `$XDG_CONFIG_HOME/mash`, else `~/.config/mash` (never `XDG_CONFIG_HOME`

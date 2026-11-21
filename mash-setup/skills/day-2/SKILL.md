@@ -66,7 +66,9 @@ run the command it names (status, then doctor, then status again).
 
 The server is a program running as the person. It does not come back after a
 reboot. Check (`mashctl doctor` names what is wrong on the server side), then
-start it:
+start it. BIN, SRV and DL below are the defaults: use the folders the
+person chose in setup. Get them from the person, or from where
+`command -v mashctl` and the server folder show them. Never guess.
 
 ```sh
 BIN="$HOME/.local/bin"; SRV="$HOME/mash-nats"; DL="$HOME/mash-setup-dl"
@@ -83,6 +85,9 @@ download it again and check it as the setup skill's step 3 does.
 ## Stop the server
 
 Needs a yes: stopping it ends mail delivery until it is started again.
+
+SRV and DL below are the defaults: fill in the folders the person chose in
+setup (ask them; never guess).
 
 ```sh
 SRV="$HOME/mash-nats"; DL="$HOME/mash-setup-dl"
@@ -147,7 +152,8 @@ Then check `mashctl endpoint list` no longer shows it.
 
 This stops the server and deletes its folder, which holds every key and all
 stored mail. The mailboxes stop working. The script asks the person to type
-the folder path and refuses without a terminal:
+the folder path and refuses without a terminal. SRV and DL are the defaults:
+fill in the folders the person chose in setup (ask them; never guess):
 
 ```sh person
 SRV="$HOME/mash-nats"; DL="$HOME/mash-setup-dl"
