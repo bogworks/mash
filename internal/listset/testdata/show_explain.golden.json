@@ -99,12 +99,12 @@
             "$JS.API.STREAM.INFO.inbox-r_o_a",
             "$KV.mash-leases.r_o_a",
             "$SRV.\u003e",
-            "_INBOX.\u003e",
+            "_INBOX.r.\u003e",
             "agents.policy.r"
           ],
           "subscribe": [
             "$SRV.\u003e",
-            "_INBOX.r_o_a.\u003e"
+            "_INBOX.r.r_o_a.\u003e"
           ]
         }
       },
@@ -153,12 +153,12 @@
             "$JS.API.STREAM.INFO.inbox-r_o_b",
             "$KV.mash-leases.r_o_b",
             "$SRV.\u003e",
-            "_INBOX.\u003e",
+            "_INBOX.r.\u003e",
             "agents.policy.r"
           ],
           "subscribe": [
             "$SRV.\u003e",
-            "_INBOX.r_o_b.\u003e"
+            "_INBOX.r.r_o_b.\u003e"
           ]
         }
       },
@@ -213,12 +213,12 @@
             "$JS.API.STREAM.INFO.inbox-r_o_c",
             "$KV.mash-leases.r_o_c",
             "$SRV.\u003e",
-            "_INBOX.\u003e",
+            "_INBOX.r.\u003e",
             "agents.policy.r"
           ],
           "subscribe": [
             "$SRV.\u003e",
-            "_INBOX.r_o_c.\u003e"
+            "_INBOX.r.r_o_c.\u003e"
           ]
         }
       },
@@ -274,12 +274,12 @@
             "$JS.API.STREAM.INFO.inbox-r_p_x",
             "$KV.mash-leases.r_p_x",
             "$SRV.\u003e",
-            "_INBOX.\u003e",
+            "_INBOX.r.\u003e",
             "agents.policy.r"
           ],
           "subscribe": [
             "$SRV.\u003e",
-            "_INBOX.r_p_x.\u003e"
+            "_INBOX.r.r_p_x.\u003e"
           ]
         }
       }
@@ -332,12 +332,12 @@
           "$JS.API.STREAM.INFO.inbox-r_o_b",
           "$KV.mash-leases.r_o_b",
           "$SRV.\u003e",
-          "_INBOX.\u003e",
+          "_INBOX.r.\u003e",
           "agents.policy.r"
         ],
         "subscribe": [
           "$SRV.\u003e",
-          "_INBOX.r_o_b.\u003e"
+          "_INBOX.r.r_o_b.\u003e"
         ]
       },
       "raw_client_limit": "The reply and plumbing subjects stay open whatever the lists say: a raw client can send data to another address on them. The lists govern who may mail, prompt, probe and watch whom, not who may communicate at all."
@@ -387,12 +387,12 @@
           "$JS.API.STREAM.INFO.inbox-r_o_a",
           "$KV.mash-leases.r_o_a",
           "$SRV.\u003e",
-          "_INBOX.\u003e",
+          "_INBOX.r.\u003e",
           "agents.policy.r"
         ],
         "subscribe": [
           "$SRV.\u003e",
-          "_INBOX.r_o_a.\u003e"
+          "_INBOX.r.r_o_a.\u003e"
         ]
       },
       "raw_client_limit": "The reply and plumbing subjects stay open whatever the lists say: a raw client can send data to another address on them. The lists govern who may mail, prompt, probe and watch whom, not who may communicate at all."
@@ -442,12 +442,12 @@
           "$JS.API.STREAM.INFO.inbox-r_o_a",
           "$KV.mash-leases.r_o_a",
           "$SRV.\u003e",
-          "_INBOX.\u003e",
+          "_INBOX.r.\u003e",
           "agents.policy.r"
         ],
         "subscribe": [
           "$SRV.\u003e",
-          "_INBOX.r_o_a.\u003e"
+          "_INBOX.r.r_o_a.\u003e"
         ]
       },
       "raw_client_limit": "The reply and plumbing subjects stay open whatever the lists say: a raw client can send data to another address on them. The lists govern who may mail, prompt, probe and watch whom, not who may communicate at all."
@@ -497,12 +497,12 @@
           "$JS.API.STREAM.INFO.inbox-r_o_b",
           "$KV.mash-leases.r_o_b",
           "$SRV.\u003e",
-          "_INBOX.\u003e",
+          "_INBOX.r.\u003e",
           "agents.policy.r"
         ],
         "subscribe": [
           "$SRV.\u003e",
-          "_INBOX.r_o_b.\u003e"
+          "_INBOX.r.r_o_b.\u003e"
         ]
       },
       "raw_client_limit": "The reply and plumbing subjects stay open whatever the lists say: a raw client can send data to another address on them. The lists govern who may mail, prompt, probe and watch whom, not who may communicate at all."

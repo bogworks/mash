@@ -103,7 +103,7 @@ template for scoped key foo.c
     agents.status.foo.c.*
     agents.status.foo.{{tag(allow)}}
     agents.hb.foo.c.{{name()}}
-    _INBOX.>
+    _INBOX.foo.>
     $SRV.>
     $JS.API.INFO
     $JS.API.STREAM.INFO.inbox-foo_c_{{name()}}
@@ -120,7 +120,7 @@ template for scoped key foo.c
   publish deny:
   subscribe allow:
     agents.hb.foo.{{tag(allow)}}
-    _INBOX.foo_c_{{name()}}.>
+    _INBOX.foo.foo_c_{{name()}}.>
     agents.prompt.foo.c.{{name()}}
     agents.status.foo.c.{{name()}}
     $SRV.>
@@ -160,7 +160,7 @@ template for scoped key foo.c
     agents.prompt.foo.{{tag(allow)}}
     agents.status.foo.{{tag(allow)}}
     agents.hb.foo.c.{{name()}}
-    _INBOX.>
+    _INBOX.foo.>
     $SRV.>
     $JS.API.INFO
     $JS.API.STREAM.INFO.inbox-foo_c_{{name()}}
@@ -180,7 +180,7 @@ template for scoped key foo.c
   subscribe allow:
     agents.hb.foo.c.*
     agents.hb.foo.{{tag(allow)}}
-    _INBOX.foo_c_{{name()}}.>
+    _INBOX.foo.foo_c_{{name()}}.>
     agents.prompt.foo.c.{{name()}}
     agents.status.foo.c.{{name()}}
     $SRV.>
@@ -475,21 +475,21 @@ change that widens or narrows what is reachable fails it, and the maintainer who
 
 | Subject (as the raw client publishes it) | Server | Reaches another address | Why it stays open |
 |---|---|---|---|
-| `_INBOX.<other flat name>.<id>` | accepted | yes: delivered to the other address, in its own and in another owner group | A reply is a plain publish to the caller's reply prefix; there is no response permission, which allowed deleting another's inbox ([ADR 0007](decisions/0007-one-nats-user-per-endpoint-least-privilege.md)). The receiver accepts only verified callers, and a prompt's reply subject carries 128 random bits (threat model, section 6.4). |
+| `_INBOX.<range>.<other flat name>.<id>` | accepted | yes: delivered to the other address, in its own and in another owner group | A reply is a plain publish to the caller's reply prefix; there is no response permission, which allowed deleting another's inbox ([ADR 0007](decisions/0007-one-nats-user-per-endpoint-least-privilege.md)). The receiver accepts only verified callers, and a prompt's reply subject carries 128 random bits (threat model, section 6.4). |
 | `$SRV.INFO.agents`, `$SRV.PING` and the rest of `$SRV.>` | accepted | yes: delivered to every sender (each subscribes to `$SRV.>`) | Discovery and live prompts are service requests to every endpoint ([ADR 0007](decisions/0007-one-nats-user-per-endpoint-least-privilege.md)). |
-| `_INBOX.<own flat name>.<id>`, its own heartbeat, its own inbox consumer, its own lease key | accepted | no | Fixed lines naming only the sender ([ADR 0009](decisions/0009-one-inbox-stream-and-consumer-per-endpoint.md)). |
+| `_INBOX.<range>.<own flat name>.<id>`, its own heartbeat, its own inbox consumer, its own lease key | accepted | no | Fixed lines naming only the sender ([ADR 0009](decisions/0009-one-inbox-stream-and-consumer-per-endpoint.md)). |
 | `$JS.API.INFO`, `$JS.API.STREAM.INFO.KV_mash-directory`, `$JS.API.DIRECT.GET.KV_mash-directory.>`, `$JS.API.STREAM.INFO.KV_mash-leases` | accepted | no: server API reads; the directory is readable by every sender | Needed to resolve names and read the lease bucket state; read only. |
 | Another address's lease key (`$KV.mash-leases.<flat>`), a read of it, and any write to `$KV.mash-directory.>` | refused | no | A sender writes only its own lease and never the directory. |
 | Another address's inbox stream: `STREAM.INFO`, `CONSUMER.INFO`, `CONSUMER.CREATE`, `CONSUMER.DURABLE.CREATE`, `CONSUMER.MSG.NEXT`, `$JS.ACK`, `STREAM.MSG.GET`, `DIRECT.GET`, `STREAM.DELETE`, `STREAM.PURGE` | refused | no | Every JetStream line names the sender's own inbox stream only. |
 | Another address's heartbeat | refused | no | Publish only to its own heartbeat. |
 
-What a raw client can therefore do: send an unlisted address a reply-prefix publish (`_INBOX.<other>.<id>`), or a
+What a raw client can therefore do: send an unlisted address a reply-prefix publish under its own owner's inboxes (`_INBOX.<owner>.<id>`; another owner's inboxes are refused), or a
 `$SRV.>` request, and what the receiver does with it rests on its own checks (verified callers, random reply subjects), not on the server. It
 cannot mail, prompt or probe an address its lists do not give, and it cannot read, consume or delete another inbox.
 Subscribing to another address's inbox, prompt and status subjects, or to a wider reply prefix (`_INBOX.>`, `agents.>`,
 `$JS.API.>`), is refused; the same test checks each.
 
-The lines are visible in the section 2.2 output: `_INBOX.>` and `$SRV.>` in publish allow. Narrowing them is another
+The lines are visible in the section 2.2 output: `_INBOX.<owner>.>` and `$SRV.>` in publish allow. Narrowing them is another
 workstream's work (the SDK's reply subjects). Until then this document guarantees who may mail, prompt, probe and watch
 whom, and not who may communicate at all (contract section 1, non-goals; REQ-010, REQ-021).
 

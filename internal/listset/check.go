@@ -127,13 +127,13 @@ func Check(ls ListSet, c *Compiled) error {
 		}
 		// Every fixed grant the sender needs must be present and survive the deny lines.
 		flat := s.addr.rng + "_" + s.addr.owner + "_" + s.addr.name
-		for _, line := range fixedPub(subj(s.addr.String(), Heartbeat), PolicySubject(s.addr.rng), flat) {
+		for _, line := range fixedPub(subj(s.addr.String(), Heartbeat), PolicySubject(s.addr.rng), s.addr.rng, flat) {
 			if !slices.Contains(p.pubAllow, line) || !p.canPub(concrete(line)) {
 				bad(who, "required publish grant %q is missing or denied: %s", line, fixedBreaks(line))
 			}
 		}
 		for _, line := range []string{
-			"_INBOX." + flat + ".>",
+			"_INBOX." + s.addr.rng + "." + flat + ".>",
 			subj(s.addr.String(), Prompt),
 			subj(s.addr.String(), Status),
 			"$SRV.>",
@@ -332,12 +332,12 @@ func universeOf(m *model) []string {
 // fixedLines are the non-agents lines a sender's expanded template may hold: publish, then subscribe.
 func fixedLines(s sender) (pub, sub []string) {
 	flat := s.addr.rng + "_" + s.addr.owner + "_" + s.addr.name
-	for _, l := range fixedPub("", PolicySubject(s.addr.rng), flat) {
+	for _, l := range fixedPub("", PolicySubject(s.addr.rng), s.addr.rng, flat) {
 		if (!strings.HasPrefix(l, "agents.") || isPolicySubject(l)) && l != "" {
 			pub = append(pub, l)
 		}
 	}
-	return pub, []string{"_INBOX." + flat + ".>", "$SRV.>"}
+	return pub, []string{"_INBOX." + s.addr.rng + "." + flat + ".>", "$SRV.>"}
 }
 
 // lineRefusal says why an expanded allow line is not one the lists could have asked for, or "".

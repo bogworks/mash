@@ -475,9 +475,9 @@ func TestAT001TemplateNamesNoPeer(t *testing.T) {
 
 // Every required fixed grant, removed from the template or denied, is refused by Check.
 func TestCheckRequiresFixedGrants(t *testing.T) {
-	pubLines := fixedPub("agents.hb.foo.c.{{name()}}", PolicySubject("foo"), "foo_c_{{name()}}")
+	pubLines := fixedPub("agents.hb.foo.c.{{name()}}", PolicySubject("foo"), "foo", "foo_c_{{name()}}")
 	subLines := []string{
-		"_INBOX.foo_c_{{name()}}.>",
+		"_INBOX.foo.foo_c_{{name()}}.>",
 		"agents.prompt.foo.c.{{name()}}",
 		"agents.status.foo.c.{{name()}}",
 		"$SRV.>",
@@ -648,5 +648,51 @@ func TestTemplateHasPolicyGrant(t *testing.T) {
 	err = Check(at001(), c)
 	if err == nil || !strings.Contains(err.Error(), "policy responder") {
 		t.Fatalf("Check without the policy grant = %v", err)
+	}
+}
+
+// A compiled template grants publish only under the inboxes of the sender's own SAP owner (the range of this package,
+// as internal/admin binds _INBOX.<owner>.>), and Check refuses a template that still carries the wide _INBOX.> line.
+func TestPublishInboxBoundToOwner(t *testing.T) {
+	ls := at001()
+	c, err := Compile(ls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var p *jwt.Permissions
+	for i := range c.Templates {
+		if c.Templates[i].Group == "foo.c" {
+			p = &c.Templates[i].Permissions
+		}
+	}
+	if p == nil {
+		t.Fatal("no template foo.c")
+	}
+	if slices.Contains(p.Pub.Allow, "_INBOX.>") || !slices.Contains(p.Pub.Allow, "_INBOX.foo.>") {
+		t.Fatalf("publish allow does not bind replies to _INBOX.foo.>: %v", p.Pub.Allow)
+	}
+	e, err := expandPermissions(*p, "x", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !e.canPub("_INBOX.foo.x") {
+		t.Error("cannot publish under its own owner's inbox")
+	}
+	if e.canPub("_INBOX.bar.x") {
+		t.Error("can publish under another owner's inbox")
+	}
+
+	for j, l := range p.Pub.Allow {
+		if l == "_INBOX.foo.>" {
+			p.Pub.Allow[j] = "_INBOX.>"
+		}
+	}
+	err = Check(ls, c)
+	var ce *CheckError
+	if !errors.As(err, &ce) {
+		t.Fatalf("want *CheckError for a template with _INBOX.>, got %T %v", err, err)
+	}
+	if !strings.Contains(err.Error(), "_INBOX.") {
+		t.Errorf("error does not name the inbox line: %v", err)
 	}
 }
