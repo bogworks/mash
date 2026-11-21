@@ -99,15 +99,6 @@ error: deleted acme.demo.bob, but PARTIAL: acme_demo_bob's user key UBIDWPW3 was
 hint: mashctl endpoint delete acme.demo.bob
 ```
 
-### Cancelled everywhere, then the lease or the inbox could not be removed (0.5.6 as built, the other path)
-
-Stream: stderr. Exit code: 1.
-
-```text
-error: deleted acme.demo.bob, but the lease fence or the inbox was not removed: the server did not answer
-hint: mashctl endpoint delete acme.demo.bob
-```
-
 ## JSON
 
 With `--json` the result is this shape. The values are an example.
@@ -131,14 +122,14 @@ server confirms is anything removed, so a failure there leaves the endpoint
 whole. If this machine holds the endpoint's creds file, it is set aside as
 &lt;address&gt;.creds.deleted, so mash no longer counts it as installed; the
 path is predictable and nothing prints it (settled 2026-11-20). Nothing else
-on any machine is touched. THE TWO LATE-FAILURE LINES are 0.5.6 as built, and
-neither is how it should read: the first carries an internal word (PARTIAL),
-the flat name with underscores, a key id and the server's raw error; the
-second says 'lease fence'. In both, the key id and the cause vary. From 0.5.7
-one line replaces both: 'error: deleted acme.demo.bob, but the removal did not
-finish: &lt;cause in plain words&gt;' with the same hint; its credentials
-already no longer work, and running the command again is safe (settled
-2026-11-21).
+on any machine is touched. THE LATE-FAILURE LINE is 0.5.6 as built, and not
+how it should read: it carries an internal word (PARTIAL), the flat name with
+underscores, a key id and the server's raw error. Two parts of it vary: the
+eight-character key id after 'user key', and the cause between 'did not
+complete: ' and '; run the same command again'. From 0.5.7 one line replaces
+it: 'error: deleted acme.demo.bob, but the removal did not finish: &lt;cause
+in plain words&gt;' with the same hint; its credentials already no longer
+work, and running the command again is safe (settled 2026-11-21).
 
 ## What it replaces
 

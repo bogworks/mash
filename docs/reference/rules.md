@@ -125,9 +125,10 @@ The rules every mash command and tool follows.
    stands in round brackets, such as '(the same JSON as --json ...)',
    describes the output in words; it is not a form to match byte for byte, and
    the conformance test skips it. The JSON example beside it shows the shape.
-   After the first cause-less line, text following ': ' at the end of an error
-   that names a cause ('...was not removed: &lt;cause&gt;') is the cause as
-   found and varies (settled 2026-11-21).
+   A part of a case that varies from run to run (a key id, a cause as the
+   server gave it) is named in that command's notes, with the words that stand
+   before and after it; a test matches everything else byte for byte and
+   nothing more loosely than the notes say (settled 2026-11-21).
 
 20. Having no endpoint reads the same in every mash command. Three wordings,
    by where it is asked. At a shell with none installed: 'error: no endpoint

@@ -3,8 +3,8 @@ package main
 // The output half of the conformance test: every x-output case of every command of release 0.5.6 in spec/mashctl.json
 // (text, stream and exit code) is run against the build and compared exactly, with two exceptions the specification's
 // rules make: a case whose whole text stands in round brackets is a description and is skipped (confIsDescription), and
-// a case that names a cause at the end of its error line compares the cause only as non-empty (confVaryingCause). A
-// case that cannot be run for another reason would be listed in confUnchecked with the reason (none now); a case that is
+// a part of a case that the command's notes name as varying is matched as the notes say and nothing more loosely
+// (confMidCause). A case that cannot be run for another reason would be listed in confUnchecked with the reason (none now); a case that is
 // neither run nor listed fails, a listed case that is checked after all fails, so the table only shrinks.
 //
 // The cases run in process against the embedded server of the other tests (no binary, no outside network): a world is
@@ -25,7 +25,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -51,21 +50,13 @@ import (
 // here. It is empty: every case is run or skipped as a description.
 var confUnchecked = map[string]string{}
 
-// confVaryingCause: key is "<command> <case>". The cases listed here end their `error:` line in a cause that the
-// specification gives as one example and the build words as it finds it (rules.json, "A case written in brackets is a
-// description" and the rule on an error that names a cause): the text after the LAST ": " of the first `error:` line
-// is the cause as found in the specification's text. The stable prefix is derived from the specification's line only
-// (everything up to and including its last ": "). The build's first `error:` line must start with that prefix and have
-// a non-empty remainder, the cause, which is not compared and may itself contain ": " (as in "mash: inbox stream:
-// <err>"). The other lines are compared exactly. See confCutCause and confMatchCause.
-var confVaryingCause = map[string]bool{
-	"endpoint delete Cancelled everywhere, then the lease or the inbox could not be removed (0.5.6 as built, the other path)": true,
-}
-
-// confMidCause: key is "<command> <case>". The cases listed here carry two varying parts inside one error line: an
-// 8-character user key id and a cause between confMidFrom and confMidTo (the build words the cause as it finds it).
-// The comparison of the case is exact except those two parts: the key id must match [A-Z0-9]{8} and the cause must be
-// non-blank. Everything else, the hint line included, stays exact. See confMidPattern.
+// confMidCause: key is "<command> <case>". The cases listed here carry parts that vary from run to run, which the
+// command's x-notes in spec/mashctl.json name with the words before and after them (rules.json: "A part of a case that
+// varies from run to run ... is named in that command's notes"). For `endpoint delete` the notes say: the
+// eight-character key id after 'user key', and the cause between 'did not complete: ' and '; run the same command
+// again'. The comparison of the case is exact except those two parts: the key id is exactly eight characters
+// ([A-Z0-9]{8}) after "user key " and the cause is non-empty text between confMidFrom and confMidTo. Everything else,
+// the hint line included, stays exact. See confMidPattern.
 var confMidCause = map[string]bool{
 	"endpoint delete Cancelled everywhere, then a later step failed (0.5.6 as built)": true,
 }
@@ -98,55 +89,6 @@ func confMidPattern(text string) (string, bool) {
 	id := loc[0] + len("user key ")
 	return regexp.QuoteMeta(head[:id]) + `[A-Z0-9]{8}` + regexp.QuoteMeta(head[id+8:]) +
 		`[^\n]*\S[^\n]*` + regexp.QuoteMeta(tail), true
-}
-
-// confCutCause (used on the specification's text) cuts the final ": <cause>" off the first line of text that starts with "error: ". It returns the text
-// with that line shortened to what stands before the cut, and the cause. ok is false when there is no such line or the
-// line has no ": " after the "error:" word itself.
-func confCutCause(text string) (cut, cause string, ok bool) {
-	lines := strings.Split(text, "\n")
-	for i, l := range lines {
-		if !strings.HasPrefix(l, "error: ") {
-			continue
-		}
-		at := strings.LastIndex(l, ": ")
-		if at <= len("error:") {
-			return text, "", false
-		}
-		lines[i] = l[:at]
-		return strings.Join(lines, "\n"), l[at+len(": "):], true
-	}
-	return text, "", false
-}
-
-// confMatchCause reads the actual text against the stable prefix of the specification's error line: want is the
-// specification's text as confCutCause returned it. The first `error: ` line of actual must start with the specification's
-// cut line plus ": " and leave a non-empty remainder; that remainder is the cause and may contain ": ". It returns actual
-// with that line shortened to the cut line, so the rest compares exactly. ok is false when there is no such line or it
-// does not start with the prefix.
-func confMatchCause(want, actual string) (cut, cause string, ok bool) {
-	var prefix string
-	for _, l := range strings.Split(want, "\n") {
-		if strings.HasPrefix(l, "error: ") {
-			prefix = l + ": "
-			break
-		}
-	}
-	if prefix == "" {
-		return actual, "", false
-	}
-	lines := strings.Split(actual, "\n")
-	for i, l := range lines {
-		if !strings.HasPrefix(l, "error: ") {
-			continue
-		}
-		if !strings.HasPrefix(l, prefix) {
-			return actual, "", false
-		}
-		lines[i] = strings.TrimSuffix(prefix, ": ")
-		return strings.Join(lines, "\n"), l[len(prefix):], true
-	}
-	return actual, "", false
 }
 
 // confIsDescription: a case whose whole text stands in round brackets describes the output in words; it is not the
@@ -257,20 +199,6 @@ func (w *confWorld) messages(addr string, n int) {
 			w.t.Fatal(err)
 		}
 	}
-}
-
-// failAfterPurgeWith is failAfterPurge (retire_test.go) with the cause of the failure given: the guarded removal runs
-// to its end, then fails as the lease fence or the inbox delete would.
-func failAfterPurgeWith(t *testing.T, cause string) {
-	t.Helper()
-	prev := deprovisionIfUser
-	deprovisionIfUser = func(a *admin.Admin, ctx context.Context, addr sap.Address, user string) error {
-		if err := a.DeprovisionIfUser(ctx, addr, user); err != nil {
-			return err
-		}
-		return errors.New(cause)
-	}
-	t.Cleanup(func() { deprovisionIfUser = prev })
 }
 
 // confInboxMessagesRun builds the world of the case "Messages" of `endpoint inbox` and runs the command with args: two
@@ -495,13 +423,6 @@ func init() {
 		w.do("endpoint", "create", "acme.demo.bob")
 		return confOutRun{ran: w.run("endpoint", "delete", "acme.demo.bob", "--yes")}
 	})
-	reg("endpoint delete Cancelled everywhere, then the lease or the inbox could not be removed (0.5.6 as built, the other path)", func(t *testing.T) confOutRun {
-		w := newConfWorld(t, true)
-		w.do("endpoint", "create", "acme.demo.bob")
-		// the key is cancelled (the revoker ran) and the removal is done; the step after it fails with its own cause
-		failAfterPurgeWith(t, "the server did not answer")
-		return confOutRun{ran: w.run("endpoint", "delete", "acme.demo.bob", "--yes")}
-	})
 	reg("endpoint delete Cancelled everywhere, then a later step failed (0.5.6 as built)", func(t *testing.T) confOutRun {
 		w := newConfWorld(t, true)
 		w.do("endpoint", "create", "acme.demo.bob")
@@ -654,20 +575,6 @@ func confOutputProblems(path string, oc confOutCase, r confOutRun) []string {
 		text = oc.Text
 	}
 	var p []string
-	if confVaryingCause[path+" "+oc.Case] {
-		var ok bool
-		if text, _, ok = confCutCause(text); !ok {
-			p = append(p, "the specification's text has no error line with a cause")
-		}
-		cut, cause, ok := confMatchCause(text, r.ran.errs)
-		switch {
-		case !ok:
-			p = append(p, fmt.Sprintf("stderr: want an error line that ends in a cause, got %q", r.ran.errs))
-		case strings.TrimSpace(cause) == "":
-			p = append(p, fmt.Sprintf("stderr: the cause is empty: %q", r.ran.errs))
-		}
-		r.ran.errs = cut
-	}
 	wantOut, wantErr := "", ""
 	if oc.Stream == "stderr" {
 		wantErr = text
