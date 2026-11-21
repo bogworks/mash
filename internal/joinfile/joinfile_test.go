@@ -42,3 +42,31 @@ func TestParseRefusesWithoutEchoingTheFile(t *testing.T) {
 		}
 	}
 }
+
+func TestParseRefusesDuplicateKeysAndTrailingBytes(t *testing.T) {
+	const ok = `{"mash_join":1,"address":"a.b.c","servers":["s"],"creds":"SECRET"}`
+	for name, in := range map[string]string{
+		"dup creds":        `{"mash_join":1,"address":"a.b.c","servers":["s"],"creds":"SECRET","creds":"x"}`,
+		"dup address":      `{"mash_join":1,"address":"a.b.c","address":"d.e.f","servers":["s"],"creds":"SECRET"}`,
+		"dup other case":   `{"mash_join":1,"address":"a.b.c","servers":["s"],"creds":"SECRET","Creds":"x"}`,
+		"dup upper first":  `{"mash_join":1,"address":"a.b.c","servers":["s"],"CREDS":"SECRET","creds":"x"}`,
+		"trailing brace":   ok + `}`,
+		"trailing bracket": ok + `]`,
+		"second object":    ok + `{}`,
+		"garbage":          ok + ` SECRET`,
+		"newline garbage":  ok + "\nx",
+	} {
+		_, err := Parse([]byte(in))
+		if !errors.Is(err, ErrNotJoinFile) || strings.Contains(err.Error(), "SECRET") {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	for name, in := range map[string]string{
+		"newline":     ok + "\n",
+		"white space": " \t" + ok + " \r\n\n",
+	} {
+		if _, err := Parse([]byte(in)); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+}

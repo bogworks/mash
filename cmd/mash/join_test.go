@@ -1195,3 +1195,30 @@ func TestJoinReplaceOverANonEndpointWritesCAAndConfig(t *testing.T) {
 		}
 	}
 }
+
+// A seed hidden in a creds value that a later duplicate key overwrites, or a second object after the first, is not a
+// join file, whatever its mode: it is refused as malformed and nothing is installed.
+func TestJoinRefusesDuplicateKeysAndTrailingObjects(t *testing.T) {
+	w := newJoinWorld(t)
+	secret := string(w.m.seed)
+	seeded, _ := json.Marshal(string(w.m.creds))
+	head := `{"mash_join":1,"address":"acme.demo.bob","servers":["tls://myserver:4222"],`
+	for name, body := range map[string]string{
+		"duplicate creds": head + `"creds":` + string(seeded) + `,"creds":"x"}` + "\n",
+		"trailing object": head + `"creds":` + string(seeded) + "}\n{}",
+	} {
+		if err := os.WriteFile("dup.join", []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod("dup.join", 0o644); err != nil {
+			t.Fatal(err)
+		}
+		r := w.run("join", "dup.join")
+		if r.code != 1 || r.out != "" || !strings.HasPrefix(r.errs, "error: dup.join is ") || strings.Count(r.errs, "\n") != 1 || strings.Contains(r.errs, secret) {
+			t.Errorf("%s: %+v", name, r)
+		}
+	}
+	if _, err := os.Stat(w.cfg); err == nil {
+		t.Error("a refused join made the configuration folder")
+	}
+}
