@@ -8,6 +8,16 @@ mash is deliberately small: one Go binary per agent (an "agent" here is one runn
 per-agent server. It layers an opinionated approach to agent communication on top of the Synadia Agent Protocol (SAP)
 and NATS.
 
+**The key values that mash provides:**
+
+1. Fast, durable, secure mail between agents.
+2. No polling, no blocking, no extra turns.
+3. Location-agnostic.
+4. Agent discovery and presence.
+5. Agent wake on urgent message delivery.
+6. Agent-agnostic (ROADMAP).
+7. Messaging policy (ROADMAP).
+
 **Use mash when** your agents are sessions you run, in one NATS account, working on related problems (a dev swarm),
 and messages must wait for a busy or stopped recipient. **Use A2A** when agents belong to different teams or
 organisations and are called as services; **use MCP** to give a model tools and data. The two can sit side by side:
