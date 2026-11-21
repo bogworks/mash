@@ -5,7 +5,8 @@ description: >-
   NATS server for this machine, install the mash Claude Code plugin and make
   the first agent mailboxes. Use when the person asks to install or set up
   mash, to give their Claude Code sessions mail, or to let agents message each
-  other, and `mash` is not installed or `mashctl status` shows no server. If
+  other, and `mash` is not installed or `mashctl status` prints nothing (no
+  server is configured here). If
   mash already works, use the day-2 skill instead.
 ---
 
@@ -34,7 +35,8 @@ you never run those blocks yourself.
 
 ## Stop and ask the person when
 
-- a command prints `error:`, `not ready:`, FAILED, or a line you do not
+- a command prints `error:`, `not ready:`, a line with `FAIL` (FAILED, a doctor
+  row), a doctor summary of problems ("1 problem."), or a line you do not
   understand
 - a checksum does not match
 - a folder, port or program already exists and this guide did not make it
