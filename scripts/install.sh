@@ -20,7 +20,6 @@
 #   MASH_RELEASE_BASE  where the release files are (an https:// address, a
 #                      mirror); needs MASH_VERSION, which names the tag the
 #                      attestation is checked against
-#   MASH_INSTALL_ALLOW_FILE=1  tests only: accept a file:// MASH_RELEASE_BASE
 #
 # Everything is inside main, called on the last line: a download cut short
 # runs nothing.
@@ -156,10 +155,6 @@ main() {
     fi
     case "$BASE" in
     https://*) ;;
-    file://*)
-        [ "${MASH_INSTALL_ALLOW_FILE:-}" = 1 ] || die "the release location must be an https:// address: $BASE"
-        PROTO="=https,file"
-        ;;
     *) die "the release location must be an https:// address: $BASE" ;;
     esac
     echo "Fetching mash and mashctl from the $tag release: $BASE"
