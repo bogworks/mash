@@ -130,7 +130,10 @@ skip the two blocks below.
 
 `BIN` may not exist yet. Debian's default umask is 002, so a folder made with
 `mkdir -p` is writable by its group, and `install.sh` refuses to install
-there: each block makes it first with the right mode. Each block works in a
+there. `install.sh` checks every folder above it too, and `install -d -m`
+sets the mode only on the folders it is given, so each block names `~/.local`
+as well as `BIN` (add any other new folder above a custom `BIN`).
+Each block makes them first with the right mode. Each block works in a
 fresh `mktemp -d` folder: a throwaway folder. After the install you remove
 only that one folder, the `T` the block set (`rm -r "$T"`), never a glob.
 
@@ -143,7 +146,7 @@ BIN="$HOME/.local/bin"; V=2.15.1
 case "$(uname -s)" in Linux) OS=linux ;; Darwin) OS=darwin ;; esac
 case "$(uname -m)" in x86_64) ARCH=amd64 ;; aarch64 | arm64) ARCH=arm64 ;; esac
 SUM="sha256sum -c -"; command -v sha256sum >/dev/null || SUM="shasum -a 256 -c -"
-install -d -m 755 "$BIN"
+install -d -m 755 "$HOME/.local" "$BIN"
 T=$(mktemp -d) && cd "$T"
 curl -fsSLO https://github.com/nats-io/nats-server/releases/download/v$V/nats-server-v$V-$OS-$ARCH.tar.gz
 curl -fsSLO https://github.com/nats-io/nats-server/releases/download/v$V/SHA256SUMS
@@ -161,7 +164,7 @@ BIN="$HOME/.local/bin"; V=0.5.2
 case "$(uname -s)" in Linux) OS=linux ;; Darwin) OS=darwin ;; esac
 case "$(uname -m)" in x86_64) ARCH=amd64 ;; aarch64 | arm64) ARCH=arm64 ;; esac
 SUM="sha256sum -c -"; command -v sha256sum >/dev/null || SUM="shasum -a 256 -c -"
-install -d -m 755 "$BIN"
+install -d -m 755 "$HOME/.local" "$BIN"
 T=$(mktemp -d) && cd "$T"
 curl -fsSLO https://github.com/nats-io/natscli/releases/download/v$V/nats-$V-$OS-$ARCH.zip
 curl -fsSLO https://github.com/nats-io/natscli/releases/download/v$V/SHA256SUMS
