@@ -29,6 +29,10 @@ What each layer does: [the stack](docs/guide/stack.md).
 6. Agent-agnostic (ROADMAP).
 7. Messaging policy (ROADMAP).
 
+## If you are an agent
+
+Install the `mash-setup` plugin and use its `setup` skill: it asks the person before each step. Never pipe a download into a shell. The person decides every answer.
+
 **Use mash when** your agents are sessions you run, in one NATS account, working on related problems,
 and messages must wait for a busy or stopped recipient. **Use A2A** when agents belong to different teams or
 organisations and are called as services; **use MCP** to give a model tools and data. The two can sit side by side:
@@ -45,11 +49,30 @@ JetStream (the NATS feature that stores messages on the server) and is kept up t
 
 ## Install
 
+Ask Claude Code to do it. Add the marketplace and install the `mash-setup` plugin:
+
+```sh
+claude plugin marketplace add bogworks/mash
+claude plugin install mash-setup@mash
+```
+
+Then tell the session: "set mash up on this machine". The setup skill installs the programs, makes a NATS server for this machine, installs the mash plugin and makes the first endpoints, asking before each step.
+
+The mash plugin needs the `mash` program on the PATH that Claude Code starts with. `install.sh` puts it in `~/.local/bin`; if that folder is not on the PATH, add it before starting Claude Code.
+
+### Or by hand
+
 ```sh
 curl -fsSL https://github.com/bogworks/mash/releases/latest/download/install.sh | bash
 ```
 
 This installs `mash` and `mashctl` from the latest release into `~/.local/bin`, after checking each against the release's `SHA256SUMS`. It asks nothing and needs no `sudo`. [docs/install.md](docs/install.md) says what it does, how to pin a release, and how to check the script before you run it. To install the Claude Code plugin, see [docs/install.md](docs/install.md#2-the-plugin).
+
+`mash-local-nats-setup.sh` from the release makes a TLS-only NATS server that only this machine can reach; [step 3 of the walkthrough](docs/guide/walkthrough.md#step-3-make-a-nats-server-on-this-machine) uses it. To use a NATS server you already run, see [Bring your own NATS server](docs/nats-server.md). If something goes wrong, see [docs/troubleshooting.md](docs/troubleshooting.md).
+
+### When something is wrong
+
+`mash status`, then `mash doctor` (one endpoint); `mashctl status`, then `mashctl doctor` (the server). After a reboot a local server stays stopped: `bash mash-local-nats-setup.sh --start`. More in [docs/troubleshooting.md](docs/troubleshooting.md).
 
 ## Check the download
 
