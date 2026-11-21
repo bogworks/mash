@@ -2,6 +2,7 @@ package release
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -29,7 +30,7 @@ func TestIsDocsPath_matchesTheClassifierScript(t *testing.T) {
 	for _, p := range paths {
 		cmd := exec.Command("bash", "../../scripts/ci-changes")
 		cmd.Stdin = strings.NewReader(p + "\n")
-		cmd.Env = []string{"PATH=/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin", "EVENT=pull_request", "HEAD_REF=pr/x/y"}
+		cmd.Env = append(os.Environ(), "EVENT=pull_request", "HEAD_REF=pr/x/y")
 		b, err := cmd.Output()
 		if err != nil {
 			t.Fatalf("scripts/ci-changes %q: %v", p, err)
@@ -74,6 +75,28 @@ func allSkipped() map[string]string {
 	return m
 }
 
+// skippedAt / okAt: one run per required check with ids starting at base, so they are newer than runsFor's ids 1 and 2.
+func runsAt(sha, conclusion string, base int64) []CheckRun {
+	var out []CheckRun
+	for i, n := range RequiredChecks {
+		r := CheckRun{ID: base + int64(i), HeadSHA: sha, Name: n, Status: "completed", Conclusion: conclusion}
+		r.App.Slug = CIApp
+		out = append(out, r)
+	}
+	return out
+}
+func skippedAt(sha string, base int64) []CheckRun { return runsAt(sha, "skipped", base) }
+func okAt(sha string, base int64) []CheckRun      { return runsAt(sha, "success", base) }
+
+// sameIDConflict reports run id 1 of the first required check twice: skipped, then failed.
+func sameIDConflict(sha string) []CheckRun {
+	a := CheckRun{ID: 1, HeadSHA: sha, Name: RequiredChecks[0], Status: "completed", Conclusion: "skipped"}
+	b := a
+	b.Conclusion = "failure"
+	a.App.Slug, b.App.Slug = CIApp, CIApp
+	return append([]CheckRun{a, b}, runsFor(sha, map[string]string{RequiredChecks[1]: "skipped"})...)
+}
+
 func TestCheckCIWalk(t *testing.T) {
 	x, p1, p2 := fp("a"), fp("b"), fp("c")
 	docs := []string{"README.md", "docs/faq.md"}
@@ -103,6 +126,12 @@ func TestCheckCIWalk(t *testing.T) {
 		{"a docs candidate whose tested ancestor failed is refused", []step{{x, docs, runsFor(x, allSkipped())}, {p1, code, runsFor(p1, failed)}}, "on the way back"},
 		{"a failed candidate is refused, not walked past", []step{{x, docs, runsFor(x, failed)}, {p1, code, runsFor(p1, allOK())}}, "failure"},
 		{"a spoofed run on the candidate is refused", []step{{x, docs, spoof(x)}, {p1, code, runsFor(p1, allOK())}}, "comes from app"},
+		{"failed then skipped on the same candidate is refused (a later skipped run does not hide a failure)", []step{{x, docs, append(runsFor(x, failed), skippedAt(x, 10)...)}, {p1, code, runsFor(p1, allOK())}}, "failure"},
+		{"skipped then succeeded on the candidate: the later tested run decides", []step{{x, docs, append(skippedAt(x, 1), okAt(x, 10)...)}}, ""},
+		{"succeeded then a later skipped re-run: the tested run decides", []step{{x, docs, append(runsFor(x, allOK()), skippedAt(x, 10)...)}}, ""},
+		{"failed then a newer success supersedes the failure", []step{{x, docs, append(runsFor(x, failed), okAt(x, 10)...)}}, ""},
+		{"the same run id skipped and failed is refused", []step{{x, docs, sameIDConflict(x)}, {p1, code, runsFor(p1, allOK())}}, "twice with different results"},
+		{"failed then skipped on an ancestor is refused on the way back", []step{{x, docs, runsFor(x, allSkipped())}, {p1, docs, append(runsFor(p1, failed), skippedAt(p1, 10)...)}, {p2, code, runsFor(p2, allOK())}}, "on the way back"},
 		{"an empty path list is code", []step{{x, nil, runsFor(x, allSkipped())}, {p1, code, runsFor(p1, allOK())}}, "no changed paths"},
 		{"a docs commit that touches .github is code", []step{{x, []string{"docs/a.md", ".github/workflows/ci.yml"}, runsFor(x, allSkipped())}, {p1, code, runsFor(p1, allOK())}}, "not docs-only"},
 		{"a docs commit that touches .mergify.yml or scripts is code", []step{{x, []string{"scripts/notes.md"}, runsFor(x, allSkipped())}, {p1, code, runsFor(p1, allOK())}}, "not docs-only"},
