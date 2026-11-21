@@ -71,7 +71,8 @@ What this does: downloads the release, checks it against its checksums and
 puts `mash` and `mashctl` in a folder; if it is not on your PATH, the
 script says so.
 
-What is created: two programs in `~/.local/bin`.
+What is created: two programs in `~/.local/bin`, the default;
+`MASH_INSTALL_DIR` names another folder.
 
 Command: `install.sh` from the release (never piped into a shell: download,
 check against `SHA256SUMS`, read it, run it).
@@ -87,7 +88,8 @@ What this does: makes a local NATS server for mash: TLS, JetStream, sign-in
 with credentials, listening on this machine only, run as you.
 
 What is created: `~/mash-nats` (keys, certificates, the server's files) and
-`mash-setup.yaml`.
+`mash-setup.yaml`. `~/mash-nats` is the default; `--dir` names another folder,
+and the last line the script prints has the path it actually wrote.
 
 Command: `mash-local-nats-setup.sh --owner acme`, downloaded from the same
 release and checked against `SHA256SUMS` like `install.sh`. Then the line it
@@ -95,7 +97,9 @@ prints last, `mashctl init --config <path>/mash-setup.yaml`.
 
 `mashctl init` reads the setup file and keeps its own copy of the keys in
 `~/.config/mash`. That folder is where `mashctl` and `mash` look for their
-configuration and credentials.
+configuration and credentials. It is the default: `MASH_CONFIG_DIR` (an
+absolute path) names another folder, and so does an absolute
+`XDG_CONFIG_HOME`, as `docs/install.md` describes.
 
 <!-- output: server -->
 Output: `[built output: server]`
@@ -450,6 +454,15 @@ Output: `[built output: refused]`
 
 What this does: an endpoint on another machine joins a mesh that someone
 else runs, from a join file. Nothing here needs the server's own files.
+
+Read this first: the server from step 3 can be reached only from the machine
+it runs on (the setup script "makes a server that only this machine can
+reach, with encryption on"), and the join file carries that server's
+address. So a join file from the step 3 server works only on that machine.
+Joining from another machine needs a server that machine can reach, with a
+certificate that covers the address it uses. The specification does not
+describe how to change the step 3 server to do that. [to confirm with the
+planner]
 
 <!-- not run by the AT-3 harness -->
 
