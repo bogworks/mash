@@ -12,7 +12,7 @@ All notable user-facing changes to mash are recorded here. The format follows [K
 
 ### Upgrading
 
-If you have never used mash, there is nothing to move: install `mash` and `mashctl` from the same release, then follow the quick start. Each session starts with `MASH_ENDPOINT` set to its address, and mail that is not verified is refused; set `MASH_ACCEPT_UNVERIFIED=1` if you depend on receiving it. If you used 0.5.0, start a new deployment: 0.5.6 does not read its state. The steps in full, and the table of old and new names, are in the release notes.
+If you have never used mash, there is nothing to move: install `mash` and `mashctl` from the same release, then follow the [quick start](docs/guide/walkthrough.md). Each session starts with `MASH_ENDPOINT` set to its address, and mail that is not verified is refused; set `MASH_ACCEPT_UNVERIFIED=1` if you depend on receiving it. If you used 0.5.0, start a new deployment: 0.5.6 does not read its state. The steps in full, and the table of old and new names, are in the release notes.
 
 ### Added
 
