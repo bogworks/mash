@@ -32,6 +32,43 @@ func TestCheckPluginVersion(t *testing.T) {
 	}
 }
 
+func TestCheckManifestVersion_namesTheFile(t *testing.T) {
+	if err := CheckManifestVersion(SetupPluginManifest, []byte(`{"version":"0.2.2"}`), "0.2.2"); err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range []string{`{"version":"0.1.0"}`, `{}`, `{not json`} {
+		err := CheckManifestVersion(SetupPluginManifest, []byte(m), "0.2.2")
+		if err == nil || !strings.Contains(err.Error(), "mash-setup/.claude-plugin/plugin.json") {
+			t.Errorf("%s: got %v, want an error naming the mash-setup manifest", m, err)
+		}
+	}
+	if err := CheckManifestVersion(SetupPluginManifest, []byte(`{"version":"0.1.0"}`), "0.2.2"); err == nil || !strings.Contains(err.Error(), "says 0.1.0, the release is 0.2.2") {
+		t.Errorf("mismatch: got %v", err)
+	}
+}
+
+// The two plugins ship together at the release version, so their manifests agree (a -pin.N suffix, added to the main
+// plugin after a release, is not a difference).
+func TestRepo_pluginManifestsAgreeOnTheVersion(t *testing.T) {
+	var got []string
+	for _, p := range PluginManifests {
+		b, err := os.ReadFile("../../" + p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var m struct {
+			Version string `json:"version"`
+		}
+		if err := json.Unmarshal(b, &m); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, regexp.MustCompile(`-pin\.[0-9]+$`).ReplaceAllString(m.Version, ""))
+	}
+	if got[0] == "" || got[0] != got[1] {
+		t.Fatalf("%s says %q but %s says %q", PluginManifests[0], got[0], PluginManifests[1], got[1])
+	}
+}
+
 // Claude Code updates an installed plugin only when its manifest version changes, so it must be a real semver.
 func TestRepo_pluginManifestHasASemverVersion(t *testing.T) {
 	b, err := os.ReadFile("../../plugin/.claude-plugin/plugin.json")

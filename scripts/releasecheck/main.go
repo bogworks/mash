@@ -387,13 +387,20 @@ func check(ctx context.Context, o Options) error {
 	r.step("X builds reproducibly and reports its version", reproducible(ctx, o, x))
 	// The plugin manifest, as committed at X, names the release: Claude Code updates an installed plugin only when
 	// its version changes.
-	manifest, merr := git(o.Repo, "show", x+":"+release.PluginManifest)
-	if merr != nil {
-		merr = fmt.Errorf("%s is missing at the candidate: %w", release.PluginManifest, merr)
-	} else {
-		merr = release.CheckPluginVersion([]byte(manifest), o.Version)
+	var merr error
+	for _, path := range release.PluginManifests {
+		manifest, err := git(o.Repo, "show", x+":"+path)
+		if err != nil {
+			err = fmt.Errorf("%s is missing at the candidate: %w", path, err)
+		} else {
+			err = release.CheckManifestVersion(path, []byte(manifest), o.Version)
+		}
+		if err != nil {
+			merr = err
+			break
+		}
 	}
-	r.step("the plugin manifest names the release version", merr)
+	r.step("the plugin manifests name the release version", merr)
 	// Release preparation ran: the change log fragments are assembled and the ADR index is regenerated (ADR 0068).
 	r.step("the change log fragments are assembled", changelogAssembled(o, x))
 	r.step("the ADR index is current", adrIndexFresh(o, x))

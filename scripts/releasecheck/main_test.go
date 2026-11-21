@@ -72,6 +72,7 @@ func newFixture(t *testing.T) *fixture {
 	write(t, repo, "cmd/mash/main.go", "package main\n\nimport (\n\t\"fmt\"\n\n\t\"github.com/bogworks/mash/internal/endpoint\"\n)\n\nvar commit string\n\nfunc main() { fmt.Printf(\"mash v%s (%s)\\n\", endpoint.Version, commit[:7]) }\n")
 	write(t, repo, "cmd/mashctl/main.go", "package main\n\nimport (\n\t\"fmt\"\n\n\t\"github.com/bogworks/mash/internal/endpoint\"\n)\n\nfunc main() { fmt.Printf(\"mashctl %s\\n\", endpoint.Version) }\n")
 	write(t, repo, "plugin/.claude-plugin/plugin.json", "{\"name\": \"mash\", \"version\": \"0.1.0\"}\n")
+	write(t, repo, "mash-setup/.claude-plugin/plugin.json", "{\"name\": \"mash-setup\", \"version\": \"0.1.0\"}\n")
 	write(t, repo, release.PluginHooks, hardenedHooks)
 	write(t, repo, renderContractPath, "contract v1\n")
 	for _, n := range release.ScriptNames() {
@@ -393,6 +394,30 @@ func TestCheck_aPluginManifestAtAnotherVersionIsRefused(t *testing.T) {
 		err := f.check()
 		if err == nil || exitCode(err) != 3 || !strings.Contains(err.Error(), "plugin/.claude-plugin/plugin.json") {
 			t.Errorf("%s: want a refusal naming the manifest, got %v", name, err)
+		}
+	}
+}
+
+func TestCheck_aSetupPluginManifestAtAnotherVersionIsRefused(t *testing.T) {
+	for name, body := range map[string]string{
+		"stale version": "{\"version\": \"0.0.9\"}\n",
+		"no manifest":   "",
+	} {
+		f := newFixture(t)
+		if body == "" {
+			gitT(t, f.repo, "rm", "-q", "mash-setup/.claude-plugin/plugin.json")
+		} else {
+			write(t, f.repo, "mash-setup/.claude-plugin/plugin.json", body)
+		}
+		gitT(t, f.repo, "add", "-A")
+		gitT(t, f.repo, "commit", "-q", "-m", "manifest")
+		gitT(t, f.repo, "push", "-q", "origin", "main")
+		f.o.X = gitT(t, f.repo, "rev-parse", "HEAD")
+		f.setCI(release.RequiredChecks...)
+		f.setCIPages(f.o.X, 100, []map[string]any{ciRun(1, "test (linux)", f.o.X), ciRun(2, "reproducible", f.o.X)})
+		err := f.check()
+		if err == nil || exitCode(err) != 3 || !strings.Contains(err.Error(), "mash-setup/.claude-plugin/plugin.json") {
+			t.Errorf("%s: want a refusal naming the mash-setup manifest, got %v", name, err)
 		}
 	}
 }

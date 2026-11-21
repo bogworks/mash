@@ -122,7 +122,7 @@ The numbered steps are what the command does in each state, and the manual path 
    go run ./scripts/changelog assemble --version X.Y.Z --date YYYY-MM-DD   # fragments and Unreleased into CHANGELOG.md
    go run ./scripts/adrlint index --write                                    # docs/decisions/INDEX.md
    ```
-   and set `plugin/.claude-plugin/plugin.json`'s `version` to `X.Y.Z`. `assemble --dry-run` prints the section first.
+   and set the `version` of both `plugin/.claude-plugin/plugin.json` and `mash-setup/.claude-plugin/plugin.json` to `X.Y.Z`. `assemble --dry-run` prints the section first.
    **Then replace the two placeholders.** A release's notes and its change-log section are the same text, and it opens
    with prose before any list ([ADR 0105](decisions/0105-a-releases-notes-are-its-change-log-section-and-open-with-a-summary-and-an-upgrading-section-and-the-release-gate-refuses-one-that-does-not.md)).
    `assemble` writes, directly under the new `## [X.Y.Z] - date` heading, a `### Summary` whose paragraph starts
@@ -157,8 +157,8 @@ The numbered steps are what the command does in each state, and the manual path 
    release's, and the previous release's plugin (read at its tag) against the candidate's binary too, since Claude Code
    updates an installed plugin only on a version change and users run an older plugin with a newer mash; a previous
    plugin that cannot be run (no `hooks.json`, an unreadable file) is a note, not a refusal.
-   Before tagging v`X.Y.Z`, `plugin/.claude-plugin/plugin.json`'s `version` must be `X.Y.Z`: release-check refuses
-   otherwise, because Claude Code updates an installed plugin only on a version change.
+   Before tagging v`X.Y.Z`, the `version` of both `plugin/.claude-plugin/plugin.json` and
+   `mash-setup/.claude-plugin/plugin.json` must be `X.Y.Z`: release-check refuses otherwise (naming the file), because Claude Code updates an installed plugin only on a version change.
    It refuses a candidate that still has a file under `changelog.d/` other than `README.md` ("changelog fragments were
    not assembled"), and one whose `docs/decisions/INDEX.md` differs from what `adrlint index` generates from the
    records at X ("is stale"); both are read from git at X, not the working tree, and a candidate without
