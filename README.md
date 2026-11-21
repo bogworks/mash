@@ -50,7 +50,7 @@ JetStream (the NATS feature that stores messages on the server) and is kept up t
 ## Get started
 
 mash gives each Claude Code session an inbox. Here two sessions on one
-machine mail each other. You need Linux or macOS and Claude Code. Everything
+machine mail each other. You need Linux or macOS, git and Claude Code. Everything
 is installed in your home folder, with no sudo.
 
 1. Add the setup skill:
