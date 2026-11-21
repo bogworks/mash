@@ -4,6 +4,19 @@ Generated from spec/*.json by go run ./scripts/refgen. Do not edit.
 
 The scripts that install mash and set up a local NATS server.
 
+## mash-migrate-0.5.5.sh
+
+For a machine that ran mash 0.5.5. Run once. It rewrites config.json's two
+renamed keys (url becomes servers, tls_ca becomes ca), keeps the old file
+beside it as a backup, prints one line saying what it changed, and touches
+nothing on the server. Addresses written with slashes and the old variable
+names are not its business: they are refused where they are used, each with
+its own error line.
+
+```sh
+curl -fsSL <release base>/mash-migrate-0.5.5.sh | bash
+```
+
 ## install.sh
 
 Finds the machine's type, downloads mash and mashctl from the same release,
@@ -16,7 +29,7 @@ asks nothing and needs no sudo. If that folder is not on the PATH it says so
 in one line.
 
 ```sh
-curl -fsSL https://github.com/bogworks/mash/releases/latest/download/install.sh | bash
+curl -fsSL <release base>/install.sh | bash
 ```
 
 ## mash-local-nats-setup.sh
@@ -45,7 +58,17 @@ points at the server just removed, and how to set up again (a new
 configuration folder, or moving the old one aside).
 
 ```sh
-curl -fsSL https://github.com/bogworks/mash/releases/latest/download/mash-local-nats-setup.sh | bash
+curl -fsSL <release base>/mash-local-nats-setup.sh | bash
+```
+
+## &lt;release base&gt;
+
+Every address in these commands and in anything the tools print is written
+from the release's own setting, so a fork or a mirror points at itself. In the
+project's own releases it is the address shown here.
+
+```sh
+https://github.com/bogworks/mash/releases/latest/download
 ```
 
 ## For an agent

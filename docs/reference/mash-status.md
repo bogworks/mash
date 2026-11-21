@@ -48,6 +48,26 @@ Stream: stdout. Exit code: 0.
 acme.demo.bob: ready, online
 ```
 
+### With --detail, inside a session
+
+Stream: stdout. Exit code: 0.
+
+```text
+acme.demo.bob: ready, online
+holds endpoint: yes
+hooks:          ran
+storage:        ok
+```
+
+### With --detail, at a shell with no session
+
+Stream: stdout. Exit code: 0.
+
+```text
+acme.demo.bob: ready, offline
+session:        none
+```
+
 ### Not working (the first line on stdout, the hint on stderr)
 
 Stream: stdout. Exit code: 1.
@@ -63,6 +83,34 @@ Stream: stdout. Exit code: 1.
 
 ```text
 acme.demo.bob: not ready: the server did not answer: tls://myserver:4222
+hint: mash doctor
+```
+
+### In a session, when another session holds this endpoint
+
+Stream: stdout. Exit code: 1.
+
+```text
+acme.demo.bob: not ready: another session holds this endpoint
+hint: mash doctor
+```
+
+### In a session that a newer session replaced
+
+Stream: stdout. Exit code: 1.
+
+```text
+acme.demo.bob: not ready: this session lost this endpoint to a newer one
+hint: mash doctor
+```
+
+### In a session that could not take the endpoint
+
+Stream: stdout. Exit code: 1.
+
+```text
+acme.demo.bob: not ready: this session could not take this endpoint:
+  the server did not answer: tls://myserver:4222
 hint: mash doctor
 ```
 
@@ -110,7 +158,7 @@ With `--json` the result is this shape. The values are an example.
 {
   "endpoint": "acme.demo.bob",
   "ready": true,
-  "online": false,
+  "online": true,
   "reason": null
 }
 ```
@@ -121,10 +169,35 @@ With `--json` the result is this shape. The values are an example.
 
 ## Notes
 
-'ready' means: the configuration is readable, the server answers, and it
-accepts this endpoint's credentials. A hint names the first installed address
-in alphabetical order. At a shell every 'hint:' line goes to stderr; an MCP
-tool's text block puts the hint on the line after the result.
+The usual answer is one line, and --json is the same four things as an object.
+--detail gives the fuller answer, for a person who wants it and for a program
+that watches a session; with --json it adds reason_code and session.
+'reason_code' is a fixed word beside the free-text reason, null when ready:
+no_endpoint, endpoints_ambiguous, config_unreadable, creds_missing,
+creds_refused, endpoint_deleted, server_unreachable, server_untrusted,
+server_no_tls, endpoint_held_elsewhere, endpoint_lost, endpoint_not_taken,
+storage_unwritable, unknown. creds_refused covers every way the server refuses
+who we are, a client certificate included; server_untrusted is only for a
+server we do not trust; unknown is for a failure that fits none, and its
+free-text reason then carries what was seen. 'session' is null at a shell and,
+inside a session, says three things about that session: holds_endpoint (true
+or false); hooks, whether the agent host's hooks have delivered mail in this
+session: ran, not_run, suspected, degraded or refused, with the meanings
+0.5.5's delivery line had; and storage, ok or failing. A program proving that
+a newly started session can receive mail reads holds_endpoint true and hooks
+ran. At a shell on the session's own machine, status reads the same state from
+what serve has recorded on disk, so the command and the tool agree. These
+names, in the usual and the fuller object alike, are part of what 0.5.6
+promises not to change. 'ready' means: the configuration is readable, the
+server answers, and it accepts this endpoint's credentials. Inside a session,
+when the configuration, the creds, the server or sign-in fails, that failure
+is what status reports, even if the session also does not hold its endpoint:
+the root cause comes first, and a session and a shell then name the same
+cause. Asked inside a session (the MCP tool), status and doctor report on that
+session itself, not on a fresh connection: 'ready, online' there means this
+session holds the endpoint and its mail will reach it. A hint names the first
+installed address in alphabetical order. At a shell every 'hint:' line goes to
+stderr; an MCP tool's text block puts the hint on the line after the result.
 
 ## What it replaces
 

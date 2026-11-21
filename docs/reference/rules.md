@@ -13,10 +13,22 @@ The rules every mash command and tool follows.
    command already shows; it does print an identifier the person can get
    nowhere else.
 
-3. --verbose adds detail, --wide adds columns. Neither is the default.
-   --verbose (-v) follows an action's line with 'label: value' lines. --wide
-   adds columns to a table and may pass 80 columns. Every table's --wide form
-   is written out in this specification.
+3. Minimal by default, in text and in JSON alike; --detail gives the fuller
+   answer in both. A command's usual answer is the least that answers the
+   question, and --json prints that same least as an object. --detail asks for
+   more: in text, 'label: value' lines after the usual line; with --json, a
+   fuller object that contains the usual one. The fuller object's extra keys
+   are the text's extra labels, in lower case with underscores ('holds
+   endpoint' is holds_endpoint), so the two can be checked against each other.
+   A program that needs the fuller object asks for it, as a person does. An
+   MCP tool takes detail the same way. --wide is the same idea for a table:
+   more columns, and it may pass 80 columns. --detail is one option with one
+   meaning on every command of both tools, so nobody has to learn which
+   commands have it: where a command has nothing more to say, --detail prints
+   what it prints without it. Every --detail and --wide form that does add
+   something is written out in this specification. (This is the command-line
+   standard's rule 24; an earlier pass of this specification called it
+   --verbose.)
 
 4. A list is a plain table. A header row in capitals, two spaces between
    columns, no borders. A repeated leading value may be left blank. --wide
@@ -152,8 +164,20 @@ The rules every mash command and tool follows.
    MASH_INSECURE_PLAINTEXT and the key insecure_plaintext, are refused with an
    error naming the new one.
 
-28. Only a destructive command asks. It asks you to type the address, and
+28. A folder left by mash 0.5.5 is named for what it is. When the
+   configuration folder holds 0.5.5's settings (the keys url and tls_ca),
+   every command of both tools stops with 'error: &lt;folder&gt; holds a mash
+   0.5.5 configuration' and 'hint: &lt;release
+   base&gt;/mash-migrate-0.5.5.sh', exit 1, and changes nothing. It never
+   reads the old keys and never guesses. The migration is a script, run once
+   by the person or by whatever manages the machine: it rewrites the two keys
+   in place, keeps a backup beside the file, and touches nothing on the
+   server. Nothing on the server needs migrating: 0.5.6 reuses the stores and
+   endpoint records 0.5.5 made, and endpoints of the two versions can mail
+   each other on one server (shown by a live run, 2026-11-20).
+
+29. Only a destructive command asks. It asks you to type the address, and
    --yes skips the question.
 
-29. Eighty columns, and color only on a terminal. --wide may be wider.
+30. Eighty columns, and color only on a terminal. --wide may be wider.
    NO_COLOR is honored.

@@ -20,7 +20,7 @@ These options work with every `mashctl` command.
 | `--creds` | `<path>` | The administrator's creds file. | MASH_ADMIN_CREDS, or "admin_creds" |
 | `--ca` | `<path>` | The certificate authority's certificate, when the server uses its own. | MASH_CA, or "ca" |
 | `--config-dir` | `<path>` | The configuration folder. Default: ~/.config/mash. | MASH_CONFIG_DIR |
-| `--verbose`, `-v` |  | After the usual output, print more about what was done, as 'label: value' lines. |  |
+| `--detail` |  | Print the fuller answer: after the usual line, more as 'label: value' lines; with --json, the fuller object. |  |
 | `--json` |  | Print the result as JSON. |  |
 | `--no-color` |  | Never use color. | NO_COLOR |
 | `--help`, `-h` |  | Show help for the command. |  |

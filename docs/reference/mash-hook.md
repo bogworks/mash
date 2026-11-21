@@ -60,10 +60,11 @@ named it prints nothing. When mash is not installed. The plugin's launcher,
 run at session start, prints one line on stdout, so the agent sees it and can
 tell the person: 'mash is not installed: the mash plugin found no mash
 program. Install it: curl -fsSL &lt;release base&gt;/install.sh | bash'.
-&lt;release base&gt; is filled in from the plugin's own release setting, the
-one its launcher already uses to find the program, so a fork or a mirror
-points at itself; in the project's own plugin it is
-https://github.com/bogworks/mash/releases/latest/download. Today nothing is
+&lt;release base&gt; is
+https://github.com/bogworks/mash/releases/latest/download, written into the
+launcher; a fork or a mirror edits that line in its own launcher. It is not
+derived from the plugin's release setting, which names the versioned download
+base and has no install.sh under it (settled 2026-11-21). Today nothing is
 said and the agent simply has no mash tools.
 
 ## What it replaces

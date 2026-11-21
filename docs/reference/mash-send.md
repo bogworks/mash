@@ -67,7 +67,7 @@ Stream: stdout. Exit code: 0.
 Urgent question mail sent (number 43).
 ```
 
-### With --verbose
+### With --detail
 
 Stream: stdout. Exit code: 0.
 

@@ -7,6 +7,12 @@ wrong. Changes nothing.
 
 Release: 0.5.6. Command line equivalent: `mash doctor`.
 
+## Parameters
+
+| Name | Type | Required | Description |
+| --- | --- | --- | --- |
+| `strict` | boolean | no | Exit 1 on a warning too. |
+
 ## Structured result
 
 The structured content of a successful result. The values are an example.
@@ -105,4 +111,16 @@ delivery  skip  needs the server
 refused   ok    no unverified mail was refused
 
 1 problem.
+```
+
+### In a session whose hooks are failing
+
+Stream: stdout. Exit code: 1.
+
+```text
+delivery  FAIL  hooks are not delivering mail to this session;
+                restart the session after reinstalling
+
+1 problem.
+hint: claude plugin install mash@mash
 ```

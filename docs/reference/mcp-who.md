@@ -13,6 +13,9 @@ Release: 0.5.6. Command line equivalent: `mash who`.
 | `prefix` | string | no | Only endpoints under this owner (acme) or this owner and group (acme.demo), or the one endpoint with this full address. acme.\* and acme.demo.\* are accepted and mean the same as acme and acme.demo. |
 | `online` | boolean | no | Only endpoints that are online. |
 | `offline` | boolean | no | Only endpoints that are offline. |
+| `role` | string | no | Only endpoints whose role contains this text. |
+| `capability` | array of string | no | Only endpoints that have this capability. May be given more than once; all must be present. |
+| `label` | array of string | no | Only endpoints with this label, as name or name=value. May be given more than once; all must match. |
 | `wide` | boolean | no | More columns: role, host and description, where recorded. May pass 80 columns. |
 
 ## Structured result

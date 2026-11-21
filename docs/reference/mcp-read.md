@@ -57,3 +57,12 @@ Stream: stderr. Exit code: 1.
 error: acme.demo.alice has no message 9
 hint: mash inbox
 ```
+
+### A message that was refused
+
+Stream: stderr. Exit code: 1.
+
+```text
+error: message 12 was refused: it was not verified
+hint: mash doctor
+```

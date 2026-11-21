@@ -13,12 +13,19 @@ Release: 0.5.6. Group: Everyday.
 mash doctor [options]
 ```
 
+## Options
+
+| Option | Argument | Description |
+| --- | --- | --- |
+| `--strict` |  | Exit 1 on a warning too. |
+
 The global options of `mash` also apply: see [mash](mash.md#global-options).
 
 ## Examples
 
 ```text
 mash doctor
+mash doctor --strict
 ```
 
 ## Exit codes
@@ -92,6 +99,43 @@ Stream: stdout. Exit code: 0.
 
 ```text
 delivery  skip  needs a session
+```
+
+### In a session that does not hold its endpoint
+
+Stream: stdout. Exit code: 0.
+
+```text
+delivery  FAIL  another session holds this endpoint
+```
+
+### In a session whose hooks have not delivered yet
+
+Stream: stdout. Exit code: 0.
+
+```text
+delivery  warn  hooks have not run in this session yet; they run with
+                the first prompt or tool call
+```
+
+### In a session whose hooks are failing
+
+Stream: stdout. Exit code: 1.
+
+```text
+delivery  FAIL  hooks are not delivering mail to this session;
+                restart the session after reinstalling
+
+1 problem.
+hint: claude plugin install mash@mash
+```
+
+### In a session that a newer session replaced
+
+Stream: stdout. Exit code: 0.
+
+```text
+delivery  FAIL  this session lost this endpoint to a newer one
 ```
 
 ### The server's certificate is not trusted
@@ -172,9 +216,16 @@ Every row is always printed, and 'checks' in the JSON always lists every row,
 each with a state of ok, warn, fail or skip; a row is skipped when an earlier
 failure means it cannot be run. The delivery row says whether mail that
 arrives can be stored on this machine for the session; it is checked only
-inside a session and skipped at a shell. The refused count is kept on this
-machine, so its row shows even when the server is down. The 'refused' row
-counts unverified mail that was refused (see mash serve).
+inside a session and skipped at a shell. In a session that has just started,
+the row is 'warn' until the first prompt or tool call, so 'doctor --strict'
+exits 1 until then: a program that waits for a session to be ready repeats the
+check. The 'hooks not run yet' warning has no hint, because no command fixes
+it. Whether storage is failing is decided by whoever asks, by trying the
+folder, not from a record kept in it. An agent host that has no hooks would
+warn for as long as it runs; only Claude Code is in scope for 0.5.6. The
+refused count is kept on this machine, so its row shows even when the server
+is down. The 'refused' row counts unverified mail that was refused (see mash
+serve).
 
 ## What it replaces
 

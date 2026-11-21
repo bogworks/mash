@@ -105,6 +105,7 @@ With `--json` the result is this shape. The values are an example.
 {
   "address": "acme.demo.bob",
   "installed_here": true,
+  "creds": "/home/ada/.config/mash/acme.demo.bob.creds",
   "join_file": null
 }
 ```

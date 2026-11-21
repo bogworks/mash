@@ -18,6 +18,9 @@ mash who [prefix] [options]
 | --- | --- | --- |
 | `--online` |  | Only endpoints that are online. |
 | `--offline` |  | Only endpoints that are offline. |
+| `--role` | `<text>` | Only endpoints whose role contains this text. |
+| `--capability` | `<name>` | Only endpoints that have this capability. May be given more than once; all must be present. |
+| `--label` | `<label>` | Only endpoints with this label, as name or name=value. May be given more than once; all must match. |
 | `--wide` |  | More columns: role, host and description, where recorded. May pass 80 columns. |
 
 The global options of `mash` also apply: see [mash](mash.md#global-options).
@@ -33,6 +36,7 @@ The global options of `mash` also apply: see [mash](mash.md#global-options).
 ```text
 mash who
 mash who acme.demo --online
+mash who --capability review --online
 ```
 
 ## Exit codes
@@ -140,10 +144,16 @@ A prefix follows the address the way a domain name does: acme is everything
 under acme, acme.demo is everything under acme.demo, and acme.demo.bob is that
 one endpoint, never acme.demo.bobby. There is no other pattern matching:
 capitals are refused, acme.demo.bob.\* is refused, and an empty prefix means
-none. The filters by role, capability, label and free text that today's
-command and tool have are gone in 0.5.6; the JSON and the MCP tool's
-structured result carry role, host, description, capability and labels for
-every endpoint, so a caller can still choose by them.
+none. The filters by role, capability and label stay, as --role, --capability
+and --label, in the command and the tool: an agent uses them to find a peer by
+what it does. Only the free-text match and the alternative output modes are
+gone. The JSON and the MCP tool's structured result carry role, host,
+description, capability and labels for every endpoint. An address is always
+owner.group.name, with dots. who says whether an endpoint is online, not
+whether mail is reaching its session: that is known only to the session
+itself, and is in its own status ('session'). A per-endpoint delivery claim
+visible to peers would be new data that mash 0.5.5 never had; it is left for a
+later release.
 
 ## What it replaces
 

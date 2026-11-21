@@ -21,7 +21,7 @@ These options work with every `mash` command.
 | `--server` | `<url>` | The server address. May be given more than once. | MASH_SERVER (commas between several), or "servers" |
 | `--ca` | `<path>` | The certificate authority's certificate, when the server uses its own. | MASH_CA, or "ca" |
 | `--config-dir` | `<path>` | The configuration folder. Default: ~/.config/mash. | MASH_CONFIG_DIR |
-| `--verbose`, `-v` |  | After the usual output, print more about what was done, as 'label: value' lines. |  |
+| `--detail` |  | Print the fuller answer: after the usual line, more as 'label: value' lines; with --json, the fuller object. |  |
 | `--json` |  | Print the result as JSON: the same object the matching MCP tool returns. |  |
 | `--no-color` |  | Never use color. Color is used only on a terminal, and NO_COLOR is honored. | NO_COLOR |
 | `--help`, `-h` |  | Show help for the command. |  |

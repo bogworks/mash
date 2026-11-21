@@ -7,6 +7,12 @@ online.
 
 Release: 0.5.6. Command line equivalent: `mash status`.
 
+## Parameters
+
+| Name | Type | Required | Description |
+| --- | --- | --- | --- |
+| `detail` | boolean | no | Return the fuller object. Default false: the usual, minimal one. |
+
 ## Structured result
 
 The structured content of a successful result. The values are an example.
@@ -15,7 +21,7 @@ The structured content of a successful result. The values are an example.
 {
   "endpoint": "acme.demo.bob",
   "ready": true,
-  "online": false,
+  "online": true,
   "reason": null
 }
 ```
@@ -47,6 +53,34 @@ Stream: stdout. Exit code: 1.
 
 ```text
 acme.demo.bob: not ready: the server did not answer: tls://myserver:4222
+hint: mash doctor
+```
+
+### In a session, when another session holds this endpoint
+
+Stream: stdout. Exit code: 1.
+
+```text
+acme.demo.bob: not ready: another session holds this endpoint
+hint: mash doctor
+```
+
+### In a session that a newer session replaced
+
+Stream: stdout. Exit code: 1.
+
+```text
+acme.demo.bob: not ready: this session lost this endpoint to a newer one
+hint: mash doctor
+```
+
+### In a session that could not take the endpoint
+
+Stream: stdout. Exit code: 1.
+
+```text
+acme.demo.bob: not ready: this session could not take this endpoint:
+  the server did not answer: tls://myserver:4222
 hint: mash doctor
 ```
 

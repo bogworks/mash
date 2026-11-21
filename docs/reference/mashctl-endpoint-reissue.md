@@ -54,7 +54,7 @@ Reissued credentials for acme.demo.bob
 Join file: acme.demo.bob.join
 ```
 
-### With --verbose
+### With --detail
 
 Stream: stdout. Exit code: 0.
 
