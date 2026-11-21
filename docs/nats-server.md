@@ -156,7 +156,7 @@ account_key: /etc/mash/account.nk
 
 - `servers` is a list of addresses, with no user name or password in them.
 - `ca` is optional; leave it out when the server's certificate chains to your system roots.
-- `owner` is your first owner: lower-case letters, digits and single hyphens, starting with a letter, up to 48 characters.
+- `owner` is your first owner: lower-case letters, digits and single hyphens, starting with a letter, up to 32 characters. (`init`'s message says 48; see [#1172](https://github.com/bogworks/mash/issues/1172).)
 - Relative paths are read from the folder the setup file is in.
 - A value that looks like a key (a seed or PEM text) instead of a path is refused.
 
