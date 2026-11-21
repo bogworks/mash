@@ -22,7 +22,7 @@ The structured content of a successful result. The values are an example.
 
 ### Version
 
-Stream: stdout. Exit code: 0.
+The call returns this text.
 
 ```text
 mash v0.5.6 (3f9a41c)

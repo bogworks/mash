@@ -67,7 +67,7 @@ The structured content of a successful result. The values are an example.
 
 ### All well
 
-Stream: stdout. Exit code: 0.
+The call returns this text.
 
 ```text
 config    ok
@@ -84,7 +84,7 @@ No problems.
 
 ### A problem and a warning
 
-Stream: stdout. Exit code: 1.
+The call returns this text with `isError` set.
 
 ```text
 config    ok
@@ -100,7 +100,7 @@ hint: ask whoever runs your mesh to run: mashctl endpoint reissue acme.demo.bob
 
 ### A check that could not run
 
-Stream: stdout. Exit code: 1.
+The call returns this text with `isError` set.
 
 ```text
 config    ok
@@ -115,7 +115,7 @@ refused   ok    no unverified mail was refused
 
 ### In a session whose hooks are failing
 
-Stream: stdout. Exit code: 1.
+The call returns this text with `isError` set.
 
 ```text
 delivery  FAIL  hooks are not delivering mail to this session;

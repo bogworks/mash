@@ -155,6 +155,21 @@ With `--json` the result is this shape. The values are an example.
 }
 ```
 
+## JSON with --detail
+
+With `--json --detail` the result is this fuller shape, which contains the
+usual one. The values are an example.
+
+```json
+{
+  "endpoint": "acme.demo.bob",
+  "servers": [
+    "tls://myserver:4222"
+  ],
+  "creds": "/home/ada/.config/mash/acme.demo.bob.creds"
+}
+```
+
 ## MCP tool
 
 None. Setup. An agent does not hold credentials-making commands.

@@ -34,7 +34,7 @@ The structured content of a successful result. The values are an example.
 
 ### A message
 
-Stream: stdout. Exit code: 0.
+The call returns this text.
 
 ```text
 number:   2
@@ -51,7 +51,7 @@ urgent:   yes
 
 ### No such message
 
-Stream: stderr. Exit code: 1.
+The call returns this text with `isError` set.
 
 ```text
 error: acme.demo.alice has no message 9
@@ -60,7 +60,7 @@ hint: mash inbox
 
 ### A message that was refused
 
-Stream: stderr. Exit code: 1.
+The call returns this text with `isError` set.
 
 ```text
 error: message 12 was refused: it was not verified

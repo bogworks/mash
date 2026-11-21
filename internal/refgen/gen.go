@@ -85,15 +85,16 @@ type paramSpec struct {
 }
 
 type mcpTool struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description"`
-	Command     string          `json:"command"`
-	Release     string          `json:"release"`
-	Params      []paramSpec     `json:"params"`
-	Structured  json.RawMessage `json:"structured"`
-	Text        []outCase       `json:"text"`
-	Errors      []outCase       `json:"errors"`
-	Note        string          `json:"note"`
+	Name             string          `json:"name"`
+	Description      string          `json:"description"`
+	Command          string          `json:"command"`
+	Release          string          `json:"release"`
+	Params           []paramSpec     `json:"params"`
+	Structured       json.RawMessage `json:"structured"`
+	StructuredDetail json.RawMessage `json:"structured_detail"`
+	Text             []outCase       `json:"text"`
+	Errors           []outCase       `json:"errors"`
+	Note             string          `json:"note"`
 }
 
 type mcpFile struct {
@@ -633,6 +634,20 @@ func (g *gen) cases(b *bld, lvl int, cs []outCase) {
 	}
 }
 
+// mcpCases writes the cases of an MCP tool result: the text of the result
+// and whether isError is set. A tool result has no stream and no exit code.
+func (g *gen) mcpCases(b *bld, lvl int, cs []outCase, isError bool) {
+	for _, c := range cs {
+		b.heading(lvl, esc(c.Case))
+		if isError {
+			b.para("The call returns this text with " + code("isError") + " set.")
+		} else {
+			b.para("The call returns this text.")
+		}
+		b.fence("text", c.Text)
+	}
+}
+
 // body writes the sections of one command, with headings at level lvl.
 func (g *gen) body(b *bld, n *node, lvl int) {
 	b.para(esc(n.Description))
@@ -681,6 +696,11 @@ func (g *gen) body(b *bld, n *node, lvl int) {
 	if raw, ok := n.meta("x-json"); ok {
 		b.heading(lvl, "JSON")
 		b.para("With " + code("--json") + " the result is this shape. The values are an example.")
+		b.fence("json", jsonIndent(raw))
+	}
+	if raw, ok := n.meta("x-json-detail"); ok {
+		b.heading(lvl, "JSON with --detail")
+		b.para("With " + code("--json --detail") + " the result is this fuller shape, which contains the usual one. The values are an example.")
 		b.fence("json", jsonIndent(raw))
 	}
 	if raw, ok := n.meta("x-mcp"); ok {
@@ -898,13 +918,18 @@ func (g *gen) mcpBody(b *bld, t mcpTool, lvl int) {
 		b.para("The structured content of a successful result. The values are an example.")
 		b.fence("json", jsonIndent(t.Structured))
 	}
+	if d := bytes.TrimSpace(t.StructuredDetail); len(d) > 0 && string(d) != "null" {
+		b.heading(lvl, "Structured result with --detail")
+		b.para("With the " + code("detail") + " parameter set, the structured content is this fuller shape, which contains the usual one. The values are an example.")
+		b.fence("json", jsonIndent(t.StructuredDetail))
+	}
 	if len(t.Text) > 0 {
 		b.heading(lvl, "Text result")
-		g.cases(b, lvl+1, t.Text)
+		g.mcpCases(b, lvl+1, t.Text, false)
 	}
 	if len(t.Errors) > 0 {
 		b.heading(lvl, "Errors")
-		g.cases(b, lvl+1, t.Errors)
+		g.mcpCases(b, lvl+1, t.Errors, true)
 	}
 	if t.Note != "" {
 		b.heading(lvl, "Notes")

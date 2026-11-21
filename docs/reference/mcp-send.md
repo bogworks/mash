@@ -46,7 +46,7 @@ The structured content of a successful result. The values are an example.
 
 ### Sent
 
-Stream: stdout. Exit code: 0.
+The call returns this text.
 
 ```text
 Mail sent (number 42).
@@ -56,7 +56,7 @@ Mail sent (number 42).
 
 ### An address in another form
 
-Stream: stderr. Exit code: 2.
+The call returns this text with `isError` set.
 
 ```text
 error: acme_demo_alice is not an address; write it as acme.demo.alice
@@ -65,7 +65,7 @@ hint: mash send --help
 
 ### Nothing arrives on standard input
 
-Stream: stderr. Exit code: 1.
+The call returns this text with `isError` set.
 
 ```text
 error: no message text arrived on standard input
@@ -73,7 +73,7 @@ error: no message text arrived on standard input
 
 ### No such endpoint
 
-Stream: stderr. Exit code: 1.
+The call returns this text with `isError` set.
 
 ```text
 error: no endpoint has the address acme.demo.alise
@@ -82,7 +82,7 @@ hint: mash who
 
 ### Not signed in
 
-Stream: stderr. Exit code: 1.
+The call returns this text with `isError` set.
 
 ```text
 error: acme.demo.bob cannot sign in: the server refused its credentials

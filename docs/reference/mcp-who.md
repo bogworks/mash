@@ -46,7 +46,7 @@ The structured content of a successful result. The values are an example.
 
 ### Endpoints
 
-Stream: stdout. Exit code: 0.
+The call returns this text.
 
 ```text
 ADDRESS          STATE
@@ -58,7 +58,7 @@ acme.demo.bob    offline
 
 ### A prefix that is not part of an address
 
-Stream: stderr. Exit code: 2.
+The call returns this text with `isError` set.
 
 ```text
 error: Acme.Demo is not an owner, an owner.group or an address

@@ -49,7 +49,7 @@ The structured content of a successful result. The values are an example.
 
 ### Messages
 
-Stream: stdout. Exit code: 0.
+The call returns this text.
 
 ```text
 2 messages for acme.demo.alice, 2 new, 1 urgent.
