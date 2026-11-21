@@ -1,6 +1,6 @@
 name: ci
 # A push to main skips the heavy jobs when the paths it added are docs-only (scripts/ci-changes; the merge queue's fast-forward of
-# a docs-only batch is one): the release gate (internal/release CheckCIWalkBack) judges such a head by the newest commit below
+# a docs-only batch is one): the release gate (internal/release CheckCIWalk) judges such a head by the newest commit below
 # it whose tests ran, provided every commit between is docs-only. Every job runs on a
 # self-hosted runner picked by literal labels: [self-hosted, rh-linux] or [self-hosted, rh-macos] (ADR 0079). A pull
 # request from a fork runs on them too; the repository holds an outside contributor's run for a person's approval. Every pull request runs, so it always gets the pr-check that its review waits for (scripts/review-pr); a docs-only one skips the heavy jobs (test, test-macos, reproducible, conformance) at job level, so every check name still reports, and runs the cheap ones (changes, adr-numbers, pr-check). The review watcher waits only on pr-check, so conformance, which gates nothing, is skipped on docs-only too. What counts as docs-only is in scripts/ci-changes; docs/branch-protection.md states the rule. The macOS test job is advisory (ADR 0079).

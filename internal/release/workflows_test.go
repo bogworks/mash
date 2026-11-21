@@ -1336,7 +1336,7 @@ func TestCI_prCheckGatesOnEveryRequiredJob(t *testing.T) {
 		t.Errorf("test-macos must run under the same condition as test, on rh-macos, and never with continue-on-error (it would hide a failure): %+v", mj)
 	}
 	// A push to main skips the heavy jobs exactly when changes says its added paths are docs-only (code=false): the release gate
-	// (internal/release/checks.go, CheckCIWalkBack) judges such a head by the newest tested commit under it.
+	// (internal/release/checks.go, CheckCIWalk) judges such a head by the newest tested commit under it.
 	if tj := w.Jobs["test"]; strings.Contains(tj.If, "github.event_name") || !strings.Contains(tj.If, "needs.changes.outputs.code != 'false'") {
 		t.Errorf("the test job must skip only on the changes output (code=false), on a push as on a pull request: if %q", tj.If)
 	}
