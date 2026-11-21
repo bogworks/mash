@@ -4,10 +4,13 @@ Status: draft for review. Text only; nothing is recorded. It is recorded later,
 on the published 0.5.6 release, and the script and then the video are approved
 before anything is published.
 
-It follows [docs/guide/walkthrough.md](../guide/walkthrough.md), steps 1 to 10,
-and uses its commands. Alice and Bob are the two endpoints. Total: about 4
-minutes 40 seconds, under 5 minutes; waits for the server or a session to
-answer are cut in the edit, not shown.
+It follows [docs/guide/walkthrough.md](../guide/walkthrough.md), its Quick
+start and steps 1 to 10, and uses its commands. Nothing on screen uses `sudo`,
+a package manager, a system service or `curl | bash`: everything is installed
+as the local user. Alice and Bob are the two endpoints. Total: about 5 minutes
+25 seconds for the default flow, and 50 seconds more if the optional scene 9
+is included; waits for the server or a session to answer are cut in the edit,
+not shown.
 
 How to read a scene:
 
@@ -20,6 +23,8 @@ How to read a scene:
 
 What mash is, for the narrator: a Claude Code plugin that gives a session an
 inbox and an address. It does not run sessions; the person starts each one.
+Mail reaches a session with its next prompt or tool call. An idle session is
+not woken, unless the person has chosen the optional wake setting (scene 9).
 
 ---
 
@@ -29,16 +34,69 @@ Type: nothing; a title card, then the terminal.
 
 Say: "mash lets Claude Code sessions send each other mail. Each session has an
 address and an inbox that keeps its mail until it is read, even while the
-session is off. In the next few minutes: install it, make two endpoints, Alice
-and Bob, and have two Claude Code sessions mail each other."
+session is off. In the next few minutes: install it, the easy way and then by
+hand, make two endpoints, Alice and Bob, and have two Claude Code sessions mail
+each other. Nothing here needs sudo."
 
 Result: `[recorded output]` (title card only).
 
-## Scene 2: check the download, then install (about 0:40) (guide steps 1 and 2)
+## Scene 2: install, with an agent or by hand (about 1:15) (guide Quick start and steps 1 and 2)
 
 Say: "We use the names acme, demo, alice and bob. Their addresses are written
-owner, group, name: acme.demo.bob. First, the install. We do not pipe a
-download into a shell. We download the script, check it, then run it."
+owner, group, name: acme.demo.bob. First, the install. The easy way is to let
+Claude Code do it. Everything is installed as you, in your home folder: no
+sudo."
+
+Type:
+
+```
+claude plugin marketplace add bogworks/mash
+```
+
+```
+claude plugin install mash-setup@mash
+```
+
+Say: "Then ask a session to set mash up. It asks before each step."
+
+Type, in a Claude Code session:
+
+```
+> set mash up on this machine
+```
+
+Result: `[recorded output]` (the session asks before each step; cut the waits in
+the edit).
+
+Say: "If you want to see each step by hand, here it is. We never pipe a
+download into a shell. We download, check, then run. First the two NATS
+programs, from their GitHub releases, each checked against its checksums and
+put in your own bin folder. This block is pasted whole; it was checked before
+the take."
+
+Type (one pasted block):
+
+```
+cd "$(mktemp -d)"
+install -d -m 755 ~/.local/bin
+OS=$(uname -s | tr A-Z a-z); ARCH=$(uname -m); case $ARCH in x86_64) ARCH=amd64;; aarch64|arm64) ARCH=arm64;; esac
+V=v2.15.3; B=https://github.com/nats-io/nats-server/releases/download/$V
+curl -fsSLO $B/nats-server-$V-$OS-$ARCH.tar.gz -O $B/SHA256SUMS
+grep " nats-server-$V-$OS-$ARCH.tar.gz\$" SHA256SUMS | sha256sum -c -
+tar -xzf nats-server-$V-$OS-$ARCH.tar.gz --strip-components=1 -C ~/.local/bin nats-server-$V-$OS-$ARCH/nats-server
+N=0.5.2; B=https://github.com/nats-io/natscli/releases/download/v$N
+curl -fsSLO $B/nats-$N-$OS-$ARCH.zip -O $B/SHA256SUMS
+grep " nats-$N-$OS-$ARCH.zip\$" SHA256SUMS | sha256sum -c -
+unzip -j -o nats-$N-$OS-$ARCH.zip '*/nats' -d ~/.local/bin
+```
+
+Say, over the block, no more than 10 seconds: "It makes your own bin folder,
+downloads the NATS server and its command, checks each against the published
+checksums, and unpacks them there."
+
+Result: `[recorded output]` (both checksum lines report OK).
+
+Say: "Now mash itself."
 
 Type:
 
@@ -182,13 +240,10 @@ Result: `[recorded output]` (both addresses, state offline).
 ## Scene 5: add the plugin to Claude Code (about 0:15) (guide step 7)
 
 Say: "The mash plugin gives a Claude Code session its inbox. It does not run
-the session; you start it."
+the session; you start it. The marketplace was added in scene 2. If you used
+the setup route, this is already done; here it is by hand."
 
 Type:
-
-```
-claude plugin marketplace add bogworks/mash
-```
 
 ```
 claude plugin install mash@mash
@@ -203,24 +258,23 @@ version` printed).
 
 ## Scene 6: two sessions exchange mail (about 0:55) (guide step 7)
 
-Say: "Two terminals. Each session starts as its own endpoint. The flag is
-Claude Code's own: it is how a plugin's wake-up channel is switched on, and
-Claude Code asks you to confirm it. Without it mail still arrives, with the
-next prompt."
+Say: "Two terminals. Each session starts as its own endpoint. Mail arrives
+with the session's next prompt or tool call. An idle session is not woken; we
+come back to that at the end."
 
 Type, terminal 1 (Bob):
 
 ```
-MASH_ENDPOINT=acme.demo.bob claude --dangerously-load-development-channels plugin:mash@mash
+MASH_ENDPOINT=acme.demo.bob claude
 ```
 
 Type, terminal 2 (Alice):
 
 ```
-MASH_ENDPOINT=acme.demo.alice claude --dangerously-load-development-channels plugin:mash@mash
+MASH_ENDPOINT=acme.demo.alice claude
 ```
 
-Result: `[recorded output]` (both sessions open after the confirmation).
+Result: `[recorded output]` (both sessions open).
 
 Say: "Ask a session for its status, from inside."
 
@@ -232,7 +286,8 @@ Type, in Bob's session:
 
 Result: `[recorded output]` (the guide shows `acme.demo.bob: ready, online`).
 
-Say: "Now Bob sends Alice a note, in plain words."
+Say: "Now Bob sends Alice a note, in plain words. Alice's session shows it
+with her next prompt, so she asks for her mail."
 
 Type, in Bob's session:
 
@@ -240,12 +295,19 @@ Type, in Bob's session:
 > Send acme.demo.alice a note: lunch at noon?
 ```
 
-Result: `[recorded output]` (Bob's session calls `send`; Alice's session shows
-mail from `acme.demo.bob`, labelled `[verified]`: that label means Bob's own
-key signed it).
+Result: `[recorded output]` (Bob's session calls `send`).
+
+Type, in Alice's session:
+
+```
+> Do I have any mail?
+```
+
+Result: `[recorded output]` (Alice's session shows mail from `acme.demo.bob`,
+labelled `[verified]`: that label means Bob's own key signed it).
 
 Say: "Alice's session shows it as mail from Bob, verified. Alice answers, and
-Bob sees the answer."
+Bob sees the answer with his next prompt."
 
 Type, in Alice's session:
 
@@ -253,8 +315,15 @@ Type, in Alice's session:
 > Reply to acme.demo.bob: yes, noon works.
 ```
 
-Result: `[recorded output]` (Alice's session calls `send`; Bob's session shows
-the answer).
+Result: `[recorded output]` (Alice's session calls `send`).
+
+Type, in Bob's session:
+
+```
+> Do I have any mail?
+```
+
+Result: `[recorded output]` (Bob's session shows the answer from Alice).
 
 ## Scene 7: mail waits for a session that is stopped (about 0:35) (guide steps 6 and 7)
 
@@ -296,7 +365,7 @@ Say: "Now Alice's session starts again, and the note is there."
 Type, terminal 2:
 
 ```
-MASH_ENDPOINT=acme.demo.alice claude --dangerously-load-development-channels plugin:mash@mash
+MASH_ENDPOINT=acme.demo.alice claude
 ```
 
 Type, in Alice's session:
@@ -308,25 +377,7 @@ Type, in Alice's session:
 Result: `[recorded output]` (Alice's session shows Bob's waiting note,
 `[verified]`).
 
-## Scene 8: an urgent message wakes an idle session (about 0:35) (guide steps 6 and 7)
-
-Say: "Alice's session is idle: nothing is being typed in it. An ordinary note
-waits for her next turn or the wake-up. Mail marked urgent does not wait: it
-wakes the idle session at once. Use it only for what cannot wait."
-
-Type, in Bob's session:
-
-```
-> Send acme.demo.alice an urgent question: is the build green?
-```
-
-Result: `[recorded output]` (Alice's idle session starts a turn by itself, led
-by a line that says the mail is urgent, and shows the message from Bob).
-
-Say: "Alice's session was woken by the mail. The mail arrives through the
-plugin's hook, and mash shows who sent it and that it is verified."
-
-## Scene 9: who is online now (about 0:10) (guide steps 5 and 7)
+## Scene 8: who is online now (about 0:10) (guide steps 5 and 7)
 
 Say: "With both sessions open, both endpoints are online."
 
@@ -337,6 +388,48 @@ MASH_ENDPOINT=acme.demo.bob mash who
 ```
 
 Result: `[recorded output]` (both addresses, state online).
+
+## Scene 9: Optional: wake an idle session (about 0:50) (guide: Optional: wake an idle session)
+
+Include this scene only if the owner decides to (see "Before recording").
+
+Say: "This is optional, and it is your choice. Until now, an idle session
+only saw mail when you typed a prompt. To wake an idle session the moment mail
+arrives, start it with Claude Code's own research-preview flag,
+dangerously-load-development-channels. It is Claude Code's flag, not mash's. It
+lets a development channel plugin push a message into a session without being
+on Claude Code's approved-channels list. Claude Code asks you to confirm it at
+each launch. Whether to use it is up to you."
+
+Type, in Alice's session, to close it:
+
+```
+> /exit
+```
+
+Type, terminal 2:
+
+```
+MASH_ENDPOINT=acme.demo.alice claude --dangerously-load-development-channels plugin:mash@mash
+```
+
+Result: `[recorded output]` (the session opens after the confirmation).
+
+Say: "Alice's session is idle: nothing is being typed in it. Mail marked urgent
+does not wait for her next prompt: it wakes the idle session. Use it only for
+what cannot wait."
+
+Type, in Bob's session:
+
+```
+> Send acme.demo.alice an urgent question: is the build green?
+```
+
+Result: `[recorded output]` (Alice's idle session starts a turn by itself, led
+by a line that says the mail is urgent, and shows the message from Bob).
+
+Say: "Alice's session was woken by the mail, and mash shows who sent it and
+that it is verified."
 
 ## Scene 10: take an endpoint away (about 0:25) (guide step 9)
 
@@ -377,7 +470,10 @@ support it. Interoperating with other agents that use the Synadia Agent
 Protocol, beyond the address form: not shown. And nothing from the 0.6.0 list.
 We also ran on one machine. Two machines need a NATS server both can reach,
 which you run yourself in 0.5.6; step 10 of the guide explains it. Everything
-here is written out, with each command, in the guide."
+here is written out, with each command, in the guide. Where everything lives:
+mash and the NATS programs in ~/.local/bin, each endpoint's key in
+~/.config/mash, the server and its mail in ~/mash-nats. To remove it all, see
+docs/install.md, under Uninstall."
 
 Type: nothing; the closing card.
 
@@ -399,6 +495,7 @@ Result: `[recorded output]` (card only).
 - Synadia Cloud (not supported in 0.5.6; see [docs/synadia.md](../synadia.md)).
 - Interoperating with Synadia Agent Protocol (SAP) agents beyond the address form.
 - Anything on the 0.6.0 list, including a script option for two machines.
+- Waking an idle session, unless the optional scene 9 is included.
 - Reading mail as JSON for scripts (guide step 8), and the day-2 server
   commands (guide step 11).
 
@@ -416,8 +513,13 @@ Result: `[recorded output]` (card only).
       join file contents. Do not `cat` a join file.
 - [ ] No personal paths or names: a throwaway user and host name, Alice and
       Bob only.
-- [ ] Rehearse the session start once, so the confirmation for the channel
-      flag is not a surprise.
+- [ ] Scene 9 (wake an idle session) is optional. Including it is the
+      owner's decision, because it shows a Claude Code research-preview flag.
+      If it is included, rehearse its session start once, so the
+      confirmation Claude Code asks for is not a surprise. If not, cut it and
+      scene 10 follows scene 8 (renumber in the edit).
+- [ ] `claude plugin marketplace add bogworks/mash` has not been run before the
+      take, so scene 2 shows it. Nothing on screen uses sudo.
 - [ ] The release is published (v0.5.6) before the take; do not record on a
       build from source.
 - [ ] Recording tool: left to the person recording.
