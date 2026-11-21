@@ -68,6 +68,11 @@ func runVerbs(args []string, env func(string) string, lookup config.Lookup, stdo
 	}
 	args = rest0
 	env, lookup = global.Shadow(spec, env, lookup)
+	// A folder mash 0.5.5 left is named for what it is, before any command runs (version and init included).
+	home := config.HomeDir(env) // as cmd/mash: the folder is found the same way in both tools
+	if code, refused := cliframe.RefuseLegacy055(stdout, stderr, env, home, global.JSON || jsonRequested(args[1:])); refused {
+		return code
+	}
 	switch args[0] {
 	case "version":
 		return runVersion(args[1:], stdout, stderr)
