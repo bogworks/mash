@@ -1,1 +1,0 @@
-A listset endpoint may publish replies only under its own owner's inbox prefix, as `mashctl` already did (ADR 0155). The 0.5.5 migration script now refuses a relative `MASH_CONFIG_DIR` and a malformed string escape in `config.json`.
