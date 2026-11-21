@@ -184,10 +184,11 @@ doing before each command, in one line. Guard rails:
   mismatch stops before unpack or install.
 - After a system package, find where it landed without relying on PATH
   (`command -v` can fail after a good install: Debian's package puts
-  `nats-server` in `/usr/sbin`, which is often not on a user's PATH). On
-  Debian and Ubuntu use `dpkg -L nats-server | grep 'bin/nats-server$'` or
-  `ls /usr/sbin/nats-server`; for another package manager use its file
-  list (for example `rpm -ql` or `pacman -Ql`). Tell the person the folder,
+  `nats-server` in a folder such as `/usr/sbin` that is often not on a
+  user's PATH). On Debian and Ubuntu use
+  `dpkg -L nats-server | grep 'bin/nats-server$'`; for another package
+  manager use its file list (for example `rpm -ql` or `pacman -Ql`). Use
+  the folder that list shows, not a remembered one. Tell the person the folder,
   and put it on PATH for the commands of this session
   (`PATH="<folder>:$PATH"` in front of commands, as for `BIN`); do not edit
   their shell files. The setup script and Verify use that PATH too. Say
@@ -354,7 +355,9 @@ Show it to the person (`cat "$DL/mash-local-nats-setup.sh"`), say in one
 sentence what it does (it makes a NATS server in the server folder, as the
 person's own user, listening on this machine only), and ask. Needs a yes:
 starting a NATS server on this machine. Then run it with the install folder
-first on the PATH, so it finds `nats-server` and `nats`:
+first on the PATH, so it finds `nats-server` and `nats`. If step 2 found
+them in a package folder, that folder goes in front too:
+`PATH="<package folder>:$BIN:$PATH"`. The command below is the default route:
 
 ```sh
 BIN="$HOME/.local/bin"; SRV="$HOME/mash-nats"; DL="$HOME/mash-setup-dl"
@@ -581,7 +584,7 @@ its own copies in `~/.config/mash`.
 | You see | Cause | Fix |
 |---|---|---|
 | `error: missing: ...` from the server script | a program is not installed | step 2 |
-| `error: missing: nats-server` while it is installed | the install folder is not on the PATH | run the script with `PATH="$BIN:$PATH"` in front of `bash` |
+| `error: missing: nats-server` while it is installed | the install folder is not on the PATH | run the script with `PATH="$BIN:$PATH"` in front of `bash` (a package folder from step 2 goes in front too) |
 | `error: ... is writable by its group or other users: not installing there` | a folder made with umask 002 is group-writable | `chmod go-w "$BIN"` (you may run it on the folder you made, after a yes) |
 | `sha256sum: ... FAILED` | the download is not the release's file | stop; do not run it; ask |
 | the script used another port, such as 4223 | 4222 is taken by a server this guide did not make | fine: leave that server alone, mash uses the other port |
