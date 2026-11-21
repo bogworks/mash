@@ -1111,6 +1111,9 @@ func (e *Endpoint) ReadInbox(ctx context.Context, q InboxQuery) (InboxRead, erro
 		}
 		out.Mail = append(out.Mail, more...)
 		for _, n := range gone { // not shown, so not counted: the same rule as for the first wave
+			if dropped[n] { // already counted in the first wave (inside the newest UrgentLook waiting)
+				continue
+			}
 			dropped[n] = true
 			if id != nil && e.refusedSeq(n, *id) {
 				continue

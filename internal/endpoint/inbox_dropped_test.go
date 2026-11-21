@@ -130,3 +130,28 @@ func TestReadInboxOldestWaitingSkipsADroppedMessageItFetches(t *testing.T) {
 		t.Fatalf("oldest waiting %v: want #3's time %v", r.State.OldestWaiting, third.At)
 	}
 }
+
+// A dropped message that both the up-front wave and the top-up reach (the newest ones, inside the urgent look) is
+// counted out once, not twice.
+func TestReadInboxCountsADroppedMessageOnceWhenToppingUp(t *testing.T) {
+	f := newFixture(t, "a", "b", "c")
+	ctx := context.Background()
+	for _, from := range []string{"c", "b", "b"} { // #1 stays; the newest two go
+		if _, err := f.client(t, from).Send(ctx, tdot("a"), "from "+from, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.adm.Deprovision(ctx, taddr("b")); err != nil {
+		t.Fatal(err)
+	}
+	r, err := strict(t, f, "a").ReadInbox(ctx, InboxQuery{Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Mail) != 1 || r.Mail[0].Seq != 1 {
+		t.Fatalf("listed: %+v", r.Mail)
+	}
+	if r.State.Total != 1 || r.State.Waiting != 1 {
+		t.Fatalf("total %d, waiting %d: want 1 and 1", r.State.Total, r.State.Waiting)
+	}
+}
