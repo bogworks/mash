@@ -15,6 +15,10 @@ mash is deliberately small: one Go binary per agent (an "agent" here is one runn
 per-agent server. It layers an opinionated approach to agent communication on top of the Synadia Agent Protocol (SAP)
 and NATS.
 
+![An agent on plain SAP beside an agent on mash: the same layers, with a mail layer added by mash](docs/images/stack.svg)
+
+What each layer does: [the stack](docs/guide/stack.md).
+
 **The key values that mash provides:**
 
 1. Fast, durable, secure mail between agents.

@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 470" role="img" aria-label="Two stacks side by side. An agent on plain SAP has four layers: agent host, SAP, NATS, TLS over TCP. An agent on mash has the same four with a mail layer, mash, added between the agent host and SAP." font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <rect x="0" y="0" width="860" height="470" fill="#ffffff"/>
+  <g font-size="15" font-weight="600" fill="#1f2328" text-anchor="middle">
+    <text x="215" y="34">An agent on plain SAP</text>
+    <text x="555" y="34">An agent on mash</text>
+  </g>
+  <g font-size="12" fill="#59636e" text-anchor="middle">
+    <text x="215" y="52">live only: both sides must be online</text>
+    <text x="555" y="52">mail waits until it is read</text>
+  </g>
+  <g stroke="#59636e" stroke-width="1.2" fill="#f6f8fa">
+    <rect x="80" y="70" width="270" height="62"/>
+    <rect x="80" y="214" width="270" height="62"/>
+    <rect x="80" y="286" width="270" height="62"/>
+    <rect x="80" y="358" width="270" height="62"/>
+    <rect x="420" y="70" width="270" height="62"/>
+    <rect x="420" y="214" width="270" height="62"/>
+    <rect x="420" y="286" width="270" height="62"/>
+    <rect x="420" y="358" width="270" height="62"/>
+  </g>
+  <rect x="420" y="142" width="270" height="62" fill="#ddf4ff" stroke="#0969da" stroke-width="2"/>
+  <rect x="80" y="142" width="270" height="62" fill="none" stroke="#59636e" stroke-width="1.2" stroke-dasharray="5 5"/>
+  <g font-size="15" font-weight="600" fill="#1f2328" text-anchor="middle">
+    <text x="215" y="97">Agent host</text><text x="555" y="97">Agent host</text>
+    <text x="555" y="169" fill="#0550ae">mash</text>
+    <text x="215" y="241">SAP</text><text x="555" y="241">SAP</text>
+    <text x="215" y="313">NATS</text><text x="555" y="313">NATS</text>
+    <text x="215" y="385">TLS over TCP</text><text x="555" y="385">TLS over TCP</text>
+  </g>
+  <g font-size="12" fill="#59636e" text-anchor="middle">
+    <text x="215" y="117">Claude Code session</text><text x="555" y="117">Claude Code session, mash plugin</text>
+    <text x="215" y="177">(nothing here)</text>
+    <text x="555" y="189" fill="#0550ae">inbox, address, signed mail, directory</text>
+    <text x="215" y="261">discovery, prompt, status, heartbeat</text><text x="555" y="261">discovery, prompt, status, heartbeat</text>
+    <text x="215" y="333">subjects, streams, accounts, creds</text><text x="555" y="333">subjects, streams, accounts, creds</text>
+    <text x="215" y="405">an encrypted connection</text><text x="555" y="405">an encrypted connection</text>
+  </g>
+  <g font-size="12" fill="#1f2328">
+    <text x="706" y="92" font-weight="600">Agent</text>
+    <text x="706" y="109" fill="#59636e">the program doing work</text>
+    <text x="706" y="164" font-weight="600" fill="#0550ae">Mail</text>
+    <text x="706" y="181" fill="#59636e">durable, per agent</text>
+    <text x="706" y="236" font-weight="600">Agent protocol</text>
+    <text x="706" y="253" fill="#59636e">agents as services</text>
+    <text x="706" y="308" font-weight="600">Messaging</text>
+    <text x="706" y="325" fill="#59636e">server and storage</text>
+    <text x="706" y="380" font-weight="600">Transport</text>
+    <text x="706" y="397" fill="#59636e">the wire</text>
+  </g>
+  <text x="430" y="452" font-size="12" fill="#59636e" text-anchor="middle">Each layer keeps its own words. mash adds one layer and changes none below it.</text>
+</svg>

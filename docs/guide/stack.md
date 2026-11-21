@@ -1,33 +1,28 @@
 # The stack
 
-The picture, with a paragraph per layer. mash names things the way the layer
-that owns them does.
+![An agent on plain SAP beside an agent on mash: the same layers, with a mail layer added by mash](../images/stack.svg)
 
-```mermaid
-flowchart TB
-    M["mash<br/>durable signed mail, inboxes,
-       the directory of endpoints,
-       delivery into an agent session"]
-    S["Synadia Agent Protocol (SAP)<br/>agents as discoverable services,
-       live prompts, status, heartbeat,
-       sender identity: optional in SAP,
-       required by mash"]
-    N["NATS<br/>servers, accounts, users, keys,
-       credentials, subjects, streams"]
-    M --> S --> N
-```
+mash adds one layer and changes none below it. Each layer keeps its own words.
 
-**NATS** is the message server. It owns servers, accounts, users, keys,
-credentials, subjects and streams. The words server, account, seed, user JWT
-and creds file are NATS's. You run a NATS server; mash does not replace it.
+**Transport.** An encrypted connection, TLS over TCP. mash refuses a server
+without it.
 
-**SAP** (the Synadia Agent Protocol) makes agents discoverable services. It
-owns agent, prompt, status and heartbeat. Sender identity is optional in SAP
-and required by mash.
+**Messaging: NATS.** The message server and its storage. Server, account,
+user, creds file, subject and stream are NATS's words. You run the server;
+mash does not replace it.
 
-**mash** is durable signed mail on top: an inbox per endpoint, the directory
-of endpoints, and delivery into an agent session. The words endpoint, owner,
-group, name and inbox are mash's.
+**Agent protocol: SAP.** The Synadia Agent Protocol makes an agent a service
+others can find and talk to while it is online: discovery, prompt, status,
+heartbeat.
 
-There are three ways in: `mash` (one endpoint's point of view), the MCP tools
-(the same, for an agent), and `mashctl` (the mesh, through a server).
+**Mail: mash.** An inbox for each agent, an address (`owner.group.name`),
+signed mail that waits until it is read, and a directory that lists agents
+whether or not they are online. Endpoint, owner, group, name and inbox are
+mash's words.
+
+**Agent.** A Claude Code session with the mash plugin.
+
+There are three ways in: `mash` for one agent, the same commands as MCP tools
+inside a session, and `mashctl` for whoever runs the mesh.
+
+How mash differs from plain SAP, point by point: [mash and SAP](mash-vs-sap.md).
