@@ -129,7 +129,7 @@ func TestStatusMatchesSpec(t *testing.T) {
 		t.Errorf("fuller object %s", js)
 	}
 	fails := map[string]*fakeHealth{
-		"Not working (the first line on stdout, the hint on stderr)": report("acme.demo.bob", false, ok("config", ""), ok("creds", ""), ok("server", "tls://myserver:4222"),
+		"Not working": report("acme.demo.bob", false, ok("config", ""), ok("creds", ""), ok("server", "tls://myserver:4222"),
 			cmds.HealthCheck{Name: "sign-in", State: cmds.CheckFail, Detail: "the server refused these credentials", Reason: "the server refused its credentials", Code: cmds.CodeCredsRefused}),
 		"The server does not answer": report("acme.demo.bob", false, ok("config", ""), ok("creds", ""),
 			cmds.HealthCheck{Name: "server", State: cmds.CheckFail, Detail: "the server did not answer: tls://myserver:4222"}),
