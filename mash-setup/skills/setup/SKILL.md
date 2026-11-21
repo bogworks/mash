@@ -12,7 +12,8 @@ description: >-
 
 # Set mash up on this machine
 
-For a person, or for an agent following it. Linux or macOS. One machine, one
+For a person, or for an agent following it. Linux or macOS (see Platforms
+below for which are tested). One machine, one
 user, a server only this machine can reach. It follows the mash walkthrough:
 plan, install, make the server, make the endpoints, send mail.
 
@@ -26,8 +27,29 @@ every question in step 1 before you change anything. Each step below that
 changes something says what it needs a yes for: ask for that yes, once, for
 that step. "Set mash up" alone is not a yes for all of them.
 
-Everything is installed as the local user: no `sudo`, no system package, no
-system service. You run each step's commands yourself after that step's yes.
+Everything is installed as the local user: no `sudo` and no system service,
+except that the person may choose a system route for `nats-server` and `nats`
+in step 2 and say yes to its exact command. You run each step's commands
+yourself after that step's yes.
+
+Platforms. The release scripts are tested on Ubuntu, Debian and macOS. At
+each step that runs one (step 3 downloads and checks them; step 4 runs
+`install.sh` and `mash-local-nats-setup.sh`; the step 2 `nats-server` and
+`nats` blocks are a worked example and follow the same rule):
+
+- On Ubuntu, Debian or macOS: run the checked script, as written.
+- On anything else (step 1 shows it): (1) tell the person this platform is
+  outside what the scripts are tested on; (2) try the script only if they
+  agree; (3) if it fails, do the equivalent steps by hand, using the script
+  as the reference, and report exactly what differed (the command, its
+  output, and what you did instead). Do not patch the scripts for another
+  distribution.
+
+One yes per step. The yes in step 1 is for the plan only. Before each step
+that changes something (steps 2 to 6; every step marked "Needs a yes"), say in
+one or two lines what it will do, show each script before you run it (every
+time, not just the first), and wait for that step's own yes. Never run two
+steps on one yes. "Defaults" or "yes" to step 1 is not a yes for a later step.
 
 Every command block runs on its own in a fresh shell. Blocks marked
 `sh person` are only for what the person must do themselves: a typed
@@ -56,6 +78,11 @@ Say which of these it is, say the next command you would run, and wait.
 
 Ask in order, all in one message. Each has a default; the person may take
 it.
+
+If the person's request already names an owner, a group, agent names or full
+addresses (for example `acme.demo.alice`), take them as the answers to
+questions 1 to 3, say so in the read-back, and ask only what is still open.
+The login-name default for the owner applies only when they gave none.
 
 1. Owner name. Default: the login name, if it is lower-case letters and
    digits. An owner is one namespace: the first part of every address
@@ -90,19 +117,27 @@ BIN="$HOME/.local/bin"; SRV="$HOME/mash-nats"; DL="$HOME/mash-setup-dl"
 Read-only look at the machine, in one block. It changes nothing:
 
 ```sh
-uname -sm; command -v mash mashctl nats-server nats openssl claude; ls -d "$HOME/mash-nats" "$HOME/.local/bin" "$HOME/mash-setup-dl" 2>&1; claude plugin list 2>&1 | head -20
+uname -sm; command -v mash mashctl nats-server nats openssl claude; ls -d "$HOME/mash-nats" "$HOME/.local/bin" "$HOME/mash-setup-dl" 2>&1; claude plugin list 2>&1 | head -20; (. /etc/os-release && echo "$ID $ID_LIKE") 2>/dev/null
 ```
+
+The last command prints the Linux distribution (`ubuntu`, `debian`, ...);
+on macOS it prints nothing and `uname -s` says `Darwin`. Use it for the
+Platforms rule.
 
 Then say this to the person, filled in, and wait for a yes:
 
 ```
 I will:
+  platform                          Ubuntu (tested)
+                                    [else: "<name>: not tested; I will ask
+                                     first"]
   download mash and mashctl         from the latest release (one tag, checked
                                     against its checksums), into ~/.local/bin
-  download nats-server and nats     from their GitHub releases (checked against
-                                    each release's SHA256SUMS), into ~/.local/bin
-  use no sudo                       everything is installed as you, nothing
-                                    system-wide
+  nats-server and nats              you choose how: the default is a download
+                                    from their GitHub releases, checked against
+                                    SHA256SUMS, into ~/.local/bin
+  use no sudo                       unless you choose a system route and say
+                                    yes to that exact command
   make a NATS server                in ~/mash-nats, this machine only, run as you
                                     (a program you run: after a reboot it is
                                      stopped; start it again with --start)
@@ -116,18 +151,61 @@ Say yes to go ahead. I will ask again before each step.
 
 ## 2. The server's programs
 
-The NATS script needs `nats-server` (2.10.7 or newer; the requirements are in
-https://github.com/bogworks/mash/blob/main/docs/nats-server.md#requirements),
-the `nats` command and `openssl`. If `nats-server` or `nats` is missing, tell
-the person where it comes from and ask for a yes. Needs a yes: downloading
-each program from its project's GitHub release into the install folder `BIN`
-of step 1. You run these blocks yourself; they need no `sudo`. If `openssl`,
-`curl`, `tar` or the port tool (`ss` on Linux, `lsof` on macOS), or both
-`unzip` and `python3`, is missing, say so in one line and stop and ask: the
-person decides how to get it.
+The NATS script needs `nats-server` 2.10.7 or newer (mash is tested with
+2.15.1; the requirements are in
+https://github.com/bogworks/mash/blob/main/docs/nats-server.md#requirements)
+and the `nats` command (natscli 0.5.2 is tested), both on the PATH of the user
+who will run mash. It also needs `openssl`, `curl`, `tar`, the port tool
+(`ss` on Linux, `lsof` on macOS), and `unzip` or `python3` for the nats
+zip. If one of those is missing, say so in one line
+and stop and ask: the person decides how to get it.
 
-On a Mac, Homebrew is an alternative: `brew install nats-server nats`. Then
-skip the two blocks below.
+Ask. If either program is missing or too old (check with
+`command -v nats-server nats` and `nats-server --version`), ask the person how
+they want them installed, and list the choices:
+
+- (a) download each from its GitHub release into their own folder `BIN` (the
+  default; recommended; no sudo)
+- (b) Homebrew or Linuxbrew: `brew install nats-server nats`
+- (c) the system's package manager
+- (d) build from source
+- (e) something else they name
+
+Wait for the answer. That question is the ask for the install route; the yes
+covers the blocks of the chosen route, shown to the person before they run.
+
+Then do it. Install for this machine and this choice, and say what you are
+doing before each command, in one line. Guard rails:
+
+- Prefer a per-user install.
+- Never use `sudo` unless the person chose a route that needs it and said yes
+  to that exact command.
+- Chain every checksum check to the step after it with `&&` or `set -e`, so a
+  mismatch stops before unpack or install.
+- After a system package, find where it landed without relying on PATH
+  (`command -v` can fail after a good install: Debian's package puts
+  `nats-server` in a folder such as `/usr/sbin` that is often not on a
+  user's PATH). On Debian and Ubuntu use
+  `dpkg -L nats-server | grep 'bin/nats-server$'`; for another package
+  manager use its file list (for example `rpm -ql` or `pacman -Ql`). Use
+  the folder that list shows, not a remembered one. Tell the person the folder,
+  and put it on PATH for the commands of this session
+  (`PATH="<folder>:$PATH"` in front of commands, as for `BIN`); do not edit
+  their shell files. The setup script and Verify use that PATH too. Say
+  that a restart after a reboot needs the folder too (the day-2 skill finds
+  it again from the package). Also check whether the package started a
+  service (for example `systemctl is-active nats-server` where systemd
+  exists), and tell the person.
+- The Debian and Ubuntu package starts an unauthenticated server on port 4222
+  (a known example). Say so, and let the person decide whether to stop it.
+- Never disable or stop a service the person did not ask to stop.
+- If the route fails, say what failed and ask. Do not switch routes silently.
+
+The default route (a), as a worked example. Adapt it for another machine type
+or choice; do not run it for a different choice. It needs a yes for
+downloading each program from its project's GitHub release into `BIN`.
+On a platform outside Ubuntu, Debian and macOS, follow the Platforms rule
+first.
 
 `BIN` may not exist yet. Debian's default umask is 002, so a folder made with
 `mkdir -p` is writable by its group, and `install.sh` refuses to install
@@ -188,18 +266,24 @@ Each block starts with `set -e`, so a checksum that does not match stops it
 before anything is unpacked or installed. Each checksum line should end in `OK`
 (a mismatch: stop, install nothing, ask).
 `nats-server --version` prints `nats-server: v2.15.1` and `nats --version`
-prints `0.5.2`. Then check `command -v nats-server nats`. `BIN` must be on the
-PATH: if it is not, tell the person to add it (do not edit their shell files);
-for this session use the full path, or put `PATH="$BIN:$PATH"` in front of a
-command. Both programs are explained at
+prints `0.5.2`. `BIN` must be on the PATH: if it is not, tell the person to
+add it (do not edit their shell files); for this session use the full path, or
+put `PATH="$BIN:$PATH"` in front of a command. Both programs are explained at
 https://github.com/bogworks/mash/blob/main/docs/nats-server.md#getting-nats-server-and-the-nats-command
+
+Verify: `nats-server --version` is 2.10.7 or newer, and
+`command -v nats-server nats` finds both: on the PATH, or in the folder the
+package put them in, with that folder on this session's PATH. Only then go on.
 
 ## 3. Download and check the two scripts
 
 Needs a yes: downloading two scripts from the mash release and checking them.
 You never pipe a download into a shell. You download each file and check it
 against the release's checksums here; step 4 shows each script to the person
-and runs it after a yes.
+and runs it after a yes. On a platform outside Ubuntu, Debian and macOS,
+follow the Platforms rule first.
+
+Ask, and wait for the yes, before running the downloads below.
 
 Use the person's download folder for `DL` (the first assignment below).
 Resolve the release tag once, and use it for the downloads and for the
@@ -237,7 +321,8 @@ do not run it.
 ## 4. Install mash and mashctl, then make the server
 
 Each script has one section below: show it, ask, run it. If a later release
-changes how a script is run, change only its section.
+changes how a script is run, change only its section. On a platform outside
+Ubuntu, Debian and macOS, follow the Platforms rule first.
 
 ### Run install.sh
 
@@ -270,7 +355,9 @@ Show it to the person (`cat "$DL/mash-local-nats-setup.sh"`), say in one
 sentence what it does (it makes a NATS server in the server folder, as the
 person's own user, listening on this machine only), and ask. Needs a yes:
 starting a NATS server on this machine. Then run it with the install folder
-first on the PATH, so it finds `nats-server` and `nats`:
+first on the PATH, so it finds `nats-server` and `nats`. If step 2 found
+them in a package folder, that folder goes in front too:
+`PATH="<package folder>:$BIN:$PATH"`. The command below is the default route:
 
 ```sh
 BIN="$HOME/.local/bin"; SRV="$HOME/mash-nats"; DL="$HOME/mash-setup-dl"
@@ -287,7 +374,9 @@ prints the server's address, `ok` and the endpoint count.
 
 The server is a program running as you. It does not come back after a reboot:
 after one, run the script again with `--start` (day-2 skill). Tell the person
-this now, before they reboot.
+this now, before they reboot. If `nats-server` came from a system package
+and its folder is not on their PATH, name that folder too: the restart
+command needs it in front of the PATH, as `PATH="<folder>:$BIN:$PATH"`.
 
 ## 5. Install the mash plugin
 
@@ -415,19 +504,32 @@ last):
    If the person wants to keep the server folder, skip this step and say
    plainly that the folder and its keys stay on disk.
 3. The plugin: `claude plugin uninstall mash@mash`.
-4. The programs this setup installed, only the named files. Say which ones
-   you installed in step 2: you only install a missing `nats-server` or
-   `nats`, and a package or Homebrew install is not removed by this step.
-   Never remove a program that was there before. `mash` and `mashctl` come
-   from the install in step 1. Name only the installed files in `rm`, for
-   example when this setup installed all four:
+4. The programs this setup installed, only the named ones. Say which route
+   step 2 took and ask before removing any package or stopping any service.
+   Never remove a program or service that was there before. `mash` and
+   `mashctl` come from the install in step 1. Name only the installed files
+   in `rm`. `nats-server` and `nats` depend on the route:
 
-   ```sh
-   BIN="$HOME/.local/bin"
-   rm "$BIN/mash" "$BIN/mashctl" "$BIN/nats-server" "$BIN/nats"
-   ```
+   - (a) default: the installed files, for example when this setup installed
+     all four:
 
-   If the person chose another install folder in step 1, fill in that path.
+     ```sh
+     BIN="$HOME/.local/bin"
+     rm "$BIN/mash" "$BIN/mashctl" "$BIN/nats-server" "$BIN/nats"
+     ```
+
+     If the person chose another install folder in step 1, fill in that path.
+   - (b) Homebrew: `brew uninstall nats-server nats`
+   - (c) system package: the package manager's remove command for the
+     package step 2 installed. If the package started a service (step 2 told
+     the person), stopping and disabling it is a separate step, for this
+     package only. A system route may need `sudo`: show the exact command
+     and do not run it without a yes to that command.
+   - (d) source: the files the person says they built into.
+   - (e) other: ask.
+
+   For (b) and (c), each command is shown exactly and run only after the
+   person says yes to it. For (a), `mash` and `mashctl` use the same `rm`.
 5. The download folder, `~/mash-setup-dl`: only the files setup downloaded
    into it, by name, then the folder if it is empty. If the person chose
    another folder in step 1, fill in that path:
@@ -459,7 +561,8 @@ last):
 ## Do not
 
 - Do not pipe a download into a shell. Do not run a script you have not shown.
-- Do not use `sudo` or any system package; everything is installed as you.
+- Do not use `sudo` or a system package, except for the route the person chose
+  in step 2 and the exact command they said yes to.
   Do not run a typed confirmation or any `sh person` block yourself.
 - Do not print, paste or mail a seed, a credentials file or a key. Do not read
   files in `~/mash-nats` or `~/.config/mash` aloud.
@@ -481,7 +584,7 @@ its own copies in `~/.config/mash`.
 | You see | Cause | Fix |
 |---|---|---|
 | `error: missing: ...` from the server script | a program is not installed | step 2 |
-| `error: missing: nats-server` while it is installed | the install folder is not on the PATH | run the script with `PATH="$BIN:$PATH"` in front of `bash` |
+| `error: missing: nats-server` while it is installed | the install folder is not on the PATH | run the script with `PATH="$BIN:$PATH"` in front of `bash` (a package folder from step 2 goes in front too) |
 | `error: ... is writable by its group or other users: not installing there` | a folder made with umask 002 is group-writable | `chmod go-w "$BIN"` (you may run it on the folder you made, after a yes) |
 | `sha256sum: ... FAILED` | the download is not the release's file | stop; do not run it; ask |
 | the script used another port, such as 4223 | 4222 is taken by a server this guide did not make | fine: leave that server alone, mash uses the other port |
