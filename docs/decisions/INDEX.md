@@ -134,3 +134,4 @@
 | [0154](0154-the-launchers-session-start-prefetch-says-on-stdout-when-no-mash-program-is-installed.md) | The launcher's session-start prefetch says on stdout when no mash program is installed | accepted | 2026-11-21 |
 | [0155](0155-a-listset-endpoint-may-publish-replies-only-under-its-own-owner-inbox-prefix.md) | A listset endpoint may publish replies only under its own owner's inbox prefix | accepted | 2026-11-21 |
 | [0156](0156-a-release-has-a-one-screen-change-log-entry-and-release-notes-the-release-page-is-built-from-the-notes.md) | A release has a one-screen change-log entry and separate release notes, the release page is built from the notes, and the gate checks nine of the thirteen rubric questions | accepted | 2026-11-21 |
+| [0157](0157-a-docs-only-pull-request-has-its-own-queue-and-needs-only-the-docs-lint.md) | A docs-only pull request has its own merge queue and needs only the docs lint | accepted | 2026-11-21 |
