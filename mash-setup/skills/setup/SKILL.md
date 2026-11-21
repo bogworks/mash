@@ -134,6 +134,21 @@ DL="$HOME/mash-setup-dl"; TAG=$(curl -fsSL -o /dev/null -w '%{url_effective}' ht
 Say the tag back to the person (it looks like `v0.5.6`) and use that same
 value as `TAG` in step 4.
 
+The checksums come from the same download as the scripts, so on their own
+they only show the files are intact. If `gh` (the GitHub CLI) is installed,
+also check the release's signed attestation of `SHA256SUMS`, pinned to the
+tag, before either script runs:
+
+```sh
+DL="$HOME/mash-setup-dl"; cd "$DL" && U=https://github.com/bogworks/mash/releases/download/$TAG && curl -fsSL -O "$U/mash.intoto.jsonl" && gh attestation verify SHA256SUMS -R bogworks/mash --bundle mash.intoto.jsonl --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref "refs/tags/$TAG"
+```
+
+Expected: it exits 0 and says it verified. Any failure: stop, run nothing.
+If `gh` is missing, or too old to have `gh attestation verify`, say so to the
+person in one sentence: the scripts are then trusted on github.com's TLS
+alone (the installer says the same). Run them only if the person says yes
+to that.
+
 Expected: `install.sh: OK` and `mash-local-nats-setup.sh: OK`. On macOS
 `sha256sum` may be missing: use `shasum -a 256 -c -`. Anything else, or a
 `404`: stop and ask. A mismatch means the file is not the release's file:
