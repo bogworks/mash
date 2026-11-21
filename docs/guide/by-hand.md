@@ -6,7 +6,7 @@ on one machine. Everything goes in your home folder. Nothing needs sudo.
 
 ## 1. What you need
 
-- Linux or macOS, `curl` and `openssl`.
+- Ubuntu, Debian or macOS, `curl` and `openssl`.
 - `nats-server` 2.10.7 or newer and the `nats` command, on your PATH.
   [Getting the NATS programs](../nats-server.md) shows one way.
 - Claude Code, for step 6.
