@@ -17,6 +17,10 @@ func IsDocsPath(p string) bool {
 			return false
 		}
 	}
+	// Agent instructions: a skill or a briefing an agent executes is code in effect (ADR 0156), wherever it sits.
+	if strings.HasPrefix(p, "mash-setup/") || p == "AGENTS.md" || strings.HasSuffix(p, "/AGENTS.md") || p == "CLAUDE.md" || strings.HasSuffix(p, "/CLAUDE.md") {
+		return false
+	}
 	switch p {
 	case ".mergify.yml", "go.mod", "go.sum", "CHANGELOG.md", "docs/branch-protection.md", "docs/allowed_signers", "docs/skipped-releases.txt", "docs/release-cutover":
 		return false

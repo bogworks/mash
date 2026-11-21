@@ -29,6 +29,8 @@ is_docs() {
 	lower="$(printf '%s' "$p" | tr '[:upper:]' '[:lower:]')"
 	case "$p" in
 	.github/* | .mergify.yml | .claude-plugin/* | plugin/* | scripts/* | cmd/* | internal/* | ci/*) return 1 ;;
+	# Agent instructions: a skill or a briefing an agent executes is code in effect (mash-lead, ADR 0156), wherever it sits.
+	mash-setup/* | AGENTS.md | */AGENTS.md | CLAUDE.md | */CLAUDE.md) return 1 ;;
 	go.mod | go.sum | */go.mod | */go.sum | *.go) return 1 ;;
 	testdata/* | */testdata/* | *conformance*) return 1 ;;
 	CHANGELOG.md | changelog.d/*) return 1 ;;

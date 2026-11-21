@@ -20,7 +20,7 @@ func TestIsDocsPath_matchesTheClassifierScript(t *testing.T) {
 		".mergify.yml", "scripts/ci-changes", "scripts/notes.md", "cmd/mash/main.go", "cmd/mash/README.md", "internal/x/y.go", "internal/x/README.md",
 		"plugin/hooks.md", ".claude-plugin/plugin.json", "ci/x.md", "go.mod", "go.sum", "sub/go.mod", "x/go.sum", "main.go", "CHANGELOG.md",
 		"changelog.d/frag.md", "testdata/a.md", "internal/testdata/a.md", "docs/testdata/a.md", "docs/conformance.md", "docs/a/conformance/b.md",
-		"NEW-TOP-LEVEL.txt", "LICENSE", "Makefile", "docs/notes.txt", "notes/a.md", "docs/sub/dir/page.md",
+		"AGENTS.md", "docs/AGENTS.md", "x/y/CLAUDE.md", "CLAUDE.md", "mash-setup/skills/setup/SKILL.md", "mash-setup/README.md", "docs/x.go", "docs/NOTES.MD", "README.MD", "docs/guide.Md", "docs/a b.md", "NEW-TOP-LEVEL.txt", "LICENSE", "Makefile", "docs/notes.txt", "notes/a.md", "docs/sub/dir/page.md",
 	}
 	for _, p := range paths {
 		cmd := exec.Command("bash", "../../scripts/ci-changes")
