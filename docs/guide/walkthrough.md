@@ -440,9 +440,9 @@ built-output pass replaces it with the real run's.)
 ## Step 9: take an endpoint away
 
 What this does: close Bob's session first. It deletes Bob's endpoint, and
-Bob's credentials stop working: on this machine the creds file is removed too,
-so `mash status` says it is missing. On another machine that still holds a
-copy, the server refuses the credentials.
+Bob's credentials stop working: on this machine `mash status` says the
+endpoint was deleted and its address cannot be used again. On another machine
+that still holds a copy, the server refuses the credentials.
 
 Commands: `mashctl endpoint delete acme.demo.bob` (you type the address to
 confirm), then `mash status` as Bob.
