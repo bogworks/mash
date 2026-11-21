@@ -76,7 +76,7 @@ They print `nats-server: v2.15.1` and `0.5.2`. Both projects publish the same fi
 
 Don't install nats-server from your system's packages for mash. If one is already installed (for example by `apt install nats-server` on Debian or Ubuntu), know two things about it:
 
-- **It runs a server with no authentication.** The package starts its own nats-server as a system service (`nats-server.service`, from `/etc/nats-server.conf`). It starts at boot and listens on `127.0.0.1:4222` with no authentication, so any process on the machine can use it. mash does not use it. Stop it and keep it from starting again (this needs an administrator): `sudo systemctl disable --now nats-server`.
+- **As shipped, it runs a server with no authentication.** The package starts its own nats-server as a system service (`nats-server.service`, from `/etc/nats-server.conf`). It starts at boot and, with the package's own `/etc/nats-server.conf`, listens on `127.0.0.1:4222` with no authentication, so any process on the machine can use it. mash cannot use a server like that. If that file is still the package's, stop the service and keep it from starting again (this needs an administrator): `sudo systemctl disable --now nats-server`. If someone has changed it to serve mash, leave it running; this page's requirements apply to it.
 - **Its binary is in `/usr/sbin`.** That is `/usr/sbin/nats-server`, which is not on a normal user's `PATH`. The setup script looks for `nats-server` on `PATH` only, so it reports nats-server as missing. Install your own copy into `~/.local/bin` as above. The setup script picks a free port if 4222 is taken.
 
 ## TLS
