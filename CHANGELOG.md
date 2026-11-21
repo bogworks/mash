@@ -8,250 +8,58 @@ All notable user-facing changes to mash are recorded here. The format follows [K
 
 ### Summary
 
-**mash 0.5.6 is a breaking change for everyone who used 0.5.5: the settings that name your agent and your server have new names, the commands you typed to set mash up are different, and mail that is not proven to come from its sender is now refused by default. Read Upgrading before you install it.** Nothing on your server needs to change, and a small script moves your 0.5.5 configuration folder across. If you have never used mash, this is the release to start with: the quick start below takes you from nothing to two endpoints that mail each other from a shell, and shows how to start two Claude Code sessions on them. Every download has a build attestation; verify it.
-
-mash lets Claude Code sessions send each other mail. Each session is an *agent* with an address of three parts, `owner.group.name` (for example `alice.dev.design`); mash calls that agent's place on the server an *endpoint*. `mash` is the command each session runs. `mashctl` is the command whoever runs your mesh (the set of agents that can reach each other) uses to set it up.
-
-### Why we changed so much
-
-0.5.5 fixed how agents are named, and then we looked honestly at what it felt like to use. Setting mash up took commands that overlapped (`adopt`, `init --local`, `provision` and `endpoint create` all made something); the same setting had three names (`MASH_OWNER`, `MASH_GROUP`, `MASH_NAME`); the same failure exited with a different number from each command; and output was written for the program that made it, not the person reading it. None of that was a deliberate design. It grew. 0.5.6 gives every command one job and one clear way to say it, written down in a specification that the commands are now built from ([ADR 0147](https://github.com/bogworks/mash/blob/v0.5.6/docs/decisions/0147-the-0-5-6-command-line-and-mcp-surface-is-built-from-a-specification-that-supersedes-contract-revision-26.md)). We chose to cut the old forms rather than carry them: there are no aliases and no deprecation period, because keeping both would have meant two ways of doing everything for good.
-
-Refusing unverified mail is the other change of heart. A message is *verified* when it is signed by the key of the endpoint it names. Until now mash delivered everything and labelled it. A label is easy to miss, and an agent may act on what it reads, so the safe default is now to deliver only mail that is proven. You can turn the old behaviour back on (see Upgrading).
-
-0.5.5 stays the version to use for running deployments until you have moved them. 0.5.0 reads nothing 0.5.6 makes; if you are still on 0.5.0, start a fresh deployment.
+**mash 0.5.6 is a breaking release for everyone who used 0.5.5: the settings that name your agent and your server have new names, the commands that set mash up have changed, and mail that is not proven to come from its sender is now refused by default. Read Upgrading before you install it.** mash lets Claude Code sessions send each other mail; each session is an agent with an address of three parts, such as `alice.dev.design`. Nothing on your server needs to change, and a small script moves your 0.5.5 configuration folder across. If you are new to mash, this is the release to start with: the release notes have a quick start. Every download has a build attestation; verify it.
 
 ### Upgrading
 
-**If you have never used mash:** nothing to move. Follow the quick start.
+Nothing on the server needs migrating. If you have never used mash, there is nothing to move. If you used 0.5.5, do these in order:
 
-**If you used 0.5.5:** the order matters. Nothing on the server needs migrating: 0.5.6 reuses the stores and endpoint records 0.5.5 made, and 0.5.5 and 0.5.6 endpoints can mail each other on one server, as long as each keeps its own configuration folder.
+1. Install 0.5.6: `mash` and `mashctl` from the same release.
+2. Run the 0.5.5 migration script once on each configuration folder; every command that reads the configuration refuses an unmigrated one (`--help` and `version` answer first).
+3. Rename settings: `MASH_ENDPOINT` replaces `MASH_OWNER`, `MASH_GROUP` and `MASH_NAME`; `MASH_SERVER` replaces `MASH_URL`; `MASH_CA` replaces `MASH_TLS_CA`.
+4. Start each session with `MASH_ENDPOINT` set; a session no longer picks an endpoint for itself.
+5. Update scripts that call `mashctl`: setup is `mashctl init --config FILE`, endpoints are `mashctl endpoint ...`.
+6. Update scripts that read output: exit codes are 0, 1 and 2, `--verbose` is `--detail`, and `mash who`, `inbox`, `read` and the MCP `send` and `read` tools changed.
+7. Mail that is not verified is now refused; set `MASH_ACCEPT_UNVERIFIED=1` if you depend on receiving it.
+8. `MASH_INSECURE_PLAINTEXT` is refused; turning encryption off is now `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1`.
+9. `mash credential create` is gone; install an endpoint on a machine with `mash join` and the file `mashctl endpoint create --out` writes.
 
-1. **Install 0.5.6.** Use the install line in the quick start. Install `mash` and `mashctl` from the same release.
-2. **Move your configuration folder.** A folder that 0.5.5 left (its `config.json` has a `url` or `tls_ca` key) is refused by every `mash` and `mashctl` command that reads the configuration (`--help` and `version` answer before it loads) with `error: <folder> holds a mash 0.5.5 configuration` and a hint to a script. Run it once: `curl -fsSL https://github.com/bogworks/mash/releases/latest/download/mash-migrate-0.5.5.sh | bash`. It renames `url` to `servers` and `tls_ca` to `ca`, keeps your old file beside it as `config.json.0.5.5`, and touches nothing on the server. mash does not read the old keys itself. **0.5.5 tools cannot use the migrated folder** (they stop with `no NATS url`), so a 0.5.5 and a 0.5.6 endpoint on one server need separate configuration folders; to go back to 0.5.5, put `config.json.0.5.5` back as `config.json`.
-3. **Rename your settings.** Use the table below. In short: `MASH_ENDPOINT=alice.dev.design` replaces `MASH_OWNER`, `MASH_GROUP` and `MASH_NAME`; `MASH_SERVER` replaces `MASH_URL`; `MASH_CA` replaces `MASH_TLS_CA`. The old names are no longer read.
-4. **Start each session with `MASH_ENDPOINT`.** A session is an agent only when `MASH_ENDPOINT`, `--endpoint` or `config.json` names it. `mash serve` and `mash hook` no longer pick the one installed endpoint for themselves; a session with none named is inert and `mash status` says so. The commands you type at a shell still use the one installed endpoint when there is only one.
-5. **Update scripts that call `mashctl`.** Setup is `mashctl init --config FILE`; endpoints are `mashctl endpoint ...`. The old top-level commands are gone (table below). `mashctl` no longer installs or starts NATS: if you want a server on this machine, run `mash-local-nats-setup.sh` from the release, which writes the file `init --config` reads.
-6. **Update scripts that read mash output or exit codes.** Exit codes are 0 (it worked), 1 (it failed) and 2 (the command line was wrong). `--verbose` and `-v` are now `--detail`. `mash who --json` is `{"endpoints": [...]}`. `mash status` is one line. `mash inbox` and `mash read` print new tables and labelled lines, and the MCP `read` tool's argument is `number`, not `seq`. The MCP `send` tool's parameters are `address`, `message`, `kind`, `urgent`, `reply_to`, `relay` and `id`.
-7. **Decide about unverified mail.** It is now refused, and the sender is not told. If you depend on receiving it, set `MASH_ACCEPT_UNVERIFIED=1` (or `accept_unverified` in `config.json`), or start `mash serve --accept-unverified`.
-8. **Turn encryption off only on purpose.** If you set `MASH_INSECURE_PLAINTEXT` or `insecure_plaintext`, mash now refuses it and names the new variable, `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1`. It is an environment variable only, and every command warns while it is set.
-9. **Make each machine's endpoints with `mash join`.** `mash credential create` is gone. `mashctl endpoint create ... --out FILE.join` now writes the file that `mash join` installs; see the quick start.
+If you used 0.5.0, start a new deployment: 0.5.6 does not read its state. The steps in full, and the table of old and new names, are in the release notes.
 
-**If you used 0.5.0:** 0.5.0 state is not read, and 0.5.5 and 0.5.6 do not convert it. Start a new deployment with the quick start, name every agent in three parts (`owner.group.name`; there is no default group), and create each agent again. Read any mail you still need in the old inboxes first: it is not carried over. Do not install 0.5.6 over a running 0.5.0 endpoint, including with `go install ...@latest`.
+### Added
 
-#### What changed, old to new
+- `mash join FILE` installs an endpoint on a machine from the join file you were given ([#981](https://github.com/bogworks/mash/pull/981)).
+- `mash doctor` and `mashctl doctor` check everything mail depends on, one row each, and say how to fix a failure ([#924](https://github.com/bogworks/mash/pull/924)).
+- `--detail` on every command prints more, and `mash status --detail` says whether mail will reach the session ([#991](https://github.com/bogworks/mash/pull/991)).
+- `install.sh` and `mash-local-nats-setup.sh` install mash and a local NATS server, each checked against the release ([#928](https://github.com/bogworks/mash/pull/928)).
+- A `mash-setup` plugin with a setup skill and a day-2 skill walks you through installing mash ([#925](https://github.com/bogworks/mash/pull/925)).
+- `mash who` filters by `--role`, `--capability` and `--label` ([#950](https://github.com/bogworks/mash/pull/950)).
+- `mash serve` wakes an idle session when more than 15 messages wait or the oldest has waited over an hour ([#953](https://github.com/bogworks/mash/pull/953)).
+- `mash send` prints the message's number and takes one quoted message, `--file` or standard input ([#908](https://github.com/bogworks/mash/pull/908)).
+- The plugin prints the install command when mash is missing ([#996](https://github.com/bogworks/mash/pull/996)).
 
-Every removed or renamed command, setting and form. A removed command prints a message that names its replacement, or is an unknown command (exit 2); none is an alias.
+### Changed
 
-| Old | New |
-| --- | --- |
-| `MASH_OWNER`, `MASH_GROUP`, `MASH_NAME` | `MASH_ENDPOINT`, the full address `owner.group.name` (also `--endpoint`, and `endpoint` in `config.json`) |
-| `MASH_URL`, `MASH_SERVERS` | `MASH_SERVER`, a comma list (also `--server`) |
-| `MASH_TLS_CA` | `MASH_CA` (also `--ca`) |
-| `config.json` keys `url`, `tls_ca` | `servers` (a list), `ca` |
-| `config.json` keys `owner`, `group`, `name` | `endpoint` (the full address). `owner` remains only as a `mashctl` setting |
-| `MASH_INSECURE_PLAINTEXT`, `insecure_plaintext` | `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1`: environment only, no flag and no config key, with a warning on stderr from every command while it is set |
-| `mashctl adopt`, `mashctl init --local`, `mashctl init --start` | `mashctl init --config FILE` (the setup file; `mash-local-nats-setup.sh` writes one for a server on this machine) |
-| `mashctl provision`, `deprovision`, `list` | `mashctl endpoint create`, `endpoint delete`, `endpoint list` |
-| `mashctl add`, `reissue`, `retire` (top level) | `mashctl endpoint create`, `endpoint reissue`, `endpoint delete`; each prints the replacement |
-| `mashctl set-meta`, `label`, `unlabel` | `mashctl endpoint set`, `endpoint unset` |
-| `mashctl suspend`, `resume`, `permissions` (top level), `suspended` | `mashctl endpoint suspend`, `endpoint resume`, `endpoint permissions`; `endpoint show` says whether an endpoint is suspended |
-| `mashctl audit`, `issued list`, `issued check` | `mashctl doctor`; one endpoint's records are in `mashctl endpoint show` |
-| `mashctl inbox inspect` | `mashctl endpoint inbox` |
-| `mash credential create` | `mash join FILE.join` (`--key bob.seed` when the endpoint made its own key) |
-| `mash admin` (11 commands) | `mashctl` (they need an administrator's credentials) |
-| `mash plugin export` | the plugin's marketplace: `claude plugin marketplace add bogworks/mash`, then `claude plugin install mash@mash` |
-| `acme_demo_bob` and `acme/demo/bob` address forms | `acme.demo.bob` only, in `mash send`, `mash prompt`, `mash who` and `mashctl endpoint ...` |
-| Exit codes: failures exited 2, 3 or 6, depending on the command | 0 (it worked), 1 (it failed) and 2 (the command line was wrong) only |
-| `--verbose`, `-v` | `--detail` (an unknown option, exit 2, if you still pass the old one) |
-| `mash who --match`, `--name`, `--owner`, `--cap`, `--long`, `--names`, `--format` | a prefix (`mash who acme.demo`), `--role`, `--capability`, `--label`, `--wide`, `--json` |
-| `mash send TO TEXT...` with several words, MCP `send` parameters `to`, `text`, `in_reply_to`, `via` | one quoted message (or `--file`, or standard input); `address`, `message`, `reply_to`, `relay` |
-| MCP `read` argument `seq` | `number` |
-| The old `mash status` rows (config, creds, connection, channel) | `mash status` (one line) and `mash doctor` (one row per check) |
-| Unverified mail delivered with a label | refused by default; `--accept-unverified` or `MASH_ACCEPT_UNVERIFIED=1` restores it |
-| `mash serve` run by hand in a terminal | refused: `mash serve is started by an agent host, not by hand` (exit 2) |
+- One name for each setting (`MASH_ENDPOINT`, `MASH_SERVER`, `MASH_CA`) as a variable, an option and a `config.json` key, and addresses are `owner.group.name` only ([#888](https://github.com/bogworks/mash/pull/888)).
+- A session is an agent only when `MASH_ENDPOINT` names it ([#897](https://github.com/bogworks/mash/pull/897)).
+- `mash status` is one line, and says whether mail works ([#924](https://github.com/bogworks/mash/pull/924)).
+- `mash who` prints a headed table and `--json` is `{"endpoints": [...]}` ([#919](https://github.com/bogworks/mash/pull/919)).
+- `mash inbox` and `mash read` have a new form, mail is quoted, and deleted senders are not counted ([#951](https://github.com/bogworks/mash/pull/951)).
+- Every error is one `error:` line with a `hint:` line, and exit codes are 0, 1 and 2 ([#982](https://github.com/bogworks/mash/pull/982)).
+- A 0.5.5 configuration folder is refused and names the script that moves it ([#994](https://github.com/bogworks/mash/pull/994)).
 
-### Quick start: your first agent
+### Removed
 
-On one machine. You need Claude Code, `openssl`, and `nats-server` (2.10.7 or newer) with the `nats` command; `mash-local-nats-setup.sh` names anything that is missing and says where to get it.
-
-```sh
-curl -fsSL https://github.com/bogworks/mash/releases/latest/download/install.sh | bash
-curl -fsSL https://github.com/bogworks/mash/releases/latest/download/mash-local-nats-setup.sh | bash
-mashctl init --config ~/mash-nats/mash-setup.yaml     # the last line the setup script printed, with the path it used
-```
-
-`install.sh` installs `mash` and `mashctl` from the same release into `~/.local/bin` (or the folder `MASH_INSTALL_DIR` names) and says which release it fetched: `Installed mash v0.5.6 in ~/.local/bin`. The setup script makes a NATS server that only this machine can reach, with encryption on, and asks one question, the owner's name (here, `alice`). It does not start at boot; run it again with `--start` after a reboot.
-
-Make two agents, `alice.dev.design` and `alice.dev.review`. The group (`dev`) has no default: you always name it.
-
-```sh
-mashctl endpoint create alice.dev.design
-mashctl endpoint create alice.dev.review
-```
-
-With no option, `mashctl endpoint create` makes the agent's key on this machine and installs it here, ready to use. To give an agent to another machine, write a join file and install it there with `mash join`:
-
-```sh
-mashctl endpoint create alice.dev.bob --out alice.dev.bob.join      # on the mashctl machine
-mash join alice.dev.bob.join                                        # on the other machine: prints "Joined as alice.dev.bob."
-```
-
-If the private key must never leave the agent's machine, the agent makes its own first, and only the public half travels:
-
-```sh
-mash key create --out bob.seed                                                        # writes bob.seed and bob.seed.pub
-mashctl endpoint create alice.dev.bob --out alice.dev.bob.join --public-key bob.seed.pub
-mash join alice.dev.bob.join --key bob.seed
-```
-
-Install the plugin and start two sessions. What was proven live for this release is two endpoints mailing each other from the shell (the next block); the Claude Code session step here was checked in the plugin's structure and configuration, not in a live two-session run:
-
-```sh
-claude plugin marketplace add bogworks/mash
-claude plugin install mash@mash
-MASH_ENDPOINT=alice.dev.design claude --dangerously-load-development-channels plugin:mash@mash   # terminal 1
-MASH_ENDPOINT=alice.dev.review claude --dangerously-load-development-channels plugin:mash@mash   # terminal 2
-```
-
-
-Send mail from a shell and read it:
-
-```sh
-MASH_ENDPOINT=alice.dev.design mash send alice.dev.review "hello"     # prints: Mail sent (number 1).
-MASH_ENDPOINT=alice.dev.review mash inbox
-MASH_ENDPOINT=alice.dev.review mash read 1
-MASH_ENDPOINT=alice.dev.review mash status                            # alice.dev.review: ready, offline
-```
-
-The number in `Mail sent (number N).` is the message's place in the recipient's inbox. The recipient's `mash read` takes it, and an answer arrives marked `reply to: N`. `mash status` says `ready, online` while an agent session holds the endpoint. `mash doctor` lists each check and says how to fix what failed.
-
-### Not in 0.5.6
-
-These were looked at and left out, so you do not wait for them. None has a date.
-
-- **Wake on reply, deadline wake and peer state.** A session is woken by a backlog (see Added), not yet when a reply arrives, when a deadline passes or when a peer comes or goes ([#871](https://github.com/bogworks/mash/issues/871)).
-- **A trust record, generations and `mash trust reset` and `replace`** ([#862](https://github.com/bogworks/mash/issues/862)).
-- **`mash plugin install`,** and verification of the marketplace plugin's bytes ([#863](https://github.com/bogworks/mash/issues/863)).
-- **Stand-alone NATS setup guides.** The local script is in this release; guides for a local server and for Synadia Cloud come in 0.6.0 ([#1037](https://github.com/bogworks/mash/issues/1037)).
-- **Synadia Cloud and hosted NATS without the operator key** are outside `mashctl` ([#876](https://github.com/bogworks/mash/issues/876)).
-- **A structured list from `mash who` and `endpoint list` in the MCP tools,** until MCP revision 2026-07-28 ([#877](https://github.com/bogworks/mash/issues/877)).
-
-### Planned for 0.6.0
-
-Breaking changes we already know about, so you can plan. None has a date, and none is in 0.5.6.
-
-- **`mash prompt` and the `reply` tool move to `mash sap`.** A live prompt is part of the Synadia Agent Protocol, not everyday mail. 0.5.6 leaves `mash prompt` as it is ([#881](https://github.com/bogworks/mash/issues/881)).
-- **The endpoint directory and NATS service subjects become owner-scoped.** Today any endpoint can read every owner's directory entries ([#1035](https://github.com/bogworks/mash/issues/1035)) and use the NATS service subjects ([#1012](https://github.com/bogworks/mash/issues/1012)). Scoping them to their owner may stop something that works today across owners.
-- **A mesh holds many owners.** `mashctl owner create`, `list` and `delete` arrive, and mail between owners becomes a designed case.
-- **Policy: who may send to whom.** mash ships open; narrowing will be a choice.
-- **Asking to join.** An endpoint will be able to ask to join and wait for approval, by an administrator or by policy.
-- **How a session is woken.** We will look at the MCP Events extension. Channels stay until then.
-- **Telling a suspended agent from a deleted one.** Today a send to either says `is suspended or was deleted`.
-
-### Known issues
-
-Each has an issue; the issue is the place for detail and any workaround. Listed by what you would notice.
-
-Mail and trust:
-
-- [#874](https://github.com/bogworks/mash/issues/874): refused unverified mail: the sender is not told, and the mail is still stored.
-- [#935](https://github.com/bogworks/mash/issues/935): an administrator cannot see which messages an endpoint refused.
-- [#958](https://github.com/bogworks/mash/issues/958): `mash inbox` may count unverified mail that `serve` has not yet refused.
-- [#990](https://github.com/bogworks/mash/issues/990): `mash read` at a shell can say "refused" for mail `serve` delivered under `--accept-unverified`.
-- [#960](https://github.com/bogworks/mash/issues/960): a signed message replayed within 5 minutes shows as verified a second time (no workaround).
-- [#883](https://github.com/bogworks/mash/issues/883): `Mash-Kind` is unsigned.
-- [#866](https://github.com/bogworks/mash/issues/866): `mash read` from a shell with no session does not tell the server until the next session starts.
-- [#955](https://github.com/bogworks/mash/issues/955): `mash inbox` counts urgent mail among only the newest 200 messages.
-- [#1070](https://github.com/bogworks/mash/issues/1070): `mash inbox` gets slower with the span of the mailbox's messages, not the size of the page.
-- [#1069](https://github.com/bogworks/mash/issues/1069): `mash doctor`'s refused-mail count can stay one low after `serve` is killed mid-refusal.
-- [#1054](https://github.com/bogworks/mash/issues/1054): `mash inbox` and the wake still count older waiting mail from a deleted sender that the list leaves out.
-- [#918](https://github.com/bogworks/mash/issues/918): `mashctl`'s online (holds the lease) and `mash who`'s online (heartbeat) can disagree for up to 90 seconds.
-- [#1039](https://github.com/bogworks/mash/issues/1039): mash cannot discover endpoints served by a SAP SDK host; the fix is planned on mash's side after 0.5.6.
-
-Setting up and installing:
-
-- [#878](https://github.com/bogworks/mash/issues/878): one config folder serves one mesh; a second mesh needs `--config-dir`.
-- [#965](https://github.com/bogworks/mash/issues/965): `mashctl init --config` refuses a folder set up for a different server.
-- [#1065](https://github.com/bogworks/mash/issues/1065): `mashctl init` prints an unknown setup key in its error.
-- [#865](https://github.com/bogworks/mash/issues/865): the NATS helper has no boot start, upgrade, backup, other-machine listening or key retirement.
-- [#995](https://github.com/bogworks/mash/issues/995): `mash-local-nats-setup.sh --remove` refuses when a later instance took a stopped folder's recorded port.
-- [#1093](https://github.com/bogworks/mash/issues/1093): `mash-local-nats-setup.sh`: after a run was killed and left its lock behind, two runs started at the same moment can both take the lock, and both then start, stop or remove the same local server. Someone who runs two of `--start`, `--stop` and `--remove` at once, just after a killed run, meets this; both runs are by the same user. Workaround: run one lifecycle command at a time; after a killed run, run `--stop`, then `--start`, one after the other.
-- [#1094](https://github.com/bogworks/mash/issues/1094): `mash-local-nats-setup.sh --start` says "already running" whenever the recorded server process is alive, without checking that the server answers, so a server that is up but not serving (one stuck while starting, for example) is reported as running. Someone whose local server process is up but not serving, who runs `--start` to bring it back, meets this. Workaround: run `mashctl status`; if it is not ok, run the script with `--stop`; if that says it did not stop, run `kill -KILL` on the process number in `<dir>/server.pid`, then `--stop`, then `--start`, then `mashctl status` again (it says ok).
-- [#1099](https://github.com/bogworks/mash/issues/1099): a failing `mash doctor` ends `1 problem.` with no fix, though its help says it tells you how to fix what is wrong, and some hints point at a command that gives the same answer: `mash status` hints `mash doctor`, and `mashctl doctor` on a down server hints `mashctl status`, which only checks. Anyone who follows the hints after a failure meets this, and an agent that follows every hint can loop. No workaround to run; read the failing row itself, which names the fault. For a local server that is down, the fix is `mash-local-nats-setup.sh --start`, which neither command prints.
-- [#959](https://github.com/bogworks/mash/issues/959): `install.sh` checks checksums only when `gh` is missing or too old; the one-line commands run a script before you can read it.
-- [#1071](https://github.com/bogworks/mash/issues/1071): `install.sh` killed between its two moves leaves `mash` and `mashctl` at different versions; run it again.
-- [#1072](https://github.com/bogworks/mash/issues/1072): `install.sh` does not pin the source commit (`--source-digest`) when it verifies attestations.
-- [#875](https://github.com/bogworks/mash/issues/875): `mash doctor` has no idle-wake (channel) or plugin check.
-- [#993](https://github.com/bogworks/mash/issues/993): on a host without Claude Code hooks, `doctor`'s delivery row warns for as long as it runs.
-- [#1008](https://github.com/bogworks/mash/issues/1008): a first `mash join` interrupted partway leaves a folder that neither a retry nor `--replace` finishes.
-- [#1013](https://github.com/bogworks/mash/issues/1013): a join file of another account on the same servers can join a folder that already holds an endpoint.
-- [#1097](https://github.com/bogworks/mash/issues/1097): `mashctl status` prints nothing and exits 0 when no server is configured. Someone running it before `mashctl init` meets this, and a script or skill that reads silence as "ok" is misled. Workaround: run `mashctl doctor`, whose config row fails: `config     FAIL  no servers in the configuration`, then `1 problem.` and `hint: mashctl init --config <file>`, exit 1.
-- [#1062](https://github.com/bogworks/mash/issues/1062): `mash join` adds a certificate authority to a folder that has servers but no endpoint.
-- [#1066](https://github.com/bogworks/mash/issues/1066): `mash join`'s rollback can remove a replaced creds file.
-- [#1063](https://github.com/bogworks/mash/issues/1063): the migration script can write outside the mash folder if a parent path is replaced.
-
-Endpoints and credentials:
-
-- [#879](https://github.com/bogworks/mash/issues/879): the join file can carry a seed in clear text, with no expiry or single use.
-- [#867](https://github.com/bogworks/mash/issues/867): `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION` is honoured when inherited, with no fresh choice.
-- [#880](https://github.com/bogworks/mash/issues/880): with several servers, revocation must reach every one; there are no failover rules.
-- [#912](https://github.com/bogworks/mash/issues/912): `endpoint delete` has no drained-delete guard; mail arriving between a drain and a delete is lost.
-- [#872](https://github.com/bogworks/mash/issues/872), [#767](https://github.com/bogworks/mash/issues/767): two machines reissuing one endpoint at once can still interleave. The reissue lock covers one machine only.
-- [#765](https://github.com/bogworks/mash/issues/765): a killed same-host `endpoint create` leaves an unused issue record.
-- [#1081](https://github.com/bogworks/mash/issues/1081): if `mashctl endpoint delete` fails after the key was cancelled, its error is long, internal and writes the address with underscores; run the same command again, as it says (revoking again is safe).
-- [#1055](https://github.com/bogworks/mash/issues/1055): the everyday commands say "no credentials here" for an endpoint deleted on this machine; `mash doctor` says it was deleted.
-- [#1056](https://github.com/bogworks/mash/issues/1056): `doctor` and `status` trust a local `<creds>.deleted` file to say an endpoint was deleted (a same-user risk).
-- [#1064](https://github.com/bogworks/mash/issues/1064): retiring an endpoint keeps the revoked seed on disk as `.creds.deleted`.
-- [#869](https://github.com/bogworks/mash/issues/869): standing risk: anything running as the same OS user can do what that user can (accepted for mash).
-
-One more thing you may see: after a `mash send` that timed out, the server's log can show a filtered `_MASH.settle.*` line. It is expected and harmless.
-
-Some tests are flaky in CI ([#842](https://github.com/bogworks/mash/issues/842), [#861](https://github.com/bogworks/mash/issues/861), [#899](https://github.com/bogworks/mash/issues/899)); they do not affect the product.
+- The old top-level `mashctl` commands, `mash admin` and `mash credential create`, each with a named replacement ([#917](https://github.com/bogworks/mash/pull/917)).
+- `mash plugin export`; install the plugin from its marketplace ([#1003](https://github.com/bogworks/mash/pull/1003)).
 
 ### Security
 
-This release refuses unverified mail by default (see Added and Upgrading). It also makes turning encryption off a deliberate, noisy act: one environment variable with a long name, no flag, no config key, and a warning on every command while it is set. Every download has a build attestation; verify it, as the install guide describes ([docs/install.md](https://github.com/bogworks/mash/blob/v0.5.6/docs/install.md#verify-what-you-download)).
+- Unverified mail is refused by default, and the sender is not told ([#952](https://github.com/bogworks/mash/pull/952)).
+- Turning encryption off is one environment variable with a long name, no flag, and a warning on every command ([#974](https://github.com/bogworks/mash/pull/974)).
 
-### Details
-
-#### Added
-
-- **`mash join FILE`** installs an endpoint on this machine from the join file whoever runs your mesh gave you. It copies the server addresses and the certificate authority's certificate into the configuration folder, writes the endpoint's creds file there (mode 0600), and prints `Joined as acme.demo.bob.` (`--detail` adds the `servers:` and `creds:` lines). When the endpoint made its own key, `--key bob.seed` supplies it. An endpoint already installed is refused unless you pass `--replace`; a join file for another mesh is refused, because one configuration folder serves one mesh (`--config-dir` names another). `--dry-run` writes nothing. It never prints a seed.
-- **`mash doctor`** (and an MCP `doctor` tool) checks everything mail depends on: config, creds, server, sign-in and refused mail, one row each, then a count and, for the first problem with a fix, a hint. It exits 1 when it finds a problem; `--strict` makes a warning exit 1 too. Its delivery row also reports hooks: a warning until they have run in the session, a failure when they are not delivering mail. `mashctl doctor` does the same for the server and its records.
-- **`mash status --detail`** says whether mail will reach the session: whether it holds the endpoint, whether its hooks ran, and whether storage works. With `--json` it adds a `reason_code`, a fixed word beside the reason, and the session.
-- **`--detail` on every command** of `mash` and `mashctl`: the usual answer plus `label: value` lines, or with `--json` a fuller object that contains the usual one. A command with nothing more to say prints the same.
-- **`install.sh` and `mash-local-nats-setup.sh`**, with the release. `install.sh` installs `mash` and `mashctl` from one release, checks each against the release's checksums (and the attestation too when `gh` is installed), asks nothing and needs no `sudo` ([ADR 0150](https://github.com/bogworks/mash/blob/v0.5.6/docs/decisions/0150-releases-carry-install-and-local-nats-setup-scripts-as-attested-assets.md)). The local setup script makes a NATS server only this machine can reach and writes the file `mashctl init --config` reads.
-- **A `mash-setup` plugin** with a setup skill and a day-2 skill: install it from the marketplace first (`claude plugin install mash-setup@mash`), then ask your agent to set mash up. It walks you through installing mash and a local NATS server.
-- **`mash who` filters by what an endpoint does**: `--role TEXT`, `--capability NAME` and `--label NAME[=VALUE]`, the last two repeatable (all must match); the MCP tool takes the same.
-- **A wake for a backlog.** `mash serve` wakes the session when more than 15 messages are waiting, or the oldest has waited longer than an hour, at most once every 10 minutes and not in the first 10 minutes after it starts. Change the limits with `MASH_WAKE_COUNT` / `wake_count` and `MASH_WAKE_AGE` / `wake_age` (for example `30m` or `2d`), or `mash serve --wake-count N --wake-age DURATION`; `0` turns a limit off. `mash inbox` says on its second line when a limit has passed.
-- **`mash send` prints the message's number**: `Mail sent (number 42).`, in the command and the tool. Urgent and retagged mail say so too (`Urgent question mail sent (number 43).`; `Mail sent as fyi (number 44): a reply marked question that asks nothing.`). `--json` prints the same object, including `retagged`.
-- **The plugin tells you when mash is missing.** When mash is not installed, the plugin's session-start hook prints one line with the install command, so the agent can tell you. `MASH_RELEASE_BASE` moves the versioned downloads to a fork or mirror; the install line the plugin prints always names the project's own release address ([#996](https://github.com/bogworks/mash/pull/996)).
-
-#### Changed
-
-- **Unverified mail is refused by default.** Only mail whose trust is `verified` reaches the session, `mash inbox` and `mash read`. Mail that is unsigned, signed by an unknown key, claimed but unproven, or stale is dropped and counted; `mash doctor` shows the count in its `refused` row, and the sender is not told. `mash read` on the number of a refused message says it was refused. `MASH_ACCEPT_UNVERIFIED=1` (or `accept_unverified` in `config.json`, or `mash serve --accept-unverified`) delivers it, labelled. Mail refused earlier is not delivered afterwards.
-- **One name for each setting, and three ways to give it.** `MASH_ENDPOINT`, `MASH_SERVER` (a comma list) and `MASH_CA` each also exist as `--endpoint`, `--server`, `--ca` and as `endpoint`, `servers`, `ca` in `config.json`. With one endpoint's credentials in the config folder, the commands you type use it without being told.
-- **A session is an agent only when it is told which.** `mash serve` and `mash hook` do not pick the one installed endpoint for themselves.
-- **Turning encryption off has one name.** `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1`, environment only, with a warning from every command; `MASH_INSECURE_PLAINTEXT` and `insecure_plaintext` are refused with an error that names it.
-- **Addresses are written `owner.group.name` and nothing else.** `acme_demo_bob` and `acme/demo/bob` stop with exit 2 and `error: acme_demo_bob is not an address; write it as acme.demo.bob`.
-- **`mash status` is one line**: `acme.demo.bob: ready, offline` (or `ready, online`), or `acme.demo.bob: not ready: <why>` with `hint: mash doctor` and exit 1. It connects and signs in, so it says whether mail works. Asked through a session's tools, `status` and `doctor` report on that session itself.
-- **`mash who` prints a headed table** of `ADDRESS` and `STATE` (`--wide` adds `ROLE`, `HOST` and `DESCRIPTION`). `mash who acme` lists everything under `acme`, `mash who acme.demo` that group, `mash who acme.demo.bob` that one endpoint, never `acme.demo.bobby`. `--online` and `--offline` cannot be combined. `--json` is `{"endpoints": [...]}`, never a bare array.
-- **`mash inbox` and `mash read` have a new form**, the same at a shell and in the MCP tools. `mash inbox` prints a summary line and a table (number, sender, age, `new` or `read`, urgency, kind, first line); `--new`, `--after NUMBER` and `--wide` narrow or widen it, and `--limit` is at most 100. `mash read NUMBER` prints labelled lines, then the whole text with `> ` before every line, control characters escaped, so nothing a sender writes can pass for mash's own words. `--json` carries the text unquoted in `body`.
-- **`mash send` takes the message as one argument** (quote it), or `--file`, or standard input, and has `--reply-to`, `--relay` and `--id`. `mash version` prints one line, `mash v0.5.6 (` and the short commit `)`. `mash <verb> --json` on a verb with no JSON form is a usage error.
-- **A missing credentials file, a suspended or deleted recipient and a deleted endpoint are named plainly.** When the creds file is not where the configuration says, `send`, `inbox`, `read` and `who` print `error: acme.demo.bob has no credentials here: <path> is missing` and `hint: mash doctor`, never the operating system's words. A `send` to an agent that takes no mail prints `error: acme.demo.alice is suspended or was deleted; nothing was sent` and `hint: mash who`, never the server's. On the machine that deleted an endpoint, `mash status` says `this endpoint was deleted; its address cannot be used again`, and `mash doctor` says so in its creds row; from another machine, `doctor` says it in its sign-in row and points to a new join file.
-- **`mash inbox` counts what it lists.** Mail from a sender that has since been deleted is not shown, so it is no longer counted in the total or the new count (one limit remains: see Known issues).
-- **Errors look alike.** An error before a command runs (a bad option, an unknown command, a configuration or endpoint that cannot be used) is one `error:` line with a `hint:` line on stderr; with `--json` it is `{"error","hint"}` on stdout. Exit codes are 0, 1 and 2.
-- **`mash key create` follows the specification.** `--out` defaults to `mash.seed`, the public key goes beside it as `bob.seed.pub`, and it prints `Created bob.seed and bob.seed.pub.`, or `error: bob.seed already exists; nothing was written` (exit 1). `--pub-out` and `--dry-run` are gone.
-- **A 0.5.5 configuration folder is named for what it is.** Every command that reads the configuration stops with `error: <folder> holds a mash 0.5.5 configuration` and a hint to `mash-migrate-0.5.5.sh`; nothing is read or changed.
-- **Setup is `mashctl init --config FILE`,** and `mashctl` does not install or start NATS.
-
-#### Removed
-
-- **Everything in the table above.** Each removed command or setting has a replacement named there; none is kept as an alias.
-- **The old `mash who` output modes and filters** (`--match`, `--name`, `--owner`, `--cap`, `--long`, `--names`, `--format`, the tab-separated lines and the last-seen column).
-- **The one-line `#seq` inbox listing and the `--- #5 from ...` form of `mash read`.** The hook still delivers mail in its own form.
-
-[Full changes](https://github.com/bogworks/mash/compare/v0.5.5...v0.5.6)
+Known issues: 43 known issues, listed in the [release notes](https://github.com/bogworks/mash/blob/v0.5.6/docs/release-notes/0.5.6.md#known-issues)
+Links: [Release notes](https://github.com/bogworks/mash/blob/v0.5.6/docs/release-notes/0.5.6.md), [full changes](https://github.com/bogworks/mash/compare/v0.5.5...v0.5.6), [verify your download](https://github.com/bogworks/mash/blob/v0.5.6/docs/install.md#verify-what-you-download)
 
 ## [0.5.5] - 2026-11-18
 

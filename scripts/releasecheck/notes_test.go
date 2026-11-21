@@ -318,3 +318,141 @@ func TestCheckAssets_releaseBodyScope(t *testing.T) {
 		}
 	})
 }
+
+// rule23Entry is a change-log entry body that passes releasenotes.ChangelogEntry for 0.5.7.
+func rule23Entry() string {
+	return "### Summary\n\n" + proseWords(45) + "\n\n### Upgrading\n\nNothing to do.\n\n### Added\n\n- One thing. [#1](https://github.com/bogworks/mash/pull/1)\n\n" +
+		"Known issues: 2, [the list](https://github.com/bogworks/mash/issues?q=label%3Aknown-0.5.7)\n" +
+		"Links: [release notes](https://github.com/bogworks/mash/blob/v0.5.7/docs/release-notes/0.5.7.md), [compare](https://github.com/bogworks/mash/compare/v0.5.6...v0.5.7), [verify](https://github.com/bogworks/mash/blob/v0.5.7/docs/release-notes/0.5.7.md#verify-what-you-download)\n"
+}
+
+// rule23Notes is a release notes file that shares rule23Entry's Summary and Upgrading.
+func rule23Notes() string {
+	return "### Summary\n\n" + proseWords(45) + "\n\n### Why this release\n\nBecause.\n\n### Upgrading\n\nNothing to do.\n\n### Verify what you download\n\nRun the check.\n"
+}
+
+// notesRepo23 is notesRepo with docs/release-notes/0.5.7.md committed too (notes "" commits none).
+func notesRepo23(t *testing.T, changelog, notes string) (Options, string) {
+	t.Helper()
+	o, _ := notesRepo(t, "v0.4.0", changelog)
+	if notes != "" {
+		write(t, o.Repo, "docs/release-notes/0.5.7.md", notes)
+		gitT(t, o.Repo, "add", "-A")
+		gitT(t, o.Repo, "commit", "-q", "-m", "release notes")
+	}
+	o.Version = "0.5.7"
+	return o, gitT(t, o.Repo, "rev-parse", "HEAD")
+}
+
+func TestChangelogSectionOpens_rule23(t *testing.T) {
+	entry := rule23Entry()
+	cases := []struct {
+		name    string
+		entry   string
+		notes   string
+		version string // "" is 0.5.7
+		want    string // "" passes
+	}{
+		{"a conforming entry and its notes pass", entry, rule23Notes(), "", ""},
+		{"an entry with no Known issues line is refused", strings.Replace(entry, "Known issues:", "Issues:", 1), rule23Notes(), "", "rubric 10"},
+		{"a quick start in the entry is refused", entry + "\n```\nmash up\n```\n", rule23Notes(), "", "rubric 8"},
+		{"no release notes file is refused", entry, "", "", "docs/release-notes/0.5.7.md is missing"},
+		{"notes with another Summary are refused", entry, strings.Replace(rule23Notes(), "word", "other", 1), "", "Summary of the release notes file differs"},
+		{"notes with another Upgrading are refused", entry, strings.Replace(rule23Notes(), "Nothing to do.", "Run it.", 1), "", "Upgrading section of the release notes file differs"},
+		{"notes with a placeholder are refused", entry, rule23Notes() + "REPLACE THIS\n", "", "REPLACE THIS"},
+		{"a version below 0.5.7 keeps the old rule: a bare section passes with no notes file", goodSection(), "", "0.5.6", ""},
+		{"a version below 0.5.7 is not held to the rubric", goodSection() + "- no link at all\n", "", "0.5.6", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			v := c.version
+			if v == "" {
+				v = "0.5.7"
+			}
+			o, x := notesRepo23(t, changelogWith([2]string{v, c.entry}), c.notes)
+			o.Version = v
+			err := changelogSectionOpens(o, x)
+			if c.want == "" {
+				if err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("got %v, want %q", err, c.want)
+			}
+		})
+	}
+	t.Run("the notes file is read from X, not the working tree", func(t *testing.T) {
+		o, x := notesRepo23(t, changelogWith([2]string{"0.5.7", entry}), "")
+		write(t, o.Repo, "docs/release-notes/0.5.7.md", rule23Notes())
+		if err := changelogSectionOpens(o, x); err == nil {
+			t.Fatal("the working tree's notes file was read")
+		}
+	})
+	t.Run("the step names say what they judge", func(t *testing.T) {
+		if got := changelogStepName("0.5.7"); !strings.Contains(got, "one screen") || !strings.Contains(got, "docs/release-notes/0.5.7.md") {
+			t.Error(got)
+		}
+		if got := changelogStepName("0.5.6"); !strings.Contains(got, "opens with a Summary") {
+			t.Error(got)
+		}
+		if got := releaseBodyStepName("0.5.7"); !strings.Contains(got, "docs/release-notes/0.5.7.md") {
+			t.Error(got)
+		}
+	})
+}
+
+func TestReleaseBodyReads_rule23(t *testing.T) {
+	link := "Full changes: [v0.5.6...v0.5.7](https://github.com/bogworks/mash/compare/v0.5.6...v0.5.7)\n"
+	notes := rule23Notes()
+	published := []releaseRow{{TagName: "v0.5.6"}}
+	cases := []struct {
+		name  string
+		body  string
+		notes string // the file at X; "" is rule23Notes
+		want  string
+	}{
+		{"the notes file with the compare link passes", notes + "\n" + link, "", ""},
+		{"the change log entry as the body is refused", rule23Entry() + "\n" + link, "", "not docs/release-notes/0.5.7.md"},
+		{"an edited body is refused", strings.Replace(notes, "Because.", "Other.", 1) + "\n" + link, "", "not docs/release-notes/0.5.7.md"},
+		{"an extra paragraph after the compare link is refused", notes + "\n" + link + "\nMore.\n", "", "not docs/release-notes/0.5.7.md"},
+		{"the notes file alone lacks the compare link", notes, "", "no link to the full changes"},
+		{"a placeholder in the file and body is refused", notes + "REPLACE THIS\n" + "\n" + link, notes + "REPLACE THIS\n", "REPLACE THIS"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			file := c.notes
+			if file == "" {
+				file = notes
+			}
+			o, x := notesRepo23(t, changelogWith([2]string{"0.5.7", rule23Entry()}), file)
+			o.GH, o.GHRepo = fakeNotesGH(t, c.body, published), "bogworks/mash"
+			err := releaseBodyReads(o, x, "v0.5.7")
+			if c.want == "" {
+				if err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("got %v, want %q", err, c.want)
+			}
+		})
+	}
+	t.Run("a missing notes file is refused", func(t *testing.T) {
+		o, x := notesRepo23(t, changelogWith([2]string{"0.5.7", rule23Entry()}), "")
+		o.GH, o.GHRepo = fakeNotesGH(t, notes+"\n"+link, published), "bogworks/mash"
+		if err := releaseBodyReads(o, x, "v0.5.7"); err == nil || !strings.Contains(err.Error(), "is missing") {
+			t.Fatalf("got %v", err)
+		}
+	})
+	t.Run("0.5.6 keeps the change-log-section rule", func(t *testing.T) {
+		o, x := notesRepo23(t, changelogWith([2]string{"0.5.6", goodSection()}), "")
+		o.Version = "0.5.6"
+		o.GH, o.GHRepo = fakeNotesGH(t, goodSection()+"\nFull changes: [v0.5.5...v0.5.6](https://github.com/bogworks/mash/compare/v0.5.5...v0.5.6)\n", []releaseRow{{TagName: "v0.5.5"}}), "bogworks/mash"
+		if err := releaseBodyReads(o, x, "v0.5.6"); err != nil {
+			t.Fatal(err)
+		}
+	})
+}

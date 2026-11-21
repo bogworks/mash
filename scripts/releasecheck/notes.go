@@ -9,6 +9,10 @@ import (
 	"github.com/bogworks/mash/internal/releasenotes"
 )
 
+// From releasenotes.Rule23From (0.5.7) the rule is release standard rule 23 instead: the change-log entry is the record,
+// judged by releasenotes.ChangelogEntry, and the release notes file docs/release-notes/<version>.md is the release page's
+// text and shares the entry's Summary and Upgrading. Versions below it keep what follows.
+//
 // A release's notes and its change-log section are the same text, and it opens with prose before any list (release
 // standard rule 23, ADR 0105). The tests live in internal/releasenotes, which scripts/changelog (the draft job) uses too.
 //
@@ -48,7 +52,35 @@ func changelogSectionOpens(o Options, x string) error {
 	if !found {
 		return fmt.Errorf("CHANGELOG.md at %s has no section \"## [%s] - date\": run go run ./scripts/changelog assemble --version %s --date YYYY-MM-DD", x, o.Version, o.Version)
 	}
-	return errors.Join(prefixed("the CHANGELOG.md section for "+o.Version, releasenotes.NoPlaceholder(body)), prefixed("the CHANGELOG.md section for "+o.Version, releasenotes.Opening(body)), prefixed("the CHANGELOG.md section for "+o.Version, releasenotes.NoCommitHashLines(body)))
+	what := "the CHANGELOG.md section for " + o.Version
+	if !releasenotes.AtLeast(o.Version, releasenotes.Rule23From) {
+		return errors.Join(prefixed(what, releasenotes.NoPlaceholder(body)), prefixed(what, releasenotes.Opening(body)), prefixed(what, releasenotes.NoCommitHashLines(body)))
+	}
+	// Rule 23 (from releasenotes.Rule23From): the entry is the record and conforms to the rubric; the release notes file
+	// is the reading document and shares its Summary and Upgrading.
+	errs := []error{prefixed(what, releasenotes.ChangelogEntry(body, o.Version))}
+	file := notesFilePath(o.Version)
+	notes, has, err := fileAt(o.Repo, x, file)
+	if err != nil {
+		return err
+	}
+	if !has {
+		errs = append(errs, fmt.Errorf("%s is missing at %s: write the release notes (why this release, upgrading step by step, how to verify, known issues, what is next) and keep its Summary and Upgrading the same as the change log entry's", file, x))
+	} else {
+		errs = append(errs, prefixed(file, releasenotes.ReleaseNotesFile(notes, body)))
+	}
+	return errors.Join(errs...)
+}
+
+// notesFilePath is the release notes file of a version (release standard rule 23).
+func notesFilePath(version string) string { return "docs/release-notes/" + version + ".md" }
+
+// changelogStepName names the pre-tag gate step that judges the change log entry (and, under rule 23, the notes file).
+func changelogStepName(version string) string {
+	if releasenotes.AtLeast(version, releasenotes.Rule23From) {
+		return "the change log entry for " + version + " is one screen and conforms to the rubric, and the release notes file " + notesFilePath(version) + " exists and shares its Summary and Upgrading"
+	}
+	return "the change log section for " + version + " opens with a Summary and an Upgrading section"
 }
 
 func prefixed(what string, err error) error {
@@ -91,17 +123,31 @@ func releaseBodyReads(o Options, x, tag string) error {
 	}
 	prev := previousRelease(tag, releases)
 	body := strings.ReplaceAll(resp.Body, "\r\n", "\n")
-	// The notes are the change-log section at X (ADR 0105): an edited draft must not publish other text. The only
-	// addition allowed is the draft job's last paragraph, the "Full changes:" compare link.
-	changelog, has, err := fileAt(o.Repo, x, "CHANGELOG.md")
-	if err != nil {
-		return err
+	// Below releasenotes.Rule23From the notes are the change-log section at X (ADR 0105); from it, the release notes file
+	// at X (rule 23): an edited draft must not publish other text. The only addition allowed is the draft job's last
+	// paragraph, the "Full changes:" compare link.
+	var sameErr error
+	if releasenotes.AtLeast(o.Version, releasenotes.Rule23From) {
+		file := notesFilePath(o.Version)
+		notes, has, err := fileAt(o.Repo, x, file)
+		if err != nil {
+			return err
+		}
+		if !has {
+			return fmt.Errorf("%s is missing at %s to compare the release body with", file, x)
+		}
+		sameErr = bodyIsText(body, notes, "the release body is not "+file+" (plus the final \"Full changes:\" compare link): the release page is built from the release notes file (rule 23)")
+	} else {
+		changelog, has, err := fileAt(o.Repo, x, "CHANGELOG.md")
+		if err != nil {
+			return err
+		}
+		section, found := releasenotes.SectionBody(changelog, o.Version)
+		if !has || !found {
+			return fmt.Errorf("CHANGELOG.md at %s has no section for %s to compare the release body with", x, o.Version)
+		}
+		sameErr = bodyIsSection(body, section)
 	}
-	section, found := releasenotes.SectionBody(changelog, o.Version)
-	if !has || !found {
-		return fmt.Errorf("CHANGELOG.md at %s has no section for %s to compare the release body with", x, o.Version)
-	}
-	sameErr := bodyIsSection(body, section)
 	return errors.Join(
 		sameErr,
 		releasenotes.NoPlaceholder(body),
@@ -134,6 +180,11 @@ func previousRelease(tag string, releases []releaseRow) string {
 // bodyIsSection is nil when body is the change-log section text, optionally followed by one final paragraph that
 // starts with "Full changes:" (the compare link the draft job appends). Trailing blank space is not compared.
 func bodyIsSection(body, section string) error {
+	return bodyIsText(body, section, "the release body is not the CHANGELOG.md section for this version (plus the final \"Full changes:\" compare link): the release notes and the change log must be the same text (ADR 0105)")
+}
+
+// bodyIsText is nil when body is section, optionally followed by one "Full changes:" paragraph; msg is the refusal.
+func bodyIsText(body, section, msg string) error {
 	body = strings.TrimRight(body, " \t\n")
 	section = strings.TrimRight(strings.ReplaceAll(section, "\r\n", "\n"), " \t\n")
 	if body == section {
@@ -142,5 +193,13 @@ func bodyIsSection(body, section string) error {
 	if rest, ok := strings.CutPrefix(body, section+"\n\n"); ok && strings.HasPrefix(rest, "Full changes:") && !strings.Contains(rest, "\n") {
 		return nil
 	}
-	return errors.New("the release body is not the CHANGELOG.md section for this version (plus the final \"Full changes:\" compare link): the release notes and the change log must be the same text (ADR 0105)")
+	return errors.New(msg)
+}
+
+// releaseBodyStepName names the step that judges the release page's body.
+func releaseBodyStepName(version string) string {
+	if releasenotes.AtLeast(version, releasenotes.Rule23From) {
+		return "the release notes are " + notesFilePath(version) + " at X, open with a Summary and an Upgrading section, link the full changes, and are not a commit list"
+	}
+	return "the release notes open with a Summary and an Upgrading section, link the full changes, and are not a commit list"
 }

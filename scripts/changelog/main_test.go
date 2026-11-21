@@ -343,3 +343,63 @@ func TestCheckNotes(t *testing.T) {
 		t.Errorf("a missing file: want 2")
 	}
 }
+
+func TestReleasePage(t *testing.T) {
+	cl := header + "## [Unreleased]\n\n## [0.5.7] - 2026-11-22\n\n### Summary\n\nEntry prose.\n\n" + "## [0.5.6] - 2026-11-21\n\n### Summary\n\nOld prose.\n\n" + prior
+	root := tree(t, map[string]string{"CHANGELOG.md": cl, "docs/release-notes/0.5.7.md": "### Summary\n\nNotes prose.\n"})
+	// From 0.5.7 the page is the notes file, not the change log section.
+	if code, out, errs := cli("release-page", "--version", "0.5.7", "--root", root); code != 0 || out != "### Summary\n\nNotes prose.\n" {
+		t.Fatalf("0.5.7: %d %q %q", code, out, errs)
+	}
+	// Below it the page is the change log section, exactly as section prints it.
+	_, want, _ := cli("section", "--version", "0.5.6", "--root", root)
+	if code, out, errs := cli("release-page", "--version", "0.5.6", "--root", root); code != 0 || out != want || !strings.Contains(out, "Old prose.") {
+		t.Fatalf("0.5.6: %d %q %q", code, out, errs)
+	}
+	if code, out, errs := cli("release-page", "--version", "0.3.2", "--root", root); code != 0 || !strings.HasPrefix(out, "### Added\n\n- Old one.") {
+		t.Fatalf("0.3.2: %d %q %q", code, out, errs)
+	}
+	// A missing notes file, a missing section and a bad version fail with exit 1; a missing change log below it is exit 2.
+	if code, out, errs := cli("release-page", "--version", "0.5.8", "--root", root); code != 1 || out != "" || !strings.Contains(errs, "release-notes/0.5.8.md does not exist") {
+		t.Fatalf("missing notes: %d %q %q", code, out, errs)
+	}
+	if code, out, errs := cli("release-page", "--version", "0.5.5", "--root", root); code != 1 || out != "" || !strings.Contains(errs, "no section") {
+		t.Fatalf("missing section: %d %q %q", code, out, errs)
+	}
+	if code, _, _ := cli("release-page", "--version", "5.7", "--root", root); code != 1 {
+		t.Errorf("a bad version: want 1")
+	}
+	if code, _, _ := cli("release-page", "--version", "0.5.6", "--root", t.TempDir()); code != 2 {
+		t.Errorf("a missing change log: want 2")
+	}
+	if code, _, _ := cli("release-page"); code != 2 {
+		t.Errorf("no version: want 2")
+	}
+}
+
+func TestCheckEntry(t *testing.T) {
+	prose := strings.TrimSpace(strings.Repeat("word ", 45)) + "."
+	good := "### Summary\n\n" + prose + "\n\n### Upgrading\n\nNothing to do.\n\n### Added\n\n- One. [#1](https://github.com/bogworks/mash/pull/1)\n\n" +
+		"Known issues: 1, [the list](https://github.com/bogworks/mash/issues/9)\n" +
+		"Links: [notes](https://github.com/bogworks/mash/blob/v0.5.7/docs/release-notes/0.5.7.md), [compare](https://github.com/bogworks/mash/compare/v0.5.6...v0.5.7), [verify](https://github.com/bogworks/mash#verify-what-you-download)\n"
+	root := tree(t, map[string]string{
+		"CHANGELOG.md":     header + "## [Unreleased]\n\n## [0.5.7] - 2026-11-22\n\n" + good + "\n" + prior,
+		"bad/CHANGELOG.md": header + "## [0.5.7] - 2026-11-22\n\n### Added\n\n- no link\n",
+	})
+	if code, out, errs := cli("check-entry", "--version", "0.5.7", "--root", root); code != 0 || out != "" {
+		t.Fatalf("good: %d %q %q", code, out, errs)
+	}
+	code, out, _ := cli("check-entry", "--version", "0.5.7", "--root", root, "--changelog", "bad/CHANGELOG.md")
+	if code != 1 || !strings.Contains(out, "rubric 2:") || !strings.Contains(out, "rubric 7:") || !strings.Contains(out, "rubric 12:") {
+		t.Fatalf("bad: %d %q", code, out)
+	}
+	if code, _, errs := cli("check-entry", "--version", "0.9.0", "--root", root); code != 1 || !strings.Contains(errs, "no section") {
+		t.Errorf("missing section: %d %q", code, errs)
+	}
+	if code, _, _ := cli("check-entry", "--version", "0.5.7", "--root", t.TempDir()); code != 2 {
+		t.Errorf("missing change log: want 2")
+	}
+	if code, _, _ := cli("check-entry"); code != 2 {
+		t.Errorf("no version: want 2")
+	}
+}

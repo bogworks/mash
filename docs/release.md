@@ -35,18 +35,19 @@ refuses, and the maintainer asks for the tag. There is no `SHA256SUMS.sig` and n
 attested subject instead. Every attestation check pins four facts: `-R <repo>`, `--signer-workflow
 <repo>/.github/workflows/release.yml`, `--source-ref refs/tags/v<version>` and `--source-digest <X>` (X is the release
 commit). `release-check --assets` verifies the eight binaries (`mash` and `mashctl`, see [ADR 0148](decisions/0148-releases-build-mashctl-beside-mash-with-the-same-supply-chain-checks.md)) and `SHA256SUMS` that way and rebuilds the binaries. After
-`--assets` passes, publication is `scripts/release-check publish <version> <X>` (for 0.5.5: `scripts/release-check publish --not-latest 0.5.5 <X>`, see below): once the service's tag exists at X it
+`--assets` passes, publication is `scripts/release-check publish <version> <X>` (for 0.5.6 and later: no `--not-latest`, see below): once the service's tag exists at X it
 runs the pre-tag gate, `--assets` and the final checks (the sums and every attestation again) immediately before
 `gh release edit v<version> --draft=false`, so the publish step is bound to what was just verified. It makes no tag and
 signs nothing. Do not publish a keyless draft with a bare `gh release edit`.
 
-**0.5.5 is published with `--not-latest`**, and so is every resume of that publish: `scripts/release-check publish --not-latest 0.5.5 <X>`
-(0.5.0 stays the release that running deployments keep using; 0.5.5 reads none of its state). With the flag the publish edit
-carries `--latest=false`, and the command then reads `gh release list --json tagName,isLatest` back and fails if v0.5.5 is
-marked latest or is missing from the list; a rerun on an already published release re-checks it too. Required step of
-the procedure: after the command reports success, check by eye that `gh release list` still shows v0.5.0 as Latest and
-v0.5.5 as not Latest. A publish made without the flag is a mistake: if the release is then marked latest, set it back with
-`gh release edit v0.5.5 --latest=false` and say so in the release record.
+**0.5.5 was published with `--not-latest`** (0.5.0 stayed the release that running deployments kept using; 0.5.5 reads none
+of its state). **0.5.6 and later releases are published as Latest: no `--not-latest`.** `install.sh` and the one-line install
+commands download from `releases/latest/download`, so a release that is not Latest is not what they install. Required step of
+the procedure: after `scripts/release-check publish <version> <X>` reports success, read back
+`gh release list --json tagName,isLatest` and check that the new tag, and only it, is marked `isLatest`; if it is not, fix
+it (`gh release edit v<version> --latest`) and say so in the release record. A tag never moves (rule 25 of the release
+standard): once the release is published, its page text may still be corrected with `gh release edit`, but the tag and the
+assets are not changed.
 
 ### What a keyless release does not prove
 
@@ -123,8 +124,8 @@ The numbered steps are what the command does in each state, and the manual path 
    go run ./scripts/adrlint index --write                                    # docs/decisions/INDEX.md
    ```
    and set the `version` of both `plugin/.claude-plugin/plugin.json` and `mash-setup/.claude-plugin/plugin.json` to `X.Y.Z`. `assemble --dry-run` prints the section first.
-   **Then replace the two placeholders.** A release's notes and its change-log section are the same text, and it opens
-   with prose before any list ([ADR 0105](decisions/0105-a-releases-notes-are-its-change-log-section-and-open-with-a-summary-and-an-upgrading-section-and-the-release-gate-refuses-one-that-does-not.md)).
+   **Then replace the two placeholders.** (0.5.6 and earlier: a release's notes and its change-log section are the same text, and it opens
+   with prose before any list; from 0.5.7 see "Two documents for a release" below.) ([ADR 0105](decisions/0105-a-releases-notes-are-its-change-log-section-and-open-with-a-summary-and-an-upgrading-section-and-the-release-gate-refuses-one-that-does-not.md)).
    `assemble` writes, directly under the new `## [X.Y.Z] - date` heading, a `### Summary` whose paragraph starts
    `REPLACE THIS PARAGRAPH:` and a `### Upgrading` whose sentence starts `REPLACE THIS:`, above the fragment-derived lists.
    * **Summary:** at least 40 words of paragraph text, before any list or heading. Say what the release is for and who
@@ -179,8 +180,9 @@ The numbered steps are what the command does in each state, and the manual path 
    build provenance"). Only after all of these succeed does it create a **draft** release with the eight binaries, the eight
    `<program>-<os>-<arch>.cdx.json` SBOMs, the three scripts `install.sh`, `mash-local-nats-setup.sh` and `mash-migrate-0.5.5.sh` (the tagged `scripts/` files, copied unchanged by the
    `sums` job; no SBOM), `mash.intoto.jsonl`,
-   `SHA256SUMS` (which lists the binaries, the three scripts and the SBOMs, in that order) and the release notes. The notes are
-   the change-log section of the released version (`go run ./scripts/changelog section --version X.Y.Z`) with one final
+   `SHA256SUMS` (which lists the binaries, the three scripts and the SBOMs, in that order) and the release notes. For 0.5.6 and
+   earlier the notes are the change-log section of the released version; from 0.5.7 they are `docs/release-notes/<version>.md`
+   (see "Two documents for a release"). Where the notes are the change-log section (`go run ./scripts/changelog section --version X.Y.Z`), one final
    paragraph, `Full changes: [v<previous>...v<tag>](https://github.com/<repository>/compare/v<previous>...v<tag>)`, where the
    previous release comes from `scripts/notes-base` (the first release has no such line). The job fails before the draft
    exists when the version has no section or the notes fail `go run ./scripts/changelog check-notes`, the opening test the
@@ -188,10 +190,32 @@ The numbered steps are what the command does in each state, and the manual path 
    A failed attestation leaves no draft; fix the cause and rerun the workflow.
 6. **Gate, before publishing** (states: draft, then published, where it only verifies): `scripts/release-check --assets <version> <X>`: the remote tag exists, is annotated,
    verifies against `docs/allowed_signers` (the release key; never this machine's own git config), peels to X and is still that object after the assets were read; the release
-   carries exactly the eight binaries (`mash-<os>-<arch>` and `mashctl-<os>-<arch>`), the three scripts `install.sh`, `mash-local-nats-setup.sh` and `mash-migrate-0.5.5.sh`, the eight `<program>-<os>-<arch>.cdx.json` SBOMs, `mash.intoto.jsonl` and `SHA256SUMS`: each binary equal to a fresh build of X made here, each script byte-equal to `scripts/<name>` at X (`git show X:scripts/<name>`), and `SHA256SUMS` listing the binaries, the scripts and the SBOMs (the order the `sums` job writes: binaries, scripts, SBOMs); and, for each of the eight binaries and the three scripts, `gh attestation verify <binary> -R bogworks/mash --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/v<version>` (build provenance) and the same with `--predicate-type https://cyclonedx.org/bom` (SBOM; the attached `<binary>.cdx.json` must equal the attested predicate) pass on the files downloaded from the release, (the SBOM check applies to the binaries only: the scripts have no SBOM) and the same with `--bundle mash.intoto.jsonl` passes on each binary and each script (and `mash.intoto.jsonl` must name `.github/workflows/release.yml` as its workflow entry point) (a missing or failing check is refused, exit 3, naming the file; there is no skip flag; this covers an older or hand-made draft that the workflow never saw, and runs only after the tag, asset and build checks passed); the release body must also pass the same opening test (a Summary and an Upgrading section, as above), hold a link containing `compare/v<previous>...v<version>` (the previous release is the highest earlier published `vN.N.N`; with none, any `/compare/v` link ending `...v<version>`), have no line ending in a parenthesized commit hash of 7 to 40 hex digits, and not contain `REPLACE THIS`. The body is judged only for a version strictly above the cutover: the cutover release itself (v0.4.0) was published before this rule and is not re-judged, and earlier ones never are. Only when all of these pass is `SHA256SUMS.sig` made, verified and uploaded (see Signing), so a draft that fails any of them is never signed. Then publish the draft: `gh release edit v<version> --draft=false`.
+   carries the binaries of both programs, the three scripts `install.sh`, `mash-local-nats-setup.sh` and `mash-migrate-0.5.5.sh`, the eight `<program>-<os>-<arch>.cdx.json` SBOMs, `mash.intoto.jsonl` and `SHA256SUMS`: each binary equal to a fresh build of X made here, each script byte-equal to `scripts/<name>` at X (`git show X:scripts/<name>`), and `SHA256SUMS` listing the binaries, the scripts and the SBOMs (the order the `sums` job writes: binaries, scripts, SBOMs); and, for each of the eight binaries and the three scripts, `gh attestation verify <binary> -R bogworks/mash --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/v<version>` (build provenance) and the same with `--predicate-type https://cyclonedx.org/bom` (SBOM; the attached `<binary>.cdx.json` must equal the attested predicate) pass on the files downloaded from the release, (the SBOM check applies to the binaries only: the scripts have no SBOM) and the same with `--bundle mash.intoto.jsonl` passes on each binary and each script (and `mash.intoto.jsonl` must name `.github/workflows/release.yml` as its workflow entry point) (a missing or failing check is refused, exit 3, naming the file; there is no skip flag; this covers an older or hand-made draft that the workflow never saw, and runs only after the tag, asset and build checks passed); the release body must also pass the same opening test (a Summary and an Upgrading section, as above), hold a link containing `compare/v<previous>...v<version>` (the previous release is the highest earlier published `vN.N.N`; with none, any `/compare/v` link ending `...v<version>`), have no line ending in a parenthesized commit hash of 7 to 40 hex digits, and not contain `REPLACE THIS`. The body is judged only for a version strictly above the cutover: the cutover release itself (v0.4.0) was published before this rule and is not re-judged, and earlier ones never are. Only when all of these pass is `SHA256SUMS.sig` made, verified and uploaded (see Signing), so a draft that fails any of them is never signed. Then publish the draft: `gh release edit v<version> --draft=false`.
    Anyone can check a tag below the cutover the same way: `git -c gpg.ssh.allowedSignersFile=docs/allowed_signers verify-tag v<version>`.
    At or above the cutover (keyless), the checks are the remote tag (annotated, peels to X, unchanged after the assets were read) and, for the eight binaries, the three scripts **and** `SHA256SUMS`, `gh attestation verify <file> -R bogworks/mash --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/v<version> --source-digest <X>`; no `SHA256SUMS.sig` is made. Then the maintainer or the lead publishes the draft: `gh release edit v<version> --draft=false`.
 7. **Record the version and commit (optional):** anyone who tracks mash releases can copy the `version: <version> commit: <X>` line the gate printed into their own records; mash prescribes no format.
+
+### Two documents for a release
+
+From 0.5.7 a release has two documents with two jobs (rule 23 of the release standard), and the release page is built
+from `docs/release-notes/<version>.md`, not from the change log. 0.5.6 and earlier used the change-log section as the page
+([ADR 0105](decisions/0105-a-releases-notes-are-its-change-log-section-and-open-with-a-summary-and-an-upgrading-section-and-the-release-gate-refuses-one-that-does-not.md)).
+
+- **The change-log entry** in `CHANGELOG.md` is the record, 60 lines or fewer: a `### Summary` of prose, a `### Upgrading`
+  section, then only the headings Added, Changed, Removed, Fixed and Security, one line per change with one pull request
+  or issue link, then a one-line known-issues count with a link, and a line of links to the release notes, the compare
+  view and the verify instructions. It holds no quick start, tutorial, install steps, full known-issues list or roadmap.
+- **The release notes** are the reading document: Summary and Upgrading (the same sentences as the entry), why this
+  release, upgrading in detail, how to verify the download, `### Known issues` (the full list), what is not in it and what
+  comes next, the quick start, and links.
+
+The change-log entry is judged by a 13-question rubric that must all be yes: (1) 60 lines or fewer; (2) a Summary of at
+least 40 words before any list; (3) a newcomer can tell what changed for them; (4) Upgrading says what to do and names every
+breaking change; (5) each line says what a user sees; (6) only the fixed headings; (7) exactly one pull request or issue link
+per line, no commit hash; (8) no quick start, tutorial or install steps; (9) no roadmap text; (10) known issues are one
+line with a count and a link; (11) security changes are under Security; (12) it links the release notes, the compare view
+and the verify instructions; (13) no internal words. The release check judges nine of them by machine (1, 2, 4, 6, 7, 8,
+9, 10 and 12) and refuses on a no; 3, 5, 11 and 13 are a reader's call in the review of the release notes.
 
 ## Optional: check a downstream consumer
 
