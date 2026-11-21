@@ -62,12 +62,12 @@ The mash plugin needs the `mash` program on the PATH that Claude Code starts wit
 
 ### Or by hand
 
-Everything installs as you, in your home folder: no `sudo`, no package manager, no system service. Download the installer and its checksums, check, then run it:
+Everything installs as you, in your home folder: no `sudo`, no package manager, no system service. Download the installer and its checksums, check, then run it; each step is joined to the next with `&&`, so a failed check stops everything:
 
 ```sh
 BASE=https://github.com/bogworks/mash/releases/latest/download
-curl -fsSLO $BASE/install.sh -O $BASE/SHA256SUMS
-grep ' install.sh$' SHA256SUMS | sha256sum -c -    # macOS: shasum -a 256 -c -
+curl -fsSLO $BASE/install.sh -O $BASE/SHA256SUMS &&
+grep ' install.sh$' SHA256SUMS | sha256sum -c - &&    # macOS: shasum -a 256 -c -
 bash install.sh
 ```
 
@@ -75,11 +75,11 @@ This installs `mash` and `mashctl` from the release into `~/.local/bin`, after c
 
 The local NATS server and the rest of the by-hand route (`nats-server` and the `nats` command from their GitHub releases, `mash-local-nats-setup.sh`, two endpoints, the first mail) are in the [Quick start](docs/guide/walkthrough.md#quick-start), each command run on this release. To use a NATS server you already run, see [Bring your own NATS server](docs/nats-server.md).
 
-Where everything lives: the programs in `~/.local/bin`, the configuration and keys in `~/.config/mash`, a local server in `~/mash-nats`. How to remove it all: [Uninstall](docs/install.md#uninstall).
+Where everything lives, by default: the programs in `~/.local/bin` (`MASH_INSTALL_DIR` names another folder), the configuration and keys in `~/.config/mash` (`$XDG_CONFIG_HOME/mash` or `MASH_CONFIG_DIR` if set), a local server in `~/mash-nats` (the folder the setup script printed, if you used `--dir`). Check yours before you remove anything. How to remove it all: [Uninstall](docs/install.md#uninstall).
 
 ### When something is wrong
 
-`mash status`, then `mash doctor` (one endpoint); `mashctl status`, then `mashctl doctor` (the server). After a reboot a local server stays stopped: `bash mash-local-nats-setup.sh --start`. More in [docs/troubleshooting.md](docs/troubleshooting.md).
+`mash status`, then `mash doctor` (one endpoint); `mashctl status`, then `mashctl doctor` (the server). After a reboot a local server stays stopped: run the setup script you downloaded (keep it; the setup skill says where it saved it) with `--start`, and with `--dir DIR` if you used one: `bash <folder>/mash-local-nats-setup.sh --start`. More in [docs/troubleshooting.md](docs/troubleshooting.md).
 
 ## Check the download
 
@@ -87,7 +87,7 @@ Where everything lives: the programs in `~/.local/bin`, the configuration and ke
 
 ```sh
 BASE=https://github.com/bogworks/mash/releases/download/v0.5.6
-curl -fsSLO $BASE/install.sh -O $BASE/SHA256SUMS -O $BASE/mash.intoto.jsonl
+curl -fsSLO $BASE/install.sh -O $BASE/SHA256SUMS -O $BASE/mash.intoto.jsonl &&
 gh attestation verify SHA256SUMS -R bogworks/mash --bundle mash.intoto.jsonl \
   --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/v0.5.6
 ```
