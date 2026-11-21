@@ -16,6 +16,7 @@
 #   - a merge group, a schedule or any other event;
 #   - an empty path list (nothing to compare);
 #   - any path not listed as documentation below (the default is code, so a new top-level path is code).
+# Agent instructions stay code too: everything under mash-setup/ (the setup skills) and AGENTS.md or CLAUDE.md anywhere.
 # Documentation that a test or the build reads stays code, so it is tested when it changes:
 # docs/branch-protection.md (internal/release), docs/reference/ and spec/ (internal/refgen compares the generated reference with the spec), docs/review/ (scripts/reviewgate and scripts/gate read policy.json), docs/allowed_signers, docs/skipped-releases.txt and docs/release-cutover (the release tooling), CHANGELOG.md and changelog.d/
 # (scripts/changelog, lint.yml), every *.md under .github/, plugin/, scripts/, cmd/, internal/ and ci/ (the plugin package is
@@ -29,6 +30,8 @@ is_docs() {
 	lower="$(printf '%s' "$p" | tr '[:upper:]' '[:lower:]')"
 	case "$p" in
 	.github/* | .mergify.yml | .claude-plugin/* | plugin/* | scripts/* | cmd/* | internal/* | ci/*) return 1 ;;
+	# Agent instructions: a skill or a briefing an agent executes is code in effect (mash-lead, ADR 0156), wherever it sits.
+	mash-setup/* | AGENTS.md | */AGENTS.md | CLAUDE.md | */CLAUDE.md) return 1 ;;
 	go.mod | go.sum | */go.mod | */go.sum | *.go) return 1 ;;
 	testdata/* | */testdata/* | *conformance*) return 1 ;;
 	CHANGELOG.md | changelog.d/*) return 1 ;;

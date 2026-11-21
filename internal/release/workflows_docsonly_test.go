@@ -175,6 +175,12 @@ func TestDocsOnly_classifier(t *testing.T) {
 		{"a Go file under docs", pr, "f/x", []string{"docs/evidence/x/main.go"}, "true"},
 		{"a rename out of scripts into docs", pr, "f/x", []string{"scripts/notes.md", "docs/notes.md"}, "true"},
 		{"a file the classifier does not know", pr, "f/x", []string{"Makefile"}, "true"},
+		{"a setup skill", pr, "f/x", []string{"mash-setup/skills/setup/SKILL.md"}, "true"},
+		{"the setup plugin manifest", pr, "f/x", []string{"mash-setup/.claude-plugin/plugin.json"}, "true"},
+		{"agent instructions at the root", pr, "f/x", []string{"AGENTS.md"}, "true"},
+		{"agent instructions in a folder", pr, "f/x", []string{"docs/guide/AGENTS.md", "docs/a.md"}, "true"},
+		{"a briefing file in a folder", pr, "f/x", []string{"docs/x/CLAUDE.md"}, "true"},
+		{"a file merely named like one", pr, "f/x", []string{"docs/agents.md", "docs/MYAGENTS.md"}, "false"},
 		{"a quoted path (git escapes it)", pr, "f/x", []string{`"docs/\303\251.md"`}, "true"},
 		{"no paths at all", pr, "f/x", nil, "true"},
 		// A push to main and a queue draft are classified by the paths they add, like a pull request (Randy 2026-11-21: a docs-only
