@@ -68,7 +68,7 @@ acme.demo.bob: ready, offline
 session:        none
 ```
 
-### Not working (the first line on stdout, the hint on stderr)
+### Not working
 
 Stream: stdout. Exit code: 1.
 
@@ -139,15 +139,6 @@ Stream: stderr. Exit code: 2.
 ```text
 error: no endpoint is installed here
 hint: mash join <file>
-```
-
-### As an MCP tool in a session with no endpoint named
-
-Stream: stdout. Exit code: 1.
-
-```text
-No endpoint is chosen for this session.
-hint: start the session with MASH_ENDPOINT=<address>
 ```
 
 ## JSON
