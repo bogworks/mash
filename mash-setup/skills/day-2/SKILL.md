@@ -36,18 +36,27 @@ the person's absolute paths there.
 
 ## Is it working
 
+First take the endpoint's address from `mashctl endpoint list`; never make
+one up. Then put it in the variable, between quotes, for `mash doctor` only;
+`mashctl status` and `mashctl doctor` run without it:
+
 ```sh
-mashctl status; mashctl doctor; MASH_ENDPOINT=acme.demo.bob mash doctor
+mashctl status; mashctl doctor
+MASH_ENDPOINT="$address" mash doctor
 ```
+
+Here `$address` stands for the address you took from the list, for example
+`acme.demo.bob`.
 
 `mashctl status` is one line: `<server>: ok, N endpoints, M online`.
 `mashctl doctor` checks the server side (storage, endpoint records, keys) and
 changes nothing. `mash doctor` checks, for one endpoint, its configuration,
 credentials, the server and sign-in, says how to fix what is wrong, and changes
 nothing. `mash status --endpoint
-acme.demo.bob` says `acme.demo.bob: ready, offline` (or `online` while a
-session holds it open). Read the `hint:` line of any error and run the command
-it names.
+<address>` says `<address>: ready, offline` (or `online` while a
+session holds it open). For an endpoint called `acme.demo.bob`, that line
+is `acme.demo.bob: ready, offline`. Read the `hint:` line of any error and
+run the command it names.
 
 ## The server does not answer (after a reboot, say)
 

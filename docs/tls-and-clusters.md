@@ -2,7 +2,7 @@
 
 This page sets up mash over TLS, on a cluster of three NATS servers, and with a second machine that runs `mashctl`. It adds to [operations.md](operations.md) and does not replace it. Read [Setting mash up with `mashctl init --config`](operations.md#setting-mash-up-with-mashctl-init---config) and [Several servers](operations.md#several-servers) first.
 
-Everything here uses settings that exist in mash 0.5.5. Nothing is a new feature. What was run and what was not is in [Not tested in 0.5.5](#not-tested-in-055) at the end.
+Everything here uses settings that exist in mash 0.5.6 (`servers`, `ca`, `tls_cert`, `tls_key`). Nothing is a new feature. The steps were last run by hand on 0.5.5, before the settings were renamed, and have not been run again on 0.5.6. What was run and what was not is in [Not tested in 0.5.5](#not-tested-in-055) at the end.
 
 Names used below: `nats.example.com` is a server, `n1.example.com`, `n2.example.com` and `n3.example.com` are the three servers of a cluster, `acme` is the owner.
 
@@ -98,7 +98,7 @@ The same settings serve `mashctl`, `mash serve`, `mash hook` and the other `mash
 
 ### Plain text and `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION`
 
-Every mash connection requires TLS, to any host, loopback included: `mashctl`, `mash serve`, `mash hook` and the commands `send`, `read`, `inbox`, `who`, `prompt`, `status` and `doctor`. A plain `nats://` or `ws://` URL is refused before any connection is made, and so is any other scheme that is not `tls://` or `wss://`. `mashctl init --local` makes a certificate authority and a server certificate, so the quick start runs over TLS with no extra setting.
+Every mash connection requires TLS, to any host, loopback included: `mashctl`, `mash serve`, `mash hook` and the commands `send`, `read`, `inbox`, `who`, `prompt`, `status` and `doctor`. A plain `nats://` or `ws://` URL is refused before any connection is made, and so is any other scheme that is not `tls://` or `wss://`. The release's local setup script, `mash-local-nats-setup.sh` (see the [setup script reference](reference/setup.md)), makes a private certificate authority and a server certificate for 127.0.0.1, so the local quick start runs over TLS with no extra setting. (`mashctl init --local`, which did this in earlier releases, is gone.)
 
 Encryption can be turned off in one way only: the environment variable `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1`, for `mash` and `mashctl` alike. It is not a setting in the table above: there is no flag and no `config.json` key. Its only value is `1`; empty or `0` is off, anything else is an error naming the variable. The old names, `MASH_INSECURE_PLAINTEXT` and the `insecure_plaintext` key, are refused with an error naming the new variable (exit 2).
 
@@ -220,7 +220,7 @@ An endpoint's `servers` may list the servers the same way. An inbox lives on one
 
 ### How it signs (DEC-004)
 
-The second machine signs as the first does. It holds the same operator signing seed and the same account identity seed. It does not get its own signing key: mashctl refuses a signing key in the account JWT that it did not make ([ADR 0059](decisions/0059-mashctl-checks-who-issued-the-account-jwt-carries-only-its-own-signing-keys-and-requires-tls-for-admin-connections.md)), so a machine with a key of its own is not supported in 0.5.5.
+The second machine signs as the first does. It holds the same operator signing seed and the same account identity seed. It does not get its own signing key: mashctl refuses a signing key in the account JWT that it did not make ([ADR 0059](decisions/0059-mashctl-checks-who-issued-the-account-jwt-carries-only-its-own-signing-keys-and-requires-tls-for-admin-connections.md)), so a machine with a key of its own is not supported.
 
 A person sets it up with `mashctl init --config`, the same command that sets up the first machine, run on the second machine.
 
@@ -277,20 +277,20 @@ Only `design.seed.pub` and the join file travel. The join file carries the serve
 
 ## Not tested in 0.5.5
 
-> The 0.5.5 acceptance run (AT-005) tested TLS, a three-server cluster and two `mashctl` machines by hand, in rootless containers on one host: three NATS servers of one cluster with TLS on the client and route connections, endpoints on separate nodes (a session on one node connecting to another node's server, mail each way), and two `mashctl` machines on one account (the same address created from both at the same moment: one succeeded, the other was refused `address_taken`). It did not test real separate hosts or a physical network, clock drift between hosts, or certificate expiry and renewal.
+> The 0.5.5 acceptance run tested TLS, a three-server cluster and two `mashctl` machines by hand, in rootless containers on one host: three NATS servers of one cluster with TLS on the client and route connections, endpoints on separate nodes (a session on one node connecting to another node's server, mail each way), and two `mashctl` machines on one account (the same address created from both at the same moment: one succeeded, the other was refused `address_taken`). It did not test real separate hosts or a physical network, clock drift between hosts, or certificate expiry and renewal.
 
-While this page was written, these steps were also run on one host, on loopback, with `nats-server` 2.15.1 and OpenSSL 4.1.0, using mash 0.5.5:
+While this page was written, these steps were also run on one host, on loopback, with `nats-server` 2.15.1 and OpenSSL 4.1.0, using mash 0.5.5, which named the server list `url` and the CA setting `tls_ca`:
 
 - One operator-mode server, with the `tls` block above added: `mashctl` over `tls://localhost` failed without `ca` and worked with it.
 - The same server with `verify: true`: a connection without a client certificate failed with the message above, and one with `tls_cert` and `tls_key` worked.
 - `mashctl` set up with a `tls://` URL and its own admin user in a second, empty config directory, then `endpoint create --public-key` from it, `mash key create` and `mash join` in a third, and `endpoint delete` with `system_creds` in `config.json`.
-- Three servers in one cluster with the `cluster` TLS block and `verify: true`, one shared certificate for all three, listing `localhost` and `127.0.0.1`: the setup step reported `3 server(s) replied`, then bucket creation, `mashctl doctor` (the `keys` check, with all three servers answering), `endpoint create` and `endpoint delete` (`3 server(s) acknowledged`) worked with a three-entry `url`.
+- Three servers in one cluster with the `cluster` TLS block and `verify: true`, one shared certificate for all three, listing `localhost` and `127.0.0.1`: the setup step reported `3 server(s) replied`, then bucket creation, `mashctl doctor` (the `keys` check, with all three servers answering), `endpoint create` and `endpoint delete` (`3 server(s) acknowledged`) worked with a three-entry server list.
 
-What was not run, by AT-005 or by these steps:
+What was not run, by the acceptance run or by these steps:
 
-- Real separate hosts, and any physical network between hosts: the AT-005 containers share one host, and the steps above ran on loopback.
+- Real separate hosts, and any physical network between hosts: the acceptance run's containers share one host, and the steps above ran on loopback.
 - Clock drift between hosts.
-- Certificates with public DNS names in the SAN (AT-005 used IP addresses), and a certificate per server issued by a real CA.
+- Certificates with public DNS names in the SAN (the acceptance run used IP addresses), and a certificate per server issued by a real CA.
 - A client list where one server is down, and a revocation with one server down.
 - Certificate expiry and renewal, and a server that needs a restart to take a new certificate.
 - The OpenSSL commands with versions other than 4.1.0.

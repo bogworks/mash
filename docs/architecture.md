@@ -3,7 +3,7 @@
 **Scope note.** This document is for mash's maintainer, contributors and adopters. It explains how mash is built and,
 for each design choice, why. It covers the system and code architecture, the reasons behind each decision and the test
 architecture. It does not cover build, release, CI, signing or supply chain, release status or the roadmap. It
-describes the 0.3.0 tree. Each concept carries its layer the first time it appears: **(NATS)** for the message
+describes the 0.3.0 tree, and states 0.5.6 facts only where the text says so (the Synadia Cloud table in section 5, for example). Sections not yet updated can still name things 0.5.6 removed, such as `mash admin` and `mashctl init --local`; the [command reference](reference/README.md) is the current word on commands. Each concept carries its layer the first time it appears: **(NATS)** for the message
 bus, **(SAP)** for the Synadia Agent Protocol, **(mash)** for mash's own additions, and **(agent host)** for the program
 that runs the model session, such as Claude Code. The reasons are recorded in the architecture decision records (ADRs)
 in [`docs/decisions/`](decisions/README.md). This document links them and does not restate them. Where an ADR says no
@@ -36,8 +36,9 @@ What mash sets out to do:
 1. **Durable mail.** A message mash has accepted waits on the NATS server until the recipient's session has been
    shown it, for up to 30 days, across process restarts of either side. A host crash of the server can lose its last
    2 minutes unless `sync_interval: always` is set (Q1; [ADR-0009][0009], [ADR-0010][0010], [ADR-0025][0025]).
-2. **Proof of sender.** Every message is signed with the sender's own NATS key. The recipient sees a one-word trust
-   label that says how far the sender is proven ([ADR-0017][0017], [ADR-0019][0019]).
+2. **Proof of sender.** Every message is signed with the sender's own NATS key. From 0.5.6, by default only mail proven to come from its sender is delivered; with
+   `accept_unverified` set, the recipient sees a one-word trust label that says how far the sender is proven
+   ([ADR-0017][0017], [ADR-0019][0019], amended by [ADR-0147][0147]).
 3. **Few model turns.** A busy session sees new mail with its next tool result. An idle session is woken only for mail
    that needs it, and urgent mail from a verified sender wakes it at once ([ADR-0024][0024], [ADR-0027][0027] to
    [ADR-0029][0029]).
@@ -114,7 +115,9 @@ measure each one.
 
 ## 3. Context and scope
 
-![Two machines each run an agent host session that starts mash; mash, other SAP tools and the operator reach one NATS server, and the operator also uses identity tooling and the Synadia Cloud API.](images/009-system-context.svg)
+![Two machines each run an agent host session that starts mash; mash, other SAP tools and the operator reach one NATS server, and the operator makes endpoints with mashctl.](images/009-system-context.svg)
+
+*This diagram is drawn for the 0.3.0 tree. It shows `mash admin` and a Synadia Cloud script, which 0.5.6 replaces with `mashctl` and no longer supports (see [Synadia Cloud](synadia.md)).*
 
 *Topology: each arrow points from the side that opens the connection or starts the process. The two machines are peers:
 they never connect to each other, and all mail and presence pass through the NATS server.*
@@ -207,6 +210,8 @@ carry the hand-off to the hook, `mcp` carries tool calls and channel events, and
 
 ![Send data flow: the sender looks up bob in the KV directory, signs the message, publishes to the inbox stream and receives a storage acknowledgement (seq 42 or duplicate).](images/011-send.svg)
 
+*This diagram is drawn for the 0.3.0 tree. It shows the old send output `sent #42`; 0.5.6 prints `Mail sent (number 42).`*
+
 A publish has exactly one responder, JetStream, so `sent` means stored ([ADR-0004][0004]). A retry with the same key
 inside the 2-minute duplicate window stores nothing new ([ADR-0031][0031]).
 
@@ -290,7 +295,7 @@ keeps its old setting, because mash refuses to change an inbox in place, which c
 | MCP ping | Every 30 s, 10 s wait | No recorded reason ([ADR-0016][0016]) | Fixed |
 | Channel ready | First `tools/list` plus 500 ms, or 3 s | Events sent earlier were lost. No recorded reason for the values ([ADR-0023][0023]) | Fixed |
 | Hook timeout | 10 s | Set in the plugin's `hooks.json` | Edit the plugin |
-| Name length | 1-48 characters | No recorded reason ([ADR-0036][0036]) | Fixed |
+| Name length | 0.5.6: each of the three address tokens, 1-32 characters (`MaxTokenLen`, `internal/sap/address.go`). 0.3.0: a name of 1-48 characters | No recorded reason ([ADR-0036][0036], which sets the 0.3.0 limit) | Fixed |
 
 ## 8. Crosscutting concepts
 
@@ -309,7 +314,9 @@ the signed one.
 
 ### 8.2 Data stores
 
-![The admin creates inboxes and writes the directory and lease tombstones; endpoints mail inboxes and read the directory; serve writes its own lease; heartbeats are not stored.](images/017-data-stores.svg)
+![mashctl, run by the admin, creates inboxes and writes the directory and lease tombstones; endpoints mail inboxes and read the directory; serve writes its own lease; heartbeats are not stored.](images/017-data-stores.svg)
+
+*This diagram is drawn for the 0.3.0 tree. Its "admin" is `mash admin`, which 0.5.6 replaced with `mashctl`.*
 
 *Data flow: arrows point where data is written or read to.*
 
@@ -347,8 +354,7 @@ this endpoint, over this exact subject and body, within 5 minutes before the ser
 - that the named sender instance is genuine beyond "this key chose to name it" ([ADR-0018][0018]).
 
 **Assets.** Mail content and history. Each endpoint's private user seed, in its credentials file. The directory, which
-maps names to keys. Each name's lease. Each session's model turns, which cost money. Admin credentials. The hosted
-service's API token, which only the quickstart script ever sees.
+maps names to keys. Each name's lease. Each session's model turns, which cost money. Admin credentials.
 
 **Actors.**
 
@@ -363,7 +369,9 @@ service's API token, which only the quickstart script ever sees.
 
 **Trust boundaries.**
 
-![Model session, agent host, mash serve and local files share one OS-user boundary; serve crosses a TLS boundary into the shared NATS account; a setup script reaches the Synadia API separately.](images/018-trust-labels.svg)
+![Model session, agent host, mash serve and local files share one OS-user boundary; serve crosses a TLS boundary into the shared NATS account; the admin's mashctl reaches the same account separately over TLS.](images/018-trust-labels.svg)
+
+*This diagram is drawn for the 0.3.0 tree. The Synadia setup script it shows is retired.*
 
 *Topology: arrows point from the client to the server it connects to. Plain lines join parts inside one boundary.*
 
@@ -476,7 +484,6 @@ About 400 Go test functions cover the product code, not counting release tooling
 | Process-level tests on the built binary | `cmd/mash` | The binary as users run it: the standalone tests with a scrubbed environment, the hook crash matrix (SIGKILL at failpoints), and the process chain with a stand-in for Claude Code. The stand-in is the test binary itself, acting as the parent of a real `mash serve` and its hooks |
 | In-process session tests | `cmd/mash` (`run()` with a test MCP client over pipes) | `mash serve` as an MCP server with no agent host: tools, leases, retries, prompts, timeouts |
 | Contract tests on output | `internal/render/testdata/contract.txt`, plugin command and manifest tests, the `who` output cases and object checked against `spec/mash.json` and `spec/mash-mcp.json` (`internal/cmdcore/cmds`) | Text that other programs parse does not change unnoticed ([ADR-0034][0034]) |
-| Fake external service | `scripts/quickstart_synadia_test.go` | `scripts/quickstart-synadia.sh` against an `httptest` fake of the Synadia API that mints real credentials, with a real NATS server |
 | Opt-in live test with a real agent host | `TestLiveClaudeAnswersServePings`, run with `MASH_LIVE_CLAUDE=1` | The installed Claude Code answers serve's pings |
 | Recorded live runs | `docs/evidence/` receipts, produced by scripted runs that are not part of `go test` | Real Claude Code (mid-turn, idle and urgent delivery, early mail), the real Synadia free tier, and `kill -9` lease takeover with timings |
 
@@ -519,6 +526,8 @@ that takes channel events.
 
 ## 12. Glossary
 
+The user-facing words are defined in the [reference glossary](reference/glossary.md), which is the current one. This table adds the layer each term belongs to and the terms the reference leaves out. Where the two differ, the reference is right for 0.5.6.
+
 | Term | Layer | Meaning |
 |---|---|---|
 | account | NATS | A tenant in a NATS server. Subjects and streams in one account are invisible to others unless exported. mash uses one account for all endpoints |
@@ -543,7 +552,7 @@ that takes channel events.
 | urgent | mash | A signed mark that wakes the recipient at once, honoured only from a `verified` sender |
 | trust label | mash | One word on every shown message: `verified`, `unknown-signer`, `claimed`, `absent` or `stale` |
 | verified | SAP, refined by mash | A valid signature by a user key that the directory lists under the claimed name, made within 5 minutes before storage |
-| digest | mash | A batch shown as one line per message, read in full with the `read` tool by `#seq`; its messages are listed, not acked, until read ([ADR-0046][0046]) |
+| digest | mash | A batch shown as one line per message, read in full with the `read` tool by its message number; its messages are listed, not acked, until read ([ADR-0046][0046]) |
 | wake | mash | A channel event, one summary line, that starts a turn in an idle session |
 | hook | agent host | A command Claude Code runs at fixed points. mash uses `PostToolUse` (after each tool call) and `UserPromptSubmit` (when a turn starts) |
 | channel | agent host | Claude Code's way for an MCP server to push an event into a session. It starts a turn when the session is idle |
@@ -730,7 +739,7 @@ All paths are in the mash repository (0.3.0 tree) unless marked otherwise.
 | 8.4, 8.5, C | `internal/config/config.go`; `internal/store/store.go`; `internal/render/render.go`; `internal/sap/subjects.go`; `internal/spool/spool.go` |
 | 10 | `*_test.go` across `cmd/mash` and `internal/`; `internal/testenv/`; `docs/evidence/*` |
 | A | `git show 5ab1e4b:docs/specs/2026-10-21-mash-design.md` compared with the 0.3.0 code; ADRs |
-| B | Claude Code documentation pages linked in B.1 (read 2026-10-31); `docs/install.md` §3; `docs/evidence/2026-10-22-live-e2e.md`, `docs/evidence/2026-10-31-quickstart-synadia-live/RECEIPT.md` (the retired quickstart script against the real Synadia API), `docs/evidence/2026-10-28-hook-delivery-live/RECEIPT.md`; ADR-0024; the maintainers' channel findings of 2026-10-31 (not in the repository) |
+| B | Claude Code documentation pages linked in B.1 (read 2026-10-31); `docs/install.md` §3; `docs/evidence/2026-10-22-live-e2e.md`, `docs/evidence/2026-10-28-hook-delivery-live/RECEIPT.md`; ADR-0024; the maintainers' channel findings of 2026-10-31 (not in the repository) |
 
 [0002]: decisions/0002-record-architecture-decisions-as-madr-records.md
 [0003]: decisions/0003-sap-plus-mail-verb-and-jetstream-durability.md
@@ -750,6 +759,7 @@ All paths are in the mash repository (0.3.0 tree) unless marked otherwise.
 [0017]: decisions/0017-every-message-is-signed-per-sap-13.md
 [0018]: decisions/0018-mash-signed-marks-are-separate-headers.md
 [0019]: decisions/0019-five-trust-labels-forged-never-shown-stale-after-five-minutes.md
+[0147]: decisions/0147-the-0-5-6-command-line-and-mcp-surface-is-built-from-a-specification-that-supersedes-contract-revision-26.md
 [0020]: decisions/0020-verified-mail-is-a-delegated-request.md
 [0021]: decisions/0021-message-bodies-are-shown-quoted.md
 [0022]: decisions/0022-one-endpoint-manager-per-session.md

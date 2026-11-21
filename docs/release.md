@@ -60,7 +60,7 @@ v0.5.5 as not Latest. A publish made without the flag is a mistake: if the relea
 
 A release made before the standard process exists is recorded here with what it skipped and what ran instead.
 
-**v0.4.0 (exception D208, 2026-11-12), commit 5d907947e06cf6ebc6ff1f2827527dafe85d56f8.**
+**v0.4.0 (exception, 2026-11-12), commit 5d907947e06cf6ebc6ff1f2827527dafe85d56f8.**
 
 - Gate: `scripts/release-check 5d907947e06cf6ebc6ff1f2827527dafe85d56f8 0.4.0` passed (exit 0) once main's push CI on that commit was green (the first push run failed on a flaky test, `TestServeLeaseRetryFromConfig`, and passed on its rerun, attempt 2). Mail latency: urgent mail 0.14s against 0.15s for v0.3.3.
 - Tag: `v0.4.0` annotated, unsigned, pushed at X by the minting service (cutover v0.4.0, [ADR 0095](decisions/0095-releases-from-the-cutover-version-are-keyless-the-tag-is-pushed-by-the-minting-service-and-attestations-replace-the-signatures.md)).
@@ -133,7 +133,7 @@ The numbered steps are what the command does in each state, and the manual path 
    * **Upgrading:** at least one sentence of paragraph text before any list: what an operator must do after upgrading
      (steps may follow as a list), or, when there is nothing to do, the sentence "Nothing to do."
    Merge it and take its merge commit as X.
-3. **Gate, before tagging:** `scripts/release-check <X> <version>` (for example `… 3f2a… 0.3.0`). It fetches main from
+3. **Gate, before tagging:** `scripts/release-check <X> <version>` (for example `… 3f2a… 0.5.6`). It fetches main from
    the release repository (never a configured origin), checks X is an ancestor, reads X's check runs through `gh`
    (every page, latest run per name, from `github-actions` only), builds X twice in fresh clones, and runs the binary to
    compare `mash v<version> (<first 7 characters of X>)` exactly. It prints the version and commit in a neutral form, `version: <version> commit: <X>`, that any consumer can copy. Exit 0 passed, 3 refused,
@@ -254,9 +254,9 @@ The results (`results.jsonl`, part logs in `results.jsonl.logs/` if the script w
 `release-check-consumer-*` directory under the temp directory whose path is printed whatever the outcome; it is kept.
 This never makes a consumer receipt: only the downstream consumer's own pin certifies, and a candidate run keeps results alone.
 
-## Before 0.3.0 and later minors: the live stranger tier
+## Before a minor release: the live stranger tier
 
-Before tagging a minor release (0.3.0 and after), run the live tier of the "setups unlike ours" matrix against the
+Before tagging a minor release, run the live tier of the "setups unlike ours" matrix against the
 installed Claude Code. It is opt-in and spends a few short haiku turns (at most 8 turns and 5 minutes per scenario):
 
     MASH_LIVE_CLAUDE=1 MASH_LIVE_CLAUDE_CREDS=<path to a Claude Code .credentials.json> \
@@ -396,26 +396,25 @@ with the in-job attestation).
 ## Policy tests on every release
 
 The policy tests run on every release and on every change of the NATS server version mash ships with, and a failure
-blocks the release (REQ-020). `scripts/release-check <X> <version>` runs them as the step "the policy tests pass
-(REQ-020)", in a fresh clone of X, under the gate's pinned Go settings (`-race` needs cgo, so `CGO_ENABLED` is the one
+blocks the release. `scripts/release-check <X> <version>` runs them as one of its steps, in a fresh clone of X, under the gate's pinned Go settings (`-race` needs cgo, so `CGO_ENABLED` is the one
 setting it turns back on). They need no network: the live tests start an in-process nats-server.
 
 In v0.5.0 these tests check the internal policy engine; no command line for it ships in this release ([ADR 0129](decisions/0129-the-policy-commands-are-not-part-of-v0-5-0-and-the-engine-stays-internal-until-it-works-standalone.md)).
 
-The list is `scripts/releasecheck/policytests.txt`, one row per test: AT id, package, test name, `required` or `pending`.
+The list is `scripts/releasecheck/policytests.txt`, one row per test: an AT id (`AT-NNN`, required in the first field), package, test name, `required` or `pending`. The table below keeps a short label beside each id.
 
-| AT | What | Status |
-| --- | --- | --- |
-| AT-004 | the compile test over the corpus, and the zero-tag case (`TestAT004_Corpus`, `TestAT004_ZeroTags`) | required |
-| AT-001 | the template for the shape names no peer (`TestAT001TemplateNamesNoPeer`), and the live run against a real server (`TestLiveMatchesCheck/AT-001_shape`) | required |
-| AT-003 | the live deny-key case (`TestLiveMatchesCheck/deny_key_(AT-003)`); closing mail drops the owner line, sharing restores it, and a deny holds with every user of the key carrying a deny tag (`TestAT003OwnerLineDroppedAndDenyHolds`) | required |
-| AT-005 | a deny-all sender, with no allow entry or with its tags removed by a new list set, is refused everywhere and still reaches its own inbox (`TestAT005DenyAllSenderIsRefused`) | required |
-| AT-020 | a raw client with tags-only credentials gets no more than its lists: the whole live run (`TestLiveMatchesCheck`), and the open reply and plumbing subjects pinned to a table (`TestAT020OpenReplyAndPlumbingSubjectsArePinned`, [threat model 5.3.1](security/threat-model.md)) | required |
-| AT-011 | does a template change reach open connections, against the recorded result for the shipped server (`TestAT011TemplateChangeReachesOpenConnections`) | required |
-| AT-010 | the applied gate runs against a live two-server cluster, an in-process nats-server pair, with the policy applied and with a server held back (`TestAT010Live`, subtests `applied` and `held_back`) | required |
+| Label | AT id | What | Status |
+| --- | --- | --- | --- |
+| compile | AT-004 | the compile test over the corpus, and the zero-tag case (`TestAT004_Corpus`, `TestAT004_ZeroTags`) | required |
+| shape | AT-001 | the template for the shape names no peer (`TestAT001TemplateNamesNoPeer`), and the live run against a real server (`TestLiveMatchesCheck/AT-001_shape`) | required |
+| deny key | AT-003 | the live deny-key case (`TestLiveMatchesCheck/deny_key_(AT-003)`); closing mail drops the owner line, sharing restores it, and a deny holds with every user of the key carrying a deny tag (`TestAT003OwnerLineDroppedAndDenyHolds`) | required |
+| deny all | AT-005 | a deny-all sender, with no allow entry or with its tags removed by a new list set, is refused everywhere and still reaches its own inbox (`TestAT005DenyAllSenderIsRefused`) | required |
+| raw client | AT-020 | a raw client with tags-only credentials gets no more than its lists: the whole live run (`TestLiveMatchesCheck`), and the open reply and plumbing subjects pinned to a table (`TestAT020OpenReplyAndPlumbingSubjectsArePinned`, [threat model 5.3.1](security/threat-model.md)) | required |
+| template change | AT-011 | does a template change reach open connections, against the recorded result for the shipped server (`TestAT011TemplateChangeReachesOpenConnections`) | required |
+| cluster | AT-010 | the applied gate runs against a live two-server cluster, an in-process nats-server pair, with the policy applied and with a server held back (`TestAT010Live`, subtests `applied` and `held_back`) | required |
 
-Every AT of REQ-020 is `required` now. The step can still print `pending` for a row whose test does not exist yet: it
-prints a notice and does not fail, and it refuses once a test for that AT exists in the tree, so the row must then be
+Every row is `required` now. The step can still print `pending` for a row whose test does not exist yet: it
+prints a notice and does not fail, and it refuses once a test for that row exists in the tree, so the row must then be
 promoted to `required`.
 
 The step refuses (exit 3) when `go test` itself exits nonzero for a required test's package (a panic after the pass, a build failure, a timeout,

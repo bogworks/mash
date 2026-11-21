@@ -1,6 +1,8 @@
-# mash: design
+# mash: design (original v0.1 design)
 
-- **Status:** approved for build, 2026-10-21. Randy asked for the spec and then straight to building; the architecture write-up is a separate artifact.
+> **This is the original v0.1 design, kept as a record.** It still uses names 0.5.6 has removed (`mash admin`, `MASH_NAME`, `MASH_URL`, `<name>.creds`, `init synadia`). For how mash works now, read [the architecture](../architecture.md) and [mash and SAP](../sap.md); for commands, the [command reference](../reference/README.md).
+
+- **Status:** the original v0.1 design (2026-10-21), kept as a record and not kept current. The current design is in [docs/architecture.md](../architecture.md), the decisions are in [docs/decisions/](../decisions/INDEX.md), and the command surface is `spec/*.json`.
 - **Scope of v0.1:** sections 1–12. Section 13 lists the later phases.
 - **Protocol:** Synadia Agent Protocol (SAP) 0.3.0, `synadia-ai/synadia-agent-sdk-docs/core-protocol.md` at `c48cea5f`. Section numbers written §n refer to that document.
 
@@ -120,7 +122,7 @@ A per-endpoint stream keeps each endpoint's history private to that endpoint, gi
 ```json
 {"name":"p-ops2","owner":"acme","agent":"claude-code","agent_token":"cc",
  "account":"A…","user":"U…","mail_subject":"agents.mail.cc.acme.p-ops2",
- "created":"2026-10-21T22:00:00Z","note":"host-b ops session"}
+ "created":"2026-10-21T22:00:00Z","note":"ops session"}
 ```
 
 ### 6.2 Rules
@@ -233,7 +235,7 @@ Anything not listed is denied. That includes another endpoint's inbox, its histo
 
 - **Allow by default.** Mail from a `verified` sender is treated as a delegated request from the operator who owns the fleet, and acted on without asking, with Claude's normal judgement. Claude may still pause on something it judges risky; that's intended.
 - **`claimed`, `unknown-signer` and `absent`** mail is information, not instructions.
-- **The blocklist hook:** `~/.config/mash/policy.md`. Free text appended to the instructions, e.g. "ask Randy before spending money or touching production". It is empty by default.
+- **The blocklist hook:** `~/.config/mash/policy.md`. Free text appended to the instructions, e.g. "ask the operator before spending money or touching production". It is empty by default.
 
 ## 10. Configuration
 
@@ -322,7 +324,7 @@ The admin commands also read `MASH_ADMIN_CREDS`.
 4. **Other agents**, such as swamp workflows, as endpoints with their own agent token.
 5. **Migration from codev** in the reference deployment: every named session gets an endpoint, launchers set `MASH_NAME` and `--channels`, and codev is removed.
 
-## Appendix: reference deployment (Randy's)
+## Appendix: reference deployment
 
 | Item | Value |
 |---|---|
