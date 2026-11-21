@@ -1,6 +1,6 @@
 # Bring your own NATS server
 
-This page is for you if you run your own `nats-server` and want mash to use it. It lists everything that server has to provide, and then shows how to connect mash to it. If you only want a server on your own machine, you do not need this page: the setup script makes one that meets every requirement below. See [Installing mash](install.md).
+This page is for you if you run your own `nats-server` and want mash to use it. It lists everything that server has to provide, and then shows how to connect mash to it. If you only want a server on your own machine, you do not need this page: the setup script makes one that meets every requirement below. See [Installing mash](install.md). Where NATS sits under mash is in [the stack](guide/stack.md).
 
 The requirements apply to mash 0.5.6. They are what mash checks or creates; where this page says "not checked", mash does not test it for you.
 
