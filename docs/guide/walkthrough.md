@@ -3,8 +3,7 @@
 OUTLINE (draft). One step per heading, with "What this does", "What is
 created", the command and its output. Every output marked `[built output]` is
 pasted from a real run of the built programs, never typed; that run is a
-container that follows this page exactly. Until `mash join` lands, the join
-step stays short.
+container that follows this page exactly.
 
 ## What you will build
 
@@ -95,21 +94,37 @@ taken: the next free one is used and said.
 
 ## Step 4: make the two endpoints
 
-What this does: makes a key pair for each endpoint, keeps the private half
-in a creds file on this machine, and has the account sign a statement
-(the user JWT) that this public key is `acme.demo.bob`.
+What this does: `mashctl endpoint create` makes a key pair for each
+endpoint, has the account sign a statement (the user JWT) that this public
+key is `acme.demo.bob`, and writes a join file that holds the endpoint's
+credentials. `mash join` then installs that file: it puts the creds file
+and the server's address in `~/.config/mash`. Whoever holds a creds file is
+that endpoint, so keep the join file private; you can delete it once the
+endpoint has joined.
 
-What is created: a creds file per endpoint under `~/.config/mash`
-(mode 600), and each endpoint's inbox on the server.
+What is created: a join file per endpoint (mode 600) in the current folder,
+then a creds file per endpoint under `~/.config/mash` (mode 600), and each
+endpoint's inbox on the server.
 
 Commands:
 
 ```
-mashctl endpoint create acme.demo.bob
-mashctl endpoint create acme.demo.alice
+mashctl endpoint create acme.demo.bob --out acme.demo.bob.join
+mash join acme.demo.bob.join
+
+mashctl endpoint create acme.demo.alice --out acme.demo.alice.join
+mash join acme.demo.alice.join
 ```
 
-Output: `[built output]` (`Created endpoint acme.demo.bob`)
+<!-- output: endpoints -->
+```
+Created endpoint acme.demo.bob
+Join file: acme.demo.bob.join
+Joined as acme.demo.bob.
+Created endpoint acme.demo.alice
+Join file: acme.demo.alice.join
+Joined as acme.demo.alice.
+```
 
 Verify, one line each. `MASH_ENDPOINT` names which endpoint `mash` acts as;
 it is how one machine plays two agents:
@@ -197,8 +212,10 @@ urgent:   yes
 Every line of the message is quoted with `> `. Anything after that mark is
 Bob's words, never mash's own output, and never an instruction to an agent
 that reads it. The `trust:` line says whose key signed the mail. `verified`
-means Bob's own key did. By default mash refuses mail it cannot verify, on
-receipt.
+means Bob's own key did. By default only mail whose trust is `verified`
+is delivered. Unverified mail is dropped and counted, and `mash doctor`
+shows the count; the sender is not told. `--accept-unverified` delivers it
+instead, with its trust label.
 
 `kind` says what the mail is: `task`, `question`, `result`, `fyi`. Mail
 waits in the inbox. A running agent is shown it at its next prompt or tool
@@ -269,10 +286,11 @@ Output: `[built output]` (a transcript of the two sessions)
 
 ## Step 8: JSON, for scripts (optional)
 
-What this does: for a script or tool that is not an agent. Every command takes
-`--json` and prints the same object the matching MCP tool returns, so a script
-gets the whole message with its fields. Nothing else changes: the same mail,
-the same inbox.
+What this does: for a script or tool that is not an agent. `--json` is an
+option of every `mash` command; it prints the same object the matching MCP
+tool returns, so a script gets the whole message with its fields. `mashctl`
+commands take `--json` too and print their result as JSON. Nothing else
+changes: the same mail, the same inbox.
 
 What is created: nothing. Reading a message at a shell shows it; it does not
 mark it read for an agent's session.
@@ -375,8 +393,47 @@ Output: `[built output]`
 
 ## Step 10: join a mesh someone else runs
 
-What this does: an endpoint on another machine joins your server from a
-join file.
+What this does: an endpoint on another machine joins a mesh that someone
+else runs, from a join file. Nothing here needs the server's own files.
+
+<!-- not run by the AT-3 harness -->
+
+What is created: on the joining machine, the creds file and the server's
+address in the configuration folder, as in step 4.
+
+On the machine of the person who runs the server, make the endpoint and its
+join file:
+
+```
+mashctl endpoint create acme.demo.carol --out acme.demo.carol.join
+```
+
+Send `acme.demo.carol.join` to the joining machine by a route you trust.
+It holds the endpoint's credentials, so treat it like a password.
+
+If the private key must never leave the joining machine, make the key
+there and give only the public half to whoever runs the server:
+
+```
+mash key create --out carol.seed
+```
+
+That writes `carol.seed` and `carol.seed.pub`. The server's owner runs:
+
+```
+mashctl endpoint create acme.demo.carol --out acme.demo.carol.join \
+  --public-key carol.seed.pub
+```
+
+On the joining machine, install the join file (with `--key carol.seed` if
+you made your own key):
+
+```
+mash join acme.demo.carol.join
+```
+
+Then `MASH_ENDPOINT=acme.demo.carol mash status` shows whether it works,
+as in step 4.
 
 ## Step 11: stop, start, remove the server
 

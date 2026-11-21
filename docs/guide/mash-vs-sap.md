@@ -10,8 +10,9 @@ in the synadia-ai/synadia-agent-sdk-docs repository. Source for the mash
 side: `spec/mash.json` and the code.
 
 - Sender identity. SAP: an optional signature. mash: required; every
-  message is signed by its sender's endpoint key, and unverified mail is
-  refused on receipt by default. Why: trust runs both ways.
+  message is signed by its sender's endpoint key, and by default only mail
+  whose trust is verified is delivered; the rest is dropped and counted,
+  and the sender is not told. Why: trust runs both ways.
 - Durable mail. SAP: live prompts. mash: a stored inbox per endpoint, kept
   while the endpoint is offline. Why: agents are not always on.
 - Directory. SAP: discovery of live agents. mash: a directory of endpoints,
@@ -20,7 +21,6 @@ side: `spec/mash.json` and the code.
   owner and group.
 - Permissions. mash: one NATS user per endpoint, confined to its own inbox
   and its owner's subjects. Why: least privilege.
-- Live prompts. SAP: the core. mash: later (`mash sap`, after 0.5.6).
 
 To fill in: the exact wording from the spec, one example per row, a link to
 each decision record.
