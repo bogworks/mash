@@ -87,7 +87,8 @@ tar -xzf nats-server-$V-$OS-$ARCH.tar.gz --strip-components=1 -C ~/.local/bin na
 N=0.5.2; B=https://github.com/nats-io/natscli/releases/download/v$N
 curl -fsSLO $B/nats-$N-$OS-$ARCH.zip -O $B/SHA256SUMS
 grep " nats-$N-$OS-$ARCH.zip\$" SHA256SUMS | sha256sum -c -
-unzip -j -o nats-$N-$OS-$ARCH.zip '*/nats' -d ~/.local/bin
+if command -v unzip >/dev/null; then unzip -j -o nats-$N-$OS-$ARCH.zip '*/nats' -d ~/.local/bin
+else python3 -m zipfile -e nats-$N-$OS-$ARCH.zip natsx && install -m 755 natsx/*/nats ~/.local/bin/nats; fi
 ```
 
 Say, over the block, no more than 10 seconds: "It makes your own bin folder,
