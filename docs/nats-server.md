@@ -32,10 +32,26 @@ The requirements apply to mash 0.5.6. They are what mash checks or creates; wher
 
 ## Getting nats-server and the nats command
 
-**nats-server.** Any way of installing 2.10.7 or newer works. Two things to know about Debian and Ubuntu's package (`sudo apt install nats-server`; Debian 13 gives 2.10.27):
+**nats-server.** Any way of installing 2.10.7 or newer works. On Debian or Ubuntu, refresh the package lists first, then install the package (Debian 13 gives 2.10.27):
 
-- The binary goes in `/usr/sbin/nats-server`, which is not on a normal user's `PATH`. Run it by that path, or add the folder for the session: `export PATH="$PATH:/usr/sbin"`. The setup script looks for `nats-server` on `PATH` only, so without this it reports nats-server as missing.
-- The package also starts a system nats-server at boot (`nats-server.service`, listening on `127.0.0.1:4222`), which is not in operator mode. mash does not use it. If you don't need it, stop it and keep it from starting again: `sudo systemctl disable --now nats-server`. If you leave it running, the setup script takes the next free port (for example 4223) instead.
+```sh
+sudo apt update
+sudo apt install nats-server
+```
+
+Then do these two things:
+
+1. **Stop and disable the server the package starts.** The package runs its own nats-server as a system service (`nats-server.service`, from `/etc/nats-server.conf`). It starts at boot and listens on `127.0.0.1:4222` with **no authentication**, so any process on the machine can use it. mash does not use it, so turn it off:
+
+   ```sh
+   sudo systemctl disable --now nats-server
+   ```
+
+2. **Put `/usr/sbin` on your `PATH`.** The binary is `/usr/sbin/nats-server`, which is not on a normal user's `PATH`, and the setup script looks for `nats-server` on `PATH` only. Without this step the script reports nats-server as missing. For the current shell:
+
+   ```sh
+   export PATH="$PATH:/usr/sbin"
+   ```
 
 Or take a release from [nats-io/nats-server releases](https://github.com/nats-io/nats-server/releases), which also lists its checksums.
 
