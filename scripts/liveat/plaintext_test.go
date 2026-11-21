@@ -30,7 +30,7 @@ func TestConnCounterCountsConnects(t *testing.T) {
 }
 
 func TestPlainRefusalOK(t *testing.T) {
-	good := Result{Code: 2, Stderr: `mash: refusing a plain nats:// connection to "127.0.0.1": set insecure_plaintext (MASH_INSECURE_PLAINTEXT=1); use a tls:// URL`}
+	good := Result{Code: 2, Stderr: `mash: refusing a plain nats:// connection to "127.0.0.1": set MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1; use a tls:// URL`}
 	for name, c := range map[string]struct {
 		r        Result
 		connects int64
@@ -40,7 +40,7 @@ func TestPlainRefusalOK(t *testing.T) {
 		"a connection was made":      {good, 1, false},
 		"wrong exit code":            {Result{Code: 1, Stderr: good.Stderr}, 0, false},
 		"does not name the override": {Result{Code: 2, Stderr: "mash: refused, use tls://"}, 0, false},
-		"does not name the fix":      {Result{Code: 2, Stderr: "set MASH_INSECURE_PLAINTEXT=1"}, 0, false},
+		"does not name the fix":      {Result{Code: 2, Stderr: "set MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1"}, 0, false},
 		"started and ran":            {Result{Code: 0}, 0, false},
 	} {
 		if got, detail := plainRefusalOK(c.r, 2, c.connects); got != c.want {
@@ -50,7 +50,7 @@ func TestPlainRefusalOK(t *testing.T) {
 }
 
 func TestPlainWarnedOK(t *testing.T) {
-	warn := "mash: WARNING: plain-text connection to 127.0.0.1 (insecure_plaintext is set)"
+	warn := "warning: encryption to the server is OFF (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set)"
 	for name, c := range map[string]struct {
 		r        Result
 		connects int64
@@ -59,7 +59,7 @@ func TestPlainWarnedOK(t *testing.T) {
 		"connected and warned on stderr": {Result{Code: 1, Stderr: warn}, 1, true},
 		"no connection":                  {Result{Stderr: warn}, 0, false},
 		"no warning":                     {Result{Stderr: "mash: connect failed"}, 1, false},
-		"warning on stdout":              {Result{Stdout: "WARNING: plain-text connection", Stderr: warn}, 1, false},
+		"warning on stdout":              {Result{Stdout: warn, Stderr: warn}, 1, false},
 	} {
 		if got, detail := plainWarnedOK(c.r, c.connects); got != c.want {
 			t.Errorf("%s: got %v, want %v (%s)", name, got, c.want, detail)
@@ -68,7 +68,7 @@ func TestPlainWarnedOK(t *testing.T) {
 }
 
 func TestDoctorWarnedOnStderr(t *testing.T) {
-	warn := "mash: WARNING: plain-text connection to 127.0.0.1 (insecure_plaintext is set)"
+	warn := "warning: encryption to the server is OFF (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set)"
 	report := "config    ok\ncreds     ok\nserver    FAIL  the server did not answer: nats://127.0.0.1:1\n\n1 problem.\n"
 	for name, c := range map[string]struct {
 		r    Result

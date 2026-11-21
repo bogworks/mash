@@ -57,7 +57,7 @@ func withRealCreds(t *testing.T, env map[string]string) map[string]string {
 
 // refusalWant are the parts every refusal of a plain URL has: the scheme, the override named both ways, and the fix.
 func refusalWant(host string) []string {
-	return []string{`refusing a plain nats:// connection to "` + host + `"`, "insecure_plaintext", "MASH_INSECURE_PLAINTEXT=1", "tls://", "MASH_CA"}
+	return []string{`refusing a plain nats:// connection to "` + host + `"`, "MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1", "tls://", "MASH_CA"}
 }
 
 func wantAllIn(t *testing.T, what, got string, wants []string) {
@@ -155,7 +155,7 @@ func TestUnsupportedSchemeRefusedEvenWithTheOverride(t *testing.T) {
 	c := newConnectCounter(t)
 	for _, override := range []string{"", "1"} {
 		env := plainEnv(t, "foo://"+c.addr)
-		env["MASH_INSECURE_PLAINTEXT"] = override
+		env["MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION"] = override
 		for _, cmd := range [][]string{{"serve"}, {"inbox"}} {
 			var out, errb bytes.Buffer
 			code := run(cmd, envStrict(env), strings.NewReader(""), &out, &errb)
@@ -174,17 +174,17 @@ func TestUnsupportedSchemeRefusedEvenWithTheOverride(t *testing.T) {
 func TestCLIWithTheOverrideConnectsAndWarnsOnStderrOnce(t *testing.T) {
 	c := newConnectCounter(t)
 	env := withRealCreds(t, plainEnv(t, "nats://"+c.addr))
-	env["MASH_INSECURE_PLAINTEXT"] = "1"
+	env["MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION"] = "1"
 	env["MASH_OPEN_TIMEOUT"] = "300ms"
 	var out, errb bytes.Buffer
 	run([]string{"inbox"}, envStrict(env), strings.NewReader(""), &out, &errb) // the listener is not a server: it fails
 	if c.n.Load() == 0 {
 		t.Fatal("no connection was made with the override set")
 	}
-	if n := strings.Count(errb.String(), "WARNING: plain-text connection to 127.0.0.1"); n != 1 {
+	if n := strings.Count(errb.String(), "warning: encryption to the server is OFF (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set)"); n != 1 {
 		t.Errorf("%d warnings on stderr, want 1: %q", n, errb.String())
 	}
-	if strings.Contains(out.String(), "WARNING") {
+	if strings.Contains(out.String(), "encryption to the server is OFF") {
 		t.Errorf("the warning is on stdout: %q", out.String())
 	}
 }
@@ -194,7 +194,7 @@ func TestCLIWithTheOverrideConnectsAndWarnsOnStderrOnce(t *testing.T) {
 func TestServeWithTheOverrideWarnsOnStderrNotStdout(t *testing.T) {
 	c := newConnectCounter(t)
 	env := withRealCreds(t, plainEnv(t, "nats://"+c.addr))
-	env["MASH_INSECURE_PLAINTEXT"] = "1"
+	env["MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION"] = "1"
 	s := startServe(t, env)
 	s.initialize(t)
 	doctor := resultText(s.call(t, 7, "doctor", `{}`))
@@ -205,7 +205,7 @@ func TestServeWithTheOverrideWarnsOnStderrNotStdout(t *testing.T) {
 	if c.n.Load() == 0 {
 		t.Error("no connection was made with the override set")
 	}
-	if n := strings.Count(s.stderr(), "WARNING: plain-text connection"); n != 1 {
+	if n := strings.Count(s.stderr(), "warning: encryption to the server is OFF (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set)"); n != 1 {
 		t.Errorf("%d warnings on stderr, want 1: %q", n, s.stderr())
 	}
 }
@@ -213,11 +213,11 @@ func TestServeWithTheOverrideWarnsOnStderrNotStdout(t *testing.T) {
 // `mash doctor` keeps the whole report, the server row's warning included, on stdout, and also says the plain-text
 // warning on standard error once (REQ-014). A tls:// URL, and a plain URL with no override, print no warning on stderr.
 func TestDoctorCommandPlainWarningOnStderr(t *testing.T) {
-	const warning = "WARNING: plain-text connection to 127.0.0.1"
+	const warning = "warning: encryption to the server is OFF (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set)"
 	doctorRun := func(url string, override bool) (string, string) {
 		env := plainEnv(t, url)
 		if override {
-			env["MASH_INSECURE_PLAINTEXT"] = "1"
+			env["MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION"] = "1"
 		}
 		env["MASH_OPEN_TIMEOUT"] = "300ms"
 		var out, errb bytes.Buffer
@@ -230,12 +230,12 @@ func TestDoctorCommandPlainWarningOnStderr(t *testing.T) {
 	}
 	for _, url := range []string{"tls://127.0.0.1:4222", "nats://127.0.0.1:4222"} {
 		out, errs := doctorRun(url, false)
-		if strings.Contains(errs, "WARNING") || strings.Contains(out, "WARNING") {
+		if strings.Contains(errs, "encryption to the server is OFF") || strings.Contains(out, "encryption to the server is OFF") {
 			t.Errorf("%s: warned: %q / %q", url, out, errs)
 		}
 	}
 	out, _ := doctorRun("nats://127.0.0.1:4222", false)
-	if !strings.Contains(out, "server    FAIL  ") || !strings.Contains(out, "insecure_plaintext") {
+	if !strings.Contains(out, "server    FAIL  ") || !strings.Contains(out, "MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION") {
 		t.Errorf("plain, no override: stdout %q", out)
 	}
 }

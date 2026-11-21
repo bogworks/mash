@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 
+	"github.com/bogworks/mash/internal/cliframe"
 	"github.com/bogworks/mash/internal/config"
 )
 
@@ -15,6 +16,10 @@ import (
 // endpoint's default creds path are not errors here, and the config is returned as loaded.
 func loadConfig(env func(string) string, lookup config.Lookup) (config.Config, error) {
 	cfg, err := config.Load(lookup, env("HOME"))
+	var skipErr *config.SkipEncryptionError
+	if errors.As(err, &skipErr) {
+		return cfg, cliframe.Usagef("%s", skipErr.Msg()) // the removed name or a bad value: a configuration error (exit 2)
+	}
 	if errors.Is(err, config.ErrNoURL) || errors.Is(err, config.ErrNoOwner) {
 		err = nil // mashctl acts as no endpoint: the verbs that need a server say so themselves
 	}

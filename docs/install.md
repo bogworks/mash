@@ -112,7 +112,7 @@ A configuration folder left by mash 0.5.5 holds the keys `url` and `tls_ca` in `
 
 | Key | Env | Meaning |
 |---|---|---|
-| `servers` | `MASH_SERVER`, `--server` | The NATS server or servers. In the environment a comma list; in `config.json` a JSON array of strings, or one string with commas; the flag repeats. Use `tls://`: SAP identity is only meaningful over a verified connection. A plain `nats://` url is refused, loopback included, unless `insecure_plaintext` is set. For a private CA or a server that requires client certificates, set `ca`, `tls_cert` and `tls_key` below. |
+| `servers` | `MASH_SERVER`, `--server` | The NATS server or servers. In the environment a comma list; in `config.json` a JSON array of strings, or one string with commas; the flag repeats. Use `tls://`: SAP identity is only meaningful over a verified connection. A plain `nats://` url is refused, loopback included, unless the environment variable `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1` is set (see [Turning encryption off](#turning-encryption-off)). For a private CA or a server that requires client certificates, set `ca`, `tls_cert` and `tls_key` below. |
 | `ca` | `MASH_CA`, `--ca` | PEM file of the CA that signed the server's certificate, for a private CA. Without it the system trust store is used. |
 | `tls_cert`, `tls_key` | `MASH_TLS_CERT`, `MASH_TLS_KEY` | PEM client certificate and its private key, for a server that requires client certificates (mutual TLS). Set both or neither. |
 | `endpoint` | `MASH_ENDPOINT`, `--endpoint` | The full address of the endpoint a session runs as, `owner.group.name`, for example `alice.dev.design`. Each token is lower-case letters, digits and single hyphens. The owner, the first token, is also the fence a credential reaches. See "Which endpoint" below. Apps started from a GUI or IDE usually do not inherit your shell's variables, so set it where Claude Code is launched (the IDE's own environment setting, or the launch command). `mash status` shows whether the endpoint is ready, before you launch. |
@@ -128,7 +128,6 @@ A configuration folder left by mash 0.5.5 holds the keys `url` and `tls_ca` in `
 | `spool_from_start` | `MASH_SPOOL_FROM_START` | `1`/`true` (or `0`/`false`; anything else is an error). Spool mail from the first message, to be shown by the hooks, instead of delivering it by channel until a hook has run: Claude Code drops channel events that arrive before its first prompt. The plugin sets it. Mail that wakes (not fyi or result) wakes the session at once until the first hook has run. Without a usable spool, mail is held unacked in the inbox (read it with the inbox and read tools). |
 | `spool_required` | `MASH_SPOOL_REQUIRED` | `1`/`true` (or `0`/`false`; anything else is an error). Default off. Fail closed: mail is never delivered by the channel. It is spooled from the first message and acked only after a hook has drained it; mail the spool cannot take (no spool, or a failing one) is held unacked in the inbox, and the failure is reported on stderr, and in a channel notice. A spool that cannot be made at start is retried every 5 seconds. Held mail is read with the inbox and read tools, and is delivered once the spool recovers. |
 | `accept_unverified` | `MASH_ACCEPT_UNVERIFIED`, or the `mash serve` flag `--accept-unverified` | `1`/`true` (or `0`/`false`; anything else is an error; in `config.json` a JSON `true` or `false`). Default off. By default only mail whose trust is `verified` reaches the session, `mash inbox` and `mash read`; mail that is unsigned (`absent`), signed by an unknown key (`unknown-signer`), `claimed` or `stale` is dropped and counted, `mash doctor` shows the count, and the sender is not told. When set, that mail is delivered instead, with its trust label, as it was before 0.5.6. The count is kept in `refused-unverified` in the endpoint's spool folder. |
-| `insecure_plaintext` | `MASH_INSECURE_PLAINTEXT` | `1`/`true` (or `0`/`false`; anything else is an error; the variable beats `config.json`). Default off. Every mash connection (`mashctl`, `mash serve`, `mash hook` and the CLI commands `send`, `read`, `inbox`, `who`, `prompt`, `status`, `doctor`) requires TLS to any host, loopback included, and a plain URL (any scheme other than `tls` and `wss`) is refused before any connection is made, exit code 2, with the host, this setting and the fix (`tls://` with the server's certificate, `ca` for a private CA). When set, plain text is allowed and each command prints a warning on stderr. Use it for a throwaway server in a test, never on a network you do not control: plain text lets anyone on the network read mail and obtain signatures. `init --local` makes a certificate authority and does not need it. |
 | `idle_wake` | `MASH_IDLE_WAKE` | Hook mode: how long spooled mail waits for a hook before serve wakes the idle session. A Go duration, 5s to 30m. Default `45s`; re-wakes double from there, to 30 minutes. |
 | `relay_window` | `MASH_RELAY_WINDOW` | serve: how soon after mail from one sender a send to another endpoint is traced as a relay candidate (see "Relay tracing" in operations.md). Nothing is blocked. A Go duration, 1s to 1h. Default `60s`. |
 | `open_timeout` | `MASH_OPEN_TIMEOUT` | How long a command or serve may spend opening: connecting to its data and checking its identity. A Go duration above zero (for example `"45s"`), for slow links. Default `20s`. |
@@ -152,6 +151,20 @@ The environment wins over the file.
 Credentials files must be mode 0600; they hold the endpoint's private key, and mash refuses to use a credentials file that other users can read (fix it with `chmod 600`). `mashctl` applies the same check to the admin credentials and to the system account credentials (`system_creds` in `config.json`). A symlink is followed and the file it points to is checked.
 
 Optional: the session instruction file `~/.config/mash/policy.md` is appended to every session's instructions. By default, mail from a verified mash endpoint is treated as a delegated request from the fleet's operator; use `policy.md` to carve out what still needs a human, for example "Ask me before spending money or touching production."
+
+### Turning encryption off
+
+Every mash connection requires TLS, to any host, loopback included: `mashctl`, `mash serve`, `mash hook` and the CLI commands. A plain URL (any scheme other than `tls` and `wss`) is refused before any connection is made, exit code 2, with the host, the variable below and the fix (`tls://` with the server's certificate, `ca` for a private CA).
+
+There is one way to allow plain text, for `mash` and `mashctl` alike: set the environment variable `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1`. It is not a setting: there is no flag and no `config.json` key. Its only value is `1` (empty or `0` is off; anything else is an error). While it is set, every command of both tools first prints this line on stderr, and nothing extra on stdout (`--json` stays clean):
+
+```
+warning: encryption to the server is OFF (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set)
+```
+
+Use it for a throwaway server in a test, never on a network you do not control: plain text lets anyone on the network read mail and obtain signatures. `init --local` makes a certificate authority and does not need it.
+
+The old names are gone with no alias: `MASH_INSECURE_PLAINTEXT` in the environment and `insecure_plaintext` in `config.json` are refused, exit 2, with an error that names `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1`.
 
 ## 5. Launch a session
 

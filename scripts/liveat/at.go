@@ -65,7 +65,7 @@ func (a *AT) tlsURL() string { return "tls://127.0.0.1:" + strconv.Itoa(a.R.Port
 func (a *AT) caPath() string { return filepath.Join(a.srvDir, fileCACert) }
 
 // Conn is the connection settings of every endpoint and mashctl command of the scenario: the one local server over
-// TLS, trusting the CA the setup script made, with no insecure_plaintext override (REQ-014, AT-001). The endpoint is a
+// TLS, trusting the CA the setup script made, with no MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION override (REQ-014, AT-001). The endpoint is a
 // placeholder that gives the commands their owner, alice; a session names its own (SessionEnv), which comes later and wins.
 func (a *AT) Conn() []string {
 	return []string{"MASH_SERVER=" + a.tlsURL(), "MASH_CA=" + a.caPath(), "MASH_ENDPOINT=alice.dev.ctl"}

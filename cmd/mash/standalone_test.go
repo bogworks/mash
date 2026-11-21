@@ -46,9 +46,9 @@ func scrubbedEnv(t *testing.T, mash map[string]string) []string {
 	t.Helper()
 	pathDir := t.TempDir() // empty: nothing resolves on it
 	env := []string{"PATH=" + pathDir, "HOME=" + t.TempDir()}
-	if _, ok := mash["MASH_INSECURE_PLAINTEXT"]; !ok {
+	if _, ok := mash["MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION"]; !ok {
 		// REQ-014: these tests are not about TLS; the override is explicit.
-		env = append(env, "MASH_INSECURE_PLAINTEXT=1")
+		env = append(env, "MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1")
 	}
 	for k, v := range mash {
 		if !strings.HasPrefix(k, "MASH_") {
@@ -93,7 +93,7 @@ func mashRun(t *testing.T, bin string, env []string, stdin string, args ...strin
 	} else if err != nil {
 		t.Fatalf("mash %v: %v", args, err)
 	}
-	return out.String(), code
+	return withoutPlainWarning(out.String()), code
 }
 
 // mashRunSplit is mashRun with standard output and standard error kept apart.

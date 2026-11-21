@@ -331,7 +331,8 @@ func epCreate(in *epInput, env func(string) string, lookup config.Lookup, stderr
 	announceTarget(cfg, env, stderr)
 	adm, ctx, closeAdmin, err := ctl.OpenAdmin("mashctl", cfg)
 	if err != nil {
-		return fail("server", admin.RewordUnavailable(err.Error())+"; nothing was changed")
+		e := epErrOf(addr, "server", admin.RewordUnavailable(err.Error())+"; nothing was changed")
+		return t, epResult{}, withPlainCode(e, err)
 	}
 	defer closeAdmin()
 	servers := serverCount(cfg)

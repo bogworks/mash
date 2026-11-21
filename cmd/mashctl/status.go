@@ -119,8 +119,8 @@ func runStatus(args []string, g cliframe.Global, env func(string) string, lookup
 		}
 	}
 	for _, s := range servers { // a plain URL without the override is a refusal, not a state of the server
-		if _, _, err := natsauth.RequireTLS(s, cfg.InsecurePlaintext); err != nil {
-			return cliframe.Report(stdout, stderr, cliframe.Failf("%s", strings.TrimPrefix(err.Error(), "mash: ")), jsonOut)
+		if _, _, err := natsauth.RequireTLS(s, cfg.SkipEncryption); err != nil {
+			return cliframe.Report(stdout, stderr, withPlainCode(cliframe.Failf("%s", strings.TrimPrefix(err.Error(), "mash: ")), err), jsonOut)
 		}
 	}
 	rows := statusRows(cfg, servers, serverStatus)
