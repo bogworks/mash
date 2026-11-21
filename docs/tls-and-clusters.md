@@ -2,7 +2,7 @@
 
 This page sets up mash over TLS, on a cluster of three NATS servers, and with a second machine that runs `mashctl`. It adds to [operations.md](operations.md) and does not replace it. Read [Setting mash up with `mashctl init --config`](operations.md#setting-mash-up-with-mashctl-init---config) and [Several servers](operations.md#several-servers) first.
 
-Everything here uses settings that exist in mash 0.5.6 (`servers`, `ca`, `tls_cert`, `tls_key`). Nothing is a new feature. The steps were last run by hand on 0.5.5, before the settings were renamed, and have not been run again on 0.5.6. What was run and what was not is in [Not tested in 0.5.5](#not-tested-in-055) at the end.
+Everything here uses settings that exist in mash 0.5.6 (`servers`, `ca`, `tls_cert`, `tls_key`). Nothing is a new feature. The steps were last run by hand on 0.5.5, before the settings were renamed, and have not been run again on 0.5.6. What was run and what was not is in [Not tested in 0.5.6](#not-tested-in-056) at the end.
 
 Names used below: `nats.example.com` is a server, `n1.example.com`, `n2.example.com` and `n3.example.com` are the three servers of a cluster, `acme` is the owner.
 
@@ -275,7 +275,7 @@ mash join acme.dev.design.join --key design.seed
 
 Only `design.seed.pub` and the join file travel. The join file carries the servers and the CA certificate, so `mash join` writes `servers` and `ca` into M3's configuration folder. M3 also needs a client certificate when the servers require one (section 1). M3 can name any one of the three servers in `servers`, or all three.
 
-## Not tested in 0.5.5
+## Not tested in 0.5.6
 
 > The 0.5.5 acceptance run tested TLS, a three-server cluster and two `mashctl` machines by hand, in rootless containers on one host: three NATS servers of one cluster with TLS on the client and route connections, endpoints on separate nodes (a session on one node connecting to another node's server, mail each way), and two `mashctl` machines on one account (the same address created from both at the same moment: one succeeded, the other was refused `address_taken`). It did not test real separate hosts or a physical network, clock drift between hosts, or certificate expiry and renewal.
 

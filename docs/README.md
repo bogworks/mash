@@ -6,7 +6,7 @@ Start with the [README](../README.md). This index is for version 0.5.6. What cha
 
 - [Walkthrough: two agents, one mail mesh](guide/walkthrough.md): by hand, step by step
 - Set up with an agent: the `mash-setup` plugin ([setup skill](../mash-setup/skills/setup/SKILL.md), [day-2 skill](../mash-setup/skills/day-2/SKILL.md))
-- [Install](install.md): binaries, plugin, verify a download, configuration, launch, upgrading from 0.5.5
+- [Install](install.md): binaries, plugin, verify a download, configuration, launch
 
 ## Understand mash
 

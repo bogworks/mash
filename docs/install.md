@@ -37,7 +37,7 @@ If you want a NATS server on this machine, `mash-local-nats-setup.sh` is the oth
 
 ### Verify what you download
 
-Every file of a release is covered by `SHA256SUMS`. `SHA256SUMS`, the binaries and the three scripts (`install.sh`, `mash-local-nats-setup.sh`, `mash-migrate-0.5.5.sh`) are also subjects of the release's build provenance attestation, which GitHub signs for the release's own workflow.
+Every file of a release is covered by `SHA256SUMS`. `SHA256SUMS`, the binaries and the two scripts (`install.sh`, `mash-local-nats-setup.sh`) are also subjects of the release's build provenance attestation, which GitHub signs for the release's own workflow.
 
 What `install.sh` does on its own:
 
@@ -58,7 +58,7 @@ less install.sh && bash install.sh
 
 If `gh` is missing or too old, skip the `gh attestation verify` lines: the `grep` line still shows the script is the release's own file, and the TLS caveat above applies. Any failure of a check: stop and run nothing.
 
-An agent does not pipe a download into a shell: the setup skill downloads each script, checks it against `SHA256SUMS`, shows you what it is about to run and runs it after a yes. All three scripts are also the repository's own `scripts/` files at the release commit, byte for byte; the release check compares them ([ADR 0150](decisions/0150-releases-carry-install-and-local-nats-setup-scripts-as-attested-assets.md), [ADR 0152](decisions/0152-the-release-carries-a-one-time-0-5-5-migration-script.md)).
+An agent does not pipe a download into a shell: the setup skill downloads each script, checks it against `SHA256SUMS`, shows you what it is about to run and runs it after a yes. Both scripts are also the repository's own `scripts/` files at the release commit, byte for byte; the release check compares them ([ADR 0150](decisions/0150-releases-carry-install-and-local-nats-setup-scripts-as-attested-assets.md)).
 
 To build from source instead, `go install github.com/bogworks/mash/cmd/mash@v0.5.6` and `go install github.com/bogworks/mash/cmd/mashctl@v0.5.6` need Go 1.27.4 or newer; the result is not the attested build. Use the tag of the release you want, not `@latest`.
 
@@ -115,8 +115,6 @@ Without this, `--channels plugin:mash@mash` is refused ("not on the approved cha
 On a machine that runs `mashctl`, `mashctl init --config FILE` writes `servers`, `ca`, `owner`, `admin_creds` and `system_creds` to this file from a setup file (see [Setting mash up](operations.md#setting-mash-up-with-mashctl-init---config)); then make each endpoint with `mashctl endpoint create` ([Adding an endpoint](operations.md#adding-an-endpoint)). The rest of this section describes the file.
 
 `~/.config/mash/config.json`, or `$XDG_CONFIG_HOME/mash/config.json` when `XDG_CONFIG_HOME` is an absolute path and that file exists (an existing `~/.config/mash` install keeps working). With no `HOME` and no absolute `XDG_CONFIG_HOME`, mash stops with an error unless everything comes from the `MASH_*` variables. A leading `~/` in `creds` and `admin_creds` (and in `MASH_CREDS` and `MASH_ADMIN_CREDS`) is expanded to your home; `~user/` is not. `policy.md` and the default creds files live in the same directory; when the XDG directory has no copy of one, mash also finds it in `~/.config/mash` (the XDG copy wins when both exist). A relative `admin_creds`, `ca`, `tls_cert` or `tls_key` in `config.json` is resolved against the config directory, not the working directory. `config.json` that is writable by every user is refused; run `chmod go-w` on it.
-
-If the folder was left by mash 0.5.5, see [If you ran mash 0.5.5](#if-you-ran-mash-055).
 
 ```json
 { "servers": ["tls://nats.example.com:4222"], "endpoint": "alice.dev.design" }
@@ -222,37 +220,6 @@ A reader treats the count as fresh when `waking_pending_at` is within 90 s (the 
 The CLI never takes the lease, so it works alongside the running session.
 
 `send --id KEY` (the send tool's `id`) is an idempotency key, 1 to 128 printable ASCII characters. Re-running a send with the same key to the same recipient from the same endpoint, within the inbox stream's two-minute duplicate window, stores nothing new: it succeeds, reports the original number and says it was a duplicate (`Mail already sent; nothing new stored.`). If a send times out waiting for the stream's acknowledgement, the message may or may not have landed; the error prints a key to retry with (`mash send <to> --id <key> ...`), which delivers it at most once, but only within that two-minute window: after it a retry may store a second copy, which the recipient shows as a new message. Without `--id` every send is a new message.
-
-## If you ran mash 0.5.5
-
-Mash 0.5.6 renamed two settings in `config.json`, in the mash
-configuration folder. If your machine ran 0.5.5, run this once. Download the
-script, check it against the release's `SHA256SUMS`, read it, then run it
-([Verify what you download](#verify-what-you-download) shows how to check
-`SHA256SUMS` itself against the attestation):
-
-```sh
-BASE=https://github.com/bogworks/mash/releases/latest/download
-curl -fsSLO $BASE/mash-migrate-0.5.5.sh -O $BASE/SHA256SUMS &&
-grep ' mash-migrate-0.5.5.sh$' SHA256SUMS | sha256sum -c - &&
-less mash-migrate-0.5.5.sh && bash mash-migrate-0.5.5.sh
-```
-
-What it changes:
-
-* In `config.json`, `url` becomes `servers` and `tls_ca` becomes `ca`.
-* Your old file stays beside the new one as `config.json.0.5.5`.
-* It prints one line saying what it changed.
-* It touches nothing on the server. Nothing there needs to change, and
-  0.5.5 and 0.5.6 can mail each other on one server, but only when each
-  keeps its own configuration folder: 0.5.5 tools cannot use a folder you
-  have migrated (they stop with `no NATS url`). To go back to 0.5.5, put
-  `config.json.0.5.5` back as `config.json`.
-
-If you skip it, nothing is lost: when 0.5.6 finds the old settings it
-changes nothing and stops with a message that names this script. It is a
-script you run once, not a `mash` or `mashctl` command
-([ADR 0152](decisions/0152-the-release-carries-a-one-time-0-5-5-migration-script.md)).
 
 ## Versions that work together
 

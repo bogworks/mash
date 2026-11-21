@@ -92,4 +92,4 @@ The build is meant to be reproducible: `scripts/buildrelease` builds a binary fr
 
 ## The scripts
 
-`install.sh`, `mash-local-nats-setup.sh` and `mash-migrate-0.5.5.sh` are release files too. They are listed in `SHA256SUMS` and covered by the same attestation. Check one the same way before you run it. See [Verify what you download](../install.md#verify-what-you-download).
+`install.sh` and `mash-local-nats-setup.sh` are release files too. They are listed in `SHA256SUMS` and covered by the same attestation. Check one the same way before you run it. See [Verify what you download](../install.md#verify-what-you-download).
