@@ -31,11 +31,14 @@ Then tell the session: "set mash up on this machine"
 
 ### By hand
 
-1. Install the programs. Work in an empty scratch folder (`cd "$(mktemp -d)"`):
-   the downloads land in the folder you are in. First `nats-server` and the
-   `nats` command, each from its GitHub release, checked against that
-   release's checksums and put in `~/.local/bin` (`nats-server` 2.10.7 or
-   newer; the `nats` zip is opened with `unzip`, or with `python3` if there is no `unzip`):
+1. Install the programs. You need two programs from NATS, on the `PATH` of
+   the user who runs mash: `nats-server` 2.10.7 or newer (tested with 2.15.1)
+   and the `nats` command (tested with 0.5.2). Any way of installing them
+   works; the setup skill above asks how you would like to. Here is one way,
+   with no `sudo`: each from its GitHub release, checked against that release's
+   checksums, into `~/.local/bin`. Work in an empty scratch folder
+   (`cd "$(mktemp -d)"`): the downloads land in the folder you are in. The
+   `nats` zip is opened with `unzip`, or with `python3` if there is no `unzip`.
 
    ```sh
    install -d -m 755 ~/.local ~/.local/bin
