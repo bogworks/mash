@@ -658,22 +658,22 @@ CNF
     ACCPUB=$(acct_pub "$OWNER")
     # the nats command signs the accounts with the operator's own (identity) key, not
     # its signing key, and mashctl init needs operator.nk to be the key that signed them
-    OPSIGN=$(nats auth operator info "$OP" 2>/dev/null </dev/null |
+    OPKEY=$(nats auth operator info "$OP" 2>/dev/null </dev/null |
         sed -n '1s/^Operator .* (\(O[A-Z2-7]*\))$/\1/p')
     # every file the next steps read must be where this nats version puts it
     _ok=1
-    [ -n "$SYSPUB" ] && [ -n "$ACCPUB" ] && [ -n "$OPSIGN" ] || _ok=0
+    [ -n "$SYSPUB" ] && [ -n "$ACCPUB" ] && [ -n "$OPKEY" ] || _ok=0
     if [ "$_ok" = 1 ]; then
         for _f in "$DIR/creds/mashadmin.creds" "$DIR/creds/sys.creds" "$ST/$OP.jwt" \
             "$ST/accounts/SYSTEM/SYSTEM.jwt" "$ST/accounts/$OWNER/$OWNER.jwt" \
-            "$(keyfile "$OPSIGN")" "$(keyfile "$ACCPUB")"; do
+            "$(keyfile "$OPKEY")" "$(keyfile "$ACCPUB")"; do
             [ -f "$_f" ] || _ok=0
         done
     fi
     [ "$_ok" = 1 ] ||
         die 1 "the nats command stored its keys somewhere unexpected (tested with nats v0.5.2)" \
             "use nats v0.5.2, or report this; nothing was left behind"
-    cp "$(keyfile "$OPSIGN")" keys/operator.nk
+    cp "$(keyfile "$OPKEY")" keys/operator.nk
     cp "$(keyfile "$ACCPUB")" keys/account.nk
     chmod 600 keys/operator.nk keys/account.nk
     cp "$ST/$OP.jwt" operator.jwt
