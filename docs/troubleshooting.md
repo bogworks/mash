@@ -37,7 +37,7 @@ Fix: run the script once, `curl -fsSL <hint address> | bash`. It renames the key
 
 ## `mash is not installed`
 
-Full text: `mash is not installed: the mash plugin found no mash program. Install it: curl -fsSL https://github.com/bogworks/mash/releases/latest/download/install.sh | bash`. The plugin's session-start hook prints it as one line on stdout, so the agent sees it and can tell you; the MCP launcher prints it on stderr after `mash launcher:` lines and exits 127, and the MCP server does not start. With `MASH_RELEASE_BASE` set (a fork or a mirror) the line names that base instead.
+Full text: `mash is not installed: the mash plugin found no mash program. Install it: curl -fsSL https://github.com/bogworks/mash/releases/latest/download/install.sh | bash`. The plugin's session-start hook prints it as one line on stdout, so the agent sees it and can tell you; the MCP launcher prints it on stderr after `mash launcher:` lines and exits 127, and the MCP server does not start. The line always names the project's own latest release, even when `MASH_RELEASE_BASE` is set.
 
 Causes:
 - The plugin is unpinned (a repository checkout or `mash plugin export`) and there is no `mash` on the `PATH` of the process that started it. An unpinned launcher never downloads.

@@ -28,10 +28,10 @@ if [ -f "$PINS" ]; then
 fi
 
 REPO_URL="https://github.com/bogworks/mash"
-# The one release-base setting: MASH_RELEASE_BASE when set (a fork or a mirror points at itself), else the project's own.
-# Versioned downloads are $MASH_RELEASE_BASE/v<version>/<asset> (default $REPO_URL/releases/download/v<version>/<asset>);
-# the install line names the "latest" base ($REPO_URL/releases/latest/download by default). Always filled in.
-INSTALL_BASE="${MASH_RELEASE_BASE:-$REPO_URL/releases/latest/download}"
+# Versioned downloads are $MASH_RELEASE_BASE/v<version>/<asset> (default $REPO_URL/releases/download/v<version>/<asset>).
+# The install line always names the project's own latest-release base, because MASH_RELEASE_BASE is the versioned
+# download base and install.sh is not under it; a fork or mirror that wants its own line edits its launcher.
+INSTALL_BASE="$REPO_URL/releases/latest/download"
 NOT_INSTALLED="mash is not installed: the mash plugin found no mash program. Install it: curl -fsSL $INSTALL_BASE/install.sh | bash"
 HINT="$NOT_INSTALLED"
 

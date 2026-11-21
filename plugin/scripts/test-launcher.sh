@@ -364,8 +364,6 @@ check "unpinned wrote nothing to stdout" empty_file "$T/out"
 
 # --- prefetch
 SENTENCE="mash is not installed: the mash plugin found no mash program. Install it: curl -fsSL https://github.com/bogworks/mash/releases/latest/download/install.sh | bash"
-SENTENCE_MIRROR="mash is not installed: the mash plugin found no mash program. Install it: curl -fsSL https://mirror.example/rel/install.sh | bash"
-SENTENCE_PFX="mash is not installed: the mash plugin found no mash program. Install it: curl -fsSL "
 D8="$T/data8"
 run "$D8" __prefetch
 check "prefetch success exits 0" eq "$RC" 0
@@ -373,25 +371,25 @@ check "prefetch success silent on stdout" empty_file "$T/out"
 check "prefetch installed binary" test -x "$D8/bin/mash-$VER"
 MASH_RELEASE_BASE="file://$REL2" run "$T/data9" __prefetch
 check "prefetch on bad sha exits 0" eq "$RC" 0
-check "prefetch on bad sha: stdout is the not-installed line, naming the release base" eq "$(cat "$T/out")" "${SENTENCE_PFX}file://$REL2/install.sh | bash"
+check "prefetch on bad sha: stdout is the not-installed line, naming the project base" eq "$(cat "$T/out")" "$SENTENCE"
 check "prefetch on bad sha installed nothing" absent "$T/data9/bin/mash-$VER"
 MASH_RELEASE_BASE="file://$T/nope" run "$T/data10" __prefetch
 check "prefetch offline exits 0" eq "$RC" 0
-check "prefetch offline: stdout is the not-installed line, naming the release base" eq "$(cat "$T/out")" "${SENTENCE_PFX}file://$T/nope/install.sh | bash"
+check "prefetch offline: stdout is the not-installed line, naming the project base" eq "$(cat "$T/out")" "$SENTENCE"
 CLAUDE_PLUGIN_DATA="$T/data11" PATH="$BASEPATH" sh "$P3/scripts/mash" __prefetch > "$T/out" 2> "$T/err"; RC=$?
 check "prefetch unpinned exits 0" eq "$RC" 0
-check "prefetch unpinned, no mash: stdout is the not-installed line" eq "$(cat "$T/out")" "${SENTENCE_PFX}$MASH_RELEASE_BASE/install.sh | bash"
+check "prefetch unpinned, no mash: stdout is the not-installed line" eq "$(cat "$T/out")" "$SENTENCE"
 check "prefetch unpinned never downloads" absent "$T/data11"
 
-# the SessionStart line, exactly, with the default base (MASH_RELEASE_BASE unset) and with a mirror
+# the SessionStart line, exactly, with MASH_RELEASE_BASE unset and with it set (the line always names the project base)
 env -u MASH_RELEASE_BASE CLAUDE_PLUGIN_DATA="$T/data14" PATH="$BASEPATH" sh "$P3/scripts/mash" __prefetch > "$T/out" 2> "$T/err"; RC=$?
 check "no binary, default base: prefetch exits 0" eq "$RC" 0
 check "no binary, default base: stdout is exactly the spec sentence" eq "$(cat "$T/out")" "$SENTENCE"
 check "no binary, default base: stdout is one line" eq "$(wc -l < "$T/out" | tr -d ' ')" 1
 MASH_RELEASE_BASE=https://mirror.example/rel CLAUDE_PLUGIN_DATA="$T/data15" PATH="$BASEPATH" sh "$P3/scripts/mash" __prefetch > "$T/out" 2> "$T/err"; RC=$?
-check "no binary, mirror base: prefetch exits 0" eq "$RC" 0
-check "no binary, mirror base: sentence names the mirror" eq "$(cat "$T/out")" "$SENTENCE_MIRROR"
-check "no binary, mirror base: no placeholder" eq "$(grep -c '<' "$T/out")" 0
+check "no binary, MASH_RELEASE_BASE set: prefetch exits 0" eq "$RC" 0
+check "no binary, MASH_RELEASE_BASE set: the line still names the project base" eq "$(cat "$T/out")" "$SENTENCE"
+check "no binary, MASH_RELEASE_BASE set: no placeholder" eq "$(grep -c '<' "$T/out")" 0
 CLAUDE_PLUGIN_DATA="$T/data16" PATH="$PB:$BASEPATH" sh "$P3/scripts/mash" __prefetch > "$T/out" 2> "$T/err"; RC=$?
 check "PATH mash exists: prefetch exits 0, nothing on stdout" eq "$RC$(wc -c < "$T/out" | tr -d ' ')" 00
 MASH_BIN="$T/ovr" CLAUDE_PLUGIN_DATA="$T/data17" PATH="$BASEPATH" sh "$P3/scripts/mash" __prefetch > "$T/out" 2> "$T/err"; RC=$?

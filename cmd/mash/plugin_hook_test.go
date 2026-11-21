@@ -193,12 +193,6 @@ func TestPluginHook_neverBlocksAndLogsStderr(t *testing.T) {
 func TestPluginPrefetchHook_neverFails(t *testing.T) {
 	out, errOut, code := runShellHook(t, prefetchCmd, t.TempDir(), "XDG_STATE_HOME="+t.TempDir())
 	want := "mash is not installed: the mash plugin found no mash program. Install it: curl -fsSL https://github.com/bogworks/mash/releases/latest/download/install.sh | bash\n"
-	if os.Getenv("MASH_RELEASE_BASE") != "" {
-		want = out // a mirror is set in this environment: the base differs, the shape is checked below
-		if !strings.HasPrefix(out, "mash is not installed: ") || strings.Count(out, "\n") != 1 {
-			t.Fatalf("stdout %q", out)
-		}
-	}
 	if code != 0 || out != want {
 		t.Fatalf("exit %d stdout %q stderr %q", code, out, errOut)
 	}
