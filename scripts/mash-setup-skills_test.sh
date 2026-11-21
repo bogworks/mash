@@ -326,8 +326,8 @@ else
   fail "release URLs referenced: $bases"
 fi
 assets="$(cat "$SETUP" "$DAY2" | grep -oE '\$U/[A-Za-z0-9._-]+' | sed 's|^\$U/||' | sort -u | tr '\n' ' ')"
-if [ "$assets" = "SHA256SUMS install.sh mash-local-nats-setup.sh mash.intoto.jsonl " ]; then
-  ok "downloaded assets are exactly SHA256SUMS, install.sh, mash-local-nats-setup.sh, mash.intoto.jsonl"
+if [ "$assets" = "SHA256SUMS install.sh mash-local-nats-setup.sh mash-migrate-0.5.5.sh mash.intoto.jsonl " ]; then
+  ok "downloaded assets are exactly SHA256SUMS, install.sh, mash-local-nats-setup.sh, mash-migrate-0.5.5.sh, mash.intoto.jsonl"
 else
   fail "downloaded assets are: $assets"
 fi

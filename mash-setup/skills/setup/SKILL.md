@@ -140,10 +140,12 @@ also check the release's signed attestation of `SHA256SUMS`, pinned to the
 tag, before either script runs:
 
 ```sh
-DL="$HOME/mash-setup-dl"; cd "$DL" && U=https://github.com/bogworks/mash/releases/download/$TAG && curl -fsSL -O "$U/mash.intoto.jsonl" && gh attestation verify SHA256SUMS -R bogworks/mash --bundle mash.intoto.jsonl --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref "refs/tags/$TAG"
+DL="$HOME/mash-setup-dl"; TAG=vX.Y.Z; cd "$DL" && U=https://github.com/bogworks/mash/releases/download/$TAG && curl -fsSL -O "$U/mash.intoto.jsonl" && gh attestation verify SHA256SUMS -R bogworks/mash --bundle mash.intoto.jsonl --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref "refs/tags/$TAG"
 ```
 
-Expected: it exits 0 and says it verified. Any failure: stop, run nothing.
+Replace `vX.Y.Z` with the tag from the block above (each block runs in a
+fresh shell). Expected: it exits 0 and says it verified. Any failure: stop,
+run nothing.
 If `gh` is missing, or too old to have `gh attestation verify`, say so to the
 person in one sentence: the scripts are then trusted on github.com's TLS
 alone (the installer says the same). Run them only if the person says yes
