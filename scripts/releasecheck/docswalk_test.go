@@ -119,12 +119,20 @@ func TestDocsWalk_realHistory(t *testing.T) {
 			t.Fatalf("want accepted: %v", err)
 		}
 	})
-	t.Run("agent instructions are code", func(t *testing.T) {
+	t.Run("agent instructions are documentation (rules 20 and 21)", func(t *testing.T) {
 		repo := walkRepo(t)
 		tested := walkCommit(t, repo, map[string]string{"internal/a.go": "package a\n"}, "code")
-		x := walkCommit(t, repo, map[string]string{"mash-setup/skills/setup/SKILL.md": "s\n"}, "skill")
+		x := walkCommit(t, repo, map[string]string{"mash-setup/skills/setup/SKILL.md": "s\n", "AGENTS.md": "a\n"}, "skill")
+		if err := judgeWalk(t, repo, x, tested); err != nil {
+			t.Fatalf("a Markdown change under mash-setup/ is documentation: want accepted: %v", err)
+		}
+	})
+	t.Run("a script under mash-setup is code", func(t *testing.T) {
+		repo := walkRepo(t)
+		tested := walkCommit(t, repo, map[string]string{"internal/a.go": "package a\n"}, "code")
+		x := walkCommit(t, repo, map[string]string{"mash-setup/setup.sh": "echo hi\n"}, "script")
 		if err := judgeWalk(t, repo, x, tested); err == nil {
-			t.Fatal("a change under mash-setup/ must not be judged docs-only")
+			t.Fatal("a non-Markdown change under mash-setup/ must not be judged docs-only")
 		}
 	})
 }

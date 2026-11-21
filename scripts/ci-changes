@@ -8,7 +8,7 @@
 #   HEAD_REF  the pull request's head ref (github.head_ref; empty on other events)
 #
 # code=false only for a pull request, a Mergify merge-queue draft or a push to main whose changed paths are nothing but
-# documentation: every path is under docs/ or is a *.md file AND is not one a build, a test or the release tooling reads.
+# documentation: every path is under docs/ or is a *.md file.
 # The caller passes the paths the event adds: a pull request's diff against its base; a queue draft's diff against main is
 # the whole batch (so a docs-only batch is docs-only and a batch with one code pull request is code); a push's diff is
 # the range it added (the release gate walks back past docs-only heads to the newest commit whose tests ran, ADR 0157 and
@@ -16,51 +16,16 @@
 #   - a merge group, a schedule or any other event;
 #   - an empty path list (nothing to compare);
 #   - any path not listed as documentation below (the default is code, so a new top-level path is code).
-# Agent instructions stay code too, at any depth: instruction files (AGENTS, CLAUDE, GEMINI, every SKILL.md), templates, and anything
-# under skills, commands, agents, hooks, prompts, briefings, plugins, .claude-plugin or mash-setup.
-# Documentation that a test or the build reads stays code, so it is tested when it changes:
-# docs/branch-protection.md (internal/release), docs/reference/ and spec/ (internal/refgen compares the generated reference with the spec), docs/review/ (scripts/reviewgate and scripts/gate read policy.json), docs/allowed_signers, docs/skipped-releases.txt and docs/release-cutover (the release tooling), CHANGELOG.md and changelog.d/
-# (scripts/changelog, lint.yml), every *.md under .github/, plugin/, scripts/, cmd/, internal/ and ci/ (the plugin package is
-# embedded; the rest sit beside code), test data, Go and module files, and binary assets under docs/ (internal/release
-# refuses a committed binary). docs/decisions/ is documentation: adr-lint and adr-numbers run on every pull request anyway.
+# Documentation is every Markdown file (*.md, wherever it sits and whatever its name) and every path under docs/ (images and SVG
+# included): bogworks-dev-standards dev-process rules 20 and 21 (Randy, 2026-11-21: "markdown is not code"). A classifier does not call a
+# Markdown file code because of its name, its directory or because a build or a test reads it. A non-Markdown file outside docs/ (a hook
+# script, a manifest, a template, a Go file) is code, wherever it sits.
 set -euo pipefail
 
-# is_docs succeeds for a path that is documentation no test or build reads.
+# is_docs succeeds for a path that is documentation: any *.md, or anything under docs/.
 is_docs() {
-	local p="$1" lower
-	lower="$(printf '%s' "$p" | tr '[:upper:]' '[:lower:]')"
-	case "$p" in
-	.github/* | .mergify.yml | .claude-plugin/* | plugin/* | scripts/* | cmd/* | internal/* | ci/*) return 1 ;;
-	go.mod | go.sum | */go.mod | */go.sum | *.go) return 1 ;;
-	testdata/* | */testdata/* | *conformance*) return 1 ;;
-	CHANGELOG.md | changelog.d/*) return 1 ;;
-	docs/branch-protection.md | docs/review/* | docs/reference/* | spec/* | docs/allowed_signers | docs/skipped-releases.txt | docs/release-cutover) return 1 ;;
-	esac
-	# Agent instructions, wherever they sit and in any letter case (x-lead, planner #2845, ADR 0157): the named files, any *.tmpl, any path with
-	# a directory component named like the places agents read instructions, and mash-setup/ at any depth. README.md, docs/install.md,
-	# SECURITY.md and CONTRIBUTING.md stay docs.
-	local base="${lower##*/}" dirs c
-	case "$base" in
-	agents.md | claude.md | gemini.md | skill.md | .cursorrules | .windsurfrules | *.tmpl) return 1 ;;
-	esac
-	case "$lower" in mash-setup/* | */mash-setup/*) return 1 ;; esac
-	if [ "$lower" != "$base" ]; then
-		dirs="${lower%/*}"
-		local IFS=/
-		for c in $dirs; do
-			case "$c" in
-			skills | commands | agents | hooks | prompts | briefings | plugins | .claude-plugin) return 1 ;;
-			esac
-		done
-	fi
-	case "$lower" in
-	docs/*.png | docs/*.jpg | docs/*.jpeg | docs/*.gif | docs/*.ico | docs/*.pdf | docs/*.woff | docs/*.woff2) return 1 ;;
-	esac
-	# Documentation is Markdown anywhere, and under docs/ only plain-text formats (security-review F1 on the docs queue): a script, a data or
-	# config file, a .cast or an .svg under docs/ is runnable or active material and stays code.
-	case "$p" in
-	*.md) return 0 ;;
-	docs/*.txt | docs/*.rst | docs/*.adoc | docs/*.csv | docs/*.log) return 0 ;;
+	case "$1" in
+	*.md | docs/*) return 0 ;;
 	esac
 	return 1
 }
