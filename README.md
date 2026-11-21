@@ -58,7 +58,6 @@ gh attestation verify SHA256SUMS -R bogworks/mash --bundle mash.intoto.jsonl \
   --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/v0.5.6
 ```
 
-<!-- TODO-PUBLISHED: after v0.5.6 is published, run the commands above once against the release and confirm they pass (the release must carry install.sh, SHA256SUMS and mash.intoto.jsonl) -->
 
 The rest (checking `install.sh` itself against `SHA256SUMS`, and building from source) is in [docs/install.md](docs/install.md#verify-what-you-download).
 
