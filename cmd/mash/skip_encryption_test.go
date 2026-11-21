@@ -253,3 +253,16 @@ func TestSkipEncryptionWarnsBeforeArgumentHandling(t *testing.T) {
 		t.Errorf("old config key, bare: exit %d, stderr %q, want hint %q", code, errb, want)
 	}
 }
+
+// A --config-dir flag can point a hook at a file with the removed key: that refusal is exit 0 too.
+func TestSkipEncryptionHookConfigDirFlagRefusalExitsZero(t *testing.T) {
+	env := plainEnv(t, "tls://127.0.0.1:1")
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"insecure_plaintext":true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, errb, code := runCapture(env, "hook", "--config-dir", dir)
+	if code != 0 || out != "" || !strings.Contains(errb, "mash hook: insecure_plaintext in config.json is no longer read") {
+		t.Fatalf("exit %d out %q err %q", code, out, errb)
+	}
+}

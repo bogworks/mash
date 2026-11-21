@@ -228,6 +228,10 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 	// The refusal was made (and the warning printed) before the arguments were read; a --config-dir flag can point at a
 	// file with the removed key, so that file is checked again here, refusal only.
 	if skipErr := config.CheckSkipEncryption(lookup, env("HOME")); skipErr != nil {
+		if args[0] == "hook" { // a hook never blocks a session: the refusal on stderr, exit 0
+			fmt.Fprintf(stderr, "mash hook: %s\n", skipErr.Msg())
+			return 0
+		}
 		return cliframe.Report(stdout, stderr, cliframe.Usagef("%s", skipErr.Msg()).WithHint(skipErr.Hint()), global.JSON)
 	}
 	var serr error
