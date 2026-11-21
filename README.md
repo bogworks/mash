@@ -25,7 +25,7 @@ and NATS.
 6. Agent-agnostic (ROADMAP).
 7. Messaging policy (ROADMAP).
 
-**Use mash when** your agents are sessions you run, in one NATS account, working on related problems (a dev swarm),
+**Use mash when** your agents are sessions you run, in one NATS account, working on related problems,
 and messages must wait for a busy or stopped recipient. **Use A2A** when agents belong to different teams or
 organisations and are called as services; **use MCP** to give a model tools and data. The two can sit side by side:
 A2A at the edge, mash inside. See [how mash compares](docs/comparison.md), including "why not A2A?".
@@ -95,7 +95,7 @@ Messaging policy is not in this release; see [what is coming in 0.6.0](docs/refe
 
 ## How it works
 
-![A Claude Code session talks stdio (MCP) to mash serve, which holds one TLS connection to the NATS server (account MASH: inbox stream, mail subject, directory and lease KVs, SAP presence).](docs/images/007-session-and-server.svg)
+![A Claude Code session talks stdio (MCP) to mash serve, which holds one TLS connection to the NATS server (the mash account: inbox streams, mail subjects, directory and lease buckets, SAP presence).](docs/images/007-session-and-server.svg)
 
 The design, with every subject, permission and limit, is in [docs/specs/2026-10-21-mash-design.md](docs/specs/2026-10-21-mash-design.md).
 
