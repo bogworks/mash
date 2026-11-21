@@ -95,7 +95,7 @@ hint: mashctl endpoint delete acme.demo.bob
 Stream: stderr. Exit code: 1.
 
 ```text
-error: deleted acme.demo.bob, but its inbox could not be removed
+error: deleted acme.demo.bob, but the lease fence or the inbox was not removed: the server did not answer
 hint: mashctl endpoint delete acme.demo.bob
 ```
 

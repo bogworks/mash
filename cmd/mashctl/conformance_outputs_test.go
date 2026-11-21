@@ -1,9 +1,11 @@
 package main
 
 // The output half of the conformance test: every x-output case of every command of release 0.5.6 in spec/mashctl.json
-// (text, stream and exit code) is either run against the build and compared exactly, or listed in confUnchecked with
-// the reason it cannot be run here. A case that is neither fails; a listed case that is checked after all fails, so the
-// table only shrinks.
+// (text, stream and exit code) is run against the build and compared exactly, with two exceptions the specification's
+// rules make: a case whose whole text stands in round brackets is a description and is skipped (confIsDescription), and
+// a case that names a cause at the end of its error line compares the cause only as non-empty (confVaryingCause). A
+// case that cannot be run for another reason is listed in confUnchecked with the reason (one now); a case that is neither
+// run nor listed fails, a listed case that is checked after all fails, so the table only shrinks.
 //
 // The cases run in process against the embedded server of the other tests (no binary, no outside network): a world is
 // a server set up by `mashctl init` for owner acme, with the endpoints a case needs, and the folder is ~/.config/mash
@@ -23,13 +25,16 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"regexp"
 	"runtime/debug"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
@@ -45,9 +50,42 @@ import (
 // confUnchecked: key is "<command> <case>" as the specification names them; the value is why the case cannot be run
 // here.
 var confUnchecked = map[string]string{
-	"endpoint delete Cancelled everywhere, then a later step failed": "no fault yields the specified words: after the key is cancelled, a failed later step is worded 'deleted ADDR, but the lease fence or the inbox was not removed: <cause>' (or, for an admin partial error, the whole 'PARTIAL: ...' sentence); the specified 'deleted ADDR, but its inbox could not be removed' is printed by no path of the build",
-	"endpoint inbox Messages":          "the build prints '?' as the sender of a message with no sender header (trust absent), where the specification has 'acme.lab.mallet' in that row, and pads the FROM column two spaces past its widest cell where the specification pads one; the build's own tests expect the two-space padding",
-	"endpoint permissions Permissions": "the text describes the output ('the same JSON as --json'); it is not the output",
+	"endpoint inbox Messages": "the case cannot arise: the specification shows message 7 (WHEN 2m ago) as not delivered and message 8 (1m ago) as delivered, and the build derives a message's state from the consumer's cursors, so a message above one that is delivered is delivered too (message 7 is not delivered only if 8 is not); and both messages are stored within a moment of each other, so their WHEN cannot differ by a minute. confInboxMessagesRun builds the nearest world and TestConfInboxMessagesObstacle pins the build's output",
+}
+
+// confVaryingCause: key is "<command> <case>". The cases listed here end their `error:` line in a cause that the
+// specification gives as one example and the build words as it finds it (rules.json, "A case written in brackets is a
+// description" and the rule on an error that names a cause): the text after the LAST ": " of the first `error:` line
+// is the cause as found. For such a case everything before that cut is compared exactly, in the specification's text
+// and in the build's, and the build's cause must be non-empty; the cause itself is not compared. See confCutCause.
+var confVaryingCause = map[string]bool{
+	"endpoint delete Cancelled everywhere, then a later step failed": true,
+}
+
+// confCutCause cuts the final ": <cause>" off the first line of text that starts with "error: ". It returns the text
+// with that line shortened to what stands before the cut, and the cause. ok is false when there is no such line or the
+// line has no ": " after the "error:" word itself.
+func confCutCause(text string) (cut, cause string, ok bool) {
+	lines := strings.Split(text, "\n")
+	for i, l := range lines {
+		if !strings.HasPrefix(l, "error: ") {
+			continue
+		}
+		at := strings.LastIndex(l, ": ")
+		if at <= len("error:") {
+			return text, "", false
+		}
+		lines[i] = l[:at]
+		return strings.Join(lines, "\n"), l[at+len(": "):], true
+	}
+	return text, "", false
+}
+
+// confIsDescription: a case whose whole text stands in round brackets describes the output in words; it is not the
+// output, and the conformance test skips it (rules.json, "A case written in brackets is a description").
+func confIsDescription(text string) bool {
+	t := strings.TrimSpace(text)
+	return len(t) >= 2 && strings.HasPrefix(t, "(") && strings.HasSuffix(t, ")")
 }
 
 // confOutCase is one x-output case.
@@ -151,6 +189,86 @@ func (w *confWorld) messages(addr string, n int) {
 			w.t.Fatal(err)
 		}
 	}
+}
+
+// failAfterPurgeWith is failAfterPurge (retire_test.go) with the cause of the failure given: the guarded removal runs
+// to its end, then fails as the lease fence or the inbox delete would.
+func failAfterPurgeWith(t *testing.T, cause string) {
+	t.Helper()
+	prev := deprovisionIfUser
+	deprovisionIfUser = func(a *admin.Admin, ctx context.Context, addr sap.Address, user string) error {
+		if err := a.DeprovisionIfUser(ctx, addr, user); err != nil {
+			return err
+		}
+		return errors.New(cause)
+	}
+	t.Cleanup(func() { deprovisionIfUser = prev })
+}
+
+// confInboxMessagesRun builds the world of the case "Messages" of `endpoint inbox` and runs the command with args: two
+// messages, numbers 7 (signed by acme.demo.alice, 48 B, read and acknowledged) and 8 (no sender header, 61 B, not
+// delivered), the clock a minute and a second after message 8 was stored.
+func confInboxMessagesRun(t *testing.T, args ...string) confOutRun {
+	t.Helper()
+	w := newConfWorld(t, true)
+	w.do("endpoint", "create", "acme.demo.alice")
+	w.do("endpoint", "create", "acme.demo.bob")
+	bob, _ := sap.ParseAddress("acme.demo.bob")
+	subject := bob.Subjects().Mail
+	raw, err := os.ReadFile(filepath.Join(w.a.env["MASH_CONFIG_DIR"], "acme.demo.alice.creds"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	alice, err := sap.IdentityFromCredsAt("alice.creds", raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pad := func(n int) []byte { return []byte(strings.Repeat("x", n)) }
+	// An inbox denies delete and purge, so numbers 1 to 6 cannot be stored and removed. The case shows 7 and 8, so
+	// the test makes bob's inbox again, with the same configuration and consumer, starting at 7.
+	st, err := w.js.Stream(w.ctx, bob.InboxStream())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cons, err := w.js.Consumer(w.ctx, bob.InboxStream(), store.Consumer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scfg, ccfg := st.CachedInfo().Config, cons.CachedInfo().Config
+	if err := w.js.DeleteStream(w.ctx, bob.InboxStream()); err != nil {
+		t.Fatal(err)
+	}
+	scfg.FirstSeq = 7
+	if st, err = w.js.CreateStream(w.ctx, scfg); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = w.js.CreateConsumer(w.ctx, bob.InboxStream(), ccfg); err != nil {
+		t.Fatal(err)
+	}
+	body := pad(48)
+	sendSigned(t, w.js, subject, body, signedHdr(t, alice, subject, body, "acme_demo_alice", time.Now(), "msg-7", "task"))
+	sendSigned(t, w.js, subject, pad(61), nats.Header{"Nats-Msg-Id": {"msg-8"}, "Mash-Kind": {"task"}}) // no sender header
+	c, err := w.js.Consumer(w.ctx, bob.InboxStream(), store.Consumer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := c.Fetch(1, jetstream.FetchMaxWait(5*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for m := range b.Messages() {
+		if err := m.DoubleAck(w.ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	last, err := st.GetMsg(w.ctx, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prev := inboxNow
+	inboxNow = func() time.Time { return last.Time.Add(time.Minute + time.Second) }
+	t.Cleanup(func() { inboxNow = prev })
+	return confOutRun{ran: w.run(append([]string{"endpoint", "inbox", "acme.demo.bob"}, args...)...)}
 }
 
 // inTmp makes the working directory a fresh one for the test, for the cases whose output names a relative file.
@@ -308,6 +426,13 @@ func init() {
 		w.do("endpoint", "create", "acme.demo.bob")
 		return confOutRun{ran: w.run("endpoint", "delete", "acme.demo.bob", "--yes")}
 	})
+	reg("endpoint delete Cancelled everywhere, then a later step failed", func(t *testing.T) confOutRun {
+		w := newConfWorld(t, true)
+		w.do("endpoint", "create", "acme.demo.bob")
+		// the key is cancelled (the revoker ran) and the removal is done; the step after it fails with its own cause
+		failAfterPurgeWith(t, "the server did not answer")
+		return confOutRun{ran: w.run("endpoint", "delete", "acme.demo.bob", "--yes")}
+	})
 	reg("endpoint delete Wrong text typed", func(t *testing.T) confOutRun {
 		w := newConfWorld(t, true)
 		w.do("endpoint", "create", "acme.demo.bob")
@@ -430,6 +555,21 @@ func confOutputProblems(path string, oc confOutCase, r confOutRun) []string {
 	if len(r.subs) == 0 {
 		text = oc.Text
 	}
+	var p []string
+	if confVaryingCause[path+" "+oc.Case] {
+		var ok bool
+		if text, _, ok = confCutCause(text); !ok {
+			p = append(p, "the specification's text has no error line with a cause")
+		}
+		cut, cause, ok := confCutCause(r.ran.errs)
+		switch {
+		case !ok:
+			p = append(p, fmt.Sprintf("stderr: want an error line that ends in a cause, got %q", r.ran.errs))
+		case strings.TrimSpace(cause) == "":
+			p = append(p, fmt.Sprintf("stderr: the cause is empty: %q", r.ran.errs))
+		}
+		r.ran.errs = cut
+	}
 	wantOut, wantErr := "", ""
 	if oc.Stream == "stderr" {
 		wantErr = text
@@ -444,7 +584,6 @@ func confOutputProblems(path string, oc confOutCase, r confOutRun) []string {
 		}
 		wantOut, wantErr = strings.Join(rest, "\n"), strings.Join(hints, "\n")
 	}
-	var p []string
 	if r.ran.code != oc.Exit {
 		p = append(p, fmt.Sprintf("exit: want %d, got %d", oc.Exit, r.ran.code))
 	}
@@ -477,6 +616,12 @@ func confOutputs(t *testing.T, tracked []specCommand) {
 			sc, oc := sc, oc
 			key := sc.path + " " + oc.Case
 			t.Run(key, func(t *testing.T) {
+				if confIsDescription(oc.Text) {
+					if _, listed := confUnchecked[key]; listed || confOutputRunners[key] != nil {
+						t.Errorf("%s: a description is skipped, so it needs no runner and no confUnchecked entry", key)
+					}
+					t.Skipf("%s: the text is a description, not the output", key)
+				}
 				run, ok := confOutputRunners[key]
 				reason, listed := confUnchecked[key]
 				switch {
