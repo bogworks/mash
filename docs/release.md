@@ -198,6 +198,7 @@ The numbered steps are what the command does in each state, and the manual path 
    Anyone can check a tag below the cutover the same way: `git -c gpg.ssh.allowedSignersFile=docs/allowed_signers verify-tag v<version>`.
    At or above the cutover (keyless), the checks are the remote tag (annotated, peels to X, unchanged after the assets were read) and, for the eight binaries, the three scripts **and** `SHA256SUMS`, `gh attestation verify <file> -R bogworks/mash --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/v<version> --source-digest <X>`; no `SHA256SUMS.sig` is made. Then the maintainer or the lead publishes the draft: `gh release edit v<version> --draft=false`.
 7. **Record the version and commit (optional):** anyone who tracks mash releases can copy the `version: <version> commit: <X>` line the gate printed into their own records; mash prescribes no format.
+8. **Pin the plugin (after publishing; required, not optional).** Run `plugin/scripts/pin-plugin <version> --attested <dir>` on the four published `mash-<os>-<arch>` binaries (see "Pinning the plugin after a release"), commit `plugin/scripts/mash.pins` and the `<version>-pin.1` bump of `plugin/.claude-plugin/plugin.json` by pull request, and put a row for this step in the release record.
 
 ### Two documents for a release
 
