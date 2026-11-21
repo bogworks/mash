@@ -122,8 +122,9 @@ the `nats` command and `openssl`. If `nats-server` or `nats` is missing, tell
 the person where it comes from and ask for a yes. Needs a yes: downloading
 each program from its project's GitHub release into the install folder `BIN`
 of step 1. You run these blocks yourself; they need no `sudo`. If `openssl`,
-`curl`, `tar` or `ss`, or both `unzip` and `python3`, is missing, say so in
-one line and stop and ask: the person decides how to get it.
+`curl`, `tar` or the port tool (`ss` on Linux, `lsof` on macOS), or both
+`unzip` and `python3`, is missing, say so in one line and stop and ask: the
+person decides how to get it.
 
 On a Mac, Homebrew is an alternative: `brew install nats-server nats`. Then
 skip the two blocks below.
@@ -399,21 +400,40 @@ last):
    mail, the person runs `--remove` (day-2 skill, "Remove the whole local
    server"): it asks them to type the folder path.
 2. The plugin: `claude plugin uninstall mash@mash`.
-3. The four programs, only the named files:
+3. The programs this setup installed, only the named files. Say which ones
+   you installed in step 2: you only install a missing `nats-server` or
+   `nats`, and a package or Homebrew install is not removed by this step.
+   Never remove a program that was there before. `mash` and `mashctl` come
+   from the install in step 1. Name only the installed files in `rm`, for
+   example when this setup installed all four:
 
    ```sh
    BIN="$HOME/.local/bin"
    rm "$BIN/mash" "$BIN/mashctl" "$BIN/nats-server" "$BIN/nats"
    ```
 
-4. The download folder, `~/mash-setup-dl`: `rm -r "$DL"`, only that one folder.
-5. mash's config and state folders, `~/.config/mash` and
-   `~/.local/state/mash`. They hold credentials: deleting them cannot be
-   undone, so the person runs it (use the active config folder that day-2
-   finds, if it is not the default):
+   If the person chose another install folder in step 1, fill in that path.
+4. The download folder, `~/mash-setup-dl`: only that one folder. If the
+   person chose another folder in step 1, fill in that path:
+
+   ```sh
+   DL="$HOME/mash-setup-dl"
+   rm -r "$DL"
+   ```
+
+5. mash's config and state folders. They hold credentials: deleting them
+   cannot be undone, so the person runs it. First work out both active
+   folders and show them. The config folder is `$MASH_CONFIG_DIR`, else
+   `$XDG_CONFIG_HOME/mash`, else `~/.config/mash` (never `XDG_CONFIG_HOME`
+   itself). The state folder is `$MASH_STATE_DIR`, else
+   `$XDG_STATE_HOME/mash`, else `~/.local/state/mash` (never
+   `XDG_STATE_HOME` itself). Ask the person to confirm the two paths, then
+   fill them in:
 
    ```sh person
-   rm -r "$HOME/.config/mash" "$HOME/.local/state/mash"
+   CFG="<the confirmed config folder>"
+   STATE="<the confirmed state folder>"
+   rm -r "$CFG" "$STATE"
    ```
 
 ## Do not
