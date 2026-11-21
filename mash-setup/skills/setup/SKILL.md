@@ -133,8 +133,11 @@ skip the two blocks below.
 `mkdir -p` is writable by its group, and `install.sh` refuses to install
 there. `install.sh` checks every folder above it too, and `install -d -m`
 sets the mode only on the folders it is given, so each block names `~/.local`
-as well as `BIN` (add any other new folder above a custom `BIN`).
-Each block makes them first with the right mode. Each block works in a
+as well as `BIN`. For a custom `BIN` with other new folders above it, add
+each missing one the same way, top down. Each block makes only the folders
+that are missing, with mode 755, and never changes a folder that already
+exists: `install.sh` refuses a group-writable one and says so, and the
+person decides. Each block works in a
 fresh `mktemp -d` folder: a throwaway folder. After the install you remove
 only that one folder, the `T` the block set (`rm -r "$T"`), never a glob.
 
@@ -148,7 +151,8 @@ BIN="$HOME/.local/bin"; V=2.15.1
 case "$(uname -s)" in Linux) OS=linux ;; Darwin) OS=darwin ;; esac
 case "$(uname -m)" in x86_64) ARCH=amd64 ;; aarch64 | arm64) ARCH=arm64 ;; esac
 SUM="sha256sum -c -"; command -v sha256sum >/dev/null || SUM="shasum -a 256 -c -"
-install -d -m 755 "$HOME/.local" "$BIN"
+[ -d "$HOME/.local" ] || install -d -m 755 "$HOME/.local"
+[ -d "$BIN" ] || install -d -m 755 "$BIN"
 T=$(mktemp -d) && cd "$T"
 curl -fsSLO https://github.com/nats-io/nats-server/releases/download/v$V/nats-server-v$V-$OS-$ARCH.tar.gz
 curl -fsSLO https://github.com/nats-io/nats-server/releases/download/v$V/SHA256SUMS
@@ -167,7 +171,8 @@ BIN="$HOME/.local/bin"; V=0.5.2
 case "$(uname -s)" in Linux) OS=linux ;; Darwin) OS=darwin ;; esac
 case "$(uname -m)" in x86_64) ARCH=amd64 ;; aarch64 | arm64) ARCH=arm64 ;; esac
 SUM="sha256sum -c -"; command -v sha256sum >/dev/null || SUM="shasum -a 256 -c -"
-install -d -m 755 "$HOME/.local" "$BIN"
+[ -d "$HOME/.local" ] || install -d -m 755 "$HOME/.local"
+[ -d "$BIN" ] || install -d -m 755 "$BIN"
 T=$(mktemp -d) && cd "$T"
 curl -fsSLO https://github.com/nats-io/natscli/releases/download/v$V/nats-$V-$OS-$ARCH.zip
 curl -fsSLO https://github.com/nats-io/natscli/releases/download/v$V/SHA256SUMS
@@ -413,13 +418,18 @@ last):
    ```
 
    If the person chose another install folder in step 1, fill in that path.
-4. The download folder, `~/mash-setup-dl`: only that one folder. If the
-   person chose another folder in step 1, fill in that path:
+4. The download folder, `~/mash-setup-dl`: only the files setup downloaded
+   into it, by name, then the folder if it is empty. If the person chose
+   another folder in step 1, fill in that path:
 
    ```sh
    DL="$HOME/mash-setup-dl"
-   rm -r "$DL"
+   cd "$DL" && rm -f install.sh mash-local-nats-setup.sh SHA256SUMS \
+     mash.intoto.jsonl; cd "$HOME" && rmdir "$DL"
    ```
+
+   `rmdir` fails harmlessly if the folder is not empty: a folder that was
+   already there with other files stays, with those files.
 
 5. mash's config and state folders. They hold credentials: deleting them
    cannot be undone, so the person runs it. First work out both active
