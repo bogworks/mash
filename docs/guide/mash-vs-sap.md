@@ -2,7 +2,8 @@
 
 The Synadia Agent Protocol (SAP) is agents as discoverable services: live
 prompts, status, heartbeat and an optional sender identity. mash is built on
-it, and on NATS under it (see [stack.md](stack.md)).
+it, and on NATS under it. [The stack](stack.md) shows an agent on plain SAP
+beside an agent on mash.
 
 One page, in one place. Source for the SAP side: the core protocol in the
 synadia-ai/synadia-agent-sdk-docs repository. Source for the mash side:

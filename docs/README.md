@@ -10,7 +10,7 @@ Start with the [README](../README.md). This index is for version 0.5.6. What cha
 
 ## Understand mash
 
-- [The stack: NATS, SAP, mash](guide/stack.md)
+- [The stack](guide/stack.md): an agent on plain SAP beside an agent on mash, layer by layer
 - [mash and SAP](sap.md), and the short version, [mash versus SAP](guide/mash-vs-sap.md)
 - [Glossary](reference/glossary.md)
 - [How mash compares](comparison.md)
