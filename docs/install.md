@@ -238,13 +238,6 @@ grep ' mash-migrate-0.5.5.sh$' SHA256SUMS | sha256sum -c - &&
 less mash-migrate-0.5.5.sh && bash mash-migrate-0.5.5.sh
 ```
 
-If you accept trusting GitHub's TLS alone, the one-line form the release
-page gives also works. It runs what it downloads without a check:
-
-```sh
-curl -fsSL https://github.com/bogworks/mash/releases/latest/download/mash-migrate-0.5.5.sh | bash
-```
-
 What it changes:
 
 * In `config.json`, `url` becomes `servers` and `tls_ca` becomes `ca`.
