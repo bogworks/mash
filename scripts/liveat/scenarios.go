@@ -136,7 +136,7 @@ func (a *AT) provision(ctl, keyHome Home, owner, group, name string, noCreds boo
 	if noCreds || !ok {
 		return e, ok
 	}
-	r = a.Mash("join-"+name, keyHome, a.Conn(), "join", e.join, "--key", e.seed, "--json")
+	r = a.Mash("join-"+name, keyHome, a.Conn(), "join", e.join, "--key", e.seed, "--json", "--detail")
 	ok = a.C.Check("mash join installs "+name+"'s creds file on its machine from the join file and its own seed", r.Code == 0, exitDetail(r)) && ok
 	rep, err := parseJoinJSON(r.Stdout)
 	if r.Code == 0 {
@@ -388,7 +388,9 @@ func checkPermissions(owner, group, name string, pub, sub, deny []string) (fails
 	return fails, owners
 }
 
-var authRE = regexp.MustCompile(`(?i)authori[sz]ation|not authori[sz]ed|revoked`)
+// authRE is how a command says the server refused its credentials: "<addr> cannot sign in: the server refused its credentials"
+// (internal/cmdcore/errors.go), or the NATS wording when it is passed through.
+var authRE = regexp.MustCompile(`(?i)authori[sz]ation|not authori[sz]ed|revoked|refused its credentials|cannot sign in`)
 
 // AT001 is the solo developer, standalone.
 var AT001 = Scenario{

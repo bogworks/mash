@@ -312,7 +312,7 @@ func TestPlainChecksFailWithoutTheProtection(t *testing.T) {
 			t.Errorf("%s passed", name)
 		}
 	}
-	// the override's behaviour (pending today)
+	// the override's behaviour
 	if ok, d := dangerousWarned(Result{Code: 0, Stderr: at4EncryptionWarning + "\n"}, 1); !ok {
 		t.Error(d)
 	}
@@ -341,6 +341,9 @@ func TestPlainChecksFailWithoutTheProtection(t *testing.T) {
 }
 
 func TestPendingIsNotAPassAndTheTableOnlyShrinks(t *testing.T) {
+	saved := at4Pending
+	at4Pending = map[string]string{"plain-text-override": "core's R1-2: a test-local entry"}
+	t.Cleanup(func() { at4Pending = saved })
 	if at4Judge(false, true) != at4Pass || at4Judge(false, false) != at4Fail {
 		t.Fatal("unlisted checks must pass or fail on their condition")
 	}
@@ -387,6 +390,10 @@ func TestPendingIsNotAPassAndTheTableOnlyShrinks(t *testing.T) {
 	if !rec.Passed() {
 		t.Error("a pending check must not fail the run")
 	}
+}
+
+// TestPendingTableEntriesAreUsed holds the real table: every entry is named by a check, and has a reason (it passes empty).
+func TestPendingTableEntriesAreUsed(t *testing.T) {
 	// every entry of the table is named by a check in at004.go (no orphan entry), and has a reason
 	src, err := os.ReadFile("at004.go")
 	if err != nil {
@@ -463,7 +470,7 @@ func TestPendingResultLineIsNotACleanPass(t *testing.T) {
 
 func TestControlEverywhereFailsWhenAPlaceLacksIt(t *testing.T) {
 	const m = "at4-control-1"
-	if ok, d := controlEverywhere(m, m, m, []int{0, 0}, m, 0); !ok {
+	if ok, d := controlEverywhere(m, 0, m, m, []int{0, 0}, m, 0); !ok {
 		t.Fatal(d)
 	}
 	for name, c := range map[string]struct {
@@ -479,7 +486,7 @@ func TestControlEverywhereFailsWhenAPlaceLacksIt(t *testing.T) {
 		"read exit 1":        {m, m, []int{0}, m, 1},
 		"inbox not run":      {m, m, nil, m, 0},
 	} {
-		if ok, d := controlEverywhere(m, c.s, c.i, c.ic, c.r, c.rc); ok || !strings.Contains(d, "control not delivered: the check proves nothing") {
+		if ok, d := controlEverywhere(m, 0, c.s, c.i, c.ic, c.r, c.rc); ok || !strings.Contains(d, "control not delivered: the check proves nothing") {
 			t.Errorf("%s: %v %q", name, ok, d)
 		}
 	}
@@ -534,5 +541,12 @@ func TestRecreateRefusedNeedsTheReason(t *testing.T) {
 		if ok, _ := recreateRefused(r); ok {
 			t.Errorf("%+v accepted", r)
 		}
+	}
+}
+
+func TestInboxHasSeqIgnoresTheSummaryLine(t *testing.T) {
+	l := "7 messages for acme.demo.alice, 7 new, 0 urgent.\n\nNUMBER  FROM  MESSAGE\n3       bob   hello\n"
+	if !inboxHasSeq(l, 3) || inboxHasSeq(l, 7) || inboxHasSeq(l, 0) {
+		t.Error("row by number")
 	}
 }

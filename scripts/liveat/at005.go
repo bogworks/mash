@@ -437,7 +437,7 @@ func (s *At5) provision(ctl Host, verb string, e *ep5) bool {
 		return false
 	}
 	e.creds = e.credsOn()
-	args2 := []string{"join", e.join, "--key", e.seed, "--json"}
+	args2 := []string{"join", e.join, "--key", e.seed, "--json", "--detail"}
 	if verb == "reissue" {
 		args2 = append(args2, "--replace")
 	}
