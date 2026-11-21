@@ -24,12 +24,10 @@ import (
 // helpers (scanners, the refusal checker, the mail crafter, the pending judge) are pure and are shown to fail on a
 // result that lacks the protection in at004_test.go; the live part (AT004 below) only gathers what they judge.
 
-// at4Pending is the list of AT-4 checks whose protection is not built yet. A check listed here that fails is recorded
-// as pending (not a pass); a check listed here that passes FAILS, saying the entry must go. So the table only shrinks.
-var at4Pending = map[string]string{
-	"plain-text-override": "core's R1-2: plain text only with MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1 (spec/rules.json), the warning on stderr, and MASH_INSECURE_PLAINTEXT refused naming the new variable",
-	"unverified-refused":  "mash serve, mash inbox and mash read drop mail whose trust is not verified, and mash doctor counts it (spec/mash.json, 'Refusing unverified mail'); today the mail is delivered with its label",
-}
+// at4Pending is the list of AT-4 checks whose protection is not built yet. It is empty now: every protection is built.
+// An entry is added only when a check's protection is not built yet; a check listed here that fails is recorded as
+// pending (not a pass), and a check listed here that passes FAILS, saying the entry must go. So the table only shrinks.
+var at4Pending = map[string]string{}
 
 // at4Verdict is how a check that may be listed in at4Pending is recorded.
 type at4Verdict int
@@ -163,10 +161,28 @@ func (a *AT) procCheck(when string) {
 	a.C.Check("argv: none of the "+strconv.Itoa(n)+" processes in the container ("+when+"; nats-server and the sessions included) has a registered secret or a seed- or JWT-shaped string in its command line", ok, d)
 }
 
+var summaryRE = regexp.MustCompile(`^\s*\d+ messages? for `)
+
+// inboxHasSeq is true when a row of a mash inbox listing starts with the message number seq.
+func inboxHasSeq(listing string, seq uint64) bool {
+	if seq == 0 {
+		return false
+	}
+	row := regexp.MustCompile(`^\s*` + strconv.FormatUint(seq, 10) + `\s`)
+	for _, l := range strings.Split(listing, "\n") {
+		if row.MatchString(l) && !summaryRE.MatchString(l) { // not the header "7 messages for X, 7 new, 0 urgent."
+			return true
+		}
+	}
+	return false
+}
+
 // controlEverywhere judges that the signed control message reached all three places the unverified ones are looked for
 // in: the session output, mash inbox and mash read, with mash inbox and mash read exiting 0. Without it a check that
 // the unverified mail is absent proves nothing.
-func controlEverywhere(marker, serveOut, inboxOut string, inboxCodes []int, readOut string, readCode int) (bool, string) {
+// mash inbox shows a message's first line cut to a column, so it is found there by its number (the first column), the
+// session and mash read show it whole and are searched for the marker. seq 0 looks for the marker in mash inbox too.
+func controlEverywhere(marker string, seq uint64, serveOut, inboxOut string, inboxCodes []int, readOut string, readCode int) (bool, string) {
 	var bad []string
 	for _, c := range inboxCodes {
 		if c != 0 {
@@ -180,7 +196,7 @@ func controlEverywhere(marker, serveOut, inboxOut string, inboxCodes []int, read
 		bad = append(bad, "mash read exit "+strconv.Itoa(readCode))
 	}
 	for _, p := range []struct{ name, text string }{{"the session", serveOut}, {"mash inbox", inboxOut}, {"mash read", readOut}} {
-		if !strings.Contains(p.text, marker) {
+		if !strings.Contains(p.text, marker) && !(p.name == "mash inbox" && inboxHasSeq(p.text, seq)) {
 			bad = append(bad, "absent from "+p.name)
 		}
 	}
@@ -534,7 +550,7 @@ var AT004 = Scenario{
 		"(2) Secret files are refused over an existing file, a symlink and a dangling symlink, and left byte-identical (and the symlink target too): the creds file in the config folder, the join file of endpoint create and reissue --out, " +
 		"the key and public key files of mash key create (seed and seed.pub), the key pending file, and the creds file of mash join (refused over each without --replace; --replace replaces a symlink itself and writes through nothing; a seed of another key, a missing --key and --dry-run change nothing), and mash credential create is an unknown command. " +
 		"(3) Unverified mail is refused: absent, claimed, unknown-signer and stale mail is published with the sender's own creds (headers crafted with the sap package), the recipient's session, mash inbox and mash read are checked, a properly signed control message is delivered, and mashctl endpoint inbox shows each stored message with its trust label. " +
-		"(4) Plain text without the override is refused before connecting (a plain nats:// URL to a non-loopback address; mash and mashctl); the MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION behaviour is pending core's R1-2. " +
+		"(4) Plain text without the override is refused before connecting (a plain nats:// URL to a non-loopback address; mash and mashctl); the MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION override behaviour is checked (the connection is made with the exact warning on stderr, and MASH_INSECURE_PLAINTEXT is refused naming the new variable). " +
 		"(5) A deleted endpoint's credential is accepted before the delete and refused after it, on this one server; the form on all three servers is AT-005's check (refusedOn and acceptedOn on the deleted review key). " +
 		"Checks whose protection is not built are recorded pending, never as passes (at4Pending); `liveat all --strict` (the release gate) exits 3 while any is pending.",
 	Body: func(a *AT) { a.at004() },
@@ -883,6 +899,19 @@ func (s *at4) join() {
 		_ = os.MkdirAll(cfg, 0o700)
 		return cfg, t
 	}
+	// A plain file at the creds path is an installed endpoint, so the folder is one an earlier join set up: it holds the
+	// certificate authority, which a join file's own must equal (a folder with an endpoint and no authority is refused
+	// as "set up with a different ca", with or without --replace). A symlink is not an installed endpoint.
+	seedFolder := func(st pathState, cfg string) error {
+		if st != psFile {
+			return nil
+		}
+		b, err := os.ReadFile(a.caPath())
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(filepath.Join(cfg, joinCAName), b, 0o644)
+	}
 	var runs []labelled
 	run := func(label, cfg string, args ...string) Result {
 		r := s.mash(label, he, append(a.Conn(), "MASH_CONFIG_DIR="+cfg), args...)
@@ -897,7 +926,11 @@ func (s *at4) join() {
 	for _, st := range []pathState{psFile, psSymlink, psDangling} {
 		cfg, tgt := freshCfg("join-over-" + string(st))
 		path := filepath.Join(cfg, who+".creds")
+		serr := seedFolder(st, cfg)
 		g, err := plant(st, path, tgt)
+		if err == nil {
+			err = serr
+		}
 		if !a.C.Check("files setup: "+string(st)+" at the creds path of mash join ("+who+" in a fresh configuration folder)", err == nil, errDetail(err)) {
 			continue
 		}
@@ -920,7 +953,11 @@ func (s *at4) join() {
 	for _, st := range []pathState{psSymlink, psDangling, psFile} {
 		cfg, tgt := freshCfg("join-replace-" + string(st))
 		path := filepath.Join(cfg, who+".creds")
+		serr := seedFolder(st, cfg)
 		g, err := plant(st, path, tgt)
+		if err == nil {
+			err = serr
+		}
 		if !a.C.Check("files setup: "+string(st)+" at the creds path for mash join --replace", err == nil, errDetail(err)) {
 			continue
 		}
@@ -1247,7 +1284,7 @@ func (s *at4) mail() {
 		if strings.Contains(serveOut, m.Marker) {
 			where = append(where, "the session")
 		}
-		if strings.Contains(listText, m.Marker) {
+		if strings.Contains(listText, m.Marker) || inboxHasSeq(listText, m.Seq) {
 			where = append(where, "mash inbox")
 		}
 		if strings.Contains(readText[m.Name], m.Marker) {
@@ -1270,7 +1307,7 @@ func (s *at4) mail() {
 	}
 	tr, found := storedTrust(ir.Stdout, ctrl.Seq)
 	a.C.Check("mail: mashctl endpoint inbox shows the control message with trust verified", found && tr == "verified", "trust "+orNone(tr))
-	cs, cd := controlEverywhere(ctrl.Marker, serveOut, listText, inboxCodes, readText[ctrl.Name], readCodes[ctrl.Name])
+	cs, cd := controlEverywhere(ctrl.Marker, ctrl.Seq, serveOut, listText, inboxCodes, readText[ctrl.Name], readCodes[ctrl.Name])
 	a.C.Check("mail: the control message is shown to the recipient in all three places (the session, mash inbox and mash read, both commands exiting 0)", cs, cd)
 	// What the specification adds: unverified mail is not shown at all (and is counted by doctor).
 	dr := s.mash("review-doctor", s.he, s.reviewEnv, "doctor")
@@ -1311,7 +1348,7 @@ func (s *at4) plain() {
 		a.C.Check("plain text: "+c.name+" refuses a plain nats:// URL to a non-loopback address with no override, before connecting (no wait, no connection error)", ok, d)
 		s.run("plain-"+c.name, r)
 	}
-	// The behaviour of R1-2: the override, its warning, and the old name refused. Written against spec/rules.json.
+	// The behaviour of R1-2 (built): the override, its warning, and the old name refused. Written against spec/rules.json.
 	cc, err := newConnCounter()
 	if !a.C.Check("plain text: a counting listener is made on a loopback port", err == nil, errDetail(err)) {
 		return
