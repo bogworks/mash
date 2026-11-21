@@ -301,6 +301,8 @@ Every failure is `error: WHAT` on standard error and at most one `hint: COMMAND`
 
 The commands and options 0.5.6 removed, and what replaces each, are in the table in the [0.5.6 changelog](../CHANGELOG.md#what-changed-old-to-new) and in the [generated reference](reference/mashctl.md).
 
+Endpoints and mail made by 0.5.0 are not read by 0.5.6, and 0.5.5 and 0.5.6 do not convert them: if you are still on 0.5.0, start a fresh deployment (see [If you used 0.5.0](../CHANGELOG.md#upgrading)).
+
 ## Revocation
 
 `endpoint delete` and `endpoint reissue` revoke the endpoint's NATS user in the same command (`mashctl endpoint suspend` does not). The revocation is an entry in the account JWT, by user public key and time: NATS refuses a user JWT for that key issued at or before the revocation time, and a connected user is closed when the server takes the account update, so credentials stop working everywhere the update reached. mashctl signs the update with the operator key, pushes it through the system account to every known server, requires every one to acknowledge it, and reads it back; if that cannot be shown it exits non-zero with `not confirmed` and running the command again is safe. An existing revocation is never lowered or removed.

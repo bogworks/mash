@@ -1,6 +1,6 @@
 # Synadia Cloud
 
-mash 0.5.6 does not support Synadia Cloud, or any hosted NATS where you do not hold the operator key. The issue is [#876](https://github.com/bogworks/mash/issues/876).
+`mashctl` in mash 0.5.6 does not support Synadia Cloud, or any hosted NATS where you do not hold the operator key, for provisioning and administration. The `mash` endpoint binary connects over TLS to any conforming NATS server it has credentials for. The issue is [#876](https://github.com/bogworks/mash/issues/876).
 
 ## What is not supported
 

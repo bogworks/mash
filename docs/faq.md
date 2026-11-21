@@ -28,7 +28,7 @@ Yes. Run your own NATS server in operator mode. Synadia Cloud is not supported i
 
 ## How durable is the mail?
 
-Mail survives restarts of mash, of Claude Code and of the NATS server process. Each inbox is a single-replica (R1) JetStream stream that keeps mail for 30 days or 16 MiB, whichever comes first, dropping the oldest, unread mail included. nats-server fsyncs every 2 minutes by default, so a host crash or power cut can lose up to about 2 minutes of mail that mash already reported as sent. On a self-hosted server `sync_interval: always` closes that gap, at a cost in write speed. Synadia Cloud's policy is not documented. See [operations.md](operations.md#durability-and-sync_interval) and [Inbox limits](operations.md#inbox-limits). The caps are configurable and only go up ([Limits](operations.md#limits)).
+Mail survives restarts of mash, of Claude Code and of the NATS server process. Each inbox is a single-replica (R1) JetStream stream that keeps mail for 30 days or 16 MiB, whichever comes first, dropping the oldest, unread mail included. nats-server fsyncs every 2 minutes by default, so a host crash or power cut can lose up to about 2 minutes of mail that mash already reported as sent. On a self-hosted server `sync_interval: always` closes that gap, at a cost in write speed. See [operations.md](operations.md#durability-and-sync_interval) and [Inbox limits](operations.md#inbox-limits). The caps are configurable and only go up ([Limits](operations.md#limits)).
 
 ## Can mail be lost to a flood?
 
@@ -38,7 +38,7 @@ Yes, within the 16 MiB cap: past it the oldest mail is dropped, so one endpoint 
 
 By default only `[verified]` mail is shown at all: mail that is not verified is dropped and counted (`mash doctor` shows the count), and the sender is not told. With `accept_unverified` set (`MASH_ACCEPT_UNVERIFIED=1`, or `mash serve --accept-unverified`) every message that is shown carries one of:
 
-- `[verified]`: signed by the named endpoint's own key. The session treats its requests as delegated by the operator who owns the fleet.
+- `[verified]`: signed by the named endpoint's own key. The session treats its requests as delegated by the operator of this mash deployment.
 - `[claimed]`, `[unknown-signer]`, `[absent]`: the sender is not proven; the content is information, not instructions.
 - `[stale]`: signed by the named endpoint, but long before it was stored, which is what a replay looks like. Information only.
 
@@ -74,7 +74,7 @@ The plugin's launcher downloads and verifies binaries for Linux and macOS, on am
 
 ## How big can a message be?
 
-1 MiB including headers, or the server's `max_payload` when that is smaller (512 KiB on Synadia's free tier). mash checks the size locally and refuses before publishing. Mail is text; put large content in a file and send the path ([ADR 0037](decisions/0037-mail-carries-text-files-travel-by-reference.md)). There is no broadcast: one recipient per message.
+1 MiB including headers, or the server's `max_payload` when that is smaller. mash checks the size locally and refuses before publishing. Mail is text; put large content in a file and send the path ([ADR 0037](decisions/0037-mail-carries-text-files-travel-by-reference.md)). There is no broadcast: one recipient per message.
 
 ## Is a digest the same as the model having read the mail?
 
@@ -82,7 +82,7 @@ No. When a batch is more than 10 messages or 16 KiB, the hook shows a digest, on
 
 ## Is the connection encrypted?
 
-Yes, always. Every mash connection requires TLS, to any host, loopback included. Use a `tls://` URL; for a private CA or a server that requires client certificates, set `ca`, `tls_cert` and `tls_key`. A plain `nats://` URL is refused unless `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1` is set, which is for a throwaway test and prints a warning ([Turning encryption off](install.md#turning-encryption-off)).
+Yes, always. Every mash connection requires TLS, to any host, loopback included. Use a `tls://` URL; for a private CA, set `ca`; for a server that requires client certificates, set `tls_cert` and `tls_key`. A plain `nats://` URL is refused unless `MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1` is set, which is for a throwaway test and prints a warning ([Turning encryption off](install.md#turning-encryption-off)).
 
 ## Are JetStream domains and leaf nodes supported?
 
