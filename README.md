@@ -164,6 +164,8 @@ MASH_ENDPOINT=acme.demo.bob claude --dangerously-load-development-channels plugi
 MASH_ENDPOINT=acme.demo.alice claude --dangerously-load-development-channels plugin:mash@mash   # terminal 2
 ```
 
+Claude Code registers a plugin's channel only when it is launched with its own flag, `--dangerously-load-development-channels plugin:mash@mash`, and it asks the person to confirm at each launch. Without the flag nothing is lost but the wake: mail still arrives with the next prompt or tool call through `mash hook`. The flag is Claude Code's, not mash's.
+
 **5. Send mail.** From a shell, Bob mails Alice, and Alice reads it:
 
 ```sh
