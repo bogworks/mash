@@ -390,7 +390,7 @@ EOF
     echo ping >"$d/json-jq.txt"
     printf 'This deletes acme.demo.bob and its empty inbox. It cannot be undone.\nType the address to confirm: acme.demo.bob\nDeleted endpoint acme.demo.bob\n' >"$d/delete.txt"
     echo 1 >"$d/refused.rc"
-    printf 'acme.demo.bob: not ready: the creds file is missing: /home/tester/.config/mash/acme.demo.bob.creds\nhint: mash doctor\n' >"$d/refused.txt"
+    printf 'acme.demo.bob: not ready: this endpoint was deleted; its address cannot be used again\nhint: mash doctor\n' >"$d/refused.txt"
     cat >"$d/lifecycle.txt" <<'EOF'
 stopped pid 355
 started: nats-server pid 709 on 127.0.0.1:4222
@@ -1050,7 +1050,7 @@ run_content_asserts() {
     # deleted it, already gone ("the creds file is missing"); a down server or any
     # other failure is not a revocation
     f=$OUT/refused.txt
-    if [ -f "$f" ] && grep -Eq "^$OWNER\.demo\.bob: not ready: (the server refused its credentials|the creds file is missing)" "$f"; then
+    if [ -f "$f" ] && grep -Eq "^$OWNER\.demo\.bob: not ready: (this endpoint was deleted; its address cannot be used again|the server refused its credentials|the creds file is missing)" "$f"; then
         ok "the call after delete says why: $(grep -E "^$OWNER\.demo\.bob: not ready:" "$f" | head -n 1 | sed 's/^[^:]*: //' | cut -c1-60)"
     else
         bad "the call after delete does not show the deleted credential refused or gone"
