@@ -99,7 +99,23 @@ bash scripts/guide-run/guide-run.sh selftest
   succeeded (`out/<id>.ok`); every other block stays as it is. It needs
   `python3` on the host.
 - `selftest` needs no podman. `go test ./scripts/ -run GuideRun` runs it with
-  `bash -n` and `shellcheck`.
+  `bash -n` and `shellcheck` (it skips on bash older than 4). It checks the
+  guide's block ids, and each step's commands against the guide's command
+  blocks (a mismatch names the step and both commands; the few steps with no
+  block, such as install, server, delete, refused and lifecycle, are an
+  explicit allow-list in the script with the reason for each). It also runs
+  the content asserts below on fixture outputs, with one defect at a time.
+
+The run's asserts, from the recorded outputs: status shows both endpoints
+ready; who lists both; the inbox table has exactly two mail rows from bob;
+read shows trust verified; `read 3 --json` and `inbox --json` parse, with body
+`ping`, number 3 and total 3; the jq line prints exactly `ping`; delete shows
+the typed address and the deletion; refused exits non-zero; lifecycle shows
+two stops, a start and the removal; in published mode curl's `CONNECT tunnel
+failed, response 403` and the proxy log's exact refusal line. The secrets scan
+reads every file the run keeps (`out/*.txt`, `out/*.cmd`, `last.txt`,
+`build-image.log`, `release-listing.txt`, and the proxy's files) and fails
+when it scanned none.
 
 The run folder keeps, for each id, `out/<id>.txt` (stdout and stderr
 together), `out/<id>.cmd` (the command lines), `out/<id>.rc` (the exit
