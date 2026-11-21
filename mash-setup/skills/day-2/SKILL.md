@@ -36,11 +36,16 @@ the person's absolute paths there.
 
 ## Is it working
 
+First take the endpoint's address from `mashctl endpoint list`; never make
+one up. Then put it in the variable, between quotes, as the blocks below do:
+
 ```sh
-mashctl status; mashctl doctor; MASH_ENDPOINT=<address> mash doctor
+MASH_ENDPOINT="$address"; export MASH_ENDPOINT
+mashctl status; mashctl doctor; mash doctor
 ```
 
-Take `<address>` from `mashctl endpoint list`; never make one up.
+Here `$address` stands for the address you took from the list, for example
+`acme.demo.bob`.
 
 `mashctl status` is one line: `<server>: ok, N endpoints, M online`.
 `mashctl doctor` checks the server side (storage, endpoint records, keys) and

@@ -36,8 +36,9 @@ What mash sets out to do:
 1. **Durable mail.** A message mash has accepted waits on the NATS server until the recipient's session has been
    shown it, for up to 30 days, across process restarts of either side. A host crash of the server can lose its last
    2 minutes unless `sync_interval: always` is set (Q1; [ADR-0009][0009], [ADR-0010][0010], [ADR-0025][0025]).
-2. **Proof of sender.** Every message is signed with the sender's own NATS key. The recipient sees a one-word trust
-   label that says how far the sender is proven ([ADR-0017][0017], [ADR-0019][0019]).
+2. **Proof of sender.** Every message is signed with the sender's own NATS key. By default only mail proven to come from its sender is delivered; with
+   `accept_unverified` set, the recipient sees a one-word trust label that says how far the sender is proven
+   ([ADR-0017][0017], [ADR-0019][0019]).
 3. **Few model turns.** A busy session sees new mail with its next tool result. An idle session is woken only for mail
    that needs it, and urgent mail from a verified sender wakes it at once ([ADR-0024][0024], [ADR-0027][0027] to
    [ADR-0029][0029]).
@@ -114,7 +115,7 @@ measure each one.
 
 ## 3. Context and scope
 
-![Two machines each run an agent host session that starts mash; mash, other SAP tools and the operator reach one NATS server, and the operator also uses identity tooling and the Synadia Cloud API.](images/009-system-context.svg)
+![Two machines each run an agent host session that starts mash; mash, other SAP tools and the operator reach one NATS server, and the operator makes endpoints with mashctl.](images/009-system-context.svg)
 
 *This diagram is drawn for the 0.3.0 tree. It shows `mash admin` and a Synadia Cloud script, which 0.5.6 replaces with `mashctl` and no longer supports (see [Synadia Cloud](synadia.md)).*
 
@@ -294,7 +295,7 @@ keeps its old setting, because mash refuses to change an inbox in place, which c
 | MCP ping | Every 30 s, 10 s wait | No recorded reason ([ADR-0016][0016]) | Fixed |
 | Channel ready | First `tools/list` plus 500 ms, or 3 s | Events sent earlier were lost. No recorded reason for the values ([ADR-0023][0023]) | Fixed |
 | Hook timeout | 10 s | Set in the plugin's `hooks.json` | Edit the plugin |
-| Name length | Each of the three address tokens, 1-32 characters | No recorded reason ([ADR-0036][0036]) | Fixed |
+| Name length | 0.5.6: each of the three address tokens, 1-32 characters (`MaxTokenLen`, `internal/sap/address.go`). 0.3.0: a name of 1-48 characters | No recorded reason ([ADR-0036][0036], which sets the 0.3.0 limit) | Fixed |
 
 ## 8. Crosscutting concepts
 
@@ -353,8 +354,7 @@ this endpoint, over this exact subject and body, within 5 minutes before the ser
 - that the named sender instance is genuine beyond "this key chose to name it" ([ADR-0018][0018]).
 
 **Assets.** Mail content and history. Each endpoint's private user seed, in its credentials file. The directory, which
-maps names to keys. Each name's lease. Each session's model turns, which cost money. Admin credentials. The hosted
-service's API token, which only the quickstart script ever sees.
+maps names to keys. Each name's lease. Each session's model turns, which cost money. Admin credentials.
 
 **Actors.**
 
@@ -369,7 +369,7 @@ service's API token, which only the quickstart script ever sees.
 
 **Trust boundaries.**
 
-![Model session, agent host, mash serve and local files share one OS-user boundary; serve crosses a TLS boundary into the shared NATS account; a setup script reaches the Synadia API separately.](images/018-trust-labels.svg)
+![Model session, agent host, mash serve and local files share one OS-user boundary; serve crosses a TLS boundary into the shared NATS account.](images/018-trust-labels.svg)
 
 *This diagram is drawn for the 0.3.0 tree. The Synadia setup script it shows is retired.*
 
@@ -484,7 +484,6 @@ About 400 Go test functions cover the product code, not counting release tooling
 | Process-level tests on the built binary | `cmd/mash` | The binary as users run it: the standalone tests with a scrubbed environment, the hook crash matrix (SIGKILL at failpoints), and the process chain with a stand-in for Claude Code. The stand-in is the test binary itself, acting as the parent of a real `mash serve` and its hooks |
 | In-process session tests | `cmd/mash` (`run()` with a test MCP client over pipes) | `mash serve` as an MCP server with no agent host: tools, leases, retries, prompts, timeouts |
 | Contract tests on output | `internal/render/testdata/contract.txt`, plugin command and manifest tests, the `who` output cases and object checked against `spec/mash.json` and `spec/mash-mcp.json` (`internal/cmdcore/cmds`) | Text that other programs parse does not change unnoticed ([ADR-0034][0034]) |
-| Fake external service | `scripts/quickstart_synadia_test.go` | `scripts/quickstart-synadia.sh` against an `httptest` fake of the Synadia API that mints real credentials, with a real NATS server |
 | Opt-in live test with a real agent host | `TestLiveClaudeAnswersServePings`, run with `MASH_LIVE_CLAUDE=1` | The installed Claude Code answers serve's pings |
 | Recorded live runs | `docs/evidence/` receipts, produced by scripted runs that are not part of `go test` | Real Claude Code (mid-turn, idle and urgent delivery, early mail), the real Synadia free tier, and `kill -9` lease takeover with timings |
 
@@ -740,7 +739,7 @@ All paths are in the mash repository (0.3.0 tree) unless marked otherwise.
 | 8.4, 8.5, C | `internal/config/config.go`; `internal/store/store.go`; `internal/render/render.go`; `internal/sap/subjects.go`; `internal/spool/spool.go` |
 | 10 | `*_test.go` across `cmd/mash` and `internal/`; `internal/testenv/`; `docs/evidence/*` |
 | A | `git show 5ab1e4b:docs/specs/2026-10-21-mash-design.md` compared with the 0.3.0 code; ADRs |
-| B | Claude Code documentation pages linked in B.1 (read 2026-10-31); `docs/install.md` §3; `docs/evidence/2026-10-22-live-e2e.md`, `docs/evidence/2026-10-31-quickstart-synadia-live/RECEIPT.md` (the retired quickstart script against the real Synadia API), `docs/evidence/2026-10-28-hook-delivery-live/RECEIPT.md`; ADR-0024; the maintainers' channel findings of 2026-10-31 (not in the repository) |
+| B | Claude Code documentation pages linked in B.1 (read 2026-10-31); `docs/install.md` §3; `docs/evidence/2026-10-22-live-e2e.md`, `docs/evidence/2026-10-28-hook-delivery-live/RECEIPT.md`; ADR-0024; the maintainers' channel findings of 2026-10-31 (not in the repository) |
 
 [0002]: decisions/0002-record-architecture-decisions-as-madr-records.md
 [0003]: decisions/0003-sap-plus-mail-verb-and-jetstream-durability.md
