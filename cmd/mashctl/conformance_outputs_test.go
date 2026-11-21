@@ -4,8 +4,8 @@ package main
 // (text, stream and exit code) is run against the build and compared exactly, with two exceptions the specification's
 // rules make: a case whose whole text stands in round brackets is a description and is skipped (confIsDescription), and
 // a case that names a cause at the end of its error line compares the cause only as non-empty (confVaryingCause). A
-// case that cannot be run for another reason is listed in confUnchecked with the reason (one now); a case that is neither
-// run nor listed fails, a listed case that is checked after all fails, so the table only shrinks.
+// case that cannot be run for another reason would be listed in confUnchecked with the reason (none now); a case that is
+// neither run nor listed fails, a listed case that is checked after all fails, so the table only shrinks.
 //
 // The cases run in process against the embedded server of the other tests (no binary, no outside network): a world is
 // a server set up by `mashctl init` for owner acme, with the endpoints a case needs, and the folder is ~/.config/mash
@@ -48,10 +48,8 @@ import (
 )
 
 // confUnchecked: key is "<command> <case>" as the specification names them; the value is why the case cannot be run
-// here.
-var confUnchecked = map[string]string{
-	"endpoint inbox Messages": "the case cannot arise: the specification shows message 7 (WHEN 2m ago) as not delivered and message 8 (1m ago) as delivered, and the build derives a message's state from the consumer's cursors, so a message above one that is delivered is delivered too (message 7 is not delivered only if 8 is not); and both messages are stored within a moment of each other, so their WHEN cannot differ by a minute. confInboxMessagesRun builds the nearest world and TestConfInboxMessagesObstacle pins the build's output",
-}
+// here. It is empty: every case is run or skipped as a description.
+var confUnchecked = map[string]string{}
 
 // confVaryingCause: key is "<command> <case>". The cases listed here end their `error:` line in a cause that the
 // specification gives as one example and the build words as it finds it (rules.json, "A case written in brackets is a
@@ -61,7 +59,45 @@ var confUnchecked = map[string]string{
 // a non-empty remainder, the cause, which is not compared and may itself contain ": " (as in "mash: inbox stream:
 // <err>"). The other lines are compared exactly. See confCutCause and confMatchCause.
 var confVaryingCause = map[string]bool{
-	"endpoint delete Cancelled everywhere, then a later step failed": true,
+	"endpoint delete Cancelled everywhere, then the lease or the inbox could not be removed (0.5.6 as built, the other path)": true,
+}
+
+// confMidCause: key is "<command> <case>". The cases listed here carry two varying parts inside one error line: an
+// 8-character user key id and a cause between confMidFrom and confMidTo (the build words the cause as it finds it).
+// The comparison of the case is exact except those two parts: the key id must match [A-Z0-9]{8} and the cause must be
+// non-blank. Everything else, the hint line included, stays exact. See confMidPattern.
+var confMidCause = map[string]bool{
+	"endpoint delete Cancelled everywhere, then a later step failed (0.5.6 as built)": true,
+}
+
+const (
+	confMidFrom = "did not complete: "
+	confMidTo   = "; run the same command again (revoking again is safe)"
+)
+
+var confMidKeyRE = regexp.MustCompile(`user key [A-Z0-9]{8} was revoked`)
+
+// confMidPattern turns the specification's text into a pattern for a case in confMidCause: the text is literal, except
+// the 8-character key id in "user key <id> was revoked" and the cause between confMidFrom and confMidTo. ok is false
+// when the text does not have those parts.
+func confMidPattern(text string) (string, bool) {
+	i := strings.Index(text, confMidFrom)
+	if i < 0 {
+		return "", false
+	}
+	i += len(confMidFrom)
+	j := strings.LastIndex(text, confMidTo)
+	if j < i {
+		return "", false
+	}
+	head, tail := text[:i], text[j:]
+	loc := confMidKeyRE.FindStringIndex(head)
+	if loc == nil {
+		return "", false
+	}
+	id := loc[0] + len("user key ")
+	return regexp.QuoteMeta(head[:id]) + `[A-Z0-9]{8}` + regexp.QuoteMeta(head[id+8:]) +
+		`[^\n]*\S[^\n]*` + regexp.QuoteMeta(tail), true
 }
 
 // confCutCause (used on the specification's text) cuts the final ": <cause>" off the first line of text that starts with "error: ". It returns the text
@@ -321,6 +357,7 @@ func init() {
 	urlSub := func(w *confWorld) []string { return []string{"tls://localhost:4222", w.url} }
 	dead := "nats://127.0.0.1:1"
 
+	reg("endpoint inbox Messages", func(t *testing.T) confOutRun { return confInboxMessagesRun(t) })
 	reg("init Set up", func(t *testing.T) confOutRun {
 		w := newConfWorld(t, false)
 		return confOutRun{ran: w.run("init", "--config", w.a.setupPath()), subs: urlSub(w)}
@@ -458,12 +495,41 @@ func init() {
 		w.do("endpoint", "create", "acme.demo.bob")
 		return confOutRun{ran: w.run("endpoint", "delete", "acme.demo.bob", "--yes")}
 	})
-	reg("endpoint delete Cancelled everywhere, then a later step failed", func(t *testing.T) confOutRun {
+	reg("endpoint delete Cancelled everywhere, then the lease or the inbox could not be removed (0.5.6 as built, the other path)", func(t *testing.T) confOutRun {
 		w := newConfWorld(t, true)
 		w.do("endpoint", "create", "acme.demo.bob")
 		// the key is cancelled (the revoker ran) and the removal is done; the step after it fails with its own cause
 		failAfterPurgeWith(t, "the server did not answer")
 		return confOutRun{ran: w.run("endpoint", "delete", "acme.demo.bob", "--yes")}
+	})
+	reg("endpoint delete Cancelled everywhere, then a later step failed (0.5.6 as built)", func(t *testing.T) confOutRun {
+		w := newConfWorld(t, true)
+		w.do("endpoint", "create", "acme.demo.bob")
+		// the real guarded removal runs; the lease bucket's stream is sealed after the key is cancelled, so the lease
+		// fence fails and the removal returns its own partial error. The wrapper only records that error.
+		var got error
+		prev := deprovisionIfUser
+		deprovisionIfUser = func(a *admin.Admin, ctx context.Context, addr sap.Address, user string) error {
+			got = prev(a, ctx, addr, user)
+			return got
+		}
+		beforeRetireRevoke = func() {
+			s, err := w.js.Stream(w.ctx, store.LeaseStreamName)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg := s.CachedInfo().Config
+			cfg.Sealed = true
+			if _, err := w.js.UpdateStream(w.ctx, cfg); err != nil {
+				t.Fatal(err)
+			}
+		}
+		t.Cleanup(func() { deprovisionIfUser = prev; beforeRetireRevoke = nil })
+		r := w.run("endpoint", "delete", "acme.demo.bob", "--yes")
+		if !admin.IsPartial(got) {
+			t.Fatalf("the removal did not return the partial error: %v", got)
+		}
+		return confOutRun{ran: r}
 	})
 	reg("endpoint delete Wrong text typed", func(t *testing.T) confOutRun {
 		w := newConfWorld(t, true)
@@ -619,6 +685,13 @@ func confOutputProblems(path string, oc confOutCase, r confOutRun) []string {
 	if r.ran.code != oc.Exit {
 		p = append(p, fmt.Sprintf("exit: want %d, got %d", oc.Exit, r.ran.code))
 	}
+	mid := ""
+	if confMidCause[path+" "+oc.Case] {
+		var ok bool
+		if mid, ok = confMidPattern(text); !ok {
+			p = append(p, "the specification's text lacks the key id or the cause the case varies in")
+		}
+	}
 	check := func(stream, want, got string) {
 		if want == "" {
 			if got != "" {
@@ -626,7 +699,11 @@ func confOutputProblems(path string, oc confOutCase, r confOutRun) []string {
 			}
 			return
 		}
-		if !regexp.MustCompile("^" + confPattern(want) + "\n$").MatchString(got) {
+		pat := confPattern(want)
+		if mid != "" && stream == "stderr" {
+			pat = mid // a stderr case: the pattern covers the whole text, hint line included
+		}
+		if !regexp.MustCompile("^" + pat + "\n$").MatchString(got) {
 			p = append(p, fmt.Sprintf("%s: want %q, got %q", stream, want+"\n", got))
 		}
 	}

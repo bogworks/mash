@@ -27,8 +27,8 @@ func TestConfCutCause(t *testing.T) {
 }
 
 func TestConfVaryingCauseCompare(t *testing.T) {
-	const key = "endpoint delete Cancelled everywhere, then a later step failed"
-	oc := confOutCase{Case: "Cancelled everywhere, then a later step failed", Stream: "stderr", Exit: 1,
+	const key = "endpoint delete Cancelled everywhere, then the lease or the inbox could not be removed (0.5.6 as built, the other path)"
+	oc := confOutCase{Case: "Cancelled everywhere, then the lease or the inbox could not be removed (0.5.6 as built, the other path)", Stream: "stderr", Exit: 1,
 		Text: "error: deleted acme.demo.bob, but the lease fence or the inbox was not removed: the server did not answer\nhint: mashctl endpoint delete acme.demo.bob"}
 	run := func(errs string) []string {
 		return confOutputProblems("endpoint delete", oc, confOutRun{ran: confRan{errs: errs, code: 1}})
@@ -67,6 +67,52 @@ func TestConfVaryingCauseCompare(t *testing.T) {
 	}
 }
 
+func TestConfMidCauseCompare(t *testing.T) {
+	const name = "Cancelled everywhere, then a later step failed (0.5.6 as built)"
+	pre := "error: deleted acme.demo.bob, but PARTIAL: acme_demo_bob's user key "
+	mid := " was revoked in the account JWT, so its credentials no longer work, but the removal did not complete: "
+	suf := "; run the same command again (revoking again is safe)"
+	hint := "\nhint: mashctl endpoint delete acme.demo.bob"
+	oc := confOutCase{Case: name, Stream: "stderr", Exit: 1,
+		Text: pre + "UBIDWPW3" + mid + "mash: lease: nats: nats: API error: code=400 err_code=10109 description=invalid operation on sealed stream" + suf + hint}
+	run := func(errs string, code int) []string {
+		return confOutputProblems("endpoint delete", oc, confOutRun{ran: confRan{errs: errs, code: code}})
+	}
+	if !confMidCause["endpoint delete "+name] {
+		t.Fatal("the case is not in confMidCause")
+	}
+	if p := run(oc.Text+"\n", 1); len(p) != 0 {
+		t.Errorf("good text: %v", p)
+	}
+	if p := run(pre+"K7Q2M9XA"+mid+"mash: lease: another cause: with colons; and semicolons"+suf+hint+"\n", 1); len(p) != 0 {
+		t.Errorf("another key id and cause: %v", p)
+	}
+	for what, errs := range map[string]string{
+		"different prefix":  "error: deleted acme.demo.bob, but something else: UBIDWPW3" + mid + "x" + suf + hint + "\n",
+		"short key id":      pre + "UBID" + mid + "x" + suf + hint + "\n",
+		"lower-case key id": pre + "ubidwpw3" + mid + "x" + suf + hint + "\n",
+		"empty cause":       pre + "UBIDWPW3" + mid + suf + hint + "\n",
+		"blank cause":       pre + "UBIDWPW3" + mid + "  " + suf + hint + "\n",
+		"missing suffix":    pre + "UBIDWPW3" + mid + "x" + hint + "\n",
+		"different hint":    pre + "UBIDWPW3" + mid + "x" + suf + "\nhint: mashctl other\n",
+		"no hint":           pre + "UBIDWPW3" + mid + "x" + suf + "\n",
+		"text after suffix": pre + "UBIDWPW3" + mid + "x" + suf + " now" + hint + "\n",
+	} {
+		if p := run(errs, 1); len(p) == 0 {
+			t.Errorf("%s passed", what)
+		}
+	}
+	if p := run(oc.Text+"\n", 2); len(p) == 0 {
+		t.Error("exit 2 passed")
+	}
+	// the mechanism applies to its case only
+	other := oc
+	other.Case = "other"
+	if p := confOutputProblems("endpoint delete", other, confOutRun{ran: confRan{errs: pre + "K7Q2M9XA" + mid + "x" + suf + hint + "\n", code: 1}}); len(p) == 0 {
+		t.Error("a case outside confMidCause accepted another key id and cause")
+	}
+}
+
 func TestConfIsDescription(t *testing.T) {
 	for text, want := range map[string]bool{
 		"(the same JSON as --json: this command prints data,\n for pasting into a NATS configuration)": true,
@@ -86,17 +132,8 @@ func TestConfIsDescription(t *testing.T) {
 	}
 }
 
-// The case "Messages" of `endpoint inbox` cannot arise (see confUnchecked). This pins the nearest world's output and
-// the --json shape of a message that names no sender.
-func TestConfInboxMessagesObstacle(t *testing.T) {
-	r := confInboxMessagesRun(t)
-	want := "2 messages for acme.demo.bob, 1 not delivered.\n\n" +
-		"NUMBER  FROM   WHEN    TRUST     DELIVERED  KIND  SIZE\n" +
-		"7       alice  1m ago  verified  yes        task  48 B\n" +
-		"8       ?      1m ago  absent    no         task  61 B\n"
-	if r.ran.code != 0 || r.ran.out != want || r.ran.errs != "" {
-		t.Errorf("%d %q %q", r.ran.code, r.ran.out, r.ran.errs)
-	}
+// The --json shape of a message that names no sender (the case "Messages" of `endpoint inbox`).
+func TestConfInboxMessagesJSON(t *testing.T) {
 	j := confInboxMessagesRun(t, "--json")
 	var doc struct {
 		Messages []map[string]any `json:"messages"`
