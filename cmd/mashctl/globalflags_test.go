@@ -21,11 +21,27 @@ func TestGlobalFlagsShadowEnvironmentAndNameTheFlagAsSource(t *testing.T) {
 		_, errb, code := h.run(args...)
 		flagged := strings.Contains(strings.Join(args, " "), "--server")
 		switch {
-		case flagged && (code != 0 || strings.Contains(errb, "target server")):
+		case flagged && (code != 0 || errb != ""):
 			t.Errorf("%v: %d %q", args, code, errb)
 		case !flagged && code == 0:
 			t.Errorf("%v: reached the server without the flag", args)
 		}
+	}
+}
+
+// An unreachable --server beats a reachable MASH_SERVER: the failure names the flag's address.
+func TestGlobalServerFlagBeatsReachableEnvironment(t *testing.T) {
+	h := newFleetEnv(t)
+	good := h.env["MASH_SERVER"]
+	if _, errb, code := h.run("limits", "apply"); code != 0 {
+		t.Fatalf("environment server should work: %d %q", code, errb)
+	}
+	_, errb, code := h.run("--server", "nats://127.0.0.1:1", "limits", "apply")
+	if code == 0 || !strings.Contains(errb, "127.0.0.1:1") {
+		t.Fatalf("flag did not win: %d %q", code, errb)
+	}
+	if hostPort := strings.TrimPrefix(good, "nats://"); strings.Contains(errb, hostPort) {
+		t.Errorf("error names the environment server %s: %q", hostPort, errb)
 	}
 }
 
