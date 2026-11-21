@@ -34,7 +34,7 @@
 | [0030](0030-sessions-are-full-sap-agents.md) | Sessions are full SAP agents: heartbeat presence, status and live prompts; only the CLI starts a prompt | accepted | 2026-10-21 |
 | [0031](0031-send-at-most-once-with-an-idempotency-key.md) | A send can be made at-most-once with a key, within the stream's duplicate window | accepted | 2026-10-30 |
 | [0032](0032-host-adapter-seam.md) | A host adapter seam isolates the agent host; Claude Code is the only host | accepted | 2026-10-28 |
-| [0033](0033-claude-code-plugin-is-the-distribution-unit.md) | The Claude Code plugin, in the repo's own marketplace, is the distribution unit | superseded by ADR-0153 | 2026-10-21 |
+| [0033](0033-claude-code-plugin-is-the-distribution-unit.md) | The Claude Code plugin, in the repo's own marketplace, is the distribution unit | accepted | 2026-10-21 |
 | [0034](0034-text-output-and-plugin-commands-are-a-compatibility-contract.md) | Text output and the plugin's commands are a compatibility contract | accepted | 2026-10-29 |
 | [0035](0035-init-synadia-provisions-a-hosted-account.md) | `mash init synadia` provisions a hosted account from the core binary | accepted | 2026-10-30 |
 | [0036](0036-names-are-lower-case-hyphenated-words-up-to-48-characters.md) | Names and owners are lower-case words joined by single hyphens, 1-48 characters | accepted | 2026-10-21 |
@@ -129,4 +129,3 @@
 | [0149](0149-further-departures-of-the-0-5-6-specification-by-the-maintainers-word.md) | Further departures of the 0.5.6 specification, by the maintainer's word (ADR 0147) | accepted | 2026-11-20 |
 | [0150](0150-releases-carry-install-and-local-nats-setup-scripts-as-attested-assets.md) | Releases carry the install and local NATS setup scripts as attested assets | accepted | 2026-11-20 |
 | [0151](0151-a-backlog-over-the-wake-count-or-age-wakes-the-session-whatever-the-kinds.md) | A backlog over the wake count or the wake age wakes the session, whatever the kinds, and listed mail counts as waiting | accepted | 2026-11-20 |
-| [0153](0153-the-plugin-is-installed-from-its-marketplace-and-mash-plugin-export-is-removed.md) | The plugin is installed from its marketplace, and `mash plugin export` is removed | accepted | 2026-11-21 |
