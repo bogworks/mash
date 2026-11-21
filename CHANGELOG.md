@@ -182,6 +182,7 @@ Setting up and installing:
 - [#993](https://github.com/bogworks/mash/issues/993): on a host without Claude Code hooks, `doctor`'s delivery row warns for as long as it runs.
 - [#1008](https://github.com/bogworks/mash/issues/1008): a first `mash join` interrupted partway leaves a folder that neither a retry nor `--replace` finishes.
 - [#1013](https://github.com/bogworks/mash/issues/1013): a join file of another account on the same servers can join a folder that already holds an endpoint.
+- [#1097](https://github.com/bogworks/mash/issues/1097): `mashctl status` prints nothing and exits 0 when no server is configured. Someone running it before `mashctl init` meets this, and a script or skill that reads silence as "ok" is misled. Workaround: run `mashctl doctor`, whose config row fails: `config     FAIL  no servers in the configuration`, then `1 problem.` and `hint: mashctl init --config <file>`, exit 1.
 - [#1062](https://github.com/bogworks/mash/issues/1062): `mash join` adds a certificate authority to a folder that has servers but no endpoint.
 - [#1066](https://github.com/bogworks/mash/issues/1066): `mash join`'s rollback can remove a replaced creds file.
 - [#1063](https://github.com/bogworks/mash/issues/1063): the migration script can write outside the mash folder if a parent path is replaced.
