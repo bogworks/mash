@@ -18,7 +18,7 @@ The maintainer's rulings of 2026-11-16 and 2026-11-17 settle the shape. The addr
 group, then instance** (decision 240); mash does not follow SAP's SHOULD for the first slot and says so; there is no
 default group; there are no legacy agents; mash ships wide open; this release has no policy; and the old endpoints "are
 literally disappearing and will exist nowhere": no one uses mash yet, so there is no soft cut and no command for one-time
-use. This record fixes the model. The design is in [the plan](https://github.com/bogworks/mash/blob/dd696e9ee8f688cef6fe1102410aa43d731f567b/docs/plans/2026-11-17-endpoint-model-owner-group-instance.md).
+use. This record fixes the model. The design is in [the plan](../plans/2026-11-17-endpoint-model-owner-group-instance.md).
 
 ## Decision Drivers
 
@@ -119,6 +119,6 @@ machinery is removed), 0077 (the rule file's keys) and 0102 (the group is slot 2
 
 ## More Information
 
-[The plan](https://github.com/bogworks/mash/blob/dd696e9ee8f688cef6fe1102410aa43d731f567b/docs/plans/2026-11-17-endpoint-model-owner-group-instance.md) has the tables, the triage of the held policy stack
+[The plan](../plans/2026-11-17-endpoint-model-owner-group-instance.md) has the tables, the triage of the held policy stack
 and the size. Decision 240, the no-default-group ruling and the hard-cut ruling are the maintainer's, 2026-11-16 and
 2026-11-17.
