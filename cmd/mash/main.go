@@ -191,7 +191,7 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 	// help and version included): a removed name or a bad value is refused (exit 2), and while the override is on
 	// every invocation prints the warning on stderr, once. A hook never blocks the session: it says the refusal on
 	// stderr, exits 0, and reads and writes nothing.
-	if skipErr := config.CheckSkipEncryption(lookup, env("HOME")); skipErr != nil {
+	if skipErr := config.CheckSkipEncryption(lookup, config.HomeDir(env)); skipErr != nil {
 		if len(args) > 0 && args[0] == "hook" {
 			fmt.Fprintf(stderr, "mash hook: %s\n", skipErr.Msg())
 			return 0
@@ -226,7 +226,7 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 	}
 	// The refusal was made (and the warning printed) before the arguments were read; a --config-dir flag can point at a
 	// file with the removed key, so that file is checked again here, refusal only.
-	if skipErr := config.CheckSkipEncryption(lookup, env("HOME")); skipErr != nil {
+	if skipErr := config.CheckSkipEncryption(lookup, config.HomeDir(env)); skipErr != nil {
 		if args[0] == "hook" { // a hook never blocks a session: the refusal on stderr, exit 0
 			fmt.Fprintf(stderr, "mash hook: %s\n", skipErr.Msg())
 			return 0

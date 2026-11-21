@@ -222,9 +222,7 @@ func doctorChecks(rep *doctorReport, env func(string) string, lookup config.Look
 		}
 	}
 	if why := probeServer(cfg, servers[0]); why != "" {
-		var p *natsauth.PlainRefusalError
-		_, _, rerr := natsauth.RequireTLS(servers[0], cfg.SkipEncryption)
-		rep.plainRefused = errors.As(rerr, &p)
+		rep.plainRefused = anyPlainRefused(servers, cfg.SkipEncryption)
 		rep.add("server", stateFail, why, "mashctl status")
 		return
 	}
@@ -233,6 +231,7 @@ func doctorChecks(rep *doctorReport, env func(string) string, lookup config.Look
 	// 3. sign-in: the admin credentials connect
 	adm, ctx, closeAdmin, err := ctl.OpenAdmin("mashctl", cfg)
 	if err != nil {
+		rep.plainRefused = rep.plainRefused || anyPlainRefused(servers, cfg.SkipEncryption) // a later server in the list is a plain URL: also a configuration error
 		msg := oneLine(err.Error())
 		if strings.Contains(msg, "uthorization violation") {
 			msg = "the server refused the admin credentials"
@@ -614,4 +613,16 @@ func doctorKeys(rep *doctorReport, ctx context.Context, adm *admin.Admin, cfg co
 		fails = append(fails, finding{oneLine(scan.Incomplete), initFix})
 	}
 	addFindings(rep, "keys", "every connected key was issued here", fails, nil)
+}
+
+// anyPlainRefused reports whether any server in the list is a plain URL the encryption rule refuses: a configuration
+// error, whichever server answers.
+func anyPlainRefused(servers []string, skip bool) bool {
+	for _, s := range servers {
+		var p *natsauth.PlainRefusalError
+		if _, _, err := natsauth.RequireTLS(s, skip); errors.As(err, &p) {
+			return true
+		}
+	}
+	return false
 }
