@@ -142,6 +142,11 @@ func TestUnknownCommandIsRefusedBeforeTheEndpointLookup(t *testing.T) {
 			}
 		}
 		env := map[string]string{"HOME": home, "MASH_SERVER": w.env["a"]["MASH_SERVER"], "MASH_CA": w.e.CAFile}
+		for _, bad := range []string{"key create"} {
+			if r := runMash(env, bad); r.code != 2 || r.errs != "error: mash has no command "+bad+"\nhint: mash --help\n" {
+				t.Errorf("%d endpoints, %q: %+v", n, bad, r)
+			}
+		}
 		r := runMash(env, "nonsense")
 		if want := "error: mash has no command nonsense\nhint: mash --help\n"; r.code != 2 || r.out != "" || r.errs != want {
 			t.Errorf("%d endpoints: %+v, want %q", n, r, want)
