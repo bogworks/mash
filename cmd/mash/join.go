@@ -216,6 +216,10 @@ func (s joinSvc) shown(path string) string {
 func certsIn(text []byte) (pemOut []byte, ders []string, err error) {
 	rest := text
 	for {
+		// pem.Decode skips text before a block; only white space may come before one.
+		if t := bytes.TrimLeft(rest, " \t\r\n"); len(t) != 0 && !bytes.HasPrefix(t, []byte("-----BEGIN ")) {
+			return nil, nil, errors.New("not only certificates")
+		}
 		blk, r := pem.Decode(rest)
 		if blk == nil {
 			if len(bytes.TrimSpace(rest)) != 0 {
@@ -379,7 +383,10 @@ func (s joinSvc) Join(_ context.Context, req cmds.JoinRequest) (cmds.JoinOutcome
 
 	// What else is written: --replace of installed creds replaces the creds and nothing else.
 	caPath := filepath.Join(dir, joinCAFile)
-	replacing := req.Replace && credsExist
+	// An existing creds path that is not an installed endpoint (a symlink, a wrong mode) is replaced all the same, but
+	// the join then writes the rest as a first join does: the new creds would be unusable without it.
+	replaceCreds := credsExist
+	replacing := credsExist && slices.Contains(config.InstalledEndpoints(dir), address)
 	writeCA := j.CA != nil && !haveCA && !replacing
 	newCfg := cloneConfig(cfg)
 	if len(have) == 0 {
@@ -454,7 +461,7 @@ func (s joinSvc) Join(_ context.Context, req cmds.JoinRequest) (cmds.JoinOutcome
 	// The creds first. A replaced creds file is kept under a temporary name until the run is whole, so a later failure
 	// can put it back.
 	var backup string
-	if replacing {
+	if replaceCreds {
 		backup = filepath.Join(dir, ".join-backup-"+filepath.Base(credsTmp))
 		if err := os.Link(credsPath, backup); err != nil {
 			return fail(err)

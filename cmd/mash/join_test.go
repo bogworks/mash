@@ -779,6 +779,8 @@ func TestJoinRefusesACAThatIsNotOnlyCertificates(t *testing.T) {
 		"key first":            genKeyPEM(t) + good,
 		"garbage":              "this is not a certificate\n",
 		"trailing garbage":     good + "trailing text\n",
+		"leading garbage":      "junk\n" + good,
+		"garbage between":      good + "junk\n" + good,
 		"bad certificate":      strings.Replace(good, "MII", "MIJ", 1),
 		"empty":                "",
 		"header":               strings.Replace(good, "-----BEGIN CERTIFICATE-----\n", "-----BEGIN CERTIFICATE-----\nProc-Type: 4,ENCRYPTED\n\n", 1),
@@ -988,5 +990,45 @@ func TestVersionJSONCarriesTheWholeCommit(t *testing.T) {
 	out.Reset()
 	if code := run([]string{"version"}, envFrom(nil), strings.NewReader(""), &out, &errb); code != 0 || !strings.HasSuffix(out.String(), " (3f9a41c)\n") {
 		t.Errorf("version: %d %q", code, out.String())
+	}
+}
+
+// Surrounding white space and several certificates are fine.
+func TestJoinAcceptsPaddedAndMultipleCertificates(t *testing.T) {
+	a, b := genCA(t, "A CA"), genCA(t, "B CA")
+	for name, ca := range map[string]string{"padded": "\n \t\r\n" + a + "\n\n  ", "two": a + "\n" + b} {
+		t.Run(name, func(t *testing.T) {
+			w := newJoinWorld(t)
+			w.joinFor("ok.join", w.m, "acme.demo.bob", &ca)
+			if r := w.run("join", "ok.join"); r.code != 0 {
+				t.Errorf("%+v", r)
+			}
+		})
+	}
+}
+
+// --replace over a creds path that is not an installed endpoint (a symlink) is a first-style join: the creds path is
+// replaced, never written through, and ca.pem and config.json are written.
+func TestJoinReplaceOverANonEndpointWritesCAAndConfig(t *testing.T) {
+	w := newJoinWorld(t)
+	os.MkdirAll(w.cfg, 0o700)
+	target := filepath.Join(w.home, "elsewhere.creds")
+	os.WriteFile(target, []byte("precious\n"), 0o600)
+	if err := os.Symlink(target, w.credsFile()); err != nil {
+		t.Fatal(err)
+	}
+	if r := w.run("join", "acme.demo.bob.join", "--replace"); r.code != 0 {
+		t.Fatal(r)
+	}
+	if st, err := os.Lstat(w.credsFile()); err != nil || !st.Mode().IsRegular() || st.Mode().Perm() != 0o600 {
+		t.Errorf("creds: %v, %v", st, err)
+	}
+	if got, _ := os.ReadFile(target); string(got) != "precious\n" {
+		t.Errorf("target written: %q", got)
+	}
+	for _, f := range []string{"ca.pem", "config.json"} {
+		if _, err := os.Stat(filepath.Join(w.cfg, f)); err != nil {
+			t.Errorf("%s: %v", f, err)
+		}
 	}
 }
