@@ -633,8 +633,6 @@ plugin:mash@mash`. This needs a claude.ai sign-in or a Console API key, not Bedr
   ("not on the approved channels allowlist"). The MCP server still runs and its tools still work. On Team and
   Enterprise plans channels stay off until an owner sets `channelsEnabled`. Personal Pro and Max accounts skip that
   check, but not the allowlist.
-- *The development flag.* `--dangerously-load-development-channels plugin:mash@mash` bypasses the allowlist for that
-  entry. It asks for confirmation on every launch and is ignored by `claude -p` and the Agent SDK.
 
 **What the allowlist means for someone installing mash.** On a personal machine, the user writes the managed settings
 file once with `sudo`, as mash's install guide shows. This worked on a Max account (2026-10-21) and in later runs.
