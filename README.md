@@ -29,6 +29,10 @@ What each layer does: [the stack](docs/guide/stack.md).
 6. Agent-agnostic (ROADMAP).
 7. Messaging policy (ROADMAP).
 
+## If you are an agent
+
+Install the `mash-setup` plugin and use its `setup` skill: it asks the person before each step. Never pipe a download into a shell. The person decides every answer.
+
 **Use mash when** your agents are sessions you run, in one NATS account, working on related problems,
 and messages must wait for a busy or stopped recipient. **Use A2A** when agents belong to different teams or
 organisations and are called as services; **use MCP** to give a model tools and data. The two can sit side by side:
@@ -45,19 +49,45 @@ JetStream (the NATS feature that stores messages on the server) and is kept up t
 
 ## Install
 
+Ask Claude Code to do it. Add the marketplace and install the `mash-setup` plugin:
+
 ```sh
-curl -fsSL https://github.com/bogworks/mash/releases/latest/download/install.sh | bash
+claude plugin marketplace add bogworks/mash
+claude plugin install mash-setup@mash
 ```
 
-This installs `mash` and `mashctl` from the latest release into `~/.local/bin`, after checking each against the release's `SHA256SUMS`. It asks nothing and needs no `sudo`. [docs/install.md](docs/install.md) says what it does, how to pin a release, and how to check the script before you run it. To install the Claude Code plugin, see [docs/install.md](docs/install.md#2-the-plugin).
+Then tell the session: "set mash up on this machine". The setup skill installs the programs, makes a NATS server for this machine, installs the mash plugin and makes the first endpoints, asking before each step.
+
+The mash plugin needs the `mash` program on the PATH that Claude Code starts with. `install.sh` puts it in `~/.local/bin`; if that folder is not on the PATH, add it before starting Claude Code.
+
+### Or by hand
+
+Everything installs as you, in your home folder: no `sudo`, no package manager, no system service. Download the installer and its checksums, check, then run it; each step is joined to the next with `&&`, so a failed check stops everything:
+
+```sh
+BASE=https://github.com/bogworks/mash/releases/latest/download
+curl -fsSLO $BASE/install.sh -O $BASE/SHA256SUMS &&
+grep ' install.sh$' SHA256SUMS | sha256sum -c - &&    # macOS: shasum -a 256 -c -
+bash install.sh
+```
+
+This installs `mash` and `mashctl` from the release into `~/.local/bin`, after checking each against the release's `SHA256SUMS`. [docs/install.md](docs/install.md) says what it does and how to pin a release.
+
+The local NATS server and the rest of the by-hand route (`nats-server` and the `nats` command from their GitHub releases, `mash-local-nats-setup.sh`, two endpoints, the first mail) are in the [Quick start](docs/guide/walkthrough.md#quick-start), each command run on this release. To use a NATS server you already run, see [Bring your own NATS server](docs/nats-server.md).
+
+Where everything lives, by default: the programs in `~/.local/bin` (`MASH_INSTALL_DIR` names another folder), the configuration and keys in `~/.config/mash` (`$XDG_CONFIG_HOME/mash` or `MASH_CONFIG_DIR` if set), a local server in `~/mash-nats` (the folder the setup script printed, if you used `--dir`). Check yours before you remove anything. How to remove it all: [Uninstall](docs/install.md#uninstall).
+
+### When something is wrong
+
+`mash status`, then `mash doctor` (one endpoint); `mashctl status`, then `mashctl doctor` (the server). After a reboot a local server stays stopped: run the setup script you downloaded (keep it; the setup skill says where it saved it) with `--start`, and with `--dir DIR` if you used one: `bash <folder>/mash-local-nats-setup.sh --start`. More in [docs/troubleshooting.md](docs/troubleshooting.md).
 
 ## Check the download
 
-`install.sh` checks each binary against the release's `SHA256SUMS`. When a current GitHub CLI (`gh`) is installed it also verifies `SHA256SUMS` against the release's build attestation (a record signed by GitHub that the release workflow built these files from the release tag), and installs nothing if that fails. Without `gh` it says so and trusts the TLS connection to github.com. To check by hand before you run anything, download the files and verify the attestation:
+`install.sh` checks each binary against the release's `SHA256SUMS`. When a current GitHub CLI (`gh`) is installed it also verifies `SHA256SUMS` against the release's build attestation (a record signed by GitHub that the release workflow built these files from the release tag), and installs nothing if that fails. Without `gh` it says so and trusts the TLS connection to github.com. `gh attestation verify` needs a current `gh`; [which version, and where to get it](docs/security/verify-your-download.md#what-you-need). To check by hand before you run anything, download the files and verify the attestation:
 
 ```sh
 BASE=https://github.com/bogworks/mash/releases/download/v0.5.6
-curl -fsSLO $BASE/install.sh -O $BASE/SHA256SUMS -O $BASE/mash.intoto.jsonl
+curl -fsSLO $BASE/install.sh -O $BASE/SHA256SUMS -O $BASE/mash.intoto.jsonl &&
 gh attestation verify SHA256SUMS -R bogworks/mash --bundle mash.intoto.jsonl \
   --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/v0.5.6
 ```
@@ -67,7 +97,7 @@ The rest (checking `install.sh` itself against `SHA256SUMS`, and building from s
 
 ## Quick start
 
-The quick start is one guided walkthrough that takes you from nothing to two Claude Code sessions mailing each other, with the output of every command. Start at the [walkthrough](docs/guide/walkthrough.md).
+The quick start is one guided walkthrough that takes you from nothing to two Claude Code sessions mailing each other, with the output of every command. The [Quick start](docs/guide/walkthrough.md#quick-start) is the short version; the rest of the walkthrough explains each step.
 
 ## Documentation
 
