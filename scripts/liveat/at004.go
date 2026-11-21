@@ -902,12 +902,15 @@ func (s *at4) join() {
 	// A plain file at the creds path is an installed endpoint, so the folder is one an earlier join set up: it holds the
 	// certificate authority, which a join file's own must equal (a folder with an endpoint and no authority is refused
 	// as "set up with a different ca", with or without --replace). A symlink is not an installed endpoint.
-	seedFolder := func(st pathState, cfg string) {
-		if st == psFile {
-			if b, err := os.ReadFile(a.caPath()); err == nil {
-				_ = os.WriteFile(filepath.Join(cfg, joinCAName), b, 0o644)
-			}
+	seedFolder := func(st pathState, cfg string) error {
+		if st != psFile {
+			return nil
 		}
+		b, err := os.ReadFile(a.caPath())
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(filepath.Join(cfg, joinCAName), b, 0o644)
 	}
 	var runs []labelled
 	run := func(label, cfg string, args ...string) Result {
@@ -923,8 +926,11 @@ func (s *at4) join() {
 	for _, st := range []pathState{psFile, psSymlink, psDangling} {
 		cfg, tgt := freshCfg("join-over-" + string(st))
 		path := filepath.Join(cfg, who+".creds")
-		seedFolder(st, cfg)
+		serr := seedFolder(st, cfg)
 		g, err := plant(st, path, tgt)
+		if err == nil {
+			err = serr
+		}
 		if !a.C.Check("files setup: "+string(st)+" at the creds path of mash join ("+who+" in a fresh configuration folder)", err == nil, errDetail(err)) {
 			continue
 		}
@@ -947,8 +953,11 @@ func (s *at4) join() {
 	for _, st := range []pathState{psSymlink, psDangling, psFile} {
 		cfg, tgt := freshCfg("join-replace-" + string(st))
 		path := filepath.Join(cfg, who+".creds")
-		seedFolder(st, cfg)
+		serr := seedFolder(st, cfg)
 		g, err := plant(st, path, tgt)
+		if err == nil {
+			err = serr
+		}
 		if !a.C.Check("files setup: "+string(st)+" at the creds path for mash join --replace", err == nil, errDetail(err)) {
 			continue
 		}
