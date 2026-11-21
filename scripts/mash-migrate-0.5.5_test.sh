@@ -169,7 +169,7 @@ case4() { # folder resolution
     chk "HOME/.config/mash by default" [ "$(hit)" = "$h/.config/mash" ]
     mig HOME="$h" XDG_CONFIG_HOME="$x" MASH_CONFIG_DIR=rel/m
     chk "a relative MASH_CONFIG_DIR is refused (nothing in any folder changed)" bash -c '[ "$1" = 1 ] && [ -z "$2" ]' _ "$RC" "$(hit)"
-    chk "a relative MASH_CONFIG_DIR: an error line that names the variable and the value" has "$W/err" "error: MASH_CONFIG_DIR is not an absolute path: rel/m"
+    chk "a relative MASH_CONFIG_DIR: an error line that names the variable, and not its value" bash -c 'grep -qx "error: MASH_CONFIG_DIR is not an absolute path" "$1" && ! grep -q "rel/m" "$1"' _ "$W/err"
     chk "a relative MASH_CONFIG_DIR: an error line and a hint line" refused
     mig HOME="$h" XDG_CONFIG_HOME=rel/x
     chk "a relative XDG_CONFIG_HOME is ignored (HOME wins)" [ "$(hit)" = "$h/.config/mash" ]
