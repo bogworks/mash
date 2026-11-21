@@ -118,7 +118,7 @@ columns is left as it is and reported.
 |-------------|------------|-------------------------------------------------------|
 | install     | 2          | checksum check, `install.sh`, `mash version`, `mashctl version` |
 | server      | 3          | checksum check, the setup script `--owner acme`, then the `mashctl init --config` line it printed last (taken from its output) |
-| endpoints   | 4          | `mashctl endpoint create` for bob and alice           |
+| endpoints   | 4          | `mashctl endpoint create --out` then `mash join`, for bob and alice |
 | status      | 4          | `mash status` as bob and as alice                     |
 | send        | 5          | the two `mash send` commands                          |
 | inbox       | 5          | alice's `mash inbox`                                  |

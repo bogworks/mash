@@ -630,8 +630,12 @@ step_server() {
 
 step_endpoints() {
     step_begin endpoints
-    step_cmd zero "$CHOME" "mashctl endpoint create $OWNER.demo.bob"
-    step_cmd zero "$CHOME" "mashctl endpoint create $OWNER.demo.alice"
+    # as the guide shows: create writes a join file (--out), then mash join
+    # installs it. The join file holds credentials; neither command prints it.
+    step_cmd zero "$CHOME" "mashctl endpoint create $OWNER.demo.bob --out $OWNER.demo.bob.join"
+    step_cmd zero "$CHOME" "mash join $OWNER.demo.bob.join"
+    step_cmd zero "$CHOME" "mashctl endpoint create $OWNER.demo.alice --out $OWNER.demo.alice.join"
+    step_cmd zero "$CHOME" "mash join $OWNER.demo.alice.join"
     step_end
 }
 
@@ -767,11 +771,9 @@ run_asserts() {
     # the guide's form is a "trust: verified" line; the 0.5.x form is "[verified]" in the header
     if [ -f "$f" ] && grep -Eq '^trust: +verified$|^--- #2 from [^ ]+ \[verified\]' "$f"; then ok "mail 2 read as alice: trust verified"; else bad "mail 2 read as alice: not shown as trust verified"; fi
     f=$OUT/json-read.txt
-    if [ -f "$f" ] && grep -Eq '"trust": "verified"' "$f"; then ok "mail 3 read as JSON: trust verified"; else bad "mail 3 read as JSON: no verified trust"; fi
+    if [ -f "$f" ] && grep -Eq '"trust": *"verified"' "$f"; then ok "mail 3 read as JSON: trust verified"; else bad "mail 3 read as JSON: no verified trust"; fi
+    # the inbox table has no trust column; trust is asserted via read and read --json
     f=$OUT/inbox.txt
-    n=0
-    [ -f "$f" ] && n=$(grep -c 'verified' "$f")
-    if [ "$n" -ge 2 ]; then ok "the inbox lists both mails as verified ($n lines)"; else bad "the inbox lists $n verified lines, wanted 2"; fi
     n=0
     [ -f "$f" ] && n=$(grep -c 'bob' "$f")
     if [ "$n" -ge 2 ]; then ok "the inbox lists two mails from bob"; else bad "the inbox lists $n mails from bob, wanted 2"; fi
