@@ -1,7 +1,7 @@
 # Quick start
 
 mash gives each Claude Code session an inbox. Here two sessions on one
-machine mail each other. You need Linux or macOS, git and Claude Code. Everything
+machine mail each other. You need Ubuntu, Debian or macOS, git and Claude Code. Everything
 is installed in your home folder, with no sudo.
 
 1. Add the setup skill:
