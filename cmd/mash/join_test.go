@@ -196,6 +196,27 @@ func TestJoinMatchesSpec(t *testing.T) {
 		writeJoin(t, "acme.demo.bob.join", joinfile.File{MashJoin: 1, Address: "acme.demo.carol", Servers: []string{"tls://myserver:4222"}, CA: &ca, Creds: string(m.creds)})
 		c.check(t, w.run("join", "acme.demo.bob.join"))
 	})
+	do("The join file can be read by others", func(w *joinWorld, c specCase) {
+		if err := os.Chmod("acme.demo.bob.join", 0o644); err != nil {
+			t.Fatal(err)
+		}
+		c.check(t, w.run("join", "acme.demo.bob.join"))
+		if _, err := os.Stat(w.cfg); err == nil {
+			t.Error("the configuration folder was made")
+		}
+	})
+	do("The join file is not a plain file of your own", func(w *joinWorld, c specCase) {
+		if err := os.Rename("acme.demo.bob.join", "real.join"); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink("real.join", "acme.demo.bob.join"); err != nil {
+			t.Fatal(err)
+		}
+		c.check(t, w.run("join", "acme.demo.bob.join"))
+		if _, err := os.Stat(w.cfg); err == nil {
+			t.Error("the configuration folder was made")
+		}
+	})
 	do("With --dry-run", func(w *joinWorld, c specCase) {
 		c.check(t, w.run("join", "acme.demo.bob.join", "--dry-run"))
 		if _, err := os.Stat(w.cfg); err == nil {
@@ -850,6 +871,7 @@ func TestJoinRefusesACredsNameThatIsNotTheAddress(t *testing.T) {
 func TestJoinOverACredsSymlink(t *testing.T) {
 	w := newJoinWorld(t)
 	os.MkdirAll(w.cfg, 0o700)
+	w.joinFor("acme.demo.bob.join", w.m, "acme.demo.bob", nil) // the folder holds creds and no ca.pem: no CA may come in
 	target := filepath.Join(w.home, "elsewhere.creds")
 	os.WriteFile(target, []byte("precious\n"), 0o600)
 	if err := os.Symlink(target, w.credsFile()); err != nil {
@@ -1171,5 +1193,32 @@ func TestJoinReplaceOverANonEndpointWritesCAAndConfig(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(w.cfg, f)); err != nil {
 			t.Errorf("%s: %v", f, err)
 		}
+	}
+}
+
+// A seed hidden in a creds value that a later duplicate key overwrites, or a second object after the first, is not a
+// join file, whatever its mode: it is refused as malformed and nothing is installed.
+func TestJoinRefusesDuplicateKeysAndTrailingObjects(t *testing.T) {
+	w := newJoinWorld(t)
+	secret := string(w.m.seed)
+	seeded, _ := json.Marshal(string(w.m.creds))
+	head := `{"mash_join":1,"address":"acme.demo.bob","servers":["tls://myserver:4222"],`
+	for name, body := range map[string]string{
+		"duplicate creds": head + `"creds":` + string(seeded) + `,"creds":"x"}` + "\n",
+		"trailing object": head + `"creds":` + string(seeded) + "}\n{}",
+	} {
+		if err := os.WriteFile("dup.join", []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod("dup.join", 0o644); err != nil {
+			t.Fatal(err)
+		}
+		r := w.run("join", "dup.join")
+		if r.code != 1 || r.out != "" || !strings.HasPrefix(r.errs, "error: dup.join is ") || strings.Count(r.errs, "\n") != 1 || strings.Contains(r.errs, secret) {
+			t.Errorf("%s: %+v", name, r)
+		}
+	}
+	if _, err := os.Stat(w.cfg); err == nil {
+		t.Error("a refused join made the configuration folder")
 	}
 }

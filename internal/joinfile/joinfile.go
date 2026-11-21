@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"strings"
 )
 
 // Format is the version of the join file: the value of its "mash_join" field.
@@ -47,12 +49,16 @@ var ErrNotJoinFile = errors.New("not a join file")
 // address, or no server. It does not check the address, the creds or the JWT.
 func Parse(raw []byte) (File, error) {
 	var j File
+	if hasDuplicateKey(raw) {
+		return File{}, ErrNotJoinFile
+	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&j); err != nil {
 		return File{}, ErrNotJoinFile
 	}
-	if dec.More() {
+	// Nothing but white space may follow the object.
+	if _, err := dec.Token(); err != io.EOF {
 		return File{}, ErrNotJoinFile
 	}
 	if j.MashJoin != Format {
@@ -62,4 +68,36 @@ func Parse(raw []byte) (File, error) {
 		return File{}, ErrNotJoinFile
 	}
 	return j, nil
+}
+
+// hasDuplicateKey reports whether the top-level object repeats a key. encoding/json matches field names without regard
+// to case (Unicode simple folding), so keys that differ only in case are repeats too. Bytes that are not an object report false: the decode
+// that follows refuses them.
+func hasDuplicateKey(raw []byte) bool {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	if t, err := dec.Token(); err != nil || t != json.Delim('{') {
+		return false
+	}
+	var seen []string
+	for dec.More() {
+		t, err := dec.Token()
+		if err != nil {
+			return false
+		}
+		k, ok := t.(string)
+		if !ok {
+			return false
+		}
+		for _, o := range seen { // the decoder's own rule: Unicode simple folding ("credſ" is "creds")
+			if strings.EqualFold(o, k) {
+				return true
+			}
+		}
+		seen = append(seen, k)
+		var skip json.RawMessage
+		if err := dec.Decode(&skip); err != nil {
+			return false
+		}
+	}
+	return false
 }

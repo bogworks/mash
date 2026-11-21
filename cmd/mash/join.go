@@ -50,21 +50,21 @@ func notJoinFile(path string) *cliframe.Error {
 // readJoinFile reads and parses the join file at path, and checks its address, its creds or JWT and its certificate.
 func readJoinFile(path string) (joinfile.File, error) {
 	var zero joinfile.File
-	fi, err := os.Stat(path)
-	if err == nil && fi.Size() > maxJoinFile {
-		return zero, notJoinFile(path)
-	}
-	var raw []byte
-	if err == nil {
-		raw, err = os.ReadFile(path)
-	}
+	sf, err := openSecret(path)
 	if err != nil {
-		reason := err
-		var pe *fs.PathError
-		if errors.As(err, &pe) {
-			reason = pe.Err
-		}
-		return zero, cliframe.Failf("cannot read %s: %v", config.Clean(path), reason)
+		return zero, err
+	}
+	defer sf.close()
+	if sf.f == nil {
+		return zero, sf.refuse() // a directory, device or fifo: not a plain file
+	}
+	raw, err := sf.readAll(maxJoinFile)
+	if err != nil {
+		return zero, readFailure(path, err)
+	}
+	if len(raw) > maxJoinFile {
+		clear(raw)
+		return zero, notJoinFile(path)
 	}
 	defer clear(raw)
 	j, err := joinfile.Parse(raw)
@@ -73,6 +73,12 @@ func readJoinFile(path string) (joinfile.File, error) {
 			return zero, cliframe.Failf("%s is a join file of a version this mash does not read (%s)", config.Clean(path), strings.TrimPrefix(err.Error(), joinfile.ErrNotJoinFile.Error()+": "))
 		}
 		return zero, notJoinFile(path)
+	}
+	// a join file that holds a seed is a secret file; one that holds only a user JWT is not
+	if j.Creds != "" {
+		if err := sf.refuse(); err != nil {
+			return zero, err
+		}
 	}
 	if _, err := sap.ParseAddress(j.Address); err != nil {
 		return zero, notJoinFile(path)
@@ -92,14 +98,17 @@ func readJoinFile(path string) (joinfile.File, error) {
 
 // readSeed reads the seed file given with --key: a user seed, trimmed.
 func readSeed(path string) ([]byte, nkeys.KeyPair, error) {
-	raw, err := os.ReadFile(path)
+	sf, err := openSecret(path)
 	if err != nil {
-		reason := err
-		var pe *fs.PathError
-		if errors.As(err, &pe) {
-			reason = pe.Err
-		}
-		return nil, nil, cliframe.Failf("cannot read %s: %v", config.Clean(path), reason)
+		return nil, nil, err
+	}
+	defer sf.close()
+	if err := sf.refuse(); err != nil {
+		return nil, nil, err
+	}
+	raw, err := sf.readAll(maxJoinFile)
+	if err != nil {
+		return nil, nil, readFailure(path, err)
 	}
 	defer clear(raw)
 	seed := bytes.TrimSpace(raw)
