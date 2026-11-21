@@ -107,7 +107,29 @@ The rules every mash command and tool follows.
    certificate is not trusted: &lt;address&gt;' and 'the server did not offer
    TLS: &lt;address&gt;'.
 
-18. Having no endpoint reads the same in every mash command. Three wordings,
+18. Missing credentials read the same in every everyday command. When the
+   chosen endpoint's creds file is not where the configuration says: 'error:
+   acme.demo.bob has no credentials here: ~/.config/mash/acme.demo.bob.creds
+   is missing' and 'hint: mash doctor', exit 1, from send, inbox, read and who
+   alike; status says the same as its reason (reason_code creds_missing) and
+   doctor in its creds row. Never the operating system's own wording. A
+   recipient that takes no mail reads 'error: &lt;address&gt; is suspended or
+   was deleted; nothing was sent', hint 'mash who', exit 1; never the server's
+   wording. The sender cannot tell the two apart: all it sees is that no
+   stream took the message, and a recipient deleted while the sender's
+   directory cache still lists it looks the same; a marker in the directory
+   record that tells them apart is for 0.6.0 (settled 2026-11-21, from the
+   candidate 1 built-output reviews).
+
+19. A case written in brackets is a description. A case whose whole text
+   stands in round brackets, such as '(the same JSON as --json ...)',
+   describes the output in words; it is not a form to match byte for byte, and
+   the conformance test skips it. The JSON example beside it shows the shape.
+   After the first cause-less line, text following ': ' at the end of an error
+   that names a cause ('...was not removed: &lt;cause&gt;') is the cause as
+   found and varies (settled 2026-11-21).
+
+20. Having no endpoint reads the same in every mash command. Three wordings,
    by where it is asked. At a shell with none installed: 'error: no endpoint
    is installed here' and 'hint: mash join &lt;file&gt;', exit 2. At a shell
    with several installed and none chosen: 'error: more than one endpoint is
@@ -116,44 +138,44 @@ The rules every mash command and tool follows.
    session with none named: 'No endpoint is chosen for this session.' and
    'hint: start the session with MASH_ENDPOINT=&lt;address&gt;'.
 
-19. --json when a command fails. Prints {"error": ..., "hint": ...} on stdout
+21. --json when a command fails. Prints {"error": ..., "hint": ...} on stdout
    and nothing on stderr, with the same exit code.
 
-20. Every command that changes the mesh or this machine's setup takes
+22. Every command that changes the mesh or this machine's setup takes
    --dry-run. It prints the usual line with 'Would' in front and changes
    nothing; with --json the object is the one the real run would print, plus
    "dry_run": true. That is mashctl's changing commands and mash join. Sending
    a message is not such a change and has no --dry-run.
 
-21. help is also a command. 'mash help' and 'mash help send' print exactly
+23. help is also a command. 'mash help' and 'mash help send' print exactly
    what 'mash --help' and 'mash send --help' print, as git, kubectl and gh do.
    The same for mashctl.
 
-22. Every setting three ways. A flag, then an environment variable, then
+24. Every setting three ways. A flag, then an environment variable, then
    config.json. The flag wins.
 
-23. One spelling. An address is owner.group.name everywhere. NATS's and SAP's
+25. One spelling. An address is owner.group.name everywhere. NATS's and SAP's
    things keep NATS's and SAP's names. The same thing has the same column
    heading and the same field name in every command.
 
-24. A prefix selects, the way a domain name does. Where a command takes a
+26. A prefix selects, the way a domain name does. Where a command takes a
    prefix, acme means everything under acme, acme.demo everything under
    acme.demo, and a full address that one endpoint. acme.\* is accepted and
    means acme. There is no other pattern matching.
 
-25. Options go anywhere after the tool's name. Every option, global or the
+27. Options go anywhere after the tool's name. Every option, global or the
    command's own, is accepted before or after the command and its arguments,
    as with kubectl and gh. Help and documentation always write them last: mash
    status --endpoint acme.demo.alice.
 
-26. A sender's words are always marked as the sender's. Wherever mash prints a
+28. A sender's words are always marked as the sender's. Wherever mash prints a
    message's text in full, every line starts with '&gt; ' and control
    characters are escaped, at a shell and in an MCP tool alike. It reads as
    quoted mail does to a person, and it shows an agent where data from someone
    else begins and ends. A table's MESSAGE column holds the sender's words
    too.
 
-27. Encryption can be turned off in one way only, and it says so every time.
+29. Encryption can be turned off in one way only, and it says so every time.
    Both tools talk to the server over TLS. The one way to turn that off is the
    environment variable MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1. There is no
    flag and no configuration-file key for it: this is the one setting that
@@ -164,7 +186,7 @@ The rules every mash command and tool follows.
    MASH_INSECURE_PLAINTEXT and the key insecure_plaintext, are refused with an
    error naming the new one.
 
-28. A folder left by mash 0.5.5 is named for what it is. When the
+30. A folder left by mash 0.5.5 is named for what it is. When the
    configuration folder holds 0.5.5's settings (the keys url and tls_ca),
    every command of both tools stops with 'error: &lt;folder&gt; holds a mash
    0.5.5 configuration' and 'hint: &lt;release
@@ -176,8 +198,8 @@ The rules every mash command and tool follows.
    endpoint records 0.5.5 made, and endpoints of the two versions can mail
    each other on one server (shown by a live run, 2026-11-20).
 
-29. Only a destructive command asks. It asks you to type the address, and
+31. Only a destructive command asks. It asks you to type the address, and
    --yes skips the question.
 
-30. Eighty columns, and color only on a terminal. --wide may be wider.
+32. Eighty columns, and color only on a terminal. --wide may be wider.
    NO_COLOR is honored.
