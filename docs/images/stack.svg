@@ -1,51 +1,77 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 470" role="img" aria-label="Two stacks side by side. An agent on plain SAP has four layers: agent host, SAP, NATS, TLS over TCP. An agent on mash has the same four with a mail layer, mash, added between the agent host and SAP." font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
-  <rect x="0" y="0" width="860" height="470" fill="#ffffff"/>
-  <g font-size="15" font-weight="600" fill="#1f2328" text-anchor="middle">
-    <text x="215" y="34">An agent on plain SAP</text>
-    <text x="555" y="34">An agent on mash</text>
-  </g>
-  <g font-size="12" fill="#59636e" text-anchor="middle">
-    <text x="215" y="52">live only: both sides must be online</text>
-    <text x="555" y="52">mail waits until it is read</text>
-  </g>
-  <g stroke="#59636e" stroke-width="1.2" fill="#f6f8fa">
-    <rect x="80" y="70" width="270" height="62"/>
-    <rect x="80" y="214" width="270" height="62"/>
-    <rect x="80" y="286" width="270" height="62"/>
-    <rect x="80" y="358" width="270" height="62"/>
-    <rect x="420" y="70" width="270" height="62"/>
-    <rect x="420" y="214" width="270" height="62"/>
-    <rect x="420" y="286" width="270" height="62"/>
-    <rect x="420" y="358" width="270" height="62"/>
-  </g>
-  <rect x="420" y="142" width="270" height="62" fill="#ddf4ff" stroke="#0969da" stroke-width="2"/>
-  <rect x="80" y="142" width="270" height="62" fill="none" stroke="#59636e" stroke-width="1.2" stroke-dasharray="5 5"/>
-  <g font-size="15" font-weight="600" fill="#1f2328" text-anchor="middle">
-    <text x="215" y="97">Agent host</text><text x="555" y="97">Agent host</text>
-    <text x="555" y="169" fill="#0550ae">mash</text>
-    <text x="215" y="241">SAP</text><text x="555" y="241">SAP</text>
-    <text x="215" y="313">NATS</text><text x="555" y="313">NATS</text>
-    <text x="215" y="385">TLS over TCP</text><text x="555" y="385">TLS over TCP</text>
-  </g>
-  <g font-size="12" fill="#59636e" text-anchor="middle">
-    <text x="215" y="117">Claude Code session</text><text x="555" y="117">Claude Code session, mash plugin</text>
-    <text x="215" y="177">(nothing here)</text>
-    <text x="555" y="189" fill="#0550ae">inbox, address, signed mail, directory</text>
-    <text x="215" y="261">discovery, prompt, status, heartbeat</text><text x="555" y="261">discovery, prompt, status, heartbeat</text>
-    <text x="215" y="333">subjects, streams, accounts, creds</text><text x="555" y="333">subjects, streams, accounts, creds</text>
-    <text x="215" y="405">an encrypted connection</text><text x="555" y="405">an encrypted connection</text>
-  </g>
-  <g font-size="12" fill="#1f2328">
-    <text x="706" y="92" font-weight="600">Agent</text>
-    <text x="706" y="109" fill="#59636e">the program doing work</text>
-    <text x="706" y="164" font-weight="600" fill="#0550ae">Mail</text>
-    <text x="706" y="181" fill="#59636e">durable, per agent</text>
-    <text x="706" y="236" font-weight="600">Agent protocol</text>
-    <text x="706" y="253" fill="#59636e">agents as services</text>
-    <text x="706" y="308" font-weight="600">Messaging</text>
-    <text x="706" y="325" fill="#59636e">server and storage</text>
-    <text x="706" y="380" font-weight="600">Transport</text>
-    <text x="706" y="397" fill="#59636e">the wire</text>
-  </g>
-  <text x="430" y="452" font-size="12" fill="#59636e" text-anchor="middle">Each layer keeps its own words. mash adds one layer and changes none below it.</text>
+<svg xmlns="http://www.w3.org/2000/svg" class="mash" viewBox="0 0 860 470" width="860" height="470" role="img" aria-label="Two stacks side by side. An agent on plain SAP has four layers: agent host, SAP, NATS, TLS over TCP. An agent on mash has the same four with a mail layer, mash, added between the agent host and SAP.">
+<style>
+.mash{--bg:#ffffff;--panel:#f6f8fa;--ink:#1f2328;--muted:#59636e;--line:#d1d9e0;--strong:#8c959f;--teal:#0b7a78;--tealsoft:#e1f3f2;--blue:#2860d8;--bluesoft:#e7eefc;--violet:#6b46db;--violetsoft:#eee9fc;--amber:#965800;--ambersoft:#fcf1dc;--green:#176f3d;--greensoft:#e1f3e7;--red:#c42f3b;--redsoft:#fbe6e8;--gray:#636c76;--graysoft:#eef1f4;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif}
+@media (prefers-color-scheme:dark){.mash{--bg:#0d1117;--panel:#161b22;--ink:#e6edf3;--muted:#9da7b3;--line:#30363d;--strong:#6e7681;--teal:#3cc2bf;--tealsoft:#0e2b2c;--blue:#79a6ff;--bluesoft:#132340;--violet:#a98fff;--violetsoft:#221a42;--amber:#f2b552;--ambersoft:#2e220b;--green:#56d38a;--greensoft:#0f2a1b;--red:#ff7b84;--redsoft:#3a161a;--gray:#9da7b3;--graysoft:#21262d}}
+.mash .bg{fill:var(--bg)}
+.mash text{fill:var(--ink)}
+.mash .t-title{font-size:18px;font-weight:650}
+.mash .t-sub{font-size:13px;fill:var(--muted)}
+.mash .t-h{font-size:13px;font-weight:600}
+.mash .t-b{font-size:13px}
+.mash .t-s{font-size:12px;fill:var(--muted)}
+.mash .t-i{font-size:12px}
+.mash .t-cap{font-size:12px;fill:var(--muted)}
+.mash .mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;font-size:12px}
+.mash .w6{font-weight:600}
+.mash .mid{text-anchor:middle}
+.mash .end{text-anchor:end}
+.mash .x-teal{fill:var(--teal)} .mash .x-blue{fill:var(--blue)} .mash .x-violet{fill:var(--violet)}
+.mash .x-amber{fill:var(--amber)} .mash .x-green{fill:var(--green)} .mash .x-red{fill:var(--red)}
+.mash .x-gray{fill:var(--gray)} .mash .x-muted{fill:var(--muted)}
+.mash .card{fill:var(--panel);stroke:var(--line);stroke-width:1}
+.mash .plain{fill:var(--bg);stroke:var(--line);stroke-width:1}
+.mash .rule{stroke:var(--line);stroke-width:1;fill:none}
+.mash .bound{fill:none;stroke:var(--strong);stroke-width:1;stroke-dasharray:4 4}
+.mash .domain{fill:none;stroke:var(--strong);stroke-width:1.25}
+.mash .f-teal{fill:var(--tealsoft);stroke:var(--teal);stroke-width:1.25}
+.mash .f-blue{fill:var(--bluesoft);stroke:var(--blue);stroke-width:1.25}
+.mash .f-violet{fill:var(--violetsoft);stroke:var(--violet);stroke-width:1.25}
+.mash .f-amber{fill:var(--ambersoft);stroke:none}
+.mash .f-violet-n{fill:var(--violetsoft);stroke:none}
+.mash .f-green{fill:var(--greensoft);stroke:var(--green);stroke-width:1.25}
+.mash .f-red{fill:var(--redsoft);stroke:var(--red);stroke-width:1.25}
+.mash .f-gray{fill:var(--graysoft);stroke:var(--line);stroke-width:1}
+.mash .f-unsigned{fill:none;stroke:var(--strong);stroke-width:1;stroke-dasharray:4 3}
+.mash .solid-teal{fill:var(--teal)} .mash .solid-violet{fill:var(--violet)} .mash .solid-green{fill:var(--green)}
+.mash .solid-ink{fill:var(--ink)} .mash .solid-amber{fill:var(--amber)} .mash .solid-gray{fill:var(--gray)}
+.mash .solid-red{fill:var(--red)} .mash .solid-blue{fill:var(--blue)}
+.mash .a{fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.mash .a-teal{stroke:var(--teal)} .mash .a-violet{stroke:var(--violet)} .mash .a-amber{stroke:var(--amber)}
+.mash .a-gray{stroke:var(--gray)} .mash .a-ink{stroke:var(--ink)} .mash .a-green{stroke:var(--green)}
+.mash .a-muted{stroke:var(--strong)}
+.mash .dash{stroke-dasharray:7 5}
+.mash .dots{stroke-dasharray:0.5 5;stroke-width:2}
+.mash .thin{stroke-width:1}
+.mash .f-blue-strong{fill:var(--bluesoft);stroke:var(--blue);stroke-width:2}
+.mash .t-lab{font-size:12px}
+</style>
+<rect x="0" y="0" width="860" height="470" class="bg"/>
+<g font-size="15" class="w6 mid"><text x="215" y="34">An agent on plain SAP</text><text x="555" y="34">An agent on mash</text></g>
+<g class="t-s mid"><text x="215" y="52">live only: both sides must be online</text><text x="555" y="52">mail waits until it is read</text></g>
+<rect x="80" y="70" width="270" height="62" class="card"/><rect x="80" y="214" width="270" height="62" class="card"/><rect x="80" y="286" width="270" height="62" class="card"/><rect x="80" y="358" width="270" height="62" class="card"/><rect x="420" y="70" width="270" height="62" class="card"/><rect x="420" y="214" width="270" height="62" class="card"/><rect x="420" y="286" width="270" height="62" class="card"/><rect x="420" y="358" width="270" height="62" class="card"/>
+<rect x="420" y="142" width="270" height="62" class="f-blue-strong"/>
+<rect x="80" y="142" width="270" height="62" class="bound"/>
+<g font-size="15" class="w6 mid">
+<text x="215" y="97" class="">Agent host</text><text x="555" y="97" class="">Agent host</text>
+<text x="555" y="169" class="x-blue">mash</text>
+<text x="215" y="241" class="">SAP</text><text x="555" y="241" class="">SAP</text>
+<text x="215" y="313" class="">NATS</text><text x="555" y="313" class="">NATS</text>
+<text x="215" y="385" class="">TLS over TCP</text><text x="555" y="385" class="">TLS over TCP</text>
+</g>
+<g class="t-s mid">
+<text x="215" y="117">Claude Code session</text><text x="555" y="117">Claude Code session, mash plugin</text>
+<text x="215" y="177">(nothing here)</text>
+<text x="555" y="189" class="x-blue">inbox, address, signed mail, directory</text>
+<text x="215" y="261" class="">discovery, prompt, status, heartbeat</text><text x="555" y="261" class="">discovery, prompt, status, heartbeat</text>
+<text x="215" y="333" class="">subjects, streams, accounts, creds</text><text x="555" y="333" class="">subjects, streams, accounts, creds</text>
+<text x="215" y="405" class="">an encrypted connection</text><text x="555" y="405" class="">an encrypted connection</text>
+</g>
+<g class="t-lab">
+<text x="706" y="92" class="w6">Agent</text><text x="706" y="109" class="x-muted">the program doing work</text>
+<text x="706" y="164" class="w6 x-blue">Mail</text><text x="706" y="181" class="x-muted">durable, per agent</text>
+<text x="706" y="236" class="w6">Agent protocol</text><text x="706" y="253" class="x-muted">agents as services</text>
+<text x="706" y="308" class="w6">Messaging</text><text x="706" y="325" class="x-muted">server and storage</text>
+<text x="706" y="380" class="w6">Transport</text><text x="706" y="397" class="x-muted">the wire</text>
+</g>
+<text x="430" y="452" class="t-cap mid">Each layer keeps its own words. mash adds one layer and changes none below it.</text>
 </svg>
