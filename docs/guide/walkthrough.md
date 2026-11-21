@@ -14,7 +14,7 @@ this section explain each one and show its output.
 
 Everything is installed as you, in your home folder. Nothing here needs
 `sudo`, a system service or a package manager. You need Linux or macOS, Claude
-Code, and `curl`, `tar`, `unzip` and `openssl`.
+Code, and `curl`, `tar` and `openssl`.
 
 ### The way to do it: let an agent set it up
 
@@ -35,7 +35,7 @@ Then tell the session: "set mash up on this machine"
    the downloads land in the folder you are in. First `nats-server` and the
    `nats` command, each from its GitHub release, checked against that
    release's checksums and put in `~/.local/bin` (`nats-server` 2.10.7 or
-   newer; `unzip` is needed for the `nats` command):
+   newer; the `nats` zip is opened with `unzip`, or with `python3` if there is no `unzip`):
 
    ```sh
    install -d -m 755 ~/.local ~/.local/bin
@@ -47,7 +47,8 @@ Then tell the session: "set mash up on this machine"
    N=0.5.2; B=https://github.com/nats-io/natscli/releases/download/v$N
    curl -fsSLO $B/nats-$N-$OS-$ARCH.zip -O $B/SHA256SUMS
    grep " nats-$N-$OS-$ARCH.zip\$" SHA256SUMS | sha256sum -c -                # macOS: shasum -a 256 -c -
-   unzip -j -o nats-$N-$OS-$ARCH.zip '*/nats' -d ~/.local/bin
+   if command -v unzip >/dev/null; then unzip -j -o nats-$N-$OS-$ARCH.zip '*/nats' -d ~/.local/bin
+   else python3 -m zipfile -e nats-$N-$OS-$ARCH.zip natsx && install -m 755 natsx/*/nats ~/.local/bin/nats; fi
    ```
 
    (The second `SHA256SUMS` replaces the first, after the first has been
@@ -189,7 +190,7 @@ Agent Protocol (SAP) is in [mash-vs-sap.md](mash-vs-sap.md).
 What this does: lists what must be on the machine before step 1.
 
 - A machine with Linux or macOS and Claude Code installed.
-- `curl`, `tar`, `unzip`, `openssl`, `jq` (step 8 only; it reads JSON and
+- `curl`, `tar`, `openssl`, `jq` (step 8 only; it reads JSON and
   picks out a field), `nats-server` 2.10.7 or newer and the `nats`
   command (the Quick start downloads both into `~/.local/bin`, checked; no
   `sudo` or package manager). On Debian or Ubuntu a minimal image also needs
