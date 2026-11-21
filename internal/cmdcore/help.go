@@ -188,3 +188,44 @@ func ParentHelp(fr Frame, description string, usages []string) string {
 	}
 	return strings.Join(sections, "\n\n") + "\n"
 }
+
+// StaticCommand is a command that is not on the table (its parameters are not a struct) but whose --help is the same
+// layout: the texts are the specification's. Arguments and Options are (label, description) rows, the label as printed
+// ("address", "--wake-count <n>").
+type StaticCommand struct {
+	Name        string
+	Description string
+	Usage       string // the synopsis, "mash serve [options]"
+	Examples    []string
+	Arguments   [][2]string
+	Options     [][2]string
+}
+
+// StaticHelp is the --help of c in the layout of helpText: description, Usage, Examples, Arguments, Options and Global
+// options, each after a blank line, no line wider than 80 columns.
+func StaticHelp(fr Frame, c StaticCommand) string {
+	sections := []string{strings.Join(wrap(c.Description, helpWidth), "\n"), "Usage:\n  " + c.Usage}
+	if len(c.Examples) > 0 {
+		sections = append(sections, "Examples:\n  "+strings.Join(c.Examples, "\n  "))
+	}
+	if len(c.Arguments) > 0 {
+		sections = append(sections, "Arguments:\n"+table(c.Arguments))
+	}
+	if len(c.Options) > 0 {
+		sections = append(sections, "Options:\n"+table(c.Options))
+	}
+	sections = append(sections, GlobalOptions(fr))
+	return strings.Join(sections, "\n\n") + "\n"
+}
+
+// GlobalOptions is the "Global options:" section of fr: the heading and the table (no trailing newline), "" when fr has none.
+func GlobalOptions(fr Frame) string {
+	var rows [][2]string
+	for _, g := range fr.Globals {
+		rows = append(rows, [2]string{optionLabel(g.Short, g.Flag, g.Value), g.Desc})
+	}
+	if len(rows) == 0 {
+		return ""
+	}
+	return "Global options:\n" + table(rows)
+}

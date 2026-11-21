@@ -25,16 +25,15 @@ import (
 )
 
 // helpIntro is the first line of the tool's own help, `mash --help` and `mash help`.
-const helpIntro = "mash: a messaging mesh for agents (SAP 0.3 + mail, on NATS JetStream)"
+const helpIntro = "Trusted mail between agents. Speaks as one endpoint."
 
 // helpTail is what follows the commands: how an endpoint is addressed, the global options and the configuration.
 const helpTail = `An endpoint is addressed owner.group.name: MASH_ENDPOINT (or config.json
 "endpoint", or --endpoint). With none set, the one endpoint whose creds file
 (owner.group.name.creds, mode 0600) is in the config directory is used; with
 several, name one.
-Global options, anywhere in the command: --endpoint ADDR, --creds PATH, --server
-URL (repeatable), --ca PATH, --config-dir PATH, --detail, --json, --no-color. A
-flag beats its environment variable, which beats config.json.
+A global option may stand anywhere in the command. A flag beats its environment
+variable, which beats config.json.
 Configuration: config.json {"servers","endpoint","ca"} in $MASH_CONFIG_DIR
 (default ~/.config/mash, or $XDG_CONFIG_HOME/mash), overridden by MASH_SERVER
 (commas between several), MASH_ENDPOINT, MASH_CA, MASH_CREDS, MASH_ADMIN_CREDS,
@@ -63,12 +62,41 @@ var helpLayout = map[string][]string{
 	"Raw SAP":     {"prompt"},
 }
 
+// handHelp is the commands that are not on the command table yet; their texts are the specification's. Their
+// --help is printed in the generated layout by cmdcore.StaticHelp.
+var handHelp = map[string]cmdcore.StaticCommand{
+	"serve": {
+		Name:        "serve",
+		Description: "Run as an MCP server for an agent host. Started by the host, not by hand.",
+		Usage:       "mash serve [options]",
+		Examples:    []string{"mash serve"},
+		Options: [][2]string{
+			{"--wake-count <n>", "Wake the session when more than this many messages are waiting. Default 15; 0 turns it off."},
+			{"--wake-age <duration>", "Wake the session when the oldest waiting message is older than this. Default 1h; 0 turns it off."},
+			{"--accept-unverified", "Deliver mail that is not verified, with its trust label. Default: off; such mail is refused."},
+		},
+	},
+	"hook": {
+		Name:        "hook",
+		Description: "Print mail waiting for this session, in the form the agent host expects. Run by the host after each tool call and with each prompt.",
+		Usage:       "mash hook",
+		Examples:    []string{"mash hook"},
+	},
+	"prompt": {
+		Name:        "prompt",
+		Description: "Ask an endpoint a live question and wait for its answer. Not stored: if the recipient is not there, it fails.",
+		Usage:       "mash prompt <address> <text>",
+		Examples:    []string{`mash prompt acme.demo.alice "are you there?"`},
+		Arguments:   [][2]string{{"address", "Who to ask."}, {"text", "The question."}},
+	},
+}
+
 // handCommands are the synopsis and one-line description of the commands that are not on the command table yet.
 var handCommands = map[string][2]string{
 	"key":    {"mash key create [options]", cmds.KeyParent},
-	"serve":  {"mash serve", "The Claude Code channel server (started by the plugin)"},
-	"hook":   {"mash hook", "The plugin's hook: shows the session its spooled mail"},
-	"prompt": {"mash prompt <to> <text...>", "A live, signed SAP prompt; prints the reply"},
+	"serve":  {handHelp["serve"].Usage, handHelp["serve"].Description},
+	"hook":   {handHelp["hook"].Usage, handHelp["hook"].Description},
+	"prompt": {handHelp["prompt"].Usage, handHelp["prompt"].Description},
 }
 
 // usageFor is the tool's own help for the table r: the commands listed by group, each with its one-line description.
@@ -93,7 +121,7 @@ func usageFor(r *cmdcore.Registry) string {
 			}
 		}
 	}
-	return b.String() + "\n" + helpTail
+	return b.String() + "\n" + cmdcore.GlobalOptions(helpFrame) + "\n\n" + helpTail
 }
 
 // usage is the help of the command table.
@@ -154,11 +182,6 @@ func versionLine(version, ldflags string, bi *debug.BuildInfo) string {
 // "+dirty" for a modified tree), else "".
 func buildRevision(ldflags string, bi *debug.BuildInfo) string {
 	return endpoint.BuildRevision(ldflags, bi)
-}
-
-// verbUsage is the usage line of each endpoint verb that is not on the command table, printed for `mash VERB --help`.
-var verbUsage = map[string]string{
-	"prompt": "usage: mash prompt <to> <text...>",
 }
 
 // helpTopic is the verbs that are not on the table and have help of their own: `mash help VERB` prints their
@@ -248,6 +271,13 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 			args = []string{args[1], "--help"}
 		}
 	}
+	// A help option before the command is the same as after it: `mash -h version` is `mash version --help`.
+	if (args[0] == "-h" || args[0] == "--help") && len(args) > 1 {
+		_, hand := handHelp[args[1]]
+		if _, topic := helpTopic[args[1]]; hand || topic || commandVerb(args[1]) { // the help option goes right after the command, before any "--"
+			args = append([]string{args[1], "--help"}, args[2:]...)
+		}
+	}
 	if u, ok := newCommands(nil).HelpFor(args[0], args[1:]); ok { // the generated help of the commands on the table
 		fmt.Fprint(stdout, u)
 		return 0
@@ -263,12 +293,6 @@ func runLookup(ctx context.Context, args []string, env func(string) string, look
 	if global.JSON && noJSONForm[args[0]] { // nothing is attempted
 		// With --json every error is {"error","hint"} on stdout and nothing on stderr (rules.json).
 		return cliframe.Report(stdout, stderr, cliframe.Usagef("mash %s has no --json form", args[0]).WithHint("mash "+args[0]+" --help"), true)
-	}
-	if u, ok := verbUsage[args[0]]; ok && len(args) > 1 {
-		if args[1] == "--help" || args[1] == "-h" { // the verb's usage line, and the verb does not run
-			fmt.Fprintln(stdout, u)
-			return 0
-		}
 	}
 	if args[0] == "serve" && stdinIsTerminal(stdin) { // run by hand: nothing is attempted, no config, no connection
 		return cliframe.Report(stdout, stderr, cliframe.Usagef("mash serve is started by an agent host, not by hand").WithHint("mash serve --help"), global.JSON)

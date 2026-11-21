@@ -10,7 +10,7 @@ import (
 // The tool's own help lists the commands by group, in the order Everyday, Setup, Integration, Raw SAP, each with its
 // one-line description, in no more than 80 columns. The commands on the command table are generated from it.
 func TestTopLevelHelpGolden(t *testing.T) {
-	const want = `mash: a messaging mesh for agents (SAP 0.3 + mail, on NATS JetStream)
+	const want = `Trusted mail between agents. Speaks as one endpoint.
 
 Everyday:
   mash send <address> [<message>] [options]    Send a message to an endpoint.
@@ -36,15 +36,22 @@ Setup:
                                                machine.
 
 Integration:
-  mash serve                                   The Claude Code channel server
-                                               (started by the plugin)
-  mash hook                                    The plugin's hook: shows the
-                                               session its spooled mail
+  mash serve [options]                         Run as an MCP server for an agent
+                                               host. Started by the host, not by
+                                               hand.
+  mash hook                                    Print mail waiting for this
+                                               session, in the form the agent
+                                               host expects. Run by the host
+                                               after each tool call and with
+                                               each prompt.
 
 Raw SAP:
-  mash prompt <to> <text...>                   A live, signed SAP prompt; prints
-                                               the reply
+  mash prompt <address> <text>                 Ask an endpoint a live question
+                                               and wait for its answer. Not
+                                               stored: if the recipient is not
+                                               there, it fails.
 
+Global options:
 `
 	for _, args := range [][]string{{"--help"}, {"help"}, {"-h"}} {
 		var out, errb bytes.Buffer

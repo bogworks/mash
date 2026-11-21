@@ -135,8 +135,17 @@ func TestPromptTextWithHelpWordsIsNotHelp(t *testing.T) {
 	}
 	for _, h := range []string{"--help", "-h"} {
 		out, code := w.cli(t, "x", "prompt", h)
-		if code != 0 || !strings.HasPrefix(out, "usage: mash prompt") {
+		if code != 0 || !strings.HasPrefix(out, "Ask an endpoint a live question") {
 			t.Errorf("prompt %s: %d %q", h, code, out)
 		}
+	}
+}
+
+// A help option before the command is moved to just after it, so a "--" later in the line cannot hide it.
+func TestHelpBeforeCommandWithTerminator(t *testing.T) {
+	want := runMash(nil, "version", "--help")
+	got := runMash(nil, "-h", "version", "--")
+	if got.code != 0 || got.out != want.out {
+		t.Fatalf("mash -h version --: exit %d, %q; want what mash version --help prints (%q)", got.code, got.out, want.out)
 	}
 }
