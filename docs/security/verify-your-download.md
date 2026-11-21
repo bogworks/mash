@@ -4,7 +4,7 @@ This page shows how to check that a mash release is the one this repository buil
 
 Release tags are annotated but not signed, so there is no tag signature to check. You check the files instead. Each step proves something different.
 
-You need `curl`, `sha256sum` (on macOS, `shasum -a 256`) and the [GitHub CLI](https://cli.github.com/) (`gh`). `gh attestation verify` needs a `gh` recent enough to have it, and a network connection to GitHub.
+You need `curl`, `sha256sum` (on macOS, `shasum -a 256`) and the [GitHub CLI](https://cli.github.com/) (`gh`). `gh attestation verify` needs a `gh` recent enough to have it, and a network connection to GitHub. With the bundle from step 1 it needs no GitHub login.
 
 ## 1. Download
 
@@ -71,7 +71,7 @@ They print `mash v0.5.6 (X)` and `mashctl v0.5.6 (X)`, where X is the first 7 ch
 
 ## Optional: the SBOM
 
-Each binary has a CycloneDX SBOM, for example `mash-linux-amd64.cdx.json`. It lists the Go modules recorded in the binary. It says nothing about vulnerabilities by itself.
+Each binary has a CycloneDX SBOM, for example `mash-linux-amd64.cdx.json`. It lists the Go modules recorded in the binary. It says nothing about vulnerabilities by itself. The SBOM's own attestation is not in `mash.intoto.jsonl`: `gh` fetches it from GitHub, so this step needs `gh auth login` first. The SBOM file itself is listed in `SHA256SUMS`, so step 2's check works for it without a login.
 
 ```sh
 curl -fsSLO $BASE/mash-$OS-$ARCH.cdx.json
