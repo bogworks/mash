@@ -18,7 +18,7 @@ Every connection requires TLS, to any host, loopback included: every verb that c
 
 ## Which server does mashctl change?
 
-`mashctl` takes its server, owner and admin credentials from `config.json`; the endpoint's own `MASH_*` variables win over the file, and the global flags `--server`, `--ca`, `--creds` and `--endpoint` win over both. Its owner is the owner part of an explicit endpoint (`--endpoint`, `MASH_ENDPOINT` or `endpoint` in `config.json`; any group and name will do), else the `owner` key of `config.json`, which `init` writes. It never comes from an installed endpoint's creds file, so installed endpoints do not change who `mashctl` acts as. Inside a mash agent session those variables are the session's, so `mashctl` would act on the session's own server. Before any verb that connects to a server, mashctl prints no line saying which server it will act on (it did so with `--verbose` in 0.5.5; no option prints it now), so check the target yourself; it warns, on stderr, when an environment variable overrides a different `config.json` value or when `MASH_LAUNCH_TOKEN` shows the shell is inside a session. It informs and never refuses; `init`, `status` and the offline verbs print no warning. To choose the target explicitly, pass `--server`, `--creds` and `--endpoint`, or use `env -u MASH_SERVER -u MASH_ENDPOINT -u MASH_ADMIN_CREDS -u MASH_CA mashctl ...`, or run outside the session. See [operations](operations.md#which-server-does-mashctl-change).
+`mashctl` takes its server, owner and admin credentials from `config.json`; the endpoint's own `MASH_*` variables win over the file, and the global flags `--server`, `--ca`, `--creds` and `--endpoint` win over both. Its owner is the owner part of an explicit endpoint (`--endpoint`, `MASH_ENDPOINT` or `endpoint` in `config.json`; any group and name will do), else the `owner` key of `config.json`, which `init` writes. It never comes from an installed endpoint's creds file, so installed endpoints do not change who `mashctl` acts as. Inside a mash agent session those variables are the session's, so `mashctl` would act on the session's own server. Before any verb that connects to a server, mashctl prints no line saying which server it will act on, so check the target yourself; it warns, on stderr, when an environment variable overrides a different `config.json` value or when `MASH_LAUNCH_TOKEN` shows the shell is inside a session. It informs and never refuses; `init`, `status` and the offline verbs print no warning. To choose the target explicitly, pass `--server`, `--creds` and `--endpoint`, or use `env -u MASH_SERVER -u MASH_ENDPOINT -u MASH_ADMIN_CREDS -u MASH_CA mashctl ...`, or run outside the session. See [operations](operations.md#which-server-does-mashctl-change).
 
 ## Setting up: `mashctl init`
 
@@ -301,7 +301,7 @@ Every failure is `error: WHAT` on standard error and at most one `hint: COMMAND`
 
 The commands and options 0.5.6 removed, and what replaces each, are in the table in the [0.5.6 changelog](../CHANGELOG.md#what-changed-old-to-new) and in the [generated reference](reference/mashctl.md).
 
-Endpoints and mail made by 0.5.0 are not read by 0.5.6, and 0.5.5 and 0.5.6 do not convert them: if you are still on 0.5.0, start a fresh deployment (see [If you used 0.5.0](../CHANGELOG.md#upgrading)).
+Endpoints and mail made by 0.5.0 are not read by 0.5.6 and are not converted: if you are still on 0.5.0, start a fresh deployment (see [If you used 0.5.0](../CHANGELOG.md#upgrading)).
 
 ## Revocation
 
