@@ -42,8 +42,8 @@ Every file of a release is covered by `SHA256SUMS`. `SHA256SUMS`, the binaries a
 What `install.sh` does on its own:
 
 - It always checks each binary against `SHA256SUMS`. Both come from the same download, so on their own they show the files are intact, not who made them.
-- With a current `gh` (the [GitHub CLI](https://cli.github.com/), new enough to have `gh attestation verify`) it also verifies `SHA256SUMS` against the attestation before it installs anything: signed by the workflow `bogworks/mash/.github/workflows/release.yml`, from the source ref `refs/tags/vX.Y.Z` of the release being installed. If that fails it installs nothing and says so.
-- With no `gh`, or one too old to have `gh attestation verify`, it says so in one line: the checksums come from the same download, so it trusts only github.com's TLS, and it goes on. The check below is the manual way to do the same, and you can run it before you run the script.
+- With `gh` 2.102.0 or newer (the [GitHub CLI](https://cli.github.com/)) it also verifies `SHA256SUMS` against the attestation before it installs anything, and prints a line when it does: signed by the workflow `bogworks/mash/.github/workflows/release.yml`, from the source ref `refs/tags/vX.Y.Z` of the release being installed. If that fails it installs nothing and says so. [Why 2.102.0](security/verify-your-download.md#what-you-need).
+- With no `gh`, a `gh` that does not run, or one older than 2.102.0, it says so in one line: the checksums come from the same download, so it trusts only github.com's TLS. Then it installs on the checksums. (This is from 0.5.8. The `install.sh` of 0.5.7 and earlier uses any `gh` that has `gh attestation verify`, and with gh 2.48 to 2.67 it stops and installs nothing.) The check below is the manual way to do the same, and you can run it before you run the script.
 
 To check the script and the attestation yourself, with a current `gh`:
 
@@ -58,7 +58,7 @@ less install.sh && bash install.sh
 
 When the attestation check passes, `gh attestation verify` can print nothing and exits 0; on a failure it prints an error and exits 1, and the `&&` stops everything after it.
 
-If `gh` is missing or too old, skip the `gh attestation verify` lines: the `grep` line still shows the script is the release's own file, and the TLS caveat above applies. Any failure of a check: stop and run nothing.
+If `gh` is missing or older than 2.102.0, skip the `gh attestation verify` lines: the `grep` line still shows the script is the release's own file, and the TLS caveat above applies. Any failure of a check: stop and run nothing.
 
 An agent does not pipe a download into a shell: the setup skill downloads each script, checks it against `SHA256SUMS`, shows you what it is about to run and runs it after a yes. Both scripts are also the repository's own `scripts/` files at the release commit, byte for byte; the release check compares them ([ADR 0150](decisions/0150-releases-carry-install-and-local-nats-setup-scripts-as-attested-assets.md)).
 
