@@ -32,7 +32,12 @@ The requirements apply to mash 0.5.6. They are what mash checks or creates; wher
 
 ## Getting nats-server and the nats command
 
-Install both as your own user, from their GitHub releases, into `~/.local/bin`. You need no `sudo`. You need `curl`, `sha256sum` (on macOS, `shasum -a 256`) and `tar`. The commands below use nats-server 2.15.1 and natscli 0.5.2, the versions we tested, on Linux amd64.
+You need two programs, on the `PATH` of the user who runs mash and its setup script:
+
+- **`nats-server` 2.10.7 or newer.** Tested with 2.15.1.
+- **`nats`** (natscli). Tested with 0.5.2. The setup script needs it; mash itself does not.
+
+Any way of getting them works. Here is one way, with no `sudo`: download each release from GitHub, check it against the release's `SHA256SUMS`, and put it in `~/.local/bin`. You need `curl`, `sha256sum` (on macOS, `shasum -a 256`) and `tar`. The commands below are for Linux amd64.
 
 First make the folder:
 
@@ -46,23 +51,23 @@ install -d -m 755 ~/.local/bin
 V=2.15.1 OS=linux ARCH=amd64
 curl -fsSLO https://github.com/nats-io/nats-server/releases/download/v$V/nats-server-v$V-$OS-$ARCH.tar.gz
 curl -fsSL -o nats-server-SHA256SUMS https://github.com/nats-io/nats-server/releases/download/v$V/SHA256SUMS
-grep " nats-server-v$V-$OS-$ARCH.tar.gz\$" nats-server-SHA256SUMS | sha256sum -c -
-tar -xzf nats-server-v$V-$OS-$ARCH.tar.gz
-install -m 0755 nats-server-v$V-$OS-$ARCH/nats-server ~/.local/bin/nats-server
+grep " nats-server-v$V-$OS-$ARCH.tar.gz\$" nats-server-SHA256SUMS | sha256sum -c - &&
+  tar -xzf nats-server-v$V-$OS-$ARCH.tar.gz &&
+  install -m 0755 nats-server-v$V-$OS-$ARCH/nats-server ~/.local/bin/nats-server
 ```
 
-**The `nats` command** (natscli). The setup script needs it; mash itself does not. natscli ships as a zip file. If you have `unzip`, use `unzip -q` in place of the `python3` line.
+**nats:** natscli ships as a zip file. If you have `unzip`, use `unzip -q nats-$V-$OS-$ARCH.zip` in place of the `python3` line.
 
 ```sh
 V=0.5.2 OS=linux ARCH=amd64
 curl -fsSLO https://github.com/nats-io/natscli/releases/download/v$V/nats-$V-$OS-$ARCH.zip
 curl -fsSL -o nats-SHA256SUMS https://github.com/nats-io/natscli/releases/download/v$V/SHA256SUMS
-grep " nats-$V-$OS-$ARCH.zip\$" nats-SHA256SUMS | sha256sum -c -
-python3 -m zipfile -e nats-$V-$OS-$ARCH.zip .
-install -m 0755 nats-$V-$OS-$ARCH/nats ~/.local/bin/nats
+grep " nats-$V-$OS-$ARCH.zip\$" nats-SHA256SUMS | sha256sum -c - &&
+  python3 -m zipfile -e nats-$V-$OS-$ARCH.zip . &&
+  install -m 0755 nats-$V-$OS-$ARCH/nats ~/.local/bin/nats
 ```
 
-Each checksum line must end in `OK`. If one doesn't, stop and don't install that file. Then make sure `~/.local/bin` is on your `PATH`, and check:
+The checksum line must print `OK`. The `&&` after it means nothing is unpacked or installed when the check fails. Then make sure `~/.local/bin` is on your `PATH`, and check:
 
 ```sh
 export PATH="$HOME/.local/bin:$PATH"
@@ -72,12 +77,12 @@ nats --version
 
 They print `nats-server: v2.15.1` and `0.5.2`. Both projects publish the same files for `ARCH=arm64` and for `OS=darwin`. We tested only `linux` and `amd64`.
 
-### If you already have a packaged server
+### If you used a system package
 
-Don't install nats-server from your system's packages for mash. If one is already installed (for example by `apt install nats-server` on Debian or Ubuntu), know two things about it:
+Check where the package put the program and whether it started a service. For example, Debian's and Ubuntu's `nats-server` package (2.10.27 on Debian 13):
 
-- **As shipped, it runs a server with no authentication.** The package starts its own nats-server as a system service (`nats-server.service`, from `/etc/nats-server.conf`). It starts at boot and, with the package's own `/etc/nats-server.conf`, listens on `127.0.0.1:4222` with no authentication, so any process on the machine can use it. mash cannot use a server like that. If that file is still the package's, stop the service and keep it from starting again (this needs an administrator): `sudo systemctl disable --now nats-server`. If someone has changed it to serve mash, leave it running; this page's requirements apply to it.
-- **Its binary is in `/usr/sbin`.** That is `/usr/sbin/nats-server`, which is not on a normal user's `PATH`. The setup script looks for `nats-server` on `PATH` only, so it reports nats-server as missing. Install your own copy into `~/.local/bin` as above. The setup script picks a free port if 4222 is taken.
+- puts the binary at `/usr/sbin/nats-server`, which is not on a normal user's `PATH`, so the setup script reports nats-server as missing;
+- starts a system service, `nats-server.service`, at boot. With the package's own `/etc/nats-server.conf` it listens on `127.0.0.1:4222` with no authentication, so any process on the machine can use it, and mash cannot use a server like that. The setup script then takes the next free port. If nothing needs that service, an administrator can stop it and keep it from starting again with `sudo systemctl disable --now nats-server`.
 
 ## TLS
 
