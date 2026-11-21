@@ -118,11 +118,29 @@ func runInstall(t *testing.T, release, toolPath string, env ...string) installRu
 	return runInstallIn(t, release, toolPath, home, dest, "install.sh", env...)
 }
 
+// patchedInstall writes a test-only copy of install.sh that accepts a file:// base, made by install-testcopy.sh,
+// into a fresh temp dir and returns its path.
+func patchedInstall(t *testing.T) string {
+	t.Helper()
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("no bash")
+	}
+	dst := filepath.Join(t.TempDir(), "install.sh")
+	if out, err := exec.Command(bash, "install-testcopy.sh", "install.sh", dst).CombinedOutput(); err != nil {
+		t.Fatalf("install-testcopy.sh: %v\n%s", err, out)
+	}
+	return dst
+}
+
 func runInstallIn(t *testing.T, release, toolPath, home, dest, script string, env ...string) installRun {
 	t.Helper()
 	bash, err := exec.LookPath("bash")
 	if err != nil {
 		t.Skip("no bash")
+	}
+	if script == "install.sh" { // the tests run a patched copy; the shipped script is https-only
+		script = patchedInstall(t)
 	}
 	cmd := exec.Command(bash, script) // go test runs in this directory
 	cmd.Env = append([]string{
@@ -132,7 +150,6 @@ func runInstallIn(t *testing.T, release, toolPath, home, dest, script string, en
 		"MASH_RELEASE_BASE=file://" + release,
 		"MASH_INSTALL_DIR=" + dest,
 		"MASH_VERSION=v0.5.6",
-		"MASH_INSTALL_ALLOW_FILE=1",
 	}, env...)
 	out, err := cmd.CombinedOutput()
 	return installRun{out: string(out), err: err, home: home, dest: dest}
@@ -358,7 +375,7 @@ func TestInstallSh_refusesAnUnsafeFolder(t *testing.T) {
 func TestInstallSh_aTruncatedScriptInstallsNothing(t *testing.T) {
 	rel, _, _ := fakeRelease(t)
 	tools := installTools(t, nil)
-	src, err := os.ReadFile("install.sh")
+	src, err := os.ReadFile(patchedInstall(t)) // the patched copy, so the file:// base is accepted
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -374,7 +391,7 @@ func TestInstallSh_aTruncatedScriptInstallsNothing(t *testing.T) {
 		dest := filepath.Join(home, "bin")
 		cmd := exec.Command(bash)
 		cmd.Stdin = strings.NewReader(strings.Join(lines[:cut], "\n"))
-		cmd.Env = []string{"PATH=" + tools, "HOME=" + home, "MASH_RELEASE_BASE=file://" + rel, "MASH_INSTALL_DIR=" + dest, "MASH_VERSION=v0.5.6", "MASH_INSTALL_ALLOW_FILE=1"}
+		cmd.Env = []string{"PATH=" + tools, "HOME=" + home, "MASH_RELEASE_BASE=file://" + rel, "MASH_INSTALL_DIR=" + dest, "MASH_VERSION=v0.5.6"}
 		out, _ := cmd.CombinedOutput()
 		if strings.Contains(string(out), "Installed") {
 			t.Errorf("a script cut at line %d installed something:\n%s", cut, out)
@@ -459,7 +476,7 @@ func TestInstallSh_latestIsResolvedToATagFirst(t *testing.T) {
 	ghLog := filepath.Join(t.TempDir(), "gh.log")
 	curlLog := filepath.Join(t.TempDir(), "curl.log")
 	tools := installTools(t, map[string]string{"gh": ghStub, "curl": curlStub})
-	env := []string{"GH_LOG=" + ghLog, "CURL_LOG=" + curlLog, "FAKE_DIR=" + rel, "MASH_RELEASE_BASE=", "MASH_VERSION=", "MASH_INSTALL_ALLOW_FILE=",
+	env := []string{"GH_LOG=" + ghLog, "CURL_LOG=" + curlLog, "FAKE_DIR=" + rel, "MASH_RELEASE_BASE=", "MASH_VERSION=",
 		"RESOLVED=https://github.com/bogworks/mash/releases/tag/v0.5.6"}
 	r := runInstall(t, rel, tools, env...)
 	if r.err != nil {
@@ -581,13 +598,82 @@ func TestInstallSh_refusesANonHTTPSBase(t *testing.T) {
 	assertNothingInstalled(t, r.dest)
 }
 
-func TestInstallSh_refusesAFileBaseUnlessTestsAllowIt(t *testing.T) {
-	rel, _, _ := fakeRelease(t)
-	r := runInstall(t, rel, installTools(t, nil), "MASH_INSTALL_ALLOW_FILE=")
-	if r.err == nil || !strings.Contains(r.out, "https://") {
-		t.Errorf("want a refusal of file://, got err=%v\n%s", r.err, r.out)
+func TestInstallSh_refusesAFileBase(t *testing.T) {
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("no bash")
 	}
-	assertNothingInstalled(t, r.dest)
+	rel, _, _ := fakeRelease(t)
+	tools := installTools(t, nil)
+	for _, allow := range []string{"", "MASH_INSTALL_ALLOW_FILE=1"} {
+		home := tempHome(t)
+		dest := filepath.Join(home, "bin")
+		cmd := exec.Command(bash, "install.sh") // the shipped script, unpatched
+		cmd.Env = []string{"PATH=" + tools, "HOME=" + home, "TMPDIR=" + t.TempDir(), "MASH_RELEASE_BASE=file://" + rel,
+			"MASH_INSTALL_DIR=" + dest, "MASH_VERSION=v0.5.6"}
+		if allow != "" {
+			cmd.Env = append(cmd.Env, allow)
+		}
+		out, err := cmd.CombinedOutput()
+		if err == nil || !strings.Contains(string(out), "the release location must be an https:// address: file://") {
+			t.Errorf("allow=%q: want a refusal of file://, got err=%v\n%s", allow, err, out)
+		}
+		assertNothingInstalled(t, dest)
+	}
+}
+
+func TestInstallTestcopy_failsWithoutTheAnchor(t *testing.T) {
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("no bash")
+	}
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.sh")
+	writeFile(t, src, "#!/usr/bin/env bash\necho hi\n")
+	dst := filepath.Join(dir, "dst.sh")
+	out, err := exec.Command(bash, "install-testcopy.sh", src, dst).CombinedOutput()
+	if err == nil || !strings.Contains(string(out), "exactly once") {
+		t.Errorf("want a loud failure without the anchor, got err=%v\n%s", err, out)
+	}
+	if _, err := os.Stat(dst); err == nil {
+		t.Error("a copy was written despite the missing anchor")
+	}
+	// Twice is as wrong as none.
+	writeFile(t, src, "    https://*) ;;\n    https://*) ;;\n")
+	if out, err := exec.Command(bash, "install-testcopy.sh", src, dst).CombinedOutput(); err == nil {
+		t.Errorf("want a failure with the anchor twice, got success\n%s", out)
+	}
+}
+
+func TestInstallTestcopy_differsOnlyByThePatch(t *testing.T) {
+	dst := patchedInstall(t)
+	fi, err := os.Stat(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode().Perm() != 0o755 {
+		t.Errorf("the copy has mode %v, want 0755", fi.Mode().Perm())
+	}
+	a, _ := os.ReadFile("install.sh")
+	b, _ := os.ReadFile(dst)
+	al, bl := strings.Split(string(a), "\n"), strings.Split(string(b), "\n")
+	if len(bl) != len(al)+1 {
+		t.Fatalf("the copy has %d lines, want %d", len(bl), len(al)+1)
+	}
+	added := 0
+	for i, j := 0, 0; j < len(bl); j++ {
+		if i < len(al) && al[i] == bl[j] {
+			i++
+			continue
+		}
+		added++
+		if bl[j] != `    file://*) PROTO="=https,file" ;;` {
+			t.Errorf("unexpected added line %q", bl[j])
+		}
+	}
+	if added != 1 {
+		t.Errorf("%d lines differ, want exactly the one patch line", added)
+	}
 }
 
 func TestInstallSh_isCleanAndEndsWithMain(t *testing.T) {
