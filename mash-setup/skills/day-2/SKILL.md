@@ -56,7 +56,11 @@ nothing. `mash status --endpoint
 <address>` says `<address>: ready, offline` (or `online` while a
 session holds it open). For an endpoint called `acme.demo.bob`, that line
 is `acme.demo.bob: ready, offline`. Read the `hint:` line of any error and
-run the command it names.
+run the command it names (status, then doctor, then status again).
+
+| You see | Cause | Fix |
+|---|---|---|
+| `not ok: the server did not answer`, or `not ready` | after a reboot or a stopped server, the local server is not running | the `--start` step below (on Debian, with the `/usr/sbin` PATH fix) |
 
 ## The server does not answer (after a reboot, say)
 
@@ -68,6 +72,16 @@ start it:
 SRV="$HOME/mash-nats"; DL="$HOME/mash-setup-dl"
 bash "$DL/mash-local-nats-setup.sh" --dir "$SRV" --start
 ```
+
+On Debian and Ubuntu, with the apt `nats-server` (in `/usr/sbin`, which is not
+on a user's PATH), add it for this run:
+
+```sh
+SRV="$HOME/mash-nats"; DL="$HOME/mash-setup-dl"
+PATH="$PATH:/usr/sbin" bash "$DL/mash-local-nats-setup.sh" --dir "$SRV" --start
+```
+
+Without it the script says `error: missing: nats-server`.
 
 `--start` never creates a server: if the folder is missing it says so and
 stops. Needs a yes: starting the server. If the script is no longer there,

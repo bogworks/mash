@@ -71,6 +71,9 @@ it.
 Everything else is fixed here: the server listens on this machine only, and
 the repository is `bogworks/mash`.
 
+The owner, group and agent names in the later blocks (`acme`, `demo`, `bob`,
+`alice`) are examples: replace each with the person's answers.
+
 Carry the answers to every later command. Each block runs in a fresh shell, so
 start each block that needs them with the line that sets them, with the
 person's values (these are the defaults). Where a later block or sentence
@@ -113,21 +116,62 @@ yourself: if the install needs it, give the person the exact command as a
 - Homebrew (macOS, and Linux): `brew install nats-server nats openssl`. On
   a Mac this is the way: the script runs there too, with the `openssl` that
   macOS ships or Homebrew's.
-- Debian and Ubuntu: `nats-server` is in apt (`sudo apt install nats-server
-  openssl`; on a minimal image also `curl unzip ca-certificates iproute2`:
-  the script needs `ss`). The apt package installs the binary to
-  `/usr/sbin/nats-server`, which is not on a user's PATH, and the script looks
-  on PATH only: tell the person to run `export PATH="$PATH:/usr/sbin"` for the
-  session. There is no apt package for the `nats` command: the person
-  downloads the linux zip for their machine from
-  https://github.com/nats-io/natscli/releases and puts `nats` on the PATH.
-  Both are explained at
-  https://github.com/bogworks/mash/blob/main/docs/nats-server.md#getting-nats-server-and-the-nats-command
+- Debian and Ubuntu: `nats-server` is in apt. A fresh image has no package
+  lists, so the person runs `apt update` first; on a minimal image the
+  second line also installs `curl unzip ca-certificates iproute2` (the script
+  needs `ss`):
 
-The apt package also starts its own `nats-server` system service at boot, on
-port 4222, not in operator mode. Leave it alone; the script uses the next free
-port and says which. (`sudo systemctl disable --now nats-server` stops it, if
-the person asks.)
+  ```sh person
+  sudo apt update
+  sudo apt install nats-server openssl curl unzip ca-certificates iproute2
+  ```
+
+  The apt package also starts its own `nats-server` system service on
+  `127.0.0.1:4222` with no authentication, which every user on this machine can
+  reach, and starts it again at every boot. mash does not use it. Ask the
+  person first, and say why in one sentence: it is an open server for every
+  local user. Then they stop it and keep it from starting again:
+
+  ```sh person
+  sudo systemctl disable --now nats-server
+  ```
+
+  If that service is already running when the script runs, the script takes
+  port 4223 instead: have the person disable the service and run the script
+  again, or accept the other port.
+
+  The package installs the binary to `/usr/sbin/nats-server`, which is not on
+  a user's PATH, and the script looks on PATH only (`error: missing:
+  nats-server`). Run the script with `/usr/sbin` added, as in step 4 and in the
+  day-2 skill's `--start` (or `export PATH="$PATH:/usr/sbin"` once per shell).
+
+  Debian's default umask is 002, so `mkdir -p` makes a folder that others in
+  the group can write, and `install.sh` refuses to install there. The person
+  makes the folders with the right mode before anything else creates them:
+
+  ```sh person
+  install -d -m 755 "$HOME/.local" "$HOME/.local/bin"
+  ```
+
+  There is no apt package for the `nats` command. The person installs v0.5.2
+  from the natscli release, checked against its checksums. `BIN` is the install
+  folder of step 1, and it must be on the PATH:
+
+  ```sh person
+  BIN="$HOME/.local/bin"; V=0.5.2 OS=linux ARCH=amd64
+  install -d -m 755 "$BIN"
+  cd "$(mktemp -d)"
+  curl -fsSLO https://github.com/nats-io/natscli/releases/download/v$V/nats-$V-$OS-$ARCH.zip
+  curl -fsSLO https://github.com/nats-io/natscli/releases/download/v$V/SHA256SUMS
+  grep " nats-$V-$OS-$ARCH.zip\$" SHA256SUMS | sha256sum -c -
+  unzip -q nats-$V-$OS-$ARCH.zip
+  install -m 0755 nats-$V-$OS-$ARCH/nats "$BIN/nats"
+  nats --version
+  ```
+
+  The checksum line should end in `OK`, and `nats --version` prints `0.5.2`.
+  That is tested on `linux` and `amd64` only. Both programs are explained at
+  https://github.com/bogworks/mash/blob/main/docs/nats-server.md#getting-nats-server-and-the-nats-command
 
 ## 3. Download and check the two scripts
 
@@ -196,6 +240,14 @@ the person's own user:
 ```sh
 SRV="$HOME/mash-nats"; DL="$HOME/mash-setup-dl"
 bash "$DL/mash-local-nats-setup.sh" --dir "$SRV" --owner acme
+```
+
+On Debian and Ubuntu, with the apt `nats-server`, run it with `/usr/sbin` on
+the PATH:
+
+```sh
+SRV="$HOME/mash-nats"; DL="$HOME/mash-setup-dl"
+PATH="$PATH:/usr/sbin" bash "$DL/mash-local-nats-setup.sh" --dir "$SRV" --owner acme
 ```
 
 It prints a line for each step and ends with the next command, with the path
@@ -268,8 +320,9 @@ MASH_ENDPOINT=acme.demo.alice mash inbox
 ```
 
 Expected: `Mail sent (number 1).`, then `1 message for acme.demo.alice, 1 new,
-0 urgent.` and a one-row table with `lunch at noon?`. `mash read 1` shows the
-message in full, with `trust: verified`.
+0 urgent.` and a one-row table with `lunch at noon?`.
+`MASH_ENDPOINT=acme.demo.alice mash read 1` shows the message in full,
+with `trust: verified`.
 
 ## 8. Use it from Claude Code
 
@@ -317,8 +370,10 @@ its own copies in `~/.config/mash`.
 | You see | Cause | Fix |
 |---|---|---|
 | `error: missing: ...` from the server script | a program is not installed | step 2 |
+| `error: missing: nats-server` while it is installed | apt put it in `/usr/sbin`, which is not on the PATH | run the script with `PATH="$PATH:/usr/sbin"` in front of `bash` |
+| `error: ... is writable by its group or other users: not installing there` | a folder made with umask 002 is group-writable | the person runs `chmod go-w ~/.local ~/.local/bin` |
 | `sha256sum: ... FAILED` | the download is not the release's file | stop; do not run it; ask |
-| the script used port 4223 | 4222 is taken, often by a packaged nats-server service | fine; leave that service alone |
+| the script used port 4223 | 4222 is taken, often by the packaged nats-server service | `sudo systemctl disable --now nats-server` (the person runs it), then run the script again; or accept the other port |
 | `not ready: the server did not answer: <url>` (from `mash status`) | the server is not running | `mash-local-nats-setup.sh --start` (day-2 skill) |
 | `error: the server did not come up` on a Mac | another user may hold the port: macOS shows you only your own listeners | ask the person to try another folder or free the port; do not stop it |
 | `mash: command not found` after install | the install folder is not on the PATH | use the full path from the install line; the person adds it |
