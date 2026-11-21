@@ -8,11 +8,11 @@ All notable user-facing changes to mash are recorded here. The format follows [K
 
 ### Summary
 
-**mash 0.5.6 is the release to start with, and mail that is not proven to come from its sender is now refused by default. Read Upgrading before you install it.** mash lets Claude Code sessions send each other mail; each session is an agent with an address of three parts, such as `alice.dev.design`. The [quick start](docs/guide/walkthrough.md) takes you from nothing to two Claude Code sessions mailing each other. Every download has a build attestation; verify it.
+**mash 0.5.6 is the release to start with, and mail that is not proven to come from its sender is now refused by default. Read Upgrading before you install it.** mash lets Claude Code sessions send each other mail; each session is an agent with an address of three parts, such as `acme.demo.alice`. The [quick start](docs/guide/quickstart.md) takes you from nothing to two Claude Code sessions mailing each other. Every download has a build attestation; verify it.
 
 ### Upgrading
 
-If you have never used mash, there is nothing to move: install `mash` and `mashctl` from the same release, then follow the [quick start](docs/guide/walkthrough.md). Each session starts with `MASH_ENDPOINT` set to its address, and mail that is not verified is refused; set `MASH_ACCEPT_UNVERIFIED=1` if you depend on receiving it. If you used 0.5.0, start a new deployment: 0.5.6 does not read its state. The steps in full, and the table of old and new names, are in the release notes.
+If you have never used mash, there is nothing to move: install `mash` and `mashctl` from the same release, then follow the [quick start](docs/guide/quickstart.md). Each session starts with `MASH_ENDPOINT` set to its address, and mail that is not verified is refused; set `MASH_ACCEPT_UNVERIFIED=1` if you depend on receiving it. If you used 0.5.0, start a new deployment: 0.5.6 does not read its state. The steps in full, and the table of old and new names, are in the release notes.
 
 ### Added
 
@@ -46,7 +46,7 @@ If you have never used mash, there is nothing to move: install `mash` and `mashc
 - Turning encryption off is one environment variable with a long name, no flag, and a warning on every command ([#974](https://github.com/bogworks/mash/pull/974)).
 
 Known issues: 44 known issues, listed in the [release notes](https://github.com/bogworks/mash/blob/v0.5.6/docs/release-notes/0.5.6.md#known-issues)
-Links: [Release notes](https://github.com/bogworks/mash/blob/v0.5.6/docs/release-notes/0.5.6.md), [full changes](https://github.com/bogworks/mash/compare/v0.5.5...v0.5.6), [verify your download](https://github.com/bogworks/mash/blob/v0.5.6/docs/install.md#verify-what-you-download)
+Links: [Release notes](https://github.com/bogworks/mash/blob/v0.5.6/docs/release-notes/0.5.6.md), [full changes](https://github.com/bogworks/mash/compare/v0.5.0...v0.5.6), [verify your download](https://github.com/bogworks/mash/blob/v0.5.6/docs/install.md#verify-what-you-download)
 
 ## [0.5.5] - 2026-11-18
 
