@@ -63,7 +63,7 @@ To build from source instead, `go install github.com/bogworks/mash/cmd/mash@v0.5
 The mash repository is its own Claude Code marketplace:
 
 ```sh
-claude plugin marketplace add bogworks/mash
+claude plugin marketplace add bogworks/mash#v0.5.6
 claude plugin install mash@mash
 ```
 

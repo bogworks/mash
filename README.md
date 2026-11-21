@@ -140,14 +140,14 @@ acme.demo.bob: ready, offline
 Ready means the server is there and reachable and the credentials are valid. Offline is normal here: no session holds the endpoint open yet.
 
 **4. Install the Claude Code plugins.** The mash repository is its own Claude Code marketplace. `mash` is the plugin that gives a session its inbox; `mash-setup` is two skills that set mash up and look after it (you can skip it):
-
+ `#v0.5.6` pins the marketplace to the release tag, so the plugins you install match the `mash` you installed.
 ```sh
-claude plugin marketplace add bogworks/mash
+claude plugin marketplace add bogworks/mash#v0.5.6
 claude plugin install mash@mash
 claude plugin install mash-setup@mash
 ```
 
-In Claude Code itself the same steps are `/plugin marketplace add bogworks/mash`, `/plugin install mash@mash` and `/plugin install mash-setup@mash`.
+In Claude Code itself the same steps are `/plugin marketplace add bogworks/mash#v0.5.6`, `/plugin install mash@mash` and `/plugin install mash-setup@mash`.
 
 Start two sessions, each as its own endpoint:
 
@@ -225,7 +225,7 @@ You need a NATS server in operator mode with JetStream (TLS recommended: use a `
 
 ```sh
 curl -fsSL https://github.com/bogworks/mash/releases/latest/download/install.sh | bash   # mash and mashctl; to build from source see above
-claude plugin marketplace add bogworks/mash
+claude plugin marketplace add bogworks/mash#v0.5.6
 claude plugin install mash@mash
 # allowlist the channel once per machine (managed settings are the admin-controlled settings file of Claude Code): write /etc/claude-code/managed-settings.json (Linux)
 # or /Library/Application Support/ClaudeCode/managed-settings.json (macOS), see docs/install.md section 3, then:
