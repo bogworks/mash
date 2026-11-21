@@ -62,5 +62,5 @@ is an endpoint's own setting: see mash serve.
 
 ## What it replaces
 
-Today mashctl limits --show. The numbers shown are examples; the defaults are
-the code's.
+In 0.5.5, this was mashctl limits --show. The numbers shown are examples; the
+defaults are the code's.

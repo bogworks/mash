@@ -71,4 +71,4 @@ None. Administration. There are no MCP tools for mashctl.
 
 ## What it replaces
 
-Replaces set-meta and label.
+In 0.5.5, this was set-meta and label.

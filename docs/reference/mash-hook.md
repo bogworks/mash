@@ -64,10 +64,10 @@ program. Install it: curl -fsSL &lt;release base&gt;/install.sh | bash'.
 https://github.com/bogworks/mash/releases/latest/download, written into the
 launcher; a fork or a mirror edits that line in its own launcher. It is not
 derived from the plugin's release setting, which names the versioned download
-base and has no install.sh under it (settled 2026-11-21). Today nothing is
-said and the agent simply has no mash tools.
+base and has no install.sh under it. In 0.5.5, nothing was said and the agent
+simply had no mash tools.
 
 ## What it replaces
 
-As built. It never connects to the server; it reads what mash serve has stored
-on disk.
+In 0.5.5, hook worked the same way. It never connects to the server; it reads
+what mash serve has stored on disk.

@@ -26,9 +26,7 @@ The rules every mash command and tool follows.
    meaning on every command of both tools, so nobody has to learn which
    commands have it: where a command has nothing more to say, --detail prints
    what it prints without it. Every --detail and --wide form that does add
-   something is written out in this specification. (This is the command-line
-   standard's rule 24; an earlier pass of this specification called it
-   --verbose.)
+   something is written out in this specification.
 
 4. A list is a plain table. A header row in capitals, two spaces between
    columns, no borders. A repeated leading value may be left blank. --wide
@@ -76,9 +74,9 @@ The rules every mash command and tool follows.
    shell's own $(...) does. Nothing else in the text is changed.
 
 13. Three exit codes. 0 it worked, 1 it failed, 2 the command line was wrong.
-   Today the same failure exits 2, 3 or 6 depending on the command. A command
-   that did part of its work exits 1, says what is left, and is safe to run
-   again.
+   In 0.5.5 the same failure exited 2, 3 or 6 depending on the command. A
+   command that did part of its work exits 1, says what is left, and is safe
+   to run again.
 
 14. Both doctors work the same way. mash doctor and mashctl doctor print every
    row every time, each marked ok, warn, FAIL or skip; a row that cannot run
@@ -118,8 +116,7 @@ The rules every mash command and tool follows.
    wording. The sender cannot tell the two apart: all it sees is that no
    stream took the message, and a recipient deleted while the sender's
    directory cache still lists it looks the same; a marker in the directory
-   record that tells them apart is for 0.6.0 (settled 2026-11-21, from the
-   candidate 1 built-output reviews).
+   record that tells them apart is planned for 0.6.0.
 
 19. A case written in brackets is a description. A case whose whole text
    stands in round brackets, such as '(the same JSON as --json ...)',
@@ -128,7 +125,7 @@ The rules every mash command and tool follows.
    A part of a case that varies from run to run (a key id, a cause as the
    server gave it) is named in that command's notes, with the words that stand
    before and after it; a test matches everything else byte for byte and
-   nothing more loosely than the notes say (settled 2026-11-21).
+   nothing more loosely than the notes say.
 
 20. Having no endpoint reads the same in every mash command. Three wordings,
    by where it is asked. At a shell with none installed: 'error: no endpoint
@@ -197,7 +194,7 @@ The rules every mash command and tool follows.
    in place, keeps a backup beside the file, and touches nothing on the
    server. Nothing on the server needs migrating: 0.5.6 reuses the stores and
    endpoint records 0.5.5 made, and endpoints of the two versions can mail
-   each other on one server (shown by a live run, 2026-11-20).
+   each other on one server.
 
 31. Only a destructive command asks. It asks you to type the address, and
    --yes skips the question.

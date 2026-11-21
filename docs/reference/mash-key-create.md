@@ -74,5 +74,5 @@ acme.demo.bob --public-key bob.seed.pub
 
 ## What it replaces
 
-As built, renamed to NATS's words. Produces the same pair as NATS's own nk
-tool.
+In 0.5.5, it worked the same way. 0.5.6 renames it to NATS's words. It
+produces the same pair as NATS's own nk tool.

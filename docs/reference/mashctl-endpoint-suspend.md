@@ -63,4 +63,4 @@ None. Administration. There are no MCP tools for mashctl.
 
 ## What it replaces
 
-Today a top-level command, mashctl suspend.
+In 0.5.5, this was a top-level command, mashctl suspend.

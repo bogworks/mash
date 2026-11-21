@@ -551,7 +551,7 @@
     }
    ],
    "errors": [],
-   "note": "As built, kept unchanged in 0.5.6. It has no mash command of its own; it is the answering half of mash prompt. Moves under sap in 0.6.0."
+   "note": "Unchanged from 0.5.5. It has no mash command of its own; it is the answering half of mash prompt. Planned for 0.6.0: it moves under sap."
   }
  ],
  "server": [
@@ -561,11 +561,11 @@
   ],
   [
    "MCP revisions",
-   "2024-11-05, 2025-03-26 and 2025-06-18. Not 2026-07-28: that revision does not let a server send what the client did not ask for, and Claude Code does not register a channel server that negotiates it. Looked at again in the 0.6.0 sprint (board card 213)."
+   "2024-11-05, 2025-03-26 and 2025-06-18. Not 2026-07-28: that revision does not let a server send what the client did not ask for, and Claude Code does not register a channel server that negotiates it. This is to be looked at again for 0.6.0."
   ],
   [
    "Every tool result",
-   "Carries two things: the structured result, which is exactly the object the matching command prints with --json; and a text block, which is exactly what the command prints without it. Today tools return text only. No output schema is declared in 0.5.6. The text block being the command's own text, not JSON, is a deliberate departure from MCP's suggestion."
+   "Carries two things: the structured result, which is exactly the object the matching command prints with --json; and a text block, which is exactly what the command prints without it. In 0.5.5, tools returned text only. No output schema is declared in 0.5.6. The text block being the command's own text, not JSON, is a deliberate departure from MCP's suggestion."
   ],
   [
    "A tool that fails",
@@ -593,7 +593,7 @@
   ],
   [
    "Waking an idle session",
-   "A Claude Code channel event: the capability 'claude/channel', declared as experimental, and the notification 'notifications/claude/channel' carrying one line that says mail is waiting. The mail itself arrives through mash hook. This is a Claude Code feature carried inside MCP, not part of MCP. WHAT THE SESSION NEEDS: Claude Code registers a plugin's channel only when it is launched with its own flag, --dangerously-load-development-channels plugin:mash@mash, and it asks the person to confirm at each launch. Without the flag nothing is lost but the wake: mail still arrives with the next prompt or tool call through mash hook. The flag is Claude Code's, not mash's; the guides and the setup skill state it in these words, and this line is looked at again when Claude Code lets a channel be installed (settled 2026-11-21)."
+   "A Claude Code channel event: the capability 'claude/channel', declared as experimental, and the notification 'notifications/claude/channel' carrying one line that says mail is waiting. The mail itself arrives through mash hook. This is a Claude Code feature carried inside MCP, not part of MCP. WHAT THE SESSION NEEDS: Claude Code registers a plugin's channel only when it is launched with its own flag, --dangerously-load-development-channels plugin:mash@mash, and it asks the person to confirm at each launch. Without the flag nothing is lost but the wake: mail still arrives with the next prompt or tool call through mash hook. The flag is Claude Code's, not mash's; the guides and the setup skill state it in these words, and this is to be looked at again when Claude Code lets a channel be installed."
   ],
   [
    "Instructions to the agent",

@@ -102,4 +102,4 @@ A repeated owner or group is left blank, so the eye finds where one ends.
 
 ## What it replaces
 
-Today also reachable as mashctl list, which is removed.
+In 0.5.5, this was also reachable as mashctl list, which is removed.

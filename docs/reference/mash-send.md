@@ -175,6 +175,7 @@ marked 'reply to: 42'.
 
 ## What it replaces
 
-CLI and MCP differ today: only the MCP tool has reply-to, relay and id; only
-the CLI has --file. The receipt wording differs between them. The underscore
-form of an address is accepted today and is refused from 0.5.6.
+In 0.5.5, the CLI and the MCP tool differed: only the MCP tool had reply-to,
+relay and id; only the CLI had --file. The receipt wording differed between
+them. The underscore form of an address was accepted in 0.5.5 and is refused
+from 0.5.6.

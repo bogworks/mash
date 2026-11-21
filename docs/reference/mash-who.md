@@ -157,5 +157,5 @@ later release.
 
 ## What it replaces
 
-Today the MCP tool always returns the long form, the CLI has three output
-modes, and matching is by substring of several fields.
+In 0.5.5, the MCP tool always returned the long form, the CLI had three output
+modes, and matching was by substring of several fields.

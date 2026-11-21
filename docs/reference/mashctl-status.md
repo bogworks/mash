@@ -78,4 +78,4 @@ None. Administration. There are no MCP tools for mashctl.
 
 ## What it replaces
 
-New.
+New in 0.5.6.

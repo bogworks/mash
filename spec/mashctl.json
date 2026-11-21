@@ -222,7 +222,7 @@
      },
      {
       "name": "x-today",
-      "value": "Replaces mashctl adopt, mashctl init and mashctl init --local. mashctl does not install or start NATS; the NATS quick-start script writes this file as its last step."
+      "value": "In 0.5.5, this job was done by mashctl adopt, mashctl init and mashctl init --local. mashctl does not install or start NATS; the NATS quick-start script writes this file as its last step."
      },
      {
       "name": "x-notes",
@@ -301,7 +301,7 @@
      },
      {
       "name": "x-today",
-      "value": "New."
+      "value": "New in 0.5.6."
      }
     ]
    },
@@ -381,7 +381,7 @@
      },
      {
       "name": "x-today",
-      "value": "Takes over mashctl audit and mashctl issued check. mashctl issued list has no command of its own any more: one endpoint's issue record is in mashctl endpoint show."
+      "value": "In 0.5.5, these checks were mashctl audit and mashctl issued check. mashctl issued list has no command of its own any more: one endpoint's issue record is in mashctl endpoint show."
      },
      {
       "name": "x-notes",
@@ -449,7 +449,7 @@
        },
        {
         "name": "x-today",
-        "value": "Today mashctl limits --show. The numbers shown are examples; the defaults are the code's."
+        "value": "In 0.5.5, this was mashctl limits --show. The numbers shown are examples; the defaults are the code's."
        },
        {
         "name": "x-notes",
@@ -536,11 +536,11 @@
        },
        {
         "name": "x-today",
-        "value": "Today mashctl limits."
+        "value": "In 0.5.5, this was mashctl limits."
        },
        {
         "name": "x-notes",
-        "value": "When it is needed. An inbox gets its limits when its endpoint is created. If you later raise the limits in config.json, inboxes that already exist keep the old ones until you run this. To be looked at again by 2026-11-27: whether a change to the limits should simply apply everywhere by itself."
+        "value": "When it is needed. An inbox gets its limits when its endpoint is created. If you later raise the limits in config.json, inboxes that already exist keep the old ones until you run this."
        }
       ]
      }
@@ -716,7 +716,7 @@
        },
        {
         "name": "x-today",
-        "value": "Today this takes --make-key or --public-key, accepts three address forms, and prints about ten lines. provision does the same job and is removed."
+        "value": "In 0.5.5, this took --make-key or --public-key, accepted three address forms, and printed about ten lines. provision did the same job and is removed."
        },
        {
         "name": "x-notes",
@@ -832,11 +832,11 @@
        },
        {
         "name": "x-today",
-        "value": "Today also reachable as deprovision, which is removed. Typing the name to confirm is what gh repo delete does."
+        "value": "In 0.5.5, this was also reachable as deprovision, which is removed. Typing the name to confirm is what gh repo delete does."
        },
        {
         "name": "x-notes",
-        "value": "Order. The endpoint's key is cancelled on every server first; only when every server confirms is anything removed, so a failure there leaves the endpoint whole. If this machine holds the endpoint's creds file, it is set aside as <address>.creds.deleted, so mash no longer counts it as installed; the path is predictable and nothing prints it (settled 2026-11-20). Nothing else on any machine is touched. THE LATE-FAILURE LINE is 0.5.6 as built, and not how it should read: it carries an internal word (PARTIAL), the flat name with underscores, a key id and the server's raw error. Two parts of it vary: the eight-character key id after 'user key', and the cause between 'did not complete: ' and '; run the same command again'. From 0.5.7 one line replaces it: 'error: deleted acme.demo.bob, but the removal did not finish: <cause in plain words>' with the same hint; its credentials already no longer work, and running the command again is safe (settled 2026-11-21)."
+        "value": "Order. The endpoint's key is cancelled on every server first; only when every server confirms is anything removed, so a failure there leaves the endpoint whole. If this machine holds the endpoint's creds file, it is set aside as <address>.creds.deleted, so mash no longer counts it as installed; the path is predictable and nothing prints it. Nothing else on any machine is touched. THE LATE-FAILURE LINE in 0.5.6 is not how it should read: it carries an internal word (PARTIAL), the flat name with underscores, a key id and the server's raw error. Two parts of it vary: the eight-character key id after 'user key', and the cause between 'did not complete: ' and '; run the same command again'. From 0.5.7 one line replaces it: 'error: deleted acme.demo.bob, but the removal did not finish: <cause in plain words>' with the same hint; its credentials already no longer work, and running the command again is safe."
        }
       ]
      },
@@ -933,7 +933,7 @@
        },
        {
         "name": "x-today",
-        "value": "Today also reachable as mashctl list, which is removed."
+        "value": "In 0.5.5, this was also reachable as mashctl list, which is removed."
        },
        {
         "name": "x-notes",
@@ -1014,7 +1014,7 @@
        },
        {
         "name": "x-today",
-        "value": "Takes over mashctl suspended and mashctl issued list for one endpoint. It no longer prints the creds file's path, the issue record, the agent, the account or the mail subject."
+        "value": "In 0.5.5, mashctl suspended and mashctl issued list did this job for one endpoint. It no longer prints the creds file's path, the issue record, the agent, the account or the mail subject."
        },
        {
         "name": "x-notes",
@@ -1105,7 +1105,7 @@
        },
        {
         "name": "x-today",
-        "value": "Replaces set-meta and label."
+        "value": "In 0.5.5, this was set-meta and label."
        }
       ]
      },
@@ -1192,7 +1192,7 @@
        },
        {
         "name": "x-today",
-        "value": "Replaces set-meta with a '-' value, and unlabel."
+        "value": "In 0.5.5, this was set-meta with a '-' value, and unlabel."
        }
       ]
      },
@@ -1263,7 +1263,7 @@
        },
        {
         "name": "x-today",
-        "value": "Today a top-level command, mashctl suspend."
+        "value": "In 0.5.5, this was a top-level command, mashctl suspend."
        }
       ]
      },
@@ -1334,7 +1334,7 @@
        },
        {
         "name": "x-today",
-        "value": "Today a top-level command, mashctl resume."
+        "value": "In 0.5.5, this was a top-level command, mashctl resume."
        }
       ]
      },
@@ -1445,7 +1445,7 @@
        },
        {
         "name": "x-today",
-        "value": "As built, with the same options as create."
+        "value": "In 0.5.5, reissue already existed. In 0.5.6 it takes the same options as create."
        }
       ]
      },
@@ -1565,7 +1565,7 @@
        },
        {
         "name": "x-today",
-        "value": "Today mashctl inbox inspect, with --from and --to; those are replaced by --after, the option mash inbox has."
+        "value": "In 0.5.5, this was mashctl inbox inspect, with --from and --to. Those are replaced by --after, the option mash inbox has."
        },
        {
         "name": "x-notes",
@@ -1651,7 +1651,7 @@
        },
        {
         "name": "x-today",
-        "value": "Today a top-level command, mashctl permissions."
+        "value": "In 0.5.5, this was a top-level command, mashctl permissions."
        },
        {
         "name": "x-notes",
@@ -1738,7 +1738,7 @@
      },
      {
       "name": "x-today",
-      "value": "Does not exist. In 0.5.6 a mesh has the one owner named at mashctl init; nothing in the grammar assumes one."
+      "value": "In 0.5.5, this did not exist. In 0.5.6 a mesh has the one owner named at mashctl init, and nothing in the grammar assumes one. Several owners per mesh are planned for 0.6.0."
      }
     ]
    },
@@ -1804,7 +1804,7 @@
      },
      {
       "name": "x-today",
-      "value": "Today prints no commit."
+      "value": "In 0.5.5, mashctl version printed no commit."
      }
     ]
    }

@@ -37,5 +37,5 @@ Answered.
 
 ## Notes
 
-As built, kept unchanged in 0.5.6. It has no mash command of its own; it is
-the answering half of mash prompt. Moves under sap in 0.6.0.
+Unchanged from 0.5.5. It has no mash command of its own; it is the answering
+half of mash prompt. Planned for 0.6.0: it moves under sap.

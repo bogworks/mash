@@ -81,4 +81,4 @@ each with allow and deny.
 
 ## What it replaces
 
-Today a top-level command, mashctl permissions.
+In 0.5.5, this was a top-level command, mashctl permissions.

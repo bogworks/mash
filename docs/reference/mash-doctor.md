@@ -259,10 +259,10 @@ refused count is kept on this machine, so its row shows even when the server
 is down. The 'refused' row counts unverified mail that was refused on arrival
 (see mash serve). Mail that was verified on arrival and whose sender was
 deleted afterwards is not counted: mash read shows it as refused, and that is
-where it is seen (settled 2026-11-21).
+where it is seen.
 
 ## What it replaces
 
-New. It takes over the rows mash status prints today. It has no plugin or
-channel row in 0.5.6: neither can be checked truthfully from a shell today,
-and the command and the tool must answer alike.
+New in 0.5.6. It takes over the rows mash status printed in 0.5.5. It has no
+plugin or channel row: neither can be checked truthfully from a shell, and the
+command and the tool must answer alike.
