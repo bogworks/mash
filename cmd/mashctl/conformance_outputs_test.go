@@ -9,7 +9,9 @@ package main
 // a server set up by `mashctl init` for owner acme, with the endpoints a case needs, and the folder is ~/.config/mash
 // as in the specification. The addresses of the specification are used as they are. What cannot be the same is
 // substituted in the specification's text: the server address (the specification's tls://localhost:4222 is the test
-// server's own), and the version and commit. Two shapes vary by nature and match as patterns: a date and time
+// server's own; of the two servers of the status case with several, tls://a.example:4222 is the test server and
+// tls://b.example:4222 is an address nothing listens on, as the case says it did not answer), and the version and
+// commit. Two shapes vary by nature and match as patterns: a date and time
 // (2026-11-19 09:40) and a public key.
 //
 // How the specification's stream is read (rules.json, "Where a hint is printed"): at a shell every `hint:` line goes to
@@ -43,10 +45,9 @@ import (
 // confUnchecked: key is "<command> <case>" as the specification names them; the value is why the case cannot be run
 // here.
 var confUnchecked = map[string]string{
-	"status Several servers: one line each":                          "the first line must say '3 endpoints, 1 online' of a second, working server at a.example; one test server answers under one address",
-	"endpoint delete Cancelled everywhere, then a later step failed": "needs a server fault injected between the cancelling of the key and the removal of the inbox",
-	"endpoint inbox Messages":                                        "the rows hold times relative to now ('2m ago', '1m ago') and the trust of messages signed by two senders, one of them an endpoint not on this server",
-	"endpoint permissions Permissions":                               "the text describes the output ('the same JSON as --json'); it is not the output",
+	"endpoint delete Cancelled everywhere, then a later step failed": "no fault yields the specified words: after the key is cancelled, a failed later step is worded 'deleted ADDR, but the lease fence or the inbox was not removed: <cause>' (or, for an admin partial error, the whole 'PARTIAL: ...' sentence); the specified 'deleted ADDR, but its inbox could not be removed' is printed by no path of the build",
+	"endpoint inbox Messages":          "the build prints '?' as the sender of a message with no sender header (trust absent), where the specification has 'acme.lab.mallet' in that row, and pads the FROM column two spaces past its widest cell where the specification pads one; the build's own tests expect the two-space padding",
+	"endpoint permissions Permissions": "the text describes the output ('the same JSON as --json'); it is not the output",
 }
 
 // confOutCase is one x-output case.
@@ -199,6 +200,12 @@ func init() {
 		w := newConfWorld(t, true)
 		w.fleet()
 		return confOutRun{ran: w.run("status"), subs: urlSub(w)}
+	})
+	reg("status Several servers: one line each", func(t *testing.T) confOutRun {
+		w := newConfWorld(t, true)
+		w.fleet()
+		w.a.env["MASH_SERVER"] = w.url + "," + dead
+		return confOutRun{ran: w.run("status"), subs: []string{"tls://a.example:4222", w.url, "tls://b.example:4222", dead}}
 	})
 	reg("status Not working (the line on stdout, the hint on stderr)", func(t *testing.T) confOutRun {
 		w := newConfWorld(t, true)
