@@ -4,7 +4,13 @@ This page shows how to check that a mash release is the one this repository buil
 
 Release tags are annotated but not signed, so there is no tag signature to check. You check the files instead. Each step proves something different.
 
-You need `curl`, `sha256sum` (on macOS, `shasum -a 256`) and the [GitHub CLI](https://cli.github.com/) (`gh`). `gh attestation verify` needs a `gh` recent enough to have it, and a network connection to GitHub. With the bundle from step 1 it needs no GitHub login.
+## What you need
+
+- `curl`, and `sha256sum` (on macOS, `shasum -a 256`).
+- The [GitHub CLI](https://cli.github.com/) (`gh`) **2.68.0 or newer**. The checks below pin the release tag with `--source-ref`, which first appeared in gh 2.68.0. Older versions either lack `gh attestation` entirely (Debian 13 ships 2.46, Ubuntu 24.04 ships 2.45) or reject `--source-ref`. Check yours with `gh --version`. Get a current gh from [cli.github.com](https://cli.github.com/) or its [releases page](https://github.com/cli/cli/releases).
+- A network connection to GitHub. With the bundle from step 1, the checks need no GitHub login.
+
+`install.sh` runs the same check when it finds gh. With gh 2.48 to 2.67 it stops and installs nothing ([#1153](https://github.com/bogworks/mash/issues/1153)). Upgrade gh, or run `install.sh` with gh off your `PATH`, in which case it checks the checksums only.
 
 ## 1. Download
 
