@@ -11,5 +11,5 @@ junior developer and by a CLI-UX reader before it is shown to anyone.
 4. Two endpoints (about 2 minutes)
 5. Mail by hand: send, inbox, read (about 3 minutes)
 6. Two Claude Code sessions mailing each other (about 4 minutes)
-7. Delete an endpoint and see its credential refused (about 1 minute)
+7. Delete an endpoint and see it stop working (about 1 minute)
 8. Join from another machine (about 2 minutes)

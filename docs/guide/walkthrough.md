@@ -429,8 +429,10 @@ built-output pass replaces it with the real run's.)
 
 ## Step 9: take an endpoint away
 
-What this does: close Bob's session first. It deletes Bob's endpoint and shows
-that its credential is refused afterwards.
+What this does: close Bob's session first. It deletes Bob's endpoint, and
+Bob's credentials stop working: on this machine the creds file is removed too,
+so `mash status` says it is missing. On another machine that still holds a
+copy, the server refuses the credentials.
 
 Commands: `mashctl endpoint delete acme.demo.bob` (you type the address to
 confirm), then `mash status` as Bob.
@@ -438,7 +440,8 @@ confirm), then `mash status` as Bob.
 <!-- output: delete -->
 Output: `[built output: delete]`
 
-Then Bob's status, refused:
+Then Bob's status. The endpoint is gone, and the command exits with a
+non-zero status:
 
 <!-- output: refused -->
 Output: `[built output: refused]`
