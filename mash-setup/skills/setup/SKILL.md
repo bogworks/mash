@@ -26,12 +26,16 @@ every question in step 1 before you change anything. Each step below that
 changes something says what it needs a yes for: ask for that yes, once, for
 that step. "Set mash up" alone is not a yes for all of them.
 
+Everything is installed as the local user: no `sudo`, no system package, no
+system service. You run each step's commands yourself after that step's yes.
+
 Every command block runs on its own in a fresh shell. Blocks marked
-`sh person` are for the person to run in their own terminal, outside your
-session: write the exact command out, say what it does, ask them to run it,
-then check the result with the read-only commands. A typed confirmation cannot
-show a human is present, because a program in your session can type it too, so
-you never run those blocks yourself.
+`sh person` are only for what the person must do themselves: a typed
+confirmation, and starting their own Claude Code sessions. Write the exact
+command out, say what it does, ask them to run it in their own terminal,
+outside your session, then check the result with the read-only commands. A
+typed confirmation cannot show a human is present, because a program in your
+session can type it too, so you never run those blocks yourself.
 
 ## Stop and ask the person when
 
@@ -62,8 +66,8 @@ it.
 3. Two agent names. Default `bob` and `alice`. Each agent's address is
    `owner.group.name`, for example `acme.demo.bob`.
 
-4. Install folder for the two programs. Default `~/.local/bin`. It is the
-   installer's `MASH_INSTALL_DIR`.
+4. Install folder for the programs (`mash`, `mashctl`, `nats-server` and
+   `nats`). Default `~/.local/bin`. It is the installer's `MASH_INSTALL_DIR`.
 5. Server folder. Default `~/mash-nats`. It is the setup script's `--dir`; give
    it as an absolute path (not `~`, not relative).
 6. Download folder for the two scripts. Default `~/mash-setup-dl`.
@@ -95,12 +99,18 @@ Then say this to the person, filled in, and wait for a yes:
 I will:
   download mash and mashctl         from the latest release (one tag, checked
                                     against its checksums), into ~/.local/bin
+  download nats-server and nats     from their GitHub releases (checked against
+                                    each release's SHA256SUMS), into ~/.local/bin
+  use no sudo                       everything is installed as you, nothing
+                                    system-wide
   make a NATS server                in ~/mash-nats, this machine only, run as you
                                     (a program you run: after a reboot it is
                                      stopped; start it again with --start)
   use the owner name                acme
   install the mash plugin           from the bogworks/mash marketplace
   make two agent mailboxes          acme.demo.bob and acme.demo.alice
+  start sessions plainly            without the development flag; mail arrives
+                                    with the next prompt or tool call
 Say yes to go ahead. I will ask again before each step.
 ```
 
@@ -108,76 +118,74 @@ Say yes to go ahead. I will ask again before each step.
 
 The NATS script needs `nats-server` (2.10.7 or newer; the requirements are in
 https://github.com/bogworks/mash/blob/main/docs/nats-server.md#requirements),
-the `nats` command and `openssl`. If any is missing, tell the person where it
-comes from, and ask for a yes before installing it. You never run `sudo`
-yourself: if the install needs it, give the person the exact command as a
-`sh person` block.
+the `nats` command and `openssl`. If `nats-server` or `nats` is missing, tell
+the person where it comes from and ask for a yes. Needs a yes: downloading
+each program from its project's GitHub release into the install folder `BIN`
+of step 1. You run these blocks yourself; they need no `sudo`. If `openssl`,
+`curl`, `tar`, `unzip` or `ss` is missing, say so in one line and stop and
+ask: the person decides how to get it.
 
-- Homebrew (macOS, and Linux): `brew install nats-server nats openssl`. On
-  a Mac this is the way: the script runs there too, with the `openssl` that
-  macOS ships or Homebrew's.
-- Debian and Ubuntu: `nats-server` is in apt. A fresh image has no package
-  lists, so the person runs `apt update` first; on a minimal image the
-  second line also installs `curl unzip ca-certificates iproute2` (the script
-  needs `ss`):
+On a Mac, Homebrew is an alternative: `brew install nats-server nats`. Then
+skip the two blocks below.
 
-  ```sh person
-  sudo apt update
-  sudo apt install nats-server openssl curl unzip ca-certificates iproute2
-  ```
+`BIN` may not exist yet. Debian's default umask is 002, so a folder made with
+`mkdir -p` is writable by its group, and `install.sh` refuses to install
+there: each block makes it first with the right mode. Each block works in a
+fresh `mktemp -d` folder: a throwaway folder. After the install you remove
+only that one folder, the `T` the block set (`rm -r "$T"`), never a glob.
 
-  The apt package also starts its own `nats-server` system service on
-  `127.0.0.1:4222` with no authentication, which every user on this machine can
-  reach, and starts it again at every boot. mash does not use it. Ask the
-  person first, and say why in one sentence: it is an open server for every
-  local user. Then they stop it and keep it from starting again:
+`nats-server` (tested v2.15.1). The block names the operating system and the
+processor (`linux` or `darwin`; `amd64` or `arm64`), downloads the release
+and its `SHA256SUMS`, checks the archive against them and installs it:
 
-  ```sh person
-  sudo systemctl disable --now nats-server
-  ```
+```sh
+BIN="$HOME/.local/bin"; V=2.15.1
+case "$(uname -s)" in Linux) OS=linux ;; Darwin) OS=darwin ;; esac
+case "$(uname -m)" in x86_64) ARCH=amd64 ;; aarch64 | arm64) ARCH=arm64 ;; esac
+SUM="sha256sum -c -"; command -v sha256sum >/dev/null || SUM="shasum -a 256 -c -"
+install -d -m 755 "$BIN"
+T=$(mktemp -d) && cd "$T"
+curl -fsSLO https://github.com/nats-io/nats-server/releases/download/v$V/nats-server-v$V-$OS-$ARCH.tar.gz
+curl -fsSLO https://github.com/nats-io/nats-server/releases/download/v$V/SHA256SUMS
+grep " nats-server-v$V-$OS-$ARCH.tar.gz\$" SHA256SUMS | $SUM
+tar -xzf nats-server-v$V-$OS-$ARCH.tar.gz
+install -m 0755 nats-server-v$V-$OS-$ARCH/nats-server "$BIN/nats-server"
+cd "$HOME" && rm -r "$T"
+"$BIN/nats-server" --version
+```
 
-  If that service is already running when the script runs, the script takes
-  port 4223 instead: have the person disable the service and run the script
-  again, or accept the other port.
+The `nats` command (natscli v0.5.2), the same way:
 
-  The package installs the binary to `/usr/sbin/nats-server`, which is not on
-  a user's PATH, and the script looks on PATH only (`error: missing:
-  nats-server`). Run the script with `/usr/sbin` added, as in step 4 and in the
-  day-2 skill's `--start` (or `export PATH="$PATH:/usr/sbin"` once per shell).
+```sh
+BIN="$HOME/.local/bin"; V=0.5.2
+case "$(uname -s)" in Linux) OS=linux ;; Darwin) OS=darwin ;; esac
+case "$(uname -m)" in x86_64) ARCH=amd64 ;; aarch64 | arm64) ARCH=arm64 ;; esac
+SUM="sha256sum -c -"; command -v sha256sum >/dev/null || SUM="shasum -a 256 -c -"
+install -d -m 755 "$BIN"
+T=$(mktemp -d) && cd "$T"
+curl -fsSLO https://github.com/nats-io/natscli/releases/download/v$V/nats-$V-$OS-$ARCH.zip
+curl -fsSLO https://github.com/nats-io/natscli/releases/download/v$V/SHA256SUMS
+grep " nats-$V-$OS-$ARCH.zip\$" SHA256SUMS | $SUM
+unzip -q nats-$V-$OS-$ARCH.zip
+install -m 0755 nats-$V-$OS-$ARCH/nats "$BIN/nats"
+cd "$HOME" && rm -r "$T"
+"$BIN/nats" --version
+```
 
-  Debian's default umask is 002, so `mkdir -p` makes a folder that others in
-  the group can write, and `install.sh` refuses to install there. The person
-  makes the folders with the right mode before anything else creates them:
-
-  ```sh person
-  install -d -m 755 "$HOME/.local" "$HOME/.local/bin"
-  ```
-
-  There is no apt package for the `nats` command. The person installs v0.5.2
-  from the natscli release, checked against its checksums. `BIN` is the install
-  folder of step 1, and it must be on the PATH:
-
-  ```sh person
-  BIN="$HOME/.local/bin"; V=0.5.2 OS=linux ARCH=amd64
-  install -d -m 755 "$BIN"
-  cd "$(mktemp -d)"
-  curl -fsSLO https://github.com/nats-io/natscli/releases/download/v$V/nats-$V-$OS-$ARCH.zip
-  curl -fsSLO https://github.com/nats-io/natscli/releases/download/v$V/SHA256SUMS
-  grep " nats-$V-$OS-$ARCH.zip\$" SHA256SUMS | sha256sum -c -
-  unzip -q nats-$V-$OS-$ARCH.zip
-  install -m 0755 nats-$V-$OS-$ARCH/nats "$BIN/nats"
-  nats --version
-  ```
-
-  The checksum line should end in `OK`, and `nats --version` prints `0.5.2`.
-  That is tested on `linux` and `amd64` only. Both programs are explained at
-  https://github.com/bogworks/mash/blob/main/docs/nats-server.md#getting-nats-server-and-the-nats-command
+Each checksum line should end in `OK` (a mismatch: stop, install nothing, ask).
+`nats-server --version` prints `nats-server: v2.15.1` and `nats --version`
+prints `0.5.2`. Then check `command -v nats-server nats`. `BIN` must be on the
+PATH: if it is not, tell the person to add it (do not edit their shell files);
+for this session use the full path, or put `PATH="$BIN:$PATH"` in front of a
+command. Both programs are explained at
+https://github.com/bogworks/mash/blob/main/docs/nats-server.md#getting-nats-server-and-the-nats-command
 
 ## 3. Download and check the two scripts
 
-Needs a yes: downloading and running two scripts from the mash release. You
-never pipe a download into a shell. You download each file, check it against
-the release's checksums, show it to the person, and run it after a yes.
+Needs a yes: downloading two scripts from the mash release and checking them.
+You never pipe a download into a shell. You download each file and check it
+against the release's checksums here; step 4 shows each script to the person
+and runs it after a yes.
 
 Use the person's download folder for `DL` (the first assignment below).
 Resolve the release tag once, and use it for the downloads and for the
@@ -212,10 +220,17 @@ Expected: `install.sh: OK` and `mash-local-nats-setup.sh: OK`. On macOS
 `404`: stop and ask. A mismatch means the file is not the release's file:
 do not run it.
 
-Show both files to the person (`cat "$DL/install.sh"`, then the
-same for the other), say in one sentence what each does, and ask for the yes.
-
 ## 4. Install mash and mashctl, then make the server
+
+Each script has one section below: show it, ask, run it. If a later release
+changes how a script is run, change only its section.
+
+### Run install.sh
+
+Show it to the person (`cat "$DL/install.sh"`), say in one sentence what it
+does (it installs `mash` and `mashctl` into the install folder, checked
+against the release's checksums), and ask. Needs a yes: running it. Then run
+it, pinned to the tag from step 3:
 
 ```sh
 BIN="$HOME/.local/bin"; DL="$HOME/mash-setup-dl"; TAG=vX.Y.Z
@@ -227,35 +242,34 @@ Replace `vX.Y.Z` with the tag from step 3.
 Expected: `Installed mash v<version> (<commit>) in <folder>` and the same for
 `mashctl`. If it says the folder is not on the PATH, tell the person to add it
 (do not edit their shell files): for this session use the full path the line
-printed. The folder is the one in the output; take it from there. A line
-saying `gh not found` is normal: it says the checksums come from the same
-download. If `gh` is installed, step 3 can also verify the attestation (see
-`docs/install.md`); if it fails, stop and ask.
+printed. The folder is the one in the output; take it from there. If it says
+the folder `is writable by its group or other users`, see the table at the
+end. A line saying `gh not found` is normal: it says the checksums come from
+the same download. If `gh` is installed, step 3 can also verify the
+attestation (see `docs/install.md`); if it fails, stop and ask.
 
 Check, read-only: `mash version` and `mashctl version` print the same version.
 
-Make the server. Needs a yes: starting a NATS server on this machine, run as
-the person's own user:
+### Run mash-local-nats-setup.sh
+
+Show it to the person (`cat "$DL/mash-local-nats-setup.sh"`), say in one
+sentence what it does (it makes a NATS server in the server folder, as the
+person's own user, listening on this machine only), and ask. Needs a yes:
+starting a NATS server on this machine. Then run it with the install folder
+first on the PATH, so it finds `nats-server` and `nats`:
 
 ```sh
-SRV="$HOME/mash-nats"; DL="$HOME/mash-setup-dl"
-bash "$DL/mash-local-nats-setup.sh" --dir "$SRV" --owner acme
-```
-
-On Debian and Ubuntu, with the apt `nats-server`, run it with `/usr/sbin` on
-the PATH:
-
-```sh
-SRV="$HOME/mash-nats"; DL="$HOME/mash-setup-dl"
-PATH="$PATH:/usr/sbin" bash "$DL/mash-local-nats-setup.sh" --dir "$SRV" --owner acme
+BIN="$HOME/.local/bin"; SRV="$HOME/mash-nats"; DL="$HOME/mash-setup-dl"
+PATH="$BIN:$PATH" bash "$DL/mash-local-nats-setup.sh" --dir "$SRV" --owner acme
 ```
 
 It prints a line for each step and ends with the next command, with the path
-it actually wrote. If it says a port other than 4222 was used, say so. Run
-the last line it printed as it printed it (`mashctl init --config
-<folder>/mash-setup.yaml`); take the path from the output, never from memory.
-Then check: `mashctl status` prints the server's address, `ok` and the
-endpoint count.
+it actually wrote. If it says a port other than 4222 was used, that is fine:
+another `nats-server` (one the machine already runs) holds 4222, so leave it
+alone and never stop it; mash uses the other port. Run the last line it
+printed as it printed it (`mashctl init --config <folder>/mash-setup.yaml`);
+take the path from the output, never from memory. Then check: `mashctl status`
+prints the server's address, `ok` and the endpoint count.
 
 The server is a program running as you. It does not come back after a reboot:
 after one, run the script again with `--start` (day-2 skill). Tell the person
@@ -330,26 +344,75 @@ Restarting your own session is the person's act. Give them these two lines to
 run in two terminals (use the names from step 1):
 
 ```sh person
-MASH_ENDPOINT=acme.demo.bob claude --dangerously-load-development-channels plugin:mash@mash
+MASH_ENDPOINT=acme.demo.bob claude
 ```
 
 ```sh person
-MASH_ENDPOINT=acme.demo.alice claude --dangerously-load-development-channels plugin:mash@mash
+MASH_ENDPOINT=acme.demo.alice claude
 ```
 
-Claude Code asks to confirm the development flag at each launch; that is
-expected. It lets mash wake an idle session; without it, mail still arrives at
-the session's next prompt or tool call.
+Mail arrives at the session's next prompt or tool call. An idle session that
+nobody prompts is not woken: see the optional section below.
 
 Say the setup is done only when one session has received mail from the other
 (`mash inbox` in the second terminal shows it as verified). Do not claim mail
 is broken because your own session started before the plugin was installed:
 the plugin loads in the next session.
 
+### Wake an idle session (optional)
+
+Claude Code has its own flag, `--dangerously-load-development-channels`. It
+lets a development plugin push a channel notification that wakes an idle
+session. Claude Code asks the person to confirm it at each launch. It is
+optional and it is the person's choice: you never add it on your own word.
+Explain it, ask whether they want it, and only if they say yes give them the
+line with it:
+
+```sh person
+MASH_ENDPOINT=acme.demo.bob claude --dangerously-load-development-channels plugin:mash@mash
+```
+
+## Remove it all
+
+Everything mash made is under the home folder: `~/.local/bin` (the install
+folder), `~/.config/mash`, `~/mash-nats`, `~/mash-setup-dl` and
+`~/.local/state/mash`. Use the person's folders from step 1. Each step needs
+a yes, in this order (the script is in the download folder, so that goes
+last):
+
+1. The server. Stop it, which keeps its folder:
+
+   ```sh
+   SRV="$HOME/mash-nats"; DL="$HOME/mash-setup-dl"
+   bash "$DL/mash-local-nats-setup.sh" --dir "$SRV" --stop
+   ```
+
+   To delete the server folder too, which holds every key and all stored
+   mail, the person runs `--remove` (day-2 skill, "Remove the whole local
+   server"): it asks them to type the folder path.
+2. The plugin: `claude plugin uninstall mash@mash`.
+3. The four programs, only the named files:
+
+   ```sh
+   BIN="$HOME/.local/bin"
+   rm "$BIN/mash" "$BIN/mashctl" "$BIN/nats-server" "$BIN/nats"
+   ```
+
+4. The download folder, `~/mash-setup-dl`: `rm -r "$DL"`, only that one folder.
+5. mash's config and state folders, `~/.config/mash` and
+   `~/.local/state/mash`. They hold credentials: deleting them cannot be
+   undone, so the person runs it (use the active config folder that day-2
+   finds, if it is not the default):
+
+   ```sh person
+   rm -r "$HOME/.config/mash" "$HOME/.local/state/mash"
+   ```
+
 ## Do not
 
 - Do not pipe a download into a shell. Do not run a script you have not shown.
-- Do not run `sudo`, a typed confirmation, or any `sh person` block yourself.
+- Do not use `sudo` or any system package; everything is installed as you.
+  Do not run a typed confirmation or any `sh person` block yourself.
 - Do not print, paste or mail a seed, a credentials file or a key. Do not read
   files in `~/mash-nats` or `~/.config/mash` aloud.
 - Do not invent a name or a path. Take every path from a command's output.
@@ -370,10 +433,10 @@ its own copies in `~/.config/mash`.
 | You see | Cause | Fix |
 |---|---|---|
 | `error: missing: ...` from the server script | a program is not installed | step 2 |
-| `error: missing: nats-server` while it is installed | apt put it in `/usr/sbin`, which is not on the PATH | run the script with `PATH="$PATH:/usr/sbin"` in front of `bash` |
-| `error: ... is writable by its group or other users: not installing there` | a folder made with umask 002 is group-writable | the person runs `chmod go-w ~/.local ~/.local/bin` |
+| `error: missing: nats-server` while it is installed | the install folder is not on the PATH | run the script with `PATH="$BIN:$PATH"` in front of `bash` |
+| `error: ... is writable by its group or other users: not installing there` | a folder made with umask 002 is group-writable | `chmod go-w "$BIN"` (you may run it on the folder you made, after a yes) |
 | `sha256sum: ... FAILED` | the download is not the release's file | stop; do not run it; ask |
-| the script used port 4223 | 4222 is taken, often by the packaged nats-server service | `sudo systemctl disable --now nats-server` (the person runs it), then run the script again; or accept the other port |
+| the script used another port, such as 4223 | 4222 is taken by a server this guide did not make | fine: leave that server alone, mash uses the other port |
 | `not ready: the server did not answer: <url>` (from `mash status`) | the server is not running | `mash-local-nats-setup.sh --start` (day-2 skill) |
 | `error: the server did not come up` on a Mac | another user may hold the port: macOS shows you only your own listeners | ask the person to try another folder or free the port; do not stop it |
 | `mash: command not found` after install | the install folder is not on the PATH | use the full path from the install line; the person adds it |

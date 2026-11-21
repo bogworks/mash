@@ -60,7 +60,7 @@ run the command it names (status, then doctor, then status again).
 
 | You see | Cause | Fix |
 |---|---|---|
-| `not ok: the server did not answer`, or `not ready` | after a reboot or a stopped server, the local server is not running | the `--start` step below (on Debian, with the `/usr/sbin` PATH fix) |
+| `not ok: the server did not answer`, or `not ready` | after a reboot or a stopped server, the local server is not running | the `--start` step below |
 
 ## The server does not answer (after a reboot, say)
 
@@ -69,19 +69,12 @@ reboot. Check (`mashctl doctor` names what is wrong on the server side), then
 start it:
 
 ```sh
-SRV="$HOME/mash-nats"; DL="$HOME/mash-setup-dl"
-bash "$DL/mash-local-nats-setup.sh" --dir "$SRV" --start
+BIN="$HOME/.local/bin"; SRV="$HOME/mash-nats"; DL="$HOME/mash-setup-dl"
+PATH="$BIN:$PATH" bash "$DL/mash-local-nats-setup.sh" --dir "$SRV" --start
 ```
 
-On Debian and Ubuntu, with the apt `nats-server` (in `/usr/sbin`, which is not
-on a user's PATH), add it for this run:
-
-```sh
-SRV="$HOME/mash-nats"; DL="$HOME/mash-setup-dl"
-PATH="$PATH:/usr/sbin" bash "$DL/mash-local-nats-setup.sh" --dir "$SRV" --start
-```
-
-Without it the script says `error: missing: nats-server`.
+The install folder goes first on the PATH so the script finds `nats-server`;
+without it the script may say `error: missing: nats-server`.
 
 `--start` never creates a server: if the folder is missing it says so and
 stops. Needs a yes: starting the server. If the script is no longer there,
@@ -111,6 +104,20 @@ mashctl endpoint create acme.demo.carol
 Expected: `Created endpoint acme.demo.carol`. Check:
 `MASH_ENDPOINT=acme.demo.carol mash status` says `ready, offline`. The
 person then starts a session as that agent (`sh person`):
+
+```sh person
+MASH_ENDPOINT=acme.demo.carol claude
+```
+
+Mail arrives with that session's next prompt or tool call.
+
+### Wake an idle session (optional)
+
+`--dangerously-load-development-channels` is Claude Code's own flag. It lets a
+development plugin push a channel notification that wakes an idle session, and
+Claude Code asks the person to confirm it at each launch. It is the person's
+choice: never add it on your own word; explain it, ask, and only on a yes give
+them the line with it:
 
 ```sh person
 MASH_ENDPOINT=acme.demo.carol claude --dangerously-load-development-channels plugin:mash@mash
@@ -200,7 +207,8 @@ run `claude plugin marketplace update mash` and
 
 ## Do not
 
-- Do not run a `sh person` block, `sudo`, or `--yes` yourself.
+- Do not use `sudo` or any system package; everything is installed as you.
+- Do not run a `sh person` block or use `--yes` yourself.
 - Do not print, paste or mail a seed, a credentials file or a key.
 - Do not stop, change or remove a NATS server this guide did not make.
 - Do not use `pkill`, `killall` or `pgrep -f`.
