@@ -1,5 +1,5 @@
 ---
-status: accepted; the same-text rule is superseded by ADR-0156 from 0.5.7
+status: accepted
 date: 2026-11-12
 decision-makers: Randy Bias (mash maintainer)
 ---
