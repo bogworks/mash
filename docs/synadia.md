@@ -14,6 +14,6 @@
 
 ## What to use instead
 
-Run your own NATS server in operator mode with JetStream, and set it up with `mashctl init --config`. For one machine, the release's `mash-local-nats-setup.sh` makes such a server (see the [setup script reference](reference/setup.md)); the [walkthrough](guide/walkthrough.md) uses it. For a server that several machines reach, see [Operating mash](operations.md) and [TLS, clusters and a second mashctl machine](tls-and-clusters.md).
+Run your own NATS server in operator mode with JetStream, and set it up with `mashctl init --config`. For one machine, the release's `mash-local-nats-setup.sh` makes such a server (see the [setup script reference](reference/setup.md)); [by hand](guide/by-hand.md) uses it. For a server that several machines reach, see [Operating mash](operations.md) and [TLS, clusters and a second mashctl machine](tls-and-clusters.md).
 
 Guides for a local server and for Synadia Cloud are planned for 0.6.0 ([#1037](https://github.com/bogworks/mash/issues/1037)). Support in `mashctl` itself is tracked in #876.
