@@ -106,14 +106,17 @@ certificate authority's certificate, if the server uses its own), 'owner' (the
 first owner), 'admin_creds' (the administrator's creds file), 'system_creds'
 (the system account's creds file), 'operator_key' (the operator key that signs
 the account: its identity key when the server was set up with the nats
-command, or a signing key if your operator uses one) and 'account_key' (the
-account's signing key). The last three are what cancelling a deleted
-endpoint's key needs. Know what this means: with a server set up by the
-script, mashctl's folder holds the operator's identity key, the strongest key
-there is, with which the operator itself can be re-issued. It is protected
-only as your own files are. A hosted NATS where you do not hold the operator
-key, such as Synadia Cloud, is not supported by mashctl in 0.5.6; mash itself
-works against any conforming server.
+command, or a signing key if your operator uses one), 'account_key' (the
+account's identity key) and, optionally, 'signing_key' (one of the account's
+signing seeds, a 0600 file: when set, endpoint users are signed with it, which
+a strict operator needs; init refuses a key that is not listed in the account
+JWT, is the identity key or is scoped). The operator and account keys are what
+cancelling a deleted endpoint's key needs. Know what this means: with a server
+set up by the script, mashctl's folder holds the operator's identity key, the
+strongest key there is, with which the operator itself can be re-issued. It is
+protected only as your own files are. A hosted NATS where you do not hold the
+operator key, such as Synadia Cloud, is not supported by mashctl in 0.5.6;
+mash itself works against any conforming server.
 
 ## What it replaces
 
