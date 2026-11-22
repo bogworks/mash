@@ -9,7 +9,7 @@ The requirements apply to mash 0.5.7. They are what mash checks or creates; wher
 1. **nats-server 2.10.7 or newer.** Tested on 2.15.1.
 2. **Operator mode with a full resolver.** An operator key signs accounts, and the server keeps the account JWTs itself.
 3. **A system account**, with a user whose credentials you can give to `mashctl`.
-4. **One account for mash**, which already exists on the server, with JetStream and file storage. The operator must not require signing keys.
+4. **One account for mash**, which already exists on the server, with JetStream and file storage. If the operator requires signing keys (`strict_signing_key_usage`), give `mashctl` one as `signing_key`.
 5. **JetStream limits on that account** large enough for your endpoints (see [Sizing](#sizing)).
 6. **TLS.** Clients connect with `tls://` (or `wss://`) URLs, loopback included.
 7. **Credentials and keys as files** that you hand to `mashctl init` (see [Keys and creds mashctl needs](#keys-and-creds-mashctl-needs)).
