@@ -169,7 +169,7 @@ func AccountFindings(ctx context.Context, r Resolver, ks *ctlkeys.Authority, ser
 				continue
 			}
 			out = append(out, Finding{Kind: KindUnknownKey, Subject: config.Clean(u.key),
-				Detail: fmt.Sprintf("the account JWT holds the %s, which mashctl did not create. %s", u.describe(), unknownKeyNote)})
+				Detail: fmt.Sprintf("the account JWT holds the %s, which mashctl did not create: it is carried unchanged when mashctl rewrites the account JWT. %s", u.describe(), unknownKeyNote)})
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool {

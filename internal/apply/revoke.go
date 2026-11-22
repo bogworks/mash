@@ -169,16 +169,20 @@ func RevokeUsers(ctx context.Context, p RevokeParams, users []string) (RevokeRes
 			if known[k] {
 				continue
 			}
+			sc, _ := claims.SigningKeys.GetScope(k)
+			if sc == nil {
+				// A plain signing key (an operator's own, or the account signing key of another tool) is carried:
+				// claims keeps SigningKeys as read, and only Revocations change.
+				continue
+			}
 			u := unknownKey{key: k}
-			if sc, _ := claims.SigningKeys.GetScope(k); sc != nil {
-				if us, ok := sc.(*jwt.UserScope); ok && us != nil {
-					u.role = us.Role
-				}
+			if us, ok := sc.(*jwt.UserScope); ok && us != nil {
+				u.role = us.Role
 			}
 			unknown = append(unknown, u.describe())
 		}
 		if len(unknown) > 0 {
-			return res, fmt.Errorf("revoke: refusing: the account JWT carries signing keys mashctl did not create: %s. %s Remove it, then revoke again (nothing was changed)", strings.Join(unknown, "; "), unknownKeyNote)
+			return res, fmt.Errorf("revoke: refusing: the account JWT carries scoped signing keys mashctl did not create: %s. %s Remove it, then revoke again (nothing was changed)", strings.Join(unknown, "; "), unknownKeyNote)
 		}
 		res.Revoked, res.Already, res.Raised = nil, nil, nil
 		want = map[string]int64{}

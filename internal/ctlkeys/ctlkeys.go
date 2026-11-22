@@ -29,10 +29,14 @@ var (
 	ErrNoSystemKey = errors.New("mashctl: no system account key (system.nk): it exists only for a server `mashctl init --local` stood up")
 	// ErrNoAccountKey is returned by Account when account.nk is absent.
 	ErrNoAccountKey = errors.New("mashctl: no account signing key: run `mashctl init`")
+	// ErrNoSigningKey is returned by Signing when signing.nk is absent: the account has no separate signing key
+	// configured, and endpoint users are signed by the account identity key.
+	ErrNoSigningKey = errors.New("mashctl: no account signing key configured (signing.nk)")
 )
 
 const (
 	accountFile  = "account.nk"
+	signingFile  = "signing.nk"
 	operatorFile = "operator.nk"
 	systemFile   = "system.nk"
 	groupsDir    = "groups"
@@ -50,6 +54,7 @@ var (
 	accountKind  = kind{"account signing", nkeys.CreateAccount, nkeys.IsValidPublicAccountKey}
 	operatorKind = kind{"operator", nkeys.CreateOperator, nkeys.IsValidPublicOperatorKey}
 	systemKind   = kind{"system account", nkeys.CreateAccount, nkeys.IsValidPublicAccountKey}
+	signingKind  = kind{"account signing", nkeys.CreateAccount, nkeys.IsValidPublicAccountKey}
 )
 
 // Authority is the key store rooted at one directory.
@@ -409,6 +414,13 @@ func (a *Authority) Account() (nkeys.KeyPair, string, error) {
 	return a.getKind(accountFile, accountKind, ErrNoAccountKey)
 }
 
+// Signing returns the account SIGNING key pair (signing.nk) and its public key: the key that signs endpoint users
+// when the operator requires signing keys (strict_signing_key_usage). It is ErrNoSigningKey when none was imported;
+// Account is then the signer.
+func (a *Authority) Signing() (nkeys.KeyPair, string, error) {
+	return a.getKind(signingFile, signingKind, ErrNoSigningKey)
+}
+
 // ErrNoGroupKey is wrapped by GroupKey when the owner group has no key file and create is false.
 var ErrNoGroupKey = errors.New("mashctl: no signing key for owner group")
 
@@ -525,6 +537,16 @@ func (a *Authority) ImportOperator(path string) (pub string, created bool, err e
 // ImportAccount is ImportOperator for the account identity seed (account.nk).
 func (a *Authority) ImportAccount(path string) (pub string, created bool, err error) {
 	return a.importKind(path, accountFile, accountKind)
+}
+
+// ParseSigningSeed is ParseAccountSeed for the account signing seed (an account-prefix seed).
+func ParseSigningSeed(path string) (nkeys.KeyPair, string, error) {
+	return parseSeedFile(path, signingKind)
+}
+
+// ImportSigning is ImportAccount for the account signing seed (signing.nk): same custody, never overwritten.
+func (a *Authority) ImportSigning(path string) (pub string, created bool, err error) {
+	return a.importKind(path, signingFile, signingKind)
 }
 
 func (a *Authority) importKind(src, name string, k kind) (pub string, created bool, err error) {

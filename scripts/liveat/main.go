@@ -36,7 +36,7 @@ import (
 func main() { os.Exit(realMain(os.Args[1:], os.Stdout, os.Stderr)) }
 
 func realMain(args []string, stdout, stderr io.Writer) (code int) {
-	usage := "usage: liveat at001|at002|at003|at004|all|selfcheck --port P [--keep] [--strict: a pending check fails the run, exit 3] [--inside: only inside a container; the default runs in a sandbox container] | liveat at005 [--dry-setup] [--hosts podman --run-by manual|ci --host-label LABEL [--subnet-base A.B] | --hosts local] [--keep] [--record-out FILE] | liveat at005-cleanup [--run RUNID]"
+	usage := "usage: liveat at001|at002|at003|at004|at006|all|selfcheck --port P [--keep] [--strict: a pending check fails the run, exit 3] [--inside: only inside a container; the default runs in a sandbox container] | liveat at005 [--dry-setup] [--hosts podman --run-by manual|ci --host-label LABEL [--subnet-base A.B] | --hosts local] [--keep] [--record-out FILE] | liveat at005-cleanup [--run RUNID]"
 	if len(args) == 0 {
 		fmt.Fprintln(stderr, usage)
 		return 2
@@ -68,6 +68,8 @@ func realMain(args []string, stdout, stderr io.Writer) (code int) {
 		scs = []Scenario{AT003}
 	case "at004":
 		scs = []Scenario{AT004}
+	case "at006": // not in "all": it converts the script's server to a strict operator
+		scs = []Scenario{AT006}
 	case "all":
 		scs = []Scenario{AT001, AT002, AT003, AT004}
 	case "selfcheck":

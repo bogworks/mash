@@ -2,6 +2,7 @@ package apply
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 
@@ -162,8 +163,8 @@ func TestVerifyAccountJWT(t *testing.T) {
 	}
 }
 
-// TestRevokeRefusesUnknownSigningKeys: RevokeUsers does not carry a signing key mashctl did not create, a scoped one
-// (a zone policy of an older release) or a plain one, and names both.
+// TestRevokeRefusesUnknownSigningKeys: RevokeUsers does not carry a scoped signing key mashctl did not create (a zone
+// policy of an older release) and names it; a plain one beside it is not the reason for the refusal.
 func TestRevokeRefusesUnknownSigningKeys(t *testing.T) {
 	ks, fk := setup(t)
 	op, _, _ := ks.Operator()
@@ -181,10 +182,13 @@ func TestRevokeRefusesUnknownSigningKeys(t *testing.T) {
 	if err == nil {
 		t.Fatal("revoked over unknown signing keys")
 	}
-	for _, w := range []string{scoped, "role legacy", plain, "plain signing key", "will not carry signing keys it did not create", "ADR 0091"} {
+	for _, w := range []string{scoped, "role legacy", "will not carry a scoped signing key it did not create", "ADR 0091"} {
 		if !strings.Contains(err.Error(), w) {
 			t.Fatalf("missing %q: %v", w, err)
 		}
+	}
+	if strings.Contains(err.Error(), plain) {
+		t.Fatalf("a plain signing key is named in the refusal: %v", err)
 	}
 	if fk.pushes != 0 {
 		t.Fatal("pushed")
@@ -199,6 +203,66 @@ func TestRevokeRefusesUnknownSigningKeys(t *testing.T) {
 	}
 	if kinds[KindZonePolicyApplied] != 1 || kinds[KindUnknownKey] != 1 {
 		t.Fatalf("findings %+v", fs)
+	}
+}
+
+// A plain signing key mashctl did not create (another tool's, or the operator's own) is carried unchanged when
+// the revocation rewrites the account JWT.
+func TestRevokeCarriesForeignPlainSigningKeys(t *testing.T) {
+	ks, fk := setup(t)
+	op, _, _ := ks.Operator()
+	pk, _ := nkeys.CreateAccount()
+	plain := pubOf(t, pk)
+	resolverToken(t, fk, ks, op, func(cl *jwt.AccountClaims) { cl.SigningKeys.Add(plain) })
+	fk.acks, fk.applyPush = []ServerAck{{Server: "s1", Code: 200}}, true
+	u := userKey(t)
+	if _, err := RevokeUsers(context.Background(), RevokeParams{Keys: ks, Resolver: fk}, []string{u}); err != nil {
+		t.Fatal(err)
+	}
+	if fk.pushes == 0 || !revokedIn(t, fk.token, u) {
+		t.Fatal("not revoked")
+	}
+	_, acct, _ := ks.Account()
+	got, err := jwt.DecodeAccountClaims(fk.token)
+	if err != nil || got.Subject != acct {
+		t.Fatalf("pushed token: %v", err)
+	}
+	if !got.SigningKeys.Contains(plain) {
+		t.Fatal("the foreign plain signing key was dropped by the rewrite")
+	}
+	if sc, _ := got.SigningKeys.GetScope(plain); sc != nil {
+		t.Fatal("the plain signing key became scoped")
+	}
+}
+
+// The configured signing key (signing.nk) counts as known: no finding, and a revocation goes through with it listed.
+func TestConfiguredSigningKeyIsKnown(t *testing.T) {
+	ks, fk := setup(t)
+	op, _, _ := ks.Operator()
+	sk, _ := nkeys.CreateAccount()
+	dir := t.TempDir()
+	seed, _ := sk.Seed()
+	path := dir + "/signing.seed"
+	if err := os.WriteFile(path, append(seed, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	pub, _, err := ks.ImportSigning(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolverToken(t, fk, ks, op, func(cl *jwt.AccountClaims) { cl.SigningKeys.Add(pub) })
+	fk.acks, fk.applyPush = []ServerAck{{Server: "s1", Code: 200}}, true
+	fs, err := AccountFindings(context.Background(), fk, ks, 0)
+	if err != nil || len(fs) != 0 {
+		t.Fatalf("findings %+v %v", fs, err)
+	}
+	u := userKey(t)
+	if _, err := RevokeUsers(context.Background(), RevokeParams{Keys: ks, Resolver: fk}, []string{u}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := jwt.DecodeAccountClaims(fk.token)
+	if !got.SigningKeys.Contains(pub) || !revokedIn(t, fk.token, u) {
+		t.Fatal("signing key lost or user not revoked")
 	}
 }
 

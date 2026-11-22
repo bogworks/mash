@@ -24,7 +24,7 @@ The requirements apply to mash 0.5.6. They are what mash checks or creates; wher
 
 **The account.** `mashctl init` cannot create the account. It must already be on the resolver, signed by the operator key you give, not expired, and its JWT's subject must be the account key you give.
 
-**No strict signing key usage.** `mashctl` signs every endpoint's user with the account's identity key, the `account_key` below. An operator that requires users to be signed by an account signing key (`strict_signing_key_usage: true`) will not accept those users. We did not test this case, and 0.5.6 has no setting for a separate signing key, so leave that option off.
+**Strict signing key usage.** By default `mashctl` signs every endpoint's user with the account's identity key, the `account_key` below. An operator that requires users to be signed by an account signing key (`strict_signing_key_usage: true`) refuses those users, so set `signing_key` below to the account's signing seed and `mashctl` signs with that instead. `init` checks that the key is one of the account JWT's signing keys. Without the setting, leave strict signing off.
 
 **JetStream with file storage.** mash keeps everything on file storage and uses no memory storage. `init` refuses an account whose JWT gives it no disk storage (disk limit 0). If the account uses tiered limits, it needs an `R1` tier, because every mash stream has one replica. The server itself must also have been able to switch JetStream on for the account: nats-server gives JetStream a budget of 75% of the free disk by default, and an account asking for more than what is left silently gets no JetStream. `init` asks the server and says so if that happened.
 
@@ -103,6 +103,7 @@ With a private CA and no `ca` set, `mashctl init` stops with: "the server's cert
 | Setup file key | What it is | What it is for |
 | --- | --- | --- |
 | `operator_key` | The operator seed (starts with `SO`): the key that signs the account's JWT. This is the operator's identity key when the server was set up with the `nats` command, or a signing key if your operator uses one. | Re-signing the account JWT when an endpoint's key is revoked. |
+| `signing_key` | Optional. A 0600 file holding one of the account's **signing** seeds (starts with `SA`; its public key is listed in the account JWT's signing keys). Set it when the operator has `strict_signing_key_usage: true`. | Signing each endpoint's user credentials, in place of `account_key`. |
 | `account_key` | The account's **identity** seed (starts with `SA`), the one whose public key is the account JWT's subject. It is not an account signing key. | Signing each endpoint's user credentials. |
 | `system_creds` | Credentials of a user in the system account. | Everything in "System account" above. |
 | `admin_creds` | Credentials of a user in the mash account. | The administrator's connection: making and removing inboxes, the directory and the records of what was issued. |

@@ -8,6 +8,7 @@ import (
 	"github.com/nats-io/nkeys"
 
 	"github.com/bogworks/mash/internal/admin"
+	"github.com/bogworks/mash/internal/ctlkeys"
 	"github.com/bogworks/mash/internal/enroll"
 	"github.com/bogworks/mash/internal/sap"
 )
@@ -22,6 +23,10 @@ func (f fixedKeys) Account() (nkeys.KeyPair, string, error) {
 	}
 	pub, _ := kp.PublicKey()
 	return kp, pub, nil
+}
+
+func (f fixedKeys) Signing() (nkeys.KeyPair, string, error) {
+	return nil, "", ctlkeys.ErrNoSigningKey
 }
 
 func TestSignUserNoServer(t *testing.T) {

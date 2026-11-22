@@ -12,12 +12,52 @@ import (
 	"github.com/nats-io/nkeys"
 
 	"github.com/bogworks/mash/internal/admin"
+	"github.com/bogworks/mash/internal/ctlkeys"
 	"github.com/bogworks/mash/internal/sap"
 )
 
 // Keys is the key store Mint signs with; *ctlkeys.Authority satisfies it.
+//
+// Account is the account IDENTITY key. Signing is the account SIGNING key an operator with strict_signing_key_usage
+// requires; it returns ctlkeys.ErrNoSigningKey (tested with errors.Is) when none is configured, and then the identity
+// key signs, as before.
 type Keys interface {
 	Account() (nkeys.KeyPair, string, error)
+	Signing() (nkeys.KeyPair, string, error)
+}
+
+// signer is the key that signs a user and what the claims then say: with a signing key it is that key and
+// issuerAccount is the account's identity public key; without one it is the identity key and issuerAccount is "".
+type signer struct {
+	kp            nkeys.KeyPair
+	acctPub       string
+	issuerAccount string
+}
+
+func (s signer) wipe() { s.kp.Wipe() }
+
+func loadSigner(keys Keys) (signer, error) {
+	acctKP, acctPub, err := keys.Account()
+	if err != nil {
+		return signer{}, err
+	}
+	if !nkeys.IsValidPublicAccountKey(acctPub) {
+		acctKP.Wipe()
+		return signer{}, errors.New("mint: the account signing key is not an account key")
+	}
+	skp, spub, err := keys.Signing()
+	if errors.Is(err, ctlkeys.ErrNoSigningKey) {
+		return signer{kp: acctKP, acctPub: acctPub}, nil
+	}
+	acctKP.Wipe()
+	if err != nil {
+		return signer{}, err
+	}
+	if !nkeys.IsValidPublicAccountKey(spub) {
+		skp.Wipe()
+		return signer{}, errors.New("mint: the account signing key is not an account key")
+	}
+	return signer{kp: skp, acctPub: acctPub, issuerAccount: acctPub}, nil
 }
 
 // Minted is one issued user. Creds holds the user seed: never log or print it.
@@ -34,14 +74,12 @@ type Minted struct {
 // that user key.
 func Mint(keys Keys, addr sap.Address, userSeed []byte) (*Minted, error) {
 	reissue := userSeed != nil
-	acctKP, acctPub, err := keys.Account()
+	sg, err := loadSigner(keys)
 	if err != nil {
 		return nil, err
 	}
-	defer acctKP.Wipe()
-	if !nkeys.IsValidPublicAccountKey(acctPub) {
-		return nil, errors.New("mint: the account signing key is not an account key")
-	}
+	defer sg.wipe()
+	acctPub := sg.acctPub
 
 	var userKP nkeys.KeyPair
 	if reissue {
@@ -68,7 +106,7 @@ func Mint(keys Keys, addr sap.Address, userSeed []byte) (*Minted, error) {
 	seed = append([]byte(nil), seed...)
 	defer clear(seed)
 
-	token, err := signUser(acctKP, addr, userPub)
+	token, err := signUser(sg, addr, userPub)
 	if err != nil {
 		return nil, err
 	}
@@ -89,24 +127,23 @@ func SignUser(keys Keys, addr sap.Address, userPub string) (token, acctPub strin
 	if !nkeys.IsValidPublicUserKey(userPub) {
 		return "", "", errors.New("mint: not a user public key")
 	}
-	acctKP, acctPub, err := keys.Account()
+	sg, err := loadSigner(keys)
 	if err != nil {
 		return "", "", err
 	}
-	defer acctKP.Wipe()
-	if !nkeys.IsValidPublicAccountKey(acctPub) {
-		return "", "", errors.New("mint: the account signing key is not an account key")
-	}
-	token, err = signUser(acctKP, addr, userPub)
-	return token, acctPub, err
+	defer sg.wipe()
+	token, err = signUser(sg, addr, userPub)
+	return token, sg.acctPub, err
 }
 
-func signUser(acctKP nkeys.KeyPair, addr sap.Address, userPub string) (string, error) {
+func signUser(sg signer, addr sap.Address, userPub string) (string, error) {
 	uc := jwt.NewUserClaims(userPub)
 	uc.Name = addr.String()
-	// The account's own key signs, so the user carries its permissions in the JWT itself.
+	// The account's own key signs, so the user carries its permissions in the JWT itself. A signing key names the
+	// account it signs for (issuer_account); the identity key is the account and names nothing.
 	uc.Permissions = *admin.Permissions(addr)
-	token, err := uc.Encode(acctKP)
+	uc.IssuerAccount = sg.issuerAccount
+	token, err := uc.Encode(sg.kp)
 	if err != nil {
 		return "", fmt.Errorf("mint: sign: %w", err)
 	}

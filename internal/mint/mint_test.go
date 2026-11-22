@@ -21,6 +21,20 @@ import (
 // fakeKeys is an in-memory Keys.
 type fakeKeys struct {
 	acct nkeys.KeyPair
+	sign nkeys.KeyPair // the account signing key; nil means none is configured
+}
+
+func (f *fakeKeys) Signing() (nkeys.KeyPair, string, error) {
+	if f.sign == nil {
+		return nil, "", ctlkeys.ErrNoSigningKey
+	}
+	seed, _ := f.sign.Seed()
+	kp, err := nkeys.FromSeed(seed)
+	if err != nil {
+		return nil, "", err
+	}
+	pub, _ := kp.PublicKey()
+	return kp, pub, nil
 }
 
 func newFakeKeys(t *testing.T) *fakeKeys {
@@ -222,4 +236,44 @@ func startServer(t *testing.T, keys *fakeKeys) string {
 	}
 	t.Cleanup(func() { s.Shutdown(); s.WaitForShutdown() })
 	return s.ClientURL()
+}
+
+// With a signing key the user JWT is issued by that key and names the account (the identity key) as issuer_account;
+// without one the identity key signs and no issuer_account is set.
+func TestMintSigningKey(t *testing.T) {
+	keys := newFakeKeys(t)
+	_, idPub, _ := keys.Account()
+	m, err := Mint(keys, testAddr, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uc, _ := jwt.DecodeUserClaims(m.JWT)
+	if uc.Issuer != idPub || uc.IssuerAccount != "" {
+		t.Fatalf("no signing key: issuer %s issuer_account %q", uc.Issuer, uc.IssuerAccount)
+	}
+	sk, _ := nkeys.CreateAccount()
+	skPub, _ := sk.PublicKey()
+	keys.sign = sk
+	m, err = Mint(keys, testAddr, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uc, err = jwt.DecodeUserClaims(m.JWT)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if uc.Issuer != skPub || uc.IssuerAccount != idPub || m.AccountPub != idPub {
+		t.Fatalf("signing key: issuer %s (want %s) issuer_account %s (want %s) account %s", uc.Issuer, skPub, uc.IssuerAccount, idPub, m.AccountPub)
+	}
+	// SignUser (a key the endpoint made) takes the same path.
+	ukp, _ := nkeys.CreateUser()
+	upub, _ := ukp.PublicKey()
+	tok, acct, err := SignUser(keys, testAddr, upub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uc, _ = jwt.DecodeUserClaims(tok)
+	if uc.Issuer != skPub || uc.IssuerAccount != idPub || acct != idPub {
+		t.Fatalf("SignUser: issuer %s issuer_account %s account %s", uc.Issuer, uc.IssuerAccount, acct)
+	}
 }

@@ -116,6 +116,16 @@ func (a *AT) StartSession(h Home, group, name string, more ...string) (*Proc, []
 // buckets and writes h's config.json. The script is run with the scenario's environment (a.Env(h)), and the srv
 // directory must not exist before the call: the script makes it.
 func (a *AT) StartServer(h Home) bool {
+	if !a.startScriptServer(h) {
+		return false
+	}
+	res := a.Ctl("init-config", h, nil, "init", "--config", filepath.Join(a.srvDir, fileSetupYAML))
+	return a.C.Check("mashctl init --config makes mash's storage on the server", res.Code == 0, exitDetail(res))
+}
+
+// startScriptServer is StartServer up to, and not including, `mashctl init`: the setup script's server is made and
+// started and its PID recorded.
+func (a *AT) startScriptServer(h Home) bool {
 	if !insideContainer() {
 		a.C.Check("the setup script runs inside a container", false, errSetupOnHost)
 		return false
@@ -147,8 +157,7 @@ func (a *AT) StartServer(h Home) bool {
 		a.C.Check("the server's PID is recorded in server.pid", false, "")
 		return false
 	}
-	res = a.Ctl("init-config", h, nil, "init", "--config", filepath.Join(a.srvDir, fileSetupYAML))
-	return a.C.Check("mashctl init --config makes mash's storage on the server", res.Code == 0, exitDetail(res))
+	return true
 }
 
 // StopServer stops the server with the script's --stop (which checks /proc that the pid is this directory's
