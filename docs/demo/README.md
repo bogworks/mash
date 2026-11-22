@@ -12,7 +12,7 @@ asciinema play -i 2 docs/demo/two-sessions.cast
 
 ## What happens
 
-1. Both sessions start as `MASH_NAME=<name> claude --channels plugin:mash@mash`. `bob` sits idle: nothing is typed in it.
+1. Both sessions start as `MASH_NAME=<name> claude` plus the channel flag the account needs ([install.md](../install.md#3-optional-wake-an-idle-session)). `bob` sits idle: nothing is typed in it.
 2. In `alice` the only prompt is: *Mail bob a task: run uname -sr and mail me the output. Then wait.*
    `alice` calls the `send` tool and says the task went out.
 3. `bob`, idle, **is woken by the mail**: a `← mash: 1 message from alice (task)` line starts a turn on its own. `bob`

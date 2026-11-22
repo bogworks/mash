@@ -115,15 +115,17 @@ mashctl endpoint create acme.demo.carol
 
 Expected: `Created endpoint acme.demo.carol`. Check:
 `MASH_ENDPOINT=acme.demo.carol mash status` says `ready, offline`. The
-person then starts a session as that agent (`sh person`):
+person then starts a session as that agent. Give it a command file like
+the ones the setup skill wrote (step 8 there): one small file in the install
+folder named for the agent (`carol`), with the full address inside, `--name`,
+and the same channel choice the person made at setup (ask again if you do not
+know it; never add `--dangerously-load-development-channels` without their
+yes). Show it, write it with `install -m 755`, then the person types the one
+word (`sh person`):
 
 ```sh person
-MASH_ENDPOINT=acme.demo.carol claude --channels plugin:mash@mash --name acme.demo.carol
+carol
 ```
-
-`--name` shows the address as the session's name, so you can tell who you are
-talking to (`/rename` does the same for a session already open); `--channels`
-lets mail wake an idle session.
 
 An address that was deleted can never be used again; pick another name.
 

@@ -80,15 +80,23 @@ Mail needs those hooks to run. They do not run with `disableAllHooks: true` in a
 <a id="3-allow-the-channel"></a><a id="3-allow-the-channel-once-per-machine"></a>
 ## 3. Optional: wake an idle session
 
-**You can skip this section.** Without it, mail still arrives at the session's next prompt or tool call. The idle wake, which rouses a session that is waiting for input, comes from the channel: start the session with `--channels plugin:mash@mash`. It needs no root and no setting, and Claude Code shows no warning:
+**You can skip this section.** Without it, mail still arrives at the session's next prompt or tool call. The idle wake, which rouses a session that is waiting for input, needs Claude Code to load mash's channel. Claude Code's channels page says: "During the preview, `--channels` only accepts plugins from an Anthropic-maintained allowlist, or from your organization's allowlist if an admin has set `allowedChannelPlugins`" ([Claude Code channels](https://code.claude.com/docs/en/channels)). mash is not on Anthropic's list, so what you do depends on your account:
 
-```sh
-MASH_ENDPOINT=alice.dev.design claude --channels plugin:mash@mash --name alice.dev.design
-```
+- **Personal account.** The idle wake needs Claude Code's development flag today. Claude Code shows a warning screen and asks you to confirm at every start; whether to use it is your choice. It lets a plugin that is not on Anthropic's list push a message into your session.
 
-`--name` puts the address in the prompt box and the terminal title, so you can tell who you are talking to; `/rename alice.dev.design` does the same for a session already open.
+  ```sh
+  MASH_ENDPOINT=alice.dev.design claude --name alice.dev.design --dangerously-load-development-channels plugin:mash@mash
+  ```
 
-If your organisation manages Claude Code, it can turn channels off. Then the idle wake does not arrive and hooks still deliver mail at the next prompt or tool call (see [Hook delivery](operations.md)).
+- **Team or Enterprise organisation.** Channels are off until an owner turns them on (`channelsEnabled`), and an administrator must add mash to `allowedChannelPlugins` in the managed settings (Organization settings > Claude Code > Channels). Then no flag is needed:
+
+  ```sh
+  MASH_ENDPOINT=alice.dev.design claude --name alice.dev.design --channels plugin:mash@mash
+  ```
+
+- **Neither.** Start the session without a channel flag. Mail arrives at the next prompt or tool call and an idle session is not woken.
+
+`--name` puts the address in the prompt box and the terminal title, so you can tell who you are talking to; `/rename alice.dev.design` does the same for a session already open. The setup skill writes one command per agent with the right flags inside, so you type one word per session. Without a channel, hooks still deliver mail ([Hook delivery](operations.md)).
 
 ## 4. Configuration
 
@@ -159,10 +167,10 @@ The old names are gone with no alias: `MASH_INSECURE_PLAINTEXT` in the environme
 ## 5. Launch a session
 
 ```sh
-MASH_ENDPOINT=alice.dev.design claude --channels plugin:mash@mash --name alice.dev.design
+MASH_ENDPOINT=alice.dev.design claude --name alice.dev.design
 ```
 
-`--channels` wakes an idle session ([section 3](#3-optional-wake-an-idle-session)); `--name` shows the address as the session's name.
+`--name` shows the address as the session's name. To wake an idle session as well, add the channel flag that fits your account ([section 3](#3-optional-wake-an-idle-session)).
 
 The session registers as a SAP agent, takes the lease on its name, and starts receiving mail. If another live session already holds the name, this one starts without mail tools and says why.
 
