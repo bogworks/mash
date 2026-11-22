@@ -77,6 +77,9 @@ type Input struct {
 	// Held is the key store's GroupPublics: every owner group of every range to its public key. A scoped signing key
 	// held there is mash's, whatever its range, and is kept (see KeptSigners).
 	Held map[string]string
+	// Signing is the public key of the configured account signing key (signing_key), "" when none: a plain signing key
+	// of the account JWT that is mash's own, so it is kept and never reported as removed by apply.
+	Signing string
 	// Exempt is the adoption marker's exempt users: never in any action.
 	Exempt []string
 	// Servers is what every server's CONNZ said for the account; ScanIncomplete is non-empty when that is not the whole
@@ -312,6 +315,9 @@ func Build(ctx context.Context, in Input) (Plan, error) {
 	kept, err := KeptSigners(in.Claims, in.Held, in.Signers, in.ListSet.Range)
 	if err != nil {
 		return Plan{}, err
+	}
+	if in.Signing != "" {
+		kept[in.Signing] = true
 	}
 	adminUnrecorded := false
 	exempt := map[string]bool{}

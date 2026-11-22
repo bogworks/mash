@@ -175,7 +175,7 @@ func RevokeUsers(ctx context.Context, p RevokeParams, users []string) (RevokeRes
 				// claims keeps SigningKeys as read, and only Revocations change.
 				continue
 			}
-			u := unknownKey{key: k}
+			u := unknownKey{key: k, scoped: true}
 			if us, ok := sc.(*jwt.UserScope); ok && us != nil {
 				u.role = us.Role
 			}

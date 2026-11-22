@@ -51,10 +51,10 @@ type kind struct {
 }
 
 var (
-	accountKind  = kind{"account signing", nkeys.CreateAccount, nkeys.IsValidPublicAccountKey}
+	accountKind  = kind{"account identity (account_key)", nkeys.CreateAccount, nkeys.IsValidPublicAccountKey}
 	operatorKind = kind{"operator", nkeys.CreateOperator, nkeys.IsValidPublicOperatorKey}
 	systemKind   = kind{"system account", nkeys.CreateAccount, nkeys.IsValidPublicAccountKey}
-	signingKind  = kind{"account signing", nkeys.CreateAccount, nkeys.IsValidPublicAccountKey}
+	signingKind  = kind{"account signing (signing_key)", nkeys.CreateAccount, nkeys.IsValidPublicAccountKey}
 )
 
 // Authority is the key store rooted at one directory.

@@ -125,6 +125,31 @@ func errNonMashKey(k string) error {
 	return fmt.Errorf("the account JWT carries a signing key that is not an owner group key of the key store (%.8s...): remove it before a list set can be applied", k)
 }
 
+// signingPub is the public key of the configured account signing key (signing_key), "" when there is none (or the
+// key store has no such key).
+func (s *Issuer) signingPub() (string, error) {
+	return SigningPub(s.Keys)
+}
+
+// SigningPub is the public key of the account signing key of ks (signing.nk), "" when it has none.
+func SigningPub(ks any) (string, error) {
+	sk, ok := ks.(interface {
+		Signing() (nkeys.KeyPair, string, error)
+	})
+	if !ok {
+		return "", nil
+	}
+	kp, pub, err := sk.Signing()
+	switch {
+	case err == nil:
+		kp.Wipe()
+		return pub, nil
+	case errors.Is(err, ctlkeys.ErrNoSigningKey):
+		return "", nil
+	}
+	return "", fmt.Errorf("account signing key: %w", err)
+}
+
 // keptFrom splits the signing keys of base. kept is the other ranges' group keys of the key store (group -> public
 // key) that base also carries: the ones the next account JWT retains, and the ones the generation read must find. A
 // key store key of another range that base does not carry is in neither. mine are this range's keys in base, which are
@@ -142,8 +167,16 @@ func (s *Issuer) keptFrom(base *jwt.AccountClaims) (kept map[string]string, mine
 	for g, pub := range ours {
 		groupOf[pub] = g
 	}
+	// The configured account signing key (signing_key) is mash's own, a plain key in the account JWT: never non-mash.
+	signing, err := s.signingPub()
+	if err != nil {
+		return nil, nil, nil, err
+	}
 	kept = map[string]string{}
 	for _, k := range base.SigningKeys.Keys() {
+		if signing != "" && k == signing {
+			continue
+		}
 		sc, _ := base.SigningKeys.GetScope(k)
 		g, held := groupOf[k]
 		if _, scoped := sc.(*jwt.UserScope); !scoped || !held {

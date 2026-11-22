@@ -62,6 +62,8 @@ type ApplyDeps struct {
 	// KeptSigners are the scoped signing keys of other ranges (group -> public key) that the account JWT keeps
 	// beside Signers (RunInput.KeptSigners). Without them a multi-range account is never read as the target.
 	KeptSigners map[string]string
+	// PlainSigners are mash's own plain signing keys that stay in the account JWT (RunInput.PlainSigners).
+	PlainSigners []string
 	// ServerLimits are the servers' limits. Apply does not use them: the intake checks sizes with listset.SizeCheck
 	// before it calls Apply, and Run refuses a JWT over policy.AccountJWTLimit.
 	ServerLimits []listset.ServerLimits
@@ -151,7 +153,7 @@ func Apply(ctx context.Context, req ApplyRequest, deps ApplyDeps) (Status, error
 		ListSet: req.ListSet, Received: req.Received, RotationStep: req.RotationStep,
 		Previous: prev, Signer: deps.Signer, OldKeys: oldKeys,
 		Signers: deps.Signers, PreviousSigners: deps.Signers,
-		KeptSigners: deps.KeptSigners,
+		KeptSigners: deps.KeptSigners, PlainSigners: deps.PlainSigners,
 		OldKeysFn: func(ctx context.Context) (map[string][]OldKey, error) {
 			return oldKeysFromRecord(ctx, deps.IssueRecord, prev, req.ListSet)
 		},

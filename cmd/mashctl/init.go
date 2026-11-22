@@ -185,7 +185,8 @@ type initState struct {
 	signKP           nkeys.KeyPair // the account signing key of signing_key; nil when it is not configured
 	opPub, acctPub   string
 	signPub          string
-	haveSign         bool // the key store already holds this very signing key
+	haveSign         bool   // the key store already holds this very signing key
+	storedSignPub    string // the public key of signing.nk in the key store when the setup file gives no signing_key
 	sysCredsRaw      []byte
 	trust            apply.Trust
 	adminRaw         []byte
@@ -370,6 +371,13 @@ func doInit(setupPath string, dry, jsonOut bool, env func(string) string, lookup
 	if st.signPub != "" {
 		if err := checkSigningKeyListed(claims, st.signPub); err != nil {
 			return cliframe.Failf("%v (nothing was changed)", err)
+		}
+	}
+
+	if st.signPub == "" && st.storedSignPub != "" {
+		// The setup file names no signing_key, but the stored signing.nk keeps signing endpoint users.
+		if err := checkSigningKeyListed(claims, st.storedSignPub); err != nil {
+			return cliframe.Failf("the key store's signing.nk (public key %s) keeps signing endpoint users and is no longer a plain listed signing key of the account JWT (%v): give the setup file's signing_key, or move signing.nk aside (nothing was changed)", st.storedSignPub, err)
 		}
 	}
 
@@ -745,6 +753,8 @@ func checkStore(ks *ctlkeys.Authority, st *initState) error {
 				return differentSetup(st, "signing key")
 			}
 			st.haveSign = true
+		} else {
+			st.storedSignPub = pub
 		}
 	}
 	return nil

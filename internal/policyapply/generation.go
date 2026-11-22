@@ -25,6 +25,9 @@ type Candidate struct {
 	// with its group as role, its group must not be a template of this candidate, and no key beyond Signers and Kept
 	// may be present. A kept key missing, or with another role, fails the read.
 	Kept map[string]string
+	// Plain are plain signing keys that are mash's own (the configured account signing key) and may be present beside
+	// Signers and Kept: they are not counted as keys beyond them. Any other plain key still fails the read.
+	Plain []string
 }
 
 // GenerationOf says which candidate the account JWT carries. The JWT carries no marker: a scoped signing key whose
@@ -81,7 +84,15 @@ func matches(claims *jwt.AccountClaims, roles map[string]scoped, c Candidate, al
 			return false // a kept signer missing, plain, or with another role
 		}
 	}
-	if c.Signers != nil && len(claims.SigningKeys) != len(own)+len(c.Kept) {
+	n := len(claims.SigningKeys)
+	for _, k := range c.Plain {
+		if sc, _ := claims.SigningKeys.GetScope(k); sc == nil {
+			if _, has := claims.SigningKeys[k]; has {
+				n--
+			}
+		}
+	}
+	if c.Signers != nil && n != len(own)+len(c.Kept) {
 		return false // a plain, a duplicate-role or any other signing key beyond the expected ones
 	}
 	for _, o := range all {

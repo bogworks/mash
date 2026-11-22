@@ -31,8 +31,8 @@ func AdminUserKey(cfg config.Config) (string, error) {
 	return strings.TrimSpace(uc.Subject), nil
 }
 
-// HeldPublicKeys is every public key mash holds for the account of cfg: the key store's operator, system, account
-// and the admin user's key. A next submitter of a planned rotation must be none of them. Any failure
+// HeldPublicKeys is every public key mash holds for the account of cfg: the key store's operator, system, account,
+// account signing and the admin user's key. A next submitter of a planned rotation must be none of them. Any failure
 // to read the key store or the admin credentials is an error, so a caller refuses (fail closed).
 func HeldPublicKeys(cfg config.Config, ks *ctlkeys.Authority) ([]string, error) {
 	_, held, err := ks.HeldKeys()

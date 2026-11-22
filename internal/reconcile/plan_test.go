@@ -606,3 +606,26 @@ func TestSameRangeGroupTheListSetDropsIsNotKept(t *testing.T) {
 		})
 	}
 }
+
+// The configured account signing key is mash's own plain signing key: it is not reported, in force or as removed by
+// the first apply.
+func TestAccountSigningKeyIsNotReported(t *testing.T) {
+	w := newWorld(t)
+	w.claims.SigningKeys.Add(w.plain)
+	for _, src := range []Source{SourceInForce, SourceListSetFile} {
+		gen := uint64(1)
+		if src == SourceListSetFile {
+			gen = 0
+		}
+		p, err := Build(context.Background(), Input{
+			Account: w.acct, Now: w.now, Source: src, Generation: gen, ListSet: testSet(), Claims: w.claims,
+			Signers: map[string]string{"foo.c": w.scoped}, Held: map[string]string{"foo.c": w.scoped}, Signing: w.plain,
+			Exempt: []string{w.admin}, Issued: w.issued, AdminUser: w.admin, AdminIssuer: w.acct})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(p.SigningKeys) != 0 || p.Unknown != 0 {
+			t.Errorf("source %v: signing keys %+v unknown %d", src, p.SigningKeys, p.Unknown)
+		}
+	}
+}

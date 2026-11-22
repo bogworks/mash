@@ -206,6 +206,30 @@ func TestRevokeRefusesUnknownSigningKeys(t *testing.T) {
 	}
 }
 
+// A scoped signing key with an empty role is scoped, not plain: drift and revoke agree (a zone finding, and a refusal).
+func TestScopedKeyWithEmptyRoleIsNotPlain(t *testing.T) {
+	ks, fk := setup(t)
+	op, _, _ := ks.Operator()
+	sk, _ := nkeys.CreateAccount()
+	scoped := pubOf(t, sk)
+	resolverToken(t, fk, ks, op, func(cl *jwt.AccountClaims) {
+		sc := jwt.NewUserScope()
+		sc.Key = scoped
+		cl.SigningKeys.AddScopedSigner(sc)
+	})
+	fk.acks, fk.applyPush = []ServerAck{{Server: "s1", Code: 200}}, true
+	if _, err := RevokeUsers(context.Background(), RevokeParams{Keys: ks, Resolver: fk}, []string{userKey(t)}); err == nil || !strings.Contains(err.Error(), "scoped signing key") {
+		t.Fatalf("revoke: %v", err)
+	}
+	fs, err := AccountFindings(context.Background(), fk, ks, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fs) != 1 || fs[0].Kind != KindZonePolicyApplied || !strings.Contains(fs[0].Detail, "scoped signing key") {
+		t.Fatalf("findings %+v", fs)
+	}
+}
+
 // A plain signing key mashctl did not create (another tool's, or the operator's own) is carried unchanged when
 // the revocation rewrites the account JWT.
 func TestRevokeCarriesForeignPlainSigningKeys(t *testing.T) {

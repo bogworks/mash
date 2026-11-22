@@ -106,12 +106,15 @@ const (
 	defaultLockWait    = 5 * time.Second
 )
 
-// unknownKey is a signing key of the fetched account JWT that is not one of mashctl's own keys. role is the scoped
-// signer's role, "" for a plain signing key.
-type unknownKey struct{ key, role string }
+// unknownKey is a signing key of the fetched account JWT that is not one of mashctl's own keys. scoped is false for a
+// plain signing key; role is the scoped signer's role.
+type unknownKey struct {
+	key, role string
+	scoped    bool
+}
 
 func (u unknownKey) describe() string {
-	if u.role == "" {
+	if !u.scoped {
 		return "plain signing key " + config.Clean(u.key)
 	}
 	return fmt.Sprintf("scoped signing key %s (role %s)", config.Clean(u.key), config.Clean(u.role))

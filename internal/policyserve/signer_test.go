@@ -13,14 +13,25 @@ import (
 
 	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/apply"
+	"github.com/bogworks/mash/internal/ctlkeys"
 	"github.com/bogworks/mash/internal/listset"
 	"github.com/bogworks/mash/internal/policyapply"
 )
 
 // storeKeys is a Keys with an operator key and any number of owner group keys.
 type storeKeys struct {
-	op     nkeys.KeyPair
-	groups map[string]nkeys.KeyPair
+	op      nkeys.KeyPair
+	groups  map[string]nkeys.KeyPair
+	signing nkeys.KeyPair // the account signing key (signing.nk); nil when none
+}
+
+func (s storeKeys) Signing() (nkeys.KeyPair, string, error) {
+	if s.signing == nil {
+		return nil, "", ctlkeys.ErrNoSigningKey
+	}
+	kp, err := nkeys.FromSeed(mustSeed(s.signing))
+	pub, _ := kp.PublicKey()
+	return kp, pub, err
 }
 
 func (s storeKeys) Operator() (nkeys.KeyPair, string, error) {

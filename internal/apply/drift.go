@@ -158,12 +158,15 @@ func AccountFindings(ctx context.Context, r Resolver, ks *ctlkeys.Authority, ser
 				continue
 			}
 			u := unknownKey{key: k}
-			if sc, _ := claims.SigningKeys.GetScope(k); sc != nil {
+			// A plain key has no scope (as RevokeUsers reads it); anything with a scope is a zone key.
+			sc, _ := claims.SigningKeys.GetScope(k)
+			if sc != nil {
+				u.scoped = true
 				if us, ok := sc.(*jwt.UserScope); ok && us != nil {
 					u.role = us.Role
 				}
 			}
-			if u.role != "" {
+			if u.scoped {
 				out = append(out, Finding{Kind: KindZonePolicyApplied, Subject: config.Clean(u.key),
 					Detail: fmt.Sprintf("the account JWT holds the %s: a zone policy from an older release is applied, and zones are removed (ADR 0091); stay on the last zoned release until the label policy model ships", u.describe())})
 				continue

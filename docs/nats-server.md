@@ -2,7 +2,7 @@
 
 This page is for you if you run your own `nats-server` and want mash to use it. It lists everything that server has to provide, and then shows how to connect mash to it. If you only want a server on your own machine, you do not need this page: the setup script makes one that meets every requirement below. See [Installing mash](install.md). Where NATS sits under mash is in [the stack](guide/stack.md).
 
-The requirements apply to mash 0.5.6. They are what mash checks or creates; where this page says "not checked", mash does not test it for you.
+The requirements apply to mash 0.5.7. They are what mash checks or creates; where this page says "not checked", mash does not test it for you.
 
 ## Requirements
 
@@ -104,7 +104,7 @@ With a private CA and no `ca` set, `mashctl init` stops with: "the server's cert
 | --- | --- | --- |
 | `operator_key` | The operator seed (starts with `SO`): the key that signs the account's JWT. This is the operator's identity key when the server was set up with the `nats` command, or a signing key if your operator uses one. | Re-signing the account JWT when an endpoint's key is revoked. |
 | `signing_key` | Optional. A 0600 file holding one of the account's **signing** seeds (starts with `SA`; its public key is listed in the account JWT's signing keys). Set it when the operator has `strict_signing_key_usage: true`. | Signing each endpoint's user credentials, in place of `account_key`. |
-| `account_key` | The account's **identity** seed (starts with `SA`), the one whose public key is the account JWT's subject. It is not an account signing key. | Signing each endpoint's user credentials. |
+| `account_key` | The account's **identity** seed (starts with `SA`), the one whose public key is the account JWT's subject. It is not an account signing key. | Signing each endpoint's user credentials when `signing_key` is not set; also the account the users belong to. |
 | `system_creds` | Credentials of a user in the system account. | Everything in "System account" above. |
 | `admin_creds` | Credentials of a user in the mash account. | The administrator's connection: making and removing inboxes, the directory and the records of what was issued. |
 

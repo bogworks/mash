@@ -72,3 +72,64 @@ func TestKeptSignersAreOtherRangesGroupsInTheJWT(t *testing.T) {
 		t.Error("a key store key that the account JWT did not carry was added")
 	}
 }
+
+// The configured account signing key is a plain signing key of the account JWT that is mash's own: it is not refused
+// as foreign (a later generation does not drop non-mash keys), Kept does not list it, and Sign leaves it in place. A
+// foreign plain key beside it is still refused.
+func TestSignKeepsTheConfiguredAccountSigningKey(t *testing.T) {
+	op, _ := nkeys.CreateOperator()
+	acct, _ := nkeys.CreateAccount()
+	apub := pubOf(acct)
+	signing := newGroupKey()
+	keys := storeKeys{op: op, groups: map[string]nkeys.KeyPair{"foo.c": newGroupKey()}, signing: signing}
+	build := func(extraPlain string) *Issuer {
+		ac := jwt.NewAccountClaims(apub)
+		ac.SigningKeys.Add(pubOf(signing))
+		if extraPlain != "" {
+			ac.SigningKeys.Add(extraPlain)
+		}
+		tok, err := ac.Encode(op)
+		if err != nil {
+			t.Fatal(err)
+		}
+		trust, err := apply.NewTrust(pubOf(op), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		now := time.Now().Add(5 * time.Second)
+		return &Issuer{Ctx: context.Background(), Keys: keys, Resolver: oneJWT{tok}, Account: apub, Trust: trust, Servers: 1, Range: "foo",
+			Now: func() time.Time { return now }}
+	}
+	c, err := listset.Compile(listset.ListSet{
+		Range: "foo",
+		Switches: []listset.SwitchEntry{{Group: "foo.c", Verb: listset.Mail, Switch: listset.Closed}, {Group: "foo.c", Verb: listset.Prompt, Switch: listset.Closed},
+			{Group: "foo.c", Verb: listset.Status, Switch: listset.Closed}, {Group: "foo.c", Verb: listset.Heartbeat, Switch: listset.Closed}},
+		Senders: []listset.SenderLists{{Sender: "foo.c.x"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	iss := build("")
+	if k, err := iss.Kept(context.Background(), 2); err != nil || len(k) != 0 {
+		t.Fatalf("Kept: %v %v", k, err)
+	}
+	out, err := iss.Sign(listset.Record{Generation: 2}, c)
+	if err != nil {
+		t.Fatalf("Sign refused the account signing key: %v", err)
+	}
+	signed, err := jwt.DecodeAccountClaims(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !signed.SigningKeys.Contains(pubOf(signing)) {
+		t.Error("the account signing key was dropped")
+	}
+	if sc, _ := signed.SigningKeys.GetScope(pubOf(signing)); sc != nil {
+		t.Error("the account signing key became scoped")
+	}
+	scopeOf(t, signed, pubOf(keys.groups["foo.c"]))
+	// a foreign plain key beside it is still refused
+	if _, err := build(pubOf(newGroupKey())).Sign(listset.Record{Generation: 2}, c); err == nil {
+		t.Error("a foreign plain signing key was accepted")
+	}
+}

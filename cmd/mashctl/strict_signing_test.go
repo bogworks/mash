@@ -309,6 +309,11 @@ func TestStrictDeleteForeignSignedUser(t *testing.T) {
 		t.Fatal("the strict server refused the foreign-signed creds")
 	}
 
+	// delete renames the creds file aside, so the connect check afterwards uses a copy
+	copyCreds := filepath.Join(a.root, "y.copy.creds")
+	if err := os.WriteFile(copyCreds, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	if out, errb, code := a.run("endpoint", "delete", "y.rehearse.one", "--yes"); code != 0 {
 		t.Fatalf("delete: %d\n%s\n%s", code, out, errb)
 	}
@@ -319,10 +324,35 @@ func TestStrictDeleteForeignSignedUser(t *testing.T) {
 	if !c.SigningKeys.Contains(fkPub) || !c.SigningKeys.Contains(skPub) {
 		t.Error("delete dropped a signing key from the account JWT")
 	}
-	if connectsWith(t, e.srv.ClientURL(), creds) {
+	if connectsWith(t, e.srv.ClientURL(), copyCreds) {
 		t.Error("the revoked foreign-signed creds still connect")
 	}
 	if out, _, code := a.run("endpoint", "list"); code != 0 || strings.Contains(out, "y.rehearse.one") {
 		t.Errorf("the record is still listed: %d\n%s", code, out)
 	}
+}
+
+// A rerun whose setup file gives no signing_key still checks the stored signing.nk: when the account JWT no longer
+// lists it as a plain signing key, init refuses and changes nothing.
+func TestInitStoredSigningKeyNoLongerListed(t *testing.T) {
+	e, sk, osk := strictEnv(t)
+	skPub, _ := sk.PublicKey()
+	a := initStrict(t, e, sk, osk, true)
+	// still listed: a rerun without signing_key is fine
+	a.vals["signing_key"] = nil
+	if out, errb, code := a.init(); code != 0 {
+		t.Fatalf("rerun while listed: %d\n%s\n%s", code, out, errb)
+	}
+	// the account lists the key as a scoped signing key now
+	ac := e.claims()
+	delete(ac.SigningKeys, skPub)
+	sc := jwt.NewUserScope()
+	sc.Key, sc.Role = skPub, "legacy"
+	ac.SigningKeys.AddScopedSigner(sc)
+	tok, err := ac.Encode(osk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pushAccountJWT(t, e, tok)
+	a.refuses(1, []string{"signing.nk", "no longer a plain listed signing key", "signing_key", "nothing was changed"}, nil)
 }

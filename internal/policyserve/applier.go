@@ -319,6 +319,11 @@ func (a *Applier) Apply(ctx context.Context, d policyintake.Doc, g policyintake.
 	if deps.KeptSigners, err = kept(ctx); err != nil {
 		return policyintake.Result{}, err
 	}
+	if sp, err := SigningPub(a.Keys); err != nil {
+		return policyintake.Result{}, err
+	} else if sp != "" {
+		deps.PlainSigners = []string{sp}
+	}
 	deps.ServerLimits = Limits(servers)
 	deps.Inventory = max(a.Servers, len(servers))
 	deps.Cluster = policyapply.NATSCluster{Conn: a.Sys, Inventory: deps.Inventory}

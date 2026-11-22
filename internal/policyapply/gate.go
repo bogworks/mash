@@ -37,6 +37,8 @@ type GateInput struct {
 	// KeptSigners are the scoped signing keys of other ranges (group -> public key) that the account JWT keeps beside
 	// Signers, for the target and the previous generation alike (see Candidate.Kept).
 	KeptSigners map[string]string
+	// PlainSigners are mash's own plain signing keys that may stand in the account JWT (see Candidate.Plain).
+	PlainSigners []string
 	// TargetJWT is the signed target account JWT. When set, a server is on the target only if the JWT it holds has the
 	// same claims ID (jti, the hash of the encoded claims) as this token: a JWT that matches the target by content,
 	// as a previous generation with equal templates, signers and revocations does, is then read as the previous
@@ -59,7 +61,7 @@ type OldKey struct {
 }
 
 func (in GateInput) target() Candidate {
-	return Candidate{Generation: in.Record.Generation, Compiled: in.Compiled, RevokedKeys: in.Expect.RevokedKeys, Signers: in.Signers, Kept: in.KeptSigners}
+	return Candidate{Generation: in.Record.Generation, Compiled: in.Compiled, RevokedKeys: in.Expect.RevokedKeys, Signers: in.Signers, Kept: in.KeptSigners, Plain: in.PlainSigners}
 }
 
 // Gate judges the target generation and reports it. It collects every failure rather than stopping at the first.

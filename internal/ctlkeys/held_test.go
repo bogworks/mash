@@ -2,7 +2,10 @@ package ctlkeys
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
+
+	"github.com/nats-io/nkeys"
 )
 
 // HeldKeys lists the operator, system and account public keys with what each is; a store without an account key
@@ -36,5 +39,20 @@ func TestHeldKeys(t *testing.T) {
 		if held[k] == "" {
 			t.Errorf("a held key is missing: %q", k[:8])
 		}
+	}
+	// The account signing key (signing.nk), when configured, is held too.
+	sk, _ := nkeys.CreateAccount()
+	seed, _ := sk.Seed()
+	path := filepath.Join(t.TempDir(), "signing.seed")
+	if err := os.WriteFile(path, append(seed, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	spub, _, err := a.ImportSigning(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, held, err = a.HeldKeys()
+	if err != nil || len(held) != 4 || held[spub] == "" {
+		t.Fatalf("with signing key: %v %v", held, err)
 	}
 }
