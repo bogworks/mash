@@ -429,12 +429,46 @@ func TestEndpointCreateSigningKeyLostRecordsNothing(t *testing.T) {
 	if _, err := os.Stat(creds); err == nil {
 		t.Fatal("creds were written")
 	}
+	if _, err := os.Lstat(creds + ".pending"); err == nil {
+		t.Fatal("a .pending seed was left behind")
+	}
 	if out, errb, code := a.init(); code != 0 {
 		t.Fatalf("init to restore: %d\n%s\n%s", code, out, errb)
 	}
 	// Had the refused create recorded the endpoint, this one would say it already exists.
 	if out, errb, code := a.run("endpoint", "create", "alice.g.x"); code != 0 {
 		t.Fatalf("create after restore: %d\n%s\n%s", code, out, errb)
+	}
+}
+
+// A signing.pub that is not a key record fails Signing with an error that is neither ErrNoSigningKey nor
+// ErrSigningKeyLost: create still refuses before staging a .pending seed or recording the endpoint.
+func TestEndpointCreateSigningRecordUnreadableRecordsNothing(t *testing.T) {
+	e, sk, osk := strictEnv(t)
+	a := initStrict(t, e, sk, osk, true)
+	keysDir := a.env["MASH_KEYS_DIR"]
+	if err := os.WriteFile(filepath.Join(keysDir, "signing.pub"), []byte("not a key\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, errb, code := a.run("endpoint", "create", "alice.g.x")
+	if code != 1 {
+		t.Fatalf("create: exit %d\n%s\n%s", code, out, errb)
+	}
+	if !strings.Contains(errb, "nothing was changed") {
+		t.Errorf("stderr lacks %q:\n%s", "nothing was changed", errb)
+	}
+	creds := filepath.Join(a.env["MASH_CONFIG_DIR"], "alice.g.x.creds")
+	for _, f := range []string{creds, creds + ".pending"} {
+		if _, err := os.Lstat(f); err == nil {
+			t.Errorf("%s was left behind", f)
+		}
+	}
+	if err := os.Remove(filepath.Join(keysDir, "signing.pub")); err != nil {
+		t.Fatal(err)
+	}
+	// Had the refused create recorded the endpoint, this one would say it already exists.
+	if out, errb, code := a.run("endpoint", "create", "alice.g.x"); code != 0 {
+		t.Fatalf("create after repair: %d\n%s\n%s", code, out, errb)
 	}
 }
 

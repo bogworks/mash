@@ -1,6 +1,6 @@
 {
   "name": "mash-setup",
-  "version": "0.5.6",
+  "version": "0.5.7",
   "description": "Skills to set mash up on this machine and to run it day to day. Install this first, then ask your agent to set mash up.",
   "author": { "name": "Bogworks", "url": "https://github.com/bogworks" },
   "homepage": "https://github.com/bogworks/mash",

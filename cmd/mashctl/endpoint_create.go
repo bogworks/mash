@@ -434,7 +434,7 @@ func epCreate(in *epInput, env func(string) string, lookup config.Lookup, stderr
 	// same way, and the endpoint record enrollCreate writes first would be left without credentials. No signing key
 	// configured (ErrNoSigningKey) means the identity key signs, as before.
 	if skp, _, serr := keys.Signing(); serr != nil {
-		if errors.Is(serr, ctlkeys.ErrSigningKeyLost) {
+		if !errors.Is(serr, ctlkeys.ErrNoSigningKey) {
 			return t, epResult{}, cliframe.Failf("%s; nothing was changed", strings.TrimPrefix(serr.Error(), "mashctl: ")).WithWrap().
 				WithHint("mashctl init --config <file>")
 		}
