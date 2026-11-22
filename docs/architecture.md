@@ -606,18 +606,23 @@ the server declares the experimental capability `claude/channel` and sends `noti
 also offer tools, such as a reply tool, like any [MCP server](https://code.claude.com/docs/en/mcp). If the server is not
 registered as a channel, or policy blocks it, Claude Code drops its events silently and the server gets no error.
 
-**How a session turns a channel on.** The session is launched with the
-[`--channels`](https://code.claude.com/docs/en/cli-reference) flag naming the plugin: `claude --channels
-plugin:mash@mash`. This needs a claude.ai sign-in or a Console API key, not Bedrock, Agent Platform or Foundry.
+**How a session turns a channel on.** The session is launched with a channel flag naming the plugin. Claude Code's
+[channels page](https://code.claude.com/docs/en/channels) says: "During the preview, `--channels` only accepts plugins
+from an Anthropic-maintained allowlist, or from your organization's allowlist if an admin has set
+`allowedChannelPlugins`." mash is not on Anthropic's list, so, per account:
 
-**What the person does.** Nothing beyond the flag: `claude --channels plugin:mash@mash` loads the channel with no
-warning and no setting, and an idle session wakes (checked on 2026-11-21). The one thing that can stop it is a managed
-policy: an organisation that manages Claude Code can turn channels off (`channelsEnabled`) or restrict which plugins
-may register (`allowedChannelPlugins`), because a channel puts outside text into the model's context ([settings](https://code.claude.com/docs/en/managed-settings)).
-mash's `status` tool reads these files, read-only, and reports what it finds
-([ADR 0039](decisions/0039-mash-reads-claude-codes-managed-settings-read-only-for-diagnosis.md)). Without a channel,
-mash still delivers mail through the hooks at the next prompt or tool call; what is lost is the idle wake and live SAP
-prompts.
+- *Personal account:* `claude --dangerously-load-development-channels plugin:mash@mash`. Claude Code shows a warning
+  screen and asks for confirmation at every start; the person chooses it knowingly.
+- *Team or Enterprise organisation:* an administrator adds mash to `allowedChannelPlugins` (and `channelsEnabled` is
+  true); then `claude --channels plugin:mash@mash`. A channel puts outside text into the model's context, which is why
+  the allowlist is the administrator's ([settings](https://code.claude.com/docs/en/managed-settings)). mash's `status`
+  tool reads these files, read-only, and reports what it finds
+  ([ADR 0039](decisions/0039-mash-reads-claude-codes-managed-settings-read-only-for-diagnosis.md)).
+- Both need a claude.ai sign-in or a Console API key, not Bedrock, Agent Platform or Foundry.
+
+Without a channel, mash still delivers mail through the hooks at the next prompt or tool call; what is lost is the idle
+wake and live SAP prompts. The setup skill writes one command per agent with the right flags inside
+([install.md](install.md#3-optional-wake-an-idle-session)).
 
 **Hooks.** The [hooks reference](https://code.claude.com/docs/en/hooks) defines `PostToolUse` (after each successful
 tool call) and `UserPromptSubmit` (when a prompt starts a turn). A hook can return `additionalContext`, which Claude

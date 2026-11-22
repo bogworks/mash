@@ -67,15 +67,20 @@ is installed in your home folder, with no sudo.
    It asks before each step: the programs it needs, a local NATS server, the
    mash plugin, and the two agents.
 
-3. Start a session as each agent, in two terminals:
+3. Start a session as each agent, in two terminals. The setup wrote one
+   command for each agent, so you type one word:
 
    ```sh
-   MASH_ENDPOINT=acme.demo.bob claude --channels plugin:mash@mash --name acme.demo.bob
-   MASH_ENDPOINT=acme.demo.alice claude --channels plugin:mash@mash --name acme.demo.alice
+   bob
+   alice
    ```
 
-   The `--name` sets the session's name to its address, so you can tell who
-   you are talking to (for a session already open, type `/rename acme.demo.alice`).
+   Each starts Claude Code with its address as the session's name, so you can
+   tell who you are talking to (for a session already open, type
+   `/rename acme.demo.alice`), and says on its first turn whether mail wakes
+   it when idle. That wake needs Claude Code to load mash's channel, which
+   depends on your account: see [wake an idle session](docs/install.md#3-optional-wake-an-idle-session). Without it, mail
+   arrives at the session's next prompt or tool call.
    Claude Code asks whether to trust the folder; choose yes.
 
 4. In Bob's session, say: "Send alice a note: lunch at noon?"
@@ -122,7 +127,7 @@ mash is a SAP agent per session, with one departure: an endpoint is addressed `o
 
 - **Mail that waits.** Each agent (endpoint) has its own JetStream inbox stream, a stored queue of its mail on the server. Mail sent to a session that is busy, asleep or not running waits up to 30 days, and arrives the moment the session can take it.
 - **Mail kinds cut turn cost.** `mash send --kind` (or the send tool's `kind`) marks mail `blocker`, `question` or `task` (wakes an idle session) or `result` or `fyi` (opt-in; waits for the session's next turn); with no kind a send is `task`.
-- **No polling turns.** Mail that lands mid-turn rides along with the next tool result (a hook). An idle session is woken by the mail itself: after 45 seconds unshown (`MASH_IDLE_WAKE`) if the mail is a blocker, question or task, at once for urgent mail from a verified sender, and again with backoff if a wake starts no turn. A burst arrives as one turn. A small batch arrives in full; a large one arrives as a digest, and Claude reads the messages it cares about.
+- **No polling turns.** Mail that lands mid-turn rides along with the next tool result (a hook). An idle session is woken by the mail itself: after 45 seconds unshown (`MASH_IDLE_WAKE`) if the mail is a blocker, question or task, at once for urgent mail from a verified sender, and again with backoff if a wake starts no turn. A burst arrives as one turn. The wake needs Claude Code to load mash's channel, which depends on your account ([wake an idle session](docs/install.md#3-optional-wake-an-idle-session)). A small batch arrives in full; a large one arrives as a digest, and Claude reads the messages it cares about.
 - **Fast replies.** The session answers through tools on the same process that holds the NATS connection open: no subprocess, no CLI, one network round trip.
 - **Verified senders.** Every message is signed with the sender's own NATS key (SAP §13), and the receiver checks it against a directory. A forged message is dropped; an unproven one is labelled as such.
 - **Unique endpoints.** One NATS user per address, and a lease (a claim on the address, held while the session runs) that refuses a second live session under the same address. A credential reaches only its own owner: it may mail any endpoint of that owner and no other owner's.

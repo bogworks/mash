@@ -88,7 +88,10 @@ First ask which setup the person wants, and wait for the answer:
   do.
 - General setup: the questions below, and a yes before each step, as written.
 
-Both end with the same closing example in step 8. In the demo setup, skip the
+Both also ask which Claude account this is, because it decides the idle wake
+(see step 8): a personal account, or a Team or Enterprise organisation's (the
+person can type `/status` in Claude Code to see which). Both end with the same
+closing example in step 8. In the demo setup, skip the
 questions below and use their defaults; the person may still change a name
 when they answer the first question.
 
@@ -160,8 +163,13 @@ I will:
   use the owner name                acme
   install the mash plugin           from the bogworks/mash marketplace
   make two agent mailboxes          acme.demo.bob and acme.demo.alice
-  start sessions named by address   with --channels (mail wakes an idle
-                                    session) and --name
+  one command per agent             `bob` and `alice`, small files in
+                                    ~/.local/bin that start Claude Code as
+                                    that agent, named by its address
+  idle wake                         [personal account: only with Claude
+                                    Code's development flag, your choice in
+                                    step 8; organisation: needs your admin;
+                                    else mail arrives at the next prompt]
 Say yes to go ahead. [General setup: I will ask again before each step.
 Demo setup: this one yes covers every step.]
 ```
@@ -460,45 +468,76 @@ with `trust: verified`.
 
 ## 8. Use it from Claude Code
 
-First check that this Claude Code can load the channel, before you give the
-launch lines. On a Team or Enterprise plan, or any machine whose Claude Code
-is managed by an organisation, channels are off until an owner or
-administrator turns them on (`channelsEnabled`), and a managed
-`allowedChannelPlugins` list can exclude mash; a personal account has neither.
-This is read-only. Ask the person to type `/status` in Claude Code and tell you
-what "Setting sources" shows, and look at the managed settings file if there is
-one (`/etc/claude-code/managed-settings.json` on Linux,
-`/Library/Application Support/ClaudeCode/managed-settings.json` on macOS; also
-any `managed-settings.d` folder beside it). Read it; never edit it. Then say
-which it is:
+Needs a yes: writing one small command file per agent in the install folder.
 
-- Nothing managed, or `channelsEnabled` is true and mash is not excluded: go on.
-- Channels are off or mash is excluded, or you cannot tell: say so plainly now,
-  before the launch lines. The person must ask their administrator (an owner
-  turns Channels on under Organization settings > Claude Code > Channels, and
-  adds `{ "marketplace": "mash", "plugin": "mash" }` to `allowedChannelPlugins`
-  if the list is set). Until then mail arrives only at the session's next
-  prompt or tool call, and an idle session is not woken. Do not edit the
-  file, and do not use any flag to get round it.
+Mail always arrives at a session's next prompt or tool call. Waking an idle
+session needs Claude Code to load mash's channel, and Claude Code says:
+"During the preview, `--channels` only accepts plugins from an
+Anthropic-maintained allowlist, or from your organization's allowlist if an
+admin has set `allowedChannelPlugins`."
+(https://code.claude.com/docs/en/channels). mash is not on Anthropic's list.
+So the wake depends on the account (ask if step 1 did not):
 
-Whatever the answer, tell the person to look at each session's start: a session
-that comes up without the channel must be said to have none, at once, not
-discovered later when a mail sits.
+- Personal account: the only way today is Claude Code's development flag,
+  `--dangerously-load-development-channels plugin:mash@mash`. Tell the person
+  plainly what it is, and ask; the default is no. It lets a plugin that is not
+  on Anthropic's list push a message into the session, Claude Code shows a
+  warning screen and asks them to confirm at every start, and nothing else
+  changes. Without it, mail still arrives at the next prompt or tool call and an
+  idle session is not woken. Never add it on your own word.
+- Team or Enterprise organisation: channels are off until an owner turns them on
+  (`channelsEnabled`), and mash must be in a managed `allowedChannelPlugins`
+  list; then `--channels plugin:mash@mash` works. Check, read-only: ask the
+  person to type `/status` and tell you what "Setting sources" shows, and read
+  the managed settings file if there is one
+  (`/etc/claude-code/managed-settings.json` on Linux,
+  `/Library/Application Support/ClaudeCode/managed-settings.json` on macOS, and
+  any `managed-settings.d` folder beside it). Never edit it. If channels
+  are off, mash is not allowed or you cannot tell, say so plainly: the
+  person asks their administrator (Organization settings > Claude Code >
+  Channels, and add `{ "marketplace": "mash", "plugin": "mash" }` to
+  `allowedChannelPlugins`), and until then there is no idle wake. If both
+  are in place, use `--channels plugin:mash@mash`.
+- Either way, no wake is a fine answer: use no channel flag.
 
-Restarting your own session is the person's act. Give them these two lines to
-run in two terminals (use the names from step 1):
+Then write one command per agent, so the person types one plain word per
+session and cannot leave out the address. Use the agent's own name as the
+file name (`bob`, `alice`). Check first that the name is free:
+`command -v bob` must print nothing; if something is there, stop and ask for
+another name. Show each file before you write it. In the file, `CHANNEL` is
+the flag chosen above, or nothing, and `MODE` is one of the two sentences
+below; keep the full three-part address inside:
+
+```sh
+#!/bin/sh
+# Start Claude Code as acme.demo.bob. Written by mash-setup.
+export MASH_ENDPOINT=acme.demo.bob
+if [ "$#" -eq 0 ]; then
+  set -- "In one line, say you are acme.demo.bob and MODE. If Claude Code showed any channel warning or error at start, say that too. Then wait."
+fi
+exec claude --name acme.demo.bob CHANNEL "$@"
+```
+
+- With a channel flag, MODE is "mail wakes you when you are idle (a channel
+  was requested)".
+- With none, MODE is "mail reaches you only at your next prompt or tool call
+  (no channel)".
+
+Write each file into the install folder with mode 755 (`install -m 755 FILE
+"$BIN/bob"`), then check `command -v bob` finds it. The person then starts
+their sessions in two terminals, with one word each (`sh person`):
 
 ```sh person
-MASH_ENDPOINT=acme.demo.bob claude --channels plugin:mash@mash --name acme.demo.bob
+bob
 ```
 
 ```sh person
-MASH_ENDPOINT=acme.demo.alice claude --channels plugin:mash@mash --name acme.demo.alice
+alice
 ```
 
-`--name` shows each session's address as its name, so the person can tell who
-they are talking to; for a session already open, `/rename acme.demo.alice`
-does the same. `--channels` lets mail wake an idle session.
+Each session says on its first turn which mode it is in. `--name` shows the
+agent's address as the session's name; for a session already open,
+`/rename acme.demo.alice` does the same.
 
 Say the setup is done only when one session has received mail from the other
 (`mash inbox` in the second terminal shows it as verified). Do not claim mail
@@ -564,6 +603,9 @@ last):
      ```
 
      If the person chose another install folder in step 1, fill in that path.
+     Also remove each agent's command file from step 8 (`"$BIN/bob"`,
+     `"$BIN/alice"`), only the ones setup wrote: check each still starts with
+     the line `# Start Claude Code as ... Written by mash-setup.` first.
    - (b) Homebrew: `brew uninstall nats-server nats`
    - (c) system package: the package manager's remove command for the
      package step 2 installed. If the package started a service (step 2 told
@@ -606,6 +648,8 @@ last):
 ## Do not
 
 - Do not pipe a download into a shell. Do not run a script you have not shown.
+- Do not add `--dangerously-load-development-channels` on your own word: only
+  after the person has been told what it is (step 8) and said yes.
 - Do not use `sudo` or a system package, except for the route the person chose
   in step 2 and the exact command they said yes to.
   Do not run a typed confirmation or any `sh person` block yourself.
