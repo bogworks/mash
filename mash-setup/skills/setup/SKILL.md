@@ -460,6 +460,31 @@ with `trust: verified`.
 
 ## 8. Use it from Claude Code
 
+First check that this Claude Code can load the channel, before you give the
+launch lines. On a Team or Enterprise plan, or any machine whose Claude Code
+is managed by an organisation, channels are off until an owner or
+administrator turns them on (`channelsEnabled`), and a managed
+`allowedChannelPlugins` list can exclude mash; a personal account has neither.
+This is read-only. Ask the person to type `/status` in Claude Code and tell you
+what "Setting sources" shows, and look at the managed settings file if there is
+one (`/etc/claude-code/managed-settings.json` on Linux,
+`/Library/Application Support/ClaudeCode/managed-settings.json` on macOS; also
+any `managed-settings.d` folder beside it). Read it; never edit it. Then say
+which it is:
+
+- Nothing managed, or `channelsEnabled` is true and mash is not excluded: go on.
+- Channels are off or mash is excluded, or you cannot tell: say so plainly now,
+  before the launch lines. The person must ask their administrator (an owner
+  turns Channels on under Organization settings > Claude Code > Channels, and
+  adds `{ "marketplace": "mash", "plugin": "mash" }` to `allowedChannelPlugins`
+  if the list is set). Until then mail arrives only at the session's next
+  prompt or tool call, and an idle session is not woken. Do not edit the
+  file, and do not use any flag to get round it.
+
+Whatever the answer, tell the person to look at each session's start: a session
+that comes up without the channel must be said to have none, at once, not
+discovered later when a mail sits.
+
 Restarting your own session is the person's act. Give them these two lines to
 run in two terminals (use the names from step 1):
 
