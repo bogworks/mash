@@ -20,7 +20,7 @@ sees and, where it helps, link the ADR or issue.
 
 ```text
 `mash who` shows `seen X ago` from the last answer to a presence probe, not the last heartbeat
-([ADR 0066](docs/decisions/0066-...md)).
+([ADR 0066](docs/decisions/0066-mash-serve-asks-who-is-online-when-someone-asks-instead-of-listening-to-every-heartbeat.md)).
 ```
 
 ## How to write a fragment
