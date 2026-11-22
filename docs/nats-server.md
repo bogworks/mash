@@ -190,7 +190,7 @@ mashctl doctor
 
 - It does not need the `nats` command or `nsc` to run. (The setup script uses the `nats` command; `nsc` is one way to make the account yourself.)
 - It does not need memory storage, a clustered or replicated stream, or any change to the server's code.
-- It does not support a hosted service where you do not hold the operator key, such as Synadia Cloud, through `mashctl` in 0.5.6.
+- It does not support a hosted service where you do not hold the operator key, such as Synadia Cloud, through `mashctl` in 0.5.7: revoking an endpoint needs the operator key, and setting up the account needs admin creds in it ([Synadia Cloud](synadia.md)).
 - Endpoints do not need the operator or account keys, only their own credentials.
 
 For a cluster, certificates and a second `mashctl` machine, see [TLS, clusters and a second mashctl machine](tls-and-clusters.md).

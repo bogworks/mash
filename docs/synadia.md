@@ -1,19 +1,25 @@
 # Synadia Cloud
 
-`mashctl` in mash 0.5.6 does not support Synadia Cloud, or any hosted NATS where you do not hold the operator key, for provisioning and administration. The `mash` endpoint binary connects over TLS to any conforming NATS server it has credentials for. The issue is [#876](https://github.com/bogworks/mash/issues/876).
+`mashctl` in mash 0.5.7 does not support Synadia Cloud, or any hosted NATS where you do not hold the operator key. The issue is [#876](https://github.com/bogworks/mash/issues/876).
 
-## What is not supported
+## What works today
 
-`mashctl` cannot set up or manage a mesh on a hosted NATS service. An earlier release shipped a quickstart script for Synadia Cloud. It is gone, and `mashctl init` takes no hosted-service option.
+The `mash` program, the one a session runs, connects over TLS to any conforming NATS server it has credentials for. It needs a creds file for a user with the permissions `mashctl endpoint permissions` prints, and the account must already hold mash's storage and the endpoint's directory record and inbox, which `mashctl` creates. On an account `mashctl` has not set up, `mash` fails with "endpoint ... is not provisioned".
 
-## Why
+## What is missing, and why
 
-`mashctl` signs each endpoint's NATS user itself, and it revokes a deleted or reissued endpoint's key by signing a new account JWT and pushing it to the server. For that it needs the operator key, the account key and the system account's credentials, all set in the file you give to `mashctl init --config` (see [Setting mash up with `mashctl init --config`](operations.md#setting-mash-up-with-mashctl-init---config)). On a hosted service the provider holds the operator key, so you cannot give it to `mashctl`.
+`mashctl` needs three kinds of authority, and a hosted service holds one of them for you:
 
-`mash` itself, the program a session runs, connects to any conforming server over TLS with a creds file for a user with the permissions `mashctl endpoint permissions` prints. A creds file is not enough on its own: the account must also hold mash's storage and the endpoint's directory record and inbox, which `mashctl` creates. On an account `mashctl` has not set up, `mash` fails with "endpoint ... is not provisioned". What is missing is the way to make and revoke those users and to set up the account's storage on a hosted service.
+- **Making an endpoint's user** needs an account signing key. Since 0.5.7 that is the optional `signing_key` setup key (see [Bring your own NATS server](nats-server.md#requirements)), so signing users is no longer what blocks a hosted service.
+- **Revoking a deleted or reissued endpoint's key** needs the account JWT signed again with the operator key and pushed to the servers through the system account (`operator_key` and `system_creds` in the setup file). On a hosted service the provider holds the operator key, so you cannot give it to `mashctl`.
+- **Setting up the account's storage** (the directory, lease, retired-name, issue-record and adoption buckets) needs admin creds for a user in the account (`admin_creds`).
+
+So the gap after 0.5.7 is revocation and account set-up on a hosted service, not user signing. `mashctl init` takes no hosted-service option, and an earlier release's quickstart script for Synadia Cloud is gone.
 
 ## What to use instead
 
 Run your own NATS server that meets the [requirements](nats-server.md#requirements), and set it up with `mashctl init --config`. For one machine, the release's `mash-local-nats-setup.sh` makes such a server (see the [setup script reference](reference/setup.md)); [by hand](guide/by-hand.md) uses it. For a server that several machines reach, see [Operating mash](operations.md) and [TLS, clusters and a second mashctl machine](tls-and-clusters.md).
 
-Guides for a local server and for Synadia Cloud are planned for 0.6.0 ([#1037](https://github.com/bogworks/mash/issues/1037)). Support in `mashctl` itself is tracked in #876.
+## Plans
+
+Support in `mashctl` for a hosted service ([#876](https://github.com/bogworks/mash/issues/876)) and the guides for a local server and for Synadia Cloud ([#1037](https://github.com/bogworks/mash/issues/1037)) are both 0.6.0 work, and the Synadia Cloud guide depends on the support. Neither has a design yet, and nothing here promises it.
