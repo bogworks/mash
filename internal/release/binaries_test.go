@@ -16,12 +16,14 @@ const maxTrackedFileSize = 256 * 1024
 
 // largeFileAllowlist maps a repo-relative path to the reason it may exceed
 // maxTrackedFileSize. Additions need a reason.
-var largeFileAllowlist = map[string]string{}
+var largeFileAllowlist = map[string]string{
+	"docs/demo/mash-demo.mp4": "demo video in the README, Randy 2026-11-22 (#1244)",
+}
 
 // binaryAssetExts are extensions of binary assets that may contain NUL bytes.
 var binaryAssetExts = map[string]bool{
 	".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".ico": true,
-	".pdf": true, ".woff": true, ".woff2": true,
+	".pdf": true, ".woff": true, ".woff2": true, ".mp4": true,
 }
 
 var executableMagics = []struct {
