@@ -515,8 +515,11 @@ export MASH_ENDPOINT=acme.demo.bob
 if [ "$#" -eq 0 ]; then
   set -- "In one line, say you are acme.demo.bob and MODE. If Claude Code showed any channel warning or error at start, say that too. Then wait."
 fi
-exec claude --name acme.demo.bob CHANNEL "$@"
+exec claude --name acme.demo.bob "$@" CHANNEL
 ```
+
+Put `CHANNEL` last. Its flag takes every following word as a channel entry, so a
+prompt after it fails with "entries must be tagged".
 
 - With a channel flag, MODE is "mail wakes you when you are idle (a channel
   was requested)".
