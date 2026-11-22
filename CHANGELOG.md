@@ -4,6 +4,24 @@ All notable user-facing changes to mash are recorded here. The format follows [K
 
 ## [Unreleased]
 
+## [0.5.7] - 2026-11-22
+
+### Summary
+
+**mash 0.5.7 fixes one thing: `mashctl` can now set up mash on a NATS server that requires users to be signed by an account signing key (`strict_signing_key_usage: true`).** Nothing changes for other servers except that revoking an endpoint no longer stops at an account signing key `mashctl` did not make.
+
+### Upgrading
+
+Install `mash` and `mashctl` from the same release. On a strict server, add `signing_key` (a 0600 file with one of the account's signing seeds) to the setup file, run `mashctl init --config FILE` again, then reissue the endpoints made with 0.5.6. See the [release notes](docs/release-notes/0.5.7.md).
+
+### Added
+
+- `signing_key`, an optional setup key: `mashctl` signs endpoint users with that account signing key and names the account as the issuer ([#1239](https://github.com/bogworks/mash/issues/1239)).
+
+### Fixed
+
+- `endpoint delete` and `endpoint reissue` carry a plain signing key in the account JWT that `mashctl` did not create, and revoke users signed by one, instead of refusing ([#1239](https://github.com/bogworks/mash/issues/1239)).
+
 ## [0.5.6] - 2026-11-21
 
 ### Summary
