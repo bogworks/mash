@@ -485,19 +485,24 @@ So the wake depends on the account (ask if step 1 did not):
   warning screen and asks them to confirm at every start, and nothing else
   changes. Without it, mail still arrives at the next prompt or tool call and an
   idle session is not woken. Never add it on your own word.
-- Team or Enterprise organisation: channels are off until an owner turns them on
-  (`channelsEnabled`), and mash must be in a managed `allowedChannelPlugins`
-  list; then `--channels plugin:mash@mash` works. Check, read-only: ask the
-  person to type `/status` and tell you what "Setting sources" shows, and read
-  the managed settings file if there is one
+- Team or Enterprise organisation: an owner can turn channels off
+  (`channelsEnabled`) or limit them to a managed `allowedChannelPlugins` list.
+  Check, read-only: ask the person to type `/status` and tell you what
+  "Setting sources" shows, and read the managed settings file if there is one
   (`/etc/claude-code/managed-settings.json` on Linux,
   `/Library/Application Support/ClaudeCode/managed-settings.json` on macOS, and
-  any `managed-settings.d` folder beside it). Never edit it. If channels
-  are off, mash is not allowed or you cannot tell, say so plainly: the
-  person asks their administrator (Organization settings > Claude Code >
-  Channels, and add `{ "marketplace": "mash", "plugin": "mash" }` to
-  `allowedChannelPlugins`), and until then there is no idle wake. If both
-  are in place, use `--channels plugin:mash@mash`.
+  any `managed-settings.d` folder beside it). Never edit it.
+  - If a managed file turns channels off, or lists other plugins and not mash:
+    say so plainly. The person asks their administrator (Organization
+    settings > Claude Code > Channels, and add
+    `{ "marketplace": "mash", "plugin": "mash" }` to `allowedChannelPlugins`),
+    and until then use no channel flag and there is no idle wake.
+  - If there is no managed file, or it says nothing about channels: use
+    `--channels plugin:mash@mash`. Measured on an organisation login with no
+    managed settings, it loads and wakes an idle session in seconds. Say that
+    it is not certain, and that if Claude Code shows an allowlist notice at
+    start, mail still arrives at the next prompt or tool call.
+  - If a managed file allows mash: use `--channels plugin:mash@mash`.
 - Either way, no wake is a fine answer: use no channel flag.
 
 Then write one command per agent, so the person types one plain word per
