@@ -395,3 +395,46 @@ func TestInitSigningKeyLost(t *testing.T) {
 		t.Fatal("signing.nk was not restored")
 	}
 }
+
+// init that stopped after writing signing.nk and before signing.pub leaves a seed with no record: a rerun with the
+// same signing_key completes the record (0600, atomic); one with another key is refused and writes nothing.
+func TestInitSigningRecordCompletedOnRetry(t *testing.T) {
+	e := newApplyEnv(t)
+	sk, _ := nkeys.CreateAccount()
+	skPub, _ := sk.PublicKey()
+	opKP, _, err := e.ks.Operator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ac := e.claims()
+	ac.SigningKeys.Add(skPub)
+	tok, err := ac.Encode(opKP)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pushAccountJWT(t, e, tok)
+	a := newIniter(t, e)
+	a.vals["signing_key"] = seedFile(t, filepath.Join(a.root, "in"), "signing.seed", sk)
+	if out, errb, code := a.init(); code != 0 {
+		t.Fatalf("init: %d\n%s\n%s", code, out, errb)
+	}
+	rec := filepath.Join(a.env["MASH_KEYS_DIR"], "signing.pub")
+	if err := os.Remove(rec); err != nil {
+		t.Fatal(err)
+	}
+	other, _ := nkeys.CreateAccount()
+	a.refuses(1, []string{"different signing key"}, map[string]any{"signing_key": seedFile(t, filepath.Join(a.root, "in"), "other.seed", other)})
+	if _, err := os.Stat(rec); err == nil {
+		t.Fatal("a record was written for a different key")
+	}
+	if out, errb, code := a.init(); code != 0 {
+		t.Fatalf("init to complete the record: %d\n%s\n%s", code, out, errb)
+	}
+	b, err := os.ReadFile(rec)
+	if err != nil || strings.TrimSpace(string(b)) != skPub {
+		t.Fatalf("record: %q %v", b, err)
+	}
+	if fi, _ := os.Stat(rec); fi.Mode().Perm() != 0o600 {
+		t.Fatalf("mode %v", fi.Mode())
+	}
+}

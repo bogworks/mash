@@ -134,6 +134,11 @@ func RevokeUsers(ctx context.Context, p RevokeParams, users []string) (RevokeRes
 		return res, fmt.Errorf("revoke: %w (nothing was changed)", err)
 	}
 
+	cfgSigner, err := configuredSigningKey(p.Keys)
+	if err != nil {
+		return res, fmt.Errorf("revoke: %w (nothing was changed)", err)
+	}
+
 	set, kerr := p.Resolver.Servers(ctx)
 	expect := serverExpect(set, p.Servers)
 	if errors.Is(kerr, ErrServerSetRefused) {
@@ -165,11 +170,24 @@ func RevokeUsers(ctx context.Context, p RevokeParams, users []string) (RevokeRes
 			return res, fmt.Errorf("revoke: the resolver has no JWT for the MASH account %s: is the account key in the key store the account of this server? (nothing was changed)", acctPub)
 		}
 		var unknown []string
+		if cfgSigner != "" {
+			if _, present := claims.SigningKeys[cfgSigner]; !present {
+				w := fmt.Sprintf("the configured signing_key %s is not in the account JWT, so users it signed are refused by the server", cfgSigner)
+				if res.Warning != "" {
+					res.Warning += "; " + w
+				} else {
+					res.Warning = w
+				}
+			}
+			if sc, _ := claims.SigningKeys.GetScope(cfgSigner); sc != nil {
+				return res, fmt.Errorf("revoke: refusing: the configured signing_key %s is a scoped signing key in the account JWT, nothing was changed", cfgSigner)
+			}
+		}
 		for _, k := range sortedKeys(claims.SigningKeys) {
-			if known[k] {
+			sc, _ := claims.SigningKeys.GetScope(k)
+			if known[k] && (sc == nil || k != cfgSigner) {
 				continue
 			}
-			sc, _ := claims.SigningKeys.GetScope(k)
 			if sc == nil {
 				// A plain signing key (an operator's own, or the account signing key of another tool) is carried:
 				// claims keeps SigningKeys as read, and only Revocations change.

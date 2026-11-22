@@ -742,11 +742,11 @@ func checkStore(ks *ctlkeys.Authority, st *initState) error {
 		}
 	}
 	kp, pub, err := ks.Signing()
+	rec, _ := ks.SigningRecord()
 	switch {
 	case errors.Is(err, ctlkeys.ErrNoSigningKey):
 	case errors.Is(err, ctlkeys.ErrSigningKeyLost):
 		// signing.nk is gone: init with the same signing_key restores it; anything else is refused.
-		rec, _ := ks.SigningRecord()
 		if st.signPub == "" {
 			return fmt.Errorf("%v (nothing was changed)", err)
 		}
@@ -761,7 +761,8 @@ func checkStore(ks *ctlkeys.Authority, st *initState) error {
 			if pub != st.signPub {
 				return differentSetup(st, "signing key")
 			}
-			st.haveSign = true
+			// A seed with no record is an init that stopped between the two writes: ImportSigning completes it.
+			st.haveSign = rec == pub
 		} else {
 			st.storedSignPub = pub
 		}

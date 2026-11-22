@@ -156,8 +156,18 @@ func AccountFindings(ctx context.Context, r Resolver, ks *ctlkeys.Authority, ser
 		if kerr != nil {
 			return nil, kerr
 		}
+		cfgSigner, cerr := configuredSigningKey(ks)
+		if cerr != nil {
+			return nil, cerr
+		}
+		if cfgSigner != "" {
+			if _, present := claims.SigningKeys[cfgSigner]; !present {
+				out = append(out, Finding{Kind: KindUnknownKey, Subject: config.Clean(cfgSigner),
+					Detail: "the configured signing_key " + config.Clean(cfgSigner) + " is not in the account JWT: users it signs are not trusted by the server"})
+			}
+		}
 		for _, k := range sortedKeys(claims.SigningKeys) {
-			if known[k] {
+			if known[k] && k != cfgSigner {
 				continue
 			}
 			u := unknownKey{key: k}
@@ -168,6 +178,9 @@ func AccountFindings(ctx context.Context, r Resolver, ks *ctlkeys.Authority, ser
 				if us, ok := sc.(*jwt.UserScope); ok && us != nil {
 					u.role = us.Role
 				}
+			}
+			if k == cfgSigner && !u.scoped {
+				continue // the configured signing key, plain: as configured
 			}
 			if u.scoped {
 				out = append(out, Finding{Kind: KindZonePolicyApplied, Subject: config.Clean(u.key),

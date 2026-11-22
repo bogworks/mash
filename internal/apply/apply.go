@@ -142,6 +142,19 @@ func knownSigningKeys(ks *ctlkeys.Authority, acctPub string) (map[string]bool, e
 	return known, nil
 }
 
+// configuredSigningKey is the public key of the configured account signing key (signing_key), or "" when none is set.
+func configuredSigningKey(ks *ctlkeys.Authority) (string, error) {
+	kp, pub, err := ks.Signing()
+	if err != nil {
+		if errors.Is(err, ctlkeys.ErrNoSigningKey) {
+			return "", nil
+		}
+		return "", err
+	}
+	kp.Wipe()
+	return pub, nil
+}
+
 // unknownKeyNote is the one explanation printed with every unknown signing key.
 const unknownKeyNote = "mashctl signs the account JWT with the operator key, so it will not carry a scoped signing key it did not create: that is a zone key of a zone policy from an older release, and ADR 0091 removed zones, so stay on the last zoned release until the label policy model ships. A plain signing key it did not create is carried unchanged."
 
