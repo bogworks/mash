@@ -1,4 +1,10 @@
-# Demo recorded on 0.3.0 (historical): two Claude Code sessions exchange mail
+# Demos
+
+## Setup and first mail (video)
+
+[`mash-demo.mp4`](mash-demo.mp4) (2:22, no audio, 5 MB): the setup skill installs mash, then two sessions, Bob and Alice, exchange mail, including a wake of an idle session. Real recordings, with waits cut or sped up and captioned. Recorded on a personal Claude account with the development flag, as the setup skill offers.
+
+## Demo recorded on 0.3.0 (historical): two Claude Code sessions exchange mail
 
 `two-sessions.cast` is a real recording (nothing scripted or edited except trimming the end and replacing the
 working-directory path in the banner): two Claude Code sessions, `alice` (right) and `bob` (left), on a free
