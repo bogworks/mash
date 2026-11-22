@@ -90,3 +90,22 @@ func TestSigningSeedWithoutRecordStillWorks(t *testing.T) {
 		kp.Wipe()
 	}
 }
+
+func TestImportSigningCheckedRefusesChangedFileBeforeWriting(t *testing.T) {
+	a, dir := newStore(t)
+	src := t.TempDir()
+	p1, pub1 := signingSeed(t, src, "s1")
+	p2, _ := signingSeed(t, src, "s2")
+	// The file was checked as p1's key, then replaced by p2's before the import.
+	if err := os.Rename(p2, p1); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := a.ImportSigningChecked(p1, pub1); !errors.Is(err, ErrSigningChanged) {
+		t.Fatalf("changed file: %v", err)
+	}
+	for _, f := range []string{"signing.nk", "signing.pub"} {
+		if _, err := os.Stat(filepath.Join(dir, f)); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("%s written: %v", f, err)
+		}
+	}
+}

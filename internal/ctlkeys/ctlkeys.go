@@ -607,11 +607,23 @@ func ParseSigningSeed(path string) (nkeys.KeyPair, string, error) {
 // from "no signing key configured" (Signing). Importing the same key again is a no-op; a key that differs from the
 // record is ErrDifferentKey and nothing changes.
 func (a *Authority) ImportSigning(path string) (pub string, created bool, err error) {
+	return a.ImportSigningChecked(path, "")
+}
+
+// ErrSigningChanged is ImportSigningChecked finding a seed whose public key is not the one the caller checked.
+var ErrSigningChanged = errors.New("signing_key changed while init ran: the key to import is not the one that was checked")
+
+// ImportSigningChecked is ImportSigning for a caller that validated the file earlier: the file is read once, and a seed
+// whose public key is not wantPub (when wantPub is not "") is ErrSigningChanged before anything is written.
+func (a *Authority) ImportSigningChecked(path, wantPub string) (pub string, created bool, err error) {
 	nk, want, err := parseSeedFile(path, signingKind)
 	if err != nil {
 		return "", false, err
 	}
-	nk.Wipe()
+	defer nk.Wipe()
+	if wantPub != "" && want != wantPub {
+		return "", false, ErrSigningChanged
+	}
 	differs := func(rec string) error {
 		return fmt.Errorf("%w: %s records %s, not the %s key %s you gave; refusing to replace it (move it aside to adopt with another key)", ErrDifferentKey, filepath.Join(a.dir, signingRec), rec, signingKind.what, want)
 	}
@@ -624,7 +636,7 @@ func (a *Authority) ImportSigning(path string) (pub string, created bool, err er
 	if rec != "" && rec != want {
 		return "", false, differs(rec)
 	}
-	pub, created, err = a.importKind(path, signingFile, signingKind)
+	pub, created, err = a.importParsed(nk, want, signingFile, signingKind)
 	if err != nil {
 		return "", false, err
 	}
@@ -651,6 +663,11 @@ func (a *Authority) importKind(src, name string, k kind) (pub string, created bo
 		return "", false, err
 	}
 	defer nk.Wipe()
+	return a.importParsed(nk, pub, name, k)
+}
+
+// importParsed installs an already parsed seed; the caller wipes nk.
+func (a *Authority) importParsed(nk nkeys.KeyPair, pub, name string, k kind) (string, bool, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	dst := filepath.Join(a.dir, name)

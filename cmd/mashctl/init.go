@@ -465,7 +465,10 @@ func doInit(setupPath string, dry, jsonOut bool, env func(string) string, lookup
 		}
 	}
 	if needSign {
-		if pub, _, err := ks.ImportSigning(sf.signingKey); err != nil {
+		if pub, _, err := ks.ImportSigningChecked(sf.signingKey, st.signPub); err != nil {
+			if errors.Is(err, ctlkeys.ErrSigningChanged) {
+				return cliframe.Failf("%v (nothing was installed for it; running init again is safe)", err)
+			}
 			return cliframe.Failf("%v\n  the account key was imported; running init again is safe", err)
 		} else if pub != st.signPub {
 			return cliframe.Failf("signing_key changed while init ran: the key imported is not the one that was checked; running init again is safe")
