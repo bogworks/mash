@@ -276,7 +276,7 @@ waiting kinds, batching and the verified-only urgent rule. Nobody has published 
 
 **What it costs.** Waking mail reaches an idle session up to 45 s late (configurable from 5 s to 30 min). Savings depend
 on senders marking mail `fyi` or `result`, because unmarked mail wakes. The wake needs Claude Code channels (a research
-preview); without them, mail waits for the session's next prompt or tool call. A message over 16 KiB arrives as a digest
+preview; on a personal account the development flag, in an organisation an administrator's allowlist entry); without them, mail waits for the session's next prompt or tool call. A message over 16 KiB arrives as a digest
 line and costs a `read` call.
 
 ## 6. Why NATS
@@ -404,9 +404,12 @@ its issue, under [Known issues](../CHANGELOG.md#known-issues) in the change log.
 
 - **One host adapter.** Claude Code only. The core runs without a host (tested), but the adapter seam is unproven.
 - **The idle wake rests on a research preview.** Claude Code channels are a research preview whose "flag syntax and
-  protocol contract may change". They need an allowlist entry in managed settings or the development flag (which Claude Code asks you to confirm at each
-  launch), are off for Team and Enterprise orgs until enabled, and are unavailable on Bedrock, Agent Platform and
-  Foundry. Without them, mail still arrives with
+  protocol contract may change". Claude Code's channels page says: "During the preview, `--channels` only accepts plugins from an Anthropic-maintained
+  allowlist, or from your organization's allowlist if an admin has set `allowedChannelPlugins`." mash is not on Anthropic's
+  list, so on a personal account the wake needs the development flag (a warning screen at every start), and in a Team or
+  Enterprise org it needs an administrator to turn channels on and add mash to `allowedChannelPlugins`. Channels are
+  unavailable on Bedrock, Agent Platform and Foundry. The setup skill writes one command per agent with the right flags
+  ([install.md](install.md#3-optional-wake-an-idle-session)). Without them, mail still arrives with
   the next prompt or tool call; it just does not wake an idle session.
 - **Durability is R1.** Single-replica inboxes on default NATS fsync (see section 8). The drop-oldest rule (16 MiB by default;
   the cap can be raised) means a flood from any endpoint can evict unread mail.

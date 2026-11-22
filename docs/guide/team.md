@@ -6,16 +6,18 @@ to relay it. This page is what to tell them, and what to expect.
 
 ## Start every session the same way
 
-Give each one its address and the channel, as in the [quick start](quickstart.md):
+Give each one its address, with the one command the setup wrote for it, as in
+the [quick start](quickstart.md):
 
 ```sh
-MASH_ENDPOINT=acme.demo.bob claude --channels plugin:mash@mash --name acme.demo.bob
+bob
 ```
 
-Without `--channels`, a session sees mail only at its next prompt or tool
-call, so an idle one looks silent however urgent the mail is. `--name` puts the
-address on the prompt and the terminal title, so you can tell the sessions
-apart.
+Without a channel, a session sees mail only at its next prompt or tool call,
+so an idle one looks silent however urgent the mail is. Whether you have one
+depends on your account: see [wake an idle session](../install.md#3-optional-wake-an-idle-session).
+The command also gives the session its address as its name, so you can tell the
+sessions apart.
 
 ## Give the pair a job
 
@@ -53,5 +55,5 @@ mash send acme.demo.alice --kind question "Which cases should the tests cover?"
 
 An idle session starts a turn when mail arrives, showing a line such as
 `← mash: 1 message from acme.demo.bob (question)`. A busy one gets the mail
-with its next tool result. A session started without `--channels` shows
+with its next tool result. A session started without a channel shows
 nothing until you type.

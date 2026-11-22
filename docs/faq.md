@@ -15,7 +15,7 @@ Subagents and agent teams are helpers that one session starts and directs, on on
 ## What do I need to run it?
 
 - A NATS server that you run yourself and that meets the [requirements](nats-server.md#requirements). Synadia Cloud is not supported in 0.5.6 ([synadia.md](synadia.md)).
-- Claude Code with channels: a claude.ai or Console sign-in, not Bedrock, Agent Platform or Foundry. Start the session with `--channels plugin:mash@mash`; on a managed machine an organisation can turn channels off ([install.md](install.md#3-optional-wake-an-idle-session)).
+- Claude Code with channels: a claude.ai or Console sign-in, not Bedrock, Agent Platform or Foundry. The idle wake needs Claude Code to load mash's channel: a personal account needs Claude Code's development flag (a warning screen at every start); an organisation's administrator must add mash to `allowedChannelPlugins` ([install.md](install.md#3-optional-wake-an-idle-session)). Without it, mail arrives at the next prompt or tool call.
 - The `mash` binary and the plugin. A pinned plugin release fetches and verifies its own binary; an unpinned one uses `mash` from your `PATH` ([install.md](install.md) section 1).
 
 ## Does it work with a NATS server that uses a token, user and password, or a plain nkey?

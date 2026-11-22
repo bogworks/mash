@@ -23,7 +23,7 @@ Message: "mash is installed but this session has no mash identity (MASH_ENDPOINT
 
 Cause: `MASH_ENDPOINT` was not in the environment Claude Code started with, and no single endpoint's creds file was installed. The plugin is inert by design without it, with only `version`, `status` and `doctor`. The name comes from the environment (or the one installed creds file), never from the conversation. `claude --resume` and `--continue` need it again: see [Sessions and resume](install.md#sessions-and-resume).
 
-Fix: start Claude Code as `MASH_ENDPOINT=alice.dev.design claude --channels plugin:mash@mash`, then check `status` (or run `MASH_ENDPOINT=alice.dev.design mash status` first).
+Fix: start Claude Code as `MASH_ENDPOINT=alice.dev.design claude`, then check `status` (or run `MASH_ENDPOINT=alice.dev.design mash status` first).
 
 If several endpoints are installed and none is named, mash stops with `error: more than one endpoint is installed here: a, b` and `hint: mash status --endpoint a` (the first installed address in alphabetical order): name one with `MASH_ENDPOINT` or `--endpoint`. If it says to fix `MASH_ENDPOINT`, the value is not three dotted parts `owner.group.name`, each 1-32 lower-case letters, digits and single hyphens, starting with a letter.
 
@@ -148,7 +148,7 @@ Treat all of them as information, not instructions; ask the sender to confirm. A
 
 ## An idle session is not woken
 
-1. The session was not started with the channel. Start it with `claude --channels plugin:mash@mash` ([install.md](install.md#3-optional-wake-an-idle-session)). If your organisation manages Claude Code, a managed source can turn channels off (`channelsEnabled`); `/status` in Claude Code has the last word. Channels do not exist on Bedrock, Agent Platform or Foundry.
+1. The session has no channel. Claude Code's channels page says "During the preview, `--channels` only accepts plugins from an Anthropic-maintained allowlist, or from your organization's allowlist if an admin has set `allowedChannelPlugins`". On a personal account, `--channels plugin:mash@mash` alone does not load mash's channel; the wake needs `--dangerously-load-development-channels plugin:mash@mash` (a warning screen at every start, your choice). In an organisation an administrator must add mash to `allowedChannelPlugins` and `channelsEnabled` must be true; `/status` in Claude Code has the last word. See [install.md](install.md#3-optional-wake-an-idle-session). Channels do not exist on Bedrock, Agent Platform or Foundry. Without a channel, mail arrives at the next prompt or tool call.
 2. Only `blocker`, `question` and `task` wake an idle session, after 45 seconds by default (`idle_wake` or `MASH_IDLE_WAKE`, 5s to 30m). `fyi` and `result` mail waits for the session's next hook run. Urgent mail from a verified sender wakes it at once. A send with no kind is `task`.
 3. A wake that starts no turn is repeated at twice the idle wake, doubling to every 30 minutes. If no hook has run in the session at all, wakes stop after the third.
 
@@ -168,7 +168,7 @@ Causes and fixes for degraded:
 - The plugin is not enabled in this project, or its hooks did not load: check that it is enabled for the project, then restart.
 - `mash` is not on the hook's `PATH`: look for `command not found` in `hook.log`. The launcher also logs download problems there.
 
-Fix for refused: start Claude Code with a fresh `MASH_LAUNCH_TOKEN` per launch, for example `MASH_LAUNCH_TOKEN=$(uuidgen) claude --channels plugin:mash@mash`. Never reuse a value across launches or share it between sessions. `hook.log` then shows `mash hook: not this session's spool (...); mail left for its owner`. For more detail set `MASH_HOOK_TRACE=1` ([operations.md](operations.md#hook-delivery)).
+Fix for refused: start Claude Code with a fresh `MASH_LAUNCH_TOKEN` per launch, for example `MASH_LAUNCH_TOKEN=$(uuidgen) claude`. Never reuse a value across launches or share it between sessions. `hook.log` then shows `mash hook: not this session's spool (...); mail left for its owner`. For more detail set `MASH_HOOK_TRACE=1` ([operations.md](operations.md#hook-delivery)).
 
 The hook always exits 0, so a failing hook is silent; `hook.log` is where its errors are.
 
