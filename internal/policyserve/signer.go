@@ -125,18 +125,45 @@ func errNonMashKey(k string) error {
 	return fmt.Errorf("the account JWT carries a signing key that is not an owner group key of the key store (%.8s...): remove it before a list set can be applied", k)
 }
 
+// SigningPub is the public key of the account signing key of ks (signing.nk), "" when it has none.
+func SigningPub(ks any) (string, error) {
+	sk, ok := ks.(interface {
+		Signing() (nkeys.KeyPair, string, error)
+	})
+	if !ok {
+		return "", nil
+	}
+	kp, pub, err := sk.Signing()
+	switch {
+	case err == nil:
+		kp.Wipe()
+		return pub, nil
+	case errors.Is(err, ctlkeys.ErrNoSigningKey):
+		return "", nil
+	}
+	return "", fmt.Errorf("account signing key: %w", err)
+}
+
 // keptFrom splits the signing keys of base. kept is the other ranges' group keys of the key store (group -> public
 // key) that base also carries: the ones the next account JWT retains, and the ones the generation read must find. A
 // key store key of another range that base does not carry is in neither. mine are this range's keys in base, which are
 // rebuilt from the list set. nonMash are the signing keys of base that are not a scoped owner group key of the key
 // store: Sign drops them after the issuer check, or refuses when it may not.
 func (s *Issuer) keptFrom(base *jwt.AccountClaims) (kept map[string]string, mine, nonMash []string, err error) {
+	kept, mine, nonMash, _, err = s.splitKeys(base)
+	return
+}
+
+// splitKeys is keptFrom that also returns plain: every plain (unscoped) signing key of base. A plain key is never
+// non-mash: the account's other issuers (the admin and exempt users', the configured signing_key) use them, and they
+// are carried unchanged. Only a scoped key that is not an owner group key of the key store is non-mash.
+func (s *Issuer) splitKeys(base *jwt.AccountClaims) (kept map[string]string, mine, nonMash, plain []string, err error) {
 	ours, err := s.Keys.GroupPublics()
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("owner group keys: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("owner group keys: %w", err)
 	}
 	if s.Range == "" {
-		return nil, nil, nil, errors.New("the issuer has no range: cannot tell which signing keys are this range's")
+		return nil, nil, nil, nil, errors.New("the issuer has no range: cannot tell which signing keys are this range's")
 	}
 	groupOf := map[string]string{} // public key -> owner group
 	for g, pub := range ours {
@@ -145,6 +172,10 @@ func (s *Issuer) keptFrom(base *jwt.AccountClaims) (kept map[string]string, mine
 	kept = map[string]string{}
 	for _, k := range base.SigningKeys.Keys() {
 		sc, _ := base.SigningKeys.GetScope(k)
+		if sc == nil {
+			plain = append(plain, k)
+			continue
+		}
 		g, held := groupOf[k]
 		if _, scoped := sc.(*jwt.UserScope); !scoped || !held {
 			nonMash = append(nonMash, k)
@@ -156,7 +187,18 @@ func (s *Issuer) keptFrom(base *jwt.AccountClaims) (kept map[string]string, mine
 			kept[g] = k
 		}
 	}
-	return kept, mine, nonMash, nil
+	return kept, mine, nonMash, plain, nil
+}
+
+// Plain is every plain (unscoped) signing key of the account JWT the servers hold now: the keys that stay beside
+// mash's, for the generation and gate checks.
+func (s *Issuer) Plain(ctx context.Context) ([]string, error) {
+	base, err := s.current(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("read the account JWT: %w", err)
+	}
+	_, _, _, plain, err := s.splitKeys(base)
+	return plain, err
 }
 
 // Kept is the scoped signing keys the next account JWT keeps beside this range's, as Sign retains them: the owner
@@ -192,7 +234,7 @@ func (s *Issuer) Sign(rec listset.Record, c *listset.Compiled) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("read the account JWT: %w", err)
 	}
-	kept, mine, nonMash, err := s.keptFrom(base)
+	kept, mine, nonMash, plain, err := s.splitKeys(base)
 	if err != nil {
 		return "", err
 	}
@@ -220,6 +262,9 @@ func (s *Issuer) Sign(rec listset.Record, c *listset.Compiled) (string, error) {
 		}
 		for _, p := range pubs {
 			stay[p] = true
+		}
+		for _, p := range plain {
+			stay[p] = true // a plain key is carried
 		}
 		exempt, err := s.ExemptIssuers(s.Ctx)
 		if err != nil {

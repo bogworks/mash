@@ -59,8 +59,8 @@ var initSpec = epSpec{
 // setupKeys are the keys of the setup file, in the order the file documents them; setupOptional are the ones it may
 // leave out.
 var (
-	setupKeys     = []string{"servers", "ca", "owner", "admin_creds", "system_creds", "operator_key", "account_key"}
-	setupOptional = map[string]bool{"ca": true}
+	setupKeys     = []string{"servers", "ca", "owner", "admin_creds", "system_creds", "operator_key", "account_key", "signing_key"}
+	setupOptional = map[string]bool{"ca": true, "signing_key": true}
 )
 
 // setupFile is the setup file `mashctl init --config` reads: paths and addresses, never secrets. Every path in it is
@@ -69,6 +69,7 @@ type setupFile struct {
 	servers                                          []string
 	ca, owner                                        string
 	adminCreds, systemCreds, operatorKey, accountKey string
+	signingKey                                       string // optional: the account SIGNING seed, for an operator with strict_signing_key_usage
 }
 
 // secretSeed matches an nkey seed: S, then O, A or U, then base32 letters, 20 characters or more in all.
@@ -151,6 +152,9 @@ func loadSetup(path, home string) (setupFile, error) {
 	if sf.accountKey, err = file("account_key"); err != nil {
 		return sf, err
 	}
+	if sf.signingKey, err = file("signing_key"); err != nil {
+		return sf, err
+	}
 	if sf.owner, err = text("owner"); err != nil {
 		return sf, cliframe.Failf("%s: owner must be a name", shown)
 	}
@@ -178,7 +182,11 @@ func loadSetup(path, home string) (setupFile, error) {
 // initState is what the read-only checks learned and the write phase needs.
 type initState struct {
 	opKP, acctKP     nkeys.KeyPair
+	signKP           nkeys.KeyPair // the account signing key of signing_key; nil when it is not configured
 	opPub, acctPub   string
+	signPub          string
+	haveSign         bool   // the key store already holds this very signing key
+	storedSignPub    string // the public key of signing.nk in the key store when the setup file gives no signing_key
 	sysCredsRaw      []byte
 	trust            apply.Trust
 	adminRaw         []byte
@@ -261,6 +269,9 @@ func doInit(setupPath string, dry, jsonOut bool, env func(string) string, lookup
 		if st.acctKP != nil {
 			st.acctKP.Wipe()
 		}
+		if st.signKP != nil {
+			st.signKP.Wipe()
+		}
 		clear(st.adminRaw)
 	}()
 
@@ -270,6 +281,14 @@ func doInit(setupPath string, dry, jsonOut bool, env func(string) string, lookup
 	}
 	if st.acctKP, st.acctPub, err = ctlkeys.ParseAccountSeed(sf.accountKey); err != nil {
 		return cliframe.Failf("account_key: %v\n  it must be a 0600 file holding the IDENTITY seed of the mash account (it starts with SA; its public key is the account JWT's subject)", err)
+	}
+	if sf.signingKey != "" {
+		if st.signKP, st.signPub, err = ctlkeys.ParseSigningSeed(sf.signingKey); err != nil {
+			return cliframe.Failf("signing_key: %v\n  it must be a 0600 file holding the SIGNING seed of the mash account (it starts with SA): a signing key the account JWT lists, not the identity key", err)
+		}
+		if st.signPub == st.acctPub {
+			return cliframe.Failf("signing_key is the account's identity key: give the identity key as account_key, and a separate signing key the account JWT lists as signing_key (nothing was changed)")
+		}
 	}
 	if st.sysCredsRaw, err = readUserCreds(sf.systemCreds); err != nil {
 		return cliframe.Failf("system_creds: %v", err)
@@ -349,6 +368,19 @@ func doInit(setupPath string, dry, jsonOut bool, env func(string) string, lookup
 		return cliframe.Failf("%v (nothing was changed)", err)
 	}
 
+	if st.signPub != "" {
+		if err := checkSigningKeyListed(claims, st.signPub); err != nil {
+			return cliframe.Failf("%v (nothing was changed)", err)
+		}
+	}
+
+	if st.signPub == "" && st.storedSignPub != "" {
+		// The setup file names no signing_key, but the stored signing.nk keeps signing endpoint users.
+		if err := checkSigningKeyListed(claims, st.storedSignPub); err != nil {
+			return cliframe.Failf("the key store's signing.nk (public key %s) keeps signing endpoint users and is no longer a plain listed signing key of the account JWT (%v): give the setup file's signing_key, or move signing.nk aside (nothing was changed)", st.storedSignPub, err)
+		}
+	}
+
 	// (3) JetStream.
 	lim, _, err := jsLimits(claims)
 	if err != nil {
@@ -394,11 +426,15 @@ func doInit(setupPath string, dry, jsonOut bool, env func(string) string, lookup
 
 	var steps []step
 	needOp, needAcct, needSys, needCfg := !st.haveOp, !st.haveAcct, !st.haveSys, !st.haveCfg
+	needSign := st.signPub != "" && !st.haveSign
 	if needOp {
 		steps = append(steps, step{"operator key", filepath.Join(keyDir, "operator.nk")})
 	}
 	if needAcct {
 		steps = append(steps, step{"account key", filepath.Join(keyDir, "account.nk")})
+	}
+	if needSign {
+		steps = append(steps, step{"signing key", filepath.Join(keyDir, "signing.nk")})
 	}
 	if needSys {
 		steps = append(steps, step{"system creds", st.sysDst})
@@ -426,6 +462,16 @@ func doInit(setupPath string, dry, jsonOut bool, env func(string) string, lookup
 			return cliframe.Failf("%v\n  the operator key was imported; running init again is safe", err)
 		} else if pub != st.acctPub {
 			return cliframe.Failf("account_key changed while init ran: the key imported is not the one that was checked; running init again is safe")
+		}
+	}
+	if needSign {
+		if pub, _, err := ks.ImportSigningChecked(sf.signingKey, st.signPub); err != nil {
+			if errors.Is(err, ctlkeys.ErrSigningChanged) {
+				return cliframe.Failf("%v (nothing was installed for it; running init again is safe)", err)
+			}
+			return cliframe.Failf("%v\n  the account key was imported; running init again is safe", err)
+		} else if pub != st.signPub {
+			return cliframe.Failf("signing_key changed while init ran: the key imported is not the one that was checked; running init again is safe")
 		}
 	}
 	if needSys {
@@ -634,6 +680,18 @@ func sameServers(got any, want []string) bool {
 	return slices.Equal(l, want)
 }
 
+// checkSigningKeyListed refuses a signing key the account JWT does not list: nats-server would refuse every user it
+// signs.
+func checkSigningKeyListed(claims *jwt.AccountClaims, signPub string) error {
+	if claims.SigningKeys.Contains(signPub) {
+		if sc, _ := claims.SigningKeys.GetScope(signPub); sc != nil {
+			return fmt.Errorf("signing_key: its public key %s is a scoped signing key of the account JWT (its template would limit every endpoint): give a plain signing key", signPub)
+		}
+		return nil
+	}
+	return fmt.Errorf("signing_key: its public key %s is not one of the signing keys of the account JWT on the resolver: users it signs would be refused. Add it to the account's signing keys (nsc edit account --sk %s), or give the signing key the account lists", signPub, signPub)
+}
+
 // verifyAccount checks the account JWT the resolver gave for acctPub: its subject is that key and it is inside its
 // validity window.
 func verifyAccount(claims *jwt.AccountClaims, acctPub string, now int64) (warns []string, err error) {
@@ -684,6 +742,32 @@ func checkStore(ks *ctlkeys.Authority, st *initState) error {
 				return differentSetup(st, k.what+" key")
 			}
 			*k.have = true
+		}
+	}
+	kp, pub, err := ks.Signing()
+	rec, _ := ks.SigningRecord()
+	switch {
+	case errors.Is(err, ctlkeys.ErrNoSigningKey):
+	case errors.Is(err, ctlkeys.ErrSigningKeyLost):
+		// signing.nk is gone: init with the same signing_key restores it; anything else is refused.
+		if st.signPub == "" {
+			return fmt.Errorf("%v (nothing was changed)", err)
+		}
+		if rec != st.signPub {
+			return differentSetup(st, "signing key")
+		}
+	case err != nil:
+		return err
+	default:
+		kp.Wipe()
+		if st.signPub != "" {
+			if pub != st.signPub {
+				return differentSetup(st, "signing key")
+			}
+			// A seed with no record is an init that stopped between the two writes: ImportSigning completes it.
+			st.haveSign = rec == pub
+		} else {
+			st.storedSignPub = pub
 		}
 	}
 	return nil

@@ -152,24 +152,43 @@ func AccountFindings(ctx context.Context, r Resolver, ks *ctlkeys.Authority, ser
 		if err != nil {
 			return nil, fmt.Errorf("refusing the account JWT: %w", err)
 		}
-		known, _ := knownSigningKeys(ks, acctPub)
+		known, kerr := knownSigningKeys(ks, acctPub)
+		if kerr != nil {
+			return nil, kerr
+		}
+		cfgSigner, cerr := configuredSigningKey(ks)
+		if cerr != nil {
+			return nil, cerr
+		}
+		if cfgSigner != "" {
+			if _, present := claims.SigningKeys[cfgSigner]; !present {
+				out = append(out, Finding{Kind: KindUnknownKey, Subject: config.Clean(cfgSigner),
+					Detail: "the configured signing_key " + config.Clean(cfgSigner) + " is not in the account JWT: users it signs are not trusted by the server"})
+			}
+		}
 		for _, k := range sortedKeys(claims.SigningKeys) {
-			if known[k] {
+			if known[k] && k != cfgSigner {
 				continue
 			}
 			u := unknownKey{key: k}
-			if sc, _ := claims.SigningKeys.GetScope(k); sc != nil {
+			// A plain key has no scope (as RevokeUsers reads it); anything with a scope is a zone key.
+			sc, _ := claims.SigningKeys.GetScope(k)
+			if sc != nil {
+				u.scoped = true
 				if us, ok := sc.(*jwt.UserScope); ok && us != nil {
 					u.role = us.Role
 				}
 			}
-			if u.role != "" {
+			if k == cfgSigner && !u.scoped {
+				continue // the configured signing key, plain: as configured
+			}
+			if u.scoped {
 				out = append(out, Finding{Kind: KindZonePolicyApplied, Subject: config.Clean(u.key),
 					Detail: fmt.Sprintf("the account JWT holds the %s: a zone policy from an older release is applied, and zones are removed (ADR 0091); stay on the last zoned release until the label policy model ships", u.describe())})
 				continue
 			}
 			out = append(out, Finding{Kind: KindUnknownKey, Subject: config.Clean(u.key),
-				Detail: fmt.Sprintf("the account JWT holds the %s, which mashctl did not create. %s", u.describe(), unknownKeyNote)})
+				Detail: fmt.Sprintf("the account JWT holds the %s, which mashctl did not create: it is carried unchanged when mashctl rewrites the account JWT. %s", u.describe(), unknownKeyNote)})
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool {

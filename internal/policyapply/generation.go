@@ -3,6 +3,7 @@ package policyapply
 import (
 	"encoding/json"
 	"slices"
+	"sort"
 
 	"github.com/nats-io/jwt/v2"
 
@@ -25,6 +26,13 @@ type Candidate struct {
 	// with its group as role, its group must not be a template of this candidate, and no key beyond Signers and Kept
 	// may be present. A kept key missing, or with another role, fails the read.
 	Kept map[string]string
+	// Plain are the plain (unscoped) signing keys the account JWT carries (PlainKeys): the configured account signing
+	// key and any other issuer's key. They may be present beside Signers and Kept and are not counted as keys beyond
+	// them. A plain key not listed still fails the read.
+	Plain []string
+	// RequiredPlain are plain signing keys that MUST be in the account JWT, unscoped: the configured account signing
+	// key (signing.nk). Plain is derived from the JWT itself, so only this field catches a JWT that lost the key.
+	RequiredPlain []string
 }
 
 // GenerationOf says which candidate the account JWT carries. The JWT carries no marker: a scoped signing key whose
@@ -81,7 +89,23 @@ func matches(claims *jwt.AccountClaims, roles map[string]scoped, c Candidate, al
 			return false // a kept signer missing, plain, or with another role
 		}
 	}
-	if c.Signers != nil && len(claims.SigningKeys) != len(own)+len(c.Kept) {
+	for _, k := range c.RequiredPlain {
+		if _, has := claims.SigningKeys[k]; !has {
+			return false // the configured signing key is missing
+		}
+		if sc, _ := claims.SigningKeys.GetScope(k); sc != nil {
+			return false // present but scoped: no longer the plain key
+		}
+	}
+	n := len(claims.SigningKeys)
+	for _, k := range c.Plain {
+		if sc, _ := claims.SigningKeys.GetScope(k); sc == nil {
+			if _, has := claims.SigningKeys[k]; has {
+				n--
+			}
+		}
+	}
+	if c.Signers != nil && n != len(own)+len(c.Kept) {
 		return false // a plain, a duplicate-role or any other signing key beyond the expected ones
 	}
 	for _, o := range all {
@@ -127,4 +151,19 @@ func canonPerms(p jwt.Permissions) string {
 	}
 	b, _ := json.Marshal(v)
 	return string(b)
+}
+
+// PlainKeys is every plain (unscoped) signing key of claims, sorted: the keys mash carries unchanged.
+func PlainKeys(claims *jwt.AccountClaims) []string {
+	if claims == nil {
+		return nil
+	}
+	var out []string
+	for _, k := range claims.SigningKeys.Keys() {
+		if sc, _ := claims.SigningKeys.GetScope(k); sc == nil {
+			out = append(out, k)
+		}
+	}
+	sort.Strings(out)
+	return out
 }

@@ -195,3 +195,56 @@ func TestApplyReadsInventoryUnderTheLock(t *testing.T) {
 		t.Fatalf("the gate did not see the credential recorded after the early read: %+v", st)
 	}
 }
+
+// A plain signing key that is mash's own (Plain) is not a key beyond the expected ones; another plain key still is.
+func TestGenerationOfPlainSigners(t *testing.T) {
+	k := newKeys(t)
+	c := compile(t, set1())
+	ownKP, _ := nkeys.CreateAccount()
+	own, _ := ownKP.PublicKey()
+	otherKP, _ := nkeys.CreateAccount()
+	other, _ := otherKP.PublicKey()
+	withOwn := k.buildWith(t, c, k.signers, []string{own})
+	withBoth := k.buildWith(t, c, k.signers, []string{own, other})
+	without := k.build(t, c)
+	for name, tc := range map[string]struct {
+		tok   string
+		plain []string
+		want  bool
+	}{
+		"own plain key present":     {withOwn, []string{own}, true},
+		"own plain key absent":      {without, []string{own}, true},
+		"plain key not declared":    {withOwn, nil, false},
+		"another plain key as well": {withBoth, []string{own}, false},
+		"declared key is the other": {withOwn, []string{other}, false},
+	} {
+		cands := []Candidate{{Generation: 1, Compiled: c, Signers: k.signers, Plain: tc.plain}}
+		if _, ok := GenerationOf(tc.tok, cands); ok != tc.want {
+			t.Errorf("%s: read = %v, want %v", name, ok, tc.want)
+		}
+	}
+}
+
+// The configured signing key is required: a JWT missing it, or carrying it scoped, is not the generation.
+func TestGenerationOfRequiresConfiguredSigner(t *testing.T) {
+	k := newKeys(t)
+	c := compile(t, set1())
+	ownKP, _ := nkeys.CreateAccount()
+	own, _ := ownKP.PublicKey()
+	plain := k.buildWith(t, c, k.signers, []string{own})
+	missing := k.build(t, c)
+	scopedTok := addScoped(t, k, missing, foreignGroup, own)
+	for name, tc := range map[string]struct {
+		tok  string
+		want bool
+	}{
+		"missing":        {missing, false},
+		"present scoped": {scopedTok, false},
+		"present plain":  {plain, true},
+	} {
+		cands := []Candidate{{Generation: 1, Compiled: c, Signers: k.signers, Plain: []string{own}, RequiredPlain: []string{own}}}
+		if _, ok := GenerationOf(tc.tok, cands); ok != tc.want {
+			t.Errorf("%s: read = %v, want %v", name, ok, tc.want)
+		}
+	}
+}

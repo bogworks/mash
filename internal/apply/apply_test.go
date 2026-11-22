@@ -3,6 +3,7 @@ package apply
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -208,7 +209,7 @@ func TestAccountFindingsReportsAPlainSigningKey(t *testing.T) {
 	pk, _ := nkeys.CreateAccount()
 	resolverToken(t, fk, ks, op, func(cl *jwt.AccountClaims) { cl.SigningKeys.Add(pubOf(t, pk)) })
 	fs, err := AccountFindings(context.Background(), fk, ks, 0)
-	if err != nil || len(fs) != 1 || fs[0].Kind != KindUnknownKey || !strings.Contains(fs[0].Detail, "will not carry signing keys it did not create") {
+	if err != nil || len(fs) != 1 || fs[0].Kind != KindUnknownKey || !strings.Contains(fs[0].Detail, "is carried unchanged") {
 		t.Fatalf("%+v %v", fs, err)
 	}
 	if applied, _ := AppliedZonePolicy(context.Background(), fk, ks, 0); applied {
@@ -234,5 +235,25 @@ func TestAccountFindingsReportsServersThatDisagree(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("no servers-differ finding: %+v", fs)
+	}
+}
+
+// A key store that cannot say which signing keys are its own (signing.nk lost) is an error, not an empty known set.
+func TestAccountFindingsReturnsTheKnownKeysError(t *testing.T) {
+	ks, fk := setup(t)
+	sk, _ := nkeys.CreateAccount()
+	seed, _ := sk.Seed()
+	src := filepath.Join(t.TempDir(), "sk")
+	if err := os.WriteFile(src, append(seed, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := ks.ImportSigning(src); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(ks.Dir(), "signing.nk")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := AccountFindings(context.Background(), fk, ks, 0); !errors.Is(err, ctlkeys.ErrSigningKeyLost) {
+		t.Fatalf("err = %v", err)
 	}
 }

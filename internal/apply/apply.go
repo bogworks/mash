@@ -7,6 +7,7 @@ package apply
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -105,22 +106,32 @@ const (
 	defaultLockWait    = 5 * time.Second
 )
 
-// unknownKey is a signing key of the fetched account JWT that is not one of mashctl's own keys. role is the scoped
-// signer's role, "" for a plain signing key.
-type unknownKey struct{ key, role string }
+// unknownKey is a signing key of the fetched account JWT that is not one of mashctl's own keys. scoped is false for a
+// plain signing key; role is the scoped signer's role.
+type unknownKey struct {
+	key, role string
+	scoped    bool
+}
 
 func (u unknownKey) describe() string {
-	if u.role == "" {
+	if !u.scoped {
 		return "plain signing key " + config.Clean(u.key)
 	}
 	return fmt.Sprintf("scoped signing key %s (role %s)", config.Clean(u.key), config.Clean(u.role))
 }
 
-// knownSigningKeys is the set of signing keys mashctl may find in the account JWT: the account identity key and the
-// public key of every owner group signer (the issue service's) in the key store. There are no per-zone signing keys any
+// knownSigningKeys is the set of signing keys mashctl may find in the account JWT: the account identity key, the
+// configured account signing key (signing_key) and the public key of every owner group signer (the issue service's)
+// in the key store. There are no per-zone signing keys any
 // more (ADR 0091).
 func knownSigningKeys(ks *ctlkeys.Authority, acctPub string) (map[string]bool, error) {
 	known := map[string]bool{acctPub: true}
+	if kp, pub, err := ks.Signing(); err == nil {
+		kp.Wipe()
+		known[pub] = true
+	} else if !errors.Is(err, ctlkeys.ErrNoSigningKey) {
+		return nil, err
+	}
 	groups, err := ks.GroupPublics()
 	if err != nil {
 		return nil, err
@@ -131,8 +142,21 @@ func knownSigningKeys(ks *ctlkeys.Authority, acctPub string) (map[string]bool, e
 	return known, nil
 }
 
+// configuredSigningKey is the public key of the configured account signing key (signing_key), or "" when none is set.
+func configuredSigningKey(ks *ctlkeys.Authority) (string, error) {
+	kp, pub, err := ks.Signing()
+	if err != nil {
+		if errors.Is(err, ctlkeys.ErrNoSigningKey) {
+			return "", nil
+		}
+		return "", err
+	}
+	kp.Wipe()
+	return pub, nil
+}
+
 // unknownKeyNote is the one explanation printed with every unknown signing key.
-const unknownKeyNote = "mashctl signs the account JWT with the operator key, so it will not carry signing keys it did not create. A scoped signer is a zone key of a zone policy from an older release: ADR 0091 removed zones, so stay on the last zoned release until the label policy model ships. Any other key is removed with the tool that added it."
+const unknownKeyNote = "mashctl signs the account JWT with the operator key, so it will not carry a scoped signing key it did not create: that is a zone key of a zone policy from an older release, and ADR 0091 removed zones, so stay on the last zoned release until the label policy model ships. A plain signing key it did not create is carried unchanged."
 
 // pushAndCheck pushes token to the resolver and checks the answers against known (the servers the ping found): every
 // known server must have acknowledged with code 200 and at least one must have answered. why is "" when all did.
