@@ -152,7 +152,10 @@ func AccountFindings(ctx context.Context, r Resolver, ks *ctlkeys.Authority, ser
 		if err != nil {
 			return nil, fmt.Errorf("refusing the account JWT: %w", err)
 		}
-		known, _ := knownSigningKeys(ks, acctPub)
+		known, kerr := knownSigningKeys(ks, acctPub)
+		if kerr != nil {
+			return nil, kerr
+		}
 		for _, k := range sortedKeys(claims.SigningKeys) {
 			if known[k] {
 				continue

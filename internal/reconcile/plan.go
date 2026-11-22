@@ -364,6 +364,9 @@ func Build(ctx context.Context, in Input) (Plan, error) {
 			if kept[k] {
 				continue
 			}
+			if sc, _ := in.Claims.SigningKeys.GetScope(k); sc == nil {
+				continue // a plain key is another issuer's or mash's signing_key: carried, never removed
+			}
 			sk := SigningKey{Key: k, State: state, Signed: []SignedUser{}}
 			for _, u := range slices.Sorted(maps.Keys(byKey)) {
 				for _, cn := range byKey[u] {

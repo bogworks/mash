@@ -1,6 +1,9 @@
 package mint
 
 import (
+	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -275,5 +278,41 @@ func TestMintSigningKey(t *testing.T) {
 	uc, _ = jwt.DecodeUserClaims(tok)
 	if uc.Issuer != skPub || uc.IssuerAccount != idPub || acct != idPub {
 		t.Fatalf("SignUser: issuer %s issuer_account %s account %s", uc.Issuer, uc.IssuerAccount, acct)
+	}
+}
+
+// A store that records a configured signing key but has lost signing.nk is refused: mint never falls back to the
+// identity key, which a strict server rejects.
+func TestMintRefusesWhenTheSigningKeyIsLost(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "keys")
+	ks, err := ctlkeys.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := ks.InitAccount(); err != nil {
+		t.Fatal(err)
+	}
+	sk, _ := nkeys.CreateAccount()
+	seed, _ := sk.Seed()
+	src := filepath.Join(t.TempDir(), "sk")
+	if err := os.WriteFile(src, append(seed, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := ks.ImportSigning(src); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Mint(ks, testAddr, nil); err != nil {
+		t.Fatalf("mint with the key: %v", err)
+	}
+	if err := os.Remove(filepath.Join(dir, "signing.nk")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Mint(ks, testAddr, nil); !errors.Is(err, ctlkeys.ErrSigningKeyLost) || !strings.Contains(err.Error(), "signing.nk") {
+		t.Fatalf("mint after loss: %v", err)
+	}
+	ukp, _ := nkeys.CreateUser()
+	upub, _ := ukp.PublicKey()
+	if _, _, err := SignUser(ks, testAddr, upub); !errors.Is(err, ctlkeys.ErrSigningKeyLost) {
+		t.Fatalf("SignUser after loss: %v", err)
 	}
 }

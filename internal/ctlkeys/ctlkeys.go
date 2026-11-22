@@ -32,11 +32,16 @@ var (
 	// ErrNoSigningKey is returned by Signing when signing.nk is absent: the account has no separate signing key
 	// configured, and endpoint users are signed by the account identity key.
 	ErrNoSigningKey = errors.New("mashctl: no account signing key configured (signing.nk)")
+	// ErrSigningKeyLost is returned by Signing when the store records a configured signing key (signing.pub) but
+	// signing.nk is missing, unreadable or another key. The identity key must not stand in for it: a strict server
+	// rejects what it signs.
+	ErrSigningKeyLost = errors.New("mashctl: the account signing key was configured (signing.pub) but signing.nk is missing or is not that key: restore signing.nk, or run `mashctl init` again with signing_key set")
 )
 
 const (
 	accountFile  = "account.nk"
 	signingFile  = "signing.nk"
+	signingRec   = "signing.pub"
 	operatorFile = "operator.nk"
 	systemFile   = "system.nk"
 	groupsDir    = "groups"
@@ -417,8 +422,60 @@ func (a *Authority) Account() (nkeys.KeyPair, string, error) {
 // Signing returns the account SIGNING key pair (signing.nk) and its public key: the key that signs endpoint users
 // when the operator requires signing keys (strict_signing_key_usage). It is ErrNoSigningKey when none was imported;
 // Account is then the signer.
+//
+// When the store holds the record of a configured signing key (signing.pub, written by ImportSigning) and signing.nk
+// is missing, unreadable or another key, it is ErrSigningKeyLost, never ErrNoSigningKey.
 func (a *Authority) Signing() (nkeys.KeyPair, string, error) {
-	return a.getKind(signingFile, signingKind, ErrNoSigningKey)
+	kp, pub, err := a.getKind(signingFile, signingKind, ErrNoSigningKey)
+	rec, rerr := a.SigningRecord()
+	if rerr != nil {
+		if kp != nil {
+			kp.Wipe()
+		}
+		return nil, "", rerr
+	}
+	switch {
+	case rec == "":
+		return kp, pub, err
+	case err != nil:
+		return nil, "", fmt.Errorf("%w (%v)", ErrSigningKeyLost, err)
+	case pub != rec:
+		kp.Wipe()
+		return nil, "", fmt.Errorf("%w (signing.nk holds %s, the record says %s)", ErrSigningKeyLost, pub, rec)
+	}
+	return kp, pub, nil
+}
+
+// SigningRecord is the public key recorded in signing.pub by ImportSigning, "" when there is no record.
+func (a *Authority) SigningRecord() (string, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.signingRecordLocked()
+}
+
+func (a *Authority) signingRecordLocked() (string, error) {
+	path := filepath.Join(a.dir, signingRec)
+	f, err := config.OpenNoFollow(path, os.O_RDONLY, 0)
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("mashctl: read %s: %w", path, err)
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil || !fi.Mode().IsRegular() || fi.Size() > 256 {
+		return "", fmt.Errorf("mashctl: %s is not a signing key record: remove it or restore it", path)
+	}
+	b, err := io.ReadAll(f)
+	if err != nil {
+		return "", fmt.Errorf("mashctl: read %s: %w", path, err)
+	}
+	pub := strings.TrimSpace(string(b))
+	if !signingKind.valid(pub) {
+		return "", fmt.Errorf("mashctl: %s does not hold an account public key: remove it or restore it", path)
+	}
+	return pub, nil
 }
 
 // ErrNoGroupKey is wrapped by GroupKey when the owner group has no key file and create is false.
@@ -545,8 +602,47 @@ func ParseSigningSeed(path string) (nkeys.KeyPair, string, error) {
 }
 
 // ImportSigning is ImportAccount for the account signing seed (signing.nk): same custody, never overwritten.
+//
+// It also records the public key beside it (signing.pub, 0600, never replaced), so a later loss of signing.nk is told
+// from "no signing key configured" (Signing). Importing the same key again is a no-op; a key that differs from the
+// record is ErrDifferentKey and nothing changes.
 func (a *Authority) ImportSigning(path string) (pub string, created bool, err error) {
-	return a.importKind(path, signingFile, signingKind)
+	nk, want, err := parseSeedFile(path, signingKind)
+	if err != nil {
+		return "", false, err
+	}
+	nk.Wipe()
+	differs := func(rec string) error {
+		return fmt.Errorf("%w: %s records %s, not the %s key %s you gave; refusing to replace it (move it aside to adopt with another key)", ErrDifferentKey, filepath.Join(a.dir, signingRec), rec, signingKind.what, want)
+	}
+	a.mu.Lock()
+	rec, rerr := a.signingRecordLocked()
+	a.mu.Unlock()
+	if rerr != nil {
+		return "", false, rerr
+	}
+	if rec != "" && rec != want {
+		return "", false, differs(rec)
+	}
+	pub, created, err = a.importKind(path, signingFile, signingKind)
+	if err != nil {
+		return "", false, err
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if rec == "" {
+		if _, err := InstallFile(filepath.Join(a.dir, signingRec), []byte(pub+"\n")); err != nil {
+			return "", false, err
+		}
+		got, err := a.signingRecordLocked()
+		if err != nil {
+			return "", false, err
+		}
+		if got != pub {
+			return "", false, differs(got)
+		}
+	}
+	return pub, created, nil
 }
 
 func (a *Authority) importKind(src, name string, k kind) (pub string, created bool, err error) {

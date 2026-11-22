@@ -224,3 +224,27 @@ func TestGenerationOfPlainSigners(t *testing.T) {
 		}
 	}
 }
+
+// The configured signing key is required: a JWT missing it, or carrying it scoped, is not the generation.
+func TestGenerationOfRequiresConfiguredSigner(t *testing.T) {
+	k := newKeys(t)
+	c := compile(t, set1())
+	ownKP, _ := nkeys.CreateAccount()
+	own, _ := ownKP.PublicKey()
+	plain := k.buildWith(t, c, k.signers, []string{own})
+	missing := k.build(t, c)
+	scopedTok := addScoped(t, k, missing, foreignGroup, own)
+	for name, tc := range map[string]struct {
+		tok  string
+		want bool
+	}{
+		"missing":        {missing, false},
+		"present scoped": {scopedTok, false},
+		"present plain":  {plain, true},
+	} {
+		cands := []Candidate{{Generation: 1, Compiled: c, Signers: k.signers, Plain: []string{own}, RequiredPlain: []string{own}}}
+		if _, ok := GenerationOf(tc.tok, cands); ok != tc.want {
+			t.Errorf("%s: read = %v, want %v", name, ok, tc.want)
+		}
+	}
+}

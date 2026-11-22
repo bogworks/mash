@@ -356,3 +356,42 @@ func TestInitStoredSigningKeyNoLongerListed(t *testing.T) {
 	pushAccountJWT(t, e, tok)
 	a.refuses(1, []string{"signing.nk", "no longer a plain listed signing key", "signing_key", "nothing was changed"}, nil)
 }
+
+// A signing.nk that is lost after init (the record signing.pub stays) is refused by init without signing_key,
+// nothing changed; init with the same signing_key restores it.
+func TestInitSigningKeyLost(t *testing.T) {
+	e := newApplyEnv(t)
+	sk, _ := nkeys.CreateAccount()
+	skPub, _ := sk.PublicKey()
+	opKP, _, err := e.ks.Operator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ac := e.claims()
+	ac.SigningKeys.Add(skPub)
+	tok, err := ac.Encode(opKP)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pushAccountJWT(t, e, tok)
+	a := newIniter(t, e)
+	seed := seedFile(t, filepath.Join(a.root, "in"), "signing.seed", sk)
+	a.vals["signing_key"] = seed
+	if out, errb, code := a.init(); code != 0 {
+		t.Fatalf("init: %d\n%s\n%s", code, out, errb)
+	}
+	keysDir := a.env["MASH_KEYS_DIR"]
+	if _, err := os.Stat(filepath.Join(keysDir, "signing.pub")); err != nil {
+		t.Fatalf("no signing.pub record: %v", err)
+	}
+	if err := os.Remove(filepath.Join(keysDir, "signing.nk")); err != nil {
+		t.Fatal(err)
+	}
+	a.refuses(1, []string{"signing.nk", "mashctl init"}, map[string]any{"signing_key": nil})
+	if out, errb, code := a.init(); code != 0 {
+		t.Fatalf("init to restore: %d\n%s\n%s", code, out, errb)
+	}
+	if mustPub(t, filepath.Join(keysDir, "signing.nk")) != skPub {
+		t.Fatal("signing.nk was not restored")
+	}
+}

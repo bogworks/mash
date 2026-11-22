@@ -208,7 +208,7 @@ func newDropWorld(t *testing.T) *dropWorld {
 	w.keys = storeKeys{op: op, groups: map[string]nkeys.KeyPair{"foo.c": newGroupKey(), "bar.d": newGroupKey()}}
 	w.otherRange = pubOf(w.keys.groups["bar.d"])
 	ac := jwt.NewAccountClaims(w.acct)
-	ac.SigningKeys.Add(w.plain)
+	addForeignScoped(ac, w.plain)
 	sc := jwt.NewUserScope()
 	sc.Key, sc.Role = w.otherRange, "bar.d"
 	sc.Template.Pub.Allow.Add("keep.bar.d")
@@ -333,7 +333,7 @@ func tokOf(t *testing.T, w *dropWorld, plain bool) string {
 	t.Helper()
 	ac := jwt.NewAccountClaims(w.acct)
 	if plain {
-		ac.SigningKeys.Add(w.plain)
+		addForeignScoped(ac, w.plain)
 	}
 	sc := jwt.NewUserScope()
 	sc.Key, sc.Role = w.otherRange, "bar.d"
@@ -361,6 +361,72 @@ func TestSignDropsANonMashKeyOnlyOnTheFirstGeneration(t *testing.T) {
 		}
 		if _, err := w.iss.Kept(context.Background(), g); err == nil {
 			t.Errorf("generation %d: Kept accepted a non-mash key", g)
+		}
+	}
+}
+
+// addForeignScoped adds a scoped signing key that is not an owner group key of any key store (another issuer's).
+func addForeignScoped(ac *jwt.AccountClaims, key string) {
+	sc := jwt.NewUserScope()
+	sc.Key, sc.Role = key, "other.role"
+	sc.Template.Pub.Allow.Add("other.>")
+	ac.SigningKeys.AddScopedSigner(sc)
+}
+
+// Foreign plain signing keys (the admin's and exempt users' other issuers) are carried: never non-mash, never dropped,
+// and a first-generation Sign with no drop fields does not refuse them.
+func TestSignCarriesEveryPlainSigningKey(t *testing.T) {
+	op, _ := nkeys.CreateOperator()
+	acct, _ := nkeys.CreateAccount()
+	apub := pubOf(acct)
+	plain1, plain2 := pubOf(newGroupKey()), pubOf(newGroupKey())
+	keys := storeKeys{op: op, groups: map[string]nkeys.KeyPair{"foo.c": newGroupKey()}}
+	ac := jwt.NewAccountClaims(apub)
+	ac.SigningKeys.Add(plain1)
+	ac.SigningKeys.Add(plain2)
+	tok, err := ac.Encode(op)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trust, err := apply.NewTrust(pubOf(op), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().Add(5 * time.Second)
+	iss := &Issuer{Ctx: context.Background(), Keys: keys, Resolver: oneJWT{tok}, Account: apub, Trust: trust, Servers: 1, Range: "foo",
+		Now: func() time.Time { return now }}
+	c, err := listset.Compile(listset.ListSet{
+		Range: "foo",
+		Switches: []listset.SwitchEntry{{Group: "foo.c", Verb: listset.Mail, Switch: listset.Closed}, {Group: "foo.c", Verb: listset.Prompt, Switch: listset.Closed},
+			{Group: "foo.c", Verb: listset.Status, Switch: listset.Closed}, {Group: "foo.c", Verb: listset.Heartbeat, Switch: listset.Closed}},
+		Senders: []listset.SenderLists{{Sender: "foo.c.x"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain, err := iss.Plain(context.Background())
+	if err != nil || len(plain) != 2 {
+		t.Fatalf("Plain = %v, %v", plain, err)
+	}
+	for _, g := range []uint64{1, 2} {
+		out, err := iss.Sign(listset.Record{Generation: g}, c)
+		if err != nil {
+			t.Fatalf("generation %d: %v", g, err)
+		}
+		got, err := jwt.DecodeAccountClaims(out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, k := range []string{plain1, plain2} {
+			if !got.SigningKeys.Contains(k) {
+				t.Errorf("generation %d: plain key dropped", g)
+			}
+		}
+		if _, err := iss.Kept(context.Background(), g); err != nil {
+			t.Errorf("Kept %d: %v", g, err)
+		}
+		if gen, ok := policyapply.GenerationOf(out, []policyapply.Candidate{{Generation: g, Compiled: c, Signers: map[string]string{"foo.c": pubOf(keys.groups["foo.c"])}, Plain: plain}}); !ok || gen != g {
+			t.Errorf("generation %d: the generation read fails with the plain keys carried", g)
 		}
 	}
 }

@@ -3,6 +3,7 @@ package apply
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -234,5 +235,25 @@ func TestAccountFindingsReportsServersThatDisagree(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("no servers-differ finding: %+v", fs)
+	}
+}
+
+// A key store that cannot say which signing keys are its own (signing.nk lost) is an error, not an empty known set.
+func TestAccountFindingsReturnsTheKnownKeysError(t *testing.T) {
+	ks, fk := setup(t)
+	sk, _ := nkeys.CreateAccount()
+	seed, _ := sk.Seed()
+	src := filepath.Join(t.TempDir(), "sk")
+	if err := os.WriteFile(src, append(seed, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := ks.ImportSigning(src); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(ks.Dir(), "signing.nk")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := AccountFindings(context.Background(), fk, ks, 0); !errors.Is(err, ctlkeys.ErrSigningKeyLost) {
+		t.Fatalf("err = %v", err)
 	}
 }

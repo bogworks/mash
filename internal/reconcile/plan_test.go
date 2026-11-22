@@ -311,7 +311,9 @@ func TestRevocationTimeIsTheLaterOfNowAndTheJWTIssueTime(t *testing.T) {
 
 func TestSigningKeysStillPresentAndRemovedByTheFirstApply(t *testing.T) {
 	w := newWorld(t)
-	w.claims.SigningKeys.Add(w.plain)
+	sc := jwt.NewUserScope()
+	sc.Key, sc.Role = w.plain, "other.role"
+	w.claims.SigningKeys.AddScopedSigner(sc)
 	signed := userKey(t)
 	w.connect(w.conn(signed, w.plain, "signed", 1))
 	p := w.build()
@@ -627,5 +629,15 @@ func TestAccountSigningKeyIsNotReported(t *testing.T) {
 		if len(p.SigningKeys) != 0 || p.Unknown != 0 {
 			t.Errorf("source %v: signing keys %+v unknown %d", src, p.SigningKeys, p.Unknown)
 		}
+	}
+}
+
+// A plain signing key (another issuer's, or the signing_key) is carried: never a signing key still present or removed.
+func TestPlainSigningKeysAreNeverReported(t *testing.T) {
+	w := newWorld(t)
+	w.claims.SigningKeys.Add(w.plain)
+	p := w.build()
+	if len(p.SigningKeys) != 0 {
+		t.Fatalf("signing keys = %+v", p.SigningKeys)
 	}
 }

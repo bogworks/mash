@@ -744,6 +744,15 @@ func checkStore(ks *ctlkeys.Authority, st *initState) error {
 	kp, pub, err := ks.Signing()
 	switch {
 	case errors.Is(err, ctlkeys.ErrNoSigningKey):
+	case errors.Is(err, ctlkeys.ErrSigningKeyLost):
+		// signing.nk is gone: init with the same signing_key restores it; anything else is refused.
+		rec, _ := ks.SigningRecord()
+		if st.signPub == "" {
+			return fmt.Errorf("%v (nothing was changed)", err)
+		}
+		if rec != st.signPub {
+			return differentSetup(st, "signing key")
+		}
 	case err != nil:
 		return err
 	default:

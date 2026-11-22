@@ -86,7 +86,7 @@ func TestSignKeepsTheConfiguredAccountSigningKey(t *testing.T) {
 		ac := jwt.NewAccountClaims(apub)
 		ac.SigningKeys.Add(pubOf(signing))
 		if extraPlain != "" {
-			ac.SigningKeys.Add(extraPlain)
+			addForeignScoped(ac, extraPlain)
 		}
 		tok, err := ac.Encode(op)
 		if err != nil {
@@ -128,8 +128,8 @@ func TestSignKeepsTheConfiguredAccountSigningKey(t *testing.T) {
 		t.Error("the account signing key became scoped")
 	}
 	scopeOf(t, signed, pubOf(keys.groups["foo.c"]))
-	// a foreign plain key beside it is still refused
+	// a foreign scoped key beside it is still refused
 	if _, err := build(pubOf(newGroupKey())).Sign(listset.Record{Generation: 2}, c); err == nil {
-		t.Error("a foreign plain signing key was accepted")
+		t.Error("a foreign scoped signing key was accepted")
 	}
 }
