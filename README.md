@@ -89,6 +89,7 @@ is installed in your home folder, with no sudo.
 Mail waits. Close Alice's session, send again from Bob's, reopen hers, and
 it is there.
 
+- Watch it first: a [2-minute video](docs/demo/mash-demo.mp4) of these steps, recorded on a personal Claude account with the development flag, as the setup skill offers.
 - Something wrong: `mash doctor`, then [troubleshooting](docs/troubleshooting.md).
 - The same thing, typed yourself: [by hand](docs/guide/by-hand.md).
 - How mash, SAP and NATS fit together: [the stack](docs/guide/stack.md).
