@@ -194,6 +194,7 @@ type initState struct {
 	sysDst           string
 	cfgPath          string
 	folder           string // the configuration folder as shown in a refusal: the home directory written as ~
+	keyFolder        string // the key folder as shown in a refusal
 	haveOp, haveAcct bool   // the key store already holds this very key
 	haveSys          bool   // sys.creds already in place with the same content
 	haveCfg          bool   // config.json already holds these settings
@@ -260,6 +261,7 @@ func doInit(setupPath string, dry, jsonOut bool, env func(string) string, lookup
 	}
 	st := &initState{serverDir: filepath.Join(cfg.Dir, "server"), cfgPath: cfg.Find("config.json")}
 	st.folder = shownFolder(cfg.Dir, env("HOME"))
+	st.keyFolder = shownFolder(keyDir, env("HOME"))
 	st.sysDst = filepath.Join(st.serverDir, sysCredsFile)
 	cfg.SysCreds = st.sysDst
 	defer func() {
@@ -277,14 +279,14 @@ func doInit(setupPath string, dry, jsonOut bool, env func(string) string, lookup
 
 	// (1) the files.
 	if st.opKP, st.opPub, err = ctlkeys.ParseOperatorSeed(sf.operatorKey); err != nil {
-		return cliframe.Failf("operator_key: %v\n  it must be a 0600 file holding the operator key that signs the account (it starts with SO): its identity key when the server was set up with the nats command, or a signing key if your operator uses one", err)
+		return seedFileFailure("operator_key", err, "it must be a 0600 file holding the operator key that signs the account (it starts with SO): its identity key when the server was set up with the nats command, or a signing key if your operator uses one")
 	}
 	if st.acctKP, st.acctPub, err = ctlkeys.ParseAccountSeed(sf.accountKey); err != nil {
-		return cliframe.Failf("account_key: %v\n  it must be a 0600 file holding the IDENTITY seed of the mash account (it starts with SA; its public key is the account JWT's subject)", err)
+		return seedFileFailure("account_key", err, "it must be a 0600 file holding the IDENTITY seed of the mash account (it starts with SA; its public key is the account JWT's subject)")
 	}
 	if sf.signingKey != "" {
 		if st.signKP, st.signPub, err = ctlkeys.ParseSigningSeed(sf.signingKey); err != nil {
-			return cliframe.Failf("signing_key: %v\n  it must be a 0600 file holding the SIGNING seed of the mash account (it starts with SA): a signing key the account JWT lists, not the identity key", err)
+			return seedFileFailure("signing_key", err, "it must be a 0600 file holding the SIGNING seed of the mash account (it starts with SA): a signing key the account JWT lists, not the identity key")
 		}
 		if st.signPub == st.acctPub {
 			return cliframe.Failf("signing_key is the account's identity key: give the identity key as account_key, and a separate signing key the account JWT lists as signing_key (nothing was changed)")
@@ -369,15 +371,15 @@ func doInit(setupPath string, dry, jsonOut bool, env func(string) string, lookup
 	}
 
 	if st.signPub != "" {
-		if err := checkSigningKeyListed(claims, st.signPub); err != nil {
-			return cliframe.Failf("%v (nothing was changed)", err)
+		if reason, advice := checkSigningKeyListed(claims, st.signPub); reason != "" {
+			return cliframe.Failf("signing_key: its public key %s %s: %s (nothing was changed)", st.signPub, reason, advice)
 		}
 	}
 
 	if st.signPub == "" && st.storedSignPub != "" {
 		// The setup file names no signing_key, but the stored signing.nk keeps signing endpoint users.
-		if err := checkSigningKeyListed(claims, st.storedSignPub); err != nil {
-			return cliframe.Failf("the key store's signing.nk (public key %s) keeps signing endpoint users and is no longer a plain listed signing key of the account JWT (%v): give the setup file's signing_key, or move signing.nk aside (nothing was changed)", st.storedSignPub, err)
+		if reason, _ := checkSigningKeyListed(claims, st.storedSignPub); reason != "" {
+			return cliframe.Failf("the key store's signing.nk (public key %s) keeps signing endpoint users and is no longer a plain listed signing key of the account JWT: it %s. Make the key a plain signing key in the account JWT again, or set up a new config folder and key folder (nothing was changed)", st.storedSignPub, reason)
 		}
 	}
 
@@ -427,6 +429,10 @@ func doInit(setupPath string, dry, jsonOut bool, env func(string) string, lookup
 	var steps []step
 	needOp, needAcct, needSys, needCfg := !st.haveOp, !st.haveAcct, !st.haveSys, !st.haveCfg
 	needSign := st.signPub != "" && !st.haveSign
+	signing := st.signPub // the signing key that signs endpoint users, "" when the identity key does
+	if signing == "" {
+		signing = st.storedSignPub
+	}
 	if needOp {
 		steps = append(steps, step{"operator key", filepath.Join(keyDir, "operator.nk")})
 	}
@@ -448,7 +454,7 @@ func doInit(setupPath string, dry, jsonOut bool, env func(string) string, lookup
 	changed := len(steps) > 0
 
 	if dry {
-		return finishInit(stdout, jsonOut, true, changed, sf, first)
+		return finishInit(stdout, jsonOut, true, changed, sf, first, signing)
 	}
 	if needOp {
 		if pub, _, err := ks.ImportOperator(sf.operatorKey); err != nil {
@@ -497,7 +503,7 @@ func doInit(setupPath string, dry, jsonOut bool, env func(string) string, lookup
 			return failErr(err)
 		}
 	}
-	return finishInit(stdout, jsonOut, false, changed, sf, first)
+	return finishInit(stdout, jsonOut, false, changed, sf, first, signing)
 }
 
 // checkClusterListed refuses a setup file that lists too few servers for the cluster the ping saw: a revocation must be
@@ -556,6 +562,23 @@ func shownFolder(dir, home string) string {
 	return dir
 }
 
+// seedFileFailure is the refusal of the seed file given as field: the file's own message, without its "mashctl:"
+// prefix, and the second line saying what the file must hold only when its content is what is wrong (not its mode).
+func seedFileFailure(field string, err error, must string) error {
+	msg := strings.TrimPrefix(err.Error(), "mashctl: ")
+	var ce *ctlkeys.SeedContentError
+	if errors.As(err, &ce) {
+		return cliframe.Failf("%s: %s\n  %s", field, msg, must)
+	}
+	return cliframe.Failf("%s: %s", field, msg)
+}
+
+// differentSigningKey is the refusal when the key folder holds a different signing key than signing_key gives.
+func differentSigningKey(st *initState, recorded string) error {
+	return cliframe.Failf("the key folder %s holds a different signing key (public key %s) than the setup file's signing_key; nothing was changed: give that key's seed as signing_key, or use a new key folder (set MASH_KEYS_DIR)", st.keyFolder, recorded).WithWrap().
+		WithHint("MASH_KEYS_DIR=<a new folder> mashctl init --config <file>")
+}
+
 // differentSetup is the refusal when the configuration folder holds a different what than the setup file gives: init
 // never replaces what the folder holds.
 func differentSetup(st *initState, what string) error {
@@ -564,7 +587,7 @@ func differentSetup(st *initState, what string) error {
 }
 
 // finishInit prints the one line of init or the JSON object.
-func finishInit(stdout io.Writer, jsonOut, dry, changed bool, sf setupFile, first string) error {
+func finishInit(stdout io.Writer, jsonOut, dry, changed bool, sf setupFile, first, signPub string) error {
 	shown := make([]string, len(sf.servers))
 	for i, s := range sf.servers {
 		shown[i] = maskURL(s)
@@ -585,7 +608,11 @@ func finishInit(stdout io.Writer, jsonOut, dry, changed bool, sf setupFile, firs
 	case dry:
 		fmt.Fprintf(stdout, "Would initialize mash on %s for owner %s\n", first, sf.owner)
 	default:
-		fmt.Fprintf(stdout, "Initialized mash on %s for owner %s\n", first, sf.owner)
+		line := fmt.Sprintf("Initialized mash on %s for owner %s", first, sf.owner)
+		if signPub != "" {
+			line += "; endpoint users are signed with signing key " + signPub
+		}
+		fmt.Fprintln(stdout, line)
 	}
 	if dry {
 		fmt.Fprintln(stdout, "Nothing was changed.")
@@ -681,15 +708,17 @@ func sameServers(got any, want []string) bool {
 }
 
 // checkSigningKeyListed refuses a signing key the account JWT does not list: nats-server would refuse every user it
-// signs.
-func checkSigningKeyListed(claims *jwt.AccountClaims, signPub string) error {
+// signs. It returns "" when the key is a plain listed signing key; else what is wrong with it, worded to follow "its
+// public key X" (so the key is printed once, by the caller), and what the setup file's owner can do about it.
+func checkSigningKeyListed(claims *jwt.AccountClaims, signPub string) (reason, advice string) {
 	if claims.SigningKeys.Contains(signPub) {
 		if sc, _ := claims.SigningKeys.GetScope(signPub); sc != nil {
-			return fmt.Errorf("signing_key: its public key %s is a scoped signing key of the account JWT (its template would limit every endpoint): give a plain signing key", signPub)
+			return "is a scoped signing key (its template would limit every endpoint)", "give a plain signing key"
 		}
-		return nil
+		return "", ""
 	}
-	return fmt.Errorf("signing_key: its public key %s is not one of the signing keys of the account JWT on the resolver: users it signs would be refused. Add it to the account's signing keys (nsc edit account --sk %s), or give the signing key the account lists", signPub, signPub)
+	return "is not one of the signing keys of the account JWT on the resolver, so users it signs would be refused",
+		fmt.Sprintf("add it to the account's signing keys (nsc edit account --sk %s), then push the account (nsc push), or give the signing key the account lists", signPub)
 }
 
 // verifyAccount checks the account JWT the resolver gave for acctPub: its subject is that key and it is inside its
@@ -754,7 +783,7 @@ func checkStore(ks *ctlkeys.Authority, st *initState) error {
 			return fmt.Errorf("%v (nothing was changed)", err)
 		}
 		if rec != st.signPub {
-			return differentSetup(st, "signing key")
+			return differentSigningKey(st, rec)
 		}
 	case err != nil:
 		return err
@@ -762,7 +791,7 @@ func checkStore(ks *ctlkeys.Authority, st *initState) error {
 		kp.Wipe()
 		if st.signPub != "" {
 			if pub != st.signPub {
-				return differentSetup(st, "signing key")
+				return differentSigningKey(st, pub)
 			}
 			// A seed with no record is an init that stopped between the two writes: ImportSigning completes it.
 			st.haveSign = rec == pub

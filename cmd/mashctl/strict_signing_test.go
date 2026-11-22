@@ -175,7 +175,7 @@ func TestInitSigningKeyChecks(t *testing.T) {
 	})
 	t.Run("not an account seed", func(t *testing.T) {
 		a.t = t
-		a.refuses(1, []string{"signing_key", "account signing"}, map[string]any{"signing_key": a.opSeed})
+		a.refuses(1, []string{"signing_key", "account signing", "holds an operator seed (SO)", "signing_key needs an account seed (SA)"}, map[string]any{"signing_key": a.opSeed})
 	})
 	t.Run("a file with open mode", func(t *testing.T) {
 		a.t = t
@@ -185,6 +185,12 @@ func TestInitSigningKeyChecks(t *testing.T) {
 			t.Fatal(err)
 		}
 		a.refuses(1, []string{"mode 0644"}, map[string]any{"signing_key": p})
+		a.vals["signing_key"] = p
+		_, errb, _ := a.init()
+		a.vals["signing_key"] = nil
+		if strings.Contains(errb, "must be a 0600 file") || strings.Contains(errb, "mashctl:") {
+			t.Errorf("a mode refusal carries the content hint or a prefix:\n%s", errb)
+		}
 	})
 }
 
@@ -210,6 +216,8 @@ func TestInitSigningKeyImport(t *testing.T) {
 	a.vals["signing_key"] = seedFile(t, filepath.Join(a.root, "in"), "signing.seed", sk)
 	if out, errb, code := a.init(); code != 0 {
 		t.Fatalf("init: %d\n%s\n%s", code, out, errb)
+	} else if !strings.Contains(out, "; endpoint users are signed with signing key "+skPub) {
+		t.Fatalf("init line does not name the signing key: %q", out)
 	}
 	stored := filepath.Join(a.env["MASH_KEYS_DIR"], "signing.nk")
 	if mustPub(t, stored) != skPub {
@@ -236,7 +244,7 @@ func TestInitSigningKeyImport(t *testing.T) {
 	ac2.SigningKeys.Add(sk2Pub)
 	tok2, _ := ac2.Encode(opKP)
 	pushAccountJWT(t, e, tok2)
-	a.refuses(1, []string{"different signing key"}, map[string]any{"signing_key": seedFile(t, filepath.Join(a.root, "in"), "signing2.seed", sk2)})
+	a.refuses(1, []string{"different signing key", skPub, "MASH_KEYS_DIR"}, map[string]any{"signing_key": seedFile(t, filepath.Join(a.root, "in"), "signing2.seed", sk2)})
 }
 
 // pushAccountJWT updates the account JWT of the env's resolver through the system account.
@@ -354,7 +362,7 @@ func TestInitStoredSigningKeyNoLongerListed(t *testing.T) {
 		t.Fatal(err)
 	}
 	pushAccountJWT(t, e, tok)
-	a.refuses(1, []string{"signing.nk", "no longer a plain listed signing key", "signing_key", "nothing was changed"}, nil)
+	a.refuses(1, []string{"signing.nk", "no longer a plain listed signing key", "new config folder and key folder", "nothing was changed"}, nil)
 }
 
 // A signing.nk that is lost after init (the record signing.pub stays) is refused by init without signing_key,
@@ -387,12 +395,46 @@ func TestInitSigningKeyLost(t *testing.T) {
 	if err := os.Remove(filepath.Join(keysDir, "signing.nk")); err != nil {
 		t.Fatal(err)
 	}
-	a.refuses(1, []string{"signing.nk", "mashctl init"}, map[string]any{"signing_key": nil})
+	a.refuses(1, []string{"signing.nk", "mashctl init", "SAME key", "signing.pub records " + skPub}, map[string]any{"signing_key": nil})
 	if out, errb, code := a.init(); code != 0 {
 		t.Fatalf("init to restore: %d\n%s\n%s", code, out, errb)
 	}
 	if mustPub(t, filepath.Join(keysDir, "signing.nk")) != skPub {
 		t.Fatal("signing.nk was not restored")
+	}
+}
+
+// A lost signing.nk is refused by endpoint create before anything is recorded: no endpoint record, no creds, and the
+// hint is init (the same create would fail again); init with the same signing_key restores it and create then works.
+func TestEndpointCreateSigningKeyLostRecordsNothing(t *testing.T) {
+	e, sk, osk := strictEnv(t)
+	a := initStrict(t, e, sk, osk, true)
+	keysDir := a.env["MASH_KEYS_DIR"]
+	if err := os.Remove(filepath.Join(keysDir, "signing.nk")); err != nil {
+		t.Fatal(err)
+	}
+	out, errb, code := a.run("endpoint", "create", "alice.g.x")
+	if code != 1 {
+		t.Fatalf("create: exit %d\n%s\n%s", code, out, errb)
+	}
+	for _, m := range []string{"signing.nk", "SAME key", "nothing was changed", "mashctl init --config <file>"} {
+		if !strings.Contains(errb, m) {
+			t.Errorf("stderr lacks %q:\n%s", m, errb)
+		}
+	}
+	if strings.Contains(errb, "no account signing key configured") {
+		t.Errorf("stderr contradicts itself:\n%s", errb)
+	}
+	creds := filepath.Join(a.env["MASH_CONFIG_DIR"], "alice.g.x.creds")
+	if _, err := os.Stat(creds); err == nil {
+		t.Fatal("creds were written")
+	}
+	if out, errb, code := a.init(); code != 0 {
+		t.Fatalf("init to restore: %d\n%s\n%s", code, out, errb)
+	}
+	// Had the refused create recorded the endpoint, this one would say it already exists.
+	if out, errb, code := a.run("endpoint", "create", "alice.g.x"); code != 0 {
+		t.Fatalf("create after restore: %d\n%s\n%s", code, out, errb)
 	}
 }
 

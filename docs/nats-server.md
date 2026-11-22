@@ -24,7 +24,7 @@ The requirements apply to mash 0.5.7. They are what mash checks or creates; wher
 
 **The account.** `mashctl init` cannot create the account. It must already be on the resolver, signed by the operator key you give, not expired, and its JWT's subject must be the account key you give.
 
-**Strict signing key usage.** By default `mashctl` signs every endpoint's user with the account's identity key, the `account_key` below. An operator that requires users to be signed by an account signing key (`strict_signing_key_usage: true`) refuses those users, so set `signing_key` below to the account's signing seed and `mashctl` signs with that instead. `init` checks that the key is one of the account JWT's signing keys. Without the setting, leave strict signing off.
+**Strict signing key usage.** By default `mashctl` signs every endpoint's user with the account's identity key, the `account_key` below. An operator that requires users to be signed by an account signing key (`strict_signing_key_usage: true`) refuses those users, so set `signing_key` below to the account's signing seed and `mashctl` signs with that instead. `init` checks that the key is one of the account JWT's signing keys. Without the setting, leave strict signing off: `init` does not check this, and on a strict server the new users are refused with "Authorization Violation".
 
 **JetStream with file storage.** mash keeps everything on file storage and uses no memory storage. `init` refuses an account whose JWT gives it no disk storage (disk limit 0). If the account uses tiered limits, it needs an `R1` tier, because every mash stream has one replica. The server itself must also have been able to switch JetStream on for the account: nats-server gives JetStream a budget of 75% of the free disk by default, and an account asking for more than what is left silently gets no JetStream. `init` asks the server and says so if that happened.
 
@@ -98,7 +98,7 @@ With a private CA and no `ca` set, `mashctl init` stops with: "the server's cert
 
 ## Keys and creds mashctl needs
 
-`mashctl init` takes four files and keeps copies of some of them. Every one must be a regular file you own, mode `0600`. mash never prints a seed, and the setup file holds paths, never keys.
+`mashctl init` takes four files, and a fifth, `signing_key`, when your operator requires signing keys, and keeps copies of some of them. Every one must be a regular file you own, mode `0600`. mash never prints a seed, and the setup file holds paths, never keys.
 
 | Setup file key | What it is | What it is for |
 | --- | --- | --- |
@@ -108,7 +108,7 @@ With a private CA and no `ca` set, `mashctl init` stops with: "the server's cert
 | `system_creds` | Credentials of a user in the system account. | Everything in "System account" above. |
 | `admin_creds` | Credentials of a user in the mash account. | The administrator's connection: making and removing inboxes, the directory and the records of what was issued. |
 
-Where they end up: `init` copies the two seeds into `~/.config/mash/keys/` (`operator.nk`, `account.nk`; the folder is `0700`, the files `0600`) and the system credentials into `~/.config/mash/server/sys.creds` (folder `0700`, file `0600`). The admin credentials stay where you put them, and `config.json` points at them. Set `MASH_CONFIG_DIR` or `--config-dir` for another folder, or `MASH_KEYS_DIR` (an absolute path) for the keys only.
+Where they end up: `init` copies the seeds into `~/.config/mash/keys/` (`operator.nk`, `account.nk` and, with `signing_key`, `signing.nk` with its record `signing.pub`; the folder is `0700`, the files `0600`) and the system credentials into `~/.config/mash/server/sys.creds` (folder `0700`, file `0600`). The admin credentials stay where you put them, and `config.json` points at them. Set `MASH_CONFIG_DIR` or `--config-dir` for another folder, or `MASH_KEYS_DIR` (an absolute path) for the keys only.
 
 Think about what this means: the operator key is the strongest key your server has, and `mashctl` keeps a copy on the machine where you run it, protected only the way your other files are. The `mash` program on a session's machine never holds any of these; an endpoint has only its own credentials.
 
@@ -141,9 +141,9 @@ If you use a smaller account limit than the table, `init` prints a warning. Its 
 
 ## Connect mash to your server
 
-mash 0.5.6 has one way to connect to a server you already have: `mashctl init --config FILE`. (`mashctl adopt`, `mashctl init --local` and `mashctl init --start` are gone.) `mashctl` does not install, configure or start NATS.
+mash 0.5.7 has one way to connect to a server you already have: `mashctl init --config FILE`. (`mashctl adopt`, `mashctl init --local` and `mashctl init --start` are gone.) `mashctl` does not install, configure or start NATS.
 
-Write a setup file. It is YAML, and every key except `ca` is required:
+Write a setup file. It is YAML, and every key except `ca` and `signing_key` is required:
 
 ```yaml
 servers: [tls://nats.example.com:4222]
