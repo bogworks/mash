@@ -163,6 +163,16 @@
    "exit": 1,
    "issue": "#1282",
    "note": "Source: ctl #1282 at d0d2b39. Printed by mashctl commands that sign an endpoint (endpoint create, reissue). Written exactly as ctl sends them: they start `mashctl:` and indent `hint:`, while the specification's error rule is `error: <what>` then `hint: <command>`; the planner decides which form holds. Lines wrap at 80 here; one line in the program. When signing.pub is gone the text says `but config.json (signing_key_pub) records <want>`. "
+  },
+  {
+   "id": "join-finishes-an-earlier-join",
+   "where": "mash join",
+   "case": "A retried join finishes an earlier one that stopped part way",
+   "text": "Joined as acme.demo.bob. An earlier join here stopped part way; this\n  finished it.",
+   "stream": "stdout",
+   "exit": 0,
+   "issue": "#1008",
+   "note": "From mash-sdk, OK'd by the lead; merges after Gate 1. Printed when mash join is retried in a folder where an earlier join stopped after installing the creds (config.json or ca.pem missing) and the creds on disk are byte-equal to what the join file installs. One line in the program (82 columns), wrapped here. If the creds differ, the refusal stays: `acme.demo.bob is already installed here` with the hint `--replace`."
   }
  ],
  "rules_next": [
