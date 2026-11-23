@@ -478,60 +478,80 @@ func (e *Endpoint) wakeBacklog(deliver Deliverer, h *held, hl Hookless) {
 			return
 		}
 	}
-	seqs := make([]spool.Ref, 0, len(h.msgs))
-	oldest := time.Time{}
-	for seq, p := range h.msgs {
-		if e.spool.IsDrained(seq) {
-			continue
-		}
-		seqs = append(seqs, seq)
-		if t := h.arrived(seq, p); oldest.IsZero() || t.Before(oldest) {
-			oldest = t
-		}
-	}
-	over := e.cfg.WakeCount > 0 && len(seqs) > e.cfg.WakeCount
-	if !over && e.cfg.WakeAge > 0 && len(seqs) > 0 && !oldest.IsZero() {
-		over = now.Sub(oldest) > e.cfg.WakeAge
-	}
-	if !over {
-		return
-	}
-	// The held set says it may be a backlog; the decision is made on the inbox's own count (what `mash inbox` shows:
-	// one bounded pass over the waiting messages, leaving out mail the list leaves out). Mail whose sender is no longer
-	// verifiable, held from before, does not wake the session for mail it will not show. Without a reading, the held
-	// set stands.
 	// A count that said no is not asked again for wakeRecount: the check runs every tick.
 	if !e.wakeNoAt.IsZero() && now.Sub(e.wakeNoAt) < wakeRecount {
 		return
 	}
-	count, at := len(seqs), oldest
-	var dropped map[uint64]bool
-	if rd, ok := e.waitingNow(now); ok {
-		over = e.cfg.WakeCount > 0 && rd.waiting > e.cfg.WakeCount
-		if !over && e.cfg.WakeAge > 0 && rd.waiting > 0 && !rd.oldest.IsZero() {
-			over = now.Sub(rd.oldest) > e.cfg.WakeAge
-		}
-		if !over {
-			e.wakeNoAt = now
-			return
-		}
-		// The line and the meta say what the decision was made on: the reading's count and oldest, and the held mail
-		// the inbox count left out is not shown.
-		count, dropped = rd.waiting, rd.dropped
-		if !rd.oldest.IsZero() {
-			at = rd.oldest
+	seqs := make([]spool.Ref, 0, len(h.msgs))
+	for seq := range h.msgs {
+		if !e.spool.IsDrained(seq) {
+			seqs = append(seqs, seq)
 		}
 	}
 	sort.Slice(seqs, func(i, j int) bool { return seqs[i].Less(seqs[j]) })
-	kept := seqs[:0]
-	for _, seq := range seqs {
-		if !dropped[seq.Seq] {
+	// held is the held set less the sequences the inbox count leaves out (own stream only), and its oldest arrival.
+	held := func(dropped map[uint64]bool) ([]spool.Ref, time.Time) {
+		kept := make([]spool.Ref, 0, len(seqs))
+		oldest := time.Time{}
+		for _, seq := range seqs {
+			if seq.Stream == "" && dropped[seq.Seq] {
+				continue
+			}
 			kept = append(kept, seq)
+			if t := h.arrived(seq, h.msgs[seq]); oldest.IsZero() || t.Before(oldest) {
+				oldest = t
+			}
+		}
+		return kept, oldest
+	}
+	overOf := func(n int, oldest time.Time) bool {
+		if e.cfg.WakeCount > 0 && n > e.cfg.WakeCount {
+			return true
+		}
+		return e.cfg.WakeAge > 0 && n > 0 && !oldest.IsZero() && now.Sub(oldest) > e.cfg.WakeAge
+	}
+	kept, oldest := held(nil)
+	if !overOf(len(kept), oldest) {
+		return
+	}
+	// The held set says it may be a backlog; the decision is made on the inbox's own count (what `mash inbox` shows:
+	// one bounded pass over the waiting messages, leaving out mail the list leaves out). Mail whose sender is no longer
+	// verifiable, held from before, does not wake the session for mail it will not show. The read runs in the
+	// background (wakeReading): while no reading is fresh this tick is skipped, never blocked. Without a connection
+	// the held set stands.
+	at := oldest
+	var dropped map[uint64]bool
+	counted := false
+	if e.js != nil {
+		rd, ok, fresh := e.wakeReading(now)
+		if !fresh {
+			return
+		}
+		dropped = rd.dropped // the scanned part's, also when the count itself is not usable
+		if ok {
+			counted = true
+			if !overOf(rd.waiting, rd.oldest) {
+				e.wakeNoAt = now
+				return
+			}
+			if !rd.oldest.IsZero() {
+				at = rd.oldest
+			}
 		}
 	}
-	seqs = kept
+	seqs, oldest = held(dropped)
 	if len(seqs) == 0 {
+		// Every held message is from a dropped sender: nothing to show. Not counted again for wakeRecount.
+		e.wakeNoAt = now
 		return
+	}
+	if !counted {
+		// No usable count: the held set decides, less the dropped senders (#1054).
+		if !overOf(len(seqs), oldest) {
+			e.wakeNoAt = now
+			return
+		}
+		at = oldest
 	}
 	mails := make([]render.Mail, len(seqs))
 	ids := make([]string, len(seqs))
@@ -544,15 +564,15 @@ func (e *Endpoint) wakeBacklog(deliver Deliverer, h *held, hl Hookless) {
 		}
 	}
 	line, _, _ := strings.Cut(render.Batch(e.cfg.Name, e.cfg.Owner, mails, e.cfg.BatchMsgs, e.cfg.BatchBytes), "\n")
-	if count != len(mails) { // the line leads with the number of messages: the reading's, not the held set's
-		line = strings.Replace(line, messageCount(len(mails)), messageCount(count), 1)
-	}
 	line += " waiting, the oldest for " + cmdrender.Age(now.Sub(at)) + "."
 	if listed > 0 {
 		line += " " + strconv.Itoa(listed) + " already listed: read them with the read tool (#seq)."
 	}
-	meta := map[string]string{"to": e.cfg.Name, "count": strconv.Itoa(count), "seqs": strings.Join(ids, ","), "wake": "true"}
+	meta := map[string]string{"to": e.cfg.Name, "count": strconv.Itoa(len(mails)), "seqs": strings.Join(ids, ","), "wake": "true"}
 	if err := deliver(line, meta); err != nil {
+		// Retried after wakeRecount, not on the next tick (the next check after the recount interval): a failing deliver is
+		// not repeated every 250 ms.
+		e.wakeNoAt = now
 		e.log.Printf("wake failed, retried next check: %v", err)
 		return
 	}
@@ -576,6 +596,38 @@ type waitingReading struct {
 	waiting int             // messages waiting, as `mash inbox` counts them (an upper bound when the read was partial)
 	oldest  time.Time       // the oldest waiting message read
 	dropped map[uint64]bool // sequences the count leaves out
+}
+
+// wakeResult is the last reading of the inbox for the backlog wake.
+type wakeResult struct {
+	rd waitingReading
+	ok bool      // the count is usable (see waitingNow)
+	at time.Time // when the read started, on the backlog clock
+}
+
+// wakeRead reads the inbox for the wake; a package var so tests can stall or fake it.
+var wakeRead = func(e *Endpoint, now time.Time) (waitingReading, bool) { return e.waitingNow(now) }
+
+// wakeReading is the cached reading of the inbox when one was read within wakeRecount (fresh). Otherwise it starts one
+// read in the background, at most one at a time, and reports not fresh: the caller skips this tick and the next one
+// uses the result. It never blocks on the read.
+func (e *Endpoint) wakeReading(now time.Time) (rd waitingReading, ok, fresh bool) {
+	e.wakeMu.Lock()
+	defer e.wakeMu.Unlock()
+	if c := e.wakeCached; !c.at.IsZero() && now.Sub(c.at) >= 0 && now.Sub(c.at) < wakeRecount {
+		return c.rd, c.ok, true
+	}
+	if !e.wakeInFlight {
+		e.wakeInFlight = true
+		go func() {
+			rd, ok := wakeRead(e, now)
+			e.wakeMu.Lock()
+			e.wakeCached = wakeResult{rd: rd, ok: ok, at: now}
+			e.wakeInFlight = false
+			e.wakeMu.Unlock()
+		}()
+	}
+	return waitingReading{}, false, false
 }
 
 // wakeReadTimeout bounds the wake's read of the inbox; the settle loop waits on it.

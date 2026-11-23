@@ -2,7 +2,9 @@ package endpoint
 
 import (
 	"context"
+	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -277,7 +279,7 @@ func TestReadInboxCountingPassStopsAtTheCap(t *testing.T) {
 // The wake's decision rests on the inbox count, not the held set: WakeCount+1 messages are held, one from a sender since
 // deleted, so the inbox counts WakeCount and no wake is sent. A count that said no stands for wakeRecount (more mail
 // that would change the answer is not seen); after it the count is read again, the wake is sent, its line and meta
-// carry the reading's count, and the dropped message is not among the held ones shown.
+// carry the filtered held mail's count (the reading only decides), and the dropped message is not among the held ones shown.
 func TestBacklogWakeDecidesOnTheInboxCountAndRecountsAfterAMinute(t *testing.T) {
 	f := newFixture(t, "a", "b", "c")
 	ctx := context.Background()
@@ -312,7 +314,12 @@ func TestBacklogWakeDecidesOnTheInboxCountAndRecountsAfterAMinute(t *testing.T) 
 		r.now = r.now.Add(d)
 		ep.wakeBacklog(func(text string, m map[string]string) error { line, meta = text, m; return nil }, r.h, HooklessNone)
 	}
-	check(wakeCooldown) // four held, the inbox counts three: not a backlog
+	check(wakeCooldown) // starts the read in the background: this tick is skipped
+	if line != "" || !ep.wakeNoAt.IsZero() {
+		t.Fatalf("decided before the reading was in: %q", line)
+	}
+	waitWakeRead(t, ep)
+	check(0) // four held, the inbox counts three: not a backlog
 	if line != "" || ep.wakeNoAt.IsZero() {
 		t.Fatalf("woke on a count of three, or did not record the no: %q", line)
 	}
@@ -325,14 +332,182 @@ func TestBacklogWakeDecidesOnTheInboxCountAndRecountsAfterAMinute(t *testing.T) 
 	if line != "" {
 		t.Fatalf("read again inside wakeRecount: %q", line)
 	}
-	check(wakeRecount)
+	check(wakeRecount) // the reading is stale: a new read starts
+	waitWakeRead(t, ep)
+	check(0)
 	if line == "" {
 		t.Fatal("no wake after wakeRecount with five waiting")
 	}
-	if !strings.HasPrefix(line, "5 messages") || meta["count"] != "5" {
-		t.Fatalf("line %q, count %q: want the reading's five", line, meta["count"])
+	if !strings.HasPrefix(line, "3 messages") || meta["count"] != "3" {
+		t.Fatalf("line %q, count %q: want the filtered held three", line, meta["count"])
 	}
-	if strings.Contains(meta["seqs"], "1") || !strings.Contains(meta["seqs"], "2") {
+	if meta["seqs"] != "2,3,4" {
 		t.Fatalf("seqs %q: want 2,3,4 without the dropped #1", meta["seqs"])
+	}
+}
+
+// waitWakeRead waits until the wake's background read has finished.
+func waitWakeRead(t *testing.T, e *Endpoint) {
+	t.Helper()
+	for i := 0; i < 2000; i++ {
+		e.wakeMu.Lock()
+		busy := e.wakeInFlight
+		e.wakeMu.Unlock()
+		if !busy {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("the wake's read did not finish")
+}
+
+// stubWakeRead replaces the wake's read for one test; the stub counts its calls.
+func stubWakeRead(t *testing.T, fn func(n int) (waitingReading, bool)) *atomic.Int32 {
+	t.Helper()
+	var calls atomic.Int32
+	old := wakeRead
+	wakeRead = func(e *Endpoint, now time.Time) (waitingReading, bool) { return fn(int(calls.Add(1))) }
+	t.Cleanup(func() { wakeRead = old })
+	return &calls
+}
+
+// connectedRig is a backlog rig whose endpoint has a stream handle (a read is attempted); count messages held.
+func connectedRig(t *testing.T, count, held int) (*backlogRig, func(deliver Deliverer, d time.Duration)) {
+	t.Helper()
+	f := newFixture(t, "a")
+	r := newBacklogRig(t, count, 0)
+	cfg := f.cfgState("a", t.TempDir(), false)
+	cfg.WakeCount, cfg.BatchMsgs, cfg.BatchBytes = count, 10, 16384
+	ep, err := Open(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(ep.Close)
+	ep.spool, ep.wakeStart = &r.sp, r.now
+	for n := uint64(1); n <= uint64(held); n++ {
+		r.h.msgs[spool.Ref{Seq: n}] = pending{msg: &dblAck{}, mail: render.Mail{Seq: n, From: "c", Kind: kind.Task, At: r.now, Body: []byte("x")}}
+	}
+	r.e = ep
+	return r, func(deliver Deliverer, d time.Duration) {
+		r.now = r.now.Add(d)
+		ep.wakeBacklog(deliver, r.h, HooklessNone)
+	}
+}
+
+// Every held message is from a dropped sender: the reading says over, nothing is shown, and the count is not read again
+// on every tick but after wakeRecount.
+func TestBacklogAllHeldDroppedDoesNotReadEveryTick(t *testing.T) {
+	calls := stubWakeRead(t, func(int) (waitingReading, bool) {
+		return waitingReading{waiting: 9, oldest: time.Now(), dropped: map[uint64]bool{1: true, 2: true, 3: true, 4: true}}, true
+	})
+	r, check := connectedRig(t, 3, 4)
+	woke := false
+	deliver := func(string, map[string]string) error { woke = true; return nil }
+	check(deliver, wakeCooldown)
+	waitWakeRead(t, r.e)
+	check(deliver, 0)
+	if woke || r.e.wakeNoAt.IsZero() {
+		t.Fatalf("woke %v, wakeNoAt %v: want no wake and the no recorded", woke, r.e.wakeNoAt)
+	}
+	for range 20 {
+		check(deliver, 250*time.Millisecond)
+		waitWakeRead(t, r.e)
+	}
+	if n := calls.Load(); n != 1 || woke {
+		t.Fatalf("reads %d, woke %v: want 1 and no wake", n, woke)
+	}
+	check(deliver, wakeRecount)
+	waitWakeRead(t, r.e)
+	if n := calls.Load(); n != 2 {
+		t.Fatalf("reads %d after wakeRecount: want 2", n)
+	}
+}
+
+// A failed deliver records the no too, so the retry waits for wakeRecount and is not repeated every tick.
+func TestBacklogDeliverFailureSetsWakeNoAt(t *testing.T) {
+	stubWakeRead(t, func(int) (waitingReading, bool) { return waitingReading{waiting: 9, oldest: time.Now()}, true })
+	r, check := connectedRig(t, 3, 4)
+	fails := 0
+	deliver := func(string, map[string]string) error { fails++; return errors.New("down") }
+	check(deliver, wakeCooldown)
+	waitWakeRead(t, r.e)
+	check(deliver, 0)
+	if fails != 1 || r.e.wakeNoAt.IsZero() {
+		t.Fatalf("deliveries %d, wakeNoAt %v: want 1 and set", fails, r.e.wakeNoAt)
+	}
+	check(deliver, 250*time.Millisecond)
+	if fails != 1 {
+		t.Fatalf("deliver retried inside wakeRecount: %d", fails)
+	}
+}
+
+// A partial reading (count not usable) still gives its dropped set: four held, one dropped, WakeCount 3, is three
+// shown, not over, no wake.
+func TestBacklogPartialReadingFiltersHeldByItsDroppedSet(t *testing.T) {
+	stubWakeRead(t, func(int) (waitingReading, bool) {
+		return waitingReading{dropped: map[uint64]bool{1: true}}, false
+	})
+	r, check := connectedRig(t, 3, 4)
+	woke := false
+	deliver := func(string, map[string]string) error { woke = true; return nil }
+	check(deliver, wakeCooldown)
+	waitWakeRead(t, r.e)
+	check(deliver, 0)
+	if woke {
+		t.Fatal("woke on four held with one from a dropped sender")
+	}
+}
+
+// A dropped sequence of another stream is not the endpoint's own: only own-stream sequences are filtered.
+func TestBacklogDroppedFiltersOnlyTheOwnStream(t *testing.T) {
+	stubWakeRead(t, func(int) (waitingReading, bool) {
+		return waitingReading{waiting: 9, oldest: time.Now(), dropped: map[uint64]bool{1: true}}, true
+	})
+	r, check := connectedRig(t, 3, 0)
+	for _, ref := range []spool.Ref{{Seq: 1}, {Stream: "other", Seq: 1}, {Seq: 2}, {Seq: 3}} {
+		r.h.msgs[ref] = pending{msg: &dblAck{}, mail: render.Mail{Seq: ref.Seq, From: "c", Kind: kind.Task, At: r.now, Body: []byte("x")}}
+	}
+	var meta map[string]string
+	deliver := func(_ string, m map[string]string) error { meta = m; return nil }
+	check(deliver, wakeCooldown)
+	waitWakeRead(t, r.e)
+	check(deliver, 0)
+	if meta == nil || meta["count"] != "3" {
+		t.Fatalf("meta %v: want the other stream's #1 kept and the own #1 left out (count 3)", meta)
+	}
+}
+
+// The tick never waits for the read: a read stuck in the stub leaves the tick returning at once, with no second read
+// started, and the result is used once it lands.
+func TestBacklogTickDoesNotBlockOnTheRead(t *testing.T) {
+	release := make(chan struct{})
+	calls := stubWakeRead(t, func(int) (waitingReading, bool) {
+		<-release
+		return waitingReading{waiting: 9, oldest: time.Now()}, true
+	})
+	r, check := connectedRig(t, 3, 4)
+	woke := 0
+	deliver := func(string, map[string]string) error { woke++; return nil }
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		check(deliver, wakeCooldown)
+		check(deliver, 250*time.Millisecond)
+		check(deliver, 250*time.Millisecond)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		close(release)
+		t.Fatal("the tick blocked on the read")
+	}
+	if woke != 0 || r.e.wakeNoAt.IsZero() == false {
+		t.Fatalf("woke %d before the reading landed", woke)
+	}
+	close(release)
+	waitWakeRead(t, r.e)
+	check(deliver, 0)
+	if woke != 1 || calls.Load() != 1 {
+		t.Fatalf("woke %d, reads %d: want 1 and 1", woke, calls.Load())
 	}
 }
