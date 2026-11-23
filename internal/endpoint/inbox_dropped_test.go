@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nats-io/nats.go/jetstream"
+
 	"github.com/bogworks/mash/internal/kind"
 	"github.com/bogworks/mash/internal/render"
 	"github.com/bogworks/mash/internal/spool"
@@ -509,5 +511,129 @@ func TestBacklogTickDoesNotBlockOnTheRead(t *testing.T) {
 	check(deliver, 0)
 	if woke != 1 || calls.Load() != 1 {
 		t.Fatalf("woke %d, reads %d: want 1 and 1", woke, calls.Load())
+	}
+}
+
+// all is the whole range as a slice (a test's view; the code never builds one).
+func (r seqRange) all() []uint64 { return r.take(int(min(r.remaining(), 1<<20))) }
+
+// A sequence range over a span of 1<<40 costs nothing in proportion to it, and yields the right values up and down.
+func TestSeqRangeIsLazy(t *testing.T) {
+	const span = uint64(1) << 40
+	var sink uint64
+	allocs := testing.AllocsPerRun(100, func() {
+		u, d := seqsUp(1, span), seqsDown(span, 1)
+		sink += u.remaining() + d.remaining()
+	})
+	if allocs > 0 {
+		t.Fatalf("building a range over %d sequences allocated %v times", span, allocs)
+	}
+	if sink == 0 {
+		t.Fatal("range empty")
+	}
+	up, down := seqsUp(5, span), seqsDown(span, 1)
+	if got := up.take(3); len(got) != 3 || got[0] != 5 || got[2] != 7 {
+		t.Fatalf("up: %v", got)
+	}
+	if got := up.take(2); got[0] != 8 || got[1] != 9 || up.remaining() != span-9 {
+		t.Fatalf("up, next: %v, %d left", got, up.remaining())
+	}
+	if got := down.take(3); got[0] != span || got[2] != span-2 || down.remaining() != span-3 {
+		t.Fatalf("down: %v", got)
+	}
+	if allocs := testing.AllocsPerRun(100, func() {
+		r := seqsUp(1, span)
+		r.take(10)
+	}); allocs > 1 {
+		t.Fatalf("taking 10 of %d sequences allocated %v times, want only the result slice", span, allocs)
+	}
+	short := seqsUp(1, 2)
+	if got := short.take(10); len(got) != 2 || short.remaining() != 0 || len(short.take(1)) != 0 {
+		t.Fatalf("short range: %v", got)
+	}
+}
+
+// collect over a span of 1<<40 reads only the page: limit reads when nothing is gone, and one more read for each gone
+// sequence in the way.
+func TestCollectCostsThePage(t *testing.T) {
+	f := newFixture(t, "a", "b")
+	ctx := context.Background()
+	a, b := f.client(t, "a"), f.client(t, "b")
+	if _, err := b.Send(ctx, tdot("a"), "m", 0); err != nil {
+		t.Fatal(err)
+	}
+	s, err := a.inbox(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const span = uint64(1) << 40
+	for _, gone := range []int{0, 5} {
+		var reads atomic.Int64
+		get := func(ctx context.Context, seq uint64, opts ...jetstream.GetMsgOpt) (*jetstream.RawStreamMsg, error) {
+			reads.Add(1)
+			if seq > span-uint64(gone) {
+				return nil, jetstream.ErrMsgNotFound
+			}
+			return s.GetMsg(ctx, 1, opts...)
+		}
+		ms, err := a.collect(ctx, get, seqsDown(span, 1), 3)
+		if err != nil || len(ms) != 3 || reads.Load() != int64(3+gone) {
+			t.Fatalf("%d gone: %d mails, %d reads, %v: want 3 mails and %d reads", gone, len(ms), reads.Load(), err, 3+gone)
+		}
+	}
+}
+
+// An inbox whose first sequence is far above 1 (the stream evicted the rest) lists the right page, up and down. The
+// stream refuses deletes, so a gap inside the span cannot be made here; this shows the output is unchanged, and the
+// cost bound is TestSeqRangeIsLazy's and TestCollectCostsThePage's.
+func TestReadInboxAfterEviction(t *testing.T) {
+	f := newFixture(t, "a", "b")
+	ctx := context.Background()
+	b := f.client(t, "b")
+	for i := 1; i <= 40; i++ {
+		if _, err := b.Send(ctx, tdot("a"), "m", 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	js := adminJS(t, f)
+	s, err := js.Stream(ctx, taddr("a").InboxStream())
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := s.Info(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := info.Config
+	cfg.MaxMsgs = 3
+	if _, err := js.UpdateStream(ctx, cfg); err != nil {
+		t.Fatal(err)
+	}
+	a := strict(t, f, "a")
+	for _, c := range []struct {
+		q    InboxQuery
+		want []uint64
+	}{
+		{InboxQuery{Limit: 2}, []uint64{39, 40}},
+		{InboxQuery{Limit: 5}, []uint64{38, 39, 40}},
+		{InboxQuery{Limit: 2, After: 1}, []uint64{38, 39}},
+		{InboxQuery{Limit: 2, After: 39}, []uint64{40}},
+	} {
+		r, err := a.ReadInbox(ctx, c.q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []uint64
+		for _, m := range r.Mail {
+			got = append(got, m.Seq)
+		}
+		if len(got) != len(c.want) {
+			t.Fatalf("%+v: listed %v, want %v", c.q, got, c.want)
+		}
+		for i := range got {
+			if got[i] != c.want[i] {
+				t.Fatalf("%+v: listed %v, want %v", c.q, got, c.want)
+			}
+		}
 	}
 }

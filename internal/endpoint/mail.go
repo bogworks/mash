@@ -1063,7 +1063,7 @@ func (e *Endpoint) readInbox(ctx context.Context, q InboxQuery) (InboxRead, erro
 	out := InboxRead{State: st}
 
 	// The sequences to read: what the query lists (in the order it takes them), the newest waiting ones, and the oldest.
-	var listSeqs []uint64
+	var listSeqs seqRange
 	floor := uint64(0)
 	if q.OnlyNew {
 		floor = st.AckFloor
@@ -1075,7 +1075,7 @@ func (e *Endpoint) readInbox(ctx context.Context, q InboxQuery) (InboxRead, erro
 	}
 	lower := max(st.AckFloor+1, first) // the oldest sequence that can be waiting
 	counting := st.Waiting > 0 && lower <= last
-	firstBatch := listSeqs[:min(len(listSeqs), q.Limit)]
+	firstBatch := listSeqs.take(q.Limit) // listSeqs is now what follows the first batch
 	listed := map[uint64]bool{}
 	for _, n := range firstBatch {
 		listed[n] = true
@@ -1169,11 +1169,15 @@ func (e *Endpoint) readInbox(ctx context.Context, q InboxQuery) (InboxRead, erro
 		scanned, bytes := 0, 0
 		for n := lower; n <= last; {
 			if scanned >= countMaxMsgs || bytes >= countMaxBytes {
-				for ; n <= last; n++ { // is anything but the listed left unread?
-					if !listed[n] {
-						out.Partial = true
-						break
+				// Is anything but the listed left unread? (counted, not walked: the span is not bounded.)
+				listedAbove := uint64(0)
+				for l := range listed {
+					if l >= n {
+						listedAbove++
 					}
+				}
+				if n <= last && last-n+1 > listedAbove {
+					out.Partial = true
 				}
 				break
 			}
@@ -1196,8 +1200,8 @@ func (e *Endpoint) readInbox(ctx context.Context, q InboxQuery) (InboxRead, erro
 			out.Mail = append(out.Mail, m)
 		}
 	}
-	if len(out.Mail) < q.Limit && len(listSeqs) > len(firstBatch) { // gone or forged ones in the way: read on
-		more, gone, err := e.collectDropped(ctx, s.GetMsg, listSeqs[len(firstBatch):], q.Limit-len(out.Mail))
+	if len(out.Mail) < q.Limit && listSeqs.remaining() > 0 { // gone or forged ones in the way: read on
+		more, gone, err := e.collectDropped(ctx, s.GetMsg, listSeqs, q.Limit-len(out.Mail))
 		if err != nil {
 			return InboxRead{}, err
 		}
@@ -1322,22 +1326,21 @@ type getMsg func(ctx context.Context, seq uint64, opts ...jetstream.GetMsgOpt) (
 // that is gone (expired or dropped by the stream's limits) is skipped, as is
 // forged mail; any other read error ends the listing and is returned, so a
 // broken connection is not mistaken for an empty inbox.
-func (e *Endpoint) collect(ctx context.Context, get getMsg, seqs []uint64, limit int) ([]render.Mail, error) {
+func (e *Endpoint) collect(ctx context.Context, get getMsg, seqs seqRange, limit int) ([]render.Mail, error) {
 	out, _, err := e.collectDropped(ctx, get, seqs, limit)
 	return out, err
 }
 
 // collectDropped is collect that also says which seqs it read and refused (toMail dropped them), for a caller that counts.
-func (e *Endpoint) collectDropped(ctx context.Context, get getMsg, seqs []uint64, limit int) ([]render.Mail, []uint64, error) {
+func (e *Endpoint) collectDropped(ctx context.Context, get getMsg, seqs seqRange, limit int) ([]render.Mail, []uint64, error) {
 	var out []render.Mail
 	var dropped []uint64 // the seqs read that toMail refused
 	// Seqs are read a batch at a time, many requests in flight at once. A batch is no larger than what is still
 	// wanted, so the limit is never passed; seqs that turn out to be gone or forged leave the next batch to top up.
 	// A batch is judged in the order given, so the result is what a read one seq at a time would have been.
-	for len(seqs) > 0 && len(out) < limit {
-		n := min(limit-len(out), len(seqs))
-		batch := seqs[:n]
-		seqs = seqs[n:]
+	for seqs.remaining() > 0 && len(out) < limit {
+		batch := seqs.take(limit - len(out))
+		n := len(batch)
 		raws := make([]*jetstream.RawStreamMsg, n)
 		errs := make([]error, n)
 		parallel(n, fetchConcurrency, func(i int) { raws[i], errs[i] = get(ctx, batch[i]) })
@@ -1367,20 +1370,51 @@ func (e *Endpoint) collectDropped(ctx context.Context, get getMsg, seqs []uint64
 	return out, dropped, nil
 }
 
-// seqsDown is last..first, newest first; seqsUp is from..to. Both are empty
-// for an empty stream (seq 0) or an empty range.
-func seqsDown(last, first uint64) []uint64 {
-	var out []uint64
-	for seq := last; seq >= max(first, 1); seq-- {
-		out = append(out, seq)
-	}
-	return out
+// seqRange is a run of stream sequences, read lazily: next is the first to yield and end the end bound (inclusive),
+// counting down when down is set. It is a few words whatever its span, so allocation and CPU follow the page listed,
+// not the span; round trips never grew with the span either. A gap (a gone sequence) costs one read each, as
+// collectDropped reads on to fill the page, and the counting pass still reads up to its caps (countMaxMsgs). Its zero
+// value is empty.
+type seqRange struct {
+	next, end uint64
+	down      bool
 }
 
-func seqsUp(from, to uint64) []uint64 {
-	var out []uint64
-	for seq := max(from, 1); seq <= to; seq++ {
-		out = append(out, seq)
+// seqsDown is top..bottom, newest first; seqsUp is from..to. Both are empty
+// for an empty stream (seq 0) or an empty range.
+func seqsDown(top, bottom uint64) seqRange {
+	return seqRange{next: top, end: max(bottom, 1), down: true}
+}
+
+func seqsUp(from, to uint64) seqRange { return seqRange{next: max(from, 1), end: to} }
+
+// remaining is how many sequences are left to yield.
+func (r seqRange) remaining() uint64 {
+	switch {
+	case r.next == 0:
+		return 0
+	case r.down && r.next >= r.end:
+		return r.next - r.end + 1
+	case !r.down && r.next <= r.end:
+		return r.end - r.next + 1
+	}
+	return 0
+}
+
+// take yields up to n of the next sequences and steps past them.
+func (r *seqRange) take(n int) []uint64 {
+	k := int(min(r.remaining(), uint64(max(n, 0))))
+	out := make([]uint64, k)
+	for i := range out {
+		out[i] = r.next
+		if r.down {
+			r.next--
+		} else {
+			r.next++
+		}
+	}
+	if k > 0 && r.remaining() == 0 {
+		*r = seqRange{}
 	}
 	return out
 }
