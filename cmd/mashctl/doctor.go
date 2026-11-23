@@ -30,8 +30,9 @@ It changes nothing.
 
 options:
   --strict       exit 1 on a warning too
-  --audit-users  also fail when a user connected to the account was not
-                 issued by mashctl (not implied by --strict)
+  --audit-users  fail if a user connected to the mash account was not
+                 issued by mashctl; use it to check who is connected
+                 now (--strict does not do this)
   --json         print the result as JSON
 
 exit codes:
@@ -554,9 +555,12 @@ func scanConnections(ctx context.Context, nc *nats.Conn, account string, servers
 	return sc, nil
 }
 
+// noKeyReported stands for a connection whose entry carries no user key.
+const noKeyReported = "(no key reported)"
+
 // connectedFindings sorts the connected keys against the issue record: the keys no record holds, and the keys the
 // record holds as revoked. No key is exempt: the admin user is in the account and init records it, and the system
-// account's users are never in the mash account's connection list.
+// account's users are never in the mash account's connection list. A connection with no key counts as unrecorded.
 func connectedFindings(conns []apply.ConnzServer, recs []store.Issued) (unrecorded, revoked []string) {
 	recorded := map[string]store.Issued{}
 	for _, r := range recs {
@@ -565,7 +569,8 @@ func connectedFindings(conns []apply.ConnzServer, recs []store.Issued) (unrecord
 	seenU, seenR := map[string]bool{}, map[string]bool{}
 	for _, s := range conns {
 		for _, c := range s.Conns {
-			if c.Key == "" {
+			if c.Key == "" { // a user that cannot be identified was not issued by mashctl as far as anyone can tell
+				unrecorded = append(unrecorded, noKeyReported)
 				continue
 			}
 			r, ok := recorded[c.Key]
@@ -579,7 +584,7 @@ func connectedFindings(conns []apply.ConnzServer, recs []store.Issued) (unrecord
 			}
 		}
 	}
-	slices.Sort(unrecorded)
+	slices.Sort(unrecorded) // "(" sorts before every key
 	slices.Sort(revoked)
 	return unrecorded, revoked
 }
@@ -603,9 +608,13 @@ func doctorKeys(rep *doctorReport, ctx context.Context, adm *admin.Admin, cfg co
 		failKeys(err.Error())
 		return
 	}
-	recs, _, err := adm.Issued(ctx)
+	recs, present, err := adm.Issued(ctx)
 	if err != nil {
 		failKeys(err.Error())
+		return
+	}
+	if !present { // without the record every connected user would look foreign
+		rep.add("keys", stateFail, "no issue record; mashctl cannot tell its users from others", initFix)
 		return
 	}
 	nc, err := connectSys(cfg, "", env)
@@ -624,26 +633,35 @@ func doctorKeys(rep *doctorReport, ctx context.Context, adm *admin.Admin, cfg co
 	unrecorded, revoked := connectedFindings(scan.Conns, recs)
 	var fails []finding
 	const fix = "mashctl endpoint list"
-	const auditFix = "revoke it with nsc; mashctl cannot revoke a user it did not issue"
+	auditFix := "revoke it with the tool that issued it (mashctl revokes only its own)"
+	if len(unrecorded) > 1 {
+		auditFix = "revoke them with the tool that issued them (mashctl revokes only its own)"
+	}
 	if n := len(revoked); n > 0 {
 		fails = append(fails, finding{fmt.Sprintf("%s still connected", count(n, "revoked key")+" "+plural(n, "is", "are")), fix})
 	}
 	if scan.Incomplete != "" {
 		fails = append(fails, finding{oneLine(scan.Incomplete), initFix})
 	}
+	auditText := ""
 	audited := auditUsers && len(unrecorded) > 0
 	if audited { // last: its keys are lines of their own, so no "; ..." may follow
 		n := len(unrecorded)
-		fails = append(fails, finding{fmt.Sprintf("%s not issued by mashctl:%s", count(n, "connected user")+" "+plural(n, "was", "were"), keyLines(unrecorded)), auditFix})
+		auditText = fmt.Sprintf("%s not issued by mashctl:%s", count(n, "connected user")+" "+plural(n, "was", "were"), keyLines(unrecorded))
+		fails = append(fails, finding{auditText, auditFix})
 	}
-	okDetail := "every connected key was issued here"
+	okDetail := "every connected user was issued by mashctl"
+	other := ""
 	if n := len(unrecorded); n > 0 && !audited {
-		okDetail = fmt.Sprintf("%s connected; mashctl did not issue %s", count(n, "other user"), plural(n, "it", "them"))
+		other = fmt.Sprintf("%s, not issued by mashctl", count(n, "other user"))
+		okDetail = "mashctl's users ok; " + other
 	}
 	addFindings(rep, "keys", okDetail, fails, nil)
-	if audited { // this finding's fix wins whatever else the row says
-		fixed := auditFix
-		rep.Checks[len(rep.Checks)-1].Fix = &fixed
+	if c := &rep.Checks[len(rep.Checks)-1]; audited && len(fails) > 1 { // the audit sentence starts a line of its own
+		c.Detail = strings.Replace(c.Detail, "; "+auditText, "\n"+auditText, 1)
+	}
+	if c := &rep.Checks[len(rep.Checks)-1]; other != "" && c.State == stateFail { // the count stays on a line of its own
+		c.Detail += "\n" + other
 	}
 }
 

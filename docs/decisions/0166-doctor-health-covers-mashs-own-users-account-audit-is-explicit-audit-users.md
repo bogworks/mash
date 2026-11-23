@@ -15,7 +15,7 @@ Randy Bias, as relayed by the planner, asked of that first design: "Do you think
 ## Decision Drivers
 
 * Mash is a tenant of the account, not its owner. Health covers mash's own things.
-* An operator who wants the account to be mash's alone still needs a way to check it, and to fail on it.
+* An operator who wants to know whether every connected user was issued by mashctl still needs a way to check it, and to fail on it. The check sees only the users connected now.
 * No new setting, no new verb, no change to what is stored on the server.
 * `external_keys` never shipped, so it can be removed with no tolerance for old state.
 
@@ -28,11 +28,11 @@ Randy Bias, as relayed by the planner, asked of that first design: "Do you think
 
 ## Decision Outcome
 
-Chosen option: D. `mashctl doctor`, with or without `--strict`, never fails because a connected user was not issued by mashctl. The `keys` row stays ok and adds one clause: `keys       ok    every connected key was issued here` when there are no other users, or `keys       ok    2 other users connected; mashctl did not issue them` (singular: `1 other user connected; mashctl did not issue it`). The new flag `mashctl doctor --audit-users` is the only thing that fails on an unknown user, and `--strict` does not imply it. It prints `keys       FAIL  2 connected users were not issued by mashctl:`, each key (up to 3, then `and N more`) on its own line at column 17, and `hint: revoke it with nsc; mashctl cannot revoke a user it did not issue`. A key the issue record holds keeps its rules, so a revoked key that is still connected still fails. `external_keys` is removed entirely.
+Chosen option: D. `mashctl doctor`, with or without `--strict`, never fails because a connected user was not issued by mashctl. The `keys` row stays ok and adds one clause: `keys       ok    every connected user was issued by mashctl` when there are no other users, or `keys       ok    mashctl's users ok; 2 other users, not issued by mashctl` (singular: `1 other user`). The new flag `mashctl doctor --audit-users` is the only thing that fails on an unknown user, and `--strict` does not imply it. It prints `keys       FAIL  2 connected users were not issued by mashctl:`, each key (up to 3, then `and N more`) on its own line at column 17, and `hint: revoke it with the tool that issued it (mashctl revokes only its own)`. A key the issue record holds keeps its rules, so a revoked key that is still connected still fails, and when it does the count of other users stays on a continuation line of the failure. `external_keys` is removed entirely.
 
 ### Confirmation
 
-`TestDoctorKeysForeignUserIsAClauseNotAFailure`, `TestDoctorAuditUsersFailsOnAForeignUser`, `TestDoctorAuditUsersManyKeysOnLinesOfTheirOwn`, `TestDoctorForeignUserCountText` and `TestDoctorRevokedStillConnectedFailsWithoutAudit` in `cmd/mashctl` pin each case: a foreign user (ok, with the count clause), `--strict` with a foreign user (still ok), `--audit-users` (fails, names the keys, caps at 3 with `and N more`, gives the hint), an account with only mash's users (the plain line), and a 0.5.7 `config.json` (unchanged, accepted as before).
+`TestDoctorKeysForeignUserIsAClauseNotAFailure`, `TestDoctorAuditUsersFailsOnAForeignUser`, `TestDoctorAuditUsersManyKeysOnLinesOfTheirOwn`, `TestDoctorForeignUserCountText`, `TestDoctorRevokedStillConnectedFailsWithoutAudit`, `TestDoctorOnlyMashUsersPassesInEveryMode`, `TestDoctorKeysFailsWhenTheIssueRecordIsMissing`, `TestDoctorKeysCountsAConnectionWithNoKey` and `TestDoctorAuditUsersRevokedKeyLinesFit80Columns` in `cmd/mashctl` pin each case: a foreign user (ok, with the count clause), `--strict` with a foreign user (still ok), `--audit-users` (fails, names the keys, caps at 3 with `and N more`, gives the hint, keeps every line within 80 columns), an account with only mash's users (the plain line, in every mode, and with a 0.5.7 `config.json` unchanged), a missing issue record (the keys row fails with `no issue record; mashctl cannot tell its users from others`, with or without `--audit-users`), and a connection that reports no key (counted as a user mashctl did not issue, shown as `(no key reported)`).
 
 ### Consequences
 
@@ -40,7 +40,7 @@ Chosen option: D. `mashctl doctor`, with or without `--strict`, never fails beca
 * Good: the audit is explicit, so a failure always means the operator asked for it.
 * Good: a 0.5.7 `config.json` needs no change, and no setting is added or left behind.
 * Neutral: `--strict` does not fail on a foreign user; use `--audit-users`.
-* Neutral: revoking a foreign user is outside mashctl. It did not issue the user, so it cannot revoke it; use nsc.
+* Neutral: revoking a foreign user is outside mashctl. It did not issue the user, so it cannot revoke it; the tool that issued it can.
 
 ## Pros and Cons of the Options
 

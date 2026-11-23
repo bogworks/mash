@@ -325,7 +325,7 @@ func TestDoctorKeysOKAssertsTheFields(t *testing.T) {
 }
 
 func TestDoctorCleanReadsTheTextReport(t *testing.T) {
-	good := "config     ok\nserver     ok    tls://127.0.0.1:14222\nkeys       ok    every connected key was issued here\n\nNo problems.\n"
+	good := "config     ok\nserver     ok    tls://127.0.0.1:14222\nkeys       ok    every connected user was issued by mashctl\n\nNo problems.\n"
 	for _, c := range []struct {
 		name   string
 		code   int
