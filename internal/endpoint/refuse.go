@@ -183,6 +183,37 @@ func writeRefusedSeqs(p, id string, seqs []uint64) error {
 	return replaceFile(p, []byte(b.String()))
 }
 
+// repairRefusedCountLocked raises the count file to the number of recorded sequences when it is lower (every recorded
+// sequence was counted; a kill between the two writes leaves it low) and returns the count as it stands. The caller
+// holds refusedMu.
+func (e *Endpoint) repairRefusedCountLocked(dir string, seqs []uint64) (int, error) {
+	cur := RefusedCount(e.cfg)
+	have := max(cur, len(seqs))
+	if have > cur {
+		if err := replaceFile(filepath.Join(dir, RefusedFile), []byte(strconv.Itoa(have)+"\n")); err != nil {
+			return cur, err
+		}
+	}
+	return have, nil
+}
+
+// reconcileRefusedCount repairs a count left low by a kill, for the redelivery of a recorded refusal that is
+// acknowledged without going through recordRefusalNew. Errors are returned for logging; they never block the ack.
+func (e *Endpoint) reconcileRefusedCount(stream string) error {
+	dir, err := SpoolDir(e.cfg)
+	if err != nil {
+		return err
+	}
+	refusedMu.Lock()
+	defer refusedMu.Unlock()
+	id, seqs := readRefusedSeqs(filepath.Join(dir, refusedSeqsFile))
+	if id != stream {
+		return nil
+	}
+	_, err = e.repairRefusedCountLocked(dir, seqs)
+	return err
+}
+
 // recordRefusalNew is recordRefusal; added reports whether seq was new (counted now), false when it was already
 // recorded and the count is returned as it stands.
 func (e *Endpoint) recordRefusalNew(seq uint64) (n int, added bool, err error) {
@@ -206,8 +237,14 @@ func (e *Endpoint) recordRefusalNew(seq uint64) (n int, added bool, err error) {
 	}
 	p := filepath.Join(dir, refusedSeqsFile)
 	fid, seqs := readRefusedSeqs(p)
-	if fid == id && slices.Contains(seqs, seq) {
-		return RefusedCount(e.cfg), false, nil
+	if fid != id {
+		seqs = nil // another stream's sequences are not this stream's
+	}
+	// Every sequence in the file was counted, so the count is never below their number. A kill between the
+	// sequence write and the count write leaves it below: the redelivery repairs it here, before it returns.
+	have, rerr := e.repairRefusedCountLocked(dir, seqs)
+	if slices.Contains(seqs, seq) {
+		return have, false, rerr
 	}
 	if _, err := os.Stat(p); err != nil { // a new file starts with its stream's identity
 		if err := replaceFile(p, []byte(refusedSeqsHeader+id+"\n")); err != nil {
@@ -245,7 +282,7 @@ func (e *Endpoint) recordRefusalNew(seq uint64) (n int, added bool, err error) {
 			return 0, false, werr
 		}
 	}
-	n = RefusedCount(e.cfg) + 1
+	n = have + 1
 	if err := replaceFile(filepath.Join(dir, RefusedFile), []byte(strconv.Itoa(n)+"\n")); err != nil {
 		return 0, false, err
 	}

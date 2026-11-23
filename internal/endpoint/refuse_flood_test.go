@@ -212,3 +212,84 @@ func TestUnrecordedRefusalLeavesCountAlone(t *testing.T) {
 		t.Fatalf("count %d after a failed recording and a lost lease, want 5", n)
 	}
 }
+
+// #1069 through the consumer: a kill between the sequence write and the count write leaves the sequence recorded and
+// the count low. The redelivery, acknowledged by the handler's refused-redelivery branch, repairs the count before the
+// ack, and a further redelivery does not count it again.
+func TestRefusedRedeliveryRepairsCountThroughConsumer(t *testing.T) {
+	f := newFixture(t, "a", "b")
+	state := t.TempDir()
+	off := f.cfgState("a", state, false)
+	subj := taddr("a").Subjects().Mail
+	publishRaw(t, f.e.ConnAs(t, f.creds["b"], tkey("b")), subj, "", "absent body")
+
+	ctx := context.Background()
+	ep1, err := Open(ctx, off)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ep1.SetSpool(spool.Spool{Dir: t.TempDir() + "/spool"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ep1.recordRefusal(1); err != nil {
+		t.Fatal(err)
+	}
+	// The kill: the sequence is recorded, the count write never happened.
+	dir, err := SpoolDir(off)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, RefusedFile), []byte("0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if n := RefusedCount(off); n != 0 {
+		t.Fatalf("setup: count %d, want 0", n)
+	}
+	cons, err := ep1.js.Consumer(ctx, ep1.ident.InboxStream(), store.Consumer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := cons.Fetch(1, jetstream.FetchMaxWait(5*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for m := range b.Messages() {
+		_ = m.Nak()
+	}
+	ep1.Close()
+
+	on := f.cfgState("a", state, true)
+	ep2, err := Open(ctx, on)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ev := &events{}
+	rctx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() { _ = ep2.Run(rctx, ev.deliver); close(done) }()
+	defer func() { cancel(); <-done; ep2.Close() }()
+	cons2, err := ep2.js.Consumer(ctx, ep2.ident.InboxStream(), store.Consumer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	until(t, "the redelivery is acknowledged", func() bool {
+		ci, err := cons2.Info(ctx)
+		return err == nil && ci.AckFloor.Stream == 1
+	})
+	if n := RefusedCount(on); n != 1 {
+		t.Fatalf("count after the redelivery %d, want 1", n)
+	}
+	// Another redelivery of the same sequence (a repeated ack loss) does not count again.
+	if n, added, err := ep2.recordRefusalNew(1); err != nil || added || n != 1 {
+		t.Fatalf("further redelivery: n=%d added=%v err=%v", n, added, err)
+	}
+	if err := ep2.reconcileRefusedCount(*ep2.refusedStream.Load()); err != nil {
+		t.Fatal(err)
+	}
+	if n := RefusedCount(on); n != 1 {
+		t.Fatalf("count after a further redelivery %d, want 1", n)
+	}
+	if got := ev.all(); len(got) != 0 {
+		t.Fatalf("a recorded-refused message reached the session: %v", got)
+	}
+}

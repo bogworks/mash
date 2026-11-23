@@ -221,6 +221,46 @@ func TestRefusedCountConcurrent(t *testing.T) {
 	}
 }
 
+// A kill between the sequence write and the count write leaves the count one low; the redelivery repairs it, a normal
+// refusal counts once and a redelivery of a counted one does not count again (#1069).
+func TestRefusalCountRepairedAfterKill(t *testing.T) {
+	cfg := config.Config{Owner: "acme", Group: "demo", Name: "bob", StateDir: t.TempDir()}
+	e := &Endpoint{cfg: cfg}
+	id := "inbox@now"
+	e.refusedStream.Store(&id)
+	for _, s := range []uint64{1, 2} {
+		if n, added, err := e.recordRefusalNew(s); err != nil || !added || n != int(s) {
+			t.Fatalf("refusal %d: n=%d added=%v err=%v", s, n, added, err)
+		}
+	}
+	if n, added, _ := e.recordRefusalNew(2); added || n != 2 {
+		t.Fatalf("redelivery double counted: n=%d added=%v", n, added)
+	}
+	// The kill: seq 3 recorded, the count still 2.
+	dir, _ := SpoolDir(cfg)
+	f, err := os.OpenFile(filepath.Join(dir, refusedSeqsFile), os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = f.WriteString("3\n")
+	f.Close()
+	if n := RefusedCount(cfg); n != 2 {
+		t.Fatalf("setup: count %d", n)
+	}
+	if n, added, err := e.recordRefusalNew(3); err != nil || added || n != 3 {
+		t.Fatalf("redelivery: n=%d added=%v err=%v", n, added, err)
+	}
+	if n := RefusedCount(cfg); n != 3 {
+		t.Fatalf("count after repair = %d, want 3", n)
+	}
+	if n, added, _ := e.recordRefusalNew(3); added || n != 3 {
+		t.Fatalf("second redelivery: n=%d added=%v", n, added)
+	}
+	if n, added, _ := e.recordRefusalNew(4); !added || n != 4 {
+		t.Fatalf("next refusal: n=%d added=%v", n, added)
+	}
+}
+
 // Without a state directory nothing is written (a relative path would litter the working directory).
 func TestRefusalNeedsAStateDir(t *testing.T) {
 	e := &Endpoint{cfg: config.Config{Owner: "acme", Group: "demo", Name: "bob"}}
