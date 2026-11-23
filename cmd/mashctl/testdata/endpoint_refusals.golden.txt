@@ -92,7 +92,7 @@ stdout:
 == create_no_account_key
 exit 1
 stderr:
-error: no account signing key
+error: no account identity key (account.nk)
 hint: mashctl init --help
 stdout:
 == create_server
@@ -216,7 +216,7 @@ stdout:
 == reissue_no_account_key
 exit 1
 stderr:
-error: no account signing key
+error: no account identity key (account.nk)
 hint: mashctl init --help
 stdout:
 == reissue_server

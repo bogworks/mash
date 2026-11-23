@@ -77,6 +77,31 @@ func TestImportSigningRecordsAndLossIsDistinct(t *testing.T) {
 	}
 }
 
+func TestRemovingBothSigningFilesReturnsToIdentitySigning(t *testing.T) {
+	a, dir := newStore(t)
+	p1, _ := signingSeed(t, t.TempDir(), "s1")
+	if _, _, err := a.ImportSigning(p1); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	if kp, _, err := a.Signing(); err != nil {
+		t.Fatalf("Signing after import: %v", err)
+	} else {
+		kp.Wipe()
+	}
+	if err := os.Remove(filepath.Join(dir, "signing.nk")); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := a.Signing(); !errors.Is(err, ErrSigningKeyLost) || errors.Is(err, ErrNoSigningKey) {
+		t.Fatalf("only signing.nk removed: %v", err)
+	}
+	if err := os.Remove(filepath.Join(dir, "signing.pub")); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := a.Signing(); !errors.Is(err, ErrNoSigningKey) {
+		t.Fatalf("both removed: %v", err)
+	}
+}
+
 func TestSigningSeedWithoutRecordStillWorks(t *testing.T) {
 	a, dir := newStore(t)
 	p, pub := signingSeed(t, t.TempDir(), "s")

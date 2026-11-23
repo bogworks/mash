@@ -27,15 +27,15 @@ var (
 	ErrNoOperatorKey = errors.New("mashctl: no operator key (operator.nk): it exists only for a server `mashctl init --local` stood up")
 	// ErrNoSystemKey is returned by System when system.nk is absent.
 	ErrNoSystemKey = errors.New("mashctl: no system account key (system.nk): it exists only for a server `mashctl init --local` stood up")
-	// ErrNoAccountKey is returned by Account when account.nk is absent.
-	ErrNoAccountKey = errors.New("mashctl: no account signing key: run `mashctl init`")
+	// ErrNoAccountKey is returned by Account when the account identity key (account.nk) is absent.
+	ErrNoAccountKey = errors.New("mashctl: no account identity key (account.nk): run `mashctl init`")
 	// ErrNoSigningKey is returned by Signing when signing.nk is absent: the account has no separate signing key
 	// configured, and endpoint users are signed by the account identity key.
 	ErrNoSigningKey = errors.New("mashctl: no account signing key configured (signing.nk)")
 	// ErrSigningKeyLost is returned by Signing when the store records a configured signing key (signing.pub) but
 	// signing.nk is missing, unreadable or another key. The identity key must not stand in for it: a strict server
 	// rejects what it signs.
-	ErrSigningKeyLost = errors.New("mashctl: the account signing key was configured (signing.pub) but signing.nk is missing or is not that key: restore signing.nk, or run `mashctl init` again with signing_key set")
+	ErrSigningKeyLost = errors.New("mashctl: the account signing key was configured (signing.pub) but signing.nk is missing or is not that key: restore signing.nk, or run `mashctl init` again with signing_key set to the SAME key (any other key is refused)")
 )
 
 const (
@@ -51,15 +51,16 @@ const (
 // kind is a type of key the store holds: how to make one and how to recognise its public key.
 type kind struct {
 	what   string
+	field  string // the setup-file key that names this seed, "" when none does
 	create func() (nkeys.KeyPair, error)
 	valid  func(pub string) bool
 }
 
 var (
-	accountKind  = kind{"account identity (account_key)", nkeys.CreateAccount, nkeys.IsValidPublicAccountKey}
-	operatorKind = kind{"operator", nkeys.CreateOperator, nkeys.IsValidPublicOperatorKey}
-	systemKind   = kind{"system account", nkeys.CreateAccount, nkeys.IsValidPublicAccountKey}
-	signingKind  = kind{"account signing (signing_key)", nkeys.CreateAccount, nkeys.IsValidPublicAccountKey}
+	accountKind  = kind{"account identity", "account_key", nkeys.CreateAccount, nkeys.IsValidPublicAccountKey}
+	operatorKind = kind{"operator", "operator_key", nkeys.CreateOperator, nkeys.IsValidPublicOperatorKey}
+	systemKind   = kind{"system account", "", nkeys.CreateAccount, nkeys.IsValidPublicAccountKey}
+	signingKind  = kind{"account signing", "signing_key", nkeys.CreateAccount, nkeys.IsValidPublicAccountKey}
 )
 
 // Authority is the key store rooted at one directory.
@@ -258,7 +259,7 @@ func readSeed(path string, k kind) (nkeys.KeyPair, error) {
 	if err := ownerErr(fi, path, "seed file"); err != nil {
 		return nil, err
 	}
-	bad := fmt.Errorf("mashctl: %s does not hold a valid %s seed", path, k.what)
+	bad := error(&SeedContentError{msg: fmt.Sprintf("mashctl: %s does not hold a valid %s seed", path, k.what)})
 	if fi.Size() > maxSeedFile {
 		return nil, bad
 	}
@@ -277,9 +278,48 @@ func readSeed(path string, k kind) (nkeys.KeyPair, error) {
 	pub, err := kp.PublicKey()
 	if err != nil || !k.valid(pub) {
 		kp.Wipe()
+		if found := seedKindFound(seed); found != "" {
+			want := "an account seed (SA)"
+			if k.field == "operator_key" {
+				want = "an operator seed (SO)"
+			}
+			who := "this file"
+			if k.field != "" {
+				who = k.field
+			}
+			bad = &SeedContentError{msg: fmt.Sprintf("%v: it holds %s; %s needs %s", bad, found, who, want)}
+		}
 		return nil, bad
 	}
 	return kp, nil
+}
+
+// SeedContentError is a seed file that was read but does not hold the seed it should: unlike a mode or ownership
+// refusal, the file's content is what is wrong.
+type SeedContentError struct{ msg string }
+
+func (e *SeedContentError) Error() string { return e.msg }
+
+// seedKindFound words the kind of a valid seed of another prefix ("an operator seed (SO)"), "" when seed is not one.
+func seedKindFound(seed []byte) string {
+	prefix, raw, err := nkeys.DecodeSeed(seed)
+	if err != nil {
+		return ""
+	}
+	clear(raw)
+	switch prefix {
+	case nkeys.PrefixByteOperator:
+		return "an operator seed (SO)"
+	case nkeys.PrefixByteAccount:
+		return "an account seed (SA)"
+	case nkeys.PrefixByteUser:
+		return "a user seed (SU)"
+	case nkeys.PrefixByteServer:
+		return "a server seed (SN)"
+	case nkeys.PrefixByteCluster:
+		return "a cluster seed (SC)"
+	}
+	return ""
 }
 
 // createSeed makes a new key and installs it at path without clobbering (see installSeed).
@@ -414,7 +454,7 @@ func (a *Authority) InitAccount() (pub string, created bool, err error) {
 	return a.initKind(accountFile, accountKind)
 }
 
-// Account returns the account signing key pair and its public key.
+// Account returns the account identity key pair (account.nk) and its public key.
 func (a *Authority) Account() (nkeys.KeyPair, string, error) {
 	return a.getKind(accountFile, accountKind, ErrNoAccountKey)
 }
@@ -438,7 +478,11 @@ func (a *Authority) Signing() (nkeys.KeyPair, string, error) {
 	case rec == "":
 		return kp, pub, err
 	case err != nil:
-		return nil, "", fmt.Errorf("%w (%v)", ErrSigningKeyLost, err)
+		// signing.nk simply missing: the record is the detail; a mode or read error is told as it is.
+		if errors.Is(err, ErrNoSigningKey) {
+			return nil, "", fmt.Errorf("%w (signing.pub records %s)", ErrSigningKeyLost, rec)
+		}
+		return nil, "", fmt.Errorf("%w (%v; signing.pub records %s)", ErrSigningKeyLost, err, rec)
 	case pub != rec:
 		kp.Wipe()
 		return nil, "", fmt.Errorf("%w (signing.nk holds %s, the record says %s)", ErrSigningKeyLost, pub, rec)

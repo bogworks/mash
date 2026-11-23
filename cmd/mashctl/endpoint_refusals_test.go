@@ -221,7 +221,7 @@ var refusalCases = []refCase{
 		}
 		fakeKeyRevoked(t, func(string) (bool, error) { return true, nil })
 	}, "the staged key", 1},
-	{"create_no_account_key", []string{"endpoint", "create", "o.g.a", "--public-key", "{PUB}", "--out", "{AUX}/out.join"}, noKeys, "no account signing key", 1},
+	{"create_no_account_key", []string{"endpoint", "create", "o.g.a", "--public-key", "{PUB}", "--out", "{AUX}/out.join"}, noKeys, "no account identity key", 1},
 	{"create_server", []string{"endpoint", "create", "o.g.a", "--public-key", "{PUB}", "--out", "{AUX}/out.join"}, unreachable, "nothing was changed", 1},
 	{"create_enroll_server", []string{"endpoint", "create", "o.g.a", "--public-key", "{PUB}", "--out", "{AUX}/out.join"}, enrollFails, "the server stopped answering", 1},
 	{"create_write", []string{"endpoint", "create", "o.g.a"}, groupWritableDir, "nothing was changed", 1},
@@ -255,7 +255,7 @@ var refusalCases = []refCase{
 			t.Fatal(err)
 		}
 	}, "exists.join already exists", 1},
-	{"reissue_no_account_key", []string{"endpoint", "reissue", "o.g.a"}, noKeys, "no account signing key", 1},
+	{"reissue_no_account_key", []string{"endpoint", "reissue", "o.g.a"}, noKeys, "no account identity key", 1},
 	{"reissue_server", []string{"endpoint", "reissue", "o.g.a"}, unreachable, "nothing was changed", 1},
 	{"reissue_enroll_server", []string{"endpoint", "reissue", "o.g.a"}, seq(seeded("a"), enrollFails), "the server stopped answering", 1},
 	{"reissue_endpoint_missing", []string{"endpoint", "reissue", "o.g.a"}, nil, "o.g.a does not exist", 1},

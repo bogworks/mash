@@ -75,7 +75,7 @@ type epFail struct {
 func epErrOf(addr sap.Address, code, detail string) *cliframe.Error {
 	detail = strings.TrimPrefix(strings.TrimPrefix(detail, "mashctl: "), "mash: ")
 	if code == "no_account_key" {
-		return cliframe.Failf("no account signing key").WithHint("mashctl init --help")
+		return cliframe.Failf("no account identity key (account.nk)").WithHint("mashctl init --help")
 	}
 	switch code {
 	case enroll.CodeAddressTaken:
@@ -428,6 +428,18 @@ func epCreate(in *epInput, env func(string) string, lookup config.Lookup, stderr
 			}
 		}
 		return t, epResult{planned: true}, nil
+	}
+
+	// The signing key is checked before anything is staged or recorded: a lost signing.nk fails every create the
+	// same way, and the endpoint record enrollCreate writes first would be left without credentials. No signing key
+	// configured (ErrNoSigningKey) means the identity key signs, as before.
+	if skp, _, serr := keys.Signing(); serr != nil {
+		if !errors.Is(serr, ctlkeys.ErrNoSigningKey) {
+			return t, epResult{}, cliframe.Failf("%s; nothing was changed", strings.TrimPrefix(serr.Error(), "mashctl: ")).WithWrap().
+				WithHint("mashctl init --config <file>")
+		}
+	} else {
+		skp.Wipe()
 	}
 
 	deps := enroll.Deps{Keys: keys, Admin: adm, Account: acct}
