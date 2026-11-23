@@ -85,3 +85,35 @@ func TestAccountFindingsConfiguredSigningKey(t *testing.T) {
 		t.Fatalf("scoped: %+v %v", fs, err)
 	}
 }
+
+// ADR 0124 / ADR 0158: a foreign scoped signing key (one mashctl did not create) beside the configured plain account
+// signing key makes a revocation refuse before any push. The refusal names the scoped key by public key and role; the
+// configured plain key is not what is blamed.
+func TestSigningKeySet_RevokeRefusesAForeignScopedKeyBesideTheConfiguredPlainKey(t *testing.T) {
+	ks, fk := setup(t)
+	op, _, _ := ks.Operator()
+	cfg := importCfgSigner(t, ks)
+	foreign, _ := nkeys.CreateAccount()
+	fpub, _ := foreign.PublicKey()
+	resolverToken(t, fk, ks, op, func(cl *jwt.AccountClaims) {
+		cl.SigningKeys.Add(cfg)
+		sc := jwt.NewUserScope()
+		sc.Key, sc.Role = fpub, "other.role"
+		cl.SigningKeys.AddScopedSigner(sc)
+	})
+	before := fk.token
+	_, err := RevokeUsers(context.Background(), RevokeParams{Keys: ks, Resolver: fk}, []string{userKey(t)})
+	if err == nil {
+		t.Fatal("revoke accepted a foreign scoped signing key")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "scoped signing key "+fpub+" (role other.role)") || !strings.Contains(msg, "nothing was changed") {
+		t.Fatalf("the refusal does not name the scoped key by public key and role: %v", err)
+	}
+	if strings.Contains(msg, cfg) || strings.Contains(msg, "configured signing_key") {
+		t.Fatalf("the configured plain key is blamed: %v", err)
+	}
+	if fk.pushes != 0 || fk.token != before {
+		t.Fatal("something was pushed")
+	}
+}
