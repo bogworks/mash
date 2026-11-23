@@ -47,11 +47,11 @@
    "id": "installer-verified",
    "where": "install.sh",
    "case": "Verified",
-   "text": "Verified SHA256SUMS against the release attestation: built by bogworks/mash's\n  release workflow from v0.5.8",
+   "text": "Verified SHA256SUMS against the release attestation: built by <repo>'s\n  release workflow from <tag>",
    "stream": "stdout",
    "exit": 0,
    "issue": "#1152",
-   "note": "Wrapped here to fit the 80-column limit; as one line it is 106 columns. Wording to be settled: shorter words or this wrapping."
+   "note": "<repo> is the configured repository (MASH_REPO, default bogworks/mash) and <tag> the release installed, e.g. `built by bogworks/mash's release workflow from v0.5.8`. Wrapped here to fit the 80-column limit; as one line it is about 106 columns. Wording to be settled: shorter words or this wrapping."
   },
   {
    "id": "installer-verify-failed",
