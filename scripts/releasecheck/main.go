@@ -9,7 +9,7 @@
 // It verifies the candidate is on main of the release repository; CI's check runs on X succeeded; X builds, from
 // fresh clones in different directories, to identical bytes whose `version` line is exactly "mash v<version> (<first 7 characters of X>)".
 // With --assets it verifies the remote tag v<version> is annotated, signed by a key this machine trusts and points at
-// X, and that the draft release carries exactly the eight binaries (mash and mashctl), the three scripts and SHA256SUMS, each equal to our own build of X.
+// X, and that the draft release carries exactly the eight binaries (mash and mashctl), the two scripts and SHA256SUMS, each equal to our own build of X.
 // It then signs SHA256SUMS (ssh-keygen -Y sign, namespace mash-release) after checking every line against those builds, verifies
 // the signature against ci/release.allowed_signers at X and uploads SHA256SUMS.sig; RELEASE_SIGNING_KEY names the key (the one that signs the tag).
 // With --consumer (maintainers only: needs a downstream consumer's checkout) it also runs that checkout's own check of mash against X, as its .mash-consumer-check manifest directs (docs/release.md): opt-in, as it can take 30+ minutes.
@@ -770,9 +770,9 @@ func checkAssetsRecord(ctx context.Context, o Options, rec *gateRecord) error {
 			r.step("tag "+tag+" still is the verified object", fmt.Errorf("now %q -> %q", obj, c))
 		}
 	}
-	r.step("the three release scripts are the repository's own files at X, byte for byte", scriptsAtX(o, x, have))
+	r.step("the two release scripts are the repository's own files at X, byte for byte", scriptsAtX(o, x, have))
 	if buildOK {
-		if r.step("the release carries exactly our build of X", release.CheckAssets(have, hashes, kl)) && terr == nil && r.ok() {
+		if r.step("the release carries exactly our build of X", release.CheckAssets(o.Version, have, hashes, kl)) && terr == nil && r.ok() {
 			// Not skippable: no flag reaches past it. Only a release whose tag, assets and builds all passed is signed.
 			// Attestations, SBOMs and the build provenance are verified first, so no maintainer signature is ever made over
 			// assets the gate rejected. They also cover a resumed or hand-made draft that release.yml's attest job never
@@ -795,15 +795,15 @@ func checkAssetsRecord(ctx context.Context, o Options, rec *gateRecord) error {
 	return r.result("release " + tag + " assets")
 }
 
-// scriptsAtX holds the release's three scripts to scripts/<name> as X carries it (release.CheckScripts).
+// scriptsAtX holds the release's scripts (two, or three up to 0.5.7) to scripts/<name> as X carries it (release.CheckScripts).
 func scriptsAtX(o Options, x string, have map[string]string) error {
 	content := map[string][]byte{}
-	for _, n := range release.ScriptNames() {
+	for _, n := range release.ScriptNamesFor(o.Version) {
 		if b, err := gitBytes(o.Repo, "show", x+":scripts/"+n); err == nil {
 			content[n] = b
 		}
 	}
-	return release.CheckScripts(have, content)
+	return release.CheckScripts(o.Version, have, content)
 }
 
 // downloadPrevious fetches the release's binary for this host into dir with gh; a failure is the gate's, not the candidate's.
