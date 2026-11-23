@@ -77,10 +77,11 @@ tilde() {
     esac
 }
 
-# unsafe_path DIR: DIR is a real path (no symlinks). Say why it may not be
-# installed into, or print nothing: DIR owned by someone other than this user
+# unsafe_path DIR: DIR is a real path (no symlinks). Say, as the whole error
+# line, why it may not be installed into, or print nothing: DIR owned by someone other than this user
 # or root, or DIR or any folder above it writable by group or others (except a
-# sticky folder owned by root above DIR, such as /tmp).
+# sticky folder owned by root above DIR, such as /tmp). A writable folder's
+# reason names the fix, chmod go-w.
 unsafe_path() {
     local target=$1 c perms owner me
     me=$(id -u)
@@ -91,13 +92,13 @@ unsafe_path() {
         # shellcheck disable=SC2012
         owner=$(ls -ldn -- "$c" | awk '{print $3}')
         if [ "$c" = "$target" ] && [ "$owner" != "$me" ] && [ "$owner" != 0 ]; then
-            echo "$c is owned by another user"
+            echo "$c is owned by another user: not installing there"
             return
         fi
         case "${perms:5:1}${perms:8:1}" in
         *w*)
             if [ "$c" = "$target" ] || [ "${perms:9:1}" != t ] || [ "$owner" != 0 ]; then
-                echo "$c is writable by its group or other users"
+                echo "$c is writable by its group or other users: not installing there. Fix: chmod go-w $c, then run the installer again"
                 return
             fi
             ;;
@@ -172,7 +173,7 @@ main() {
     [ -d "$dir" ] || die "$dir is not a folder"
     real=$(cd -P -- "$dir" && pwd -P) || die "could not enter $dir"
     tmp=$(unsafe_path "$real")
-    [ -z "$tmp" ] || die "$tmp: not installing there"
+    [ -z "$tmp" ] || die "$tmp"
     for name in mash mashctl; do
         [ ! -d "$real/$name" ] || die "$real/$name is a folder: not installing there"
     done

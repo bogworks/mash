@@ -341,6 +341,7 @@ func TestInstallSh_refusesAnUnsafeFolder(t *testing.T) {
 		if r.err == nil || !strings.Contains(r.out, "writable by its group or other users") {
 			t.Errorf("want a writable refusal, got err=%v\n%s", r.err, r.out)
 		}
+		assertNamesTheFix(t, r.out, home)
 		assertNothingInstalled(t, dest)
 	})
 	t.Run("world-writable", func(t *testing.T) {
@@ -356,6 +357,7 @@ func TestInstallSh_refusesAnUnsafeFolder(t *testing.T) {
 		if r.err == nil || !strings.Contains(r.out, "writable by its group or other users") {
 			t.Errorf("want a writable refusal, got err=%v\n%s", r.err, r.out)
 		}
+		assertNamesTheFix(t, r.out, dest)
 		assertNothingInstalled(t, dest)
 	})
 	t.Run("group-writable parent", func(t *testing.T) {
@@ -368,8 +370,73 @@ func TestInstallSh_refusesAnUnsafeFolder(t *testing.T) {
 		if r.err == nil || !strings.Contains(r.out, "writable by its group or other users") {
 			t.Errorf("want a writable refusal for the parent, got err=%v\n%s", r.err, r.out)
 		}
+		assertNamesTheFix(t, r.out, home)
 		assertNothingInstalled(t, dest)
 	})
+}
+
+// assertNamesTheFix checks the output tells the user to run chmod go-w on folder (resolved, as the script prints it).
+func assertNamesTheFix(t *testing.T, out, folder string) {
+	t.Helper()
+	real, err := filepath.EvalSymlinks(folder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "chmod go-w "+real) {
+		t.Errorf("want the fix chmod go-w %s in the output, got:\n%s", real, out)
+	}
+}
+
+// Claude Code's own installer makes ~/.local and ~/.local/bin mode 775. The refusal must name each folder and the fix.
+func TestInstallSh_groupWritableLocalNamesTheFix(t *testing.T) {
+	rel, _, _ := fakeRelease(t)
+	tools := installTools(t, nil)
+	home := tempHome(t)
+	local := filepath.Join(home, ".local")
+	dest := filepath.Join(local, "bin")
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range []string{local, dest} {
+		if err := os.Chmod(d, 0o775); err != nil {
+			t.Fatal(err)
+		}
+	}
+	realLocal, err := filepath.EvalSymlinks(local)
+	if err != nil {
+		t.Fatal(err)
+	}
+	realDest := filepath.Join(realLocal, "bin")
+
+	r := runInstallIn(t, rel, tools, home, dest, "install.sh")
+	if r.err == nil || !strings.Contains(r.out, realDest+" is writable by its group or other users") ||
+		!strings.Contains(r.out, "chmod go-w "+realDest) {
+		t.Fatalf("want a refusal naming %s and the fix, got err=%v\n%s", realDest, r.err, r.out)
+	}
+	assertNothingInstalled(t, dest)
+
+	if err := os.Chmod(dest, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	r = runInstallIn(t, rel, tools, home, dest, "install.sh")
+	if r.err == nil || !strings.Contains(r.out, realLocal+" is writable by its group or other users") ||
+		!strings.Contains(r.out, "chmod go-w "+realLocal) {
+		t.Fatalf("want a refusal naming %s and the fix, got err=%v\n%s", realLocal, r.err, r.out)
+	}
+	assertNothingInstalled(t, dest)
+
+	if err := os.Chmod(local, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	r = runInstallIn(t, rel, tools, home, dest, "install.sh")
+	if r.err != nil {
+		t.Fatalf("install failed after the fixes: %v\n%s", r.err, r.out)
+	}
+	for _, n := range []string{"mash", "mashctl"} {
+		if _, err := os.Stat(filepath.Join(dest, n)); err != nil {
+			t.Errorf("%s not installed: %v", n, err)
+		}
+	}
 }
 
 func TestInstallSh_aTruncatedScriptInstallsNothing(t *testing.T) {
