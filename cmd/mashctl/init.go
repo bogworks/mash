@@ -487,19 +487,10 @@ func doInit(setupPath string, dry, jsonOut bool, env func(string) string, lookup
 			return cliframe.Failf("account_key changed while init ran: the key imported is not the one that was checked; running init again is safe")
 		}
 	}
-	if needSign {
-		if pub, _, err := ks.ImportSigningChecked(sf.signingKey, st.signPub); err != nil {
-			if errors.Is(err, ctlkeys.ErrSigningChanged) {
-				return cliframe.Failf("%v (nothing was installed for it; running init again is safe)", err)
-			}
-			return cliframe.Failf("%v\n  the account key was imported; running init again is safe", err)
-		} else if pub != st.signPub {
-			return cliframe.Failf("signing_key changed while init ran: the key imported is not the one that was checked; running init again is safe")
-		}
-	}
-	// A config.json that already exists gets signing_key_pub right after the key is imported: an init that stops after
-	// the import must not leave a key store whose signing key mashctl cannot tell from a lost one. A new config.json is
-	// written last, with everything else, so a config.json that exists means init got that far.
+	// A config.json that already exists gets signing_key_pub before the key is imported: an init that stops after the
+	// import must not leave a key store whose signing key mashctl cannot tell from a lost one (stopped before the import,
+	// the field with no files refuses and a rerun imports). A new config.json is written last, with everything else, so
+	// a config.json that exists means init got that far.
 	cfgWritten := false
 	writeConfig := func() error {
 		if needCfg {
@@ -519,6 +510,16 @@ func doInit(setupPath string, dry, jsonOut bool, env func(string) string, lookup
 			return failErr(err)
 		}
 		cfgWritten = true
+	}
+	if needSign {
+		if pub, _, err := ks.ImportSigningChecked(sf.signingKey, st.signPub); err != nil {
+			if errors.Is(err, ctlkeys.ErrSigningChanged) {
+				return cliframe.Failf("%v (nothing was installed for it; running init again is safe)", err)
+			}
+			return cliframe.Failf("%v\n  the account key was imported; running init again is safe", err)
+		} else if pub != st.signPub {
+			return cliframe.Failf("signing_key changed while init ran: the key imported is not the one that was checked; running init again is safe")
+		}
 	}
 	if needSys {
 		if err := ensureDir(st.serverDir); err != nil {

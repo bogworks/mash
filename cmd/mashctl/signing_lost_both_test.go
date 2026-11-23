@@ -362,7 +362,7 @@ func TestInterruptedInitWritesNewConfigLast(t *testing.T) {
 	}
 }
 
-// A config.json that exists without signing_key_pub gets it right after the key import: an init that stops after
+// A config.json that exists without signing_key_pub gets it before the key import: an init that stops after
 // the import has recorded it, so the key store with both files removed refuses create; a rerun finishes.
 func TestInterruptedInitOnExistingConfigHasRecordedTheSigningKey(t *testing.T) {
 	if os.Geteuid() == 0 {
@@ -407,6 +407,57 @@ func TestInterruptedInitOnExistingConfigHasRecordedTheSigningKey(t *testing.T) {
 		t.Fatalf("create after the interrupted init and lost files: %d\n%s\n%s", code, out, errb)
 	}
 	if err := os.Chmod(server, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if out, errb, code := a.init(); code != 0 {
+		t.Fatalf("rerun: %d\n%s\n%s", code, out, errb)
+	}
+	if out, errb, code := a.run("endpoint", "create", "alice.g.x"); code != 0 {
+		t.Fatalf("create after the rerun: %d\n%s\n%s", code, out, errb)
+	}
+}
+
+func TestFailedKeyImportOnExistingConfigHasRecordedTheSigningKey(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores the read-only folder that stops the import")
+	}
+	e, sk, osk := strictEnv(t)
+	skPub, _ := sk.PublicKey()
+	a := newIniter(t, e)
+	if err := os.WriteFile(a.opSeed, mustRead(t, seedFile(t, t.TempDir(), "op", osk)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sc := filepath.Join(a.root, "in", "signer.creds")
+	signingKeyCreds(t, e.acctPub, sk, sc)
+	a.vals["admin_creds"] = sc
+	// a first init without signing_key: config.json exists and has no signing_key_pub
+	if out, errb, code := a.init(); code != 0 {
+		t.Fatalf("first init: %d\n%s\n%s", code, out, errb)
+	}
+	cfgDir := a.env["MASH_CONFIG_DIR"]
+	if g, _ := configSigningPub(t, cfgDir); g != "" {
+		t.Fatalf("signing_key_pub before: %q", g)
+	}
+	// the key folder is read-only: the import of signing.nk fails, after the field was written
+	keysDir := a.env["MASH_KEYS_DIR"]
+	if err := os.Chmod(keysDir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(keysDir, 0o700) })
+	a.vals["signing_key"] = seedFile(t, filepath.Join(a.root, "in"), "signing.seed", sk)
+	if out, errb, code := a.init(); code == 0 {
+		t.Fatalf("init went through a read-only key folder:\n%s\n%s", out, errb)
+	}
+	if got, raw := configSigningPub(t, cfgDir); got != skPub {
+		t.Fatalf("the failed import left signing_key_pub = %q, want %s\n%s", got, skPub, raw)
+	}
+	if _, err := os.Lstat(filepath.Join(keysDir, "signing.nk")); !os.IsNotExist(err) {
+		t.Fatalf("signing.nk after the failed import: %v", err)
+	}
+	if out, errb, code := a.run("endpoint", "create", "alice.g.x"); code != 1 || !strings.Contains(errb, "both missing") {
+		t.Fatalf("create after the failed import: %d\n%s\n%s", code, out, errb)
+	}
+	if err := os.Chmod(keysDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if out, errb, code := a.init(); code != 0 {
