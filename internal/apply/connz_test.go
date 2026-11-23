@@ -97,7 +97,7 @@ func TestConnzShiftedPageIsIncompleteNotClean(t *testing.T) {
 	if err != nil || len(got) != 1 {
 		t.Fatalf("%v %+v", err, got)
 	}
-	if got[0].Incomplete == "" || !strings.Contains(got[0].Incomplete, "changed while it was read") {
+	if got[0].Incomplete == "" || !strings.Contains(got[0].Incomplete, "user list kept changing") {
 		t.Fatalf("not marked incomplete: %+v", got[0])
 	}
 	seen := map[uint64]bool{}
@@ -170,7 +170,7 @@ func TestConnzEqualTotalShiftIsIncompleteNotClean(t *testing.T) {
 	if err != nil || len(got) != 1 {
 		t.Fatalf("%v %+v", err, got)
 	}
-	if got[0].Incomplete == "" || !strings.Contains(got[0].Incomplete, "changed while it was read") {
+	if got[0].Incomplete == "" || !strings.Contains(got[0].Incomplete, "user list kept changing") {
 		t.Fatalf("a shifted multi-page scan was not marked incomplete: %+v", got[0])
 	}
 	if f.calls < connzScanTries {

@@ -826,3 +826,124 @@ func TestDoctorAuditUsersRevokedKeyLinesFit80Columns(t *testing.T) {
 		}
 	}
 }
+
+// scriptScans makes the keys check read the scripted scans in order (the last one repeats) and returns the number of
+// reads made. churnPause is 0 for the test.
+func scriptScans(t *testing.T, scans ...connScan) *int {
+	t.Helper()
+	oldScan, oldPause := scanConns, churnPause
+	t.Cleanup(func() { scanConns, churnPause = oldScan, oldPause })
+	churnPause = 0
+	calls := 0
+	scanConns = func(context.Context, *nats.Conn, string, int) (connScan, error) {
+		s := scans[min(calls, len(scans)-1)]
+		calls++
+		return s, nil
+	}
+	return &calls
+}
+
+func keyScan(unsettled bool, keys ...string) connScan {
+	var cs []apply.ConnzConn
+	for _, k := range keys {
+		cs = append(cs, apply.ConnzConn{Key: k})
+	}
+	sc := connScan{Conns: []apply.ConnzServer{{Name: "s1", Conns: cs}}}
+	if unsettled {
+		sc.Incomplete = "server s1's user list kept changing: it is not complete"
+		sc.Unsettled = true
+	}
+	return sc
+}
+
+func checkFits80(t *testing.T, e *applyEnv, args ...string) {
+	t.Helper()
+	out, errb, _ := e.run(args...)
+	for _, l := range strings.Split(cleanText(e, out)+errb, "\n") {
+		if len(l) > 80 {
+			t.Errorf("%v: %d columns: %q", args, len(l), l)
+		}
+	}
+}
+
+// Churn only among users mashctl did not issue is not a finding: ok in both modes, the count shown.
+func TestDoctorKeysChurnOfForeignUsersIsNotAFinding(t *testing.T) {
+	e := newXYEnv(t)
+	calls := scriptScans(t, keyScan(true, "UFOREIGN1"), keyScan(true, "UFOREIGN2"), keyScan(true, "UFOREIGN1", "UFOREIGN3"))
+	for _, args := range [][]string{{}, {"--strict"}} {
+		*calls = 0
+		_, by, code := doctorJSON(t, e.run, args...)
+		if c := by["keys"]; code != 0 || c.State != "ok" || c.Detail != "mashctl's users ok; 2 other users, not issued by mashctl" {
+			t.Fatalf("%v: %d %+v", args, code, c)
+		}
+	}
+	checkFits80(t, e, "doctor")
+}
+
+// Persistent churn of one of mash's own users warns after three reads: exit 0, and 1 with --strict.
+func TestDoctorKeysChurnOfMashUsersWarns(t *testing.T) {
+	e := newXYEnv(t)
+	_, xKey := credsSubject(t, e.credsPath(xy("x").String()))
+	calls := scriptScans(t, keyScan(true, xKey), keyScan(true), keyScan(true, xKey))
+	const line = "mash's connections kept changing; checked 3 times"
+	for _, c := range []struct {
+		args []string
+		exit int
+	}{{nil, 0}, {[]string{"--strict"}, 1}} {
+		*calls = 0
+		_, by, code := doctorJSON(t, e.run, c.args...)
+		k := by["keys"]
+		if code != c.exit || k.State != "warn" || !strings.HasPrefix(k.Detail, line) || k.Fix == nil || *k.Fix != "mashctl doctor" || *calls != 3 {
+			t.Fatalf("%v: %d calls %d %+v", c.args, code, *calls, k)
+		}
+	}
+	out, _, _ := e.run("doctor")
+	if !strings.Contains(cleanText(e, out), "keys       warn  "+line) {
+		t.Fatalf("%q", cleanText(e, out))
+	}
+	checkFits80(t, e, "doctor")
+}
+
+// With --audit-users an unsettled read fails in plain words, and never names the scan's inner workings.
+func TestDoctorAuditUsersFailsOnChurn(t *testing.T) {
+	e := newXYEnv(t)
+	scriptScans(t, keyScan(true, "UFOREIGN1"))
+	_, by, code := doctorJSON(t, e.run, "--audit-users")
+	k := by["keys"]
+	if code != 1 || k.State != "fail" || !strings.Contains(k.Detail, "server s1's user list kept changing: it is not complete") {
+		t.Fatalf("%d %+v", code, k)
+	}
+	if low := strings.ToLower(k.Detail); strings.Contains(low, "connz") || strings.Contains(low, "nats") || strings.Contains(low, "scans") {
+		t.Fatalf("%q", k.Detail)
+	}
+	checkFits80(t, e, "doctor", "--audit-users")
+}
+
+// A read that settles on the second or third try gives the usual ok line.
+func TestDoctorKeysChurnThatSettlesIsOK(t *testing.T) {
+	e := newXYEnv(t)
+	for n := 1; n <= 2; n++ {
+		scans := make([]connScan, 0, 3)
+		for i := 0; i < n; i++ {
+			scans = append(scans, keyScan(true, "UFOREIGN1"))
+		}
+		scans = append(scans, keyScan(false, "UFOREIGN1"))
+		calls := scriptScans(t, scans...)
+		_, by, code := doctorJSON(t, e.run, "--strict")
+		if c := by["keys"]; code != 0 || c.State != "ok" || c.Detail != "mashctl's users ok; 1 other user, not issued by mashctl" || *calls != n+1 {
+			t.Fatalf("settles after %d: %d calls %d %+v", n, code, *calls, c)
+		}
+	}
+}
+
+// A server that did not answer is not churn: it fails in plain mode, and is not retried.
+func TestDoctorKeysSetIncompleteIsNotChurn(t *testing.T) {
+	e := newXYEnv(t)
+	sc := keyScan(false, "UFOREIGN1")
+	sc.Incomplete = "1 server(s) replied of 2 expected"
+	calls := scriptScans(t, sc)
+	_, by, code := doctorJSON(t, e.run)
+	if k := by["keys"]; code != 1 || k.State != "fail" || !strings.Contains(k.Detail, "1 server(s) replied") || *calls != 1 {
+		t.Fatalf("%d calls %d %+v", code, *calls, k)
+	}
+}
