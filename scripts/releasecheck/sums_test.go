@@ -372,6 +372,7 @@ func TestAssets_signatureRefusals(t *testing.T) {
 // Publishing refuses a release that has no SHA256SUMS.sig that verifies, whatever the gate before it said.
 func TestPublish_realWorldRefusesWithoutAVerifyingSignature(t *testing.T) {
 	f := signedFixture(t, nil)
+	f.listLatest()
 	w := realWorld{ctx: context.Background(), o: f.o}
 	err := w.Publish("v0.1.0")
 	if err == nil || exitCode(err) != 3 || !strings.Contains(err.Error(), "SHA256SUMS.sig is no longer attached") {
@@ -475,6 +476,7 @@ func (f *fixture) editAssets(t *testing.T, edit func(s string) string) {
 
 func TestPublish_signedDraftIsPublished(t *testing.T) {
 	f := signedDraft(t)
+	f.listLatest()
 	if err := f.publish(); err != nil {
 		t.Fatalf("a signed, unchanged draft was refused: %v", err)
 	}
@@ -604,6 +606,7 @@ func TestPublish_wholeAssetSetReplacedAfterTheGateIsRefused(t *testing.T) {
 // With no gate result from this process, Publish runs the gate itself rather than trust anything else.
 func TestPublish_withoutAGateResultTheGateRunsFirst(t *testing.T) {
 	f := signedDraft(t)
+	f.listLatest()
 	f.gate = nil
 	if err := f.publish(); err != nil {
 		t.Fatalf("a correct signed draft was refused: %v", err)
@@ -1040,4 +1043,9 @@ func TestAssets_neverSignsWhatVerificationRejected(t *testing.T) {
 			t.Fatalf("err = %v (exit %d)", err, exitCode(err))
 		}
 	})
+}
+
+// listLatest fakes `gh release list` after publishing: v0.1.0 is listed and marked Latest.
+func (f *fixture) listLatest() {
+	write(f.t, f.ghDir(), "releases.json", `[{"tagName":"v0.1.0","isDraft":false,"isLatest":true}]`)
 }

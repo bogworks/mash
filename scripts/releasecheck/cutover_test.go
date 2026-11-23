@@ -303,6 +303,7 @@ func TestPublish_keylessRealWorld(t *testing.T) {
 	}
 	t.Run("publishes with no key and no signature", func(t *testing.T) {
 		f := gated(t)
+		f.listLatest()
 		if err := f.publish(); err != nil {
 			t.Fatalf("refused: %v", err)
 		}
