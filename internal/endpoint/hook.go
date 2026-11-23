@@ -637,7 +637,7 @@ func (e *Endpoint) stopWake() {
 }
 
 // wakeReadTimeout bounds the wake's read of the inbox; the settle loop waits on it.
-const wakeReadTimeout = 5 * time.Second
+var wakeReadTimeout = 5 * time.Second // a var so tests on a loaded runner can raise it
 
 // waitingNow is the inbox's count of waiting messages and the time of the oldest, the same count `mash inbox` reports
 // (readInbox, new messages only: one pass over the waiting backlog, bounded by the same cap). ok is false when the
