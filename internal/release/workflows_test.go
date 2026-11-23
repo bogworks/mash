@@ -326,6 +326,9 @@ func TestRelease_noJobOrStepCanBypassAFailure(t *testing.T) {
 			t.Errorf("job %s has if %q, want %q (listed in jobConditions: %v)", jn, j.If, want, ok)
 		}
 		for _, st := range j.Steps {
+			if jn == "test-macos" && st.Name == "Leave nothing behind" {
+				continue // the advisory macOS leg's cleanup on a reused runner: always() and `|| true` are its whole point
+			}
 			if st.If != "" || st.ContinueOnError != nil {
 				t.Errorf("job %s step %q has if/continue-on-error: %q %v", jn, st.Name, st.If, st.ContinueOnError)
 			}
@@ -367,7 +370,7 @@ var jobConditions = map[string]string{
 // the job id, a condition or a matrix on a required job would silently make the gate refuse every candidate.
 func TestCI_requiredJobsKeepTheirCheckNames(t *testing.T) {
 	for jn, j := range load(t, "ci.yml").Jobs {
-		if want, ok := map[string]string{"test": "test (linux)", "test-eph": "test (linux, eph)", "test-macos": "test (macos)"}[jn]; ok {
+		if want, ok := map[string]string{"test": "test (linux)"}[jn]; ok {
 			// The check name differs from the job id on purpose, and no matrix may rename it.
 			if j.Name != want {
 				t.Errorf("the %s job is named %q, want exactly %s", jn, j.Name, want)
@@ -460,7 +463,7 @@ func TestWorkflows_noBareDoubleBracketUnderSetE(t *testing.T) {
 // One OS failing must not hide the other's result: the two legs are separate jobs that do not need each other.
 func TestCI_osLegsAreIndependentJobs(t *testing.T) {
 	w := load(t, "ci.yml")
-	for _, jn := range []string{"test", "test-eph", "test-macos"} {
+	for _, jn := range []string{"test"} {
 		j := w.Jobs[jn]
 		if len(j.Strategy.Matrix) != 0 {
 			t.Errorf("%s must not be matrixed", jn)
@@ -1301,7 +1304,7 @@ func TestBuildTwice_cleansUpEvenWhenTheRefIsAlreadyGone(t *testing.T) {
 // pr-check (the one check a pull request's merge waits for), and conformance (the fast static slice a pull request's
 // review starts on; it gates neither a merge nor a release).
 // test (macos) is advisory (ADR 0079, TODO(macos-gate) in ci.yml) and so is test (linux, eph) (ADR 0123): visible, but they gate neither a merge nor a release.
-var ciOnlyJobs = []string{"adr-numbers", "changes", "conformance", "docs-lint", "pr-check", "test (linux, eph)", "test (macos)"}
+var ciOnlyJobs = []string{"adr-numbers", "changes", "conformance", "docs-lint", "pr-check"}
 
 // pr-check is the single check scripts/review-pr waits for before a review: it must run on every pull request (a
 // docs-only one too, or its review waits forever), after every required job, and pass only if they did.
@@ -1332,8 +1335,16 @@ func TestCI_prCheckGatesOnEveryRequiredJob(t *testing.T) {
 	if strings.Contains(needs, "test-macos") {
 		t.Errorf("pr-check needs test-macos, which is advisory (TODO(macos-gate) in ci.yml): %v", j.Needs)
 	}
-	if mj := w.Jobs["test-macos"]; mj.ContinueOnError != nil || mj.If != advisoryIf || !strings.Contains(fmt.Sprint(mj.RunsOn), "rh-macos") {
-		t.Errorf("test-macos must run under advisoryIf (queue drafts only), on rh-macos, and never with continue-on-error (it would hide a failure): %+v", mj)
+	if _, ok := w.Jobs["test-macos"]; ok {
+		t.Error("ci.yml has test-macos: macOS runs on tagged releases only (release.yml, rule 21)")
+	}
+	if mj := load(t, "release.yml").Jobs["test-macos"]; mj.ContinueOnError != nil || mj.If != "" || !strings.Contains(fmt.Sprint(mj.RunsOn), "rh-macos") {
+		t.Errorf("release.yml test-macos must run on every tag, on rh-macos, unconditionally and never with continue-on-error: %+v", mj)
+	}
+	for jn, rj := range load(t, "release.yml").Jobs {
+		if jn != "test-macos" && strings.Contains(fmt.Sprint(rj.Needs), "test-macos") {
+			t.Errorf("release.yml job %s needs test-macos, which is advisory (ADR 0079): a macOS runner outage must not block a tag", jn)
+		}
 	}
 	// A push to main skips the heavy jobs exactly when changes says its added paths are docs-only (code=false): the release gate
 	// (internal/release/checks.go, CheckCIWalk) judges such a head by the newest tested commit under it.
@@ -2456,7 +2467,7 @@ func TestADRLint_skipsOnlyMergifyQueueDrafts(t *testing.T) {
 // test (macos) uses the host's shared module cache: it exports neither GOPATH nor GOMODCACHE, verifies the cache with
 // `go mod verify` after setup-go and before go vet, and never removes the toolchain cache under RUNNER_TOOL_CACHE.
 func TestCI_macosUsesTheSharedModuleCacheAndVerifiesIt(t *testing.T) {
-	j := load(t, "ci.yml").Jobs["test-macos"]
+	j := load(t, "release.yml").Jobs["test-macos"]
 	setup, verify, vet := -1, -1, -1
 	for i, st := range j.Steps {
 		if strings.Contains(st.Run, "GOMODCACHE") || strings.Contains(st.Run, "GOPATH") || strings.Contains(st.Run, "gomod") {
@@ -2516,8 +2527,13 @@ func TestRelease_everyUploadArtifactKeepsOneDay(t *testing.T) {
 // .mergify.yml never names it, so it gates no merge and no release.
 func TestCI_ephShadowJobGatesNothing(t *testing.T) {
 	w := load(t, "ci.yml")
-	if _, ok := w.Jobs["test-eph"]; !ok {
-		t.Fatal("ci.yml has no test-eph job")
+	if _, ok := w.Jobs["test-eph"]; ok {
+		t.Fatal("ci.yml has test-eph: the eph pilot runs nightly (nightly.yml), never per change (rule 21)")
+	}
+	n := load(t, "nightly.yml")
+	ej, ok := n.Jobs["test-eph"]
+	if !ok {
+		t.Fatal("nightly.yml has no test-eph job")
 	}
 	if strings.Contains(fmt.Sprint(w.Jobs["pr-check"].Needs), "test-eph") {
 		t.Errorf("pr-check needs test-eph, which is advisory (ADR 0123): %v", w.Jobs["pr-check"].Needs)
@@ -2539,9 +2555,12 @@ func TestCI_ephShadowJobGatesNothing(t *testing.T) {
 	if strings.Contains(string(b), "eph") {
 		t.Error(".mergify.yml mentions the eph job: it must not be a queue condition")
 	}
-	tj, ej := w.Jobs["test"], w.Jobs["test-eph"]
-	if ej.If != advisoryIf || ej.TimeoutMinutes != tj.TimeoutMinutes || fmt.Sprint(ej.Needs) != fmt.Sprint(tj.Needs) || ej.ContinueOnError != nil {
-		t.Errorf("test-eph must use advisoryIf (queue drafts only) and match test in timeout and needs, and never use continue-on-error: %+v", ej)
+	on, _ := n.On.(map[string]any)
+	if _, ok := on["schedule"]; !ok || on["pull_request"] != nil || on["push"] != nil {
+		t.Errorf("nightly.yml must trigger on schedule (and workflow_dispatch) only: %v", on)
+	}
+	if ej.ContinueOnError != nil || ej.TimeoutMinutes != w.Jobs["test"].TimeoutMinutes {
+		t.Errorf("test-eph must match test in timeout and never use continue-on-error: %+v", ej)
 	}
 }
 

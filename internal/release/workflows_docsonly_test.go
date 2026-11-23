@@ -13,15 +13,12 @@ import (
 // level on the changes job's code output; no workflow-level paths filter exists, because a required check that never
 // reports stalls the merge queue. scripts/ci-changes is the classifier; docs/branch-protection.md states the rule.
 
-// heavyIf is the job-level condition of every heavy job in ci.yml that gates (test, test-macos, reproducible): skipped only
+// heavyIf is the job-level condition of every heavy job in ci.yml that gates (test, reproducible): skipped only
 // when changes answered code=false, run when changes failed (an empty output), and never run after a cancellation.
 const heavyIf = "${{ !cancelled() && needs.changes.outputs.code != 'false' }}"
 
 // reproIf: heavyIf, and not on an ordinary pull request push: it runs on a queue draft and on a push (Randy 2026-11-21).
 const reproIf = "${{ !cancelled() && needs.changes.outputs.code != 'false' && (github.event_name != 'pull_request' || startsWith(github.head_ref, 'mergify/')) }}"
-
-// advisoryIf is the condition of the advisory test jobs (test-eph, test-macos): heavyIf, and only on a Mergify queue draft.
-const advisoryIf = "${{ !cancelled() && needs.changes.outputs.code != 'false' && startsWith(github.head_ref, 'mergify/') }}"
 
 // Every workflow may filter by branch or tag, but none by path: the checks pr-check, adr-lint, label-reset, test (linux),
 // reproducible, lint, govulncheck and codeql all come from these files, and a check a path filter keeps from running never
@@ -46,7 +43,7 @@ func TestDocsOnly_noWorkflowLevelPathFilter(t *testing.T) {
 // Each heavy job needs changes and is skipped by the changes output; every cheap or required job is not.
 func TestDocsOnly_heavyJobsSkipOnTheChangesOutput(t *testing.T) {
 	heavy := map[string][]string{
-		"ci.yml":       {"test", "test-eph", "test-macos", "reproducible", "conformance"},
+		"ci.yml":       {"test", "reproducible", "conformance"},
 		"lint.yml":     {"lint"},
 		"security.yml": {"govulncheck", "codeql"},
 	}
@@ -77,10 +74,10 @@ func TestDocsOnly_heavyJobsSkipOnTheChangesOutput(t *testing.T) {
 	if got := load(t, "ci.yml").Jobs["reproducible"].If; got != reproIf {
 		t.Errorf("ci.yml/reproducible if = %q, want %q", got, reproIf)
 	}
-	// The two advisory jobs run only on a queue draft (Randy 2026-11-21): the heavy condition and the draft's branch.
+	// Rule 21: no macOS or eph leg runs per change; they live in release.yml (tag) and nightly.yml (schedule on main).
 	for _, jn := range []string{"test-eph", "test-macos"} {
-		if got := load(t, "ci.yml").Jobs[jn].If; got != advisoryIf {
-			t.Errorf("ci.yml/%s if = %q, want %q", jn, got, advisoryIf)
+		if _, ok := load(t, "ci.yml").Jobs[jn]; ok {
+			t.Errorf("ci.yml has job %s: macOS runs on tags only (release.yml) and eph nightly (nightly.yml), never per change", jn)
 		}
 	}
 	// The cheap and required jobs never mention the classifier's verdict: adr-numbers runs on every event, adr-lint and

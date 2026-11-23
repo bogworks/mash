@@ -1,0 +1,24 @@
+name: nightly
+# Nightly on main (rule 21): test (linux, eph), the ephemeral one-job runner pilot (ADR 0123), moved off the per-change path. It gates nothing:
+# not in pr-check, not in release.RequiredChecks, not in .mergify.yml. It keeps the pilot's comparison with rh-linux at once a day.
+# No fallback and no hosted label: with no such runner online the run waits. docs/ci-table.md is the one table.
+on:
+  schedule:
+    - cron: '10 3 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  test-eph:
+    name: test (linux, eph)
+    if: ${{ github.ref == 'refs/heads/main' }}
+    timeout-minutes: 45
+    runs-on: [self-hosted, rh-linux-eph]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/go-test
+        with:
+          forbidden-words: ${{ vars.MASH_FORBIDDEN_WORDS }}

@@ -257,8 +257,9 @@ func TestWorkflows_goCacheStepInTheSharedTestAction(t *testing.T) {
 	if called < 0 || setupGo < 0 || called > setupGo {
 		t.Errorf("go-test action: ci-go-caches race must run before setup-go (step %d, setup-go %d)", called, setupGo)
 	}
-	for _, jn := range []string{"test", "test-eph"} {
-		steps := load(t, "ci.yml").Jobs[jn].Steps
+	for _, jn := range []string{"ci.yml/test", "nightly.yml/test-eph"} {
+		f, j, _ := strings.Cut(jn, "/")
+		steps := load(t, f).Jobs[j].Steps
 		if len(steps) != 2 || !strings.HasPrefix(steps[0].Uses, "actions/checkout@") || steps[1].Uses != "./.github/actions/go-test" {
 			t.Errorf("ci.yml/%s: steps must be actions/checkout then ./.github/actions/go-test, got %+v", jn, steps)
 			continue
