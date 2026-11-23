@@ -369,7 +369,7 @@ func TestKeyWithNoAddressIsRefused(t *testing.T) {
 		t.Errorf("unknown key: %q", got)
 	}
 	// A key that maps to an address outside the range.
-	if got := errorOf(r.ask(t, "q.o.z", Request{Op: OpShow})); !strings.Contains(got, "not an endpoint of range") {
+	if got := errorOf(r.ask(t, "q.o.z", Request{Op: OpShow})); !strings.Contains(got, "not an endpoint under address prefix") {
 		t.Errorf("outside the range: %q", got)
 	}
 	// An address is never taken from the body.

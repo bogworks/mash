@@ -1,4 +1,4 @@
 refused: nothing would change
-  [range] range: the document is for range bar and the selected range is foo
-  [validate] sender "foo.c.core": range part "foo" is not the account's range "bar"
-  [validate] sender "foo.c.lead": range part "foo" is not the account's range "bar"
+  [range] range: the document is for address prefix bar and the selected address prefix is foo
+  [validate] sender "foo.c.core": address prefix "foo" is not the account's address prefix "bar"
+  [validate] sender "foo.c.lead": address prefix "foo" is not the account's address prefix "bar"

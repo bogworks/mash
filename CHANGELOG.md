@@ -8,11 +8,13 @@ All notable user-facing changes to mash are recorded here. The format follows [K
 
 ### Summary
 
-**mash 0.5.7 fixes one thing: `mashctl` can now set up mash on a NATS server that requires users to be signed by an account signing key (`strict_signing_key_usage: true`).** Nothing changes for other servers except that revoking an endpoint no longer stops at an account signing key `mashctl` did not make.
+**mash 0.5.7 fixes one thing: `mashctl` can now set up mash on a NATS server that requires users to be signed by an account signing key.** If your server does not set `strict_signing_key_usage`, you need do nothing: the one change you may notice is that revoking an endpoint no longer stops at an account signing key that `mashctl` did not make.
 
 ### Upgrading
 
-Install `mash` and `mashctl` from the same release. On a strict server, add `signing_key` (a 0600 file with one of the account's signing seeds) to the setup file, run `mashctl init --config FILE` again, then reissue the endpoints made with 0.5.6. See the [release notes](docs/release-notes/0.5.7.md).
+Install `mash` and `mashctl` from the same release, as before. Nothing in the setup file, the key store or your endpoints needs to change.
+
+**If your NATS operator has `strict_signing_key_usage: true`,** 0.5.6 could not set mash up: `mashctl endpoint create` made users the server refused, and `mash doctor` showed the sign-in failing with "the server refused these credentials". To fix it, add one key to your setup file, `signing_key`, pointing at a 0600 file that holds one of the account's signing seeds, then run `mashctl init --config FILE` again. `init` checks that the key is one of the account JWT's signing keys. Then reissue the endpoints you made with 0.5.6 (`mashctl endpoint reissue`); users already signed with the account's identity key stay refused until you do. Keep `account_key` as it is: it is still the account's identity seed.
 
 ### Added
 
@@ -21,6 +23,9 @@ Install `mash` and `mashctl` from the same release. On a strict server, add `sig
 ### Fixed
 
 - `endpoint delete` and `endpoint reissue` carry a plain signing key in the account JWT that `mashctl` did not create, and revoke users signed by one, instead of refusing ([#1239](https://github.com/bogworks/mash/issues/1239)).
+
+Known issues: 49 known issues, listed in the [release notes](https://github.com/bogworks/mash/blob/v0.5.7/docs/release-notes/0.5.7.md#known-issues)
+Links: [Release notes](https://github.com/bogworks/mash/blob/v0.5.7/docs/release-notes/0.5.7.md), [full changes](https://github.com/bogworks/mash/compare/v0.5.6...v0.5.7), [verify your download](https://github.com/bogworks/mash/blob/v0.5.7/docs/install.md#verify-what-you-download)
 
 ## [0.5.6] - 2026-11-21
 

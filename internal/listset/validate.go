@@ -49,7 +49,7 @@ func parseGroup(s string) (rng, owner, reason string) {
 	case 3:
 		return "", "", "a switch is set for an owner group, never for a single sender"
 	default:
-		return "", "", "a group is range.owner, two parts"
+		return "", "", "a group is two parts joined by a dot"
 	}
 }
 
@@ -89,7 +89,7 @@ func validate(ls ListSet) (*model, error) {
 	bad := func(entry, format string, a ...any) { ps = append(ps, Problem{entry, fmt.Sprintf(format, a...)}) }
 
 	if _, err := sap.NewAddress(ls.Range, "a", "a"); err != nil {
-		bad("range "+quote(ls.Range), "%s", strings.TrimPrefix(err.Error(), "sap: "))
+		bad("address prefix "+quote(ls.Range), "%s", strings.TrimPrefix(err.Error(), "sap: "))
 	}
 	m := &model{rng: ls.Range, switches: map[string]map[Verb]Switch{}}
 
@@ -100,7 +100,7 @@ func validate(ls ListSet) (*model, error) {
 		if !ok {
 			bad(entry, "%s", reason)
 		} else if rng != ls.Range {
-			bad(entry, "range part %q is not the account's range %q", rng, ls.Range)
+			bad(entry, "address prefix %q is not the account's address prefix %q", rng, ls.Range)
 			ok = false
 		}
 		if !e.Verb.valid() {
@@ -145,7 +145,7 @@ func validate(ls ListSet) (*model, error) {
 			continue
 		}
 		if addr.rng != ls.Range {
-			bad("sender "+quote(sl.Sender), "range part %q is not the account's range %q", addr.rng, ls.Range)
+			bad("sender "+quote(sl.Sender), "address prefix %q is not the account's address prefix %q", addr.rng, ls.Range)
 			continue
 		}
 		if seen[addr.String()] {
@@ -203,7 +203,7 @@ func parseList(in []string, kind string, owner address, rng string, bad func(str
 		case reason != "":
 			bad(entry, "%s", reason)
 		case a.rng != rng:
-			bad(entry, "range part %q is not the account's range %q", a.rng, rng)
+			bad(entry, "address prefix %q is not the account's address prefix %q", a.rng, rng)
 		case slices.Contains(out, a):
 			bad(entry, "listed twice")
 		default:

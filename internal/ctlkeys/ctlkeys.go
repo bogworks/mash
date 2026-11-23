@@ -541,7 +541,7 @@ func (a *Authority) groupsPath() string { return filepath.Join(a.dir, groupsDir)
 // keys; with create it generates and writes one if absent. It never overwrites.
 func (a *Authority) GroupKey(group string, create bool) (nkeys.KeyPair, error) {
 	if !validGroup(group) {
-		return nil, fmt.Errorf("mashctl: invalid owner group %q: want range.owner, each part lower-case letters, digits and hyphens, up to 32 characters", group)
+		return nil, fmt.Errorf("mashctl: invalid owner group %q: want two parts joined by a dot, each lower-case letters, digits and hyphens, up to 32 characters", group)
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()

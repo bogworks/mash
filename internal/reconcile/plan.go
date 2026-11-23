@@ -210,7 +210,7 @@ func ExpectedSigners(groups []string, held map[string]string) (map[string]string
 	for _, g := range groups {
 		k := held[g]
 		if k == "" {
-			return nil, fmt.Errorf("the key store holds no signing key for group %s: run the reconcile where the range's owner group keys are (the account JWT is not used to guess which key is mash's)", g)
+			return nil, fmt.Errorf("the key store holds no signing key for group %s: run the reconcile where the list set's owner group keys are (the account JWT is not used to guess which key is mash's)", g)
 		}
 		out[g] = k
 	}
@@ -223,7 +223,7 @@ func ExpectedSigners(groups []string, held map[string]string) (map[string]string
 // rebuilt from the list set, so one the list set no longer names is not in it. rng is the list set's range.
 func OtherRangesKept(claims *jwt.AccountClaims, held map[string]string, rng string) (map[string]string, error) {
 	if rng == "" {
-		return nil, errors.New("no range: cannot tell this range's signing keys from another range's (the list set names none)")
+		return nil, errors.New("no address prefix: cannot tell this list set's signing keys from those of another (the list set names none)")
 	}
 	out := map[string]string{}
 	if claims == nil {

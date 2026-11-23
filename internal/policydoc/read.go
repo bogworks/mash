@@ -426,7 +426,7 @@ func Diff(ctx context.Context, r Reader, file []byte, rng string, servers []list
 	var pre []listset.Refusal
 	if rng != "" && next.Range != rng {
 		pre = append(pre, listset.Refusal{Stage: StageRange, Entry: "range",
-			Reason: fmt.Sprintf("the document is for range %s and the selected range is %s", next.Range, rng)})
+			Reason: fmt.Sprintf("the document is for address prefix %s and the selected address prefix is %s", next.Range, rng)})
 	}
 	if next.BaseGeneration != gen {
 		pre = append(pre, listset.Refusal{Stage: StageBase, Entry: "base_generation",

@@ -116,7 +116,7 @@ func (e Entry) validate() error {
 		return errors.New("host is empty or has whitespace")
 	}
 	if r, o, ok := strings.Cut(e.Group, "."); !ok || r == "" || o == "" || strings.Contains(o, ".") {
-		return fmt.Errorf("group %q is not range.owner", e.Group)
+		return fmt.Errorf("group %q is not two parts joined by a dot", e.Group)
 	}
 	if !nkeys.IsValidPublicUserKey(e.RequesterKey) {
 		return fmt.Errorf("requester_key %q is not a NATS user public key", e.RequesterKey)
