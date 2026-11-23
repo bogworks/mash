@@ -20,9 +20,9 @@
 #
 # One exclusive lifecycle lock (the file DIR/.lock, holding the pid) is held
 # across the whole of create, --start, --stop and --remove, so they cannot
-# overlap; a lock whose pid is gone is taken over.
-# Two runs that take over the same stale lock at the same instant can both
-# win; that is accepted for a same-user script.
+# overlap; a lock whose pid is gone is taken over, under a second exclusive
+# file (DIR/.lock.recover), so only one run can take it over. If a run is
+# killed in that tiny window, the next run stops and names the file to remove.
 #
 # Portability: file owner and mode come from GNU stat (-c) or BSD stat (-f),
 # found by trying `stat -c %u /` once; process checks use /proc on Linux and
@@ -401,7 +401,12 @@ start_server() { # needs PORT
 
 # ---------------------------------------------------------------- lock
 LOCKED=0
+RLOCKED=0
 release_lock() {
+    if [ "$RLOCKED" = 1 ]; then
+        RLOCKED=0
+        [ "$(cat "$DIR/.lock.recover" 2>/dev/null || true)" != "$$" ] || rm -f "$DIR/.lock.recover" 2>/dev/null || true
+    fi
     if [ "$LOCKED" = 1 ]; then
         LOCKED=0
         [ "$(cat "$DIR/.lock" 2>/dev/null || true)" != "$$" ] || rm -f "$DIR/.lock" 2>/dev/null || true
@@ -413,24 +418,90 @@ busy() { die 1 "another run is using $DIR (pid ${1:-?})" "wait for it to finish,
 # which is atomic and exclusive on every system (mkdir is not, in uutils
 # coreutils on Ubuntu 26.04)
 lock_make() { ( set -C; printf '%s\n' "$$" >"$DIR/.lock" ) 2>/dev/null; }
-lock_dir() {
-    if ! lock_make; then
-        _lp=$(cat "$DIR/.lock" 2>/dev/null || true)
-        if [ -z "$_lp" ]; then
-            sleep 1
-            _lp=$(cat "$DIR/.lock" 2>/dev/null || true)
+# a pid read from a lock file: digits only, else empty
+lock_pid() {
+    _v=$(cat "$1" 2>/dev/null || true)
+    case $_v in *[!0-9]*) _v='' ;; esac
+    printf '%s' "$_v"
+}
+# what DIR/.lock is: its pid, "dir" for an old-format lock folder (its own
+# stale marker), or empty when it is missing, empty or unreadable
+lock_state() {
+    if [ -d "$1" ] && [ ! -L "$1" ]; then printf 'dir'; else lock_pid "$1"; fi
+}
+# take over a stale DIR/.lock (its state, $1, is a dead pid or "dir") under a
+# second lock, DIR/.lock.recover, so that only one run can do it. Returns 0
+# with the lock taken, or 1 when .lock is not (any more) the stale one the
+# caller read: the caller looks at .lock again. An empty or missing .lock is
+# never removed: a live run may have taken it since it was read. The marker
+# "empty" (an empty or non-numeric .lock that stayed so after a wait) only
+# ever ends in the left-over error, naming the file for the user to remove.
+lock_recover() {
+    _stale=$1
+    [ -n "$_stale" ] || return 1
+    # set the flag first: release_lock removes the file only if it holds $$
+    RLOCKED=1
+    if ! ( set -C; printf '%s\n' "$$" >"$DIR/.lock.recover" ) 2>/dev/null; then
+        RLOCKED=0
+        _rp=$(lock_pid "$DIR/.lock.recover")
+        if [ -n "$_rp" ] && kill -0 "$_rp" 2>/dev/null; then busy "$_rp"; fi
+        sleep 1
+        # a file that still holds the same dead pid (or is still empty) after
+        # the wait was left by a stopped run; anything else is a finished
+        # recovery by another run
+        if [ -e "$DIR/.lock.recover" ] && [ "$(lock_pid "$DIR/.lock.recover")" = "$_rp" ]; then
+            die 1 "$DIR/.lock.recover is left over from a run that was stopped while it took over a stale lock" \
+                "remove that one file ($DIR/.lock.recover), then run $SELF again"
         fi
-        case $_lp in *[!0-9]*) _lp='' ;; esac
-        if [ -n "$_lp" ] && kill -0 "$_lp" 2>/dev/null; then busy "$_lp"; fi
-        # stale: its run is gone; take over by recorded path
-        if [ -d "$DIR/.lock" ] && [ ! -L "$DIR/.lock" ]; then
-            rmdir "$DIR/.lock" 2>/dev/null || busy "$_lp"
-        else
-            rm -f "$DIR/.lock" 2>/dev/null || busy "$_lp"
-        fi
-        lock_make || busy "$_lp"
+        return 1
     fi
+    # re-read under the recover lock: remove .lock only if it is still the stale one
+    if [ "$_stale" = empty ]; then
+        # a run that took .lock may still be about to write its pid: wait, then read again
+        sleep 1
+    fi
+    _cur=$(lock_state "$DIR/.lock")
+    if [ "$_stale" = empty ]; then
+        if [ -f "$DIR/.lock" ] && [ ! -L "$DIR/.lock" ] && [ -z "$_cur" ]; then
+            die 1 "$DIR/.lock is left over from a run that was stopped while it took the lock" \
+                "remove that one file ($DIR/.lock), then run $SELF again"
+        fi
+        release_lock; return 1
+    fi
+    if [ "$_cur" != "$_stale" ]; then release_lock; return 1; fi
+    # the stale pid may have been reused by a live run since it was read
+    [ "$_cur" = dir ] || ! kill -0 "$_cur" 2>/dev/null || busy "$_cur"
+    if [ "$_cur" = dir ]; then
+        rmdir "$DIR/.lock" 2>/dev/null || busy "$(lock_pid "$DIR/.lock")"
+    else
+        rm -f "$DIR/.lock" 2>/dev/null || busy "$(lock_pid "$DIR/.lock")"
+    fi
+    lock_make || busy "$(lock_pid "$DIR/.lock")"
     LOCKED=1
+    [ "$(cat "$DIR/.lock.recover" 2>/dev/null || true)" != "$$" ] || rm -f "$DIR/.lock.recover" 2>/dev/null || true
+    RLOCKED=0
+}
+lock_dir() {
+    _try=0
+    while [ "$_try" -lt 3 ]; do
+        _try=$((_try + 1))
+        lock_make && { LOCKED=1; return 0; }
+        _lp=$(lock_state "$DIR/.lock")
+        if [ -z "$_lp" ]; then
+            # "empty" only if .lock existed (a regular file) and was empty on both
+            # reads; if it was missing on either, look again (lock_make retries)
+            _e1=0; [ -f "$DIR/.lock" ] && [ ! -L "$DIR/.lock" ] && _e1=1
+            sleep 1
+            _lp=$(lock_state "$DIR/.lock")
+            if [ -z "$_lp" ]; then
+                if [ "$_e1" = 1 ] && [ -f "$DIR/.lock" ] && [ ! -L "$DIR/.lock" ]; then _lp=empty; else continue; fi
+            fi
+        fi
+        if [ "$_lp" != dir ] && [ "$_lp" != empty ] && [ -n "$_lp" ] && kill -0 "$_lp" 2>/dev/null; then busy "$_lp"; fi
+        # stale: its run is gone; take over under .lock.recover
+        lock_recover "$_lp" && return 0
+    done
+    busy "$(lock_pid "$DIR/.lock")"
 }
 lock_mode() { # for --start, --stop, --remove
     trap release_lock EXIT
