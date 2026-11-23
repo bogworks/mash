@@ -628,6 +628,17 @@ func specCommand(t *testing.T, name string) (map[string]any, map[string]any) {
 	return nil, nil
 }
 
+// sendCasesComparedInCmdMash are the send x-output cases that are the process's error cases (stderr, exit code). This package
+// cannot produce them; cmd/mash compares them, in the file named. An unlisted unhandled case still fails.
+var sendCasesComparedInCmdMash = map[string]string{
+	"An address in another form":                "cmd/mash/send_cmd_test.go",
+	"Nothing arrives on standard input":         "cmd/mash/prerun_errors_test.go",
+	"No such endpoint":                          "cmd/mash/send_cmd_test.go",
+	"The recipient is suspended or was deleted": "cmd/mash/spec_failures_test.go (TestSendToSuspendedMatchesSpec)",
+	"No credentials here":                       "cmd/mash/spec_failures_test.go (TestMissingCredsMatchesSpec, reads the spec text)",
+	"Not signed in":                             "cmd/mash/frame_auth_test.go",
+}
+
 // The descriptions, examples, tool description and objects are the specification's, word for word.
 func TestMatchesSpec(t *testing.T) {
 	norm := func(s string) string { return strings.Join(strings.Fields(s), " ") }
@@ -698,7 +709,7 @@ func TestMatchesSpec(t *testing.T) {
 			r = cmds.SendResult{To: "acme.demo.alice", Number: 42, Kind: "task"}
 		case "Sent, urgent, with a kind":
 			r = cmds.SendResult{To: "acme.demo.alice", Number: 43, Kind: "question", Urgent: true}
-		case "With --verbose":
+		case "With --detail":
 			r = cmds.SendResult{To: "acme.demo.alice", Number: 42, Kind: "task"}
 			verbose = true
 		case "A reply marked question that asks nothing":
@@ -706,6 +717,10 @@ func TestMatchesSpec(t *testing.T) {
 		case "Repeated --id":
 			r = cmds.SendResult{To: "acme.demo.alice", Number: 42, Kind: "task", Duplicate: true}
 		default:
+			if _, ok := sendCasesComparedInCmdMash[c["case"].(string)]; ok {
+				continue
+			}
+			t.Errorf("send: no test handles the spec case %q", c["case"])
 			continue
 		}
 		if got := r.Text(cmdcore.Opts{Detail: verbose}); got != c["text"] {
