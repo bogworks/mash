@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -136,7 +138,7 @@ func TestMeasureLatencies_currentTree(t *testing.T) {
 	if env["MASH_SPOOL_FROM_START"] != "1" {
 		t.Fatalf("the plugin's env block is %v: the measurement would not run serve the way the plugin does", env)
 	}
-	got, err := measureLatencies(context.Background(), bin, spec, true, true)
+	got, err := measureLatencies(context.Background(), bin, spec, true, true, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -377,11 +379,54 @@ func TestBaselinePassesWhenPreviousOnline(t *testing.T) {
 	}
 }
 
-func TestEndpointNameEnvHasLegacyVariables(t *testing.T) {
-	env := strings.Join(append(endpointNameEnv("alice", "bob"), legacyConnEnv("nats://x:1")...), "\n")
-	for _, want := range []string{"MASH_URL=nats://x:1", "MASH_INSECURE_PLAINTEXT=1", "MASH_ENDPOINT=alice." + labGroup + ".bob", "MASH_NAME=bob", "MASH_OWNER=alice", "MASH_GROUP=" + labGroup} {
+func TestLabEnvLegacyHasLegacyVariables(t *testing.T) {
+	env := strings.Join(labConnEnv("alice", "bob", "nats://x:1", "/c", true), "\n")
+	for _, want := range []string{"MASH_URL=nats://x:1", "MASH_INSECURE_PLAINTEXT=1", "MASH_ENDPOINT=alice." + labGroup + ".bob", "MASH_NAME=bob", "MASH_OWNER=alice", "MASH_GROUP=" + labGroup, "MASH_SERVER=nats://x:1", "MASH_CREDS=/c"} {
 		if !strings.Contains(env, want) {
 			t.Errorf("env lacks %q:\n%s", want, env)
+		}
+	}
+}
+
+func TestLabEnvCurrentHasNoLegacyVariables(t *testing.T) {
+	env := labConnEnv("alice", "bob", "nats://x:1", "/c", false)
+	for _, kv := range env {
+		for _, bad := range []string{"MASH_INSECURE_PLAINTEXT", "MASH_URL", "MASH_NAME", "MASH_OWNER", "MASH_GROUP"} {
+			if strings.HasPrefix(kv, bad+"=") {
+				t.Errorf("a current binary gets %s", kv)
+			}
+		}
+	}
+	joined := strings.Join(env, "\n")
+	for _, want := range []string{"MASH_ENDPOINT=alice." + labGroup + ".bob", "MASH_SERVER=nats://x:1", "MASH_CREDS=/c", "MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("env lacks %q:\n%s", want, joined)
+		}
+	}
+}
+
+func TestLatencyStepLegacyOnlyForPreviousBelowEndpointEnvSince(t *testing.T) {
+	for tag, want := range map[string]bool{"v0.5.5": true, "v0.5.6": false, "v0.5.7": false} {
+		var mu sync.Mutex
+		got := map[string][]bool{}
+		fake := func(_ context.Context, bin string, _ serveSpec, _, _, legacy bool) (latencies, error) {
+			mu.Lock()
+			got[bin] = append(got[bin], legacy)
+			mu.Unlock()
+			return latencies{Fresh: 100 * time.Millisecond, FreshOK: true}, nil
+		}
+		b := &binaries{cand: "cand", prev: "prev", prevTag: tag, prevSpec: &serveSpec{Args: []string{"serve"}}}
+		_ = latencyStep(context.Background(), Options{measure: fake, Out: io.Discard}, b)
+		if len(got["cand"]) != 2 {
+			t.Errorf("%s: candidate measured %v, want two calls", tag, got["cand"])
+		}
+		for _, l := range got["cand"] {
+			if l {
+				t.Errorf("%s: the candidate got legacy=true", tag)
+			}
+		}
+		if g := got["prev"]; len(g) != 1 || g[0] != want {
+			t.Errorf("%s: previous got legacy %v, want %v", tag, g, want)
 		}
 	}
 }
