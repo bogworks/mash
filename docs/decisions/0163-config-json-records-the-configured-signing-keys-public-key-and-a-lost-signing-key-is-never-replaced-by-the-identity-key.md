@@ -53,7 +53,10 @@ Chosen option: the second.
 * `cmd/mashctl/signing_lost_both_test.go`: both files gone with the field refuses `endpoint create` and records nothing; a
   configuration without the field still signs with the identity key; a rerun restores; a different value is refused.
 * `internal/ctlkeys` tests of `Signing()` with an expectation: both gone, one gone, a different stored key.
-* Tests that revoke, apply and policy refuse when both files are gone, and that every `ctlkeys` open site sets the expectation.
+* `cmd/mashctl` `TestEndpointDeleteSigningLostBothRefuses`, `internal/apply` `TestAccountFindingsRefusesWhenBothSigningFilesAreGone` and
+  `internal/policyserve` `TestSigningPubRefusesWhenBothSigningFilesAreGone`: delete, apply and the policy applier refuse when both files are gone.
+* `internal/ctlkeys` `TestSigningRefusalTypes`: each refusal has its own type, is an `ErrSigningKeyLost`, names the key folder and gives the fix as a hint line.
+* The expected key is a required parameter of `ctlkeys.Open`, so a call site cannot omit it: the compiler enforces it.
 
 ## Pros and Cons of the Options
 

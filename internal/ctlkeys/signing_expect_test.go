@@ -105,3 +105,94 @@ func TestOpenRefusesAMalformedExpectedSigningKey(t *testing.T) {
 		}
 	}
 }
+
+// Each refusal has its own type; each is an ErrSigningKeyLost, names the key folder and gives the fix as a hint line.
+func TestSigningRefusalTypes(t *testing.T) {
+	src := t.TempDir()
+	p1, pub1 := signingSeed(t, src, "s1")
+	p2, pub2 := signingSeed(t, src, "s2")
+	cases := []struct {
+		name  string
+		setup func(t *testing.T, dir string) (expect string)
+		check func(t *testing.T, err error)
+	}{
+		{"both missing", func(t *testing.T, dir string) string {
+			rm(t, dir, "signing.nk", "signing.pub")
+			return pub1
+		}, func(t *testing.T, err error) {
+			var e *SigningLostBothError
+			if !errors.As(err, &e) || e.Pub != pub1 {
+				t.Fatalf("type: %T", err)
+			}
+		}},
+		{"signing.pub missing", func(t *testing.T, dir string) string {
+			rm(t, dir, "signing.pub")
+			return pub1
+		}, func(t *testing.T, err error) {
+			var e *SigningPubMissingError
+			if !errors.As(err, &e) || e.Pub != pub1 {
+				t.Fatalf("type: %T", err)
+			}
+		}},
+		{"record differs from config.json", func(t *testing.T, dir string) string { return pub2 }, func(t *testing.T, err error) {
+			var e *SigningRecordMismatchError
+			if !errors.As(err, &e) || e.Expected != pub2 || e.Recorded != pub1 {
+				t.Fatalf("type: %T", err)
+			}
+		}},
+		{"signing.nk differs from the record", func(t *testing.T, dir string) string {
+			b, _ := os.ReadFile(p2)
+			if err := os.WriteFile(filepath.Join(dir, "signing.nk"), b, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			return pub1
+		}, func(t *testing.T, err error) {
+			var e *SigningKeyMismatchError
+			if !errors.As(err, &e) || e.Held != pub2 || e.Want != pub1 {
+				t.Fatalf("type: %T", err)
+			}
+		}},
+		{"signing.nk differs from config.json, no record", func(t *testing.T, dir string) string {
+			rm(t, dir, "signing.pub")
+			return pub2
+		}, func(t *testing.T, err error) {
+			var e *SigningKeyMismatchError
+			if !errors.As(err, &e) || e.Held != pub1 || e.Want != pub2 {
+				t.Fatalf("type: %T", err)
+			}
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			a, dir := newStore(t)
+			if _, _, err := a.ImportSigning(p1); err != nil {
+				t.Fatal(err)
+			}
+			exp := c.setup(t, dir)
+			ks, err := Open(dir, exp)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, _, err = ks.Signing()
+			if err == nil || !errors.Is(err, ErrSigningKeyLost) || errors.Is(err, ErrNoSigningKey) {
+				t.Fatalf("err = %v", err)
+			}
+			c.check(t, err)
+			msg := err.Error()
+			lines := strings.Split(msg, "\n")
+			if !strings.Contains(msg, dir) || len(lines) != 2 || !strings.HasPrefix(lines[1], "  hint: ") {
+				t.Errorf("text lacks the folder or the hint line: %q", msg)
+			}
+			t.Log(strings.ReplaceAll(msg, dir, "<dir>"))
+		})
+	}
+}
+
+func rm(t *testing.T, dir string, names ...string) {
+	t.Helper()
+	for _, n := range names {
+		if err := os.Remove(filepath.Join(dir, n)); err != nil {
+			t.Fatal(err)
+		}
+	}
+}

@@ -41,14 +41,48 @@ var (
 // SigningLostBothError is what Signing returns when config.json records a configured signing key (signing_key_pub)
 // and the key store holds neither signing.nk nor signing.pub. It is an ErrSigningKeyLost: the identity key must not
 // stand in for the signing key.
-type SigningLostBothError struct{ Pub string }
+type SigningLostBothError struct{ Pub, Dir string }
 
 func (e *SigningLostBothError) Error() string {
-	return fmt.Sprintf("mashctl: signing_key was configured (public key %s in config.json) but signing.nk and signing.pub are both missing from the key store: run `mashctl init --config <file>` with the same signing_key", e.Pub)
+	return fmt.Sprintf("mashctl: signing.nk and signing.pub are both missing from the key store %s (config.json records signing_key_pub %s)\n  hint: run `mashctl init --config <file>` with the same signing_key", e.Dir, e.Pub)
 }
 
 // Is makes the error an ErrSigningKeyLost.
 func (e *SigningLostBothError) Is(target error) bool { return target == ErrSigningKeyLost }
+
+// SigningPubMissingError is what Signing returns when signing.nk is in the key store and signing.pub is gone. Pub is
+// the key signing.nk holds. It is an ErrSigningKeyLost.
+type SigningPubMissingError struct{ Pub, Dir string }
+
+func (e *SigningPubMissingError) Error() string {
+	return fmt.Sprintf("mashctl: signing.pub is missing from the key store %s (signing.nk is there and holds %s)\n  hint: run `mashctl init --config <file>` with the same signing_key to record it again", e.Dir, e.Pub)
+}
+
+// Is makes the error an ErrSigningKeyLost.
+func (e *SigningPubMissingError) Is(target error) bool { return target == ErrSigningKeyLost }
+
+// SigningRecordMismatchError is what Signing returns when signing.pub records another key than config.json's
+// signing_key_pub. It is an ErrSigningKeyLost.
+type SigningRecordMismatchError struct{ Expected, Recorded, Dir string }
+
+func (e *SigningRecordMismatchError) Error() string {
+	return fmt.Sprintf("mashctl: signing.pub in the key store %s records signing key %s, but config.json records signing_key_pub %s\n  hint: put back the signing.pub and signing.nk of key %s, or point MASH_KEYS_DIR at a key folder that holds them", e.Dir, e.Recorded, e.Expected, e.Expected)
+}
+
+// Is makes the error an ErrSigningKeyLost.
+func (e *SigningRecordMismatchError) Is(target error) bool { return target == ErrSigningKeyLost }
+
+// SigningKeyMismatchError is what Signing returns when signing.nk holds another key than the one wanted. Want is the
+// key signing.pub records, or, when signing.pub is gone, the one config.json records; WantFrom names which. It is an
+// ErrSigningKeyLost.
+type SigningKeyMismatchError struct{ Held, Want, WantFrom, Dir string }
+
+func (e *SigningKeyMismatchError) Error() string {
+	return fmt.Sprintf("mashctl: signing.nk in the key store %s holds signing key %s, but %s records %s\n  hint: restore the signing.nk of key %s", e.Dir, e.Held, e.WantFrom, e.Want, e.Want)
+}
+
+// Is makes the error an ErrSigningKeyLost.
+func (e *SigningKeyMismatchError) Is(target error) bool { return target == ErrSigningKeyLost }
 
 const (
 	accountFile  = "account.nk"
@@ -499,20 +533,20 @@ func (a *Authority) Signing() (nkeys.KeyPair, string, error) {
 	exp := a.expectSigning
 	switch {
 	case exp != "" && rec == "" && errors.Is(err, ErrNoSigningKey):
-		return nil, "", &SigningLostBothError{Pub: exp}
+		return nil, "", &SigningLostBothError{Pub: exp, Dir: a.dir}
 	case exp != "" && rec == "" && err == nil:
 		// signing.nk is here and signing.pub is gone: the record is part of the configured state, so it is not trusted
 		// until init (with the same signing_key) writes it again.
 		kp.Wipe()
 		if pub != exp {
-			return nil, "", fmt.Errorf("%w (config.json records signing_key_pub %s, signing.nk holds %s and signing.pub is missing)", ErrSigningKeyLost, exp, pub)
+			return nil, "", &SigningKeyMismatchError{Held: pub, Want: exp, WantFrom: "config.json (signing_key_pub)", Dir: a.dir}
 		}
-		return nil, "", fmt.Errorf("%w (signing.pub is missing: run `mashctl init --config <file>` with the same signing_key to record it again)", ErrSigningKeyLost)
+		return nil, "", &SigningPubMissingError{Pub: pub, Dir: a.dir}
 	case exp != "" && rec != "" && rec != exp:
 		if kp != nil {
 			kp.Wipe()
 		}
-		return nil, "", fmt.Errorf("%w (config.json records signing_key_pub %s, signing.pub records %s)", ErrSigningKeyLost, exp, rec)
+		return nil, "", &SigningRecordMismatchError{Expected: exp, Recorded: rec, Dir: a.dir}
 	case rec == "":
 		return kp, pub, err
 	case err != nil:
@@ -523,7 +557,7 @@ func (a *Authority) Signing() (nkeys.KeyPair, string, error) {
 		return nil, "", fmt.Errorf("%w (%v; signing.pub records %s)", ErrSigningKeyLost, err, rec)
 	case pub != rec:
 		kp.Wipe()
-		return nil, "", fmt.Errorf("%w (signing.nk holds %s, the record says %s)", ErrSigningKeyLost, pub, rec)
+		return nil, "", &SigningKeyMismatchError{Held: pub, Want: rec, WantFrom: "signing.pub", Dir: a.dir}
 	}
 	return kp, pub, nil
 }

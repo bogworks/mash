@@ -497,8 +497,9 @@ func doInit(setupPath string, dry, jsonOut bool, env func(string) string, lookup
 			return cliframe.Failf("signing_key changed while init ran: the key imported is not the one that was checked; running init again is safe")
 		}
 	}
-	// The public key of the signing key goes into config.json right after the key is imported, not last: an init that
-	// stops after the import must not leave a key store whose signing key mashctl cannot tell from a lost one.
+	// A config.json that already exists gets signing_key_pub right after the key is imported: an init that stops after
+	// the import must not leave a key store whose signing key mashctl cannot tell from a lost one. A new config.json is
+	// written last, with everything else, so a config.json that exists means init got that far.
 	cfgWritten := false
 	writeConfig := func() error {
 		if needCfg {
@@ -513,7 +514,7 @@ func doInit(setupPath string, dry, jsonOut bool, env func(string) string, lookup
 		}
 		return nil
 	}
-	if st.recordPub() != "" && (needCfg || st.cfgNeedSignPub) {
+	if st.recordPub() != "" && !needCfg && st.cfgNeedSignPub {
 		if err := writeConfig(); err != nil {
 			return failErr(err)
 		}
@@ -746,20 +747,31 @@ func checkConfigFile(st *initState, cfg config.Config, sf setupFile) error {
 
 // addSigningPub completes an existing config.json with signing_key_pub (the public key only). It keeps the file's bytes
 // and layout: the one member is inserted before the closing brace, in the indentation of the last member. The file is
-// then replaced by a 0600 temp file in the same folder renamed over it, and the folder is synced. A symbolic link is
-// refused, a stored value that is not an account public key is an error, and a different stored key is never replaced.
+// then replaced by a 0600 temp file in the same folder renamed over it (a rename replaces whatever is at the path and
+// never follows a link), and the folder is synced. The file is opened without following a link and checked on the open
+// descriptor, so a link swapped in after the check is not read. A symbolic link is refused, a stored value that is not
+// an account public key is an error, and a different stored key is never replaced.
 func addSigningPub(path, pub string) error {
 	if !nkeys.IsValidPublicAccountKey(pub) {
 		return fmt.Errorf("signing key %q is not an account public key", pub)
 	}
-	fi, err := os.Lstat(path)
+	notPlain := fmt.Errorf("%s is not a plain file (a symbolic link?): refusing to rewrite it. Replace it with the file itself", path)
+	f, err := config.OpenNoFollow(path, os.O_RDONLY, 0)
+	if err != nil {
+		if config.IsSymlinkRefusal(err) {
+			return notPlain
+		}
+		return err
+	}
+	defer f.Close()
+	fi, err := f.Stat()
 	if err != nil {
 		return err
 	}
-	if fi.Mode()&fs.ModeSymlink != 0 || !fi.Mode().IsRegular() {
-		return fmt.Errorf("%s is not a plain file (a symbolic link?): refusing to rewrite it. Replace it with the file itself", path)
+	if !fi.Mode().IsRegular() {
+		return notPlain
 	}
-	raw, err := os.ReadFile(path)
+	raw, err := io.ReadAll(f)
 	if err != nil {
 		return err
 	}
@@ -988,6 +1000,11 @@ func checkStore(ks *ctlkeys.Authority, st *initState) error {
 			// A seed with no record is an init that stopped between the two writes: ImportSigning completes it.
 			st.haveSign = rec == pub
 		} else {
+			if rec == "" {
+				// signing.nk without its record and no signing_key to restore it: recording the key in config.json
+				// would make every later command refuse, so init refuses now, before any write.
+				return fmt.Errorf("%w (nothing was changed)", &ctlkeys.SigningPubMissingError{Pub: pub, Dir: st.keyFolder})
+			}
 			if cfgPub != "" && pub != cfgPub {
 				return cliframe.Failf("the key folder %s holds signing key %s but config.json records signing_key_pub %s; nothing was changed: give the seed of the recorded key as signing_key, or use a new key folder (set MASH_KEYS_DIR)", st.keyFolder, pub, cfgPub).WithWrap().
 					WithHint("MASH_KEYS_DIR=<a new folder> mashctl init --config <file>")

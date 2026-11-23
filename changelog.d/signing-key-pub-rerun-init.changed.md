@@ -1,0 +1,1 @@
+**If you set signing_key on 0.5.7, run `mashctl init --config <file>` once more after upgrading.** mashctl now records the signing key's public key in config.json (signing_key_pub). With it, a key folder that loses its signing files is refused with the fix named, and never falls back to signing with the account's identity key. Without it nothing changes.

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -68,7 +69,7 @@ func TestEndpointCreateSigningLostBothRefuses(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("create: exit %d\n%s\n%s", code, out, errb)
 	}
-	for _, m := range []string{"signing_key was configured", skPub, "both missing", "mashctl init --config <file>", "nothing was changed"} {
+	for _, m := range []string{skPub, "both missing", "mashctl init --config <file>", "nothing was changed"} {
 		if !strings.Contains(errb, m) {
 			t.Errorf("stderr lacks %q:\n%s", m, errb)
 		}
@@ -148,7 +149,7 @@ func TestInitSigningLostBothNeedsTheKey(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	a.refuses(1, []string{"signing_key was configured", "both missing", "nothing was changed"}, map[string]any{"signing_key": nil})
+	a.refuses(1, []string{"both missing", "nothing was changed"}, map[string]any{"signing_key": nil})
 }
 
 // config.json records a different signing_key_pub than the setup file's signing_key: init refuses and changes
@@ -196,7 +197,7 @@ func TestEndpointDeleteSigningLostBothRefuses(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("delete: exit %d\n%s\n%s", code, out, errb)
 	}
-	for _, m := range []string{"signing_key was configured", skPub, "both missing", "mashctl init --config <file>"} {
+	for _, m := range []string{skPub, "both missing", "mashctl init --config <file>"} {
 		if !strings.Contains(errb, m) {
 			t.Errorf("stderr lacks %q:\n%s", m, errb)
 		}
@@ -275,10 +276,42 @@ func TestInitRefusesAStoredKeyThatIsNotTheRecordedOne(t *testing.T) {
 	}
 }
 
-// init that stops after the key import has already written the public key into config.json: the key store with
-// signing.nk and signing.pub removed then refuses create instead of signing with the identity key, and a rerun
-// finishes.
-func TestInterruptedInitHasRecordedTheSigningKey(t *testing.T) {
+// A rerun without signing_key, signing.nk in the key store and signing.pub gone: init refuses before any write and
+// names the same fix as the key store's own refusal. Without it init would report success and every later command
+// would refuse. Both with a config.json that records the field and with one that does not (written before 0.5.8).
+func TestInitWithoutSigningKeyRefusesWhenSigningPubIsGone(t *testing.T) {
+	for _, withField := range []bool{true, false} {
+		name := "config records the field"
+		if !withField {
+			name = "config without the field"
+		}
+		t.Run(name, func(t *testing.T) {
+			e, sk, osk := strictEnv(t)
+			skPub, _ := sk.PublicKey()
+			a := initStrict(t, e, sk, osk, true)
+			keysDir := a.env["MASH_KEYS_DIR"]
+			if err := os.Remove(filepath.Join(keysDir, "signing.pub")); err != nil {
+				t.Fatal(err)
+			}
+			if !withField {
+				cfg := filepath.Join(a.env["MASH_CONFIG_DIR"], "config.json")
+				var m map[string]any
+				if err := json.Unmarshal(mustRead(t, cfg), &m); err != nil {
+					t.Fatal(err)
+				}
+				delete(m, "signing_key_pub")
+				b, _ := json.MarshalIndent(m, "", "  ")
+				if err := os.WriteFile(cfg, b, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			a.refuses(1, []string{"signing.pub is missing", "signing.nk is there", skPub, "mashctl init --config <file>", "same signing_key", "nothing was changed"}, map[string]any{"signing_key": nil})
+		})
+	}
+}
+
+// A new config.json is written last: an init that stops after the key import leaves none, and a rerun finishes.
+func TestInterruptedInitWritesNewConfigLast(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root ignores the read-only folder that stops init")
 	}
@@ -311,14 +344,68 @@ func TestInterruptedInitHasRecordedTheSigningKey(t *testing.T) {
 			t.Fatalf("%s: %v", f, err)
 		}
 	}
+	if _, err := os.Stat(filepath.Join(cfgDir, "config.json")); !os.IsNotExist(err) {
+		t.Fatalf("the interrupted init left a config.json (err %v)", err)
+	}
+	if err := os.Chmod(server, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if out, errb, code := a.init(); code != 0 {
+		t.Fatalf("rerun: %d\n%s\n%s", code, out, errb)
+	}
+	if got, raw := configSigningPub(t, cfgDir); got != skPub {
+		t.Fatalf("signing_key_pub = %q, want %s\n%s", got, skPub, raw)
+	}
+	removeSigningFiles(t, keysDir)
+	if out, errb, code := a.run("endpoint", "create", "alice.g.x"); code != 1 || !strings.Contains(errb, "both missing") {
+		t.Fatalf("create after lost files: %d\n%s\n%s", code, out, errb)
+	}
+}
+
+// A config.json that exists without signing_key_pub gets it right after the key import: an init that stops after
+// the import has recorded it, so the key store with both files removed refuses create; a rerun finishes.
+func TestInterruptedInitOnExistingConfigHasRecordedTheSigningKey(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores the read-only folder that stops init")
+	}
+	e, sk, osk := strictEnv(t)
+	skPub, _ := sk.PublicKey()
+	a := newIniter(t, e)
+	if err := os.WriteFile(a.opSeed, mustRead(t, seedFile(t, t.TempDir(), "op", osk)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sc := filepath.Join(a.root, "in", "signer.creds")
+	signingKeyCreds(t, e.acctPub, sk, sc)
+	a.vals["admin_creds"] = sc
+	// a first init without signing_key: config.json exists and has no signing_key_pub
+	if out, errb, code := a.init(); code != 0 {
+		t.Fatalf("first init: %d\n%s\n%s", code, out, errb)
+	}
+	cfgDir := a.env["MASH_CONFIG_DIR"]
+	if g, _ := configSigningPub(t, cfgDir); g != "" {
+		t.Fatalf("signing_key_pub before: %q", g)
+	}
+	// sys.creds gone and the server folder read-only: the next init stops when it installs them, after the import
+	server := filepath.Join(cfgDir, "server")
+	if err := os.Remove(filepath.Join(server, "sys.creds")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(server, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(server, 0o700) })
+	a.vals["signing_key"] = seedFile(t, filepath.Join(a.root, "in"), "signing.seed", sk)
+	if out, errb, code := a.init(); code == 0 {
+		t.Fatalf("init went through a read-only folder:\n%s\n%s", out, errb)
+	}
+	keysDir := a.env["MASH_KEYS_DIR"]
 	if got, raw := configSigningPub(t, cfgDir); got != skPub {
 		t.Fatalf("the interrupted init left signing_key_pub = %q, want %s\n%s", got, skPub, raw)
 	}
 	removeSigningFiles(t, keysDir)
-	if out, errb, code := a.run("endpoint", "create", "alice.g.x"); code != 1 || !strings.Contains(errb, "signing_key was configured") {
+	if out, errb, code := a.run("endpoint", "create", "alice.g.x"); code != 1 || !strings.Contains(errb, "both missing") {
 		t.Fatalf("create after the interrupted init and lost files: %d\n%s\n%s", code, out, errb)
 	}
-	// the rerun with the same signing_key finishes, and restores the files
 	if err := os.Chmod(server, 0o700); err != nil {
 		t.Fatal(err)
 	}
