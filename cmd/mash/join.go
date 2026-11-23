@@ -49,6 +49,13 @@ func notJoinFile(path string) *cliframe.Error {
 	return cliframe.Failf("%s is not a join file this mash can read", config.Clean(path))
 }
 
+// wrongJWTName is the failure for a user JWT whose name is not the join file's address (a user signed outside mashctl,
+// say). It names both, which are not secrets, so the person can see what to fix; nothing else of the file is shown.
+func wrongJWTName(path, jwtName, address string) *cliframe.Error {
+	return cliframe.Failf("%s is not a join file this mash can read: its user JWT is named %q but the join file's address is %q; they must be the same",
+		config.Clean(path), config.Clean(jwtName), config.Clean(address))
+}
+
 // readJoinFile reads and parses the join file at path, and checks its address, its creds or JWT and its certificate.
 func readJoinFile(path string) (joinfile.File, error) {
 	var zero joinfile.File
@@ -141,8 +148,12 @@ func credsText(j joinfile.File, req cmds.JoinRequest) ([]byte, error) {
 		}
 		pub, _ := kp.PublicKey()
 		// the JWT's name is the endpoint it was issued for: it must be the address the join file says
-		if c, err := jwt.DecodeUserClaims(token); err != nil || c.Subject != pub || c.Name != j.Address {
+		c, err := jwt.DecodeUserClaims(token)
+		if err != nil || c.Subject != pub {
 			return nil, notJoinFile(req.File)
+		}
+		if c.Name != j.Address {
+			return nil, wrongJWTName(req.File, c.Name, j.Address)
 		}
 		text := j.Creds
 		if !strings.HasSuffix(text, "\n") {
@@ -151,8 +162,11 @@ func credsText(j joinfile.File, req cmds.JoinRequest) ([]byte, error) {
 		return []byte(text), nil
 	}
 	claims, err := jwt.DecodeUserClaims(j.UserJWT)
-	if err != nil || claims.Name != j.Address {
+	if err != nil {
 		return nil, notJoinFile(req.File)
+	}
+	if claims.Name != j.Address {
+		return nil, wrongJWTName(req.File, claims.Name, j.Address)
 	}
 	if req.Key == "" {
 		return nil, cliframe.Usagef("this join file holds no seed; it was made for your own key").

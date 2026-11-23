@@ -1,0 +1,1 @@
+**`mash join` says what is wrong when the user JWT's name is not the join file's address.** It used to answer only "not a join file this mash can read". It now names both the JWT's name and the address it expected.

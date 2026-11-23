@@ -852,7 +852,7 @@ func TestJoinRefusesACAThatIsNotOnlyCertificates(t *testing.T) {
 }
 
 // The JWT's name is the endpoint it was issued for; a join file whose address differs is refused before anything is
-// written. The specification has no case for it, so it is the invalid-join-file error.
+// written. The error names the JWT's name and the address the join file gives (#1242).
 func TestJoinRefusesACredsNameThatIsNotTheAddress(t *testing.T) {
 	w := newJoinWorld(t)
 	other := newJoinMaterial(t, "acme.demo.carol")
@@ -861,7 +861,7 @@ func TestJoinRefusesACredsNameThatIsNotTheAddress(t *testing.T) {
 	os.WriteFile("carol.seed", other.seed, 0o600)
 	for _, args := range [][]string{{"join", "mix.join"}, {"join", "mixjwt.join", "--key", "carol.seed"}} {
 		r := w.run(args...)
-		if r.code != 1 || r.out != "" || r.errs != "error: "+args[1]+" is not a join file this mash can read\n" {
+		if r.code != 1 || r.out != "" || r.errs != "error: "+args[1]+` is not a join file this mash can read: its user JWT is named "acme.demo.carol" but the join file's address is "acme.demo.bob"; they must be the same`+"\n" {
 			t.Errorf("%v: %+v", args, r)
 		}
 	}
