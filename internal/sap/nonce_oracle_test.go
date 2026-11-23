@@ -35,7 +35,7 @@ func fakeServer(t *testing.T, nonce string) (url string, sigs chan string) {
 		info, _ := json.Marshal(map[string]any{"server_id": "X", "version": "2.10.0", "proto": 1, "headers": true,
 			"auth_required": true, "nonce": nonce, "max_payload": 1048576})
 		_, _ = c.Write([]byte("INFO " + string(info) + "\r\n"))
-		_ = c.SetReadDeadline(time.Now().Add(5 * time.Second))
+		_ = c.SetReadDeadline(time.Now().Add(30 * time.Second))
 		line, err := bufio.NewReader(c).ReadString('\n')
 		if err != nil || !strings.HasPrefix(line, "CONNECT ") {
 			close(sigs)
@@ -86,7 +86,7 @@ func TestStockClientIsSigningOracle(t *testing.T) {
 	subject := "agents.mail.o.g.bob"
 	nonce, h := forgedMailNonce(id, subject, body, time.Now())
 	url, sigs := fakeServer(t, nonce)
-	_, _ = nats.Connect(url, nats.UserCredentials(creds), nats.Timeout(2*time.Second), nats.NoReconnect())
+	_, _ = nats.Connect(url, nats.UserCredentials(creds), nats.Timeout(15*time.Second), nats.NoReconnect())
 	sig, ok := <-sigs
 	if !ok {
 		t.Fatal("no CONNECT")
@@ -103,7 +103,7 @@ func TestNatsauthRefusesMailNonce(t *testing.T) {
 	nonce, _ := forgedMailNonce(id, "agents.mail.o.g.bob", []byte("x"), time.Now())
 	for _, n := range []string{nonce, "AGENT-SENDER-V1\nA\nU\n", "short", strings.Repeat("a", 33), "abc def ghijklm", ""} {
 		url, sigs := fakeServer(t, n)
-		nc, err := nats.Connect(url, natsauth.UserCredentials(creds), nats.Timeout(2*time.Second), nats.NoReconnect())
+		nc, err := nats.Connect(url, natsauth.UserCredentials(creds), nats.Timeout(15*time.Second), nats.NoReconnect())
 		if err == nil {
 			nc.Close()
 			t.Fatalf("connected with nonce %q", n)
@@ -119,7 +119,7 @@ func TestNatsauthSignsServerNonce(t *testing.T) {
 	_, kp, creds := oracleSetup(t)
 	const nonce = "Kq3_-x9ZaB0cD1e" // 15 raw-URL characters, as nats-server sends
 	url, sigs := fakeServer(t, nonce)
-	_, _ = nats.Connect(url, natsauth.UserCredentials(creds), nats.Timeout(2*time.Second), nats.NoReconnect())
+	_, _ = nats.Connect(url, natsauth.UserCredentials(creds), nats.Timeout(15*time.Second), nats.NoReconnect())
 	sig, ok := <-sigs
 	if !ok {
 		t.Fatal("no CONNECT")

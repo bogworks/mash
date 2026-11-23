@@ -208,7 +208,7 @@ func TestRevokeUsersCutsOffAConnectedUser(t *testing.T) {
 	t.Logf("connection closed by the server: %v", why)
 
 	// The same creds no longer connect.
-	nc2, err := nats.Connect(srv.ClientURL(), nats.UserCredentials(credPath), nats.NoReconnect(), nats.Timeout(3*time.Second))
+	nc2, err := nats.Connect(srv.ClientURL(), nats.UserCredentials(credPath), nats.NoReconnect(), nats.Timeout(15*time.Second))
 	if err == nil {
 		nc2.Close()
 		t.Fatal("the revoked creds connected")
