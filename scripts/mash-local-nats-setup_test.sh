@@ -1614,7 +1614,7 @@ write_receipt() {
         echo "- modes: $MODES"
         echo "- date (UTC): $(date -u +%Y-%m-%dT%H:%M:%SZ)"
         echo "- test: scripts/mash-local-nats-setup_test.sh, sha256 $(sha256sum "$SELF_TEST" | awk '{print $1}')"
-        echo "- script under test: scripts/mash-local-nats-setup.sh, sha256 $SCRIPTSHA"
+        echo "- script under test: scripts/mash-local-nats-setup.sh, sha256 $SCRIPTSHA (run as a test copy with the MLNT_UNAME hook added)"
         echo "- natscli v$NCV linux-amd64 zip, sha256 $NATSHA (pinned: $NATPIN)"
         echo "- podman: $(podman --version 2>/dev/null)"
         echo
@@ -1663,6 +1663,9 @@ DISK0=$(free_mb "$SCRATCH")
 [ "$(id -u)" -ne 0 ] || { echo "run as an ordinary user (rootless podman)" >&2; exit 2; }
 
 mkdir -p "$CTX" "$LOGS" || exit 2
+# The script the containers run is a test copy with the MLNT_UNAME hook put back; the shipped script has none (#1120).
+bash "$HERE/mash-local-nats-setup-testcopy.sh" "$SCRIPT_SRC" "$CTX/mash-local-nats-setup.sh" || exit 2
+SCRIPT_SRC=$CTX/mash-local-nats-setup.sh
 echo "== run $RUN: images: $IMAGES; cases: $CASES"
 if [ -n "${MLNT_MASHCTL:-}" ]; then
     [ -f "$MLNT_MASHCTL" ] || { echo "no $MLNT_MASHCTL (MLNT_MASHCTL)" >&2; exit 2; }

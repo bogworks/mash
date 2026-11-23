@@ -1,0 +1,1 @@
+**The local server setup script no longer reads a test variable.** `mash-local-nats-setup.sh` used to let `MLNT_UNAME` replace the platform name, a hook for our tests that shipped to everyone. The script now asks the system for the platform and nothing else; the hook lives in a test-only copy.

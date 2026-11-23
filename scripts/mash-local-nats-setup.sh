@@ -29,10 +29,6 @@
 # kill -0 plus ps on macOS; listeners are read with ss (Linux) or lsof (macOS).
 # The openssl commands avoid -addext and -noenc so that LibreSSL (macOS) and
 # OpenSSL 3 both work.
-#
-# Test hook (not in --help): MLNT_UNAME, when set, replaces the output of
-# `uname -s`; "Darwin" makes the script take the macOS branches (BSD stat
-# flags, ps and lsof instead of /proc and ss), so a test can exercise them.
 set -eu
 umask 077
 
@@ -127,11 +123,10 @@ set_paths() {
 }
 
 # Platform layer. BSD=1 means BSD userland (macOS): BSD stat flags, ps and lsof.
-# MLNT_UNAME=Darwin forces it (test hook); otherwise it is chosen by whether
-# GNU `stat -c` works here.
+# Darwin from `uname -s` selects it; otherwise it is chosen by whether GNU `stat -c` works here.
 init_platform() {
     BSD=0
-    if [ "${MLNT_UNAME:-$(uname -s 2>/dev/null || true)}" = Darwin ]; then
+    if [ "$(uname -s 2>/dev/null || true)" = Darwin ]; then
         BSD=1
     elif ! stat -c %u / >/dev/null 2>&1; then
         BSD=1
