@@ -913,7 +913,7 @@ func jsLimits(c *jwt.AccountClaims) (jwt.JetStreamLimits, string, error) {
 		lim, tier = r1, " (tier R1)"
 	}
 	if lim.DiskStorage == 0 {
-		return lim, "", errors.New("JetStream is not enabled for the account: its JWT limits give it no file storage (disk 0), and mash keeps everything on file. Enable it first (for example `nsc edit account NAME --js-disk-storage 2G --js-streams 1024 --js-consumer 128`, then push)")
+		return lim, "", errors.New("JetStream is not enabled for the account: its JWT limits give it no file storage (disk 0), and mash keeps everything on file. Enable it first (for example `nsc edit account NAME --js-disk-storage 2G --js-streams 1024 --js-consumer 1024`, then push)")
 	}
 	return lim, tier, nil
 }

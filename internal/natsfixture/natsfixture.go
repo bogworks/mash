@@ -41,12 +41,12 @@ const (
 	ServerName    = "mash-local"
 )
 
-// Account limits for JetStream, the defaults docs/operations.md describes (2G of disk, 1024 streams, 128 consumers).
+// Account limits for JetStream, the defaults docs/operations.md describes (2G of disk, 1024 streams, 1024 consumers).
 // No memory store: mash stores everything on file.
 const (
 	jsDisk      = 2 << 30
 	jsStreams   = 1024
-	jsConsumers = 128
+	jsConsumers = 1024
 )
 
 // Params says what to build.
