@@ -238,20 +238,62 @@ proc_alive() {
     _st=$(sed -n 's/^State:[[:space:]]*\(.\).*/\1/p' "/proc/$1/status" 2>/dev/null)
     [ -n "$_st" ] && [ "$_st" != Z ] && [ "$_st" != X ]
 }
+# proc_is_nats PID: the process's executable is named nats-server (/proc exe, else
+# comm, on Linux; ps comm on macOS)
+proc_is_nats() {
+    if [ "$BSD" = 1 ]; then
+        _exe=$(ps -p "$1" -o comm= 2>/dev/null | head -n 1 | sed 's/^ *//; s/ *$//')
+    else
+        _exe=$(readlink "/proc/$1/exe" 2>/dev/null || true)
+        if [ -z "$_exe" ]; then _exe=$(cat "/proc/$1/comm" 2>/dev/null || true); fi
+        _exe=${_exe% (deleted)}
+    fi
+    [ "${_exe##*/}" = nats-server ]
+}
+# proc_argv PID: the process's arguments, one per line (macOS: split on spaces)
+proc_argv() {
+    if [ "$BSD" = 1 ]; then
+        ps -ww -p "$1" -o args= 2>/dev/null | head -n 1 | tr ' ' '\n'
+    else
+        tr '\0' '\n' <"/proc/$1/cmdline" 2>/dev/null
+    fi
+}
 # proc_ours PID: running nats-server whose arguments name this DIR's server.conf
 proc_ours() {
     proc_alive "$1" || return 1
+    proc_is_nats "$1" || return 1
+    proc_argv "$1" | grep -Fxq -- "$DIR/server.conf"
+}
+# proc_cwd PID: the process's working folder (best effort on macOS)
+proc_cwd() {
     if [ "$BSD" = 1 ]; then
-        _exe=$(ps -p "$1" -o comm= 2>/dev/null | head -n 1 | sed 's/^ *//; s/ *$//')
-        [ "${_exe##*/}" = nats-server ] || return 1
-        ps -ww -p "$1" -o args= 2>/dev/null | head -n 1 | tr ' ' '\n' | grep -Fxq -- "$DIR/server.conf"
-        return
+        lsof -nP -a -p "$1" -d cwd -Fn 2>/dev/null </dev/null | sed -n 's/^n//p' | head -n 1
+    else
+        readlink "/proc/$1/cwd" 2>/dev/null
     fi
-    _exe=$(readlink "/proc/$1/exe" 2>/dev/null || true)
-    if [ -z "$_exe" ]; then _exe=$(cat "/proc/$1/comm" 2>/dev/null || true); fi
-    _exe=${_exe% (deleted)}
-    [ "${_exe##*/}" = nats-server ] || return 1
-    tr '\0' '\n' <"/proc/$1/cmdline" 2>/dev/null | grep -Fxq -- "$DIR/server.conf"
+}
+# proc_server_dir PID: print the mash local server folder X of a nats-server run
+# with exactly one -c X/server.conf (or --config X/server.conf), where
+# X/mash-setup.json is a regular file; print nothing otherwise. Informational only.
+proc_server_dir() {
+    proc_is_nats "$1" || return 0
+    _conf=$(proc_argv "$1" | awk '
+        $0 == "-c" || $0 == "--config" { n++; want = 1; next }
+        want { v = $0; want = 0 }
+        END { if (n == 1 && v != "") print v }')
+    case $_conf in
+        server.conf) _x=. ;;
+        */server.conf) _x=${_conf%/server.conf}; [ -n "$_x" ] || _x=/ ;;
+        *) return 0 ;;
+    esac
+    case $_x in
+        /*) ;;
+        *) _cwd=$(proc_cwd "$1")
+           case $_cwd in /*) ;; *) return 0 ;; esac
+           if [ "$_x" = . ]; then _x=$_cwd; else _x=${_cwd%/}/${_x#./}; fi ;;
+    esac
+    [ -f "$_x/mash-setup.json" ] && [ ! -L "$_x/mash-setup.json" ] || return 0
+    printf '%s' "$_x"
 }
 recorded_pid() {
     [ -f "$DIR/server.pid" ] || return 1
@@ -284,6 +326,36 @@ listen_addrs() {
 
 listening() { # is 127.0.0.1:$PORT accepting
     listen_addrs "$PORT" | grep -Fxq "127.0.0.1:$PORT"
+}
+
+# listener_pids: every pid listening on 127.0.0.1:$PORT, one per line (none when
+# the tool shows no pid, such as another user's process under ss)
+listener_pids() {
+    if [ "$PORT_TOOL" = lsof ]; then
+        # the same -Fn form as listen_addrs: a p<pid> line, then n<addr> per socket
+        lsof -nP "-iTCP:$PORT" -sTCP:LISTEN -Fn 2>/dev/null </dev/null | awk -v a="n127.0.0.1:$PORT" '
+            /^p[0-9]+$/ { p = substr($0, 2) }
+            $0 == a && p != "" { print p }' || true
+    else
+        # a shared socket shows several pid= entries on one line: print every one
+        ss -Hltnp 2>/dev/null | awk -v a="127.0.0.1:$PORT" '$4 == a {
+            s = $0
+            while (match(s, /pid=[0-9]+/)) { print substr(s, RSTART + 4, RLENGTH - 4); s = substr(s, RSTART + RLENGTH) } }' || true
+    fi
+}
+# port_holders: " (pid N, the local server in X; pid M)" for the listeners on
+# 127.0.0.1:$PORT, in tool order without duplicates; nothing when no pid is shown
+port_holders() {
+    _hs=''; _seen=' '
+    for _hp in $(listener_pids); do
+        case $_seen in *" $_hp "*) continue ;; esac
+        _seen="$_seen$_hp "
+        _hx=$(proc_server_dir "$_hp")
+        _h="pid $_hp"
+        [ -z "$_hx" ] || _h="$_h, the local server in $_hx"
+        _hs="${_hs:+$_hs; }$_h"
+    done
+    [ -z "$_hs" ] || printf ' (%s)' "$_hs"
 }
 
 port_taken() { # PORT
@@ -555,7 +627,7 @@ mode_remove() {
     # a wrapper script around nats-server keeps the port after the recorded pid
     # is gone; deleting DIR then would pull its store out from under it
     if listening; then
-        die 1 "something still listens on 127.0.0.1:$PORT; nothing was removed" \
+        die 1 "something still listens on 127.0.0.1:$PORT$(port_holders); nothing was removed" \
             "stop the program that holds the port (a wrapper script that runs nats-server?), then run $SELF --remove again"
     fi
     rm -rf "$DIR"
