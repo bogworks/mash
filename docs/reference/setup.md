@@ -59,7 +59,11 @@ the script's output, never from memory. The NATS account it makes is named
 after the owner; the system account keeps NATS's own name, SYSTEM. The server
 runs as your own user's process, not as a system service, so it does not come
 back after a reboot: run the script again with --start to start it (it never
-creates anything then), --stop to stop it, or --remove to remove it. After
+creates anything then), --stop to stop it, or --remove to remove it. When
+--start finds its server process already running, it first checks that the
+server answers: if it does, it says 'already running'; if the process is alive
+but the server does not answer, it stops with an error and changes nothing (it
+does not kill or restart), and the hint is to run --stop, then --start. After
 --remove it prints two lines: that mashctl's folder still points at the server
 just removed, and how to set up again (a new configuration folder, or moving
 the old one aside).

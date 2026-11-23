@@ -516,15 +516,27 @@ mode_stop() {
     do_stop
 }
 
+# need_tools NAME...: stop if any is not installed
+need_tools() {
+    miss=''
+    for t in "$@"; do command -v "$t" >/dev/null 2>&1 || miss="$miss $t"; done
+    [ -z "$miss" ] || die 1 "missing:$miss" "install it: brew install nats-server nats (macOS), or see the docs"
+}
+
 mode_start() {
     require_made_dir
     lock_mode
     if _p=$(recorded_pid) && proc_ours "$_p"; then
-        echo "already running: pid $_p on 127.0.0.1:$PORT"; return 0
+        # alive is not enough: the server must answer (verify needs nats; listening needs the port tool)
+        need_tools nats
+        need_port_tool
+        if listening && verify; then
+            echo "already running: pid $_p on 127.0.0.1:$PORT"; return 0
+        fi
+        die 1 "pid $_p is running but the server does not answer on 127.0.0.1:$PORT" \
+            "run $SELF --stop, then $SELF --start"
     fi
-    miss=''
-    for t in nats-server nats; do command -v "$t" >/dev/null 2>&1 || miss="$miss $t"; done
-    [ -z "$miss" ] || die 1 "missing:$miss" "install it: brew install nats-server nats (macOS), or see the docs"
+    need_tools nats-server nats
     need_port_tool
     if port_taken "$PORT"; then
         die 1 "port $PORT is now used by another program" \
