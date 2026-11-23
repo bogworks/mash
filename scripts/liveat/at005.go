@@ -825,7 +825,7 @@ func (s *At5) revocationSeen() {
 		return r, ok
 	})
 	ok, d = doctorKeysOK(dc.Code, dc.Stdout)
-	s.check("M2: mashctl doctor --json after the revocation: exit 0, no problem, keys ok (no revoked key connected, every connected key issued by mash)", ok, d)
+	s.check("M2: mashctl doctor --json after the revocation: exit 0, no problem, keys ok (no revoked key connected, every connected user issued by mashctl, or other users the account shares)", ok, d)
 	s.ClusterCheck(m2, "M2 after the revocation")
 }
 

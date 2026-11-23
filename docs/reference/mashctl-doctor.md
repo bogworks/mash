@@ -18,6 +18,7 @@ mashctl doctor [options]
 | Option | Argument | Description |
 | --- | --- | --- |
 | `--strict` |  | Exit 1 on a warning too. |
+| `--audit-users` |  | Fail if a user connected to the mash account was not issued by mashctl; use it to check who is connected now (--strict does not do this). |
 
 The global options of `mashctl` also apply: see
 [mashctl](mashctl.md#global-options).
@@ -33,7 +34,7 @@ mashctl doctor
 | Code | Meaning |
 | --- | --- |
 | 0 | It worked. |
-| 1 | It failed; one line on stderr says why. |
+| 1 | A problem was found; the report on stdout says which. |
 | 2 | The command line was wrong; nothing was attempted. |
 
 ## Output
@@ -48,14 +49,14 @@ server     ok    tls://localhost:4222
 sign-in    ok
 storage    ok
 endpoints  ok    3 records, 3 inboxes
-keys       ok    every connected key was issued here
+keys       ok    every connected user was issued by mashctl
 
 No problems.
 ```
 
 ### A problem
 
-Stream: stdout. Exit code: 1.
+Stream: stdout, then the hint on stderr. Exit code: 1.
 
 ```text
 config     ok
@@ -63,10 +64,42 @@ server     ok    tls://localhost:4222
 sign-in    ok
 storage    ok
 endpoints  FAIL  1 inbox has no endpoint record: acme.demo.dave
-keys       ok    every connected key was issued here
+keys       ok    every connected user was issued by mashctl
 
 1 problem.
 hint: mashctl endpoint show acme.demo.dave
+```
+
+### Another tool's user is connected (not a problem)
+
+Stream: stdout. Exit code: 0.
+
+```text
+config     ok
+server     ok    tls://localhost:4222
+sign-in    ok
+storage    ok
+endpoints  ok    3 records, 3 inboxes
+keys       ok    mashctl's users ok; 1 other user, not issued by mashctl
+
+No problems.
+```
+
+### --audit-users finds a user mashctl did not issue
+
+Stream: stdout, then the hint on stderr. Exit code: 1.
+
+```text
+config     ok
+server     ok    tls://localhost:4222
+sign-in    ok
+storage    ok
+endpoints  ok    3 records, 3 inboxes
+keys       FAIL  1 connected user was not issued by mashctl:
+                 UDXU4RCSJNZOIQHZNWXHXORDPRTGNJAHAHFRGZNEEJCPQTT2M7NLCNF4
+
+1 problem.
+hint: revoke it with the tool that issued it (mashctl revokes only its own)
 ```
 
 ## JSON

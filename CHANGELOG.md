@@ -8,15 +8,15 @@ All notable user-facing changes to mash are recorded here. The format follows [K
 
 ### Summary
 
-**mash 0.5.8 exists for a fleet migration: it lets mash accept keys that another tool issued, which you list in `config.json` under `external_keys`, so `mashctl doctor` no longer fails on them ([#1300](https://github.com/bogworks/mash/issues/1300)), and `install.sh` tells you how to fix a folder it refuses ([#1240](https://github.com/bogworks/mash/issues/1240)).** If your NATS account is shared with other tools, list their user public keys as `external_keys` in `config.json` and the `keys` check passes; if you never share an account, nothing changes. The rest is smaller: one count for `mash inbox` and the idle wake, a refused-mail count that is repaired after a kill, safer installer and setup scripts, and a bigger default for the local server. Every download has a build attestation; verify it. The known issues are listed in the release notes.
+**mash 0.5.8 exists for a fleet migration: `mashctl doctor` now passes on a NATS account shared with other tools, and `mashctl doctor --audit-users` checks that every connected user was issued by mashctl ([#1300](https://github.com/bogworks/mash/issues/1300)). `install.sh` also tells you how to fix a folder it refuses ([#1240](https://github.com/bogworks/mash/issues/1240)).** `mashctl doctor` no longer fails because a connected user was not issued by mashctl; it says how many other users are connected, and `--audit-users` is the one option that fails on them. If you never share an account, nothing changes. The rest is smaller: one count for `mash inbox` and the idle wake, a refused-mail count that is repaired after a kill, safer installer and setup scripts, and a bigger default for the local server. Every download has a build attestation; verify it. The known issues are listed in the release notes.
 
 ### Upgrading
 
-Update both plugins, `mash` and `mash-setup`, then restart your Claude Code sessions: the serve and inbox fixes need a restart. Install `mash` and `mashctl` from the same release, as before. A local server you already set up keeps its old limits of 64 streams and 128 consumers; the new default of 1024 applies to servers set up with 0.5.8.
+Update both plugins, `mash` and `mash-setup`, then restart your Claude Code sessions: the serve and inbox fixes need a restart. Install `mash` and `mashctl` from the same release, as before. A local server you already set up keeps its old limits of 64 streams and 128 consumers; the new default of 1024 applies to servers set up with 0.5.8. The upgrade is one-way; problems are fixed by the next release.
 
 ### Added
 
-- `external_keys` in `config.json` lists keys other tools issued on a shared account, so `mashctl doctor` stops failing on them; a bad entry stops every mash command that reads the configuration, including mail, until fixed or removed ([#1300](https://github.com/bogworks/mash/issues/1300)).
+- `mashctl doctor` no longer fails because a connected user was not issued by mashctl; it says how many other users are connected, and the new `--audit-users` fails on them and names each key; a missing issue store fails the keys row ([#1300](https://github.com/bogworks/mash/issues/1300)).
 
 ### Changed
 
@@ -32,7 +32,7 @@ Update both plugins, `mash` and `mash-setup`, then restart your Claude Code sess
 - `mash-local-nats-setup.sh` lets only one run take over a stale lock, and names a lock left by a run killed mid-takeover ([#1093](https://github.com/bogworks/mash/issues/1093)).
 - `mash-local-nats-setup.sh --start` says so when a running server does not answer, instead of reporting "already running" ([#1094](https://github.com/bogworks/mash/issues/1094)).
 
-Known issues: 55 known issues, listed in the [release notes](https://github.com/bogworks/mash/blob/v0.5.8/docs/release-notes/0.5.8.md#known-issues)
+Known issues: 56 known issues, listed in the [release notes](https://github.com/bogworks/mash/blob/v0.5.8/docs/release-notes/0.5.8.md#known-issues)
 Links: [Release notes](https://github.com/bogworks/mash/blob/v0.5.8/docs/release-notes/0.5.8.md), [full changes](https://github.com/bogworks/mash/compare/v0.5.7...v0.5.8), [verify your download](https://github.com/bogworks/mash/blob/v0.5.8/docs/install.md#verify-what-you-download)
 
 ## [0.5.7] - 2026-11-22
