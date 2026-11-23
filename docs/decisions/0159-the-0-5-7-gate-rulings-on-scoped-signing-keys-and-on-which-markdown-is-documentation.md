@@ -1,7 +1,7 @@
 ---
 status: accepted
 date: 2026-11-23
-decision-makers: Randy Bias (mash maintainer)
+decision-makers: mash-lead (0.5.7 gate rulings, under the maintainer's release delegation); Randy Bias for dev-process rules 20-21
 ---
 
 # The 0.5.7 gate rulings on scoped signing keys and on which Markdown is documentation
