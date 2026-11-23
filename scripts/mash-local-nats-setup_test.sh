@@ -458,7 +458,7 @@ case6() { # the server works
     nn "$d" "$p" kv get B1 k --raw >"$W/kvget" 2>&1
     chk "kv get B1 k returns the value" has "$W/kvget" v-mash
     nn "$d" "$p" account info >"$W/ainfo" 2>&1
-    chk "wire: JetStream max streams 64" hasre "$W/ainfo" 'Streams: +[0-9]+ of 64$'
+    chk "wire: JetStream max streams 1024" hasre "$W/ainfo" 'Streams: +[0-9]+ of 1,?024$'
     chk "wire: JetStream max consumers 128" hasre "$W/ainfo" 'Consumers: Maximum 128 per stream$'
     chk "wire: JetStream max file storage 2.0 GiB" hasre "$W/ainfo" 'Storage: +[0-9.]+ [A-Za-z]+ of 2\.0 GiB'
     chk "wire: JetStream memory 0" hasre "$W/ainfo" 'Memory: +0 B of 0 B'
@@ -466,7 +466,7 @@ case6() { # the server works
         nats auth account info acme --operator mash >"$W/jwt" 2>&1
     chk "JWT: account is named acme" hasre "$W/jwt" '^Account acme \(A[A-Z0-9]+\)$'
     chk "JWT: JetStream on" hasre "$W/jwt" 'JetStream: +true'
-    chk "JWT: max streams 64" hasre "$W/jwt" 'Maximum Streams: +64$'
+    chk "JWT: max streams 1024" hasre "$W/jwt" 'Maximum Streams: +1,?024$'
     chk "JWT: max consumers 128" hasre "$W/jwt" 'Max Consumers Per Stream: +128$'
     chk "JWT: max file storage 2.0 GiB" hasre "$W/jwt" 'Max File Storage: +2\.0 GiB$'
     chk "the admin user is in account acme (wire account = JWT account)" \

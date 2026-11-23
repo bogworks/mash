@@ -644,7 +644,7 @@ CNF
     nats auth operator add "$OP" >/dev/null </dev/null
     nats auth account add "$OWNER" --operator "$OP" --defaults >/dev/null </dev/null
     nats auth account edit "$OWNER" --operator "$OP" --jetstream --js-disk 2147483648 \
-        --js-memory 0 --js-disk-stream 0 --js-memory-stream 0 --js-streams 64 \
+        --js-memory 0 --js-disk-stream 0 --js-memory-stream 0 --js-streams 1024 \
         --js-consumers 128 --js-max-pending 0 >/dev/null </dev/null
     nats auth user add mashadmin "$OWNER" --operator "$OP" --defaults \
         --credential "$DIR/creds/mashadmin.creds" >/dev/null </dev/null

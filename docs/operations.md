@@ -73,11 +73,11 @@ What `mashctl` prints and reads follows from not trusting the server:
 
 ## The account
 
-Create an account with JetStream limits sized for your endpoints (see [Sizing](nats-server.md#sizing)). The account name is yours to choose; `MASH` is only the default in these examples (set `ACCOUNT` to use another). The limits default to 2G of disk, 64 streams and 128 consumers.
+Create an account with JetStream limits sized for your endpoints (see [Sizing](nats-server.md#sizing)). The account name is yours to choose; `MASH` is only the default in these examples (set `ACCOUNT` to use another). The limits default to 2G of disk, 1024 streams and 128 consumers.
 
 ```sh
 ACCOUNT=${ACCOUNT:-MASH}
-JS_DISK=${JS_DISK:-2G} JS_STREAMS=${JS_STREAMS:-64} JS_CONSUMERS=${JS_CONSUMERS:-128}
+JS_DISK=${JS_DISK:-2G} JS_STREAMS=${JS_STREAMS:-1024} JS_CONSUMERS=${JS_CONSUMERS:-128}
 nsc add account "$ACCOUNT"
 nsc edit account "$ACCOUNT" --sk generate --js-disk-storage "$JS_DISK" --js-streams "$JS_STREAMS" --js-consumer "$JS_CONSUMERS"
 nsc push --account "$ACCOUNT"

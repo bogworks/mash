@@ -135,7 +135,7 @@ So, for N endpoints with the defaults, the account needs at least:
 - **Consumers:** N.
 - **Disk:** 93 MiB + 16 MiB x N. For example, 20 endpoints: 413 MiB.
 
-Round up. The script's account is given 2 GiB of disk, 64 streams and 128 consumers, which is room for about 59 endpoints by the stream count. Some of these numbers differ from what older text says; the table above is what the 0.5.6 code creates. The inbox cap and the three bucket caps can be raised in `config.json` under `limits` (`inbox_max_bytes`, `inbox_max_age`, `directory_max_bytes`, `lease_max_bytes`, `inbox_max_consumers`); `mashctl limits show` prints what is in force and `mashctl limits apply` raises existing inboxes. mash never lowers a cap.
+Round up. The script's account is given 2 GiB of disk, 1024 streams and 128 consumers. Disk binds first: 93 + 16 x N must fit in 2048 MiB, which gives N = 122 endpoints; the consumer limit would stop at 128 and the stream limit (5 + N) at 1019, so neither is reached. Some of these numbers differ from what older text says; the table above is what the 0.5.6 code creates. The inbox cap and the three bucket caps can be raised in `config.json` under `limits` (`inbox_max_bytes`, `inbox_max_age`, `directory_max_bytes`, `lease_max_bytes`, `inbox_max_consumers`); `mashctl limits show` prints what is in force and `mashctl limits apply` raises existing inboxes. mash never lowers a cap.
 
 If you use a smaller account limit than the table, `init` prints a warning. Its arithmetic is based on a rougher estimate than the table above, so work from the table.
 
