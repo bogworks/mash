@@ -7,7 +7,7 @@ This walks through one machine running Claude Code sessions with mash. Provision
 ## Requirements
 
 - A NATS server that meets the [requirements](nats-server.md#requirements). To run one on this machine, see [getting nats-server](nats-server.md#getting-nats-server-and-the-nats-command). You do not need `nats-server` on a machine where you only run endpoints, or if you already have a server. `mashctl` does not install or start NATS.
-- Claude Code 2.1.312 or newer (the oldest version a live receipt passed on; mash does not refuse older ones). The plugin and the `mash` binary should be the same release (major and minor).
+- Claude Code 2.1.312 or newer (the oldest version a live receipt passed on; mash does not refuse older ones). The plugin and the `mash` binary should be the same release (for example 0.5.8).
 
 ## 1. The binary
 
@@ -31,7 +31,7 @@ grep ' install.sh$' SHA256SUMS | sha256sum -c - &&  # macOS: shasum -a 256 -c -
 bash install.sh
 ```
 
-It finds the machine's type (Linux or macOS, amd64 or arm64), downloads `mash` and `mashctl` from the same release together with that release's `SHA256SUMS`, checks each binary against it, and puts both in `~/.local/bin` (`MASH_INSTALL_DIR` names another folder; `MASH_VERSION=v0.5.6` pins a release, and without it the script first looks up the latest release's tag and downloads from that tag; `MASH_REPO=owner/name` names another repository, default `bogworks/mash`, for the download, the tag lookup and the attestation check; a `MASH_RELEASE_BASE` mirror needs `MASH_VERSION`). It prints one line for each, with the path it used, for example `Installed mash v0.5.6 (3f9a41c) in ~/.local/bin`, asks nothing and needs no `sudo`. If the folder is not on your `PATH` it says so in one line. A symbolic link to the folder is followed. It refuses a folder that belongs to another user, or that, or any folder above it, other users can write to (a root-owned sticky folder such as `/tmp` above it is fine), and on any failed check nothing is installed; both binaries are staged before either is put in place. Ctrl-C, a closed terminal or a `kill` (SIGINT, SIGTERM, SIGHUP) while it swaps them in leaves both old or both new, never one of each; another signal, such as `kill -9` or SIGQUIT, can still split them in a very small window.
+It finds the machine's type (Linux or macOS, amd64 or arm64), downloads `mash` and `mashctl` from the same release together with that release's `SHA256SUMS`, checks each binary against it, and puts both in `~/.local/bin` (`MASH_INSTALL_DIR` names another folder; `MASH_VERSION=v0.5.8` pins a release, and without it the script first looks up the latest release's tag and downloads from that tag; `MASH_REPO=owner/name` names another repository, default `bogworks/mash`, for the download, the tag lookup and the attestation check; a `MASH_RELEASE_BASE` mirror needs `MASH_VERSION`). It prints one line for each, with the path it used, for example `Installed mash v0.5.8 (8e8fe56) in ~/.local/bin`, asks nothing and needs no `sudo`. If the folder is not on your `PATH` it says so in one line. A symbolic link to the folder is followed. It refuses a folder that belongs to another user, or that, or any folder above it, other users can write to (a root-owned sticky folder such as `/tmp` above it is fine), and on any failed check nothing is installed; both binaries are staged before either is put in place. Ctrl-C, a closed terminal or a `kill` (SIGINT, SIGTERM, SIGHUP) while it swaps them in leaves both old or both new, never one of each; another signal, such as `kill -9` or SIGQUIT, can still split them in a very small window.
 
 If you want a NATS server on this machine, `mash-local-nats-setup.sh` is the other script of the release; [by hand, step 3](guide/by-hand.md#3-make-a-server) uses it.
 
@@ -48,19 +48,21 @@ What `install.sh` does on its own:
 To check the script and the attestation yourself, with a current `gh`:
 
 ```sh
-BASE=https://github.com/bogworks/mash/releases/download/v0.5.6   # use the tag of the release you want; for another repository (MASH_REPO) change bogworks/mash here and in -R and --signer-workflow
+BASE=https://github.com/bogworks/mash/releases/download/v0.5.8   # use the tag of the release you want; for another repository (MASH_REPO) change bogworks/mash here and in -R and --signer-workflow
 curl -fsSLO $BASE/install.sh -O $BASE/SHA256SUMS -O $BASE/mash.intoto.jsonl &&
 gh attestation verify SHA256SUMS -R bogworks/mash --bundle mash.intoto.jsonl \
-  --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/v0.5.6 &&
+  --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref refs/tags/v0.5.8 &&
 grep ' install.sh$' SHA256SUMS | sha256sum -c - &&           # macOS: shasum -a 256 -c -
 less install.sh && bash install.sh
 ```
+
+When the attestation check passes, `gh attestation verify` can print nothing and exits 0; on a failure it prints an error and exits 1, and the `&&` stops everything after it.
 
 If `gh` is missing or too old, skip the `gh attestation verify` lines: the `grep` line still shows the script is the release's own file, and the TLS caveat above applies. Any failure of a check: stop and run nothing.
 
 An agent does not pipe a download into a shell: the setup skill downloads each script, checks it against `SHA256SUMS`, shows you what it is about to run and runs it after a yes. Both scripts are also the repository's own `scripts/` files at the release commit, byte for byte; the release check compares them ([ADR 0150](decisions/0150-releases-carry-install-and-local-nats-setup-scripts-as-attested-assets.md)).
 
-To build from source instead, `go install github.com/bogworks/mash/cmd/mash@v0.5.6` and `go install github.com/bogworks/mash/cmd/mashctl@v0.5.6` need Go 1.27.4 or newer; the result is not the attested build. Use the tag of the release you want, not `@latest`.
+To build from source instead, `go install github.com/bogworks/mash/cmd/mash@v0.5.8` and `go install github.com/bogworks/mash/cmd/mashctl@v0.5.8` need Go 1.27.4 or newer; the result is not the attested build. Use the tag of the release you want, not `@latest`.
 
 ## 2. The plugin
 
@@ -215,7 +217,7 @@ The CLI never takes the lease, so it works alongside the running session.
 |---|---|
 | `nats-server` | 2.10.7 or newer (tested on 2.15), only where you run the server |
 | Claude Code | 2.1.312 or newer (older ones are not refused, but are not tested) |
-| `mash`, `mashctl` and the `mash` plugin | the same release (major and minor) |
+| `mash`, `mashctl` and the `mash` plugin | the same release (for example 0.5.8) |
 | Go, to build from source | 1.27.4 or newer |
 
 ## Uninstall

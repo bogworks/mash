@@ -6,7 +6,7 @@ on one machine. Everything goes in your home folder. Nothing needs sudo.
 
 ## 1. What you need
 
-- Ubuntu, Debian or macOS, `curl` and `openssl`.
+- Ubuntu, Debian or macOS, `curl` and `openssl`. On Linux, also `ss` or `lsof`.
 - `nats-server` 2.10.7 or newer and the `nats` command, on your PATH.
   [Getting the NATS programs](../nats-server.md) shows one way.
 - Claude Code, for step 6.
@@ -25,13 +25,18 @@ bash install.sh
 On macOS use `shasum -a 256 -c -` in place of `sha256sum -c -`. Nothing runs
 unless the check passes.
 
+An example of the output (your versions may differ):
+
 ```
 install.sh: OK
-Fetching mash and mashctl from the v0.5.6 release: https://github.com/bogworks/mash/releases/download/v0.5.6
-Installed mash v0.5.6 (dd696e9) in ~/.local/bin
-Installed mashctl v0.5.6 (dd696e9) in ~/.local/bin
+Fetching mash and mashctl from the v0.5.8 release: https://github.com/bogworks/mash/releases/download/v0.5.8
+gh not found: the checksums come from the same download, so this trusts github.com's TLS; see docs/install.md to verify the attestation
+Installed mash v0.5.8 (8e8fe56) in ~/.local/bin
+Installed mashctl v0.5.8 (8e8fe56) in ~/.local/bin
 ~/.local/bin is not on your PATH; add it to use mash
 ```
+
+The `gh not found` line appears only when `gh` (the GitHub command-line tool) is not installed or too old (a similar line says so). It is not an error.
 
 If it says `~/.local/bin` is not on your PATH, add it and open a new terminal window (a script or an `ssh` command does not read `~/.zshrc`, so the line only takes effect in a new interactive terminal):
 
@@ -45,14 +50,31 @@ To check the download's origin as well, see
 ## 3. Make a server
 
 mash keeps mail on a NATS server. This makes one that only this machine can
-reach, and tells mash about it:
+reach, and tells mash about it. `BASE` is the variable from step 2; set it
+again if you are in a new terminal:
 
 ```sh
+BASE=https://github.com/bogworks/mash/releases/latest/download
 curl -fsSLO $BASE/mash-local-nats-setup.sh -O $BASE/SHA256SUMS &&
 grep ' mash-local-nats-setup.sh$' SHA256SUMS | sha256sum -c - &&
 bash mash-local-nats-setup.sh --owner acme
 mashctl init --config ~/mash-nats/mash-setup.yaml
 ```
+
+An example of the output (your versions may differ):
+
+```
+mash-local-nats-setup.sh: OK
+checked: nats-server 2.15.1, nats 0.5.2, openssl
+port: 4222
+made: CA, certificate, operator, accounts, users
+started: nats-server pid 2983 on 127.0.0.1:4222
+checked: sign-in and system ping ok
+mashctl init --config /home/you/mash-nats/mash-setup.yaml
+Initialized mash on tls://127.0.0.1:4222 for owner acme
+```
+
+The script also needs `ss` or `lsof` on Linux (Debian and Ubuntu: `apt install iproute2`); it names anything missing and changes nothing.
 
 `acme` is the owner, the first part of every address. The server does not
 start at boot. After a reboot: `bash mash-local-nats-setup.sh --start`.
