@@ -28,8 +28,12 @@ func fixture(t *testing.T, next, nextFile string) string {
 	write(t, dir, "mash.json", tool(next))
 	write(t, dir, "mashctl.json", emptyTool)
 	write(t, dir, "rules.json", rules)
-	if nextFile == "" {
-		nextFile = "{}"
+	const info = `"info":{"version":"0.5.9-spec.0"}`
+	switch {
+	case nextFile == "" || nextFile == "{}":
+		nextFile = "{" + info + "}"
+	case !strings.Contains(nextFile, `"info"`):
+		nextFile = "{" + info + "," + strings.TrimPrefix(nextFile, "{")
 	}
 	write(t, dir, "next.json", nextFile)
 	return dir
@@ -169,6 +173,38 @@ func TestRealSpec(t *testing.T) {
 	for _, w := range []string{"installer-verified [install.sh]", "rule: Both doctors work the same way", "Both doctors work the same way"} {
 		if !strings.Contains(out, w) {
 			t.Errorf("missing %q in\n%s", w, out)
+		}
+	}
+}
+
+func TestHeadingTakesVersionFromFile(t *testing.T) {
+	dir := fixture(t, `[]`, `{"info":{"version":"1.2.3-spec.4"}}`)
+	out, err := render(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(out, "# Gate 1 demo: planned 1.2.3 output\n") {
+		t.Errorf("heading does not name the version from the file:\n%s", out)
+	}
+}
+
+func TestMalformedVersionRefused(t *testing.T) {
+	for _, next := range []string{
+		`{"items":[]}`,
+		`{"info":{"version":""},"items":[]}`,
+		`{"info":{"version":"0.5.9"}}`,
+		`{"info":{"version":"v0.5.9-spec.0"}}`,
+		`{"info":{"version":"0.5-spec.0"}}`,
+		`{"info":{"version":"0.5.9-spec."}}`,
+	} {
+		dir := fixture(t, `[]`, next)
+		write(t, dir, "next.json", next)
+		out, err := render(dir)
+		if err == nil || !strings.Contains(err.Error(), "info.version") {
+			t.Errorf("%s: want a version refusal, got err=%v", next, err)
+		}
+		if out != "" {
+			t.Errorf("%s: refused render must give no output", next)
 		}
 	}
 }

@@ -5,7 +5,7 @@ Generated from spec/*.json by go run ./scripts/refgen. Do not edit.
 Check the server, mash's storage on it and every endpoint's records, and say
 how to fix what is wrong. Changes nothing.
 
-Release: 0.5.6. Group: Mesh.
+Release: 0.5.8. Group: Mesh.
 
 ## Usage
 

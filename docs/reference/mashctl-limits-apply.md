@@ -4,7 +4,7 @@ Generated from spec/*.json by go run ./scripts/refgen. Do not edit.
 
 Raise existing inboxes to the configured limits. Never lowers one.
 
-Release: 0.5.6. Group: Mesh.
+Release: 0.5.8. Group: Mesh.
 
 ## Usage
 

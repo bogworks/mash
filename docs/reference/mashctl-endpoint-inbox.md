@@ -4,7 +4,7 @@ Generated from spec/*.json by go run ./scripts/refgen. Do not edit.
 
 List what is in an endpoint's inbox, without showing any message's text.
 
-Release: 0.5.6. Group: Endpoints.
+Release: 0.5.8. Group: Endpoints.
 
 ## Usage
 

@@ -5,7 +5,7 @@ Generated from spec/*.json by go run ./scripts/refgen. Do not edit.
 Check everything mail depends on for this endpoint, and say how to fix what is
 wrong. Changes nothing.
 
-Release: 0.5.6. Command line equivalent: `mash doctor`.
+Release: 0.5.8. Command line equivalent: `mash doctor`.
 
 ## Parameters
 

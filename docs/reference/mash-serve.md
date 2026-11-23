@@ -4,7 +4,7 @@ Generated from spec/*.json by go run ./scripts/refgen. Do not edit.
 
 Run as an MCP server for an agent host. Started by the host, not by hand.
 
-Release: 0.5.6. Group: Integration.
+Release: 0.5.8. Group: Integration.
 
 Visible and documented for anyone wiring mash into an agent host other than
 Claude Code.

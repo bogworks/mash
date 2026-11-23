@@ -71,6 +71,9 @@ type ruleNext struct {
 }
 
 type nextFile struct {
+	Info struct {
+		Version string `json:"version"`
+	} `json:"info"`
 	Items     []nextItem `json:"items"`
 	RulesNext []ruleNext `json:"rules_next"`
 }
@@ -227,11 +230,30 @@ func (r *renderer) walk(c *command, path []string) error {
 	return nil
 }
 
+var specVersion = regexp.MustCompile(`^(\d+\.\d+\.\d+)-spec\.\d+$`)
+
+// release returns the release a spec version such as "0.5.9-spec.0" plans.
+func release(v string) (string, error) {
+	m := specVersion.FindStringSubmatch(v)
+	if m == nil {
+		return "", fmt.Errorf("info.version %q must look like 0.5.9-spec.0", v)
+	}
+	return m[1], nil
+}
+
 // render builds the Markdown for the spec in dir. It returns an error, and no
 // output, when a secrets pattern matches or a line exceeds the hard width.
 func render(dir string) (string, error) {
+	var nf nextFile
+	if err := readJSON(filepath.Join(dir, "next.json"), &nf); err != nil {
+		return "", err
+	}
+	rel, err := release(nf.Info.Version)
+	if err != nil {
+		return "", fmt.Errorf("next.json: %w", err)
+	}
 	r := &renderer{}
-	r.b.WriteString("# Gate 1 demo: planned 0.5.8 output\n\nGenerated from the specification (x-output-next, spec/next.json). Not yet implemented.\n")
+	r.b.WriteString("# Gate 1 demo: planned " + rel + " output\n\nGenerated from the specification (x-output-next, spec/next.json). Not yet implemented.\n")
 	for _, f := range []string{"mash.json", "mashctl.json"} {
 		var t toolSpec
 		if err := readJSON(filepath.Join(dir, f), &t); err != nil {
@@ -243,10 +265,6 @@ func render(dir string) (string, error) {
 		if err := r.walk(t.Command, nil); err != nil {
 			return "", err
 		}
-	}
-	var nf nextFile
-	if err := readJSON(filepath.Join(dir, "next.json"), &nf); err != nil {
-		return "", err
 	}
 	for _, it := range nf.Items {
 		where := it.ID

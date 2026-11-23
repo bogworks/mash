@@ -4,7 +4,7 @@ Generated from spec/*.json by go run ./scripts/refgen. Do not edit.
 
 Make your own key pair, for when the seed must never leave this machine.
 
-Release: 0.5.6. Group: Setup.
+Release: 0.5.8. Group: Setup.
 
 ## Usage
 
