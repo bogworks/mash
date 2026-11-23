@@ -3,7 +3,8 @@ Generated from spec/*.json by go run ./scripts/refgen. Do not edit.
 # mashctl doctor
 
 Check the server, mash's storage on it and every endpoint's records, and say
-how to fix what is wrong. Changes nothing.
+how to fix what is wrong. Changes nothing. Keys that other tools issued on a
+shared account are accepted when config.json lists them as external_keys.
 
 Release: 0.5.6. Group: Mesh.
 

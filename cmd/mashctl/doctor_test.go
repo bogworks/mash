@@ -10,12 +10,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats-server/v2/server"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
+	"github.com/nats-io/nkeys"
 
 	"github.com/bogworks/mash/internal/admin"
 	"github.com/bogworks/mash/internal/natsauth"
+	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/store"
 )
 
@@ -559,5 +562,114 @@ func TestDoctorPlainServerAfterUnreachableOneIsExit2(t *testing.T) {
 	out, errb, code := e.run("doctor")
 	if code != 2 {
 		t.Fatalf("exit %d, want 2: %q %q", code, out, errb)
+	}
+}
+
+// rogueKey mints a user signed outside mashctl, connects it and returns its public key.
+func rogueKey(t *testing.T, e *applyEnv, name string) string {
+	t.Helper()
+	akp, _, err := e.ks.Account()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ukp, _ := nkeys.CreateUser()
+	pub, _ := ukp.PublicKey()
+	uc := jwt.NewUserClaims(pub)
+	uc.Name = name
+	uc.Permissions = *admin.Permissions(sap.Address{Owner: "alice", Group: "g", Instance: name})
+	tok, err := uc.Encode(akp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nc := e.connect(nats.UserJWT(func() (string, error) { return tok, nil }, func(n []byte) ([]byte, error) { return ukp.Sign(n) }), nats.Name(name+"-client"))
+	if !nc.IsConnected() {
+		t.Fatal("the rogue did not connect")
+	}
+	return pub
+}
+
+// setExternal writes config.json with the system creds and the given raw external_keys value.
+func (e *applyEnv) setExternal(raw string) {
+	e.t.Helper()
+	e.writeConfig(`{"system_creds":"` + e.sysCreds + `","external_keys":` + raw + `}`)
+}
+
+const keysOKLine = "keys       ok    every connected key was issued here"
+
+// A listed connected key passes and is counted; an unlisted one still fails, with and without --strict; an empty or
+// absent list changes nothing.
+func TestDoctorKeysExternalKeys(t *testing.T) {
+	e := newXYEnv(t)
+	listed := rogueKey(t, e, "tool-a")
+
+	// absent and empty: today's failure, byte for byte
+	failWant := "config     ok\nserver     ok    tls://localhost:4222\nsign-in    ok\nstorage    ok\nendpoints  ok    2 records, 2 inboxes\nkeys       FAIL  1 connected key was not issued here\n\n1 problem.\n"
+	for _, raw := range []string{"", "null", "[]"} {
+		if raw != "" {
+			e.setExternal(raw)
+		}
+		out, errb, code := e.run("doctor")
+		if code != 1 || cleanText(e, out) != failWant || errb != "hint: mashctl endpoint list\n" {
+			t.Fatalf("external_keys %q: exit %d\n%q\nstderr %q", raw, code, cleanText(e, out), errb)
+		}
+	}
+
+	e.setExternal(`["` + listed + `"]`)
+	out, errb, code := e.run("doctor")
+	want := "config     ok\nserver     ok    tls://localhost:4222\nsign-in    ok\nstorage    ok\nendpoints  ok    2 records, 2 inboxes\nkeys       ok    every connected key was issued here or is listed in external_keys (1 external)\n\nNo problems.\n"
+	if code != 0 || cleanText(e, out) != want || errb != "" {
+		t.Fatalf("listed: exit %d\n%q\nstderr %q", code, cleanText(e, out), errb)
+	}
+	if _, errb, code := e.run("doctor", "--strict"); code != 0 {
+		t.Fatalf("listed, strict: %d %q", code, errb)
+	}
+
+	// a second, unlisted key: the failure stays, the listed one is not counted as a failure
+	rogueKey(t, e, "tool-b")
+	for _, args := range [][]string{{"doctor"}, {"doctor", "--strict"}} {
+		out, errb, code := e.run(args...)
+		if code != 1 || cleanText(e, out) != failWant || errb != "hint: mashctl endpoint list\n" {
+			t.Fatalf("%v: exit %d\n%q\nstderr %q", args, code, cleanText(e, out), errb)
+		}
+	}
+	if _, by, code := doctorJSON(t, e.run); code != 1 || by["keys"].State != "fail" || by["keys"].Detail != "1 connected key was not issued here" {
+		t.Fatalf("json: %d %+v", code, by["keys"])
+	}
+}
+
+// The issue record wins: a revoked key that is still connected fails even when it is also listed.
+func TestDoctorKeysExternalKeysDoNotHideARevokedKey(t *testing.T) {
+	e := newXYEnv(t)
+	e.connect(natsauth.UserCredentials(e.credsPath(xy("x").String())), nats.Name("x-client"))
+	_, xKey := credsSubject(t, e.credsPath(xy("x").String()))
+	adm, ctx, closeAdm := e.admin()
+	defer closeAdm()
+	if err := adm.MarkRevoked(ctx, xKey, time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+	e.setExternal(`["` + xKey + `"]`)
+	if _, by, code := doctorJSON(t, e.run); code != 1 || by["keys"].State != "fail" || by["keys"].Detail != "1 revoked key is still connected" {
+		t.Fatalf("%d %+v", code, by["keys"])
+	}
+}
+
+// A malformed entry is a configuration error that names the entry.
+func TestDoctorExternalKeysMalformedIsAConfigError(t *testing.T) {
+	e := newXYEnv(t)
+	acct := e.acctPub
+	for raw, named := range map[string]string{
+		`"` + acct + `"`:   "external_keys",
+		`[42]`:             "42",
+		`["` + acct + `"]`: acct,
+		`["garbage"]`:      `"garbage"`,
+		`["*"]`:            `"*"`,
+		`[""]`:             `""`,
+	} {
+		e.setExternal(raw)
+		_, by, code := doctorJSON(t, e.run)
+		c := by["config"]
+		if code != 1 || c.State != "fail" || !strings.Contains(c.Detail, "external_keys") || !strings.Contains(c.Detail, named) {
+			t.Errorf("%s: %d %+v", raw, code, c)
+		}
 	}
 }

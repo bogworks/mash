@@ -19,6 +19,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/nats-io/nkeys"
+
 	"github.com/bogworks/mash/internal/namerule"
 	"github.com/bogworks/mash/internal/sap"
 	"github.com/bogworks/mash/internal/store"
@@ -90,6 +92,9 @@ type Config struct {
 	AcceptUnverified bool
 	Dir              string       // the config directory (ConfigDir); "" when none can be found
 	Limits           store.Limits // config.json "limits": inbox and bucket caps (defaults: store.DefaultLimits)
+	// ExternalKeys is config.json "external_keys": exact user public keys that other tools issued on this account.
+	// mashctl doctor does not fail a connected key listed here (unless the issue record holds it).
+	ExternalKeys []string
 
 	// The name-acceptance rule (docs/name-rule.md). Load reads the file once; a file that cannot be read or is invalid
 	// fails Load. NameRule is nil, and accepts everything, when no file is named.
@@ -158,6 +163,8 @@ type file struct {
 
 	NameRuleFile     json.RawMessage `json:"name_rule_file"`     // kept raw: null, "" and non-strings are present but invalid
 	NameRuleRequired json.RawMessage `json:"name_rule_required"` // kept raw: only true and false are valid
+
+	ExternalKeys json.RawMessage `json:"external_keys"` // kept raw: null or an array of user public keys
 }
 
 var nameRE = regexp.MustCompile(`^[a-z][a-z0-9]*(-[a-z0-9]+)*$`)
@@ -376,6 +383,9 @@ func ValidateFile(raw []byte) error {
 		return err
 	}
 	if _, err := nameRuleRequiredKey(f.NameRuleRequired); err != nil {
+		return err
+	}
+	if _, err := externalKeysKey(f.ExternalKeys); err != nil {
 		return err
 	}
 	return nil
@@ -600,6 +610,9 @@ func loadPicking(lookup Lookup, home string, autoPick bool) (Config, error) {
 	}
 
 	if c.Limits, err = ParseLimits(f.Limits); err != nil {
+		return c, err
+	}
+	if c.ExternalKeys, err = externalKeysKey(f.ExternalKeys); err != nil {
 		return c, err
 	}
 
@@ -918,6 +931,29 @@ func nameRuleFileKey(raw json.RawMessage) (path string, set bool, err error) {
 		return "", true, errors.New("mash: config.json \"name_rule_file\" must be a non-empty string: give the path of a name-rule file, or remove the key for no rule")
 	}
 	return v, true, nil
+}
+
+// externalKeysKey is the list in a present external_keys key (nil when absent or null): an array of user public keys.
+func externalKeysKey(raw json.RawMessage) ([]string, error) {
+	if t := strings.TrimSpace(string(raw)); t == "" || t == "null" {
+		return nil, nil
+	}
+	var items []json.RawMessage
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return nil, errors.New("mash: config.json \"external_keys\" must be an array of user public keys (U...)")
+	}
+	var keys []string
+	for _, it := range items {
+		var k string
+		if err := json.Unmarshal(it, &k); err != nil || strings.TrimSpace(string(it)) == "null" {
+			return nil, fmt.Errorf("mash: config.json \"external_keys\" entry %s is not a string: list user public keys (U...)", strings.TrimSpace(string(it)))
+		}
+		if !nkeys.IsValidPublicUserKey(k) {
+			return nil, fmt.Errorf("mash: config.json \"external_keys\" entry %q is not a user public key: list exact keys that start with U", k)
+		}
+		keys = append(keys, k)
+	}
+	return keys, nil
 }
 
 // nameRuleRequiredKey is the value of a present name_rule_required key (false when absent): only the JSON booleans.

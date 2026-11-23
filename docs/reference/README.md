@@ -41,7 +41,8 @@ from the spec.
     is working, and how many endpoints it has.
   - [`mashctl doctor`](mashctl-doctor.md): Check the server, mash's storage on
     it and every endpoint's records, and say how to fix what is wrong. Changes
-    nothing.
+    nothing. Keys that other tools issued on a shared account are accepted
+    when config.json lists them as external_keys.
   - [`mashctl limits`](mashctl-limits.md): Show or apply the storage limits.
     - [`mashctl limits show`](mashctl-limits-show.md): Print the limits in
       force.

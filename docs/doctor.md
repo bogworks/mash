@@ -69,7 +69,7 @@ server that does not answer shows one `FAIL` line and four `skip` lines, not fiv
 | `sign-in` | the server refuses the admin credentials, or they cannot be used | | `mashctl init --config <file>` |
 | `storage` | the directory or lease bucket is missing, the lease bucket allows rollup writes (it has not been hardened) or cannot be read | another bucket is missing, a bucket's size cap is below the configured one, or a bucket is 90% full or more | `mashctl init --config <file>` |
 | `endpoints` | a directory record cannot be read; an inbox has no endpoint record; a record has no inbox; an inbox lost mail unread; a retirement was started and not finished; the retired-name bucket has no size cap or a bad configuration | an inbox is 90% full or more; the retired-name bucket is at or over 50% of its cap; a lease has no endpoint record | the command for the first finding: `mashctl endpoint show ADDRESS`, `mashctl endpoint inbox ADDRESS`, `mashctl endpoint delete ADDRESS`, `mashctl limits apply ADDRESS` |
-| `keys` | a connected key was not issued here, a key recorded as revoked is still connected, or not every server answered | no `system_creds` in the configuration, so nothing was checked | `mashctl endpoint list`; `mashctl init --config <file>` |
+| `keys` | a connected key was not issued here and is not in `external_keys`, a key recorded as revoked is still connected, or not every server answered | no `system_creds` in the configuration, so nothing was checked | `mashctl endpoint list`; `mashctl init --config <file>` |
 
 When a check finds several things its detail lists them, separated by `;`, failures first, and names up to three
 addresses for each (`and N more` after that).
@@ -103,6 +103,19 @@ for every user JWT it issues). A key that is connected and not in the record was
 as revoked that is still connected means the revocation did not take effect (check that every server holds the account
 JWT with the revocation, and revoke the key again). No key is exempt, not even the admin user the command connects
 with: `mashctl init` records it. Only public keys are used.
+
+On a shared account, another tool may have issued users that mash did not. List their exact user public keys (`U...`)
+in `config.json` as `external_keys`, an array of strings. A connected key that is listed, and not in the record, is
+not a finding, and the line says so:
+
+```text
+keys       ok    every connected key was issued here or is listed in external_keys (1 external)
+```
+
+A key that is not listed and not in the record still fails, with or without `--strict`. A key the record holds keeps its
+own rules: a revoked key that is still connected fails even when it is also listed. An entry that is not a user public
+key is a configuration error that names the entry. With no `external_keys`, nothing changes. The list is per machine
+that runs `mashctl`, and an entry for a key that is no longer connected does no harm.
 
 The check is complete only when every server answered: the servers it expects are the count under `servers` in
 `config.json`, and a cluster that reports more servers than are listed is not complete either. A server that did not

@@ -145,35 +145,44 @@ The rules every mash command and tool follows.
    "dry_run": true. That is mashctl's changing commands and mash join. Sending
    a message is not such a change and has no --dry-run.
 
-23. help is also a command. 'mash help' and 'mash help send' print exactly
+23. Keys issued by other tools are listed, not forgiven. config.json takes
+   external_keys, an array of exact user public keys (U...) that other tools
+   issued on a shared account. mashctl doctor accepts a connected key that is
+   listed and not in the issue record, and its keys line says 'every connected
+   key was issued here or is listed in external_keys (1 external)'. Any other
+   key the record does not hold still fails, with or without --strict, and a
+   key the record holds as revoked fails even when it is listed. An entry that
+   is not a user public key is a configuration error that names the entry.
+
+24. help is also a command. 'mash help' and 'mash help send' print exactly
    what 'mash --help' and 'mash send --help' print, as git, kubectl and gh do.
    The same for mashctl.
 
-24. Every setting three ways. A flag, then an environment variable, then
+25. Every setting three ways. A flag, then an environment variable, then
    config.json. The flag wins.
 
-25. One spelling. An address is owner.group.name everywhere. NATS's and SAP's
+26. One spelling. An address is owner.group.name everywhere. NATS's and SAP's
    things keep NATS's and SAP's names. The same thing has the same column
    heading and the same field name in every command.
 
-26. A prefix selects, the way a domain name does. Where a command takes a
+27. A prefix selects, the way a domain name does. Where a command takes a
    prefix, acme means everything under acme, acme.demo everything under
    acme.demo, and a full address that one endpoint. acme.\* is accepted and
    means acme. There is no other pattern matching.
 
-27. Options go anywhere after the tool's name. Every option, global or the
+28. Options go anywhere after the tool's name. Every option, global or the
    command's own, is accepted before or after the command and its arguments,
    as with kubectl and gh. Help and documentation always write them last: mash
    status --endpoint acme.demo.alice.
 
-28. A sender's words are always marked as the sender's. Wherever mash prints a
+29. A sender's words are always marked as the sender's. Wherever mash prints a
    message's text in full, every line starts with '&gt; ' and control
    characters are escaped, at a shell and in an MCP tool alike. It reads as
    quoted mail does to a person, and it shows an agent where data from someone
    else begins and ends. A table's MESSAGE column holds the sender's words
    too.
 
-29. Encryption can be turned off in one way only, and it says so every time.
+30. Encryption can be turned off in one way only, and it says so every time.
    Both tools talk to the server over TLS. The one way to turn that off is the
    environment variable MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1. There is no
    flag and no configuration-file key for it: this is the one setting that
@@ -184,7 +193,7 @@ The rules every mash command and tool follows.
    MASH_INSECURE_PLAINTEXT and the key insecure_plaintext, are refused with an
    error naming the new one.
 
-30. A folder left by mash 0.5.5 is named for what it is. When the
+31. A folder left by mash 0.5.5 is named for what it is. When the
    configuration folder holds 0.5.5's settings (the keys url and tls_ca),
    every command of both tools stops with 'error: &lt;folder&gt; holds a mash
    0.5.5 configuration' and 'hint: &lt;release
@@ -196,8 +205,8 @@ The rules every mash command and tool follows.
    endpoint records 0.5.5 made, and endpoints of the two versions can mail
    each other on one server.
 
-31. Only a destructive command asks. It asks you to type the address, and
+32. Only a destructive command asks. It asks you to type the address, and
    --yes skips the question.
 
-32. Eighty columns, and color only on a terminal. --wide may be wider.
+33. Eighty columns, and color only on a terminal. --wide may be wider.
    NO_COLOR is honored.

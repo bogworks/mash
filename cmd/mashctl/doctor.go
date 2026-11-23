@@ -540,12 +540,19 @@ func scanConnections(ctx context.Context, nc *nats.Conn, account string, servers
 // connectedFindings sorts the connected keys against the issue record: the keys no record holds, and the keys the
 // record holds as revoked. No key is exempt: the admin user is in the account and init records it, and the system
 // account's users are never in the mash account's connection list.
-func connectedFindings(conns []apply.ConnzServer, recs []store.Issued) (unrecorded, revoked []string) {
+//
+// A key no record holds that is listed (config.json "external_keys") is not unrecorded: it goes to
+// external, which is no finding. A key the record holds is never external, listed or not.
+func connectedFindings(conns []apply.ConnzServer, recs []store.Issued, listed []string) (unrecorded, revoked, external []string) {
+	isListed := map[string]bool{}
+	for _, k := range listed {
+		isListed[k] = true
+	}
 	recorded := map[string]store.Issued{}
 	for _, r := range recs {
 		recorded[r.PublicKey] = r
 	}
-	seenU, seenR := map[string]bool{}, map[string]bool{}
+	seenU, seenR, seenE := map[string]bool{}, map[string]bool{}, map[string]bool{}
 	for _, s := range conns {
 		for _, c := range s.Conns {
 			if c.Key == "" {
@@ -553,6 +560,11 @@ func connectedFindings(conns []apply.ConnzServer, recs []store.Issued) (unrecord
 			}
 			r, ok := recorded[c.Key]
 			switch {
+			case !ok && isListed[c.Key]:
+				if !seenE[c.Key] {
+					seenE[c.Key] = true
+					external = append(external, c.Key)
+				}
 			case !ok && !seenU[c.Key]:
 				seenU[c.Key] = true
 				unrecorded = append(unrecorded, c.Key)
@@ -564,7 +576,8 @@ func connectedFindings(conns []apply.ConnzServer, recs []store.Issued) (unrecord
 	}
 	slices.Sort(unrecorded)
 	slices.Sort(revoked)
-	return unrecorded, revoked
+	slices.Sort(external)
+	return unrecorded, revoked, external
 }
 
 // doctorKeys is the keys check: every key connected to the account was issued here and none that was revoked is still
@@ -600,7 +613,7 @@ func doctorKeys(rep *doctorReport, ctx context.Context, adm *admin.Admin, cfg co
 		failKeys(err.Error())
 		return
 	}
-	unrecorded, revoked := connectedFindings(scan.Conns, recs)
+	unrecorded, revoked, external := connectedFindings(scan.Conns, recs, cfg.ExternalKeys)
 	var fails []finding
 	const fix = "mashctl endpoint list"
 	if n := len(unrecorded); n > 0 {
@@ -612,7 +625,11 @@ func doctorKeys(rep *doctorReport, ctx context.Context, adm *admin.Admin, cfg co
 	if scan.Incomplete != "" {
 		fails = append(fails, finding{oneLine(scan.Incomplete), initFix})
 	}
-	addFindings(rep, "keys", "every connected key was issued here", fails, nil)
+	okDetail := "every connected key was issued here"
+	if n := len(external); n > 0 {
+		okDetail = fmt.Sprintf("every connected key was issued here or is listed in external_keys (%d external)", n)
+	}
+	addFindings(rep, "keys", okDetail, fails, nil)
 }
 
 // anyPlainRefused reports whether any server in the list is a plain URL the encryption rule refuses: a configuration

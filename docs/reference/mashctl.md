@@ -33,7 +33,7 @@ These options work with every `mashctl` command.
 | --- | --- |
 | [`mashctl init`](mashctl-init.md) | Set mash up on a NATS server you already have, from a file. |
 | [`mashctl status`](mashctl-status.md) | Say in one line whether the server is working, and how many endpoints it has. |
-| [`mashctl doctor`](mashctl-doctor.md) | Check the server, mash's storage on it and every endpoint's records, and say how to fix what is wrong. Changes nothing. |
+| [`mashctl doctor`](mashctl-doctor.md) | Check the server, mash's storage on it and every endpoint's records, and say how to fix what is wrong. Changes nothing. Keys that other tools issued on a shared account are accepted when config.json lists them as external_keys. |
 | [`mashctl limits`](mashctl-limits.md) | Show or apply the storage limits. |
 | [`mashctl version`](mashctl-version.md) | Print the version. |
 

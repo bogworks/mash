@@ -89,6 +89,10 @@
    "detail": "It prints the usual line with 'Would' in front and changes nothing; with --json the object is the one the real run would print, plus \"dry_run\": true. That is mashctl's changing commands and mash join. Sending a message is not such a change and has no --dry-run."
   },
   {
+   "rule": "Keys issued by other tools are listed, not forgiven",
+   "detail": "config.json takes external_keys, an array of exact user public keys (U...) that other tools issued on a shared account. mashctl doctor accepts a connected key that is listed and not in the issue record, and its keys line says 'every connected key was issued here or is listed in external_keys (1 external)'. Any other key the record does not hold still fails, with or without --strict, and a key the record holds as revoked fails even when it is listed. An entry that is not a user public key is a configuration error that names the entry."
+  },
+  {
    "rule": "help is also a command",
    "detail": "'mash help' and 'mash help send' print exactly what 'mash --help' and 'mash send --help' print, as git, kubectl and gh do. The same for mashctl."
   },
