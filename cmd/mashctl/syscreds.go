@@ -71,7 +71,12 @@ func openKeys(cfg config.Config, env func(string) string) (*ctlkeys.Authority, e
 	if err != nil {
 		return nil, err
 	}
-	return ctlkeys.Open(dir)
+	ks, err := ctlkeys.Open(dir)
+	if err != nil {
+		return nil, err
+	}
+	ks.ExpectSigning(cfg.SigningKeyPub)
+	return ks, nil
 }
 
 // credsUserKey is the user public key (the JWT's subject) of the creds file at p; no seed is kept.

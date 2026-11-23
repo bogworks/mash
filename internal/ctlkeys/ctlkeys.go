@@ -38,6 +38,18 @@ var (
 	ErrSigningKeyLost = errors.New("mashctl: the account signing key was configured (signing.pub) but signing.nk is missing or is not that key: restore signing.nk, or run `mashctl init` again with signing_key set to the SAME key (any other key is refused)")
 )
 
+// SigningLostBothError is what Signing returns when config.json records a configured signing key (signing_key_pub)
+// and the key store holds neither signing.nk nor signing.pub. It is an ErrSigningKeyLost: the identity key must not
+// stand in for the signing key.
+type SigningLostBothError struct{ Pub string }
+
+func (e *SigningLostBothError) Error() string {
+	return fmt.Sprintf("mashctl: signing_key was configured (public key %s in config.json) but signing.nk and signing.pub are both missing from the key store: run `mashctl init --config <file>` with the same signing_key", e.Pub)
+}
+
+// Is makes the error an ErrSigningKeyLost.
+func (e *SigningLostBothError) Is(target error) bool { return target == ErrSigningKeyLost }
+
 const (
 	accountFile  = "account.nk"
 	signingFile  = "signing.nk"
@@ -67,6 +79,16 @@ var (
 type Authority struct {
 	dir string
 	mu  sync.Mutex
+	// expectSigning is the public key config.json says was configured as signing_key ("" when it says none).
+	expectSigning string
+}
+
+// ExpectSigning tells the store that config.json records a configured signing key (signing_key_pub): Signing then
+// refuses, as ErrSigningKeyLost, when signing.nk and signing.pub are both gone, instead of reporting no signing key.
+func (a *Authority) ExpectSigning(pub string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.expectSigning = pub
 }
 
 // DirFor is the key directory: $MASH_KEYS_DIR when absolute (a relative one is an error), else <cfg.Dir>/keys.
@@ -476,6 +498,12 @@ func (a *Authority) Signing() (nkeys.KeyPair, string, error) {
 	}
 	switch {
 	case rec == "":
+		a.mu.Lock()
+		exp := a.expectSigning
+		a.mu.Unlock()
+		if exp != "" && errors.Is(err, ErrNoSigningKey) {
+			return nil, "", &SigningLostBothError{Pub: exp}
+		}
 		return kp, pub, err
 	case err != nil:
 		// signing.nk simply missing: the record is the detail; a mode or read error is told as it is.

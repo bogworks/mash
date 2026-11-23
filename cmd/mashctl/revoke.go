@@ -33,6 +33,7 @@ func revokeUserKeys(ctx context.Context, cfg config.Config, env func(string) str
 	if err != nil {
 		return 0, err
 	}
+	ks.ExpectSigning(cfg.SigningKeyPub)
 	if _, err := sysCredsPath("", env, cfg); err != nil {
 		return 0, err
 	}
@@ -82,6 +83,7 @@ func readAccount(ctx context.Context, cfg config.Config, env func(string) string
 	if err != nil {
 		return false, err
 	}
+	ks.ExpectSigning(cfg.SigningKeyPub)
 	if _, err := sysCredsPath("", env, cfg); err != nil {
 		return false, err
 	}

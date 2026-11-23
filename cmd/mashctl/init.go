@@ -198,6 +198,8 @@ type initState struct {
 	haveOp, haveAcct bool   // the key store already holds this very key
 	haveSys          bool   // sys.creds already in place with the same content
 	haveCfg          bool   // config.json already holds these settings
+	cfgNeedSignPub   bool   // config.json exists and lacks signing_key_pub: init completes it
+	cfgSignPub       string // signing_key_pub of the existing config.json ("" when none)
 }
 
 // initResult is what `mashctl init --json` prints.
@@ -305,6 +307,7 @@ func doInit(setupPath string, dry, jsonOut bool, env func(string) string, lookup
 
 	// The key store, the destination files and config.json must not conflict: checked now so nothing is written on a
 	// refusal.
+	st.cfgSignPub = cfg.SigningKeyPub
 	if err := checkStore(ks, st); err != nil {
 		return failErr(err)
 	}
@@ -448,7 +451,7 @@ func doInit(setupPath string, dry, jsonOut bool, env func(string) string, lookup
 	if len(missing) > 0 {
 		steps = append(steps, step{"storage", strings.Join(missing, ", ")})
 	}
-	if needCfg {
+	if needCfg || st.cfgNeedSignPub {
 		steps = append(steps, step{"config", st.cfgPath})
 	}
 	changed := len(steps) > 0
@@ -500,6 +503,10 @@ func doInit(setupPath string, dry, jsonOut bool, env func(string) string, lookup
 			return failErr(err)
 		}
 		if _, err := ctlkeys.InstallFile(st.cfgPath, configJSON(initSettings(cfg, sf, st))); err != nil {
+			return failErr(err)
+		}
+	} else if st.cfgNeedSignPub {
+		if err := addSigningPub(st.cfgPath, st.signPub); err != nil {
 			return failErr(err)
 		}
 	}
@@ -627,6 +634,9 @@ func initSettings(cfg config.Config, sf setupFile, st *initState) map[string]any
 	if sf.ca != "" {
 		m["ca"] = sf.ca // the setup file's own ca only: never an environment setting or an old config.json's
 	}
+	if st.signPub != "" {
+		m["signing_key_pub"] = st.signPub // the PUBLIC key only: it tells a lost signing key from none ever configured
+	}
 	return m
 }
 
@@ -635,7 +645,7 @@ func configJSON(m map[string]any) []byte {
 	var b bytes.Buffer
 	b.WriteString("{\n")
 	var parts []string
-	for _, k := range []string{"servers", "ca", "owner", "admin_creds", "system_creds", "tls_cert", "tls_key"} {
+	for _, k := range []string{"servers", "ca", "owner", "admin_creds", "system_creds", "signing_key_pub", "tls_cert", "tls_key"} {
 		if v, ok := m[k]; ok {
 			enc, _ := json.Marshal(v)
 			parts = append(parts, fmt.Sprintf("  %q: %s", k, enc))
@@ -684,8 +694,56 @@ func checkConfigFile(st *initState, cfg config.Config, sf setupFile) error {
 	if len(differ) > 0 {
 		return differentSetup(st, map[string]string{"servers": "server", "ca": "server", "owner": "owner", "admin_creds": "admin creds", "system_creds": "system creds"}[differ[0]])
 	}
+	if st.signPub != "" {
+		var got string
+		rawv, present := have["signing_key_pub"]
+		if present {
+			_ = json.Unmarshal(rawv, &got)
+		}
+		switch {
+		case got != "" && got != st.signPub:
+			return differentSetup(st, "signing key")
+		case got == "":
+			st.cfgNeedSignPub = true
+		}
+	}
 	st.haveCfg = true
 	return nil
+}
+
+// addSigningPub completes an existing config.json with signing_key_pub (the public key only), keeping every other key,
+// by writing a 0600 temp file in the same folder and renaming it over the original.
+func addSigningPub(path, pub string) error {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var have map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &have); err != nil {
+		return fmt.Errorf("%s is not valid JSON: refusing to replace it. Move it aside", path)
+	}
+	enc, _ := json.Marshal(pub)
+	have["signing_key_pub"] = enc
+	out, err := json.MarshalIndent(have, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".config.json.tmp-")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	_, werr := tmp.Write(append(out, '\n'))
+	if werr == nil {
+		werr = tmp.Sync()
+	}
+	if cerr := tmp.Close(); werr == nil {
+		werr = cerr
+	}
+	if werr != nil {
+		return werr
+	}
+	return os.Rename(tmp.Name(), path)
 }
 
 // sameServers reports whether a config.json "servers" value (a list, or one comma-separated string) is want.
@@ -777,6 +835,11 @@ func checkStore(ks *ctlkeys.Authority, st *initState) error {
 	rec, _ := ks.SigningRecord()
 	switch {
 	case errors.Is(err, ctlkeys.ErrNoSigningKey):
+		// Both signing.nk and signing.pub are gone. config.json says whether a signing key was ever configured: then
+		// only the same signing_key restores it (a different one is refused with the config.json comparison).
+		if st.signPub == "" && st.cfgSignPub != "" {
+			return fmt.Errorf("signing_key was configured (public key %s in config.json) but signing.nk and signing.pub are both missing from the key store: give the same signing_key in the setup file (nothing was changed)", st.cfgSignPub)
+		}
 	case errors.Is(err, ctlkeys.ErrSigningKeyLost):
 		// signing.nk is gone: init with the same signing_key restores it; anything else is refused.
 		if st.signPub == "" {
