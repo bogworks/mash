@@ -137,3 +137,4 @@
 | [0157](0157-a-docs-only-pull-request-has-its-own-queue-and-needs-only-the-docs-lint.md) | A docs-only pull request has its own merge queue and needs only the docs lint | accepted | 2026-11-21 |
 | [0158](0158-mashctl-carries-the-accounts-plain-signing-keys-and-still-refuses-scoped-ones.md) | mashctl carries the account's plain signing keys and still refuses scoped ones | accepted | 2026-11-22 |
 | [0159](0159-the-0-5-7-gate-rulings-on-scoped-signing-keys-and-on-which-markdown-is-documentation.md) | The 0.5.7 gate rulings on scoped signing keys and on which Markdown is documentation | accepted | 2026-11-23 |
+| [0161](0161-the-policy-documents-range-field-flag-and-placeholder-are-renamed-prefix-with-no-old-name-accepted.md) | The policy document's range field, flag and placeholder are renamed prefix, with no old name accepted | accepted | 2026-11-23 |
