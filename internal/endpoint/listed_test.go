@@ -3,6 +3,7 @@ package endpoint
 import (
 	"context"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -126,25 +127,33 @@ func TestListedNeverWakes(t *testing.T) {
 // New mail wakes as usual, and the wake's summary does not announce the listed mail again.
 func TestListedMailDoesNotHideOrRepeatInANewWake(t *testing.T) {
 	listedKnobs(t)
-	// The first wake of held mail comes IdleWake after it is spooled; the digest below must land before it. At 300 ms a
-	// loaded runner can take longer than that between the spool and the listing, so the first wake fires for mail
-	// that was not yet listed. A long idle wake gives the listing a wide margin; the waits are bounded by it.
-	IdleWake = 2 * time.Second
+	// The first wake of held mail comes IdleWake after it is spooled; the serve loop must notice the digest before it.
+	// The test waits for that notice (waking_pending drops) instead of sleeping past the wake, and IdleWake is a wide
+	// margin over the spool-to-notice gap on a loaded runner. Every wait below is a bounded poll.
+	IdleWake = 5 * time.Second
 	f := newFixture(t, "a", "b")
-	_, ev, sp := f.runSpooled(t, "a")
+	a, ev, sp := f.runSpooled(t, "a")
 	if err := sp.Touch(); err != nil {
 		t.Fatal(err)
 	}
 	sendQuestions(t, f, 2)
-	until(t, "spooled", func() bool { return len(waiting(t, sp)) == 2 })
+	untilWithin(t, 30*time.Second, "spooled", func() bool { return len(waiting(t, sp)) == 2 }, func() string { return strconv.Itoa(len(waiting(t, sp))) + " spooled" })
+	untilWithin(t, 30*time.Second, "the count is known", func() bool { n, ok := a.waking.snapshot(); return ok && n == 2 }, func() string {
+		n, ok := a.waking.snapshot()
+		return "waking_pending " + strconv.Itoa(int(n)) + " known " + strconv.FormatBool(ok)
+	})
 	listAll(t, sp)
-	time.Sleep(IdleWake + IdleWake/2) // past the first wake it would have rung, were the mail not listed
+	untilWithin(t, 30*time.Second, "the serve loop notices the digest", func() bool { n, _ := a.waking.snapshot(); return n == 0 }, func() string {
+		n, _ := a.waking.snapshot()
+		return "waking_pending " + strconv.Itoa(int(n)) + ", events " + strings.Join(ev.all(), "|")
+	})
 	if got := ev.all(); len(got) != 0 {
 		t.Fatalf("woke for listed mail: %q", got)
 	}
 	sendQuestions(t, f, 1)
-	if got := ev.waitFor(t, 1, 30*time.Second); got[0] != "1 message from "+tdot("b")+" (question)" {
-		t.Fatalf("the wake %q, want the new message alone", got[0])
+	got := ev.waitFor(t, 1, 30*time.Second)
+	if got[0] != "1 message from "+tdot("b")+" (question)" || len(got) != 1 {
+		t.Fatalf("the wake %q, want the new message alone", got)
 	}
 }
 
