@@ -83,7 +83,7 @@ tilde() {
 # sticky folder owned by root above DIR, such as /tmp). A writable folder's
 # reason names the fix, chmod go-w.
 unsafe_path() {
-    local target=$1 c perms owner me
+    local target=$1 c perms owner me sq q
     me=$(id -u)
     c=$target
     while :; do
@@ -98,7 +98,9 @@ unsafe_path() {
         case "${perms:5:1}${perms:8:1}" in
         *w*)
             if [ "$c" = "$target" ] || [ "${perms:9:1}" != t ] || [ "$owner" != 0 ]; then
-                echo "$c is writable by its group or other users: not installing there. Fix: chmod go-w $c, then run the installer again"
+                sq="'\\''"
+                q=${c//\'/$sq}
+                echo "$c is writable by its group or other users: not installing there. Fix: chmod go-w '$q', then run the installer again"
                 return
             fi
             ;;
