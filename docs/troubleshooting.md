@@ -37,6 +37,12 @@ Fix, if you want the full check: install or update `gh` ([cli.github.com](https:
 
 `install.sh` stopped with `the attestation of the release's SHA256SUMS did not verify: nothing was installed`. Nothing was installed. Do not install from that download. Run the manual check in [Verify what you download](install.md#verify-what-you-download) for the tag you meant, and if it fails there too, report it through [SECURITY.md](../SECURITY.md).
 
+## `is writable by its group or other users: not installing there` from `install.sh`
+
+`install.sh` refuses a folder that its group or other users can write to, and it checks every folder above the install folder too. Nothing was installed. Claude Code's installer can leave `~/.local` and `~/.local/bin` writable by their group, so this is common when Claude Code was installed first.
+
+Fix: run the `chmod go-w '<folder>'` command the message prints (the folder is in single quotes, so a path with a space pastes safely) and run the install line again. It may then name the folder above it (for example `~/.local` after `~/.local/bin`): do the same. Or set `MASH_INSTALL_DIR` to a folder only you can write to.
+
 ## `mash is not installed`
 
 Full text: `mash is not installed: the mash plugin found no mash program. Install it: curl -fsSL https://github.com/bogworks/mash/releases/latest/download/install.sh | bash`. (That is the plugin's own text; do not pipe it. Download `install.sh` and `SHA256SUMS`, check, then `bash install.sh`, as the [install guide](install.md) shows.) The plugin's session-start hook prints it as one line on stdout, so the agent sees it and can tell you; the MCP launcher prints it on stderr after `mash launcher:` lines and exits 127, and the MCP server does not start. The line always names the project's own latest release, even when `MASH_RELEASE_BASE` is set.
