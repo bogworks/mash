@@ -159,6 +159,7 @@ func runPublish(o Options, w world, x string) error {
 		say("tag %s is at the candidate", tag)
 	}
 
+	publishedNow := false // this run called w.Publish
 	st, err := w.Release(tag)
 	if err != nil {
 		return failed(err)
@@ -203,6 +204,7 @@ func runPublish(o Options, w world, x string) error {
 			if err := w.Publish(tag); err != nil {
 				return stepErr(err) // no verifying SHA256SUMS.sig is a refusal (3); gh failing is not
 			}
+			publishedNow = true
 		}
 	}
 
@@ -220,11 +222,14 @@ func runPublish(o Options, w world, x string) error {
 	}
 	if err := verify(tag); err != nil {
 		// The release is already published: a failed check is not a refusal, so it is exit 4.
-		fix := "--latest"
+		// Only a run that just published may suggest moving Latest: a re-verify of an older release must not.
+		hint := fmt.Sprintf("gh release edit %s --latest", tag)
 		if o.NotLatest {
-			fix = "--latest=false"
+			hint = fmt.Sprintf("gh release edit %s --latest=false", tag)
+		} else if !publishedNow {
+			hint = "if this is an older release, rerun with --not-latest"
 		}
-		return stepErr(op(fmt.Errorf("%s is published; rerun to re-verify, or gh release edit %s %s: %w", tag, tag, fix, err)))
+		return stepErr(op(fmt.Errorf("%s is published; rerun to re-verify, or %s: %w", tag, hint, err)))
 	}
 	if err := w.Assets(); err != nil {
 		return stepErr(err)

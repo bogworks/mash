@@ -154,7 +154,7 @@ func TestPublish_rerunVerifiesNotLatest(t *testing.T) {
 		return false
 	}
 	o := Options{Version: "1.2.3", Wait: time.Minute, NotLatest: true}
-	t.Run("published and marked latest: refused", func(t *testing.T) {
+	t.Run("published and marked latest: exit 4, not a refusal", func(t *testing.T) {
 		f := newFake()
 		f.tagAt, f.release = "abc", relPublished
 		f.latestErr = errors.New("v1.2.3 was published with --not-latest but is marked latest")
@@ -184,7 +184,7 @@ func TestPublish_rerunVerifiesNotLatest(t *testing.T) {
 			t.Fatalf("no latest check: %v", f.calls)
 		}
 	})
-	t.Run("without the flag, published but not marked Latest: refused", func(t *testing.T) {
+	t.Run("without the flag, published but not marked Latest: exit 4, not a refusal", func(t *testing.T) {
 		f := newFake()
 		f.tagAt, f.release = "abc", relPublished
 		f.notMarkedLatest = errors.New("v1.2.3 was published but is not marked Latest")
@@ -715,10 +715,34 @@ func TestPublish_failedCheckAfterPublishIsExit4(t *testing.T) {
 		}
 		err := runPublish(Options{Version: "1.2.3", Wait: time.Minute, NotLatest: notLatest}, f, "abc")
 		want := "v1.2.3 is published; rerun to re-verify, or gh release edit v1.2.3 " + fix
+		if !notLatest {
+			want = "v1.2.3 is published; rerun to re-verify, or if this is an older release, rerun with --not-latest"
+		}
 		if err == nil || !strings.Contains(err.Error(), want) || exitCode(err) != 4 {
 			t.Errorf("notLatest=%v: got %v, exit %d", notLatest, err, exitCode(err))
 		}
 	}
+}
+
+func TestPublish_latestHintDependsOnWhoPublished(t *testing.T) {
+	t.Run("published by this run: suggests --latest", func(t *testing.T) {
+		f := newFake()
+		f.tagAt, f.release = "abc", relDraft
+		f.notMarkedLatest = errors.New("not marked Latest")
+		err := run(f)
+		if err == nil || exitCode(err) != 4 || !strings.Contains(err.Error(), "gh release edit v1.2.3 --latest") || strings.Contains(err.Error(), "--not-latest") {
+			t.Fatalf("got %v, exit %d", err, exitCode(err))
+		}
+	})
+	t.Run("already published: no --latest, suggests --not-latest", func(t *testing.T) {
+		f := newFake()
+		f.tagAt, f.release = "abc", relPublished
+		f.notMarkedLatest = errors.New("not marked Latest")
+		err := run(f)
+		if err == nil || exitCode(err) != 4 || strings.Contains(err.Error(), "--latest") || !strings.Contains(err.Error(), "older release, rerun with --not-latest") {
+			t.Fatalf("got %v, exit %d", err, exitCode(err))
+		}
+	})
 }
 
 func TestPublishRelease_notLatest(t *testing.T) {
@@ -776,9 +800,9 @@ func TestPublishRelease_latestPassesFlagAndVerifies(t *testing.T) {
 
 func TestPublishRelease_latestButAnotherIsLatest(t *testing.T) {
 	o, _ := ghLog(t, listNotLatest)
-	err := publishRelease(o, "v0.4.0", noSleep)
-	if err == nil || !strings.Contains(err.Error(), "not marked Latest") {
-		t.Fatalf("got %v", err)
+	err := stepErr(publishRelease(o, "v0.4.0", noSleep)) // as runPublish wraps it
+	if err == nil || !strings.Contains(err.Error(), "not marked Latest") || !strings.Contains(err.Error(), "is published; rerun") || exitCode(err) != 4 {
+		t.Fatalf("got %v, exit %d", err, exitCode(err))
 	}
 }
 
