@@ -138,3 +138,4 @@
 | [0158](0158-mashctl-carries-the-accounts-plain-signing-keys-and-still-refuses-scoped-ones.md) | mashctl carries the account's plain signing keys and still refuses scoped ones | accepted | 2026-11-22 |
 | [0159](0159-the-0-5-7-gate-rulings-on-scoped-signing-keys-and-on-which-markdown-is-documentation.md) | The 0.5.7 gate rulings on scoped signing keys and on which Markdown is documentation | accepted | 2026-11-23 |
 | [0160](0160-macos-runs-on-tagged-releases-only-and-the-ephemeral-pilot-runs-nightly.md) | macOS runs on tagged releases only, the ephemeral pilot runs nightly, and one pinned table says what runs when | accepted | 2026-11-23 |
+| [0164](0164-planned-output-is-written-in-x-output-next-and-spec-next-json-and-rendered-as-the-gate-1-demo.md) | Planned output is written in x-output-next and spec/next.json, and rendered as the Gate 1 demo | accepted | 2026-11-23 |
