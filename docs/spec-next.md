@@ -25,7 +25,7 @@ metadata entry:
 ## Everything else: `spec/next.json`
 
 ```json
-{"info": {"version": "0.5.8-spec.0"},
+{"info": {"version": "0.5.9-spec.0"},
  "items": [{"id": "...", "where": "install.sh|policy document|rules",
             "case": "...", "text": "...", "stream": "...", "exit": 0,
             "issue": "#...", "replaces": "...", "note": "..."}],
