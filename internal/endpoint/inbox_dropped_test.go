@@ -74,9 +74,9 @@ func TestReadInboxCountsDroppedFoundWhileToppingUp(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// enough newer mail that #2 and #3 are outside what the read fetches up front (the newest UrgentLook)
+	// enough newer mail that #2 and #3 are outside what the read fetches up front (past the first batch the read takes)
 	cc := f.client(t, "c")
-	for i := 0; i < UrgentLook; i++ {
+	for i := 0; i < fillerCount; i++ {
 		if _, err := cc.Send(ctx, tdot("a"), "filler", 0); err != nil {
 			t.Fatal(err)
 		}
@@ -92,7 +92,7 @@ func TestReadInboxCountsDroppedFoundWhileToppingUp(t *testing.T) {
 	if len(r.Mail) != 1 || r.Mail[0].Seq != 4 {
 		t.Fatalf("listed: %+v", r.Mail)
 	}
-	if want := UrgentLook + 1; r.State.Total != want || r.State.Waiting != want {
+	if want := fillerCount + 1; r.State.Total != want || r.State.Waiting != want {
 		t.Fatalf("total %d, waiting %d: want %d and %d", r.State.Total, r.State.Waiting, want, want)
 	}
 }
@@ -107,9 +107,9 @@ func TestReadInboxOldestWaitingSkipsADroppedMessageItFetches(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// enough newer mail that #2 is outside what the read fetches for the urgent count (the newest UrgentLook)
+	// enough newer mail that #2 is outside what the read fetches for the urgent count (past the first batch the read takes)
 	cc := f.client(t, "c")
-	for i := 0; i < UrgentLook; i++ {
+	for i := 0; i < fillerCount; i++ {
 		if _, err := cc.Send(ctx, tdot("a"), "filler", 0); err != nil {
 			t.Fatal(err)
 		}
@@ -131,7 +131,7 @@ func TestReadInboxOldestWaitingSkipsADroppedMessageItFetches(t *testing.T) {
 	}
 }
 
-// A dropped message that both the up-front wave and the top-up reach (the newest ones, inside the urgent look) is
+// A dropped message that both the up-front wave and the top-up reach (the newest ones, in the counting pass) is
 // counted out once, not twice.
 func TestReadInboxCountsADroppedMessageOnceWhenToppingUp(t *testing.T) {
 	f := newFixture(t, "a", "b", "c")
@@ -153,5 +153,61 @@ func TestReadInboxCountsADroppedMessageOnceWhenToppingUp(t *testing.T) {
 	}
 	if r.State.Total != 1 || r.State.Waiting != 1 {
 		t.Fatalf("total %d, waiting %d: want 1 and 1", r.State.Total, r.State.Waiting)
+	}
+}
+
+// fillerCount is how many newer messages the tests below pile on.
+const fillerCount = 200
+
+// Urgent mail is counted over the whole waiting backlog, not the newest few hundred: 250 waiting, urgent at #3 and #7.
+func TestReadInboxUrgentCountCoversTheWholeBacklog(t *testing.T) {
+	f := newFixture(t, "a", "b")
+	ctx := context.Background()
+	b := f.client(t, "b")
+	for i := 1; i <= 250; i++ {
+		if _, err := b.SendWith(ctx, tdot("a"), "m", SendOptions{Urgent: i == 3 || i == 7}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r, err := strict(t, f, "a").ReadInbox(ctx, InboxQuery{Limit: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.NewUrgent != 2 || r.State.Total != 250 || r.State.Waiting != 250 {
+		t.Fatalf("urgent %d, total %d, waiting %d: want 2, 250, 250", r.NewUrgent, r.State.Total, r.State.Waiting)
+	}
+}
+
+// An older waiting message from a deleted sender, far outside the listed window, is not counted in the total or the
+// new count, and the count the wake decides on is the inbox's own count. The dropped message is counted out once.
+func TestReadInboxAndWakeCountOlderDroppedMailOnce(t *testing.T) {
+	f := newFixture(t, "a", "b", "c")
+	ctx := context.Background()
+	if _, err := f.client(t, "b").Send(ctx, tdot("a"), "from b, soon gone", 0); err != nil {
+		t.Fatal(err)
+	}
+	cc := f.client(t, "c")
+	for i := 0; i < 250; i++ {
+		if _, err := cc.SendWith(ctx, tdot("a"), "m", SendOptions{Urgent: i == 100}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.adm.Deprovision(ctx, taddr("b")); err != nil {
+		t.Fatal(err)
+	}
+	a := strict(t, f, "a")
+	r, err := a.ReadInbox(ctx, InboxQuery{Limit: 3}) // the newest 3: #1 is far outside
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.State.Total != 250 || r.State.Waiting != 250 || r.NewUrgent != 1 {
+		t.Fatalf("total %d, waiting %d, urgent %d: want 250, 250, 1", r.State.Total, r.State.Waiting, r.NewUrgent)
+	}
+	n, oldest, ok := a.waitingNow()
+	if !ok || n != r.State.Waiting {
+		t.Fatalf("wake count %d (ok %v), inbox count %d", n, ok, r.State.Waiting)
+	}
+	if oldest.IsZero() || oldest.Before(r.State.OldestWaiting) || oldest.After(r.State.OldestWaiting) {
+		t.Fatalf("wake oldest %v, inbox oldest %v", oldest, r.State.OldestWaiting)
 	}
 }

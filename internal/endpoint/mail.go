@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -981,22 +982,19 @@ type InboxQuery struct {
 type InboxRead struct {
 	State InboxState
 	Mail  []render.Mail
-	// NewUrgent is how many waiting messages are urgent, among the newest UrgentLook of them (the whole count when
-	// fewer are waiting).
+	// NewUrgent is how many waiting messages are urgent: all of them, however long the backlog.
 	NewUrgent int
 }
 
-// UrgentLook is how many of the newest waiting messages ReadInbox reads to count the urgent ones; a body can be a
-// mebibyte, and a long backlog is not read whole for a count.
-const UrgentLook = 200
+// countBatch is how many messages the counting pass of ReadInbox reads before it judges them and lets go of their
+// bodies (a body can be a mebibyte).
+const countBatch = 128
 
-// oldestLookups bounds how many sequences are tried for the oldest waiting message: a message that is gone (expired or
-// deleted) is skipped, and a long run of them is not worth reading for.
-const oldestLookups = 20
-
-// ReadInbox reads the inbox consumer and stream, and the messages the query lists, the newest waiting ones and the
-// oldest waiting one, all in one wave of requests. An endpoint with no consumer yet has acknowledged nothing: every
-// message is waiting.
+// ReadInbox reads the inbox consumer and stream, and the messages the query lists, in one bounded pass: the listed
+// messages and every waiting one are read once, a batch at a time, and the totals, the waiting count, the urgent count
+// and the oldest waiting time are all taken from that pass, leaving out mail the list leaves out. The work is the
+// waiting backlog (plus the list), not the inbox's history. mash serve's backlog wake counts with this same read. An
+// endpoint with no consumer yet has acknowledged nothing: every message is waiting.
 func (e *Endpoint) ReadInbox(ctx context.Context, q InboxQuery) (InboxRead, error) {
 	s, err := e.inbox(ctx)
 	if err != nil {
@@ -1037,66 +1035,78 @@ func (e *Endpoint) ReadInbox(ctx context.Context, q InboxQuery) (InboxRead, erro
 		listSeqs = seqsDown(last, max(first, floor+1))
 	}
 	lower := max(st.AckFloor+1, first) // the oldest sequence that can be waiting
-	var waitSeqs []uint64
-	if st.Waiting > 0 && lower <= last {
-		waitSeqs = seqsUp(max(lower, last+1-min(last+1-lower, UrgentLook)), last)
-	}
-	want := map[uint64]bool{}
-	var seqs []uint64
-	add := func(n uint64) {
-		if !want[n] {
-			want[n] = true
-			seqs = append(seqs, n)
-		}
-	}
+	counting := st.Waiting > 0 && lower <= last
 	firstBatch := listSeqs[:min(len(listSeqs), q.Limit)]
+	listed := map[uint64]bool{}
 	for _, n := range firstBatch {
-		add(n)
+		listed[n] = true
 	}
-	for _, n := range waitSeqs {
-		add(n)
-	}
-	if st.Waiting > 0 && lower <= last {
-		add(lower)
-	}
-	raws := make([]*jetstream.RawStreamMsg, len(seqs))
-	errs := make([]error, len(seqs))
-	parallel(len(seqs), fetchConcurrency, func(i int) { raws[i], errs[i] = s.GetMsg(ctx, seqs[i]) })
-	got := map[uint64]*jetstream.RawStreamMsg{}
-	var read []*jetstream.RawStreamMsg
-	for i, n := range seqs {
-		switch {
-		case errs[i] == nil:
-			got[n] = raws[i]
-			read = append(read, raws[i])
-		case errors.Is(errs[i], jetstream.ErrMsgNotFound):
-		default:
-			return InboxRead{}, fmt.Errorf("mash: inbox: read #%s: %w", FormatMsgRef(MsgRef{Seq: n}), errs[i])
+	// One pass, oldest first, over the listed messages and every waiting one, a batch at a time (many requests in
+	// flight, each batch's bodies dropped before the next): the work is the waiting backlog, not the history.
+	seqs := append([]uint64(nil), firstBatch...)
+	if counting {
+		for n := lower; n <= last; n++ {
+			if !listed[n] {
+				seqs = append(seqs, n)
+			}
 		}
 	}
-	if err := e.loadSenders(ctx, read); err != nil {
-		return InboxRead{}, fmt.Errorf("mash: inbox: %w", err)
-	}
-	mails := map[uint64]render.Mail{}
-	// A message read in this wave that toMail drops (its sender is no longer verified, say) is not shown, so it is not
-	// counted. One already recorded as refused is out of the total (refusedStored); any other is taken off here, and off
-	// the waiting count when it is above the acknowledged floor (the same approximation as "new"). Only the messages
-	// read in this wave are examined: the listed ones and the newest UrgentLook waiting; an older waiting message that
-	// would be dropped is still counted.
+	slices.Sort(seqs)
+	mails := map[uint64]render.Mail{} // the listed ones only
+	// A message read that toMail drops (its sender is no longer verified, say) is not shown, so it is not counted. One
+	// already recorded as refused is out of the total (refusedStored); any other is taken off here, and off the
+	// waiting count when it is above the acknowledged floor (the same approximation as "new"). Every waiting message
+	// is read in the pass, so an older one that would be dropped is not counted either.
 	dropped := map[uint64]bool{}
 	id := e.inboxID.Load()
-	for n, raw := range got {
-		if m, ok := e.toMail(raw); ok {
-			mails[n] = m
-			continue
-		}
+	drop := func(n uint64) {
 		dropped[n] = true
 		if id != nil && e.refusedSeq(n, *id) {
-			continue
+			return
 		}
 		out.State.Total = max(out.State.Total-1, 0)
 		if n > st.AckFloor {
 			out.State.Waiting = max(out.State.Waiting-1, 0)
+		}
+	}
+	var oldest time.Time
+	for len(seqs) > 0 {
+		batch := seqs[:min(len(seqs), countBatch)]
+		seqs = seqs[len(batch):]
+		raws := make([]*jetstream.RawStreamMsg, len(batch))
+		errs := make([]error, len(batch))
+		parallel(len(batch), fetchConcurrency, func(i int) { raws[i], errs[i] = s.GetMsg(ctx, batch[i]) })
+		var read []*jetstream.RawStreamMsg
+		for i, n := range batch {
+			switch {
+			case errs[i] == nil:
+				read = append(read, raws[i])
+			case errors.Is(errs[i], jetstream.ErrMsgNotFound):
+			default:
+				return InboxRead{}, fmt.Errorf("mash: inbox: read #%s: %w", FormatMsgRef(MsgRef{Seq: n}), errs[i])
+			}
+		}
+		if err := e.loadSenders(ctx, read); err != nil {
+			return InboxRead{}, fmt.Errorf("mash: inbox: %w", err)
+		}
+		for i, n := range batch {
+			if raws[i] == nil {
+				continue
+			}
+			m, ok := e.toMail(raws[i])
+			if !ok {
+				drop(n)
+				continue
+			}
+			if listed[n] {
+				mails[n] = m
+			}
+			if n > st.AckFloor && m.Urgent {
+				out.NewUrgent++
+			}
+			if oldest.IsZero() && n >= lower {
+				oldest = raws[i].Time
+			}
 		}
 	}
 	for _, n := range firstBatch {
@@ -1110,17 +1120,9 @@ func (e *Endpoint) ReadInbox(ctx context.Context, q InboxQuery) (InboxRead, erro
 			return InboxRead{}, err
 		}
 		out.Mail = append(out.Mail, more...)
-		for _, n := range gone { // not shown, so not counted: the same rule as for the first wave
-			if dropped[n] { // already counted in the first wave (inside the newest UrgentLook waiting)
-				continue
-			}
-			dropped[n] = true
-			if id != nil && e.refusedSeq(n, *id) {
-				continue
-			}
-			out.State.Total = max(out.State.Total-1, 0)
-			if n > st.AckFloor {
-				out.State.Waiting = max(out.State.Waiting-1, 0)
+		for _, n := range gone { // not shown, so not counted: the same rule as for the pass
+			if !dropped[n] { // one the pass read is already counted
+				drop(n)
 			}
 		}
 	}
@@ -1128,39 +1130,9 @@ func (e *Endpoint) ReadInbox(ctx context.Context, q InboxQuery) (InboxRead, erro
 		sortMail(out.Mail)
 	}
 	if out.State.Waiting > 0 {
-		for n, m := range mails {
-			if n > st.AckFloor && m.Urgent {
-				out.NewUrgent++
-			}
-		}
-		oldest := time.Time{}
-		for n, tries := lower, 0; n <= last && tries < oldestLookups; n, tries = n+1, tries+1 {
-			raw := got[n]
-			if dropped[n] { // not shown: not the oldest waiting
-				continue
-			}
-			if raw == nil && !want[n] { // the first was gone: look at the next
-				r, err := s.GetMsg(ctx, n)
-				if errors.Is(err, jetstream.ErrMsgNotFound) {
-					continue
-				}
-				if err != nil {
-					return InboxRead{}, fmt.Errorf("mash: inbox: read #%d: %w", n, err)
-				}
-				raw = r
-				if err := e.loadSenders(ctx, []*jetstream.RawStreamMsg{raw}); err != nil {
-					return InboxRead{}, fmt.Errorf("mash: inbox: %w", err)
-				}
-				if _, shown := e.toMail(raw); !shown { // not shown: not the oldest waiting
-					continue
-				}
-			}
-			if raw != nil {
-				oldest = raw.Time
-				break
-			}
-		}
 		out.State.OldestWaiting = oldest
+	} else {
+		out.NewUrgent = 0
 	}
 	return out, nil
 }

@@ -284,7 +284,7 @@ func mailItem(m render.Mail, floor uint64, waiting bool) cmds.MailItem {
 
 // inboxOn is the inbox command's read of ep. The counts come from the server's consumer (what has not reached the
 // session), not from the messages listed: a listing is only a window. A message is new when it is above the consumer's
-// acknowledged floor. How many waiting messages are urgent is counted over the newest endpoint.UrgentLook of them.
+// acknowledged floor. How many waiting messages are urgent is counted over all of them, in the same pass as the totals.
 func inboxOn(ctx context.Context, ep *endpoint.Endpoint, q cmds.InboxQuery, w wakeSettings) (cmds.InboxView, error) {
 	r, err := ep.ReadInbox(ctx, endpoint.InboxQuery{OnlyNew: q.OnlyNew, After: uint64(q.After), Limit: q.Limit})
 	if err != nil {

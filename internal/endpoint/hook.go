@@ -432,6 +432,9 @@ func (e *Endpoint) wakeIfIdle(deliver Deliverer, h *held, hl Hookless) bool {
 // waits: 10 minutes (the specification's "at most once every 10 minutes and not in the first 10 minutes").
 const wakeCooldown = 10 * time.Minute
 
+// wakeRecount is how long a count of the inbox that found no backlog stands before the wake reads it again.
+const wakeRecount = time.Minute
+
 // backlogClock is the clock of the backlog wake and the age of the mail it judges; tests replace it.
 var backlogClock = time.Now
 
@@ -493,6 +496,24 @@ func (e *Endpoint) wakeBacklog(deliver Deliverer, h *held, hl Hookless) {
 	if !over {
 		return
 	}
+	// The held set says it may be a backlog; the decision is made on the inbox's own count (what `mash inbox` shows:
+	// one bounded pass over the waiting messages, leaving out mail the list leaves out). Mail whose sender is no longer
+	// verifiable, held from before, does not wake the session for mail it will not show. Without a reading, the held
+	// set stands.
+	// A count that said no is not asked again for wakeRecount: the check runs every tick.
+	if !e.wakeNoAt.IsZero() && now.Sub(e.wakeNoAt) < wakeRecount {
+		return
+	}
+	if n, at, ok := e.waitingNow(); ok {
+		over = e.cfg.WakeCount > 0 && n > e.cfg.WakeCount
+		if !over && e.cfg.WakeAge > 0 && n > 0 && !at.IsZero() {
+			over = now.Sub(at) > e.cfg.WakeAge
+		}
+		if !over {
+			e.wakeNoAt = now
+			return
+		}
+	}
 	sort.Slice(seqs, func(i, j int) bool { return seqs[i].Less(seqs[j]) })
 	mails := make([]render.Mail, len(seqs))
 	ids := make([]string, len(seqs))
@@ -519,6 +540,22 @@ func (e *Endpoint) wakeBacklog(deliver Deliverer, h *held, hl Hookless) {
 	// The backlog wake starts the idle backoff like any other wake, so an idle wake does not follow it within seconds.
 	h.wakeAt = now
 	h.wakes++
+}
+
+// waitingNow is the inbox's count of waiting messages and the time of the oldest, the same count `mash inbox` reports
+// (ReadInbox, new messages only: one bounded pass over the waiting backlog). ok is false when it cannot be read.
+func (e *Endpoint) waitingNow() (waiting int, oldest time.Time, ok bool) {
+	if e.js == nil {
+		return 0, time.Time{}, false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	r, err := e.ReadInbox(ctx, InboxQuery{OnlyNew: true})
+	if err != nil {
+		e.log.Printf("wake: inbox count not read, using the held mail: %v", err)
+		return 0, time.Time{}, false
+	}
+	return r.State.Waiting, r.State.OldestWaiting, true
 }
 
 // headroomTTL is how long a stream-info reading stands; headroomTimeout bounds one read.
