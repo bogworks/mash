@@ -150,7 +150,10 @@ The rules every mash command and tool follows.
    The same for mashctl.
 
 24. Every setting three ways. A flag, then an environment variable, then
-   config.json. The flag wins.
+   config.json. The flag wins. Two settings are the exception: the encryption
+   switch is an environment variable only, and external_keys (the user keys
+   mashctl doctor accepts that other tools issued) is a config.json key only,
+   with no flag or environment variable.
 
 25. One spelling. An address is owner.group.name everywhere. NATS's and SAP's
    things keep NATS's and SAP's names. The same thing has the same column
@@ -176,13 +179,13 @@ The rules every mash command and tool follows.
 29. Encryption can be turned off in one way only, and it says so every time.
    Both tools talk to the server over TLS. The one way to turn that off is the
    environment variable MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1. There is no
-   flag and no configuration-file key for it: this is the one setting that
-   cannot be given three ways, so that it cannot be left on in a file and
-   forgotten. While it is set, every command of both tools first prints, on
-   stderr: 'warning: encryption to the server is OFF
-   (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is set)'. The older names,
-   MASH_INSECURE_PLAINTEXT and the key insecure_plaintext, are refused with an
-   error naming the new one.
+   flag and no configuration-file key for it: this is one of two settings that
+   cannot be given three ways (external_keys, a config.json key only, is the
+   other), so that it cannot be left on in a file and forgotten. While it is
+   set, every command of both tools first prints, on stderr: 'warning:
+   encryption to the server is OFF (MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION is
+   set)'. The older names, MASH_INSECURE_PLAINTEXT and the key
+   insecure_plaintext, are refused with an error naming the new one.
 
 30. A folder left by mash 0.5.5 is named for what it is. When the
    configuration folder holds 0.5.5's settings (the keys url and tls_ca),
