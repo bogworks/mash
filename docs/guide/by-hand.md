@@ -13,17 +13,7 @@ on one machine. Everything goes in your home folder. Nothing needs sudo.
 
 ## 2. Install mash and mashctl
 
-Download the installer, check it, run it:
-
-```sh
-BASE=https://github.com/bogworks/mash/releases/latest/download
-curl -fsSLO $BASE/install.sh -O $BASE/SHA256SUMS &&
-grep ' install.sh$' SHA256SUMS | sha256sum -c - &&
-bash install.sh
-```
-
-On macOS use `shasum -a 256 -c -` in place of `sha256sum -c -`. Nothing runs
-unless the check passes.
+Download the installer, check it, run it: the three commands are in the README's [Install the programs yourself](../../README.md#install-the-programs-yourself). On macOS use `shasum -a 256 -c -` in place of `sha256sum -c -`. Nothing runs unless the check passes.
 
 An example of the output (your versions may differ):
 

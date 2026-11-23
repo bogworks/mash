@@ -22,14 +22,7 @@ mash is one static Go binary, and `install.sh` is the install: it puts `mash` an
 - The MCP server runs `${CLAUDE_PLUGIN_ROOT}/scripts/mash` directly, so the launcher needs its exec bit: git-based marketplace installs (`claude plugin marketplace add bogworks/mash`, then `claude plugin install mash@mash`) preserve the mode. The hooks run it as `sh ${CLAUDE_PLUGIN_ROOT}/scripts/mash`, which needs no exec bit.
 - Offline, or on an unsupported platform, the plugin uses a `mash` already on the `PATH` or a copy it downloaded earlier; if there is neither, it says so on stderr and the server does not start.
 
-To install the binaries (required for an unpinned plugin; also for the CLI in section 5), run the install script of the release. This is the install, three lines and a run:
-
-```sh
-BASE=https://github.com/bogworks/mash/releases/latest/download
-curl -fsSLO $BASE/install.sh -O $BASE/SHA256SUMS &&
-grep ' install.sh$' SHA256SUMS | sha256sum -c - &&  # macOS: shasum -a 256 -c -
-bash install.sh
-```
+To install the binaries (required for an unpinned plugin; also for the CLI in section 5), run the install script of the release. The install is the three commands in the README's [Install the programs yourself](../README.md#install-the-programs-yourself): download `install.sh`, check it against `SHA256SUMS`, run it.
 
 It finds the machine's type (Linux or macOS, amd64 or arm64), downloads `mash` and `mashctl` from the same release together with that release's `SHA256SUMS`, checks each binary against it, and puts both in `~/.local/bin` (`MASH_INSTALL_DIR` names another folder; `MASH_VERSION=v0.5.8` pins a release, and without it the script first looks up the latest release's tag and downloads from that tag; `MASH_REPO=owner/name` names another repository, default `bogworks/mash`, for the download, the tag lookup and the attestation check; a `MASH_RELEASE_BASE` mirror needs `MASH_VERSION`). It prints one line for each, with the path it used, for example `Installed mash v0.5.8 (8e8fe56) in ~/.local/bin`, asks nothing and needs no `sudo`. If the folder is not on your `PATH` it says so in one line. A symbolic link to the folder is followed. It refuses a folder that belongs to another user, or that, or any folder above it, other users can write to (a root-owned sticky folder such as `/tmp` above it is fine), and on any failed check nothing is installed; both binaries are staged before either is put in place. Ctrl-C, a closed terminal or a `kill` (SIGINT, SIGTERM, SIGHUP) while it swaps them in leaves both old or both new, never one of each; another signal, such as `kill -9` or SIGQUIT, can still split them in a very small window.
 

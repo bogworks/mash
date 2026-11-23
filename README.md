@@ -26,8 +26,6 @@ What each layer does: [the stack](docs/guide/stack.md).
 3. Location-agnostic.
 4. Agent discovery and presence.
 5. Agent wake on urgent message delivery.
-6. Agent-agnostic (ROADMAP).
-7. Messaging policy (ROADMAP).
 
 ## If you are an agent
 
