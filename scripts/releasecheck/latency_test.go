@@ -52,11 +52,7 @@ func TestJudgeLatency(t *testing.T) {
 		{"previous finding is a note", ok(100 * ms), ptr(withFinding(ok(100*ms), "fyi woke")), 0, []string{"the previous release v0.2.6: fyi woke"}},
 		{"candidate never delivered: one problem, no double count", withFinding(latencies{Fresh: freshTimeout}, "no notification"), ptr(ok(100 * ms)), 1, nil},
 	} {
-		tag := "v0.2.6"
-		if c.prev == nil {
-			tag = "" // the first release: there is no previous tag either
-		}
-		problems, notes := judgeLatency(c.cand, c.prev, tag)
+		problems, notes := judgeLatency(c.cand, c.prev, "v0.2.6")
 		if len(problems) != c.problems {
 			t.Errorf("%s: %d problems %v, want %d", c.name, len(problems), problems, c.problems)
 		}

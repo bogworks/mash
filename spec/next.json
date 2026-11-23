@@ -177,12 +177,12 @@
   {
    "id": "join-user-jwt-name-differs",
    "where": "mash join",
-   "case": "The join file's user JWT is named differently from its address",
-   "text": "error: <file> is not a join file this mash can read: its user JWT is\n  named \"<jwt name>\" but the join file's address is \"<address>\"; they\n  must be the same",
+   "case": "The join file's user JWT is named for another address",
+   "text": "error: mix.join was made for \"acme.demo.carol\", but its address is\n  \"acme.demo.bob\"\nhint: ask whoever made this file for a new one: mashctl endpoint reissue\n  acme.demo.bob --out acme.demo.bob.join",
    "stream": "stderr",
    "exit": 1,
    "issue": "#1303",
-   "note": "From ctl (head a10bccd). Only when the user JWT's name differs from the join file's address. Every other join-file problem keeps the old line `error: <file> is not a join file this mash can read`. One line in the program; wrapped here."
+   "note": "From ctl (final text, head f1c8b74; replaces ctl's earlier #1303 text). When the user JWT has no name: `error: mix.join has no name, but its address is \"acme.demo.bob\"` and the same hint. The old line `error: mix.join is not a join file this mash can read` stays for every other join-file problem. Lines wrapped here; one error line and one hint line in the program."
   },
   {
    "id": "setup-remove-port-held-1",
