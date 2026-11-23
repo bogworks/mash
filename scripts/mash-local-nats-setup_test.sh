@@ -11,6 +11,10 @@
 # on the host.  On exit (also on failure) it removes only this run's containers,
 # by name, this run's images, by recorded id, and its build directory.
 #
+# The script under test is a test copy made by mash-local-nats-setup-testcopy.sh:
+# the shipped script reads only `uname -s`, the copy also honours MLNT_UNAME. The
+# shipped script is mounted too, for the checks that it ignores MLNT_UNAME.
+#
 # Two modes per image: "linux" (the script as it runs on Linux) and "darwin"
 # (MLNT_UNAME=Darwin, so the script takes its macOS branches, with shims on PATH
 # that behave like the BSD tools: a stat that rejects -c and takes -f, no ss and
@@ -40,7 +44,8 @@
 # ======================================================================
 inside_main() {
 set -u
-SCRIPT=/t/mash-local-nats-setup.sh
+SCRIPT=/t/mash-local-nats-setup.sh          # the test copy (honours MLNT_UNAME)
+SHIPPED=/t/mash-local-nats-setup-shipped.sh # the shipped script, as released
 CASE=$1
 H=${HOME:?}
 W=$(mktemp -d "${TMPDIR:-/tmp}/w.XXXXXX")
@@ -909,11 +914,24 @@ case15() { # macOS support: no refusal, the BSD branches (darwin mode), neither 
     chk "--remove without ss and lsof: the dir is kept" [ -d "$d" ]
     PRE=(); ptyrun "$d" bash "$SCRIPT" --remove --dir "$d"
     chk "cleanup: --remove with the tools: exit 0" rc_is 0
-    # (b) MLNT_UNAME does not make the script refuse anything
+    # (b) MLNT_UNAME=Linux does not make the test copy refuse anything
     PRE=(env MLNT_UNAME=Linux)
     run --owner acme --dir "$H/lx"
-    chk "MLNT_UNAME=Linux: works as usual" rc_is 0
+    chk "test copy, MLNT_UNAME=Linux: works as usual" rc_is 0
     stopdir "$H/lx"
+    # (b2) the shipped script has no such hook
+    chk "shipped script: no MLNT_UNAME in it" bash -c '! grep -q MLNT_UNAME "$1"' _ "$SHIPPED"
+    chk "test copy: MLNT_UNAME is in it" grep -q MLNT_UNAME "$SCRIPT"
+    if [ "$SIM" != darwin ]; then
+        # MLNT_UNAME=Darwin on the shipped script is ignored: the Linux branches run
+        # (ss and /proc, no BSD stat), where the test copy would take the macOS ones.
+        PRE=(env MLNT_UNAME=Darwin)
+        SCRIPT_KEEP=$SCRIPT; SCRIPT=$SHIPPED
+        run --owner acme --dir "$H/lx2"
+        chk "shipped script, MLNT_UNAME=Darwin: still the Linux branches, works" rc_is 0
+        stopdir "$H/lx2"
+        SCRIPT=$SCRIPT_KEEP
+    fi
     if [ "$SIM" != darwin ]; then
         chk "linux mode: no shims on PATH" [ -z "$SHIMS" ]
         return 0
@@ -1605,6 +1623,8 @@ IMGLINES=''
 DISK0=''
 NATSHA=''
 SCRIPTSHA=$(sha256sum "$SCRIPT_SRC" | awk '{print $1}')
+# the test copy, built once from the shipped script into this run's build dir
+SCRIPT_COPY=$CTX/mash-local-nats-setup.sh
 
 write_receipt() {
     {
@@ -1615,13 +1635,14 @@ write_receipt() {
         echo "- date (UTC): $(date -u +%Y-%m-%dT%H:%M:%SZ)"
         echo "- test: scripts/mash-local-nats-setup_test.sh, sha256 $(sha256sum "$SELF_TEST" | awk '{print $1}')"
         echo "- script under test: scripts/mash-local-nats-setup.sh, sha256 $SCRIPTSHA"
+        echo "  (run through a test copy made by mash-local-nats-setup-testcopy.sh, sha256 $(sha256sum "$SCRIPT_COPY" | awk '{print $1}'), which only adds the MLNT_UNAME hook)"
         echo "- natscli v$NCV linux-amd64 zip, sha256 $NATSHA (pinned: $NATPIN)"
         echo "- podman: $(podman --version 2>/dev/null)"
         echo
         echo "## What the two modes prove"
         echo
         echo "- linux: the script as it runs on Linux (GNU stat, /proc, ss), the whole case list, unshimmed."
-        echo "- darwin: MLNT_UNAME=Darwin, so the script takes its macOS branches (BSD stat -f, ps and"
+        echo "- darwin: MLNT_UNAME=Darwin (honoured by the test copy only), so the script takes its macOS branches (BSD stat -f, ps and"
         echo "  lsof instead of /proc and ss), the same whole case list, on a PATH with shims that behave"
         echo "  like the BSD tools (stat rejects -c; no ss or sha256sum; lsof built on ss; ps and readlink"
         echo "  reject GNU-only flags; each shim call is logged and case 15 checks no call was rejected)."
@@ -1663,6 +1684,7 @@ DISK0=$(free_mb "$SCRATCH")
 [ "$(id -u)" -ne 0 ] || { echo "run as an ordinary user (rootless podman)" >&2; exit 2; }
 
 mkdir -p "$CTX" "$LOGS" || exit 2
+bash "$HERE/mash-local-nats-setup-testcopy.sh" "$SCRIPT_SRC" "$SCRIPT_COPY" || exit 2
 echo "== run $RUN: images: $IMAGES; cases: $CASES"
 if [ -n "${MLNT_MASHCTL:-}" ]; then
     [ -f "$MLNT_MASHCTL" ] || { echo "no $MLNT_MASHCTL (MLNT_MASHCTL)" >&2; exit 2; }
@@ -1739,7 +1761,8 @@ for tag in $IMAGES; do
         timeout 600 podman run --rm --name "$name" --user "$user" --network none \
             --security-opt no-new-privileges --cap-drop=all --pids-limit 2048 \
             -e MLNT_INSIDE=1 "${envs[@]+"${envs[@]}"}" \
-            -v "$SELF_TEST:/t/test.sh:ro" -v "$SCRIPT_SRC:/t/mash-local-nats-setup.sh:ro" \
+            -v "$SELF_TEST:/t/test.sh:ro" -v "$SCRIPT_COPY:/t/mash-local-nats-setup.sh:ro" \
+            -v "$SCRIPT_SRC:/t/mash-local-nats-setup-shipped.sh:ro" \
             ${MLNT_MASHCTL:+-v "$CTX/mashctl:/t/mashctl:ro"} \
             "$img" bash /t/test.sh "$n" >"$lg" 2>&1
         rc=$?
