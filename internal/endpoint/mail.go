@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -982,20 +981,57 @@ type InboxQuery struct {
 type InboxRead struct {
 	State InboxState
 	Mail  []render.Mail
-	// NewUrgent is how many waiting messages are urgent: all of them, however long the backlog.
+	// NewUrgent is how many waiting messages are urgent, among those the counting pass read: all of them unless Partial.
 	NewUrgent int
+	// Partial is set when the counting pass stopped at its cap (countMaxMsgs, countMaxBytes) with waiting messages
+	// unread, or failed part way. State.Total and State.Waiting are then the server's numbers less the dropped
+	// messages found so far (upper bounds), NewUrgent is the count in the part read (a lower bound) and OldestWaiting
+	// is the oldest waiting message read. Internal only: what a partial count says in the output is pending Gate 1,
+	// and nothing renders it yet.
+	Partial bool
+
+	dropped      map[uint64]bool // sequences the pass read and left out (sender no longer verified, say)
+	shownWaiting int             // waiting messages the pass read and kept: what the counts are at least
 }
 
 // countBatch is how many messages the counting pass of ReadInbox reads before it judges them and lets go of their
 // bodies (a body can be a mebibyte).
 const countBatch = 128
 
+// countBodyMax is the largest body a message can have; a batch is no bigger than the byte cap left can hold of them,
+// so the bytes read pass the cap by at most one body.
+const countBodyMax = 1 << 20
+
+// The cap of the counting pass of ReadInbox (the listed page is read outside it): the pass stops after this many
+// messages or this many bytes of bodies, whichever comes first (the batches shrink near the byte cap, so the
+// bytes pass it by at most one body). A never-read message at the acknowledged floor keeps the whole backlog waiting; the cost of a read
+// is still bounded (REQ-012). Variables so that tests can lower them.
+var (
+	countMaxMsgs  = 1000
+	countMaxBytes = 32 << 20
+)
+
 // ReadInbox reads the inbox consumer and stream, and the messages the query lists, in one bounded pass: the listed
-// messages and every waiting one are read once, a batch at a time, and the totals, the waiting count, the urgent count
-// and the oldest waiting time are all taken from that pass, leaving out mail the list leaves out. The work is the
-// waiting backlog (plus the list), not the inbox's history. mash serve's backlog wake counts with this same read. An
-// endpoint with no consumer yet has acknowledged nothing: every message is waiting.
+// messages are read, then the waiting ones oldest first from the acknowledged floor, a batch at a time, up to the cap
+// (countMaxMsgs messages or countMaxBytes of bodies). The totals, the waiting count, the urgent count and the oldest
+// waiting time are all taken from that pass, leaving out mail the list leaves out. Past the cap the read is Partial
+// (see InboxRead). mash serve's backlog wake counts with this same read. An endpoint with no consumer yet has
+// acknowledged nothing: every message is waiting.
+//
+// "New" and "urgent" are counted above the acknowledged floor, which is not the set of unacknowledged messages: urgent
+// mail acknowledged out of order (above the floor, already acked) is still counted in NewUrgent, the same approximation
+// as for the new count.
 func (e *Endpoint) ReadInbox(ctx context.Context, q InboxQuery) (InboxRead, error) {
+	r, err := e.readInbox(ctx, q)
+	if err != nil {
+		return InboxRead{}, err
+	}
+	return r, nil
+}
+
+// readInbox is ReadInbox, but an error that stops the counting pass part way comes back with the Partial read so far
+// (the backlog wake decides on it); any other error comes back with an empty one.
+func (e *Endpoint) readInbox(ctx context.Context, q InboxQuery) (InboxRead, error) {
 	s, err := e.inbox(ctx)
 	if err != nil {
 		return InboxRead{}, err
@@ -1041,23 +1077,15 @@ func (e *Endpoint) ReadInbox(ctx context.Context, q InboxQuery) (InboxRead, erro
 	for _, n := range firstBatch {
 		listed[n] = true
 	}
-	// One pass, oldest first, over the listed messages and every waiting one, a batch at a time (many requests in
-	// flight, each batch's bodies dropped before the next): the work is the waiting backlog, not the history.
-	seqs := append([]uint64(nil), firstBatch...)
-	if counting {
-		for n := lower; n <= last; n++ {
-			if !listed[n] {
-				seqs = append(seqs, n)
-			}
-		}
-	}
-	slices.Sort(seqs)
+	// The listed messages are read first (outside the cap), then the waiting ones oldest first, a batch at a time (many
+	// requests in flight, each batch's bodies dropped before the next), until the cap (countMaxMsgs, countMaxBytes).
 	mails := map[uint64]render.Mail{} // the listed ones only
 	// A message read that toMail drops (its sender is no longer verified, say) is not shown, so it is not counted. One
 	// already recorded as refused is out of the total (refusedStored); any other is taken off here, and off the
-	// waiting count when it is above the acknowledged floor (the same approximation as "new"). Every waiting message
-	// is read in the pass, so an older one that would be dropped is not counted either.
+	// waiting count when it is above the acknowledged floor (the same approximation as "new"). Every message the pass
+	// reads is judged so; an older waiting one past the cap is not read, and stays counted.
 	dropped := map[uint64]bool{}
+	out.dropped = dropped
 	id := e.inboxID.Load()
 	drop := func(n uint64) {
 		dropped[n] = true
@@ -1070,43 +1098,94 @@ func (e *Endpoint) ReadInbox(ctx context.Context, q InboxQuery) (InboxRead, erro
 		}
 	}
 	var oldest time.Time
-	for len(seqs) > 0 {
-		batch := seqs[:min(len(seqs), countBatch)]
-		seqs = seqs[len(batch):]
-		raws := make([]*jetstream.RawStreamMsg, len(batch))
-		errs := make([]error, len(batch))
-		parallel(len(batch), fetchConcurrency, func(i int) { raws[i], errs[i] = s.GetMsg(ctx, batch[i]) })
-		var read []*jetstream.RawStreamMsg
-		for i, n := range batch {
-			switch {
-			case errs[i] == nil:
-				read = append(read, raws[i])
-			case errors.Is(errs[i], jetstream.ErrMsgNotFound):
-			default:
-				return InboxRead{}, fmt.Errorf("mash: inbox: read #%s: %w", FormatMsgRef(MsgRef{Seq: n}), errs[i])
+	var oldestSeq uint64
+	// scan reads seqs a batch at a time and judges them; it returns the bytes of the bodies read.
+	scan := func(seqs []uint64) (int, error) {
+		bytes := 0
+		for len(seqs) > 0 {
+			batch := seqs[:min(len(seqs), countBatch)]
+			seqs = seqs[len(batch):]
+			raws := make([]*jetstream.RawStreamMsg, len(batch))
+			errs := make([]error, len(batch))
+			parallel(len(batch), fetchConcurrency, func(i int) { raws[i], errs[i] = s.GetMsg(ctx, batch[i]) })
+			var read []*jetstream.RawStreamMsg
+			for i, n := range batch {
+				switch {
+				case errs[i] == nil:
+					read = append(read, raws[i])
+					bytes += len(raws[i].Data)
+				case errors.Is(errs[i], jetstream.ErrMsgNotFound):
+				default:
+					return bytes, fmt.Errorf("mash: inbox: read #%s: %w", FormatMsgRef(MsgRef{Seq: n}), errs[i])
+				}
+			}
+			if err := e.loadSenders(ctx, read); err != nil {
+				return bytes, fmt.Errorf("mash: inbox: %w", err)
+			}
+			for i, n := range batch {
+				if raws[i] == nil {
+					continue
+				}
+				m, ok := e.toMail(raws[i])
+				if !ok {
+					drop(n)
+					continue
+				}
+				if listed[n] {
+					mails[n] = m
+				}
+				if n > st.AckFloor {
+					out.shownWaiting++
+					if m.Urgent {
+						out.NewUrgent++
+					}
+				}
+				if n >= lower && (oldestSeq == 0 || n < oldestSeq) {
+					oldest, oldestSeq = raws[i].Time, n
+				}
 			}
 		}
-		if err := e.loadSenders(ctx, read); err != nil {
-			return InboxRead{}, fmt.Errorf("mash: inbox: %w", err)
+		return bytes, nil
+	}
+	finish := func() {
+		if out.State.Waiting > 0 {
+			out.State.OldestWaiting = oldest
+		} else {
+			out.NewUrgent, out.shownWaiting = 0, 0
 		}
-		for i, n := range batch {
-			if raws[i] == nil {
-				continue
+	}
+	fail := func(err error) (InboxRead, error) { // the read so far goes back with the error (the wake decides on it)
+		out.Partial = true
+		finish()
+		return out, err
+	}
+	if _, err := scan(firstBatch); err != nil {
+		return fail(err)
+	}
+	if counting {
+		scanned, bytes := 0, 0
+		for n := lower; n <= last; {
+			if scanned >= countMaxMsgs || bytes >= countMaxBytes {
+				for ; n <= last; n++ { // is anything but the listed left unread?
+					if !listed[n] {
+						out.Partial = true
+						break
+					}
+				}
+				break
 			}
-			m, ok := e.toMail(raws[i])
-			if !ok {
-				drop(n)
-				continue
+			var batch []uint64
+			for ; n <= last && len(batch) < min(countBatch, countMaxMsgs-scanned, max(1, (countMaxBytes-bytes)/countBodyMax)); n++ {
+				if !listed[n] {
+					batch = append(batch, n)
+				}
 			}
-			if listed[n] {
-				mails[n] = m
+			b, err := scan(batch)
+			if err != nil {
+				return fail(err)
 			}
-			if n > st.AckFloor && m.Urgent {
-				out.NewUrgent++
-			}
-			if oldest.IsZero() && n >= lower {
-				oldest = raws[i].Time
-			}
+			scanned += len(batch)
+			bytes += b
 		}
 	}
 	for _, n := range firstBatch {
@@ -1129,11 +1208,7 @@ func (e *Endpoint) ReadInbox(ctx context.Context, q InboxQuery) (InboxRead, erro
 	if q.After == 0 {
 		sortMail(out.Mail)
 	}
-	if out.State.Waiting > 0 {
-		out.State.OldestWaiting = oldest
-	} else {
-		out.NewUrgent = 0
-	}
+	finish()
 	return out, nil
 }
 

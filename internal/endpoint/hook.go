@@ -504,17 +504,35 @@ func (e *Endpoint) wakeBacklog(deliver Deliverer, h *held, hl Hookless) {
 	if !e.wakeNoAt.IsZero() && now.Sub(e.wakeNoAt) < wakeRecount {
 		return
 	}
-	if n, at, ok := e.waitingNow(); ok {
-		over = e.cfg.WakeCount > 0 && n > e.cfg.WakeCount
-		if !over && e.cfg.WakeAge > 0 && n > 0 && !at.IsZero() {
-			over = now.Sub(at) > e.cfg.WakeAge
+	count, at := len(seqs), oldest
+	var dropped map[uint64]bool
+	if rd, ok := e.waitingNow(now); ok {
+		over = e.cfg.WakeCount > 0 && rd.waiting > e.cfg.WakeCount
+		if !over && e.cfg.WakeAge > 0 && rd.waiting > 0 && !rd.oldest.IsZero() {
+			over = now.Sub(rd.oldest) > e.cfg.WakeAge
 		}
 		if !over {
 			e.wakeNoAt = now
 			return
 		}
+		// The line and the meta say what the decision was made on: the reading's count and oldest, and the held mail
+		// the inbox count left out is not shown.
+		count, dropped = rd.waiting, rd.dropped
+		if !rd.oldest.IsZero() {
+			at = rd.oldest
+		}
 	}
 	sort.Slice(seqs, func(i, j int) bool { return seqs[i].Less(seqs[j]) })
+	kept := seqs[:0]
+	for _, seq := range seqs {
+		if !dropped[seq.Seq] {
+			kept = append(kept, seq)
+		}
+	}
+	seqs = kept
+	if len(seqs) == 0 {
+		return
+	}
 	mails := make([]render.Mail, len(seqs))
 	ids := make([]string, len(seqs))
 	listed := 0
@@ -526,11 +544,14 @@ func (e *Endpoint) wakeBacklog(deliver Deliverer, h *held, hl Hookless) {
 		}
 	}
 	line, _, _ := strings.Cut(render.Batch(e.cfg.Name, e.cfg.Owner, mails, e.cfg.BatchMsgs, e.cfg.BatchBytes), "\n")
-	line += " waiting, the oldest for " + cmdrender.Age(now.Sub(oldest)) + "."
+	if count != len(mails) { // the line leads with the number of messages: the reading's, not the held set's
+		line = strings.Replace(line, messageCount(len(mails)), messageCount(count), 1)
+	}
+	line += " waiting, the oldest for " + cmdrender.Age(now.Sub(at)) + "."
 	if listed > 0 {
 		line += " " + strconv.Itoa(listed) + " already listed: read them with the read tool (#seq)."
 	}
-	meta := map[string]string{"to": e.cfg.Name, "count": strconv.Itoa(len(mails)), "seqs": strings.Join(ids, ","), "wake": "true"}
+	meta := map[string]string{"to": e.cfg.Name, "count": strconv.Itoa(count), "seqs": strings.Join(ids, ","), "wake": "true"}
 	if err := deliver(line, meta); err != nil {
 		e.log.Printf("wake failed, retried next check: %v", err)
 		return
@@ -542,20 +563,51 @@ func (e *Endpoint) wakeBacklog(deliver Deliverer, h *held, hl Hookless) {
 	h.wakes++
 }
 
+// messageCount is "1 message" or "N messages", as the summary line of a batch says it.
+func messageCount(n int) string {
+	if n == 1 {
+		return "1 message"
+	}
+	return strconv.Itoa(n) + " messages"
+}
+
+// waitingReading is the inbox's count for the backlog wake.
+type waitingReading struct {
+	waiting int             // messages waiting, as `mash inbox` counts them (an upper bound when the read was partial)
+	oldest  time.Time       // the oldest waiting message read
+	dropped map[uint64]bool // sequences the count leaves out
+}
+
+// wakeReadTimeout bounds the wake's read of the inbox; the settle loop waits on it.
+const wakeReadTimeout = 5 * time.Second
+
 // waitingNow is the inbox's count of waiting messages and the time of the oldest, the same count `mash inbox` reports
-// (ReadInbox, new messages only: one bounded pass over the waiting backlog). ok is false when it cannot be read.
-func (e *Endpoint) waitingNow() (waiting int, oldest time.Time, ok bool) {
+// (readInbox, new messages only: one pass over the waiting backlog, bounded by the same cap). ok is false when the
+// count cannot be used: not read, or only partly read (the cap, an error, the timeout) with what was read not yet over
+// the wake's count or age. When what was read is already over, the decision is made on it.
+func (e *Endpoint) waitingNow(now time.Time) (rd waitingReading, ok bool) {
 	if e.js == nil {
-		return 0, time.Time{}, false
+		return waitingReading{}, false
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), wakeReadTimeout)
 	defer cancel()
-	r, err := e.ReadInbox(ctx, InboxQuery{OnlyNew: true})
-	if err != nil {
+	r, err := e.readInbox(ctx, InboxQuery{OnlyNew: true})
+	if err != nil && !r.Partial {
 		e.log.Printf("wake: inbox count not read, using the held mail: %v", err)
-		return 0, time.Time{}, false
+		return waitingReading{}, false
 	}
-	return r.State.Waiting, r.State.OldestWaiting, true
+	rd = waitingReading{waiting: r.State.Waiting, oldest: r.State.OldestWaiting, dropped: r.dropped}
+	if !r.Partial {
+		return rd, true
+	}
+	over := e.cfg.WakeCount > 0 && r.shownWaiting > e.cfg.WakeCount
+	if !over && e.cfg.WakeAge > 0 && r.shownWaiting > 0 && !r.State.OldestWaiting.IsZero() {
+		over = now.Sub(r.State.OldestWaiting) > e.cfg.WakeAge
+	}
+	if !over {
+		e.log.Printf("wake: inbox count only partly read (err %v), using the held mail", err)
+	}
+	return rd, over
 }
 
 // headroomTTL is how long a stream-info reading stands; headroomTimeout bounds one read.
