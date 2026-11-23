@@ -16,7 +16,7 @@ Update both plugins, `mash` and `mash-setup`, then restart your Claude Code sess
 
 ### Added
 
-- `mashctl doctor` no longer fails because a connected user was not issued by mashctl; it says how many other users are connected, and the new `--audit-users` fails on them and names each key; a missing issue store fails the keys row ([#1300](https://github.com/bogworks/mash/issues/1300)).
+- `mashctl doctor` no longer fails because a connected user was not issued by mashctl; it says how many other users are connected, and the new `--audit-users` fails on them and names each key; a missing issue store fails the keys row; it no longer fails when other tools' connections change while it reads, and warns if mashctl's users keep connecting and leaving ([#1300](https://github.com/bogworks/mash/issues/1300)).
 
 ### Changed
 

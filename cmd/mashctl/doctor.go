@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
@@ -515,7 +517,19 @@ type connScan struct {
 	// Incomplete says why the scan is not the whole picture ("" when it is): the server set is incomplete, a server did
 	// not answer the connection list, or a list was not read whole.
 	Incomplete string
+	// Unsettled is true when the only reason for Incomplete is that some server's list kept changing while it was read:
+	// the server set is complete and every server answered. Another read may settle; it is not a missing server.
+	Unsettled bool
 }
+
+// churnTries is how many times the keys check reads the connections when the lists keep changing; churnPause is the
+// short wait between two reads (tests set it to 0).
+const churnTries = 3
+
+var churnPause = 300 * time.Millisecond
+
+// scanConns reads the connections; a variable so tests can script a sequence of results.
+var scanConns = scanConnections
 
 // scanConnections reads the connections of account from every server over nc (a system account connection). An error is
 // a failure to ask at all; a partial answer is reported in Incomplete, never passed over.
@@ -550,6 +564,7 @@ func scanConnections(ctx context.Context, nc *nats.Conn, account string, servers
 		sc.Incomplete = fmt.Sprintf("%d server(s) answered the ping but not the connection list: %s", len(missing), config.Clean(strings.Join(missing, ", ")))
 	}
 	if len(unreconciled) > 0 {
+		sc.Unsettled = sc.Incomplete == ""
 		why := strings.Join(unreconciled, "; ")
 		if sc.Incomplete != "" {
 			why = sc.Incomplete + "; " + why
@@ -639,12 +654,64 @@ func doctorKeys(rep *doctorReport, ctx context.Context, adm *admin.Admin, cfg co
 	defer nc.Close()
 	ctx, cancel := context.WithTimeout(ctx, applyDeadline)
 	defer cancel()
-	scan, err := scanConnections(ctx, nc, account, serverCount(cfg))
-	if err != nil {
-		failKeys(err.Error())
-		return
+	var attempts []connScan
+	stopped := false // the deadline or a cancel ended the reads after at least one complete one
+	for i := 0; i < churnTries && !stopped; i++ {
+		if i > 0 && churnPause > 0 {
+			t := time.NewTimer(churnPause)
+			select {
+			case <-ctx.Done():
+				t.Stop()
+				stopped = true
+			case <-t.C:
+			}
+			if stopped {
+				break
+			}
+		}
+		sc, err := scanConns(ctx, nc, account, serverCount(cfg))
+		if err != nil {
+			if len(attempts) > 0 && (ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)) {
+				stopped = true
+				break
+			}
+			failKeys(err.Error())
+			return
+		}
+		attempts = append(attempts, sc)
+		if !sc.Unsettled {
+			break
+		}
+	}
+	scan := attempts[len(attempts)-1]
+	var warns []finding
+	churn := false
+	if scan.Unsettled {
+		// Every read so far was unsettled (the loop ends early only on a settled one): after the last try, or when the
+		// deadline stopped the reads.
+		reads := "read " + plural(len(attempts), "once", fmt.Sprintf("%d times", len(attempts)))
+		if !auditUsers {
+			// Churn among users mashctl did not issue is not a finding; churn of one of mashctl's users is.
+			if churnIsMashs(attempts, recs) {
+				warns = append(warns, finding{"mashctl's users kept connecting and leaving; " + reads, "wait a minute, then run mashctl doctor again"})
+			}
+			scan.Incomplete = ""
+		} else {
+			churn = true
+			scan.Incomplete = fmt.Sprintf("%s; %s", scan.Incomplete, reads)
+		}
 	}
 	unrecorded, keyless, revoked := connectedFindings(scan.Conns, recs)
+	// A key recorded as revoked that was connected in ANY read counts, even when the last read no longer saw it.
+	for _, a := range attempts[:len(attempts)-1] {
+		_, _, r := connectedFindings(a.Conns, recs)
+		for _, k := range r {
+			if !slices.Contains(revoked, k) {
+				revoked = append(revoked, k)
+			}
+		}
+	}
+	slices.Sort(revoked)
 	var fails []finding
 	const fix = "mashctl endpoint list"
 	auditFix := "revoke it with the tool that issued it (mashctl revokes only its own)"
@@ -655,7 +722,11 @@ func doctorKeys(rep *doctorReport, ctx context.Context, adm *admin.Admin, cfg co
 		fails = append(fails, finding{fmt.Sprintf("%s still connected", count(n, "revoked key")+" "+plural(n, "is", "are")), fix})
 	}
 	if scan.Incomplete != "" {
-		fails = append(fails, finding{oneLine(scan.Incomplete), initFix})
+		f := finding{oneLine(scan.Incomplete), initFix}
+		if churn && len(fails) == 0 && len(unrecorded)+keyless == 0 {
+			f.fix = "wait a minute, then run mashctl doctor --audit-users again"
+		}
+		fails = append(fails, f)
 	}
 	auditText := ""
 	audited := auditUsers && len(unrecorded)+keyless > 0
@@ -670,13 +741,56 @@ func doctorKeys(rep *doctorReport, ctx context.Context, adm *admin.Admin, cfg co
 		other = fmt.Sprintf("%s, not issued by mashctl", count(n, "other user"))
 		okDetail = "mashctl's users ok; " + other
 	}
-	addFindings(rep, "keys", okDetail, fails, nil)
+	addFindings(rep, "keys", okDetail, fails, warns)
 	if c := &rep.Checks[len(rep.Checks)-1]; audited && len(fails) > 1 { // the audit sentence starts a line of its own
 		c.Detail = strings.Replace(c.Detail, "; "+auditText, "\n"+auditText, 1)
 	}
-	if c := &rep.Checks[len(rep.Checks)-1]; other != "" && c.State == stateFail { // the count stays on a line of its own
+	if c := &rep.Checks[len(rep.Checks)-1]; other != "" && (c.State == stateFail || c.State == stateWarn) { // the count stays on a line of its own
 		c.Detail += "\n" + other
 	}
+}
+
+// churnIsMashs reports whether mashctl's users came or went between the reads: some key the issue record holds has a
+// different set of connection ids in two reads (a recorded key appearing or disappearing counts). Foreign keys,
+// keyless connections and a foreign key reconnecting are not mashctl's. With one read there is nothing to compare, and
+// mashctl's users cannot be ruled out (the deadline stopped the reads), so it reports true. With several reads that
+// differ in nothing, it reports false.
+func churnIsMashs(attempts []connScan, recs []store.Issued) bool {
+	if len(attempts) < 2 {
+		return true
+	}
+	recorded := map[string]bool{}
+	for _, r := range recs {
+		recorded[r.PublicKey] = true
+	}
+	sets := func(a connScan) map[string]map[string]bool {
+		m := map[string]map[string]bool{}
+		for _, s := range a.Conns {
+			for _, c := range s.Conns {
+				if !recorded[c.Key] {
+					continue
+				}
+				if m[c.Key] == nil {
+					m[c.Key] = map[string]bool{}
+				}
+				m[c.Key][fmt.Sprintf("%s/%d", s.Name, c.CID)] = true
+			}
+		}
+		return m
+	}
+	first := sets(attempts[0])
+	for _, a := range attempts[1:] {
+		next := sets(a)
+		if len(next) != len(first) {
+			return true
+		}
+		for k, ids := range first {
+			if !maps.Equal(ids, next[k]) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // anyPlainRefused reports whether any server in the list is a plain URL the encryption rule refuses: a configuration
