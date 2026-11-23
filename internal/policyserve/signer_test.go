@@ -430,3 +430,75 @@ func TestSignCarriesEveryPlainSigningKey(t *testing.T) {
 		}
 	}
 }
+
+// foreignScopedWorld is the drop world with the configured plain account signing key (signing.nk) and a foreign scoped
+// key (addForeignScoped) in the account JWT, plus another range's held group key.
+func foreignScopedWorld(t *testing.T) (*dropWorld, string) {
+	t.Helper()
+	w := newDropWorld(t)
+	signing := newGroupKey()
+	w.keys.signing = signing
+	w.iss.Keys = w.keys
+	ac := jwt.NewAccountClaims(w.acct)
+	ac.SigningKeys.Add(pubOf(signing))
+	addForeignScoped(ac, w.plain)
+	tok, err := ac.Encode(w.keys.op)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.iss.Resolver = oneJWT{tok}
+	w.enable(w.acct, map[string][]string{"UEXEMPT": {w.acct}})
+	return w, pubOf(signing)
+}
+
+// ADR 0124 / ADR 0158: the first generation, with the drop fields set, drops a foreign scoped signing key and keeps the
+// configured plain account signing key.
+func TestSigningKeySet_FirstGenerationDropsAForeignScopedKeyAndKeepsTheConfiguredKey(t *testing.T) {
+	w, cfg := foreignScopedWorld(t)
+	out, err := w.iss.Sign(listset.Record{Generation: 1}, w.compiled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := jwt.DecodeAccountClaims(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.SigningKeys.Contains(w.plain) {
+		t.Error("the foreign scoped key stays")
+	}
+	if !got.SigningKeys.Contains(cfg) {
+		t.Fatal("the configured plain signing key was dropped")
+	}
+	if sc, _ := got.SigningKeys.GetScope(cfg); sc != nil {
+		t.Error("the configured signing key became scoped")
+	}
+}
+
+// ADR 0124 / ADR 0158: a later generation does not drop; it refuses the foreign scoped signing key, and the configured
+// plain account signing key is still in the account JWT.
+func TestSigningKeySet_LaterGenerationRefusesAForeignScopedKey(t *testing.T) {
+	w, cfg := foreignScopedWorld(t)
+	for _, g := range []uint64{2, 7} {
+		out, err := w.iss.Sign(listset.Record{Generation: g}, w.compiled)
+		if err == nil || out != "" {
+			t.Fatalf("generation %d: the foreign scoped key was accepted (err %v)", g, err)
+		}
+		if !strings.Contains(err.Error(), "remove it before a list set can be applied") || !strings.Contains(err.Error(), w.plain[:8]) {
+			t.Errorf("generation %d: the refusal does not name the foreign key: %v", g, err)
+		}
+		if strings.Contains(err.Error(), cfg[:8]) {
+			t.Errorf("generation %d: the configured key is blamed: %v", g, err)
+		}
+	}
+	tok, err := w.iss.Resolver.Lookup(context.Background(), w.acct)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cl, err := jwt.DecodeAccountClaims(tok)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cl.SigningKeys.Contains(cfg) || !cl.SigningKeys.Contains(w.plain) {
+		t.Error("the account JWT changed")
+	}
+}
