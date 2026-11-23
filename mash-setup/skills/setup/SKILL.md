@@ -324,8 +324,9 @@ value as `TAG` in step 4.
 The checksums come from the same download as the scripts, so on their own
 they only show the files are intact. If `gh` (the GitHub CLI) 2.102.0 or
 newer is installed (`gh --version`; older versions check `--signer-workflow`
-only as a prefix, so they cannot be trusted with it), also check the release's signed attestation of `SHA256SUMS`, pinned to the
-tag, before either script runs:
+only as a prefix, so they cannot be trusted with it), also check the
+release's signed attestation of `SHA256SUMS`, pinned to the tag, before
+either script runs:
 
 ```sh
 DL="$HOME/mash-setup-dl"; TAG=vX.Y.Z; cd "$DL" && U=https://github.com/bogworks/mash/releases/download/$TAG && curl -fsSL -O "$U/mash.intoto.jsonl" && gh attestation verify SHA256SUMS -R bogworks/mash --bundle mash.intoto.jsonl --signer-workflow bogworks/mash/.github/workflows/release.yml --source-ref "refs/tags/$TAG"
