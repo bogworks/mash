@@ -57,10 +57,10 @@ gh attestation verify mashctl-$OS-$ARCH -R bogworks/mash --bundle mash.intoto.js
   --source-ref refs/tags/$MASH_VERSION
 ```
 
-To also pin the commit, add `--source-digest` with the commit the tag points to:
+`install.sh` pins the repository, the signer workflow and the tag ref. It does not pin the commit. The only place it could learn the commit is GitHub, at install time, which is the same source as the download, so the pin would add nothing. If you have the commit from somewhere else, for example your own reviewed clone, add it to the checks above:
 
 ```sh
-git ls-remote https://github.com/bogworks/mash.git "refs/tags/$MASH_VERSION^{}"
+  --source-digest <commit>
 ```
 
 What this does not show: the release jobs run on self-hosted runners that the maintainers operate. The attestation says the maintainers' workflow built these bytes. You still decide whether to trust the maintainers. The build level is SLSA build level 2, not 3. See [docs/release.md](../release.md) for the reasoning.
