@@ -19,16 +19,7 @@ import (
 // be sourced without running main, so these run the real script under a pseudo-terminal (util-linux `script`, for
 // --remove's /dev/tty prompt) with ss and lsof stubs on PATH that report listeners with pids the test chooses. A
 // listener is either a "nats" stand-in (a copy of this test binary named nats-server, which only sleeps when
-// MLNT_STANDIN=1, started with the argv the case needs) or a "plain" sleep whose argv[0] is a chosen string.
-
-// TestMain: the stand-in nats-server mode.
-func TestMain(m *testing.M) {
-	if os.Getenv("MLNT_STANDIN") == "1" {
-		time.Sleep(300 * time.Second)
-		os.Exit(0)
-	}
-	os.Exit(m.Run())
-}
+// fakeServerEnv=1 (see TestMain in mash_local_nats_setup_start_test.go), started with the argv the case needs) or a "plain" sleep whose argv[0] is a chosen string.
 
 // typedReader types ans after the prompt is up, then holds the terminal open while the script answers.
 type typedReader struct {
@@ -128,7 +119,7 @@ func runRemove(t *testing.T, sc scenario) (rc int, out string, e env, pids []int
 		if l.nats {
 			c = exec.Command(natsExe, l.args(e)...)
 			c.Args[0] = "nats-server"
-			c.Env = []string{"MLNT_STANDIN=1"}
+			c.Env = []string{fakeServerEnv + "=1"} // TestMain (start test) sleeps in this mode
 		} else {
 			c = exec.Command("bash", "-c", `exec -a "$1" sleep 300`, "bash", strings.Join(l.args(e), " "))
 		}
