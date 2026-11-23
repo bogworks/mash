@@ -519,7 +519,6 @@ func (e *Endpoint) wakeBacklog(deliver Deliverer, h *held, hl Hookless) {
 	// verifiable, held from before, does not wake the session for mail it will not show. The read runs in the
 	// background (wakeReading): while no reading is fresh this tick is skipped, never blocked. Without a connection
 	// the held set stands.
-	at := oldest
 	var dropped map[uint64]bool
 	counted := false
 	if e.js != nil {
@@ -533,9 +532,6 @@ func (e *Endpoint) wakeBacklog(deliver Deliverer, h *held, hl Hookless) {
 			if !overOf(rd.waiting, rd.oldest) {
 				e.wakeNoAt = now
 				return
-			}
-			if !rd.oldest.IsZero() {
-				at = rd.oldest
 			}
 		}
 	}
@@ -551,7 +547,6 @@ func (e *Endpoint) wakeBacklog(deliver Deliverer, h *held, hl Hookless) {
 			e.wakeNoAt = now
 			return
 		}
-		at = oldest
 	}
 	mails := make([]render.Mail, len(seqs))
 	ids := make([]string, len(seqs))
@@ -564,7 +559,7 @@ func (e *Endpoint) wakeBacklog(deliver Deliverer, h *held, hl Hookless) {
 		}
 	}
 	line, _, _ := strings.Cut(render.Batch(e.cfg.Name, e.cfg.Owner, mails, e.cfg.BatchMsgs, e.cfg.BatchBytes), "\n")
-	line += " waiting, the oldest for " + cmdrender.Age(now.Sub(at)) + "."
+	line += " waiting, the oldest for " + cmdrender.Age(now.Sub(oldest)) + "."
 	if listed > 0 {
 		line += " " + strconv.Itoa(listed) + " already listed: read them with the read tool (#seq)."
 	}
@@ -581,14 +576,6 @@ func (e *Endpoint) wakeBacklog(deliver Deliverer, h *held, hl Hookless) {
 	// The backlog wake starts the idle backoff like any other wake, so an idle wake does not follow it within seconds.
 	h.wakeAt = now
 	h.wakes++
-}
-
-// messageCount is "1 message" or "N messages", as the summary line of a batch says it.
-func messageCount(n int) string {
-	if n == 1 {
-		return "1 message"
-	}
-	return strconv.Itoa(n) + " messages"
 }
 
 // waitingReading is the inbox's count for the backlog wake.
@@ -630,6 +617,25 @@ func (e *Endpoint) wakeReading(now time.Time) (rd waitingReading, ok, fresh bool
 	return waitingReading{}, false, false
 }
 
+// wakeContext is the context of the wake's background reads: cancelled by Close, so an in-flight read ends with the
+// endpoint.
+func (e *Endpoint) wakeContext() context.Context {
+	e.wakeMu.Lock()
+	defer e.wakeMu.Unlock()
+	if e.wakeCtx == nil {
+		e.wakeCtx, e.wakeCancel = context.WithCancel(context.Background())
+	}
+	return e.wakeCtx
+}
+
+// stopWake cancels the wake's reads; later ones start cancelled.
+func (e *Endpoint) stopWake() {
+	e.wakeContext()
+	e.wakeMu.Lock()
+	e.wakeCancel()
+	e.wakeMu.Unlock()
+}
+
 // wakeReadTimeout bounds the wake's read of the inbox; the settle loop waits on it.
 const wakeReadTimeout = 5 * time.Second
 
@@ -641,7 +647,7 @@ func (e *Endpoint) waitingNow(now time.Time) (rd waitingReading, ok bool) {
 	if e.js == nil {
 		return waitingReading{}, false
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), wakeReadTimeout)
+	ctx, cancel := context.WithTimeout(e.wakeContext(), wakeReadTimeout)
 	defer cancel()
 	r, err := e.readInbox(ctx, InboxQuery{OnlyNew: true})
 	if err != nil && !r.Partial {

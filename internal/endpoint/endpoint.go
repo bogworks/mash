@@ -65,6 +65,8 @@ type Endpoint struct {
 	wakeMu       sync.Mutex
 	wakeCached   wakeResult
 	wakeInFlight bool
+	wakeCtx      context.Context // cancelled by Close (wakeContext)
+	wakeCancel   context.CancelFunc
 
 	heldN  atomic.Int32 // held count as of the last settle pass; read by tests
 	headMu sync.Mutex   // guards the stream-headroom cache (streamHasHeadroom)
@@ -803,6 +805,7 @@ func (e *Endpoint) Run(ctx context.Context, deliver Deliverer) error {
 
 // Close releases the lease and closes the connection.
 func (e *Endpoint) Close() {
+	e.stopWake()
 	if svc := e.svc(); svc != nil {
 		svc.stop()
 	}
