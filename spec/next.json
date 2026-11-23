@@ -123,6 +123,46 @@
    "exit": 0,
    "issue": "#1262",
    "replaces": "generation: 3\nrange: foo"
+  },
+  {
+   "id": "signing-lost-both",
+   "where": "mashctl endpoint create / reissue (strict signing)",
+   "case": "signing.nk and signing.pub are both missing",
+   "text": "mashctl: signing.nk and signing.pub are both missing from the key store\n  <dir> (config.json records signing_key_pub <pub>)\n  hint: run `mashctl init --config <file>` with the same signing_key",
+   "stream": "stderr",
+   "exit": 1,
+   "issue": "#1282",
+   "note": "Source: ctl #1282 at d0d2b39. Printed by mashctl commands that sign an endpoint (endpoint create, reissue). Written exactly as ctl sends them: they start `mashctl:` and indent `hint:`, while the specification's error rule is `error: <what>` then `hint: <command>`; the planner decides which form holds. Lines wrap at 80 here; one line in the program. "
+  },
+  {
+   "id": "signing-pub-missing",
+   "where": "mashctl endpoint create / reissue (strict signing)",
+   "case": "signing.pub is missing, signing.nk is there",
+   "text": "mashctl: signing.pub is missing from the key store <dir>\n  (signing.nk is there and holds <pub>)\n  hint: run `mashctl init --config <file>` with the same signing_key to\n  record it again",
+   "stream": "stderr",
+   "exit": 1,
+   "issue": "#1282",
+   "note": "Source: ctl #1282 at d0d2b39. Printed by mashctl commands that sign an endpoint (endpoint create, reissue). Written exactly as ctl sends them: they start `mashctl:` and indent `hint:`, while the specification's error rule is `error: <what>` then `hint: <command>`; the planner decides which form holds. Lines wrap at 80 here; one line in the program. "
+  },
+  {
+   "id": "signing-record-mismatch",
+   "where": "mashctl endpoint create / reissue (strict signing)",
+   "case": "signing.pub differs from config.json",
+   "text": "mashctl: signing.pub in the key store <dir> records signing key\n  <recorded>, but config.json records signing_key_pub <expected>\n  hint: put back the signing.pub and signing.nk of key <expected>, or\n  point MASH_KEYS_DIR at a key folder that holds them",
+   "stream": "stderr",
+   "exit": 1,
+   "issue": "#1282",
+   "note": "Source: ctl #1282 at d0d2b39. Printed by mashctl commands that sign an endpoint (endpoint create, reissue). Written exactly as ctl sends them: they start `mashctl:` and indent `hint:`, while the specification's error rule is `error: <what>` then `hint: <command>`; the planner decides which form holds. Lines wrap at 80 here; one line in the program. "
+  },
+  {
+   "id": "signing-key-mismatch",
+   "where": "mashctl endpoint create / reissue (strict signing)",
+   "case": "signing.nk holds another key",
+   "text": "mashctl: signing.nk in the key store <dir> holds signing key <held>,\n  but signing.pub records <want>\n  hint: restore the signing.nk of key <want>",
+   "stream": "stderr",
+   "exit": 1,
+   "issue": "#1282",
+   "note": "Source: ctl #1282 at d0d2b39. Printed by mashctl commands that sign an endpoint (endpoint create, reissue). Written exactly as ctl sends them: they start `mashctl:` and indent `hint:`, while the specification's error rule is `error: <what>` then `hint: <command>`; the planner decides which form holds. Lines wrap at 80 here; one line in the program. When signing.pub is gone the text says `but config.json (signing_key_pub) records <want>`. "
   }
  ],
  "rules_next": [
