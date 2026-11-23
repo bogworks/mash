@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -135,6 +136,13 @@ func patchedInstall(t *testing.T) string {
 
 func runInstallIn(t *testing.T, release, toolPath, home, dest, script string, env ...string) installRun {
 	t.Helper()
+	return runInstallGroup(t, false, release, toolPath, home, dest, script, env...)
+}
+
+// runInstallGroup is runInstallIn with the option to start bash in its own process group, so a test can signal the
+// whole group the way a terminal does for Ctrl-C.
+func runInstallGroup(t *testing.T, ownGroup bool, release, toolPath, home, dest, script string, env ...string) installRun {
+	t.Helper()
 	bash, err := exec.LookPath("bash")
 	if err != nil {
 		t.Skip("no bash")
@@ -151,6 +159,9 @@ func runInstallIn(t *testing.T, release, toolPath, home, dest, script string, en
 		"MASH_INSTALL_DIR=" + dest,
 		"MASH_VERSION=v0.5.6",
 	}, env...)
+	if ownGroup {
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	}
 	out, err := cmd.CombinedOutput()
 	return installRun{out: string(out), err: err, home: home, dest: dest}
 }
@@ -563,6 +574,52 @@ func TestInstallSh_bothBinariesOrNeither(t *testing.T) {
 	}
 	if entries, _ := os.ReadDir(dest); len(entries) != 2 {
 		t.Errorf("temporary files were left in the folder: %v", entries)
+	}
+}
+
+// A signal that arrives while mashctl is being put in place must not leave the two binaries from different
+// releases. bash runs in its own process group and the stub mv signals the whole group, as a terminal does for
+// Ctrl-C (a signal to bash's PID alone is deferred by a non-interactive bash, which would hide a missing guard).
+// The stub mv is a direct child of bash, so $PPID is bash, and bash is its group's leader, so -$PPID is the group.
+// Without the guard the signal kills bash and the stub (both in the group), so mashctl is never renamed and the
+// install fails. With the guard the ignore disposition is inherited by the stub and the real mv, so the install
+// completes with both new.
+func TestInstallSh_aSignalDuringTheRenamesLeavesOneRelease(t *testing.T) {
+	for _, sig := range []string{"TERM", "INT", "HUP"} {
+		t.Run(sig, func(t *testing.T) {
+			rel, _, _ := fakeRelease(t)
+			home := tempHome(t)
+			dest := filepath.Join(home, "bin")
+			if err := os.Mkdir(dest, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			writeFile(t, filepath.Join(dest, "mash"), "OLD-MASH")
+			writeFile(t, filepath.Join(dest, "mashctl"), "OLD-CTL")
+			realMv, err := exec.LookPath("mv")
+			if err != nil {
+				t.Skip("no mv")
+			}
+			realSleep, err := exec.LookPath("sleep")
+			if err != nil {
+				t.Skip("no sleep")
+			}
+			stub := "for a; do last=$a; done\n" +
+				"case \"$last\" in */mashctl)\n" +
+				"  kill -s " + sig + " -- \"-$PPID\"\n" +
+				"  \"$REAL_SLEEP\" 0.2;;\n" +
+				"esac\n" +
+				"exec \"$REAL_MV\" \"$@\"\n"
+			tools := installTools(t, map[string]string{"mv": stub})
+			r := runInstallGroup(t, true, rel, tools, home, dest, "install.sh", "REAL_MV="+realMv, "REAL_SLEEP="+realSleep)
+			if r.err != nil {
+				t.Errorf("want the install to finish despite SIG%s, got err=%v\n%s", sig, r.err, r.out)
+			}
+			m, _ := os.ReadFile(filepath.Join(dest, "mash"))
+			c, _ := os.ReadFile(filepath.Join(dest, "mashctl"))
+			if !strings.Contains(string(m), fakeMashVersion) || !strings.Contains(string(c), fakeCtlVersion) {
+				t.Errorf("mash = %q, mashctl = %q: want both new", m, c)
+			}
+		})
 	}
 }
 
