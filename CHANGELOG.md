@@ -8,7 +8,7 @@ All notable user-facing changes to mash are recorded here. The format follows [K
 
 ### Summary
 
-**mash 0.5.8 exists for a fleet migration: `mashctl doctor` now accepts keys that other tools issued on a shared account, and `install.sh` tells you how to fix a folder it refuses.** If your NATS account is shared with other tools, list their user public keys as `external_keys` in `config.json` and the `keys` check passes; if you never share an account, nothing changes. The rest is smaller: one count for `mash inbox` and the idle wake, a refused-mail count that is repaired after a kill, safer installer and setup scripts, and a bigger default for the local server. Every download has a build attestation; verify it. The known issues are listed in the release notes.
+**mash 0.5.8 exists for a fleet migration: `mashctl doctor` now accepts keys that other tools issued on a shared account ([#1300](https://github.com/bogworks/mash/issues/1300)), and `install.sh` tells you how to fix a folder it refuses ([#1240](https://github.com/bogworks/mash/issues/1240)).** If your NATS account is shared with other tools, list their user public keys as `external_keys` in `config.json` and the `keys` check passes; if you never share an account, nothing changes. The rest is smaller: one count for `mash inbox` and the idle wake, a refused-mail count that is repaired after a kill, safer installer and setup scripts, and a bigger default for the local server. Every download has a build attestation; verify it. The known issues are listed in the release notes.
 
 ### Upgrading
 
