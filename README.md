@@ -1,5 +1,7 @@
 # mash
 
+[![Two Claude Code sessions, bob and alice, mail each other through mash: click to watch the 2½-minute demo](docs/demo/mash-demo-poster.png)](docs/demo/mash-demo.mp4)
+
 [![release](https://img.shields.io/github/v/release/bogworks/mash)](https://github.com/bogworks/mash/releases/latest)
 [![license: Apache-2.0](https://img.shields.io/github/license/bogworks/mash)](LICENSE)
 [![quick start](https://img.shields.io/badge/quick%20start-two%20sessions-blue)](docs/guide/quickstart.md)
