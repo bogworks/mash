@@ -131,3 +131,36 @@ func TestApplyPresenceKey(t *testing.T) {
 		t.Fatalf("a subject of the removed form counted %d", n)
 	}
 }
+
+// A verified registration counts whatever its metadata owner says: the address is the subject's, and the id_sig
+// and the directory key still decide.
+func TestApplyPresenceIgnoresMetadataOwner(t *testing.T) {
+	const key = "acme_team1_ops1"
+	a, b := newFormIdentity(t), newFormIdentity(t)
+	e := keyEndpoint(map[string]store.Record{key: {Owner: "acme", Group: "team1", Instance: "ops1", User: a.User}})
+	subj := "agents.prompt.acme.team1.ops1"
+	with := func(id sap.Identity, owner, signed, subject string) *nats.Msg {
+		sig, err := id.IDSig(sap.AgentName, owner, signed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		d, _ := json.Marshal(map[string]any{
+			"metadata":  map[string]string{"owner": owner, "agent": sap.AgentName, "account": id.Account, "user_nkey": id.User, "id_sig": sig},
+			"endpoints": []map[string]string{{"name": "prompt", "subject": subject}},
+		})
+		return &nats.Msg{Data: d}
+	}
+	if n := e.applyPresence(with(a, "someone-else", subj, subj)); n != 1 {
+		t.Fatalf("a verified registration with another metadata owner counted %d", n)
+	}
+	e.lastSeen = map[string]time.Time{}
+	if n := e.applyPresence(with(a, "acme", "agents.prompt.acme.team1.zzz", subj)); n != 0 {
+		t.Fatalf("a bad id_sig counted %d", n)
+	}
+	if n := e.applyPresence(with(b, "acme", subj, subj)); n != 0 {
+		t.Fatalf("another key on the subject counted %d", n)
+	}
+	if n := e.applyPresence(with(a, "acme", "agents.prompt.acme.team1.ops2", "agents.prompt.acme.team1.ops2")); n != 0 || !e.lastSeen[key].IsZero() {
+		t.Fatalf("a subject that is not the directory key's counted %d", n)
+	}
+}

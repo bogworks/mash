@@ -48,6 +48,7 @@ Consequence for discovery:
 - A wildcard on the first slot, such as `agents.mail.claude-code.>`, finds no mash endpoint.
 - Discovery by the SAP service name does. mash registers the service name `agents`, so `$SRV.INFO.agents` lists mash endpoints.
 - The service metadata carries `owner`, `group` and `instance` (the name), so a caller reads who each endpoint is from the reply.
+- mash finds an endpoint by its prompt subject alone, `T3.T4.T5` as the subject carries them. It does not filter on the metadata `owner`, so an endpoint hosted by another SAP SDK (`harness.owner.session`) is found by that address. Metadata is never used for routing or trust.
 
 This is a documented change in what one slot means. The subject keeps its shape and its five tokens. SAP's protocol and the SAP Go SDK are not changed.
 
