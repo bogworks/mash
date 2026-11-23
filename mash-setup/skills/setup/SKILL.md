@@ -368,8 +368,10 @@ Expected: `Installed mash v<version> (<commit>) in <folder>` and the same for
 (do not edit their shell files): for this session use the full path the line
 printed. The folder is the one in the output; take it from there. If it says
 the folder `is writable by its group or other users`, see the table at the
-end. A line saying `gh not found` is normal: it says the checksums come from
-the same download. If `gh` is installed, step 3 can also verify the
+end. A line starting `warning: gh not found` (or `gh did not run`, `gh's version
+could not be read`, `gh is older than 2.102.0`) is normal: it says the download
+was not authenticated and was checked only against checksums from the same
+release. If `gh` is installed, step 3 can also verify the
 attestation (see `docs/install.md`); if it fails, stop and ask.
 
 Check, read-only: `mash version` and `mashctl version` print the same version.

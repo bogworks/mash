@@ -191,21 +191,21 @@ main() {
     # The attestation of SHA256SUMS, when gh is there and 2.102.0 or newer: older
     # versions check --signer-workflow only as a prefix (GHSA-wjmr-j3rp-mh2g).
     if ! command -v gh >/dev/null 2>&1; then
-        echo "gh not found: the checksums come from the same download, so this trusts github.com's TLS; see docs/install.md to verify the attestation"
+        echo "warning: gh not found, so this download was not authenticated; it was checked only against checksums from the same release. See docs/install.md to verify it."
     else
         ghout=$(gh --version 2>/dev/null) || ghout=
         ghline=$(printf '%s\n' "$ghout" | head -n 1)
         ghver=$(printf '%s\n' "$ghline" | awk '$1 == "gh" && $2 == "version" && $3 ~ /^[0-9]+\.[0-9]+\.[0-9]+/ { split($3, v, /[^0-9]+/); print v[1], v[2], v[3], ($3 ~ /^[0-9.]+-/ ? "pre" : "") }')
         if [ -z "$ghout" ]; then
-            echo "gh did not run: the checksums come from the same download, so this trusts github.com's TLS; see docs/install.md to verify the attestation"
+            echo "warning: gh did not run, so this download was not authenticated; it was checked only against checksums from the same release. See docs/install.md to verify it."
         elif [ -z "$ghver" ]; then
-            echo "gh's version could not be read: the checksums come from the same download, so this trusts github.com's TLS; see docs/install.md to verify the attestation"
+            echo "warning: gh's version could not be read, so this download was not authenticated; it was checked only against checksums from the same release. See docs/install.md to verify it."
         else
             read -r ghmajor ghminor ghpatch ghpre <<<"$ghver"
             # A prerelease of 2.102.0 itself is older than 2.102.0.
             if [ "$ghmajor" -lt 2 ] || { [ "$ghmajor" -eq 2 ] && [ "$ghminor" -lt 102 ]; } ||
                 { [ "$ghmajor" -eq 2 ] && [ "$ghminor" -eq 102 ] && [ "$ghpatch" -eq 0 ] && [ -n "$ghpre" ]; }; then
-                echo "gh is older than 2.102.0, so it cannot be trusted to check the attestation: the checksums come from the same download, so this trusts github.com's TLS; upgrade gh to verify (see docs/install.md)"
+                echo "warning: gh is older than 2.102.0, so this download was not authenticated; it was checked only against checksums from the same release. See docs/install.md to verify it."
             else
                 fetch mash.intoto.jsonl
                 (cd "$WORKDIR" && gh attestation verify "$sumsname" -R "$REPO" --bundle mash.intoto.jsonl \

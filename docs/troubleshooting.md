@@ -27,9 +27,9 @@ Fix: start Claude Code as `MASH_ENDPOINT=alice.dev.design claude`, then check `s
 
 If several endpoints are installed and none is named, mash stops with `error: more than one endpoint is installed here: a, b` and `hint: mash status --endpoint a` (the first installed address in alphabetical order): name one with `MASH_ENDPOINT` or `--endpoint`. If it says to fix `MASH_ENDPOINT`, the value is not three dotted parts `owner.group.name`, each 1-32 lower-case letters, digits and single hyphens, starting with a letter.
 
-## `gh not found` or `gh is too old` from `install.sh`
+## `warning: gh ... so this download was not authenticated` from `install.sh`
 
-Message: `gh not found: the checksums come from the same download, so this trusts github.com's TLS; see docs/install.md to verify the attestation`, or the same with `gh is too old to verify attestations`. It is not an error: the install went on. It means the installer checked each binary against `SHA256SUMS` but could not check that `SHA256SUMS` itself came from the release's own workflow, so you are trusting github.com's TLS alone.
+Message: `warning: gh not found, so this download was not authenticated; it was checked only against checksums from the same release. See docs/install.md to verify it.`, or the same with `gh did not run`, `gh's version could not be read` or `gh is older than 2.102.0` in place of `gh not found`. It is not an error: the install went on. It means the installer checked each binary against `SHA256SUMS` but could not check that `SHA256SUMS` itself came from the release's own workflow, so the download was not authenticated.
 
 Fix, if you want the full check: install or update `gh` ([cli.github.com](https://cli.github.com/)) and run the install line again, or check by hand as [Verify what you download](install.md#verify-what-you-download) shows.
 

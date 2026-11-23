@@ -530,7 +530,7 @@ func TestInstallSh_verifiesTheAttestationWithGh(t *testing.T) {
 	if strings.TrimSpace(string(calls)) != want {
 		t.Errorf("gh was called with\n%s\nwant\n%s", calls, want)
 	}
-	if strings.Contains(r.out, "gh not found") {
+	if strings.Contains(r.out, "warning: gh not found") {
 		t.Errorf("gh is there, so no note is wanted:\n%s", r.out)
 	}
 	if !strings.HasPrefix(r.out, "Fetching mash and mashctl from the v0.5.6 release: file://") {
@@ -611,7 +611,7 @@ func TestInstallSh_latestIsResolvedToATagFirst(t *testing.T) {
 }
 
 func TestInstallSh_ghBeforeTheMinimumFallsBackToChecksumsWithAnHonestNote(t *testing.T) {
-	const note = "gh is older than 2.102.0, so it cannot be trusted to check the attestation: the checksums come from the same download, so this trusts github.com's TLS; upgrade gh to verify (see docs/install.md)\n"
+	const note = "warning: gh is older than 2.102.0, so this download was not authenticated; it was checked only against checksums from the same release. See docs/install.md to verify it.\n"
 	for _, v := range []string{"2.48.0", "2.67.0", "2.101.0", "2.101.9", "2.9.0", "1.99.0", "2.102.0-rc1"} {
 		t.Run(v, func(t *testing.T) {
 			rel, _, _ := fakeRelease(t)
@@ -660,7 +660,7 @@ func TestInstallSh_ghAtOrAboveTheMinimumVerifiesAndSaysSo(t *testing.T) {
 }
 
 func TestInstallSh_ghThatDoesNotRunSaysSoAndFallsBack(t *testing.T) {
-	const note = "gh did not run: the checksums come from the same download, so this trusts github.com's TLS; see docs/install.md to verify the attestation\n"
+	const note = "warning: gh did not run, so this download was not authenticated; it was checked only against checksums from the same release. See docs/install.md to verify it.\n"
 	for name, env := range map[string][]string{
 		"exit 127":  {"GH_VERSION_EXIT=127"},
 		"no output": {"GH_VERSION_OUT="},
@@ -684,7 +684,7 @@ func TestInstallSh_ghThatDoesNotRunSaysSoAndFallsBack(t *testing.T) {
 }
 
 func TestInstallSh_ghWhoseVersionCannotBeParsedSaysSoAndFallsBack(t *testing.T) {
-	const note = "gh's version could not be read: the checksums come from the same download, so this trusts github.com's TLS; see docs/install.md to verify the attestation\n"
+	const note = "warning: gh's version could not be read, so this download was not authenticated; it was checked only against checksums from the same release. See docs/install.md to verify it.\n"
 	for name, v := range map[string]string{"DEV": "gh version DEV (2026-11-18)", "v prefix": "gh version v2.105.0 (2026-11-18)", "garbage": "garbage"} {
 		t.Run(name, func(t *testing.T) {
 			rel, _, _ := fakeRelease(t)
@@ -800,7 +800,7 @@ func TestInstallSh_withoutGhSaysSoInOneLine(t *testing.T) {
 	if r.err != nil {
 		t.Fatalf("install failed: %v\n%s", r.err, r.out)
 	}
-	const note = "gh not found: the checksums come from the same download, so this trusts github.com's TLS; see docs/install.md to verify the attestation\n"
+	const note = "warning: gh not found, so this download was not authenticated; it was checked only against checksums from the same release. See docs/install.md to verify it.\n"
 	if strings.Count(r.out, note) != 1 {
 		t.Errorf("want the one-line note once:\n%s", r.out)
 	}
