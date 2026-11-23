@@ -13,7 +13,7 @@ Events: **pr** an ordinary pull request push; **draft** a Mergify merge-queue dr
 | ci.yml | adr-numbers | pr, draft, main | yes | cheap |
 | ci.yml | docs-lint | pr, draft, main | yes | cheap; the only job a docs-only change needs |
 | ci.yml | pr-check | pr, draft, main | yes | the one verdict the queue and the review read |
-| release.yml | test (macos) | tag | no (advisory, ADR 0079) | macOS runs on tagged releases only; nothing needs it, so a macOS runner outage never blocks a tag |
+| release.yml | test (macos) | tag | no (advisory, ADR 0079) | macOS runs on tagged releases only (a tag push, not the workflow_dispatch dry run); nothing needs it, so a macOS runner outage never blocks a tag |
 | nightly.yml | test (linux, eph) | nightly | no (advisory, ADR 0123) | the ephemeral-runner pilot, once a day on main; in no required check and no Mergify condition |
 
 Not in the table, by rule: no macOS and no eph job runs on a pull request, a queue draft or a push to main.

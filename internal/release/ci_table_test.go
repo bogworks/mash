@@ -39,17 +39,21 @@ func eventsOf(t *testing.T, file, jobName string) []string {
 		base["tag"] = true // the dry run is a tag-path rehearsal
 	}
 	cond := strings.Join(strings.Fields(j.If), " ")
-	// the conditions this table knows; the classifier output and cancellation guards do not change the event set
-	cond = strings.ReplaceAll(cond, "!cancelled() && needs.changes.outputs.code != 'false'", "")
-	cond = strings.ReplaceAll(cond, "${{ }}", "")
+	// Each condition this table knows is matched WHOLE (no substring: an extra `&& ...` must fail this test, not pass it).
+	const heavy = "${{ !cancelled() && needs.changes.outputs.code != 'false' }}"
+	const notOnPlainPR = "${{ !cancelled() && needs.changes.outputs.code != 'false' && (github.event_name != 'pull_request' || startsWith(github.head_ref, 'mergify/')) }}"
+	const prOnly = "github.event_name == 'pull_request' && !startsWith(github.head_ref, 'mergify/') && needs.changes.outputs.code != 'false'"
 	switch {
-	case strings.Trim(cond, "${} &") == "" || cond == "always()":
+	case cond == "" || cond == "always()" || cond == "${{ always() }}" || cond == heavy:
 		// every event the workflow triggers on
-	case strings.Contains(cond, "github.event_name == 'pull_request' && !startsWith(github.head_ref, 'mergify/')"):
+	case cond == prOnly:
 		base = map[string]bool{"pr": base["pr"]}
-	case strings.Contains(cond, "(github.event_name != 'pull_request' || startsWith(github.head_ref, 'mergify/'))"):
+	case cond == notOnPlainPR:
 		delete(base, "pr")
-	case strings.Contains(cond, "github.ref == 'refs/heads/main'"):
+	case file == "release.yml" && cond == "${{ github.event_name == 'push' }}":
+		delete(base, "main")
+		base = map[string]bool{"tag": base["tag"]} // a tag push only, not the dispatch dry run
+	case file == "nightly.yml" && cond == "${{ github.ref == 'refs/heads/main' }}":
 		// the nightly job: schedule or dispatch on main only; the event set stays {nightly}
 	default:
 		t.Fatalf("%s/%s has an if this table test does not understand: %q (extend eventsOf and docs/ci-table.md)", file, jobName, j.If)

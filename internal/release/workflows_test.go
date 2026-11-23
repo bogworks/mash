@@ -364,6 +364,7 @@ var jobConditions = map[string]string{
 	"attest-sbom":    "${{ !cancelled() && needs.sbom.result == 'success' }}",
 	"dry-run-verify": "${{ !cancelled() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && " + allFourSucceeded + " }}",
 	"dry-run-notes":  dryRunNotesIf,
+	"test-macos":     "${{ github.event_name == 'push' }}", // a tag push only: never the dry run (a queued Mac job would hold the next dry run)
 }
 
 // ci.yml's check names are the job names, except the test jobs' explicit test (linux) and test (macos): a name that differs from
@@ -1338,8 +1339,8 @@ func TestCI_prCheckGatesOnEveryRequiredJob(t *testing.T) {
 	if _, ok := w.Jobs["test-macos"]; ok {
 		t.Error("ci.yml has test-macos: macOS runs on tagged releases only (release.yml, rule 21)")
 	}
-	if mj := load(t, "release.yml").Jobs["test-macos"]; mj.ContinueOnError != nil || mj.If != "" || !strings.Contains(fmt.Sprint(mj.RunsOn), "rh-macos") {
-		t.Errorf("release.yml test-macos must run on every tag, on rh-macos, unconditionally and never with continue-on-error: %+v", mj)
+	if mj := load(t, "release.yml").Jobs["test-macos"]; mj.ContinueOnError != nil || mj.If != "${{ github.event_name == 'push' }}" || !strings.Contains(fmt.Sprint(mj.RunsOn), "rh-macos") {
+		t.Errorf("release.yml test-macos must run on every tag push (not the dry run), on rh-macos, and never with continue-on-error: %+v", mj)
 	}
 	for jn, rj := range load(t, "release.yml").Jobs {
 		if jn != "test-macos" && strings.Contains(fmt.Sprint(rj.Needs), "test-macos") {

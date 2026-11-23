@@ -30,7 +30,7 @@ Rule 21 (dev-process, Randy Bias, 2026-11-21) says a change is tested once, noth
 Chosen option: the second.
 
 * `ci.yml` has no `test-macos` and no `test-eph`. A queue draft runs `changes`, `test (linux)`, `reproducible`, `pr-check` and the cheap jobs; an ordinary pull request push runs `changes`, `conformance`, `test (linux)` and the cheap jobs.
-* `release.yml` gains `test (macos)` on every `v*` tag (and the dry run), on `[self-hosted, rh-macos]`, advisory as in ADR 0079: it is not in `release.RequiredChecks` and no job needs it, so a macOS runner outage never blocks a tag.
+* `release.yml` gains `test (macos)` on every `v*` tag (and the tag push only, not the dry run), on `[self-hosted, rh-macos]`, advisory as in ADR 0079: it is not in `release.RequiredChecks` and no job needs it, so a macOS runner outage never blocks a tag.
 * `nightly.yml` runs `test (linux, eph)` on `[self-hosted, rh-linux-eph]` on a schedule on main (03:10 UTC). It gates nothing: not in `pr-check`, not in `RequiredChecks`, not in `.mergify.yml`.
 * `docs/ci-table.md` is the one table of job by event, pinned by `internal/release/ci_table_test.go`.
 
