@@ -398,7 +398,7 @@
        {
         "case": "A problem",
         "text": "config     ok\nserver     ok    tls://localhost:4222\nsign-in    ok\nstorage    ok\nendpoints  FAIL  1 inbox has no endpoint record: acme.demo.dave\nkeys       ok    every connected user was issued by mashctl\n\n1 problem.\nhint: mashctl endpoint show acme.demo.dave",
-        "stream": "stdout",
+        "stream": "stdout, then the hint on stderr",
         "exit": 1
        },
        {
@@ -410,7 +410,7 @@
        {
         "case": "--audit-users finds a user mashctl did not issue",
         "text": "config     ok\nserver     ok    tls://localhost:4222\nsign-in    ok\nstorage    ok\nendpoints  ok    3 records, 3 inboxes\nkeys       FAIL  1 connected user was not issued by mashctl:\n                 UDXU4RCSJNZOIQHZNWXHXORDPRTGNJAHAHFRGZNEEJCPQTT2M7NLCNF4\n\n1 problem.\nhint: revoke it with the tool that issued it (mashctl revokes only its own)",
-        "stream": "stdout",
+        "stream": "stdout, then the hint on stderr",
         "exit": 1
        }
       ]

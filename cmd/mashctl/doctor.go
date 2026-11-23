@@ -389,17 +389,21 @@ func names(list []string) string {
 	return strings.Join(list, ", ")
 }
 
-// keyLines lists up to three keys, each whole on a line of its own after a newline, then "and N more".
-func keyLines(list []string) string {
-	var b strings.Builder
-	for i, k := range list {
-		if i == 3 {
-			fmt.Fprintf(&b, "\nand %d more", len(list)-3)
-			break
-		}
-		b.WriteString("\n" + k)
+// keyLines lists, each whole on a line of its own after a newline, the one line for the keyless connections (when
+// there are any) and then the keys, three lines at most, then "and N more". N counts the remaining users, not lines:
+// every key not shown is one user (the keyless line comes first, so it is always shown).
+func keyLines(keys []string, keyless int) string {
+	var lines []string
+	if keyless > 0 {
+		lines = append(lines, keylessLine(keyless))
 	}
-	return b.String()
+	room := 3 - len(lines)
+	lines = append(lines, keys[:min(room, len(keys))]...)
+	out := "\n" + strings.Join(lines, "\n")
+	if len(keys) > room {
+		out += fmt.Sprintf("\nand %d more", len(keys)-room)
+	}
+	return out
 }
 
 // plural picks the verb form for n things: "1 inbox has", "2 inboxes have".
@@ -555,22 +559,30 @@ func scanConnections(ctx context.Context, nc *nats.Conn, account string, servers
 	return sc, nil
 }
 
-// noKeyReported stands for a connection whose entry carries no user key.
-const noKeyReported = "(no key reported)"
+// keylessLine stands, on one line, for the connections whose entry carries no user key.
+func keylessLine(n int) string {
+	if n == 1 {
+		return "(no key reported)"
+	}
+	return fmt.Sprintf("(no key reported, %d connections)", n)
+}
 
-// connectedFindings sorts the connected keys against the issue record: the keys no record holds, and the keys the
+// connectedFindings returns the distinct unrecorded keys and, apart, the number of connections that report no key (each
+// is a user, so the users not issued by mashctl number len(unrecorded)+keyless), and the revoked keys still connected.
+// It sorts the connected keys against the issue record: the keys no record holds, and the keys the
 // record holds as revoked. No key is exempt: the admin user is in the account and init records it, and the system
 // account's users are never in the mash account's connection list. A connection with no key counts as unrecorded.
-func connectedFindings(conns []apply.ConnzServer, recs []store.Issued) (unrecorded, revoked []string) {
+func connectedFindings(conns []apply.ConnzServer, recs []store.Issued) (unrecorded []string, keyless int, revoked []string) {
 	recorded := map[string]store.Issued{}
 	for _, r := range recs {
 		recorded[r.PublicKey] = r
 	}
 	seenU, seenR := map[string]bool{}, map[string]bool{}
+
 	for _, s := range conns {
 		for _, c := range s.Conns {
 			if c.Key == "" { // a user that cannot be identified was not issued by mashctl as far as anyone can tell
-				unrecorded = append(unrecorded, noKeyReported)
+				keyless++
 				continue
 			}
 			r, ok := recorded[c.Key]
@@ -584,13 +596,15 @@ func connectedFindings(conns []apply.ConnzServer, recs []store.Issued) (unrecord
 			}
 		}
 	}
-	slices.Sort(unrecorded) // "(" sorts before every key
+	slices.Sort(unrecorded)
 	slices.Sort(revoked)
-	return unrecorded, revoked
+	return unrecorded, keyless, revoked
 }
 
-// doctorKeys is the keys check: every key connected to the account was issued here and none that was revoked is still
-// connected. It needs the system account credentials; without them it warns and checks nothing, or fails under --audit-users.
+// doctorKeys is the keys check: no key the issue record holds as revoked is still connected; with auditUsers, every
+// connected user was also issued by mashctl. It fails when the issue record is missing, in every mode, because the
+// record is mashctl's own state. It needs the system account credentials; without them it warns and checks nothing,
+// or fails under auditUsers.
 func doctorKeys(rep *doctorReport, ctx context.Context, adm *admin.Admin, cfg config.Config, env func(string) string, auditUsers bool) {
 	if cfg.SysCreds == "" && auditUsers {
 		rep.add("keys", stateFail, "no system_creds: connected users cannot be audited", initFix)
@@ -630,11 +644,11 @@ func doctorKeys(rep *doctorReport, ctx context.Context, adm *admin.Admin, cfg co
 		failKeys(err.Error())
 		return
 	}
-	unrecorded, revoked := connectedFindings(scan.Conns, recs)
+	unrecorded, keyless, revoked := connectedFindings(scan.Conns, recs)
 	var fails []finding
 	const fix = "mashctl endpoint list"
 	auditFix := "revoke it with the tool that issued it (mashctl revokes only its own)"
-	if len(unrecorded) > 1 {
+	if len(unrecorded)+keyless > 1 {
 		auditFix = "revoke them with the tool that issued them (mashctl revokes only its own)"
 	}
 	if n := len(revoked); n > 0 {
@@ -644,15 +658,15 @@ func doctorKeys(rep *doctorReport, ctx context.Context, adm *admin.Admin, cfg co
 		fails = append(fails, finding{oneLine(scan.Incomplete), initFix})
 	}
 	auditText := ""
-	audited := auditUsers && len(unrecorded) > 0
+	audited := auditUsers && len(unrecorded)+keyless > 0
 	if audited { // last: its keys are lines of their own, so no "; ..." may follow
-		n := len(unrecorded)
-		auditText = fmt.Sprintf("%s not issued by mashctl:%s", count(n, "connected user")+" "+plural(n, "was", "were"), keyLines(unrecorded))
+		n := len(unrecorded) + keyless
+		auditText = fmt.Sprintf("%s not issued by mashctl:%s", count(n, "connected user")+" "+plural(n, "was", "were"), keyLines(unrecorded, keyless))
 		fails = append(fails, finding{auditText, auditFix})
 	}
 	okDetail := "every connected user was issued by mashctl"
 	other := ""
-	if n := len(unrecorded); n > 0 && !audited {
+	if n := len(unrecorded) + keyless; n > 0 && !audited {
 		other = fmt.Sprintf("%s, not issued by mashctl", count(n, "other user"))
 		okDetail = "mashctl's users ok; " + other
 	}

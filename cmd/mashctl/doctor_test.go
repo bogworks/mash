@@ -765,7 +765,10 @@ func TestDoctorKeysFailsWhenTheIssueRecordIsMissing(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, args := range [][]string{{}, {"--strict"}, {"--audit-users"}} {
-		_, by, _ := doctorJSON(t, e.run, args...)
+		_, by, code := doctorJSON(t, e.run, args...)
+		if code != 1 { // FAIL in every mode: the record is mashctl's own state
+			t.Errorf("%v: exit %d, want 1", args, code)
+		}
 		c := by["keys"]
 		if c.State != "fail" || c.Detail != "no issue record; mashctl cannot tell its users from others" || c.Fix == nil || *c.Fix != "mashctl init --config <file>" {
 			t.Fatalf("%v: %+v", args, c)
@@ -773,18 +776,32 @@ func TestDoctorKeysFailsWhenTheIssueRecordIsMissing(t *testing.T) {
 		if len("keys       FAIL  "+c.Detail) > 80 {
 			t.Errorf("%v: line too long", args)
 		}
+		out, _, hcode := e.run(append([]string{"doctor"}, args...)...)
+		if hcode != 1 || !strings.Contains(cleanText(e, out), "no issue record") {
+			t.Errorf("%v: human output exit %d: %q", args, hcode, cleanText(e, out))
+		}
 	}
 }
 
-// A connection with no key is an unidentified user: it is counted as unrecorded, shown as "(no key reported)" among the
-// key lines (within the cap, counted in N), and never skipped.
+// A connection with no key is an unidentified user: it is counted as unrecorded and shown as one line, "(no key reported)"
+// or "(no key reported, N connections)", first among the key lines (within the cap of three lines); "and N more" counts
+// the users not shown.
 func TestDoctorKeysCountsAConnectionWithNoKey(t *testing.T) {
-	conns := []apply.ConnzServer{{Conns: []apply.ConnzConn{{Key: ""}, {Key: "UAAA"}}}}
-	un, rv := connectedFindings(conns, nil)
-	if len(rv) != 0 || !slices.Equal(un, []string{"(no key reported)", "UAAA"}) {
-		t.Fatalf("%q %q", un, rv)
+	conns := []apply.ConnzServer{{Conns: []apply.ConnzConn{{Key: ""}, {Key: "UAAA"}, {Key: ""}}}}
+	un, kl, rv := connectedFindings(conns, nil)
+	if len(rv) != 0 || kl != 2 || !slices.Equal(un, []string{"UAAA"}) {
+		t.Fatalf("%q %d %q", un, kl, rv)
 	}
-	if got := keyLines(un); got != "\n(no key reported)\nUAAA" {
+	if got := keyLines(un, kl); got != "\n(no key reported, 2 connections)\nUAAA" {
+		t.Fatalf("%q", got)
+	}
+	if got := keyLines(nil, 1); got != "\n(no key reported)" {
+		t.Fatalf("%q", got)
+	}
+	if got := keyLines([]string{"UA", "UB", "UC", "UD"}, 2); got != "\n(no key reported, 2 connections)\nUA\nUB\nand 2 more" {
+		t.Fatalf("%q", got)
+	}
+	if got := keyLines([]string{"UA", "UB", "UC", "UD"}, 0); got != "\nUA\nUB\nUC\nand 1 more" {
 		t.Fatalf("%q", got)
 	}
 }

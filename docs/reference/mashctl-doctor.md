@@ -56,7 +56,7 @@ No problems.
 
 ### A problem
 
-Stream: stdout. Exit code: 1.
+Stream: stdout, then the hint on stderr. Exit code: 1.
 
 ```text
 config     ok
@@ -87,7 +87,7 @@ No problems.
 
 ### --audit-users finds a user mashctl did not issue
 
-Stream: stdout. Exit code: 1.
+Stream: stdout, then the hint on stderr. Exit code: 1.
 
 ```text
 config     ok
