@@ -566,6 +566,53 @@ func TestInstallSh_bothBinariesOrNeither(t *testing.T) {
 	}
 }
 
+// A SIGTERM that arrives while mashctl is being put in place must not leave the two binaries from different
+// releases. The stub mv is a direct child of the bash running install.sh, so $PPID is that bash. It sends SIGTERM,
+// then gives bash a moment to die. If it died (the script did not shield itself), the interruption landed before the
+// mashctl rename, so the stub stops without renaming, as a real kill would. If bash is still there, the stub renames.
+func TestInstallSh_aSignalDuringTheRenamesLeavesOneRelease(t *testing.T) {
+	for _, sig := range []string{"TERM", "INT", "HUP"} {
+		t.Run(sig, func(t *testing.T) {
+			rel, _, _ := fakeRelease(t)
+			home := tempHome(t)
+			dest := filepath.Join(home, "bin")
+			if err := os.Mkdir(dest, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			writeFile(t, filepath.Join(dest, "mash"), "OLD-MASH")
+			writeFile(t, filepath.Join(dest, "mashctl"), "OLD-CTL")
+			realMv, err := exec.LookPath("mv")
+			if err != nil {
+				t.Skip("no mv")
+			}
+			realSleep, err := exec.LookPath("sleep")
+			if err != nil {
+				t.Skip("no sleep")
+			}
+			stub := "for a; do last=$a; done\n" +
+				"case \"$last\" in */mashctl)\n" +
+				"  kill -" + sig + " \"$PPID\"\n" +
+				"  i=0\n" +
+				"  while [ $i -lt 40 ]; do\n" +
+				"    kill -0 \"$PPID\" 2>/dev/null || exit 143\n" +
+				"    \"$REAL_SLEEP\" 0.05\n" +
+				"    i=$((i+1))\n" +
+				"  done;;\n" +
+				"esac\n" +
+				"exec \"$REAL_MV\" \"$@\"\n"
+			tools := installTools(t, map[string]string{"mv": stub})
+			runInstallIn(t, rel, tools, home, dest, "install.sh", "REAL_MV="+realMv, "REAL_SLEEP="+realSleep)
+			m, _ := os.ReadFile(filepath.Join(dest, "mash"))
+			c, _ := os.ReadFile(filepath.Join(dest, "mashctl"))
+			oldBoth := string(m) == "OLD-MASH" && string(c) == "OLD-CTL"
+			newBoth := strings.Contains(string(m), fakeMashVersion) && strings.Contains(string(c), fakeCtlVersion)
+			if !oldBoth && !newBoth {
+				t.Errorf("mash = %q, mashctl = %q: want both old or both new", m, c)
+			}
+		})
+	}
+}
+
 func TestInstallSh_refusesWhenTheAttestationFails(t *testing.T) {
 	rel, _, _ := fakeRelease(t)
 	log := filepath.Join(t.TempDir(), "gh.log")

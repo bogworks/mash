@@ -223,11 +223,19 @@ main() {
         STAGED+=("$backup")
         cp -p -- "$real/mash" "$backup"
     fi
+    # Ignore SIGINT, SIGTERM and SIGHUP across the two renames and the undo, so
+    # an interruption leaves both old or both new. SIGKILL cannot be caught; that
+    # leaves a tiny window.
+    local old_traps
+    old_traps=$(trap -p INT TERM HUP)
+    trap '' INT TERM HUP
     mv -f -- "${staged_new[0]}" "$real/mash" || die "could not install mash: nothing was installed"
     if ! mv -f -- "${staged_new[1]}" "$real/mashctl"; then
         if [ -n "$backup" ]; then mv -f -- "$backup" "$real/mash"; else rm -f -- "$real/mash"; fi
         die "could not install mashctl: nothing was installed"
     fi
+    trap - INT TERM HUP
+    eval "$old_traps"
     STAGED=()
     [ -z "$backup" ] || rm -f -- "$backup"
 
