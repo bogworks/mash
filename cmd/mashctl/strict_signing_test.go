@@ -32,7 +32,7 @@ func seedFile(t *testing.T, dir, name string, kp nkeys.KeyPair) string {
 // connectsWith reports whether the server takes a connection with the creds file.
 func connectsWith(t *testing.T, url, creds string) bool {
 	t.Helper()
-	nc, err := nats.Connect(url, natsauth.UserCredentials(creds), nats.MaxReconnects(0))
+	nc, err := nats.Connect(url, natsauth.UserCredentials(creds), nats.MaxReconnects(0), nats.Timeout(15*time.Second))
 	if err != nil {
 		return false
 	}
@@ -250,7 +250,7 @@ func TestInitSigningKeyImport(t *testing.T) {
 // pushAccountJWT updates the account JWT of the env's resolver through the system account.
 func pushAccountJWT(t *testing.T, e *applyEnv, tok string) {
 	t.Helper()
-	nc, err := nats.Connect(e.srv.ClientURL(), natsauth.UserCredentials(e.sysCreds))
+	nc, err := nats.Connect(e.srv.ClientURL(), nats.Timeout(15*time.Second), natsauth.UserCredentials(e.sysCreds))
 	if err != nil {
 		t.Fatal(err)
 	}
