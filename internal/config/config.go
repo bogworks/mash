@@ -943,14 +943,27 @@ func externalKeysKey(raw json.RawMessage) ([]string, error) {
 		return nil, errors.New("mash: config.json \"external_keys\" must be an array of user public keys (U...)")
 	}
 	var keys []string
-	for _, it := range items {
+	seen := map[string]bool{}
+	for i, it := range items {
 		var k string
 		if err := json.Unmarshal(it, &k); err != nil || strings.TrimSpace(string(it)) == "null" {
-			return nil, fmt.Errorf("mash: config.json \"external_keys\" entry %s is not a string: list user public keys (U...)", strings.TrimSpace(string(it)))
+			return nil, fmt.Errorf("mash: config.json \"external_keys\" entry %d (not shown) is not a string: list user public keys (U...)", i+1)
+		}
+		// An entry is echoed only when it starts with U: a seed (SU...) must never reach an error, which doctor prints.
+		shown := fmt.Sprintf("entry %d (not shown)", i+1)
+		if t := strings.TrimSpace(k); strings.HasPrefix(t, "U") {
+			shown = fmt.Sprintf("entry %q", k)
+		}
+		if k != strings.TrimSpace(k) || strings.ContainsAny(k, "\r\n") {
+			return nil, fmt.Errorf("mash: config.json \"external_keys\" %s has whitespace or a line break: list exact keys with nothing around them", shown)
 		}
 		if !nkeys.IsValidPublicUserKey(k) {
-			return nil, fmt.Errorf("mash: config.json \"external_keys\" entry %q is not a user public key: list exact keys that start with U", k)
+			return nil, fmt.Errorf("mash: config.json \"external_keys\" %s is not a user public key: list exact keys that start with U", shown)
 		}
+		if seen[k] {
+			return nil, fmt.Errorf("mash: config.json \"external_keys\" lists %s twice: list each key once", k)
+		}
+		seen[k] = true
 		keys = append(keys, k)
 	}
 	return keys, nil

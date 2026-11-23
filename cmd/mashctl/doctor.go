@@ -616,8 +616,9 @@ func doctorKeys(rep *doctorReport, ctx context.Context, adm *admin.Admin, cfg co
 	unrecorded, revoked, external := connectedFindings(scan.Conns, recs, cfg.ExternalKeys)
 	var fails []finding
 	const fix = "mashctl endpoint list"
+	const unlistedFix = "if another tool issued it, list it in config.json external_keys; otherwise revoke it"
 	if n := len(unrecorded); n > 0 {
-		fails = append(fails, finding{fmt.Sprintf("%s not issued here", count(n, "connected key")+" "+plural(n, "was", "were")), fix})
+		fails = append(fails, finding{fmt.Sprintf("%s not issued here: %s", count(n, "connected key")+" "+plural(n, "was", "were"), names(unrecorded)), unlistedFix})
 	}
 	if n := len(revoked); n > 0 {
 		fails = append(fails, finding{fmt.Sprintf("%s still connected", count(n, "revoked key")+" "+plural(n, "is", "are")), fix})
@@ -627,7 +628,7 @@ func doctorKeys(rep *doctorReport, ctx context.Context, adm *admin.Admin, cfg co
 	}
 	okDetail := "every connected key was issued here"
 	if n := len(external); n > 0 {
-		okDetail = fmt.Sprintf("every connected key was issued here or is listed in external_keys (%d external)", n)
+		okDetail = fmt.Sprintf("every connected key was issued here or listed (%d external)", n)
 	}
 	addFindings(rep, "keys", okDetail, fails, nil)
 }

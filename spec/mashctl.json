@@ -349,7 +349,7 @@
    },
    {
     "name": "doctor",
-    "description": "Check the server, mash's storage on it and every endpoint's records, and say how to fix what is wrong. Changes nothing. Keys that other tools issued on a shared account are accepted when config.json lists them as external_keys.",
+    "description": "Check the server, mash's storage on it and every endpoint's records, and say how to fix what is wrong. Changes nothing.",
     "options": [
      {
       "name": "--strict",

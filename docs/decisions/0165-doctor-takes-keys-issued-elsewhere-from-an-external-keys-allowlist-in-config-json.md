@@ -37,6 +37,8 @@ Chosen option: A. `config.json` takes `external_keys`, an array of exact user pu
 * Bad: the list is kept per admin machine, not shared through the server.
 * Neutral: a stale entry is harmless, because it only matters while that key is connected.
 * Neutral: entries are exact keys; there are no patterns.
+* Neutral: `external_keys` is a config.json-only setting, with no flag and no environment variable. It is an exception to "every setting three ways", as the encryption switch is (that one is environment only).
+* Neutral: the field is validated by the shared config loader, so a bad entry (not a user public key, surrounding whitespace, a duplicate) also stops `mash serve`, not only `mashctl doctor`. An error names an entry only if it starts with `U`, so a seed is never echoed.
 
 ## Pros and Cons of the Options
 

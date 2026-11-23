@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -409,8 +410,8 @@ func TestDoctorKeysReportsAKeyMashDidNotIssue(t *testing.T) {
 		t.Fatal("the rogue did not connect")
 	}
 	out, errb, code := e.run("doctor")
-	want := "config     ok\nserver     ok    tls://localhost:4222\nsign-in    ok\nstorage    ok\nendpoints  ok    2 records, 2 inboxes\nkeys       FAIL  1 connected key was not issued here\n\n1 problem.\n"
-	if code != 1 || cleanText(e, out) != want || errb != "hint: mashctl endpoint list\n" {
+	want := "config     ok\nserver     ok    tls://localhost:4222\nsign-in    ok\nstorage    ok\nendpoints  ok    2 records, 2 inboxes\nkeys       FAIL  1 connected key was not issued here: KEY\n\n1 problem.\n"
+	if code != 1 || userKeyRE.ReplaceAllString(cleanText(e, out), "KEY") != want || errb != "hint: if another tool issued it, list it in config.json external_keys; otherwise revoke it\n" {
 		t.Fatalf("exit %d\n%q\nstderr %q\nwant\n%q", code, cleanText(e, out), errb, want)
 	}
 	rogue.Close()
@@ -425,7 +426,7 @@ func TestDoctorKeysHasNoExemptionForTheCommandsOwnAdmin(t *testing.T) {
 	e := newXYEnv(t)
 	path, _ := mintUnrecordedAdmin(t, e)
 	e.env["MASH_ADMIN_CREDS"] = path
-	if _, by, code := doctorJSON(t, e.run); code != 1 || by["keys"].Detail != "1 connected key was not issued here" {
+	if _, by, code := doctorJSON(t, e.run); code != 1 || !strings.HasPrefix(by["keys"].Detail, "1 connected key was not issued here: U") {
 		t.Fatalf("an unrecorded admin was not reported: %d %+v", code, by["keys"])
 	}
 }
@@ -463,7 +464,7 @@ func TestDoctorKeysRefusesAnIncompleteServerSet(t *testing.T) {
 	}
 	e.connect(e.mintRogue("rogue"))
 	_, by, _ = doctorJSON(t, e.run)
-	if c := by["keys"]; !strings.HasPrefix(c.Detail, "1 connected key was not issued here; ") || !strings.Contains(c.Detail, "1 server(s) replied") {
+	if c := by["keys"]; !strings.HasPrefix(c.Detail, "1 connected key was not issued here: U") || !strings.Contains(c.Detail, "1 server(s) replied") {
 		t.Fatalf("%+v", c)
 	}
 	e.servers(1)
@@ -594,6 +595,8 @@ func (e *applyEnv) setExternal(raw string) {
 	e.writeConfig(`{"system_creds":"` + e.sysCreds + `","external_keys":` + raw + `}`)
 }
 
+var userKeyRE = regexp.MustCompile(`U[A-Z2-7]{55}`)
+
 const keysOKLine = "keys       ok    every connected key was issued here"
 
 // A listed connected key passes and is counted; an unlisted one still fails, with and without --strict; an empty or
@@ -603,20 +606,24 @@ func TestDoctorKeysExternalKeys(t *testing.T) {
 	listed := rogueKey(t, e, "tool-a")
 
 	// absent and empty: today's failure, byte for byte
-	failWant := "config     ok\nserver     ok    tls://localhost:4222\nsign-in    ok\nstorage    ok\nendpoints  ok    2 records, 2 inboxes\nkeys       FAIL  1 connected key was not issued here\n\n1 problem.\n"
+	failFor := func(key string) string {
+		return "config     ok\nserver     ok    tls://localhost:4222\nsign-in    ok\nstorage    ok\nendpoints  ok    2 records, 2 inboxes\nkeys       FAIL  1 connected key was not issued here: " + key + "\n\n1 problem.\n"
+	}
+	const unlistedHint = "hint: if another tool issued it, list it in config.json external_keys; otherwise revoke it\n"
+	failWant := failFor(listed)
 	for _, raw := range []string{"", "null", "[]"} {
 		if raw != "" {
 			e.setExternal(raw)
 		}
 		out, errb, code := e.run("doctor")
-		if code != 1 || cleanText(e, out) != failWant || errb != "hint: mashctl endpoint list\n" {
+		if code != 1 || cleanText(e, out) != failWant || errb != unlistedHint {
 			t.Fatalf("external_keys %q: exit %d\n%q\nstderr %q", raw, code, cleanText(e, out), errb)
 		}
 	}
 
 	e.setExternal(`["` + listed + `"]`)
 	out, errb, code := e.run("doctor")
-	want := "config     ok\nserver     ok    tls://localhost:4222\nsign-in    ok\nstorage    ok\nendpoints  ok    2 records, 2 inboxes\nkeys       ok    every connected key was issued here or is listed in external_keys (1 external)\n\nNo problems.\n"
+	want := "config     ok\nserver     ok    tls://localhost:4222\nsign-in    ok\nstorage    ok\nendpoints  ok    2 records, 2 inboxes\nkeys       ok    every connected key was issued here or listed (1 external)\n\nNo problems.\n"
 	if code != 0 || cleanText(e, out) != want || errb != "" {
 		t.Fatalf("listed: exit %d\n%q\nstderr %q", code, cleanText(e, out), errb)
 	}
@@ -625,14 +632,15 @@ func TestDoctorKeysExternalKeys(t *testing.T) {
 	}
 
 	// a second, unlisted key: the failure stays, the listed one is not counted as a failure
-	rogueKey(t, e, "tool-b")
+	unlisted := rogueKey(t, e, "tool-b")
+	failWant = failFor(unlisted)
 	for _, args := range [][]string{{"doctor"}, {"doctor", "--strict"}} {
 		out, errb, code := e.run(args...)
-		if code != 1 || cleanText(e, out) != failWant || errb != "hint: mashctl endpoint list\n" {
+		if code != 1 || cleanText(e, out) != failWant || errb != unlistedHint {
 			t.Fatalf("%v: exit %d\n%q\nstderr %q", args, code, cleanText(e, out), errb)
 		}
 	}
-	if _, by, code := doctorJSON(t, e.run); code != 1 || by["keys"].State != "fail" || by["keys"].Detail != "1 connected key was not issued here" {
+	if _, by, code := doctorJSON(t, e.run); code != 1 || by["keys"].State != "fail" || by["keys"].Detail != "1 connected key was not issued here: "+unlisted {
 		t.Fatalf("json: %d %+v", code, by["keys"])
 	}
 }
@@ -659,17 +667,64 @@ func TestDoctorExternalKeysMalformedIsAConfigError(t *testing.T) {
 	acct := e.acctPub
 	for raw, named := range map[string]string{
 		`"` + acct + `"`:   "external_keys",
-		`[42]`:             "42",
-		`["` + acct + `"]`: acct,
-		`["garbage"]`:      `"garbage"`,
-		`["*"]`:            `"*"`,
-		`[""]`:             `""`,
+		`[42]`:             "entry 1 (not shown)",
+		`["` + acct + `"]`: "entry 1 (not shown)",
+		`["garbage"]`:      "entry 1 (not shown)",
+		`["*"]`:            "entry 1 (not shown)",
+		`[""]`:             "entry 1 (not shown)",
 	} {
 		e.setExternal(raw)
 		_, by, code := doctorJSON(t, e.run)
 		c := by["config"]
 		if code != 1 || c.State != "fail" || !strings.Contains(c.Detail, "external_keys") || !strings.Contains(c.Detail, named) {
 			t.Errorf("%s: %d %+v", raw, code, c)
+		}
+	}
+}
+
+// A key issued here and also listed stays issued: it is not counted as external.
+func TestDoctorKeysIssuedAndListedIsNotExternal(t *testing.T) {
+	e := newXYEnv(t)
+	_, xKey := credsSubject(t, e.credsPath(xy("x").String()))
+	e.connect(natsauth.UserCredentials(e.credsPath(xy("x").String())), nats.Name("x-client"))
+	e.setExternal(`["` + xKey + `"]`)
+	out, errb, code := e.run("doctor")
+	if code != 0 || errb != "" || !strings.Contains(cleanText(e, out), keysOKLine+"\n") || strings.Contains(out, "external") {
+		t.Fatalf("exit %d\n%q\nstderr %q", code, cleanText(e, out), errb)
+	}
+}
+
+// An operator key, an account key, a seed, an entry with a line break and a repeated entry are each refused; a seed is
+// never printed, in the config line or in --json.
+func TestDoctorExternalKeysRefusedEntries(t *testing.T) {
+	e := newXYEnv(t)
+	op, _ := nkeys.CreateOperator()
+	opub, _ := op.PublicKey()
+	u, _ := nkeys.CreateUser()
+	upub, _ := u.PublicKey()
+	seed, _ := u.Seed()
+	for name, raw := range map[string]string{
+		"operator":   `["` + opub + `"]`,
+		"account":    `["` + e.acctPub + `"]`,
+		"seed":       `["` + string(seed) + `"]`,
+		"newline":    `["` + upub + `\n"]`,
+		"whitespace": `[" ` + upub + `"]`,
+		"duplicate":  `["` + upub + `","` + upub + `"]`,
+	} {
+		e.setExternal(raw)
+		out, errb, code := e.run("doctor", "--json")
+		var rep doctorReport
+		if code != 1 || json.Unmarshal([]byte(out), &rep) != nil {
+			t.Errorf("%s: exit %d %q", name, code, out)
+			continue
+		}
+		for _, c := range rep.Checks {
+			if c.Name == "config" && (c.State != "fail" || !strings.Contains(c.Detail, "external_keys")) {
+				t.Errorf("%s: %+v", name, c)
+			}
+		}
+		if strings.Contains(out+errb, string(seed)) || strings.Contains(out+errb, opub) || strings.Contains(out+errb, e.acctPub) {
+			t.Errorf("%s: a key that must not be echoed was printed: %q %q", name, out, errb)
 		}
 	}
 }
