@@ -18,6 +18,7 @@ mashctl doctor [options]
 | Option | Argument | Description |
 | --- | --- | --- |
 | `--strict` |  | Exit 1 on a warning too. |
+| `--audit-users` |  | Also fail when a user connected to the account was not issued by mashctl. Not implied by --strict. |
 
 The global options of `mashctl` also apply: see
 [mashctl](mashctl.md#global-options).
@@ -67,6 +68,38 @@ keys       ok    every connected key was issued here
 
 1 problem.
 hint: mashctl endpoint show acme.demo.dave
+```
+
+### Another tool's user is connected (not a problem)
+
+Stream: stdout. Exit code: 0.
+
+```text
+config     ok
+server     ok    tls://localhost:4222
+sign-in    ok
+storage    ok
+endpoints  ok    3 records, 3 inboxes
+keys       ok    1 other user connected; mashctl did not issue it
+
+No problems.
+```
+
+### --audit-users finds a user mashctl did not issue
+
+Stream: stdout. Exit code: 1.
+
+```text
+config     ok
+server     ok    tls://localhost:4222
+sign-in    ok
+storage    ok
+endpoints  ok    3 records, 3 inboxes
+keys       FAIL  1 connected user was not issued by mashctl:
+                 UDXU4RCSJNZOIQHZNWXHXORDPRTGNJAHAHFRGZNEEJCPQTT2M7NLCNF4
+
+1 problem.
+hint: revoke it with nsc; mashctl cannot revoke a user it did not issue
 ```
 
 ## JSON

@@ -6,12 +6,13 @@ machines. It takes its server, owner and credentials from `config.json` like the
 [mashctl.md](mashctl.md)); `mashctl init --config FILE` writes them.
 
 ```text
-mashctl doctor [--strict] [--json]
+mashctl doctor [--strict] [--audit-users] [--json]
 ```
 
 The generated reference page, [mashctl doctor](reference/mashctl-doctor.md), has the exact output and exit codes; this page explains what each check means.
 
 - `--strict` exits 1 on a warning too.
+- `--audit-users` also fails when a user connected to the account was not issued by mashctl. Not implied by `--strict`.
 - `--json` prints the result as JSON.
 
 It takes over `mashctl audit` and `mashctl issued check`, which no longer exist: `mashctl audit` and `mashctl issued`
@@ -69,16 +70,16 @@ server that does not answer shows one `FAIL` line and four `skip` lines, not fiv
 | `sign-in` | the server refuses the admin credentials, or they cannot be used | | `mashctl init --config <file>` |
 | `storage` | the directory or lease bucket is missing, the lease bucket allows rollup writes (it has not been hardened) or cannot be read | another bucket is missing, a bucket's size cap is below the configured one, or a bucket is 90% full or more | `mashctl init --config <file>` |
 | `endpoints` | a directory record cannot be read; an inbox has no endpoint record; a record has no inbox; an inbox lost mail unread; a retirement was started and not finished; the retired-name bucket has no size cap or a bad configuration | an inbox is 90% full or more; the retired-name bucket is at or over 50% of its cap; a lease has no endpoint record | the command for the first finding: `mashctl endpoint show ADDRESS`, `mashctl endpoint inbox ADDRESS`, `mashctl endpoint delete ADDRESS`, `mashctl limits apply ADDRESS` |
-| `keys` | a connected key was not issued here and is not in `external_keys` (the finding names it), a key recorded as revoked is still connected, or not every server answered | no `system_creds` in the configuration, so nothing was checked | `mashctl endpoint list`; `mashctl init --config <file>` |
+| `keys` | a key recorded as revoked is still connected, not every server answered, or, with `--audit-users`, a connected user was not issued by mashctl (the finding names it) | no `system_creds` in the configuration, so nothing was checked | `mashctl endpoint list`; `mashctl init --config <file>` |
 
 When a check finds several things its detail lists them, separated by `;`, failures first, and names up to three
 addresses for each (`and N more` after that).
 
-Connected keys that were not issued here are the exception: each key is shown whole on a line of its own under the
-detail (up to three, then `and N more`), and that finding comes last in the `keys` line:
+With `--audit-users`, the connected users mashctl did not issue are the exception: each key is shown whole on a line of
+its own under the detail (up to three, then `and N more`), and that finding comes last in the `keys` line:
 
 ```text
-keys       FAIL  2 connected keys were not issued here:
+keys       FAIL  2 connected users were not issued by mashctl:
                  UAB2DMH4SPCMUGKLPFSR3O54L2YQ53CAGXIUSSU2GE55OHENR3PXIN4A
                  UDXU4RCSJNZOIQHXEVIZRFQ3C4SQ3N7KRBYQ3JNLKSDGFSAPQQBWHWKR
 ```
@@ -110,40 +111,41 @@ changes an existing bucket, so recreate it with a larger cap and its markers cop
 
 It asks every server, through the system account (`system_creds` in `config.json`), which user public keys are
 connected in the mash account, and compares them with the issue record (the `mash-issued` bucket, which `mashctl` writes
-for every user JWT it issues). A key that is connected and not in the record was not issued here; a key the record holds
-as revoked that is still connected means the revocation did not take effect (check that every server holds the account
-JWT with the revocation, and revoke the key again). No key is exempt, not even the admin user the command connects
-with: `mashctl init` records it. Only public keys are used.
+for every user JWT it issues). A key the record holds as revoked that is still connected means the revocation did not
+take effect (check that every server holds the account JWT with the revocation, and revoke the key again). Only public
+keys are used.
 
-On a shared account, another tool may have issued users that mash did not. List their exact user public keys (`U...`)
-in `config.json` as `external_keys`, an array of strings. A connected key that is listed, and not in the record, is
-not a finding, and the line says so:
+#### What health covers
 
-```json
-{
-  "system_creds": "~/.mash/system.creds",
-  "external_keys": ["UDXU4RCSJNZOIQHZNWXHXORDPRTGNJAHAHFRGZNEEJCPQTT2M7NLCNF4"]
-}
-```
+Health covers mash's own endpoints, the users mashctl issued, storage and sign-in. It never fails because other users
+share the account: mash is a tenant of the NATS account, not its owner. A connected user that mashctl did not issue is
+counted on the `keys` line and is not a problem, with or without `--strict`:
 
 ```text
-keys       ok    every connected key was issued here or listed (1 external)
+keys       ok    2 other users connected; mashctl did not issue them
 ```
 
-A connected key that is neither issued here nor listed fails and is named, up to three, then `and N more`; the hint reads
-`if another tool issued it, list it in config.json external_keys; otherwise revoke it`.
+With one it reads `1 other user connected; mashctl did not issue it`; with none, `every connected key was issued here`.
 
-A key that is not listed and not in the record still fails, with or without `--strict`. A key the record holds keeps its
-own rules: a revoked key that is still connected fails even when it is also listed. An entry that is not a user public
-key, has whitespace or a line break around it, or repeats an earlier entry is a configuration error that stops every mash command that reads the configuration, including mail, until the entry is fixed or removed; it is not only a `mashctl doctor` setting. The error names the entry
-unless it does not start with `U`, so a seed pasted by mistake is never printed. `external_keys` is a `config.json` key
-only: it has no flag or environment variable. With no `external_keys`, nothing changes. The list is per machine
-that runs `mashctl`, and an entry for a key that is no longer connected does no harm.
+`mashctl doctor --audit-users` is the explicit check that the account is mash's alone, and the only thing that fails on
+such a user. It is not implied by `--strict`, and works with or without it. It names the keys, up to three, then
+`and N more`:
+
+```text
+keys       FAIL  1 connected user was not issued by mashctl:
+                 UDXU4RCSJNZOIQHZNWXHXORDPRTGNJAHAHFRGZNEEJCPQTT2M7NLCNF4
+
+1 problem.
+hint: revoke it with nsc; mashctl cannot revoke a user it did not issue
+```
+
+Revoking a user mashctl did not issue is done with `nsc`. With no such user, `--audit-users` leaves the row as
+`every connected key was issued here`.
 
 The check is complete only when every server answered: the servers it expects are the count under `servers` in
 `config.json`, and a cluster that reports more servers than are listed is not complete either. A server that did not
 answer, or whose connection list changed while it was read and could not be read whole, fails the check with the reason,
-even when no foreign key was found. Without `system_creds` the check warns and reads nothing.
+even when no other user was found. Without `system_creds` the check warns and reads nothing.
 
 ## Exit codes
 

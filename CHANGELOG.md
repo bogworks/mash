@@ -8,7 +8,7 @@ All notable user-facing changes to mash are recorded here. The format follows [K
 
 ### Summary
 
-**mash 0.5.8 exists for a fleet migration: it lets mash accept keys that another tool issued, which you list in `config.json` under `external_keys`, so `mashctl doctor` no longer fails on them ([#1300](https://github.com/bogworks/mash/issues/1300)), and `install.sh` tells you how to fix a folder it refuses ([#1240](https://github.com/bogworks/mash/issues/1240)).** If your NATS account is shared with other tools, list their user public keys as `external_keys` in `config.json` and the `keys` check passes; if you never share an account, nothing changes. The rest is smaller: one count for `mash inbox` and the idle wake, a refused-mail count that is repaired after a kill, safer installer and setup scripts, and a bigger default for the local server. Every download has a build attestation; verify it. The known issues are listed in the release notes.
+**mash 0.5.8 exists for a fleet migration: `mashctl doctor` now passes on a NATS account shared with other tools, and `mashctl doctor --audit-users` checks that the account is mash's alone ([#1300](https://github.com/bogworks/mash/issues/1300)). `install.sh` also tells you how to fix a folder it refuses ([#1240](https://github.com/bogworks/mash/issues/1240)).** `mashctl doctor` no longer fails because a connected user was not issued by mashctl; it says how many other users are connected, and `--audit-users` is the one option that fails on them. If you never share an account, nothing changes. The rest is smaller: one count for `mash inbox` and the idle wake, a refused-mail count that is repaired after a kill, safer installer and setup scripts, and a bigger default for the local server. Every download has a build attestation; verify it. The known issues are listed in the release notes.
 
 ### Upgrading
 
@@ -16,7 +16,7 @@ Update both plugins, `mash` and `mash-setup`, then restart your Claude Code sess
 
 ### Added
 
-- `external_keys` in `config.json` lists keys other tools issued on a shared account, so `mashctl doctor` stops failing on them; a bad entry stops every mash command that reads the configuration, including mail, until fixed or removed ([#1300](https://github.com/bogworks/mash/issues/1300)).
+- `mashctl doctor` no longer fails because a connected user was not issued by mashctl; it says how many other users are connected, and the new `--audit-users` fails on them and names each key ([#1300](https://github.com/bogworks/mash/issues/1300)).
 
 ### Changed
 

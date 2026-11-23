@@ -1,10 +1,12 @@
 ---
-status: accepted
+status: superseded by ADR-0166
 date: 2026-11-23
 decision-makers: Randy Bias (mash maintainer)
 ---
 
 # Doctor takes keys issued elsewhere from an external_keys allowlist in config.json
+
+Superseded by [0166](0166-doctor-health-covers-mashs-own-users-account-audit-is-explicit-audit-users.md).
 
 ## Context and Problem Statement
 

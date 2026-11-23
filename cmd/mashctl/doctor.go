@@ -22,15 +22,17 @@ import (
 )
 
 // doctorUsage is the text of `mashctl doctor --help`.
-const doctorUsage = `usage: mashctl doctor [--strict] [--json]
+const doctorUsage = `usage: mashctl doctor [--strict] [--audit-users] [--json]
 
 Check the server, mash's storage on it and every endpoint's records,
 and say how to fix what is wrong.
 It changes nothing.
 
 options:
-  --strict   exit 1 on a warning too
-  --json     print the result as JSON
+  --strict       exit 1 on a warning too
+  --audit-users  also fail when a user connected to the account was not
+                 issued by mashctl (not implied by --strict)
+  --json         print the result as JSON
 
 exit codes:
   0  no problem (and, with --strict, no warning)
@@ -40,7 +42,7 @@ exit codes:
 Example: mashctl doctor
 `
 
-var doctorSpec = epSpec{name: "doctor", verb: "doctor", flags: []string{"--strict"}, min: 0, max: 0, offline: true}
+var doctorSpec = epSpec{name: "doctor", verb: "doctor", flags: []string{"--strict", "--audit-users"}, min: 0, max: 0, offline: true}
 
 // The states of a check.
 const (
@@ -170,7 +172,7 @@ func runDoctor(args []string, g cliframe.Global, env func(string) string, lookup
 		return cliframe.Report(stdout, stderr, err, jsonRequested(args))
 	}
 	rep := doctorReport{Checks: []doctorCheck{}}
-	doctorChecks(&rep, env, lookup)
+	doctorChecks(&rep, env, lookup, in.flags["--audit-users"])
 	rep.complete()
 	if jsonOut {
 		writeJSON(stdout, rep)
@@ -196,7 +198,7 @@ func oneLine(s string) string {
 }
 
 // doctorChecks runs the six checks and adds each result to rep.
-func doctorChecks(rep *doctorReport, env func(string) string, lookup config.Lookup) {
+func doctorChecks(rep *doctorReport, env func(string) string, lookup config.Lookup, auditUsers bool) {
 	// 1. config
 	cfg, err := loadCtlConfig(env, lookup, true)
 	why := ""
@@ -250,7 +252,7 @@ func doctorChecks(rep *doctorReport, env func(string) string, lookup config.Look
 	}
 
 	// 6. keys
-	doctorKeys(rep, ctx, adm, cfg, env)
+	doctorKeys(rep, ctx, adm, cfg, env, auditUsers)
 }
 
 // probeServer connects to one server, with the TLS settings of the configuration and no credentials. A server that
@@ -555,19 +557,12 @@ func scanConnections(ctx context.Context, nc *nats.Conn, account string, servers
 // connectedFindings sorts the connected keys against the issue record: the keys no record holds, and the keys the
 // record holds as revoked. No key is exempt: the admin user is in the account and init records it, and the system
 // account's users are never in the mash account's connection list.
-//
-// A key no record holds that is listed (config.json "external_keys") is not unrecorded: it goes to
-// external, which is no finding. A key the record holds is never external, listed or not.
-func connectedFindings(conns []apply.ConnzServer, recs []store.Issued, listed []string) (unrecorded, revoked, external []string) {
-	isListed := map[string]bool{}
-	for _, k := range listed {
-		isListed[k] = true
-	}
+func connectedFindings(conns []apply.ConnzServer, recs []store.Issued) (unrecorded, revoked []string) {
 	recorded := map[string]store.Issued{}
 	for _, r := range recs {
 		recorded[r.PublicKey] = r
 	}
-	seenU, seenR, seenE := map[string]bool{}, map[string]bool{}, map[string]bool{}
+	seenU, seenR := map[string]bool{}, map[string]bool{}
 	for _, s := range conns {
 		for _, c := range s.Conns {
 			if c.Key == "" {
@@ -575,11 +570,6 @@ func connectedFindings(conns []apply.ConnzServer, recs []store.Issued, listed []
 			}
 			r, ok := recorded[c.Key]
 			switch {
-			case !ok && isListed[c.Key]:
-				if !seenE[c.Key] {
-					seenE[c.Key] = true
-					external = append(external, c.Key)
-				}
 			case !ok && !seenU[c.Key]:
 				seenU[c.Key] = true
 				unrecorded = append(unrecorded, c.Key)
@@ -591,13 +581,12 @@ func connectedFindings(conns []apply.ConnzServer, recs []store.Issued, listed []
 	}
 	slices.Sort(unrecorded)
 	slices.Sort(revoked)
-	slices.Sort(external)
-	return unrecorded, revoked, external
+	return unrecorded, revoked
 }
 
 // doctorKeys is the keys check: every key connected to the account was issued here and none that was revoked is still
 // connected. It needs the system account credentials; without them it warns and checks nothing.
-func doctorKeys(rep *doctorReport, ctx context.Context, adm *admin.Admin, cfg config.Config, env func(string) string) {
+func doctorKeys(rep *doctorReport, ctx context.Context, adm *admin.Admin, cfg config.Config, env func(string) string, auditUsers bool) {
 	if cfg.SysCreds == "" {
 		rep.add("keys", stateWarn, "no system_creds in the configuration; connected keys were not checked", initFix)
 		return
@@ -628,24 +617,30 @@ func doctorKeys(rep *doctorReport, ctx context.Context, adm *admin.Admin, cfg co
 		failKeys(err.Error())
 		return
 	}
-	unrecorded, revoked, external := connectedFindings(scan.Conns, recs, cfg.ExternalKeys)
+	unrecorded, revoked := connectedFindings(scan.Conns, recs)
 	var fails []finding
 	const fix = "mashctl endpoint list"
-	const unlistedFix = "if another tool issued it, list it in config.json external_keys; otherwise revoke it"
+	const auditFix = "revoke it with nsc; mashctl cannot revoke a user it did not issue"
 	if n := len(revoked); n > 0 {
 		fails = append(fails, finding{fmt.Sprintf("%s still connected", count(n, "revoked key")+" "+plural(n, "is", "are")), fix})
 	}
 	if scan.Incomplete != "" {
 		fails = append(fails, finding{oneLine(scan.Incomplete), initFix})
 	}
-	if n := len(unrecorded); n > 0 { // last: its keys are lines of their own, so no "; ..." may follow
-		fails = append(fails, finding{fmt.Sprintf("%s not issued here:%s", count(n, "connected key")+" "+plural(n, "was", "were"), keyLines(unrecorded)), unlistedFix})
+	audited := auditUsers && len(unrecorded) > 0
+	if audited { // last: its keys are lines of their own, so no "; ..." may follow
+		n := len(unrecorded)
+		fails = append(fails, finding{fmt.Sprintf("%s not issued by mashctl:%s", count(n, "connected user")+" "+plural(n, "was", "were"), keyLines(unrecorded)), auditFix})
 	}
 	okDetail := "every connected key was issued here"
-	if n := len(external); n > 0 {
-		okDetail = fmt.Sprintf("every connected key was issued here or listed (%d external)", n)
+	if n := len(unrecorded); n > 0 && !audited {
+		okDetail = fmt.Sprintf("%s connected; mashctl did not issue %s", count(n, "other user"), plural(n, "it", "them"))
 	}
 	addFindings(rep, "keys", okDetail, fails, nil)
+	if audited { // this finding's fix wins whatever else the row says
+		fixed := auditFix
+		rep.Checks[len(rep.Checks)-1].Fix = &fixed
+	}
 }
 
 // anyPlainRefused reports whether any server in the list is a plain URL the encryption rule refuses: a configuration

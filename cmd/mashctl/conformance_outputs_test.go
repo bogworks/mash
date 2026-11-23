@@ -354,6 +354,19 @@ func init() {
 		return confOutRun{ran: w.run("doctor"), subs: urlSub(w)}
 	})
 
+	reg("doctor Another tool's user is connected (not a problem)", func(t *testing.T) confOutRun {
+		w := newConfWorld(t, true)
+		w.fleet()
+		w.a.src.connect(w.a.src.mintRogue("tool-a"))
+		return confOutRun{ran: w.run("doctor"), subs: urlSub(w)}
+	})
+	reg("doctor --audit-users finds a user mashctl did not issue", func(t *testing.T) confOutRun {
+		w := newConfWorld(t, true)
+		w.fleet()
+		w.a.src.connect(w.a.src.mintRogue("tool-a"))
+		return confOutRun{ran: w.run("doctor", "--audit-users"), subs: urlSub(w)}
+	})
+
 	reg("limits show Limits", func(t *testing.T) confOutRun {
 		return confOutRun{ran: newConfWorld(t, true).run("limits", "show")}
 	})

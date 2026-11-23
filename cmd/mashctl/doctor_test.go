@@ -403,32 +403,83 @@ func TestBuildRetiredUncappedIsAProblemNotAnAlarm(t *testing.T) {
 	}
 }
 
-// Keys: a key signed outside mashctl is connected and mash did not issue it.
-func TestDoctorKeysReportsAKeyMashDidNotIssue(t *testing.T) {
+// Keys: a key signed outside mashctl is connected and mash did not issue it. It is never a failure by itself; only
+// --audit-users fails on it.
+func TestDoctorKeysForeignUserIsAClauseNotAFailure(t *testing.T) {
 	e := newXYEnv(t)
 	rogue := e.connect(e.mintRogue("rogue"), nats.Name("rogue-client"))
 	if !rogue.IsConnected() {
 		t.Fatal("the rogue did not connect")
 	}
-	out, errb, code := e.run("doctor")
-	want := "config     ok\nserver     ok    tls://localhost:4222\nsign-in    ok\nstorage    ok\nendpoints  ok    2 records, 2 inboxes\nkeys       FAIL  1 connected key was not issued here:\n                 KEY\n\n1 problem.\n"
-	if code != 1 || userKeyRE.ReplaceAllString(cleanText(e, out), "KEY") != want || errb != "hint: if another tool issued it, list it in config.json external_keys; otherwise revoke it\n" {
-		t.Fatalf("exit %d\n%q\nstderr %q\nwant\n%q", code, cleanText(e, out), errb, want)
+	want := "config     ok\nserver     ok    tls://localhost:4222\nsign-in    ok\nstorage    ok\nendpoints  ok    2 records, 2 inboxes\nkeys       ok    1 other user connected; mashctl did not issue it\n\nNo problems.\n"
+	for _, args := range [][]string{{"doctor"}, {"doctor", "--strict"}} {
+		out, errb, code := e.run(args...)
+		if code != 0 || cleanText(e, out) != want || errb != "" {
+			t.Fatalf("%v: exit %d\n%q\nstderr %q\nwant\n%q", args, code, cleanText(e, out), errb, want)
+		}
+	}
+	if _, by, code := doctorJSON(t, e.run); code != 0 || by["keys"].State != "ok" || by["keys"].Detail != "1 other user connected; mashctl did not issue it" || by["keys"].Fix != nil {
+		t.Fatalf("json: %d %+v", code, by["keys"])
 	}
 	rogue.Close()
 	time.Sleep(200 * time.Millisecond)
-	if _, by, code := doctorJSON(t, e.run); code != 0 || by["keys"].State != "ok" {
+	if _, by, code := doctorJSON(t, e.run); code != 0 || by["keys"].Detail != "every connected key was issued here" {
 		t.Fatalf("after the rogue left: %d %+v", code, by["keys"])
 	}
 }
 
-// The admin key this command connects with is not exempt: unrecorded, it is reported; once recorded it is clean.
+// --audit-users fails on a user mashctl did not issue, names it, and never points at `mashctl init`; with --strict too.
+func TestDoctorAuditUsersFailsOnAForeignUser(t *testing.T) {
+	e := newXYEnv(t)
+	key := rogueKey(t, e, "tool-a")
+	want := "config     ok\nserver     ok    tls://localhost:4222\nsign-in    ok\nstorage    ok\nendpoints  ok    2 records, 2 inboxes\nkeys       FAIL  1 connected user was not issued by mashctl:\n                 " + key + "\n\n1 problem.\n"
+	const hint = "hint: revoke it with nsc; mashctl cannot revoke a user it did not issue\n"
+	for _, args := range [][]string{{"doctor", "--audit-users"}, {"doctor", "--strict", "--audit-users"}, {"doctor", "--audit-users", "--strict"}} {
+		out, errb, code := e.run(args...)
+		if code != 1 || cleanText(e, out) != want || errb != hint {
+			t.Fatalf("%v: exit %d\n%q\nstderr %q\nwant\n%q", args, code, cleanText(e, out), errb, want)
+		}
+		if strings.Contains(out+errb, "init --config") || strings.Contains(out+errb, "mashctl init") {
+			t.Errorf("%v: points at init: %q %q", args, out, errb)
+		}
+	}
+	_, by, code := doctorJSON(t, e.run, "--audit-users")
+	if c := by["keys"]; code != 1 || c.State != "fail" || c.Detail != "1 connected user was not issued by mashctl:\n"+key || c.Fix == nil || *c.Fix != "revoke it with nsc; mashctl cannot revoke a user it did not issue" {
+		t.Fatalf("json: %d %+v", code, by["keys"])
+	}
+}
+
+// Only mash's users: the three modes pass with the unchanged ok text, and a 0.5.7-style config.json (no new keys, and
+// an unknown key such as a leftover external_keys) works the same.
+func TestDoctorOnlyMashUsersPassesInEveryMode(t *testing.T) {
+	e := newXYEnv(t)
+	const want = "config     ok\nserver     ok    tls://localhost:4222\nsign-in    ok\nstorage    ok\nendpoints  ok    2 records, 2 inboxes\nkeys       ok    every connected key was issued here\n\nNo problems.\n"
+	check := func(label string) {
+		t.Helper()
+		for _, args := range [][]string{{"doctor"}, {"doctor", "--strict"}, {"doctor", "--audit-users"}, {"doctor", "--strict", "--audit-users"}} {
+			out, errb, code := e.run(args...)
+			if code != 0 || cleanText(e, out) != want || errb != "" {
+				t.Fatalf("%s %v: exit %d\n%q\nstderr %q", label, args, code, cleanText(e, out), errb)
+			}
+		}
+	}
+	check("fixture config")
+	e.writeConfig(`{"system_creds":"` + e.sysCreds + `"}`) // a 0.5.7-style file
+	check("0.5.7 config")
+	e.writeConfig(`{"system_creds":"` + e.sysCreds + `","external_keys":["` + e.acctPub + `"]}`) // an unknown key is ignored
+	check("unknown external_keys")
+}
+
+// The admin key this command connects with is not exempt: unrecorded, --audit-users reports it; once recorded it is clean.
 func TestDoctorKeysHasNoExemptionForTheCommandsOwnAdmin(t *testing.T) {
 	e := newXYEnv(t)
 	path, _ := mintUnrecordedAdmin(t, e)
 	e.env["MASH_ADMIN_CREDS"] = path
-	if _, by, code := doctorJSON(t, e.run); code != 1 || !strings.HasPrefix(by["keys"].Detail, "1 connected key was not issued here:\nU") {
+	if _, by, code := doctorJSON(t, e.run, "--audit-users"); code != 1 || !strings.HasPrefix(by["keys"].Detail, "1 connected user was not issued by mashctl:\nU") {
 		t.Fatalf("an unrecorded admin was not reported: %d %+v", code, by["keys"])
+	}
+	if _, by, code := doctorJSON(t, e.run); code != 0 || by["keys"].State != "ok" || !strings.Contains(by["keys"].Detail, "other user") {
+		t.Fatalf("default: %d %+v", code, by["keys"])
 	}
 }
 
@@ -465,11 +516,18 @@ func TestDoctorKeysRefusesAnIncompleteServerSet(t *testing.T) {
 	}
 	e.connect(e.mintRogue("rogue"))
 	_, by, _ = doctorJSON(t, e.run)
-	if c := by["keys"]; !strings.HasPrefix(c.Detail, "1 server(s) replied") || !strings.Contains(c.Detail, "; 1 connected key was not issued here:\nU") {
+	if c := by["keys"]; !strings.HasPrefix(c.Detail, "1 server(s) replied") || strings.Contains(c.Detail, "not issued") {
+		t.Fatalf("%+v", c)
+	}
+	_, by, _ = doctorJSON(t, e.run, "--audit-users")
+	if c := by["keys"]; !strings.HasPrefix(c.Detail, "1 server(s) replied") || !strings.Contains(c.Detail, "; 1 connected user was not issued by mashctl:\nU") {
 		t.Fatalf("%+v", c)
 	}
 	e.servers(1)
-	if _, by, code := doctorJSON(t, e.run); by["keys"].State != "fail" || code != 1 { // the rogue is still connected
+	if _, by, code := doctorJSON(t, e.run); by["keys"].State != "ok" || code != 0 { // the rogue is still connected, and no failure
+		t.Fatalf("%d %+v", code, by["keys"])
+	}
+	if _, by, code := doctorJSON(t, e.run, "--audit-users"); by["keys"].State != "fail" || code != 1 {
 		t.Fatalf("%d %+v", code, by["keys"])
 	}
 }
@@ -590,64 +648,10 @@ func rogueKey(t *testing.T, e *applyEnv, name string) string {
 	return pub
 }
 
-// setExternal writes config.json with the system creds and the given raw external_keys value.
-func (e *applyEnv) setExternal(raw string) {
-	e.t.Helper()
-	e.writeConfig(`{"system_creds":"` + e.sysCreds + `","external_keys":` + raw + `}`)
-}
-
 var userKeyRE = regexp.MustCompile(`U[A-Z2-7]{55}`)
 
-const keysOKLine = "keys       ok    every connected key was issued here"
-
-// A listed connected key passes and is counted; an unlisted one still fails, with and without --strict; an empty or
-// absent list changes nothing.
-func TestDoctorKeysExternalKeys(t *testing.T) {
-	e := newXYEnv(t)
-	listed := rogueKey(t, e, "tool-a")
-
-	// absent and empty: today's failure, byte for byte
-	failFor := func(key string) string {
-		return "config     ok\nserver     ok    tls://localhost:4222\nsign-in    ok\nstorage    ok\nendpoints  ok    2 records, 2 inboxes\nkeys       FAIL  1 connected key was not issued here:\n                 " + key + "\n\n1 problem.\n"
-	}
-	const unlistedHint = "hint: if another tool issued it, list it in config.json external_keys; otherwise revoke it\n"
-	failWant := failFor(listed)
-	for _, raw := range []string{"", "null", "[]"} {
-		if raw != "" {
-			e.setExternal(raw)
-		}
-		out, errb, code := e.run("doctor")
-		if code != 1 || cleanText(e, out) != failWant || errb != unlistedHint {
-			t.Fatalf("external_keys %q: exit %d\n%q\nstderr %q", raw, code, cleanText(e, out), errb)
-		}
-	}
-
-	e.setExternal(`["` + listed + `"]`)
-	out, errb, code := e.run("doctor")
-	want := "config     ok\nserver     ok    tls://localhost:4222\nsign-in    ok\nstorage    ok\nendpoints  ok    2 records, 2 inboxes\nkeys       ok    every connected key was issued here or listed (1 external)\n\nNo problems.\n"
-	if code != 0 || cleanText(e, out) != want || errb != "" {
-		t.Fatalf("listed: exit %d\n%q\nstderr %q", code, cleanText(e, out), errb)
-	}
-	if _, errb, code := e.run("doctor", "--strict"); code != 0 {
-		t.Fatalf("listed, strict: %d %q", code, errb)
-	}
-
-	// a second, unlisted key: the failure stays, the listed one is not counted as a failure
-	unlisted := rogueKey(t, e, "tool-b")
-	failWant = failFor(unlisted)
-	for _, args := range [][]string{{"doctor"}, {"doctor", "--strict"}} {
-		out, errb, code := e.run(args...)
-		if code != 1 || cleanText(e, out) != failWant || errb != unlistedHint {
-			t.Fatalf("%v: exit %d\n%q\nstderr %q", args, code, cleanText(e, out), errb)
-		}
-	}
-	if _, by, code := doctorJSON(t, e.run); code != 1 || by["keys"].State != "fail" || by["keys"].Detail != "1 connected key was not issued here:\n"+unlisted {
-		t.Fatalf("json: %d %+v", code, by["keys"])
-	}
-}
-
-// The issue record wins: a revoked key that is still connected fails even when it is also listed.
-func TestDoctorKeysExternalKeysDoNotHideARevokedKey(t *testing.T) {
+// A revoked key that is still connected fails without --audit-users, and its own fix stays when another user is there.
+func TestDoctorRevokedStillConnectedFailsWithoutAudit(t *testing.T) {
 	e := newXYEnv(t)
 	e.connect(natsauth.UserCredentials(e.credsPath(xy("x").String())), nats.Name("x-client"))
 	_, xKey := credsSubject(t, e.credsPath(xy("x").String()))
@@ -656,100 +660,63 @@ func TestDoctorKeysExternalKeysDoNotHideARevokedKey(t *testing.T) {
 	if err := adm.MarkRevoked(ctx, xKey, time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)); err != nil {
 		t.Fatal(err)
 	}
-	e.setExternal(`["` + xKey + `"]`)
-	if _, by, code := doctorJSON(t, e.run); code != 1 || by["keys"].State != "fail" || by["keys"].Detail != "1 revoked key is still connected" {
-		t.Fatalf("%d %+v", code, by["keys"])
+	rogueKey(t, e, "tool-a")
+	for _, args := range [][]string{{}, {"--strict"}} {
+		_, by, code := doctorJSON(t, e.run, args...)
+		if c := by["keys"]; code != 1 || c.State != "fail" || c.Detail != "1 revoked key is still connected" || c.Fix == nil || *c.Fix != "mashctl endpoint list" {
+			t.Fatalf("%v: %d %+v", args, code, c)
+		}
+	}
+	_, by, code := doctorJSON(t, e.run, "--audit-users")
+	c := by["keys"]
+	if code != 1 || !strings.HasPrefix(c.Detail, "1 revoked key is still connected; 1 connected user was not issued by mashctl:\nU") || c.Fix == nil || !strings.HasPrefix(*c.Fix, "revoke it with nsc") {
+		t.Fatalf("audit: %d %+v", code, c)
 	}
 }
 
-// A malformed entry is a configuration error that names the entry.
-func TestDoctorExternalKeysMalformedIsAConfigError(t *testing.T) {
+// The clause is singular for one user and plural for more, and the audit failure follows the same rule.
+func TestDoctorForeignUserCountText(t *testing.T) {
 	e := newXYEnv(t)
-	acct := e.acctPub
-	for raw, named := range map[string]string{
-		`"` + acct + `"`:   "external_keys",
-		`[42]`:             "entry 1 (not shown)",
-		`["` + acct + `"]`: "entry 1 (not shown)",
-		`["garbage"]`:      "entry 1 (not shown)",
-		`["*"]`:            "entry 1 (not shown)",
-		`[""]`:             "entry 1 (not shown)",
-	} {
-		e.setExternal(raw)
-		_, by, code := doctorJSON(t, e.run)
-		c := by["config"]
-		if code != 1 || c.State != "fail" || !strings.Contains(c.Detail, "external_keys") || !strings.Contains(c.Detail, named) {
-			t.Errorf("%s: %d %+v", raw, code, c)
-		}
+	rogueKey(t, e, "tool-a")
+	_, by, _ := doctorJSON(t, e.run)
+	if d := by["keys"].Detail; d != "1 other user connected; mashctl did not issue it" {
+		t.Fatalf("%q", d)
+	}
+	rogueKey(t, e, "tool-b")
+	_, by, _ = doctorJSON(t, e.run)
+	if d := by["keys"].Detail; d != "2 other users connected; mashctl did not issue them" {
+		t.Fatalf("%q", d)
+	}
+	out, _, _ := e.run("doctor")
+	if !strings.Contains(out, "keys       ok    2 other users connected; mashctl did not issue them\n") {
+		t.Fatalf("%q", out)
+	}
+	_, by, _ = doctorJSON(t, e.run, "--audit-users")
+	if d := by["keys"].Detail; !strings.HasPrefix(d, "2 connected users were not issued by mashctl:\n") {
+		t.Fatalf("%q", d)
 	}
 }
 
-// A key issued here and also listed stays issued: it is not counted as external.
-func TestDoctorKeysIssuedAndListedIsNotExternal(t *testing.T) {
-	e := newXYEnv(t)
-	_, xKey := credsSubject(t, e.credsPath(xy("x").String()))
-	e.connect(natsauth.UserCredentials(e.credsPath(xy("x").String())), nats.Name("x-client"))
-	e.setExternal(`["` + xKey + `"]`)
-	out, errb, code := e.run("doctor")
-	if code != 0 || errb != "" || !strings.Contains(cleanText(e, out), keysOKLine+"\n") || strings.Contains(out, "external") {
-		t.Fatalf("exit %d\n%q\nstderr %q", code, cleanText(e, out), errb)
-	}
-}
-
-// An operator key, an account key, a seed, an entry with a line break and a repeated entry are each refused; a seed is
-// never printed, in the config line or in --json.
-func TestDoctorExternalKeysRefusedEntries(t *testing.T) {
-	e := newXYEnv(t)
-	op, _ := nkeys.CreateOperator()
-	opub, _ := op.PublicKey()
-	u, _ := nkeys.CreateUser()
-	upub, _ := u.PublicKey()
-	seed, _ := u.Seed()
-	for name, raw := range map[string]string{
-		"operator":   `["` + opub + `"]`,
-		"account":    `["` + e.acctPub + `"]`,
-		"seed":       `["` + string(seed) + `"]`,
-		"newline":    `["` + upub + `\n"]`,
-		"whitespace": `[" ` + upub + `"]`,
-		"duplicate":  `["` + upub + `","` + upub + `"]`,
-	} {
-		e.setExternal(raw)
-		out, errb, code := e.run("doctor", "--json")
-		var rep doctorReport
-		if code != 1 || json.Unmarshal([]byte(out), &rep) != nil {
-			t.Errorf("%s: exit %d %q", name, code, out)
-			continue
-		}
-		for _, c := range rep.Checks {
-			if c.Name == "config" && (c.State != "fail" || !strings.Contains(c.Detail, "external_keys")) {
-				t.Errorf("%s: %+v", name, c)
-			}
-		}
-		if strings.Contains(out+errb, string(seed)) || strings.Contains(out+errb, opub) || strings.Contains(out+errb, e.acctPub) {
-			t.Errorf("%s: a key that must not be echoed was printed: %q %q", name, out, errb)
-		}
-	}
-}
-
-// Five unlisted keys: three whole keys and "and 2 more", each on its own line, every line of the human output within
-// 80 columns; --json keeps the keys whole in detail.
-func TestDoctorKeysManyUnlistedKeysOnLinesOfTheirOwn(t *testing.T) {
+// Five foreign users with --audit-users: three whole keys and "and 2 more", each on its own line, every line of the
+// human output within 80 columns; --json keeps the keys whole in detail.
+func TestDoctorAuditUsersManyKeysOnLinesOfTheirOwn(t *testing.T) {
 	e := newXYEnv(t)
 	for i := 0; i < 5; i++ {
 		rogueKey(t, e, fmt.Sprintf("tool-%d", i))
 	}
-	out, _, code := e.run("doctor")
+	out, errb, code := e.run("doctor", "--audit-users")
 	if code != 1 {
 		t.Fatalf("exit %d", code)
 	}
 	text := cleanText(e, out)
 	lines := strings.Split(text, "\n")
-	for _, l := range lines {
+	for _, l := range append(lines, strings.Split(errb, "\n")...) {
 		if len(l) > 80 {
 			t.Errorf("%d columns: %q", len(l), l)
 		}
 	}
 	i := slices.IndexFunc(lines, func(l string) bool { return strings.HasPrefix(l, "keys ") })
-	if i < 0 || len(lines) < i+5 || lines[i] != "keys       FAIL  5 connected keys were not issued here:" || lines[i+4] != strings.Repeat(" ", 17)+"and 2 more" {
+	if i < 0 || len(lines) < i+5 || lines[i] != "keys       FAIL  5 connected users were not issued by mashctl:" || lines[i+4] != strings.Repeat(" ", 17)+"and 2 more" {
 		t.Fatalf("%q", text)
 	}
 	for _, l := range lines[i+1 : i+4] {
@@ -757,9 +724,9 @@ func TestDoctorKeysManyUnlistedKeysOnLinesOfTheirOwn(t *testing.T) {
 			t.Errorf("not an indented key: %q", l)
 		}
 	}
-	_, by, _ := doctorJSON(t, e.run)
+	_, by, _ := doctorJSON(t, e.run, "--audit-users")
 	dl := strings.Split(by["keys"].Detail, "\n")
-	if len(dl) != 5 || dl[0] != "5 connected keys were not issued here:" || dl[4] != "and 2 more" {
+	if len(dl) != 5 || dl[0] != "5 connected users were not issued by mashctl:" || dl[4] != "and 2 more" {
 		t.Fatalf("%q", by["keys"].Detail)
 	}
 	for _, k := range dl[1:4] {
