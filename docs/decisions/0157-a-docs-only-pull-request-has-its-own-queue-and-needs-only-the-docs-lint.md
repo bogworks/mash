@@ -94,5 +94,3 @@ log, agent instructions, skills, commands, hooks, prompts and templates) still g
 The maintainer's words, 2026-11-21: "Why are we running full CI on docs changes?... totally unwarranted." and "I think linting docs
 is all that's required." The standard is `dev-process` rule 20 (bogworks-dev-standards). The release gate change is in
 `internal/release` (`CheckCIWalk`).
-
-Amended 2026-11-23 (0.5.7 final gate, maintainer ruling): `dev-process` rules 20 and 21 (bogworks-dev-standards 0.8.0 and 0.8.1) make every Markdown file documentation, so `SKILL.md` and the agent-instruction paths listed above are no longer code for the docs-only classification; `scripts/ci-changes` follows that standard.

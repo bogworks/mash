@@ -136,3 +136,4 @@
 | [0156](0156-a-release-has-a-one-screen-change-log-entry-and-release-notes-the-release-page-is-built-from-the-notes.md) | A release has a one-screen change-log entry and separate release notes, the release page is built from the notes, and the gate checks nine of the thirteen rubric questions | accepted | 2026-11-21 |
 | [0157](0157-a-docs-only-pull-request-has-its-own-queue-and-needs-only-the-docs-lint.md) | A docs-only pull request has its own merge queue and needs only the docs lint | accepted | 2026-11-21 |
 | [0158](0158-mashctl-carries-the-accounts-plain-signing-keys-and-still-refuses-scoped-ones.md) | mashctl carries the account's plain signing keys and still refuses scoped ones | accepted | 2026-11-22 |
+| [0159](0159-the-0-5-7-gate-rulings-on-scoped-signing-keys-and-on-which-markdown-is-documentation.md) | The 0.5.7 gate rulings on scoped signing keys and on which Markdown is documentation | accepted | 2026-11-23 |
