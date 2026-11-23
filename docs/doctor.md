@@ -135,7 +135,7 @@ A connected key that is neither issued here nor listed fails and is named, up to
 
 A key that is not listed and not in the record still fails, with or without `--strict`. A key the record holds keeps its
 own rules: a revoked key that is still connected fails even when it is also listed. An entry that is not a user public
-key, has whitespace or a line break around it, or repeats an earlier entry is a configuration error; it names the entry
+key, has whitespace or a line break around it, or repeats an earlier entry is a configuration error that stops every mash command that reads the configuration, including mail, until the entry is fixed or removed; it is not only a `mashctl doctor` setting. The error names the entry
 unless it does not start with `U`, so a seed pasted by mistake is never printed. `external_keys` is a `config.json` key
 only: it has no flag or environment variable. With no `external_keys`, nothing changes. The list is per machine
 that runs `mashctl`, and an entry for a key that is no longer connected does no harm.
