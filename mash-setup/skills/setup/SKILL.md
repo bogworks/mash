@@ -322,8 +322,9 @@ Say the tag back to the person (it looks like `v0.5.6`) and use that same
 value as `TAG` in step 4.
 
 The checksums come from the same download as the scripts, so on their own
-they only show the files are intact. If `gh` (the GitHub CLI) is installed,
-also check the release's signed attestation of `SHA256SUMS`, pinned to the
+they only show the files are intact. If `gh` (the GitHub CLI) 2.102.0 or
+newer is installed (`gh --version`; older versions check `--signer-workflow`
+only as a prefix, so they cannot be trusted with it), also check the release's signed attestation of `SHA256SUMS`, pinned to the
 tag, before either script runs:
 
 ```sh
@@ -333,9 +334,10 @@ DL="$HOME/mash-setup-dl"; TAG=vX.Y.Z; cd "$DL" && U=https://github.com/bogworks/
 Replace `vX.Y.Z` with the tag from the block above (each block runs in a
 fresh shell). Expected: it exits 0 and says it verified. Any failure: stop,
 run nothing.
-If `gh` is missing, or too old to have `gh attestation verify`, say so to the
-person in one sentence: the scripts are then trusted on github.com's TLS
-alone (the installer says the same). Run them only if the person says yes
+If `gh` is missing, does not run, or is older than 2.102.0, do not run the
+block above. Say so to the person in one sentence: the scripts are then
+checked against checksums from the same release, not authenticated (the
+installer says the same). Run them only if the person says yes
 to that.
 
 Expected: `install.sh: OK` and `mash-local-nats-setup.sh: OK`. On macOS
@@ -371,7 +373,7 @@ the folder `is writable by its group or other users`, see the table at the
 end. A line starting `warning: gh not found` (or `gh did not run`, `gh's version
 could not be read`, `gh is older than 2.102.0`) is normal: it says the download
 was not authenticated and was checked only against checksums from the same
-release. If `gh` is installed, step 3 can also verify the
+release. If `gh` 2.102.0 or newer is installed, step 3 can also verify the
 attestation (see `docs/install.md`); if it fails, stop and ask.
 
 Check, read-only: `mash version` and `mashctl version` print the same version.
