@@ -157,19 +157,37 @@ not_others_writable() {
     return 0
 }
 
+# root_only_path DIR: true when DIR and every ancestor up to / (and the same for
+# DIR's physical path, which differs when a part of it is a symlink) is owned by
+# root and not writable by group or others. Anything unreadable is a failure.
+root_only_path() {
+    _p=$(CDPATH='' cd -P -- "$1" 2>/dev/null && pwd -P) || return 1
+    for _r in "$1" "$_p"; do
+        while :; do
+            [ "$(fileowner_l "$_r")" = 0 ] || return 1
+            not_others_writable "$(filemode_l "$_r")" || return 1
+            [ "$_r" = / ] && break
+            _r=${_r%/*}
+            [ -n "$_r" ] || _r=/
+        done
+    done
+    return 0
+}
+
 # find_nats_server: sets NATS_SERVER to nats-server when it is on PATH; else to
 # the first one in the sbin folders (Debian's package installs there), only if
-# the binary and its folder are owned by root and not writable by group or
-# others, and then says so. Returns 1 when none is usable.
+# the binary, its folder and every ancestor of it are owned by root and not
+# writable by group or others, and then says so. Returns 1 when none is usable.
 find_nats_server() {
     NATS_SERVER=nats-server
     if command -v nats-server >/dev/null 2>&1; then return 0; fi
     for _d in /usr/sbin /usr/local/sbin /sbin; do
         _f=$_d/nats-server
-        [ -f "$_f" ] && [ -x "$_f" ] || continue
+        [ -f "$_f" ] && [ -x "$_f" ] && [ ! -L "$_f" ] || continue # a link could point outside the checked folder
         [ "$(fileowner_l "$_f")" = 0 ] && [ "$(fileowner_l "$_d")" = 0 ] || continue
         not_others_writable "$(filemode_l "$_f")" || continue
         not_others_writable "$(filemode_l "$_d")" || continue
+        root_only_path "$_d" || continue
         NATS_SERVER=$_f
         echo "nats-server: using $_f (that folder is not on your PATH)"
         return 0

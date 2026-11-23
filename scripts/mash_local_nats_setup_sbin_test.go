@@ -10,15 +10,22 @@ import (
 
 // These tests write a stub nats-server into the real /usr/sbin, so they run only as root inside a throwaway
 // container with MASH_TEST_SBIN=1 (see the run command in the pull request). Anywhere else they skip.
-func sbinSetup(t *testing.T, mode os.FileMode, uid int) (out string, argvLog string) {
+func sbinSetup(t *testing.T, mode os.FileMode, uid int) (out string, argvLog string, err error) {
+	t.Helper()
+	return sbinSetupIn(t, "/usr/sbin", mode, uid)
+}
+
+func sbinSetupIn(t *testing.T, dir string, mode os.FileMode, uid int) (out string, argvLog string, runErr error) {
 	t.Helper()
 	if os.Geteuid() != 0 || os.Getenv("MASH_TEST_SBIN") != "1" {
 		t.Skip("needs root and MASH_TEST_SBIN=1, in a throwaway container")
 	}
-	stub := "/usr/sbin/nats-server"
-	if _, err := os.Lstat(stub); err == nil {
-		t.Fatal(stub + " already exists: run in a clean container")
+	for _, d := range []string{"/usr/sbin", "/usr/local/sbin", "/sbin"} {
+		if _, err := os.Lstat(d + "/nats-server"); err == nil {
+			t.Fatal(d + "/nats-server already exists: run in a clean container")
+		}
 	}
+	stub := dir + "/nats-server"
 	// not t.TempDir: its parent is 0700, and the script runs as uid 1000
 	tmp, err := os.MkdirTemp("", "sbin")
 	if err != nil {
@@ -62,36 +69,70 @@ func sbinSetup(t *testing.T, mode os.FileMode, uid int) (out string, argvLog str
 	}
 	cmd := exec.Command("setpriv", "--reuid=1000", "--regid=1000", "--clear-groups", "bash", filepath.Join(root, "scripts/mash-local-nats-setup.sh"), "--owner", "alice", "--dir", filepath.Join(tmp, "n"))
 	cmd.Env = []string{"PATH=" + bin + ":/usr/bin:/bin", "HOME=" + tmp}
-	b, _ := cmd.CombinedOutput()
-	return string(b), argvLog
+	b, err := cmd.CombinedOutput()
+	return string(b), argvLog, err
 }
 
 const sbinLine = "nats-server: using /usr/sbin/nats-server (that folder is not on your PATH)"
 
+// exitCode is the script's exit status, or -1 when it did not run to an exit.
+func exitCode(err error) int {
+	if err == nil {
+		return 0
+	}
+	if ee, ok := err.(*exec.ExitError); ok {
+		return ee.ExitCode()
+	}
+	return -1
+}
+
 func TestSbinNatsServerUsed(t *testing.T) {
-	out, argv := sbinSetup(t, 0o755, 0)
+	out, argv, err := sbinSetup(t, 0o755, 0)
+	// the stub `nats` fails, so create mode stops after the version check
+	if exitCode(err) != 1 {
+		t.Fatalf("want exit status 1, got %v:\n%s", err, out)
+	}
 	if strings.Count(out, sbinLine) != 1 {
 		t.Fatalf("want the line once, got:\n%s", out)
 	}
 	if strings.Contains(out, "missing") {
 		t.Fatalf("nats-server reported missing:\n%s", out)
 	}
-	b, err := os.ReadFile(argv)
-	if err != nil || !strings.Contains(string(b), "/usr/sbin/nats-server --version") {
-		t.Fatalf("stub not called by full path with --version: %q %v\n%s", b, err, out)
+	b, rerr := os.ReadFile(argv)
+	if rerr != nil || !strings.Contains(string(b), "/usr/sbin/nats-server --version") {
+		t.Fatalf("stub not called by full path with --version: %q %v\n%s", b, rerr, out)
 	}
 }
 
 func TestSbinNatsServerGroupWritable(t *testing.T) {
-	out, _ := sbinSetup(t, 0o775, 0)
-	if !strings.Contains(out, "missing: nats-server") || strings.Contains(out, "using /usr/sbin") {
-		t.Fatalf("want missing: nats-server, got:\n%s", out)
+	out, _, err := sbinSetup(t, 0o775, 0)
+	if exitCode(err) != 1 || !strings.Contains(out, "missing: nats-server") || strings.Contains(out, "using /usr/sbin") {
+		t.Fatalf("want missing: nats-server and exit 1, got %v:\n%s", err, out)
 	}
 }
 
 func TestSbinNatsServerNotRootOwned(t *testing.T) {
-	out, _ := sbinSetup(t, 0o755, 1000)
-	if !strings.Contains(out, "missing: nats-server") || strings.Contains(out, "using /usr/sbin") {
-		t.Fatalf("want missing: nats-server, got:\n%s", out)
+	out, _, err := sbinSetup(t, 0o755, 1000)
+	if exitCode(err) != 1 || !strings.Contains(out, "missing: nats-server") || strings.Contains(out, "using /usr/sbin") {
+		t.Fatalf("want missing: nats-server and exit 1, got %v:\n%s", err, out)
+	}
+}
+
+func TestSbinNatsServerAncestorGroupWritable(t *testing.T) {
+	const anc = "/usr/local"
+	fi, err := os.Stat(anc)
+	if err != nil {
+		t.Skip(anc + " missing")
+	}
+	if os.Geteuid() == 0 && os.Getenv("MASH_TEST_SBIN") == "1" {
+		old := fi.Mode().Perm()
+		if err := os.Chmod(anc, 0o775); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { os.Chmod(anc, old) })
+	}
+	out, _, err := sbinSetupIn(t, "/usr/local/sbin", 0o755, 0)
+	if exitCode(err) != 1 || !strings.Contains(out, "missing: nats-server") || strings.Contains(out, "using /usr/local/sbin") {
+		t.Fatalf("want missing: nats-server and exit 1, got %v:\n%s", err, out)
 	}
 }
