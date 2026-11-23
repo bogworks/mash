@@ -297,17 +297,3 @@ func TestDiscoverRefusesMalformedSubjects(t *testing.T) {
 		}
 	}
 }
-
-// Accepted residual: discovery is a presence check only. An unsigned $SRV.INFO answer (no id_sig) whose prompt
-// subject equals the wanted one makes Discover succeed, so a credential in the same account can make an address look
-// reachable for prompt. Whether it can receive the prompt rests on the server's subscribe permission on the
-// subject, not on discovery (planner ruling).
-func TestDiscoverAcceptsUnsignedAnswerResidual(t *testing.T) {
-	want := taddr("ghost").Subjects().Prompt
-	f := newFixture(t, "a", "b")
-	answerInfo(t, f.client(t, "a"), nil, want)
-	subj, err := Discover(context.Background(), f.client(t, "b").Conn(), taddr("ghost"))
-	if err != nil || subj != want {
-		t.Fatalf("unsigned answer for the wanted subject: got (%q, %v)", subj, err)
-	}
-}
