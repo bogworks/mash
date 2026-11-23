@@ -349,13 +349,21 @@ func TestWhoOnlineBothForms(t *testing.T) {
 func TestNoBaselineWhenPreviousNeverCameOnline(t *testing.T) {
 	cand := latencies{Fresh: 100 * time.Millisecond, FreshOK: true}
 	none := latencies{} // FreshOK false: Fresh is 0, not a measurement
-	problems, _ := judgeLatency(cand, &none, "v0.5.5")
-	if len(problems) != 1 || !strings.Contains(problems[0].Error(), "no baseline: the previous release v0.5.5 did not come online") {
+	const want = "no baseline: the previous release v0.5.5 has no fresh-session first-mail time to compare with"
+	problems, notes := judgeLatency(cand, &none, "v0.5.5")
+	if len(problems) != 1 || problems[0].Error() != want {
 		t.Errorf("judgeLatency: problems %v, want one no-baseline", problems)
 	}
-	problems, _ = judgeUnderPrevPlugin(cand, none, "v0.5.5")
-	if len(problems) != 1 || !strings.Contains(problems[0].Error(), "no baseline: the previous release v0.5.5 did not come online") {
-		t.Errorf("judgeUnderPrevPlugin: problems %v, want one no-baseline", problems)
+	if !strings.Contains(strings.Join(notes, "\n"), "note  fresh-session first mail: candidate 0.10s, v0.5.5 none") {
+		t.Errorf("judgeLatency: notes %v lack the candidate's own time", notes)
+	}
+	// The caller runs both judges: the missing baseline is reported once.
+	p2, n2 := judgeUnderPrevPlugin(cand, none, "v0.5.5")
+	if len(p2) != 0 || len(n2) != 1 {
+		t.Errorf("judgeUnderPrevPlugin: problems %v notes %v, want no problem and one note", p2, n2)
+	}
+	if all := append(problems, p2...); len(all) != 1 {
+		t.Errorf("both judges: %d problems, want 1: %v", len(all), all)
 	}
 }
 
@@ -370,8 +378,8 @@ func TestBaselinePassesWhenPreviousOnline(t *testing.T) {
 }
 
 func TestEndpointNameEnvHasLegacyVariables(t *testing.T) {
-	env := strings.Join(endpointNameEnv("alice", "bob"), "\n")
-	for _, want := range []string{"MASH_ENDPOINT=alice." + labGroup + ".bob", "MASH_NAME=bob", "MASH_OWNER=alice", "MASH_GROUP=" + labGroup} {
+	env := strings.Join(append(endpointNameEnv("alice", "bob"), legacyConnEnv("nats://x:1")...), "\n")
+	for _, want := range []string{"MASH_URL=nats://x:1", "MASH_INSECURE_PLAINTEXT=1", "MASH_ENDPOINT=alice." + labGroup + ".bob", "MASH_NAME=bob", "MASH_OWNER=alice", "MASH_GROUP=" + labGroup} {
 		if !strings.Contains(env, want) {
 			t.Errorf("env lacks %q:\n%s", want, env)
 		}

@@ -124,7 +124,8 @@ func judgeLatency(cand latencies, prev *latencies, prevTag string) (problems []e
 		notes = append(notes, fmt.Sprintf("note  the previous release %s: %s", prevTag, f))
 	}
 	if !prev.FreshOK {
-		problems = append(problems, fmt.Errorf("no baseline: the previous release %s did not come online, so it has no fresh-session first-mail time to compare with", prevTag))
+		problems = append(problems, fmt.Errorf("no baseline: the previous release %s has no fresh-session first-mail time to compare with", prevTag))
+		notes = append(notes, fmt.Sprintf("note  fresh-session first mail: candidate %s, %s none", secs(cand.Fresh), prevTag))
 		return problems, notes
 	}
 	notes = append(notes, fmt.Sprintf("note  fresh-session first mail: candidate %s, %s %s", secs(cand.Fresh), prevTag, secs(prev.Fresh)))
@@ -146,8 +147,8 @@ func judgeUnderPrevPlugin(cand, prev latencies, prevTag string) (problems []erro
 	for _, f := range cand.Findings {
 		problems = append(problems, errors.New(who+": "+f))
 	}
-	if !prev.FreshOK {
-		problems = append(problems, fmt.Errorf("no baseline: the previous release %s did not come online, so it has no fresh-session first-mail time to compare with", prevTag))
+	if !prev.FreshOK { // judgeLatency, which always runs first, has reported the missing baseline
+		notes = append(notes, fmt.Sprintf("note  fresh-session first mail: %s %s, %s none", who, secs(cand.Fresh), prevTag))
 		return problems, notes
 	}
 	notes = append(notes, fmt.Sprintf("note  fresh-session first mail: %s %s, %s %s", who, secs(cand.Fresh), prevTag, secs(prev.Fresh)))
@@ -399,6 +400,7 @@ func (l *lab) endpointEnv(ctx context.Context, name string, plugin bool) ([]stri
 		env = append(env, l.spec.envPairs()...)
 	}
 	env = append(env, endpointNameEnv(l.ne.Owner, name)...)
+	env = append(env, legacyConnEnv(l.ne.URL)...)
 	return append(env, "MASH_SERVER="+l.ne.URL, "MASH_CREDS="+creds,
 		// REQ-014: this check is not about TLS; the override is explicit.
 		"MASH_DANGEROUSLY_SKIP_NATS_ENCRYPTION=1"), nil
@@ -409,6 +411,12 @@ func (l *lab) endpointEnv(ctx context.Context, name string, plugin bool) ([]stri
 // every binary gets all four.
 func endpointNameEnv(owner, name string) []string {
 	return []string{"MASH_ENDPOINT=" + owner + "." + labGroup + "." + name, "MASH_NAME=" + name, "MASH_OWNER=" + owner, "MASH_GROUP=" + labGroup}
+}
+
+// legacyConnEnv is what v0.5.5 needs to connect: it reads its server only from MASH_URL and refuses nats:// without
+// MASH_INSECURE_PLAINTEXT (internal/config/config.go). Current releases ignore both.
+func legacyConnEnv(url string) []string {
+	return []string{"MASH_URL=" + url, "MASH_INSECURE_PLAINTEXT=1"}
 }
 
 // sendMail sends the standard probe text from the sender to to, with the binary under test.
