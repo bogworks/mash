@@ -206,8 +206,19 @@ func (e *Endpoint) recordRefusalNew(seq uint64) (n int, added bool, err error) {
 	}
 	p := filepath.Join(dir, refusedSeqsFile)
 	fid, seqs := readRefusedSeqs(p)
-	if fid == id && slices.Contains(seqs, seq) {
-		return RefusedCount(e.cfg), false, nil
+	if fid != id {
+		seqs = nil // another stream's sequences are not this stream's
+	}
+	// Every sequence in the file was counted, so the count is never below their number. A kill between the
+	// sequence write and the count write leaves it below: the redelivery repairs it here, before it returns.
+	have := max(RefusedCount(e.cfg), len(seqs))
+	if slices.Contains(seqs, seq) {
+		if have > RefusedCount(e.cfg) {
+			if err := replaceFile(filepath.Join(dir, RefusedFile), []byte(strconv.Itoa(have)+"\n")); err != nil {
+				return 0, false, err
+			}
+		}
+		return have, false, nil
 	}
 	if _, err := os.Stat(p); err != nil { // a new file starts with its stream's identity
 		if err := replaceFile(p, []byte(refusedSeqsHeader+id+"\n")); err != nil {
@@ -245,7 +256,7 @@ func (e *Endpoint) recordRefusalNew(seq uint64) (n int, added bool, err error) {
 			return 0, false, werr
 		}
 	}
-	n = RefusedCount(e.cfg) + 1
+	n = have + 1
 	if err := replaceFile(filepath.Join(dir, RefusedFile), []byte(strconv.Itoa(n)+"\n")); err != nil {
 		return 0, false, err
 	}
