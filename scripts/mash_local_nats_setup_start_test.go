@@ -35,6 +35,10 @@ func runStartAgainstLiveServer(t *testing.T, listens, answers bool) (rc int, std
 		t.Skip("needs /proc (Linux)")
 	}
 	root := t.TempDir()
+	// under umask 002 TempDir is 0775, and the script refuses a --dir under a group-writable folder
+	if err := os.Chmod(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	bin := filepath.Join(root, "bin")
 	home := filepath.Join(root, "home")
 	dir = filepath.Join(home, "mash-nats")
