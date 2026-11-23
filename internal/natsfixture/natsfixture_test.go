@@ -275,6 +275,7 @@ func TestBuildValidates(t *testing.T) {
 	for _, p := range []Params{
 		{Dir: "relative", Owner: "alice", Port: 4222},
 		{Dir: s.serverDir, Owner: "Bad Name", Port: 4222},
+		{Dir: s.serverDir, Owner: strings.Repeat("a", 33), Port: 4222}, // 32 is the longest owner the admin connection takes (#1172)
 		{Dir: s.serverDir, Owner: "alice", Port: 0},
 		{Dir: s.serverDir, Owner: "alice", Port: 70000},
 	} {
