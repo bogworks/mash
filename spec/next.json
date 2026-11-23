@@ -223,6 +223,17 @@
    "exit": 1,
    "issue": "#1287",
    "note": "From mash-sdk (lead #833). --remove still refuses whenever the port is held; only the error line names the holder, the hint is unchanged. The earlier 'removing anyway' line is dropped: there is no remove-anyway path in 0.5.8. One line in the program; wrapped here."
+  },
+  {
+   "id": "serve-shell-reports-delivered",
+   "where": "mash serve / read / inbox (shell)",
+   "case": "A shell reports what serve delivered",
+   "text": "what serve refused is invisible at a shell; what serve delivered is shown\nthere with its label",
+   "stream": "n/a",
+   "exit": 0,
+   "issue": "#990",
+   "replaces": "A refused message is invisible at a shell too",
+   "note": "REQ-013. No new output case. A message serve recorded as refused stays refused at a shell, whatever the shell's accept-unverified setting. A message serve delivered under --accept-unverified shows at a shell with its trust label, whatever the shell's setting. A message no serve has judged yet is judged by the shell's own setting, as today. The existing 'A message that was refused' case and the inbox listing are unchanged."
   }
  ],
  "rules_next": [

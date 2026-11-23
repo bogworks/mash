@@ -1235,6 +1235,46 @@
         "issue": "#1099",
         "replaces": "A check that could not run",
         "note": "Stdout rows as today; the hint line goes to stderr."
+       },
+       {
+        "case": "Claude Code is recent enough",
+        "text": "claude    ok    2.1.320",
+        "stream": "stdout",
+        "exit": 0,
+        "issue": "#1130",
+        "note": "PROPOSED row, REQ-017: the words, the upper bound (2.2) and skip versus warn for no claude are open for the planner. New row after config. Doctors report, never refuse: status and serve are unchanged."
+       },
+       {
+        "case": "Claude Code is too old",
+        "text": "claude    FAIL  2.1.300 is older than 2.1.312, the oldest mash is tested with\nhint: update Claude Code",
+        "stream": "stdout, then the hint on stderr",
+        "exit": 1,
+        "issue": "#1130",
+        "note": "PROPOSED row, REQ-017: the words, the upper bound (2.2) and skip versus warn for no claude are open for the planner. New row after config. Doctors report, never refuse: status and serve are unchanged. The minimum shown is the one in the compatibility matrix file."
+       },
+       {
+        "case": "Claude Code is newer than tested",
+        "text": "claude    warn  2.9.0 is newer than 2.2, the newest mash is tested with",
+        "stream": "stdout",
+        "exit": 0,
+        "issue": "#1130",
+        "note": "PROPOSED row, REQ-017: the words, the upper bound (2.2) and skip versus warn for no claude are open for the planner. New row after config. Doctors report, never refuse: status and serve are unchanged. Never FAIL; the upper bound comes from the compatibility matrix (REQ-032)."
+       },
+       {
+        "case": "No claude command",
+        "text": "claude    skip  no claude command found",
+        "stream": "stdout",
+        "exit": 0,
+        "issue": "#1130",
+        "note": "PROPOSED row, REQ-017: the words, the upper bound (2.2) and skip versus warn for no claude are open for the planner. New row after config. Doctors report, never refuse: status and serve are unchanged. skip, not warn, because mash also serves hosts without Claude Code."
+       },
+       {
+        "case": "The version of claude is unreadable",
+        "text": "claude    warn  the version of claude could not be read",
+        "stream": "stdout",
+        "exit": 0,
+        "issue": "#1130",
+        "note": "PROPOSED row, REQ-017: the words, the upper bound (2.2) and skip versus warn for no claude are open for the planner. New row after config. Doctors report, never refuse: status and serve are unchanged. --json: the same row as {\"name\": \"claude\", \"status\": ..., \"detail\": ...}."
        }
       ]
      }
