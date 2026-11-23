@@ -24,7 +24,7 @@ Install `mash` and `mashctl` from the same release, as before. Nothing in the se
 
 - `endpoint delete` and `endpoint reissue` carry a plain signing key in the account JWT that `mashctl` did not create, and revoke users signed by one, instead of refusing ([#1239](https://github.com/bogworks/mash/issues/1239)).
 
-Known issues: 49 known issues, listed in the [release notes](https://github.com/bogworks/mash/blob/v0.5.7/docs/release-notes/0.5.7.md#known-issues)
+Known issues: 51 known issues, listed in the [release notes](https://github.com/bogworks/mash/blob/v0.5.7/docs/release-notes/0.5.7.md#known-issues)
 Links: [Release notes](https://github.com/bogworks/mash/blob/v0.5.7/docs/release-notes/0.5.7.md), [full changes](https://github.com/bogworks/mash/compare/v0.5.6...v0.5.7), [verify your download](https://github.com/bogworks/mash/blob/v0.5.7/docs/install.md#verify-what-you-download)
 
 ## [0.5.6] - 2026-11-21
