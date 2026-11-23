@@ -71,7 +71,7 @@
    "stream": "stdout",
    "exit": 0,
    "issue": "#1151",
-   "note": "Printed once, only when nats-server is not on PATH and a root-owned, not group- or other-writable one is in /usr/sbin, /usr/local/sbin or /sbin (in that order); the folder in the line is the one found."
+   "note": "Printed once, only when nats-server is not on PATH and a root-owned, not group- or other-writable one (not a symbolic link, in a folder whose every ancestor is the same) is in /usr/sbin, /usr/local/sbin or /sbin (in that order); the folder in the line is the one found."
   },
   {
    "id": "policy-field-prefix",
