@@ -59,6 +59,14 @@ type Endpoint struct {
 	// wakeStart is when serve took the spool; lastWake when any wake (idle, urgent or backlog) last woke the session (zero: never). Neither
 	// survives a restart (hook.go, wakeBacklog).
 	wakeStart, lastWake time.Time
+	// wakeNoAt is when the inbox count last found no backlog for the backlog wake (hook.go, wakeBacklog).
+	wakeNoAt time.Time
+	// wakeMu guards the wake's cached reading of the inbox and its one in-flight read (hook.go, wakeReading).
+	wakeMu       sync.Mutex
+	wakeCached   wakeResult
+	wakeInFlight bool
+	wakeCtx      context.Context // cancelled by Close (wakeContext)
+	wakeCancel   context.CancelFunc
 
 	heldN  atomic.Int32 // held count as of the last settle pass; read by tests
 	headMu sync.Mutex   // guards the stream-headroom cache (streamHasHeadroom)
@@ -797,6 +805,7 @@ func (e *Endpoint) Run(ctx context.Context, deliver Deliverer) error {
 
 // Close releases the lease and closes the connection.
 func (e *Endpoint) Close() {
+	e.stopWake()
 	if svc := e.svc(); svc != nil {
 		svc.stop()
 	}
