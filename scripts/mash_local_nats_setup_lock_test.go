@@ -276,3 +276,32 @@ func TestStaleLockFolderIsTakenOver(t *testing.T) {
 	}
 	noLockFiles(t, dir)
 }
+
+// A .lock that stays empty (or holds no pid) after the 1 s wait was left by a run stopped between creating it and
+// writing its pid. It is reported with the file to remove and is never removed by the script.
+func TestEmptyLockIsLeftOver(t *testing.T) {
+	for name, content := range map[string]string{"empty": "", "non-numeric": "abc\n"} {
+		t.Run(name, func(t *testing.T) {
+			script, dir := lockTestDir(t)
+			lock := filepath.Join(dir, ".lock")
+			if err := os.WriteFile(lock, []byte(content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			rc, _, errOut, err := runStop(script, dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if rc != 1 || !strings.Contains(errOut, "error: "+lock+" is left over from a run that was stopped while it took the lock") ||
+				!strings.Contains(errOut, "hint: remove that one file ("+lock+"), then run mash-local-nats-setup.sh again") ||
+				strings.Contains(errOut, "another run is using") {
+				t.Fatalf("rc=%d stderr=%q; want rc 1, the left-over error and hint", rc, errOut)
+			}
+			if b, err := os.ReadFile(lock); err != nil || string(b) != content {
+				t.Fatalf(".lock was removed or changed: %q, %v", b, err)
+			}
+			if _, err := os.Lstat(filepath.Join(dir, ".lock.recover")); err == nil {
+				t.Error(".lock.recover left behind")
+			}
+		})
+	}
+}

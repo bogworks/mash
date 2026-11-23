@@ -433,7 +433,9 @@ lock_state() {
 # second lock, DIR/.lock.recover, so that only one run can do it. Returns 0
 # with the lock taken, or 1 when .lock is not (any more) the stale one the
 # caller read: the caller looks at .lock again. An empty or missing .lock is
-# never removed: a live run may have taken it since it was read.
+# never removed: a live run may have taken it since it was read. The marker
+# "empty" (an empty or non-numeric .lock that stayed so after a wait) only
+# ever ends in the left-over error, naming the file for the user to remove.
 lock_recover() {
     _stale=$1
     [ -n "$_stale" ] || return 1
@@ -455,6 +457,13 @@ lock_recover() {
     fi
     # re-read under the recover lock: remove .lock only if it is still the stale one
     _cur=$(lock_state "$DIR/.lock")
+    if [ "$_stale" = empty ]; then
+        if [ -f "$DIR/.lock" ] && [ ! -L "$DIR/.lock" ] && [ -z "$_cur" ]; then
+            die 1 "$DIR/.lock is left over from a run that was stopped while it took the lock" \
+                "remove that one file ($DIR/.lock), then run $SELF again"
+        fi
+        release_lock; return 1
+    fi
     if [ "$_cur" != "$_stale" ]; then release_lock; return 1; fi
     if [ "$_cur" = dir ]; then
         rmdir "$DIR/.lock" 2>/dev/null || busy "$(lock_pid "$DIR/.lock")"
@@ -475,8 +484,9 @@ lock_dir() {
         if [ -z "$_lp" ]; then
             sleep 1
             _lp=$(lock_state "$DIR/.lock")
+            [ -n "$_lp" ] || _lp=empty
         fi
-        if [ "$_lp" != dir ] && [ -n "$_lp" ] && kill -0 "$_lp" 2>/dev/null; then busy "$_lp"; fi
+        if [ "$_lp" != dir ] && [ "$_lp" != empty ] && [ -n "$_lp" ] && kill -0 "$_lp" 2>/dev/null; then busy "$_lp"; fi
         # stale: its run is gone; take over under .lock.recover
         lock_recover "$_lp" && return 0
     done
